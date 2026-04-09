@@ -18,6 +18,7 @@ builder.Services.AddSingleton<IHashService, HashService>();
 builder.Services.AddInfrastructure();
 builder.Services.AddScoped<IUnitOfWork, UnitOfWork>();
 builder.Services.AddScoped<ITenantService, TenantService>();
+builder.Services.AddScoped<IAuthService, AuthService>();
 builder.Services.AddJwtAuthentication();
 builder.Services.AddControllers();
 builder.Services.AddEndpointsApiExplorer();

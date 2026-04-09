@@ -17,7 +17,8 @@ public sealed class TenantMiddleware
         var path = context.Request.Path;
         if (path.StartsWithSegments("/health")
             || path.StartsWithSegments("/swagger")
-            || path.StartsWithSegments("/api/tenants/setup"))
+            || path.StartsWithSegments("/api/tenants/setup")
+            || path.StartsWithSegments("/api/auth/login"))
         {
             await _next(context);
             return;
