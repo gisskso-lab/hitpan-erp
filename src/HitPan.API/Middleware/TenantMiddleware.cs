@@ -15,7 +15,9 @@ public sealed class TenantMiddleware
     public async Task InvokeAsync(HttpContext context, CurrentTenant currentTenant)
     {
         var path = context.Request.Path;
-        if (path.StartsWithSegments("/health") || path.StartsWithSegments("/swagger"))
+        if (path.StartsWithSegments("/health")
+            || path.StartsWithSegments("/swagger")
+            || path.StartsWithSegments("/api/tenants/setup"))
         {
             await _next(context);
             return;

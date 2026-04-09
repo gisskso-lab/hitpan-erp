@@ -31,6 +31,7 @@ public sealed class AppDbContext : DbContext
     public DbSet<Partner> Partners => Set<Partner>();
     public DbSet<Employee> Employees => Set<Employee>();
     public DbSet<Warehouse> Warehouses => Set<Warehouse>();
+    public DbSet<Subscription> Subscriptions => Set<Subscription>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -44,6 +45,7 @@ public sealed class AppDbContext : DbContext
         modelBuilder.ApplyConfiguration(new PartnerConfiguration(encryptedConverter));
         modelBuilder.ApplyConfiguration(new EmployeeConfiguration(encryptedConverter));
         modelBuilder.ApplyConfiguration(new WarehouseConfiguration());
+        modelBuilder.ApplyConfiguration(new SubscriptionConfiguration());
 
         foreach (var entityType in modelBuilder.Model.GetEntityTypes())
         {

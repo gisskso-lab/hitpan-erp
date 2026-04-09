@@ -1,4 +1,5 @@
 using HitPan.Application.Interfaces;
+using HitPan.Application.Services;
 using HitPan.API.Extensions;
 using HitPan.API.Middleware;
 using HitPan.Infrastructure.Extensions;
@@ -16,6 +17,7 @@ builder.Services.AddSingleton<IEncryptionService, EncryptionService>();
 builder.Services.AddSingleton<IHashService, HashService>();
 builder.Services.AddInfrastructure();
 builder.Services.AddScoped<IUnitOfWork, UnitOfWork>();
+builder.Services.AddScoped<ITenantService, TenantService>();
 builder.Services.AddJwtAuthentication();
 builder.Services.AddControllers();
 builder.Services.AddEndpointsApiExplorer();
