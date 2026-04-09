@@ -1,6 +1,6 @@
 using System.Linq.Expressions;
 using HitPan.Application.Interfaces;
-using HitPan.Domain.Abstractions;
+using HitPan.Domain.Common;
 using Microsoft.EntityFrameworkCore;
 
 namespace HitPan.Infrastructure.Persistence;
