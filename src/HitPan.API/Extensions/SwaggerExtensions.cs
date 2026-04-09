@@ -1,4 +1,4 @@
-using Microsoft.OpenApi;
+using Microsoft.OpenApi.Models;
 
 namespace HitPan.API.Extensions;
 
@@ -9,7 +9,7 @@ public static class SwaggerExtensions
         services.AddEndpointsApiExplorer();
         services.AddSwaggerGen(options =>
         {
-            var scheme = new OpenApiSecurityScheme
+            options.AddSecurityDefinition("Bearer", new OpenApiSecurityScheme
             {
                 Name = "Authorization",
                 In = ParameterLocation.Header,
@@ -17,15 +17,20 @@ public static class SwaggerExtensions
                 Scheme = "bearer",
                 BearerFormat = "JWT",
                 Description = "Bearer {token}"
-            };
+            });
 
-            options.AddSecurityDefinition("Bearer", scheme);
-
-            options.AddSecurityRequirement(_ => new OpenApiSecurityRequirement
+            options.AddSecurityRequirement(new OpenApiSecurityRequirement
             {
                 {
-                    new OpenApiSecuritySchemeReference("Bearer"),
-                    new List<string>()
+                    new OpenApiSecurityScheme
+                    {
+                        Reference = new OpenApiReference
+                        {
+                            Type = ReferenceType.SecurityScheme,
+                            Id = "Bearer"
+                        }
+                    },
+                    Array.Empty<string>()
                 }
             });
         });
