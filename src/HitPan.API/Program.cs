@@ -19,6 +19,7 @@ builder.Services.AddInfrastructure();
 builder.Services.AddScoped<IUnitOfWork, UnitOfWork>();
 builder.Services.AddScoped<ITenantService, TenantService>();
 builder.Services.AddScoped<IAuthService, AuthService>();
+builder.Services.AddScoped<IPurchaseService, PurchaseService>();
 builder.Services.AddJwtAuthentication();
 builder.Services.AddControllers();
 builder.Services.AddSwaggerWithJwt();
