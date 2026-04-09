@@ -18,7 +18,8 @@ public sealed class TenantMiddleware
         if (path.StartsWithSegments("/health")
             || path.StartsWithSegments("/swagger")
             || path.StartsWithSegments("/api/tenants/setup")
-            || path.StartsWithSegments("/api/auth/login"))
+            || path.StartsWithSegments("/api/auth/login")
+            || path.StartsWithSegments("/api/auth/refresh"))
         {
             await _next(context);
             return;

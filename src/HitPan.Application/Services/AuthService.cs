@@ -49,6 +49,65 @@ public class AuthService : IAuthService
             throw new InvalidOperationException("JWT_SECRET environment variable is required.");
         }
 
+        return CreateLoginResponse(user, secret);
+    }
+
+    public async Task<LoginResponse> RefreshAsync(RefreshTokenRequest request, CancellationToken ct = default)
+    {
+        var secret = Environment.GetEnvironmentVariable("JWT_SECRET");
+        if (string.IsNullOrWhiteSpace(secret))
+        {
+            throw new InvalidOperationException("JWT_SECRET environment variable is required.");
+        }
+
+        var tokenHandler = new JwtSecurityTokenHandler();
+        var key = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(secret));
+
+        ClaimsPrincipal principal;
+        try
+        {
+            principal = tokenHandler.ValidateToken(
+                request.RefreshToken,
+                new TokenValidationParameters
+                {
+                    ValidateIssuer = false,
+                    ValidateAudience = false,
+                    ValidateIssuerSigningKey = true,
+                    IssuerSigningKey = key,
+                    ValidateLifetime = true,
+                    ClockSkew = TimeSpan.Zero
+                },
+                out _);
+        }
+        catch
+        {
+            throw new UnauthorizedAccessException("유효하지 않은 토큰입니다");
+        }
+
+        var tokenType = principal.FindFirst("token_type")?.Value;
+        if (!string.Equals(tokenType, "refresh", StringComparison.Ordinal))
+        {
+            throw new UnauthorizedAccessException("유효하지 않은 토큰입니다");
+        }
+
+        var userId = principal.FindFirst("user_id")?.Value;
+        if (string.IsNullOrWhiteSpace(userId))
+        {
+            throw new UnauthorizedAccessException("유효하지 않은 토큰입니다");
+        }
+
+        var userRepository = _unitOfWork.Repository<User>();
+        var user = await userRepository.GetByIdAsync(userId);
+        if (user is null || !user.IsActive)
+        {
+            throw new UnauthorizedAccessException("유효하지 않은 토큰입니다");
+        }
+
+        return CreateLoginResponse(user, secret);
+    }
+
+    private static LoginResponse CreateLoginResponse(User user, string secret)
+    {
         var key = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(secret));
         var credentials = new SigningCredentials(key, SecurityAlgorithms.HmacSha256);
         var now = DateTime.UtcNow;
