@@ -38,6 +38,10 @@ public sealed class AppDbContext : DbContext
     public DbSet<PurchaseReceiptItem> PurchaseReceiptItems => Set<PurchaseReceiptItem>();
     public DbSet<StockLedger> StockLedgers => Set<StockLedger>();
     public DbSet<WorkflowSetting> WorkflowSettings => Set<WorkflowSetting>();
+    public DbSet<SalesOrder> SalesOrders => Set<SalesOrder>();
+    public DbSet<SalesOrderItem> SalesOrderItems => Set<SalesOrderItem>();
+    public DbSet<SalesDelivery> SalesDeliveries => Set<SalesDelivery>();
+    public DbSet<SalesDeliveryItem> SalesDeliveryItems => Set<SalesDeliveryItem>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -56,6 +60,10 @@ public sealed class AppDbContext : DbContext
         modelBuilder.ApplyConfiguration(new PurchaseOrderItemConfiguration());
         modelBuilder.ApplyConfiguration(new PurchaseReceiptConfiguration());
         modelBuilder.ApplyConfiguration(new PurchaseReceiptItemConfiguration());
+        modelBuilder.ApplyConfiguration(new SalesOrderConfiguration());
+        modelBuilder.ApplyConfiguration(new SalesOrderItemConfiguration());
+        modelBuilder.ApplyConfiguration(new SalesDeliveryConfiguration());
+        modelBuilder.ApplyConfiguration(new SalesDeliveryItemConfiguration());
 
         modelBuilder.Entity<WorkflowSetting>(builder =>
         {
