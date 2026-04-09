@@ -1,4 +1,5 @@
 using HitPan.Infrastructure.Persistence;
+using HitPan.Infrastructure.Persistence.Seed;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using MySqlConnector;
@@ -37,6 +38,8 @@ public static class InfrastructureExtensions
                 serverVersion,
                 x => x.MigrationsAssembly("HitPan.Infrastructure")));
         services.AddScoped<IDbConnection>(_ => new MySqlConnection(connStr));
+        services.AddScoped<CommonCodeSeeder>();
+        services.AddScoped<SystemSeeder>();
 
         return services;
     }

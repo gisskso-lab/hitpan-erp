@@ -146,6 +146,20 @@ public sealed class AppDbContext : DbContext
 
     public string CurrentTenantId => _currentTenant.TenantId;
 
+    public async Task<User?> FindUserByEmailAsync(string email)
+    {
+        return await Users
+            .IgnoreQueryFilters()
+            .FirstOrDefaultAsync(u => u.Email == email && u.IsActive == true);
+    }
+
+    public async Task<User?> FindUserByIdAsync(string userId)
+    {
+        return await Users
+            .IgnoreQueryFilters()
+            .FirstOrDefaultAsync(u => u.Id == userId && u.IsActive == true);
+    }
+
     public override Task<int> SaveChangesAsync(CancellationToken cancellationToken = default)
     {
         var utcNow = DateTime.UtcNow;

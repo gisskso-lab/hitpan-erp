@@ -15,17 +15,17 @@ public class AuthService : IAuthService
     private static readonly TimeSpan RefreshTokenLifetime = TimeSpan.FromDays(7);
 
     private readonly IUnitOfWork _unitOfWork;
+    private readonly IAuthUserLookup _authUserLookup;
 
-    public AuthService(IUnitOfWork unitOfWork)
+    public AuthService(IUnitOfWork unitOfWork, IAuthUserLookup authUserLookup)
     {
         _unitOfWork = unitOfWork;
+        _authUserLookup = authUserLookup;
     }
 
     public async Task<LoginResponse> LoginAsync(LoginRequest request, CancellationToken ct = default)
     {
-        var userRepository = _unitOfWork.Repository<User>();
-        var users = await userRepository.FindAsync(x => x.Email == request.Email);
-        var user = users.FirstOrDefault();
+        var user = await _authUserLookup.FindUserByEmailAsync(request.Email, ct);
 
         if (user is null)
         {
@@ -96,9 +96,8 @@ public class AuthService : IAuthService
             throw new UnauthorizedAccessException("유효하지 않은 토큰입니다");
         }
 
-        var userRepository = _unitOfWork.Repository<User>();
-        var user = await userRepository.GetByIdAsync(userId);
-        if (user is null || !user.IsActive)
+        var user = await _authUserLookup.FindUserByIdAsync(userId, ct);
+        if (user is null)
         {
             throw new UnauthorizedAccessException("유효하지 않은 토큰입니다");
         }
