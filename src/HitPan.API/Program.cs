@@ -1,6 +1,7 @@
 using HitPan.Application.Interfaces;
 using HitPan.API.Extensions;
 using HitPan.API.Middleware;
+using HitPan.Infrastructure.Persistence;
 using HitPan.Infrastructure.Security;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -12,6 +13,7 @@ builder.Services.AddScoped<CurrentTenant>();
 builder.Services.AddScoped<ICurrentTenant>(sp => sp.GetRequiredService<CurrentTenant>());
 builder.Services.AddSingleton<IEncryptionService, EncryptionService>();
 builder.Services.AddSingleton<IHashService, HashService>();
+builder.Services.AddScoped<IUnitOfWork, UnitOfWork>();
 builder.Services.AddJwtAuthentication();
 builder.Services.AddControllers();
 builder.Services.AddEndpointsApiExplorer();
