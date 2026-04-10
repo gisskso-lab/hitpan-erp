@@ -43,6 +43,10 @@ public class AuthService : IAuthService
             throw new UnauthorizedAccessException("비활성화된 계정입니다");
         }
 
+        var employeeRepo = _unitOfWork.Repository<Employee>();
+        var employees = await employeeRepo.FindAsync(x => x.UserId == user.Id && x.IsActive);
+        var employee = employees.FirstOrDefault();
+
         var redirectToWelcome = user.LastLoginAt is null;
         user.LastLoginAt = DateTime.UtcNow;
         await _unitOfWork.SaveChangesAsync(ct);
@@ -53,7 +57,7 @@ public class AuthService : IAuthService
             throw new InvalidOperationException("JWT_SECRET environment variable is required.");
         }
 
-        return CreateLoginResponse(user, secret, redirectToWelcome);
+        return CreateLoginResponse(user, employee, secret, redirectToWelcome);
     }
 
     public async Task<LoginResponse> RefreshAsync(RefreshTokenRequest request, CancellationToken ct = default)
@@ -106,22 +110,33 @@ public class AuthService : IAuthService
             throw new UnauthorizedAccessException("유효하지 않은 토큰입니다");
         }
 
-        return CreateLoginResponse(user, secret, redirectToWelcome: false);
+        var employeeRepo = _unitOfWork.Repository<Employee>();
+        var employees = await employeeRepo.FindAsync(x => x.UserId == user.Id && x.IsActive);
+        var employee = employees.FirstOrDefault();
+
+        return CreateLoginResponse(user, employee, secret, redirectToWelcome: false);
     }
 
-    private static LoginResponse CreateLoginResponse(User user, string secret, bool redirectToWelcome)
+    private static LoginResponse CreateLoginResponse(User user, Employee? employee, string secret, bool redirectToWelcome)
     {
         var key = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(secret));
         var credentials = new SigningCredentials(key, SecurityAlgorithms.HmacSha256);
         var now = DateTime.UtcNow;
         var accessExpiresAt = now.Add(AccessTokenLifetime);
 
+        var employeeRole = string.IsNullOrWhiteSpace(employee?.Role)
+            ? MapLegacyRole(user.Role.ToString())
+            : employee.Role;
+        var employeeId = employee?.Id ?? string.Empty;
+
         var accessClaims = new List<Claim>
         {
             new("tenant_id", user.TenantId),
             new("user_id", user.Id),
             new("name", user.UserName),
-            new("role", user.Role.ToString())
+            new("employee_id", employeeId),
+            new(ClaimTypes.Role, employeeRole),
+            new("role", employeeRole)
         };
 
         var accessTokenDescriptor = new JwtSecurityToken(
@@ -149,8 +164,17 @@ public class AuthService : IAuthService
             ExpiresAt = accessExpiresAt,
             TenantId = user.TenantId,
             UserName = user.UserName,
-            Role = user.Role.ToString(),
+            Role = employeeRole,
             RedirectToWelcome = redirectToWelcome
+        };
+    }
+
+    private static string MapLegacyRole(string role)
+    {
+        return role switch
+        {
+            "TenantAdmin" => "system_admin",
+            _ => role
         };
     }
 }

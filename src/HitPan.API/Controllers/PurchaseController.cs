@@ -1,11 +1,13 @@
 using HitPan.Application.DTOs.Purchase;
 using HitPan.Application.Interfaces;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
 namespace HitPan.API.Controllers;
 
 [ApiController]
 [Route("api/purchase")]
+[Authorize(Policy = "PurchaseOnly")]
 public class PurchaseController : ControllerBase
 {
     private readonly IPurchaseService _purchaseService;

@@ -1,11 +1,13 @@
 using HitPan.Application.DTOs.Stock;
 using HitPan.Application.Interfaces;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
 namespace HitPan.API.Controllers;
 
 [ApiController]
 [Route("api/stock")]
+[Authorize(Policy = "SalesOnly")]
 public class StockController : ControllerBase
 {
     private readonly IStockService _stockService;

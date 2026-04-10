@@ -1,11 +1,13 @@
 using HitPan.Application.DTOs.Sales;
 using HitPan.Application.Interfaces;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
 namespace HitPan.API.Controllers;
 
 [ApiController]
 [Route("api/sales")]
+[Authorize(Policy = "SalesOnly")]
 public class SalesController : ControllerBase
 {
     private readonly ISalesService _salesService;

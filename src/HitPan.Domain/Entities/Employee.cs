@@ -23,5 +23,6 @@ public class Employee : BaseEntity, ITenantEntity
     public string? BankName { get; set; }
     public string? BankAccount { get; set; }
     public string? BaseSalary { get; set; }
+    public string Role { get; set; } = "sales_user";
     public bool IsActive { get; set; } = true;
 }
