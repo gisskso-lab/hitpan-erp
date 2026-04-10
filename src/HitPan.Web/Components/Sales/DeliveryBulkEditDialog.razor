@@ -48,5 +48,5 @@
         Dialog.Close(DialogResult.Ok(payload));
     }
 
-    private void Cancel() => Dialog.Cancel();
+    private void Cancel() => Dialog.Close(DialogResult.Cancel());
 }

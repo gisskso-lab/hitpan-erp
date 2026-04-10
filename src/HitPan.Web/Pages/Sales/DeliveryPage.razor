@@ -27,7 +27,7 @@
             <div class="delivery-selection-bar">
                 <span><strong>@_selectedCount</strong>개 선택됨</span>
                 <MudIconButton Icon="@Icons.Material.Filled.Close"
-                               Title="선택 해제"
+                               aria-label="선택 해제"
                                Size="Size.Small"
                                OnClick="ClearSelection" />
                 <MudButton Variant="Variant.Filled" Color="Color.Primary" Size="Size.Small" OnClick="BulkConfirmAsync">일괄확정</MudButton>
@@ -37,7 +37,7 @@
                 }
                 else
                 {
-                    <MudButton Variant="Variant.Outlined" Color="Color.Default" Size="Size.Small" Disabled="true" Title="Manager 이상만 가능">
+                    <MudButton Variant="Variant.Outlined" Color="Color.Default" Size="Size.Small" Disabled="true" aria-label="Manager 이상만 가능">
                         일괄삭제
                     </MudButton>
                 }
@@ -333,7 +333,7 @@
         };
         var dialog = await DialogService.ShowAsync<DeliveryBulkEditDialog>("단가 일괄변경", parameters);
         var res = await dialog.Result;
-        if (res is null || res.CancellationToken.IsCancellationRequested || res.Data is not decimal price) return;
+        if (res is null || res.Canceled || res.Data is not decimal price) return;
 
         foreach (var line in _draft.Lines.Where(l => !l.IsPlaceholder && l.IsSelected))
         {
@@ -350,7 +350,7 @@
         if (_draft is null || _selectedCount == 0) return;
         var parameters = new DialogParameters<DeliveryBulkEditDialog>
         {
-            { x => x.Kind, BulkEditKind.Assignee }
+            { x => x.Kind, DeliveryBulkEditDialog.BulkEditKind.Assignee }
         };
         var dialog = await DialogService.ShowAsync<DeliveryBulkEditDialog>("담당자 일괄변경", parameters);
         var res = await dialog.Result;
@@ -369,7 +369,7 @@
         if (_draft is null || _selectedCount == 0) return;
         var parameters = new DialogParameters<DeliveryBulkEditDialog>
         {
-            { x => x.Kind, BulkEditKind.Warehouse }
+            { x => x.Kind, DeliveryBulkEditDialog.BulkEditKind.Warehouse }
         };
         var dialog = await DialogService.ShowAsync<DeliveryBulkEditDialog>("창고 일괄변경", parameters);
         var res = await dialog.Result;

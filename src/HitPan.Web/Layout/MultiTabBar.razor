@@ -6,6 +6,8 @@
 @inject WorkTabService TabService
 @inject AuthenticationStateProvider AuthStateProvider
 @inject TenantProfileService TenantProfile
+@inject IAuthService AuthService
+@inject NavigationManager Navigation
 
 <div class="hitpan-tabbar">
     <div class="hitpan-tabbar-tabs">
@@ -41,6 +43,11 @@
         <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined" Class="hitpan-chip-context">
             @FormatCompanyAndUser()
         </MudChip>
+        <MudIconButton Icon="@Icons.Material.Filled.Logout"
+                       aria-label="로그아웃"
+                       Class="hitpan-tabbar-logout"
+                       Size="Size.Small"
+                       OnClick="LogoutAsync" />
     </div>
 </div>
 
@@ -86,6 +93,12 @@
         var company = string.IsNullOrWhiteSpace(TenantProfile.CompanyName) ? "—" : TenantProfile.CompanyName!;
         var user = string.IsNullOrWhiteSpace(_userName) ? "—" : _userName!;
         return $"{company} · {user}";
+    }
+
+    private async Task LogoutAsync()
+    {
+        await AuthService.LogoutAsync();
+        Navigation.NavigateTo("/login", forceLoad: true);
     }
 
     private void OnTabsChanged() => _ = InvokeAsync(StateHasChanged);
