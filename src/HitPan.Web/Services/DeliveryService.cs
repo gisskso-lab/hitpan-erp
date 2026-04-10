@@ -96,4 +96,27 @@ public sealed class DeliveryService(HttpClient http)
         var body = await resp.Content.ReadFromJsonAsync<BulkConfirmApiResponse>(JsonOptions, ct);
         return body ?? new BulkConfirmApiResponse();
     }
+
+    public async Task<List<SalesListItem>> GetListAsync(
+        string listType,
+        DateTime? from,
+        DateTime? to,
+        string partnerName = "",
+        CancellationToken ct = default)
+    {
+        var query = "api/sales/deliveries"
+                    + $"?status={listType}"
+                    + $"&from={from:yyyy-MM-dd}"
+                    + $"&to={to:yyyy-MM-dd}"
+                    + $"&partner={Uri.EscapeDataString(partnerName)}";
+        try
+        {
+            var result = await http.GetFromJsonAsync<List<SalesListItem>>(query, ct);
+            return result ?? new List<SalesListItem>();
+        }
+        catch
+        {
+            return new List<SalesListItem>();
+        }
+    }
 }

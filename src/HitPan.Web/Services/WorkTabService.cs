@@ -72,6 +72,12 @@ public sealed class WorkTabService
         Notify();
     }
 
+    public Task UpdateTabTitleAsync(int tabId, string documentNumber)
+    {
+        UpdateTabTitle(tabId, documentNumber);
+        return Task.CompletedTask;
+    }
+
     public void SetTabDirty(int tabId, bool isDirty = true)
     {
         if (!_tabs.TryGetValue(tabId, out var state))

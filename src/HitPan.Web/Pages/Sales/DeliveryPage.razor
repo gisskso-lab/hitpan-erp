@@ -428,6 +428,38 @@
     private Task Cancel() => Task.CompletedTask;
     private Task Print() => Task.CompletedTask;
     private Task OpenTaxInvoice() => Task.CompletedTask;
-    private Task OpenListPopup() => Task.CompletedTask;
     private Task OpenPartnerList() => Task.CompletedTask;
+
+    private async Task OpenListPopup()
+    {
+        var parameters = new DialogParameters
+        {
+            ["ListType"] = "sales"
+        };
+        var options = new DialogOptions
+        {
+            MaxWidth = MaxWidth.Large,
+            FullWidth = true,
+            CloseButton = true
+        };
+        var dialog = await DialogService.ShowAsync<SalesListDialog>(
+            "판매 목록 조회", parameters, options);
+        var result = await dialog.Result;
+
+        if (result is not null && !result.Canceled && result.Data is SalesListItem item)
+        {
+            await LoadOrderToGrid(item.OrderId);
+        }
+    }
+
+    private async Task LoadOrderToGrid(string orderId)
+    {
+        if (TabService.ActiveTabId is { } currentTabId)
+        {
+            var shortId = orderId.Length > 8 ? orderId[..8] : orderId;
+            await TabService.UpdateTabTitleAsync(currentTabId, $"거래명세서 [{shortId}]");
+        }
+
+        StateHasChanged();
+    }
 }

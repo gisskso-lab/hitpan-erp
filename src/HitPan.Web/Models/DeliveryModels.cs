@@ -94,6 +94,22 @@ public sealed class DeliverySummaryModel
     public decimal TotalAmount { get; set; }
 }
 
+public sealed class SalesListItem
+{
+    public string OrderId { get; set; } = string.Empty;
+    public DateTime OrderDate { get; set; }
+    public string OrderNo { get; set; } = string.Empty;
+    public string PartnerId { get; set; } = string.Empty;
+    public string PartnerName { get; set; } = string.Empty;
+    public decimal TotalAmount { get; set; }
+    public decimal VatAmount { get; set; }
+    public string Status { get; set; } = string.Empty;
+
+    // UI only
+    public bool IsChecked { get; set; }
+    public bool IsProcessed => Status is "invoiced" or "cancelled";
+}
+
 public sealed class DeliveryWorkflowStepModel
 {
     public string Key { get; set; } = string.Empty;
