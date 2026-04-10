@@ -1,16 +1,12 @@
 ﻿@inherits LayoutComponentBase
-<div class="page">
-    <div class="sidebar">
-        <NavMenu />
-    </div>
+@attribute [Authorize]
 
-    <main>
-        <div class="top-row px-4">
-            <a href="https://learn.microsoft.com/aspnet/core/" target="_blank">About</a>
-        </div>
-
-        <article class="content px-4">
+<div class="hitpan-shell">
+    <Sidebar />
+    <div class="hitpan-main-column">
+        <TopHeader />
+        <main class="hitpan-body mud-px-4 mud-py-4">
             @Body
-        </article>
-    </main>
+        </main>
+    </div>
 </div>

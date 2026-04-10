@@ -1,0 +1,95 @@
+@implements IDisposable
+@using HitPan.Web.Models
+@using HitPan.Web.Services
+@using Microsoft.AspNetCore.Components.Web
+@inject WorkTabService TabService
+@inject AuthenticationStateProvider AuthStateProvider
+
+<div class="hitpan-tabbar">
+    <div class="hitpan-tabbar-tabs">
+        @foreach (var tab in TabService.GetOrderedTabs())
+        {
+            var active = tab.Id == TabService.ActiveTabId;
+            <button type="button"
+                    class="hitpan-tab @(active ? "hitpan-tab--active" : null)"
+                    @onclick="@(() => TabService.SwitchTab(tab.Id))">
+                <span class="hitpan-tab-dot @GetDotClass(tab.Kind)" title="@tab.Kind"></span>
+                @if (tab.IsDirty)
+                {
+                    <span class="hitpan-tab-unsaved" aria-hidden="true">·</span>
+                }
+                <span class="hitpan-tab-title hitpan-mono">@tab.DisplayTitle</span>
+                <span class="hitpan-tab-close"
+                      role="button"
+                      tabindex="0"
+                      aria-label="탭 닫기"
+                      @onclick:stopPropagation="true"
+                      @onclick="@(async () => await TabService.CloseTabAsync(tab.Id))"
+                      @onkeydown="@(e => OnCloseKeyDownAsync(e, tab.Id))">×</span>
+            </button>
+        }
+        <button type="button"
+                class="hitpan-tab hitpan-tab--add"
+                title="새 탭 (거래명세서)"
+                @onclick="@(() => TabService.TryAddTab(WorkDocumentKind.SalesDelivery))">
+            +
+        </button>
+    </div>
+    <div class="hitpan-tabbar-chips">
+        <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined" Class="hitpan-chip-company">
+            @(_companyLabel ?? "—")
+        </MudChip>
+        <MudChip T="string" Size="Size.Small" Variant="Variant.Filled" Color="Color.Primary" Class="hitpan-chip-user">
+            @(_userLabel ?? "—")
+        </MudChip>
+    </div>
+</div>
+
+@code {
+    private string? _companyLabel;
+    private string? _userLabel;
+
+    protected override async Task OnInitializedAsync()
+    {
+        TabService.StateChanged += OnTabsChanged;
+        await LoadUserLabelsAsync();
+    }
+
+    private async Task LoadUserLabelsAsync()
+    {
+        var state = await AuthStateProvider.GetAuthenticationStateAsync();
+        var user = state.User;
+        _userLabel = user.Identity?.Name;
+        var tenant = user.FindFirst("tenant_id")?.Value;
+        _companyLabel = string.IsNullOrEmpty(tenant)
+            ? "회사"
+            : tenant.Length <= 10
+                ? tenant
+                : tenant[..10] + "…";
+    }
+
+    private void OnTabsChanged() => _ = InvokeAsync(StateHasChanged);
+
+    private static string GetDotClass(WorkDocumentKind kind) => kind switch
+    {
+        WorkDocumentKind.SalesDelivery => "hitpan-tab-dot--delivery",
+        WorkDocumentKind.SalesOrder => "hitpan-tab-dot--order",
+        WorkDocumentKind.PurchaseOrder => "hitpan-tab-dot--po",
+        WorkDocumentKind.PurchaseReceipt => "hitpan-tab-dot--receipt",
+        WorkDocumentKind.Return => "hitpan-tab-dot--return",
+        _ => string.Empty
+    };
+
+    private async Task OnCloseKeyDownAsync(KeyboardEventArgs e, int tabId)
+    {
+        if (e.Key is "Enter" or " ")
+        {
+            await TabService.CloseTabAsync(tabId);
+        }
+    }
+
+    public void Dispose()
+    {
+        TabService.StateChanged -= OnTabsChanged;
+    }
+}

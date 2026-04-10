@@ -1,0 +1,32 @@
+.hitpan-login-page {
+    min-height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 1.5rem;
+    background: linear-gradient(160deg, #f0f4f3 0%, #e8eeec 100%);
+}
+
+.hitpan-login-card {
+    width: 100%;
+    max-width: 400px;
+}
+
+.hitpan-login-brand {
+    text-align: center;
+}
+
+.hitpan-login-logo {
+    width: 56px;
+    height: 56px;
+    margin: 0 auto 1rem;
+    background: #0F6E56;
+    color: #fff;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: 700;
+    font-size: 1.25rem;
+    border-radius: 10px;
+    font-family: "Noto Sans KR", sans-serif;
+}

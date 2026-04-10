@@ -28,6 +28,14 @@ builder.Services.AddJwtAuthentication();
 builder.Services.AddControllers();
 builder.Services.AddSwaggerWithJwt();
 
+builder.Services.AddCors(options =>
+{
+    options.AddPolicy("BlazorWasmDev", policy =>
+        policy.WithOrigins("http://localhost:5234", "https://localhost:7100")
+            .AllowAnyHeader()
+            .AllowAnyMethod());
+});
+
 var app = builder.Build();
 
 if (app.Environment.IsDevelopment())
@@ -45,6 +53,8 @@ if (app.Environment.IsDevelopment())
 }
 
 app.UseHttpsRedirection();
+
+app.UseCors("BlazorWasmDev");
 
 app.UseAuthentication();
 app.UseAuthorization();

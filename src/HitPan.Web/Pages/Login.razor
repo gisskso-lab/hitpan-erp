@@ -1,0 +1,115 @@
+@page "/login"
+@attribute [Microsoft.AspNetCore.Authorization.AllowAnonymous]
+@layout EmptyLayout
+@inject IAuthService AuthService
+@inject NavigationManager Navigation
+@inject AuthenticationStateProvider AuthenticationStateProvider
+
+<PageTitle>로그인 — 히트판 ERP</PageTitle>
+
+<div class="hitpan-login-page">
+    <MudPaper Class="hitpan-login-card pa-8" Elevation="4">
+        <div class="hitpan-login-brand mb-6">
+            <div class="hitpan-login-logo">HP</div>
+            <MudText Typo="Typo.h5" Style="font-family: 'Noto Sans KR', sans-serif;">히트판 ERP</MudText>
+            <MudText Typo="Typo.body2" Class="mud-text-secondary">사업을 한곳에서</MudText>
+        </div>
+
+        <MudForm @ref="_form" ValidationDelay="0">
+            <MudTextField @bind-Value="_email"
+                          Label="이메일"
+                          Variant="Variant.Outlined"
+                          InputType="InputType.Email"
+                          Required="true"
+                          RequiredError="이메일을 입력하세요"
+                          Disabled="_busy"
+                          Class="mb-4"
+                          Style="font-family: 'Noto Sans KR', sans-serif;" />
+
+            <MudTextField @bind-Value="_password"
+                          Label="비밀번호"
+                          Variant="Variant.Outlined"
+                          InputType="InputType.Password"
+                          Required="true"
+                          RequiredError="비밀번호를 입력하세요"
+                          Disabled="_busy"
+                          Class="mb-4"
+                          Style="font-family: 'Noto Sans KR', sans-serif;" />
+
+            @if (!string.IsNullOrEmpty(_errorMessage))
+            {
+                <MudAlert Severity="Severity.Error" Dense="true" Class="mb-4" Style="font-family: 'Noto Sans KR', sans-serif;">
+                    @_errorMessage
+                </MudAlert>
+            }
+
+            <MudButton Variant="Variant.Filled"
+                       Color="Color.Primary"
+                       FullWidth="true"
+                       Disabled="_busy || string.IsNullOrWhiteSpace(_email) || string.IsNullOrWhiteSpace(_password)"
+                       OnClick="SubmitAsync"
+                       Style="font-family: 'Noto Sans KR', sans-serif;">
+                @if (_busy)
+                {
+                    <MudProgressCircular Color="Color.Primary" Size="Size.Small" Indeterminate="true" Class="mr-2" />
+                }
+                로그인
+            </MudButton>
+        </MudForm>
+    </MudPaper>
+</div>
+
+@code {
+    private MudForm? _form;
+    private string _email = string.Empty;
+    private string _password = string.Empty;
+    private string? _errorMessage;
+    private bool _busy;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var state = await AuthenticationStateProvider.GetAuthenticationStateAsync();
+        if (state.User.Identity?.IsAuthenticated == true)
+        {
+            Navigation.NavigateTo("/", replace: true);
+        }
+    }
+
+    private async Task SubmitAsync()
+    {
+        if (_form is not null)
+        {
+            await _form.ValidateAsync();
+        }
+
+        if (_form is not null && !_form.IsValid)
+        {
+            return;
+        }
+
+        _errorMessage = null;
+        _busy = true;
+        try
+        {
+            var result = await AuthService.LoginAsync(_email.Trim(), _password);
+            if (!result.Success)
+            {
+                _errorMessage = result.ErrorMessage ?? "로그인에 실패했습니다.";
+                return;
+            }
+
+            if (result.Data?.RedirectToWelcome == true)
+            {
+                Navigation.NavigateTo("/welcome", replace: true);
+            }
+            else
+            {
+                Navigation.NavigateTo("/", replace: true);
+            }
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+}

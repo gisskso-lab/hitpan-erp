@@ -43,13 +43,17 @@ public class AuthService : IAuthService
             throw new UnauthorizedAccessException("비활성화된 계정입니다");
         }
 
+        var redirectToWelcome = user.LastLoginAt is null;
+        user.LastLoginAt = DateTime.UtcNow;
+        await _unitOfWork.SaveChangesAsync(ct);
+
         var secret = Environment.GetEnvironmentVariable("JWT_SECRET");
         if (string.IsNullOrWhiteSpace(secret))
         {
             throw new InvalidOperationException("JWT_SECRET environment variable is required.");
         }
 
-        return CreateLoginResponse(user, secret);
+        return CreateLoginResponse(user, secret, redirectToWelcome);
     }
 
     public async Task<LoginResponse> RefreshAsync(RefreshTokenRequest request, CancellationToken ct = default)
@@ -102,10 +106,10 @@ public class AuthService : IAuthService
             throw new UnauthorizedAccessException("유효하지 않은 토큰입니다");
         }
 
-        return CreateLoginResponse(user, secret);
+        return CreateLoginResponse(user, secret, redirectToWelcome: false);
     }
 
-    private static LoginResponse CreateLoginResponse(User user, string secret)
+    private static LoginResponse CreateLoginResponse(User user, string secret, bool redirectToWelcome)
     {
         var key = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(secret));
         var credentials = new SigningCredentials(key, SecurityAlgorithms.HmacSha256);
@@ -144,7 +148,8 @@ public class AuthService : IAuthService
             ExpiresAt = accessExpiresAt,
             TenantId = user.TenantId,
             UserName = user.UserName,
-            Role = user.Role.ToString()
+            Role = user.Role.ToString(),
+            RedirectToWelcome = redirectToWelcome
         };
     }
 }

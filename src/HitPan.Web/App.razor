@@ -1,6 +1,51 @@
-﻿<Router AppAssembly="@typeof(App).Assembly" NotFoundPage="typeof(Pages.NotFound)">
-    <Found Context="routeData">
-        <RouteView RouteData="@routeData" DefaultLayout="@typeof(MainLayout)"/>
-        <FocusOnNavigate RouteData="@routeData" Selector="h1" />
-    </Found>
-</Router>
+﻿@using HitPan.Web.Components
+@using HitPan.Web.Layout
+@using Microsoft.AspNetCore.Components.Authorization
+@using MudBlazor
+
+<MudThemeProvider Theme="_hitPanTheme" DefaultScrollbar="true">
+    <MudPopoverProvider />
+    <MudDialogProvider />
+    <MudSnackbarProvider />
+    <CascadingAuthenticationState>
+        <Router AppAssembly="@typeof(App).Assembly" NotFoundPage="typeof(Pages.NotFound)">
+            <Found Context="routeData">
+                <AuthorizeRouteView RouteData="@routeData" DefaultLayout="@typeof(MainLayout)">
+                    <NotAuthorized>
+                        <LayoutView Layout="@typeof(EmptyLayout)">
+                            <RedirectToLogin />
+                        </LayoutView>
+                    </NotAuthorized>
+                </AuthorizeRouteView>
+                <FocusOnNavigate RouteData="@routeData" Selector="h1" />
+            </Found>
+        </Router>
+    </CascadingAuthenticationState>
+</MudThemeProvider>
+
+@code {
+    private readonly MudTheme _hitPanTheme = new()
+    {
+        PaletteLight = new PaletteLight
+        {
+            Primary = "#0F6E56",
+            Secondary = "#0F6E56",
+            AppbarBackground = "#0F6E56",
+            AppbarText = "#FFFFFF",
+            Error = "#A32D2D",
+        },
+        Typography = new Typography
+        {
+            Default = new DefaultTypography { FontFamily = new[] { "Noto Sans KR", "sans-serif" } },
+            Body1 = new Body1Typography { FontFamily = new[] { "Noto Sans KR", "sans-serif" } },
+            Body2 = new Body2Typography { FontFamily = new[] { "Noto Sans KR", "sans-serif" } },
+            Button = new ButtonTypography { FontFamily = new[] { "Noto Sans KR", "sans-serif" } },
+            H1 = new H1Typography { FontFamily = new[] { "Noto Sans KR", "sans-serif" } },
+            H2 = new H2Typography { FontFamily = new[] { "Noto Sans KR", "sans-serif" } },
+            H3 = new H3Typography { FontFamily = new[] { "Noto Sans KR", "sans-serif" } },
+            H4 = new H4Typography { FontFamily = new[] { "Noto Sans KR", "sans-serif" } },
+            H5 = new H5Typography { FontFamily = new[] { "Noto Sans KR", "sans-serif" } },
+            H6 = new H6Typography { FontFamily = new[] { "Noto Sans KR", "sans-serif" } },
+        },
+    };
+}

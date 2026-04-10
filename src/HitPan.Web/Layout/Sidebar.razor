@@ -1,0 +1,109 @@
+@implements IDisposable
+@using System.Security.Claims
+@using HitPan.Web.Models
+@using HitPan.Web.Services
+@inject NavigationManager Navigation
+@inject WorkTabService TabService
+@inject AuthenticationStateProvider AuthStateProvider
+
+<div class="hitpan-sidebar mud-elevation-1">
+    <div class="hitpan-sidebar-logo" title="히트판">HP</div>
+    <nav class="hitpan-sidebar-nav" aria-label="주 메뉴">
+        @foreach (var item in _visibleItems)
+        {
+            var active = IsActive(item.Href);
+            <button type="button"
+                    class="hitpan-sidebar-item @(active ? "hitpan-sidebar-item--active" : null)"
+                    @onclick="@(() => OnMenuClick(item))">
+                <MudIcon Icon="@item.Icon" Class="hitpan-sidebar-icon" />
+                <span class="hitpan-sidebar-label">@item.Title</span>
+            </button>
+        }
+    </nav>
+</div>
+
+@code {
+    private List<SidebarMenuEntry> _visibleItems = new();
+
+    protected override async Task OnInitializedAsync()
+    {
+        Navigation.LocationChanged += OnLocationChanged;
+        await RefreshMenuAsync();
+    }
+
+    private void OnLocationChanged(object? sender, LocationChangedEventArgs e)
+    {
+        _ = InvokeAsync(async () =>
+        {
+            await RefreshMenuAsync();
+            StateHasChanged();
+        });
+    }
+
+    private async Task RefreshMenuAsync()
+    {
+        var state = await AuthStateProvider.GetAuthenticationStateAsync();
+        _visibleItems = SidebarMenu.All.Where(i => i.IsVisibleTo(state.User)).ToList();
+    }
+
+    private void OnMenuClick(SidebarMenuEntry item)
+    {
+        if (item.OpenTabKind is { } kind)
+        {
+            TabService.TryAddTab(kind);
+        }
+
+        Navigation.NavigateTo(item.Href);
+    }
+
+    private bool IsActive(string href)
+    {
+        var path = new Uri(Navigation.Uri).AbsolutePath;
+        return string.Equals(path.TrimEnd('/'), href.TrimEnd('/'), StringComparison.OrdinalIgnoreCase)
+               || (path == "/" && href == "/");
+    }
+
+    public void Dispose()
+    {
+        Navigation.LocationChanged -= OnLocationChanged;
+    }
+
+    private sealed record SidebarMenuEntry(
+        string Title,
+        string Icon,
+        string Href,
+        string[]? AllowedRoles,
+        WorkDocumentKind? OpenTabKind)
+    {
+        public bool IsVisibleTo(ClaimsPrincipal user)
+        {
+            if (user.Identity?.IsAuthenticated != true)
+            {
+                return false;
+            }
+
+            if (AllowedRoles is null || AllowedRoles.Length == 0)
+            {
+                return true;
+            }
+
+            return AllowedRoles.Any(r => HitPanRoleHelper.IsInHitPanRole(user, r));
+        }
+    }
+
+    private static class SidebarMenu
+    {
+        public static readonly SidebarMenuEntry[] All =
+        {
+            new("설정", Icons.Material.Filled.Settings, "/settings", new[] { "TenantAdmin" }, null),
+            new("견적", Icons.Material.Filled.RequestQuote, "/quotes", new[] { "TenantAdmin", "Manager", "User" },
+                WorkDocumentKind.SalesOrder),
+            new("매입", Icons.Material.Filled.LocalShipping, "/purchase", new[] { "TenantAdmin", "Manager" },
+                WorkDocumentKind.PurchaseReceipt),
+            new("판매", Icons.Material.Filled.PointOfSale, "/sales", new[] { "TenantAdmin", "Manager", "User" },
+                WorkDocumentKind.SalesDelivery),
+            new("재고", Icons.Material.Filled.Inventory, "/stock", null, null),
+            new("회계", Icons.Material.Filled.AccountBalance, "/accounting", new[] { "TenantAdmin" }, null)
+        };
+    }
+}
