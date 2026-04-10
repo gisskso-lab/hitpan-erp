@@ -31,20 +31,40 @@ public sealed class TenantMiddleware
             return;
         }
 
+        var accountType = context.User.FindFirstValue("account_type");
         var tenantId = context.User.FindFirstValue("tenant_id");
+        var resellerId = context.User.FindFirstValue("reseller_id");
+        var platformId = context.User.FindFirstValue("platform_id");
         var userId = context.User.FindFirstValue("user_id");
         var role = context.User.FindFirstValue("role");
 
-        if (string.IsNullOrWhiteSpace(tenantId))
+        context.Items["AccountType"] = accountType;
+        context.Items["TenantId"] = tenantId;
+        context.Items["ResellerId"] = resellerId;
+        context.Items["PlatformId"] = platformId;
+
+        if (accountType == "reseller_admin" && string.IsNullOrEmpty(resellerId))
         {
-            context.Response.StatusCode = StatusCodes.Status401Unauthorized;
+            context.Response.StatusCode = StatusCodes.Status403Forbidden;
+            await context.Response.WriteAsync("Forbidden");
             return;
         }
 
-        currentTenant.Set(
-            tenantId,
-            userId ?? string.Empty,
-            role ?? string.Empty);
+        if ((accountType == "tenant_user" || accountType == "tenant_admin") && string.IsNullOrEmpty(tenantId))
+        {
+            context.Response.StatusCode = StatusCodes.Status403Forbidden;
+            await context.Response.WriteAsync("Forbidden");
+            return;
+        }
+
+        if (string.IsNullOrWhiteSpace(tenantId))
+        {
+            context.Response.StatusCode = StatusCodes.Status403Forbidden;
+            await context.Response.WriteAsync("Forbidden");
+            return;
+        }
+
+        currentTenant.Set(tenantId, userId ?? string.Empty, role ?? string.Empty);
 
         await _next(context);
     }

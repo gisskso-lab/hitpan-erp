@@ -20,6 +20,9 @@ public class SalesController : ControllerBase
     [HttpPost("orders")]
     public async Task<IActionResult> CreateOrder([FromBody] CreateSalesOrderRequest request, CancellationToken ct)
     {
+        var tenantId = HttpContext.Items["TenantId"]?.ToString();
+        if (string.IsNullOrEmpty(tenantId)) return Forbid();
+
         var id = await _salesService.CreateOrderAsync(request, ct);
         return Created($"/api/sales/orders/{id}", new { id });
     }
@@ -27,6 +30,9 @@ public class SalesController : ControllerBase
     [HttpPost("deliveries")]
     public async Task<IActionResult> CreateDelivery([FromBody] CreateDeliveryRequest request, CancellationToken ct)
     {
+        var tenantId = HttpContext.Items["TenantId"]?.ToString();
+        if (string.IsNullOrEmpty(tenantId)) return Forbid();
+
         var id = await _salesService.CreateDeliveryAsync(request, ct);
         return Created($"/api/sales/deliveries/{id}", new { id });
     }
@@ -34,6 +40,9 @@ public class SalesController : ControllerBase
     [HttpPost("deliveries/{id}/confirm")]
     public async Task<IActionResult> ConfirmDelivery(string id, [FromBody] ConfirmDeliveryRequest request, CancellationToken ct)
     {
+        var tenantId = HttpContext.Items["TenantId"]?.ToString();
+        if (string.IsNullOrEmpty(tenantId)) return Forbid();
+
         await _salesService.ConfirmDeliveryAsync(id, request, ct);
         return Ok(new { id, status = "confirmed" });
     }

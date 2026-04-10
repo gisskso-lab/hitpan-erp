@@ -20,6 +20,9 @@ public class StockController : ControllerBase
     [HttpGet("balance")]
     public async Task<IActionResult> GetBalance(CancellationToken ct)
     {
+        var tenantId = HttpContext.Items["TenantId"]?.ToString();
+        if (string.IsNullOrEmpty(tenantId)) return Forbid();
+
         var result = await _stockService.GetBalanceAsync(ct);
         return Ok(result);
     }
@@ -27,6 +30,9 @@ public class StockController : ControllerBase
     [HttpPost("ledger")]
     public async Task<IActionResult> GetLedger([FromBody] StockLedgerQueryRequest request, CancellationToken ct)
     {
+        var tenantId = HttpContext.Items["TenantId"]?.ToString();
+        if (string.IsNullOrEmpty(tenantId)) return Forbid();
+
         var result = await _stockService.GetLedgerAsync(request, ct);
         return Ok(result);
     }

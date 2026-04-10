@@ -134,6 +134,9 @@ public class AuthService : IAuthService
             new("tenant_id", user.TenantId),
             new("user_id", user.Id),
             new("name", user.UserName),
+            new("account_type", user.AccountType ?? "tenant_user"),
+            new("platform_id", user.PlatformId ?? string.Empty),
+            new("reseller_id", user.ResellerId ?? string.Empty),
             new("employee_id", employeeId),
             new(ClaimTypes.Role, employeeRole),
             new("role", employeeRole)

@@ -19,6 +19,9 @@ public sealed class UserConfiguration : IEntityTypeConfiguration<User>
         builder.Property(e => e.PasswordHash).HasColumnName("password_hash").HasMaxLength(256).IsRequired();
         builder.Property(e => e.UserName).HasColumnName("user_name").HasMaxLength(50).IsRequired();
         builder.Property(e => e.Role).HasColumnName("role").HasConversion<string>().IsRequired();
+        builder.Property(e => e.AccountType).HasColumnName("account_type").HasMaxLength(20).IsRequired();
+        builder.Property(e => e.ResellerId).HasColumnName("reseller_id").HasMaxLength(36);
+        builder.Property(e => e.PlatformId).HasColumnName("platform_id").HasMaxLength(36);
         builder.Property(e => e.DeptId).HasColumnName("dept_id").HasMaxLength(36);
         builder.Property(e => e.Phone).HasColumnName("phone").HasMaxLength(20);
         builder.Property(e => e.IsActive).HasColumnName("is_active").IsRequired();

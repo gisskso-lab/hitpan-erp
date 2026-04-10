@@ -19,6 +19,9 @@ public class PartnerController : ControllerBase
     [Authorize(Policy = "SalesOnly")]
     public async Task<IActionResult> GetBalance(string id, CancellationToken ct)
     {
+        var tenantId = HttpContext.Items["TenantId"]?.ToString();
+        if (string.IsNullOrEmpty(tenantId)) return Forbid();
+
         var balance = await _partnerService.GetBalanceAsync(id, ct);
         if (balance is null)
         {

@@ -41,6 +41,17 @@ builder.Services.AddAuthorization(options =>
         policy.RequireRole("system_admin", "hr_manager"));
     options.AddPolicy("AdminOnly", policy =>
         policy.RequireRole("system_admin"));
+    options.AddPolicy("PlatformOnly", policy =>
+        policy.RequireClaim("account_type", "platform_admin"));
+    options.AddPolicy("ResellerOnly", policy =>
+        policy.RequireAssertion(ctx =>
+            ctx.User.HasClaim("account_type", "reseller_admin") ||
+            ctx.User.HasClaim("account_type", "platform_admin")));
+    options.AddPolicy("TenantOnly", policy =>
+        policy.RequireAssertion(ctx =>
+            ctx.User.HasClaim("account_type", "tenant_admin") ||
+            ctx.User.HasClaim("account_type", "tenant_user") ||
+            ctx.User.HasClaim("account_type", "platform_admin")));
 });
 builder.Services.AddControllers();
 builder.Services.AddSwaggerWithJwt();
