@@ -257,10 +257,6 @@ html, body {
     flex-shrink: 0;
 }
 
-.hitpan-chip-company {
-    max-width: 120px;
-}
-
-.hitpan-chip-user {
-    max-width: 140px;
+.hitpan-chip-context {
+    max-width: min(320px, 42vw);
 }

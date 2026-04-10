@@ -38,11 +38,8 @@
         </button>
     </div>
     <div class="hitpan-tabbar-chips">
-        <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined" Class="hitpan-chip-company">
-            @FormatCompany()
-        </MudChip>
-        <MudChip T="string" Size="Size.Small" Variant="Variant.Filled" Color="Color.Primary" Class="hitpan-chip-user">
-            @FormatUser(_userName)
+        <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined" Class="hitpan-chip-context">
+            @FormatCompanyAndUser()
         </MudChip>
     </div>
 </div>
@@ -84,11 +81,12 @@
         await TenantProfile.LoadAsync();
     }
 
-    private string FormatCompany() =>
-        string.IsNullOrWhiteSpace(TenantProfile.CompanyName) ? "—" : TenantProfile.CompanyName!;
-
-    private static string FormatUser(string? name) =>
-        string.IsNullOrWhiteSpace(name) ? "—" : name;
+    private string FormatCompanyAndUser()
+    {
+        var company = string.IsNullOrWhiteSpace(TenantProfile.CompanyName) ? "—" : TenantProfile.CompanyName!;
+        var user = string.IsNullOrWhiteSpace(_userName) ? "—" : _userName!;
+        return $"{company} · {user}";
+    }
 
     private void OnTabsChanged() => _ = InvokeAsync(StateHasChanged);
 

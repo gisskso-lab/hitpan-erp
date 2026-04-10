@@ -7,11 +7,11 @@ namespace HitPan.API.Controllers;
 
 [ApiController]
 [Route("api/tenants")]
-public class TenantController : ControllerBase
+public class TenantsController : ControllerBase
 {
     private readonly ITenantService _tenantService;
 
-    public TenantController(ITenantService tenantService)
+    public TenantsController(ITenantService tenantService)
     {
         _tenantService = tenantService;
     }

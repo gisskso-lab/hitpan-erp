@@ -30,20 +30,30 @@ public sealed class CommonCodeSeeder
             for (var i = 0; i < group.Value.Length; i++)
             {
                 var codeValue = group.Value[i];
+                const string countSql = """
+                    SELECT COUNT(*) FROM common_codes
+                    WHERE tenant_id IS NULL
+                      AND code_group = @CodeGroup
+                      AND code_value = @CodeValue
+                    """;
+
+                var count = await _dbConnection.ExecuteScalarAsync<long>(
+                    new CommandDefinition(
+                        countSql,
+                        new { CodeGroup = group.Key, CodeValue = codeValue },
+                        cancellationToken: ct));
+
+                if (count > 0)
+                {
+                    continue;
+                }
+
                 await _dbConnection.ExecuteAsync(
                     new CommandDefinition(
                         """
                         INSERT INTO common_codes
                           (code_id, tenant_id, code_group, code_value, code_label, sort_order, is_active)
-                        SELECT
-                          @CodeId, NULL, @CodeGroup, @CodeValue, @CodeLabel, @SortOrder, 1
-                        WHERE NOT EXISTS (
-                          SELECT 1
-                          FROM common_codes
-                          WHERE tenant_id IS NULL
-                            AND code_group = @CodeGroup
-                            AND code_value = @CodeValue
-                        );
+                        VALUES (@CodeId, NULL, @CodeGroup, @CodeValue, @CodeLabel, @SortOrder, 1)
                         """,
                         new
                         {

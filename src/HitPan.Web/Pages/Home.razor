@@ -7,37 +7,31 @@
 <PageTitle>대시보드 · 히트판 ERP</PageTitle>
 
 <div class="hitpan-home">
-    <MudStack AlignItems="AlignItems.Center" Spacing="5" Class="hitpan-home-stack">
-        <MudText Typo="Typo.subtitle1" Class="hitpan-home-date mud-text-secondary">
-            @TodayKorean
+    <MudText Typo="Typo.caption" Class="hitpan-home-date-corner mud-text-secondary">
+        @TodayKorean
+    </MudText>
+
+    <MudStack AlignItems="AlignItems.Center" Justify="Justify.Center" Spacing="4" Class="hitpan-home-stack">
+        <MudIcon Icon="@Icons.Material.Outlined.Description"
+                 Color="Color.Default"
+                 Class="hitpan-home-doc-icon"
+                 aria-hidden="true" />
+
+        <MudText Typo="Typo.h6" Class="hitpan-home-title">
+            오늘 거래가 없습니다
+        </MudText>
+
+        <MudText Typo="Typo.body2" Class="mud-text-secondary text-center hitpan-home-sub">
+            거래명세서를 작성해서 시작하세요
         </MudText>
 
         <MudButton Variant="Variant.Filled"
                    Color="Color.Primary"
                    Size="Size.Large"
-                   Class="hitpan-home-primary-cta"
+                   Class="hitpan-home-cta"
                    OnClick="GoSalesDelivery">
             거래명세서 작성하기
         </MudButton>
-
-        <MudPaper Elevation="0" Class="hitpan-home-empty">
-            <MudStack AlignItems="AlignItems.Center" Spacing="3">
-                <div class="hitpan-home-empty-icon" aria-hidden="true">
-                    <MudIcon Icon="@Icons.Material.Outlined.ReceiptLong" Style="font-size: 3.5rem;" />
-                </div>
-                <MudText Typo="Typo.h6" Class="hitpan-home-empty-title">
-                    오늘 거래가 없습니다
-                </MudText>
-                <MudText Typo="Typo.body2" Class="mud-text-secondary text-center hitpan-home-empty-caption">
-                    새 거래명세서를 작성해 업무를 시작하세요.
-                </MudText>
-                <MudButton Variant="Variant.Outlined"
-                           Color="Color.Primary"
-                           OnClick="GoSalesDelivery">
-                    거래명세서 작성하기
-                </MudButton>
-            </MudStack>
-        </MudPaper>
     </MudStack>
 </div>
 
