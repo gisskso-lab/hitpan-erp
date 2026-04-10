@@ -53,6 +53,18 @@
     width: 44px;
 }
 
+.delivery-num-right {
+    text-align: right;
+}
+
+.delivery-grid :deep(th) {
+    height: 38px;
+}
+
+.delivery-grid :deep(td) {
+    height: 36px;
+}
+
 .delivery-grid--compact :deep(td),
 .delivery-grid--compact :deep(th) {
     padding-top: 4px !important;

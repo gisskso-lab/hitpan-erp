@@ -1,43 +1,50 @@
 @using HitPan.Web.Models
 
 <div class="delivery-form">
-    <MudGrid Spacing="2">
-        <MudItem xs="12" sm="6" md="3">
-            <MudSelect T="string" Label="문서유형" Value="Draft.DocumentType" ValueChanged="OnDocumentTypeChanged" Variant="Variant.Outlined" Dense="true">
-                <MudSelectItem Value="@("거래명세서")">거래명세서</MudSelectItem>
-                <MudSelectItem Value="@("수주")">수주</MudSelectItem>
-                <MudSelectItem Value="@("발주")">발주</MudSelectItem>
-                <MudSelectItem Value="@("매입")">매입</MudSelectItem>
-                <MudSelectItem Value="@("반품")">반품</MudSelectItem>
-            </MudSelect>
+    <MudGrid Spacing="2" Class="pa-2">
+        <MudItem xs="12" sm="4" md="3">
+            <MudDatePicker Label="판매일자"
+                           Date="Draft.SalesDate"
+                           DateChanged="OnSalesDateChanged"
+                           Variant="Variant.Outlined"
+                           Margin="Margin.Dense"
+                           Style="font-size:13px;" />
         </MudItem>
-        <MudItem xs="6" sm="3" md="2">
-            <MudDatePicker Label="판매일자" Date="Draft.SalesDate" DateChanged="OnSalesDateChanged" Variant="Variant.Outlined" Margin="Margin.Dense" />
+        <MudItem xs="12" sm="2" md="2">
+            <MudNumericField T="int"
+                             Label="순위"
+                             Value="Draft.DailySequence"
+                             ValueChanged="OnDailySequenceChanged"
+                             Min="1"
+                             Variant="Variant.Outlined"
+                             Margin="Margin.Dense"
+                             Style="font-size:13px;" />
         </MudItem>
-        <MudItem xs="6" sm="3" md="2">
-            <MudTextField T="string" Label="순위" Value="@Draft.DailySequence.ToString()" ReadOnly="true" Variant="Variant.Outlined" Margin="Margin.Dense" />
-        </MudItem>
-        <MudItem xs="12" sm="6" md="3">
-            <MudTextField T="string"
-                          @ref="_companyRef"
-                          Label="판매업체"
-                          Value="Draft.SalesCompany"
-                          ValueChanged="OnSalesCompanyChanged"
-                          Variant="Variant.Outlined"
-                          Margin="Margin.Dense" />
-        </MudItem>
-        <MudItem xs="12" sm="6" md="2">
-            <MudTextField T="string" Label="담당자" Value="Draft.ManagerName" ReadOnly="true" Variant="Variant.Outlined" Margin="Margin.Dense" />
+        <MudItem xs="12" sm="6" md="5">
+            <MudAutocomplete T="string"
+                             @ref="_companyRef"
+                             Label="판매업체"
+                             Value="Draft.SalesCompany"
+                             ValueChanged="OnSalesCompanyChanged"
+                             SearchFunc="SearchPartners"
+                             Variant="Variant.Outlined"
+                             Margin="Margin.Dense"
+                             Dense="true"
+                             Adornment="Adornment.End"
+                             AdornmentIcon="@Icons.Material.Filled.List"
+                             OnAdornmentClick="OpenPartnerList"
+                             Style="font-size:13px;" />
         </MudItem>
     </MudGrid>
 </div>
 
 @code {
-    private MudTextField<string>? _companyRef;
+    private MudAutocomplete<string>? _companyRef;
     private bool _focused;
 
     [Parameter, EditorRequired] public DeliveryDraftModel Draft { get; set; } = default!;
     [Parameter] public EventCallback OnChanged { get; set; }
+    [Parameter] public EventCallback OnOpenPartnerList { get; set; }
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
@@ -48,12 +55,6 @@
         }
     }
 
-    private async Task OnDocumentTypeChanged(string value)
-    {
-        Draft.DocumentType = value;
-        await OnChanged.InvokeAsync();
-    }
-
     private async Task OnSalesDateChanged(DateTime? date)
     {
         if (date is null) return;
@@ -61,9 +62,26 @@
         await OnChanged.InvokeAsync();
     }
 
+    private async Task OnDailySequenceChanged(int value)
+    {
+        Draft.DailySequence = value < 1 ? 1 : value;
+        await OnChanged.InvokeAsync();
+    }
+
     private async Task OnSalesCompanyChanged(string value)
     {
         Draft.SalesCompany = value;
         await OnChanged.InvokeAsync();
+    }
+
+    private Task<IEnumerable<string>> SearchPartners(string value, CancellationToken cancellationToken)
+    {
+        IEnumerable<string> items = Array.Empty<string>();
+        return Task.FromResult(items);
+    }
+
+    private async Task OpenPartnerList()
+    {
+        await OnOpenPartnerList.InvokeAsync();
     }
 }

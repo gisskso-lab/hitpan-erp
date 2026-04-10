@@ -24,6 +24,10 @@
                  EditMode="DataGridEditMode.Cell"
                  Hover="true"
                  Striped="true"
+                 FixedHeader="true"
+                 Height="calc(100vh - 340px)"
+                 Style="font-size:13px"
+                 RowStyleFunc="RowStyle"
                  Class="@($"delivery-grid {GetDensityClass()}")"
                  SelectedItem="SelectedLine"
                  SelectedItemChanged="OnSelectedItemChanged">
@@ -81,22 +85,22 @@
             </TemplateColumn>
             <TemplateColumn Title="수량">
                 <CellTemplate>
-                    <MudNumericField T="decimal" Value="context.Item.Quantity" ValueChanged="@(v => UpdateQuantity(context.Item, v))" Margin="Margin.Dense" />
+                    <MudNumericField T="decimal" Value="context.Item.Qty" ValueChanged="@(v => UpdateQuantity(context.Item, v))" Margin="Margin.Dense" Class="delivery-num-right" />
                 </CellTemplate>
             </TemplateColumn>
             <TemplateColumn Title="단가">
                 <CellTemplate>
-                    <MudNumericField T="decimal" Value="context.Item.UnitPrice" ValueChanged="@(v => UpdateUnitPrice(context.Item, v))" Margin="Margin.Dense" />
+                    <MudNumericField T="decimal" Value="context.Item.UnitPrice" ValueChanged="@(v => UpdateUnitPrice(context.Item, v))" Margin="Margin.Dense" Class="delivery-num-right" />
                 </CellTemplate>
             </TemplateColumn>
             <TemplateColumn Title="금액">
                 <CellTemplate>
-                    <MudText Class="@($"hitpan-amount {GetAmountClass(context.Item.Amount)}")">@context.Item.Amount.ToString("N0")</MudText>
+                    <MudText Class="@($"hitpan-amount delivery-num-right {GetAmountClass(context.Item.Amount)}")">@context.Item.Amount.ToString("N0")</MudText>
                 </CellTemplate>
             </TemplateColumn>
             <TemplateColumn Title="부가세액">
                 <CellTemplate>
-                    <MudNumericField T="decimal" Value="context.Item.VatAmount" ValueChanged="@(v => UpdateVat(context.Item, v))" Margin="Margin.Dense" />
+                    <MudText Class="hitpan-amount delivery-num-right">@context.Item.VatAmount.ToString("N0")</MudText>
                 </CellTemplate>
             </TemplateColumn>
             <TemplateColumn Title="비고">
@@ -121,6 +125,7 @@
     [Parameter] public EventCallback OnChanged { get; set; }
     [Parameter] public EventCallback OnSelectionChanged { get; set; }
     [Parameter] public EventCallback<(DeliveryLineModel Line, DeliveryContextAction Action)> OnContextSecondary { get; set; }
+    [Parameter] public DeliverySummaryModel Summary { get; set; } = new();
 
     private IEnumerable<DeliveryLineModel> DataLines => Lines.Where(l => !l.IsPlaceholder);
 
@@ -273,29 +278,39 @@
 
     private async Task UpdateQuantity(DeliveryLineModel line, decimal value)
     {
-        line.Quantity = value;
-        line.RecalculateAmount();
-        await NotifyDataChanged();
+        line.Qty = value;
+        await OnItemChanged(line);
     }
 
     private async Task UpdateUnitPrice(DeliveryLineModel line, decimal value)
     {
         line.UnitPrice = value;
-        line.RecalculateAmount();
-        await NotifyDataChanged();
-    }
-
-    private async Task UpdateVat(DeliveryLineModel line, decimal value)
-    {
-        line.VatAmount = value;
-        line.VatManuallyEdited = true;
-        await NotifyDataChanged();
+        await OnItemChanged(line);
     }
 
     private async Task NotifyDataChanged()
     {
         await OnChanged.InvokeAsync();
     }
+
+    private async Task OnItemChanged(DeliveryLineModel item)
+    {
+        for (var i = 0; i < Lines.Count; i++)
+        {
+            Lines[i].RowNo = i + 1;
+        }
+
+        Summary.SupplyAmount = Lines.Where(x => !x.IsPlaceholder).Sum(x => x.Amount);
+        Summary.VatAmount = Lines.Where(x => !x.IsPlaceholder).Sum(x => x.VatAmount);
+        Summary.TotalAmount = Summary.SupplyAmount + Summary.VatAmount;
+        Summary.TodaySales = Summary.TotalAmount;
+        Summary.ClaimAmount = Summary.TotalAmount;
+
+        await NotifyDataChanged();
+        StateHasChanged();
+    }
+
+    private string RowStyle(DeliveryLineModel item, int index) => "height:36px;font-size:13px;";
 
     private static string GetAmountClass(decimal amount)
     {

@@ -10,27 +10,35 @@ public enum DeliveryGridDensity
 public sealed class DeliveryLineModel
 {
     public int No { get; set; }
+    public int RowNo
+    {
+        get => No;
+        set => No = value;
+    }
+
     public bool IsSelected { get; set; }
     public string ItemName { get; set; } = string.Empty;
     public string Spec { get; set; } = string.Empty;
     public string Unit { get; set; } = "EA";
     public decimal Quantity { get; set; }
+    public decimal Qty
+    {
+        get => Quantity;
+        set => Quantity = value;
+    }
+
     public decimal UnitPrice { get; set; }
-    public decimal Amount { get; set; }
-    public decimal VatAmount { get; set; }
+    public decimal Amount => decimal.Round(Quantity * UnitPrice, 2, MidpointRounding.AwayFromZero);
+    public decimal VatAmount => decimal.Round(Amount * 0.1m, 2, MidpointRounding.AwayFromZero);
+    public decimal Total => Amount + VatAmount;
     public string Note { get; set; } = string.Empty;
     public string Warehouse { get; set; } = string.Empty;
     public string LineAssignee { get; set; } = string.Empty;
-    public bool VatManuallyEdited { get; set; }
     public bool IsPlaceholder { get; set; }
 
     public void RecalculateAmount()
     {
-        Amount = decimal.Round(Quantity * UnitPrice, 2, MidpointRounding.AwayFromZero);
-        if (!VatManuallyEdited)
-        {
-            VatAmount = decimal.Round(Amount * 0.1m, 2, MidpointRounding.AwayFromZero);
-        }
+        // Computed fields are derived from quantity and unit price.
     }
 
     public DeliveryLineModel CloneForRow()
@@ -42,12 +50,9 @@ public sealed class DeliveryLineModel
             Unit = Unit,
             Quantity = Quantity,
             UnitPrice = UnitPrice,
-            Amount = Amount,
-            VatAmount = VatAmount,
             Note = Note,
             Warehouse = Warehouse,
             LineAssignee = LineAssignee,
-            VatManuallyEdited = VatManuallyEdited,
             IsPlaceholder = false
         };
     }
@@ -77,12 +82,13 @@ public sealed class DeliveryDraftModel
 
 public sealed class DeliverySummaryModel
 {
-    public decimal PrevReceivable { get; set; }
-    public decimal DailySales { get; set; }
-    public decimal BillingAmount { get; set; }
-    public decimal CurrentReceivable { get; set; }
+    public decimal PrevReceivable { get; set; } // 전미수금
+    public decimal TodaySales { get; set; } // 당일판매
+    public decimal TodayReceipt { get; set; } // 당일수금
+    public decimal ClaimAmount { get; set; } // 청구금액
     public decimal CashAmount { get; set; }
     public decimal CardAmount { get; set; }
+    public decimal DiscountAmount { get; set; } // 전체할인
     public decimal SupplyAmount { get; set; }
     public decimal VatAmount { get; set; }
     public decimal TotalAmount { get; set; }

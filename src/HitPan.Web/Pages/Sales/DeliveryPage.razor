@@ -20,7 +20,7 @@
     {
         <WorkflowBreadcrumb Steps="_workflowSteps" />
 
-        <DeliveryForm Draft="_draft" OnChanged="OnHeaderChanged" />
+        <DeliveryForm Draft="_draft" OnChanged="OnHeaderChanged" OnOpenPartnerList="OpenPartnerList" />
 
         @if (_selectedCount > 0)
         {
@@ -50,30 +50,22 @@
         }
         else
         {
-            <div class="delivery-toolbar">
-                <MudButtonGroup Variant="Variant.Outlined">
-                    <MudButton>이전</MudButton>
-                    <MudButton>다음</MudButton>
-                </MudButtonGroup>
-                <MudButtonGroup Variant="Variant.Outlined">
-                    <MudButton>엑셀</MudButton>
-                    <MudButton>인쇄</MudButton>
-                    <MudButton>세금계산서</MudButton>
-                </MudButtonGroup>
-                <MudButtonGroup Variant="Variant.Outlined">
-                    <MudButton OnClick="AddLine">추가</MudButton>
-                    <MudButton OnClick="DeleteLine">삭제</MudButton>
-                </MudButtonGroup>
-                <MudButtonGroup Variant="Variant.Outlined">
-                    <MudButton Class="@GetDensityButtonClass(DeliveryGridDensity.Compact)" OnClick="@(() => ChangeDensity(DeliveryGridDensity.Compact))">컴팩트</MudButton>
-                    <MudButton Class="@GetDensityButtonClass(DeliveryGridDensity.Normal)" OnClick="@(() => ChangeDensity(DeliveryGridDensity.Normal))">보통</MudButton>
-                    <MudButton Class="@GetDensityButtonClass(DeliveryGridDensity.Comfortable)" OnClick="@(() => ChangeDensity(DeliveryGridDensity.Comfortable))">여유</MudButton>
-                </MudButtonGroup>
-                <MudButtonGroup Variant="Variant.Filled" Color="Color.Primary">
-                    <MudButton OnClick="SaveAsync">저장</MudButton>
-                    <MudButton OnClick="ConfirmAsync">전송</MudButton>
-                </MudButtonGroup>
-            </div>
+            <MudToolBar Dense="true" Class="pa-1 gap-1 delivery-toolbar">
+                <MudIconButton Icon="@Icons.Material.Filled.ChevronLeft" OnClick="GoPrev" aria-label="이전" />
+                <MudIconButton Icon="@Icons.Material.Filled.ChevronRight" OnClick="GoNext" aria-label="다음" />
+                <MudDivider Vertical="true" FlexItem="true" />
+
+                <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Add" OnClick="AddNew">추가</MudButton>
+                <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Save" OnClick="Save">저장</MudButton>
+                <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Undo" OnClick="Cancel">취소</MudButton>
+                <MudButton Variant="Variant.Outlined" Color="Color.Error" StartIcon="@Icons.Material.Filled.Delete" OnClick="DeleteConfirm">삭제</MudButton>
+                <MudDivider Vertical="true" FlexItem="true" />
+
+                <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Print" OnClick="Print">인쇄</MudButton>
+                <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Receipt" OnClick="OpenTaxInvoice">세금</MudButton>
+                <MudSpacer />
+                <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.FormatListBulleted" OnClick="OpenListPopup">목록</MudButton>
+            </MudToolBar>
         }
 
         <div class="delivery-grid-wrap">
@@ -83,7 +75,8 @@
                           SelectedLineChanged="OnSelectedLineChanged"
                           OnChanged="OnLinesChanged"
                           OnSelectionChanged="OnSelectionChanged"
-                          OnContextSecondary="OnContextSecondaryAsync" />
+                          OnContextSecondary="OnContextSecondaryAsync"
+                          Summary="_summary" />
         </div>
 
         <DeliveryFooter Summary="_summary" />
@@ -232,13 +225,6 @@
         RecalculateSummary();
     }
 
-    private void ChangeDensity(DeliveryGridDensity density)
-    {
-        if (_draft is null) return;
-        _draft.Density = density;
-        MarkDirty();
-    }
-
     private async Task SaveAsync()
     {
         if (_draft is null) return;
@@ -383,9 +369,6 @@
         MarkDirty();
     }
 
-    private string GetDensityButtonClass(DeliveryGridDensity density) =>
-        _draft?.Density == density ? "delivery-density-active" : string.Empty;
-
     private void RecalculateSummary()
     {
         if (_draft is null) return;
@@ -395,10 +378,10 @@
         _summary.SupplyAmount = supply;
         _summary.VatAmount = vat;
         _summary.TotalAmount = supply + vat;
-        _summary.DailySales = _summary.TotalAmount;
-        _summary.BillingAmount = _summary.TotalAmount;
+        _summary.TodaySales = _summary.TotalAmount;
+        _summary.TodayReceipt = _summary.CashAmount + _summary.CardAmount;
+        _summary.ClaimAmount = _summary.TotalAmount;
         _summary.PrevReceivable = 0;
-        _summary.CurrentReceivable = _summary.BillingAmount;
         _summary.CashAmount = decimal.Round(_summary.TotalAmount * 0.5m, 2, MidpointRounding.AwayFromZero);
         _summary.CardAmount = decimal.Round(_summary.TotalAmount - _summary.CashAmount, 2, MidpointRounding.AwayFromZero);
     }
@@ -411,4 +394,40 @@
             TabService.SetTabDirty(tabId, true);
         }
     }
+
+    private async Task DeleteConfirm()
+    {
+        var result = await DialogService.ShowMessageBoxAsync(
+            "삭제 확인",
+            "선택한 거래명세서를 삭제하시겠습니까?",
+            yesText: "삭제",
+            cancelText: "취소");
+        if (result == true)
+        {
+            await DeleteOrder();
+        }
+    }
+
+    private Task DeleteOrder()
+    {
+        DeleteLine();
+        return Task.CompletedTask;
+    }
+
+    private Task GoPrev() => Task.CompletedTask;
+    private Task GoNext() => Task.CompletedTask;
+
+    private Task AddNew()
+    {
+        AddLine();
+        return Task.CompletedTask;
+    }
+
+    private Task Save() => SaveAsync();
+
+    private Task Cancel() => Task.CompletedTask;
+    private Task Print() => Task.CompletedTask;
+    private Task OpenTaxInvoice() => Task.CompletedTask;
+    private Task OpenListPopup() => Task.CompletedTask;
+    private Task OpenPartnerList() => Task.CompletedTask;
 }

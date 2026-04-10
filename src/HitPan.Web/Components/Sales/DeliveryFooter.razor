@@ -1,24 +1,70 @@
 @using HitPan.Web.Models
 
 <div class="delivery-footer">
-    <div class="delivery-footer-left">
-        <span class="delivery-footer-item delivery-footer-item--alert">전미수금 <span class="hitpan-mono">@Summary.PrevReceivable.ToString("N0")</span></span>
-        <span class="delivery-footer-item">당일판매 <span class="hitpan-mono">@Summary.DailySales.ToString("N0")</span></span>
-        <span class="delivery-footer-item">청구금액 <span class="hitpan-mono">@Summary.BillingAmount.ToString("N0")</span></span>
-        <span class="delivery-footer-item delivery-footer-item--alert">현미수금 <span class="hitpan-mono">@Summary.CurrentReceivable.ToString("N0")</span></span>
-        <span class="delivery-footer-item">현금 <span class="hitpan-mono">@Summary.CashAmount.ToString("N0")</span></span>
-        <span class="delivery-footer-item">카드 <span class="hitpan-mono">@Summary.CardAmount.ToString("N0")</span></span>
+    <div class="delivery-footer-block">
+        <div>
+            <span class="footer-label">전미수금</span>
+            <span class="footer-value hitpan-mono">@Summary.PrevReceivable.ToString("N0")</span>
+        </div>
+        <div>
+            <span class="footer-label">당일판매</span>
+            <span class="footer-value hitpan-mono">@Summary.TodaySales.ToString("N0")</span>
+        </div>
+        <div>
+            <span class="footer-label">당일수금</span>
+            <span class="footer-value hitpan-mono">@Summary.TodayReceipt.ToString("N0")</span>
+        </div>
+        <div>
+            <span class="footer-label">청구금액</span>
+            <span class="footer-value red bold hitpan-mono">@Summary.ClaimAmount.ToString("N0")</span>
+        </div>
     </div>
-    <div class="delivery-footer-right">
-        <span class="delivery-footer-item">공급가액 <span class="hitpan-mono">@Summary.SupplyAmount.ToString("N0")</span></span>
-        <span class="delivery-footer-item">부가세액 <span class="hitpan-mono">@Summary.VatAmount.ToString("N0")</span></span>
-        <span class="delivery-footer-total">
-            <span class="delivery-footer-total-label">합계금액</span>
-            <span class="hitpan-mono delivery-footer-total-value">@Summary.TotalAmount.ToString("N0")</span>
-        </span>
+    <div class="delivery-footer-block">
+        <div>
+            <span class="footer-label">공급가액</span>
+            <span class="footer-value hitpan-mono">@Summary.SupplyAmount.ToString("N0")</span>
+        </div>
+        <div>
+            <span class="footer-label">부가세액</span>
+            <span class="footer-value hitpan-mono">@Summary.VatAmount.ToString("N0")</span>
+        </div>
+        <div class="footer-field highlight">
+            <span class="footer-label">합계금액</span>
+            <span class="footer-value red bold hitpan-mono">@Summary.TotalAmount.ToString("N0")</span>
+        </div>
+        <div>
+            <span class="footer-label">현금입금</span>
+            <MudNumericField T="decimal" Value="Summary.CashAmount" ValueChanged="OnCashChanged" Variant="Variant.Outlined" Margin="Margin.Dense" />
+        </div>
+        <div>
+            <span class="footer-label">카드입금</span>
+            <MudNumericField T="decimal" Value="Summary.CardAmount" ValueChanged="OnCardChanged" Variant="Variant.Outlined" Margin="Margin.Dense" />
+        </div>
+        <div>
+            <span class="footer-label">전체할인</span>
+            <MudNumericField T="decimal" Value="Summary.DiscountAmount" ValueChanged="OnDiscountChanged" Variant="Variant.Outlined" Margin="Margin.Dense" />
+        </div>
     </div>
 </div>
 
 @code {
-    [Parameter, EditorRequired] public DeliverySummaryModel Summary { get; set; } = default!;
+    [Parameter] public DeliverySummaryModel Summary { get; set; } = new();
+
+    private Task OnCashChanged(decimal value)
+    {
+        Summary.CashAmount = value;
+        return Task.CompletedTask;
+    }
+
+    private Task OnCardChanged(decimal value)
+    {
+        Summary.CardAmount = value;
+        return Task.CompletedTask;
+    }
+
+    private Task OnDiscountChanged(decimal value)
+    {
+        Summary.DiscountAmount = value;
+        return Task.CompletedTask;
+    }
 }
