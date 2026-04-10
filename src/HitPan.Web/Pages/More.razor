@@ -1,0 +1,51 @@
+@page "/more"
+@attribute [Authorize]
+@inject NavigationManager Nav
+@inject AuthenticationStateProvider AuthStateProvider
+
+<PageTitle>더보기</PageTitle>
+
+<MudStack Spacing="3" Class="mud-pt-2">
+    <MudText Typo="Typo.h6">더보기</MudText>
+    <MudText Typo="Typo.body2" Class="mud-text-secondary">
+        설정·회계 등 상단 메뉴에 있던 항목입니다.
+    </MudText>
+
+    @if (_showSettings)
+    {
+        <MudButton Variant="Variant.Outlined"
+                   Color="Color.Primary"
+                   FullWidth="true"
+                   OnClick="@(() => Nav.NavigateTo("/settings"))">
+            설정
+        </MudButton>
+    }
+    @if (_showAccounting)
+    {
+        <MudButton Variant="Variant.Outlined"
+                   Color="Color.Primary"
+                   FullWidth="true"
+                   OnClick="@(() => Nav.NavigateTo("/accounting"))">
+            회계
+        </MudButton>
+    }
+    @if (!_showSettings && !_showAccounting)
+    {
+        <MudText Typo="Typo.body2" Class="mud-text-secondary">
+            표시할 추가 메뉴가 없습니다.
+        </MudText>
+    }
+</MudStack>
+
+@code {
+    private bool _showSettings;
+    private bool _showAccounting;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var state = await AuthStateProvider.GetAuthenticationStateAsync();
+        var u = state.User;
+        _showSettings = HitPanRoleHelper.IsInHitPanRole(u, "TenantAdmin");
+        _showAccounting = HitPanRoleHelper.IsInHitPanRole(u, "TenantAdmin");
+    }
+}

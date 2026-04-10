@@ -7,31 +7,44 @@
 <PageTitle>대시보드 · 히트판 ERP</PageTitle>
 
 <div class="hitpan-home">
-    <MudText Typo="Typo.caption" Class="hitpan-home-date-corner mud-text-secondary">
-        @TodayKorean
-    </MudText>
+    <MudStack AlignItems="AlignItems.Stretch"
+              Justify="Justify.Center"
+              Spacing="3"
+              Class="hitpan-home-stack">
+        <div class="hitpan-home-row hitpan-home-row--icon">
+            <MudIcon Icon="@Icons.Material.Outlined.Description"
+                     Color="Color.Default"
+                     Class="hitpan-home-doc-icon"
+                     aria-hidden="true" />
+        </div>
 
-    <MudStack AlignItems="AlignItems.Center" Justify="Justify.Center" Spacing="4" Class="hitpan-home-stack">
-        <MudIcon Icon="@Icons.Material.Outlined.Description"
-                 Color="Color.Default"
-                 Class="hitpan-home-doc-icon"
-                 aria-hidden="true" />
+        <div class="hitpan-home-row">
+            <MudText Typo="Typo.h6" Class="hitpan-home-title">
+                오늘 거래가 없습니다
+            </MudText>
+        </div>
 
-        <MudText Typo="Typo.h6" Class="hitpan-home-title">
-            오늘 거래가 없습니다
-        </MudText>
+        <div class="hitpan-home-row">
+            <MudText Typo="Typo.caption" Class="hitpan-home-date mud-text-secondary">
+                @TodayKorean
+            </MudText>
+        </div>
 
-        <MudText Typo="Typo.body2" Class="mud-text-secondary text-center hitpan-home-sub">
-            거래명세서를 작성해서 시작하세요
-        </MudText>
+        <div class="hitpan-home-row">
+            <MudText Typo="Typo.body2" Class="hitpan-home-sub mud-text-secondary">
+                거래명세서를 작성해서 시작하세요
+            </MudText>
+        </div>
 
-        <MudButton Variant="Variant.Filled"
-                   Color="Color.Primary"
-                   Size="Size.Large"
-                   Class="hitpan-home-cta"
-                   OnClick="GoSalesDelivery">
-            거래명세서 작성하기
-        </MudButton>
+        <div class="hitpan-home-row hitpan-home-row--btn">
+            <MudButton Variant="Variant.Filled"
+                       Color="Color.Primary"
+                       Size="Size.Large"
+                       Class="hitpan-home-cta"
+                       OnClick="GoSalesDelivery">
+                거래명세서 작성하기
+            </MudButton>
+        </div>
     </MudStack>
 </div>
 

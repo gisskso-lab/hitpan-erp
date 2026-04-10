@@ -6,25 +6,22 @@
 @inject WorkTabService TabService
 @inject AuthenticationStateProvider AuthStateProvider
 
-<div class="hitpan-sidebar mud-elevation-1">
-    <div class="hitpan-sidebar-logo" title="히트판">HP</div>
-    <nav class="hitpan-sidebar-nav" aria-label="주 메뉴">
-        @foreach (var item in _visibleItems)
-        {
-            var active = IsActive(item.Href);
-            <button type="button"
-                    class="hitpan-sidebar-item @(active ? "hitpan-sidebar-item--active" : null)"
-                    title="@item.Title"
-                    @onclick="@(() => OnMenuClick(item))">
-                <MudIcon Icon="@item.Icon" Class="hitpan-sidebar-icon" />
-                <span class="hitpan-sidebar-label">@item.Title</span>
-            </button>
-        }
-    </nav>
-</div>
+<nav class="hitpan-bottom-nav" aria-label="하단 메뉴">
+    @foreach (var item in _visibleItems)
+    {
+        var active = IsActive(item.Href);
+        <button type="button"
+                class="hitpan-bottom-nav-item @(active ? "hitpan-bottom-nav-item--active" : null)"
+                title="@item.Title"
+                @onclick="@(() => OnTap(item))">
+            <MudIcon Icon="@item.Icon" Class="hitpan-bottom-nav-icon" />
+            <span class="hitpan-bottom-nav-label">@item.Title</span>
+        </button>
+    }
+</nav>
 
 @code {
-    private List<SidebarMenuEntry> _visibleItems = new();
+    private List<BottomNavEntry> _visibleItems = new();
 
     protected override async Task OnInitializedAsync()
     {
@@ -32,22 +29,16 @@
         await RefreshMenuAsync();
     }
 
-    private void OnLocationChanged(object? sender, LocationChangedEventArgs e)
-    {
-        _ = InvokeAsync(async () =>
-        {
-            await RefreshMenuAsync();
-            StateHasChanged();
-        });
-    }
+    private void OnLocationChanged(object? sender, LocationChangedEventArgs e) =>
+        _ = InvokeAsync(StateHasChanged);
 
     private async Task RefreshMenuAsync()
     {
         var state = await AuthStateProvider.GetAuthenticationStateAsync();
-        _visibleItems = SidebarMenu.All.Where(i => i.IsVisibleTo(state.User)).ToList();
+        _visibleItems = BottomNavMenu.All.Where(i => i.IsVisibleTo(state.User)).ToList();
     }
 
-    private void OnMenuClick(SidebarMenuEntry item)
+    private void OnTap(BottomNavEntry item)
     {
         if (item.OpenTabKind is { } kind)
         {
@@ -59,9 +50,15 @@
 
     private bool IsActive(string href)
     {
-        var path = new Uri(Navigation.Uri).AbsolutePath;
-        return string.Equals(path.TrimEnd('/'), href.TrimEnd('/'), StringComparison.OrdinalIgnoreCase)
-               || (path == "/" && href == "/");
+        var path = new Uri(Navigation.Uri).AbsolutePath.TrimEnd('/');
+        var h = href.TrimEnd('/');
+        if (h == "/more")
+        {
+            return path.Equals("/more", StringComparison.OrdinalIgnoreCase);
+        }
+
+        return string.Equals(path, h, StringComparison.OrdinalIgnoreCase)
+               || (path == "/" && h == "/");
     }
 
     public void Dispose()
@@ -69,7 +66,7 @@
         Navigation.LocationChanged -= OnLocationChanged;
     }
 
-    private sealed record SidebarMenuEntry(
+    private sealed record BottomNavEntry(
         string Title,
         string Icon,
         string Href,
@@ -92,11 +89,10 @@
         }
     }
 
-    private static class SidebarMenu
+    private static class BottomNavMenu
     {
-        public static readonly SidebarMenuEntry[] All =
+        public static readonly BottomNavEntry[] All =
         {
-            new("설정", Icons.Material.Filled.Settings, "/settings", new[] { "TenantAdmin" }, null),
             new("견적", Icons.Material.Filled.RequestQuote, "/quotes", new[] { "TenantAdmin", "Manager", "User" },
                 WorkDocumentKind.SalesOrder),
             new("매입", Icons.Material.Filled.LocalShipping, "/purchase", new[] { "TenantAdmin", "Manager" },
@@ -104,7 +100,7 @@
             new("판매", Icons.Material.Filled.PointOfSale, "/sales", new[] { "TenantAdmin", "Manager", "User" },
                 WorkDocumentKind.SalesDelivery),
             new("재고", Icons.Material.Filled.Inventory, "/stock", null, null),
-            new("회계", Icons.Material.Filled.AccountBalance, "/accounting", new[] { "TenantAdmin" }, null)
+            new("더보기", Icons.Material.Filled.MoreHoriz, "/more", null, null)
         };
     }
 }

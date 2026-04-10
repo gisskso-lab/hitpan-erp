@@ -260,3 +260,117 @@ html, body {
 .hitpan-chip-context {
     max-width: min(320px, 42vw);
 }
+
+/* ── 태블릿·좁은 화면: max-width 1279px (모바일은 사이드바 숨김으로 레이블 규칙만 적용됨) ── */
+@media (max-width: 1279px) {
+    .hitpan-tabbar-tabs {
+        -webkit-overflow-scrolling: touch;
+        scrollbar-width: thin;
+    }
+
+    .hitpan-tab {
+        font-size: 11px;
+    }
+
+    .hitpan-tab-title {
+        max-width: 100px;
+    }
+
+    .hitpan-chip-context {
+        font-size: 11px;
+        max-width: min(280px, 50vw);
+    }
+
+    .hitpan-sidebar-label {
+        display: none !important;
+    }
+
+    .hitpan-sidebar-item {
+        padding: 8px 0;
+        gap: 0;
+    }
+
+    .hitpan-sidebar-icon {
+        font-size: 17px !important;
+        width: 17px !important;
+        height: 17px !important;
+    }
+}
+
+/* ── 모바일: 767px 이하 ── */
+.hitpan-bottom-nav {
+    display: none;
+}
+
+@media (max-width: 767px) {
+    .hitpan-sidebar {
+        display: none !important;
+    }
+
+    .hitpan-top-header {
+        display: none !important;
+    }
+
+    .hitpan-main-column {
+        padding-bottom: calc(60px + env(safe-area-inset-bottom, 0px));
+    }
+
+    main.hitpan-body {
+        padding-left: 1rem !important;
+        padding-right: 1rem !important;
+    }
+
+    .hitpan-bottom-nav {
+        display: flex;
+        position: fixed;
+        bottom: 0;
+        left: 0;
+        right: 0;
+        z-index: 20;
+        box-sizing: border-box;
+        min-height: 60px;
+        height: calc(60px + env(safe-area-inset-bottom, 0px));
+        padding-bottom: env(safe-area-inset-bottom, 0px);
+        align-items: stretch;
+        justify-content: space-around;
+        background: #fff;
+        border-top: 1px solid var(--mud-palette-lines-default);
+    }
+
+    .hitpan-bottom-nav-item {
+        flex: 1;
+        min-width: 0;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 4px;
+        border: none;
+        background: transparent;
+        color: var(--mud-palette-text-secondary);
+        cursor: pointer;
+        padding: 6px 2px 8px;
+        font-family: "Noto Sans KR", sans-serif;
+    }
+
+    .hitpan-bottom-nav-item--active {
+        color: #0f6e56;
+        font-weight: 600;
+    }
+
+    .hitpan-bottom-nav-icon {
+        font-size: 22px !important;
+        width: 22px !important;
+        height: 22px !important;
+    }
+
+    .hitpan-bottom-nav-label {
+        font-size: 10px;
+        line-height: 1.1;
+        text-align: center;
+        max-width: 100%;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+}
