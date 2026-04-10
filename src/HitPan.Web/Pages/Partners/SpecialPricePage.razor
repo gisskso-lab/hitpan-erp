@@ -1,0 +1,206 @@
+@page "/partners/special-prices"
+@using HitPan.Web.Models
+@using HitPan.Web.Services
+@inject SpecialPriceService SpService
+@inject IDialogService DialogService
+
+<div class="sp-page">
+    <MudPaper Elevation="0" Class="pa-3 mb-2" Style="border-bottom:1px solid #E5E7EB">
+        <MudGrid Spacing="2">
+            <MudItem xs="12" sm="4">
+                <MudAutocomplete T="string"
+                                 Value="SelectedPartnerName"
+                                 Label="거래처 선택"
+                                 Variant="Variant.Outlined"
+                                 Margin="Margin.Dense"
+                                 Style="font-size:13px"
+                                 SearchFunc="SearchPartner"
+                                 ValueChanged="OnPartnerChanged"
+                                 AdornmentIcon="@Icons.Material.Filled.Business" />
+            </MudItem>
+            <MudItem xs="12" sm="3">
+                <MudTextField @bind-Value="FilterItem"
+                              Label="품목 검색"
+                              Variant="Variant.Outlined"
+                              Margin="Margin.Dense"
+                              Style="font-size:13px"
+                              Adornment="Adornment.End"
+                              AdornmentIcon="@Icons.Material.Filled.Search"
+                              OnKeyUp="FilterGrid" />
+            </MudItem>
+            <MudItem xs="6" sm="2">
+                <MudCheckBox @bind-Value="ShowActiveOnly"
+                             Label="거래품목만"
+                             Style="font-size:13px"
+                             Color="Color.Primary" />
+            </MudItem>
+            <MudItem xs="6" sm="3" Class="d-flex justify-end gap-2">
+                <MudButton Variant="Variant.Outlined"
+                           Size="Size.Small"
+                           Style="font-size:12px"
+                           StartIcon="@Icons.Material.Filled.Add"
+                           OnClick="AddRow">추가</MudButton>
+                <MudButton Variant="Variant.Filled"
+                           Color="Color.Primary"
+                           Size="Size.Small"
+                           Style="font-size:12px"
+                           StartIcon="@Icons.Material.Filled.Save"
+                           OnClick="SaveConfirm">저장</MudButton>
+            </MudItem>
+        </MudGrid>
+    </MudPaper>
+
+    <MudDataGrid T="SpecialPriceItem"
+                 Items="FilteredItems"
+                 Dense="true"
+                 Hover="true"
+                 Striped="true"
+                 FixedHeader="true"
+                 Height="calc(100vh - 220px)"
+                 Style="font-size:13px"
+                 EditMode="DataGridEditMode.Cell"
+                 RowStyleFunc="RowStyle">
+        <Columns>
+            <PropertyColumn Property="x => x.ItemName"
+                            Title="품목명"
+                            CellStyle="font-size:13px" />
+            <PropertyColumn Property="x => x.Spec"
+                            Title="규격"
+                            CellStyle="font-size:13px" />
+            <PropertyColumn Property="x => x.Unit"
+                            Title="단위"
+                            CellStyle="width:60px;text-align:center" />
+            <PropertyColumn Property="x => x.StdPrice"
+                            Title="표준단가"
+                            Format="N0"
+                            CellStyle="width:110px;text-align:right;color:#6B7280" />
+            <PropertyColumn Property="x => x.SpecialPrice"
+                            Title="특별단가"
+                            Format="N0"
+                            CellStyle="width:110px;text-align:right;font-weight:500" />
+            <TemplateColumn Title="대비%"
+                            CellStyle="width:80px;text-align:center">
+                <CellTemplate>
+                    <MudChip T="string"
+                             Size="Size.Small"
+                             Color="@GetRatioColor(context.Item.VsRatio)"
+                             Style="font-size:11px">
+                        @context.Item.VsRatioLabel
+                    </MudChip>
+                </CellTemplate>
+            </TemplateColumn>
+            <PropertyColumn Property="x => x.LastSupplyDate"
+                            Title="최종납품"
+                            Format="yyyy-MM-dd"
+                            CellStyle="width:100px" />
+            <TemplateColumn CellStyle="width:50px;text-align:center">
+                <CellTemplate>
+                    <MudIconButton Icon="@Icons.Material.Filled.Delete"
+                                   Size="Size.Small"
+                                   Color="Color.Error"
+                                   OnClick="@(() => DeleteConfirm(context.Item))" />
+                </CellTemplate>
+            </TemplateColumn>
+        </Columns>
+    </MudDataGrid>
+</div>
+
+@code {
+    private string SelectedPartnerId = string.Empty;
+    private string SelectedPartnerName = string.Empty;
+    private string FilterItem = string.Empty;
+    private bool ShowActiveOnly = true;
+    private List<SpecialPriceItem> Items = new();
+
+    private List<SpecialPriceItem> FilteredItems =>
+        Items.Where(x =>
+            (!ShowActiveOnly || x.IsActive) &&
+            (string.IsNullOrEmpty(FilterItem) ||
+             x.ItemName.Contains(FilterItem, StringComparison.OrdinalIgnoreCase) ||
+             (x.Spec ?? string.Empty).Contains(FilterItem, StringComparison.OrdinalIgnoreCase)))
+            .ToList();
+
+    private async Task OnPartnerChanged(string name)
+    {
+        SelectedPartnerName = name;
+        SelectedPartnerId = name;
+        if (!string.IsNullOrEmpty(SelectedPartnerId))
+        {
+            Items = await SpService.GetAsync(SelectedPartnerId);
+        }
+    }
+
+    private async Task SaveConfirm()
+    {
+        var result = await DialogService.ShowMessageBoxAsync(
+            "저장 확인",
+            "변경된 특별단가를 저장하시겠습니까?",
+            yesText: "저장",
+            cancelText: "취소");
+        if (result != true)
+        {
+            return;
+        }
+
+        foreach (var item in Items)
+        {
+            await SpService.SaveAsync(SelectedPartnerId, new SpecialPriceUpsertDto
+            {
+                ItemId = item.ItemId,
+                Spec = item.Spec,
+                Unit = item.Unit,
+                SpecialPrice = item.SpecialPrice,
+                StdPrice = item.StdPrice,
+                LastSupplyDate = item.LastSupplyDate
+            });
+        }
+
+        Items = await SpService.GetAsync(SelectedPartnerId);
+    }
+
+    private async Task DeleteConfirm(SpecialPriceItem item)
+    {
+        var result = await DialogService.ShowMessageBoxAsync(
+            "삭제 확인",
+            $"{item.ItemName}의 특별단가를 삭제하시겠습니까?",
+            yesText: "삭제",
+            cancelText: "취소");
+        if (result != true)
+        {
+            return;
+        }
+
+        await SpService.DeleteAsync(SelectedPartnerId, item.ItemId);
+        Items = await SpService.GetAsync(SelectedPartnerId);
+    }
+
+    private void AddRow()
+    {
+        Items.Add(new SpecialPriceItem
+        {
+            PartnerId = SelectedPartnerId,
+            IsEditing = true
+        });
+    }
+
+    private Color GetRatioColor(decimal ratio) => ratio switch
+    {
+        < 100 => Color.Success,
+        > 100 => Color.Error,
+        _ => Color.Default
+    };
+
+    private string RowStyle(SpecialPriceItem item, int index)
+        => "height:36px;font-size:13px;";
+
+    private Task<IEnumerable<string>> SearchPartner(string value, CancellationToken ct)
+    {
+        // TODO: 업체 검색 API 연동
+        return Task.FromResult<IEnumerable<string>>(new List<string>());
+    }
+
+    private void FilterGrid(KeyboardEventArgs e)
+    {
+        StateHasChanged();
+    }
+}

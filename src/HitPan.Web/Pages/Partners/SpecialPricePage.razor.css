@@ -1,0 +1,15 @@
+.sp-page {
+    height: 100vh;
+}
+
+.ratio-down {
+    color: #16A34A;
+}
+
+.ratio-up {
+    color: #DC2626;
+}
+
+.ratio-same {
+    color: #6B7280;
+}
