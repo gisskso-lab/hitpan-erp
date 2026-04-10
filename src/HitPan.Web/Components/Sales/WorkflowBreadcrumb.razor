@@ -1,0 +1,38 @@
+@using HitPan.Web.Models
+@inject NavigationManager Nav
+@inject WorkTabService TabService
+
+<div class="workflow-bc" aria-label="업무 흐름">
+    @for (var i = 0; i < Steps.Count; i++)
+    {
+        var step = Steps[i];
+        var label = step.IsCurrent ? $"{step.Label}★" : step.Label;
+        <button type="button"
+                class="workflow-bc-step @(step.IsCurrent ? "workflow-bc-step--current" : null)"
+                @onclick="@(() => NavigateAsync(step))">
+            <span class="workflow-bc-label">@label</span>
+            @if (!string.IsNullOrWhiteSpace(step.LinkedDocumentNumber))
+            {
+                <span class="workflow-bc-doc hitpan-mono">@step.LinkedDocumentNumber</span>
+            }
+        </button>
+        @if (i < Steps.Count - 1)
+        {
+            <span class="workflow-bc-arrow" aria-hidden="true">→</span>
+        }
+    }
+</div>
+
+@code {
+    [Parameter, EditorRequired] public IReadOnlyList<DeliveryWorkflowStepModel> Steps { get; set; } = Array.Empty<DeliveryWorkflowStepModel>();
+
+    private void NavigateAsync(DeliveryWorkflowStepModel step)
+    {
+        if (step.OpenTabKind is { } kind)
+        {
+            TabService.TryAddTab(kind);
+        }
+
+        Nav.NavigateTo(step.Href);
+    }
+}

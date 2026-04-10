@@ -37,6 +37,7 @@ builder.Services.AddScoped<HitPanAuthStateProvider>();
 builder.Services.AddScoped<AuthenticationStateProvider>(sp => sp.GetRequiredService<HitPanAuthStateProvider>());
 builder.Services.AddScoped<IAuthService, AuthService>();
 builder.Services.AddScoped<WorkTabService>();
+builder.Services.AddScoped<DeliveryService>();
 builder.Services.AddTransient<HitPanApiAuthHandler>();
 builder.Services.AddScoped<TenantProfileService>();
 builder.Services.AddScoped(sp =>

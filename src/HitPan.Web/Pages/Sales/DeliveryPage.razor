@@ -1,0 +1,414 @@
+@using System.Security.Claims
+@using HitPan.Web.Components.Sales
+@using HitPan.Web.Models
+@using HitPan.Web.Services
+@namespace HitPan.Web.Pages.Delivery
+@inject DeliveryService DeliveryService
+@inject WorkTabService TabService
+@inject AuthenticationStateProvider AuthStateProvider
+@inject IDialogService DialogService
+@inject ISnackbar Snackbar
+
+<NavigationLock ConfirmExternalNavigation="@_hasUnsavedChanges" OnBeforeInternalNavigation="OnBeforeInternalNavigation" />
+
+<section class="delivery-page">
+    @if (_draft is null)
+    {
+        <MudProgressCircular Color="Color.Primary" Indeterminate="true" />
+    }
+    else
+    {
+        <WorkflowBreadcrumb Steps="_workflowSteps" />
+
+        <DeliveryForm Draft="_draft" OnChanged="OnHeaderChanged" />
+
+        @if (_selectedCount > 0)
+        {
+            <div class="delivery-selection-bar">
+                <span><strong>@_selectedCount</strong>개 선택됨</span>
+                <MudIconButton Icon="@Icons.Material.Filled.Close"
+                               Title="선택 해제"
+                               Size="Size.Small"
+                               OnClick="ClearSelection" />
+                <MudButton Variant="Variant.Filled" Color="Color.Primary" Size="Size.Small" OnClick="BulkConfirmAsync">일괄확정</MudButton>
+                @if (_canBulkDelete)
+                {
+                    <MudButton Variant="Variant.Outlined" Color="Color.Error" Size="Size.Small" OnClick="BulkDeleteAsync">일괄삭제</MudButton>
+                }
+                else
+                {
+                    <MudButton Variant="Variant.Outlined" Color="Color.Default" Size="Size.Small" Disabled="true" Title="Manager 이상만 가능">
+                        일괄삭제
+                    </MudButton>
+                }
+                <MudMenu Label="일괄변경" Variant="Variant.Outlined" Dense="true" AnchorOrigin="Origin.BottomLeft">
+                    <MudMenuItem OnClick="BulkChangeUnitPriceAsync">단가 일괄변경</MudMenuItem>
+                    <MudMenuItem OnClick="BulkChangeAssigneeAsync">담당자 일괄변경</MudMenuItem>
+                    <MudMenuItem OnClick="BulkChangeWarehouseAsync">창고 일괄변경</MudMenuItem>
+                </MudMenu>
+            </div>
+        }
+        else
+        {
+            <div class="delivery-toolbar">
+                <MudButtonGroup Variant="Variant.Outlined">
+                    <MudButton>이전</MudButton>
+                    <MudButton>다음</MudButton>
+                </MudButtonGroup>
+                <MudButtonGroup Variant="Variant.Outlined">
+                    <MudButton>엑셀</MudButton>
+                    <MudButton>인쇄</MudButton>
+                    <MudButton>세금계산서</MudButton>
+                </MudButtonGroup>
+                <MudButtonGroup Variant="Variant.Outlined">
+                    <MudButton OnClick="AddLine">추가</MudButton>
+                    <MudButton OnClick="DeleteLine">삭제</MudButton>
+                </MudButtonGroup>
+                <MudButtonGroup Variant="Variant.Outlined">
+                    <MudButton Class="@GetDensityButtonClass(DeliveryGridDensity.Compact)" OnClick="@(() => ChangeDensity(DeliveryGridDensity.Compact))">컴팩트</MudButton>
+                    <MudButton Class="@GetDensityButtonClass(DeliveryGridDensity.Normal)" OnClick="@(() => ChangeDensity(DeliveryGridDensity.Normal))">보통</MudButton>
+                    <MudButton Class="@GetDensityButtonClass(DeliveryGridDensity.Comfortable)" OnClick="@(() => ChangeDensity(DeliveryGridDensity.Comfortable))">여유</MudButton>
+                </MudButtonGroup>
+                <MudButtonGroup Variant="Variant.Filled" Color="Color.Primary">
+                    <MudButton OnClick="SaveAsync">저장</MudButton>
+                    <MudButton OnClick="ConfirmAsync">전송</MudButton>
+                </MudButtonGroup>
+            </div>
+        }
+
+        <div class="delivery-grid-wrap">
+            <DeliveryGrid Lines="_draft.Lines"
+                          Density="_draft.Density"
+                          SelectedLine="_selectedLine"
+                          SelectedLineChanged="OnSelectedLineChanged"
+                          OnChanged="OnLinesChanged"
+                          OnSelectionChanged="OnSelectionChanged"
+                          OnContextSecondary="OnContextSecondaryAsync" />
+        </div>
+
+        <DeliveryFooter Summary="_summary" />
+    }
+</section>
+
+@code {
+    private DeliveryDraftModel? _draft;
+    private DeliverySummaryModel _summary = new();
+    private DeliveryLineModel? _selectedLine;
+    private bool _hasUnsavedChanges;
+    private IReadOnlyList<DeliveryWorkflowStepModel> _workflowSteps = Array.Empty<DeliveryWorkflowStepModel>();
+    private int _selectedCount;
+    private bool _canBulkDelete;
+    private ClaimsPrincipal? _user;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var state = await AuthStateProvider.GetAuthenticationStateAsync();
+        _user = state.User;
+        _canBulkDelete = HitPanRoleHelper.IsInHitPanRole(_user, "TenantAdmin")
+                         || HitPanRoleHelper.IsInHitPanRole(_user, "Manager");
+
+        var manager = _user.FindFirst("name")?.Value
+                      ?? _user.FindFirst(ClaimTypes.Name)?.Value
+                      ?? "담당자";
+        _draft = await DeliveryService.CreateDraftAsync(manager);
+        _draft.LinkedQuoteDocumentNo = $"QT-{_draft.SalesDate:yyyyMMdd}-001";
+        _draft.LinkedSalesOrderDocumentNo = $"SO-{_draft.SalesDate:yyyyMMdd}-001";
+        RefreshWorkflow();
+        RecalculateSummary();
+    }
+
+    private void RefreshWorkflow()
+    {
+        if (_draft is null) return;
+        _workflowSteps = DeliveryWorkflowFactory.Build(_draft.DocumentType, _draft);
+    }
+
+    private async Task OnHeaderChanged()
+    {
+        RefreshWorkflow();
+        MarkDirty();
+        await InvokeAsync(StateHasChanged);
+    }
+
+    private async Task OnBeforeInternalNavigation(LocationChangingContext context)
+    {
+        if (!_hasUnsavedChanges) return;
+        var leave = await DialogService.ShowMessageBoxAsync(
+            "확인",
+            "저장하지 않은 내용이 있습니다. 이동하시겠습니까?",
+            yesText: "이동",
+            noText: "취소");
+        if (leave != true)
+        {
+            context.PreventNavigation();
+        }
+    }
+
+    private async Task OnLinesChanged()
+    {
+        MarkDirty();
+        RecalculateSummary();
+        await InvokeAsync(StateHasChanged);
+    }
+
+    private Task OnSelectedLineChanged(DeliveryLineModel? line)
+    {
+        _selectedLine = line;
+        return Task.CompletedTask;
+    }
+
+    private Task OnSelectionChanged()
+    {
+        UpdateSelectionCount();
+        StateHasChanged();
+        return Task.CompletedTask;
+    }
+
+    private void UpdateSelectionCount()
+    {
+        if (_draft is null)
+        {
+            _selectedCount = 0;
+            return;
+        }
+
+        _selectedCount = _draft.Lines.Count(x => !x.IsPlaceholder && x.IsSelected);
+    }
+
+    private void ClearSelection()
+    {
+        if (_draft is null) return;
+        foreach (var line in _draft.Lines)
+        {
+            line.IsSelected = false;
+        }
+
+        UpdateSelectionCount();
+        StateHasChanged();
+    }
+
+    private async Task OnContextSecondaryAsync((DeliveryLineModel Line, DeliveryContextAction Action) arg)
+    {
+        switch (arg.Action)
+        {
+            case DeliveryContextAction.LinkSalesOrder:
+                Snackbar.Add("수주 연결은 추후 API와 연동됩니다.", Severity.Info);
+                break;
+            case DeliveryContextAction.IssueTaxInvoice:
+                Snackbar.Add("세금계산서 발행은 추후 연동됩니다.", Severity.Info);
+                break;
+            case DeliveryContextAction.PartnerHistory:
+                Snackbar.Add("거래처 거래내역 조회는 추후 연동됩니다.", Severity.Info);
+                break;
+        }
+
+        await Task.CompletedTask;
+    }
+
+    private void AddLine()
+    {
+        if (_draft is null) return;
+        _draft.Lines.Add(new DeliveryLineModel { No = _draft.Lines.Count + 1 });
+        MarkDirty();
+        RecalculateSummary();
+    }
+
+    private void DeleteLine()
+    {
+        if (_draft is null || _selectedLine is null) return;
+        _draft.Lines.Remove(_selectedLine);
+        for (var i = 0; i < _draft.Lines.Count; i++)
+        {
+            _draft.Lines[i].No = i + 1;
+        }
+
+        if (_draft.Lines.Count == 0)
+        {
+            _draft.Lines.Add(new DeliveryLineModel { No = 1, IsPlaceholder = true });
+        }
+
+        _selectedLine = null;
+        MarkDirty();
+        RecalculateSummary();
+    }
+
+    private void ChangeDensity(DeliveryGridDensity density)
+    {
+        if (_draft is null) return;
+        _draft.Density = density;
+        MarkDirty();
+    }
+
+    private async Task SaveAsync()
+    {
+        if (_draft is null) return;
+        var docNo = await DeliveryService.SaveAsync(_draft);
+        if (TabService.ActiveTabId is { } tabId)
+        {
+            TabService.UpdateTabTitle(tabId, docNo);
+        }
+
+        _hasUnsavedChanges = false;
+        if (TabService.ActiveTabId is { } currentTabId)
+        {
+            TabService.SetTabDirty(currentTabId, false);
+        }
+
+        RefreshWorkflow();
+        Snackbar.Add($"저장 완료: {docNo}", Severity.Success);
+    }
+
+    private async Task ConfirmAsync()
+    {
+        if (_draft is null) return;
+        if (string.IsNullOrWhiteSpace(_draft.DocumentNumber))
+        {
+            await SaveAsync();
+        }
+
+        try
+        {
+            await DeliveryService.ConfirmAsync(_draft);
+            Snackbar.Add("전송(확정)을 완료했습니다.", Severity.Success);
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add(ex.Message, Severity.Warning);
+        }
+    }
+
+    private async Task BulkConfirmAsync()
+    {
+        if (_draft is null || string.IsNullOrWhiteSpace(_draft.Id))
+        {
+            Snackbar.Add("저장 후 일괄확정을 사용할 수 있습니다.", Severity.Warning);
+            return;
+        }
+
+        var result = await DeliveryService.BulkConfirmAsync(new[] { _draft.Id });
+        if (result.Failed.Count > 0)
+        {
+            Snackbar.Add($"일부 실패: {result.Failed.Count}건", Severity.Warning);
+        }
+        else
+        {
+            Snackbar.Add("일괄확정이 완료되었습니다.", Severity.Success);
+        }
+
+        ClearSelection();
+    }
+
+    private async Task BulkDeleteAsync()
+    {
+        if (!_canBulkDelete || _draft is null || _selectedCount == 0) return;
+        var ok = await DialogService.ShowMessageBoxAsync(
+            "일괄삭제",
+            "선택한 행을 삭제하시겠습니까?",
+            yesText: "삭제",
+            cancelText: "취소");
+        if (ok != true) return;
+
+        _draft.Lines.RemoveAll(l => l.IsSelected && !l.IsPlaceholder);
+        for (var i = 0; i < _draft.Lines.Count; i++)
+        {
+            _draft.Lines[i].No = i + 1;
+        }
+
+        if (_draft.Lines.Count == 0)
+        {
+            _draft.Lines.Add(new DeliveryLineModel { No = 1, IsPlaceholder = true });
+        }
+
+        ClearSelection();
+        MarkDirty();
+        RecalculateSummary();
+    }
+
+    private async Task BulkChangeUnitPriceAsync()
+    {
+        if (_draft is null || _selectedCount == 0) return;
+        var parameters = new DialogParameters<DeliveryBulkEditDialog>
+        {
+            { x => x.Kind, DeliveryBulkEditDialog.BulkEditKind.UnitPrice }
+        };
+        var dialog = await DialogService.ShowAsync<DeliveryBulkEditDialog>("단가 일괄변경", parameters);
+        var res = await dialog.Result;
+        if (res is null || res.CancellationToken.IsCancellationRequested || res.Data is not decimal price) return;
+
+        foreach (var line in _draft.Lines.Where(l => !l.IsPlaceholder && l.IsSelected))
+        {
+            line.UnitPrice = price;
+            line.RecalculateAmount();
+        }
+
+        MarkDirty();
+        RecalculateSummary();
+    }
+
+    private async Task BulkChangeAssigneeAsync()
+    {
+        if (_draft is null || _selectedCount == 0) return;
+        var parameters = new DialogParameters<DeliveryBulkEditDialog>
+        {
+            { x => x.Kind, BulkEditKind.Assignee }
+        };
+        var dialog = await DialogService.ShowAsync<DeliveryBulkEditDialog>("담당자 일괄변경", parameters);
+        var res = await dialog.Result;
+        if (res is null || res.Canceled || res.Data is not string name) return;
+
+        foreach (var line in _draft.Lines.Where(l => !l.IsPlaceholder && l.IsSelected))
+        {
+            line.LineAssignee = name;
+        }
+
+        MarkDirty();
+    }
+
+    private async Task BulkChangeWarehouseAsync()
+    {
+        if (_draft is null || _selectedCount == 0) return;
+        var parameters = new DialogParameters<DeliveryBulkEditDialog>
+        {
+            { x => x.Kind, BulkEditKind.Warehouse }
+        };
+        var dialog = await DialogService.ShowAsync<DeliveryBulkEditDialog>("창고 일괄변경", parameters);
+        var res = await dialog.Result;
+        if (res is null || res.Canceled || res.Data is not string wh) return;
+
+        foreach (var line in _draft.Lines.Where(l => !l.IsPlaceholder && l.IsSelected))
+        {
+            line.Warehouse = wh;
+        }
+
+        MarkDirty();
+    }
+
+    private string GetDensityButtonClass(DeliveryGridDensity density) =>
+        _draft?.Density == density ? "delivery-density-active" : string.Empty;
+
+    private void RecalculateSummary()
+    {
+        if (_draft is null) return;
+        var lines = _draft.Lines.Where(x => !x.IsPlaceholder).ToList();
+        var supply = lines.Sum(x => x.Amount);
+        var vat = lines.Sum(x => x.VatAmount);
+        _summary.SupplyAmount = supply;
+        _summary.VatAmount = vat;
+        _summary.TotalAmount = supply + vat;
+        _summary.DailySales = _summary.TotalAmount;
+        _summary.BillingAmount = _summary.TotalAmount;
+        _summary.PrevReceivable = 0;
+        _summary.CurrentReceivable = _summary.BillingAmount;
+        _summary.CashAmount = decimal.Round(_summary.TotalAmount * 0.5m, 2, MidpointRounding.AwayFromZero);
+        _summary.CardAmount = decimal.Round(_summary.TotalAmount - _summary.CashAmount, 2, MidpointRounding.AwayFromZero);
+    }
+
+    private void MarkDirty()
+    {
+        _hasUnsavedChanges = true;
+        if (TabService.ActiveTabId is { } tabId)
+        {
+            TabService.SetTabDirty(tabId, true);
+        }
+    }
+}

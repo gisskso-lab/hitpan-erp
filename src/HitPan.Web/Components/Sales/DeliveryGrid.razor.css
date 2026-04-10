@@ -1,0 +1,72 @@
+.delivery-grid-host {
+    position: relative;
+}
+
+.delivery-ctx-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 1200;
+    background: transparent;
+}
+
+.delivery-ctx-menu {
+    position: fixed;
+    z-index: 1210;
+    min-width: 200px;
+    padding: 6px 0;
+    border-radius: 8px;
+    border: 1px solid var(--mud-palette-lines-default);
+    background: var(--mud-palette-surface);
+    font-family: "Noto Sans KR", sans-serif;
+}
+
+.delivery-ctx-item {
+    display: block;
+    width: 100%;
+    text-align: left;
+    border: none;
+    background: transparent;
+    padding: 8px 14px;
+    font-size: 0.8125rem;
+    cursor: pointer;
+    color: var(--mud-palette-text-primary);
+}
+
+.delivery-ctx-item:hover {
+    background: rgba(15, 110, 86, 0.08);
+    color: #0f6e56;
+}
+
+.delivery-ctx-sep {
+    height: 1px;
+    margin: 4px 0;
+    background: var(--mud-palette-lines-default);
+}
+
+.delivery-row-ctx {
+    display: flex;
+    align-items: center;
+    min-height: 100%;
+}
+
+.delivery-cell-check {
+    width: 44px;
+}
+
+.delivery-grid--compact :deep(td),
+.delivery-grid--compact :deep(th) {
+    padding-top: 4px !important;
+    padding-bottom: 4px !important;
+}
+
+.delivery-grid--normal :deep(td),
+.delivery-grid--normal :deep(th) {
+    padding-top: 7px !important;
+    padding-bottom: 7px !important;
+}
+
+.delivery-grid--comfortable :deep(td),
+.delivery-grid--comfortable :deep(th) {
+    padding-top: 11px !important;
+    padding-bottom: 11px !important;
+}

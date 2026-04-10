@@ -1,0 +1,24 @@
+@using HitPan.Web.Models
+
+<div class="delivery-footer">
+    <div class="delivery-footer-left">
+        <span class="delivery-footer-item delivery-footer-item--alert">전미수금 <span class="hitpan-mono">@Summary.PrevReceivable.ToString("N0")</span></span>
+        <span class="delivery-footer-item">당일판매 <span class="hitpan-mono">@Summary.DailySales.ToString("N0")</span></span>
+        <span class="delivery-footer-item">청구금액 <span class="hitpan-mono">@Summary.BillingAmount.ToString("N0")</span></span>
+        <span class="delivery-footer-item delivery-footer-item--alert">현미수금 <span class="hitpan-mono">@Summary.CurrentReceivable.ToString("N0")</span></span>
+        <span class="delivery-footer-item">현금 <span class="hitpan-mono">@Summary.CashAmount.ToString("N0")</span></span>
+        <span class="delivery-footer-item">카드 <span class="hitpan-mono">@Summary.CardAmount.ToString("N0")</span></span>
+    </div>
+    <div class="delivery-footer-right">
+        <span class="delivery-footer-item">공급가액 <span class="hitpan-mono">@Summary.SupplyAmount.ToString("N0")</span></span>
+        <span class="delivery-footer-item">부가세액 <span class="hitpan-mono">@Summary.VatAmount.ToString("N0")</span></span>
+        <span class="delivery-footer-total">
+            <span class="delivery-footer-total-label">합계금액</span>
+            <span class="hitpan-mono delivery-footer-total-value">@Summary.TotalAmount.ToString("N0")</span>
+        </span>
+    </div>
+</div>
+
+@code {
+    [Parameter, EditorRequired] public DeliverySummaryModel Summary { get; set; } = default!;
+}

@@ -1,0 +1,69 @@
+@using HitPan.Web.Models
+
+<div class="delivery-form">
+    <MudGrid Spacing="2">
+        <MudItem xs="12" sm="6" md="3">
+            <MudSelect T="string" Label="문서유형" Value="Draft.DocumentType" ValueChanged="OnDocumentTypeChanged" Variant="Variant.Outlined" Dense="true">
+                <MudSelectItem Value="@("거래명세서")">거래명세서</MudSelectItem>
+                <MudSelectItem Value="@("수주")">수주</MudSelectItem>
+                <MudSelectItem Value="@("발주")">발주</MudSelectItem>
+                <MudSelectItem Value="@("매입")">매입</MudSelectItem>
+                <MudSelectItem Value="@("반품")">반품</MudSelectItem>
+            </MudSelect>
+        </MudItem>
+        <MudItem xs="6" sm="3" md="2">
+            <MudDatePicker Label="판매일자" Date="Draft.SalesDate" DateChanged="OnSalesDateChanged" Variant="Variant.Outlined" Margin="Margin.Dense" />
+        </MudItem>
+        <MudItem xs="6" sm="3" md="2">
+            <MudTextField T="string" Label="순위" Value="@Draft.DailySequence.ToString()" ReadOnly="true" Variant="Variant.Outlined" Margin="Margin.Dense" />
+        </MudItem>
+        <MudItem xs="12" sm="6" md="3">
+            <MudTextField T="string"
+                          @ref="_companyRef"
+                          Label="판매업체"
+                          Value="Draft.SalesCompany"
+                          ValueChanged="OnSalesCompanyChanged"
+                          Variant="Variant.Outlined"
+                          Margin="Margin.Dense" />
+        </MudItem>
+        <MudItem xs="12" sm="6" md="2">
+            <MudTextField T="string" Label="담당자" Value="Draft.ManagerName" ReadOnly="true" Variant="Variant.Outlined" Margin="Margin.Dense" />
+        </MudItem>
+    </MudGrid>
+</div>
+
+@code {
+    private MudTextField<string>? _companyRef;
+    private bool _focused;
+
+    [Parameter, EditorRequired] public DeliveryDraftModel Draft { get; set; } = default!;
+    [Parameter] public EventCallback OnChanged { get; set; }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender && !_focused && _companyRef is not null)
+        {
+            _focused = true;
+            await _companyRef.FocusAsync();
+        }
+    }
+
+    private async Task OnDocumentTypeChanged(string value)
+    {
+        Draft.DocumentType = value;
+        await OnChanged.InvokeAsync();
+    }
+
+    private async Task OnSalesDateChanged(DateTime? date)
+    {
+        if (date is null) return;
+        Draft.SalesDate = date.Value;
+        await OnChanged.InvokeAsync();
+    }
+
+    private async Task OnSalesCompanyChanged(string value)
+    {
+        Draft.SalesCompany = value;
+        await OnChanged.InvokeAsync();
+    }
+}
