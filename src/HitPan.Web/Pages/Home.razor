@@ -1,8 +1,53 @@
 ﻿@page "/"
+@attribute [Authorize]
+@using System.Globalization
+@inject WorkTabService TabService
+@inject NavigationManager Nav
 
-<PageTitle>히트판 ERP</PageTitle>
+<PageTitle>대시보드 · 히트판 ERP</PageTitle>
 
-<h1>히트판 ERP</h1>
+<div class="hitpan-home">
+    <MudStack AlignItems="AlignItems.Center" Spacing="5" Class="hitpan-home-stack">
+        <MudText Typo="Typo.subtitle1" Class="hitpan-home-date mud-text-secondary">
+            @TodayKorean
+        </MudText>
 
-<p>Welcome to your new app.</p>
-<p><a href="/login">로그인</a></p>
+        <MudButton Variant="Variant.Filled"
+                   Color="Color.Primary"
+                   Size="Size.Large"
+                   Class="hitpan-home-primary-cta"
+                   OnClick="GoSalesDelivery">
+            거래명세서 작성하기
+        </MudButton>
+
+        <MudPaper Elevation="0" Class="hitpan-home-empty">
+            <MudStack AlignItems="AlignItems.Center" Spacing="3">
+                <div class="hitpan-home-empty-icon" aria-hidden="true">
+                    <MudIcon Icon="@Icons.Material.Outlined.ReceiptLong" Style="font-size: 3.5rem;" />
+                </div>
+                <MudText Typo="Typo.h6" Class="hitpan-home-empty-title">
+                    오늘 거래가 없습니다
+                </MudText>
+                <MudText Typo="Typo.body2" Class="mud-text-secondary text-center hitpan-home-empty-caption">
+                    새 거래명세서를 작성해 업무를 시작하세요.
+                </MudText>
+                <MudButton Variant="Variant.Outlined"
+                           Color="Color.Primary"
+                           OnClick="GoSalesDelivery">
+                    거래명세서 작성하기
+                </MudButton>
+            </MudStack>
+        </MudPaper>
+    </MudStack>
+</div>
+
+@code {
+    private string TodayKorean =>
+        DateTime.Now.ToString("yyyy년 M월 d일 dddd", new CultureInfo("ko-KR"));
+
+    private void GoSalesDelivery()
+    {
+        _ = TabService.TryAddTab(WorkDocumentKind.SalesDelivery);
+        Nav.NavigateTo("/sales");
+    }
+}

@@ -72,10 +72,15 @@ public sealed class HitPanAuthStateProvider(
         }
 
         var userId = claims.FirstOrDefault(x => x.Type == "user_id")?.Value;
+        var jwtName = claims.FirstOrDefault(x => x.Type == "name")?.Value;
         claims.RemoveAll(x => x.Type == ClaimTypes.Name);
         if (!string.IsNullOrEmpty(displayName))
         {
             claims.Add(new Claim(ClaimTypes.Name, displayName));
+        }
+        else if (!string.IsNullOrEmpty(jwtName))
+        {
+            claims.Add(new Claim(ClaimTypes.Name, jwtName));
         }
         else if (!string.IsNullOrEmpty(userId))
         {

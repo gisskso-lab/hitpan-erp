@@ -5,4 +5,5 @@ namespace HitPan.Application.Interfaces;
 public interface ITenantService
 {
     Task<CreateTenantResponse> CreateAsync(CreateTenantRequest request, CancellationToken ct = default);
+    Task<TenantMeResponse?> GetCurrentAsync(CancellationToken ct = default);
 }

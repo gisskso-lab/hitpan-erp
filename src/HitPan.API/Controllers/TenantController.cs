@@ -30,4 +30,17 @@ public class TenantController : ControllerBase
             return Conflict(new { message = ex.Message });
         }
     }
+
+    [HttpGet("me")]
+    [Authorize]
+    public async Task<IActionResult> Me(CancellationToken ct)
+    {
+        var me = await _tenantService.GetCurrentAsync(ct);
+        if (me is null)
+        {
+            return NotFound();
+        }
+
+        return Ok(me);
+    }
 }

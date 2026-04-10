@@ -37,6 +37,15 @@ builder.Services.AddScoped<HitPanAuthStateProvider>();
 builder.Services.AddScoped<AuthenticationStateProvider>(sp => sp.GetRequiredService<HitPanAuthStateProvider>());
 builder.Services.AddScoped<IAuthService, AuthService>();
 builder.Services.AddScoped<WorkTabService>();
-builder.Services.AddScoped(_ => new HttpClient { BaseAddress = apiUri });
+builder.Services.AddTransient<HitPanApiAuthHandler>();
+builder.Services.AddScoped<TenantProfileService>();
+builder.Services.AddScoped(sp =>
+{
+    var handler = new HitPanApiAuthHandler(sp.GetRequiredService<HitPanProtectedLocalStorage>())
+    {
+        InnerHandler = new HttpClientHandler()
+    };
+    return new HttpClient(handler) { BaseAddress = apiUri };
+});
 
 await builder.Build().RunAsync();

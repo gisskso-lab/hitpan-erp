@@ -120,6 +120,7 @@ public class AuthService : IAuthService
         {
             new("tenant_id", user.TenantId),
             new("user_id", user.Id),
+            new("name", user.UserName),
             new("role", user.Role.ToString())
         };
 

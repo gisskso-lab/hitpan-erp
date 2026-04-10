@@ -1,4 +1,5 @@
 using System.Net;
+using System.Net.Http;
 using System.Net.Http.Json;
 using HitPan.Web.Models;
 using HitPan.Web.Providers;
@@ -26,39 +27,50 @@ public sealed class AuthService : IAuthService
 
     public async Task<AuthLoginResult> LoginAsync(string email, string password, CancellationToken ct = default)
     {
-        using var response = await _http.PostAsJsonAsync(
-            "api/auth/login",
-            new LoginRequestDto { Email = email, Password = password },
-            cancellationToken: ct);
-
-        if (response.StatusCode == HttpStatusCode.Unauthorized)
+        try
         {
-            var err = await response.Content.ReadFromJsonAsync<ApiErrorMessageDto>(cancellationToken: ct);
+            using var response = await _http.PostAsJsonAsync(
+                "api/auth/login",
+                new LoginRequestDto { Email = email, Password = password },
+                cancellationToken: ct);
+
+            if (response.StatusCode == HttpStatusCode.Unauthorized)
+            {
+                var err = await response.Content.ReadFromJsonAsync<ApiErrorMessageDto>(cancellationToken: ct);
+                return new AuthLoginResult
+                {
+                    Success = false,
+                    ErrorMessage = err?.Message ?? "이메일 또는 비밀번호가 틀립니다"
+                };
+            }
+
+            if (!response.IsSuccessStatusCode)
+            {
+                return new AuthLoginResult
+                {
+                    Success = false,
+                    ErrorMessage = $"로그인 요청 실패 ({(int)response.StatusCode})"
+                };
+            }
+
+            var data = await response.Content.ReadFromJsonAsync<LoginApiResponse>(cancellationToken: ct);
+            if (data is null || string.IsNullOrEmpty(data.AccessToken))
+            {
+                return new AuthLoginResult { Success = false, ErrorMessage = "응답을 해석할 수 없습니다." };
+            }
+
+            await PersistSessionAsync(data);
+            await _authState.NotifySessionChangedAsync();
+            return new AuthLoginResult { Success = true, Data = data };
+        }
+        catch (HttpRequestException)
+        {
             return new AuthLoginResult
             {
                 Success = false,
-                ErrorMessage = err?.Message ?? "이메일 또는 비밀번호가 틀립니다"
+                ErrorMessage = "서버에 연결할 수 없습니다. API 서버를 확인해주세요."
             };
         }
-
-        if (!response.IsSuccessStatusCode)
-        {
-            return new AuthLoginResult
-            {
-                Success = false,
-                ErrorMessage = $"로그인 요청 실패 ({(int)response.StatusCode})"
-            };
-        }
-
-        var data = await response.Content.ReadFromJsonAsync<LoginApiResponse>(cancellationToken: ct);
-        if (data is null || string.IsNullOrEmpty(data.AccessToken))
-        {
-            return new AuthLoginResult { Success = false, ErrorMessage = "응답을 해석할 수 없습니다." };
-        }
-
-        await PersistSessionAsync(data);
-        await _authState.NotifySessionChangedAsync();
-        return new AuthLoginResult { Success = true, Data = data };
     }
 
     public async Task<bool> RefreshAsync(CancellationToken ct = default)

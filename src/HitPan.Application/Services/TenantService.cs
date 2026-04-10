@@ -8,10 +8,12 @@ namespace HitPan.Application.Services;
 public class TenantService : ITenantService
 {
     private readonly IUnitOfWork _unitOfWork;
+    private readonly ICurrentTenant _currentTenant;
 
-    public TenantService(IUnitOfWork unitOfWork)
+    public TenantService(IUnitOfWork unitOfWork, ICurrentTenant currentTenant)
     {
         _unitOfWork = unitOfWork;
+        _currentTenant = currentTenant;
     }
 
     public async Task<CreateTenantResponse> CreateAsync(CreateTenantRequest request, CancellationToken ct = default)
@@ -86,6 +88,25 @@ public class TenantService : ITenantService
             TenantId = tenantId,
             TenantCode = tenantCode,
             Message = "등록 완료. 30일 무료 체험이 시작됩니다."
+        };
+    }
+
+    public async Task<TenantMeResponse?> GetCurrentAsync(CancellationToken ct = default)
+    {
+        var tenantId = _currentTenant.TenantId;
+        if (string.IsNullOrWhiteSpace(tenantId))
+            return null;
+
+        var tenants = _unitOfWork.Repository<Tenant>();
+        var tenant = await tenants.GetByIdAsync(tenantId);
+        if (tenant is null)
+            return null;
+
+        return new TenantMeResponse
+        {
+            TenantId = tenant.Id,
+            CompanyName = tenant.CompanyName,
+            Status = tenant.Status.ToString().ToLowerInvariant()
         };
     }
 }

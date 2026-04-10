@@ -71,7 +71,7 @@
         var state = await AuthenticationStateProvider.GetAuthenticationStateAsync();
         if (state.User.Identity?.IsAuthenticated == true)
         {
-            Navigation.NavigateTo("/", replace: true);
+            Navigation.NavigateTo("/", forceLoad: true);
         }
     }
 
@@ -100,11 +100,11 @@
 
             if (result.Data?.RedirectToWelcome == true)
             {
-                Navigation.NavigateTo("/welcome", replace: true);
+                Navigation.NavigateTo("/welcome", forceLoad: true);
             }
             else
             {
-                Navigation.NavigateTo("/", replace: true);
+                Navigation.NavigateTo("/", forceLoad: true);
             }
         }
         finally

@@ -1,4 +1,3 @@
-using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using Microsoft.JSInterop;
@@ -6,25 +5,24 @@ using Microsoft.JSInterop;
 namespace HitPan.Web.Services;
 
 /// <summary>
-/// 브라우저 localStorage에 값을 암호화해 저장합니다.
-/// Microsoft.AspNetCore.Components.Server.ProtectedBrowserStorage.ProtectedLocalStorage 는
-/// 브라우저(WASM) 실행 시 <see cref="PlatformNotSupportedException"/> 을 던집니다.
+/// Blazor WASM 브라우저에서는 대칭키(AES 등) API가 지원되지 않을 수 있어,
+/// JSON 직렬화 후 Base64 인코딩만 적용하고 <see cref="IJSRuntime"/>으로
+/// <c>window.hitpanStorage</c>에 위임합니다. (래퍼: <c>hitpanStorage_set</c> 등)
 /// </summary>
 public sealed class HitPanProtectedLocalStorage(IJSRuntime jsRuntime)
 {
     private static readonly JsonSerializerOptions JsonOptions = new() { PropertyNamingPolicy = JsonNamingPolicy.CamelCase };
-    private static readonly byte[] Key = SHA256.HashData(Encoding.UTF8.GetBytes("HitPan.Wasm.ProtectedLocalStorage.v1"));
 
     public async ValueTask SetAsync(string key, object value)
     {
         var json = JsonSerializer.Serialize(value, value.GetType(), JsonOptions);
-        var protectedPayload = ProtectToBase64(json);
-        await jsRuntime.InvokeVoidAsync("localStorage.setItem", key, protectedPayload);
+        var b64 = Convert.ToBase64String(Encoding.UTF8.GetBytes(json));
+        await jsRuntime.InvokeVoidAsync("hitpanStorage_set", key, b64);
     }
 
     public async ValueTask<HitPanStorageResult<T>> GetAsync<T>(string key)
     {
-        var b64 = await jsRuntime.InvokeAsync<string?>("localStorage.getItem", key);
+        var b64 = await jsRuntime.InvokeAsync<string?>("hitpanStorage_get", key);
         if (string.IsNullOrEmpty(b64))
         {
             return new HitPanStorageResult<T>(false, default);
@@ -32,7 +30,7 @@ public sealed class HitPanProtectedLocalStorage(IJSRuntime jsRuntime)
 
         try
         {
-            var json = UnprotectFromBase64(b64);
+            var json = Encoding.UTF8.GetString(Convert.FromBase64String(b64));
             var deserialized = JsonSerializer.Deserialize<T>(json, JsonOptions);
             return new HitPanStorageResult<T>(true, deserialized);
         }
@@ -43,44 +41,7 @@ public sealed class HitPanProtectedLocalStorage(IJSRuntime jsRuntime)
     }
 
     public ValueTask DeleteAsync(string key) =>
-        jsRuntime.InvokeVoidAsync("localStorage.removeItem", key);
-
-    private static string ProtectToBase64(string plainText)
-    {
-        var plain = Encoding.UTF8.GetBytes(plainText);
-        using var aes = Aes.Create();
-        aes.KeySize = 256;
-        aes.Key = Key;
-        aes.Mode = CipherMode.CBC;
-        aes.Padding = PaddingMode.PKCS7;
-        aes.GenerateIV();
-        using var enc = aes.CreateEncryptor();
-        var cipher = enc.TransformFinalBlock(plain, 0, plain.Length);
-        var packed = new byte[aes.IV.Length + cipher.Length];
-        Buffer.BlockCopy(aes.IV, 0, packed, 0, aes.IV.Length);
-        Buffer.BlockCopy(cipher, 0, packed, aes.IV.Length, cipher.Length);
-        return Convert.ToBase64String(packed);
-    }
-
-    private static string UnprotectFromBase64(string b64)
-    {
-        var packed = Convert.FromBase64String(b64);
-        if (packed.Length <= 16)
-        {
-            throw new CryptographicException("Invalid payload.");
-        }
-
-        using var aes = Aes.Create();
-        aes.KeySize = 256;
-        aes.Key = Key;
-        aes.Mode = CipherMode.CBC;
-        aes.Padding = PaddingMode.PKCS7;
-        var iv = packed.AsSpan(0, 16);
-        var cipher = packed.AsSpan(16);
-        using var dec = aes.CreateDecryptor(aes.Key, iv.ToArray());
-        var plain = dec.TransformFinalBlock(cipher.ToArray(), 0, cipher.Length);
-        return Encoding.UTF8.GetString(plain);
-    }
+        jsRuntime.InvokeVoidAsync("hitpanStorage_remove", key);
 }
 
 public readonly struct HitPanStorageResult<T>(bool success, T? value)
