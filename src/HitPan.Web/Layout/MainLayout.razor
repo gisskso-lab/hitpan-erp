@@ -1,13 +1,36 @@
 ﻿@inherits LayoutComponentBase
 @attribute [Authorize]
+@using HitPan.Web.Helpers
+@using HitPan.Web.Components
 
-<div class="hitpan-shell">
-    <Sidebar />
-    <div class="hitpan-main-column">
-        <TopHeader />
-        <main class="hitpan-body mud-px-4 mud-py-4">
-            @Body
-        </main>
-    </div>
-    <MobileBottomNav />
-</div>
+<AuthorizeView>
+    <Authorized Context="context">
+        @{
+            var accountType = AccountTypeHelper.GetAccountType(context.User);
+        }
+        @if (accountType == AccountTypeHelper.PlatformAdmin)
+        {
+            <PlatformLayout>@Body</PlatformLayout>
+        }
+        else if (accountType == AccountTypeHelper.ResellerAdmin)
+        {
+            <ResellerLayout>@Body</ResellerLayout>
+        }
+        else
+        {
+            <div class="hitpan-shell">
+                <Sidebar />
+                <div class="hitpan-main-column">
+                    <TopHeader />
+                    <main class="hitpan-body mud-px-4 mud-py-4">
+                        @Body
+                    </main>
+                </div>
+                <MobileBottomNav />
+            </div>
+        }
+    </Authorized>
+    <NotAuthorized>
+        <RedirectToLogin />
+    </NotAuthorized>
+</AuthorizeView>
