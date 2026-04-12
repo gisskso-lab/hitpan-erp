@@ -1,5 +1,6 @@
 using System.Net;
 using System.Net.Http.Json;
+using System.Text;
 using System.Text.Json;
 using HitPan.Web.Models;
 
@@ -97,26 +98,116 @@ public sealed class DeliveryService(HttpClient http)
         return body ?? new BulkConfirmApiResponse();
     }
 
-    public async Task<List<SalesListItem>> GetListAsync(
+    /// <summary>목록 조회 (쿼리 문자열 날짜).</summary>
+    public async Task<List<DeliveryListDto>> GetListAsync(
+        string? from = null,
+        string? to = null,
+        string? partner = null,
+        string? status = null,
+        CancellationToken ct = default)
+    {
+        try
+        {
+            var query = new StringBuilder("api/sales/deliveries?");
+            query.Append($"from={Uri.EscapeDataString(from ?? "")}");
+            query.Append($"&to={Uri.EscapeDataString(to ?? "")}");
+            query.Append($"&partner={Uri.EscapeDataString(partner ?? "")}");
+            query.Append($"&status={Uri.EscapeDataString(status ?? "")}");
+            return await http.GetFromJsonAsync<List<DeliveryListDto>>(query.ToString(), JsonOptions, ct)
+                   ?? new List<DeliveryListDto>();
+        }
+        catch
+        {
+            return new List<DeliveryListDto>();
+        }
+    }
+
+    /// <summary>판매 목록 다이얼로그용 — API DTO를 <see cref="SalesListItem"/>으로 변환.</summary>
+    public async Task<List<SalesListItem>> GetSalesListItemsAsync(
         string listType,
         DateTime? from,
         DateTime? to,
         string partnerName = "",
         CancellationToken ct = default)
     {
-        var query = "api/sales/deliveries"
-                    + $"?status={listType}"
-                    + $"&from={from:yyyy-MM-dd}"
-                    + $"&to={to:yyyy-MM-dd}"
-                    + $"&partner={Uri.EscapeDataString(partnerName)}";
+        var fromStr = from?.ToString("yyyy-MM-dd") ?? "";
+        var toStr = to?.ToString("yyyy-MM-dd") ?? "";
+        var list = await GetListAsync(fromStr, toStr, partnerName, listType, ct);
+        return list.Select(static d => new SalesListItem
+        {
+            OrderId = d.DeliveryId,
+            OrderDate = d.OrderDate,
+            OrderNo = d.DeliveryNo,
+            PartnerId = d.PartnerId,
+            PartnerName = d.PartnerName,
+            TotalAmount = d.TotalAmount,
+            VatAmount = d.VatAmount,
+            Status = d.Status
+        }).ToList();
+    }
+
+    public async Task<DeliveryDetailDto?> GetAsync(string deliveryId, CancellationToken ct = default)
+    {
         try
         {
-            var result = await http.GetFromJsonAsync<List<SalesListItem>>(query, ct);
-            return result ?? new List<SalesListItem>();
+            return await http.GetFromJsonAsync<DeliveryDetailDto>(
+                $"api/sales/deliveries/{Uri.EscapeDataString(deliveryId)}",
+                JsonOptions,
+                ct);
         }
         catch
         {
-            return new List<SalesListItem>();
+            return null;
+        }
+    }
+
+    public async Task<bool> UpdateAsync(
+        string deliveryId,
+        UpdateDeliveryRequest req,
+        CancellationToken ct = default)
+    {
+        try
+        {
+            using var res = await http.PutAsJsonAsync(
+                $"api/sales/deliveries/{Uri.EscapeDataString(deliveryId)}",
+                req,
+                ct);
+            return res.IsSuccessStatusCode;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    public async Task<bool> DeleteAsync(string deliveryId, CancellationToken ct = default)
+    {
+        try
+        {
+            using var res = await http.DeleteAsync(
+                $"api/sales/deliveries/{Uri.EscapeDataString(deliveryId)}",
+                ct);
+            return res.IsSuccessStatusCode;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    public async Task<List<PartnerSearchResult>> SearchPartnersAsync(string keyword, CancellationToken ct = default)
+    {
+        try
+        {
+            return await http.GetFromJsonAsync<List<PartnerSearchResult>>(
+                       $"api/partners/search?q={Uri.EscapeDataString(keyword)}",
+                       JsonOptions,
+                       ct)
+                   ?? new List<PartnerSearchResult>();
+        }
+        catch
+        {
+            return new List<PartnerSearchResult>();
         }
     }
 }

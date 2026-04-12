@@ -419,10 +419,26 @@
         }
     }
 
-    private Task DeleteOrder()
+    private async Task DeleteOrder()
     {
-        DeleteLine();
-        return Task.CompletedTask;
+        if (_draft is null) return;
+
+        var persisted = !string.IsNullOrWhiteSpace(_draft.DocumentNumber);
+        if (persisted)
+        {
+            var ok = await DeliveryService.DeleteAsync(_draft.Id!);
+            if (ok)
+            {
+                Snackbar.Add("삭제되었습니다.", Severity.Success);
+            }
+            else
+            {
+                Snackbar.Add("삭제 실패.", Severity.Error);
+                return;
+            }
+        }
+
+        await ResetToNewDeliveryAsync();
     }
 
     private Task GoPrev() => Task.CompletedTask;
@@ -434,7 +450,64 @@
         return Task.CompletedTask;
     }
 
-    private Task Save() => SaveAsync();
+    private async Task Save()
+    {
+        if (_draft is null) return;
+
+        if (string.IsNullOrWhiteSpace(_draft.DocumentNumber))
+        {
+            await SaveAsync();
+            return;
+        }
+
+        if (string.IsNullOrWhiteSpace(_draft.Id))
+        {
+            Snackbar.Add("저장 실패.", Severity.Error);
+            return;
+        }
+
+        var req = new UpdateDeliveryRequest
+        {
+            OrderDate = _draft.SalesDate,
+            PartnerId = _draft.PartnerId ?? "",
+            CashAmount = _summary.CashAmount,
+            CardAmount = _summary.CardAmount,
+            DiscountAmount = _summary.DiscountAmount,
+            Memo = _draft.Memo,
+            Items = _draft.Lines
+                .Where(x => !x.IsPlaceholder)
+                .Select(x => new DeliveryItemDto
+                {
+                    ItemId = x.ItemId,
+                    ItemName = x.ItemName,
+                    Spec = x.Spec,
+                    Unit = x.Unit,
+                    Qty = x.Qty,
+                    UnitPrice = x.UnitPrice,
+                    Amount = x.Amount,
+                    VatAmount = x.VatAmount,
+                    Memo = x.Note,
+                    RowNo = x.RowNo
+                }).ToList()
+        };
+
+        var ok = await DeliveryService.UpdateAsync(_draft.Id, req);
+        if (ok)
+        {
+            Snackbar.Add("저장되었습니다.", Severity.Success);
+            _hasUnsavedChanges = false;
+            if (TabService.ActiveTabId is { } tabId)
+            {
+                TabService.SetTabDirty(tabId, false);
+            }
+
+            RefreshWorkflow();
+        }
+        else
+        {
+            Snackbar.Add("저장 실패.", Severity.Error);
+        }
+    }
 
     private Task Cancel() => Task.CompletedTask;
     private Task Print() => Task.CompletedTask;
@@ -491,12 +564,98 @@
 
     private async Task LoadOrderToGrid(string orderId)
     {
-        if (TabService.ActiveTabId is { } currentTabId)
+        var detail = await DeliveryService.GetAsync(orderId);
+        if (detail is null)
         {
-            var shortId = orderId.Length > 8 ? orderId[..8] : orderId;
-            await TabService.UpdateTabTitleAsync(currentTabId, $"거래명세서 [{shortId}]");
+            Snackbar.Add("문서를 불러올 수 없습니다.", Severity.Warning);
+            return;
         }
 
-        StateHasChanged();
+        var lines = detail.Items.Count > 0
+            ? detail.Items
+                .OrderBy(x => x.RowNo)
+                .Select((x, i) => new DeliveryLineModel
+                {
+                    ItemId = x.ItemId,
+                    No = x.RowNo > 0 ? x.RowNo : i + 1,
+                    IsPlaceholder = false,
+                    ItemName = x.ItemName,
+                    Spec = x.Spec ?? "",
+                    Unit = string.IsNullOrEmpty(x.Unit) ? "EA" : x.Unit!,
+                    Quantity = x.Qty,
+                    UnitPrice = x.UnitPrice,
+                    Note = x.Memo ?? "",
+                    Warehouse = "",
+                    LineAssignee = ""
+                }).ToList()
+            : new List<DeliveryLineModel> { new() { No = 1, IsPlaceholder = true } };
+
+        for (var i = 0; i < lines.Count; i++)
+        {
+            lines[i].No = i + 1;
+        }
+
+        _draft = new DeliveryDraftModel
+        {
+            Id = detail.DeliveryId,
+            DocumentNumber = detail.DeliveryNo,
+            SalesDate = detail.OrderDate,
+            PartnerId = detail.PartnerId,
+            SalesCompany = detail.PartnerName,
+            Memo = detail.Memo,
+            ManagerName = detail.EmployeeName ?? "",
+            DocumentType = "거래명세서",
+            Lines = lines,
+            Density = DeliveryGridDensity.Normal,
+            DailySequence = 1,
+            LinkedQuoteDocumentNo = $"QT-{detail.OrderDate:yyyyMMdd}-001",
+            LinkedSalesOrderDocumentNo = $"SO-{detail.OrderDate:yyyyMMdd}-001"
+        };
+
+        var supply = lines.Where(x => !x.IsPlaceholder).Sum(x => x.Amount);
+        var vat = lines.Where(x => !x.IsPlaceholder).Sum(x => x.VatAmount);
+        _summary.PrevReceivable = detail.PrevReceivable;
+        _summary.TodaySales = detail.TodaySales;
+        _summary.TodayReceipt = detail.TodayReceipt;
+        _summary.CashAmount = detail.CashAmount;
+        _summary.CardAmount = detail.CardAmount;
+        _summary.DiscountAmount = detail.DiscountAmount;
+        _summary.SupplyAmount = supply;
+        _summary.VatAmount = vat;
+        _summary.TotalAmount = supply + vat;
+        _summary.ClaimAmount = _summary.TotalAmount;
+
+        _hasUnsavedChanges = false;
+        _selectedLine = null;
+        UpdateSelectionCount();
+        RefreshWorkflow();
+
+        if (TabService.ActiveTabId is { } currentTabId)
+        {
+            await TabService.UpdateTabTitleAsync(currentTabId, $"거래명세서 [{detail.DeliveryNo}]");
+        }
+
+        await InvokeAsync(StateHasChanged);
+    }
+
+    private async Task ResetToNewDeliveryAsync()
+    {
+        var state = await AuthStateProvider.GetAuthenticationStateAsync();
+        var manager = state.User.FindFirst("name")?.Value
+                      ?? state.User.FindFirst(ClaimTypes.Name)?.Value
+                      ?? "담당자";
+        _draft = await DeliveryService.CreateDraftAsync(manager);
+        _draft.LinkedQuoteDocumentNo = $"QT-{_draft.SalesDate:yyyyMMdd}-001";
+        _draft.LinkedSalesOrderDocumentNo = $"SO-{_draft.SalesDate:yyyyMMdd}-001";
+        _selectedLine = null;
+        _hasUnsavedChanges = false;
+        if (TabService.ActiveTabId is { } tabId)
+        {
+            TabService.SetTabDirty(tabId, false);
+        }
+
+        RefreshWorkflow();
+        RecalculateSummary();
+        await InvokeAsync(StateHasChanged);
     }
 }
