@@ -1,16 +1,32 @@
 ﻿@inherits LayoutComponentBase
 @attribute [Authorize]
 @using HitPan.Web.Components
+@using Microsoft.AspNetCore.Components.Authorization
+@using MudBlazor
 
-<div class="hitpan-shell">
-    <aside class="hitpan-sidebar-aside" aria-label="메인 메뉴">
-        <Sidebar />
-    </aside>
-    <div class="hitpan-main">
-        <TopHeader />
-        <main class="hitpan-content mud-px-4 mud-py-4">
-            @Body
-        </main>
-        <MobileBottomNav />
-    </div>
-</div>
+<CascadingAuthenticationState>
+    <AuthorizeView>
+        <Authorized>
+            <div class="hitpan-shell">
+                <aside class="hitpan-sidebar-aside" aria-label="메인 메뉴">
+                    <Sidebar />
+                </aside>
+                <div class="hitpan-main">
+                    <TopHeader />
+                    <main class="hitpan-content mud-px-4 mud-py-4">
+                        @Body
+                    </main>
+                    <MobileBottomNav />
+                </div>
+            </div>
+        </Authorized>
+        <Authorizing>
+            <div style="display:flex;justify-content:center;align-items:center;height:100vh">
+                <MudProgressCircular Color="Color.Primary" Indeterminate="true" />
+            </div>
+        </Authorizing>
+        <NotAuthorized>
+            <RedirectToLogin />
+        </NotAuthorized>
+    </AuthorizeView>
+</CascadingAuthenticationState>

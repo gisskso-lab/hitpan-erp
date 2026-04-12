@@ -72,20 +72,28 @@
 
     private async Task LoadLabelsFromJwtAsync()
     {
-        var state = await AuthStateProvider.GetAuthenticationStateAsync();
-        var user = state.User;
-        if (user.Identity?.IsAuthenticated != true)
+        try
+        {
+            var state = await AuthStateProvider.GetAuthenticationStateAsync();
+            var user = state.User;
+            if (user.Identity?.IsAuthenticated != true)
+            {
+                _userName = null;
+                TenantProfile.Clear();
+                return;
+            }
+
+            _userName = user.FindFirst("name")?.Value
+                        ?? user.FindFirst(ClaimTypes.Name)?.Value
+                        ?? user.Identity?.Name;
+
+            await TenantProfile.LoadAsync();
+        }
+        catch
         {
             _userName = null;
             TenantProfile.Clear();
-            return;
         }
-
-        _userName = user.FindFirst("name")?.Value
-                    ?? user.FindFirst(ClaimTypes.Name)?.Value
-                    ?? user.Identity?.Name;
-
-        await TenantProfile.LoadAsync();
     }
 
     private string FormatCompanyAndUser()
