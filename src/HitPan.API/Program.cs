@@ -95,7 +95,8 @@ if (app.Environment.IsDevelopment())
 }
 
 // Configure the HTTP request pipeline.
-if (app.Environment.IsDevelopment())
+// Production이 아니면 Swagger 활성(터미널에서 ENV 미지정 시 Production이 되어 UI가 안 뜨는 경우 방지)
+if (!app.Environment.IsProduction())
 {
     app.UseSwagger();
     app.UseSwaggerUI();
@@ -114,5 +115,10 @@ app.UseAuthorization();
 app.UseMiddleware<TenantMiddleware>();
 
 app.MapControllers();
+
+if (!app.Environment.IsProduction())
+{
+    app.MapGet("/", () => Results.Redirect("/swagger")).ExcludeFromDescription();
+}
 
 app.Run();
