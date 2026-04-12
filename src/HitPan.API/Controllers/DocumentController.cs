@@ -1,3 +1,4 @@
+using HitPan.Application.DTOs.Document;
 using HitPan.Application.Services;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -6,126 +7,146 @@ namespace HitPan.API.Controllers;
 
 [ApiController]
 [Route("api/documents")]
-[Authorize(Policy = "TenantOnly")]
+[Authorize]
 public class DocumentController : ControllerBase
 {
-    private static readonly HashSet<string> Kinds = new(StringComparer.OrdinalIgnoreCase)
-    {
-        "sales-order", "purchase-order", "delivery", "stock", "partner", "item", "quotation"
-    };
+    private readonly ExcelExportService _excelService;
+    private readonly PdfExportService _pdfService;
+    private readonly ExcelImportService _importService;
 
-    private readonly DocumentService _documents;
-    private readonly ExcelImportService _import;
-
-    public DocumentController(DocumentService documents, ExcelImportService import)
+    public DocumentController(
+        ExcelExportService excelService,
+        PdfExportService pdfService,
+        ExcelImportService importService)
     {
-        _documents = documents;
-        _import = import;
+        _excelService = excelService;
+        _pdfService = pdfService;
+        _importService = importService;
     }
 
-    [HttpGet("excel/{kind}")]
-    public IActionResult DownloadExcel([FromRoute] string kind)
+    [HttpGet("{type}/{id}/excel")]
+    public IActionResult DownloadExcel(string type, string id)
     {
-        if (!Kinds.Contains(kind))
+        var data = CreateStubDocument(id);
+        byte[] bytes;
+        string fileName;
+
+        if (type == "delivery")
         {
-            return BadRequest("unknown kind");
+            bytes = _excelService.GenerateDeliveryExcel(data);
+            fileName = $"거래명세서_{id}_{DateTime.Now:yyyyMMdd}.xlsx";
+        }
+        else
+        {
+            bytes = _excelService.GenerateExcel(data, type);
+            var title = GetTitleByType(type);
+            fileName = $"{title}_{id}_{DateTime.Now:yyyyMMdd}.xlsx";
         }
 
-        var tenantId = HttpContext.Items["TenantId"]?.ToString();
-        if (string.IsNullOrEmpty(tenantId))
-        {
-            return Forbid();
-        }
-
-        var bytes = kind switch
-        {
-            "sales-order" => _documents.CreateExcelSalesOrder(tenantId),
-            "purchase-order" => _documents.CreateExcelPurchaseOrder(tenantId),
-            "delivery" => _documents.CreateExcelDelivery(tenantId),
-            "stock" => _documents.CreateExcelStock(tenantId),
-            "partner" => _documents.CreateExcelPartner(tenantId),
-            "item" => _documents.CreateExcelItemCatalog(tenantId),
-            "quotation" => _documents.CreateExcelQuotation(tenantId),
-            _ => Array.Empty<byte>()
-        };
-
-        return File(bytes, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            $"hitpan-{kind}.xlsx");
+        var encodedName = Uri.EscapeDataString(fileName);
+        Response.Headers.Append("Content-Disposition",
+            $"attachment; filename*=UTF-8''{encodedName}");
+        return File(bytes,
+            "application/vnd.openxmlformats-officedocument" +
+            ".spreadsheetml.sheet");
     }
 
-    [HttpGet("pdf/{kind}")]
-    public IActionResult DownloadPdf([FromRoute] string kind)
+    [HttpGet("{type}/{id}/pdf")]
+    public IActionResult DownloadPdf(string type, string id)
     {
-        if (!Kinds.Contains(kind))
-        {
-            return BadRequest("unknown kind");
-        }
-
-        var tenantId = HttpContext.Items["TenantId"]?.ToString();
-        if (string.IsNullOrEmpty(tenantId))
-        {
-            return Forbid();
-        }
-
-        var bytes = kind switch
-        {
-            "sales-order" => _documents.CreatePdfSalesOrder(tenantId),
-            "purchase-order" => _documents.CreatePdfPurchaseOrder(tenantId),
-            "delivery" => _documents.CreatePdfDelivery(tenantId),
-            "stock" => _documents.CreatePdfStock(tenantId),
-            "partner" => _documents.CreatePdfPartner(tenantId),
-            "item" => _documents.CreatePdfItemCatalog(tenantId),
-            "quotation" => _documents.CreatePdfQuotation(tenantId),
-            _ => Array.Empty<byte>()
-        };
-
-        return File(bytes, "application/pdf", $"hitpan-{kind}.pdf");
+        var data = CreateStubDocument(id);
+        var title = GetTitleByType(type);
+        var bytes = type == "delivery"
+            ? _pdfService.GenerateDeliveryPdf(data)
+            : _pdfService.GeneratePdf(data, title);
+        var fileName = $"{title}_{id}_{DateTime.Now:yyyyMMdd}.pdf";
+        var encodedName = Uri.EscapeDataString(fileName);
+        Response.Headers.Append("Content-Disposition",
+            $"attachment; filename*=UTF-8''{encodedName}");
+        return File(bytes, "application/pdf");
     }
 
-    [HttpPost("import/{kind}")]
+    [HttpPost("import/excel")]
     [RequestSizeLimit(20_000_000)]
-    public async Task<IActionResult> UploadExcel([FromRoute] string kind, IFormFile file, CancellationToken ct)
+    public IActionResult ImportExcel(IFormFile? file)
     {
-        if (!Kinds.Contains(kind))
+        if (file is null || file.Length == 0)
         {
-            return BadRequest("unknown kind");
+            return BadRequest("파일이 없습니다.");
         }
 
-        var tenantId = HttpContext.Items["TenantId"]?.ToString();
-        if (string.IsNullOrEmpty(tenantId))
-        {
-            return Forbid();
-        }
-
-        if (file.Length == 0)
-        {
-            return BadRequest("empty file");
-        }
-
-        await using var ms = new MemoryStream();
-        await file.CopyToAsync(ms, ct);
-        ms.Position = 0;
-
-        IReadOnlyList<IReadOnlyDictionary<string, string>> rows;
         try
         {
-            rows = kind switch
-            {
-                "sales-order" => _import.ParseSalesOrderImport(ms),
-                "purchase-order" => _import.ParsePurchaseOrderImport(ms),
-                "delivery" => _import.ParseDeliveryImport(ms),
-                "stock" => _import.ParseStockImport(ms),
-                "partner" => _import.ParsePartnerImport(ms),
-                "item" => _import.ParseItemCatalogImport(ms),
-                "quotation" => _import.ParseQuotationImport(ms),
-                _ => Array.Empty<IReadOnlyDictionary<string, string>>()
-            };
+            using var stream = file.OpenReadStream();
+            var result = _importService.ParseAnyExcel(stream);
+            return Ok(result);
         }
         catch (Exception ex)
         {
-            return BadRequest(new { error = "parse_failed", message = ex.Message });
+            return BadRequest($"파싱 오류: {ex.Message}");
+        }
+    }
+
+    [HttpPost("import/confirm")]
+    public Task<IActionResult> ConfirmImport([FromBody] ImportPreviewDto preview)
+    {
+        if (!preview.IsValid)
+        {
+            return Task.FromResult<IActionResult>(BadRequest("유효하지 않은 데이터입니다."));
         }
 
-        return Ok(new { tenantId, kind, rowCount = rows.Count, rows });
+        return Task.FromResult<IActionResult>(
+            Ok(new { message = "저장 완료 (TODO: 실제 DB 연동)" }));
     }
+
+    private DocumentDto CreateStubDocument(string id)
+    {
+        var tenantId = HttpContext.Items["TenantId"]?.ToString() ?? string.Empty;
+        return new DocumentDto
+        {
+            Tenant = new TenantInfo
+            {
+                TenantId = tenantId,
+                CompanyName = "",
+                BizNo = "",
+                CeoName = "",
+                Tel = "",
+                Address = ""
+            },
+            Partner = new PartnerInfo
+            {
+                PartnerId = "",
+                PartnerName = "",
+                BizNo = "",
+                CeoName = "",
+                Tel = "",
+                Address = ""
+            },
+            Header = new DocumentHeader
+            {
+                DocumentId = id,
+                DocNo = "",
+                OrderDate = DateTime.Today,
+                EmployeeName = "",
+                SupplyAmount = 0,
+                VatAmount = 0,
+                TotalAmount = 0,
+                CashAmount = 0,
+                CardAmount = 0,
+                DiscountAmount = 0
+            },
+            Items = new List<DocumentItem>()
+        };
+    }
+
+    private static string GetTitleByType(string type) => type switch
+    {
+        "delivery" => "거래명세서",
+        "quotation" => "견적서",
+        "po" => "발주서",
+        "so" => "수주서",
+        "po_receipt" => "매입명세서",
+        "po_tax" => "매입계산서",
+        _ => "거래문서"
+    };
 }

@@ -1,78 +1,53 @@
 using ClosedXML.Excel;
+using HitPan.Application.DTOs.Document;
 
 namespace HitPan.Application.Services;
 
-/// <summary>엑셀 역수입 파서 (7종).</summary>
-public sealed class ExcelImportService
+public class ExcelImportService
 {
-    public IReadOnlyList<IReadOnlyDictionary<string, string>> ParseSalesOrderImport(Stream stream)
-        => ParseFirstSheet(stream, "판매수주");
-
-    public IReadOnlyList<IReadOnlyDictionary<string, string>> ParsePurchaseOrderImport(Stream stream)
-        => ParseFirstSheet(stream, "매입발주");
-
-    public IReadOnlyList<IReadOnlyDictionary<string, string>> ParseDeliveryImport(Stream stream)
-        => ParseFirstSheet(stream, "거래명세");
-
-    public IReadOnlyList<IReadOnlyDictionary<string, string>> ParseStockImport(Stream stream)
-        => ParseFirstSheet(stream, "재고");
-
-    public IReadOnlyList<IReadOnlyDictionary<string, string>> ParsePartnerImport(Stream stream)
-        => ParseFirstSheet(stream, "거래처");
-
-    public IReadOnlyList<IReadOnlyDictionary<string, string>> ParseItemCatalogImport(Stream stream)
-        => ParseFirstSheet(stream, "품목");
-
-    public IReadOnlyList<IReadOnlyDictionary<string, string>> ParseQuotationImport(Stream stream)
-        => ParseFirstSheet(stream, "견적");
-
-    /// <summary>첫 시트에서 1행을 헤더로 간주하고 2행부터 키-값 행으로 파싱합니다.</summary>
-    private static IReadOnlyList<IReadOnlyDictionary<string, string>> ParseFirstSheet(Stream stream, string contextHint)
+    public ImportPreviewDto ParseAnyExcel(Stream stream)
     {
-        using var wb = new XLWorkbook(stream);
-        var ws = wb.Worksheet(1);
-        var range = ws.RangeUsed();
-        if (range is null)
-        {
-            return Array.Empty<IReadOnlyDictionary<string, string>>();
-        }
+        using var workbook = new XLWorkbook(stream);
+        var ws = workbook.Worksheet(1);
 
-        var firstRow = range.FirstRow().RowNumber();
-        var lastRow = range.LastRow().RowNumber();
-        var firstCol = range.FirstColumn().ColumnNumber();
-        var lastCol = range.LastColumn().ColumnNumber();
-
-        var headers = new List<string>();
-        for (var c = firstCol; c <= lastCol; c++)
+        if (ws.Cell("Z1").GetString() != "HITPAN_DOC")
         {
-            var h = ws.Cell(firstRow, c).GetString().Trim();
-            headers.Add(string.IsNullOrEmpty(h) ? $"col_{c}" : h);
-        }
-
-        var rows = new List<IReadOnlyDictionary<string, string>>();
-        for (var r = firstRow + 1; r <= lastRow; r++)
-        {
-            var dict = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-            var empty = true;
-            for (var i = 0; i < headers.Count; i++)
+            return new ImportPreviewDto
             {
-                var col = firstCol + i;
-                var v = ws.Cell(r, col).GetString().Trim();
-                if (!string.IsNullOrEmpty(v))
-                {
-                    empty = false;
-                }
+                IsValid = false,
+                ErrorMessage = "히트판 전용 양식이 아닙니다."
+            };
+        }
 
-                dict[headers[i]] = v;
+        var dto = new ImportPreviewDto
+        {
+            DocumentType = ws.Cell("Z2").GetString(),
+            TenantId = ws.Cell("Z3").GetString(),
+            DocumentId = ws.Cell("Z4").GetString(),
+            IsValid = true
+        };
+
+        for (var row = 8; row < 28; row++)
+        {
+            var itemName = ws.Cell(row, 2).GetString();
+            if (string.IsNullOrWhiteSpace(itemName))
+            {
+                continue;
             }
 
-            if (!empty)
+            dto.ParsedItems.Add(new DocumentItem
             {
-                dict["_context"] = contextHint;
-                rows.Add(dict);
-            }
+                ItemName = itemName,
+                Spec = ws.Cell(row, 3).GetString(),
+                Unit = ws.Cell(row, 4).GetString(),
+                Qty = ws.Cell(row, 5).GetValue<decimal>(),
+                UnitPrice = ws.Cell(row, 6).GetValue<decimal>(),
+                Amount = ws.Cell(row, 7).GetValue<decimal>(),
+                VatAmount = ws.Cell(row, 8).GetValue<decimal>(),
+                Memo = ws.Cell(row, 9).GetString()
+            });
         }
 
-        return rows;
+        return dto;
     }
 }

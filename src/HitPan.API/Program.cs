@@ -1,3 +1,4 @@
+using System.Text;
 using HitPan.Application.Interfaces;
 using HitPan.Application.Services;
 using HitPan.API.Extensions;
@@ -6,6 +7,10 @@ using HitPan.Infrastructure.Extensions;
 using HitPan.Infrastructure.Persistence;
 using HitPan.Infrastructure.Persistence.Seed;
 using HitPan.Infrastructure.Security;
+using QuestPDF.Infrastructure;
+
+Encoding.RegisterProvider(CodePagesEncodingProvider.Instance);
+QuestPDF.Settings.License = LicenseType.Community;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -25,7 +30,8 @@ builder.Services.AddScoped<IPurchaseService, PurchaseService>();
 builder.Services.AddScoped<ISalesService, SalesService>();
 builder.Services.AddScoped<IStockService, StockService>();
 builder.Services.AddScoped<IPartnerService, PartnerService>();
-builder.Services.AddScoped<DocumentService>();
+builder.Services.AddScoped<ExcelExportService>();
+builder.Services.AddScoped<PdfExportService>();
 builder.Services.AddScoped<ExcelImportService>();
 builder.Services.AddScoped<IPartnerBalanceRepository, PartnerBalanceRepository>();
 builder.Services.AddJwtAuthentication();
