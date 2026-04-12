@@ -1,26 +1,16 @@
 ﻿@inherits LayoutComponentBase
 @attribute [Authorize]
 @using HitPan.Web.Components
-@using Microsoft.AspNetCore.Components.Authorization
 
-<CascadingAuthenticationState>
-    <AuthorizeView>
-        <Authorized>
-            <div class="hitpan-shell">
-                <aside class="hitpan-sidebar-aside" aria-label="메인 메뉴">
-                    <Sidebar />
-                </aside>
-                <div class="hitpan-main">
-                    <TopHeader />
-                    <main class="hitpan-content mud-px-4 mud-py-4">
-                        @Body
-                    </main>
-                    <MobileBottomNav />
-                </div>
-            </div>
-        </Authorized>
-        <NotAuthorized>
-            <RedirectToLogin />
-        </NotAuthorized>
-    </AuthorizeView>
-</CascadingAuthenticationState>
+<div class="hitpan-shell">
+    <aside class="hitpan-sidebar-aside" aria-label="메인 메뉴">
+        <Sidebar />
+    </aside>
+    <div class="hitpan-main">
+        <TopHeader />
+        <main class="hitpan-content mud-px-4 mud-py-4">
+            @Body
+        </main>
+        <MobileBottomNav />
+    </div>
+</div>
