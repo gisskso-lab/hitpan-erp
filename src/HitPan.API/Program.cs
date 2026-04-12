@@ -25,6 +25,8 @@ builder.Services.AddScoped<IPurchaseService, PurchaseService>();
 builder.Services.AddScoped<ISalesService, SalesService>();
 builder.Services.AddScoped<IStockService, StockService>();
 builder.Services.AddScoped<IPartnerService, PartnerService>();
+builder.Services.AddScoped<DocumentService>();
+builder.Services.AddScoped<ExcelImportService>();
 builder.Services.AddScoped<IPartnerBalanceRepository, PartnerBalanceRepository>();
 builder.Services.AddJwtAuthentication();
 builder.Services.AddAuthorization(options =>
