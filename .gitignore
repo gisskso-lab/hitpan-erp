@@ -6,8 +6,11 @@
 src/HitPan.API/appsettings.Development.json
 src/HitPan.Web/appsettings.Development.json
 src/HitPan.Web/wwwroot/appsettings.Development.json
+artifacts/**/appsettings.Development.json
+src/**/artifacts/**/appsettings.Development.json
 
 # .NET
+appsettings.Development.json
 bin/
 obj/
 *.user
