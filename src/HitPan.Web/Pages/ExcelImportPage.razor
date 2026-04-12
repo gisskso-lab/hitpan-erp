@@ -1,0 +1,173 @@
+@page "/sales/import"
+@inject HttpClient Http
+@inject IDialogService DialogService
+@inject NavigationManager Nav
+
+<MudPaper Class="pa-4">
+    <MudText Typo="Typo.h6" Class="mb-4">
+        엑셀 역수입
+    </MudText>
+
+    <MudText Typo="Typo.body2"
+             Style="color:#6B7280" Class="mb-3">
+        히트판에서보낸 엑셀 파일을
+        다시 가져올 수 있습니다.
+    </MudText>
+
+    <MudFileUpload T="IBrowserFile"
+                   Accept=".xlsx"
+                   MaxFileSize="@(10 * 1024 * 1024)"
+                   OnFilesChanged="OnFilesChanged">
+        <CustomContent Context="upload">
+            <MudButton Variant="Variant.Outlined"
+                       StartIcon="@Icons.Material.Filled.Upload"
+                       OnClick="@(async () => await upload.OpenFilePickerAsync())">
+                엑셀 파일 선택 (.xlsx)
+            </MudButton>
+        </CustomContent>
+    </MudFileUpload>
+
+    @if (SelectedFile != null)
+    {
+        <MudText Class="mt-2" Style="font-size:13px">
+            선택된 파일: @SelectedFile.Name
+        </MudText>
+        <MudButton Variant="Variant.Filled"
+                   Color="Color.Primary"
+                   Class="mt-2"
+                   OnClick="Preview">
+            미리보기
+        </MudButton>
+    }
+
+    @if (PreviewItems?.Any() == true)
+    {
+        <MudText Typo="Typo.subtitle1" Class="mt-4">
+            미리보기 - @(PreviewItems.Count)건 인식됨
+        </MudText>
+        <MudDataGrid T="PreviewItem"
+                     Items="PreviewItems"
+                     Dense="true" Striped="true"
+                     Style="font-size:13px">
+            <Columns>
+                <PropertyColumn Property="x => x.ItemName"
+                                Title="품명" />
+                <PropertyColumn Property="x => x.Qty"
+                                Title="수량" Format="N2" />
+                <PropertyColumn Property="x => x.UnitPrice"
+                                Title="단가" Format="N0" />
+                <PropertyColumn Property="x => x.Amount"
+                                Title="금액" Format="N0" />
+            </Columns>
+        </MudDataGrid>
+
+        <MudButton Variant="Variant.Filled"
+                   Color="Color.Success"
+                   Class="mt-3"
+                   OnClick="Confirm">
+            확인 후 저장
+        </MudButton>
+    }
+</MudPaper>
+
+@code {
+    private IBrowserFile? SelectedFile;
+    private List<PreviewItem>? PreviewItems;
+    private string? PreviewDocType;
+    private string? PreviewDocId;
+
+    private void OnFilesChanged(InputFileChangeEventArgs args)
+    {
+        SelectedFile = args.FileCount > 0 ? args.File : null;
+    }
+
+    private async Task Preview()
+    {
+        if (SelectedFile == null) return;
+        using var content = new MultipartFormDataContent();
+        using var stream = SelectedFile.OpenReadStream(maxAllowedSize: 10 * 1024 * 1024);
+        content.Add(new StreamContent(stream), "file", SelectedFile.Name);
+
+        var res = await Http.PostAsync(
+            "api/documents/import/excel", content);
+        if (!res.IsSuccessStatusCode)
+        {
+            await DialogService.ShowMessageBoxAsync(
+                "오류", "파일 파싱에 실패했습니다.");
+            return;
+        }
+
+        var result = await res.Content
+            .ReadFromJsonAsync<ImportPreviewResult>();
+        if (result?.IsValid != true)
+        {
+            await DialogService.ShowMessageBoxAsync(
+                "오류", result?.ErrorMessage
+                            ?? "히트판 전용 양식이 아닙니다.");
+            return;
+        }
+
+        PreviewDocType = result.DocumentType;
+        PreviewDocId = result.DocumentId;
+        PreviewItems = result.ParsedItems
+            ?.Select(x => new PreviewItem
+            {
+                ItemName = x.ItemName,
+                Qty = x.Qty,
+                UnitPrice = x.UnitPrice,
+                Amount = x.Amount
+            }).ToList();
+    }
+
+    private async Task Confirm()
+    {
+        var result = await DialogService.ShowMessageBoxAsync(
+            "저장 확인",
+            $"{PreviewItems?.Count}건을 저장하시겠습니까?",
+            yesText: "저장", cancelText: "취소");
+        if (result != true) return;
+
+        var res = await Http.PostAsJsonAsync(
+            "api/documents/import/confirm",
+            new
+            {
+                DocumentType = PreviewDocType,
+                DocumentId = PreviewDocId,
+                IsValid = true,
+                ParsedItems = PreviewItems
+            });
+
+        if (res.IsSuccessStatusCode)
+        {
+            await DialogService.ShowMessageBoxAsync(
+                "완료", "저장되었습니다.");
+            Nav.NavigateTo("/sales");
+        }
+    }
+
+    private class PreviewItem
+    {
+        public string ItemName { get; set; } = "";
+        public decimal Qty { get; set; }
+        public decimal UnitPrice { get; set; }
+        public decimal Amount { get; set; }
+    }
+
+    private class ImportPreviewResult
+    {
+        public string? DocumentType { get; set; }
+        public string? DocumentId { get; set; }
+        public string? TenantId { get; set; }
+        public bool IsValid { get; set; }
+        public string? ErrorMessage { get; set; }
+        public List<ParsedItem>? ParsedItems { get; set; }
+    }
+
+    private class ParsedItem
+    {
+        public string ItemName { get; set; } = "";
+        public decimal Qty { get; set; }
+        public decimal UnitPrice { get; set; }
+        public decimal Amount { get; set; }
+    }
+}

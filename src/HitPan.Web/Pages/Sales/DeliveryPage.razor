@@ -4,6 +4,7 @@
 @using HitPan.Web.Services
 @namespace HitPan.Web.Pages.Delivery
 @inject DeliveryService DeliveryService
+@inject DocumentService DocService
 @inject WorkTabService TabService
 @inject AuthenticationStateProvider AuthStateProvider
 @inject IDialogService DialogService
@@ -62,6 +63,16 @@
                 <MudDivider Vertical="true" FlexItem="true" />
 
                 <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Print" OnClick="Print">인쇄</MudButton>
+                <MudButton Variant="Variant.Outlined"
+                           Size="Size.Small"
+                           Style="font-size:12px"
+                           StartIcon="@Icons.Material.Filled.TableChart"
+                           OnClick="DownloadExcel">엑셀</MudButton>
+                <MudButton Variant="Variant.Outlined"
+                           Size="Size.Small"
+                           Style="font-size:12px"
+                           StartIcon="@Icons.Material.Filled.PictureAsPdf"
+                           OnClick="DownloadPdf">PDF</MudButton>
                 <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Receipt" OnClick="OpenTaxInvoice">세금</MudButton>
                 <MudSpacer />
                 <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.FormatListBulleted" OnClick="OpenListPopup">목록</MudButton>
@@ -427,6 +438,32 @@
 
     private Task Cancel() => Task.CompletedTask;
     private Task Print() => Task.CompletedTask;
+
+    private async Task DownloadExcel()
+    {
+        if (_draft is null || string.IsNullOrEmpty(_draft.Id))
+        {
+            await DialogService.ShowMessageBoxAsync(
+                "알림", "먼저 거래명세서를 선택해주세요.");
+            return;
+        }
+
+        await DocService.DownloadExcelAsync(
+            "delivery", _draft.Id);
+    }
+
+    private async Task DownloadPdf()
+    {
+        if (_draft is null || string.IsNullOrEmpty(_draft.Id))
+        {
+            await DialogService.ShowMessageBoxAsync(
+                "알림", "먼저 거래명세서를 선택해주세요.");
+            return;
+        }
+
+        await DocService.DownloadPdfAsync(
+            "delivery", _draft.Id);
+    }
     private Task OpenTaxInvoice() => Task.CompletedTask;
     private Task OpenPartnerList() => Task.CompletedTask;
 
