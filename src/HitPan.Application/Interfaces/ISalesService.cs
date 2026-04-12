@@ -5,7 +5,7 @@ namespace HitPan.Application.Interfaces;
 public interface ISalesService
 {
     Task<string> CreateOrderAsync(CreateSalesOrderRequest request, CancellationToken ct = default);
-    Task<string> CreateDeliveryAsync(CreateDeliveryRequest request, CancellationToken ct = default);
+    Task<(string Id, string DocumentNumber)> CreateDeliveryAsync(CreateDeliveryRequest request, CancellationToken ct = default);
     Task ConfirmDeliveryAsync(string deliveryId, ConfirmDeliveryRequest request, CancellationToken ct = default);
 
     Task<DeliveryDetailDto?> GetDeliveryAsync(string deliveryId, string tenantId, CancellationToken ct = default);

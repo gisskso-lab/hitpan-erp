@@ -33,8 +33,8 @@ public class SalesController : ControllerBase
         var tenantId = HttpContext.Items["TenantId"]?.ToString();
         if (string.IsNullOrEmpty(tenantId)) return Forbid();
 
-        var id = await _salesService.CreateDeliveryAsync(request, ct);
-        return Created($"/api/sales/deliveries/{id}", new { id });
+        var (id, documentNumber) = await _salesService.CreateDeliveryAsync(request, ct);
+        return Created($"/api/sales/deliveries/{id}", new { id, documentNumber });
     }
 
     [HttpPost("deliveries/{id}/confirm")]

@@ -76,10 +76,37 @@ public class SalesService : ISalesService
         return orderId;
     }
 
-    public async Task<string> CreateDeliveryAsync(CreateDeliveryRequest request, CancellationToken ct = default)
+    public async Task<(string Id, string DocumentNumber)> CreateDeliveryAsync(CreateDeliveryRequest request, CancellationToken ct = default)
     {
+        if (string.IsNullOrWhiteSpace(request.PartnerId))
+        {
+            throw new InvalidOperationException("거래처를 선택해주세요.");
+        }
+
+        if (request.Items.Count == 0)
+        {
+            throw new InvalidOperationException("품목이 한 줄 이상 필요합니다.");
+        }
+
         var deliveryRepo = _unitOfWork.Repository<SalesDelivery>();
         var itemRepo = _unitOfWork.Repository<SalesDeliveryItem>();
+
+        const string whSql = """
+                             SELECT warehouse_id
+                             FROM warehouses
+                             WHERE tenant_id = @TenantId
+                               AND is_active = 1
+                             ORDER BY warehouse_id
+                             LIMIT 1
+                             """;
+
+        var defaultWarehouseId = await _db.QueryFirstOrDefaultAsync<string>(
+            new CommandDefinition(whSql, new { TenantId = _currentTenant.TenantId }, cancellationToken: ct));
+
+        if (string.IsNullOrEmpty(defaultWarehouseId))
+        {
+            throw new InvalidOperationException("등록된 창고가 없습니다.");
+        }
 
         var date = request.DeliveryDate == default ? DateTime.UtcNow.Date : request.DeliveryDate.Date;
         var prefix = $"SD-{date:yyyyMMdd}-";
@@ -107,6 +134,35 @@ public class SalesService : ISalesService
 
         foreach (var line in request.Items)
         {
+            var warehouseId = string.IsNullOrWhiteSpace(line.WarehouseId) ? defaultWarehouseId : line.WarehouseId;
+
+            var itemId = line.ItemId?.Trim() ?? string.Empty;
+            if (string.IsNullOrEmpty(itemId))
+            {
+                var name = line.ItemName?.Trim();
+                if (string.IsNullOrEmpty(name))
+                {
+                    throw new InvalidOperationException("품목 ID 또는 품명이 필요합니다.");
+                }
+
+                const string itemResolveSql = """
+                                              SELECT item_id
+                                              FROM items
+                                              WHERE tenant_id = @TenantId
+                                                AND item_name = @ItemName
+                                                AND is_active = 1
+                                              ORDER BY item_id
+                                              LIMIT 1
+                                              """;
+
+                itemId = await _db.QueryFirstOrDefaultAsync<string>(
+                             new CommandDefinition(
+                                 itemResolveSql,
+                                 new { TenantId = _currentTenant.TenantId, ItemName = name },
+                                 cancellationToken: ct))
+                         ?? throw new InvalidOperationException($"등록된 품목을 찾을 수 없습니다: {name}");
+            }
+
             await itemRepo.AddAsync(new SalesDeliveryItem
             {
                 Id = Guid.NewGuid().ToString(),
@@ -114,8 +170,8 @@ public class SalesService : ISalesService
                 DeliveryId = deliveryId,
                 TenantId = _currentTenant.TenantId,
                 OrderItemId = line.OrderItemId,
-                ItemId = line.ItemId,
-                WarehouseId = line.WarehouseId,
+                ItemId = itemId,
+                WarehouseId = warehouseId,
                 Qty = line.Qty,
                 UnitPrice = line.UnitPrice,
                 SupplyAmount = line.SupplyAmount,
@@ -124,7 +180,7 @@ public class SalesService : ISalesService
         }
 
         await _unitOfWork.SaveChangesAsync(ct);
-        return deliveryId;
+        return (deliveryId, deliveryNo);
     }
 
     public async Task ConfirmDeliveryAsync(string deliveryId, ConfirmDeliveryRequest request, CancellationToken ct = default)

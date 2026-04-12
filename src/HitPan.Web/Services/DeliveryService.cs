@@ -2,6 +2,7 @@ using System.Net;
 using System.Net.Http.Json;
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using HitPan.Web.Models;
 
 namespace HitPan.Web.Services;
@@ -10,6 +11,11 @@ public sealed class DeliveryService(HttpClient http)
 {
     private static readonly Dictionary<string, int> DailyCounter = new();
     private static readonly JsonSerializerOptions JsonOptions = new() { PropertyNameCaseInsensitive = true };
+
+    private static readonly JsonSerializerOptions PostJsonOptions = new(JsonSerializerDefaults.Web)
+    {
+        DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull
+    };
 
     public Task<DeliveryDraftModel> CreateDraftAsync(string managerName, CancellationToken ct = default)
     {
@@ -69,7 +75,8 @@ public sealed class DeliveryService(HttpClient http)
             throw new InvalidOperationException("문서 ID가 없습니다. 저장 후 다시 시도하세요.");
         }
 
-        using var resp = await http.PostAsync($"api/sales/deliveries/{draft.Id}/confirm", content: null, cancellationToken: ct);
+        using var content = new StringContent("{}", Encoding.UTF8, "application/json");
+        using var resp = await http.PostAsync($"api/sales/deliveries/{draft.Id}/confirm", content, cancellationToken: ct);
         if (resp.StatusCode is HttpStatusCode.NotFound or HttpStatusCode.BadRequest)
         {
             return;

@@ -239,20 +239,27 @@
     private async Task SaveAsync()
     {
         if (_draft is null) return;
-        var docNo = await DeliveryService.SaveAsync(_draft);
-        if (TabService.ActiveTabId is { } tabId)
+        try
         {
-            TabService.UpdateTabTitle(tabId, docNo);
-        }
+            var docNo = await DeliveryService.SaveAsync(_draft);
+            if (TabService.ActiveTabId is { } tabId)
+            {
+                TabService.UpdateTabTitle(tabId, docNo);
+            }
 
-        _hasUnsavedChanges = false;
-        if (TabService.ActiveTabId is { } currentTabId)
+            _hasUnsavedChanges = false;
+            if (TabService.ActiveTabId is { } currentTabId)
+            {
+                TabService.SetTabDirty(currentTabId, false);
+            }
+
+            RefreshWorkflow();
+            Snackbar.Add($"저장 완료: {docNo}", Severity.Success);
+        }
+        catch (Exception ex)
         {
-            TabService.SetTabDirty(currentTabId, false);
+            Snackbar.Add(ex.Message, Severity.Error);
         }
-
-        RefreshWorkflow();
-        Snackbar.Add($"저장 완료: {docNo}", Severity.Success);
     }
 
     private async Task ConfirmAsync()

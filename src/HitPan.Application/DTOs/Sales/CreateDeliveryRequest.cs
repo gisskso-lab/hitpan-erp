@@ -22,10 +22,12 @@ public class CreateDeliveryItemRequest
 {
     public string? OrderItemId { get; set; }
 
-    [Required]
+    /// <summary>비어 있으면 <see cref="ItemName"/>으로 품목 마스터에서 첫 매칭.</summary>
     public string ItemId { get; set; } = string.Empty;
 
-    [Required]
+    public string? ItemName { get; set; }
+
+    /// <summary>비어 있으면 테넌트 기본 창고(첫 번째 활성 창고).</summary>
     public string WarehouseId { get; set; } = string.Empty;
 
     public decimal Qty { get; set; }
