@@ -1,3 +1,5 @@
+using System.Data;
+using Dapper;
 using HitPan.Application.DTOs.Sales;
 using HitPan.Application.Interfaces;
 using HitPan.Domain.Entities;
@@ -9,11 +11,19 @@ public class SalesService : ISalesService
 {
     private readonly IUnitOfWork _unitOfWork;
     private readonly ICurrentTenant _currentTenant;
+    private readonly IDbConnection _db;
+    private readonly IPartnerService _partnerService;
 
-    public SalesService(IUnitOfWork unitOfWork, ICurrentTenant currentTenant)
+    public SalesService(
+        IUnitOfWork unitOfWork,
+        ICurrentTenant currentTenant,
+        IDbConnection db,
+        IPartnerService partnerService)
     {
         _unitOfWork = unitOfWork;
         _currentTenant = currentTenant;
+        _db = db;
+        _partnerService = partnerService;
     }
 
     public async Task<string> CreateOrderAsync(CreateSalesOrderRequest request, CancellationToken ct = default)
@@ -224,5 +234,290 @@ public class SalesService : ISalesService
         delivery.Status = SalesDeliveryStatus.Confirmed;
         deliveryRepo.Update(delivery);
         await _unitOfWork.SaveChangesAsync(ct);
+    }
+
+    public async Task<DeliveryDetailDto?> GetDeliveryAsync(string deliveryId, string tenantId, CancellationToken ct = default)
+    {
+        const string sql = """
+                           SELECT
+                               d.delivery_id AS DeliveryId,
+                               d.delivery_no AS DeliveryNo,
+                               d.delivery_date AS OrderDate,
+                               d.partner_id AS PartnerId,
+                               p.partner_name AS PartnerName,
+                               (d.total_amount + d.vat_amount) AS TotalAmount,
+                               d.vat_amount AS VatAmount,
+                               d.total_amount AS SupplyAmount,
+                               d.status AS Status,
+                               d.memo AS Memo,
+                               CAST(0 AS DECIMAL(15,2)) AS CashAmount,
+                               CAST(0 AS DECIMAL(15,2)) AS CardAmount,
+                               CAST(0 AS DECIMAL(15,2)) AS DiscountAmount,
+                               d.employee_id AS EmployeeId,
+                               e.emp_name AS EmployeeName
+                           FROM sales_deliveries d
+                           LEFT JOIN partners p
+                               ON p.partner_id = d.partner_id
+                                  AND p.tenant_id = d.tenant_id
+                           LEFT JOIN employees e
+                               ON e.employee_id = d.employee_id
+                                  AND e.tenant_id = d.tenant_id
+                           WHERE d.delivery_id = @DeliveryId
+                             AND d.tenant_id = @TenantId
+                           """;
+
+        var delivery = await _db.QueryFirstOrDefaultAsync<DeliveryDetailDto>(
+            new CommandDefinition(sql, new { DeliveryId = deliveryId, TenantId = tenantId }, cancellationToken: ct));
+
+        if (delivery is null)
+        {
+            return null;
+        }
+
+        const string itemSql = """
+                               SELECT
+                                   di.item_id AS ItemId,
+                                   it.item_name AS ItemName,
+                                   CAST(NULL AS CHAR(100)) AS Spec,
+                                   it.unit AS Unit,
+                                   di.qty AS Qty,
+                                   di.unit_price AS UnitPrice,
+                                   di.supply_amount AS Amount,
+                                   di.vat_amount AS VatAmount,
+                                   CAST(NULL AS CHAR(500)) AS Memo,
+                                   0 AS RowNo
+                               FROM sales_delivery_items di
+                               LEFT JOIN items it
+                                   ON it.item_id = di.item_id
+                                      AND it.tenant_id = di.tenant_id
+                               WHERE di.delivery_id = @DeliveryId
+                                 AND di.tenant_id = @TenantId
+                               ORDER BY di.delivery_item_id
+                               """;
+
+        var items = (await _db.QueryAsync<DeliveryItemDto>(
+                new CommandDefinition(itemSql, new { DeliveryId = deliveryId, TenantId = tenantId }, cancellationToken: ct)))
+            .ToList();
+        for (var i = 0; i < items.Count; i++)
+        {
+            items[i].RowNo = i + 1;
+        }
+
+        delivery.Items = items;
+
+        const string balanceSql = """
+                                  SELECT COALESCE(receivable_balance, 0)
+                                  FROM v_partner_balance
+                                  WHERE partner_id = @PartnerId
+                                    AND tenant_id = @TenantId
+                                  """;
+
+        delivery.PrevReceivable = await _db.QueryFirstOrDefaultAsync<decimal>(
+            new CommandDefinition(balanceSql, new { delivery.PartnerId, TenantId = tenantId }, cancellationToken: ct));
+
+        const string todaySql = """
+                                SELECT COALESCE(SUM(d.total_amount + d.vat_amount), 0)
+                                FROM sales_deliveries d
+                                WHERE d.tenant_id = @TenantId
+                                  AND d.partner_id = @PartnerId
+                                  AND d.delivery_date = CURDATE()
+                                  AND d.status <> 'cancelled'
+                                """;
+
+        delivery.TodaySales = await _db.QueryFirstOrDefaultAsync<decimal>(
+            new CommandDefinition(todaySql, new { TenantId = tenantId, delivery.PartnerId }, cancellationToken: ct));
+
+        delivery.TodayReceipt = 0m;
+        return delivery;
+    }
+
+    public async Task<List<DeliveryListDto>> GetDeliveriesAsync(
+        string tenantId,
+        DateTime? from = null,
+        DateTime? to = null,
+        string? partnerName = null,
+        string? status = null,
+        CancellationToken ct = default)
+    {
+        const string sql = """
+                           SELECT
+                               d.delivery_id AS DeliveryId,
+                               d.delivery_no AS DeliveryNo,
+                               d.delivery_date AS OrderDate,
+                               d.partner_id AS PartnerId,
+                               p.partner_name AS PartnerName,
+                               (d.total_amount + d.vat_amount) AS TotalAmount,
+                               d.vat_amount AS VatAmount,
+                               d.total_amount AS SupplyAmount,
+                               d.status AS Status,
+                               d.memo AS Memo
+                           FROM sales_deliveries d
+                           LEFT JOIN partners p
+                               ON p.partner_id = d.partner_id
+                                  AND p.tenant_id = d.tenant_id
+                           WHERE d.tenant_id = @TenantId
+                             AND (@From IS NULL OR d.delivery_date >= @From)
+                             AND (@To IS NULL OR d.delivery_date <= @To)
+                             AND (@PartnerName IS NULL OR p.partner_name LIKE CONCAT('%', @PartnerName, '%'))
+                             AND (@Status IS NULL OR d.status = @Status)
+                           ORDER BY d.delivery_date DESC,
+                                    d.delivery_no DESC
+                           LIMIT 200
+                           """;
+
+        var rows = await _db.QueryAsync<DeliveryListDto>(
+            new CommandDefinition(
+                sql,
+                new
+                {
+                    TenantId = tenantId,
+                    From = from?.Date,
+                    To = to?.Date,
+                    PartnerName = partnerName,
+                    Status = status
+                },
+                cancellationToken: ct));
+
+        return rows.ToList();
+    }
+
+    public async Task UpdateDeliveryAsync(
+        string deliveryId,
+        UpdateDeliveryDto dto,
+        string tenantId,
+        string userId,
+        CancellationToken ct = default)
+    {
+        const string assertSql = """
+                                 SELECT status
+                                 FROM sales_deliveries
+                                 WHERE delivery_id = @DeliveryId
+                                   AND tenant_id = @TenantId
+                                 """;
+
+        var status = await _db.QueryFirstOrDefaultAsync<string>(
+            new CommandDefinition(assertSql, new { DeliveryId = deliveryId, TenantId = tenantId }, cancellationToken: ct));
+
+        if (status is null)
+        {
+            throw new InvalidOperationException("거래명세서를 찾을 수 없습니다.");
+        }
+
+        if (!string.Equals(status, "draft", StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidOperationException("draft 상태 전표만 수정할 수 있습니다.");
+        }
+
+        if (dto.Items.Count == 0)
+        {
+            throw new InvalidOperationException("품목이 한 줄 이상 필요합니다.");
+        }
+
+        const string whSql = """
+                             SELECT warehouse_id
+                             FROM warehouses
+                             WHERE tenant_id = @TenantId
+                               AND is_active = 1
+                             ORDER BY warehouse_id
+                             LIMIT 1
+                             """;
+
+        var defaultWarehouseId = await _db.QueryFirstOrDefaultAsync<string>(
+            new CommandDefinition(whSql, new { TenantId = tenantId }, cancellationToken: ct));
+
+        if (string.IsNullOrEmpty(defaultWarehouseId))
+        {
+            throw new InvalidOperationException("등록된 창고가 없습니다.");
+        }
+
+        var supplyAmount = dto.Items.Sum(x => x.Amount);
+        var vatAmount = dto.Items.Sum(x => x.VatAmount);
+
+        const string updateSql = """
+                                 UPDATE sales_deliveries SET
+                                     delivery_date = @OrderDate,
+                                     partner_id = @PartnerId,
+                                     memo = @Memo,
+                                     total_amount = @SupplyAmount,
+                                     vat_amount = @VatAmount,
+                                     updated_at = NOW(6),
+                                     updated_by = @UserId
+                                 WHERE delivery_id = @DeliveryId
+                                   AND tenant_id = @TenantId
+                                   AND status = 'draft'
+                                 """;
+
+        await _db.ExecuteAsync(
+            new CommandDefinition(
+                updateSql,
+                new
+                {
+                    DeliveryId = deliveryId,
+                    TenantId = tenantId,
+                    OrderDate = dto.OrderDate.Date,
+                    PartnerId = dto.PartnerId,
+                    Memo = dto.Memo,
+                    SupplyAmount = supplyAmount,
+                    VatAmount = vatAmount,
+                    UserId = string.IsNullOrEmpty(userId) ? null : userId
+                },
+                cancellationToken: ct));
+
+        await _db.ExecuteAsync(
+            new CommandDefinition(
+                "DELETE FROM sales_delivery_items WHERE delivery_id = @DeliveryId AND tenant_id = @TenantId",
+                new { DeliveryId = deliveryId, TenantId = tenantId },
+                cancellationToken: ct));
+
+        var row = 0;
+        foreach (var item in dto.Items)
+        {
+            row++;
+            var itemId = string.IsNullOrWhiteSpace(item.ItemId) ? Guid.NewGuid().ToString() : item.ItemId;
+            await _db.ExecuteAsync(
+                new CommandDefinition(
+                    """
+                    INSERT INTO sales_delivery_items
+                        (delivery_item_id, delivery_id, tenant_id, order_item_id, item_id, warehouse_id,
+                         qty, unit_price, supply_amount, vat_amount)
+                    VALUES
+                        (@DeliveryItemId, @DeliveryId, @TenantId, NULL, @ItemId, @WarehouseId,
+                         @Qty, @UnitPrice, @SupplyAmount, @VatAmount)
+                    """,
+                    new
+                    {
+                        DeliveryItemId = Guid.NewGuid().ToString(),
+                        DeliveryId = deliveryId,
+                        TenantId = tenantId,
+                        item.ItemId,
+                        WarehouseId = defaultWarehouseId,
+                        item.Qty,
+                        item.UnitPrice,
+                        SupplyAmount = item.Amount,
+                        item.VatAmount
+                    },
+                    cancellationToken: ct));
+        }
+    }
+
+    public async Task DeleteDeliveryAsync(string deliveryId, string tenantId, CancellationToken ct = default)
+    {
+        await _db.ExecuteAsync(
+            new CommandDefinition(
+                """
+                UPDATE sales_deliveries
+                SET status = 'cancelled',
+                    updated_at = NOW(6)
+                WHERE delivery_id = @DeliveryId
+                  AND tenant_id = @TenantId
+                  AND status = 'draft'
+                """,
+                new { DeliveryId = deliveryId, TenantId = tenantId },
+                cancellationToken: ct));
+    }
+
+    public Task<List<PartnerSearchDto>> SearchPartnersAsync(string tenantId, string keyword, CancellationToken ct = default)
+    {
+        return _partnerService.SearchPartnersAsync(tenantId, keyword, ct);
     }
 }

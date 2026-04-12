@@ -17,6 +17,20 @@ public class PartnerController : ControllerBase
         _partnerService = partnerService;
     }
 
+    [HttpGet("search")]
+    [Authorize(Policy = "SalesOnly")]
+    public async Task<IActionResult> SearchPartners([FromQuery] string q, CancellationToken ct)
+    {
+        var tenantId = HttpContext.Items["TenantId"]?.ToString();
+        if (string.IsNullOrEmpty(tenantId))
+        {
+            return Forbid();
+        }
+
+        var result = await _partnerService.SearchPartnersAsync(tenantId, q, ct);
+        return Ok(result);
+    }
+
     [HttpGet("{id}/balance")]
     [Authorize(Policy = "SalesOnly")]
     public async Task<IActionResult> GetBalance(string id, CancellationToken ct)

@@ -1,4 +1,5 @@
 using HitPan.Application.DTOs.Partner;
+using HitPan.Application.DTOs.Sales;
 using HitPan.Application.Interfaces;
 using System.Data;
 using Dapper;
@@ -126,5 +127,36 @@ public class PartnerService : IPartnerService
     public Task<bool> IsAssignedPartnerAsync(string? employeeId, string partnerId, string tenantId, CancellationToken ct = default)
     {
         return Task.FromResult(true);
+    }
+
+    public async Task<List<PartnerSearchDto>> SearchPartnersAsync(string tenantId, string keyword, CancellationToken ct = default)
+    {
+        keyword = keyword?.Trim() ?? string.Empty;
+        if (keyword.Length == 0)
+        {
+            return new List<PartnerSearchDto>();
+        }
+
+        var sql = """
+                  SELECT partner_id AS PartnerId,
+                         partner_name AS PartnerName,
+                         biz_no AS BizNo,
+                         tel AS Tel,
+                         address AS Address
+                  FROM partners
+                  WHERE tenant_id = @TenantId
+                    AND (partner_name LIKE CONCAT('%', @Keyword, '%')
+                      OR biz_no LIKE CONCAT('%', @Keyword, '%'))
+                    AND is_active = 1
+                  ORDER BY partner_name
+                  LIMIT 20
+                  """;
+
+        var rows = await _db.QueryAsync<PartnerSearchDto>(new CommandDefinition(
+            sql,
+            new { TenantId = tenantId, Keyword = keyword },
+            cancellationToken: ct));
+
+        return rows.ToList();
     }
 }

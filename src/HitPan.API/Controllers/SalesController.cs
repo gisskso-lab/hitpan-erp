@@ -46,4 +46,69 @@ public class SalesController : ControllerBase
         await _salesService.ConfirmDeliveryAsync(id, request, ct);
         return Ok(new { id, status = "confirmed" });
     }
+
+    [HttpGet("deliveries")]
+    public async Task<IActionResult> GetDeliveries(
+        [FromQuery] DateTime? from,
+        [FromQuery] DateTime? to,
+        [FromQuery] string? partner,
+        [FromQuery] string? status,
+        CancellationToken ct)
+    {
+        var tenantId = HttpContext.Items["TenantId"]?.ToString();
+        if (string.IsNullOrEmpty(tenantId))
+        {
+            return Forbid();
+        }
+
+        var result = await _salesService.GetDeliveriesAsync(tenantId, from, to, partner, status, ct);
+        return Ok(result);
+    }
+
+    [HttpGet("deliveries/{id}")]
+    public async Task<IActionResult> GetDelivery(string id, CancellationToken ct)
+    {
+        var tenantId = HttpContext.Items["TenantId"]?.ToString();
+        if (string.IsNullOrEmpty(tenantId))
+        {
+            return Forbid();
+        }
+
+        var result = await _salesService.GetDeliveryAsync(id, tenantId, ct);
+        if (result is null)
+        {
+            return NotFound();
+        }
+
+        return Ok(result);
+    }
+
+    [HttpPut("deliveries/{id}")]
+    [Authorize(Policy = "SalesManager")]
+    public async Task<IActionResult> UpdateDelivery(string id, [FromBody] UpdateDeliveryDto dto, CancellationToken ct)
+    {
+        var tenantId = HttpContext.Items["TenantId"]?.ToString();
+        var userId = User.FindFirst("employee_id")?.Value;
+        if (string.IsNullOrEmpty(tenantId))
+        {
+            return Forbid();
+        }
+
+        await _salesService.UpdateDeliveryAsync(id, dto, tenantId, userId ?? string.Empty, ct);
+        return Ok();
+    }
+
+    [HttpDelete("deliveries/{id}")]
+    [Authorize(Policy = "SalesManager")]
+    public async Task<IActionResult> DeleteDelivery(string id, CancellationToken ct)
+    {
+        var tenantId = HttpContext.Items["TenantId"]?.ToString();
+        if (string.IsNullOrEmpty(tenantId))
+        {
+            return Forbid();
+        }
+
+        await _salesService.DeleteDeliveryAsync(id, tenantId, ct);
+        return Ok();
+    }
 }
