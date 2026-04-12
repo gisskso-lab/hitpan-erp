@@ -1,36 +1,26 @@
 ﻿@inherits LayoutComponentBase
 @attribute [Authorize]
-@using HitPan.Web.Helpers
 @using HitPan.Web.Components
+@using Microsoft.AspNetCore.Components.Authorization
 
-<AuthorizeView>
-    <Authorized Context="context">
-        @{
-            var accountType = AccountTypeHelper.GetAccountType(context.User);
-        }
-        @if (accountType == AccountTypeHelper.PlatformAdmin)
-        {
-            <PlatformLayout>@Body</PlatformLayout>
-        }
-        else if (accountType == AccountTypeHelper.ResellerAdmin)
-        {
-            <ResellerLayout>@Body</ResellerLayout>
-        }
-        else
-        {
+<CascadingAuthenticationState>
+    <AuthorizeView>
+        <Authorized>
             <div class="hitpan-shell">
-                <Sidebar />
-                <div class="hitpan-main-column">
+                <aside class="hitpan-sidebar-aside" aria-label="메인 메뉴">
+                    <Sidebar />
+                </aside>
+                <div class="hitpan-main">
                     <TopHeader />
-                    <main class="hitpan-body mud-px-4 mud-py-4">
+                    <main class="hitpan-content mud-px-4 mud-py-4">
                         @Body
                     </main>
+                    <MobileBottomNav />
                 </div>
-                <MobileBottomNav />
             </div>
-        }
-    </Authorized>
-    <NotAuthorized>
-        <RedirectToLogin />
-    </NotAuthorized>
-</AuthorizeView>
+        </Authorized>
+        <NotAuthorized>
+            <RedirectToLogin />
+        </NotAuthorized>
+    </AuthorizeView>
+</CascadingAuthenticationState>

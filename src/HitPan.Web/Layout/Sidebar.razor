@@ -1,5 +1,6 @@
 @implements IDisposable
 @using System.Security.Claims
+@using HitPan.Web.Helpers
 @using HitPan.Web.Models
 @using HitPan.Web.Services
 @inject NavigationManager Navigation
@@ -85,10 +86,28 @@
 
             if (AllowedRoles is null || AllowedRoles.Length == 0)
             {
-                return true;
+                var at = AccountTypeHelper.GetAccountType(user);
+                return at == AccountTypeHelper.TenantAdmin
+                    || at == AccountTypeHelper.TenantUser
+                    || string.Equals(at, "TenantAdmin", StringComparison.OrdinalIgnoreCase);
             }
 
-            return AllowedRoles.Any(r => HitPanRoleHelper.IsInHitPanRole(user, r));
+            return AllowedRoles.Any(r => MatchesRequirement(user, r));
+        }
+
+        private static bool MatchesRequirement(ClaimsPrincipal user, string requirement)
+        {
+            if (string.Equals(requirement, AccountTypeHelper.PlatformAdmin, StringComparison.Ordinal))
+            {
+                return AccountTypeHelper.IsPlatformAdmin(user);
+            }
+
+            if (string.Equals(requirement, AccountTypeHelper.ResellerAdmin, StringComparison.Ordinal))
+            {
+                return AccountTypeHelper.IsResellerAdmin(user);
+            }
+
+            return HitPanRoleHelper.IsInHitPanRole(user, requirement);
         }
     }
 
@@ -96,17 +115,47 @@
     {
         public static readonly SidebarMenuEntry[] All =
         {
-            new("설정", Icons.Material.Filled.Settings, "/settings", new[] { "TenantAdmin" }, null),
-            new("견적", Icons.Material.Filled.RequestQuote, "/quotes", new[] { "TenantAdmin", "Manager", "User" },
+            new("대시보드", Icons.Material.Filled.Dashboard, "/platform/dashboard",
+                new[] { AccountTypeHelper.PlatformAdmin }, null),
+            new("대리점 관리", Icons.Material.Filled.Store, "/platform/resellers",
+                new[] { AccountTypeHelper.PlatformAdmin }, null),
+            new("고객사 관리", Icons.Material.Filled.Business, "/platform/tenants",
+                new[] { AccountTypeHelper.PlatformAdmin }, null),
+            new("수수료 정책", Icons.Material.Filled.Percent, "/platform/commission",
+                new[] { AccountTypeHelper.PlatformAdmin }, null),
+            new("프로모션", Icons.Material.Filled.Campaign, "/platform/promotions",
+                new[] { AccountTypeHelper.PlatformAdmin }, null),
+            new("매출 현황", Icons.Material.Filled.BarChart, "/platform/revenue",
+                new[] { AccountTypeHelper.PlatformAdmin }, null),
+
+            new("대시보드", Icons.Material.Filled.Dashboard, "/reseller/dashboard",
+                new[] { AccountTypeHelper.ResellerAdmin }, null),
+            new("내 고객사", Icons.Material.Filled.Business, "/reseller/customers",
+                new[] { AccountTypeHelper.ResellerAdmin }, null),
+            new("수수료 현황", Icons.Material.Filled.AttachMoney, "/reseller/revenue",
+                new[] { AccountTypeHelper.ResellerAdmin }, null),
+            new("정산 내역", Icons.Material.Filled.AccountBalance, "/reseller/payout",
+                new[] { AccountTypeHelper.ResellerAdmin }, null),
+
+            new("설정", Icons.Material.Filled.Settings, "/settings",
+                new[] { "TenantAdmin", AccountTypeHelper.PlatformAdmin }, null),
+            new("견적", Icons.Material.Filled.RequestQuote, "/quotes",
+                new[] { "TenantAdmin", "Manager", "User", AccountTypeHelper.PlatformAdmin },
                 WorkDocumentKind.SalesOrder),
-            new("매입", Icons.Material.Filled.LocalShipping, "/purchase", new[] { "TenantAdmin", "Manager" },
+            new("매입", Icons.Material.Filled.LocalShipping, "/purchase",
+                new[] { "TenantAdmin", "Manager", AccountTypeHelper.PlatformAdmin },
                 WorkDocumentKind.PurchaseReceipt),
-            new("판매", Icons.Material.Filled.PointOfSale, "/sales", new[] { "TenantAdmin", "Manager", "User" },
+            new("판매", Icons.Material.Filled.PointOfSale, "/sales",
+                new[] { "TenantAdmin", "Manager", "User", AccountTypeHelper.PlatformAdmin },
                 WorkDocumentKind.SalesDelivery),
-            new("엑셀 역수입", Icons.Material.Filled.FileUpload, "/sales/import", new[] { "TenantAdmin", "Manager", "User" }, null),
-            new("업체특별단가", Icons.Material.Filled.PriceChange, "/partners/special-prices", new[] { "TenantAdmin", "Manager", "User" }, null),
-            new("재고", Icons.Material.Filled.Inventory, "/stock", null, null),
-            new("회계", Icons.Material.Filled.AccountBalance, "/accounting", new[] { "TenantAdmin" }, null)
+            new("엑셀 역수입", Icons.Material.Filled.FileUpload, "/sales/import",
+                new[] { "TenantAdmin", "Manager", "User", AccountTypeHelper.PlatformAdmin }, null),
+            new("업체특별단가", Icons.Material.Filled.PriceChange, "/partners/special-prices",
+                new[] { "TenantAdmin", "Manager", "User", AccountTypeHelper.PlatformAdmin }, null),
+            new("재고", Icons.Material.Filled.Inventory, "/stock",
+                new[] { "TenantAdmin", "Manager", "User", AccountTypeHelper.PlatformAdmin }, null),
+            new("회계", Icons.Material.Filled.AccountBalance, "/accounting",
+                new[] { "TenantAdmin", AccountTypeHelper.PlatformAdmin }, null)
         };
     }
 }

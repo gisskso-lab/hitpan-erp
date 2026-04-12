@@ -1,49 +1,13 @@
 @inherits LayoutComponentBase
-@using HitPan.Web.Services
-@inject NavigationManager Nav
-@inject IAuthService AuthService
 
-<MudLayout>
-    <MudAppBar Elevation="1" Style="background:#059669">
-        <MudText Typo="Typo.h6" Style="color:white;font-size:15px">
-            히트판 대리점 포털
-        </MudText>
-        <MudSpacer />
-        <MudText Style="color:#D1FAE5;font-size:12px">
-            reseller_admin
-        </MudText>
-        <MudIconButton Icon="@Icons.Material.Filled.Logout"
-                       Color="Color.Inherit"
-                       OnClick="Logout" />
-    </MudAppBar>
-    <MudDrawer Open="true" Elevation="1" Variant="DrawerVariant.Persistent">
-        <MudNavMenu>
-            <MudText Typo="Typo.caption" Class="px-4 py-2" Style="color:#6B7280">대리점 포털</MudText>
-            <MudNavLink Href="/reseller/dashboard" Icon="@Icons.Material.Filled.Dashboard">
-                대시보드
-            </MudNavLink>
-            <MudNavLink Href="/reseller/customers" Icon="@Icons.Material.Filled.Business">
-                내 고객사
-            </MudNavLink>
-            <MudNavLink Href="/reseller/revenue" Icon="@Icons.Material.Filled.AttachMoney">
-                수수료 현황
-            </MudNavLink>
-            <MudNavLink Href="/reseller/payout" Icon="@Icons.Material.Filled.AccountBalance">
-                정산 내역
-            </MudNavLink>
-        </MudNavMenu>
-    </MudDrawer>
-    <MudMainContent>
-        <MudContainer MaxWidth="MaxWidth.ExtraLarge" Class="pa-4">
+<div class="hitpan-shell">
+    <aside class="hitpan-sidebar-aside" aria-label="메인 메뉴">
+        <Sidebar />
+    </aside>
+    <div class="hitpan-main">
+        <TopHeader />
+        <main class="hitpan-content mud-px-4 mud-py-4">
             @Body
-        </MudContainer>
-    </MudMainContent>
-</MudLayout>
-
-@code {
-    private async Task Logout()
-    {
-        await AuthService.LogoutAsync();
-        Nav.NavigateTo("/login");
-    }
-}
+        </main>
+    </div>
+</div>

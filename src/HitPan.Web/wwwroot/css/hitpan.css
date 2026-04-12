@@ -38,7 +38,13 @@ html, body {
     background: var(--mud-palette-background);
 }
 
-.hitpan-main-column {
+.hitpan-sidebar-aside {
+    flex-shrink: 0;
+    display: flex;
+}
+
+.hitpan-main-column,
+.hitpan-main {
     flex: 1;
     display: flex;
     flex-direction: column;
@@ -55,7 +61,8 @@ html, body {
     background: var(--mud-palette-surface);
 }
 
-.hitpan-body {
+.hitpan-body,
+.hitpan-content {
     flex: 1;
     overflow: auto;
     min-height: 0;
@@ -311,11 +318,13 @@ html, body {
         display: none !important;
     }
 
-    .hitpan-main-column {
+    .hitpan-main-column,
+    .hitpan-main {
         padding-bottom: calc(60px + env(safe-area-inset-bottom, 0px));
     }
 
-    main.hitpan-body {
+    main.hitpan-body,
+    main.hitpan-content {
         padding-left: 1rem !important;
         padding-right: 1rem !important;
     }

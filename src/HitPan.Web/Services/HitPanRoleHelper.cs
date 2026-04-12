@@ -11,6 +11,12 @@ public static class HitPanRoleHelper
             return true;
         }
 
+        // Login JWT maps legacy TenantAdmin → system_admin (AuthService.MapLegacyRole).
+        if (role == "TenantAdmin" && user.IsInRole("system_admin"))
+        {
+            return true;
+        }
+
         var alternate = role switch
         {
             "TenantAdmin" => "tenant_admin",
