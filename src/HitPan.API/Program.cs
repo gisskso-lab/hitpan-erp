@@ -13,6 +13,7 @@ Encoding.RegisterProvider(CodePagesEncodingProvider.Instance);
 QuestPDF.Settings.License = LicenseType.Community;
 
 var builder = WebApplication.CreateBuilder(args);
+var isDevelopment = builder.Environment.IsDevelopment();
 
 // Add services to the container.
 
@@ -67,9 +68,21 @@ builder.Services.AddSwaggerWithJwt();
 builder.Services.AddCors(options =>
 {
     options.AddPolicy("BlazorWasmDev", policy =>
-        policy.WithOrigins("http://localhost:5234", "https://localhost:7100")
-            .AllowAnyHeader()
-            .AllowAnyMethod());
+    {
+        if (isDevelopment)
+        {
+            // LAN에서 PC2 브라우저 등 임의 Origin → API 호출 허용(Development 전용)
+            policy.SetIsOriginAllowed(_ => true)
+                .AllowAnyHeader()
+                .AllowAnyMethod();
+        }
+        else
+        {
+            policy.WithOrigins("http://localhost:5234", "https://localhost:7100")
+                .AllowAnyHeader()
+                .AllowAnyMethod();
+        }
+    });
 });
 
 var app = builder.Build();
@@ -88,7 +101,11 @@ if (app.Environment.IsDevelopment())
     app.UseSwaggerUI();
 }
 
-app.UseHttpsRedirection();
+// Development·LAN에서는 http://IP:5257 만 쓰는 경우가 많아 리다이렉트 생략
+if (!isDevelopment)
+{
+    app.UseHttpsRedirection();
+}
 
 app.UseCors("BlazorWasmDev");
 

@@ -9,6 +9,8 @@ public enum DeliveryGridDensity
 
 public sealed class DeliveryLineModel
 {
+    public string ItemId { get; set; } = string.Empty;
+
     public int No { get; set; }
     public int RowNo
     {
@@ -61,6 +63,13 @@ public sealed class DeliveryLineModel
 public sealed class DeliveryDraftModel
 {
     public string? Id { get; set; }
+
+    /// <summary>거래처 API 식별자 (자동완성 선택 시 설정).</summary>
+    public string? PartnerId { get; set; }
+
+    /// <summary>비고.</summary>
+    public string? Memo { get; set; }
+
     public string DocumentType { get; set; } = "거래명세서";
     public DateTime SalesDate { get; set; }
     public int DailySequence { get; set; }
@@ -107,7 +116,75 @@ public sealed class SalesListItem
 
     // UI only
     public bool IsChecked { get; set; }
-    public bool IsProcessed => Status is "invoiced" or "cancelled";
+    public bool IsProcessed =>
+        Status is "confirmed" or "invoiced" or "cancelled";
+}
+
+public class DeliveryListDto
+{
+    public string DeliveryId { get; set; } = "";
+    public string DeliveryNo { get; set; } = "";
+    public DateTime OrderDate { get; set; }
+    public string PartnerId { get; set; } = "";
+    public string PartnerName { get; set; } = "";
+    public decimal TotalAmount { get; set; }
+    public decimal VatAmount { get; set; }
+    public decimal SupplyAmount { get; set; }
+    public string Status { get; set; } = "";
+    public string? Memo { get; set; }
+
+    public bool IsChecked { get; set; }
+    public bool IsProcessed =>
+        Status == "confirmed" ||
+        Status == "invoiced" ||
+        Status == "cancelled";
+}
+
+public sealed class DeliveryDetailDto : DeliveryListDto
+{
+    public decimal CashAmount { get; set; }
+    public decimal CardAmount { get; set; }
+    public decimal DiscountAmount { get; set; }
+    public string? EmployeeId { get; set; }
+    public string? EmployeeName { get; set; }
+    public List<DeliveryItemDto> Items { get; set; } = new();
+    public decimal PrevReceivable { get; set; }
+    public decimal TodaySales { get; set; }
+    public decimal TodayReceipt { get; set; }
+}
+
+public sealed class DeliveryItemDto
+{
+    public string ItemId { get; set; } = "";
+    public string ItemName { get; set; } = "";
+    public string? Spec { get; set; }
+    public string? Unit { get; set; }
+    public decimal Qty { get; set; }
+    public decimal UnitPrice { get; set; }
+    public decimal Amount { get; set; }
+    public decimal VatAmount { get; set; }
+    public string? Memo { get; set; }
+    public int RowNo { get; set; }
+}
+
+public sealed class UpdateDeliveryRequest
+{
+    public DateTime OrderDate { get; set; }
+    public string PartnerId { get; set; } = "";
+    public decimal CashAmount { get; set; }
+    public decimal CardAmount { get; set; }
+    public decimal DiscountAmount { get; set; }
+    public string? Memo { get; set; }
+    public List<DeliveryItemDto> Items { get; set; } = new();
+}
+
+public sealed class PartnerSearchResult
+{
+    public string PartnerId { get; set; } = "";
+    public string PartnerName { get; set; } = "";
+    public string? BizNo { get; set; }
+    public string? Tel { get; set; }
+    public string? Address { get; set; }
 }
 
 public sealed class DeliveryWorkflowStepModel

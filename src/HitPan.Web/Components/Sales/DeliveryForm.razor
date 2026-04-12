@@ -1,4 +1,6 @@
 @using HitPan.Web.Models
+@using HitPan.Web.Services
+@inject DeliveryService DeliveryService
 
 <div class="delivery-form">
     <MudGrid Spacing="2" Class="pa-2">
@@ -41,6 +43,7 @@
 @code {
     private MudAutocomplete<string>? _companyRef;
     private bool _focused;
+    private Dictionary<string, string> _partnerMap = new();
 
     [Parameter, EditorRequired] public DeliveryDraftModel Draft { get; set; } = default!;
     [Parameter] public EventCallback OnChanged { get; set; }
@@ -71,13 +74,25 @@
     private async Task OnSalesCompanyChanged(string value)
     {
         Draft.SalesCompany = value;
+        if (_partnerMap.TryGetValue(value, out var id))
+            Draft.PartnerId = id;
+        else if (string.IsNullOrWhiteSpace(value))
+            Draft.PartnerId = null;
+
         await OnChanged.InvokeAsync();
     }
 
-    private Task<IEnumerable<string>> SearchPartners(string value, CancellationToken cancellationToken)
+    private async Task<IEnumerable<string>> SearchPartners(string value, CancellationToken cancellationToken)
     {
-        IEnumerable<string> items = Array.Empty<string>();
-        return Task.FromResult(items);
+        if (string.IsNullOrWhiteSpace(value))
+            return Array.Empty<string>();
+
+        var results = await DeliveryService.SearchPartnersAsync(value, cancellationToken);
+        _partnerMap = results
+            .GroupBy(x => x.PartnerName)
+            .ToDictionary(g => g.Key, g => g.First().PartnerId);
+
+        return results.Select(x => x.PartnerName).Distinct();
     }
 
     private async Task OpenPartnerList()

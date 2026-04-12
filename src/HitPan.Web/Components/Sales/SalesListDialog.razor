@@ -145,7 +145,7 @@
 
     private async Task Search()
     {
-        Items = await DeliveryService.GetListAsync(ListType, FilterFrom, FilterTo, FilterPartner);
+        Items = await DeliveryService.GetSalesListItemsAsync(ListType, FilterFrom, FilterTo, FilterPartner);
         AllChecked = false;
     }
 

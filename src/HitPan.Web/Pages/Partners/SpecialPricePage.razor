@@ -183,12 +183,12 @@
         });
     }
 
-    private Color GetRatioColor(decimal ratio) => ratio switch
+    private Color GetRatioColor(decimal ratio)
     {
-        < 100 => Color.Success,
-        > 100 => Color.Error,
-        _ => Color.Default
-    };
+        if (ratio < 100m) return Color.Success;
+        if (ratio > 100m) return Color.Error;
+        return Color.Default;
+    }
 
     private string RowStyle(SpecialPriceItem item, int index)
         => "height:36px;font-size:13px;";
