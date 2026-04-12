@@ -1,3 +1,5 @@
+using System.Security.Claims;
+using HitPan.API.Security;
 using HitPan.Application.DTOs.Document;
 using HitPan.Application.Services;
 using Microsoft.AspNetCore.Authorization;
@@ -7,27 +9,36 @@ namespace HitPan.API.Controllers;
 
 [ApiController]
 [Route("api/documents")]
-[Authorize]
 public class DocumentController : ControllerBase
 {
     private readonly ExcelExportService _excelService;
     private readonly PdfExportService _pdfService;
     private readonly ExcelImportService _importService;
+    private readonly AccessTokenValidator _accessTokenValidator;
 
     public DocumentController(
         ExcelExportService excelService,
         PdfExportService pdfService,
-        ExcelImportService importService)
+        ExcelImportService importService,
+        AccessTokenValidator accessTokenValidator)
     {
         _excelService = excelService;
         _pdfService = pdfService;
         _importService = importService;
+        _accessTokenValidator = accessTokenValidator;
     }
 
     [HttpGet("{type}/{id}/excel")]
-    public IActionResult DownloadExcel(string type, string id)
+    [AllowAnonymous]
+    public IActionResult DownloadExcel(string type, string id, [FromQuery] string? token)
     {
-        var data = CreateStubDocument(id);
+        var principal = _accessTokenValidator.ValidateAccessToken(token);
+        if (principal is null)
+        {
+            return Unauthorized();
+        }
+
+        var data = CreateStubDocument(id, principal);
         byte[] bytes;
         string fileName;
 
@@ -52,9 +63,16 @@ public class DocumentController : ControllerBase
     }
 
     [HttpGet("{type}/{id}/pdf")]
-    public IActionResult DownloadPdf(string type, string id)
+    [AllowAnonymous]
+    public IActionResult DownloadPdf(string type, string id, [FromQuery] string? token)
     {
-        var data = CreateStubDocument(id);
+        var principal = _accessTokenValidator.ValidateAccessToken(token);
+        if (principal is null)
+        {
+            return Unauthorized();
+        }
+
+        var data = CreateStubDocument(id, principal);
         var title = GetTitleByType(type);
         var bytes = type == "delivery"
             ? _pdfService.GenerateDeliveryPdf(data)
@@ -66,6 +84,7 @@ public class DocumentController : ControllerBase
         return File(bytes, "application/pdf");
     }
 
+    [Authorize]
     [HttpPost("import/excel")]
     [RequestSizeLimit(20_000_000)]
     public IActionResult ImportExcel(IFormFile? file)
@@ -87,6 +106,7 @@ public class DocumentController : ControllerBase
         }
     }
 
+    [Authorize]
     [HttpPost("import/confirm")]
     public Task<IActionResult> ConfirmImport([FromBody] ImportPreviewDto preview)
     {
@@ -99,9 +119,11 @@ public class DocumentController : ControllerBase
             Ok(new { message = "저장 완료 (TODO: 실제 DB 연동)" }));
     }
 
-    private DocumentDto CreateStubDocument(string id)
+    private DocumentDto CreateStubDocument(string id, ClaimsPrincipal? principal = null)
     {
-        var tenantId = HttpContext.Items["TenantId"]?.ToString() ?? string.Empty;
+        var tenantId = principal?.FindFirst("tenant_id")?.Value
+            ?? HttpContext.Items["TenantId"]?.ToString()
+            ?? string.Empty;
         return new DocumentDto
         {
             Tenant = new TenantInfo

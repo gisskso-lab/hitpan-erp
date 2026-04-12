@@ -7,6 +7,7 @@ using HitPan.Infrastructure.Extensions;
 using HitPan.Infrastructure.Persistence;
 using HitPan.Infrastructure.Persistence.Seed;
 using HitPan.Infrastructure.Security;
+using HitPan.API.Security;
 using QuestPDF.Infrastructure;
 
 Encoding.RegisterProvider(CodePagesEncodingProvider.Instance);
@@ -35,6 +36,7 @@ builder.Services.AddScoped<ExcelExportService>();
 builder.Services.AddScoped<PdfExportService>();
 builder.Services.AddScoped<ExcelImportService>();
 builder.Services.AddScoped<IPartnerBalanceRepository, PartnerBalanceRepository>();
+builder.Services.AddSingleton<AccessTokenValidator>();
 builder.Services.AddJwtAuthentication();
 builder.Services.AddAuthorization(options =>
 {

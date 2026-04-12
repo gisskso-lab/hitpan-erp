@@ -25,6 +25,13 @@ public sealed class TenantMiddleware
             return;
         }
 
+        // Excel/PDF: opened in a new window with ?token=…; controller validates token and tenant.
+        if (IsDocumentDownload(path))
+        {
+            await _next(context);
+            return;
+        }
+
         if (context.User?.Identity?.IsAuthenticated != true)
         {
             context.Response.StatusCode = StatusCodes.Status401Unauthorized;
@@ -67,5 +74,17 @@ public sealed class TenantMiddleware
         currentTenant.Set(tenantId, userId ?? string.Empty, role ?? string.Empty);
 
         await _next(context);
+    }
+
+    private static bool IsDocumentDownload(PathString path)
+    {
+        var p = path.Value ?? string.Empty;
+        if (!p.StartsWith("/api/documents/", StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        return p.EndsWith("/excel", StringComparison.OrdinalIgnoreCase)
+            || p.EndsWith("/pdf", StringComparison.OrdinalIgnoreCase);
     }
 }

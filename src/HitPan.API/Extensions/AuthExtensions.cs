@@ -34,6 +34,19 @@ public static class AuthExtensions
                     ValidateLifetime = true,
                     ClockSkew = TimeSpan.Zero
                 };
+                options.Events = new JwtBearerEvents
+                {
+                    OnMessageReceived = ctx =>
+                    {
+                        var t = ctx.Request.Query["token"].FirstOrDefault();
+                        if (!string.IsNullOrEmpty(t))
+                        {
+                            ctx.Token = t;
+                        }
+
+                        return Task.CompletedTask;
+                    }
+                };
             });
 
         services.AddAuthorization();
