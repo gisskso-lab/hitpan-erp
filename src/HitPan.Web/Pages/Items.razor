@@ -1,0 +1,145 @@
+@page "/items"
+@namespace HitPan.Web.Pages.ItemMasterUi
+@attribute [Authorize]
+@inject ItemMasterService ItemsApi
+@inject NavigationManager Nav
+
+<PageTitle>상품 마스터</PageTitle>
+
+<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
+    <MudText Typo="Typo.h6">상품 마스터</MudText>
+    <MudButton Variant="Variant.Filled"
+               Color="Color.Primary"
+               OnClick="OpenCreate">
+        + 상품 등록
+    </MudButton>
+</div>
+
+<MudPaper Elevation="0" Class="pa-3 mb-4"
+          Style="border:0.5px solid var(--mud-palette-lines-default);border-radius:12px">
+    <div style="display:flex;gap:12px;flex-wrap:wrap;align-items:center">
+        <MudTextField @bind-Value="_search"
+                      Placeholder="상품명·코드 검색"
+                      Variant="Variant.Outlined"
+                      Margin="Margin.Dense"
+                      Style="min-width:200px"
+                      Adornment="Adornment.Start"
+                      AdornmentIcon="@Icons.Material.Filled.Search"
+                      OnKeyUp="OnSearchKeyUp" />
+        <MudSelect T="string"
+                   @bind-Value="_typeFilter"
+                   Variant="Variant.Outlined"
+                   Margin="Margin.Dense"
+                   Style="min-width:120px"
+                   Label="유형">
+            <MudSelectItem Value="@("")">전체</MudSelectItem>
+            <MudSelectItem Value="@("product")">상품</MudSelectItem>
+            <MudSelectItem Value="@("material")">자재</MudSelectItem>
+            <MudSelectItem Value="@("finished")">완제품</MudSelectItem>
+        </MudSelect>
+        <MudButton Variant="Variant.Outlined" OnClick="Search">검색</MudButton>
+    </div>
+</MudPaper>
+
+@if (_loading)
+{
+    <MudProgressLinear Indeterminate="true" Color="Color.Primary" />
+}
+else
+{
+    <MudPaper Elevation="0"
+              Style="border:0.5px solid var(--mud-palette-lines-default);border-radius:12px;overflow:hidden">
+        <MudTable Items="_items" Dense="true" Hover="true" Striped="true" T="ItemListModel">
+            <HeaderContent>
+                <MudTh>코드</MudTh>
+                <MudTh>상품명</MudTh>
+                <MudTh>그룹</MudTh>
+                <MudTh>규격</MudTh>
+                <MudTh>단위</MudTh>
+                <MudTh Style="text-align:right">판매단가</MudTh>
+                <MudTh Style="text-align:right">현재고</MudTh>
+                <MudTh>상태</MudTh>
+                <MudTh></MudTh>
+            </HeaderContent>
+            <RowTemplate>
+                <MudTd DataLabel="코드">@context.ItemCode</MudTd>
+                <MudTd DataLabel="상품명">
+                    <MudText Style="font-weight:500">@context.ItemName</MudText>
+                </MudTd>
+                <MudTd DataLabel="그룹">@context.ItemGroup</MudTd>
+                <MudTd DataLabel="규격">@context.Spec</MudTd>
+                <MudTd DataLabel="단위">@context.Unit</MudTd>
+                <MudTd DataLabel="판매단가" Style="text-align:right">@context.SalePrice.ToString("N0")</MudTd>
+                <MudTd DataLabel="현재고" Style="@($"text-align:right;color:{StockColor(context)}")">
+                    @context.CurrentStock.ToString("N1")
+                </MudTd>
+                <MudTd DataLabel="상태">
+                    <MudChip T="string"
+                             Size="Size.Small"
+                             Color="@(context.IsActive ? Color.Success : Color.Default)"
+                             Variant="Variant.Text">
+                        @(context.IsActive ? "정상" : "중지")
+                    </MudChip>
+                </MudTd>
+                <MudTd>
+                    <MudIconButton Icon="@Icons.Material.Filled.Edit"
+                                   Size="Size.Small"
+                                   OnClick="@(() => Nav.NavigateTo($"/items/{context.ItemId}"))" />
+                </MudTd>
+            </RowTemplate>
+            <NoRecordsContent>
+                <MudText Style="padding:24px;color:var(--mud-palette-text-secondary)">
+                    등록된 상품이 없습니다
+                </MudText>
+            </NoRecordsContent>
+        </MudTable>
+    </MudPaper>
+    <MudText Style="font-size:12px;color:var(--mud-palette-text-secondary);margin-top:8px">
+        총 @_items.Count 개
+    </MudText>
+}
+
+@code {
+    private List<ItemListModel> _items = new();
+    private bool _loading = true;
+    private string _search = "";
+    private string _typeFilter = "";
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadList();
+    }
+
+    private static string StockColor(ItemListModel x)
+        => x.SafetyStock > 0 && x.CurrentStock <= x.SafetyStock ? "#E24B4A" : "inherit";
+
+    private async Task LoadList()
+    {
+        _loading = true;
+        StateHasChanged();
+        var result = await ItemsApi.GetListAsync(
+            string.IsNullOrWhiteSpace(_search) ? null : _search,
+            null,
+            string.IsNullOrWhiteSpace(_typeFilter) ? null : _typeFilter).ConfigureAwait(false);
+        _items = result ?? new List<ItemListModel>();
+        _loading = false;
+    }
+
+    private async Task Search()
+    {
+        await LoadList();
+    }
+
+    private async Task OnSearchKeyUp(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter")
+        {
+            await Search();
+        }
+    }
+
+    private void OpenCreate()
+    {
+        Nav.NavigateTo("/items/new");
+    }
+}

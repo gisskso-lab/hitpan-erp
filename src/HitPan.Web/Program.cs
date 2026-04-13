@@ -40,6 +40,7 @@ builder.Services.AddScoped<WorkTabService>();
 builder.Services.AddScoped<DeliveryService>();
 builder.Services.AddScoped<SettingsService>();
 builder.Services.AddScoped<PartnerMasterService>();
+builder.Services.AddScoped<ItemMasterService>();
 builder.Services.AddScoped<DocumentService>();
 builder.Services.AddScoped<SpecialPriceService>();
 builder.Services.AddTransient<HitPanApiAuthHandler>();
