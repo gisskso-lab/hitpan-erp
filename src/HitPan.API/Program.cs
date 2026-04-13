@@ -38,6 +38,7 @@ builder.Services.AddScoped<IStockService, StockService>();
 builder.Services.AddScoped<IPartnerService, PartnerService>();
 builder.Services.AddScoped<IItemService, ItemService>();
 builder.Services.AddScoped<IBomService, BomService>();
+builder.Services.AddScoped<IPermissionService, PermissionService>();
 builder.Services.AddScoped<ExcelExportService>();
 builder.Services.AddScoped<PdfExportService>();
 builder.Services.AddScoped<ExcelImportService>();

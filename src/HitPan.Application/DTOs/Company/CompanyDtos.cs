@@ -14,6 +14,13 @@ public class CompanyDto
     public string? ZipCode { get; set; }
     public string? Email { get; set; }
     public string? LogoUrl { get; set; }
+    public string? CorpNo { get; set; }
+    public string? SubsidiaryNo { get; set; }
+    public string? Homepage { get; set; }
+    public DateTime? InitialDate { get; set; }
+    public string? EInvoiceServer { get; set; }
+    public string? EInvoiceId { get; set; }
+    public bool EInvoiceEnabled { get; set; }
     public string TaxType { get; set; } = "taxable";
     public int FiscalMonth { get; set; } = 12;
 }
@@ -31,6 +38,13 @@ public class UpdateCompanyDto
     public string? ZipCode { get; set; }
     public string? Email { get; set; }
     public string? LogoUrl { get; set; }
+    public string? CorpNo { get; set; }
+    public string? SubsidiaryNo { get; set; }
+    public string? Homepage { get; set; }
+    public DateTime? InitialDate { get; set; }
+    public string? EInvoiceServer { get; set; }
+    public string? EInvoiceId { get; set; }
+    public bool EInvoiceEnabled { get; set; }
     public string TaxType { get; set; } = "taxable";
     public int FiscalMonth { get; set; } = 12;
 }

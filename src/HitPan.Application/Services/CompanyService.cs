@@ -36,6 +36,13 @@ public sealed class CompanyService : ICompanyService
                     zip_code AS ZipCode,
                     email AS Email,
                     logo_url AS LogoUrl,
+                    corp_no AS CorpNo,
+                    subsidiary_no AS SubsidiaryNo,
+                    homepage AS Homepage,
+                    initial_date AS InitialDate,
+                    e_invoice_server AS EInvoiceServer,
+                    e_invoice_id AS EInvoiceId,
+                    e_invoice_enabled AS EInvoiceEnabled,
                     tax_type AS TaxType,
                     fiscal_month AS FiscalMonth
                 FROM tenants
@@ -75,7 +82,8 @@ public sealed class CompanyService : ICompanyService
             Tel = row.Tel,
             Address = row.Address,
             TaxType = "taxable",
-            FiscalMonth = 12
+            FiscalMonth = 12,
+            EInvoiceEnabled = false
         };
     }
 
@@ -100,6 +108,13 @@ public sealed class CompanyService : ICompanyService
                         zip_code = @ZipCode,
                         email = @Email,
                         logo_url = @LogoUrl,
+                        corp_no = @CorpNo,
+                        subsidiary_no = @SubsidiaryNo,
+                        homepage = @Homepage,
+                        initial_date = @InitialDate,
+                        e_invoice_server = @EInvoiceServer,
+                        e_invoice_id = @EInvoiceId,
+                        e_invoice_enabled = @EInvoiceEnabled,
                         tax_type = @TaxType,
                         fiscal_month = @FiscalMonth,
                         updated_at = NOW(6)
@@ -119,6 +134,13 @@ public sealed class CompanyService : ICompanyService
                         ZipCode = dto.ZipCode,
                         Email = dto.Email,
                         LogoUrl = dto.LogoUrl,
+                        CorpNo = dto.CorpNo,
+                        SubsidiaryNo = dto.SubsidiaryNo,
+                        Homepage = dto.Homepage,
+                        InitialDate = dto.InitialDate,
+                        EInvoiceServer = dto.EInvoiceServer,
+                        EInvoiceId = dto.EInvoiceId,
+                        EInvoiceEnabled = dto.EInvoiceEnabled ? 1 : 0,
                         TaxType = dto.TaxType,
                         FiscalMonth = dto.FiscalMonth
                     },
