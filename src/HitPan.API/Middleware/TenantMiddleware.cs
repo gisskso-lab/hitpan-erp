@@ -50,7 +50,8 @@ public sealed class TenantMiddleware
         context.Items["ResellerId"] = resellerId;
         context.Items["PlatformId"] = platformId;
 
-        if (accountType == "reseller_admin" && string.IsNullOrEmpty(resellerId))
+        // reseller_id 없어도 tenant_id로 ERP 컨텍스트가 있으면 통과(JWT에 reseller_id 미포함 계정 대비)
+        if (accountType == "reseller_admin" && string.IsNullOrEmpty(resellerId) && string.IsNullOrEmpty(tenantId))
         {
             context.Response.StatusCode = StatusCodes.Status403Forbidden;
             await context.Response.WriteAsync("Forbidden");
@@ -64,14 +65,14 @@ public sealed class TenantMiddleware
             return;
         }
 
-        if (string.IsNullOrWhiteSpace(tenantId))
+        if (string.IsNullOrWhiteSpace(tenantId) && accountType != "platform_admin")
         {
             context.Response.StatusCode = StatusCodes.Status403Forbidden;
             await context.Response.WriteAsync("Forbidden");
             return;
         }
 
-        currentTenant.Set(tenantId, userId ?? string.Empty, role ?? string.Empty);
+        currentTenant.Set(tenantId ?? string.Empty, userId ?? string.Empty, role ?? string.Empty);
 
         await _next(context);
     }

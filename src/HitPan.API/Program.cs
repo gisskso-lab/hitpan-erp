@@ -63,6 +63,13 @@ builder.Services.AddAuthorization(options =>
             ctx.User.HasClaim("account_type", "tenant_admin") ||
             ctx.User.HasClaim("account_type", "tenant_user") ||
             ctx.User.HasClaim("account_type", "platform_admin")));
+    // GET /api/tenants/me — Blazor TenantProfile (플랫폼·대리점·고객사)
+    options.AddPolicy("TenantProfile", policy =>
+        policy.RequireAssertion(ctx =>
+        {
+            var at = ctx.User.FindFirst("account_type")?.Value;
+            return at is "platform_admin" or "reseller_admin" or "tenant_admin" or "tenant_user";
+        }));
 });
 builder.Services.AddControllers();
 builder.Services.AddSwaggerWithJwt();

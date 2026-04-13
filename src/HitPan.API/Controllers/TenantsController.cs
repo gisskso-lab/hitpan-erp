@@ -7,7 +7,6 @@ namespace HitPan.API.Controllers;
 
 [ApiController]
 [Route("api/tenants")]
-[Authorize(Policy = "PlatformOnly")]
 public class TenantsController : ControllerBase
 {
     private readonly ITenantService _tenantService;
@@ -33,7 +32,7 @@ public class TenantsController : ControllerBase
     }
 
     [HttpGet("me")]
-    [Authorize]
+    [Authorize(Policy = "TenantProfile")]
     public async Task<IActionResult> Me(CancellationToken ct)
     {
         var me = await _tenantService.GetCurrentAsync(ct);
