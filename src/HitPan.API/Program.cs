@@ -3,6 +3,7 @@ using HitPan.Application.Interfaces;
 using HitPan.Application.Services;
 using HitPan.API.Extensions;
 using HitPan.API.Middleware;
+using HitPan.Infrastructure.Events;
 using HitPan.Infrastructure.Extensions;
 using HitPan.Infrastructure.Persistence;
 using HitPan.Infrastructure.Persistence.Seed;
@@ -36,6 +37,7 @@ builder.Services.AddScoped<ExcelExportService>();
 builder.Services.AddScoped<PdfExportService>();
 builder.Services.AddScoped<ExcelImportService>();
 builder.Services.AddScoped<IPartnerBalanceRepository, PartnerBalanceRepository>();
+builder.Services.AddScoped<IEventPublisher, SyncEventPublisher>();
 builder.Services.AddSingleton<AccessTokenValidator>();
 builder.Services.AddJwtAuthentication();
 builder.Services.AddAuthorization(options =>
@@ -118,6 +120,9 @@ if (!isDevelopment)
 }
 
 app.UseCors("BlazorWasmDev");
+
+app.UseMiddleware<RateLimitMiddleware>();
+app.UseMiddleware<AuditLogMiddleware>();
 
 app.UseAuthentication();
 app.UseAuthorization();
