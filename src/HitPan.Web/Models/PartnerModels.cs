@@ -44,3 +44,28 @@ public class SpecialPriceUpsertDto
     public DateTime? LastSupplyDate { get; set; }
     public bool IsActive { get; set; } = true;
 }
+
+public sealed class PartnerListRow
+{
+    public string PartnerId { get; set; } = "";
+
+    public string PartnerCode { get; set; } = "";
+
+    public string PartnerName { get; set; } = "";
+
+    public string PartnerType { get; set; } = "";
+
+    public string? BizNo { get; set; }
+
+    public string? Tel { get; set; }
+
+    public string PriceGrade { get; set; } = "A";
+
+    public decimal CreditLimit { get; set; }
+
+    public decimal Balance { get; set; }
+
+    public bool IsActive { get; set; }
+
+    public DateTime CreatedAt { get; set; }
+}

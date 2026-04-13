@@ -1,0 +1,92 @@
+@page "/partners"
+@namespace HitPan.Web.Pages.PartnerMasterUi
+@attribute [Authorize]
+@inject PartnerMasterService PartnersApi
+
+<PageTitle>업체 마스터</PageTitle>
+
+<MudText Typo="Typo.h6" Class="mb-3">업체 마스터</MudText>
+
+<MudPaper Elevation="0" Class="pa-3 mb-3" Style="border:1px solid var(--mud-palette-lines-default);border-radius:12px">
+    <MudGrid Spacing="2" Class="align-center">
+        <MudItem xs="12" sm="6" md="4">
+            <MudTextField @bind-Value="_search"
+                          Label="업체명·코드 검색"
+                          Variant="Variant.Outlined"
+                          Margin="Margin.Dense"
+                          OnBlur="ReloadAsync" />
+        </MudItem>
+        <MudItem xs="12" sm="4" md="3">
+            <MudSelect T="string"
+                       @bind-Value="_type"
+                       Label="유형"
+                       Variant="Variant.Outlined"
+                       Margin="Margin.Dense"
+                       Dense="true">
+                <MudSelectItem Value="@("")">전체</MudSelectItem>
+                <MudSelectItem Value="@("customer")">매출처</MudSelectItem>
+                <MudSelectItem Value="@("supplier")">매입처</MudSelectItem>
+                <MudSelectItem Value="@("both")">겸용</MudSelectItem>
+            </MudSelect>
+        </MudItem>
+        <MudItem xs="12" sm="2" md="2" Class="d-flex align-end">
+            <MudButton Variant="Variant.Filled"
+                       Color="Color.Primary"
+                       Size="Size.Small"
+                       OnClick="ReloadAsync"
+                       Disabled="_loading">
+                조회
+            </MudButton>
+        </MudItem>
+    </MudGrid>
+</MudPaper>
+
+@if (_loading)
+{
+    <MudProgressLinear Indeterminate="true" Color="Color.Primary" />
+}
+else
+{
+    <MudTable Items="_rows" Dense="true" Hover="true" Striped="true" FixedHeader="true" Height="calc(100vh - 240px)">
+        <HeaderContent>
+            <MudTh>코드</MudTh>
+            <MudTh>업체명</MudTh>
+            <MudTh>유형</MudTh>
+            <MudTh>등급</MudTh>
+            <MudTh Style="text-align:right">여신한도</MudTh>
+            <MudTh Style="text-align:right">잔액</MudTh>
+            <MudTh>사용</MudTh>
+        </HeaderContent>
+        <RowTemplate>
+            <MudTd DataLabel="코드">@context.PartnerCode</MudTd>
+            <MudTd DataLabel="업체명">@context.PartnerName</MudTd>
+            <MudTd DataLabel="유형">@context.PartnerType</MudTd>
+            <MudTd DataLabel="등급">@context.PriceGrade</MudTd>
+            <MudTd DataLabel="여신한도" Style="text-align:right">@context.CreditLimit.ToString("N0")</MudTd>
+            <MudTd DataLabel="잔액" Style="text-align:right">@context.Balance.ToString("N0")</MudTd>
+            <MudTd DataLabel="사용">@(context.IsActive ? "Y" : "N")</MudTd>
+        </RowTemplate>
+    </MudTable>
+}
+
+@code {
+    private List<PartnerListRow> _rows = new();
+    private string _search = "";
+    private string _type = "";
+    private bool _loading = true;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await ReloadAsync();
+    }
+
+    private async Task ReloadAsync()
+    {
+        _loading = true;
+        StateHasChanged();
+        _rows = await PartnersApi.GetListAsync(
+            string.IsNullOrWhiteSpace(_search) ? null : _search,
+            string.IsNullOrWhiteSpace(_type) ? null : _type).ConfigureAwait(false);
+        _loading = false;
+    }
+}

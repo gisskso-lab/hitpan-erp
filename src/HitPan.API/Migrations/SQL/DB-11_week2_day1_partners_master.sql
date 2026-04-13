@@ -1,0 +1,66 @@
+-- WEEK 2 Day 1 — 업체(partners) 마스터 컬럼 보강 + partner_special_prices 정비
+-- 선행: DB-06 partners 소프트삭제 컬럼 등
+
+ALTER TABLE partners
+  ADD COLUMN IF NOT EXISTS partner_code VARCHAR(20) NULL,
+  ADD COLUMN IF NOT EXISTS partner_type VARCHAR(20) NOT NULL DEFAULT 'both',
+  ADD COLUMN IF NOT EXISTS biz_no VARCHAR(12) NULL,
+  ADD COLUMN IF NOT EXISTS ceo_name VARCHAR(50) NULL,
+  ADD COLUMN IF NOT EXISTS biz_type VARCHAR(50) NULL,
+  ADD COLUMN IF NOT EXISTS biz_item VARCHAR(100) NULL,
+  ADD COLUMN IF NOT EXISTS tel VARCHAR(20) NULL,
+  ADD COLUMN IF NOT EXISTS fax VARCHAR(20) NULL,
+  ADD COLUMN IF NOT EXISTS zip_code VARCHAR(10) NULL,
+  ADD COLUMN IF NOT EXISTS address VARCHAR(200) NULL,
+  ADD COLUMN IF NOT EXISTS email VARCHAR(100) NULL,
+  ADD COLUMN IF NOT EXISTS manager_name VARCHAR(50) NULL,
+  ADD COLUMN IF NOT EXISTS manager_tel VARCHAR(20) NULL,
+  ADD COLUMN IF NOT EXISTS credit_limit DECIMAL(15,2) NULL DEFAULT 0,
+  ADD COLUMN IF NOT EXISTS price_grade CHAR(1) NOT NULL DEFAULT 'A',
+  ADD COLUMN IF NOT EXISTS tax_type VARCHAR(20) NOT NULL DEFAULT 'taxable',
+  ADD COLUMN IF NOT EXISTS payment_terms INT NOT NULL DEFAULT 30,
+  ADD COLUMN IF NOT EXISTS memo TEXT NULL,
+  ADD COLUMN IF NOT EXISTS row_version INT NOT NULL DEFAULT 0;
+
+CREATE TABLE IF NOT EXISTS partner_special_prices (
+  id              VARCHAR(36)   NOT NULL PRIMARY KEY,
+  tenant_id       VARCHAR(36)   NOT NULL,
+  partner_id      VARCHAR(36)   NOT NULL,
+  item_id         VARCHAR(36)   NOT NULL,
+  spec            VARCHAR(100)  NULL,
+  unit            VARCHAR(20)   NULL,
+  special_price   DECIMAL(15,2) NOT NULL DEFAULT 0,
+  std_price       DECIMAL(15,2) NOT NULL DEFAULT 0,
+  vs_ratio        DECIMAL(9,4)  NOT NULL DEFAULT 0,
+  last_supply_date DATE         NULL,
+  price_type      VARCHAR(20)   NOT NULL DEFAULT 'fixed',
+  unit_price      DECIMAL(15,2) NULL,
+  start_date      DATE          NULL,
+  end_date        DATE          NULL,
+  is_active       TINYINT(1)    NOT NULL DEFAULT 1,
+  created_by      VARCHAR(36)   NULL,
+  updated_by      VARCHAR(36)   NULL,
+  created_at      DATETIME(6)   NOT NULL DEFAULT NOW(6),
+  updated_at      DATETIME(6)   NOT NULL DEFAULT NOW(6) ON UPDATE NOW(6),
+  UNIQUE KEY uk_partner_item (tenant_id, partner_id, item_id),
+  INDEX idx_tenant (tenant_id),
+  INDEX idx_partner (tenant_id, partner_id),
+  INDEX idx_item (tenant_id, item_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+ALTER TABLE partner_special_prices
+  ADD COLUMN IF NOT EXISTS spec VARCHAR(100) NULL,
+  ADD COLUMN IF NOT EXISTS unit VARCHAR(20) NULL,
+  ADD COLUMN IF NOT EXISTS special_price DECIMAL(15,2) NOT NULL DEFAULT 0,
+  ADD COLUMN IF NOT EXISTS std_price DECIMAL(15,2) NOT NULL DEFAULT 0,
+  ADD COLUMN IF NOT EXISTS vs_ratio DECIMAL(9,4) NOT NULL DEFAULT 0,
+  ADD COLUMN IF NOT EXISTS last_supply_date DATE NULL,
+  ADD COLUMN IF NOT EXISTS price_type VARCHAR(20) NOT NULL DEFAULT 'fixed',
+  ADD COLUMN IF NOT EXISTS unit_price DECIMAL(15,2) NULL,
+  ADD COLUMN IF NOT EXISTS start_date DATE NULL,
+  ADD COLUMN IF NOT EXISTS end_date DATE NULL,
+  ADD COLUMN IF NOT EXISTS is_active TINYINT(1) NOT NULL DEFAULT 1,
+  ADD COLUMN IF NOT EXISTS created_by VARCHAR(36) NULL,
+  ADD COLUMN IF NOT EXISTS updated_by VARCHAR(36) NULL,
+  ADD COLUMN IF NOT EXISTS created_at DATETIME(6) NOT NULL DEFAULT NOW(6),
+  ADD COLUMN IF NOT EXISTS updated_at DATETIME(6) NOT NULL DEFAULT NOW(6) ON UPDATE NOW(6);
