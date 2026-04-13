@@ -1,8 +1,9 @@
 -- WEEK 1 Day 2 — 핵심 인덱스 + 소프트 삭제
 --
 -- 선행: ERROR 1300(깨진 COLUMN COMMENT) 시 `DB-07_fix_column_comments_utf8.sql` 먼저 실행.
--- InnoDB: 서버가 읽는 my.ini 에서 skip-innodb 제거 후 MariaDB 서비스 재시작 필요(관리자 권한).
+-- InnoDB: 서버가 읽는 my.ini 에서 skip-innodb 제거 후 MariaDB 서비스 재시작(관리자 권한).
 --   이 PC 기본 설정 파일 예: C:\MariaDB\mariadb-10.0.17-win32\my.ini
+-- 검증: InnoDB DEFAULT + default_storage_engine=InnoDB 환경에서 인덱스·is_deleted 적용 확인됨.
 --
 -- 스키마 정합:
 --   sales_deliveries: delivery_date (컬럼명 order_date 아님), status 가 longtext 인 경우 접두 인덱스
