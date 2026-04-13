@@ -1,0 +1,134 @@
+@page "/users/permissions"
+@namespace HitPan.Web.Pages.UsersUi
+@attribute [Authorize]
+@inject PermissionService PermSvc
+@inject ISnackbar Snackbar
+
+<PageTitle>사용자 권한 설정</PageTitle>
+
+<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
+  <MudText Typo="Typo.h6">사용자 권한 설정</MudText>
+  <MudText Style="font-size:12px;color:var(--mud-palette-text-secondary)">
+    관리자만 설정 가능합니다
+  </MudText>
+</div>
+
+@if (_loading)
+{
+  <MudProgressLinear Indeterminate="true" Color="Color.Primary" />
+}
+else
+{
+  <MudTabs Elevation="0" Rounded="true" ApplyEffectsToContainer="true">
+    @foreach (var user in _users)
+    {
+      <MudTabPanel Text="@(user.EmpName ?? user.UserName)">
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:16px">
+          <div style="width:36px;height:36px;border-radius:50%;background:#E6F1FB;display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:500;color:#185FA5">
+            @((user.EmpName ?? user.UserName).Substring(0, 1))
+          </div>
+          <div>
+            <MudText Style="font-size:14px;font-weight:500">
+              @(user.EmpName ?? user.UserName)
+            </MudText>
+            <MudText Style="font-size:11px;color:var(--mud-palette-text-secondary)">
+              @GetRoleLabel(user.Role)
+            </MudText>
+          </div>
+          <div style="margin-left:auto">
+            <MudButton Variant="Variant.Filled" Color="Color.Primary" Size="Size.Small"
+              OnClick="@(() => SavePermissions(user))">
+              저장
+            </MudButton>
+          </div>
+        </div>
+
+        <div style="display:flex;gap:8px;margin-bottom:12px">
+          <MudButton Size="Size.Small" Variant="Variant.Outlined"
+            OnClick="@(() => SelectAll(user, true))">전체 허용</MudButton>
+          <MudButton Size="Size.Small" Variant="Variant.Outlined"
+            OnClick="@(() => SelectAll(user, false))">전체 해제</MudButton>
+        </div>
+
+        <MudPaper Elevation="0" Style="border:0.5px solid var(--mud-palette-lines-default);border-radius:12px;overflow:hidden">
+          <table style="width:100%;border-collapse:collapse;font-size:12px">
+            <thead>
+              <tr style="background:var(--mud-palette-background-grey)">
+                <th style="padding:8px 12px;text-align:left;font-weight:500;width:140px">메뉴</th>
+                <th style="padding:8px;text-align:center;width:60px">조회</th>
+                <th style="padding:8px;text-align:center;width:60px">등록</th>
+                <th style="padding:8px;text-align:center;width:60px">수정</th>
+                <th style="padding:8px;text-align:center;width:60px">삭제</th>
+                <th style="padding:8px;text-align:center;width:60px">출력</th>
+              </tr>
+            </thead>
+            <tbody>
+              @foreach (var perm in user.Permissions)
+              {
+                <tr style="border-bottom:0.5px solid var(--mud-palette-lines-default)">
+                  <td style="padding:6px 12px;font-weight:500">@perm.MenuName</td>
+                  <td style="text-align:center;padding:6px"><MudCheckBox T="bool" @bind-Value="perm.CanView" Color="Color.Primary" Dense="true" /></td>
+                  <td style="text-align:center;padding:6px"><MudCheckBox T="bool" @bind-Value="perm.CanCreate" Color="Color.Primary" Dense="true" /></td>
+                  <td style="text-align:center;padding:6px"><MudCheckBox T="bool" @bind-Value="perm.CanUpdate" Color="Color.Primary" Dense="true" /></td>
+                  <td style="text-align:center;padding:6px"><MudCheckBox T="bool" @bind-Value="perm.CanDelete" Color="Color.Primary" Dense="true" /></td>
+                  <td style="text-align:center;padding:6px"><MudCheckBox T="bool" @bind-Value="perm.CanExport" Color="Color.Primary" Dense="true" /></td>
+                </tr>
+              }
+            </tbody>
+          </table>
+        </MudPaper>
+      </MudTabPanel>
+    }
+  </MudTabs>
+}
+
+@code {
+private List<UserPermissionModel> _users = new();
+private bool _loading = true;
+
+protected override async Task OnInitializedAsync()
+{
+    _loading = true;
+    _users = await PermSvc.GetAllAsync() ?? new();
+    _loading = false;
+}
+
+private async Task SavePermissions(UserPermissionModel user)
+{
+    var ok = await PermSvc.SaveAsync(
+        new SavePermissionsModel
+        {
+            UserId = user.UserId,
+            Permissions = user.Permissions
+        });
+
+    if (ok)
+    {
+        Snackbar.Add($"{user.EmpName ?? user.UserName} 권한이 저장됐습니다.", Severity.Success);
+    }
+    else
+    {
+        Snackbar.Add("저장 실패. 다시 시도해주세요.", Severity.Error);
+    }
+}
+
+private static void SelectAll(UserPermissionModel user, bool value)
+{
+    foreach (var p in user.Permissions)
+    {
+        p.CanView = value;
+        p.CanCreate = value;
+        p.CanUpdate = value;
+        p.CanDelete = value;
+        p.CanExport = value;
+    }
+}
+
+private static string GetRoleLabel(string role)
+    => role switch
+    {
+        "TenantAdmin" => "관리자",
+        "Manager" => "매니저",
+        _ => "일반사용자"
+    };
+}

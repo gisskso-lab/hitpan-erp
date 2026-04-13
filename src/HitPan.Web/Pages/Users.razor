@@ -1,0 +1,21 @@
+@page "/users"
+@namespace HitPan.Web.Pages.UsersUi
+@attribute [Authorize]
+@inject NavigationManager Nav
+
+<PageTitle>사용자 관리</PageTitle>
+
+<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
+    <MudText Typo="Typo.h6">사용자 관리</MudText>
+    <MudButton Variant="Variant.Outlined"
+      Size="Size.Small"
+      OnClick="@(() => Nav.NavigateTo("/users/permissions"))">
+      권한 설정
+    </MudButton>
+</div>
+
+<MudPaper Elevation="0" Class="pa-4" Style="border:0.5px solid var(--mud-palette-lines-default);border-radius:12px">
+    <MudText Style="font-size:13px;color:var(--mud-palette-text-secondary)">
+        사용자 목록 화면은 추후 연결 예정입니다.
+    </MudText>
+</MudPaper>
