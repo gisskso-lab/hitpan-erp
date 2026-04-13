@@ -29,6 +29,8 @@ builder.Services.AddScoped<IUnitOfWork, UnitOfWork>();
 builder.Services.AddScoped<IAuthUserLookup, AuthUserLookup>();
 builder.Services.AddScoped<ITenantService, TenantService>();
 builder.Services.AddScoped<IAuthService, AuthService>();
+builder.Services.AddScoped<IUserService, UserService>();
+builder.Services.AddScoped<ICompanyService, CompanyService>();
 builder.Services.AddScoped<IPurchaseService, PurchaseService>();
 builder.Services.AddScoped<ISalesService, SalesService>();
 builder.Services.AddScoped<IStockService, StockService>();
@@ -72,6 +74,8 @@ builder.Services.AddAuthorization(options =>
             var at = ctx.User.FindFirst("account_type")?.Value;
             return at is "platform_admin" or "reseller_admin" or "tenant_admin" or "tenant_user";
         }));
+    options.AddPolicy("TenantAdminOnly", policy =>
+        policy.RequireClaim("account_type", "tenant_admin"));
 });
 builder.Services.AddControllers();
 builder.Services.AddSwaggerWithJwt();
