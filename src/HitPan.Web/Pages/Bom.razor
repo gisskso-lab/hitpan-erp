@@ -1,0 +1,138 @@
+@page "/bom"
+@namespace HitPan.Web.Pages.BomUi
+@attribute [Authorize]
+@inject BomService BomApi
+@inject ISnackbar Snackbar
+@inject NavigationManager Nav
+
+<PageTitle>BOM 자재명세서</PageTitle>
+
+<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
+  <MudText Typo="Typo.h6">BOM 자재명세서</MudText>
+  <MudButton Variant="Variant.Filled"
+    Color="Color.Primary"
+    OnClick="@(() => Nav.NavigateTo("/bom/new"))">
+    + BOM 등록
+  </MudButton>
+</div>
+
+@if (_alerts.Any())
+{
+  <MudPaper Elevation="0" Class="pa-3 mb-4"
+    Style="border:1px solid var(--mud-palette-warning);border-radius:12px;background:var(--mud-palette-warning-lighten)">
+    <div style="display:flex;align-items:center;gap:8px;margin-bottom:12px">
+      <MudIcon Icon="@Icons.Material.Filled.Warning" Color="Color.Warning" />
+      <MudText Style="font-weight:500;font-size:14px">
+        재고 부족 알림 @_alerts.Count 건
+      </MudText>
+    </div>
+    @foreach (var alert in _alerts)
+    {
+      <div style="display:flex;align-items:center;justify-content:space-between;padding:8px 0;border-bottom:0.5px solid var(--mud-palette-lines-default)">
+        <div>
+          <MudText Style="font-size:13px;font-weight:500">@alert.ItemName</MudText>
+          <MudText Style="font-size:11px;color:var(--mud-palette-text-secondary)">
+            현재 @alert.CurrentQty.ToString("N1") / 안전재고 @alert.SafetyQty.ToString("N1")
+            @if (alert.PartnerName != null)
+            {
+              <span> → @(alert.PartnerName)에 @alert.OrderQty.ToString("N0")개 발주 권장</span>
+            }
+          </MudText>
+        </div>
+        <div style="display:flex;gap:4px">
+          @if (alert.PartnerId != null)
+          {
+            <MudButton Size="Size.Small" Variant="Variant.Filled" Color="Color.Warning"
+              OnClick="@(() => OrderAlert(alert.AlertId))">발주하기</MudButton>
+          }
+          <MudButton Size="Size.Small" Variant="Variant.Text"
+            OnClick="@(() => DismissAlert(alert.AlertId))">나중에</MudButton>
+        </div>
+      </div>
+    }
+  </MudPaper>
+}
+
+@if (_loading)
+{
+  <MudProgressLinear Indeterminate="true" Color="Color.Primary" />
+}
+else
+{
+  <MudPaper Elevation="0"
+    Style="border:0.5px solid var(--mud-palette-lines-default);border-radius:12px;overflow:hidden">
+    <MudTable Items="_boms" Dense="true" Hover="true" Striped="true" T="BomListModel">
+      <HeaderContent>
+        <MudTh>완성품</MudTh>
+        <MudTh>BOM 이름</MudTh>
+        <MudTh>버전</MudTh>
+        <MudTh>자재 수</MudTh>
+        <MudTh Style="text-align:right">BOM 원가</MudTh>
+        <MudTh>기본</MudTh>
+        <MudTh></MudTh>
+      </HeaderContent>
+      <RowTemplate>
+        <MudTd><MudText Style="font-weight:500">@context.ProductItemName</MudText></MudTd>
+        <MudTd>@context.BomName</MudTd>
+        <MudTd>v@context.BomVersion</MudTd>
+        <MudTd>@context.MaterialCount 개</MudTd>
+        <MudTd Style="text-align:right">@context.TotalCost.ToString("N0")원</MudTd>
+        <MudTd>
+          @if (context.IsDefault)
+          {
+            <MudChip T="string" Size="Size.Small" Color="Color.Success" Variant="Variant.Text">기본</MudChip>
+          }
+        </MudTd>
+        <MudTd>
+          <MudIconButton Icon="@Icons.Material.Filled.Edit" Size="Size.Small"
+            OnClick="@(() => Nav.NavigateTo($"/bom/{context.BomId}"))" />
+        </MudTd>
+      </RowTemplate>
+      <NoRecordsContent>
+        <MudText Style="padding:24px;color:var(--mud-palette-text-secondary)">
+          등록된 BOM이 없습니다
+        </MudText>
+      </NoRecordsContent>
+    </MudTable>
+  </MudPaper>
+}
+
+@code {
+private List<BomListModel> _boms = new();
+private List<StockAlertModel> _alerts = new();
+private bool _loading = true;
+
+protected override async Task OnInitializedAsync()
+{
+    await Task.WhenAll(LoadBoms(), LoadAlerts());
+}
+
+private async Task LoadBoms()
+{
+    _loading = true;
+    StateHasChanged();
+    _boms = await BomApi.GetListAsync() ?? new();
+    _loading = false;
+}
+
+private async Task LoadAlerts()
+{
+    _alerts = await BomApi.GetAlertsAsync() ?? new();
+}
+
+private async Task OrderAlert(string alertId)
+{
+    var ok = await BomApi.OrderAlertAsync(alertId);
+    if (ok)
+    {
+        Snackbar.Add("발주 처리됐습니다.", Severity.Success);
+        await LoadAlerts();
+    }
+}
+
+private async Task DismissAlert(string alertId)
+{
+    await BomApi.DismissAlertAsync(alertId);
+    await LoadAlerts();
+}
+}

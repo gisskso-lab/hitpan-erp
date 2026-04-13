@@ -34,6 +34,9 @@ public sealed class SyncEventPublisher : IEventPublisher
             case "purchase.confirmed" when payload is PurchaseConfirmedEvent p:
                 await OnPurchaseConfirmed(p, ct).ConfigureAwait(false);
                 break;
+            case "bom.assembled" when payload is BomAssembledEvent b:
+                await OnBomAssembled(b, ct).ConfigureAwait(false);
+                break;
         }
     }
 
@@ -232,5 +235,128 @@ public sealed class SyncEventPublisher : IEventPublisher
                 """,
                 new { p.TenantId, YearMonth = ym, Amount = p.TotalAmount },
                 cancellationToken: ct)).ConfigureAwait(false);
+    }
+
+    private async Task OnBomAssembled(BomAssembledEvent b, CancellationToken ct)
+    {
+        await _db.ExecuteAsync(new CommandDefinition(
+            """
+            INSERT INTO item_stock
+              (stock_id, tenant_id, item_id, warehouse_id, current_qty, avg_cost, last_updated_at)
+            VALUES
+              (UUID(), @TenantId, @ItemId, 'default', @Qty, @Cost, NOW(6))
+            ON DUPLICATE KEY UPDATE
+              avg_cost = ((current_qty * avg_cost + @Qty * @Cost) / NULLIF(current_qty + @Qty, 0)),
+              current_qty = current_qty + @Qty,
+              last_updated_at = NOW(6)
+            """,
+            new { b.TenantId, ItemId = b.ProductItemId, Qty = b.ProducedQty, Cost = b.ProductionCost },
+            cancellationToken: ct)).ConfigureAwait(false);
+
+        foreach (var mat in b.Materials)
+        {
+            await _db.ExecuteAsync(new CommandDefinition(
+                """
+                UPDATE item_stock SET
+                    current_qty = current_qty - @Qty,
+                    last_updated_at = NOW(6)
+                WHERE tenant_id = @TenantId
+                  AND item_id = @ItemId
+                """,
+                new { b.TenantId, ItemId = mat.ItemId, Qty = mat.UsedQty },
+                cancellationToken: ct)).ConfigureAwait(false);
+        }
+
+        var ym = DateTime.Now.ToString("yyyyMM");
+        await _db.ExecuteAsync(new CommandDefinition(
+            """
+            INSERT INTO monthly_summary
+              (summary_id, tenant_id, `year_month`,
+               total_sales, total_purchase, total_receipt, total_payment, last_updated_at)
+            VALUES
+              (UUID(), @TenantId, @YearMonth, 0, @Cost, 0, 0, NOW(6))
+            ON DUPLICATE KEY UPDATE
+              total_purchase = total_purchase + @Cost,
+              last_updated_at = NOW(6)
+            """,
+            new { b.TenantId, YearMonth = ym, Cost = b.ProductionCost * b.ProducedQty },
+            cancellationToken: ct)).ConfigureAwait(false);
+
+        await CheckSafetyStockAsync(b.TenantId, b.Materials.Select(x => x.ItemId).ToList(), ct).ConfigureAwait(false);
+    }
+
+    private async Task CheckSafetyStockAsync(string tenantId, List<string> itemIds, CancellationToken ct)
+    {
+        foreach (var itemId in itemIds.Distinct(StringComparer.Ordinal))
+        {
+            var info = await _db.QueryFirstOrDefaultAsync<SafetyStockInfo>(new CommandDefinition(
+                """
+                SELECT
+                  COALESCE(s.current_qty, 0) AS CurrentQty,
+                  COALESCE(i.safety_stock, i.safe_stock, 0) AS SafetyStock,
+                  COALESCE(i.auto_order_enabled, 0) AS AutoOrderEnabled,
+                  i.auto_order_partner_id AS PartnerId,
+                  COALESCE(i.auto_order_qty, 0) AS OrderQty
+                FROM items i
+                LEFT JOIN item_stock s
+                  ON s.tenant_id = i.tenant_id
+                 AND s.item_id = i.item_id
+                WHERE i.item_id = @ItemId
+                  AND i.tenant_id = @TenantId
+                """,
+                new { ItemId = itemId, TenantId = tenantId },
+                cancellationToken: ct)).ConfigureAwait(false);
+
+            if (info is null || info.CurrentQty > info.SafetyStock || info.SafetyStock <= 0)
+            {
+                continue;
+            }
+
+            var exists = await _db.QueryFirstOrDefaultAsync<int>(new CommandDefinition(
+                """
+                SELECT COUNT(*) FROM stock_alerts
+                WHERE tenant_id = @TenantId
+                  AND item_id = @ItemId
+                  AND status = 'pending'
+                """,
+                new { TenantId = tenantId, ItemId = itemId },
+                cancellationToken: ct)).ConfigureAwait(false);
+            if (exists > 0)
+            {
+                continue;
+            }
+
+            await _db.ExecuteAsync(new CommandDefinition(
+                """
+                INSERT INTO stock_alerts (
+                  alert_id, tenant_id, item_id,
+                  alert_type, current_qty, safety_qty, shortage_qty,
+                  partner_id, order_qty, status, created_at, updated_at)
+                VALUES (
+                  UUID(), @TenantId, @ItemId,
+                  'safety_stock', @CurrentQty, @SafetyQty, @ShortageQty,
+                  @PartnerId, @OrderQty, 'pending', NOW(6), NOW(6))
+                """,
+                new
+                {
+                    TenantId = tenantId,
+                    ItemId = itemId,
+                    CurrentQty = info.CurrentQty,
+                    SafetyQty = info.SafetyStock,
+                    ShortageQty = info.SafetyStock - info.CurrentQty,
+                    PartnerId = info.PartnerId,
+                    OrderQty = info.OrderQty
+                },
+                cancellationToken: ct)).ConfigureAwait(false);
+        }
+    }
+
+    private sealed class SafetyStockInfo
+    {
+        public decimal CurrentQty { get; set; }
+        public decimal SafetyStock { get; set; }
+        public bool AutoOrderEnabled { get; set; }
+        public string? PartnerId { get; set; }
+        public decimal OrderQty { get; set; }
     }
 }

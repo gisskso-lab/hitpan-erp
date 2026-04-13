@@ -28,3 +28,27 @@ public record PurchaseConfirmedEvent(
     string PartnerId,
     decimal TotalAmount,
     List<DeliveryItemEvent> Items);
+
+public record BomAssembledEvent(
+    string TenantId,
+    string BomId,
+    string ProductItemId,
+    decimal ProducedQty,
+    decimal ProductionCost,
+    List<BomMaterialUsedEvent> Materials);
+
+public record BomMaterialUsedEvent(
+    string ItemId,
+    decimal UsedQty,
+    decimal UnitCost);
+
+public record StockAlertEvent(
+    string TenantId,
+    string ItemId,
+    string AlertType,
+    decimal CurrentQty,
+    decimal SafetyQty,
+    decimal ShortageQty,
+    string? PartnerId,
+    decimal OrderQty,
+    string? BomId);
