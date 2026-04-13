@@ -1,169 +1,96 @@
-@implements IDisposable
-@using System.Security.Claims
 @using HitPan.Web.Helpers
-@using HitPan.Web.Models
-@using HitPan.Web.Services
-@inject NavigationManager Navigation
-@inject WorkTabService TabService
 @inject AuthenticationStateProvider AuthStateProvider
 
-<div class="hitpan-sidebar mud-elevation-1">
-    <div class="hitpan-sidebar-logo" title="히트판">HP</div>
-    <nav class="hitpan-sidebar-nav" aria-label="주 메뉴">
-        @foreach (var item in _visibleItems)
-        {
-            var active = IsActive(item.Href);
-            <button type="button"
-                    class="hitpan-sidebar-item @(active ? "hitpan-sidebar-item--active" : null)"
-                    title="@item.Title"
-                    @onclick="@(() => OnMenuClick(item))">
-                <MudIcon Icon="@item.Icon" Class="hitpan-sidebar-icon" />
-                <span class="hitpan-sidebar-label">@item.Title</span>
-            </button>
-        }
-    </nav>
-</div>
+<MudNavMenu>
+    <MudNavLink Href="/dashboard" Icon="@Icons.Material.Filled.Dashboard">
+        대시보드
+    </MudNavLink>
+
+    <MudNavGroup Title="설정" Icon="@Icons.Material.Filled.Settings" Expanded="false">
+        <MudNavLink Href="/company" Icon="@Icons.Material.Filled.Business">사용자정보 설정</MudNavLink>
+        <MudNavLink Href="/users/permissions" Icon="@Icons.Material.Filled.Lock">권한 설정</MudNavLink>
+        <MudNavLink Href="/settings" Icon="@Icons.Material.Filled.Tune">사용환경 설정</MudNavLink>
+        <MudNavLink Href="/print-settings" Icon="@Icons.Material.Filled.Print">양식(인쇄)정보 설정</MudNavLink>
+    </MudNavGroup>
+
+    <MudNavGroup Title="업체 관리" Icon="@Icons.Material.Filled.Business" Expanded="false">
+        <MudNavLink Href="/partners" Icon="@Icons.Material.Filled.People">업체 마스터</MudNavLink>
+        <MudNavLink Href="/partners/special-prices" Icon="@Icons.Material.Filled.LocalOffer">업체 특별단가</MudNavLink>
+        <MudNavLink Href="/partners/ledger" Icon="@Icons.Material.Filled.Book">업체별 원장</MudNavLink>
+    </MudNavGroup>
+
+    <MudNavGroup Title="상품 관리" Icon="@Icons.Material.Filled.Inventory" Expanded="false">
+        <MudNavLink Href="/items" Icon="@Icons.Material.Filled.Category">상품 마스터</MudNavLink>
+        <MudNavLink Href="/bom" Icon="@Icons.Material.Filled.AccountTree">BOM 자재명세서</MudNavLink>
+        <MudNavLink Href="/items/special-prices" Icon="@Icons.Material.Filled.LocalOffer">상품 특별단가</MudNavLink>
+        <MudNavLink Href="/items/ledger" Icon="@Icons.Material.Filled.Book">상품별 원장</MudNavLink>
+    </MudNavGroup>
+
+    <MudNavGroup Title="판매" Icon="@Icons.Material.Filled.PointOfSale" Expanded="false">
+        <MudNavLink Href="/quotations" Icon="@Icons.Material.Filled.RequestQuote">견적서</MudNavLink>
+        <MudNavLink Href="/sales-orders" Icon="@Icons.Material.Filled.Assignment">수주서</MudNavLink>
+        <MudNavLink Href="/deliveries" Icon="@Icons.Material.Filled.Receipt">거래명세서</MudNavLink>
+        <MudNavLink Href="/sales/summary" Icon="@Icons.Material.Filled.BarChart">판매 현황</MudNavLink>
+    </MudNavGroup>
+
+    <MudNavGroup Title="매입" Icon="@Icons.Material.Filled.ShoppingCart" Expanded="false">
+        <MudNavLink Href="/purchase-orders" Icon="@Icons.Material.Filled.AddShoppingCart">발주서</MudNavLink>
+        <MudNavLink Href="/purchases" Icon="@Icons.Material.Filled.MoveToInbox">매입 처리</MudNavLink>
+        <MudNavLink Href="/returns" Icon="@Icons.Material.Filled.AssignmentReturn">반품 처리</MudNavLink>
+        <MudNavLink Href="/purchases/summary" Icon="@Icons.Material.Filled.BarChart">매입 현황</MudNavLink>
+    </MudNavGroup>
+
+    <MudNavGroup Title="재고" Icon="@Icons.Material.Filled.Warehouse" Expanded="false">
+        <MudNavLink Href="/stock" Icon="@Icons.Material.Filled.Inventory2">재고 현황</MudNavLink>
+        <MudNavLink Href="/stock/ledger" Icon="@Icons.Material.Filled.ListAlt">각종 수불부</MudNavLink>
+        <MudNavLink Href="/stock/adjust" Icon="@Icons.Material.Filled.Tune">재고 실사·조정</MudNavLink>
+    </MudNavGroup>
+
+    <MudNavGroup Title="수금·지급" Icon="@Icons.Material.Filled.AccountBalance" Expanded="false">
+        <MudNavLink Href="/collections" Icon="@Icons.Material.Filled.AttachMoney">수금</MudNavLink>
+        <MudNavLink Href="/payments" Icon="@Icons.Material.Filled.Money">지급</MudNavLink>
+    </MudNavGroup>
+
+    <MudNavGroup Title="회계" Icon="@Icons.Material.Filled.Calculate" Expanded="false">
+        <MudNavLink Href="/accounting/accounts" Icon="@Icons.Material.Filled.AccountTree">계정과목</MudNavLink>
+        <MudNavLink Href="/accounting/expenses" Icon="@Icons.Material.Filled.Receipt">경비 처리</MudNavLink>
+        <MudNavLink Href="/accounting/profit" Icon="@Icons.Material.Filled.TrendingUp">손익 현황</MudNavLink>
+    </MudNavGroup>
+
+    @if (IsPlatformAdmin)
+    {
+        <MudNavGroup Title="본사 관리" Icon="@Icons.Material.Filled.CorporateFare" Expanded="true">
+            <MudNavLink Href="/admin/dashboard" Icon="@Icons.Material.Filled.Dashboard">본사 대시보드</MudNavLink>
+            <MudNavLink Href="/admin/resellers" Icon="@Icons.Material.Filled.Store">대리점 관리</MudNavLink>
+            <MudNavLink Href="/admin/tenants" Icon="@Icons.Material.Filled.Business">고객사 관리</MudNavLink>
+            <MudNavLink Href="/admin/commission" Icon="@Icons.Material.Filled.Percent">수수료 정책</MudNavLink>
+        </MudNavGroup>
+    }
+
+    @if (IsReseller)
+    {
+        <MudNavGroup Title="대리점 관리" Icon="@Icons.Material.Filled.Store" Expanded="true">
+            <MudNavLink Href="/reseller/dashboard" Icon="@Icons.Material.Filled.Dashboard">대리점 대시보드</MudNavLink>
+            <MudNavLink Href="/reseller/tenants" Icon="@Icons.Material.Filled.Business">고객사 관리</MudNavLink>
+            <MudNavLink Href="/reseller/commission" Icon="@Icons.Material.Filled.Percent">수수료 현황</MudNavLink>
+            <MudNavLink Href="/reseller/settlement" Icon="@Icons.Material.Filled.AccountBalance">정산 내역</MudNavLink>
+        </MudNavGroup>
+    }
+</MudNavMenu>
 
 @code {
-    private List<SidebarMenuEntry> _visibleItems = new();
+    private string AccountType { get; set; } = string.Empty;
 
     protected override async Task OnInitializedAsync()
     {
-        Navigation.LocationChanged += OnLocationChanged;
-        await RefreshMenuAsync();
-    }
-
-    private void OnLocationChanged(object? sender, LocationChangedEventArgs e)
-    {
-        _ = InvokeAsync(async () =>
-        {
-            await RefreshMenuAsync();
-            StateHasChanged();
-        });
-    }
-
-    private async Task RefreshMenuAsync()
-    {
         var state = await AuthStateProvider.GetAuthenticationStateAsync();
-        _visibleItems = SidebarMenu.All.Where(i => i.IsVisibleTo(state.User)).ToList();
+        AccountType = AccountTypeHelper.GetAccountType(state.User);
     }
 
-    private void OnMenuClick(SidebarMenuEntry item)
-    {
-        if (item.OpenTabKind is { } kind)
-        {
-            TabService.TryAddTab(kind);
-        }
+    private bool IsPlatformAdmin =>
+        AccountType == "platform_admin";
 
-        Navigation.NavigateTo(item.Href);
-    }
-
-    private bool IsActive(string href)
-    {
-        var path = new Uri(Navigation.Uri).AbsolutePath;
-        return string.Equals(path.TrimEnd('/'), href.TrimEnd('/'), StringComparison.OrdinalIgnoreCase)
-               || (path == "/" && href == "/");
-    }
-
-    public void Dispose()
-    {
-        Navigation.LocationChanged -= OnLocationChanged;
-    }
-
-    private sealed record SidebarMenuEntry(
-        string Title,
-        string Icon,
-        string Href,
-        string[]? AllowedRoles,
-        WorkDocumentKind? OpenTabKind)
-    {
-        public bool IsVisibleTo(ClaimsPrincipal user)
-        {
-            if (user.Identity?.IsAuthenticated != true)
-            {
-                return false;
-            }
-
-            if (AllowedRoles is null || AllowedRoles.Length == 0)
-            {
-                var at = AccountTypeHelper.GetAccountType(user);
-                return at == AccountTypeHelper.TenantAdmin
-                    || at == AccountTypeHelper.TenantUser
-                    || string.Equals(at, "TenantAdmin", StringComparison.OrdinalIgnoreCase);
-            }
-
-            return AllowedRoles.Any(r => MatchesRequirement(user, r));
-        }
-
-        private static bool MatchesRequirement(ClaimsPrincipal user, string requirement)
-        {
-            if (string.Equals(requirement, AccountTypeHelper.PlatformAdmin, StringComparison.Ordinal))
-            {
-                return AccountTypeHelper.IsPlatformAdmin(user);
-            }
-
-            if (string.Equals(requirement, AccountTypeHelper.ResellerAdmin, StringComparison.Ordinal))
-            {
-                return AccountTypeHelper.IsResellerAdmin(user);
-            }
-
-            return HitPanRoleHelper.IsInHitPanRole(user, requirement);
-        }
-    }
-
-    private static class SidebarMenu
-    {
-        public static readonly SidebarMenuEntry[] All =
-        {
-            new("대시보드", Icons.Material.Filled.Dashboard, "/platform/dashboard",
-                new[] { AccountTypeHelper.PlatformAdmin }, null),
-            new("대리점 관리", Icons.Material.Filled.Store, "/platform/resellers",
-                new[] { AccountTypeHelper.PlatformAdmin }, null),
-            new("고객사 관리", Icons.Material.Filled.Business, "/platform/tenants",
-                new[] { AccountTypeHelper.PlatformAdmin }, null),
-            new("수수료 정책", Icons.Material.Filled.Percent, "/platform/commission",
-                new[] { AccountTypeHelper.PlatformAdmin }, null),
-            new("프로모션", Icons.Material.Filled.Campaign, "/platform/promotions",
-                new[] { AccountTypeHelper.PlatformAdmin }, null),
-            new("매출 현황", Icons.Material.Filled.BarChart, "/platform/revenue",
-                new[] { AccountTypeHelper.PlatformAdmin }, null),
-
-            new("대시보드", Icons.Material.Filled.Dashboard, "/reseller/dashboard",
-                new[] { AccountTypeHelper.ResellerAdmin }, null),
-            new("내 고객사", Icons.Material.Filled.Business, "/reseller/customers",
-                new[] { AccountTypeHelper.ResellerAdmin }, null),
-            new("수수료 현황", Icons.Material.Filled.AttachMoney, "/reseller/revenue",
-                new[] { AccountTypeHelper.ResellerAdmin }, null),
-            new("정산 내역", Icons.Material.Filled.AccountBalance, "/reseller/payout",
-                new[] { AccountTypeHelper.ResellerAdmin }, null),
-
-            new("설정", Icons.Material.Filled.Settings, "/settings",
-                new[] { "TenantAdmin", AccountTypeHelper.PlatformAdmin }, null),
-            new("견적", Icons.Material.Filled.RequestQuote, "/quotes",
-                new[] { "TenantAdmin", "Manager", "User", AccountTypeHelper.PlatformAdmin },
-                WorkDocumentKind.SalesOrder),
-            new("매입", Icons.Material.Filled.LocalShipping, "/purchase",
-                new[] { "TenantAdmin", "Manager", AccountTypeHelper.PlatformAdmin },
-                WorkDocumentKind.PurchaseReceipt),
-            new("판매", Icons.Material.Filled.PointOfSale, "/sales",
-                new[] { "TenantAdmin", "Manager", "User", AccountTypeHelper.PlatformAdmin },
-                WorkDocumentKind.SalesDelivery),
-            new("엑셀 역수입", Icons.Material.Filled.FileUpload, "/sales/import",
-                new[] { "TenantAdmin", "Manager", "User", AccountTypeHelper.PlatformAdmin }, null),
-            new("상품 마스터", Icons.Material.Filled.ViewList, "/items",
-                new[] { "TenantAdmin", "Manager", "User", AccountTypeHelper.PlatformAdmin }, null),
-            new("BOM 자재명세서", Icons.Material.Filled.AccountTree, "/bom",
-                new[] { "TenantAdmin", "Manager", "User", AccountTypeHelper.PlatformAdmin }, null),
-            new("업체 마스터", Icons.Material.Filled.BusinessCenter, "/partners",
-                new[] { "TenantAdmin", "Manager", "User", AccountTypeHelper.PlatformAdmin }, null),
-            new("업체특별단가", Icons.Material.Filled.PriceChange, "/partners/special-prices",
-                new[] { "TenantAdmin", "Manager", "User", AccountTypeHelper.PlatformAdmin }, null),
-            new("권한 설정", Icons.Material.Filled.AdminPanelSettings, "/users/permissions",
-                new[] { "TenantAdmin", AccountTypeHelper.PlatformAdmin }, null),
-            new("재고", Icons.Material.Filled.Inventory, "/stock",
-                new[] { "TenantAdmin", "Manager", "User", AccountTypeHelper.PlatformAdmin }, null),
-            new("회계", Icons.Material.Filled.AccountBalance, "/accounting",
-                new[] { "TenantAdmin", AccountTypeHelper.PlatformAdmin }, null)
-        };
-    }
+    private bool IsReseller =>
+        AccountType == "reseller" ||
+        AccountType == "reseller_admin";
 }

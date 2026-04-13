@@ -13,9 +13,12 @@ public sealed class WorkTabState
 {
     public required int Id { get; init; }
     public required WorkDocumentKind Kind { get; init; }
-    public string? DocumentNumber { get; set; }
+    public string Title { get; set; } = "";
+    public string? SubTitle { get; set; }
+    public string Url { get; set; } = "";
+    public string Icon { get; set; } = "";
     public bool IsDirty { get; set; }
 
     public string DisplayTitle =>
-        string.IsNullOrEmpty(DocumentNumber) ? "새 작업창" : DocumentNumber!;
+        string.IsNullOrEmpty(SubTitle) ? Title : $"{Title} ({SubTitle})";
 }

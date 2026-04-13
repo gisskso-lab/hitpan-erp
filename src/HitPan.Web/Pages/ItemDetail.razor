@@ -1,0 +1,171 @@
+@page "/items/new"
+@page "/items/{Id}"
+@attribute [Authorize]
+@inject ItemMasterService ItemsApi
+@inject PartnerMasterService PartnersApi
+@inject NavigationManager Nav
+@inject ISnackbar Snackbar
+
+<PageTitle>@(_isNew ? "상품 등록" : "상품 수정")</PageTitle>
+
+<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
+    <MudText Typo="Typo.h6">@(_isNew ? "상품 등록" : "상품 수정")</MudText>
+    <div style="display:flex;gap:8px">
+        <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="SaveAsync" Disabled="_saving">저장</MudButton>
+        <MudButton Variant="Variant.Outlined" Color="Color.Error" OnClick="DeleteAsync" Disabled="_isNew || _saving">삭제</MudButton>
+        <MudButton Variant="Variant.Text" OnClick="BackToList">목록으로</MudButton>
+    </div>
+</div>
+
+@if (_loading)
+{
+    <MudProgressLinear Indeterminate="true" Color="Color.Primary" />
+}
+else
+{
+    <MudGrid Spacing="2">
+        <MudItem xs="12" md="6">
+            <MudPaper Class="pa-4" Elevation="0" Style="border:1px solid var(--mud-palette-lines-default);border-radius:12px">
+                <MudText Typo="Typo.subtitle1" Class="mb-2">기본정보</MudText>
+                <MudTextField @bind-Value="_model.ItemName" Label="상품명" Required="true" Variant="Variant.Outlined" Margin="Margin.Dense" />
+                <MudTextField @bind-Value="_model.ItemCode" Label="상품코드" Variant="Variant.Outlined" Margin="Margin.Dense" />
+                <MudTextField @bind-Value="_model.ItemGroup" Label="상품그룹" Variant="Variant.Outlined" Margin="Margin.Dense" />
+                <MudSelect T="string" @bind-Value="_model.ItemType" Label="유형" Variant="Variant.Outlined" Margin="Margin.Dense">
+                    <MudSelectItem Value="@("product")">상품</MudSelectItem>
+                    <MudSelectItem Value="@("material")">자재</MudSelectItem>
+                    <MudSelectItem Value="@("finished")">완제품</MudSelectItem>
+                </MudSelect>
+                <MudTextField @bind-Value="_model.Spec" Label="규격" Variant="Variant.Outlined" Margin="Margin.Dense" />
+                <MudTextField @bind-Value="_model.Unit" Label="단위" Variant="Variant.Outlined" Margin="Margin.Dense" />
+            </MudPaper>
+        </MudItem>
+
+        <MudItem xs="12" md="6">
+            <MudPaper Class="pa-4" Elevation="0" Style="border:1px solid var(--mud-palette-lines-default);border-radius:12px">
+                <MudText Typo="Typo.subtitle1" Class="mb-2">단가</MudText>
+                <MudNumericField T="decimal" @bind-Value="_model.SalePrice" Label="판매단가" Variant="Variant.Outlined" Margin="Margin.Dense" />
+                <MudNumericField T="decimal" @bind-Value="_model.PurchasePrice" Label="매입단가" Variant="Variant.Outlined" Margin="Margin.Dense" />
+                <MudNumericField T="decimal" @bind-Value="_model.StandardPrice" Label="표준단가" Variant="Variant.Outlined" Margin="Margin.Dense" />
+                <MudSelect T="string" @bind-Value="_model.TaxType" Label="부가세 유형" Variant="Variant.Outlined" Margin="Margin.Dense">
+                    <MudSelectItem Value="@("taxable")">과세</MudSelectItem>
+                    <MudSelectItem Value="@("zero")">영세</MudSelectItem>
+                    <MudSelectItem Value="@("exempt")">면세</MudSelectItem>
+                </MudSelect>
+            </MudPaper>
+        </MudItem>
+
+        <MudItem xs="12">
+            <MudPaper Class="pa-4" Elevation="0" Style="border:1px solid var(--mud-palette-lines-default);border-radius:12px">
+                <MudText Typo="Typo.subtitle1" Class="mb-2">재고</MudText>
+                <MudGrid Spacing="2">
+                    <MudItem xs="12" md="3">
+                        <MudNumericField T="decimal" @bind-Value="_model.SafetyStock" Label="안전재고" Variant="Variant.Outlined" Margin="Margin.Dense" />
+                    </MudItem>
+                    <MudItem xs="12" md="3" Class="d-flex align-center">
+                        <MudSwitch @bind-Value="_model.AutoOrderEnabled" Color="Color.Primary">자동발주 사용</MudSwitch>
+                    </MudItem>
+                    <MudItem xs="12" md="3">
+                        <MudSelect T="string" @bind-Value="_model.AutoOrderPartnerId" Label="기본 발주처" Variant="Variant.Outlined" Margin="Margin.Dense">
+                            <MudSelectItem Value="@((string?)null)">미지정</MudSelectItem>
+                            @foreach (var partner in _partners)
+                            {
+                                <MudSelectItem Value="@partner.PartnerId">@partner.PartnerName</MudSelectItem>
+                            }
+                        </MudSelect>
+                    </MudItem>
+                    <MudItem xs="12" md="3">
+                        <MudNumericField T="decimal" @bind-Value="_model.AutoOrderQty" Label="기본 발주수량" Variant="Variant.Outlined" Margin="Margin.Dense" />
+                    </MudItem>
+                    <MudItem xs="12" md="3">
+                        <MudTextField @bind-Value="_model.Barcode" Label="바코드" Variant="Variant.Outlined" Margin="Margin.Dense" />
+                    </MudItem>
+                    <MudItem xs="12">
+                        <MudTextField @bind-Value="_model.Memo" Label="메모" Variant="Variant.Outlined" Margin="Margin.Dense" Lines="3" />
+                    </MudItem>
+                </MudGrid>
+            </MudPaper>
+        </MudItem>
+    </MudGrid>
+}
+
+@code {
+    [Parameter] public string? Id { get; set; }
+
+    private ItemDetailModel _model = new();
+    private List<PartnerListRow> _partners = new();
+    private bool _loading = true;
+    private bool _saving;
+    private bool _isNew;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        _isNew = string.IsNullOrWhiteSpace(Id) || string.Equals(Id, "new", StringComparison.OrdinalIgnoreCase);
+        _loading = true;
+        _partners = await PartnersApi.GetListAsync();
+        if (_isNew)
+        {
+            _model = new ItemDetailModel
+            {
+                ItemType = "product",
+                Unit = "EA",
+                TaxType = "taxable",
+                IsActive = true
+            };
+        }
+        else
+        {
+            var loaded = await ItemsApi.GetAsync(Id!);
+            _model = loaded ?? new ItemDetailModel();
+        }
+
+        _loading = false;
+    }
+
+    private async Task SaveAsync()
+    {
+        if (string.IsNullOrWhiteSpace(_model.ItemName))
+        {
+            Snackbar.Add("상품명은 필수입니다.", Severity.Warning);
+            return;
+        }
+
+        _saving = true;
+        var ok = _isNew
+            ? await ItemsApi.CreateAsync(_model)
+            : await ItemsApi.UpdateAsync(Id!, _model);
+        _saving = false;
+        if (!ok)
+        {
+            Snackbar.Add("저장에 실패했습니다.", Severity.Error);
+            return;
+        }
+
+        Snackbar.Add("저장되었습니다.", Severity.Success);
+        BackToList();
+    }
+
+    private async Task DeleteAsync()
+    {
+        if (_isNew)
+        {
+            return;
+        }
+
+        _saving = true;
+        var ok = await ItemsApi.DeleteAsync(Id!);
+        _saving = false;
+        if (!ok)
+        {
+            Snackbar.Add("삭제에 실패했습니다.", Severity.Error);
+            return;
+        }
+
+        Snackbar.Add("삭제되었습니다.", Severity.Success);
+        BackToList();
+    }
+
+    private void BackToList()
+    {
+        Nav.NavigateTo("/items");
+    }
+}

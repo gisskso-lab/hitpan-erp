@@ -62,9 +62,13 @@ else
                 <MudTh></MudTh>
             </HeaderContent>
             <RowTemplate>
-                <MudTd DataLabel="코드">@context.ItemCode</MudTd>
+                <MudTd DataLabel="코드">
+                    <MudButton Variant="Variant.Text" Class="pa-0 text-none" OnClick="@(() => OpenDetail(context.ItemId))">@context.ItemCode</MudButton>
+                </MudTd>
                 <MudTd DataLabel="상품명">
-                    <MudText Style="font-weight:500">@context.ItemName</MudText>
+                    <MudButton Variant="Variant.Text" Class="pa-0 text-none" OnClick="@(() => OpenDetail(context.ItemId))">
+                        <MudText Style="font-weight:500">@context.ItemName</MudText>
+                    </MudButton>
                 </MudTd>
                 <MudTd DataLabel="그룹">@context.ItemGroup</MudTd>
                 <MudTd DataLabel="규격">@context.Spec</MudTd>
@@ -141,5 +145,15 @@ else
     private void OpenCreate()
     {
         Nav.NavigateTo("/items/new");
+    }
+
+    private void OpenDetail(string? itemId)
+    {
+        if (string.IsNullOrWhiteSpace(itemId))
+        {
+            return;
+        }
+
+        Nav.NavigateTo($"/items/{itemId}");
     }
 }

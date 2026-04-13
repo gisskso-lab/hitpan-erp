@@ -2,10 +2,16 @@
 @namespace HitPan.Web.Pages.PartnerMasterUi
 @attribute [Authorize]
 @inject PartnerMasterService PartnersApi
+@inject NavigationManager Nav
 
 <PageTitle>업체 마스터</PageTitle>
 
-<MudText Typo="Typo.h6" Class="mb-3">업체 마스터</MudText>
+<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
+    <MudText Typo="Typo.h6">업체 마스터</MudText>
+    <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="@(() => Nav.NavigateTo("/partners/new"))">
+        + 업체 등록
+    </MudButton>
+</div>
 
 <MudPaper Elevation="0" Class="pa-3 mb-3" Style="border:1px solid var(--mud-palette-lines-default);border-radius:12px">
     <MudGrid Spacing="2" Class="align-center">
@@ -56,15 +62,25 @@ else
             <MudTh Style="text-align:right">여신한도</MudTh>
             <MudTh Style="text-align:right">잔액</MudTh>
             <MudTh>사용</MudTh>
+            <MudTh></MudTh>
         </HeaderContent>
         <RowTemplate>
-            <MudTd DataLabel="코드">@context.PartnerCode</MudTd>
-            <MudTd DataLabel="업체명">@context.PartnerName</MudTd>
+            <MudTd DataLabel="코드">
+                <MudButton Variant="Variant.Text" Class="pa-0 text-none" OnClick="@(() => OpenDetail(context.PartnerId))">@context.PartnerCode</MudButton>
+            </MudTd>
+            <MudTd DataLabel="업체명">
+                <MudButton Variant="Variant.Text" Class="pa-0 text-none" OnClick="@(() => OpenDetail(context.PartnerId))">@context.PartnerName</MudButton>
+            </MudTd>
             <MudTd DataLabel="유형">@context.PartnerType</MudTd>
             <MudTd DataLabel="등급">@context.PriceGrade</MudTd>
             <MudTd DataLabel="여신한도" Style="text-align:right">@context.CreditLimit.ToString("N0")</MudTd>
             <MudTd DataLabel="잔액" Style="text-align:right">@context.Balance.ToString("N0")</MudTd>
             <MudTd DataLabel="사용">@(context.IsActive ? "Y" : "N")</MudTd>
+            <MudTd>
+                <MudIconButton Icon="@Icons.Material.Filled.Edit"
+                               Size="Size.Small"
+                               OnClick="@(() => Nav.NavigateTo($"/partners/{context.PartnerId}"))" />
+            </MudTd>
         </RowTemplate>
     </MudTable>
 }
@@ -88,5 +104,15 @@ else
             string.IsNullOrWhiteSpace(_search) ? null : _search,
             string.IsNullOrWhiteSpace(_type) ? null : _type).ConfigureAwait(false);
         _loading = false;
+    }
+
+    private void OpenDetail(string? partnerId)
+    {
+        if (string.IsNullOrWhiteSpace(partnerId))
+        {
+            return;
+        }
+
+        Nav.NavigateTo($"/partners/{partnerId}");
     }
 }

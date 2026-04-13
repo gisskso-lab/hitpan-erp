@@ -36,12 +36,7 @@ public sealed class WorkTabService
         }
 
         var id = _nextId++;
-        var state = new WorkTabState
-        {
-            Id = id,
-            Kind = kind,
-            IsDirty = true
-        };
+        var state = CreateState(id, kind);
         _tabs[id] = state;
         _order.Add(id);
         _activeTabId = id;
@@ -67,7 +62,8 @@ public sealed class WorkTabService
             return;
         }
 
-        state.DocumentNumber = documentNumber;
+        state.Title = documentNumber;
+        state.SubTitle = null;
         state.IsDirty = false;
         Notify();
     }
@@ -75,6 +71,23 @@ public sealed class WorkTabService
     public Task UpdateTabTitleAsync(int tabId, string documentNumber)
     {
         UpdateTabTitle(tabId, documentNumber);
+        return Task.CompletedTask;
+    }
+
+    public void UpdateSubTitle(int tabId, string? subTitle)
+    {
+        if (!_tabs.TryGetValue(tabId, out var state))
+        {
+            return;
+        }
+
+        state.SubTitle = string.IsNullOrWhiteSpace(subTitle) ? null : subTitle.Trim();
+        Notify();
+    }
+
+    public Task UpdateSubTitleAsync(int tabId, string? subTitle)
+    {
+        UpdateSubTitle(tabId, subTitle);
         return Task.CompletedTask;
     }
 
@@ -128,4 +141,27 @@ public sealed class WorkTabService
     }
 
     private void Notify() => StateChanged?.Invoke();
+
+    private static WorkTabState CreateState(int id, WorkDocumentKind kind)
+    {
+        var (title, url, icon) = kind switch
+        {
+            WorkDocumentKind.SalesDelivery => ("거래명세서", "/deliveries", Icons.Material.Filled.Receipt),
+            WorkDocumentKind.SalesOrder => ("수주서", "/sales-orders", Icons.Material.Filled.Assignment),
+            WorkDocumentKind.PurchaseOrder => ("발주서", "/purchase-orders", Icons.Material.Filled.AddShoppingCart),
+            WorkDocumentKind.PurchaseReceipt => ("매입명세서", "/purchases", Icons.Material.Filled.MoveToInbox),
+            WorkDocumentKind.Return => ("반품", "/returns", Icons.Material.Filled.AssignmentReturn),
+            _ => ("작업", "/", Icons.Material.Filled.Description)
+        };
+
+        return new WorkTabState
+        {
+            Id = id,
+            Kind = kind,
+            Title = title,
+            Url = url,
+            Icon = icon,
+            IsDirty = true
+        };
+    }
 }

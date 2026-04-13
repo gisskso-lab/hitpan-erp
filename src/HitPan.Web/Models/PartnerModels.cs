@@ -45,7 +45,7 @@ public class SpecialPriceUpsertDto
     public bool IsActive { get; set; } = true;
 }
 
-public sealed class PartnerListRow
+public class PartnerListRow
 {
     public string PartnerId { get; set; } = "";
 
@@ -68,4 +68,22 @@ public sealed class PartnerListRow
     public bool IsActive { get; set; }
 
     public DateTime CreatedAt { get; set; }
+}
+
+public sealed class PartnerDetailModel : PartnerListRow
+{
+    public string? CeoName { get; set; }
+    public string? BizType { get; set; }
+    public string? BizItem { get; set; }
+    public string? Fax { get; set; }
+    public string? ZipCode { get; set; }
+    public string? Address { get; set; }
+    public string? Email { get; set; }
+    public string? Homepage { get; set; }
+    public string? ManagerName { get; set; }
+    public string? ManagerTel { get; set; }
+    public string TaxType { get; set; } = "taxable";
+    public int PaymentTerms { get; set; } = 30;
+    public string? Memo { get; set; }
+    public int RowVersion { get; set; }
 }

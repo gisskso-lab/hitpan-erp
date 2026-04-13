@@ -35,6 +35,12 @@ public class ItemListModel
 
 public class ItemDetailModel : ItemListModel
 {
+    public bool AutoOrderEnabled { get; set; }
+
+    public string? AutoOrderPartnerId { get; set; }
+
+    public decimal AutoOrderQty { get; set; }
+
     public string? Barcode { get; set; }
 
     public string? Memo { get; set; }
