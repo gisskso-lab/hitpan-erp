@@ -1,0 +1,124 @@
+@using HitPan.Web.Models
+@namespace HitPan.Web.Components.Purchase
+
+<!-- 매입명세 라인 MudDataGrid 인라인 편집(발주 그리드와 동일 UX). -->
+<MudDataGrid T="DeliveryLineModel"
+             Items="Lines"
+             Dense="true"
+             ReadOnly="@IsReadOnly"
+             EditMode="DataGridEditMode.Cell"
+             Hover="true"
+             Striped="true"
+             FixedHeader="true"
+             Height="calc(100vh - 360px)"
+             RowStyleFunc="GetRowStyle"
+             Class="@($"delivery-grid {GetDensityClass()}")"
+             SelectedItem="_selectedLine"
+             SelectedItemChanged="OnSelectedItemChangedAsync">
+    <Columns>
+        <TemplateColumn Title="No">
+            <CellTemplate>@context.Item.No</CellTemplate>
+        </TemplateColumn>
+
+        <TemplateColumn Title="품명">
+            <CellTemplate>
+                <MudAutocomplete T="ItemListModel"
+                                 Value="ToItemModel(context.Item)"
+                                 ValueChanged="@(item => OnItemSelectedAsync(context.Item, item))"
+                                 SearchFunc="SearchItemsAsync"
+                                 ToStringFunc="@(x => x is null ? string.Empty : x.ItemName)"
+                                 Dense="true"
+                                 Disabled="@IsReadOnly"
+                                 Placeholder="품명 검색"
+                                 KeyDownPreventDefault="true"
+                                 OnKeyDown="@(e => HandleKeyDownAsync(e, context.Item, GridColumn.ItemName))" />
+            </CellTemplate>
+        </TemplateColumn>
+
+        <TemplateColumn Title="규격">
+            <CellTemplate>
+                <MudTextField T="string"
+                              Value="context.Item.Spec"
+                              ValueChanged="@(v => UpdateSpecAsync(context.Item, v))"
+                              Margin="Margin.Dense"
+                              Disabled="@IsReadOnly"
+                              KeyDownPreventDefault="true"
+                              OnKeyDown="@(e => HandleKeyDownAsync(e, context.Item, GridColumn.Spec))" />
+            </CellTemplate>
+        </TemplateColumn>
+
+        <TemplateColumn Title="단위">
+            <CellTemplate>
+                <MudTextField T="string"
+                              Value="context.Item.Unit"
+                              ValueChanged="@(v => UpdateUnitAsync(context.Item, v))"
+                              Margin="Margin.Dense"
+                              Disabled="@IsReadOnly"
+                              KeyDownPreventDefault="true"
+                              OnKeyDown="@(e => HandleKeyDownAsync(e, context.Item, GridColumn.Unit))" />
+            </CellTemplate>
+        </TemplateColumn>
+
+        <TemplateColumn Title="수량">
+            <CellTemplate>
+                <MudNumericField T="decimal"
+                                 Value="context.Item.Qty"
+                                 ValueChanged="@(v => UpdateQtyAsync(context.Item, v))"
+                                 Margin="Margin.Dense"
+                                 Class="delivery-num-right"
+                                 Disabled="@IsReadOnly"
+                                 KeyDownPreventDefault="true"
+                                 OnKeyDown="@(e => HandleKeyDownAsync(e, context.Item, GridColumn.Qty))" />
+            </CellTemplate>
+        </TemplateColumn>
+
+        <TemplateColumn Title="단가">
+            <CellTemplate>
+                <MudNumericField T="decimal"
+                                 Value="context.Item.UnitPrice"
+                                 ValueChanged="@(v => UpdateUnitPriceAsync(context.Item, v))"
+                                 Margin="Margin.Dense"
+                                 Class="delivery-num-right"
+                                 Disabled="@IsReadOnly"
+                                 KeyDownPreventDefault="true"
+                                 OnKeyDown="@(e => HandleKeyDownAsync(e, context.Item, GridColumn.UnitPrice))" />
+            </CellTemplate>
+        </TemplateColumn>
+
+        <TemplateColumn Title="금액">
+            <CellTemplate>
+                <MudText Class="delivery-num-right">@context.Item.Amount.ToString("N0")</MudText>
+            </CellTemplate>
+        </TemplateColumn>
+
+        <TemplateColumn Title="부가세액">
+            <CellTemplate>
+                <MudText Class="delivery-num-right">@context.Item.VatAmount.ToString("N0")</MudText>
+            </CellTemplate>
+        </TemplateColumn>
+
+        <TemplateColumn Title="입고창고">
+            <CellTemplate>
+                <MudTextField T="string"
+                              Value="context.Item.Warehouse"
+                              ValueChanged="@(v => UpdateWarehouseAsync(context.Item, v))"
+                              Margin="Margin.Dense"
+                              Disabled="@IsReadOnly"
+                              KeyDownPreventDefault="true"
+                              OnKeyDown="@(e => HandleKeyDownAsync(e, context.Item, GridColumn.Warehouse))" />
+            </CellTemplate>
+        </TemplateColumn>
+
+        <TemplateColumn Title="비고">
+            <CellTemplate>
+                <MudTextField T="string"
+                              Value="context.Item.Note"
+                              ValueChanged="@(v => UpdateNoteAsync(context.Item, v))"
+                              Margin="Margin.Dense"
+                              Disabled="@IsReadOnly"
+                              KeyDownPreventDefault="true"
+                              OnKeyDown="@(e => HandleKeyDownAsync(e, context.Item, GridColumn.Note))" />
+            </CellTemplate>
+        </TemplateColumn>
+    </Columns>
+</MudDataGrid>
