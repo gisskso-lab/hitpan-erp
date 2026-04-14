@@ -35,6 +35,7 @@ builder.Services.AddScoped<ICompanyService, CompanyService>();
 builder.Services.AddScoped<ISettingsService, SettingsService>();
 builder.Services.AddScoped<IPurchaseService, PurchaseService>();
 builder.Services.AddScoped<ISalesService, SalesService>();
+builder.Services.AddScoped<IQuotationService, QuotationService>();
 builder.Services.AddScoped<DeliveryBatchService>();
 builder.Services.AddScoped<IStockService, StockService>();
 builder.Services.AddScoped<IPartnerService, PartnerService>();

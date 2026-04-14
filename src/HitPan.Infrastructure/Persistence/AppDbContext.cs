@@ -40,6 +40,8 @@ public sealed class AppDbContext : DbContext
     public DbSet<WorkflowSetting> WorkflowSettings => Set<WorkflowSetting>();
     public DbSet<SalesOrder> SalesOrders => Set<SalesOrder>();
     public DbSet<SalesOrderItem> SalesOrderItems => Set<SalesOrderItem>();
+    public DbSet<Quotation> Quotations => Set<Quotation>();
+    public DbSet<QuotationItem> QuotationItems => Set<QuotationItem>();
     public DbSet<SalesDelivery> SalesDeliveries => Set<SalesDelivery>();
     public DbSet<SalesDeliveryItem> SalesDeliveryItems => Set<SalesDeliveryItem>();
 
@@ -62,6 +64,8 @@ public sealed class AppDbContext : DbContext
         modelBuilder.ApplyConfiguration(new PurchaseReceiptItemConfiguration());
         modelBuilder.ApplyConfiguration(new SalesOrderConfiguration());
         modelBuilder.ApplyConfiguration(new SalesOrderItemConfiguration());
+        modelBuilder.ApplyConfiguration(new QuotationConfiguration());
+        modelBuilder.ApplyConfiguration(new QuotationItemConfiguration());
         modelBuilder.ApplyConfiguration(new SalesDeliveryConfiguration());
         modelBuilder.ApplyConfiguration(new SalesDeliveryItemConfiguration());
 
