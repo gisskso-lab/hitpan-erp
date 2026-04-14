@@ -18,7 +18,8 @@ public sealed class SettingsController : ControllerBase
     }
 
     [HttpGet]
-    [Authorize(Policy = "TenantAdminOnly")]
+    // TenantProfile 정책으로 플랫폼/대리점/고객사 계정의 조회 접근을 허용한다.
+    [Authorize(Policy = "TenantProfile")]
     public async Task<IActionResult> Get(CancellationToken ct)
     {
         var tenantId = HttpContext.Items["TenantId"]?.ToString();
@@ -32,7 +33,8 @@ public sealed class SettingsController : ControllerBase
     }
 
     [HttpPut]
-    [Authorize(Policy = "TenantAdminOnly")]
+    // TenantProfile 정책으로 동일 tenant 범위 내 설정 저장 접근을 허용한다.
+    [Authorize(Policy = "TenantProfile")]
     public async Task<IActionResult> Save([FromBody] UpdateTenantSettingsDto dto, CancellationToken ct)
     {
         var tenantId = HttpContext.Items["TenantId"]?.ToString();
