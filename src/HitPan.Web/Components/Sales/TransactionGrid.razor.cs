@@ -53,7 +53,8 @@ public partial class TransactionGrid : ComponentBase
         }
 
         var items = await ItemService.GetListAsync(search: keyword, group: null, type: null, ct: cancellationToken);
-        return items ?? Array.Empty<ItemListModel>();
+        // List<ItemListModel>? 와 배열은 ?? 로 결합할 수 없어(CS0019) null 분기로 반환한다.
+        return items is null ? (IEnumerable<ItemListModel>)Array.Empty<ItemListModel>() : items;
     }
 
     private ItemListModel? GetItemFromLine(DeliveryLineModel line)

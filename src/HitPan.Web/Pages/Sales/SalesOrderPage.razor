@@ -1,0 +1,77 @@
+@using HitPan.Web.Components.Sales
+@using HitPan.Web.Models
+@using HitPan.Web.Services
+@* Pages/Sales.razor 가 HitPan.Web.Pages 네임스페이스에 클래스 Sales 를 두므로, 동일 경로의 하위 네임스페이스 HitPan.Web.Pages.Sales 는 CS0101 충돌이 난다. UsersUi 등과 같이 별도 UI 네임스페이스로 분리한다. *@
+@namespace HitPan.Web.Pages.SalesOrderUi
+@inject WorkTabService TabService
+@inject DocumentService DocService
+@inject IDialogService DialogService
+@inject ISnackbar Snackbar
+
+<!-- 미저장 데이터가 있을 때 브라우저/내부 이동을 제어한다. -->
+<NavigationLock ConfirmExternalNavigation="@_hasUnsavedChanges" OnBeforeInternalNavigation="OnBeforeInternalNavigationAsync" />
+
+<section class="sales-order-page">
+    @if (_draft is null)
+    {
+        <MudProgressCircular Color="Color.Primary" Indeterminate="true" />
+    }
+    else
+    {
+        <WorkflowBreadcrumb Steps="_workflowSteps" />
+
+        <!-- SalesOrderForm 영역: 별도 컴포넌트 대신 페이지 내 입력 블록으로 구성 -->
+        <MudPaper Class="pa-3 mb-2 sales-order-form">
+            <MudGrid>
+                <MudItem xs="12" md="3">
+                    <MudDatePicker Label="주문일자" Date="_draft.SalesDate" DateChanged="OnOrderDateChangedAsync" />
+                </MudItem>
+                <MudItem xs="12" md="4">
+                    <MudTextField T="string"
+                                  Label="거래처"
+                                  Value="_draft.SalesCompany"
+                                  ValueChanged="OnSalesCompanyChangedAsync"
+                                  Margin="Margin.Dense" />
+                </MudItem>
+                <MudItem xs="12" md="5">
+                    <MudTextField T="string"
+                                  Label="메모"
+                                  Value="_draft.Memo"
+                                  ValueChanged="OnMemoChangedAsync"
+                                  Margin="Margin.Dense" />
+                </MudItem>
+            </MudGrid>
+        </MudPaper>
+
+        <MudToolBar Dense="true" Class="pa-1 gap-1 sales-order-toolbar">
+            <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Add" OnClick="AddNewAsync">추가</MudButton>
+            <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Save" OnClick="SaveAsync">저장</MudButton>
+            <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Undo" OnClick="CancelAsync">취소</MudButton>
+            <MudButton Variant="Variant.Outlined" Color="Color.Error" StartIcon="@Icons.Material.Filled.Delete" OnClick="DeleteConfirmAsync">삭제</MudButton>
+            <MudDivider Vertical="true" FlexItem="true" />
+            <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Print" OnClick="PrintAsync">인쇄</MudButton>
+            <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.TableChart" OnClick="DownloadExcelAsync">엑셀</MudButton>
+            <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.PictureAsPdf" OnClick="DownloadPdfAsync">PDF</MudButton>
+            <MudSpacer />
+            <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.FormatListBulleted" OnClick="OpenListAsync">목록</MudButton>
+        </MudToolBar>
+
+        <div class="sales-order-grid-wrap">
+            <SalesOrderGrid Lines="_draft.Lines"
+                            Density="_draft.Density"
+                            Summary="_summary"
+                            Status="_status"
+                            OnChanged="OnGridChangedAsync"
+                            SelectedLineChanged="OnSelectedLineChangedAsync" />
+        </div>
+
+        <!-- SalesOrderFooter 영역: 별도 컴포넌트 대신 페이지 내 요약 블록으로 구성 -->
+        <MudPaper Class="pa-3 mt-2 sales-order-footer">
+            <MudStack Row="true" Spacing="3">
+                <MudText Typo="Typo.body2">공급가액: @_summary.SupplyAmount.ToString("N0")</MudText>
+                <MudText Typo="Typo.body2">부가세: @_summary.VatAmount.ToString("N0")</MudText>
+                <MudText Typo="Typo.body2">합계: @_summary.TotalAmount.ToString("N0")</MudText>
+            </MudStack>
+        </MudPaper>
+    }
+</section>
