@@ -1,0 +1,73 @@
+@using HitPan.Web.Models
+@namespace HitPan.Web.Components.Purchase
+
+<!-- 발주 목록: 필터·선택·합계(데이터는 GET API 추가 전까지 빈 목록). -->
+<div class="purchase-order-list">
+    <MudPaper Class="pa-3 mb-2">
+        <MudStack Row="true" Spacing="2" AlignItems="AlignItems.Center" Wrap="Wrap.Wrap">
+            <MudDatePicker Label="시작일" Date="_startDate" DateChanged="OnStartDateChangedAsync" />
+            <MudDatePicker Label="종료일" Date="_endDate" DateChanged="OnEndDateChangedAsync" />
+
+            <MudAutocomplete T="PartnerSearchResult"
+                             Label="업체"
+                             Value="_partner"
+                             ValueChanged="OnPartnerChangedAsync"
+                             SearchFunc="SearchPartnersAsync"
+                             ToStringFunc="@(x => x is null ? string.Empty : x.PartnerName)"
+                             Dense="true"
+                             Clearable="true" />
+
+            @* Razor 에서 Value="draft" 는 식별자로 파싱되므로 문자열 리터럴로 넘긴다. *@
+            <MudSelect T="string" Label="상태" Value="_status" ValueChanged="OnStatusChangedAsync" Dense="true" Style="min-width:180px">
+                <MudSelectItem T="string" Value="@("draft")">Draft</MudSelectItem>
+                <MudSelectItem T="string" Value="@("confirmed")">Confirmed</MudSelectItem>
+                <MudSelectItem T="string" Value="@("cancelled")">Cancelled</MudSelectItem>
+            </MudSelect>
+
+            @* LoadAsync 가 CancellationToken 을 받으면 메서드 그룹을 OnClick 에 직접 넘길 수 없다. *@
+            <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="@(() => LoadAsync())">조회</MudButton>
+            <MudButton Variant="Variant.Outlined" Color="Color.Success" OnClick="BulkConfirmAsync" Disabled="@(!_selectedRows.Any())">
+                선택 일괄 확정
+            </MudButton>
+        </MudStack>
+    </MudPaper>
+
+    <MudPaper Class="pa-2 mb-2">
+        <MudStack Row="true" Spacing="3">
+            <MudText Typo="Typo.body2">선택 공급가액: @_selectedSupply.ToString("N0")</MudText>
+            <MudText Typo="Typo.body2">선택 부가세: @_selectedVat.ToString("N0")</MudText>
+            <MudText Typo="Typo.body2">선택 합계: @_selectedTotal.ToString("N0")</MudText>
+        </MudStack>
+    </MudPaper>
+
+    <MudTable T="PurchaseListRowModel" Items="_rows" Dense="true" Hover="true" Striped="true" FixedHeader="true" Height="calc(100vh - 430px)">
+        <HeaderContent>
+            <MudTh Style="width:48px">
+                <MudCheckBox T="bool" Value="_allSelected" ValueChanged="ToggleAllAsync" />
+            </MudTh>
+            <MudTh>일자</MudTh>
+            <MudTh>전표번호</MudTh>
+            <MudTh>업체</MudTh>
+            <MudTh>상태</MudTh>
+            <MudTh Class="text-right">합계</MudTh>
+        </HeaderContent>
+        <RowTemplate>
+            <MudTd>
+                <MudCheckBox T="bool"
+                             Value="context.IsChecked"
+                             ValueChanged="@(v => ToggleOneAsync(context, v))"
+                             OnClick:stopPropagation="true" />
+            </MudTd>
+            <MudTd @onclick="@(() => SelectRowAsync(context))">@context.OrderDate.ToString("yyyy-MM-dd")</MudTd>
+            <MudTd @onclick="@(() => SelectRowAsync(context))">
+                <MudText Class="@GetSelectedClass(context)">@context.OrderNo</MudText>
+            </MudTd>
+            <MudTd @onclick="@(() => SelectRowAsync(context))">@context.PartnerName</MudTd>
+            <MudTd @onclick="@(() => SelectRowAsync(context))">@context.Status</MudTd>
+            <MudTd Class="text-right" @onclick="@(() => SelectRowAsync(context))">@context.TotalAmount.ToString("N0")</MudTd>
+        </RowTemplate>
+        <NoRecordsContent>
+            <MudText Typo="Typo.body2" Class="pa-4">조회된 발주서가 없습니다.</MudText>
+        </NoRecordsContent>
+    </MudTable>
+</div>
