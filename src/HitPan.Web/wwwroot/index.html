@@ -31,6 +31,21 @@
         <span class="dismiss">🗙</span>
     </div>
     <script src="js/storage.js"></script>
+    <script src="//t1.daumcdn.net/mapjsapi/bundle/postcode/prod/postcode.v2.js"></script>
+    <script>
+        // 카카오 우편번호 팝업을 열고 결과를 Blazor 컴포넌트로 전달한다.
+        window.openDaumPostcode = function (dotnetRef) {
+            new daum.Postcode({
+                oncomplete: function (data) {
+                    // 도로명 주소를 우선 사용하고, 없으면 지번 주소를 사용한다.
+                    var fullAddress = data.roadAddress || data.jibunAddress;
+                    var zonecode = data.zonecode;
+                    // Blazor 컴포넌트의 JSInvokable 메서드로 선택 결과를 전달한다.
+                    dotnetRef.invokeMethodAsync("OnAddressSelected", zonecode, fullAddress);
+                }
+            }).open();
+        };
+    </script>
     <script src="_framework/blazor.webassembly.js"></script>
     <script src="_content/MudBlazor/MudBlazor.min.js"></script>
 </body>

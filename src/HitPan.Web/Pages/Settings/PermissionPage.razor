@@ -1,0 +1,103 @@
+@page "/settings/permissions"
+@namespace HitPan.Web.Pages.SettingsUi
+@attribute [Authorize]
+
+<PageTitle>권한설정</PageTitle>
+
+<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
+    <MudText Typo="Typo.h6">권한설정</MudText>
+    <MudText Style="font-size:12px;color:var(--mud-palette-text-secondary)">관리자(사장)가 직원별 메뉴 권한을 자유롭게 부여</MudText>
+</div>
+
+@if (_loading)
+{
+    <MudProgressLinear Indeterminate="true" Color="Color.Primary" />
+}
+else
+{
+    <MudGrid Spacing="2">
+        <MudItem xs="12" md="4">
+            <MudPaper Elevation="0" Class="pa-3" Style="border:0.5px solid var(--mud-palette-lines-default);border-radius:12px">
+                <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
+                    <MudText Typo="Typo.subtitle2">직원 목록</MudText>
+                    <MudButton Size="Size.Small" Variant="Variant.Outlined" OnClick="OpenAddEmployeeDialog">+ 직원추가</MudButton>
+                </div>
+                <MudTable T="PermissionEmployeeRowModel" Items="_employees" Dense="true" Hover="true" FixedHeader="true" Height="420px">
+                    <HeaderContent>
+                        <MudTh>이름</MudTh>
+                        <MudTh>이메일</MudTh>
+                        <MudTh>부서</MudTh>
+                        <MudTh>직급</MudTh>
+                    </HeaderContent>
+                    <RowTemplate>
+                        <MudTd @onclick="@(() => SelectEmployee(context.UserId))">
+                            <MudText Class="@GetSelectedClass(context.UserId)">@context.DisplayName</MudText>
+                        </MudTd>
+                        <MudTd @onclick="@(() => SelectEmployee(context.UserId))">@context.Email</MudTd>
+                        <MudTd @onclick="@(() => SelectEmployee(context.UserId))">@context.Department</MudTd>
+                        <MudTd @onclick="@(() => SelectEmployee(context.UserId))">@context.Position</MudTd>
+                    </RowTemplate>
+                    <NoRecordsContent>
+                        <MudText Typo="Typo.body2" Class="pa-4">조회된 직원이 없습니다.</MudText>
+                    </NoRecordsContent>
+                </MudTable>
+            </MudPaper>
+        </MudItem>
+        <MudItem xs="12" md="8">
+            <MudPaper Elevation="0" Class="pa-3" Style="border:0.5px solid var(--mud-palette-lines-default);border-radius:12px">
+                @if (SelectedEmployee is null)
+                {
+                    <MudAlert Severity="Severity.Info" Dense="true">좌측 직원 행을 선택하면 권한을 편집할 수 있습니다.</MudAlert>
+                }
+                else
+                {
+                    <div style="display:flex;align-items:center;gap:8px;margin-bottom:12px">
+                        <MudText Typo="Typo.subtitle2">@SelectedEmployee.DisplayName 권한 설정</MudText>
+                        <MudText Style="font-size:12px;color:var(--mud-palette-text-secondary)">@SelectedEmployee.Department / @SelectedEmployee.Position</MudText>
+                        <div style="margin-left:auto;display:flex;gap:8px">
+                            <MudButton Size="Size.Small" Variant="Variant.Outlined" OnClick="@(() => SelectAll(SelectedEmployee.PermissionSource, true))">전체허용</MudButton>
+                            <MudButton Size="Size.Small" Variant="Variant.Outlined" OnClick="@(() => SelectAll(SelectedEmployee.PermissionSource, false))">전체해제</MudButton>
+                            <MudButton Size="Size.Small" Variant="Variant.Filled" Color="Color.Primary" OnClick="@(() => SaveEmployeePermissionsAsync(SelectedEmployee.PermissionSource))">저장</MudButton>
+                        </div>
+                    </div>
+                    @RenderPermissionTable(SelectedEmployee.PermissionSource.Permissions)
+                }
+            </MudPaper>
+        </MudItem>
+    </MudGrid>
+}
+
+@code {
+    /// <summary>
+    /// 권한 체크박스 테이블을 렌더링한다.
+    /// </summary>
+    /// <param name="permissions">권한 목록</param>
+    /// <returns>렌더 프래그먼트</returns>
+    private RenderFragment RenderPermissionTable(List<MenuPermissionModel> permissions) => @<MudPaper Elevation="0" Style="border:0.5px solid var(--mud-palette-lines-default);border-radius:12px;overflow:hidden">
+        <table style="width:100%;border-collapse:collapse;font-size:12px">
+            <thead>
+                <tr style="background:var(--mud-palette-background-grey)">
+                    <th style="padding:8px 12px;text-align:left;font-weight:500;width:180px">메뉴</th>
+                    <th style="padding:8px;text-align:center;width:60px">조회</th>
+                    <th style="padding:8px;text-align:center;width:60px">등록</th>
+                    <th style="padding:8px;text-align:center;width:60px">수정</th>
+                    <th style="padding:8px;text-align:center;width:60px">삭제</th>
+                    <th style="padding:8px;text-align:center;width:60px">출력</th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var perm in permissions)
+                {
+                    <tr style="border-bottom:0.5px solid var(--mud-palette-lines-default)">
+                        <td style="padding:6px 12px;font-weight:500">@perm.MenuName</td>
+                        <td style="text-align:center;padding:6px"><MudCheckBox T="bool" @bind-Value="perm.CanView" Color="Color.Primary" Dense="true" /></td>
+                        <td style="text-align:center;padding:6px"><MudCheckBox T="bool" @bind-Value="perm.CanCreate" Color="Color.Primary" Dense="true" /></td>
+                        <td style="text-align:center;padding:6px"><MudCheckBox T="bool" @bind-Value="perm.CanUpdate" Color="Color.Primary" Dense="true" /></td>
+                        <td style="text-align:center;padding:6px"><MudCheckBox T="bool" @bind-Value="perm.CanDelete" Color="Color.Primary" Dense="true" /></td>
+                        <td style="text-align:center;padding:6px"><MudCheckBox T="bool" @bind-Value="perm.CanExport" Color="Color.Primary" Dense="true" /></td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </MudPaper>;
+}
