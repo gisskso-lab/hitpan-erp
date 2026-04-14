@@ -1,3 +1,4 @@
+@page "/deliveries"
 @using System.Security.Claims
 @using HitPan.Web.Components.Sales
 @using HitPan.Web.Models
@@ -131,6 +132,10 @@
     {
         RefreshWorkflow();
         MarkDirty();
+        if (TabService.ActiveTabId is { } tabId)
+        {
+            TabService.UpdateSubTitle(tabId, _draft?.SalesCompany);
+        }
         await InvokeAsync(StateHasChanged);
     }
 
@@ -244,7 +249,7 @@
             var docNo = await DeliveryService.SaveAsync(_draft);
             if (TabService.ActiveTabId is { } tabId)
             {
-                TabService.UpdateTabTitle(tabId, docNo);
+                TabService.UpdateSubTitle(tabId, _draft.SalesCompany);
             }
 
             _hasUnsavedChanges = false;
@@ -639,7 +644,7 @@
 
         if (TabService.ActiveTabId is { } currentTabId)
         {
-            await TabService.UpdateTabTitleAsync(currentTabId, $"거래명세서 [{detail.DeliveryNo}]");
+            await TabService.UpdateSubTitleAsync(currentTabId, detail.PartnerName);
         }
 
         await InvokeAsync(StateHasChanged);
