@@ -7,8 +7,7 @@ namespace HitPan.API.Controllers;
 
 [ApiController]
 [Route("api/permissions")]
-// TenantProfile 정책으로 플랫폼/대리점/고객사 계정 접근을 허용하되 tenant 경계는 서비스에서 유지한다.
-[Authorize(Policy = "TenantProfile")]
+[Authorize(Policy = "TenantAdminOnly")]
 public class PermissionController : ControllerBase
 {
     private readonly IPermissionService _svc;
