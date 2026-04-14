@@ -75,14 +75,8 @@ public partial class PermissionPage : ComponentBase
                 EnsureErpPermissionSet(user);
             }
 
-            // 권한설정은 고객사 직원만 대상이므로 대리점·플랫폼 계정은 목록에서 제외한다.
+            // 역할 구분 없이 직원 단위로 권한을 편집할 수 있도록 목록을 구성한다.
             _employees = _allUsers
-                .Where(static x =>
-                    !x.Role.Contains("reseller", StringComparison.OrdinalIgnoreCase) &&
-                    !x.Role.Contains("dealer", StringComparison.OrdinalIgnoreCase) &&
-                    !x.Role.Contains("platform", StringComparison.OrdinalIgnoreCase) &&
-                    !x.Role.Contains("대리점", StringComparison.OrdinalIgnoreCase) &&
-                    !x.Role.Contains("플랫폼", StringComparison.OrdinalIgnoreCase))
                 .Select(static x => new PermissionEmployeeRowModel
                 {
                     UserId = x.UserId,
