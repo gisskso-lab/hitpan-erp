@@ -33,6 +33,21 @@
     <script src="js/storage.js"></script>
     <script src="_framework/blazor.webassembly.js"></script>
     <script src="_content/MudBlazor/MudBlazor.min.js"></script>
+    <!-- 카카오 우편번호 API -->
+    <script src="https://t1.daumcdn.net/mapjsapi/bundle/postcode/prod/postcode.v2.js"></script>
+
+    <!-- 히트판 우편번호 찾기 interop -->
+    <script>
+        // 카카오 우편번호 팝업을 열고 선택 결과를 Blazor로 전달한다.
+        function openDaumPostcode(dotNetRef) {
+            new daum.Postcode({
+                oncomplete: function (data) {
+                    // 선택한 우편번호와 기본주소를 Blazor 콜백으로 전달한다.
+                    dotNetRef.invokeMethodAsync('OnAddressSelected', data.zonecode, data.roadAddress || data.jibunAddress);
+                }
+            }).open();
+        }
+    </script>
 </body>
 
 </html>

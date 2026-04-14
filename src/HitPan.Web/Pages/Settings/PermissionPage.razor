@@ -1,0 +1,105 @@
+@page "/users/permissions"
+@namespace HitPan.Web.Pages.SettingsUi
+@attribute [Authorize]
+@using HitPan.Web.Models
+@using HitPan.Web.Services
+@inject PermissionService PermSvc
+@inject ISnackbar Snackbar
+
+<PageTitle>권한설정</PageTitle>
+
+<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
+    <MudText Typo="Typo.h6">권한설정</MudText>
+    <MudText Style="font-size:12px;color:var(--mud-palette-text-secondary)">
+        고객사 관리자(사장)가 자기 회사 직원에게 메뉴별 권한 부여
+    </MudText>
+</div>
+
+@if (_loading)
+{
+    <MudProgressLinear Indeterminate="true" Color="Color.Primary" />
+}
+else
+{
+    <MudGrid Spacing="3">
+        <!-- 좌측: 직원 목록 -->
+        <MudItem xs="12" md="4">
+            <MudPaper Elevation="0" Class="pa-3" Style="border:0.5px solid var(--mud-palette-lines-default);border-radius:12px">
+                <MudText Typo="Typo.subtitle2" Class="mb-2">직원 목록</MudText>
+                <MudList T="string" Dense="true" @bind-SelectedValue="_selectedUserId">
+                    @foreach (var user in _users)
+                    {
+                        <MudListItem T="string"
+                                     Value="@user.UserId"
+                                     OnClick="@(() => SelectEmployee(user.UserId))"
+                                     Style="@(user.UserId == _selectedUserId ? "background:var(--mud-palette-primary-lighten);font-weight:500" : "")">
+                            <div style="display:flex;align-items:center;gap:8px">
+                                <!-- 이니셜 아바타 -->
+                                <div style="width:32px;height:32px;border-radius:50%;background:#E6F1FB;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:500;color:#185FA5">
+                                    @((user.EmpName ?? user.UserName).Substring(0, 1))
+                                </div>
+                                <div>
+                                    <div style="font-size:13px;font-weight:500">@(user.EmpName ?? user.UserName)</div>
+                                    <div style="font-size:11px;color:var(--mud-palette-text-secondary)">@GetRoleLabel(user.Role)</div>
+                                </div>
+                            </div>
+                        </MudListItem>
+                    }
+                </MudList>
+            </MudPaper>
+        </MudItem>
+
+        <!-- 우측: 선택된 직원의 권한 체크박스 -->
+        <MudItem xs="12" md="8">
+            @if (_selectedUser is not null)
+            {
+                <MudPaper Elevation="0" Class="pa-3" Style="border:0.5px solid var(--mud-palette-lines-default);border-radius:12px">
+                    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
+                        <MudText Typo="Typo.subtitle2">@(_selectedUser.EmpName ?? _selectedUser.UserName) 권한</MudText>
+                        <div style="display:flex;gap:8px">
+                            <!-- 전체허용 버튼 -->
+                            <MudButton Size="Size.Small" Variant="Variant.Outlined" OnClick="@(() => ToggleAll(true))">전체허용</MudButton>
+                            <!-- 전체해제 버튼 -->
+                            <MudButton Size="Size.Small" Variant="Variant.Outlined" OnClick="@(() => ToggleAll(false))">전체해제</MudButton>
+                            <!-- 저장 버튼 -->
+                            <MudButton Size="Size.Small" Variant="Variant.Filled" Color="Color.Primary" OnClick="SaveAsync">저장</MudButton>
+                        </div>
+                    </div>
+                    <MudPaper Elevation="0" Style="border:0.5px solid var(--mud-palette-lines-default);border-radius:8px;overflow:hidden">
+                        <table style="width:100%;border-collapse:collapse;font-size:12px">
+                            <thead>
+                                <tr style="background:var(--mud-palette-background-grey)">
+                                    <th style="padding:8px 12px;text-align:left;font-weight:500;width:140px">메뉴</th>
+                                    <th style="padding:8px;text-align:center;width:60px">조회</th>
+                                    <th style="padding:8px;text-align:center;width:60px">등록</th>
+                                    <th style="padding:8px;text-align:center;width:60px">수정</th>
+                                    <th style="padding:8px;text-align:center;width:60px">삭제</th>
+                                    <th style="padding:8px;text-align:center;width:60px">출력</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                @foreach (var perm in _selectedUser.Permissions)
+                                {
+                                    <tr style="border-bottom:0.5px solid var(--mud-palette-lines-default)">
+                                        <td style="padding:6px 12px;font-weight:500">@perm.MenuName</td>
+                                        <td style="text-align:center;padding:6px"><MudCheckBox T="bool" @bind-Value="perm.CanView" Color="Color.Primary" Dense="true" /></td>
+                                        <td style="text-align:center;padding:6px"><MudCheckBox T="bool" @bind-Value="perm.CanCreate" Color="Color.Primary" Dense="true" /></td>
+                                        <td style="text-align:center;padding:6px"><MudCheckBox T="bool" @bind-Value="perm.CanUpdate" Color="Color.Primary" Dense="true" /></td>
+                                        <td style="text-align:center;padding:6px"><MudCheckBox T="bool" @bind-Value="perm.CanDelete" Color="Color.Primary" Dense="true" /></td>
+                                        <td style="text-align:center;padding:6px"><MudCheckBox T="bool" @bind-Value="perm.CanExport" Color="Color.Primary" Dense="true" /></td>
+                                    </tr>
+                                }
+                            </tbody>
+                        </table>
+                    </MudPaper>
+                </MudPaper>
+            }
+            else
+            {
+                <MudPaper Elevation="0" Class="pa-4" Style="border:0.5px solid var(--mud-palette-lines-default);border-radius:12px;text-align:center">
+                    <MudText Style="color:var(--mud-palette-text-secondary)">좌측에서 직원을 선택하세요</MudText>
+                </MudPaper>
+            }
+        </MudItem>
+    </MudGrid>
+}
