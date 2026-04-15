@@ -44,6 +44,8 @@ builder.Services.AddScoped<PartnerMasterService>();
 builder.Services.AddScoped<ItemMasterService>();
 builder.Services.AddScoped<BomService>();
 builder.Services.AddScoped<PermissionService>();
+builder.Services.AddScoped<EmployeeService>();
+builder.Services.AddScoped<LeaveRequestService>();
 builder.Services.AddScoped<DocumentService>();
 builder.Services.AddScoped<SpecialPriceService>();
 builder.Services.AddTransient<HitPanApiAuthHandler>();
