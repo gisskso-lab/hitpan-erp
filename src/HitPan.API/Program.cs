@@ -54,7 +54,7 @@ builder.Services.AddJwtAuthentication();
 builder.Services.AddAuthorization(options =>
 {
     options.AddPolicy("SalesOnly", policy =>
-        policy.RequireRole("system_admin", "sales_manager", "sales_user"));
+        policy.RequireRole("system_admin", "sales_manager", "sales_user", "TenantAdmin", "tenant_admin"));
     options.AddPolicy("SalesManager", policy =>
         policy.RequireRole("system_admin", "sales_manager"));
     options.AddPolicy("PurchaseOnly", policy =>
