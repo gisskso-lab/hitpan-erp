@@ -35,6 +35,27 @@ public partial class UserInfoPage : ComponentBase, IDisposable
             {
                 _model.BusinessType = current.IndustryType;
             }
+
+            // tenants 테이블에서 사업장 정보를 불러와 화면 모델에 반영한다.
+            var company = await SettingsSvc.GetCompanyAsync().ConfigureAwait(false);
+            if (company is not null)
+            {
+                _model.CompanyName = company.CompanyName;
+                _model.CeoName = company.CeoName;
+                _model.BusinessNo = company.BizNo;
+                _model.BusinessType = company.BizType ?? string.Empty;
+                _model.BusinessCategory = company.BizItem ?? string.Empty;
+                _model.Phone = company.Tel ?? string.Empty;
+                _model.Fax = company.Fax ?? string.Empty;
+                _model.Email = company.Email ?? string.Empty;
+                _model.Homepage = company.Homepage ?? string.Empty;
+                _model.ZipCode = company.ZipCode ?? string.Empty;
+                _model.Address = company.Address ?? string.Empty;
+                _model.AddressDetail = company.AddressDetail ?? string.Empty;
+                _model.CorporateNo = company.CorpNo ?? string.Empty;
+                _model.BranchNo = company.SubsidiaryNo ?? string.Empty;
+            }
+
             _subscription = new SubscriptionInfoViewModel
             {
                 PlanName = "Business",
@@ -154,9 +175,30 @@ public partial class UserInfoPage : ComponentBase, IDisposable
         _saving = true;
         var current = await SettingsSvc.GetAsync().ConfigureAwait(false) ?? new TenantSettingsModel();
         current.IndustryType = _model.BusinessType;
-        var ok = await SettingsSvc.SaveAsync(current).ConfigureAwait(false);
+        var okSettings = await SettingsSvc.SaveAsync(current).ConfigureAwait(false);
+
+        // tenants 사업장 컬럼과 동일한 필드만 API로 전달한다(비고·이미지 미리보기 등은 별도 저장 대상 아님).
+        var company = new TenantCompanyModel
+        {
+            CompanyName = _model.CompanyName,
+            CeoName = _model.CeoName,
+            BizNo = _model.BusinessNo,
+            BizType = _model.BusinessType,
+            BizItem = _model.BusinessCategory,
+            Tel = _model.Phone,
+            Fax = _model.Fax,
+            Email = _model.Email,
+            Homepage = _model.Homepage,
+            ZipCode = _model.ZipCode,
+            Address = _model.Address,
+            AddressDetail = _model.AddressDetail,
+            CorpNo = _model.CorporateNo,
+            SubsidiaryNo = _model.BranchNo
+        };
+        var okCompany = await SettingsSvc.SaveCompanyAsync(company).ConfigureAwait(false);
+
         _saving = false;
-        if (ok)
+        if (okSettings && okCompany)
         {
             Snackbar.Add("사용자정보설정이 적용되었습니다.", Severity.Success);
         }

@@ -135,6 +135,152 @@ public sealed class SettingsService : ISettingsService
             cancellationToken: ct)).ConfigureAwait(false);
     }
 
+    /// <summary>
+    /// tenants 테이블에 사업장 연락처·주소 등 표시용 정보를 저장한다.
+    /// </summary>
+    public async Task SaveCompanyAsync(UpdateTenantCompanyDto dto, string tenantId, CancellationToken ct = default)
+    {
+        await EnsureOpenAsync(ct).ConfigureAwait(false);
+
+        // NOT NULL 컬럼(상호·대표·사업자번호)은 빈 값이 오면 DB 기존 값을 유지한다.
+        const string selectRequired = """
+            SELECT
+              company_name AS CompanyName,
+              ceo_name AS CeoName,
+              biz_no AS BizNo
+            FROM tenants
+            WHERE tenant_id = @TenantId
+            """;
+
+        var required = await _db.QueryFirstOrDefaultAsync<TenantCompanyRequiredRow>(
+                new CommandDefinition(selectRequired, new { TenantId = tenantId }, cancellationToken: ct))
+            .ConfigureAwait(false);
+
+        if (required is null)
+        {
+            return;
+        }
+
+        var companyName = string.IsNullOrWhiteSpace(dto.CompanyName) ? required.CompanyName : dto.CompanyName.Trim();
+        var ceoName = string.IsNullOrWhiteSpace(dto.CeoName) ? required.CeoName : dto.CeoName.Trim();
+        var bizNo = string.IsNullOrWhiteSpace(dto.BizNo) ? required.BizNo : dto.BizNo.Trim();
+        if (bizNo.Length > 12)
+        {
+            bizNo = bizNo[..12];
+        }
+
+        // tenants.address 단일 컬럼이므로 기본주소와 상세주소를 한 줄로 합친다.
+        var combinedAddress = $"{dto.Address?.Trim() ?? string.Empty} {dto.AddressDetail?.Trim() ?? string.Empty}".Trim();
+        if (combinedAddress.Length > 200)
+        {
+            combinedAddress = combinedAddress[..200];
+        }
+
+        var subsidiaryNo = dto.SubsidiaryNo?.Trim() ?? string.Empty;
+        if (subsidiaryNo.Length > 4)
+        {
+            subsidiaryNo = subsidiaryNo[..4];
+        }
+
+        var corpNo = dto.CorpNo?.Trim();
+        if (!string.IsNullOrEmpty(corpNo) && corpNo.Length > 13)
+        {
+            corpNo = corpNo[..13];
+        }
+
+        var tel = TruncateNullable(dto.Tel, 20);
+        var fax = TruncateNullable(dto.Fax, 20);
+        var email = TruncateNullable(dto.Email, 100);
+        var homepage = TruncateNullable(dto.Homepage, 200);
+        var zipCode = TruncateNullable(dto.ZipCode, 10);
+        var bizType = TruncateNullable(dto.BizType, 50);
+        var bizItem = TruncateNullable(dto.BizItem, 100);
+
+        const string updateSql = """
+            UPDATE tenants SET
+              company_name = @CompanyName,
+              ceo_name = @CeoName,
+              biz_no = @BizNo,
+              biz_type = @BizType,
+              biz_item = @BizItem,
+              tel = @Tel,
+              fax = @Fax,
+              email = @Email,
+              homepage = @Homepage,
+              zip_code = @ZipCode,
+              address = @Address,
+              corp_no = @CorpNo,
+              subsidiary_no = @SubsidiaryNo,
+              updated_at = NOW(6)
+            WHERE tenant_id = @TenantId
+            """;
+
+        await _db.ExecuteAsync(new CommandDefinition(
+                updateSql,
+                new
+                {
+                    TenantId = tenantId,
+                    CompanyName = companyName,
+                    CeoName = ceoName,
+                    BizNo = bizNo,
+                    BizType = bizType,
+                    BizItem = bizItem,
+                    Tel = tel,
+                    Fax = fax,
+                    Email = email,
+                    Homepage = homepage,
+                    ZipCode = zipCode,
+                    Address = string.IsNullOrEmpty(combinedAddress) ? null : combinedAddress,
+                    CorpNo = corpNo,
+                    SubsidiaryNo = string.IsNullOrEmpty(subsidiaryNo) ? null : subsidiaryNo
+                },
+                cancellationToken: ct))
+            .ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// tenants 테이블에서 사업장 기본 정보를 조회한다.
+    /// </summary>
+    public async Task<UpdateTenantCompanyDto?> GetCompanyAsync(string tenantId, CancellationToken ct = default)
+    {
+        await EnsureOpenAsync(ct).ConfigureAwait(false);
+        const string sql = """
+            SELECT
+              company_name AS CompanyName,
+              ceo_name AS CeoName,
+              biz_no AS BizNo,
+              biz_type AS BizType,
+              biz_item AS BizItem,
+              tel AS Tel,
+              fax AS Fax,
+              email AS Email,
+              homepage AS Homepage,
+              zip_code AS ZipCode,
+              address AS Address,
+              corp_no AS CorpNo,
+              subsidiary_no AS SubsidiaryNo
+            FROM tenants
+            WHERE tenant_id = @TenantId
+            """;
+        return await _db.QueryFirstOrDefaultAsync<UpdateTenantCompanyDto>(
+                new CommandDefinition(sql, new { TenantId = tenantId }, cancellationToken: ct))
+            .ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// NULL 허용 문자열을 최대 길이로 잘라 tenants 컬럼 제약에 맞춘다.
+    /// </summary>
+    private static string? TruncateNullable(string? value, int maxLen)
+    {
+        if (string.IsNullOrEmpty(value))
+        {
+            return null;
+        }
+
+        var t = value.Trim();
+        return t.Length <= maxLen ? t : t[..maxLen];
+    }
+
     public async Task<UnitPriceValidationDto> ValidateUnitPriceAsync(
         string tenantId,
         decimal unitPrice,
@@ -301,6 +447,15 @@ public sealed class SettingsService : ISettingsService
         }
 
         _db.Open();
+    }
+
+    private sealed class TenantCompanyRequiredRow
+    {
+        public string CompanyName { get; set; } = string.Empty;
+
+        public string CeoName { get; set; } = string.Empty;
+
+        public string BizNo { get; set; } = string.Empty;
     }
 
     private sealed class TenantSettingsRow

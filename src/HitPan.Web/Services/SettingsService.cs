@@ -38,6 +38,38 @@ public sealed class SettingsService(HttpClient http)
         }
     }
 
+    /// <summary>
+    /// 사업장 기본정보를 tenants 테이블에 반영한다.
+    /// </summary>
+    public async Task<bool> SaveCompanyAsync(TenantCompanyModel model, CancellationToken ct = default)
+    {
+        try
+        {
+            using var res = await http.PutAsJsonAsync("api/settings/company", model, ct).ConfigureAwait(false);
+            return res.IsSuccessStatusCode;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// 사업장 기본정보를 조회한다.
+    /// </summary>
+    public async Task<TenantCompanyModel?> GetCompanyAsync(CancellationToken ct = default)
+    {
+        try
+        {
+            return await http.GetFromJsonAsync<TenantCompanyModel>("api/settings/company", JsonOptions, ct)
+                .ConfigureAwait(false);
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
     public async Task<bool> VerifyForcePasswordAsync(string password, CancellationToken ct = default)
     {
         try

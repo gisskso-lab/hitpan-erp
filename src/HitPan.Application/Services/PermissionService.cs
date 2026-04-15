@@ -50,6 +50,7 @@ public class PermissionService : IPermissionService
             WHERE tenant_id = @TenantId
               AND is_deleted = 0
               AND is_active = 1
+              AND account_type IN ('tenant_admin', 'tenant_user') -- 플랫폼·리셀러 관리자는 권한 설정 대상에서 제외
             ORDER BY
               CASE role
                 WHEN 'TenantAdmin' THEN 1
@@ -89,6 +90,7 @@ public class PermissionService : IPermissionService
             WHERE user_id = @UserId
               AND tenant_id = @TenantId
               AND is_deleted = 0
+              AND account_type IN ('tenant_admin', 'tenant_user') -- 플랫폼·리셀러 관리자는 조회·편집 대상에서 제외
             """,
             new { UserId = userId, TenantId = tenantId },
             cancellationToken: ct)).ConfigureAwait(false);

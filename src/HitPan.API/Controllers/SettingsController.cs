@@ -45,6 +45,45 @@ public sealed class SettingsController : ControllerBase
         return Ok();
     }
 
+    /// <summary>
+    /// 사업장 기본정보(tenants)를 조회한다.
+    /// </summary>
+    [HttpGet("company")]
+    [Authorize(Policy = "TenantAdminOnly")]
+    public async Task<IActionResult> GetCompany(CancellationToken ct)
+    {
+        var tenantId = HttpContext.Items["TenantId"]?.ToString();
+        if (string.IsNullOrEmpty(tenantId))
+        {
+            return Forbid();
+        }
+
+        var dto = await _settingsService.GetCompanyAsync(tenantId, ct).ConfigureAwait(false);
+        if (dto is null)
+        {
+            return NotFound();
+        }
+
+        return Ok(dto);
+    }
+
+    /// <summary>
+    /// 사업장 기본정보(tenants)를 갱신한다.
+    /// </summary>
+    [HttpPut("company")]
+    [Authorize(Policy = "TenantAdminOnly")]
+    public async Task<IActionResult> SaveCompany([FromBody] UpdateTenantCompanyDto dto, CancellationToken ct)
+    {
+        var tenantId = HttpContext.Items["TenantId"]?.ToString();
+        if (string.IsNullOrEmpty(tenantId))
+        {
+            return Forbid();
+        }
+
+        await _settingsService.SaveCompanyAsync(dto, tenantId, ct).ConfigureAwait(false);
+        return Ok();
+    }
+
     [HttpPost("validate-unit-price")]
     public async Task<IActionResult> ValidateUnitPrice(
         [FromBody] ValidateUnitPriceRequestDto dto,

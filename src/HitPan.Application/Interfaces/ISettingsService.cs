@@ -8,6 +8,16 @@ public interface ISettingsService
 
     Task SaveAsync(UpdateTenantSettingsDto dto, string tenantId, CancellationToken ct = default);
 
+    /// <summary>
+    /// tenants 행의 사업장 기본 정보를 갱신한다.
+    /// </summary>
+    Task SaveCompanyAsync(UpdateTenantCompanyDto dto, string tenantId, CancellationToken ct = default);
+
+    /// <summary>
+    /// tenants 테이블에서 사업장 기본 정보를 조회한다.
+    /// </summary>
+    Task<UpdateTenantCompanyDto?> GetCompanyAsync(string tenantId, CancellationToken ct = default);
+
     Task<UnitPriceValidationDto> ValidateUnitPriceAsync(
         string tenantId,
         decimal unitPrice,
