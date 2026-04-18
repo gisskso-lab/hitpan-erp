@@ -37,8 +37,8 @@ public partial class ReturnPage : ComponentBase
     private async Task<IEnumerable<string>> SearchPartnerAsync(string value, CancellationToken ct)
     {
         _partnerCache ??= await PartnersApi.GetListAsync() ?? new();
-        if (string.IsNullOrWhiteSpace(value)) return _partnerCache.Select(p => p.PartnerName);
-        return _partnerCache.Where(p => p.PartnerName.Contains(value, StringComparison.OrdinalIgnoreCase)).Select(p => p.PartnerName);
+        if (string.IsNullOrWhiteSpace(value)) return _partnerCache.Select(p => p.PartnerName).Distinct();
+        return _partnerCache.Where(p => p.PartnerName.Contains(value, StringComparison.OrdinalIgnoreCase)).Select(p => p.PartnerName).Distinct();
     }
 
     private async Task OnBeforeInternalNavigationAsync(LocationChangingContext context)

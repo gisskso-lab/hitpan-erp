@@ -87,8 +87,8 @@ public partial class QuotationGrid : ComponentBase
     private Task<IEnumerable<string>> SearchItemAsync(string value, CancellationToken ct)
     {
         if (ItemCache is null) return Task.FromResult(Enumerable.Empty<string>());
-        if (string.IsNullOrWhiteSpace(value)) return Task.FromResult(ItemCache.Select(i => i.ItemName));
-        return Task.FromResult(ItemCache.Where(i => i.ItemName.Contains(value, StringComparison.OrdinalIgnoreCase)).Select(i => i.ItemName));
+        if (string.IsNullOrWhiteSpace(value)) return Task.FromResult(ItemCache.Select(i => i.ItemName).Distinct());
+        return Task.FromResult(ItemCache.Where(i => i.ItemName.Contains(value, StringComparison.OrdinalIgnoreCase)).Select(i => i.ItemName).Distinct());
     }
 
     /// <summary>
