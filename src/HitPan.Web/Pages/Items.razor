@@ -3,6 +3,8 @@
 @attribute [Authorize]
 @inject ItemMasterService ItemsApi
 @inject NavigationManager Nav
+@inject ISnackbar Snackbar
+@inject IDialogService DialogService
 
 <PageTitle>상품 마스터</PageTitle>
 
@@ -35,6 +37,7 @@
             <MudSelectItem Value="@("")">전체</MudSelectItem>
             <MudSelectItem Value="@("product")">상품</MudSelectItem>
             <MudSelectItem Value="@("material")">자재</MudSelectItem>
+            <MudSelectItem Value="@("semi_finished")">반제품</MudSelectItem>
             <MudSelectItem Value="@("finished")">완제품</MudSelectItem>
         </MudSelect>
         <MudButton Variant="Variant.Outlined" OnClick="Search">검색</MudButton>
@@ -53,7 +56,7 @@ else
             <HeaderContent>
                 <MudTh>코드</MudTh>
                 <MudTh>상품명</MudTh>
-                <MudTh>그룹</MudTh>
+                <MudTh>유형</MudTh>
                 <MudTh>규격</MudTh>
                 <MudTh>단위</MudTh>
                 <MudTh Style="text-align:right">판매단가</MudTh>
@@ -70,7 +73,12 @@ else
                         <MudText Style="font-weight:500">@context.ItemName</MudText>
                     </MudButton>
                 </MudTd>
-                <MudTd DataLabel="그룹">@context.ItemGroup</MudTd>
+                <MudTd DataLabel="유형">
+                    <MudChip T="string" Size="Size.Small" Variant="Variant.Text"
+                             Color="@GetTypeColor(context.ItemType)">
+                        @GetTypeLabel(context.ItemType)
+                    </MudChip>
+                </MudTd>
                 <MudTd DataLabel="규격">@context.Spec</MudTd>
                 <MudTd DataLabel="단위">@context.Unit</MudTd>
                 <MudTd DataLabel="판매단가" Style="text-align:right">@context.SalePrice.ToString("N0")</MudTd>
@@ -89,6 +97,10 @@ else
                     <MudIconButton Icon="@Icons.Material.Filled.Edit"
                                    Size="Size.Small"
                                    OnClick="@(() => Nav.NavigateTo($"/items/{context.ItemId}"))" />
+                    <MudIconButton Icon="@Icons.Material.Filled.Delete"
+                                   Size="Size.Small"
+                                   Color="Color.Error"
+                                   OnClick="@(() => DeleteAsync(context))" />
                 </MudTd>
             </RowTemplate>
             <NoRecordsContent>
@@ -114,9 +126,6 @@ else
         await LoadList();
     }
 
-    private static string StockColor(ItemListModel x)
-        => x.SafetyStock > 0 && x.CurrentStock <= x.SafetyStock ? "#E24B4A" : "inherit";
-
     private async Task LoadList()
     {
         _loading = true;
@@ -124,9 +133,10 @@ else
         var result = await ItemsApi.GetListAsync(
             string.IsNullOrWhiteSpace(_search) ? null : _search,
             null,
-            string.IsNullOrWhiteSpace(_typeFilter) ? null : _typeFilter).ConfigureAwait(false);
+            string.IsNullOrWhiteSpace(_typeFilter) ? null : _typeFilter);
         _items = result ?? new List<ItemListModel>();
         _loading = false;
+        StateHasChanged();
     }
 
     private async Task Search()
@@ -155,5 +165,47 @@ else
         }
 
         Nav.NavigateTo($"/items/{itemId}");
+    }
+
+    private static string GetTypeLabel(string type) => type switch
+    {
+        "finished" => "완제품",
+        "semi_finished" or "semi" => "반제품",
+        "material" => "자재",
+        "product" => "상품",
+        _ => type
+    };
+
+    private static Color GetTypeColor(string type) => type switch
+    {
+        "finished" => Color.Primary,
+        "semi_finished" or "semi" => Color.Info,
+        "material" => Color.Warning,
+        _ => Color.Default
+    };
+
+    private static string StockColor(ItemListModel item) =>
+        item.CurrentStock <= item.SafetyStock ? "var(--mud-palette-error)" : "inherit";
+
+    private async Task DeleteAsync(ItemListModel item)
+    {
+        if (string.IsNullOrWhiteSpace(item.ItemId)) return;
+
+        var confirm = await DialogService.ShowMessageBoxAsync(
+            "상품 삭제",
+            $"'{item.ItemName}' 상품을 삭제하시겠습니까?",
+            yesText: "삭제", cancelText: "취소");
+        if (confirm != true) return;
+
+        var ok = await ItemsApi.DeleteAsync(item.ItemId);
+        if (ok)
+        {
+            Snackbar.Add("삭제되었습니다.", Severity.Success);
+            await LoadList();
+        }
+        else
+        {
+            Snackbar.Add("삭제에 실패했습니다.", Severity.Error);
+        }
     }
 }

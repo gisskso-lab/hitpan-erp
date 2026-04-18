@@ -9,6 +9,7 @@ public interface IBomService
     Task<string> CreateAsync(CreateBomDto dto, string tenantId, CancellationToken ct = default);
     Task UpdateAsync(string bomId, CreateBomDto dto, string tenantId, CancellationToken ct = default);
     Task DeleteAsync(string bomId, string tenantId, CancellationToken ct = default);
+    Task<string> RegisterBomAsItemAsync(string bomId, string itemType, string tenantId, CancellationToken ct = default);
     Task<BomAssembleCheckDto> CheckAssembleAsync(string bomId, decimal produceQty, string tenantId, CancellationToken ct = default);
     Task AssembleAsync(BomAssembleDto dto, string tenantId, string userId, CancellationToken ct = default);
     Task<List<StockAlertDto>> GetAlertsAsync(string tenantId, CancellationToken ct = default);

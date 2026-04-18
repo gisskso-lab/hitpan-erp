@@ -14,6 +14,57 @@ public class BomListModel
     public DateTime CreatedAt { get; set; }
 }
 
+public class BomDetailModel
+{
+    public string BomId { get; set; } = "";
+    public string ProductItemId { get; set; } = "";
+    public string ProductItemName { get; set; } = "";
+    public string BomName { get; set; } = "";
+    public int BomVersion { get; set; }
+    public bool IsDefault { get; set; } = true;
+    public bool IsActive { get; set; } = true;
+    public string? Memo { get; set; }
+    public List<BomItemModel> Items { get; set; } = new();
+    public decimal TotalCost { get; set; }
+}
+
+public class BomItemModel
+{
+    public string BomItemId { get; set; } = "";
+    public int SeqNo { get; set; }
+    public string MaterialItemId { get; set; } = "";
+    public string MaterialItemName { get; set; } = "";
+    public string? Spec { get; set; }
+    public string Unit { get; set; } = "EA";
+    public decimal Qty { get; set; }
+    public decimal LossRate { get; set; }
+    public decimal ActualQty { get; set; }
+    public decimal UnitCost { get; set; }
+    public decimal TotalCost { get; set; }
+    public decimal CurrentStock { get; set; }
+    public decimal SafetyStock { get; set; }
+    public string? Memo { get; set; }
+}
+
+public class CreateBomModel
+{
+    public string ProductItemId { get; set; } = "";
+    public string BomName { get; set; } = "";
+    public bool IsDefault { get; set; } = true;
+    public string? Memo { get; set; }
+    public List<CreateBomItemModel> Items { get; set; } = new();
+}
+
+public class CreateBomItemModel
+{
+    public int SeqNo { get; set; }
+    public string MaterialItemId { get; set; } = "";
+    public decimal Qty { get; set; }
+    public string Unit { get; set; } = "EA";
+    public decimal LossRate { get; set; }
+    public string? Memo { get; set; }
+}
+
 public class BomMaterialCheckModel
 {
     public string ItemId { get; set; } = "";

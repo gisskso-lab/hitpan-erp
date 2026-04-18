@@ -155,6 +155,7 @@ public partial class PermissionPage : ComponentBase
     {
         "TenantAdmin" => "관리자",
         "Manager" => "매니저",
-        _ => "일반사용자"
+        "sales_user" => "영업사원",
+        _ => "일반사원"
     };
 }

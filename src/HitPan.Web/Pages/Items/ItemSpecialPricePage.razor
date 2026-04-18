@@ -1,0 +1,200 @@
+@page "/items/special-prices"
+@using HitPan.Web.Models
+@using HitPan.Web.Services
+@attribute [Authorize]
+@inject ItemMasterService ItemsApi
+@inject PartnerMasterService PartnersApi
+@inject ISnackbar Snackbar
+@inject IDialogService DialogService
+
+<PageTitle>상품 특별단가</PageTitle>
+
+<MudPaper Elevation="0" Class="pa-3 mb-2" Style="border-bottom:1px solid #E5E7EB">
+    <MudGrid Spacing="2">
+        <MudItem xs="12" sm="4">
+            <MudAutocomplete T="ItemListModel"
+                             Value="_selectedItem"
+                             Label="상품 선택"
+                             Variant="Variant.Outlined"
+                             Margin="Margin.Dense"
+                             Style="font-size:13px"
+                             SearchFunc="SearchItem"
+                             ToStringFunc="@(x => x?.ItemName ?? "")"
+                             ValueChanged="OnItemChanged"
+                             AdornmentIcon="@Icons.Material.Filled.Inventory2" />
+        </MudItem>
+        <MudItem xs="12" sm="3">
+            @if (_selectedItem is not null)
+            {
+                <MudText Typo="Typo.body2" Class="mt-2" Style="color:#6B7280">
+                    코드: @_selectedItem.ItemCode &nbsp; | &nbsp; 판매단가: @_selectedItem.SalePrice.ToString("N0")원
+                </MudText>
+            }
+        </MudItem>
+        <MudItem xs="6" sm="2"></MudItem>
+        <MudItem xs="6" sm="3" Class="d-flex justify-end gap-2">
+            <MudButton Variant="Variant.Outlined"
+                       Size="Size.Small"
+                       Style="font-size:12px"
+                       StartIcon="@Icons.Material.Filled.Add"
+                       Disabled="@(_selectedItem is null)"
+                       OnClick="AddRow">추가</MudButton>
+            <MudButton Variant="Variant.Filled"
+                       Color="Color.Primary"
+                       Size="Size.Small"
+                       Style="font-size:12px"
+                       StartIcon="@Icons.Material.Filled.Save"
+                       Disabled="@(_selectedItem is null || _saving)"
+                       OnClick="SaveAllAsync">저장</MudButton>
+        </MudItem>
+    </MudGrid>
+</MudPaper>
+
+@if (_selectedItem is null)
+{
+    <MudAlert Severity="Severity.Info" Class="ma-4">상품을 선택하면 업체별 특별단가를 관리할 수 있습니다.</MudAlert>
+}
+else if (_loading)
+{
+    <MudProgressLinear Indeterminate="true" Color="Color.Primary" />
+}
+else
+{
+    <MudTable Items="_prices" Dense="true" Hover="true" Striped="true" FixedHeader="true"
+              Style="font-size:13px" Height="calc(100vh - 220px)">
+        <HeaderContent>
+            <MudTh>거래처</MudTh>
+            <MudTh Style="width:100px">단가유형</MudTh>
+            <MudTh Style="width:130px;text-align:right">특별단가</MudTh>
+            <MudTh Style="width:130px">시작일</MudTh>
+            <MudTh Style="width:130px">종료일</MudTh>
+            <MudTh Style="width:80px;text-align:center">활성</MudTh>
+            <MudTh Style="width:50px"></MudTh>
+        </HeaderContent>
+        <RowTemplate>
+            <MudTd>
+                @if (string.IsNullOrEmpty(context.PriceId))
+                {
+                    <MudSelect T="string" @bind-Value="context.PartnerId" Variant="Variant.Text" Margin="Margin.Dense" Dense="true" Style="font-size:13px">
+                        @foreach (var p in _partners)
+                        {
+                            <MudSelectItem Value="@p.PartnerId">@p.PartnerName</MudSelectItem>
+                        }
+                    </MudSelect>
+                }
+                else
+                {
+                    @(context.PartnerName ?? context.PartnerId)
+                }
+            </MudTd>
+            <MudTd>
+                <MudSelect T="string" @bind-Value="context.PriceType" Variant="Variant.Text" Margin="Margin.Dense" Dense="true" Style="font-size:13px">
+                    <MudSelectItem Value="@("fixed")">고정</MudSelectItem>
+                    <MudSelectItem Value="@("discount")">할인</MudSelectItem>
+                </MudSelect>
+            </MudTd>
+            <MudTd Style="text-align:right">
+                <MudNumericField T="decimal" @bind-Value="context.UnitPrice" Variant="Variant.Text" Margin="Margin.Dense" Style="font-size:13px;text-align:right" />
+            </MudTd>
+            <MudTd>
+                <MudDatePicker Date="context.StartDate" DateChanged="@(d => context.StartDate = d)"
+                               Variant="Variant.Text" Margin="Margin.Dense"
+                               DateFormat="yyyy-MM-dd" Style="font-size:13px" />
+            </MudTd>
+            <MudTd>
+                <MudDatePicker Date="context.EndDate" DateChanged="@(d => context.EndDate = d)"
+                               Variant="Variant.Text" Margin="Margin.Dense"
+                               DateFormat="yyyy-MM-dd" Style="font-size:13px" />
+            </MudTd>
+            <MudTd Style="text-align:center">
+                <MudCheckBox T="bool" @bind-Value="context.IsActive" Color="Color.Primary" />
+            </MudTd>
+            <MudTd>
+                <MudIconButton Icon="@Icons.Material.Filled.Delete" Size="Size.Small" Color="Color.Error"
+                               OnClick="@(() => DeleteAsync(context))" />
+            </MudTd>
+        </RowTemplate>
+        <NoRecordsContent>
+            <MudText Typo="Typo.body2" Style="color:#9CA3AF">등록된 특별단가가 없습니다.</MudText>
+        </NoRecordsContent>
+    </MudTable>
+}
+
+@code {
+    private ItemListModel? _selectedItem;
+    private List<ItemListModel> _allItems = new();
+    private List<PartnerListRow> _partners = new();
+    private List<ItemSpecialPriceModel> _prices = new();
+    private bool _loading;
+    private bool _saving;
+
+    protected override async Task OnInitializedAsync()
+    {
+        _allItems = await ItemsApi.GetListAsync() ?? new();
+        _partners = await PartnersApi.GetListAsync() ?? new();
+    }
+
+    private Task<IEnumerable<ItemListModel>> SearchItem(string value, CancellationToken ct)
+    {
+        var result = string.IsNullOrWhiteSpace(value)
+            ? _allItems
+            : _allItems.Where(x =>
+                x.ItemName.Contains(value, StringComparison.OrdinalIgnoreCase) ||
+                x.ItemCode.Contains(value, StringComparison.OrdinalIgnoreCase));
+        return Task.FromResult(result);
+    }
+
+    private async Task OnItemChanged(ItemListModel? item)
+    {
+        _selectedItem = item;
+        if (item is null) return;
+        _loading = true;
+        StateHasChanged();
+        _prices = await ItemsApi.GetSpecialPricesAsync(item.ItemId);
+        _loading = false;
+    }
+
+    private void AddRow()
+    {
+        _prices.Add(new ItemSpecialPriceModel());
+    }
+
+    private async Task SaveAllAsync()
+    {
+        if (_selectedItem is null) return;
+        _saving = true;
+
+        foreach (var p in _prices)
+        {
+            if (string.IsNullOrEmpty(p.PartnerId)) continue;
+            await ItemsApi.UpsertSpecialPriceAsync(_selectedItem.ItemId, p);
+        }
+
+        _prices = await ItemsApi.GetSpecialPricesAsync(_selectedItem.ItemId);
+        _saving = false;
+        Snackbar.Add("저장되었습니다.", Severity.Success);
+    }
+
+    private async Task DeleteAsync(ItemSpecialPriceModel item)
+    {
+        if (_selectedItem is null) return;
+
+        if (!string.IsNullOrEmpty(item.PriceId))
+        {
+            var confirm = await DialogService.ShowMessageBoxAsync(
+                "삭제 확인",
+                $"'{item.PartnerName}' 특별단가를 삭제하시겠습니까?",
+                yesText: "삭제", cancelText: "취소");
+            if (confirm != true) return;
+
+            await ItemsApi.DeleteSpecialPriceAsync(_selectedItem.ItemId, item.PriceId);
+            _prices = await ItemsApi.GetSpecialPricesAsync(_selectedItem.ItemId);
+            Snackbar.Add("삭제되었습니다.", Severity.Success);
+        }
+        else
+        {
+            _prices.Remove(item);
+        }
+    }
+
+}

@@ -74,6 +74,27 @@ public class BomController : ControllerBase
         return Ok();
     }
 
+    [HttpPost("{id:guid}/register-item")]
+    public async Task<IActionResult> RegisterBomAsItem(string id, [FromBody] RegisterBomItemRequest req, CancellationToken ct)
+    {
+        var tid = HttpContext.Items["TenantId"]?.ToString();
+        if (string.IsNullOrEmpty(tid)) return Forbid();
+        try
+        {
+            var itemId = await _svc.RegisterBomAsItemAsync(id, req.ItemType, tid, ct).ConfigureAwait(false);
+            return Ok(new { itemId, message = "상품마스터에 등록되었습니다." });
+        }
+        catch (Exception ex)
+        {
+            return BadRequest(new { message = ex.Message });
+        }
+    }
+
+    public class RegisterBomItemRequest
+    {
+        public string ItemType { get; set; } = "semi_finished";
+    }
+
     [HttpPost("{id:guid}/check-assemble")]
     public async Task<IActionResult> CheckAssemble(string id, [FromBody] decimal produceQty, CancellationToken ct)
     {

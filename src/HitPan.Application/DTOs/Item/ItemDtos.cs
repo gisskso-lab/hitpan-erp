@@ -35,6 +35,12 @@ public class ItemListDto
 
 public class ItemDetailDto : ItemListDto
 {
+    public bool AutoOrderEnabled { get; set; }
+
+    public string? AutoOrderPartnerId { get; set; }
+
+    public decimal AutoOrderQty { get; set; }
+
     public string? Barcode { get; set; }
 
     public string? Memo { get; set; }
@@ -65,6 +71,12 @@ public class CreateItemDto
     public string TaxType { get; set; } = "taxable";
 
     public decimal SafetyStock { get; set; }
+
+    public bool AutoOrderEnabled { get; set; }
+
+    public string? AutoOrderPartnerId { get; set; }
+
+    public decimal AutoOrderQty { get; set; }
 
     public string? Barcode { get; set; }
 

@@ -4,6 +4,8 @@
 @inject PartnerMasterService PartnersApi
 @inject NavigationManager Nav
 @inject ISnackbar Snackbar
+@inject IDialogService DialogService
+@inject IJSRuntime JS
 
 <PageTitle>@(_isNew ? "업체 등록" : "업체 수정")</PageTitle>
 
@@ -45,8 +47,12 @@ else
                 <MudText Typo="Typo.subtitle1" Class="mb-2">연락처</MudText>
                 <MudTextField @bind-Value="_model.Tel" Label="전화" Variant="Variant.Outlined" Margin="Margin.Dense" />
                 <MudTextField @bind-Value="_model.Fax" Label="팩스" Variant="Variant.Outlined" Margin="Margin.Dense" />
-                <MudTextField @bind-Value="_model.ZipCode" Label="우편번호" Variant="Variant.Outlined" Margin="Margin.Dense" />
-                <MudTextField @bind-Value="_model.Address" Label="주소" Variant="Variant.Outlined" Margin="Margin.Dense" />
+                <div style="display:flex;gap:8px;align-items:end">
+                    <MudTextField @bind-Value="_model.ZipCode" Label="우편번호" Variant="Variant.Outlined" Margin="Margin.Dense" ReadOnly="true" Style="flex:1" />
+                    <MudButton Variant="Variant.Outlined" Size="Size.Small" OnClick="SearchAddress" Style="height:40px;white-space:nowrap">우편번호 찾기</MudButton>
+                </div>
+                <MudTextField @bind-Value="_model.Address" Label="주소" Variant="Variant.Outlined" Margin="Margin.Dense" ReadOnly="true" />
+                <MudTextField @bind-Value="_model.AddressDetail" Label="상세주소" Variant="Variant.Outlined" Margin="Margin.Dense" Placeholder="상세주소를 입력하세요" />
                 <MudTextField @bind-Value="_model.Email" Label="이메일" Variant="Variant.Outlined" Margin="Margin.Dense" />
                 <MudTextField @bind-Value="_model.Homepage" Label="홈페이지" Variant="Variant.Outlined" Margin="Margin.Dense" />
                 <MudTextField @bind-Value="_model.ManagerName" Label="담당자명" Variant="Variant.Outlined" Margin="Margin.Dense" />
@@ -128,14 +134,14 @@ else
         }
 
         _saving = true;
-        var ok = _isNew
+        var result = _isNew
             ? await PartnersApi.CreateAsync(_model)
             : await PartnersApi.UpdateAsync(Id!, _model);
         _saving = false;
 
-        if (!ok)
+        if (!result.ok)
         {
-            Snackbar.Add("저장에 실패했습니다.", Severity.Error);
+            Snackbar.Add(result.errorMessage ?? "저장에 실패했습니다.", Severity.Error);
             return;
         }
 
@@ -146,6 +152,15 @@ else
     private async Task DeleteAsync()
     {
         if (_isNew)
+        {
+            return;
+        }
+
+        var confirm = await DialogService.ShowMessageBoxAsync(
+            "업체 삭제",
+            $"'{_model.PartnerName}' 업체를 삭제하시겠습니까?",
+            yesText: "삭제", cancelText: "취소");
+        if (confirm != true)
         {
             return;
         }
@@ -161,6 +176,21 @@ else
 
         Snackbar.Add("삭제되었습니다.", Severity.Success);
         BackToList();
+    }
+
+    private async Task SearchAddress()
+    {
+        var dotNetRef = DotNetObjectReference.Create(this);
+        await JS.InvokeVoidAsync("openDaumPostcode", dotNetRef);
+    }
+
+    [JSInvokable]
+    public Task OnAddressSelected(string zipCode, string address)
+    {
+        _model.ZipCode = zipCode;
+        _model.Address = address;
+        StateHasChanged();
+        return Task.CompletedTask;
     }
 
     private void BackToList()

@@ -47,3 +47,15 @@ public class ItemDetailModel : ItemListModel
 
     public int RowVersion { get; set; }
 }
+
+public class ItemSpecialPriceModel
+{
+    public string PriceId { get; set; } = "";
+    public string PartnerId { get; set; } = "";
+    public string? PartnerName { get; set; }
+    public string PriceType { get; set; } = "fixed";
+    public decimal UnitPrice { get; set; }
+    public DateTime? StartDate { get; set; }
+    public DateTime? EndDate { get; set; }
+    public bool IsActive { get; set; } = true;
+}

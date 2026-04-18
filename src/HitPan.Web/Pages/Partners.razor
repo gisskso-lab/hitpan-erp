@@ -3,6 +3,8 @@
 @attribute [Authorize]
 @inject PartnerMasterService PartnersApi
 @inject NavigationManager Nav
+@inject ISnackbar Snackbar
+@inject IDialogService DialogService
 
 <PageTitle>업체 마스터</PageTitle>
 
@@ -80,6 +82,10 @@ else
                 <MudIconButton Icon="@Icons.Material.Filled.Edit"
                                Size="Size.Small"
                                OnClick="@(() => Nav.NavigateTo($"/partners/{context.PartnerId}"))" />
+                <MudIconButton Icon="@Icons.Material.Filled.Delete"
+                               Size="Size.Small"
+                               Color="Color.Error"
+                               OnClick="@(() => DeleteAsync(context))" />
             </MudTd>
         </RowTemplate>
     </MudTable>
@@ -102,8 +108,9 @@ else
         StateHasChanged();
         _rows = await PartnersApi.GetListAsync(
             string.IsNullOrWhiteSpace(_search) ? null : _search,
-            string.IsNullOrWhiteSpace(_type) ? null : _type).ConfigureAwait(false);
+            string.IsNullOrWhiteSpace(_type) ? null : _type);
         _loading = false;
+        StateHasChanged();
     }
 
     private void OpenDetail(string? partnerId)
@@ -114,5 +121,27 @@ else
         }
 
         Nav.NavigateTo($"/partners/{partnerId}");
+    }
+
+    private async Task DeleteAsync(PartnerListRow row)
+    {
+        if (string.IsNullOrWhiteSpace(row.PartnerId)) return;
+
+        var confirm = await DialogService.ShowMessageBoxAsync(
+            "업체 삭제",
+            $"'{row.PartnerName}' 업체를 삭제하시겠습니까?",
+            yesText: "삭제", cancelText: "취소");
+        if (confirm != true) return;
+
+        var ok = await PartnersApi.DeleteAsync(row.PartnerId);
+        if (ok)
+        {
+            Snackbar.Add("삭제되었습니다.", Severity.Success);
+            await ReloadAsync();
+        }
+        else
+        {
+            Snackbar.Add("삭제에 실패했습니다.", Severity.Error);
+        }
     }
 }

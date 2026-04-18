@@ -39,37 +39,44 @@ public class PermissionService : IPermissionService
     {
         await EnsureOpenAsync(ct).ConfigureAwait(false);
 
-        var users = (await _db.QueryAsync<UserRow>(new CommandDefinition(
+        // ERP 내부 권한은 employees 테이블 기준 (SaaS 계층 혼용 금지)
+        var employees = (await _db.QueryAsync<EmployeeRow>(new CommandDefinition(
             """
             SELECT
-                user_id AS UserId,
-                user_name AS UserName,
-                emp_name AS EmpName,
-                role AS Role
-            FROM users
-            WHERE tenant_id = @TenantId
-              AND is_deleted = 0
-              AND is_active = 1
-              AND account_type IN ('tenant_admin', 'tenant_user') -- 플랫폼·리셀러 관리자는 권한 설정 대상에서 제외
+                e.employee_id AS EmployeeId,
+                e.user_id AS UserId,
+                e.emp_name AS EmpName,
+                e.emp_no AS EmpNo,
+                e.position AS Position,
+                e.role AS Role
+            FROM employees e
+            WHERE e.tenant_id = @TenantId
+              AND e.is_active = 1
             ORDER BY
-              CASE role
+              CASE e.role
                 WHEN 'TenantAdmin' THEN 1
                 WHEN 'Manager' THEN 2
                 ELSE 3
               END,
-              COALESCE(emp_name, user_name)
+              e.emp_name
             """,
             new { TenantId = tenantId },
             cancellationToken: ct)).ConfigureAwait(false)).ToList();
 
         var result = new List<UserPermissionDto>();
-        foreach (var u in users)
+        foreach (var emp in employees)
         {
-            var dto = await GetAsync(u.UserId, tenantId, ct).ConfigureAwait(false);
-            if (dto is not null)
+            var permKey = emp.UserId ?? emp.EmployeeId;
+            var dto = await GetByKeyAsync(permKey, tenantId, ct).ConfigureAwait(false);
+
+            result.Add(new UserPermissionDto
             {
-                result.Add(dto);
-            }
+                UserId = permKey,
+                UserName = emp.EmpNo,
+                EmpName = emp.EmpName,
+                Role = emp.Role,
+                Permissions = dto?.Permissions ?? BuildDefaultMenus()
+            });
         }
 
         return result;
@@ -79,27 +86,44 @@ public class PermissionService : IPermissionService
     {
         await EnsureOpenAsync(ct).ConfigureAwait(false);
 
-        var user = await _db.QueryFirstOrDefaultAsync<UserRow>(new CommandDefinition(
+        // employees 기준으로 먼저 조회 (user_id 또는 employee_id)
+        var emp = await _db.QueryFirstOrDefaultAsync<EmployeeRow>(new CommandDefinition(
             """
             SELECT
-                user_id AS UserId,
-                user_name AS UserName,
-                emp_name AS EmpName,
-                role AS Role
-            FROM users
-            WHERE user_id = @UserId
-              AND tenant_id = @TenantId
-              AND is_deleted = 0
-              AND account_type IN ('tenant_admin', 'tenant_user') -- 플랫폼·리셀러 관리자는 조회·편집 대상에서 제외
+                e.employee_id AS EmployeeId,
+                e.user_id AS UserId,
+                e.emp_name AS EmpName,
+                e.emp_no AS EmpNo,
+                e.position AS Position,
+                e.role AS Role
+            FROM employees e
+            WHERE e.tenant_id = @TenantId
+              AND e.is_active = 1
+              AND (e.user_id = @Key OR e.employee_id = @Key)
             """,
-            new { UserId = userId, TenantId = tenantId },
+            new { Key = userId, TenantId = tenantId },
             cancellationToken: ct)).ConfigureAwait(false);
 
-        if (user is null || string.IsNullOrWhiteSpace(user.UserId))
+        if (emp is null)
         {
             return null;
         }
 
+        var permKey = emp.UserId ?? emp.EmployeeId;
+        var dto = await GetByKeyAsync(permKey, tenantId, ct).ConfigureAwait(false);
+
+        return new UserPermissionDto
+        {
+            UserId = permKey,
+            UserName = emp.EmpNo,
+            EmpName = emp.EmpName,
+            Role = emp.Role,
+            Permissions = dto?.Permissions ?? BuildDefaultMenus()
+        };
+    }
+
+    private async Task<UserPermissionDto?> GetByKeyAsync(string permKey, string tenantId, CancellationToken ct)
+    {
         var saved = (await _db.QueryAsync<MenuPermissionDto>(new CommandDefinition(
             """
             SELECT
@@ -113,7 +137,7 @@ public class PermissionService : IPermissionService
             WHERE user_id = @UserId
               AND tenant_id = @TenantId
             """,
-            new { UserId = userId, TenantId = tenantId },
+            new { UserId = permKey, TenantId = tenantId },
             cancellationToken: ct)).ConfigureAwait(false)).ToDictionary(x => x.MenuCode, StringComparer.OrdinalIgnoreCase);
 
         var perms = MenuList.Select(m =>
@@ -133,12 +157,18 @@ public class PermissionService : IPermissionService
 
         return new UserPermissionDto
         {
-            UserId = user.UserId,
-            UserName = user.UserName,
-            EmpName = user.EmpName,
-            Role = user.Role,
+            UserId = permKey,
             Permissions = perms
         };
+    }
+
+    private List<MenuPermissionDto> BuildDefaultMenus()
+    {
+        return MenuList.Select(m => new MenuPermissionDto
+        {
+            MenuCode = m.Code,
+            MenuName = m.Name
+        }).ToList();
     }
 
     public async Task SaveAsync(SavePermissionsDto dto, string tenantId, CancellationToken ct = default)
@@ -228,11 +258,13 @@ public class PermissionService : IPermissionService
         _db.Open();
     }
 
-    private sealed class UserRow
+    private sealed class EmployeeRow
     {
-        public string UserId { get; set; } = "";
-        public string UserName { get; set; } = "";
-        public string? EmpName { get; set; }
+        public string EmployeeId { get; set; } = "";
+        public string? UserId { get; set; }
+        public string EmpName { get; set; } = "";
+        public string EmpNo { get; set; } = "";
+        public string? Position { get; set; }
         public string Role { get; set; } = "";
     }
 }

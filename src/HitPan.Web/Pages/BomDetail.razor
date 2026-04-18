@@ -1,0 +1,353 @@
+@page "/bom/new"
+@page "/bom/{Id}"
+@attribute [Authorize]
+@inject BomService BomApi
+@inject ItemMasterService ItemsApi
+@inject NavigationManager Nav
+@inject ISnackbar Snackbar
+@inject IDialogService DialogService
+
+<PageTitle>@(_isNew ? "BOM 등록" : "BOM 수정")</PageTitle>
+
+<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
+    <MudText Typo="Typo.h6">@(_isNew ? "BOM 등록" : "BOM 수정")</MudText>
+    <div style="display:flex;gap:8px">
+        <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="SaveAsync" Disabled="_saving">저장</MudButton>
+        <MudButton Variant="Variant.Outlined" Color="Color.Error" OnClick="DeleteAsync" Disabled="_isNew || _saving">삭제</MudButton>
+        <MudButton Variant="Variant.Text" OnClick="@(() => Nav.NavigateTo("/bom"))">목록으로</MudButton>
+    </div>
+</div>
+
+@if (_loading)
+{
+    <MudProgressLinear Indeterminate="true" Color="Color.Primary" />
+}
+else
+{
+    <MudGrid Spacing="2">
+        <!-- 상단: 기본정보 -->
+        <MudItem xs="12">
+            <MudPaper Class="pa-4" Elevation="0" Style="border:1px solid var(--mud-palette-lines-default);border-radius:12px">
+                <MudText Typo="Typo.subtitle1" Class="mb-2">기본정보</MudText>
+                <MudGrid Spacing="2">
+                    <MudItem xs="12" md="5">
+                        <MudTextField @bind-Value="_bomName" Label="BOM 이름" Variant="Variant.Outlined" Margin="Margin.Dense" Required="true" />
+                    </MudItem>
+                    <MudItem xs="12" md="2">
+                        <MudCheckBox T="bool" @bind-Value="_isDefault" Label="기본 BOM" Color="Color.Primary" />
+                    </MudItem>
+                    <MudItem xs="12" md="5">
+                        <MudTextField @bind-Value="_memo" Label="메모" Variant="Variant.Outlined" Margin="Margin.Dense" />
+                    </MudItem>
+                </MudGrid>
+            </MudPaper>
+        </MudItem>
+
+        <!-- 하단: 자재 목록 그리드 -->
+        <MudItem xs="12">
+            <MudPaper Class="pa-4" Elevation="0" Style="border:1px solid var(--mud-palette-lines-default);border-radius:12px">
+                <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+                    <MudText Typo="Typo.subtitle1">자재 목록</MudText>
+                    <MudButton Variant="Variant.Outlined" Size="Size.Small" Color="Color.Primary" OnClick="AddMaterial">
+                        + 자재 추가
+                    </MudButton>
+                </div>
+
+                <MudPaper Elevation="0" Style="border:0.5px solid var(--mud-palette-lines-default);border-radius:8px;overflow:hidden">
+                    <MudTable Items="_materials" Dense="true" Hover="true" T="MaterialRow">
+                        <HeaderContent>
+                            <MudTh Style="width:40px">No</MudTh>
+                            <MudTh>자재명</MudTh>
+                            <MudTh Style="width:80px">단위</MudTh>
+                            <MudTh Style="width:100px;text-align:right">소요량</MudTh>
+                            <MudTh Style="width:100px;text-align:right">Loss(%)</MudTh>
+                            <MudTh Style="width:150px">메모</MudTh>
+                            <MudTh Style="width:50px"></MudTh>
+                        </HeaderContent>
+                        <RowTemplate>
+                            <MudTd>@context.SeqNo</MudTd>
+                            <MudTd>
+                                <MudAutocomplete T="ItemOption"
+                                                 @bind-Value="context.SelectedItem"
+                                                 SearchFunc="SearchItems"
+                                                 ToStringFunc="@(x => x?.Name ?? "")"
+                                                 Variant="Variant.Text"
+                                                 Margin="Margin.Dense"
+                                                 Dense="true" />
+                            </MudTd>
+                            <MudTd>
+                                <MudTextField @bind-Value="context.Unit" Variant="Variant.Text" Margin="Margin.Dense" />
+                            </MudTd>
+                            <MudTd>
+                                <MudNumericField T="decimal" @bind-Value="context.Qty" Variant="Variant.Text" Margin="Margin.Dense" />
+                            </MudTd>
+                            <MudTd>
+                                <MudNumericField T="decimal" @bind-Value="context.LossRate" Variant="Variant.Text" Margin="Margin.Dense" />
+                            </MudTd>
+                            <MudTd>
+                                <MudTextField @bind-Value="context.Memo" Variant="Variant.Text" Margin="Margin.Dense" />
+                            </MudTd>
+                            <MudTd>
+                                <MudIconButton Icon="@Icons.Material.Filled.Delete" Size="Size.Small" Color="Color.Error"
+                                               OnClick="@(() => RemoveMaterial(context))" />
+                            </MudTd>
+                        </RowTemplate>
+                        <NoRecordsContent>
+                            <MudText Style="padding:24px;color:var(--mud-palette-text-secondary)">
+                                자재를 추가해주세요
+                            </MudText>
+                        </NoRecordsContent>
+                    </MudTable>
+                </MudPaper>
+            </MudPaper>
+        </MudItem>
+    </MudGrid>
+}
+
+@* 상품등록 다이얼로그 *@
+<MudDialog @bind-Visible="_showRegisterDialog" Options="new DialogOptions { MaxWidth = MaxWidth.ExtraSmall, FullWidth = true }">
+    <TitleContent>
+        <MudText Typo="Typo.h6">자재명세서 대로 상품등록 하시겠습니까?</MudText>
+    </TitleContent>
+    <DialogContent>
+        <MudText Class="mb-3">BOM '<strong>@_bomName</strong>'을 상품마스터에 등록합니다.</MudText>
+        <MudSelect T="string" @bind-Value="_registerItemType" Label="상품 유형" Variant="Variant.Outlined" Margin="Margin.Dense">
+            <MudSelectItem Value="@("semi_finished")">반제품</MudSelectItem>
+            <MudSelectItem Value="@("finished")">완제품</MudSelectItem>
+        </MudSelect>
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="SkipRegister">나중에</MudButton>
+        <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="ConfirmRegister">상품 등록</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [Parameter] public string? Id { get; set; }
+
+    private bool _isNew;
+    private bool _loading = true;
+    private bool _saving;
+
+    // 기본정보
+    private string? _selectedProductId;
+    private string _bomName = "";
+    private bool _isDefault = true;
+    private string? _memo;
+
+    // 자재 목록
+    private List<MaterialRow> _materials = new();
+
+    // 자재 검색용 캐시
+    private List<ItemOption>? _itemCache;
+
+    // 상품등록 다이얼로그
+    private bool _showRegisterDialog;
+    private string? _pendingBomId;
+    private string _registerItemType = "semi_finished";
+
+    protected override async Task OnParametersSetAsync()
+    {
+        _isNew = string.IsNullOrWhiteSpace(Id) || string.Equals(Id, "new", StringComparison.OrdinalIgnoreCase);
+        _loading = true;
+
+        if (_isNew)
+        {
+            _selectedProductId = null;
+            _bomName = "";
+            _isDefault = true;
+            _memo = null;
+            _materials = new();
+        }
+        else
+        {
+            var detail = await BomApi.GetAsync(Id!);
+            if (detail is null)
+            {
+                Snackbar.Add("BOM을 찾을 수 없습니다.", Severity.Error);
+                Nav.NavigateTo("/bom");
+                return;
+            }
+
+            _selectedProductId = detail.ProductItemId;
+            _bomName = detail.BomName;
+            _isDefault = detail.IsDefault;
+            _memo = detail.Memo;
+            _materials = detail.Items.Select((it, idx) => new MaterialRow
+            {
+                SeqNo = it.SeqNo > 0 ? it.SeqNo : idx + 1,
+                SelectedItem = new ItemOption { ItemId = it.MaterialItemId, Name = it.MaterialItemName },
+                Unit = it.Unit,
+                Qty = it.Qty,
+                LossRate = it.LossRate,
+                Memo = it.Memo
+            }).ToList();
+        }
+
+        _loading = false;
+    }
+
+    // 자재 검색 (전체)
+    private async Task<IEnumerable<ItemOption>> SearchItems(string? value, CancellationToken ct)
+    {
+        _itemCache ??= await LoadItemOptions();
+        if (string.IsNullOrWhiteSpace(value))
+            return _itemCache;
+        return _itemCache.Where(x => x.Name.Contains(value, StringComparison.OrdinalIgnoreCase));
+    }
+
+    private async Task<List<ItemOption>> LoadItemOptions()
+    {
+        var items = await ItemsApi.GetListAsync() ?? new();
+        return items.Select(i => new ItemOption { ItemId = i.ItemId, Name = i.ItemName }).ToList();
+    }
+
+    private void AddMaterial()
+    {
+        _materials.Add(new MaterialRow
+        {
+            SeqNo = _materials.Count + 1
+        });
+    }
+
+    private void RemoveMaterial(MaterialRow row)
+    {
+        _materials.Remove(row);
+        for (int i = 0; i < _materials.Count; i++)
+            _materials[i].SeqNo = i + 1;
+    }
+
+    private async Task SaveAsync()
+    {
+        if (string.IsNullOrWhiteSpace(_bomName))
+        {
+            Snackbar.Add("BOM 이름을 입력해주세요.", Severity.Warning);
+            return;
+        }
+        if (!_materials.Any(m => m.SelectedItem is not null))
+        {
+            Snackbar.Add("자재를 1개 이상 추가해주세요.", Severity.Warning);
+            return;
+        }
+
+        var model = new CreateBomModel
+        {
+            ProductItemId = _selectedProductId ?? "",
+            BomName = _bomName,
+            IsDefault = _isDefault,
+            Memo = _memo,
+            Items = _materials
+                .Where(m => m.SelectedItem is not null)
+                .Select(m => new CreateBomItemModel
+                {
+                    SeqNo = m.SeqNo,
+                    MaterialItemId = m.SelectedItem!.ItemId,
+                    Qty = m.Qty,
+                    Unit = m.Unit,
+                    LossRate = m.LossRate,
+                    Memo = m.Memo
+                }).ToList()
+        };
+
+        _saving = true;
+        if (_isNew)
+        {
+            var (ok, bomId) = await BomApi.CreateAsync(model);
+            _saving = false;
+            if (!ok)
+            {
+                Snackbar.Add("BOM 등록에 실패했습니다.", Severity.Error);
+                return;
+            }
+            Snackbar.Add("BOM이 등록되었습니다.", Severity.Success);
+
+            // 상품등록 확인 — 반제품 or 완제품
+            _pendingBomId = bomId;
+            _showRegisterDialog = true;
+            StateHasChanged();
+            return; // 목록 이동은 다이얼로그 후에
+        }
+        else
+        {
+            var ok = await BomApi.UpdateAsync(Id!, model);
+            _saving = false;
+            if (!ok)
+            {
+                Snackbar.Add("BOM 수정에 실패했습니다.", Severity.Error);
+                return;
+            }
+            Snackbar.Add("BOM이 수정되었습니다.", Severity.Success);
+        }
+
+        Nav.NavigateTo("/bom");
+    }
+
+    private async Task DeleteAsync()
+    {
+        if (_isNew) return;
+
+        var confirm = await DialogService.ShowMessageBoxAsync(
+            "BOM 삭제",
+            $"'{_bomName}' BOM을 삭제하시겠습니까?",
+            yesText: "삭제", cancelText: "취소");
+        if (confirm != true) return;
+
+        _saving = true;
+        var ok = await BomApi.DeleteAsync(Id!);
+        _saving = false;
+        if (!ok)
+        {
+            Snackbar.Add("삭제에 실패했습니다.", Severity.Error);
+            return;
+        }
+
+        Snackbar.Add("삭제되었습니다.", Severity.Success);
+        Nav.NavigateTo("/bom");
+    }
+
+    private void SkipRegister()
+    {
+        _showRegisterDialog = false;
+        Nav.NavigateTo("/bom", forceLoad: true);
+    }
+
+    private async Task ConfirmRegister()
+    {
+        if (string.IsNullOrEmpty(_pendingBomId)) return;
+
+        var ok = await BomApi.RegisterBomAsItemAsync(_pendingBomId, _registerItemType);
+        _showRegisterDialog = false;
+
+        if (ok)
+        {
+            var label = _registerItemType == "finished" ? "완제품" : "반제품";
+            Snackbar.Add($"'{_bomName}'이 {label}으로 상품마스터에 등록되었습니다.", Severity.Success);
+        }
+        else
+        {
+            Snackbar.Add("상품 등록에 실패했습니다.", Severity.Error);
+        }
+
+        Nav.NavigateTo("/bom", forceLoad: true);
+    }
+
+    // 상품 옵션 (Autocomplete용)
+    public class ItemOption
+    {
+        public string ItemId { get; set; } = "";
+        public string Name { get; set; } = "";
+        public override bool Equals(object? obj) => obj is ItemOption o && o.ItemId == ItemId;
+        public override int GetHashCode() => ItemId.GetHashCode();
+    }
+
+    // 자재 행
+    public class MaterialRow
+    {
+        public int SeqNo { get; set; }
+        public ItemOption? SelectedItem { get; set; }
+        public string Unit { get; set; } = "EA";
+        public decimal Qty { get; set; }
+        public decimal LossRate { get; set; }
+        public string? Memo { get; set; }
+    }
+}

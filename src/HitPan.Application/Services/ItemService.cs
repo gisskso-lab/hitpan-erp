@@ -92,6 +92,9 @@ public sealed class ItemService : IItemService
                              LOWER(IFNULL(i.tax_type, 'taxable')) AS TaxType,
                              i.is_active AS IsActive,
                              i.created_at AS CreatedAt,
+                             IFNULL(i.auto_order_enabled, 0) AS AutoOrderEnabled,
+                             i.auto_order_partner_id AS AutoOrderPartnerId,
+                             IFNULL(i.auto_order_qty, 0) AS AutoOrderQty,
                              i.barcode AS Barcode,
                              i.memo AS Memo,
                              IFNULL(i.row_version, 0) AS RowVersion
@@ -135,6 +138,22 @@ public sealed class ItemService : IItemService
         var code = string.IsNullOrWhiteSpace(dto.ItemCode)
             ? "I-" + id[..Math.Min(8, id.Length)]
             : dto.ItemCode.Trim();
+
+        var codeDup = await _db.QueryFirstOrDefaultAsync<int>(new CommandDefinition(
+            """
+            SELECT COUNT(*) FROM items
+            WHERE tenant_id = @TenantId
+              AND item_code = @Code
+              AND (is_deleted = 0 OR is_deleted IS NULL)
+            """,
+            new { TenantId = tenantId, Code = code },
+            cancellationToken: ct)).ConfigureAwait(false);
+
+        if (codeDup > 0)
+        {
+            throw new InvalidOperationException($"이미 사용 중인 상품코드입니다: {code}");
+        }
+
         var itemType = NormalizeItemType(dto.ItemType);
         var taxType = string.IsNullOrWhiteSpace(dto.TaxType) ? "taxable" : dto.TaxType.Trim();
         var unit = string.IsNullOrWhiteSpace(dto.Unit) ? "EA" : dto.Unit.Trim();
@@ -148,6 +167,7 @@ public sealed class ItemService : IItemService
               category_id, unit, spec,
               purchase_price, sale_price, standard_price,
               tax_type, safety_stock, barcode, memo,
+              auto_order_enabled, auto_order_partner_id, auto_order_qty,
               std_price, cost_price, safe_stock,
               is_active, is_deleted, row_version,
               created_at, updated_at)
@@ -158,6 +178,7 @@ public sealed class ItemService : IItemService
               NULL, @Unit, @Spec,
               @PurchasePrice, @SalePrice, @StandardPrice,
               @TaxType, @SafetyStock, @Barcode, @Memo,
+              @AutoOrderEnabled, @AutoOrderPartnerId, @AutoOrderQty,
               @StandardPrice, @PurchasePrice, @SafetyStock,
               1, 0, 0,
               NOW(6), NOW(6))
@@ -178,7 +199,10 @@ public sealed class ItemService : IItemService
                 TaxType = taxType,
                 SafetyStock = dto.SafetyStock,
                 Barcode = dto.Barcode,
-                Memo = dto.Memo
+                Memo = dto.Memo,
+                AutoOrderEnabled = dto.AutoOrderEnabled ? 1 : 0,
+                AutoOrderPartnerId = dto.AutoOrderPartnerId,
+                AutoOrderQty = dto.AutoOrderQty
             },
             cancellationToken: ct)).ConfigureAwait(false);
 
@@ -210,6 +234,9 @@ public sealed class ItemService : IItemService
                 safety_stock     = @SafetyStock,
                 barcode          = @Barcode,
                 memo             = @Memo,
+                auto_order_enabled   = @AutoOrderEnabled,
+                auto_order_partner_id = @AutoOrderPartnerId,
+                auto_order_qty   = @AutoOrderQty,
                 std_price        = @StandardPrice,
                 cost_price       = @PurchasePrice,
                 safe_stock       = @SafetyStock,
@@ -238,6 +265,9 @@ public sealed class ItemService : IItemService
                 SafetyStock = dto.SafetyStock,
                 Barcode = dto.Barcode,
                 Memo = dto.Memo,
+                AutoOrderEnabled = dto.AutoOrderEnabled ? 1 : 0,
+                AutoOrderPartnerId = dto.AutoOrderPartnerId,
+                AutoOrderQty = dto.AutoOrderQty,
                 IsActive = dto.IsActive ? 1 : 0,
                 RowVersion = dto.RowVersion
             },
@@ -385,7 +415,7 @@ public sealed class ItemService : IItemService
         var v = (t ?? "product").Trim().ToLowerInvariant();
         return v switch
         {
-            "product" or "material" or "finished" or "semi" or "expense" => v,
+            "product" or "material" or "finished" or "semi" or "semi_finished" or "expense" => v,
             _ => "product"
         };
     }

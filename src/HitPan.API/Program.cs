@@ -84,7 +84,9 @@ builder.Services.AddAuthorization(options =>
             return at is "platform_admin" or "reseller_admin" or "tenant_admin" or "tenant_user";
         }));
     options.AddPolicy("TenantAdminOnly", policy =>
-        policy.RequireClaim("account_type", "tenant_admin"));
+        policy.RequireAssertion(ctx =>
+            ctx.User.HasClaim("account_type", "tenant_admin") ||
+            ctx.User.HasClaim("account_type", "platform_admin")));
 });
 builder.Services.AddControllers();
 builder.Services.AddSwaggerWithJwt();

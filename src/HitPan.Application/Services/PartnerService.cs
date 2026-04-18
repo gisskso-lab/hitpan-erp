@@ -229,6 +229,7 @@ public sealed class PartnerService : IPartnerService
                              p.fax AS Fax,
                              p.zip_code AS ZipCode,
                              p.address AS Address,
+                             p.address_detail AS AddressDetail,
                              p.email AS Email,
                              p.manager_name AS ManagerName,
                              p.manager_tel AS ManagerTel,
@@ -279,6 +280,21 @@ public sealed class PartnerService : IPartnerService
         var code = string.IsNullOrWhiteSpace(dto.PartnerCode)
             ? "P-" + id[..Math.Min(8, id.Length)]
             : dto.PartnerCode.Trim();
+
+        var codeDup = await _db.QueryFirstOrDefaultAsync<int>(new CommandDefinition(
+            """
+            SELECT COUNT(*) FROM partners
+            WHERE tenant_id = @TenantId
+              AND partner_code = @Code
+              AND (is_deleted = 0 OR is_deleted IS NULL)
+            """,
+            new { TenantId = tenantId, Code = code },
+            cancellationToken: ct)).ConfigureAwait(false);
+
+        if (codeDup > 0)
+        {
+            throw new InvalidOperationException($"이미 사용 중인 업체코드입니다: {code}");
+        }
         var pType = NormalizePartnerType(dto.PartnerType);
 
         await _db.ExecuteAsync(new CommandDefinition(
@@ -288,7 +304,7 @@ public sealed class PartnerService : IPartnerService
               partner_code, partner_name,
               partner_type, biz_no, ceo_name,
               biz_type, biz_item,
-              tel, fax, zip_code, address,
+              tel, fax, zip_code, address, address_detail,
               email, manager_name, manager_tel,
               credit_limit, price_grade,
               tax_type, payment_terms, memo,
@@ -300,7 +316,7 @@ public sealed class PartnerService : IPartnerService
               @PartnerCode, @PartnerName,
               @PartnerType, @BizNo, @CeoName,
               @BizType, @BizItem,
-              @Tel, @Fax, @ZipCode, @Address,
+              @Tel, @Fax, @ZipCode, @Address, @AddressDetail,
               @Email, @ManagerName, @ManagerTel,
               @CreditLimit, @PriceGrade,
               @TaxType, @PaymentTerms, @Memo,
@@ -323,6 +339,7 @@ public sealed class PartnerService : IPartnerService
                 Fax = dto.Fax,
                 ZipCode = dto.ZipCode,
                 Address = dto.Address,
+                AddressDetail = dto.AddressDetail,
                 Email = dto.Email,
                 ManagerName = dto.ManagerName,
                 ManagerTel = dto.ManagerTel,
@@ -360,6 +377,7 @@ public sealed class PartnerService : IPartnerService
                 fax           = @Fax,
                 zip_code      = @ZipCode,
                 address       = @Address,
+                address_detail = @AddressDetail,
                 email         = @Email,
                 manager_name  = @ManagerName,
                 manager_tel   = @ManagerTel,
@@ -391,6 +409,7 @@ public sealed class PartnerService : IPartnerService
                 Fax = dto.Fax,
                 ZipCode = dto.ZipCode,
                 Address = dto.Address,
+                AddressDetail = dto.AddressDetail,
                 Email = dto.Email,
                 ManagerName = dto.ManagerName,
                 ManagerTel = dto.ManagerTel,

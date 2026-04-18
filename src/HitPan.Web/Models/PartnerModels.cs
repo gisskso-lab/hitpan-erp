@@ -78,6 +78,7 @@ public sealed class PartnerDetailModel : PartnerListRow
     public string? Fax { get; set; }
     public string? ZipCode { get; set; }
     public string? Address { get; set; }
+    public string? AddressDetail { get; set; }
     public string? Email { get; set; }
     public string? Homepage { get; set; }
     public string? ManagerName { get; set; }

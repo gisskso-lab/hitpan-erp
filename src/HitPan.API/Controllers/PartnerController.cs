@@ -74,8 +74,15 @@ public class PartnerController : ControllerBase
             return Forbid();
         }
 
-        var newId = await _partnerService.CreatePartnerAsync(dto, tenantId, ct).ConfigureAwait(false);
-        return Ok(new { partnerId = newId });
+        try
+        {
+            var newId = await _partnerService.CreatePartnerAsync(dto, tenantId, ct).ConfigureAwait(false);
+            return Ok(new { partnerId = newId });
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(new { message = ex.Message });
+        }
     }
 
     [HttpPut("{id}")]
@@ -88,8 +95,15 @@ public class PartnerController : ControllerBase
             return Forbid();
         }
 
-        await _partnerService.UpdatePartnerAsync(id, dto, tenantId, ct).ConfigureAwait(false);
-        return Ok();
+        try
+        {
+            await _partnerService.UpdatePartnerAsync(id, dto, tenantId, ct).ConfigureAwait(false);
+            return Ok();
+        }
+        catch (InvalidOperationException ex)
+        {
+            return Conflict(new { message = ex.Message });
+        }
     }
 
     [HttpDelete("{id}")]

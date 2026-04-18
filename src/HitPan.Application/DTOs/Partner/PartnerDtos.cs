@@ -43,6 +43,8 @@ public class PartnerDetailDto : PartnerListDto
 
     public string? Address { get; set; }
 
+    public string? AddressDetail { get; set; }
+
     public string? ManagerTel { get; set; }
 
     public string TaxType { get; set; } = "taxable";
@@ -77,6 +79,8 @@ public class CreatePartnerDto
     public string? ZipCode { get; set; }
 
     public string? Address { get; set; }
+
+    public string? AddressDetail { get; set; }
 
     public string? Email { get; set; }
 

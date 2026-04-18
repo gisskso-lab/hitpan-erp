@@ -111,7 +111,8 @@ public class BomService : IBomService
     public async Task<string> CreateAsync(CreateBomDto dto, string tenantId, CancellationToken ct = default)
     {
         await EnsureOpenAsync(ct).ConfigureAwait(false);
-        if (await HasCircularRefAsync(dto.ProductItemId, dto.Items.Select(x => x.MaterialItemId).ToList(), tenantId, ct).ConfigureAwait(false))
+        if (!string.IsNullOrEmpty(dto.ProductItemId) &&
+            await HasCircularRefAsync(dto.ProductItemId, dto.Items.Select(x => x.MaterialItemId).ToList(), tenantId, ct).ConfigureAwait(false))
             throw new InvalidOperationException("순환 참조가 감지됐습니다. 자재 구성을 확인해주세요.");
 
         var bomId = Guid.NewGuid().ToString();
@@ -211,6 +212,70 @@ public class BomService : IBomService
             new { BomId = bomId, TenantId = tenantId }, cancellationToken: ct)).ConfigureAwait(false);
     }
 
+    public async Task<string> RegisterBomAsItemAsync(string bomId, string itemType, string tenantId, CancellationToken ct = default)
+    {
+        await EnsureOpenAsync(ct).ConfigureAwait(false);
+        var bom = await GetAsync(bomId, tenantId, ct).ConfigureAwait(false)
+                  ?? throw new InvalidOperationException("BOM을 찾을 수 없습니다.");
+
+        // BOM 이름으로 상품 생성
+        var itemId = Guid.NewGuid().ToString();
+        var itemCode = "BOM-" + itemId[..Math.Min(8, itemId.Length)];
+
+        // BOM 원가를 매입단가로 설정
+        var bomCost = bom.TotalCost;
+
+        await _db.ExecuteAsync(new CommandDefinition(
+            """
+            INSERT INTO items (
+              item_id, tenant_id, item_code, item_name,
+              item_group, item_type, category_id, unit, spec,
+              purchase_price, sale_price, standard_price,
+              tax_type, safety_stock, barcode, memo,
+              auto_order_enabled, auto_order_partner_id, auto_order_qty,
+              std_price, cost_price, safe_stock,
+              is_active, is_deleted, row_version,
+              created_at, updated_at)
+            VALUES (
+              @ItemId, @TenantId, @ItemCode, @ItemName,
+              NULL, @ItemType, NULL, 'EA', NULL,
+              @BomCost, 0, @BomCost,
+              'taxable', 0, NULL, @Memo,
+              0, NULL, 0,
+              @BomCost, @BomCost, 0,
+              1, 0, 0,
+              NOW(6), NOW(6))
+            """,
+            new
+            {
+                ItemId = itemId,
+                TenantId = tenantId,
+                ItemCode = itemCode,
+                ItemName = bom.BomName,
+                ItemType = itemType,
+                BomCost = bomCost,
+                Memo = $"BOM 자동등록 (BOM ID: {bomId})"
+            }, cancellationToken: ct)).ConfigureAwait(false);
+
+        // BOM의 product_item_id 연결
+        await _db.ExecuteAsync(new CommandDefinition(
+            "UPDATE bom_headers SET product_item_id = @ItemId, updated_at = NOW(6) WHERE bom_id = @BomId AND tenant_id = @TenantId",
+            new { ItemId = itemId, BomId = bomId, TenantId = tenantId },
+            cancellationToken: ct)).ConfigureAwait(false);
+
+        // 재고 초기화
+        await _db.ExecuteAsync(new CommandDefinition(
+            """
+            INSERT INTO item_stock (stock_id, tenant_id, item_id, warehouse_id, current_qty, avg_cost, last_updated_at)
+            VALUES (UUID(), @TenantId, @ItemId, 'default', 0, @BomCost, NOW(6))
+            ON DUPLICATE KEY UPDATE last_updated_at = NOW(6)
+            """,
+            new { TenantId = tenantId, ItemId = itemId, BomCost = bomCost },
+            cancellationToken: ct)).ConfigureAwait(false);
+
+        return itemId;
+    }
+
     public async Task<BomAssembleCheckDto> CheckAssembleAsync(string bomId, decimal produceQty, string tenantId, CancellationToken ct = default)
     {
         var bom = await GetAsync(bomId, tenantId, ct).ConfigureAwait(false) ?? throw new InvalidOperationException("BOM을 찾을 수 없습니다.");
@@ -270,6 +335,7 @@ public class BomService : IBomService
             productionCost += unitCost * mat.RequiredQty;
             materials.Add(new BomMaterialUsedEvent(mat.ItemId, mat.RequiredQty, unitCost));
 
+            // 자재 재고 차감 로그
             await _db.ExecuteAsync(new CommandDefinition(
                 """
                 INSERT INTO stock_adjust_logs (
@@ -287,10 +353,57 @@ public class BomService : IBomService
                     TenantId = tenantId,
                     ItemId = mat.ItemId,
                     Qty = mat.RequiredQty,
-                    Reason = $"BOM조립:{bom.BomName} {dto.ProduceQty}개",
+                    Reason = $"BOM생산:{bom.BomName} {dto.ProduceQty}개",
                     UserId = userId
                 }, cancellationToken: ct)).ConfigureAwait(false);
+
+            // 자재 재고 실제 차감
+            await _db.ExecuteAsync(new CommandDefinition(
+                """
+                UPDATE item_stock
+                SET current_qty = GREATEST(current_qty - @Qty, 0), last_updated_at = NOW(6)
+                WHERE tenant_id = @TenantId AND item_id = @ItemId
+                """,
+                new { TenantId = tenantId, ItemId = mat.ItemId, Qty = mat.RequiredQty },
+                cancellationToken: ct)).ConfigureAwait(false);
         }
+
+        // 완성품 재고 증가 로그
+        var unitProductionCost = productionCost / Math.Max(dto.ProduceQty, 1);
+        await _db.ExecuteAsync(new CommandDefinition(
+            """
+            INSERT INTO stock_adjust_logs (
+              adjust_id, tenant_id, item_id, warehouse_id, before_qty, after_qty, adjust_qty,
+              before_cost, after_cost, reason, user_id, created_at)
+            SELECT
+              UUID(), @TenantId, @ItemId, 'default',
+              COALESCE(current_qty, 0), COALESCE(current_qty, 0) + @Qty, @Qty,
+              COALESCE(avg_cost, 0), @UnitCost, @Reason, @UserId, NOW(6)
+            FROM item_stock
+            WHERE tenant_id=@TenantId AND item_id=@ItemId
+            """,
+            new
+            {
+                TenantId = tenantId,
+                ItemId = bom.ProductItemId,
+                Qty = dto.ProduceQty,
+                UnitCost = unitProductionCost,
+                Reason = $"BOM생산:{bom.BomName} {dto.ProduceQty}개 완성",
+                UserId = userId
+            }, cancellationToken: ct)).ConfigureAwait(false);
+
+        // 완성품 재고 실제 증가
+        await _db.ExecuteAsync(new CommandDefinition(
+            """
+            INSERT INTO item_stock (stock_id, tenant_id, item_id, warehouse_id, current_qty, avg_cost, last_updated_at)
+            VALUES (UUID(), @TenantId, @ItemId, 'default', @Qty, @UnitCost, NOW(6))
+            ON DUPLICATE KEY UPDATE
+              current_qty = current_qty + @Qty,
+              avg_cost = @UnitCost,
+              last_updated_at = NOW(6)
+            """,
+            new { TenantId = tenantId, ItemId = bom.ProductItemId, Qty = dto.ProduceQty, UnitCost = unitProductionCost },
+            cancellationToken: ct)).ConfigureAwait(false);
 
         await _events.PublishAsync(
             "bom.assembled",
@@ -299,7 +412,7 @@ public class BomService : IBomService
                 dto.BomId,
                 bom.ProductItemId,
                 dto.ProduceQty,
-                productionCost / Math.Max(dto.ProduceQty, 1),
+                unitProductionCost,
                 materials),
             ct).ConfigureAwait(false);
     }

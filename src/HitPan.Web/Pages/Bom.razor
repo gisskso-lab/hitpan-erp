@@ -4,6 +4,7 @@
 @inject BomService BomApi
 @inject ISnackbar Snackbar
 @inject NavigationManager Nav
+@inject IDialogService DialogService
 
 <PageTitle>BOM 자재명세서</PageTitle>
 
@@ -69,7 +70,7 @@ else
         <MudTh>자재 수</MudTh>
         <MudTh Style="text-align:right">BOM 원가</MudTh>
         <MudTh>기본</MudTh>
-        <MudTh></MudTh>
+        <MudTh Style="width:180px;text-align:center">관리</MudTh>
       </HeaderContent>
       <RowTemplate>
         <MudTd><MudText Style="font-weight:500">@context.ProductItemName</MudText></MudTd>
@@ -83,9 +84,16 @@ else
             <MudChip T="string" Size="Size.Small" Color="Color.Success" Variant="Variant.Text">기본</MudChip>
           }
         </MudTd>
-        <MudTd>
-          <MudIconButton Icon="@Icons.Material.Filled.Edit" Size="Size.Small"
+        <MudTd Style="text-align:center">
+          <MudIconButton Icon="@Icons.Material.Filled.Visibility" Size="Size.Small"
+            Title="조회"
             OnClick="@(() => Nav.NavigateTo($"/bom/{context.BomId}"))" />
+          <MudIconButton Icon="@Icons.Material.Filled.PrecisionManufacturing" Size="Size.Small"
+            Color="Color.Primary" Title="생산"
+            OnClick="@(() => OpenProduceDialog(context))" />
+          <MudIconButton Icon="@Icons.Material.Filled.Delete" Size="Size.Small"
+            Color="Color.Error" Title="삭제"
+            OnClick="@(() => DeleteBomAsync(context))" />
         </MudTd>
       </RowTemplate>
       <NoRecordsContent>
@@ -97,10 +105,41 @@ else
   </MudPaper>
 }
 
+@* 생산 다이얼로그 *@
+<MudDialog @bind-Visible="_produceDialogVisible" Options="new DialogOptions { MaxWidth = MaxWidth.Small, FullWidth = true }">
+  <TitleContent>
+    <MudText Typo="Typo.h6">생산 실행</MudText>
+  </TitleContent>
+  <DialogContent>
+    @if (_produceBom is not null)
+    {
+      <MudText Class="mb-3">완성품: <strong>@_produceBom.ProductItemName</strong> (BOM: @_produceBom.BomName)</MudText>
+      <MudNumericField T="decimal" @bind-Value="_produceQty" Label="생산 수량" Variant="Variant.Outlined"
+        Margin="Margin.Dense" Min="1" />
+      <MudTextField @bind-Value="_produceMemo" Label="메모" Variant="Variant.Outlined" Margin="Margin.Dense" Class="mt-2" />
+      <MudText Typo="Typo.caption" Class="mt-2" Style="color:#6B7280">
+        생산 시 자재 재고가 차감되고, 완성품 재고가 증가합니다.
+      </MudText>
+    }
+  </DialogContent>
+  <DialogActions>
+    <MudButton OnClick="@(() => _produceDialogVisible = false)">취소</MudButton>
+    <MudButton Variant="Variant.Filled" Color="Color.Primary" Disabled="_producing"
+      OnClick="ExecuteProduceAsync">생산 실행</MudButton>
+  </DialogActions>
+</MudDialog>
+
 @code {
 private List<BomListModel> _boms = new();
 private List<StockAlertModel> _alerts = new();
 private bool _loading = true;
+
+// 생산 다이얼로그
+private bool _produceDialogVisible;
+private BomListModel? _produceBom;
+private decimal _produceQty = 1;
+private string? _produceMemo;
+private bool _producing;
 
 protected override async Task OnInitializedAsync()
 {
@@ -118,6 +157,62 @@ private async Task LoadBoms()
 private async Task LoadAlerts()
 {
     _alerts = await BomApi.GetAlertsAsync() ?? new();
+}
+
+private void OpenProduceDialog(BomListModel bom)
+{
+    _produceBom = bom;
+    _produceQty = 1;
+    _produceMemo = null;
+    _produceDialogVisible = true;
+}
+
+private async Task ExecuteProduceAsync()
+{
+    if (_produceBom is null || _produceQty <= 0) return;
+
+    var confirm = await DialogService.ShowMessageBoxAsync(
+        "생산 확인",
+        $"'{_produceBom.ProductItemName}' {_produceQty}개를 생산하시겠습니까?\n자재 재고가 차감되고 완성품 재고가 증가합니다.",
+        yesText: "생산", cancelText: "취소");
+    if (confirm != true) return;
+
+    _producing = true;
+    StateHasChanged();
+
+    var ok = await BomApi.AssembleAsync(_produceBom.BomId, _produceQty, _produceMemo);
+    _producing = false;
+
+    if (ok)
+    {
+        Snackbar.Add($"'{_produceBom.ProductItemName}' {_produceQty}개 생산 완료! 재고에 반영되었습니다.", Severity.Success);
+        _produceDialogVisible = false;
+        await LoadBoms();
+    }
+    else
+    {
+        Snackbar.Add("생산에 실패했습니다. 자재 재고를 확인해주세요.", Severity.Error);
+    }
+}
+
+private async Task DeleteBomAsync(BomListModel bom)
+{
+    var confirm = await DialogService.ShowMessageBoxAsync(
+        "BOM 삭제",
+        $"'{bom.BomName}' BOM을 삭제하시겠습니까?",
+        yesText: "삭제", cancelText: "취소");
+    if (confirm != true) return;
+
+    var ok = await BomApi.DeleteAsync(bom.BomId);
+    if (ok)
+    {
+        Snackbar.Add("삭제되었습니다.", Severity.Success);
+        await LoadBoms();
+    }
+    else
+    {
+        Snackbar.Add("삭제에 실패했습니다.", Severity.Error);
+    }
 }
 
 private async Task OrderAlert(string alertId)

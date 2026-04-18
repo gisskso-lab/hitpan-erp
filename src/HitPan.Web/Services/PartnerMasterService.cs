@@ -30,11 +30,12 @@ public sealed class PartnerMasterService(HttpClient http)
             }
 
             var path = "api/partners" + (qs.Count > 0 ? "?" + string.Join("&", qs) : "");
-            var list = await http.GetFromJsonAsync<List<PartnerListRow>>(path, JsonOptions, ct).ConfigureAwait(false);
+            var list = await http.GetFromJsonAsync<List<PartnerListRow>>(path, JsonOptions, ct);
             return list ?? new List<PartnerListRow>();
         }
-        catch
+        catch (Exception ex)
         {
+            Console.WriteLine($"[PartnerMasterService.GetListAsync] Error: {ex.Message}");
             return new List<PartnerListRow>();
         }
     }
@@ -43,50 +44,84 @@ public sealed class PartnerMasterService(HttpClient http)
     {
         try
         {
-            return await http.GetFromJsonAsync<PartnerDetailModel>($"api/partners/{Uri.EscapeDataString(id)}", JsonOptions, ct)
-                .ConfigureAwait(false);
+            return await http.GetFromJsonAsync<PartnerDetailModel>($"api/partners/{Uri.EscapeDataString(id)}", JsonOptions, ct);
         }
-        catch
+        catch (Exception ex)
         {
+            Console.WriteLine($"[PartnerMasterService.GetAsync] Error: {ex.Message}");
             return null;
         }
     }
 
-    public async Task<bool> CreateAsync(PartnerDetailModel model, CancellationToken ct = default)
+    public async Task<(bool ok, string? errorMessage)> CreateAsync(PartnerDetailModel model, CancellationToken ct = default)
     {
         try
         {
-            using var res = await http.PostAsJsonAsync("api/partners", model, ct).ConfigureAwait(false);
-            return res.IsSuccessStatusCode;
+            using var res = await http.PostAsJsonAsync("api/partners", model, ct);
+            if (!res.IsSuccessStatusCode)
+            {
+                var body = await res.Content.ReadAsStringAsync(ct);
+                Console.WriteLine($"[PartnerMasterService.CreateAsync] {(int)res.StatusCode}: {body}");
+                var msg = ExtractErrorMessage(body);
+                return (false, msg);
+            }
+            return (true, null);
         }
-        catch
+        catch (Exception ex)
         {
-            return false;
+            Console.WriteLine($"[PartnerMasterService.CreateAsync] Error: {ex.Message}");
+            return (false, null);
         }
     }
 
-    public async Task<bool> UpdateAsync(string id, PartnerDetailModel model, CancellationToken ct = default)
+    public async Task<(bool ok, string? errorMessage)> UpdateAsync(string id, PartnerDetailModel model, CancellationToken ct = default)
     {
         try
         {
-            using var res = await http.PutAsJsonAsync($"api/partners/{Uri.EscapeDataString(id)}", model, ct).ConfigureAwait(false);
-            return res.IsSuccessStatusCode;
+            using var res = await http.PutAsJsonAsync($"api/partners/{Uri.EscapeDataString(id)}", model, ct);
+            if (!res.IsSuccessStatusCode)
+            {
+                var body = await res.Content.ReadAsStringAsync(ct);
+                Console.WriteLine($"[PartnerMasterService.UpdateAsync] {(int)res.StatusCode}: {body}");
+                var msg = ExtractErrorMessage(body);
+                return (false, msg);
+            }
+            return (true, null);
         }
-        catch
+        catch (Exception ex)
         {
-            return false;
+            Console.WriteLine($"[PartnerMasterService.UpdateAsync] Error: {ex.Message}");
+            return (false, null);
         }
+    }
+
+    private static string? ExtractErrorMessage(string body)
+    {
+        try
+        {
+            using var doc = System.Text.Json.JsonDocument.Parse(body);
+            if (doc.RootElement.TryGetProperty("message", out var msgEl))
+                return msgEl.GetString();
+        }
+        catch { }
+        return null;
     }
 
     public async Task<bool> DeleteAsync(string id, CancellationToken ct = default)
     {
         try
         {
-            using var res = await http.DeleteAsync($"api/partners/{Uri.EscapeDataString(id)}", ct).ConfigureAwait(false);
+            using var res = await http.DeleteAsync($"api/partners/{Uri.EscapeDataString(id)}", ct);
+            if (!res.IsSuccessStatusCode)
+            {
+                var body = await res.Content.ReadAsStringAsync(ct);
+                Console.WriteLine($"[PartnerMasterService.DeleteAsync] {(int)res.StatusCode}: {body}");
+            }
             return res.IsSuccessStatusCode;
         }
-        catch
+        catch (Exception ex)
         {
+            Console.WriteLine($"[PartnerMasterService.DeleteAsync] Error: {ex.Message}");
             return false;
         }
     }
@@ -98,6 +133,6 @@ public sealed class PartnerMasterService(HttpClient http)
             return new List<PartnerListRow>();
         }
 
-        return await GetListAsync(query, null, ct).ConfigureAwait(false);
+        return await GetListAsync(query, null, ct);
     }
 }
