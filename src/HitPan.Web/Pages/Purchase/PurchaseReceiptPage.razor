@@ -10,6 +10,8 @@
 @inject IDialogService DialogService
 @inject ISnackbar Snackbar
 @inject HttpClient Http
+@inject PartnerMasterService PartnersApi
+@inject ItemMasterService ItemsApi
 
 <PageTitle>매입명세서</PageTitle>
 
@@ -40,11 +42,9 @@
                                   HelperText="라인별 창고가 비어 있을 때 적용" />
                 </MudItem>
                 <MudItem xs="12" md="3">
-                    <MudTextField T="string"
-                                  Label="공급처"
-                                  Value="_draft.SalesCompany"
-                                  ValueChanged="OnPartnerNameChangedAsync"
-                                  Margin="Margin.Dense" />
+                    <MudAutocomplete T="string" Label="공급처" Value="_draft.SalesCompany"
+                        ValueChanged="OnPartnerNameChangedAsync" SearchFunc="SearchPartnerAsync"
+                        Margin="Margin.Dense" Placeholder="공급처 검색" />
                 </MudItem>
                 <MudItem xs="12" md="3">
                     <MudTextField T="string"
@@ -74,6 +74,7 @@
                                  Density="_draft.Density"
                                  Summary="_summary"
                                  Status="_status"
+                                 ItemCache="_itemCache"
                                  OnChanged="OnGridChangedAsync"
                                  SelectedLineChanged="OnSelectedLineChangedAsync" />
         </div>

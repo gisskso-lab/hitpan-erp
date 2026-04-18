@@ -1,114 +1,69 @@
 @using HitPan.Web.Models
 @namespace HitPan.Web.Components.Sales
 
-<MudDataGrid T="DeliveryLineModel"
-             @ref="_grid"
-             Items="Lines"
-             Dense="true"
-             ReadOnly="@IsReadOnly"
-             EditMode="DataGridEditMode.Cell"
-             Hover="true"
-             Striped="true"
-             FixedHeader="true"
-             Height="calc(100vh - 360px)"
-             RowStyleFunc="RowStyle"
-             Class="@($"delivery-grid {GetDensityClass()}")"
-             SelectedItem="_selectedLine"
-             SelectedItemChanged="HandleSelectedItemChanged">
-    <Columns>
-        <TemplateColumn Title="No">
-            <CellTemplate>@context.Item.No</CellTemplate>
-        </TemplateColumn>
+<MudTable T="DeliveryLineModel" Items="Lines" Dense="true" Hover="true" Striped="true" FixedHeader="true" Height="calc(100vh - 360px)">
+    <HeaderContent>
+        <MudTh Style="width:60px">No</MudTh>
+        <MudTh>품명</MudTh>
+        <MudTh>규격</MudTh>
+        <MudTh Style="width:90px">단위</MudTh>
+        <MudTh Class="text-right">수량</MudTh>
+        <MudTh Class="text-right">단가</MudTh>
+        <MudTh Class="text-right">금액</MudTh>
+        <MudTh Class="text-right">부가세액</MudTh>
+        <MudTh>비고</MudTh>
+    </HeaderContent>
+    <RowTemplate>
+        <MudTd>@context.No</MudTd>
+        <MudTd><MudAutocomplete T="string" Value="context.ItemName" SearchFunc="SearchItemAsync"
+            ValueChanged="@(v => { context.ItemName = v; context.IsPlaceholder = false; AutoFillItem(context, v); NotifyChanged(); })"
+            Margin="Margin.Dense" Dense="true" Placeholder="품명 검색" /></MudTd>
+        <MudTd><MudTextField T="string" Value="context.Spec" ValueChanged="@(v => { context.Spec = v; NotifyChanged(); })" Margin="Margin.Dense" /></MudTd>
+        <MudTd><MudTextField T="string" Value="context.Unit" ValueChanged="@(v => { context.Unit = v; NotifyChanged(); })" Margin="Margin.Dense" /></MudTd>
+        <MudTd><MudNumericField T="decimal" Value="context.Qty" ValueChanged="@(v => { context.Qty = v; RecalcLine(context); })" Margin="Margin.Dense" /></MudTd>
+        <MudTd><MudNumericField T="decimal" Value="context.UnitPrice" ValueChanged="@(v => { context.UnitPrice = v; RecalcLine(context); })" Margin="Margin.Dense" /></MudTd>
+        <MudTd Class="text-right">@context.Amount.ToString("N0")</MudTd>
+        <MudTd Class="text-right">@context.VatAmount.ToString("N0")</MudTd>
+        <MudTd><MudTextField T="string" Value="context.Note" ValueChanged="@(v => { context.Note = v; NotifyChanged(); })" Margin="Margin.Dense" /></MudTd>
+    </RowTemplate>
+    <NoRecordsContent><MudText Typo="Typo.body2" Class="pa-4">품목이 없습니다.</MudText></NoRecordsContent>
+</MudTable>
 
-        <TemplateColumn Title="품명">
-            <CellTemplate>
-                <MudAutocomplete T="ItemListModel"
-                                 Value="GetItemFromLine(context.Item)"
-                                 ValueChanged="@(item => OnItemSelectedAsync(context.Item, item))"
-                                 SearchFunc="SearchItemsAsync"
-                                 ToStringFunc="@(x => x is null ? string.Empty : x.ItemName)"
-                                 ResetValueOnEmptyText="true"
-                                 CoerceText="false"
-                                 Dense="true"
-                                 Disabled="@IsReadOnly"
-                                 Placeholder="품명 검색"
-                                 KeyDownPreventDefault="true"
-                                 OnKeyDown="@(e => HandleCellKeyDownAsync(e, context.Item, TransactionGridColumn.ItemName))" />
-            </CellTemplate>
-        </TemplateColumn>
+@code {
+    [Parameter, EditorRequired] public List<DeliveryLineModel> Lines { get; set; } = default!;
+    [Parameter] public DeliveryGridDensity Density { get; set; }
+    [Parameter] public DeliverySummaryModel Summary { get; set; } = new();
+    [Parameter] public string Status { get; set; } = "draft";
+    [Parameter] public EventCallback OnChanged { get; set; }
+    [Parameter] public EventCallback<DeliveryLineModel?> SelectedLineChanged { get; set; }
+    [Parameter] public List<ItemListModel>? ItemCache { get; set; }
 
-        <TemplateColumn Title="규격">
-            <CellTemplate>
-                <MudTextField T="string"
-                              Value="context.Item.Spec"
-                              ValueChanged="@(v => UpdateTextAsync(context.Item, TransactionGridColumn.Spec, v))"
-                              Margin="Margin.Dense"
-                              Disabled="@IsReadOnly"
-                              KeyDownPreventDefault="true"
-                              OnKeyDown="@(e => HandleCellKeyDownAsync(e, context.Item, TransactionGridColumn.Spec))" />
-            </CellTemplate>
-        </TemplateColumn>
+    private Task<IEnumerable<string>> SearchItemAsync(string value, CancellationToken ct)
+    {
+        if (ItemCache is null) return Task.FromResult(Enumerable.Empty<string>());
+        if (string.IsNullOrWhiteSpace(value)) return Task.FromResult(ItemCache.Select(i => i.ItemName));
+        return Task.FromResult(ItemCache.Where(i => i.ItemName.Contains(value, StringComparison.OrdinalIgnoreCase)).Select(i => i.ItemName));
+    }
 
-        <TemplateColumn Title="단위">
-            <CellTemplate>
-                <MudTextField T="string"
-                              Value="context.Item.Unit"
-                              ValueChanged="@(v => UpdateTextAsync(context.Item, TransactionGridColumn.Unit, v))"
-                              Margin="Margin.Dense"
-                              Disabled="@IsReadOnly"
-                              KeyDownPreventDefault="true"
-                              OnKeyDown="@(e => HandleCellKeyDownAsync(e, context.Item, TransactionGridColumn.Unit))" />
-            </CellTemplate>
-        </TemplateColumn>
+    private void AutoFillItem(DeliveryLineModel line, string itemName)
+    {
+        if (ItemCache is null) return;
+        var item = ItemCache.FirstOrDefault(i => i.ItemName == itemName);
+        if (item is null) return;
+        line.ItemId = item.ItemId;
+        line.Spec = item.Spec ?? "";
+        line.Unit = item.Unit;
+        line.UnitPrice = item.SalePrice;
+    }
 
-        <TemplateColumn Title="수량">
-            <CellTemplate>
-                <MudNumericField T="decimal"
-                                 Value="context.Item.Qty"
-                                 ValueChanged="@(v => UpdateQuantityAsync(context.Item, v))"
-                                 Margin="Margin.Dense"
-                                 Class="delivery-num-right"
-                                 Disabled="@IsReadOnly"
-                                 KeyDownPreventDefault="true"
-                                 OnKeyDown="@(e => HandleCellKeyDownAsync(e, context.Item, TransactionGridColumn.Qty))" />
-            </CellTemplate>
-        </TemplateColumn>
+    private void RecalcLine(DeliveryLineModel line)
+    {
+        Summary.SupplyAmount = Lines.Where(x => !x.IsPlaceholder).Sum(x => x.Amount);
+        Summary.VatAmount = Lines.Where(x => !x.IsPlaceholder).Sum(x => x.VatAmount);
+        Summary.TotalAmount = Summary.SupplyAmount + Summary.VatAmount;
+        OnChanged.InvokeAsync();
+        StateHasChanged();
+    }
 
-        <TemplateColumn Title="단가">
-            <CellTemplate>
-                <MudNumericField T="decimal"
-                                 Value="context.Item.UnitPrice"
-                                 ValueChanged="@(v => UpdateUnitPriceAsync(context.Item, v))"
-                                 Margin="Margin.Dense"
-                                 Class="delivery-num-right"
-                                 Disabled="@IsReadOnly"
-                                 KeyDownPreventDefault="true"
-                                 OnKeyDown="@(e => HandleCellKeyDownAsync(e, context.Item, TransactionGridColumn.UnitPrice))" />
-            </CellTemplate>
-        </TemplateColumn>
-
-        <TemplateColumn Title="금액">
-            <CellTemplate>
-                <MudText Class="delivery-num-right">@context.Item.Amount.ToString("N0")</MudText>
-            </CellTemplate>
-        </TemplateColumn>
-
-        <TemplateColumn Title="부가세액">
-            <CellTemplate>
-                <MudText Class="delivery-num-right">@context.Item.VatAmount.ToString("N0")</MudText>
-            </CellTemplate>
-        </TemplateColumn>
-
-        <TemplateColumn Title="비고">
-            <CellTemplate>
-                <MudTextField T="string"
-                              Value="context.Item.Note"
-                              ValueChanged="@(v => UpdateTextAsync(context.Item, TransactionGridColumn.Note, v))"
-                              Margin="Margin.Dense"
-                              Disabled="@IsReadOnly"
-                              KeyDownPreventDefault="true"
-                              OnKeyDown="@(e => HandleCellKeyDownAsync(e, context.Item, TransactionGridColumn.Note))" />
-            </CellTemplate>
-        </TemplateColumn>
-    </Columns>
-</MudDataGrid>
+    private void NotifyChanged() => OnChanged.InvokeAsync();
+}

@@ -7,6 +7,8 @@
 @inject DocumentService DocService
 @inject IDialogService DialogService
 @inject ISnackbar Snackbar
+@inject PartnerMasterService PartnersApi
+@inject ItemMasterService ItemsApi
 
 <NavigationLock ConfirmExternalNavigation="@_hasUnsavedChanges" OnBeforeInternalNavigation="OnBeforeInternalNavigationAsync" />
 
@@ -28,11 +30,9 @@
                     <MudDatePicker Label="유효기한" Date="_draft.ValidUntil" DateChanged="OnValidUntilChangedAsync" />
                 </MudItem>
                 <MudItem xs="12" md="3">
-                    <MudTextField T="string"
-                                  Label="거래처"
-                                  Value="_draft.SalesCompany"
-                                  ValueChanged="OnPartnerNameChangedAsync"
-                                  Margin="Margin.Dense" />
+                    <MudAutocomplete T="string" Label="거래처" Value="_draft.SalesCompany"
+                        ValueChanged="OnPartnerNameChangedAsync" SearchFunc="SearchPartnerAsync"
+                        Margin="Margin.Dense" Placeholder="거래처 검색" />
                 </MudItem>
                 <MudItem xs="12" md="3">
                     <MudTextField T="string"
@@ -63,6 +63,7 @@
                            Density="_draft.Density"
                            Summary="_summary"
                            Status="_draft.Status"
+                           ItemCache="_itemCache"
                            OnChanged="OnGridChangedAsync"
                            SelectedLineChanged="OnSelectedLineChangedAsync"
                            OnSelectionChanged="OnSelectionChangedAsync" />

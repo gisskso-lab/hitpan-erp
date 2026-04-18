@@ -16,6 +16,12 @@ namespace HitPan.Web.Pages.SalesOrderUi;
 /// </summary>
 public partial class SalesOrderPage : ComponentBase
 {
+    // 거래처 캐시
+    private List<PartnerListRow>? _partnerCache;
+
+    // 품목 캐시
+    private List<ItemListModel>? _itemCache;
+
     // 화면에서 편집 중인 수주 초안 데이터
     private DeliveryDraftModel? _draft;
 
@@ -37,8 +43,9 @@ public partial class SalesOrderPage : ComponentBase
     /// <summary>
     /// 페이지 초기 진입 시 수주 초안을 만든다.
     /// </summary>
-    protected override Task OnInitializedAsync()
+    protected override async Task OnInitializedAsync()
     {
+        _itemCache = await ItemsApi.GetListAsync() ?? new();
         _draft = new DeliveryDraftModel
         {
             Id = Guid.NewGuid().ToString(),
@@ -54,7 +61,6 @@ public partial class SalesOrderPage : ComponentBase
 
         RefreshWorkflow();
         RecalculateSummary();
-        return Task.CompletedTask;
     }
 
     /// <summary>
@@ -97,6 +103,16 @@ public partial class SalesOrderPage : ComponentBase
         MarkDirty();
         RefreshWorkflow();
         await InvokeAsync(StateHasChanged);
+    }
+
+    /// <summary>
+    /// 거래처 자동완성 검색을 수행한다.
+    /// </summary>
+    private async Task<IEnumerable<string>> SearchPartnerAsync(string value, CancellationToken ct)
+    {
+        _partnerCache ??= await PartnersApi.GetListAsync() ?? new();
+        if (string.IsNullOrWhiteSpace(value)) return _partnerCache.Select(p => p.PartnerName);
+        return _partnerCache.Where(p => p.PartnerName.Contains(value, StringComparison.OrdinalIgnoreCase)).Select(p => p.PartnerName);
     }
 
     /// <summary>

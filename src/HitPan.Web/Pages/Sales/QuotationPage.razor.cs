@@ -20,6 +20,12 @@ public partial class QuotationPage : ComponentBase
     // 인증 상태 제공자다.
     [Inject] private AuthenticationStateProvider AuthStateProvider { get; set; } = default!;
 
+    // 거래처 캐시다.
+    private List<PartnerListRow>? _partnerCache;
+
+    // 품목 캐시다.
+    private List<ItemListModel>? _itemCache;
+
     // 현재 편집 중인 견적 초안이다.
     private QuotationDraftModel? _draft;
 
@@ -46,6 +52,7 @@ public partial class QuotationPage : ComponentBase
                           ?? "담당자";
 
         _draft = await QuotationService.CreateDraftAsync(managerName);
+        _itemCache = await ItemsApi.GetListAsync() ?? new();
         RefreshWorkflow();
         RecalculateSummary();
     }
@@ -101,6 +108,16 @@ public partial class QuotationPage : ComponentBase
         _draft.ValidUntil = value;
         MarkDirty();
         await InvokeAsync(StateHasChanged);
+    }
+
+    /// <summary>
+    /// 거래처 자동완성 검색을 수행한다.
+    /// </summary>
+    private async Task<IEnumerable<string>> SearchPartnerAsync(string value, CancellationToken ct)
+    {
+        _partnerCache ??= await PartnersApi.GetListAsync() ?? new();
+        if (string.IsNullOrWhiteSpace(value)) return _partnerCache.Select(p => p.PartnerName);
+        return _partnerCache.Where(p => p.PartnerName.Contains(value, StringComparison.OrdinalIgnoreCase)).Select(p => p.PartnerName);
     }
 
     /// <summary>

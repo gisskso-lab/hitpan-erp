@@ -27,7 +27,9 @@
         </MudTd>
         <MudTd @onclick="@(() => SelectRowAsync(context))">@context.No</MudTd>
         <MudTd>
-            <MudTextField T="string" Value="context.ItemName" ValueChanged="@(v => UpdateItemNameAsync(context, v))" Margin="Margin.Dense" Disabled="@IsReadOnly" />
+            <MudAutocomplete T="string" Value="context.ItemName" SearchFunc="SearchItemAsync"
+                ValueChanged="@(v => { UpdateItemNameAsync(context, v); AutoFillItem(context, v); })"
+                Margin="Margin.Dense" Dense="true" Placeholder="품명 검색" Disabled="@IsReadOnly" />
         </MudTd>
         <MudTd>
             <MudTextField T="string" Value="context.Spec" ValueChanged="@(v => UpdateSpecAsync(context, v))" Margin="Margin.Dense" Disabled="@IsReadOnly" />

@@ -1,123 +1,36 @@
 @using HitPan.Web.Models
 
-<div class="delivery-grid-host">
-    @if (_ctxOpen)
-    {
-        <div class="delivery-ctx-overlay" @onclick="CloseContextMenu"></div>
-        <div class="delivery-ctx-menu mud-elevation-4" style="@($"top:{_ctxY}px;left:{_ctxX}px;")" @onclick:stopPropagation="true">
-            <button type="button" class="delivery-ctx-item" @onclick="@(() => RunLocal(DeliveryContextAction.CopyRow))">행 복사</button>
-            <button type="button" class="delivery-ctx-item" @onclick="@(() => RunLocal(DeliveryContextAction.InsertAbove))">위에 행 추가</button>
-            <button type="button" class="delivery-ctx-item" @onclick="@(() => RunLocal(DeliveryContextAction.InsertBelow))">아래에 행 추가</button>
-            <button type="button" class="delivery-ctx-item" @onclick="@(() => RunLocal(DeliveryContextAction.DeleteRow))">행 삭제</button>
-            <div class="delivery-ctx-sep"></div>
-            <button type="button" class="delivery-ctx-item" @onclick="@(() => RunSecondary(DeliveryContextAction.LinkSalesOrder))">수주로 연결</button>
-            <button type="button" class="delivery-ctx-item" @onclick="@(() => RunSecondary(DeliveryContextAction.IssueTaxInvoice))">세금계산서 발행</button>
-            <div class="delivery-ctx-sep"></div>
-            <button type="button" class="delivery-ctx-item" @onclick="@(() => RunSecondary(DeliveryContextAction.PartnerHistory))">이 거래처 거래내역</button>
-        </div>
-    }
-
-    <MudDataGrid T="DeliveryLineModel"
-                 Items="Lines"
-                 Dense="true"
-                 ReadOnly="false"
-                 EditMode="DataGridEditMode.Cell"
-                 Hover="true"
-                 Striped="true"
-                 FixedHeader="true"
-                 Height="calc(100vh - 340px)"
-                 Style="font-size:13px"
-                 RowStyleFunc="RowStyle"
-                 Class="@($"delivery-grid {GetDensityClass()}")"
-                 SelectedItem="SelectedLine"
-                 SelectedItemChanged="OnSelectedItemChanged">
-        <Columns>
-            <TemplateColumn Title="" CellClass="delivery-cell-check">
-                <HeaderTemplate>
-                    <MudCheckBox T="bool"
-                                 Value="AllSelected"
-                                 ValueChanged="ToggleSelectAll"
-                                 indeterminate="@SomeSelected"
-                                 Dense="true"
-                                 Color="Color.Primary"
-                                 Class="ma-0" />
-                </HeaderTemplate>
-                <CellTemplate>
-                    <div class="delivery-row-ctx"
-                         @oncontextmenu="@(e => OpenContextMenu(e, context.Item))"
-                         @oncontextmenu:preventDefault="true">
-                        <MudCheckBox T="bool"
-                                     Value="context.Item.IsSelected"
-                                     ValueChanged="@(v => ToggleOne(context.Item, v))"
-                                     Disabled="context.Item.IsPlaceholder"
-                                     Dense="true"
-                                     Color="Color.Primary"
-                                     Class="ma-0" />
-                    </div>
-                </CellTemplate>
-            </TemplateColumn>
-            <TemplateColumn Title="No" CellClass="delivery-cell-no">
-                <CellTemplate>@context.Item.No</CellTemplate>
-            </TemplateColumn>
-            <TemplateColumn Title="품명">
-                <CellTemplate>
-                    @if (context.Item.IsPlaceholder)
-                    {
-                        <MudButton Variant="Variant.Text" Color="Color.Primary" OnClick="@(() => ActivatePlaceholder(context.Item))">
-                            + 품목 추가
-                        </MudButton>
-                    }
-                    else
-                    {
-                        <MudTextField T="string" Value="context.Item.ItemName" ValueChanged="@(v => UpdateText(context.Item, nameof(DeliveryLineModel.ItemName), v))" Margin="Margin.Dense" />
-                    }
-                </CellTemplate>
-            </TemplateColumn>
-            <TemplateColumn Title="규격">
-                <CellTemplate>
-                    <MudTextField T="string" Value="context.Item.Spec" ValueChanged="@(v => UpdateText(context.Item, nameof(DeliveryLineModel.Spec), v))" Margin="Margin.Dense" />
-                </CellTemplate>
-            </TemplateColumn>
-            <TemplateColumn Title="단위">
-                <CellTemplate>
-                    <MudTextField T="string" Value="context.Item.Unit" ValueChanged="@(v => UpdateText(context.Item, nameof(DeliveryLineModel.Unit), v))" Margin="Margin.Dense" />
-                </CellTemplate>
-            </TemplateColumn>
-            <TemplateColumn Title="수량">
-                <CellTemplate>
-                    <MudNumericField T="decimal" Value="context.Item.Qty" ValueChanged="@(v => UpdateQuantity(context.Item, v))" Margin="Margin.Dense" Class="delivery-num-right" />
-                </CellTemplate>
-            </TemplateColumn>
-            <TemplateColumn Title="단가">
-                <CellTemplate>
-                    <MudNumericField T="decimal" Value="context.Item.UnitPrice" ValueChanged="@(v => UpdateUnitPrice(context.Item, v))" Margin="Margin.Dense" Class="delivery-num-right" />
-                </CellTemplate>
-            </TemplateColumn>
-            <TemplateColumn Title="금액">
-                <CellTemplate>
-                    <MudText Class="@($"hitpan-amount delivery-num-right {GetAmountClass(context.Item.Amount)}")">@context.Item.Amount.ToString("N0")</MudText>
-                </CellTemplate>
-            </TemplateColumn>
-            <TemplateColumn Title="부가세액">
-                <CellTemplate>
-                    <MudText Class="hitpan-amount delivery-num-right">@context.Item.VatAmount.ToString("N0")</MudText>
-                </CellTemplate>
-            </TemplateColumn>
-            <TemplateColumn Title="비고">
-                <CellTemplate>
-                    <MudTextField T="string" Value="context.Item.Note" ValueChanged="@(v => UpdateText(context.Item, nameof(DeliveryLineModel.Note), v))" Margin="Margin.Dense" />
-                </CellTemplate>
-            </TemplateColumn>
-        </Columns>
-    </MudDataGrid>
-</div>
+<MudTable T="DeliveryLineModel" Items="Lines" Dense="true" Hover="true" Striped="true" FixedHeader="true" Height="calc(100vh - 340px)">
+    <HeaderContent>
+        <MudTh Style="width:48px"><MudCheckBox T="bool" Value="AllSelected" ValueChanged="ToggleSelectAll" /></MudTh>
+        <MudTh Style="width:60px">No</MudTh>
+        <MudTh>품명</MudTh>
+        <MudTh>규격</MudTh>
+        <MudTh Style="width:90px">단위</MudTh>
+        <MudTh Class="text-right">수량</MudTh>
+        <MudTh Class="text-right">단가</MudTh>
+        <MudTh Class="text-right">금액</MudTh>
+        <MudTh Class="text-right">부가세액</MudTh>
+        <MudTh>비고</MudTh>
+    </HeaderContent>
+    <RowTemplate>
+        <MudTd><MudCheckBox T="bool" Value="context.IsSelected" ValueChanged="@(v => ToggleOne(context, v))" /></MudTd>
+        <MudTd>@context.No</MudTd>
+        <MudTd><MudAutocomplete T="string" Value="context.ItemName" SearchFunc="SearchItemAsync"
+            ValueChanged="@(v => { context.ItemName = v; context.IsPlaceholder = false; AutoFillItem(context, v); NotifyChanged(); })"
+            Margin="Margin.Dense" Dense="true" Placeholder="품명 검색" /></MudTd>
+        <MudTd><MudTextField T="string" Value="context.Spec" ValueChanged="@(v => { context.Spec = v; NotifyChanged(); })" Margin="Margin.Dense" /></MudTd>
+        <MudTd><MudTextField T="string" Value="context.Unit" ValueChanged="@(v => { context.Unit = v; NotifyChanged(); })" Margin="Margin.Dense" /></MudTd>
+        <MudTd><MudNumericField T="decimal" Value="context.Qty" ValueChanged="@(v => { context.Qty = v; RecalcLine(context); })" Margin="Margin.Dense" /></MudTd>
+        <MudTd><MudNumericField T="decimal" Value="context.UnitPrice" ValueChanged="@(v => { context.UnitPrice = v; RecalcLine(context); })" Margin="Margin.Dense" /></MudTd>
+        <MudTd Class="text-right">@context.Amount.ToString("N0")</MudTd>
+        <MudTd Class="text-right">@context.VatAmount.ToString("N0")</MudTd>
+        <MudTd><MudTextField T="string" Value="context.Note" ValueChanged="@(v => { context.Note = v; NotifyChanged(); })" Margin="Margin.Dense" /></MudTd>
+    </RowTemplate>
+    <NoRecordsContent><MudText Typo="Typo.body2" Class="pa-4">품목이 없습니다. 추가 버튼을 눌러주세요.</MudText></NoRecordsContent>
+</MudTable>
 
 @code {
-    private bool _ctxOpen;
-    private double _ctxX;
-    private double _ctxY;
-    private DeliveryLineModel? _ctxLine;
-
     [Parameter, EditorRequired] public List<DeliveryLineModel> Lines { get; set; } = default!;
     [Parameter] public DeliveryLineModel? SelectedLine { get; set; }
     [Parameter] public EventCallback<DeliveryLineModel?> SelectedLineChanged { get; set; }
@@ -126,33 +39,31 @@
     [Parameter] public EventCallback OnSelectionChanged { get; set; }
     [Parameter] public EventCallback<(DeliveryLineModel Line, DeliveryContextAction Action)> OnContextSecondary { get; set; }
     [Parameter] public DeliverySummaryModel Summary { get; set; } = new();
+    [Parameter] public List<ItemListModel>? ItemCache { get; set; }
 
-    private IEnumerable<DeliveryLineModel> DataLines => Lines.Where(l => !l.IsPlaceholder);
-
-    private bool AllSelected => DataLines.Any() && DataLines.All(l => l.IsSelected);
-
-    private bool SomeSelected => Lines.Any(l => !l.IsPlaceholder && l.IsSelected) && !AllSelected;
-
-    private string GetDensityClass() => Density switch
+    private Task<IEnumerable<string>> SearchItemAsync(string value, CancellationToken ct)
     {
-        DeliveryGridDensity.Compact => "delivery-grid--compact",
-        DeliveryGridDensity.Comfortable => "delivery-grid--comfortable",
-        _ => "delivery-grid--normal"
-    };
-
-    private async Task OnSelectedItemChanged(DeliveryLineModel? line)
-    {
-        SelectedLine = line;
-        await SelectedLineChanged.InvokeAsync(line);
+        if (ItemCache is null) return Task.FromResult(Enumerable.Empty<string>());
+        if (string.IsNullOrWhiteSpace(value)) return Task.FromResult(ItemCache.Select(i => i.ItemName));
+        return Task.FromResult(ItemCache.Where(i => i.ItemName.Contains(value, StringComparison.OrdinalIgnoreCase)).Select(i => i.ItemName));
     }
+
+    private void AutoFillItem(DeliveryLineModel line, string itemName)
+    {
+        if (ItemCache is null) return;
+        var item = ItemCache.FirstOrDefault(i => i.ItemName == itemName);
+        if (item is null) return;
+        line.ItemId = item.ItemId;
+        line.Spec = item.Spec ?? "";
+        line.Unit = item.Unit;
+        line.UnitPrice = item.SalePrice;
+    }
+
+    private bool AllSelected => Lines.Any(l => !l.IsPlaceholder) && Lines.Where(l => !l.IsPlaceholder).All(l => l.IsSelected);
 
     private async Task ToggleSelectAll(bool value)
     {
-        foreach (var line in DataLines)
-        {
-            line.IsSelected = value;
-        }
-
+        foreach (var l in Lines.Where(x => !x.IsPlaceholder)) l.IsSelected = value;
         await OnSelectionChanged.InvokeAsync();
     }
 
@@ -162,161 +73,14 @@
         await OnSelectionChanged.InvokeAsync();
     }
 
-    private void OpenContextMenu(MouseEventArgs e, DeliveryLineModel line)
+    private void RecalcLine(DeliveryLineModel line)
     {
-        if (line.IsPlaceholder)
-        {
-            return;
-        }
-
-        _ctxLine = line;
-        _ctxX = e.ClientX;
-        _ctxY = e.ClientY;
-        _ctxOpen = true;
-    }
-
-    private void CloseContextMenu()
-    {
-        _ctxOpen = false;
-        _ctxLine = null;
-    }
-
-    private async Task RunLocal(DeliveryContextAction action)
-    {
-        var line = _ctxLine;
-        CloseContextMenu();
-        if (line is null)
-        {
-            return;
-        }
-
-        var idx = Lines.IndexOf(line);
-        switch (action)
-        {
-            case DeliveryContextAction.CopyRow:
-                if (idx >= 0)
-                {
-                    var copy = line.CloneForRow();
-                    Lines.Insert(idx + 1, copy);
-                    Renumber();
-                    await NotifyDataChanged();
-                }
-
-                break;
-            case DeliveryContextAction.InsertAbove:
-                if (idx >= 0)
-                {
-                    Lines.Insert(idx, new DeliveryLineModel());
-                    Renumber();
-                    await NotifyDataChanged();
-                }
-
-                break;
-            case DeliveryContextAction.InsertBelow:
-                if (idx >= 0)
-                {
-                    Lines.Insert(idx + 1, new DeliveryLineModel());
-                    Renumber();
-                    await NotifyDataChanged();
-                }
-
-                break;
-            case DeliveryContextAction.DeleteRow:
-                if (idx >= 0)
-                {
-                    Lines.RemoveAt(idx);
-                    if (Lines.Count == 0)
-                    {
-                        Lines.Add(new DeliveryLineModel { No = 1, IsPlaceholder = true });
-                    }
-                    else
-                    {
-                        Renumber();
-                    }
-
-                    await NotifyDataChanged();
-                }
-
-                break;
-        }
-    }
-
-    private async Task RunSecondary(DeliveryContextAction action)
-    {
-        var line = _ctxLine;
-        CloseContextMenu();
-        if (line is null)
-        {
-            return;
-        }
-
-        await OnContextSecondary.InvokeAsync((line, action));
-    }
-
-    private void Renumber()
-    {
-        for (var i = 0; i < Lines.Count; i++)
-        {
-            Lines[i].No = i + 1;
-        }
-    }
-
-    private async Task ActivatePlaceholder(DeliveryLineModel line)
-    {
-        line.IsPlaceholder = false;
-        await NotifyDataChanged();
-    }
-
-    private async Task UpdateText(DeliveryLineModel line, string field, string value)
-    {
-        if (field == nameof(DeliveryLineModel.ItemName)) line.ItemName = value;
-        if (field == nameof(DeliveryLineModel.Spec)) line.Spec = value;
-        if (field == nameof(DeliveryLineModel.Unit)) line.Unit = value;
-        if (field == nameof(DeliveryLineModel.Note)) line.Note = value;
-        await NotifyDataChanged();
-    }
-
-    private async Task UpdateQuantity(DeliveryLineModel line, decimal value)
-    {
-        line.Qty = value;
-        await OnItemChanged(line);
-    }
-
-    private async Task UpdateUnitPrice(DeliveryLineModel line, decimal value)
-    {
-        line.UnitPrice = value;
-        await OnItemChanged(line);
-    }
-
-    private async Task NotifyDataChanged()
-    {
-        await OnChanged.InvokeAsync();
-    }
-
-    private async Task OnItemChanged(DeliveryLineModel item)
-    {
-        for (var i = 0; i < Lines.Count; i++)
-        {
-            Lines[i].RowNo = i + 1;
-        }
-
         Summary.SupplyAmount = Lines.Where(x => !x.IsPlaceholder).Sum(x => x.Amount);
         Summary.VatAmount = Lines.Where(x => !x.IsPlaceholder).Sum(x => x.VatAmount);
         Summary.TotalAmount = Summary.SupplyAmount + Summary.VatAmount;
-        Summary.TodaySales = Summary.TotalAmount;
-        Summary.ClaimAmount = Summary.TotalAmount;
-
-        await NotifyDataChanged();
+        OnChanged.InvokeAsync();
         StateHasChanged();
     }
 
-    private string RowStyle(DeliveryLineModel item, int index) => "height:36px;font-size:13px;";
-
-    private static string GetAmountClass(decimal amount)
-    {
-        if (amount < 0) return "hitpan-amount--negative";
-        if (amount == 0) return "hitpan-amount--zero";
-        if (amount >= 1_000_000m) return "hitpan-amount--high";
-        return string.Empty;
-    }
+    private void NotifyChanged() => OnChanged.InvokeAsync();
 }

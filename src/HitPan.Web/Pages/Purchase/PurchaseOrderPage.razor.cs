@@ -15,6 +15,12 @@ namespace HitPan.Web.Pages.PurchaseOrderUi;
 /// </summary>
 public partial class PurchaseOrderPage : ComponentBase
 {
+    // 거래처 캐시
+    private List<PartnerListRow>? _partnerCache;
+
+    // 품목 캐시
+    private List<ItemListModel>? _itemCache;
+
     // 편집 중인 발주 초안(라인·문서번호 등은 거래명세와 동일한 Draft 모델을 재사용한다).
     private DeliveryDraftModel? _draft;
 
@@ -40,8 +46,9 @@ public partial class PurchaseOrderPage : ComponentBase
     /// 초기 진입 시 신규 발주 초안을 구성한다.
     /// </summary>
     /// <returns>초기화 작업</returns>
-    protected override Task OnInitializedAsync()
+    protected override async Task OnInitializedAsync()
     {
+        _itemCache = await ItemsApi.GetListAsync() ?? new();
         _draft = new DeliveryDraftModel
         {
             Id = Guid.NewGuid().ToString(),
@@ -59,7 +66,16 @@ public partial class PurchaseOrderPage : ComponentBase
 
         RefreshWorkflow();
         RecalculateSummary();
-        return Task.CompletedTask;
+    }
+
+    /// <summary>
+    /// 공급처 자동완성 검색을 수행한다.
+    /// </summary>
+    private async Task<IEnumerable<string>> SearchPartnerAsync(string value, CancellationToken ct)
+    {
+        _partnerCache ??= await PartnersApi.GetListAsync() ?? new();
+        if (string.IsNullOrWhiteSpace(value)) return _partnerCache.Select(p => p.PartnerName);
+        return _partnerCache.Where(p => p.PartnerName.Contains(value, StringComparison.OrdinalIgnoreCase)).Select(p => p.PartnerName);
     }
 
     /// <summary>

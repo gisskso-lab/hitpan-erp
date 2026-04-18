@@ -35,6 +35,9 @@ public partial class QuotationGrid : ComponentBase
     /// <summary>선택 상태 변경 콜백이다.</summary>
     [Parameter] public EventCallback OnSelectionChanged { get; set; }
 
+    /// <summary>품목 캐시 목록이다.</summary>
+    [Parameter] public List<ItemListModel>? ItemCache { get; set; }
+
     /// <summary>
     /// 파라미터 수신 시 플레이스홀더를 보장한다.
     /// </summary>
@@ -76,6 +79,30 @@ public partial class QuotationGrid : ComponentBase
     private async Task SelectRowAsync(QuotationLineModel line)
     {
         await SelectedLineChanged.InvokeAsync(line);
+    }
+
+    /// <summary>
+    /// 품목 자동완성 검색을 수행한다.
+    /// </summary>
+    private Task<IEnumerable<string>> SearchItemAsync(string value, CancellationToken ct)
+    {
+        if (ItemCache is null) return Task.FromResult(Enumerable.Empty<string>());
+        if (string.IsNullOrWhiteSpace(value)) return Task.FromResult(ItemCache.Select(i => i.ItemName));
+        return Task.FromResult(ItemCache.Where(i => i.ItemName.Contains(value, StringComparison.OrdinalIgnoreCase)).Select(i => i.ItemName));
+    }
+
+    /// <summary>
+    /// 품목 선택 시 규격·단위·단가를 자동 채운다.
+    /// </summary>
+    private void AutoFillItem(QuotationLineModel line, string itemName)
+    {
+        if (ItemCache is null) return;
+        var item = ItemCache.FirstOrDefault(i => i.ItemName == itemName);
+        if (item is null) return;
+        line.ItemId = item.ItemId;
+        line.Spec = item.Spec ?? "";
+        line.Unit = item.Unit;
+        line.UnitPrice = item.SalePrice;
     }
 
     /// <summary>

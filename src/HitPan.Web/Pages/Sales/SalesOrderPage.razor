@@ -8,6 +8,8 @@
 @inject DocumentService DocService
 @inject IDialogService DialogService
 @inject ISnackbar Snackbar
+@inject PartnerMasterService PartnersApi
+@inject ItemMasterService ItemsApi
 
 <!-- 미저장 데이터가 있을 때 브라우저/내부 이동을 제어한다. -->
 <NavigationLock ConfirmExternalNavigation="@_hasUnsavedChanges" OnBeforeInternalNavigation="OnBeforeInternalNavigationAsync" />
@@ -28,11 +30,9 @@
                     <MudDatePicker Label="주문일자" Date="_draft.SalesDate" DateChanged="OnOrderDateChangedAsync" />
                 </MudItem>
                 <MudItem xs="12" md="4">
-                    <MudTextField T="string"
-                                  Label="거래처"
-                                  Value="_draft.SalesCompany"
-                                  ValueChanged="OnSalesCompanyChangedAsync"
-                                  Margin="Margin.Dense" />
+                    <MudAutocomplete T="string" Label="거래처" Value="_draft.SalesCompany"
+                        ValueChanged="OnSalesCompanyChangedAsync" SearchFunc="SearchPartnerAsync"
+                        Margin="Margin.Dense" Placeholder="거래처 검색" />
                 </MudItem>
                 <MudItem xs="12" md="5">
                     <MudTextField T="string"
@@ -62,6 +62,7 @@
                             Density="_draft.Density"
                             Summary="_summary"
                             Status="_status"
+                            ItemCache="_itemCache"
                             OnChanged="OnGridChangedAsync"
                             SelectedLineChanged="OnSelectedLineChangedAsync" />
         </div>

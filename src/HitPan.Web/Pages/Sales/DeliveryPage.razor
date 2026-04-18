@@ -10,6 +10,8 @@
 @inject AuthenticationStateProvider AuthStateProvider
 @inject IDialogService DialogService
 @inject ISnackbar Snackbar
+@inject PartnerMasterService PartnersApi
+@inject ItemMasterService ItemsApi
 
 <NavigationLock ConfirmExternalNavigation="@_hasUnsavedChanges" OnBeforeInternalNavigation="OnBeforeInternalNavigation" />
 
@@ -88,6 +90,7 @@
                           OnChanged="OnLinesChanged"
                           OnSelectionChanged="OnSelectionChanged"
                           OnContextSecondary="OnContextSecondaryAsync"
+                          ItemCache="_itemCache"
                           Summary="_summary" />
         </div>
 
@@ -104,6 +107,8 @@
     private int _selectedCount;
     private bool _canBulkDelete;
     private ClaimsPrincipal? _user;
+    private List<PartnerListRow>? _partnerCache;
+    private List<ItemListModel>? _itemCache;
 
     protected override async Task OnInitializedAsync()
     {
@@ -118,8 +123,16 @@
         _draft = await DeliveryService.CreateDraftAsync(manager);
         _draft.LinkedQuoteDocumentNo = $"QT-{_draft.SalesDate:yyyyMMdd}-001";
         _draft.LinkedSalesOrderDocumentNo = $"SO-{_draft.SalesDate:yyyyMMdd}-001";
+        _itemCache = await ItemsApi.GetListAsync() ?? new();
         RefreshWorkflow();
         RecalculateSummary();
+    }
+
+    private async Task<IEnumerable<string>> SearchPartnerAsync(string value, CancellationToken ct)
+    {
+        _partnerCache ??= await PartnersApi.GetListAsync() ?? new();
+        if (string.IsNullOrWhiteSpace(value)) return _partnerCache.Select(p => p.PartnerName);
+        return _partnerCache.Where(p => p.PartnerName.Contains(value, StringComparison.OrdinalIgnoreCase)).Select(p => p.PartnerName);
     }
 
     private void RefreshWorkflow()
