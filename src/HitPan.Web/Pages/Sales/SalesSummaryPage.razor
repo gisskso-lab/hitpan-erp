@@ -1,0 +1,24 @@
+@page "/sales/summary"
+@namespace HitPan.Web.Pages.SalesUi
+@attribute [Authorize]
+
+<PageTitle>판매 현황</PageTitle>
+<MudText Typo="Typo.h6" Class="mb-4">판매 현황</MudText>
+<MudPaper Class="pa-4 mb-4" Elevation="0" Style="border:1px solid var(--mud-palette-lines-default);border-radius:12px">
+    <MudGrid Spacing="2">
+        <MudItem xs="12" md="4">
+            <MudSelect T="string" @bind-Value="_period" Label="조회 기간" Variant="Variant.Outlined" Margin="Margin.Dense">
+                <MudSelectItem Value="@("today")">오늘</MudSelectItem>
+                <MudSelectItem Value="@("week")">이번 주</MudSelectItem>
+                <MudSelectItem Value="@("month")">이번 달</MudSelectItem>
+                <MudSelectItem Value="@("quarter")">이번 분기</MudSelectItem>
+                <MudSelectItem Value="@("year")">올해</MudSelectItem>
+            </MudSelect>
+        </MudItem>
+    </MudGrid>
+</MudPaper>
+<MudAlert Severity="Severity.Info">판매 현황 데이터는 준비중입니다.</MudAlert>
+
+@code {
+    private string _period = "month";
+}
