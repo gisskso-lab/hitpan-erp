@@ -145,7 +145,20 @@
 
     private async Task Search()
     {
-        Items = await DeliveryService.GetSalesListItemsAsync(ListType, FilterFrom, FilterTo, FilterPartner);
+        var fromStr = FilterFrom?.ToString("yyyy-MM-dd") ?? "";
+        var toStr = FilterTo?.ToString("yyyy-MM-dd") ?? "";
+        var list = await DeliveryService.GetListAsync(fromStr, toStr, FilterPartner, "", CancellationToken.None);
+        Items = list.Select(d => new SalesListItem
+        {
+            OrderId = d.DeliveryId,
+            OrderDate = d.OrderDate,
+            OrderNo = d.DeliveryNo,
+            PartnerId = d.PartnerId,
+            PartnerName = d.PartnerName,
+            TotalAmount = d.TotalAmount,
+            VatAmount = d.VatAmount,
+            Status = d.Status
+        }).ToList();
         AllChecked = false;
     }
 
