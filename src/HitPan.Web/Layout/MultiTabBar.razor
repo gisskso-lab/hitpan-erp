@@ -32,12 +32,15 @@
                       @onkeydown="@(e => OnCloseKeyDownAsync(e, tab.Id))">×</span>
             </button>
         }
-        <button type="button"
-                class="hitpan-tab hitpan-tab--add"
-                title="새 탭 (거래명세서)"
-                @onclick="@(() => TabService.TryAddTab(WorkDocumentKind.SalesDelivery))">
-            +
-        </button>
+        <MudMenu Icon="@Icons.Material.Filled.Add" Size="Size.Small" Dense="true" Title="새 탭 추가"
+                 Class="hitpan-tab hitpan-tab--add" AnchorOrigin="Origin.BottomLeft">
+            <MudMenuItem OnClick="@(() => TabService.TryAddTab(WorkDocumentKind.Quotation))">견적서</MudMenuItem>
+            <MudMenuItem OnClick="@(() => TabService.TryAddTab(WorkDocumentKind.SalesDelivery))">거래명세서</MudMenuItem>
+            <MudMenuItem OnClick="@(() => TabService.TryAddTab(WorkDocumentKind.SalesOrder))">수주서</MudMenuItem>
+            <MudMenuItem OnClick="@(() => TabService.TryAddTab(WorkDocumentKind.PurchaseOrder))">발주서</MudMenuItem>
+            <MudMenuItem OnClick="@(() => TabService.TryAddTab(WorkDocumentKind.PurchaseReceipt))">매입명세서</MudMenuItem>
+            <MudMenuItem OnClick="@(() => TabService.TryAddTab(WorkDocumentKind.Return))">반품</MudMenuItem>
+        </MudMenu>
     </div>
     <div class="hitpan-tabbar-chips">
         <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined" Class="hitpan-chip-context">
@@ -57,9 +60,12 @@
     protected override async Task OnInitializedAsync()
     {
         TabService.StateChanged += OnTabsChanged;
+        TabService.NavigateRequested += OnNavigateRequested;
         AuthStateProvider.AuthenticationStateChanged += OnAuthenticationStateChanged;
         await LoadLabelsFromJwtAsync();
     }
+
+    private void OnNavigateRequested(string url) => Navigation.NavigateTo(url);
 
     private async void OnAuthenticationStateChanged(Task _)
     {
@@ -113,6 +119,7 @@
 
     private static string GetDotClass(WorkDocumentKind kind) => kind switch
     {
+        WorkDocumentKind.Quotation => "hitpan-tab-dot--quote",
         WorkDocumentKind.SalesDelivery => "hitpan-tab-dot--delivery",
         WorkDocumentKind.SalesOrder => "hitpan-tab-dot--order",
         WorkDocumentKind.PurchaseOrder => "hitpan-tab-dot--po",
@@ -132,6 +139,7 @@
     public void Dispose()
     {
         TabService.StateChanged -= OnTabsChanged;
+        TabService.NavigateRequested -= OnNavigateRequested;
         AuthStateProvider.AuthenticationStateChanged -= OnAuthenticationStateChanged;
     }
 }

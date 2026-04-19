@@ -14,6 +14,9 @@ public sealed class WorkTabService
     private int _nextId = 1;
     private int? _activeTabId;
 
+    /// <summary>탭 전환 시 URL 이동을 위한 콜백</summary>
+    public Action<string>? NavigateRequested { get; set; }
+
     public WorkTabService(ISnackbar snackbar, IDialogService dialogService)
     {
         _snackbar = snackbar;
@@ -41,18 +44,20 @@ public sealed class WorkTabService
         _order.Add(id);
         _activeTabId = id;
         Notify();
+        NavigateRequested?.Invoke(state.Url);
         return true;
     }
 
     public void SwitchTab(int tabId)
     {
-        if (!_tabs.ContainsKey(tabId))
+        if (!_tabs.TryGetValue(tabId, out var tab))
         {
             return;
         }
 
         _activeTabId = tabId;
         Notify();
+        NavigateRequested?.Invoke(tab.Url);
     }
 
     public void UpdateTabTitle(int tabId, string documentNumber)
@@ -146,6 +151,7 @@ public sealed class WorkTabService
     {
         var (title, url, icon) = kind switch
         {
+            WorkDocumentKind.Quotation => ("견적서", "/quotations", Icons.Material.Filled.RequestQuote),
             WorkDocumentKind.SalesDelivery => ("거래명세서", "/deliveries", Icons.Material.Filled.Receipt),
             WorkDocumentKind.SalesOrder => ("수주서", "/sales-orders", Icons.Material.Filled.Assignment),
             WorkDocumentKind.PurchaseOrder => ("발주서", "/purchase-orders", Icons.Material.Filled.AddShoppingCart),

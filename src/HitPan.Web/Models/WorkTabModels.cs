@@ -2,6 +2,7 @@ namespace HitPan.Web.Models;
 
 public enum WorkDocumentKind
 {
+    Quotation,
     SalesDelivery,
     SalesOrder,
     PurchaseOrder,
