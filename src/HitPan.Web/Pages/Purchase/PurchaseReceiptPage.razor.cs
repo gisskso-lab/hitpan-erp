@@ -45,6 +45,9 @@ public partial class PurchaseReceiptPage : ComponentBase
     // Draft / Confirmed 등 그리드 읽기 전용 전환용
     private string _status = "Draft";
 
+    // 신규 문서 여부다.
+    private bool _isNew = true;
+
     /// <summary>
     /// 초기 진입 시 신규 매입명세 초안을 구성한다.
     /// </summary>
@@ -155,6 +158,15 @@ public partial class PurchaseReceiptPage : ComponentBase
         }
 
         _draft.SalesCompany = value;
+
+        // 거래처명으로 PartnerId 매핑
+        _partnerCache ??= await PartnersApi.GetListAsync() ?? new();
+        var matched = _partnerCache.FirstOrDefault(p => p.PartnerName == value);
+        if (matched is not null)
+        {
+            _draft.PartnerId = matched.PartnerId;
+        }
+
         MarkDirty();
 
         if (TabService.ActiveTabId is { } tabId)
@@ -310,6 +322,7 @@ public partial class PurchaseReceiptPage : ComponentBase
                 }
 
                 _draft.DocumentNumber ??= $"PR-{_receiptDate:yyyyMMdd}-API";
+                _isNew = false;
                 _hasUnsavedChanges = false;
                 _status = "Draft";
                 if (TabService.ActiveTabId is { } tabId)
@@ -345,11 +358,34 @@ public partial class PurchaseReceiptPage : ComponentBase
     }
 
     /// <summary>
-    /// 더티 플래그만 해제한다.
+    /// 편집을 취소하고 신규이면 초기화, 기존이면 재로드한다.
     /// </summary>
-    /// <returns>완료</returns>
-    private Task CancelAsync()
+    /// <returns>비동기 작업</returns>
+    private async Task CancelAsync()
     {
+        if (!_isNew && _draft is not null && !string.IsNullOrWhiteSpace(_draft.Id))
+        {
+            // TODO: 매입명세서 상세 조회 API 연동 후 서버에서 다시 로드.
+            // 현재는 더티 플래그만 해제한다.
+        }
+        else
+        {
+            _draft = new DeliveryDraftModel
+            {
+                Id = Guid.NewGuid().ToString(),
+                DocumentType = "매입",
+                SalesDate = DateTime.Today,
+                ManagerName = "담당자",
+                Lines = new List<DeliveryLineModel> { new() { No = 1, IsPlaceholder = true } }
+            };
+            _receiptDate = DateTime.Today;
+            _draft.SalesDate = _receiptDate.Value;
+            _headerWarehouseId = "MAIN";
+            _isNew = true;
+            RecalculateSummary();
+            RefreshWorkflow();
+        }
+
         _hasUnsavedChanges = false;
         if (TabService.ActiveTabId is { } tabId)
         {
@@ -357,7 +393,7 @@ public partial class PurchaseReceiptPage : ComponentBase
         }
 
         Snackbar.Add("변경사항을 취소했습니다.", Severity.Info);
-        return Task.CompletedTask;
+        await InvokeAsync(StateHasChanged);
     }
 
     /// <summary>
@@ -379,11 +415,29 @@ public partial class PurchaseReceiptPage : ComponentBase
     }
 
     /// <summary>
-    /// 초안을 신규 상태로 재생성한다.
+    /// 매입명세서를 삭제하고 신규 상태로 재생성한다.
     /// </summary>
     /// <returns>UI 갱신</returns>
     private async Task DeleteAsync()
     {
+        if (!_isNew && _draft is not null && !string.IsNullOrWhiteSpace(_draft.Id))
+        {
+            try
+            {
+                using var resp = await Http.DeleteAsync($"api/purchase/receipts/{Uri.EscapeDataString(_draft.Id)}");
+                if (!resp.IsSuccessStatusCode)
+                {
+                    Snackbar.Add("삭제에 실패했습니다.", Severity.Error);
+                    return;
+                }
+            }
+            catch (Exception ex)
+            {
+                Snackbar.Add($"삭제 중 오류: {ex.Message}", Severity.Error);
+                return;
+            }
+        }
+
         _draft = new DeliveryDraftModel
         {
             Id = Guid.NewGuid().ToString(),
@@ -395,6 +449,7 @@ public partial class PurchaseReceiptPage : ComponentBase
         _receiptDate = DateTime.Today;
         _draft.SalesDate = _receiptDate.Value;
         _headerWarehouseId = "MAIN";
+        _isNew = true;
         _selectedLine = null;
         _hasUnsavedChanges = false;
         _status = "Draft";

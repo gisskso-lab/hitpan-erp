@@ -38,6 +38,9 @@ public partial class QuotationPage : ComponentBase
     // 미저장 변경 여부다.
     private bool _hasUnsavedChanges;
 
+    // 신규 문서 여부다.
+    private bool _isNew = true;
+
     // 워크플로 스텝이다.
     private IReadOnlyList<DeliveryWorkflowStepModel> _workflowSteps = Array.Empty<DeliveryWorkflowStepModel>();
 
@@ -131,6 +134,15 @@ public partial class QuotationPage : ComponentBase
         }
 
         _draft.SalesCompany = value;
+
+        // 거래처명으로 PartnerId 매핑
+        _partnerCache ??= await PartnersApi.GetListAsync() ?? new();
+        var matched = _partnerCache.FirstOrDefault(p => p.PartnerName == value);
+        if (matched is not null)
+        {
+            _draft.PartnerId = matched.PartnerId;
+        }
+
         MarkDirty();
         if (TabService.ActiveTabId is { } tabId)
         {
@@ -210,27 +222,39 @@ public partial class QuotationPage : ComponentBase
             return;
         }
 
-        if (string.IsNullOrWhiteSpace(_draft.Id) || _draft.Id.Length < 30)
+        try
         {
-            var createdId = await QuotationService.CreateAsync(_draft);
-            if (!string.IsNullOrWhiteSpace(createdId))
+            if (_isNew)
             {
+                var createdId = await QuotationService.CreateAsync(_draft);
+                if (string.IsNullOrWhiteSpace(createdId))
+                {
+                    Snackbar.Add("견적서 생성에 실패했습니다.", Severity.Error);
+                    return;
+                }
+
                 _draft.Id = createdId;
+                _isNew = false;
                 var reloaded = await QuotationService.GetAsync(createdId);
                 if (reloaded is not null)
                 {
                     _draft = reloaded;
                 }
             }
-        }
-        else
-        {
-            var ok = await QuotationService.UpdateAsync(_draft.Id, _draft);
-            if (!ok)
+            else
             {
-                Snackbar.Add("견적서 저장에 실패했습니다.", Severity.Error);
-                return;
+                var ok = await QuotationService.UpdateAsync(_draft.Id, _draft);
+                if (!ok)
+                {
+                    Snackbar.Add("견적서 저장에 실패했습니다.", Severity.Error);
+                    return;
+                }
             }
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"저장 중 오류: {ex.Message}", Severity.Error);
+            return;
         }
 
         _hasUnsavedChanges = false;
@@ -248,16 +272,34 @@ public partial class QuotationPage : ComponentBase
     /// <summary>
     /// 편집을 취소한다.
     /// </summary>
-    private Task CancelAsync()
+    private async Task CancelAsync()
     {
+        if (!_isNew && _draft is not null && !string.IsNullOrWhiteSpace(_draft.Id))
+        {
+            var reloaded = await QuotationService.GetAsync(_draft.Id);
+            if (reloaded is not null)
+            {
+                _draft = reloaded;
+            }
+        }
+        else
+        {
+            var state = await AuthStateProvider.GetAuthenticationStateAsync();
+            var managerName = state.User.FindFirst("name")?.Value ?? "담당자";
+            _draft = await QuotationService.CreateDraftAsync(managerName);
+            _isNew = true;
+        }
+
         _hasUnsavedChanges = false;
         if (TabService.ActiveTabId is { } tabId)
         {
             TabService.SetTabDirty(tabId, false);
         }
 
+        RecalculateSummary();
+        RefreshWorkflow();
         Snackbar.Add("변경사항을 취소했습니다.", Severity.Info);
-        return Task.CompletedTask;
+        await InvokeAsync(StateHasChanged);
     }
 
     /// <summary>
@@ -291,6 +333,7 @@ public partial class QuotationPage : ComponentBase
                           ?? state.User.FindFirst(ClaimTypes.Name)?.Value
                           ?? "담당자";
         _draft = await QuotationService.CreateDraftAsync(managerName);
+        _isNew = true;
         _selectedLine = null;
         _hasUnsavedChanges = false;
         RecalculateSummary();
@@ -378,6 +421,7 @@ public partial class QuotationPage : ComponentBase
         }
 
         _draft = loaded;
+        _isNew = false;
         _hasUnsavedChanges = false;
         RecalculateSummary();
         RefreshWorkflow();

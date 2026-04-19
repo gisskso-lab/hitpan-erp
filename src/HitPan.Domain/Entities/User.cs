@@ -17,6 +17,8 @@ public class User : BaseEntity, ITenantEntity
     public string? DeptId { get; set; }
     public string? Phone { get; set; }
     public bool IsActive { get; set; } = true;
+    public int FailedLoginCount { get; set; }
+    public DateTime? LockoutEnd { get; set; }
     public DateTime? LastLoginAt { get; set; }
     public DateTime? PasswordChangedAt { get; set; }
 }

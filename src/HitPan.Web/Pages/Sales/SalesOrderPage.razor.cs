@@ -40,6 +40,9 @@ public partial class SalesOrderPage : ComponentBase
     // 화면 상태값 (Draft/Confirmed)
     private string _status = "Draft";
 
+    // 신규 문서 여부다.
+    private bool _isNew = true;
+
     /// <summary>
     /// 페이지 초기 진입 시 수주 초안을 만든다.
     /// </summary>
@@ -127,6 +130,15 @@ public partial class SalesOrderPage : ComponentBase
         }
 
         _draft.SalesCompany = value;
+
+        // 거래처명으로 PartnerId 매핑
+        _partnerCache ??= await PartnersApi.GetListAsync() ?? new();
+        var matched = _partnerCache.FirstOrDefault(p => p.PartnerName == value);
+        if (matched is not null)
+        {
+            _draft.PartnerId = matched.PartnerId;
+        }
+
         MarkDirty();
 
         // 활성 탭이 있으면 거래처명으로 부제목을 동기화한다.
@@ -195,15 +207,72 @@ public partial class SalesOrderPage : ComponentBase
     /// <summary>
     /// 수주서를 저장 처리한다.
     /// </summary>
-    private Task SaveAsync()
+    private async Task SaveAsync()
     {
         if (_draft is null)
         {
-            return Task.CompletedTask;
+            return;
         }
 
-        // 데모 단계에서는 문서번호만 로컬 채번하여 저장 상태를 표현한다.
-        _draft.DocumentNumber ??= $"SO-{DateTime.Now:yyyyMMdd}-001";
+        _draft.DocumentType = "수주";
+
+        try
+        {
+            if (_isNew)
+            {
+                var docNo = await DeliveryService.SaveAsync(_draft);
+                if (string.IsNullOrWhiteSpace(docNo))
+                {
+                    Snackbar.Add("수주서 생성에 실패했습니다.", Severity.Error);
+                    return;
+                }
+
+                _isNew = false;
+            }
+            else
+            {
+                if (string.IsNullOrWhiteSpace(_draft.Id))
+                {
+                    Snackbar.Add("수주서 저장 실패: 문서 ID가 없습니다.", Severity.Error);
+                    return;
+                }
+
+                var req = new UpdateDeliveryRequest
+                {
+                    OrderDate = _draft.SalesDate,
+                    PartnerId = _draft.PartnerId ?? "",
+                    Memo = _draft.Memo,
+                    Items = _draft.Lines
+                        .Where(x => !x.IsPlaceholder)
+                        .Select(x => new DeliveryItemDto
+                        {
+                            ItemId = x.ItemId,
+                            ItemName = x.ItemName,
+                            Spec = x.Spec,
+                            Unit = x.Unit,
+                            Qty = x.Qty,
+                            UnitPrice = x.UnitPrice,
+                            Amount = x.Amount,
+                            VatAmount = x.VatAmount,
+                            Memo = x.Note,
+                            RowNo = x.RowNo
+                        }).ToList()
+                };
+
+                var ok = await DeliveryService.UpdateAsync(_draft.Id, req);
+                if (!ok)
+                {
+                    Snackbar.Add("수주서 저장에 실패했습니다.", Severity.Error);
+                    return;
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"저장 중 오류: {ex.Message}", Severity.Error);
+            return;
+        }
+
         _hasUnsavedChanges = false;
         _status = "Draft";
 
@@ -213,23 +282,68 @@ public partial class SalesOrderPage : ComponentBase
             TabService.UpdateSubTitle(tabId, _draft.SalesCompany);
         }
 
+        RefreshWorkflow();
+        RecalculateSummary();
         Snackbar.Add("수주서 저장이 완료되었습니다.", Severity.Success);
-        return Task.CompletedTask;
     }
 
     /// <summary>
     /// 편집 내용을 취소하고 더티 플래그를 해제한다.
     /// </summary>
-    private Task CancelAsync()
+    private async Task CancelAsync()
     {
+        if (!_isNew && _draft is not null && !string.IsNullOrWhiteSpace(_draft.Id))
+        {
+            // 서버에서 다시 로드한다.
+            var detail = await DeliveryService.GetAsync(_draft.Id);
+            if (detail is not null)
+            {
+                _draft = new DeliveryDraftModel
+                {
+                    Id = detail.DeliveryId,
+                    DocumentNumber = detail.DeliveryNo,
+                    SalesDate = detail.OrderDate,
+                    PartnerId = detail.PartnerId,
+                    SalesCompany = detail.PartnerName,
+                    Memo = detail.Memo,
+                    ManagerName = detail.EmployeeName ?? "",
+                    DocumentType = "수주",
+                    Lines = detail.Items.Count > 0
+                        ? detail.Items.OrderBy(x => x.RowNo).Select((x, i) => new DeliveryLineModel
+                        {
+                            ItemId = x.ItemId, No = x.RowNo > 0 ? x.RowNo : i + 1,
+                            IsPlaceholder = false, ItemName = x.ItemName,
+                            Spec = x.Spec ?? "", Unit = string.IsNullOrEmpty(x.Unit) ? "EA" : x.Unit!,
+                            Quantity = x.Qty, UnitPrice = x.UnitPrice, Note = x.Memo ?? ""
+                        }).ToList()
+                        : new List<DeliveryLineModel> { new() { No = 1, IsPlaceholder = true } }
+                };
+            }
+        }
+        else
+        {
+            // 신규 상태로 초기화한다.
+            _draft = new DeliveryDraftModel
+            {
+                Id = Guid.NewGuid().ToString(),
+                DocumentType = "수주",
+                SalesDate = DateTime.Today,
+                ManagerName = "담당자",
+                Lines = new List<DeliveryLineModel> { new() { No = 1, IsPlaceholder = true } }
+            };
+            _isNew = true;
+        }
+
         _hasUnsavedChanges = false;
         if (TabService.ActiveTabId is { } tabId)
         {
             TabService.SetTabDirty(tabId, false);
         }
 
+        RecalculateSummary();
+        RefreshWorkflow();
         Snackbar.Add("변경사항을 취소했습니다.", Severity.Info);
-        return Task.CompletedTask;
+        await InvokeAsync(StateHasChanged);
     }
 
     /// <summary>
@@ -250,10 +364,20 @@ public partial class SalesOrderPage : ComponentBase
     }
 
     /// <summary>
-    /// 현재 수주 데이터를 초기화하여 신규 문서 상태로 되돌린다.
+    /// 수주서를 삭제하고 신규 문서 상태로 되돌린다.
     /// </summary>
     private async Task DeleteAsync()
     {
+        if (_draft is not null && !string.IsNullOrWhiteSpace(_draft.Id) && !_isNew)
+        {
+            var ok = await DeliveryService.DeleteAsync(_draft.Id);
+            if (!ok)
+            {
+                Snackbar.Add("삭제에 실패했습니다.", Severity.Error);
+                return;
+            }
+        }
+
         _draft = new DeliveryDraftModel
         {
             Id = Guid.NewGuid().ToString(),
@@ -262,6 +386,7 @@ public partial class SalesOrderPage : ComponentBase
             ManagerName = "담당자",
             Lines = new List<DeliveryLineModel> { new() { No = 1, IsPlaceholder = true } }
         };
+        _isNew = true;
         _selectedLine = null;
         _hasUnsavedChanges = false;
         _status = "Draft";

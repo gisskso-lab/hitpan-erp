@@ -25,6 +25,8 @@ public sealed class UserConfiguration : IEntityTypeConfiguration<User>
         builder.Property(e => e.DeptId).HasColumnName("dept_id").HasMaxLength(36);
         builder.Property(e => e.Phone).HasColumnName("phone").HasMaxLength(20);
         builder.Property(e => e.IsActive).HasColumnName("is_active").IsRequired();
+        builder.Property(e => e.FailedLoginCount).HasColumnName("failed_login_count").IsRequired().HasDefaultValue(0);
+        builder.Property(e => e.LockoutEnd).HasColumnName("lockout_end");
         builder.Property(e => e.LastLoginAt).HasColumnName("last_login_at");
         builder.Property(e => e.PasswordChangedAt).HasColumnName("password_changed_at");
         builder.Property(e => e.CreatedAt).HasColumnName("created_at").IsRequired();

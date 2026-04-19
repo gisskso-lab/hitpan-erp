@@ -32,16 +32,37 @@ public class AuthService : IAuthService
             throw new UnauthorizedAccessException(InvalidCredentialMessage);
         }
 
+        // 계정 잠금 확인
+        if (user.LockoutEnd.HasValue && user.LockoutEnd.Value > DateTime.UtcNow)
+        {
+            var remaining = (int)(user.LockoutEnd.Value - DateTime.UtcNow).TotalMinutes + 1;
+            throw new UnauthorizedAccessException($"계정이 잠겼습니다. {remaining}분 후 다시 시도해주세요.");
+        }
+
         var passwordValid = BCrypt.Net.BCrypt.Verify(request.Password, user.PasswordHash);
         if (!passwordValid)
         {
-            throw new UnauthorizedAccessException(InvalidCredentialMessage);
+            // 로그인 실패 횟수 증가
+            user.FailedLoginCount++;
+            if (user.FailedLoginCount >= 5)
+            {
+                user.LockoutEnd = DateTime.UtcNow.AddMinutes(15);
+                await _unitOfWork.SaveChangesAsync(ct);
+                throw new UnauthorizedAccessException("로그인 5회 실패로 계정이 15분간 잠겼습니다.");
+            }
+
+            await _unitOfWork.SaveChangesAsync(ct);
+            throw new UnauthorizedAccessException($"이메일 또는 비밀번호가 올바르지 않습니다. (실패 {user.FailedLoginCount}/5)");
         }
 
         if (!user.IsActive)
         {
             throw new UnauthorizedAccessException("비활성화된 계정입니다");
         }
+
+        // 로그인 성공 시 실패 카운트 초기화
+        user.FailedLoginCount = 0;
+        user.LockoutEnd = null;
 
         var employeeRepo = _unitOfWork.Repository<Employee>();
         var employees = await employeeRepo.FindAsync(x => x.UserId == user.Id && x.IsActive);

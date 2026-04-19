@@ -18,6 +18,7 @@ public partial class ReturnPage : ComponentBase
     private IReadOnlyList<DeliveryWorkflowStepModel> _workflowSteps = Array.Empty<DeliveryWorkflowStepModel>();
     private string _status = "Draft";
     private string _returnType = "purchase_return";
+    private bool _isNew = true;
 
     protected override async Task OnInitializedAsync()
     {
@@ -61,6 +62,15 @@ public partial class ReturnPage : ComponentBase
     {
         if (_draft is null) return;
         _draft.SalesCompany = value;
+
+        // 거래처명으로 PartnerId 매핑
+        _partnerCache ??= await PartnersApi.GetListAsync() ?? new();
+        var matched = _partnerCache.FirstOrDefault(p => p.PartnerName == value);
+        if (matched is not null)
+        {
+            _draft.PartnerId = matched.PartnerId;
+        }
+
         MarkDirty();
         if (TabService.ActiveTabId is { } tabId) TabService.UpdateSubTitle(tabId, value);
         await InvokeAsync(StateHasChanged);
@@ -97,10 +107,12 @@ public partial class ReturnPage : ComponentBase
         await InvokeAsync(StateHasChanged);
     }
 
+    // TODO: 반품 백엔드 API가 구현되면 _isNew 플래그로 Create/Update 분기하여 실제 API를 호출한다.
     private Task SaveAsync()
     {
         if (_draft is null) return Task.CompletedTask;
         _draft.DocumentNumber ??= $"RT-{DateTime.Now:yyyyMMdd}-001";
+        _isNew = false;
         _hasUnsavedChanges = false;
         _status = "Draft";
         if (TabService.ActiveTabId is { } tabId)
@@ -112,12 +124,28 @@ public partial class ReturnPage : ComponentBase
         return Task.CompletedTask;
     }
 
-    private Task CancelAsync()
+    private async Task CancelAsync()
     {
+        if (_isNew || _draft is null || string.IsNullOrWhiteSpace(_draft.Id))
+        {
+            _draft = new DeliveryDraftModel
+            {
+                Id = Guid.NewGuid().ToString(),
+                DocumentType = "반품",
+                SalesDate = DateTime.Today,
+                ManagerName = "담당자",
+                Lines = new List<DeliveryLineModel> { new() { No = 1, IsPlaceholder = true } }
+            };
+            _isNew = true;
+            RecalculateSummary();
+            RefreshWorkflow();
+        }
+        // TODO: 반품 백엔드 API 구현 후, _isNew == false 일 때 서버에서 다시 로드.
+
         _hasUnsavedChanges = false;
         if (TabService.ActiveTabId is { } tabId) TabService.SetTabDirty(tabId, false);
         Snackbar.Add("변경사항을 취소했습니다.", Severity.Info);
-        return Task.CompletedTask;
+        await InvokeAsync(StateHasChanged);
     }
 
     private async Task DeleteConfirmAsync()
@@ -126,6 +154,7 @@ public partial class ReturnPage : ComponentBase
         if (ok == true) await DeleteAsync();
     }
 
+    // TODO: 반품 백엔드 API 구현 후, 삭제 API 호출 추가.
     private async Task DeleteAsync()
     {
         _draft = new DeliveryDraftModel
@@ -136,6 +165,7 @@ public partial class ReturnPage : ComponentBase
             ManagerName = "담당자",
             Lines = new List<DeliveryLineModel> { new() { No = 1, IsPlaceholder = true } }
         };
+        _isNew = true;
         _selectedLine = null;
         _hasUnsavedChanges = false;
         _status = "Draft";

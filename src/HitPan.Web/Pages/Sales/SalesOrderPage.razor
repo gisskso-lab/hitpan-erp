@@ -10,6 +10,7 @@
 @inject ISnackbar Snackbar
 @inject PartnerMasterService PartnersApi
 @inject ItemMasterService ItemsApi
+@inject DeliveryService DeliveryService
 
 <!-- 미저장 데이터가 있을 때 브라우저/내부 이동을 제어한다. -->
 <NavigationLock ConfirmExternalNavigation="@_hasUnsavedChanges" OnBeforeInternalNavigation="OnBeforeInternalNavigationAsync" />

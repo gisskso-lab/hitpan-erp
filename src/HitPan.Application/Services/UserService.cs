@@ -83,6 +83,7 @@ public sealed class UserService : IUserService
 
     public async Task<string> CreateAsync(CreateUserDto dto, string tenantId, CancellationToken ct = default)
     {
+        ValidatePassword(dto.Password);
         await EnsureOpenAsync(ct).ConfigureAwait(false);
 
         var dup = await _db.ExecuteScalarAsync<long>(
@@ -251,6 +252,18 @@ public sealed class UserService : IUserService
         return Enum.TryParse<UserRole>(role, ignoreCase: true, out var parsed)
             ? parsed
             : UserRole.User;
+    }
+
+    private static void ValidatePassword(string password)
+    {
+        if (string.IsNullOrWhiteSpace(password) || password.Length < 8)
+            throw new InvalidOperationException("비밀번호는 최소 8자 이상이어야 합니다.");
+        if (!password.Any(char.IsUpper))
+            throw new InvalidOperationException("비밀번호에 대문자가 1개 이상 포함되어야 합니다.");
+        if (!password.Any(char.IsDigit))
+            throw new InvalidOperationException("비밀번호에 숫자가 1개 이상 포함되어야 합니다.");
+        if (!password.Any(c => !char.IsLetterOrDigit(c)))
+            throw new InvalidOperationException("비밀번호에 특수문자가 1개 이상 포함되어야 합니다.");
     }
 
     private async Task EnsureOpenAsync(CancellationToken ct)

@@ -99,6 +99,7 @@
     private int _selectedCount;
     private bool _canBulkDelete;
     private ClaimsPrincipal? _user;
+    private bool _isNew = true;
     private List<PartnerListRow>? _partnerCache;
     private List<ItemListModel>? _itemCache;
 
@@ -135,6 +136,17 @@
 
     private async Task OnHeaderChanged()
     {
+        // 거래처명으로 PartnerId 매핑
+        if (_draft is not null && !string.IsNullOrWhiteSpace(_draft.SalesCompany))
+        {
+            _partnerCache ??= await PartnersApi.GetListAsync() ?? new();
+            var matched = _partnerCache.FirstOrDefault(p => p.PartnerName == _draft.SalesCompany);
+            if (matched is not null)
+            {
+                _draft.PartnerId = matched.PartnerId;
+            }
+        }
+
         RefreshWorkflow();
         MarkDirty();
         if (TabService.ActiveTabId is { } tabId)
@@ -251,24 +263,73 @@
         if (_draft is null) return;
         try
         {
-            var docNo = await DeliveryService.SaveAsync(_draft);
+            if (_isNew)
+            {
+                var docNo = await DeliveryService.SaveAsync(_draft);
+                if (string.IsNullOrWhiteSpace(docNo))
+                {
+                    Snackbar.Add("거래명세서 생성에 실패했습니다.", Severity.Error);
+                    return;
+                }
+
+                _isNew = false;
+                Snackbar.Add($"저장 완료: {docNo}", Severity.Success);
+            }
+            else
+            {
+                if (string.IsNullOrWhiteSpace(_draft.Id))
+                {
+                    Snackbar.Add("저장 실패: 문서 ID가 없습니다.", Severity.Error);
+                    return;
+                }
+
+                var req = new UpdateDeliveryRequest
+                {
+                    OrderDate = _draft.SalesDate,
+                    PartnerId = _draft.PartnerId ?? "",
+                    CashAmount = _summary.CashAmount,
+                    CardAmount = _summary.CardAmount,
+                    DiscountAmount = _summary.DiscountAmount,
+                    Memo = _draft.Memo,
+                    Items = _draft.Lines
+                        .Where(x => !x.IsPlaceholder)
+                        .Select(x => new DeliveryItemDto
+                        {
+                            ItemId = x.ItemId,
+                            ItemName = x.ItemName,
+                            Spec = x.Spec,
+                            Unit = x.Unit,
+                            Qty = x.Qty,
+                            UnitPrice = x.UnitPrice,
+                            Amount = x.Amount,
+                            VatAmount = x.VatAmount,
+                            Memo = x.Note,
+                            RowNo = x.RowNo
+                        }).ToList()
+                };
+
+                var ok = await DeliveryService.UpdateAsync(_draft.Id, req);
+                if (!ok)
+                {
+                    Snackbar.Add("저장에 실패했습니다.", Severity.Error);
+                    return;
+                }
+
+                Snackbar.Add("저장되었습니다.", Severity.Success);
+            }
+
             if (TabService.ActiveTabId is { } tabId)
             {
                 TabService.UpdateSubTitle(tabId, _draft.SalesCompany);
+                TabService.SetTabDirty(tabId, false);
             }
 
             _hasUnsavedChanges = false;
-            if (TabService.ActiveTabId is { } currentTabId)
-            {
-                TabService.SetTabDirty(currentTabId, false);
-            }
-
             RefreshWorkflow();
-            Snackbar.Add($"저장 완료: {docNo}", Severity.Success);
         }
         catch (Exception ex)
         {
-            Snackbar.Add(ex.Message, Severity.Error);
+            Snackbar.Add($"저장 중 오류: {ex.Message}", Severity.Error);
         }
     }
 
@@ -456,6 +517,7 @@
         }
 
         await ResetToNewDeliveryAsync();
+        _isNew = true;
     }
 
     private Task GoPrev() => Task.CompletedTask;
@@ -469,64 +531,29 @@
 
     private async Task Save()
     {
-        if (_draft is null) return;
+        await SaveAsync();
+    }
 
-        if (string.IsNullOrWhiteSpace(_draft.DocumentNumber))
+    private async Task Cancel()
+    {
+        if (!_isNew && _draft is not null && !string.IsNullOrWhiteSpace(_draft.Id))
         {
-            await SaveAsync();
-            return;
-        }
-
-        if (string.IsNullOrWhiteSpace(_draft.Id))
-        {
-            Snackbar.Add("저장 실패.", Severity.Error);
-            return;
-        }
-
-        var req = new UpdateDeliveryRequest
-        {
-            OrderDate = _draft.SalesDate,
-            PartnerId = _draft.PartnerId ?? "",
-            CashAmount = _summary.CashAmount,
-            CardAmount = _summary.CardAmount,
-            DiscountAmount = _summary.DiscountAmount,
-            Memo = _draft.Memo,
-            Items = _draft.Lines
-                .Where(x => !x.IsPlaceholder)
-                .Select(x => new DeliveryItemDto
-                {
-                    ItemId = x.ItemId,
-                    ItemName = x.ItemName,
-                    Spec = x.Spec,
-                    Unit = x.Unit,
-                    Qty = x.Qty,
-                    UnitPrice = x.UnitPrice,
-                    Amount = x.Amount,
-                    VatAmount = x.VatAmount,
-                    Memo = x.Note,
-                    RowNo = x.RowNo
-                }).ToList()
-        };
-
-        var ok = await DeliveryService.UpdateAsync(_draft.Id, req);
-        if (ok)
-        {
-            Snackbar.Add("저장되었습니다.", Severity.Success);
-            _hasUnsavedChanges = false;
-            if (TabService.ActiveTabId is { } tabId)
-            {
-                TabService.SetTabDirty(tabId, false);
-            }
-
-            RefreshWorkflow();
+            await LoadOrderToGrid(_draft.Id);
         }
         else
         {
-            Snackbar.Add("저장 실패.", Severity.Error);
+            await ResetToNewDeliveryAsync();
+            _isNew = true;
         }
-    }
 
-    private Task Cancel() => Task.CompletedTask;
+        _hasUnsavedChanges = false;
+        if (TabService.ActiveTabId is { } tabId)
+        {
+            TabService.SetTabDirty(tabId, false);
+        }
+
+        Snackbar.Add("변경사항을 취소했습니다.", Severity.Info);
+    }
     private Task Print() => Task.CompletedTask;
 
     private async Task DownloadExcel()
@@ -642,6 +669,7 @@
         _summary.TotalAmount = supply + vat;
         _summary.ClaimAmount = _summary.TotalAmount;
 
+        _isNew = false;
         _hasUnsavedChanges = false;
         _selectedLine = null;
         UpdateSelectionCount();
