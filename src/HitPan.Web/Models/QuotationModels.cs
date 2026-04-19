@@ -168,4 +168,7 @@ public sealed class QuotationListItem
 
     /// <summary>부가세다.</summary>
     public decimal VatAmount { get; set; }
+
+    /// <summary>UI 전용 체크 상태다.</summary>
+    public bool IsChecked { get; set; }
 }

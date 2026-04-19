@@ -396,6 +396,45 @@ public partial class SalesOrderPage : ComponentBase
     }
 
     /// <summary>
+    /// 현재 수주서를 거래명세서(판매)로 전환한다.
+    /// </summary>
+    private async Task ConvertToDeliveryAsync()
+    {
+        if (_draft is null || string.IsNullOrWhiteSpace(_draft.Id) || _isNew)
+        {
+            Snackbar.Add("저장된 수주서를 먼저 선택해주세요.", Severity.Warning);
+            return;
+        }
+
+        var confirm = await DialogService.ShowMessageBoxAsync(
+            "판매전환 확인",
+            "현재 수주서를 거래명세서로 전환하시겠습니까?",
+            yesText: "전환",
+            cancelText: "취소");
+
+        if (confirm != true)
+        {
+            return;
+        }
+
+        try
+        {
+            var result = await DeliveryService.ConvertOrderToDeliveryAsync(_draft.Id);
+            if (result is null)
+            {
+                Snackbar.Add("판매전환에 실패했습니다.", Severity.Error);
+                return;
+            }
+
+            Snackbar.Add($"거래명세서 {result.DocumentNumber} 가 생성되었습니다.", Severity.Success);
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"판매전환 중 오류: {ex.Message}", Severity.Error);
+        }
+    }
+
+    /// <summary>
     /// 인쇄 기능을 호출한다. (현재는 안내 토스트만 표시)
     /// </summary>
     private Task PrintAsync()

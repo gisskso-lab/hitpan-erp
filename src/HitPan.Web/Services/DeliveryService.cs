@@ -129,6 +129,56 @@ public sealed class DeliveryService(HttpClient http)
         }
     }
 
+    /// <summary>수주서 목록 조회 (수주 전용 API 호출).</summary>
+    public async Task<List<SalesListItem>> GetOrderListAsync(
+        DateTime? from = null, DateTime? to = null, string? status = null, CancellationToken ct = default)
+    {
+        try
+        {
+            var qs = new List<string>();
+            if (from.HasValue) qs.Add($"from={from:yyyy-MM-dd}");
+            if (to.HasValue) qs.Add($"to={to:yyyy-MM-dd}");
+            if (!string.IsNullOrEmpty(status)) qs.Add($"status={Uri.EscapeDataString(status)}");
+            var path = "api/sales/orders" + (qs.Count > 0 ? "?" + string.Join("&", qs) : "");
+
+            var list = await http.GetFromJsonAsync<List<DeliveryListDto>>(path, JsonOptions, ct)
+                       ?? new List<DeliveryListDto>();
+
+            return list.Select(static d => new SalesListItem
+            {
+                OrderId = d.DeliveryId,
+                OrderDate = d.OrderDate,
+                OrderNo = d.DeliveryNo,
+                PartnerId = d.PartnerId,
+                PartnerName = d.PartnerName,
+                TotalAmount = d.TotalAmount,
+                VatAmount = d.VatAmount,
+                Status = d.Status
+            }).ToList();
+        }
+        catch
+        {
+            return new List<SalesListItem>();
+        }
+    }
+
+    /// <summary>수주서를 거래명세서(판매)로 전환한다.</summary>
+    public async Task<ConvertToDeliveryResponse?> ConvertOrderToDeliveryAsync(string orderId, CancellationToken ct = default)
+    {
+        try
+        {
+            using var content = new StringContent("{}", Encoding.UTF8, "application/json");
+            using var resp = await http.PostAsync(
+                $"api/sales/orders/{Uri.EscapeDataString(orderId)}/convert-to-delivery", content, cancellationToken: ct);
+            if (!resp.IsSuccessStatusCode) return null;
+            return await resp.Content.ReadFromJsonAsync<ConvertToDeliveryResponse>(JsonOptions, ct);
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
     /// <summary>판매 목록 다이얼로그용 — API DTO를 <see cref="SalesListItem"/>으로 변환.</summary>
     public async Task<List<SalesListItem>> GetSalesListItemsAsync(
         string listType,

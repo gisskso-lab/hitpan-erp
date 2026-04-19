@@ -29,6 +29,9 @@
             <MudButton Variant="Variant.Outlined" Color="Color.Success" OnClick="BulkConfirmAsync" Disabled="@(!_selectedRows.Any())">
                 선택 일괄 확정
             </MudButton>
+            <MudButton Variant="Variant.Outlined" Color="Color.Tertiary" StartIcon="@Icons.Material.Filled.SwapHoriz" OnClick="BulkConvertToDeliveryAsync" Disabled="@(!_selectedRows.Any())">
+                판매로 전환
+            </MudButton>
         </MudStack>
     </MudPaper>
 

@@ -215,6 +215,12 @@ public sealed class BulkConfirmFailedItem
     public string? Reason { get; set; }
 }
 
+public sealed class ConvertToDeliveryResponse
+{
+    public string DeliveryId { get; set; } = string.Empty;
+    public string DocumentNumber { get; set; } = string.Empty;
+}
+
 public enum DeliveryContextAction
 {
     CopyRow,

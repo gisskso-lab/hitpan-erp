@@ -572,6 +572,100 @@ public class SalesService : ISalesService
                 cancellationToken: ct));
     }
 
+    public async Task<List<DeliveryListDto>> GetOrdersAsync(
+        string tenantId,
+        DateTime? from = null,
+        DateTime? to = null,
+        string? status = null,
+        CancellationToken ct = default)
+    {
+        const string sql = """
+                           SELECT
+                               o.order_id AS DeliveryId,
+                               o.order_no AS DeliveryNo,
+                               o.order_date AS OrderDate,
+                               o.partner_id AS PartnerId,
+                               p.partner_name AS PartnerName,
+                               (o.total_amount + o.vat_amount) AS TotalAmount,
+                               o.vat_amount AS VatAmount,
+                               o.total_amount AS SupplyAmount,
+                               o.status AS Status,
+                               o.memo AS Memo
+                           FROM sales_orders o
+                           LEFT JOIN partners p
+                               ON p.partner_id = o.partner_id
+                                  AND p.tenant_id = o.tenant_id
+                           WHERE o.tenant_id = @TenantId
+                             AND (@From IS NULL OR o.order_date >= @From)
+                             AND (@To IS NULL OR o.order_date <= @To)
+                             AND (@Status IS NULL OR o.status = @Status)
+                           ORDER BY o.order_date DESC,
+                                    o.order_no DESC
+                           LIMIT 200
+                           """;
+
+        var rows = await _db.QueryAsync<DeliveryListDto>(
+            new CommandDefinition(
+                sql,
+                new
+                {
+                    TenantId = tenantId,
+                    From = from?.Date,
+                    To = to?.Date,
+                    Status = string.IsNullOrWhiteSpace(status) ? null : status
+                },
+                cancellationToken: ct));
+
+        return rows.ToList();
+    }
+
+    public async Task<(string DeliveryId, string DocumentNumber)> ConvertOrderToDeliveryAsync(
+        string orderId,
+        string tenantId,
+        CancellationToken ct = default)
+    {
+        var orderRepo = _unitOfWork.Repository<SalesOrder>();
+        var orderItemRepo = _unitOfWork.Repository<SalesOrderItem>();
+
+        var order = await orderRepo.GetByIdAsync(orderId)
+            ?? throw new InvalidOperationException("수주서를 찾을 수 없습니다.");
+
+        if (order.TenantId != tenantId)
+        {
+            throw new InvalidOperationException("수주서를 찾을 수 없습니다.");
+        }
+
+        var items = await orderItemRepo.FindAsync(x => x.OrderId == orderId);
+        var deliveryItems = items
+            .Where(x => x.OrderedQty - x.DeliveredQty > 0)
+            .Select(x => new CreateDeliveryItemRequest
+            {
+                OrderItemId = x.OrderItemId,
+                ItemId = x.ItemId,
+                Qty = x.OrderedQty - x.DeliveredQty,
+                UnitPrice = x.UnitPrice,
+                SupplyAmount = (x.OrderedQty - x.DeliveredQty) * x.UnitPrice,
+                VatAmount = Math.Round((x.OrderedQty - x.DeliveredQty) * x.UnitPrice * 0.1m, 0)
+            }).ToList();
+
+        if (deliveryItems.Count == 0)
+        {
+            throw new InvalidOperationException("전환 가능한 미출고 품목이 없습니다.");
+        }
+
+        var request = new CreateDeliveryRequest
+        {
+            OrderId = orderId,
+            PartnerId = order.PartnerId,
+            EmployeeId = order.EmployeeId,
+            DeliveryDate = DateTime.UtcNow.Date,
+            Memo = $"수주 {order.OrderNo} 에서 전환",
+            Items = deliveryItems
+        };
+
+        return await CreateDeliveryAsync(request, ct);
+    }
+
     public Task<List<PartnerSearchDto>> SearchPartnersAsync(string tenantId, string keyword, CancellationToken ct = default)
     {
         return _partnerService.SearchPartnersAsync(tenantId, keyword, ct);

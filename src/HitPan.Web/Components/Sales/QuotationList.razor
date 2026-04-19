@@ -25,6 +25,9 @@
 
         <MudTable T="QuotationListItem" Items="_rows" Dense="true" Hover="true" Striped="true" FixedHeader="true" Height="420px">
             <HeaderContent>
+                <MudTh Style="width:48px">
+                    <MudCheckBox T="bool" Value="_allSelected" ValueChanged="ToggleAllAsync" />
+                </MudTh>
                 <MudTh>견적번호</MudTh>
                 <MudTh>거래처</MudTh>
                 <MudTh>견적일</MudTh>
@@ -34,6 +37,12 @@
                 <MudTh Class="text-right">부가세</MudTh>
             </HeaderContent>
             <RowTemplate>
+                <MudTd>
+                    <MudCheckBox T="bool"
+                                 Value="context.IsChecked"
+                                 ValueChanged="@(v => ToggleOneAsync(context, v))"
+                                 OnClick:stopPropagation="true" />
+                </MudTd>
                 <MudTd @ondblclick="@(() => SelectAsync(context))">@context.QuoteNo</MudTd>
                 <MudTd @ondblclick="@(() => SelectAsync(context))">@context.PartnerName</MudTd>
                 <MudTd @ondblclick="@(() => SelectAsync(context))">@context.QuoteDate.ToString("yyyy-MM-dd")</MudTd>
@@ -48,6 +57,9 @@
         </MudTable>
     </DialogContent>
     <DialogActions>
+        <MudButton Variant="Variant.Outlined" Color="Color.Tertiary" StartIcon="@Icons.Material.Filled.SwapHoriz" OnClick="BulkConvertToOrderAsync" Disabled="@(!_selectedRows.Any())">
+            수주로 전환
+        </MudButton>
         <MudSpacer />
         <MudButton Variant="Variant.Outlined" OnClick="Close">닫기</MudButton>
     </DialogActions>

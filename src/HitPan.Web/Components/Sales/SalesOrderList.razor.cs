@@ -1,6 +1,7 @@
 using HitPan.Web.Models;
 using HitPan.Web.Services;
 using Microsoft.AspNetCore.Components;
+using MudBlazor;
 
 namespace HitPan.Web.Components.Sales;
 
@@ -51,6 +52,12 @@ public partial class SalesOrderList : ComponentBase
     /// </summary>
     [Inject]
     private DeliveryService DeliveryService { get; set; } = default!;
+
+    /// <summary>
+    /// 스낵바 서비스.
+    /// </summary>
+    [Inject]
+    private ISnackbar Snackbar { get; set; } = default!;
 
     /// <summary>
     /// 사용자가 행을 클릭했을 때 선택된 주문 ID를 전달한다.
@@ -131,12 +138,11 @@ public partial class SalesOrderList : ComponentBase
     /// <param name="ct">HTTP 요청 취소용 토큰</param>
     private async Task LoadAsync(CancellationToken ct = default)
     {
-        // DeliveryService에 정의된 GetSalesListItemsAsync(listType, from, to, partnerName, ct)를 그대로 사용한다.
-        _rows = await DeliveryService.GetSalesListItemsAsync(
-            listType: _status,
+        // 수주서 전용 API를 호출한다.
+        _rows = await DeliveryService.GetOrderListAsync(
             from: _startDate,
             to: _endDate,
-            partnerName: _partner?.PartnerName ?? string.Empty,
+            status: _status,
             ct: ct);
 
         foreach (var row in _rows)
@@ -211,6 +217,51 @@ public partial class SalesOrderList : ComponentBase
         _allSelected = _rows.Count > 0 && _rows.All(x => x.IsChecked);
         RecalculateSelectionSummary();
         await InvokeAsync(StateHasChanged);
+    }
+
+    /// <summary>
+    /// 선택된 수주서를 일괄 판매(거래명세서)로 전환한다.
+    /// </summary>
+    private async Task BulkConvertToDeliveryAsync()
+    {
+        var ids = _selectedRows
+            .Where(x => !string.IsNullOrWhiteSpace(x.OrderId))
+            .Select(x => x.OrderId)
+            .ToList();
+
+        if (ids.Count == 0)
+        {
+            return;
+        }
+
+        var successCount = 0;
+        var failCount = 0;
+
+        foreach (var orderId in ids)
+        {
+            var result = await DeliveryService.ConvertOrderToDeliveryAsync(orderId);
+            if (result is not null)
+            {
+                successCount++;
+            }
+            else
+            {
+                failCount++;
+            }
+        }
+
+        if (successCount > 0)
+        {
+            Snackbar.Add($"{successCount}건 판매전환 완료", Severity.Success);
+        }
+
+        if (failCount > 0)
+        {
+            Snackbar.Add($"{failCount}건 판매전환 실패", Severity.Error);
+        }
+
+        // 목록 새로고침
+        await LoadAsync(CancellationToken.None);
     }
 
     /// <summary>

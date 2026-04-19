@@ -16,6 +16,9 @@ public partial class QuotationList : ComponentBase
     // 견적 서비스다.
     [Inject] private QuotationService QuotationService { get; set; } = default!;
 
+    // 스낵바 서비스다.
+    [Inject] private ISnackbar Snackbar { get; set; } = default!;
+
     // 시작일 필터다.
     private DateTime? _startDate = DateTime.Today.AddDays(-30);
 
@@ -30,6 +33,12 @@ public partial class QuotationList : ComponentBase
 
     // 조회 목록 데이터다.
     private List<QuotationListItem> _rows = new();
+
+    // 체크된 행 컬렉션이다.
+    private List<QuotationListItem> _selectedRows = new();
+
+    // 헤더 전체선택 체크 상태다.
+    private bool _allSelected;
 
     /// <summary>
     /// 초기 목록을 조회한다.
@@ -82,6 +91,77 @@ public partial class QuotationList : ComponentBase
     {
         _rows = await QuotationService.GetListAsync(_startDate, _endDate, _partnerName, _status);
         await InvokeAsync(StateHasChanged);
+    }
+
+    /// <summary>
+    /// 전체선택 체크 토글이다.
+    /// </summary>
+    private Task ToggleAllAsync(bool value)
+    {
+        _allSelected = value;
+        foreach (var row in _rows)
+        {
+            row.IsChecked = value;
+        }
+
+        _selectedRows = _rows.Where(x => x.IsChecked).ToList();
+        return Task.CompletedTask;
+    }
+
+    /// <summary>
+    /// 단일 행 체크 토글이다.
+    /// </summary>
+    private Task ToggleOneAsync(QuotationListItem row, bool value)
+    {
+        row.IsChecked = value;
+        _selectedRows = _rows.Where(x => x.IsChecked).ToList();
+        _allSelected = _rows.Count > 0 && _rows.All(x => x.IsChecked);
+        return Task.CompletedTask;
+    }
+
+    /// <summary>
+    /// 선택된 견적서를 일괄 수주서로 전환한다.
+    /// </summary>
+    private async Task BulkConvertToOrderAsync()
+    {
+        var ids = _selectedRows
+            .Where(x => !string.IsNullOrWhiteSpace(x.QuoteId))
+            .Select(x => x.QuoteId)
+            .ToList();
+
+        if (ids.Count == 0)
+        {
+            return;
+        }
+
+        var successCount = 0;
+        var failCount = 0;
+
+        foreach (var quoteId in ids)
+        {
+            var orderId = await QuotationService.ConvertToSalesOrderAsync(quoteId);
+            if (!string.IsNullOrWhiteSpace(orderId))
+            {
+                successCount++;
+            }
+            else
+            {
+                failCount++;
+            }
+        }
+
+        if (successCount > 0)
+        {
+            Snackbar.Add($"{successCount}건 수주전환 완료", Severity.Success);
+        }
+
+        if (failCount > 0)
+        {
+            Snackbar.Add($"{failCount}건 수주전환 실패", Severity.Error);
+        }
+
+        // 목록 새로고침
+        await LoadAsync();
     }
 
     /// <summary>

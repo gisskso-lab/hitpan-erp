@@ -27,6 +27,30 @@ public class SalesController : ControllerBase
         return Created($"/api/sales/orders/{id}", new { id });
     }
 
+    [HttpGet("orders")]
+    public async Task<IActionResult> GetOrders(
+        [FromQuery] DateTime? from,
+        [FromQuery] DateTime? to,
+        [FromQuery] string? status,
+        CancellationToken ct)
+    {
+        var tenantId = HttpContext.Items["TenantId"]?.ToString();
+        if (string.IsNullOrEmpty(tenantId)) return Forbid();
+
+        var result = await _salesService.GetOrdersAsync(tenantId, from, to, status, ct);
+        return Ok(result);
+    }
+
+    [HttpPost("orders/{id}/convert-to-delivery")]
+    public async Task<IActionResult> ConvertOrderToDelivery(string id, CancellationToken ct)
+    {
+        var tenantId = HttpContext.Items["TenantId"]?.ToString();
+        if (string.IsNullOrEmpty(tenantId)) return Forbid();
+
+        var (deliveryId, documentNumber) = await _salesService.ConvertOrderToDeliveryAsync(id, tenantId, ct);
+        return Ok(new { deliveryId, documentNumber });
+    }
+
     [HttpPost("deliveries")]
     public async Task<IActionResult> CreateDelivery([FromBody] CreateDeliveryRequest request, CancellationToken ct)
     {
