@@ -18,6 +18,8 @@ public partial class ReturnPage : ComponentBase
     private IReadOnlyList<DeliveryWorkflowStepModel> _workflowSteps = Array.Empty<DeliveryWorkflowStepModel>();
     private string _status = "Draft";
     private string _returnType = "purchase_return";
+    private bool _showReturnList;
+    private List<PurchaseReturnListItem> _returnList = new();
     private bool _isNew = true;
 
     protected override async Task OnInitializedAsync()
@@ -188,8 +190,14 @@ public partial class ReturnPage : ComponentBase
 
     private async Task OpenListAsync()
     {
-        Snackbar.Add("반품 목록 기능은 다음 단계에서 연동됩니다.", Severity.Info);
-        await Task.CompletedTask;
+        _returnList = await DeliveryService.GetPurchaseReturnListAsync();
+        _showReturnList = true;
+        await InvokeAsync(StateHasChanged);
+    }
+
+    private void CloseReturnList()
+    {
+        _showReturnList = false;
     }
 
     private void RefreshWorkflow()

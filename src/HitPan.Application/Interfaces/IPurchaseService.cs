@@ -31,4 +31,10 @@ public interface IPurchaseService
         string receiptId,
         string tenantId,
         CancellationToken ct = default);
+
+    Task<List<PurchaseReturnListDto>> GetReturnsAsync(
+        string tenantId,
+        DateTime? from = null,
+        DateTime? to = null,
+        CancellationToken ct = default);
 }

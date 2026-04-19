@@ -331,6 +331,21 @@ public sealed class DeliveryService(HttpClient http)
         }
     }
 
+    public async Task<List<PurchaseReturnListItem>> GetPurchaseReturnListAsync(
+        DateTime? from = null, DateTime? to = null, CancellationToken ct = default)
+    {
+        try
+        {
+            var qs = new List<string>();
+            if (from.HasValue) qs.Add($"from={from:yyyy-MM-dd}");
+            if (to.HasValue) qs.Add($"to={to:yyyy-MM-dd}");
+            var path = "api/purchase/returns" + (qs.Count > 0 ? "?" + string.Join("&", qs) : "");
+            var list = await http.GetFromJsonAsync<List<PurchaseReturnListItem>>(path, JsonOptions, ct);
+            return list ?? new();
+        }
+        catch { return new(); }
+    }
+
     public async Task<bool> ConvertReceiptToReturnAsync(string receiptId, CancellationToken ct = default)
     {
         try

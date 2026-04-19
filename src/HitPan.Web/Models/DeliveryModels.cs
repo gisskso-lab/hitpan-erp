@@ -344,3 +344,17 @@ public static class DeliveryWorkflowFactory
             LinkedDocumentNumber = linkedNo
         };
 }
+
+public sealed class PurchaseReturnListItem
+{
+    public string ReturnId { get; set; } = string.Empty;
+    public string ReturnNo { get; set; } = string.Empty;
+    public DateTime ReturnDate { get; set; }
+    public string PartnerId { get; set; } = string.Empty;
+    public string PartnerName { get; set; } = string.Empty;
+    public decimal TotalAmount { get; set; }
+    public decimal VatAmount { get; set; }
+    public string Status { get; set; } = string.Empty;
+    public string? Memo { get; set; }
+    public bool IsChecked { get; set; }
+}

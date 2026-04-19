@@ -386,6 +386,34 @@ public class PurchaseService : IPurchaseService
         return (receiptId, receiptNo);
     }
 
+    public async Task<List<PurchaseReturnListDto>> GetReturnsAsync(
+        string tenantId, DateTime? from = null, DateTime? to = null, CancellationToken ct = default)
+    {
+        if (_db.State != System.Data.ConnectionState.Open)
+        {
+            if (_db is System.Data.Common.DbConnection dbConn) await dbConn.OpenAsync(ct);
+            else _db.Open();
+        }
+
+        var sql = """
+            SELECT r.return_id AS ReturnId, r.return_no AS ReturnNo, r.return_date AS ReturnDate,
+                   r.partner_id AS PartnerId, COALESCE(p.partner_name,'') AS PartnerName,
+                   r.total_amount AS TotalAmount, r.vat_amount AS VatAmount,
+                   r.status AS Status, r.memo AS Memo
+            FROM purchase_returns r
+            LEFT JOIN partners p ON p.partner_id = r.partner_id
+            WHERE r.tenant_id = @Tid AND r.is_deleted = 0
+            """;
+        var conditions = new List<string>();
+        if (from.HasValue) conditions.Add("AND r.return_date >= @From");
+        if (to.HasValue) conditions.Add("AND r.return_date <= @To");
+        sql += string.Join(" ", conditions) + " ORDER BY r.return_date DESC, r.return_no DESC";
+
+        var rows = await _db.QueryAsync<PurchaseReturnListDto>(new CommandDefinition(
+            sql, new { Tid = tenantId, From = from, To = to }, cancellationToken: ct));
+        return rows.ToList();
+    }
+
     public async Task<(string ReturnId, string ReturnNo)> ConvertReceiptToReturnAsync(
         string receiptId, string tenantId, CancellationToken ct = default)
     {
@@ -399,7 +427,7 @@ public class PurchaseService : IPurchaseService
 
         // 매입 정보 조회
         var receipt = await _db.QueryFirstOrDefaultAsync<dynamic>(new CommandDefinition(
-            "SELECT receipt_id, receipt_no, partner_id FROM purchase_receipts WHERE receipt_id=@Id AND tenant_id=@Tid AND is_deleted=0",
+            "SELECT receipt_id, receipt_no, partner_id FROM purchase_receipts WHERE receipt_id=@Id AND tenant_id=@Tid",
             new { Id = receiptId, Tid = tenantId }, cancellationToken: ct))
             ?? throw new InvalidOperationException("매입명세서를 찾을 수 없습니다.");
 
