@@ -1,0 +1,12 @@
+@page "/accounting/cashbook"
+@namespace HitPan.Web.Pages.FinanceUi
+@attribute [Authorize]
+
+<PageTitle>현금출납장</PageTitle>
+<MudContainer MaxWidth="MaxWidth.Small" Class="d-flex align-center justify-center" Style="height:calc(100vh - 120px)">
+    <MudPaper Class="pa-8 text-center" Elevation="0">
+        <MudIcon Icon="@Icons.Material.Filled.AccountBalanceWallet" Size="Size.Large" Color="Color.Primary" Class="mb-4" />
+        <MudText Typo="Typo.h5" Class="mb-2">현금출납장</MudText>
+        <MudText Typo="Typo.body1" Color="Color.Secondary">준비중입니다.</MudText>
+    </MudPaper>
+</MudContainer>
