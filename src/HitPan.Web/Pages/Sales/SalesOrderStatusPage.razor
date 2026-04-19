@@ -1,0 +1,67 @@
+@page "/sales-order-status"
+@namespace HitPan.Web.Pages.SalesUi
+@attribute [Authorize]
+@using HitPan.Web.Models
+@using HitPan.Web.Services
+@inject DeliveryService DeliveryService
+@inject ISnackbar Snackbar
+
+<PageTitle>수주현황</PageTitle>
+<MudText Typo="Typo.h6" Class="mb-3">수주현황</MudText>
+
+<MudPaper Class="pa-3 mb-3" Elevation="0" Style="border:1px solid var(--mud-palette-lines-default);border-radius:12px">
+    <MudGrid Spacing="2" Class="align-center">
+        <MudItem xs="12" sm="3">
+            <MudDatePicker @bind-Date="_from" Label="시작일" Variant="Variant.Outlined" Margin="Margin.Dense" DateFormat="yyyy-MM-dd" />
+        </MudItem>
+        <MudItem xs="12" sm="3">
+            <MudDatePicker @bind-Date="_to" Label="종료일" Variant="Variant.Outlined" Margin="Margin.Dense" DateFormat="yyyy-MM-dd" />
+        </MudItem>
+        <MudItem xs="12" sm="4">
+            <MudTextField @bind-Value="_partner" Label="업체명" Variant="Variant.Outlined" Margin="Margin.Dense"
+                          Adornment="Adornment.End" AdornmentIcon="@Icons.Material.Filled.Search" />
+        </MudItem>
+        <MudItem xs="12" sm="2">
+            <MudButton Variant="Variant.Filled" Color="Color.Primary" FullWidth="true" OnClick="SearchAsync">조회</MudButton>
+        </MudItem>
+    </MudGrid>
+</MudPaper>
+
+<MudPaper Elevation="0" Style="border:0.5px solid var(--mud-palette-lines-default);border-radius:12px;overflow:hidden">
+    <MudTable T="SalesListItem" Items="_items" Dense="true" Hover="true" Striped="true" FixedHeader="true" Height="calc(100vh - 280px)">
+        <HeaderContent>
+            <MudTh>일자</MudTh>
+            <MudTh>수주번호</MudTh>
+            <MudTh>업체명</MudTh>
+            <MudTh>상태</MudTh>
+            <MudTh Style="text-align:right">합계</MudTh>
+        </HeaderContent>
+        <RowTemplate>
+            <MudTd>@context.OrderDate.ToString("yyyy-MM-dd")</MudTd>
+            <MudTd><MudText Style="font-weight:500">@context.OrderNo</MudText></MudTd>
+            <MudTd>@context.PartnerName</MudTd>
+            <MudTd><MudChip T="string" Size="Size.Small" Color="@GetColor(context.Status)" Variant="Variant.Text">@GetLabel(context.Status)</MudChip></MudTd>
+            <MudTd Style="text-align:right;font-weight:500">@context.TotalAmount.ToString("N0")</MudTd>
+        </RowTemplate>
+        <NoRecordsContent><MudText Class="pa-4" Style="color:#9CA3AF">조회된 수주가 없습니다.</MudText></NoRecordsContent>
+    </MudTable>
+</MudPaper>
+
+@code {
+    private DateTime? _from = DateTime.Today.AddDays(-30);
+    private DateTime? _to = DateTime.Today;
+    private string _partner = "";
+    private List<SalesListItem> _items = new();
+
+    protected override async Task OnInitializedAsync() => await SearchAsync();
+
+    private async Task SearchAsync()
+    {
+        _items = await DeliveryService.GetOrderListAsync(_from, _to, null) ?? new();
+        if (!string.IsNullOrWhiteSpace(_partner))
+            _items = _items.Where(x => x.PartnerName.Contains(_partner, StringComparison.OrdinalIgnoreCase)).ToList();
+    }
+
+    private static Color GetColor(string s) => s switch { "draft" => Color.Default, "confirmed" => Color.Success, _ => Color.Info };
+    private static string GetLabel(string s) => s switch { "draft" => "임시", "confirmed" => "확정", _ => s };
+}
