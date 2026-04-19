@@ -56,7 +56,7 @@
             </MudGrid>
         </MudPaper>
 
-        <MudToolBar Dense="true" Class="pa-1 gap-1 purchase-receipt-toolbar">
+        <MudToolBar Dense="true" Style="overflow-x:auto;flex-wrap:nowrap" Class="pa-1 gap-1 purchase-receipt-toolbar">
             <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Add" OnClick="AddNewAsync">추가</MudButton>
             <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Save" OnClick="SaveAsync">저장</MudButton>
             <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Undo" OnClick="CancelAsync">취소</MudButton>
