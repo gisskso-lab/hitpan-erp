@@ -47,10 +47,10 @@
         <MudNavLink Href="/purchase-order-status" Icon="@Icons.Material.Filled.ListAlt">발주현황</MudNavLink>
         <MudNavLink Icon="@Icons.Material.Filled.MoveToInbox" OnClick="@(() => TabService.TryAddTab(WorkDocumentKind.PurchaseReceipt))">매입 처리</MudNavLink>
         <MudNavLink Href="/purchase-status" Icon="@Icons.Material.Filled.ListAlt">매입현황</MudNavLink>
-        <MudNavLink Icon="@Icons.Material.Filled.AssignmentReturn" OnClick="@(() => TabService.TryAddTab(WorkDocumentKind.Return))">반품 처리</MudNavLink>
-        <MudNavLink Href="/return-status" Icon="@Icons.Material.Filled.ListAlt">반품현황</MudNavLink>
         <MudNavLink Href="/purchase/ranking" Icon="@Icons.Material.Filled.EmojiEvents">매입순위표</MudNavLink>
         <MudNavLink Href="/purchase/statistics" Icon="@Icons.Material.Filled.Analytics">매입통계</MudNavLink>
+        <MudNavLink Icon="@Icons.Material.Filled.AssignmentReturn" OnClick="@(() => TabService.TryAddTab(WorkDocumentKind.Return))">반품 처리</MudNavLink>
+        <MudNavLink Href="/return-status" Icon="@Icons.Material.Filled.ListAlt">반품현황</MudNavLink>
     </MudNavGroup>
 
     <MudNavGroup Title="재고" Icon="@Icons.Material.Filled.Warehouse" Expanded="false">
