@@ -26,4 +26,9 @@ public interface IPurchaseService
         string poId,
         string tenantId,
         CancellationToken ct = default);
+
+    Task<(string ReturnId, string ReturnNo)> ConvertReceiptToReturnAsync(
+        string receiptId,
+        string tenantId,
+        CancellationToken ct = default);
 }

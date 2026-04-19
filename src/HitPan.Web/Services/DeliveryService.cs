@@ -330,4 +330,19 @@ public sealed class DeliveryService(HttpClient http)
             return null;
         }
     }
+
+    public async Task<bool> ConvertReceiptToReturnAsync(string receiptId, CancellationToken ct = default)
+    {
+        try
+        {
+            using var resp = await http.PostAsync(
+                $"api/purchase/receipts/{Uri.EscapeDataString(receiptId)}/convert-to-return",
+                new StringContent("{}", Encoding.UTF8, "application/json"), ct);
+            return resp.IsSuccessStatusCode;
+        }
+        catch
+        {
+            return false;
+        }
+    }
 }

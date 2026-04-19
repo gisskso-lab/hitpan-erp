@@ -53,6 +53,9 @@ public partial class PurchaseReceiptList : ComponentBase
     [Inject]
     private ISnackbar Snackbar { get; set; } = default!;
 
+    [Inject]
+    private IDialogService DialogService { get; set; } = default!;
+
     /// <summary>
     /// 행 클릭 시 상위로 매입명세 Id 를 전달한다.
     /// </summary>
@@ -225,13 +228,23 @@ public partial class PurchaseReceiptList : ComponentBase
             .Select(x => x.ReceiptId)
             .ToList();
 
-        if (ids.Count == 0)
+        if (ids.Count == 0) return;
+
+        var confirm = await DialogService.ShowMessageBoxAsync(
+            "반품 전환",
+            $"선택한 {ids.Count}건을 반품으로 전환하시겠습니까?",
+            yesText: "전환", cancelText: "취소");
+        if (confirm != true) return;
+
+        var success = 0;
+        foreach (var id in ids)
         {
-            return;
+            var ok = await DeliveryService.ConvertReceiptToReturnAsync(id);
+            if (ok) success++;
         }
 
-        Snackbar.Add("반품 전환 API 는 아직 없습니다. 추후 API 연동 필요.", Severity.Info);
-        await InvokeAsync(StateHasChanged);
+        Snackbar.Add($"{success}건 반품 전환 완료", Severity.Success);
+        await LoadAsync();
     }
 
     /// <summary>

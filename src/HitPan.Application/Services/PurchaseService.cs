@@ -385,4 +385,79 @@ public class PurchaseService : IPurchaseService
 
         return (receiptId, receiptNo);
     }
+
+    public async Task<(string ReturnId, string ReturnNo)> ConvertReceiptToReturnAsync(
+        string receiptId, string tenantId, CancellationToken ct = default)
+    {
+        if (_db.State != System.Data.ConnectionState.Open)
+        {
+            if (_db is System.Data.Common.DbConnection dbConn)
+                await dbConn.OpenAsync(ct);
+            else
+                _db.Open();
+        }
+
+        // 매입 정보 조회
+        var receipt = await _db.QueryFirstOrDefaultAsync<dynamic>(new CommandDefinition(
+            "SELECT receipt_id, receipt_no, partner_id FROM purchase_receipts WHERE receipt_id=@Id AND tenant_id=@Tid AND is_deleted=0",
+            new { Id = receiptId, Tid = tenantId }, cancellationToken: ct))
+            ?? throw new InvalidOperationException("매입명세서를 찾을 수 없습니다.");
+
+        // 매입 품목 조회
+        var items = (await _db.QueryAsync<dynamic>(new CommandDefinition(
+            "SELECT item_id, qty, unit_price, supply_amount, vat_amount, warehouse_id FROM purchase_receipt_items WHERE receipt_id=@Id AND tenant_id=@Tid",
+            new { Id = receiptId, Tid = tenantId }, cancellationToken: ct))).ToList();
+
+        // 반품 문서번호 채번
+        var today = DateTime.UtcNow.Date;
+        var prefix = $"RT-{today:yyyyMMdd}-";
+        var cnt = await _db.QueryFirstOrDefaultAsync<int>(new CommandDefinition(
+            "SELECT COUNT(*) FROM purchase_returns WHERE tenant_id=@Tid AND return_no LIKE CONCAT(@Pfx,'%')",
+            new { Tid = tenantId, Pfx = prefix }, cancellationToken: ct));
+        var returnNo = $"{prefix}{cnt + 1:000}";
+        var returnId = Guid.NewGuid().ToString();
+
+        decimal totalAmount = 0, totalVat = 0;
+        foreach (var item in items)
+        {
+            totalAmount += (decimal)item.supply_amount;
+            totalVat += (decimal)item.vat_amount;
+        }
+
+        // 반품 헤더 생성
+        await _db.ExecuteAsync(new CommandDefinition(
+            """
+            INSERT INTO purchase_returns (return_id, tenant_id, return_no, receipt_id, partner_id,
+              return_date, return_type, status, total_amount, vat_amount, memo, created_at, updated_at)
+            VALUES (@ReturnId, @Tid, @ReturnNo, @ReceiptId, @PartnerId,
+              @ReturnDate, 'purchase_return', 'draft', @Total, @Vat, @Memo, NOW(6), NOW(6))
+            """,
+            new
+            {
+                ReturnId = returnId, Tid = tenantId, ReturnNo = returnNo,
+                ReceiptId = receiptId, PartnerId = (string)receipt.partner_id,
+                ReturnDate = today, Total = totalAmount, Vat = totalVat,
+                Memo = $"매입 {(string)receipt.receipt_no} 에서 반품 전환"
+            }, cancellationToken: ct));
+
+        // 반품 품목 생성
+        foreach (var item in items)
+        {
+            await _db.ExecuteAsync(new CommandDefinition(
+                """
+                INSERT INTO purchase_return_items (return_item_id, return_id, tenant_id,
+                  item_id, qty, unit_price, supply_amount, vat_amount, warehouse_id)
+                VALUES (UUID(), @ReturnId, @Tid, @ItemId, @Qty, @Price, @Supply, @Vat, @Wh)
+                """,
+                new
+                {
+                    ReturnId = returnId, Tid = tenantId,
+                    ItemId = (string)item.item_id, Qty = (decimal)item.qty,
+                    Price = (decimal)item.unit_price, Supply = (decimal)item.supply_amount,
+                    Vat = (decimal)item.vat_amount, Wh = (string?)item.warehouse_id
+                }, cancellationToken: ct));
+        }
+
+        return (returnId, returnNo);
+    }
 }

@@ -65,6 +65,22 @@ public class PurchaseController : ControllerBase
         return Ok(result);
     }
 
+    [HttpPost("receipts/{id}/convert-to-return")]
+    public async Task<IActionResult> ConvertReceiptToReturn(string id, CancellationToken ct)
+    {
+        var tenantId = HttpContext.Items["TenantId"]?.ToString();
+        if (string.IsNullOrEmpty(tenantId)) return Forbid();
+        try
+        {
+            var (returnId, returnNo) = await _purchaseService.ConvertReceiptToReturnAsync(id, tenantId, ct);
+            return Ok(new { returnId, returnNo });
+        }
+        catch (Exception ex)
+        {
+            return BadRequest(new { message = ex.Message });
+        }
+    }
+
     [HttpPost("receipts")]
     public async Task<IActionResult> CreateReceipt([FromBody] CreateReceiptRequest request, CancellationToken ct)
     {
