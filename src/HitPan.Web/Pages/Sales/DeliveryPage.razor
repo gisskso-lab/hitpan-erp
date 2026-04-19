@@ -24,55 +24,36 @@
     {
         <WorkflowBreadcrumb Steps="_workflowSteps" />
 
-        <DeliveryForm Draft="_draft" OnChanged="OnHeaderChanged" OnOpenPartnerList="OpenPartnerList" />
+        <MudPaper Class="pa-3 mb-2">
+            <MudGrid>
+                <MudItem xs="12" md="3">
+                    <MudDatePicker Label="판매일자" Date="_draft.SalesDate" DateChanged="OnSalesDateChanged" />
+                </MudItem>
+                <MudItem xs="12" md="4">
+                    <MudAutocomplete T="string" Label="거래처" Value="_draft.SalesCompany"
+                        ValueChanged="OnPartnerNameChanged" SearchFunc="SearchPartnerAsync"
+                        Margin="Margin.Dense" Placeholder="거래처 검색" />
+                </MudItem>
+                <MudItem xs="12" md="5">
+                    <MudTextField T="string" Label="메모" Value="_draft.Memo"
+                        ValueChanged="OnMemoChanged" Margin="Margin.Dense" />
+                </MudItem>
+            </MudGrid>
+        </MudPaper>
 
-        @if (_selectedCount > 0)
-        {
-            <div class="delivery-selection-bar">
-                <span><strong>@_selectedCount</strong>개 선택됨</span>
-                <MudIconButton Icon="@Icons.Material.Filled.Close"
-                               aria-label="선택 해제"
-                               Size="Size.Small"
-                               OnClick="ClearSelection" />
-                <MudButton Variant="Variant.Filled" Color="Color.Primary" Size="Size.Small" OnClick="BulkConfirmAsync">일괄확정</MudButton>
-                @if (_canBulkDelete)
-                {
-                    <MudButton Variant="Variant.Outlined" Color="Color.Error" Size="Size.Small" OnClick="BulkDeleteAsync">일괄삭제</MudButton>
-                }
-                else
-                {
-                    <MudButton Variant="Variant.Outlined" Color="Color.Default" Size="Size.Small" Disabled="true" aria-label="Manager 이상만 가능">
-                        일괄삭제
-                    </MudButton>
-                }
-                <MudMenu Label="일괄변경" Variant="Variant.Outlined" Dense="true" AnchorOrigin="Origin.BottomLeft">
-                    <MudMenuItem OnClick="BulkChangeUnitPriceAsync">단가 일괄변경</MudMenuItem>
-                    <MudMenuItem OnClick="BulkChangeAssigneeAsync">담당자 일괄변경</MudMenuItem>
-                    <MudMenuItem OnClick="BulkChangeWarehouseAsync">창고 일괄변경</MudMenuItem>
-                </MudMenu>
-            </div>
-        }
-        else
-        {
-            <MudToolBar Dense="true" Style="overflow-x:auto;flex-wrap:nowrap" Class="pa-1 gap-1 delivery-toolbar">
-                <MudIconButton Icon="@Icons.Material.Filled.ChevronLeft" OnClick="GoPrev" aria-label="이전" />
-                <MudIconButton Icon="@Icons.Material.Filled.ChevronRight" OnClick="GoNext" aria-label="다음" />
-                <MudDivider Vertical="true" FlexItem="true" />
-
-                <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Add" OnClick="AddNew">추가</MudButton>
-                <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Save" OnClick="Save">저장</MudButton>
-                <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Undo" OnClick="Cancel">취소</MudButton>
-                <MudButton Variant="Variant.Outlined" Color="Color.Error" StartIcon="@Icons.Material.Filled.Delete" OnClick="DeleteConfirm">삭제</MudButton>
-                <MudDivider Vertical="true" FlexItem="true" />
-
-                <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Print" OnClick="Print">인쇄</MudButton>
-                <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.TableChart" OnClick="DownloadExcel">엑셀</MudButton>
-                <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.PictureAsPdf" OnClick="DownloadPdf">PDF</MudButton>
-                <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Receipt" OnClick="OpenTaxInvoice">세금</MudButton>
-                <MudSpacer />
-                <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.FormatListBulleted" OnClick="OpenListPopup">목록</MudButton>
-            </MudToolBar>
-        }
+        <MudToolBar Dense="true" Style="overflow-x:auto;flex-wrap:nowrap" Class="pa-1 gap-1">
+            <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Add" OnClick="AddNew">추가</MudButton>
+            <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Save" OnClick="Save">저장</MudButton>
+            <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Undo" OnClick="Cancel">취소</MudButton>
+            <MudButton Variant="Variant.Outlined" Color="Color.Error" StartIcon="@Icons.Material.Filled.Delete" OnClick="DeleteConfirm">삭제</MudButton>
+            <MudDivider Vertical="true" FlexItem="true" />
+            <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Print" OnClick="Print">인쇄</MudButton>
+            <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.TableChart" OnClick="DownloadExcel">엑셀</MudButton>
+            <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.PictureAsPdf" OnClick="DownloadPdf">PDF</MudButton>
+            <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Receipt" OnClick="OpenTaxInvoice">세금</MudButton>
+            <MudSpacer />
+            <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.FormatListBulleted" OnClick="OpenListPopup">목록</MudButton>
+        </MudToolBar>
 
         <div class="delivery-grid-wrap">
             <DeliveryGrid Lines="_draft.Lines"
@@ -86,7 +67,13 @@
                           Summary="_summary" />
         </div>
 
-        <DeliveryFooter Summary="_summary" />
+        <MudPaper Class="pa-3 mt-2">
+            <MudStack Row="true" Spacing="3">
+                <MudText Typo="Typo.body2">공급가액: @_summary.SupplyAmount.ToString("N0")</MudText>
+                <MudText Typo="Typo.body2">부가세: @_summary.VatAmount.ToString("N0")</MudText>
+                <MudText Typo="Typo.body2">합계: @_summary.TotalAmount.ToString("N0")</MudText>
+            </MudStack>
+        </MudPaper>
     }
 </section>
 
@@ -132,6 +119,28 @@
     {
         if (_draft is null) return;
         _workflowSteps = DeliveryWorkflowFactory.Build(_draft.DocumentType, _draft);
+    }
+
+    private async Task OnSalesDateChanged(DateTime? value)
+    {
+        if (_draft is null) return;
+        _draft.SalesDate = value ?? DateTime.Today;
+        await OnHeaderChanged();
+    }
+
+    private async Task OnPartnerNameChanged(string value)
+    {
+        if (_draft is null) return;
+        _draft.SalesCompany = value;
+        await OnHeaderChanged();
+    }
+
+    private async Task OnMemoChanged(string value)
+    {
+        if (_draft is null) return;
+        _draft.Memo = value;
+        MarkDirty();
+        await InvokeAsync(StateHasChanged);
     }
 
     private async Task OnHeaderChanged()
