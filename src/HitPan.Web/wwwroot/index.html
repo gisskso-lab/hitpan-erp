@@ -48,6 +48,17 @@
             }).open();
         }
     </script>
+
+    <!-- 툴바 마우스 휠 → 가로 스크롤 변환 -->
+    <script>
+        document.addEventListener('wheel', function (e) {
+            var toolbar = e.target.closest('.mud-toolbar');
+            if (toolbar && toolbar.scrollWidth > toolbar.clientWidth) {
+                e.preventDefault();
+                toolbar.scrollLeft += e.deltaY;
+            }
+        }, { passive: false });
+    </script>
 </body>
 
 </html>
