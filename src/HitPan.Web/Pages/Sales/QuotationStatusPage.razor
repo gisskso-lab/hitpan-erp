@@ -12,12 +12,21 @@
 <MudPaper Class="pa-3 mb-3" Elevation="0" Style="border:1px solid var(--mud-palette-lines-default);border-radius:12px">
     <MudGrid Spacing="2" Class="align-center">
         <MudItem xs="12" sm="3">
+            <MudSelect T="string" @bind-Value="_viewType" Label="조회유형" Variant="Variant.Outlined" Margin="Margin.Dense">
+                <MudSelectItem Value="@("period")">기간별 제출현황</MudSelectItem>
+                <MudSelectItem Value="@("item")">품목별 제출현황</MudSelectItem>
+                <MudSelectItem Value="@("partner")">업체별 제출현황</MudSelectItem>
+                <MudSelectItem Value="@("employee")">사원별 제출현황</MudSelectItem>
+                <MudSelectItem Value="@("price")">견적단가 조회</MudSelectItem>
+            </MudSelect>
+        </MudItem>
+        <MudItem xs="12" sm="2">
             <MudDatePicker @bind-Date="_from" Label="시작일" Variant="Variant.Outlined" Margin="Margin.Dense" DateFormat="yyyy-MM-dd" />
         </MudItem>
-        <MudItem xs="12" sm="3">
+        <MudItem xs="12" sm="2">
             <MudDatePicker @bind-Date="_to" Label="종료일" Variant="Variant.Outlined" Margin="Margin.Dense" DateFormat="yyyy-MM-dd" />
         </MudItem>
-        <MudItem xs="12" sm="4">
+        <MudItem xs="12" sm="3">
             <MudTextField @bind-Value="_partner" Label="업체명" Variant="Variant.Outlined" Margin="Margin.Dense"
                           Adornment="Adornment.End" AdornmentIcon="@Icons.Material.Filled.Search" />
         </MudItem>
@@ -55,6 +64,7 @@
     private DateTime? _from = DateTime.Today.AddDays(-30);
     private DateTime? _to = DateTime.Today;
     private string _partner = "";
+    private string _viewType = "period";
     private List<QuotationListItem> _items = new();
 
     protected override async Task OnInitializedAsync() => await SearchAsync();
