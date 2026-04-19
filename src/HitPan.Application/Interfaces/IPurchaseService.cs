@@ -7,4 +7,23 @@ public interface IPurchaseService
     Task<string> CreateOrderAsync(CreatePurchaseOrderRequest request, CancellationToken ct = default);
     Task<string> CreateReceiptAsync(CreateReceiptRequest request, CancellationToken ct = default);
     Task ConfirmReceiptAsync(string receiptId, ConfirmReceiptRequest request, CancellationToken ct = default);
+
+    Task<List<PurchaseOrderListDto>> GetOrdersAsync(
+        string tenantId,
+        DateTime? from = null,
+        DateTime? to = null,
+        string? status = null,
+        CancellationToken ct = default);
+
+    Task<List<PurchaseReceiptListDto>> GetReceiptsAsync(
+        string tenantId,
+        DateTime? from = null,
+        DateTime? to = null,
+        string? status = null,
+        CancellationToken ct = default);
+
+    Task<(string ReceiptId, string ReceiptNo)> ConvertOrderToReceiptAsync(
+        string poId,
+        string tenantId,
+        CancellationToken ct = default);
 }

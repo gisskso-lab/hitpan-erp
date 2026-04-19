@@ -425,6 +425,45 @@ public partial class PurchaseOrderPage : ComponentBase
     }
 
     /// <summary>
+    /// 현재 발주서를 매입명세서(입고)로 전환한다.
+    /// </summary>
+    private async Task ConvertToReceiptAsync()
+    {
+        if (_draft is null || string.IsNullOrWhiteSpace(_draft.Id) || _isNew)
+        {
+            Snackbar.Add("저장된 발주서를 먼저 선택해주세요.", Severity.Warning);
+            return;
+        }
+
+        var confirm = await DialogService.ShowMessageBoxAsync(
+            "매입전환 확인",
+            "현재 발주서를 매입명세서로 전환하시겠습니까?",
+            yesText: "전환",
+            cancelText: "취소");
+
+        if (confirm != true)
+        {
+            return;
+        }
+
+        try
+        {
+            var result = await DeliveryService.ConvertOrderToReceiptAsync(_draft.Id);
+            if (result is null)
+            {
+                Snackbar.Add("매입전환에 실패했습니다.", Severity.Error);
+                return;
+            }
+
+            Snackbar.Add($"매입명세서 {result.ReceiptNo} 가 생성되었습니다.", Severity.Success);
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"매입전환 중 오류: {ex.Message}", Severity.Error);
+        }
+    }
+
+    /// <summary>
     /// 인쇄(추후 연동).
     /// </summary>
     /// <returns>완료</returns>

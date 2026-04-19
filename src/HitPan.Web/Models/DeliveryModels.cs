@@ -219,6 +219,53 @@ public sealed class ConvertToDeliveryResponse
     public string DocumentNumber { get; set; } = string.Empty;
 }
 
+/// <summary>
+/// 발주 목록 조회 응답을 매핑하는 웹 전용 모델.
+/// 서버 PurchaseOrderListDto 와 동일 필드를 JSON 역직렬화용으로 둔다.
+/// </summary>
+public sealed class PurchaseOrderListItem
+{
+    public string PoId { get; set; } = string.Empty;
+    public string PoNo { get; set; } = string.Empty;
+    public DateTime PoDate { get; set; }
+    public string PartnerId { get; set; } = string.Empty;
+    public string PartnerName { get; set; } = string.Empty;
+    public decimal TotalAmount { get; set; }
+    public decimal VatAmount { get; set; }
+    public decimal SupplyAmount { get; set; }
+    public string Status { get; set; } = string.Empty;
+    public string? Memo { get; set; }
+    public bool IsChecked { get; set; }
+}
+
+/// <summary>
+/// 매입명세 목록 조회 응답을 매핑하는 웹 전용 모델.
+/// 서버 PurchaseReceiptListDto 와 동일 필드를 JSON 역직렬화용으로 둔다.
+/// </summary>
+public sealed class PurchaseReceiptListItem
+{
+    public string ReceiptId { get; set; } = string.Empty;
+    public string ReceiptNo { get; set; } = string.Empty;
+    public DateTime ReceiptDate { get; set; }
+    public string PartnerId { get; set; } = string.Empty;
+    public string PartnerName { get; set; } = string.Empty;
+    public decimal TotalAmount { get; set; }
+    public decimal VatAmount { get; set; }
+    public decimal SupplyAmount { get; set; }
+    public string Status { get; set; } = string.Empty;
+    public string? Memo { get; set; }
+    public bool IsChecked { get; set; }
+}
+
+/// <summary>
+/// 발주서 매입전환 응답.
+/// </summary>
+public sealed class ConvertToReceiptResponse
+{
+    public string ReceiptId { get; set; } = string.Empty;
+    public string ReceiptNo { get; set; } = string.Empty;
+}
+
 public enum DeliveryContextAction
 {
     CopyRow,

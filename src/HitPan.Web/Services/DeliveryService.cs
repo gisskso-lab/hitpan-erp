@@ -267,4 +267,67 @@ public sealed class DeliveryService(HttpClient http)
             return new List<PartnerSearchResult>();
         }
     }
+
+    /// <summary>발주서 목록 조회 (발주 전용 API 호출).</summary>
+    public async Task<List<PurchaseOrderListItem>> GetPurchaseOrderListAsync(
+        DateTime? from = null, DateTime? to = null, string? status = null, CancellationToken ct = default)
+    {
+        try
+        {
+            var qs = new List<string>();
+            if (from.HasValue) qs.Add($"from={from:yyyy-MM-dd}");
+            if (to.HasValue) qs.Add($"to={to:yyyy-MM-dd}");
+            if (!string.IsNullOrEmpty(status)) qs.Add($"status={Uri.EscapeDataString(status)}");
+            var path = "api/purchase/orders" + (qs.Count > 0 ? "?" + string.Join("&", qs) : "");
+
+            var list = await http.GetFromJsonAsync<List<PurchaseOrderListItem>>(path, JsonOptions, ct)
+                       ?? new List<PurchaseOrderListItem>();
+
+            return list;
+        }
+        catch
+        {
+            return new List<PurchaseOrderListItem>();
+        }
+    }
+
+    /// <summary>매입명세서 목록 조회 (매입명세 전용 API 호출).</summary>
+    public async Task<List<PurchaseReceiptListItem>> GetPurchaseReceiptListAsync(
+        DateTime? from = null, DateTime? to = null, string? status = null, CancellationToken ct = default)
+    {
+        try
+        {
+            var qs = new List<string>();
+            if (from.HasValue) qs.Add($"from={from:yyyy-MM-dd}");
+            if (to.HasValue) qs.Add($"to={to:yyyy-MM-dd}");
+            if (!string.IsNullOrEmpty(status)) qs.Add($"status={Uri.EscapeDataString(status)}");
+            var path = "api/purchase/receipts" + (qs.Count > 0 ? "?" + string.Join("&", qs) : "");
+
+            var list = await http.GetFromJsonAsync<List<PurchaseReceiptListItem>>(path, JsonOptions, ct)
+                       ?? new List<PurchaseReceiptListItem>();
+
+            return list;
+        }
+        catch
+        {
+            return new List<PurchaseReceiptListItem>();
+        }
+    }
+
+    /// <summary>발주서를 매입명세서(입고)로 전환한다.</summary>
+    public async Task<ConvertToReceiptResponse?> ConvertOrderToReceiptAsync(string poId, CancellationToken ct = default)
+    {
+        try
+        {
+            using var content = new StringContent("{}", Encoding.UTF8, "application/json");
+            using var resp = await http.PostAsync(
+                $"api/purchase/orders/{Uri.EscapeDataString(poId)}/convert-to-receipt", content, cancellationToken: ct);
+            if (!resp.IsSuccessStatusCode) return null;
+            return await resp.Content.ReadFromJsonAsync<ConvertToReceiptResponse>(JsonOptions, ct);
+        }
+        catch
+        {
+            return null;
+        }
+    }
 }

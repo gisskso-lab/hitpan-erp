@@ -459,6 +459,21 @@ public partial class PurchaseReceiptPage : ComponentBase
     }
 
     /// <summary>
+    /// 현재 매입명세서를 반품으로 전환한다 (반품 API 추가 전 스텁).
+    /// </summary>
+    private Task ConvertToReturnAsync()
+    {
+        if (_draft is null || string.IsNullOrWhiteSpace(_draft.Id) || _isNew)
+        {
+            Snackbar.Add("저장된 매입명세서를 먼저 선택해주세요.", Severity.Warning);
+            return Task.CompletedTask;
+        }
+
+        Snackbar.Add("반품전환 API 는 아직 없습니다. 추후 API 연동 필요.", Severity.Info);
+        return Task.CompletedTask;
+    }
+
+    /// <summary>
     /// 인쇄(추후 연동).
     /// </summary>
     /// <returns>완료</returns>

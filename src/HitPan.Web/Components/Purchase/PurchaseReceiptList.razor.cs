@@ -6,38 +6,8 @@ using MudBlazor;
 namespace HitPan.Web.Components.Purchase;
 
 /// <summary>
-/// 매입명세 목록 행(웹 전용). 서버 매입명세 목록 DTO 가 생기면 필드를 맞춰 교체한다.
-/// </summary>
-public sealed class PurchaseReceiptListRowModel
-{
-    // 서버 매입명세 Id(EventCallback 과의 호환을 위해 OrderId 명명을 유지한다).
-    public string OrderId { get; set; } = string.Empty;
-
-    // 입고일(표시용)
-    public DateTime OrderDate { get; set; }
-
-    // 전표번호(입고번호)
-    public string OrderNo { get; set; } = string.Empty;
-
-    // 공급처명
-    public string PartnerName { get; set; } = string.Empty;
-
-    // 합계 금액
-    public decimal TotalAmount { get; set; }
-
-    // 부가세
-    public decimal VatAmount { get; set; }
-
-    // 상태 문자열
-    public string Status { get; set; } = string.Empty;
-
-    // 목록 체크박스용 UI 상태
-    public bool IsChecked { get; set; }
-}
-
-/// <summary>
 /// 매입명세서 목록 필터·선택·합계 UI.
-/// 발주 목록(PurchaseOrderList) 패턴을 계승하되 매입명세 GET API 가 없어 조회는 빈 결과로 둔다.
+/// 발주 목록(PurchaseOrderList) 패턴을 계승한다.
 /// </summary>
 public partial class PurchaseReceiptList : ComponentBase
 {
@@ -54,10 +24,10 @@ public partial class PurchaseReceiptList : ComponentBase
     private string _status = "draft";
 
     // 목록 행
-    private List<PurchaseReceiptListRowModel> _rows = new();
+    private List<PurchaseReceiptListItem> _rows = new();
 
     // 선택된 행
-    private List<PurchaseReceiptListRowModel> _selectedRows = new();
+    private List<PurchaseReceiptListItem> _selectedRows = new();
 
     // 전체 선택 체크
     private bool _allSelected;
@@ -171,11 +141,11 @@ public partial class PurchaseReceiptList : ComponentBase
     /// <returns>비동기 조회</returns>
     private async Task LoadAsync(CancellationToken ct = default)
     {
-        // 추후 API 연동 필요: GET api/purchase/receipts?from&to&partner&status 가 생기면 여기서 HttpClient 로 채운다.
-        // 추후 PurchaseService 연동 필요: 서버 목록 조회 메서드가 생기면 동일 데이터로 바인딩한다.
-        // 현재 PurchaseController 에 목록 GET 이 없으므로 빈 목록으로 UI 만 검증한다.
-        _ = ct;
-        _rows = new List<PurchaseReceiptListRowModel>();
+        _rows = await DeliveryService.GetPurchaseReceiptListAsync(
+            from: _startDate,
+            to: _endDate,
+            status: _status,
+            ct: ct);
 
         foreach (var row in _rows)
         {
@@ -213,7 +183,7 @@ public partial class PurchaseReceiptList : ComponentBase
     /// <param name="row">행</param>
     /// <param name="value">체크 여부</param>
     /// <returns>완료</returns>
-    private async Task ToggleOneAsync(PurchaseReceiptListRowModel row, bool value)
+    private async Task ToggleOneAsync(PurchaseReceiptListItem row, bool value)
     {
         row.IsChecked = value;
         _selectedRows = _rows.Where(x => x.IsChecked).ToList();
@@ -229,8 +199,8 @@ public partial class PurchaseReceiptList : ComponentBase
     private async Task BulkConfirmAsync()
     {
         var ids = _selectedRows
-            .Where(x => !string.IsNullOrWhiteSpace(x.OrderId))
-            .Select(x => x.OrderId)
+            .Where(x => !string.IsNullOrWhiteSpace(x.ReceiptId))
+            .Select(x => x.ReceiptId)
             .ToList();
 
         // 선택이 없으면 API 를 호출하지 않는다.
@@ -242,6 +212,25 @@ public partial class PurchaseReceiptList : ComponentBase
         // 추후 API 연동 필요: POST api/purchase/receipts/{id}/confirm 를 일괄 호출하거나 bulk 엔드포인트를 추가한다.
         // 추후 PurchaseService 연동 필요: ConfirmReceiptAsync 를 클라이언트에서 반복 호출하는 방식은 정책 협의 후 적용한다.
         Snackbar.Add("매입명세 일괄 확정은 추후 API 연동 필요(현재 단건 확정 엔드포인트만 존재).", Severity.Info);
+        await InvokeAsync(StateHasChanged);
+    }
+
+    /// <summary>
+    /// 선택된 매입명세서를 반품으로 전환한다 (반품 API 추가 전 스텁).
+    /// </summary>
+    private async Task BulkConvertToReturnAsync()
+    {
+        var ids = _selectedRows
+            .Where(x => !string.IsNullOrWhiteSpace(x.ReceiptId))
+            .Select(x => x.ReceiptId)
+            .ToList();
+
+        if (ids.Count == 0)
+        {
+            return;
+        }
+
+        Snackbar.Add("반품 전환 API 는 아직 없습니다. 추후 API 연동 필요.", Severity.Info);
         await InvokeAsync(StateHasChanged);
     }
 
@@ -268,14 +257,14 @@ public partial class PurchaseReceiptList : ComponentBase
     /// </summary>
     /// <param name="row">행</param>
     /// <returns>콜백 호출</returns>
-    private async Task SelectRowAsync(PurchaseReceiptListRowModel row)
+    private async Task SelectRowAsync(PurchaseReceiptListItem row)
     {
-        if (string.IsNullOrWhiteSpace(row.OrderId))
+        if (string.IsNullOrWhiteSpace(row.ReceiptId))
         {
             return;
         }
 
-        await OnOrderSelected.InvokeAsync(row.OrderId);
+        await OnOrderSelected.InvokeAsync(row.ReceiptId);
     }
 
     /// <summary>
@@ -283,9 +272,9 @@ public partial class PurchaseReceiptList : ComponentBase
     /// </summary>
     /// <param name="row">행</param>
     /// <returns>CSS 클래스</returns>
-    private string GetSelectedClass(PurchaseReceiptListRowModel row)
+    private string GetSelectedClass(PurchaseReceiptListItem row)
     {
-        return string.Equals(row.OrderId, SelectedOrderId, StringComparison.OrdinalIgnoreCase)
+        return string.Equals(row.ReceiptId, SelectedOrderId, StringComparison.OrdinalIgnoreCase)
             ? "font-weight-bold text-primary"
             : string.Empty;
     }

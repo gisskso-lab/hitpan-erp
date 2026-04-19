@@ -6,38 +6,8 @@ using MudBlazor;
 namespace HitPan.Web.Components.Purchase;
 
 /// <summary>
-/// 발주 목록 행(웹 전용). 서버 발주 목록 DTO 가 생기면 필드를 맞춰 교체한다.
-/// </summary>
-public sealed class PurchaseListRowModel
-{
-    // 서버 발주 Id
-    public string OrderId { get; set; } = string.Empty;
-
-    // 발주일
-    public DateTime OrderDate { get; set; }
-
-    // 전표번호
-    public string OrderNo { get; set; } = string.Empty;
-
-    // 공급처명
-    public string PartnerName { get; set; } = string.Empty;
-
-    // 합계 금액
-    public decimal TotalAmount { get; set; }
-
-    // 부가세
-    public decimal VatAmount { get; set; }
-
-    // 상태 문자열
-    public string Status { get; set; } = string.Empty;
-
-    // 목록 체크박스용 UI 상태
-    public bool IsChecked { get; set; }
-}
-
-/// <summary>
 /// 발주서 목록 필터·선택·합계 UI.
-/// 수주 목록(SalesOrderList) 패턴을 계승하되 발주 GET API 가 없어 조회는 빈 결과로 둔다.
+/// 수주 목록(SalesOrderList) 패턴을 계승한다.
 /// </summary>
 public partial class PurchaseOrderList : ComponentBase
 {
@@ -54,10 +24,10 @@ public partial class PurchaseOrderList : ComponentBase
     private string _status = "draft";
 
     // 목록 행
-    private List<PurchaseListRowModel> _rows = new();
+    private List<PurchaseOrderListItem> _rows = new();
 
     // 선택된 행
-    private List<PurchaseListRowModel> _selectedRows = new();
+    private List<PurchaseOrderListItem> _selectedRows = new();
 
     // 전체 선택 체크
     private bool _allSelected;
@@ -171,10 +141,11 @@ public partial class PurchaseOrderList : ComponentBase
     /// <returns>비동기 조회</returns>
     private async Task LoadAsync(CancellationToken ct = default)
     {
-        // 추후 API 연동 필요: GET api/purchase/orders?from&to&partner&status 가 생기면 여기서 HttpClient 로 채운다.
-        // 현재 IPurchaseService·PurchaseController 에 목록 API 가 없으므로 빈 목록으로 UI 만 검증한다.
-        _ = ct;
-        _rows = new List<PurchaseListRowModel>();
+        _rows = await DeliveryService.GetPurchaseOrderListAsync(
+            from: _startDate,
+            to: _endDate,
+            status: _status,
+            ct: ct);
 
         foreach (var row in _rows)
         {
@@ -212,7 +183,7 @@ public partial class PurchaseOrderList : ComponentBase
     /// <param name="row">행</param>
     /// <param name="value">체크 여부</param>
     /// <returns>완료</returns>
-    private async Task ToggleOneAsync(PurchaseListRowModel row, bool value)
+    private async Task ToggleOneAsync(PurchaseOrderListItem row, bool value)
     {
         row.IsChecked = value;
         _selectedRows = _rows.Where(x => x.IsChecked).ToList();
@@ -228,8 +199,8 @@ public partial class PurchaseOrderList : ComponentBase
     private async Task BulkConfirmAsync()
     {
         var ids = _selectedRows
-            .Where(x => !string.IsNullOrWhiteSpace(x.OrderId))
-            .Select(x => x.OrderId)
+            .Where(x => !string.IsNullOrWhiteSpace(x.PoId))
+            .Select(x => x.PoId)
             .ToList();
 
         // 선택이 없으면 API 를 호출하지 않는다.
@@ -241,6 +212,51 @@ public partial class PurchaseOrderList : ComponentBase
         // 추후 API 연동 필요: 발주 확정 bulk 엔드포인트가 생기면 DeliveryService.BulkConfirmAsync 와 유사하게 연결한다.
         Snackbar.Add("발주 일괄 확정 API 가 아직 없습니다. 추후 API 연동 필요.", Severity.Info);
         await InvokeAsync(StateHasChanged);
+    }
+
+    /// <summary>
+    /// 선택된 발주서를 일괄 매입(입고)으로 전환한다.
+    /// </summary>
+    private async Task BulkConvertToReceiptAsync()
+    {
+        var ids = _selectedRows
+            .Where(x => !string.IsNullOrWhiteSpace(x.PoId))
+            .Select(x => x.PoId)
+            .ToList();
+
+        if (ids.Count == 0)
+        {
+            return;
+        }
+
+        var successCount = 0;
+        var failCount = 0;
+
+        foreach (var poId in ids)
+        {
+            var result = await DeliveryService.ConvertOrderToReceiptAsync(poId);
+            if (result is not null)
+            {
+                successCount++;
+            }
+            else
+            {
+                failCount++;
+            }
+        }
+
+        if (successCount > 0)
+        {
+            Snackbar.Add($"{successCount}건 매입전환 완료", Severity.Success);
+        }
+
+        if (failCount > 0)
+        {
+            Snackbar.Add($"{failCount}건 매입전환 실패", Severity.Error);
+        }
+
+        // 목록 새로고침
+        await LoadAsync(CancellationToken.None);
     }
 
     /// <summary>
@@ -265,14 +281,14 @@ public partial class PurchaseOrderList : ComponentBase
     /// </summary>
     /// <param name="row">행</param>
     /// <returns>콜백 호출</returns>
-    private async Task SelectRowAsync(PurchaseListRowModel row)
+    private async Task SelectRowAsync(PurchaseOrderListItem row)
     {
-        if (string.IsNullOrWhiteSpace(row.OrderId))
+        if (string.IsNullOrWhiteSpace(row.PoId))
         {
             return;
         }
 
-        await OnOrderSelected.InvokeAsync(row.OrderId);
+        await OnOrderSelected.InvokeAsync(row.PoId);
     }
 
     /// <summary>
@@ -280,9 +296,9 @@ public partial class PurchaseOrderList : ComponentBase
     /// </summary>
     /// <param name="row">행</param>
     /// <returns>CSS 클래스</returns>
-    private string GetSelectedClass(PurchaseListRowModel row)
+    private string GetSelectedClass(PurchaseOrderListItem row)
     {
-        return string.Equals(row.OrderId, SelectedOrderId, StringComparison.OrdinalIgnoreCase)
+        return string.Equals(row.PoId, SelectedOrderId, StringComparison.OrdinalIgnoreCase)
             ? "font-weight-bold text-primary"
             : string.Empty;
     }

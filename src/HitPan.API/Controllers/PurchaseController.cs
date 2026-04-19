@@ -17,6 +17,20 @@ public class PurchaseController : ControllerBase
         _purchaseService = purchaseService;
     }
 
+    [HttpGet("orders")]
+    public async Task<IActionResult> GetOrders(
+        [FromQuery] DateTime? from,
+        [FromQuery] DateTime? to,
+        [FromQuery] string? status,
+        CancellationToken ct)
+    {
+        var tenantId = HttpContext.Items["TenantId"]?.ToString();
+        if (string.IsNullOrEmpty(tenantId)) return Forbid();
+
+        var result = await _purchaseService.GetOrdersAsync(tenantId, from, to, status, ct);
+        return Ok(result);
+    }
+
     [HttpPost("orders")]
     public async Task<IActionResult> CreateOrder([FromBody] CreatePurchaseOrderRequest request, CancellationToken ct)
     {
@@ -25,6 +39,30 @@ public class PurchaseController : ControllerBase
 
         var id = await _purchaseService.CreateOrderAsync(request, ct);
         return Created($"/api/purchase/orders/{id}", new { id });
+    }
+
+    [HttpPost("orders/{id}/convert-to-receipt")]
+    public async Task<IActionResult> ConvertOrderToReceipt(string id, CancellationToken ct)
+    {
+        var tenantId = HttpContext.Items["TenantId"]?.ToString();
+        if (string.IsNullOrEmpty(tenantId)) return Forbid();
+
+        var (receiptId, receiptNo) = await _purchaseService.ConvertOrderToReceiptAsync(id, tenantId, ct);
+        return Ok(new { receiptId, receiptNo });
+    }
+
+    [HttpGet("receipts")]
+    public async Task<IActionResult> GetReceipts(
+        [FromQuery] DateTime? from,
+        [FromQuery] DateTime? to,
+        [FromQuery] string? status,
+        CancellationToken ct)
+    {
+        var tenantId = HttpContext.Items["TenantId"]?.ToString();
+        if (string.IsNullOrEmpty(tenantId)) return Forbid();
+
+        var result = await _purchaseService.GetReceiptsAsync(tenantId, from, to, status, ct);
+        return Ok(result);
     }
 
     [HttpPost("receipts")]

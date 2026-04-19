@@ -1,3 +1,5 @@
+using System.Data;
+using Dapper;
 using HitPan.Application.DTOs.Purchase;
 using HitPan.Application.Interfaces;
 using HitPan.Domain.Entities;
@@ -9,11 +11,13 @@ public class PurchaseService : IPurchaseService
 {
     private readonly IUnitOfWork _unitOfWork;
     private readonly ICurrentTenant _currentTenant;
+    private readonly IDbConnection _db;
 
-    public PurchaseService(IUnitOfWork unitOfWork, ICurrentTenant currentTenant)
+    public PurchaseService(IUnitOfWork unitOfWork, ICurrentTenant currentTenant, IDbConnection db)
     {
         _unitOfWork = unitOfWork;
         _currentTenant = currentTenant;
+        _db = db;
     }
 
     public async Task<string> CreateOrderAsync(CreatePurchaseOrderRequest request, CancellationToken ct = default)
@@ -218,5 +222,167 @@ public class PurchaseService : IPurchaseService
         receiptRepo.Update(receipt);
 
         await _unitOfWork.SaveChangesAsync(ct);
+    }
+
+    public async Task<List<PurchaseOrderListDto>> GetOrdersAsync(
+        string tenantId,
+        DateTime? from = null,
+        DateTime? to = null,
+        string? status = null,
+        CancellationToken ct = default)
+    {
+        const string sql = """
+                           SELECT
+                               po.po_id AS PoId,
+                               po.po_no AS PoNo,
+                               po.po_date AS PoDate,
+                               po.partner_id AS PartnerId,
+                               p.partner_name AS PartnerName,
+                               (po.total_amount + po.vat_amount) AS TotalAmount,
+                               po.vat_amount AS VatAmount,
+                               po.total_amount AS SupplyAmount,
+                               po.status AS Status,
+                               po.memo AS Memo
+                           FROM purchase_orders po
+                           LEFT JOIN partners p
+                               ON p.partner_id = po.partner_id
+                                  AND p.tenant_id = po.tenant_id
+                           WHERE po.tenant_id = @TenantId
+                             AND po.is_deleted = 0
+                             AND (@From IS NULL OR po.po_date >= @From)
+                             AND (@To IS NULL OR po.po_date <= @To)
+                             AND (@Status IS NULL OR po.status = @Status)
+                           ORDER BY po.po_date DESC,
+                                    po.po_no DESC
+                           LIMIT 200
+                           """;
+
+        var rows = await _db.QueryAsync<PurchaseOrderListDto>(
+            new CommandDefinition(
+                sql,
+                new
+                {
+                    TenantId = tenantId,
+                    From = from?.Date,
+                    To = to?.Date,
+                    Status = string.IsNullOrWhiteSpace(status) ? null : status
+                },
+                cancellationToken: ct));
+
+        return rows.ToList();
+    }
+
+    public async Task<List<PurchaseReceiptListDto>> GetReceiptsAsync(
+        string tenantId,
+        DateTime? from = null,
+        DateTime? to = null,
+        string? status = null,
+        CancellationToken ct = default)
+    {
+        const string sql = """
+                           SELECT
+                               pr.receipt_id AS ReceiptId,
+                               pr.receipt_no AS ReceiptNo,
+                               pr.receipt_date AS ReceiptDate,
+                               pr.partner_id AS PartnerId,
+                               p.partner_name AS PartnerName,
+                               (pr.total_amount + pr.vat_amount) AS TotalAmount,
+                               pr.vat_amount AS VatAmount,
+                               pr.total_amount AS SupplyAmount,
+                               pr.status AS Status,
+                               pr.memo AS Memo
+                           FROM purchase_receipts pr
+                           LEFT JOIN partners p
+                               ON p.partner_id = pr.partner_id
+                                  AND p.tenant_id = pr.tenant_id
+                           WHERE pr.tenant_id = @TenantId
+                             AND (@From IS NULL OR pr.receipt_date >= @From)
+                             AND (@To IS NULL OR pr.receipt_date <= @To)
+                             AND (@Status IS NULL OR pr.status = @Status)
+                           ORDER BY pr.receipt_date DESC,
+                                    pr.receipt_no DESC
+                           LIMIT 200
+                           """;
+
+        var rows = await _db.QueryAsync<PurchaseReceiptListDto>(
+            new CommandDefinition(
+                sql,
+                new
+                {
+                    TenantId = tenantId,
+                    From = from?.Date,
+                    To = to?.Date,
+                    Status = string.IsNullOrWhiteSpace(status) ? null : status
+                },
+                cancellationToken: ct));
+
+        return rows.ToList();
+    }
+
+    public async Task<(string ReceiptId, string ReceiptNo)> ConvertOrderToReceiptAsync(
+        string poId,
+        string tenantId,
+        CancellationToken ct = default)
+    {
+        var poRepo = _unitOfWork.Repository<PurchaseOrder>();
+        var poItemRepo = _unitOfWork.Repository<PurchaseOrderItem>();
+
+        var po = await poRepo.GetByIdAsync(poId)
+            ?? throw new InvalidOperationException("발주서를 찾을 수 없습니다.");
+
+        if (po.TenantId != tenantId)
+        {
+            throw new InvalidOperationException("발주서를 찾을 수 없습니다.");
+        }
+
+        var items = await poItemRepo.FindAsync(x => x.PoId == poId);
+        var receiptItems = items
+            .Where(x => x.OrderedQty - x.ReceivedQty > 0)
+            .Select(x => new CreateReceiptItemRequest
+            {
+                PoItemId = x.PoItemId,
+                ItemId = x.ItemId,
+                WarehouseId = x.WarehouseId ?? string.Empty,
+                Qty = x.OrderedQty - x.ReceivedQty,
+                UnitPrice = x.UnitPrice,
+                SupplyAmount = (x.OrderedQty - x.ReceivedQty) * x.UnitPrice,
+                VatAmount = Math.Round((x.OrderedQty - x.ReceivedQty) * x.UnitPrice * 0.1m, 0)
+            }).ToList();
+
+        if (receiptItems.Count == 0)
+        {
+            throw new InvalidOperationException("전환 가능한 미입고 품목이 없습니다.");
+        }
+
+        // 창고 Id가 비어 있는 라인은 기본 창고로 채운다.
+        foreach (var item in receiptItems.Where(x => string.IsNullOrWhiteSpace(x.WarehouseId)))
+        {
+            // 기본 창고 조회: warehouses 테이블의 첫 번째 활성 창고를 사용한다.
+            var defaultWh = await _db.QueryFirstOrDefaultAsync<string>(
+                new CommandDefinition(
+                    "SELECT warehouse_id FROM warehouses WHERE tenant_id = @TenantId AND is_active = 1 LIMIT 1",
+                    new { TenantId = tenantId },
+                    cancellationToken: ct));
+
+            item.WarehouseId = defaultWh ?? "MAIN";
+        }
+
+        var request = new CreateReceiptRequest
+        {
+            PoId = poId,
+            PartnerId = po.PartnerId,
+            ReceiptDate = DateTime.UtcNow.Date,
+            Memo = $"발주 {po.PoNo} 에서 전환",
+            Items = receiptItems
+        };
+
+        var receiptId = await CreateReceiptAsync(request, ct);
+
+        // 생성된 입고 전표의 번호를 조회한다.
+        var receiptRepo = _unitOfWork.Repository<PurchaseReceipt>();
+        var receipt = await receiptRepo.GetByIdAsync(receiptId);
+        var receiptNo = receipt?.ReceiptNo ?? string.Empty;
+
+        return (receiptId, receiptNo);
     }
 }

@@ -29,6 +29,9 @@
             <MudButton Variant="Variant.Outlined" Color="Color.Success" OnClick="BulkConfirmAsync" Disabled="@(!_selectedRows.Any())">
                 선택 일괄 확정
             </MudButton>
+            <MudButton Variant="Variant.Outlined" Color="Color.Tertiary" StartIcon="@Icons.Material.Filled.SwapHoriz" OnClick="BulkConvertToReceiptAsync" Disabled="@(!_selectedRows.Any())">
+                매입으로 전환
+            </MudButton>
         </MudStack>
     </MudPaper>
 
@@ -40,7 +43,7 @@
         </MudStack>
     </MudPaper>
 
-    <MudTable T="PurchaseListRowModel" Items="_rows" Dense="true" Hover="true" Striped="true" FixedHeader="true" Height="calc(100vh - 430px)">
+    <MudTable T="PurchaseOrderListItem" Items="_rows" Dense="true" Hover="true" Striped="true" FixedHeader="true" Height="calc(100vh - 430px)">
         <HeaderContent>
             <MudTh Style="width:48px">
                 <MudCheckBox T="bool" Value="_allSelected" ValueChanged="ToggleAllAsync" />
@@ -58,9 +61,9 @@
                              ValueChanged="@(v => ToggleOneAsync(context, v))"
                              OnClick:stopPropagation="true" />
             </MudTd>
-            <MudTd @onclick="@(() => SelectRowAsync(context))">@context.OrderDate.ToString("yyyy-MM-dd")</MudTd>
+            <MudTd @onclick="@(() => SelectRowAsync(context))">@context.PoDate.ToString("yyyy-MM-dd")</MudTd>
             <MudTd @onclick="@(() => SelectRowAsync(context))">
-                <MudText Class="@GetSelectedClass(context)">@context.OrderNo</MudText>
+                <MudText Class="@GetSelectedClass(context)">@context.PoNo</MudText>
             </MudTd>
             <MudTd @onclick="@(() => SelectRowAsync(context))">@context.PartnerName</MudTd>
             <MudTd @onclick="@(() => SelectRowAsync(context))">@context.Status</MudTd>
