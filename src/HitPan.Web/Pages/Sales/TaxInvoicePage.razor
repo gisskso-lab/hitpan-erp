@@ -1,12 +1,180 @@
 @page "/tax-invoice"
 @namespace HitPan.Web.Pages.SalesUi
 @attribute [Authorize]
+@using HitPan.Web.Models
+@using HitPan.Web.Services
+@inject DeliveryService DeliveryService
+@inject ISnackbar Snackbar
+@inject IDialogService DialogService
 
 <PageTitle>세금계산서</PageTitle>
-<MudContainer MaxWidth="MaxWidth.Small" Class="d-flex align-center justify-center" Style="height:calc(100vh - 120px)">
-    <MudPaper Class="pa-8 text-center" Elevation="0">
-        <MudIcon Icon="@Icons.Material.Filled.Description" Size="Size.Large" Color="Color.Primary" Class="mb-4" />
-        <MudText Typo="Typo.h5" Class="mb-2">세금계산서</MudText>
-        <MudText Typo="Typo.body1" Color="Color.Secondary">국세청 API 연동 후 사용 가능합니다. (Phase 6)</MudText>
-    </MudPaper>
-</MudContainer>
+
+<MudText Typo="Typo.h6" Class="mb-3">세금계산서</MudText>
+
+<!-- 필터 영역 -->
+<MudPaper Class="pa-3 mb-3" Elevation="0" Style="border:1px solid var(--mud-palette-lines-default);border-radius:12px">
+    <MudGrid Spacing="2" Class="align-center">
+        <MudItem xs="12" sm="2">
+            <MudDatePicker @bind-Date="_fromDate" Label="시작일" Variant="Variant.Outlined" Margin="Margin.Dense" DateFormat="yyyy-MM-dd" />
+        </MudItem>
+        <MudItem xs="12" sm="2">
+            <MudDatePicker @bind-Date="_toDate" Label="종료일" Variant="Variant.Outlined" Margin="Margin.Dense" DateFormat="yyyy-MM-dd" />
+        </MudItem>
+        <MudItem xs="12" sm="3">
+            <MudTextField @bind-Value="_partnerFilter" Label="업체명" Variant="Variant.Outlined" Margin="Margin.Dense"
+                          Adornment="Adornment.End" AdornmentIcon="@Icons.Material.Filled.Search" />
+        </MudItem>
+        <MudItem xs="12" sm="3">
+            <MudSelect T="string" @bind-Value="_statusFilter" Label="발행 상태" Variant="Variant.Outlined" Margin="Margin.Dense">
+                <MudSelectItem Value="@("all")">전체</MudSelectItem>
+                <MudSelectItem Value="@("invoiced")">미전자발행 (계산서 발행)</MudSelectItem>
+                <MudSelectItem Value="@("e-issued")">전자발행 완료</MudSelectItem>
+            </MudSelect>
+        </MudItem>
+        <MudItem xs="12" sm="2">
+            <MudButton Variant="Variant.Filled" Color="Color.Primary" FullWidth="true" OnClick="SearchAsync">조회</MudButton>
+        </MudItem>
+    </MudGrid>
+</MudPaper>
+
+<!-- 요약 + 전자발행 버튼 -->
+<MudPaper Class="pa-2 mb-2 d-flex align-center gap-3" Elevation="0">
+    <MudText Typo="Typo.body2">전체: @(_items.Count)건</MudText>
+    <MudText Typo="Typo.body2">선택: @(_items.Count(x => x.IsChecked))건</MudText>
+    <MudText Typo="Typo.body2">선택 공급가액: @(_items.Where(x => x.IsChecked).Sum(x => x.SupplyAmount).ToString("N0"))</MudText>
+    <MudText Typo="Typo.body2">선택 부가세: @(_items.Where(x => x.IsChecked).Sum(x => x.VatAmount).ToString("N0"))</MudText>
+    <MudSpacer />
+    <MudButton Variant="Variant.Filled" Color="Color.Success" StartIcon="@Icons.Material.Filled.Send"
+               Disabled="@(!_items.Any(x => x.IsChecked && x.Status == "invoiced"))"
+               OnClick="BulkEIssueAsync">전자발행</MudButton>
+</MudPaper>
+
+<!-- 메인 그리드 -->
+<MudPaper Elevation="0" Style="border:0.5px solid var(--mud-palette-lines-default);border-radius:12px;overflow:hidden">
+    <MudTable T="TaxInvoiceItem" Items="_filteredItems" Dense="true" Hover="true" Striped="true" FixedHeader="true"
+              Height="calc(100vh - 340px)">
+        <HeaderContent>
+            <MudTh Style="width:48px"><MudCheckBox T="bool" Value="_allChecked" ValueChanged="ToggleAll" /></MudTh>
+            <MudTh>일자</MudTh>
+            <MudTh>전표번호</MudTh>
+            <MudTh>업체명</MudTh>
+            <MudTh Style="text-align:right">공급가액</MudTh>
+            <MudTh Style="text-align:right">부가세</MudTh>
+            <MudTh Style="text-align:right">합계</MudTh>
+            <MudTh Style="width:130px;text-align:center">상태</MudTh>
+        </HeaderContent>
+        <RowTemplate>
+            <MudTd><MudCheckBox T="bool" Value="context.IsChecked" ValueChanged="@(v => ToggleOne(context, v))" /></MudTd>
+            <MudTd>@context.InvoiceDate.ToString("yyyy-MM-dd")</MudTd>
+            <MudTd><MudText Style="font-weight:500">@context.DocumentNo</MudText></MudTd>
+            <MudTd>@context.PartnerName</MudTd>
+            <MudTd Style="text-align:right">@context.SupplyAmount.ToString("N0")</MudTd>
+            <MudTd Style="text-align:right">@context.VatAmount.ToString("N0")</MudTd>
+            <MudTd Style="text-align:right;font-weight:500">@((context.SupplyAmount + context.VatAmount).ToString("N0"))</MudTd>
+            <MudTd Style="text-align:center">
+                <MudChip T="string" Size="Size.Small"
+                         Color="@(context.Status == "e-issued" ? Color.Success : Color.Warning)"
+                         Variant="Variant.Text">
+                    @(context.Status == "e-issued" ? "전자발행 완료" : "계산서 발행")
+                </MudChip>
+            </MudTd>
+        </RowTemplate>
+        <NoRecordsContent>
+            <MudText Typo="Typo.body2" Class="pa-4" Style="color:#9CA3AF">조회된 계산서가 없습니다.</MudText>
+        </NoRecordsContent>
+    </MudTable>
+</MudPaper>
+
+@code {
+    private DateTime? _fromDate = DateTime.Today.AddDays(-30);
+    private DateTime? _toDate = DateTime.Today;
+    private string _partnerFilter = "";
+    private string _statusFilter = "all";
+    private bool _allChecked;
+    private List<TaxInvoiceItem> _items = new();
+
+    private IEnumerable<TaxInvoiceItem> _filteredItems => _statusFilter switch
+    {
+        "invoiced" => _items.Where(x => x.Status == "invoiced"),
+        "e-issued" => _items.Where(x => x.Status == "e-issued"),
+        _ => _items
+    };
+
+    protected override async Task OnInitializedAsync()
+    {
+        await SearchAsync();
+    }
+
+    private async Task SearchAsync()
+    {
+        var fromStr = _fromDate?.ToString("yyyy-MM-dd") ?? "";
+        var toStr = _toDate?.ToString("yyyy-MM-dd") ?? "";
+        var list = await DeliveryService.GetListAsync(fromStr, toStr, _partnerFilter, "", CancellationToken.None);
+
+        // invoiced 또는 e-issued 상태만 계산서 목록에 표시
+        _items = list
+            .Where(d => d.Status is "invoiced" or "confirmed" or "e-issued")
+            .Select(d => new TaxInvoiceItem
+            {
+                DeliveryId = d.DeliveryId,
+                DocumentNo = d.DeliveryNo,
+                InvoiceDate = d.OrderDate,
+                PartnerId = d.PartnerId,
+                PartnerName = d.PartnerName,
+                SupplyAmount = d.SupplyAmount,
+                VatAmount = d.VatAmount,
+                Status = d.Status == "confirmed" ? "invoiced" : d.Status
+            }).ToList();
+
+        _allChecked = false;
+        StateHasChanged();
+    }
+
+    private void ToggleAll(bool value)
+    {
+        _allChecked = value;
+        foreach (var item in _filteredItems) item.IsChecked = value;
+    }
+
+    private void ToggleOne(TaxInvoiceItem item, bool value)
+    {
+        item.IsChecked = value;
+        _allChecked = _items.Any() && _items.All(x => x.IsChecked);
+    }
+
+    private async Task BulkEIssueAsync()
+    {
+        var selected = _items.Where(x => x.IsChecked && x.Status == "invoiced").ToList();
+        if (selected.Count == 0) return;
+
+        var confirm = await DialogService.ShowMessageBoxAsync(
+            "전자발행 확인",
+            $"선택한 {selected.Count}건을 국세청에 전자발행 하시겠습니까?",
+            yesText: "전자발행", cancelText: "취소");
+        if (confirm != true) return;
+
+        // Phase 6에서 국세청 API 연동 — 지금은 상태만 변경
+        foreach (var item in selected)
+        {
+            item.Status = "e-issued";
+            item.IsChecked = false;
+        }
+
+        _allChecked = false;
+        Snackbar.Add($"{selected.Count}건 전자발행 처리되었습니다. (국세청 API 연동은 Phase 6)", Severity.Success);
+        StateHasChanged();
+    }
+
+    private class TaxInvoiceItem
+    {
+        public string DeliveryId { get; set; } = "";
+        public string DocumentNo { get; set; } = "";
+        public DateTime InvoiceDate { get; set; }
+        public string PartnerId { get; set; } = "";
+        public string PartnerName { get; set; } = "";
+        public decimal SupplyAmount { get; set; }
+        public decimal VatAmount { get; set; }
+        public string Status { get; set; } = "invoiced";
+        public bool IsChecked { get; set; }
+    }
+}
