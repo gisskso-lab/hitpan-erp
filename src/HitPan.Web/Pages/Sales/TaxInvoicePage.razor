@@ -1,0 +1,12 @@
+@page "/tax-invoice"
+@namespace HitPan.Web.Pages.SalesUi
+@attribute [Authorize]
+
+<PageTitle>세금계산서</PageTitle>
+<MudContainer MaxWidth="MaxWidth.Small" Class="d-flex align-center justify-center" Style="height:calc(100vh - 120px)">
+    <MudPaper Class="pa-8 text-center" Elevation="0">
+        <MudIcon Icon="@Icons.Material.Filled.Description" Size="Size.Large" Color="Color.Primary" Class="mb-4" />
+        <MudText Typo="Typo.h5" Class="mb-2">세금계산서</MudText>
+        <MudText Typo="Typo.body1" Color="Color.Secondary">국세청 API 연동 후 사용 가능합니다. (Phase 6)</MudText>
+    </MudPaper>
+</MudContainer>

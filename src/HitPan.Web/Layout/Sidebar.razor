@@ -33,6 +33,7 @@
         <MudNavLink Icon="@Icons.Material.Filled.RequestQuote" OnClick="@(() => TabService.TryAddTab(WorkDocumentKind.Quotation))">견적서</MudNavLink>
         <MudNavLink Icon="@Icons.Material.Filled.Assignment" OnClick="@(() => TabService.TryAddTab(WorkDocumentKind.SalesOrder))">수주서</MudNavLink>
         <MudNavLink Icon="@Icons.Material.Filled.Receipt" OnClick="@(() => TabService.TryAddTab(WorkDocumentKind.SalesDelivery))">거래명세서</MudNavLink>
+        <MudNavLink Href="/tax-invoice" Icon="@Icons.Material.Filled.Description">세금계산서</MudNavLink>
         <MudNavLink Href="/sales/summary" Icon="@Icons.Material.Filled.BarChart">판매 현황</MudNavLink>
     </MudNavGroup>
 
