@@ -54,4 +54,44 @@ public interface IReportService
         string viewType, string tenantId,
         DateTime? from = null, DateTime? to = null,
         string? partner = null, CancellationToken ct = default);
+
+    /// <summary>
+    /// 판매 순위표를 조회한다.
+    /// </summary>
+    Task<List<ReportRow>> GetSalesRankingAsync(
+        string viewType, string tenantId,
+        DateTime? from = null, DateTime? to = null,
+        string? partner = null, CancellationToken ct = default);
+
+    /// <summary>
+    /// 판매 수익성 분석을 조회한다.
+    /// </summary>
+    Task<List<ProfitReportRow>> GetSalesProfitabilityAsync(
+        string viewType, string tenantId,
+        DateTime? from = null, DateTime? to = null,
+        string? partner = null, CancellationToken ct = default);
+
+    /// <summary>
+    /// 판매 통계를 조회한다.
+    /// </summary>
+    Task<List<ReportRow>> GetSalesStatisticsAsync(
+        string viewType, string tenantId,
+        DateTime? from = null, DateTime? to = null,
+        string? partner = null, CancellationToken ct = default);
+
+    /// <summary>
+    /// 매입 순위표를 조회한다.
+    /// </summary>
+    Task<List<ReportRow>> GetPurchaseRankingAsync(
+        string viewType, string tenantId,
+        DateTime? from = null, DateTime? to = null,
+        string? partner = null, CancellationToken ct = default);
+
+    /// <summary>
+    /// 매입 통계를 조회한다.
+    /// </summary>
+    Task<List<ReportRow>> GetPurchaseStatisticsAsync(
+        string viewType, string tenantId,
+        DateTime? from = null, DateTime? to = null,
+        string? partner = null, CancellationToken ct = default);
 }

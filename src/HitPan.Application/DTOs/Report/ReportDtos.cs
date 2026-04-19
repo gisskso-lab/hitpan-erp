@@ -35,3 +35,39 @@ public class ReportRow
     /// </summary>
     public decimal TotalAmount { get; set; }
 }
+
+/// <summary>
+/// 수익성 분석 리포트 행 DTO다.
+/// </summary>
+public class ProfitReportRow
+{
+    /// <summary>
+    /// 라벨이다. (업체명/품목명/기간)
+    /// </summary>
+    public string Label { get; set; } = "";
+
+    /// <summary>
+    /// 건수다.
+    /// </summary>
+    public int Count { get; set; }
+
+    /// <summary>
+    /// 매출(수익)이다.
+    /// </summary>
+    public decimal Revenue { get; set; }
+
+    /// <summary>
+    /// 원가다.
+    /// </summary>
+    public decimal Cost { get; set; }
+
+    /// <summary>
+    /// 이익이다.
+    /// </summary>
+    public decimal Profit { get; set; }
+
+    /// <summary>
+    /// 이익률(%)이다.
+    /// </summary>
+    public decimal ProfitRate { get; set; }
+}

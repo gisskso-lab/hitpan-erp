@@ -1,0 +1,108 @@
+@page "/sales/profitability"
+@namespace HitPan.Web.Pages.SalesUi
+@attribute [Authorize]
+@using HitPan.Web.Models
+@using System.Net.Http.Json
+@inject HttpClient Http
+
+<PageTitle>판매수익성분석</PageTitle>
+<MudText Typo="Typo.h6" Class="mb-3">판매수익성분석</MudText>
+
+<MudPaper Class="pa-3 mb-3" Elevation="0" Style="border:1px solid var(--mud-palette-lines-default);border-radius:12px">
+    <MudGrid Spacing="2" Class="align-center">
+        <MudItem xs="12" sm="3">
+            <MudSelect T="string" @bind-Value="_viewType" Label="조회유형" Variant="Variant.Outlined" Margin="Margin.Dense">
+                <MudSelectItem Value="@("partner")">업체별</MudSelectItem>
+                <MudSelectItem Value="@("item")">품목별</MudSelectItem>
+                <MudSelectItem Value="@("period")">기간별</MudSelectItem>
+                <MudSelectItem Value="@("region")">지역별</MudSelectItem>
+                <MudSelectItem Value="@("employee")">사원별</MudSelectItem>
+            </MudSelect>
+        </MudItem>
+        <MudItem xs="12" sm="2">
+            <MudDatePicker @bind-Date="_from" Label="시작일" Variant="Variant.Outlined" Margin="Margin.Dense" DateFormat="yyyy-MM-dd" />
+        </MudItem>
+        <MudItem xs="12" sm="2">
+            <MudDatePicker @bind-Date="_to" Label="종료일" Variant="Variant.Outlined" Margin="Margin.Dense" DateFormat="yyyy-MM-dd" />
+        </MudItem>
+        <MudItem xs="12" sm="3">
+            <MudTextField @bind-Value="_partner" Label="업체명" Variant="Variant.Outlined" Margin="Margin.Dense"
+                          Adornment="Adornment.End" AdornmentIcon="@Icons.Material.Filled.Search" />
+        </MudItem>
+        <MudItem xs="12" sm="2">
+            <MudButton Variant="Variant.Filled" Color="Color.Primary" FullWidth="true" OnClick="SearchAsync">조회</MudButton>
+        </MudItem>
+    </MudGrid>
+</MudPaper>
+
+@if (_viewType is "partner" or "item" or "period")
+{
+    <MudPaper Elevation="0" Style="border:0.5px solid var(--mud-palette-lines-default);border-radius:12px;overflow:hidden">
+        <MudTable T="ProfitReportRow" Items="_reportData" Dense="true" Hover="true" Striped="true" FixedHeader="true" Height="calc(100vh - 280px)">
+            <HeaderContent>
+                <MudTh>@GetLabelHeader()</MudTh>
+                <MudTh Style="text-align:right">건수</MudTh>
+                <MudTh Style="text-align:right">매출</MudTh>
+                <MudTh Style="text-align:right">원가</MudTh>
+                <MudTh Style="text-align:right">이익</MudTh>
+                <MudTh Style="text-align:right">이익률(%)</MudTh>
+            </HeaderContent>
+            <RowTemplate>
+                <MudTd>@context.Label</MudTd>
+                <MudTd Style="text-align:right">@context.Count.ToString("N0")</MudTd>
+                <MudTd Style="text-align:right">@context.Revenue.ToString("N0")</MudTd>
+                <MudTd Style="text-align:right">@context.Cost.ToString("N0")</MudTd>
+                <MudTd Style="@($"text-align:right;font-weight:500;color:{(context.Profit >= 0 ? "#2E7D32" : "#C62828")}")">@context.Profit.ToString("N0")</MudTd>
+                <MudTd Style="@($"text-align:right;font-weight:500;color:{(context.ProfitRate >= 0 ? "#2E7D32" : "#C62828")}")">@context.ProfitRate.ToString("N1")%</MudTd>
+            </RowTemplate>
+            <NoRecordsContent><MudText Class="pa-4" Style="color:#9CA3AF">조회된 데이터가 없습니다.</MudText></NoRecordsContent>
+        </MudTable>
+    </MudPaper>
+}
+else
+{
+    <MudAlert Severity="Severity.Info">@(_viewType == "region" ? "지역별" : "사원별") 수익성분석 데이터는 준비중입니다.</MudAlert>
+}
+
+@code {
+    private DateTime? _from = DateTime.Today.AddDays(-30);
+    private DateTime? _to = DateTime.Today;
+    private string _partner = "";
+    private string _viewType = "partner";
+    private List<ProfitReportRow> _reportData = new();
+
+    protected override async Task OnInitializedAsync() => await SearchAsync();
+
+    private async Task SearchAsync()
+    {
+        if (_viewType is not ("partner" or "item" or "period"))
+        {
+            _reportData = new();
+            StateHasChanged();
+            return;
+        }
+
+        var qs = new List<string>();
+        qs.Add($"view={_viewType}");
+        if (_from.HasValue) qs.Add($"from={_from:yyyy-MM-dd}");
+        if (_to.HasValue) qs.Add($"to={_to:yyyy-MM-dd}");
+        if (!string.IsNullOrWhiteSpace(_partner)) qs.Add($"partner={Uri.EscapeDataString(_partner)}");
+        var path = "api/reports/sales-profitability?" + string.Join("&", qs);
+        try
+        {
+            _reportData = await Http.GetFromJsonAsync<List<ProfitReportRow>>(path) ?? new();
+        }
+        catch
+        {
+            _reportData = new();
+        }
+        StateHasChanged();
+    }
+
+    private string GetLabelHeader() => _viewType switch
+    {
+        "partner" => "업체명",
+        "item" => "품명",
+        _ => "기간"
+    };
+}

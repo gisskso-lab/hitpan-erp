@@ -355,6 +355,16 @@ public class ReportRow
     public decimal TotalAmount { get; set; }
 }
 
+public class ProfitReportRow
+{
+    public string Label { get; set; } = "";
+    public int Count { get; set; }
+    public decimal Revenue { get; set; }
+    public decimal Cost { get; set; }
+    public decimal Profit { get; set; }
+    public decimal ProfitRate { get; set; }
+}
+
 public sealed class PurchaseReturnListItem
 {
     public string ReturnId { get; set; } = string.Empty;

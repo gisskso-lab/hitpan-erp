@@ -1,0 +1,115 @@
+@page "/purchase/statistics"
+@namespace HitPan.Web.Pages.PurchaseUi
+@attribute [Authorize]
+@using HitPan.Web.Models
+@using System.Net.Http.Json
+@inject HttpClient Http
+
+<PageTitle>매입통계</PageTitle>
+<MudText Typo="Typo.h6" Class="mb-3">매입통계</MudText>
+
+<MudPaper Class="pa-3 mb-3" Elevation="0" Style="border:1px solid var(--mud-palette-lines-default);border-radius:12px">
+    <MudGrid Spacing="2" Class="align-center">
+        <MudItem xs="12" sm="3">
+            <MudSelect T="string" @bind-Value="_viewType" Label="조회유형" Variant="Variant.Outlined" Margin="Margin.Dense">
+                <MudSelectItem Value="@("item-monthly")">연간 월별(품목)</MudSelectItem>
+                <MudSelectItem Value="@("partner-monthly")">연간 월별(업체)</MudSelectItem>
+                <MudSelectItem Value="@("item-yoy")">전년동기대비(품목)</MudSelectItem>
+                <MudSelectItem Value="@("partner-yoy")">전년동기대비(업체)</MudSelectItem>
+            </MudSelect>
+        </MudItem>
+        <MudItem xs="12" sm="2">
+            <MudDatePicker @bind-Date="_from" Label="시작일" Variant="Variant.Outlined" Margin="Margin.Dense" DateFormat="yyyy-MM-dd" />
+        </MudItem>
+        <MudItem xs="12" sm="2">
+            <MudDatePicker @bind-Date="_to" Label="종료일" Variant="Variant.Outlined" Margin="Margin.Dense" DateFormat="yyyy-MM-dd" />
+        </MudItem>
+        <MudItem xs="12" sm="3">
+            <MudTextField @bind-Value="_partner" Label="업체명" Variant="Variant.Outlined" Margin="Margin.Dense"
+                          Adornment="Adornment.End" AdornmentIcon="@Icons.Material.Filled.Search" />
+        </MudItem>
+        <MudItem xs="12" sm="2">
+            <MudButton Variant="Variant.Filled" Color="Color.Primary" FullWidth="true" OnClick="SearchAsync">조회</MudButton>
+        </MudItem>
+    </MudGrid>
+</MudPaper>
+
+@if (_viewType is "item-monthly" or "partner-monthly")
+{
+    <MudPaper Elevation="0" Style="border:0.5px solid var(--mud-palette-lines-default);border-radius:12px;overflow:hidden">
+        <MudTable T="ReportRow" Items="_reportData" Dense="true" Hover="true" Striped="true" FixedHeader="true" Height="calc(100vh - 280px)">
+            <HeaderContent>
+                <MudTh>@GetLabelHeader()</MudTh>
+                <MudTh Style="text-align:right">건수</MudTh>
+                <MudTh Style="text-align:right">수량</MudTh>
+                <MudTh Style="text-align:right">공급가액</MudTh>
+                <MudTh Style="text-align:right">부가세</MudTh>
+                <MudTh Style="text-align:right">합계</MudTh>
+            </HeaderContent>
+            <RowTemplate>
+                <MudTd>@context.Label</MudTd>
+                <MudTd Style="text-align:right">@context.Count.ToString("N0")</MudTd>
+                <MudTd Style="text-align:right">@context.Qty.ToString("N1")</MudTd>
+                <MudTd Style="text-align:right">@context.SupplyAmount.ToString("N0")</MudTd>
+                <MudTd Style="text-align:right">@context.VatAmount.ToString("N0")</MudTd>
+                <MudTd Style="text-align:right;font-weight:500">@context.TotalAmount.ToString("N0")</MudTd>
+            </RowTemplate>
+            <NoRecordsContent><MudText Class="pa-4" Style="color:#9CA3AF">조회된 데이터가 없습니다.</MudText></NoRecordsContent>
+        </MudTable>
+    </MudPaper>
+}
+else
+{
+    <MudAlert Severity="Severity.Info">@GetViewLabel() 데이터는 준비중입니다.</MudAlert>
+}
+
+@code {
+    private DateTime? _from = new DateTime(DateTime.Today.Year, 1, 1);
+    private DateTime? _to = DateTime.Today;
+    private string _partner = "";
+    private string _viewType = "item-monthly";
+    private List<ReportRow> _reportData = new();
+
+    protected override async Task OnInitializedAsync() => await SearchAsync();
+
+    private async Task SearchAsync()
+    {
+        if (_viewType is not ("item-monthly" or "partner-monthly"))
+        {
+            _reportData = new();
+            StateHasChanged();
+            return;
+        }
+
+        var qs = new List<string>();
+        qs.Add($"view={_viewType}");
+        if (_from.HasValue) qs.Add($"from={_from:yyyy-MM-dd}");
+        if (_to.HasValue) qs.Add($"to={_to:yyyy-MM-dd}");
+        if (!string.IsNullOrWhiteSpace(_partner)) qs.Add($"partner={Uri.EscapeDataString(_partner)}");
+        var path = "api/reports/purchase-statistics?" + string.Join("&", qs);
+        try
+        {
+            _reportData = await Http.GetFromJsonAsync<List<ReportRow>>(path) ?? new();
+        }
+        catch
+        {
+            _reportData = new();
+        }
+        StateHasChanged();
+    }
+
+    private string GetLabelHeader() => _viewType switch
+    {
+        "partner-monthly" => "업체 (월)",
+        _ => "품목 (월)"
+    };
+
+    private string GetViewLabel() => _viewType switch
+    {
+        "item-monthly" => "연간 월별(품목)",
+        "partner-monthly" => "연간 월별(업체)",
+        "item-yoy" => "전년동기대비(품목)",
+        "partner-yoy" => "전년동기대비(업체)",
+        _ => "매입통계"
+    };
+}

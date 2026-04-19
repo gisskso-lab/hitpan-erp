@@ -478,4 +478,364 @@ public class ReportService : IReportService
 
         return rows.ToList();
     }
+
+    /// <inheritdoc />
+    public async Task<List<ReportRow>> GetSalesRankingAsync(
+        string viewType, string tenantId,
+        DateTime? from = null, DateTime? to = null,
+        string? partner = null, CancellationToken ct = default)
+    {
+        var sql = viewType switch
+        {
+            "partner" => """
+                SELECT
+                    p.partner_name AS Label,
+                    COUNT(DISTINCT sd.delivery_id) AS Count,
+                    0 AS Qty,
+                    COALESCE(SUM(sd.total_amount), 0) AS SupplyAmount,
+                    COALESCE(SUM(sd.vat_amount), 0) AS VatAmount,
+                    COALESCE(SUM(sd.total_amount + sd.vat_amount), 0) AS TotalAmount
+                FROM sales_deliveries sd
+                LEFT JOIN partners p
+                    ON p.partner_id = sd.partner_id AND p.tenant_id = sd.tenant_id
+                WHERE sd.tenant_id = @TenantId AND sd.is_deleted = 0
+                  AND (@From IS NULL OR sd.delivery_date >= @From)
+                  AND (@To IS NULL OR sd.delivery_date <= @To)
+                  AND (@Partner IS NULL OR p.partner_name LIKE CONCAT('%', @Partner, '%'))
+                GROUP BY sd.partner_id, p.partner_name
+                ORDER BY SupplyAmount DESC
+                """,
+            "item" => """
+                SELECT
+                    i.item_name AS Label,
+                    COUNT(DISTINCT sd.delivery_id) AS Count,
+                    COALESCE(SUM(sdi.qty), 0) AS Qty,
+                    COALESCE(SUM(sdi.supply_amount), 0) AS SupplyAmount,
+                    COALESCE(SUM(sdi.vat_amount), 0) AS VatAmount,
+                    COALESCE(SUM(sdi.supply_amount + sdi.vat_amount), 0) AS TotalAmount
+                FROM sales_delivery_items sdi
+                INNER JOIN sales_deliveries sd ON sd.delivery_id = sdi.delivery_id AND sd.tenant_id = sdi.tenant_id
+                LEFT JOIN items i ON i.item_id = sdi.item_id AND i.tenant_id = sdi.tenant_id
+                LEFT JOIN partners p ON p.partner_id = sd.partner_id AND p.tenant_id = sd.tenant_id
+                WHERE sd.tenant_id = @TenantId AND sd.is_deleted = 0
+                  AND (@From IS NULL OR sd.delivery_date >= @From)
+                  AND (@To IS NULL OR sd.delivery_date <= @To)
+                  AND (@Partner IS NULL OR p.partner_name LIKE CONCAT('%', @Partner, '%'))
+                GROUP BY sdi.item_id, i.item_name
+                ORDER BY SupplyAmount DESC
+                """,
+            _ => """
+                SELECT
+                    DATE_FORMAT(sd.delivery_date, '%Y-%m-%d') AS Label,
+                    COUNT(*) AS Count,
+                    0 AS Qty,
+                    COALESCE(SUM(sd.total_amount), 0) AS SupplyAmount,
+                    COALESCE(SUM(sd.vat_amount), 0) AS VatAmount,
+                    COALESCE(SUM(sd.total_amount + sd.vat_amount), 0) AS TotalAmount
+                FROM sales_deliveries sd
+                LEFT JOIN partners p
+                    ON p.partner_id = sd.partner_id AND p.tenant_id = sd.tenant_id
+                WHERE sd.tenant_id = @TenantId AND sd.is_deleted = 0
+                  AND (@From IS NULL OR sd.delivery_date >= @From)
+                  AND (@To IS NULL OR sd.delivery_date <= @To)
+                  AND (@Partner IS NULL OR p.partner_name LIKE CONCAT('%', @Partner, '%'))
+                GROUP BY sd.delivery_date
+                ORDER BY SupplyAmount DESC
+                """
+        };
+
+        var rows = await _db.QueryAsync<ReportRow>(
+            new CommandDefinition(sql, new
+            {
+                TenantId = tenantId,
+                From = from?.Date,
+                To = to?.Date,
+                Partner = partner
+            }, cancellationToken: ct));
+
+        return rows.ToList();
+    }
+
+    /// <inheritdoc />
+    public async Task<List<ProfitReportRow>> GetSalesProfitabilityAsync(
+        string viewType, string tenantId,
+        DateTime? from = null, DateTime? to = null,
+        string? partner = null, CancellationToken ct = default)
+    {
+        var sql = viewType switch
+        {
+            "partner" => """
+                SELECT
+                    p.partner_name AS Label,
+                    COUNT(DISTINCT sd.delivery_id) AS Count,
+                    COALESCE(SUM(sdi.supply_amount), 0) AS Revenue,
+                    COALESCE(SUM(sdi.qty * COALESCE(i.purchase_price, i.cost_price, 0)), 0) AS Cost,
+                    COALESCE(SUM(sdi.supply_amount), 0) - COALESCE(SUM(sdi.qty * COALESCE(i.purchase_price, i.cost_price, 0)), 0) AS Profit,
+                    CASE WHEN COALESCE(SUM(sdi.supply_amount), 0) = 0 THEN 0
+                         ELSE ROUND((COALESCE(SUM(sdi.supply_amount), 0) - COALESCE(SUM(sdi.qty * COALESCE(i.purchase_price, i.cost_price, 0)), 0))
+                              / COALESCE(SUM(sdi.supply_amount), 0) * 100, 2)
+                    END AS ProfitRate
+                FROM sales_delivery_items sdi
+                INNER JOIN sales_deliveries sd ON sd.delivery_id = sdi.delivery_id AND sd.tenant_id = sdi.tenant_id
+                LEFT JOIN items i ON i.item_id = sdi.item_id AND i.tenant_id = sdi.tenant_id
+                LEFT JOIN partners p ON p.partner_id = sd.partner_id AND p.tenant_id = sd.tenant_id
+                WHERE sd.tenant_id = @TenantId AND sd.is_deleted = 0
+                  AND (@From IS NULL OR sd.delivery_date >= @From)
+                  AND (@To IS NULL OR sd.delivery_date <= @To)
+                  AND (@Partner IS NULL OR p.partner_name LIKE CONCAT('%', @Partner, '%'))
+                GROUP BY sd.partner_id, p.partner_name
+                ORDER BY Revenue DESC
+                """,
+            "item" => """
+                SELECT
+                    i.item_name AS Label,
+                    COUNT(DISTINCT sd.delivery_id) AS Count,
+                    COALESCE(SUM(sdi.supply_amount), 0) AS Revenue,
+                    COALESCE(SUM(sdi.qty * COALESCE(i.purchase_price, i.cost_price, 0)), 0) AS Cost,
+                    COALESCE(SUM(sdi.supply_amount), 0) - COALESCE(SUM(sdi.qty * COALESCE(i.purchase_price, i.cost_price, 0)), 0) AS Profit,
+                    CASE WHEN COALESCE(SUM(sdi.supply_amount), 0) = 0 THEN 0
+                         ELSE ROUND((COALESCE(SUM(sdi.supply_amount), 0) - COALESCE(SUM(sdi.qty * COALESCE(i.purchase_price, i.cost_price, 0)), 0))
+                              / COALESCE(SUM(sdi.supply_amount), 0) * 100, 2)
+                    END AS ProfitRate
+                FROM sales_delivery_items sdi
+                INNER JOIN sales_deliveries sd ON sd.delivery_id = sdi.delivery_id AND sd.tenant_id = sdi.tenant_id
+                LEFT JOIN items i ON i.item_id = sdi.item_id AND i.tenant_id = sdi.tenant_id
+                LEFT JOIN partners p ON p.partner_id = sd.partner_id AND p.tenant_id = sd.tenant_id
+                WHERE sd.tenant_id = @TenantId AND sd.is_deleted = 0
+                  AND (@From IS NULL OR sd.delivery_date >= @From)
+                  AND (@To IS NULL OR sd.delivery_date <= @To)
+                  AND (@Partner IS NULL OR p.partner_name LIKE CONCAT('%', @Partner, '%'))
+                GROUP BY sdi.item_id, i.item_name
+                ORDER BY Revenue DESC
+                """,
+            _ => """
+                SELECT
+                    DATE_FORMAT(sd.delivery_date, '%Y-%m-%d') AS Label,
+                    COUNT(DISTINCT sd.delivery_id) AS Count,
+                    COALESCE(SUM(sdi.supply_amount), 0) AS Revenue,
+                    COALESCE(SUM(sdi.qty * COALESCE(i.purchase_price, i.cost_price, 0)), 0) AS Cost,
+                    COALESCE(SUM(sdi.supply_amount), 0) - COALESCE(SUM(sdi.qty * COALESCE(i.purchase_price, i.cost_price, 0)), 0) AS Profit,
+                    CASE WHEN COALESCE(SUM(sdi.supply_amount), 0) = 0 THEN 0
+                         ELSE ROUND((COALESCE(SUM(sdi.supply_amount), 0) - COALESCE(SUM(sdi.qty * COALESCE(i.purchase_price, i.cost_price, 0)), 0))
+                              / COALESCE(SUM(sdi.supply_amount), 0) * 100, 2)
+                    END AS ProfitRate
+                FROM sales_delivery_items sdi
+                INNER JOIN sales_deliveries sd ON sd.delivery_id = sdi.delivery_id AND sd.tenant_id = sdi.tenant_id
+                LEFT JOIN items i ON i.item_id = sdi.item_id AND i.tenant_id = sdi.tenant_id
+                LEFT JOIN partners p ON p.partner_id = sd.partner_id AND p.tenant_id = sd.tenant_id
+                WHERE sd.tenant_id = @TenantId AND sd.is_deleted = 0
+                  AND (@From IS NULL OR sd.delivery_date >= @From)
+                  AND (@To IS NULL OR sd.delivery_date <= @To)
+                  AND (@Partner IS NULL OR p.partner_name LIKE CONCAT('%', @Partner, '%'))
+                GROUP BY sd.delivery_date
+                ORDER BY Revenue DESC
+                """
+        };
+
+        var rows = await _db.QueryAsync<ProfitReportRow>(
+            new CommandDefinition(sql, new
+            {
+                TenantId = tenantId,
+                From = from?.Date,
+                To = to?.Date,
+                Partner = partner
+            }, cancellationToken: ct));
+
+        return rows.ToList();
+    }
+
+    /// <inheritdoc />
+    public async Task<List<ReportRow>> GetSalesStatisticsAsync(
+        string viewType, string tenantId,
+        DateTime? from = null, DateTime? to = null,
+        string? partner = null, CancellationToken ct = default)
+    {
+        var sql = viewType switch
+        {
+            "partner-monthly" => """
+                SELECT
+                    CONCAT(p.partner_name, ' (', DATE_FORMAT(sd.delivery_date, '%Y-%m'), ')') AS Label,
+                    COUNT(DISTINCT sd.delivery_id) AS Count,
+                    COALESCE(SUM(sdi.qty), 0) AS Qty,
+                    COALESCE(SUM(sdi.supply_amount), 0) AS SupplyAmount,
+                    COALESCE(SUM(sdi.vat_amount), 0) AS VatAmount,
+                    COALESCE(SUM(sdi.supply_amount + sdi.vat_amount), 0) AS TotalAmount
+                FROM sales_delivery_items sdi
+                INNER JOIN sales_deliveries sd ON sd.delivery_id = sdi.delivery_id AND sd.tenant_id = sdi.tenant_id
+                LEFT JOIN partners p ON p.partner_id = sd.partner_id AND p.tenant_id = sd.tenant_id
+                WHERE sd.tenant_id = @TenantId AND sd.is_deleted = 0
+                  AND (@From IS NULL OR sd.delivery_date >= @From)
+                  AND (@To IS NULL OR sd.delivery_date <= @To)
+                  AND (@Partner IS NULL OR p.partner_name LIKE CONCAT('%', @Partner, '%'))
+                GROUP BY sd.partner_id, p.partner_name, DATE_FORMAT(sd.delivery_date, '%Y-%m')
+                ORDER BY p.partner_name, DATE_FORMAT(sd.delivery_date, '%Y-%m')
+                """,
+            _ => """
+                SELECT
+                    CONCAT(i.item_name, ' (', DATE_FORMAT(sd.delivery_date, '%Y-%m'), ')') AS Label,
+                    COUNT(DISTINCT sd.delivery_id) AS Count,
+                    COALESCE(SUM(sdi.qty), 0) AS Qty,
+                    COALESCE(SUM(sdi.supply_amount), 0) AS SupplyAmount,
+                    COALESCE(SUM(sdi.vat_amount), 0) AS VatAmount,
+                    COALESCE(SUM(sdi.supply_amount + sdi.vat_amount), 0) AS TotalAmount
+                FROM sales_delivery_items sdi
+                INNER JOIN sales_deliveries sd ON sd.delivery_id = sdi.delivery_id AND sd.tenant_id = sdi.tenant_id
+                LEFT JOIN items i ON i.item_id = sdi.item_id AND i.tenant_id = sdi.tenant_id
+                LEFT JOIN partners p ON p.partner_id = sd.partner_id AND p.tenant_id = sd.tenant_id
+                WHERE sd.tenant_id = @TenantId AND sd.is_deleted = 0
+                  AND (@From IS NULL OR sd.delivery_date >= @From)
+                  AND (@To IS NULL OR sd.delivery_date <= @To)
+                  AND (@Partner IS NULL OR p.partner_name LIKE CONCAT('%', @Partner, '%'))
+                GROUP BY sdi.item_id, i.item_name, DATE_FORMAT(sd.delivery_date, '%Y-%m')
+                ORDER BY i.item_name, DATE_FORMAT(sd.delivery_date, '%Y-%m')
+                """
+        };
+
+        var rows = await _db.QueryAsync<ReportRow>(
+            new CommandDefinition(sql, new
+            {
+                TenantId = tenantId,
+                From = from?.Date,
+                To = to?.Date,
+                Partner = partner
+            }, cancellationToken: ct));
+
+        return rows.ToList();
+    }
+
+    /// <inheritdoc />
+    public async Task<List<ReportRow>> GetPurchaseRankingAsync(
+        string viewType, string tenantId,
+        DateTime? from = null, DateTime? to = null,
+        string? partner = null, CancellationToken ct = default)
+    {
+        var sql = viewType switch
+        {
+            "partner" => """
+                SELECT
+                    p.partner_name AS Label,
+                    COUNT(DISTINCT pr.receipt_id) AS Count,
+                    0 AS Qty,
+                    COALESCE(SUM(pr.total_amount), 0) AS SupplyAmount,
+                    COALESCE(SUM(pr.vat_amount), 0) AS VatAmount,
+                    COALESCE(SUM(pr.total_amount + pr.vat_amount), 0) AS TotalAmount
+                FROM purchase_receipts pr
+                LEFT JOIN partners p
+                    ON p.partner_id = pr.partner_id AND p.tenant_id = pr.tenant_id
+                WHERE pr.tenant_id = @TenantId
+                  AND (@From IS NULL OR pr.receipt_date >= @From)
+                  AND (@To IS NULL OR pr.receipt_date <= @To)
+                  AND (@Partner IS NULL OR p.partner_name LIKE CONCAT('%', @Partner, '%'))
+                GROUP BY pr.partner_id, p.partner_name
+                ORDER BY SupplyAmount DESC
+                """,
+            "item" => """
+                SELECT
+                    i.item_name AS Label,
+                    COUNT(DISTINCT pr.receipt_id) AS Count,
+                    COALESCE(SUM(pri.qty), 0) AS Qty,
+                    COALESCE(SUM(pri.supply_amount), 0) AS SupplyAmount,
+                    COALESCE(SUM(pri.vat_amount), 0) AS VatAmount,
+                    COALESCE(SUM(pri.supply_amount + pri.vat_amount), 0) AS TotalAmount
+                FROM purchase_receipt_items pri
+                INNER JOIN purchase_receipts pr ON pr.receipt_id = pri.receipt_id AND pr.tenant_id = pri.tenant_id
+                LEFT JOIN items i ON i.item_id = pri.item_id AND i.tenant_id = pri.tenant_id
+                LEFT JOIN partners p ON p.partner_id = pr.partner_id AND p.tenant_id = pr.tenant_id
+                WHERE pr.tenant_id = @TenantId
+                  AND (@From IS NULL OR pr.receipt_date >= @From)
+                  AND (@To IS NULL OR pr.receipt_date <= @To)
+                  AND (@Partner IS NULL OR p.partner_name LIKE CONCAT('%', @Partner, '%'))
+                GROUP BY pri.item_id, i.item_name
+                ORDER BY SupplyAmount DESC
+                """,
+            _ => """
+                SELECT
+                    DATE_FORMAT(pr.receipt_date, '%Y-%m-%d') AS Label,
+                    COUNT(*) AS Count,
+                    0 AS Qty,
+                    COALESCE(SUM(pr.total_amount), 0) AS SupplyAmount,
+                    COALESCE(SUM(pr.vat_amount), 0) AS VatAmount,
+                    COALESCE(SUM(pr.total_amount + pr.vat_amount), 0) AS TotalAmount
+                FROM purchase_receipts pr
+                LEFT JOIN partners p
+                    ON p.partner_id = pr.partner_id AND p.tenant_id = pr.tenant_id
+                WHERE pr.tenant_id = @TenantId
+                  AND (@From IS NULL OR pr.receipt_date >= @From)
+                  AND (@To IS NULL OR pr.receipt_date <= @To)
+                  AND (@Partner IS NULL OR p.partner_name LIKE CONCAT('%', @Partner, '%'))
+                GROUP BY pr.receipt_date
+                ORDER BY SupplyAmount DESC
+                """
+        };
+
+        var rows = await _db.QueryAsync<ReportRow>(
+            new CommandDefinition(sql, new
+            {
+                TenantId = tenantId,
+                From = from?.Date,
+                To = to?.Date,
+                Partner = partner
+            }, cancellationToken: ct));
+
+        return rows.ToList();
+    }
+
+    /// <inheritdoc />
+    public async Task<List<ReportRow>> GetPurchaseStatisticsAsync(
+        string viewType, string tenantId,
+        DateTime? from = null, DateTime? to = null,
+        string? partner = null, CancellationToken ct = default)
+    {
+        var sql = viewType switch
+        {
+            "partner-monthly" => """
+                SELECT
+                    CONCAT(p.partner_name, ' (', DATE_FORMAT(pr.receipt_date, '%Y-%m'), ')') AS Label,
+                    COUNT(DISTINCT pr.receipt_id) AS Count,
+                    COALESCE(SUM(pri.qty), 0) AS Qty,
+                    COALESCE(SUM(pri.supply_amount), 0) AS SupplyAmount,
+                    COALESCE(SUM(pri.vat_amount), 0) AS VatAmount,
+                    COALESCE(SUM(pri.supply_amount + pri.vat_amount), 0) AS TotalAmount
+                FROM purchase_receipt_items pri
+                INNER JOIN purchase_receipts pr ON pr.receipt_id = pri.receipt_id AND pr.tenant_id = pri.tenant_id
+                LEFT JOIN partners p ON p.partner_id = pr.partner_id AND p.tenant_id = pr.tenant_id
+                WHERE pr.tenant_id = @TenantId
+                  AND (@From IS NULL OR pr.receipt_date >= @From)
+                  AND (@To IS NULL OR pr.receipt_date <= @To)
+                  AND (@Partner IS NULL OR p.partner_name LIKE CONCAT('%', @Partner, '%'))
+                GROUP BY pr.partner_id, p.partner_name, DATE_FORMAT(pr.receipt_date, '%Y-%m')
+                ORDER BY p.partner_name, DATE_FORMAT(pr.receipt_date, '%Y-%m')
+                """,
+            _ => """
+                SELECT
+                    CONCAT(i.item_name, ' (', DATE_FORMAT(pr.receipt_date, '%Y-%m'), ')') AS Label,
+                    COUNT(DISTINCT pr.receipt_id) AS Count,
+                    COALESCE(SUM(pri.qty), 0) AS Qty,
+                    COALESCE(SUM(pri.supply_amount), 0) AS SupplyAmount,
+                    COALESCE(SUM(pri.vat_amount), 0) AS VatAmount,
+                    COALESCE(SUM(pri.supply_amount + pri.vat_amount), 0) AS TotalAmount
+                FROM purchase_receipt_items pri
+                INNER JOIN purchase_receipts pr ON pr.receipt_id = pri.receipt_id AND pr.tenant_id = pri.tenant_id
+                LEFT JOIN items i ON i.item_id = pri.item_id AND i.tenant_id = pri.tenant_id
+                LEFT JOIN partners p ON p.partner_id = pr.partner_id AND p.tenant_id = pr.tenant_id
+                WHERE pr.tenant_id = @TenantId
+                  AND (@From IS NULL OR pr.receipt_date >= @From)
+                  AND (@To IS NULL OR pr.receipt_date <= @To)
+                  AND (@Partner IS NULL OR p.partner_name LIKE CONCAT('%', @Partner, '%'))
+                GROUP BY pri.item_id, i.item_name, DATE_FORMAT(pr.receipt_date, '%Y-%m')
+                ORDER BY i.item_name, DATE_FORMAT(pr.receipt_date, '%Y-%m')
+                """
+        };
+
+        var rows = await _db.QueryAsync<ReportRow>(
+            new CommandDefinition(sql, new
+            {
+                TenantId = tenantId,
+                From = from?.Date,
+                To = to?.Date,
+                Partner = partner
+            }, cancellationToken: ct));
+
+        return rows.ToList();
+    }
 }

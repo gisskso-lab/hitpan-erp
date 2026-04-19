@@ -36,6 +36,9 @@
         <MudNavLink Href="/sales-order-status" Icon="@Icons.Material.Filled.ListAlt">수주현황</MudNavLink>
         <MudNavLink Icon="@Icons.Material.Filled.Receipt" OnClick="@(() => TabService.TryAddTab(WorkDocumentKind.SalesDelivery))">거래명세서</MudNavLink>
         <MudNavLink Href="/sales/summary" Icon="@Icons.Material.Filled.BarChart">판매현황</MudNavLink>
+        <MudNavLink Href="/sales/ranking" Icon="@Icons.Material.Filled.EmojiEvents">판매순위표</MudNavLink>
+        <MudNavLink Href="/sales/profitability" Icon="@Icons.Material.Filled.TrendingUp">판매수익성분석</MudNavLink>
+        <MudNavLink Href="/sales/statistics" Icon="@Icons.Material.Filled.Analytics">판매통계</MudNavLink>
         <MudNavLink Href="/tax-invoice" Icon="@Icons.Material.Filled.Description">세금계산서</MudNavLink>
     </MudNavGroup>
 
@@ -46,12 +49,17 @@
         <MudNavLink Href="/purchase-status" Icon="@Icons.Material.Filled.ListAlt">매입현황</MudNavLink>
         <MudNavLink Icon="@Icons.Material.Filled.AssignmentReturn" OnClick="@(() => TabService.TryAddTab(WorkDocumentKind.Return))">반품 처리</MudNavLink>
         <MudNavLink Href="/return-status" Icon="@Icons.Material.Filled.ListAlt">반품현황</MudNavLink>
+        <MudNavLink Href="/purchase/ranking" Icon="@Icons.Material.Filled.EmojiEvents">매입순위표</MudNavLink>
+        <MudNavLink Href="/purchase/statistics" Icon="@Icons.Material.Filled.Analytics">매입통계</MudNavLink>
     </MudNavGroup>
 
     <MudNavGroup Title="재고" Icon="@Icons.Material.Filled.Warehouse" Expanded="false">
         <MudNavLink Href="/stock" Icon="@Icons.Material.Filled.Inventory2">재고 현황</MudNavLink>
         <MudNavLink Href="/stock/ledger" Icon="@Icons.Material.Filled.ListAlt">각종 수불부</MudNavLink>
         <MudNavLink Href="/stock/adjust" Icon="@Icons.Material.Filled.Tune">재고 실사·조정</MudNavLink>
+        <MudNavLink Href="/stock/transfer" Icon="@Icons.Material.Filled.SwapHoriz">재고이송</MudNavLink>
+        <MudNavLink Href="/stock/transfer-status" Icon="@Icons.Material.Filled.ListAlt">재고이송 현황</MudNavLink>
+        <MudNavLink Href="/stock/warehouse-split" Icon="@Icons.Material.Filled.AccountTree">창고분리 (자사/3PL)</MudNavLink>
     </MudNavGroup>
 
     <MudNavGroup Title="수금·지급" Icon="@Icons.Material.Filled.AccountBalance" Expanded="false">

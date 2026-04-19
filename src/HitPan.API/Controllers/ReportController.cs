@@ -152,4 +152,119 @@ public class ReportController : ControllerBase
             .ConfigureAwait(false);
         return Ok(rows);
     }
+
+    /// <summary>
+    /// 판매 순위표를 조회한다.
+    /// </summary>
+    [HttpGet("sales-ranking")]
+    [Authorize(Policy = "TenantOnly")]
+    public async Task<IActionResult> GetSalesRanking(
+        [FromQuery] string view = "partner",
+        [FromQuery] DateTime? from = null,
+        [FromQuery] DateTime? to = null,
+        [FromQuery] string? partner = null,
+        CancellationToken ct = default)
+    {
+        var tenantId = HttpContext.Items["TenantId"]?.ToString();
+        if (string.IsNullOrEmpty(tenantId))
+        {
+            return Forbid();
+        }
+
+        var rows = await _reportService.GetSalesRankingAsync(view, tenantId, from, to, partner, ct)
+            .ConfigureAwait(false);
+        return Ok(rows);
+    }
+
+    /// <summary>
+    /// 판매 수익성 분석을 조회한다.
+    /// </summary>
+    [HttpGet("sales-profitability")]
+    [Authorize(Policy = "TenantOnly")]
+    public async Task<IActionResult> GetSalesProfitability(
+        [FromQuery] string view = "partner",
+        [FromQuery] DateTime? from = null,
+        [FromQuery] DateTime? to = null,
+        [FromQuery] string? partner = null,
+        CancellationToken ct = default)
+    {
+        var tenantId = HttpContext.Items["TenantId"]?.ToString();
+        if (string.IsNullOrEmpty(tenantId))
+        {
+            return Forbid();
+        }
+
+        var rows = await _reportService.GetSalesProfitabilityAsync(view, tenantId, from, to, partner, ct)
+            .ConfigureAwait(false);
+        return Ok(rows);
+    }
+
+    /// <summary>
+    /// 판매 통계를 조회한다.
+    /// </summary>
+    [HttpGet("sales-statistics")]
+    [Authorize(Policy = "TenantOnly")]
+    public async Task<IActionResult> GetSalesStatistics(
+        [FromQuery] string view = "item-monthly",
+        [FromQuery] DateTime? from = null,
+        [FromQuery] DateTime? to = null,
+        [FromQuery] string? partner = null,
+        CancellationToken ct = default)
+    {
+        var tenantId = HttpContext.Items["TenantId"]?.ToString();
+        if (string.IsNullOrEmpty(tenantId))
+        {
+            return Forbid();
+        }
+
+        var rows = await _reportService.GetSalesStatisticsAsync(view, tenantId, from, to, partner, ct)
+            .ConfigureAwait(false);
+        return Ok(rows);
+    }
+
+    /// <summary>
+    /// 매입 순위표를 조회한다.
+    /// </summary>
+    [HttpGet("purchase-ranking")]
+    [Authorize(Policy = "TenantOnly")]
+    public async Task<IActionResult> GetPurchaseRanking(
+        [FromQuery] string view = "item",
+        [FromQuery] DateTime? from = null,
+        [FromQuery] DateTime? to = null,
+        [FromQuery] string? partner = null,
+        CancellationToken ct = default)
+    {
+        var tenantId = HttpContext.Items["TenantId"]?.ToString();
+        if (string.IsNullOrEmpty(tenantId))
+        {
+            return Forbid();
+        }
+
+        var rows = await _reportService.GetPurchaseRankingAsync(view, tenantId, from, to, partner, ct)
+            .ConfigureAwait(false);
+        return Ok(rows);
+    }
+
+    /// <summary>
+    /// 매입 통계를 조회한다.
+    /// </summary>
+    [HttpGet("purchase-statistics")]
+    [Authorize(Policy = "TenantOnly")]
+    public async Task<IActionResult> GetPurchaseStatistics(
+        [FromQuery] string view = "item-monthly",
+        [FromQuery] DateTime? from = null,
+        [FromQuery] DateTime? to = null,
+        [FromQuery] string? partner = null,
+        CancellationToken ct = default)
+    {
+        var tenantId = HttpContext.Items["TenantId"]?.ToString();
+        if (string.IsNullOrEmpty(tenantId))
+        {
+            return Forbid();
+        }
+
+        var rows = await _reportService.GetPurchaseStatisticsAsync(view, tenantId, from, to, partner, ct)
+            .ConfigureAwait(false);
+        return Ok(rows);
+    }
 }
