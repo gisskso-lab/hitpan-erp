@@ -8,12 +8,19 @@
         대시보드
     </MudNavLink>
 
+    <MudNavGroup Title="결재함" Icon="@Icons.Material.Filled.Notifications" Expanded="false">
+        <MudNavLink Href="/approval/pending" Icon="@Icons.Material.Filled.HourglassTop">결재 대기</MudNavLink>
+        <MudNavLink Href="/approval/sent" Icon="@Icons.Material.Filled.Send">내가 보낸 결재</MudNavLink>
+        <MudNavLink Href="/approval/completed" Icon="@Icons.Material.Filled.CheckCircle">완료된 결재</MudNavLink>
+    </MudNavGroup>
+
     <MudNavGroup Title="설정" Icon="@Icons.Material.Filled.Settings" Expanded="false">
         <MudNavLink Href="/company" Icon="@Icons.Material.Filled.Business">사용자정보 설정</MudNavLink>
         <MudNavLink Href="/users/permissions" Icon="@Icons.Material.Filled.Lock">권한 설정</MudNavLink>
         <MudNavLink Href="/employees" Icon="@Icons.Material.Filled.People">사원관리</MudNavLink>
         <MudNavLink Href="/settings" Icon="@Icons.Material.Filled.Tune">사용환경 설정</MudNavLink>
         <MudNavLink Href="/print-settings" Icon="@Icons.Material.Filled.Print">양식(인쇄)정보 설정</MudNavLink>
+        <MudNavLink Href="/settings/approval" Icon="@Icons.Material.Filled.Rule">결재 설정</MudNavLink>
     </MudNavGroup>
 
     <MudNavGroup Title="업체 관리" Icon="@Icons.Material.Filled.Business" Expanded="false">
@@ -71,6 +78,20 @@
         <MudNavLink Href="/accounting/accounts" Icon="@Icons.Material.Filled.AccountTree">계정과목</MudNavLink>
         <MudNavLink Href="/accounting/expenses" Icon="@Icons.Material.Filled.Receipt">경비 처리</MudNavLink>
         <MudNavLink Href="/accounting/profit" Icon="@Icons.Material.Filled.TrendingUp">손익 현황</MudNavLink>
+    </MudNavGroup>
+
+    <MudNavGroup Title="인사·근태" Icon="@Icons.Material.Filled.Badge" Expanded="false">
+        <MudNavLink Href="/hr/employees" Icon="@Icons.Material.Filled.PersonAdd">직원 등록·수정</MudNavLink>
+        <MudNavLink Href="/hr/departments" Icon="@Icons.Material.Filled.CorporateFare">부서 관리</MudNavLink>
+        <MudNavLink Href="/hr/positions" Icon="@Icons.Material.Filled.WorkspacePremium">직급 관리</MudNavLink>
+        <MudNavLink Href="/hr/attendance" Icon="@Icons.Material.Filled.AccessTime">출퇴근 현황</MudNavLink>
+        <MudNavLink Href="/hr/attendance-calendar" Icon="@Icons.Material.Filled.CalendarMonth">근태 달력</MudNavLink>
+        <MudNavLink Href="/hr/overtime" Icon="@Icons.Material.Filled.MoreTime">초과근무 현황</MudNavLink>
+        <MudNavLink Href="/hr/leave-request" Icon="@Icons.Material.Filled.EventAvailable">연차 신청</MudNavLink>
+        <MudNavLink Href="/hr/leave-status" Icon="@Icons.Material.Filled.DateRange">연차 현황</MudNavLink>
+        <MudNavLink Href="/hr/leave-calendar" Icon="@Icons.Material.Filled.CalendarToday">휴가 달력</MudNavLink>
+        <MudNavLink Href="/hr/expense-request" Icon="@Icons.Material.Filled.ReceiptLong">지출 결의서</MudNavLink>
+        <MudNavLink Href="/hr/expense-status" Icon="@Icons.Material.Filled.Summarize">경비 현황</MudNavLink>
     </MudNavGroup>
 
     @if (IsPlatformAdmin)
