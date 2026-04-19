@@ -2,11 +2,48 @@
 @namespace HitPan.Web.Pages.HrUi
 @attribute [Authorize]
 
-<PageTitle>출퇴근 현황</PageTitle>
-<MudContainer MaxWidth="MaxWidth.Small" Class="d-flex align-center justify-center" Style="height:calc(100vh - 120px)">
-    <MudPaper Class="pa-8 text-center" Elevation="0">
-        <MudIcon Icon="@Icons.Material.Filled.AccessTime" Size="Size.Large" Color="Color.Warning" Class="mb-4" />
-        <MudText Typo="Typo.h5" Class="mb-2">출퇴근 현황</MudText>
-        <MudText Typo="Typo.body1" Color="Color.Secondary">준비중입니다.</MudText>
-    </MudPaper>
-</MudContainer>
+<PageTitle>근태 관리</PageTitle>
+<MudText Typo="Typo.h6" Class="mb-3">근태 관리</MudText>
+
+<MudPaper Class="pa-3 mb-3" Elevation="0" Style="border:1px solid var(--mud-palette-lines-default);border-radius:12px">
+    <MudGrid Spacing="2" Class="align-center">
+        <MudItem xs="12" sm="3">
+            <MudSelect T="string" @bind-Value="_viewType" Label="조회유형" Variant="Variant.Outlined" Margin="Margin.Dense">
+                <MudSelectItem Value="@("attendance")">출퇴근 현황</MudSelectItem>
+                <MudSelectItem Value="@("overtime")">초과근무 현황</MudSelectItem>
+                <MudSelectItem Value="@("leave-status")">연차 현황</MudSelectItem>
+            </MudSelect>
+        </MudItem>
+        <MudItem xs="12" sm="2">
+            <MudDatePicker @bind-Date="_from" Label="시작일" Variant="Variant.Outlined" Margin="Margin.Dense" DateFormat="yyyy-MM-dd" />
+        </MudItem>
+        <MudItem xs="12" sm="2">
+            <MudDatePicker @bind-Date="_to" Label="종료일" Variant="Variant.Outlined" Margin="Margin.Dense" DateFormat="yyyy-MM-dd" />
+        </MudItem>
+        <MudItem xs="12" sm="2">
+            <MudButton Variant="Variant.Filled" Color="Color.Primary" FullWidth="true" Disabled="true">조회</MudButton>
+        </MudItem>
+        <MudItem xs="12" sm="3" Class="d-flex justify-end">
+            <MudToggleIconButton @bind-Toggled="_calendarView"
+                Icon="@Icons.Material.Filled.ViewList" ToggledIcon="@Icons.Material.Filled.CalendarMonth"
+                Title="리스트뷰" ToggledTitle="달력뷰" />
+        </MudItem>
+    </MudGrid>
+</MudPaper>
+
+<MudAlert Severity="Severity.Info">@GetLabel() 데이터는 준비중입니다. (@(_calendarView ? "달력뷰" : "리스트뷰"))</MudAlert>
+
+@code {
+    private string _viewType = "attendance";
+    private DateTime? _from = DateTime.Today.AddDays(-30);
+    private DateTime? _to = DateTime.Today;
+    private bool _calendarView;
+
+    private string GetLabel() => _viewType switch
+    {
+        "attendance" => "출퇴근 현황",
+        "overtime" => "초과근무 현황",
+        "leave-status" => "연차 현황",
+        _ => "근태"
+    };
+}
