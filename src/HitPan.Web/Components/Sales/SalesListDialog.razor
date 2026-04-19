@@ -109,16 +109,16 @@
     </DialogContent>
 
     <DialogActions>
-        <MudButton OnClick="ChangeToSales"
+        <MudButton OnClick="IssueInvoiceAsync"
                    Variant="Variant.Outlined"
                    Size="Size.Small"
                    Style="font-size:12px"
-                   Disabled="!HasChecked">판매로 변경</MudButton>
+                   Disabled="!HasDraftChecked">계산서 발행</MudButton>
         <MudButton OnClick="IssueElectronic"
                    Variant="Variant.Outlined"
                    Size="Size.Small"
                    Style="font-size:12px"
-                   Disabled="!HasChecked">전자발행</MudButton>
+                   Disabled="!HasInvoicedChecked">전자발행</MudButton>
         <MudSpacer />
         <MudButton OnClick="Close"
                    Variant="Variant.Outlined"
@@ -137,6 +137,8 @@
     private List<SalesListItem> Items = new();
     private bool AllChecked;
     private bool HasChecked => Items.Any(x => x.IsChecked);
+    private bool HasDraftChecked => Items.Any(x => x.IsChecked && x.Status == "draft");
+    private bool HasInvoicedChecked => Items.Any(x => x.IsChecked && x.Status == "invoiced");
 
     protected override async Task OnInitializedAsync()
     {
@@ -185,21 +187,27 @@
         }
     }
 
-    private async Task ChangeToSales()
+    private async Task IssueInvoiceAsync()
     {
-        var checkedItems = Items.Where(x => x.IsChecked).ToList();
+        var checkedItems = Items.Where(x => x.IsChecked && x.Status == "draft").ToList();
+        if (checkedItems.Count == 0) return;
+
         var result = await DialogService.ShowMessageBoxAsync(
-            "판매로 변경",
-            $"선택한 {checkedItems.Count}건을 판매로 변경하시겠습니까?",
-            yesText: "변경",
+            "계산서 발행",
+            $"선택한 {checkedItems.Count}건을 계산서 발행 처리하시겠습니까?",
+            yesText: "발행",
             cancelText: "취소");
-        if (result != true)
-        {
-            return;
-        }
+        if (result != true) return;
 
         await DeliveryService.BulkConfirmAsync(checkedItems.Select(x => x.OrderId).ToList());
-        await Search();
+        // 상태를 invoiced로 표시
+        foreach (var item in checkedItems)
+        {
+            item.Status = "invoiced";
+            item.IsChecked = false;
+        }
+        AllChecked = false;
+        StateHasChanged();
     }
 
     private async Task IssueElectronic()
