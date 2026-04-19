@@ -2,8 +2,8 @@
 @namespace HitPan.Web.Pages.SalesUi
 @attribute [Authorize]
 @using HitPan.Web.Models
-@using HitPan.Web.Services
-@inject DeliveryService DeliveryService
+@using System.Net.Http.Json
+@inject HttpClient Http
 @inject ISnackbar Snackbar
 
 <PageTitle>수주현황</PageTitle>
@@ -37,42 +37,82 @@
     </MudGrid>
 </MudPaper>
 
-<MudPaper Elevation="0" Style="border:0.5px solid var(--mud-palette-lines-default);border-radius:12px;overflow:hidden">
-    <MudTable T="SalesListItem" Items="_items" Dense="true" Hover="true" Striped="true" FixedHeader="true" Height="calc(100vh - 280px)">
-        <HeaderContent>
-            <MudTh>일자</MudTh>
-            <MudTh>수주번호</MudTh>
-            <MudTh>업체명</MudTh>
-            <MudTh>상태</MudTh>
-            <MudTh Style="text-align:right">합계</MudTh>
-        </HeaderContent>
-        <RowTemplate>
-            <MudTd>@context.OrderDate.ToString("yyyy-MM-dd")</MudTd>
-            <MudTd><MudText Style="font-weight:500">@context.OrderNo</MudText></MudTd>
-            <MudTd>@context.PartnerName</MudTd>
-            <MudTd><MudChip T="string" Size="Size.Small" Color="@GetColor(context.Status)" Variant="Variant.Text">@GetLabel(context.Status)</MudChip></MudTd>
-            <MudTd Style="text-align:right;font-weight:500">@context.TotalAmount.ToString("N0")</MudTd>
-        </RowTemplate>
-        <NoRecordsContent><MudText Class="pa-4" Style="color:#9CA3AF">조회된 수주가 없습니다.</MudText></NoRecordsContent>
-    </MudTable>
-</MudPaper>
+@if (_viewType is "period" or "item" or "partner")
+{
+    <MudPaper Elevation="0" Style="border:0.5px solid var(--mud-palette-lines-default);border-radius:12px;overflow:hidden">
+        <MudTable T="ReportRow" Items="_reportData" Dense="true" Hover="true" Striped="true" FixedHeader="true" Height="calc(100vh - 280px)">
+            <HeaderContent>
+                <MudTh>@GetLabelHeader()</MudTh>
+                <MudTh Style="text-align:right">건수</MudTh>
+                @if (_viewType == "item") { <MudTh Style="text-align:right">수량</MudTh> }
+                <MudTh Style="text-align:right">공급가액</MudTh>
+                <MudTh Style="text-align:right">부가세</MudTh>
+                <MudTh Style="text-align:right">합계</MudTh>
+            </HeaderContent>
+            <RowTemplate>
+                <MudTd>@context.Label</MudTd>
+                <MudTd Style="text-align:right">@context.Count.ToString("N0")</MudTd>
+                @if (_viewType == "item") { <MudTd Style="text-align:right">@context.Qty.ToString("N1")</MudTd> }
+                <MudTd Style="text-align:right">@context.SupplyAmount.ToString("N0")</MudTd>
+                <MudTd Style="text-align:right">@context.VatAmount.ToString("N0")</MudTd>
+                <MudTd Style="text-align:right;font-weight:500">@context.TotalAmount.ToString("N0")</MudTd>
+            </RowTemplate>
+            <NoRecordsContent><MudText Class="pa-4" Style="color:#9CA3AF">조회된 수주가 없습니다.</MudText></NoRecordsContent>
+        </MudTable>
+    </MudPaper>
+}
+else
+{
+    <MudAlert Severity="Severity.Info">@GetViewLabel() 데이터는 준비중입니다.</MudAlert>
+}
 
 @code {
     private DateTime? _from = DateTime.Today.AddDays(-30);
     private DateTime? _to = DateTime.Today;
     private string _partner = "";
     private string _viewType = "period";
-    private List<SalesListItem> _items = new();
+    private List<ReportRow> _reportData = new();
 
     protected override async Task OnInitializedAsync() => await SearchAsync();
 
     private async Task SearchAsync()
     {
-        _items = await DeliveryService.GetOrderListAsync(_from, _to, null) ?? new();
-        if (!string.IsNullOrWhiteSpace(_partner))
-            _items = _items.Where(x => x.PartnerName.Contains(_partner, StringComparison.OrdinalIgnoreCase)).ToList();
+        if (_viewType is not ("period" or "item" or "partner"))
+        {
+            _reportData = new();
+            StateHasChanged();
+            return;
+        }
+
+        var qs = new List<string>();
+        qs.Add($"view={_viewType}");
+        if (_from.HasValue) qs.Add($"from={_from:yyyy-MM-dd}");
+        if (_to.HasValue) qs.Add($"to={_to:yyyy-MM-dd}");
+        if (!string.IsNullOrWhiteSpace(_partner)) qs.Add($"partner={Uri.EscapeDataString(_partner)}");
+        var path = "api/reports/sales-orders?" + string.Join("&", qs);
+        try
+        {
+            _reportData = await Http.GetFromJsonAsync<List<ReportRow>>(path) ?? new();
+        }
+        catch
+        {
+            _reportData = new();
+        }
+        StateHasChanged();
     }
 
-    private static Color GetColor(string s) => s switch { "draft" => Color.Default, "confirmed" => Color.Success, _ => Color.Info };
-    private static string GetLabel(string s) => s switch { "draft" => "임시", "confirmed" => "확정", _ => s };
+    private string GetLabelHeader() => _viewType switch
+    {
+        "partner" => "업체명",
+        "item" => "품명",
+        _ => "기간"
+    };
+
+    private string GetViewLabel() => _viewType switch
+    {
+        "delivery" => "납기별 수주현황",
+        "backorder" => "수주 미납품 현황",
+        "price" => "수주단가 변동현황",
+        _ => "수주현황"
+    };
 }

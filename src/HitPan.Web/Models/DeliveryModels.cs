@@ -345,6 +345,16 @@ public static class DeliveryWorkflowFactory
         };
 }
 
+public class ReportRow
+{
+    public string Label { get; set; } = "";
+    public int Count { get; set; }
+    public decimal Qty { get; set; }
+    public decimal SupplyAmount { get; set; }
+    public decimal VatAmount { get; set; }
+    public decimal TotalAmount { get; set; }
+}
+
 public sealed class PurchaseReturnListItem
 {
     public string ReturnId { get; set; } = string.Empty;

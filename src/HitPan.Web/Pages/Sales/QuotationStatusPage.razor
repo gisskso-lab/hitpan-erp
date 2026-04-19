@@ -2,8 +2,8 @@
 @namespace HitPan.Web.Pages.SalesUi
 @attribute [Authorize]
 @using HitPan.Web.Models
-@using HitPan.Web.Services
-@inject QuotationService QuotationService
+@using System.Net.Http.Json
+@inject HttpClient Http
 @inject ISnackbar Snackbar
 
 <PageTitle>견적현황</PageTitle>
@@ -36,44 +36,74 @@
     </MudGrid>
 </MudPaper>
 
-<MudPaper Elevation="0" Style="border:0.5px solid var(--mud-palette-lines-default);border-radius:12px;overflow:hidden">
-    <MudTable T="QuotationListItem" Items="_items" Dense="true" Hover="true" Striped="true" FixedHeader="true" Height="calc(100vh - 280px)">
-        <HeaderContent>
-            <MudTh>일자</MudTh>
-            <MudTh>견적번호</MudTh>
-            <MudTh>업체명</MudTh>
-            <MudTh>상태</MudTh>
-            <MudTh Style="text-align:right">공급가액</MudTh>
-            <MudTh Style="text-align:right">부가세</MudTh>
-            <MudTh Style="text-align:right">합계</MudTh>
-        </HeaderContent>
-        <RowTemplate>
-            <MudTd>@context.QuoteDate.ToString("yyyy-MM-dd")</MudTd>
-            <MudTd><MudText Style="font-weight:500">@context.QuoteNo</MudText></MudTd>
-            <MudTd>@context.PartnerName</MudTd>
-            <MudTd><MudChip T="string" Size="Size.Small" Color="@GetColor(context.Status)" Variant="Variant.Text">@GetLabel(context.Status)</MudChip></MudTd>
-            <MudTd Style="text-align:right">@context.TotalAmount.ToString("N0")</MudTd>
-            <MudTd Style="text-align:right">@context.VatAmount.ToString("N0")</MudTd>
-            <MudTd Style="text-align:right;font-weight:500">@((context.TotalAmount + context.VatAmount).ToString("N0"))</MudTd>
-        </RowTemplate>
-        <NoRecordsContent><MudText Class="pa-4" Style="color:#9CA3AF">조회된 견적이 없습니다.</MudText></NoRecordsContent>
-    </MudTable>
-</MudPaper>
+@if (_viewType is "period" or "item" or "partner")
+{
+    <MudPaper Elevation="0" Style="border:0.5px solid var(--mud-palette-lines-default);border-radius:12px;overflow:hidden">
+        <MudTable T="ReportRow" Items="_reportData" Dense="true" Hover="true" Striped="true" FixedHeader="true" Height="calc(100vh - 280px)">
+            <HeaderContent>
+                <MudTh>@GetLabelHeader()</MudTh>
+                <MudTh Style="text-align:right">건수</MudTh>
+                @if (_viewType == "item") { <MudTh Style="text-align:right">수량</MudTh> }
+                <MudTh Style="text-align:right">공급가액</MudTh>
+                <MudTh Style="text-align:right">부가세</MudTh>
+                <MudTh Style="text-align:right">합계</MudTh>
+            </HeaderContent>
+            <RowTemplate>
+                <MudTd>@context.Label</MudTd>
+                <MudTd Style="text-align:right">@context.Count.ToString("N0")</MudTd>
+                @if (_viewType == "item") { <MudTd Style="text-align:right">@context.Qty.ToString("N1")</MudTd> }
+                <MudTd Style="text-align:right">@context.SupplyAmount.ToString("N0")</MudTd>
+                <MudTd Style="text-align:right">@context.VatAmount.ToString("N0")</MudTd>
+                <MudTd Style="text-align:right;font-weight:500">@context.TotalAmount.ToString("N0")</MudTd>
+            </RowTemplate>
+            <NoRecordsContent><MudText Class="pa-4" Style="color:#9CA3AF">조회된 견적이 없습니다.</MudText></NoRecordsContent>
+        </MudTable>
+    </MudPaper>
+}
+else
+{
+    <MudAlert Severity="Severity.Info">@(_viewType == "employee" ? "사원별 제출현황" : "견적단가 조회") 데이터는 준비중입니다.</MudAlert>
+}
 
 @code {
     private DateTime? _from = DateTime.Today.AddDays(-30);
     private DateTime? _to = DateTime.Today;
     private string _partner = "";
     private string _viewType = "period";
-    private List<QuotationListItem> _items = new();
+    private List<ReportRow> _reportData = new();
 
     protected override async Task OnInitializedAsync() => await SearchAsync();
 
     private async Task SearchAsync()
     {
-        _items = await QuotationService.GetListAsync(_from, _to, _partner) ?? new();
+        if (_viewType is not ("period" or "item" or "partner"))
+        {
+            _reportData = new();
+            StateHasChanged();
+            return;
+        }
+
+        var qs = new List<string>();
+        qs.Add($"view={_viewType}");
+        if (_from.HasValue) qs.Add($"from={_from:yyyy-MM-dd}");
+        if (_to.HasValue) qs.Add($"to={_to:yyyy-MM-dd}");
+        if (!string.IsNullOrWhiteSpace(_partner)) qs.Add($"partner={Uri.EscapeDataString(_partner)}");
+        var path = "api/reports/quotations?" + string.Join("&", qs);
+        try
+        {
+            _reportData = await Http.GetFromJsonAsync<List<ReportRow>>(path) ?? new();
+        }
+        catch
+        {
+            _reportData = new();
+        }
+        StateHasChanged();
     }
 
-    private static Color GetColor(string s) => s switch { "converted" => Color.Success, "draft" => Color.Default, _ => Color.Info };
-    private static string GetLabel(string s) => s switch { "converted" => "수주전환", "draft" => "임시", "submitted" => "제출", _ => s };
+    private string GetLabelHeader() => _viewType switch
+    {
+        "partner" => "업체명",
+        "item" => "품명",
+        _ => "기간"
+    };
 }
