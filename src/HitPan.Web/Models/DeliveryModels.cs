@@ -117,7 +117,7 @@ public sealed class SalesListItem
     // UI only
     public bool IsChecked { get; set; }
     public bool IsProcessed =>
-        Status is "confirmed" or "invoiced" or "cancelled";
+        Status is "cancelled";
 }
 
 public class DeliveryListDto
@@ -135,8 +135,6 @@ public class DeliveryListDto
 
     public bool IsChecked { get; set; }
     public bool IsProcessed =>
-        Status == "confirmed" ||
-        Status == "invoiced" ||
         Status == "cancelled";
 }
 
