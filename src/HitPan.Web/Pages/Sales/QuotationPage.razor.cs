@@ -444,7 +444,7 @@ public partial class QuotationPage : ComponentBase
             DocumentNumber = _draft.DocumentNumber,
             LinkedQuoteDocumentNo = _draft.DocumentNumber
         };
-        _workflowSteps = DeliveryWorkflowFactory.Build("수주", bridge);
+        _workflowSteps = DeliveryWorkflowFactory.Build("견적", bridge);
     }
 
     /// <summary>

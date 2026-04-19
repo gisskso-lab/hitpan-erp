@@ -232,32 +232,39 @@ public static class DeliveryWorkflowFactory
     {
         return documentType switch
         {
+            "견적" => Flow(
+                currentKey: "quote",
+                Step("quote", "견적", "/quotations", null, draft.DocumentNumber),
+                Step("order", "수주", "/sales-orders", null, null),
+                Step("delivery", "거래명세서", "/deliveries", null, null),
+                Step("tax", "세금계산서", "/deliveries", null, null)),
             "수주" => Flow(
                 currentKey: "order",
-                Step("quote", "견적", "/quotes", WorkDocumentKind.SalesOrder, draft.LinkedQuoteDocumentNo),
-                Step("order", "수주", "/sales", WorkDocumentKind.SalesOrder, draft.DocumentNumber),
-                Step("delivery", "거래명세서", "/sales", WorkDocumentKind.SalesDelivery, null),
-                Step("tax", "세금계산서", "/accounting", null, null)),
+                Step("quote", "견적", "/quotations", null, draft.LinkedQuoteDocumentNo),
+                Step("order", "수주", "/sales-orders", null, draft.DocumentNumber),
+                Step("delivery", "거래명세서", "/deliveries", null, null),
+                Step("tax", "세금계산서", "/deliveries", null, null)),
             "발주" => Flow(
                 currentKey: "po",
-                Step("po", "발주", "/purchase", WorkDocumentKind.PurchaseOrder, draft.DocumentNumber),
-                Step("purchase", "매입", "/purchase", WorkDocumentKind.PurchaseReceipt, draft.LinkedPurchaseOrderDocumentNo),
-                Step("receipt", "입고", "/purchase", WorkDocumentKind.PurchaseReceipt, null)),
+                Step("po", "발주", "/purchase-orders", null, draft.DocumentNumber),
+                Step("purchase", "매입", "/purchases", null, null),
+                Step("return", "반품", "/returns", null, null)),
             "매입" => Flow(
                 currentKey: "purchase",
-                Step("po", "발주", "/purchase", WorkDocumentKind.PurchaseOrder, draft.LinkedPurchaseOrderDocumentNo),
-                Step("purchase", "매입", "/purchase", WorkDocumentKind.PurchaseReceipt, draft.DocumentNumber),
-                Step("receipt", "입고", "/purchase", WorkDocumentKind.PurchaseReceipt, null)),
+                Step("po", "발주", "/purchase-orders", null, draft.LinkedPurchaseOrderDocumentNo),
+                Step("purchase", "매입", "/purchases", null, draft.DocumentNumber),
+                Step("return", "반품", "/returns", null, null)),
             "반품" => Flow(
                 currentKey: "return",
-                Step("return", "반품", "/sales", WorkDocumentKind.Return, draft.DocumentNumber),
-                Step("stock", "재고", "/stock", null, null)),
+                Step("po", "발주", "/purchase-orders", null, null),
+                Step("purchase", "매입", "/purchases", null, null),
+                Step("return", "반품", "/returns", null, draft.DocumentNumber)),
             _ => Flow(
                 currentKey: "delivery",
-                Step("quote", "견적", "/quotes", WorkDocumentKind.SalesOrder, draft.LinkedQuoteDocumentNo),
-                Step("order", "수주", "/quotes", WorkDocumentKind.SalesOrder, draft.LinkedSalesOrderDocumentNo),
-                Step("delivery", "거래명세서", "/sales", WorkDocumentKind.SalesDelivery, draft.DocumentNumber),
-                Step("tax", "세금계산서", "/accounting", null, null))
+                Step("quote", "견적", "/quotations", null, draft.LinkedQuoteDocumentNo),
+                Step("order", "수주", "/sales-orders", null, draft.LinkedSalesOrderDocumentNo),
+                Step("delivery", "거래명세서", "/deliveries", null, draft.DocumentNumber),
+                Step("tax", "세금계산서", "/deliveries", null, null))
         };
     }
 

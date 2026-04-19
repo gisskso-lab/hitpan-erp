@@ -264,26 +264,62 @@ public class QuotationService : IQuotationService
     /// <inheritdoc />
     public async Task<string> ConvertToSalesOrderAsync(string tenantId, string quoteId, CancellationToken ct = default)
     {
-        await EnsureExistsAsync(tenantId, quoteId, ct);
+        var quote = await GetAsync(tenantId, quoteId, ct)
+                    ?? throw new InvalidOperationException("견적서를 찾을 수 없습니다.");
 
-        // 추후 실제 수주서 생성 로직 연동이 필요하므로 임시 식별자를 생성한다.
-        var convertedOrderId = $"SO-TODO-{Guid.NewGuid():N}"[..16];
+        // 수주 문서번호 채번
+        var today = DateTime.UtcNow.Date;
+        var prefix = $"SO-{today:yyyyMMdd}-";
+        var cnt = await _db.QueryFirstOrDefaultAsync<int>(new CommandDefinition(
+            "SELECT COUNT(*) FROM sales_orders WHERE tenant_id=@TenantId AND order_no LIKE CONCAT(@Prefix,'%')",
+            new { TenantId = tenantId, Prefix = prefix }, cancellationToken: ct));
+        var orderNo = $"{prefix}{cnt + 1:000}";
+        var orderId = Guid.NewGuid().ToString();
 
-        const string sql = """
-                           UPDATE quotations
-                           SET status = 'converted',
-                               converted_order_id = @ConvertedOrderId,
-                               updated_at = NOW(6)
-                           WHERE tenant_id = @TenantId
-                             AND quote_id = @QuoteId
-                             AND is_deleted = 0
-                           """;
+        // 수주 헤더 생성
         await _db.ExecuteAsync(new CommandDefinition(
-            sql,
-            new { TenantId = tenantId, QuoteId = quoteId, ConvertedOrderId = convertedOrderId },
+            """
+            INSERT INTO sales_orders (order_id, tenant_id, order_no, partner_id, employee_id,
+              order_date, delivery_date, status, total_amount, vat_amount, memo, created_at, updated_at)
+            VALUES (@Id, @TenantId, @OrderNo, @PartnerId, NULL,
+              @OrderDate, NULL, 'draft', @TotalAmount, @VatAmount, @Memo, NOW(6), NOW(6))
+            """,
+            new
+            {
+                Id = orderId, TenantId = tenantId, OrderNo = orderNo,
+                PartnerId = quote.PartnerId, OrderDate = today,
+                TotalAmount = quote.TotalAmount, VatAmount = quote.VatAmount,
+                Memo = $"견적서 전환: {quote.QuoteNo}"
+            }, cancellationToken: ct));
+
+        // 수주 품목 생성
+        foreach (var item in quote.Items)
+        {
+            await _db.ExecuteAsync(new CommandDefinition(
+                """
+                INSERT INTO sales_order_items (order_item_id, order_id, tenant_id,
+                  item_id, ordered_qty, delivered_qty, unit_price, supply_amount, vat_amount, item_status)
+                VALUES (UUID(), @OrderId, @TenantId,
+                  @ItemId, @Qty, 0, @UnitPrice, @Amount, @VatAmount, 'pending')
+                """,
+                new
+                {
+                    OrderId = orderId, TenantId = tenantId,
+                    ItemId = item.ItemId, Qty = item.Qty,
+                    UnitPrice = item.UnitPrice, Amount = item.Amount, VatAmount = item.VatAmount
+                }, cancellationToken: ct));
+        }
+
+        // 견적서 상태 업데이트
+        await _db.ExecuteAsync(new CommandDefinition(
+            """
+            UPDATE quotations SET status = 'converted', converted_order_id = @OrderNo, updated_at = NOW(6)
+            WHERE tenant_id = @TenantId AND quote_id = @QuoteId AND is_deleted = 0
+            """,
+            new { TenantId = tenantId, QuoteId = quoteId, OrderNo = orderNo },
             cancellationToken: ct));
 
-        return convertedOrderId;
+        return orderNo;
     }
 
     /// <summary>
