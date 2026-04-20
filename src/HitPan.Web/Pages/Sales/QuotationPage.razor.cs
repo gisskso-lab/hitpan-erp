@@ -1,3 +1,4 @@
+using Microsoft.JSInterop;
 using System.Security.Claims;
 using HitPan.Web.Components.Common;
 using HitPan.Web.Components.Sales;
@@ -368,10 +369,9 @@ public partial class QuotationPage : ComponentBase
     /// <summary>
     /// 인쇄 기능을 호출한다.
     /// </summary>
-    private Task PrintAsync()
+    private async Task PrintAsync()
     {
-        Snackbar.Add("인쇄 기능은 다음 단계에서 연동됩니다.", Severity.Info);
-        return Task.CompletedTask;
+        await Js.InvokeVoidAsync("print");
     }
 
     /// <summary>

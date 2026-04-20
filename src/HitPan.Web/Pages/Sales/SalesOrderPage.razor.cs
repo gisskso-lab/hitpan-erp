@@ -1,3 +1,4 @@
+using Microsoft.JSInterop;
 using System.Security.Claims;
 using HitPan.Web.Components.Common;
 using HitPan.Web.Components.Sales; // ShowAsync<SalesOrderList> 등 코드비하인드에서 컴포넌트 타입을 인식한다(_Imports.razor 는 .cs 에 적용되지 않음).
@@ -452,13 +453,10 @@ public partial class SalesOrderPage : ComponentBase
         }
     }
 
-    /// <summary>
-    /// 인쇄 기능을 호출한다. (현재는 안내 토스트만 표시)
-    /// </summary>
-    private Task PrintAsync()
+    /// <summary>브라우저 인쇄 대화상자를 연다.</summary>
+    private async Task PrintAsync()
     {
-        Snackbar.Add("인쇄 기능은 다음 단계에서 연동됩니다.", Severity.Info);
-        return Task.CompletedTask;
+        await Js.InvokeVoidAsync("print");
     }
 
     /// <summary>

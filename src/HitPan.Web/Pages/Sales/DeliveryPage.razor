@@ -11,6 +11,7 @@
 @inject AuthenticationStateProvider AuthStateProvider
 @inject IDialogService DialogService
 @inject ISnackbar Snackbar
+@inject IJSRuntime Js
 @inject PartnerMasterService PartnersApi
 @inject ItemMasterService ItemsApi
 
@@ -582,7 +583,7 @@
 
         Snackbar.Add("변경사항을 취소했습니다.", Severity.Info);
     }
-    private Task Print() => Task.CompletedTask;
+    private async Task Print() => await Js.InvokeVoidAsync("print");
 
     /// <summary>
     /// 이메일 발송 다이얼로그를 연다.

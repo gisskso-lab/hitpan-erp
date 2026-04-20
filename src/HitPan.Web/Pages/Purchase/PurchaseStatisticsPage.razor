@@ -4,7 +4,9 @@
 @using HitPan.Web.Models
 @using System.Net.Http.Json
 @inject HttpClient Http
+@inject IJSRuntime Js
 @inject ISnackbar Snackbar
+@inject IJSRuntime Js
 
 <PageTitle>매입통계</PageTitle>
 <MudText Typo="Typo.h6" Class="mb-3">매입통계</MudText>
@@ -104,7 +106,7 @@ else
     /// <summary>화면 데이터를 엑셀로 내보낸다.</summary>
     private Task ExportExcelAsync() { Snackbar.Add("엑셀 내보내기는 준비중입니다.", Severity.Info); return Task.CompletedTask; }
     /// <summary>화면을 인쇄한다.</summary>
-    private Task PrintAsync() { Snackbar.Add("인쇄 기능은 준비중입니다.", Severity.Info); return Task.CompletedTask; }
+    private async Task PrintAsync() { await Js.InvokeVoidAsync("print"); }
 
     private string GetLabelHeader() => _viewType switch
     {

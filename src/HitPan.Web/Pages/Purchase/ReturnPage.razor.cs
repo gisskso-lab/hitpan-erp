@@ -1,3 +1,4 @@
+using Microsoft.JSInterop;
 using HitPan.Web.Components.Common;
 using HitPan.Web.Components.Purchase;
 using HitPan.Web.Models;
@@ -194,7 +195,7 @@ public partial class ReturnPage : ComponentBase
         await InvokeAsync(StateHasChanged);
     }
 
-    private Task PrintAsync() { Snackbar.Add("인쇄 기능은 다음 단계에서 연동됩니다.", Severity.Info); return Task.CompletedTask; }
+    private async Task PrintAsync() { await Js.InvokeVoidAsync("print"); }
 
     /// <summary>
     /// 이메일 발송 다이얼로그를 연다.

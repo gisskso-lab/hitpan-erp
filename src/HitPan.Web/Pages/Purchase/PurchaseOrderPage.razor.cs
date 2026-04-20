@@ -1,3 +1,4 @@
+using Microsoft.JSInterop;
 using System.Net.Http.Json;
 using System.Text.Json.Serialization;
 using HitPan.Web.Components.Common;
@@ -481,15 +482,10 @@ public partial class PurchaseOrderPage : ComponentBase
         }
     }
 
-    /// <summary>
-    /// 인쇄(추후 연동).
-    /// </summary>
-    /// <returns>완료</returns>
-    private Task PrintAsync()
+    /// <summary>브라우저 인쇄 대화상자를 연다.</summary>
+    private async Task PrintAsync()
     {
-        // 추후 API 연동 필요: 브라우저 인쇄 또는 서버 PDF URL.
-        Snackbar.Add("인쇄 기능은 다음 단계에서 연동됩니다.", Severity.Info);
-        return Task.CompletedTask;
+        await Js.InvokeVoidAsync("print");
     }
 
     /// <summary>
