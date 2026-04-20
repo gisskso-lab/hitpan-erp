@@ -10,6 +10,7 @@ namespace HitPan.Application.Services;
 public class MonthlyClosingService : IMonthlyClosingService
 {
     private readonly IDbConnection _db;
+    private readonly IAuditService _audit;
 
     // 상태 라벨
     private static readonly Dictionary<string, string> StatusLabels = new()
@@ -19,7 +20,11 @@ public class MonthlyClosingService : IMonthlyClosingService
         ["reopened"] = "재오픈"
     };
 
-    public MonthlyClosingService(IDbConnection db) => _db = db;
+    public MonthlyClosingService(IDbConnection db, IAuditService audit)
+    {
+        _db = db;
+        _audit = audit;
+    }
 
     public async Task<List<MonthlyClosingDto>> GetStatusAsync(string tenantId, CancellationToken ct = default)
     {
@@ -136,6 +141,11 @@ public class MonthlyClosingService : IMonthlyClosingService
                 summary.Sales, summary.Purchase, summary.Receipt, summary.Payment,
                 Memo = request.Memo
             }, cancellationToken: ct));
+
+        // 감사로그 — 마감 확정 (DB-16 미실행 환경에서는 서비스 내부에서 스킵)
+        var afterJson = $"{{\"status\":\"closed\",\"sales\":{summary.Sales},\"purchase\":{summary.Purchase},\"receipt\":{summary.Receipt},\"payment\":{summary.Payment}}}";
+        await _audit.LogAsync("state_change", "monthly_closing", request.YearMonth,
+            beforeJson: "{\"status\":\"open\"}", afterJson: afterJson, ct: ct);
     }
 
     public async Task ReopenAsync(ReopenMonthRequest request, string tenantId, string userId, CancellationToken ct = default)
@@ -161,6 +171,12 @@ public class MonthlyClosingService : IMonthlyClosingService
             """,
             new { TenantId = tenantId, Ym = request.YearMonth, UserId = userId, Reason = request.Reason },
             cancellationToken: ct));
+
+        // 감사로그 — 재오픈 (사유 포함)
+        await _audit.LogAsync("state_change", "monthly_closing", request.YearMonth,
+            beforeJson: "{\"status\":\"closed\"}",
+            afterJson: "{\"status\":\"reopened\"}",
+            reason: request.Reason, ct: ct);
     }
 
     public async Task<bool> IsClosedAsync(string tenantId, DateTime date, CancellationToken ct = default)

@@ -55,6 +55,7 @@ builder.Services.AddScoped<IPartnerService, PartnerService>();
 builder.Services.AddScoped<IItemService, ItemService>();
 builder.Services.AddScoped<IBomService, BomService>();
 builder.Services.AddScoped<IPermissionService, PermissionService>();
+builder.Services.AddScoped<IAuditService, AuditService>();
 builder.Services.AddScoped<IEmployeeService, EmployeeService>();
 builder.Services.AddScoped<ILeaveRequestService, LeaveRequestService>();
 builder.Services.AddScoped<IReportService, ReportService>();
