@@ -619,6 +619,9 @@ public class SalesService : ISalesService
         return rows.ToList();
     }
 
+    /// <summary>
+    /// 수주서를 거래명세서로 전환한다. 미출고 품목이 없으면 차단한다.
+    /// </summary>
     public async Task<(string DeliveryId, string DocumentNumber)> ConvertOrderToDeliveryAsync(
         string orderId,
         string tenantId,

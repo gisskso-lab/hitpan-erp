@@ -262,10 +262,19 @@ public class QuotationService : IQuotationService
     }
 
     /// <inheritdoc />
+    /// <summary>
+    /// 견적서를 수주서로 전환한다. 이미 전환된 견적은 중복 전환을 차단한다.
+    /// </summary>
     public async Task<string> ConvertToSalesOrderAsync(string tenantId, string quoteId, CancellationToken ct = default)
     {
         var quote = await GetAsync(tenantId, quoteId, ct)
                     ?? throw new InvalidOperationException("견적서를 찾을 수 없습니다.");
+
+        // 이미 전환된 견적서는 중복 전환 차단
+        if (quote.Status == "converted")
+        {
+            throw new InvalidOperationException($"이미 수주로 전환된 견적서입니다. (전환번호: {quote.ConvertedOrderId})");
+        }
 
         // 수주 문서번호 채번
         var today = DateTime.UtcNow.Date;

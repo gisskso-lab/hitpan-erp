@@ -30,8 +30,19 @@ public sealed class WorkTabService
     public IReadOnlyList<WorkTabState> GetOrderedTabs() =>
         _order.Select(id => _tabs[id]).ToList();
 
+    /// <summary>
+    /// 새 탭을 추가한다. 같은 종류의 빈 탭(새 문서)이 있으면 기존 탭으로 전환한다.
+    /// </summary>
     public bool TryAddTab(WorkDocumentKind kind)
     {
+        // 같은 종류의 빈 탭(새 문서)이 있으면 그 탭으로 전환
+        var existing = _tabs.Values.FirstOrDefault(t => t.Kind == kind && string.IsNullOrEmpty(t.SubTitle));
+        if (existing is not null)
+        {
+            SwitchTab(existing.Id);
+            return true;
+        }
+
         if (_tabs.Count >= MaxTabs)
         {
             _snackbar.Add("탭은 최대 5개까지 열 수 있습니다.", Severity.Warning);
