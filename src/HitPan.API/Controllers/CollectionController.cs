@@ -1,3 +1,4 @@
+using HitPan.API.Authorization;
 using HitPan.Application.DTOs.Approval;
 using HitPan.Application.Interfaces;
 using Microsoft.AspNetCore.Authorization;
@@ -22,6 +23,7 @@ public class CollectionController : ControllerBase
 
     /// <summary>수금 목록 조회</summary>
     [HttpGet("collections")]
+    [RequirePermission("COLLECTION", "view")]
     public async Task<IActionResult> GetCollections(
         [FromQuery] DateTime? from, [FromQuery] DateTime? to, [FromQuery] string? partnerId, CancellationToken ct)
     {
@@ -32,6 +34,7 @@ public class CollectionController : ControllerBase
 
     /// <summary>수금 등록</summary>
     [HttpPost("collections")]
+    [RequirePermission("COLLECTION", "create")]
     public async Task<IActionResult> CreateCollection([FromBody] CreateCollectionRequest request, CancellationToken ct)
     {
         var tenantId = HttpContext.Items["TenantId"]?.ToString();
@@ -43,6 +46,7 @@ public class CollectionController : ControllerBase
 
     /// <summary>수금 삭제 (비활성화)</summary>
     [HttpDelete("collections/{id}")]
+    [RequirePermission("COLLECTION", "delete")]
     public async Task<IActionResult> DeleteCollection(string id, CancellationToken ct)
     {
         var tenantId = HttpContext.Items["TenantId"]?.ToString();
@@ -55,6 +59,7 @@ public class CollectionController : ControllerBase
 
     /// <summary>지급 목록 조회</summary>
     [HttpGet("payments")]
+    [RequirePermission("PAYMENT", "view")]
     public async Task<IActionResult> GetPayments(
         [FromQuery] DateTime? from, [FromQuery] DateTime? to, [FromQuery] string? partnerId, CancellationToken ct)
     {
@@ -65,6 +70,7 @@ public class CollectionController : ControllerBase
 
     /// <summary>지급 등록</summary>
     [HttpPost("payments")]
+    [RequirePermission("PAYMENT", "create")]
     public async Task<IActionResult> CreatePayment([FromBody] CreatePaymentRequest request, CancellationToken ct)
     {
         var tenantId = HttpContext.Items["TenantId"]?.ToString();
@@ -76,6 +82,7 @@ public class CollectionController : ControllerBase
 
     /// <summary>지급 삭제 (비활성화)</summary>
     [HttpDelete("payments/{id}")]
+    [RequirePermission("PAYMENT", "delete")]
     public async Task<IActionResult> DeletePayment(string id, CancellationToken ct)
     {
         var tenantId = HttpContext.Items["TenantId"]?.ToString();
