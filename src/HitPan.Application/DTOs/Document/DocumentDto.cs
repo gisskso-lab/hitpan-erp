@@ -16,6 +16,8 @@ public class TenantInfo
     public string CeoName { get; set; } = string.Empty;
     public string Tel { get; set; } = string.Empty;
     public string Address { get; set; } = string.Empty;
+    public string BizType { get; set; } = string.Empty;
+    public string BizItem { get; set; } = string.Empty;
 }
 
 public class PartnerInfo
@@ -26,6 +28,8 @@ public class PartnerInfo
     public string CeoName { get; set; } = string.Empty;
     public string Tel { get; set; } = string.Empty;
     public string Address { get; set; } = string.Empty;
+    public string BizType { get; set; } = string.Empty;
+    public string BizItem { get; set; } = string.Empty;
 }
 
 public class DocumentHeader
@@ -52,5 +56,6 @@ public class DocumentItem
     public decimal UnitPrice { get; set; }
     public decimal Amount { get; set; }
     public decimal VatAmount { get; set; }
+    public decimal DiscountRate { get; set; }
     public string Memo { get; set; } = string.Empty;
 }
