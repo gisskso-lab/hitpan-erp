@@ -28,7 +28,7 @@
             <MudDatePicker @bind-Date="_to" Label="종료일" Variant="Variant.Outlined" Margin="Margin.Dense" DateFormat="yyyy-MM-dd" />
         </MudItem>
         <MudItem xs="12" sm="3">
-            <MudTextField @bind-Value="_partner" Label="업체명" Variant="Variant.Outlined" Margin="Margin.Dense"
+            <MudTextField @bind-Value="_searchText" Label="@GetFilterLabel()" Variant="Variant.Outlined" Margin="Margin.Dense"
                           Adornment="Adornment.End" AdornmentIcon="@Icons.Material.Filled.Search" />
         </MudItem>
         <MudItem xs="12" sm="2" Class="d-flex gap-1 align-center">
@@ -71,7 +71,7 @@ else
 @code {
     private DateTime? _from = new DateTime(DateTime.Today.Year, 1, 1);
     private DateTime? _to = DateTime.Today;
-    private string _partner = "";
+    private string _searchText = "";
     private string _viewType = "item-monthly";
     private List<ReportRow> _reportData = new();
 
@@ -90,7 +90,7 @@ else
         qs.Add($"view={_viewType}");
         if (_from.HasValue) qs.Add($"from={_from:yyyy-MM-dd}");
         if (_to.HasValue) qs.Add($"to={_to:yyyy-MM-dd}");
-        if (!string.IsNullOrWhiteSpace(_partner)) qs.Add($"partner={Uri.EscapeDataString(_partner)}");
+        if (!string.IsNullOrWhiteSpace(_searchText)) qs.Add($"partner={Uri.EscapeDataString(_searchText)}");
         var path = "api/reports/purchase-statistics?" + string.Join("&", qs);
         try
         {
@@ -121,5 +121,12 @@ else
         "item-yoy" => "전년동기대비(품목)",
         "partner-yoy" => "전년동기대비(업체)",
         _ => "매입통계"
+    };
+
+    private string GetFilterLabel() => _viewType switch
+    {
+        "partner-monthly" or "partner-yoy" => "업체명",
+        "item-monthly" or "item-yoy" => "품명",
+        _ => "검색어"
     };
 }

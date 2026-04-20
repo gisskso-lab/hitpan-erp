@@ -42,64 +42,27 @@
             </MudItem>
         </MudGrid>
 
-        <MudDataGrid T="SalesListItem"
-                     Items="Items"
-                     Dense="true"
-                     Hover="true"
-                     Striped="true"
-                     FixedHeader="true"
-                     Height="400px"
-                     Style="font-size:13px"
-                     RowStyleFunc="RowStyle"
-                     RowClick="OnRowClick">
-            <Columns>
-                <TemplateColumn CellStyle="width:50px;text-align:center"
-                                HeaderStyle="width:50px;text-align:center">
-                    <HeaderTemplate>
-                        <MudCheckBox T="bool"
-                                     Value="AllChecked"
-                                     ValueChanged="ToggleAll"
-                                     Size="Size.Small" />
-                    </HeaderTemplate>
-                    <CellTemplate>
-                        <MudCheckBox T="bool"
-                                     Value="context.Item.IsChecked"
-                                     ValueChanged="v => OnCheck(context.Item, v)"
-                                     Disabled="context.Item.IsProcessed"
-                                     Size="Size.Small" />
-                    </CellTemplate>
-                </TemplateColumn>
-                <PropertyColumn Property="x => x.OrderDate"
-                                Title="일자"
-                                CellStyle="width:90px"
-                                Format="yyyy-MM-dd" />
-                <PropertyColumn Property="x => x.OrderNo"
-                                Title="순위"
-                                CellStyle="width:60px;text-align:center" />
-                <PropertyColumn Property="x => x.PartnerName"
-                                Title="업체명"
-                                CellStyle="font-size:13px" />
-                <PropertyColumn Property="x => x.TotalAmount"
-                                Title="금액"
-                                CellStyle="width:110px;text-align:right"
-                                Format="N0" />
-                <PropertyColumn Property="x => x.VatAmount"
-                                Title="부가세"
-                                CellStyle="width:100px;text-align:right"
-                                Format="N0" />
-                <TemplateColumn Title="상태"
-                                CellStyle="width:80px;text-align:center">
-                    <CellTemplate>
-                        <MudChip T="string"
-                                 Size="Size.Small"
-                                 Color="@GetStatusColor(context.Item.Status)"
-                                 Style="font-size:11px">
-                            @GetStatusLabel(context.Item.Status)
-                        </MudChip>
-                    </CellTemplate>
-                </TemplateColumn>
-            </Columns>
-        </MudDataGrid>
+        <MudTable T="SalesListItem" Items="Items" Dense="true" Hover="true" Striped="true" FixedHeader="true" Height="400px">
+            <HeaderContent>
+                <MudTh Style="width:48px"><MudCheckBox T="bool" Value="AllChecked" ValueChanged="ToggleAll" Size="Size.Small" /></MudTh>
+                <MudTh>일자</MudTh>
+                <MudTh>전표번호</MudTh>
+                <MudTh>업체</MudTh>
+                <MudTh>상태</MudTh>
+                <MudTh Style="text-align:right">금액</MudTh>
+                <MudTh Style="text-align:right">부가세</MudTh>
+            </HeaderContent>
+            <RowTemplate>
+                <MudTd><MudCheckBox T="bool" Value="context.IsChecked" ValueChanged="@(v => OnCheck(context, v))" Disabled="context.IsProcessed" Size="Size.Small" /></MudTd>
+                <MudTd @ondblclick="@(() => SelectRow(context))">@context.OrderDate.ToString("yyyy-MM-dd")</MudTd>
+                <MudTd @ondblclick="@(() => SelectRow(context))"><MudText Style="font-weight:500">@context.OrderNo</MudText></MudTd>
+                <MudTd @ondblclick="@(() => SelectRow(context))">@context.PartnerName</MudTd>
+                <MudTd><MudChip T="string" Size="Size.Small" Color="@GetStatusColor(context.Status)" Variant="Variant.Text">@GetStatusLabel(context.Status)</MudChip></MudTd>
+                <MudTd Style="text-align:right">@context.TotalAmount.ToString("N0")</MudTd>
+                <MudTd Style="text-align:right">@context.VatAmount.ToString("N0")</MudTd>
+            </RowTemplate>
+            <NoRecordsContent><MudText Class="pa-4" Style="color:#9CA3AF">조회된 거래명세서가 없습니다.</MudText></NoRecordsContent>
+        </MudTable>
 
         <MudText Typo="Typo.caption"
                  Class="pa-1"
@@ -179,12 +142,10 @@
         AllChecked = Items.Where(x => !x.IsProcessed).All(x => x.IsChecked);
     }
 
-    private void OnRowClick(DataGridRowClickEventArgs<SalesListItem> args)
+    /// <summary>행 더블클릭 시 해당 문서를 선택하여 닫는다.</summary>
+    private void SelectRow(SalesListItem item)
     {
-        if (args.MouseEventArgs.Detail == 2)
-        {
-            MudDialog.Close(DialogResult.Ok(args.Item));
-        }
+        MudDialog.Close(DialogResult.Ok(item));
     }
 
     private async Task IssueInvoiceAsync()
