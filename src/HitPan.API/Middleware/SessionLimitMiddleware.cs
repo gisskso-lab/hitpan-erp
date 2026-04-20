@@ -1,5 +1,6 @@
 using System.Data;
 using Dapper;
+using Microsoft.Extensions.Caching.Memory;
 
 namespace HitPan.API.Middleware;
 
@@ -7,6 +8,9 @@ namespace HitPan.API.Middleware;
 public sealed class SessionLimitMiddleware
 {
     private readonly RequestDelegate _next;
+    private readonly ILogger<SessionLimitMiddleware> _logger;
+    private readonly IMemoryCache _cache;
+    private static readonly TimeSpan TierCacheTtl = TimeSpan.FromMinutes(5);
     // 티어별 동시 세션 제한 (기본값)
     private static readonly Dictionary<string, int> TierLimits = new()
     {
@@ -17,9 +21,14 @@ public sealed class SessionLimitMiddleware
         [""] = 50            // 기본값 (개발 모드)
     };
 
-    public SessionLimitMiddleware(RequestDelegate next)
+    public SessionLimitMiddleware(
+        RequestDelegate next,
+        ILogger<SessionLimitMiddleware> logger,
+        IMemoryCache cache)
     {
         _next = next;
+        _logger = logger;
+        _cache = cache;
     }
 
     public async Task InvokeAsync(HttpContext context, IDbConnection db)
@@ -48,15 +57,22 @@ public sealed class SessionLimitMiddleware
                 "SELECT COUNT(DISTINCT user_id) FROM user_sessions WHERE tenant_id = @TenantId AND expires_at > NOW()",
                 new { TenantId = tenantId });
 
-            // 테넌트 티어 확인
-            var tier = await db.QueryFirstOrDefaultAsync<string>(
-                "SELECT COALESCE(subscription_tier, '') FROM tenants WHERE tenant_id = @TenantId",
-                new { TenantId = tenantId }) ?? "";
+            // 테넌트 티어 확인 — 5분 캐싱 (과금 주기 내 거의 불변)
+            var tier = await _cache.GetOrCreateAsync($"tenant-tier:{tenantId}", async entry =>
+            {
+                entry.AbsoluteExpirationRelativeToNow = TierCacheTtl;
+                return await db.QueryFirstOrDefaultAsync<string>(
+                    "SELECT COALESCE(subscription_tier, '') FROM tenants WHERE tenant_id = @TenantId",
+                    new { TenantId = tenantId }) ?? "";
+            }) ?? "";
 
             var limit = TierLimits.GetValueOrDefault(tier.ToLower(), 50);
 
             if (activeCount > limit)
             {
+                _logger.LogWarning(
+                    "Session limit exceeded. Tenant={TenantId} User={UserId} Active={Active} Limit={Limit} Tier={Tier}",
+                    tenantId, userId, activeCount, limit, tier);
                 context.Response.StatusCode = StatusCodes.Status429TooManyRequests;
                 context.Response.ContentType = "application/json";
                 await context.Response.WriteAsync(
@@ -64,9 +80,12 @@ public sealed class SessionLimitMiddleware
                 return;
             }
         }
-        catch
+        catch (Exception ex)
         {
-            // 세션 체크 실패해도 요청은 통과 (가용성 우선)
+            // 세션 체크 실패해도 요청은 통과 (가용성 우선) — 단, 반드시 로그 남김
+            _logger.LogError(ex,
+                "Session limit check failed. Tenant={TenantId} User={UserId}. Request passed through (availability priority).",
+                tenantId, userId);
         }
 
         await _next(context);

@@ -81,7 +81,7 @@ public sealed class TenantMiddleware
             return;
         }
 
-        currentTenant.Set(tenantId ?? string.Empty, userId ?? string.Empty, role ?? string.Empty);
+        currentTenant.Set(tenantId ?? string.Empty, userId ?? string.Empty, role ?? string.Empty, accountType ?? string.Empty);
 
         await _next(context);
     }

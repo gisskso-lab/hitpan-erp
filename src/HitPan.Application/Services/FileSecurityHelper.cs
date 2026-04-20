@@ -43,11 +43,13 @@ public static class FileSecurityHelper
         if (fileSize == 0)
             return "빈 파일은 업로드할 수 없습니다.";
 
-        // 이중 확장자 체크 (예: document.pdf.exe)
-        var nameWithoutExt = Path.GetFileNameWithoutExtension(fileName);
-        var innerExt = Path.GetExtension(nameWithoutExt);
-        if (BlockedExtensions.Contains(innerExt))
-            return "이중 확장자 파일은 업로드할 수 없습니다.";
+        // 다단 확장자 체크 — 모든 조각을 검사 (payload.exe.txt.pdf 같은 우회 차단)
+        var segments = fileName.Split('.');
+        foreach (var seg in segments.Skip(1))
+        {
+            if (BlockedExtensions.Contains("." + seg))
+                return $"실행 파일 확장자(.{seg})가 포함되어 있어 업로드할 수 없습니다.";
+        }
 
         return null; // 통과
     }

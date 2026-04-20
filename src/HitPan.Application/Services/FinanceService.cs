@@ -20,32 +20,29 @@ public class FinanceService : IFinanceService
     public async Task<List<CashbookDto>> GetCashbookAsync(string tenantId, DateTime? from, DateTime? to, CancellationToken ct = default)
     {
         await EnsureOpenAsync(ct);
+        // 누적 잔액은 SQL window function으로 계산 (O(n) 메모리 루프 제거)
         var sql = """
-            SELECT c.cashbook_id AS CashbookId, c.tx_date AS TxDate, c.tx_type AS TxType,
-                   c.category AS Category, c.partner_id AS PartnerId, p.partner_name AS PartnerName,
-                   c.description AS Description, c.income_amount AS IncomeAmount,
-                   c.expense_amount AS ExpenseAmount, c.balance AS Balance,
-                   c.payment_method AS PaymentMethod, c.memo AS Memo
-            FROM cashbook c
-            LEFT JOIN partners p ON p.partner_id = c.partner_id
-            WHERE c.tenant_id = @TenantId AND c.is_active = 1
+            SELECT * FROM (
+                SELECT c.cashbook_id AS CashbookId, c.tx_date AS TxDate, c.tx_type AS TxType,
+                       c.category AS Category, c.partner_id AS PartnerId, p.partner_name AS PartnerName,
+                       c.description AS Description, c.income_amount AS IncomeAmount,
+                       c.expense_amount AS ExpenseAmount,
+                       SUM(c.income_amount - c.expense_amount) OVER (
+                           ORDER BY c.tx_date ASC, c.created_at ASC
+                           ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
+                       ) AS Balance,
+                       c.payment_method AS PaymentMethod, c.memo AS Memo,
+                       c.created_at AS CreatedAt
+                FROM cashbook c
+                LEFT JOIN partners p ON p.partner_id = c.partner_id
+                WHERE c.tenant_id = @TenantId AND c.is_active = 1
             """;
         if (from.HasValue) sql += " AND c.tx_date >= @From";
         if (to.HasValue) sql += " AND c.tx_date <= @To";
-        sql += " ORDER BY c.tx_date ASC, c.created_at ASC";
+        sql += ") t ORDER BY t.TxDate DESC, t.CreatedAt DESC";
 
-        var rows = (await _db.QueryAsync<CashbookDto>(new CommandDefinition(
+        return (await _db.QueryAsync<CashbookDto>(new CommandDefinition(
             sql, new { TenantId = tenantId, From = from, To = to }, cancellationToken: ct))).ToList();
-
-        // 잔액 동적 계산 (DB 저장 잔액 대신 누적 합계)
-        decimal runningBalance = 0;
-        foreach (var row in rows)
-        {
-            runningBalance += row.IncomeAmount - row.ExpenseAmount;
-            row.Balance = runningBalance;
-        }
-        rows.Reverse(); // 최신순 정렬
-        return rows;
     }
 
     public async Task<string> CreateCashbookAsync(CreateCashbookRequest req, string tenantId, string userId, CancellationToken ct = default)
@@ -54,27 +51,34 @@ public class FinanceService : IFinanceService
         await ApprovalTriggerHelper.EnsureNotClosedAsync(_db, tenantId, req.TxDate, ct);
         using var tx = _db.BeginTransaction();
         var id = Guid.NewGuid().ToString();
+        try
+        {
+            var prevBalance = await _db.QueryFirstOrDefaultAsync<decimal>(new CommandDefinition(
+                "SELECT COALESCE(balance, 0) FROM cashbook WHERE tenant_id = @TenantId AND is_active = 1 ORDER BY tx_date DESC, created_at DESC LIMIT 1 FOR UPDATE",
+                new { TenantId = tenantId }, transaction: tx, cancellationToken: ct));
 
-        var prevBalance = await _db.QueryFirstOrDefaultAsync<decimal>(new CommandDefinition(
-            "SELECT COALESCE(balance, 0) FROM cashbook WHERE tenant_id = @TenantId AND is_active = 1 ORDER BY tx_date DESC, created_at DESC LIMIT 1 FOR UPDATE",
-            new { TenantId = tenantId }, transaction: tx, cancellationToken: ct));
+            var income = req.TxType == "income" ? req.Amount : 0;
+            var expense = req.TxType == "expense" ? req.Amount : 0;
+            var balance = prevBalance + income - expense;
 
-        var income = req.TxType == "income" ? req.Amount : 0;
-        var expense = req.TxType == "expense" ? req.Amount : 0;
-        var balance = prevBalance + income - expense;
-
-        await _db.ExecuteAsync(new CommandDefinition(
-            """
-            INSERT INTO cashbook (cashbook_id, tenant_id, tx_date, tx_type, category, partner_id,
-                   description, income_amount, expense_amount, balance, payment_method, memo, created_by)
-            VALUES (@Id, @TenantId, @TxDate, @TxType, @Category, @PartnerId,
-                   @Description, @Income, @Expense, @Balance, @Method, @Memo, @UserId)
-            """,
-            new { Id = id, TenantId = tenantId, req.TxDate, req.TxType, req.Category, req.PartnerId,
-                  req.Description, Income = income, Expense = expense, Balance = balance,
-                  Method = req.PaymentMethod, req.Memo, UserId = userId }, transaction: tx, cancellationToken: ct));
-        tx.Commit();
-        return id;
+            await _db.ExecuteAsync(new CommandDefinition(
+                """
+                INSERT INTO cashbook (cashbook_id, tenant_id, tx_date, tx_type, category, partner_id,
+                       description, income_amount, expense_amount, balance, payment_method, memo, created_by)
+                VALUES (@Id, @TenantId, @TxDate, @TxType, @Category, @PartnerId,
+                       @Description, @Income, @Expense, @Balance, @Method, @Memo, @UserId)
+                """,
+                new { Id = id, TenantId = tenantId, req.TxDate, req.TxType, req.Category, req.PartnerId,
+                      req.Description, Income = income, Expense = expense, Balance = balance,
+                      Method = req.PaymentMethod, req.Memo, UserId = userId }, transaction: tx, cancellationToken: ct));
+            tx.Commit();
+            return id;
+        }
+        catch
+        {
+            try { tx.Rollback(); } catch { /* 이미 닫힌 tx — 원본 예외 보존 */ }
+            throw;
+        }
     }
 
     public async Task DeleteCashbookAsync(string id, string tenantId, CancellationToken ct = default)

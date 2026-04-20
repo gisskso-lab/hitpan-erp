@@ -33,5 +33,7 @@ public sealed class AppDbContextFactory : IDesignTimeDbContextFactory<AppDbConte
     private sealed class DesignTimeTenant : ICurrentTenant
     {
         public string TenantId => string.Empty;
+        public string UserId => string.Empty;
+        public string AccountType => string.Empty;
     }
 }

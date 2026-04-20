@@ -9,6 +9,7 @@ namespace HitPan.Application.Services;
 public class PermissionService : IPermissionService
 {
     private readonly IDbConnection _db;
+    private readonly ICurrentTenant _currentTenant;
 
     private static readonly List<(string Code, string Name)> MenuList =
     [
@@ -25,14 +26,18 @@ public class PermissionService : IPermissionService
         ("COLLECTION", "수금"),
         ("PAYMENT", "지급"),
         ("ACCOUNTING", "회계"),
+        ("APPROVAL", "결재"),
+        ("HR", "인사"),
+        ("MONTHLY_CLOSING", "월마감"),
         ("DASHBOARD", "대시보드"),
         ("SETTINGS", "사용환경설정"),
         ("USERS", "사용자관리")
     ];
 
-    public PermissionService(IDbConnection db)
+    public PermissionService(IDbConnection db, ICurrentTenant currentTenant)
     {
         _db = db;
+        _currentTenant = currentTenant;
     }
 
     public async Task<List<UserPermissionDto>> GetAllUsersPermissionsAsync(string tenantId, CancellationToken ct = default)
@@ -216,6 +221,13 @@ public class PermissionService : IPermissionService
 
     public async Task<bool> HasPermissionAsync(string userId, string tenantId, string menuCode, string action, CancellationToken ct = default)
     {
+        // Layer 0 — tenant_admin / platform_admin은 항상 전권 (락아웃 방지)
+        if (userId == _currentTenant.UserId &&
+            (_currentTenant.AccountType == "tenant_admin" || _currentTenant.AccountType == "platform_admin"))
+        {
+            return true;
+        }
+
         await EnsureOpenAsync(ct).ConfigureAwait(false);
 
         var col = action.ToLowerInvariant() switch

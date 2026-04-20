@@ -33,6 +33,7 @@ var isDevelopment = builder.Environment.IsDevelopment();
 // Add services to the container.
 
 builder.Services.AddHttpContextAccessor();
+builder.Services.AddMemoryCache();
 builder.Services.AddScoped<CurrentTenant>();
 builder.Services.AddScoped<ICurrentTenant>(sp => sp.GetRequiredService<CurrentTenant>());
 builder.Services.AddSingleton<IEncryptionService, EncryptionService>();
