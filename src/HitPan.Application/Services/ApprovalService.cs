@@ -51,9 +51,12 @@ public class ApprovalService : IApprovalService
         ["note"]          = "어음"
     };
 
-    public ApprovalService(IDbConnection db)
+    private readonly IAuditService _audit;
+
+    public ApprovalService(IDbConnection db, IAuditService audit)
     {
         _db = db;
+        _audit = audit;
     }
 
     // ═══════════════════════════════════════════
@@ -460,6 +463,11 @@ public class ApprovalService : IApprovalService
             }
 
             tx.Commit();
+
+            // 감사로그 — 결재 승인/반려
+            var afterJson = $"{{\"action\":\"{request.Action}\",\"seq\":{doc.CurrentSeq},\"approver\":\"{employeeName}\"}}";
+            await _audit.LogAsync("state_change", "approval", approvalId,
+                afterJson: afterJson, reason: request.Comment, ct: ct);
         }
         catch
         {

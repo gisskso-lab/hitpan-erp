@@ -10,10 +10,12 @@ namespace HitPan.Application.Services;
 public class CollectionService : ICollectionService
 {
     private readonly IDbConnection _db;
+    private readonly IAuditService _audit;
 
-    public CollectionService(IDbConnection db)
+    public CollectionService(IDbConnection db, IAuditService audit)
     {
         _db = db;
+        _audit = audit;
     }
 
     // ═══════════════════════════════════════════
@@ -94,6 +96,11 @@ public class CollectionService : ICollectionService
                 new { TenantId = tenantId, request.PartnerId, request.Amount }, transaction: tx, cancellationToken: ct));
 
             tx.Commit();
+
+            // 감사로그 — 수금 생성
+            var afterJson = $"{{\"partner_id\":\"{request.PartnerId}\",\"date\":\"{request.CollectionDate:yyyy-MM-dd}\",\"amount\":{request.Amount},\"method\":\"{request.CollectionMethod}\"}}";
+            await _audit.LogAsync("create", "collection", id, afterJson: afterJson, ct: ct);
+
             return id;
         }
         catch
@@ -131,6 +138,10 @@ public class CollectionService : ICollectionService
                 new { TenantId = tenantId, col.PartnerId, col.Amount }, transaction: tx, cancellationToken: ct));
 
             tx.Commit();
+
+            // 감사로그 — 수금 소프트 삭제
+            var beforeJson = $"{{\"partner_id\":\"{col.PartnerId}\",\"amount\":{col.Amount}}}";
+            await _audit.LogAsync("delete", "collection", collectionId, beforeJson: beforeJson, ct: ct);
         }
         catch
         {
@@ -216,6 +227,11 @@ public class CollectionService : ICollectionService
                 new { TenantId = tenantId, request.PartnerId, request.Amount }, transaction: tx, cancellationToken: ct));
 
             tx.Commit();
+
+            // 감사로그 — 지급 생성
+            var afterJson = $"{{\"partner_id\":\"{request.PartnerId}\",\"date\":\"{request.PaymentDate:yyyy-MM-dd}\",\"amount\":{request.Amount},\"method\":\"{request.PaymentMethod}\"}}";
+            await _audit.LogAsync("create", "payment", id, afterJson: afterJson, ct: ct);
+
             return id;
         }
         catch
@@ -251,6 +267,10 @@ public class CollectionService : ICollectionService
                 new { TenantId = tenantId, pay.PartnerId, pay.Amount }, transaction: tx, cancellationToken: ct));
 
             tx.Commit();
+
+            // 감사로그 — 지급 소프트 삭제
+            var beforeJson = $"{{\"partner_id\":\"{pay.PartnerId}\",\"amount\":{pay.Amount}}}";
+            await _audit.LogAsync("delete", "payment", paymentId, beforeJson: beforeJson, ct: ct);
         }
         catch
         {

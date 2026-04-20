@@ -10,8 +10,13 @@ namespace HitPan.Application.Services;
 public class FinanceService : IFinanceService
 {
     private readonly IDbConnection _db;
+    private readonly IAuditService _audit;
 
-    public FinanceService(IDbConnection db) => _db = db;
+    public FinanceService(IDbConnection db, IAuditService audit)
+    {
+        _db = db;
+        _audit = audit;
+    }
 
     // ═══════════════════════════════════════
     // 현금출납장
@@ -72,6 +77,11 @@ public class FinanceService : IFinanceService
                       req.Description, Income = income, Expense = expense, Balance = balance,
                       Method = req.PaymentMethod, req.Memo, UserId = userId }, transaction: tx, cancellationToken: ct));
             tx.Commit();
+
+            // 감사로그 — 현금출납장 생성
+            var afterJson = $"{{\"tx_date\":\"{req.TxDate:yyyy-MM-dd}\",\"tx_type\":\"{req.TxType}\",\"amount\":{req.Amount}}}";
+            await _audit.LogAsync("create", "cashbook", id, afterJson: afterJson, ct: ct);
+
             return id;
         }
         catch
@@ -87,6 +97,9 @@ public class FinanceService : IFinanceService
         await _db.ExecuteAsync(new CommandDefinition(
             "UPDATE cashbook SET is_active = 0 WHERE cashbook_id = @Id AND tenant_id = @TenantId",
             new { Id = id, TenantId = tenantId }, cancellationToken: ct));
+
+        // 감사로그 — 현금출납장 소프트 삭제
+        await _audit.LogAsync("delete", "cashbook", id, ct: ct);
     }
 
     // ═══════════════════════════════════════
