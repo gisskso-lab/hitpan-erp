@@ -258,6 +258,27 @@ public class SalesService : ISalesService
                 UnitCost = line.UnitPrice,
                 SupplyAmount = line.SupplyAmount
             });
+
+            // item_stock 테이블 갱신 (재고 차감)
+            const string updateStockSql = """
+                INSERT INTO item_stock (stock_id, tenant_id, item_id, warehouse_id, current_qty, avg_cost, last_updated_at)
+                VALUES (UUID(), @TenantId, @ItemId, @WarehouseId, -@Qty, @UnitCost, NOW(6))
+                ON DUPLICATE KEY UPDATE
+                  current_qty = current_qty - @Qty,
+                  last_updated_at = NOW(6)
+                """;
+
+            await _db.ExecuteAsync(new CommandDefinition(
+                updateStockSql,
+                new
+                {
+                    TenantId = delivery.TenantId,
+                    ItemId = line.ItemId,
+                    WarehouseId = line.WarehouseId,
+                    Qty = line.Qty,
+                    UnitCost = line.UnitPrice
+                },
+                cancellationToken: ct));
         }
 
         if (!string.IsNullOrWhiteSpace(delivery.OrderId))

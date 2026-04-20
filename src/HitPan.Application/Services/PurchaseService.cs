@@ -189,6 +189,28 @@ public class PurchaseService : IPurchaseService
             };
 
             await ledgerRepo.AddAsync(ledger);
+
+            // item_stock 테이블 갱신 (재고 증가)
+            const string upsertStockSql = """
+                INSERT INTO item_stock (stock_id, tenant_id, item_id, warehouse_id, current_qty, avg_cost, last_updated_at)
+                VALUES (UUID(), @TenantId, @ItemId, @WarehouseId, @Qty, @UnitCost, NOW(6))
+                ON DUPLICATE KEY UPDATE
+                  current_qty = current_qty + @Qty,
+                  avg_cost = @UnitCost,
+                  last_updated_at = NOW(6)
+                """;
+
+            await _db.ExecuteAsync(new CommandDefinition(
+                upsertStockSql,
+                new
+                {
+                    TenantId = receipt.TenantId,
+                    ItemId = line.ItemId,
+                    WarehouseId = line.WarehouseId,
+                    Qty = line.Qty,
+                    UnitCost = line.UnitPrice
+                },
+                cancellationToken: ct));
         }
 
         if (!string.IsNullOrWhiteSpace(receipt.PoId))
