@@ -53,12 +53,16 @@ public class DocumentController : ControllerBase
         var tenantId = principal.FindFirst("tenant_id")?.Value ?? string.Empty;
         var data = await LoadDocumentAsync(type, id, tenantId);
 
-        // 문서 타입별 엑셀 생성 메서드 분기
+        // 문서 타입별 엑셀 생성 메서드 분기 (프론트 docType 값 기준)
         var bytes = type switch
         {
-            "delivery" => _excelService.GenerateDeliveryExcel(data),
             "quotation" => _excelService.GenerateQuotationExcel(data),
+            "sales-order" => _excelService.GenerateDeliveryExcel(data),      // 수주서 — 거래명세서 양식 활용
+            "delivery" => _excelService.GenerateDeliveryExcel(data),
             "tax-invoice" => _excelService.GenerateTaxInvoiceExcel(data),
+            "purchase-order" => _excelService.GenerateDeliveryExcel(data),   // 발주서 — 거래명세서 양식 활용
+            "purchase-receipt" => _excelService.GenerateDeliveryExcel(data), // 매입 — 거래명세서 양식 활용
+            "return" => _excelService.GenerateDeliveryExcel(data),           // 반품 — 거래명세서 양식 활용
             _ => _excelService.GenerateDeliveryExcel(data)
         };
 
@@ -86,13 +90,17 @@ public class DocumentController : ControllerBase
         var tenantId = principal.FindFirst("tenant_id")?.Value ?? string.Empty;
         var data = await LoadDocumentAsync(type, id, tenantId);
 
-        // 문서 타입별 PDF 생성 메서드 분기
+        // 문서 타입별 PDF 생성 메서드 분기 (프론트 docType 값 기준)
         var bytes = type switch
         {
-            "delivery" => _pdfService.GenerateDeliveryPdf(data),
             "quotation" => _pdfService.GenerateQuotationPdf(data),
+            "sales-order" => _pdfService.GenerateDeliveryPdf(data),      // 수주서
+            "delivery" => _pdfService.GenerateDeliveryPdf(data),
             "tax-invoice" => _pdfService.GenerateTaxInvoicePdf(data),
-            _ => _pdfService.GenerateDeliveryPdf(data) // 기본값
+            "purchase-order" => _pdfService.GenerateDeliveryPdf(data),   // 발주서
+            "purchase-receipt" => _pdfService.GenerateDeliveryPdf(data), // 매입
+            "return" => _pdfService.GenerateDeliveryPdf(data),           // 반품
+            _ => _pdfService.GenerateDeliveryPdf(data)
         };
 
         var title = GetTitleByType(type);
@@ -283,15 +291,18 @@ public class DocumentController : ControllerBase
         };
     }
 
+    /// <summary>
+    /// 문서 타입 코드를 한글 제목으로 변환한다.
+    /// </summary>
     private static string GetTitleByType(string type) => type switch
     {
-        "delivery" => "거래명세서",
         "quotation" => "견적서",
+        "sales-order" => "수주서",
+        "delivery" => "거래명세서",
         "tax-invoice" => "세금계산서",
-        "po" => "발주서",
-        "so" => "수주서",
-        "po_receipt" => "매입명세서",
-        "po_tax" => "매입계산서",
+        "purchase-order" => "발주서",
+        "purchase-receipt" => "매입명세서",
+        "return" => "반품처리서",
         _ => "거래문서"
     };
 }
