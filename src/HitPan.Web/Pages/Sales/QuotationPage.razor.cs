@@ -1,4 +1,5 @@
 using System.Security.Claims;
+using HitPan.Web.Components.Common;
 using HitPan.Web.Components.Sales;
 using HitPan.Web.Models;
 using HitPan.Web.Services;
@@ -374,12 +375,18 @@ public partial class QuotationPage : ComponentBase
     }
 
     /// <summary>
-    /// 이메일 발송 기능 (Phase 2 연동 예정).
+    /// 이메일 발송 다이얼로그를 연다.
     /// </summary>
-    private Task EmailAsync()
+    private async Task EmailAsync()
     {
-        Snackbar.Add("이메일 발송 기능은 다음 단계에서 연동됩니다.", Severity.Info);
-        return Task.CompletedTask;
+        var parameters = new DialogParameters
+        {
+            ["DocumentType"] = "견적서",
+            ["DocumentNo"] = _draft?.DocumentNumber ?? "신규",
+            ["PartnerEmail"] = ""
+        };
+        var options = new DialogOptions { MaxWidth = MaxWidth.Small, FullWidth = true, CloseButton = true };
+        await DialogService.ShowAsync<EmailSendDialog>("이메일 발송", parameters, options);
     }
 
     /// <summary>

@@ -1,3 +1,4 @@
+using HitPan.Web.Components.Common;
 using HitPan.Web.Components.Purchase;
 using HitPan.Web.Models;
 using HitPan.Web.Services;
@@ -194,7 +195,21 @@ public partial class ReturnPage : ComponentBase
     }
 
     private Task PrintAsync() { Snackbar.Add("인쇄 기능은 다음 단계에서 연동됩니다.", Severity.Info); return Task.CompletedTask; }
-    private Task EmailAsync() { Snackbar.Add("이메일 발송 기능은 다음 단계에서 연동됩니다.", Severity.Info); return Task.CompletedTask; }
+
+    /// <summary>
+    /// 이메일 발송 다이얼로그를 연다.
+    /// </summary>
+    private async Task EmailAsync()
+    {
+        var parameters = new DialogParameters
+        {
+            ["DocumentType"] = "반품처리서",
+            ["DocumentNo"] = _draft?.DocumentNumber ?? "신규",
+            ["PartnerEmail"] = ""
+        };
+        var options = new DialogOptions { MaxWidth = MaxWidth.Small, FullWidth = true, CloseButton = true };
+        await DialogService.ShowAsync<EmailSendDialog>("이메일 발송", parameters, options);
+    }
     private async Task DownloadExcelAsync()
     {
         if (_draft is null || string.IsNullOrWhiteSpace(_draft.Id)) { Snackbar.Add("저장된 문서를 먼저 선택해주세요.", Severity.Warning); return; }
