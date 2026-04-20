@@ -15,10 +15,10 @@
 <MudPaper Class="pa-3 mb-3" Elevation="0" Style="border:1px solid var(--mud-palette-lines-default);border-radius:12px">
     <MudGrid Spacing="2" Class="align-center">
         <MudItem xs="12" sm="2">
-            <MudDatePicker @bind-Date="_fromDate" Label="시작일" Variant="Variant.Outlined" Margin="Margin.Dense" DateFormat="yyyy-MM-dd" />
+            <MudDatePicker @bind-Date="_fromDate" Label="시작일" Variant="Variant.Outlined" Margin="Margin.Dense" Style="min-width:160px" DateFormat="yyyy-MM-dd" />
         </MudItem>
         <MudItem xs="12" sm="2">
-            <MudDatePicker @bind-Date="_toDate" Label="종료일" Variant="Variant.Outlined" Margin="Margin.Dense" DateFormat="yyyy-MM-dd" />
+            <MudDatePicker @bind-Date="_toDate" Label="종료일" Variant="Variant.Outlined" Margin="Margin.Dense" Style="min-width:160px" DateFormat="yyyy-MM-dd" />
         </MudItem>
         <MudItem xs="12" sm="3">
             <MudTextField @bind-Value="_partnerFilter" Label="업체명" Variant="Variant.Outlined" Margin="Margin.Dense"

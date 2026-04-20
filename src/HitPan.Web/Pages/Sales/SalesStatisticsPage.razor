@@ -26,10 +26,10 @@
             </MudSelect>
         </MudItem>
         <MudItem xs="12" sm="2">
-            <MudDatePicker @bind-Date="_from" Label="시작일" Variant="Variant.Outlined" Margin="Margin.Dense" DateFormat="yyyy-MM-dd" />
+            <MudDatePicker @bind-Date="_from" Label="시작일" Variant="Variant.Outlined" Margin="Margin.Dense" Style="min-width:160px" DateFormat="yyyy-MM-dd" />
         </MudItem>
         <MudItem xs="12" sm="2">
-            <MudDatePicker @bind-Date="_to" Label="종료일" Variant="Variant.Outlined" Margin="Margin.Dense" DateFormat="yyyy-MM-dd" />
+            <MudDatePicker @bind-Date="_to" Label="종료일" Variant="Variant.Outlined" Margin="Margin.Dense" Style="min-width:160px" DateFormat="yyyy-MM-dd" />
         </MudItem>
         <MudItem xs="12" sm="3">
             <MudTextField @bind-Value="_searchText" Label="@GetFilterLabel()" Variant="Variant.Outlined" Margin="Margin.Dense"
