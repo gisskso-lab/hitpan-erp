@@ -7,6 +7,8 @@
 @inject IJSRuntime Js
 @inject ISnackbar Snackbar
 @inject IJSRuntime Js
+@inject PartnerMasterService PartnersApi
+@inject ItemMasterService ItemsApi
 
 <PageTitle>수주현황</PageTitle>
 <MudText Typo="Typo.h6" Class="mb-3">수주현황</MudText>
@@ -29,10 +31,28 @@
         <MudItem xs="12" sm="2">
             <MudDatePicker @bind-Date="_to" Label="종료일" Variant="Variant.Outlined" Margin="Margin.Dense" Style="min-width:160px" DateFormat="yyyy-MM-dd" />
         </MudItem>
-        <MudItem xs="12" sm="3">
-            <MudTextField @bind-Value="_searchText" Label="@GetFilterLabel()" Variant="Variant.Outlined" Margin="Margin.Dense"
-                          Adornment="Adornment.End" AdornmentIcon="@Icons.Material.Filled.Search" />
-        </MudItem>
+        @if (ShowSearchBox())
+        {
+            <MudItem xs="12" sm="3">
+                @if (_viewType is "item" or "price")
+                {
+                    <MudAutocomplete T="string" Value="_searchText" ValueChanged="@(v => _searchText = v)"
+                        SearchFunc="SearchItemAsync" Margin="Margin.Dense" Placeholder="품명 검색"
+                        Variant="Variant.Outlined" />
+                }
+                else if (_viewType is "partner")
+                {
+                    <MudAutocomplete T="string" Value="_searchText" ValueChanged="@(v => _searchText = v)"
+                        SearchFunc="SearchPartnerAsync" Margin="Margin.Dense" Placeholder="업체 검색"
+                        Variant="Variant.Outlined" />
+                }
+                else
+                {
+                    <MudTextField @bind-Value="_searchText" Label="@GetFilterLabel()" Variant="Variant.Outlined"
+                        Margin="Margin.Dense" Adornment="Adornment.End" AdornmentIcon="@Icons.Material.Filled.Search" />
+                }
+            </MudItem>
+        }
         <MudItem xs="12" sm="2" Class="d-flex gap-1 align-center">
             <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="SearchAsync">조회</MudButton>
             <MudButton Variant="Variant.Outlined" Size="Size.Small" StartIcon="@Icons.Material.Filled.TableChart" OnClick="ExportExcelAsync">엑셀</MudButton>
@@ -131,4 +151,23 @@ else
         "item" or "price" => "품명",
         _ => "검색어"
     };
+
+    private bool ShowSearchBox() => _viewType is not "period";
+
+    private List<PartnerListRow>? _partnerCache;
+    private List<ItemListModel>? _itemCache;
+
+    private async Task<IEnumerable<string>> SearchPartnerAsync(string value, CancellationToken ct)
+    {
+        _partnerCache ??= await PartnersApi.GetListAsync() ?? new();
+        if (string.IsNullOrWhiteSpace(value)) return _partnerCache.Select(p => p.PartnerName).Distinct();
+        return _partnerCache.Where(p => p.PartnerName.Contains(value, StringComparison.OrdinalIgnoreCase)).Select(p => p.PartnerName).Distinct();
+    }
+
+    private async Task<IEnumerable<string>> SearchItemAsync(string value, CancellationToken ct)
+    {
+        _itemCache ??= await ItemsApi.GetListAsync() ?? new();
+        if (string.IsNullOrWhiteSpace(value)) return _itemCache.Select(i => i.ItemName).Distinct();
+        return _itemCache.Where(i => i.ItemName.Contains(value, StringComparison.OrdinalIgnoreCase)).Select(i => i.ItemName).Distinct();
+    }
 }
