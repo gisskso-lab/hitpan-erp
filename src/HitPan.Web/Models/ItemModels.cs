@@ -48,6 +48,17 @@ public class ItemDetailModel : ItemListModel
     public int RowVersion { get; set; }
 }
 
+/// <summary>창고 조회용 모델 (상품 상세 등에서 사용)</summary>
+public class WarehouseItem
+{
+    public string WarehouseId { get; set; } = "";
+    public string WhCode { get; set; } = "";
+    public string WhName { get; set; } = "";
+    public string WhType { get; set; } = "";
+    public string? Location { get; set; }
+    public bool IsActive { get; set; }
+}
+
 public class ItemSpecialPriceModel
 {
     public string PriceId { get; set; } = "";

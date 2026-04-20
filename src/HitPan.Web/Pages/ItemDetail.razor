@@ -6,6 +6,7 @@
 @inject NavigationManager Nav
 @inject ISnackbar Snackbar
 @inject IDialogService DialogService
+@inject HttpClient Http
 
 <PageTitle>@(_isNew ? "상품 등록" : "상품 수정")</PageTitle>
 
@@ -81,6 +82,15 @@ else
                     <MudItem xs="12" md="3">
                         <MudTextField @bind-Value="_model.Barcode" Label="바코드" Variant="Variant.Outlined" Margin="Margin.Dense" />
                     </MudItem>
+                    <MudItem xs="12" md="3">
+                        <MudSelect T="string" @bind-Value="_selectedWarehouseId" Label="기본 창고" Variant="Variant.Outlined" Margin="Margin.Dense">
+                            <MudSelectItem Value="@((string?)null)">미지정</MudSelectItem>
+                            @foreach (var wh in _warehouses)
+                            {
+                                <MudSelectItem Value="@wh.WarehouseId">@wh.WhName</MudSelectItem>
+                            }
+                        </MudSelect>
+                    </MudItem>
                     <MudItem xs="12">
                         <MudTextField @bind-Value="_model.Memo" Label="메모" Variant="Variant.Outlined" Margin="Margin.Dense" Lines="3" />
                     </MudItem>
@@ -95,6 +105,8 @@ else
 
     private ItemDetailModel _model = new();
     private List<PartnerListRow> _partners = new();
+    private List<WarehouseItem> _warehouses = new();
+    private string? _selectedWarehouseId; // 참조용 — DB에 저장하지 않음
     private bool _loading = true;
     private bool _saving;
     private bool _isNew;
@@ -104,6 +116,9 @@ else
         _isNew = string.IsNullOrWhiteSpace(Id) || string.Equals(Id, "new", StringComparison.OrdinalIgnoreCase);
         _loading = true;
         _partners = await PartnersApi.GetListAsync() ?? new List<PartnerListRow>();
+        // 창고 목록 로드 (기본 창고 드롭다운용)
+        try { _warehouses = await Http.GetFromJsonAsync<List<WarehouseItem>>("api/warehouses") ?? new(); }
+        catch { _warehouses = new(); }
         if (_isNew)
         {
             _model = new ItemDetailModel
