@@ -1,15 +1,21 @@
 @page "/stock"
 @namespace HitPan.Web.Pages.StockUi
 @attribute [Authorize]
+@using HitPan.Web.Models
+@using System.Net.Http.Json
+@inject HttpClient Http
+@inject IJSRuntime Js
+@inject ISnackbar Snackbar
 
 <PageTitle>재고 현황</PageTitle>
 <MudText Typo="Typo.h6" Class="mb-3">재고 현황</MudText>
 
+@* 필터 영역 *@
 <MudPaper Class="pa-3 mb-3" Elevation="0" Style="border:1px solid var(--mud-palette-lines-default);border-radius:12px">
     <MudGrid Spacing="2" Class="align-center">
         <MudItem xs="12" sm="3">
             <MudSelect T="string" @bind-Value="_viewType" Label="조회유형" Variant="Variant.Outlined" Margin="Margin.Dense">
-                <MudSelectItem Value="@("period")">기간별 상품재고현황</MudSelectItem>
+                <MudSelectItem Value="@("current")">기간별 상품재고현황</MudSelectItem>
                 <MudSelectItem Value="@("warehouse")">창고별 재고현황</MudSelectItem>
                 <MudSelectItem Value="@("optimal")">적정재고대비 현황</MudSelectItem>
                 <MudSelectItem Value="@("safety")">안전재고 현황</MudSelectItem>
@@ -18,36 +24,94 @@
                 <MudSelectItem Value="@("monthly-io")">년간월별 입출재고현황(세부)</MudSelectItem>
             </MudSelect>
         </MudItem>
-        <MudItem xs="12" sm="2">
-            <MudDatePicker @bind-Date="_from" Label="시작일" Variant="Variant.Outlined" Margin="Margin.Dense" DateFormat="yyyy-MM-dd" />
-        </MudItem>
-        <MudItem xs="12" sm="2">
-            <MudDatePicker @bind-Date="_to" Label="종료일" Variant="Variant.Outlined" Margin="Margin.Dense" DateFormat="yyyy-MM-dd" />
-        </MudItem>
         <MudItem xs="12" sm="3">
-            <MudTextField @bind-Value="_partner" Label="업체명" Variant="Variant.Outlined" Margin="Margin.Dense"
+            <MudTextField @bind-Value="_search" Label="품목명 검색" Variant="Variant.Outlined" Margin="Margin.Dense"
                           Adornment="Adornment.End" AdornmentIcon="@Icons.Material.Filled.Search" />
         </MudItem>
-        <MudItem xs="12" sm="2">
-            <MudButton Variant="Variant.Filled" Color="Color.Primary" FullWidth="true" Disabled="true">조회</MudButton>
+        <MudItem xs="12" sm="2" Class="d-flex gap-1 align-center">
+            <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="SearchAsync">조회</MudButton>
+            <MudButton Variant="Variant.Outlined" Size="Size.Small" StartIcon="@Icons.Material.Filled.Print" OnClick="PrintAsync">인쇄</MudButton>
         </MudItem>
     </MudGrid>
 </MudPaper>
 
-<MudAlert Severity="Severity.Info">@GetViewLabel() 데이터는 준비중입니다.</MudAlert>
+@* 지원 뷰: current, warehouse, safety *@
+@if (_viewType is "current" or "warehouse" or "safety")
+{
+    <MudPaper Elevation="0" Style="border:0.5px solid var(--mud-palette-lines-default);border-radius:12px;overflow:hidden">
+        <MudTable T="ReportRow" Items="_filteredData" Dense="true" Hover="true" Striped="true" FixedHeader="true" Height="calc(100vh - 280px)">
+            <HeaderContent>
+                <MudTh>@GetLabelHeader()</MudTh>
+                @if (_viewType == "warehouse") { <MudTh Style="text-align:right">품목수</MudTh> }
+                <MudTh Style="text-align:right">수량</MudTh>
+                <MudTh Style="text-align:right">재고금액</MudTh>
+            </HeaderContent>
+            <RowTemplate>
+                <MudTd>@context.Label</MudTd>
+                @if (_viewType == "warehouse") { <MudTd Style="text-align:right">@context.Count.ToString("N0")</MudTd> }
+                <MudTd Style="text-align:right">@context.Qty.ToString("N1")</MudTd>
+                <MudTd Style="text-align:right;font-weight:500">@context.SupplyAmount.ToString("N0")</MudTd>
+            </RowTemplate>
+            <NoRecordsContent><MudText Class="pa-4" Style="color:#9CA3AF">조회된 재고가 없습니다.</MudText></NoRecordsContent>
+        </MudTable>
+    </MudPaper>
+}
+else
+{
+    <MudAlert Severity="Severity.Info">@GetViewLabel() 데이터는 준비중입니다.</MudAlert>
+}
 
 @code {
-    private string _viewType = "period";
-    private DateTime? _from = DateTime.Today.AddDays(-30);
-    private DateTime? _to = DateTime.Today;
-    private string _partner = "";
+    private string _viewType = "current";
+    private string _search = "";
+    private List<ReportRow> _reportData = new();
 
+    /// <summary>검색어로 필터링된 데이터를 반환한다.</summary>
+    private IEnumerable<ReportRow> _filteredData =>
+        string.IsNullOrWhiteSpace(_search)
+            ? _reportData
+            : _reportData.Where(r => r.Label.Contains(_search, StringComparison.OrdinalIgnoreCase));
+
+    protected override async Task OnInitializedAsync() => await SearchAsync();
+
+    /// <summary>재고현황을 조회한다.</summary>
+    private async Task SearchAsync()
+    {
+        // 지원하지 않는 뷰 타입이면 데이터를 비운다.
+        if (_viewType is not ("current" or "warehouse" or "safety"))
+        {
+            _reportData = new();
+            StateHasChanged();
+            return;
+        }
+
+        var path = $"api/reports/stock-status?view={_viewType}";
+        try
+        {
+            _reportData = await Http.GetFromJsonAsync<List<ReportRow>>(path) ?? new();
+        }
+        catch
+        {
+            _reportData = new();
+        }
+        StateHasChanged();
+    }
+
+    /// <summary>화면을 인쇄한다.</summary>
+    private async Task PrintAsync() { await Js.InvokeVoidAsync("print"); }
+
+    /// <summary>테이블 첫 번째 컬럼 헤더를 반환한다.</summary>
+    private string GetLabelHeader() => _viewType switch
+    {
+        "warehouse" => "창고명",
+        "safety" => "품목명 (안전재고 미달)",
+        _ => "품목명"
+    };
+
+    /// <summary>준비중 메시지용 뷰 라벨을 반환한다.</summary>
     private string GetViewLabel() => _viewType switch
     {
-        "period" => "기간별 상품재고현황",
-        "warehouse" => "창고별 재고현황",
         "optimal" => "적정재고대비 현황",
-        "safety" => "안전재고 현황",
         "dead-stock" => "재고월수(사장재고) 현황",
         "loss-rate" => "재고 로스율",
         "monthly-io" => "년간월별 입출재고현황(세부)",

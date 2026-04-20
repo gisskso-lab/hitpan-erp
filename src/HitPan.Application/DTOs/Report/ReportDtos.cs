@@ -71,3 +71,39 @@ public class ProfitReportRow
     /// </summary>
     public decimal ProfitRate { get; set; }
 }
+
+/// <summary>
+/// 수불부(원장) 행 DTO다.
+/// </summary>
+public class StockLedgerRow
+{
+    /// <summary>
+    /// 라벨이다. (품목명 또는 업체명)
+    /// </summary>
+    public string Label { get; set; } = "";
+
+    /// <summary>
+    /// 입고수량 합계다.
+    /// </summary>
+    public decimal QtyIn { get; set; }
+
+    /// <summary>
+    /// 출고수량 합계다.
+    /// </summary>
+    public decimal QtyOut { get; set; }
+
+    /// <summary>
+    /// 잔량이다. (입고 - 출고)
+    /// </summary>
+    public decimal Balance { get; set; }
+
+    /// <summary>
+    /// 입고금액이다.
+    /// </summary>
+    public decimal AmountIn { get; set; }
+
+    /// <summary>
+    /// 출고금액이다.
+    /// </summary>
+    public decimal AmountOut { get; set; }
+}

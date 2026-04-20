@@ -267,4 +267,47 @@ public class ReportController : ControllerBase
             .ConfigureAwait(false);
         return Ok(rows);
     }
+
+    /// <summary>
+    /// 수불부(원장)를 조회한다. (상품별 / 업체별)
+    /// </summary>
+    [HttpGet("stock-ledger")]
+    [Authorize(Policy = "TenantOnly")]
+    public async Task<IActionResult> GetStockLedger(
+        [FromQuery] string view = "item",
+        [FromQuery] DateTime? from = null,
+        [FromQuery] DateTime? to = null,
+        [FromQuery] string? partner = null,
+        CancellationToken ct = default)
+    {
+        var tenantId = HttpContext.Items["TenantId"]?.ToString();
+        if (string.IsNullOrEmpty(tenantId))
+        {
+            return Forbid();
+        }
+
+        var rows = await _reportService.GetStockLedgerAsync(view, tenantId, from, to, partner, ct)
+            .ConfigureAwait(false);
+        return Ok(rows);
+    }
+
+    /// <summary>
+    /// 재고현황을 조회한다. (전체 현재고 / 안전재고 미달 / 창고별)
+    /// </summary>
+    [HttpGet("stock-status")]
+    [Authorize(Policy = "TenantOnly")]
+    public async Task<IActionResult> GetStockStatus(
+        [FromQuery] string view = "current",
+        CancellationToken ct = default)
+    {
+        var tenantId = HttpContext.Items["TenantId"]?.ToString();
+        if (string.IsNullOrEmpty(tenantId))
+        {
+            return Forbid();
+        }
+
+        var rows = await _reportService.GetStockStatusAsync(view, tenantId, ct)
+            .ConfigureAwait(false);
+        return Ok(rows);
+    }
 }

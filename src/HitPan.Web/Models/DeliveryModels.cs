@@ -365,6 +365,19 @@ public class ProfitReportRow
     public decimal ProfitRate { get; set; }
 }
 
+/// <summary>
+/// 수불부(원장) 행 모델이다.
+/// </summary>
+public class StockLedgerRow
+{
+    public string Label { get; set; } = "";
+    public decimal QtyIn { get; set; }
+    public decimal QtyOut { get; set; }
+    public decimal Balance { get; set; }
+    public decimal AmountIn { get; set; }
+    public decimal AmountOut { get; set; }
+}
+
 public sealed class PurchaseReturnListItem
 {
     public string ReturnId { get; set; } = string.Empty;

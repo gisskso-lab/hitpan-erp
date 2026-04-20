@@ -1,0 +1,29 @@
+@page "/hr/leave"
+@namespace HitPan.Web.Pages.HrUi
+@attribute [Authorize]
+
+<PageTitle>휴가·연차</PageTitle>
+<MudText Typo="Typo.h6" Class="mb-3">휴가·연차</MudText>
+
+<MudPaper Class="pa-3 mb-3" Elevation="0" Style="border:1px solid var(--mud-palette-lines-default);border-radius:12px">
+    <MudGrid Spacing="2" Class="align-center">
+        <MudItem xs="12" sm="3">
+            <MudSelect T="string" @bind-Value="_viewType" Label="메뉴" Variant="Variant.Outlined" Margin="Margin.Dense">
+                <MudSelectItem Value="@("request")">연차 신청</MudSelectItem>
+                <MudSelectItem Value="@("calendar")">휴가 달력</MudSelectItem>
+            </MudSelect>
+        </MudItem>
+        <MudItem xs="12" sm="9" Class="d-flex justify-end">
+            @if (_viewType == "request")
+            {
+                <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Add" Disabled="true">연차 신청</MudButton>
+            }
+        </MudItem>
+    </MudGrid>
+</MudPaper>
+
+<MudAlert Severity="Severity.Info">@(_viewType == "request" ? "연차 신청" : "휴가 달력") 기능은 준비중입니다.</MudAlert>
+
+@code {
+    private string _viewType = "request";
+}

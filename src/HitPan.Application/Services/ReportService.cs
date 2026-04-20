@@ -838,4 +838,132 @@ public class ReportService : IReportService
 
         return rows.ToList();
     }
+
+    /// <inheritdoc />
+    public async Task<List<StockLedgerRow>> GetStockLedgerAsync(
+        string viewType, string tenantId,
+        DateTime? from, DateTime? to,
+        string? partner, CancellationToken ct)
+    {
+        // 수불부: 상품별 또는 업체별로 입출고·잔량을 집계한다.
+        var sql = viewType switch
+        {
+            "partner" => """
+                SELECT
+                    p.partner_name AS Label,
+                    SUM(sl.qty_in)  AS QtyIn,
+                    SUM(sl.qty_out) AS QtyOut,
+                    SUM(sl.qty_in) - SUM(sl.qty_out) AS Balance,
+                    SUM(CASE WHEN sl.qty_in  > 0 THEN COALESCE(sl.supply_amount, 0) ELSE 0 END) AS AmountIn,
+                    SUM(CASE WHEN sl.qty_out > 0 THEN COALESCE(sl.supply_amount, 0) ELSE 0 END) AS AmountOut
+                FROM stock_ledger sl
+                LEFT JOIN partners p ON p.partner_id = sl.partner_id AND p.tenant_id = sl.tenant_id
+                WHERE sl.tenant_id = @TenantId
+                  AND (@From IS NULL OR sl.ledger_date >= @From)
+                  AND (@To   IS NULL OR sl.ledger_date <= @To)
+                  AND (@Partner IS NULL OR p.partner_name LIKE CONCAT('%', @Partner, '%'))
+                GROUP BY sl.partner_id, p.partner_name
+                ORDER BY p.partner_name
+                """,
+            _ => """
+                SELECT
+                    i.item_name AS Label,
+                    SUM(sl.qty_in)  AS QtyIn,
+                    SUM(sl.qty_out) AS QtyOut,
+                    SUM(sl.qty_in) - SUM(sl.qty_out) AS Balance,
+                    SUM(CASE WHEN sl.qty_in  > 0 THEN COALESCE(sl.supply_amount, 0) ELSE 0 END) AS AmountIn,
+                    SUM(CASE WHEN sl.qty_out > 0 THEN COALESCE(sl.supply_amount, 0) ELSE 0 END) AS AmountOut
+                FROM stock_ledger sl
+                LEFT JOIN items i ON i.item_id = sl.item_id AND i.tenant_id = sl.tenant_id
+                WHERE sl.tenant_id = @TenantId
+                  AND (@From IS NULL OR sl.ledger_date >= @From)
+                  AND (@To   IS NULL OR sl.ledger_date <= @To)
+                  AND (@Partner IS NULL OR EXISTS (
+                      SELECT 1 FROM partners pp
+                      WHERE pp.partner_id = sl.partner_id
+                        AND pp.tenant_id  = sl.tenant_id
+                        AND pp.partner_name LIKE CONCAT('%', @Partner, '%')
+                  ))
+                GROUP BY sl.item_id, i.item_name
+                ORDER BY i.item_name
+                """
+        };
+
+        var rows = await _db.QueryAsync<StockLedgerRow>(
+            new CommandDefinition(sql, new
+            {
+                TenantId = tenantId,
+                From = from?.Date,
+                To = to?.Date,
+                Partner = partner
+            }, cancellationToken: ct));
+
+        return rows.ToList();
+    }
+
+    /// <inheritdoc />
+    public async Task<List<ReportRow>> GetStockStatusAsync(
+        string viewType, string tenantId, CancellationToken ct)
+    {
+        var sql = viewType switch
+        {
+            // 안전재고 미달 품목만 조회한다.
+            "safety" => """
+                SELECT
+                    i.item_name AS Label,
+                    1 AS Count,
+                    COALESCE(s.current_qty, 0) AS Qty,
+                    COALESCE(s.current_qty * i.sale_price, 0) AS SupplyAmount,
+                    0 AS VatAmount,
+                    COALESCE(s.current_qty * i.sale_price, 0) AS TotalAmount
+                FROM items i
+                LEFT JOIN item_stock s ON s.item_id = i.item_id AND s.tenant_id = i.tenant_id
+                WHERE i.tenant_id = @TenantId
+                  AND i.is_active = 1
+                  AND (i.is_deleted = 0 OR i.is_deleted IS NULL)
+                  AND i.safety_stock > 0
+                  AND COALESCE(s.current_qty, 0) <= i.safety_stock
+                ORDER BY i.item_name
+                """,
+            // 창고별 재고현황을 조회한다.
+            "warehouse" => """
+                SELECT
+                    COALESCE(w.wh_name, '기본창고') AS Label,
+                    COUNT(DISTINCT s.item_id) AS Count,
+                    COALESCE(SUM(s.current_qty), 0) AS Qty,
+                    COALESCE(SUM(s.current_qty * i.sale_price), 0) AS SupplyAmount,
+                    0 AS VatAmount,
+                    COALESCE(SUM(s.current_qty * i.sale_price), 0) AS TotalAmount
+                FROM item_stock s
+                LEFT JOIN items i ON i.item_id = s.item_id AND i.tenant_id = s.tenant_id
+                LEFT JOIN warehouses w ON w.warehouse_id = s.warehouse_id AND w.tenant_id = s.tenant_id
+                WHERE s.tenant_id = @TenantId
+                  AND i.is_active = 1
+                  AND (i.is_deleted = 0 OR i.is_deleted IS NULL)
+                GROUP BY s.warehouse_id, w.wh_name
+                ORDER BY w.wh_name
+                """,
+            // 전체 현재고를 조회한다. (기본)
+            _ => """
+                SELECT
+                    i.item_name AS Label,
+                    1 AS Count,
+                    COALESCE(s.current_qty, 0) AS Qty,
+                    COALESCE(s.current_qty * i.sale_price, 0) AS SupplyAmount,
+                    0 AS VatAmount,
+                    COALESCE(s.current_qty * i.sale_price, 0) AS TotalAmount
+                FROM items i
+                LEFT JOIN item_stock s ON s.item_id = i.item_id AND s.tenant_id = i.tenant_id
+                WHERE i.tenant_id = @TenantId
+                  AND i.is_active = 1
+                  AND (i.is_deleted = 0 OR i.is_deleted IS NULL)
+                ORDER BY i.item_name
+                """
+        };
+
+        var rows = await _db.QueryAsync<ReportRow>(
+            new CommandDefinition(sql, new { TenantId = tenantId }, cancellationToken: ct));
+
+        return rows.ToList();
+    }
 }

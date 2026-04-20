@@ -94,4 +94,18 @@ public interface IReportService
         string viewType, string tenantId,
         DateTime? from = null, DateTime? to = null,
         string? partner = null, CancellationToken ct = default);
+
+    /// <summary>
+    /// 수불부(원장)를 조회한다. (상품별 / 업체별)
+    /// </summary>
+    Task<List<StockLedgerRow>> GetStockLedgerAsync(
+        string viewType, string tenantId,
+        DateTime? from, DateTime? to,
+        string? partner, CancellationToken ct);
+
+    /// <summary>
+    /// 재고현황을 조회한다. (전체 현재고 / 안전재고 미달)
+    /// </summary>
+    Task<List<ReportRow>> GetStockStatusAsync(
+        string viewType, string tenantId, CancellationToken ct);
 }
