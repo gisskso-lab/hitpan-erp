@@ -157,7 +157,11 @@ public class DocumentController : ControllerBase
         return type switch
         {
             "quotation" => await LoadQuotationDocumentAsync(id, tenantId, tenantInfo),
-            // TODO: delivery, tax-invoice 등 다른 타입은 서비스 구현 후 연동
+            "sales-order" => await LoadSalesOrderDocumentAsync(id, tenantId, tenantInfo),
+            "delivery" => await LoadDeliveryDocumentAsync(id, tenantId, tenantInfo),
+            "purchase-order" => await LoadPurchaseOrderDocumentAsync(id, tenantId, tenantInfo),
+            "purchase-receipt" => await LoadPurchaseReceiptDocumentAsync(id, tenantId, tenantInfo),
+            "return" => await LoadReturnDocumentAsync(id, tenantId, tenantInfo),
             _ => CreateStubDocument(id, tenantId, tenantInfo)
         };
     }
@@ -177,13 +181,7 @@ public class DocumentController : ControllerBase
         var partnerInfo = await LoadPartnerInfoAsync(quote.PartnerId, tenantId);
 
         // 담당자명 조회
-        var employeeName = "";
-        if (!string.IsNullOrEmpty(quote.EmployeeId))
-        {
-            employeeName = await _db.QueryFirstOrDefaultAsync<string>(
-                "SELECT employee_name FROM employees WHERE employee_id = @EmpId AND tenant_id = @TenantId",
-                new { EmpId = quote.EmployeeId, TenantId = tenantId }) ?? "";
-        }
+        var employeeName = await LoadEmployeeNameAsync(quote.EmployeeId, tenantId);
 
         return new DocumentDto
         {
@@ -213,6 +211,311 @@ public class DocumentController : ControllerBase
                 Memo = qi.Memo ?? ""
             }).ToList()
         };
+    }
+
+    /// <summary>
+    /// 수주서 데이터를 DB에서 로드하여 DocumentDto로 변환한다.
+    /// </summary>
+    private async Task<DocumentDto> LoadSalesOrderDocumentAsync(string id, string tenantId, TenantInfo tenantInfo)
+    {
+        const string headerSql = """
+            SELECT order_id, order_no, order_date, partner_id, employee_id,
+                   total_amount, vat_amount, memo
+            FROM sales_orders
+            WHERE order_id = @Id AND tenant_id = @TenantId AND is_deleted = 0
+            """;
+
+        var header = await _db.QueryFirstOrDefaultAsync<dynamic>(headerSql,
+            new { Id = id, TenantId = tenantId });
+
+        if (header is null)
+            return CreateStubDocument(id, tenantId, tenantInfo);
+
+        const string itemsSql = """
+            SELECT i.item_id, it.item_name, it.spec, it.unit,
+                   i.ordered_qty AS qty, i.unit_price, i.supply_amount AS amount, i.vat_amount
+            FROM sales_order_items i
+            LEFT JOIN items it ON it.item_id = i.item_id AND it.tenant_id = i.tenant_id
+            WHERE i.order_id = @Id AND i.tenant_id = @TenantId
+            """;
+
+        var items = (await _db.QueryAsync<dynamic>(itemsSql,
+            new { Id = id, TenantId = tenantId })).ToList();
+
+        var partnerInfo = await LoadPartnerInfoAsync((string)header.partner_id, tenantId);
+        var employeeName = await LoadEmployeeNameAsync((string?)header.employee_id, tenantId);
+
+        return new DocumentDto
+        {
+            Tenant = tenantInfo,
+            Partner = partnerInfo,
+            Header = new DocumentHeader
+            {
+                DocumentId = (string)header.order_id,
+                DocNo = (string)header.order_no,
+                OrderDate = (DateTime)header.order_date,
+                EmployeeName = employeeName,
+                SupplyAmount = (decimal)header.total_amount,
+                VatAmount = (decimal)header.vat_amount,
+                TotalAmount = (decimal)header.total_amount + (decimal)header.vat_amount
+            },
+            Items = items.Select(i => new DocumentItem
+            {
+                ItemName = (string?)i.item_name ?? "",
+                Spec = (string?)i.spec ?? "",
+                Unit = (string?)i.unit ?? "",
+                Qty = (decimal)i.qty,
+                UnitPrice = (decimal)i.unit_price,
+                Amount = (decimal)i.amount,
+                VatAmount = (decimal)i.vat_amount
+            }).ToList()
+        };
+    }
+
+    /// <summary>
+    /// 거래명세서 데이터를 DB에서 로드하여 DocumentDto로 변환한다.
+    /// </summary>
+    private async Task<DocumentDto> LoadDeliveryDocumentAsync(string id, string tenantId, TenantInfo tenantInfo)
+    {
+        const string headerSql = """
+            SELECT delivery_id, delivery_no, delivery_date, partner_id, employee_id,
+                   total_amount, vat_amount, memo
+            FROM sales_deliveries
+            WHERE delivery_id = @Id AND tenant_id = @TenantId AND is_deleted = 0
+            """;
+
+        var header = await _db.QueryFirstOrDefaultAsync<dynamic>(headerSql,
+            new { Id = id, TenantId = tenantId });
+
+        if (header is null)
+            return CreateStubDocument(id, tenantId, tenantInfo);
+
+        const string itemsSql = """
+            SELECT i.item_id, it.item_name, it.spec, it.unit,
+                   i.qty, i.unit_price, i.supply_amount AS amount, i.vat_amount
+            FROM sales_delivery_items i
+            LEFT JOIN items it ON it.item_id = i.item_id AND it.tenant_id = i.tenant_id
+            WHERE i.delivery_id = @Id AND i.tenant_id = @TenantId
+            """;
+
+        var items = (await _db.QueryAsync<dynamic>(itemsSql,
+            new { Id = id, TenantId = tenantId })).ToList();
+
+        var partnerInfo = await LoadPartnerInfoAsync((string)header.partner_id, tenantId);
+        var employeeName = await LoadEmployeeNameAsync((string?)header.employee_id, tenantId);
+
+        return new DocumentDto
+        {
+            Tenant = tenantInfo,
+            Partner = partnerInfo,
+            Header = new DocumentHeader
+            {
+                DocumentId = (string)header.delivery_id,
+                DocNo = (string)header.delivery_no,
+                OrderDate = (DateTime)header.delivery_date,
+                EmployeeName = employeeName,
+                SupplyAmount = (decimal)header.total_amount,
+                VatAmount = (decimal)header.vat_amount,
+                TotalAmount = (decimal)header.total_amount + (decimal)header.vat_amount
+            },
+            Items = items.Select(i => new DocumentItem
+            {
+                ItemName = (string?)i.item_name ?? "",
+                Spec = (string?)i.spec ?? "",
+                Unit = (string?)i.unit ?? "",
+                Qty = (decimal)i.qty,
+                UnitPrice = (decimal)i.unit_price,
+                Amount = (decimal)i.amount,
+                VatAmount = (decimal)i.vat_amount
+            }).ToList()
+        };
+    }
+
+    /// <summary>
+    /// 발주서 데이터를 DB에서 로드하여 DocumentDto로 변환한다.
+    /// </summary>
+    private async Task<DocumentDto> LoadPurchaseOrderDocumentAsync(string id, string tenantId, TenantInfo tenantInfo)
+    {
+        const string headerSql = """
+            SELECT po_id, po_no, po_date, partner_id, employee_id,
+                   total_amount, vat_amount, memo
+            FROM purchase_orders
+            WHERE po_id = @Id AND tenant_id = @TenantId AND is_deleted = 0
+            """;
+
+        var header = await _db.QueryFirstOrDefaultAsync<dynamic>(headerSql,
+            new { Id = id, TenantId = tenantId });
+
+        if (header is null)
+            return CreateStubDocument(id, tenantId, tenantInfo);
+
+        const string itemsSql = """
+            SELECT i.item_id, it.item_name, it.spec, it.unit,
+                   i.ordered_qty AS qty, i.unit_price, i.supply_amount AS amount, i.vat_amount
+            FROM purchase_order_items i
+            LEFT JOIN items it ON it.item_id = i.item_id AND it.tenant_id = i.tenant_id
+            WHERE i.po_id = @Id AND i.tenant_id = @TenantId
+            """;
+
+        var items = (await _db.QueryAsync<dynamic>(itemsSql,
+            new { Id = id, TenantId = tenantId })).ToList();
+
+        var partnerInfo = await LoadPartnerInfoAsync((string)header.partner_id, tenantId);
+        var employeeName = await LoadEmployeeNameAsync((string?)header.employee_id, tenantId);
+
+        return new DocumentDto
+        {
+            Tenant = tenantInfo,
+            Partner = partnerInfo,
+            Header = new DocumentHeader
+            {
+                DocumentId = (string)header.po_id,
+                DocNo = (string)header.po_no,
+                OrderDate = (DateTime)header.po_date,
+                EmployeeName = employeeName,
+                SupplyAmount = (decimal)header.total_amount,
+                VatAmount = (decimal)header.vat_amount,
+                TotalAmount = (decimal)header.total_amount + (decimal)header.vat_amount
+            },
+            Items = items.Select(i => new DocumentItem
+            {
+                ItemName = (string?)i.item_name ?? "",
+                Spec = (string?)i.spec ?? "",
+                Unit = (string?)i.unit ?? "",
+                Qty = (decimal)i.qty,
+                UnitPrice = (decimal)i.unit_price,
+                Amount = (decimal)i.amount,
+                VatAmount = (decimal)i.vat_amount
+            }).ToList()
+        };
+    }
+
+    /// <summary>
+    /// 매입명세서 데이터를 DB에서 로드하여 DocumentDto로 변환한다.
+    /// </summary>
+    private async Task<DocumentDto> LoadPurchaseReceiptDocumentAsync(string id, string tenantId, TenantInfo tenantInfo)
+    {
+        const string headerSql = """
+            SELECT receipt_id, receipt_no, receipt_date, partner_id,
+                   total_amount, vat_amount, memo
+            FROM purchase_receipts
+            WHERE receipt_id = @Id AND tenant_id = @TenantId
+            """;
+
+        var header = await _db.QueryFirstOrDefaultAsync<dynamic>(headerSql,
+            new { Id = id, TenantId = tenantId });
+
+        if (header is null)
+            return CreateStubDocument(id, tenantId, tenantInfo);
+
+        const string itemsSql = """
+            SELECT i.item_id, it.item_name, it.spec, it.unit,
+                   i.qty, i.unit_price, i.supply_amount AS amount, i.vat_amount
+            FROM purchase_receipt_items i
+            LEFT JOIN items it ON it.item_id = i.item_id AND it.tenant_id = i.tenant_id
+            WHERE i.receipt_id = @Id AND i.tenant_id = @TenantId
+            """;
+
+        var items = (await _db.QueryAsync<dynamic>(itemsSql,
+            new { Id = id, TenantId = tenantId })).ToList();
+
+        var partnerInfo = await LoadPartnerInfoAsync((string)header.partner_id, tenantId);
+
+        return new DocumentDto
+        {
+            Tenant = tenantInfo,
+            Partner = partnerInfo,
+            Header = new DocumentHeader
+            {
+                DocumentId = (string)header.receipt_id,
+                DocNo = (string)header.receipt_no,
+                OrderDate = (DateTime)header.receipt_date,
+                SupplyAmount = (decimal)header.total_amount,
+                VatAmount = (decimal)header.vat_amount,
+                TotalAmount = (decimal)header.total_amount + (decimal)header.vat_amount
+            },
+            Items = items.Select(i => new DocumentItem
+            {
+                ItemName = (string?)i.item_name ?? "",
+                Spec = (string?)i.spec ?? "",
+                Unit = (string?)i.unit ?? "",
+                Qty = (decimal)i.qty,
+                UnitPrice = (decimal)i.unit_price,
+                Amount = (decimal)i.amount,
+                VatAmount = (decimal)i.vat_amount
+            }).ToList()
+        };
+    }
+
+    /// <summary>
+    /// 반품처리서 데이터를 DB에서 로드하여 DocumentDto로 변환한다.
+    /// </summary>
+    private async Task<DocumentDto> LoadReturnDocumentAsync(string id, string tenantId, TenantInfo tenantInfo)
+    {
+        const string headerSql = """
+            SELECT return_id, return_no, return_date, partner_id,
+                   total_amount, vat_amount, memo
+            FROM purchase_returns
+            WHERE return_id = @Id AND tenant_id = @TenantId AND is_deleted = 0
+            """;
+
+        var header = await _db.QueryFirstOrDefaultAsync<dynamic>(headerSql,
+            new { Id = id, TenantId = tenantId });
+
+        if (header is null)
+            return CreateStubDocument(id, tenantId, tenantInfo);
+
+        const string itemsSql = """
+            SELECT i.item_id, it.item_name, it.spec, it.unit,
+                   i.qty, i.unit_price, i.supply_amount AS amount, i.vat_amount, i.memo
+            FROM purchase_return_items i
+            LEFT JOIN items it ON it.item_id = i.item_id AND it.tenant_id = i.tenant_id
+            WHERE i.return_id = @Id AND i.tenant_id = @TenantId
+            """;
+
+        var items = (await _db.QueryAsync<dynamic>(itemsSql,
+            new { Id = id, TenantId = tenantId })).ToList();
+
+        var partnerInfo = await LoadPartnerInfoAsync((string)header.partner_id, tenantId);
+
+        return new DocumentDto
+        {
+            Tenant = tenantInfo,
+            Partner = partnerInfo,
+            Header = new DocumentHeader
+            {
+                DocumentId = (string)header.return_id,
+                DocNo = (string)header.return_no,
+                OrderDate = (DateTime)header.return_date,
+                SupplyAmount = (decimal)header.total_amount,
+                VatAmount = (decimal)header.vat_amount,
+                TotalAmount = (decimal)header.total_amount + (decimal)header.vat_amount
+            },
+            Items = items.Select(i => new DocumentItem
+            {
+                ItemName = (string?)i.item_name ?? "",
+                Spec = (string?)i.spec ?? "",
+                Unit = (string?)i.unit ?? "",
+                Qty = (decimal)i.qty,
+                UnitPrice = (decimal)i.unit_price,
+                Amount = (decimal)i.amount,
+                VatAmount = (decimal)i.vat_amount,
+                Memo = (string?)i.memo ?? ""
+            }).ToList()
+        };
+    }
+
+    /// <summary>
+    /// 담당자명을 DB에서 조회한다.
+    /// </summary>
+    private async Task<string> LoadEmployeeNameAsync(string? employeeId, string tenantId)
+    {
+        if (string.IsNullOrEmpty(employeeId))
+            return "";
+
+        return await _db.QueryFirstOrDefaultAsync<string>(
+            "SELECT employee_name FROM employees WHERE employee_id = @EmpId AND tenant_id = @TenantId",
+            new { EmpId = employeeId, TenantId = tenantId }) ?? "";
     }
 
     /// <summary>
