@@ -1,3 +1,4 @@
+using HitPan.API.Authorization;
 using HitPan.Application.DTOs.Approval;
 using HitPan.Application.Interfaces;
 using Microsoft.AspNetCore.Authorization;
@@ -22,6 +23,7 @@ public class ApprovalController : ControllerBase
 
     /// <summary>전체 결재 설정 조회</summary>
     [HttpGet("settings")]
+    [RequirePermission("APPROVAL", "view")]
     public async Task<IActionResult> GetSettings(CancellationToken ct)
     {
         var tenantId = HttpContext.Items["TenantId"]?.ToString();
@@ -45,6 +47,7 @@ public class ApprovalController : ControllerBase
 
     /// <summary>문서유형별 결재 라인 조회</summary>
     [HttpGet("lines/{docType}")]
+    [RequirePermission("APPROVAL", "view")]
     public async Task<IActionResult> GetLines(string docType, CancellationToken ct)
     {
         var tenantId = HttpContext.Items["TenantId"]?.ToString();
@@ -70,6 +73,7 @@ public class ApprovalController : ControllerBase
     /// <summary>결재 요청 생성</summary>
     [Authorize(Policy = "TenantOnly")]
     [HttpPost("documents")]
+    [RequirePermission("APPROVAL", "create")]
     public async Task<IActionResult> CreateApproval([FromBody] CreateApprovalRequest request, CancellationToken ct)
     {
         var tenantId = HttpContext.Items["TenantId"]?.ToString();
@@ -83,6 +87,7 @@ public class ApprovalController : ControllerBase
     /// <summary>결재 대기 목록 (내가 처리해야 할 결재)</summary>
     [Authorize(Policy = "TenantOnly")]
     [HttpGet("pending")]
+    [RequirePermission("APPROVAL", "view")]
     public async Task<IActionResult> GetPending(CancellationToken ct)
     {
         var tenantId = HttpContext.Items["TenantId"]?.ToString();
@@ -94,6 +99,7 @@ public class ApprovalController : ControllerBase
     /// <summary>내가 보낸 결재 목록</summary>
     [Authorize(Policy = "TenantOnly")]
     [HttpGet("sent")]
+    [RequirePermission("APPROVAL", "view")]
     public async Task<IActionResult> GetSent(CancellationToken ct)
     {
         var tenantId = HttpContext.Items["TenantId"]?.ToString();
@@ -105,6 +111,7 @@ public class ApprovalController : ControllerBase
     /// <summary>완료된 결재 목록 (내가 결재한 건)</summary>
     [Authorize(Policy = "TenantOnly")]
     [HttpGet("completed")]
+    [RequirePermission("APPROVAL", "view")]
     public async Task<IActionResult> GetCompleted(CancellationToken ct)
     {
         var tenantId = HttpContext.Items["TenantId"]?.ToString();
@@ -116,6 +123,7 @@ public class ApprovalController : ControllerBase
     /// <summary>결재 상세 (문서 + 이력 + 라인)</summary>
     [Authorize(Policy = "TenantOnly")]
     [HttpGet("documents/{approvalId}")]
+    [RequirePermission("APPROVAL", "view")]
     public async Task<IActionResult> GetDetail(string approvalId, CancellationToken ct)
     {
         var tenantId = HttpContext.Items["TenantId"]?.ToString();
@@ -128,6 +136,7 @@ public class ApprovalController : ControllerBase
     /// <summary>결재 처리 (승인/반려)</summary>
     [Authorize(Policy = "TenantOnly")]
     [HttpPost("documents/{approvalId}/process")]
+    [RequirePermission("APPROVAL", "update")]
     public async Task<IActionResult> Process(string approvalId, [FromBody] ProcessApprovalRequest request, CancellationToken ct)
     {
         var tenantId = HttpContext.Items["TenantId"]?.ToString();

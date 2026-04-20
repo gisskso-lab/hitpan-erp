@@ -1,3 +1,4 @@
+using HitPan.API.Authorization;
 using HitPan.Application.DTOs.Approval;
 using HitPan.Application.Interfaces;
 using Microsoft.AspNetCore.Authorization;
@@ -18,6 +19,7 @@ public class FinanceController : ControllerBase
     // ── 현금출납장 ──
 
     [HttpGet("cashbook")]
+    [RequirePermission("ACCOUNTING", "view")]
     public async Task<IActionResult> GetCashbook([FromQuery] DateTime? from, [FromQuery] DateTime? to, CancellationToken ct)
     {
         var tid = HttpContext.Items["TenantId"]?.ToString();
@@ -26,6 +28,7 @@ public class FinanceController : ControllerBase
     }
 
     [HttpPost("cashbook")]
+    [RequirePermission("ACCOUNTING", "create")]
     public async Task<IActionResult> CreateCashbook([FromBody] CreateCashbookRequest req, CancellationToken ct)
     {
         var tid = HttpContext.Items["TenantId"]?.ToString();
@@ -36,6 +39,7 @@ public class FinanceController : ControllerBase
     }
 
     [HttpDelete("cashbook/{id}")]
+    [RequirePermission("ACCOUNTING", "delete")]
     public async Task<IActionResult> DeleteCashbook(string id, CancellationToken ct)
     {
         var tid = HttpContext.Items["TenantId"]?.ToString();
@@ -47,6 +51,7 @@ public class FinanceController : ControllerBase
     // ── 매입매출장 ──
 
     [HttpGet("purchase-sales-ledger")]
+    [RequirePermission("ACCOUNTING", "view")]
     public async Task<IActionResult> GetPurchaseSalesLedger([FromQuery] DateTime? from, [FromQuery] DateTime? to, CancellationToken ct)
     {
         var tid = HttpContext.Items["TenantId"]?.ToString();
@@ -57,6 +62,7 @@ public class FinanceController : ControllerBase
     // ── 부가세 신고자료 ──
 
     [HttpGet("vat")]
+    [RequirePermission("ACCOUNTING", "view")]
     public async Task<IActionResult> GetVat([FromQuery] int? year, [FromQuery] int? half, CancellationToken ct)
     {
         var tid = HttpContext.Items["TenantId"]?.ToString();
@@ -69,6 +75,7 @@ public class FinanceController : ControllerBase
     // ── 경비 ──
 
     [HttpGet("expenses")]
+    [RequirePermission("ACCOUNTING", "view")]
     public async Task<IActionResult> GetExpenses([FromQuery] DateTime? from, [FromQuery] DateTime? to, CancellationToken ct)
     {
         var tid = HttpContext.Items["TenantId"]?.ToString();
@@ -77,6 +84,7 @@ public class FinanceController : ControllerBase
     }
 
     [HttpPost("expenses")]
+    [RequirePermission("ACCOUNTING", "create")]
     public async Task<IActionResult> CreateExpense([FromBody] CreateExpenseRequest req, CancellationToken ct)
     {
         var tid = HttpContext.Items["TenantId"]?.ToString();
@@ -88,6 +96,7 @@ public class FinanceController : ControllerBase
 
     /// <summary>경비 승인/반려</summary>
     [HttpPost("expenses/{id}/process")]
+    [RequirePermission("ACCOUNTING", "update")]
     public async Task<IActionResult> ProcessExpense(string id, [FromBody] ProcessExpenseRequest req, CancellationToken ct)
     {
         var tid = HttpContext.Items["TenantId"]?.ToString();
@@ -100,6 +109,7 @@ public class FinanceController : ControllerBase
 
     /// <summary>데이터 정합성 자동 검증 (8개 항목)</summary>
     [HttpGet("integrity-check")]
+    [RequirePermission("ACCOUNTING", "view")]
     public async Task<IActionResult> CheckIntegrity(CancellationToken ct)
     {
         var tid = HttpContext.Items["TenantId"]?.ToString();
@@ -110,6 +120,7 @@ public class FinanceController : ControllerBase
     // ── 손익현황 ──
 
     [HttpGet("profit")]
+    [RequirePermission("ACCOUNTING", "view")]
     public async Task<IActionResult> GetProfit([FromQuery] int? year, CancellationToken ct)
     {
         var tid = HttpContext.Items["TenantId"]?.ToString();

@@ -1,3 +1,4 @@
+using HitPan.API.Authorization;
 using HitPan.Application.DTOs.Employee;
 using HitPan.Application.Interfaces;
 using Microsoft.AspNetCore.Authorization;
@@ -17,6 +18,7 @@ public class HrController : ControllerBase
     // ── 출퇴근 ──
 
     [HttpGet("attendance")]
+    [RequirePermission("HR", "view")]
     public async Task<IActionResult> GetAttendance([FromQuery] DateTime? from, [FromQuery] DateTime? to, [FromQuery] string? employeeId, CancellationToken ct)
     {
         var tid = HttpContext.Items["TenantId"]?.ToString();
@@ -25,6 +27,7 @@ public class HrController : ControllerBase
     }
 
     [HttpPost("check-in")]
+    [RequirePermission("HR", "create")]
     public async Task<IActionResult> CheckIn([FromBody] CheckInOutRequest req, CancellationToken ct)
     {
         var tid = HttpContext.Items["TenantId"]?.ToString();
@@ -35,6 +38,7 @@ public class HrController : ControllerBase
     }
 
     [HttpPost("check-out")]
+    [RequirePermission("HR", "update")]
     public async Task<IActionResult> CheckOut(CancellationToken ct)
     {
         var tid = HttpContext.Items["TenantId"]?.ToString();
@@ -47,6 +51,7 @@ public class HrController : ControllerBase
     // ── 초과근무 ──
 
     [HttpGet("overtime")]
+    [RequirePermission("HR", "view")]
     public async Task<IActionResult> GetOvertime([FromQuery] DateTime? from, [FromQuery] DateTime? to, CancellationToken ct)
     {
         var tid = HttpContext.Items["TenantId"]?.ToString();
@@ -55,6 +60,7 @@ public class HrController : ControllerBase
     }
 
     [HttpPost("overtime")]
+    [RequirePermission("HR", "create")]
     public async Task<IActionResult> CreateOvertime([FromBody] CreateOvertimeRequest req, CancellationToken ct)
     {
         var tid = HttpContext.Items["TenantId"]?.ToString();
@@ -67,6 +73,7 @@ public class HrController : ControllerBase
     // ── HR 경비신청 ──
 
     [HttpGet("expense-requests")]
+    [RequirePermission("HR", "view")]
     public async Task<IActionResult> GetHrExpenses([FromQuery] string? employeeId, CancellationToken ct)
     {
         var tid = HttpContext.Items["TenantId"]?.ToString();
@@ -75,6 +82,7 @@ public class HrController : ControllerBase
     }
 
     [HttpPost("expense-requests")]
+    [RequirePermission("HR", "create")]
     public async Task<IActionResult> CreateHrExpense([FromBody] CreateHrExpenseRequest req, CancellationToken ct)
     {
         var tid = HttpContext.Items["TenantId"]?.ToString();

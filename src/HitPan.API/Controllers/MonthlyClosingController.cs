@@ -1,3 +1,4 @@
+using HitPan.API.Authorization;
 using HitPan.Application.DTOs.Approval;
 using HitPan.Application.Interfaces;
 using Microsoft.AspNetCore.Authorization;
@@ -18,6 +19,7 @@ public class MonthlyClosingController : ControllerBase
     /// <summary>최근 12개월 마감 현황</summary>
     [HttpGet]
     [Authorize(Policy = "TenantOnly")]
+    [RequirePermission("MONTHLY_CLOSING", "view")]
     public async Task<IActionResult> GetStatus(CancellationToken ct)
     {
         var tenantId = HttpContext.Items["TenantId"]?.ToString();
@@ -50,6 +52,7 @@ public class MonthlyClosingController : ControllerBase
     /// <summary>특정 날짜가 마감 상태인지 확인</summary>
     [HttpGet("check")]
     [Authorize(Policy = "TenantOnly")]
+    [RequirePermission("MONTHLY_CLOSING", "view")]
     public async Task<IActionResult> Check([FromQuery] DateTime date, CancellationToken ct)
     {
         var tenantId = HttpContext.Items["TenantId"]?.ToString();
