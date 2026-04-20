@@ -411,54 +411,61 @@ public class ApprovalService : IApprovalService
 
         // 트랜잭션으로 이력 INSERT + 상태 UPDATE 원자적 처리
         using var tx = _db.BeginTransaction();
-
-        // 결재 이력 INSERT (INSERT ONLY 원칙)
-        await _db.ExecuteAsync(new CommandDefinition(
-            """
-            INSERT INTO approval_history
-              (history_id, tenant_id, approval_id, seq_no, approver_id, approver_name,
-               is_delegated, original_approver_id, action, comment)
-            VALUES
-              (UUID(), @TenantId, @ApprovalId, @SeqNo, @ApproverId, @ApproverName,
-               @IsDelegated, @OriginalApproverId, @Action, @Comment)
-            """,
-            new
-            {
-                TenantId = tenantId,
-                ApprovalId = approvalId,
-                SeqNo = doc.CurrentSeq,
-                ApproverId = employeeId,
-                ApproverName = employeeName,
-                IsDelegated = isDelegated ? 1 : 0,
-                OriginalApproverId = originalApproverId,
-                Action = request.Action,
-                Comment = request.Comment
-            }, transaction: tx, cancellationToken: ct));
-
-        // 상태 업데이트
-        if (request.Action == "rejected")
+        try
         {
+            // 결재 이력 INSERT (INSERT ONLY 원칙)
             await _db.ExecuteAsync(new CommandDefinition(
-                "UPDATE approval_documents SET status = 'rejected', completed_at = NOW(6), updated_at = NOW(6) WHERE approval_id = @ApprovalId AND tenant_id = @TenantId",
-                new { ApprovalId = approvalId, TenantId = tenantId }, transaction: tx, cancellationToken: ct));
-        }
-        else if (request.Action == "approved")
-        {
-            if (doc.CurrentSeq >= doc.TotalLines)
-            {
-                await _db.ExecuteAsync(new CommandDefinition(
-                    "UPDATE approval_documents SET status = 'approved', completed_at = NOW(6), updated_at = NOW(6) WHERE approval_id = @ApprovalId AND tenant_id = @TenantId",
-                    new { ApprovalId = approvalId, TenantId = tenantId }, transaction: tx, cancellationToken: ct));
-            }
-            else
-            {
-                await _db.ExecuteAsync(new CommandDefinition(
-                    "UPDATE approval_documents SET current_seq = current_seq + 1, updated_at = NOW(6) WHERE approval_id = @ApprovalId AND tenant_id = @TenantId",
-                    new { ApprovalId = approvalId, TenantId = tenantId }, transaction: tx, cancellationToken: ct));
-            }
-        }
+                """
+                INSERT INTO approval_history
+                  (history_id, tenant_id, approval_id, seq_no, approver_id, approver_name,
+                   is_delegated, original_approver_id, action, comment)
+                VALUES
+                  (UUID(), @TenantId, @ApprovalId, @SeqNo, @ApproverId, @ApproverName,
+                   @IsDelegated, @OriginalApproverId, @Action, @Comment)
+                """,
+                new
+                {
+                    TenantId = tenantId,
+                    ApprovalId = approvalId,
+                    SeqNo = doc.CurrentSeq,
+                    ApproverId = employeeId,
+                    ApproverName = employeeName,
+                    IsDelegated = isDelegated ? 1 : 0,
+                    OriginalApproverId = originalApproverId,
+                    Action = request.Action,
+                    Comment = request.Comment
+                }, transaction: tx, cancellationToken: ct));
 
-        tx.Commit();
+            // 상태 업데이트
+            if (request.Action == "rejected")
+            {
+                await _db.ExecuteAsync(new CommandDefinition(
+                    "UPDATE approval_documents SET status = 'rejected', completed_at = NOW(6), updated_at = NOW(6) WHERE approval_id = @ApprovalId AND tenant_id = @TenantId",
+                    new { ApprovalId = approvalId, TenantId = tenantId }, transaction: tx, cancellationToken: ct));
+            }
+            else if (request.Action == "approved")
+            {
+                if (doc.CurrentSeq >= doc.TotalLines)
+                {
+                    await _db.ExecuteAsync(new CommandDefinition(
+                        "UPDATE approval_documents SET status = 'approved', completed_at = NOW(6), updated_at = NOW(6) WHERE approval_id = @ApprovalId AND tenant_id = @TenantId",
+                        new { ApprovalId = approvalId, TenantId = tenantId }, transaction: tx, cancellationToken: ct));
+                }
+                else
+                {
+                    await _db.ExecuteAsync(new CommandDefinition(
+                        "UPDATE approval_documents SET current_seq = current_seq + 1, updated_at = NOW(6) WHERE approval_id = @ApprovalId AND tenant_id = @TenantId",
+                        new { ApprovalId = approvalId, TenantId = tenantId }, transaction: tx, cancellationToken: ct));
+                }
+            }
+
+            tx.Commit();
+        }
+        catch
+        {
+            try { tx.Rollback(); } catch { /* 이미 닫힌 tx — 원본 예외 보존 */ }
+            throw;
+        }
     }
 
     // ═══════════════════════════════════════════

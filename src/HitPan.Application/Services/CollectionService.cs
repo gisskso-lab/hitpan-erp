@@ -55,44 +55,52 @@ public class CollectionService : ICollectionService
         await ApprovalTriggerHelper.EnsureNotClosedAsync(_db, tenantId, request.CollectionDate, ct);
         using var tx = _db.BeginTransaction();
         var id = Guid.NewGuid().ToString();
-        await _db.ExecuteAsync(new CommandDefinition(
-            """
-            INSERT INTO collections
-              (collection_id, tenant_id, partner_id, collection_date, amount, collection_method,
-               ref_doc_type, ref_doc_id, memo, created_by)
-            VALUES
-              (@Id, @TenantId, @PartnerId, @CollectionDate, @Amount, @Method,
-               @RefDocType, @RefDocId, @Memo, @UserId)
-            """,
-            new
-            {
-                Id = id,
-                TenantId = tenantId,
-                request.PartnerId,
-                request.CollectionDate,
-                request.Amount,
-                Method = request.CollectionMethod,
-                request.RefDocType,
-                request.RefDocId,
-                request.Memo,
-                UserId = userId
-            }, transaction: tx, cancellationToken: ct));
+        try
+        {
+            await _db.ExecuteAsync(new CommandDefinition(
+                """
+                INSERT INTO collections
+                  (collection_id, tenant_id, partner_id, collection_date, amount, collection_method,
+                   ref_doc_type, ref_doc_id, memo, created_by)
+                VALUES
+                  (@Id, @TenantId, @PartnerId, @CollectionDate, @Amount, @Method,
+                   @RefDocType, @RefDocId, @Memo, @UserId)
+                """,
+                new
+                {
+                    Id = id,
+                    TenantId = tenantId,
+                    request.PartnerId,
+                    request.CollectionDate,
+                    request.Amount,
+                    Method = request.CollectionMethod,
+                    request.RefDocType,
+                    request.RefDocId,
+                    request.Memo,
+                    UserId = userId
+                }, transaction: tx, cancellationToken: ct));
 
-        // partner_balance 수금 반영
-        await _db.ExecuteAsync(new CommandDefinition(
-            """
-            INSERT INTO partner_balance
-              (balance_id, tenant_id, partner_id, total_sales, total_receipt, total_purchase, total_payment, last_updated_at)
-            VALUES
-              (UUID(), @TenantId, @PartnerId, 0, @Amount, 0, 0, NOW(6))
-            ON DUPLICATE KEY UPDATE
-              total_receipt = total_receipt + @Amount,
-              last_updated_at = NOW(6)
-            """,
-            new { TenantId = tenantId, request.PartnerId, request.Amount }, transaction: tx, cancellationToken: ct));
+            // partner_balance 수금 반영
+            await _db.ExecuteAsync(new CommandDefinition(
+                """
+                INSERT INTO partner_balance
+                  (balance_id, tenant_id, partner_id, total_sales, total_receipt, total_purchase, total_payment, last_updated_at)
+                VALUES
+                  (UUID(), @TenantId, @PartnerId, 0, @Amount, 0, 0, NOW(6))
+                ON DUPLICATE KEY UPDATE
+                  total_receipt = total_receipt + @Amount,
+                  last_updated_at = NOW(6)
+                """,
+                new { TenantId = tenantId, request.PartnerId, request.Amount }, transaction: tx, cancellationToken: ct));
 
-        tx.Commit();
-        return id;
+            tx.Commit();
+            return id;
+        }
+        catch
+        {
+            try { tx.Rollback(); } catch { /* 이미 닫힌 tx — 원본 예외 보존 */ }
+            throw;
+        }
     }
 
     public async Task DeleteCollectionAsync(string collectionId, string tenantId, CancellationToken ct = default)
@@ -107,21 +115,28 @@ public class CollectionService : ICollectionService
 
         // 트랜잭션으로 비활성화 + 잔액 차감 원자적 처리
         using var tx = _db.BeginTransaction();
+        try
+        {
+            await _db.ExecuteAsync(new CommandDefinition(
+                "UPDATE collections SET is_active = 0, updated_at = NOW(6) WHERE collection_id = @Id AND tenant_id = @TenantId",
+                new { Id = collectionId, TenantId = tenantId }, transaction: tx, cancellationToken: ct));
 
-        await _db.ExecuteAsync(new CommandDefinition(
-            "UPDATE collections SET is_active = 0, updated_at = NOW(6) WHERE collection_id = @Id AND tenant_id = @TenantId",
-            new { Id = collectionId, TenantId = tenantId }, transaction: tx, cancellationToken: ct));
+            await _db.ExecuteAsync(new CommandDefinition(
+                """
+                UPDATE partner_balance SET
+                  total_receipt = GREATEST(0, total_receipt - @Amount),
+                  last_updated_at = NOW(6)
+                WHERE tenant_id = @TenantId AND partner_id = @PartnerId
+                """,
+                new { TenantId = tenantId, col.PartnerId, col.Amount }, transaction: tx, cancellationToken: ct));
 
-        await _db.ExecuteAsync(new CommandDefinition(
-            """
-            UPDATE partner_balance SET
-              total_receipt = GREATEST(0, total_receipt - @Amount),
-              last_updated_at = NOW(6)
-            WHERE tenant_id = @TenantId AND partner_id = @PartnerId
-            """,
-            new { TenantId = tenantId, col.PartnerId, col.Amount }, transaction: tx, cancellationToken: ct));
-
-        tx.Commit();
+            tx.Commit();
+        }
+        catch
+        {
+            try { tx.Rollback(); } catch { /* 이미 닫힌 tx — 원본 예외 보존 */ }
+            throw;
+        }
     }
 
     // ═══════════════════════════════════════════
@@ -162,44 +177,52 @@ public class CollectionService : ICollectionService
         await ApprovalTriggerHelper.EnsureNotClosedAsync(_db, tenantId, request.PaymentDate, ct);
         using var tx = _db.BeginTransaction();
         var id = Guid.NewGuid().ToString();
-        await _db.ExecuteAsync(new CommandDefinition(
-            """
-            INSERT INTO payments
-              (payment_id, tenant_id, partner_id, payment_date, amount, payment_method,
-               payment_type, ref_order_id, memo, created_by)
-            VALUES
-              (@Id, @TenantId, @PartnerId, @PaymentDate, @Amount, @Method,
-               @PaymentType, @RefOrderId, @Memo, @UserId)
-            """,
-            new
-            {
-                Id = id,
-                TenantId = tenantId,
-                request.PartnerId,
-                request.PaymentDate,
-                request.Amount,
-                Method = request.PaymentMethod,
-                request.PaymentType,
-                request.RefOrderId,
-                request.Memo,
-                UserId = userId
-            }, transaction: tx, cancellationToken: ct));
+        try
+        {
+            await _db.ExecuteAsync(new CommandDefinition(
+                """
+                INSERT INTO payments
+                  (payment_id, tenant_id, partner_id, payment_date, amount, payment_method,
+                   payment_type, ref_order_id, memo, created_by)
+                VALUES
+                  (@Id, @TenantId, @PartnerId, @PaymentDate, @Amount, @Method,
+                   @PaymentType, @RefOrderId, @Memo, @UserId)
+                """,
+                new
+                {
+                    Id = id,
+                    TenantId = tenantId,
+                    request.PartnerId,
+                    request.PaymentDate,
+                    request.Amount,
+                    Method = request.PaymentMethod,
+                    request.PaymentType,
+                    request.RefOrderId,
+                    request.Memo,
+                    UserId = userId
+                }, transaction: tx, cancellationToken: ct));
 
-        // partner_balance 지급 반영
-        await _db.ExecuteAsync(new CommandDefinition(
-            """
-            INSERT INTO partner_balance
-              (balance_id, tenant_id, partner_id, total_sales, total_receipt, total_purchase, total_payment, last_updated_at)
-            VALUES
-              (UUID(), @TenantId, @PartnerId, 0, 0, 0, @Amount, NOW(6))
-            ON DUPLICATE KEY UPDATE
-              total_payment = total_payment + @Amount,
-              last_updated_at = NOW(6)
-            """,
-            new { TenantId = tenantId, request.PartnerId, request.Amount }, transaction: tx, cancellationToken: ct));
+            // partner_balance 지급 반영
+            await _db.ExecuteAsync(new CommandDefinition(
+                """
+                INSERT INTO partner_balance
+                  (balance_id, tenant_id, partner_id, total_sales, total_receipt, total_purchase, total_payment, last_updated_at)
+                VALUES
+                  (UUID(), @TenantId, @PartnerId, 0, 0, 0, @Amount, NOW(6))
+                ON DUPLICATE KEY UPDATE
+                  total_payment = total_payment + @Amount,
+                  last_updated_at = NOW(6)
+                """,
+                new { TenantId = tenantId, request.PartnerId, request.Amount }, transaction: tx, cancellationToken: ct));
 
-        tx.Commit();
-        return id;
+            tx.Commit();
+            return id;
+        }
+        catch
+        {
+            try { tx.Rollback(); } catch { /* 이미 닫힌 tx — 원본 예외 보존 */ }
+            throw;
+        }
     }
 
     public async Task DeletePaymentAsync(string paymentId, string tenantId, CancellationToken ct = default)
@@ -212,21 +235,28 @@ public class CollectionService : ICollectionService
         if (string.IsNullOrEmpty(pay.PartnerId)) return;
 
         using var tx = _db.BeginTransaction();
+        try
+        {
+            await _db.ExecuteAsync(new CommandDefinition(
+                "UPDATE payments SET is_active = 0, updated_at = NOW(6) WHERE payment_id = @Id AND tenant_id = @TenantId",
+                new { Id = paymentId, TenantId = tenantId }, transaction: tx, cancellationToken: ct));
 
-        await _db.ExecuteAsync(new CommandDefinition(
-            "UPDATE payments SET is_active = 0, updated_at = NOW(6) WHERE payment_id = @Id AND tenant_id = @TenantId",
-            new { Id = paymentId, TenantId = tenantId }, transaction: tx, cancellationToken: ct));
+            await _db.ExecuteAsync(new CommandDefinition(
+                """
+                UPDATE partner_balance SET
+                  total_payment = GREATEST(0, total_payment - @Amount),
+                  last_updated_at = NOW(6)
+                WHERE tenant_id = @TenantId AND partner_id = @PartnerId
+                """,
+                new { TenantId = tenantId, pay.PartnerId, pay.Amount }, transaction: tx, cancellationToken: ct));
 
-        await _db.ExecuteAsync(new CommandDefinition(
-            """
-            UPDATE partner_balance SET
-              total_payment = GREATEST(0, total_payment - @Amount),
-              last_updated_at = NOW(6)
-            WHERE tenant_id = @TenantId AND partner_id = @PartnerId
-            """,
-            new { TenantId = tenantId, pay.PartnerId, pay.Amount }, transaction: tx, cancellationToken: ct));
-
-        tx.Commit();
+            tx.Commit();
+        }
+        catch
+        {
+            try { tx.Rollback(); } catch { /* 이미 닫힌 tx — 원본 예외 보존 */ }
+            throw;
+        }
     }
 
     private async Task EnsureOpenAsync(CancellationToken ct)
