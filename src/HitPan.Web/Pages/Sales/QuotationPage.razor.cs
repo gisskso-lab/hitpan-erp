@@ -374,6 +374,15 @@ public partial class QuotationPage : ComponentBase
     }
 
     /// <summary>
+    /// 이메일 발송 기능 (Phase 2 연동 예정).
+    /// </summary>
+    private Task EmailAsync()
+    {
+        Snackbar.Add("이메일 발송 기능은 다음 단계에서 연동됩니다.", Severity.Info);
+        return Task.CompletedTask;
+    }
+
+    /// <summary>
     /// 엑셀 다운로드를 호출한다.
     /// </summary>
     private async Task DownloadExcelAsync()

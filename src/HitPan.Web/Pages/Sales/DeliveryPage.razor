@@ -51,6 +51,7 @@
             <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Print" OnClick="Print">인쇄</MudButton>
             <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.TableChart" OnClick="DownloadExcel">엑셀</MudButton>
             <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.PictureAsPdf" OnClick="DownloadPdf">PDF</MudButton>
+            <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Email" OnClick="EmailAsync">이메일</MudButton>
             <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Receipt" OnClick="OpenTaxInvoice">세금</MudButton>
             <MudSpacer />
             <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.FormatListBulleted" OnClick="OpenListPopup">목록</MudButton>
@@ -581,6 +582,15 @@
         Snackbar.Add("변경사항을 취소했습니다.", Severity.Info);
     }
     private Task Print() => Task.CompletedTask;
+
+    /// <summary>
+    /// 이메일 발송 (Phase 2 연동 예정).
+    /// </summary>
+    private Task EmailAsync()
+    {
+        Snackbar.Add("이메일 발송 기능은 다음 단계에서 연동됩니다.", Severity.Info);
+        return Task.CompletedTask;
+    }
 
     private async Task DownloadExcel()
     {

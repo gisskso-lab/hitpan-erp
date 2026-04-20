@@ -510,6 +510,15 @@ public partial class PurchaseReceiptPage : ComponentBase
     }
 
     /// <summary>
+    /// 이메일 발송 기능 (Phase 2 연동 예정).
+    /// </summary>
+    private Task EmailAsync()
+    {
+        Snackbar.Add("이메일 발송 기능은 다음 단계에서 연동됩니다.", Severity.Info);
+        return Task.CompletedTask;
+    }
+
+    /// <summary>
     /// 엑셀 다운로드 요청을 문서 서비스에 위임한다.
     /// </summary>
     /// <returns>다운로드 작업</returns>
