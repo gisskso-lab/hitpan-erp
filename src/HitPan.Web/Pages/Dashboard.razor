@@ -3,11 +3,36 @@
 @namespace HitPan.Web.Pages
 @attribute [Authorize]
 @using System.Net.Http.Json
+@using HitPan.Web.Helpers
+@using HitPan.Web.Services
 @inject HttpClient Http
 @inject ISnackbar Snackbar
 @inject NavigationManager Nav
+@inject PermissionService PermSvc
+@inject AuthenticationStateProvider AuthState
 
 <PageTitle>대시보드 — 히트판 ERP</PageTitle>
+
+@* 권한 설정 안내 배너 — 어드민 첫 진입 시 권한 미설정 상태 유도 *@
+@if (_showPermissionBanner)
+{
+    <MudAlert Severity="Severity.Info" Class="mb-3" Elevation="0">
+        <div class="d-flex align-center justify-space-between" style="gap:16px;flex-wrap:wrap">
+            <div>
+                <MudText Typo="Typo.subtitle1" Style="font-weight:600">🔐 권한 설정이 필요합니다</MudText>
+                <MudText Typo="Typo.body2">
+                    직원별 메뉴 접근 권한이 아직 설정되지 않았습니다.
+                    각 직원이 필요한 메뉴만 보도록 먼저 권한을 지정해주세요.
+                </MudText>
+            </div>
+            <MudButton Variant="Variant.Filled" Color="Color.Primary"
+                EndIcon="@Icons.Material.Filled.ArrowForward"
+                OnClick="@(() => Nav.NavigateTo("/users/permissions"))">
+                권한 설정하러 가기
+            </MudButton>
+        </div>
+    </MudAlert>
+}
 
 @* 헤더 영역 *@
 <div class="d-flex justify-space-between align-center mb-3">
@@ -222,6 +247,7 @@
     // ─── 데이터 모델 ───
     private DashboardData _data = new();
     private bool _loading = true;
+    private bool _showPermissionBanner = false;
 
     // ─── 차트 옵션: 월별 추이 ───
     private ApexChartOptions<MonthlyTrend> _chartOptions = new()
@@ -270,7 +296,31 @@
     // ─── 초기 로드 ───
     protected override async Task OnInitializedAsync()
     {
+        await CheckPermissionBannerAsync();
         await LoadDashboardAsync();
+    }
+
+    /// <summary>어드민이 권한 미설정 상태면 상단 배너 노출</summary>
+    private async Task CheckPermissionBannerAsync()
+    {
+        try
+        {
+            var state = await AuthState.GetAuthenticationStateAsync();
+            if (AccountTypeHelper.GetAccountType(state.User) != AccountTypeHelper.TenantAdmin)
+                return;
+
+            var perms = await PermSvc.GetAllAsync();
+            if (perms == null || perms.Count == 0) { _showPermissionBanner = true; return; }
+
+            // 누구도 단 하나라도 권한을 받지 않은 상태면 배너 표시
+            var anyConfigured = perms.Any(u => u.Permissions
+                .Any(p => p.CanView || p.CanCreate || p.CanUpdate || p.CanDelete || p.CanExport));
+            _showPermissionBanner = !anyConfigured;
+        }
+        catch
+        {
+            _showPermissionBanner = false; // 조회 실패 시 배너 숨김 (보수적)
+        }
     }
 
     /// <summary>대시보드 데이터 로드</summary>
