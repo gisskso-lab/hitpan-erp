@@ -37,7 +37,7 @@
                 <MudSelectItem Value="@("both")">겸용</MudSelectItem>
             </MudSelect>
         </MudItem>
-        <MudItem xs="12" sm="2" md="2" Class="d-flex align-end">
+        <MudItem xs="12" sm="2" md="2" Class="d-flex align-end gap-1">
             <MudButton Variant="Variant.Filled"
                        Color="Color.Primary"
                        Size="Size.Small"
@@ -45,6 +45,8 @@
                        Disabled="_loading">
                 조회
             </MudButton>
+            <MudButton Variant="Variant.Outlined" Size="Size.Small" StartIcon="@Icons.Material.Filled.TableChart" OnClick="ExportExcelAsync">엑셀</MudButton>
+            <MudButton Variant="Variant.Outlined" Size="Size.Small" StartIcon="@Icons.Material.Filled.Print" OnClick="PrintAsync">인쇄</MudButton>
         </MudItem>
     </MudGrid>
 </MudPaper>
@@ -112,6 +114,11 @@ else
         _loading = false;
         StateHasChanged();
     }
+
+    /// <summary>화면 데이터를 엑셀로 내보낸다.</summary>
+    private Task ExportExcelAsync() { Snackbar.Add("엑셀 내보내기는 준비중입니다.", Severity.Info); return Task.CompletedTask; }
+    /// <summary>화면을 인쇄한다.</summary>
+    private Task PrintAsync() { Snackbar.Add("인쇄 기능은 준비중입니다.", Severity.Info); return Task.CompletedTask; }
 
     private void OpenDetail(string? partnerId)
     {

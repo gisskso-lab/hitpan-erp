@@ -32,8 +32,10 @@
             <MudTextField @bind-Value="_partner" Label="업체명" Variant="Variant.Outlined" Margin="Margin.Dense"
                           Adornment="Adornment.End" AdornmentIcon="@Icons.Material.Filled.Search" />
         </MudItem>
-        <MudItem xs="12" sm="2">
-            <MudButton Variant="Variant.Filled" Color="Color.Primary" FullWidth="true" OnClick="SearchAsync">조회</MudButton>
+        <MudItem xs="12" sm="2" Class="d-flex gap-1 align-center">
+            <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="SearchAsync">조회</MudButton>
+            <MudButton Variant="Variant.Outlined" Size="Size.Small" StartIcon="@Icons.Material.Filled.TableChart" OnClick="ExportExcelAsync">엑셀</MudButton>
+            <MudButton Variant="Variant.Outlined" Size="Size.Small" StartIcon="@Icons.Material.Filled.Print" OnClick="PrintAsync">인쇄</MudButton>
         </MudItem>
     </MudGrid>
 </MudPaper>
@@ -101,6 +103,11 @@ else
         }
         StateHasChanged();
     }
+
+    /// <summary>화면 데이터를 엑셀로 내보낸다.</summary>
+    private Task ExportExcelAsync() { Snackbar.Add("엑셀 내보내기는 준비중입니다.", Severity.Info); return Task.CompletedTask; }
+    /// <summary>화면을 인쇄한다.</summary>
+    private Task PrintAsync() { Snackbar.Add("인쇄 기능은 준비중입니다.", Severity.Info); return Task.CompletedTask; }
 
     private string GetLabelHeader() => _viewType switch
     {

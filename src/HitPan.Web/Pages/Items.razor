@@ -41,6 +41,8 @@
             <MudSelectItem Value="@("finished")">완제품</MudSelectItem>
         </MudSelect>
         <MudButton Variant="Variant.Outlined" OnClick="Search">검색</MudButton>
+        <MudButton Variant="Variant.Outlined" Size="Size.Small" StartIcon="@Icons.Material.Filled.TableChart" OnClick="ExportExcelAsync">엑셀</MudButton>
+        <MudButton Variant="Variant.Outlined" Size="Size.Small" StartIcon="@Icons.Material.Filled.Print" OnClick="PrintAsync">인쇄</MudButton>
     </div>
 </MudPaper>
 
@@ -166,6 +168,11 @@ else
 
         Nav.NavigateTo($"/items/{itemId}");
     }
+
+    /// <summary>화면 데이터를 엑셀로 내보낸다.</summary>
+    private Task ExportExcelAsync() { Snackbar.Add("엑셀 내보내기는 준비중입니다.", Severity.Info); return Task.CompletedTask; }
+    /// <summary>화면을 인쇄한다.</summary>
+    private Task PrintAsync() { Snackbar.Add("인쇄 기능은 준비중입니다.", Severity.Info); return Task.CompletedTask; }
 
     private static string GetTypeLabel(string type) => type switch
     {
