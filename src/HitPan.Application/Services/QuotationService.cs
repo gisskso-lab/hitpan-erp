@@ -241,8 +241,20 @@ public class QuotationService : IQuotationService
     }
 
     /// <inheritdoc />
+    /// <summary>
+    /// 견적서를 삭제한다. 전환 완료된 문서는 삭제할 수 없다.
+    /// </summary>
     public async Task DeleteAsync(string tenantId, string quoteId, CancellationToken ct = default)
     {
+        // 전환된 문서 삭제 차단
+        var status = await _db.QueryFirstOrDefaultAsync<string>(new CommandDefinition(
+            "SELECT status FROM quotations WHERE tenant_id=@TenantId AND quote_id=@QuoteId AND is_deleted=0",
+            new { TenantId = tenantId, QuoteId = quoteId }, cancellationToken: ct));
+        if (status == "converted")
+        {
+            throw new InvalidOperationException("수주로 전환된 견적서는 삭제할 수 없습니다.");
+        }
+
         const string sql = """
                            UPDATE quotations
                            SET is_deleted = 1,

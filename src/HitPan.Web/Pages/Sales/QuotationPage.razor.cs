@@ -41,6 +41,9 @@ public partial class QuotationPage : ComponentBase
     // 신규 문서 여부다.
     private bool _isNew = true;
 
+    // 전환 완료 여부 — 전환된 문서는 수정·삭제 불가 (읽기 전용)
+    private bool _isConverted => _draft?.Status == "converted";
+
     // 워크플로 스텝이다.
     private IReadOnlyList<DeliveryWorkflowStepModel> _workflowSteps = Array.Empty<DeliveryWorkflowStepModel>();
 
