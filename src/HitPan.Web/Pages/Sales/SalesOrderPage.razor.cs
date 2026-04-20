@@ -187,6 +187,23 @@ public partial class SalesOrderPage : ComponentBase
     }
 
     /// <summary>
+    /// 현재 문서를 복사해서 새 문서를 만든다.
+    /// </summary>
+    private async Task CopyAsync()
+    {
+        if (_draft is null) return;
+        _draft.Id = Guid.NewGuid().ToString();
+        _draft.DocumentNumber = null;
+        _draft.SalesDate = DateTime.Today;
+        _isNew = true;
+        _hasUnsavedChanges = true;
+        _status = "Draft";
+        RefreshWorkflow();
+        Snackbar.Add("문서가 복사되었습니다. 수정 후 저장해주세요.", Severity.Success);
+        await InvokeAsync(StateHasChanged);
+    }
+
+    /// <summary>
     /// 툴바 "추가" 동작으로 새 빈 라인을 추가한다.
     /// </summary>
     private async Task AddNewAsync()

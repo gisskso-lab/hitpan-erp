@@ -199,6 +199,26 @@ public partial class QuotationPage : ComponentBase
     }
 
     /// <summary>
+    /// 현재 문서를 복사해서 새 문서를 만든다. 원본은 그대로 보존된다.
+    /// </summary>
+    private async Task CopyAsync()
+    {
+        if (_draft is null) return;
+
+        // 기존 내용을 유지하면서 새 문서로 전환
+        _draft.Id = null;
+        _draft.DocumentNumber = null;
+        _draft.Status = "draft";
+        _draft.QuoteDate = DateTime.Today;
+        _isNew = true;
+        _hasUnsavedChanges = true;
+
+        RefreshWorkflow();
+        Snackbar.Add("문서가 복사되었습니다. 수정 후 저장해주세요.", Severity.Success);
+        await InvokeAsync(StateHasChanged);
+    }
+
+    /// <summary>
     /// 새 라인을 추가한다.
     /// </summary>
     private async Task AddNewAsync()

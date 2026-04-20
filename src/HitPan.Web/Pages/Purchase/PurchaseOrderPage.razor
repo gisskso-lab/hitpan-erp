@@ -57,6 +57,7 @@
             <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Save" OnClick="SaveAsync">저장</MudButton>
             <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Undo" OnClick="CancelAsync">취소</MudButton>
             <MudButton Variant="Variant.Outlined" Color="Color.Error" StartIcon="@Icons.Material.Filled.Delete" OnClick="DeleteConfirmAsync">삭제</MudButton>
+            <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.ContentCopy" OnClick="CopyAsync" Disabled="@_isNew">복사</MudButton>
             <MudDivider Vertical="true" FlexItem="true" />
             <MudButton Variant="Variant.Outlined" Color="Color.Success" StartIcon="@Icons.Material.Filled.SwapHoriz" OnClick="ConvertToReceiptAsync" Disabled="@(_isNew || _draft?.Id is null)">매입전환</MudButton>
             <MudDivider Vertical="true" FlexItem="true" />

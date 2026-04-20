@@ -99,6 +99,23 @@ public partial class ReturnPage : ComponentBase
         return Task.CompletedTask;
     }
 
+    /// <summary>
+    /// 현재 문서를 복사해서 새 문서를 만든다.
+    /// </summary>
+    private async Task CopyAsync()
+    {
+        if (_draft is null) return;
+        _draft.Id = Guid.NewGuid().ToString();
+        _draft.DocumentNumber = null;
+        _draft.SalesDate = DateTime.Today;
+        _isNew = true;
+        _hasUnsavedChanges = true;
+        _status = "Draft";
+        RefreshWorkflow();
+        Snackbar.Add("문서가 복사되었습니다. 수정 후 저장해주세요.", Severity.Success);
+        await InvokeAsync(StateHasChanged);
+    }
+
     private async Task AddNewAsync()
     {
         if (_draft is null) return;
