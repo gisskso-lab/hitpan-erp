@@ -86,6 +86,10 @@ public sealed class AuthService : IAuthService
 
     public async Task LogoutAsync(CancellationToken ct = default)
     {
+        // 로그아웃 API 호출 (자동 퇴근 기록)
+        try { await _http.PostAsJsonAsync("api/auth/logout", new { }, ct); }
+        catch { /* 퇴근 기록 실패해도 로그아웃 진행 */ }
+
         await _storage.DeleteAsync(AuthStorageKeys.AccessToken);
         await _storage.DeleteAsync(AuthStorageKeys.RefreshToken);
         await _storage.DeleteAsync(AuthStorageKeys.UserDisplayName);

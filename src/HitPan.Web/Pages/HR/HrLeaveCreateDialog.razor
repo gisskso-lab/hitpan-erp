@@ -1,0 +1,104 @@
+@namespace HitPan.Web.Pages.HrUi
+@inject HitPan.Web.Services.LeaveRequestService LeaveService
+
+<MudDialog>
+    <DialogContent>
+        <MudForm @ref="_form" @bind-IsValid="_formValid">
+            <MudGrid Spacing="2">
+                <MudItem xs="12">
+                    <MudSelect T="string" @bind-Value="_model.LeaveType" Label="휴가유형" Variant="Variant.Outlined"
+                               Margin="Margin.Dense" Required="true" RequiredError="휴가유형을 선택하세요.">
+                        <MudSelectItem Value="@("annual")">연차</MudSelectItem>
+                        <MudSelectItem Value="@("sick")">병가</MudSelectItem>
+                        <MudSelectItem Value="@("personal")">개인사유</MudSelectItem>
+                        <MudSelectItem Value="@("bereavement")">경조사</MudSelectItem>
+                    </MudSelect>
+                </MudItem>
+                <MudItem xs="6">
+                    <MudDatePicker @bind-Date="_startDate" Label="시작일" Variant="Variant.Outlined" Margin="Margin.Dense"
+                                   Required="true" RequiredError="시작일을 선택하세요." DateFormat="yyyy-MM-dd" Style="min-width:160px" />
+                </MudItem>
+                <MudItem xs="6">
+                    <MudDatePicker @bind-Date="_endDate" Label="종료일" Variant="Variant.Outlined" Margin="Margin.Dense"
+                                   Required="true" RequiredError="종료일을 선택하세요." DateFormat="yyyy-MM-dd" Style="min-width:160px" />
+                </MudItem>
+                <MudItem xs="12">
+                    <MudNumericField T="decimal" @bind-Value="_model.LeaveDays" Label="일수" Variant="Variant.Outlined"
+                                     Margin="Margin.Dense" Min="0.5m" Step="0.5m"
+                                     HelperText="반차는 0.5일로 입력하세요." />
+                </MudItem>
+                <MudItem xs="12">
+                    <MudTextField @bind-Value="_model.Reason" Label="사유" Variant="Variant.Outlined" Margin="Margin.Dense"
+                                  Lines="3" Placeholder="휴가 사유를 입력하세요." />
+                </MudItem>
+            </MudGrid>
+        </MudForm>
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="Cancel" Color="Color.Default" Variant="Variant.Text">취소</MudButton>
+        <MudButton OnClick="Submit" Color="Color.Primary" Variant="Variant.Filled" Disabled="@(!_formValid || _submitting)">
+            @if (_submitting) { <MudProgressCircular Size="Size.Small" Indeterminate="true" Class="mr-2" /> }
+            신청
+        </MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private IMudDialogInstance MudDialog { get; set; } = null!;
+
+    private MudForm _form = null!;
+    private bool _formValid;
+    private bool _submitting;
+
+    private CreateLeaveRequestModel _model = new();
+    private DateTime? _startDate = DateTime.Today;
+    private DateTime? _endDate = DateTime.Today;
+
+    /// <summary>
+    /// 날짜 변경 시 일수를 자동 계산한다.
+    /// </summary>
+    protected override void OnParametersSet()
+    {
+        RecalculateDays();
+    }
+
+    private void RecalculateDays()
+    {
+        if (_startDate.HasValue && _endDate.HasValue && _endDate >= _startDate)
+        {
+            _model.LeaveDays = (decimal)(_endDate.Value - _startDate.Value).TotalDays + 1;
+        }
+    }
+
+    private void Cancel() => MudDialog.Cancel();
+
+    /// <summary>
+    /// 연차 신청 API를 호출한다.
+    /// </summary>
+    private async Task Submit()
+    {
+        await _form.ValidateAsync();
+        if (!_formValid) return;
+
+        _submitting = true;
+        StateHasChanged();
+
+        // 날짜 매핑
+        _model.StartDate = _startDate ?? DateTime.Today;
+        _model.EndDate = _endDate ?? DateTime.Today;
+        RecalculateDays();
+
+        var success = await LeaveService.CreateAsync(_model);
+
+        _submitting = false;
+
+        if (success)
+        {
+            MudDialog.Close(DialogResult.Ok(true));
+        }
+        else
+        {
+            MudDialog.Cancel();
+        }
+    }
+}

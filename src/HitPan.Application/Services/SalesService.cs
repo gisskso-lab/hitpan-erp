@@ -198,6 +198,9 @@ public class SalesService : ISalesService
             throw new InvalidOperationException("draft 상태 전표만 확정할 수 있습니다.");
         }
 
+        // 월마감 체크 — 마감된 월의 전표 확정 차단
+        await ApprovalTriggerHelper.EnsureNotClosedAsync(_db, delivery.TenantId, delivery.DeliveryDate, ct);
+
         var lines = await deliveryItemRepo.FindAsync(x => x.DeliveryId == deliveryId);
 
         if (!string.IsNullOrWhiteSpace(delivery.OrderId))
@@ -311,6 +314,18 @@ public class SalesService : ISalesService
         delivery.Status = SalesDeliveryStatus.Confirmed;
         deliveryRepo.Update(delivery);
         await _unitOfWork.SaveChangesAsync(ct);
+
+        // monthly_summary 매출 갱신
+        await ApprovalTriggerHelper.UpdateMonthlySummaryAsync(_db,
+            delivery.TenantId, delivery.DeliveryDate,
+            delivery.TotalAmount + delivery.VatAmount, 0, ct);
+
+        // 결재 트리거: 결재 설정이 ON이면 결재 문서 자동 생성
+        await ApprovalTriggerHelper.TryCreateApprovalAsync(_db,
+            "delivery", delivery.DeliveryId, delivery.DeliveryNo,
+            $"거래명세서 확정: {delivery.DeliveryNo}",
+            delivery.TotalAmount + delivery.VatAmount,
+            delivery.TenantId, delivery.EmployeeId ?? "system", "확정자", ct);
     }
 
     public async Task<DeliveryDetailDto?> GetDeliveryAsync(string deliveryId, string tenantId, CancellationToken ct = default)
@@ -593,7 +608,7 @@ public class SalesService : ISalesService
                 cancellationToken: ct));
     }
 
-    public async Task<List<DeliveryListDto>> GetOrdersAsync(
+    public async Task<List<SalesOrderListDto>> GetOrdersAsync(
         string tenantId,
         DateTime? from = null,
         DateTime? to = null,
@@ -602,8 +617,8 @@ public class SalesService : ISalesService
     {
         const string sql = """
                            SELECT
-                               o.order_id AS DeliveryId,
-                               o.order_no AS DeliveryNo,
+                               o.order_id AS OrderId,
+                               o.order_no AS OrderNo,
                                o.order_date AS OrderDate,
                                o.partner_id AS PartnerId,
                                p.partner_name AS PartnerName,
@@ -625,7 +640,7 @@ public class SalesService : ISalesService
                            LIMIT 200
                            """;
 
-        var rows = await _db.QueryAsync<DeliveryListDto>(
+        var rows = await _db.QueryAsync<SalesOrderListDto>(
             new CommandDefinition(
                 sql,
                 new
@@ -694,4 +709,6 @@ public class SalesService : ISalesService
     {
         return _partnerService.SearchPartnersAsync(tenantId, keyword, ct);
     }
+
+    // 결재 트리거는 ApprovalTriggerHelper.TryCreateApprovalAsync로 통합됨
 }

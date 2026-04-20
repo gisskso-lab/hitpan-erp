@@ -1,12 +1,275 @@
 @page "/stock/transfer"
 @namespace HitPan.Web.Pages.StockUi
 @attribute [Authorize]
+@using HitPan.Web.Models
+@using System.Net.Http.Json
+@inject HttpClient Http
+@inject IJSRuntime Js
+@inject ISnackbar Snackbar
+@inject ItemMasterService ItemsApi
 
 <PageTitle>재고이송</PageTitle>
-<MudContainer MaxWidth="MaxWidth.Small" Class="d-flex align-center justify-center" Style="height:calc(100vh - 120px)">
-    <MudPaper Class="pa-8 text-center" Elevation="0">
-        <MudIcon Icon="@Icons.Material.Filled.SwapHoriz" Size="Size.Large" Color="Color.Warning" Class="mb-4" />
-        <MudText Typo="Typo.h5" Class="mb-2">재고이송</MudText>
-        <MudText Typo="Typo.body1" Color="Color.Secondary">준비중입니다.</MudText>
-    </MudPaper>
-</MudContainer>
+<MudText Typo="Typo.h6" Class="mb-3">재고 이송</MudText>
+
+@* 이송 입력 폼 *@
+<MudPaper Class="pa-4 mb-3" Elevation="0" Style="border:0.5px solid var(--mud-palette-lines-default);border-radius:12px">
+    <MudGrid Spacing="2" Class="align-center">
+        <MudItem xs="12" sm="3">
+            <MudAutocomplete T="string" Value="_selectedItem" ValueChanged="OnItemChanged"
+                SearchFunc="SearchItemAsync" Label="품목 선택" Variant="Variant.Outlined" Margin="Margin.Dense"
+                Placeholder="품명 입력" />
+        </MudItem>
+        <MudItem xs="12" sm="2">
+            <MudSelect T="string" Value="_fromWarehouse" ValueChanged="OnFromWarehouseChanged" Label="출고창고" Variant="Variant.Outlined" Margin="Margin.Dense">
+                @foreach (var wh in _warehouses)
+                {
+                    <MudSelectItem Value="@wh.Code">@wh.Name</MudSelectItem>
+                }
+            </MudSelect>
+        </MudItem>
+        <MudItem xs="12" sm="1" Class="d-flex justify-center">
+            <MudIcon Icon="@Icons.Material.Filled.ArrowForward" Color="Color.Primary" Size="Size.Large" />
+        </MudItem>
+        <MudItem xs="12" sm="2">
+            <MudSelect T="string" @bind-Value="_toWarehouse" Label="입고창고" Variant="Variant.Outlined" Margin="Margin.Dense">
+                @foreach (var wh in _warehouses.Where(w => w.Code != _fromWarehouse))
+                {
+                    <MudSelectItem Value="@wh.Code">@wh.Name</MudSelectItem>
+                }
+            </MudSelect>
+        </MudItem>
+        <MudItem xs="12" sm="2">
+            <MudNumericField T="decimal" @bind-Value="_transferQty" Label="수량" Variant="Variant.Outlined" Margin="Margin.Dense" Format="N1" />
+        </MudItem>
+        <MudItem xs="12" sm="2">
+            <MudTextField @bind-Value="_memo" Label="메모" Variant="Variant.Outlined" Margin="Margin.Dense" />
+        </MudItem>
+    </MudGrid>
+
+    @* 현재 가용 재고 표시 *@
+    @if (_availableQty.HasValue)
+    {
+        <MudText Typo="Typo.body2" Class="mt-2" Style="color:#6B7280">
+            현재 가용수량: <strong style="color:#0F6E56">@_availableQty.Value.ToString("N1")</strong>
+        </MudText>
+    }
+
+    <div class="d-flex justify-end mt-3">
+        <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="TransferAsync" Disabled="_isProcessing">이송</MudButton>
+    </div>
+</MudPaper>
+
+@* 로딩 바 *@
+@if (_isLoading)
+{
+    <MudProgressLinear Color="Color.Primary" Indeterminate="true" Class="mb-2" />
+}
+
+@* 최근 이송 이력 *@
+<MudPaper Elevation="0" Style="border:0.5px solid var(--mud-palette-lines-default);border-radius:12px;overflow:hidden">
+    <MudTable T="TransferRow" Items="_recentTransfers" Dense="true" Hover="true" Striped="true" FixedHeader="true" Height="calc(100vh - 380px)">
+        <HeaderContent>
+            <MudTh>일자</MudTh>
+            <MudTh>품목</MudTh>
+            <MudTh>출고창고</MudTh>
+            <MudTh>입고창고</MudTh>
+            <MudTh Style="text-align:right">수량</MudTh>
+            <MudTh>메모</MudTh>
+        </HeaderContent>
+        <RowTemplate>
+            <MudTd>@context.TransferDate</MudTd>
+            <MudTd>@context.ItemName</MudTd>
+            <MudTd>@context.FromWarehouse</MudTd>
+            <MudTd>@context.ToWarehouse</MudTd>
+            <MudTd Style="text-align:right">@context.Qty.ToString("N1")</MudTd>
+            <MudTd>@context.Memo</MudTd>
+        </RowTemplate>
+        <NoRecordsContent><MudText Class="pa-4" Style="color:#9CA3AF">이송 이력이 없습니다.</MudText></NoRecordsContent>
+    </MudTable>
+</MudPaper>
+
+@code {
+    // --- 입력 필드 ---
+    private string _selectedItem = "";
+    private string _fromWarehouse = "";
+    private string _toWarehouse = "";
+    private decimal _transferQty;
+    private string _memo = "";
+    private bool _isProcessing;
+    private bool _isLoading;
+    private decimal? _availableQty;
+
+    // --- 데이터 ---
+    private List<WarehouseOption> _warehouses = new();
+    private List<TransferRow> _recentTransfers = new();
+    private List<ItemListModel>? _itemCache;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadWarehousesAsync();
+        await LoadRecentTransfersAsync();
+    }
+
+    /// <summary>창고 목록을 로드한다.</summary>
+    private async Task LoadWarehousesAsync()
+    {
+        try
+        {
+            _warehouses = await Http.GetFromJsonAsync<List<WarehouseOption>>("api/warehouses") ?? new();
+        }
+        catch
+        {
+            _warehouses = new();
+        }
+    }
+
+    /// <summary>품목 자동완성 검색을 수행한다.</summary>
+    private async Task<IEnumerable<string>> SearchItemAsync(string value, CancellationToken ct)
+    {
+        _itemCache ??= await ItemsApi.GetListAsync() ?? new();
+        if (string.IsNullOrWhiteSpace(value))
+            return _itemCache.Select(i => i.ItemName).Distinct();
+        return _itemCache
+            .Where(i => i.ItemName.Contains(value, StringComparison.OrdinalIgnoreCase))
+            .Select(i => i.ItemName).Distinct();
+    }
+
+    /// <summary>품목 선택 시 가용 재고를 조회한다.</summary>
+    private async Task OnItemChanged(string value)
+    {
+        _selectedItem = value ?? "";
+        await LoadAvailableQtyAsync();
+    }
+
+    /// <summary>출고창고 변경 시 가용 재고를 갱신한다.</summary>
+    private async Task OnFromWarehouseChanged(string value)
+    {
+        _fromWarehouse = value ?? "";
+        await LoadAvailableQtyAsync();
+    }
+
+    /// <summary>선택된 품목+출고창고 기준 가용 재고를 조회한다.</summary>
+    private async Task LoadAvailableQtyAsync()
+    {
+        if (string.IsNullOrWhiteSpace(_selectedItem) || string.IsNullOrWhiteSpace(_fromWarehouse))
+        {
+            _availableQty = null;
+            return;
+        }
+        try
+        {
+            var path = $"api/stock/balance?item={Uri.EscapeDataString(_selectedItem)}&warehouse={Uri.EscapeDataString(_fromWarehouse)}";
+            var result = await Http.GetFromJsonAsync<BalanceResult>(path);
+            _availableQty = result?.Qty ?? 0;
+        }
+        catch
+        {
+            _availableQty = null;
+        }
+        StateHasChanged();
+    }
+
+    /// <summary>재고 이송을 실행한다.</summary>
+    private async Task TransferAsync()
+    {
+        if (string.IsNullOrWhiteSpace(_selectedItem))
+        {
+            Snackbar.Add("품목을 선택해주세요.", Severity.Warning);
+            return;
+        }
+        if (string.IsNullOrWhiteSpace(_fromWarehouse) || string.IsNullOrWhiteSpace(_toWarehouse))
+        {
+            Snackbar.Add("출고창고와 입고창고를 선택해주세요.", Severity.Warning);
+            return;
+        }
+        if (_fromWarehouse == _toWarehouse)
+        {
+            Snackbar.Add("출고창고와 입고창고가 동일합니다.", Severity.Warning);
+            return;
+        }
+        if (_transferQty <= 0)
+        {
+            Snackbar.Add("수량을 입력해주세요.", Severity.Warning);
+            return;
+        }
+
+        _isProcessing = true;
+        try
+        {
+            var payload = new
+            {
+                ItemName = _selectedItem,
+                FromWarehouseCode = _fromWarehouse,
+                ToWarehouseCode = _toWarehouse,
+                Qty = _transferQty,
+                Memo = _memo
+            };
+            var resp = await Http.PostAsJsonAsync("api/stock/transfer", payload);
+            if (resp.IsSuccessStatusCode)
+            {
+                Snackbar.Add("재고 이송이 완료되었습니다.", Severity.Success);
+                _selectedItem = "";
+                _transferQty = 0;
+                _memo = "";
+                _availableQty = null;
+                await LoadRecentTransfersAsync();
+            }
+            else
+            {
+                Snackbar.Add("이송 처리에 실패했습니다.", Severity.Error);
+            }
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"오류: {ex.Message}", Severity.Error);
+        }
+        finally
+        {
+            _isProcessing = false;
+        }
+    }
+
+    /// <summary>최근 이송 이력을 로드한다.</summary>
+    private async Task LoadRecentTransfersAsync()
+    {
+        _isLoading = true;
+        StateHasChanged();
+        try
+        {
+            var from = DateTime.Today.AddDays(-30).ToString("yyyy-MM-dd");
+            var to = DateTime.Today.ToString("yyyy-MM-dd");
+            _recentTransfers = await Http.GetFromJsonAsync<List<TransferRow>>($"api/stock/transfer/history?from={from}&to={to}") ?? new();
+        }
+        catch
+        {
+            _recentTransfers = new();
+        }
+        finally
+        {
+            _isLoading = false;
+            StateHasChanged();
+        }
+    }
+
+    // --- 내부 모델 ---
+    private class WarehouseOption
+    {
+        public string Code { get; set; } = "";
+        public string Name { get; set; } = "";
+    }
+
+    private class BalanceResult
+    {
+        public decimal Qty { get; set; }
+    }
+
+    private class TransferRow
+    {
+        public string TransferDate { get; set; } = "";
+        public string ItemName { get; set; } = "";
+        public string FromWarehouse { get; set; } = "";
+        public string ToWarehouse { get; set; } = "";
+        public decimal Qty { get; set; }
+        public string Memo { get; set; } = "";
+    }
+}

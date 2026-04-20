@@ -1,12 +1,110 @@
 @page "/approval/sent"
 @namespace HitPan.Web.Pages.ApprovalUi
 @attribute [Authorize]
+@using HitPan.Web.Models
+@using HitPan.Web.Services
+@inject ApprovalService ApprovalSvc
 
 <PageTitle>내가 보낸 결재</PageTitle>
-<MudContainer MaxWidth="MaxWidth.Small" Class="d-flex align-center justify-center" Style="height:calc(100vh - 120px)">
-    <MudPaper Class="pa-8 text-center" Elevation="0">
-        <MudIcon Icon="@Icons.Material.Filled.Send" Size="Size.Large" Color="Color.Primary" Class="mb-4" />
-        <MudText Typo="Typo.h5" Class="mb-2">내가 보낸 결재</MudText>
-        <MudText Typo="Typo.body1" Color="Color.Secondary">준비중입니다.</MudText>
+
+<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
+    <MudText Typo="Typo.h6">내가 보낸 결재</MudText>
+    <MudText Style="font-size:12px;color:var(--mud-palette-text-secondary)">
+        내가 기안한 결재 문서 진행 현황
+    </MudText>
+</div>
+
+@if (_loading)
+{
+    <MudProgressLinear Indeterminate="true" Color="Color.Primary" />
+}
+else if (_items.Count == 0)
+{
+    <MudPaper Elevation="0" Class="pa-8 text-center" Style="border:0.5px solid var(--mud-palette-lines-default);border-radius:12px">
+        <MudIcon Icon="@Icons.Material.Filled.Send" Size="Size.Large" Color="Color.Primary" Class="mb-2" />
+        <MudText Typo="Typo.body1">보낸 결재가 없습니다.</MudText>
     </MudPaper>
-</MudContainer>
+}
+else
+{
+    <MudPaper Elevation="0" Class="pa-2" Style="border:0.5px solid var(--mud-palette-lines-default);border-radius:12px">
+        <MudTable Items="_items" Dense="true" Hover="true" OnRowClick="OnRowClick" T="ApprovalDocumentModel">
+            <HeaderContent>
+                <MudTh>문서유형</MudTh>
+                <MudTh>제목</MudTh>
+                <MudTh Style="text-align:right">금액</MudTh>
+                <MudTh>상태</MudTh>
+                <MudTh>기안일</MudTh>
+                <MudTh>완료일</MudTh>
+                <MudTh Style="width:80px">진행</MudTh>
+            </HeaderContent>
+            <RowTemplate>
+                <MudTd>
+                    <MudChip T="string" Size="Size.Small" Color="Color.Info" Variant="Variant.Outlined">@context.DocTypeLabel</MudChip>
+                </MudTd>
+                <MudTd>@context.Title</MudTd>
+                <MudTd Style="text-align:right">@context.Amount.ToString("N0")원</MudTd>
+                <MudTd>
+                    <MudChip T="string" Size="Size.Small" Variant="Variant.Filled"
+                        Color="@(context.Status switch { "approved" => Color.Success, "rejected" => Color.Error, "cancelled" => Color.Default, _ => Color.Warning })">
+                        @context.StatusLabel
+                    </MudChip>
+                </MudTd>
+                <MudTd>@context.RequestedAt.ToString("yyyy-MM-dd")</MudTd>
+                <MudTd>@(context.CompletedAt?.ToString("yyyy-MM-dd") ?? "-")</MudTd>
+                <MudTd>@context.CurrentSeq / @context.TotalLines</MudTd>
+            </RowTemplate>
+        </MudTable>
+    </MudPaper>
+}
+
+@* ── 상세 다이얼로그 ── *@
+@if (_detail is not null)
+{
+    <MudDialog @bind-Visible="_showDetail" Options="@(new DialogOptions { MaxWidth = MaxWidth.Medium, FullWidth = true })">
+        <TitleContent><MudText Typo="Typo.h6">@_detail.Document.Title</MudText></TitleContent>
+        <DialogContent>
+            <MudGrid Spacing="2" Class="mb-3">
+                <MudItem xs="6" md="3"><MudText Typo="Typo.caption">문서유형</MudText><MudText>@_detail.Document.DocTypeLabel</MudText></MudItem>
+                <MudItem xs="6" md="3"><MudText Typo="Typo.caption">문서번호</MudText><MudText>@(_detail.Document.RefNo ?? "-")</MudText></MudItem>
+                <MudItem xs="6" md="3"><MudText Typo="Typo.caption">금액</MudText><MudText>@_detail.Document.Amount.ToString("N0")원</MudText></MudItem>
+                <MudItem xs="6" md="3"><MudText Typo="Typo.caption">상태</MudText><MudText>@_detail.Document.StatusLabel</MudText></MudItem>
+            </MudGrid>
+
+            <MudText Typo="Typo.subtitle2" Class="mb-2">결재 이력</MudText>
+            <MudTimeline TimelinePosition="TimelinePosition.Start">
+                @foreach (var h in _detail.History)
+                {
+                    <MudTimelineItem Color="@(h.Action == "approved" ? Color.Success : Color.Error)" Size="Size.Small">
+                        <ItemContent>
+                            <MudText Typo="Typo.body2"><b>@h.ApproverName</b> — @h.ActionLabel @(h.IsDelegated ? "(위임)" : "")</MudText>
+                            @if (!string.IsNullOrWhiteSpace(h.Comment)) { <MudText Typo="Typo.caption">@h.Comment</MudText> }
+                            <MudText Typo="Typo.caption" Color="Color.Secondary">@h.ActedAt.ToString("yyyy-MM-dd HH:mm")</MudText>
+                        </ItemContent>
+                    </MudTimelineItem>
+                }
+            </MudTimeline>
+        </DialogContent>
+        <DialogActions><MudButton OnClick="@(() => _showDetail = false)">닫기</MudButton></DialogActions>
+    </MudDialog>
+}
+
+@code {
+    private List<ApprovalDocumentModel> _items = new();
+    private ApprovalDetailModel? _detail;
+    private bool _loading = true;
+    private bool _showDetail;
+
+    protected override async Task OnInitializedAsync()
+    {
+        _loading = true;
+        _items = await ApprovalSvc.GetSentAsync();
+        _loading = false;
+    }
+
+    private async Task OnRowClick(TableRowClickEventArgs<ApprovalDocumentModel> args)
+    {
+        _detail = await ApprovalSvc.GetDetailAsync(args.Item.ApprovalId);
+        _showDetail = true;
+    }
+}

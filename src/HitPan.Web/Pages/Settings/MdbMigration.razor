@@ -1,0 +1,264 @@
+@page "/settings/mdb-migration"
+@namespace HitPan.Web.Pages.SettingsUi
+@attribute [Authorize]
+@inject HttpClient Http
+@inject ISnackbar Snackbar
+
+<PageTitle>데이터 이관</PageTitle>
+
+<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
+    <MudText Typo="Typo.h6">기존 히트판 데이터 이관</MudText>
+    <MudText Style="font-size:12px;color:var(--mud-palette-text-secondary)">
+        기존 히트판의 데이터를 새 히트판으로 간편하게 가져옵니다
+    </MudText>
+</div>
+
+@* 경고 알림 *@
+<MudAlert Severity="Severity.Warning" Class="mb-4" Dense="true" Icon="@Icons.Material.Filled.Warning">
+    이관 전 반드시 기존 데이터를 백업하세요. 중복 데이터가 생길 수 있습니다.
+</MudAlert>
+
+@* MDB 폴더 경로 입력 + 버튼 *@
+<MudPaper Elevation="0" Class="pa-4 mb-4" Style="border:0.5px solid var(--mud-palette-lines-default);border-radius:12px">
+    <MudText Typo="Typo.subtitle2" Class="mb-3">기존 히트판 설치 폴더</MudText>
+    <MudGrid Spacing="2">
+        <MudItem xs="12" md="8">
+            <MudTextField T="string" Label="MDB 폴더 경로" @bind-Value="_folderPath"
+                          Variant="Variant.Outlined" Margin="Margin.Dense"
+                          Placeholder="예: C:\HITWIN"
+                          HelperText="기존 히트판이 설치된 폴더 경로를 입력하세요 (보통 C:\HITWIN)" />
+        </MudItem>
+        <MudItem xs="12" md="2">
+            <MudButton Variant="Variant.Outlined" Color="Color.Primary"
+                       StartIcon="@Icons.Material.Filled.Search"
+                       OnClick="PreviewAsync"
+                       Disabled="@(_loading || string.IsNullOrWhiteSpace(_folderPath))"
+                       Style="height:40px;margin-top:4px;width:100%">
+                미리보기
+            </MudButton>
+        </MudItem>
+        <MudItem xs="12" md="2">
+            <MudButton Variant="Variant.Filled" Color="Color.Primary"
+                       StartIcon="@Icons.Material.Filled.PlayArrow"
+                       OnClick="StartMigrationAsync"
+                       Disabled="@(_loading || _previewResult == null)"
+                       Style="height:40px;margin-top:4px;width:100%">
+                이관 시작
+            </MudButton>
+        </MudItem>
+    </MudGrid>
+</MudPaper>
+
+@* 진행 상태 표시 *@
+@if (_loading)
+{
+    <MudProgressLinear Indeterminate="true" Color="Color.Primary" Class="mb-4" />
+    <MudText Typo="Typo.body2" Align="Align.Center" Class="mb-4" Style="color:var(--mud-palette-text-secondary)">
+        @_statusMessage
+    </MudText>
+}
+
+@* 미리보기 / 결과 2단 레이아웃 *@
+@if (_previewResult != null || _migrationResult != null)
+{
+    <MudGrid Spacing="3">
+        @* 좌측: 원본(MDB) 테이블 현황 *@
+        <MudItem xs="12" md="6">
+            <MudPaper Elevation="0" Class="pa-4" Style="border:0.5px solid var(--mud-palette-lines-default);border-radius:12px">
+                <MudText Typo="Typo.subtitle2" Class="mb-3">
+                    <MudIcon Icon="@Icons.Material.Filled.Storage" Size="Size.Small" Class="mr-1" />
+                    기존 히트판 데이터
+                </MudText>
+
+                @if (_previewResult != null)
+                {
+                    <MudTable Items="_previewResult" Dense="true" Hover="true" Elevation="0"
+                              Style="border:0.5px solid var(--mud-palette-lines-default);border-radius:8px">
+                        <HeaderContent>
+                            <MudTh>테이블명</MudTh>
+                            <MudTh Style="text-align:right">레코드 수</MudTh>
+                        </HeaderContent>
+                        <RowTemplate>
+                            <MudTd DataLabel="테이블명">@context.Key</MudTd>
+                            <MudTd DataLabel="레코드 수" Style="text-align:right">
+                                @context.Value.ToString("N0")
+                            </MudTd>
+                        </RowTemplate>
+                    </MudTable>
+
+                    <MudText Typo="Typo.body2" Class="mt-2" Style="color:var(--mud-palette-text-secondary)">
+                        총 @_previewResult.Values.Sum().ToString("N0") 건
+                    </MudText>
+                }
+            </MudPaper>
+        </MudItem>
+
+        @* 우측: 마이그레이션 결과 (새 히트판) *@
+        <MudItem xs="12" md="6">
+            <MudPaper Elevation="0" Class="pa-4" Style="border:0.5px solid var(--mud-palette-lines-default);border-radius:12px">
+                <MudText Typo="Typo.subtitle2" Class="mb-3">
+                    <MudIcon Icon="@Icons.Material.Filled.CloudUpload" Size="Size.Small" Class="mr-1" />
+                    이관 결과 (새 히트판)
+                </MudText>
+
+                @if (_migrationResult != null)
+                {
+                    <MudTable Items="_migrationRows" Dense="true" Hover="true" Elevation="0"
+                              Style="border:0.5px solid var(--mud-palette-lines-default);border-radius:8px">
+                        <HeaderContent>
+                            <MudTh>대상 테이블</MudTh>
+                            <MudTh Style="text-align:right">가져온 건수</MudTh>
+                            <MudTh Style="text-align:center;width:48px">상태</MudTh>
+                        </HeaderContent>
+                        <RowTemplate>
+                            <MudTd DataLabel="대상 테이블">@context.Name</MudTd>
+                            <MudTd DataLabel="가져온 건수" Style="text-align:right">
+                                @context.Count.ToString("N0")
+                            </MudTd>
+                            <MudTd DataLabel="상태" Style="text-align:center">
+                                @if (context.Count > 0)
+                                {
+                                    <MudIcon Icon="@Icons.Material.Filled.CheckCircle" Color="Color.Success" Size="Size.Small" />
+                                }
+                                else
+                                {
+                                    <MudIcon Icon="@Icons.Material.Filled.Remove" Color="Color.Default" Size="Size.Small" />
+                                }
+                            </MudTd>
+                        </RowTemplate>
+                    </MudTable>
+
+                    <MudText Typo="Typo.body2" Class="mt-2" Style="color:var(--mud-palette-text-secondary)">
+                        총 @_migrationRows.Sum(r => r.Count).ToString("N0") 건 가져옴
+                    </MudText>
+                }
+                else
+                {
+                    <MudText Typo="Typo.body2" Style="color:var(--mud-palette-text-secondary)">
+                        미리보기 확인 후 "이관 시작" 버튼을 눌러주세요.
+                    </MudText>
+                }
+            </MudPaper>
+        </MudItem>
+    </MudGrid>
+}
+
+@code {
+    /* ── 상태 변수 ── */
+    private string _folderPath = @"C:\HITWIN";
+    private bool _loading;
+    private string _statusMessage = "";
+    private Dictionary<string, int>? _previewResult;
+    private MigrationResult? _migrationResult;
+    private List<MigrationRow> _migrationRows = new();
+
+    /* ── 미리보기 ── */
+    private async Task PreviewAsync()
+    {
+        try
+        {
+            _loading = true;
+            _statusMessage = "기존 데이터를 분석하는 중...";
+            _migrationResult = null;
+            _migrationRows.Clear();
+            StateHasChanged();
+
+            _previewResult = await Http.GetFromJsonAsync<Dictionary<string, int>>(
+                $"api/migration/legacy-mdb/preview?folderPath={Uri.EscapeDataString(_folderPath)}");
+
+            if (_previewResult == null || _previewResult.Count == 0)
+            {
+                Snackbar.Add("기존 히트판 데이터를 찾을 수 없습니다.", Severity.Warning);
+            }
+            else
+            {
+                Snackbar.Add($"총 {_previewResult.Values.Sum():N0}건 발견", Severity.Success);
+            }
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"미리보기 실패: {ex.Message}", Severity.Error);
+            _previewResult = null;
+        }
+        finally
+        {
+            _loading = false;
+            _statusMessage = "";
+        }
+    }
+
+    /* ── 마이그레이션 시작 ── */
+    private async Task StartMigrationAsync()
+    {
+        try
+        {
+            _loading = true;
+            _statusMessage = "데이터 이관 중... 잠시 기다려주세요.";
+            StateHasChanged();
+
+            // POST 요청 — 폴더 경로를 body로 전달
+            var payload = new { folderPath = _folderPath };
+            var response = await Http.PostAsJsonAsync("api/migration/legacy-mdb", payload);
+
+            if (!response.IsSuccessStatusCode)
+            {
+                var errorText = await response.Content.ReadAsStringAsync();
+                Snackbar.Add($"이관 실패 ({(int)response.StatusCode}): {errorText}", Severity.Error);
+                return;
+            }
+
+            _migrationResult = await response.Content.ReadFromJsonAsync<MigrationResult>();
+
+            if (_migrationResult != null)
+            {
+                // 결과를 테이블 행으로 변환
+                _migrationRows = new List<MigrationRow>
+                {
+                    new("업체(거래처)", _migrationResult.Partners),
+                    new("상품(품목)", _migrationResult.Items),
+                    new("BOM(자재명세서)", _migrationResult.BomHeaders),
+                    new("사원", _migrationResult.Employees),
+                    new("매입(발주)", _migrationResult.PurchaseOrders),
+                    new("판매(수주)", _migrationResult.SalesOrders),
+                    new("재고원장(입출고)", _migrationResult.StockLedger),
+                    new("수금", _migrationResult.Collections),
+                    new("경비(현금출납)", _migrationResult.Cashbook),
+                    new("전표(비용처리)", _migrationResult.Expenses),
+                };
+
+                var total = _migrationRows.Sum(r => r.Count);
+                Snackbar.Add($"이관 완료! 총 {total:N0}건 가져옴", Severity.Success);
+            }
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"이관 오류: {ex.Message}", Severity.Error);
+        }
+        finally
+        {
+            _loading = false;
+            _statusMessage = "";
+        }
+    }
+
+    /* ── DTO: 미리보기 결과 — Dictionary<string, int> 직접 사용 ── */
+
+    /* ── DTO: 마이그레이션 결과 ── */
+    private class MigrationResult
+    {
+        public int Partners { get; set; }
+        public int Items { get; set; }
+        public int BomHeaders { get; set; }
+        public int Employees { get; set; }
+        public int PurchaseOrders { get; set; }
+        public int SalesOrders { get; set; }
+        public int StockLedger { get; set; }
+        public int Collections { get; set; }
+        public int Cashbook { get; set; }
+        public int Expenses { get; set; }
+        public int Total { get; set; }
+    }
+
+    /* ── 테이블 행 표시용 레코드 ── */
+    private record MigrationRow(string Name, int Count);
+}

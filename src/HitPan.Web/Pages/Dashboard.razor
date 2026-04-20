@@ -1,11 +1,421 @@
+@page "/"
 @page "/dashboard"
+@namespace HitPan.Web.Pages
 @attribute [Authorize]
+@using System.Net.Http.Json
+@inject HttpClient Http
+@inject ISnackbar Snackbar
+@inject NavigationManager Nav
 
-<PageTitle>대시보드</PageTitle>
-<MudContainer MaxWidth="MaxWidth.Small" Class="d-flex align-center justify-center" Style="height:calc(100vh - 120px)">
-    <MudPaper Class="pa-8 text-center" Elevation="0">
-        <MudIcon Icon="@Icons.Material.Filled.Dashboard" Size="Size.Large" Color="Color.Primary" Class="mb-4" />
-        <MudText Typo="Typo.h5" Class="mb-2">대시보드</MudText>
-        <MudText Typo="Typo.body1" Color="Color.Secondary">준비중입니다.</MudText>
-    </MudPaper>
-</MudContainer>
+<PageTitle>대시보드 — 히트판 ERP</PageTitle>
+
+@* 헤더 영역 *@
+<div class="d-flex justify-space-between align-center mb-3">
+    <MudText Typo="Typo.h6">대시보드</MudText>
+    <MudText Typo="Typo.body2" Color="Color.Secondary">@DateTime.Now.ToString("yyyy-MM-dd (ddd)")</MudText>
+</div>
+
+@* KPI 카드 영역 *@
+<MudGrid Spacing="2" Class="mb-3">
+    @* 오늘 매출 *@
+    <MudItem xs="12" sm="6" md="2" lg="2">
+        <MudPaper Elevation="0" Class="pa-3" Style="border:0.5px solid var(--mud-palette-lines-default);border-radius:12px;border-top:3px solid #0F6E56">
+            <div class="d-flex align-center gap-2 mb-1">
+                <MudIcon Icon="@Icons.Material.Filled.PointOfSale" Size="Size.Small" Style="color:#0F6E56" />
+                <MudText Typo="Typo.caption" Style="color:#666">오늘 매출</MudText>
+            </div>
+            <MudText Typo="Typo.h6" Style="font-weight:700">@FormatAmount(_data.TodaySales)</MudText>
+        </MudPaper>
+    </MudItem>
+
+    @* 이번달 매출 *@
+    <MudItem xs="12" sm="6" md="2" lg="2">
+        <MudPaper Elevation="0" Class="pa-3" Style="border:0.5px solid var(--mud-palette-lines-default);border-radius:12px;border-top:3px solid #1976D2">
+            <div class="d-flex align-center gap-2 mb-1">
+                <MudIcon Icon="@Icons.Material.Filled.TrendingUp" Size="Size.Small" Style="color:#1976D2" />
+                <MudText Typo="Typo.caption" Style="color:#666">이번달 매출</MudText>
+            </div>
+            <MudText Typo="Typo.h6" Style="font-weight:700">@FormatAmount(_data.MonthSales)</MudText>
+        </MudPaper>
+    </MudItem>
+
+    @* 이번달 매입 *@
+    <MudItem xs="12" sm="6" md="2" lg="2">
+        <MudPaper Elevation="0" Class="pa-3" Style="border:0.5px solid var(--mud-palette-lines-default);border-radius:12px;border-top:3px solid #F57C00">
+            <div class="d-flex align-center gap-2 mb-1">
+                <MudIcon Icon="@Icons.Material.Filled.ShoppingCart" Size="Size.Small" Style="color:#F57C00" />
+                <MudText Typo="Typo.caption" Style="color:#666">이번달 매입</MudText>
+            </div>
+            <MudText Typo="Typo.h6" Style="font-weight:700">@FormatAmount(_data.MonthPurchase)</MudText>
+        </MudPaper>
+    </MudItem>
+
+    @* 미수금 *@
+    <MudItem xs="12" sm="6" md="3" lg="3">
+        <MudPaper Elevation="0" Class="pa-3" Style="border:0.5px solid var(--mud-palette-lines-default);border-radius:12px;border-top:3px solid #D32F2F">
+            <div class="d-flex align-center gap-2 mb-1">
+                <MudIcon Icon="@Icons.Material.Filled.Warning" Size="Size.Small" Style="color:#D32F2F" />
+                <MudText Typo="Typo.caption" Style="color:#666">미수금</MudText>
+            </div>
+            <MudText Typo="Typo.h6" Style="font-weight:700;color:#D32F2F">@FormatAmount(_data.UnpaidReceivable)</MudText>
+        </MudPaper>
+    </MudItem>
+
+    @* 결재대기 *@
+    <MudItem xs="12" sm="6" md="3" lg="3">
+        <MudPaper Elevation="0" Class="pa-3" Style="border:0.5px solid var(--mud-palette-lines-default);border-radius:12px;border-top:3px solid #7B1FA2">
+            <div class="d-flex align-center gap-2 mb-1">
+                <MudIcon Icon="@Icons.Material.Filled.PendingActions" Size="Size.Small" Style="color:#7B1FA2" />
+                <MudText Typo="Typo.caption" Style="color:#666">결재대기</MudText>
+            </div>
+            <MudText Typo="Typo.h6" Style="font-weight:700;color:#7B1FA2">@(_data.PendingApprovalCount)건</MudText>
+        </MudPaper>
+    </MudItem>
+</MudGrid>
+
+@* 차트 영역 *@
+<MudGrid Spacing="2" Class="mb-3">
+    @* 월별 매출·매입 추이 *@
+    <MudItem xs="12" md="8">
+        <MudPaper Elevation="0" Class="pa-3" Style="border:0.5px solid var(--mud-palette-lines-default);border-radius:12px;height:280px">
+            <MudText Typo="Typo.subtitle2" Class="mb-2" Style="font-weight:600">월별 매출·매입 추이</MudText>
+            @if (_data.MonthlyTrend.Any())
+            {
+                <ApexChart TItem="MonthlyTrend"
+                           Options="@_chartOptions"
+                           Height="220">
+                    <ApexPointSeries TItem="MonthlyTrend"
+                                     Items="_data.MonthlyTrend"
+                                     Name="매출"
+                                     SeriesType="SeriesType.Bar"
+                                     XValue="@(e => e.Label)"
+                                     YValue="@(e => e.SalesAmount)" />
+                    <ApexPointSeries TItem="MonthlyTrend"
+                                     Items="_data.MonthlyTrend"
+                                     Name="매입"
+                                     SeriesType="SeriesType.Bar"
+                                     XValue="@(e => e.Label)"
+                                     YValue="@(e => e.PurchaseAmount)" />
+                </ApexChart>
+            }
+            else
+            {
+                <div class="d-flex align-center justify-center" style="height:200px">
+                    <MudText Color="Color.Secondary" Typo="Typo.body2">데이터가 없습니다</MudText>
+                </div>
+            }
+        </MudPaper>
+    </MudItem>
+
+    @* 거래처 TOP 5 *@
+    <MudItem xs="12" md="4">
+        <MudPaper Elevation="0" Class="pa-3" Style="border:0.5px solid var(--mud-palette-lines-default);border-radius:12px;height:280px">
+            <MudText Typo="Typo.subtitle2" Class="mb-2" Style="font-weight:600">거래처 TOP 5</MudText>
+            @if (_data.TopPartners.Any())
+            {
+                <ApexChart TItem="PartnerRank"
+                           Options="@_partnerChartOptions"
+                           Height="220">
+                    <ApexPointSeries TItem="PartnerRank"
+                                     Items="_data.TopPartners"
+                                     Name="거래금액"
+                                     SeriesType="SeriesType.Bar"
+                                     XValue="@(e => e.PartnerName)"
+                                     YValue="@(e => e.TotalAmount)" />
+                </ApexChart>
+            }
+            else
+            {
+                <div class="d-flex align-center justify-center" style="height:200px">
+                    <MudText Color="Color.Secondary" Typo="Typo.body2">데이터가 없습니다</MudText>
+                </div>
+            }
+        </MudPaper>
+    </MudItem>
+</MudGrid>
+
+@* 하단 영역: 최근 거래 + 재고 부족 *@
+<MudGrid Spacing="2">
+    @* 최근 거래 *@
+    <MudItem xs="12" md="7">
+        <MudPaper Elevation="0" Class="pa-3" Style="border:0.5px solid var(--mud-palette-lines-default);border-radius:12px">
+            <MudText Typo="Typo.subtitle2" Class="mb-2" Style="font-weight:600">최근 거래</MudText>
+            <MudTable T="RecentTx" Items="_data.RecentTransactions" Dense="true" Hover="true" Elevation="0"
+                      Style="border:none" FixedHeader="false">
+                <HeaderContent>
+                    <MudTh>일자</MudTh>
+                    <MudTh>유형</MudTh>
+                    <MudTh>문서번호</MudTh>
+                    <MudTh>거래처</MudTh>
+                    <MudTh Style="text-align:right">금액</MudTh>
+                    <MudTh>상태</MudTh>
+                </HeaderContent>
+                <RowTemplate>
+                    <MudTd>@context.TxDate.ToString("MM-dd")</MudTd>
+                    <MudTd>
+                        <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined"
+                                 Color="@GetDocTypeColor(context.DocType)">@context.DocType</MudChip>
+                    </MudTd>
+                    <MudTd>@context.DocNo</MudTd>
+                    <MudTd>@context.PartnerName</MudTd>
+                    <MudTd Style="text-align:right;font-weight:500">@FormatAmount(context.Amount)</MudTd>
+                    <MudTd>
+                        <MudChip T="string" Size="Size.Small" Variant="Variant.Filled"
+                                 Color="@GetStatusColor(context.Status)">@context.Status</MudChip>
+                    </MudTd>
+                </RowTemplate>
+                <NoRecordsContent>
+                    <MudText Typo="Typo.body2" Color="Color.Secondary" Align="Align.Center">거래 내역이 없습니다</MudText>
+                </NoRecordsContent>
+            </MudTable>
+        </MudPaper>
+    </MudItem>
+
+    @* 재고 부족 알림 *@
+    <MudItem xs="12" md="5">
+        <MudPaper Elevation="0" Class="pa-3" Style="border:0.5px solid var(--mud-palette-lines-default);border-radius:12px">
+            <div class="d-flex justify-space-between align-center mb-2">
+                <MudText Typo="Typo.subtitle2" Style="font-weight:600">재고 부족 알림</MudText>
+                @if (_data.LowStockItems.Any())
+                {
+                    <MudChip T="string" Size="Size.Small" Color="Color.Error" Variant="Variant.Filled">
+                        @(_data.LowStockItems.Count)건
+                    </MudChip>
+                }
+            </div>
+            @if (_data.LowStockItems.Any())
+            {
+                <MudSimpleTable Dense="true" Hover="true" Style="border:none">
+                    <thead>
+                        <tr>
+                            <th>품목명</th>
+                            <th>규격</th>
+                            <th style="text-align:right">현재고</th>
+                            <th style="text-align:right">안전재고</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var item in _data.LowStockItems)
+                        {
+                            <tr style="color:#D32F2F;font-weight:500">
+                                <td>@item.ItemName</td>
+                                <td>@item.Spec</td>
+                                <td style="text-align:right">@item.CurrentQty.ToString("N0")</td>
+                                <td style="text-align:right">@item.SafetyStock.ToString("N0")</td>
+                            </tr>
+                        }
+                    </tbody>
+                </MudSimpleTable>
+            }
+            else
+            {
+                <div class="d-flex flex-column align-center justify-center" style="height:100px">
+                    <MudIcon Icon="@Icons.Material.Filled.CheckCircleOutline" Color="Color.Success" Size="Size.Large" />
+                    <MudText Typo="Typo.body2" Color="Color.Secondary" Class="mt-1">재고 부족 품목 없음</MudText>
+                </div>
+            }
+        </MudPaper>
+    </MudItem>
+</MudGrid>
+
+@code {
+    // ─── 데이터 모델 ───
+    private DashboardData _data = new();
+    private bool _loading = true;
+
+    // ─── 차트 옵션: 월별 추이 ───
+    private ApexChartOptions<MonthlyTrend> _chartOptions = new()
+    {
+        Chart = new Chart { Toolbar = new Toolbar { Show = false } },
+        PlotOptions = new PlotOptions
+        {
+            Bar = new PlotOptionsBar { ColumnWidth = "60%" }
+        },
+        Yaxis = new List<YAxis>
+        {
+            new()
+            {
+                Labels = new YAxisLabels
+                {
+                    Formatter = @"function(val) { return val >= 10000 ? (val/10000).toFixed(0) + '만' : val.toLocaleString() }"
+                }
+            }
+        },
+        Colors = new List<string> { "#0F6E56", "#F57C00" },
+        Legend = new Legend { Position = LegendPosition.Top }
+    };
+
+    // ─── 차트 옵션: 거래처 TOP5 (가로 막대) ───
+    private ApexChartOptions<PartnerRank> _partnerChartOptions = new()
+    {
+        Chart = new Chart { Toolbar = new Toolbar { Show = false } },
+        PlotOptions = new PlotOptions
+        {
+            Bar = new PlotOptionsBar { Horizontal = true, BarHeight = "60%" }
+        },
+        Yaxis = new List<YAxis>
+        {
+            new()
+            {
+                Labels = new YAxisLabels
+                {
+                    Formatter = @"function(val) { return val >= 10000 ? (val/10000).toFixed(0) + '만' : val.toLocaleString() }"
+                }
+            }
+        },
+        Colors = new List<string> { "#0F6E56" },
+        Legend = new Legend { Show = false }
+    };
+
+    // ─── 초기 로드 ───
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadDashboardAsync();
+    }
+
+    /// <summary>대시보드 데이터 로드</summary>
+    private async Task LoadDashboardAsync()
+    {
+        _loading = true;
+        try
+        {
+            var result = await Http.GetFromJsonAsync<DashboardData>("/api/finance/dashboard");
+            if (result != null)
+            {
+                _data = result;
+            }
+        }
+        catch (HttpRequestException)
+        {
+            // API 미구현 시 샘플 데이터로 폴백
+            _data = GetSampleData();
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"대시보드 로드 실패: {ex.Message}", Severity.Error);
+            _data = GetSampleData();
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    /// <summary>금액 포맷: ₩ + 만원 단위 변환</summary>
+    private string FormatAmount(decimal amount)
+    {
+        if (Math.Abs(amount) >= 100_000_000m) // 1억 이상
+            return $"₩{(amount / 100_000_000m):N1}억";
+        if (Math.Abs(amount) >= 10_000m) // 1만 이상
+            return $"₩{(amount / 10_000m):N0}만";
+        return $"₩{amount:N0}";
+    }
+
+    /// <summary>문서유형별 색상</summary>
+    private Color GetDocTypeColor(string docType) => docType switch
+    {
+        "매출" or "판매" => Color.Success,
+        "매입" => Color.Warning,
+        "견적" => Color.Info,
+        "발주" => Color.Secondary,
+        _ => Color.Default
+    };
+
+    /// <summary>상태별 색상</summary>
+    private Color GetStatusColor(string status) => status switch
+    {
+        "완료" or "확정" => Color.Success,
+        "대기" or "진행" => Color.Info,
+        "취소" => Color.Error,
+        _ => Color.Default
+    };
+
+    /// <summary>API 미구현 시 샘플 데이터</summary>
+    private DashboardData GetSampleData() => new()
+    {
+        TodaySales = 1_234_000m,
+        MonthSales = 12_345_000m,
+        MonthPurchase = 8_900_000m,
+        UnpaidReceivable = 3_445_000m,
+        PendingApprovalCount = 5,
+        MonthlyTrend = new List<MonthlyTrend>
+        {
+            new() { Label = "11월", SalesAmount = 9_800_000, PurchaseAmount = 7_200_000 },
+            new() { Label = "12월", SalesAmount = 11_200_000, PurchaseAmount = 8_100_000 },
+            new() { Label = "1월", SalesAmount = 10_500_000, PurchaseAmount = 7_800_000 },
+            new() { Label = "2월", SalesAmount = 9_200_000, PurchaseAmount = 6_900_000 },
+            new() { Label = "3월", SalesAmount = 13_100_000, PurchaseAmount = 9_500_000 },
+            new() { Label = "4월", SalesAmount = 12_345_000, PurchaseAmount = 8_900_000 }
+        },
+        TopPartners = new List<PartnerRank>
+        {
+            new() { PartnerName = "(주)한빛유통", TotalAmount = 4_500_000, OrderCount = 12 },
+            new() { PartnerName = "대성산업", TotalAmount = 3_200_000, OrderCount = 8 },
+            new() { PartnerName = "미래테크", TotalAmount = 2_800_000, OrderCount = 15 },
+            new() { PartnerName = "삼진물산", TotalAmount = 2_100_000, OrderCount = 6 },
+            new() { PartnerName = "동아상사", TotalAmount = 1_900_000, OrderCount = 9 }
+        },
+        RecentTransactions = new List<RecentTx>
+        {
+            new() { TxDate = DateTime.Today, DocType = "매출", DocNo = "SL-20260420-001", PartnerName = "(주)한빛유통", Amount = 1_234_000, Status = "완료" },
+            new() { TxDate = DateTime.Today.AddDays(-1), DocType = "매입", DocNo = "PU-20260419-003", PartnerName = "대성산업", Amount = 890_000, Status = "완료" },
+            new() { TxDate = DateTime.Today.AddDays(-1), DocType = "견적", DocNo = "QT-20260419-002", PartnerName = "미래테크", Amount = 2_500_000, Status = "대기" },
+            new() { TxDate = DateTime.Today.AddDays(-2), DocType = "발주", DocNo = "PO-20260418-001", PartnerName = "삼진물산", Amount = 1_650_000, Status = "진행" },
+            new() { TxDate = DateTime.Today.AddDays(-3), DocType = "매출", DocNo = "SL-20260417-005", PartnerName = "동아상사", Amount = 780_000, Status = "완료" }
+        },
+        LowStockItems = new List<LowStock>
+        {
+            new() { ItemName = "A4용지 80g", Spec = "500매/박스", CurrentQty = 3, SafetyStock = 10 },
+            new() { ItemName = "토너 TK-1150", Spec = "정품", CurrentQty = 1, SafetyStock = 5 },
+            new() { ItemName = "볼펜 0.5mm", Spec = "흑색/12자루", CurrentQty = 5, SafetyStock = 20 }
+        }
+    };
+
+    // ─── DTO 클래스 ───
+    private class DashboardData
+    {
+        public decimal TodaySales { get; set; }
+        public decimal MonthSales { get; set; }
+        public decimal MonthPurchase { get; set; }
+        public decimal UnpaidReceivable { get; set; }
+        public decimal UnpaidPayable { get; set; }
+        public int LowStockCount { get; set; }
+        public int PendingApprovalCount { get; set; }
+        public List<MonthlyTrend> MonthlyTrend { get; set; } = new();
+        public List<PartnerRank> TopPartners { get; set; } = new();
+        public List<RecentTx> RecentTransactions { get; set; } = new();
+        public List<LowStock> LowStockItems { get; set; } = new();
+    }
+
+    private class MonthlyTrend
+    {
+        public string Label { get; set; } = "";
+        public decimal SalesAmount { get; set; }
+        public decimal PurchaseAmount { get; set; }
+    }
+
+    private class PartnerRank
+    {
+        public string PartnerName { get; set; } = "";
+        public decimal TotalAmount { get; set; }
+        public int OrderCount { get; set; }
+    }
+
+    private class RecentTx
+    {
+        public DateTime TxDate { get; set; }
+        public string DocType { get; set; } = "";
+        public string DocNo { get; set; } = "";
+        public string PartnerName { get; set; } = "";
+        public decimal Amount { get; set; }
+        public string Status { get; set; } = "";
+    }
+
+    private class LowStock
+    {
+        public string ItemName { get; set; } = "";
+        public string Spec { get; set; } = "";
+        public decimal CurrentQty { get; set; }
+        public decimal SafetyStock { get; set; }
+    }
+}

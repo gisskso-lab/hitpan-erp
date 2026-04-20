@@ -1,0 +1,32 @@
+using HitPan.Application.DTOs.Approval;
+
+namespace HitPan.Application.Interfaces;
+
+/// <summary>경리·세무 통합 서비스</summary>
+public interface IFinanceService
+{
+    // 현금출납장
+    Task<List<CashbookDto>> GetCashbookAsync(string tenantId, DateTime? from, DateTime? to, CancellationToken ct = default);
+    Task<string> CreateCashbookAsync(CreateCashbookRequest req, string tenantId, string userId, CancellationToken ct = default);
+    Task DeleteCashbookAsync(string id, string tenantId, CancellationToken ct = default);
+
+    // 매입매출장
+    Task<List<PurchaseSalesLedgerDto>> GetPurchaseSalesLedgerAsync(string tenantId, DateTime? from, DateTime? to, CancellationToken ct = default);
+
+    // 부가세 신고자료
+    Task<VatSummaryDto> GetVatSummaryAsync(string tenantId, int year, int half, CancellationToken ct = default);
+
+    // 경비
+    Task<List<ExpenseDto>> GetExpensesAsync(string tenantId, DateTime? from, DateTime? to, CancellationToken ct = default);
+    Task<string> CreateExpenseAsync(CreateExpenseRequest req, string tenantId, string userId, CancellationToken ct = default);
+    Task ApproveExpenseAsync(string expenseId, string tenantId, string action, CancellationToken ct = default);
+
+    // 손익현황
+    Task<List<ProfitSummaryDto>> GetProfitAsync(string tenantId, int year, CancellationToken ct = default);
+
+    // 정합성 검증
+    Task<DataIntegrityReport> CheckIntegrityAsync(string tenantId, CancellationToken ct = default);
+
+    // 대시보드
+    Task<DashboardSummaryDto> GetDashboardAsync(string tenantId, CancellationToken ct = default);
+}

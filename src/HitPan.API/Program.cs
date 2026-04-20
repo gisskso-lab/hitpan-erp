@@ -12,10 +12,22 @@ using HitPan.Infrastructure.Security;
 using HitPan.API.Security;
 using QuestPDF.Infrastructure;
 
+using Microsoft.AspNetCore.Components.WebAssembly.Server;
+
 Encoding.RegisterProvider(CodePagesEncodingProvider.Instance);
 QuestPDF.Settings.License = LicenseType.Community;
 
 var builder = WebApplication.CreateBuilder(args);
+
+// EXE 옆 wwwroot가 있으면 WebRoot로 설정 (installer 모드)
+var exeDir = Path.GetDirectoryName(Environment.ProcessPath) ?? AppContext.BaseDirectory;
+var exeWebRoot = Path.Combine(exeDir, "wwwroot");
+if (Directory.Exists(exeWebRoot) && File.Exists(Path.Combine(exeWebRoot, "index.html")))
+{
+    builder.Environment.WebRootPath = exeWebRoot;
+    builder.Environment.ContentRootPath = exeDir;
+}
+
 var isDevelopment = builder.Environment.IsDevelopment();
 
 // Add services to the container.
@@ -45,9 +57,15 @@ builder.Services.AddScoped<IPermissionService, PermissionService>();
 builder.Services.AddScoped<IEmployeeService, EmployeeService>();
 builder.Services.AddScoped<ILeaveRequestService, LeaveRequestService>();
 builder.Services.AddScoped<IReportService, ReportService>();
+builder.Services.AddScoped<IApprovalService, ApprovalService>();
+builder.Services.AddScoped<ICollectionService, CollectionService>();
+builder.Services.AddScoped<IMonthlyClosingService, MonthlyClosingService>();
+builder.Services.AddScoped<IFinanceService, FinanceService>();
+builder.Services.AddScoped<IHrService, HrService>();
 builder.Services.AddScoped<ExcelExportService>();
 builder.Services.AddScoped<PdfExportService>();
 builder.Services.AddScoped<ExcelImportService>();
+builder.Services.AddScoped<MdbMigrationService>();
 builder.Services.AddScoped<IPartnerBalanceRepository, PartnerBalanceRepository>();
 builder.Services.AddScoped<IEventPublisher, SyncEventPublisher>();
 builder.Services.AddSingleton<AccessTokenValidator>();
@@ -105,7 +123,11 @@ builder.Services.AddCors(options =>
         }
         else
         {
-            policy.WithOrigins("http://localhost:5234", "https://localhost:7100")
+            // 환경변수 ALLOWED_ORIGINS로 허용 도메인 추가 가능 (콤마 구분)
+            var origins = Environment.GetEnvironmentVariable("ALLOWED_ORIGINS")?.Split(',', StringSplitOptions.RemoveEmptyEntries)
+                ?? Array.Empty<string>();
+            var defaultOrigins = new[] { "http://localhost:5234", "https://localhost:7100" };
+            policy.WithOrigins(defaultOrigins.Concat(origins).ToArray())
                 .AllowAnyHeader()
                 .AllowAnyMethod();
         }
@@ -135,7 +157,16 @@ if (!isDevelopment)
     app.UseHttpsRedirection();
 }
 
+app.UseMiddleware<GlobalExceptionMiddleware>();
 app.UseCors("BlazorWasmDev");
+
+// Blazor WASM 정적 파일 서빙 — 인증 전에 처리
+var hasBlazor = File.Exists(Path.Combine(builder.Environment.WebRootPath ?? "", "index.html"));
+if (hasBlazor)
+{
+    app.UseBlazorFrameworkFiles();
+    app.UseStaticFiles();
+}
 
 app.UseMiddleware<RateLimitMiddleware>();
 app.UseMiddleware<AuditLogMiddleware>();
@@ -143,10 +174,15 @@ app.UseMiddleware<AuditLogMiddleware>();
 app.UseAuthentication();
 app.UseAuthorization();
 app.UseMiddleware<TenantMiddleware>();
+app.UseMiddleware<SessionLimitMiddleware>();
 
 app.MapControllers();
 
-if (!app.Environment.IsProduction())
+if (hasBlazor)
+{
+    app.MapFallbackToFile("index.html");
+}
+else if (!app.Environment.IsProduction())
 {
     app.MapGet("/", () => Results.Redirect("/swagger")).ExcludeFromDescription();
 }

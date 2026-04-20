@@ -27,7 +27,7 @@ public interface ISalesService
 
     Task DeleteDeliveryAsync(string deliveryId, string tenantId, CancellationToken ct = default);
 
-    Task<List<DeliveryListDto>> GetOrdersAsync(
+    Task<List<SalesOrderListDto>> GetOrdersAsync(
         string tenantId,
         DateTime? from = null,
         DateTime? to = null,

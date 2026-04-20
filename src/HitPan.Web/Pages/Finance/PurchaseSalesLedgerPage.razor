@@ -1,12 +1,48 @@
 @page "/accounting/purchase-sales"
 @namespace HitPan.Web.Pages.FinanceUi
 @attribute [Authorize]
+@using HitPan.Web.Models
+@using HitPan.Web.Services
+@inject FinanceClientService FinSvc
 
 <PageTitle>매입매출장</PageTitle>
-<MudContainer MaxWidth="MaxWidth.Small" Class="d-flex align-center justify-center" Style="height:calc(100vh - 120px)">
-    <MudPaper Class="pa-8 text-center" Elevation="0">
-        <MudIcon Icon="@Icons.Material.Filled.MenuBook" Size="Size.Large" Color="Color.Primary" Class="mb-4" />
-        <MudText Typo="Typo.h5" Class="mb-2">매입매출장</MudText>
-        <MudText Typo="Typo.body1" Color="Color.Secondary">준비중입니다.</MudText>
-    </MudPaper>
-</MudContainer>
+<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
+    <MudText Typo="Typo.h6">매입매출장</MudText>
+    <MudText Style="font-size:12px;color:var(--mud-palette-text-secondary)">확정된 매입·매출 전표 자동 집계</MudText>
+</div>
+
+<MudPaper Elevation="0" Class="pa-2" Style="border:0.5px solid var(--mud-palette-lines-default);border-radius:12px">
+    <MudGrid Spacing="2" Class="pa-2 mb-2">
+        <MudItem xs="6" md="2"><MudDatePicker Label="시작일" @bind-Date="_from" Variant="Variant.Outlined" Margin="Margin.Dense" Style="min-width:160px" /></MudItem>
+        <MudItem xs="6" md="2"><MudDatePicker Label="종료일" @bind-Date="_to" Variant="Variant.Outlined" Margin="Margin.Dense" Style="min-width:160px" /></MudItem>
+        <MudItem xs="12" md="2"><MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="LoadAsync">조회</MudButton></MudItem>
+        <MudItem xs="12" md="6" Style="text-align:right">
+            <MudText Typo="Typo.subtitle2" Class="mt-2">매출: @_items.Where(x=>x.DocType=="매출").Sum(x=>x.TotalAmount).ToString("N0")원 | 매입: @_items.Where(x=>x.DocType=="매입").Sum(x=>x.TotalAmount).ToString("N0")원</MudText>
+        </MudItem>
+    </MudGrid>
+    <MudTable Items="_items" Dense="true" Hover="true" Striped="true">
+        <HeaderContent>
+            <MudTh>일자</MudTh><MudTh>구분</MudTh><MudTh>전표번호</MudTh><MudTh>거래처</MudTh>
+            <MudTh Style="text-align:right">공급가</MudTh><MudTh Style="text-align:right">부가세</MudTh>
+            <MudTh Style="text-align:right;font-weight:600">합계</MudTh>
+        </HeaderContent>
+        <RowTemplate>
+            <MudTd>@context.TxDate.ToString("yyyy-MM-dd")</MudTd>
+            <MudTd><MudChip T="string" Size="Size.Small" Color="@(context.DocType=="매출"?Color.Primary:Color.Warning)" Variant="Variant.Text">@context.DocType</MudChip></MudTd>
+            <MudTd>@context.DocNo</MudTd>
+            <MudTd>@context.PartnerName</MudTd>
+            <MudTd Style="text-align:right">@context.SupplyAmount.ToString("N0")</MudTd>
+            <MudTd Style="text-align:right">@context.VatAmount.ToString("N0")</MudTd>
+            <MudTd Style="text-align:right;font-weight:600">@context.TotalAmount.ToString("N0")</MudTd>
+        </RowTemplate>
+        <NoRecordsContent><MudText Class="pa-4" Style="color:#9CA3AF">조회된 데이터가 없습니다.</MudText></NoRecordsContent>
+    </MudTable>
+</MudPaper>
+
+@code {
+    private List<PurchaseSalesLedgerModel> _items = new();
+    private DateTime? _from = DateTime.Today.AddDays(-90);
+    private DateTime? _to = DateTime.Today;
+    protected override async Task OnInitializedAsync() => await LoadAsync();
+    private async Task LoadAsync() { _items = await FinSvc.GetPurchaseSalesLedgerAsync(_from, _to); StateHasChanged(); }
+}

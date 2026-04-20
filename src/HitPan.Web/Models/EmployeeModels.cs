@@ -56,6 +56,8 @@ public sealed class LeaveRequestModel
     public DateTime StartDate { get; set; }
     public DateTime EndDate { get; set; }
     public string Status { get; set; } = "pending";
+    public string? Reason { get; set; }
+    public string? RejectReason { get; set; }
     public DateTime CreatedAt { get; set; }
 }
 

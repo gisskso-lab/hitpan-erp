@@ -239,33 +239,8 @@ public sealed class SyncEventPublisher : IEventPublisher
 
     private async Task OnBomAssembled(BomAssembledEvent b, CancellationToken ct)
     {
-        await _db.ExecuteAsync(new CommandDefinition(
-            """
-            INSERT INTO item_stock
-              (stock_id, tenant_id, item_id, warehouse_id, current_qty, avg_cost, last_updated_at)
-            VALUES
-              (UUID(), @TenantId, @ItemId, 'default', @Qty, @Cost, NOW(6))
-            ON DUPLICATE KEY UPDATE
-              avg_cost = ((current_qty * avg_cost + @Qty * @Cost) / NULLIF(current_qty + @Qty, 0)),
-              current_qty = current_qty + @Qty,
-              last_updated_at = NOW(6)
-            """,
-            new { b.TenantId, ItemId = b.ProductItemId, Qty = b.ProducedQty, Cost = b.ProductionCost },
-            cancellationToken: ct)).ConfigureAwait(false);
-
-        foreach (var mat in b.Materials)
-        {
-            await _db.ExecuteAsync(new CommandDefinition(
-                """
-                UPDATE item_stock SET
-                    current_qty = current_qty - @Qty,
-                    last_updated_at = NOW(6)
-                WHERE tenant_id = @TenantId
-                  AND item_id = @ItemId
-                """,
-                new { b.TenantId, ItemId = mat.ItemId, Qty = mat.UsedQty },
-                cancellationToken: ct)).ConfigureAwait(false);
-        }
+        // ※ item_stock 업데이트는 BomService.AssembleAsync에서 이미 처리됨
+        //   여기서는 월별 요약·안전재고 알림만 담당 (이중 처리 방지)
 
         var ym = DateTime.Now.ToString("yyyyMM");
         await _db.ExecuteAsync(new CommandDefinition(

@@ -48,6 +48,11 @@ builder.Services.AddScoped<EmployeeService>();
 builder.Services.AddScoped<LeaveRequestService>();
 builder.Services.AddScoped<DocumentService>();
 builder.Services.AddScoped<SpecialPriceService>();
+builder.Services.AddScoped<ApprovalService>();
+builder.Services.AddScoped<CollectionPaymentService>();
+builder.Services.AddScoped<MonthlyClosingService>();
+builder.Services.AddScoped<FinanceClientService>();
+builder.Services.AddScoped<HrClientService>();
 builder.Services.AddTransient<HitPanApiAuthHandler>();
 builder.Services.AddScoped<TenantProfileService>();
 builder.Services.AddScoped(sp =>

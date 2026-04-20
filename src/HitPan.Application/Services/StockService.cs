@@ -21,19 +21,29 @@ public class StockService : IStockService
 
     public async Task<IReadOnlyList<StockBalanceDto>> GetBalanceAsync(CancellationToken ct = default)
     {
-        var repo = _unitOfWork.Repository<StockLedger>();
-        var currentYm = DateTime.UtcNow.ToString("yyyy-MM");
-        var rows = await repo.FindAsync(x => x.Ym == currentYm);
-
-        return rows
-            .GroupBy(x => new { x.ItemId, x.WarehouseId })
-            .Select(g => new StockBalanceDto
-            {
-                ItemId = g.Key.ItemId,
-                WarehouseId = g.Key.WarehouseId,
-                BalanceQty = g.Sum(x => x.QtyIn - x.QtyOut)
-            })
-            .ToList();
+        // item_stock + items + warehouses 조인으로 전체 재고현황 반환
+        if (_dbConnection.State != System.Data.ConnectionState.Open)
+        {
+            if (_dbConnection is System.Data.Common.DbConnection c) await c.OpenAsync(ct);
+            else _dbConnection.Open();
+        }
+        var tenantId = _currentTenant.TenantId;
+        const string sql = """
+            SELECT s.item_id AS ItemId, i.item_code AS ItemCode, i.item_name AS ItemName,
+                   i.spec AS Spec, i.unit AS Unit, i.item_group AS ItemGroup,
+                   s.warehouse_id AS WarehouseId, w.wh_name AS WarehouseName,
+                   s.current_qty AS CurrentQty, s.current_qty AS BalanceQty,
+                   s.avg_cost AS AvgCost,
+                   COALESCE(i.safety_stock, i.safe_stock, 0) AS SafetyStock
+            FROM item_stock s
+            JOIN items i ON i.item_id = s.item_id AND i.is_deleted = 0
+            LEFT JOIN warehouses w ON w.warehouse_id = s.warehouse_id AND w.tenant_id = s.tenant_id
+            WHERE s.tenant_id = @TenantId
+            ORDER BY i.item_group, i.item_code
+            """;
+        var rows = await _dbConnection.QueryAsync<StockBalanceDto>(
+            new CommandDefinition(sql, new { TenantId = tenantId }, cancellationToken: ct));
+        return rows.ToList();
     }
 
     public async Task<IReadOnlyList<StockLedgerRow>> GetLedgerAsync(StockLedgerQueryRequest request, CancellationToken ct = default)
@@ -206,5 +216,280 @@ public class StockService : IStockService
             "adjust" => ["SourceType", "CreatedBy"],
             _ => ["ItemId", "WarehouseId", "LedgerDate"]
         };
+    }
+
+    // ── 재고 실사·조정 ──
+
+    /// <summary>재고 실사 조정 처리</summary>
+    public async Task<StockAdjustResultDto> AdjustStockAsync(string tenantId, string userId, StockAdjustRequest req, CancellationToken ct = default)
+    {
+        await EnsureOpenAsync(ct).ConfigureAwait(false);
+
+        // 1. 현재 장부 수량 조회
+        const string qtySQL = """
+            SELECT COALESCE(current_qty, 0)
+            FROM item_stock
+            WHERE tenant_id = @TenantId AND item_id = @ItemId AND warehouse_id = @WarehouseId
+            """;
+        var currentQty = await _dbConnection.ExecuteScalarAsync<decimal>(
+            new CommandDefinition(qtySQL, new { TenantId = tenantId, req.ItemId, req.WarehouseId }, cancellationToken: ct)).ConfigureAwait(false);
+
+        // 2. 차이 계산
+        var diff = req.ActualQty - currentQty;
+        var adjustType = diff > 0 ? "increase" : diff < 0 ? "decrease" : "match";
+        var now = DateTime.UtcNow;
+
+        // 3. 차이가 있으면 stock_ledger INSERT (INSERT ONLY 원칙)
+        if (diff != 0)
+        {
+            const string ledgerInsert = """
+                INSERT INTO stock_ledger
+                    (tenant_id, item_id, warehouse_id, ledger_date, ym,
+                     move_type, source_type, qty_in, qty_out, memo, created_by, created_at)
+                VALUES
+                    (@TenantId, @ItemId, @WarehouseId, @LedgerDate, @Ym,
+                     @MoveType, 'adjustment', @QtyIn, @QtyOut, @Memo, @CreatedBy, @CreatedAt)
+                """;
+            await _dbConnection.ExecuteAsync(new CommandDefinition(ledgerInsert, new
+            {
+                TenantId = tenantId,
+                req.ItemId,
+                req.WarehouseId,
+                LedgerDate = now,
+                Ym = now.ToString("yyyy-MM"),
+                MoveType = diff > 0 ? "in" : "out",
+                QtyIn = diff > 0 ? Math.Abs(diff) : 0m,
+                QtyOut = diff < 0 ? Math.Abs(diff) : 0m,
+                Memo = req.Reason ?? "재고 실사 조정",
+                CreatedBy = userId,
+                CreatedAt = now
+            }, cancellationToken: ct)).ConfigureAwait(false);
+
+            // 4. item_stock 갱신
+            const string updateStock = """
+                UPDATE item_stock
+                SET current_qty = @ActualQty, available_qty = @ActualQty, updated_at = @Now
+                WHERE tenant_id = @TenantId AND item_id = @ItemId AND warehouse_id = @WarehouseId
+                """;
+            await _dbConnection.ExecuteAsync(new CommandDefinition(updateStock, new
+            {
+                req.ActualQty,
+                Now = now,
+                TenantId = tenantId,
+                req.ItemId,
+                req.WarehouseId
+            }, cancellationToken: ct)).ConfigureAwait(false);
+        }
+
+        // 5. 품목명·창고명 조회 후 결과 반환
+        const string nameSql = """
+            SELECT i.item_name AS ItemName, COALESCE(w.wh_name, '') AS WarehouseName
+            FROM items i
+            LEFT JOIN warehouses w ON w.warehouse_id = @WarehouseId AND w.tenant_id = @TenantId
+            WHERE i.item_id = @ItemId AND i.tenant_id = @TenantId
+            """;
+        var names = await _dbConnection.QuerySingleOrDefaultAsync<(string ItemName, string WarehouseName)>(
+            new CommandDefinition(nameSql, new { TenantId = tenantId, req.ItemId, req.WarehouseId }, cancellationToken: ct)).ConfigureAwait(false);
+
+        return new StockAdjustResultDto
+        {
+            ItemId = req.ItemId,
+            ItemName = names.ItemName ?? string.Empty,
+            WarehouseName = names.WarehouseName ?? string.Empty,
+            BeforeQty = currentQty,
+            ActualQty = req.ActualQty,
+            DiffQty = diff,
+            AdjustType = adjustType,
+            AdjustedAt = now
+        };
+    }
+
+    /// <summary>재고 조정 이력 조회</summary>
+    public async Task<List<StockAdjustResultDto>> GetAdjustHistoryAsync(string tenantId, DateTime? from, DateTime? to, CancellationToken ct = default)
+    {
+        await EnsureOpenAsync(ct).ConfigureAwait(false);
+
+        const string sql = """
+            SELECT l.item_id AS ItemId, i.item_name AS ItemName,
+                   COALESCE(w.wh_name, '') AS WarehouseName,
+                   0 AS BeforeQty,
+                   CASE WHEN l.move_type = 'in' THEN l.qty_in ELSE -l.qty_out END AS DiffQty,
+                   CASE WHEN l.move_type = 'in' THEN l.qty_in ELSE l.qty_out END AS ActualQty,
+                   CASE WHEN l.move_type = 'in' THEN 'increase' ELSE 'decrease' END AS AdjustType,
+                   l.created_at AS AdjustedAt
+            FROM stock_ledger l
+            JOIN items i ON i.item_id = l.item_id AND i.tenant_id = l.tenant_id
+            LEFT JOIN warehouses w ON w.warehouse_id = l.warehouse_id AND w.tenant_id = l.tenant_id
+            WHERE l.tenant_id = @TenantId
+              AND l.source_type = 'adjustment'
+              AND (@From IS NULL OR l.ledger_date >= @From)
+              AND (@To IS NULL OR l.ledger_date <= @To)
+            ORDER BY l.created_at DESC
+            """;
+        var rows = await _dbConnection.QueryAsync<StockAdjustResultDto>(
+            new CommandDefinition(sql, new { TenantId = tenantId, From = from, To = to }, cancellationToken: ct)).ConfigureAwait(false);
+        return rows.ToList();
+    }
+
+    // ── 재고 이송 ──
+
+    /// <summary>재고 이송 처리 (출고 + 입고 두 건 INSERT)</summary>
+    public async Task TransferStockAsync(string tenantId, string userId, StockTransferRequest req, CancellationToken ct = default)
+    {
+        await EnsureOpenAsync(ct).ConfigureAwait(false);
+
+        // 유효성 검사: 출발 창고와 도착 창고가 동일하면 안 됨
+        if (req.FromWarehouseId == req.ToWarehouseId)
+            throw new InvalidOperationException("출발 창고와 도착 창고가 동일합니다.");
+
+        // 출발 창고 가용 수량 확인
+        const string checkSql = """
+            SELECT COALESCE(available_qty, 0)
+            FROM item_stock
+            WHERE tenant_id = @TenantId AND item_id = @ItemId AND warehouse_id = @WarehouseId
+            """;
+        var availableQty = await _dbConnection.ExecuteScalarAsync<decimal>(
+            new CommandDefinition(checkSql, new { TenantId = tenantId, req.ItemId, WarehouseId = req.FromWarehouseId }, cancellationToken: ct)).ConfigureAwait(false);
+
+        if (availableQty < req.Qty)
+            throw new InvalidOperationException($"출발 창고 가용 수량 부족 (가용: {availableQty}, 요청: {req.Qty})");
+
+        var now = DateTime.UtcNow;
+        var ym = now.ToString("yyyy-MM");
+
+        // stock_ledger: 출고 INSERT
+        const string outInsert = """
+            INSERT INTO stock_ledger
+                (tenant_id, item_id, warehouse_id, ledger_date, ym,
+                 move_type, source_type, qty_in, qty_out, memo, created_by, created_at)
+            VALUES
+                (@TenantId, @ItemId, @WarehouseId, @LedgerDate, @Ym,
+                 'out', 'transfer', 0, @Qty, @Memo, @CreatedBy, @CreatedAt)
+            """;
+        await _dbConnection.ExecuteAsync(new CommandDefinition(outInsert, new
+        {
+            TenantId = tenantId,
+            req.ItemId,
+            WarehouseId = req.FromWarehouseId,
+            LedgerDate = now,
+            Ym = ym,
+            req.Qty,
+            Memo = req.Memo ?? "재고 이송",
+            CreatedBy = userId,
+            CreatedAt = now
+        }, cancellationToken: ct)).ConfigureAwait(false);
+
+        // stock_ledger: 입고 INSERT
+        const string inInsert = """
+            INSERT INTO stock_ledger
+                (tenant_id, item_id, warehouse_id, ledger_date, ym,
+                 move_type, source_type, qty_in, qty_out, memo, created_by, created_at)
+            VALUES
+                (@TenantId, @ItemId, @WarehouseId, @LedgerDate, @Ym,
+                 'in', 'transfer', @Qty, 0, @Memo, @CreatedBy, @CreatedAt)
+            """;
+        await _dbConnection.ExecuteAsync(new CommandDefinition(inInsert, new
+        {
+            TenantId = tenantId,
+            req.ItemId,
+            WarehouseId = req.ToWarehouseId,
+            LedgerDate = now,
+            Ym = ym,
+            req.Qty,
+            Memo = req.Memo ?? "재고 이송",
+            CreatedBy = userId,
+            CreatedAt = now
+        }, cancellationToken: ct)).ConfigureAwait(false);
+
+        // item_stock: 출발 창고 차감
+        const string updateFrom = """
+            UPDATE item_stock
+            SET current_qty = current_qty - @Qty, available_qty = available_qty - @Qty, updated_at = @Now
+            WHERE tenant_id = @TenantId AND item_id = @ItemId AND warehouse_id = @WarehouseId
+            """;
+        await _dbConnection.ExecuteAsync(new CommandDefinition(updateFrom, new
+        {
+            req.Qty, Now = now, TenantId = tenantId, req.ItemId, WarehouseId = req.FromWarehouseId
+        }, cancellationToken: ct)).ConfigureAwait(false);
+
+        // item_stock: 도착 창고 증가 (없으면 INSERT)
+        const string upsertTo = """
+            INSERT INTO item_stock (tenant_id, item_id, warehouse_id, current_qty, available_qty, avg_cost, updated_at)
+            VALUES (@TenantId, @ItemId, @WarehouseId, @Qty, @Qty, 0, @Now)
+            ON DUPLICATE KEY UPDATE
+                current_qty = current_qty + @Qty,
+                available_qty = available_qty + @Qty,
+                updated_at = @Now
+            """;
+        await _dbConnection.ExecuteAsync(new CommandDefinition(upsertTo, new
+        {
+            TenantId = tenantId, req.ItemId, WarehouseId = req.ToWarehouseId, req.Qty, Now = now
+        }, cancellationToken: ct)).ConfigureAwait(false);
+    }
+
+    /// <summary>재고 이송 이력 조회</summary>
+    public async Task<List<StockTransferDto>> GetTransferHistoryAsync(string tenantId, DateTime? from, DateTime? to, CancellationToken ct = default)
+    {
+        await EnsureOpenAsync(ct).ConfigureAwait(false);
+
+        const string sql = """
+            SELECT l.ledger_id AS LedgerId, l.ledger_date AS TransferDate,
+                   i.item_name AS ItemName, COALESCE(i.spec, '') AS Spec,
+                   COALESCE(wf.wh_name, '') AS FromWarehouse,
+                   COALESCE(wt.wh_name, '') AS ToWarehouse,
+                   l.qty_out AS Qty, l.memo AS Memo, l.created_by AS CreatedBy
+            FROM stock_ledger l
+            JOIN items i ON i.item_id = l.item_id AND i.tenant_id = l.tenant_id
+            LEFT JOIN warehouses wf ON wf.warehouse_id = l.warehouse_id AND wf.tenant_id = l.tenant_id
+            LEFT JOIN stock_ledger l2 ON l2.tenant_id = l.tenant_id
+                AND l2.item_id = l.item_id AND l2.source_type = 'transfer' AND l2.move_type = 'in'
+                AND l2.created_at = l.created_at AND l2.created_by = l.created_by
+            LEFT JOIN warehouses wt ON wt.warehouse_id = l2.warehouse_id AND wt.tenant_id = l2.tenant_id
+            WHERE l.tenant_id = @TenantId
+              AND l.source_type = 'transfer'
+              AND l.move_type = 'out'
+              AND (@From IS NULL OR l.ledger_date >= @From)
+              AND (@To IS NULL OR l.ledger_date <= @To)
+            ORDER BY l.created_at DESC
+            """;
+        var rows = await _dbConnection.QueryAsync<StockTransferDto>(
+            new CommandDefinition(sql, new { TenantId = tenantId, From = from, To = to }, cancellationToken: ct)).ConfigureAwait(false);
+        return rows.ToList();
+    }
+
+    // ── 창고 분리 현황 ──
+
+    /// <summary>창고별 재고 현황 (자사/위탁 분리)</summary>
+    public async Task<List<WarehouseSplitDto>> GetWarehouseSplitAsync(string tenantId, CancellationToken ct = default)
+    {
+        await EnsureOpenAsync(ct).ConfigureAwait(false);
+
+        const string sql = """
+            SELECT w.warehouse_id AS WarehouseId, w.wh_code AS WhCode, w.wh_name AS WhName,
+                   COALESCE(w.wh_type, 'normal') AS WhType, COALESCE(w.location, '') AS Location,
+                   COUNT(DISTINCT s.item_id) AS ItemCount,
+                   COALESCE(SUM(s.current_qty), 0) AS TotalQty,
+                   COALESCE(SUM(s.current_qty * s.avg_cost), 0) AS TotalValue
+            FROM warehouses w
+            LEFT JOIN item_stock s ON s.warehouse_id = w.warehouse_id AND s.tenant_id = w.tenant_id
+            WHERE w.tenant_id = @TenantId AND w.is_active = 1
+            GROUP BY w.warehouse_id, w.wh_code, w.wh_name, w.wh_type, w.location
+            ORDER BY w.wh_type, w.wh_code
+            """;
+        var rows = await _dbConnection.QueryAsync<WarehouseSplitDto>(
+            new CommandDefinition(sql, new { TenantId = tenantId }, cancellationToken: ct)).ConfigureAwait(false);
+        return rows.ToList();
+    }
+
+    /// <summary>DB 연결 열기 헬퍼</summary>
+    private async Task EnsureOpenAsync(CancellationToken ct)
+    {
+        if (_dbConnection.State != ConnectionState.Open)
+        {
+            if (_dbConnection is System.Data.Common.DbConnection c)
+                await c.OpenAsync(ct).ConfigureAwait(false);
+            else
+                _dbConnection.Open();
+        }
     }
 }

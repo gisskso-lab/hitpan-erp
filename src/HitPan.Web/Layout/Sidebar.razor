@@ -1,7 +1,9 @@
 ﻿@using HitPan.Web.Helpers
 @using HitPan.Web.Models
+@using HitPan.Web.Services
 @inject AuthenticationStateProvider AuthStateProvider
 @inject WorkTabService TabService
+@inject ApprovalService ApprovalSvc
 
 <MudNavMenu>
     <MudNavLink Href="/dashboard" Icon="@Icons.Material.Filled.Dashboard">
@@ -9,7 +11,13 @@
     </MudNavLink>
 
     <MudNavGroup Title="결재함" Icon="@Icons.Material.Filled.Notifications" Expanded="false">
-        <MudNavLink Href="/approval/pending" Icon="@Icons.Material.Filled.HourglassTop">결재 대기</MudNavLink>
+        <MudNavLink Href="/approval/pending" Icon="@Icons.Material.Filled.HourglassTop">
+            결재 대기
+            @if (_approvalPendingCount > 0)
+            {
+                <MudChip T="string" Size="Size.Small" Color="Color.Error" Variant="Variant.Filled" Class="ml-2">@_approvalPendingCount</MudChip>
+            }
+        </MudNavLink>
         <MudNavLink Href="/approval/sent" Icon="@Icons.Material.Filled.Send">내가 보낸 결재</MudNavLink>
         <MudNavLink Href="/approval/completed" Icon="@Icons.Material.Filled.CheckCircle">완료된 결재</MudNavLink>
     </MudNavGroup>
@@ -21,6 +29,7 @@
         <MudNavLink Href="/settings" Icon="@Icons.Material.Filled.Tune">사용환경 설정</MudNavLink>
         <MudNavLink Href="/print-settings" Icon="@Icons.Material.Filled.Print">양식(인쇄)정보 설정</MudNavLink>
         <MudNavLink Href="/settings/approval" Icon="@Icons.Material.Filled.Rule">결재 설정</MudNavLink>
+        <MudNavLink Href="/settings/mdb-migration" Icon="@Icons.Material.Filled.SwapHoriz">데이터 이관</MudNavLink>
     </MudNavGroup>
 
     <MudNavGroup Title="업체 관리" Icon="@Icons.Material.Filled.Business" Expanded="false">
@@ -79,9 +88,11 @@
         <MudNavLink Href="/accounting/cashbook" Icon="@Icons.Material.Filled.AccountBalanceWallet">현금출납장</MudNavLink>
         <MudNavLink Href="/accounting/purchase-sales" Icon="@Icons.Material.Filled.MenuBook">매입매출장</MudNavLink>
         <MudNavLink Href="/accounting/vat" Icon="@Icons.Material.Filled.RequestPage">부가세 신고자료</MudNavLink>
+        <MudNavLink Href="/tax-invoice-stats" Icon="@Icons.Material.Filled.BarChart">세금계산서 통계</MudNavLink>
         <MudNavLink Href="/accounting/expenses" Icon="@Icons.Material.Filled.Receipt">경비 처리</MudNavLink>
         <MudNavLink Href="/accounting/profit" Icon="@Icons.Material.Filled.TrendingUp">손익 현황</MudNavLink>
-        <MudNavLink Href="/accounting/export" Icon="@Icons.Material.Filled.FileDownload">세무사 자료 내보내기</MudNavLink>
+        <MudNavLink Href="/accounting/export" Icon="@Icons.Material.Filled.Send">세무사 자료 보내기</MudNavLink>
+        <MudNavLink Href="/accounting/monthly-closing" Icon="@Icons.Material.Filled.Lock">월마감</MudNavLink>
     </MudNavGroup>
 
     <MudNavGroup Title="인사·근태" Icon="@Icons.Material.Filled.Badge" Expanded="false">
@@ -113,11 +124,16 @@
 
 @code {
     private string AccountType { get; set; } = string.Empty;
+    private int _approvalPendingCount;
 
     protected override async Task OnInitializedAsync()
     {
         var state = await AuthStateProvider.GetAuthenticationStateAsync();
         AccountType = AccountTypeHelper.GetAccountType(state.User);
+
+        // 결재 대기 건수 로딩
+        try { var pending = await ApprovalSvc.GetPendingAsync(); _approvalPendingCount = pending.Count; }
+        catch { _approvalPendingCount = 0; }
     }
 
     private bool IsPlatformAdmin =>

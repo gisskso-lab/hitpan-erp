@@ -1,12 +1,268 @@
 @page "/settings/approval"
 @namespace HitPan.Web.Pages.SettingsUi
 @attribute [Authorize]
+@using HitPan.Web.Models
+@using HitPan.Web.Services
+@inject ApprovalService ApprovalSvc
+@inject EmployeeService EmployeeSvc
+@inject ISnackbar Snackbar
 
 <PageTitle>결재 설정</PageTitle>
-<MudContainer MaxWidth="MaxWidth.Small" Class="d-flex align-center justify-center" Style="height:calc(100vh - 120px)">
-    <MudPaper Class="pa-8 text-center" Elevation="0">
-        <MudIcon Icon="@Icons.Material.Filled.Rule" Size="Size.Large" Color="Color.Primary" Class="mb-4" />
-        <MudText Typo="Typo.h5" Class="mb-2">결재 설정</MudText>
-        <MudText Typo="Typo.body1" Color="Color.Secondary">준비중입니다.</MudText>
+
+<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
+    <MudText Typo="Typo.h6">결재 설정</MudText>
+    <MudText Style="font-size:12px;color:var(--mud-palette-text-secondary)">
+        문서유형별 결재 ON/OFF · 기준금액 · 결재라인 · 위임결재
+    </MudText>
+</div>
+
+@if (_loading)
+{
+    <MudProgressLinear Indeterminate="true" Color="Color.Primary" />
+}
+else
+{
+    @* ── 1. 문서유형별 결재 ON/OFF 설정 ── *@
+    <MudPaper Elevation="0" Class="pa-4 mb-4" Style="border:0.5px solid var(--mud-palette-lines-default);border-radius:12px">
+        <MudText Typo="Typo.subtitle2" Class="mb-3">문서유형별 결재 사용</MudText>
+        <MudTable Items="_settings" Dense="true" Hover="true">
+            <HeaderContent>
+                <MudTh>문서유형</MudTh>
+                <MudTh Style="width:80px;text-align:center">사용</MudTh>
+                <MudTh Style="width:160px">기준금액</MudTh>
+                <MudTh Style="width:100px;text-align:center">미만 자동승인</MudTh>
+                <MudTh Style="width:80px">최대라인</MudTh>
+                <MudTh Style="width:120px">결재라인</MudTh>
+            </HeaderContent>
+            <RowTemplate>
+                <MudTd>@context.DocTypeLabel</MudTd>
+                <MudTd Style="text-align:center">
+                    <MudSwitch T="bool" Value="context.IsEnabled" ValueChanged="@(v => OnToggle(context, v))" Color="Color.Primary" />
+                </MudTd>
+                <MudTd>
+                    <MudNumericField T="decimal" Value="context.ThresholdAmount"
+                        ValueChanged="@(v => OnThresholdChange(context, v))"
+                        Variant="Variant.Outlined" Margin="Margin.Dense" Format="N0"
+                        Disabled="@(!context.IsEnabled)" />
+                </MudTd>
+                <MudTd Style="text-align:center">
+                    <MudCheckBox T="bool" Value="context.AutoApproveBelow"
+                        ValueChanged="@(v => OnAutoApproveChange(context, v))"
+                        Disabled="@(!context.IsEnabled || context.ThresholdAmount <= 0)" />
+                </MudTd>
+                <MudTd>
+                    <MudNumericField T="int" Value="context.MaxLines"
+                        ValueChanged="@(v => OnMaxLinesChange(context, v))"
+                        Variant="Variant.Outlined" Margin="Margin.Dense" Min="1" Max="5"
+                        Disabled="@(!context.IsEnabled)" />
+                </MudTd>
+                <MudTd>
+                    <MudButton Variant="Variant.Text" Color="Color.Primary" Size="Size.Small"
+                        StartIcon="@Icons.Material.Filled.Settings"
+                        OnClick="@(() => OpenLineEditor(context.DocType, context.DocTypeLabel))"
+                        Disabled="@(!context.IsEnabled)">설정</MudButton>
+                </MudTd>
+            </RowTemplate>
+        </MudTable>
     </MudPaper>
-</MudContainer>
+
+    @* ── 2. 결재라인 편집 영역 ── *@
+    @if (_editingDocType is not null)
+    {
+        <MudPaper Elevation="0" Class="pa-4 mb-4" Style="border:0.5px solid var(--mud-palette-lines-default);border-radius:12px">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+                <MudText Typo="Typo.subtitle2">@_editingDocTypeLabel 결재라인</MudText>
+                <MudButton Variant="Variant.Outlined" Size="Size.Small" StartIcon="@Icons.Material.Filled.Add" OnClick="AddLine">추가</MudButton>
+            </div>
+
+            <MudTable Items="_lines" Dense="true" Hover="true">
+                <HeaderContent>
+                    <MudTh Style="width:50px">순서</MudTh>
+                    <MudTh>결재자</MudTh>
+                    <MudTh Style="width:100px">직책라벨</MudTh>
+                    <MudTh>위임결재자</MudTh>
+                    <MudTh Style="width:130px">위임시작일</MudTh>
+                    <MudTh Style="width:130px">위임종료일</MudTh>
+                    <MudTh Style="width:60px"></MudTh>
+                </HeaderContent>
+                <RowTemplate>
+                    <MudTd>@context.SeqNo</MudTd>
+                    <MudTd>
+                        <MudAutocomplete T="EmployeeListItemModel" Label="결재자"
+                            Value="_employeeLookup.GetValueOrDefault(context.ApproverId)"
+                            ValueChanged="@(e => OnApproverChanged(context, e))"
+                            SearchFunc="SearchEmployee" ToStringFunc="@(e => e?.EmpName ?? "")"
+                            Variant="Variant.Outlined" Margin="Margin.Dense" Dense="true" />
+                    </MudTd>
+                    <MudTd>
+                        <MudTextField T="string" @bind-Value="context.RoleLabel" Variant="Variant.Outlined" Margin="Margin.Dense" Placeholder="팀장, 부장 등" />
+                    </MudTd>
+                    <MudTd>
+                        <MudAutocomplete T="EmployeeListItemModel" Label="위임자"
+                            Value="GetEmployee(context.DelegateId)"
+                            ValueChanged="@(e => OnDelegateChanged(context, e))"
+                            SearchFunc="SearchEmployee" ToStringFunc="@(e => e?.EmpName ?? "")"
+                            Variant="Variant.Outlined" Margin="Margin.Dense" Dense="true" />
+                    </MudTd>
+                    <MudTd>
+                        <MudDatePicker Date="context.DelegateStart" DateChanged="@(d => context.DelegateStart = d)"
+                            Variant="Variant.Outlined" Margin="Margin.Dense" Placeholder="시작일" Style="min-width:130px" />
+                    </MudTd>
+                    <MudTd>
+                        <MudDatePicker Date="context.DelegateEnd" DateChanged="@(d => context.DelegateEnd = d)"
+                            Variant="Variant.Outlined" Margin="Margin.Dense" Placeholder="종료일" Style="min-width:130px" />
+                    </MudTd>
+                    <MudTd>
+                        <MudIconButton Icon="@Icons.Material.Filled.Delete" Size="Size.Small" Color="Color.Error" OnClick="@(() => RemoveLine(context))" />
+                    </MudTd>
+                </RowTemplate>
+            </MudTable>
+
+            <MudToolBar Dense="true" Class="pa-1 gap-1 mt-2">
+                <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Save" OnClick="SaveLinesAsync">라인 저장</MudButton>
+                <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Close" OnClick="CloseLineEditor">닫기</MudButton>
+            </MudToolBar>
+        </MudPaper>
+    }
+}
+
+@code {
+    // 결재 설정 목록
+    private List<ApprovalSettingModel> _settings = new();
+    // 결재 라인 편집
+    private string? _editingDocType;
+    private string? _editingDocTypeLabel;
+    private List<ApprovalLineItemModel> _lines = new();
+    // 사원 목록 (결재자 선택용)
+    private List<EmployeeListItemModel> _employees = new();
+    private Dictionary<string, EmployeeListItemModel> _employeeLookup = new();
+    private bool _loading = true;
+
+    protected override async Task OnInitializedAsync()
+    {
+        _settings = await ApprovalSvc.GetSettingsAsync();
+        _employees = await EmployeeSvc.GetListAsync();
+        _employeeLookup = _employees.ToDictionary(e => e.EmployeeId, e => e);
+        _loading = false;
+    }
+
+    // ── 설정 토글/변경 → 즉시 저장 ──
+
+    private async Task OnToggle(ApprovalSettingModel s, bool v)
+    {
+        s.IsEnabled = v;
+        await SaveSettingAsync(s);
+    }
+
+    private async Task OnThresholdChange(ApprovalSettingModel s, decimal v)
+    {
+        s.ThresholdAmount = v;
+        await SaveSettingAsync(s);
+    }
+
+    private async Task OnAutoApproveChange(ApprovalSettingModel s, bool v)
+    {
+        s.AutoApproveBelow = v;
+        await SaveSettingAsync(s);
+    }
+
+    private async Task OnMaxLinesChange(ApprovalSettingModel s, int v)
+    {
+        s.MaxLines = v;
+        await SaveSettingAsync(s);
+    }
+
+    private async Task SaveSettingAsync(ApprovalSettingModel s)
+    {
+        var ok = await ApprovalSvc.SaveSettingAsync(new SaveApprovalSettingModel
+        {
+            DocType = s.DocType,
+            IsEnabled = s.IsEnabled,
+            ThresholdAmount = s.ThresholdAmount,
+            AutoApproveBelow = s.AutoApproveBelow,
+            MaxLines = s.MaxLines
+        });
+        if (ok) Snackbar.Add($"{s.DocTypeLabel} 설정 저장됨", Severity.Success);
+        else Snackbar.Add("저장 실패", Severity.Error);
+    }
+
+    // ── 결재라인 편집 ──
+
+    private async Task OpenLineEditor(string docType, string label)
+    {
+        _editingDocType = docType;
+        _editingDocTypeLabel = label;
+        var existing = await ApprovalSvc.GetLinesAsync(docType);
+        _lines = existing.Select(l => new ApprovalLineItemModel
+        {
+            SeqNo = l.SeqNo,
+            ApproverId = l.ApproverId,
+            ApproverName = l.ApproverName,
+            RoleLabel = l.RoleLabel,
+            DelegateId = l.DelegateId,
+            DelegateName = l.DelegateName,
+            DelegateStart = l.DelegateStart,
+            DelegateEnd = l.DelegateEnd
+        }).ToList();
+        StateHasChanged();
+    }
+
+    private void CloseLineEditor()
+    {
+        _editingDocType = null;
+        _lines.Clear();
+    }
+
+    private void AddLine()
+    {
+        _lines.Add(new ApprovalLineItemModel { SeqNo = _lines.Count + 1 });
+    }
+
+    private void RemoveLine(ApprovalLineItemModel line)
+    {
+        _lines.Remove(line);
+        for (var i = 0; i < _lines.Count; i++)
+            _lines[i].SeqNo = i + 1;
+    }
+
+    private void OnApproverChanged(ApprovalLineItemModel line, EmployeeListItemModel? emp)
+    {
+        if (emp is null) return;
+        line.ApproverId = emp.EmployeeId;
+        line.ApproverName = emp.EmpName;
+    }
+
+    private void OnDelegateChanged(ApprovalLineItemModel line, EmployeeListItemModel? emp)
+    {
+        if (emp is null) { line.DelegateId = null; line.DelegateName = null; return; }
+        line.DelegateId = emp.EmployeeId;
+        line.DelegateName = emp.EmpName;
+    }
+
+    private async Task SaveLinesAsync()
+    {
+        if (_editingDocType is null) return;
+        var ok = await ApprovalSvc.SaveLinesAsync(new SaveApprovalLinesModel
+        {
+            DocType = _editingDocType,
+            Lines = _lines
+        });
+        if (ok) Snackbar.Add("결재라인 저장됨", Severity.Success);
+        else Snackbar.Add("저장 실패", Severity.Error);
+    }
+
+    private EmployeeListItemModel? GetEmployee(string? id)
+    {
+        if (string.IsNullOrEmpty(id)) return null;
+        return _employeeLookup.GetValueOrDefault(id);
+    }
+
+    private Task<IEnumerable<EmployeeListItemModel>> SearchEmployee(string? value, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+            return Task.FromResult(_employees.AsEnumerable());
+        return Task.FromResult(_employees.Where(e =>
+            e.EmpName.Contains(value, StringComparison.OrdinalIgnoreCase) ||
+            e.EmpNo.Contains(value, StringComparison.OrdinalIgnoreCase)));
+    }
+}

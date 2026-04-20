@@ -7,6 +7,8 @@ public sealed class RateLimitMiddleware
     private readonly RequestDelegate _next;
     private static readonly ConcurrentDictionary<string, (int Count, DateTime Window)> LoginAttempts = new();
     private static readonly ConcurrentDictionary<string, (int Count, DateTime Window)> ApiRequests = new();
+    private static readonly ConcurrentDictionary<string, (int Count, DateTime Window)> WriteRequests = new();
+    private static readonly ConcurrentDictionary<string, (int Count, DateTime Window)> ExportRequests = new();
 
     public RateLimitMiddleware(RequestDelegate next)
     {
@@ -31,6 +33,38 @@ public sealed class RateLimitMiddleware
             }
         }
 
+        // 쓰기 요청 (POST/PUT/DELETE) — 분당 60회 제한
+        if (path.StartsWith("/api/", StringComparison.Ordinal) &&
+            context.Request.Method is "POST" or "PUT" or "DELETE")
+        {
+            if (!CheckRateLimit(WriteRequests, ip, maxCount: 60, windowSeconds: 60))
+            {
+                context.Response.StatusCode = StatusCodes.Status429TooManyRequests;
+                await context.Response.WriteAsJsonAsync(new
+                {
+                    message = "쓰기 요청이 너무 많습니다. 잠시 후 다시 시도해주세요."
+                }).ConfigureAwait(false);
+                return;
+            }
+        }
+
+        // 내보내기/리포트 — 분당 10회 제한 (PDF/엑셀 생성은 무거움)
+        if (path.Contains("/export", StringComparison.Ordinal) ||
+            path.Contains("/pdf", StringComparison.Ordinal) ||
+            path.Contains("/excel", StringComparison.Ordinal))
+        {
+            if (!CheckRateLimit(ExportRequests, ip, maxCount: 10, windowSeconds: 60))
+            {
+                context.Response.StatusCode = StatusCodes.Status429TooManyRequests;
+                await context.Response.WriteAsJsonAsync(new
+                {
+                    message = "내보내기 요청이 너무 많습니다. 잠시 후 다시 시도해주세요."
+                }).ConfigureAwait(false);
+                return;
+            }
+        }
+
+        // 전체 API — 분당 300회 제한
         if (path.StartsWith("/api/", StringComparison.Ordinal))
         {
             if (!CheckRateLimit(ApiRequests, ip, maxCount: 300, windowSeconds: 60))

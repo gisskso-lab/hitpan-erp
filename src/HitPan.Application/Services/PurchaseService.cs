@@ -141,6 +141,9 @@ public class PurchaseService : IPurchaseService
             throw new InvalidOperationException("draft 상태 전표만 확정할 수 있습니다.");
         }
 
+        // 월마감 체크 — 마감된 월의 전표 확정 차단
+        await ApprovalTriggerHelper.EnsureNotClosedAsync(_db, receipt.TenantId, receipt.ReceiptDate, ct);
+
         var receiptItems = await receiptItemRepo.FindAsync(x => x.ReceiptId == receiptId);
 
         if (!string.IsNullOrWhiteSpace(receipt.PoId))
@@ -244,6 +247,18 @@ public class PurchaseService : IPurchaseService
         receiptRepo.Update(receipt);
 
         await _unitOfWork.SaveChangesAsync(ct);
+
+        // monthly_summary 매입 갱신
+        await ApprovalTriggerHelper.UpdateMonthlySummaryAsync(_db,
+            receipt.TenantId, receipt.ReceiptDate,
+            0, receipt.TotalAmount + receipt.VatAmount, ct);
+
+        // 결재 트리거
+        await ApprovalTriggerHelper.TryCreateApprovalAsync(_db,
+            "receipt", receipt.ReceiptId, receipt.ReceiptNo,
+            $"매입명세서 확정: {receipt.ReceiptNo}",
+            receipt.TotalAmount + receipt.VatAmount,
+            receipt.TenantId, "system", "확정자", ct);
     }
 
     public async Task<List<PurchaseOrderListDto>> GetOrdersAsync(
@@ -510,4 +525,6 @@ public class PurchaseService : IPurchaseService
 
         return (returnId, returnNo);
     }
+
+    // 결재 트리거는 ApprovalTriggerHelper.TryCreateApprovalAsync로 통합됨
 }

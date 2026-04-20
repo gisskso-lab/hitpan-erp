@@ -1,12 +1,69 @@
 @page "/hr/overtime"
 @namespace HitPan.Web.Pages.HrUi
 @attribute [Authorize]
+@using HitPan.Web.Models
+@using HitPan.Web.Services
+@inject HrClientService HrSvc
+@inject ISnackbar Snackbar
 
-<PageTitle>초과근무 현황</PageTitle>
-<MudContainer MaxWidth="MaxWidth.Small" Class="d-flex align-center justify-center" Style="height:calc(100vh - 120px)">
-    <MudPaper Class="pa-8 text-center" Elevation="0">
-        <MudIcon Icon="@Icons.Material.Filled.MoreTime" Size="Size.Large" Color="Color.Warning" Class="mb-4" />
-        <MudText Typo="Typo.h5" Class="mb-2">초과근무 현황</MudText>
-        <MudText Typo="Typo.body1" Color="Color.Secondary">준비중입니다.</MudText>
-    </MudPaper>
-</MudContainer>
+<PageTitle>초과근무</PageTitle>
+<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
+    <MudText Typo="Typo.h6">초과근무</MudText>
+</div>
+
+<MudPaper Elevation="0" Class="pa-4 mb-3" Style="border:0.5px solid var(--mud-palette-lines-default);border-radius:12px">
+    <MudText Typo="Typo.subtitle2" Class="mb-3">초과근무 신청</MudText>
+    <MudGrid Spacing="2">
+        <MudItem xs="12" md="2"><MudDatePicker Label="근무일" @bind-Date="_editDate" Variant="Variant.Outlined" Margin="Margin.Dense" Style="min-width:160px" /></MudItem>
+        <MudItem xs="12" md="2"><MudTimePicker Label="시작" @bind-Time="_startTime" Variant="Variant.Outlined" Margin="Margin.Dense" /></MudItem>
+        <MudItem xs="12" md="2"><MudTimePicker Label="종료" @bind-Time="_endTime" Variant="Variant.Outlined" Margin="Margin.Dense" /></MudItem>
+        <MudItem xs="12" md="2">
+            <MudSelect T="string" Label="유형" @bind-Value="_edit.OvertimeType" Variant="Variant.Outlined" Margin="Margin.Dense">
+                <MudSelectItem Value="@("weekday")">평일</MudSelectItem>
+                <MudSelectItem Value="@("weekend")">주말</MudSelectItem>
+                <MudSelectItem Value="@("holiday")">공휴일</MudSelectItem>
+            </MudSelect>
+        </MudItem>
+        <MudItem xs="12" md="2"><MudTextField T="string" Label="사유" @bind-Value="_edit.Reason" Variant="Variant.Outlined" Margin="Margin.Dense" /></MudItem>
+        <MudItem xs="12" md="2"><MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="SaveAsync" Class="mt-1" FullWidth="true">신청</MudButton></MudItem>
+    </MudGrid>
+</MudPaper>
+
+<MudPaper Elevation="0" Class="pa-2" Style="border:0.5px solid var(--mud-palette-lines-default);border-radius:12px">
+    <MudTable Items="_items" Dense="true" Hover="true" Striped="true">
+        <HeaderContent>
+            <MudTh>날짜</MudTh><MudTh>사원</MudTh><MudTh>시작</MudTh><MudTh>종료</MudTh>
+            <MudTh Style="text-align:right">시간</MudTh><MudTh>유형</MudTh><MudTh>사유</MudTh><MudTh>상태</MudTh>
+        </HeaderContent>
+        <RowTemplate>
+            <MudTd>@context.WorkDate.ToString("yyyy-MM-dd")</MudTd>
+            <MudTd>@context.EmployeeName</MudTd>
+            <MudTd>@context.StartTime.ToString(@"hh\:mm")</MudTd>
+            <MudTd>@context.EndTime.ToString(@"hh\:mm")</MudTd>
+            <MudTd Style="text-align:right">@context.Hours.ToString("N1")h</MudTd>
+            <MudTd>@(context.OvertimeType switch { "weekday" => "평일", "weekend" => "주말", "holiday" => "공휴일", _ => context.OvertimeType })</MudTd>
+            <MudTd>@context.Reason</MudTd>
+            <MudTd><MudChip T="string" Size="Size.Small" Variant="Variant.Filled" Color="@(context.Status == "approved" ? Color.Success : context.Status == "rejected" ? Color.Error : Color.Warning)">@(context.Status switch { "approved" => "승인", "rejected" => "반려", _ => "대기" })</MudChip></MudTd>
+        </RowTemplate>
+    </MudTable>
+</MudPaper>
+
+@code {
+    private List<OvertimeModel> _items = new();
+    private CreateOvertimeModel _edit = new();
+    private DateTime? _editDate = DateTime.Today;
+    private TimeSpan? _startTime = new(18, 0, 0);
+    private TimeSpan? _endTime = new(21, 0, 0);
+
+    protected override async Task OnInitializedAsync() { _items = await HrSvc.GetOvertimeAsync(); }
+
+    private async Task SaveAsync()
+    {
+        _edit.WorkDate = _editDate ?? DateTime.Today;
+        _edit.StartTime = _startTime ?? new(18, 0, 0);
+        _edit.EndTime = _endTime ?? new(21, 0, 0);
+        var ok = await HrSvc.CreateOvertimeAsync(_edit);
+        if (ok) { Snackbar.Add("신청 완료", Severity.Success); _edit = new(); _items = await HrSvc.GetOvertimeAsync(); }
+        else Snackbar.Add("신청 실패", Severity.Error);
+    }
+}

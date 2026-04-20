@@ -1,0 +1,54 @@
+@namespace HitPan.Web.Pages.HrUi
+@inject HitPan.Web.Services.LeaveRequestService LeaveService
+
+<MudDialog>
+    <DialogContent>
+        <MudText Class="mb-3">@EmployeeName 님의 연차 신청을 반려합니다.</MudText>
+        <MudTextField @bind-Value="_reason" Label="반려 사유" Variant="Variant.Outlined" Margin="Margin.Dense"
+                      Lines="3" Required="true" RequiredError="반려 사유를 입력하세요."
+                      Placeholder="반려 사유를 입력하세요." />
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="Cancel" Color="Color.Default" Variant="Variant.Text">취소</MudButton>
+        <MudButton OnClick="Submit" Color="Color.Error" Variant="Variant.Filled" Disabled="@(string.IsNullOrWhiteSpace(_reason) || _submitting)">
+            @if (_submitting) { <MudProgressCircular Size="Size.Small" Indeterminate="true" Class="mr-2" /> }
+            반려
+        </MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private IMudDialogInstance MudDialog { get; set; } = null!;
+
+    [Parameter] public string RequestId { get; set; } = string.Empty;
+    [Parameter] public string EmployeeName { get; set; } = string.Empty;
+
+    private string _reason = string.Empty;
+    private bool _submitting;
+
+    private void Cancel() => MudDialog.Cancel();
+
+    /// <summary>
+    /// 반려 API를 호출한다.
+    /// </summary>
+    private async Task Submit()
+    {
+        if (string.IsNullOrWhiteSpace(_reason)) return;
+
+        _submitting = true;
+        StateHasChanged();
+
+        var success = await LeaveService.RejectAsync(RequestId, _reason);
+
+        _submitting = false;
+
+        if (success)
+        {
+            MudDialog.Close(DialogResult.Ok(true));
+        }
+        else
+        {
+            MudDialog.Cancel();
+        }
+    }
+}

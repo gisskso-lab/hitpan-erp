@@ -405,6 +405,33 @@ public class BomService : IBomService
             new { TenantId = tenantId, ItemId = bom.ProductItemId, Qty = dto.ProduceQty, UnitCost = unitProductionCost },
             cancellationToken: ct)).ConfigureAwait(false);
 
+        // stock_ledger에 BOM 생산 기록 (수불부 정합성)
+        // 자재 출고
+        foreach (var mat in materials)
+        {
+            await _db.ExecuteAsync(new CommandDefinition(
+                """
+                INSERT INTO stock_ledger (tenant_id, item_id, warehouse_id, ledger_date, ym,
+                  move_type, source_type, source_id, doc_no, qty_in, qty_out, unit_cost, supply_amount)
+                VALUES (@TenantId, @ItemId, 'default', CURDATE(), DATE_FORMAT(CURDATE(),'%Y-%m'),
+                  'out', 'bom_production', @BomId, @DocNo, 0, @Qty, @Cost, @Qty * @Cost)
+                """,
+                new { TenantId = tenantId, ItemId = mat.ItemId, BomId = dto.BomId,
+                      DocNo = bom.BomName, Qty = mat.UsedQty, Cost = mat.UnitCost },
+                cancellationToken: ct)).ConfigureAwait(false);
+        }
+        // 완성품 입고
+        await _db.ExecuteAsync(new CommandDefinition(
+            """
+            INSERT INTO stock_ledger (tenant_id, item_id, warehouse_id, ledger_date, ym,
+              move_type, source_type, source_id, doc_no, qty_in, qty_out, unit_cost, supply_amount)
+            VALUES (@TenantId, @ItemId, 'default', CURDATE(), DATE_FORMAT(CURDATE(),'%Y-%m'),
+              'in', 'bom_production', @BomId, @DocNo, @Qty, 0, @Cost, @Qty * @Cost)
+            """,
+            new { TenantId = tenantId, ItemId = bom.ProductItemId, BomId = dto.BomId,
+                  DocNo = bom.BomName, Qty = dto.ProduceQty, Cost = unitProductionCost },
+            cancellationToken: ct)).ConfigureAwait(false);
+
         await _events.PublishAsync(
             "bom.assembled",
             new BomAssembledEvent(

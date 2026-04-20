@@ -1,12 +1,55 @@
 @page "/accounting/profit"
 @namespace HitPan.Web.Pages.FinanceUi
 @attribute [Authorize]
+@using HitPan.Web.Models
+@using HitPan.Web.Services
+@inject FinanceClientService FinSvc
 
 <PageTitle>손익 현황</PageTitle>
-<MudContainer MaxWidth="MaxWidth.Small" Class="d-flex align-center justify-center" Style="height:calc(100vh - 120px)">
-    <MudPaper Class="pa-8 text-center" Elevation="0">
-        <MudIcon Icon="@Icons.Material.Filled.Construction" Size="Size.Large" Color="Color.Warning" Class="mb-4" />
-        <MudText Typo="Typo.h5" Class="mb-2">손익 현황</MudText>
-        <MudText Typo="Typo.body1" Color="Color.Secondary">준비중입니다.</MudText>
-    </MudPaper>
-</MudContainer>
+<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
+    <MudText Typo="Typo.h6">손익 현황</MudText>
+</div>
+
+<MudPaper Elevation="0" Class="pa-2 mb-3" Style="border:0.5px solid var(--mud-palette-lines-default);border-radius:12px">
+    <MudGrid Spacing="2" Class="pa-2">
+        <MudItem xs="6" md="2">
+            <MudNumericField T="int" Label="년도" @bind-Value="_year" Variant="Variant.Outlined" Margin="Margin.Dense" />
+        </MudItem>
+        <MudItem xs="12" md="2"><MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="LoadAsync">조회</MudButton></MudItem>
+        <MudItem xs="12" md="8" Style="text-align:right">
+            <MudText Typo="Typo.subtitle2" Class="mt-2">
+                연간 매출: @_items.Sum(x => x.SalesAmount).ToString("N0")원 | 순이익: @_items.Sum(x => x.NetProfit).ToString("N0")원
+            </MudText>
+        </MudItem>
+    </MudGrid>
+</MudPaper>
+
+<MudPaper Elevation="0" Class="pa-2" Style="border:0.5px solid var(--mud-palette-lines-default);border-radius:12px">
+    <MudTable Items="_items" Dense="true" Hover="true" Striped="true">
+        <HeaderContent>
+            <MudTh>월</MudTh>
+            <MudTh Style="text-align:right">매출</MudTh>
+            <MudTh Style="text-align:right">매입</MudTh>
+            <MudTh Style="text-align:right">매출총이익</MudTh>
+            <MudTh Style="text-align:right">경비</MudTh>
+            <MudTh Style="text-align:right;font-weight:600">순이익</MudTh>
+            <MudTh Style="text-align:right">이익률</MudTh>
+        </HeaderContent>
+        <RowTemplate>
+            <MudTd Style="font-weight:500">@context.YearMonthLabel</MudTd>
+            <MudTd Style="text-align:right">@context.SalesAmount.ToString("N0")</MudTd>
+            <MudTd Style="text-align:right">@context.PurchaseAmount.ToString("N0")</MudTd>
+            <MudTd Style="text-align:right">@context.GrossProfit.ToString("N0")</MudTd>
+            <MudTd Style="text-align:right">@context.ExpenseAmount.ToString("N0")</MudTd>
+            <MudTd Style="@($"text-align:right;font-weight:600;color:{(context.NetProfit >= 0 ? "#16A34A" : "#DC2626")}")">@context.NetProfit.ToString("N0")</MudTd>
+            <MudTd Style="text-align:right">@context.ProfitRate.ToString("N1")%</MudTd>
+        </RowTemplate>
+    </MudTable>
+</MudPaper>
+
+@code {
+    private List<ProfitSummaryModel> _items = new();
+    private int _year = DateTime.Today.Year;
+    protected override async Task OnInitializedAsync() => await LoadAsync();
+    private async Task LoadAsync() { _items = await FinSvc.GetProfitAsync(_year); StateHasChanged(); }
+}

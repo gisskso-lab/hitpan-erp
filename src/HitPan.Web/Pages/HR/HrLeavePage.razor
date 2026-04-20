@@ -1,29 +1,258 @@
 @page "/hr/leave"
 @namespace HitPan.Web.Pages.HrUi
 @attribute [Authorize]
+@inject HitPan.Web.Services.LeaveRequestService LeaveService
+@inject ISnackbar Snackbar
+@inject IDialogService DialogService
 
-<PageTitle>휴가·연차</PageTitle>
-<MudText Typo="Typo.h6" Class="mb-3">휴가·연차</MudText>
+<PageTitle>휴가·연차 관리</PageTitle>
+<MudText Typo="Typo.h6" Class="mb-3">휴가·연차 관리</MudText>
 
+@* === KPI 카드 === *@
+<MudGrid Spacing="3" Class="mb-4">
+    <MudItem xs="12" sm="4">
+        <MudPaper Elevation="0" Class="pa-4 text-center" Style="border:1px solid var(--mud-palette-lines-default);border-radius:12px">
+            <MudText Typo="Typo.caption" Color="Color.Default">총 연차</MudText>
+            <MudText Typo="Typo.h4" Color="Color.Primary">@_totalLeave<span style="font-size:0.5em">일</span></MudText>
+        </MudPaper>
+    </MudItem>
+    <MudItem xs="12" sm="4">
+        <MudPaper Elevation="0" Class="pa-4 text-center" Style="border:1px solid var(--mud-palette-lines-default);border-radius:12px">
+            <MudText Typo="Typo.caption" Color="Color.Default">사용 연차</MudText>
+            <MudText Typo="Typo.h4" Color="Color.Warning">@_usedLeave<span style="font-size:0.5em">일</span></MudText>
+        </MudPaper>
+    </MudItem>
+    <MudItem xs="12" sm="4">
+        <MudPaper Elevation="0" Class="pa-4 text-center" Style="border:1px solid var(--mud-palette-lines-default);border-radius:12px">
+            <MudText Typo="Typo.caption" Color="Color.Default">잔여 연차</MudText>
+            <MudText Typo="Typo.h4" Color="Color.Success">@_remainLeave<span style="font-size:0.5em">일</span></MudText>
+        </MudPaper>
+    </MudItem>
+</MudGrid>
+
+@* === 필터 영역 === *@
 <MudPaper Class="pa-3 mb-3" Elevation="0" Style="border:1px solid var(--mud-palette-lines-default);border-radius:12px">
     <MudGrid Spacing="2" Class="align-center">
-        <MudItem xs="12" sm="3">
-            <MudSelect T="string" @bind-Value="_viewType" Label="메뉴" Variant="Variant.Outlined" Margin="Margin.Dense">
-                <MudSelectItem Value="@("request")">연차 신청</MudSelectItem>
-                <MudSelectItem Value="@("calendar")">휴가 달력</MudSelectItem>
+        <MudItem xs="12" sm="2">
+            <MudSelect T="string" @bind-Value="_filterStatus" Label="상태" Variant="Variant.Outlined" Margin="Margin.Dense">
+                <MudSelectItem Value="@("")">전체</MudSelectItem>
+                <MudSelectItem Value="@("pending")">대기</MudSelectItem>
+                <MudSelectItem Value="@("approved")">승인</MudSelectItem>
+                <MudSelectItem Value="@("rejected")">반려</MudSelectItem>
             </MudSelect>
         </MudItem>
-        <MudItem xs="12" sm="9" Class="d-flex justify-end">
-            @if (_viewType == "request")
-            {
-                <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Add" Disabled="true">연차 신청</MudButton>
-            }
+        <MudItem xs="12" sm="3">
+            <MudDatePicker @bind-Date="_filterStartDate" Label="시작일" Variant="Variant.Outlined" Margin="Margin.Dense"
+                           Style="min-width:160px" DateFormat="yyyy-MM-dd" />
+        </MudItem>
+        <MudItem xs="12" sm="3">
+            <MudDatePicker @bind-Date="_filterEndDate" Label="종료일" Variant="Variant.Outlined" Margin="Margin.Dense"
+                           Style="min-width:160px" DateFormat="yyyy-MM-dd" />
+        </MudItem>
+        <MudItem xs="12" sm="4" Class="d-flex justify-end gap-2">
+            <MudButton Variant="Variant.Outlined" Color="Color.Default" OnClick="LoadDataAsync" StartIcon="@Icons.Material.Filled.Search" Size="Size.Small">조회</MudButton>
+            <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="OpenCreateDialog" StartIcon="@Icons.Material.Filled.Add" Size="Size.Small">연차 신청</MudButton>
         </MudItem>
     </MudGrid>
 </MudPaper>
 
-<MudAlert Severity="Severity.Info">@(_viewType == "request" ? "연차 신청" : "휴가 달력") 기능은 준비중입니다.</MudAlert>
+@* === 테이블 === *@
+<MudPaper Elevation="0" Style="border:1px solid var(--mud-palette-lines-default);border-radius:12px">
+    <MudTable Items="@_filteredList" Dense="true" Hover="true" Striped="true" Loading="@_loading" LoadingProgressColor="Color.Primary"
+              FixedHeader="true" Height="calc(100vh - 420px)">
+        <HeaderContent>
+            <MudTh>신청일</MudTh>
+            <MudTh>사원명</MudTh>
+            <MudTh>휴가유형</MudTh>
+            <MudTh>시작일</MudTh>
+            <MudTh>종료일</MudTh>
+            <MudTh Style="text-align:center">일수</MudTh>
+            <MudTh>사유</MudTh>
+            <MudTh Style="text-align:center">상태</MudTh>
+            <MudTh Style="text-align:center">액션</MudTh>
+        </HeaderContent>
+        <RowTemplate>
+            <MudTd>@context.CreatedAt.ToString("yyyy-MM-dd")</MudTd>
+            <MudTd>@context.EmployeeName</MudTd>
+            <MudTd>@GetLeaveTypeLabel(context.LeaveType)</MudTd>
+            <MudTd>@context.StartDate.ToString("yyyy-MM-dd")</MudTd>
+            <MudTd>@context.EndDate.ToString("yyyy-MM-dd")</MudTd>
+            <MudTd Style="text-align:center">@context.LeaveDays</MudTd>
+            <MudTd>@(context.Reason ?? "-")</MudTd>
+            <MudTd Style="text-align:center">
+                <MudChip T="string" Size="Size.Small" Color="@GetStatusColor(context.Status)">@GetStatusLabel(context.Status)</MudChip>
+            </MudTd>
+            <MudTd Style="text-align:center">
+                @if (context.Status == "pending")
+                {
+                    <MudTooltip Text="승인">
+                        <MudIconButton Icon="@Icons.Material.Filled.Check" Color="Color.Success" Size="Size.Small"
+                                       OnClick="@(() => ConfirmApprove(context))" />
+                    </MudTooltip>
+                    <MudTooltip Text="반려">
+                        <MudIconButton Icon="@Icons.Material.Filled.Close" Color="Color.Error" Size="Size.Small"
+                                       OnClick="@(() => OpenRejectDialog(context))" />
+                    </MudTooltip>
+                }
+                else
+                {
+                    <MudText Typo="Typo.caption">-</MudText>
+                }
+            </MudTd>
+        </RowTemplate>
+        <NoRecordsContent>
+            <MudText Align="Align.Center" Class="pa-4">조회된 연차 신청 내역이 없습니다.</MudText>
+        </NoRecordsContent>
+    </MudTable>
+</MudPaper>
 
 @code {
-    private string _viewType = "request";
+    // === 상태 변수 ===
+    private bool _loading;
+    private List<LeaveRequestModel> _allList = new();
+
+    // KPI (총 연차는 추후 동적으로 변경 예정)
+    private decimal _totalLeave = 15m;
+    private decimal _usedLeave;
+    private decimal _remainLeave;
+
+    // 필터
+    private string _filterStatus = "";
+    private DateTime? _filterStartDate;
+    private DateTime? _filterEndDate;
+
+    /// <summary>
+    /// 필터 적용된 목록을 반환한다.
+    /// </summary>
+    private IEnumerable<LeaveRequestModel> _filteredList => _allList
+        .Where(x => string.IsNullOrEmpty(_filterStatus) || x.Status == _filterStatus)
+        .Where(x => _filterStartDate == null || x.StartDate >= _filterStartDate)
+        .Where(x => _filterEndDate == null || x.EndDate <= _filterEndDate)
+        .OrderByDescending(x => x.CreatedAt);
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadDataAsync();
+    }
+
+    /// <summary>
+    /// API에서 연차 신청 목록을 불러온다.
+    /// </summary>
+    private async Task LoadDataAsync()
+    {
+        _loading = true;
+        StateHasChanged();
+
+        _allList = await LeaveService.GetListAsync();
+        CalculateKpi();
+
+        _loading = false;
+    }
+
+    /// <summary>
+    /// KPI 카드 수치를 계산한다.
+    /// </summary>
+    private void CalculateKpi()
+    {
+        _usedLeave = _allList
+            .Where(x => x.Status == "approved")
+            .Sum(x => x.LeaveDays);
+        _remainLeave = _totalLeave - _usedLeave;
+    }
+
+    // === 라벨 헬퍼 ===
+
+    private static string GetLeaveTypeLabel(string type) => type switch
+    {
+        "annual" => "연차",
+        "sick" => "병가",
+        "personal" => "개인사유",
+        "bereavement" => "경조사",
+        _ => type
+    };
+
+    private static string GetStatusLabel(string status) => status switch
+    {
+        "pending" => "대기",
+        "approved" => "승인",
+        "rejected" => "반려",
+        _ => status
+    };
+
+    private static Color GetStatusColor(string status) => status switch
+    {
+        "pending" => Color.Warning,
+        "approved" => Color.Success,
+        "rejected" => Color.Error,
+        _ => Color.Default
+    };
+
+    // === 연차 신청 다이얼로그 ===
+
+    /// <summary>
+    /// 연차 신청 다이얼로그를 연다.
+    /// </summary>
+    private async Task OpenCreateDialog()
+    {
+        var parameters = new DialogParameters<HrLeaveCreateDialog>();
+        var options = new DialogOptions { MaxWidth = MaxWidth.Small, FullWidth = true, CloseOnEscapeKey = true };
+        var dialog = await DialogService.ShowAsync<HrLeaveCreateDialog>("연차 신청", parameters, options);
+        var result = await dialog.Result;
+
+        if (result is not null && !result.Canceled)
+        {
+            Snackbar.Add("연차 신청이 완료되었습니다.", Severity.Success);
+            await LoadDataAsync();
+        }
+    }
+
+    // === 승인 ===
+
+    /// <summary>
+    /// 승인 확인 후 API를 호출한다.
+    /// </summary>
+    private async Task ConfirmApprove(LeaveRequestModel item)
+    {
+        var confirmed = await DialogService.ShowMessageBoxAsync(
+            "승인 확인",
+            $"{item.EmployeeName}님의 연차 신청을 승인하시겠습니까?",
+            yesText: "승인", cancelText: "취소");
+
+        if (confirmed == true)
+        {
+            var success = await LeaveService.ApproveAsync(item.RequestId);
+            if (success)
+            {
+                Snackbar.Add("승인되었습니다.", Severity.Success);
+                await LoadDataAsync();
+            }
+            else
+            {
+                Snackbar.Add("승인 처리에 실패했습니다.", Severity.Error);
+            }
+        }
+    }
+
+    // === 반려 ===
+
+    /// <summary>
+    /// 반려 사유 입력 다이얼로그를 연다.
+    /// </summary>
+    private async Task OpenRejectDialog(LeaveRequestModel item)
+    {
+        var parameters = new DialogParameters<HrLeaveRejectDialog>
+        {
+            { x => x.RequestId, item.RequestId },
+            { x => x.EmployeeName, item.EmployeeName }
+        };
+        var options = new DialogOptions { MaxWidth = MaxWidth.ExtraSmall, FullWidth = true, CloseOnEscapeKey = true };
+        var dialog = await DialogService.ShowAsync<HrLeaveRejectDialog>("연차 반려", parameters, options);
+        var result = await dialog.Result;
+
+        if (result is not null && !result.Canceled)
+        {
+            Snackbar.Add("반려 처리되었습니다.", Severity.Success);
+            await LoadDataAsync();
+        }
+    }
 }

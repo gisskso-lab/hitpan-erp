@@ -1,12 +1,178 @@
 @page "/collections"
 @namespace HitPan.Web.Pages.FinanceUi
 @attribute [Authorize]
+@using HitPan.Web.Models
+@using HitPan.Web.Services
+@inject CollectionPaymentService CollSvc
+@inject PartnerMasterService PartnerSvc
+@inject ISnackbar Snackbar
 
 <PageTitle>수금</PageTitle>
-<MudContainer MaxWidth="MaxWidth.Small" Class="d-flex align-center justify-center" Style="height:calc(100vh - 120px)">
-    <MudPaper Class="pa-8 text-center" Elevation="0">
-        <MudIcon Icon="@Icons.Material.Filled.Construction" Size="Size.Large" Color="Color.Warning" Class="mb-4" />
-        <MudText Typo="Typo.h5" Class="mb-2">수금</MudText>
-        <MudText Typo="Typo.body1" Color="Color.Secondary">준비중입니다.</MudText>
+
+<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
+    <MudText Typo="Typo.h6">수금</MudText>
+    <MudText Style="font-size:12px;color:var(--mud-palette-text-secondary)">
+        거래처로부터 받은 돈 관리
+    </MudText>
+</div>
+
+@if (_loading)
+{
+    <MudProgressLinear Indeterminate="true" Color="Color.Primary" />
+}
+else
+{
+    @* ── 입력 폼 ── *@
+    <MudPaper Elevation="0" Class="pa-4 mb-3" Style="border:0.5px solid var(--mud-palette-lines-default);border-radius:12px">
+        <MudText Typo="Typo.subtitle2" Class="mb-3">수금 등록</MudText>
+        <MudGrid Spacing="2">
+            <MudItem xs="12" md="3">
+                <MudAutocomplete T="PartnerListRow" Label="거래처"
+                    Value="_selectedPartner" ValueChanged="OnPartnerSelected"
+                    SearchFunc="SearchPartner" ToStringFunc="@(p => p?.PartnerName ?? "")"
+                    Variant="Variant.Outlined" Margin="Margin.Dense" />
+            </MudItem>
+            <MudItem xs="12" md="2">
+                <MudDatePicker Label="수금일" @bind-Date="_editDate" Variant="Variant.Outlined" Margin="Margin.Dense" Style="min-width:160px" />
+            </MudItem>
+            <MudItem xs="12" md="2">
+                <MudNumericField T="decimal" Label="수금액" @bind-Value="_edit.Amount" Variant="Variant.Outlined" Margin="Margin.Dense" Format="N0" />
+            </MudItem>
+            <MudItem xs="12" md="2">
+                <MudSelect T="string" Label="수금수단" @bind-Value="_edit.CollectionMethod" Variant="Variant.Outlined" Margin="Margin.Dense">
+                    <MudSelectItem Value="@("cash")">현금</MudSelectItem>
+                    <MudSelectItem Value="@("bank_transfer")">계좌이체</MudSelectItem>
+                    <MudSelectItem Value="@("check")">수표</MudSelectItem>
+                    <MudSelectItem Value="@("card")">카드</MudSelectItem>
+                    <MudSelectItem Value="@("note")">어음</MudSelectItem>
+                </MudSelect>
+            </MudItem>
+            <MudItem xs="12" md="3">
+                <MudTextField T="string" Label="비고" @bind-Value="_edit.Memo" Variant="Variant.Outlined" Margin="Margin.Dense" />
+            </MudItem>
+        </MudGrid>
     </MudPaper>
-</MudContainer>
+
+    <MudToolBar Dense="true" Class="pa-1 gap-1 mb-2">
+        <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Save" OnClick="SaveAsync">저장</MudButton>
+        <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Undo" OnClick="ResetForm">초기화</MudButton>
+    </MudToolBar>
+
+    @* ── 목록 ── *@
+    <MudPaper Elevation="0" Class="pa-2" Style="border:0.5px solid var(--mud-palette-lines-default);border-radius:12px">
+        <MudGrid Spacing="2" Class="mb-2 pa-2">
+            <MudItem xs="12" md="3">
+                <MudDatePicker Label="시작일" @bind-Date="_filterFrom" Variant="Variant.Outlined" Margin="Margin.Dense" Style="min-width:160px" />
+            </MudItem>
+            <MudItem xs="12" md="3">
+                <MudDatePicker Label="종료일" @bind-Date="_filterTo" Variant="Variant.Outlined" Margin="Margin.Dense" Style="min-width:160px" />
+            </MudItem>
+            <MudItem xs="12" md="2">
+                <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Search" OnClick="LoadAsync" Class="mt-1">조회</MudButton>
+            </MudItem>
+            <MudItem xs="12" md="4" Style="text-align:right">
+                <MudText Typo="Typo.subtitle2" Class="mt-2">합계: @_items.Sum(x => x.Amount).ToString("N0")원</MudText>
+            </MudItem>
+        </MudGrid>
+
+        <MudTable Items="_items" Dense="true" Hover="true">
+            <HeaderContent>
+                <MudTh>수금일</MudTh>
+                <MudTh>거래처</MudTh>
+                <MudTh Style="text-align:right">수금액</MudTh>
+                <MudTh>수금수단</MudTh>
+                <MudTh>비고</MudTh>
+                <MudTh Style="width:60px"></MudTh>
+            </HeaderContent>
+            <RowTemplate>
+                <MudTd>@context.CollectionDate.ToString("yyyy-MM-dd")</MudTd>
+                <MudTd>@context.PartnerName</MudTd>
+                <MudTd Style="text-align:right">@context.Amount.ToString("N0")원</MudTd>
+                <MudTd>@context.CollectionMethodLabel</MudTd>
+                <MudTd>@context.Memo</MudTd>
+                <MudTd>
+                    <MudIconButton Icon="@Icons.Material.Filled.Delete" Size="Size.Small" Color="Color.Error" OnClick="@(() => ConfirmDelete(context.CollectionId))" />
+                </MudTd>
+            </RowTemplate>
+        </MudTable>
+    </MudPaper>
+}
+
+@code {
+    private List<CollectionModel> _items = new();
+    private List<PartnerListRow> _partners = new();
+    private CreateCollectionModel _edit = new();
+    private PartnerListRow? _selectedPartner;
+    private DateTime? _editDate = DateTime.Today;
+    private DateTime? _filterFrom;
+    private DateTime? _filterTo;
+    private bool _loading = true;
+
+    protected override async Task OnInitializedAsync()
+    {
+        _partners = await PartnerSvc.GetListAsync();
+        await LoadAsync();
+    }
+
+    private async Task LoadAsync()
+    {
+        _loading = true;
+        _items = await CollSvc.GetCollectionsAsync(_filterFrom, _filterTo);
+        _loading = false;
+    }
+
+    private void OnPartnerSelected(PartnerListRow? p)
+    {
+        _selectedPartner = p;
+        _edit.PartnerId = p?.PartnerId ?? "";
+    }
+
+    private async Task SaveAsync()
+    {
+        if (string.IsNullOrEmpty(_edit.PartnerId)) { Snackbar.Add("거래처를 선택해주세요.", Severity.Warning); return; }
+        if (_edit.Amount <= 0) { Snackbar.Add("수금액을 입력해주세요.", Severity.Warning); return; }
+        _edit.CollectionDate = _editDate ?? DateTime.Today;
+
+        var ok = await CollSvc.CreateCollectionAsync(_edit);
+        if (ok) { Snackbar.Add("수금 저장됨", Severity.Success); ResetForm(); await LoadAsync(); }
+        else Snackbar.Add("저장 실패", Severity.Error);
+    }
+
+    private string? _pendingDeleteId;
+
+    private void ConfirmDelete(string id)
+    {
+        // 첫 클릭: 확인 상태 설정, 두 번째 클릭: 실제 삭제
+        if (_pendingDeleteId == id)
+        {
+            _ = DoDeleteAsync(id);
+        }
+        else
+        {
+            _pendingDeleteId = id;
+            Snackbar.Add("한번 더 클릭하면 삭제됩니다.", Severity.Warning);
+        }
+    }
+
+    private async Task DoDeleteAsync(string id)
+    {
+        var ok = await CollSvc.DeleteCollectionAsync(id);
+        _pendingDeleteId = null;
+        if (ok) { Snackbar.Add("삭제됨", Severity.Success); await LoadAsync(); StateHasChanged(); }
+        else Snackbar.Add("삭제 실패", Severity.Error);
+    }
+
+    private void ResetForm()
+    {
+        _edit = new CreateCollectionModel();
+        _selectedPartner = null;
+        _editDate = DateTime.Today;
+    }
+
+    private Task<IEnumerable<PartnerListRow>> SearchPartner(string? value, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(value)) return Task.FromResult(_partners.AsEnumerable());
+        return Task.FromResult(_partners.Where(p =>
+            p.PartnerName.Contains(value, StringComparison.OrdinalIgnoreCase)));
+    }
+}

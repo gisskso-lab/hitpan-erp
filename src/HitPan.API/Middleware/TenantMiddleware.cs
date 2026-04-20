@@ -15,6 +15,13 @@ public sealed class TenantMiddleware
     public async Task InvokeAsync(HttpContext context, CurrentTenant currentTenant)
     {
         var path = context.Request.Path;
+        // API 경로가 아니면 통과 (정적 파일, Blazor WASM 등)
+        if (!path.StartsWithSegments("/api"))
+        {
+            await _next(context);
+            return;
+        }
+
         if (path.StartsWithSegments("/health")
             || path.StartsWithSegments("/swagger")
             || path.StartsWithSegments("/api/tenants/setup")
@@ -49,6 +56,8 @@ public sealed class TenantMiddleware
         context.Items["TenantId"] = tenantId;
         context.Items["ResellerId"] = resellerId;
         context.Items["PlatformId"] = platformId;
+        context.Items["UserId"] = userId;
+        context.Items["UserName"] = context.User.FindFirstValue("name");
 
         // reseller_id 없어도 tenant_id로 ERP 컨텍스트가 있으면 통과(JWT에 reseller_id 미포함 계정 대비)
         if (accountType == "reseller_admin" && string.IsNullOrEmpty(resellerId) && string.IsNullOrEmpty(tenantId))

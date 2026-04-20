@@ -353,6 +353,8 @@ public class ReportRow
     public decimal SupplyAmount { get; set; }
     public decimal VatAmount { get; set; }
     public decimal TotalAmount { get; set; }
+    /// <summary>안전재고 미달 여부 — 재고현황에서 행 강조용</summary>
+    public bool IsBelowSafety { get; set; }
 }
 
 public class ProfitReportRow

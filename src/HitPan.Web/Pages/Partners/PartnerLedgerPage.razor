@@ -2,8 +2,10 @@
 @namespace HitPan.Web.Pages.Partners
 @attribute [Authorize]
 @using HitPan.Web.Models
+@using HitPan.Web.Services
 @using System.Net.Http.Json
 @inject HttpClient Http
+@inject PartnerMasterService PartnerSvc
 @inject IJSRuntime Js
 @inject ISnackbar Snackbar
 
@@ -20,8 +22,11 @@
             <MudDatePicker @bind-Date="_to" Label="종료일" Variant="Variant.Outlined" Margin="Margin.Dense" Style="min-width:160px" DateFormat="yyyy-MM-dd" />
         </MudItem>
         <MudItem xs="12" sm="3">
-            <MudTextField @bind-Value="_partner" Label="업체명 검색" Variant="Variant.Outlined" Margin="Margin.Dense"
-                          Adornment="Adornment.End" AdornmentIcon="@Icons.Material.Filled.Search" />
+            <MudAutocomplete T="PartnerListRow" Label="업체명 검색"
+                Value="_selectedPartner" ValueChanged="OnPartnerSelected"
+                SearchFunc="SearchPartner" ToStringFunc="@(p => p?.PartnerName ?? "")"
+                Variant="Variant.Outlined" Margin="Margin.Dense" Dense="true"
+                ResetValueOnEmptyText="true" CoerceText="false" />
         </MudItem>
         <MudItem xs="12" sm="2" Class="d-flex gap-1 align-center">
             <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="SearchAsync">조회</MudButton>
@@ -57,9 +62,29 @@
     private DateTime? _from = DateTime.Today.AddDays(-30);
     private DateTime? _to = DateTime.Today;
     private string _partner = "";
+    private PartnerListRow? _selectedPartner;
+    private List<PartnerListRow> _partners = new();
     private List<StockLedgerRow> _data = new();
 
-    protected override async Task OnInitializedAsync() => await SearchAsync();
+    protected override async Task OnInitializedAsync()
+    {
+        _partners = await PartnerSvc.GetListAsync();
+        await SearchAsync();
+    }
+
+    private void OnPartnerSelected(PartnerListRow? p)
+    {
+        _selectedPartner = p;
+        _partner = p?.PartnerName ?? "";
+    }
+
+    private Task<IEnumerable<PartnerListRow>> SearchPartner(string? value, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(value)) return Task.FromResult(_partners.AsEnumerable());
+        return Task.FromResult(_partners.Where(p =>
+            p.PartnerName.Contains(value, StringComparison.OrdinalIgnoreCase) ||
+            p.PartnerCode.Contains(value, StringComparison.OrdinalIgnoreCase)));
+    }
 
     /// <summary>업체별 수불부를 조회한다.</summary>
     private async Task SearchAsync()

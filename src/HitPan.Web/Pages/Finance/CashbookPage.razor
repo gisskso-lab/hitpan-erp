@@ -1,12 +1,90 @@
 @page "/accounting/cashbook"
 @namespace HitPan.Web.Pages.FinanceUi
 @attribute [Authorize]
+@using HitPan.Web.Models
+@using HitPan.Web.Services
+@inject FinanceClientService FinSvc
+@inject ISnackbar Snackbar
 
 <PageTitle>현금출납장</PageTitle>
-<MudContainer MaxWidth="MaxWidth.Small" Class="d-flex align-center justify-center" Style="height:calc(100vh - 120px)">
-    <MudPaper Class="pa-8 text-center" Elevation="0">
-        <MudIcon Icon="@Icons.Material.Filled.AccountBalanceWallet" Size="Size.Large" Color="Color.Primary" Class="mb-4" />
-        <MudText Typo="Typo.h5" Class="mb-2">현금출납장</MudText>
-        <MudText Typo="Typo.body1" Color="Color.Secondary">준비중입니다.</MudText>
-    </MudPaper>
-</MudContainer>
+<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
+    <MudText Typo="Typo.h6">현금출납장</MudText>
+</div>
+
+@* 입력 폼 *@
+<MudPaper Elevation="0" Class="pa-4 mb-3" Style="border:0.5px solid var(--mud-palette-lines-default);border-radius:12px">
+    <MudGrid Spacing="2">
+        <MudItem xs="12" md="2">
+            <MudDatePicker Label="일자" @bind-Date="_editDate" Variant="Variant.Outlined" Margin="Margin.Dense" Style="min-width:160px" />
+        </MudItem>
+        <MudItem xs="12" md="2">
+            <MudSelect T="string" Label="구분" @bind-Value="_edit.TxType" Variant="Variant.Outlined" Margin="Margin.Dense">
+                <MudSelectItem Value="@("income")">입금</MudSelectItem>
+                <MudSelectItem Value="@("expense")">출금</MudSelectItem>
+            </MudSelect>
+        </MudItem>
+        <MudItem xs="12" md="2">
+            <MudTextField T="string" Label="적요" @bind-Value="_edit.Description" Variant="Variant.Outlined" Margin="Margin.Dense" />
+        </MudItem>
+        <MudItem xs="12" md="2">
+            <MudNumericField T="decimal" Label="금액" @bind-Value="_edit.Amount" Variant="Variant.Outlined" Margin="Margin.Dense" Format="N0" />
+        </MudItem>
+        <MudItem xs="12" md="2">
+            <MudSelect T="string" Label="결제수단" @bind-Value="_edit.PaymentMethod" Variant="Variant.Outlined" Margin="Margin.Dense">
+                <MudSelectItem Value="@("cash")">현금</MudSelectItem>
+                <MudSelectItem Value="@("bank_transfer")">계좌이체</MudSelectItem>
+                <MudSelectItem Value="@("card")">카드</MudSelectItem>
+            </MudSelect>
+        </MudItem>
+        <MudItem xs="12" md="2">
+            <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="SaveAsync" Class="mt-1" FullWidth="true">등록</MudButton>
+        </MudItem>
+    </MudGrid>
+</MudPaper>
+
+@* 필터 + 목록 *@
+<MudPaper Elevation="0" Class="pa-2" Style="border:0.5px solid var(--mud-palette-lines-default);border-radius:12px">
+    <MudGrid Spacing="2" Class="pa-2 mb-2">
+        <MudItem xs="6" md="2"><MudDatePicker Label="시작일" @bind-Date="_from" Variant="Variant.Outlined" Margin="Margin.Dense" Style="min-width:160px" /></MudItem>
+        <MudItem xs="6" md="2"><MudDatePicker Label="종료일" @bind-Date="_to" Variant="Variant.Outlined" Margin="Margin.Dense" Style="min-width:160px" /></MudItem>
+        <MudItem xs="12" md="2"><MudButton Variant="Variant.Outlined" OnClick="LoadAsync">조회</MudButton></MudItem>
+    </MudGrid>
+    <MudTable Items="_items" Dense="true" Hover="true" Striped="true">
+        <HeaderContent>
+            <MudTh>일자</MudTh><MudTh>구분</MudTh><MudTh>적요</MudTh><MudTh>거래처</MudTh>
+            <MudTh Style="text-align:right">입금</MudTh><MudTh Style="text-align:right">출금</MudTh>
+            <MudTh Style="text-align:right;font-weight:600">잔액</MudTh>
+        </HeaderContent>
+        <RowTemplate>
+            <MudTd>@context.TxDate.ToString("yyyy-MM-dd")</MudTd>
+            <MudTd><MudChip T="string" Size="Size.Small" Color="@(context.TxType=="income"?Color.Success:Color.Error)" Variant="Variant.Text">@(context.TxType=="income"?"입금":"출금")</MudChip></MudTd>
+            <MudTd>@context.Description</MudTd>
+            <MudTd>@(context.PartnerName ?? "-")</MudTd>
+            <MudTd Style="text-align:right;color:#16A34A">@(context.IncomeAmount > 0 ? context.IncomeAmount.ToString("N0") : "")</MudTd>
+            <MudTd Style="text-align:right;color:#DC2626">@(context.ExpenseAmount > 0 ? context.ExpenseAmount.ToString("N0") : "")</MudTd>
+            <MudTd Style="text-align:right;font-weight:600">@context.Balance.ToString("N0")</MudTd>
+        </RowTemplate>
+    </MudTable>
+</MudPaper>
+
+@code {
+    private List<CashbookModel> _items = new();
+    private CreateCashbookModel _edit = new();
+    private DateTime? _editDate = DateTime.Today;
+    private DateTime? _from = DateTime.Today.AddDays(-30);
+    private DateTime? _to = DateTime.Today;
+
+    protected override async Task OnInitializedAsync() => await LoadAsync();
+
+    private async Task LoadAsync() { _items = await FinSvc.GetCashbookAsync(_from, _to); }
+
+    private async Task SaveAsync()
+    {
+        if (string.IsNullOrWhiteSpace(_edit.Description)) { Snackbar.Add("적요를 입력해주세요.", Severity.Warning); return; }
+        if (_edit.Amount <= 0) { Snackbar.Add("금액을 입력해주세요.", Severity.Warning); return; }
+        _edit.TxDate = _editDate ?? DateTime.Today;
+        var ok = await FinSvc.CreateCashbookAsync(_edit);
+        if (ok) { Snackbar.Add("등록됨", Severity.Success); _edit = new(); _editDate = DateTime.Today; await LoadAsync(); }
+        else Snackbar.Add("등록 실패", Severity.Error);
+    }
+}

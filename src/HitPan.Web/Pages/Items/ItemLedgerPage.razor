@@ -2,8 +2,10 @@
 @namespace HitPan.Web.Pages.Items
 @attribute [Authorize]
 @using HitPan.Web.Models
+@using HitPan.Web.Services
 @using System.Net.Http.Json
 @inject HttpClient Http
+@inject ItemMasterService ItemSvc
 @inject IJSRuntime Js
 @inject ISnackbar Snackbar
 
@@ -20,8 +22,11 @@
             <MudDatePicker @bind-Date="_to" Label="종료일" Variant="Variant.Outlined" Margin="Margin.Dense" Style="min-width:160px" DateFormat="yyyy-MM-dd" />
         </MudItem>
         <MudItem xs="12" sm="3">
-            <MudTextField @bind-Value="_partner" Label="업체명 검색" Variant="Variant.Outlined" Margin="Margin.Dense"
-                          Adornment="Adornment.End" AdornmentIcon="@Icons.Material.Filled.Search" />
+            <MudAutocomplete T="ItemListModel" Label="상품명 검색"
+                Value="_selectedItem" ValueChanged="OnItemSelected"
+                SearchFunc="SearchItem" ToStringFunc="@(i => i?.ItemName ?? "")"
+                Variant="Variant.Outlined" Margin="Margin.Dense" Dense="true"
+                ResetValueOnEmptyText="true" CoerceText="false" />
         </MudItem>
         <MudItem xs="12" sm="2" Class="d-flex gap-1 align-center">
             <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="SearchAsync">조회</MudButton>
@@ -57,9 +62,29 @@
     private DateTime? _from = DateTime.Today.AddDays(-30);
     private DateTime? _to = DateTime.Today;
     private string _partner = "";
+    private ItemListModel? _selectedItem;
+    private List<ItemListModel> _items = new();
     private List<StockLedgerRow> _data = new();
 
-    protected override async Task OnInitializedAsync() => await SearchAsync();
+    protected override async Task OnInitializedAsync()
+    {
+        _items = await ItemSvc.GetListAsync() ?? new();
+        await SearchAsync();
+    }
+
+    private void OnItemSelected(ItemListModel? item)
+    {
+        _selectedItem = item;
+        _partner = item?.ItemName ?? "";
+    }
+
+    private Task<IEnumerable<ItemListModel>> SearchItem(string? value, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(value)) return Task.FromResult(_items.AsEnumerable());
+        return Task.FromResult(_items.Where(i =>
+            i.ItemName.Contains(value, StringComparison.OrdinalIgnoreCase) ||
+            i.ItemCode.Contains(value, StringComparison.OrdinalIgnoreCase)));
+    }
 
     /// <summary>상품별 수불부를 조회한다.</summary>
     private async Task SearchAsync()

@@ -1,0 +1,226 @@
+@page "/tax-invoice-stats"
+@namespace HitPan.Web.Pages.SalesUi
+@attribute [Authorize]
+@using HitPan.Web.Models
+@using HitPan.Web.Services
+@inject FinanceClientService FinSvc
+@inject ISnackbar Snackbar
+
+<PageTitle>세금계산서 통계</PageTitle>
+<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
+    <MudText Typo="Typo.h6">세금계산서 통계</MudText>
+    <div class="d-flex gap-2 align-center">
+        <MudNumericField T="int" Label="년도" @bind-Value="_year" Variant="Variant.Outlined" Margin="Margin.Dense" Style="width:100px" />
+        <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="LoadAsync">조회</MudButton>
+    </div>
+</div>
+
+<!-- KPI 카드 4개 -->
+<MudGrid Spacing="3" Class="mb-3">
+    <MudItem xs="6" md="3">
+        <MudPaper Elevation="0" Class="pa-4" Style="border:0.5px solid var(--mud-palette-lines-default);border-radius:12px;border-left:4px solid #1976D2">
+            <MudText Typo="Typo.caption" Style="color:var(--mud-palette-text-secondary)">총 발행건수</MudText>
+            <MudText Typo="Typo.h5" Style="font-weight:700;color:#1976D2">@_totalCount 건</MudText>
+            <MudText Typo="Typo.caption">@_year 년 누적</MudText>
+        </MudPaper>
+    </MudItem>
+    <MudItem xs="6" md="3">
+        <MudPaper Elevation="0" Class="pa-4" Style="border:0.5px solid var(--mud-palette-lines-default);border-radius:12px;border-left:4px solid #0F6E56">
+            <MudText Typo="Typo.caption" Style="color:var(--mud-palette-text-secondary)">매출 합계</MudText>
+            <MudText Typo="Typo.h5" Style="font-weight:700;color:#0F6E56">₩@_salesTotalAmount.ToString("N0")</MudText>
+            <MudText Typo="Typo.caption">@_salesCount 건</MudText>
+        </MudPaper>
+    </MudItem>
+    <MudItem xs="6" md="3">
+        <MudPaper Elevation="0" Class="pa-4" Style="border:0.5px solid var(--mud-palette-lines-default);border-radius:12px;border-left:4px solid #F57C00">
+            <MudText Typo="Typo.caption" Style="color:var(--mud-palette-text-secondary)">매입 합계</MudText>
+            <MudText Typo="Typo.h5" Style="font-weight:700;color:#F57C00">₩@_purchaseTotalAmount.ToString("N0")</MudText>
+            <MudText Typo="Typo.caption">@_purchaseCount 건</MudText>
+        </MudPaper>
+    </MudItem>
+    <MudItem xs="6" md="3">
+        <MudPaper Elevation="0" Class="pa-4" Style="border:0.5px solid var(--mud-palette-lines-default);border-radius:12px;border-left:4px solid #D32F2F">
+            <MudText Typo="Typo.caption" Style="color:var(--mud-palette-text-secondary)">미발행 건수</MudText>
+            <MudText Typo="Typo.h5" Style="font-weight:700;color:#D32F2F">@_unissuedCount 건</MudText>
+            <MudText Typo="Typo.caption">확인 필요</MudText>
+        </MudPaper>
+    </MudItem>
+</MudGrid>
+
+<!-- 차트 영역: 월별 추이 + 도넛 차트 -->
+<MudGrid Spacing="3" Class="mb-3">
+    <MudItem xs="12" md="8">
+        <MudPaper Elevation="0" Class="pa-4" Style="border:0.5px solid var(--mud-palette-lines-default);border-radius:12px">
+            <MudText Typo="Typo.subtitle2" Class="mb-2" Style="font-weight:600">월별 세금계산서 발행 추이</MudText>
+            <ApexChart TItem="MonthlyChartItem" Options="@_monthlyOptions" Height="300">
+                <ApexPointSeries TItem="MonthlyChartItem"
+                                 Items="_monthlySalesItems"
+                                 Name="매출"
+                                 SeriesType="SeriesType.Bar"
+                                 XValue="@(e => e.Month)"
+                                 YValue="@(e => e.Amount)" />
+                <ApexPointSeries TItem="MonthlyChartItem"
+                                 Items="_monthlyPurchaseItems"
+                                 Name="매입"
+                                 SeriesType="SeriesType.Bar"
+                                 XValue="@(e => e.Month)"
+                                 YValue="@(e => e.Amount)" />
+            </ApexChart>
+        </MudPaper>
+    </MudItem>
+    <MudItem xs="12" md="4">
+        <MudPaper Elevation="0" Class="pa-4" Style="border:0.5px solid var(--mud-palette-lines-default);border-radius:12px">
+            <MudText Typo="Typo.subtitle2" Class="mb-2" Style="font-weight:600">발행 상태 비율</MudText>
+            <ApexChart TItem="StatusChartItem" Options="@_statusOptions" Height="300">
+                <ApexPointSeries TItem="StatusChartItem"
+                                 Items="_statusItems"
+                                 SeriesType="SeriesType.Donut"
+                                 XValue="@(e => e.Label)"
+                                 YValue="@(e => e.Count)"
+                                 OrderByDescending="@(e => e.Y)" />
+            </ApexChart>
+        </MudPaper>
+    </MudItem>
+</MudGrid>
+
+<!-- 거래처별 TOP 10 -->
+<MudPaper Elevation="0" Class="pa-4" Style="border:0.5px solid var(--mud-palette-lines-default);border-radius:12px">
+    <MudText Typo="Typo.subtitle2" Class="mb-2" Style="font-weight:600">거래처별 세금계산서 합계 TOP 10</MudText>
+    <ApexChart TItem="PartnerChartItem" Options="@_partnerOptions" Height="350">
+        <ApexPointSeries TItem="PartnerChartItem"
+                         Items="_partnerItems"
+                         SeriesType="SeriesType.Bar"
+                         XValue="@(e => e.PartnerName)"
+                         YValue="@(e => e.TotalAmount)" />
+    </ApexChart>
+</MudPaper>
+
+@code {
+    private int _year = DateTime.Today.Year;
+
+    // KPI 데이터
+    private int _totalCount;
+    private int _salesCount;
+    private int _purchaseCount;
+    private int _unissuedCount;
+    private decimal _salesTotalAmount;
+    private decimal _purchaseTotalAmount;
+
+    // 차트 데이터 모델
+    private class MonthlyChartItem
+    {
+        public string Month { get; set; } = string.Empty;
+        public decimal Amount { get; set; }
+    }
+
+    private class StatusChartItem
+    {
+        public string Label { get; set; } = string.Empty;
+        public decimal Count { get; set; }
+    }
+
+    private class PartnerChartItem
+    {
+        public string PartnerName { get; set; } = string.Empty;
+        public decimal TotalAmount { get; set; }
+    }
+
+    // 차트 아이템
+    private List<MonthlyChartItem> _monthlySalesItems = new();
+    private List<MonthlyChartItem> _monthlyPurchaseItems = new();
+    private List<StatusChartItem> _statusItems = new();
+    private List<PartnerChartItem> _partnerItems = new();
+
+    // 월별 차트 옵션
+    private ApexChartOptions<MonthlyChartItem> _monthlyOptions = new()
+    {
+        Chart = new Chart { Background = "transparent", Stacked = false },
+        Colors = new List<string> { "#0F6E56", "#F57C00" },
+        PlotOptions = new PlotOptions
+        {
+            Bar = new PlotOptionsBar { Horizontal = false, ColumnWidth = "60%" }
+        },
+        Yaxis = new List<YAxis> { new YAxis { Labels = new YAxisLabels { Formatter = "function(val) { return '₩' + val.toLocaleString(); }" } } }
+    };
+
+    // 도넛 차트 옵션 (상태 비율)
+    private ApexChartOptions<StatusChartItem> _statusOptions = new()
+    {
+        Chart = new Chart { Background = "transparent" },
+        Colors = new List<string> { "#0F6E56", "#D32F2F", "#1976D2" },
+        Legend = new Legend { Position = LegendPosition.Bottom }
+    };
+
+    // 거래처별 수평 바 차트 옵션
+    private ApexChartOptions<PartnerChartItem> _partnerOptions = new()
+    {
+        Chart = new Chart { Background = "transparent" },
+        Colors = new List<string> { "#1976D2" },
+        PlotOptions = new PlotOptions
+        {
+            Bar = new PlotOptionsBar { Horizontal = true, BarHeight = "60%" }
+        }
+    };
+
+    protected override async Task OnInitializedAsync() => await LoadAsync();
+
+    private async Task LoadAsync()
+    {
+        // 연간 전체 데이터 조회
+        var from = new DateTime(_year, 1, 1);
+        var to = new DateTime(_year, 12, 31);
+        var ledger = await FinSvc.GetPurchaseSalesLedgerAsync(from, to);
+
+        // KPI 계산
+        _totalCount = ledger.Count;
+        _salesCount = ledger.Count(x => x.DocType == "매출");
+        _purchaseCount = ledger.Count(x => x.DocType == "매입");
+        _salesTotalAmount = ledger.Where(x => x.DocType == "매출").Sum(x => x.TotalAmount);
+        _purchaseTotalAmount = ledger.Where(x => x.DocType == "매입").Sum(x => x.TotalAmount);
+        // 미발행 건수: 전표번호가 비어있는 항목으로 추정
+        _unissuedCount = ledger.Count(x => string.IsNullOrWhiteSpace(x.DocNo));
+
+        // 월별 추이 데이터 구성
+        _monthlySalesItems = Enumerable.Range(1, 12).Select(m => new MonthlyChartItem
+        {
+            Month = $"{m}월",
+            Amount = ledger.Where(x => x.DocType == "매출" && x.TxDate.Month == m).Sum(x => x.TotalAmount)
+        }).ToList();
+
+        _monthlyPurchaseItems = Enumerable.Range(1, 12).Select(m => new MonthlyChartItem
+        {
+            Month = $"{m}월",
+            Amount = ledger.Where(x => x.DocType == "매입" && x.TxDate.Month == m).Sum(x => x.TotalAmount)
+        }).ToList();
+
+        // 상태 도넛 차트 (발행/미발행 구분)
+        var issuedCount = ledger.Count(x => !string.IsNullOrWhiteSpace(x.DocNo));
+        var unissued = _unissuedCount;
+        _statusItems = new List<StatusChartItem>
+        {
+            new() { Label = "발행 완료", Count = issuedCount },
+            new() { Label = "미발행", Count = unissued > 0 ? unissued : 0 }
+        };
+        // 발행 완료 중 전자발행 추정 (전표번호에 'E' 포함)
+        var electronicCount = ledger.Count(x => x.DocNo.Contains("E", StringComparison.OrdinalIgnoreCase));
+        if (electronicCount > 0)
+        {
+            _statusItems = new List<StatusChartItem>
+            {
+                new() { Label = "전자발행", Count = electronicCount },
+                new() { Label = "수기발행", Count = issuedCount - electronicCount },
+                new() { Label = "미발행", Count = unissued > 0 ? unissued : 0 }
+            };
+        }
+
+        // 거래처별 TOP 10
+        _partnerItems = ledger
+            .GroupBy(x => x.PartnerName)
+            .Select(g => new PartnerChartItem { PartnerName = g.Key, TotalAmount = g.Sum(x => x.TotalAmount) })
+            .OrderByDescending(x => x.TotalAmount)
+            .Take(10)
+            .ToList();
+
+        StateHasChanged();
+    }
+}

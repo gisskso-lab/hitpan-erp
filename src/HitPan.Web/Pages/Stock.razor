@@ -39,7 +39,8 @@
 @if (_viewType is "current" or "warehouse" or "safety")
 {
     <MudPaper Elevation="0" Style="border:0.5px solid var(--mud-palette-lines-default);border-radius:12px;overflow:hidden">
-        <MudTable T="ReportRow" Items="_filteredData" Dense="true" Hover="true" Striped="true" FixedHeader="true" Height="calc(100vh - 280px)">
+        <MudTable T="ReportRow" Items="_filteredData" Dense="true" Hover="true" Striped="true" FixedHeader="true" Height="calc(100vh - 280px)"
+                  RowStyleFunc="@((row, _) => row.IsBelowSafety ? "background-color:#FEF2F2;color:#DC2626;font-weight:500" : "")">
             <HeaderContent>
                 <MudTh>@GetLabelHeader()</MudTh>
                 @if (_viewType == "warehouse") { <MudTh Style="text-align:right">품목수</MudTh> }
