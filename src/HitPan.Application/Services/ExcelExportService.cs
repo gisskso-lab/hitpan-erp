@@ -40,17 +40,17 @@ public class ExcelExportService
     /// <summary>
     /// 거래명세서 엑셀을 생성한다.
     /// </summary>
-    public byte[] GenerateDeliveryExcel(DocumentDto data)
+    public byte[] GenerateDeliveryExcel(DocumentDto data, string sheetTitle = "거래명세서", string docTitle = "거 래 명 세 서")
     {
         using var workbook = new XLWorkbook();
-        var ws = workbook.Worksheets.Add("거래명세서");
+        var ws = workbook.Worksheets.Add(sheetTitle);
 
         // ── 열 너비 설정 ──
         SetDeliveryColumnWidths(ws);
 
         // ── Row 1: 제목 ──
         var titleRange = ws.Range("A1:I1").Merge();
-        titleRange.Value = "거 래 명 세 서";
+        titleRange.Value = docTitle;
         ApplyTitleStyle(titleRange);
 
         // ── Row 2: 문서번호 ──

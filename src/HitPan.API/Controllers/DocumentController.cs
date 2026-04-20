@@ -53,16 +53,16 @@ public class DocumentController : ControllerBase
         var tenantId = principal.FindFirst("tenant_id")?.Value ?? string.Empty;
         var data = await LoadDocumentAsync(type, id, tenantId);
 
-        // 문서 타입별 엑셀 생성 메서드 분기 (프론트 docType 값 기준)
+        // 문서 타입별 엑셀 생성 — 제목만 다르게 동일 양식 활용
         var bytes = type switch
         {
             "quotation" => _excelService.GenerateQuotationExcel(data),
-            "sales-order" => _excelService.GenerateDeliveryExcel(data),      // 수주서 — 거래명세서 양식 활용
+            "sales-order" => _excelService.GenerateDeliveryExcel(data, "수주서", "수 주 서"),
             "delivery" => _excelService.GenerateDeliveryExcel(data),
             "tax-invoice" => _excelService.GenerateTaxInvoiceExcel(data),
-            "purchase-order" => _excelService.GenerateDeliveryExcel(data),   // 발주서 — 거래명세서 양식 활용
-            "purchase-receipt" => _excelService.GenerateDeliveryExcel(data), // 매입 — 거래명세서 양식 활용
-            "return" => _excelService.GenerateDeliveryExcel(data),           // 반품 — 거래명세서 양식 활용
+            "purchase-order" => _excelService.GenerateDeliveryExcel(data, "발주서", "발 주 서"),
+            "purchase-receipt" => _excelService.GenerateDeliveryExcel(data, "매입명세서", "매 입 명 세 서"),
+            "return" => _excelService.GenerateDeliveryExcel(data, "반품처리서", "반 품 처 리 서"),
             _ => _excelService.GenerateDeliveryExcel(data)
         };
 
@@ -90,16 +90,16 @@ public class DocumentController : ControllerBase
         var tenantId = principal.FindFirst("tenant_id")?.Value ?? string.Empty;
         var data = await LoadDocumentAsync(type, id, tenantId);
 
-        // 문서 타입별 PDF 생성 메서드 분기 (프론트 docType 값 기준)
+        // 문서 타입별 PDF 생성 — 제목만 다르게 동일 양식 활용
         var bytes = type switch
         {
             "quotation" => _pdfService.GenerateQuotationPdf(data),
-            "sales-order" => _pdfService.GenerateDeliveryPdf(data),      // 수주서
+            "sales-order" => _pdfService.GenerateDeliveryPdf(data, "수 주 서"),
             "delivery" => _pdfService.GenerateDeliveryPdf(data),
             "tax-invoice" => _pdfService.GenerateTaxInvoicePdf(data),
-            "purchase-order" => _pdfService.GenerateDeliveryPdf(data),   // 발주서
-            "purchase-receipt" => _pdfService.GenerateDeliveryPdf(data), // 매입
-            "return" => _pdfService.GenerateDeliveryPdf(data),           // 반품
+            "purchase-order" => _pdfService.GenerateDeliveryPdf(data, "발 주 서"),
+            "purchase-receipt" => _pdfService.GenerateDeliveryPdf(data, "매 입 명 세 서"),
+            "return" => _pdfService.GenerateDeliveryPdf(data, "반 품 처 리 서"),
             _ => _pdfService.GenerateDeliveryPdf(data)
         };
 

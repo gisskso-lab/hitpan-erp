@@ -18,7 +18,7 @@ public class PdfExportService
     /// </summary>
     /// <param name="data">문서 데이터다.</param>
     /// <returns>PDF 바이트 배열이다.</returns>
-    public byte[] GenerateDeliveryPdf(DocumentDto data)
+    public byte[] GenerateDeliveryPdf(DocumentDto data, string title = "거 래 명 세 서")
     {
         var document = Document.Create(container =>
         {
@@ -28,8 +28,8 @@ public class PdfExportService
 
                 page.Content().Column(col =>
                 {
-                    // 제목: "거 래 명 세 서"
-                    col.Item().PaddingBottom(5).Text("거 래 명 세 서")
+                    // 제목
+                    col.Item().PaddingBottom(5).Text(title)
                         .FontSize(20).Bold().AlignCenter();
 
                     // 문서번호 (우측 정렬)
