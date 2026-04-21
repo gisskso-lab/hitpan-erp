@@ -1,3 +1,4 @@
+using HitPan.API.Authorization;
 using HitPan.Application.DTOs.User;
 using HitPan.Application.Interfaces;
 using Microsoft.AspNetCore.Authorization;
@@ -18,6 +19,7 @@ public sealed class UserController : ControllerBase
     }
 
     [HttpGet]
+    [RequirePermission("USERS", "view")]
     public async Task<IActionResult> GetList(CancellationToken ct)
     {
         var tenantId = HttpContext.Items["TenantId"]?.ToString();
@@ -31,6 +33,7 @@ public sealed class UserController : ControllerBase
     }
 
     [HttpGet("{id}")]
+    [RequirePermission("USERS", "view")]
     public async Task<IActionResult> Get(string id, CancellationToken ct)
     {
         var tenantId = HttpContext.Items["TenantId"]?.ToString();
@@ -50,6 +53,7 @@ public sealed class UserController : ControllerBase
 
     [HttpPost]
     [Authorize(Policy = "TenantAdminOnly")]
+    [RequirePermission("USERS", "create")]
     public async Task<IActionResult> Create([FromBody] CreateUserDto dto, CancellationToken ct)
     {
         var tenantId = HttpContext.Items["TenantId"]?.ToString();
@@ -71,6 +75,7 @@ public sealed class UserController : ControllerBase
 
     [HttpPut("{id}")]
     [Authorize(Policy = "TenantAdminOnly")]
+    [RequirePermission("USERS", "update")]
     public async Task<IActionResult> Update(string id, [FromBody] UpdateUserDto dto, CancellationToken ct)
     {
         var tenantId = HttpContext.Items["TenantId"]?.ToString();
@@ -85,6 +90,7 @@ public sealed class UserController : ControllerBase
 
     [HttpDelete("{id}")]
     [Authorize(Policy = "TenantAdminOnly")]
+    [RequirePermission("USERS", "delete")]
     public async Task<IActionResult> Delete(string id, CancellationToken ct)
     {
         var tenantId = HttpContext.Items["TenantId"]?.ToString();
@@ -99,6 +105,7 @@ public sealed class UserController : ControllerBase
 
     [HttpPost("{id}/reset-password")]
     [Authorize(Policy = "TenantAdminOnly")]
+    [RequirePermission("USERS", "update")]
     public async Task<IActionResult> ResetPassword(string id, CancellationToken ct)
     {
         var tenantId = HttpContext.Items["TenantId"]?.ToString();

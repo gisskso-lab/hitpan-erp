@@ -10,10 +10,12 @@ namespace HitPan.Application.Services;
 public sealed class UserService : IUserService
 {
     private readonly IDbConnection _db;
+    private readonly IAuditService _audit;
 
-    public UserService(IDbConnection db)
+    public UserService(IDbConnection db, IAuditService audit)
     {
         _db = db;
+        _audit = audit;
     }
 
     public async Task<List<UserListDto>> GetListAsync(string tenantId, CancellationToken ct = default)
@@ -147,6 +149,10 @@ public sealed class UserService : IUserService
                 },
                 cancellationToken: ct)).ConfigureAwait(false);
 
+        // 감사로그 — 사용자 생성
+        var afterJson = $"{{\"email\":\"{dto.Email}\",\"user_name\":\"{dto.UserName}\",\"role\":\"{roleStr}\",\"account_type\":\"{accountType}\"}}";
+        await _audit.LogAsync("create", "user", userId, afterJson: afterJson, ct: ct);
+
         return userId;
     }
 
@@ -193,6 +199,10 @@ public sealed class UserService : IUserService
                     Memo = dto.Memo
                 },
                 cancellationToken: ct)).ConfigureAwait(false);
+
+        // 감사로그 — 사용자 수정
+        var afterJson = $"{{\"user_name\":\"{dto.UserName}\",\"role\":\"{roleStr}\",\"is_active\":{(dto.IsActive ? "true" : "false")}}}";
+        await _audit.LogAsync("update", "user", userId, afterJson: afterJson, ct: ct);
     }
 
     public async Task DeactivateAsync(string userId, string tenantId, CancellationToken ct = default)
@@ -212,6 +222,9 @@ public sealed class UserService : IUserService
                 """,
                 new { UserId = userId, TenantId = tenantId },
                 cancellationToken: ct)).ConfigureAwait(false);
+
+        // 감사로그 — 사용자 비활성화 (소프트 삭제)
+        await _audit.LogAsync("delete", "user", userId, ct: ct);
     }
 
     public async Task<string> ResetPasswordAsync(string userId, string tenantId, CancellationToken ct = default)
@@ -238,6 +251,9 @@ public sealed class UserService : IUserService
         {
             throw new InvalidOperationException("사용자를 찾을 수 없습니다.");
         }
+
+        // 감사로그 — 비밀번호 초기화 (보안 민감 이벤트)
+        await _audit.LogAsync("update", "user", userId, afterJson: "{\"action\":\"password_reset\"}", ct: ct);
 
         return temp;
     }
