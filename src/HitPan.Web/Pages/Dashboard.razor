@@ -34,67 +34,42 @@
     </MudAlert>
 }
 
-@* 헤더 영역 *@
-<div class="d-flex justify-space-between align-center mb-3">
-    <MudText Typo="Typo.h6">대시보드</MudText>
-    <MudText Typo="Typo.body2" Color="Color.Secondary">@DateTime.Now.ToString("yyyy-MM-dd (ddd)")</MudText>
-</div>
+@* 페이지 헤더 — 디자인 시스템 v1 *@
+<PageHeader Title="대시보드" Subtitle="@(DateTime.Now.ToString("yyyy-MM-dd (ddd)"))" />
 
-@* KPI 카드 영역 *@
+@* KPI 카드 영역 — KpiCard 공용 컴포넌트 *@
 <MudGrid Spacing="2" Class="mb-3">
-    @* 오늘 매출 *@
     <MudItem xs="12" sm="6" md="2" lg="2">
-        <MudPaper Elevation="0" Class="pa-3" Style="border:0.5px solid var(--mud-palette-lines-default);border-radius:12px;border-top:3px solid #0F6E56">
-            <div class="d-flex align-center gap-2 mb-1">
-                <MudIcon Icon="@Icons.Material.Filled.PointOfSale" Size="Size.Small" Style="color:#0F6E56" />
-                <MudText Typo="Typo.caption" Style="color:#666">오늘 매출</MudText>
-            </div>
-            <MudText Typo="Typo.h6" Style="font-weight:700">@FormatAmount(_data.TodaySales)</MudText>
-        </MudPaper>
+        <KpiCard Color="KpiCard.KpiColor.Primary"
+                 Icon="@Icons.Material.Filled.PointOfSale"
+                 Label="오늘 매출"
+                 Value="@FormatAmount(_data.TodaySales)" />
     </MudItem>
-
-    @* 이번달 매출 *@
     <MudItem xs="12" sm="6" md="2" lg="2">
-        <MudPaper Elevation="0" Class="pa-3" Style="border:0.5px solid var(--mud-palette-lines-default);border-radius:12px;border-top:3px solid #1976D2">
-            <div class="d-flex align-center gap-2 mb-1">
-                <MudIcon Icon="@Icons.Material.Filled.TrendingUp" Size="Size.Small" Style="color:#1976D2" />
-                <MudText Typo="Typo.caption" Style="color:#666">이번달 매출</MudText>
-            </div>
-            <MudText Typo="Typo.h6" Style="font-weight:700">@FormatAmount(_data.MonthSales)</MudText>
-        </MudPaper>
+        <KpiCard Color="KpiCard.KpiColor.Info"
+                 Icon="@Icons.Material.Filled.TrendingUp"
+                 Label="이번달 매출"
+                 Value="@FormatAmount(_data.MonthSales)" />
     </MudItem>
-
-    @* 이번달 매입 *@
     <MudItem xs="12" sm="6" md="2" lg="2">
-        <MudPaper Elevation="0" Class="pa-3" Style="border:0.5px solid var(--mud-palette-lines-default);border-radius:12px;border-top:3px solid #F57C00">
-            <div class="d-flex align-center gap-2 mb-1">
-                <MudIcon Icon="@Icons.Material.Filled.ShoppingCart" Size="Size.Small" Style="color:#F57C00" />
-                <MudText Typo="Typo.caption" Style="color:#666">이번달 매입</MudText>
-            </div>
-            <MudText Typo="Typo.h6" Style="font-weight:700">@FormatAmount(_data.MonthPurchase)</MudText>
-        </MudPaper>
+        <KpiCard Color="KpiCard.KpiColor.Warning"
+                 Icon="@Icons.Material.Filled.ShoppingCart"
+                 Label="이번달 매입"
+                 Value="@FormatAmount(_data.MonthPurchase)" />
     </MudItem>
-
-    @* 미수금 *@
     <MudItem xs="12" sm="6" md="3" lg="3">
-        <MudPaper Elevation="0" Class="pa-3" Style="border:0.5px solid var(--mud-palette-lines-default);border-radius:12px;border-top:3px solid #D32F2F">
-            <div class="d-flex align-center gap-2 mb-1">
-                <MudIcon Icon="@Icons.Material.Filled.Warning" Size="Size.Small" Style="color:#D32F2F" />
-                <MudText Typo="Typo.caption" Style="color:#666">미수금</MudText>
-            </div>
-            <MudText Typo="Typo.h6" Style="font-weight:700;color:#D32F2F">@FormatAmount(_data.UnpaidReceivable)</MudText>
-        </MudPaper>
+        <KpiCard Color="KpiCard.KpiColor.Error"
+                 Icon="@Icons.Material.Filled.Warning"
+                 Label="미수금"
+                 Value="@FormatAmount(_data.UnpaidReceivable)"
+                 EmphasizeValue="true" />
     </MudItem>
-
-    @* 결재대기 *@
     <MudItem xs="12" sm="6" md="3" lg="3">
-        <MudPaper Elevation="0" Class="pa-3" Style="border:0.5px solid var(--mud-palette-lines-default);border-radius:12px;border-top:3px solid #7B1FA2">
-            <div class="d-flex align-center gap-2 mb-1">
-                <MudIcon Icon="@Icons.Material.Filled.PendingActions" Size="Size.Small" Style="color:#7B1FA2" />
-                <MudText Typo="Typo.caption" Style="color:#666">결재대기</MudText>
-            </div>
-            <MudText Typo="Typo.h6" Style="font-weight:700;color:#7B1FA2">@(_data.PendingApprovalCount)건</MudText>
-        </MudPaper>
+        <KpiCard Color="KpiCard.KpiColor.Purple"
+                 Icon="@Icons.Material.Filled.PendingActions"
+                 Label="결재대기"
+                 Value="@($"{_data.PendingApprovalCount}건")"
+                 EmphasizeValue="true" />
     </MudItem>
 </MudGrid>
 

@@ -1,0 +1,65 @@
+@namespace HitPan.Web.Components.Common
+
+@* ══════════════════════════════════════════════════════════════
+   KpiCard — 좌측 컬러보더 + 아이콘 + 라벨 + 값 + 부가설명
+   사용 예:
+     <KpiCard Color="KpiColor.Primary"
+              Icon="@Icons.Material.Filled.PointOfSale"
+              Label="오늘 매출"
+              Value="₩1,234,567"
+              Sub="전일 대비 +12%" />
+   ══════════════════════════════════════════════════════════════ *@
+
+<div class="@CardClass">
+    <div class="hitpan-kpi-label">
+        @if (!string.IsNullOrWhiteSpace(Icon))
+        {
+            <MudIcon Icon="@Icon" Style="@($"color:{IconColor};font-size:14px")" />
+        }
+        @Label
+    </div>
+    <div class="@ValueClass">@Value</div>
+    @if (!string.IsNullOrWhiteSpace(Sub))
+    {
+        <div class="hitpan-kpi-sub">@Sub</div>
+    }
+</div>
+
+@code {
+    public enum KpiColor { Primary, Info, Warning, Error, Success, Purple }
+
+    /// <summary>좌측 컬러바 색상</summary>
+    [Parameter] public KpiColor Color { get; set; } = KpiColor.Primary;
+
+    /// <summary>아이콘 (선택)</summary>
+    [Parameter] public string? Icon { get; set; }
+
+    /// <summary>라벨 (작은 회색 텍스트)</summary>
+    [Parameter] public string Label { get; set; } = "";
+
+    /// <summary>큰 값 텍스트</summary>
+    [Parameter] public string Value { get; set; } = "";
+
+    /// <summary>값도 색상 강조할지 (기본=검정). true면 Color 따라감</summary>
+    [Parameter] public bool EmphasizeValue { get; set; } = false;
+
+    /// <summary>부가 설명 (작은 회색 텍스트)</summary>
+    [Parameter] public string? Sub { get; set; }
+
+    private string CardClass => $"hitpan-kpi hitpan-kpi--{Color.ToString().ToLowerInvariant()}";
+
+    private string ValueClass => EmphasizeValue
+        ? $"hitpan-kpi-value hitpan-kpi-value--{Color.ToString().ToLowerInvariant()}"
+        : "hitpan-kpi-value";
+
+    private string IconColor => Color switch
+    {
+        KpiColor.Primary => "var(--hitpan-primary)",
+        KpiColor.Info => "var(--hitpan-info)",
+        KpiColor.Warning => "var(--hitpan-warning)",
+        KpiColor.Error => "var(--hitpan-error)",
+        KpiColor.Success => "var(--hitpan-success)",
+        KpiColor.Purple => "var(--hitpan-purple)",
+        _ => "var(--hitpan-primary)"
+    };
+}

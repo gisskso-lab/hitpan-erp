@@ -423,9 +423,49 @@ html, body {
 }
 
 /* ════════════════════════════════════════════════════════════
-   공용 유틸 클래스 (신규 페이지부터 적용 — 2026-04-22 확정)
-   기존 페이지 인라인 스타일은 v1.1에서 일괄 교체.
+   히트판 디자인 시스템 v1 (2026-04-22)
+   - 토큰 + 공용 클래스
+   - 신규 페이지부터 적용, 기존은 점진적 교체
    ════════════════════════════════════════════════════════════ */
+
+:root {
+    /* 색상 — 브랜드 */
+    --hitpan-primary: #0F6E56;
+    --hitpan-primary-soft: #E8F5E9;
+    --hitpan-info: #1976D2;
+    --hitpan-info-soft: #E3F2FD;
+    --hitpan-warning: #F57C00;
+    --hitpan-warning-soft: #FFF3E0;
+    --hitpan-error: #D32F2F;
+    --hitpan-error-soft: #FFEBEE;
+    --hitpan-success: #2E7D32;
+    --hitpan-success-soft: #E8F5E9;
+    --hitpan-purple: #7B1FA2;
+    --hitpan-purple-soft: #F3E5F5;
+
+    /* 텍스트 */
+    --hitpan-text-strong: #111827;
+    --hitpan-text-default: #374151;
+    --hitpan-text-muted: #6B7280;
+    --hitpan-text-faint: #9CA3AF;
+
+    /* 간격 (8점 그리드) */
+    --hitpan-gap-xs: 4px;
+    --hitpan-gap-sm: 8px;
+    --hitpan-gap-md: 16px;
+    --hitpan-gap-lg: 24px;
+    --hitpan-gap-xl: 32px;
+
+    /* 보더 & 반경 */
+    --hitpan-border: 0.5px solid var(--mud-palette-lines-default);
+    --hitpan-radius-sm: 6px;
+    --hitpan-radius-md: 8px;
+    --hitpan-radius-lg: 12px;
+
+    /* 그림자 (절제) */
+    --hitpan-shadow-sm: 0 1px 2px rgba(0,0,0,0.04);
+    --hitpan-shadow-md: 0 4px 12px rgba(0,0,0,0.08);
+}
 
 /* 히트판 카드 — Elevation=0 + 0.5px 보더 + 12px radius (MudPaper 표준) */
 .hitpan-card {
@@ -458,5 +498,119 @@ html, body {
     font-size: 14px;
     text-align: center;
     padding: 32px 16px;
+}
+
+/* ════════════════════════════════════════════════════════════
+   페이지 구조 (PageHeader 컴포넌트와 쌍)
+   ════════════════════════════════════════════════════════════ */
+
+/* 페이지 헤더 — 제목+부제 좌측 / 액션 버튼 우측 */
+.hitpan-page-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-end;
+    gap: var(--hitpan-gap-md);
+    margin-bottom: var(--hitpan-gap-md);
+    padding-bottom: var(--hitpan-gap-sm);
+    flex-wrap: wrap;
+}
+
+.hitpan-page-title {
+    font-size: 18px;
+    font-weight: 600;
+    color: var(--hitpan-text-strong);
+    line-height: 1.3;
+    margin: 0;
+}
+
+.hitpan-page-subtitle {
+    font-size: 12px;
+    color: var(--hitpan-text-muted);
+    margin-top: 2px;
+}
+
+.hitpan-page-actions {
+    display: flex;
+    gap: var(--hitpan-gap-sm);
+    flex-wrap: wrap;
+}
+
+/* ════════════════════════════════════════════════════════════
+   KPI 카드 (KpiCard 컴포넌트와 쌍)
+   ════════════════════════════════════════════════════════════ */
+
+.hitpan-kpi {
+    border: var(--hitpan-border);
+    border-radius: var(--hitpan-radius-lg);
+    background: var(--mud-palette-background);
+    padding: 12px 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    min-height: 84px;
+    position: relative;
+    overflow: hidden;
+}
+
+/* 좌측 컬러 바 (4px) — 색상별 변형 */
+.hitpan-kpi--primary  { border-left: 4px solid var(--hitpan-primary); }
+.hitpan-kpi--info     { border-left: 4px solid var(--hitpan-info); }
+.hitpan-kpi--warning  { border-left: 4px solid var(--hitpan-warning); }
+.hitpan-kpi--error    { border-left: 4px solid var(--hitpan-error); }
+.hitpan-kpi--success  { border-left: 4px solid var(--hitpan-success); }
+.hitpan-kpi--purple   { border-left: 4px solid var(--hitpan-purple); }
+
+.hitpan-kpi-label {
+    font-size: 12px;
+    color: var(--hitpan-text-muted);
+    display: flex;
+    align-items: center;
+    gap: 4px;
+}
+
+.hitpan-kpi-value {
+    font-size: 20px;
+    font-weight: 700;
+    color: var(--hitpan-text-strong);
+    font-variant-numeric: tabular-nums;
+    line-height: 1.2;
+}
+
+.hitpan-kpi-sub {
+    font-size: 11px;
+    color: var(--hitpan-text-faint);
+}
+
+/* 색상 강조된 값 (예: 미수금 빨강) */
+.hitpan-kpi-value--error   { color: var(--hitpan-error); }
+.hitpan-kpi-value--warning { color: var(--hitpan-warning); }
+.hitpan-kpi-value--info    { color: var(--hitpan-info); }
+.hitpan-kpi-value--success { color: var(--hitpan-success); }
+.hitpan-kpi-value--primary { color: var(--hitpan-primary); }
+
+/* ════════════════════════════════════════════════════════════
+   섹션 카드 (SectionCard 컴포넌트와 쌍)
+   - 페이지 내 영역 구분용 일반 카드
+   ════════════════════════════════════════════════════════════ */
+
+.hitpan-section {
+    border: var(--hitpan-border);
+    border-radius: var(--hitpan-radius-lg);
+    background: var(--mud-palette-background);
+    padding: var(--hitpan-gap-md);
+    margin-bottom: var(--hitpan-gap-md);
+}
+
+.hitpan-section--tight { padding: var(--hitpan-gap-sm); }
+.hitpan-section--flat  { padding: 0; overflow: hidden; }
+
+.hitpan-section-title {
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--hitpan-text-default);
+    margin-bottom: var(--hitpan-gap-sm);
+    display: flex;
+    align-items: center;
+    gap: 6px;
 }
 
