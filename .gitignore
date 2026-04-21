@@ -34,3 +34,10 @@ dist/
 # 테스트 결과
 TestResults/
 coverage/
+
+# 설치 파일 빌드 산출물 (대용량)
+installer-build/tmp-web/
+installer-build/hitpan/
+installer-build/prereqs/mariadb.msi
+installer-build/hitpan_db.sql
+installer-build/output/*.exe
