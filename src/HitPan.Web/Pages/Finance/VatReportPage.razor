@@ -4,15 +4,17 @@
 @using HitPan.Web.Models
 @using HitPan.Web.Services
 @inject FinanceClientService FinSvc
+@inject IJSRuntime Js
+@inject ISnackbar Snackbar
 
 <PageTitle>부가세 신고자료</PageTitle>
-<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
+<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px" class="no-print">
     <MudText Typo="Typo.h6">부가세 신고자료</MudText>
 </div>
 
-<!-- 년도/반기 필터 -->
-<MudPaper Elevation="0" Class="pa-2 mb-3" Style="border:0.5px solid var(--mud-palette-lines-default);border-radius:12px">
-    <MudGrid Spacing="2" Class="pa-2">
+<!-- 년도/반기 필터 + 추출 버튼 -->
+<MudPaper Elevation="0" Class="pa-2 mb-3 no-print" Style="border:0.5px solid var(--mud-palette-lines-default);border-radius:12px">
+    <MudGrid Spacing="2" Class="pa-2 align-center">
         <MudItem xs="6" md="2">
             <MudNumericField T="int" Label="년도" @bind-Value="_year" Variant="Variant.Outlined" Margin="Margin.Dense" />
         </MudItem>
@@ -22,9 +24,37 @@
                 <MudSelectItem Value="2">하반기 (7~12월)</MudSelectItem>
             </MudSelect>
         </MudItem>
-        <MudItem xs="12" md="2"><MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="LoadAsync">조회</MudButton></MudItem>
+        <MudItem xs="12" md="8" Class="d-flex gap-2 flex-wrap">
+            <MudButton Variant="Variant.Filled" Color="Color.Primary"
+                       StartIcon="@Icons.Material.Filled.Search" OnClick="LoadAsync">조회</MudButton>
+            <MudDivider Vertical="true" FlexItem="true" Class="mx-2" />
+            <MudButton Variant="Variant.Outlined" Color="Color.Error"
+                       StartIcon="@Icons.Material.Filled.PictureAsPdf"
+                       OnClick="ExportPdfAsync" Disabled="@(_vat is null)">
+                PDF (시각화+텍스트)
+            </MudButton>
+            <MudButton Variant="Variant.Outlined" Color="Color.Success"
+                       StartIcon="@Icons.Material.Filled.TableChart"
+                       OnClick="ExportExcelAsync" Disabled="@(_vat is null)">
+                엑셀 (텍스트)
+            </MudButton>
+            <MudButton Variant="Variant.Outlined"
+                       StartIcon="@Icons.Material.Filled.Print"
+                       OnClick="PrintAsync" Disabled="@(_vat is null)">
+                인쇄
+            </MudButton>
+        </MudItem>
     </MudGrid>
 </MudPaper>
+
+@* 인쇄/PDF용 상단 타이틀 (화면에서는 숨김, 인쇄할 때만 보임) *@
+<div class="print-only" style="display:none;text-align:center;margin-bottom:16px">
+    <h2 style="margin:0;font-weight:700">부가세 신고자료</h2>
+    @if (_vat is not null)
+    {
+        <p style="margin:4px 0;color:#555">@_vat.Period · 출력일 @DateTime.Now.ToString("yyyy-MM-dd HH:mm")</p>
+    }
+</div>
 
 @if (_vat is not null)
 {
@@ -178,4 +208,54 @@
             new() { Label = "매입세액", Amount = _vat.PurchaseVat }
         };
     }
+
+    /// <summary>PDF 내보내기 — 브라우저 인쇄 다이얼로그로 차트+텍스트 모두 PDF 저장</summary>
+    private async Task ExportPdfAsync()
+    {
+        if (_vat is null) return;
+        await Js.InvokeVoidAsync("print");
+        Snackbar.Add("PDF 내보내기: 인쇄 창에서 '대상 → PDF로 저장'을 선택하세요.", Severity.Info);
+    }
+
+    /// <summary>인쇄</summary>
+    private async Task PrintAsync()
+    {
+        if (_vat is null) return;
+        await Js.InvokeVoidAsync("print");
+    }
+
+    /// <summary>엑셀(CSV) 내보내기 — 텍스트 상세 데이터</summary>
+    private async Task ExportExcelAsync()
+    {
+        if (_vat is null) return;
+
+        var netLabel = _vat.NetVat >= 0 ? "납부세액" : "환급세액";
+        var csv = new System.Text.StringBuilder();
+        csv.AppendLine("부가세 신고자료");
+        csv.AppendLine($"기간,{_vat.Period}");
+        csv.AppendLine($"출력일,{DateTime.Now:yyyy-MM-dd HH:mm}");
+        csv.AppendLine();
+        csv.AppendLine("구분,건수,공급가액,세액");
+        csv.AppendLine($"매출,{_vat.SalesCount},{_vat.SalesSupply},{_vat.SalesVat}");
+        csv.AppendLine($"매입,{_vat.PurchaseCount},{_vat.PurchaseSupply},{_vat.PurchaseVat}");
+        csv.AppendLine();
+        csv.AppendLine($"{netLabel},{Math.Abs(_vat.NetVat)}");
+
+        // UTF-8 BOM 포함 (한글 엑셀 호환)
+        var bytes = System.Text.Encoding.UTF8.GetPreamble()
+            .Concat(System.Text.Encoding.UTF8.GetBytes(csv.ToString())).ToArray();
+        var base64 = Convert.ToBase64String(bytes);
+        var fileName = $"부가세신고자료_{_year}년_{(_half == 1 ? "상반기" : "하반기")}.csv";
+        await Js.InvokeVoidAsync("eval",
+            $"{{var a=document.createElement('a');a.href='data:text/csv;base64,{base64}';a.download='{fileName}';a.click();}}");
+        Snackbar.Add("엑셀(CSV) 내보내기 완료", Severity.Success);
+    }
 }
+
+@* 인쇄 전용 스타일 — 버튼/필터 숨기고 타이틀 표시 *@
+<style>
+    @@media print {
+        .no-print { display: none !important; }
+        .print-only { display: block !important; }
+    }
+</style>
