@@ -238,6 +238,11 @@ public class FinanceService : IFinanceService
                   req.Category, req.Description, req.Amount, Vat = req.VatAmount,
                   Method = req.PaymentMethod, Receipt = req.ReceiptYn ? 1 : 0, req.Memo, UserId = userId },
             cancellationToken: ct));
+
+        // 감사로그 — 경비 생성
+        var afterJson = $"{{\"expense_date\":\"{req.ExpenseDate:yyyy-MM-dd}\",\"category\":\"{req.Category}\",\"amount\":{req.Amount}}}";
+        await _audit.LogAsync("create", "expense", id, afterJson: afterJson, ct: ct);
+
         return id;
     }
 
@@ -256,6 +261,10 @@ public class FinanceService : IFinanceService
                 "UPDATE hr_expense_requests SET status = @Action, approved_by = @TenantId, approved_at = NOW(6) WHERE request_id = @Id AND tenant_id = @TenantId",
                 new { Id = expenseId, TenantId = tenantId, Action = action }, cancellationToken: ct));
         }
+
+        // 감사로그 — 경비 승인/반려 (action 값: approved/rejected 등)
+        var afterJson = $"{{\"action\":\"{action}\"}}";
+        await _audit.LogAsync("approve", "expense", expenseId, afterJson: afterJson, ct: ct);
     }
 
     // ═══════════════════════════════════════
@@ -409,40 +418,49 @@ public class FinanceService : IFinanceService
         var yearStart = new DateTime(today.Year, 1, 1);
         var p = new { TenantId = tenantId, Today = today, MonthStart = monthStart, YearStart = yearStart };
 
-        // ── 6개 KPI 쿼리를 병렬 실행 (순차 0.24s → 병렬 ~0.05s) ──
-        var todaySalesTask = _db.QueryFirstOrDefaultAsync<decimal>(new CommandDefinition(
-            "SELECT COALESCE(SUM(total_amount + vat_amount), 0) FROM sales_deliveries WHERE tenant_id = @TenantId AND status IN ('confirmed','invoiced') AND is_deleted = 0 AND delivery_date = @Today", p, cancellationToken: ct));
+        // ── 7개 KPI를 UNION ALL 단일 쿼리로 통합 (네트워크 왕복 1회) ──
+        // 주의: MySqlConnection은 thread-safe 아니므로 Task.WhenAll 병렬 금지 ("conn in use" 에러)
+        // 대신 모든 KPI를 한 번의 쿼리에 합쳐서 성능 확보
+        const string kpiSql = """
+            SELECT 'today_sales' AS k, COALESCE(SUM(total_amount + vat_amount), 0) AS v
+              FROM sales_deliveries WHERE tenant_id=@TenantId AND status IN ('confirmed','invoiced') AND is_deleted=0 AND delivery_date=@Today
+            UNION ALL
+            SELECT 'month_sales', COALESCE(SUM(total_amount + vat_amount), 0)
+              FROM sales_deliveries WHERE tenant_id=@TenantId AND status IN ('confirmed','invoiced') AND is_deleted=0
+                AND delivery_date>=@MonthStart AND delivery_date<=@Today
+            UNION ALL
+            SELECT 'month_purchase', COALESCE(SUM(total_amount + vat_amount), 0)
+              FROM purchase_receipts WHERE tenant_id=@TenantId AND status='confirmed'
+                AND receipt_date>=@MonthStart AND receipt_date<=@Today
+            UNION ALL
+            SELECT 'receivable',
+              COALESCE((SELECT SUM(total_amount + vat_amount) FROM sales_deliveries WHERE tenant_id=@TenantId AND status IN ('confirmed','invoiced') AND is_deleted=0), 0)
+              - COALESCE((SELECT SUM(amount) FROM collections WHERE tenant_id=@TenantId AND ref_doc_type IN ('sales_delivery','sales_order')), 0)
+            UNION ALL
+            SELECT 'payable',
+              COALESCE((SELECT SUM(total_amount + vat_amount) FROM purchase_receipts WHERE tenant_id=@TenantId AND status='confirmed'), 0)
+              - COALESCE((SELECT SUM(amount) FROM collections WHERE tenant_id=@TenantId AND ref_doc_type IN ('purchase_receipt','purchase_order')), 0)
+            UNION ALL
+            SELECT 'low_stock',
+              (SELECT COUNT(*) FROM item_stock s INNER JOIN items i ON i.item_id=s.item_id AND i.tenant_id=s.tenant_id
+               WHERE s.tenant_id=@TenantId AND i.is_deleted=0 AND i.safety_stock>0 AND s.current_qty<i.safety_stock)
+            UNION ALL
+            SELECT 'pending_approval',
+              (SELECT COUNT(*) FROM approval_documents WHERE tenant_id=@TenantId AND status='pending')
+            """;
 
-        var monthSalesTask = _db.QueryFirstOrDefaultAsync<decimal>(new CommandDefinition(
-            "SELECT COALESCE(SUM(total_amount + vat_amount), 0) FROM sales_deliveries WHERE tenant_id = @TenantId AND status IN ('confirmed','invoiced') AND is_deleted = 0 AND delivery_date >= @MonthStart AND delivery_date <= @Today", p, cancellationToken: ct));
-
-        var monthPurchaseTask = _db.QueryFirstOrDefaultAsync<decimal>(new CommandDefinition(
-            "SELECT COALESCE(SUM(total_amount + vat_amount), 0) FROM purchase_receipts WHERE tenant_id = @TenantId AND status = 'confirmed' AND receipt_date >= @MonthStart AND receipt_date <= @Today", p, cancellationToken: ct));
-
-        var receivableTask = _db.QueryFirstOrDefaultAsync<decimal>(new CommandDefinition(
-            "SELECT COALESCE(SUM(total_amount + vat_amount), 0) - COALESCE((SELECT SUM(amount) FROM collections WHERE tenant_id = @TenantId AND ref_doc_type IN ('sales_delivery','sales_order')), 0) FROM sales_deliveries WHERE tenant_id = @TenantId AND status IN ('confirmed','invoiced') AND is_deleted = 0", p, cancellationToken: ct));
-
-        var payableTask = _db.QueryFirstOrDefaultAsync<decimal>(new CommandDefinition(
-            "SELECT COALESCE(SUM(total_amount + vat_amount), 0) - COALESCE((SELECT SUM(amount) FROM collections WHERE tenant_id = @TenantId AND ref_doc_type IN ('purchase_receipt','purchase_order')), 0) FROM purchase_receipts WHERE tenant_id = @TenantId AND status = 'confirmed'", p, cancellationToken: ct));
-
-        var lowStockTask = _db.QueryFirstOrDefaultAsync<int>(new CommandDefinition(
-            "SELECT COUNT(*) FROM item_stock s INNER JOIN items i ON i.item_id = s.item_id AND i.tenant_id = s.tenant_id WHERE s.tenant_id = @TenantId AND i.is_deleted = 0 AND i.safety_stock > 0 AND s.current_qty < i.safety_stock", p, cancellationToken: ct));
-
-        var approvalTask = _db.QueryFirstOrDefaultAsync<int>(new CommandDefinition(
-            "SELECT COUNT(*) FROM approval_documents WHERE tenant_id = @TenantId AND status = 'pending'", p, cancellationToken: ct));
-
-        // 7개 KPI 동시 실행
-        await Task.WhenAll(todaySalesTask, monthSalesTask, monthPurchaseTask, receivableTask, payableTask, lowStockTask, approvalTask).ConfigureAwait(false);
+        var kpiRows = (await _db.QueryAsync<(string k, decimal v)>(
+            new CommandDefinition(kpiSql, p, cancellationToken: ct)).ConfigureAwait(false)).ToDictionary(r => r.k, r => r.v);
 
         var dto = new DashboardSummaryDto
         {
-            TodaySales = todaySalesTask.Result,
-            MonthSales = monthSalesTask.Result,
-            MonthPurchase = monthPurchaseTask.Result,
-            UnpaidReceivable = receivableTask.Result,
-            UnpaidPayable = payableTask.Result,
-            LowStockCount = lowStockTask.Result,
-            PendingApprovalCount = approvalTask.Result
+            TodaySales = kpiRows.GetValueOrDefault("today_sales"),
+            MonthSales = kpiRows.GetValueOrDefault("month_sales"),
+            MonthPurchase = kpiRows.GetValueOrDefault("month_purchase"),
+            UnpaidReceivable = kpiRows.GetValueOrDefault("receivable"),
+            UnpaidPayable = kpiRows.GetValueOrDefault("payable"),
+            LowStockCount = (int)kpiRows.GetValueOrDefault("low_stock"),
+            PendingApprovalCount = (int)kpiRows.GetValueOrDefault("pending_approval")
         };
 
         // ── 월별 매출·매입 추이 (최근 6개월) ──

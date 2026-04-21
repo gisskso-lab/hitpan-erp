@@ -209,6 +209,11 @@ SI 현장 20년 현업 출신.
 10. **한 화면씩 완성 → 사장님 확인 → 승인 → 써밋**
 11. **권한은 어드민이 직접 설정** — 업종·규모별 템플릿 제공 금지 (2026-04-21 확정)
 12. **인터페이스 확장 시 모든 구현체 grep 필수** — 누락으로 인한 빌드 오류·런타임 오류 원천 차단
+13. **새 SQL 작성 전 DESCRIBE 테이블 의무** — 런타임 500 재발 방지. 컬럼·타입 확인 후 쿼리 작성
+14. **Razor(.razor) 파일에 C# raw string 금지** — `"""..."""` 구문은 Razor 파서가 인식 못 함. `$"...\n..."` 사용
+15. **빈 catch 블록 금지** — 최소한 `_logger.LogWarning(ex, ...)` 한 줄. silent swallow는 운영 사고 추적 불가
+16. **MySqlConnection + Task.WhenAll 조합 금지** — MySqlConnection은 thread-safe가 아님. 병렬 쿼리 시 "connection in use" 에러. 다중 KPI는 `UNION ALL` 단일 쿼리 또는 `QueryMultipleAsync` 사용
+17. **신규 DB 테이블은 반드시 `ENGINE=InnoDB` 명시** — MyISAM은 트랜잭션·FK 지원 안 함. 4/22 40개 테이블 일괄 전환 교훈
 
 ---
 

@@ -421,3 +421,42 @@ html, body {
     /* 페이지 여백 */
     @page { margin: 10mm; }
 }
+
+/* ════════════════════════════════════════════════════════════
+   공용 유틸 클래스 (신규 페이지부터 적용 — 2026-04-22 확정)
+   기존 페이지 인라인 스타일은 v1.1에서 일괄 교체.
+   ════════════════════════════════════════════════════════════ */
+
+/* 히트판 카드 — Elevation=0 + 0.5px 보더 + 12px radius (MudPaper 표준) */
+.hitpan-card {
+    border: 0.5px solid var(--mud-palette-lines-default);
+    border-radius: 12px;
+    background: var(--mud-palette-background);
+}
+
+/* KPI 상단 컬러 보더 카드 (대시보드 스타일) */
+.hitpan-kpi-card {
+    border: 0.5px solid var(--mud-palette-lines-default);
+    border-radius: 12px;
+    border-top: 3px solid var(--mud-palette-primary);
+    padding: 12px 16px;
+    background: var(--mud-palette-background);
+}
+
+/* 인쇄 시 숨김/표시 (no-print / print-only) — 공용 토글 */
+.no-print { /* 화면에서는 그대로 보임 */ }
+.print-only { display: none; }
+
+@media print {
+    .no-print { display: none !important; }
+    .print-only { display: block !important; }
+}
+
+/* 빈 상태 텍스트 — EmptyState 컴포넌트 내부 사용 */
+.hitpan-empty-text {
+    color: #9CA3AF;
+    font-size: 14px;
+    text-align: center;
+    padding: 32px 16px;
+}
+

@@ -11,12 +11,14 @@ public class StockService : IStockService
     private readonly IUnitOfWork _unitOfWork;
     private readonly ICurrentTenant _currentTenant;
     private readonly IDbConnection _dbConnection;
+    private readonly IAuditService _audit;
 
-    public StockService(IUnitOfWork unitOfWork, ICurrentTenant currentTenant, IDbConnection dbConnection)
+    public StockService(IUnitOfWork unitOfWork, ICurrentTenant currentTenant, IDbConnection dbConnection, IAuditService audit)
     {
         _unitOfWork = unitOfWork;
         _currentTenant = currentTenant;
         _dbConnection = dbConnection;
+        _audit = audit;
     }
 
     public async Task<IReadOnlyList<StockBalanceDto>> GetBalanceAsync(CancellationToken ct = default)
@@ -304,6 +306,10 @@ public class StockService : IStockService
         var names = await _dbConnection.QuerySingleOrDefaultAsync<(string ItemName, string WarehouseName)>(
             new CommandDefinition(nameSql, new { TenantId = tenantId, req.ItemId, req.WarehouseId }, cancellationToken: ct)).ConfigureAwait(false);
 
+        // 감사로그 — 재고 실사 조정 (before_qty, actual_qty, diff 기록)
+        var afterJson = $"{{\"item_id\":\"{req.ItemId}\",\"warehouse_id\":\"{req.WarehouseId}\",\"before_qty\":{currentQty},\"actual_qty\":{req.ActualQty},\"diff\":{diff},\"adjust_type\":\"{adjustType}\"}}";
+        await _audit.LogAsync("adjust", "stock", req.ItemId, afterJson: afterJson, reason: req.Reason, ct: ct);
+
         return new StockAdjustResultDto
         {
             ItemId = req.ItemId,
@@ -452,6 +458,10 @@ public class StockService : IStockService
             try { tx.Rollback(); } catch { /* 이미 닫힌 tx */ }
             throw;
         }
+
+        // 감사로그 — 재고 이송 (from_warehouse → to_warehouse, qty 기록)
+        var afterJson = $"{{\"item_id\":\"{req.ItemId}\",\"from_warehouse\":\"{req.FromWarehouseId}\",\"to_warehouse\":\"{req.ToWarehouseId}\",\"qty\":{req.Qty}}}";
+        await _audit.LogAsync("transfer", "stock", req.ItemId, afterJson: afterJson, reason: req.Memo, ct: ct);
     }
 
     /// <summary>재고 이송 이력 조회</summary>

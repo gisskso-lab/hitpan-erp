@@ -1,0 +1,79 @@
+@namespace HitPan.Web.Components.Common
+
+@* ══════════════════════════════════════════════════════════════
+   EmptyState — 빈 상태 공용 컴포넌트
+   사용 예:
+     <EmptyState Icon="@Icons.Material.Outlined.Inbox"
+                 Title="등록된 상품이 없습니다"
+                 Subtitle="우측 상단 '신규' 버튼으로 첫 상품을 등록해보세요"
+                 ActionText="신규 상품 등록"
+                 OnAction="@(() => OpenCreateDialog())" />
+   ══════════════════════════════════════════════════════════════ *@
+
+<div style="display:flex;flex-direction:column;align-items:center;justify-content:center;padding:48px 24px;text-align:center;min-height:@MinHeight">
+    @* 아이콘 *@
+    <MudIcon Icon="@Icon" Style="@($"font-size:56px;color:{IconColor};margin-bottom:16px")" />
+
+    @* 타이틀 *@
+    @if (!string.IsNullOrWhiteSpace(Title))
+    {
+        <MudText Typo="Typo.subtitle1" Style="font-weight:600;color:#374151;margin-bottom:4px">
+            @Title
+        </MudText>
+    }
+
+    @* 부제 *@
+    @if (!string.IsNullOrWhiteSpace(Subtitle))
+    {
+        <MudText Typo="Typo.body2" Style="color:#9CA3AF;max-width:360px;margin-bottom:16px">
+            @Subtitle
+        </MudText>
+    }
+
+    @* 액션 버튼 (선택) *@
+    @if (!string.IsNullOrWhiteSpace(ActionText) && OnAction.HasDelegate)
+    {
+        <MudButton Variant="Variant.Filled" Color="Color.Primary"
+                   StartIcon="@(ActionIcon ?? Icons.Material.Filled.Add)"
+                   OnClick="@(() => OnAction.InvokeAsync())">
+            @ActionText
+        </MudButton>
+    }
+
+    @* 커스텀 슬롯 *@
+    @if (ChildContent is not null)
+    {
+        <div style="margin-top:16px">
+            @ChildContent
+        </div>
+    }
+</div>
+
+@code {
+    /// <summary>아이콘 (MudBlazor Icons)</summary>
+    [Parameter] public string Icon { get; set; } = Icons.Material.Outlined.Inbox;
+
+    /// <summary>아이콘 색상 (HEX)</summary>
+    [Parameter] public string IconColor { get; set; } = "#D1D5DB";
+
+    /// <summary>빈 상태 메인 타이틀</summary>
+    [Parameter] public string Title { get; set; } = "데이터가 없습니다";
+
+    /// <summary>부제 (안내 문구)</summary>
+    [Parameter] public string? Subtitle { get; set; }
+
+    /// <summary>액션 버튼 텍스트 (없으면 버튼 미표시)</summary>
+    [Parameter] public string? ActionText { get; set; }
+
+    /// <summary>액션 버튼 아이콘</summary>
+    [Parameter] public string? ActionIcon { get; set; }
+
+    /// <summary>액션 버튼 클릭 이벤트</summary>
+    [Parameter] public EventCallback OnAction { get; set; }
+
+    /// <summary>영역 최소 높이 (CSS 값, 기본 200px)</summary>
+    [Parameter] public string MinHeight { get; set; } = "200px";
+
+    /// <summary>커스텀 추가 콘텐츠 (버튼 아래 삽입)</summary>
+    [Parameter] public RenderFragment? ChildContent { get; set; }
+}

@@ -11,11 +11,13 @@ public class AuthController : ControllerBase
 {
     private readonly IAuthService _authService;
     private readonly IHrService _hrService;
+    private readonly ILogger<AuthController> _logger;
 
-    public AuthController(IAuthService authService, IHrService hrService)
+    public AuthController(IAuthService authService, IHrService hrService, ILogger<AuthController> logger)
     {
         _authService = authService;
         _hrService = hrService;
+        _logger = logger;
     }
 
     [HttpPost("login")]
@@ -41,7 +43,11 @@ public class AuthController : ControllerBase
                             new HitPan.Application.DTOs.Employee.CheckInOutRequest { Memo = "자동출근" }, ct);
                     }
                 }
-                catch { /* 출근 기록 실패해도 로그인은 성공 */ }
+                catch (Exception ex)
+                {
+                    // 출근 기록 실패는 로그인 자체를 막지 않지만 운영 추적을 위해 로그 남김
+                    _logger.LogWarning(ex, "자동 출근 기록 실패 — TenantId: {TenantId}", response.TenantId);
+                }
             }
 
             return Ok(response);
@@ -64,7 +70,7 @@ public class AuthController : ControllerBase
         {
             // 자동 퇴근 기록
             try { await _hrService.CheckOutAsync(tenantId, userId, ct); }
-            catch { }
+            catch (Exception ex) { _logger.LogWarning(ex, "자동 퇴근 기록 실패 — UserId: {UserId}", userId); }
 
             // 세션 + refresh_token 정리
             try
@@ -82,7 +88,7 @@ public class AuthController : ControllerBase
                     "DELETE FROM user_sessions WHERE user_id = @UserId",
                     new { UserId = userId });
             }
-            catch { }
+            catch (Exception ex) { _logger.LogWarning(ex, "로그아웃 세션/토큰 정리 실패 — UserId: {UserId}", userId); }
         }
 
         return Ok(new { message = "로그아웃 완료" });

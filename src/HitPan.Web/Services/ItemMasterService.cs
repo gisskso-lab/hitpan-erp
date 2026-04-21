@@ -108,7 +108,7 @@ public sealed class ItemMasterService(HttpClient http)
             if (doc.RootElement.TryGetProperty("message", out var msgEl))
                 return msgEl.GetString();
         }
-        catch { }
+        catch { /* JSON이 아닌 응답 — 의도된 무시, 호출자가 기본 메시지 사용 */ }
         return null;
     }
 

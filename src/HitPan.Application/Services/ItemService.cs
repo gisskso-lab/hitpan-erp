@@ -9,10 +9,12 @@ namespace HitPan.Application.Services;
 public sealed class ItemService : IItemService
 {
     private readonly IDbConnection _db;
+    private readonly IAuditService _audit;
 
-    public ItemService(IDbConnection db)
+    public ItemService(IDbConnection db, IAuditService audit)
     {
         _db = db;
+        _audit = audit;
     }
 
     public async Task<List<ItemListDto>> GetListAsync(
@@ -206,6 +208,10 @@ public sealed class ItemService : IItemService
             },
             cancellationToken: ct)).ConfigureAwait(false);
 
+        // 감사로그 — 상품 생성
+        var afterJson = $"{{\"item_code\":\"{code}\",\"item_name\":\"{dto.ItemName.Trim()}\",\"item_type\":\"{itemType}\"}}";
+        await _audit.LogAsync("create", "item", id, afterJson: afterJson, ct: ct);
+
         return id;
     }
 
@@ -277,6 +283,10 @@ public sealed class ItemService : IItemService
         {
             throw new InvalidOperationException("다른 사용자가 수정했습니다. 새로고침 후 다시 시도해주세요.");
         }
+
+        // 감사로그 — 상품 수정 (핵심 변경 필드만 기록)
+        var afterJson = $"{{\"item_name\":\"{dto.ItemName.Trim()}\",\"sale_price\":{dto.SalePrice},\"purchase_price\":{dto.PurchasePrice},\"is_active\":{(dto.IsActive ? "true" : "false")}}}";
+        await _audit.LogAsync("update", "item", itemId, afterJson: afterJson, ct: ct);
     }
 
     public async Task DeleteAsync(string itemId, string tenantId, CancellationToken ct = default)
@@ -295,6 +305,9 @@ public sealed class ItemService : IItemService
             """,
             new { ItemId = itemId, TenantId = tenantId },
             cancellationToken: ct)).ConfigureAwait(false);
+
+        // 감사로그 — 상품 소프트 삭제
+        await _audit.LogAsync("delete", "item", itemId, ct: ct);
     }
 
     public async Task<List<ItemSpecialPriceDto>> GetSpecialPricesAsync(string itemId, string tenantId, CancellationToken ct = default)
