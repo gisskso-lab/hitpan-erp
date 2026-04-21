@@ -34,6 +34,7 @@ var isDevelopment = builder.Environment.IsDevelopment();
 
 builder.Services.AddHttpContextAccessor();
 builder.Services.AddMemoryCache();
+builder.Services.AddDataProtection();  // DPAPI 기반 비밀번호 보호 (인증서 등)
 builder.Services.AddScoped<CurrentTenant>();
 builder.Services.AddScoped<ICurrentTenant>(sp => sp.GetRequiredService<CurrentTenant>());
 builder.Services.AddSingleton<IEncryptionService, EncryptionService>();
@@ -56,6 +57,7 @@ builder.Services.AddScoped<IItemService, ItemService>();
 builder.Services.AddScoped<IBomService, BomService>();
 builder.Services.AddScoped<IPermissionService, PermissionService>();
 builder.Services.AddScoped<IAuditService, AuditService>();
+builder.Services.AddScoped<ITenantCertificateService, TenantCertificateService>();
 builder.Services.AddScoped<IEmployeeService, EmployeeService>();
 builder.Services.AddScoped<ILeaveRequestService, LeaveRequestService>();
 builder.Services.AddScoped<IReportService, ReportService>();

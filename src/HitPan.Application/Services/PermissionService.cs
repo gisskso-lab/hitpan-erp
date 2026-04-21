@@ -29,6 +29,7 @@ public class PermissionService : IPermissionService
         ("APPROVAL", "결재"),
         ("HR", "인사"),
         ("MONTHLY_CLOSING", "월마감"),
+        ("CERTIFICATE", "범용인증서"),
         ("DASHBOARD", "대시보드"),
         ("SETTINGS", "사용환경설정"),
         ("USERS", "사용자관리")

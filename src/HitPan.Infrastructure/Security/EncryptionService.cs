@@ -7,6 +7,8 @@ public interface IEncryptionService
 {
     string Encrypt(string plainText);
     string Decrypt(string cipherText);
+    byte[] EncryptBytes(byte[] plainBytes);
+    byte[] DecryptBytes(byte[] cipherBytes);
 }
 
 public sealed class EncryptionService : IEncryptionService
@@ -79,6 +81,48 @@ public sealed class EncryptionService : IEncryptionService
         using var decryptor = aes.CreateDecryptor();
         var plainBytes = decryptor.TransformFinalBlock(cipherBytes, 0, cipherBytes.Length);
         return Encoding.UTF8.GetString(plainBytes);
+    }
+
+    public byte[] EncryptBytes(byte[] plainBytes)
+    {
+        if (plainBytes is null) throw new ArgumentNullException(nameof(plainBytes));
+
+        using var aes = Aes.Create();
+        aes.Mode = CipherMode.CBC;
+        aes.Padding = PaddingMode.PKCS7;
+        aes.KeySize = 256;
+        aes.Key = _key;
+        aes.GenerateIV();
+
+        using var encryptor = aes.CreateEncryptor();
+        var cipher = encryptor.TransformFinalBlock(plainBytes, 0, plainBytes.Length);
+
+        var result = new byte[IvSizeInBytes + cipher.Length];
+        Buffer.BlockCopy(aes.IV, 0, result, 0, IvSizeInBytes);
+        Buffer.BlockCopy(cipher, 0, result, IvSizeInBytes, cipher.Length);
+        return result;
+    }
+
+    public byte[] DecryptBytes(byte[] cipherBytes)
+    {
+        if (cipherBytes is null) throw new ArgumentNullException(nameof(cipherBytes));
+        if (cipherBytes.Length <= IvSizeInBytes)
+            throw new CryptographicException("Cipher payload invalid.");
+
+        var iv = new byte[IvSizeInBytes];
+        var ct = new byte[cipherBytes.Length - IvSizeInBytes];
+        Buffer.BlockCopy(cipherBytes, 0, iv, 0, IvSizeInBytes);
+        Buffer.BlockCopy(cipherBytes, IvSizeInBytes, ct, 0, ct.Length);
+
+        using var aes = Aes.Create();
+        aes.Mode = CipherMode.CBC;
+        aes.Padding = PaddingMode.PKCS7;
+        aes.KeySize = 256;
+        aes.Key = _key;
+        aes.IV = iv;
+
+        using var decryptor = aes.CreateDecryptor();
+        return decryptor.TransformFinalBlock(ct, 0, ct.Length);
     }
 
     private static byte[] ParseKey(string rawKey)
