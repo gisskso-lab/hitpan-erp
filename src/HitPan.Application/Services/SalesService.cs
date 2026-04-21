@@ -13,17 +13,20 @@ public class SalesService : ISalesService
     private readonly ICurrentTenant _currentTenant;
     private readonly IDbConnection _db;
     private readonly IPartnerService _partnerService;
+    private readonly IAuditService _audit;
 
     public SalesService(
         IUnitOfWork unitOfWork,
         ICurrentTenant currentTenant,
         IDbConnection db,
-        IPartnerService partnerService)
+        IPartnerService partnerService,
+        IAuditService audit)
     {
         _unitOfWork = unitOfWork;
         _currentTenant = currentTenant;
         _db = db;
         _partnerService = partnerService;
+        _audit = audit;
     }
 
     public async Task<string> CreateOrderAsync(CreateSalesOrderRequest request, CancellationToken ct = default)
@@ -73,6 +76,11 @@ public class SalesService : ISalesService
         }
 
         await _unitOfWork.SaveChangesAsync(ct);
+
+        // 감사로그 — 수주서 생성
+        var soAfterJson = $"{{\"order_no\":\"{orderNo}\",\"partner_id\":\"{request.PartnerId}\",\"item_count\":{request.Items.Count}}}";
+        await _audit.LogAsync("create", "sales_order", orderId, afterJson: soAfterJson, ct: ct);
+
         return orderId;
     }
 
@@ -180,6 +188,11 @@ public class SalesService : ISalesService
         }
 
         await _unitOfWork.SaveChangesAsync(ct);
+
+        // 감사로그 — 거래명세서 생성 (초안)
+        var delAfterJson = $"{{\"delivery_no\":\"{deliveryNo}\",\"partner_id\":\"{request.PartnerId}\",\"item_count\":{request.Items.Count}}}";
+        await _audit.LogAsync("create", "sales_delivery", deliveryId, afterJson: delAfterJson, ct: ct);
+
         return (deliveryId, deliveryNo);
     }
 
@@ -349,6 +362,9 @@ public class SalesService : ISalesService
                 cancellationToken: ct));
 
             tx.Commit();
+
+            // 감사로그 — 거래명세서 확정 (재고·원장 반영)
+            await _audit.LogAsync("confirm", "sales_delivery", deliveryId, ct: ct);
         }
         catch
         {

@@ -1,4 +1,5 @@
 using HitPan.Application.DTOs.Auth;
+using HitPan.Application.DTOs.Device;
 using HitPan.Application.Interfaces;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -11,12 +12,18 @@ public class AuthController : ControllerBase
 {
     private readonly IAuthService _authService;
     private readonly IHrService _hrService;
+    private readonly ITenantDeviceService _deviceService;
     private readonly ILogger<AuthController> _logger;
 
-    public AuthController(IAuthService authService, IHrService hrService, ILogger<AuthController> logger)
+    public AuthController(
+        IAuthService authService,
+        IHrService hrService,
+        ITenantDeviceService deviceService,
+        ILogger<AuthController> logger)
     {
         _authService = authService;
         _hrService = hrService;
+        _deviceService = deviceService;
         _logger = logger;
     }
 
@@ -27,6 +34,48 @@ public class AuthController : ControllerBase
         try
         {
             var response = await _authService.LoginAsync(request, ct);
+
+            // ── 기기 기반 라이선싱: 로그인 성공 후 기기 등록/갱신 ──
+            // - fingerprint 없으면 스킵 (기존 클라이언트 호환)
+            // - 한도 초과면 로그인 거부 (Unauthorized)
+            if (!string.IsNullOrEmpty(response.TenantId) && !string.IsNullOrEmpty(request.DeviceFingerprint))
+            {
+                try
+                {
+                    var handler = new System.IdentityModel.Tokens.Jwt.JwtSecurityTokenHandler();
+                    var jwt = handler.ReadJwtToken(response.AccessToken);
+                    var userId = jwt.Claims.FirstOrDefault(c => c.Type == "user_id")?.Value;
+
+                    if (!string.IsNullOrEmpty(userId))
+                    {
+                        var ipAddress = HttpContext.Connection.RemoteIpAddress?.ToString() ?? "";
+                        var ua = request.DeviceName; // 편의상 UA를 DeviceName 필드에 담아 보낼 수도 있음
+                        var deviceReq = new RegisterDeviceRequest
+                        {
+                            Fingerprint = request.DeviceFingerprint!,
+                            DeviceType = request.DeviceType ?? "pc",
+                            DeviceName = request.DeviceName,
+                            UserAgent = Request.Headers["User-Agent"].ToString()
+                        };
+
+                        var (allowed, reason, deviceId) = await _deviceService.RegisterOrRefreshAsync(
+                            response.TenantId, userId, deviceReq, ipAddress, ct);
+
+                        if (!allowed)
+                        {
+                            // 기기 한도 초과 등 → 로그인 거부 (명확한 한국어 메시지)
+                            return Unauthorized(new { message = reason });
+                        }
+
+                        response.DeviceId = deviceId;
+                    }
+                }
+                catch (Exception ex)
+                {
+                    // 기기 등록 로직 자체가 실패해도 로그인 흐름은 막지 않음(운영 추적만)
+                    _logger.LogWarning(ex, "기기 등록/갱신 실패 — TenantId: {TenantId}", response.TenantId);
+                }
+            }
 
             // 로그인 성공 시 자동 출근 기록 (중복 출근은 서비스에서 무시)
             if (!string.IsNullOrEmpty(response.TenantId))

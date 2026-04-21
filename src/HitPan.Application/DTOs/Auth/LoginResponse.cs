@@ -11,4 +11,10 @@ public class LoginResponse
 
     /// <summary>로그인 시점에 last_login_at 이 비어 있었으면 true (온보딩 라우팅용).</summary>
     public bool RedirectToWelcome { get; set; }
+
+    /// <summary>
+    /// 기기 등록 결과(있으면 클라이언트가 localStorage에 보관).
+    /// fingerprint가 없거나 이미 등록된 경우 null일 수 있음.
+    /// </summary>
+    public string? DeviceId { get; set; }
 }

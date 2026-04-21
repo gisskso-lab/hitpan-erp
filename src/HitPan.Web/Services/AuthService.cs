@@ -3,6 +3,7 @@ using System.Net.Http;
 using System.Net.Http.Json;
 using HitPan.Web.Models;
 using HitPan.Web.Providers;
+using Microsoft.JSInterop;
 
 namespace HitPan.Web.Services;
 
@@ -12,26 +13,46 @@ public sealed class AuthService : IAuthService
     private readonly HitPanProtectedLocalStorage _storage;
     private readonly HitPanAuthStateProvider _authState;
     private readonly IAuthTokenRefresher _tokenRefresher;
+    private readonly IJSRuntime _js;
 
     public AuthService(
         HttpClient http,
         HitPanProtectedLocalStorage storage,
         HitPanAuthStateProvider authState,
-        IAuthTokenRefresher tokenRefresher)
+        IAuthTokenRefresher tokenRefresher,
+        IJSRuntime js)
     {
         _http = http;
         _storage = storage;
         _authState = authState;
         _tokenRefresher = tokenRefresher;
+        _js = js;
     }
 
     public async Task<AuthLoginResult> LoginAsync(string email, string password, CancellationToken ct = default)
     {
         try
         {
+            // ── 기기 지문 수집 (기기 기반 라이선싱) ──
+            // JS 미로드/private 모드 등 실패해도 로그인은 진행 (서버에서 fingerprint 없으면 스킵).
+            string? fingerprint = null;
+            string? deviceType = null;
+            try
+            {
+                fingerprint = await _js.InvokeAsync<string>("hitpanDevice.getFingerprint");
+                deviceType = await _js.InvokeAsync<string>("hitpanDevice.getDeviceType");
+            }
+            catch { /* 지문 수집 실패 시 기본 로그인 플로우로 진행 */ }
+
             using var response = await _http.PostAsJsonAsync(
                 "api/auth/login",
-                new LoginRequestDto { Email = email, Password = password },
+                new LoginRequestDto
+                {
+                    Email = email,
+                    Password = password,
+                    DeviceFingerprint = fingerprint,
+                    DeviceType = deviceType
+                },
                 cancellationToken: ct);
 
             if (response.StatusCode == HttpStatusCode.Unauthorized)
@@ -57,6 +78,13 @@ public sealed class AuthService : IAuthService
             if (data is null || string.IsNullOrEmpty(data.AccessToken))
             {
                 return new AuthLoginResult { Success = false, ErrorMessage = "응답을 해석할 수 없습니다." };
+            }
+
+            // 서버가 device_id를 돌려줬으면 localStorage에 보관 (다음 로그인/미들웨어 활용용)
+            if (!string.IsNullOrEmpty(data.DeviceId))
+            {
+                try { await _js.InvokeVoidAsync("hitpanDevice.setDeviceId", data.DeviceId); }
+                catch { /* 보관 실패해도 로그인은 계속 */ }
             }
 
             await PersistSessionAsync(data);

@@ -13,6 +13,11 @@ public sealed class LoginRequestDto
 {
     public string Email { get; set; } = string.Empty;
     public string Password { get; set; } = string.Empty;
+
+    // 기기 기반 라이선싱 (선택값)
+    public string? DeviceFingerprint { get; set; }
+    public string? DeviceType { get; set; }
+    public string? DeviceName { get; set; }
 }
 
 public sealed class LoginApiResponse
@@ -24,6 +29,7 @@ public sealed class LoginApiResponse
     public string UserName { get; set; } = string.Empty;
     public string Role { get; set; } = string.Empty;
     public bool RedirectToWelcome { get; set; }
+    public string? DeviceId { get; set; }
 }
 
 public sealed class RefreshTokenRequestDto

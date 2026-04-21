@@ -12,12 +12,14 @@ public class PurchaseService : IPurchaseService
     private readonly IUnitOfWork _unitOfWork;
     private readonly ICurrentTenant _currentTenant;
     private readonly IDbConnection _db;
+    private readonly IAuditService _audit;
 
-    public PurchaseService(IUnitOfWork unitOfWork, ICurrentTenant currentTenant, IDbConnection db)
+    public PurchaseService(IUnitOfWork unitOfWork, ICurrentTenant currentTenant, IDbConnection db, IAuditService audit)
     {
         _unitOfWork = unitOfWork;
         _currentTenant = currentTenant;
         _db = db;
+        _audit = audit;
     }
 
     public async Task<string> CreateOrderAsync(CreatePurchaseOrderRequest request, CancellationToken ct = default)
@@ -70,6 +72,11 @@ public class PurchaseService : IPurchaseService
         }
 
         await _unitOfWork.SaveChangesAsync(ct);
+
+        // 감사로그 — 발주서 생성
+        var poAfterJson = $"{{\"po_no\":\"{poNo}\",\"partner_id\":\"{request.PartnerId}\",\"item_count\":{request.Items.Count}}}";
+        await _audit.LogAsync("create", "purchase_order", poId, afterJson: poAfterJson, ct: ct);
+
         return poId;
     }
 
@@ -122,6 +129,11 @@ public class PurchaseService : IPurchaseService
         }
 
         await _unitOfWork.SaveChangesAsync(ct);
+
+        // 감사로그 — 매입명세서 생성 (초안)
+        var recAfterJson = $"{{\"receipt_no\":\"{receiptNo}\",\"partner_id\":\"{request.PartnerId}\",\"item_count\":{request.Items.Count}}}";
+        await _audit.LogAsync("create", "purchase_receipt", receiptId, afterJson: recAfterJson, ct: ct);
+
         return receiptId;
     }
 
@@ -282,6 +294,9 @@ public class PurchaseService : IPurchaseService
                 cancellationToken: ct));
 
             tx.Commit();
+
+            // 감사로그 — 매입명세서 확정 (재고 반영)
+            await _audit.LogAsync("confirm", "purchase_receipt", receiptId, ct: ct);
         }
         catch
         {

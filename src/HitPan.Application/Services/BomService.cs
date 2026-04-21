@@ -11,11 +11,13 @@ public class BomService : IBomService
 {
     private readonly IDbConnection _db;
     private readonly IEventPublisher _events;
+    private readonly IAuditService _audit;
 
-    public BomService(IDbConnection db, IEventPublisher events)
+    public BomService(IDbConnection db, IEventPublisher events, IAuditService audit)
     {
         _db = db;
         _events = events;
+        _audit = audit;
     }
 
     public async Task<List<BomListDto>> GetListAsync(string tenantId, CancellationToken ct = default)
@@ -167,6 +169,11 @@ public class BomService : IBomService
         }
 
         await UpdateCostCacheAsync(bomId, tenantId, ct).ConfigureAwait(false);
+
+        // 감사로그 — BOM 신규 생성
+        var afterJson = $"{{\"bom_name\":\"{dto.BomName}\",\"product_item_id\":\"{dto.ProductItemId}\",\"material_count\":{dto.Items?.Count ?? 0}}}";
+        await _audit.LogAsync("create", "bom", bomId, afterJson: afterJson, ct: ct);
+
         return bomId;
     }
 
@@ -202,6 +209,10 @@ public class BomService : IBomService
                 cancellationToken: ct)).ConfigureAwait(false);
         }
         await UpdateCostCacheAsync(bomId, tenantId, ct).ConfigureAwait(false);
+
+        // 감사로그 — BOM 수정 (구성 자재 변경 포함)
+        var afterJson = $"{{\"bom_name\":\"{dto.BomName}\",\"material_count\":{dto.Items?.Count ?? 0}}}";
+        await _audit.LogAsync("update", "bom", bomId, afterJson: afterJson, ct: ct);
     }
 
     public async Task DeleteAsync(string bomId, string tenantId, CancellationToken ct = default)
@@ -210,6 +221,9 @@ public class BomService : IBomService
         await _db.ExecuteAsync(new CommandDefinition(
             "UPDATE bom_headers SET is_active=0, updated_at=NOW(6) WHERE bom_id=@BomId AND tenant_id=@TenantId",
             new { BomId = bomId, TenantId = tenantId }, cancellationToken: ct)).ConfigureAwait(false);
+
+        // 감사로그 — BOM 소프트 삭제
+        await _audit.LogAsync("delete", "bom", bomId, ct: ct);
     }
 
     public async Task<string> RegisterBomAsItemAsync(string bomId, string itemType, string tenantId, CancellationToken ct = default)
@@ -437,6 +451,10 @@ public class BomService : IBomService
                 transaction: tx, cancellationToken: ct)).ConfigureAwait(false);
 
             tx.Commit();
+
+            // 감사로그 — BOM assemble (자재차감 + 완성품증가)
+            var assembleJson = $"{{\"product_item_id\":\"{bom.ProductItemId}\",\"produce_qty\":{dto.ProduceQty},\"material_count\":{materials.Count}}}";
+            await _audit.LogAsync("assemble", "bom", dto.BomId, afterJson: assembleJson, ct: ct);
 
             // 이벤트 발행은 커밋 이후 (롤백 시 외부 알림 없어야 함)
             await _events.PublishAsync(
