@@ -62,6 +62,15 @@ public class StockService : IStockService
         var toYm = toDate.ToString("yyyy-MM");
         var ledgerType = request.LedgerType.ToLowerInvariant();
 
+        // ── 보안: SQL Injection 방지 — 화이트리스트 검증 필수 ──
+        // GROUP BY / ORDER BY 컬럼명은 Dapper 파라미터 불가 → 동적 문자열 조합됨
+        // 허용 값이 아닌 ledgerType은 즉시 차단
+        var allowedTypes = new HashSet<string> { "item", "partner", "warehouse", "employee", "cross", "period", "adjust" };
+        if (!allowedTypes.Contains(ledgerType))
+        {
+            throw new InvalidOperationException($"허용되지 않는 원장 유형입니다: {ledgerType}");
+        }
+
         var parameters = new DynamicParameters();
         parameters.Add("tenantId", _currentTenant.TenantId);
         parameters.Add("fromDate", fromDate);
@@ -469,25 +478,26 @@ public class StockService : IStockService
     {
         await EnsureOpenAsync(ct).ConfigureAwait(false);
 
+        // stock_ledger는 created_at/created_by 컬럼 없음 → source_id 기반 매칭
         const string sql = """
             SELECT l.ledger_id AS LedgerId, l.ledger_date AS TransferDate,
                    i.item_name AS ItemName, COALESCE(i.spec, '') AS Spec,
                    COALESCE(wf.wh_name, '') AS FromWarehouse,
                    COALESCE(wt.wh_name, '') AS ToWarehouse,
-                   l.qty_out AS Qty, l.memo AS Memo, l.created_by AS CreatedBy
+                   l.qty_out AS Qty, l.memo AS Memo, '' AS CreatedBy
             FROM stock_ledger l
             JOIN items i ON i.item_id = l.item_id AND i.tenant_id = l.tenant_id
             LEFT JOIN warehouses wf ON wf.warehouse_id = l.warehouse_id AND wf.tenant_id = l.tenant_id
             LEFT JOIN stock_ledger l2 ON l2.tenant_id = l.tenant_id
-                AND l2.item_id = l.item_id AND l2.source_type = 'transfer' AND l2.move_type = 'in'
-                AND l2.created_at = l.created_at AND l2.created_by = l.created_by
+                AND l2.source_type = 'transfer' AND l2.move_type = 'in'
+                AND l2.source_id = l.source_id
             LEFT JOIN warehouses wt ON wt.warehouse_id = l2.warehouse_id AND wt.tenant_id = l2.tenant_id
             WHERE l.tenant_id = @TenantId
               AND l.source_type = 'transfer'
               AND l.move_type = 'out'
               AND (@From IS NULL OR l.ledger_date >= @From)
               AND (@To IS NULL OR l.ledger_date <= @To)
-            ORDER BY l.created_at DESC
+            ORDER BY l.ledger_date DESC, l.ledger_id DESC
             """;
         var rows = await _dbConnection.QueryAsync<StockTransferDto>(
             new CommandDefinition(sql, new { TenantId = tenantId, From = from, To = to }, cancellationToken: ct)).ConfigureAwait(false);
