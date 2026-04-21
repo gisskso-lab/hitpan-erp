@@ -21,7 +21,8 @@ public sealed class ChatAnswerModel
 /// </summary>
 public sealed class RelatedArticleModel
 {
-    public long ArticleId { get; set; }
+    // UUID 기반 VARCHAR(36) — long 아님
+    public string ArticleId { get; set; } = string.Empty;
     public string Title { get; set; } = string.Empty;
     public string? Category { get; set; }
     public string? RelatedMenuUrl { get; set; }
@@ -49,7 +50,8 @@ public sealed class TokenQuotaModel
 /// </summary>
 public sealed class KbArticleModel
 {
-    public long ArticleId { get; set; }
+    // UUID 기반 VARCHAR(36) — long 아님
+    public string ArticleId { get; set; } = string.Empty;
     public string? Category { get; set; }
     public string Title { get; set; } = string.Empty;
     public string? ContentMarkdown { get; set; }
