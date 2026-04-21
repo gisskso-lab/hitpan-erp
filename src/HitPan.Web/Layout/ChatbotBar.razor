@@ -1,0 +1,289 @@
+@* ────────────────────────────────────────────────────────────────
+   히트판 AI 챗봇 바 — 상단 좌측 상시 노출 (Apple Spotlight 스타일)
+   - 평소: 슬림한 검색창 (Ctrl+K 배지)
+   - 클릭 시: 드롭다운 패널 (질문·답변·피드백·토큰)
+   4가지 상태: 빈 상태(인기질문 추천) / 로딩 / 답변 / 피드백
+   ────────────────────────────────────────────────────────────────
+*@
+@using HitPan.Web.Models
+@using HitPan.Web.Services
+@using Microsoft.AspNetCore.Components.Web
+@inject ChatbotService Chat
+@inject NavigationManager Nav
+@inject IJSRuntime Js
+@inject ISnackbar Snack
+
+<div class="hitpan-chatbot-bar">
+    @* ── 상시 노출 텍스트박스 (버튼처럼 클릭) ── *@
+    <div class="hitpan-chatbot-input" @onclick="OpenPanel">
+        <MudIcon Icon="@Icons.Material.Filled.SmartToy" Style="color:#0F6E56;font-size:18px" />
+        <span class="hitpan-chatbot-placeholder">
+            @(string.IsNullOrEmpty(_currentQuestion) ? "히트판에게 물어보세요" : _currentQuestion)
+        </span>
+        <span class="hitpan-chatbot-kbd">Ctrl+K</span>
+    </div>
+
+    @if (_isOpen)
+    {
+        @* ── 외부 클릭 차단용 오버레이 (클릭 시 닫힘) ── *@
+        <div class="hitpan-chatbot-overlay" @onclick="ClosePanel"></div>
+
+        @* ── 답변 패널 ── *@
+        <div class="hitpan-chatbot-panel" @onclick:stopPropagation="true">
+
+            @* 헤더 *@
+            <div class="hitpan-chatbot-panel-header">
+                <MudIcon Icon="@Icons.Material.Filled.SmartToy" Style="color:#0F6E56" />
+                <MudText Typo="Typo.subtitle1" Style="font-weight:600;flex:1">히트판 AI 도우미</MudText>
+                <MudIconButton Icon="@Icons.Material.Filled.Close" Size="Size.Small" OnClick="ClosePanel" />
+            </div>
+
+            @* 입력창 *@
+            <div class="hitpan-chatbot-panel-input">
+                <MudTextField T="string" @bind-Value="_input" @ref="_inputRef"
+                              Placeholder="예: 견적서 어떻게 만들어요?"
+                              Variant="Variant.Outlined" Margin="Margin.Dense"
+                              Immediate="true" OnKeyDown="OnKeyDown"
+                              Adornment="Adornment.End"
+                              AdornmentIcon="@(_loading ? Icons.Material.Filled.HourglassTop : Icons.Material.Filled.Send)"
+                              OnAdornmentClick="SendAsync" />
+            </div>
+
+            @* 답변/상태 영역 *@
+            <div class="hitpan-chatbot-panel-body">
+                @if (_loading)
+                {
+                    <MudProgressLinear Indeterminate="true" Color="Color.Primary" />
+                    <MudText Typo="Typo.caption" Class="mt-2" Style="color:#9CA3AF">AI가 답변을 찾고 있어요...</MudText>
+                }
+                else if (_currentAnswer != null)
+                {
+                    @* 공식 답변 배지 — confidenceScore ≥ 0.5 일 때만 *@
+                    @if (_currentAnswer.ConfidenceScore >= 0.5m)
+                    {
+                        <MudChip T="string" Size="Size.Small" Color="Color.Success" Variant="Variant.Filled" Class="mb-2">
+                            ✓ 히트판 공식 답변
+                        </MudChip>
+                    }
+
+                    @* 답변 본문 (줄바꿈 보존) *@
+                    <MudText Typo="Typo.body2" Style="white-space:pre-line;line-height:1.7">
+                        @_currentAnswer.Answer
+                    </MudText>
+
+                    @* 관련 메뉴 링크 *@
+                    @if (_currentAnswer.RelatedArticles is { Count: > 0 } &&
+                         _currentAnswer.RelatedArticles.Any(a => !string.IsNullOrEmpty(a.RelatedMenuUrl)))
+                    {
+                        <MudDivider Class="my-3" />
+                        <MudText Typo="Typo.caption" Style="color:#666;font-weight:600">관련 메뉴</MudText>
+                        <div class="hitpan-chatbot-related-menus">
+                            @foreach (var art in _currentAnswer.RelatedArticles.Where(a => !string.IsNullOrEmpty(a.RelatedMenuUrl)))
+                            {
+                                <MudButton Variant="Variant.Outlined" Size="Size.Small"
+                                           StartIcon="@Icons.Material.Filled.ArrowForward"
+                                           OnClick="@(() => NavigateAndClose(art.RelatedMenuUrl!))">
+                                    @art.Title
+                                </MudButton>
+                            }
+                        </div>
+                    }
+
+                    @* 피드백 버튼 *@
+                    <div class="hitpan-chatbot-feedback mt-4">
+                        <MudText Typo="Typo.caption" Style="color:#666">이 답변이 도움됐나요?</MudText>
+                        <MudIconButton Icon="@Icons.Material.Filled.ThumbUp" Size="Size.Small"
+                                       Color="@(_feedbackGiven == true ? Color.Success : Color.Default)"
+                                       OnClick="@(() => SubmitFeedback(true))" />
+                        <MudIconButton Icon="@Icons.Material.Filled.ThumbDown" Size="Size.Small"
+                                       Color="@(_feedbackGiven == false ? Color.Error : Color.Default)"
+                                       OnClick="@(() => SubmitFeedback(false))" />
+                    </div>
+                }
+                else
+                {
+                    @* 초기 상태 — 인기 질문 추천 *@
+                    <MudText Typo="Typo.subtitle2" Class="mb-2" Style="font-weight:600">💡 자주 묻는 질문</MudText>
+                    @if (_popularQuestions.Count == 0)
+                    {
+                        <MudText Typo="Typo.caption" Style="color:#9CA3AF">
+                            질문을 입력해 주세요.
+                        </MudText>
+                    }
+                    else
+                    {
+                        @foreach (var popular in _popularQuestions.Take(5))
+                        {
+                            <MudButton Variant="Variant.Text" FullWidth="true" Class="justify-start mb-1"
+                                       StartIcon="@Icons.Material.Filled.QuestionMark"
+                                       OnClick="@(() => AskSuggested(popular.Title))"
+                                       Style="text-transform:none;text-align:left">
+                                @popular.Title
+                            </MudButton>
+                        }
+                    }
+                }
+            </div>
+
+            @* 토큰 사용량 위젯 *@
+            @if (_quota != null)
+            {
+                <div class="hitpan-chatbot-quota">
+                    <div class="hitpan-chatbot-quota-row">
+                        <span>💎 이번달 CS 토큰</span>
+                        <span style="font-weight:600">
+                            @_quota.UsedTokens.ToString("N0") / @((_quota.MonthlyLimit + _quota.ExtraTokens).ToString("N0"))
+                        </span>
+                    </div>
+                    <MudProgressLinear Value="@TokenUsagePercent" Color="@TokenColor" Size="Size.Small" Class="mt-1" />
+                    @if (TokenUsagePercent >= 80)
+                    {
+                        <div class="mt-1" style="color:#F57C00">
+                            ⚠️ 토큰 소진 임박 —
+                            <a href="/settings/ai" @onclick="@(() => NavigateAndClose("/settings/ai"))" @onclick:preventDefault="true"
+                               style="color:#0F6E56;cursor:pointer">추가 구매 / 업그레이드</a>
+                        </div>
+                    }
+                </div>
+            }
+        </div>
+    }
+</div>
+
+@code {
+    // ── 상태 ──
+    private bool _isOpen;
+    private string _input = string.Empty;
+    private string _currentQuestion = string.Empty;   // 검색창에 요약으로 노출할 마지막 질문
+    private MudTextField<string>? _inputRef;
+    private bool _loading;
+    private ChatAnswerModel? _currentAnswer;
+    private TokenQuotaModel? _quota;
+    private List<KbArticleModel> _popularQuestions = new();
+    private bool? _feedbackGiven;
+
+    // ── 계산값 ──
+    private double TokenUsagePercent
+    {
+        get
+        {
+            if (_quota is null) return 0;
+            var total = Math.Max(1, _quota.MonthlyLimit + _quota.ExtraTokens);
+            return Math.Min(100, (double)_quota.UsedTokens / total * 100);
+        }
+    }
+
+    private Color TokenColor => TokenUsagePercent switch
+    {
+        >= 95 => Color.Error,
+        >= 80 => Color.Warning,
+        _ => Color.Success
+    };
+
+    protected override async Task OnInitializedAsync()
+    {
+        // 초기 진입 시 쿼터/인기질문 프리페치 — 실패해도 UI는 정상 노출
+        await LoadQuotaAsync();
+        await LoadPopularAsync();
+    }
+
+    private async Task LoadQuotaAsync()
+    {
+        _quota = await Chat.GetQuotaAsync();
+    }
+
+    private async Task LoadPopularAsync()
+    {
+        _popularQuestions = await Chat.GetPopularKbAsync();
+    }
+
+    private void OpenPanel()
+    {
+        _isOpen = true;
+        _feedbackGiven = null;
+        StateHasChanged();
+
+        // 패널 렌더링 후 입력창에 포커스 (약간의 지연 필요)
+        _ = InvokeAsync(async () =>
+        {
+            await Task.Delay(80);
+            if (_inputRef is not null)
+            {
+                try { await _inputRef.FocusAsync(); } catch { /* 포커스 실패 무시 */ }
+            }
+        });
+    }
+
+    private void ClosePanel()
+    {
+        _isOpen = false;
+    }
+
+    private async Task OnKeyDown(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter" && !string.IsNullOrWhiteSpace(_input))
+        {
+            await SendAsync();
+        }
+        else if (e.Key == "Escape")
+        {
+            ClosePanel();
+        }
+    }
+
+    private async Task AskSuggested(string question)
+    {
+        _input = question;
+        await SendAsync();
+    }
+
+    private async Task SendAsync()
+    {
+        if (string.IsNullOrWhiteSpace(_input)) return;
+
+        _currentQuestion = _input;
+        _loading = true;
+        _currentAnswer = null;
+        _feedbackGiven = null;
+        StateHasChanged();
+
+        try
+        {
+            _currentAnswer = await Chat.AskAsync(_input);
+            _input = string.Empty;
+            await LoadQuotaAsync();   // 토큰 잔량 갱신
+        }
+        catch (Exception ex)
+        {
+            Snack.Add($"답변 실패: {ex.Message}", Severity.Error);
+        }
+        finally
+        {
+            _loading = false;
+            StateHasChanged();
+        }
+    }
+
+    private async Task SubmitFeedback(bool helpful)
+    {
+        if (_currentAnswer is null || _feedbackGiven is not null) return;
+        try
+        {
+            await Chat.RecordFeedbackAsync(_currentAnswer.ConvId, helpful);
+            _feedbackGiven = helpful;
+            Snack.Add(
+                helpful ? "피드백 감사합니다! 학습에 반영됩니다." : "더 나은 답변을 위해 노력하겠습니다.",
+                Severity.Success);
+        }
+        catch (Exception ex)
+        {
+            Snack.Add($"피드백 기록 실패: {ex.Message}", Severity.Error);
+        }
+    }
+
+    private void NavigateAndClose(string url)
+    {
+        ClosePanel();
+        Nav.NavigateTo(url);
+    }
+}

@@ -71,6 +71,8 @@ builder.Services.AddScoped<ICollectionService, CollectionService>();
 builder.Services.AddScoped<IMonthlyClosingService, MonthlyClosingService>();
 builder.Services.AddScoped<IFinanceService, FinanceService>();
 builder.Services.AddScoped<IHrService, HrService>();
+// AI 챗봇 (Phase A: FAQ/KB 매칭 + 대화 이력 축적)
+builder.Services.AddScoped<IChatbotService, ChatbotService>();
 builder.Services.AddScoped<ExcelExportService>();
 builder.Services.AddScoped<PdfExportService>();
 builder.Services.AddScoped<ExcelImportService>();
