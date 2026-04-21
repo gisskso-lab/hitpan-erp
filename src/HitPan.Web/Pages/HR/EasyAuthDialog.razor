@@ -1,0 +1,81 @@
+@namespace HitPan.Web.Pages.HrUi
+
+@* ══════════════════════════════════════════════════════════════
+   EasyAuthDialog — 간편인증(카카오/토스/금융/PASS) 본인정보 입력 다이얼로그
+   결과: AuthResult(Name, Phone, Birth) — 취소 시 Canceled
+   ══════════════════════════════════════════════════════════════ *@
+
+<MudDialog>
+    <TitleContent>
+        <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="2">
+            <MudIcon Icon="@Icons.Material.Filled.VerifiedUser" Color="Color.Primary" />
+            <MudText Typo="Typo.h6">@ProviderLabel 본인확인</MudText>
+        </MudStack>
+    </TitleContent>
+    <DialogContent>
+        <MudText Typo="Typo.body2" Class="mb-3">
+            @ProviderLabel 본인확인을 위해 아래 정보를 입력하세요.
+        </MudText>
+        <MudTextField T="string" @bind-Value="Name" Label="이름"
+                      Variant="Variant.Outlined" Margin="Margin.Dense" Required="true" Class="mb-2" />
+        <MudTextField T="string" @bind-Value="Phone" Label="휴대폰 번호 (숫자만)"
+                      Variant="Variant.Outlined" Margin="Margin.Dense" Required="true" Class="mb-2" />
+        <MudTextField T="string" @bind-Value="Birth" Label="생년월일 (8자리, 예: 19900101)"
+                      Variant="Variant.Outlined" Margin="Margin.Dense" Required="true" MaxLength="8" />
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="Cancel" Variant="Variant.Text">취소</MudButton>
+        <MudButton OnClick="Submit" Variant="Variant.Filled" Color="Color.Primary"
+                   StartIcon="@Icons.Material.Filled.Check">
+            인증 진행
+        </MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private IMudDialogInstance MudDialog { get; set; } = default!;
+
+    [Parameter] public string ProviderKey { get; set; } = "kakao";
+    [Parameter] public string ProviderLabel { get; set; } = "카카오";
+
+    private string Name { get; set; } = "";
+    private string Phone { get; set; } = "";
+    private string Birth { get; set; } = "";
+
+    [Inject] private ISnackbar Snackbar { get; set; } = default!;
+
+    public sealed class AuthResult
+    {
+        public string Name { get; set; } = "";
+        public string Phone { get; set; } = "";
+        public string Birth { get; set; } = "";
+    }
+
+    private void Submit()
+    {
+        if (string.IsNullOrWhiteSpace(Name))
+        {
+            Snackbar.Add("이름을 입력해주세요.", Severity.Warning);
+            return;
+        }
+        if (string.IsNullOrWhiteSpace(Phone))
+        {
+            Snackbar.Add("휴대폰 번호를 입력해주세요.", Severity.Warning);
+            return;
+        }
+        if (string.IsNullOrWhiteSpace(Birth) || Birth.Length != 8)
+        {
+            Snackbar.Add("생년월일 8자리를 입력해주세요.", Severity.Warning);
+            return;
+        }
+
+        MudDialog.Close(DialogResult.Ok(new AuthResult
+        {
+            Name = Name.Trim(),
+            Phone = Phone.Trim().Replace("-", ""),
+            Birth = Birth.Trim()
+        }));
+    }
+
+    private void Cancel() => MudDialog.Cancel();
+}

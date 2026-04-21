@@ -77,6 +77,9 @@ builder.Services.AddScoped<ExcelImportService>();
 builder.Services.AddScoped<MdbMigrationService>();
 builder.Services.AddScoped<IPartnerBalanceRepository, PartnerBalanceRepository>();
 builder.Services.AddScoped<IEventPublisher, SyncEventPublisher>();
+// 전자서명 (간편인증 Mock 4종 + 수동 3종) + 전자근로계약서
+builder.Services.AddScoped<IESignatureService, ESignatureService>();
+builder.Services.AddScoped<ILaborContractService, LaborContractService>();
 builder.Services.AddSingleton<AccessTokenValidator>();
 builder.Services.AddJwtAuthentication();
 builder.Services.AddAuthorization(options =>

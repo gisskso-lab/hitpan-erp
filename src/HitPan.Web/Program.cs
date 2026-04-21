@@ -54,6 +54,8 @@ builder.Services.AddScoped<CollectionPaymentService>();
 builder.Services.AddScoped<MonthlyClosingService>();
 builder.Services.AddScoped<FinanceClientService>();
 builder.Services.AddScoped<HrClientService>();
+builder.Services.AddScoped<ESignService>();
+builder.Services.AddScoped<LaborContractService>();
 builder.Services.AddTransient<HitPanApiAuthHandler>();
 builder.Services.AddScoped<TenantProfileService>();
 builder.Services.AddScoped(sp =>

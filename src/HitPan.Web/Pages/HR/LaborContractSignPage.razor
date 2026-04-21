@@ -1,0 +1,598 @@
+@page "/hr/labor-contracts/{Id}/sign"
+@namespace HitPan.Web.Pages.HrUi
+@attribute [AllowAnonymous]
+@using System.Security.Cryptography
+@using System.Text
+@using HitPan.Web.Components.Common
+@using HitPan.Web.Models
+@using HitPan.Web.Services
+@using Microsoft.AspNetCore.Components.Forms
+@inject LaborContractService ContractSvc
+@inject ESignService ESignSvc
+@inject ISnackbar Snackbar
+@inject IDialogService DialogService
+
+<PageTitle>근로계약서 서명 — 히트판 ERP</PageTitle>
+
+<div style="max-width:900px;margin:0 auto;padding:24px 16px">
+
+    @if (_loading)
+    {
+        <MudProgressLinear Indeterminate="true" Color="Color.Primary" />
+    }
+    else if (_contract is null)
+    {
+        <EmptyState Icon="@Icons.Material.Outlined.ErrorOutline"
+                    Title="계약서를 찾을 수 없습니다"
+                    Subtitle="링크가 잘못되었거나 계약서가 삭제되었을 수 있습니다." />
+    }
+    else
+    {
+        @* ── 상단 헤더 ── *@
+        <div style="text-align:center;margin-bottom:24px">
+            <MudText Typo="Typo.body1" Style="color:var(--mud-palette-text-secondary)">
+                @(_contract.CompanyName ?? "회사")
+            </MudText>
+            <MudText Typo="Typo.h5" Style="font-weight:700;margin-top:4px">
+                근로계약서 서명 요청
+            </MudText>
+        </div>
+
+        @* ── 계약서 본문 (A4 스타일) ── *@
+        <div style="background:#fff;border:1px solid #D1D5DB;border-radius:8px;padding:40px 48px;
+                    margin-bottom:24px;box-shadow:0 2px 8px rgba(0,0,0,0.04);line-height:1.7">
+            <div style="text-align:center;margin-bottom:32px">
+                <MudText Typo="Typo.h4" Style="font-weight:700;letter-spacing:0.1em">근 로 계 약 서</MudText>
+            </div>
+
+            <MudText Typo="Typo.body1" Class="mb-3" Style="line-height:1.8">
+                <strong>@(_contract.CompanyName ?? "(회사명)")</strong>(이하 "회사"라 한다)와(과)
+                <strong>@_contract.EmployeeName</strong>(이하 "근로자"라 한다)은(는)
+                다음과 같이 근로계약을 체결한다.
+            </MudText>
+
+            @* 1조: 근로계약기간 *@
+            <div class="mb-3">
+                <MudText Typo="Typo.subtitle1" Style="font-weight:700">제1조 (근로계약기간)</MudText>
+                <MudText Typo="Typo.body2" Style="margin-left:16px">
+                    계약형태: <strong>@GetContractTypeLabel(_contract.ContractType)</strong><br />
+                    계약기간:
+                    @_contract.StartDate.ToString("yyyy년 MM월 dd일")
+                    @(_contract.EndDate is null
+                        ? " 부터 (기간의 정함이 없음)"
+                        : $" 부터 {_contract.EndDate.Value:yyyy년 MM월 dd일} 까지")
+                </MudText>
+            </div>
+
+            @* 2조: 근무장소 및 업무 *@
+            <div class="mb-3">
+                <MudText Typo="Typo.subtitle1" Style="font-weight:700">제2조 (근무장소 및 담당업무)</MudText>
+                <MudText Typo="Typo.body2" Style="margin-left:16px">
+                    근무장소: @(_contract.WorkLocation ?? "-")<br />
+                    담당업무: @(_contract.JobDescription ?? "-")
+                </MudText>
+            </div>
+
+            @* 3조: 근로시간 *@
+            <div class="mb-3">
+                <MudText Typo="Typo.subtitle1" Style="font-weight:700">제3조 (근로시간 및 휴게)</MudText>
+                <MudText Typo="Typo.body2" Style="margin-left:16px">
+                    @(_contract.WorkHours ?? "회사 규정에 따름")
+                </MudText>
+            </div>
+
+            @* 4조: 임금 *@
+            <div class="mb-3">
+                <MudText Typo="Typo.subtitle1" Style="font-weight:700">제4조 (임금)</MudText>
+                <MudText Typo="Typo.body2" Style="margin-left:16px">
+                    @GetSalaryTypeLabel(_contract.SalaryType): <strong>@_contract.Salary.ToString("N0")원</strong><br />
+                    임금 지급일: 매월 @(_contract.PayDay?.ToString() ?? "25")일<br />
+                    지급방법: 근로자가 지정한 예금계좌로 입금
+                </MudText>
+            </div>
+
+            @* 5조: 사회보험 *@
+            <div class="mb-3">
+                <MudText Typo="Typo.subtitle1" Style="font-weight:700">제5조 (사회보험 적용)</MudText>
+                <MudText Typo="Typo.body2" Style="margin-left:16px">
+                    @(string.IsNullOrWhiteSpace(_contract.SocialInsurance) ? "해당사항 없음" : _contract.SocialInsurance)
+                </MudText>
+            </div>
+
+            @* 6조: 연차휴가 *@
+            <div class="mb-3">
+                <MudText Typo="Typo.subtitle1" Style="font-weight:700">제6조 (연차유급휴가)</MudText>
+                <MudText Typo="Typo.body2" Style="margin-left:16px">
+                    연간 @(_contract.AnnualLeaveDays?.ToString("0.#") ?? "15")일
+                </MudText>
+            </div>
+
+            @* 7조: 특약 *@
+            @if (!string.IsNullOrWhiteSpace(_contract.SpecialTerms))
+            {
+                <div class="mb-3">
+                    <MudText Typo="Typo.subtitle1" Style="font-weight:700">제7조 (특약사항)</MudText>
+                    <MudText Typo="Typo.body2" Style="margin-left:16px;white-space:pre-line">
+                        @_contract.SpecialTerms
+                    </MudText>
+                </div>
+            }
+
+            @* 서명 영역 *@
+            <div style="margin-top:48px;padding-top:24px;border-top:1px solid #E5E7EB">
+                <MudGrid>
+                    <MudItem xs="6">
+                        <MudText Typo="Typo.body2"><strong>회 사</strong></MudText>
+                        <MudText Typo="Typo.body2">@(_contract.CompanyName ?? "(회사명)")</MudText>
+                        <div style="height:72px;margin-top:8px;border-bottom:1px dashed #9CA3AF;
+                                    display:flex;align-items:flex-end;justify-content:flex-end;padding:0 16px 4px">
+                            <MudText Typo="Typo.caption" Style="color:#9CA3AF">(인)</MudText>
+                        </div>
+                    </MudItem>
+                    <MudItem xs="6">
+                        <MudText Typo="Typo.body2"><strong>근 로 자</strong></MudText>
+                        <MudText Typo="Typo.body2">@_contract.EmployeeName</MudText>
+                        <div style="height:72px;margin-top:8px;border-bottom:1px dashed #9CA3AF;
+                                    display:flex;align-items:center;justify-content:center;padding:0 16px">
+                            @if (_signed)
+                            {
+                                <div style="text-align:center">
+                                    <MudIcon Icon="@Icons.Material.Filled.VerifiedUser" Color="Color.Success"
+                                             Style="font-size:28px" />
+                                    <MudText Typo="Typo.caption" Style="color:#16A34A;font-weight:600">
+                                        서명 완료
+                                    </MudText>
+                                </div>
+                            }
+                            else
+                            {
+                                <MudText Typo="Typo.caption" Style="color:#9CA3AF">(서명 대기)</MudText>
+                            }
+                        </div>
+                    </MudItem>
+                </MudGrid>
+            </div>
+        </div>
+
+        @* ── 서명 완료 상태 ── *@
+        @if (_signed)
+        {
+            <MudPaper Elevation="0" Class="pa-4 mb-3"
+                      Style="border:1px solid #16A34A;border-radius:12px;background:#F0FDF4">
+                <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="2">
+                    <MudIcon Icon="@Icons.Material.Filled.CheckCircle" Color="Color.Success"
+                             Style="font-size:32px" />
+                    <div>
+                        <MudText Typo="Typo.subtitle1" Style="font-weight:700;color:#16A34A">
+                            계약 완료되었습니다
+                        </MudText>
+                        <MudText Typo="Typo.body2" Style="color:#374151">
+                            서명 완료 — @GetProviderLabel(_signedProvider),
+                            @_signedAt.ToString("yyyy-MM-dd HH:mm:ss"),
+                            거래ID <code>@(_signedTxId ?? "-")</code>
+                        </MudText>
+                    </div>
+                </MudStack>
+            </MudPaper>
+        }
+        else
+        {
+            @* ── 본인 확인 방법 선택 ── *@
+            <MudPaper Elevation="0" Class="pa-4 mb-3"
+                      Style="border:0.5px solid var(--mud-palette-lines-default);border-radius:12px">
+                <MudText Typo="Typo.subtitle1" Style="font-weight:700" Class="mb-3">본인 확인 방법 선택</MudText>
+
+                @* 간편인증 4종 *@
+                <MudGrid Spacing="2">
+                    <MudItem xs="6" sm="3">
+                        <div @onclick="@(() => StartEasyAuth("kakao"))"
+                             style="cursor:pointer;padding:20px 12px;background:#FEE500;color:#191919;
+                                    border-radius:12px;text-align:center;font-weight:600;
+                                    transition:transform 0.15s" class="sign-provider-btn">
+                            <MudIcon Icon="@Icons.Material.Filled.Chat" Style="font-size:28px;margin-bottom:4px" />
+                            <div>카카오</div>
+                        </div>
+                    </MudItem>
+                    <MudItem xs="6" sm="3">
+                        <div @onclick="@(() => StartEasyAuth("toss"))"
+                             style="cursor:pointer;padding:20px 12px;background:#0064FF;color:#fff;
+                                    border-radius:12px;text-align:center;font-weight:600;
+                                    transition:transform 0.15s" class="sign-provider-btn">
+                            <MudIcon Icon="@Icons.Material.Filled.Payments" Style="font-size:28px;margin-bottom:4px" />
+                            <div>토스</div>
+                        </div>
+                    </MudItem>
+                    <MudItem xs="6" sm="3">
+                        <div @onclick="@(() => StartEasyAuth("finance"))"
+                             style="cursor:pointer;padding:20px 12px;background:#0067AC;color:#fff;
+                                    border-radius:12px;text-align:center;font-weight:600;
+                                    transition:transform 0.15s" class="sign-provider-btn">
+                            <MudIcon Icon="@Icons.Material.Filled.AccountBalance" Style="font-size:28px;margin-bottom:4px" />
+                            <div>금융</div>
+                        </div>
+                    </MudItem>
+                    <MudItem xs="6" sm="3">
+                        <div @onclick="@(() => StartEasyAuth("pass"))"
+                             style="cursor:pointer;padding:20px 12px;background:#555555;color:#fff;
+                                    border-radius:12px;text-align:center;font-weight:600;
+                                    transition:transform 0.15s" class="sign-provider-btn">
+                            <MudIcon Icon="@Icons.Material.Filled.PhoneIphone" Style="font-size:28px;margin-bottom:4px" />
+                            <div>PASS</div>
+                        </div>
+                    </MudItem>
+                </MudGrid>
+
+                @* 추가 옵션 *@
+                <MudText Typo="Typo.caption" Class="mt-4 mb-2" Style="color:var(--mud-palette-text-secondary)">
+                    다른 방식으로 서명
+                </MudText>
+                <MudStack Row="true" Spacing="2" Wrap="Wrap.Wrap">
+                    <MudButton Variant="Variant.Outlined" Size="Size.Small"
+                               StartIcon="@Icons.Material.Filled.Scanner"
+                               OnClick="@(() => _showManualUpload = true)">
+                        서면 스캔 업로드
+                    </MudButton>
+                    <MudButton Variant="Variant.Outlined" Size="Size.Small"
+                               StartIcon="@Icons.Material.Filled.Gesture"
+                               OnClick="@(() => _showHandwritten = true)">
+                        직접 서명(태블릿)
+                    </MudButton>
+                    <MudButton Variant="Variant.Outlined" Size="Size.Small"
+                               StartIcon="@Icons.Material.Filled.AdminPanelSettings"
+                               OnClick="@(() => _showAdminVerified = true)">
+                        관리자 대리확인
+                    </MudButton>
+                </MudStack>
+
+                @* 서면 스캔 업로드 섹션 *@
+                @if (_showManualUpload)
+                {
+                    <MudDivider Class="my-3" />
+                    <MudText Typo="Typo.subtitle2" Class="mb-2">서면 스캔본 업로드</MudText>
+                    <MudGrid Spacing="2">
+                        <MudItem xs="12" sm="4">
+                            <MudTextField T="string" @bind-Value="_signerName" Label="이름"
+                                          Variant="Variant.Outlined" Margin="Margin.Dense" Required="true" />
+                        </MudItem>
+                        <MudItem xs="12" sm="4">
+                            <MudTextField T="string" @bind-Value="_signerPhone" Label="휴대폰"
+                                          Variant="Variant.Outlined" Margin="Margin.Dense" />
+                        </MudItem>
+                        <MudItem xs="12" sm="4">
+                            <MudTextField T="string" @bind-Value="_signerBirth" Label="생년월일(8자리)"
+                                          Variant="Variant.Outlined" Margin="Margin.Dense" />
+                        </MudItem>
+                        <MudItem xs="12">
+                            <MudFileUpload T="IBrowserFile" FilesChanged="OnManualFileChanged"
+                                           Accept=".png,.jpg,.jpeg,.pdf" MaximumFileSize="5242880">
+                                <ActivatorContent>
+                                    <MudButton Variant="Variant.Outlined"
+                                               StartIcon="@Icons.Material.Filled.AttachFile">
+                                        파일 선택 (PNG/JPG/PDF, 5MB 이하)
+                                    </MudButton>
+                                </ActivatorContent>
+                            </MudFileUpload>
+                            @if (_uploadedFileName != null)
+                            {
+                                <MudText Typo="Typo.caption" Class="ml-2">선택됨: @_uploadedFileName</MudText>
+                            }
+                        </MudItem>
+                        <MudItem xs="12" Class="d-flex justify-end">
+                            <MudButton Variant="Variant.Filled" Color="Color.Primary"
+                                       StartIcon="@Icons.Material.Filled.CloudUpload"
+                                       OnClick="@(() => SignManualAsync("manual_upload"))"
+                                       Disabled="_signing">
+                                스캔본으로 서명 제출
+                            </MudButton>
+                        </MudItem>
+                    </MudGrid>
+                }
+
+                @* 손글씨 서명 섹션 (파일 업로드로 대체) *@
+                @if (_showHandwritten)
+                {
+                    <MudDivider Class="my-3" />
+                    <MudText Typo="Typo.subtitle2" Class="mb-2">직접 서명 (이미지 업로드)</MudText>
+                    <MudGrid Spacing="2">
+                        <MudItem xs="12" sm="4">
+                            <MudTextField T="string" @bind-Value="_signerName" Label="이름"
+                                          Variant="Variant.Outlined" Margin="Margin.Dense" Required="true" />
+                        </MudItem>
+                        <MudItem xs="12" sm="4">
+                            <MudTextField T="string" @bind-Value="_signerPhone" Label="휴대폰"
+                                          Variant="Variant.Outlined" Margin="Margin.Dense" />
+                        </MudItem>
+                        <MudItem xs="12" sm="4">
+                            <MudTextField T="string" @bind-Value="_signerBirth" Label="생년월일(8자리)"
+                                          Variant="Variant.Outlined" Margin="Margin.Dense" />
+                        </MudItem>
+                        <MudItem xs="12">
+                            <MudFileUpload T="IBrowserFile" FilesChanged="OnHandwrittenFileChanged"
+                                           Accept=".png,.jpg,.jpeg" MaximumFileSize="5242880">
+                                <ActivatorContent>
+                                    <MudButton Variant="Variant.Outlined"
+                                               StartIcon="@Icons.Material.Filled.AttachFile">
+                                        서명 이미지 선택 (PNG/JPG, 5MB 이하)
+                                    </MudButton>
+                                </ActivatorContent>
+                            </MudFileUpload>
+                            @if (_uploadedFileName != null)
+                            {
+                                <MudText Typo="Typo.caption" Class="ml-2">선택됨: @_uploadedFileName</MudText>
+                            }
+                        </MudItem>
+                        <MudItem xs="12" Class="d-flex justify-end">
+                            <MudButton Variant="Variant.Filled" Color="Color.Primary"
+                                       StartIcon="@Icons.Material.Filled.Check"
+                                       OnClick="@(() => SignManualAsync("handwritten"))"
+                                       Disabled="_signing">
+                                서명 제출
+                            </MudButton>
+                        </MudItem>
+                    </MudGrid>
+                }
+
+                @* 관리자 대리확인 섹션 *@
+                @if (_showAdminVerified)
+                {
+                    <MudDivider Class="my-3" />
+                    <MudText Typo="Typo.subtitle2" Class="mb-2">관리자 대리확인</MudText>
+                    <MudGrid Spacing="2">
+                        <MudItem xs="12" sm="4">
+                            <MudTextField T="string" @bind-Value="_signerName" Label="이름"
+                                          Variant="Variant.Outlined" Margin="Margin.Dense" Required="true" />
+                        </MudItem>
+                        <MudItem xs="12" sm="4">
+                            <MudTextField T="string" @bind-Value="_signerPhone" Label="휴대폰"
+                                          Variant="Variant.Outlined" Margin="Margin.Dense" />
+                        </MudItem>
+                        <MudItem xs="12" sm="4">
+                            <MudTextField T="string" @bind-Value="_signerBirth" Label="생년월일(8자리)"
+                                          Variant="Variant.Outlined" Margin="Margin.Dense" />
+                        </MudItem>
+                        <MudItem xs="12">
+                            <MudTextField T="string" @bind-Value="_manualReason"
+                                          Label="대리확인 사유 (예: 외국인 근로자, 장애 등)"
+                                          Variant="Variant.Outlined" Margin="Margin.Dense"
+                                          Required="true" Lines="2" />
+                        </MudItem>
+                        <MudItem xs="12" Class="d-flex justify-end">
+                            <MudButton Variant="Variant.Filled" Color="Color.Primary"
+                                       StartIcon="@Icons.Material.Filled.Check"
+                                       OnClick="@(() => SignManualAsync("admin_verified"))"
+                                       Disabled="_signing">
+                                대리확인 제출
+                            </MudButton>
+                        </MudItem>
+                    </MudGrid>
+                }
+            </MudPaper>
+        }
+    }
+</div>
+
+<style>
+    .sign-provider-btn:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 4px 12px rgba(0,0,0,0.12);
+    }
+</style>
+
+@code {
+    [Parameter] public string Id { get; set; } = string.Empty;
+
+    private bool _loading = true;
+    private LaborContractDetailModel? _contract;
+
+    // 서명자 정보 입력
+    private string _signerName = "";
+    private string _signerPhone = "";
+    private string _signerBirth = "";
+    private string _manualReason = "";
+
+    // 섹션 표시
+    private bool _showManualUpload;
+    private bool _showHandwritten;
+    private bool _showAdminVerified;
+
+    // 파일 업로드
+    private byte[]? _uploadedFileBlob;
+    private string? _uploadedFileName;
+
+    // 서명 완료 상태
+    private bool _signed;
+    private string _signedProvider = "";
+    private DateTime _signedAt;
+    private string? _signedTxId;
+
+    private bool _signing;
+
+    protected override async Task OnInitializedAsync()
+    {
+        _loading = true;
+        _contract = await ContractSvc.GetAsync(Id);
+        if (_contract?.Status == "signed")
+        {
+            _signed = true;
+            _signedAt = _contract.SignedAt ?? DateTime.Now;
+        }
+        _loading = false;
+    }
+
+    // ── 간편인증 진행 ──
+
+    /// <summary>
+    /// 간편인증(카카오/토스/금융/PASS) 다이얼로그를 표시한다.
+    /// </summary>
+    private async Task StartEasyAuth(string provider)
+    {
+        var parameters = new DialogParameters<EasyAuthDialog>
+        {
+            { x => x.ProviderKey, provider },
+            { x => x.ProviderLabel, GetProviderLabel(provider) }
+        };
+        var options = new DialogOptions { MaxWidth = MaxWidth.ExtraSmall, FullWidth = true, CloseOnEscapeKey = true };
+        var dlg = await DialogService.ShowAsync<EasyAuthDialog>($"{GetProviderLabel(provider)} 인증", parameters, options);
+        var result = await dlg.Result;
+        if (result is null || result.Canceled) return;
+        if (result.Data is not EasyAuthDialog.AuthResult auth) return;
+
+        await SubmitSignAsync(new ESignRequestModel
+        {
+            DocumentType = "labor_contract",
+            DocumentId = Id,
+            DocumentTitle = $"{_contract?.EmployeeName} 근로계약서",
+            DocumentHash = ComputeDocumentHash(),
+            Provider = provider,
+            SignerName = auth.Name,
+            SignerPhone = auth.Phone,
+            SignerBirth = auth.Birth
+        });
+    }
+
+    // ── 파일 업로드 ──
+
+    private async Task OnManualFileChanged(IBrowserFile file)
+    {
+        await ReadFileAsync(file);
+    }
+
+    private async Task OnHandwrittenFileChanged(IBrowserFile file)
+    {
+        await ReadFileAsync(file);
+    }
+
+    private async Task ReadFileAsync(IBrowserFile file)
+    {
+        if (file is null) return;
+        try
+        {
+            using var ms = new MemoryStream();
+            await file.OpenReadStream(5 * 1024 * 1024).CopyToAsync(ms);
+            _uploadedFileBlob = ms.ToArray();
+            _uploadedFileName = file.Name;
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"파일 읽기 실패: {ex.Message}", Severity.Error);
+        }
+    }
+
+    // ── 수동 방식 서명 제출 ──
+
+    /// <summary>
+    /// 수동(업로드/손글씨/관리자대리) 방식 서명을 제출한다.
+    /// </summary>
+    private async Task SignManualAsync(string provider)
+    {
+        if (string.IsNullOrWhiteSpace(_signerName))
+        {
+            Snackbar.Add("서명자 이름을 입력해주세요.", Severity.Warning);
+            return;
+        }
+
+        if (provider == "admin_verified" && string.IsNullOrWhiteSpace(_manualReason))
+        {
+            Snackbar.Add("대리확인 사유를 입력해주세요.", Severity.Warning);
+            return;
+        }
+
+        if ((provider == "manual_upload" || provider == "handwritten") && _uploadedFileBlob is null)
+        {
+            Snackbar.Add("서명 파일을 선택해주세요.", Severity.Warning);
+            return;
+        }
+
+        await SubmitSignAsync(new ESignRequestModel
+        {
+            DocumentType = "labor_contract",
+            DocumentId = Id,
+            DocumentTitle = $"{_contract?.EmployeeName} 근로계약서",
+            DocumentHash = ComputeDocumentHash(),
+            Provider = provider,
+            SignerName = _signerName,
+            SignerPhone = _signerPhone,
+            SignerBirth = _signerBirth,
+            SignatureBlob = (provider == "manual_upload" || provider == "handwritten") ? _uploadedFileBlob : null,
+            ManualReason = provider == "admin_verified" ? _manualReason : null
+        });
+    }
+
+    /// <summary>
+    /// 서명 API를 호출하고 계약서에 연결한다.
+    /// </summary>
+    private async Task SubmitSignAsync(ESignRequestModel req)
+    {
+        _signing = true;
+        StateHasChanged();
+
+        var esign = await ESignSvc.SignAsync(req);
+        if (esign is null)
+        {
+            _signing = false;
+            Snackbar.Add("서명 기록에 실패했습니다.", Severity.Error);
+            return;
+        }
+
+        var attached = await ContractSvc.AttachSignAsync(Id, esign.EsignId);
+        if (!attached)
+        {
+            _signing = false;
+            Snackbar.Add("서명은 기록되었지만 계약서 연결에 실패했습니다.", Severity.Warning);
+            return;
+        }
+
+        _signed = true;
+        _signedProvider = esign.Provider;
+        _signedAt = esign.SignedAt;
+        _signedTxId = esign.TxId;
+        _signing = false;
+
+        Snackbar.Add("계약이 완료되었습니다.", Severity.Success);
+        StateHasChanged();
+    }
+
+    // ── 문서 해시 (간단한 SHA256) ──
+
+    private string ComputeDocumentHash()
+    {
+        if (_contract is null) return "";
+        var text = $"{_contract.ContractId}|{_contract.EmployeeId}|{_contract.StartDate:yyyy-MM-dd}|" +
+                   $"{_contract.EndDate:yyyy-MM-dd}|{_contract.Salary}|{_contract.SalaryType}";
+        using var sha = SHA256.Create();
+        var bytes = sha.ComputeHash(Encoding.UTF8.GetBytes(text));
+        return Convert.ToHexString(bytes).ToLowerInvariant();
+    }
+
+    // ── 라벨 ──
+
+    private static string GetContractTypeLabel(string t) => t switch
+    {
+        "regular" => "정규직",
+        "contract" => "계약직",
+        "part_time" => "파트타임",
+        "daily" => "일용직",
+        _ => t
+    };
+
+    private static string GetSalaryTypeLabel(string t) => t switch
+    {
+        "monthly" => "월급",
+        "hourly" => "시급",
+        "daily" => "일급",
+        "annual" => "연봉",
+        _ => t
+    };
+
+    private static string GetProviderLabel(string p) => p switch
+    {
+        "kakao" => "카카오",
+        "toss" => "토스",
+        "finance" => "금융인증",
+        "pass" => "PASS",
+        "manual_upload" => "서면 스캔",
+        "handwritten" => "직접 서명",
+        "admin_verified" => "관리자 대리확인",
+        _ => p
+    };
+}
