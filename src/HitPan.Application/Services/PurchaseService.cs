@@ -192,28 +192,6 @@ public class PurchaseService : IPurchaseService
             };
 
             await ledgerRepo.AddAsync(ledger);
-
-            // item_stock 테이블 갱신 (재고 증가)
-            const string upsertStockSql = """
-                INSERT INTO item_stock (stock_id, tenant_id, item_id, warehouse_id, current_qty, avg_cost, last_updated_at)
-                VALUES (UUID(), @TenantId, @ItemId, @WarehouseId, @Qty, @UnitCost, NOW(6))
-                ON DUPLICATE KEY UPDATE
-                  current_qty = current_qty + @Qty,
-                  avg_cost = @UnitCost,
-                  last_updated_at = NOW(6)
-                """;
-
-            await _db.ExecuteAsync(new CommandDefinition(
-                upsertStockSql,
-                new
-                {
-                    TenantId = receipt.TenantId,
-                    ItemId = line.ItemId,
-                    WarehouseId = line.WarehouseId,
-                    Qty = line.Qty,
-                    UnitCost = line.UnitPrice
-                },
-                cancellationToken: ct));
         }
 
         if (!string.IsNullOrWhiteSpace(receipt.PoId))
@@ -248,12 +226,70 @@ public class PurchaseService : IPurchaseService
 
         await _unitOfWork.SaveChangesAsync(ct);
 
-        // monthly_summary 매입 갱신
-        await ApprovalTriggerHelper.UpdateMonthlySummaryAsync(_db,
-            receipt.TenantId, receipt.ReceiptDate,
-            0, receipt.TotalAmount + receipt.VatAmount, ct);
+        // ── 트랜잭션 감싸기 (재고 정합성 보장 — 중간 실패 시 전체 롤백) ──
+        // item_stock 다건 UPSERT + monthly_summary 갱신을 원자적으로 묶는다.
+        if (_db.State != ConnectionState.Open)
+        {
+            if (_db is System.Data.Common.DbConnection dbConn) await dbConn.OpenAsync(ct);
+            else _db.Open();
+        }
+        using var tx = _db.BeginTransaction();
+        try
+        {
+            foreach (var line in receiptItems)
+            {
+                // item_stock 테이블 갱신 (재고 증가)
+                const string upsertStockSql = """
+                    INSERT INTO item_stock (stock_id, tenant_id, item_id, warehouse_id, current_qty, avg_cost, last_updated_at)
+                    VALUES (UUID(), @TenantId, @ItemId, @WarehouseId, @Qty, @UnitCost, NOW(6))
+                    ON DUPLICATE KEY UPDATE
+                      current_qty = current_qty + @Qty,
+                      avg_cost = @UnitCost,
+                      last_updated_at = NOW(6)
+                    """;
 
-        // 결재 트리거
+                await _db.ExecuteAsync(new CommandDefinition(
+                    upsertStockSql,
+                    new
+                    {
+                        TenantId = receipt.TenantId,
+                        ItemId = line.ItemId,
+                        WarehouseId = line.WarehouseId,
+                        Qty = line.Qty,
+                        UnitCost = line.UnitPrice
+                    },
+                    transaction: tx,
+                    cancellationToken: ct));
+            }
+
+            // monthly_summary 매입 갱신
+            var ymStr = receipt.ReceiptDate.ToString("yyyyMM");
+            await _db.ExecuteAsync(new CommandDefinition(
+                """
+                INSERT INTO monthly_summary (summary_id, tenant_id, `year_month`, total_sales, total_purchase, total_receipt, total_payment, last_updated_at)
+                VALUES (UUID(), @TenantId, @Ym, 0, @Purchase, 0, 0, NOW(6))
+                ON DUPLICATE KEY UPDATE
+                  total_purchase = total_purchase + @Purchase,
+                  last_updated_at = NOW(6)
+                """,
+                new
+                {
+                    TenantId = receipt.TenantId,
+                    Ym = ymStr,
+                    Purchase = receipt.TotalAmount + receipt.VatAmount
+                },
+                transaction: tx,
+                cancellationToken: ct));
+
+            tx.Commit();
+        }
+        catch
+        {
+            try { tx.Rollback(); } catch { /* 이미 닫힌 tx */ }
+            throw;
+        }
+
+        // 결재 트리거 (커밋 이후 실행)
         await ApprovalTriggerHelper.TryCreateApprovalAsync(_db,
             "receipt", receipt.ReceiptId, receipt.ReceiptNo,
             $"매입명세서 확정: {receipt.ReceiptNo}",

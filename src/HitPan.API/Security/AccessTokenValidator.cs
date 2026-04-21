@@ -20,11 +20,17 @@ public sealed class AccessTokenValidator
             throw new InvalidOperationException("JWT_SECRET environment variable is required.");
         }
 
+        // 보안 강화: issuer/audience 검증 활성화
+        var jwtIssuer = Environment.GetEnvironmentVariable("JWT_ISSUER") ?? "hitpan-erp";
+        var jwtAudience = Environment.GetEnvironmentVariable("JWT_AUDIENCE") ?? "hitpan-client";
+
         var key = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwtSecret));
         _parameters = new TokenValidationParameters
         {
-            ValidateIssuer = false,
-            ValidateAudience = false,
+            ValidateIssuer = true,
+            ValidIssuer = jwtIssuer,
+            ValidateAudience = true,
+            ValidAudience = jwtAudience,
             ValidateIssuerSigningKey = true,
             IssuerSigningKey = key,
             ValidateLifetime = true,

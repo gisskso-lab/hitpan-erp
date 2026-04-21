@@ -261,27 +261,6 @@ public class SalesService : ISalesService
                 UnitCost = line.UnitPrice,
                 SupplyAmount = line.SupplyAmount
             });
-
-            // item_stock 테이블 갱신 (재고 차감)
-            const string updateStockSql = """
-                INSERT INTO item_stock (stock_id, tenant_id, item_id, warehouse_id, current_qty, avg_cost, last_updated_at)
-                VALUES (UUID(), @TenantId, @ItemId, @WarehouseId, -@Qty, @UnitCost, NOW(6))
-                ON DUPLICATE KEY UPDATE
-                  current_qty = current_qty - @Qty,
-                  last_updated_at = NOW(6)
-                """;
-
-            await _db.ExecuteAsync(new CommandDefinition(
-                updateStockSql,
-                new
-                {
-                    TenantId = delivery.TenantId,
-                    ItemId = line.ItemId,
-                    WarehouseId = line.WarehouseId,
-                    Qty = line.Qty,
-                    UnitCost = line.UnitPrice
-                },
-                cancellationToken: ct));
         }
 
         if (!string.IsNullOrWhiteSpace(delivery.OrderId))
@@ -315,12 +294,69 @@ public class SalesService : ISalesService
         deliveryRepo.Update(delivery);
         await _unitOfWork.SaveChangesAsync(ct);
 
-        // monthly_summary 매출 갱신
-        await ApprovalTriggerHelper.UpdateMonthlySummaryAsync(_db,
-            delivery.TenantId, delivery.DeliveryDate,
-            delivery.TotalAmount + delivery.VatAmount, 0, ct);
+        // ── 트랜잭션 감싸기 (재고 정합성 보장 — 중간 실패 시 전체 롤백) ──
+        // item_stock 다건 UPDATE + monthly_summary 갱신을 원자적으로 묶는다.
+        if (_db.State != ConnectionState.Open)
+        {
+            if (_db is System.Data.Common.DbConnection dbConn) await dbConn.OpenAsync(ct);
+            else _db.Open();
+        }
+        using var tx = _db.BeginTransaction();
+        try
+        {
+            foreach (var line in lines)
+            {
+                // item_stock 테이블 갱신 (재고 차감)
+                const string updateStockSql = """
+                    INSERT INTO item_stock (stock_id, tenant_id, item_id, warehouse_id, current_qty, avg_cost, last_updated_at)
+                    VALUES (UUID(), @TenantId, @ItemId, @WarehouseId, -@Qty, @UnitCost, NOW(6))
+                    ON DUPLICATE KEY UPDATE
+                      current_qty = current_qty - @Qty,
+                      last_updated_at = NOW(6)
+                    """;
 
-        // 결재 트리거: 결재 설정이 ON이면 결재 문서 자동 생성
+                await _db.ExecuteAsync(new CommandDefinition(
+                    updateStockSql,
+                    new
+                    {
+                        TenantId = delivery.TenantId,
+                        ItemId = line.ItemId,
+                        WarehouseId = line.WarehouseId,
+                        Qty = line.Qty,
+                        UnitCost = line.UnitPrice
+                    },
+                    transaction: tx,
+                    cancellationToken: ct));
+            }
+
+            // monthly_summary 매출 갱신
+            var ymStr = delivery.DeliveryDate.ToString("yyyyMM");
+            await _db.ExecuteAsync(new CommandDefinition(
+                """
+                INSERT INTO monthly_summary (summary_id, tenant_id, `year_month`, total_sales, total_purchase, total_receipt, total_payment, last_updated_at)
+                VALUES (UUID(), @TenantId, @Ym, @Sales, 0, 0, 0, NOW(6))
+                ON DUPLICATE KEY UPDATE
+                  total_sales = total_sales + @Sales,
+                  last_updated_at = NOW(6)
+                """,
+                new
+                {
+                    TenantId = delivery.TenantId,
+                    Ym = ymStr,
+                    Sales = delivery.TotalAmount + delivery.VatAmount
+                },
+                transaction: tx,
+                cancellationToken: ct));
+
+            tx.Commit();
+        }
+        catch
+        {
+            try { tx.Rollback(); } catch { /* 이미 닫힌 tx */ }
+            throw;
+        }
+
+        // 결재 트리거: 결재 설정이 ON이면 결재 문서 자동 생성 (커밋 이후 실행)
         await ApprovalTriggerHelper.TryCreateApprovalAsync(_db,
             "delivery", delivery.DeliveryId, delivery.DeliveryNo,
             $"거래명세서 확정: {delivery.DeliveryNo}",

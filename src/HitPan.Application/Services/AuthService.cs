@@ -95,12 +95,18 @@ public class AuthService : IAuthService
         ClaimsPrincipal principal;
         try
         {
+            // 보안 강화: refresh 토큰도 issuer/audience 검증
+            var refreshIssuer = Environment.GetEnvironmentVariable("JWT_ISSUER") ?? "hitpan-erp";
+            var refreshAudience = Environment.GetEnvironmentVariable("JWT_AUDIENCE") ?? "hitpan-client";
+
             principal = tokenHandler.ValidateToken(
                 request.RefreshToken,
                 new TokenValidationParameters
                 {
-                    ValidateIssuer = false,
-                    ValidateAudience = false,
+                    ValidateIssuer = true,
+                    ValidIssuer = refreshIssuer,
+                    ValidateAudience = true,
+                    ValidAudience = refreshAudience,
                     ValidateIssuerSigningKey = true,
                     IssuerSigningKey = key,
                     ValidateLifetime = true,
@@ -163,7 +169,13 @@ public class AuthService : IAuthService
             new("role", employeeRole)
         };
 
+        // Issuer/Audience — 토큰 스푸핑 방지 (ValidIssuer/ValidAudience와 일치해야 검증 통과)
+        var issuer = Environment.GetEnvironmentVariable("JWT_ISSUER") ?? "hitpan-erp";
+        var audience = Environment.GetEnvironmentVariable("JWT_AUDIENCE") ?? "hitpan-client";
+
         var accessTokenDescriptor = new JwtSecurityToken(
+            issuer: issuer,
+            audience: audience,
             claims: accessClaims,
             expires: accessExpiresAt,
             signingCredentials: credentials);
@@ -176,6 +188,8 @@ public class AuthService : IAuthService
         };
 
         var refreshTokenDescriptor = new JwtSecurityToken(
+            issuer: issuer,
+            audience: audience,
             claims: refreshClaims,
             expires: now.Add(RefreshTokenLifetime),
             signingCredentials: credentials);

@@ -242,43 +242,56 @@ public class StockService : IStockService
         // 3. 차이가 있으면 stock_ledger INSERT (INSERT ONLY 원칙)
         if (diff != 0)
         {
-            const string ledgerInsert = """
-                INSERT INTO stock_ledger
-                    (tenant_id, item_id, warehouse_id, ledger_date, ym,
-                     move_type, source_type, qty_in, qty_out, memo, created_by, created_at)
-                VALUES
-                    (@TenantId, @ItemId, @WarehouseId, @LedgerDate, @Ym,
-                     @MoveType, 'adjustment', @QtyIn, @QtyOut, @Memo, @CreatedBy, @CreatedAt)
-                """;
-            await _dbConnection.ExecuteAsync(new CommandDefinition(ledgerInsert, new
+            // ── 트랜잭션 감싸기 (재고 정합성 보장 — 중간 실패 시 전체 롤백) ──
+            // stock_ledger INSERT + item_stock UPDATE를 원자적으로 묶어 부분 실패로 인한 불일치 방지
+            using var tx = _dbConnection.BeginTransaction();
+            try
             {
-                TenantId = tenantId,
-                req.ItemId,
-                req.WarehouseId,
-                LedgerDate = now,
-                Ym = now.ToString("yyyy-MM"),
-                MoveType = diff > 0 ? "in" : "out",
-                QtyIn = diff > 0 ? Math.Abs(diff) : 0m,
-                QtyOut = diff < 0 ? Math.Abs(diff) : 0m,
-                Memo = req.Reason ?? "재고 실사 조정",
-                CreatedBy = userId,
-                CreatedAt = now
-            }, cancellationToken: ct)).ConfigureAwait(false);
+                const string ledgerInsert = """
+                    INSERT INTO stock_ledger
+                        (tenant_id, item_id, warehouse_id, ledger_date, ym,
+                         move_type, source_type, qty_in, qty_out, memo, created_by, created_at)
+                    VALUES
+                        (@TenantId, @ItemId, @WarehouseId, @LedgerDate, @Ym,
+                         @MoveType, 'adjustment', @QtyIn, @QtyOut, @Memo, @CreatedBy, @CreatedAt)
+                    """;
+                await _dbConnection.ExecuteAsync(new CommandDefinition(ledgerInsert, new
+                {
+                    TenantId = tenantId,
+                    req.ItemId,
+                    req.WarehouseId,
+                    LedgerDate = now,
+                    Ym = now.ToString("yyyy-MM"),
+                    MoveType = diff > 0 ? "in" : "out",
+                    QtyIn = diff > 0 ? Math.Abs(diff) : 0m,
+                    QtyOut = diff < 0 ? Math.Abs(diff) : 0m,
+                    Memo = req.Reason ?? "재고 실사 조정",
+                    CreatedBy = userId,
+                    CreatedAt = now
+                }, transaction: tx, cancellationToken: ct)).ConfigureAwait(false);
 
-            // 4. item_stock 갱신
-            const string updateStock = """
-                UPDATE item_stock
-                SET current_qty = @ActualQty, available_qty = @ActualQty, updated_at = @Now
-                WHERE tenant_id = @TenantId AND item_id = @ItemId AND warehouse_id = @WarehouseId
-                """;
-            await _dbConnection.ExecuteAsync(new CommandDefinition(updateStock, new
+                // 4. item_stock 갱신
+                const string updateStock = """
+                    UPDATE item_stock
+                    SET current_qty = @ActualQty, available_qty = @ActualQty, updated_at = @Now
+                    WHERE tenant_id = @TenantId AND item_id = @ItemId AND warehouse_id = @WarehouseId
+                    """;
+                await _dbConnection.ExecuteAsync(new CommandDefinition(updateStock, new
+                {
+                    req.ActualQty,
+                    Now = now,
+                    TenantId = tenantId,
+                    req.ItemId,
+                    req.WarehouseId
+                }, transaction: tx, cancellationToken: ct)).ConfigureAwait(false);
+
+                tx.Commit();
+            }
+            catch
             {
-                req.ActualQty,
-                Now = now,
-                TenantId = tenantId,
-                req.ItemId,
-                req.WarehouseId
-            }, cancellationToken: ct)).ConfigureAwait(false);
+                try { tx.Rollback(); } catch { /* 이미 닫힌 tx */ }
+                throw;
+            }
         }
 
         // 5. 품목명·창고명 조회 후 결과 반환
@@ -357,74 +370,88 @@ public class StockService : IStockService
         var now = DateTime.UtcNow;
         var ym = now.ToString("yyyy-MM");
 
-        // stock_ledger: 출고 INSERT
-        const string outInsert = """
-            INSERT INTO stock_ledger
-                (tenant_id, item_id, warehouse_id, ledger_date, ym,
-                 move_type, source_type, qty_in, qty_out, memo, created_by, created_at)
-            VALUES
-                (@TenantId, @ItemId, @WarehouseId, @LedgerDate, @Ym,
-                 'out', 'transfer', 0, @Qty, @Memo, @CreatedBy, @CreatedAt)
-            """;
-        await _dbConnection.ExecuteAsync(new CommandDefinition(outInsert, new
+        // ── 트랜잭션 감싸기 (재고 정합성 보장 — 중간 실패 시 전체 롤백) ──
+        // 출고+입고 stock_ledger 2건 + item_stock 2건 UPDATE를 원자적으로 묶는다.
+        // 중간 실패 시 출발 창고만 차감되고 도착 창고에 안 들어가는 유령 재고 방지.
+        using var tx = _dbConnection.BeginTransaction();
+        try
         {
-            TenantId = tenantId,
-            req.ItemId,
-            WarehouseId = req.FromWarehouseId,
-            LedgerDate = now,
-            Ym = ym,
-            req.Qty,
-            Memo = req.Memo ?? "재고 이송",
-            CreatedBy = userId,
-            CreatedAt = now
-        }, cancellationToken: ct)).ConfigureAwait(false);
+            // stock_ledger: 출고 INSERT
+            const string outInsert = """
+                INSERT INTO stock_ledger
+                    (tenant_id, item_id, warehouse_id, ledger_date, ym,
+                     move_type, source_type, qty_in, qty_out, memo, created_by, created_at)
+                VALUES
+                    (@TenantId, @ItemId, @WarehouseId, @LedgerDate, @Ym,
+                     'out', 'transfer', 0, @Qty, @Memo, @CreatedBy, @CreatedAt)
+                """;
+            await _dbConnection.ExecuteAsync(new CommandDefinition(outInsert, new
+            {
+                TenantId = tenantId,
+                req.ItemId,
+                WarehouseId = req.FromWarehouseId,
+                LedgerDate = now,
+                Ym = ym,
+                req.Qty,
+                Memo = req.Memo ?? "재고 이송",
+                CreatedBy = userId,
+                CreatedAt = now
+            }, transaction: tx, cancellationToken: ct)).ConfigureAwait(false);
 
-        // stock_ledger: 입고 INSERT
-        const string inInsert = """
-            INSERT INTO stock_ledger
-                (tenant_id, item_id, warehouse_id, ledger_date, ym,
-                 move_type, source_type, qty_in, qty_out, memo, created_by, created_at)
-            VALUES
-                (@TenantId, @ItemId, @WarehouseId, @LedgerDate, @Ym,
-                 'in', 'transfer', @Qty, 0, @Memo, @CreatedBy, @CreatedAt)
-            """;
-        await _dbConnection.ExecuteAsync(new CommandDefinition(inInsert, new
-        {
-            TenantId = tenantId,
-            req.ItemId,
-            WarehouseId = req.ToWarehouseId,
-            LedgerDate = now,
-            Ym = ym,
-            req.Qty,
-            Memo = req.Memo ?? "재고 이송",
-            CreatedBy = userId,
-            CreatedAt = now
-        }, cancellationToken: ct)).ConfigureAwait(false);
+            // stock_ledger: 입고 INSERT
+            const string inInsert = """
+                INSERT INTO stock_ledger
+                    (tenant_id, item_id, warehouse_id, ledger_date, ym,
+                     move_type, source_type, qty_in, qty_out, memo, created_by, created_at)
+                VALUES
+                    (@TenantId, @ItemId, @WarehouseId, @LedgerDate, @Ym,
+                     'in', 'transfer', @Qty, 0, @Memo, @CreatedBy, @CreatedAt)
+                """;
+            await _dbConnection.ExecuteAsync(new CommandDefinition(inInsert, new
+            {
+                TenantId = tenantId,
+                req.ItemId,
+                WarehouseId = req.ToWarehouseId,
+                LedgerDate = now,
+                Ym = ym,
+                req.Qty,
+                Memo = req.Memo ?? "재고 이송",
+                CreatedBy = userId,
+                CreatedAt = now
+            }, transaction: tx, cancellationToken: ct)).ConfigureAwait(false);
 
-        // item_stock: 출발 창고 차감
-        const string updateFrom = """
-            UPDATE item_stock
-            SET current_qty = current_qty - @Qty, available_qty = available_qty - @Qty, updated_at = @Now
-            WHERE tenant_id = @TenantId AND item_id = @ItemId AND warehouse_id = @WarehouseId
-            """;
-        await _dbConnection.ExecuteAsync(new CommandDefinition(updateFrom, new
-        {
-            req.Qty, Now = now, TenantId = tenantId, req.ItemId, WarehouseId = req.FromWarehouseId
-        }, cancellationToken: ct)).ConfigureAwait(false);
+            // item_stock: 출발 창고 차감
+            const string updateFrom = """
+                UPDATE item_stock
+                SET current_qty = current_qty - @Qty, available_qty = available_qty - @Qty, updated_at = @Now
+                WHERE tenant_id = @TenantId AND item_id = @ItemId AND warehouse_id = @WarehouseId
+                """;
+            await _dbConnection.ExecuteAsync(new CommandDefinition(updateFrom, new
+            {
+                req.Qty, Now = now, TenantId = tenantId, req.ItemId, WarehouseId = req.FromWarehouseId
+            }, transaction: tx, cancellationToken: ct)).ConfigureAwait(false);
 
-        // item_stock: 도착 창고 증가 (없으면 INSERT)
-        const string upsertTo = """
-            INSERT INTO item_stock (tenant_id, item_id, warehouse_id, current_qty, available_qty, avg_cost, updated_at)
-            VALUES (@TenantId, @ItemId, @WarehouseId, @Qty, @Qty, 0, @Now)
-            ON DUPLICATE KEY UPDATE
-                current_qty = current_qty + @Qty,
-                available_qty = available_qty + @Qty,
-                updated_at = @Now
-            """;
-        await _dbConnection.ExecuteAsync(new CommandDefinition(upsertTo, new
+            // item_stock: 도착 창고 증가 (없으면 INSERT)
+            const string upsertTo = """
+                INSERT INTO item_stock (tenant_id, item_id, warehouse_id, current_qty, available_qty, avg_cost, updated_at)
+                VALUES (@TenantId, @ItemId, @WarehouseId, @Qty, @Qty, 0, @Now)
+                ON DUPLICATE KEY UPDATE
+                    current_qty = current_qty + @Qty,
+                    available_qty = available_qty + @Qty,
+                    updated_at = @Now
+                """;
+            await _dbConnection.ExecuteAsync(new CommandDefinition(upsertTo, new
+            {
+                TenantId = tenantId, req.ItemId, WarehouseId = req.ToWarehouseId, req.Qty, Now = now
+            }, transaction: tx, cancellationToken: ct)).ConfigureAwait(false);
+
+            tx.Commit();
+        }
+        catch
         {
-            TenantId = tenantId, req.ItemId, WarehouseId = req.ToWarehouseId, req.Qty, Now = now
-        }, cancellationToken: ct)).ConfigureAwait(false);
+            try { tx.Rollback(); } catch { /* 이미 닫힌 tx */ }
+            throw;
+        }
     }
 
     /// <summary>재고 이송 이력 조회</summary>

@@ -17,6 +17,10 @@ public static class AuthExtensions
             throw new InvalidOperationException("JWT_SECRET environment variable is required.");
         }
 
+        // Issuer/Audience — .env 또는 기본값 (토큰 스푸핑 방지)
+        var jwtIssuer = Environment.GetEnvironmentVariable("JWT_ISSUER") ?? "hitpan-erp";
+        var jwtAudience = Environment.GetEnvironmentVariable("JWT_AUDIENCE") ?? "hitpan-client";
+
         var key = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwtSecret));
 
         services
@@ -27,8 +31,11 @@ public static class AuthExtensions
                 options.SaveToken = false;
                 options.TokenValidationParameters = new TokenValidationParameters
                 {
-                    ValidateIssuer = false,
-                    ValidateAudience = false,
+                    // 보안 강화: issuer/audience 검증 활성화 (외부 토큰 차단)
+                    ValidateIssuer = true,
+                    ValidIssuer = jwtIssuer,
+                    ValidateAudience = true,
+                    ValidAudience = jwtAudience,
                     ValidateIssuerSigningKey = true,
                     IssuerSigningKey = key,
                     ValidateLifetime = true,

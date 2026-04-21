@@ -17,6 +17,10 @@ using Microsoft.AspNetCore.Components.WebAssembly.Server;
 Encoding.RegisterProvider(CodePagesEncodingProvider.Instance);
 QuestPDF.Settings.License = LicenseType.Community;
 
+// ── .env 파일 로드 (시크릿 분리) ──
+// 프로젝트 루트 → 상위 탐색. 파일 없으면 무시 (프로덕션은 OS 환경변수 사용).
+LoadDotEnv();
+
 var builder = WebApplication.CreateBuilder(args);
 
 // EXE 옆 wwwroot가 있으면 WebRoot로 설정 (installer 모드)
@@ -192,3 +196,22 @@ else if (!app.Environment.IsProduction())
 }
 
 app.Run();
+
+// ── .env 파일 로드 헬퍼 ──
+// 실행 디렉토리부터 상위로 올라가며 .env 파일을 찾아 로드한다.
+// 시크릿(DB/JWT/AES)을 소스코드 외부로 분리하여 Git 노출 방지.
+static void LoadDotEnv()
+{
+    var cur = new DirectoryInfo(AppContext.BaseDirectory);
+    while (cur is not null)
+    {
+        var envPath = Path.Combine(cur.FullName, ".env");
+        if (File.Exists(envPath))
+        {
+            try { DotNetEnv.Env.Load(envPath); }
+            catch { /* .env 읽기 실패해도 OS 환경변수 fallback */ }
+            return;
+        }
+        cur = cur.Parent;
+    }
+}
