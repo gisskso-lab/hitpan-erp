@@ -48,3 +48,18 @@ public class ResetPasswordResponse
     public string TempPassword { get; set; } = "";
     public string Message { get; set; } = "";
 }
+
+public class BulkCreateResult
+{
+    public int TotalRows { get; set; }
+    public int SuccessCount { get; set; }
+    public int FailedCount { get; set; }
+    public List<BulkRowErrorModel> Errors { get; set; } = new();
+}
+
+public class BulkRowErrorModel
+{
+    public int Row { get; set; }
+    public string? Email { get; set; }
+    public string Reason { get; set; } = "";
+}

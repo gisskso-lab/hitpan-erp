@@ -6,6 +6,7 @@
 @inject UserService UserSvc
 @inject ISnackbar Snackbar
 @inject NavigationManager Nav
+@inject IJSRuntime JS
 
 <PageTitle>사용자 추가·관리</PageTitle>
 
@@ -20,6 +21,9 @@
         <MudButton Variant="Variant.Outlined" Size="Size.Small"
             StartIcon="@Icons.Material.Filled.Lock"
             OnClick="@(() => Nav.NavigateTo("/users/permissions"))">권한 설정</MudButton>
+        <MudButton Variant="Variant.Outlined" Size="Size.Small" Color="Color.Success"
+            StartIcon="@Icons.Material.Filled.UploadFile"
+            OnClick="@(() => _showBulk = true)">엑셀 일괄등록</MudButton>
         <MudButton Variant="Variant.Filled" Size="Size.Small" Color="Color.Primary"
             StartIcon="@Icons.Material.Filled.PersonAdd"
             OnClick="OpenCreateDialog">사용자 추가</MudButton>
@@ -174,6 +178,64 @@ else
     </DialogActions>
 </MudDialog>
 
+@* 엑셀 일괄 업로드 다이얼로그 *@
+<MudDialog @bind-Visible="_showBulk" Options="@(new DialogOptions { MaxWidth = MaxWidth.Medium, FullWidth = true })">
+    <TitleContent><MudText Typo="Typo.h6">엑셀 일괄 사용자 등록</MudText></TitleContent>
+    <DialogContent>
+        <MudAlert Severity="Severity.Info" Class="mb-3">
+            ① 템플릿 다운로드 → ② 엑셀 작성 → ③ 업로드<br />
+            첫 행은 헤더이며 변경하지 마세요. 한 행이 실패해도 나머지 행은 계속 처리됩니다.
+        </MudAlert>
+
+        <div class="d-flex gap-2 mb-3">
+            <MudButton Variant="Variant.Outlined" Color="Color.Primary"
+                StartIcon="@Icons.Material.Filled.Download"
+                OnClick="DownloadTemplate" Disabled="_busy">
+                템플릿 다운로드
+            </MudButton>
+            <MudFileUpload T="IBrowserFile" FilesChanged="OnFileSelected" Accept=".xlsx">
+                <ActivatorContent>
+                    <MudButton Variant="Variant.Filled" Color="Color.Success"
+                        StartIcon="@Icons.Material.Filled.UploadFile"
+                        Disabled="_busy">
+                        @(_busy ? "업로드 중..." : "엑셀 선택 + 업로드")
+                    </MudButton>
+                </ActivatorContent>
+            </MudFileUpload>
+        </div>
+
+        @if (_bulkResult != null)
+        {
+            <MudPaper Elevation="0" Class="pa-3" Style="border:1px solid var(--mud-palette-lines-default);border-radius:8px">
+                <MudText Typo="Typo.subtitle1" Style="font-weight:600">업로드 결과</MudText>
+                <div class="d-flex gap-3 mt-2">
+                    <MudChip T="string" Color="Color.Info" Variant="Variant.Filled">총 @(_bulkResult.TotalRows)행</MudChip>
+                    <MudChip T="string" Color="Color.Success" Variant="Variant.Filled">성공 @(_bulkResult.SuccessCount)건</MudChip>
+                    <MudChip T="string" Color="Color.Error" Variant="Variant.Filled">실패 @(_bulkResult.FailedCount)건</MudChip>
+                </div>
+                @if (_bulkResult.Errors.Any())
+                {
+                    <MudText Typo="Typo.body2" Class="mt-3" Style="font-weight:600">실패한 행:</MudText>
+                    <MudSimpleTable Dense="true" Class="mt-1" Style="font-size:12px">
+                        <thead>
+                            <tr><th>행</th><th>이메일</th><th>실패 사유</th></tr>
+                        </thead>
+                        <tbody>
+                            @foreach (var e in _bulkResult.Errors)
+                            {
+                                <tr><td>@e.Row</td><td>@e.Email</td><td style="color:var(--mud-palette-error)">@e.Reason</td></tr>
+                            }
+                        </tbody>
+                    </MudSimpleTable>
+                }
+            </MudPaper>
+        }
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="CloseBulkDialog">닫기</MudButton>
+    </DialogActions>
+</MudDialog>
+
 @* 임시 비밀번호 발급 결과 다이얼로그 *@
 <MudDialog @bind-Visible="_showResetResult" Options="@(new DialogOptions { MaxWidth = MaxWidth.Small, FullWidth = true })">
     <TitleContent><MudText Typo="Typo.h6">임시 비밀번호 발급됨</MudText></TitleContent>
@@ -199,11 +261,12 @@ else
     private bool _busy = false;
 
     // 다이얼로그 상태
-    private bool _showCreate, _showEdit, _showDeactivate, _showResetResult;
+    private bool _showCreate, _showEdit, _showDeactivate, _showResetResult, _showBulk;
     private CreateUserModel _createModel = new();
     private UpdateUserModel _editModel = new();
     private UserListModel? _editTarget, _deactivateTarget, _resetTarget;
     private string _tempPassword = "";
+    private BulkCreateResult? _bulkResult;
 
     protected override async Task OnInitializedAsync()
     {
@@ -313,6 +376,44 @@ else
             _showResetResult = true;
         }
         else Snackbar.Add("비밀번호 초기화 실패", Severity.Error);
+    }
+
+    // ── 엑셀 일괄 ──
+    private async Task DownloadTemplate()
+    {
+        _busy = true;
+        var bytes = await UserSvc.GetBulkTemplateAsync();
+        _busy = false;
+        if (bytes == null) { Snackbar.Add("템플릿 다운로드 실패", Severity.Error); return; }
+
+        // JS interop으로 브라우저 다운로드 트리거
+        await JS.InvokeVoidAsync("downloadFileFromBytes",
+            "히트판_사용자_일괄등록_템플릿.xlsx",
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            Convert.ToBase64String(bytes));
+    }
+
+    private async Task OnFileSelected(IBrowserFile file)
+    {
+        if (file == null) return;
+        _busy = true;
+        _bulkResult = null;
+        using var stream = file.OpenReadStream(maxAllowedSize: 10 * 1024 * 1024); // 10MB
+        _bulkResult = await UserSvc.BulkUploadAsync(stream, file.Name);
+        _busy = false;
+        if (_bulkResult != null && _bulkResult.SuccessCount > 0)
+        {
+            Snackbar.Add($"{_bulkResult.SuccessCount}건 등록 성공", Severity.Success);
+            await LoadAsync();
+        }
+        if (_bulkResult?.FailedCount > 0)
+            Snackbar.Add($"{_bulkResult.FailedCount}건 실패 — 다이얼로그에서 확인", Severity.Warning);
+    }
+
+    private void CloseBulkDialog()
+    {
+        _showBulk = false;
+        _bulkResult = null;
     }
 
     // ── 유틸 ──

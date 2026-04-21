@@ -258,6 +258,39 @@ public sealed class UserService : IUserService
         return temp;
     }
 
+    public async Task<BulkCreateResultDto> BulkCreateAsync(List<CreateUserDto> rows, string tenantId, CancellationToken ct = default)
+    {
+        var result = new BulkCreateResultDto { TotalRows = rows.Count };
+
+        // 각 행 독립 처리 — 한 행 실패해도 나머지 진행
+        for (var i = 0; i < rows.Count; i++)
+        {
+            var row = rows[i];
+            try
+            {
+                await CreateAsync(row, tenantId, ct).ConfigureAwait(false);
+                result.SuccessCount++;
+            }
+            catch (Exception ex)
+            {
+                result.FailedCount++;
+                result.Errors.Add(new BulkRowError
+                {
+                    Row = i + 1,
+                    Email = row.Email,
+                    Reason = ex.Message
+                });
+            }
+        }
+
+        // 일괄 업로드 자체 이벤트 감사로그
+        await _audit.LogAsync("create", "user_bulk", null,
+            afterJson: $"{{\"total\":{result.TotalRows},\"success\":{result.SuccessCount},\"failed\":{result.FailedCount}}}",
+            ct: ct);
+
+        return result;
+    }
+
     private static UserRole ParseUserRole(string? role)
     {
         if (string.IsNullOrWhiteSpace(role))

@@ -65,4 +65,39 @@ public sealed class UserService(HttpClient http)
         }
         catch { return null; }
     }
+
+    public async Task<byte[]?> GetBulkTemplateAsync(CancellationToken ct = default)
+    {
+        try
+        {
+            var res = await http.GetAsync("api/users/bulk/template", ct).ConfigureAwait(false);
+            if (!res.IsSuccessStatusCode) return null;
+            return await res.Content.ReadAsByteArrayAsync(ct).ConfigureAwait(false);
+        }
+        catch { return null; }
+    }
+
+    public async Task<BulkCreateResult?> BulkUploadAsync(Stream stream, string fileName, CancellationToken ct = default)
+    {
+        try
+        {
+            using var content = new MultipartFormDataContent();
+            using var fileContent = new StreamContent(stream);
+            fileContent.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue(
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+            content.Add(fileContent, "file", fileName);
+
+            var res = await http.PostAsync("api/users/bulk", content, ct).ConfigureAwait(false);
+            if (!res.IsSuccessStatusCode)
+            {
+                var err = await res.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
+                return new BulkCreateResult { FailedCount = -1, Errors = new() { new() { Row = 0, Reason = err } } };
+            }
+            return await res.Content.ReadFromJsonAsync<BulkCreateResult>(ct).ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            return new BulkCreateResult { FailedCount = -1, Errors = new() { new() { Row = 0, Reason = ex.Message } } };
+        }
+    }
 }
