@@ -42,16 +42,7 @@
             <MudMenuItem OnClick="@(() => TabService.TryAddTab(WorkDocumentKind.Return))">반품</MudMenuItem>
         </MudMenu>
     </div>
-    <div class="hitpan-tabbar-chips">
-        <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined" Class="hitpan-chip-context">
-            @FormatCompanyAndUser()
-        </MudChip>
-        <MudIconButton Icon="@Icons.Material.Filled.Logout"
-                       aria-label="로그아웃"
-                       Class="hitpan-tabbar-logout"
-                       Size="Size.Small"
-                       OnClick="LogoutAsync" />
-    </div>
+    @* 계정 정보 + 로그아웃은 TopHeader 우측 AccountBadge 컴포넌트로 이동 *@
 </div>
 
 @code {

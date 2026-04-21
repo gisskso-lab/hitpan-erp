@@ -1,0 +1,92 @@
+@* ══════════════════════════════════════════════════════════════
+   AccountBadge — 상단 우측 고정 계정 정보 + 로그아웃 아이콘
+   ══════════════════════════════════════════════════════════════ *@
+@using System.Security.Claims
+@using HitPan.Web.Services
+@inject AuthenticationStateProvider AuthStateProvider
+@inject TenantProfileService TenantProfile
+@inject IAuthService AuthService
+@inject NavigationManager Navigation
+
+<div class="hitpan-account-badge">
+    @* 계정 정보 (회사명 · 사용자명) *@
+    <div class="hitpan-account-info">
+        <MudIcon Icon="@Icons.Material.Filled.AccountCircle"
+                 Size="Size.Small"
+                 Style="color:var(--hitpan-primary)" />
+        <span class="hitpan-account-text">
+            @FormatCompanyAndUser()
+        </span>
+    </div>
+
+    @* 로그아웃 버튼 *@
+    <MudTooltip Text="로그아웃">
+        <MudIconButton Icon="@Icons.Material.Filled.Logout"
+                       aria-label="로그아웃"
+                       Size="Size.Small"
+                       OnClick="LogoutAsync" />
+    </MudTooltip>
+</div>
+
+@code {
+    private string? _userName;
+
+    protected override async Task OnInitializedAsync()
+    {
+        AuthStateProvider.AuthenticationStateChanged += OnAuthenticationStateChanged;
+        await LoadLabelsFromJwtAsync();
+    }
+
+    private async void OnAuthenticationStateChanged(Task _)
+    {
+        await InvokeAsync(async () =>
+        {
+            await LoadLabelsFromJwtAsync();
+            StateHasChanged();
+        });
+    }
+
+    private async Task LoadLabelsFromJwtAsync()
+    {
+        try
+        {
+            var state = await AuthStateProvider.GetAuthenticationStateAsync();
+            var user = state.User;
+            if (user.Identity?.IsAuthenticated != true)
+            {
+                _userName = null;
+                TenantProfile.Clear();
+                return;
+            }
+
+            _userName = user.FindFirst("name")?.Value
+                        ?? user.FindFirst(ClaimTypes.Name)?.Value
+                        ?? user.Identity?.Name;
+
+            await TenantProfile.LoadAsync();
+        }
+        catch
+        {
+            _userName = null;
+            TenantProfile.Clear();
+        }
+    }
+
+    private string FormatCompanyAndUser()
+    {
+        var company = string.IsNullOrWhiteSpace(TenantProfile.CompanyName) ? "—" : TenantProfile.CompanyName!;
+        var user = string.IsNullOrWhiteSpace(_userName) ? "—" : _userName!;
+        return $"{company} · {user}";
+    }
+
+    private async Task LogoutAsync()
+    {
+        await AuthService.LogoutAsync();
+        Navigation.NavigateTo("/login", forceLoad: true);
+    }
+
+    public void Dispose()
+    {
+        AuthStateProvider.AuthenticationStateChanged -= OnAuthenticationStateChanged;
+    }
+}

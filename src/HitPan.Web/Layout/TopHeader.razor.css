@@ -1,11 +1,10 @@
-/* 높이는 hitpan.css 의 .hitpan-top-header */
+/* 상단 헤더 3영역: 좌측 챗봇 / 중앙 탭바 / 우측 계정 */
 
-/* 상단 헤더를 좌/우 2영역으로 분할 — 좌측 챗봇, 우측 탭바 */
 ::deep .hitpan-top-header {
     display: flex;
     align-items: center;
     gap: 12px;
-    padding: 0 12px;
+    padding: 0 16px;
 }
 
 ::deep .hitpan-top-header-left {
@@ -15,7 +14,7 @@
     height: 100%;
 }
 
-::deep .hitpan-top-header-right {
+::deep .hitpan-top-header-center {
     flex: 1;
     min-width: 0;
     display: flex;
@@ -24,3 +23,53 @@
     overflow: hidden;
 }
 
+::deep .hitpan-top-header-right {
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    height: 100%;
+}
+
+/* 계정 배지 스타일 */
+::deep .hitpan-account-badge {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    padding: 4px 8px 4px 12px;
+    background: var(--mud-palette-background);
+    border: var(--hitpan-border, 0.5px solid var(--mud-palette-lines-default));
+    border-radius: 20px;
+    height: 32px;
+}
+
+::deep .hitpan-account-info {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding-right: 4px;
+    border-right: 1px solid var(--mud-palette-lines-default);
+    margin-right: 2px;
+}
+
+::deep .hitpan-account-text {
+    font-size: 12px;
+    color: var(--hitpan-text-default, #374151);
+    font-weight: 500;
+    white-space: nowrap;
+    max-width: 240px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+/* 모바일: 계정 텍스트 숨기고 아이콘만 */
+@media (max-width: 768px) {
+    ::deep .hitpan-account-text,
+    ::deep .hitpan-account-info {
+        display: none;
+    }
+    ::deep .hitpan-account-badge {
+        padding: 4px;
+        border: none;
+    }
+}

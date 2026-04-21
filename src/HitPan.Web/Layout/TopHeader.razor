@@ -1,10 +1,14 @@
 <header class="hitpan-top-header">
-    @* 상단 좌측: AI 챗봇 바 (Spotlight 스타일) *@
+    @* 좌측: AI 챗봇 바 (Spotlight 스타일) *@
     <div class="hitpan-top-header-left">
         <ChatbotBar />
     </div>
-    @* 우측: 기존 다중 탭바 *@
-    <div class="hitpan-top-header-right">
+    @* 중앙: 다중 탭바 (탭만) *@
+    <div class="hitpan-top-header-center">
         <MultiTabBar />
+    </div>
+    @* 우측: 계정 정보 + 로그아웃 *@
+    <div class="hitpan-top-header-right">
+        <AccountBadge />
     </div>
 </header>

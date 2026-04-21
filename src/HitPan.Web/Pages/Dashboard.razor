@@ -16,19 +16,19 @@
 @* 권한 설정 안내 배너 — 어드민 첫 진입 시 권한 미설정 상태 유도 *@
 @if (_showPermissionBanner)
 {
-    <MudAlert Severity="Severity.Info" Class="mb-3" Elevation="0">
+    @* 권한 설정 안내 — Warning(주황)으로 주의 환기, 보라색 혼동 방지 *@
+    <MudAlert Severity="Severity.Warning" Class="mb-3" Elevation="0" Dense="true">
         <div class="d-flex align-center justify-space-between" style="gap:16px;flex-wrap:wrap">
             <div>
-                <MudText Typo="Typo.subtitle1" Style="font-weight:600">🔐 권한 설정이 필요합니다</MudText>
-                <MudText Typo="Typo.body2">
-                    직원별 메뉴 접근 권한이 아직 설정되지 않았습니다.
-                    각 직원이 필요한 메뉴만 보도록 먼저 권한을 지정해주세요.
+                <MudText Typo="Typo.body2" Style="font-weight:600">🔐 권한 설정이 필요합니다</MudText>
+                <MudText Typo="Typo.caption" Style="color:var(--hitpan-text-muted)">
+                    직원별 메뉴 접근 권한이 아직 설정되지 않았습니다. 먼저 지정해주세요.
                 </MudText>
             </div>
-            <MudButton Variant="Variant.Filled" Color="Color.Primary"
+            <MudButton Variant="Variant.Filled" Color="Color.Primary" Size="Size.Small"
                 EndIcon="@Icons.Material.Filled.ArrowForward"
                 OnClick="@(() => Nav.NavigateTo("/users/permissions"))">
-                권한 설정하러 가기
+                권한 설정
             </MudButton>
         </div>
     </MudAlert>

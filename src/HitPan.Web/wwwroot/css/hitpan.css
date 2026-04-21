@@ -55,12 +55,15 @@ html, body {
 }
 
 .hitpan-top-header {
-    height: 38px;
-    min-height: 38px;
-    max-height: 38px;
+    height: 48px;
+    min-height: 48px;
+    max-height: 48px;
     flex-shrink: 0;
     border-bottom: 1px solid var(--mud-palette-lines-default);
     background: var(--mud-palette-surface);
+    display: flex;
+    align-items: center;
+    overflow: hidden;
 }
 
 .hitpan-body,
