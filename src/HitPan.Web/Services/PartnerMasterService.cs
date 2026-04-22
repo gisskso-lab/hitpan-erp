@@ -135,4 +135,33 @@ public sealed class PartnerMasterService(HttpClient http)
 
         return await GetListAsync(query, null, ct);
     }
+
+    /// <summary>
+    /// AR Aging 연체 버킷 — 전 매출처 연체 현황 (`v_partner_aging_buckets` 뷰).
+    /// 매출처 리스트 페이지 연체 컬럼·배지 표시용.
+    /// </summary>
+    public async Task<List<PartnerAgingRow>> GetAgingAsync(CancellationToken ct = default)
+    {
+        try
+        {
+            var rows = await http.GetFromJsonAsync<List<PartnerAgingRow>>("api/partners/aging", JsonOptions, ct);
+            return rows ?? new();
+        }
+        catch
+        {
+            return new();
+        }
+    }
+}
+
+public sealed class PartnerAgingRow
+{
+    public string PartnerId { get; set; } = "";
+    public string PartnerName { get; set; } = "";
+    public int OpenInvoices { get; set; }
+    public decimal Bucket0_30 { get; set; }
+    public decimal Bucket31_60 { get; set; }
+    public decimal Bucket61_90 { get; set; }
+    public decimal Bucket90Plus { get; set; }
+    public decimal TotalUnpaid { get; set; }
 }

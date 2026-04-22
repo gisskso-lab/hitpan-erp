@@ -9,14 +9,13 @@
 
 <PageTitle>상품 마스터</PageTitle>
 
-<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
-    <MudText Typo="Typo.h6">상품 마스터</MudText>
-    <MudButton Variant="Variant.Filled"
-               Color="Color.Primary"
-               OnClick="OpenCreate">
-        + 상품 등록
-    </MudButton>
-</div>
+<PageHeader Title="상품 마스터" Subtitle="단품 · 조립(BOM) · 1+1 기획상품 통합 관리">
+    <Actions>
+        <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="OpenCreate">
+            + 상품 등록
+        </MudButton>
+    </Actions>
+</PageHeader>
 
 <MudPaper Elevation="0" Class="pa-3 mb-4 hitpan-card">
     <div style="display:flex;gap:12px;flex-wrap:wrap;align-items:center">

@@ -468,6 +468,13 @@ html, body {
     --hitpan-aging-60-soft:     #FFEDD5;
     --hitpan-aging-90-soft:     #FEE2E2;
 
+    /* Settings 페이지 카테고리 dot 색 (5종) */
+    --hitpan-dot-green:  #1D9E75;
+    --hitpan-dot-blue:   #185FA5;
+    --hitpan-dot-amber:  #BA7517;
+    --hitpan-dot-red:    #E24B4A;
+    --hitpan-dot-purple: #534AB7;
+
     /* 상품 타입 칩 */
     --hitpan-chip-promo-bg:    #FEE2E2;
     --hitpan-chip-promo-fg:    #DC2626;

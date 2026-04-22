@@ -9,12 +9,13 @@
 
 <PageTitle>업체 마스터</PageTitle>
 
-<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
-    <MudText Typo="Typo.h6">업체 마스터</MudText>
-    <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="@(() => Nav.NavigateTo("/partners/new"))">
-        + 업체 등록
-    </MudButton>
-</div>
+<PageHeader Title="업체 마스터" Subtitle="매입·매출 거래처 등록 · 연체 현황">
+    <Actions>
+        <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="@(() => Nav.NavigateTo("/partners/new"))">
+            + 업체 등록
+        </MudButton>
+    </Actions>
+</PageHeader>
 
 <MudPaper Elevation="0" Class="pa-3 mb-3" Style="border:1px solid var(--mud-palette-lines-default);border-radius:12px">
     <MudGrid Spacing="2" Class="align-center">
@@ -66,6 +67,8 @@ else
             <MudTh>등급</MudTh>
             <MudTh Style="text-align:right">여신한도</MudTh>
             <MudTh Style="text-align:right">잔액</MudTh>
+            <MudTh Style="text-align:right">미수금</MudTh>
+            <MudTh>연체</MudTh>
             <MudTh>사용</MudTh>
             <MudTh></MudTh>
         </HeaderContent>
@@ -80,6 +83,18 @@ else
             <MudTd DataLabel="등급">@context.PriceGrade</MudTd>
             <MudTd DataLabel="여신한도" Style="text-align:right">@context.CreditLimit.ToString("N0")</MudTd>
             <MudTd DataLabel="잔액" Style="text-align:right">@context.Balance.ToString("N0")</MudTd>
+            <MudTd DataLabel="미수금" Style="text-align:right">
+                @(GetAging(context.PartnerId) is { } ua ? ua.TotalUnpaid.ToString("N0") : "-")
+            </MudTd>
+            <MudTd DataLabel="연체">
+                @{
+                    var ag = GetAging(context.PartnerId);
+                }
+                @if (ag is not null && ag.TotalUnpaid > 0)
+                {
+                    <PartnerAgingBadge DaysOverdue="@AgingDays(ag)" />
+                }
+            </MudTd>
             <MudTd DataLabel="사용">@(context.IsActive ? "Y" : "N")</MudTd>
             <MudTd>
                 <MudIconButton Icon="@Icons.Material.Filled.Edit"
@@ -96,6 +111,7 @@ else
 
 @code {
     private List<PartnerListRow> _rows = new();
+    private List<PartnerAgingRow> _aging = new();
     private string _search = "";
     private string _type = "";
     private bool _loading = true;
@@ -109,11 +125,29 @@ else
     {
         _loading = true;
         StateHasChanged();
-        _rows = await PartnersApi.GetListAsync(
+        var rowsTask = PartnersApi.GetListAsync(
             string.IsNullOrWhiteSpace(_search) ? null : _search,
             string.IsNullOrWhiteSpace(_type) ? null : _type);
+        var agingTask = PartnersApi.GetAgingAsync();
+        await Task.WhenAll(rowsTask, agingTask);
+        _rows = rowsTask.Result;
+        _aging = agingTask.Result;
         _loading = false;
         StateHasChanged();
+    }
+
+    // 거래처 id로 연체 행 lookup (미사용 시 null)
+    private PartnerAgingRow? GetAging(string? partnerId)
+        => string.IsNullOrEmpty(partnerId) ? null
+            : _aging.FirstOrDefault(x => x.PartnerId == partnerId);
+
+    // AR Aging 행에서 가장 심한 연체 버킷을 days로 환산 (뱃지 색 결정용)
+    private static int AgingDays(PartnerAgingRow a)
+    {
+        if (a.Bucket90Plus > 0) return 120;
+        if (a.Bucket61_90 > 0)  return 75;
+        if (a.Bucket31_60 > 0)  return 45;
+        return 15;
     }
 
     /// <summary>화면 데이터를 엑셀로 내보낸다.</summary>

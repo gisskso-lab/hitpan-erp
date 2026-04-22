@@ -11,14 +11,14 @@
 
 <PageTitle>BOM 자재명세서</PageTitle>
 
-<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
-  <MudText Typo="Typo.h6">BOM 자재명세서</MudText>
-  <MudButton Variant="Variant.Filled"
-    Color="Color.Primary"
-    OnClick="@(() => Nav.NavigateTo("/bom/new"))">
-    + BOM 등록
-  </MudButton>
-</div>
+<PageHeader Title="BOM 자재명세서" Subtitle="조립상품 판매 시 자재 자동 차감을 위한 구성표">
+    <Actions>
+        <MudButton Variant="Variant.Filled" Color="Color.Primary"
+                   OnClick="@(() => Nav.NavigateTo("/bom/new"))">
+            + BOM 등록
+        </MudButton>
+    </Actions>
+</PageHeader>
 
 @* 완성품 검색 필터 *@
 <MudPaper Class="pa-3 mb-3" Elevation="0" Style="border:1px solid var(--mud-palette-lines-default);border-radius:12px">
