@@ -77,8 +77,8 @@
                 <MudTd Style="text-align:right">@context.Count.ToString("N0")</MudTd>
                 <MudTd Style="text-align:right">@context.Revenue.ToString("N0")</MudTd>
                 <MudTd Style="text-align:right">@context.Cost.ToString("N0")</MudTd>
-                <MudTd Style="@($"text-align:right;font-weight:500;color:{(context.Profit >= 0 ? "#2E7D32" : "#C62828")}")">@context.Profit.ToString("N0")</MudTd>
-                <MudTd Style="@($"text-align:right;font-weight:500;color:{(context.ProfitRate >= 0 ? "#2E7D32" : "#C62828")}")">@context.ProfitRate.ToString("N1")%</MudTd>
+                <MudTd Style="@($"text-align:right;font-weight:500;color:{(context.Profit >= 0 ? "var(--hitpan-profit-dark)" : "var(--hitpan-loss-dark)")}")">@context.Profit.ToString("N0")</MudTd>
+                <MudTd Style="@($"text-align:right;font-weight:500;color:{(context.ProfitRate >= 0 ? "var(--hitpan-profit-dark)" : "var(--hitpan-loss-dark)")}")">@context.ProfitRate.ToString("N1")%</MudTd>
             </RowTemplate>
             <NoRecordsContent><MudText Class="pa-4" Style="color:var(--hitpan-text-faint)">조회된 데이터가 없습니다.</MudText></NoRecordsContent>
         </MudTable>

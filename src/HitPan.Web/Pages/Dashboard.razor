@@ -9,6 +9,7 @@
 @inject ISnackbar Snackbar
 @inject NavigationManager Nav
 @inject PermissionService PermSvc
+@inject PartnerMasterService PartnerSvc
 @inject AuthenticationStateProvider AuthState
 
 <PageTitle>대시보드 — 히트판 ERP</PageTitle>
@@ -134,6 +135,54 @@
     </MudItem>
 </MudGrid>
 
+@* AR Aging 연체 Top 5 — 대표이사 자금 관리용 *@
+<MudPaper Elevation="0" Class="pa-3 mb-3" Style="border:0.5px solid var(--mud-palette-lines-default);border-radius:12px">
+    <div class="d-flex justify-space-between align-center mb-2">
+        <MudText Typo="Typo.subtitle2" Style="font-weight:600">외상·연체 Top 5</MudText>
+        <MudButton Size="Size.Small" Variant="Variant.Text" EndIcon="@Icons.Material.Filled.ArrowForward"
+                   OnClick="@(() => Nav.NavigateTo("/partners"))">전체 보기</MudButton>
+    </div>
+    @if (_aging is not null && _aging.Count > 0)
+    {
+        <MudSimpleTable Dense="true" Hover="true" Style="border:none">
+            <thead>
+                <tr>
+                    <th>거래처</th>
+                    <th style="text-align:right">미수금</th>
+                    <th style="text-align:right">0~30일</th>
+                    <th style="text-align:right">31~60일</th>
+                    <th style="text-align:right">61~90일</th>
+                    <th style="text-align:right">90일+</th>
+                    <th style="text-align:center">연체</th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var a in _aging.Take(5))
+                {
+                    <tr style="cursor:pointer" @onclick="@(() => Nav.NavigateTo($"/partners/{a.PartnerId}"))">
+                        <td style="font-weight:500">@a.PartnerName</td>
+                        <td style="text-align:right;font-weight:600">@a.TotalUnpaid.ToString("N0")</td>
+                        <td style="text-align:right">@a.Bucket0_30.ToString("N0")</td>
+                        <td style="text-align:right">@a.Bucket31_60.ToString("N0")</td>
+                        <td style="text-align:right">@a.Bucket61_90.ToString("N0")</td>
+                        <td style="text-align:right;color:var(--hitpan-aging-90);font-weight:600">@a.Bucket90Plus.ToString("N0")</td>
+                        <td style="text-align:center">
+                            <PartnerAgingBadge DaysOverdue="@MaxOverdueDays(a)" />
+                        </td>
+                    </tr>
+                }
+            </tbody>
+        </MudSimpleTable>
+    }
+    else
+    {
+        <div class="d-flex flex-column align-center justify-center" style="height:80px">
+            <MudIcon Icon="@Icons.Material.Filled.CheckCircleOutline" Color="Color.Success" Size="Size.Large" />
+            <MudText Typo="Typo.body2" Color="Color.Secondary" Class="mt-1">미수금 없음 — 자금 건전</MudText>
+        </div>
+    }
+</MudPaper>
+
 @* 하단 영역: 최근 거래 + 재고 부족 *@
 <MudGrid Spacing="2">
     @* 최근 거래 *@
@@ -221,8 +270,17 @@
 @code {
     // ─── 데이터 모델 ───
     private DashboardData _data = new();
+    private List<PartnerAgingRow> _aging = new();
     private bool _loading = true;
     private bool _showPermissionBanner = false;
+
+    private static int MaxOverdueDays(PartnerAgingRow a)
+    {
+        if (a.Bucket90Plus > 0) return 120;
+        if (a.Bucket61_90 > 0)  return 75;
+        if (a.Bucket31_60 > 0)  return 45;
+        return 15;
+    }
 
     // ─── 차트 옵션: 월별 추이 ───
     private ApexChartOptions<MonthlyTrend> _chartOptions = new()
@@ -272,7 +330,21 @@
     protected override async Task OnInitializedAsync()
     {
         await CheckPermissionBannerAsync();
-        await LoadDashboardAsync();
+        await Task.WhenAll(LoadDashboardAsync(), LoadAgingAsync());
+    }
+
+    private async Task LoadAgingAsync()
+    {
+        try
+        {
+            var rows = await PartnerSvc.GetAgingAsync();
+            _aging = rows
+                .Where(x => x.TotalUnpaid > 0)
+                .OrderByDescending(x => x.Bucket90Plus)
+                .ThenByDescending(x => x.TotalUnpaid)
+                .ToList();
+        }
+        catch { _aging = new(); }
     }
 
     /// <summary>어드민이 권한 미설정 상태면 상단 배너 노출</summary>

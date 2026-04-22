@@ -52,7 +52,7 @@
     <h2 style="margin:0;font-weight:700">부가세 신고자료</h2>
     @if (_vat is not null)
     {
-        <p style="margin:4px 0;color:#555">@_vat.Period · 출력일 @DateTime.Now.ToString("yyyy-MM-dd HH:mm")</p>
+        <p style="margin:4px 0;color:var(--hitpan-auth-simple)">@_vat.Period · 출력일 @DateTime.Now.ToString("yyyy-MM-dd HH:mm")</p>
     }
 </div>
 

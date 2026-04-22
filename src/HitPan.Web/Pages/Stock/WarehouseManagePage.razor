@@ -7,12 +7,13 @@
 
 <PageTitle>창고 관리</PageTitle>
 
-<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
-    <MudText Typo="Typo.h6">창고 관리</MudText>
-    <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Add" OnClick="OpenAddDialog">
-        창고 추가
-    </MudButton>
-</div>
+<PageHeader Title="창고 관리" Subtitle="본점·지점 창고 등록 및 관리">
+    <Actions>
+        <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Add" OnClick="OpenAddDialog">
+            창고 추가
+        </MudButton>
+    </Actions>
+</PageHeader>
 
 @if (_loading)
 {
