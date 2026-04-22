@@ -29,36 +29,30 @@
     </MudText>
 </MudAlert>
 
+@* ── KPI 카드 4개 (전체 / 활성 / 만료 임박 / 만료·폐기) — 공용 KpiCard 사용 ── *@
 <MudGrid Spacing="2" Class="mb-3">
     <MudItem xs="12" sm="6" md="3">
-        <MudPaper Elevation="0" Class="pa-3" Style="border:0.5px solid var(--mud-palette-lines-default);border-radius:12px;border-top:3px solid #0F6E56">
-            <MudText Typo="Typo.caption" Style="color:#666">전체 인증서</MudText>
-            <MudText Typo="Typo.h6" Style="font-weight:700">@_list.Count 건</MudText>
-        </MudPaper>
+        <KpiCard Color="KpiCard.KpiColor.Primary"
+                 Label="전체 인증서"
+                 Value="@($"{_list.Count} 건")" />
     </MudItem>
     <MudItem xs="12" sm="6" md="3">
-        <MudPaper Elevation="0" Class="pa-3" Style="border:0.5px solid var(--mud-palette-lines-default);border-radius:12px;border-top:3px solid #1976D2">
-            <MudText Typo="Typo.caption" Style="color:#666">활성</MudText>
-            <MudText Typo="Typo.h6" Style="font-weight:700;color:#1976D2">
-                @_list.Count(c => c.Status == "active") 건
-            </MudText>
-        </MudPaper>
+        <KpiCard Color="KpiCard.KpiColor.Info"
+                 Label="활성"
+                 Value="@($"{_list.Count(c => c.Status == "active")} 건")"
+                 EmphasizeValue="true" />
     </MudItem>
     <MudItem xs="12" sm="6" md="3">
-        <MudPaper Elevation="0" Class="pa-3" Style="border:0.5px solid var(--mud-palette-lines-default);border-radius:12px;border-top:3px solid #F57C00">
-            <MudText Typo="Typo.caption" Style="color:#666">만료 임박 (30일)</MudText>
-            <MudText Typo="Typo.h6" Style="font-weight:700;color:#F57C00">
-                @_list.Count(c => c.Status == "active" && c.DaysUntilExpiry <= 30 && c.DaysUntilExpiry >= 0) 건
-            </MudText>
-        </MudPaper>
+        <KpiCard Color="KpiCard.KpiColor.Warning"
+                 Label="만료 임박 (30일)"
+                 Value="@($"{_list.Count(c => c.Status == "active" && c.DaysUntilExpiry <= 30 && c.DaysUntilExpiry >= 0)} 건")"
+                 EmphasizeValue="true" />
     </MudItem>
     <MudItem xs="12" sm="6" md="3">
-        <MudPaper Elevation="0" Class="pa-3" Style="border:0.5px solid var(--mud-palette-lines-default);border-radius:12px;border-top:3px solid #D32F2F">
-            <MudText Typo="Typo.caption" Style="color:#666">만료/폐기</MudText>
-            <MudText Typo="Typo.h6" Style="font-weight:700;color:#D32F2F">
-                @_list.Count(c => c.Status != "active") 건
-            </MudText>
-        </MudPaper>
+        <KpiCard Color="KpiCard.KpiColor.Error"
+                 Label="만료/폐기"
+                 Value="@($"{_list.Count(c => c.Status != "active")} 건")"
+                 EmphasizeValue="true" />
     </MudItem>
 </MudGrid>
 

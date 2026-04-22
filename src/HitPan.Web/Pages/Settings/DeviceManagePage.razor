@@ -24,51 +24,35 @@
                        Title="새로고침" />
     </div>
 
-    @* ── KPI 카드 4개 (PC / Mobile / 추가슬롯 / 구독티어) ── *@
+    @* ── KPI 카드 4개 (PC / Mobile / 추가슬롯 / 구독티어) — 공용 KpiCard 사용 ── *@
     <MudGrid Spacing="3" Class="mb-4">
         <MudItem xs="12" sm="6" md="3">
-            <div class="hitpan-kpi-card" style="border-top-color:#0F6E56">
-                <MudText Typo="Typo.caption" Style="color:var(--mud-palette-text-secondary)">PC 사용 / 한도</MudText>
-                <MudText Typo="Typo.h5" Style="font-weight:700;color:#0F6E56">
-                    @(_quota?.PcUsed ?? 0) / @(_quota?.PcLimit ?? 0)
-                </MudText>
-                <MudText Typo="Typo.body2" Style="color:var(--mud-palette-text-secondary)">
-                    남은 PC 슬롯 @GetRemaining(_quota?.PcUsed, _quota?.PcLimit)대
-                </MudText>
-            </div>
+            <KpiCard Color="KpiCard.KpiColor.Primary"
+                     Label="PC 사용 / 한도"
+                     Value="@($"{_quota?.PcUsed ?? 0} / {_quota?.PcLimit ?? 0}")"
+                     Sub="@($"남은 PC 슬롯 {GetRemaining(_quota?.PcUsed, _quota?.PcLimit)}대")"
+                     EmphasizeValue="true" />
         </MudItem>
         <MudItem xs="12" sm="6" md="3">
-            <div class="hitpan-kpi-card" style="border-top-color:#2563EB">
-                <MudText Typo="Typo.caption" Style="color:var(--mud-palette-text-secondary)">모바일 사용 / 한도</MudText>
-                <MudText Typo="Typo.h5" Style="font-weight:700;color:#2563EB">
-                    @(_quota?.MobileUsed ?? 0) / @(_quota?.MobileLimit ?? 0)
-                </MudText>
-                <MudText Typo="Typo.body2" Style="color:var(--mud-palette-text-secondary)">
-                    남은 모바일 슬롯 @GetRemaining(_quota?.MobileUsed, _quota?.MobileLimit)대
-                </MudText>
-            </div>
+            <KpiCard Color="KpiCard.KpiColor.Info"
+                     Label="모바일 사용 / 한도"
+                     Value="@($"{_quota?.MobileUsed ?? 0} / {_quota?.MobileLimit ?? 0}")"
+                     Sub="@($"남은 모바일 슬롯 {GetRemaining(_quota?.MobileUsed, _quota?.MobileLimit)}대")"
+                     EmphasizeValue="true" />
         </MudItem>
         <MudItem xs="12" sm="6" md="3">
-            <div class="hitpan-kpi-card" style="border-top-color:#D97706">
-                <MudText Typo="Typo.caption" Style="color:var(--mud-palette-text-secondary)">추가 구매 슬롯</MudText>
-                <MudText Typo="Typo.h5" Style="font-weight:700;color:#D97706">
-                    @(_quota?.ExtraSlots ?? 0)
-                </MudText>
-                <MudText Typo="Typo.body2" Style="color:var(--mud-palette-text-secondary)">
-                    1슬롯 = PC 1 또는 모바일 2
-                </MudText>
-            </div>
+            <KpiCard Color="KpiCard.KpiColor.Warning"
+                     Label="추가 구매 슬롯"
+                     Value="@($"{_quota?.ExtraSlots ?? 0}")"
+                     Sub="1슬롯 = PC 1 또는 모바일 2"
+                     EmphasizeValue="true" />
         </MudItem>
         <MudItem xs="12" sm="6" md="3">
-            <div class="hitpan-kpi-card" style="border-top-color:#7C3AED">
-                <MudText Typo="Typo.caption" Style="color:var(--mud-palette-text-secondary)">구독 티어</MudText>
-                <MudText Typo="Typo.h5" Style="font-weight:700;color:#7C3AED;text-transform:uppercase">
-                    @(_quota?.SubscriptionTier ?? "-")
-                </MudText>
-                <MudText Typo="Typo.body2" Style="color:var(--mud-palette-text-secondary)">
-                    현재 가입 상품
-                </MudText>
-            </div>
+            <KpiCard Color="KpiCard.KpiColor.Purple"
+                     Label="구독 티어"
+                     Value="@((_quota?.SubscriptionTier ?? "-").ToUpperInvariant())"
+                     Sub="현재 가입 상품"
+                     EmphasizeValue="true" />
         </MudItem>
     </MudGrid>
 
