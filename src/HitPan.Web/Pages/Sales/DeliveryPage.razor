@@ -48,6 +48,12 @@
             <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Save" OnClick="Save">저장</MudButton>
             <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Undo" OnClick="Cancel">취소</MudButton>
             <MudButton Variant="Variant.Outlined" Color="Color.Error" StartIcon="@Icons.Material.Filled.Delete" OnClick="DeleteConfirm">삭제</MudButton>
+            @if (_draft?.Status == "confirmed")
+            {
+                <MudButton Variant="Variant.Outlined" Color="Color.Warning"
+                           StartIcon="@Icons.Material.Filled.Cancel"
+                           OnClick="CancelConfirmedAsync">매출취소</MudButton>
+            }
             <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.ContentCopy" OnClick="CopyAsync" Disabled="@_isNew">복사</MudButton>
             <MudDivider Vertical="true" FlexItem="true" />
             <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Print" OnClick="Print">인쇄</MudButton>
@@ -536,6 +542,34 @@
     private Task GoPrev() => Task.CompletedTask;
     private Task GoNext() => Task.CompletedTask;
 
+    private async Task CancelConfirmedAsync()
+    {
+        if (_draft is null || string.IsNullOrWhiteSpace(_draft.Id)) return;
+        if (_draft.Status != "confirmed")
+        {
+            Snackbar.Add("확정된 전표만 매출취소할 수 있습니다.", Severity.Warning);
+            return;
+        }
+
+        var confirm = await DialogService.ShowMessageBoxAsync(
+            "매출 취소 (Reverse)",
+            $"이 거래명세서를 취소하면 재고·수금·거래처잔액이 모두 원상 복귀됩니다.\n문서번호: {_draft.DocumentNumber}\n\n진행하시겠습니까?",
+            yesText: "매출취소 진행", cancelText: "닫기");
+        if (confirm != true) return;
+
+        var (ok, err) = await DeliveryService.CancelConfirmedAsync(_draft.Id);
+        if (ok)
+        {
+            Snackbar.Add("매출 취소 완료 — Reverse 원장이 발행되었습니다.", Severity.Success);
+            _draft.Status = "cancelled";
+            await InvokeAsync(StateHasChanged);
+        }
+        else
+        {
+            Snackbar.Add($"매출취소 실패: {err}", Severity.Error);
+        }
+    }
+
     /// <summary>
     /// 현재 문서를 복사해서 새 문서를 만든다.
     /// </summary>
@@ -697,7 +731,8 @@
             Density = DeliveryGridDensity.Normal,
             DailySequence = 1,
             LinkedQuoteDocumentNo = $"QT-{detail.OrderDate:yyyyMMdd}-001",
-            LinkedSalesOrderDocumentNo = $"SO-{detail.OrderDate:yyyyMMdd}-001"
+            LinkedSalesOrderDocumentNo = $"SO-{detail.OrderDate:yyyyMMdd}-001",
+            Status = detail.Status  // 확정/취소 버튼 분기용
         };
 
         var supply = lines.Where(x => !x.IsPlaceholder).Sum(x => x.Amount);

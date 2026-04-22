@@ -85,6 +85,9 @@ public sealed class DeliveryDraftModel
     /// <summary>이전 단계 연결 문서 (예: 수주)</summary>
     public string? LinkedSalesOrderDocumentNo { get; set; }
 
+    /// <summary>서버 상태 (draft | confirmed | cancelled). 확정 후 '매출취소' 버튼 노출 분기용.</summary>
+    public string? Status { get; set; }
+
     /// <summary>이전 단계 연결 문서 (예: 발주)</summary>
     public string? LinkedPurchaseOrderDocumentNo { get; set; }
 }

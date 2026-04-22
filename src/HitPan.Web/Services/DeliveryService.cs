@@ -252,6 +252,28 @@ public sealed class DeliveryService(HttpClient http)
         }
     }
 
+    /// <summary>
+    /// 확정된 거래명세서 취소 — Reverse 원장 발행으로 재고·잔액·수금 전체 복귀.
+    /// draft 상태 전표는 DeleteAsync 사용.
+    /// </summary>
+    public async Task<(bool Success, string? ErrorMessage)> CancelConfirmedAsync(string deliveryId, CancellationToken ct = default)
+    {
+        try
+        {
+            using var content = new StringContent("{}", Encoding.UTF8, "application/json");
+            using var res = await http.PostAsync(
+                $"api/sales/deliveries/{Uri.EscapeDataString(deliveryId)}/cancel", content, ct);
+            if (res.IsSuccessStatusCode) return (true, null);
+
+            var body = await res.Content.ReadAsStringAsync(ct);
+            return (false, body);
+        }
+        catch (Exception ex)
+        {
+            return (false, ex.Message);
+        }
+    }
+
     public async Task<List<PartnerSearchResult>> SearchPartnersAsync(string keyword, CancellationToken ct = default)
     {
         try
@@ -358,6 +380,27 @@ public sealed class DeliveryService(HttpClient http)
         catch
         {
             return false;
+        }
+    }
+
+    /// <summary>
+    /// 매입반품 확정 — status 'draft' → 'confirmed' + 재고원장 Reverse OUT 발행.
+    /// </summary>
+    public async Task<(bool Success, string? ErrorMessage)> ConfirmPurchaseReturnAsync(string returnId, CancellationToken ct = default)
+    {
+        try
+        {
+            using var content = new StringContent("{}", Encoding.UTF8, "application/json");
+            using var resp = await http.PostAsync(
+                $"api/purchase/returns/{Uri.EscapeDataString(returnId)}/confirm", content, ct);
+            if (resp.IsSuccessStatusCode) return (true, null);
+
+            var body = await resp.Content.ReadAsStringAsync(ct);
+            return (false, body);
+        }
+        catch (Exception ex)
+        {
+            return (false, ex.Message);
         }
     }
 }

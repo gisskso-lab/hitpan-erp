@@ -229,6 +229,38 @@ public partial class ReturnPage : ComponentBase
         await InvokeAsync(StateHasChanged);
     }
 
+    private async Task ConfirmReturnAsync()
+    {
+        if (_draft is null || string.IsNullOrWhiteSpace(_draft.Id))
+        {
+            Snackbar.Add("저장된 반품 문서를 먼저 선택해주세요.", Severity.Warning);
+            return;
+        }
+        if (_status != "Draft")
+        {
+            Snackbar.Add("draft 상태만 확정할 수 있습니다.", Severity.Warning);
+            return;
+        }
+
+        var ok = await DialogService.ShowMessageBoxAsync(
+            "반품 확정",
+            $"반품을 확정하면 재고원장에 Reverse OUT이 기록되고 재고가 차감됩니다.\n문서번호: {_draft.DocumentNumber}\n\n확정하시겠습니까?",
+            yesText: "반품확정", cancelText: "닫기");
+        if (ok != true) return;
+
+        var (success, err) = await DeliveryService.ConfirmPurchaseReturnAsync(_draft.Id);
+        if (success)
+        {
+            Snackbar.Add("반품 확정 완료 — Reverse 원장이 발행되었습니다.", Severity.Success);
+            _status = "Confirmed";
+            await InvokeAsync(StateHasChanged);
+        }
+        else
+        {
+            Snackbar.Add($"반품 확정 실패: {err}", Severity.Error);
+        }
+    }
+
     private void CloseReturnList()
     {
         _showReturnList = false;
