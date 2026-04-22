@@ -35,9 +35,9 @@ dist/
 TestResults/
 coverage/
 
-# 설치 파일 빌드 산출물 (대용량)
-installer-build/tmp-web/
-installer-build/hitpan/
-installer-build/prereqs/mariadb.msi
-installer-build/hitpan_db.sql
-installer-build/output/*.exe
+# 설치 파일 빌드 산출물 전체 제외 (요구사항은 docs/PRD_설치파일.md 참조)
+installer-build/
+installer/
+*.zip
+hitpan_erp_backup_*.sql
+artifacts/doc-build/
