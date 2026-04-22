@@ -9,19 +9,16 @@
 
 <PageTitle>범용인증서 관리 — 히트판 ERP</PageTitle>
 
-<div class="d-flex justify-space-between align-center mb-3">
-    <div>
-        <MudText Typo="Typo.h6">범용인증서 관리</MudText>
-        <MudText Typo="Typo.caption" Style="color:var(--mud-palette-text-secondary)">
-            PFX/P12 인증서 등록 · 관리 · 기본 인증서 지정
-        </MudText>
-    </div>
-    <MudButton Variant="Variant.Filled" Color="Color.Primary"
-               StartIcon="@Icons.Material.Filled.CloudUpload"
-               OnClick="OpenUploadDialog">
-        인증서 등록
-    </MudButton>
-</div>
+<PageHeader Title="범용인증서 관리"
+            Subtitle="PFX/P12 인증서 등록 · 관리 · 기본 인증서 지정">
+    <Actions>
+        <MudButton Variant="Variant.Filled" Color="Color.Primary"
+                   StartIcon="@Icons.Material.Filled.CloudUpload"
+                   OnClick="OpenUploadDialog">
+            인증서 등록
+        </MudButton>
+    </Actions>
+</PageHeader>
 
 <MudAlert Severity="Severity.Info" Class="mb-3" Dense="true" Elevation="0">
     <MudText Typo="Typo.body2">

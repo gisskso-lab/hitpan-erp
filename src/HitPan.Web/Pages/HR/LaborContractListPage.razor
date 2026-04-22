@@ -14,22 +14,19 @@
 
 <PageTitle>전자근로계약서 — 히트판 ERP</PageTitle>
 
-<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
-    <div>
-        <MudText Typo="Typo.h6">전자근로계약서</MudText>
-        <MudText Typo="Typo.body2" Style="color:var(--mud-palette-text-secondary)">
-            근로계약서를 작성·발송하고 직원의 전자서명으로 체결합니다.
-        </MudText>
-    </div>
-    @if (_isTenantAdmin)
-    {
-        <MudButton Variant="Variant.Filled" Color="Color.Primary"
-                   StartIcon="@Icons.Material.Filled.Add"
-                   OnClick="GoCreate">
-            신규 계약서 작성
-        </MudButton>
-    }
-</div>
+<PageHeader Title="전자근로계약서"
+            Subtitle="근로계약서를 작성·발송하고 직원의 전자서명으로 체결합니다.">
+    <Actions>
+        @if (_isTenantAdmin)
+        {
+            <MudButton Variant="Variant.Filled" Color="Color.Primary"
+                       StartIcon="@Icons.Material.Filled.Add"
+                       OnClick="GoCreate">
+                신규 계약서 작성
+            </MudButton>
+        }
+    </Actions>
+</PageHeader>
 
 @* === 필터 === *@
 <MudPaper Elevation="0" Class="pa-3 mb-3" Style="border:0.5px solid var(--mud-palette-lines-default);border-radius:12px">

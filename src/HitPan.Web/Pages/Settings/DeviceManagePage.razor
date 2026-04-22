@@ -10,19 +10,16 @@
 <PageTitle>등록 기기 관리 — 히트판 ERP</PageTitle>
 
 <MudContainer MaxWidth="MaxWidth.Large" Class="py-4">
-    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
-        <div>
-            <MudText Typo="Typo.h5">등록 기기 관리</MudText>
-            <MudText Typo="Typo.body2" Style="color:var(--mud-palette-text-secondary)">
-                히트판은 디바이스 개수 과금 — 계정 수는 무제한, 총 기기 수만 제한됩니다.
-            </MudText>
-        </div>
-        <MudIconButton Icon="@Icons.Material.Filled.Refresh"
-                       Color="Color.Primary"
-                       Size="Size.Medium"
-                       OnClick="LoadAsync"
-                       Title="새로고침" />
-    </div>
+    <PageHeader Title="등록 기기 관리"
+                Subtitle="히트판은 디바이스 개수 과금 — 계정 수는 무제한, 총 기기 수만 제한됩니다.">
+        <Actions>
+            <MudIconButton Icon="@Icons.Material.Filled.Refresh"
+                           Color="Color.Primary"
+                           Size="Size.Medium"
+                           OnClick="LoadAsync"
+                           Title="새로고침" />
+        </Actions>
+    </PageHeader>
 
     @* ── KPI 카드 4개 (PC / Mobile / 추가슬롯 / 구독티어) — 공용 KpiCard 사용 ── *@
     <MudGrid Spacing="3" Class="mb-4">
