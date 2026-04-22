@@ -6,25 +6,51 @@
 @inject FinanceClientService FinSvc
 
 <PageTitle>손익 현황</PageTitle>
-<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
-    <MudText Typo="Typo.h6">손익 현황</MudText>
-</div>
 
-<MudPaper Elevation="0" Class="pa-2 mb-3" Style="border:0.5px solid var(--mud-palette-lines-default);border-radius:12px">
-    <MudGrid Spacing="2" Class="pa-2">
+<PageHeader Title="손익 현황" Subtitle="월별 매출·매입·경비·순이익 집계">
+    <Actions>
+        <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="LoadAsync">조회</MudButton>
+    </Actions>
+</PageHeader>
+
+@* KPI 요약 *@
+<MudGrid Spacing="2" Class="mb-3">
+    <MudItem xs="12" sm="3">
+        <KpiCard Color="KpiCard.KpiColor.Primary"
+                 Icon="@Icons.Material.Filled.TrendingUp"
+                 Label="연간 매출"
+                 Value="@_items.Sum(x => x.SalesAmount).ToString("N0")" />
+    </MudItem>
+    <MudItem xs="12" sm="3">
+        <KpiCard Color="KpiCard.KpiColor.Warning"
+                 Icon="@Icons.Material.Filled.ShoppingCart"
+                 Label="연간 매입"
+                 Value="@_items.Sum(x => x.PurchaseAmount).ToString("N0")" />
+    </MudItem>
+    <MudItem xs="12" sm="3">
+        <KpiCard Color="KpiCard.KpiColor.Purple"
+                 Icon="@Icons.Material.Filled.Paid"
+                 Label="경비 합계"
+                 Value="@_items.Sum(x => x.ExpenseAmount).ToString("N0")" />
+    </MudItem>
+    <MudItem xs="12" sm="3">
+        <KpiCard Color="@(_items.Sum(x => x.NetProfit) >= 0 ? KpiCard.KpiColor.Success : KpiCard.KpiColor.Error)"
+                 Icon="@Icons.Material.Filled.Savings"
+                 Label="순이익"
+                 EmphasizeValue="true"
+                 Value="@_items.Sum(x => x.NetProfit).ToString("N0")" />
+    </MudItem>
+</MudGrid>
+
+<SectionCard Title="조회 조건">
+    <MudGrid Spacing="2">
         <MudItem xs="6" md="2">
             <MudNumericField T="int" Label="년도" @bind-Value="_year" Variant="Variant.Outlined" Margin="Margin.Dense" />
         </MudItem>
-        <MudItem xs="12" md="2"><MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="LoadAsync">조회</MudButton></MudItem>
-        <MudItem xs="12" md="8" Style="text-align:right">
-            <MudText Typo="Typo.subtitle2" Class="mt-2">
-                연간 매출: @_items.Sum(x => x.SalesAmount).ToString("N0")원 | 순이익: @_items.Sum(x => x.NetProfit).ToString("N0")원
-            </MudText>
-        </MudItem>
     </MudGrid>
-</MudPaper>
+</SectionCard>
 
-<MudPaper Elevation="0" Class="pa-2" Style="border:0.5px solid var(--mud-palette-lines-default);border-radius:12px">
+<SectionCard Variant="SectionCard.SectionVariant.Flat">
     <MudTable Items="_items" Dense="true" Hover="true" Striped="true">
         <HeaderContent>
             <MudTh>월</MudTh>
@@ -44,8 +70,13 @@
             <MudTd Style="@($"text-align:right;font-weight:600;color:{(context.NetProfit >= 0 ? "#16A34A" : "#DC2626")}")">@context.NetProfit.ToString("N0")</MudTd>
             <MudTd Style="text-align:right">@context.ProfitRate.ToString("N1")%</MudTd>
         </RowTemplate>
+        <NoRecordsContent>
+            <EmptyState Icon="@Icons.Material.Filled.BarChart"
+                        Title="손익 데이터가 없습니다"
+                        Subtitle="해당 연도의 매입·매출 전표를 확인해 주세요." />
+        </NoRecordsContent>
     </MudTable>
-</MudPaper>
+</SectionCard>
 
 @code {
     private List<ProfitSummaryModel> _items = new();

@@ -197,7 +197,7 @@
                     <tbody>
                         @foreach (var item in _data.LowStockItems)
                         {
-                            <tr style="color:#D32F2F;font-weight:500">
+                            <tr style="color:var(--hitpan-error);font-weight:500">
                                 <td>@item.ItemName</td>
                                 <td>@item.Spec</td>
                                 <td style="text-align:right">@item.CurrentQty.ToString("N0")</td>

@@ -17,7 +17,7 @@
     @* 타이틀 *@
     @if (!string.IsNullOrWhiteSpace(Title))
     {
-        <MudText Typo="Typo.subtitle1" Style="font-weight:600;color:#374151;margin-bottom:4px">
+        <MudText Typo="Typo.subtitle1" Style="font-weight:600;color:var(--hitpan-text-default);margin-bottom:4px">
             @Title
         </MudText>
     }
@@ -25,7 +25,7 @@
     @* 부제 *@
     @if (!string.IsNullOrWhiteSpace(Subtitle))
     {
-        <MudText Typo="Typo.body2" Style="color:#9CA3AF;max-width:360px;margin-bottom:16px">
+        <MudText Typo="Typo.body2" Style="color:var(--hitpan-text-faint);max-width:360px;margin-bottom:16px">
             @Subtitle
         </MudText>
     }

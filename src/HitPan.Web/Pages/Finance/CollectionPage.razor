@@ -9,12 +9,12 @@
 
 <PageTitle>수금</PageTitle>
 
-<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
-    <MudText Typo="Typo.h6">수금</MudText>
-    <MudText Style="font-size:12px;color:var(--mud-palette-text-secondary)">
-        거래처로부터 받은 돈 관리
-    </MudText>
-</div>
+<PageHeader Title="수금 관리" Subtitle="거래처로부터 받은 돈 등록 및 조회">
+    <Actions>
+        <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Save" OnClick="SaveAsync">저장</MudButton>
+        <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Undo" OnClick="ResetForm">초기화</MudButton>
+    </Actions>
+</PageHeader>
 
 @if (_loading)
 {
@@ -22,9 +22,30 @@
 }
 else
 {
+    @* KPI 요약 *@
+    <MudGrid Spacing="2" Class="mb-3">
+        <MudItem xs="12" sm="4">
+            <KpiCard Color="KpiCard.KpiColor.Primary"
+                     Icon="@Icons.Material.Filled.AttachMoney"
+                     Label="수금 합계"
+                     Value="@_items.Sum(x => x.Amount).ToString("N0")" />
+        </MudItem>
+        <MudItem xs="12" sm="4">
+            <KpiCard Color="KpiCard.KpiColor.Info"
+                     Icon="@Icons.Material.Filled.ListAlt"
+                     Label="수금 건수"
+                     Value="@_items.Count.ToString("N0")" />
+        </MudItem>
+        <MudItem xs="12" sm="4">
+            <KpiCard Color="KpiCard.KpiColor.Success"
+                     Icon="@Icons.Material.Filled.Today"
+                     Label="최근 수금일"
+                     Value="@(_items.Any() ? _items.Max(x => x.CollectionDate).ToString("yyyy-MM-dd") : "-")" />
+        </MudItem>
+    </MudGrid>
+
     @* ── 입력 폼 ── *@
-    <MudPaper Elevation="0" Class="pa-4 mb-3" Style="border:0.5px solid var(--mud-palette-lines-default);border-radius:12px">
-        <MudText Typo="Typo.subtitle2" Class="mb-3">수금 등록</MudText>
+    <SectionCard Title="수금 등록" Icon="@Icons.Material.Filled.AddCard">
         <MudGrid Spacing="2">
             <MudItem xs="12" md="3">
                 <MudAutocomplete T="PartnerListRow" Label="거래처"
@@ -51,16 +72,11 @@ else
                 <MudTextField T="string" Label="비고" @bind-Value="_edit.Memo" Variant="Variant.Outlined" Margin="Margin.Dense" />
             </MudItem>
         </MudGrid>
-    </MudPaper>
-
-    <MudToolBar Dense="true" Class="pa-1 gap-1 mb-2">
-        <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Save" OnClick="SaveAsync">저장</MudButton>
-        <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Undo" OnClick="ResetForm">초기화</MudButton>
-    </MudToolBar>
+    </SectionCard>
 
     @* ── 목록 ── *@
-    <MudPaper Elevation="0" Class="pa-2" Style="border:0.5px solid var(--mud-palette-lines-default);border-radius:12px">
-        <MudGrid Spacing="2" Class="mb-2 pa-2">
+    <SectionCard Title="수금 목록" Icon="@Icons.Material.Filled.Receipt">
+        <MudGrid Spacing="2" Class="mb-2">
             <MudItem xs="12" md="3">
                 <MudDatePicker Label="시작일" @bind-Date="_filterFrom" Variant="Variant.Outlined" Margin="Margin.Dense" Style="min-width:160px" />
             </MudItem>
@@ -70,11 +86,10 @@ else
             <MudItem xs="12" md="2">
                 <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Search" OnClick="LoadAsync" Class="mt-1">조회</MudButton>
             </MudItem>
-            <MudItem xs="12" md="4" Style="text-align:right">
-                <MudText Typo="Typo.subtitle2" Class="mt-2">합계: @_items.Sum(x => x.Amount).ToString("N0")원</MudText>
-            </MudItem>
         </MudGrid>
+    </SectionCard>
 
+    <SectionCard Variant="SectionCard.SectionVariant.Flat">
         <MudTable Items="_items" Dense="true" Hover="true">
             <HeaderContent>
                 <MudTh>수금일</MudTh>
@@ -94,8 +109,13 @@ else
                     <MudIconButton Icon="@Icons.Material.Filled.Delete" Size="Size.Small" Color="Color.Error" OnClick="@(() => ConfirmDelete(context.CollectionId))" />
                 </MudTd>
             </RowTemplate>
+            <NoRecordsContent>
+                <EmptyState Icon="@Icons.Material.Filled.AttachMoney"
+                            Title="수금 내역이 없습니다"
+                            Subtitle="위 '수금 등록' 영역에서 첫 수금을 저장해 보세요." />
+            </NoRecordsContent>
         </MudTable>
-    </MudPaper>
+    </SectionCard>
 }
 
 @code {
