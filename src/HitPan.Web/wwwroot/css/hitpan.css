@@ -551,6 +551,38 @@ html, body {
 }
 
 /* ════════════════════════════════════════════════════════════
+   공용 필터바 (현황·통계·순위·분석 페이지 상단)
+   MudGrid의 12칸 압축 문제 해결: flex-wrap + gap + 필드별 min-width
+   ════════════════════════════════════════════════════════════ */
+.hitpan-filter-bar {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px;
+    align-items: flex-end;
+}
+.hitpan-filter-bar > * {
+    flex: 0 0 auto;
+}
+.hitpan-filter-field { min-width: 180px; }
+.hitpan-filter-field--sm { min-width: 140px; }
+.hitpan-filter-field--md { min-width: 200px; }
+.hitpan-filter-field--lg { min-width: 260px; }
+.hitpan-filter-actions {
+    display: flex;
+    gap: 6px;
+    align-items: center;
+    margin-left: auto;   /* 우측 정렬 */
+    flex-wrap: nowrap;
+}
+
+/* MudBlazor DatePicker · Select · Autocomplete 내부 input 폭 보장 */
+.hitpan-filter-field .mud-input-control,
+.hitpan-filter-field .mud-input-control-input-container,
+.hitpan-filter-field .mud-select,
+.hitpan-filter-field .mud-autocomplete,
+.hitpan-filter-field .mud-picker { width: 100%; }
+
+/* ════════════════════════════════════════════════════════════
    상품 타입 칩 (ItemTypeChip 컴포넌트 — promo / assembly)
    ════════════════════════════════════════════════════════════ */
 .hitpan-item-chip {

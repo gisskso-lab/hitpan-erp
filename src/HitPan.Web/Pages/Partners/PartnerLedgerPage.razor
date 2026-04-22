@@ -10,29 +10,29 @@
 @inject ISnackbar Snackbar
 
 <PageTitle>업체별 원장</PageTitle>
-<MudText Typo="Typo.h6" Class="mb-3">업체별 원장 (수불부)</MudText>
+<PageHeader Title="업체별 원장 (수불부)" Subtitle="거래처별 입출고·잔액 이력" />
 
 @* 필터 영역 *@
 <MudPaper Class="pa-3 mb-3" Elevation="0" Style="border:1px solid var(--mud-palette-lines-default);border-radius:12px">
-    <MudGrid Spacing="2" Class="align-center">
-        <MudItem xs="12" sm="2">
-            <MudDatePicker @bind-Date="_from" Label="시작일" Variant="Variant.Outlined" Margin="Margin.Dense" Style="min-width:160px" DateFormat="yyyy-MM-dd" />
-        </MudItem>
-        <MudItem xs="12" sm="2">
-            <MudDatePicker @bind-Date="_to" Label="종료일" Variant="Variant.Outlined" Margin="Margin.Dense" Style="min-width:160px" DateFormat="yyyy-MM-dd" />
-        </MudItem>
-        <MudItem xs="12" sm="3">
+    <div class="hitpan-filter-bar">
+        <div class="hitpan-filter-field hitpan-filter-field--sm">
+            <MudDatePicker @bind-Date="_from" Label="시작일" Variant="Variant.Outlined" Margin="Margin.Dense" DateFormat="yyyy-MM-dd" />
+        </div>
+        <div class="hitpan-filter-field hitpan-filter-field--sm">
+            <MudDatePicker @bind-Date="_to" Label="종료일" Variant="Variant.Outlined" Margin="Margin.Dense" DateFormat="yyyy-MM-dd" />
+        </div>
+        <div class="hitpan-filter-field hitpan-filter-field--md">
             <MudAutocomplete T="PartnerListRow" Label="업체명 검색"
                 Value="_selectedPartner" ValueChanged="OnPartnerSelected"
                 SearchFunc="SearchPartner" ToStringFunc="@(p => p?.PartnerName ?? "")"
                 Variant="Variant.Outlined" Margin="Margin.Dense" Dense="true"
                 ResetValueOnEmptyText="true" CoerceText="false" />
-        </MudItem>
-        <MudItem xs="12" sm="2" Class="d-flex gap-1 align-center">
+        </div>
+        <div class="hitpan-filter-actions">
             <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="SearchAsync">조회</MudButton>
             <MudButton Variant="Variant.Outlined" Size="Size.Small" StartIcon="@Icons.Material.Filled.Print" OnClick="PrintAsync">인쇄</MudButton>
-        </MudItem>
-    </MudGrid>
+        </div>
+    </div>
 </MudPaper>
 
 @* 데이터 테이블 *@
