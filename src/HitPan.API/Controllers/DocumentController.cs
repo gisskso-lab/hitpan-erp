@@ -12,6 +12,7 @@ namespace HitPan.API.Controllers;
 
 [ApiController]
 [Route("api/documents")]
+[Authorize]
 public class DocumentController : ControllerBase
 {
     private readonly ExcelExportService _excelService;
@@ -40,11 +41,52 @@ public class DocumentController : ControllerBase
         _db = db;
     }
 
+    [HttpPost("{type}/{id}/download-token")]
+    public IActionResult IssueDownloadToken(string type, string id)
+    {
+        // 2시간 유효 · doc_id 바인딩된 다운로드 전용 토큰 발급.
+        // 로그인된 사용자(Authorize)만 이 엔드포인트 호출 가능.
+        var tenantId = HttpContext.Items["TenantId"]?.ToString();
+        var userId = HttpContext.Items["UserId"]?.ToString();
+        if (string.IsNullOrEmpty(tenantId) || string.IsNullOrEmpty(userId))
+        {
+            return Forbid();
+        }
+
+        var jwtSecret = Environment.GetEnvironmentVariable("JWT_SECRET")!;
+        var issuer = Environment.GetEnvironmentVariable("JWT_ISSUER") ?? "hitpan-erp";
+        var audience = Environment.GetEnvironmentVariable("JWT_AUDIENCE") ?? "hitpan-client";
+        var key = new Microsoft.IdentityModel.Tokens.SymmetricSecurityKey(
+            System.Text.Encoding.UTF8.GetBytes(jwtSecret));
+        var creds = new Microsoft.IdentityModel.Tokens.SigningCredentials(
+            key, Microsoft.IdentityModel.Tokens.SecurityAlgorithms.HmacSha256);
+
+        var now = DateTime.UtcNow;
+        var jwt = new System.IdentityModel.Tokens.Jwt.JwtSecurityToken(
+            issuer: issuer, audience: audience,
+            claims: new[]
+            {
+                new System.Security.Claims.Claim("token_type", "download"),
+                new System.Security.Claims.Claim("doc_id", id),
+                new System.Security.Claims.Claim("doc_type", type),
+                new System.Security.Claims.Claim("tenant_id", tenantId),
+                new System.Security.Claims.Claim("user_id", userId),
+                new System.Security.Claims.Claim("iat", new DateTimeOffset(now).ToUnixTimeSeconds().ToString(),
+                    System.Security.Claims.ClaimValueTypes.Integer64)
+            },
+            notBefore: now,
+            expires: now.AddHours(2),
+            signingCredentials: creds);
+
+        var tokenStr = new System.IdentityModel.Tokens.Jwt.JwtSecurityTokenHandler().WriteToken(jwt);
+        return Ok(new { token = tokenStr, expires_in = 7200 });
+    }
+
     [HttpGet("{type}/{id}/excel")]
     [AllowAnonymous]
     public async Task<IActionResult> DownloadExcel(string type, string id, [FromQuery] string? token)
     {
-        var principal = _accessTokenValidator.ValidateAccessToken(token);
+        var principal = _accessTokenValidator.ValidateDownloadToken(token, id);
         if (principal is null)
         {
             return Unauthorized();
@@ -81,7 +123,7 @@ public class DocumentController : ControllerBase
     [AllowAnonymous]
     public async Task<IActionResult> DownloadPdf(string type, string id, [FromQuery] string? token)
     {
-        var principal = _accessTokenValidator.ValidateAccessToken(token);
+        var principal = _accessTokenValidator.ValidateDownloadToken(token, id);
         if (principal is null)
         {
             return Unauthorized();

@@ -20,14 +20,14 @@
 }
 else if (_items.Count == 0)
 {
-    <MudPaper Elevation="0" Class="pa-8 text-center" Style="border:0.5px solid var(--mud-palette-lines-default);border-radius:12px">
+    <MudPaper Elevation="0" Class="pa-8 text-center hitpan-card">
         <MudIcon Icon="@Icons.Material.Filled.History" Size="Size.Large" Color="Color.Primary" Class="mb-2" />
         <MudText Typo="Typo.body1">결재 이력이 없습니다.</MudText>
     </MudPaper>
 }
 else
 {
-    <MudPaper Elevation="0" Class="pa-2" Style="border:0.5px solid var(--mud-palette-lines-default);border-radius:12px">
+    <MudPaper Elevation="0" Class="pa-2 hitpan-card">
         <MudTable Items="_items" Dense="true" Hover="true" OnRowClick="OnRowClick" T="ApprovalDocumentModel">
             <HeaderContent>
                 <MudTh>문서유형</MudTh>

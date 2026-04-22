@@ -67,7 +67,7 @@
             <MudTd Style="text-align:right">@context.PurchaseAmount.ToString("N0")</MudTd>
             <MudTd Style="text-align:right">@context.GrossProfit.ToString("N0")</MudTd>
             <MudTd Style="text-align:right">@context.ExpenseAmount.ToString("N0")</MudTd>
-            <MudTd Style="@($"text-align:right;font-weight:600;color:{(context.NetProfit >= 0 ? "#16A34A" : "#DC2626")}")">@context.NetProfit.ToString("N0")</MudTd>
+            <MudTd Style="@($"text-align:right;font-weight:600;color:{(context.NetProfit >= 0 ? "var(--hitpan-income)" : "var(--hitpan-expense)")}")">@context.NetProfit.ToString("N0")</MudTd>
             <MudTd Style="text-align:right">@context.ProfitRate.ToString("N1")%</MudTd>
         </RowTemplate>
         <NoRecordsContent>

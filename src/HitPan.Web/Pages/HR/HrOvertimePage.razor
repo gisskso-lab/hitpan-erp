@@ -11,7 +11,7 @@
     <MudText Typo="Typo.h6">초과근무</MudText>
 </div>
 
-<MudPaper Elevation="0" Class="pa-4 mb-3" Style="border:0.5px solid var(--mud-palette-lines-default);border-radius:12px">
+<MudPaper Elevation="0" Class="pa-4 mb-3 hitpan-card">
     <MudText Typo="Typo.subtitle2" Class="mb-3">초과근무 신청</MudText>
     <MudGrid Spacing="2">
         <MudItem xs="12" md="2"><MudDatePicker Label="근무일" @bind-Date="_editDate" Variant="Variant.Outlined" Margin="Margin.Dense" Style="min-width:160px" /></MudItem>
@@ -29,7 +29,7 @@
     </MudGrid>
 </MudPaper>
 
-<MudPaper Elevation="0" Class="pa-2" Style="border:0.5px solid var(--mud-palette-lines-default);border-radius:12px">
+<MudPaper Elevation="0" Class="pa-2 hitpan-card">
     <MudTable Items="_items" Dense="true" Hover="true" Striped="true">
         <HeaderContent>
             <MudTh>날짜</MudTh><MudTh>사원</MudTh><MudTh>시작</MudTh><MudTh>종료</MudTh>

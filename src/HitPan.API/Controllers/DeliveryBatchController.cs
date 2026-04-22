@@ -10,9 +10,9 @@ namespace HitPan.API.Controllers;
 [Authorize(Policy = "SalesOnly")]
 public class DeliveryBatchController : ControllerBase
 {
-    private readonly DeliveryBatchService _batchService;
+    private readonly IDeliveryBatchService _batchService;
 
-    public DeliveryBatchController(DeliveryBatchService batchService)
+    public DeliveryBatchController(IDeliveryBatchService batchService)
     {
         _batchService = batchService;
     }

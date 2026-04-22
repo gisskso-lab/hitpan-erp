@@ -62,7 +62,7 @@
 
 @if (_viewType is "partner" or "item" or "period")
 {
-    <MudPaper Elevation="0" Style="border:0.5px solid var(--mud-palette-lines-default);border-radius:12px;overflow:hidden">
+    <MudPaper Elevation="0" Class="hitpan-card" Style="overflow:hidden">
         <MudTable T="ReportRow" Items="_reportData" Dense="true" Hover="true" Striped="true" FixedHeader="true" Height="calc(100vh - 280px)">
             <HeaderContent>
                 <MudTh>순위</MudTh>
@@ -82,7 +82,7 @@
                 <MudTd Style="text-align:right">@context.VatAmount.ToString("N0")</MudTd>
                 <MudTd Style="text-align:right;font-weight:500">@context.TotalAmount.ToString("N0")</MudTd>
             </RowTemplate>
-            <NoRecordsContent><MudText Class="pa-4" Style="color:#9CA3AF">조회된 데이터가 없습니다.</MudText></NoRecordsContent>
+            <NoRecordsContent><MudText Class="pa-4" Style="color:var(--hitpan-text-faint)">조회된 데이터가 없습니다.</MudText></NoRecordsContent>
         </MudTable>
     </MudPaper>
 }

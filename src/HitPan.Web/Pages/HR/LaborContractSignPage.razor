@@ -126,7 +126,7 @@
                         <MudText Typo="Typo.body2">@(_contract.CompanyName ?? "(회사명)")</MudText>
                         <div style="height:72px;margin-top:8px;border-bottom:1px dashed #9CA3AF;
                                     display:flex;align-items:flex-end;justify-content:flex-end;padding:0 16px 4px">
-                            <MudText Typo="Typo.caption" Style="color:#9CA3AF">(인)</MudText>
+                            <MudText Typo="Typo.caption" Style="color:var(--hitpan-text-faint)">(인)</MudText>
                         </div>
                     </MudItem>
                     <MudItem xs="6">
@@ -146,7 +146,7 @@
                             }
                             else
                             {
-                                <MudText Typo="Typo.caption" Style="color:#9CA3AF">(서명 대기)</MudText>
+                                <MudText Typo="Typo.caption" Style="color:var(--hitpan-text-faint)">(서명 대기)</MudText>
                             }
                         </div>
                     </MudItem>
@@ -166,7 +166,7 @@
                         <MudText Typo="Typo.subtitle1" Style="font-weight:700;color:#16A34A">
                             계약 완료되었습니다
                         </MudText>
-                        <MudText Typo="Typo.body2" Style="color:#374151">
+                        <MudText Typo="Typo.body2" Style="color:var(--hitpan-text-default)">
                             서명 완료 — @GetProviderLabel(_signedProvider),
                             @_signedAt.ToString("yyyy-MM-dd HH:mm:ss"),
                             거래ID <code>@(_signedTxId ?? "-")</code>
@@ -178,15 +178,14 @@
         else
         {
             @* ── 본인 확인 방법 선택 ── *@
-            <MudPaper Elevation="0" Class="pa-4 mb-3"
-                      Style="border:0.5px solid var(--mud-palette-lines-default);border-radius:12px">
+            <MudPaper Elevation="0" Class="pa-4 mb-3 hitpan-card">
                 <MudText Typo="Typo.subtitle1" Style="font-weight:700" Class="mb-3">본인 확인 방법 선택</MudText>
 
                 @* 간편인증 4종 *@
                 <MudGrid Spacing="2">
                     <MudItem xs="6" sm="3">
                         <div @onclick="@(() => StartEasyAuth("kakao"))"
-                             style="cursor:pointer;padding:20px 12px;background:#FEE500;color:#191919;
+                             style="cursor:pointer;padding:20px 12px;background:var(--hitpan-kakao);color:var(--hitpan-kakao-text);
                                     border-radius:12px;text-align:center;font-weight:600;
                                     transition:transform 0.15s" class="sign-provider-btn">
                             <MudIcon Icon="@Icons.Material.Filled.Chat" Style="font-size:28px;margin-bottom:4px" />
@@ -195,7 +194,7 @@
                     </MudItem>
                     <MudItem xs="6" sm="3">
                         <div @onclick="@(() => StartEasyAuth("toss"))"
-                             style="cursor:pointer;padding:20px 12px;background:#0064FF;color:#fff;
+                             style="cursor:pointer;padding:20px 12px;background:var(--hitpan-toss);color:#fff;
                                     border-radius:12px;text-align:center;font-weight:600;
                                     transition:transform 0.15s" class="sign-provider-btn">
                             <MudIcon Icon="@Icons.Material.Filled.Payments" Style="font-size:28px;margin-bottom:4px" />
@@ -204,7 +203,7 @@
                     </MudItem>
                     <MudItem xs="6" sm="3">
                         <div @onclick="@(() => StartEasyAuth("finance"))"
-                             style="cursor:pointer;padding:20px 12px;background:#0067AC;color:#fff;
+                             style="cursor:pointer;padding:20px 12px;background:var(--hitpan-pass);color:#fff;
                                     border-radius:12px;text-align:center;font-weight:600;
                                     transition:transform 0.15s" class="sign-provider-btn">
                             <MudIcon Icon="@Icons.Material.Filled.AccountBalance" Style="font-size:28px;margin-bottom:4px" />
@@ -213,7 +212,7 @@
                     </MudItem>
                     <MudItem xs="6" sm="3">
                         <div @onclick="@(() => StartEasyAuth("pass"))"
-                             style="cursor:pointer;padding:20px 12px;background:#555555;color:#fff;
+                             style="cursor:pointer;padding:20px 12px;background:var(--hitpan-auth-simple);color:#fff;
                                     border-radius:12px;text-align:center;font-weight:600;
                                     transition:transform 0.15s" class="sign-provider-btn">
                             <MudIcon Icon="@Icons.Material.Filled.PhoneIphone" Style="font-size:28px;margin-bottom:4px" />

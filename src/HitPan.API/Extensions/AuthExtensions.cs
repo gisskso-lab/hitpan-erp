@@ -17,6 +17,27 @@ public static class AuthExtensions
             throw new InvalidOperationException("JWT_SECRET environment variable is required.");
         }
 
+        // Production 강제 검증: JWT_SECRET 최소 32바이트(256비트) + 약한 기본값 차단
+        var envName = Environment.GetEnvironmentVariable("ASPNETCORE_ENVIRONMENT") ?? "Production";
+        if (string.Equals(envName, "Production", StringComparison.OrdinalIgnoreCase))
+        {
+            if (jwtSecret.Length < 32)
+            {
+                throw new InvalidOperationException(
+                    $"JWT_SECRET must be at least 32 characters in Production (current: {jwtSecret.Length}). " +
+                    "Generate with: openssl rand -base64 64");
+            }
+            var weakDefaults = new[] { "secret", "changeme", "hitpan-default", "__CHANGE_ME__", "test" };
+            foreach (var weak in weakDefaults)
+            {
+                if (jwtSecret.Contains(weak, StringComparison.OrdinalIgnoreCase))
+                {
+                    throw new InvalidOperationException(
+                        $"JWT_SECRET contains a weak default marker '{weak}'. Replace with a strong random value.");
+                }
+            }
+        }
+
         // Issuer/Audience — .env 또는 기본값 (토큰 스푸핑 방지)
         var jwtIssuer = Environment.GetEnvironmentVariable("JWT_ISSUER") ?? "hitpan-erp";
         var jwtAudience = Environment.GetEnvironmentVariable("JWT_AUDIENCE") ?? "hitpan-client";

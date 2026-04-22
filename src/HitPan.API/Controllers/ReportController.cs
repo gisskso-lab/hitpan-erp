@@ -6,6 +6,7 @@ namespace HitPan.API.Controllers;
 
 [ApiController]
 [Route("api/reports")]
+[Authorize]
 public class ReportController : ControllerBase
 {
     private readonly IReportService _reportService;

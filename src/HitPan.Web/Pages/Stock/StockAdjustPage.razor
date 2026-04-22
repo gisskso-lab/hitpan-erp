@@ -79,7 +79,7 @@
             <MudTd>@context.WarehouseName</MudTd>
             <MudTd Style="text-align:right">@context.BookQty.ToString("N1")</MudTd>
             <MudTd Style="text-align:right">@context.ActualQty.ToString("N1")</MudTd>
-            <MudTd Style="@($"text-align:right;color:{(context.Diff > 0 ? "#2563EB" : context.Diff < 0 ? "#DC2626" : "inherit")}")">@context.Diff.ToString("N1")</MudTd>
+            <MudTd Style="@($"text-align:right;color:{(context.Diff > 0 ? "var(--hitpan-info)" : context.Diff < 0 ? "var(--hitpan-expense)" : "inherit")}")">@context.Diff.ToString("N1")</MudTd>
             <MudTd>@context.AdjustType</MudTd>
             <MudTd>@context.Reason</MudTd>
         </RowTemplate>

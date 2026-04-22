@@ -23,7 +23,7 @@
 else
 {
     @* ── 입력 폼 ── *@
-    <MudPaper Elevation="0" Class="pa-4 mb-3" Style="border:0.5px solid var(--mud-palette-lines-default);border-radius:12px">
+    <MudPaper Elevation="0" Class="pa-4 mb-3 hitpan-card">
         <MudText Typo="Typo.subtitle2" Class="mb-3">지급 등록</MudText>
         <MudGrid Spacing="2">
             <MudItem xs="12" md="3">
@@ -59,7 +59,7 @@ else
     </MudToolBar>
 
     @* ── 목록 ── *@
-    <MudPaper Elevation="0" Class="pa-2" Style="border:0.5px solid var(--mud-palette-lines-default);border-radius:12px">
+    <MudPaper Elevation="0" Class="pa-2 hitpan-card">
         <MudGrid Spacing="2" Class="mb-2 pa-2">
             <MudItem xs="12" md="3">
                 <MudDatePicker Label="시작일" @bind-Date="_filterFrom" Variant="Variant.Outlined" Margin="Margin.Dense" Style="min-width:160px" />

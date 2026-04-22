@@ -135,4 +135,29 @@ public class SalesController : ControllerBase
         await _salesService.DeleteDeliveryAsync(id, tenantId, ct);
         return Ok();
     }
+
+    /// <summary>
+    /// 확정된 거래명세서 취소 — Reverse 원장 발행으로 재고·잔액·수금 전체 복귀.
+    /// draft는 DELETE 엔드포인트 사용.
+    /// </summary>
+    [HttpPost("deliveries/{id}/cancel")]
+    [Authorize(Policy = "SalesManager")]
+    public async Task<IActionResult> CancelConfirmedDelivery(string id, CancellationToken ct)
+    {
+        var tenantId = HttpContext.Items["TenantId"]?.ToString();
+        if (string.IsNullOrEmpty(tenantId))
+        {
+            return Forbid();
+        }
+        var employeeId = HttpContext.Items["EmployeeId"]?.ToString();
+        try
+        {
+            await _salesService.CancelConfirmedDeliveryAsync(id, tenantId, employeeId, ct);
+            return Ok();
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(new { message = ex.Message });
+        }
+    }
 }

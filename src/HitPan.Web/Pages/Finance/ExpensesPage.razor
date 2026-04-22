@@ -12,7 +12,7 @@
 </div>
 
 @* 입력 폼 *@
-<MudPaper Elevation="0" Class="pa-4 mb-3" Style="border:0.5px solid var(--mud-palette-lines-default);border-radius:12px">
+<MudPaper Elevation="0" Class="pa-4 mb-3 hitpan-card">
     <MudGrid Spacing="2">
         <MudItem xs="12" md="2">
             <MudDatePicker Label="경비일" @bind-Date="_editDate" Variant="Variant.Outlined" Margin="Margin.Dense" Style="min-width:160px" />
@@ -50,7 +50,7 @@
 </MudPaper>
 
 @* 목록 *@
-<MudPaper Elevation="0" Class="pa-2" Style="border:0.5px solid var(--mud-palette-lines-default);border-radius:12px">
+<MudPaper Elevation="0" Class="pa-2 hitpan-card">
     <MudTable Items="_items" Dense="true" Hover="true" Striped="true">
         <HeaderContent>
             <MudTh>일자</MudTh><MudTh>분류</MudTh><MudTh>내용</MudTh><MudTh>신청자</MudTh>
@@ -83,7 +83,7 @@
                 }
             </MudTd>
         </RowTemplate>
-        <NoRecordsContent><MudText Class="pa-4" Style="color:#9CA3AF">등록된 경비가 없습니다.</MudText></NoRecordsContent>
+        <NoRecordsContent><MudText Class="pa-4" Style="color:var(--hitpan-text-faint)">등록된 경비가 없습니다.</MudText></NoRecordsContent>
     </MudTable>
 </MudPaper>
 

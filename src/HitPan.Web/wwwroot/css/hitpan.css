@@ -452,6 +452,26 @@ html, body {
     --hitpan-text-muted: #6B7280;
     --hitpan-text-faint: #9CA3AF;
 
+    /* 재무 (수익/지출) */
+    --hitpan-income: #16A34A;
+    --hitpan-expense: #DC2626;
+    --hitpan-profit-dark: #2E7D32;
+    --hitpan-loss-dark: #C62828;
+
+    /* 외부 브랜드 (간편인증) */
+    --hitpan-kakao: #FEE500;
+    --hitpan-kakao-text: #191919;
+    --hitpan-toss: #0064FF;
+    --hitpan-pass: #0067AC;
+    --hitpan-auth-simple: #555555;
+
+    /* 보조 배경·라인 */
+    --hitpan-line: #E5E7EB;
+    --hitpan-line-soft: #D1D5DB;
+    --hitpan-bg-soft: #F8FAFC;
+    --hitpan-info-tile: #F2F8FF;
+    --hitpan-star: #F9A825;
+
     /* 간격 (8점 그리드) */
     --hitpan-gap-xs: 4px;
     --hitpan-gap-sm: 8px;

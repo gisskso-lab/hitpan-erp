@@ -8,6 +8,7 @@ namespace HitPan.API.Controllers;
 
 [ApiController]
 [Route("api/partners")]
+[Authorize]
 public class PartnerController : ControllerBase
 {
     private readonly IPartnerService _partnerService;

@@ -5,7 +5,12 @@ using HitPan.Application.Interfaces;
 
 namespace HitPan.API.Services;
 
-public sealed class DeliveryBatchService
+public interface IDeliveryBatchService
+{
+    Task<List<BatchSaveResult>> SaveBatchAsync(List<CreateDeliveryRequest> requests, CancellationToken ct = default);
+}
+
+public sealed class DeliveryBatchService : IDeliveryBatchService
 {
     private readonly IDbConnection _db;
     private readonly ICurrentTenant _currentTenant;

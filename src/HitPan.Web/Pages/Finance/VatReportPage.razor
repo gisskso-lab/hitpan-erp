@@ -13,7 +13,7 @@
 </div>
 
 <!-- 년도/반기 필터 + 추출 버튼 -->
-<MudPaper Elevation="0" Class="pa-2 mb-3 no-print" Style="border:0.5px solid var(--mud-palette-lines-default);border-radius:12px">
+<MudPaper Elevation="0" Class="pa-2 mb-3 no-print hitpan-card">
     <MudGrid Spacing="2" Class="pa-2 align-center">
         <MudItem xs="6" md="2">
             <MudNumericField T="int" Label="년도" @bind-Value="_year" Variant="Variant.Outlined" Margin="Margin.Dense" />
@@ -61,23 +61,23 @@
     <!-- KPI 카드 3개: 매출세액, 매입세액, 납부/환급세액 -->
     <MudGrid Spacing="3" Class="mb-3">
         <MudItem xs="12" md="4">
-            <MudPaper Elevation="0" Class="pa-4" Style="border:0.5px solid var(--mud-palette-lines-default);border-radius:12px;border-left:4px solid #0F6E56">
+            <MudPaper Elevation="0" Class="pa-4 hitpan-card" Style="border-left:4px solid var(--hitpan-primary)">
                 <MudText Typo="Typo.caption" Style="color:var(--mud-palette-text-secondary)">매출세액</MudText>
-                <MudText Typo="Typo.h5" Style="font-weight:700;color:#0F6E56">₩@_vat.SalesVat.ToString("N0")</MudText>
+                <MudText Typo="Typo.h5" Style="font-weight:700;color:var(--hitpan-primary)">₩@_vat.SalesVat.ToString("N0")</MudText>
                 <MudText Typo="Typo.body2" Style="color:var(--mud-palette-text-secondary)">공급가액 ₩@_vat.SalesSupply.ToString("N0") / @_vat.SalesCount 건</MudText>
             </MudPaper>
         </MudItem>
         <MudItem xs="12" md="4">
-            <MudPaper Elevation="0" Class="pa-4" Style="border:0.5px solid var(--mud-palette-lines-default);border-radius:12px;border-left:4px solid #F57C00">
+            <MudPaper Elevation="0" Class="pa-4 hitpan-card" Style="border-left:4px solid var(--hitpan-warning)">
                 <MudText Typo="Typo.caption" Style="color:var(--mud-palette-text-secondary)">매입세액</MudText>
-                <MudText Typo="Typo.h5" Style="font-weight:700;color:#F57C00">₩@_vat.PurchaseVat.ToString("N0")</MudText>
+                <MudText Typo="Typo.h5" Style="font-weight:700;color:var(--hitpan-warning)">₩@_vat.PurchaseVat.ToString("N0")</MudText>
                 <MudText Typo="Typo.body2" Style="color:var(--mud-palette-text-secondary)">공급가액 ₩@_vat.PurchaseSupply.ToString("N0") / @_vat.PurchaseCount 건</MudText>
             </MudPaper>
         </MudItem>
         <MudItem xs="12" md="4">
-            <MudPaper Elevation="0" Class="pa-4" Style="@($"border:0.5px solid var(--mud-palette-lines-default);border-radius:12px;border-left:4px solid {(_vat.NetVat >= 0 ? "#D32F2F" : "#1976D2")}")">
+            <MudPaper Elevation="0" Class="pa-4 hitpan-card" Style="@($"border-left:4px solid {(_vat.NetVat >= 0 ? "var(--hitpan-error)" : "var(--hitpan-info)")}")">
                 <MudText Typo="Typo.caption" Style="color:var(--mud-palette-text-secondary)">@(_vat.NetVat >= 0 ? "납부세액" : "환급세액")</MudText>
-                <MudText Typo="Typo.h5" Style="@($"font-weight:700;color:{(_vat.NetVat >= 0 ? "#D32F2F" : "#1976D2")}")">₩@Math.Abs(_vat.NetVat).ToString("N0")</MudText>
+                <MudText Typo="Typo.h5" Style="@($"font-weight:700;color:{(_vat.NetVat >= 0 ? "var(--hitpan-error)" : "var(--hitpan-info)")}")">₩@Math.Abs(_vat.NetVat).ToString("N0")</MudText>
                 <MudText Typo="Typo.body2" Style="color:var(--mud-palette-text-secondary)">매출세액 - 매입세액</MudText>
             </MudPaper>
         </MudItem>
@@ -86,7 +86,7 @@
     <!-- 차트 영역: 파이차트 + 바차트 -->
     <MudGrid Spacing="3" Class="mb-3">
         <MudItem xs="12" md="5">
-            <MudPaper Elevation="0" Class="pa-4" Style="border:0.5px solid var(--mud-palette-lines-default);border-radius:12px">
+            <MudPaper Elevation="0" Class="pa-4 hitpan-card">
                 <MudText Typo="Typo.subtitle2" Class="mb-2" Style="font-weight:600">매출·매입 비율</MudText>
                 <ApexChart TItem="VatChartItem" Options="@_pieOptions" Height="280">
                     <ApexPointSeries TItem="VatChartItem"
@@ -99,7 +99,7 @@
             </MudPaper>
         </MudItem>
         <MudItem xs="12" md="7">
-            <MudPaper Elevation="0" Class="pa-4" Style="border:0.5px solid var(--mud-palette-lines-default);border-radius:12px">
+            <MudPaper Elevation="0" Class="pa-4 hitpan-card">
                 <MudText Typo="Typo.subtitle2" Class="mb-2" Style="font-weight:600">매출세액 vs 매입세액 비교</MudText>
                 <ApexChart TItem="VatChartItem" Options="@_barOptions" Height="280">
                     <ApexPointSeries TItem="VatChartItem"
@@ -113,33 +113,33 @@
     </MudGrid>
 
     <!-- 기존 상세 테이블 (스타일 개선) -->
-    <MudPaper Elevation="0" Class="pa-4" Style="border:0.5px solid var(--mud-palette-lines-default);border-radius:12px">
+    <MudPaper Elevation="0" Class="pa-4 hitpan-card">
         <MudText Typo="Typo.subtitle1" Class="mb-3" Style="font-weight:600">@_vat.Period 상세</MudText>
         <MudGrid Spacing="3">
             <MudItem xs="12" md="6">
-                <MudText Typo="Typo.subtitle2" Style="color:#0F6E56;font-weight:600">매출</MudText>
+                <MudText Typo="Typo.subtitle2" Style="color:var(--hitpan-primary);font-weight:600">매출</MudText>
                 <MudSimpleTable Dense="true" Class="mt-2" Style="border-radius:8px;overflow:hidden">
                     <tbody>
                         <tr><td>건수</td><td style="text-align:right;font-weight:500">@_vat.SalesCount 건</td></tr>
                         <tr><td>공급가액</td><td style="text-align:right">₩@_vat.SalesSupply.ToString("N0")</td></tr>
-                        <tr style="background:#E8F5E9"><td style="font-weight:600">매출세액</td><td style="text-align:right;font-weight:600;color:#0F6E56">₩@_vat.SalesVat.ToString("N0")</td></tr>
+                        <tr style="background:var(--hitpan-primary-soft)"><td style="font-weight:600">매출세액</td><td style="text-align:right;font-weight:600;color:var(--hitpan-primary)">₩@_vat.SalesVat.ToString("N0")</td></tr>
                     </tbody>
                 </MudSimpleTable>
             </MudItem>
             <MudItem xs="12" md="6">
-                <MudText Typo="Typo.subtitle2" Style="color:#F57C00;font-weight:600">매입</MudText>
+                <MudText Typo="Typo.subtitle2" Style="color:var(--hitpan-warning);font-weight:600">매입</MudText>
                 <MudSimpleTable Dense="true" Class="mt-2" Style="border-radius:8px;overflow:hidden">
                     <tbody>
                         <tr><td>건수</td><td style="text-align:right;font-weight:500">@_vat.PurchaseCount 건</td></tr>
                         <tr><td>공급가액</td><td style="text-align:right">₩@_vat.PurchaseSupply.ToString("N0")</td></tr>
-                        <tr style="background:#FFF3E0"><td style="font-weight:600">매입세액</td><td style="text-align:right;font-weight:600;color:#F57C00">₩@_vat.PurchaseVat.ToString("N0")</td></tr>
+                        <tr style="background:var(--hitpan-warning-soft)"><td style="font-weight:600">매입세액</td><td style="text-align:right;font-weight:600;color:var(--hitpan-warning)">₩@_vat.PurchaseVat.ToString("N0")</td></tr>
                     </tbody>
                 </MudSimpleTable>
             </MudItem>
         </MudGrid>
         <MudDivider Class="my-3" />
-        <div style="text-align:center;padding:12px;background:@(_vat.NetVat >= 0 ? "#FFEBEE" : "#E3F2FD");border-radius:8px">
-            <MudText Typo="Typo.h5" Style="@($"font-weight:700;color:{(_vat.NetVat >= 0 ? "#D32F2F" : "#1976D2")}")">
+        <div style="text-align:center;padding:12px;background:@(_vat.NetVat >= 0 ? "var(--hitpan-error-soft)" : "var(--hitpan-info-soft)");border-radius:8px">
+            <MudText Typo="Typo.h5" Style="@($"font-weight:700;color:{(_vat.NetVat >= 0 ? "var(--hitpan-error)" : "var(--hitpan-info)")}")">
                 @(_vat.NetVat >= 0 ? "납부세액" : "환급세액"): ₩@Math.Abs(_vat.NetVat).ToString("N0")
             </MudText>
         </div>

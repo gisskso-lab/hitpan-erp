@@ -243,6 +243,15 @@ public class FinanceService : IFinanceService
         var afterJson = $"{{\"expense_date\":\"{req.ExpenseDate:yyyy-MM-dd}\",\"category\":\"{req.Category}\",\"amount\":{req.Amount}}}";
         await _audit.LogAsync("create", "expense", id, afterJson: afterJson, ct: ct);
 
+        // 결재 워크플로우 트리거 — 설정 ON 시 결재 문서 자동 생성
+        // (현장영업·외근 경비 → 대표 결재 라인 자동 연결)
+        var docNo = $"EXP-{req.ExpenseDate:yyyyMMdd}-{id.Substring(0, 6)}";
+        var title = $"경비 승인 요청: {req.Category} / {req.Amount:N0}원";
+        await ApprovalTriggerHelper.TryCreateApprovalAsync(_db,
+            "expense", id, docNo, title,
+            req.Amount + req.VatAmount,
+            tenantId, userId, "경비등록자", ct);
+
         return id;
     }
 

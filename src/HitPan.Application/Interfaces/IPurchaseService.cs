@@ -37,4 +37,10 @@ public interface IPurchaseService
         DateTime? from = null,
         DateTime? to = null,
         CancellationToken ct = default);
+
+    Task ConfirmPurchaseReturnAsync(
+        string returnId,
+        string tenantId,
+        string? employeeId,
+        CancellationToken ct = default);
 }

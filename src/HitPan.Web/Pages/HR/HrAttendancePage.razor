@@ -24,7 +24,7 @@
     </MudGrid>
 </MudPaper>
 
-<MudPaper Elevation="0" Class="pa-2" Style="border:0.5px solid var(--mud-palette-lines-default);border-radius:12px">
+<MudPaper Elevation="0" Class="pa-2 hitpan-card">
     <MudTable Items="_items" Dense="true" Hover="true" Striped="true">
         <HeaderContent>
             <MudTh>날짜</MudTh><MudTh>사원</MudTh><MudTh>출근</MudTh><MudTh>퇴근</MudTh>
@@ -44,7 +44,7 @@
             </MudTd>
             <MudTd>@context.Memo</MudTd>
         </RowTemplate>
-        <NoRecordsContent><MudText Class="pa-4" Style="color:#9CA3AF">근태 기록이 없습니다.</MudText></NoRecordsContent>
+        <NoRecordsContent><MudText Class="pa-4" Style="color:var(--hitpan-text-faint)">근태 기록이 없습니다.</MudText></NoRecordsContent>
     </MudTable>
 </MudPaper>
 

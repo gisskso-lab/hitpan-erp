@@ -11,7 +11,7 @@
     <MudText Typo="Typo.h6">경비 신청 (지출결의서)</MudText>
 </div>
 
-<MudPaper Elevation="0" Class="pa-4 mb-3" Style="border:0.5px solid var(--mud-palette-lines-default);border-radius:12px">
+<MudPaper Elevation="0" Class="pa-4 mb-3 hitpan-card">
     <MudGrid Spacing="2">
         <MudItem xs="12" md="2"><MudDatePicker Label="지출일" @bind-Date="_editDate" Variant="Variant.Outlined" Margin="Margin.Dense" Style="min-width:160px" /></MudItem>
         <MudItem xs="12" md="2">
@@ -30,7 +30,7 @@
     </MudGrid>
 </MudPaper>
 
-<MudPaper Elevation="0" Class="pa-2" Style="border:0.5px solid var(--mud-palette-lines-default);border-radius:12px">
+<MudPaper Elevation="0" Class="pa-2 hitpan-card">
     <MudTable Items="_items" Dense="true" Hover="true" Striped="true">
         <HeaderContent>
             <MudTh>지출일</MudTh><MudTh>신청자</MudTh><MudTh>분류</MudTh><MudTh>내용</MudTh>
@@ -44,7 +44,7 @@
             <MudTd Style="text-align:right">@context.Amount.ToString("N0")원</MudTd>
             <MudTd><MudChip T="string" Size="Size.Small" Variant="Variant.Filled" Color="@(context.Status == "approved" ? Color.Success : context.Status == "rejected" ? Color.Error : Color.Warning)">@(context.Status switch { "approved" => "승인", "rejected" => "반려", _ => "대기" })</MudChip></MudTd>
         </RowTemplate>
-        <NoRecordsContent><MudText Class="pa-4" Style="color:#9CA3AF">신청된 경비가 없습니다.</MudText></NoRecordsContent>
+        <NoRecordsContent><MudText Class="pa-4" Style="color:var(--hitpan-text-faint)">신청된 경비가 없습니다.</MudText></NoRecordsContent>
     </MudTable>
 </MudPaper>
 

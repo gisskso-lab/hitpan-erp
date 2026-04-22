@@ -12,7 +12,7 @@
 </div>
 
 @* 입력 폼 *@
-<MudPaper Elevation="0" Class="pa-4 mb-3" Style="border:0.5px solid var(--mud-palette-lines-default);border-radius:12px">
+<MudPaper Elevation="0" Class="pa-4 mb-3 hitpan-card">
     <MudGrid Spacing="2">
         <MudItem xs="12" md="2">
             <MudDatePicker Label="일자" @bind-Date="_editDate" Variant="Variant.Outlined" Margin="Margin.Dense" Style="min-width:160px" />
@@ -43,13 +43,14 @@
 </MudPaper>
 
 @* 필터 + 목록 *@
-<MudPaper Elevation="0" Class="pa-2" Style="border:0.5px solid var(--mud-palette-lines-default);border-radius:12px">
+<MudPaper Elevation="0" Class="pa-2 hitpan-card">
     <MudGrid Spacing="2" Class="pa-2 mb-2">
         <MudItem xs="6" md="2"><MudDatePicker Label="시작일" @bind-Date="_from" Variant="Variant.Outlined" Margin="Margin.Dense" Style="min-width:160px" /></MudItem>
         <MudItem xs="6" md="2"><MudDatePicker Label="종료일" @bind-Date="_to" Variant="Variant.Outlined" Margin="Margin.Dense" Style="min-width:160px" /></MudItem>
         <MudItem xs="12" md="2"><MudButton Variant="Variant.Outlined" OnClick="LoadAsync">조회</MudButton></MudItem>
     </MudGrid>
-    <MudTable Items="_items" Dense="true" Hover="true" Striped="true">
+    <MudTable Items="_items" Dense="true" Hover="true" Striped="true"
+              FixedHeader="true" Height="520px" Virtualize="true">
         <HeaderContent>
             <MudTh>일자</MudTh><MudTh>구분</MudTh><MudTh>적요</MudTh><MudTh>거래처</MudTh>
             <MudTh Style="text-align:right">입금</MudTh><MudTh Style="text-align:right">출금</MudTh>
@@ -60,10 +61,13 @@
             <MudTd><MudChip T="string" Size="Size.Small" Color="@(context.TxType=="income"?Color.Success:Color.Error)" Variant="Variant.Text">@(context.TxType=="income"?"입금":"출금")</MudChip></MudTd>
             <MudTd>@context.Description</MudTd>
             <MudTd>@(context.PartnerName ?? "-")</MudTd>
-            <MudTd Style="text-align:right;color:#16A34A">@(context.IncomeAmount > 0 ? context.IncomeAmount.ToString("N0") : "")</MudTd>
-            <MudTd Style="text-align:right;color:#DC2626">@(context.ExpenseAmount > 0 ? context.ExpenseAmount.ToString("N0") : "")</MudTd>
+            <MudTd Style="text-align:right;color:var(--hitpan-income)">@(context.IncomeAmount > 0 ? context.IncomeAmount.ToString("N0") : "")</MudTd>
+            <MudTd Style="text-align:right;color:var(--hitpan-expense)">@(context.ExpenseAmount > 0 ? context.ExpenseAmount.ToString("N0") : "")</MudTd>
             <MudTd Style="text-align:right;font-weight:600">@context.Balance.ToString("N0")</MudTd>
         </RowTemplate>
+        <PagerContent>
+            <MudTablePager PageSizeOptions="new[]{50,100,200,500}" />
+        </PagerContent>
     </MudTable>
 </MudPaper>
 

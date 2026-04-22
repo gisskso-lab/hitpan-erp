@@ -18,8 +18,7 @@
     </MudButton>
 </div>
 
-<MudPaper Elevation="0" Class="pa-3 mb-4"
-          Style="border:0.5px solid var(--mud-palette-lines-default);border-radius:12px">
+<MudPaper Elevation="0" Class="pa-3 mb-4 hitpan-card">
     <div style="display:flex;gap:12px;flex-wrap:wrap;align-items:center">
         <MudTextField @bind-Value="_search"
                       Placeholder="상품명·코드 검색"
@@ -53,8 +52,7 @@
 }
 else
 {
-    <MudPaper Elevation="0"
-              Style="border:0.5px solid var(--mud-palette-lines-default);border-radius:12px;overflow:hidden">
+    <MudPaper Elevation="0" Class="hitpan-card" Style="overflow:hidden">
         <MudTable Items="_items" Dense="true" Hover="true" Striped="true" T="ItemListModel">
             <HeaderContent>
                 <MudTh>코드</MudTh>
@@ -181,6 +179,8 @@ else
         "semi_finished" or "semi" => "반제품",
         "material" => "자재",
         "product" => "상품",
+        "assembly" => "조립(BOM)",
+        "promo" => "🎁 1+1 기획",
         _ => type
     };
 
@@ -189,6 +189,8 @@ else
         "finished" => Color.Primary,
         "semi_finished" or "semi" => Color.Info,
         "material" => Color.Warning,
+        "assembly" => Color.Secondary,
+        "promo" => Color.Error,
         _ => Color.Default
     };
 

@@ -18,30 +18,30 @@
 <!-- KPI 카드 4개 -->
 <MudGrid Spacing="3" Class="mb-3">
     <MudItem xs="6" md="3">
-        <MudPaper Elevation="0" Class="pa-4" Style="border:0.5px solid var(--mud-palette-lines-default);border-radius:12px;border-left:4px solid #1976D2">
+        <MudPaper Elevation="0" Class="pa-4 hitpan-card" Style="border-left:4px solid var(--hitpan-info)">
             <MudText Typo="Typo.caption" Style="color:var(--mud-palette-text-secondary)">총 발행건수</MudText>
-            <MudText Typo="Typo.h5" Style="font-weight:700;color:#1976D2">@_totalCount 건</MudText>
+            <MudText Typo="Typo.h5" Style="font-weight:700;color:var(--hitpan-info)">@_totalCount 건</MudText>
             <MudText Typo="Typo.caption">@_year 년 누적</MudText>
         </MudPaper>
     </MudItem>
     <MudItem xs="6" md="3">
-        <MudPaper Elevation="0" Class="pa-4" Style="border:0.5px solid var(--mud-palette-lines-default);border-radius:12px;border-left:4px solid #0F6E56">
+        <MudPaper Elevation="0" Class="pa-4 hitpan-card" Style="border-left:4px solid var(--hitpan-primary)">
             <MudText Typo="Typo.caption" Style="color:var(--mud-palette-text-secondary)">매출 합계</MudText>
-            <MudText Typo="Typo.h5" Style="font-weight:700;color:#0F6E56">₩@_salesTotalAmount.ToString("N0")</MudText>
+            <MudText Typo="Typo.h5" Style="font-weight:700;color:var(--hitpan-primary)">₩@_salesTotalAmount.ToString("N0")</MudText>
             <MudText Typo="Typo.caption">@_salesCount 건</MudText>
         </MudPaper>
     </MudItem>
     <MudItem xs="6" md="3">
-        <MudPaper Elevation="0" Class="pa-4" Style="border:0.5px solid var(--mud-palette-lines-default);border-radius:12px;border-left:4px solid #F57C00">
+        <MudPaper Elevation="0" Class="pa-4 hitpan-card" Style="border-left:4px solid var(--hitpan-warning)">
             <MudText Typo="Typo.caption" Style="color:var(--mud-palette-text-secondary)">매입 합계</MudText>
-            <MudText Typo="Typo.h5" Style="font-weight:700;color:#F57C00">₩@_purchaseTotalAmount.ToString("N0")</MudText>
+            <MudText Typo="Typo.h5" Style="font-weight:700;color:var(--hitpan-warning)">₩@_purchaseTotalAmount.ToString("N0")</MudText>
             <MudText Typo="Typo.caption">@_purchaseCount 건</MudText>
         </MudPaper>
     </MudItem>
     <MudItem xs="6" md="3">
-        <MudPaper Elevation="0" Class="pa-4" Style="border:0.5px solid var(--mud-palette-lines-default);border-radius:12px;border-left:4px solid #D32F2F">
+        <MudPaper Elevation="0" Class="pa-4 hitpan-card" Style="border-left:4px solid var(--hitpan-error)">
             <MudText Typo="Typo.caption" Style="color:var(--mud-palette-text-secondary)">미발행 건수</MudText>
-            <MudText Typo="Typo.h5" Style="font-weight:700;color:#D32F2F">@_unissuedCount 건</MudText>
+            <MudText Typo="Typo.h5" Style="font-weight:700;color:var(--hitpan-error)">@_unissuedCount 건</MudText>
             <MudText Typo="Typo.caption">확인 필요</MudText>
         </MudPaper>
     </MudItem>
@@ -50,7 +50,7 @@
 <!-- 차트 영역: 월별 추이 + 도넛 차트 -->
 <MudGrid Spacing="3" Class="mb-3">
     <MudItem xs="12" md="8">
-        <MudPaper Elevation="0" Class="pa-4" Style="border:0.5px solid var(--mud-palette-lines-default);border-radius:12px">
+        <MudPaper Elevation="0" Class="pa-4 hitpan-card">
             <MudText Typo="Typo.subtitle2" Class="mb-2" Style="font-weight:600">월별 세금계산서 발행 추이</MudText>
             <ApexChart TItem="MonthlyChartItem" Options="@_monthlyOptions" Height="300">
                 <ApexPointSeries TItem="MonthlyChartItem"
@@ -69,7 +69,7 @@
         </MudPaper>
     </MudItem>
     <MudItem xs="12" md="4">
-        <MudPaper Elevation="0" Class="pa-4" Style="border:0.5px solid var(--mud-palette-lines-default);border-radius:12px">
+        <MudPaper Elevation="0" Class="pa-4 hitpan-card">
             <MudText Typo="Typo.subtitle2" Class="mb-2" Style="font-weight:600">발행 상태 비율</MudText>
             <ApexChart TItem="StatusChartItem" Options="@_statusOptions" Height="300">
                 <ApexPointSeries TItem="StatusChartItem"
@@ -84,7 +84,7 @@
 </MudGrid>
 
 <!-- 거래처별 TOP 10 -->
-<MudPaper Elevation="0" Class="pa-4" Style="border:0.5px solid var(--mud-palette-lines-default);border-radius:12px">
+<MudPaper Elevation="0" Class="pa-4 hitpan-card">
     <MudText Typo="Typo.subtitle2" Class="mb-2" Style="font-weight:600">거래처별 세금계산서 합계 TOP 10</MudText>
     <ApexChart TItem="PartnerChartItem" Options="@_partnerOptions" Height="350">
         <ApexPointSeries TItem="PartnerChartItem"

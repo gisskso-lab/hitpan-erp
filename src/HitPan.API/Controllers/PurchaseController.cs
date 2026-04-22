@@ -74,6 +74,23 @@ public class PurchaseController : ControllerBase
         return Ok(result);
     }
 
+    [HttpPost("returns/{id}/confirm")]
+    public async Task<IActionResult> ConfirmReturn(string id, CancellationToken ct)
+    {
+        var tenantId = HttpContext.Items["TenantId"]?.ToString();
+        if (string.IsNullOrEmpty(tenantId)) return Forbid();
+        var employeeId = HttpContext.Items["EmployeeId"]?.ToString();
+        try
+        {
+            await _purchaseService.ConfirmPurchaseReturnAsync(id, tenantId, employeeId, ct);
+            return Ok();
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(new { message = ex.Message });
+        }
+    }
+
     [HttpPost("receipts/{id}/convert-to-return")]
     public async Task<IActionResult> ConvertReceiptToReturn(string id, CancellationToken ct)
     {

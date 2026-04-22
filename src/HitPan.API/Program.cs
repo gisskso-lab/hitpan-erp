@@ -11,6 +11,8 @@ using HitPan.Infrastructure.Persistence.Seed;
 using HitPan.Infrastructure.Security;
 using HitPan.API.Security;
 using QuestPDF.Infrastructure;
+using Serilog;
+using Serilog.Events;
 
 using Microsoft.AspNetCore.Components.WebAssembly.Server;
 
@@ -21,7 +23,25 @@ QuestPDF.Settings.License = LicenseType.Community;
 // 프로젝트 루트 → 상위 탐색. 파일 없으면 무시 (프로덕션은 OS 환경변수 사용).
 LoadDotEnv();
 
+// ── Serilog 부트스트랩 (요청/에러 구조화 로그) ──
+var logDir = Environment.GetEnvironmentVariable("HITPAN_LOG_DIR")
+    ?? Path.Combine(AppContext.BaseDirectory, "logs");
+Directory.CreateDirectory(logDir);
+Log.Logger = new LoggerConfiguration()
+    .MinimumLevel.Information()
+    .MinimumLevel.Override("Microsoft.AspNetCore", LogEventLevel.Warning)
+    .MinimumLevel.Override("Microsoft.EntityFrameworkCore", LogEventLevel.Warning)
+    .Enrich.FromLogContext()
+    .WriteTo.Console()
+    .WriteTo.File(
+        path: Path.Combine(logDir, "hitpan-.log"),
+        rollingInterval: RollingInterval.Day,
+        retainedFileCountLimit: 14,
+        outputTemplate: "{Timestamp:yyyy-MM-dd HH:mm:ss.fff zzz} [{Level:u3}] {SourceContext} {Message:lj} {Properties:j}{NewLine}{Exception}")
+    .CreateLogger();
+
 var builder = WebApplication.CreateBuilder(args);
+builder.Host.UseSerilog();
 
 // EXE 옆 wwwroot가 있으면 WebRoot로 설정 (installer 모드)
 var exeDir = Path.GetDirectoryName(Environment.ProcessPath) ?? AppContext.BaseDirectory;
@@ -54,7 +74,7 @@ builder.Services.AddScoped<ISettingsService, SettingsService>();
 builder.Services.AddScoped<IPurchaseService, PurchaseService>();
 builder.Services.AddScoped<ISalesService, SalesService>();
 builder.Services.AddScoped<IQuotationService, QuotationService>();
-builder.Services.AddScoped<DeliveryBatchService>();
+builder.Services.AddScoped<IDeliveryBatchService, DeliveryBatchService>();
 builder.Services.AddScoped<IStockService, StockService>();
 builder.Services.AddScoped<IPartnerService, PartnerService>();
 builder.Services.AddScoped<IItemService, ItemService>();
@@ -137,13 +157,19 @@ builder.Services.AddCors(options =>
         }
         else
         {
-            // 환경변수 ALLOWED_ORIGINS로 허용 도메인 추가 가능 (콤마 구분)
+            // Production 강화: ALLOWED_ORIGINS 환경변수 필수.
+            // 미설정 시 빈 리스트로 고정 → 외부 호출 완전 차단.
+            // Credentials·특정 헤더·메서드만 허용 (와일드카드 금지).
             var origins = Environment.GetEnvironmentVariable("ALLOWED_ORIGINS")?.Split(',', StringSplitOptions.RemoveEmptyEntries)
                 ?? Array.Empty<string>();
-            var defaultOrigins = new[] { "http://localhost:5234", "https://localhost:7100" };
-            policy.WithOrigins(defaultOrigins.Concat(origins).ToArray())
-                .AllowAnyHeader()
-                .AllowAnyMethod();
+            if (origins.Length == 0)
+            {
+                Console.Error.WriteLine("[WARN] ALLOWED_ORIGINS is empty in Production — CORS will reject all cross-origin requests.");
+            }
+            policy.WithOrigins(origins)
+                .WithHeaders("Content-Type", "Authorization", "Accept")
+                .WithMethods("GET", "POST", "PUT", "DELETE", "OPTIONS")
+                .AllowCredentials();
         }
     });
 });
@@ -170,6 +196,21 @@ if (!isDevelopment)
 {
     app.UseHttpsRedirection();
 }
+
+// 보안 헤더 (CSP · X-Frame · X-Content-Type-Options · Referrer-Policy)
+app.Use(async (ctx, next) =>
+{
+    var h = ctx.Response.Headers;
+    h["X-Content-Type-Options"] = "nosniff";
+    h["X-Frame-Options"] = "DENY";
+    h["Referrer-Policy"] = "strict-origin-when-cross-origin";
+    if (!isDevelopment)
+    {
+        h["Content-Security-Policy"] = "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: https:; connect-src 'self' https:; frame-ancestors 'none'";
+        h["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains";
+    }
+    await next();
+});
 
 app.UseMiddleware<GlobalExceptionMiddleware>();
 app.UseCors("BlazorWasmDev");
@@ -215,7 +256,10 @@ static void LoadDotEnv()
         if (File.Exists(envPath))
         {
             try { DotNetEnv.Env.Load(envPath); }
-            catch { /* .env 읽기 실패해도 OS 환경변수 fallback */ }
+            catch (Exception ex)
+            {
+                Console.Error.WriteLine($"[WARN] .env load failed at {envPath}: {ex.Message} — falling back to OS env vars");
+            }
             return;
         }
         cur = cur.Parent;
