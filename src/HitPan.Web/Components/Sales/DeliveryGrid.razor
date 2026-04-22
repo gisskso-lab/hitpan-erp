@@ -16,9 +16,14 @@
     <RowTemplate>
         <MudTd><MudCheckBox T="bool" Value="context.IsSelected" ValueChanged="@(v => ToggleOne(context, v))" /></MudTd>
         <MudTd>@context.No</MudTd>
-        <MudTd><MudAutocomplete T="string" Value="context.ItemName" SearchFunc="SearchItemAsync"
-            ValueChanged="@(v => { context.ItemName = v; context.IsPlaceholder = false; AutoFillItem(context, v); NotifyChanged(); })"
-            Margin="Margin.Dense" Dense="true" Placeholder="품명 검색" /></MudTd>
+        <MudTd>
+            <div style="display:flex;align-items:center;gap:4px">
+                <MudAutocomplete T="string" Value="context.ItemName" SearchFunc="SearchItemAsync"
+                    ValueChanged="@(v => { context.ItemName = v; context.IsPlaceholder = false; AutoFillItem(context, v); NotifyChanged(); })"
+                    Margin="Margin.Dense" Dense="true" Placeholder="품명 검색" />
+                <ItemTypeChip ItemType="@context.ItemType" />
+            </div>
+        </MudTd>
         <MudTd><MudTextField T="string" Value="context.Spec" ValueChanged="@(v => { context.Spec = v; NotifyChanged(); })" Margin="Margin.Dense" /></MudTd>
         <MudTd><MudTextField T="string" Value="context.Unit" ValueChanged="@(v => { context.Unit = v; NotifyChanged(); })" Margin="Margin.Dense" /></MudTd>
         <MudTd><MudNumericField T="decimal" Value="context.Qty" ValueChanged="@(v => { context.Qty = v; RecalcLine(context); })" Margin="Margin.Dense" /></MudTd>
@@ -57,6 +62,7 @@
         line.Spec = item.Spec ?? "";
         line.Unit = item.Unit;
         line.UnitPrice = item.SalePrice;
+        line.ItemType = item.ItemType;  // promo/assembly 칩 자동 반영
     }
 
     private bool AllSelected => Lines.Any(l => !l.IsPlaceholder) && Lines.Where(l => !l.IsPlaceholder).All(l => l.IsSelected);

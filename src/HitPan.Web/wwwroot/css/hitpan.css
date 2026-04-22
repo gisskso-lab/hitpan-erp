@@ -458,6 +458,22 @@ html, body {
     --hitpan-profit-dark: #2E7D32;
     --hitpan-loss-dark: #C62828;
 
+    /* 연체 관리 (AR Aging 4단계) */
+    --hitpan-aging-normal: #16A34A;
+    --hitpan-aging-30:     #F59E0B;
+    --hitpan-aging-60:     #EA580C;
+    --hitpan-aging-90:     #DC2626;
+    --hitpan-aging-normal-soft: #F0FDF4;
+    --hitpan-aging-30-soft:     #FEF3C7;
+    --hitpan-aging-60-soft:     #FFEDD5;
+    --hitpan-aging-90-soft:     #FEE2E2;
+
+    /* 상품 타입 칩 */
+    --hitpan-chip-promo-bg:    #FEE2E2;
+    --hitpan-chip-promo-fg:    #DC2626;
+    --hitpan-chip-assembly-bg: #DBEAFE;
+    --hitpan-chip-assembly-fg: #1D4ED8;
+
     /* 외부 브랜드 (간편인증) */
     --hitpan-kakao: #FEE500;
     --hitpan-kakao-text: #191919;
@@ -513,7 +529,56 @@ html, body {
 @media print {
     .no-print { display: none !important; }
     .print-only { display: block !important; }
+    /* 인쇄 시 MudToolBar (버튼 바) 자동 숨김 — 세금계산서·거래명세서 출력 깔끔 */
+    .mud-toolbar,
+    .hitpan-top-header,
+    .hitpan-sidebar-aside,
+    .mud-snackbar-container,
+    .mud-overlay { display: none !important; }
+    /* 인쇄 배경 흰색 강제 */
+    body, .hitpan-shell, .hitpan-content, .hitpan-body {
+        background: white !important;
+    }
+    /* 인쇄 시 각 페이지 여백 */
+    @page { margin: 15mm; }
 }
+
+/* ════════════════════════════════════════════════════════════
+   상품 타입 칩 (ItemTypeChip 컴포넌트 — promo / assembly)
+   ════════════════════════════════════════════════════════════ */
+.hitpan-item-chip {
+    display: inline-block;
+    padding: 1px 6px;
+    border-radius: 4px;
+    font-size: 11px;
+    font-weight: 600;
+    margin-left: 4px;
+    vertical-align: middle;
+    cursor: help;
+}
+.hitpan-item-chip--promo {
+    background: var(--hitpan-chip-promo-bg);
+    color: var(--hitpan-chip-promo-fg);
+}
+.hitpan-item-chip--assembly {
+    background: var(--hitpan-chip-assembly-bg);
+    color: var(--hitpan-chip-assembly-fg);
+}
+
+/* ════════════════════════════════════════════════════════════
+   AR Aging 연체 버킷 (4단계)
+   ════════════════════════════════════════════════════════════ */
+.hitpan-aging-badge {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 4px;
+    font-size: 11px;
+    font-weight: 600;
+}
+.hitpan-aging-badge--normal { background: var(--hitpan-aging-normal-soft); color: var(--hitpan-aging-normal); }
+.hitpan-aging-badge--30     { background: var(--hitpan-aging-30-soft);     color: var(--hitpan-aging-30); }
+.hitpan-aging-badge--60     { background: var(--hitpan-aging-60-soft);     color: var(--hitpan-aging-60); }
+.hitpan-aging-badge--90     { background: var(--hitpan-aging-90-soft);     color: var(--hitpan-aging-90); }
 
 /* 빈 상태 텍스트 — EmptyState 컴포넌트 내부 사용 */
 .hitpan-empty-text {

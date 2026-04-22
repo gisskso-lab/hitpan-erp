@@ -242,9 +242,19 @@ public partial class ReturnPage : ComponentBase
             return;
         }
 
+        // 구체적 영향 범위 표시 — UX/UI 팀 제안
+        var itemCount = _draft.Lines.Count(l => !l.IsPlaceholder);
+        var totalQty = _draft.Lines.Where(l => !l.IsPlaceholder).Sum(l => l.Quantity);
+
         var ok = await DialogService.ShowMessageBoxAsync(
-            "반품 확정",
-            $"반품을 확정하면 재고원장에 Reverse OUT이 기록되고 재고가 차감됩니다.\n문서번호: {_draft.DocumentNumber}\n\n확정하시겠습니까?",
+            "⚠ 매입반품 확정 (Reverse OUT)",
+            $"거래처: {_draft.SalesCompany}\n" +
+            $"문서번호: {_draft.DocumentNumber}\n" +
+            $"품목 수: {itemCount}개 · 총 수량: {totalQty:N1}\n" +
+            $"반품 금액: {_summary.TotalAmount:N0}원\n\n" +
+            $"→ 재고 {totalQty:N1}개 차감 (공급처로 반환)\n" +
+            $"→ 재고원장에 Reverse OUT 기록\n\n" +
+            $"확정하시겠습니까?",
             yesText: "반품확정", cancelText: "닫기");
         if (ok != true) return;
 

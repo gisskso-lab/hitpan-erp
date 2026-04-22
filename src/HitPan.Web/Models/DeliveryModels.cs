@@ -38,6 +38,9 @@ public sealed class DeliveryLineModel
     public string LineAssignee { get; set; } = string.Empty;
     public bool IsPlaceholder { get; set; }
 
+    /// <summary>상품 타입 (product | assembly | promo). 라인에 1+1·조립 칩 표시용.</summary>
+    public string? ItemType { get; set; }
+
     public void RecalculateAmount()
     {
         // Computed fields are derived from quantity and unit price.

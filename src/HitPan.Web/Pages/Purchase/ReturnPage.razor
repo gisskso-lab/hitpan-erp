@@ -58,9 +58,13 @@
             <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.ContentCopy" OnClick="CopyAsync" Disabled="@_isNew">복사</MudButton>
             @if (_status == "Draft" && !_isNew && !string.IsNullOrWhiteSpace(_draft.Id))
             {
-                <MudButton Variant="Variant.Filled" Color="Color.Success"
-                           StartIcon="@Icons.Material.Filled.CheckCircle"
-                           OnClick="ConfirmReturnAsync">반품확정</MudButton>
+                <AuthorizeView Roles="tenant_admin,purchase_manager">
+                    <Authorized>
+                        <MudButton Variant="Variant.Filled" Color="Color.Success"
+                                   StartIcon="@Icons.Material.Filled.CheckCircle"
+                                   OnClick="ConfirmReturnAsync">반품확정</MudButton>
+                    </Authorized>
+                </AuthorizeView>
             }
             <MudDivider Vertical="true" FlexItem="true" />
             <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Print" OnClick="PrintAsync">인쇄</MudButton>

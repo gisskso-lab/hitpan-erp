@@ -50,9 +50,13 @@
             <MudButton Variant="Variant.Outlined" Color="Color.Error" StartIcon="@Icons.Material.Filled.Delete" OnClick="DeleteConfirm">삭제</MudButton>
             @if (_draft?.Status == "confirmed")
             {
-                <MudButton Variant="Variant.Outlined" Color="Color.Warning"
-                           StartIcon="@Icons.Material.Filled.Cancel"
-                           OnClick="CancelConfirmedAsync">매출취소</MudButton>
+                <AuthorizeView Roles="tenant_admin,sales_manager">
+                    <Authorized>
+                        <MudButton Variant="Variant.Outlined" Color="Color.Warning"
+                                   StartIcon="@Icons.Material.Filled.ReplayCircleFilled"
+                                   OnClick="CancelConfirmedAsync">매출취소</MudButton>
+                    </Authorized>
+                </AuthorizeView>
             }
             <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.ContentCopy" OnClick="CopyAsync" Disabled="@_isNew">복사</MudButton>
             <MudDivider Vertical="true" FlexItem="true" />
@@ -551,9 +555,21 @@
             return;
         }
 
+        // 구체적 영향 범위 요약 — UX/UI 개발팀 제안
+        var itemCount = _draft.Lines.Count(l => !l.IsPlaceholder);
+        var totalQty = _draft.Lines.Where(l => !l.IsPlaceholder).Sum(l => l.Quantity);
+        var totalAmount = _summary.TotalAmount;
+
         var confirm = await DialogService.ShowMessageBoxAsync(
-            "매출 취소 (Reverse)",
-            $"이 거래명세서를 취소하면 재고·수금·거래처잔액이 모두 원상 복귀됩니다.\n문서번호: {_draft.DocumentNumber}\n\n진행하시겠습니까?",
+            "⚠ 확정 매출 취소 (Reverse 원장 발행)",
+            $"거래처: {_draft.SalesCompany}\n" +
+            $"문서번호: {_draft.DocumentNumber}\n" +
+            $"품목 수: {itemCount}개 · 총 수량: {totalQty:N1}\n" +
+            $"취소 금액: {totalAmount:N0}원\n\n" +
+            $"→ 재고 {totalQty:N1}개 복귀\n" +
+            $"→ 수금 {totalAmount:N0}원 자동 무효화\n" +
+            $"→ 거래처 잔액 재계산\n\n" +
+            $"이 작업은 되돌릴 수 없습니다. 진행하시겠습니까?",
             yesText: "매출취소 진행", cancelText: "닫기");
         if (confirm != true) return;
 
@@ -561,8 +577,8 @@
         if (ok)
         {
             Snackbar.Add("매출 취소 완료 — Reverse 원장이 발행되었습니다.", Severity.Success);
-            _draft.Status = "cancelled";
-            await InvokeAsync(StateHasChanged);
+            // 서버 재조회 — stale 제거 (프론트 매니저 지적)
+            await LoadOrderToGrid(_draft.Id!);
         }
         else
         {

@@ -163,6 +163,29 @@ public class PartnerController : ControllerBase
         return Ok();
     }
 
+    /// <summary>AR Aging 연체 버킷 — 전 거래처 or 특정 거래처 연체 현황.</summary>
+    [HttpGet("aging")]
+    [Authorize(Policy = "SalesOnly")]
+    public async Task<IActionResult> GetAging([FromServices] System.Data.IDbConnection db, CancellationToken ct)
+    {
+        var tenantId = HttpContext.Items["TenantId"]?.ToString();
+        if (string.IsNullOrEmpty(tenantId)) return Forbid();
+
+        const string sql = """
+            SELECT partner_id AS PartnerId, partner_name AS PartnerName,
+                   open_invoices AS OpenInvoices,
+                   bucket_0_30 AS Bucket0_30, bucket_31_60 AS Bucket31_60,
+                   bucket_61_90 AS Bucket61_90, bucket_90_plus AS Bucket90Plus,
+                   total_unpaid AS TotalUnpaid
+            FROM v_partner_aging_buckets
+            WHERE tenant_id = @TenantId
+            ORDER BY total_unpaid DESC
+            """;
+
+        var rows = await Dapper.SqlMapper.QueryAsync(db, new Dapper.CommandDefinition(sql, new { TenantId = tenantId }, cancellationToken: ct));
+        return Ok(rows);
+    }
+
     [HttpGet("{id}/balance")]
     [Authorize(Policy = "SalesOnly")]
     public async Task<IActionResult> GetBalance(string id, CancellationToken ct)
