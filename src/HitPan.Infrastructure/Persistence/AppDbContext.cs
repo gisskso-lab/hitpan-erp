@@ -50,7 +50,7 @@ public sealed class AppDbContext : DbContext
         base.OnModelCreating(modelBuilder);
 
         var encryptedConverter = new EncryptedValueConverter(_encryptionService);
-        modelBuilder.ApplyConfiguration(new TenantConfiguration());
+        modelBuilder.ApplyConfiguration(new TenantConfiguration(encryptedConverter));
         modelBuilder.ApplyConfiguration(new UserConfiguration());
         modelBuilder.ApplyConfiguration(new DepartmentConfiguration());
         modelBuilder.ApplyConfiguration(new ItemConfiguration());

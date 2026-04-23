@@ -30,7 +30,25 @@ public sealed class SettingsService : ISettingsService
               allow_force_stock_adjust AS AllowForceStockAdjust,
               allow_credit_override AS AllowCreditOverride,
               price_deviation_limit AS PriceDeviationLimit,
-              force_edit_require_password AS ForceEditRequirePassword
+              force_edit_require_password AS ForceEditRequirePassword,
+              stock_eval_method AS StockEvalMethod,
+              use_multi_warehouse AS UseMultiWarehouse,
+              stock_shortage_alert AS StockShortageAlert,
+              allow_minus_stock AS AllowMinusStock,
+              price_input_type AS PriceInputType,
+              auto_vat_adjust AS AutoVatAdjust,
+              vat_round_type AS VatRoundType,
+              price_a_rate AS PriceARate,
+              price_b_rate AS PriceBRate,
+              price_c_rate AS PriceCRate,
+              price_d_rate AS PriceDRate,
+              price_e_rate AS PriceERate,
+              use_credit_limit AS UseCreditLimit,
+              credit_limit_amount AS CreditLimitAmount,
+              show_purchase_price AS ShowPurchasePrice,
+              use_sales_by_employee AS UseSalesByEmployee,
+              use_personal_info_protect AS UsePersonalInfoProtect,
+              industry_type AS IndustryType
             FROM tenant_settings
             WHERE tenant_id = @TenantId
             """;
@@ -55,7 +73,25 @@ public sealed class SettingsService : ISettingsService
             AllowForceStockAdjust = ToBool(row.AllowForceStockAdjust),
             AllowCreditOverride = ToBool(row.AllowCreditOverride),
             PriceDeviationLimit = (int)Math.Clamp(row.PriceDeviationLimit, 0, int.MaxValue),
-            ForceEditRequirePassword = ToBool(row.ForceEditRequirePassword)
+            ForceEditRequirePassword = ToBool(row.ForceEditRequirePassword),
+            StockEvalMethod = row.StockEvalMethod,
+            UseMultiWarehouse = ToBool(row.UseMultiWarehouse),
+            StockShortageAlert = ToBool(row.StockShortageAlert),
+            AllowMinusStock = ToBool(row.AllowMinusStock),
+            PriceInputType = row.PriceInputType,
+            AutoVatAdjust = ToBool(row.AutoVatAdjust),
+            VatRoundType = row.VatRoundType,
+            PriceARate = row.PriceARate,
+            PriceBRate = row.PriceBRate,
+            PriceCRate = row.PriceCRate,
+            PriceDRate = row.PriceDRate,
+            PriceERate = row.PriceERate,
+            UseCreditLimit = ToBool(row.UseCreditLimit),
+            CreditLimitAmount = row.CreditLimitAmount,
+            ShowPurchasePrice = ToBool(row.ShowPurchasePrice),
+            UseSalesByEmployee = ToBool(row.UseSalesByEmployee),
+            UsePersonalInfoProtect = ToBool(row.UsePersonalInfoProtect),
+            IndustryType = row.IndustryType
         };
     }
 
@@ -93,7 +129,25 @@ public sealed class SettingsService : ISettingsService
               allow_force_stock_adjust,
               allow_credit_override,
               price_deviation_limit,
-              force_edit_require_password)
+              force_edit_require_password,
+              stock_eval_method,
+              use_multi_warehouse,
+              stock_shortage_alert,
+              allow_minus_stock,
+              price_input_type,
+              auto_vat_adjust,
+              vat_round_type,
+              price_a_rate,
+              price_b_rate,
+              price_c_rate,
+              price_d_rate,
+              price_e_rate,
+              use_credit_limit,
+              credit_limit_amount,
+              show_purchase_price,
+              use_sales_by_employee,
+              use_personal_info_protect,
+              industry_type)
             VALUES (
               @TenantId,
               @AllowForcePriceInput,
@@ -104,7 +158,25 @@ public sealed class SettingsService : ISettingsService
               @AllowForceStockAdjust,
               @AllowCreditOverride,
               @PriceDeviationLimit,
-              @ForceEditRequirePassword)
+              @ForceEditRequirePassword,
+              @StockEvalMethod,
+              @UseMultiWarehouse,
+              @StockShortageAlert,
+              @AllowMinusStock,
+              @PriceInputType,
+              @AutoVatAdjust,
+              @VatRoundType,
+              @PriceARate,
+              @PriceBRate,
+              @PriceCRate,
+              @PriceDRate,
+              @PriceERate,
+              @UseCreditLimit,
+              @CreditLimitAmount,
+              @ShowPurchasePrice,
+              @UseSalesByEmployee,
+              @UsePersonalInfoProtect,
+              @IndustryType)
             ON DUPLICATE KEY UPDATE
               allow_force_price_input = @AllowForcePriceInput,
               allow_force_vat_input = @AllowForceVatInput,
@@ -114,8 +186,32 @@ public sealed class SettingsService : ISettingsService
               allow_force_stock_adjust = @AllowForceStockAdjust,
               allow_credit_override = @AllowCreditOverride,
               price_deviation_limit = @PriceDeviationLimit,
-              force_edit_require_password = @ForceEditRequirePassword
+              force_edit_require_password = @ForceEditRequirePassword,
+              stock_eval_method = @StockEvalMethod,
+              use_multi_warehouse = @UseMultiWarehouse,
+              stock_shortage_alert = @StockShortageAlert,
+              allow_minus_stock = @AllowMinusStock,
+              price_input_type = @PriceInputType,
+              auto_vat_adjust = @AutoVatAdjust,
+              vat_round_type = @VatRoundType,
+              price_a_rate = @PriceARate,
+              price_b_rate = @PriceBRate,
+              price_c_rate = @PriceCRate,
+              price_d_rate = @PriceDRate,
+              price_e_rate = @PriceERate,
+              use_credit_limit = @UseCreditLimit,
+              credit_limit_amount = @CreditLimitAmount,
+              show_purchase_price = @ShowPurchasePrice,
+              use_sales_by_employee = @UseSalesByEmployee,
+              use_personal_info_protect = @UsePersonalInfoProtect,
+              industry_type = @IndustryType
             """;
+
+        var priceInputType = NormalizeEnum(dto.PriceInputType, new[] { "net", "inclusive" }, "net");
+        var stockEvalMethod = NormalizeEnum(dto.StockEvalMethod, new[] { "moving_avg", "fifo", "lifo" }, "moving_avg");
+        var vatRoundType = NormalizeEnum(dto.VatRoundType, new[] { "round", "floor", "ceil" }, "round");
+        var industryType = NormalizeEnum(dto.IndustryType, new[] { "retail", "metal", "elec", "plastic", "wood", "food" }, "retail");
+        var creditAmount = dto.CreditLimitAmount < 0 ? 0 : dto.CreditLimitAmount;
 
         await _db.ExecuteAsync(new CommandDefinition(
             upsert,
@@ -130,9 +226,38 @@ public sealed class SettingsService : ISettingsService
                 AllowForceStockAdjust = dto.AllowForceStockAdjust ? 1 : 0,
                 AllowCreditOverride = dto.AllowCreditOverride ? 1 : 0,
                 PriceDeviationLimit = limit,
-                ForceEditRequirePassword = dto.ForceEditRequirePassword ? 1 : 0
+                ForceEditRequirePassword = dto.ForceEditRequirePassword ? 1 : 0,
+                StockEvalMethod = stockEvalMethod,
+                UseMultiWarehouse = dto.UseMultiWarehouse ? 1 : 0,
+                StockShortageAlert = dto.StockShortageAlert ? 1 : 0,
+                AllowMinusStock = dto.AllowMinusStock ? 1 : 0,
+                PriceInputType = priceInputType,
+                AutoVatAdjust = dto.AutoVatAdjust ? 1 : 0,
+                VatRoundType = vatRoundType,
+                PriceARate = dto.PriceARate,
+                PriceBRate = dto.PriceBRate,
+                PriceCRate = dto.PriceCRate,
+                PriceDRate = dto.PriceDRate,
+                PriceERate = dto.PriceERate,
+                UseCreditLimit = dto.UseCreditLimit ? 1 : 0,
+                CreditLimitAmount = creditAmount,
+                ShowPurchasePrice = dto.ShowPurchasePrice ? 1 : 0,
+                UseSalesByEmployee = dto.UseSalesByEmployee ? 1 : 0,
+                UsePersonalInfoProtect = dto.UsePersonalInfoProtect ? 1 : 0,
+                IndustryType = industryType
             },
             cancellationToken: ct)).ConfigureAwait(false);
+    }
+
+    private static string NormalizeEnum(string? value, string[] allowed, string fallback)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return fallback;
+        }
+
+        var trimmed = value.Trim().ToLowerInvariant();
+        return Array.Exists(allowed, v => v == trimmed) ? trimmed : fallback;
     }
 
     /// <summary>
@@ -428,7 +553,25 @@ public sealed class SettingsService : ISettingsService
         AllowForceStockAdjust = true,
         AllowCreditOverride = false,
         PriceDeviationLimit = 50,
-        ForceEditRequirePassword = true
+        ForceEditRequirePassword = true,
+        StockEvalMethod = "moving_avg",
+        UseMultiWarehouse = false,
+        StockShortageAlert = true,
+        AllowMinusStock = false,
+        PriceInputType = "net",
+        AutoVatAdjust = true,
+        VatRoundType = "round",
+        PriceARate = 1.00m,
+        PriceBRate = 1.10m,
+        PriceCRate = 1.20m,
+        PriceDRate = 1.30m,
+        PriceERate = 1.50m,
+        UseCreditLimit = true,
+        CreditLimitAmount = 1000000m,
+        ShowPurchasePrice = false,
+        UseSalesByEmployee = true,
+        UsePersonalInfoProtect = true,
+        IndustryType = "retail"
     };
 
     private static bool ToBool(long v) => v != 0;
@@ -479,5 +622,41 @@ public sealed class SettingsService : ISettingsService
         public long PriceDeviationLimit { get; set; }
 
         public long ForceEditRequirePassword { get; set; }
+
+        public string StockEvalMethod { get; set; } = "moving_avg";
+
+        public long UseMultiWarehouse { get; set; }
+
+        public long StockShortageAlert { get; set; } = 1;
+
+        public long AllowMinusStock { get; set; }
+
+        public string PriceInputType { get; set; } = "net";
+
+        public long AutoVatAdjust { get; set; } = 1;
+
+        public string VatRoundType { get; set; } = "round";
+
+        public decimal PriceARate { get; set; } = 1.00m;
+
+        public decimal PriceBRate { get; set; } = 1.10m;
+
+        public decimal PriceCRate { get; set; } = 1.20m;
+
+        public decimal PriceDRate { get; set; } = 1.30m;
+
+        public decimal PriceERate { get; set; } = 1.50m;
+
+        public long UseCreditLimit { get; set; } = 1;
+
+        public decimal CreditLimitAmount { get; set; } = 1000000m;
+
+        public long ShowPurchasePrice { get; set; }
+
+        public long UseSalesByEmployee { get; set; } = 1;
+
+        public long UsePersonalInfoProtect { get; set; } = 1;
+
+        public string IndustryType { get; set; } = "retail";
     }
 }

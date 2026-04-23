@@ -26,13 +26,13 @@ public sealed class PartnerConfiguration : IEntityTypeConfiguration<Partner>
         builder.Property(e => e.PartnerCode).HasColumnName("partner_code").HasMaxLength(20).IsRequired();
         builder.Property(e => e.PartnerName).HasColumnName("partner_name").HasMaxLength(100).IsRequired();
         builder.Property(e => e.PartnerType).HasColumnName("partner_type").HasConversion<string>().IsRequired();
-        builder.Property(e => e.BizNo).HasColumnName("biz_no").HasMaxLength(12);
+        builder.Property(e => e.BizNo).HasColumnName("biz_no").HasMaxLength(100).HasConversion(_encryptedConverter);
         builder.Property(e => e.CeoName).HasColumnName("ceo_name").HasMaxLength(50);
         builder.Property(e => e.BizType).HasColumnName("biz_type").HasMaxLength(50);
         builder.Property(e => e.BizItem).HasColumnName("biz_item").HasMaxLength(50);
-        builder.Property(e => e.Tel).HasColumnName("tel").HasMaxLength(20);
-        builder.Property(e => e.Fax).HasColumnName("fax").HasMaxLength(20);
-        builder.Property(e => e.Email).HasColumnName("email").HasMaxLength(100);
+        builder.Property(e => e.Tel).HasColumnName("tel").HasMaxLength(100).HasConversion(_encryptedConverter);
+        builder.Property(e => e.Fax).HasColumnName("fax").HasMaxLength(100).HasConversion(_encryptedConverter);
+        builder.Property(e => e.Email).HasColumnName("email").HasMaxLength(200).HasConversion(_encryptedConverter);
         builder.Property(e => e.Address).HasColumnName("address").HasMaxLength(200);
         builder.Property(e => e.CreditLimit).HasColumnName("credit_limit").HasColumnType("decimal(15,2)");
         builder.Property(e => e.PaymentTerms).HasColumnName("payment_terms");

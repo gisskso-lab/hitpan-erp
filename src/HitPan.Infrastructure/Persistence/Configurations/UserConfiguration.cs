@@ -15,7 +15,8 @@ public sealed class UserConfiguration : IEntityTypeConfiguration<User>
         builder.Ignore(e => e.UserId);
 
         builder.Property(e => e.TenantId).HasColumnName("tenant_id").HasMaxLength(36).IsRequired();
-        builder.Property(e => e.Email).HasColumnName("email").HasMaxLength(100).IsRequired();
+        // Email은 평문 유지 — FindUserByEmailAsync 직접 비교 필요 (향후 email_hash 기반 로그인으로 개편 시 암호화 전환)
+        builder.Property(e => e.Email).HasColumnName("email").HasMaxLength(200).IsRequired();
         builder.Property(e => e.PasswordHash).HasColumnName("password_hash").HasMaxLength(256).IsRequired();
         builder.Property(e => e.UserName).HasColumnName("user_name").HasMaxLength(50).IsRequired();
         builder.Property(e => e.Role).HasColumnName("role").HasConversion<string>().IsRequired();
@@ -23,7 +24,7 @@ public sealed class UserConfiguration : IEntityTypeConfiguration<User>
         builder.Property(e => e.ResellerId).HasColumnName("reseller_id").HasMaxLength(36);
         builder.Property(e => e.PlatformId).HasColumnName("platform_id").HasMaxLength(36);
         builder.Property(e => e.DeptId).HasColumnName("dept_id").HasMaxLength(36);
-        builder.Property(e => e.Phone).HasColumnName("phone").HasMaxLength(20);
+        builder.Property(e => e.Phone).HasColumnName("phone").HasMaxLength(100);
         builder.Property(e => e.IsActive).HasColumnName("is_active").IsRequired();
         builder.Property(e => e.FailedLoginCount).HasColumnName("failed_login_count").IsRequired().HasDefaultValue(0);
         builder.Property(e => e.LockoutEnd).HasColumnName("lockout_end");

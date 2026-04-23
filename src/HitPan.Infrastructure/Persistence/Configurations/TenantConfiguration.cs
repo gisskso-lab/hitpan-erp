@@ -1,4 +1,5 @@
 using HitPan.Domain.Entities;
+using HitPan.Infrastructure.Security.Converters;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata.Builders;
 
@@ -6,6 +7,13 @@ namespace HitPan.Infrastructure.Persistence.Configurations;
 
 public sealed class TenantConfiguration : IEntityTypeConfiguration<Tenant>
 {
+    private readonly EncryptedValueConverter _encryptedConverter;
+
+    public TenantConfiguration(EncryptedValueConverter encryptedConverter)
+    {
+        _encryptedConverter = encryptedConverter;
+    }
+
     public void Configure(EntityTypeBuilder<Tenant> builder)
     {
         builder.ToTable("tenants");
@@ -18,9 +26,9 @@ public sealed class TenantConfiguration : IEntityTypeConfiguration<Tenant>
 
         builder.Property(e => e.TenantCode).HasColumnName("tenant_code").HasMaxLength(20).IsRequired();
         builder.Property(e => e.CompanyName).HasColumnName("company_name").HasMaxLength(100).IsRequired();
-        builder.Property(e => e.BizNo).HasColumnName("biz_no").HasMaxLength(12).IsRequired();
+        builder.Property(e => e.BizNo).HasColumnName("biz_no").HasMaxLength(100).IsRequired().HasConversion(_encryptedConverter);
         builder.Property(e => e.CeoName).HasColumnName("ceo_name").HasMaxLength(50).IsRequired();
-        builder.Property(e => e.Tel).HasColumnName("tel").HasMaxLength(20);
+        builder.Property(e => e.Tel).HasColumnName("tel").HasMaxLength(100).HasConversion(_encryptedConverter);
         builder.Property(e => e.Address).HasColumnName("address").HasMaxLength(200);
         builder.Property(e => e.ResellerId).HasColumnName("reseller_id").HasMaxLength(36);
         builder.Property(e => e.Status).HasColumnName("status").HasConversion<string>().IsRequired();
