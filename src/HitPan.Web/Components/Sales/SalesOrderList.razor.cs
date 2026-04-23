@@ -170,7 +170,8 @@ public partial class SalesOrderList : ComponentBase
 
         _selectedRows = _rows.Where(x => x.IsChecked).ToList();
         RecalculateSelectionSummary();
-        await Task.CompletedTask;
+        // 외부 툴바의 "판매로 전환" / "일괄 확정" 버튼 Disabled 상태 즉시 갱신.
+        await InvokeAsync(StateHasChanged);
     }
 
     /// <summary>
@@ -182,7 +183,7 @@ public partial class SalesOrderList : ComponentBase
         _selectedRows = _rows.Where(x => x.IsChecked).ToList();
         _allSelected = _rows.Count > 0 && _rows.All(x => x.IsChecked);
         RecalculateSelectionSummary();
-        await Task.CompletedTask;
+        await InvokeAsync(StateHasChanged);
     }
 
     /// <summary>
@@ -224,6 +225,12 @@ public partial class SalesOrderList : ComponentBase
     /// </summary>
     private async Task BulkConvertToDeliveryAsync()
     {
+        if (_selectedRows.Count == 0)
+        {
+            Snackbar.Add("전환할 수주서를 먼저 선택해주세요.", Severity.Warning);
+            return;
+        }
+
         var ids = _selectedRows
             .Where(x => !string.IsNullOrWhiteSpace(x.OrderId))
             .Select(x => x.OrderId)
@@ -231,22 +238,24 @@ public partial class SalesOrderList : ComponentBase
 
         if (ids.Count == 0)
         {
+            // 선택은 있는데 OrderId가 빈 문자열 — 서버 응답 매핑 오류. 과거 회귀 방지용 진단.
+            Snackbar.Add("선택된 행의 수주 ID를 읽지 못했습니다. 목록을 새로고침한 후 다시 시도해주세요.", Severity.Error);
             return;
         }
 
         var successCount = 0;
-        var failCount = 0;
+        var failures = new List<string>();
 
         foreach (var orderId in ids)
         {
-            var result = await DeliveryService.ConvertOrderToDeliveryAsync(orderId);
+            var (result, err) = await DeliveryService.ConvertOrderToDeliveryWithErrorAsync(orderId);
             if (result is not null)
             {
                 successCount++;
             }
             else
             {
-                failCount++;
+                failures.Add($"{orderId}: {err ?? "알 수 없는 오류"}");
             }
         }
 
@@ -255,9 +264,10 @@ public partial class SalesOrderList : ComponentBase
             Snackbar.Add($"{successCount}건 판매전환 완료", Severity.Success);
         }
 
-        if (failCount > 0)
+        if (failures.Count > 0)
         {
-            Snackbar.Add($"{failCount}건 판매전환 실패", Severity.Error);
+            // 첫 실패 사유를 포함해 즉시 원인 파악 가능하게 표시.
+            Snackbar.Add($"{failures.Count}건 판매전환 실패 — {failures[0]}", Severity.Error);
         }
 
         // 목록 새로고침

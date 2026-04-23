@@ -128,21 +128,31 @@ public partial class ReturnPage : ComponentBase
         await InvokeAsync(StateHasChanged);
     }
 
-    // TODO: 반품 백엔드 API가 구현되면 _isNew 플래그로 Create/Update 분기하여 실제 API를 호출한다.
-    private Task SaveAsync()
+    /// <summary>
+    /// 반품은 매입명세서에서 "반품전환" 버튼으로만 생성되는 설계다.
+    /// 신규 저장 시 사용자를 매입명세서 화면으로 유도하고, 기존 반품 편집은
+    /// 아직 수정 API가 없으므로 확정/삭제만 가능함을 알린다.
+    /// </summary>
+    private async Task SaveAsync()
     {
-        if (_draft is null) return Task.CompletedTask;
-        _draft.DocumentNumber ??= $"RT-{DateTime.Now:yyyyMMdd}-001";
-        _isNew = false;
-        _hasUnsavedChanges = false;
-        _status = "Draft";
-        if (TabService.ActiveTabId is { } tabId)
+        if (_draft is null) return;
+
+        if (_isNew)
         {
-            TabService.SetTabDirty(tabId, false);
-            TabService.UpdateSubTitle(tabId, _draft.SalesCompany);
+            var go = await DialogService.ShowMessageBoxAsync(
+                "반품 생성 경로 안내",
+                "반품은 매입명세서에서 '반품전환' 버튼으로 생성됩니다. 매입명세서 화면으로 이동하시겠습니까?",
+                yesText: "매입명세서로 이동",
+                cancelText: "닫기");
+            if (go == true)
+            {
+                Nav.NavigateTo("/purchases");
+            }
+            return;
         }
-        Snackbar.Add("반품 처리가 저장되었습니다.", Severity.Success);
-        return Task.CompletedTask;
+
+        // 기존 반품 편집 — 서버 수정 API가 아직 없으므로 draft 수정은 제한 안내.
+        Snackbar.Add("반품 수정 API는 아직 제공되지 않습니다. 삭제 후 매입에서 재전환 또는 '확정' 버튼으로 진행해주세요.", Severity.Info);
     }
 
     private async Task CancelAsync()
@@ -175,9 +185,32 @@ public partial class ReturnPage : ComponentBase
         if (ok == true) await DeleteAsync();
     }
 
-    // TODO: 반품 백엔드 API 구현 후, 삭제 API 호출 추가.
+    /// <summary>
+    /// 반품 삭제 — draft 상태만 서버에 DELETE 요청. 서버 성공 시 새 빈 초안으로 교체.
+    /// 신규 문서(_isNew)거나 id 없으면 클라이언트 reset만 수행.
+    /// </summary>
     private async Task DeleteAsync()
     {
+        if (!_isNew && _draft is not null && !string.IsNullOrWhiteSpace(_draft.Id))
+        {
+            try
+            {
+                using var resp = await Http.DeleteAsync($"api/purchase/returns/{Uri.EscapeDataString(_draft.Id)}");
+                if (!resp.IsSuccessStatusCode)
+                {
+                    var body = await resp.Content.ReadAsStringAsync();
+                    Snackbar.Add($"삭제 실패: {(string.IsNullOrWhiteSpace(body) ? $"HTTP {(int)resp.StatusCode}" : body)}", Severity.Error);
+                    return;
+                }
+                Snackbar.Add("반품 문서가 삭제되었습니다.", Severity.Success);
+            }
+            catch (Exception ex)
+            {
+                Snackbar.Add($"삭제 중 오류: {ex.Message}", Severity.Error);
+                return;
+            }
+        }
+
         _draft = new DeliveryDraftModel
         {
             Id = Guid.NewGuid().ToString(),

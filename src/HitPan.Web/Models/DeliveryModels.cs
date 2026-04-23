@@ -207,6 +207,50 @@ public sealed class DeliverySaveApiResponse
     public string? DocumentNumber { get; set; }
 }
 
+/// <summary>거래명세서 저장 결과. 실패 시 Error에 서버 응답 본문을 담아 UI에서 원인 표시.</summary>
+public sealed record DeliverySaveResult(bool Success, string? DocumentNumber, string? Error);
+
+/// <summary>서버 CreateDeliveryRequest와 동일 스키마(web 쪽 명시 매핑용).</summary>
+public sealed class CreateDeliveryPayload
+{
+    public string? OrderId { get; set; }
+    public string PartnerId { get; set; } = string.Empty;
+    public string? EmployeeId { get; set; }
+    public DateTime DeliveryDate { get; set; }
+    public string? Memo { get; set; }
+    public List<CreateDeliveryItemPayload> Items { get; set; } = new();
+}
+
+public sealed class CreateDeliveryItemPayload
+{
+    public string? OrderItemId { get; set; }
+    public string ItemId { get; set; } = string.Empty;
+    public string? ItemName { get; set; }
+    public string? WarehouseId { get; set; }
+    public decimal Qty { get; set; }
+    public decimal UnitPrice { get; set; }
+    public decimal SupplyAmount { get; set; }
+    public decimal VatAmount { get; set; }
+}
+
+/// <summary>
+/// 서버 SalesOrderListDto (api/sales/orders 응답)과 1:1 매핑되는 웹 전용 모델.
+/// DeliveryListDto와 필드명이 달라(OrderId vs DeliveryId) 별도 타입으로 분리한다.
+/// </summary>
+public sealed class SalesOrderRow
+{
+    public string OrderId { get; set; } = string.Empty;
+    public string OrderNo { get; set; } = string.Empty;
+    public DateTime OrderDate { get; set; }
+    public string PartnerId { get; set; } = string.Empty;
+    public string PartnerName { get; set; } = string.Empty;
+    public decimal TotalAmount { get; set; }
+    public decimal VatAmount { get; set; }
+    public decimal SupplyAmount { get; set; }
+    public string Status { get; set; } = string.Empty;
+    public string? Memo { get; set; }
+}
+
 public sealed class BulkConfirmApiResponse
 {
     public List<string> Success { get; set; } = new();

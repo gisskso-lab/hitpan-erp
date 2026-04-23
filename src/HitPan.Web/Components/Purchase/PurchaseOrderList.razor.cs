@@ -174,7 +174,8 @@ public partial class PurchaseOrderList : ComponentBase
 
         _selectedRows = _rows.Where(x => x.IsChecked).ToList();
         RecalculateSelectionSummary();
-        await Task.CompletedTask;
+        // 외부 툴바 버튼 Disabled 즉시 갱신.
+        await InvokeAsync(StateHasChanged);
     }
 
     /// <summary>
@@ -189,7 +190,7 @@ public partial class PurchaseOrderList : ComponentBase
         _selectedRows = _rows.Where(x => x.IsChecked).ToList();
         _allSelected = _rows.Count > 0 && _rows.All(x => x.IsChecked);
         RecalculateSelectionSummary();
-        await Task.CompletedTask;
+        await InvokeAsync(StateHasChanged);
     }
 
     /// <summary>
@@ -230,18 +231,18 @@ public partial class PurchaseOrderList : ComponentBase
         }
 
         var successCount = 0;
-        var failCount = 0;
+        var failures = new List<string>();
 
         foreach (var poId in ids)
         {
-            var result = await DeliveryService.ConvertOrderToReceiptAsync(poId);
+            var (result, err) = await DeliveryService.ConvertOrderToReceiptWithErrorAsync(poId);
             if (result is not null)
             {
                 successCount++;
             }
             else
             {
-                failCount++;
+                failures.Add($"{poId}: {err ?? "알 수 없는 오류"}");
             }
         }
 
@@ -250,9 +251,9 @@ public partial class PurchaseOrderList : ComponentBase
             Snackbar.Add($"{successCount}건 매입전환 완료", Severity.Success);
         }
 
-        if (failCount > 0)
+        if (failures.Count > 0)
         {
-            Snackbar.Add($"{failCount}건 매입전환 실패", Severity.Error);
+            Snackbar.Add($"{failures.Count}건 매입전환 실패 — {failures[0]}", Severity.Error);
         }
 
         // 목록 새로고침

@@ -239,10 +239,10 @@ public partial class SalesOrderPage : ComponentBase
         {
             if (_isNew)
             {
-                var docNo = await DeliveryService.SaveAsync(_draft);
-                if (string.IsNullOrWhiteSpace(docNo))
+                var result = await DeliveryService.SaveAsync(_draft);
+                if (!result.Success || string.IsNullOrWhiteSpace(result.DocumentNumber))
                 {
-                    Snackbar.Add("수주서 생성에 실패했습니다.", Severity.Error);
+                    Snackbar.Add($"수주서 생성 실패: {result.Error ?? "알 수 없는 오류"}", Severity.Error);
                     return;
                 }
 

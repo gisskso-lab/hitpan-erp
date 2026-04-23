@@ -91,6 +91,22 @@ public class PurchaseController : ControllerBase
         }
     }
 
+    [HttpDelete("returns/{id}")]
+    public async Task<IActionResult> DeleteReturn(string id, CancellationToken ct)
+    {
+        var tenantId = HttpContext.Items["TenantId"]?.ToString();
+        if (string.IsNullOrEmpty(tenantId)) return Forbid();
+        try
+        {
+            await _purchaseService.DeletePurchaseReturnAsync(id, tenantId, ct);
+            return NoContent();
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(new { message = ex.Message });
+        }
+    }
+
     [HttpPost("receipts/{id}/convert-to-return")]
     public async Task<IActionResult> ConvertReceiptToReturn(string id, CancellationToken ct)
     {

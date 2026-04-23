@@ -13,6 +13,8 @@
     <MudText Typo="Typo.h6">@(_isNew ? "BOM 등록" : "BOM 수정")</MudText>
     <div style="display:flex;gap:8px">
         <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="SaveAsync" Disabled="_saving">저장</MudButton>
+        <MudButton Variant="Variant.Filled" Color="Color.Success" StartIcon="@Icons.Material.Filled.Build"
+                   OnClick="OpenAssembleDialog" Disabled="_isNew || _saving || _materials.Count == 0">조립 실행</MudButton>
         <MudButton Variant="Variant.Outlined" Color="Color.Error" OnClick="DeleteAsync" Disabled="_isNew || _saving">삭제</MudButton>
         <MudButton Variant="Variant.Text" OnClick="@(() => Nav.NavigateTo("/bom"))">목록으로</MudButton>
     </div>
@@ -122,6 +124,28 @@ else
     </DialogActions>
 </MudDialog>
 
+@* 조립 실행 다이얼로그 *@
+<MudDialog @bind-Visible="_showAssembleDialog" Options="new DialogOptions { MaxWidth = MaxWidth.ExtraSmall, FullWidth = true }">
+    <TitleContent>
+        <MudText Typo="Typo.h6">조립 실행</MudText>
+    </TitleContent>
+    <DialogContent>
+        <MudText Class="mb-3">
+            BOM '<strong>@_bomName</strong>'으로 완제품을 생산합니다.<br />
+            자재 @_materials.Count 종을 BOM 비율대로 소비하고 완제품 수량만큼 재고를 증가시킵니다.
+        </MudText>
+        <MudNumericField T="decimal" @bind-Value="_produceQty" Label="생산 수량" Variant="Variant.Outlined"
+                         Margin="Margin.Dense" Min="0.01m" HideSpinButtons="false" />
+        <MudTextField @bind-Value="_assembleMemo" Label="메모 (선택)" Variant="Variant.Outlined"
+                      Margin="Margin.Dense" Class="mt-2" />
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="@(() => _showAssembleDialog = false)" Disabled="_assembling">취소</MudButton>
+        <MudButton Variant="Variant.Filled" Color="Color.Success" OnClick="ConfirmAssembleAsync"
+                   Disabled="_assembling || _produceQty <= 0">실행</MudButton>
+    </DialogActions>
+</MudDialog>
+
 @code {
     [Parameter] public string? Id { get; set; }
 
@@ -145,6 +169,12 @@ else
     private bool _showRegisterDialog;
     private string? _pendingBomId;
     private string _registerItemType = "semi_finished";
+
+    // 조립 실행 다이얼로그
+    private bool _showAssembleDialog;
+    private bool _assembling;
+    private decimal _produceQty = 1;
+    private string? _assembleMemo;
 
     protected override async Task OnParametersSetAsync()
     {
@@ -309,6 +339,42 @@ else
     {
         _showRegisterDialog = false;
         Nav.NavigateTo("/bom", forceLoad: true);
+    }
+
+    private void OpenAssembleDialog()
+    {
+        if (_isNew || string.IsNullOrEmpty(Id))
+        {
+            Snackbar.Add("먼저 BOM을 저장한 뒤 조립 실행이 가능합니다.", Severity.Warning);
+            return;
+        }
+        if (_materials.Count == 0)
+        {
+            Snackbar.Add("자재가 하나 이상 등록돼야 조립 실행할 수 있습니다.", Severity.Warning);
+            return;
+        }
+        _produceQty = 1;
+        _assembleMemo = null;
+        _showAssembleDialog = true;
+    }
+
+    private async Task ConfirmAssembleAsync()
+    {
+        if (string.IsNullOrEmpty(Id) || _produceQty <= 0) return;
+
+        _assembling = true;
+        var (ok, err) = await BomApi.AssembleWithErrorAsync(Id, _produceQty, _assembleMemo);
+        _assembling = false;
+
+        if (ok)
+        {
+            Snackbar.Add($"조립 실행 완료 — 완제품 {_produceQty:N0}개 생산, 자재 소비 반영됨.", Severity.Success);
+            _showAssembleDialog = false;
+        }
+        else
+        {
+            Snackbar.Add($"조립 실행 실패: {err ?? "알 수 없는 오류"}", Severity.Error);
+        }
     }
 
     private async Task ConfirmRegister()

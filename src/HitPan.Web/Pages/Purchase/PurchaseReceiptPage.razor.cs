@@ -500,6 +500,50 @@ public partial class PurchaseReceiptPage : ComponentBase
             Snackbar.Add("반품 전환에 실패했습니다.", Severity.Error);
     }
 
+    /// <summary>
+    /// 매입 확정 — 서버 POST /api/purchase/receipts/{id}/confirm 호출.
+    /// 서버에서 stock_ledger IN + item_stock 증가 + 월요약 갱신을 원자 트랜잭션으로 처리한다.
+    /// </summary>
+    private async Task ConfirmAsync()
+    {
+        if (_draft is null || string.IsNullOrWhiteSpace(_draft.Id) || _isNew)
+        {
+            Snackbar.Add("먼저 매입명세서를 저장해주세요.", Severity.Warning);
+            return;
+        }
+
+        var itemCount = _draft.Lines.Count(x => !x.IsPlaceholder);
+        var totalQty = _draft.Lines.Where(x => !x.IsPlaceholder).Sum(x => x.Qty);
+        var totalAmount = _summary.TotalAmount;
+
+        var confirm = await DialogService.ShowMessageBoxAsync(
+            "매입 확정",
+            $"공급처: {_draft.SalesCompany}\n문서번호: {_draft.DocumentNumber}\n품목: {itemCount}건 · 수량 {totalQty:N1}\n금액: {totalAmount:N0}원\n\n→ 재고 원장(IN) 기록 + 재고 증가\n→ 거래처 미지급금 증가\n→ 월요약 반영\n\n확정하시겠습니까?",
+            yesText: "확정", cancelText: "취소");
+        if (confirm != true) return;
+
+        try
+        {
+            using var content = new StringContent("{}", System.Text.Encoding.UTF8, "application/json");
+            using var resp = await Http.PostAsync(
+                $"api/purchase/receipts/{Uri.EscapeDataString(_draft.Id)}/confirm", content);
+            if (!resp.IsSuccessStatusCode)
+            {
+                var body = await resp.Content.ReadAsStringAsync();
+                Snackbar.Add($"확정 실패: {(string.IsNullOrWhiteSpace(body) ? $"HTTP {(int)resp.StatusCode}" : body)}", Severity.Error);
+                return;
+            }
+
+            _status = "Confirmed";
+            Snackbar.Add("매입 확정 완료 — 재고 반영되었습니다.", Severity.Success);
+            RefreshWorkflow();
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"확정 중 오류: {ex.Message}", Severity.Error);
+        }
+    }
+
     /// <summary>브라우저 인쇄 대화상자를 연다.</summary>
     private async Task PrintAsync()
     {

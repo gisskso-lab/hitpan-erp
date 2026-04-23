@@ -40,9 +40,29 @@ public sealed class DeliveryService(HttpClient http)
         return Task.FromResult(draft);
     }
 
-    public async Task<string> SaveAsync(DeliveryDraftModel draft, CancellationToken ct = default)
+    public async Task<DeliverySaveResult> SaveAsync(DeliveryDraftModel draft, CancellationToken ct = default)
     {
-        using var resp = await http.PostAsJsonAsync("api/sales/deliveries", draft, ct);
+        // 서버 CreateDeliveryRequest 스키마에 맞춰 명시적으로 매핑한다.
+        // (draft 객체 직접 직렬화 시 Lines/Items, SalesDate/DeliveryDate 등 필드명 불일치로 서버가 품목을 빈 리스트로 받는다.)
+        var payload = new CreateDeliveryPayload
+        {
+            PartnerId = draft.PartnerId ?? string.Empty,
+            DeliveryDate = draft.SalesDate,
+            Memo = draft.Memo,
+            Items = draft.Lines
+                .Where(x => !x.IsPlaceholder)
+                .Select(x => new CreateDeliveryItemPayload
+                {
+                    ItemId = x.ItemId,
+                    ItemName = string.IsNullOrWhiteSpace(x.ItemId) ? x.ItemName : null,
+                    Qty = x.Qty,
+                    UnitPrice = x.UnitPrice,
+                    SupplyAmount = x.Amount,
+                    VatAmount = x.VatAmount
+                }).ToList()
+        };
+
+        using var resp = await http.PostAsJsonAsync("api/sales/deliveries", payload, PostJsonOptions, ct);
 
         if (resp.IsSuccessStatusCode)
         {
@@ -55,17 +75,14 @@ public sealed class DeliveryService(HttpClient http)
                     draft.Id = body.Id;
                 }
 
-                return body.DocumentNumber;
+                return new DeliverySaveResult(true, body.DocumentNumber, null);
             }
+
+            return new DeliverySaveResult(false, null, "서버 응답에 문서번호가 없습니다.");
         }
 
-        var key = draft.SalesDate.ToString("yyyyMMdd");
-        DailyCounter.TryGetValue(key, out var seq);
-        seq = Math.Max(seq, draft.DailySequence);
-        DailyCounter[key] = seq;
-        var docNo = $"DL-{key}-{seq:000}";
-        draft.DocumentNumber = docNo;
-        return docNo;
+        var errBody = await resp.Content.ReadAsStringAsync(ct);
+        return new DeliverySaveResult(false, null, string.IsNullOrWhiteSpace(errBody) ? $"HTTP {(int)resp.StatusCode}" : errBody);
     }
 
     public async Task ConfirmAsync(DeliveryDraftModel draft, CancellationToken ct = default)
@@ -87,22 +104,41 @@ public sealed class DeliveryService(HttpClient http)
 
     public async Task<BulkConfirmApiResponse> BulkConfirmAsync(IReadOnlyList<string> deliveryIds, CancellationToken ct = default)
     {
-        using var resp = await http.PostAsJsonAsync(
-            "api/sales/deliveries/bulk-confirm",
-            new { deliveryIds },
-            ct);
+        try
+        {
+            using var resp = await http.PostAsJsonAsync(
+                "api/sales/deliveries/bulk-confirm",
+                new { deliveryIds },
+                ct);
 
-        if (!resp.IsSuccessStatusCode)
+            if (!resp.IsSuccessStatusCode)
+            {
+                // 실패 응답 — 전 건을 서버 응답 본문과 함께 실패로 기록한다.
+                // (기존 코드는 실패 ID를 Success 리스트에 담아 위장해서 UI가 성공으로 착각하게 했다.)
+                var err = await resp.Content.ReadAsStringAsync(ct);
+                var reason = string.IsNullOrWhiteSpace(err) ? $"HTTP {(int)resp.StatusCode}" : err;
+                return new BulkConfirmApiResponse
+                {
+                    Success = new List<string>(),
+                    Failed = deliveryIds
+                        .Select(id => new BulkConfirmFailedItem { Id = id, Reason = reason })
+                        .ToList()
+                };
+            }
+
+            var body = await resp.Content.ReadFromJsonAsync<BulkConfirmApiResponse>(JsonOptions, ct);
+            return body ?? new BulkConfirmApiResponse();
+        }
+        catch (Exception ex)
         {
             return new BulkConfirmApiResponse
             {
-                Success = deliveryIds.ToList(),
-                Failed = new List<BulkConfirmFailedItem>()
+                Success = new List<string>(),
+                Failed = deliveryIds
+                    .Select(id => new BulkConfirmFailedItem { Id = id, Reason = ex.Message })
+                    .ToList()
             };
         }
-
-        var body = await resp.Content.ReadFromJsonAsync<BulkConfirmApiResponse>(JsonOptions, ct);
-        return body ?? new BulkConfirmApiResponse();
     }
 
     /// <summary>목록 조회 (쿼리 문자열 날짜).</summary>
@@ -130,6 +166,11 @@ public sealed class DeliveryService(HttpClient http)
     }
 
     /// <summary>수주서 목록 조회 (수주 전용 API 호출).</summary>
+    /// <remarks>
+    /// 서버 SalesOrderListDto는 OrderId/OrderNo 필드를 반환한다.
+    /// 과거에 DeliveryListDto로 역직렬화하면서 OrderId가 빈 문자열로 내려왔고,
+    /// 이로 인해 "판매로 전환" 버튼이 무반응이었다(ids.Count == 0으로 즉시 return).
+    /// </remarks>
     public async Task<List<SalesListItem>> GetOrderListAsync(
         DateTime? from = null, DateTime? to = null, string? status = null, CancellationToken ct = default)
     {
@@ -141,14 +182,14 @@ public sealed class DeliveryService(HttpClient http)
             if (!string.IsNullOrEmpty(status)) qs.Add($"status={Uri.EscapeDataString(status)}");
             var path = "api/sales/orders" + (qs.Count > 0 ? "?" + string.Join("&", qs) : "");
 
-            var list = await http.GetFromJsonAsync<List<DeliveryListDto>>(path, JsonOptions, ct)
-                       ?? new List<DeliveryListDto>();
+            var list = await http.GetFromJsonAsync<List<SalesOrderRow>>(path, JsonOptions, ct)
+                       ?? new List<SalesOrderRow>();
 
             return list.Select(static d => new SalesListItem
             {
-                OrderId = d.DeliveryId,
+                OrderId = d.OrderId,
                 OrderDate = d.OrderDate,
-                OrderNo = d.DeliveryNo,
+                OrderNo = d.OrderNo,
                 PartnerId = d.PartnerId,
                 PartnerName = d.PartnerName,
                 TotalAmount = d.TotalAmount,
@@ -165,17 +206,30 @@ public sealed class DeliveryService(HttpClient http)
     /// <summary>수주서를 거래명세서(판매)로 전환한다.</summary>
     public async Task<ConvertToDeliveryResponse?> ConvertOrderToDeliveryAsync(string orderId, CancellationToken ct = default)
     {
+        var (result, _) = await ConvertOrderToDeliveryWithErrorAsync(orderId, ct);
+        return result;
+    }
+
+    /// <summary>수주서 → 판매 전환. 실패 시 서버 응답 본문을 함께 반환한다.</summary>
+    public async Task<(ConvertToDeliveryResponse? Result, string? Error)> ConvertOrderToDeliveryWithErrorAsync(string orderId, CancellationToken ct = default)
+    {
         try
         {
             using var content = new StringContent("{}", Encoding.UTF8, "application/json");
             using var resp = await http.PostAsync(
                 $"api/sales/orders/{Uri.EscapeDataString(orderId)}/convert-to-delivery", content, cancellationToken: ct);
-            if (!resp.IsSuccessStatusCode) return null;
-            return await resp.Content.ReadFromJsonAsync<ConvertToDeliveryResponse>(JsonOptions, ct);
+            if (!resp.IsSuccessStatusCode)
+            {
+                var err = await resp.Content.ReadAsStringAsync(ct);
+                return (null, string.IsNullOrWhiteSpace(err) ? $"HTTP {(int)resp.StatusCode}" : err);
+            }
+
+            var body = await resp.Content.ReadFromJsonAsync<ConvertToDeliveryResponse>(JsonOptions, ct);
+            return (body, null);
         }
-        catch
+        catch (Exception ex)
         {
-            return null;
+            return (null, ex.Message);
         }
     }
 
@@ -339,17 +393,30 @@ public sealed class DeliveryService(HttpClient http)
     /// <summary>발주서를 매입명세서(입고)로 전환한다.</summary>
     public async Task<ConvertToReceiptResponse?> ConvertOrderToReceiptAsync(string poId, CancellationToken ct = default)
     {
+        var (result, _) = await ConvertOrderToReceiptWithErrorAsync(poId, ct);
+        return result;
+    }
+
+    /// <summary>발주서 → 매입 전환. 실패 시 서버 응답 본문을 함께 반환한다.</summary>
+    public async Task<(ConvertToReceiptResponse? Result, string? Error)> ConvertOrderToReceiptWithErrorAsync(string poId, CancellationToken ct = default)
+    {
         try
         {
             using var content = new StringContent("{}", Encoding.UTF8, "application/json");
             using var resp = await http.PostAsync(
                 $"api/purchase/orders/{Uri.EscapeDataString(poId)}/convert-to-receipt", content, cancellationToken: ct);
-            if (!resp.IsSuccessStatusCode) return null;
-            return await resp.Content.ReadFromJsonAsync<ConvertToReceiptResponse>(JsonOptions, ct);
+            if (!resp.IsSuccessStatusCode)
+            {
+                var err = await resp.Content.ReadAsStringAsync(ct);
+                return (null, string.IsNullOrWhiteSpace(err) ? $"HTTP {(int)resp.StatusCode}" : err);
+            }
+
+            var body = await resp.Content.ReadFromJsonAsync<ConvertToReceiptResponse>(JsonOptions, ct);
+            return (body, null);
         }
-        catch
+        catch (Exception ex)
         {
-            return null;
+            return (null, ex.Message);
         }
     }
 

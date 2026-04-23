@@ -132,14 +132,26 @@ public sealed class BomService(HttpClient http)
 
     public async Task<bool> AssembleAsync(string bomId, decimal produceQty, string? memo = null, CancellationToken ct = default)
     {
+        var (ok, _) = await AssembleWithErrorAsync(bomId, produceQty, memo, ct).ConfigureAwait(false);
+        return ok;
+    }
+
+    /// <summary>조립 실행. 실패 시 서버 응답 본문을 함께 반환.</summary>
+    public async Task<(bool Ok, string? Error)> AssembleWithErrorAsync(string bomId, decimal produceQty, string? memo = null, CancellationToken ct = default)
+    {
         try
         {
             using var res = await http.PostAsJsonAsync("api/bom/assemble", new { bomId, produceQty, memo }, ct).ConfigureAwait(false);
-            return res.IsSuccessStatusCode;
+            if (!res.IsSuccessStatusCode)
+            {
+                var body = await res.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
+                return (false, string.IsNullOrWhiteSpace(body) ? $"HTTP {(int)res.StatusCode}" : body);
+            }
+            return (true, null);
         }
-        catch
+        catch (Exception ex)
         {
-            return false;
+            return (false, ex.Message);
         }
     }
 }

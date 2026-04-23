@@ -4,8 +4,11 @@
 @using HitPan.Web.Models
 @using HitPan.Web.Services
 @inject DeliveryService DeliveryService
+@inject DocumentService DocService
 @inject ISnackbar Snackbar
 @inject IDialogService DialogService
+@inject NavigationManager Nav
+@inject IJSRuntime Js
 
 <PageTitle>세금계산서</PageTitle>
 
@@ -167,6 +170,16 @@
 
     protected override async Task OnInitializedAsync()
     {
+        // DeliveryPage "세금" 버튼에서 넘어올 때 쿼리스트링으로 거래처/기간 필터 프리셋 반영.
+        var uri = Nav.ToAbsoluteUri(Nav.Uri);
+        var qs = System.Web.HttpUtility.ParseQueryString(uri.Query);
+        var partner = qs["partner"];
+        var from = qs["from"];
+        var to = qs["to"];
+        if (!string.IsNullOrWhiteSpace(partner)) _partnerFilter = partner!;
+        if (DateTime.TryParse(from, out var f)) _fromDate = f;
+        if (DateTime.TryParse(to, out var t)) _toDate = t;
+
         await SearchAsync();
     }
 
@@ -246,11 +259,69 @@
         StateHasChanged();
     }
 
-    private Task PrintAsync() { Snackbar.Add("인쇄 기능은 Phase 2에서 연동됩니다.", Severity.Info); return Task.CompletedTask; }
-    private Task ExcelAsync() { Snackbar.Add("엑셀 변환은 Phase 2에서 연동됩니다.", Severity.Info); return Task.CompletedTask; }
-    private Task PdfAsync() { Snackbar.Add("PDF 변환은 Phase 2에서 연동됩니다.", Severity.Info); return Task.CompletedTask; }
-    private Task EmailAsync() { Snackbar.Add("이메일 발송은 Phase 2에서 연동됩니다.", Severity.Info); return Task.CompletedTask; }
-    private Task FaxAsync() { Snackbar.Add("팩스 발송은 Phase 2에서 연동됩니다.", Severity.Info); return Task.CompletedTask; }
+    private async Task PrintAsync()
+    {
+        // 브라우저 인쇄 — 선택이 없으면 화면 전체, 있으면 첫 건 상세 후 인쇄.
+        var selected = _items.Where(x => x.IsChecked).ToList();
+        if (selected.Count == 1)
+        {
+            await OpenDetailAsync(selected[0]);
+        }
+        await Js.InvokeVoidAsync("print");
+    }
+
+    private async Task ExcelAsync()
+    {
+        var selected = _items.Where(x => x.IsChecked).ToList();
+        if (selected.Count == 0)
+        {
+            Snackbar.Add("인쇄/다운로드할 계산서를 선택해주세요.", Severity.Warning);
+            return;
+        }
+        foreach (var item in selected)
+        {
+            await DocService.DownloadExcelAsync("delivery", item.DeliveryId);
+        }
+    }
+
+    private async Task PdfAsync()
+    {
+        var selected = _items.Where(x => x.IsChecked).ToList();
+        if (selected.Count == 0)
+        {
+            Snackbar.Add("인쇄/다운로드할 계산서를 선택해주세요.", Severity.Warning);
+            return;
+        }
+        foreach (var item in selected)
+        {
+            await DocService.DownloadPdfAsync("delivery", item.DeliveryId);
+        }
+    }
+
+    private async Task EmailAsync()
+    {
+        var selected = _items.Where(x => x.IsChecked).ToList();
+        if (selected.Count == 0)
+        {
+            Snackbar.Add("이메일 발송할 계산서를 선택해주세요.", Severity.Warning);
+            return;
+        }
+        var parameters = new DialogParameters
+        {
+            ["DocumentType"] = "세금계산서",
+            ["DocumentNo"] = selected.Count == 1 ? selected[0].DocumentNo : $"{selected.Count}건 일괄",
+            ["PartnerEmail"] = ""
+        };
+        var options = new DialogOptions { MaxWidth = MaxWidth.Small, FullWidth = true, CloseButton = true };
+        await DialogService.ShowAsync<EmailSendDialog>("이메일 발송", parameters, options);
+    }
+
+    private Task FaxAsync()
+    {
+        // 팩스 전송은 외부 팩스 서비스(Phase 2) 전까지 안내만.
+        Snackbar.Add("팩스 발송 기능은 Phase 2에서 외부 팩스 서비스(엠클라우드/PC-FAX)와 연동 예정입니다.", Severity.Info);
+        return Task.CompletedTask;
+    }
 
     private class TaxInvoiceItem
     {

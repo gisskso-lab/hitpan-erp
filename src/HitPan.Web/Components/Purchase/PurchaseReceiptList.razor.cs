@@ -177,7 +177,8 @@ public partial class PurchaseReceiptList : ComponentBase
 
         _selectedRows = _rows.Where(x => x.IsChecked).ToList();
         RecalculateSelectionSummary();
-        await Task.CompletedTask;
+        // 외부 툴바 버튼 Disabled 즉시 갱신.
+        await InvokeAsync(StateHasChanged);
     }
 
     /// <summary>
@@ -192,7 +193,7 @@ public partial class PurchaseReceiptList : ComponentBase
         _selectedRows = _rows.Where(x => x.IsChecked).ToList();
         _allSelected = _rows.Count > 0 && _rows.All(x => x.IsChecked);
         RecalculateSelectionSummary();
-        await Task.CompletedTask;
+        await InvokeAsync(StateHasChanged);
     }
 
     /// <summary>

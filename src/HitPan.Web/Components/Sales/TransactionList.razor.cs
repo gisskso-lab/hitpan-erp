@@ -92,7 +92,8 @@ public partial class TransactionList : ComponentBase
 
         _selectedRows = _rows.Where(x => x.IsChecked).ToList();
         RecalculateSelectedSummary();
-        await Task.CompletedTask;
+        // 외부 툴바 버튼 Disabled 즉시 갱신.
+        await InvokeAsync(StateHasChanged);
     }
 
     private async Task ToggleOneAsync(DeliveryListDto row, bool value)
@@ -101,7 +102,7 @@ public partial class TransactionList : ComponentBase
         _selectedRows = _rows.Where(x => x.IsChecked).ToList();
         _allSelected = _rows.Count > 0 && _rows.All(x => x.IsChecked);
         RecalculateSelectedSummary();
-        await Task.CompletedTask;
+        await InvokeAsync(StateHasChanged);
     }
 
     private async Task BulkConfirmSelectedAsync()

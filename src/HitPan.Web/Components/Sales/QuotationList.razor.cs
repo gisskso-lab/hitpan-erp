@@ -105,7 +105,8 @@ public partial class QuotationList : ComponentBase
         }
 
         _selectedRows = _rows.Where(x => x.IsChecked).ToList();
-        return Task.CompletedTask;
+        // 외부 툴바 버튼 Disabled 즉시 갱신.
+        return InvokeAsync(StateHasChanged);
     }
 
     /// <summary>
@@ -116,7 +117,7 @@ public partial class QuotationList : ComponentBase
         row.IsChecked = value;
         _selectedRows = _rows.Where(x => x.IsChecked).ToList();
         _allSelected = _rows.Count > 0 && _rows.All(x => x.IsChecked);
-        return Task.CompletedTask;
+        return InvokeAsync(StateHasChanged);
     }
 
     /// <summary>

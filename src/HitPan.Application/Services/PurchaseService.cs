@@ -292,7 +292,21 @@ public class PurchaseService : IPurchaseService
                 transaction: dbTx,
                 cancellationToken: ct));
 
-            // 4) 전체 커밋
+            // 4) 회계 자동 기표 (차변 매입+부가세대급금 / 대변 외상매입금)
+            // PurchaseReceipt 엔티티에는 EmployeeId가 없으므로 null로 전달 (추후 도메인 확장 시 실제 사원 ID 연결).
+            await AutoJournalHelper.RecordPurchaseConfirmAsync(
+                conn, dbTx,
+                receipt.TenantId,
+                receipt.ReceiptId,
+                receipt.ReceiptNo,
+                receipt.ReceiptDate,
+                receipt.PartnerId,
+                receipt.TotalAmount,
+                receipt.VatAmount,
+                null,
+                ct);
+
+            // 5) 전체 커밋
             await tx.CommitAsync(ct);
 
             // 감사로그
@@ -581,12 +595,14 @@ public class PurchaseService : IPurchaseService
 
     // ─────────────────────────────────────────────────────────────────────
     // 매입반품 확정 — status 'draft' → 'confirmed' + 재고원장 REVERSE OUT
-    // 원매입(IN)의 역방향으로 OUT 원장을 기록해 재고를 차감한다.
+    // 원매입(IN)의 역방향으로 OUT 원장을 기록해 재고를 차감하고,
+    // item_stock.current_qty 감소 + monthly_summary.total_purchase 차감을
+    // 단일 트랜잭션으로 처리한다. (이전 구현은 stock_ledger만 기록하고 실재고를 갱신하지 않았음.)
     // ─────────────────────────────────────────────────────────────────────
     public async Task ConfirmPurchaseReturnAsync(string returnId, string tenantId, string? employeeId, CancellationToken ct = default)
     {
         var header = await _db.QueryFirstOrDefaultAsync<dynamic>(new CommandDefinition(
-            "SELECT return_id, partner_id, return_date, status, return_no FROM purchase_returns WHERE return_id=@Id AND tenant_id=@Tid",
+            "SELECT return_id, partner_id, return_date, status, return_no, total_amount, vat_amount FROM purchase_returns WHERE return_id=@Id AND tenant_id=@Tid",
             new { Id = returnId, Tid = tenantId }, cancellationToken: ct))
             ?? throw new InvalidOperationException("반품 문서를 찾을 수 없습니다.");
 
@@ -595,41 +611,156 @@ public class PurchaseService : IPurchaseService
             throw new InvalidOperationException("draft 상태만 확정할 수 있습니다.");
         }
 
-        var items = await _db.QueryAsync<dynamic>(new CommandDefinition(
-            "SELECT item_id, qty, unit_price, supply_amount, warehouse_id FROM purchase_return_items WHERE return_id=@Id AND tenant_id=@Tid",
-            new { Id = returnId, Tid = tenantId }, cancellationToken: ct));
-
+        // 월마감 체크
         DateTime rd = (DateTime)header.return_date;
-        foreach (var it in items)
+        await ApprovalTriggerHelper.EnsureNotClosedAsync(_db, tenantId, rd, ct);
+
+        var items = (await _db.QueryAsync<dynamic>(new CommandDefinition(
+            "SELECT item_id, qty, unit_price, supply_amount, warehouse_id FROM purchase_return_items WHERE return_id=@Id AND tenant_id=@Tid",
+            new { Id = returnId, Tid = tenantId }, cancellationToken: ct))).ToList();
+
+        var returnNo = (string)header.return_no;
+        var partnerId = (string)header.partner_id;
+        var totalAmount = (decimal)header.total_amount;
+        var vatAmount = (decimal)header.vat_amount;
+
+        // EF + Dapper 공유 트랜잭션 (매입 확정 패턴과 동일)
+        using var tx = await _unitOfWork.BeginTransactionAsync(ct);
+        try
         {
-            await _db.ExecuteAsync(new CommandDefinition(
+            var conn = _unitOfWork.GetDbConnection();
+            var dbTx = tx.DbTransaction;
+
+            // 1) 재고원장 Reverse OUT INSERT
+            foreach (var it in items)
+            {
+                await conn.ExecuteAsync(new CommandDefinition(
+                    """
+                    INSERT INTO stock_ledger
+                      (tenant_id, item_id, warehouse_id, partner_id, employee_id, ledger_date, ym,
+                       move_type, source_type, source_id, doc_no, qty_in, qty_out, unit_cost, supply_amount, memo)
+                    VALUES
+                      (@Tid, @ItemId, @Wh, @PartnerId, @EmpId, @Date, @Ym,
+                       'out', 'purchase_return', @Rid, @DocNo, 0, @Qty, @UnitPrice, @Supply, '매입반품 (Reverse IN)')
+                    """,
+                    new
+                    {
+                        Tid = tenantId,
+                        ItemId = (string)it.item_id,
+                        Wh = (string?)it.warehouse_id ?? "wh-main",
+                        PartnerId = partnerId,
+                        EmpId = employeeId,
+                        Date = rd,
+                        Ym = rd.ToString("yyyy-MM"),
+                        Rid = returnId,
+                        DocNo = returnNo,
+                        Qty = (decimal)it.qty,
+                        UnitPrice = (decimal)it.unit_price,
+                        Supply = (decimal)it.supply_amount
+                    },
+                    transaction: dbTx,
+                    cancellationToken: ct));
+
+                // 2) item_stock 감소 — 없는 레코드도 방어적으로 UPSERT
+                await conn.ExecuteAsync(new CommandDefinition(
+                    """
+                    INSERT INTO item_stock (stock_id, tenant_id, item_id, warehouse_id, current_qty, avg_cost, last_updated_at)
+                    VALUES (UUID(), @TenantId, @ItemId, @WarehouseId, -@Qty, @UnitCost, NOW(6))
+                    ON DUPLICATE KEY UPDATE
+                      current_qty = current_qty - @Qty,
+                      last_updated_at = NOW(6)
+                    """,
+                    new
+                    {
+                        TenantId = tenantId,
+                        ItemId = (string)it.item_id,
+                        WarehouseId = (string?)it.warehouse_id ?? "wh-main",
+                        Qty = (decimal)it.qty,
+                        UnitCost = (decimal)it.unit_price
+                    },
+                    transaction: dbTx,
+                    cancellationToken: ct));
+            }
+
+            // 3) monthly_summary 매입 취소(차감)
+            await conn.ExecuteAsync(new CommandDefinition(
                 """
-                INSERT INTO stock_ledger
-                  (tenant_id, item_id, warehouse_id, partner_id, employee_id, ledger_date, ym,
-                   move_type, source_type, source_id, doc_no, qty_in, qty_out, unit_cost, supply_amount, memo)
-                VALUES
-                  (@Tid, @ItemId, @Wh, @PartnerId, @EmpId, @Date, @Ym,
-                   'out', 'purchase_return', @Rid, @DocNo, 0, @Qty, @UnitPrice, @Supply, '매입반품 (Reverse IN)')
+                INSERT INTO monthly_summary (summary_id, tenant_id, `year_month`, total_sales, total_purchase, total_receipt, total_payment, last_updated_at)
+                VALUES (UUID(), @TenantId, @Ym, 0, -@Purchase, 0, 0, NOW(6))
+                ON DUPLICATE KEY UPDATE
+                  total_purchase = total_purchase - @Purchase,
+                  last_updated_at = NOW(6)
                 """,
                 new
                 {
-                    Tid = tenantId,
-                    ItemId = (string)it.item_id,
-                    Wh = (string?)it.warehouse_id ?? "wh-main",
-                    PartnerId = (string)header.partner_id,
-                    EmpId = employeeId,
-                    Date = rd,
-                    Ym = rd.ToString("yyyy-MM"),
-                    Rid = returnId,
-                    DocNo = (string)header.return_no,
-                    Qty = (decimal)it.qty,
-                    UnitPrice = (decimal)it.unit_price,
-                    Supply = (decimal)it.supply_amount
-                }, cancellationToken: ct));
+                    TenantId = tenantId,
+                    Ym = rd.ToString("yyyyMM"),
+                    Purchase = totalAmount + vatAmount
+                },
+                transaction: dbTx,
+                cancellationToken: ct));
+
+            // 4) 상태 전환
+            await conn.ExecuteAsync(new CommandDefinition(
+                "UPDATE purchase_returns SET status='confirmed', updated_at=NOW(6) WHERE return_id=@Id AND tenant_id=@Tid",
+                new { Id = returnId, Tid = tenantId },
+                transaction: dbTx,
+                cancellationToken: ct));
+
+            await tx.CommitAsync(ct);
+
+            await _audit.LogAsync("confirm", "purchase_return", returnId, ct: ct);
+        }
+        catch
+        {
+            try { await tx.RollbackAsync(ct); } catch { /* 이미 닫힌 tx */ }
+            throw;
         }
 
-        await _db.ExecuteAsync(new CommandDefinition(
-            "UPDATE purchase_returns SET status='confirmed', updated_at=NOW(6) WHERE return_id=@Id AND tenant_id=@Tid",
-            new { Id = returnId, Tid = tenantId }, cancellationToken: ct));
+        // 결재 트리거 (커밋 이후)
+        await ApprovalTriggerHelper.TryCreateApprovalAsync(_db,
+            "purchase_return", returnId, returnNo,
+            $"매입반품 확정: {returnNo}",
+            totalAmount + vatAmount,
+            tenantId, "system", "확정자", ct);
+    }
+
+    // ─────────────────────────────────────────────────────────────────────
+    // 매입반품 draft 삭제 — confirmed 상태는 매출취소와 같은 별도 취소 경로가 필요.
+    // ─────────────────────────────────────────────────────────────────────
+    public async Task DeletePurchaseReturnAsync(string returnId, string tenantId, CancellationToken ct = default)
+    {
+        var status = await _db.QueryFirstOrDefaultAsync<string?>(new CommandDefinition(
+            "SELECT status FROM purchase_returns WHERE return_id=@Id AND tenant_id=@Tid",
+            new { Id = returnId, Tid = tenantId }, cancellationToken: ct))
+            ?? throw new InvalidOperationException("반품 문서를 찾을 수 없습니다.");
+
+        if (status != "draft")
+        {
+            throw new InvalidOperationException("draft 상태만 삭제할 수 있습니다. 확정된 반품은 취소 처리가 필요합니다.");
+        }
+
+        using var tx = await _unitOfWork.BeginTransactionAsync(ct);
+        try
+        {
+            var conn = _unitOfWork.GetDbConnection();
+            var dbTx = tx.DbTransaction;
+
+            await conn.ExecuteAsync(new CommandDefinition(
+                "DELETE FROM purchase_return_items WHERE return_id=@Id AND tenant_id=@Tid",
+                new { Id = returnId, Tid = tenantId }, transaction: dbTx, cancellationToken: ct));
+
+            await conn.ExecuteAsync(new CommandDefinition(
+                "DELETE FROM purchase_returns WHERE return_id=@Id AND tenant_id=@Tid",
+                new { Id = returnId, Tid = tenantId }, transaction: dbTx, cancellationToken: ct));
+
+            await tx.CommitAsync(ct);
+            await _audit.LogAsync("delete", "purchase_return", returnId, ct: ct);
+        }
+        catch
+        {
+            try { await tx.RollbackAsync(ct); } catch { /* 이미 닫힌 tx */ }
+            throw;
+        }
     }
 }

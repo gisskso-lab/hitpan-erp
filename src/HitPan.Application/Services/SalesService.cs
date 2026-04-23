@@ -368,7 +368,20 @@ public class SalesService : ISalesService
                 transaction: dbTx,
                 cancellationToken: ct));
 
-            // 4) 전체 커밋 — EF + Dapper 쓰기가 원자적으로 확정
+            // 4) 회계 자동 기표 (차변 외상매출금 / 대변 매출+부가세예수금)
+            await AutoJournalHelper.RecordSalesConfirmAsync(
+                conn, dbTx,
+                delivery.TenantId,
+                delivery.DeliveryId,
+                delivery.DeliveryNo,
+                delivery.DeliveryDate,
+                delivery.PartnerId,
+                delivery.TotalAmount,
+                delivery.VatAmount,
+                delivery.EmployeeId,
+                ct);
+
+            // 5) 전체 커밋 — EF + Dapper 쓰기가 원자적으로 확정
             await tx.CommitAsync(ct);
 
             // 감사로그 (트랜잭션 밖)

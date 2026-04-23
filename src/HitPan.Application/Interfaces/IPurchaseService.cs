@@ -43,4 +43,9 @@ public interface IPurchaseService
         string tenantId,
         string? employeeId,
         CancellationToken ct = default);
+
+    Task DeletePurchaseReturnAsync(
+        string returnId,
+        string tenantId,
+        CancellationToken ct = default);
 }

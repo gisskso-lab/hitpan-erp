@@ -65,6 +65,8 @@
             <MudButton Variant="Variant.Outlined" Color="Color.Error" StartIcon="@Icons.Material.Filled.Delete" OnClick="DeleteConfirmAsync">삭제</MudButton>
             <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.ContentCopy" OnClick="CopyAsync" Disabled="@_isNew">복사</MudButton>
             <MudDivider Vertical="true" FlexItem="true" />
+            <MudButton Variant="Variant.Filled" Color="Color.Success" StartIcon="@Icons.Material.Filled.CheckCircle"
+                       OnClick="ConfirmAsync" Disabled="@(_isNew || _draft?.Id is null || _status == "Confirmed")">확정</MudButton>
             <MudButton Variant="Variant.Outlined" Color="Color.Warning" StartIcon="@Icons.Material.Filled.SwapHoriz" OnClick="ConvertToReturnAsync" Disabled="@(_isNew || _draft?.Id is null)">반품전환</MudButton>
             <MudDivider Vertical="true" FlexItem="true" />
             <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Print" OnClick="PrintAsync">인쇄</MudButton>
