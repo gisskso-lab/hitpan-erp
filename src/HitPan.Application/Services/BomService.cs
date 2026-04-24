@@ -277,14 +277,24 @@ public class BomService : IBomService
             new { ItemId = itemId, BomId = bomId, TenantId = tenantId },
             cancellationToken: ct)).ConfigureAwait(false);
 
-        // 재고 초기화
+        // 재고 초기화 — 기본 창고 조회(FK fk_is_warehouse 위반 방지).
+        var defaultWhId = await _db.QueryFirstOrDefaultAsync<string>(new CommandDefinition(
+            """
+            SELECT warehouse_id FROM warehouses
+             WHERE tenant_id=@TenantId AND is_active=1
+             ORDER BY (CASE WHEN wh_code IN ('MAIN','WH-MAIN') THEN 0 ELSE 1 END), wh_code
+             LIMIT 1
+            """,
+            new { TenantId = tenantId }, cancellationToken: ct)).ConfigureAwait(false)
+            ?? throw new InvalidOperationException("활성 창고가 없습니다.");
+
         await _db.ExecuteAsync(new CommandDefinition(
             """
             INSERT INTO item_stock (stock_id, tenant_id, item_id, warehouse_id, current_qty, avg_cost, last_updated_at)
-            VALUES (UUID(), @TenantId, @ItemId, 'default', 0, @BomCost, NOW(6))
+            VALUES (UUID(), @TenantId, @ItemId, @WarehouseId, 0, @BomCost, NOW(6))
             ON DUPLICATE KEY UPDATE last_updated_at = NOW(6)
             """,
-            new { TenantId = tenantId, ItemId = itemId, BomCost = bomCost },
+            new { TenantId = tenantId, ItemId = itemId, WarehouseId = defaultWhId, BomCost = bomCost },
             cancellationToken: ct)).ConfigureAwait(false);
 
         return itemId;
@@ -339,6 +349,18 @@ public class BomService : IBomService
         var check = await CheckAssembleAsync(dto.BomId, dto.ProduceQty, tenantId, ct).ConfigureAwait(false);
         var bom = await GetAsync(dto.BomId, tenantId, ct).ConfigureAwait(false) ?? throw new InvalidOperationException("BOM을 찾을 수 없습니다.");
 
+        // 기본 창고 ID 확보 ("default" 하드코딩 제거 — fk_sal_warehouse FK 위반 방지).
+        // 테넌트의 활성 창고 중 wh_code='MAIN'(또는 'WH-MAIN') 우선, 없으면 첫 활성 창고.
+        var defaultWarehouseId = await _db.QueryFirstOrDefaultAsync<string>(new CommandDefinition(
+            """
+            SELECT warehouse_id FROM warehouses
+             WHERE tenant_id=@TenantId AND is_active=1
+             ORDER BY (CASE WHEN wh_code IN ('MAIN','WH-MAIN') THEN 0 ELSE 1 END), wh_code
+             LIMIT 1
+            """,
+            new { TenantId = tenantId }, cancellationToken: ct)).ConfigureAwait(false)
+            ?? throw new InvalidOperationException("활성 창고가 없습니다. 창고 마스터에 기본 창고를 등록하세요.");
+
         // ── 트랜잭션 감싸기 (자재차감 + 완성품증가 + stock_ledger 일괄 atomicity 보장) ──
         // 이전 버그: 중간 실패 시 자재는 차감됐는데 완성품 안 올라가거나, 이중 처리되는 현상
         using var tx = _db.BeginTransaction();
@@ -361,7 +383,7 @@ public class BomService : IBomService
                       adjust_id, tenant_id, item_id, warehouse_id, before_qty, after_qty, adjust_qty,
                       before_cost, after_cost, reason, user_id, created_at)
                     SELECT
-                      UUID(), @TenantId, @ItemId, 'default',
+                      UUID(), @TenantId, @ItemId, @WarehouseId,
                       COALESCE(current_qty, 0), COALESCE(current_qty, 0) - @Qty, @Qty * -1,
                       COALESCE(avg_cost, 0), COALESCE(avg_cost, 0), @Reason, @UserId, NOW(6)
                     FROM item_stock
@@ -371,6 +393,7 @@ public class BomService : IBomService
                     {
                         TenantId = tenantId,
                         ItemId = mat.ItemId,
+                        WarehouseId = defaultWarehouseId,
                         Qty = mat.RequiredQty,
                         Reason = $"BOM생산:{bom.BomName} {dto.ProduceQty}개",
                         UserId = userId
@@ -395,7 +418,7 @@ public class BomService : IBomService
                   adjust_id, tenant_id, item_id, warehouse_id, before_qty, after_qty, adjust_qty,
                   before_cost, after_cost, reason, user_id, created_at)
                 SELECT
-                  UUID(), @TenantId, @ItemId, 'default',
+                  UUID(), @TenantId, @ItemId, @WarehouseId,
                   COALESCE(current_qty, 0), COALESCE(current_qty, 0) + @Qty, @Qty,
                   COALESCE(avg_cost, 0), @UnitCost, @Reason, @UserId, NOW(6)
                 FROM item_stock
@@ -405,6 +428,7 @@ public class BomService : IBomService
                 {
                     TenantId = tenantId,
                     ItemId = bom.ProductItemId,
+                    WarehouseId = defaultWarehouseId,
                     Qty = dto.ProduceQty,
                     UnitCost = unitProductionCost,
                     Reason = $"BOM생산:{bom.BomName} {dto.ProduceQty}개 완성",
@@ -415,13 +439,14 @@ public class BomService : IBomService
             await _db.ExecuteAsync(new CommandDefinition(
                 """
                 INSERT INTO item_stock (stock_id, tenant_id, item_id, warehouse_id, current_qty, avg_cost, last_updated_at)
-                VALUES (UUID(), @TenantId, @ItemId, 'default', @Qty, @UnitCost, NOW(6))
+                VALUES (UUID(), @TenantId, @ItemId, @WarehouseId, @Qty, @UnitCost, NOW(6))
                 ON DUPLICATE KEY UPDATE
                   current_qty = current_qty + @Qty,
                   avg_cost = @UnitCost,
                   last_updated_at = NOW(6)
                 """,
-                new { TenantId = tenantId, ItemId = bom.ProductItemId, Qty = dto.ProduceQty, UnitCost = unitProductionCost },
+                new { TenantId = tenantId, ItemId = bom.ProductItemId, WarehouseId = defaultWarehouseId,
+                      Qty = dto.ProduceQty, UnitCost = unitProductionCost },
                 transaction: tx, cancellationToken: ct)).ConfigureAwait(false);
 
             // stock_ledger에 BOM 생산 기록 (수불부 정합성)
@@ -431,11 +456,11 @@ public class BomService : IBomService
                     """
                     INSERT INTO stock_ledger (tenant_id, item_id, warehouse_id, ledger_date, ym,
                       move_type, source_type, source_id, doc_no, qty_in, qty_out, unit_cost, supply_amount)
-                    VALUES (@TenantId, @ItemId, 'default', CURDATE(), DATE_FORMAT(CURDATE(),'%Y-%m'),
+                    VALUES (@TenantId, @ItemId, @WarehouseId, CURDATE(), DATE_FORMAT(CURDATE(),'%Y-%m'),
                       'out', 'bom_production', @BomId, @DocNo, 0, @Qty, @Cost, @Qty * @Cost)
                     """,
-                    new { TenantId = tenantId, ItemId = mat.ItemId, BomId = dto.BomId,
-                          DocNo = bom.BomName, Qty = mat.UsedQty, Cost = mat.UnitCost },
+                    new { TenantId = tenantId, ItemId = mat.ItemId, WarehouseId = defaultWarehouseId,
+                          BomId = dto.BomId, DocNo = bom.BomName, Qty = mat.UsedQty, Cost = mat.UnitCost },
                     transaction: tx, cancellationToken: ct)).ConfigureAwait(false);
             }
             // 완성품 입고
@@ -443,11 +468,11 @@ public class BomService : IBomService
                 """
                 INSERT INTO stock_ledger (tenant_id, item_id, warehouse_id, ledger_date, ym,
                   move_type, source_type, source_id, doc_no, qty_in, qty_out, unit_cost, supply_amount)
-                VALUES (@TenantId, @ItemId, 'default', CURDATE(), DATE_FORMAT(CURDATE(),'%Y-%m'),
+                VALUES (@TenantId, @ItemId, @WarehouseId, CURDATE(), DATE_FORMAT(CURDATE(),'%Y-%m'),
                   'in', 'bom_production', @BomId, @DocNo, @Qty, 0, @Cost, @Qty * @Cost)
                 """,
-                new { TenantId = tenantId, ItemId = bom.ProductItemId, BomId = dto.BomId,
-                      DocNo = bom.BomName, Qty = dto.ProduceQty, Cost = unitProductionCost },
+                new { TenantId = tenantId, ItemId = bom.ProductItemId, WarehouseId = defaultWarehouseId,
+                      BomId = dto.BomId, DocNo = bom.BomName, Qty = dto.ProduceQty, Cost = unitProductionCost },
                 transaction: tx, cancellationToken: ct)).ConfigureAwait(false);
 
             tx.Commit();

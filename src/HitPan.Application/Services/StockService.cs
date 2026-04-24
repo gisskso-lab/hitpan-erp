@@ -258,13 +258,16 @@ public class StockService : IStockService
             using var tx = _dbConnection.BeginTransaction();
             try
             {
+                // stock_ledger 실 스키마: source_id NOT NULL. 실사조정은 원본 전표가 없으므로
+                // 조정 이벤트 자체에 GUID를 부여해 추적성 확보(INSERT ONLY 원칙 §3과 일관).
+                var adjustSourceId = Guid.NewGuid().ToString();
                 const string ledgerInsert = """
                     INSERT INTO stock_ledger
                         (tenant_id, item_id, warehouse_id, ledger_date, ym,
-                         move_type, source_type, qty_in, qty_out, memo, created_by, created_at)
+                         move_type, source_type, source_id, qty_in, qty_out, memo, created_by, created_at)
                     VALUES
                         (@TenantId, @ItemId, @WarehouseId, @LedgerDate, @Ym,
-                         @MoveType, 'adjustment', @QtyIn, @QtyOut, @Memo, @CreatedBy, @CreatedAt)
+                         @MoveType, 'adjustment', @SourceId, @QtyIn, @QtyOut, @Memo, @CreatedBy, @CreatedAt)
                     """;
                 await _dbConnection.ExecuteAsync(new CommandDefinition(ledgerInsert, new
                 {
@@ -274,6 +277,7 @@ public class StockService : IStockService
                     LedgerDate = now,
                     Ym = now.ToString("yyyy-MM"),
                     MoveType = diff > 0 ? "in" : "out",
+                    SourceId = adjustSourceId,
                     QtyIn = diff > 0 ? Math.Abs(diff) : 0m,
                     QtyOut = diff < 0 ? Math.Abs(diff) : 0m,
                     Memo = req.Reason ?? "재고 실사 조정",
@@ -281,10 +285,10 @@ public class StockService : IStockService
                     CreatedAt = now
                 }, transaction: tx, cancellationToken: ct)).ConfigureAwait(false);
 
-                // 4. item_stock 갱신
+                // 4. item_stock 갱신 — 실 스키마는 current_qty / last_updated_at (available_qty, updated_at 없음).
                 const string updateStock = """
                     UPDATE item_stock
-                    SET current_qty = @ActualQty, available_qty = @ActualQty, updated_at = @Now
+                    SET current_qty = @ActualQty, last_updated_at = @Now
                     WHERE tenant_id = @TenantId AND item_id = @ItemId AND warehouse_id = @WarehouseId
                     """;
                 await _dbConnection.ExecuteAsync(new CommandDefinition(updateStock, new
@@ -370,9 +374,9 @@ public class StockService : IStockService
         if (req.FromWarehouseId == req.ToWarehouseId)
             throw new InvalidOperationException("출발 창고와 도착 창고가 동일합니다.");
 
-        // 출발 창고 가용 수량 확인
+        // 출발 창고 가용 수량 확인 — 실 스키마에 available_qty 없음 → current_qty 사용.
         const string checkSql = """
-            SELECT COALESCE(available_qty, 0)
+            SELECT COALESCE(current_qty, 0)
             FROM item_stock
             WHERE tenant_id = @TenantId AND item_id = @ItemId AND warehouse_id = @WarehouseId
             """;
@@ -391,14 +395,17 @@ public class StockService : IStockService
         using var tx = _dbConnection.BeginTransaction();
         try
         {
-            // stock_ledger: 출고 INSERT
+            // 이송 이벤트 하나의 sourceId 를 쓰고, ledger 2건(out+in)을 같은 id로 묶어 추적성 확보.
+            var transferSourceId = Guid.NewGuid().ToString();
+
+            // stock_ledger: 출고 INSERT (실 스키마: source_id NOT NULL)
             const string outInsert = """
                 INSERT INTO stock_ledger
                     (tenant_id, item_id, warehouse_id, ledger_date, ym,
-                     move_type, source_type, qty_in, qty_out, memo, created_by, created_at)
+                     move_type, source_type, source_id, qty_in, qty_out, memo, created_by, created_at)
                 VALUES
                     (@TenantId, @ItemId, @WarehouseId, @LedgerDate, @Ym,
-                     'out', 'transfer', 0, @Qty, @Memo, @CreatedBy, @CreatedAt)
+                     'out', 'transfer', @SourceId, 0, @Qty, @Memo, @CreatedBy, @CreatedAt)
                 """;
             await _dbConnection.ExecuteAsync(new CommandDefinition(outInsert, new
             {
@@ -407,6 +414,7 @@ public class StockService : IStockService
                 WarehouseId = req.FromWarehouseId,
                 LedgerDate = now,
                 Ym = ym,
+                SourceId = transferSourceId,
                 req.Qty,
                 Memo = req.Memo ?? "재고 이송",
                 CreatedBy = userId,
@@ -417,10 +425,10 @@ public class StockService : IStockService
             const string inInsert = """
                 INSERT INTO stock_ledger
                     (tenant_id, item_id, warehouse_id, ledger_date, ym,
-                     move_type, source_type, qty_in, qty_out, memo, created_by, created_at)
+                     move_type, source_type, source_id, qty_in, qty_out, memo, created_by, created_at)
                 VALUES
                     (@TenantId, @ItemId, @WarehouseId, @LedgerDate, @Ym,
-                     'in', 'transfer', @Qty, 0, @Memo, @CreatedBy, @CreatedAt)
+                     'in', 'transfer', @SourceId, @Qty, 0, @Memo, @CreatedBy, @CreatedAt)
                 """;
             await _dbConnection.ExecuteAsync(new CommandDefinition(inInsert, new
             {
@@ -429,16 +437,17 @@ public class StockService : IStockService
                 WarehouseId = req.ToWarehouseId,
                 LedgerDate = now,
                 Ym = ym,
+                SourceId = transferSourceId,
                 req.Qty,
                 Memo = req.Memo ?? "재고 이송",
                 CreatedBy = userId,
                 CreatedAt = now
             }, transaction: tx, cancellationToken: ct)).ConfigureAwait(false);
 
-            // item_stock: 출발 창고 차감
+            // item_stock: 출발 창고 차감 (실 스키마: available_qty/updated_at 없음)
             const string updateFrom = """
                 UPDATE item_stock
-                SET current_qty = current_qty - @Qty, available_qty = available_qty - @Qty, updated_at = @Now
+                SET current_qty = current_qty - @Qty, last_updated_at = @Now
                 WHERE tenant_id = @TenantId AND item_id = @ItemId AND warehouse_id = @WarehouseId
                 """;
             await _dbConnection.ExecuteAsync(new CommandDefinition(updateFrom, new
@@ -446,14 +455,13 @@ public class StockService : IStockService
                 req.Qty, Now = now, TenantId = tenantId, req.ItemId, WarehouseId = req.FromWarehouseId
             }, transaction: tx, cancellationToken: ct)).ConfigureAwait(false);
 
-            // item_stock: 도착 창고 증가 (없으면 INSERT)
+            // item_stock: 도착 창고 증가 (없으면 INSERT) — stock_id PK 필요, last_updated_at 사용
             const string upsertTo = """
-                INSERT INTO item_stock (tenant_id, item_id, warehouse_id, current_qty, available_qty, avg_cost, updated_at)
-                VALUES (@TenantId, @ItemId, @WarehouseId, @Qty, @Qty, 0, @Now)
+                INSERT INTO item_stock (stock_id, tenant_id, item_id, warehouse_id, current_qty, avg_cost, last_updated_at)
+                VALUES (UUID(), @TenantId, @ItemId, @WarehouseId, @Qty, 0, @Now)
                 ON DUPLICATE KEY UPDATE
                     current_qty = current_qty + @Qty,
-                    available_qty = available_qty + @Qty,
-                    updated_at = @Now
+                    last_updated_at = @Now
                 """;
             await _dbConnection.ExecuteAsync(new CommandDefinition(upsertTo, new
             {
