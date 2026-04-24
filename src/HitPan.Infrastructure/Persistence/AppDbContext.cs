@@ -165,24 +165,49 @@ public sealed class AppDbContext : DbContext
             .FirstOrDefaultAsync(u => u.Id == userId && u.IsActive == true);
     }
 
+    // EF Core가 내부에서 호출하는 정식 시그니처 (acceptAllChangesOnSuccess + CancellationToken).
+    // 단일 인자 시그니처(SaveChangesAsync(CancellationToken))는 base가 이 메서드를 호출하지 않으므로
+    // 단일 인자만 override하면 우회되어 타임스탬프가 박히지 않는다 (MariaDB strict mode에서 INSERT 실패).
+    // → 사장님 헌법: "어 어젠 됐는데?" 사고 패턴. 정공으로 두 시그니처 모두 처리.
+    public override Task<int> SaveChangesAsync(bool acceptAllChangesOnSuccess, CancellationToken cancellationToken = default)
+    {
+        ApplyAuditTimestamps();
+        return base.SaveChangesAsync(acceptAllChangesOnSuccess, cancellationToken);
+    }
+
     public override Task<int> SaveChangesAsync(CancellationToken cancellationToken = default)
     {
-        var utcNow = DateTime.UtcNow;
+        ApplyAuditTimestamps();
+        return base.SaveChangesAsync(cancellationToken);
+    }
 
+    public override int SaveChanges()
+    {
+        ApplyAuditTimestamps();
+        return base.SaveChanges();
+    }
+
+    public override int SaveChanges(bool acceptAllChangesOnSuccess)
+    {
+        ApplyAuditTimestamps();
+        return base.SaveChanges(acceptAllChangesOnSuccess);
+    }
+
+    private void ApplyAuditTimestamps()
+    {
+        var utcNow = DateTime.UtcNow;
         foreach (var entry in ChangeTracker.Entries<BaseEntity>())
         {
             if (entry.State == EntityState.Added)
             {
-                entry.Entity.CreatedAt = utcNow;
-                entry.Entity.UpdatedAt = utcNow;
+                if (entry.Entity.CreatedAt == default) entry.Entity.CreatedAt = utcNow;
+                if (entry.Entity.UpdatedAt == default) entry.Entity.UpdatedAt = utcNow;
             }
             else if (entry.State == EntityState.Modified)
             {
                 entry.Entity.UpdatedAt = utcNow;
             }
         }
-
-        return base.SaveChangesAsync(cancellationToken);
     }
 
     private static HitPan.Domain.Enums.StockMoveType ParseStockMoveType(string value)
