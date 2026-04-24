@@ -2,6 +2,7 @@ using System.Text;
 using HitPan.Application.Interfaces;
 using HitPan.Application.Services;
 using HitPan.API.Extensions;
+using HitPan.API.HostedServices;
 using HitPan.API.Middleware;
 using HitPan.API.Services;
 using HitPan.Infrastructure.Events;
@@ -99,6 +100,8 @@ builder.Services.AddScoped<ExcelImportService>();
 builder.Services.AddScoped<MdbMigrationService>();
 builder.Services.AddScoped<IPartnerBalanceRepository, PartnerBalanceRepository>();
 builder.Services.AddScoped<IEventPublisher, SyncEventPublisher>();
+// 멱등 처리 — idempotency_keys 만료 정리 (DESIGN_PRINCIPLES §5.3 / 작업지시서 20260425작4)
+builder.Services.AddHostedService<IdempotencyCleanupService>();
 // 전자서명 (간편인증 Mock 4종 + 수동 3종) + 전자근로계약서
 builder.Services.AddScoped<IESignatureService, ESignatureService>();
 builder.Services.AddScoped<ILaborContractService, LaborContractService>();
@@ -230,6 +233,8 @@ app.UseAuthentication();
 app.UseAuthorization();
 app.UseMiddleware<TenantMiddleware>();
 app.UseMiddleware<SessionLimitMiddleware>();
+// 멱등 처리: TenantMiddleware 이후 (tenantId 필요), MapControllers 이전 — [IdempotencyKey] 옵트인 액션만 영향 (DESIGN_PRINCIPLES §5.3 / 작업지시서 20260425작4)
+app.UseMiddleware<IdempotencyMiddleware>();
 
 app.MapControllers();
 

@@ -27,6 +27,7 @@
   <ItemGroup>
     <ProjectReference Include="..\HitPan.Application\HitPan.Application.csproj" />
     <ProjectReference Include="..\HitPan.Infrastructure\HitPan.Infrastructure.csproj" />
+    <ProjectReference Include="..\HitPan.Contracts\HitPan.Contracts.csproj" />
   </ItemGroup>
 
 </Project>

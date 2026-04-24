@@ -2,6 +2,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\HitPan.Domain\HitPan.Domain.csproj" />
+    <ProjectReference Include="..\HitPan.Contracts\HitPan.Contracts.csproj" />
   </ItemGroup>
 
   <ItemGroup>
