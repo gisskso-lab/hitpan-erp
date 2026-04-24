@@ -41,6 +41,44 @@ public class PurchaseController : ControllerBase
         return Created($"/api/purchase/orders/{id}", new { id });
     }
 
+    [HttpGet("orders/{id}")]
+    public async Task<IActionResult> GetOrder(string id, CancellationToken ct)
+    {
+        var tenantId = HttpContext.Items["TenantId"]?.ToString();
+        if (string.IsNullOrEmpty(tenantId)) return Forbid();
+
+        var detail = await _purchaseService.GetOrderDetailAsync(id, tenantId, ct);
+        if (detail is null) return NotFound();
+        return Ok(detail);
+    }
+
+    [HttpDelete("orders/{id}")]
+    public async Task<IActionResult> DeleteOrder(string id, CancellationToken ct)
+    {
+        var tenantId = HttpContext.Items["TenantId"]?.ToString();
+        if (string.IsNullOrEmpty(tenantId)) return Forbid();
+        try
+        {
+            await _purchaseService.DeletePurchaseOrderAsync(id, tenantId, ct);
+            return NoContent();
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(new { message = ex.Message });
+        }
+    }
+
+    [HttpGet("returns/{id}")]
+    public async Task<IActionResult> GetReturn(string id, CancellationToken ct)
+    {
+        var tenantId = HttpContext.Items["TenantId"]?.ToString();
+        if (string.IsNullOrEmpty(tenantId)) return Forbid();
+
+        var detail = await _purchaseService.GetReturnDetailAsync(id, tenantId, ct);
+        if (detail is null) return NotFound();
+        return Ok(detail);
+    }
+
     [HttpPost("orders/{id}/convert-to-receipt")]
     public async Task<IActionResult> ConvertOrderToReceipt(string id, CancellationToken ct)
     {
@@ -131,6 +169,33 @@ public class PurchaseController : ControllerBase
 
         var id = await _purchaseService.CreateReceiptAsync(request, ct);
         return Created($"/api/purchase/receipts/{id}", new { id });
+    }
+
+    [HttpGet("receipts/{id}")]
+    public async Task<IActionResult> GetReceipt(string id, CancellationToken ct)
+    {
+        var tenantId = HttpContext.Items["TenantId"]?.ToString();
+        if (string.IsNullOrEmpty(tenantId)) return Forbid();
+
+        var detail = await _purchaseService.GetReceiptDetailAsync(id, tenantId, ct);
+        if (detail is null) return NotFound();
+        return Ok(detail);
+    }
+
+    [HttpDelete("receipts/{id}")]
+    public async Task<IActionResult> DeleteReceipt(string id, CancellationToken ct)
+    {
+        var tenantId = HttpContext.Items["TenantId"]?.ToString();
+        if (string.IsNullOrEmpty(tenantId)) return Forbid();
+        try
+        {
+            await _purchaseService.DeletePurchaseReceiptAsync(id, tenantId, ct);
+            return NoContent();
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(new { message = ex.Message });
+        }
     }
 
     [HttpPost("receipts/{id}/confirm")]

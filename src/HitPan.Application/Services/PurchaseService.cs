@@ -755,4 +755,247 @@ public class PurchaseService : IPurchaseService
             throw;
         }
     }
+
+    // ─────────────────────────────────────────────────────────────────────
+    // 매입명세서 단건 조회 — 목록 클릭 → 편집 화면 로드용.
+    // ─────────────────────────────────────────────────────────────────────
+    public async Task<PurchaseReceiptDetailDto?> GetReceiptDetailAsync(
+        string receiptId, string tenantId, CancellationToken ct = default)
+    {
+        const string headerSql = """
+            SELECT pr.receipt_id  AS ReceiptId,
+                   pr.receipt_no  AS ReceiptNo,
+                   pr.receipt_date AS ReceiptDate,
+                   pr.po_id       AS PoId,
+                   pr.partner_id  AS PartnerId,
+                   COALESCE(p.partner_name, '') AS PartnerName,
+                   pr.total_amount AS TotalAmount,
+                   pr.vat_amount   AS VatAmount,
+                   pr.status       AS Status,
+                   pr.memo         AS Memo
+              FROM purchase_receipts pr
+              LEFT JOIN partners p
+                ON p.partner_id = pr.partner_id
+               AND p.tenant_id  = pr.tenant_id
+             WHERE pr.receipt_id = @Id
+               AND pr.tenant_id  = @Tid
+            """;
+
+        var header = await _db.QueryFirstOrDefaultAsync<PurchaseReceiptDetailDto>(
+            new CommandDefinition(headerSql, new { Id = receiptId, Tid = tenantId }, cancellationToken: ct));
+        if (header is null)
+        {
+            return null;
+        }
+
+        const string linesSql = """
+            SELECT pri.receipt_item_id AS ReceiptItemId,
+                   pri.po_item_id      AS PoItemId,
+                   pri.item_id         AS ItemId,
+                   COALESCE(i.item_name, '') AS ItemName,
+                   COALESCE(i.spec, '')      AS Spec,
+                   IFNULL(i.unit, 'EA')      AS Unit,
+                   pri.warehouse_id    AS WarehouseId,
+                   pri.qty             AS Qty,
+                   pri.unit_price      AS UnitPrice,
+                   pri.supply_amount   AS SupplyAmount,
+                   pri.vat_amount      AS VatAmount
+              FROM purchase_receipt_items pri
+              LEFT JOIN items i
+                ON i.item_id  = pri.item_id
+               AND i.tenant_id = pri.tenant_id
+             WHERE pri.receipt_id = @Id
+               AND pri.tenant_id  = @Tid
+             ORDER BY pri.receipt_item_id
+            """;
+
+        var lines = await _db.QueryAsync<PurchaseReceiptDetailItemDto>(
+            new CommandDefinition(linesSql, new { Id = receiptId, Tid = tenantId }, cancellationToken: ct));
+        header.Items = lines.ToList();
+        return header;
+    }
+
+    // ─────────────────────────────────────────────────────────────────────
+    // 매입명세서 draft 삭제 — confirmed는 별도 취소(Reverse) 경로 필요.
+    // INSERT ONLY 원장(§3) 원칙상 confirmed는 여기서 삭제 금지.
+    // ─────────────────────────────────────────────────────────────────────
+    // ─────────────────────────────────────────────────────────────────────
+    // 발주서 단건 조회 — 목록 클릭 → 편집 화면 로드용.
+    // ─────────────────────────────────────────────────────────────────────
+    public async Task<PurchaseOrderDetailDto?> GetOrderDetailAsync(
+        string poId, string tenantId, CancellationToken ct = default)
+    {
+        const string headerSql = """
+            SELECT po.po_id        AS PoId,
+                   po.po_no        AS PoNo,
+                   po.po_date      AS PoDate,
+                   po.expected_date AS ExpectedDate,
+                   po.partner_id   AS PartnerId,
+                   COALESCE(p.partner_name, '') AS PartnerName,
+                   po.total_amount AS TotalAmount,
+                   po.vat_amount   AS VatAmount,
+                   po.status       AS Status,
+                   po.memo         AS Memo
+              FROM purchase_orders po
+              LEFT JOIN partners p
+                ON p.partner_id = po.partner_id
+               AND p.tenant_id  = po.tenant_id
+             WHERE po.po_id     = @Id
+               AND po.tenant_id = @Tid
+               AND po.is_deleted = 0
+            """;
+
+        var header = await _db.QueryFirstOrDefaultAsync<PurchaseOrderDetailDto>(
+            new CommandDefinition(headerSql, new { Id = poId, Tid = tenantId }, cancellationToken: ct));
+        if (header is null) return null;
+
+        const string linesSql = """
+            SELECT poi.po_item_id    AS PoItemId,
+                   poi.item_id       AS ItemId,
+                   COALESCE(i.item_name, '') AS ItemName,
+                   COALESCE(i.spec, '')      AS Spec,
+                   IFNULL(i.unit, 'EA')      AS Unit,
+                   poi.warehouse_id  AS WarehouseId,
+                   poi.ordered_qty   AS OrderedQty,
+                   poi.received_qty  AS ReceivedQty,
+                   poi.unit_price    AS UnitPrice,
+                   poi.supply_amount AS SupplyAmount,
+                   poi.vat_amount    AS VatAmount
+              FROM purchase_order_items poi
+              LEFT JOIN items i
+                ON i.item_id   = poi.item_id
+               AND i.tenant_id = poi.tenant_id
+             WHERE poi.po_id     = @Id
+               AND poi.tenant_id = @Tid
+             ORDER BY poi.po_item_id
+            """;
+
+        var lines = await _db.QueryAsync<PurchaseOrderDetailItemDto>(
+            new CommandDefinition(linesSql, new { Id = poId, Tid = tenantId }, cancellationToken: ct));
+        header.Items = lines.ToList();
+        return header;
+    }
+
+    // ─────────────────────────────────────────────────────────────────────
+    // 발주서 draft 삭제 — soft delete (is_deleted=1). 매입전환 후에는 삭제 불가.
+    // ─────────────────────────────────────────────────────────────────────
+    public async Task DeletePurchaseOrderAsync(string poId, string tenantId, CancellationToken ct = default)
+    {
+        var row = await _db.QueryFirstOrDefaultAsync<dynamic>(new CommandDefinition(
+            "SELECT status, is_deleted FROM purchase_orders WHERE po_id=@Id AND tenant_id=@Tid",
+            new { Id = poId, Tid = tenantId }, cancellationToken: ct))
+            ?? throw new InvalidOperationException("발주서를 찾을 수 없습니다.");
+
+        if ((long)row.is_deleted == 1L)
+        {
+            throw new InvalidOperationException("이미 삭제된 발주서입니다.");
+        }
+
+        // 이미 매입전환된(입고 수량 존재) 라인이 있으면 삭제 불가.
+        var receivedCount = await _db.QueryFirstOrDefaultAsync<long>(new CommandDefinition(
+            "SELECT COUNT(*) FROM purchase_order_items WHERE po_id=@Id AND tenant_id=@Tid AND received_qty > 0",
+            new { Id = poId, Tid = tenantId }, cancellationToken: ct));
+        if (receivedCount > 0)
+        {
+            throw new InvalidOperationException("이미 매입전환(입고)된 라인이 있어 삭제할 수 없습니다. 반품·취소 경로를 사용해주세요.");
+        }
+
+        await _db.ExecuteAsync(new CommandDefinition(
+            "UPDATE purchase_orders SET is_deleted=1, updated_at=NOW(6) WHERE po_id=@Id AND tenant_id=@Tid",
+            new { Id = poId, Tid = tenantId }, cancellationToken: ct));
+
+        await _audit.LogAsync("delete", "purchase_order", poId, ct: ct);
+    }
+
+    // ─────────────────────────────────────────────────────────────────────
+    // 매입반품 단건 조회 — 목록 → 편집 로드용.
+    // ─────────────────────────────────────────────────────────────────────
+    public async Task<PurchaseReturnDetailDto?> GetReturnDetailAsync(
+        string returnId, string tenantId, CancellationToken ct = default)
+    {
+        const string headerSql = """
+            SELECT r.return_id    AS ReturnId,
+                   r.return_no    AS ReturnNo,
+                   r.return_date  AS ReturnDate,
+                   r.receipt_id   AS ReceiptId,
+                   r.partner_id   AS PartnerId,
+                   COALESCE(p.partner_name, '') AS PartnerName,
+                   r.total_amount AS TotalAmount,
+                   r.vat_amount   AS VatAmount,
+                   r.status       AS Status,
+                   r.memo         AS Memo
+              FROM purchase_returns r
+              LEFT JOIN partners p
+                ON p.partner_id = r.partner_id
+               AND p.tenant_id  = r.tenant_id
+             WHERE r.return_id  = @Id
+               AND r.tenant_id  = @Tid
+               AND r.is_deleted = 0
+            """;
+
+        var header = await _db.QueryFirstOrDefaultAsync<PurchaseReturnDetailDto>(
+            new CommandDefinition(headerSql, new { Id = returnId, Tid = tenantId }, cancellationToken: ct));
+        if (header is null) return null;
+
+        const string linesSql = """
+            SELECT rti.return_item_id AS ReturnItemId,
+                   rti.item_id        AS ItemId,
+                   COALESCE(i.item_name, '') AS ItemName,
+                   COALESCE(i.spec, '')      AS Spec,
+                   IFNULL(i.unit, 'EA')      AS Unit,
+                   rti.warehouse_id   AS WarehouseId,
+                   rti.qty            AS Qty,
+                   rti.unit_price     AS UnitPrice,
+                   rti.supply_amount  AS SupplyAmount,
+                   rti.vat_amount     AS VatAmount
+              FROM purchase_return_items rti
+              LEFT JOIN items i
+                ON i.item_id   = rti.item_id
+               AND i.tenant_id = rti.tenant_id
+             WHERE rti.return_id = @Id
+               AND rti.tenant_id = @Tid
+             ORDER BY rti.return_item_id
+            """;
+
+        var lines = await _db.QueryAsync<PurchaseReturnDetailItemDto>(
+            new CommandDefinition(linesSql, new { Id = returnId, Tid = tenantId }, cancellationToken: ct));
+        header.Items = lines.ToList();
+        return header;
+    }
+
+    public async Task DeletePurchaseReceiptAsync(string receiptId, string tenantId, CancellationToken ct = default)
+    {
+        var status = await _db.QueryFirstOrDefaultAsync<string?>(new CommandDefinition(
+            "SELECT status FROM purchase_receipts WHERE receipt_id=@Id AND tenant_id=@Tid",
+            new { Id = receiptId, Tid = tenantId }, cancellationToken: ct))
+            ?? throw new InvalidOperationException("매입명세서를 찾을 수 없습니다.");
+
+        if (!string.Equals(status, "draft", StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidOperationException("draft 상태만 삭제할 수 있습니다. 확정된 매입은 취소 처리가 필요합니다.");
+        }
+
+        using var tx = await _unitOfWork.BeginTransactionAsync(ct);
+        try
+        {
+            var conn = _unitOfWork.GetDbConnection();
+            var dbTx = tx.DbTransaction;
+
+            await conn.ExecuteAsync(new CommandDefinition(
+                "DELETE FROM purchase_receipt_items WHERE receipt_id=@Id AND tenant_id=@Tid",
+                new { Id = receiptId, Tid = tenantId }, transaction: dbTx, cancellationToken: ct));
+
+            await conn.ExecuteAsync(new CommandDefinition(
+                "DELETE FROM purchase_receipts WHERE receipt_id=@Id AND tenant_id=@Tid",
+                new { Id = receiptId, Tid = tenantId }, transaction: dbTx, cancellationToken: ct));
+
+            await tx.CommitAsync(ct);
+            await _audit.LogAsync("delete", "purchase_receipt", receiptId, ct: ct);
+        }
+        catch
+        {
+            try { await tx.RollbackAsync(ct); } catch { /* 이미 닫힌 tx */ }
+            throw;
+        }
+    }
 }

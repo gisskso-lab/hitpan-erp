@@ -59,8 +59,17 @@ public partial class SalesOrderList : ComponentBase
     [Inject]
     private ISnackbar Snackbar { get; set; } = default!;
 
+    [Inject]
+    private IDialogService DialogService { get; set; } = default!;
+
     /// <summary>
-    /// 사용자가 행을 클릭했을 때 선택된 주문 ID를 전달한다.
+    /// 다이얼로그 호스트. 행 클릭 시 선택 ID를 결과로 Close한다.
+    /// </summary>
+    [CascadingParameter]
+    private IMudDialogInstance? MudDialog { get; set; }
+
+    /// <summary>
+    /// 사용자가 행을 클릭했을 때 선택된 주문 ID를 전달한다(임베드용).
     /// </summary>
     [Parameter]
     public EventCallback<string> OnOrderSelected { get; set; }
@@ -302,7 +311,77 @@ public partial class SalesOrderList : ComponentBase
             return;
         }
 
+        if (MudDialog is not null)
+        {
+            MudDialog.Close(DialogResult.Ok(row.OrderId));
+            return;
+        }
+
         await OnOrderSelected.InvokeAsync(row.OrderId);
+    }
+
+    /// <summary>단건 삭제 — draft만.</summary>
+    private async Task DeleteOneAsync(SalesListItem row)
+    {
+        if (string.IsNullOrWhiteSpace(row.OrderId)) return;
+
+        var confirm = await DialogService.ShowMessageBoxAsync(
+            "수주서 삭제",
+            $"[{row.OrderNo}] 을(를) 삭제하시겠습니까?\n(판매전환된 라인이 있으면 삭제할 수 없습니다.)",
+            yesText: "삭제", cancelText: "취소");
+        if (confirm != true) return;
+
+        var (ok, error) = await DeliveryService.DeleteSalesOrderAsync(row.OrderId);
+        if (ok)
+        {
+            Snackbar.Add($"[{row.OrderNo}] 삭제되었습니다.", Severity.Success);
+            await LoadAsync();
+        }
+        else
+        {
+            Snackbar.Add($"삭제 실패: {error}", Severity.Error);
+        }
+    }
+
+    /// <summary>선택 행 일괄 삭제 — draft만 대상.</summary>
+    private async Task BulkDeleteAsync()
+    {
+        var targets = _selectedRows
+            .Where(x => !string.IsNullOrWhiteSpace(x.OrderId)
+                        && string.Equals(x.Status, "draft", StringComparison.OrdinalIgnoreCase))
+            .ToList();
+
+        if (targets.Count == 0)
+        {
+            Snackbar.Add("삭제 가능한 draft 상태 수주서가 없습니다.", Severity.Warning);
+            return;
+        }
+
+        var confirm = await DialogService.ShowMessageBoxAsync(
+            "수주서 일괄 삭제",
+            $"선택한 draft 상태 {targets.Count}건을 삭제하시겠습니까?",
+            yesText: "삭제", cancelText: "취소");
+        if (confirm != true) return;
+
+        var success = 0;
+        var failed = new List<(string No, string Reason)>();
+        foreach (var row in targets)
+        {
+            var (ok, error) = await DeliveryService.DeleteSalesOrderAsync(row.OrderId);
+            if (ok) success++;
+            else failed.Add((row.OrderNo, error ?? "unknown"));
+        }
+
+        if (failed.Count == 0)
+        {
+            Snackbar.Add($"{success}건 삭제 완료.", Severity.Success);
+        }
+        else
+        {
+            Snackbar.Add($"성공 {success}건 / 실패 {failed.Count}건. 첫 실패: {failed[0].No} — {failed[0].Reason[..Math.Min(150, failed[0].Reason.Length)]}", Severity.Warning);
+        }
+
+        await LoadAsync();
     }
 
     /// <summary>

@@ -391,6 +391,39 @@ public sealed class DeliveryService(HttpClient http)
         }
     }
 
+    /// <summary>매입명세서 단건 상세 조회 (목록 → 편집 화면 로드용).</summary>
+    public async Task<PurchaseReceiptDetailModel?> GetPurchaseReceiptDetailAsync(string receiptId, CancellationToken ct = default)
+    {
+        try
+        {
+            return await http.GetFromJsonAsync<PurchaseReceiptDetailModel>(
+                $"api/purchase/receipts/{Uri.EscapeDataString(receiptId)}",
+                JsonOptions,
+                ct);
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    /// <summary>매입명세서 draft 삭제. 성공 시 (true, null), 실패 시 (false, 서버응답).</summary>
+    public async Task<(bool Success, string? Error)> DeletePurchaseReceiptAsync(string receiptId, CancellationToken ct = default)
+    {
+        try
+        {
+            using var resp = await http.DeleteAsync(
+                $"api/purchase/receipts/{Uri.EscapeDataString(receiptId)}", ct);
+            if (resp.IsSuccessStatusCode) return (true, null);
+            var body = await resp.Content.ReadAsStringAsync(ct);
+            return (false, string.IsNullOrWhiteSpace(body) ? $"HTTP {(int)resp.StatusCode}" : body);
+        }
+        catch (Exception ex)
+        {
+            return (false, ex.Message);
+        }
+    }
+
     /// <summary>발주서를 매입명세서(입고)로 전환한다.</summary>
     public async Task<ConvertToReceiptResponse?> ConvertOrderToReceiptAsync(string poId, CancellationToken ct = default)
     {
@@ -434,6 +467,99 @@ public sealed class DeliveryService(HttpClient http)
             return list ?? new();
         }
         catch { return new(); }
+    }
+
+    /// <summary>발주서 단건 상세 조회.</summary>
+    public async Task<PurchaseOrderDetailModel?> GetPurchaseOrderDetailAsync(string poId, CancellationToken ct = default)
+    {
+        try
+        {
+            return await http.GetFromJsonAsync<PurchaseOrderDetailModel>(
+                $"api/purchase/orders/{Uri.EscapeDataString(poId)}", JsonOptions, ct);
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    /// <summary>발주서 삭제(소프트). 성공 시 (true, null).</summary>
+    public async Task<(bool Success, string? Error)> DeletePurchaseOrderAsync(string poId, CancellationToken ct = default)
+    {
+        try
+        {
+            using var resp = await http.DeleteAsync(
+                $"api/purchase/orders/{Uri.EscapeDataString(poId)}", ct);
+            if (resp.IsSuccessStatusCode) return (true, null);
+            var body = await resp.Content.ReadAsStringAsync(ct);
+            return (false, string.IsNullOrWhiteSpace(body) ? $"HTTP {(int)resp.StatusCode}" : body);
+        }
+        catch (Exception ex)
+        {
+            return (false, ex.Message);
+        }
+    }
+
+    /// <summary>수주서 단건 상세 조회.</summary>
+    public async Task<SalesOrderDetailModel?> GetSalesOrderDetailAsync(string orderId, CancellationToken ct = default)
+    {
+        try
+        {
+            return await http.GetFromJsonAsync<SalesOrderDetailModel>(
+                $"api/sales/orders/{Uri.EscapeDataString(orderId)}", JsonOptions, ct);
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    /// <summary>수주서 삭제(소프트). 성공 시 (true, null).</summary>
+    public async Task<(bool Success, string? Error)> DeleteSalesOrderAsync(string orderId, CancellationToken ct = default)
+    {
+        try
+        {
+            using var resp = await http.DeleteAsync(
+                $"api/sales/orders/{Uri.EscapeDataString(orderId)}", ct);
+            if (resp.IsSuccessStatusCode) return (true, null);
+            var body = await resp.Content.ReadAsStringAsync(ct);
+            return (false, string.IsNullOrWhiteSpace(body) ? $"HTTP {(int)resp.StatusCode}" : body);
+        }
+        catch (Exception ex)
+        {
+            return (false, ex.Message);
+        }
+    }
+
+    /// <summary>매입반품 단건 상세 조회.</summary>
+    public async Task<PurchaseReturnDetailModel?> GetPurchaseReturnDetailAsync(string returnId, CancellationToken ct = default)
+    {
+        try
+        {
+            return await http.GetFromJsonAsync<PurchaseReturnDetailModel>(
+                $"api/purchase/returns/{Uri.EscapeDataString(returnId)}", JsonOptions, ct);
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    /// <summary>매입반품 삭제 (draft만). 성공 시 (true, null).</summary>
+    public async Task<(bool Success, string? Error)> DeletePurchaseReturnAsync(string returnId, CancellationToken ct = default)
+    {
+        try
+        {
+            using var resp = await http.DeleteAsync(
+                $"api/purchase/returns/{Uri.EscapeDataString(returnId)}", ct);
+            if (resp.IsSuccessStatusCode) return (true, null);
+            var body = await resp.Content.ReadAsStringAsync(ct);
+            return (false, string.IsNullOrWhiteSpace(body) ? $"HTTP {(int)resp.StatusCode}" : body);
+        }
+        catch (Exception ex)
+        {
+            return (false, ex.Message);
+        }
     }
 
     public async Task<bool> ConvertReceiptToReturnAsync(string receiptId, CancellationToken ct = default)

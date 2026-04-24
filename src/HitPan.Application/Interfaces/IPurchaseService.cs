@@ -48,4 +48,29 @@ public interface IPurchaseService
         string returnId,
         string tenantId,
         CancellationToken ct = default);
+
+    Task<PurchaseReceiptDetailDto?> GetReceiptDetailAsync(
+        string receiptId,
+        string tenantId,
+        CancellationToken ct = default);
+
+    Task DeletePurchaseReceiptAsync(
+        string receiptId,
+        string tenantId,
+        CancellationToken ct = default);
+
+    Task<PurchaseOrderDetailDto?> GetOrderDetailAsync(
+        string poId,
+        string tenantId,
+        CancellationToken ct = default);
+
+    Task DeletePurchaseOrderAsync(
+        string poId,
+        string tenantId,
+        CancellationToken ct = default);
+
+    Task<PurchaseReturnDetailDto?> GetReturnDetailAsync(
+        string returnId,
+        string tenantId,
+        CancellationToken ct = default);
 }

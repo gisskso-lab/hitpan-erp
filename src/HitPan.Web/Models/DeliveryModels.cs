@@ -307,6 +307,37 @@ public sealed class PurchaseReceiptListItem
     public bool IsChecked { get; set; }
 }
 
+/// <summary>매입명세서 단건 상세 (목록 → 편집 화면 로드용).</summary>
+public sealed class PurchaseReceiptDetailModel
+{
+    public string ReceiptId { get; set; } = string.Empty;
+    public string ReceiptNo { get; set; } = string.Empty;
+    public DateTime ReceiptDate { get; set; }
+    public string? PoId { get; set; }
+    public string PartnerId { get; set; } = string.Empty;
+    public string PartnerName { get; set; } = string.Empty;
+    public decimal TotalAmount { get; set; }
+    public decimal VatAmount { get; set; }
+    public string Status { get; set; } = string.Empty;
+    public string? Memo { get; set; }
+    public List<PurchaseReceiptDetailItem> Items { get; set; } = new();
+}
+
+public sealed class PurchaseReceiptDetailItem
+{
+    public string ReceiptItemId { get; set; } = string.Empty;
+    public string? PoItemId { get; set; }
+    public string ItemId { get; set; } = string.Empty;
+    public string ItemName { get; set; } = string.Empty;
+    public string? Spec { get; set; }
+    public string? Unit { get; set; }
+    public string? WarehouseId { get; set; }
+    public decimal Qty { get; set; }
+    public decimal UnitPrice { get; set; }
+    public decimal SupplyAmount { get; set; }
+    public decimal VatAmount { get; set; }
+}
+
 /// <summary>
 /// 발주서 매입전환 응답.
 /// </summary>
@@ -314,6 +345,96 @@ public sealed class ConvertToReceiptResponse
 {
     public string ReceiptId { get; set; } = string.Empty;
     public string ReceiptNo { get; set; } = string.Empty;
+}
+
+/// <summary>발주서 단건 상세.</summary>
+public sealed class PurchaseOrderDetailModel
+{
+    public string PoId { get; set; } = string.Empty;
+    public string PoNo { get; set; } = string.Empty;
+    public DateTime PoDate { get; set; }
+    public DateTime? ExpectedDate { get; set; }
+    public string PartnerId { get; set; } = string.Empty;
+    public string PartnerName { get; set; } = string.Empty;
+    public decimal TotalAmount { get; set; }
+    public decimal VatAmount { get; set; }
+    public string Status { get; set; } = string.Empty;
+    public string? Memo { get; set; }
+    public List<PurchaseOrderDetailItem> Items { get; set; } = new();
+}
+
+public sealed class PurchaseOrderDetailItem
+{
+    public string PoItemId { get; set; } = string.Empty;
+    public string ItemId { get; set; } = string.Empty;
+    public string ItemName { get; set; } = string.Empty;
+    public string? Spec { get; set; }
+    public string? Unit { get; set; }
+    public string? WarehouseId { get; set; }
+    public decimal OrderedQty { get; set; }
+    public decimal ReceivedQty { get; set; }
+    public decimal UnitPrice { get; set; }
+    public decimal SupplyAmount { get; set; }
+    public decimal VatAmount { get; set; }
+}
+
+/// <summary>수주서 단건 상세.</summary>
+public sealed class SalesOrderDetailModel
+{
+    public string OrderId { get; set; } = string.Empty;
+    public string OrderNo { get; set; } = string.Empty;
+    public DateTime OrderDate { get; set; }
+    public DateTime? DeliveryDate { get; set; }
+    public string PartnerId { get; set; } = string.Empty;
+    public string PartnerName { get; set; } = string.Empty;
+    public decimal TotalAmount { get; set; }
+    public decimal VatAmount { get; set; }
+    public string Status { get; set; } = string.Empty;
+    public string? Memo { get; set; }
+    public List<SalesOrderDetailItem> Items { get; set; } = new();
+}
+
+public sealed class SalesOrderDetailItem
+{
+    public string OrderItemId { get; set; } = string.Empty;
+    public string ItemId { get; set; } = string.Empty;
+    public string ItemName { get; set; } = string.Empty;
+    public string? Spec { get; set; }
+    public string? Unit { get; set; }
+    public decimal Qty { get; set; }
+    public decimal UnitPrice { get; set; }
+    public decimal SupplyAmount { get; set; }
+    public decimal VatAmount { get; set; }
+}
+
+/// <summary>매입반품 단건 상세.</summary>
+public sealed class PurchaseReturnDetailModel
+{
+    public string ReturnId { get; set; } = string.Empty;
+    public string ReturnNo { get; set; } = string.Empty;
+    public DateTime ReturnDate { get; set; }
+    public string? ReceiptId { get; set; }
+    public string PartnerId { get; set; } = string.Empty;
+    public string PartnerName { get; set; } = string.Empty;
+    public decimal TotalAmount { get; set; }
+    public decimal VatAmount { get; set; }
+    public string Status { get; set; } = string.Empty;
+    public string? Memo { get; set; }
+    public List<PurchaseReturnDetailItem> Items { get; set; } = new();
+}
+
+public sealed class PurchaseReturnDetailItem
+{
+    public string ReturnItemId { get; set; } = string.Empty;
+    public string ItemId { get; set; } = string.Empty;
+    public string ItemName { get; set; } = string.Empty;
+    public string? Spec { get; set; }
+    public string? Unit { get; set; }
+    public string? WarehouseId { get; set; }
+    public decimal Qty { get; set; }
+    public decimal UnitPrice { get; set; }
+    public decimal SupplyAmount { get; set; }
+    public decimal VatAmount { get; set; }
 }
 
 public enum DeliveryContextAction

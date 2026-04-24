@@ -61,7 +61,14 @@ public partial class PurchaseReceiptList : ComponentBase
     private HttpClient Http { get; set; } = default!;
 
     /// <summary>
-    /// 행 클릭 시 상위로 매입명세 Id 를 전달한다.
+    /// 다이얼로그 호스트 — 행 클릭 시 선택 ID를 결과로 Close한다.
+    /// 페이지에 직접 임베드될 때는 null이므로 OnOrderSelected 콜백도 병행한다.
+    /// </summary>
+    [CascadingParameter]
+    private IMudDialogInstance? MudDialog { get; set; }
+
+    /// <summary>
+    /// 행 클릭 시 상위로 매입명세 Id 를 전달한다(임베드용, 보조 경로).
     /// </summary>
     [Parameter]
     public EventCallback<string> OnOrderSelected { get; set; }
@@ -331,7 +338,100 @@ public partial class PurchaseReceiptList : ComponentBase
             return;
         }
 
+        // 다이얼로그로 열려 있으면 선택 ID를 결과로 닫아 호출자가 편집 화면에 로드.
+        if (MudDialog is not null)
+        {
+            MudDialog.Close(DialogResult.Ok(row.ReceiptId));
+            return;
+        }
+
         await OnOrderSelected.InvokeAsync(row.ReceiptId);
+    }
+
+    /// <summary>
+    /// 단건 삭제 — draft만 허용. confirmed는 UI에서 아이콘이 Disabled.
+    /// </summary>
+    private async Task DeleteOneAsync(PurchaseReceiptListItem row)
+    {
+        if (string.IsNullOrWhiteSpace(row.ReceiptId)) return;
+
+        var confirm = await DialogService.ShowMessageBoxAsync(
+            "매입명세서 삭제",
+            $"[{row.ReceiptNo}] 을(를) 삭제하시겠습니까?\n(확정된 전표는 삭제할 수 없습니다.)",
+            yesText: "삭제", cancelText: "취소");
+        if (confirm != true) return;
+
+        var (ok, error) = await DeleteReceiptAsync(row.ReceiptId);
+        if (ok)
+        {
+            Snackbar.Add($"[{row.ReceiptNo}] 삭제되었습니다.", Severity.Success);
+            await LoadAsync();
+        }
+        else
+        {
+            Snackbar.Add($"삭제 실패: {error}", Severity.Error);
+        }
+    }
+
+    /// <summary>
+    /// 선택 행 일괄 삭제 — draft 건만 대상, confirmed는 스킵.
+    /// </summary>
+    private async Task BulkDeleteAsync()
+    {
+        var draftTargets = _selectedRows
+            .Where(x => !string.IsNullOrWhiteSpace(x.ReceiptId)
+                        && string.Equals(x.Status, "draft", StringComparison.OrdinalIgnoreCase))
+            .ToList();
+
+        if (draftTargets.Count == 0)
+        {
+            Snackbar.Add("삭제 가능한 draft 상태 매입명세가 없습니다.", Severity.Warning);
+            return;
+        }
+
+        var confirm = await DialogService.ShowMessageBoxAsync(
+            "매입명세서 일괄 삭제",
+            $"선택한 draft 상태 {draftTargets.Count}건을 삭제하시겠습니까?",
+            yesText: "삭제", cancelText: "취소");
+        if (confirm != true) return;
+
+        var success = 0;
+        var failed = new List<(string No, string Reason)>();
+        foreach (var row in draftTargets)
+        {
+            var (ok, error) = await DeleteReceiptAsync(row.ReceiptId);
+            if (ok) success++;
+            else failed.Add((row.ReceiptNo, error ?? "unknown"));
+        }
+
+        if (failed.Count == 0)
+        {
+            Snackbar.Add($"{success}건 삭제 완료.", Severity.Success);
+        }
+        else
+        {
+            Snackbar.Add($"성공 {success}건 / 실패 {failed.Count}건. 첫 실패: {failed[0].No} — {failed[0].Reason[..Math.Min(150, failed[0].Reason.Length)]}", Severity.Warning);
+        }
+
+        await LoadAsync();
+    }
+
+    /// <summary>
+    /// 서버 DELETE 호출. 성공 시 (true, null), 실패 시 (false, 서버응답).
+    /// </summary>
+    private async Task<(bool Success, string? Error)> DeleteReceiptAsync(string receiptId)
+    {
+        try
+        {
+            using var resp = await Http.DeleteAsync($"api/purchase/receipts/{Uri.EscapeDataString(receiptId)}");
+            if (resp.IsSuccessStatusCode) return (true, null);
+            var body = await resp.Content.ReadAsStringAsync();
+            return (false, string.IsNullOrWhiteSpace(body) ? $"HTTP {(int)resp.StatusCode}" : body);
+        }
+        catch (Exception ex)
+        {
+            return (false, ex.Message);
+        }
     }
 
     /// <summary>

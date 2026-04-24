@@ -67,6 +67,35 @@ public class SalesOrderListDto
     public string? Memo { get; set; }
 }
 
+/// <summary>수주서 단건 상세(헤더+라인) — 목록 → 편집 로드용.</summary>
+public class SalesOrderDetailDto
+{
+    public string OrderId { get; set; } = string.Empty;
+    public string OrderNo { get; set; } = string.Empty;
+    public DateTime OrderDate { get; set; }
+    public DateTime? DeliveryDate { get; set; }
+    public string PartnerId { get; set; } = string.Empty;
+    public string PartnerName { get; set; } = string.Empty;
+    public decimal TotalAmount { get; set; }
+    public decimal VatAmount { get; set; }
+    public string Status { get; set; } = string.Empty;
+    public string? Memo { get; set; }
+    public List<SalesOrderDetailItemDto> Items { get; set; } = new();
+}
+
+public class SalesOrderDetailItemDto
+{
+    public string OrderItemId { get; set; } = string.Empty;
+    public string ItemId { get; set; } = string.Empty;
+    public string ItemName { get; set; } = string.Empty;
+    public string? Spec { get; set; }
+    public string? Unit { get; set; }
+    public decimal Qty { get; set; }
+    public decimal UnitPrice { get; set; }
+    public decimal SupplyAmount { get; set; }
+    public decimal VatAmount { get; set; }
+}
+
 public class PartnerSearchDto
 {
     public string PartnerId { get; set; } = string.Empty;

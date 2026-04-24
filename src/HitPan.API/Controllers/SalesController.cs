@@ -41,6 +41,33 @@ public class SalesController : ControllerBase
         return Ok(result);
     }
 
+    [HttpGet("orders/{id}")]
+    public async Task<IActionResult> GetOrder(string id, CancellationToken ct)
+    {
+        var tenantId = HttpContext.Items["TenantId"]?.ToString();
+        if (string.IsNullOrEmpty(tenantId)) return Forbid();
+
+        var detail = await _salesService.GetOrderDetailAsync(id, tenantId, ct);
+        if (detail is null) return NotFound();
+        return Ok(detail);
+    }
+
+    [HttpDelete("orders/{id}")]
+    public async Task<IActionResult> DeleteOrder(string id, CancellationToken ct)
+    {
+        var tenantId = HttpContext.Items["TenantId"]?.ToString();
+        if (string.IsNullOrEmpty(tenantId)) return Forbid();
+        try
+        {
+            await _salesService.DeleteSalesOrderAsync(id, tenantId, ct);
+            return NoContent();
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(new { message = ex.Message });
+        }
+    }
+
     [HttpPost("orders/{id}/convert-to-delivery")]
     public async Task<IActionResult> ConvertOrderToDelivery(string id, CancellationToken ct)
     {

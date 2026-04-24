@@ -1037,4 +1037,89 @@ public class SalesService : ISalesService
             }
         }
     }
+
+    // ─────────────────────────────────────────────────────────────────────
+    // 수주서 단건 조회 — 목록 클릭 → 편집 화면 로드용.
+    // ─────────────────────────────────────────────────────────────────────
+    public async Task<SalesOrderDetailDto?> GetOrderDetailAsync(
+        string orderId, string tenantId, CancellationToken ct = default)
+    {
+        const string headerSql = """
+            SELECT o.order_id     AS OrderId,
+                   o.order_no     AS OrderNo,
+                   o.order_date   AS OrderDate,
+                   o.delivery_date AS DeliveryDate,
+                   o.partner_id   AS PartnerId,
+                   COALESCE(p.partner_name, '') AS PartnerName,
+                   o.total_amount AS TotalAmount,
+                   o.vat_amount   AS VatAmount,
+                   o.status       AS Status,
+                   o.memo         AS Memo
+              FROM sales_orders o
+              LEFT JOIN partners p
+                ON p.partner_id = o.partner_id
+               AND p.tenant_id  = o.tenant_id
+             WHERE o.order_id  = @Id
+               AND o.tenant_id = @Tid
+               AND o.is_deleted = 0
+            """;
+
+        var header = await _db.QueryFirstOrDefaultAsync<SalesOrderDetailDto>(
+            new CommandDefinition(headerSql, new { Id = orderId, Tid = tenantId }, cancellationToken: ct));
+        if (header is null) return null;
+
+        const string linesSql = """
+            SELECT soi.order_item_id AS OrderItemId,
+                   soi.item_id       AS ItemId,
+                   COALESCE(i.item_name, '') AS ItemName,
+                   COALESCE(i.spec, '')      AS Spec,
+                   IFNULL(i.unit, 'EA')      AS Unit,
+                   soi.ordered_qty   AS Qty,
+                   soi.unit_price    AS UnitPrice,
+                   soi.supply_amount AS SupplyAmount,
+                   soi.vat_amount    AS VatAmount
+              FROM sales_order_items soi
+              LEFT JOIN items i
+                ON i.item_id   = soi.item_id
+               AND i.tenant_id = soi.tenant_id
+             WHERE soi.order_id  = @Id
+               AND soi.tenant_id = @Tid
+             ORDER BY soi.order_item_id
+            """;
+
+        var lines = await _db.QueryAsync<SalesOrderDetailItemDto>(
+            new CommandDefinition(linesSql, new { Id = orderId, Tid = tenantId }, cancellationToken: ct));
+        header.Items = lines.ToList();
+        return header;
+    }
+
+    // ─────────────────────────────────────────────────────────────────────
+    // 수주서 draft 삭제 — soft delete. 판매전환된 라인 있으면 차단.
+    // ─────────────────────────────────────────────────────────────────────
+    public async Task DeleteSalesOrderAsync(string orderId, string tenantId, CancellationToken ct = default)
+    {
+        var row = await _db.QueryFirstOrDefaultAsync<dynamic>(new CommandDefinition(
+            "SELECT status, is_deleted FROM sales_orders WHERE order_id=@Id AND tenant_id=@Tid",
+            new { Id = orderId, Tid = tenantId }, cancellationToken: ct))
+            ?? throw new InvalidOperationException("수주서를 찾을 수 없습니다.");
+
+        if ((long)row.is_deleted == 1L)
+        {
+            throw new InvalidOperationException("이미 삭제된 수주서입니다.");
+        }
+
+        var deliveredCount = await _db.QueryFirstOrDefaultAsync<long>(new CommandDefinition(
+            "SELECT COUNT(*) FROM sales_order_items WHERE order_id=@Id AND tenant_id=@Tid AND delivered_qty > 0",
+            new { Id = orderId, Tid = tenantId }, cancellationToken: ct));
+        if (deliveredCount > 0)
+        {
+            throw new InvalidOperationException("이미 판매전환(출고)된 라인이 있어 삭제할 수 없습니다. 거래명세서 취소 경로를 사용해주세요.");
+        }
+
+        await _db.ExecuteAsync(new CommandDefinition(
+            "UPDATE sales_orders SET is_deleted=1, updated_at=NOW(6) WHERE order_id=@Id AND tenant_id=@Tid",
+            new { Id = orderId, Tid = tenantId }, cancellationToken: ct));
+
+        await _audit.LogAsync("delete", "sales_order", orderId, ct: ct);
+    }
 }

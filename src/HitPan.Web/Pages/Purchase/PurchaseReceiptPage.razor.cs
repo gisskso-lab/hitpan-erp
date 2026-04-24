@@ -633,7 +633,84 @@ public partial class PurchaseReceiptPage : ComponentBase
     private async Task OpenListAsync()
     {
         var options = new DialogOptions { MaxWidth = MaxWidth.ExtraLarge, FullWidth = true, CloseButton = true };
-        await DialogService.ShowAsync<PurchaseReceiptList>("매입명세서 목록", options);
+        var dlg = await DialogService.ShowAsync<PurchaseReceiptList>("매입명세서 목록", options);
+        var result = await dlg.Result;
+        if (result is null || result.Canceled) return;
+
+        var receiptId = result.Data as string;
+        if (string.IsNullOrWhiteSpace(receiptId)) return;
+
+        await LoadReceiptAsync(receiptId);
+    }
+
+    /// <summary>
+    /// 서버에서 매입명세서 단건을 읽어 편집 화면(_draft)에 주입한다.
+    /// 확정 전표도 열람용으로 로드하되 그리드는 _status 로 읽기전용 처리된다.
+    /// </summary>
+    private async Task LoadReceiptAsync(string receiptId)
+    {
+        var detail = await DeliveryService.GetPurchaseReceiptDetailAsync(receiptId);
+        if (detail is null)
+        {
+            Snackbar.Add("매입명세서를 불러오지 못했습니다.", Severity.Error);
+            return;
+        }
+
+        _itemCache ??= await ItemsApi.GetListAsync() ?? new();
+        await EnsureDefaultWarehouseAsync();
+
+        var lines = new List<DeliveryLineModel>();
+        var no = 1;
+        foreach (var it in detail.Items)
+        {
+            lines.Add(new DeliveryLineModel
+            {
+                No = no++,
+                ItemId = it.ItemId,
+                ItemName = it.ItemName,
+                Spec = it.Spec ?? string.Empty,
+                Unit = string.IsNullOrWhiteSpace(it.Unit) ? "EA" : it.Unit!,
+                Quantity = it.Qty,
+                UnitPrice = it.UnitPrice,
+                Warehouse = it.WarehouseId ?? string.Empty,
+                IsPlaceholder = false
+            });
+        }
+        // 편집 편의를 위해 placeholder 한 줄 추가.
+        lines.Add(new DeliveryLineModel { No = no, IsPlaceholder = true });
+
+        _draft = new DeliveryDraftModel
+        {
+            Id = detail.ReceiptId,
+            DocumentType = "매입",
+            DocumentNumber = detail.ReceiptNo,
+            SalesDate = detail.ReceiptDate,
+            ManagerName = "담당자",
+            PartnerId = detail.PartnerId,
+            SalesCompany = detail.PartnerName,
+            Memo = detail.Memo,
+            Status = detail.Status,
+            Lines = lines
+        };
+        _receiptDate = detail.ReceiptDate;
+        _status = string.Equals(detail.Status, "confirmed", StringComparison.OrdinalIgnoreCase)
+            ? "Confirmed" : "Draft";
+        _isNew = false;
+        _hasUnsavedChanges = false;
+        _selectedLine = null;
+
+        // 라인별 Warehouse 가 비어 있으면 헤더 기본 창고로 채우는 건 편집 시 적용.
+        RecalculateSummary();
+        RefreshWorkflow();
+
+        if (TabService.ActiveTabId is { } tabId)
+        {
+            TabService.SetTabDirty(tabId, false);
+            TabService.UpdateSubTitle(tabId, _draft.SalesCompany);
+        }
+
+        Snackbar.Add($"[{detail.ReceiptNo}] 불러왔습니다.", Severity.Info);
+        await InvokeAsync(StateHasChanged);
     }
 
     /// <summary>

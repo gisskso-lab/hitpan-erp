@@ -42,4 +42,14 @@ public interface ISalesService
         CancellationToken ct = default);
 
     Task<List<PartnerSearchDto>> SearchPartnersAsync(string tenantId, string keyword, CancellationToken ct = default);
+
+    Task<SalesOrderDetailDto?> GetOrderDetailAsync(
+        string orderId,
+        string tenantId,
+        CancellationToken ct = default);
+
+    Task DeleteSalesOrderAsync(
+        string orderId,
+        string tenantId,
+        CancellationToken ct = default);
 }

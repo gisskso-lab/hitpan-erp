@@ -541,7 +541,80 @@ public partial class PurchaseOrderPage : ComponentBase
     private async Task OpenListAsync()
     {
         var options = new DialogOptions { MaxWidth = MaxWidth.ExtraLarge, FullWidth = true, CloseButton = true };
-        await DialogService.ShowAsync<PurchaseOrderList>("발주서 목록", options);
+        var dlg = await DialogService.ShowAsync<PurchaseOrderList>("발주서 목록", options);
+        var result = await dlg.Result;
+        if (result is null || result.Canceled) return;
+
+        var poId = result.Data as string;
+        if (string.IsNullOrWhiteSpace(poId)) return;
+
+        await LoadOrderAsync(poId);
+    }
+
+    /// <summary>
+    /// 서버에서 발주서 단건을 읽어 편집 화면(_draft)에 주입한다.
+    /// </summary>
+    private async Task LoadOrderAsync(string poId)
+    {
+        var detail = await DeliveryService.GetPurchaseOrderDetailAsync(poId);
+        if (detail is null)
+        {
+            Snackbar.Add("발주서를 불러오지 못했습니다.", Severity.Error);
+            return;
+        }
+
+        _itemCache ??= await ItemsApi.GetListAsync() ?? new();
+
+        var lines = new List<DeliveryLineModel>();
+        var no = 1;
+        foreach (var it in detail.Items)
+        {
+            lines.Add(new DeliveryLineModel
+            {
+                No = no++,
+                ItemId = it.ItemId,
+                ItemName = it.ItemName,
+                Spec = it.Spec ?? string.Empty,
+                Unit = string.IsNullOrWhiteSpace(it.Unit) ? "EA" : it.Unit!,
+                Quantity = it.OrderedQty,
+                UnitPrice = it.UnitPrice,
+                Warehouse = it.WarehouseId ?? string.Empty,
+                IsPlaceholder = false
+            });
+        }
+        lines.Add(new DeliveryLineModel { No = no, IsPlaceholder = true });
+
+        _draft = new DeliveryDraftModel
+        {
+            Id = detail.PoId,
+            DocumentType = "발주",
+            DocumentNumber = detail.PoNo,
+            SalesDate = detail.PoDate,
+            ManagerName = "담당자",
+            PartnerId = detail.PartnerId,
+            SalesCompany = detail.PartnerName,
+            Memo = detail.Memo,
+            Status = detail.Status,
+            Lines = lines
+        };
+        _deliveryDueDate = detail.ExpectedDate;
+        _status = string.Equals(detail.Status, "confirmed", StringComparison.OrdinalIgnoreCase)
+            ? "Confirmed" : "Draft";
+        _isNew = false;
+        _hasUnsavedChanges = false;
+        _selectedLine = null;
+
+        RecalculateSummary();
+        RefreshWorkflow();
+
+        if (TabService.ActiveTabId is { } tabId)
+        {
+            TabService.SetTabDirty(tabId, false);
+            TabService.UpdateSubTitle(tabId, _draft.SalesCompany);
+        }
+
+        Snackbar.Add($"[{detail.PoNo}] 불러왔습니다.", Severity.Info);
+        await InvokeAsync(StateHasChanged);
     }
 
     /// <summary>

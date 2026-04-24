@@ -32,6 +32,9 @@
             <MudButton Variant="Variant.Outlined" Color="Color.Tertiary" StartIcon="@Icons.Material.Filled.SwapHoriz" OnClick="BulkConvertToDeliveryAsync" Disabled="@(!_selectedRows.Any())">
                 판매로 전환
             </MudButton>
+            <MudButton Variant="Variant.Outlined" Color="Color.Error" StartIcon="@Icons.Material.Filled.Delete" OnClick="BulkDeleteAsync" Disabled="@(!_selectedRows.Any())">
+                선택 삭제
+            </MudButton>
         </MudStack>
     </MudPaper>
 
@@ -53,6 +56,7 @@
             <MudTh>업체</MudTh>
             <MudTh>상태</MudTh>
             <MudTh Class="text-right">합계</MudTh>
+            <MudTh Style="width:56px"></MudTh>
         </HeaderContent>
         <RowTemplate>
             <MudTd>
@@ -69,6 +73,15 @@
             <MudTd @onclick="@(() => SelectRowAsync(context))">@context.PartnerName</MudTd>
             <MudTd @onclick="@(() => SelectRowAsync(context))">@context.Status</MudTd>
             <MudTd Class="text-right" @onclick="@(() => SelectRowAsync(context))">@context.TotalAmount.ToString("N0")</MudTd>
+            <MudTd>
+                <div @onclick:stopPropagation="true">
+                    <MudIconButton Icon="@Icons.Material.Filled.Delete"
+                                   Color="Color.Error"
+                                   Size="Size.Small"
+                                   Disabled="@(!string.Equals(context.Status, "draft", StringComparison.OrdinalIgnoreCase))"
+                                   OnClick="@(() => DeleteOneAsync(context))" />
+                </div>
+            </MudTd>
         </RowTemplate>
         <NoRecordsContent>
             <MudText Typo="Typo.body2" Class="pa-4">조회된 수주서가 없습니다.</MudText>

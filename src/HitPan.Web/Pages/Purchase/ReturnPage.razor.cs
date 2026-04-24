@@ -20,8 +20,6 @@ public partial class ReturnPage : ComponentBase
     private IReadOnlyList<DeliveryWorkflowStepModel> _workflowSteps = Array.Empty<DeliveryWorkflowStepModel>();
     private string _status = "Draft";
     private string _returnType = "purchase_return";
-    private bool _showReturnList;
-    private List<PurchaseReturnListItem> _returnList = new();
     private bool _isNew = true;
 
     protected override async Task OnInitializedAsync()
@@ -257,8 +255,77 @@ public partial class ReturnPage : ComponentBase
 
     private async Task OpenListAsync()
     {
-        _returnList = await DeliveryService.GetPurchaseReturnListAsync();
-        _showReturnList = true;
+        var options = new DialogOptions { MaxWidth = MaxWidth.ExtraLarge, FullWidth = true, CloseButton = true };
+        var dlg = await DialogService.ShowAsync<PurchaseReturnList>("매입반품 목록", options);
+        var result = await dlg.Result;
+        if (result is null || result.Canceled) return;
+
+        var returnId = result.Data as string;
+        if (string.IsNullOrWhiteSpace(returnId)) return;
+
+        await LoadReturnAsync(returnId);
+    }
+
+    /// <summary>서버에서 매입반품 단건을 읽어 편집 화면에 주입한다.</summary>
+    private async Task LoadReturnAsync(string returnId)
+    {
+        var detail = await DeliveryService.GetPurchaseReturnDetailAsync(returnId);
+        if (detail is null)
+        {
+            Snackbar.Add("반품 문서를 불러오지 못했습니다.", Severity.Error);
+            return;
+        }
+
+        _itemCache ??= await ItemsApi.GetListAsync() ?? new();
+
+        var lines = new List<DeliveryLineModel>();
+        var no = 1;
+        foreach (var it in detail.Items)
+        {
+            lines.Add(new DeliveryLineModel
+            {
+                No = no++,
+                ItemId = it.ItemId,
+                ItemName = it.ItemName,
+                Spec = it.Spec ?? string.Empty,
+                Unit = string.IsNullOrWhiteSpace(it.Unit) ? "EA" : it.Unit!,
+                Quantity = it.Qty,
+                UnitPrice = it.UnitPrice,
+                Warehouse = it.WarehouseId ?? string.Empty,
+                IsPlaceholder = false
+            });
+        }
+        lines.Add(new DeliveryLineModel { No = no, IsPlaceholder = true });
+
+        _draft = new DeliveryDraftModel
+        {
+            Id = detail.ReturnId,
+            DocumentType = "반품",
+            DocumentNumber = detail.ReturnNo,
+            SalesDate = detail.ReturnDate,
+            ManagerName = "담당자",
+            PartnerId = detail.PartnerId,
+            SalesCompany = detail.PartnerName,
+            Memo = detail.Memo,
+            Status = detail.Status,
+            Lines = lines
+        };
+        _status = string.Equals(detail.Status, "confirmed", StringComparison.OrdinalIgnoreCase)
+            ? "Confirmed" : "Draft";
+        _isNew = false;
+        _hasUnsavedChanges = false;
+        _selectedLine = null;
+
+        RecalculateSummary();
+        RefreshWorkflow();
+
+        if (TabService.ActiveTabId is { } tabId)
+        {
+            TabService.SetTabDirty(tabId, false);
+            TabService.UpdateSubTitle(tabId, _draft.SalesCompany);
+        }
+
+        Snackbar.Add($"[{detail.ReturnNo}] 불러왔습니다.", Severity.Info);
         await InvokeAsync(StateHasChanged);
     }
 
@@ -302,11 +369,6 @@ public partial class ReturnPage : ComponentBase
         {
             Snackbar.Add($"반품 확정 실패: {err}", Severity.Error);
         }
-    }
-
-    private void CloseReturnList()
-    {
-        _showReturnList = false;
     }
 
     private void RefreshWorkflow()

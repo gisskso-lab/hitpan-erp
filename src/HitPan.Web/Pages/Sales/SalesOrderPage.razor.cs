@@ -508,7 +508,78 @@ public partial class SalesOrderPage : ComponentBase
     private async Task OpenListAsync()
     {
         var options = new DialogOptions { MaxWidth = MaxWidth.ExtraLarge, FullWidth = true, CloseButton = true };
-        await DialogService.ShowAsync<SalesOrderList>("수주서 목록", options);
+        var dlg = await DialogService.ShowAsync<SalesOrderList>("수주서 목록", options);
+        var result = await dlg.Result;
+        if (result is null || result.Canceled) return;
+
+        var orderId = result.Data as string;
+        if (string.IsNullOrWhiteSpace(orderId)) return;
+
+        await LoadOrderAsync(orderId);
+    }
+
+    /// <summary>
+    /// 서버에서 수주서 단건을 읽어 편집 화면(_draft)에 주입한다.
+    /// </summary>
+    private async Task LoadOrderAsync(string orderId)
+    {
+        var detail = await DeliveryService.GetSalesOrderDetailAsync(orderId);
+        if (detail is null)
+        {
+            Snackbar.Add("수주서를 불러오지 못했습니다.", Severity.Error);
+            return;
+        }
+
+        _itemCache ??= await ItemsApi.GetListAsync() ?? new();
+
+        var lines = new List<DeliveryLineModel>();
+        var no = 1;
+        foreach (var it in detail.Items)
+        {
+            lines.Add(new DeliveryLineModel
+            {
+                No = no++,
+                ItemId = it.ItemId,
+                ItemName = it.ItemName,
+                Spec = it.Spec ?? string.Empty,
+                Unit = string.IsNullOrWhiteSpace(it.Unit) ? "EA" : it.Unit!,
+                Quantity = it.Qty,
+                UnitPrice = it.UnitPrice,
+                IsPlaceholder = false
+            });
+        }
+        lines.Add(new DeliveryLineModel { No = no, IsPlaceholder = true });
+
+        _draft = new DeliveryDraftModel
+        {
+            Id = detail.OrderId,
+            DocumentType = "수주",
+            DocumentNumber = detail.OrderNo,
+            SalesDate = detail.OrderDate,
+            ManagerName = "담당자",
+            PartnerId = detail.PartnerId,
+            SalesCompany = detail.PartnerName,
+            Memo = detail.Memo,
+            Status = detail.Status,
+            Lines = lines
+        };
+        _status = string.Equals(detail.Status, "confirmed", StringComparison.OrdinalIgnoreCase)
+            ? "Confirmed" : "Draft";
+        _isNew = false;
+        _hasUnsavedChanges = false;
+        _selectedLine = null;
+
+        RecalculateSummary();
+        RefreshWorkflow();
+
+        if (TabService.ActiveTabId is { } tabId)
+        {
+            TabService.SetTabDirty(tabId, false);
+            TabService.UpdateSubTitle(tabId, _draft.SalesCompany);
+        }
+
+        Snackbar.Add($"[{detail.OrderNo}] 불러왔습니다.", Severity.Info);
+        await InvokeAsync(StateHasChanged);
     }
 
     /// <summary>

@@ -1,0 +1,55 @@
+@using HitPan.Web.Models
+@namespace HitPan.Web.Components.Purchase
+
+<div class="purchase-return-list">
+    <MudPaper Class="pa-3 mb-2">
+        <MudStack Row="true" Spacing="2" AlignItems="AlignItems.Center" Wrap="Wrap.Wrap">
+            <MudDatePicker Label="시작일" Date="_startDate" DateChanged="OnStartDateChangedAsync" />
+            <MudDatePicker Label="종료일" Date="_endDate" DateChanged="OnEndDateChangedAsync" />
+            <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="@(() => LoadAsync())">조회</MudButton>
+            <MudButton Variant="Variant.Outlined" Color="Color.Error" StartIcon="@Icons.Material.Filled.Delete" OnClick="BulkDeleteAsync" Disabled="@(!_selectedRows.Any())">
+                선택 삭제
+            </MudButton>
+        </MudStack>
+    </MudPaper>
+
+    <MudTable T="PurchaseReturnListItem" Items="_rows" Dense="true" Hover="true" Striped="true" FixedHeader="true" Height="calc(100vh - 360px)">
+        <HeaderContent>
+            <MudTh Style="width:48px">
+                <MudCheckBox T="bool" Value="_allSelected" ValueChanged="ToggleAllAsync" />
+            </MudTh>
+            <MudTh>일자</MudTh>
+            <MudTh>전표번호</MudTh>
+            <MudTh>업체</MudTh>
+            <MudTh>상태</MudTh>
+            <MudTh Class="text-right">합계</MudTh>
+            <MudTh Style="width:56px"></MudTh>
+        </HeaderContent>
+        <RowTemplate>
+            <MudTd>
+                <div @onclick:stopPropagation="true">
+                    <MudCheckBox T="bool"
+                                 Value="context.IsChecked"
+                                 ValueChanged="@(v => ToggleOneAsync(context, v))" />
+                </div>
+            </MudTd>
+            <MudTd @onclick="@(() => SelectRowAsync(context))">@context.ReturnDate.ToString("yyyy-MM-dd")</MudTd>
+            <MudTd @onclick="@(() => SelectRowAsync(context))">@context.ReturnNo</MudTd>
+            <MudTd @onclick="@(() => SelectRowAsync(context))">@context.PartnerName</MudTd>
+            <MudTd @onclick="@(() => SelectRowAsync(context))">@context.Status</MudTd>
+            <MudTd Class="text-right" @onclick="@(() => SelectRowAsync(context))">@((context.TotalAmount + context.VatAmount).ToString("N0"))</MudTd>
+            <MudTd>
+                <div @onclick:stopPropagation="true">
+                    <MudIconButton Icon="@Icons.Material.Filled.Delete"
+                                   Color="Color.Error"
+                                   Size="Size.Small"
+                                   Disabled="@(!string.Equals(context.Status, "draft", StringComparison.OrdinalIgnoreCase))"
+                                   OnClick="@(() => DeleteOneAsync(context))" />
+                </div>
+            </MudTd>
+        </RowTemplate>
+        <NoRecordsContent>
+            <MudText Typo="Typo.body2" Class="pa-4">조회된 매입반품이 없습니다.</MudText>
+        </NoRecordsContent>
+    </MudTable>
+</div>
