@@ -25,5 +25,10 @@ public sealed class SalesDeliveryItemConfiguration : IEntityTypeConfiguration<Sa
         builder.Property(e => e.UnitPrice).HasColumnName("unit_price").HasColumnType("decimal(15,2)").IsRequired();
         builder.Property(e => e.SupplyAmount).HasColumnName("supply_amount").HasColumnType("decimal(15,2)").IsRequired();
         builder.Property(e => e.VatAmount).HasColumnName("vat_amount").HasColumnType("decimal(15,2)").IsRequired();
+
+        builder.HasOne<SalesDelivery>()
+               .WithMany()
+               .HasForeignKey(e => e.DeliveryId)
+               .OnDelete(DeleteBehavior.Cascade);
     }
 }

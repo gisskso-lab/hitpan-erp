@@ -34,5 +34,10 @@ public sealed class QuotationItemConfiguration : IEntityTypeConfiguration<Quotat
         builder.Property(e => e.VatAmount).HasColumnName("vat_amount").HasColumnType("decimal(15,2)").IsRequired();
         builder.Property(e => e.Memo).HasColumnName("memo").HasMaxLength(200);
         builder.Property(e => e.SortOrder).HasColumnName("sort_order").IsRequired();
+
+        builder.HasOne<Quotation>()
+               .WithMany()
+               .HasForeignKey(e => e.QuoteId)
+               .OnDelete(DeleteBehavior.Cascade);
     }
 }

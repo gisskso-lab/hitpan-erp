@@ -71,6 +71,34 @@ public class SalesController : ControllerBase
         return Ok(new { id, status = "confirmed" });
     }
 
+    /// <summary>거래명세서 일괄 확정 — 프론트 SalesListDialog "계산서 발행" 버튼의 백엔드 엔드포인트.</summary>
+    /// 성공/실패를 건별로 분리 반환해 UI가 정직하게 집계한다 (헌법 #20).
+    [HttpPost("deliveries/bulk-confirm")]
+    public async Task<IActionResult> BulkConfirmDeliveries([FromBody] BulkConfirmDeliveriesRequest request, CancellationToken ct)
+    {
+        var tenantId = HttpContext.Items["TenantId"]?.ToString();
+        if (string.IsNullOrEmpty(tenantId)) return Forbid();
+
+        var success = new List<string>();
+        var failed = new List<BulkConfirmFailureItem>();
+        var ids = request?.DeliveryIds ?? new List<string>();
+
+        foreach (var id in ids)
+        {
+            try
+            {
+                await _salesService.ConfirmDeliveryAsync(id, new ConfirmDeliveryRequest(), ct);
+                success.Add(id);
+            }
+            catch (Exception ex)
+            {
+                failed.Add(new BulkConfirmFailureItem { Id = id, Reason = ex.Message });
+            }
+        }
+
+        return Ok(new { success, failed });
+    }
+
     [HttpGet("deliveries")]
     public async Task<IActionResult> GetDeliveries(
         [FromQuery] DateTime? from,
@@ -160,4 +188,15 @@ public class SalesController : ControllerBase
             return BadRequest(new { message = ex.Message });
         }
     }
+}
+
+public sealed class BulkConfirmDeliveriesRequest
+{
+    public List<string> DeliveryIds { get; set; } = new();
+}
+
+public sealed class BulkConfirmFailureItem
+{
+    public string Id { get; set; } = string.Empty;
+    public string Reason { get; set; } = string.Empty;
 }

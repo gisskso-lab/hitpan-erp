@@ -28,5 +28,10 @@ public sealed class PurchaseOrderItemConfiguration : IEntityTypeConfiguration<Pu
         builder.Property(e => e.VatAmount).HasColumnName("vat_amount").HasColumnType("decimal(15,2)").IsRequired();
         builder.Property(e => e.WarehouseId).HasColumnName("warehouse_id").HasMaxLength(36);
         builder.Property(e => e.ItemStatus).HasColumnName("item_status").HasMaxLength(20).IsRequired();
+
+        builder.HasOne<PurchaseOrder>()
+               .WithMany()
+               .HasForeignKey(e => e.PoId)
+               .OnDelete(DeleteBehavior.Cascade);
     }
 }

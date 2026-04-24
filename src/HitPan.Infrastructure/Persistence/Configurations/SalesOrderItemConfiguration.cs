@@ -25,5 +25,10 @@ public sealed class SalesOrderItemConfiguration : IEntityTypeConfiguration<Sales
         builder.Property(e => e.SupplyAmount).HasColumnName("supply_amount").HasColumnType("decimal(15,2)").IsRequired();
         builder.Property(e => e.VatAmount).HasColumnName("vat_amount").HasColumnType("decimal(15,2)").IsRequired();
         builder.Property(e => e.ItemStatus).HasColumnName("item_status").HasMaxLength(20).IsRequired();
+
+        builder.HasOne<SalesOrder>()
+               .WithMany()
+               .HasForeignKey(e => e.OrderId)
+               .OnDelete(DeleteBehavior.Cascade);
     }
 }
