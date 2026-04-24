@@ -531,9 +531,98 @@ public class BomService : IBomService
     public async Task OrderAlertAsync(string alertId, string tenantId, CancellationToken ct = default)
     {
         await EnsureOpenAsync(ct).ConfigureAwait(false);
-        await _db.ExecuteAsync(new CommandDefinition(
-            "UPDATE stock_alerts SET status='ordered', updated_at=NOW(6) WHERE alert_id=@AlertId AND tenant_id=@TenantId",
-            new { AlertId = alertId, TenantId = tenantId }, cancellationToken: ct)).ConfigureAwait(false);
+
+        // 1) 알림에서 item_id·부족수량 조회
+        var alert = await _db.QueryFirstOrDefaultAsync<(string ItemId, decimal ShortageQty, string? AutoOrderPartnerId, decimal AutoOrderQty, decimal PurchasePrice)>(
+            new CommandDefinition(
+                """
+                SELECT sa.item_id AS ItemId,
+                       sa.shortage_qty AS ShortageQty,
+                       bi.auto_order_partner_id AS AutoOrderPartnerId,
+                       COALESCE(bi.auto_order_qty, sa.shortage_qty) AS AutoOrderQty,
+                       COALESCE(i.purchase_price, i.cost_price, 0) AS PurchasePrice
+                FROM stock_alerts sa
+                LEFT JOIN bom_items bi
+                  ON bi.material_item_id = sa.item_id AND bi.tenant_id = sa.tenant_id
+                LEFT JOIN items i ON i.item_id = sa.item_id AND i.tenant_id = sa.tenant_id
+                WHERE sa.alert_id = @AlertId AND sa.tenant_id = @TenantId
+                LIMIT 1
+                """,
+                new { AlertId = alertId, TenantId = tenantId },
+                cancellationToken: ct)).ConfigureAwait(false);
+
+        if (string.IsNullOrEmpty(alert.ItemId))
+            throw new InvalidOperationException("알림 또는 품목을 찾을 수 없습니다.");
+        if (string.IsNullOrWhiteSpace(alert.AutoOrderPartnerId))
+            throw new InvalidOperationException("자동발주 공급처가 설정되지 않았습니다. BOM 자재에서 '자동발주 공급처'를 먼저 지정하세요.");
+
+        var orderQty = alert.AutoOrderQty > 0 ? alert.AutoOrderQty : alert.ShortageQty;
+        var unitPrice = alert.PurchasePrice;
+        var supply = orderQty * unitPrice;
+        var vat = Math.Round(supply * 0.1m, 0, MidpointRounding.AwayFromZero);
+
+        // 2) 발주서 번호 채번(해당일자 순번)
+        var today = DateTime.Today;
+        var prefix = $"PO-{today:yyyyMMdd}-";
+        var cnt = await _db.QueryFirstOrDefaultAsync<int>(new CommandDefinition(
+            "SELECT COUNT(*) FROM purchase_orders WHERE tenant_id=@TenantId AND po_no LIKE CONCAT(@Prefix, '%')",
+            new { TenantId = tenantId, Prefix = prefix }, cancellationToken: ct)).ConfigureAwait(false);
+        var poNo = $"{prefix}{cnt + 1:000}";
+        var poId = Guid.NewGuid().ToString();
+
+        // 3) purchase_orders + purchase_order_items INSERT (단일 tx)
+        using var tx = _db.BeginTransaction();
+        try
+        {
+            await _db.ExecuteAsync(new CommandDefinition(
+                """
+                INSERT INTO purchase_orders
+                  (po_id, tenant_id, po_no, partner_id, po_date, status, total_amount, vat_amount, memo, created_at, updated_at)
+                VALUES
+                  (@PoId, @TenantId, @PoNo, @PartnerId, @PoDate, 'draft', @Supply, @Vat, @Memo, NOW(6), NOW(6))
+                """,
+                new
+                {
+                    PoId = poId,
+                    TenantId = tenantId,
+                    PoNo = poNo,
+                    PartnerId = alert.AutoOrderPartnerId,
+                    PoDate = today,
+                    Supply = supply,
+                    Vat = vat,
+                    Memo = $"BOM 자재부족 자동발주 (alert {alertId[..8]})"
+                }, transaction: tx, cancellationToken: ct)).ConfigureAwait(false);
+
+            await _db.ExecuteAsync(new CommandDefinition(
+                """
+                INSERT INTO purchase_order_items
+                  (po_item_id, po_id, tenant_id, item_id, ordered_qty, received_qty, unit_price, supply_amount, vat_amount, item_status)
+                VALUES
+                  (UUID(), @PoId, @TenantId, @ItemId, @Qty, 0, @UnitPrice, @Supply, @Vat, 'pending')
+                """,
+                new
+                {
+                    PoId = poId,
+                    TenantId = tenantId,
+                    ItemId = alert.ItemId,
+                    Qty = orderQty,
+                    UnitPrice = unitPrice,
+                    Supply = supply,
+                    Vat = vat
+                }, transaction: tx, cancellationToken: ct)).ConfigureAwait(false);
+
+            // 4) 알림 상태 ordered + 발주 ID 연결
+            await _db.ExecuteAsync(new CommandDefinition(
+                "UPDATE stock_alerts SET status='ordered', updated_at=NOW(6) WHERE alert_id=@AlertId AND tenant_id=@TenantId",
+                new { AlertId = alertId, TenantId = tenantId }, transaction: tx, cancellationToken: ct)).ConfigureAwait(false);
+
+            tx.Commit();
+        }
+        catch
+        {
+            try { tx.Rollback(); } catch { /* closed */ }
+            throw;
+        }
     }
 
     private async Task<bool> HasCircularRefAsync(string productItemId, List<string> materialIds, string tenantId, CancellationToken ct)

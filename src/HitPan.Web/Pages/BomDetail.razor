@@ -32,13 +32,27 @@ else
             <MudPaper Class="pa-4" Elevation="0" Style="border:1px solid var(--mud-palette-lines-default);border-radius:12px">
                 <MudText Typo="Typo.subtitle1" Class="mb-2">기본정보</MudText>
                 <MudGrid Spacing="2">
-                    <MudItem xs="12" md="5">
+                    <MudItem xs="12" md="6">
+                        @* 완제품 선택 — fk_bh_item FK를 만족시키기 위한 필수 필드(없으면 빈 문자열 POST로 400). *@
+                        <MudAutocomplete T="ItemOption"
+                                         Value="@_selectedProduct"
+                                         ValueChanged="OnProductSelected"
+                                         SearchFunc="SearchProducts"
+                                         ToStringFunc="@(x => x?.Name ?? "")"
+                                         Label="완제품"
+                                         Required="true"
+                                         RequiredError="완제품을 선택하세요."
+                                         Variant="Variant.Outlined"
+                                         Margin="Margin.Dense"
+                                         Dense="true" />
+                    </MudItem>
+                    <MudItem xs="12" md="4">
                         <MudTextField @bind-Value="_bomName" Label="BOM 이름" Variant="Variant.Outlined" Margin="Margin.Dense" Required="true" />
                     </MudItem>
                     <MudItem xs="12" md="2">
                         <MudCheckBox T="bool" @bind-Value="_isDefault" Label="기본 BOM" Color="Color.Primary" />
                     </MudItem>
-                    <MudItem xs="12" md="5">
+                    <MudItem xs="12">
                         <MudTextField @bind-Value="_memo" Label="메모" Variant="Variant.Outlined" Margin="Margin.Dense" />
                     </MudItem>
                 </MudGrid>
@@ -155,6 +169,7 @@ else
 
     // 기본정보
     private string? _selectedProductId;
+    private ItemOption? _selectedProduct;
     private string _bomName = "";
     private bool _isDefault = true;
     private string? _memo;
@@ -181,9 +196,13 @@ else
         _isNew = string.IsNullOrWhiteSpace(Id) || string.Equals(Id, "new", StringComparison.OrdinalIgnoreCase);
         _loading = true;
 
+        // 상품 캐시 선행 로드 — 완제품 Autocomplete·자재 Autocomplete 공용.
+        _itemCache ??= await LoadItemOptions();
+
         if (_isNew)
         {
             _selectedProductId = null;
+            _selectedProduct = null;
             _bomName = "";
             _isDefault = true;
             _memo = null;
@@ -200,6 +219,8 @@ else
             }
 
             _selectedProductId = detail.ProductItemId;
+            _selectedProduct = _itemCache.FirstOrDefault(x => x.ItemId == detail.ProductItemId)
+                ?? new ItemOption { ItemId = detail.ProductItemId, Name = detail.ProductItemName };
             _bomName = detail.BomName;
             _isDefault = detail.IsDefault;
             _memo = detail.Memo;
@@ -215,6 +236,23 @@ else
         }
 
         _loading = false;
+    }
+
+    private Task<IEnumerable<ItemOption>> SearchProducts(string? value, CancellationToken ct)
+    {
+        var src = _itemCache ?? new List<ItemOption>();
+        var filtered = string.IsNullOrWhiteSpace(value)
+            ? src
+            : src.Where(x => x.Name.Contains(value, StringComparison.OrdinalIgnoreCase));
+        return Task.FromResult<IEnumerable<ItemOption>>(filtered);
+    }
+
+    private void OnProductSelected(ItemOption? selected)
+    {
+        _selectedProduct = selected;
+        _selectedProductId = selected?.ItemId;
+        if (string.IsNullOrWhiteSpace(_bomName) && selected is not null)
+            _bomName = $"{selected.Name} 기본 BOM";
     }
 
     // 자재 검색 (전체)
@@ -249,6 +287,11 @@ else
 
     private async Task SaveAsync()
     {
+        if (string.IsNullOrWhiteSpace(_selectedProductId))
+        {
+            Snackbar.Add("완제품을 선택해주세요.", Severity.Warning);
+            return;
+        }
         if (string.IsNullOrWhiteSpace(_bomName))
         {
             Snackbar.Add("BOM 이름을 입력해주세요.", Severity.Warning);

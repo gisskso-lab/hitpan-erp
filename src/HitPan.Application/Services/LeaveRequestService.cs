@@ -85,6 +85,20 @@ public sealed class LeaveRequestService : ILeaveRequestService
             },
             cancellationToken: ct)).ConfigureAwait(false);
 
+        // 결재 트리거 — 연차도 결재 라인이 설정돼 있으면 approval_documents 자동 생성(발신함 노출).
+        // 금액은 연차일수 기반(레거시 금액 기반 결재 로직 재활용).
+        var empName = await _db.QueryFirstOrDefaultAsync<string?>(new CommandDefinition(
+            "SELECT emp_name FROM employees WHERE tenant_id=@TenantId AND employee_id=@EmpId",
+            new { TenantId = tenantId, EmpId = request.EmployeeId },
+            cancellationToken: ct)).ConfigureAwait(false) ?? "직원";
+
+        var title = $"연차 신청: {empName} {request.StartDate:yyyy-MM-dd}~{request.EndDate:yyyy-MM-dd} ({request.LeaveDays}일)";
+        await ApprovalTriggerHelper.TryCreateApprovalAsync(
+            _db, docType: "leave", refId: requestId, refNo: requestId[..8],
+            title: title, amount: request.LeaveDays,
+            tenantId: tenantId, requesterId: request.EmployeeId, requesterName: empName,
+            ct: ct).ConfigureAwait(false);
+
         return requestId;
     }
 
