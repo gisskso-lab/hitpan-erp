@@ -56,10 +56,11 @@
         </HeaderContent>
         <RowTemplate>
             <MudTd>
-                <MudCheckBox T="bool"
-                             Value="context.IsChecked"
-                             ValueChanged="@(v => ToggleOneAsync(context, v))"
-                             OnClick:stopPropagation="true" />
+                <div @onclick:stopPropagation="true">
+                    <MudCheckBox T="bool"
+                                 Value="context.IsChecked"
+                                 ValueChanged="@(v => ToggleOneAsync(context, v))" />
+                </div>
             </MudTd>
             <MudTd @onclick="@(() => SelectRowAsync(context))">@context.OrderDate.ToString("yyyy-MM-dd")</MudTd>
             <MudTd @onclick="@(() => SelectRowAsync(context))">

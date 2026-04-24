@@ -39,7 +39,7 @@ public partial class SalesOrderPage : ComponentBase
     // 워크플로 브레드크럼 표시 모델
     private IReadOnlyList<DeliveryWorkflowStepModel> _workflowSteps = Array.Empty<DeliveryWorkflowStepModel>();
 
-    // 화면 상태값 (Draft/Confirmed)
+    // 화면 상태값 (Draft/Confirmed) — Razor의 Status="@_status"에서 사용
     private string _status = "Draft";
 
     // 신규 문서 여부다.

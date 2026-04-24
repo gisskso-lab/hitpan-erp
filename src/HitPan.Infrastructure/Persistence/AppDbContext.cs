@@ -50,12 +50,13 @@ public sealed class AppDbContext : DbContext
         base.OnModelCreating(modelBuilder);
 
         var encryptedConverter = new EncryptedValueConverter(_encryptionService);
-        modelBuilder.ApplyConfiguration(new TenantConfiguration(encryptedConverter));
+        var nullableEncryptedConverter = new NullableEncryptedValueConverter(_encryptionService);
+        modelBuilder.ApplyConfiguration(new TenantConfiguration(encryptedConverter, nullableEncryptedConverter));
         modelBuilder.ApplyConfiguration(new UserConfiguration());
         modelBuilder.ApplyConfiguration(new DepartmentConfiguration());
         modelBuilder.ApplyConfiguration(new ItemConfiguration());
-        modelBuilder.ApplyConfiguration(new PartnerConfiguration(encryptedConverter));
-        modelBuilder.ApplyConfiguration(new EmployeeConfiguration(encryptedConverter));
+        modelBuilder.ApplyConfiguration(new PartnerConfiguration(encryptedConverter, nullableEncryptedConverter));
+        modelBuilder.ApplyConfiguration(new EmployeeConfiguration(encryptedConverter, nullableEncryptedConverter));
         modelBuilder.ApplyConfiguration(new WarehouseConfiguration());
         modelBuilder.ApplyConfiguration(new SubscriptionConfiguration());
         modelBuilder.ApplyConfiguration(new PurchaseOrderConfiguration());

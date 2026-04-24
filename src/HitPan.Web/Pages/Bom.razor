@@ -106,13 +106,13 @@ else
         </MudTd>
         <MudTd Style="text-align:center">
           <MudIconButton Icon="@Icons.Material.Filled.Visibility" Size="Size.Small"
-            Title="조회"
+            title="조회"
             OnClick="@(() => Nav.NavigateTo($"/bom/{context.BomId}"))" />
           <MudIconButton Icon="@Icons.Material.Filled.PrecisionManufacturing" Size="Size.Small"
-            Color="Color.Primary" Title="생산"
+            Color="Color.Primary" title="생산"
             OnClick="@(() => OpenProduceDialog(context))" />
           <MudIconButton Icon="@Icons.Material.Filled.Delete" Size="Size.Small"
-            Color="Color.Error" Title="삭제"
+            Color="Color.Error" title="삭제"
             OnClick="@(() => DeleteBomAsync(context))" />
         </MudTd>
       </RowTemplate>

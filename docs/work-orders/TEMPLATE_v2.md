@@ -83,7 +83,7 @@
 
 ## 8. 완료 기준 (Definition of Done)
 
-- [ ] 빌드 0 errors (API + Web)
+- [ ] 빌드 **0 errors + 0 warnings** (API + Web) — 사장님 헌법 #19
 - [ ] 회귀 테스트 통과
 - [ ] EVF 영향 영역 검증 통과 (해당 시)
 - [ ] 어벤져스 리뷰 완료

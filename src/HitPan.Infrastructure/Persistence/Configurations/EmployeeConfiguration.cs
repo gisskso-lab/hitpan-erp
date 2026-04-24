@@ -8,10 +8,14 @@ namespace HitPan.Infrastructure.Persistence.Configurations;
 public sealed class EmployeeConfiguration : IEntityTypeConfiguration<Employee>
 {
     private readonly EncryptedValueConverter _encryptedConverter;
+    private readonly NullableEncryptedValueConverter _nullableEncryptedConverter;
 
-    public EmployeeConfiguration(EncryptedValueConverter encryptedConverter)
+    public EmployeeConfiguration(
+        EncryptedValueConverter encryptedConverter,
+        NullableEncryptedValueConverter nullableEncryptedConverter)
     {
         _encryptedConverter = encryptedConverter;
+        _nullableEncryptedConverter = nullableEncryptedConverter;
     }
 
     public void Configure(EntityTypeBuilder<Employee> builder)
@@ -32,13 +36,13 @@ public sealed class EmployeeConfiguration : IEntityTypeConfiguration<Employee>
         builder.Property(e => e.EmpType).HasColumnName("emp_type").HasConversion<string>().IsRequired();
         builder.Property(e => e.JoinDate).HasColumnName("join_date").IsRequired();
         builder.Property(e => e.ResignDate).HasColumnName("resign_date");
-        builder.Property(e => e.BirthDate).HasColumnName("birth_date").HasMaxLength(200).HasConversion(_encryptedConverter);
+        builder.Property(e => e.BirthDate).HasColumnName("birth_date").HasMaxLength(200).HasConversion(_nullableEncryptedConverter);
         builder.Property(e => e.IdNoHash).HasColumnName("id_no_hash").HasMaxLength(256);
         builder.Property(e => e.Phone).HasColumnName("phone").HasMaxLength(20);
         builder.Property(e => e.Email).HasColumnName("email").HasMaxLength(100);
         builder.Property(e => e.BankName).HasColumnName("bank_name").HasMaxLength(30);
-        builder.Property(e => e.BankAccount).HasColumnName("bank_account").HasMaxLength(200).HasConversion(_encryptedConverter);
-        builder.Property(e => e.BaseSalary).HasColumnName("base_salary").HasMaxLength(200).HasConversion(_encryptedConverter);
+        builder.Property(e => e.BankAccount).HasColumnName("bank_account").HasMaxLength(200).HasConversion(_nullableEncryptedConverter);
+        builder.Property(e => e.BaseSalary).HasColumnName("base_salary").HasMaxLength(200).HasConversion(_nullableEncryptedConverter);
         builder.Property(e => e.Role).HasColumnName("role").HasMaxLength(30).IsRequired();
         builder.Property(e => e.IsActive).HasColumnName("is_active").IsRequired();
         builder.Property(e => e.CreatedAt).HasColumnName("created_at").IsRequired();

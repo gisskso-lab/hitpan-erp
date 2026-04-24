@@ -1,3 +1,4 @@
+using System.Runtime.Versioning;
 using HitPan.Application.Services;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -8,10 +9,13 @@ namespace HitPan.API.Controllers;
 /// 레거시 히트판 MDB 데이터 마이그레이션 컨트롤러
 /// - 기존 VB + Access(.mdb) 데이터를 신규 ERP DB로 이관
 /// - tenant_admin 권한 필수
+/// - Windows 전용 (Microsoft.Jet.OLEDB ACE 드라이버 의존) — Linux 컨테이너 배포 시 미지원
+///   사장님 헌법 #19 warnings 0 준수: SupportedOSPlatform 어트리뷰트로 명시 → CA1416 해소
 /// </summary>
 [ApiController]
 [Route("api/migration")]
 [Authorize(Policy = "TenantAdminOnly")]
+[SupportedOSPlatform("windows")]
 public sealed class MigrationController : ControllerBase
 {
     private readonly MdbMigrationService _migrationService;

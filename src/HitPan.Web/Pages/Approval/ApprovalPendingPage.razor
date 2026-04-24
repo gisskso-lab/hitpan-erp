@@ -136,6 +136,7 @@ else
 
     private async Task OnRowClick(TableRowClickEventArgs<ApprovalDocumentModel> args)
     {
+        if (args.Item is null) return;
         _detail = await ApprovalSvc.GetDetailAsync(args.Item.ApprovalId);
         _showDetail = true;
     }

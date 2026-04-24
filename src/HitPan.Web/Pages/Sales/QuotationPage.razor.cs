@@ -268,6 +268,11 @@ public partial class QuotationPage : ComponentBase
             }
             else
             {
+                if (string.IsNullOrEmpty(_draft.Id))
+                {
+                    Snackbar.Add("견적서 ID가 없어 갱신이 불가합니다.", Severity.Error);
+                    return;
+                }
                 var ok = await QuotationService.UpdateAsync(_draft.Id, _draft);
                 if (!ok)
                 {

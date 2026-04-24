@@ -224,6 +224,7 @@ SI 현장 20년 현업 출신.
 16. **MySqlConnection + Task.WhenAll 조합 금지** — MySqlConnection은 thread-safe가 아님. 병렬 쿼리 시 "connection in use" 에러. 다중 KPI는 `UNION ALL` 단일 쿼리 또는 `QueryMultipleAsync` 사용
 17. **신규 DB 테이블은 반드시 `ENGINE=InnoDB` 명시** — MyISAM은 트랜잭션·FK 지원 안 함. 4/22 40개 테이블 일괄 전환 교훈
 18. **본사 서버로 고객사 ERP 업무 데이터 전송 금지** — 본사가 받는 건 ① SaaS 운영 데이터(가입·결제·라이선스·텔레메트리·CS) + ② 대리점 영업 데이터(채널·수수료·KPI)뿐. 매출/매입/원장/거래처/직원/상품/재고/세금계산서/결재 등 고객사 업무 데이터는 절대 본사로 전송 코드 작성 금지. (사장님 헌법 2026-04-25, DESIGN_PRINCIPLES §14.3) 위반 시 4프로토콜 #3 민감 작업으로 즉시 반려.
+19. **빌드는 errors 0 + warnings 0이 정합성·무결성** — 사장님 헌법 격언 (2026-04-25): *"그냥 되어야 하는 거야. '어 어젠 됐는데?? 본사에선 됐는데?'?? 이유가 있어선 안 돼. 고객들은 컴퓨터 전문가가 아니고 사용자들이야. 최대한 보수적으로!!!"* — 경고는 미래의 오류. 데이터 양 늘고 고객사 환경 변하면 폭발. 신규 PR은 errors 0 + warnings 0 필수. 기존 경고도 작지서로 전수 정리. CI/CD에 `<TreatWarningsAsErrors>true</TreatWarningsAsErrors>` 강제화 (마커스 리 합류 후).
 
 ---
 

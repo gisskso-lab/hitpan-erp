@@ -38,10 +38,11 @@
             </HeaderContent>
             <RowTemplate>
                 <MudTd>
-                    <MudCheckBox T="bool"
-                                 Value="context.IsChecked"
-                                 ValueChanged="@(v => ToggleOneAsync(context, v))"
-                                 OnClick:stopPropagation="true" />
+                    <div @onclick:stopPropagation="true">
+                        <MudCheckBox T="bool"
+                                     Value="context.IsChecked"
+                                     ValueChanged="@(v => ToggleOneAsync(context, v))" />
+                    </div>
                 </MudTd>
                 <MudTd @ondblclick="@(() => SelectAsync(context))">@context.QuoteNo</MudTd>
                 <MudTd @ondblclick="@(() => SelectAsync(context))">@context.PartnerName</MudTd>

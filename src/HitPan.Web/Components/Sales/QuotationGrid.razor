@@ -19,16 +19,17 @@
     </HeaderContent>
     <RowTemplate>
         <MudTd>
-            <MudCheckBox T="bool"
-                         Value="context.IsSelected"
-                         ValueChanged="@(v => ToggleOneAsync(context, v))"
-                         OnClick:stopPropagation="true"
-                         Disabled="@IsReadOnly" />
+            <div @onclick:stopPropagation="true">
+                <MudCheckBox T="bool"
+                             Value="context.IsSelected"
+                             ValueChanged="@(v => ToggleOneAsync(context, v))"
+                             Disabled="@IsReadOnly" />
+            </div>
         </MudTd>
         <MudTd @onclick="@(() => SelectRowAsync(context))">@context.No</MudTd>
         <MudTd>
             <MudAutocomplete T="string" Value="context.ItemName" SearchFunc="SearchItemAsync"
-                ValueChanged="@(v => { UpdateItemNameAsync(context, v); AutoFillItem(context, v); })"
+                ValueChanged="@(async v => { await UpdateItemNameAsync(context, v); AutoFillItem(context, v); })"
                 Margin="Margin.Dense" Dense="true" Placeholder="품명 검색" Disabled="@IsReadOnly" />
         </MudTd>
         <MudTd>

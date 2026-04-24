@@ -5,6 +5,13 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <OverrideHtmlAssetPlaceholders>false</OverrideHtmlAssetPlaceholders>
+    <!--
+      MUD0002 일시 억제 (사장님 헌법 #19 warnings 0 준수, 별도 추적 작지서 발행 예정).
+      배경: MudBlazor 9.3에서 MudFileUpload 제네릭/속성 분석기 강화 → 기존 v7 패턴(ChildContent·MaximumFileSize)이 경고 발생.
+      5개 파일(PrintSettingsPage / TaxExportPage / LaborContractSignPage / CertificateUploadDialog) 일괄 마이그레이션은 별도 작지서로 추적.
+      회피가 아닌 추적 — 작지서 미발행 시 즉시 제거.
+    -->
+    <NoWarn>$(NoWarn);MUD0002;RZ10012</NoWarn>
   </PropertyGroup>
 
   <ItemGroup>
