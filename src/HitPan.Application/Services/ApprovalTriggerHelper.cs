@@ -18,7 +18,12 @@ public static class ApprovalTriggerHelper
             throw new InvalidOperationException($"{ym[..4]}년 {ym[4..]}월은 마감된 기간입니다. 전표를 수정할 수 없습니다.");
     }
 
-    /// <summary>매출/매입 확정 시 monthly_summary 갱신</summary>
+    /// <summary>
+    /// [Deprecated 작4 P0-4] 매출/매입 확정 시 monthly_summary 갱신.
+    /// 멱등 보장이 없어 같은 source 두 번 가산되는 위험. 호출처 0건이지만 안전 차원에서 Obsolete 마킹.
+    /// 신규 호출은 <see cref="MonthlySummaryGuard.TryApplyAsync"/>를 사용할 것.
+    /// </summary>
+    [Obsolete("멱등 보장 없음. MonthlySummaryGuard.TryApplyAsync를 사용하세요. (작4 P0-4)", error: false)]
     public static async Task UpdateMonthlySummaryAsync(IDbConnection db, string tenantId, DateTime date, decimal salesAmount, decimal purchaseAmount, CancellationToken ct)
     {
         var ym = date.ToString("yyyyMM");

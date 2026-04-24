@@ -103,24 +103,16 @@ public sealed class SyncEventPublisher : IEventPublisher
                     cancellationToken: ct)).ConfigureAwait(false);
         }
 
-        var ym = DateTime.Now.ToString("yyyyMM");
-        await _db.ExecuteAsync(
-            new CommandDefinition(
-                """
-                INSERT INTO monthly_summary
-                  (summary_id, tenant_id, `year_month`,
-                   total_sales, total_purchase,
-                   total_receipt, total_payment,
-                   last_updated_at)
-                VALUES
-                  (UUID(), @TenantId, @YearMonth,
-                   @Amount, 0, 0, 0, NOW(6))
-                ON DUPLICATE KEY UPDATE
-                  total_sales = total_sales + @Amount,
-                  last_updated_at = NOW(6)
-                """,
-                new { e.TenantId, YearMonth = ym, Amount = e.TotalAmount },
-                cancellationToken: ct)).ConfigureAwait(false);
+        // monthly_summary 가산 — 멱등 가드 (작4 P0-4)
+        await HitPan.Application.Services.MonthlySummaryGuard.TryApplyAsync(
+            _db, dbTx: null,
+            tenantId: e.TenantId,
+            date: DateTime.Now,
+            sourceType: "delivery_confirmed",
+            sourceId: e.DeliveryId,
+            field: HitPan.Application.Services.MonthlySummaryGuard.SummaryField.TotalSales,
+            amount: e.TotalAmount,
+            ct: ct).ConfigureAwait(false);
     }
 
     private async Task OnDeliveryCancelled(DeliveryCancelledEvent c, CancellationToken ct)
@@ -217,24 +209,16 @@ public sealed class SyncEventPublisher : IEventPublisher
                     cancellationToken: ct)).ConfigureAwait(false);
         }
 
-        var ym = DateTime.Now.ToString("yyyyMM");
-        await _db.ExecuteAsync(
-            new CommandDefinition(
-                """
-                INSERT INTO monthly_summary
-                  (summary_id, tenant_id, `year_month`,
-                   total_sales, total_purchase,
-                   total_receipt, total_payment,
-                   last_updated_at)
-                VALUES
-                  (UUID(), @TenantId, @YearMonth,
-                   0, @Amount, 0, 0, NOW(6))
-                ON DUPLICATE KEY UPDATE
-                  total_purchase = total_purchase + @Amount,
-                  last_updated_at = NOW(6)
-                """,
-                new { p.TenantId, YearMonth = ym, Amount = p.TotalAmount },
-                cancellationToken: ct)).ConfigureAwait(false);
+        // monthly_summary 가산 — 멱등 가드 (작4 P0-4)
+        await HitPan.Application.Services.MonthlySummaryGuard.TryApplyAsync(
+            _db, dbTx: null,
+            tenantId: p.TenantId,
+            date: DateTime.Now,
+            sourceType: "purchase_confirmed",
+            sourceId: p.PoId,
+            field: HitPan.Application.Services.MonthlySummaryGuard.SummaryField.TotalPurchase,
+            amount: p.TotalAmount,
+            ct: ct).ConfigureAwait(false);
     }
 
     private async Task OnBomAssembled(BomAssembledEvent b, CancellationToken ct)
@@ -242,20 +226,17 @@ public sealed class SyncEventPublisher : IEventPublisher
         // ※ item_stock 업데이트는 BomService.AssembleAsync에서 이미 처리됨
         //   여기서는 월별 요약·안전재고 알림만 담당 (이중 처리 방지)
 
-        var ym = DateTime.Now.ToString("yyyyMM");
-        await _db.ExecuteAsync(new CommandDefinition(
-            """
-            INSERT INTO monthly_summary
-              (summary_id, tenant_id, `year_month`,
-               total_sales, total_purchase, total_receipt, total_payment, last_updated_at)
-            VALUES
-              (UUID(), @TenantId, @YearMonth, 0, @Cost, 0, 0, NOW(6))
-            ON DUPLICATE KEY UPDATE
-              total_purchase = total_purchase + @Cost,
-              last_updated_at = NOW(6)
-            """,
-            new { b.TenantId, YearMonth = ym, Cost = b.ProductionCost * b.ProducedQty },
-            cancellationToken: ct)).ConfigureAwait(false);
+        // monthly_summary 가산 — 멱등 가드 (작4 P0-4)
+        var bomCost = b.ProductionCost * b.ProducedQty;
+        await HitPan.Application.Services.MonthlySummaryGuard.TryApplyAsync(
+            _db, dbTx: null,
+            tenantId: b.TenantId,
+            date: DateTime.Now,
+            sourceType: "bom_assembled",
+            sourceId: b.BomId,
+            field: HitPan.Application.Services.MonthlySummaryGuard.SummaryField.TotalPurchase,
+            amount: bomCost,
+            ct: ct).ConfigureAwait(false);
 
         await CheckSafetyStockAsync(b.TenantId, b.Materials.Select(x => x.ItemId).ToList(), ct).ConfigureAwait(false);
     }

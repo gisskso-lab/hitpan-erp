@@ -273,24 +273,16 @@ public class PurchaseService : IPurchaseService
                     cancellationToken: ct));
             }
 
-            // 3) monthly_summary 매입 갱신 (Dapper · 동일 tx)
-            var ymStr = receipt.ReceiptDate.ToString("yyyyMM");
-            await conn.ExecuteAsync(new CommandDefinition(
-                """
-                INSERT INTO monthly_summary (summary_id, tenant_id, `year_month`, total_sales, total_purchase, total_receipt, total_payment, last_updated_at)
-                VALUES (UUID(), @TenantId, @Ym, 0, @Purchase, 0, 0, NOW(6))
-                ON DUPLICATE KEY UPDATE
-                  total_purchase = total_purchase + @Purchase,
-                  last_updated_at = NOW(6)
-                """,
-                new
-                {
-                    TenantId = receipt.TenantId,
-                    Ym = ymStr,
-                    Purchase = receipt.TotalAmount + receipt.VatAmount
-                },
-                transaction: dbTx,
-                cancellationToken: ct));
+            // 3) monthly_summary 매입 갱신 — 멱등 가드 (작4 P0-4, 동일 tx)
+            await MonthlySummaryGuard.TryApplyAsync(
+                conn, dbTx,
+                tenantId: receipt.TenantId,
+                date: receipt.ReceiptDate,
+                sourceType: "purchase_receipt_confirmed",
+                sourceId: receipt.ReceiptId,
+                field: MonthlySummaryGuard.SummaryField.TotalPurchase,
+                amount: receipt.TotalAmount + receipt.VatAmount,
+                ct: ct);
 
             // 4) 회계 자동 기표 (차변 매입+부가세대급금 / 대변 외상매입금)
             // PurchaseReceipt 엔티티에는 EmployeeId가 없으므로 null로 전달 (추후 도메인 확장 시 실제 사원 ID 연결).

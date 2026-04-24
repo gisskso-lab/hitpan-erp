@@ -349,24 +349,16 @@ public class SalesService : ISalesService
                     cancellationToken: ct));
             }
 
-            // 3) monthly_summary 매출 갱신 (Dapper · 동일 tx)
-            var ymStr = delivery.DeliveryDate.ToString("yyyyMM");
-            await conn.ExecuteAsync(new CommandDefinition(
-                """
-                INSERT INTO monthly_summary (summary_id, tenant_id, `year_month`, total_sales, total_purchase, total_receipt, total_payment, last_updated_at)
-                VALUES (UUID(), @TenantId, @Ym, @Sales, 0, 0, 0, NOW(6))
-                ON DUPLICATE KEY UPDATE
-                  total_sales = total_sales + @Sales,
-                  last_updated_at = NOW(6)
-                """,
-                new
-                {
-                    TenantId = delivery.TenantId,
-                    Ym = ymStr,
-                    Sales = delivery.TotalAmount + delivery.VatAmount
-                },
-                transaction: dbTx,
-                cancellationToken: ct));
+            // 3) monthly_summary 매출 갱신 — 멱등 가드 (작4 P0-4, 동일 tx)
+            await MonthlySummaryGuard.TryApplyAsync(
+                conn, dbTx,
+                tenantId: delivery.TenantId,
+                date: delivery.DeliveryDate,
+                sourceType: "delivery_confirmed",
+                sourceId: delivery.DeliveryId,
+                field: MonthlySummaryGuard.SummaryField.TotalSales,
+                amount: delivery.TotalAmount + delivery.VatAmount,
+                ct: ct);
 
             // 4) 회계 자동 기표 (차변 외상매출금 / 대변 매출+부가세예수금)
             await AutoJournalHelper.RecordSalesConfirmAsync(
