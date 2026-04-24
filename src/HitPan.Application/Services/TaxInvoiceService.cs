@@ -90,32 +90,58 @@ public sealed class TaxInvoiceService : ITaxInvoiceService
                 cancellationToken: ct));
         var invoiceNo = $"{prefix}{todayCount + 1:D3}";
 
-        // 4) INSERT — UoW 트랜잭션 (P0-3 BK PoC 완료 후 통합 예정. 1차는 단순 Dapper)
+        // 4) UoW 트랜잭션 (작5 — INSERT tax_invoices + UPDATE sales_deliveries.tax_invoice_id 동일 tx)
+        //    검증팀 BK #1: 역참조가 없으면 거래명세서 화면에서 발행 여부 표시 불가.
         var invoiceId = Guid.NewGuid().ToString();
-        await _db.ExecuteAsync(
-            new CommandDefinition(
-                """
-                INSERT INTO tax_invoices
-                  (invoice_id, tenant_id, delivery_id, invoice_no,
-                   issued_at, issued_by, amount_total, vat_total,
-                   status, etax_status, idempotency_key)
-                VALUES
-                  (@InvoiceId, @TenantId, @DeliveryId, @InvoiceNo,
-                   NOW(6), @IssuedBy, @Amount, @Vat,
-                   'issued', 'pending', @IdempotencyKey)
-                """,
-                new
-                {
-                    InvoiceId = invoiceId,
-                    TenantId = tenantId,
-                    DeliveryId = delivery.DeliveryId,
-                    InvoiceNo = invoiceNo,
-                    IssuedBy = userId,
-                    Amount = delivery.TotalAmount,
-                    Vat = delivery.VatAmount,
-                    IdempotencyKey = idempotencyKey
-                },
-                cancellationToken: ct));
+        using var tx = await _unitOfWork.BeginTransactionAsync(ct);
+        try
+        {
+            var conn = _unitOfWork.GetDbConnection();
+            var dbTx = tx.DbTransaction;
+
+            // 4-a) tax_invoices INSERT
+            await conn.ExecuteAsync(
+                new CommandDefinition(
+                    """
+                    INSERT INTO tax_invoices
+                      (invoice_id, tenant_id, delivery_id, invoice_no,
+                       issued_at, issued_by, amount_total, vat_total,
+                       status, etax_status, idempotency_key)
+                    VALUES
+                      (@InvoiceId, @TenantId, @DeliveryId, @InvoiceNo,
+                       NOW(6), @IssuedBy, @Amount, @Vat,
+                       'issued', 'pending', @IdempotencyKey)
+                    """,
+                    new
+                    {
+                        InvoiceId = invoiceId,
+                        TenantId = tenantId,
+                        DeliveryId = delivery.DeliveryId,
+                        InvoiceNo = invoiceNo,
+                        IssuedBy = userId,
+                        Amount = delivery.TotalAmount,
+                        Vat = delivery.VatAmount,
+                        IdempotencyKey = idempotencyKey
+                    },
+                    transaction: dbTx,
+                    cancellationToken: ct));
+
+            // 4-b) sales_deliveries.tax_invoice_id 역참조 갱신 (DB-20)
+            //   거래명세서 화면에서 "이미 발행됨" 칩 표시용. 둘 중 하나 실패 시 전체 롤백.
+            await conn.ExecuteAsync(
+                new CommandDefinition(
+                    "UPDATE sales_deliveries SET tax_invoice_id = @InvoiceId, updated_at = NOW(6) WHERE delivery_id = @DeliveryId AND tenant_id = @TenantId",
+                    new { InvoiceId = invoiceId, DeliveryId = delivery.DeliveryId, TenantId = tenantId },
+                    transaction: dbTx,
+                    cancellationToken: ct));
+
+            await tx.CommitAsync(ct);
+        }
+        catch
+        {
+            try { await tx.RollbackAsync(ct); } catch { /* 이미 닫힌 tx */ }
+            throw;
+        }
 
         return new TaxInvoiceResponse(
             InvoiceId: invoiceId,
@@ -226,13 +252,38 @@ public sealed class TaxInvoiceService : ITaxInvoiceService
             throw new TaxInvoiceException("already_canceled", "이미 취소된 계산서입니다.");
         }
 
-        // 현재 라운드: status만 변경. 역분개·summary 차감은 별도 작지서 (4프로토콜 #4 쪼개기)
+        // UoW 트랜잭션 (작5 — UPDATE tax_invoices.status='canceled' + UPDATE sales_deliveries.tax_invoice_id=NULL 동일 tx)
+        //   역참조 환원 → 같은 거래명세서를 다시 발행 가능 (uk_tax_invoices_delivery는 issued만 차단하지 않음 → 별도 라운드 보강)
+        //   역분개·summary 차감은 별도 라운드 (4프로토콜 #4 쪼개기, 작2 §3 비범위)
         var now = DateTime.UtcNow;
-        await _db.ExecuteAsync(
-            new CommandDefinition(
-                "UPDATE tax_invoices SET status = 'canceled', updated_at = NOW(6) WHERE invoice_id = @InvoiceId AND tenant_id = @TenantId",
-                new { InvoiceId = invoiceId, TenantId = tenantId },
-                cancellationToken: ct));
+        using var tx = await _unitOfWork.BeginTransactionAsync(ct);
+        try
+        {
+            var conn = _unitOfWork.GetDbConnection();
+            var dbTx = tx.DbTransaction;
+
+            await conn.ExecuteAsync(
+                new CommandDefinition(
+                    "UPDATE tax_invoices SET status = 'canceled', updated_at = NOW(6) WHERE invoice_id = @InvoiceId AND tenant_id = @TenantId",
+                    new { InvoiceId = invoiceId, TenantId = tenantId },
+                    transaction: dbTx,
+                    cancellationToken: ct));
+
+            // sales_deliveries 역참조 환원 (DB-20)
+            await conn.ExecuteAsync(
+                new CommandDefinition(
+                    "UPDATE sales_deliveries SET tax_invoice_id = NULL, updated_at = NOW(6) WHERE tax_invoice_id = @InvoiceId AND tenant_id = @TenantId",
+                    new { InvoiceId = invoiceId, TenantId = tenantId },
+                    transaction: dbTx,
+                    cancellationToken: ct));
+
+            await tx.CommitAsync(ct);
+        }
+        catch
+        {
+            try { await tx.RollbackAsync(ct); } catch { /* 이미 닫힌 tx */ }
+            throw;
+        }
 
         return new CancelTaxInvoiceResponse(invoiceId, now, "canceled");
     }
