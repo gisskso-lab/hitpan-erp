@@ -5,6 +5,7 @@
 @using HitPan.Web.Services
 @inject DeliveryService DeliveryService
 @inject DocumentService DocService
+@inject TaxInvoiceApiService TaxInvoiceApi
 @inject ISnackbar Snackbar
 @inject IDialogService DialogService
 @inject NavigationManager Nav
@@ -222,24 +223,42 @@
 
     private async Task BulkEIssueAsync()
     {
-        var selected = _items.Where(x => x.IsChecked && x.Status == "invoiced").ToList();
-        if (selected.Count == 0) return;
+        // 1계층(내부 마킹) 일괄 발행 — 거래명세서 confirmed → 계산서 발행 API 호출.
+        // 2/3계층(전자세금계산서 국세청 전송)은 별도 라운드.
+        var selected = _items.Where(x => x.IsChecked && x.Status is "invoiced" or "confirmed").ToList();
+        if (selected.Count == 0)
+        {
+            Snackbar.Add("발행 대상이 없습니다.", Severity.Warning);
+            return;
+        }
 
         var confirm = await DialogService.ShowMessageBoxAsync(
-            "전자발행 확인",
-            $"선택한 {selected.Count}건을 국세청에 전자발행 하시겠습니까?",
-            yesText: "전자발행", cancelText: "취소");
+            "계산서 일괄 발행",
+            $"선택한 {selected.Count}건에 대해 계산서를 발행하시겠습니까?",
+            yesText: "발행", cancelText: "취소");
         if (confirm != true) return;
 
-        // Phase 6에서 국세청 API 연동 — 지금은 상태만 변경
-        foreach (var item in selected)
+        var result = await TaxInvoiceApi.BulkIssueAsync(selected.Select(x => x.DeliveryId));
+
+        foreach (var s in result.Successes)
         {
-            item.Status = "e-issued";
-            item.IsChecked = false;
+            var item = _items.FirstOrDefault(x => x.DeliveryId == s.DeliveryId);
+            if (item is not null)
+            {
+                item.Status = "invoiced";
+                item.IsChecked = false;
+            }
         }
 
         _allChecked = false;
-        Snackbar.Add($"{selected.Count}건 전자발행 처리되었습니다. (국세청 API 연동은 Phase 6)", Severity.Success);
+
+        if (result.Failures.Count == 0)
+            Snackbar.Add($"{result.Successes.Count}건 계산서 발행 완료", Severity.Success);
+        else if (result.Successes.Count == 0)
+            Snackbar.Add($"전건 실패 ({result.Failures.Count}건): {result.Failures[0].Reason}", Severity.Error);
+        else
+            Snackbar.Add($"성공 {result.Successes.Count}건 / 실패 {result.Failures.Count}건. 첫 실패: {result.Failures[0].Reason}", Severity.Warning);
+
         StateHasChanged();
     }
 

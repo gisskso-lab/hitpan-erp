@@ -50,6 +50,7 @@ builder.Services.AddScoped<LeaveRequestService>();
 builder.Services.AddScoped<DocumentService>();
 builder.Services.AddScoped<SpecialPriceService>();
 builder.Services.AddScoped<ApprovalService>();
+builder.Services.AddScoped<TaxInvoiceApiService>();
 builder.Services.AddScoped<CollectionPaymentService>();
 builder.Services.AddScoped<MonthlyClosingService>();
 builder.Services.AddScoped<FinanceClientService>();
@@ -61,7 +62,10 @@ builder.Services.AddTransient<HitPanApiAuthHandler>();
 builder.Services.AddScoped<TenantProfileService>();
 builder.Services.AddScoped(sp =>
 {
-    var handler = new HitPanApiAuthHandler(sp.GetRequiredService<HitPanProtectedLocalStorage>())
+    var handler = new HitPanApiAuthHandler(
+        sp.GetRequiredService<HitPanProtectedLocalStorage>(),
+        sp.GetRequiredService<MudBlazor.ISnackbar>(),
+        sp.GetRequiredService<ILogger<HitPanApiAuthHandler>>())
     {
         InnerHandler = new HttpClientHandler()
     };

@@ -79,18 +79,29 @@ public sealed class IdempotencyMiddleware
         var requestHash = await ComputeBodyHashAsync(context.Request.Body);
         context.Request.Body.Position = 0;
 
-        // 기존 캐시 조회
-        var cached = await db.QueryFirstOrDefaultAsync<CachedRow>(
-            """
-            SELECT request_hash AS RequestHash,
-                   status_code  AS StatusCode,
-                   response_body AS ResponseBody,
-                   expires_at   AS ExpiresAt
-              FROM idempotency_keys
-             WHERE tenant_id = @TenantId AND idempotency_key = @Key AND expires_at > NOW(6)
-             LIMIT 1
-            """,
-            new { TenantId = tenantId, Key = key });
+        // 기존 캐시 조회. 테이블 누락/DB 장애 시 fail-open(새 요청처럼 처리)으로 서비스 중단 방지.
+        CachedRow? cached = null;
+        try
+        {
+            cached = await db.QueryFirstOrDefaultAsync<CachedRow>(
+                """
+                SELECT request_hash AS RequestHash,
+                       status_code  AS StatusCode,
+                       response_body AS ResponseBody,
+                       expires_at   AS ExpiresAt
+                  FROM idempotency_keys
+                 WHERE tenant_id = @TenantId AND idempotency_key = @Key AND expires_at > NOW(6)
+                 LIMIT 1
+                """,
+                new { TenantId = tenantId, Key = key });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex,
+                "Idempotency 캐시 조회 실패 (fail-open): tenant={Tenant} key={Key} 라우트={Route}",
+                tenantId, key, context.Request.Path);
+            cached = null;
+        }
 
         if (cached is not null)
         {

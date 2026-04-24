@@ -6,6 +6,7 @@
 @using HitPan.Web.Services
 @namespace HitPan.Web.Pages.Delivery
 @inject DeliveryService DeliveryService
+@inject TaxInvoiceApiService TaxInvoiceApi
 @inject DocumentService DocService
 @inject WorkTabService TabService
 @inject AuthenticationStateProvider AuthStateProvider
@@ -245,7 +246,7 @@
                 Snackbar.Add("수주 연결은 추후 API와 연동됩니다.", Severity.Info);
                 break;
             case DeliveryContextAction.IssueTaxInvoice:
-                Snackbar.Add("세금계산서 발행은 추후 연동됩니다.", Severity.Info);
+                await IssueTaxInvoiceForCurrentAsync();
                 break;
             case DeliveryContextAction.PartnerHistory:
                 Snackbar.Add("거래처 거래내역 조회는 추후 연동됩니다.", Severity.Info);
@@ -397,7 +398,35 @@
         }
         catch (Exception ex)
         {
-            Snackbar.Add(ex.Message, Severity.Warning);
+            Snackbar.Add(ex.Message, Severity.Error);
+        }
+    }
+
+    private async Task IssueTaxInvoiceForCurrentAsync()
+    {
+        if (_draft is null || string.IsNullOrWhiteSpace(_draft.Id))
+        {
+            Snackbar.Add("저장된 거래명세서에서만 계산서를 발행할 수 있습니다.", Severity.Warning);
+            return;
+        }
+
+        var confirm = await DialogService.ShowMessageBoxAsync(
+            "계산서 발행",
+            $"거래명세서 {_draft.DocumentNumber}에 대해 계산서를 발행하시겠습니까?",
+            yesText: "발행", cancelText: "취소");
+        if (confirm != true) return;
+
+        try
+        {
+            var r = await TaxInvoiceApi.IssueAsync(_draft.Id, null);
+            if (r.Success)
+                Snackbar.Add($"계산서 발행 완료 — 계산서번호 {r.InvoiceNo}", Severity.Success);
+            else
+                Snackbar.Add($"계산서 발행 실패: {r.ErrorMessage}", Severity.Error);
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"계산서 발행 오류: {ex.Message}", Severity.Error);
         }
     }
 

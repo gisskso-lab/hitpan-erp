@@ -94,12 +94,13 @@ public sealed class DeliveryService(HttpClient http)
 
         using var content = new StringContent("{}", Encoding.UTF8, "application/json");
         using var resp = await http.PostAsync($"api/sales/deliveries/{draft.Id}/confirm", content, cancellationToken: ct);
-        if (resp.StatusCode is HttpStatusCode.NotFound or HttpStatusCode.BadRequest)
+        if (!resp.IsSuccessStatusCode)
         {
-            return;
+            // §절대원칙 #20 — 실패를 성공으로 위장하면 재고 미차감 무결성 붕괴.
+            var body = await resp.Content.ReadAsStringAsync(ct);
+            var reason = string.IsNullOrWhiteSpace(body) ? $"HTTP {(int)resp.StatusCode}" : body;
+            throw new InvalidOperationException($"거래명세서 확정 실패 ({(int)resp.StatusCode}): {reason}");
         }
-
-        resp.EnsureSuccessStatusCode();
     }
 
     public async Task<BulkConfirmApiResponse> BulkConfirmAsync(IReadOnlyList<string> deliveryIds, CancellationToken ct = default)

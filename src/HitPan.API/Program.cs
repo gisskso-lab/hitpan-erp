@@ -119,11 +119,11 @@ builder.Services.AddAuthorization(options =>
     options.AddPolicy("SalesManager", policy =>
         policy.RequireRole("system_admin", "sales_manager"));
     options.AddPolicy("PurchaseOnly", policy =>
-        policy.RequireRole("system_admin", "purchase_manager"));
+        policy.RequireRole("system_admin", "purchase_manager", "TenantAdmin", "tenant_admin"));
     options.AddPolicy("AccountOnly", policy =>
-        policy.RequireRole("system_admin", "account_manager"));
+        policy.RequireRole("system_admin", "account_manager", "TenantAdmin", "tenant_admin"));
     options.AddPolicy("HROnly", policy =>
-        policy.RequireRole("system_admin", "hr_manager"));
+        policy.RequireRole("system_admin", "hr_manager", "TenantAdmin", "tenant_admin"));
     options.AddPolicy("AdminOnly", policy =>
         policy.RequireRole("system_admin"));
     options.AddPolicy("PlatformOnly", policy =>
