@@ -113,8 +113,53 @@ public class BomService : IBomService
     public async Task<string> CreateAsync(CreateBomDto dto, string tenantId, CancellationToken ct = default)
     {
         await EnsureOpenAsync(ct).ConfigureAwait(false);
-        if (!string.IsNullOrEmpty(dto.ProductItemId) &&
-            await HasCircularRefAsync(dto.ProductItemId, dto.Items.Select(x => x.MaterialItemId).ToList(), tenantId, ct).ConfigureAwait(false))
+
+        // 사장님 지시 흐름: 완제품은 "새 이름"으로 입력 → 서비스가 items INSERT → 그 ID를 FK로 사용.
+        // 기존 상품에 BOM을 덧붙이려면 dto.ProductItemId 를 세팅해 호출한다(레거시/수정 호환).
+        var productItemId = dto.ProductItemId;
+        if (string.IsNullOrWhiteSpace(productItemId))
+        {
+            var newName = (dto.ProductItemName ?? dto.BomName)?.Trim();
+            if (string.IsNullOrWhiteSpace(newName))
+                throw new InvalidOperationException("완제품명을 입력하거나 기존 상품을 지정해주세요.");
+
+            // 자동 상품코드: PROD-yyyyMMdd-HHmmss-<6자리>
+            var itemCode = $"PROD-{DateTime.Now:yyyyMMdd-HHmmss}-{Guid.NewGuid().ToString()[..6].ToUpperInvariant()}";
+            productItemId = Guid.NewGuid().ToString();
+
+            await _db.ExecuteAsync(new CommandDefinition(
+                """
+                INSERT INTO items (
+                  item_id, tenant_id, item_code, item_name,
+                  item_group, item_type, category_id, unit, spec,
+                  purchase_price, sale_price, standard_price,
+                  tax_type, safety_stock, barcode, memo,
+                  auto_order_enabled, auto_order_partner_id, auto_order_qty,
+                  std_price, cost_price, safe_stock,
+                  is_active, is_deleted, row_version,
+                  created_at, updated_at)
+                VALUES (
+                  @ItemId, @TenantId, @ItemCode, @ItemName,
+                  NULL, 'product', NULL, 'EA', NULL,
+                  0, 0, 0,
+                  'taxable', 0, NULL, @Memo,
+                  0, NULL, 0,
+                  0, 0, 0,
+                  1, 0, 0,
+                  NOW(6), NOW(6))
+                """,
+                new
+                {
+                    ItemId = productItemId,
+                    TenantId = tenantId,
+                    ItemCode = itemCode,
+                    ItemName = newName,
+                    Memo = $"BOM 완제품 자동등록: {dto.BomName}"
+                }, cancellationToken: ct)).ConfigureAwait(false);
+        }
+
+        // 순환 참조 체크 — 완제품과 자재 목록 간 루프 탐지.
+        if (await HasCircularRefAsync(productItemId, dto.Items.Select(x => x.MaterialItemId).ToList(), tenantId, ct).ConfigureAwait(false))
             throw new InvalidOperationException("순환 참조가 감지됐습니다. 자재 구성을 확인해주세요.");
 
         var bomId = Guid.NewGuid().ToString();
@@ -122,11 +167,11 @@ public class BomService : IBomService
         {
             await _db.ExecuteAsync(new CommandDefinition(
                 "UPDATE bom_headers SET is_default = 0 WHERE tenant_id=@TenantId AND product_item_id=@ItemId",
-                new { TenantId = tenantId, ItemId = dto.ProductItemId }, cancellationToken: ct)).ConfigureAwait(false);
+                new { TenantId = tenantId, ItemId = productItemId }, cancellationToken: ct)).ConfigureAwait(false);
         }
         var maxVer = await _db.QueryFirstOrDefaultAsync<int>(new CommandDefinition(
             "SELECT COALESCE(MAX(bom_version),0) FROM bom_headers WHERE tenant_id=@TenantId AND product_item_id=@ItemId",
-            new { TenantId = tenantId, ItemId = dto.ProductItemId }, cancellationToken: ct)).ConfigureAwait(false);
+            new { TenantId = tenantId, ItemId = productItemId }, cancellationToken: ct)).ConfigureAwait(false);
 
         await _db.ExecuteAsync(new CommandDefinition(
             """
@@ -139,7 +184,7 @@ public class BomService : IBomService
             {
                 BomId = bomId,
                 TenantId = tenantId,
-                ProductItemId = dto.ProductItemId,
+                ProductItemId = productItemId,
                 BomName = dto.BomName,
                 Version = maxVer + 1,
                 IsDefault = dto.IsDefault ? 1 : 0,
@@ -170,8 +215,9 @@ public class BomService : IBomService
 
         await UpdateCostCacheAsync(bomId, tenantId, ct).ConfigureAwait(false);
 
-        // 감사로그 — BOM 신규 생성
-        var afterJson = $"{{\"bom_name\":\"{dto.BomName}\",\"product_item_id\":\"{dto.ProductItemId}\",\"material_count\":{dto.Items?.Count ?? 0}}}";
+        // 감사로그 — BOM 신규 생성 (완제품 자동등록 여부 포함)
+        var autoCreated = string.IsNullOrWhiteSpace(dto.ProductItemId);
+        var afterJson = $"{{\"bom_name\":\"{dto.BomName}\",\"product_item_id\":\"{productItemId}\",\"auto_product_created\":{(autoCreated ? "true" : "false")},\"material_count\":{dto.Items?.Count ?? 0}}}";
         await _audit.LogAsync("create", "bom", bomId, afterJson: afterJson, ct: ct);
 
         return bomId;

@@ -49,6 +49,7 @@ public class BomItemModel
 public class CreateBomModel
 {
     public string ProductItemId { get; set; } = "";
+    public string? ProductItemName { get; set; }   // 신규 완제품 자동 등록용
     public string BomName { get; set; } = "";
     public bool IsDefault { get; set; } = true;
     public string? Memo { get; set; }

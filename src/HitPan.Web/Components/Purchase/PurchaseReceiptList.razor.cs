@@ -1,3 +1,4 @@
+using System.Net.Http.Json;
 using HitPan.Web.Models;
 using HitPan.Web.Services;
 using Microsoft.AspNetCore.Components;
@@ -55,6 +56,9 @@ public partial class PurchaseReceiptList : ComponentBase
 
     [Inject]
     private IDialogService DialogService { get; set; } = default!;
+
+    [Inject]
+    private HttpClient Http { get; set; } = default!;
 
     /// <summary>
     /// 행 클릭 시 상위로 매입명세 Id 를 전달한다.
@@ -202,20 +206,69 @@ public partial class PurchaseReceiptList : ComponentBase
     /// <returns>비동기 처리</returns>
     private async Task BulkConfirmAsync()
     {
-        var ids = _selectedRows
-            .Where(x => !string.IsNullOrWhiteSpace(x.ReceiptId))
+        var draftIds = _selectedRows
+            .Where(x => !string.IsNullOrWhiteSpace(x.ReceiptId)
+                        && string.Equals(x.Status, "draft", StringComparison.OrdinalIgnoreCase))
             .Select(x => x.ReceiptId)
             .ToList();
 
-        // 선택이 없으면 API 를 호출하지 않는다.
-        if (ids.Count == 0)
+        if (draftIds.Count == 0)
         {
+            Snackbar.Add("확정 가능한 draft 상태 매입이 없습니다.", Severity.Warning);
             return;
         }
 
-        // 추후 API 연동 필요: POST api/purchase/receipts/{id}/confirm 를 일괄 호출하거나 bulk 엔드포인트를 추가한다.
-        // 추후 PurchaseService 연동 필요: ConfirmReceiptAsync 를 클라이언트에서 반복 호출하는 방식은 정책 협의 후 적용한다.
-        Snackbar.Add("매입명세 일괄 확정은 추후 API 연동 필요(현재 단건 확정 엔드포인트만 존재).", Severity.Info);
+        // 단건 confirm 엔드포인트를 순차 호출. 성공/실패 분리 집계 — 헌법 §20에 따라
+        // 실패를 성공 Snackbar로 위장하지 않는다(거래명세서 bulk-confirm과 동일 정책).
+        var success = new List<string>();
+        var failed = new List<(string Id, string Reason)>();
+
+        foreach (var id in draftIds)
+        {
+            try
+            {
+                using var resp = await Http.PostAsJsonAsync(
+                    $"api/purchase/receipts/{Uri.EscapeDataString(id)}/confirm",
+                    new { },
+                    CancellationToken.None);
+                if (resp.IsSuccessStatusCode)
+                {
+                    success.Add(id);
+                }
+                else
+                {
+                    var body = await resp.Content.ReadAsStringAsync();
+                    failed.Add((id, string.IsNullOrWhiteSpace(body) ? $"HTTP {(int)resp.StatusCode}" : body));
+                }
+            }
+            catch (Exception ex)
+            {
+                failed.Add((id, ex.Message));
+            }
+        }
+
+        // 성공 행 상태 갱신 — 화면 즉시 반영
+        foreach (var row in _rows.Where(r => success.Contains(r.ReceiptId)))
+        {
+            row.Status = "confirmed";
+        }
+        _selectedRows.Clear();
+        _allSelected = false;
+        RecalculateSelectionSummary();
+
+        if (failed.Count == 0)
+        {
+            Snackbar.Add($"{success.Count}건 매입 확정 완료 (재고 반영됨)", Severity.Success);
+        }
+        else if (success.Count == 0)
+        {
+            Snackbar.Add($"전건 확정 실패 ({failed.Count}건): {failed[0].Reason[..Math.Min(200, failed[0].Reason.Length)]}", Severity.Error);
+        }
+        else
+        {
+            Snackbar.Add($"성공 {success.Count}건 / 실패 {failed.Count}건. 첫 실패: {failed[0].Reason[..Math.Min(200, failed[0].Reason.Length)]}", Severity.Warning);
+        }
+
         await InvokeAsync(StateHasChanged);
     }
 

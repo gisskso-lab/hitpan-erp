@@ -52,7 +52,13 @@ public class BomItemDto
 
 public class CreateBomDto
 {
+    // 기존 상품에 BOM을 덧붙이는 경우 선택. 신규 완제품으로 등록하려면 비워둔다.
     public string ProductItemId { get; set; } = "";
+
+    // 신규 완제품명. 이 값이 있고 ProductItemId가 비어있으면 서비스가 items INSERT 후 연결.
+    // 사장님 지시 흐름: "BOM 생성 → 상품등록 확인 → 상품마스터 반영".
+    public string? ProductItemName { get; set; }
+
     public string BomName { get; set; } = "";
     public bool IsDefault { get; set; } = true;
     public string? Memo { get; set; }

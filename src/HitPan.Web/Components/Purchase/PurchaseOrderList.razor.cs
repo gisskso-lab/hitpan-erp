@@ -199,19 +199,9 @@ public partial class PurchaseOrderList : ComponentBase
     /// <returns>비동기 처리</returns>
     private async Task BulkConfirmAsync()
     {
-        var ids = _selectedRows
-            .Where(x => !string.IsNullOrWhiteSpace(x.PoId))
-            .Select(x => x.PoId)
-            .ToList();
-
-        // 선택이 없으면 API 를 호출하지 않는다.
-        if (ids.Count == 0)
-        {
-            return;
-        }
-
-        // 추후 API 연동 필요: 발주 확정 bulk 엔드포인트가 생기면 DeliveryService.BulkConfirmAsync 와 유사하게 연결한다.
-        Snackbar.Add("발주 일괄 확정 API 가 아직 없습니다. 추후 API 연동 필요.", Severity.Info);
+        // 발주는 별도 "확정" 상태가 없다. 워크플로우 §20 기준으로 발주→매입전환이 완결 경로.
+        // draft 상태에서 바로 "매입전환" 버튼을 쓰도록 안내.
+        Snackbar.Add("발주는 '매입전환' 버튼으로 완결합니다(별도 확정 단계 없음). 오른쪽 매입전환 버튼을 사용하세요.", Severity.Info);
         await InvokeAsync(StateHasChanged);
     }
 

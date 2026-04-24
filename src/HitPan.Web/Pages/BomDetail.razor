@@ -33,18 +33,15 @@ else
                 <MudText Typo="Typo.subtitle1" Class="mb-2">기본정보</MudText>
                 <MudGrid Spacing="2">
                     <MudItem xs="12" md="6">
-                        @* 완제품 선택 — fk_bh_item FK를 만족시키기 위한 필수 필드(없으면 빈 문자열 POST로 400). *@
-                        <MudAutocomplete T="ItemOption"
-                                         Value="@_selectedProduct"
-                                         ValueChanged="OnProductSelected"
-                                         SearchFunc="SearchProducts"
-                                         ToStringFunc="@(x => x?.Name ?? "")"
-                                         Label="완제품"
-                                         Required="true"
-                                         RequiredError="완제품을 선택하세요."
-                                         Variant="Variant.Outlined"
-                                         Margin="Margin.Dense"
-                                         Dense="true" />
+                        @* 완제품명 — 새 이름 입력 (저장 시 상품마스터에 자동 등록). *@
+                        @* 사장님 지시 로직: "BOM 생성 → 상품등록 확인 → 상품마스터 반영" *@
+                        <MudTextField @bind-Value="_productName"
+                                      Label="완제품명 (새 상품)"
+                                      Variant="Variant.Outlined"
+                                      Margin="Margin.Dense"
+                                      Required="true"
+                                      RequiredError="완제품명을 입력하세요."
+                                      HelperText="저장 시 상품마스터에 자동 등록됩니다." />
                     </MudItem>
                     <MudItem xs="12" md="4">
                         <MudTextField @bind-Value="_bomName" Label="BOM 이름" Variant="Variant.Outlined" Margin="Margin.Dense" Required="true" />
@@ -168,8 +165,8 @@ else
     private bool _saving;
 
     // 기본정보
-    private string? _selectedProductId;
-    private ItemOption? _selectedProduct;
+    private string? _selectedProductId;        // 수정 모드에서만 기존 ID 유지
+    private string _productName = "";          // 신규: 완제품명(저장 시 상품마스터 자동 등록)
     private string _bomName = "";
     private bool _isDefault = true;
     private string? _memo;
@@ -196,13 +193,13 @@ else
         _isNew = string.IsNullOrWhiteSpace(Id) || string.Equals(Id, "new", StringComparison.OrdinalIgnoreCase);
         _loading = true;
 
-        // 상품 캐시 선행 로드 — 완제품 Autocomplete·자재 Autocomplete 공용.
+        // 자재 Autocomplete 용 item 캐시(완제품·자재 모두 포함).
         _itemCache ??= await LoadItemOptions();
 
         if (_isNew)
         {
             _selectedProductId = null;
-            _selectedProduct = null;
+            _productName = "";
             _bomName = "";
             _isDefault = true;
             _memo = null;
@@ -219,8 +216,7 @@ else
             }
 
             _selectedProductId = detail.ProductItemId;
-            _selectedProduct = _itemCache.FirstOrDefault(x => x.ItemId == detail.ProductItemId)
-                ?? new ItemOption { ItemId = detail.ProductItemId, Name = detail.ProductItemName };
+            _productName = detail.ProductItemName ?? "";
             _bomName = detail.BomName;
             _isDefault = detail.IsDefault;
             _memo = detail.Memo;
@@ -236,23 +232,6 @@ else
         }
 
         _loading = false;
-    }
-
-    private Task<IEnumerable<ItemOption>> SearchProducts(string? value, CancellationToken ct)
-    {
-        var src = _itemCache ?? new List<ItemOption>();
-        var filtered = string.IsNullOrWhiteSpace(value)
-            ? src
-            : src.Where(x => x.Name.Contains(value, StringComparison.OrdinalIgnoreCase));
-        return Task.FromResult<IEnumerable<ItemOption>>(filtered);
-    }
-
-    private void OnProductSelected(ItemOption? selected)
-    {
-        _selectedProduct = selected;
-        _selectedProductId = selected?.ItemId;
-        if (string.IsNullOrWhiteSpace(_bomName) && selected is not null)
-            _bomName = $"{selected.Name} 기본 BOM";
     }
 
     // 자재 검색 (전체)
@@ -287,9 +266,10 @@ else
 
     private async Task SaveAsync()
     {
-        if (string.IsNullOrWhiteSpace(_selectedProductId))
+        // 신규: 완제품명 필수. 수정: 기존 ProductItemId 사용.
+        if (_isNew && string.IsNullOrWhiteSpace(_productName))
         {
-            Snackbar.Add("완제품을 선택해주세요.", Severity.Warning);
+            Snackbar.Add("완제품명을 입력해주세요.", Severity.Warning);
             return;
         }
         if (string.IsNullOrWhiteSpace(_bomName))
@@ -303,9 +283,21 @@ else
             return;
         }
 
+        // 신규 저장 전 확인 다이얼로그 — 사장님 지시 흐름 "상품등록하시겠습니까? Y/N".
+        if (_isNew)
+        {
+            var confirmRegister = await DialogService.ShowMessageBoxAsync(
+                "상품등록 확인",
+                $"완제품 '{_productName}' 을(를) 상품마스터에 등록하고 BOM을 저장합니다. 계속하시겠습니까?",
+                yesText: "등록하고 저장",
+                cancelText: "취소");
+            if (confirmRegister != true) return;
+        }
+
         var model = new CreateBomModel
         {
             ProductItemId = _selectedProductId ?? "",
+            ProductItemName = _isNew ? _productName : null,
             BomName = _bomName,
             IsDefault = _isDefault,
             Memo = _memo,
