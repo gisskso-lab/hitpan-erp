@@ -153,6 +153,13 @@ public class PurchaseService : IPurchaseService
             throw new InvalidOperationException("draft 상태 전표만 확정할 수 있습니다.");
         }
 
+        // 합계 0원 매입은 확정 금지 — journal_lines 의 CHECK 제약
+        // (debit>0 AND credit=0) OR (debit=0 AND credit>0) 위반 및 워크플로우 오염 방지(§20).
+        if (receipt.TotalAmount + receipt.VatAmount <= 0m)
+        {
+            throw new InvalidOperationException("합계가 0원인 매입은 확정할 수 없습니다. 품목·수량·단가를 확인해주세요.");
+        }
+
         // 월마감 체크 — 마감된 월의 전표 확정 차단
         await ApprovalTriggerHelper.EnsureNotClosedAsync(_db, receipt.TenantId, receipt.ReceiptDate, ct);
 

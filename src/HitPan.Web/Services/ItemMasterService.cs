@@ -15,6 +15,7 @@ public sealed class ItemMasterService(HttpClient http)
         string? search = null,
         string? group = null,
         string? type = null,
+        bool excludeBom = false,
         CancellationToken ct = default)
     {
         try
@@ -33,6 +34,11 @@ public sealed class ItemMasterService(HttpClient http)
             if (!string.IsNullOrWhiteSpace(type))
             {
                 qs.Add("type=" + Uri.EscapeDataString(type.Trim()));
+            }
+
+            if (excludeBom)
+            {
+                qs.Add("excludeBom=true");
             }
 
             var path = "api/items" + (qs.Count > 0 ? "?" + string.Join("&", qs) : "");

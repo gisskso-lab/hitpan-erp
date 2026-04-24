@@ -35,6 +35,8 @@
             <MudButton Variant="Variant.Outlined" Color="Color.Error" StartIcon="@Icons.Material.Filled.Delete" OnClick="BulkDeleteAsync" Disabled="@(!_selectedRows.Any())">
                 선택 삭제
             </MudButton>
+            <MudSpacer />
+            <MudText Typo="Typo.caption" Style="color:#888">행을 <b>더블클릭</b>하면 작성창에 불러옵니다</MudText>
         </MudStack>
     </MudPaper>
 
@@ -66,13 +68,13 @@
                                  ValueChanged="@(v => ToggleOneAsync(context, v))" />
                 </div>
             </MudTd>
-            <MudTd @onclick="@(() => SelectRowAsync(context))">@context.OrderDate.ToString("yyyy-MM-dd")</MudTd>
-            <MudTd @onclick="@(() => SelectRowAsync(context))">
+            <MudTd @ondblclick="@(() => SelectRowAsync(context))" style="cursor:pointer">@context.OrderDate.ToString("yyyy-MM-dd")</MudTd>
+            <MudTd @ondblclick="@(() => SelectRowAsync(context))" style="cursor:pointer">
                 <MudText Class="@GetSelectedClass(context)">@context.OrderNo</MudText>
             </MudTd>
-            <MudTd @onclick="@(() => SelectRowAsync(context))">@context.PartnerName</MudTd>
-            <MudTd @onclick="@(() => SelectRowAsync(context))">@context.Status</MudTd>
-            <MudTd Class="text-right" @onclick="@(() => SelectRowAsync(context))">@context.TotalAmount.ToString("N0")</MudTd>
+            <MudTd @ondblclick="@(() => SelectRowAsync(context))" style="cursor:pointer">@context.PartnerName</MudTd>
+            <MudTd @ondblclick="@(() => SelectRowAsync(context))" style="cursor:pointer">@context.Status</MudTd>
+            <MudTd Class="text-right" @ondblclick="@(() => SelectRowAsync(context))" style="cursor:pointer">@context.TotalAmount.ToString("N0")</MudTd>
             <MudTd>
                 <div @onclick:stopPropagation="true">
                     <MudIconButton Icon="@Icons.Material.Filled.Delete"

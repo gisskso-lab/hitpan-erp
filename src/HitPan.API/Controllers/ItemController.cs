@@ -19,7 +19,12 @@ public sealed class ItemController : ControllerBase
 
     [HttpGet]
     [Authorize(Policy = "TenantOnly")]
-    public async Task<IActionResult> GetList([FromQuery] string? search, [FromQuery] string? group, [FromQuery] string? type, CancellationToken ct)
+    public async Task<IActionResult> GetList(
+        [FromQuery] string? search,
+        [FromQuery] string? group,
+        [FromQuery] string? type,
+        [FromQuery] bool excludeBom,
+        CancellationToken ct)
     {
         var tid = HttpContext.Items["TenantId"]?.ToString();
         if (string.IsNullOrEmpty(tid))
@@ -27,7 +32,7 @@ public sealed class ItemController : ControllerBase
             return Forbid();
         }
 
-        var result = await _svc.GetListAsync(tid, search, group, type, ct).ConfigureAwait(false);
+        var result = await _svc.GetListAsync(tid, search, group, type, excludeBom, ct).ConfigureAwait(false);
         return Ok(result);
     }
 

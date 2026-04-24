@@ -130,10 +130,19 @@ else
     {
         _loading = true;
         StateHasChanged();
+        // 상품 마스터 화면은 BOM 헤더(완제품·반제품, BOM- 코드)는 숨긴다.
+        // BOM 자재명세서는 /bom 전용 화면에서만 조회하도록 한다 (사장님 지시 2026-04-25).
+        // 단, 사용자가 유형 필터에서 '완제품' 또는 '반제품' 을 명시적으로 선택한 경우는 예외.
+        var explicitBomType = !string.IsNullOrWhiteSpace(_typeFilter)
+            && (_typeFilter.Equals("finished", StringComparison.OrdinalIgnoreCase)
+                || _typeFilter.Equals("semi_finished", StringComparison.OrdinalIgnoreCase)
+                || _typeFilter.Equals("semi", StringComparison.OrdinalIgnoreCase));
+
         var result = await ItemsApi.GetListAsync(
             string.IsNullOrWhiteSpace(_search) ? null : _search,
             null,
-            string.IsNullOrWhiteSpace(_typeFilter) ? null : _typeFilter);
+            string.IsNullOrWhiteSpace(_typeFilter) ? null : _typeFilter,
+            excludeBom: !explicitBomType);
         _items = result ?? new List<ItemListModel>();
         _loading = false;
         StateHasChanged();

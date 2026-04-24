@@ -9,6 +9,7 @@ public interface IItemService
         string? search = null,
         string? group = null,
         string? type = null,
+        bool excludeBom = false,
         CancellationToken ct = default);
 
     Task<ItemDetailDto?> GetAsync(string itemId, string tenantId, CancellationToken ct = default);

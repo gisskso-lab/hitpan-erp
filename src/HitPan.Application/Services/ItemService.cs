@@ -22,10 +22,13 @@ public sealed class ItemService : IItemService
         string? search = null,
         string? group = null,
         string? type = null,
+        bool excludeBom = false,
         CancellationToken ct = default)
     {
         await EnsureOpenAsync(ct).ConfigureAwait(false);
 
+        // excludeBom=true 인 경우 BOM 결과물(완제품·반제품) 및 BOM- 로 시작하는 코드 제외.
+        // 상품 마스터 화면은 순수 판매·자재 상품만 보여주고 BOM 헤더는 BOM 화면에서만 조회.
         const string sql = """
                            SELECT
                              i.item_id AS ItemId,
@@ -56,6 +59,13 @@ public sealed class ItemService : IItemService
                                   IFNULL(i.item_code, '') LIKE CONCAT('%', @Search, '%'))
                              AND (@Group IS NULL OR @Group = '' OR i.item_group = @Group)
                              AND (@Type IS NULL OR @Type = '' OR LOWER(i.item_type) = LOWER(@Type))
+                             AND (
+                                   @ExcludeBom = 0
+                                OR (
+                                     LOWER(IFNULL(i.item_type, 'product')) NOT IN ('finished', 'semi_finished', 'semi')
+                                 AND (IFNULL(i.item_code, '') NOT LIKE 'BOM-%')
+                                   )
+                             )
                            ORDER BY i.item_group, i.item_name
                            """;
 
@@ -66,7 +76,8 @@ public sealed class ItemService : IItemService
                 TenantId = tenantId,
                 Search = search?.Trim(),
                 Group = group?.Trim(),
-                Type = type?.Trim()
+                Type = type?.Trim(),
+                ExcludeBom = excludeBom ? 1 : 0
             },
             cancellationToken: ct)).ConfigureAwait(false);
 

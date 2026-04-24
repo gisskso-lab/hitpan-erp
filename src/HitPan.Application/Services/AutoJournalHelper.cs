@@ -51,9 +51,12 @@ internal static class AutoJournalHelper
         await InsertEntryAsync(conn, tx, entryId, tenantId, entryNo, entryDate,
             "sales", sourceId, employeeId, $"매출 자동기표: {documentNo}", ct);
 
-        // 차변 외상매출금
-        await InsertLineAsync(conn, tx, entryId, tenantId, AccountsReceivable, "debit",
-            total, partnerId, $"매출채권 {documentNo}", ct);
+        // 차변 외상매출금 — total=0이면 스킵 (CHECK chk_jl_debit_or_credit: 0/0 라인 금지).
+        if (total != 0m)
+        {
+            await InsertLineAsync(conn, tx, entryId, tenantId, AccountsReceivable, "debit",
+                total, partnerId, $"매출채권 {documentNo}", ct);
+        }
 
         // 대변 매출
         if (supplyAmount != 0m)
@@ -109,9 +112,12 @@ internal static class AutoJournalHelper
                 vatAmount, partnerId, $"부가세대급금 {documentNo}", ct);
         }
 
-        // 대변 외상매입금
-        await InsertLineAsync(conn, tx, entryId, tenantId, AccountsPayable, "credit",
-            total, partnerId, $"매입채무 {documentNo}", ct);
+        // 대변 외상매입금 — total=0이면 스킵 (CHECK chk_jl_debit_or_credit: 0/0 라인 금지).
+        if (total != 0m)
+        {
+            await InsertLineAsync(conn, tx, entryId, tenantId, AccountsPayable, "credit",
+                total, partnerId, $"매입채무 {documentNo}", ct);
+        }
     }
 
     private static Task InsertEntryAsync(

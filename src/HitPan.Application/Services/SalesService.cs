@@ -214,6 +214,12 @@ public class SalesService : ISalesService
             throw new InvalidOperationException("draft 상태 전표만 확정할 수 있습니다.");
         }
 
+        // 합계 0원 판매는 확정 금지 — journal_lines CHECK 제약 위반 방지(§20 워크플로우 오염 차단).
+        if (delivery.TotalAmount + delivery.VatAmount <= 0m)
+        {
+            throw new InvalidOperationException("합계가 0원인 거래명세서는 확정할 수 없습니다. 품목·수량·단가를 확인해주세요.");
+        }
+
         // 월마감 체크 — 마감된 월의 전표 확정 차단
         await ApprovalTriggerHelper.EnsureNotClosedAsync(_db, delivery.TenantId, delivery.DeliveryDate, ct);
 
