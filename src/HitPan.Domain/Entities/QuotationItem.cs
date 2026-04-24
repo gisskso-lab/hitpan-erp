@@ -10,7 +10,8 @@ public class QuotationItem : BaseEntity
     /// <summary>
     /// 품목 식별자(도메인 별칭)다.
     /// </summary>
-    public string QuotationItemId { get; set; } = string.Empty;
+    // EF가 Id↔id 매핑 + QuotationItemId Ignore. Id alias로 통일.
+    public string QuotationItemId { get => Id; set => Id = value; }
 
     /// <summary>
     /// 견적서 식별자다.

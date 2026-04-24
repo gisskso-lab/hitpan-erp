@@ -32,6 +32,36 @@ public partial class PurchaseReceiptPage : ComponentBase
     // 라인에 창고가 비어 있을 때 CreateReceiptItemRequest.WarehouseId 에 넣을 헤더 기본 창고 Id.
     private string _headerWarehouseId = string.Empty;
 
+    // 창고 마스터 캐시(ID 자동 선택·라벨 표시용). "MAIN" 하드코딩 대신 실제 warehouse_id 사용.
+    private List<WarehouseSimple> _warehouses = new();
+
+    private sealed class WarehouseSimple
+    {
+        [JsonPropertyName("warehouseId")] public string WarehouseId { get; set; } = string.Empty;
+        [JsonPropertyName("whCode")] public string WhCode { get; set; } = string.Empty;
+        [JsonPropertyName("whName")] public string WhName { get; set; } = string.Empty;
+        [JsonPropertyName("isActive")] public bool IsActive { get; set; }
+    }
+
+    private async Task EnsureDefaultWarehouseAsync()
+    {
+        if (_warehouses.Count > 0 && !string.IsNullOrWhiteSpace(_headerWarehouseId)) return;
+
+        try
+        {
+            _warehouses = await Http.GetFromJsonAsync<List<WarehouseSimple>>("api/warehouses") ?? new();
+        }
+        catch
+        {
+            _warehouses = new();
+        }
+
+        var mainWh = _warehouses.FirstOrDefault(x => x.IsActive && (x.WhCode == "MAIN" || x.WhCode == "WH-MAIN"))
+                     ?? _warehouses.FirstOrDefault(x => x.IsActive)
+                     ?? _warehouses.FirstOrDefault();
+        _headerWarehouseId = mainWh?.WarehouseId ?? string.Empty;
+    }
+
     // 푸터 합계
     private DeliverySummaryModel _summary = new();
 
@@ -73,8 +103,8 @@ public partial class PurchaseReceiptPage : ComponentBase
         _receiptDate = DateTime.Today;
         _draft.SalesDate = _receiptDate.Value;
 
-        // 스텁 기본 창고 Id(추후 창고 마스터 API 로 대체).
-        _headerWarehouseId = "MAIN";
+        // 실제 warehouse_id 로딩(§#20 워크플로 끊김 금지 — "MAIN" 문자열 하드코딩 제거).
+        await EnsureDefaultWarehouseAsync();
 
         RefreshWorkflow();
         RecalculateSummary();
@@ -399,7 +429,7 @@ public partial class PurchaseReceiptPage : ComponentBase
             };
             _receiptDate = DateTime.Today;
             _draft.SalesDate = _receiptDate.Value;
-            _headerWarehouseId = "MAIN";
+            await EnsureDefaultWarehouseAsync();
             _isNew = true;
             RecalculateSummary();
             RefreshWorkflow();
@@ -467,7 +497,7 @@ public partial class PurchaseReceiptPage : ComponentBase
         };
         _receiptDate = DateTime.Today;
         _draft.SalesDate = _receiptDate.Value;
-        _headerWarehouseId = "MAIN";
+        await EnsureDefaultWarehouseAsync();
         _isNew = true;
         _selectedLine = null;
         _hasUnsavedChanges = false;

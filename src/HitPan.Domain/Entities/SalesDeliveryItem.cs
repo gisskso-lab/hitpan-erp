@@ -4,7 +4,8 @@ namespace HitPan.Domain.Entities;
 
 public class SalesDeliveryItem : BaseEntity, ITenantEntity
 {
-    public string DeliveryItemId { get; set; } = string.Empty;
+    // EF가 Id↔delivery_item_id 매핑 + DeliveryItemId Ignore. Id alias로 통일.
+    public string DeliveryItemId { get => Id; set => Id = value; }
     public string DeliveryId { get; set; } = string.Empty;
     public string TenantId { get; set; } = string.Empty;
     public string? OrderItemId { get; set; }

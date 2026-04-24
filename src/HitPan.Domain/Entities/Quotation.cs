@@ -11,7 +11,8 @@ public class Quotation : BaseEntity, ITenantEntity
     /// <summary>
     /// 견적서 식별자(도메인 별칭)다.
     /// </summary>
-    public string QuoteId { get; set; } = string.Empty;
+    // EF가 Id↔quote_id 매핑 + QuoteId Ignore. Id alias로 통일.
+    public string QuoteId { get => Id; set => Id = value; }
 
     /// <summary>
     /// 테넌트 식별자다.

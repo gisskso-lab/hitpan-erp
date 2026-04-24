@@ -16,13 +16,15 @@ namespace HitPan.Application.Services;
 internal static class AutoJournalHelper
 {
     // 표준 계정 식별자 (chart_of_accounts 도입 전까지 account_id 자리에 직접 사용)
-    public const string SalesRevenue = "acc-sales-revenue";             // 매출 (대변)
-    public const string VatPayable = "acc-vat-payable";                 // 부가세예수금 (대변)
-    public const string AccountsReceivable = "acc-accounts-receivable"; // 외상매출금 (차변)
+    // accounts 테이블의 실 account_code는 표준 5자리 한국 계정과목 코드.
+    // 과거 "acc-sales-revenue" 같은 긴 심볼릭 문자열은 VARCHAR(10) 컬럼 초과로 INSERT 실패했다.
+    public const string SalesRevenue = "40100";         // 상품매출 (대변)
+    public const string VatPayable = "25500";           // 부가세예수금 (대변)
+    public const string AccountsReceivable = "10800";   // 외상매출금 (차변)
 
-    public const string PurchaseCost = "acc-purchase-cost";             // 매입 (차변)
-    public const string VatReceivable = "acc-vat-receivable";           // 부가세대급금 (차변)
-    public const string AccountsPayable = "acc-accounts-payable";       // 외상매입금 (대변)
+    public const string PurchaseCost = "50100";         // 상품매입 (차변)
+    public const string VatReceivable = "17600";        // 부가세대급금 (차변)
+    public const string AccountsPayable = "23200";      // 외상매입금 (대변)
 
     /// <summary>
     /// 매출(거래명세서) 확정 기표.
@@ -118,17 +120,21 @@ internal static class AutoJournalHelper
         string sourceType, string sourceId, string? employeeId, string memo,
         CancellationToken ct)
     {
+        // journal_entries 실 스키마: entry_id / tenant_id / entry_no / entry_date / ym /
+        //   description / source_type / source_id / is_confirmed / confirmed_at / confirmed_by /
+        //   created_at / created_by.  (code가 들고있던 status/employee_id/memo 컬럼은 실제로는 없음 → drift)
+        var ym = entryDate.ToString("yyyy-MM");
         return conn.ExecuteAsync(new CommandDefinition(
             """
             INSERT INTO journal_entries
-              (entry_id, tenant_id, entry_no, entry_date, source_type, source_id,
-               status, employee_id, memo, created_at)
+              (entry_id, tenant_id, entry_no, entry_date, ym, description, source_type, source_id,
+               is_confirmed, confirmed_at, confirmed_by, created_at, created_by)
             VALUES
-              (@EntryId, @TenantId, @EntryNo, @EntryDate, @SourceType, @SourceId,
-               'confirmed', @EmployeeId, @Memo, NOW())
+              (@EntryId, @TenantId, @EntryNo, @EntryDate, @Ym, @Memo, @SourceType, @SourceId,
+               1, NOW(6), @EmployeeId, NOW(6), @EmployeeId)
             """,
             new { EntryId = entryId, TenantId = tenantId, EntryNo = entryNo, EntryDate = entryDate,
-                  SourceType = sourceType, SourceId = sourceId, EmployeeId = employeeId, Memo = memo },
+                  Ym = ym, SourceType = sourceType, SourceId = sourceId, EmployeeId = employeeId, Memo = memo },
             transaction: tx,
             cancellationToken: ct));
     }
@@ -139,15 +145,19 @@ internal static class AutoJournalHelper
         decimal amount, string? partnerId, string memo,
         CancellationToken ct)
     {
+        // journal_lines 실 스키마: account_code / debit_amount / credit_amount / partner_id / memo
+        // (code가 들고있던 account_id/dc_type/amount는 drift).
+        var debit = dcType == "debit" ? amount : 0m;
+        var credit = dcType == "credit" ? amount : 0m;
         return conn.ExecuteAsync(new CommandDefinition(
             """
             INSERT INTO journal_lines
-              (entry_id, tenant_id, account_id, dc_type, amount, partner_id, memo, created_at)
+              (entry_id, tenant_id, account_code, debit_amount, credit_amount, partner_id, memo, created_at)
             VALUES
-              (@EntryId, @TenantId, @AccountId, @DcType, @Amount, @PartnerId, @Memo, NOW())
+              (@EntryId, @TenantId, @AccountCode, @Debit, @Credit, @PartnerId, @Memo, NOW(6))
             """,
-            new { EntryId = entryId, TenantId = tenantId, AccountId = accountId, DcType = dcType,
-                  Amount = amount, PartnerId = partnerId, Memo = memo },
+            new { EntryId = entryId, TenantId = tenantId, AccountCode = accountId,
+                  Debit = debit, Credit = credit, PartnerId = partnerId, Memo = memo },
             transaction: tx,
             cancellationToken: ct));
     }

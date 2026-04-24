@@ -5,7 +5,10 @@ namespace HitPan.Domain.Entities;
 
 public class SalesDelivery : BaseEntity, ITenantEntity
 {
-    public string DeliveryId { get; set; } = string.Empty;
+    // EF Configuration이 PK Id↔delivery_id 컬럼으로 매핑하고 DeliveryId 프로퍼티는 Ignore한다.
+    // DB 조회(GetByIdAsync)로 받은 엔티티는 DeliveryId가 기본값(빈 문자열)이어서
+    // 후속 MonthlySummaryGuard 검증에서 빈 값으로 터졌다(ArgumentException). → Id alias 로 통일.
+    public string DeliveryId { get => Id; set => Id = value; }
     public string TenantId { get; set; } = string.Empty;
     public string DeliveryNo { get; set; } = string.Empty;
     public string? OrderId { get; set; }

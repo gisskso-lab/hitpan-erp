@@ -4,7 +4,8 @@ namespace HitPan.Domain.Entities;
 
 public class PurchaseReceiptItem : BaseEntity, ITenantEntity
 {
-    public string ReceiptItemId { get; set; } = string.Empty;
+    // EF가 Id↔receipt_item_id 매핑 + ReceiptItemId Ignore. Id alias로 통일.
+    public string ReceiptItemId { get => Id; set => Id = value; }
     public string ReceiptId { get; set; } = string.Empty;
     public string TenantId { get; set; } = string.Empty;
     public string? PoItemId { get; set; }

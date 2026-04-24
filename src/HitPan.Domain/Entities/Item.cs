@@ -5,7 +5,8 @@ namespace HitPan.Domain.Entities;
 
 public class Item : BaseEntity, ITenantEntity
 {
-    public string ItemId { get; set; } = string.Empty;
+    // EF가 Id↔item_id 매핑 + ItemId Ignore. Id alias로 통일.
+    public string ItemId { get => Id; set => Id = value; }
     public string TenantId { get; set; } = string.Empty;
     public string ItemCode { get; set; } = string.Empty;
     public string ItemName { get; set; } = string.Empty;
