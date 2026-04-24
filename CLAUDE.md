@@ -223,6 +223,7 @@ SI 현장 20년 현업 출신.
 15. **빈 catch 블록 금지** — 최소한 `_logger.LogWarning(ex, ...)` 한 줄. silent swallow는 운영 사고 추적 불가
 16. **MySqlConnection + Task.WhenAll 조합 금지** — MySqlConnection은 thread-safe가 아님. 병렬 쿼리 시 "connection in use" 에러. 다중 KPI는 `UNION ALL` 단일 쿼리 또는 `QueryMultipleAsync` 사용
 17. **신규 DB 테이블은 반드시 `ENGINE=InnoDB` 명시** — MyISAM은 트랜잭션·FK 지원 안 함. 4/22 40개 테이블 일괄 전환 교훈
+18. **본사 서버로 고객사 ERP 업무 데이터 전송 금지** — 본사가 받는 건 ① SaaS 운영 데이터(가입·결제·라이선스·텔레메트리·CS) + ② 대리점 영업 데이터(채널·수수료·KPI)뿐. 매출/매입/원장/거래처/직원/상품/재고/세금계산서/결재 등 고객사 업무 데이터는 절대 본사로 전송 코드 작성 금지. (사장님 헌법 2026-04-25, DESIGN_PRINCIPLES §14.3) 위반 시 4프로토콜 #3 민감 작업으로 즉시 반려.
 
 ---
 
