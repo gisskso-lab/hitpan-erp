@@ -3,6 +3,7 @@ using System.Data.Common;
 using Dapper;
 using HitPan.Application.DTOs.Item;
 using HitPan.Application.Interfaces;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace HitPan.Application.Services;
 
@@ -10,11 +11,13 @@ public sealed class ItemService : IItemService
 {
     private readonly IDbConnection _db;
     private readonly IAuditService _audit;
+    private readonly IServiceProvider _services;
 
-    public ItemService(IDbConnection db, IAuditService audit)
+    public ItemService(IDbConnection db, IAuditService audit, IServiceProvider services)
     {
         _db = db;
         _audit = audit;
+        _services = services;
     }
 
     public async Task<List<ItemListDto>> GetListAsync(
@@ -238,6 +241,12 @@ public sealed class ItemService : IItemService
         var unit = string.IsNullOrWhiteSpace(dto.Unit) ? "EA" : dto.Unit.Trim();
         var code = string.IsNullOrWhiteSpace(dto.ItemCode) ? null : dto.ItemCode.Trim();
 
+        // 사장님 지시 (2026-04-26): 자재 매입단가가 바뀌면 그 자재를 쓰는 BOM 의
+        // 완제품·반제품 매입단가 자동 재계산. UPDATE 전 기존 매입단가 조회해서 비교.
+        var oldPurchasePrice = await _db.QueryFirstOrDefaultAsync<decimal>(new CommandDefinition(
+            "SELECT COALESCE(purchase_price, cost_price, 0) FROM items WHERE item_id=@ItemId AND tenant_id=@TenantId",
+            new { ItemId = itemId, TenantId = tenantId }, cancellationToken: ct)).ConfigureAwait(false);
+
         var affected = await _db.ExecuteAsync(new CommandDefinition(
             """
             UPDATE items SET
@@ -301,6 +310,25 @@ public sealed class ItemService : IItemService
         // 감사로그 — 상품 수정 (핵심 변경 필드만 기록)
         var afterJson = $"{{\"item_name\":\"{dto.ItemName.Trim()}\",\"sale_price\":{dto.SalePrice},\"purchase_price\":{dto.PurchasePrice},\"is_active\":{(dto.IsActive ? "true" : "false")}}}";
         await _audit.LogAsync("update", "item", itemId, afterJson: afterJson, ct: ct);
+
+        // 매입단가 변경 시 → 이 자재를 쓰는 모든 BOM 의 완제품·반제품 단가 재계산.
+        // 체인 전파(반제품 → 완제품)는 BomService 가 재귀 처리.
+        if (oldPurchasePrice != dto.PurchasePrice)
+        {
+            try
+            {
+                var bomSvc = _services.GetService<IBomService>();
+                if (bomSvc is not null)
+                {
+                    await bomSvc.RecalculateBomsUsingMaterialAsync(itemId, tenantId, ct).ConfigureAwait(false);
+                }
+            }
+            catch (Exception ex)
+            {
+                // BOM 재계산 실패는 상품 수정 자체를 막지 않음 — 경고 로그만 남김.
+                Console.WriteLine($"[ItemService.UpdateAsync] BOM recalc failed for material {itemId}: {ex.Message}");
+            }
+        }
     }
 
     public async Task DeleteAsync(string itemId, string tenantId, CancellationToken ct = default)

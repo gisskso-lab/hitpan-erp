@@ -23,6 +23,13 @@ public interface IBomService
     Task<string?> GetBomIdByItemAsync(string itemId, string tenantId, CancellationToken ct = default);
 
     /// <summary>
+    /// 특정 자재(item_id)가 들어간 모든 BOM 의 원가를 재계산하고
+    /// 해당 완제품·반제품의 items.purchase_price 등을 자동 동기화한다.
+    /// 사장님 지시 (2026-04-26): 자재 단가가 바뀌면 조립 완제품 매입단가 자동 반영.
+    /// </summary>
+    Task RecalculateBomsUsingMaterialAsync(string materialItemId, string tenantId, CancellationToken ct = default);
+
+    /// <summary>
     /// BOM 조립 직후 자재 부족·안전재고 위반 품목을 자동발주 후보로 반환.
     /// 사장님 지시 (2026-04-26): 자재가 안전재고 이하/0 이면 다이얼로그로 묻고
     /// OK 시 발주서를 즉시 생성. 판매 자동발주(SalesService)와 동일 DTO 사용.

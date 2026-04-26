@@ -682,8 +682,23 @@ public class BomService : IBomService
         return false;
     }
 
+    /// <summary>
+    /// BOM 원가 재계산 → bom_cost_cache + items 테이블 동시 갱신.
+    /// 사장님 지시 (2026-04-26): 조립 자재 단가가 바뀌면 BOM 완제품·반제품의
+    /// 매입단가에 즉시 자동 반영. items.purchase_price/cost_price/std_price/standard_price
+    /// 4개를 동기화해 매입·재고·원가 어디서 읽어도 같은 값.
+    /// 체인 전파: 이 완제품이 다른 BOM 의 자재이기도 하면(반제품 케이스)
+    /// 그 상위 BOM 도 재귀 재계산. 순환은 CreateAsync 시 HasCircularRefAsync 가 차단.
+    /// </summary>
     private async Task UpdateCostCacheAsync(string bomId, string tenantId, CancellationToken ct)
     {
+        await UpdateCostCacheRecursiveAsync(bomId, tenantId, new HashSet<string>(StringComparer.OrdinalIgnoreCase), ct);
+    }
+
+    private async Task UpdateCostCacheRecursiveAsync(string bomId, string tenantId, HashSet<string> visited, CancellationToken ct)
+    {
+        if (!visited.Add(bomId)) return; // 순환 안전망
+
         var cost = await _db.QueryFirstOrDefaultAsync<decimal>(new CommandDefinition(
             """
             SELECT COALESCE(SUM(
@@ -694,10 +709,12 @@ public class BomService : IBomService
             WHERE bi.bom_id=@BomId AND bi.tenant_id=@TenantId
             """,
             new { BomId = bomId, TenantId = tenantId }, cancellationToken: ct)).ConfigureAwait(false);
+
         var productItemId = await _db.QueryFirstOrDefaultAsync<string>(new CommandDefinition(
             "SELECT product_item_id FROM bom_headers WHERE bom_id=@BomId AND tenant_id=@TenantId",
             new { BomId = bomId, TenantId = tenantId }, cancellationToken: ct)).ConfigureAwait(false);
         if (string.IsNullOrWhiteSpace(productItemId)) return;
+
         await _db.ExecuteAsync(new CommandDefinition(
             """
             INSERT INTO bom_cost_cache
@@ -708,6 +725,35 @@ public class BomService : IBomService
               calculated_cost=@Cost, is_dirty=0, last_calculated_at=NOW(6)
             """,
             new { TenantId = tenantId, ProductItemId = productItemId, Cost = cost }, cancellationToken: ct)).ConfigureAwait(false);
+
+        // items 테이블 매입단가/원가/표준가 동기화 — 사장님 지시 핵심.
+        await _db.ExecuteAsync(new CommandDefinition(
+            """
+            UPDATE items
+               SET purchase_price = @Cost,
+                   cost_price     = @Cost,
+                   standard_price = @Cost,
+                   std_price      = @Cost,
+                   updated_at     = NOW(6)
+             WHERE item_id   = @ProductItemId
+               AND tenant_id = @TenantId
+            """,
+            new { TenantId = tenantId, ProductItemId = productItemId, Cost = cost }, cancellationToken: ct)).ConfigureAwait(false);
+
+        // 체인 전파: 이 완제품을 자재로 쓰는 상위 BOM 모두 재계산.
+        var parents = await _db.QueryAsync<string>(new CommandDefinition(
+            """
+            SELECT DISTINCT bi.bom_id
+              FROM bom_items bi
+             WHERE bi.material_item_id = @ProductItemId
+               AND bi.tenant_id        = @TenantId
+            """,
+            new { ProductItemId = productItemId, TenantId = tenantId }, cancellationToken: ct)).ConfigureAwait(false);
+
+        foreach (var parentBomId in parents)
+        {
+            await UpdateCostCacheRecursiveAsync(parentBomId, tenantId, visited, ct);
+        }
     }
 
     public async Task<string?> GetBomIdByItemAsync(string itemId, string tenantId, CancellationToken ct = default)
@@ -717,6 +763,27 @@ public class BomService : IBomService
             "SELECT bom_id FROM bom_headers WHERE product_item_id=@ItemId AND tenant_id=@Tid LIMIT 1",
             new { ItemId = itemId, Tid = tenantId },
             cancellationToken: ct)).ConfigureAwait(false);
+    }
+
+    public async Task RecalculateBomsUsingMaterialAsync(string materialItemId, string tenantId, CancellationToken ct = default)
+    {
+        await EnsureOpenAsync(ct).ConfigureAwait(false);
+
+        // 자재로 쓰이는 모든 BOM 헤더 조회.
+        var bomIds = await _db.QueryAsync<string>(new CommandDefinition(
+            """
+            SELECT DISTINCT bi.bom_id
+              FROM bom_items bi
+             WHERE bi.material_item_id = @ItemId
+               AND bi.tenant_id        = @Tid
+            """,
+            new { ItemId = materialItemId, Tid = tenantId }, cancellationToken: ct)).ConfigureAwait(false);
+
+        var visited = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var bomId in bomIds)
+        {
+            await UpdateCostCacheRecursiveAsync(bomId, tenantId, visited, ct);
+        }
     }
 
     public async Task<List<DTOs.Sales.AutoOrderCandidateDto>> GetAssembleAutoOrderCandidatesAsync(
