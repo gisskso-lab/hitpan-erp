@@ -114,6 +114,7 @@ public sealed class ItemService : IItemService
                              IFNULL(i.auto_order_enabled, 0) AS AutoOrderEnabled,
                              i.auto_order_partner_id AS AutoOrderPartnerId,
                              IFNULL(i.auto_order_qty, 0) AS AutoOrderQty,
+                             IFNULL(i.auto_receive_on_order, 0) AS AutoReceiveOnOrder,
                              i.barcode AS Barcode,
                              i.memo AS Memo,
                              IFNULL(i.row_version, 0) AS RowVersion
@@ -186,7 +187,7 @@ public sealed class ItemService : IItemService
               category_id, unit, spec,
               purchase_price, sale_price, standard_price,
               tax_type, safety_stock, barcode, memo,
-              auto_order_enabled, auto_order_partner_id, auto_order_qty,
+              auto_order_enabled, auto_order_partner_id, auto_order_qty, auto_receive_on_order,
               std_price, cost_price, safe_stock,
               is_active, is_deleted, row_version,
               created_at, updated_at)
@@ -197,7 +198,7 @@ public sealed class ItemService : IItemService
               NULL, @Unit, @Spec,
               @PurchasePrice, @SalePrice, @StandardPrice,
               @TaxType, @SafetyStock, @Barcode, @Memo,
-              @AutoOrderEnabled, @AutoOrderPartnerId, @AutoOrderQty,
+              @AutoOrderEnabled, @AutoOrderPartnerId, @AutoOrderQty, @AutoReceiveOnOrder,
               @StandardPrice, @PurchasePrice, @SafetyStock,
               1, 0, 0,
               NOW(6), NOW(6))
@@ -221,7 +222,8 @@ public sealed class ItemService : IItemService
                 Memo = dto.Memo,
                 AutoOrderEnabled = dto.AutoOrderEnabled ? 1 : 0,
                 AutoOrderPartnerId = dto.AutoOrderPartnerId,
-                AutoOrderQty = dto.AutoOrderQty
+                AutoOrderQty = dto.AutoOrderQty,
+                AutoReceiveOnOrder = dto.AutoReceiveOnOrder ? 1 : 0
             },
             cancellationToken: ct)).ConfigureAwait(false);
 
@@ -266,6 +268,7 @@ public sealed class ItemService : IItemService
                 auto_order_enabled   = @AutoOrderEnabled,
                 auto_order_partner_id = @AutoOrderPartnerId,
                 auto_order_qty   = @AutoOrderQty,
+                auto_receive_on_order = @AutoReceiveOnOrder,
                 std_price        = @StandardPrice,
                 cost_price       = @PurchasePrice,
                 safe_stock       = @SafetyStock,
@@ -297,6 +300,7 @@ public sealed class ItemService : IItemService
                 AutoOrderEnabled = dto.AutoOrderEnabled ? 1 : 0,
                 AutoOrderPartnerId = dto.AutoOrderPartnerId,
                 AutoOrderQty = dto.AutoOrderQty,
+                AutoReceiveOnOrder = dto.AutoReceiveOnOrder ? 1 : 0,
                 IsActive = dto.IsActive ? 1 : 0,
                 RowVersion = dto.RowVersion
             },

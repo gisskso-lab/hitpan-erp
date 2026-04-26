@@ -470,21 +470,142 @@ else
         if (string.IsNullOrEmpty(Id) || _produceQty <= 0) return;
 
         _assembling = true;
-        var (ok, err) = await BomApi.AssembleWithErrorAsync(Id, _produceQty, _assembleMemo);
-        _assembling = false;
-
-        if (ok)
+        try
         {
-            Snackbar.Add($"조립 실행 완료 — 완제품 {_produceQty:N0}개 생산, 자재 소비 반영됨.", Severity.Success);
-            _showAssembleDialog = false;
+            // 사장님 헌법 (2026-04-26): "자재가 들어오기 전에 완제품이 +되는 일은 절대 없어야 함."
+            // 1) 생산 시도 전에 재고 사전체크.
+            var check = await BomApi.CheckAssembleAsync(Id, _produceQty);
+            if (check is null)
+            {
+                Snackbar.Add("재고 체크 실패 — 잠시 후 다시 시도해주세요.", Severity.Error);
+                return;
+            }
 
-            // 사장님 지시 (2026-04-26): BOM 생산 직후에도 안전재고 이하/0 자재가 있으면
-            // 자동발주 다이얼로그. OK 시 발주서 즉시 생성 + 발주 목록에 노출.
-            await CheckAssembleAutoOrderAsync(Id);
+            if (check.CanProduce)
+            {
+                // 2-A) 자재·반제품 모두 충분 → 즉시 생산.
+                var (ok, err) = await BomApi.AssembleWithErrorAsync(Id, _produceQty, _assembleMemo);
+                if (ok)
+                {
+                    Snackbar.Add($"조립 실행 완료 — 완제품 {_produceQty:N0}개 생산, 자재 소비 반영됨.", Severity.Success);
+                    _showAssembleDialog = false;
+                }
+                else
+                {
+                    Snackbar.Add($"조립 실행 실패: {err ?? "알 수 없는 오류"}", Severity.Error);
+                }
+                return;
+            }
+
+            // 2-B) 부족 — 사장님 헌법 분기.
+            var shortages = check.Materials.Where(m => !m.IsEnough).ToList();
+            var semiShortages = shortages.Where(m => m.ItemType == "semi_finished").ToList();
+            var matShortages = shortages.Where(m => m.ItemType != "semi_finished").ToList();
+
+            // (i) 반제품이 한 톨이라도 부족 → 즉시 반려. 자동발주 금지 (반제품은 사내 생산물).
+            if (semiShortages.Count > 0)
+            {
+                var lines = string.Join("\n", semiShortages.Select(m =>
+                    $"• {m.ItemName} ({m.ShortageQty:N0}{m.Unit} 부족, 현재 {m.CurrentStock:N0} / 필요 {m.RequiredQty:N0})"));
+                await DialogService.ShowMessageBoxAsync(
+                    "❌ 생산 불가 — 반제품 재고 부족",
+                    $"해당 BOM 반제품 재고가 없습니다. 생산이 불가합니다.\n\n{lines}\n\n반제품을 먼저 생산한 뒤 다시 시도해주세요.",
+                    yesText: "확인");
+                return;
+            }
+
+            // (ii) 자재만 부족 — 자동발주 미설정 자재가 하나라도 있으면 안내 후 반려.
+            var unsetMaterials = matShortages.Where(m => !m.AutoOrderEnabled || string.IsNullOrWhiteSpace(m.AutoOrderPartnerId)).ToList();
+            if (unsetMaterials.Count > 0)
+            {
+                var lines = string.Join("\n", unsetMaterials.Select(m =>
+                    $"• {m.ItemName} ({m.ShortageQty:N0}{m.Unit} 부족) — 자동발주 미설정"));
+                await DialogService.ShowMessageBoxAsync(
+                    "❌ 자동발주 미설정 자재 포함",
+                    $"아래 자재는 자동발주가 설정되지 않아 생산을 진행할 수 없습니다.\n\n{lines}\n\n상품마스터에서 자동발주 거래처/수량을 설정하거나 수동 발주 후 다시 시도해주세요.",
+                    yesText: "확인");
+                return;
+            }
+
+            // (iii) 부족 자재 모두 자동발주 설정 OK → 자동발주 분기.
+            //   - 모두 AutoReceiveOnOrder=Y → 자동 사슬 (발주+매입+확정+생산 한 번에) 제안
+            //   - 하나라도 N → 반자동 (발주서만, 매입처리/확정은 수동)
+            var allAutoReceive = matShortages.All(m => m.AutoReceiveOnOrder);
+            var matLines = string.Join("\n", matShortages.Take(5).Select(m =>
+                $"• {m.ItemName} ({m.ShortageQty:N0}{m.Unit} 부족) → {m.AutoOrderPartnerName} {m.AutoOrderQty:N0}{m.Unit}"));
+            var more = matShortages.Count > 5 ? $"\n... 외 {matShortages.Count - 5}건" : "";
+
+            string title, body, yesText, noText;
+            if (allAutoReceive)
+            {
+                title = "⚠ 자재 부족 — 자동 사슬";
+                body = $"아래 자재가 부족합니다. 자동발주→매입→매입확정→생산을 한 번에 진행하시겠습니까?\n\n{matLines}{more}\n\n" +
+                       "[자동 사슬] 발주+매입확정+생산까지 한 번에 (재고 즉시 +반영, 발주서·매입명세서 모두 발자국 남음)\n" +
+                       "[발주서만] 발주서만 생성, 매입처리·확정은 수동";
+                yesText = "자동 사슬";
+                noText = "발주서만";
+            }
+            else
+            {
+                title = "⚠ 자재 부족 — 자동발주";
+                body = $"아래 자재가 부족합니다. 자동발주 처리 후 생산하시겠습니까?\n\n{matLines}{more}\n\n" +
+                       "[발주서만] 발주서를 생성합니다. 발주목록에서 매입처리, 매입목록에서 매입확정 후 다시 생산지시 해주세요.";
+                yesText = "발주서 생성";
+                noText = "취소";
+            }
+
+            var choice = await DialogService.ShowMessageBoxAsync(title, body,
+                yesText: yesText, noText: noText, cancelText: allAutoReceive ? "취소" : null);
+            if (choice is null || (allAutoReceive && choice == false && choice is null)) return;
+
+            // 자동발주 후보 재조회 — 사장님 헌법 (2026-04-26): produceQty 전달 필수.
+            // 서버에서 MAX(부족분, 자동발주수량)으로 계산하므로 한번에 끝나는 발주량 산출.
+            var candidates = await BomApi.GetAssembleAutoOrderCandidatesAsync(Id, _produceQty);
+            if (candidates.Count == 0)
+            {
+                Snackbar.Add("자동발주 후보 자재가 없습니다 (안전재고 이상이거나 자동발주 미설정).", Severity.Warning);
+                return;
+            }
+
+            var autoReceive = allAutoReceive && choice == true;
+            var results = await DeliveryService.CreateAutoOrdersAsync(candidates, autoReceive);
+            var success = results.Where(r => r.Success).ToList();
+            var failed = results.Where(r => !r.Success).ToList();
+
+            if (success.Count > 0)
+            {
+                var noList = string.Join(", ", success.Select(r => r.PoNo));
+                var label = autoReceive ? "자동발주+매입확정" : "자동발주서";
+                Snackbar.Add($"{label} {success.Count}건 완료: {noList}", Severity.Success);
+
+                if (autoReceive)
+                {
+                    // 자동 사슬: 매입확정까지 끝났으니 자재 +반영 완료. 곧바로 BOM 생산 자동 진행.
+                    var (ok, err) = await BomApi.AssembleWithErrorAsync(Id, _produceQty, _assembleMemo);
+                    if (ok)
+                    {
+                        Snackbar.Add($"자동 사슬 완료 — 발주+매입+생산 한 사슬, 완제품 {_produceQty:N0}개 생산.", Severity.Success);
+                        _showAssembleDialog = false;
+                    }
+                    else
+                    {
+                        Snackbar.Add($"자재 입고는 완료됐으나 BOM 생산 단계에서 실패: {err}\n발주·매입 발자국은 남아있으니 BOM 생산을 다시 시도해주세요.", Severity.Warning);
+                    }
+                }
+                else
+                {
+                    Snackbar.Add("발주서가 생성됐습니다. 발주목록 → 매입처리 → 매입확정 후 BOM 생산을 다시 시도해주세요.", Severity.Info);
+                }
+            }
+            if (failed.Count > 0)
+            {
+                var firstReason = failed[0].Reason ?? "사유 미상";
+                Snackbar.Add($"{failed.Count}건 실패: {firstReason[..Math.Min(150, firstReason.Length)]}", Severity.Warning);
+            }
         }
-        else
+        finally
         {
-            Snackbar.Add($"조립 실행 실패: {err ?? "알 수 없는 오류"}", Severity.Error);
+            _assembling = false;
         }
     }
 

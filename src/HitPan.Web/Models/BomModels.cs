@@ -79,6 +79,21 @@ public class BomMaterialCheckModel
     public string? AutoOrderPartnerName { get; set; }
     public decimal AutoOrderQty { get; set; }
     public bool AutoOrderEnabled { get; set; }
+
+    // 사장님 헌법 (2026-04-26): 반제품 부족 → 자동발주 금지·즉시 반려.
+    public string ItemType { get; set; } = "material";
+
+    // items.auto_receive_on_order — 자동 사슬 vs 반자동 분기 키.
+    public bool AutoReceiveOnOrder { get; set; }
+}
+
+public class BomAssembleCheckModel
+{
+    public string BomId { get; set; } = "";
+    public decimal ProduceQty { get; set; }
+    public List<BomMaterialCheckModel> Materials { get; set; } = new();
+    public bool CanProduce { get; set; }
+    public decimal TotalCost { get; set; }
 }
 
 public class StockAlertModel

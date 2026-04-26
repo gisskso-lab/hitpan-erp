@@ -79,6 +79,12 @@ else
                     <MudItem xs="12" md="3">
                         <MudNumericField T="decimal" @bind-Value="_model.AutoOrderQty" Label="기본 발주수량" Variant="Variant.Outlined" Margin="Margin.Dense" />
                     </MudItem>
+                    <MudItem xs="12" md="3" Class="d-flex align-center">
+                        @* 사장님 헌법 (2026-04-26): 자동발주 시 매입확정까지 자동.
+                           N(default)=반자동(발주서만), Y=자동 사슬(발주+매입+확정+자재반영+생산까지 한 번에).
+                           어느 쪽이든 발주서·매입명세서·원장은 동일하게 발자국 남음 (§절대원칙 #20). *@
+                        <MudSwitch @bind-Value="_model.AutoReceiveOnOrder" Color="Color.Secondary">자동 매입확정</MudSwitch>
+                    </MudItem>
                     <MudItem xs="12" md="3">
                         <MudTextField @bind-Value="_model.Barcode" Label="바코드" Variant="Variant.Outlined" Margin="Margin.Dense" />
                     </MudItem>

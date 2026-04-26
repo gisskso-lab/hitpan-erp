@@ -85,8 +85,15 @@ public class PurchaseController : ControllerBase
         var tenantId = HttpContext.Items["TenantId"]?.ToString();
         if (string.IsNullOrEmpty(tenantId)) return Forbid();
 
-        var (receiptId, receiptNo) = await _purchaseService.ConvertOrderToReceiptAsync(id, tenantId, ct);
-        return Ok(new { receiptId, receiptNo });
+        try
+        {
+            var (receiptId, receiptNo) = await _purchaseService.ConvertOrderToReceiptAsync(id, tenantId, ct);
+            return Ok(new { receiptId, receiptNo });
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(new { message = ex.Message });
+        }
     }
 
     [HttpGet("receipts")]

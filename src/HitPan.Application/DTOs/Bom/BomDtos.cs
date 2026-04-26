@@ -46,6 +46,8 @@ public class BomItemDto
     public bool AutoOrderEnabled { get; set; }
     public string? AutoOrderPartnerId { get; set; }
     public decimal AutoOrderQty { get; set; }
+    public bool AutoReceiveOnOrder { get; set; }
+    public string ItemType { get; set; } = "material";
     public string? Memo { get; set; }
     public bool HasChildBom { get; set; }
 }
@@ -104,6 +106,12 @@ public class BomMaterialCheckDto
     public string? AutoOrderPartnerName { get; set; }
     public decimal AutoOrderQty { get; set; }
     public bool AutoOrderEnabled { get; set; }
+
+    // 사장님 헌법 (2026-04-26): 반제품 부족 시 자동발주 금지·즉시 반려.
+    public string ItemType { get; set; } = "material";
+
+    // items.auto_receive_on_order — 부족 자재 모두 Y면 자동 사슬, 하나라도 N이면 반자동.
+    public bool AutoReceiveOnOrder { get; set; }
 }
 
 public class StockAlertDto

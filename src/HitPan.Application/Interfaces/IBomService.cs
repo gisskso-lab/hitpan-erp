@@ -44,5 +44,6 @@ public interface IBomService
     Task<List<DTOs.Sales.AutoOrderCandidateDto>> GetAssembleAutoOrderCandidatesAsync(
         string bomId,
         string tenantId,
+        decimal produceQty = 1,
         CancellationToken ct = default);
 }

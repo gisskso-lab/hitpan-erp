@@ -291,7 +291,39 @@ public class PurchaseService : IPurchaseService
                 amount: receipt.TotalAmount + receipt.VatAmount,
                 ct: ct);
 
-            // 4) 회계 자동 기표 (차변 매입+부가세대급금 / 대변 외상매입금)
+            // 4-A) PO 헤더 status 동기화 — receipt.PoId 가 있을 때만.
+            // 모든 라인 closed → 'received' / 일부만 closed → 'partial' / 그 외 'ordered'.
+            // §절대원칙 #20 (워크플로우 끊김 금지): item_status 만 갱신하고 헤더가 'draft' 로 남으면
+            // 발주서 목록에서 매입전환 버튼 재노출 → 미입고 0 → 400. 헤더까지 함께 옮긴다.
+            // EF enum 매핑은 'closed'/'confirmed' 를 쓰지만 DB enum 은 'received'/'ordered' 라 직 SQL 사용.
+            if (!string.IsNullOrWhiteSpace(receipt.PoId))
+            {
+                await conn.ExecuteAsync(new CommandDefinition(
+                    """
+                    UPDATE purchase_orders po
+                    LEFT JOIN (
+                        SELECT po_id,
+                               SUM(CASE WHEN item_status='closed'  THEN 1 ELSE 0 END) AS closed_cnt,
+                               SUM(CASE WHEN item_status='partial' THEN 1 ELSE 0 END) AS partial_cnt,
+                               COUNT(*) AS total_cnt
+                        FROM purchase_order_items
+                        WHERE po_id = @PoId
+                        GROUP BY po_id
+                    ) s ON s.po_id = po.po_id
+                    SET po.status = CASE
+                                       WHEN s.closed_cnt = s.total_cnt THEN 'received'
+                                       WHEN s.closed_cnt > 0 OR s.partial_cnt > 0 THEN 'partial'
+                                       ELSE 'ordered'
+                                    END,
+                        po.updated_at = NOW(6)
+                    WHERE po.po_id = @PoId AND po.tenant_id = @TenantId
+                    """,
+                    new { PoId = receipt.PoId, TenantId = receipt.TenantId },
+                    transaction: dbTx,
+                    cancellationToken: ct));
+            }
+
+            // 5) 회계 자동 기표 (차변 매입+부가세대급금 / 대변 외상매입금)
             // PurchaseReceipt 엔티티에는 EmployeeId가 없으므로 null로 전달 (추후 도메인 확장 시 실제 사원 ID 연결).
             await AutoJournalHelper.RecordPurchaseConfirmAsync(
                 conn, dbTx,
@@ -453,7 +485,13 @@ public class PurchaseService : IPurchaseService
 
         if (receiptItems.Count == 0)
         {
-            throw new InvalidOperationException("전환 가능한 미입고 품목이 없습니다.");
+            // 모든 라인이 이미 입고 완료(received_qty >= ordered_qty)면, 보통은 dd89274 의
+            // 자동 매입처리(autoReceive) 로 이미 끝난 PO. 사용자가 발주서 목록에서 또 누른 경우.
+            var allClosed = items.Any() && items.All(x => x.OrderedQty - x.ReceivedQty <= 0);
+            var msg = allClosed
+                ? "이미 매입이 완료된 발주서입니다. 매입명세서 목록에서 확인해 주세요."
+                : "전환 가능한 미입고 품목이 없습니다.";
+            throw new InvalidOperationException(msg);
         }
 
         // 창고 Id가 비어 있는 라인은 기본 창고로 채운다.

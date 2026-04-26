@@ -60,14 +60,41 @@ public sealed class BomService(HttpClient http)
         public string? BomId { get; set; }
     }
 
-    /// <summary>BOM 조립 직후 자재 자동발주 후보 조회. 판매와 동일 DTO 사용.</summary>
-    public async Task<List<AutoOrderCandidateModel>> GetAssembleAutoOrderCandidatesAsync(string bomId, CancellationToken ct = default)
+    /// <summary>
+    /// BOM 생산지시 전 재고 사전체크. 사장님 헌법 (2026-04-26):
+    /// CanProduce=false 면 클라이언트가 부족분 분류 후 다이얼로그 분기 (반제품→반려, 자재→자동발주).
+    /// </summary>
+    public async Task<BomAssembleCheckModel?> CheckAssembleAsync(string bomId, decimal produceQty, CancellationToken ct = default)
+    {
+        try
+        {
+            using var res = await http.PostAsJsonAsync($"api/bom/{Uri.EscapeDataString(bomId)}/check-assemble", produceQty, ct);
+            if (!res.IsSuccessStatusCode)
+            {
+                Console.WriteLine($"[BomService.CheckAssembleAsync] {(int)res.StatusCode}");
+                return null;
+            }
+            var opts = new System.Text.Json.JsonSerializerOptions { PropertyNameCaseInsensitive = true };
+            return await res.Content.ReadFromJsonAsync<BomAssembleCheckModel>(opts, ct);
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[BomService.CheckAssembleAsync] {ex.Message}");
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// BOM 조립 직후 자재 자동발주 후보 조회.
+    /// 사장님 헌법 (2026-04-26): produceQty 전달 → 서버가 MAX(부족분, 자동발주수량)으로 계산.
+    /// </summary>
+    public async Task<List<AutoOrderCandidateModel>> GetAssembleAutoOrderCandidatesAsync(string bomId, decimal produceQty = 1, CancellationToken ct = default)
     {
         try
         {
             var opts = new System.Text.Json.JsonSerializerOptions { PropertyNameCaseInsensitive = true };
             return await http.GetFromJsonAsync<List<AutoOrderCandidateModel>>(
-                $"api/bom/{Uri.EscapeDataString(bomId)}/auto-order-candidates", opts, ct) ?? new();
+                $"api/bom/{Uri.EscapeDataString(bomId)}/auto-order-candidates?produceQty={produceQty}", opts, ct) ?? new();
         }
         catch (Exception ex)
         {

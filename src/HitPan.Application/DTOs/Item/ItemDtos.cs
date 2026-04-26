@@ -41,6 +41,9 @@ public class ItemDetailDto : ItemListDto
 
     public decimal AutoOrderQty { get; set; }
 
+    // 사장님 헌법 (2026-04-26): 자동발주 시 매입확정까지 자동 사슬.
+    public bool AutoReceiveOnOrder { get; set; }
+
     public string? Barcode { get; set; }
 
     public string? Memo { get; set; }
@@ -77,6 +80,9 @@ public class CreateItemDto
     public string? AutoOrderPartnerId { get; set; }
 
     public decimal AutoOrderQty { get; set; }
+
+    // 사장님 헌법 (2026-04-26): 자동발주 시 매입확정까지 자동 사슬.
+    public bool AutoReceiveOnOrder { get; set; }
 
     public string? Barcode { get; set; }
 

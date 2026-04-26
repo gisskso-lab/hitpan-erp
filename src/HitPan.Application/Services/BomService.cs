@@ -90,6 +90,8 @@ public class BomService : IBomService
               COALESCE(i.auto_order_enabled, 0) AS AutoOrderEnabled,
               i.auto_order_partner_id AS AutoOrderPartnerId,
               COALESCE(i.auto_order_qty, 0) AS AutoOrderQty,
+              COALESCE(i.auto_receive_on_order, 0) AS AutoReceiveOnOrder,
+              COALESCE(i.item_type, 'material') AS ItemType,
               bi.memo AS Memo,
               CASE WHEN EXISTS (
                 SELECT 1 FROM bom_headers x
@@ -365,7 +367,9 @@ public class BomService : IBomService
                 AutoOrderPartnerId = item.AutoOrderPartnerId,
                 AutoOrderPartnerName = partnerName,
                 AutoOrderQty = item.AutoOrderQty,
-                AutoOrderEnabled = item.AutoOrderEnabled
+                AutoOrderEnabled = item.AutoOrderEnabled,
+                ItemType = item.ItemType,
+                AutoReceiveOnOrder = item.AutoReceiveOnOrder
             });
             totalCost += item.UnitCost * required;
         }
@@ -385,6 +389,21 @@ public class BomService : IBomService
         await EnsureOpenAsync(ct).ConfigureAwait(false);
         var check = await CheckAssembleAsync(dto.BomId, dto.ProduceQty, tenantId, ct).ConfigureAwait(false);
         var bom = await GetAsync(dto.BomId, tenantId, ct).ConfigureAwait(false) ?? throw new InvalidOperationException("BOM을 찾을 수 없습니다.");
+
+        // §절대원칙 #20 (워크플로우 무결성) — 자재/반제품 재고가 부족하면 완제품 +반영 절대 금지.
+        // 사장님 헌법 (2026-04-26): "자재가 들어오기 전에 완제품이 +되는 일은 절대 없어야 함."
+        // 부족분은 [발주→매입→매입확정→자재 +반영] 사슬을 끝낸 뒤 다시 생산지시.
+        // (자동 사슬은 P1 작지서로 분리.)
+        if (!check.CanProduce)
+        {
+            var shortages = check.Materials
+                .Where(m => !m.IsEnough)
+                .Select(m => $"• {m.ItemName} {m.ShortageQty}{m.Unit} 부족 (필요 {m.RequiredQty}, 현재 {m.CurrentStock})");
+            throw new InvalidOperationException(
+                "재고 부족으로 BOM 생산을 진행할 수 없습니다.\n" +
+                string.Join("\n", shortages) +
+                "\n\n부족한 자재는 발주→매입→매입확정 절차로 입고한 뒤 다시 생산지시 해주세요.");
+        }
 
         // 기본 창고 ID 확보 ("default" 하드코딩 제거 — fk_sal_warehouse FK 위반 방지).
         // 테넌트의 활성 창고 중 wh_code='MAIN'(또는 'WH-MAIN') 우선, 없으면 첫 활성 창고.
@@ -952,12 +971,19 @@ public class BomService : IBomService
     }
 
     public async Task<List<DTOs.Sales.AutoOrderCandidateDto>> GetAssembleAutoOrderCandidatesAsync(
-        string bomId, string tenantId, CancellationToken ct = default)
+        string bomId, string tenantId, decimal produceQty = 1, CancellationToken ct = default)
     {
         await EnsureOpenAsync(ct).ConfigureAwait(false);
 
-        // BOM 자재 라인 중 (재고 ≤ 안전재고 OR 재고 ≤ 0) 인 자재를 자동발주 후보로 반환.
-        // 판매 자동발주와 동일 DTO 형태. auto_order_* 정보는 items 테이블에서 조회.
+        // 사장님 헌법 (2026-04-26):
+        // "재고가 자동발주수량보다 더 현저하게 부족할 경우 = 사용자가 생산할 때 필요한 재고를 맞춰서 발주.
+        //  재고가 자동발주수량보다는 부족하지 않을 경우 = 자동발주 수량으로 발주."
+        //
+        // 한 줄 룰: SuggestedOrderQty = MAX(부족분, 자동발주수량).
+        //   부족분 = CEIL(bi.qty * (1 + bi.loss_rate/100) * produceQty) - 현재고
+        //
+        // 이유: 자동발주수량은 평소 단위(MOQ 역할)일 뿐, 큰 생산 1회를 50회로 쪼개 누르게 만들면 자동화 의미 없음.
+        // 정식 버전에선 moq_qty 별도 컬럼으로 분리 예정 (사장님 지시 2026-04-26).
         const string sql = """
             SELECT
                 i.item_id        AS ItemId,
@@ -965,7 +991,10 @@ public class BomService : IBomService
                 i.item_name      AS ItemName,
                 COALESCE(s.qty, 0) AS CurrentQty,
                 COALESCE(i.safety_stock, i.safe_stock, 0) AS SafetyQty,
-                COALESCE(i.auto_order_qty, 0) AS SuggestedOrderQty,
+                GREATEST(
+                    CEIL(bi.qty * (1 + bi.loss_rate/100) * @ProduceQty) - COALESCE(s.qty, 0),
+                    COALESCE(i.auto_order_qty, 0)
+                ) AS SuggestedOrderQty,
                 i.auto_order_partner_id AS PartnerId,
                 p.partner_name   AS PartnerName,
                 COALESCE(i.purchase_price, i.cost_price, 0) AS UnitPrice,
@@ -986,13 +1015,13 @@ public class BomService : IBomService
                AND bi.tenant_id  = @Tid
                AND IFNULL(i.auto_order_enabled, 0) = 1
                AND (
-                     COALESCE(s.qty, 0) <= COALESCE(i.safety_stock, i.safe_stock, 0)
-                  OR COALESCE(s.qty, 0) <= 0
+                     COALESCE(s.qty, 0) < CEIL(bi.qty * (1 + bi.loss_rate/100) * @ProduceQty)
+                  OR COALESCE(s.qty, 0) <= COALESCE(i.safety_stock, i.safe_stock, 0)
                    )
             """;
 
         var rows = await _db.QueryAsync<DTOs.Sales.AutoOrderCandidateDto>(new CommandDefinition(
-            sql, new { BomId = bomId, Tid = tenantId }, cancellationToken: ct)).ConfigureAwait(false);
+            sql, new { BomId = bomId, Tid = tenantId, ProduceQty = produceQty }, cancellationToken: ct)).ConfigureAwait(false);
         return rows.ToList();
     }
 

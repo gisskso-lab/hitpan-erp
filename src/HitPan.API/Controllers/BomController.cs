@@ -37,11 +37,16 @@ public class BomController : ControllerBase
     /// 사장님 지시 (2026-04-26): 부족 다이얼로그 → OK 시 발주서 생성.
     /// </summary>
     [HttpGet("{id:guid}/auto-order-candidates")]
-    public async Task<IActionResult> GetAssembleAutoOrderCandidates(string id, CancellationToken ct)
+    public async Task<IActionResult> GetAssembleAutoOrderCandidates(
+        string id,
+        [FromQuery] decimal produceQty,
+        CancellationToken ct)
     {
         var tid = HttpContext.Items["TenantId"]?.ToString();
         if (string.IsNullOrEmpty(tid)) return Forbid();
-        var list = await _svc.GetAssembleAutoOrderCandidatesAsync(id, tid, ct).ConfigureAwait(false);
+        // 사장님 헌법 (2026-04-26): produceQty 0 이하면 1로 안전 처리 (기본 호출 호환).
+        var qty = produceQty > 0 ? produceQty : 1m;
+        var list = await _svc.GetAssembleAutoOrderCandidatesAsync(id, tid, qty, ct).ConfigureAwait(false);
         return Ok(list);
     }
 
