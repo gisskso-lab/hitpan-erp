@@ -190,7 +190,7 @@ public class ReportService : IReportService
                 FROM sales_deliveries sd
                 LEFT JOIN partners p
                     ON p.partner_id = sd.partner_id AND p.tenant_id = sd.tenant_id
-                WHERE sd.tenant_id = @TenantId AND sd.is_deleted = 0
+                WHERE sd.tenant_id = @TenantId AND sd.is_deleted = 0 AND sd.status <> 'cancelled'
                   AND (@From IS NULL OR sd.delivery_date >= @From)
                   AND (@To IS NULL OR sd.delivery_date <= @To)
                   AND (@Partner IS NULL OR p.partner_name LIKE CONCAT('%', @Partner, '%'))
@@ -209,7 +209,7 @@ public class ReportService : IReportService
                 INNER JOIN sales_deliveries sd ON sd.delivery_id = sdi.delivery_id AND sd.tenant_id = sdi.tenant_id
                 LEFT JOIN items i ON i.item_id = sdi.item_id AND i.tenant_id = sdi.tenant_id
                 LEFT JOIN partners p ON p.partner_id = sd.partner_id AND p.tenant_id = sd.tenant_id
-                WHERE sd.tenant_id = @TenantId AND sd.is_deleted = 0
+                WHERE sd.tenant_id = @TenantId AND sd.is_deleted = 0 AND sd.status <> 'cancelled'
                   AND (@From IS NULL OR sd.delivery_date >= @From)
                   AND (@To IS NULL OR sd.delivery_date <= @To)
                   AND (@Partner IS NULL OR p.partner_name LIKE CONCAT('%', @Partner, '%'))
@@ -227,7 +227,7 @@ public class ReportService : IReportService
                 FROM sales_deliveries sd
                 LEFT JOIN partners p
                     ON p.partner_id = sd.partner_id AND p.tenant_id = sd.tenant_id
-                WHERE sd.tenant_id = @TenantId AND sd.is_deleted = 0
+                WHERE sd.tenant_id = @TenantId AND sd.is_deleted = 0 AND sd.status <> 'cancelled'
                   AND (@From IS NULL OR sd.delivery_date >= @From)
                   AND (@To IS NULL OR sd.delivery_date <= @To)
                   AND (@Partner IS NULL OR p.partner_name LIKE CONCAT('%', @Partner, '%'))
@@ -344,7 +344,7 @@ public class ReportService : IReportService
                 FROM purchase_receipts pr
                 LEFT JOIN partners p
                     ON p.partner_id = pr.partner_id AND p.tenant_id = pr.tenant_id
-                WHERE pr.tenant_id = @TenantId
+                WHERE pr.tenant_id = @TenantId AND pr.status <> 'cancelled'
                   AND (@From IS NULL OR pr.receipt_date >= @From)
                   AND (@To IS NULL OR pr.receipt_date <= @To)
                   AND (@Partner IS NULL OR p.partner_name LIKE CONCAT('%', @Partner, '%'))
@@ -363,7 +363,7 @@ public class ReportService : IReportService
                 INNER JOIN purchase_receipts pr ON pr.receipt_id = pri.receipt_id AND pr.tenant_id = pri.tenant_id
                 LEFT JOIN items i ON i.item_id = pri.item_id AND i.tenant_id = pri.tenant_id
                 LEFT JOIN partners p ON p.partner_id = pr.partner_id AND p.tenant_id = pr.tenant_id
-                WHERE pr.tenant_id = @TenantId
+                WHERE pr.tenant_id = @TenantId AND pr.status <> 'cancelled'
                   AND (@From IS NULL OR pr.receipt_date >= @From)
                   AND (@To IS NULL OR pr.receipt_date <= @To)
                   AND (@Partner IS NULL OR p.partner_name LIKE CONCAT('%', @Partner, '%'))
@@ -381,7 +381,7 @@ public class ReportService : IReportService
                 FROM purchase_receipts pr
                 LEFT JOIN partners p
                     ON p.partner_id = pr.partner_id AND p.tenant_id = pr.tenant_id
-                WHERE pr.tenant_id = @TenantId
+                WHERE pr.tenant_id = @TenantId AND pr.status <> 'cancelled'
                   AND (@From IS NULL OR pr.receipt_date >= @From)
                   AND (@To IS NULL OR pr.receipt_date <= @To)
                   AND (@Partner IS NULL OR p.partner_name LIKE CONCAT('%', @Partner, '%'))
@@ -498,7 +498,7 @@ public class ReportService : IReportService
                 FROM sales_deliveries sd
                 LEFT JOIN partners p
                     ON p.partner_id = sd.partner_id AND p.tenant_id = sd.tenant_id
-                WHERE sd.tenant_id = @TenantId AND sd.is_deleted = 0
+                WHERE sd.tenant_id = @TenantId AND sd.is_deleted = 0 AND sd.status <> 'cancelled'
                   AND (@From IS NULL OR sd.delivery_date >= @From)
                   AND (@To IS NULL OR sd.delivery_date <= @To)
                   AND (@Partner IS NULL OR p.partner_name LIKE CONCAT('%', @Partner, '%'))
@@ -517,7 +517,7 @@ public class ReportService : IReportService
                 INNER JOIN sales_deliveries sd ON sd.delivery_id = sdi.delivery_id AND sd.tenant_id = sdi.tenant_id
                 LEFT JOIN items i ON i.item_id = sdi.item_id AND i.tenant_id = sdi.tenant_id
                 LEFT JOIN partners p ON p.partner_id = sd.partner_id AND p.tenant_id = sd.tenant_id
-                WHERE sd.tenant_id = @TenantId AND sd.is_deleted = 0
+                WHERE sd.tenant_id = @TenantId AND sd.is_deleted = 0 AND sd.status <> 'cancelled'
                   AND (@From IS NULL OR sd.delivery_date >= @From)
                   AND (@To IS NULL OR sd.delivery_date <= @To)
                   AND (@Partner IS NULL OR p.partner_name LIKE CONCAT('%', @Partner, '%'))
@@ -535,7 +535,7 @@ public class ReportService : IReportService
                 FROM sales_deliveries sd
                 LEFT JOIN partners p
                     ON p.partner_id = sd.partner_id AND p.tenant_id = sd.tenant_id
-                WHERE sd.tenant_id = @TenantId AND sd.is_deleted = 0
+                WHERE sd.tenant_id = @TenantId AND sd.is_deleted = 0 AND sd.status <> 'cancelled'
                   AND (@From IS NULL OR sd.delivery_date >= @From)
                   AND (@To IS NULL OR sd.delivery_date <= @To)
                   AND (@Partner IS NULL OR p.partner_name LIKE CONCAT('%', @Partner, '%'))
@@ -579,7 +579,7 @@ public class ReportService : IReportService
                 INNER JOIN sales_deliveries sd ON sd.delivery_id = sdi.delivery_id AND sd.tenant_id = sdi.tenant_id
                 LEFT JOIN items i ON i.item_id = sdi.item_id AND i.tenant_id = sdi.tenant_id
                 LEFT JOIN partners p ON p.partner_id = sd.partner_id AND p.tenant_id = sd.tenant_id
-                WHERE sd.tenant_id = @TenantId AND sd.is_deleted = 0
+                WHERE sd.tenant_id = @TenantId AND sd.is_deleted = 0 AND sd.status <> 'cancelled'
                   AND (@From IS NULL OR sd.delivery_date >= @From)
                   AND (@To IS NULL OR sd.delivery_date <= @To)
                   AND (@Partner IS NULL OR p.partner_name LIKE CONCAT('%', @Partner, '%'))
@@ -601,7 +601,7 @@ public class ReportService : IReportService
                 INNER JOIN sales_deliveries sd ON sd.delivery_id = sdi.delivery_id AND sd.tenant_id = sdi.tenant_id
                 LEFT JOIN items i ON i.item_id = sdi.item_id AND i.tenant_id = sdi.tenant_id
                 LEFT JOIN partners p ON p.partner_id = sd.partner_id AND p.tenant_id = sd.tenant_id
-                WHERE sd.tenant_id = @TenantId AND sd.is_deleted = 0
+                WHERE sd.tenant_id = @TenantId AND sd.is_deleted = 0 AND sd.status <> 'cancelled'
                   AND (@From IS NULL OR sd.delivery_date >= @From)
                   AND (@To IS NULL OR sd.delivery_date <= @To)
                   AND (@Partner IS NULL OR p.partner_name LIKE CONCAT('%', @Partner, '%'))
@@ -623,7 +623,7 @@ public class ReportService : IReportService
                 INNER JOIN sales_deliveries sd ON sd.delivery_id = sdi.delivery_id AND sd.tenant_id = sdi.tenant_id
                 LEFT JOIN items i ON i.item_id = sdi.item_id AND i.tenant_id = sdi.tenant_id
                 LEFT JOIN partners p ON p.partner_id = sd.partner_id AND p.tenant_id = sd.tenant_id
-                WHERE sd.tenant_id = @TenantId AND sd.is_deleted = 0
+                WHERE sd.tenant_id = @TenantId AND sd.is_deleted = 0 AND sd.status <> 'cancelled'
                   AND (@From IS NULL OR sd.delivery_date >= @From)
                   AND (@To IS NULL OR sd.delivery_date <= @To)
                   AND (@Partner IS NULL OR p.partner_name LIKE CONCAT('%', @Partner, '%'))
@@ -663,7 +663,7 @@ public class ReportService : IReportService
                 FROM sales_delivery_items sdi
                 INNER JOIN sales_deliveries sd ON sd.delivery_id = sdi.delivery_id AND sd.tenant_id = sdi.tenant_id
                 LEFT JOIN partners p ON p.partner_id = sd.partner_id AND p.tenant_id = sd.tenant_id
-                WHERE sd.tenant_id = @TenantId AND sd.is_deleted = 0
+                WHERE sd.tenant_id = @TenantId AND sd.is_deleted = 0 AND sd.status <> 'cancelled'
                   AND (@From IS NULL OR sd.delivery_date >= @From)
                   AND (@To IS NULL OR sd.delivery_date <= @To)
                   AND (@Partner IS NULL OR p.partner_name LIKE CONCAT('%', @Partner, '%'))
@@ -682,7 +682,7 @@ public class ReportService : IReportService
                 INNER JOIN sales_deliveries sd ON sd.delivery_id = sdi.delivery_id AND sd.tenant_id = sdi.tenant_id
                 LEFT JOIN items i ON i.item_id = sdi.item_id AND i.tenant_id = sdi.tenant_id
                 LEFT JOIN partners p ON p.partner_id = sd.partner_id AND p.tenant_id = sd.tenant_id
-                WHERE sd.tenant_id = @TenantId AND sd.is_deleted = 0
+                WHERE sd.tenant_id = @TenantId AND sd.is_deleted = 0 AND sd.status <> 'cancelled'
                   AND (@From IS NULL OR sd.delivery_date >= @From)
                   AND (@To IS NULL OR sd.delivery_date <= @To)
                   AND (@Partner IS NULL OR p.partner_name LIKE CONCAT('%', @Partner, '%'))
@@ -722,7 +722,7 @@ public class ReportService : IReportService
                 FROM purchase_receipts pr
                 LEFT JOIN partners p
                     ON p.partner_id = pr.partner_id AND p.tenant_id = pr.tenant_id
-                WHERE pr.tenant_id = @TenantId
+                WHERE pr.tenant_id = @TenantId AND pr.status <> 'cancelled'
                   AND (@From IS NULL OR pr.receipt_date >= @From)
                   AND (@To IS NULL OR pr.receipt_date <= @To)
                   AND (@Partner IS NULL OR p.partner_name LIKE CONCAT('%', @Partner, '%'))
@@ -741,7 +741,7 @@ public class ReportService : IReportService
                 INNER JOIN purchase_receipts pr ON pr.receipt_id = pri.receipt_id AND pr.tenant_id = pri.tenant_id
                 LEFT JOIN items i ON i.item_id = pri.item_id AND i.tenant_id = pri.tenant_id
                 LEFT JOIN partners p ON p.partner_id = pr.partner_id AND p.tenant_id = pr.tenant_id
-                WHERE pr.tenant_id = @TenantId
+                WHERE pr.tenant_id = @TenantId AND pr.status <> 'cancelled'
                   AND (@From IS NULL OR pr.receipt_date >= @From)
                   AND (@To IS NULL OR pr.receipt_date <= @To)
                   AND (@Partner IS NULL OR p.partner_name LIKE CONCAT('%', @Partner, '%'))
@@ -759,7 +759,7 @@ public class ReportService : IReportService
                 FROM purchase_receipts pr
                 LEFT JOIN partners p
                     ON p.partner_id = pr.partner_id AND p.tenant_id = pr.tenant_id
-                WHERE pr.tenant_id = @TenantId
+                WHERE pr.tenant_id = @TenantId AND pr.status <> 'cancelled'
                   AND (@From IS NULL OR pr.receipt_date >= @From)
                   AND (@To IS NULL OR pr.receipt_date <= @To)
                   AND (@Partner IS NULL OR p.partner_name LIKE CONCAT('%', @Partner, '%'))
@@ -799,7 +799,7 @@ public class ReportService : IReportService
                 FROM purchase_receipt_items pri
                 INNER JOIN purchase_receipts pr ON pr.receipt_id = pri.receipt_id AND pr.tenant_id = pri.tenant_id
                 LEFT JOIN partners p ON p.partner_id = pr.partner_id AND p.tenant_id = pr.tenant_id
-                WHERE pr.tenant_id = @TenantId
+                WHERE pr.tenant_id = @TenantId AND pr.status <> 'cancelled'
                   AND (@From IS NULL OR pr.receipt_date >= @From)
                   AND (@To IS NULL OR pr.receipt_date <= @To)
                   AND (@Partner IS NULL OR p.partner_name LIKE CONCAT('%', @Partner, '%'))
@@ -818,7 +818,7 @@ public class ReportService : IReportService
                 INNER JOIN purchase_receipts pr ON pr.receipt_id = pri.receipt_id AND pr.tenant_id = pri.tenant_id
                 LEFT JOIN items i ON i.item_id = pri.item_id AND i.tenant_id = pri.tenant_id
                 LEFT JOIN partners p ON p.partner_id = pr.partner_id AND p.tenant_id = pr.tenant_id
-                WHERE pr.tenant_id = @TenantId
+                WHERE pr.tenant_id = @TenantId AND pr.status <> 'cancelled'
                   AND (@From IS NULL OR pr.receipt_date >= @From)
                   AND (@To IS NULL OR pr.receipt_date <= @To)
                   AND (@Partner IS NULL OR p.partner_name LIKE CONCAT('%', @Partner, '%'))

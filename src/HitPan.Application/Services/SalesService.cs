@@ -519,6 +519,8 @@ public class SalesService : ISalesService
                                ON p.partner_id = d.partner_id
                                   AND p.tenant_id = d.tenant_id
                            WHERE d.tenant_id = @TenantId
+                             AND (d.is_deleted = 0 OR d.is_deleted IS NULL)
+                             AND d.status <> 'cancelled'
                              AND (@From IS NULL OR d.delivery_date >= @From)
                              AND (@To IS NULL OR d.delivery_date <= @To)
                              AND (@PartnerName IS NULL OR p.partner_name LIKE CONCAT('%', @PartnerName, '%'))
@@ -1143,12 +1145,23 @@ public class SalesService : ISalesService
             throw new InvalidOperationException("이미 삭제된 수주서입니다.");
         }
 
-        var deliveredCount = await _db.QueryFirstOrDefaultAsync<long>(new CommandDefinition(
-            "SELECT COUNT(*) FROM sales_order_items WHERE order_id=@Id AND tenant_id=@Tid AND delivered_qty > 0",
+        // 판매전환된 라인 차단 — 단, 거래명세서가 cancelled 면 무시(사장님 정책: 삭제=취소).
+        var activeDelivered = await _db.QueryFirstOrDefaultAsync<long>(new CommandDefinition(
+            """
+            SELECT COUNT(*)
+              FROM sales_delivery_items di
+              JOIN sales_deliveries sd ON sd.delivery_id = di.delivery_id AND sd.tenant_id = di.tenant_id
+             WHERE di.order_item_id IN (
+                     SELECT order_item_id FROM sales_order_items
+                      WHERE order_id=@Id AND tenant_id=@Tid
+                   )
+               AND di.tenant_id = @Tid
+               AND sd.status <> 'cancelled'
+            """,
             new { Id = orderId, Tid = tenantId }, cancellationToken: ct));
-        if (deliveredCount > 0)
+        if (activeDelivered > 0)
         {
-            throw new InvalidOperationException("이미 판매전환(출고)된 라인이 있어 삭제할 수 없습니다. 거래명세서 취소 경로를 사용해주세요.");
+            throw new InvalidOperationException("이미 판매전환(출고)된 라인이 있어 삭제할 수 없습니다. 거래명세서를 먼저 취소해주세요.");
         }
 
         await _db.ExecuteAsync(new CommandDefinition(

@@ -397,6 +397,7 @@ public class PurchaseService : IPurchaseService
                                ON p.partner_id = pr.partner_id
                                   AND p.tenant_id = pr.tenant_id
                            WHERE pr.tenant_id = @TenantId
+                             AND pr.status <> 'cancelled'
                              AND (@From IS NULL OR pr.receipt_date >= @From)
                              AND (@To IS NULL OR pr.receipt_date <= @To)
                              AND (@Status IS NULL OR pr.status = @Status)
@@ -900,13 +901,25 @@ public class PurchaseService : IPurchaseService
             throw new InvalidOperationException("이미 삭제된 발주서입니다.");
         }
 
-        // 이미 매입전환된(입고 수량 존재) 라인이 있으면 삭제 불가.
-        var receivedCount = await _db.QueryFirstOrDefaultAsync<long>(new CommandDefinition(
-            "SELECT COUNT(*) FROM purchase_order_items WHERE po_id=@Id AND tenant_id=@Tid AND received_qty > 0",
+        // 매입전환된 라인 차단 — 단, 그 매입명세서가 cancelled 상태면 살아있는 입고가
+        // 아니므로 차단 대상에서 제외 (사장님 보고 2026-04-26: 매입 삭제 후에도 발주 못 지움).
+        // active(=non-cancelled) 매입명세서에 연결된 라인이 received_qty>0 일 때만 차단.
+        var activeReceived = await _db.QueryFirstOrDefaultAsync<long>(new CommandDefinition(
+            """
+            SELECT COUNT(*)
+              FROM purchase_receipt_items pri
+              JOIN purchase_receipts pr ON pr.receipt_id = pri.receipt_id AND pr.tenant_id = pri.tenant_id
+             WHERE pri.po_item_id IN (
+                     SELECT po_item_id FROM purchase_order_items
+                      WHERE po_id=@Id AND tenant_id=@Tid
+                   )
+               AND pri.tenant_id = @Tid
+               AND pr.status <> 'cancelled'
+            """,
             new { Id = poId, Tid = tenantId }, cancellationToken: ct));
-        if (receivedCount > 0)
+        if (activeReceived > 0)
         {
-            throw new InvalidOperationException("이미 매입전환(입고)된 라인이 있어 삭제할 수 없습니다. 반품·취소 경로를 사용해주세요.");
+            throw new InvalidOperationException("이미 매입전환(입고)된 라인이 있어 삭제할 수 없습니다. 매입명세서를 먼저 취소하거나 반품해주세요.");
         }
 
         await _db.ExecuteAsync(new CommandDefinition(
