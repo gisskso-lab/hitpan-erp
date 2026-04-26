@@ -238,19 +238,13 @@
         var targets = Items.Where(x => x.IsChecked && x.Status != "invoiced").ToList();
         if (targets.Count == 0) return;
 
-        var confirmedCount = targets.Count(t => t.Status == "confirmed");
-        var msg = new System.Text.StringBuilder();
-        msg.AppendLine($"선택한 {targets.Count}건을 삭제하시겠습니까?");
-        if (confirmedCount > 0)
-        {
-            msg.AppendLine();
-            msg.AppendLine($"⚠ 이 중 {confirmedCount}건은 확정된 거래로,");
-            msg.AppendLine("재고와 회계 기표가 Reverse(역행) 처리됩니다.");
-        }
-        msg.AppendLine();
-        msg.AppendLine("계산서 발행된 거래는 자동으로 제외됩니다.");
-
-        var ok = await DialogService.ShowMessageBoxAsync("거래명세서 삭제", msg.ToString(),
+        // 사장님 지시 (2026-04-26): "취소가 곧 삭제고, 삭제가 곧 취소".
+        // 현장 직원 친화 문구로 통일 — 재고/회계 reverse 같은 기술 용어 제외.
+        var ok = await DialogService.ShowMessageBoxAsync(
+            "거래명세서 삭제",
+            $"선택한 {targets.Count}건을 삭제하시겠습니까?\n\n" +
+            "해당 목록을 삭제하시면, 해당 거래목록도 취소로 반영됩니다.\n" +
+            "(계산서 발행된 거래는 자동으로 제외됩니다.)",
             yesText: "삭제", cancelText: "취소");
         if (ok != true) return;
 
