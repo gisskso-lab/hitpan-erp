@@ -95,15 +95,15 @@ else
                     </MudChip>
                 </MudTd>
                 <MudTd>
-                    @if (IsBomCandidate(context))
-                    {
-                        <MudTooltip Text="이 상품의 BOM 자재명세서 보기">
-                            <MudIconButton Icon="@Icons.Material.Filled.AccountTree"
-                                           Size="Size.Small"
-                                           Color="Color.Info"
-                                           OnClick="@(() => OpenBomAsync(context))" />
-                        </MudTooltip>
-                    }
+                    <MudTooltip Text="이 상품의 BOM 자재명세서 보기">
+                        <MudButton Variant="Variant.Outlined"
+                                   Size="Size.Small"
+                                   Color="Color.Info"
+                                   StartIcon="@Icons.Material.Filled.AccountTree"
+                                   OnClick="@(() => OpenBomAsync(context))">
+                            BOM 보기
+                        </MudButton>
+                    </MudTooltip>
                     <MudIconButton Icon="@Icons.Material.Filled.Edit"
                                    Size="Size.Small"
                                    OnClick="@(() => Nav.NavigateTo($"/items/{context.ItemId}"))" />
@@ -140,19 +140,16 @@ else
     {
         _loading = true;
         StateHasChanged();
-        // 상품 마스터 화면은 BOM 헤더(완제품·반제품, BOM- 코드)는 숨긴다.
-        // BOM 자재명세서는 /bom 전용 화면에서만 조회하도록 한다 (사장님 지시 2026-04-25).
-        // 단, 사용자가 유형 필터에서 '완제품' 또는 '반제품' 을 명시적으로 선택한 경우는 예외.
-        var explicitBomType = !string.IsNullOrWhiteSpace(_typeFilter)
-            && (_typeFilter.Equals("finished", StringComparison.OrdinalIgnoreCase)
-                || _typeFilter.Equals("semi_finished", StringComparison.OrdinalIgnoreCase)
-                || _typeFilter.Equals("semi", StringComparison.OrdinalIgnoreCase));
-
+        // 사장님 지시 (2026-04-26):
+        // 상품목록에는 BOM 헤더(bom_headers.product_item_id 매핑된 항목)는 표시 금지.
+        // 일반 상품(BOM 미매핑)은 type 무관 그대로 표시 — type='완제품'으로 변경한 일반
+        // 상품이 사라지던 회귀(2026-04-26) 해소. BOM 매핑 여부로만 판단.
+        // 행마다 "BOM 보기" 버튼이 있고, 클릭 시 해당 상품의 BOM 화면으로 이동.
         var result = await ItemsApi.GetListAsync(
             string.IsNullOrWhiteSpace(_search) ? null : _search,
             null,
             string.IsNullOrWhiteSpace(_typeFilter) ? null : _typeFilter,
-            excludeBom: !explicitBomType);
+            excludeBom: true);
         _items = result ?? new List<ItemListModel>();
         _loading = false;
         StateHasChanged();
@@ -215,32 +212,29 @@ else
     private static string StockColor(ItemListModel item) =>
         item.CurrentStock <= item.SafetyStock ? "var(--mud-palette-error)" : "inherit";
 
-    /// <summary>BOM 등록 가능성이 있는 행(완제품·반제품 또는 BOM- 코드)인지 판단.</summary>
-    private static bool IsBomCandidate(ItemListModel item)
-    {
-        var t = (item.ItemType ?? string.Empty).ToLowerInvariant();
-        if (t is "finished" or "semi_finished" or "semi" or "assembly")
-        {
-            return true;
-        }
-
-        return !string.IsNullOrWhiteSpace(item.ItemCode)
-            && item.ItemCode.StartsWith("BOM-", StringComparison.OrdinalIgnoreCase);
-    }
-
-    /// <summary>상품행에서 BOM 자재명세서 화면으로 이동. 매핑 없으면 안내.</summary>
+    /// <summary>
+    /// 상품행 "BOM 보기" 버튼 — 해당 상품에 연결된 BOM 자재명세서로 이동.
+    /// 매핑 없으면 BOM 등록 페이지(/bom/new)로 보내 새 BOM 작성을 유도.
+    /// </summary>
     private async Task OpenBomAsync(ItemListModel item)
     {
         if (string.IsNullOrWhiteSpace(item.ItemId)) return;
 
         var bomId = await BomApi.GetBomIdByItemAsync(item.ItemId);
-        if (string.IsNullOrWhiteSpace(bomId))
+        if (!string.IsNullOrWhiteSpace(bomId))
         {
-            Snackbar.Add("이 상품에 연결된 BOM 자재명세서가 없습니다.", Severity.Warning);
+            Nav.NavigateTo($"/bom/{bomId}");
             return;
         }
 
-        Nav.NavigateTo($"/bom/{bomId}");
+        var go = await DialogService.ShowMessageBoxAsync(
+            "BOM 자재명세서 없음",
+            $"'{item.ItemName}' 에 연결된 BOM 자재명세서가 없습니다.\n새로 등록하시겠습니까?",
+            yesText: "BOM 등록", cancelText: "닫기");
+        if (go == true)
+        {
+            Nav.NavigateTo("/bom/new");
+        }
     }
 
     private async Task DeleteAsync(ItemListModel item)

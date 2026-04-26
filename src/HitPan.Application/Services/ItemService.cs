@@ -27,8 +27,10 @@ public sealed class ItemService : IItemService
     {
         await EnsureOpenAsync(ct).ConfigureAwait(false);
 
-        // excludeBom=true 인 경우 BOM 결과물(완제품·반제품) 및 BOM- 로 시작하는 코드 제외.
-        // 상품 마스터 화면은 순수 판매·자재 상품만 보여주고 BOM 헤더는 BOM 화면에서만 조회.
+        // excludeBom=true: bom_headers 에 product_item_id 로 매핑된 항목만 제외(타입 무관).
+        // (이전엔 item_type IN ('finished','semi_finished') OR item_code LIKE 'BOM-%' 로 숨겼으나,
+        //  사용자가 일반 상품의 type을 '완제품'으로 바꾸면 같이 사라지는 회귀 발생 → 폐기.)
+        // 상품마스터에는 BOM 헤더만 빠지고, 일반 상품(BOM 미매핑)은 type 무관 그대로 표시.
         const string sql = """
                            SELECT
                              i.item_id AS ItemId,
@@ -61,9 +63,10 @@ public sealed class ItemService : IItemService
                              AND (@Type IS NULL OR @Type = '' OR LOWER(i.item_type) = LOWER(@Type))
                              AND (
                                    @ExcludeBom = 0
-                                OR (
-                                     LOWER(IFNULL(i.item_type, 'product')) NOT IN ('finished', 'semi_finished', 'semi')
-                                 AND (IFNULL(i.item_code, '') NOT LIKE 'BOM-%')
+                                OR NOT EXISTS (
+                                     SELECT 1 FROM bom_headers bh
+                                      WHERE bh.product_item_id = i.item_id
+                                        AND bh.tenant_id       = i.tenant_id
                                    )
                              )
                            ORDER BY i.item_group, i.item_name
