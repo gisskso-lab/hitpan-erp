@@ -396,8 +396,7 @@
             await DeliveryService.ConfirmAsync(_draft);
             Snackbar.Add("전송(확정)을 완료했습니다.", Severity.Success);
 
-            // 사장님 지시 (2026-04-26): 판매 반영 후 안전재고 이하/0 인 자동발주 품목이 있으면
-            // 즉시 다이얼로그로 묻고 OK 시 발주서 생성. ("바로 자동발주가 되어야 정상이지")
+            // 정상 확정 후에도 안전재고 이하/0 자동발주 후보 있으면 다이얼로그.
             if (!string.IsNullOrWhiteSpace(_draft.Id))
             {
                 await CheckAutoOrderAsync(_draft.Id);
@@ -405,7 +404,23 @@
         }
         catch (Exception ex)
         {
-            Snackbar.Add(ex.Message, Severity.Error);
+            // 사장님 지시 (2026-04-26): 재고 부족으로 확정 실패해도 자동발주 다이얼로그가
+            // 떠야 함. 서버는 재고 차감 무결성 위해 확정을 거부하지만, 사용자 흐름은
+            // "재고 부족 → 자동발주? → 발주서 생성" 으로 끊기지 않게 한다(§20).
+            var msg = ex.Message ?? string.Empty;
+            var isStockShortage =
+                msg.Contains("재고", StringComparison.OrdinalIgnoreCase)
+                && msg.Contains("부족", StringComparison.OrdinalIgnoreCase);
+
+            if (isStockShortage && !string.IsNullOrWhiteSpace(_draft.Id))
+            {
+                Snackbar.Add("재고가 부족합니다. 자동발주 후보를 확인합니다…", Severity.Warning);
+                await CheckAutoOrderAsync(_draft.Id);
+            }
+            else
+            {
+                Snackbar.Add(msg, Severity.Error);
+            }
         }
     }
 

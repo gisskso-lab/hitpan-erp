@@ -569,18 +569,17 @@ public class BomService : IBomService
     {
         await EnsureOpenAsync(ct).ConfigureAwait(false);
 
-        // 1) 알림에서 item_id·부족수량 조회
+        // 1) 알림에서 item_id·부족수량 조회 — bom_items 에는 auto_order_* 컬럼이 없으므로
+        //    items.auto_order_partner_id / auto_order_qty 만 사용 (사장님 보고 2026-04-26 회귀 수정).
         var alert = await _db.QueryFirstOrDefaultAsync<(string ItemId, decimal ShortageQty, string? AutoOrderPartnerId, decimal AutoOrderQty, decimal PurchasePrice)>(
             new CommandDefinition(
                 """
                 SELECT sa.item_id AS ItemId,
                        sa.shortage_qty AS ShortageQty,
-                       bi.auto_order_partner_id AS AutoOrderPartnerId,
-                       COALESCE(bi.auto_order_qty, sa.shortage_qty) AS AutoOrderQty,
+                       i.auto_order_partner_id AS AutoOrderPartnerId,
+                       COALESCE(NULLIF(i.auto_order_qty, 0), sa.shortage_qty) AS AutoOrderQty,
                        COALESCE(i.purchase_price, i.cost_price, 0) AS PurchasePrice
                 FROM stock_alerts sa
-                LEFT JOIN bom_items bi
-                  ON bi.material_item_id = sa.item_id AND bi.tenant_id = sa.tenant_id
                 LEFT JOIN items i ON i.item_id = sa.item_id AND i.tenant_id = sa.tenant_id
                 WHERE sa.alert_id = @AlertId AND sa.tenant_id = @TenantId
                 LIMIT 1

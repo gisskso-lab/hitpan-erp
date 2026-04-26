@@ -188,6 +188,20 @@
             {
                 var first = resp.Failed[0];
                 Snackbar.Add($"{resp.Failed.Count}건 확정 실패 — {first.Reason ?? "알 수 없는 오류"}", Severity.Error);
+
+                // 사장님 지시 (2026-04-26): 재고 부족으로 확정 실패한 건이 있으면
+                // 자동발주 후보를 모아 한 번에 다이얼로그로 묻고 OK 시 발주서 생성.
+                var stockShortageIds = resp.Failed
+                    .Where(f => (f.Reason ?? string.Empty).Contains("재고")
+                                && (f.Reason ?? string.Empty).Contains("부족"))
+                    .Select(f => f.Id)
+                    .Where(id => !string.IsNullOrWhiteSpace(id))
+                    .Select(id => id!)
+                    .ToList();
+                if (stockShortageIds.Count > 0)
+                {
+                    await PromptAutoOrderForFailedAsync(stockShortageIds);
+                }
             }
 
             StateHasChanged();
@@ -195,6 +209,66 @@
         catch (Exception ex)
         {
             Snackbar.Add($"확정 처리 중 오류: {ex.Message}", Severity.Error);
+        }
+    }
+
+    /// <summary>
+    /// 일괄 확정 실패한 거래명세서들의 자동발주 후보를 합쳐 다이얼로그로 묻고,
+    /// OK 시 발주서를 한 번에 생성한다 (§20 워크플로우 끊김 금지).
+    /// </summary>
+    private async Task PromptAutoOrderForFailedAsync(List<string> deliveryIds)
+    {
+        var allCandidates = new List<HitPan.Web.Models.AutoOrderCandidateModel>();
+        foreach (var id in deliveryIds)
+        {
+            var list = await DeliveryService.GetAutoOrderCandidatesAsync(id);
+            foreach (var c in list)
+            {
+                if (!allCandidates.Any(x => x.ItemId == c.ItemId))
+                {
+                    allCandidates.Add(c);
+                }
+            }
+        }
+        if (allCandidates.Count == 0) return;
+
+        var outOfStock = allCandidates.Count(c => c.Reason == "out_of_stock");
+        var belowSafety = allCandidates.Count - outOfStock;
+
+        var msg = new System.Text.StringBuilder();
+        msg.AppendLine($"재고 부족으로 확정 실패한 거래명세서 {deliveryIds.Count}건이 있습니다.");
+        msg.AppendLine();
+        if (outOfStock > 0) msg.AppendLine($"재고가 없는 품목: {outOfStock}건");
+        if (belowSafety > 0) msg.AppendLine($"안전재고 이하 품목: {belowSafety}건");
+        msg.AppendLine();
+        foreach (var c in allCandidates.Take(5))
+        {
+            msg.AppendLine($"• {c.ItemName}: 현재고 {c.CurrentQty:N0} / 안전재고 {c.SafetyQty:N0}"
+                + (string.IsNullOrWhiteSpace(c.PartnerName) ? " (공급처 미설정)" : $" → {c.PartnerName}"));
+        }
+        if (allCandidates.Count > 5) msg.AppendLine($"... 외 {allCandidates.Count - 5}건");
+        msg.AppendLine();
+        msg.AppendLine("자동발주 하시겠습니까?");
+
+        var yes = await DialogService.ShowMessageBoxAsync(
+            "⚠ 재고부족 자동발주",
+            msg.ToString(),
+            yesText: "자동발주", cancelText: "닫기");
+        if (yes != true) return;
+
+        var results = await DeliveryService.CreateAutoOrdersAsync(allCandidates);
+        var success = results.Where(r => r.Success).ToList();
+        var failed = results.Where(r => !r.Success).ToList();
+
+        if (success.Count > 0)
+        {
+            var noList = string.Join(", ", success.Select(r => r.PoNo));
+            Snackbar.Add($"자동발주서 {success.Count}건 생성 완료: {noList}", Severity.Success);
+        }
+        if (failed.Count > 0)
+        {
+            var firstReason = failed[0].Reason ?? "사유 미상";
+            Snackbar.Add($"{failed.Count}건 자동발주 실패: {firstReason[..Math.Min(150, firstReason.Length)]}", Severity.Warning);
         }
     }
 
