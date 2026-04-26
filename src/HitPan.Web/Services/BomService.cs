@@ -60,6 +60,22 @@ public sealed class BomService(HttpClient http)
         public string? BomId { get; set; }
     }
 
+    /// <summary>BOM 조립 직후 자재 자동발주 후보 조회. 판매와 동일 DTO 사용.</summary>
+    public async Task<List<AutoOrderCandidateModel>> GetAssembleAutoOrderCandidatesAsync(string bomId, CancellationToken ct = default)
+    {
+        try
+        {
+            var opts = new System.Text.Json.JsonSerializerOptions { PropertyNameCaseInsensitive = true };
+            return await http.GetFromJsonAsync<List<AutoOrderCandidateModel>>(
+                $"api/bom/{Uri.EscapeDataString(bomId)}/auto-order-candidates", opts, ct) ?? new();
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[BomService.GetAssembleAutoOrderCandidatesAsync] {ex.Message}");
+            return new();
+        }
+    }
+
     public async Task<(bool ok, string? bomId)> CreateAsync(CreateBomModel model, CancellationToken ct = default)
     {
         try

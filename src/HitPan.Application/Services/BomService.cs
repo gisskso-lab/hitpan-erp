@@ -720,6 +720,51 @@ public class BomService : IBomService
             cancellationToken: ct)).ConfigureAwait(false);
     }
 
+    public async Task<List<DTOs.Sales.AutoOrderCandidateDto>> GetAssembleAutoOrderCandidatesAsync(
+        string bomId, string tenantId, CancellationToken ct = default)
+    {
+        await EnsureOpenAsync(ct).ConfigureAwait(false);
+
+        // BOM 자재 라인 중 (재고 ≤ 안전재고 OR 재고 ≤ 0) 인 자재를 자동발주 후보로 반환.
+        // 판매 자동발주와 동일 DTO 형태. auto_order_* 정보는 items 테이블에서 조회.
+        const string sql = """
+            SELECT
+                i.item_id        AS ItemId,
+                IFNULL(i.item_code,'') AS ItemCode,
+                i.item_name      AS ItemName,
+                COALESCE(s.qty, 0) AS CurrentQty,
+                COALESCE(i.safety_stock, i.safe_stock, 0) AS SafetyQty,
+                COALESCE(i.auto_order_qty, 0) AS SuggestedOrderQty,
+                i.auto_order_partner_id AS PartnerId,
+                p.partner_name   AS PartnerName,
+                COALESCE(i.purchase_price, i.cost_price, 0) AS UnitPrice,
+                CASE
+                  WHEN COALESCE(s.qty, 0) <= 0 THEN 'out_of_stock'
+                  ELSE 'below_safety'
+                END AS Reason
+              FROM bom_items bi
+              JOIN items i
+                ON i.item_id = bi.material_item_id AND i.tenant_id = bi.tenant_id
+              LEFT JOIN (
+                   SELECT tenant_id, item_id, SUM(current_qty) AS qty
+                     FROM item_stock GROUP BY tenant_id, item_id
+              ) s ON s.tenant_id = i.tenant_id AND s.item_id = i.item_id
+              LEFT JOIN partners p
+                ON p.partner_id = i.auto_order_partner_id AND p.tenant_id = i.tenant_id
+             WHERE bi.bom_id     = @BomId
+               AND bi.tenant_id  = @Tid
+               AND IFNULL(i.auto_order_enabled, 0) = 1
+               AND (
+                     COALESCE(s.qty, 0) <= COALESCE(i.safety_stock, i.safe_stock, 0)
+                  OR COALESCE(s.qty, 0) <= 0
+                   )
+            """;
+
+        var rows = await _db.QueryAsync<DTOs.Sales.AutoOrderCandidateDto>(new CommandDefinition(
+            sql, new { BomId = bomId, Tid = tenantId }, cancellationToken: ct)).ConfigureAwait(false);
+        return rows.ToList();
+    }
+
     private async Task EnsureOpenAsync(CancellationToken ct)
     {
         if (_db.State == ConnectionState.Open) return;

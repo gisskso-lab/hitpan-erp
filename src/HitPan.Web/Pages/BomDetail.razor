@@ -6,6 +6,7 @@
 @inject NavigationManager Nav
 @inject ISnackbar Snackbar
 @inject IDialogService DialogService
+@inject DeliveryService DeliveryService
 
 <PageTitle>@(_isNew ? "BOM 등록" : "BOM 수정")</PageTitle>
 
@@ -407,10 +408,61 @@ else
         {
             Snackbar.Add($"조립 실행 완료 — 완제품 {_produceQty:N0}개 생산, 자재 소비 반영됨.", Severity.Success);
             _showAssembleDialog = false;
+
+            // 사장님 지시 (2026-04-26): BOM 생산 직후에도 안전재고 이하/0 자재가 있으면
+            // 자동발주 다이얼로그. OK 시 발주서 즉시 생성 + 발주 목록에 노출.
+            await CheckAssembleAutoOrderAsync(Id);
         }
         else
         {
             Snackbar.Add($"조립 실행 실패: {err ?? "알 수 없는 오류"}", Severity.Error);
+        }
+    }
+
+    /// <summary>
+    /// BOM 조립 직후 자재 자동발주 후보 조회 → 다이얼로그 → OK 시 발주서 생성.
+    /// 판매 자동발주(DeliveryPage.CheckAutoOrderAsync)와 같은 패턴, 같은 발주 생성 API.
+    /// </summary>
+    private async Task CheckAssembleAutoOrderAsync(string bomId)
+    {
+        var candidates = await BomApi.GetAssembleAutoOrderCandidatesAsync(bomId);
+        if (candidates.Count == 0) return;
+
+        var outOfStock = candidates.Count(c => c.Reason == "out_of_stock");
+        var belowSafety = candidates.Count - outOfStock;
+
+        var msg = new System.Text.StringBuilder();
+        if (outOfStock > 0) msg.AppendLine($"재고가 없는 자재: {outOfStock}건");
+        if (belowSafety > 0) msg.AppendLine($"안전재고 이하 자재: {belowSafety}건");
+        msg.AppendLine();
+        foreach (var c in candidates.Take(5))
+        {
+            msg.AppendLine($"• {c.ItemName}: 현재고 {c.CurrentQty:N0} / 안전재고 {c.SafetyQty:N0}"
+                + (string.IsNullOrWhiteSpace(c.PartnerName) ? " (공급처 미설정)" : $" → {c.PartnerName}"));
+        }
+        if (candidates.Count > 5) msg.AppendLine($"... 외 {candidates.Count - 5}건");
+        msg.AppendLine();
+        msg.AppendLine("자동발주 하시겠습니까?");
+
+        var yes = await DialogService.ShowMessageBoxAsync(
+            "⚠ 자재 자동발주",
+            msg.ToString(),
+            yesText: "자동발주", cancelText: "닫기");
+        if (yes != true) return;
+
+        var results = await DeliveryService.CreateAutoOrdersAsync(candidates);
+        var success = results.Where(r => r.Success).ToList();
+        var failed = results.Where(r => !r.Success).ToList();
+
+        if (success.Count > 0)
+        {
+            var noList = string.Join(", ", success.Select(r => r.PoNo));
+            Snackbar.Add($"자동발주서 {success.Count}건 생성 완료: {noList}", Severity.Success);
+        }
+        if (failed.Count > 0)
+        {
+            var firstReason = failed[0].Reason ?? "사유 미상";
+            Snackbar.Add($"{failed.Count}건 자동발주 실패: {firstReason[..Math.Min(150, firstReason.Length)]}", Severity.Warning);
         }
     }
 

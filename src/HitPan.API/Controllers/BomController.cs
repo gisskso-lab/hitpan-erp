@@ -32,6 +32,19 @@ public class BomController : ControllerBase
         return Ok(new { bomId });
     }
 
+    /// <summary>
+    /// BOM 조립 직후 자재 부족·안전재고 위반 자동발주 후보 조회.
+    /// 사장님 지시 (2026-04-26): 부족 다이얼로그 → OK 시 발주서 생성.
+    /// </summary>
+    [HttpGet("{id:guid}/auto-order-candidates")]
+    public async Task<IActionResult> GetAssembleAutoOrderCandidates(string id, CancellationToken ct)
+    {
+        var tid = HttpContext.Items["TenantId"]?.ToString();
+        if (string.IsNullOrEmpty(tid)) return Forbid();
+        var list = await _svc.GetAssembleAutoOrderCandidatesAsync(id, tid, ct).ConfigureAwait(false);
+        return Ok(list);
+    }
+
     [HttpGet("{id:guid}")]
     public async Task<IActionResult> Get(string id, CancellationToken ct)
     {

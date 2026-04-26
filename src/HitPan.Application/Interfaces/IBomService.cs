@@ -21,4 +21,14 @@ public interface IBomService
     /// 해당 item_id 가 BOM 등록된 완제품/반제품일 때만 결과 반환.
     /// </summary>
     Task<string?> GetBomIdByItemAsync(string itemId, string tenantId, CancellationToken ct = default);
+
+    /// <summary>
+    /// BOM 조립 직후 자재 부족·안전재고 위반 품목을 자동발주 후보로 반환.
+    /// 사장님 지시 (2026-04-26): 자재가 안전재고 이하/0 이면 다이얼로그로 묻고
+    /// OK 시 발주서를 즉시 생성. 판매 자동발주(SalesService)와 동일 DTO 사용.
+    /// </summary>
+    Task<List<DTOs.Sales.AutoOrderCandidateDto>> GetAssembleAutoOrderCandidatesAsync(
+        string bomId,
+        string tenantId,
+        CancellationToken ct = default);
 }
