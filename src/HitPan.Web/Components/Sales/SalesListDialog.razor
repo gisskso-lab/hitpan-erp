@@ -83,6 +83,17 @@
                    Size="Size.Small"
                    Style="font-size:12px"
                    Disabled="!HasInvoicedChecked">전자발행</MudButton>
+        <AuthorizeView Roles="tenant_admin,sales_manager,system_admin,TenantAdmin">
+            <Authorized>
+                <MudButton OnClick="BulkDeleteAsync"
+                           Variant="Variant.Outlined"
+                           Color="Color.Error"
+                           Size="Size.Small"
+                           Style="font-size:12px"
+                           StartIcon="@Icons.Material.Filled.Delete"
+                           Disabled="!HasDeletableChecked">선택 삭제</MudButton>
+            </Authorized>
+        </AuthorizeView>
         <MudSpacer />
         <MudButton OnClick="Close"
                    Variant="Variant.Outlined"
@@ -103,6 +114,8 @@
     private bool HasChecked => Items.Any(x => x.IsChecked);
     private bool HasDraftChecked => Items.Any(x => x.IsChecked && x.Status == "draft");
     private bool HasInvoicedChecked => Items.Any(x => x.IsChecked && x.Status == "invoiced");
+    /// <summary>삭제 가능 = 선택됨 AND 계산서 발행 전(invoiced 아님). 권한은 AuthorizeView에서.</summary>
+    private bool HasDeletableChecked => Items.Any(x => x.IsChecked && x.Status != "invoiced");
 
     protected override async Task OnInitializedAsync()
     {
@@ -210,6 +223,53 @@
         {
             Snackbar.Add($"확정 처리 중 오류: {ex.Message}", Severity.Error);
         }
+    }
+
+    /// <summary>
+    /// 선택 삭제 — 사장님 지시 (2026-04-26): 판매확정 되더라도 전자계산서 발행 전엔
+    /// 삭제 가능. 권한은 AuthorizeView 로 tenant_admin / sales_manager 등에 제한.
+    /// 서버 DELETE /api/sales/deliveries/{id} 가 자체적으로:
+    ///   - tax_invoices 발행 레코드 있으면 거부
+    ///   - draft → cancelled 표시
+    ///   - confirmed → Reverse 원장 발행 후 cancelled
+    /// </summary>
+    private async Task BulkDeleteAsync()
+    {
+        var targets = Items.Where(x => x.IsChecked && x.Status != "invoiced").ToList();
+        if (targets.Count == 0) return;
+
+        var confirmedCount = targets.Count(t => t.Status == "confirmed");
+        var msg = new System.Text.StringBuilder();
+        msg.AppendLine($"선택한 {targets.Count}건을 삭제하시겠습니까?");
+        if (confirmedCount > 0)
+        {
+            msg.AppendLine();
+            msg.AppendLine($"⚠ 이 중 {confirmedCount}건은 확정된 거래로,");
+            msg.AppendLine("재고와 회계 기표가 Reverse(역행) 처리됩니다.");
+        }
+        msg.AppendLine();
+        msg.AppendLine("계산서 발행된 거래는 자동으로 제외됩니다.");
+
+        var ok = await DialogService.ShowMessageBoxAsync("거래명세서 삭제", msg.ToString(),
+            yesText: "삭제", cancelText: "취소");
+        if (ok != true) return;
+
+        var success = 0;
+        var failed = new List<(string No, string Reason)>();
+        foreach (var t in targets)
+        {
+            var r = await DeliveryService.DeleteAsync(t.OrderId);
+            if (r) success++;
+            else failed.Add((t.OrderNo, "서버 거부"));
+        }
+
+        if (success > 0) Snackbar.Add($"{success}건 삭제 완료.", Severity.Success);
+        if (failed.Count > 0)
+        {
+            Snackbar.Add($"{failed.Count}건 삭제 실패: {failed[0].No} ({failed[0].Reason})", Severity.Warning);
+        }
+
+        await Search();
     }
 
     /// <summary>

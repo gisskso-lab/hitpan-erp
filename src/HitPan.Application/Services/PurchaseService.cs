@@ -888,12 +888,14 @@ public class PurchaseService : IPurchaseService
     // ─────────────────────────────────────────────────────────────────────
     public async Task DeletePurchaseOrderAsync(string poId, string tenantId, CancellationToken ct = default)
     {
-        var row = await _db.QueryFirstOrDefaultAsync<dynamic>(new CommandDefinition(
-            "SELECT status, is_deleted FROM purchase_orders WHERE po_id=@Id AND tenant_id=@Tid",
+        // dynamic 캐스팅(long·byte 변환) 시 InvalidCastException 으로 500 회귀가 발생해
+        // 강타입 record 로 교체. is_deleted 는 TINYINT(1) → byte 매핑.
+        var row = await _db.QueryFirstOrDefaultAsync<(string Status, byte IsDeleted)?>(new CommandDefinition(
+            "SELECT status AS Status, is_deleted AS IsDeleted FROM purchase_orders WHERE po_id=@Id AND tenant_id=@Tid",
             new { Id = poId, Tid = tenantId }, cancellationToken: ct))
             ?? throw new InvalidOperationException("발주서를 찾을 수 없습니다.");
 
-        if ((long)row.is_deleted == 1L)
+        if (row.IsDeleted == 1)
         {
             throw new InvalidOperationException("이미 삭제된 발주서입니다.");
         }

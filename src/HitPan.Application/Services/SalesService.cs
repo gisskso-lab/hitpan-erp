@@ -678,6 +678,33 @@ public class SalesService : ISalesService
 
     public async Task DeleteDeliveryAsync(string deliveryId, string tenantId, CancellationToken ct = default)
     {
+        // 사장님 지시 (2026-04-26): 거래명세서는 전자계산서 발행 전이면 삭제 가능.
+        //   - 권한은 컨트롤러에서 SalesManager 정책으로 이미 강제됨.
+        //   - tax_invoices 에 delivery_id 발행 레코드 있으면 거부 (감사·세무 무결성).
+        //   - status='draft'    → cancelled 표시
+        //   - status='confirmed' → CancelConfirmedDeliveryAsync 로 Reverse 원장 발행
+        //     (재고·원장·회계 모두 복귀, INSERT ONLY 원칙 유지).
+
+        var invoiced = await _db.QueryFirstOrDefaultAsync<int>(new CommandDefinition(
+            "SELECT COUNT(*) FROM tax_invoices WHERE delivery_id=@Id AND tenant_id=@Tid",
+            new { Id = deliveryId, Tid = tenantId }, cancellationToken: ct));
+        if (invoiced > 0)
+        {
+            throw new InvalidOperationException("전자계산서가 발행된 거래명세서는 삭제할 수 없습니다. 계산서를 먼저 취소해주세요.");
+        }
+
+        var status = await _db.QueryFirstOrDefaultAsync<string?>(new CommandDefinition(
+            "SELECT status FROM sales_deliveries WHERE delivery_id=@Id AND tenant_id=@Tid",
+            new { Id = deliveryId, Tid = tenantId }, cancellationToken: ct));
+        if (string.IsNullOrEmpty(status)) return; // 이미 없음
+
+        if (string.Equals(status, "confirmed", StringComparison.OrdinalIgnoreCase))
+        {
+            // 확정된 거래는 Reverse 경로 — 재고·잔액·회계 무결성 유지.
+            await CancelConfirmedDeliveryAsync(deliveryId, tenantId, employeeId: null, ct);
+            return;
+        }
+
         await _db.ExecuteAsync(
             new CommandDefinition(
                 """
@@ -690,6 +717,8 @@ public class SalesService : ISalesService
                 """,
                 new { DeliveryId = deliveryId, TenantId = tenantId },
                 cancellationToken: ct));
+
+        await _audit.LogAsync("delete", "sales_delivery", deliveryId, ct: ct);
     }
 
     /// <summary>
@@ -1104,12 +1133,12 @@ public class SalesService : ISalesService
     // ─────────────────────────────────────────────────────────────────────
     public async Task DeleteSalesOrderAsync(string orderId, string tenantId, CancellationToken ct = default)
     {
-        var row = await _db.QueryFirstOrDefaultAsync<dynamic>(new CommandDefinition(
-            "SELECT status, is_deleted FROM sales_orders WHERE order_id=@Id AND tenant_id=@Tid",
+        var row = await _db.QueryFirstOrDefaultAsync<(string Status, byte IsDeleted)?>(new CommandDefinition(
+            "SELECT status AS Status, is_deleted AS IsDeleted FROM sales_orders WHERE order_id=@Id AND tenant_id=@Tid",
             new { Id = orderId, Tid = tenantId }, cancellationToken: ct))
             ?? throw new InvalidOperationException("수주서를 찾을 수 없습니다.");
 
-        if ((long)row.is_deleted == 1L)
+        if (row.IsDeleted == 1)
         {
             throw new InvalidOperationException("이미 삭제된 수주서입니다.");
         }
