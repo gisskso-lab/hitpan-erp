@@ -48,7 +48,8 @@
         </MudStack>
     </MudPaper>
 
-    <MudTable T="PurchaseReceiptListItem" Items="_rows" Dense="true" Hover="true" Striped="true" FixedHeader="true" Height="calc(100vh - 430px)">
+    <MudTable T="PurchaseReceiptListItem" Items="_rows" Dense="true" Hover="true" Striped="true" FixedHeader="true" Height="calc(100vh - 430px)"
+              RowStyleFunc="@RowStyleFunc">
         <HeaderContent>
             <MudTh Style="width:48px">
                 <MudCheckBox T="bool" Value="_allSelected" ValueChanged="ToggleAllAsync" />
@@ -65,7 +66,8 @@
                 <div @onclick:stopPropagation="true">
                     <MudCheckBox T="bool"
                                  Value="context.IsChecked"
-                                 ValueChanged="@(v => ToggleOneAsync(context, v))" />
+                                 ValueChanged="@(v => ToggleOneAsync(context, v))"
+                                 Disabled="@IsConfirmed(context)" />
                 </div>
             </MudTd>
             <MudTd @ondblclick="@(() => SelectRowAsync(context))" style="cursor:pointer">@context.ReceiptDate.ToString("yyyy-MM-dd")</MudTd>
@@ -73,7 +75,16 @@
                 <MudText Class="@GetSelectedClass(context)">@context.ReceiptNo</MudText>
             </MudTd>
             <MudTd @ondblclick="@(() => SelectRowAsync(context))" style="cursor:pointer">@context.PartnerName</MudTd>
-            <MudTd @ondblclick="@(() => SelectRowAsync(context))" style="cursor:pointer">@context.Status</MudTd>
+            <MudTd @ondblclick="@(() => SelectRowAsync(context))" style="cursor:pointer">
+                @if (IsConfirmed(context))
+                {
+                    <MudChip T="string" Size="Size.Small" Color="Color.Success" Variant="Variant.Filled">매입확정</MudChip>
+                }
+                else
+                {
+                    <MudChip T="string" Size="Size.Small" Color="Color.Default" Variant="Variant.Outlined">@context.Status</MudChip>
+                }
+            </MudTd>
             <MudTd Class="text-right" @ondblclick="@(() => SelectRowAsync(context))" style="cursor:pointer">@context.TotalAmount.ToString("N0")</MudTd>
             <MudTd>
                 <div @onclick:stopPropagation="true">

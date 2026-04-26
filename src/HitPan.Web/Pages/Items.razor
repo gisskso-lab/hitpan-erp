@@ -6,6 +6,7 @@
 @inject ISnackbar Snackbar
 @inject IJSRuntime Js
 @inject IDialogService DialogService
+@inject BomService BomApi
 
 <PageTitle>상품 마스터</PageTitle>
 
@@ -94,6 +95,15 @@ else
                     </MudChip>
                 </MudTd>
                 <MudTd>
+                    @if (IsBomCandidate(context))
+                    {
+                        <MudTooltip Text="이 상품의 BOM 자재명세서 보기">
+                            <MudIconButton Icon="@Icons.Material.Filled.AccountTree"
+                                           Size="Size.Small"
+                                           Color="Color.Info"
+                                           OnClick="@(() => OpenBomAsync(context))" />
+                        </MudTooltip>
+                    }
                     <MudIconButton Icon="@Icons.Material.Filled.Edit"
                                    Size="Size.Small"
                                    OnClick="@(() => Nav.NavigateTo($"/items/{context.ItemId}"))" />
@@ -204,6 +214,34 @@ else
 
     private static string StockColor(ItemListModel item) =>
         item.CurrentStock <= item.SafetyStock ? "var(--mud-palette-error)" : "inherit";
+
+    /// <summary>BOM 등록 가능성이 있는 행(완제품·반제품 또는 BOM- 코드)인지 판단.</summary>
+    private static bool IsBomCandidate(ItemListModel item)
+    {
+        var t = (item.ItemType ?? string.Empty).ToLowerInvariant();
+        if (t is "finished" or "semi_finished" or "semi" or "assembly")
+        {
+            return true;
+        }
+
+        return !string.IsNullOrWhiteSpace(item.ItemCode)
+            && item.ItemCode.StartsWith("BOM-", StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>상품행에서 BOM 자재명세서 화면으로 이동. 매핑 없으면 안내.</summary>
+    private async Task OpenBomAsync(ItemListModel item)
+    {
+        if (string.IsNullOrWhiteSpace(item.ItemId)) return;
+
+        var bomId = await BomApi.GetBomIdByItemAsync(item.ItemId);
+        if (string.IsNullOrWhiteSpace(bomId))
+        {
+            Snackbar.Add("이 상품에 연결된 BOM 자재명세서가 없습니다.", Severity.Warning);
+            return;
+        }
+
+        Nav.NavigateTo($"/bom/{bomId}");
+    }
 
     private async Task DeleteAsync(ItemListModel item)
     {

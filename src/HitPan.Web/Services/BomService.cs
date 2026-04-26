@@ -29,6 +29,27 @@ public sealed class BomService(HttpClient http)
         }
     }
 
+    /// <summary>상품마스터 item_id 로 매핑된 BOM 의 bom_id 조회. 매핑 없으면 null.</summary>
+    public async Task<string?> GetBomIdByItemAsync(string itemId, CancellationToken ct = default)
+    {
+        try
+        {
+            using var resp = await http.GetAsync($"api/bom/by-item/{Uri.EscapeDataString(itemId)}", ct);
+            if (!resp.IsSuccessStatusCode) return null;
+            var body = await resp.Content.ReadFromJsonAsync<BomByItemResponse>(cancellationToken: ct);
+            return body?.BomId;
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private sealed class BomByItemResponse
+    {
+        public string? BomId { get; set; }
+    }
+
     public async Task<(bool ok, string? bomId)> CreateAsync(CreateBomModel model, CancellationToken ct = default)
     {
         try

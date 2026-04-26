@@ -181,9 +181,10 @@ public partial class PurchaseReceiptList : ComponentBase
     private async Task ToggleAllAsync(bool value)
     {
         _allSelected = value;
+        // 확정된 매입(confirmed)은 일괄확정·반품전환·삭제 대상이 아니므로 전체선택에서 제외.
         foreach (var row in _rows)
         {
-            row.IsChecked = value;
+            row.IsChecked = value && !IsConfirmed(row);
         }
 
         _selectedRows = _rows.Where(x => x.IsChecked).ToList();
@@ -191,6 +192,14 @@ public partial class PurchaseReceiptList : ComponentBase
         // 외부 툴바 버튼 Disabled 즉시 갱신.
         await InvokeAsync(StateHasChanged);
     }
+
+    /// <summary>확정된 매입명세 행 — 체크박스/삭제 비활성화 대상.</summary>
+    private static bool IsConfirmed(PurchaseReceiptListItem row)
+        => string.Equals(row.Status, "confirmed", StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>확정 행은 흐리게 표시. (MudTable RowStyleFunc 시그니처: (T, int) => string)</summary>
+    private static string RowStyleFunc(PurchaseReceiptListItem row, int rowIndex)
+        => IsConfirmed(row) ? "opacity:0.55;background:#f7f7f7;" : string.Empty;
 
     /// <summary>
     /// 단일 행 선택 토글.
@@ -200,6 +209,8 @@ public partial class PurchaseReceiptList : ComponentBase
     /// <returns>완료</returns>
     private async Task ToggleOneAsync(PurchaseReceiptListItem row, bool value)
     {
+        // 확정 행은 사장님 지시(2026-04-26)대로 조회 전용 — 선택 자체 무시.
+        if (IsConfirmed(row)) { row.IsChecked = false; await InvokeAsync(StateHasChanged); return; }
         row.IsChecked = value;
         _selectedRows = _rows.Where(x => x.IsChecked).ToList();
         _allSelected = _rows.Count > 0 && _rows.All(x => x.IsChecked);

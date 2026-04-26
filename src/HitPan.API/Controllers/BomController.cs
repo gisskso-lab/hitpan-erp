@@ -22,6 +22,16 @@ public class BomController : ControllerBase
         return Ok(await _svc.GetListAsync(tid, ct).ConfigureAwait(false));
     }
 
+    [HttpGet("by-item/{itemId}")]
+    public async Task<IActionResult> GetByItem(string itemId, CancellationToken ct)
+    {
+        var tid = HttpContext.Items["TenantId"]?.ToString();
+        if (string.IsNullOrEmpty(tid)) return Forbid();
+        var bomId = await _svc.GetBomIdByItemAsync(itemId, tid, ct).ConfigureAwait(false);
+        if (string.IsNullOrEmpty(bomId)) return NotFound();
+        return Ok(new { bomId });
+    }
+
     [HttpGet("{id:guid}")]
     public async Task<IActionResult> Get(string id, CancellationToken ct)
     {

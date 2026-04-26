@@ -720,6 +720,15 @@ public class BomService : IBomService
             new { TenantId = tenantId, ProductItemId = productItemId, Cost = cost }, cancellationToken: ct)).ConfigureAwait(false);
     }
 
+    public async Task<string?> GetBomIdByItemAsync(string itemId, string tenantId, CancellationToken ct = default)
+    {
+        await EnsureOpenAsync(ct).ConfigureAwait(false);
+        return await _db.QueryFirstOrDefaultAsync<string?>(new CommandDefinition(
+            "SELECT bom_id FROM bom_headers WHERE product_item_id=@ItemId AND tenant_id=@Tid LIMIT 1",
+            new { ItemId = itemId, Tid = tenantId },
+            cancellationToken: ct)).ConfigureAwait(false);
+    }
+
     private async Task EnsureOpenAsync(CancellationToken ct)
     {
         if (_db.State == ConnectionState.Open) return;

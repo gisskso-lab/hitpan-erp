@@ -15,4 +15,10 @@ public interface IBomService
     Task<List<StockAlertDto>> GetAlertsAsync(string tenantId, CancellationToken ct = default);
     Task DismissAlertAsync(string alertId, string tenantId, CancellationToken ct = default);
     Task OrderAlertAsync(string alertId, string tenantId, CancellationToken ct = default);
+
+    /// <summary>
+    /// 상품마스터의 item_id 로 매핑된 BOM 헤더의 bom_id 를 찾는다.
+    /// 해당 item_id 가 BOM 등록된 완제품/반제품일 때만 결과 반환.
+    /// </summary>
+    Task<string?> GetBomIdByItemAsync(string itemId, string tenantId, CancellationToken ct = default);
 }
