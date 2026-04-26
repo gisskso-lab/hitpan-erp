@@ -96,6 +96,37 @@ public class SalesOrderDetailItemDto
     public decimal VatAmount { get; set; }
 }
 
+/// <summary>
+/// 거래명세서 확정 직후 안전재고 위반 후보 (사장님 지시 2026-04-26).
+/// 프론트에서 "자동발주 하시겠습니까?" 다이얼로그를 띄울 때 사용.
+/// </summary>
+public class AutoOrderCandidateDto
+{
+    public string ItemId { get; set; } = string.Empty;
+    public string ItemCode { get; set; } = string.Empty;
+    public string ItemName { get; set; } = string.Empty;
+    public decimal CurrentQty { get; set; }
+    public decimal SafetyQty { get; set; }
+    public decimal SuggestedOrderQty { get; set; }
+    public string? PartnerId { get; set; }
+    public string? PartnerName { get; set; }
+    public decimal UnitPrice { get; set; }
+    /// <summary>"out_of_stock" | "below_safety"</summary>
+    public string Reason { get; set; } = string.Empty;
+}
+
+/// <summary>자동발주 생성 결과 — 공급처별 발주서 1건 또는 실패 사유.</summary>
+public class AutoOrderResultDto
+{
+    public string? PoId { get; set; }
+    public string? PoNo { get; set; }
+    public string? PartnerId { get; set; }
+    public string? PartnerName { get; set; }
+    public List<string> ItemIds { get; set; } = new();
+    public bool Success { get; set; }
+    public string? Reason { get; set; }
+}
+
 public class PartnerSearchDto
 {
     public string PartnerId { get; set; } = string.Empty;

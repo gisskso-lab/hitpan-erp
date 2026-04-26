@@ -469,6 +469,37 @@ public sealed class DeliveryService(HttpClient http)
         catch { return new(); }
     }
 
+    /// <summary>거래명세서 확정 직후 자동발주 후보 조회 (사장님 지시 2026-04-26).</summary>
+    public async Task<List<AutoOrderCandidateModel>> GetAutoOrderCandidatesAsync(string deliveryId, CancellationToken ct = default)
+    {
+        try
+        {
+            return await http.GetFromJsonAsync<List<AutoOrderCandidateModel>>(
+                $"api/sales/deliveries/{Uri.EscapeDataString(deliveryId)}/auto-order-candidates",
+                JsonOptions, ct) ?? new();
+        }
+        catch
+        {
+            return new();
+        }
+    }
+
+    /// <summary>자동발주 즉시 생성. 공급처별 발주서(draft)로 묶여 반환.</summary>
+    public async Task<List<AutoOrderResultModel>> CreateAutoOrdersAsync(
+        IReadOnlyList<AutoOrderCandidateModel> candidates, CancellationToken ct = default)
+    {
+        try
+        {
+            using var resp = await http.PostAsJsonAsync("api/sales/auto-orders", candidates, ct);
+            if (!resp.IsSuccessStatusCode) return new();
+            return await resp.Content.ReadFromJsonAsync<List<AutoOrderResultModel>>(JsonOptions, ct) ?? new();
+        }
+        catch
+        {
+            return new();
+        }
+    }
+
     /// <summary>발주서 단건 상세 조회.</summary>
     public async Task<PurchaseOrderDetailModel?> GetPurchaseOrderDetailAsync(string poId, CancellationToken ct = default)
     {

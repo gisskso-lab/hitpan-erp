@@ -52,4 +52,22 @@ public interface ISalesService
         string orderId,
         string tenantId,
         CancellationToken ct = default);
+
+    /// <summary>
+    /// 거래명세서 확정 직후 안전재고 위반·재고0 품목을 자동발주 후보로 반환.
+    /// auto_order_enabled=1 이고 (current_qty &lt;= safety_stock OR current_qty &lt;= 0) 인 라인만.
+    /// </summary>
+    Task<List<AutoOrderCandidateDto>> GetAutoOrderCandidatesAsync(
+        string deliveryId,
+        string tenantId,
+        CancellationToken ct = default);
+
+    /// <summary>
+    /// 자동발주 — 사용자가 다이얼로그에서 OK한 품목을 발주서(status=draft) 한 건으로 즉시 생성.
+    /// 공급처별로 발주서를 묶어 생성한다(공급처 미설정 품목은 스킵 + 사유 반환).
+    /// </summary>
+    Task<List<AutoOrderResultDto>> CreateAutoOrdersAsync(
+        IReadOnlyList<AutoOrderCandidateDto> candidates,
+        string tenantId,
+        CancellationToken ct = default);
 }

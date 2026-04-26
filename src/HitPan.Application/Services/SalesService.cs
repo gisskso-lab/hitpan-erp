@@ -1128,4 +1128,166 @@ public class SalesService : ISalesService
 
         await _audit.LogAsync("delete", "sales_order", orderId, ct: ct);
     }
+
+    // ─────────────────────────────────────────────────────────────────────
+    // 자동발주 후보 조회 — 거래명세서 확정 직후 안전재고 위반 품목 추출.
+    // 사장님 지시 (2026-04-26): 판매 반영 시 재고가 안전재고 이하/0 이면
+    //   "자동발주 하시겠습니까?" 다이얼로그를 띄울 후보를 내려준다.
+    // 조건: 라인 품목 중 auto_order_enabled=1 AND
+    //       (item_stock 합계 <= items.safety_stock OR <= 0)
+    // ─────────────────────────────────────────────────────────────────────
+    public async Task<List<AutoOrderCandidateDto>> GetAutoOrderCandidatesAsync(
+        string deliveryId, string tenantId, CancellationToken ct = default)
+    {
+        const string sql = """
+            SELECT DISTINCT
+                   i.item_id        AS ItemId,
+                   IFNULL(i.item_code,'') AS ItemCode,
+                   i.item_name      AS ItemName,
+                   COALESCE(s.qty, 0) AS CurrentQty,
+                   COALESCE(i.safety_stock, i.safe_stock, 0) AS SafetyQty,
+                   COALESCE(i.auto_order_qty, 0) AS SuggestedOrderQty,
+                   i.auto_order_partner_id AS PartnerId,
+                   p.partner_name   AS PartnerName,
+                   COALESCE(i.purchase_price, i.cost_price, 0) AS UnitPrice,
+                   CASE
+                     WHEN COALESCE(s.qty, 0) <= 0 THEN 'out_of_stock'
+                     ELSE 'below_safety'
+                   END AS Reason
+              FROM sales_delivery_items di
+              JOIN items i
+                ON i.item_id = di.item_id AND i.tenant_id = di.tenant_id
+              LEFT JOIN (
+                   SELECT tenant_id, item_id, SUM(current_qty) AS qty
+                     FROM item_stock GROUP BY tenant_id, item_id
+              ) s ON s.tenant_id = i.tenant_id AND s.item_id = i.item_id
+              LEFT JOIN partners p
+                ON p.partner_id = i.auto_order_partner_id AND p.tenant_id = i.tenant_id
+             WHERE di.delivery_id = @DeliveryId
+               AND di.tenant_id   = @Tid
+               AND IFNULL(i.auto_order_enabled, 0) = 1
+               AND (
+                     COALESCE(s.qty, 0) <= COALESCE(i.safety_stock, i.safe_stock, 0)
+                  OR COALESCE(s.qty, 0) <= 0
+                   )
+            """;
+
+        var rows = await _db.QueryAsync<AutoOrderCandidateDto>(new CommandDefinition(
+            sql, new { DeliveryId = deliveryId, Tid = tenantId }, cancellationToken: ct));
+        return rows.ToList();
+    }
+
+    // ─────────────────────────────────────────────────────────────────────
+    // 자동발주 즉시 생성 — 사장님 지시 (2026-04-26): 다이얼로그 OK 시
+    //   "바로 자동발주가 되어야 정상이지". 공급처별로 묶어 발주서(draft) 1건씩 생성.
+    // 공급처 미설정 품목은 스킵 + 사유 반환(워크플로우 §20 끊김 금지).
+    // ─────────────────────────────────────────────────────────────────────
+    public async Task<List<AutoOrderResultDto>> CreateAutoOrdersAsync(
+        IReadOnlyList<AutoOrderCandidateDto> candidates, string tenantId, CancellationToken ct = default)
+    {
+        var results = new List<AutoOrderResultDto>();
+        if (candidates.Count == 0) return results;
+
+        // 공급처별 그룹핑. 미지정 품목은 별도 실패 결과.
+        var noPartner = candidates.Where(c => string.IsNullOrWhiteSpace(c.PartnerId)).ToList();
+        if (noPartner.Count > 0)
+        {
+            results.Add(new AutoOrderResultDto
+            {
+                Success = false,
+                Reason = $"{noPartner.Count}개 품목에 자동발주 공급처 미설정 — 상품마스터에서 지정 필요.",
+                ItemIds = noPartner.Select(x => x.ItemId).ToList()
+            });
+        }
+
+        var groups = candidates
+            .Where(c => !string.IsNullOrWhiteSpace(c.PartnerId))
+            .GroupBy(c => c.PartnerId!);
+
+        var today = DateTime.Today;
+        var prefix = $"PO-{today:yyyyMMdd}-";
+
+        foreach (var grp in groups)
+        {
+            var partnerId = grp.Key;
+            var lines = grp.ToList();
+            var supply = lines.Sum(x => Math.Max(x.SuggestedOrderQty, 1m) * x.UnitPrice);
+            var vat = Math.Round(supply * 0.1m, 0, MidpointRounding.AwayFromZero);
+
+            using var tx = _db.BeginTransaction();
+            try
+            {
+                var cnt = await _db.QueryFirstOrDefaultAsync<int>(new CommandDefinition(
+                    "SELECT COUNT(*) FROM purchase_orders WHERE tenant_id=@Tid AND po_no LIKE CONCAT(@Prefix, '%')",
+                    new { Tid = tenantId, Prefix = prefix }, transaction: tx, cancellationToken: ct));
+                var poNo = $"{prefix}{cnt + 1:000}";
+                var poId = Guid.NewGuid().ToString();
+
+                await _db.ExecuteAsync(new CommandDefinition(
+                    """
+                    INSERT INTO purchase_orders
+                      (po_id, tenant_id, po_no, partner_id, po_date, status, total_amount, vat_amount, memo, created_at, updated_at)
+                    VALUES
+                      (@PoId, @Tid, @PoNo, @PartnerId, @PoDate, 'draft', @Supply, @Vat, @Memo, NOW(6), NOW(6))
+                    """,
+                    new
+                    {
+                        PoId = poId, Tid = tenantId, PoNo = poNo,
+                        PartnerId = partnerId, PoDate = today,
+                        Supply = supply, Vat = vat,
+                        Memo = "안전재고 자동발주 (판매확정 트리거)"
+                    }, transaction: tx, cancellationToken: ct));
+
+                foreach (var line in lines)
+                {
+                    var qty = line.SuggestedOrderQty > 0 ? line.SuggestedOrderQty : Math.Max(line.SafetyQty - line.CurrentQty, 1m);
+                    var lineSupply = qty * line.UnitPrice;
+                    var lineVat = Math.Round(lineSupply * 0.1m, 0, MidpointRounding.AwayFromZero);
+
+                    await _db.ExecuteAsync(new CommandDefinition(
+                        """
+                        INSERT INTO purchase_order_items
+                          (po_item_id, po_id, tenant_id, item_id, ordered_qty, received_qty, unit_price, supply_amount, vat_amount, item_status)
+                        VALUES
+                          (UUID(), @PoId, @Tid, @ItemId, @Qty, 0, @UnitPrice, @Supply, @Vat, 'pending')
+                        """,
+                        new
+                        {
+                            PoId = poId, Tid = tenantId, ItemId = line.ItemId,
+                            Qty = qty, UnitPrice = line.UnitPrice,
+                            Supply = lineSupply, Vat = lineVat
+                        }, transaction: tx, cancellationToken: ct));
+                }
+
+                tx.Commit();
+                await _audit.LogAsync("create", "purchase_order", poId,
+                    afterJson: $"{{\"source\":\"auto_order\",\"po_no\":\"{poNo}\",\"item_count\":{lines.Count}}}",
+                    ct: ct);
+
+                results.Add(new AutoOrderResultDto
+                {
+                    Success = true,
+                    PoId = poId,
+                    PoNo = poNo,
+                    PartnerId = partnerId,
+                    PartnerName = lines[0].PartnerName,
+                    ItemIds = lines.Select(x => x.ItemId).ToList()
+                });
+            }
+            catch (Exception ex)
+            {
+                try { tx.Rollback(); } catch { /* 이미 닫힌 tx */ }
+                results.Add(new AutoOrderResultDto
+                {
+                    Success = false,
+                    PartnerId = partnerId,
+                    PartnerName = lines[0].PartnerName,
+                    ItemIds = lines.Select(x => x.ItemId).ToList(),
+                    Reason = ex.Message
+                });
+            }
+        }
+
+        return results;
+    }
 }

@@ -347,6 +347,33 @@ public sealed class ConvertToReceiptResponse
     public string ReceiptNo { get; set; } = string.Empty;
 }
 
+/// <summary>거래명세서 확정 직후 자동발주 후보 (사장님 지시 2026-04-26).</summary>
+public sealed class AutoOrderCandidateModel
+{
+    public string ItemId { get; set; } = string.Empty;
+    public string ItemCode { get; set; } = string.Empty;
+    public string ItemName { get; set; } = string.Empty;
+    public decimal CurrentQty { get; set; }
+    public decimal SafetyQty { get; set; }
+    public decimal SuggestedOrderQty { get; set; }
+    public string? PartnerId { get; set; }
+    public string? PartnerName { get; set; }
+    public decimal UnitPrice { get; set; }
+    /// <summary>"out_of_stock" | "below_safety"</summary>
+    public string Reason { get; set; } = string.Empty;
+}
+
+public sealed class AutoOrderResultModel
+{
+    public string? PoId { get; set; }
+    public string? PoNo { get; set; }
+    public string? PartnerId { get; set; }
+    public string? PartnerName { get; set; }
+    public List<string> ItemIds { get; set; } = new();
+    public bool Success { get; set; }
+    public string? Reason { get; set; }
+}
+
 /// <summary>발주서 단건 상세.</summary>
 public sealed class PurchaseOrderDetailModel
 {

@@ -41,6 +41,26 @@ public class SalesController : ControllerBase
         return Ok(result);
     }
 
+    [HttpGet("deliveries/{id}/auto-order-candidates")]
+    public async Task<IActionResult> GetAutoOrderCandidates(string id, CancellationToken ct)
+    {
+        var tenantId = HttpContext.Items["TenantId"]?.ToString();
+        if (string.IsNullOrEmpty(tenantId)) return Forbid();
+
+        var list = await _salesService.GetAutoOrderCandidatesAsync(id, tenantId, ct);
+        return Ok(list);
+    }
+
+    [HttpPost("auto-orders")]
+    public async Task<IActionResult> CreateAutoOrders([FromBody] List<AutoOrderCandidateDto> candidates, CancellationToken ct)
+    {
+        var tenantId = HttpContext.Items["TenantId"]?.ToString();
+        if (string.IsNullOrEmpty(tenantId)) return Forbid();
+
+        var results = await _salesService.CreateAutoOrdersAsync(candidates ?? new(), tenantId, ct);
+        return Ok(results);
+    }
+
     [HttpGet("orders/{id}")]
     public async Task<IActionResult> GetOrder(string id, CancellationToken ct)
     {
