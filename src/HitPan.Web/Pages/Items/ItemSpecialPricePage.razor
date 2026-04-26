@@ -66,6 +66,7 @@ else
             <MudTh>거래처</MudTh>
             <MudTh Style="width:100px">단가유형</MudTh>
             <MudTh Style="width:130px;text-align:right">특별단가</MudTh>
+            <MudTh Style="width:110px;text-align:right">할인율(%)</MudTh>
             <MudTh Style="width:130px">시작일</MudTh>
             <MudTh Style="width:130px">종료일</MudTh>
             <MudTh Style="width:80px;text-align:center">활성</MudTh>
@@ -94,7 +95,28 @@ else
                 </MudSelect>
             </MudTd>
             <MudTd Style="text-align:right">
-                <MudNumericField T="decimal" @bind-Value="context.UnitPrice" Variant="Variant.Text" Margin="Margin.Dense" Style="font-size:13px;text-align:right" />
+                @* 고정 단가일 때만 입력 가능. 할인 모드면 자동 계산값 표시. *@
+                @if (context.PriceType == "discount")
+                {
+                    <MudText Typo="Typo.body2" Style="color:#9CA3AF">@CalcDiscountedPrice(context).ToString("N0")</MudText>
+                }
+                else
+                {
+                    <MudNumericField T="decimal" @bind-Value="context.UnitPrice" Variant="Variant.Text" Margin="Margin.Dense" Style="font-size:13px;text-align:right" />
+                }
+            </MudTd>
+            <MudTd Style="text-align:right">
+                @if (context.PriceType == "discount")
+                {
+                    <MudNumericField T="decimal?" @bind-Value="context.DiscountRate"
+                                     Variant="Variant.Text" Margin="Margin.Dense"
+                                     Min="0" Max="100" Format="N1"
+                                     Style="font-size:13px;text-align:right" />
+                }
+                else
+                {
+                    <MudText Typo="Typo.body2" Style="color:#9CA3AF">—</MudText>
+                }
             </MudTd>
             <MudTd>
                 <MudDatePicker Date="context.StartDate" DateChanged="@(d => context.StartDate = d)"
@@ -173,6 +195,14 @@ else
         _prices = await ItemsApi.GetSpecialPricesAsync(_selectedItem.ItemId);
         _saving = false;
         Snackbar.Add("저장되었습니다.", Severity.Success);
+    }
+
+    /// <summary>할인율 모드에서 미리보기용 환산 가격 — 상품 판매단가 × (1 - 할인율%).</summary>
+    private decimal CalcDiscountedPrice(ItemSpecialPriceModel row)
+    {
+        if (_selectedItem is null || row.DiscountRate is null) return 0m;
+        var rate = Math.Clamp(row.DiscountRate.Value, 0m, 100m);
+        return Math.Round(_selectedItem.SalePrice * (100m - rate) / 100m, 0, MidpointRounding.AwayFromZero);
     }
 
     private async Task DeleteAsync(ItemSpecialPriceModel item)

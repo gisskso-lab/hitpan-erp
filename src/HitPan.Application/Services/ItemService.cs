@@ -335,6 +335,7 @@ public sealed class ItemService : IItemService
                              p.partner_name AS PartnerName,
                              IFNULL(sp.price_type, 'fixed') AS PriceType,
                              sp.unit_price AS UnitPrice,
+                             sp.discount_rate AS DiscountRate,
                              sp.start_date AS StartDate,
                              sp.end_date AS EndDate,
                              sp.is_active AS IsActive
@@ -364,21 +365,34 @@ public sealed class ItemService : IItemService
             : dto.PriceId.Trim();
         var priceType = string.IsNullOrWhiteSpace(dto.PriceType) ? "fixed" : dto.PriceType.Trim();
 
+        // 단가유형별 의미 분기 — 할인 모드는 unit_price=0, 고정 모드는 discount_rate=null.
+        // (DDL 자체는 둘 다 nullable 허용하되 서비스에서 정합성 강제.)
+        var unitPrice = priceType == "discount" ? 0m : dto.UnitPrice;
+        decimal? discountRate = priceType == "discount"
+            ? (dto.DiscountRate ?? 0m)
+            : (decimal?)null;
+
+        if (priceType == "discount" && (discountRate < 0m || discountRate > 100m))
+        {
+            throw new InvalidOperationException("할인율은 0~100% 범위여야 합니다.");
+        }
+
         await _db.ExecuteAsync(new CommandDefinition(
             """
             INSERT INTO item_special_prices (
               price_id, tenant_id, item_id,
-              partner_id, price_type, unit_price,
+              partner_id, price_type, unit_price, discount_rate,
               start_date, end_date,
               is_active, created_at, updated_at)
             VALUES (
               @PriceId, @TenantId, @ItemId,
-              @PartnerId, @PriceType, @UnitPrice,
+              @PartnerId, @PriceType, @UnitPrice, @DiscountRate,
               @StartDate, @EndDate,
               @IsActive, NOW(6), NOW(6))
             ON DUPLICATE KEY UPDATE
               price_type = @PriceType,
               unit_price = @UnitPrice,
+              discount_rate = @DiscountRate,
               start_date = @StartDate,
               end_date = @EndDate,
               is_active = @IsActive,
@@ -391,7 +405,8 @@ public sealed class ItemService : IItemService
                 ItemId = itemId,
                 PartnerId = dto.PartnerId,
                 PriceType = priceType,
-                UnitPrice = dto.UnitPrice,
+                UnitPrice = unitPrice,
+                DiscountRate = discountRate,
                 StartDate = dto.StartDate,
                 EndDate = dto.EndDate,
                 IsActive = dto.IsActive ? 1 : 0

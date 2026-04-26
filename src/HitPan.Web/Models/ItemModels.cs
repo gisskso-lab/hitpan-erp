@@ -66,6 +66,8 @@ public class ItemSpecialPriceModel
     public string? PartnerName { get; set; }
     public string PriceType { get; set; } = "fixed";
     public decimal UnitPrice { get; set; }
+    /// <summary>할인율(%) — PriceType='discount' 일 때 사용.</summary>
+    public decimal? DiscountRate { get; set; }
     public DateTime? StartDate { get; set; }
     public DateTime? EndDate { get; set; }
     public bool IsActive { get; set; } = true;

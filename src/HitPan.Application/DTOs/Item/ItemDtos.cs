@@ -102,6 +102,9 @@ public class ItemSpecialPriceDto
 
     public decimal UnitPrice { get; set; }
 
+    /// <summary>할인율(%) — PriceType='discount' 일 때 사용. 그 외엔 null.</summary>
+    public decimal? DiscountRate { get; set; }
+
     public DateTime? StartDate { get; set; }
 
     public DateTime? EndDate { get; set; }
