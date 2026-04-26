@@ -35,12 +35,22 @@ public sealed class BomService(HttpClient http)
         try
         {
             using var resp = await http.GetAsync($"api/bom/by-item/{Uri.EscapeDataString(itemId)}", ct);
-            if (!resp.IsSuccessStatusCode) return null;
-            var body = await resp.Content.ReadFromJsonAsync<BomByItemResponse>(cancellationToken: ct);
+            if (resp.StatusCode == System.Net.HttpStatusCode.NotFound) return null;
+            if (!resp.IsSuccessStatusCode)
+            {
+                var err = await resp.Content.ReadAsStringAsync(ct);
+                Console.WriteLine($"[BomService.GetBomIdByItemAsync] {(int)resp.StatusCode}: {err}");
+                return null;
+            }
+            // ASP.NET 직렬화는 camelCase ("bomId") 로 내려간다.
+            // 명시적으로 PropertyNameCaseInsensitive 옵션을 넘겨 안전하게 매칭.
+            var opts = new System.Text.Json.JsonSerializerOptions { PropertyNameCaseInsensitive = true };
+            var body = await resp.Content.ReadFromJsonAsync<BomByItemResponse>(opts, ct);
             return body?.BomId;
         }
-        catch
+        catch (Exception ex)
         {
+            Console.WriteLine($"[BomService.GetBomIdByItemAsync] Error: {ex.Message}");
             return null;
         }
     }

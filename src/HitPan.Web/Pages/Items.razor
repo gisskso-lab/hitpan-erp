@@ -140,16 +140,15 @@ else
     {
         _loading = true;
         StateHasChanged();
-        // 사장님 지시 (2026-04-26):
-        // 상품목록에는 BOM 헤더(bom_headers.product_item_id 매핑된 항목)는 표시 금지.
-        // 일반 상품(BOM 미매핑)은 type 무관 그대로 표시 — type='완제품'으로 변경한 일반
-        // 상품이 사라지던 회귀(2026-04-26) 해소. BOM 매핑 여부로만 판단.
-        // 행마다 "BOM 보기" 버튼이 있고, 클릭 시 해당 상품의 BOM 화면으로 이동.
+        // 사장님 지시 (2026-04-26 최종):
+        // 상품마스터에는 모든 상품(BOM 등록된 완제품 포함) 표시. 행마다 "BOM 보기"
+        // 버튼으로 BOM 매핑 있으면 BOM 화면 이동, 없으면 등록 다이얼로그 안내.
+        // 자동생성 BOM- 코드 중복 행 회귀는 RegisterBomAsItemAsync 수정으로 차단됨
+        // (cb2a9b5) — 따라서 excludeBom 옵션은 자재 콤비박스(순환 차단)에만 사용.
         var result = await ItemsApi.GetListAsync(
             string.IsNullOrWhiteSpace(_search) ? null : _search,
             null,
-            string.IsNullOrWhiteSpace(_typeFilter) ? null : _typeFilter,
-            excludeBom: true);
+            string.IsNullOrWhiteSpace(_typeFilter) ? null : _typeFilter);
         _items = result ?? new List<ItemListModel>();
         _loading = false;
         StateHasChanged();
