@@ -537,6 +537,156 @@ public class BomService : IBomService
         }
     }
 
+    /// <summary>
+    /// 조립 해체 — AssembleAsync 의 정확한 Reverse.
+    /// 사장님 지시 (2026-04-26): "조립 해체(삭제) 시 반대로 가격·재고는 원래대로 회귀".
+    ///   - 완제품 재고 OUT + stock_ledger out 원장 INSERT
+    ///   - 자재 재고 IN + stock_ledger in 원장 INSERT
+    ///   - 조립 시 사용된 수량(BOM.qty * (1+loss%) * produceQty) 그대로 자재로 복귀
+    ///   - INSERT ONLY 원칙 유지(원본 원장 수정/삭제 안 함, 역행 원장만 추가)
+    /// </summary>
+    public async Task DisassembleAsync(BomAssembleDto dto, string tenantId, string userId, CancellationToken ct = default)
+    {
+        await EnsureOpenAsync(ct).ConfigureAwait(false);
+        var bom = await GetAsync(dto.BomId, tenantId, ct).ConfigureAwait(false)
+            ?? throw new InvalidOperationException("BOM을 찾을 수 없습니다.");
+
+        var defaultWarehouseId = await _db.QueryFirstOrDefaultAsync<string>(new CommandDefinition(
+            """
+            SELECT warehouse_id FROM warehouses
+             WHERE tenant_id=@TenantId AND is_active=1
+             ORDER BY (CASE WHEN wh_code IN ('MAIN','WH-MAIN') THEN 0 ELSE 1 END), wh_code
+             LIMIT 1
+            """,
+            new { TenantId = tenantId }, cancellationToken: ct)).ConfigureAwait(false)
+            ?? throw new InvalidOperationException("활성 창고가 없습니다.");
+
+        // 완제품 재고 ≥ 해체 수량 검증
+        var productStock = await _db.QueryFirstOrDefaultAsync<decimal>(new CommandDefinition(
+            "SELECT COALESCE(current_qty, 0) FROM item_stock WHERE tenant_id=@Tid AND item_id=@Pid AND warehouse_id=@Wh",
+            new { Tid = tenantId, Pid = bom.ProductItemId, Wh = defaultWarehouseId },
+            cancellationToken: ct)).ConfigureAwait(false);
+        if (productStock < dto.ProduceQty)
+        {
+            throw new InvalidOperationException($"완제품 재고가 부족합니다. 현재고 {productStock:N1} < 해체 요청 {dto.ProduceQty:N1}.");
+        }
+
+        using var tx = _db.BeginTransaction();
+        try
+        {
+            // 완제품의 현재 매입단가 = unit cost (Reverse 시 자재 단가 복원에 사용)
+            var unitProductionCost = await _db.QueryFirstOrDefaultAsync<decimal>(new CommandDefinition(
+                "SELECT COALESCE(purchase_price, cost_price, avg_cost, 0) FROM items WHERE item_id=@Pid",
+                new { Pid = bom.ProductItemId }, transaction: tx, cancellationToken: ct)).ConfigureAwait(false);
+
+            // 1) 완제품 재고 차감 (OUT)
+            await _db.ExecuteAsync(new CommandDefinition(
+                """
+                INSERT INTO stock_adjust_logs (
+                  adjust_id, tenant_id, item_id, warehouse_id, before_qty, after_qty, adjust_qty,
+                  before_cost, after_cost, reason, user_id, created_at)
+                SELECT
+                  UUID(), @TenantId, @ItemId, @WarehouseId,
+                  COALESCE(current_qty, 0), COALESCE(current_qty, 0) - @Qty, @Qty * -1,
+                  COALESCE(avg_cost, 0), COALESCE(avg_cost, 0), @Reason, @UserId, NOW(6)
+                FROM item_stock
+                WHERE tenant_id=@TenantId AND item_id=@ItemId
+                """,
+                new
+                {
+                    TenantId = tenantId, ItemId = bom.ProductItemId, WarehouseId = defaultWarehouseId,
+                    Qty = dto.ProduceQty, Reason = $"BOM해체:{bom.BomName} {dto.ProduceQty}개",
+                    UserId = userId
+                }, transaction: tx, cancellationToken: ct)).ConfigureAwait(false);
+
+            await _db.ExecuteAsync(new CommandDefinition(
+                """
+                UPDATE item_stock
+                SET current_qty = GREATEST(current_qty - @Qty, 0), last_updated_at = NOW(6)
+                WHERE tenant_id=@TenantId AND item_id=@ItemId AND warehouse_id=@WarehouseId
+                """,
+                new { TenantId = tenantId, ItemId = bom.ProductItemId, WarehouseId = defaultWarehouseId, Qty = dto.ProduceQty },
+                transaction: tx, cancellationToken: ct)).ConfigureAwait(false);
+
+            // 완제품 OUT 원장 (Reverse IN)
+            await _db.ExecuteAsync(new CommandDefinition(
+                """
+                INSERT INTO stock_ledger (tenant_id, item_id, warehouse_id, ledger_date, ym,
+                  move_type, source_type, source_id, doc_no, qty_in, qty_out, unit_cost, supply_amount, memo)
+                VALUES (@TenantId, @ItemId, @WarehouseId, CURDATE(), DATE_FORMAT(CURDATE(),'%Y-%m'),
+                  'out', 'bom_disassemble', @BomId, @DocNo, 0, @Qty, @Cost, @Qty * @Cost, 'BOM 해체 (Reverse IN)')
+                """,
+                new { TenantId = tenantId, ItemId = bom.ProductItemId, WarehouseId = defaultWarehouseId,
+                      BomId = dto.BomId, DocNo = bom.BomName, Qty = dto.ProduceQty, Cost = unitProductionCost },
+                transaction: tx, cancellationToken: ct)).ConfigureAwait(false);
+
+            // 2) 각 자재 재고 복귀 (IN)
+            foreach (var item in bom.Items)
+            {
+                var requiredQty = Math.Ceiling(item.Qty * (1 + item.LossRate / 100m) * dto.ProduceQty);
+                var matUnitCost = await _db.QueryFirstOrDefaultAsync<decimal>(new CommandDefinition(
+                    "SELECT COALESCE(purchase_price, cost_price, 0) FROM items WHERE item_id=@ItemId",
+                    new { ItemId = item.MaterialItemId }, transaction: tx, cancellationToken: ct)).ConfigureAwait(false);
+
+                // 자재 재고 복귀 로그
+                await _db.ExecuteAsync(new CommandDefinition(
+                    """
+                    INSERT INTO stock_adjust_logs (
+                      adjust_id, tenant_id, item_id, warehouse_id, before_qty, after_qty, adjust_qty,
+                      before_cost, after_cost, reason, user_id, created_at)
+                    SELECT
+                      UUID(), @TenantId, @ItemId, @WarehouseId,
+                      COALESCE(current_qty, 0), COALESCE(current_qty, 0) + @Qty, @Qty,
+                      COALESCE(avg_cost, 0), COALESCE(avg_cost, 0), @Reason, @UserId, NOW(6)
+                    FROM item_stock
+                    WHERE tenant_id=@TenantId AND item_id=@ItemId
+                    """,
+                    new
+                    {
+                        TenantId = tenantId, ItemId = item.MaterialItemId, WarehouseId = defaultWarehouseId,
+                        Qty = requiredQty, Reason = $"BOM해체:{bom.BomName} {dto.ProduceQty}개 자재복귀",
+                        UserId = userId
+                    }, transaction: tx, cancellationToken: ct)).ConfigureAwait(false);
+
+                // 자재 재고 실제 증가 (없으면 row 생성)
+                await _db.ExecuteAsync(new CommandDefinition(
+                    """
+                    INSERT INTO item_stock (stock_id, tenant_id, item_id, warehouse_id, current_qty, avg_cost, last_updated_at)
+                    VALUES (UUID(), @TenantId, @ItemId, @WarehouseId, @Qty, @UnitCost, NOW(6))
+                    ON DUPLICATE KEY UPDATE
+                      current_qty = current_qty + @Qty,
+                      last_updated_at = NOW(6)
+                    """,
+                    new { TenantId = tenantId, ItemId = item.MaterialItemId, WarehouseId = defaultWarehouseId,
+                          Qty = requiredQty, UnitCost = matUnitCost },
+                    transaction: tx, cancellationToken: ct)).ConfigureAwait(false);
+
+                // 자재 IN 원장 (Reverse OUT)
+                await _db.ExecuteAsync(new CommandDefinition(
+                    """
+                    INSERT INTO stock_ledger (tenant_id, item_id, warehouse_id, ledger_date, ym,
+                      move_type, source_type, source_id, doc_no, qty_in, qty_out, unit_cost, supply_amount, memo)
+                    VALUES (@TenantId, @ItemId, @WarehouseId, CURDATE(), DATE_FORMAT(CURDATE(),'%Y-%m'),
+                      'in', 'bom_disassemble', @BomId, @DocNo, @Qty, 0, @Cost, @Qty * @Cost, 'BOM 해체 자재복귀 (Reverse OUT)')
+                    """,
+                    new { TenantId = tenantId, ItemId = item.MaterialItemId, WarehouseId = defaultWarehouseId,
+                          BomId = dto.BomId, DocNo = bom.BomName, Qty = requiredQty, Cost = matUnitCost },
+                    transaction: tx, cancellationToken: ct)).ConfigureAwait(false);
+            }
+
+            tx.Commit();
+
+            await _audit.LogAsync("disassemble", "bom", dto.BomId,
+                afterJson: $"{{\"product_item_id\":\"{bom.ProductItemId}\",\"produce_qty\":{dto.ProduceQty},\"material_count\":{bom.Items.Count}}}",
+                ct: ct);
+        }
+        catch
+        {
+            try { tx.Rollback(); } catch { /* 이미 닫힌 tx */ }
+            throw;
+        }
+    }
+
     public async Task<List<StockAlertDto>> GetAlertsAsync(string tenantId, CancellationToken ct = default)
     {
         await EnsureOpenAsync(ct).ConfigureAwait(false);

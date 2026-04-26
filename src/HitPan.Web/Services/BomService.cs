@@ -201,4 +201,25 @@ public sealed class BomService(HttpClient http)
             return (false, ex.Message);
         }
     }
+
+    /// <summary>
+    /// 조립 해체 — 사장님 지시 (2026-04-26): 완제품 OUT + 자재 IN 으로 가격·재고 회귀.
+    /// </summary>
+    public async Task<(bool Ok, string? Error)> DisassembleWithErrorAsync(string bomId, decimal produceQty, string? memo = null, CancellationToken ct = default)
+    {
+        try
+        {
+            using var res = await http.PostAsJsonAsync("api/bom/disassemble", new { bomId, produceQty, memo }, ct).ConfigureAwait(false);
+            if (!res.IsSuccessStatusCode)
+            {
+                var body = await res.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
+                return (false, string.IsNullOrWhiteSpace(body) ? $"HTTP {(int)res.StatusCode}" : body);
+            }
+            return (true, null);
+        }
+        catch (Exception ex)
+        {
+            return (false, ex.Message);
+        }
+    }
 }

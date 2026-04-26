@@ -16,6 +16,8 @@
         <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="SaveAsync" Disabled="_saving">저장</MudButton>
         <MudButton Variant="Variant.Filled" Color="Color.Success" StartIcon="@Icons.Material.Filled.Build"
                    OnClick="OpenAssembleDialog" Disabled="_isNew || _saving || _materials.Count == 0">조립 실행</MudButton>
+        <MudButton Variant="Variant.Outlined" Color="Color.Warning" StartIcon="@Icons.Material.Filled.Undo"
+                   OnClick="OpenDisassembleDialog" Disabled="_isNew || _saving || _materials.Count == 0">조립 해체</MudButton>
         <MudButton Variant="Variant.Outlined" Color="Color.Error" OnClick="DeleteAsync" Disabled="_isNew || _saving">삭제</MudButton>
         <MudButton Variant="Variant.Text" OnClick="@(() => Nav.NavigateTo("/bom"))">목록으로</MudButton>
     </div>
@@ -158,6 +160,27 @@ else
     </DialogActions>
 </MudDialog>
 
+<MudDialog @bind-Visible="_showDisassembleDialog" Options="new DialogOptions { MaxWidth = MaxWidth.ExtraSmall, FullWidth = true }">
+    <TitleContent>
+        <MudText Typo="Typo.h6">⚠ 조립 해체</MudText>
+    </TitleContent>
+    <DialogContent>
+        <MudText Class="mb-3">
+            BOM '<strong>@_bomName</strong>' 완제품을 해체합니다.<br />
+            완제품 수량만큼 재고가 차감되고, 자재 @_materials.Count 종이 BOM 비율대로 재고로 복귀합니다.
+        </MudText>
+        <MudNumericField T="decimal" @bind-Value="_disassembleQty" Label="해체 수량" Variant="Variant.Outlined"
+                         Margin="Margin.Dense" Min="0.01m" HideSpinButtons="false" />
+        <MudTextField @bind-Value="_disassembleMemo" Label="메모 (선택)" Variant="Variant.Outlined"
+                      Margin="Margin.Dense" Class="mt-2" />
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="@(() => _showDisassembleDialog = false)" Disabled="_disassembling">취소</MudButton>
+        <MudButton Variant="Variant.Filled" Color="Color.Warning" OnClick="ConfirmDisassembleAsync"
+                   Disabled="_disassembling || _disassembleQty <= 0">해체</MudButton>
+    </DialogActions>
+</MudDialog>
+
 @code {
     [Parameter] public string? Id { get; set; }
 
@@ -188,6 +211,12 @@ else
     private bool _assembling;
     private decimal _produceQty = 1;
     private string? _assembleMemo;
+
+    // 조립 해체 다이얼로그
+    private bool _showDisassembleDialog;
+    private bool _disassembling;
+    private decimal _disassembleQty = 1;
+    private string? _disassembleMemo;
 
     protected override async Task OnParametersSetAsync()
     {
@@ -400,6 +429,40 @@ else
         _produceQty = 1;
         _assembleMemo = null;
         _showAssembleDialog = true;
+    }
+
+    private void OpenDisassembleDialog()
+    {
+        if (_isNew || string.IsNullOrEmpty(Id))
+        {
+            Snackbar.Add("저장된 BOM 에서만 해체할 수 있습니다.", Severity.Warning);
+            return;
+        }
+        _disassembleQty = 1;
+        _disassembleMemo = null;
+        _showDisassembleDialog = true;
+    }
+
+    /// <summary>
+    /// 조립 해체 — 사장님 지시 (2026-04-26): 완제품 OUT + 자재 IN 으로 재고/가격 회귀.
+    /// </summary>
+    private async Task ConfirmDisassembleAsync()
+    {
+        if (string.IsNullOrEmpty(Id) || _disassembleQty <= 0) return;
+
+        _disassembling = true;
+        var (ok, err) = await BomApi.DisassembleWithErrorAsync(Id, _disassembleQty, _disassembleMemo);
+        _disassembling = false;
+
+        if (ok)
+        {
+            Snackbar.Add($"조립 해체 완료 — 완제품 {_disassembleQty:N0}개 차감, 자재 복귀됨.", Severity.Success);
+            _showDisassembleDialog = false;
+        }
+        else
+        {
+            Snackbar.Add($"조립 해체 실패: {err ?? "알 수 없는 오류"}", Severity.Error);
+        }
     }
 
     private async Task ConfirmAssembleAsync()

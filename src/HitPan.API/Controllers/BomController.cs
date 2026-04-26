@@ -144,6 +144,23 @@ public class BomController : ControllerBase
         }
     }
 
+    [HttpPost("disassemble")]
+    public async Task<IActionResult> Disassemble([FromBody] BomAssembleDto dto, CancellationToken ct)
+    {
+        var tid = HttpContext.Items["TenantId"]?.ToString();
+        var uid = HttpContext.User.FindFirst("sub")?.Value ?? "";
+        if (string.IsNullOrEmpty(tid)) return Forbid();
+        try
+        {
+            await _svc.DisassembleAsync(dto, tid, uid, ct).ConfigureAwait(false);
+            return Ok(new { message = "조립 해체가 완료됐습니다. 완성품 재고는 차감되고 자재 재고가 복귀됐습니다." });
+        }
+        catch (Exception ex)
+        {
+            return BadRequest(new { message = ex.Message });
+        }
+    }
+
     [HttpGet("alerts")]
     public async Task<IActionResult> GetAlerts(CancellationToken ct)
     {

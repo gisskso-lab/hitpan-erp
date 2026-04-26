@@ -12,6 +12,13 @@ public interface IBomService
     Task<string> RegisterBomAsItemAsync(string bomId, string itemType, string tenantId, CancellationToken ct = default);
     Task<BomAssembleCheckDto> CheckAssembleAsync(string bomId, decimal produceQty, string tenantId, CancellationToken ct = default);
     Task AssembleAsync(BomAssembleDto dto, string tenantId, string userId, CancellationToken ct = default);
+
+    /// <summary>
+    /// 조립 해체 — 사장님 지시 (2026-04-26): 조립 후 해체 시 가격·재고가
+    /// 원래대로 회귀. 완제품 OUT + 자재 IN 으로 Reverse 원장 INSERT,
+    /// item_stock 양쪽 복귀, stock_adjust_logs 기록.
+    /// </summary>
+    Task DisassembleAsync(BomAssembleDto dto, string tenantId, string userId, CancellationToken ct = default);
     Task<List<StockAlertDto>> GetAlertsAsync(string tenantId, CancellationToken ct = default);
     Task DismissAlertAsync(string alertId, string tenantId, CancellationToken ct = default);
     Task OrderAlertAsync(string alertId, string tenantId, CancellationToken ct = default);
