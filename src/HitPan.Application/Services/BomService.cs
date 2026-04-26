@@ -272,58 +272,49 @@ public class BomService : IBomService
         await _audit.LogAsync("delete", "bom", bomId, ct: ct);
     }
 
+    /// <summary>
+    /// BOM 저장 후 다이얼로그에서 사용자가 "반제품/완제품"으로 분류한 결과를 반영.
+    /// 사장님 지시 (2026-04-26): 새 items 행을 또 만들지 말고 CreateAsync 가 이미 만든
+    /// product_item_id 의 item_type 만 갱신하고 매입단가를 BOM 원가로 세팅.
+    /// (이전 구현은 BOM- 코드의 새 items 행을 INSERT 하고 bom_headers.product_item_id 를
+    ///  덮어써 같은 이름의 행이 2개 생기는 회귀를 유발했음.)
+    /// </summary>
     public async Task<string> RegisterBomAsItemAsync(string bomId, string itemType, string tenantId, CancellationToken ct = default)
     {
         await EnsureOpenAsync(ct).ConfigureAwait(false);
         var bom = await GetAsync(bomId, tenantId, ct).ConfigureAwait(false)
                   ?? throw new InvalidOperationException("BOM을 찾을 수 없습니다.");
 
-        // BOM 이름으로 상품 생성
-        var itemId = Guid.NewGuid().ToString();
-        var itemCode = "BOM-" + itemId[..Math.Min(8, itemId.Length)];
+        if (string.IsNullOrWhiteSpace(bom.ProductItemId))
+        {
+            throw new InvalidOperationException("BOM에 연결된 상품이 없습니다. BOM을 먼저 저장해주세요.");
+        }
 
-        // BOM 원가를 매입단가로 설정
         var bomCost = bom.TotalCost;
 
+        // 기존 product_item_id 행의 item_type 만 'product' → 'finished'/'semi_finished' 로 변경.
+        // 매입단가/원가/std_price 도 BOM 원가로 동기화. 코드는 그대로 유지(예: PROD-...).
         await _db.ExecuteAsync(new CommandDefinition(
             """
-            INSERT INTO items (
-              item_id, tenant_id, item_code, item_name,
-              item_group, item_type, category_id, unit, spec,
-              purchase_price, sale_price, standard_price,
-              tax_type, safety_stock, barcode, memo,
-              auto_order_enabled, auto_order_partner_id, auto_order_qty,
-              std_price, cost_price, safe_stock,
-              is_active, is_deleted, row_version,
-              created_at, updated_at)
-            VALUES (
-              @ItemId, @TenantId, @ItemCode, @ItemName,
-              NULL, @ItemType, NULL, 'EA', NULL,
-              @BomCost, 0, @BomCost,
-              'taxable', 0, NULL, @Memo,
-              0, NULL, 0,
-              @BomCost, @BomCost, 0,
-              1, 0, 0,
-              NOW(6), NOW(6))
+            UPDATE items
+               SET item_type      = @ItemType,
+                   purchase_price = @BomCost,
+                   cost_price     = @BomCost,
+                   standard_price = @BomCost,
+                   std_price      = @BomCost,
+                   updated_at     = NOW(6)
+             WHERE item_id   = @ItemId
+               AND tenant_id = @TenantId
             """,
             new
             {
-                ItemId = itemId,
+                ItemId = bom.ProductItemId,
                 TenantId = tenantId,
-                ItemCode = itemCode,
-                ItemName = bom.BomName,
                 ItemType = itemType,
-                BomCost = bomCost,
-                Memo = $"BOM 자동등록 (BOM ID: {bomId})"
+                BomCost = bomCost
             }, cancellationToken: ct)).ConfigureAwait(false);
 
-        // BOM의 product_item_id 연결
-        await _db.ExecuteAsync(new CommandDefinition(
-            "UPDATE bom_headers SET product_item_id = @ItemId, updated_at = NOW(6) WHERE bom_id = @BomId AND tenant_id = @TenantId",
-            new { ItemId = itemId, BomId = bomId, TenantId = tenantId },
-            cancellationToken: ct)).ConfigureAwait(false);
-
-        // 재고 초기화 — 기본 창고 조회(FK fk_is_warehouse 위반 방지).
+        // 기본 창고 재고 초기화(없으면 0으로 생성, 있으면 avg_cost만 BOM 원가로 갱신).
         var defaultWhId = await _db.QueryFirstOrDefaultAsync<string>(new CommandDefinition(
             """
             SELECT warehouse_id FROM warehouses
@@ -338,12 +329,12 @@ public class BomService : IBomService
             """
             INSERT INTO item_stock (stock_id, tenant_id, item_id, warehouse_id, current_qty, avg_cost, last_updated_at)
             VALUES (UUID(), @TenantId, @ItemId, @WarehouseId, 0, @BomCost, NOW(6))
-            ON DUPLICATE KEY UPDATE last_updated_at = NOW(6)
+            ON DUPLICATE KEY UPDATE avg_cost = @BomCost, last_updated_at = NOW(6)
             """,
-            new { TenantId = tenantId, ItemId = itemId, WarehouseId = defaultWhId, BomCost = bomCost },
+            new { TenantId = tenantId, ItemId = bom.ProductItemId, WarehouseId = defaultWhId, BomCost = bomCost },
             cancellationToken: ct)).ConfigureAwait(false);
 
-        return itemId;
+        return bom.ProductItemId;
     }
 
     public async Task<BomAssembleCheckDto> CheckAssembleAsync(string bomId, decimal produceQty, string tenantId, CancellationToken ct = default)

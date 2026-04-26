@@ -245,7 +245,9 @@ else
 
     private async Task<List<ItemOption>> LoadItemOptions()
     {
-        var items = await ItemsApi.GetListAsync() ?? new();
+        // 자재 후보는 BOM 헤더(=다른 BOM의 완제품)를 제외 — 같은 이름이 두 번 보이는 회귀 차단
+        // (사장님 지시 2026-04-26). bom_headers.product_item_id 매핑된 행은 자재로 쓰면 순환.
+        var items = await ItemsApi.GetListAsync(excludeBom: true) ?? new();
         return items.Select(i => new ItemOption { ItemId = i.ItemId, Name = i.ItemName }).ToList();
     }
 
