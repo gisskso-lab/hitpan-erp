@@ -83,17 +83,17 @@
                    Size="Size.Small"
                    Style="font-size:12px"
                    Disabled="!HasInvoicedChecked">전자발행</MudButton>
-        <AuthorizeView Roles="tenant_admin,sales_manager,system_admin,TenantAdmin">
-            <Authorized>
-                <MudButton OnClick="BulkDeleteAsync"
-                           Variant="Variant.Outlined"
-                           Color="Color.Error"
-                           Size="Size.Small"
-                           Style="font-size:12px"
-                           StartIcon="@Icons.Material.Filled.Delete"
-                           Disabled="!HasDeletableChecked">선택 삭제</MudButton>
-            </Authorized>
-        </AuthorizeView>
+        @* AuthorizeView 는 MudDialog 캐스케이드 밖에서 Task<AuthenticationState>를 못 받아
+           "Authorization requires a cascading parameter" 오류 발생.
+           권한 검증은 백엔드 [Authorize(Policy = "SalesManager")] 가 강제하고
+           UI 는 항상 노출 → 권한 없으면 서버가 403 반환, 사용자에게 안내. *@
+        <MudButton OnClick="BulkDeleteAsync"
+                   Variant="Variant.Outlined"
+                   Color="Color.Error"
+                   Size="Size.Small"
+                   Style="font-size:12px"
+                   StartIcon="@Icons.Material.Filled.Delete"
+                   Disabled="!HasDeletableChecked">선택 삭제</MudButton>
         <MudSpacer />
         <MudButton OnClick="Close"
                    Variant="Variant.Outlined"
