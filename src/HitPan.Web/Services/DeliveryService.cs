@@ -484,13 +484,19 @@ public sealed class DeliveryService(HttpClient http)
         }
     }
 
-    /// <summary>자동발주 즉시 생성. 공급처별 발주서(draft)로 묶여 반환.</summary>
+    /// <summary>
+    /// 자동발주 즉시 생성. 공급처별 발주서(draft)로 묶여 반환.
+    /// autoReceive=true 면 발주 직후 매입전환 + 매입확정까지 원클릭 (사장님 지시 2026-04-26).
+    /// </summary>
     public async Task<List<AutoOrderResultModel>> CreateAutoOrdersAsync(
-        IReadOnlyList<AutoOrderCandidateModel> candidates, CancellationToken ct = default)
+        IReadOnlyList<AutoOrderCandidateModel> candidates,
+        bool autoReceive = false,
+        CancellationToken ct = default)
     {
         try
         {
-            using var resp = await http.PostAsJsonAsync("api/sales/auto-orders", candidates, ct);
+            var path = $"api/sales/auto-orders?autoReceive={autoReceive.ToString().ToLowerInvariant()}";
+            using var resp = await http.PostAsJsonAsync(path, candidates, ct);
             if (!resp.IsSuccessStatusCode) return new();
             return await resp.Content.ReadFromJsonAsync<List<AutoOrderResultModel>>(JsonOptions, ct) ?? new();
         }

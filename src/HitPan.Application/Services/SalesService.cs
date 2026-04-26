@@ -1,9 +1,11 @@
 using System.Data;
 using Dapper;
 using HitPan.Application.DTOs.Sales;
+using HitPan.Application.DTOs.Purchase;
 using HitPan.Application.Interfaces;
 using HitPan.Domain.Entities;
 using HitPan.Domain.Enums;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace HitPan.Application.Services;
 
@@ -14,19 +16,22 @@ public class SalesService : ISalesService
     private readonly IDbConnection _db;
     private readonly IPartnerService _partnerService;
     private readonly IAuditService _audit;
+    private readonly IServiceProvider _services;
 
     public SalesService(
         IUnitOfWork unitOfWork,
         ICurrentTenant currentTenant,
         IDbConnection db,
         IPartnerService partnerService,
-        IAuditService audit)
+        IAuditService audit,
+        IServiceProvider services)
     {
         _unitOfWork = unitOfWork;
         _currentTenant = currentTenant;
         _db = db;
         _partnerService = partnerService;
         _audit = audit;
+        _services = services;
     }
 
     public async Task<string> CreateOrderAsync(CreateSalesOrderRequest request, CancellationToken ct = default)
@@ -1225,7 +1230,7 @@ public class SalesService : ISalesService
     // 공급처 미설정 품목은 스킵 + 사유 반환(워크플로우 §20 끊김 금지).
     // ─────────────────────────────────────────────────────────────────────
     public async Task<List<AutoOrderResultDto>> CreateAutoOrdersAsync(
-        IReadOnlyList<AutoOrderCandidateDto> candidates, string tenantId, CancellationToken ct = default)
+        IReadOnlyList<AutoOrderCandidateDto> candidates, string tenantId, bool autoReceive = false, CancellationToken ct = default)
     {
         var results = new List<AutoOrderResultDto>();
         if (candidates.Count == 0) return results;
@@ -1306,7 +1311,7 @@ public class SalesService : ISalesService
                     afterJson: $"{{\"source\":\"auto_order\",\"po_no\":\"{poNo}\",\"item_count\":{lines.Count}}}",
                     ct: ct);
 
-                results.Add(new AutoOrderResultDto
+                var resultRow = new AutoOrderResultDto
                 {
                     Success = true,
                     PoId = poId,
@@ -1314,7 +1319,28 @@ public class SalesService : ISalesService
                     PartnerId = partnerId,
                     PartnerName = lines[0].PartnerName,
                     ItemIds = lines.Select(x => x.ItemId).ToList()
-                });
+                };
+
+                // 사장님 지시 (2026-04-26): 자동발주 → 매입처리까지 원클릭.
+                // autoReceive=true 면 발주 직후 매입전환 + 매입 확정까지 진행 → 자재 재고 즉시 +반영.
+                if (autoReceive)
+                {
+                    try
+                    {
+                        var purSvc = _services.GetService<IPurchaseService>()
+                            ?? throw new InvalidOperationException("매입 서비스를 찾을 수 없습니다.");
+                        var (receiptId, receiptNo) = await purSvc.ConvertOrderToReceiptAsync(poId, tenantId, ct);
+                        await purSvc.ConfirmReceiptAsync(receiptId, new ConfirmReceiptRequest(), ct);
+                        resultRow.Reason = $"매입 자동확정: {receiptNo}";
+                    }
+                    catch (Exception ex)
+                    {
+                        // 발주는 성공했으니 결과는 Success=true 유지하되 사유에 매입 실패 표시.
+                        resultRow.Reason = $"발주 OK / 매입 자동확정 실패: {ex.Message}";
+                    }
+                }
+
+                results.Add(resultRow);
             }
             catch (Exception ex)
             {

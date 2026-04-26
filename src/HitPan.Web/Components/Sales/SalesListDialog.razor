@@ -302,15 +302,19 @@
         }
         if (allCandidates.Count > 5) msg.AppendLine($"... 외 {allCandidates.Count - 5}건");
         msg.AppendLine();
-        msg.AppendLine("자동발주 하시겠습니까?");
+        msg.AppendLine("[자동발주+매입처리] 발주서 생성 후 매입확정까지 진행 (재고 즉시 +반영)");
+        msg.AppendLine("[발주서만] 발주서만 생성, 매입은 수동");
 
-        var yes = await DialogService.ShowMessageBoxAsync(
+        var choice = await DialogService.ShowMessageBoxAsync(
             "⚠ 재고부족 자동발주",
             msg.ToString(),
-            yesText: "자동발주", cancelText: "닫기");
-        if (yes != true) return;
+            yesText: "자동발주+매입처리",
+            noText: "발주서만",
+            cancelText: "취소");
+        if (choice is null) return;
 
-        var results = await DeliveryService.CreateAutoOrdersAsync(allCandidates);
+        var autoReceive = choice == true;
+        var results = await DeliveryService.CreateAutoOrdersAsync(allCandidates, autoReceive);
         var success = results.Where(r => r.Success).ToList();
         var failed = results.Where(r => !r.Success).ToList();
 

@@ -65,9 +65,12 @@ public interface ISalesService
     /// <summary>
     /// 자동발주 — 사용자가 다이얼로그에서 OK한 품목을 발주서(status=draft) 한 건으로 즉시 생성.
     /// 공급처별로 발주서를 묶어 생성한다(공급처 미설정 품목은 스킵 + 사유 반환).
+    /// autoReceive=true 이면 발주 생성 직후 매입전환 + 매입 확정까지 원클릭으로 완료.
+    /// 사장님 지시 (2026-04-26): "자동발주 → 매입처리까지 원클릭".
     /// </summary>
     Task<List<AutoOrderResultDto>> CreateAutoOrdersAsync(
         IReadOnlyList<AutoOrderCandidateDto> candidates,
         string tenantId,
+        bool autoReceive = false,
         CancellationToken ct = default);
 }

@@ -512,26 +512,35 @@ else
         if (candidates.Count > 5) msg.AppendLine($"... 외 {candidates.Count - 5}건");
         msg.AppendLine();
         msg.AppendLine("자동발주 하시겠습니까?");
+        msg.AppendLine();
+        msg.AppendLine("[자동발주+매입처리] 발주서 생성 후 매입확정까지 진행 (재고 즉시 +반영)");
+        msg.AppendLine("[발주서만] 발주서만 생성, 매입은 수동");
+        msg.AppendLine("[취소] 닫기");
 
-        var yes = await DialogService.ShowMessageBoxAsync(
+        // 3-way 선택: Yes=원클릭(자동발주+매입), No=발주만, Cancel=닫기
+        var choice = await DialogService.ShowMessageBoxAsync(
             "⚠ 자재 자동발주",
             msg.ToString(),
-            yesText: "자동발주", cancelText: "닫기");
-        if (yes != true) return;
+            yesText: "자동발주+매입처리",
+            noText: "발주서만",
+            cancelText: "취소");
+        if (choice is null) return;
 
-        var results = await DeliveryService.CreateAutoOrdersAsync(candidates);
+        var autoReceive = choice == true;
+        var results = await DeliveryService.CreateAutoOrdersAsync(candidates, autoReceive);
         var success = results.Where(r => r.Success).ToList();
         var failed = results.Where(r => !r.Success).ToList();
 
         if (success.Count > 0)
         {
             var noList = string.Join(", ", success.Select(r => r.PoNo));
-            Snackbar.Add($"자동발주서 {success.Count}건 생성 완료: {noList}", Severity.Success);
+            var label = autoReceive ? "자동발주+매입확정" : "자동발주서";
+            Snackbar.Add($"{label} {success.Count}건 완료: {noList}", Severity.Success);
         }
         if (failed.Count > 0)
         {
             var firstReason = failed[0].Reason ?? "사유 미상";
-            Snackbar.Add($"{failed.Count}건 자동발주 실패: {firstReason[..Math.Min(150, firstReason.Length)]}", Severity.Warning);
+            Snackbar.Add($"{failed.Count}건 실패: {firstReason[..Math.Min(150, firstReason.Length)]}", Severity.Warning);
         }
     }
 

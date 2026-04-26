@@ -52,12 +52,15 @@ public class SalesController : ControllerBase
     }
 
     [HttpPost("auto-orders")]
-    public async Task<IActionResult> CreateAutoOrders([FromBody] List<AutoOrderCandidateDto> candidates, CancellationToken ct)
+    public async Task<IActionResult> CreateAutoOrders(
+        [FromBody] List<AutoOrderCandidateDto> candidates,
+        [FromQuery] bool autoReceive,
+        CancellationToken ct)
     {
         var tenantId = HttpContext.Items["TenantId"]?.ToString();
         if (string.IsNullOrEmpty(tenantId)) return Forbid();
 
-        var results = await _salesService.CreateAutoOrdersAsync(candidates ?? new(), tenantId, ct);
+        var results = await _salesService.CreateAutoOrdersAsync(candidates ?? new(), tenantId, autoReceive, ct);
         return Ok(results);
     }
 
