@@ -661,11 +661,26 @@ public class BomService : IBomService
         }
     }
 
+    /// <summary>
+    /// 다단 BOM (원자재 → 반제품1 → 반제품2 → 완제품) 순환 참조 검사.
+    /// 사장님 지시 (2026-04-26): 2~5단 깊이 공정구조 지원. 재귀로 깊이 무관 탐색.
+    /// visited HashSet 으로 이미 손상된 데이터(기존 순환)도 stack overflow 없이 종료.
+    /// </summary>
     private async Task<bool> HasCircularRefAsync(string productItemId, List<string> materialIds, string tenantId, CancellationToken ct)
+    {
+        var visited = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        return await HasCircularRefRecursiveAsync(productItemId, materialIds, tenantId, visited, ct);
+    }
+
+    private async Task<bool> HasCircularRefRecursiveAsync(
+        string productItemId, List<string> materialIds, string tenantId,
+        HashSet<string> visited, CancellationToken ct)
     {
         foreach (var matId in materialIds)
         {
             if (matId == productItemId) return true;
+            if (!visited.Add(matId)) continue; // 이미 본 자재는 재방문 안 함
+
             var childBom = await _db.QueryFirstOrDefaultAsync<string>(new CommandDefinition(
                 """
                 SELECT bom_id FROM bom_headers
@@ -677,7 +692,7 @@ public class BomService : IBomService
             var childMats = (await _db.QueryAsync<string>(new CommandDefinition(
                 "SELECT material_item_id FROM bom_items WHERE bom_id=@BomId AND tenant_id=@TenantId",
                 new { BomId = childBom, TenantId = tenantId }, cancellationToken: ct)).ConfigureAwait(false)).ToList();
-            if (await HasCircularRefAsync(productItemId, childMats, tenantId, ct).ConfigureAwait(false)) return true;
+            if (await HasCircularRefRecursiveAsync(productItemId, childMats, tenantId, visited, ct).ConfigureAwait(false)) return true;
         }
         return false;
     }
