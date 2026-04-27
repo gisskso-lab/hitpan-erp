@@ -148,7 +148,7 @@
     <div class="d-flex justify-space-between align-center mb-2">
         <MudText Typo="Typo.subtitle2" Style="font-weight:600">외상·연체 Top 5</MudText>
         <MudButton Size="Size.Small" Variant="Variant.Text" EndIcon="@Icons.Material.Filled.ArrowForward"
-                   OnClick="@(() => Nav.NavigateTo("/partners"))">전체 보기</MudButton>
+                   OnClick="@(() => Nav.NavigateTo("/collections"))">전체 보기</MudButton>
     </div>
     @if (_aging is not null && _aging.Count > 0)
     {
@@ -167,7 +167,7 @@
             <tbody>
                 @foreach (var a in _aging.Take(5))
                 {
-                    <tr style="cursor:pointer" @onclick="@(() => Nav.NavigateTo($"/partners/{a.PartnerId}"))">
+                    <tr style="cursor:pointer" @onclick="@(() => Nav.NavigateTo($"/collections?partner={a.PartnerId}"))">
                         <td style="font-weight:500">@a.PartnerName</td>
                         <td style="text-align:right;font-weight:600">@a.TotalUnpaid.ToString("N0")</td>
                         <td style="text-align:right">@a.Bucket0_30.ToString("N0")</td>

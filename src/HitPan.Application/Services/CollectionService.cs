@@ -279,6 +279,133 @@ public class CollectionService : ICollectionService
         }
     }
 
+    // ═══════════════════════════════════════════
+    // 미수/미지급 정공법 (WS-20260427-04, 사장님 헌법 §20)
+    // 사장님 가드레일: 매입·판매 확정 전표 → 미수/미지급 자동 계산 → 전표 매칭 처리
+    // - sales_deliveries 와 collections 의 ref_doc_id 1:1 매칭
+    // - purchase_receipts 와 payments 의 ref_order_id 1:1 매칭
+    // - 잔액 = (total + vat) - SUM(이미 처리된 금액), > 0 인 것만 노출
+    // ═══════════════════════════════════════════
+
+    public async Task<ReceivablesResponseDto> GetReceivablesAsync(string tenantId, CancellationToken ct = default)
+    {
+        await EnsureOpenAsync(ct);
+
+        // 전표별 미수 잔액 (status=confirmed AND outstanding > 0)
+        var docSql = @"
+            SELECT
+              sd.partner_id          AS PartnerId,
+              sd.delivery_id         AS DeliveryId,
+              sd.delivery_no         AS DeliveryNo,
+              sd.delivery_date       AS DeliveryDate,
+              (sd.total_amount + sd.vat_amount) AS TotalWithVat,
+              IFNULL(c.collected, 0) AS Collected,
+              (sd.total_amount + sd.vat_amount) - IFNULL(c.collected, 0) AS Outstanding,
+              CASE
+                WHEN DATEDIFF(CURDATE(), sd.delivery_date) <= 30 THEN '0_30'
+                WHEN DATEDIFF(CURDATE(), sd.delivery_date) <= 60 THEN '31_60'
+                WHEN DATEDIFF(CURDATE(), sd.delivery_date) <= 90 THEN '61_90'
+                ELSE '90_plus'
+              END AS AgingBucket
+            FROM sales_deliveries sd
+            LEFT JOIN (
+              SELECT ref_doc_id, SUM(amount) AS collected
+              FROM collections
+              WHERE is_active = 1 AND ref_doc_type = 'sales_delivery' AND tenant_id = @TenantId
+              GROUP BY ref_doc_id
+            ) c ON c.ref_doc_id = sd.delivery_id
+            WHERE sd.tenant_id = @TenantId
+              AND sd.status = 'confirmed'
+              AND sd.is_deleted = 0
+              AND (sd.total_amount + sd.vat_amount) - IFNULL(c.collected, 0) > 0
+            ORDER BY sd.delivery_date ASC";
+
+        var docs = (await _db.QueryAsync<ReceivableDocumentDto>(new CommandDefinition(
+            docSql, new { TenantId = tenantId }, cancellationToken: ct))).ToList();
+
+        // 거래처별 그룹핑 (요약 표)
+        var partnerNamesSql = @"
+            SELECT partner_id, partner_name
+            FROM partners
+            WHERE tenant_id = @TenantId AND is_deleted = 0";
+        var partnerNames = (await _db.QueryAsync<(string partner_id, string partner_name)>(
+            new CommandDefinition(partnerNamesSql, new { TenantId = tenantId }, cancellationToken: ct)))
+            .ToDictionary(x => x.partner_id, x => x.partner_name);
+
+        var summary = docs.GroupBy(d => d.PartnerId).Select(g => new ReceivableSummaryDto
+        {
+            PartnerId = g.Key,
+            PartnerName = partnerNames.GetValueOrDefault(g.Key, ""),
+            Outstanding = g.Sum(d => d.Outstanding),
+            Aging0_30 = g.Where(d => d.AgingBucket == "0_30").Sum(d => d.Outstanding),
+            Aging31_60 = g.Where(d => d.AgingBucket == "31_60").Sum(d => d.Outstanding),
+            Aging61_90 = g.Where(d => d.AgingBucket == "61_90").Sum(d => d.Outstanding),
+            Aging90Plus = g.Where(d => d.AgingBucket == "90_plus").Sum(d => d.Outstanding),
+            IsOverdue = g.Any(d => d.AgingBucket == "61_90" || d.AgingBucket == "90_plus"),
+            DocumentCount = g.Count()
+        }).OrderByDescending(s => s.Outstanding).ToList();
+
+        return new ReceivablesResponseDto { Summary = summary, Documents = docs };
+    }
+
+    public async Task<PayablesResponseDto> GetPayablesAsync(string tenantId, CancellationToken ct = default)
+    {
+        await EnsureOpenAsync(ct);
+
+        var docSql = @"
+            SELECT
+              pr.partner_id          AS PartnerId,
+              pr.receipt_id          AS ReceiptId,
+              pr.receipt_no          AS ReceiptNo,
+              pr.receipt_date        AS ReceiptDate,
+              (pr.total_amount + pr.vat_amount) AS TotalWithVat,
+              IFNULL(pay.paid, 0)    AS Paid,
+              (pr.total_amount + pr.vat_amount) - IFNULL(pay.paid, 0) AS Outstanding,
+              CASE
+                WHEN DATEDIFF(CURDATE(), pr.receipt_date) <= 30 THEN '0_30'
+                WHEN DATEDIFF(CURDATE(), pr.receipt_date) <= 60 THEN '31_60'
+                WHEN DATEDIFF(CURDATE(), pr.receipt_date) <= 90 THEN '61_90'
+                ELSE '90_plus'
+              END AS AgingBucket
+            FROM purchase_receipts pr
+            LEFT JOIN (
+              SELECT ref_order_id, SUM(amount) AS paid
+              FROM payments
+              WHERE is_active = 1 AND payment_type = 'purchase' AND tenant_id = @TenantId
+              GROUP BY ref_order_id
+            ) pay ON pay.ref_order_id = pr.receipt_id
+            WHERE pr.tenant_id = @TenantId
+              AND pr.status = 'confirmed'
+              AND (pr.total_amount + pr.vat_amount) - IFNULL(pay.paid, 0) > 0
+            ORDER BY pr.receipt_date ASC";
+
+        var docs = (await _db.QueryAsync<PayableDocumentDto>(new CommandDefinition(
+            docSql, new { TenantId = tenantId }, cancellationToken: ct))).ToList();
+
+        var partnerNamesSql = @"
+            SELECT partner_id, partner_name
+            FROM partners
+            WHERE tenant_id = @TenantId AND is_deleted = 0";
+        var partnerNames = (await _db.QueryAsync<(string partner_id, string partner_name)>(
+            new CommandDefinition(partnerNamesSql, new { TenantId = tenantId }, cancellationToken: ct)))
+            .ToDictionary(x => x.partner_id, x => x.partner_name);
+
+        var summary = docs.GroupBy(d => d.PartnerId).Select(g => new PayableSummaryDto
+        {
+            PartnerId = g.Key,
+            PartnerName = partnerNames.GetValueOrDefault(g.Key, ""),
+            Outstanding = g.Sum(d => d.Outstanding),
+            Aging0_30 = g.Where(d => d.AgingBucket == "0_30").Sum(d => d.Outstanding),
+            Aging31_60 = g.Where(d => d.AgingBucket == "31_60").Sum(d => d.Outstanding),
+            Aging61_90 = g.Where(d => d.AgingBucket == "61_90").Sum(d => d.Outstanding),
+            Aging90Plus = g.Where(d => d.AgingBucket == "90_plus").Sum(d => d.Outstanding),
+            IsOverdue = g.Any(d => d.AgingBucket == "61_90" || d.AgingBucket == "90_plus"),
+            DocumentCount = g.Count()
+        }).OrderByDescending(s => s.Outstanding).ToList();
+
+        return new PayablesResponseDto { Summary = summary, Documents = docs };
+    }
+
     private async Task EnsureOpenAsync(CancellationToken ct)
     {
         if (_db.State == ConnectionState.Open) return;

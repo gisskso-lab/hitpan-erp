@@ -90,4 +90,26 @@ public class CollectionController : ControllerBase
         await _collectionService.DeletePaymentAsync(id, tenantId, ct);
         return Ok(new { message = "삭제되었습니다." });
     }
+
+    // ── 미수/미지급 정공법 (WS-20260427-04, 사장님 헌법 §20) ──
+
+    /// <summary>미수금 목록 (거래처 요약 + 전표 펼침)</summary>
+    [HttpGet("finance/receivables")]
+    [RequirePermission("COLLECTION", "view")]
+    public async Task<IActionResult> GetReceivables(CancellationToken ct)
+    {
+        var tenantId = HttpContext.Items["TenantId"]?.ToString();
+        if (string.IsNullOrEmpty(tenantId)) return Forbid();
+        return Ok(await _collectionService.GetReceivablesAsync(tenantId, ct));
+    }
+
+    /// <summary>미지급금 목록 (거래처 요약 + 전표 펼침)</summary>
+    [HttpGet("finance/payables")]
+    [RequirePermission("PAYMENT", "view")]
+    public async Task<IActionResult> GetPayables(CancellationToken ct)
+    {
+        var tenantId = HttpContext.Items["TenantId"]?.ToString();
+        if (string.IsNullOrEmpty(tenantId)) return Forbid();
+        return Ok(await _collectionService.GetPayablesAsync(tenantId, ct));
+    }
 }

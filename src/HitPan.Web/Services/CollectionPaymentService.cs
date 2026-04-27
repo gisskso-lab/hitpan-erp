@@ -59,4 +59,18 @@ public sealed class CollectionPaymentService(HttpClient http)
         try { using var r = await http.DeleteAsync($"api/payments/{Uri.EscapeDataString(id)}", ct); return r.IsSuccessStatusCode; }
         catch { return false; }
     }
+
+    // ── 미수/미지급 정공법 (WS-20260427-04, 사장님 헌법 §20) ──
+
+    public async Task<ReceivablesResponseModel> GetReceivablesAsync(CancellationToken ct = default)
+    {
+        try { return await http.GetFromJsonAsync<ReceivablesResponseModel>("api/finance/receivables", ct) ?? new(); }
+        catch { return new(); }
+    }
+
+    public async Task<PayablesResponseModel> GetPayablesAsync(CancellationToken ct = default)
+    {
+        try { return await http.GetFromJsonAsync<PayablesResponseModel>("api/finance/payables", ct) ?? new(); }
+        catch { return new(); }
+    }
 }

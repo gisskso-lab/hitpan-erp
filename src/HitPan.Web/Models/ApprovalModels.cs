@@ -170,3 +170,67 @@ public class CreatePaymentModel
     public string? RefOrderId { get; set; }
     public string? Memo { get; set; }
 }
+
+// ── 미수/미지급 정공법 (WS-20260427-04, 사장님 헌법 §20) ──
+
+public class ReceivableSummaryModel
+{
+    public string PartnerId { get; set; } = string.Empty;
+    public string PartnerName { get; set; } = string.Empty;
+    public decimal Outstanding { get; set; }
+    public decimal Aging0_30 { get; set; }
+    public decimal Aging31_60 { get; set; }
+    public decimal Aging61_90 { get; set; }
+    public decimal Aging90Plus { get; set; }
+    public bool IsOverdue { get; set; }
+    public int DocumentCount { get; set; }
+}
+
+public class ReceivableDocumentModel
+{
+    public string PartnerId { get; set; } = string.Empty;
+    public string DeliveryId { get; set; } = string.Empty;
+    public string DeliveryNo { get; set; } = string.Empty;
+    public DateTime DeliveryDate { get; set; }
+    public decimal TotalWithVat { get; set; }
+    public decimal Collected { get; set; }
+    public decimal Outstanding { get; set; }
+    public string AgingBucket { get; set; } = string.Empty;
+}
+
+public class ReceivablesResponseModel
+{
+    public List<ReceivableSummaryModel> Summary { get; set; } = new();
+    public List<ReceivableDocumentModel> Documents { get; set; } = new();
+}
+
+public class PayableSummaryModel
+{
+    public string PartnerId { get; set; } = string.Empty;
+    public string PartnerName { get; set; } = string.Empty;
+    public decimal Outstanding { get; set; }
+    public decimal Aging0_30 { get; set; }
+    public decimal Aging31_60 { get; set; }
+    public decimal Aging61_90 { get; set; }
+    public decimal Aging90Plus { get; set; }
+    public bool IsOverdue { get; set; }
+    public int DocumentCount { get; set; }
+}
+
+public class PayableDocumentModel
+{
+    public string PartnerId { get; set; } = string.Empty;
+    public string ReceiptId { get; set; } = string.Empty;
+    public string ReceiptNo { get; set; } = string.Empty;
+    public DateTime ReceiptDate { get; set; }
+    public decimal TotalWithVat { get; set; }
+    public decimal Paid { get; set; }
+    public decimal Outstanding { get; set; }
+    public string AgingBucket { get; set; } = string.Empty;
+}
+
+public class PayablesResponseModel
+{
+    public List<PayableSummaryModel> Summary { get; set; } = new();
+    public List<PayableDocumentModel> Documents { get; set; } = new();
+}
