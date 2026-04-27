@@ -244,14 +244,25 @@
             return;
         }
 
+        // 품목명 → ItemId 변환 (백엔드 DTO는 ItemId 기대).
+        // 사장님 헌법 §20 준수: 워크플로우 끊김 금지 — 콤보 회복 후 드러난 잠재 버그 정공 패치.
+        _itemCache ??= await ItemsApi.GetListAsync() ?? new();
+        var matchedItem = _itemCache.FirstOrDefault(i =>
+            string.Equals(i.ItemName, _selectedItem, StringComparison.OrdinalIgnoreCase));
+        if (matchedItem is null || string.IsNullOrEmpty(matchedItem.ItemId))
+        {
+            Snackbar.Add("품목을 다시 선택해주세요.", Severity.Warning);
+            return;
+        }
+
         _isProcessing = true;
         try
         {
             var payload = new
             {
-                ItemName = _selectedItem,
-                FromWarehouseCode = _fromWarehouse,
-                ToWarehouseCode = _toWarehouse,
+                ItemId = matchedItem.ItemId,
+                FromWarehouseId = _fromWarehouse,
+                ToWarehouseId = _toWarehouse,
                 Qty = _transferQty,
                 Memo = _memo
             };
@@ -305,7 +316,10 @@
     // --- 내부 모델 ---
     private class WarehouseOption
     {
+        [System.Text.Json.Serialization.JsonPropertyName("warehouseId")]
         public string Code { get; set; } = "";
+
+        [System.Text.Json.Serialization.JsonPropertyName("whName")]
         public string Name { get; set; } = "";
     }
 
