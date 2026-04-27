@@ -138,7 +138,58 @@
     private async Task OnItemChanged(string value)
     {
         _selectedItem = value ?? "";
+
+        // 사장님 헌법 (2026-04-27): "재고이송시 품목선택하면 해당품목이 현재 있는 창고가
+        // 출고창고에 자동으로 셋팅되야지." — 잔량 많은 창고 우선 (Picking Strategy 기본).
+        // 기존 LoadAvailableQtyAsync 동작은 보존, 여기서는 추가만.
+        await AutoFillFromWarehouseAsync();
+
         await LoadAvailableQtyAsync();
+    }
+
+    /// <summary>
+    /// 선택된 품목의 창고별 재고 분포를 조회해 잔량 많은 창고를 출고창고에 자동 셋팅.
+    /// 음수 재고인 창고는 후순위 (양수 잔량 창고가 우선).
+    /// </summary>
+    private async Task AutoFillFromWarehouseAsync()
+    {
+        if (string.IsNullOrWhiteSpace(_selectedItem)) return;
+        try
+        {
+            // 전체 balance 받아 클라이언트에서 매칭 — 백엔드 API 변경 회피.
+            var rows = await Http.GetFromJsonAsync<List<StockBalanceItem>>("api/stock/balance");
+            if (rows is null) return;
+
+            // 1) 이름으로 매칭, 2) 양수 잔량 우선, 3) 잔량 많은 순.
+            var pick = rows
+                .Where(r => string.Equals(r.ItemName, _selectedItem, StringComparison.OrdinalIgnoreCase))
+                .OrderByDescending(r => r.CurrentQty > 0)
+                .ThenByDescending(r => r.CurrentQty)
+                .FirstOrDefault();
+
+            if (pick is null || string.IsNullOrWhiteSpace(pick.WarehouseId)) return;
+
+            // 창고 콤보 옵션은 Code 기준이므로 매칭 — warehouse_id 또는 wh_code.
+            var matched = _warehouses.FirstOrDefault(w =>
+                string.Equals(w.Code, pick.WarehouseId, StringComparison.OrdinalIgnoreCase));
+            if (matched is not null)
+            {
+                _fromWarehouse = matched.Code;
+            }
+        }
+        catch
+        {
+            // 자동 셋팅 실패해도 사용자가 수동 선택하면 됨 — 묵음.
+        }
+    }
+
+    /// <summary>StockBalance API 응답 매핑용 내부 클래스 (수정 회피, 추가만).</summary>
+    private sealed class StockBalanceItem
+    {
+        public string ItemName { get; set; } = "";
+        public string WarehouseId { get; set; } = "";
+        public string WarehouseName { get; set; } = "";
+        public decimal CurrentQty { get; set; }
     }
 
     /// <summary>출고창고 변경 시 가용 재고를 갱신한다.</summary>

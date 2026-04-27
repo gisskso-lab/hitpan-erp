@@ -40,39 +40,45 @@
 @* 페이지 헤더 — 디자인 시스템 v1 *@
 <PageHeader Title="대시보드" Subtitle="@(DateTime.Now.ToString("yyyy-MM-dd (ddd)"))" />
 
-@* KPI 카드 영역 — KpiCard 공용 컴포넌트 *@
+@* KPI 카드 영역 — KpiCard 공용 컴포넌트.
+   사장님 헌법 (2026-04-27): "대시보드 시각화 클릭 = 해당 데이터/전표로 바로 연동". *@
 <MudGrid Spacing="2" Class="mb-3">
     <MudItem xs="12" sm="6" md="2" lg="2">
         <KpiCard Color="KpiCard.KpiColor.Primary"
                  Icon="@Icons.Material.Filled.PointOfSale"
                  Label="오늘 매출"
-                 Value="@FormatAmount(_data.TodaySales)" />
+                 Value="@FormatAmount(_data.TodaySales)"
+                 OnClick="@(() => Nav.NavigateTo($"/deliveries?from={DateTime.Today:yyyy-MM-dd}&to={DateTime.Today:yyyy-MM-dd}"))" />
     </MudItem>
     <MudItem xs="12" sm="6" md="2" lg="2">
         <KpiCard Color="KpiCard.KpiColor.Info"
                  Icon="@Icons.Material.Filled.TrendingUp"
                  Label="이번달 매출"
-                 Value="@FormatAmount(_data.MonthSales)" />
+                 Value="@FormatAmount(_data.MonthSales)"
+                 OnClick="@(() => Nav.NavigateTo($"/deliveries?from={MonthStart():yyyy-MM-dd}&to={DateTime.Today:yyyy-MM-dd}"))" />
     </MudItem>
     <MudItem xs="12" sm="6" md="2" lg="2">
         <KpiCard Color="KpiCard.KpiColor.Warning"
                  Icon="@Icons.Material.Filled.ShoppingCart"
                  Label="이번달 매입"
-                 Value="@FormatAmount(_data.MonthPurchase)" />
+                 Value="@FormatAmount(_data.MonthPurchase)"
+                 OnClick="@(() => Nav.NavigateTo($"/purchases?from={MonthStart():yyyy-MM-dd}&to={DateTime.Today:yyyy-MM-dd}"))" />
     </MudItem>
     <MudItem xs="12" sm="6" md="3" lg="3">
         <KpiCard Color="KpiCard.KpiColor.Error"
                  Icon="@Icons.Material.Filled.Warning"
                  Label="미수금"
                  Value="@FormatAmount(_data.UnpaidReceivable)"
-                 EmphasizeValue="true" />
+                 EmphasizeValue="true"
+                 OnClick="@(() => Nav.NavigateTo("/partners/ledger"))" />
     </MudItem>
     <MudItem xs="12" sm="6" md="3" lg="3">
         <KpiCard Color="KpiCard.KpiColor.Purple"
                  Icon="@Icons.Material.Filled.PendingActions"
                  Label="결재대기"
                  Value="@($"{_data.PendingApprovalCount}건")"
-                 EmphasizeValue="true" />
+                 EmphasizeValue="true"
+                 OnClick="@(() => Nav.NavigateTo("/approval/pending"))" />
     </MudItem>
 </MudGrid>
 
@@ -192,7 +198,9 @@
         <MudPaper Elevation="0" Class="pa-3" Style="border:0.5px solid var(--mud-palette-lines-default);border-radius:12px">
             <MudText Typo="Typo.subtitle2" Class="mb-2" Style="font-weight:600">최근 거래</MudText>
             <MudTable T="RecentTx" Items="_data.RecentTransactions" Dense="true" Hover="true" Elevation="0"
-                      Style="border:none" FixedHeader="false">
+                      Style="border:none" FixedHeader="false"
+                      OnRowClick="@((TableRowClickEventArgs<RecentTx> e) => { if (e.Item is not null) GoToTransaction(e.Item); })"
+                      RowStyle="cursor:pointer">
                 <HeaderContent>
                     <MudTh>일자</MudTh>
                     <MudTh>유형</MudTh>
@@ -262,7 +270,8 @@
                     <tbody>
                         @foreach (var a in _pendingAlerts)
                         {
-                            <tr style="color:var(--hitpan-error);font-weight:500">
+                            <tr style="color:var(--hitpan-error);font-weight:500;cursor:pointer"
+                                @onclick="@(() => Nav.NavigateTo($"/items/{a.ItemId}"))">
                                 <td>@a.ItemName</td>
                                 <td style="text-align:right">@a.CurrentQty.ToString("N0")</td>
                                 <td style="text-align:right">@a.SafetyQty.ToString("N0")</td>
@@ -400,6 +409,24 @@
         {
             _orderingDashboard = false;
             StateHasChanged();
+        }
+    }
+
+    // 사장님 헌법 (2026-04-27): 시각화 클릭 → 데이터/전표 연동.
+    private static DateTime MonthStart() => new DateTime(DateTime.Today.Year, DateTime.Today.Month, 1);
+
+    private void GoToTransaction(RecentTx tx)
+    {
+        // RecentTx.DocType: "매입" / "판매" / "매입반품" / "판매반품" / 그 외 (한글 라벨).
+        // 라우팅 — 해당 목록 페이지에 거래일자 필터로 이동, 사용자가 그 행을 보고 더블클릭하면 상세.
+        var dateStr = tx.TxDate.ToString("yyyy-MM-dd");
+        if (tx.DocType.Contains("매입"))
+        {
+            Nav.NavigateTo($"/purchases?from={dateStr}&to={dateStr}");
+        }
+        else
+        {
+            Nav.NavigateTo($"/deliveries?from={dateStr}&to={dateStr}");
         }
     }
 

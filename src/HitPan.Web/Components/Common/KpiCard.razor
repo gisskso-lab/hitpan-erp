@@ -10,7 +10,7 @@
               Sub="전일 대비 +12%" />
    ══════════════════════════════════════════════════════════════ *@
 
-<div class="@CardClass">
+<div class="@CardClass" @onclick="HandleClick" style="@CursorStyle">
     <div class="hitpan-kpi-label">
         @if (!string.IsNullOrWhiteSpace(Icon))
         {
@@ -45,6 +45,19 @@
 
     /// <summary>부가 설명 (작은 회색 텍스트)</summary>
     [Parameter] public string? Sub { get; set; }
+
+    /// <summary>
+    /// 카드 클릭 시 호출 콜백.
+    /// 사장님 헌법 (2026-04-27): "대시보드 시각화 클릭 = 해당 데이터/전표로 바로 연동"
+    /// </summary>
+    [Parameter] public EventCallback OnClick { get; set; }
+
+    private async Task HandleClick()
+    {
+        if (OnClick.HasDelegate) await OnClick.InvokeAsync();
+    }
+
+    private string CursorStyle => OnClick.HasDelegate ? "cursor:pointer" : "";
 
     private string CardClass => $"hitpan-kpi hitpan-kpi--{Color.ToString().ToLowerInvariant()}";
 
