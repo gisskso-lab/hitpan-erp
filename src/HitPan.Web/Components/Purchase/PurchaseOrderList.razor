@@ -73,7 +73,7 @@
                 <MudText Class="@GetSelectedClass(context)">@context.PoNo</MudText>
             </MudTd>
             <MudTd @ondblclick="@(() => SelectRowAsync(context))" style="cursor:pointer">@context.PartnerName</MudTd>
-            <MudTd @ondblclick="@(() => SelectRowAsync(context))" style="cursor:pointer">@context.Status</MudTd>
+            <MudTd @ondblclick="@(() => SelectRowAsync(context))" style="cursor:pointer">@HitPan.Web.Helpers.StatusLabel.PurchaseOrder(context.Status)</MudTd>
             <MudTd Class="text-right" @ondblclick="@(() => SelectRowAsync(context))" style="cursor:pointer">@context.TotalAmount.ToString("N0")</MudTd>
             <MudTd>
                 <div @onclick:stopPropagation="true">

@@ -709,6 +709,44 @@ public class BomService : IBomService
     public async Task<List<StockAlertDto>> GetAlertsAsync(string tenantId, CancellationToken ct = default)
     {
         await EnsureOpenAsync(ct).ConfigureAwait(false);
+
+        // 사장님 헌법 (2026-04-27): 안전재고 미달 알림은 트리거(매입/판매/BOM) 외에도
+        // 평소에 감지되어야 함. GetAlertsAsync 호출 시점에 즉석으로 안전재고 미달 자재를
+        // 직접 조회하여 stock_alerts 'pending' 으로 자동 보충.
+        // (이미 'pending'이 있으면 SyncEventPublisher의 가드와 동일 로직으로 SKIP.)
+        await _db.ExecuteAsync(new CommandDefinition(
+            """
+            INSERT INTO stock_alerts
+              (alert_id, tenant_id, item_id,
+               alert_type, current_qty, safety_qty, shortage_qty,
+               partner_id, order_qty, status, created_at, updated_at)
+            SELECT
+              UUID(), i.tenant_id, i.item_id,
+              'safety_stock',
+              COALESCE(s.current_qty, 0),
+              COALESCE(i.safety_stock, i.safe_stock, 0),
+              COALESCE(i.safety_stock, i.safe_stock, 0) - COALESCE(s.current_qty, 0),
+              i.auto_order_partner_id,
+              COALESCE(i.auto_order_qty, 0),
+              'pending', NOW(6), NOW(6)
+            FROM items i
+            LEFT JOIN item_stock s
+              ON s.tenant_id = i.tenant_id AND s.item_id = i.item_id
+            WHERE i.tenant_id = @TenantId
+              AND i.is_deleted = 0
+              AND i.is_active = 1
+              AND COALESCE(i.safety_stock, i.safe_stock, 0) > 0
+              AND COALESCE(s.current_qty, 0) <= COALESCE(i.safety_stock, i.safe_stock, 0)
+              AND COALESCE(i.auto_order_enabled, 0) = 1
+              AND NOT EXISTS (
+                SELECT 1 FROM stock_alerts sa
+                WHERE sa.tenant_id = i.tenant_id
+                  AND sa.item_id = i.item_id
+                  AND sa.status = 'pending'
+              )
+            """,
+            new { TenantId = tenantId }, cancellationToken: ct)).ConfigureAwait(false);
+
         var rows = await _db.QueryAsync<StockAlertDto>(new CommandDefinition(
             """
             SELECT

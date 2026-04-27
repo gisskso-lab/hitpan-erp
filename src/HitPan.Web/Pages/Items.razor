@@ -7,6 +7,7 @@
 @inject IJSRuntime Js
 @inject IDialogService DialogService
 @inject BomService BomApi
+@inject DeliveryService DeliveryService
 
 <PageTitle>상품 마스터</PageTitle>
 
@@ -17,6 +18,34 @@
         </MudButton>
     </Actions>
 </PageHeader>
+
+@* 사장님 헌법 (2026-04-27): 안전재고 미달 자재가 평소에도 사장님 눈에 띄어야 함.
+   상품마스터가 평소 안전망. stock_alerts 'pending' 을 읽어서 배너로 노출.
+   배너 클릭 → 자동발주 다이얼로그 → 발주서/매입확정/원클릭 사슬 *@
+@if (_safetyAlerts.Count > 0)
+{
+    <MudPaper Elevation="0" Class="pa-3 mb-4"
+              Style="background:#fff4e5;border:1px solid #ff9800;border-radius:12px">
+        <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+            <MudIcon Icon="@Icons.Material.Filled.Warning" Color="Color.Warning" Size="Size.Medium" />
+            <div style="flex:1;min-width:200px">
+                <MudText Typo="Typo.subtitle1" Style="font-weight:600">
+                    안전재고 미달 자재 @_safetyAlerts.Count 건
+                </MudText>
+                <MudText Typo="Typo.body2" Style="color:#666">
+                    @string.Join(" · ", _safetyAlerts.Take(3).Select(a => $"{a.ItemName} (현재고 {a.CurrentQty:N0} / 안전재고 {a.SafetyQty:N0})"))
+                    @(_safetyAlerts.Count > 3 ? $" 외 {_safetyAlerts.Count - 3}건" : "")
+                </MudText>
+            </div>
+            <MudButton Variant="Variant.Filled" Color="Color.Warning"
+                       StartIcon="@Icons.Material.Filled.ShoppingCart"
+                       OnClick="OpenSafetyAutoOrderAsync"
+                       Disabled="_orderingSafety">
+                @(_orderingSafety ? "처리중..." : "자동발주 실행")
+            </MudButton>
+        </div>
+    </MudPaper>
+}
 
 <MudPaper Elevation="0" Class="pa-3 mb-4 hitpan-card">
     <div style="display:flex;gap:12px;flex-wrap:wrap;align-items:center">
@@ -131,9 +160,77 @@ else
     private string _search = "";
     private string _typeFilter = "";
 
+    // 사장님 헌법 (2026-04-27): 상품마스터 = 평소 안전망. 안전재고 미달 자재 배너 + 자동발주.
+    private List<StockAlertModel> _safetyAlerts = new();
+    private bool _orderingSafety = false;
+
     protected override async Task OnInitializedAsync()
     {
         await LoadList();
+        await LoadSafetyAlerts();
+    }
+
+    private async Task LoadSafetyAlerts()
+    {
+        var alerts = await BomApi.GetAlertsAsync();
+        // 'pending' 상태(=신규 발생, 사용자 행동 대기)만 노출. ordered/dismissed 는 이미 처리됨.
+        _safetyAlerts = (alerts ?? new List<StockAlertModel>())
+            .Where(a => string.Equals(a.Status, "pending", StringComparison.OrdinalIgnoreCase))
+            .ToList();
+        StateHasChanged();
+    }
+
+    private async Task OpenSafetyAutoOrderAsync()
+    {
+        if (_safetyAlerts.Count == 0) return;
+
+        // BOM 다이얼로그와 동일 분기. 모두 auto_receive_on_order=Y면 B-1, 아니면 B-2.
+        // (StockAlertModel 에 AutoReceiveOnOrder 가 없으므로 보수적 default = B-2 발주서만.)
+        var lines = string.Join("\n", _safetyAlerts.Take(5).Select(a =>
+            $"• {a.ItemName} (현재고 {a.CurrentQty:N0} / 안전재고 {a.SafetyQty:N0}, 부족 {a.ShortageQty:N0})"));
+        var more = _safetyAlerts.Count > 5 ? $"\n... 외 {_safetyAlerts.Count - 5}건" : "";
+
+        var choice = await DialogService.ShowMessageBoxAsync(
+            "⚠ 안전재고 미달 자동발주",
+            $"아래 자재가 안전재고 미달입니다. 자동발주를 진행하시겠습니까?\n\n{lines}{more}\n\n" +
+            "[발주서 생성] 자동발주서를 만들고 발주목록에 노출. 매입처리·확정은 발주목록에서 진행.\n" +
+            "[자동 사슬] 발주+매입확정까지 한 번에 처리 (재고 즉시 +반영).",
+            yesText: "자동 사슬", noText: "발주서 생성", cancelText: "취소");
+        if (choice is null) return;
+
+        _orderingSafety = true;
+        StateHasChanged();
+        try
+        {
+            // stock_alerts 의 alert_id 단위로 BomApi.OrderAlertAsync 호출 — 기존 alert→PO 변환 흐름 재사용.
+            // 자동 사슬(true) 선택 시: 발주 생성 + autoReceive 까지 가도록 별도 처리 (지금은 OrderAlertAsync 가
+            // PO 만 생성하므로 자동 사슬 미지원 → 베타 P1: stock_alerts 에 auto_receive_on_order 반영 추가).
+            var autoChain = choice == true;
+            var success = 0;
+            var failed = 0;
+            foreach (var a in _safetyAlerts)
+            {
+                if (string.IsNullOrWhiteSpace(a.AlertId)) continue;
+                var ok = await BomApi.OrderAlertAsync(a.AlertId);
+                if (ok) success++; else failed++;
+            }
+
+            if (success > 0)
+            {
+                var label = autoChain ? "자동발주(자동 사슬은 베타 P1 작지서로 분리, 지금은 발주서만 생성됨)" : "자동발주서";
+                Snackbar.Add($"{label} {success}건 생성 완료. 발주목록 → 매입처리 → 매입확정 진행해주세요.", Severity.Success);
+            }
+            if (failed > 0)
+            {
+                Snackbar.Add($"{failed}건 실패", Severity.Warning);
+            }
+            await LoadSafetyAlerts();
+        }
+        finally
+        {
+            _orderingSafety = false;
+            StateHasChanged();
+        }
     }
 
     private async Task LoadList()

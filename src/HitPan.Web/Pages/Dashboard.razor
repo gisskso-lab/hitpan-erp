@@ -11,6 +11,8 @@
 @inject PermissionService PermSvc
 @inject PartnerMasterService PartnerSvc
 @inject AuthenticationStateProvider AuthState
+@inject BomService BomApi
+@inject IDialogService DialogService
 
 <PageTitle>대시보드 — 히트판 ERP</PageTitle>
 
@@ -210,7 +212,7 @@
                     <MudTd Style="text-align:right;font-weight:500">@FormatAmount(context.Amount)</MudTd>
                     <MudTd>
                         <MudChip T="string" Size="Size.Small" Variant="Variant.Filled"
-                                 Color="@GetStatusColor(context.Status)">@context.Status</MudChip>
+                                 Color="@GetStatusColor(context.Status)">@HitPan.Web.Helpers.StatusLabel.Document(context.Status)</MudChip>
                     </MudTd>
                 </RowTemplate>
                 <NoRecordsContent>
@@ -220,37 +222,52 @@
         </MudPaper>
     </MudItem>
 
-    @* 재고 부족 알림 *@
+    @* 재고 부족 알림 — 사장님 헌법 (2026-04-27): 안전재고 미달 = 평소 안전망. 대시보드에서 바로 발주. *@
     <MudItem xs="12" md="5">
         <MudPaper Elevation="0" Class="pa-3" Style="border:0.5px solid var(--mud-palette-lines-default);border-radius:12px">
             <div class="d-flex justify-space-between align-center mb-2">
                 <MudText Typo="Typo.subtitle2" Style="font-weight:600">재고 부족 알림</MudText>
-                @if (_data.LowStockItems.Any())
-                {
-                    <MudChip T="string" Size="Size.Small" Color="Color.Error" Variant="Variant.Filled">
-                        @(_data.LowStockItems.Count)건
-                    </MudChip>
-                }
+                <div class="d-flex align-center" style="gap:8px">
+                    @if (_pendingAlerts.Count > 0)
+                    {
+                        <MudButton Variant="Variant.Filled" Color="Color.Warning" Size="Size.Small"
+                                   StartIcon="@Icons.Material.Filled.ShoppingCart"
+                                   OnClick="OpenDashboardAutoOrderAsync"
+                                   Disabled="_orderingDashboard">
+                            @(_orderingDashboard ? "처리중..." : $"자동발주 ({_pendingAlerts.Count})")
+                        </MudButton>
+                    }
+                    @if (_pendingAlerts.Any())
+                    {
+                        <MudChip T="string" Size="Size.Small" Color="Color.Error" Variant="Variant.Filled">
+                            @(_pendingAlerts.Count)건
+                        </MudChip>
+                    }
+                </div>
             </div>
-            @if (_data.LowStockItems.Any())
+            @* 사장님 지적 (2026-04-27): 재고 부족 표시와 자동발주 카운트는 단일 소스(_pendingAlerts).
+               두 소스가 어긋나면 "재고 부족 없음 + 자동발주 3건" 같은 모순 발생. *@
+            @if (_pendingAlerts.Any())
             {
                 <MudSimpleTable Dense="true" Hover="true" Style="border:none">
                     <thead>
                         <tr>
-                            <th>품목명</th>
-                            <th>규격</th>
+                            <th>자재명</th>
                             <th style="text-align:right">현재고</th>
                             <th style="text-align:right">안전재고</th>
+                            <th style="text-align:right">부족</th>
+                            <th>발주처</th>
                         </tr>
                     </thead>
                     <tbody>
-                        @foreach (var item in _data.LowStockItems)
+                        @foreach (var a in _pendingAlerts)
                         {
                             <tr style="color:var(--hitpan-error);font-weight:500">
-                                <td>@item.ItemName</td>
-                                <td>@item.Spec</td>
-                                <td style="text-align:right">@item.CurrentQty.ToString("N0")</td>
-                                <td style="text-align:right">@item.SafetyStock.ToString("N0")</td>
+                                <td>@a.ItemName</td>
+                                <td style="text-align:right">@a.CurrentQty.ToString("N0")</td>
+                                <td style="text-align:right">@a.SafetyQty.ToString("N0")</td>
+                                <td style="text-align:right">@a.ShortageQty.ToString("N0")</td>
+                                <td>@(string.IsNullOrWhiteSpace(a.PartnerName) ? "(미설정)" : a.PartnerName)</td>
                             </tr>
                         }
                     </tbody>
@@ -325,11 +342,65 @@
         Legend = new Legend { Show = false }
     };
 
+    // 사장님 헌법 (2026-04-27): 대시보드 = 평소 안전망. stock_alerts 'pending' 자동 발주 트리거.
+    private List<StockAlertModel> _pendingAlerts = new();
+    private bool _orderingDashboard = false;
+
     // ─── 초기 로드 ───
     protected override async Task OnInitializedAsync()
     {
         await CheckPermissionBannerAsync();
-        await Task.WhenAll(LoadDashboardAsync(), LoadAgingAsync());
+        await Task.WhenAll(LoadDashboardAsync(), LoadAgingAsync(), LoadPendingAlertsAsync());
+    }
+
+    private async Task LoadPendingAlertsAsync()
+    {
+        var alerts = await BomApi.GetAlertsAsync();
+        _pendingAlerts = (alerts ?? new List<StockAlertModel>())
+            .Where(a => string.Equals(a.Status, "pending", StringComparison.OrdinalIgnoreCase))
+            .ToList();
+    }
+
+    private async Task OpenDashboardAutoOrderAsync()
+    {
+        if (_pendingAlerts.Count == 0) return;
+
+        var lines = string.Join("\n", _pendingAlerts.Take(5).Select(a =>
+            $"• {a.ItemName} (현재고 {a.CurrentQty:N0} / 안전재고 {a.SafetyQty:N0}, 부족 {a.ShortageQty:N0})"));
+        var more = _pendingAlerts.Count > 5 ? $"\n... 외 {_pendingAlerts.Count - 5}건" : "";
+
+        var go = await DialogService.ShowMessageBoxAsync(
+            "⚠ 안전재고 미달 자동발주",
+            $"아래 자재가 안전재고 미달입니다. 자동발주서를 생성하시겠습니까?\n\n{lines}{more}\n\n" +
+            "발주서 생성 후 [발주목록 → 매입처리 → 매입확정] 단계로 진행해주세요.",
+            yesText: "자동발주 실행", cancelText: "취소");
+        if (go != true) return;
+
+        _orderingDashboard = true;
+        StateHasChanged();
+        try
+        {
+            var success = 0;
+            var failed = 0;
+            foreach (var a in _pendingAlerts)
+            {
+                if (string.IsNullOrWhiteSpace(a.AlertId)) continue;
+                var ok = await BomApi.OrderAlertAsync(a.AlertId);
+                if (ok) success++; else failed++;
+            }
+
+            if (success > 0)
+                Snackbar.Add($"자동발주서 {success}건 생성 완료. 발주목록 → 매입처리 → 매입확정 진행해주세요.", Severity.Success);
+            if (failed > 0)
+                Snackbar.Add($"{failed}건 실패", Severity.Warning);
+
+            await LoadPendingAlertsAsync();
+        }
+        finally
+        {
+            _orderingDashboard = false;
+            StateHasChanged();
+        }
     }
 
     private async Task LoadAgingAsync()

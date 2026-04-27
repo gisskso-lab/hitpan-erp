@@ -113,6 +113,11 @@ public sealed class SyncEventPublisher : IEventPublisher
             field: HitPan.Application.Services.MonthlySummaryGuard.SummaryField.TotalSales,
             amount: e.TotalAmount,
             ct: ct).ConfigureAwait(false);
+
+        // 사장님 헌법 (2026-04-27): 판매 확정으로 재고가 빠졌으니 안전재고 미달 자재가 새로 생겼을 수 있음.
+        // BOM 트리거 외에서도 평소 안전망이 작동하도록 모든 트리거 끝에 CheckSafetyStockAsync 호출.
+        // 상품마스터 화면이 stock_alerts 'pending' 을 읽어 배너로 노출.
+        await CheckSafetyStockAsync(e.TenantId, e.Items.Select(x => x.ItemId).ToList(), ct).ConfigureAwait(false);
     }
 
     private async Task OnDeliveryCancelled(DeliveryCancelledEvent c, CancellationToken ct)
@@ -219,6 +224,11 @@ public sealed class SyncEventPublisher : IEventPublisher
             field: HitPan.Application.Services.MonthlySummaryGuard.SummaryField.TotalPurchase,
             amount: p.TotalAmount,
             ct: ct).ConfigureAwait(false);
+
+        // 사장님 헌법 (2026-04-27): 매입 확정 후에도 안전재고 체크.
+        // 입고된 자재가 안전재고 회복했는지(=pending alert 자동 정리는 별도 P1) +
+        // 동일 거래에 들어가지 않은 다른 자재가 그 사이 안전재고 미달이 됐을 수 있어 일괄 점검.
+        await CheckSafetyStockAsync(p.TenantId, p.Items.Select(x => x.ItemId).ToList(), ct).ConfigureAwait(false);
     }
 
     private async Task OnBomAssembled(BomAssembledEvent b, CancellationToken ct)

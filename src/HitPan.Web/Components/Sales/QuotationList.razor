@@ -48,7 +48,7 @@
                 <MudTd @ondblclick="@(() => SelectAsync(context))">@context.PartnerName</MudTd>
                 <MudTd @ondblclick="@(() => SelectAsync(context))">@context.QuoteDate.ToString("yyyy-MM-dd")</MudTd>
                 <MudTd @ondblclick="@(() => SelectAsync(context))">@context.ValidUntil?.ToString("yyyy-MM-dd")</MudTd>
-                <MudTd @ondblclick="@(() => SelectAsync(context))">@context.Status</MudTd>
+                <MudTd @ondblclick="@(() => SelectAsync(context))">@HitPan.Web.Helpers.StatusLabel.Quotation(context.Status)</MudTd>
                 <MudTd Class="text-right" @ondblclick="@(() => SelectAsync(context))">@context.TotalAmount.ToString("N0")</MudTd>
                 <MudTd Class="text-right" @ondblclick="@(() => SelectAsync(context))">@context.VatAmount.ToString("N0")</MudTd>
             </RowTemplate>
