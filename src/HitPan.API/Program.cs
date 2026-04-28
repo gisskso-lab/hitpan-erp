@@ -231,11 +231,13 @@ if (hasBlazor)
     app.UseStaticFiles();
 }
 
-app.UseMiddleware<RateLimitMiddleware>();
 app.UseMiddleware<AuditLogMiddleware>();
 
 app.UseAuthentication();
 app.UseAuthorization();
+// 작20260428이7 #4: RateLimit은 Authentication 이후로 이동.
+// 인증된 user_id 기반 카운트 → 터널 환경에서 다수 사용자가 같은 IP로 인식되어도 오차단 안 발생.
+app.UseMiddleware<RateLimitMiddleware>();
 app.UseMiddleware<TenantMiddleware>();
 app.UseMiddleware<SessionLimitMiddleware>();
 // 멱등 처리: TenantMiddleware 이후 (tenantId 필요), MapControllers 이전 — [IdempotencyKey] 옵트인 액션만 영향 (DESIGN_PRINCIPLES §5.3 / 작업지시서 20260425작4)

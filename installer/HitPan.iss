@@ -249,11 +249,18 @@ begin
     BatchFile := ExpandConstant('{tmp}\db-setup.bat');
     BatchContent := TStringList.Create;
     try
+      // 작20260428이9 — 재설치/업그레이드 시 운영 데이터 보존 (사장님 헌법 §EVF "악의").
+      // 기존 items/partners/거래 데이터 1건이라도 있으면 시드 import 건너뜀.
       BatchContent.Add('@echo off');
+      BatchContent.Add('setlocal enabledelayedexpansion');
       BatchContent.Add('set "PATH=%PATH%;C:\Program Files\MariaDB 11.4\bin;C:\Program Files\MariaDB 10.11\bin;C:\Program Files\MySQL\MySQL Server 8.4\bin"');
       BatchContent.Add(Format('mysql -u root -p%s -e "CREATE DATABASE IF NOT EXISTS hitpan_erp CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;"', [MariaRootPw]));
       BatchContent.Add(Format('mysql -u root -p%s -e "CREATE USER IF NOT EXISTS ''hitpan''@''localhost'' IDENTIFIED BY ''Hitpan2025!''; GRANT ALL ON *.* TO ''hitpan''@''localhost''; FLUSH PRIVILEGES;"', [MariaRootPw]));
-      BatchContent.Add('mysql -u hitpan -pHitpan2025! hitpan_erp < "' + ExpandConstant('{app}\hitpan_db.sql') + '"');
+      // 운영 데이터 존재 여부 확인 (테이블 없으면 0 처리)
+      BatchContent.Add('set EXISTING_DATA=0');
+      BatchContent.Add('for /f "skip=1 tokens=*" %%c in (''mysql -u hitpan -pHitpan2025! -N -e "SELECT COALESCE((SELECT COUNT(*) FROM hitpan_erp.items),0)+COALESCE((SELECT COUNT(*) FROM hitpan_erp.partners),0)+COALESCE((SELECT COUNT(*) FROM hitpan_erp.purchase_orders),0)+COALESCE((SELECT COUNT(*) FROM hitpan_erp.sales_orders),0)" 2^^^>nul'') do set EXISTING_DATA=%%c');
+      BatchContent.Add('if "!EXISTING_DATA!"=="" set EXISTING_DATA=0');
+      BatchContent.Add('if !EXISTING_DATA! GTR 0 (echo 기존 운영 데이터 !EXISTING_DATA!건 감지. 시드 import 건너뜀 (사용자 데이터 보호^).) else (mysql -u hitpan -pHitpan2025! hitpan_erp < "' + ExpandConstant('{app}\hitpan_db.sql') + '")');
       BatchContent.SaveToFile(BatchFile);
     finally
       BatchContent.Free;

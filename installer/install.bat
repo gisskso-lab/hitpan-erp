@@ -1,4 +1,5 @@
 @echo off
+setlocal enabledelayedexpansion
 title HitPan ERP Install
 
 echo.
@@ -83,13 +84,25 @@ if %ERRORLEVEL% NEQ 0 (
 mysql -u root -p%ROOT_PW% -e "CREATE DATABASE IF NOT EXISTS hitpan_erp CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;" >nul 2>&1
 mysql -u root -p%ROOT_PW% -e "CREATE USER IF NOT EXISTS 'hitpan'@'localhost' IDENTIFIED BY 'Hitpan2025!'; GRANT ALL ON *.* TO 'hitpan'@'localhost'; FLUSH PRIVILEGES;" >nul 2>&1
 
-:: Import schema + sample data
+:: Import schema (safe seed — 시스템 테이블만, 운영 데이터는 0건)
+:: 작20260428이9: 기존 DB에 운영 데이터(items/partners/거래) 있으면 import 건너뜀.
+:: 사장님 헌법 §EVF "악의": 재설치/업데이트 시 고객사 1년치 데이터 자동 삭제 사고 방지.
 if exist "%INSTALL_DIR%hitpan_db.sql" (
-    echo   - Importing schema and sample data...
+    :: 안전 점검 — 기존 운영 데이터 있는지 확인
+    for /f "skip=1 tokens=*" %%c in ('mysql -u hitpan -pHitpan2025! -N -e "SELECT (SELECT COUNT(*) FROM hitpan_erp.items WHERE is_deleted=0) + (SELECT COUNT(*) FROM hitpan_erp.partners WHERE is_deleted=0) + (SELECT COUNT(*) FROM hitpan_erp.purchase_orders WHERE is_deleted=0) + (SELECT COUNT(*) FROM hitpan_erp.sales_orders WHERE is_deleted=0)" 2^>nul') do set EXISTING_DATA=%%c
+
+    if defined EXISTING_DATA (
+        if !EXISTING_DATA! GTR 0 (
+            echo   - 기존 운영 데이터 감지(!EXISTING_DATA!건). 시드 import 건너뜀 (사용자 데이터 보호).
+            goto skip_db_import
+        )
+    )
+    echo   - DB 시드 import 중 (시스템 테이블만)...
     mysql -u hitpan -pHitpan2025! hitpan_erp < "%INSTALL_DIR%hitpan_db.sql" >nul 2>&1
-    echo   - DB ready (200 items, 200 partners, 600+ transactions)
+    echo   - DB 준비 완료 (빈 운영 데이터, 시스템 시드만)
+    :skip_db_import
 ) else (
-    echo   - Warning: hitpan_db.sql not found. Empty database.
+    echo   - 경고: hitpan_db.sql 없음. 빈 DB로 진행.
 )
 
 :: ---- 3. Security Keys ----

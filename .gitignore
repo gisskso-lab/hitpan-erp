@@ -56,3 +56,4 @@ installer/cloudflared.exe
 *.zip
 hitpan_erp_backup_*.sql
 artifacts/doc-build/
+backups/
