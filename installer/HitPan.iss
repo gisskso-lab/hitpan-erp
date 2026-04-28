@@ -1,4 +1,4 @@
-; ============================================================
+﻿; ============================================================
 ; HitPan ERP — 원클릭 통합 인스톨러 (Inno Setup 6.x)
 ; WS-20260428-02 — 옵션 X2 + Gard 4개
 ;
@@ -183,9 +183,7 @@ var
   Lines: TArrayOfString;
 begin
   TempFile := ExpandConstant('{tmp}\randkey.txt');
-  PsScript := Format(
-    '[Convert]::ToBase64String((1..%d|%%{Get-Random -Max 256}|%%{[byte]$_})) | Out-File -Encoding ASCII -NoNewline "%s"',
-    [Bytes, TempFile]);
+  PsScript := Format('[Convert]::ToBase64String((1..%d|%%{Get-Random -Max 256}|%%{[byte]$_})) | Out-File -Encoding ASCII -NoNewline "%s"', [Bytes, TempFile]);
 
   Exec('powershell.exe', '-NoProfile -ExecutionPolicy Bypass -Command "' + PsScript + '"',
        '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
@@ -243,10 +241,7 @@ begin
     // 4. MariaDB silent install (NeedsMariaDB이면)
     if NeedsMariaDB then
     begin
-      Exec('msiexec.exe',
-           Format('/i "%s\mariadb.msi" /quiet SERVICENAME=MariaDB PASSWORD=%s',
-                  [ExpandConstant('{tmp}'), MariaRootPw]),
-           '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+      Exec('msiexec.exe', Format('/i "%s\mariadb.msi" /quiet SERVICENAME=MariaDB PASSWORD=%s', [ExpandConstant('{tmp}'), MariaRootPw]), '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
       Sleep(10000);  // 서비스 시작 대기
     end;
 

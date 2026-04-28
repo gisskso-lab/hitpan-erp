@@ -1,4 +1,4 @@
-# ============================================================
+﻿# ============================================================
 # 의존성 번들 다운로드 스크립트
 # WS-20260428-02 — 캐시 디렉토리에 1회만 받음 (재실행 시 재사용)
 #
@@ -44,17 +44,17 @@ function Download-IfMissing {
     if ((Test-Path $Path) -and (-not $Force)) {
         $sizeMB = [Math]::Round((Get-Item $Path).Length / 1MB, 1)
         if ($sizeMB -ge $ExpectedMinMB) {
-            Write-Host "  ✅ $Label : 캐시 사용 ($sizeMB MB)" -ForegroundColor Green
+            Write-Host "  ✅ $Label : 캐시 사용 (${sizeMB} MB)" -ForegroundColor Green
             return
         }
-        Write-Host "  ⚠ $Label : 크기 이상 ($sizeMB MB < $ExpectedMinMB MB), 재다운로드"
+        Write-Host "  ⚠ $Label : 크기 이상 (${sizeMB} MB < ${ExpectedMinMB} MB), 재다운로드"
     }
 
     Write-Host "  → $Label 다운로드 중..." -NoNewline
     try {
         Invoke-WebRequest -Uri $Url -OutFile $Path -UseBasicParsing
         $sizeMB = [Math]::Round((Get-Item $Path).Length / 1MB, 1)
-        Write-Host " OK ($sizeMB MB)" -ForegroundColor Green
+        Write-Host " OK (${sizeMB} MB)" -ForegroundColor Green
     } catch {
         Write-Host " 실패" -ForegroundColor Red
         Write-Error "다운로드 실패: $Url`n  $_"
@@ -99,7 +99,7 @@ Write-Host ""
 # 캐시 폴더 안내
 $totalMB = [Math]::Round((Get-ChildItem $BundleDir -File | Measure-Object Length -Sum).Sum / 1MB, 1)
 Write-Host "  번들 위치: $BundleDir"
-Write-Host "  총 크기:   $totalMB MB"
+Write-Host "  총 크기:   ${totalMB} MB"
 Write-Host ""
 Write-Host "  ※ 재빌드 시 -SkipBundleDownload 옵션 사용 가능" -ForegroundColor Cyan
 Write-Host ""

@@ -1,4 +1,4 @@
-# 히트판 ERP — 정적 파일 웹 서버 (포트 5234)
+﻿# 히트판 ERP — 정적 파일 웹 서버 (포트 5234)
 $webRoot = Join-Path $PSScriptRoot "web\wwwroot"
 $port = 5234
 

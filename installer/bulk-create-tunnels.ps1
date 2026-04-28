@@ -1,4 +1,4 @@
-# 베타 고객용 Cloudflare Tunnel 일괄 발급 스크립트
+﻿# 베타 고객용 Cloudflare Tunnel 일괄 발급 스크립트
 # 사장님 또는 마커스 리(인프라 매니저) 본사 PC에서 1회 실행
 # 결과: tenant-002 ~ tenant-010 토큰 9개 발급 + tunnels.csv 출력
 #

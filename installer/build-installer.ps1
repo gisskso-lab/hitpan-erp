@@ -1,4 +1,4 @@
-# ============================================================
+﻿# ============================================================
 # HitPan ERP 인스톨러 빌드 자동화 스크립트
 # WS-20260428-02 (Gard 3) — 옵션 X2 + X1 갈아타기 디딤돌
 #
@@ -49,12 +49,18 @@ if ($TenantId -notmatch '^[a-z0-9\-]+$') {
     exit 1
 }
 
-# Inno Setup 6 설치 확인
-$isccPath = "C:\Program Files (x86)\Inno Setup 6\ISCC.exe"
-if (-not (Test-Path $isccPath)) {
+# Inno Setup 6 설치 확인 (관리자/사용자 양쪽 경로 탐색)
+$isccCandidates = @(
+    "C:\Program Files (x86)\Inno Setup 6\ISCC.exe",
+    "C:\Program Files\Inno Setup 6\ISCC.exe",
+    "$env:LOCALAPPDATA\Programs\Inno Setup 6\ISCC.exe"
+)
+$isccPath = $isccCandidates | Where-Object { Test-Path $_ } | Select-Object -First 1
+if (-not $isccPath) {
     Write-Error "Inno Setup 6 가 설치되지 않았습니다.`n  https://jrsoftware.org/isdl.php 에서 설치 후 재시도."
     exit 1
 }
+Write-Host "  ISCC:       $isccPath"
 
 # 작업 디렉토리 = 프로젝트 루트
 $projectRoot = Split-Path -Parent $PSScriptRoot
