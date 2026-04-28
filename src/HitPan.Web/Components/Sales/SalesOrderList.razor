@@ -18,10 +18,12 @@
                              Clearable="true" />
 
             @* Value="draft" 는 Razor에서 식별자 draft 로 해석되어 CS0103 이 난다. 문자열 리터럴은 @("...") 로 전달한다. *@
+            @* 4/29 §20 핫픽스: 기본값 'all' (전체) — confirmed 된 수주가 화면에서 사라지는 사고 방지 *@
             <MudSelect T="string" Label="상태" Value="_status" ValueChanged="OnStatusChangedAsync" Dense="true" Style="min-width:180px">
-                <MudSelectItem T="string" Value="@("draft")">Draft</MudSelectItem>
-                <MudSelectItem T="string" Value="@("confirmed")">Confirmed</MudSelectItem>
-                <MudSelectItem T="string" Value="@("cancelled")">Cancelled</MudSelectItem>
+                <MudSelectItem T="string" Value="@("all")">전체</MudSelectItem>
+                <MudSelectItem T="string" Value="@("draft")">임시저장</MudSelectItem>
+                <MudSelectItem T="string" Value="@("confirmed")">확정</MudSelectItem>
+                <MudSelectItem T="string" Value="@("cancelled")">취소</MudSelectItem>
             </MudSelect>
 
             @* LoadAsync(CancellationToken) 는 선택적 인자가 있어 메서드 그룹이 EventCallback 과 맞지 않는다(CS1503). *@

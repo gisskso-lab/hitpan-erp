@@ -29,7 +29,8 @@ public sealed class RateLimitMiddleware
             // 로그인은 항상 IP 기반 (인증 전이라 user_id 없음).
             var ipKey = ResolveClientIp(context);
             // 베타 환경: 비번 헷갈려 여러 번 시도해도 OK + 동일 IP 다수 사용자(터널) 고려.
-            if (!CheckRateLimit(LoginAttempts, ipKey, maxCount: 100, windowSeconds: 300))
+            // 베타 9곳 동시 운영 + Blazor WASM 토큰 갱신 패턴 → 5분 1000회 허용 (브루트포스는 IP 차단으로 별도 대응 영역).
+            if (!CheckRateLimit(LoginAttempts, ipKey, maxCount: 1000, windowSeconds: 300))
             {
                 context.Response.StatusCode = StatusCodes.Status429TooManyRequests;
                 await context.Response.WriteAsJsonAsync(new

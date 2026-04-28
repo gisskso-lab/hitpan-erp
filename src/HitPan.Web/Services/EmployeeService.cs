@@ -38,10 +38,17 @@ public sealed class EmployeeService(HttpClient http)
         try
         {
             using var res = await http.PostAsJsonAsync("api/employees", request, ct).ConfigureAwait(false);
+            if (!res.IsSuccessStatusCode)
+            {
+                // 작20260428이7 §원칙 #15 "빈 catch 금지" — 진단 가능한 메시지 던짐.
+                var body = await res.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
+                Console.Error.WriteLine($"[EmployeeService.CreateAsync] {(int)res.StatusCode} {res.StatusCode}: {body}");
+            }
             return res.IsSuccessStatusCode;
         }
-        catch
+        catch (Exception ex)
         {
+            Console.Error.WriteLine($"[EmployeeService.CreateAsync] EXCEPTION: {ex.GetType().Name} {ex.Message}");
             return false;
         }
     }

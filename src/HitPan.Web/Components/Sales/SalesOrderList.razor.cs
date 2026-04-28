@@ -25,8 +25,8 @@ public partial class SalesOrderList : ComponentBase
     // 선택된 거래처 필터
     private PartnerSearchResult? _partner;
 
-    // 상태 필터 (draft/confirmed/cancelled)
-    private string _status = "draft";
+    // 상태 필터 (all/draft/confirmed/cancelled) — 4/29 §20 핫픽스: 기본 '전체'
+    private string _status = "all";
 
     // 목록 행 데이터
     private List<SalesListItem> _rows = new();
@@ -148,10 +148,11 @@ public partial class SalesOrderList : ComponentBase
     private async Task LoadAsync(CancellationToken ct = default)
     {
         // 수주서 전용 API를 호출한다.
+        // 4/29 §20 핫픽스: 'all' 은 서버 미전송으로 변환 (전체 조회)
         _rows = await DeliveryService.GetOrderListAsync(
             from: _startDate,
             to: _endDate,
-            status: _status,
+            status: _status == "all" ? null : _status,
             ct: ct);
 
         foreach (var row in _rows)

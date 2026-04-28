@@ -30,8 +30,9 @@ public class PurchaseService : IPurchaseService
         var now = DateTime.UtcNow;
         var date = request.PoDate == default ? now.Date : request.PoDate.Date;
         var prefix = $"PO-{date:yyyyMMdd}-";
-        var todayOrders = await poRepo.FindAsync(x => x.PoNo.StartsWith(prefix));
-        var poNo = $"{prefix}{todayOrders.Count + 1:000}";
+        // 작20260428이7 P0-A: EF FindAsync.Count 패턴은 미저장 엔티티 누락 → UNIQUE 충돌. DB MAX 직조회.
+        var poNo = await DocumentNumberHelper.NextNumberAsync(
+            _db, _currentTenant.TenantId, "purchase_orders", "po_no", prefix, ct);
 
         var poId = Guid.NewGuid().ToString();
         var po = new PurchaseOrder
@@ -88,8 +89,9 @@ public class PurchaseService : IPurchaseService
         var now = DateTime.UtcNow;
         var date = request.ReceiptDate == default ? now.Date : request.ReceiptDate.Date;
         var prefix = $"PR-{date:yyyyMMdd}-";
-        var todayReceipts = await receiptRepo.FindAsync(x => x.ReceiptNo.StartsWith(prefix));
-        var receiptNo = $"{prefix}{todayReceipts.Count + 1:000}";
+        // 작20260428이7 P0-A: 174건 자동 사슬 채번 충돌 진범. DB MAX 직조회로 EF 캐시 우회.
+        var receiptNo = await DocumentNumberHelper.NextNumberAsync(
+            _db, _currentTenant.TenantId, "purchase_receipts", "receipt_no", prefix, ct);
 
         var receiptId = Guid.NewGuid().ToString();
         var receipt = new PurchaseReceipt

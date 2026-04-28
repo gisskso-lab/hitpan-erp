@@ -41,8 +41,9 @@ public class SalesService : ISalesService
 
         var date = request.OrderDate == default ? DateTime.UtcNow.Date : request.OrderDate.Date;
         var prefix = $"SO-{date:yyyyMMdd}-";
-        var today = await orderRepo.FindAsync(x => x.OrderNo.StartsWith(prefix));
-        var orderNo = $"{prefix}{today.Count + 1:000}";
+        // 작20260428이7 P0-A: EF 캐시 우회 + UNIQUE 충돌 방지 (DB MAX 직조회).
+        var orderNo = await DocumentNumberHelper.NextNumberAsync(
+            _db, _currentTenant.TenantId, "sales_orders", "order_no", prefix, ct);
 
         var orderId = Guid.NewGuid().ToString();
         var order = new SalesOrder
@@ -126,8 +127,9 @@ public class SalesService : ISalesService
 
         var date = request.DeliveryDate == default ? DateTime.UtcNow.Date : request.DeliveryDate.Date;
         var prefix = $"SD-{date:yyyyMMdd}-";
-        var today = await deliveryRepo.FindAsync(x => x.DeliveryNo.StartsWith(prefix));
-        var deliveryNo = $"{prefix}{today.Count + 1:000}";
+        // 작20260428이7 P0-A: EF 캐시 우회 + UNIQUE 충돌 방지 (DB MAX 직조회).
+        var deliveryNo = await DocumentNumberHelper.NextNumberAsync(
+            _db, _currentTenant.TenantId, "sales_deliveries", "delivery_no", prefix, ct);
 
         var deliveryId = Guid.NewGuid().ToString();
         var delivery = new SalesDelivery
@@ -361,6 +363,37 @@ public class SalesService : ISalesService
                         Qty = line.Qty,
                         UnitCost = line.UnitPrice
                     },
+                    transaction: dbTx,
+                    cancellationToken: ct));
+            }
+
+            // 2-A) 수주서 헤더 status 동기화 — delivery.OrderId 가 있을 때만.
+            // §절대원칙 #20 (워크플로우 끊김 금지): item_status 만 갱신하고 헤더가 'draft' 로 남으면
+            // 수주 목록에 "임시저장"으로 보임 → 사용자 혼란 + 거래명세서 변환 재시도 시 잔량 0 차단.
+            // 4/29 SO-20260428-001 사고 진범. PurchaseService PO 헤더 동기화와 동일 패턴.
+            if (!string.IsNullOrWhiteSpace(delivery.OrderId))
+            {
+                await conn.ExecuteAsync(new CommandDefinition(
+                    """
+                    UPDATE sales_orders so
+                    LEFT JOIN (
+                        SELECT order_id,
+                               SUM(CASE WHEN item_status='closed'  THEN 1 ELSE 0 END) AS closed_cnt,
+                               SUM(CASE WHEN item_status='partial' THEN 1 ELSE 0 END) AS partial_cnt,
+                               COUNT(*) AS total_cnt
+                        FROM sales_order_items
+                        WHERE order_id = @OrderId
+                        GROUP BY order_id
+                    ) s ON s.order_id = so.order_id
+                    SET so.status = CASE
+                                       WHEN s.closed_cnt = s.total_cnt THEN 'confirmed'
+                                       WHEN s.closed_cnt > 0 OR s.partial_cnt > 0 THEN 'order'
+                                       ELSE 'draft'
+                                    END,
+                        so.updated_at = NOW(6)
+                    WHERE so.order_id = @OrderId AND so.tenant_id = @TenantId
+                    """,
+                    new { OrderId = delivery.OrderId, TenantId = delivery.TenantId },
                     transaction: dbTx,
                     cancellationToken: ct));
             }
@@ -1340,7 +1373,11 @@ public class SalesService : ISalesService
                     }
                     catch (Exception ex)
                     {
-                        // 발주는 성공했으니 결과는 Success=true 유지하되 사유에 매입 실패 표시.
+                        // 작20260428이7 (P0-A): §절대원칙 #15 "빈 catch 금지" + §#20 "워크플로우 끊김 금지".
+                        // 자동 사슬에서 매입확정 실패하면 Success=false로 명확히 알리고 로그 남김.
+                        // 이전 버그: Success=true 유지 → 사용자는 성공이라 알지만 stock_ledger INSERT 안 됨 → "재고부족 안 사라짐".
+                        Console.Error.WriteLine($"[WARN] 자동 사슬 매입확정 실패 — PoNo={poNo} TenantId={tenantId} ex={ex.GetType().Name} msg={ex.Message}");
+                        resultRow.Success = false;
                         resultRow.Reason = $"발주 OK / 매입 자동확정 실패: {ex.Message}";
                     }
                 }
