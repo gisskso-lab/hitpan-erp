@@ -2,6 +2,14 @@
 .env
 *.env.local
 
+# Cloudflare Tunnel 토큰 — 절대 커밋 금지 (WS-20260428-01)
+installer/tunnels.csv
+installer/hitpan-tunnel.conf
+installer/hitpan-keys.conf
+installer/cloudflared.exe
+**/tunnels-*.csv
+**/*tunnel-token*
+
 # 로컬 개발 설정(민감정보 가능)
 src/HitPan.API/appsettings.Development.json
 src/HitPan.Web/appsettings.Development.json
@@ -35,9 +43,16 @@ dist/
 TestResults/
 coverage/
 
-# 설치 파일 빌드 산출물 전체 제외 (요구사항은 docs/PRD_설치파일.md 참조)
+# 설치 파일 빌드 산출물 (바이너리만 제외, 소스 스크립트는 추적)
 installer-build/
-installer/
+installer/api/
+installer/web/
+installer/wwwroot/
+installer/*.exe
+installer/*.dll
+installer/*.msi
+installer/*.sql
+installer/cloudflared.exe
 *.zip
 hitpan_erp_backup_*.sql
 artifacts/doc-build/
