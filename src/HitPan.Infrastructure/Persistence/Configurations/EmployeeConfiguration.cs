@@ -45,6 +45,10 @@ public sealed class EmployeeConfiguration : IEntityTypeConfiguration<Employee>
         builder.Property(e => e.BaseSalary).HasColumnName("base_salary").HasMaxLength(200).HasConversion(_nullableEncryptedConverter);
         builder.Property(e => e.Role).HasColumnName("role").HasMaxLength(30).IsRequired();
         builder.Property(e => e.IsActive).HasColumnName("is_active").IsRequired();
+
+        // 작20260429 연차 관리 — DECIMAL(5,1) (소수점 0.5일 단위 가능)
+        builder.Property(e => e.AnnualLeaveTotal).HasColumnName("annual_leave_total").HasColumnType("decimal(5,1)").IsRequired();
+        builder.Property(e => e.AnnualLeaveUsed).HasColumnName("annual_leave_used").HasColumnType("decimal(5,1)").IsRequired();
         builder.Property(e => e.CreatedAt).HasColumnName("created_at").IsRequired();
         builder.Property(e => e.UpdatedAt).HasColumnName("updated_at").IsRequired();
         builder.Property(e => e.CreatedBy).HasColumnName("created_by").HasMaxLength(36);

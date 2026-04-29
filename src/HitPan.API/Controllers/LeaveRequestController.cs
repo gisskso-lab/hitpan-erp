@@ -33,6 +33,26 @@ public sealed class LeaveRequestController : ControllerBase
         return Ok(list);
     }
 
+    /// <summary>
+    /// 작20260429 (사장님 결재): 대시보드 월간 연차 캘린더.
+    /// </summary>
+    [HttpGet("calendar")]
+    public async Task<IActionResult> GetCalendar([FromQuery] int? year, [FromQuery] int? month, CancellationToken ct)
+    {
+        var tenantId = HttpContext.Items["TenantId"]?.ToString();
+        if (string.IsNullOrEmpty(tenantId))
+        {
+            return Forbid();
+        }
+
+        var y = year ?? DateTime.Today.Year;
+        var m = month ?? DateTime.Today.Month;
+        if (m < 1 || m > 12) return BadRequest(new { message = "month must be 1~12" });
+
+        var result = await _leaveRequestService.GetCalendarAsync(tenantId, y, m, ct).ConfigureAwait(false);
+        return Ok(result);
+    }
+
     [HttpPost]
     public async Task<IActionResult> Create([FromBody] CreateLeaveRequest request, CancellationToken ct)
     {

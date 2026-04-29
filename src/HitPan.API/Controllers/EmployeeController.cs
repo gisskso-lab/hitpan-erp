@@ -89,4 +89,24 @@ public sealed class EmployeeController : ControllerBase
         await _employeeService.DeleteAsync(tenantId, id, ct).ConfigureAwait(false);
         return Ok();
     }
+
+    /// <summary>
+    /// 작20260429 연차 관리 (사장님 결재): 부여·사용 일수 단독 저장.
+    /// 사원관리 그리드의 연차 컬럼 인라인 편집 후 호출된다.
+    /// 다른 사원 정보는 변경하지 않는다 (워크플로우 영향 0건).
+    /// </summary>
+    [HttpPut("{id}/annual-leave")]
+    public async Task<IActionResult> UpdateAnnualLeave(string id,
+        [FromBody] UpdateAnnualLeaveRequest request, CancellationToken ct)
+    {
+        var tenantId = HttpContext.Items["TenantId"]?.ToString();
+        if (string.IsNullOrEmpty(tenantId))
+        {
+            return Forbid();
+        }
+
+        await _employeeService.UpdateAnnualLeaveAsync(tenantId, id,
+            request.AnnualLeaveTotal, request.AnnualLeaveUsed, ct).ConfigureAwait(false);
+        return Ok();
+    }
 }

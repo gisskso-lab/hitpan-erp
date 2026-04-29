@@ -16,288 +16,149 @@
 
 <PageTitle>대시보드 — 히트판 ERP</PageTitle>
 
-@* 권한 설정 안내 배너 — 어드민 첫 진입 시 권한 미설정 상태 유도 *@
-@if (_showPermissionBanner)
-{
-    @* 권한 설정 안내 — Warning(주황)으로 주의 환기, 보라색 혼동 방지 *@
-    <MudAlert Severity="Severity.Warning" Class="mb-3" Elevation="0" Dense="true">
-        <div class="d-flex align-center justify-space-between" style="gap:16px;flex-wrap:wrap">
-            <div>
-                <MudText Typo="Typo.body2" Style="font-weight:600">🔐 권한 설정이 필요합니다</MudText>
-                <MudText Typo="Typo.caption" Style="color:var(--hitpan-text-muted)">
-                    직원별 메뉴 접근 권한이 아직 설정되지 않았습니다. 먼저 지정해주세요.
-                </MudText>
-            </div>
-            <MudButton Variant="Variant.Filled" Color="Color.Primary" Size="Size.Small"
-                EndIcon="@Icons.Material.Filled.ArrowForward"
-                OnClick="@(() => Nav.NavigateTo("/users/permissions"))">
-                권한 설정
-            </MudButton>
-        </div>
-    </MudAlert>
-}
-
-@* 페이지 헤더 — 디자인 시스템 v1 *@
-<PageHeader Title="대시보드" Subtitle="@(DateTime.Now.ToString("yyyy-MM-dd (ddd)"))" />
-
-@* KPI 카드 영역 — KpiCard 공용 컴포넌트.
-   사장님 헌법 (2026-04-27): "대시보드 시각화 클릭 = 해당 데이터/전표로 바로 연동". *@
-<MudGrid Spacing="2" Class="mb-3">
-    <MudItem xs="12" sm="6" md="2" lg="2">
-        <KpiCard Color="KpiCard.KpiColor.Primary"
-                 Icon="@Icons.Material.Filled.PointOfSale"
-                 Label="오늘 매출"
-                 Value="@FormatAmount(_data.TodaySales)"
-                 OnClick="@(() => Nav.NavigateTo($"/deliveries?from={DateTime.Today:yyyy-MM-dd}&to={DateTime.Today:yyyy-MM-dd}"))" />
-    </MudItem>
-    <MudItem xs="12" sm="6" md="2" lg="2">
-        <KpiCard Color="KpiCard.KpiColor.Info"
-                 Icon="@Icons.Material.Filled.TrendingUp"
-                 Label="이번달 매출"
-                 Value="@FormatAmount(_data.MonthSales)"
-                 OnClick="@(() => Nav.NavigateTo($"/deliveries?from={MonthStart():yyyy-MM-dd}&to={DateTime.Today:yyyy-MM-dd}"))" />
-    </MudItem>
-    <MudItem xs="12" sm="6" md="2" lg="2">
-        <KpiCard Color="KpiCard.KpiColor.Warning"
-                 Icon="@Icons.Material.Filled.ShoppingCart"
-                 Label="이번달 매입"
-                 Value="@FormatAmount(_data.MonthPurchase)"
-                 OnClick="@(() => Nav.NavigateTo($"/purchases?from={MonthStart():yyyy-MM-dd}&to={DateTime.Today:yyyy-MM-dd}"))" />
-    </MudItem>
-    <MudItem xs="12" sm="6" md="3" lg="3">
-        <KpiCard Color="KpiCard.KpiColor.Error"
-                 Icon="@Icons.Material.Filled.Warning"
-                 Label="미수금"
-                 Value="@FormatAmount(_data.UnpaidReceivable)"
-                 EmphasizeValue="true"
-                 OnClick="@(() => Nav.NavigateTo("/partners/ledger"))" />
-    </MudItem>
-    <MudItem xs="12" sm="6" md="3" lg="3">
-        <KpiCard Color="KpiCard.KpiColor.Purple"
-                 Icon="@Icons.Material.Filled.PendingActions"
-                 Label="결재대기"
-                 Value="@($"{_data.PendingApprovalCount}건")"
-                 EmphasizeValue="true"
-                 OnClick="@(() => Nav.NavigateTo("/approval/pending"))" />
-    </MudItem>
-</MudGrid>
-
-@* 차트 영역 *@
-<MudGrid Spacing="2" Class="mb-3">
-    @* 월별 매출·매입 추이 *@
-    <MudItem xs="12" md="8">
-        <MudPaper Elevation="0" Class="pa-3" Style="border:0.5px solid var(--mud-palette-lines-default);border-radius:12px;height:280px">
-            <MudText Typo="Typo.subtitle2" Class="mb-2" Style="font-weight:600">월별 매출·매입 추이</MudText>
-            @if (_data.MonthlyTrend.Any())
+@* ─── 토스 감성 Hero + 우측 경고 알림 카드 (사장님 결재 2026-04-29 — 옵션 B) ───
+   좌측: 인사말 + 오늘 매출 + 부제
+   우측: 권한·구독·기기 등 계정 관련 경고 카드 스택 (없으면 좌측이 전체 폭 차지)
+*@
+<div class="hp-hero-row">
+    <div class="hp-hero">
+        <p class="hp-hero-greeting">
+            <strong>안녕하세요, @(_userName)</strong>
+            <span class="hp-hero-dot">·</span>
+            <span class="hp-hero-date">@(DateTime.Now.ToString("M월 d일 dddd", new System.Globalization.CultureInfo("ko-KR")))</span>
+        </p>
+        <h1 class="hp-hero-title">
+            오늘 매출
+            <span class="hp-hero-amount">@FormatAmount(_data.TodaySales)</span>
+        </h1>
+        <p class="hp-hero-subtitle">
+            @if (_data.MonthSales > 0)
             {
-                <ApexChart TItem="MonthlyTrend"
-                           Options="@_chartOptions"
-                           Height="220">
-                    <ApexPointSeries TItem="MonthlyTrend"
-                                     Items="_data.MonthlyTrend"
-                                     Name="매출"
-                                     SeriesType="SeriesType.Bar"
-                                     XValue="@(e => e.Label)"
-                                     YValue="@(e => e.SalesAmount)" />
-                    <ApexPointSeries TItem="MonthlyTrend"
-                                     Items="_data.MonthlyTrend"
-                                     Name="매입"
-                                     SeriesType="SeriesType.Bar"
-                                     XValue="@(e => e.Label)"
-                                     YValue="@(e => e.PurchaseAmount)" />
-                </ApexChart>
+                <text>이번달 누적 <strong>@FormatAmount(_data.MonthSales)</strong> · 좋은 하루의 시작입니다 👏</text>
             }
             else
             {
-                <div class="d-flex align-center justify-center" style="height:200px">
-                    <MudText Color="Color.Secondary" Typo="Typo.body2">데이터가 없습니다</MudText>
-                </div>
+                <text>오늘도 좋은 하루 보내세요 👏</text>
             }
-        </MudPaper>
-    </MudItem>
-
-    @* 거래처 TOP 5 *@
-    <MudItem xs="12" md="4">
-        <MudPaper Elevation="0" Class="pa-3" Style="border:0.5px solid var(--mud-palette-lines-default);border-radius:12px;height:280px">
-            <MudText Typo="Typo.subtitle2" Class="mb-2" Style="font-weight:600">거래처 TOP 5</MudText>
-            @if (_data.TopPartners.Any())
-            {
-                <ApexChart TItem="PartnerRank"
-                           Options="@_partnerChartOptions"
-                           Height="220">
-                    <ApexPointSeries TItem="PartnerRank"
-                                     Items="_data.TopPartners"
-                                     Name="거래금액"
-                                     SeriesType="SeriesType.Bar"
-                                     XValue="@(e => e.PartnerName)"
-                                     YValue="@(e => e.TotalAmount)" />
-                </ApexChart>
-            }
-            else
-            {
-                <div class="d-flex align-center justify-center" style="height:200px">
-                    <MudText Color="Color.Secondary" Typo="Typo.body2">데이터가 없습니다</MudText>
-                </div>
-            }
-        </MudPaper>
-    </MudItem>
-</MudGrid>
-
-@* AR Aging 연체 Top 5 — 대표이사 자금 관리용 *@
-<MudPaper Elevation="0" Class="pa-3 mb-3" Style="border:0.5px solid var(--mud-palette-lines-default);border-radius:12px">
-    <div class="d-flex justify-space-between align-center mb-2">
-        <MudText Typo="Typo.subtitle2" Style="font-weight:600">외상·연체 Top 5</MudText>
-        <MudButton Size="Size.Small" Variant="Variant.Text" EndIcon="@Icons.Material.Filled.ArrowForward"
-                   OnClick="@(() => Nav.NavigateTo("/collections"))">전체 보기</MudButton>
+        </p>
     </div>
-    @if (_aging is not null && _aging.Count > 0)
+
+    @* 우측 경고 알림 스택 — 권한 미설정·구독 갱신·기기 등록 등 계정/구독 영역 알림.
+       알림이 0건이면 카드 통째로 숨겨 Hero가 전체 폭 차지 (반응형 유지). *@
+    @if (_alerts.Count > 0)
     {
-        <MudSimpleTable Dense="true" Hover="true" Style="border:none">
-            <thead>
-                <tr>
-                    <th>거래처</th>
-                    <th style="text-align:right">미수금</th>
-                    <th style="text-align:right">0~30일</th>
-                    <th style="text-align:right">31~60일</th>
-                    <th style="text-align:right">61~90일</th>
-                    <th style="text-align:right">90일+</th>
-                    <th style="text-align:center">연체</th>
-                </tr>
-            </thead>
-            <tbody>
-                @foreach (var a in _aging.Take(5))
-                {
-                    <tr style="cursor:pointer" @onclick="@(() => Nav.NavigateTo($"/collections?partner={a.PartnerId}"))">
-                        <td style="font-weight:500">@a.PartnerName</td>
-                        <td style="text-align:right;font-weight:600">@a.TotalUnpaid.ToString("N0")</td>
-                        <td style="text-align:right">@a.Bucket0_30.ToString("N0")</td>
-                        <td style="text-align:right">@a.Bucket31_60.ToString("N0")</td>
-                        <td style="text-align:right">@a.Bucket61_90.ToString("N0")</td>
-                        <td style="text-align:right;color:var(--hitpan-aging-90);font-weight:600">@a.Bucket90Plus.ToString("N0")</td>
-                        <td style="text-align:center">
-                            <PartnerAgingBadge DaysOverdue="@MaxOverdueDays(a)" />
-                        </td>
-                    </tr>
-                }
-            </tbody>
-        </MudSimpleTable>
-    }
-    else
-    {
-        <div class="d-flex flex-column align-center justify-center" style="height:80px">
-            <MudIcon Icon="@Icons.Material.Filled.CheckCircleOutline" Color="Color.Success" Size="Size.Large" />
-            <MudText Typo="Typo.body2" Color="Color.Secondary" Class="mt-1">미수금 없음 — 자금 건전</MudText>
+        <div class="hp-alert-stack">
+            @foreach (var alert in _alerts)
+            {
+                <div class="hp-alert-card hp-alert-@alert.Severity"
+                     @onclick="@(() => Nav.NavigateTo(alert.Href))" role="button" tabindex="0">
+                    <div class="hp-alert-icon">
+                        <MudIcon Icon="@alert.Icon" Size="Size.Small" />
+                    </div>
+                    <div class="hp-alert-body">
+                        <div class="hp-alert-title">@alert.Title</div>
+                        <div class="hp-alert-desc">@alert.Description</div>
+                    </div>
+                    <MudIcon Icon="@Icons.Material.Filled.ArrowForward" Class="hp-alert-arrow" Size="Size.Small" />
+                </div>
+            }
         </div>
     }
-</MudPaper>
+</div>
 
-@* 하단 영역: 최근 거래 + 재고 부족 *@
-<MudGrid Spacing="2">
-    @* 최근 거래 *@
-    <MudItem xs="12" md="7">
-        <MudPaper Elevation="0" Class="pa-3" Style="border:0.5px solid var(--mud-palette-lines-default);border-radius:12px">
-            <MudText Typo="Typo.subtitle2" Class="mb-2" Style="font-weight:600">최근 거래</MudText>
-            <MudTable T="RecentTx" Items="_data.RecentTransactions" Dense="true" Hover="true" Elevation="0"
-                      Style="border:none" FixedHeader="false"
-                      OnRowClick="@((TableRowClickEventArgs<RecentTx> e) => { if (e.Item is not null) GoToTransaction(e.Item); })"
-                      RowStyle="cursor:pointer">
-                <HeaderContent>
-                    <MudTh>일자</MudTh>
-                    <MudTh>유형</MudTh>
-                    <MudTh>문서번호</MudTh>
-                    <MudTh>거래처</MudTh>
-                    <MudTh Style="text-align:right">금액</MudTh>
-                    <MudTh>상태</MudTh>
-                </HeaderContent>
-                <RowTemplate>
-                    <MudTd>@context.TxDate.ToString("MM-dd")</MudTd>
-                    <MudTd>
-                        <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined"
-                                 Color="@GetDocTypeColor(context.DocType)">@context.DocType</MudChip>
-                    </MudTd>
-                    <MudTd>@context.DocNo</MudTd>
-                    <MudTd>@context.PartnerName</MudTd>
-                    <MudTd Style="text-align:right;font-weight:500">@FormatAmount(context.Amount)</MudTd>
-                    <MudTd>
-                        <MudChip T="string" Size="Size.Small" Variant="Variant.Filled"
-                                 Color="@GetStatusColor(context.Status)">@HitPan.Web.Helpers.StatusLabel.Document(context.Status)</MudChip>
-                    </MudTd>
-                </RowTemplate>
-                <NoRecordsContent>
-                    <MudText Typo="Typo.body2" Color="Color.Secondary" Align="Align.Center">거래 내역이 없습니다</MudText>
-                </NoRecordsContent>
-            </MudTable>
-        </MudPaper>
-    </MudItem>
+@* ─── Quick Action 4카드 (이미지 그대로 — 컬러풀 아이콘 + 화살표) ─── *@
+<div class="hp-quick-grid">
+    <div class="hp-quick-card" @onclick="@(() => Nav.NavigateTo("/sales-orders/new"))">
+        <div class="hp-quick-icon hp-q-green">
+            <MudIcon Icon="@Icons.Material.Filled.Add" Size="Size.Medium" />
+        </div>
+        <div class="hp-quick-title">새 수주 작성</div>
+        <div class="hp-quick-desc">고객사 주문을 빠르게 접수해요</div>
+        <MudIcon Icon="@Icons.Material.Filled.ArrowForward" Class="hp-quick-arrow" />
+    </div>
 
-    @* 재고 부족 알림 — 사장님 헌법 (2026-04-27): 안전재고 미달 = 평소 안전망. 대시보드에서 바로 발주. *@
-    <MudItem xs="12" md="5">
-        <MudPaper Elevation="0" Class="pa-3" Style="border:0.5px solid var(--mud-palette-lines-default);border-radius:12px">
-            <div class="d-flex justify-space-between align-center mb-2">
-                <MudText Typo="Typo.subtitle2" Style="font-weight:600">재고 부족 알림</MudText>
-                <div class="d-flex align-center" style="gap:8px">
-                    @if (_pendingAlerts.Count > 0)
-                    {
-                        <MudButton Variant="Variant.Filled" Color="Color.Warning" Size="Size.Small"
-                                   StartIcon="@Icons.Material.Filled.ShoppingCart"
-                                   OnClick="OpenDashboardAutoOrderAsync"
-                                   Disabled="_orderingDashboard">
-                            @(_orderingDashboard ? "처리중..." : $"자동발주 ({_pendingAlerts.Count})")
-                        </MudButton>
-                    }
-                    @if (_pendingAlerts.Any())
-                    {
-                        <MudChip T="string" Size="Size.Small" Color="Color.Error" Variant="Variant.Filled">
-                            @(_pendingAlerts.Count)건
-                        </MudChip>
-                    }
-                </div>
-            </div>
-            @* 사장님 지적 (2026-04-27): 재고 부족 표시와 자동발주 카운트는 단일 소스(_pendingAlerts).
-               두 소스가 어긋나면 "재고 부족 없음 + 자동발주 3건" 같은 모순 발생. *@
-            @if (_pendingAlerts.Any())
-            {
-                <MudSimpleTable Dense="true" Hover="true" Style="border:none">
-                    <thead>
-                        <tr>
-                            <th>자재명</th>
-                            <th style="text-align:right">현재고</th>
-                            <th style="text-align:right">안전재고</th>
-                            <th style="text-align:right">부족</th>
-                            <th>발주처</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        @foreach (var a in _pendingAlerts)
-                        {
-                            <tr style="color:var(--hitpan-error);font-weight:500;cursor:pointer"
-                                @onclick="@(() => Nav.NavigateTo($"/items/{a.ItemId}"))">
-                                <td>@a.ItemName</td>
-                                <td style="text-align:right">@a.CurrentQty.ToString("N0")</td>
-                                <td style="text-align:right">@a.SafetyQty.ToString("N0")</td>
-                                <td style="text-align:right">@a.ShortageQty.ToString("N0")</td>
-                                <td>@(string.IsNullOrWhiteSpace(a.PartnerName) ? "(미설정)" : a.PartnerName)</td>
-                            </tr>
-                        }
-                    </tbody>
-                </MudSimpleTable>
-            }
-            else
-            {
-                <div class="d-flex flex-column align-center justify-center" style="height:100px">
-                    <MudIcon Icon="@Icons.Material.Filled.CheckCircleOutline" Color="Color.Success" Size="Size.Large" />
-                    <MudText Typo="Typo.body2" Color="Color.Secondary" Class="mt-1">재고 부족 품목 없음</MudText>
-                </div>
-            }
-        </MudPaper>
-    </MudItem>
-</MudGrid>
+    <div class="hp-quick-card" @onclick="@(() => Nav.NavigateTo("/purchase-order-status"))">
+        <div class="hp-quick-icon hp-q-blue">
+            <MudIcon Icon="@Icons.Material.Filled.AssignmentTurnedIn" Size="Size.Medium" />
+        </div>
+        <div class="hp-quick-title">발주 처리</div>
+        <div class="hp-quick-desc">대기 중인 발주를 빠르게 처리해요</div>
+        <MudIcon Icon="@Icons.Material.Filled.ArrowForward" Class="hp-quick-arrow" />
+    </div>
+
+    <div class="hp-quick-card" @onclick="@(() => Nav.NavigateTo("/tax-invoice"))">
+        <div class="hp-quick-icon hp-q-pink">
+            <MudIcon Icon="@Icons.Material.Filled.Receipt" Size="Size.Medium" />
+        </div>
+        <div class="hp-quick-title">세금계산서</div>
+        <div class="hp-quick-desc">전자세금계산서 발행</div>
+        <MudIcon Icon="@Icons.Material.Filled.ArrowForward" Class="hp-quick-arrow" />
+    </div>
+
+    <div class="hp-quick-card" @onclick="@(() => Nav.NavigateTo("/partners/ledger"))">
+        <div class="hp-quick-icon hp-q-orange">
+            <MudIcon Icon="@Icons.Material.Filled.NotificationsActive" Size="Size.Medium" />
+        </div>
+        <div class="hp-quick-title">미수금 알림</div>
+        <div class="hp-quick-desc">@(_aging.Any() ? $"{_aging.Count}건이 30일 경과했어요" : "30일 경과 거래처를 확인해요")</div>
+        <MudIcon Icon="@Icons.Material.Filled.ArrowForward" Class="hp-quick-arrow" />
+    </div>
+</div>
+
+@* ─── KPI Hero (그린 그라디언트 큰 카드 + 보조 2장) ─── *@
+<div class="hp-kpi-hero-row">
+    <div class="hp-kpi-hero" @onclick="@(() => Nav.NavigateTo($"/deliveries?from={MonthStart():yyyy-MM-dd}&to={DateTime.Today:yyyy-MM-dd}"))">
+        <div class="hp-kpi-hero-bg-1"></div>
+        <div class="hp-kpi-hero-bg-2"></div>
+        <div class="hp-kpi-hero-label">이번달 누적 매출</div>
+        <div class="hp-kpi-hero-value">
+            @FormatAmount(_data.MonthSales)
+        </div>
+        <span class="hp-kpi-hero-delta">▲ 지난달 대비 추이</span>
+    </div>
+
+    <div class="hp-kpi-card" @onclick="@(() => Nav.NavigateTo("/stock"))">
+        <div class="hp-kpi-label">재고 자산</div>
+        <div class="hp-kpi-value">@(_data.LowStockCount > 0 ? $"⚠️ {_data.LowStockCount}건 부족" : "정상")</div>
+        <span class="hp-kpi-delta hp-up">▲ 안전재고 위</span>
+    </div>
+
+    <div class="hp-kpi-card" @onclick="@(() => Nav.NavigateTo("/partners/ledger"))">
+        <div class="hp-kpi-label">미수금</div>
+        <div class="hp-kpi-value">@FormatAmount(_data.UnpaidReceivable)</div>
+        <span class="hp-kpi-delta hp-down">▲ @(_aging.Count)건 30일 경과</span>
+    </div>
+</div>
+
+@* 4/29 사장님 결재: 정밀 KPI 5장 제거 — Hero/KPI Hero가 이미 핵심 정보 표시.
+   대시보드는 깔끔하게 (Hero + Quick + KPI Hero + 챗봇 + 연차 캘린더)까지만.
+   기존 KPI 5장 컴포넌트(KpiCard)는 다른 페이지에서 그대로 활용 가능 — 코드 보존. *@
+
+@* 4/29 사장님 결재: AI 도우미 카드 제거 — 상단 ChatbotBar(TopHeader)와 통합·중복 제거. *@
+
+@* ─── 4/29 사장님 결재: 월간 직원 연차 캘린더 ───
+   대시보드 핵심 시각화 — 이번달 누가 언제 휴가인지 한눈에.
+   사원 × 일자 매트릭스. 휴가 종류별 색상.
+   기존 차트·외상연체·최근거래·재고알림 컴포넌트는 다른 페이지(현황·재무)에서 활용 가능 — 코드 보존. *@
+<LeaveCalendar />
 
 @code {
     // ─── 데이터 모델 ───
     private DashboardData _data = new();
     private List<PartnerAgingRow> _aging = new();
-    private bool _showPermissionBanner = false;
+
+    // 4/29 사장님 결재 (옵션 B): Hero 우측 경고 알림 카드 스택.
+    // 권한 미설정 / 구독 갱신 / 기기 등록 등 계정·구독 관련 알림만 모음 (워크플로우 알림 X).
+    private List<DashboardAlert> _alerts = new();
+
+    private sealed class DashboardAlert
+    {
+        public string Title { get; init; } = "";
+        public string Description { get; init; } = "";
+        public string Icon { get; init; } = "";
+        public string Href { get; init; } = "";
+        public string Severity { get; init; } = "warn"; // warn / info / danger
+    }
 
     private static int MaxOverdueDays(PartnerAgingRow a)
     {
@@ -351,66 +212,35 @@
         Legend = new Legend { Show = false }
     };
 
-    // 사장님 헌법 (2026-04-27): 대시보드 = 평소 안전망. stock_alerts 'pending' 자동 발주 트리거.
-    private List<StockAlertModel> _pendingAlerts = new();
-    private bool _orderingDashboard = false;
+    // 토스 Hero — 인삿말에 표시할 사용자 이름. JWT claim 에서 추출.
+    private string _userName = "사장님";
 
     // ─── 초기 로드 ───
     protected override async Task OnInitializedAsync()
     {
         await CheckPermissionBannerAsync();
-        await Task.WhenAll(LoadDashboardAsync(), LoadAgingAsync(), LoadPendingAlertsAsync());
+        await LoadUserNameAsync();
+        await Task.WhenAll(LoadDashboardAsync(), LoadAgingAsync());
     }
 
-    private async Task LoadPendingAlertsAsync()
+    private async Task LoadUserNameAsync()
     {
-        var alerts = await BomApi.GetAlertsAsync();
-        _pendingAlerts = (alerts ?? new List<StockAlertModel>())
-            .Where(a => string.Equals(a.Status, "pending", StringComparison.OrdinalIgnoreCase))
-            .ToList();
-    }
-
-    private async Task OpenDashboardAutoOrderAsync()
-    {
-        if (_pendingAlerts.Count == 0) return;
-
-        var lines = string.Join("\n", _pendingAlerts.Take(5).Select(a =>
-            $"• {a.ItemName} (현재고 {a.CurrentQty:N0} / 안전재고 {a.SafetyQty:N0}, 부족 {a.ShortageQty:N0})"));
-        var more = _pendingAlerts.Count > 5 ? $"\n... 외 {_pendingAlerts.Count - 5}건" : "";
-
-        var go = await DialogService.ShowMessageBoxAsync(
-            "⚠ 안전재고 미달 자동발주",
-            $"아래 자재가 안전재고 미달입니다. 자동발주서를 생성하시겠습니까?\n\n{lines}{more}\n\n" +
-            "발주서 생성 후 [발주목록 → 매입처리 → 매입확정] 단계로 진행해주세요.",
-            yesText: "자동발주 실행", cancelText: "취소");
-        if (go != true) return;
-
-        _orderingDashboard = true;
-        StateHasChanged();
         try
         {
-            var success = 0;
-            var failed = 0;
-            foreach (var a in _pendingAlerts)
-            {
-                if (string.IsNullOrWhiteSpace(a.AlertId)) continue;
-                var ok = await BomApi.OrderAlertAsync(a.AlertId);
-                if (ok) success++; else failed++;
-            }
-
-            if (success > 0)
-                Snackbar.Add($"자동발주서 {success}건 생성 완료. 발주목록 → 매입처리 → 매입확정 진행해주세요.", Severity.Success);
-            if (failed > 0)
-                Snackbar.Add($"{failed}건 실패", Severity.Warning);
-
-            await LoadPendingAlertsAsync();
+            var state = await AuthState.GetAuthenticationStateAsync();
+            var name = state.User?.FindFirst("name")?.Value
+                       ?? state.User?.FindFirst(System.Security.Claims.ClaimTypes.Name)?.Value;
+            if (!string.IsNullOrWhiteSpace(name)) _userName = $"{name}님";
         }
-        finally
+        catch (Exception ex)
         {
-            _orderingDashboard = false;
-            StateHasChanged();
+            // §원칙 #15 — silent swallow 금지. 진단 로그만 남기고 기본값 유지.
+            Console.Error.WriteLine($"[Dashboard.LoadUserNameAsync] {ex.GetType().Name}: {ex.Message}");
         }
     }
+
+    // 4/29 사장님 결재로 대시보드 청소: 재고 부족 알림 + 자동발주 트리거 코드 제거.
+    // 재고 알림은 향후 재고관리 화면에서 별도 구현 예정 (BomApi.OrderAlertAsync는 보존 — 다른 페이지에서 활용 가능).
 
     // 사장님 헌법 (2026-04-27): 시각화 클릭 → 데이터/전표 연동.
     private static DateTime MonthStart() => new DateTime(DateTime.Today.Year, DateTime.Today.Month, 1);
@@ -444,7 +274,7 @@
         catch { _aging = new(); }
     }
 
-    /// <summary>어드민이 권한 미설정 상태면 상단 배너 노출</summary>
+    /// <summary>4/29 사장님 결재 (옵션 B): 권한·구독·기기 등 계정 관련 경고를 _alerts에 모아 Hero 우측에 카드로 노출.</summary>
     private async Task CheckPermissionBannerAsync()
     {
         try
@@ -454,16 +284,34 @@
                 return;
 
             var perms = await PermSvc.GetAllAsync();
-            if (perms == null || perms.Count == 0) { _showPermissionBanner = true; return; }
+            var needsPermissionSetup = false;
+            if (perms == null || perms.Count == 0)
+            {
+                needsPermissionSetup = true;
+            }
+            else
+            {
+                var anyConfigured = perms.Any(u => u.Permissions
+                    .Any(p => p.CanView || p.CanCreate || p.CanUpdate || p.CanDelete || p.CanExport));
+                needsPermissionSetup = !anyConfigured;
+            }
 
-            // 누구도 단 하나라도 권한을 받지 않은 상태면 배너 표시
-            var anyConfigured = perms.Any(u => u.Permissions
-                .Any(p => p.CanView || p.CanCreate || p.CanUpdate || p.CanDelete || p.CanExport));
-            _showPermissionBanner = !anyConfigured;
+            if (needsPermissionSetup)
+            {
+                _alerts.Add(new DashboardAlert
+                {
+                    Title = "권한 설정이 필요합니다",
+                    Description = "직원별 메뉴 접근 권한을 지정해주세요",
+                    Icon = Icons.Material.Filled.Lock,
+                    Href = "/users/permissions",
+                    Severity = "warn"
+                });
+            }
         }
-        catch
+        catch (Exception ex)
         {
-            _showPermissionBanner = false; // 조회 실패 시 배너 숨김 (보수적)
+            // §원칙 #15 — silent swallow 금지. 로그만 남기고 알림 미노출 (보수적).
+            Console.Error.WriteLine($"[Dashboard.CheckPermissionBannerAsync] {ex.GetType().Name}: {ex.Message}");
         }
     }
 

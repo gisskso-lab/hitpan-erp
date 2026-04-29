@@ -34,6 +34,8 @@ public sealed class EmployeeService : IEmployeeService
               e.email AS Email,
               e.role AS Role,
               e.is_active AS IsActive,
+              e.annual_leave_total AS AnnualLeaveTotal,
+              e.annual_leave_used  AS AnnualLeaveUsed,
               CASE WHEN e.user_id IS NULL OR e.user_id = '' THEN 0 ELSE 1 END AS HasUserAccount
             FROM employees e
             LEFT JOIN departments d
@@ -74,6 +76,8 @@ public sealed class EmployeeService : IEmployeeService
               e.email AS Email,
               e.role AS Role,
               e.is_active AS IsActive,
+              e.annual_leave_total AS AnnualLeaveTotal,
+              e.annual_leave_used  AS AnnualLeaveUsed,
               e.created_by AS CreatedBy,
               e.updated_by AS UpdatedBy,
               e.created_at AS CreatedAt,
@@ -184,6 +188,41 @@ public sealed class EmployeeService : IEmployeeService
                 Phone = request.Phone,
                 Email = request.Email,
                 Role = string.IsNullOrWhiteSpace(request.Role) ? "sales_user" : request.Role
+            },
+            cancellationToken: ct)).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// 작20260429 (사장님 결재): 연차 부여·사용 일수만 단독 저장 (사원관리 그리드용).
+    /// 다른 사원 정보는 건드리지 않는다 — 권한 분리 + 워크플로우 영향 0건.
+    /// 잔여는 (Total - Used) 계산값. 음수 입력 차단(0 이하면 0으로 보정).
+    /// </summary>
+    public async Task UpdateAnnualLeaveAsync(string tenantId, string employeeId,
+        decimal annualLeaveTotal, decimal annualLeaveUsed, CancellationToken ct = default)
+    {
+        await EnsureOpenAsync(ct).ConfigureAwait(false);
+
+        // 음수 차단 — 사용자 실수 방어 (원장 무결성 정신과 동일)
+        if (annualLeaveTotal < 0m) annualLeaveTotal = 0m;
+        if (annualLeaveUsed  < 0m) annualLeaveUsed  = 0m;
+
+        const string sql = """
+            UPDATE employees
+            SET annual_leave_total = @Total,
+                annual_leave_used  = @Used,
+                updated_at         = NOW(6)
+            WHERE tenant_id  = @TenantId
+              AND employee_id = @EmployeeId
+            """;
+
+        await _db.ExecuteAsync(new CommandDefinition(
+            sql,
+            new
+            {
+                TenantId = tenantId,
+                EmployeeId = employeeId,
+                Total = annualLeaveTotal,
+                Used = annualLeaveUsed
             },
             cancellationToken: ct)).ConfigureAwait(false);
     }

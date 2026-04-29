@@ -16,6 +16,11 @@ public sealed class EmployeeListDto
     public string Role { get; set; } = "sales_user";
     public bool IsActive { get; set; }
     public bool HasUserAccount { get; set; }
+
+    // 작20260429 연차 관리 (사장님 결재)
+    public decimal AnnualLeaveTotal { get; set; }
+    public decimal AnnualLeaveUsed { get; set; }
+    public decimal AnnualLeaveRemaining => AnnualLeaveTotal - AnnualLeaveUsed;
 }
 
 /// <summary>
@@ -40,10 +45,23 @@ public sealed class EmployeeDetailDto
     public string? Email { get; set; }
     public string Role { get; set; } = "sales_user";
     public bool IsActive { get; set; }
+    public decimal AnnualLeaveTotal { get; set; }
+    public decimal AnnualLeaveUsed { get; set; }
+    public decimal AnnualLeaveRemaining => AnnualLeaveTotal - AnnualLeaveUsed;
     public string? CreatedBy { get; set; }
     public string? UpdatedBy { get; set; }
     public DateTime CreatedAt { get; set; }
     public DateTime UpdatedAt { get; set; }
+}
+
+/// <summary>
+/// 작20260429 연차 저장 요청 (사장님 결재).
+/// 사원관리 그리드에서 부여·사용 일수만 단독 저장한다.
+/// </summary>
+public sealed class UpdateAnnualLeaveRequest
+{
+    public decimal AnnualLeaveTotal { get; set; }
+    public decimal AnnualLeaveUsed { get; set; }
 }
 
 /// <summary>

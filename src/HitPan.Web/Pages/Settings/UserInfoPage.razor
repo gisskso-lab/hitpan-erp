@@ -126,6 +126,13 @@ else
                     <MudItem xs="5"><MudText Style="font-size:12px;color:var(--mud-palette-text-secondary)">라이선스 사용</MudText></MudItem>
                     <MudItem xs="7"><MudText Style="font-size:12px">@_subscription.UsedLicense / @_subscription.TotalLicense</MudText></MudItem>
                 </MudGrid>
+                @* 사장님 결재 2026-04-29: 구독결제 관리 진입 버튼 *@
+                <MudButton Variant="Variant.Filled" Color="Color.Primary" FullWidth="true"
+                           StartIcon="@Icons.Material.Filled.Payment"
+                           OnClick="@(() => Navigation.NavigateTo("/settings/subscription-billing"))"
+                           Class="mt-3">
+                    구독결제 관리
+                </MudButton>
             </MudPaper>
         </MudItem>
     </MudGrid>

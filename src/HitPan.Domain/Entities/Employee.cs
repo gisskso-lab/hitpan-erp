@@ -25,4 +25,10 @@ public class Employee : BaseEntity, ITenantEntity
     public string? BaseSalary { get; set; }
     public string Role { get; set; } = "sales_user";
     public bool IsActive { get; set; } = true;
+
+    // 작20260429 연차 관리 (사장님 결재): employees 테이블에 컬럼 2개만 추가.
+    // 잔여는 (Total - Used) 계산값 — DB 저장 X, 화면 표시만.
+    // 별도 이력 테이블은 베타 후 정식 운영 시 마이그레이션 검토.
+    public decimal AnnualLeaveTotal { get; set; }
+    public decimal AnnualLeaveUsed { get; set; }
 }

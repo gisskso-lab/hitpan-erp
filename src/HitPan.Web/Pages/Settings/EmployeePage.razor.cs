@@ -137,6 +137,32 @@ public partial class EmployeePage : ComponentBase
         await ReloadAllAsync().ConfigureAwait(false);
     }
 
+    /// <summary>
+    /// 작20260429 연차 관리 (사장님 결재): 그리드 한 행의 연차만 단독 저장.
+    /// 사용자 실수 방지: 사용 > 부여 시 경고만 띄우고 저장은 진행한다 (마이너스 잔여 허용 — 가불 개념).
+    /// </summary>
+    private async Task SaveAnnualLeaveAsync(EmployeeListItemModel row)
+    {
+        if (row.AnnualLeaveTotal < 0 || row.AnnualLeaveUsed < 0)
+        {
+            Snackbar.Add("연차는 0 이상이어야 합니다.", Severity.Warning);
+            return;
+        }
+
+        var ok = await EmployeeSvc.UpdateAnnualLeaveAsync(
+            row.EmployeeId, row.AnnualLeaveTotal, row.AnnualLeaveUsed).ConfigureAwait(false);
+        if (!ok)
+        {
+            Snackbar.Add($"{row.EmpName} 연차 저장 실패.", Severity.Error);
+            return;
+        }
+
+        var msg = row.AnnualLeaveUsed > row.AnnualLeaveTotal
+            ? $"{row.EmpName} 연차 저장 완료 (사용량이 부여를 초과했습니다)"
+            : $"{row.EmpName} 연차 저장 완료 (잔여 {row.AnnualLeaveRemaining:0.#}일)";
+        Snackbar.Add(msg, Severity.Success);
+    }
+
     private async Task SelectEmployeeAsync(string employeeId)
     {
         var detail = await EmployeeSvc.GetAsync(employeeId).ConfigureAwait(false);

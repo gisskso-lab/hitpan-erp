@@ -16,6 +16,53 @@ public sealed class EmployeeListItemModel
     public string Role { get; set; } = "sales_user";
     public bool IsActive { get; set; }
     public bool HasUserAccount { get; set; }
+
+    // 작20260429 연차 관리 (사장님 결재): 그리드 인라인 편집·저장
+    public decimal AnnualLeaveTotal { get; set; }
+    public decimal AnnualLeaveUsed { get; set; }
+    public decimal AnnualLeaveRemaining => AnnualLeaveTotal - AnnualLeaveUsed;
+}
+
+/// <summary>
+/// 작20260429 연차 저장 요청 모델 (사장님 결재).
+/// </summary>
+public sealed class UpdateAnnualLeaveModel
+{
+    public decimal AnnualLeaveTotal { get; set; }
+    public decimal AnnualLeaveUsed { get; set; }
+}
+
+/// <summary>
+/// 작20260429 (사장님 결재): 대시보드 월간 연차 캘린더 응답 모델.
+/// </summary>
+public sealed class LeaveCalendarModel
+{
+    public int Year { get; set; }
+    public int Month { get; set; }
+    public int DayCount { get; set; }
+    public List<LeaveCalendarRowModel> Rows { get; set; } = new();
+    public int TotalLeaveCount { get; set; }
+    public string? TopUserName { get; set; }
+    public decimal TopUserDays { get; set; }
+}
+
+public sealed class LeaveCalendarRowModel
+{
+    public string EmployeeId { get; set; } = string.Empty;
+    public string EmpName { get; set; } = string.Empty;
+    public string? Position { get; set; }
+    public decimal AnnualLeaveTotal { get; set; }
+    public decimal AnnualLeaveUsed { get; set; }
+    public decimal AnnualLeaveRemaining => AnnualLeaveTotal - AnnualLeaveUsed;
+    public List<LeaveCalendarCellModel> Cells { get; set; } = new();
+}
+
+public sealed class LeaveCalendarCellModel
+{
+    public DateTime Date { get; set; }
+    public string LeaveType { get; set; } = "annual";
+    public decimal LeaveDays { get; set; }
+    public string Status { get; set; } = "approved";
 }
 
 /// <summary>

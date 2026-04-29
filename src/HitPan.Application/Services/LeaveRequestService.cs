@@ -165,6 +165,86 @@ public sealed class LeaveRequestService : ILeaveRequestService
             cancellationToken: ct)).ConfigureAwait(false);
     }
 
+    /// <summary>
+    /// 작20260429 (사장님 결재): 월간 직원 연차 캘린더 조회.
+    /// 활성 사원 + 해당 월에 걸치는 휴가 (status approved/pending) 매트릭스로 반환.
+    /// 한 사원이 여러 일에 걸친 휴가는 일자별로 셀 펼쳐서 반환.
+    /// </summary>
+    public async Task<LeaveCalendarDto> GetCalendarAsync(string tenantId, int year, int month, CancellationToken ct = default)
+    {
+        await EnsureOpenAsync(ct).ConfigureAwait(false);
+
+        var monthStart = new DateTime(year, month, 1);
+        var monthEnd = monthStart.AddMonths(1).AddDays(-1);
+
+        // 1) 활성 사원 + 연차 부여/사용
+        const string empSql = """
+            SELECT
+              employee_id        AS EmployeeId,
+              emp_name           AS EmpName,
+              position           AS Position,
+              annual_leave_total AS AnnualLeaveTotal,
+              annual_leave_used  AS AnnualLeaveUsed
+            FROM employees
+            WHERE tenant_id = @TenantId AND is_active = 1
+            ORDER BY emp_no
+            """;
+        var emps = (await _db.QueryAsync<LeaveCalendarRow>(new CommandDefinition(
+            empSql, new { TenantId = tenantId }, cancellationToken: ct)).ConfigureAwait(false)).ToList();
+
+        // 2) 이번달과 겹치는 휴가 (start <= monthEnd AND end >= monthStart)
+        const string leaveSql = """
+            SELECT employee_id, leave_type, leave_days, start_date, end_date, status
+            FROM leave_requests
+            WHERE tenant_id = @TenantId
+              AND status IN ('approved','pending')
+              AND start_date <= @MonthEnd
+              AND end_date   >= @MonthStart
+            """;
+        var leaves = (await _db.QueryAsync<(
+            string EmployeeId, string LeaveType, decimal LeaveDays, DateTime StartDate, DateTime EndDate, string Status)>(
+            new CommandDefinition(leaveSql,
+                new { TenantId = tenantId, MonthStart = monthStart, MonthEnd = monthEnd },
+                cancellationToken: ct)).ConfigureAwait(false)).ToList();
+
+        // 3) 사원별 셀 분포 채우기 — 일자별로 펼침
+        var byEmp = leaves.GroupBy(x => x.EmployeeId).ToDictionary(g => g.Key, g => g.ToList());
+        foreach (var row in emps)
+        {
+            if (!byEmp.TryGetValue(row.EmployeeId, out var list)) continue;
+            foreach (var lv in list)
+            {
+                var dStart = lv.StartDate < monthStart ? monthStart : lv.StartDate;
+                var dEnd   = lv.EndDate   > monthEnd   ? monthEnd   : lv.EndDate;
+                for (var d = dStart; d <= dEnd; d = d.AddDays(1))
+                {
+                    row.Cells.Add(new LeaveCalendarCell
+                    {
+                        Date = d,
+                        LeaveType = lv.LeaveType,
+                        LeaveDays = lv.LeaveDays,
+                        Status = lv.Status
+                    });
+                }
+            }
+        }
+
+        // 4) 통계
+        var totalCount = emps.Sum(r => r.Cells.Count);
+        var top = emps.OrderByDescending(r => r.Cells.Count).FirstOrDefault();
+
+        return new LeaveCalendarDto
+        {
+            Year = year,
+            Month = month,
+            DayCount = DateTime.DaysInMonth(year, month),
+            Rows = emps,
+            TotalLeaveCount = totalCount,
+            TopUserName = top?.Cells.Count > 0 ? top.EmpName : null,
+            TopUserDays = top?.Cells.Count > 0 ? top.Cells.Count : 0m
+        };
+    }
+
     private async Task EnsureOpenAsync(CancellationToken ct)
     {
         if (_db.State == ConnectionState.Open)

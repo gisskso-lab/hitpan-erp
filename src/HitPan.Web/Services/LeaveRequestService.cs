@@ -24,6 +24,23 @@ public sealed class LeaveRequestService(HttpClient http)
         }
     }
 
+    /// <summary>
+    /// 작20260429 (사장님 결재): 대시보드 월간 연차 캘린더.
+    /// </summary>
+    public async Task<LeaveCalendarModel?> GetCalendarAsync(int year, int month, CancellationToken ct = default)
+    {
+        try
+        {
+            return await http.GetFromJsonAsync<LeaveCalendarModel>(
+                $"api/leave-requests/calendar?year={year}&month={month}", ct).ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine($"[LeaveRequestService.GetCalendarAsync] {ex.GetType().Name}: {ex.Message}");
+            return null;
+        }
+    }
+
     public async Task<bool> CreateAsync(CreateLeaveRequestModel request, CancellationToken ct = default)
     {
         try

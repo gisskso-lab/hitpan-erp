@@ -1,0 +1,251 @@
+@page "/settings/approval-lines"
+@namespace HitPan.Web.Pages.SettingsUi
+@attribute [Authorize]
+@using HitPan.Web.Models
+@using HitPan.Web.Services
+@inject ApprovalLineService LineSvc
+@inject PositionService PositionSvc
+@inject EmployeeService EmployeeSvc
+@inject ISnackbar Snackbar
+
+<PageTitle>결재라인 설정</PageTitle>
+
+<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
+    <MudText Typo="Typo.h6">결재라인 설정</MudText>
+    <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Add" OnClick="OnAddLine">
+        결재라인 추가
+    </MudButton>
+</div>
+
+@if (_loading)
+{
+    <MudProgressLinear Indeterminate="true" Color="Color.Primary" />
+}
+else
+{
+    @if (_lines.Count == 0)
+    {
+        <MudPaper Elevation="0" Class="pa-6" Style="border:0.5px dashed var(--mud-palette-lines-default);border-radius:12px;text-align:center;color:var(--mud-palette-text-secondary)">
+            등록된 결재라인이 없습니다. 우측 상단 [결재라인 추가] 버튼을 누르세요.
+        </MudPaper>
+    }
+    else
+    {
+        @foreach (var line in _lines)
+        {
+            <MudPaper Elevation="0" Class="pa-4 mb-3" Style="border:0.5px solid var(--mud-palette-lines-default);border-radius:12px">
+                <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+                    <div style="display:flex;gap:12px;align-items:baseline">
+                        <MudText Typo="Typo.subtitle1" Style="font-weight:700">@line.Name</MudText>
+                        <MudText Style="font-size:12px;color:var(--mud-palette-text-secondary)">
+                            단계 @(line.StepCount)개 @(line.IsActive ? "" : " · 비활성")
+                        </MudText>
+                    </div>
+                    <div style="display:flex;gap:6px">
+                        <MudButton Size="Size.Small" Variant="Variant.Outlined" OnClick="@(() => OnEditLine(line.ApprovalLineId))">편집</MudButton>
+                        <MudButton Size="Size.Small" Variant="Variant.Outlined" Color="Color.Error" OnClick="@(() => OnDeleteLine(line))">삭제</MudButton>
+                    </div>
+                </div>
+            </MudPaper>
+        }
+    }
+}
+
+@* ─── 추가/편집 모달 ─── *@
+<MudDialog @bind-Visible="_dialogOpen" Options="@(new DialogOptions { CloseButton = true, MaxWidth = MaxWidth.Medium, FullWidth = true })">
+    <TitleContent>
+        <MudText Typo="Typo.h6">@(_editingId is null ? "결재라인 추가" : "결재라인 편집")</MudText>
+    </TitleContent>
+    <DialogContent>
+        <MudGrid Spacing="2">
+            <MudItem xs="12" md="6">
+                <MudTextField T="string" Label="결재라인 이름" @bind-Value="_form.Name" Variant="Variant.Outlined" Margin="Margin.Dense" Placeholder="예: 일반 결재" />
+            </MudItem>
+            <MudItem xs="12" md="4">
+                <MudTextField T="string" Label="설명(선택)" @bind-Value="_form.Description" Variant="Variant.Outlined" Margin="Margin.Dense" />
+            </MudItem>
+            <MudItem xs="6" md="2">
+                <MudSwitch T="bool" @bind-Value="_form.IsActive" Label="사용" Color="Color.Primary" />
+            </MudItem>
+        </MudGrid>
+
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-top:16px;margin-bottom:8px">
+            <MudText Typo="Typo.subtitle2">결재 단계 (위에서부터 순서대로 결재)</MudText>
+            <MudButton Size="Size.Small" Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Add" OnClick="OnAddStep">
+                추가
+            </MudButton>
+        </div>
+
+        @if (_form.Steps.Count == 0)
+        {
+            <MudText Style="font-size:12px;color:var(--mud-palette-text-secondary);padding:12px 0">
+                단계가 비어있습니다. [추가] 버튼으로 직급+담당자를 추가하세요.
+            </MudText>
+        }
+        else
+        {
+            <MudTable Items="_form.Steps" Dense="true" Hover="false" Bordered="false">
+                <HeaderContent>
+                    <MudTh Style="width:60px">순번</MudTh>
+                    <MudTh Style="width:200px">직급</MudTh>
+                    <MudTh>담당자</MudTh>
+                    <MudTh Style="width:80px"></MudTh>
+                </HeaderContent>
+                <RowTemplate>
+                    <MudTd>@(_form.Steps.IndexOf(context) + 1)</MudTd>
+                    <MudTd>
+                        <MudSelect T="string" @bind-Value="context.PositionId" Variant="Variant.Outlined" Margin="Margin.Dense" Dense="true">
+                            @foreach (var p in _positions)
+                            {
+                                <MudSelectItem Value="@p.PositionId">@p.Name</MudSelectItem>
+                            }
+                        </MudSelect>
+                    </MudTd>
+                    <MudTd>
+                        <MudSelect T="string" @bind-Value="context.EmployeeId" Variant="Variant.Outlined" Margin="Margin.Dense" Dense="true">
+                            @foreach (var e in _employees)
+                            {
+                                <MudSelectItem Value="@e.EmployeeId">@e.EmpName (@e.DeptName)</MudSelectItem>
+                            }
+                        </MudSelect>
+                    </MudTd>
+                    <MudTd>
+                        <MudIconButton Icon="@Icons.Material.Filled.Delete" Size="Size.Small" Color="Color.Error" OnClick="@(() => OnRemoveStep(context))" />
+                    </MudTd>
+                </RowTemplate>
+            </MudTable>
+        }
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="CloseDialog">취소</MudButton>
+        <MudButton Color="Color.Primary" Variant="Variant.Filled" OnClick="OnSaveLine" Disabled="_saving">저장</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    private List<ApprovalLineListItemModel> _lines = new();
+    private List<PositionListItemModel> _positions = new();
+    private List<EmployeeListItemModel> _employees = new();
+    private bool _loading = true;
+
+    private bool _dialogOpen;
+    private string? _editingId;
+    private SaveApprovalLineModel _form = new() { IsActive = true };
+    private bool _saving;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await ReloadAsync();
+    }
+
+    private async Task ReloadAsync()
+    {
+        _loading = true;
+        var linesTask = LineSvc.GetListAsync();
+        var positionsTask = PositionSvc.GetListAsync();
+        var employeesTask = EmployeeSvc.GetListAsync();
+        await Task.WhenAll(linesTask, positionsTask, employeesTask);
+        _lines = linesTask.Result;
+        _positions = positionsTask.Result.Where(p => p.IsActive).ToList();
+        _employees = employeesTask.Result.Where(e => e.IsActive).ToList();
+        _loading = false;
+    }
+
+    private void OnAddLine()
+    {
+        _editingId = null;
+        _form = new SaveApprovalLineModel { IsActive = true, SortOrder = (_lines.Count + 1) * 10 };
+        _dialogOpen = true;
+    }
+
+    private async Task OnEditLine(string id)
+    {
+        var detail = await LineSvc.GetAsync(id);
+        if (detail is null)
+        {
+            Snackbar.Add("결재라인을 찾을 수 없습니다.", Severity.Error);
+            return;
+        }
+
+        _editingId = id;
+        _form = new SaveApprovalLineModel
+        {
+            Name = detail.Name,
+            Description = detail.Description,
+            SortOrder = detail.SortOrder,
+            IsActive = detail.IsActive,
+            Steps = detail.Steps.Select(s => new SaveApprovalLineStepModel
+            {
+                StepOrder = s.StepOrder,
+                PositionId = s.PositionId,
+                EmployeeId = s.EmployeeId
+            }).ToList()
+        };
+        _dialogOpen = true;
+    }
+
+    private void OnAddStep()
+    {
+        _form.Steps.Add(new SaveApprovalLineStepModel
+        {
+            StepOrder = _form.Steps.Count + 1,
+            PositionId = _positions.FirstOrDefault()?.PositionId ?? string.Empty,
+            EmployeeId = _employees.FirstOrDefault()?.EmployeeId ?? string.Empty
+        });
+    }
+
+    private void OnRemoveStep(SaveApprovalLineStepModel step)
+    {
+        _form.Steps.Remove(step);
+    }
+
+    private async Task OnSaveLine()
+    {
+        if (string.IsNullOrWhiteSpace(_form.Name))
+        {
+            Snackbar.Add("결재라인 이름을 입력하세요.", Severity.Warning);
+            return;
+        }
+        if (_form.Steps.Any(s => string.IsNullOrEmpty(s.PositionId) || string.IsNullOrEmpty(s.EmployeeId)))
+        {
+            Snackbar.Add("모든 단계에 직급과 담당자를 지정하세요.", Severity.Warning);
+            return;
+        }
+
+        _saving = true;
+        bool ok = _editingId is null
+            ? await LineSvc.CreateAsync(_form)
+            : await LineSvc.UpdateAsync(_editingId, _form);
+        _saving = false;
+
+        if (ok)
+        {
+            Snackbar.Add(_editingId is null ? "결재라인이 추가되었습니다." : "결재라인이 수정되었습니다.", Severity.Success);
+            _dialogOpen = false;
+            await ReloadAsync();
+        }
+        else
+        {
+            Snackbar.Add("저장 실패.", Severity.Error);
+        }
+    }
+
+    private async Task OnDeleteLine(ApprovalLineListItemModel line)
+    {
+        var ok = await LineSvc.DeleteAsync(line.ApprovalLineId);
+        if (ok)
+        {
+            Snackbar.Add("결재라인이 삭제되었습니다.", Severity.Success);
+            await ReloadAsync();
+        }
+        else
+        {
+            Snackbar.Add("삭제 실패.", Severity.Error);
+        }
+    }
+
+    private void CloseDialog()
+    {
+        _dialogOpen = false;
+    }
+}

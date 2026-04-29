@@ -75,6 +75,7 @@ else
             </MudToolBar>
 
             <MudPaper Elevation="0" Class="pa-2" Style="border:0.5px solid var(--mud-palette-lines-default);border-radius:12px">
+                @* 작20260429 연차 관리 (사장님 결재): 그리드에 부여·사용·잔여 + 인라인 편집·저장 *@
                 <MudTable Items="_employees" Dense="true" Hover="true">
                     <HeaderContent>
                         <MudTh Style="width:40px"><MudCheckBox T="bool" /></MudTh>
@@ -83,6 +84,10 @@ else
                         <MudTh>이름</MudTh>
                         <MudTh>부서</MudTh>
                         <MudTh>직급</MudTh>
+                        <MudTh Style="text-align:right;min-width:90px">연차 부여</MudTh>
+                        <MudTh Style="text-align:right;min-width:90px">연차 사용</MudTh>
+                        <MudTh Style="text-align:right;min-width:80px">잔여</MudTh>
+                        <MudTh Style="width:80px;text-align:center">저장</MudTh>
                         <MudTh>상태</MudTh>
                     </HeaderContent>
                     <RowTemplate>
@@ -94,6 +99,31 @@ else
                         <MudTd DataLabel="이름">@context.EmpName</MudTd>
                         <MudTd DataLabel="부서">@context.DeptName</MudTd>
                         <MudTd DataLabel="직급">@context.Position</MudTd>
+                        <MudTd DataLabel="연차 부여" Style="text-align:right">
+                            <MudNumericField T="decimal" @bind-Value="context.AnnualLeaveTotal"
+                                             Min="0" Max="365" Step="0.5m" Variant="Variant.Outlined"
+                                             Margin="Margin.Dense" Style="width:90px" HideSpinButtons="true" />
+                        </MudTd>
+                        <MudTd DataLabel="연차 사용" Style="text-align:right">
+                            <MudNumericField T="decimal" @bind-Value="context.AnnualLeaveUsed"
+                                             Min="0" Max="365" Step="0.5m" Variant="Variant.Outlined"
+                                             Margin="Margin.Dense" Style="width:90px" HideSpinButtons="true" />
+                        </MudTd>
+                        <MudTd DataLabel="잔여" Style="text-align:right">
+                            @{
+                                var remain = context.AnnualLeaveRemaining;
+                                var color = remain < 0 ? "var(--hp-status-error-fg)"
+                                          : remain == 0 ? "var(--hp-text-tertiary)"
+                                          : "var(--hp-status-success-fg)";
+                            }
+                            <span style="font-weight:600;font-variant-numeric:tabular-nums;color:@color">
+                                @remain.ToString("0.#")일
+                            </span>
+                        </MudTd>
+                        <MudTd DataLabel="저장" Style="text-align:center">
+                            <MudIconButton Icon="@Icons.Material.Filled.Save" Size="Size.Small" Color="Color.Primary"
+                                           OnClick="@(() => SaveAnnualLeaveAsync(context))" />
+                        </MudTd>
                         <MudTd DataLabel="상태">
                             <MudChip T="string" Size="Size.Small" Color="@(context.IsActive ? Color.Success : Color.Default)">
                                 @(context.IsActive ? "재직" : "비활성")

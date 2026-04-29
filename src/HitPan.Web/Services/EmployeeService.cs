@@ -79,4 +79,28 @@ public sealed class EmployeeService(HttpClient http)
         }
     }
 
+    /// <summary>
+    /// 작20260429 연차 관리 (사장님 결재): 부여·사용 일수만 단독 저장.
+    /// 사원관리 그리드의 연차 컬럼 인라인 편집 후 호출.
+    /// </summary>
+    public async Task<bool> UpdateAnnualLeaveAsync(string id, decimal total, decimal used, CancellationToken ct = default)
+    {
+        try
+        {
+            var body = new UpdateAnnualLeaveModel { AnnualLeaveTotal = total, AnnualLeaveUsed = used };
+            using var res = await http.PutAsJsonAsync(
+                $"api/employees/{Uri.EscapeDataString(id)}/annual-leave", body, ct).ConfigureAwait(false);
+            if (!res.IsSuccessStatusCode)
+            {
+                var bodyText = await res.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
+                Console.Error.WriteLine($"[EmployeeService.UpdateAnnualLeaveAsync] {(int)res.StatusCode}: {bodyText}");
+            }
+            return res.IsSuccessStatusCode;
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine($"[EmployeeService.UpdateAnnualLeaveAsync] EXCEPTION: {ex.GetType().Name} {ex.Message}");
+            return false;
+        }
+    }
 }

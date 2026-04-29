@@ -37,3 +37,37 @@ public sealed class ApproveLeaveRequest
     public bool Approved { get; set; }
     public string? RejectReason { get; set; }
 }
+
+/// <summary>
+/// 작20260429 (사장님 결재): 대시보드 월간 연차 캘린더 응답 DTO.
+/// 활성 사원 행 + 휴가 셀 목록.
+/// </summary>
+public sealed class LeaveCalendarDto
+{
+    public int Year { get; set; }
+    public int Month { get; set; }
+    public int DayCount { get; set; }
+    public List<LeaveCalendarRow> Rows { get; set; } = new();
+    public int TotalLeaveCount { get; set; }
+    public string? TopUserName { get; set; }
+    public decimal TopUserDays { get; set; }
+}
+
+public sealed class LeaveCalendarRow
+{
+    public string EmployeeId { get; set; } = string.Empty;
+    public string EmpName { get; set; } = string.Empty;
+    public string? Position { get; set; }
+    public decimal AnnualLeaveTotal { get; set; }
+    public decimal AnnualLeaveUsed { get; set; }
+    public decimal AnnualLeaveRemaining => AnnualLeaveTotal - AnnualLeaveUsed;
+    public List<LeaveCalendarCell> Cells { get; set; } = new();
+}
+
+public sealed class LeaveCalendarCell
+{
+    public DateTime Date { get; set; }
+    public string LeaveType { get; set; } = "annual"; // annual / half / sick / official
+    public decimal LeaveDays { get; set; }
+    public string Status { get; set; } = "approved";  // pending / approved / rejected
+}
