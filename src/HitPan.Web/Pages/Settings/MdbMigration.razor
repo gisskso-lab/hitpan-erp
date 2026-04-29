@@ -218,12 +218,18 @@
                     new("상품(품목)", _migrationResult.Items),
                     new("BOM(자재명세서)", _migrationResult.BomHeaders),
                     new("사원", _migrationResult.Employees),
-                    new("매입(발주)", _migrationResult.PurchaseOrders),
-                    new("판매(수주)", _migrationResult.SalesOrders),
+                    new("거래명세 매입(K2)", _migrationResult.PurchaseOrders),
+                    new("거래명세 매출(K2)", _migrationResult.SalesOrders),
+                    new("매입발주(IU)", _migrationResult.PurchaseOrdersFromIU),
+                    new("매출주문(IO)", _migrationResult.SalesOrdersFromIO),
+                    new("세금계산서(TX)", _migrationResult.TaxInvoices),
                     new("재고원장(입출고)", _migrationResult.StockLedger),
                     new("수금", _migrationResult.Collections),
                     new("경비(현금출납)", _migrationResult.Cashbook),
                     new("전표(비용처리)", _migrationResult.Expenses),
+                    new("어음(EU+EQ)", _migrationResult.Bills),
+                    new("카드결제(CD)", _migrationResult.CardPayments),
+                    new("은행거래(BANKF)", _migrationResult.BankTransactions),
                 };
 
                 var total = _migrationRows.Sum(r => r.Count);
@@ -256,6 +262,12 @@
         public int Collections { get; set; }
         public int Cashbook { get; set; }
         public int Expenses { get; set; }
+        public int PurchaseOrdersFromIU { get; set; }
+        public int SalesOrdersFromIO { get; set; }
+        public int TaxInvoices { get; set; }
+        public int Bills { get; set; }
+        public int CardPayments { get; set; }
+        public int BankTransactions { get; set; }
         public int Total { get; set; }
     }
 

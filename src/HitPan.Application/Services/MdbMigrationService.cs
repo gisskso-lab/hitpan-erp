@@ -75,8 +75,13 @@ public sealed class MdbMigrationService
             result["DOCF5 (수금)"] = CountMdbTable(oleConn, "DOCF5");
             result["DOCF6 (경비)"] = CountMdbTable(oleConn, "DOCF6");
             result["DOCF7 (전표)"] = CountMdbTable(oleConn, "DOCF7");
-            result["DOCFA (매입상세)"] = CountMdbTable(oleConn, "DOCFA");
-            result["DOCFO (발주상세)"] = CountMdbTable(oleConn, "DOCFO");
+            result["DOCFA (매입발주)"] = CountMdbTable(oleConn, "DOCFA");
+            result["DOCFO (매출주문)"] = CountMdbTable(oleConn, "DOCFO");
+            result["DOCF9 (어음발행)"] = CountMdbTable(oleConn, "DOCF9");
+            result["DOCFQ (어음만기)"] = CountMdbTable(oleConn, "DOCFQ");
+            result["DOCCD (카드결제)"] = CountMdbTable(oleConn, "DOCCD");
+            result["DOCCD1 (카드라인)"] = CountMdbTable(oleConn, "DOCCD1");
+            result["BANKF (은행거래)"] = CountMdbTable(oleConn, "BANKF");
         }
 
         // POTHER.mdb
@@ -179,6 +184,30 @@ public sealed class MdbMigrationService
                 // 2-5. 전표 (DOCF7 → expenses 또는 cashbook 보조)
                 result.Expenses = await MigrateExpensesAsync(
                     oleConn, tenantId, now, employeeMap, tx, ct).ConfigureAwait(false);
+
+                // 2-6. 매입발주 (DOCFA → purchase_orders)
+                result.PurchaseOrdersFromIU = await MigratePurchaseOrdersFromIUAsync(
+                    oleConn, tenantId, now, partnerMap, itemMap, tx, ct).ConfigureAwait(false);
+
+                // 2-7. 매출주문 (DOCFO → sales_orders)
+                result.SalesOrdersFromIO = await MigrateSalesOrdersFromIOAsync(
+                    oleConn, tenantId, now, partnerMap, itemMap, tx, ct).ConfigureAwait(false);
+
+                // 2-8. 세금계산서 (DOCF4 → tax_invoices, 4품목 행분해)
+                result.TaxInvoices = await MigrateTaxInvoicesAsync(
+                    oleConn, tenantId, now, partnerMap, tx, ct).ConfigureAwait(false);
+
+                // 2-9. 어음 (DOCF9 + DOCFQ → bills)
+                result.Bills = await MigrateBillsAsync(
+                    oleConn, tenantId, now, partnerMap, tx, ct).ConfigureAwait(false);
+
+                // 2-10. 카드결제 (DOCCD + DOCCD1 → card_payments + lines)
+                result.CardPayments = await MigrateCardPaymentsAsync(
+                    oleConn, tenantId, now, partnerMap, tx, ct).ConfigureAwait(false);
+
+                // 2-11. 은행거래 (BANKF → bank_transactions)
+                result.BankTransactions = await MigrateBankTransactionsAsync(
+                    oleConn, tenantId, now, partnerMap, tx, ct).ConfigureAwait(false);
             }
 
             tx.Commit();
@@ -1037,6 +1066,473 @@ public sealed class MdbMigrationService
         return count;
     }
 
+    // ────────────────────────────────────────────────────────────────
+    // 2-6. 매입발주 (DOCFA → purchase_orders + purchase_order_items)
+    // ────────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// DOCFA(IU_*)를 읽어 purchase_orders + items 로 이관한다.
+    /// 동일 IU_NO를 헤더로, IU_SUN으로 라인 분리.
+    /// </summary>
+    private async Task<int> MigratePurchaseOrdersFromIUAsync(
+        OleDbConnection oleConn, string tenantId, DateTime now,
+        Dictionary<int, string> partnerMap, Dictionary<string, string> itemMap,
+        IDbTransaction tx, CancellationToken ct)
+    {
+        var dt = ReadMdbTable(oleConn, "SELECT * FROM DOCFA ORDER BY IU_NO, IU_SUN");
+        if (dt.Rows.Count == 0) return 0;
+
+        const string headSql = """
+            INSERT INTO purchase_orders
+              (po_id, tenant_id, po_no, po_date, partner_id, total_supply, total_vat, total_amount,
+               status, remark, created_at, updated_at)
+            VALUES
+              (@PoId, @TenantId, @PoNo, @PoDate, @PartnerId, @Supply, @Vat, @Total,
+               'confirmed', @Remark, @Now, @Now)
+            """;
+        const string lineSql = """
+            INSERT INTO purchase_order_items
+              (po_item_id, po_id, tenant_id, seq, item_id, item_name, spec, qty, unit_price,
+               supply_amount, vat_amount, total_amount, remark)
+            VALUES
+              (@LineId, @PoId, @TenantId, @Seq, @ItemId, @ItemName, @Spec, @Qty, @UnitPrice,
+               @Supply, @Vat, @Total, @Remark)
+            """;
+
+        // 헤더 그룹화
+        var groups = dt.AsEnumerable().GroupBy(r => GetStr(r, "IU_NO"));
+        int headCount = 0;
+        foreach (var g in groups)
+        {
+            var poNo = g.Key;
+            if (string.IsNullOrWhiteSpace(poNo)) continue;
+            var first = g.First();
+            var buyCode = GetInt(first, "IU_BUY");
+            if (!partnerMap.TryGetValue(buyCode, out var partnerId)) continue;
+
+            var poDate = ParseLegacyDate(GetStr(first, "IU_ODT")) ?? now;
+            decimal supply = g.Sum(r => GetDec(r, "IU_AMT"));
+            decimal vat = g.Sum(r => GetDec(r, "IU_VAT"));
+            var poId = Guid.NewGuid().ToString();
+
+            await _db.ExecuteAsync(new CommandDefinition(headSql, new
+            {
+                PoId = poId, TenantId = tenantId, PoNo = poNo, PoDate = poDate,
+                PartnerId = partnerId, Supply = supply, Vat = vat, Total = supply + vat,
+                Remark = GetStr(first, "IU_REM"), Now = now
+            }, transaction: tx, cancellationToken: ct)).ConfigureAwait(false);
+            headCount++;
+
+            int seq = 1;
+            foreach (var r in g)
+            {
+                var pum = GetStr(r, "IU_PUM");
+                var ku = GetStr(r, "IU_KU");
+                var key = $"{pum}|{ku}";
+                itemMap.TryGetValue(key, out var itemId);
+                var qty = GetDec(r, "IU_QTY");
+                var dan = GetDec(r, "IU_DAN");
+                var amt = GetDec(r, "IU_AMT");
+                var v = GetDec(r, "IU_VAT");
+                await _db.ExecuteAsync(new CommandDefinition(lineSql, new
+                {
+                    LineId = Guid.NewGuid().ToString(), PoId = poId, TenantId = tenantId,
+                    Seq = seq++, ItemId = itemId, ItemName = pum, Spec = ku,
+                    Qty = qty, UnitPrice = dan, Supply = amt, Vat = v, Total = amt + v,
+                    Remark = GetStr(r, "IU_REM")
+                }, transaction: tx, cancellationToken: ct)).ConfigureAwait(false);
+            }
+        }
+
+        _logger.LogInformation("[MDB마이그레이션] 매입발주(DOCFA→purchase_orders) {Count}건 이관 완료", headCount);
+        return headCount;
+    }
+
+    // ────────────────────────────────────────────────────────────────
+    // 2-7. 매출주문 (DOCFO → sales_orders + sales_order_items)
+    // ────────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// DOCFO(IO_*)를 읽어 sales_orders + items 로 이관한다.
+    /// </summary>
+    private async Task<int> MigrateSalesOrdersFromIOAsync(
+        OleDbConnection oleConn, string tenantId, DateTime now,
+        Dictionary<int, string> partnerMap, Dictionary<string, string> itemMap,
+        IDbTransaction tx, CancellationToken ct)
+    {
+        var dt = ReadMdbTable(oleConn, "SELECT * FROM DOCFO ORDER BY IO_NO, IO_SUN");
+        if (dt.Rows.Count == 0) return 0;
+
+        const string headSql = """
+            INSERT INTO sales_orders
+              (so_id, tenant_id, so_no, so_date, partner_id, total_supply, total_vat, total_amount,
+               status, remark, created_at, updated_at)
+            VALUES
+              (@SoId, @TenantId, @SoNo, @SoDate, @PartnerId, @Supply, @Vat, @Total,
+               'confirmed', @Remark, @Now, @Now)
+            """;
+        const string lineSql = """
+            INSERT INTO sales_order_items
+              (so_item_id, so_id, tenant_id, seq, item_id, item_name, spec, qty, unit_price,
+               supply_amount, vat_amount, total_amount, remark)
+            VALUES
+              (@LineId, @SoId, @TenantId, @Seq, @ItemId, @ItemName, @Spec, @Qty, @UnitPrice,
+               @Supply, @Vat, @Total, @Remark)
+            """;
+
+        var groups = dt.AsEnumerable().GroupBy(r => GetStr(r, "IO_NO"));
+        int headCount = 0;
+        foreach (var g in groups)
+        {
+            var soNo = g.Key;
+            if (string.IsNullOrWhiteSpace(soNo)) continue;
+            var first = g.First();
+            var buyCode = GetInt(first, "IO_BUY");
+            if (!partnerMap.TryGetValue(buyCode, out var partnerId)) continue;
+
+            var soDate = ParseLegacyDate(GetStr(first, "IO_ODT")) ?? now;
+            decimal supply = g.Sum(r => GetDec(r, "IO_AMT"));
+            decimal vat = g.Sum(r => GetDec(r, "IO_VAT"));
+            var soId = Guid.NewGuid().ToString();
+
+            await _db.ExecuteAsync(new CommandDefinition(headSql, new
+            {
+                SoId = soId, TenantId = tenantId, SoNo = soNo, SoDate = soDate,
+                PartnerId = partnerId, Supply = supply, Vat = vat, Total = supply + vat,
+                Remark = GetStr(first, "IO_REM"), Now = now
+            }, transaction: tx, cancellationToken: ct)).ConfigureAwait(false);
+            headCount++;
+
+            int seq = 1;
+            foreach (var r in g)
+            {
+                var pum = GetStr(r, "IO_PUM");
+                var ku = GetStr(r, "IO_KU");
+                var key = $"{pum}|{ku}";
+                itemMap.TryGetValue(key, out var itemId);
+                var qty = GetDec(r, "IO_QTY");
+                var dan = GetDec(r, "IO_DAN");
+                var amt = GetDec(r, "IO_AMT");
+                var v = GetDec(r, "IO_VAT");
+                await _db.ExecuteAsync(new CommandDefinition(lineSql, new
+                {
+                    LineId = Guid.NewGuid().ToString(), SoId = soId, TenantId = tenantId,
+                    Seq = seq++, ItemId = itemId, ItemName = pum, Spec = ku,
+                    Qty = qty, UnitPrice = dan, Supply = amt, Vat = v, Total = amt + v,
+                    Remark = GetStr(r, "IO_REM")
+                }, transaction: tx, cancellationToken: ct)).ConfigureAwait(false);
+            }
+        }
+
+        _logger.LogInformation("[MDB마이그레이션] 매출주문(DOCFO→sales_orders) {Count}건 이관 완료", headCount);
+        return headCount;
+    }
+
+    // ────────────────────────────────────────────────────────────────
+    // 2-8. 세금계산서 (DOCF4 → tax_invoices, 4품목 행분해)
+    // ────────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// DOCF4(TX_*)를 읽어 tax_invoices 로 이관한다.
+    /// 한 행에 품목 4개(TX_PUM1~4)가 평면으로 들어있어 합산 후 헤더 한 건으로 INSERT한다.
+    /// </summary>
+    private async Task<int> MigrateTaxInvoicesAsync(
+        OleDbConnection oleConn, string tenantId, DateTime now,
+        Dictionary<int, string> partnerMap,
+        IDbTransaction tx, CancellationToken ct)
+    {
+        var dt = ReadMdbTable(oleConn, "SELECT * FROM DOCF4");
+        if (dt.Rows.Count == 0) return 0;
+
+        // tax_invoices 컬럼 존재 확인용 — 신규 ERP 스키마에 맞춰 핵심만 INSERT
+        const string sql = """
+            INSERT INTO tax_invoices
+              (tax_invoice_id, tenant_id, invoice_no, invoice_date, invoice_type,
+               partner_id, supply_amount, vat_amount, total_amount,
+               status, remark, created_at, updated_at)
+            VALUES
+              (@Id, @TenantId, @No, @Date, @Type,
+               @PartnerId, @Supply, @Vat, @Total,
+               'confirmed', @Remark, @Now, @Now)
+            """;
+
+        int count = 0;
+        foreach (DataRow r in dt.Rows)
+        {
+            var no = GetStr(r, "TX_NO");
+            if (string.IsNullOrWhiteSpace(no)) continue;
+            var buyCode = GetInt(r, "TX_BUY");
+            if (!partnerMap.TryGetValue(buyCode, out var partnerId)) continue;
+
+            var d = ParseLegacyDate(GetStr(r, "TX_PDT")) ?? now;
+            // TX_GU = 발행구분 ('1'=매출/발행, '2'=매입/수취 추정)
+            var gu = GetStr(r, "TX_GU");
+            var typeCode = gu == "2" ? "purchase" : "sales";
+
+            // 4품목 합산
+            decimal supply = GetDec(r, "TX_KUM1") + GetDec(r, "TX_KUM2") + GetDec(r, "TX_KUM3") + GetDec(r, "TX_KUM4");
+            decimal vat = GetDec(r, "TX_VAT1") + GetDec(r, "TX_VAT2") + GetDec(r, "TX_VAT3") + GetDec(r, "TX_VAT4");
+
+            try
+            {
+                await _db.ExecuteAsync(new CommandDefinition(sql, new
+                {
+                    Id = Guid.NewGuid().ToString(), TenantId = tenantId,
+                    No = no, Date = d, Type = typeCode,
+                    PartnerId = partnerId, Supply = supply, Vat = vat, Total = supply + vat,
+                    Remark = GetStr(r, "TX_REM"), Now = now
+                }, transaction: tx, cancellationToken: ct)).ConfigureAwait(false);
+                count++;
+            }
+            catch (Exception ex)
+            {
+                // 신규 tax_invoices 스키마와 컬럼명이 안 맞으면 로그만 남기고 계속.
+                _logger.LogWarning(ex, "[MDB마이그레이션] 세금계산서 {No} INSERT 실패 — 스키마 차이 가능성", no);
+            }
+        }
+
+        _logger.LogInformation("[MDB마이그레이션] 세금계산서(DOCF4→tax_invoices) {Count}건 이관 완료", count);
+        return count;
+    }
+
+    // ────────────────────────────────────────────────────────────────
+    // 2-9. 어음 (DOCF9 + DOCFQ → bills)
+    // ────────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// DOCF9(EU_*) 어음 발행 + DOCFQ(EQ_*) 어음 만기/회수를 읽어 bills 로 이관한다.
+    /// EU_CLA: 1=받을어음, 2=지급어음 (추정).
+    /// </summary>
+    private async Task<int> MigrateBillsAsync(
+        OleDbConnection oleConn, string tenantId, DateTime now,
+        Dictionary<int, string> partnerMap,
+        IDbTransaction tx, CancellationToken ct)
+    {
+        const string sql = """
+            INSERT INTO bills
+              (bill_id, tenant_id, bill_type, bill_no, bank_name, issue_place,
+               partner_id, partner_name_legacy,
+               issue_date, maturity_date, amount, status, remark, legacy_source, created_at, updated_at)
+            VALUES
+              (@Id, @TenantId, @Type, @No, @Bank, @IssuePlace,
+               @PartnerId, @PartnerNameLegacy,
+               @IssueDate, @MaturityDate, @Amount, @Status, @Remark, @Source, @Now, @Now)
+            """;
+
+        int count = 0;
+
+        // ── DOCF9: 어음 발행 ──
+        var dt9 = ReadMdbTable(oleConn, "SELECT * FROM DOCF9");
+        foreach (DataRow r in dt9.Rows)
+        {
+            var no = GetStr(r, "EU_NO");
+            if (string.IsNullOrWhiteSpace(no)) continue;
+            var amt = GetDec(r, "EU_AMT");
+            if (amt <= 0) continue;
+
+            var cla = GetStr(r, "EU_CLA");
+            var billType = cla == "2" ? "P" : "R";
+            var partnerName = GetStr(r, "EU_BUY");
+
+            await _db.ExecuteAsync(new CommandDefinition(sql, new
+            {
+                Id = Guid.NewGuid().ToString(), TenantId = tenantId,
+                Type = billType, No = no,
+                Bank = GetStr(r, "EU_BANK"), IssuePlace = GetStr(r, "EU_BAL"),
+                PartnerId = (string?)null, PartnerNameLegacy = partnerName,
+                IssueDate = ParseLegacyDate(GetStr(r, "EU_BDT")) ?? now,
+                MaturityDate = ParseLegacyDate(GetStr(r, "EU_MDT")),
+                Amount = amt, Status = "issued",
+                Remark = GetStr(r, "EU_REM"), Source = "DOCF9", Now = now
+            }, transaction: tx, cancellationToken: ct)).ConfigureAwait(false);
+            count++;
+        }
+
+        // ── DOCFQ: 어음 만기/회수 (별건으로 INSERT) ──
+        var dtQ = ReadMdbTable(oleConn, "SELECT * FROM DOCFQ");
+        foreach (DataRow r in dtQ.Rows)
+        {
+            var no = GetStr(r, "EQ_NO");
+            if (string.IsNullOrWhiteSpace(no)) continue;
+            var amt = GetDec(r, "EQ_AMT");
+            if (amt <= 0) continue;
+
+            var cla = GetStr(r, "EQ_CLA");
+            var billType = cla == "2" ? "P" : "R";
+
+            await _db.ExecuteAsync(new CommandDefinition(sql, new
+            {
+                Id = Guid.NewGuid().ToString(), TenantId = tenantId,
+                Type = billType, No = no,
+                Bank = GetStr(r, "EQ_BANK"), IssuePlace = (string?)null,
+                PartnerId = (string?)null, PartnerNameLegacy = GetStr(r, "EQ_BUYJ"),
+                IssueDate = ParseLegacyDate(GetStr(r, "EQ_BDT")) ?? now,
+                MaturityDate = ParseLegacyDate(GetStr(r, "EQ_MDT")),
+                Amount = amt, Status = "paid",
+                Remark = GetStr(r, "EQ_REM"), Source = "DOCFQ", Now = now
+            }, transaction: tx, cancellationToken: ct)).ConfigureAwait(false);
+            count++;
+        }
+
+        _logger.LogInformation("[MDB마이그레이션] 어음(DOCF9+DOCFQ→bills) {Count}건 이관 완료", count);
+        return count;
+    }
+
+    // ────────────────────────────────────────────────────────────────
+    // 2-10. 카드결제 (DOCCD + DOCCD1 → card_payments + lines)
+    // ────────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// DOCCD(CD_*) 카드결제 마스터 + DOCCD1(CD1_*) 라인을 card_payments + lines로 이관한다.
+    /// CD_CDNO를 헤더 키로 사용 — 동일 CD_CDNO+CD_KIDT 묶음을 한 결제건으로.
+    /// </summary>
+    private async Task<int> MigrateCardPaymentsAsync(
+        OleDbConnection oleConn, string tenantId, DateTime now,
+        Dictionary<int, string> partnerMap,
+        IDbTransaction tx, CancellationToken ct)
+    {
+        var dt = ReadMdbTable(oleConn, "SELECT * FROM DOCCD");
+        if (dt.Rows.Count == 0) return 0;
+
+        const string headSql = """
+            INSERT INTO card_payments
+              (card_payment_id, tenant_id, card_no, card_company, holder_name,
+               payment_date, total_amount, installment_amount, installment_months,
+               status, remark, legacy_source, created_at, updated_at)
+            VALUES
+              (@Id, @TenantId, @CardNo, @CardCompany, @HolderName,
+               @PayDate, @TotalAmount, @InstallmentAmount, @InstallmentMonths,
+               @Status, @Remark, 'DOCCD', @Now, @Now)
+            """;
+        const string lineSql = """
+            INSERT INTO card_payment_lines
+              (line_id, card_payment_id, tenant_id, seq, partner_id, partner_name_legacy,
+               tx_date, amount, remark)
+            VALUES
+              (@LineId, @HeaderId, @TenantId, @Seq, @PartnerId, @PartnerNameLegacy,
+               @TxDate, @Amount, @Remark)
+            """;
+
+        // CD1 라인을 CD_CDNO 기준 사전에 적재
+        var dt1 = ReadMdbTable(oleConn, "SELECT * FROM DOCCD1");
+        var lineMap = new Dictionary<string, List<DataRow>>(StringComparer.OrdinalIgnoreCase);
+        foreach (DataRow lr in dt1.Rows)
+        {
+            var key = GetStr(lr, "CD1_NO");
+            if (string.IsNullOrWhiteSpace(key)) continue;
+            if (!lineMap.TryGetValue(key, out var list)) { list = new(); lineMap[key] = list; }
+            list.Add(lr);
+        }
+
+        int headCount = 0;
+        foreach (DataRow r in dt.Rows)
+        {
+            var cdNo = GetStr(r, "CD_CDNO");
+            if (string.IsNullOrWhiteSpace(cdNo)) continue;
+            var amt = GetDec(r, "CD_MAMT");
+            if (amt <= 0) continue;
+
+            var headerId = Guid.NewGuid().ToString();
+            var hal = GetDec(r, "CD_HAL");          // 할부원금 추정
+            int months = 0;
+            if (hal > 0 && amt > 0 && hal < amt)
+            {
+                months = (int)Math.Round(amt / hal, MidpointRounding.AwayFromZero);
+                if (months < 0 || months > 36) months = 0;
+            }
+
+            await _db.ExecuteAsync(new CommandDefinition(headSql, new
+            {
+                Id = headerId, TenantId = tenantId,
+                CardNo = cdNo, CardCompany = GetStr(r, "CD_BANK"), HolderName = GetStr(r, "CD_NAME"),
+                PayDate = ParseLegacyDate(GetStr(r, "CD_DT")) ?? now,
+                TotalAmount = amt, InstallmentAmount = hal, InstallmentMonths = months,
+                Status = "settled", Remark = GetStr(r, "CD_MREM"), Now = now
+            }, transaction: tx, cancellationToken: ct)).ConfigureAwait(false);
+            headCount++;
+
+            // 라인 (CD_CDNO 키로 lookup → CD1_NO)
+            if (lineMap.TryGetValue(cdNo, out var lines))
+            {
+                int seq = 1;
+                foreach (var lr in lines)
+                {
+                    var sBuy = GetInt(lr, "CD1_SBUY");
+                    partnerMap.TryGetValue(sBuy, out var partnerId);
+                    await _db.ExecuteAsync(new CommandDefinition(lineSql, new
+                    {
+                        LineId = Guid.NewGuid().ToString(), HeaderId = headerId, TenantId = tenantId,
+                        Seq = seq++, PartnerId = partnerId, PartnerNameLegacy = (string?)null,
+                        TxDate = ParseLegacyDate(GetStr(lr, "CD1_SYMD")) ?? ParseLegacyDate(GetStr(lr, "CD1_YMD")) ?? now,
+                        Amount = GetDec(lr, "CD1_AMT"),
+                        Remark = GetStr(lr, "CD1_JEK")
+                    }, transaction: tx, cancellationToken: ct)).ConfigureAwait(false);
+                }
+            }
+        }
+
+        _logger.LogInformation("[MDB마이그레이션] 카드결제(DOCCD+CD1→card_payments) {Count}건 이관 완료", headCount);
+        return headCount;
+    }
+
+    // ────────────────────────────────────────────────────────────────
+    // 2-11. 은행거래 (BANKF → bank_transactions, INSERT ONLY)
+    // ────────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// BANKF(BK_*) 은행거래 원장을 bank_transactions로 이관한다.
+    /// BK_JEN: '1'=입금(차변), '2'=출금(대변) 추정.
+    /// </summary>
+    private async Task<int> MigrateBankTransactionsAsync(
+        OleDbConnection oleConn, string tenantId, DateTime now,
+        Dictionary<int, string> partnerMap,
+        IDbTransaction tx, CancellationToken ct)
+    {
+        var dt = ReadMdbTable(oleConn, "SELECT * FROM BANKF");
+        if (dt.Rows.Count == 0) return 0;
+
+        const string sql = """
+            INSERT INTO bank_transactions
+              (bank_tx_id, tenant_id, account_no, bank_name, tx_date, tx_type,
+               amount, partner_id, partner_name_legacy, description, remark,
+               imported_from, legacy_source, created_at)
+            VALUES
+              (@Id, @TenantId, @AccountNo, @BankName, @TxDate, @TxType,
+               @Amount, @PartnerId, @PartnerNameLegacy, @Description, @Remark,
+               'mdb_legacy', 'BANKF', @Now)
+            """;
+
+        int count = 0;
+        foreach (DataRow r in dt.Rows)
+        {
+            var accNo = GetStr(r, "BK_NO");
+            if (string.IsNullOrWhiteSpace(accNo)) continue;
+            var amt = GetDec(r, "BK_AMT");
+            if (amt <= 0) continue;
+
+            var jen = GetStr(r, "BK_JEN");
+            var txType = jen == "2" ? "2" : "1";   // 1=입금, 2=출금
+            var sBuy = GetInt(r, "BK_SBUY");
+            partnerMap.TryGetValue(sBuy, out var partnerId);
+
+            await _db.ExecuteAsync(new CommandDefinition(sql, new
+            {
+                Id = Guid.NewGuid().ToString(), TenantId = tenantId,
+                AccountNo = accNo, BankName = GetStr(r, "BK_CLA"),
+                TxDate = ParseLegacyDate(GetStr(r, "BK_YMD")) ?? now,
+                TxType = txType, Amount = amt,
+                PartnerId = partnerId, PartnerNameLegacy = (string?)null,
+                Description = GetStr(r, "BK_JEK"),
+                Remark = GetStr(r, "BK_cheri"),
+                Now = now
+            }, transaction: tx, cancellationToken: ct)).ConfigureAwait(false);
+            count++;
+        }
+
+        _logger.LogInformation("[MDB마이그레이션] 은행거래(BANKF→bank_transactions) {Count}건 이관 완료", count);
+        return count;
+    }
+
     // ════════════════════════════════════════════════════════════════
     // 유틸리티 메서드
     // ════════════════════════════════════════════════════════════════
@@ -1222,15 +1718,37 @@ public sealed class MdbMigrationResult
     /// <summary>전표(expenses) 이관 건수</summary>
     public int Expenses { get; set; }
 
+    /// <summary>매입발주(purchase_orders, DOCFA→IU) 이관 건수</summary>
+    public int PurchaseOrdersFromIU { get; set; }
+
+    /// <summary>매출(sales_orders, DOCFO→IO) 이관 건수</summary>
+    public int SalesOrdersFromIO { get; set; }
+
+    /// <summary>세금계산서(tax_invoices, DOCF4→TX) 이관 건수 (4품목 행분해 기준)</summary>
+    public int TaxInvoices { get; set; }
+
+    /// <summary>어음(bills, DOCF9+EQ) 이관 건수</summary>
+    public int Bills { get; set; }
+
+    /// <summary>카드결제(card_payments, DOCCD+CD1) 이관 건수</summary>
+    public int CardPayments { get; set; }
+
+    /// <summary>은행거래(bank_transactions, BANKF) 이관 건수</summary>
+    public int BankTransactions { get; set; }
+
     /// <summary>전체 이관 건수 합계</summary>
     public int Total => Partners + Items + BomHeaders + Employees
                         + SalesOrders + PurchaseOrders + StockLedger
-                        + Collections + Cashbook + Expenses;
+                        + Collections + Cashbook + Expenses
+                        + PurchaseOrdersFromIU + SalesOrdersFromIO + TaxInvoices
+                        + Bills + CardPayments + BankTransactions;
 
     public override string ToString()
     {
         return $"업체:{Partners}, 상품:{Items}, BOM:{BomHeaders}, 사원:{Employees}, " +
                $"판매:{SalesOrders}, 매입:{PurchaseOrders}, 입출고:{StockLedger}, " +
-               $"수금:{Collections}, 경비:{Cashbook}, 전표:{Expenses} [합계:{Total}]";
+               $"수금:{Collections}, 경비:{Cashbook}, 전표:{Expenses}, " +
+               $"매입(IU):{PurchaseOrdersFromIU}, 매출(IO):{SalesOrdersFromIO}, " +
+               $"세금계산서:{TaxInvoices}, 어음:{Bills}, 카드:{CardPayments}, 은행:{BankTransactions} [합계:{Total}]";
     }
 }

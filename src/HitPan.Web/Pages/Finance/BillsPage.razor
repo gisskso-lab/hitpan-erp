@@ -1,0 +1,194 @@
+@page "/accounting/bills"
+@namespace HitPan.Web.Pages.FinanceUi
+@attribute [Authorize]
+@using HitPan.Web.Models
+@using HitPan.Web.Services
+@inject BillsCardsBankService FinSvc
+@inject ISnackbar Snackbar
+
+<PageTitle>어음 관리</PageTitle>
+
+<PageHeader Title="어음 관리" Subtitle="받을어음·지급어음 발행/할인/회수 통합">
+    <Actions>
+        <MudButton Variant="Variant.Filled" Color="Color.Primary"
+                   StartIcon="@Icons.Material.Filled.Add"
+                   OnClick="OpenCreateAsync">새 어음</MudButton>
+    </Actions>
+</PageHeader>
+
+@* KPI *@
+<MudGrid Spacing="2" Class="mb-3">
+    <MudItem xs="12" sm="3">
+        <KpiCard Color="KpiCard.KpiColor.Primary" Icon="@Icons.Material.Filled.Receipt"
+                 Label="받을어음 건수" Value="@_items.Count(b => b.BillType == "R" && b.Status == "issued").ToString("N0")" />
+    </MudItem>
+    <MudItem xs="12" sm="3">
+        <KpiCard Color="KpiCard.KpiColor.Success" Icon="@Icons.Material.Filled.AttachMoney"
+                 Label="받을어음 잔액" Value="@_items.Where(b => b.BillType == "R" && b.Status == "issued").Sum(b => b.Amount).ToString("N0")" />
+    </MudItem>
+    <MudItem xs="12" sm="3">
+        <KpiCard Color="KpiCard.KpiColor.Warning" Icon="@Icons.Material.Filled.Money"
+                 Label="지급어음 건수" Value="@_items.Count(b => b.BillType == "P" && b.Status == "issued").ToString("N0")" />
+    </MudItem>
+    <MudItem xs="12" sm="3">
+        <KpiCard Color="KpiCard.KpiColor.Error" Icon="@Icons.Material.Filled.MoneyOff"
+                 Label="지급어음 잔액" Value="@_items.Where(b => b.BillType == "P" && b.Status == "issued").Sum(b => b.Amount).ToString("N0")" />
+    </MudItem>
+</MudGrid>
+
+<SectionCard Title="조회 조건">
+    <MudGrid Spacing="2">
+        <MudItem xs="6" md="2">
+            <MudSelect T="string" Label="구분" @bind-Value="_filterType" Variant="Variant.Outlined" Margin="Margin.Dense" Clearable="true">
+                <MudSelectItem Value="@((string?)null)">전체</MudSelectItem>
+                <MudSelectItem Value="@("R")">받을어음</MudSelectItem>
+                <MudSelectItem Value="@("P")">지급어음</MudSelectItem>
+            </MudSelect>
+        </MudItem>
+        <MudItem xs="6" md="2">
+            <MudSelect T="string" Label="상태" @bind-Value="_filterStatus" Variant="Variant.Outlined" Margin="Margin.Dense" Clearable="true">
+                <MudSelectItem Value="@((string?)null)">전체</MudSelectItem>
+                <MudSelectItem Value="@("issued")">발행</MudSelectItem>
+                <MudSelectItem Value="@("discounted")">할인</MudSelectItem>
+                <MudSelectItem Value="@("paid")">회수/결제완료</MudSelectItem>
+                <MudSelectItem Value="@("defaulted")">부도</MudSelectItem>
+                <MudSelectItem Value="@("cancelled")">취소</MudSelectItem>
+            </MudSelect>
+        </MudItem>
+        <MudItem xs="6" md="2"><MudDatePicker Label="발행일 시작" @bind-Date="_from" Variant="Variant.Outlined" Margin="Margin.Dense" /></MudItem>
+        <MudItem xs="6" md="2"><MudDatePicker Label="발행일 종료" @bind-Date="_to" Variant="Variant.Outlined" Margin="Margin.Dense" /></MudItem>
+        <MudItem xs="12" md="2" Class="d-flex align-end">
+            <MudButton Variant="Variant.Outlined" Color="Color.Primary" OnClick="LoadAsync" FullWidth="true">조회</MudButton>
+        </MudItem>
+    </MudGrid>
+</SectionCard>
+
+<SectionCard Variant="SectionCard.SectionVariant.Flat" Class="mt-3">
+    <MudTable T="BillModel" Items="_items" Dense="true" Hover="true" Striped="true" FixedHeader="true" Height="calc(100vh - 360px)">
+        <HeaderContent>
+            <MudTh>구분</MudTh>
+            <MudTh>어음번호</MudTh>
+            <MudTh>발행일</MudTh>
+            <MudTh>만기일</MudTh>
+            <MudTh>거래처</MudTh>
+            <MudTh>은행</MudTh>
+            <MudTh Style="text-align:right">금액</MudTh>
+            <MudTh>상태</MudTh>
+            <MudTh Style="text-align:center">액션</MudTh>
+        </HeaderContent>
+        <RowTemplate>
+            <MudTd>
+                <MudChip T="string" Size="Size.Small" Color="@(context.BillType == "R" ? Color.Primary : Color.Warning)" Variant="Variant.Text">
+                    @(context.BillType == "R" ? "받을" : "지급")
+                </MudChip>
+            </MudTd>
+            <MudTd Style="font-family:monospace">@context.BillNo</MudTd>
+            <MudTd>@context.IssueDate.ToString("yyyy-MM-dd")</MudTd>
+            <MudTd>@(context.MaturityDate?.ToString("yyyy-MM-dd") ?? "-")</MudTd>
+            <MudTd>@(context.PartnerName ?? "-")</MudTd>
+            <MudTd>@(context.BankName ?? "-")</MudTd>
+            <MudTd Style="text-align:right;font-weight:500">@context.Amount.ToString("N0")</MudTd>
+            <MudTd>
+                <MudChip T="string" Size="Size.Small"
+                         Color="@(context.Status switch { "issued" => Color.Info, "paid" => Color.Success, "defaulted" => Color.Error, "discounted" => Color.Secondary, _ => Color.Default })"
+                         Variant="Variant.Text">@StatusLabel(context.Status)</MudChip>
+            </MudTd>
+            <MudTd Style="text-align:center">
+                @if (context.Status == "issued")
+                {
+                    <MudButton Size="Size.Small" Variant="Variant.Outlined" Color="Color.Success" OnClick="() => MarkPaidAsync(context)">결제완료</MudButton>
+                }
+            </MudTd>
+        </RowTemplate>
+        <NoRecordsContent>
+            <EmptyState Icon="@Icons.Material.Filled.Receipt"
+                        Title="어음이 없습니다"
+                        Subtitle="우상단 [새 어음] 버튼으로 등록하세요." />
+        </NoRecordsContent>
+    </MudTable>
+</SectionCard>
+
+@* 입력 다이얼로그 *@
+<MudDialog @bind-Visible="_dlg" Options="@(new DialogOptions { MaxWidth = MaxWidth.Small, FullWidth = true })">
+    <TitleContent>새 어음 등록</TitleContent>
+    <DialogContent>
+        <MudGrid Spacing="2">
+            <MudItem xs="6">
+                <MudSelect T="string" Label="구분" @bind-Value="_edit.BillType" Variant="Variant.Outlined" Margin="Margin.Dense">
+                    <MudSelectItem Value="@("R")">받을어음</MudSelectItem>
+                    <MudSelectItem Value="@("P")">지급어음</MudSelectItem>
+                </MudSelect>
+            </MudItem>
+            <MudItem xs="6"><MudTextField T="string" Label="어음번호" @bind-Value="_edit.BillNo" Variant="Variant.Outlined" Margin="Margin.Dense" /></MudItem>
+            <MudItem xs="6"><MudDatePicker Label="발행일" @bind-Date="_editIssueDate" Variant="Variant.Outlined" Margin="Margin.Dense" /></MudItem>
+            <MudItem xs="6"><MudDatePicker Label="만기일" @bind-Date="_editMaturityDate" Variant="Variant.Outlined" Margin="Margin.Dense" /></MudItem>
+            <MudItem xs="6"><MudTextField T="string" Label="은행" @bind-Value="_edit.BankName" Variant="Variant.Outlined" Margin="Margin.Dense" /></MudItem>
+            <MudItem xs="6"><MudTextField T="string" Label="발행지" @bind-Value="_edit.IssuePlace" Variant="Variant.Outlined" Margin="Margin.Dense" /></MudItem>
+            <MudItem xs="12"><MudNumericField T="decimal" Label="금액" @bind-Value="_edit.Amount" Variant="Variant.Outlined" Margin="Margin.Dense" Format="N0" /></MudItem>
+            <MudItem xs="12"><MudTextField T="string" Label="비고" @bind-Value="_edit.Remark" Variant="Variant.Outlined" Margin="Margin.Dense" Lines="2" /></MudItem>
+        </MudGrid>
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="@(() => _dlg = false)">취소</MudButton>
+        <MudButton Color="Color.Primary" Variant="Variant.Filled" OnClick="SaveAsync">등록</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    private List<BillModel> _items = new();
+    private string? _filterType;
+    private string? _filterStatus;
+    private DateTime? _from = DateTime.Today.AddMonths(-3);
+    private DateTime? _to = DateTime.Today.AddMonths(3);
+
+    private bool _dlg;
+    private CreateBillModel _edit = new();
+    private DateTime? _editIssueDate = DateTime.Today;
+    private DateTime? _editMaturityDate;
+
+    protected override async Task OnInitializedAsync() => await LoadAsync();
+
+    private async Task LoadAsync()
+    {
+        _items = await FinSvc.ListBillsAsync(_filterType, _filterStatus, _from, _to);
+        StateHasChanged();
+    }
+
+    private Task OpenCreateAsync()
+    {
+        _edit = new CreateBillModel { BillType = "R" };
+        _editIssueDate = DateTime.Today;
+        _editMaturityDate = null;
+        _dlg = true;
+        return Task.CompletedTask;
+    }
+
+    private async Task SaveAsync()
+    {
+        if (string.IsNullOrWhiteSpace(_edit.BillNo)) { Snackbar.Add("어음번호를 입력하세요.", Severity.Warning); return; }
+        if (_edit.Amount <= 0) { Snackbar.Add("금액을 입력하세요.", Severity.Warning); return; }
+        _edit.IssueDate = _editIssueDate ?? DateTime.Today;
+        _edit.MaturityDate = _editMaturityDate;
+        var ok = await FinSvc.CreateBillAsync(_edit);
+        Snackbar.Add(ok ? "등록됨" : "등록 실패", ok ? Severity.Success : Severity.Error);
+        if (ok) { _dlg = false; await LoadAsync(); }
+    }
+
+    private async Task MarkPaidAsync(BillModel row)
+    {
+        var ok = await FinSvc.UpdateBillStatusAsync(row.BillId,
+            new UpdateBillStatusModel { Status = "paid", SettledDate = DateTime.Today });
+        Snackbar.Add(ok ? "결제완료 처리" : "처리 실패", ok ? Severity.Success : Severity.Error);
+        if (ok) await LoadAsync();
+    }
+
+    private static string StatusLabel(string s) => s switch
+    {
+        "issued" => "발행",
+        "discounted" => "할인",
+        "paid" => "결제완료",
+        "defaulted" => "부도",
+        "cancelled" => "취소",
+        _ => s
+    };
+}
