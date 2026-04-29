@@ -59,36 +59,33 @@
     </MudGrid>
 </SectionCard>
 
-@* 지원 뷰: current, warehouse, safety *@
-@if (_viewType is "current" or "warehouse" or "safety")
-{
-    <SectionCard Variant="SectionCard.SectionVariant.Flat">
-        <MudTable T="ReportRow" Items="_filteredData" Dense="true" Hover="true" Striped="true" FixedHeader="true" Height="calc(100vh - 280px)"
-                  RowStyleFunc="@((row, _) => row.IsBelowSafety ? "background-color:#FEF2F2;color:#DC2626;font-weight:500" : "")">
-            <HeaderContent>
-                <MudTh>@GetLabelHeader()</MudTh>
-                @if (_viewType == "warehouse") { <MudTh Style="text-align:right">품목수</MudTh> }
-                <MudTh Style="text-align:right">수량</MudTh>
-                <MudTh Style="text-align:right">재고금액</MudTh>
-            </HeaderContent>
-            <RowTemplate>
-                <MudTd>@context.Label</MudTd>
-                @if (_viewType == "warehouse") { <MudTd Style="text-align:right">@context.Count.ToString("N0")</MudTd> }
-                <MudTd Style="text-align:right">@context.Qty.ToString("N1")</MudTd>
-                <MudTd Style="text-align:right;font-weight:500">@context.SupplyAmount.ToString("N0")</MudTd>
-            </RowTemplate>
-            <NoRecordsContent>
-                <EmptyState Icon="@Icons.Material.Filled.Inventory2"
-                            Title="조회된 재고가 없습니다"
-                            Subtitle="검색어나 조회 유형을 변경해 보세요." />
-            </NoRecordsContent>
-        </MudTable>
-    </SectionCard>
-}
-else
-{
-    <MudAlert Severity="Severity.Info">@GetViewLabel() 데이터는 준비중입니다.</MudAlert>
-}
+@* 사장님 결재 2026-04-29: 7종 풀스택 → 가드 제거. optimal/dead/loss/io 컬럼 의미 다름. *@
+<SectionCard Variant="SectionCard.SectionVariant.Flat">
+    <MudTable T="ReportRow" Items="_filteredData" Dense="true" Hover="true" Striped="true" FixedHeader="true" Height="calc(100vh - 280px)"
+              RowStyleFunc="@((row, _) => row.IsBelowSafety ? "background-color:#FEF2F2;color:#DC2626;font-weight:500" : "")">
+        <HeaderContent>
+            <MudTh>@GetLabelHeader()</MudTh>
+            @if (_viewType == "warehouse") { <MudTh Style="text-align:right">품목수</MudTh> }
+            <MudTh Style="text-align:right">@GetQtyHeader()</MudTh>
+            <MudTh Style="text-align:right">@GetSupplyHeader()</MudTh>
+            @if (ShowExtraCol()) { <MudTh Style="text-align:right">@GetVatHeader()</MudTh> }
+            <MudTh Style="text-align:right">@GetTotalHeader()</MudTh>
+        </HeaderContent>
+        <RowTemplate>
+            <MudTd>@context.Label</MudTd>
+            @if (_viewType == "warehouse") { <MudTd Style="text-align:right">@context.Count.ToString("N0")</MudTd> }
+            <MudTd Style="text-align:right">@context.Qty.ToString("N1")</MudTd>
+            <MudTd Style="text-align:right">@context.SupplyAmount.ToString("N0")</MudTd>
+            @if (ShowExtraCol()) { <MudTd Style="text-align:right">@context.VatAmount.ToString("N1")</MudTd> }
+            <MudTd Style="text-align:right;font-weight:500">@context.TotalAmount.ToString("N0")</MudTd>
+        </RowTemplate>
+        <NoRecordsContent>
+            <EmptyState Icon="@Icons.Material.Filled.Inventory2"
+                        Title="조회된 재고가 없습니다"
+                        Subtitle="검색어나 조회 유형을 변경해 보세요." />
+        </NoRecordsContent>
+    </MudTable>
+</SectionCard>
 
 @code {
     private string _viewType = "current";
@@ -106,14 +103,6 @@ else
     /// <summary>재고현황을 조회한다.</summary>
     private async Task SearchAsync()
     {
-        // 지원하지 않는 뷰 타입이면 데이터를 비운다.
-        if (_viewType is not ("current" or "warehouse" or "safety"))
-        {
-            _reportData = new();
-            StateHasChanged();
-            return;
-        }
-
         var path = $"api/reports/stock-status?view={_viewType}";
         try
         {
@@ -134,7 +123,41 @@ else
     {
         "warehouse" => "창고명",
         "safety" => "품목명 (안전재고 미달)",
+        "monthly-io" => "품목 (월)",
         _ => "품목명"
+    };
+
+    // 동적 컬럼 — 조회유형마다 의미 다름
+    private bool ShowExtraCol() => _viewType is "current" or "safety" or "optimal" or "dead-stock" or "loss-rate" or "monthly-io";
+    private string GetQtyHeader() => _viewType switch
+    {
+        "loss-rate" => "조정수량",
+        "monthly-io" => "입고량",
+        _ => "수량"
+    };
+    private string GetSupplyHeader() => _viewType switch
+    {
+        "current" or "optimal" => "안전재고",
+        "safety" => "안전재고",
+        "dead-stock" => "원가재고액",
+        "loss-rate" => "현재고",
+        "monthly-io" => "출고량",
+        _ => "재고금액"
+    };
+    private string GetVatHeader() => _viewType switch
+    {
+        "current" or "safety" => "안전재고",
+        "optimal" => "적정비율(%)",
+        "dead-stock" => "미출고일수",
+        "loss-rate" => "로스율(%)",
+        "monthly-io" => "잔량",
+        _ => "—"
+    };
+    private string GetTotalHeader() => _viewType switch
+    {
+        "monthly-io" => "입출차액",
+        "loss-rate" => "로스금액",
+        _ => "재고금액"
     };
 
     /// <summary>준비중 메시지용 뷰 라벨을 반환한다.</summary>

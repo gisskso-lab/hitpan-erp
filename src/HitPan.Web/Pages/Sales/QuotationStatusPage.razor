@@ -60,34 +60,28 @@
     </div>
 </MudPaper>
 
-@if (_viewType is "period" or "item" or "partner")
-{
-    <MudPaper Elevation="0" Class="hitpan-card" Style="overflow:hidden">
-        <MudTable T="ReportRow" Items="_reportData" Dense="true" Hover="true" Striped="true" FixedHeader="true" Height="calc(100vh - 280px)">
-            <HeaderContent>
-                <MudTh>@GetLabelHeader()</MudTh>
-                <MudTh Style="text-align:right">건수</MudTh>
-                @if (_viewType == "item") { <MudTh Style="text-align:right">수량</MudTh> }
-                <MudTh Style="text-align:right">공급가액</MudTh>
-                <MudTh Style="text-align:right">부가세</MudTh>
-                <MudTh Style="text-align:right">합계</MudTh>
-            </HeaderContent>
-            <RowTemplate>
-                <MudTd>@context.Label</MudTd>
-                <MudTd Style="text-align:right">@context.Count.ToString("N0")</MudTd>
-                @if (_viewType == "item") { <MudTd Style="text-align:right">@context.Qty.ToString("N1")</MudTd> }
-                <MudTd Style="text-align:right">@context.SupplyAmount.ToString("N0")</MudTd>
-                <MudTd Style="text-align:right">@context.VatAmount.ToString("N0")</MudTd>
-                <MudTd Style="text-align:right;font-weight:500">@context.TotalAmount.ToString("N0")</MudTd>
-            </RowTemplate>
-            <NoRecordsContent><MudText Class="pa-4" Style="color:var(--hitpan-text-faint)">조회된 견적이 없습니다.</MudText></NoRecordsContent>
-        </MudTable>
-    </MudPaper>
-}
-else
-{
-    <MudAlert Severity="Severity.Info">@(_viewType == "employee" ? "사원별 제출현황" : "견적단가 조회") 데이터는 준비중입니다.</MudAlert>
-}
+@* 사장님 결재 2026-04-29: 5종 풀스택 → 가드 제거. price 는 단가조회(최저/최고/평균). *@
+<MudPaper Elevation="0" Class="hitpan-card" Style="overflow:hidden">
+    <MudTable T="ReportRow" Items="_reportData" Dense="true" Hover="true" Striped="true" FixedHeader="true" Height="calc(100vh - 280px)">
+        <HeaderContent>
+            <MudTh>@GetLabelHeader()</MudTh>
+            <MudTh Style="text-align:right">건수</MudTh>
+            @if (ShowQty()) { <MudTh Style="text-align:right">@GetQtyHeader()</MudTh> }
+            <MudTh Style="text-align:right">@GetSupplyHeader()</MudTh>
+            <MudTh Style="text-align:right">@GetVatHeader()</MudTh>
+            <MudTh Style="text-align:right">@GetTotalHeader()</MudTh>
+        </HeaderContent>
+        <RowTemplate>
+            <MudTd>@context.Label</MudTd>
+            <MudTd Style="text-align:right">@context.Count.ToString("N0")</MudTd>
+            @if (ShowQty()) { <MudTd Style="text-align:right">@context.Qty.ToString("N1")</MudTd> }
+            <MudTd Style="text-align:right">@context.SupplyAmount.ToString("N0")</MudTd>
+            <MudTd Style="text-align:right">@context.VatAmount.ToString("N0")</MudTd>
+            <MudTd Style="text-align:right;font-weight:500">@context.TotalAmount.ToString("N0")</MudTd>
+        </RowTemplate>
+        <NoRecordsContent><MudText Class="pa-4" Style="color:var(--hitpan-text-faint)">조회된 견적이 없습니다.</MudText></NoRecordsContent>
+    </MudTable>
+</MudPaper>
 
 @code {
     private DateTime? _from = DateTime.Today.AddDays(-30);
@@ -100,12 +94,6 @@ else
 
     private async Task SearchAsync()
     {
-        if (_viewType is not ("period" or "item" or "partner"))
-        {
-            _reportData = new();
-            StateHasChanged();
-            return;
-        }
 
         var qs = new List<string>();
         qs.Add($"view={_viewType}");
@@ -132,9 +120,16 @@ else
     private string GetLabelHeader() => _viewType switch
     {
         "partner" => "업체명",
-        "item" => "품명",
+        "item" or "price" => "품명",
+        "employee" => "사원명",
         _ => "기간"
     };
+
+    private bool ShowQty() => _viewType is "item" or "price";
+    private string GetQtyHeader() => _viewType switch { "price" => "누적수량", _ => "수량" };
+    private string GetSupplyHeader() => _viewType switch { "price" => "최저단가", _ => "공급가액" };
+    private string GetVatHeader() => _viewType switch { "price" => "최고단가", _ => "부가세" };
+    private string GetTotalHeader() => _viewType switch { "price" => "평균단가", _ => "합계" };
 
     private string GetFilterLabel() => _viewType switch
     {

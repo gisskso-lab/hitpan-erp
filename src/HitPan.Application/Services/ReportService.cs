@@ -23,63 +23,14 @@ public class ReportService : IReportService
         DateTime? from = null, DateTime? to = null,
         string? partner = null, CancellationToken ct = default)
     {
+        // 사장님 결재 2026-04-29: 견적현황 5종 풀스택. price=견적단가 조회.
         var sql = viewType switch
         {
-            "partner" => """
-                SELECT
-                    p.partner_name AS Label,
-                    COUNT(DISTINCT q.quote_id) AS Count,
-                    0 AS Qty,
-                    COALESCE(SUM(q.total_amount), 0) AS SupplyAmount,
-                    COALESCE(SUM(q.vat_amount), 0) AS VatAmount,
-                    COALESCE(SUM(q.total_amount + q.vat_amount), 0) AS TotalAmount
-                FROM quotations q
-                LEFT JOIN partners p
-                    ON p.partner_id = q.partner_id AND p.tenant_id = q.tenant_id
-                WHERE q.tenant_id = @TenantId AND q.is_deleted = 0
-                  AND (@From IS NULL OR q.quote_date >= @From)
-                  AND (@To IS NULL OR q.quote_date <= @To)
-                  AND (@Partner IS NULL OR p.partner_name LIKE CONCAT('%', @Partner, '%'))
-                GROUP BY q.partner_id, p.partner_name
-                ORDER BY SupplyAmount DESC
-                """,
-            "item" => """
-                SELECT
-                    i.item_name AS Label,
-                    COUNT(DISTINCT q.quote_id) AS Count,
-                    COALESCE(SUM(qi.qty), 0) AS Qty,
-                    COALESCE(SUM(qi.amount), 0) AS SupplyAmount,
-                    COALESCE(SUM(qi.vat_amount), 0) AS VatAmount,
-                    COALESCE(SUM(qi.amount + qi.vat_amount), 0) AS TotalAmount
-                FROM quotation_items qi
-                INNER JOIN quotations q ON q.quote_id = qi.quote_id
-                LEFT JOIN items i ON i.item_id = qi.item_id AND i.tenant_id = q.tenant_id
-                LEFT JOIN partners p ON p.partner_id = q.partner_id AND p.tenant_id = q.tenant_id
-                WHERE q.tenant_id = @TenantId AND q.is_deleted = 0
-                  AND (@From IS NULL OR q.quote_date >= @From)
-                  AND (@To IS NULL OR q.quote_date <= @To)
-                  AND (@Partner IS NULL OR p.partner_name LIKE CONCAT('%', @Partner, '%'))
-                GROUP BY qi.item_id, i.item_name
-                ORDER BY SupplyAmount DESC
-                """,
-            _ => """
-                SELECT
-                    DATE_FORMAT(q.quote_date, '%Y-%m-%d') AS Label,
-                    COUNT(*) AS Count,
-                    0 AS Qty,
-                    COALESCE(SUM(q.total_amount), 0) AS SupplyAmount,
-                    COALESCE(SUM(q.vat_amount), 0) AS VatAmount,
-                    COALESCE(SUM(q.total_amount + q.vat_amount), 0) AS TotalAmount
-                FROM quotations q
-                LEFT JOIN partners p
-                    ON p.partner_id = q.partner_id AND p.tenant_id = q.tenant_id
-                WHERE q.tenant_id = @TenantId AND q.is_deleted = 0
-                  AND (@From IS NULL OR q.quote_date >= @From)
-                  AND (@To IS NULL OR q.quote_date <= @To)
-                  AND (@Partner IS NULL OR p.partner_name LIKE CONCAT('%', @Partner, '%'))
-                GROUP BY q.quote_date
-                ORDER BY q.quote_date
-                """
+            "partner" => Q_BY_PARTNER,
+            "item" => Q_BY_ITEM,
+            "employee" => Q_BY_EMPLOYEE,
+            "price" => Q_PRICE,
+            _ => Q_BY_PERIOD
         };
 
         var rows = await _db.QueryAsync<ReportRow>(
@@ -93,6 +44,102 @@ public class ReportService : IReportService
 
         return rows.ToList();
     }
+
+    // ─── 견적현황 5종 SQL ───
+    private const string Q_BY_PERIOD = """
+        SELECT
+            DATE_FORMAT(q.quote_date, '%Y-%m-%d') AS Label,
+            COUNT(*) AS Count,
+            0 AS Qty,
+            COALESCE(SUM(q.total_amount), 0) AS SupplyAmount,
+            COALESCE(SUM(q.vat_amount), 0) AS VatAmount,
+            COALESCE(SUM(q.total_amount + q.vat_amount), 0) AS TotalAmount
+        FROM quotations q
+        LEFT JOIN partners p ON p.partner_id = q.partner_id AND p.tenant_id = q.tenant_id
+        WHERE q.tenant_id = @TenantId AND q.is_deleted = 0
+          AND (@From IS NULL OR q.quote_date >= @From)
+          AND (@To IS NULL OR q.quote_date <= @To)
+          AND (@Partner IS NULL OR p.partner_name LIKE CONCAT('%', @Partner, '%'))
+        GROUP BY q.quote_date
+        ORDER BY q.quote_date
+        """;
+
+    private const string Q_BY_PARTNER = """
+        SELECT
+            p.partner_name AS Label,
+            COUNT(DISTINCT q.quote_id) AS Count,
+            0 AS Qty,
+            COALESCE(SUM(q.total_amount), 0) AS SupplyAmount,
+            COALESCE(SUM(q.vat_amount), 0) AS VatAmount,
+            COALESCE(SUM(q.total_amount + q.vat_amount), 0) AS TotalAmount
+        FROM quotations q
+        LEFT JOIN partners p ON p.partner_id = q.partner_id AND p.tenant_id = q.tenant_id
+        WHERE q.tenant_id = @TenantId AND q.is_deleted = 0
+          AND (@From IS NULL OR q.quote_date >= @From)
+          AND (@To IS NULL OR q.quote_date <= @To)
+          AND (@Partner IS NULL OR p.partner_name LIKE CONCAT('%', @Partner, '%'))
+        GROUP BY q.partner_id, p.partner_name
+        ORDER BY SupplyAmount DESC
+        """;
+
+    private const string Q_BY_ITEM = """
+        SELECT
+            i.item_name AS Label,
+            COUNT(DISTINCT q.quote_id) AS Count,
+            COALESCE(SUM(qi.qty), 0) AS Qty,
+            COALESCE(SUM(qi.amount), 0) AS SupplyAmount,
+            COALESCE(SUM(qi.vat_amount), 0) AS VatAmount,
+            COALESCE(SUM(qi.amount + qi.vat_amount), 0) AS TotalAmount
+        FROM quotation_items qi
+        INNER JOIN quotations q ON q.quote_id = qi.quote_id
+        LEFT JOIN items i ON i.item_id = qi.item_id AND i.tenant_id = q.tenant_id
+        WHERE q.tenant_id = @TenantId AND q.is_deleted = 0
+          AND (@From IS NULL OR q.quote_date >= @From)
+          AND (@To IS NULL OR q.quote_date <= @To)
+          AND (@Partner IS NULL OR i.item_name LIKE CONCAT('%', @Partner, '%'))
+        GROUP BY qi.item_id, i.item_name
+        ORDER BY SupplyAmount DESC
+        """;
+
+    private const string Q_BY_EMPLOYEE = """
+        SELECT
+            COALESCE(e.emp_name, e2.emp_name, '미지정') AS Label,
+            COUNT(DISTINCT q.quote_id) AS Count,
+            0 AS Qty,
+            COALESCE(SUM(q.total_amount), 0) AS SupplyAmount,
+            COALESCE(SUM(q.vat_amount), 0) AS VatAmount,
+            COALESCE(SUM(q.total_amount + q.vat_amount), 0) AS TotalAmount
+        FROM quotations q
+        LEFT JOIN employees e  ON e.employee_id = q.employee_id AND e.tenant_id = q.tenant_id
+        LEFT JOIN employees e2 ON e2.user_id    = q.created_by  AND e2.tenant_id = q.tenant_id
+        WHERE q.tenant_id = @TenantId AND q.is_deleted = 0
+          AND (@From IS NULL OR q.quote_date >= @From)
+          AND (@To IS NULL OR q.quote_date <= @To)
+          AND (@Partner IS NULL OR COALESCE(e.emp_name, e2.emp_name) LIKE CONCAT('%', @Partner, '%'))
+        GROUP BY COALESCE(q.employee_id, q.created_by), Label
+        ORDER BY SupplyAmount DESC
+        """;
+
+    // 견적단가 조회 — 품목별 최저/최고/평균 견적 단가
+    private const string Q_PRICE = """
+        SELECT
+            i.item_name AS Label,
+            COUNT(DISTINCT q.quote_id) AS Count,
+            COALESCE(SUM(qi.qty), 0) AS Qty,
+            COALESCE(MIN(qi.unit_price), 0) AS SupplyAmount,
+            COALESCE(MAX(qi.unit_price), 0) AS VatAmount,
+            COALESCE(AVG(qi.unit_price), 0) AS TotalAmount
+        FROM quotation_items qi
+        INNER JOIN quotations q ON q.quote_id = qi.quote_id
+        LEFT JOIN items i ON i.item_id = qi.item_id AND i.tenant_id = q.tenant_id
+        WHERE q.tenant_id = @TenantId AND q.is_deleted = 0
+          AND qi.unit_price > 0
+          AND (@From IS NULL OR q.quote_date >= @From)
+          AND (@To IS NULL OR q.quote_date <= @To)
+          AND (@Partner IS NULL OR i.item_name LIKE CONCAT('%', @Partner, '%'))
+        GROUP BY qi.item_id, i.item_name
+        ORDER BY i.item_name
+        """;
 
     /// <inheritdoc />
     public async Task<List<ReportRow>> GetSalesOrderReportAsync(
@@ -100,63 +147,16 @@ public class ReportService : IReportService
         DateTime? from = null, DateTime? to = null,
         string? partner = null, CancellationToken ct = default)
     {
+        // 사장님 결재 2026-04-29: 수주현황 6종 풀스택.
+        // backorder: ordered_qty > delivered_qty / delivery: delivery_date 기준
         var sql = viewType switch
         {
-            "partner" => """
-                SELECT
-                    p.partner_name AS Label,
-                    COUNT(DISTINCT so.order_id) AS Count,
-                    0 AS Qty,
-                    COALESCE(SUM(so.total_amount), 0) AS SupplyAmount,
-                    COALESCE(SUM(so.vat_amount), 0) AS VatAmount,
-                    COALESCE(SUM(so.total_amount + so.vat_amount), 0) AS TotalAmount
-                FROM sales_orders so
-                LEFT JOIN partners p
-                    ON p.partner_id = so.partner_id AND p.tenant_id = so.tenant_id
-                WHERE so.tenant_id = @TenantId AND so.is_deleted = 0
-                  AND (@From IS NULL OR so.order_date >= @From)
-                  AND (@To IS NULL OR so.order_date <= @To)
-                  AND (@Partner IS NULL OR p.partner_name LIKE CONCAT('%', @Partner, '%'))
-                GROUP BY so.partner_id, p.partner_name
-                ORDER BY SupplyAmount DESC
-                """,
-            "item" => """
-                SELECT
-                    i.item_name AS Label,
-                    COUNT(DISTINCT so.order_id) AS Count,
-                    COALESCE(SUM(soi.ordered_qty), 0) AS Qty,
-                    COALESCE(SUM(soi.supply_amount), 0) AS SupplyAmount,
-                    COALESCE(SUM(soi.vat_amount), 0) AS VatAmount,
-                    COALESCE(SUM(soi.supply_amount + soi.vat_amount), 0) AS TotalAmount
-                FROM sales_order_items soi
-                INNER JOIN sales_orders so ON so.order_id = soi.order_id AND so.tenant_id = soi.tenant_id
-                LEFT JOIN items i ON i.item_id = soi.item_id AND i.tenant_id = soi.tenant_id
-                LEFT JOIN partners p ON p.partner_id = so.partner_id AND p.tenant_id = so.tenant_id
-                WHERE so.tenant_id = @TenantId AND so.is_deleted = 0
-                  AND (@From IS NULL OR so.order_date >= @From)
-                  AND (@To IS NULL OR so.order_date <= @To)
-                  AND (@Partner IS NULL OR p.partner_name LIKE CONCAT('%', @Partner, '%'))
-                GROUP BY soi.item_id, i.item_name
-                ORDER BY SupplyAmount DESC
-                """,
-            _ => """
-                SELECT
-                    DATE_FORMAT(so.order_date, '%Y-%m-%d') AS Label,
-                    COUNT(*) AS Count,
-                    0 AS Qty,
-                    COALESCE(SUM(so.total_amount), 0) AS SupplyAmount,
-                    COALESCE(SUM(so.vat_amount), 0) AS VatAmount,
-                    COALESCE(SUM(so.total_amount + so.vat_amount), 0) AS TotalAmount
-                FROM sales_orders so
-                LEFT JOIN partners p
-                    ON p.partner_id = so.partner_id AND p.tenant_id = so.tenant_id
-                WHERE so.tenant_id = @TenantId AND so.is_deleted = 0
-                  AND (@From IS NULL OR so.order_date >= @From)
-                  AND (@To IS NULL OR so.order_date <= @To)
-                  AND (@Partner IS NULL OR p.partner_name LIKE CONCAT('%', @Partner, '%'))
-                GROUP BY so.order_date
-                ORDER BY so.order_date
-                """
+            "partner" => SO_BY_PARTNER,
+            "item" => SO_BY_ITEM,
+            "delivery" => SO_BY_DELIVERY,
+            "backorder" => SO_BACKORDER,
+            "price" => SO_PRICE,
+            _ => SO_BY_PERIOD
         };
 
         var rows = await _db.QueryAsync<ReportRow>(
@@ -170,6 +170,126 @@ public class ReportService : IReportService
 
         return rows.ToList();
     }
+
+    // ─── 수주현황 6종 SQL ───
+    private const string SO_BY_PERIOD = """
+        SELECT
+            DATE_FORMAT(so.order_date, '%Y-%m-%d') AS Label,
+            COUNT(*) AS Count,
+            0 AS Qty,
+            COALESCE(SUM(so.total_amount), 0) AS SupplyAmount,
+            COALESCE(SUM(so.vat_amount), 0) AS VatAmount,
+            COALESCE(SUM(so.total_amount + so.vat_amount), 0) AS TotalAmount
+        FROM sales_orders so
+        LEFT JOIN partners p ON p.partner_id = so.partner_id AND p.tenant_id = so.tenant_id
+        WHERE so.tenant_id = @TenantId AND so.is_deleted = 0 AND so.status <> 'cancelled'
+          AND (@From IS NULL OR so.order_date >= @From)
+          AND (@To IS NULL OR so.order_date <= @To)
+          AND (@Partner IS NULL OR p.partner_name LIKE CONCAT('%', @Partner, '%'))
+        GROUP BY so.order_date
+        ORDER BY so.order_date
+        """;
+
+    private const string SO_BY_PARTNER = """
+        SELECT
+            p.partner_name AS Label,
+            COUNT(DISTINCT so.order_id) AS Count,
+            0 AS Qty,
+            COALESCE(SUM(so.total_amount), 0) AS SupplyAmount,
+            COALESCE(SUM(so.vat_amount), 0) AS VatAmount,
+            COALESCE(SUM(so.total_amount + so.vat_amount), 0) AS TotalAmount
+        FROM sales_orders so
+        LEFT JOIN partners p ON p.partner_id = so.partner_id AND p.tenant_id = so.tenant_id
+        WHERE so.tenant_id = @TenantId AND so.is_deleted = 0 AND so.status <> 'cancelled'
+          AND (@From IS NULL OR so.order_date >= @From)
+          AND (@To IS NULL OR so.order_date <= @To)
+          AND (@Partner IS NULL OR p.partner_name LIKE CONCAT('%', @Partner, '%'))
+        GROUP BY so.partner_id, p.partner_name
+        ORDER BY SupplyAmount DESC
+        """;
+
+    private const string SO_BY_ITEM = """
+        SELECT
+            i.item_name AS Label,
+            COUNT(DISTINCT so.order_id) AS Count,
+            COALESCE(SUM(soi.ordered_qty), 0) AS Qty,
+            COALESCE(SUM(soi.supply_amount), 0) AS SupplyAmount,
+            COALESCE(SUM(soi.vat_amount), 0) AS VatAmount,
+            COALESCE(SUM(soi.supply_amount + soi.vat_amount), 0) AS TotalAmount
+        FROM sales_order_items soi
+        INNER JOIN sales_orders so ON so.order_id = soi.order_id AND so.tenant_id = soi.tenant_id
+        LEFT JOIN items i ON i.item_id = soi.item_id AND i.tenant_id = soi.tenant_id
+        WHERE so.tenant_id = @TenantId AND so.is_deleted = 0 AND so.status <> 'cancelled'
+          AND (@From IS NULL OR so.order_date >= @From)
+          AND (@To IS NULL OR so.order_date <= @To)
+          AND (@Partner IS NULL OR i.item_name LIKE CONCAT('%', @Partner, '%'))
+        GROUP BY soi.item_id, i.item_name
+        ORDER BY SupplyAmount DESC
+        """;
+
+    // 납기별 — sales_orders.delivery_date 기준
+    private const string SO_BY_DELIVERY = """
+        SELECT
+            COALESCE(DATE_FORMAT(so.delivery_date, '%Y-%m-%d'), '미지정') AS Label,
+            COUNT(DISTINCT so.order_id) AS Count,
+            COALESCE(SUM(soi.ordered_qty - soi.delivered_qty), 0) AS Qty,
+            COALESCE(SUM(soi.supply_amount), 0) AS SupplyAmount,
+            COALESCE(SUM(soi.vat_amount), 0) AS VatAmount,
+            COALESCE(SUM(soi.supply_amount + soi.vat_amount), 0) AS TotalAmount
+        FROM sales_orders so
+        LEFT JOIN sales_order_items soi ON soi.order_id = so.order_id AND soi.tenant_id = so.tenant_id
+        LEFT JOIN partners p ON p.partner_id = so.partner_id AND p.tenant_id = so.tenant_id
+        WHERE so.tenant_id = @TenantId AND so.is_deleted = 0 AND so.status <> 'cancelled'
+          AND (@From IS NULL OR so.delivery_date IS NULL OR so.delivery_date >= @From)
+          AND (@To IS NULL OR so.delivery_date IS NULL OR so.delivery_date <= @To)
+          AND (@Partner IS NULL OR p.partner_name LIKE CONCAT('%', @Partner, '%'))
+        GROUP BY so.delivery_date
+        ORDER BY so.delivery_date
+        """;
+
+    // 미납품 현황 — ordered_qty > delivered_qty 인 품목/업체
+    private const string SO_BACKORDER = """
+        SELECT
+            CONCAT(i.item_name, ' / ', p.partner_name) AS Label,
+            COUNT(DISTINCT so.order_id) AS Count,
+            COALESCE(SUM(soi.ordered_qty - soi.delivered_qty), 0) AS Qty,
+            COALESCE(SUM((soi.ordered_qty - soi.delivered_qty) * soi.unit_price), 0) AS SupplyAmount,
+            COALESCE(SUM(soi.ordered_qty), 0) AS VatAmount,
+            COALESCE(SUM(soi.delivered_qty), 0) AS TotalAmount
+        FROM sales_order_items soi
+        INNER JOIN sales_orders so ON so.order_id = soi.order_id AND so.tenant_id = soi.tenant_id
+        LEFT JOIN items i ON i.item_id = soi.item_id AND i.tenant_id = soi.tenant_id
+        LEFT JOIN partners p ON p.partner_id = so.partner_id AND p.tenant_id = so.tenant_id
+        WHERE so.tenant_id = @TenantId AND so.is_deleted = 0 AND so.status <> 'cancelled'
+          AND soi.ordered_qty > soi.delivered_qty
+          AND (@From IS NULL OR so.order_date >= @From)
+          AND (@To IS NULL OR so.order_date <= @To)
+          AND (@Partner IS NULL OR i.item_name LIKE CONCAT('%', @Partner, '%')
+               OR p.partner_name LIKE CONCAT('%', @Partner, '%'))
+        GROUP BY soi.item_id, i.item_name, so.partner_id, p.partner_name
+        ORDER BY Qty DESC
+        """;
+
+    // 수주단가 변동현황
+    private const string SO_PRICE = """
+        SELECT
+            i.item_name AS Label,
+            COUNT(DISTINCT so.order_id) AS Count,
+            COALESCE(SUM(soi.ordered_qty), 0) AS Qty,
+            COALESCE(MIN(soi.unit_price), 0) AS SupplyAmount,
+            COALESCE(MAX(soi.unit_price), 0) AS VatAmount,
+            COALESCE(AVG(soi.unit_price), 0) AS TotalAmount
+        FROM sales_order_items soi
+        INNER JOIN sales_orders so ON so.order_id = soi.order_id AND so.tenant_id = soi.tenant_id
+        LEFT JOIN items i ON i.item_id = soi.item_id AND i.tenant_id = soi.tenant_id
+        WHERE so.tenant_id = @TenantId AND so.is_deleted = 0 AND so.status <> 'cancelled'
+          AND soi.unit_price > 0
+          AND (@From IS NULL OR so.order_date >= @From)
+          AND (@To IS NULL OR so.order_date <= @To)
+          AND (@Partner IS NULL OR i.item_name LIKE CONCAT('%', @Partner, '%'))
+        GROUP BY soi.item_id, i.item_name
+        ORDER BY i.item_name
+        """;
 
     /// <inheritdoc />
     public async Task<List<ReportRow>> GetSalesReportAsync(
@@ -1797,60 +1917,18 @@ public class ReportService : IReportService
     public async Task<List<ReportRow>> GetStockStatusAsync(
         string viewType, string tenantId, CancellationToken ct)
     {
+        // 사장님 결재 2026-04-29: 재고현황 7종 풀스택.
+        // 기존 컬럼 오타 수정 (safety_stock → safe_stock).
+        // current/warehouse/safety/optimal/dead-stock/loss-rate/monthly-io 7종.
         var sql = viewType switch
         {
-            // 안전재고 미달 품목만 조회한다.
-            "safety" => """
-                SELECT
-                    i.item_name AS Label,
-                    1 AS Count,
-                    COALESCE(s.current_qty, 0) AS Qty,
-                    COALESCE(s.current_qty * i.sale_price, 0) AS SupplyAmount,
-                    0 AS VatAmount,
-                    COALESCE(s.current_qty * i.sale_price, 0) AS TotalAmount
-                FROM items i
-                LEFT JOIN item_stock s ON s.item_id = i.item_id AND s.tenant_id = i.tenant_id
-                WHERE i.tenant_id = @TenantId
-                  AND i.is_active = 1
-                  AND (i.is_deleted = 0 OR i.is_deleted IS NULL)
-                  AND i.safety_stock > 0
-                  AND COALESCE(s.current_qty, 0) <= i.safety_stock
-                ORDER BY i.item_name
-                """,
-            // 창고별 재고현황을 조회한다.
-            "warehouse" => """
-                SELECT
-                    COALESCE(w.wh_name, '기본창고') AS Label,
-                    COUNT(DISTINCT s.item_id) AS Count,
-                    COALESCE(SUM(s.current_qty), 0) AS Qty,
-                    COALESCE(SUM(s.current_qty * i.sale_price), 0) AS SupplyAmount,
-                    0 AS VatAmount,
-                    COALESCE(SUM(s.current_qty * i.sale_price), 0) AS TotalAmount
-                FROM item_stock s
-                LEFT JOIN items i ON i.item_id = s.item_id AND i.tenant_id = s.tenant_id
-                LEFT JOIN warehouses w ON w.warehouse_id = s.warehouse_id AND w.tenant_id = s.tenant_id
-                WHERE s.tenant_id = @TenantId
-                  AND i.is_active = 1
-                  AND (i.is_deleted = 0 OR i.is_deleted IS NULL)
-                GROUP BY s.warehouse_id, w.wh_name
-                ORDER BY w.wh_name
-                """,
-            // 전체 현재고를 조회한다. (기본)
-            _ => """
-                SELECT
-                    i.item_name AS Label,
-                    1 AS Count,
-                    COALESCE(s.current_qty, 0) AS Qty,
-                    COALESCE(s.current_qty * i.sale_price, 0) AS SupplyAmount,
-                    0 AS VatAmount,
-                    COALESCE(s.current_qty * i.sale_price, 0) AS TotalAmount
-                FROM items i
-                LEFT JOIN item_stock s ON s.item_id = i.item_id AND s.tenant_id = i.tenant_id
-                WHERE i.tenant_id = @TenantId
-                  AND i.is_active = 1
-                  AND (i.is_deleted = 0 OR i.is_deleted IS NULL)
-                ORDER BY i.item_name
-                """
+            "warehouse" => STOCK_BY_WAREHOUSE,
+            "safety" => STOCK_SAFETY_BELOW,
+            "optimal" => STOCK_OPTIMAL,
+            "dead-stock" => STOCK_DEAD,
+            "loss-rate" => STOCK_LOSS_RATE,
+            "monthly-io" => STOCK_MONTHLY_IO,
+            _ => STOCK_CURRENT
         };
 
         var rows = await _db.QueryAsync<ReportRow>(
@@ -1858,4 +1936,163 @@ public class ReportService : IReportService
 
         return rows.ToList();
     }
+
+    // ─── 재고현황 7종 SQL ───
+    // 전체 현재고 (기본)
+    private const string STOCK_CURRENT = """
+        SELECT
+            i.item_name AS Label,
+            1 AS Count,
+            COALESCE(SUM(s.current_qty), 0) AS Qty,
+            COALESCE(SUM(s.current_qty) * i.sale_price, 0) AS SupplyAmount,
+            COALESCE(i.safe_stock, 0) AS VatAmount,
+            COALESCE(SUM(s.current_qty) * i.sale_price, 0) AS TotalAmount
+        FROM items i
+        LEFT JOIN item_stock s ON s.item_id = i.item_id AND s.tenant_id = i.tenant_id
+        WHERE i.tenant_id = @TenantId
+          AND i.is_active = 1
+          AND (i.is_deleted = 0 OR i.is_deleted IS NULL)
+        GROUP BY i.item_id, i.item_name, i.sale_price, i.safe_stock
+        ORDER BY i.item_name
+        """;
+
+    // 창고별 재고
+    private const string STOCK_BY_WAREHOUSE = """
+        SELECT
+            COALESCE(w.wh_name, '기본창고') AS Label,
+            COUNT(DISTINCT s.item_id) AS Count,
+            COALESCE(SUM(s.current_qty), 0) AS Qty,
+            COALESCE(SUM(s.current_qty * i.sale_price), 0) AS SupplyAmount,
+            0 AS VatAmount,
+            COALESCE(SUM(s.current_qty * i.sale_price), 0) AS TotalAmount
+        FROM item_stock s
+        LEFT JOIN items i ON i.item_id = s.item_id AND i.tenant_id = s.tenant_id
+        LEFT JOIN warehouses w ON w.warehouse_id = s.warehouse_id AND w.tenant_id = s.tenant_id
+        WHERE s.tenant_id = @TenantId
+          AND i.is_active = 1
+          AND (i.is_deleted = 0 OR i.is_deleted IS NULL)
+        GROUP BY s.warehouse_id, w.wh_name
+        ORDER BY w.wh_name
+        """;
+
+    // 안전재고 미달 (safe_stock 컬럼 사용)
+    private const string STOCK_SAFETY_BELOW = """
+        SELECT
+            i.item_name AS Label,
+            1 AS Count,
+            COALESCE(SUM(s.current_qty), 0) AS Qty,
+            COALESCE(i.safe_stock, 0) AS SupplyAmount,
+            COALESCE(i.safe_stock, 0) - COALESCE(SUM(s.current_qty), 0) AS VatAmount,
+            COALESCE(SUM(s.current_qty) * i.sale_price, 0) AS TotalAmount
+        FROM items i
+        LEFT JOIN item_stock s ON s.item_id = i.item_id AND s.tenant_id = i.tenant_id
+        WHERE i.tenant_id = @TenantId
+          AND i.is_active = 1
+          AND (i.is_deleted = 0 OR i.is_deleted IS NULL)
+          AND COALESCE(i.safe_stock, 0) > 0
+        GROUP BY i.item_id, i.item_name, i.safe_stock, i.sale_price
+        HAVING Qty <= SupplyAmount
+        ORDER BY VatAmount DESC
+        """;
+
+    // 적정재고대비 — 현재고 vs 안전재고 비율
+    private const string STOCK_OPTIMAL = """
+        SELECT
+            i.item_name AS Label,
+            1 AS Count,
+            COALESCE(SUM(s.current_qty), 0) AS Qty,
+            COALESCE(i.safe_stock, 0) AS SupplyAmount,
+            CASE WHEN COALESCE(i.safe_stock, 0) = 0 THEN 0
+                 ELSE ROUND(COALESCE(SUM(s.current_qty), 0) / i.safe_stock * 100, 1)
+            END AS VatAmount,
+            COALESCE(SUM(s.current_qty) * i.sale_price, 0) AS TotalAmount
+        FROM items i
+        LEFT JOIN item_stock s ON s.item_id = i.item_id AND s.tenant_id = i.tenant_id
+        WHERE i.tenant_id = @TenantId
+          AND i.is_active = 1
+          AND (i.is_deleted = 0 OR i.is_deleted IS NULL)
+        GROUP BY i.item_id, i.item_name, i.safe_stock, i.sale_price
+        ORDER BY VatAmount
+        """;
+
+    // 사장재고 — 현재고는 있는데 최근 3개월 출고 0인 품목
+    private const string STOCK_DEAD = """
+        SELECT
+            i.item_name AS Label,
+            1 AS Count,
+            COALESCE(SUM(s.current_qty), 0) AS Qty,
+            COALESCE(SUM(s.current_qty) * COALESCE(i.purchase_price, i.cost_price, 0), 0) AS SupplyAmount,
+            DATEDIFF(CURDATE(),
+              COALESCE((SELECT MAX(sd.delivery_date) FROM sales_deliveries sd
+                        INNER JOIN sales_delivery_items sdi ON sdi.delivery_id = sd.delivery_id
+                        WHERE sd.tenant_id = i.tenant_id AND sdi.item_id = i.item_id
+                          AND sd.is_deleted = 0 AND sd.status <> 'cancelled'), CURDATE() - INTERVAL 9999 DAY)
+            ) AS VatAmount,
+            COALESCE(SUM(s.current_qty) * i.sale_price, 0) AS TotalAmount
+        FROM items i
+        LEFT JOIN item_stock s ON s.item_id = i.item_id AND s.tenant_id = i.tenant_id
+        WHERE i.tenant_id = @TenantId
+          AND i.is_active = 1
+          AND (i.is_deleted = 0 OR i.is_deleted IS NULL)
+        GROUP BY i.item_id, i.item_name, i.purchase_price, i.cost_price, i.sale_price
+        HAVING Qty > 0 AND VatAmount >= 90
+        ORDER BY VatAmount DESC
+        """;
+
+    // 재고 로스율 — stock_adjust_logs 음수 조정만 합산 / 현재고
+    private const string STOCK_LOSS_RATE = """
+        SELECT
+            i.item_name AS Label,
+            COUNT(DISTINCT al.adjust_id) AS Count,
+            COALESCE(SUM(al.adjust_qty), 0) AS Qty,
+            COALESCE(MAX(s.current_qty), 0) AS SupplyAmount,
+            CASE WHEN COALESCE(MAX(s.current_qty), 0) = 0 THEN 0
+                 ELSE ROUND(ABS(COALESCE(SUM(al.adjust_qty), 0)) / COALESCE(MAX(s.current_qty), 0) * 100, 2)
+            END AS VatAmount,
+            COALESCE(SUM(al.adjust_qty * COALESCE(i.purchase_price, i.cost_price, 0)), 0) AS TotalAmount
+        FROM items i
+        LEFT JOIN item_stock s ON s.item_id = i.item_id AND s.tenant_id = i.tenant_id
+        LEFT JOIN stock_adjust_logs al ON al.item_id = i.item_id AND al.tenant_id = i.tenant_id
+        WHERE i.tenant_id = @TenantId
+          AND i.is_active = 1
+          AND (i.is_deleted = 0 OR i.is_deleted IS NULL)
+        GROUP BY i.item_id, i.item_name, i.purchase_price, i.cost_price
+        HAVING Count > 0
+        ORDER BY VatAmount DESC
+        """;
+
+    // 년간월별 입출재고 — 매입(입고) - 매출(출고)
+    private const string STOCK_MONTHLY_IO = """
+        SELECT
+            CONCAT(i.item_name, ' (', t.ym, ')') AS Label,
+            COALESCE(SUM(t.in_count), 0) AS Count,
+            COALESCE(SUM(t.in_qty), 0) AS Qty,
+            COALESCE(SUM(t.out_qty), 0) AS SupplyAmount,
+            COALESCE(SUM(t.in_qty - t.out_qty), 0) AS VatAmount,
+            COALESCE(SUM(t.in_amt - t.out_amt), 0) AS TotalAmount
+        FROM items i
+        INNER JOIN (
+            SELECT pri.item_id, DATE_FORMAT(pr.receipt_date, '%Y-%m') AS ym,
+                   COUNT(DISTINCT pr.receipt_id) AS in_count,
+                   SUM(pri.qty) AS in_qty, 0 AS out_qty,
+                   SUM(pri.supply_amount) AS in_amt, 0 AS out_amt,
+                   pri.tenant_id
+            FROM purchase_receipt_items pri
+            INNER JOIN purchase_receipts pr ON pr.receipt_id = pri.receipt_id AND pr.tenant_id = pri.tenant_id
+            WHERE pr.tenant_id = @TenantId AND pr.status <> 'cancelled'
+            GROUP BY pri.item_id, ym, pri.tenant_id
+            UNION ALL
+            SELECT sdi.item_id, DATE_FORMAT(sd.delivery_date, '%Y-%m') AS ym,
+                   0, 0, SUM(sdi.qty), 0, SUM(sdi.supply_amount), sdi.tenant_id
+            FROM sales_delivery_items sdi
+            INNER JOIN sales_deliveries sd ON sd.delivery_id = sdi.delivery_id AND sd.tenant_id = sdi.tenant_id
+            WHERE sd.tenant_id = @TenantId AND sd.is_deleted = 0 AND sd.status <> 'cancelled'
+            GROUP BY sdi.item_id, ym, sdi.tenant_id
+        ) t ON t.item_id = i.item_id AND t.tenant_id = i.tenant_id
+        WHERE i.tenant_id = @TenantId
+          AND i.is_active = 1
+          AND (i.is_deleted = 0 OR i.is_deleted IS NULL)
+        GROUP BY i.item_id, i.item_name, t.ym
+        ORDER BY i.item_name, t.ym
+        """;
 }
