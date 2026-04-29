@@ -1,0 +1,50 @@
+@namespace HitPan.Web.Pages.SettingsUi
+@using HitPan.Web.Models
+
+<MudDialog>
+    <DialogContent>
+        <MudAlert Severity="Severity.Error" Class="mb-3" Dense="true" Icon="@Icons.Material.Filled.Warning">
+            <strong>주의 — 현재 데이터가 모두 덮어씌워집니다.</strong>
+            복원 직전 자동 백업이 만들어지므로 사고 시 직전 상태로 되돌릴 수는 있습니다.
+        </MudAlert>
+
+        <MudText Typo="Typo.body2" Class="mb-2">복원할 백업 파일</MudText>
+        <MudTextField T="string" Value="@SourceFile" ReadOnly="true"
+                      Variant="Variant.Outlined" Margin="Margin.Dense" Class="mb-3"
+                      Style="font-family:monospace;font-size:11px" />
+
+        <MudText Typo="Typo.body2" Class="mb-2">
+            확인을 위해 <strong>회사명</strong>을 정확히 입력하세요.
+        </MudText>
+        <MudTextField T="string" @bind-Value="_confirmName" Label="회사명"
+                      Variant="Variant.Outlined" Margin="Margin.Dense"
+                      Placeholder="예: (주)히트판" />
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="Cancel">취소</MudButton>
+        <MudButton Color="Color.Error" Variant="Variant.Filled"
+                   StartIcon="@Icons.Material.Filled.RestoreFromTrash"
+                   Disabled="@string.IsNullOrWhiteSpace(_confirmName)"
+                   OnClick="Confirm">복원 실행</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private IMudDialogInstance MudDialog { get; set; } = default!;
+    [Parameter] public string SourceFile { get; set; } = "";
+    [Parameter] public string BackupId { get; set; } = "";
+
+    private string _confirmName = "";
+
+    private void Cancel() => MudDialog.Cancel();
+
+    private void Confirm()
+    {
+        var req = new RestoreRequestModel
+        {
+            BackupId = BackupId,
+            ConfirmCompanyName = _confirmName
+        };
+        MudDialog.Close(DialogResult.Ok(req));
+    }
+}

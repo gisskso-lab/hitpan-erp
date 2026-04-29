@@ -91,6 +91,7 @@ builder.Services.AddScoped<IPositionService, PositionService>();
 builder.Services.AddScoped<IApprovalLineService, ApprovalLineService>();
 builder.Services.AddScoped<IBillingProvider, ManualBillingProvider>();
 builder.Services.AddScoped<IBillingService, BillingService>();
+builder.Services.AddScoped<IBackupService, BackupService>();
 builder.Services.AddScoped<ILeaveRequestService, LeaveRequestService>();
 builder.Services.AddScoped<IReportService, ReportService>();
 builder.Services.AddScoped<IApprovalService, ApprovalService>();

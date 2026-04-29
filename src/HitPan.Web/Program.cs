@@ -49,6 +49,7 @@ builder.Services.AddScoped<EmployeeService>();
 builder.Services.AddScoped<PositionService>();
 builder.Services.AddScoped<ApprovalLineService>();
 builder.Services.AddScoped<BillingService>();
+builder.Services.AddScoped<BackupService>();
 builder.Services.AddScoped<LeaveRequestService>();
 builder.Services.AddScoped<DocumentService>();
 builder.Services.AddScoped<SpecialPriceService>();

@@ -1,0 +1,238 @@
+@page "/data/backup"
+@namespace HitPan.Web.Pages.SettingsUi
+@attribute [Authorize]
+@using HitPan.Web.Models
+@using HitPan.Web.Services
+@inject BackupService BackupApi
+@inject ISnackbar Snackbar
+@inject IDialogService Dialog
+
+<PageTitle>자료 백업·복원</PageTitle>
+
+<PageHeader Title="자료 백업·복원" Subtitle="로컬 미러 백업 — 1차 메인 + 2차 외장(선택)">
+    <Actions>
+        <MudButton Variant="Variant.Filled" Color="Color.Primary"
+                   StartIcon="@Icons.Material.Filled.Save"
+                   OnClick="RunBackupAsync" Disabled="@_busy">지금 백업</MudButton>
+    </Actions>
+</PageHeader>
+
+<MudAlert Severity="Severity.Warning" Class="mb-3" Dense="true" Icon="@Icons.Material.Filled.Warning">
+    <strong>같은 디스크 백업은 위험합니다.</strong> 디스크 고장 시 원본·백업 동시 손실. 외장하드/USB/별도 드라이브를 2차 미러로 지정하세요.
+</MudAlert>
+
+@* 백업 위치 설정 *@
+<SectionCard Title="백업 위치">
+    <MudGrid Spacing="2">
+        <MudItem xs="12" md="6">
+            <MudTextField T="string" Label="1차 백업 폴더 (메인 하드)" @bind-Value="_settings.PrimaryPath"
+                          Variant="Variant.Outlined" Margin="Margin.Dense"
+                          Placeholder="C:\HitpanBackup"
+                          HelperText="필수. 폴더가 없으면 백업 시 자동 생성됩니다." />
+        </MudItem>
+        <MudItem xs="12" md="6">
+            <MudTextField T="string" Label="2차 미러 폴더 (외장 / USB / NAS)" @bind-Value="_settings.MirrorPath"
+                          Variant="Variant.Outlined" Margin="Margin.Dense"
+                          Placeholder="E:\HitpanBackup_Mirror (선택)"
+                          HelperText="선택. 1차 백업 후 동일 파일이 자동 복사됩니다." />
+        </MudItem>
+        <MudItem xs="12" md="4">
+            <MudSelect T="string" Label="자동 백업 주기" @bind-Value="_settings.ScheduleMode"
+                       Variant="Variant.Outlined" Margin="Margin.Dense">
+                <MudSelectItem Value="@("manual")">수동 (버튼 클릭 시에만)</MudSelectItem>
+                <MudSelectItem Value="@("hourly")">매 1시간</MudSelectItem>
+                <MudSelectItem Value="@("every_6h")">매 6시간</MudSelectItem>
+                <MudSelectItem Value="@("daily_03")">매일 새벽 3시</MudSelectItem>
+            </MudSelect>
+        </MudItem>
+        <MudItem xs="12" md="4">
+            <MudNumericField T="int" Label="보관 개수" @bind-Value="_settings.RetentionCount"
+                             Variant="Variant.Outlined" Margin="Margin.Dense" Min="1" Max="365"
+                             HelperText="이 개수 초과 시 오래된 백업부터 자동 삭제. (복원 직전 자동백업은 제외)" />
+        </MudItem>
+        <MudItem xs="12" md="4" Class="d-flex align-end">
+            <MudButton Variant="Variant.Outlined" Color="Color.Primary"
+                       StartIcon="@Icons.Material.Filled.Check"
+                       OnClick="SaveSettingsAsync" FullWidth="true">설정 저장</MudButton>
+        </MudItem>
+    </MudGrid>
+    @if (_settings.LastRunAt is not null)
+    {
+        <MudText Typo="Typo.caption" Class="mt-2" Style="color:var(--mud-palette-text-secondary)">
+            마지막 백업: @_settings.LastRunAt?.ToString("yyyy-MM-dd HH:mm:ss")
+            — 상태: <strong style="@(_settings.LastStatus == "success" ? "color:var(--hitpan-income)" : "color:var(--hitpan-expense)")">@(_settings.LastStatus ?? "—")</strong>
+            @if (_settings.LastStatus == "failed" && !string.IsNullOrEmpty(_settings.LastError))
+            {
+                <span> (@_settings.LastError)</span>
+            }
+        </MudText>
+    }
+</SectionCard>
+
+@* 백업 이력 *@
+<SectionCard Title="백업 이력" Class="mt-3">
+    <MudTable Items="_history" Dense="true" Hover="true" Striped="true">
+        <HeaderContent>
+            <MudTh>시작 시각</MudTh>
+            <MudTh>상태</MudTh>
+            <MudTh>1차 파일</MudTh>
+            <MudTh>2차 미러</MudTh>
+            <MudTh Style="text-align:right">크기</MudTh>
+            <MudTh>유형</MudTh>
+            <MudTh Style="text-align:center">복원</MudTh>
+        </HeaderContent>
+        <RowTemplate>
+            <MudTd>@context.StartedAt.ToString("yyyy-MM-dd HH:mm:ss")</MudTd>
+            <MudTd>
+                <MudChip T="string" Size="Size.Small"
+                         Color="@(context.Status == "success" ? Color.Success : context.Status == "failed" ? Color.Error : Color.Default)"
+                         Variant="Variant.Text">@context.Status</MudChip>
+            </MudTd>
+            <MudTd Style="font-size:11px;font-family:monospace">@(context.PrimaryFile ?? "-")</MudTd>
+            <MudTd Style="font-size:11px;font-family:monospace">@(context.MirrorFile ?? "—")</MudTd>
+            <MudTd Style="text-align:right">@FormatSize(context.FileSizeBytes)</MudTd>
+            <MudTd>@context.TriggeredBy</MudTd>
+            <MudTd Style="text-align:center">
+                @if (context.Status == "success")
+                {
+                    <MudButton Size="Size.Small" Variant="Variant.Outlined" Color="Color.Warning"
+                               StartIcon="@Icons.Material.Filled.RestoreFromTrash"
+                               OnClick="() => OpenRestoreDialogAsync(context)">복원</MudButton>
+                }
+            </MudTd>
+        </RowTemplate>
+        <NoRecordsContent>
+            <EmptyState Icon="@Icons.Material.Filled.Save"
+                        Title="백업 이력이 없습니다"
+                        Subtitle="상단의 [지금 백업] 버튼으로 첫 백업을 만드세요." />
+        </NoRecordsContent>
+    </MudTable>
+</SectionCard>
+
+@* 복원 이력 *@
+<SectionCard Title="복원 이력" Class="mt-3">
+    <MudTable Items="_restoreHistory" Dense="true" Hover="true" Striped="true">
+        <HeaderContent>
+            <MudTh>시각</MudTh>
+            <MudTh>상태</MudTh>
+            <MudTh>복원 파일</MudTh>
+            <MudTh>안전 백업</MudTh>
+            <MudTh>실행자</MudTh>
+        </HeaderContent>
+        <RowTemplate>
+            <MudTd>@context.StartedAt.ToString("yyyy-MM-dd HH:mm:ss")</MudTd>
+            <MudTd>
+                <MudChip T="string" Size="Size.Small"
+                         Color="@(context.Status == "success" ? Color.Success : context.Status == "failed" ? Color.Error : Color.Default)"
+                         Variant="Variant.Text">@context.Status</MudChip>
+            </MudTd>
+            <MudTd Style="font-size:11px;font-family:monospace">@context.SourceFile</MudTd>
+            <MudTd Style="font-size:11px;font-family:monospace">@(context.PreRestoreBackup ?? "—")</MudTd>
+            <MudTd>@(context.TriggeredByUser ?? "—")</MudTd>
+        </RowTemplate>
+        <NoRecordsContent>
+            <MudText Class="pa-4" Style="color:var(--hitpan-text-faint)">복원 이력이 없습니다.</MudText>
+        </NoRecordsContent>
+    </MudTable>
+</SectionCard>
+
+@code {
+    private BackupSettingsModel _settings = new();
+    private List<BackupHistoryModel> _history = new();
+    private List<RestoreHistoryModel> _restoreHistory = new();
+    private bool _busy;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadAsync();
+    }
+
+    private async Task LoadAsync()
+    {
+        _settings = await BackupApi.GetSettingsAsync();
+        _history = await BackupApi.GetHistoryAsync(50);
+        _restoreHistory = await BackupApi.GetRestoreHistoryAsync(20);
+        StateHasChanged();
+    }
+
+    private async Task SaveSettingsAsync()
+    {
+        if (string.IsNullOrWhiteSpace(_settings.PrimaryPath))
+        {
+            Snackbar.Add("1차 백업 폴더는 필수입니다.", Severity.Warning);
+            return;
+        }
+        var ok = await BackupApi.UpdateSettingsAsync(_settings);
+        Snackbar.Add(ok ? "설정 저장됨" : "저장 실패", ok ? Severity.Success : Severity.Error);
+    }
+
+    private async Task RunBackupAsync()
+    {
+        if (string.IsNullOrWhiteSpace(_settings.PrimaryPath))
+        {
+            Snackbar.Add("먼저 1차 백업 폴더를 지정·저장하세요.", Severity.Warning);
+            return;
+        }
+        _busy = true;
+        Snackbar.Add("백업 진행 중… (몇 초~수십 초 소요)", Severity.Info);
+        try
+        {
+            var result = await BackupApi.RunBackupAsync();
+            if (result.Success)
+            {
+                var sizeText = FormatSize(result.FileSizeBytes);
+                var mirrorText = string.IsNullOrEmpty(result.MirrorFile) ? "" : " (+ 미러 복사)";
+                Snackbar.Add($"백업 완료 — {sizeText}{mirrorText}", Severity.Success);
+            }
+            else
+            {
+                Snackbar.Add($"백업 실패: {result.Error}", Severity.Error);
+            }
+            await LoadAsync();
+        }
+        finally { _busy = false; }
+    }
+
+    private async Task OpenRestoreDialogAsync(BackupHistoryModel row)
+    {
+        var parameters = new DialogParameters<RestoreConfirmDialog>
+        {
+            { x => x.SourceFile, row.PrimaryFile ?? "" },
+            { x => x.BackupId, row.BackupId }
+        };
+        var options = new DialogOptions { CloseButton = true, MaxWidth = MaxWidth.Small, FullWidth = true };
+        var dialog = await Dialog.ShowAsync<RestoreConfirmDialog>("자료 복원", parameters, options);
+        var result = await dialog.Result;
+        if (result is null || result.Canceled) return;
+
+        if (result.Data is RestoreRequestModel req)
+        {
+            _busy = true;
+            Snackbar.Add("복원 진행 중… 화면을 닫지 마세요.", Severity.Info);
+            try
+            {
+                var resp = await BackupApi.RestoreAsync(req);
+                if (resp.Success)
+                {
+                    Snackbar.Add($"복원 완료. 직전 자동백업: {resp.PreRestoreBackup}", Severity.Success);
+                }
+                else
+                {
+                    Snackbar.Add($"복원 실패: {resp.Error}", Severity.Error);
+                }
+                await LoadAsync();
+            }
+            finally { _busy = false; }
+        }
+    }
+
+    private static string FormatSize(long? bytes)
+    {
+        if (bytes is null) return "—";
+        double v = bytes.Value;
+        string[] units = { "B", "KB", "MB", "GB" };
+        int i = 0;
+        while (v >= 1024 && i < units.Length - 1) { v /= 1024; i++; }
+        return $"{v:N1} {units[i]}";
+    }
+}
