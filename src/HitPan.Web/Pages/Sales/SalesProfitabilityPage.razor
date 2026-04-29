@@ -60,34 +60,28 @@
     </div>
 </MudPaper>
 
-@if (_viewType is "partner" or "item" or "period")
-{
-    <MudPaper Elevation="0" Class="hitpan-card" Style="overflow:hidden">
-        <MudTable T="ProfitReportRow" Items="_reportData" Dense="true" Hover="true" Striped="true" FixedHeader="true" Height="calc(100vh - 280px)">
-            <HeaderContent>
-                <MudTh>@GetLabelHeader()</MudTh>
-                <MudTh Style="text-align:right">건수</MudTh>
-                <MudTh Style="text-align:right">매출</MudTh>
-                <MudTh Style="text-align:right">원가</MudTh>
-                <MudTh Style="text-align:right">이익</MudTh>
-                <MudTh Style="text-align:right">이익률(%)</MudTh>
-            </HeaderContent>
-            <RowTemplate>
-                <MudTd>@context.Label</MudTd>
-                <MudTd Style="text-align:right">@context.Count.ToString("N0")</MudTd>
-                <MudTd Style="text-align:right">@context.Revenue.ToString("N0")</MudTd>
-                <MudTd Style="text-align:right">@context.Cost.ToString("N0")</MudTd>
-                <MudTd Style="@($"text-align:right;font-weight:500;color:{(context.Profit >= 0 ? "var(--hitpan-profit-dark)" : "var(--hitpan-loss-dark)")}")">@context.Profit.ToString("N0")</MudTd>
-                <MudTd Style="@($"text-align:right;font-weight:500;color:{(context.ProfitRate >= 0 ? "var(--hitpan-profit-dark)" : "var(--hitpan-loss-dark)")}")">@context.ProfitRate.ToString("N1")%</MudTd>
-            </RowTemplate>
-            <NoRecordsContent><MudText Class="pa-4" Style="color:var(--hitpan-text-faint)">조회된 데이터가 없습니다.</MudText></NoRecordsContent>
-        </MudTable>
-    </MudPaper>
-}
-else
-{
-    <MudAlert Severity="Severity.Info">@(_viewType == "region" ? "지역별" : "사원별") 수익성분석 데이터는 준비중입니다.</MudAlert>
-}
+@* 사장님 결재 2026-04-29: 5종 분기 백엔드 풀스택 → 가드 제거 *@
+<MudPaper Elevation="0" Class="hitpan-card" Style="overflow:hidden">
+    <MudTable T="ProfitReportRow" Items="_reportData" Dense="true" Hover="true" Striped="true" FixedHeader="true" Height="calc(100vh - 280px)">
+        <HeaderContent>
+            <MudTh>@GetLabelHeader()</MudTh>
+            <MudTh Style="text-align:right">건수</MudTh>
+            <MudTh Style="text-align:right">매출</MudTh>
+            <MudTh Style="text-align:right">원가</MudTh>
+            <MudTh Style="text-align:right">이익</MudTh>
+            <MudTh Style="text-align:right">이익률(%)</MudTh>
+        </HeaderContent>
+        <RowTemplate>
+            <MudTd>@context.Label</MudTd>
+            <MudTd Style="text-align:right">@context.Count.ToString("N0")</MudTd>
+            <MudTd Style="text-align:right">@context.Revenue.ToString("N0")</MudTd>
+            <MudTd Style="text-align:right">@context.Cost.ToString("N0")</MudTd>
+            <MudTd Style="@($"text-align:right;font-weight:500;color:{(context.Profit >= 0 ? "var(--hitpan-profit-dark)" : "var(--hitpan-loss-dark)")}")">@context.Profit.ToString("N0")</MudTd>
+            <MudTd Style="@($"text-align:right;font-weight:500;color:{(context.ProfitRate >= 0 ? "var(--hitpan-profit-dark)" : "var(--hitpan-loss-dark)")}")">@context.ProfitRate.ToString("N1")%</MudTd>
+        </RowTemplate>
+        <NoRecordsContent><MudText Class="pa-4" Style="color:var(--hitpan-text-faint)">조회된 데이터가 없습니다.</MudText></NoRecordsContent>
+    </MudTable>
+</MudPaper>
 
 @code {
     private DateTime? _from = DateTime.Today.AddDays(-30);
@@ -100,13 +94,6 @@ else
 
     private async Task SearchAsync()
     {
-        if (_viewType is not ("partner" or "item" or "period"))
-        {
-            _reportData = new();
-            StateHasChanged();
-            return;
-        }
-
         var qs = new List<string>();
         qs.Add($"view={_viewType}");
         if (_from.HasValue) qs.Add($"from={_from:yyyy-MM-dd}");
@@ -133,6 +120,8 @@ else
     {
         "partner" => "업체명",
         "item" => "품명",
+        "region" => "지역",
+        "employee" => "사원명",
         _ => "기간"
     };
 

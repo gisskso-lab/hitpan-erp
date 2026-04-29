@@ -60,36 +60,30 @@
     </div>
 </MudPaper>
 
-@if (_viewType is "partner" or "item" or "period")
-{
-    <MudPaper Elevation="0" Class="hitpan-card" Style="overflow:hidden">
-        <MudTable T="ReportRow" Items="_reportData" Dense="true" Hover="true" Striped="true" FixedHeader="true" Height="calc(100vh - 280px)">
-            <HeaderContent>
-                <MudTh>순위</MudTh>
-                <MudTh>@GetLabelHeader()</MudTh>
-                <MudTh Style="text-align:right">건수</MudTh>
-                @if (_viewType == "item") { <MudTh Style="text-align:right">수량</MudTh> }
-                <MudTh Style="text-align:right">공급가액</MudTh>
-                <MudTh Style="text-align:right">부가세</MudTh>
-                <MudTh Style="text-align:right">합계</MudTh>
-            </HeaderContent>
-            <RowTemplate>
-                <MudTd>@(_reportData.IndexOf(context) + 1)</MudTd>
-                <MudTd>@context.Label</MudTd>
-                <MudTd Style="text-align:right">@context.Count.ToString("N0")</MudTd>
-                @if (_viewType == "item") { <MudTd Style="text-align:right">@context.Qty.ToString("N1")</MudTd> }
-                <MudTd Style="text-align:right">@context.SupplyAmount.ToString("N0")</MudTd>
-                <MudTd Style="text-align:right">@context.VatAmount.ToString("N0")</MudTd>
-                <MudTd Style="text-align:right;font-weight:500">@context.TotalAmount.ToString("N0")</MudTd>
-            </RowTemplate>
-            <NoRecordsContent><MudText Class="pa-4" Style="color:var(--hitpan-text-faint)">조회된 데이터가 없습니다.</MudText></NoRecordsContent>
-        </MudTable>
-    </MudPaper>
-}
-else
-{
-    <MudAlert Severity="Severity.Info">@(_viewType == "region" ? "지역별" : "사원별") 순위표 데이터는 준비중입니다.</MudAlert>
-}
+@* 사장님 결재 2026-04-29: 지역별/사원별 SQL 추가 → 가드 제거 *@
+<MudPaper Elevation="0" Class="hitpan-card" Style="overflow:hidden">
+    <MudTable T="ReportRow" Items="_reportData" Dense="true" Hover="true" Striped="true" FixedHeader="true" Height="calc(100vh - 280px)">
+        <HeaderContent>
+            <MudTh>순위</MudTh>
+            <MudTh>@GetLabelHeader()</MudTh>
+            <MudTh Style="text-align:right">건수</MudTh>
+            @if (_viewType == "item") { <MudTh Style="text-align:right">수량</MudTh> }
+            <MudTh Style="text-align:right">공급가액</MudTh>
+            <MudTh Style="text-align:right">부가세</MudTh>
+            <MudTh Style="text-align:right">합계</MudTh>
+        </HeaderContent>
+        <RowTemplate>
+            <MudTd>@(_reportData.IndexOf(context) + 1)</MudTd>
+            <MudTd>@context.Label</MudTd>
+            <MudTd Style="text-align:right">@context.Count.ToString("N0")</MudTd>
+            @if (_viewType == "item") { <MudTd Style="text-align:right">@context.Qty.ToString("N1")</MudTd> }
+            <MudTd Style="text-align:right">@context.SupplyAmount.ToString("N0")</MudTd>
+            <MudTd Style="text-align:right">@context.VatAmount.ToString("N0")</MudTd>
+            <MudTd Style="text-align:right;font-weight:500">@context.TotalAmount.ToString("N0")</MudTd>
+        </RowTemplate>
+        <NoRecordsContent><MudText Class="pa-4" Style="color:var(--hitpan-text-faint)">조회된 데이터가 없습니다.</MudText></NoRecordsContent>
+    </MudTable>
+</MudPaper>
 
 @code {
     private DateTime? _from = DateTime.Today.AddDays(-30);
@@ -102,13 +96,6 @@ else
 
     private async Task SearchAsync()
     {
-        if (_viewType is not ("partner" or "item" or "period"))
-        {
-            _reportData = new();
-            StateHasChanged();
-            return;
-        }
-
         var qs = new List<string>();
         qs.Add($"view={_viewType}");
         if (_from.HasValue) qs.Add($"from={_from:yyyy-MM-dd}");
@@ -135,6 +122,8 @@ else
     {
         "partner" => "업체명",
         "item" => "품명",
+        "region" => "지역",
+        "employee" => "사원명",
         _ => "기간"
     };
 
