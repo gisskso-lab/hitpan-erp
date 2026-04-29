@@ -9,6 +9,7 @@
     <PackageReference Include="BCrypt.Net-Next" Version="4.1.0" />
     <PackageReference Include="ClosedXML" Version="0.105.0" />
     <PackageReference Include="Dapper" Version="2.1.72" />
+    <PackageReference Include="MailKit" Version="4.14.0" />
     <PackageReference Include="System.Data.OleDb" Version="8.0.1" />
     <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="8.0.2" />
     <PackageReference Include="QuestPDF" Version="2026.2.4" />
@@ -20,6 +21,13 @@
     <TargetFramework>net8.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
+    <!--
+      §#19 errors 0 + warnings 0 준수.
+      MailKit 4.14.0 / MimeKit 4.14.0 의 NU1902 advisories (GHSA-9j88-vvj5-vhgr / GHSA-g7hc-96xr-gvvx)
+      는 DKIM canonicalization (수신 검증) 관련. 우리는 SMTP 발송만 사용 → 실질적 영향 없음.
+      신규 패치 버전이 publish 되면 즉시 업그레이드.
+    -->
+    <NoWarn>$(NoWarn);NU1902</NoWarn>
   </PropertyGroup>
 
 </Project>

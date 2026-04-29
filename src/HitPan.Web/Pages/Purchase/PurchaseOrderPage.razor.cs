@@ -496,8 +496,10 @@ public partial class PurchaseOrderPage : ComponentBase
         var parameters = new DialogParameters
         {
             ["DocumentType"] = "발주서",
+            ["DocumentTypeKey"] = "purchase_order",
             ["DocumentNo"] = _draft?.DocumentNumber ?? "신규",
-            ["PartnerEmail"] = ""
+            ["DocumentId"] = _draft?.Id ?? "",
+            ["PartnerId"] = _draft?.PartnerId ?? ""
         };
         var options = new DialogOptions { MaxWidth = MaxWidth.Small, FullWidth = true, CloseButton = true };
         await DialogService.ShowAsync<EmailSendDialog>("이메일 발송", parameters, options);

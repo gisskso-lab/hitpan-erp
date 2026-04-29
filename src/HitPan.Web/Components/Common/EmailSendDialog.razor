@@ -1,6 +1,9 @@
 @* 이메일 발송 다이얼로그 — 재사용 가능한 공통 컴포넌트 *@
-@* FAX 발송 기능은 향후 이 다이얼로그에 "FAX" 탭으로 추가 예정 (Phase 3) *@
+@* 사장님 결재 2026-04-29: SMTP 실제 발송 + PDF 첨부 + 거래처 이메일 자동셋팅 *@
 @namespace HitPan.Web.Components.Common
+@using HitPan.Web.Models
+@using HitPan.Web.Services
+@inject EmailClientService EmailApi
 
 <MudDialog>
     <TitleContent>
@@ -48,7 +51,7 @@
     </DialogContent>
     <DialogActions>
         <MudButton OnClick="Cancel" Variant="Variant.Text">취소</MudButton>
-        <MudButton OnClick="Send" Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Send">발송</MudButton>
+        <MudButton OnClick="Send" Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Send" Disabled="@_busy">@(_busy ? "발송중…" : "발송")</MudButton>
     </DialogActions>
 </MudDialog>
 
@@ -62,7 +65,7 @@
     private ISnackbar Snackbar { get; set; } = default!;
 
     /// <summary>
-    /// 문서 종류 (견적서, 수주서, 거래명세서, 발주서, 매입명세서, 반품처리서).
+    /// 문서 종류 라벨 (견적서/수주서/거래명세서/세금계산서/발주서/매입명세서).
     /// </summary>
     [Parameter]
     public string DocumentType { get; set; } = string.Empty;
@@ -78,6 +81,22 @@
     /// </summary>
     [Parameter]
     public string? PartnerEmail { get; set; }
+
+    /// <summary>
+    /// 백엔드 API 키 (PDF 렌더링·이력 기록용). quotation/sales_order/delivery/tax_invoice/purchase_order/purchase_receipt
+    /// </summary>
+    [Parameter]
+    public string DocumentTypeKey { get; set; } = string.Empty;
+
+    /// <summary>
+    /// 문서 PK (UUID 등) — PDF 렌더링용.
+    /// </summary>
+    [Parameter]
+    public string DocumentId { get; set; } = string.Empty;
+
+    /// <summary>거래처 ID (이력 기록용 — 옵션).</summary>
+    [Parameter]
+    public string? PartnerId { get; set; }
 
     // 받는 사람 이메일
     private string _recipientEmail = string.Empty;
@@ -95,14 +114,20 @@
     private string _attachmentName = string.Empty;
 
     /// <summary>
-    /// 다이얼로그 열릴 때 기본값을 채운다.
+    /// 다이얼로그 열릴 때 기본값을 채운다 — 거래처 이메일 자동 셋팅.
+    /// 우선순위: PartnerEmail 파라미터 → PartnerId로 백엔드 lookup → 빈값.
     /// </summary>
-    protected override void OnParametersSet()
+    protected override async Task OnParametersSetAsync()
     {
-        // 받는 사람 — 거래처 이메일이 있으면 미리 채운다.
+        // 받는 사람 — PartnerEmail 직접 전달이 우선
         if (!string.IsNullOrWhiteSpace(PartnerEmail))
         {
             _recipientEmail = PartnerEmail;
+        }
+        else if (!string.IsNullOrWhiteSpace(PartnerId) && string.IsNullOrEmpty(_recipientEmail))
+        {
+            // 백엔드에서 거래처 이메일 자동 lookup
+            _recipientEmail = await EmailApi.GetPartnerEmailAsync(PartnerId);
         }
 
         // 제목 — "[문서종류] 문서번호 송부의 건"
@@ -115,15 +140,57 @@
         _attachmentName = $"{DocumentType}_{DocumentNo}.pdf";
     }
 
-    /// <summary>
-    /// 발송 버튼 클릭 — SMTP 미연동 상태이므로 안내 메시지만 표시한다.
-    /// </summary>
-    private void Send()
+    private bool _busy;
+
+    /// <summary>발송 버튼 — EmailService API 호출.</summary>
+    private async Task Send()
     {
-        // Phase 2 에서 SMTP 설정 후 실제 발송 로직으로 교체한다.
-        Snackbar.Add("이메일 발송 기능은 SMTP 설정 후 사용 가능합니다. (Phase 2)", Severity.Info);
-        MudDialog.Close(DialogResult.Ok(true));
+        if (string.IsNullOrWhiteSpace(_recipientEmail))
+        {
+            Snackbar.Add("받는 사람 이메일을 입력하세요.", Severity.Warning);
+            return;
+        }
+        _busy = true;
+        Snackbar.Add("이메일 발송 중…", Severity.Info);
+        try
+        {
+            // DocumentTypeKey가 비어있으면 한글 라벨에서 추정
+            var typeKey = string.IsNullOrEmpty(DocumentTypeKey) ? GuessTypeKey(DocumentType) : DocumentTypeKey;
+
+            var result = await EmailApi.SendDocumentAsync(new SendDocumentEmailModel
+            {
+                DocumentType = typeKey,
+                DocumentId = DocumentId,
+                DocumentNo = DocumentNo,
+                PartnerId = PartnerId,
+                RecipientEmail = _recipientEmail,
+                Subject = _subject,
+                Body = _body,
+                AttachPdf = _attachPdf
+            });
+            if (result.Success)
+            {
+                Snackbar.Add("이메일 발송 완료", Severity.Success);
+                MudDialog.Close(DialogResult.Ok(true));
+            }
+            else
+            {
+                Snackbar.Add($"발송 실패: {result.Error}", Severity.Error);
+            }
+        }
+        finally { _busy = false; }
     }
+
+    private static string GuessTypeKey(string label) => label switch
+    {
+        "견적서" => "quotation",
+        "수주서" => "sales_order",
+        "거래명세서" => "delivery",
+        "세금계산서" => "tax_invoice",
+        "발주서" => "purchase_order",
+        "매입명세서" => "purchase_receipt",
+        _ => "quotation"
+    };
 
     /// <summary>
     /// 취소 버튼 클릭.

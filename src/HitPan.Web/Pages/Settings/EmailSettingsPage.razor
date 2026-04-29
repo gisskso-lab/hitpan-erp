@@ -1,0 +1,111 @@
+@page "/settings/email"
+@namespace HitPan.Web.Pages.SettingsUi
+@attribute [Authorize]
+@using HitPan.Web.Models
+@using HitPan.Web.Services
+@inject EmailClientService EmailApi
+@inject ISnackbar Snackbar
+
+<PageTitle>이메일(SMTP) 설정</PageTitle>
+
+<PageHeader Title="이메일(SMTP) 설정" Subtitle="6종 문서 자동 발송용 — 회사 메일서버 정보">
+    <Actions>
+        <MudButton Variant="Variant.Outlined" Color="Color.Primary" StartIcon="@Icons.Material.Filled.NetworkCheck"
+                   OnClick="TestAsync" Disabled="@_busy">SMTP 테스트</MudButton>
+    </Actions>
+</PageHeader>
+
+<MudAlert Severity="Severity.Info" Class="mb-3" Dense="true" Icon="@Icons.Material.Filled.Info">
+    네이버: smtp.naver.com:587 (SSL) / Gmail: smtp.gmail.com:587 (SSL, 앱비밀번호 필요) / 다음: smtp.daum.net:465 (SSL) / 회사메일: 호스팅사 가이드 참조
+</MudAlert>
+
+<SectionCard Title="SMTP 서버 설정">
+    <MudGrid Spacing="2">
+        <MudItem xs="12" md="8"><MudTextField T="string" Label="SMTP 호스트" @bind-Value="_edit.SmtpHost" Variant="Variant.Outlined" Margin="Margin.Dense" Placeholder="smtp.naver.com" /></MudItem>
+        <MudItem xs="12" md="4"><MudNumericField T="int" Label="포트" @bind-Value="_edit.SmtpPort" Variant="Variant.Outlined" Margin="Margin.Dense" /></MudItem>
+        <MudItem xs="12" md="6"><MudTextField T="string" Label="SMTP 사용자(아이디)" @bind-Value="_edit.SmtpUser" Variant="Variant.Outlined" Margin="Margin.Dense" /></MudItem>
+        <MudItem xs="12" md="6">
+            <MudTextField T="string" Label="@(_settings.HasPassword ? "패스워드 (저장됨 — 변경 시에만 입력)" : "패스워드")"
+                          @bind-Value="_edit.SmtpPassword" Variant="Variant.Outlined" Margin="Margin.Dense"
+                          InputType="InputType.Password"
+                          HelperText="@(_settings.HasPassword ? "비워두면 기존 패스워드 유지" : "필수")" />
+        </MudItem>
+        <MudItem xs="12" md="4"><MudCheckBox T="bool" @bind-Value="_edit.UseSsl" Label="SSL/TLS 사용" /></MudItem>
+        <MudItem xs="12" md="4"><MudCheckBox T="bool" @bind-Value="_edit.BccSelf" Label="발송 시 자기자신에게 BCC" /></MudItem>
+    </MudGrid>
+</SectionCard>
+
+<SectionCard Title="발신자 정보" Class="mt-3">
+    <MudGrid Spacing="2">
+        <MudItem xs="12" md="6"><MudTextField T="string" Label="발신 이메일" @bind-Value="_edit.FromAddress" Variant="Variant.Outlined" Margin="Margin.Dense" Placeholder="hello@hitpan.kr" /></MudItem>
+        <MudItem xs="12" md="6"><MudTextField T="string" Label="발신자 이름 (옵션)" @bind-Value="_edit.FromName" Variant="Variant.Outlined" Margin="Margin.Dense" Placeholder="(주)히트판" /></MudItem>
+    </MudGrid>
+    <MudButton Class="mt-3" Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Save" OnClick="SaveAsync">저장</MudButton>
+</SectionCard>
+
+@if (_settings.LastTestAt is not null)
+{
+    <SectionCard Title="마지막 테스트" Class="mt-3" Variant="SectionCard.SectionVariant.Flat">
+        <MudText Typo="Typo.body2">
+            @_settings.LastTestAt?.ToString("yyyy-MM-dd HH:mm:ss") —
+            <strong style="@(_settings.LastTestResult == "success" ? "color:var(--hitpan-income)" : "color:var(--hitpan-expense)")">
+                @(_settings.LastTestResult ?? "—")
+            </strong>
+        </MudText>
+        @if (_settings.LastTestResult == "failed" && !string.IsNullOrEmpty(_settings.LastTestError))
+        {
+            <MudText Typo="Typo.caption" Style="color:var(--mud-palette-text-secondary)">@_settings.LastTestError</MudText>
+        }
+    </SectionCard>
+}
+
+@code {
+    private EmailSettingsModel _settings = new();
+    private UpdateEmailSettingsModel _edit = new();
+    private bool _busy;
+
+    protected override async Task OnInitializedAsync()
+    {
+        _settings = await EmailApi.GetSettingsAsync();
+        _edit = new UpdateEmailSettingsModel
+        {
+            SmtpHost = _settings.SmtpHost,
+            SmtpPort = _settings.SmtpPort == 0 ? 587 : _settings.SmtpPort,
+            SmtpUser = _settings.SmtpUser,
+            SmtpPassword = null,
+            UseSsl = _settings.UseSsl,
+            FromAddress = _settings.FromAddress,
+            FromName = _settings.FromName,
+            BccSelf = _settings.BccSelf
+        };
+        StateHasChanged();
+    }
+
+    private async Task SaveAsync()
+    {
+        if (string.IsNullOrWhiteSpace(_edit.SmtpHost)) { Snackbar.Add("SMTP 호스트를 입력하세요.", Severity.Warning); return; }
+        if (string.IsNullOrWhiteSpace(_edit.FromAddress)) { Snackbar.Add("발신 이메일을 입력하세요.", Severity.Warning); return; }
+        if (!_settings.HasPassword && string.IsNullOrWhiteSpace(_edit.SmtpPassword)) { Snackbar.Add("패스워드를 입력하세요.", Severity.Warning); return; }
+        var ok = await EmailApi.UpdateSettingsAsync(_edit);
+        Snackbar.Add(ok ? "설정 저장됨" : "저장 실패", ok ? Severity.Success : Severity.Error);
+        if (ok)
+        {
+            _settings = await EmailApi.GetSettingsAsync();
+            _edit.SmtpPassword = null;  // 한 번 저장됐으니 다음 입력은 변경 시에만
+            StateHasChanged();
+        }
+    }
+
+    private async Task TestAsync()
+    {
+        _busy = true;
+        try
+        {
+            var r = await EmailApi.TestSmtpAsync();
+            Snackbar.Add(r.Success ? "SMTP 연결 성공" : $"실패: {r.Error}", r.Success ? Severity.Success : Severity.Error);
+            _settings = await EmailApi.GetSettingsAsync();
+            StateHasChanged();
+        }
+        finally { _busy = false; }
+    }
+}
