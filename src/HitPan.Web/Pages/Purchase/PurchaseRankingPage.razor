@@ -17,9 +17,11 @@
     <div class="hitpan-filter-bar">
         <div class="hitpan-filter-field hitpan-filter-field--md">
             <MudSelect T="string" @bind-Value="_viewType" Label="조회유형" Variant="Variant.Outlined" Margin="Margin.Dense">
+                <MudSelectItem Value="@("partner")">업체별</MudSelectItem>
                 <MudSelectItem Value="@("item")">품목별</MudSelectItem>
                 <MudSelectItem Value="@("period")">기간별</MudSelectItem>
-                <MudSelectItem Value="@("partner")">업체별</MudSelectItem>
+                <MudSelectItem Value="@("region")">지역별</MudSelectItem>
+                <MudSelectItem Value="@("employee")">사원별</MudSelectItem>
             </MudSelect>
         </div>
         <div class="hitpan-filter-field hitpan-filter-field--sm">
@@ -119,6 +121,8 @@
     {
         "partner" => "업체명",
         "item" => "품명",
+        "region" => "지역",
+        "employee" => "사원명",
         _ => "기간"
     };
 
@@ -126,6 +130,8 @@
     {
         "partner" => "업체명",
         "item" => "품명",
+        "region" => "지역",
+        "employee" => "사원명",
         _ => "검색어"
     };
 
