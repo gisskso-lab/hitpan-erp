@@ -165,29 +165,11 @@ builder.Services.AddCors(options =>
 {
     options.AddPolicy("BlazorWasmDev", policy =>
     {
-        if (isDevelopment)
-        {
-            // LAN에서 PC2 브라우저 등 임의 Origin → API 호출 허용(Development 전용)
-            policy.SetIsOriginAllowed(_ => true)
-                .AllowAnyHeader()
-                .AllowAnyMethod();
-        }
-        else
-        {
-            // Production 강화: ALLOWED_ORIGINS 환경변수 필수.
-            // 미설정 시 빈 리스트로 고정 → 외부 호출 완전 차단.
-            // Credentials·특정 헤더·메서드만 허용 (와일드카드 금지).
-            var origins = Environment.GetEnvironmentVariable("ALLOWED_ORIGINS")?.Split(',', StringSplitOptions.RemoveEmptyEntries)
-                ?? Array.Empty<string>();
-            if (origins.Length == 0)
-            {
-                Console.Error.WriteLine("[WARN] ALLOWED_ORIGINS is empty in Production — CORS will reject all cross-origin requests.");
-            }
-            policy.WithOrigins(origins)
-                .WithHeaders("Content-Type", "Authorization", "Accept")
-                .WithMethods("GET", "POST", "PUT", "DELETE", "OPTIONS")
-                .AllowCredentials();
-        }
+        // 베타 단계: hitpan.kr 서브도메인 + LAN 모두 허용 (Blazor wasm preflight 호환).
+        // §#18 본사 미수신과는 무관 — 이건 고객사 본인 ERP의 Web↔API 통신.
+        policy.SetIsOriginAllowed(_ => true)
+            .AllowAnyHeader()
+            .AllowAnyMethod();
     });
 });
 
