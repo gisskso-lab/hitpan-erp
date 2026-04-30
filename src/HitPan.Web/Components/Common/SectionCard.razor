@@ -41,10 +41,20 @@
     /// <summary>Default=패딩 16 / Tight=8 / Flat=0 (테이블 꽉 채울 때)</summary>
     [Parameter] public SectionVariant Variant { get; set; } = SectionVariant.Default;
 
-    private string ContainerClass => Variant switch
+    /// <summary>외부에서 전달하는 추가 클래스 (예: 여백 mt-3)</summary>
+    [Parameter] public string? Class { get; set; }
+
+    private string ContainerClass
     {
-        SectionVariant.Tight => "hitpan-section hitpan-section--tight",
-        SectionVariant.Flat => "hitpan-section hitpan-section--flat",
-        _ => "hitpan-section"
-    };
+        get
+        {
+            var baseClass = Variant switch
+            {
+                SectionVariant.Tight => "hitpan-section hitpan-section--tight",
+                SectionVariant.Flat => "hitpan-section hitpan-section--flat",
+                _ => "hitpan-section"
+            };
+            return string.IsNullOrWhiteSpace(Class) ? baseClass : $"{baseClass} {Class}";
+        }
+    }
 }
