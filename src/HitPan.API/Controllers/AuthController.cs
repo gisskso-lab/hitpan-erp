@@ -157,4 +157,26 @@ public class AuthController : ControllerBase
             return Unauthorized(new { message = ex.Message });
         }
     }
+
+    /// <summary>
+    /// Step-up 인증: 현재 로그인한 어드민 본인 비밀번호 재검증.
+    /// WO-20260430-9 (사장님 검증 발견 — 사용자 정보 수정 등 민감 작업 보호용).
+    /// 통과 시 200, 실패 시 401. 5분 캐싱은 후속 작업.
+    /// </summary>
+    [HttpPost("verify-password")]
+    [Authorize]
+    public async Task<IActionResult> VerifyPassword([FromBody] VerifyPasswordRequest request, CancellationToken ct)
+    {
+        var userId = HttpContext.Items["UserId"]?.ToString();
+        if (string.IsNullOrEmpty(userId) || string.IsNullOrEmpty(request?.Password))
+        {
+            return Unauthorized(new { message = "인증 정보가 부족합니다." });
+        }
+
+        var ok = await _authService.VerifyOwnPasswordAsync(userId, request.Password, ct);
+        return ok ? Ok(new { verified = true })
+                  : Unauthorized(new { message = "비밀번호가 일치하지 않습니다." });
+    }
 }
+
+public sealed record VerifyPasswordRequest(string Password);

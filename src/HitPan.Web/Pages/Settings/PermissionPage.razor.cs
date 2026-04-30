@@ -1,4 +1,5 @@
-﻿using HitPan.Web.Models;
+﻿using HitPan.Web.Components.Common;
+using HitPan.Web.Models;
 using HitPan.Web.Services;
 using Microsoft.AspNetCore.Components;
 using MudBlazor;
@@ -95,11 +96,17 @@ public partial class PermissionPage : ComponentBase
     }
 
     /// <summary>
-    /// 선택된 직원 권한을 저장한다.
+    /// 선택된 직원 권한을 저장한다. WO-20260430-9 Step-up 보호.
     /// </summary>
     private async Task SaveAsync()
     {
         if (_selectedUser is null) return;
+
+        // 권한 변경 = 민감 작업 (사장님 헌법 #18 + WO-9)
+        var stepUp = await StepUpDialog.RequestAsync(DialogService,
+            $"{_selectedUser.EmpName ?? _selectedUser.UserName} 권한 변경").ConfigureAwait(false);
+        if (!stepUp) return;
+
         var ok = await PermSvc.SaveAsync(new SavePermissionsModel
         {
             UserId = _selectedUser.UserId,

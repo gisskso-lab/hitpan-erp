@@ -215,4 +215,24 @@ public class AuthService : IAuthService
             _ => role
         };
     }
+
+    /// <summary>
+    /// Step-up 인증 (WO-20260430-9): 현재 로그인한 사용자의 비밀번호 재검증.
+    /// 사용자 정보 수정 등 민감 작업 진입 전 안전장치.
+    /// </summary>
+    public async Task<bool> VerifyOwnPasswordAsync(string userId, string password, CancellationToken ct = default)
+    {
+        if (string.IsNullOrEmpty(userId) || string.IsNullOrEmpty(password))
+        {
+            return false;
+        }
+
+        var user = await _authUserLookup.FindUserByIdAsync(userId, ct);
+        if (user is null || !user.IsActive)
+        {
+            return false;
+        }
+
+        return BCrypt.Net.BCrypt.Verify(password, user.PasswordHash);
+    }
 }

@@ -3,8 +3,10 @@
 @attribute [Authorize]
 @using HitPan.Web.Models
 @using HitPan.Web.Services
+@using HitPan.Web.Components.Common
 @inject PermissionService PermSvc
 @inject ISnackbar Snackbar
+@inject IDialogService DialogService
 
 <PageTitle>권한설정</PageTitle>
 

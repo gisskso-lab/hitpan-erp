@@ -3,10 +3,12 @@
 @attribute [Authorize]
 @using HitPan.Web.Models
 @using HitPan.Web.Services
+@using HitPan.Web.Components.Common
 @inject UserService UserSvc
 @inject ISnackbar Snackbar
 @inject NavigationManager Nav
 @inject IJSRuntime JS
+@inject IDialogService DialogService
 
 <PageTitle>사용자 추가·관리</PageTitle>
 
@@ -330,8 +332,13 @@ else
     }
 
     // ── 수정 ──
-    private void OpenEditDialog(UserListModel user)
+    private async Task OpenEditDialog(UserListModel user)
     {
+        // WO-20260430-9 Step-up: 사용자 정보 수정 = 민감 작업
+        var stepUp = await StepUpDialog.RequestAsync(DialogService,
+            $"{user.Email} 정보 수정");
+        if (!stepUp) return;
+
         _editTarget = user;
         _editModel = new()
         {
@@ -363,8 +370,13 @@ else
     }
 
     // ── 비활성화 ──
-    private void OpenDeactivateDialog(UserListModel user)
+    private async Task OpenDeactivateDialog(UserListModel user)
     {
+        // WO-20260430-9 Step-up: 비활성화 = 민감 작업
+        var stepUp = await StepUpDialog.RequestAsync(DialogService,
+            $"{user.Email} 계정 비활성화");
+        if (!stepUp) return;
+
         _deactivateTarget = user;
         _showDeactivate = true;
     }
@@ -387,6 +399,11 @@ else
     // ── 임시 비밀번호 ──
     private async Task OpenResetPwDialog(UserListModel user)
     {
+        // WO-20260430-9 Step-up: 비밀번호 초기화 = 민감 작업
+        var stepUp = await StepUpDialog.RequestAsync(DialogService,
+            $"{user.Email} 비밀번호 초기화");
+        if (!stepUp) return;
+
         _resetTarget = user;
         var res = await UserSvc.ResetPasswordAsync(user.UserId);
         if (res != null)
