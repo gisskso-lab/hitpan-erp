@@ -113,7 +113,12 @@ else
         <MudTextField T="string" @bind-Value="_createModel.UserName" Label="이름 *" Variant="Variant.Outlined" Class="mb-2" />
         <div class="d-flex gap-2 mb-2 align-center">
             <MudTextField T="string" @bind-Value="_createModel.Password" Label="임시 비밀번호 *" Variant="Variant.Outlined"
-                InputType="InputType.Text" HelperText="@PasswordHint(_createModel.Password)" Class="flex-grow-1" />
+                InputType="@(_showCreatePassword ? InputType.Text : InputType.Password)"
+                Adornment="Adornment.End"
+                AdornmentIcon="@(_showCreatePassword ? Icons.Material.Filled.VisibilityOff : Icons.Material.Filled.Visibility)"
+                OnAdornmentClick="@(() => _showCreatePassword = !_showCreatePassword)"
+                AdornmentAriaLabel="비밀번호 표시 전환"
+                HelperText="@PasswordHint(_createModel.Password)" Class="flex-grow-1" />
             <MudButton Variant="Variant.Outlined" Size="Size.Small" OnClick="GenerateTempPassword">랜덤생성</MudButton>
         </div>
         <MudTextField T="string" @bind-Value="_createModel.Department" Label="부서" Variant="Variant.Outlined" Class="mb-2" />
@@ -243,8 +248,18 @@ else
         <MudAlert Severity="Severity.Info" Class="mb-3">
             <strong>@_resetTarget?.Email</strong> 계정의 임시 비밀번호를 아래에서 복사해 사용자에게 전달하세요.
         </MudAlert>
-        <MudPaper Elevation="0" Class="pa-3" Style="background:var(--mud-palette-background-grey);border-radius:8px">
-            <MudText Typo="Typo.h6" Style="font-family:monospace;word-break:break-all">@_tempPassword</MudText>
+        <MudPaper Elevation="0" Class="pa-3 d-flex align-center gap-2" Style="background:var(--mud-palette-background-grey);border-radius:8px">
+            <MudText Typo="Typo.h6" Style="font-family:monospace;word-break:break-all;flex:1">
+                @(_showResetPassword ? _tempPassword : new string('●', _tempPassword?.Length ?? 0))
+            </MudText>
+            <MudIconButton Size="Size.Small"
+                Icon="@(_showResetPassword ? Icons.Material.Filled.VisibilityOff : Icons.Material.Filled.Visibility)"
+                OnClick="@(() => _showResetPassword = !_showResetPassword)"
+                aria-label="비밀번호 표시 전환" />
+            <MudIconButton Size="Size.Small"
+                Icon="@Icons.Material.Filled.ContentCopy"
+                OnClick="CopyTempPasswordAsync"
+                aria-label="비밀번호 복사" />
         </MudPaper>
         <MudText Typo="Typo.caption" Class="mt-3" Style="color:var(--mud-palette-text-secondary)">
             이 비밀번호는 다시 볼 수 없습니다. 사용자에게 전달 후 본인 비밀번호로 변경하도록 안내해주세요.
@@ -266,6 +281,9 @@ else
     private UpdateUserModel _editModel = new();
     private UserListModel? _editTarget, _deactivateTarget, _resetTarget;
     private string _tempPassword = "";
+    // WO-4 보안: 비밀번호 마스킹 토글 (사장님 검증 발견 #1, 안랩·법무팀장 권고)
+    private bool _showCreatePassword = false;
+    private bool _showResetPassword = false;
     private BulkCreateResult? _bulkResult;
 
     protected override async Task OnInitializedAsync()
@@ -285,6 +303,7 @@ else
     private void OpenCreateDialog()
     {
         _createModel = new() { Role = "User" };
+        _showCreatePassword = false; // 항상 마스킹 상태로 시작
         _showCreate = true;
     }
 
@@ -373,9 +392,25 @@ else
         if (res != null)
         {
             _tempPassword = res.TempPassword;
+            _showResetPassword = false; // 항상 마스킹 상태로 시작
             _showResetResult = true;
         }
         else Snackbar.Add("비밀번호 초기화 실패", Severity.Error);
+    }
+
+    // 임시 비밀번호 클립보드 복사
+    private async Task CopyTempPasswordAsync()
+    {
+        if (string.IsNullOrEmpty(_tempPassword)) return;
+        try
+        {
+            await JS.InvokeVoidAsync("navigator.clipboard.writeText", _tempPassword);
+            Snackbar.Add("비밀번호가 클립보드에 복사되었습니다", Severity.Success);
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"복사 실패: {ex.Message}", Severity.Error);
+        }
     }
 
     // ── 엑셀 일괄 ──
