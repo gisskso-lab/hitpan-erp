@@ -95,7 +95,7 @@
         <MudIcon Icon="@Icons.Material.Filled.ArrowForward" Class="hp-quick-arrow" />
     </div>
 
-    <div class="hp-quick-card" @onclick="@(() => Nav.NavigateTo("/partners/ledger"))">
+    <div class="hp-quick-card" @onclick="@(() => Nav.NavigateTo("/collections"))">
         <div class="hp-quick-icon hp-q-orange">
             <MudIcon Icon="@Icons.Material.Filled.NotificationsActive" Size="Size.Medium" />
         </div>
@@ -107,7 +107,7 @@
 
 @* ─── KPI Hero (그린 그라디언트 큰 카드 + 보조 2장) ─── *@
 <div class="hp-kpi-hero-row">
-    <div class="hp-kpi-hero" @onclick="@(() => Nav.NavigateTo($"/deliveries?from={MonthStart():yyyy-MM-dd}&to={DateTime.Today:yyyy-MM-dd}"))">
+    <div class="hp-kpi-hero" @onclick="@(() => Nav.NavigateTo("/sales/summary"))">
         <div class="hp-kpi-hero-bg-1"></div>
         <div class="hp-kpi-hero-bg-2"></div>
         <div class="hp-kpi-hero-label">이번달 누적 매출</div>
@@ -123,7 +123,7 @@
         <span class="hp-kpi-delta hp-up">▲ 안전재고 위</span>
     </div>
 
-    <div class="hp-kpi-card" @onclick="@(() => Nav.NavigateTo("/partners/ledger"))">
+    <div class="hp-kpi-card" @onclick="@(() => Nav.NavigateTo("/collections"))">
         <div class="hp-kpi-label">미수금</div>
         <div class="hp-kpi-value">@FormatAmount(_data.UnpaidReceivable)</div>
         <span class="hp-kpi-delta hp-down">▲ @(_aging.Count)건 30일 경과</span>

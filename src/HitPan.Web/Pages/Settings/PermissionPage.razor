@@ -36,7 +36,7 @@ else
                             <div style="display:flex;align-items:center;gap:8px">
                                 <!-- 이니셜 아바타 -->
                                 <div style="width:32px;height:32px;border-radius:50%;background:#E6F1FB;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:500;color:#185FA5">
-                                    @((user.EmpName ?? user.UserName).Substring(0, 1))
+                                    @GetInitial(user.EmpName, user.UserName)
                                 </div>
                                 <div>
                                     <div style="font-size:13px;font-weight:500">@(user.EmpName ?? user.UserName)</div>

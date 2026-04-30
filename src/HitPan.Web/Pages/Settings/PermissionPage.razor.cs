@@ -158,4 +158,15 @@ public partial class PermissionPage : ComponentBase
         "sales_user" => "영업사원",
         _ => "일반사원"
     };
+
+    /// <summary>
+    /// 이름 첫 글자(이니셜)를 반환. 둘 다 비어있으면 "·" 반환 (Substring 폭발 방지).
+    /// </summary>
+    private static string GetInitial(string? primary, string? fallback)
+    {
+        var name = !string.IsNullOrWhiteSpace(primary) ? primary
+                 : !string.IsNullOrWhiteSpace(fallback) ? fallback
+                 : null;
+        return string.IsNullOrEmpty(name) ? "·" : name[..1];
+    }
 }

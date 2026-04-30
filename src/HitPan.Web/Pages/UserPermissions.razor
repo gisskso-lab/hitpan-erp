@@ -25,7 +25,7 @@ else
       <MudTabPanel Text="@(user.EmpName ?? user.UserName)">
         <div style="display:flex;align-items:center;gap:8px;margin-bottom:16px">
           <div style="width:36px;height:36px;border-radius:50%;background:#E6F1FB;display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:500;color:#185FA5">
-            @((user.EmpName ?? user.UserName).Substring(0, 1))
+            @SafeInitial(user.EmpName, user.UserName)
           </div>
           <div>
             <MudText Style="font-size:14px;font-weight:500">
@@ -131,4 +131,13 @@ private static string GetRoleLabel(string role)
         "Manager" => "매니저",
         _ => "일반사용자"
     };
+
+// 이니셜 1자: 이름 둘 다 비어있으면 "·" 반환 (Substring 폭발 방지)
+private static string SafeInitial(string? primary, string? fallback)
+{
+    var name = !string.IsNullOrWhiteSpace(primary) ? primary
+             : !string.IsNullOrWhiteSpace(fallback) ? fallback
+             : null;
+    return string.IsNullOrEmpty(name) ? "·" : name[..1];
+}
 }
