@@ -19,9 +19,10 @@
 
             @* Razor 에서 Value="draft" 는 식별자로 파싱되므로 문자열 리터럴로 넘긴다. *@
             <MudSelect T="string" Label="상태" Value="_status" ValueChanged="OnStatusChangedAsync" Dense="true" Style="min-width:180px">
-                <MudSelectItem T="string" Value="@("draft")">Draft</MudSelectItem>
-                <MudSelectItem T="string" Value="@("confirmed")">Confirmed</MudSelectItem>
-                <MudSelectItem T="string" Value="@("cancelled")">Cancelled</MudSelectItem>
+                <MudSelectItem T="string" Value="@("")">전체</MudSelectItem>
+                <MudSelectItem T="string" Value="@("draft")">임시저장</MudSelectItem>
+                <MudSelectItem T="string" Value="@("confirmed")">확정</MudSelectItem>
+                <MudSelectItem T="string" Value="@("cancelled")">취소</MudSelectItem>
             </MudSelect>
 
             @* LoadAsync 가 CancellationToken 을 받으면 메서드 그룹을 OnClick 에 직접 넘길 수 없다. *@

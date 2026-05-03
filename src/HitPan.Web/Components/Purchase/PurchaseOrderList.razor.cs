@@ -20,8 +20,8 @@ public partial class PurchaseOrderList : ComponentBase
     // 거래처 필터
     private PartnerSearchResult? _partner;
 
-    // 상태 필터
-    private string _status = "draft";
+    // 상태 필터 (기본값: 전체)
+    private string _status = "";
 
     // 목록 행
     private List<PurchaseOrderListItem> _rows = new();
