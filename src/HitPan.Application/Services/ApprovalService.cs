@@ -140,7 +140,7 @@ public class ApprovalService : IApprovalService
                    role_label AS RoleLabel, delegate_id AS DelegateId,
                    delegate_name AS DelegateName, delegate_start AS DelegateStart,
                    delegate_end AS DelegateEnd
-            FROM approval_lines
+            FROM approval_doc_lines
             WHERE tenant_id = @TenantId AND doc_type = @DocType AND is_active = 1
             ORDER BY seq_no
             """,
@@ -153,14 +153,14 @@ public class ApprovalService : IApprovalService
         await EnsureOpenAsync(ct);
         // 기존 라인 비활성화 후 새로 추가
         await _db.ExecuteAsync(new CommandDefinition(
-            "UPDATE approval_lines SET is_active = 0 WHERE tenant_id = @TenantId AND doc_type = @DocType",
+            "UPDATE approval_doc_lines SET is_active = 0 WHERE tenant_id = @TenantId AND doc_type = @DocType",
             new { TenantId = tenantId, DocType = request.DocType }, cancellationToken: ct));
 
         foreach (var line in request.Lines)
         {
             await _db.ExecuteAsync(new CommandDefinition(
                 """
-                INSERT INTO approval_lines
+                INSERT INTO approval_doc_lines
                   (line_id, tenant_id, doc_type, seq_no, approver_id, approver_name,
                    role_label, delegate_id, delegate_name, delegate_start, delegate_end, is_active)
                 VALUES
@@ -265,7 +265,7 @@ public class ApprovalService : IApprovalService
                    ad.requested_at AS RequestedAt, ad.memo AS Memo,
                    al.approver_name AS CurrentApproverName
             FROM approval_documents ad
-            INNER JOIN approval_lines al
+            INNER JOIN approval_doc_lines al
               ON al.tenant_id = ad.tenant_id
               AND al.doc_type = ad.doc_type
               AND al.seq_no = ad.current_seq
@@ -387,7 +387,7 @@ public class ApprovalService : IApprovalService
                 """
                 SELECT approver_id AS ApproverId, delegate_id AS DelegateId,
                        delegate_start AS DelegateStart, delegate_end AS DelegateEnd
-                FROM approval_lines
+                FROM approval_doc_lines
                 WHERE tenant_id = @TenantId AND doc_type = @DocType AND seq_no = @SeqNo AND is_active = 1
                 """,
                 new { TenantId = tenantId, DocType = doc.DocType, SeqNo = doc.CurrentSeq }, cancellationToken: ct));
