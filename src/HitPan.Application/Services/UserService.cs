@@ -149,6 +149,41 @@ public sealed class UserService : IUserService
                 },
                 cancellationToken: ct)).ConfigureAwait(false);
 
+        // 사원 자동 등록 — users 생성과 동시에 employees 행도 만들어 사원연결 완성
+        var empNo = await _db.ExecuteScalarAsync<int>(new CommandDefinition(
+            "SELECT COALESCE(MAX(CAST(SUBSTRING(emp_no, 5) AS UNSIGNED)), 0) + 1 FROM employees WHERE tenant_id = @TenantId AND emp_no LIKE 'EMP-%'",
+            new { TenantId = tenantId }, cancellationToken: ct)).ConfigureAwait(false);
+
+        await _db.ExecuteAsync(new CommandDefinition(
+            """
+            INSERT INTO employees (
+                employee_id, tenant_id, user_id,
+                emp_no, emp_name,
+                position, emp_type,
+                join_date, is_active, role,
+                annual_leave_total, annual_leave_used,
+                created_at, created_by, updated_at, updated_by)
+            VALUES (
+                @EmpId, @TenantId, @UserId,
+                @EmpNo, @EmpName,
+                @Position, 'full_time',
+                @JoinDate, 1, @Role,
+                15.0, 0.0,
+                NOW(6), @UserId, NOW(6), @UserId)
+            """,
+            new
+            {
+                EmpId = Guid.NewGuid().ToString(),
+                TenantId = tenantId,
+                UserId = userId,
+                EmpNo = $"EMP-{empNo:D3}",
+                EmpName = string.IsNullOrWhiteSpace(dto.EmpName) ? dto.UserName : dto.EmpName,
+                Position = dto.Position ?? string.Empty,
+                JoinDate = dto.HireDate ?? DateTime.UtcNow,
+                Role = roleStr
+            },
+            cancellationToken: ct)).ConfigureAwait(false);
+
         // 감사로그 — 사용자 생성
         var afterJson = $"{{\"email\":\"{dto.Email}\",\"user_name\":\"{dto.UserName}\",\"role\":\"{roleStr}\",\"account_type\":\"{accountType}\"}}";
         await _audit.LogAsync("create", "user", userId, afterJson: afterJson, ct: ct);

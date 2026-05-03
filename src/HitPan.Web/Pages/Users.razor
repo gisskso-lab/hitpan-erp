@@ -126,13 +126,14 @@ else
         <MudTextField T="string" @bind-Value="_createModel.Department" Label="부서" Variant="Variant.Outlined" Class="mb-2" />
         <MudTextField T="string" @bind-Value="_createModel.Position" Label="직책" Variant="Variant.Outlined" Class="mb-2" />
         <MudTextField T="string" @bind-Value="_createModel.Phone" Label="전화번호" Variant="Variant.Outlined" Class="mb-2" />
+        <MudDatePicker @bind-Date="_createModel.HireDate" Label="입사일" Variant="Variant.Outlined" Class="mb-2" Editable="true" DateFormat="yyyy-MM-dd" />
         @* role 드롭다운 — tenant_user만 (관리자 증식 방지) *@
         <MudSelect T="string" @bind-Value="_createModel.Role" Label="역할" Variant="Variant.Outlined" Class="mb-2">
             <MudSelectItem Value="@("User")">일반 사용자</MudSelectItem>
             <MudSelectItem Value="@("Manager")">매니저</MudSelectItem>
         </MudSelect>
-        <MudAlert Severity="Severity.Info" Class="mt-2" Dense="true">
-            관리자 계정 추가는 보안상 데이터베이스에서만 가능합니다.
+        <MudAlert Severity="Severity.Success" Class="mt-2" Dense="true">
+            추가 시 사원 정보도 자동 등록됩니다. (사원관리에서 추가 정보 입력 가능)
         </MudAlert>
     </DialogContent>
     <DialogActions>
