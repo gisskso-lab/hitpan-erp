@@ -32,7 +32,8 @@ public class PurchaseService : IPurchaseService
 
         var now = DateTime.UtcNow;
         var date = request.PoDate == default ? now.Date : request.PoDate.Date;
-        var prefix = $"PO-{date:yyyyMMdd}-";
+        // WO-11: 한글 prefix 통일 (발주서 = 발-)
+        var prefix = $"발-{date:yyyyMMdd}-";
         // 작20260428이7 P0-A: EF FindAsync.Count 패턴은 미저장 엔티티 누락 → UNIQUE 충돌. DB MAX 직조회.
         var poNo = await DocumentNumberHelper.NextNumberAsync(
             _db, _currentTenant.TenantId, "purchase_orders", "po_no", prefix, ct);
@@ -91,7 +92,8 @@ public class PurchaseService : IPurchaseService
 
         var now = DateTime.UtcNow;
         var date = request.ReceiptDate == default ? now.Date : request.ReceiptDate.Date;
-        var prefix = $"PR-{date:yyyyMMdd}-";
+        // WO-11: 한글 prefix 통일 (매입처리 = 매-)
+        var prefix = $"매-{date:yyyyMMdd}-";
         // 작20260428이7 P0-A: 174건 자동 사슬 채번 충돌 진범. DB MAX 직조회로 EF 캐시 우회.
         var receiptNo = await DocumentNumberHelper.NextNumberAsync(
             _db, _currentTenant.TenantId, "purchase_receipts", "receipt_no", prefix, ct);
@@ -608,9 +610,9 @@ public class PurchaseService : IPurchaseService
             "SELECT item_id, qty, unit_price, supply_amount, vat_amount, warehouse_id FROM purchase_receipt_items WHERE receipt_id=@Id AND tenant_id=@Tid",
             new { Id = receiptId, Tid = tenantId }, cancellationToken: ct))).ToList();
 
-        // 반품 문서번호 채번
+        // 반품 문서번호 채번 — WO-11 한글 prefix
         var today = DateTime.UtcNow.Date;
-        var prefix = $"RT-{today:yyyyMMdd}-";
+        var prefix = $"매반-{today:yyyyMMdd}-";
         var cnt = await _db.QueryFirstOrDefaultAsync<int>(new CommandDefinition(
             "SELECT COUNT(*) FROM purchase_returns WHERE tenant_id=@Tid AND return_no LIKE CONCAT(@Pfx,'%')",
             new { Tid = tenantId, Pfx = prefix }, cancellationToken: ct));

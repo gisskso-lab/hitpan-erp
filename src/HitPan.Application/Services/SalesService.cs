@@ -41,7 +41,8 @@ public class SalesService : ISalesService
         var itemRepo = _unitOfWork.Repository<SalesOrderItem>();
 
         var date = request.OrderDate == default ? DateTime.UtcNow.Date : request.OrderDate.Date;
-        var prefix = $"SO-{date:yyyyMMdd}-";
+        // WO-11: 한글 prefix 통일 (수주서 = 수-)
+        var prefix = $"수-{date:yyyyMMdd}-";
         // 작20260428이7 P0-A: EF 캐시 우회 + UNIQUE 충돌 방지 (DB MAX 직조회).
         var orderNo = await DocumentNumberHelper.NextNumberAsync(
             _db, _currentTenant.TenantId, "sales_orders", "order_no", prefix, ct);
@@ -127,7 +128,8 @@ public class SalesService : ISalesService
         }
 
         var date = request.DeliveryDate == default ? DateTime.UtcNow.Date : request.DeliveryDate.Date;
-        var prefix = $"SD-{date:yyyyMMdd}-";
+        // WO-11: 한글 prefix 통일 (거래명세서 = 명-)
+        var prefix = $"명-{date:yyyyMMdd}-";
         // 작20260428이7 P0-A: EF 캐시 우회 + UNIQUE 충돌 방지 (DB MAX 직조회).
         var deliveryNo = await DocumentNumberHelper.NextNumberAsync(
             _db, _currentTenant.TenantId, "sales_deliveries", "delivery_no", prefix, ct);
@@ -1322,7 +1324,8 @@ public class SalesService : ISalesService
             .GroupBy(c => c.PartnerId!);
 
         var today = DateTime.Today;
-        var prefix = $"PO-{today:yyyyMMdd}-";
+        // WO-11: 한글 prefix 통일 (자동발주 = 발-)
+        var prefix = $"발-{today:yyyyMMdd}-";
 
         foreach (var grp in groups)
         {

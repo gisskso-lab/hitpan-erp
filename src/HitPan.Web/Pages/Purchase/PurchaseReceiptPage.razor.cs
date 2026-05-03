@@ -314,7 +314,7 @@ public partial class PurchaseReceiptPage : ComponentBase
         {
             // 추후 API 연동 필요: 공급처 자동완성으로 PartnerId 를 채우는 UX를 추가하면 본 검증을 완화할 수 있다.
             Snackbar.Add("공급처 PartnerId 가 없습니다. 거래처 마스터 연동·자동완성 추가 후 저장하세요.", Severity.Warning);
-            _draft.DocumentNumber ??= $"PR-{DateTime.Now:yyyyMMdd}-LOCAL";
+            _draft.DocumentNumber ??= $"매-{DateTime.Now:yyyyMMdd}-LOCAL"; // WO-11 한글 prefix
             _hasUnsavedChanges = false;
             if (TabService.ActiveTabId is { } tabIdLocal)
             {
@@ -370,7 +370,7 @@ public partial class PurchaseReceiptPage : ComponentBase
                     _draft.Id = body.Id;
                 }
 
-                _draft.DocumentNumber ??= $"PR-{_receiptDate:yyyyMMdd}-API";
+                _draft.DocumentNumber ??= $"매-{_receiptDate:yyyyMMdd}-API"; // WO-11 한글 prefix
                 _isNew = false;
                 _hasUnsavedChanges = false;
                 _status = "Draft";
@@ -394,7 +394,7 @@ public partial class PurchaseReceiptPage : ComponentBase
         }
 
         // 추후 API 연동 필요: 재시도·상세 오류 메시지 표시.
-        _draft.DocumentNumber ??= $"PR-{DateTime.Now:yyyyMMdd}-001";
+        _draft.DocumentNumber ??= $"매-{DateTime.Now:yyyyMMdd}-001"; // WO-11 한글 prefix
         _hasUnsavedChanges = false;
         _status = "Draft";
         if (TabService.ActiveTabId is { } tabIdFallback)

@@ -288,9 +288,9 @@ public class QuotationService : IQuotationService
             throw new InvalidOperationException($"이미 수주로 전환된 견적서입니다. (전환번호: {quote.ConvertedOrderId})");
         }
 
-        // 수주 문서번호 채번
+        // 수주 문서번호 채번 — WO-11 한글 prefix
         var today = DateTime.UtcNow.Date;
-        var prefix = $"SO-{today:yyyyMMdd}-";
+        var prefix = $"수-{today:yyyyMMdd}-";
         var cnt = await _db.QueryFirstOrDefaultAsync<int>(new CommandDefinition(
             "SELECT COUNT(*) FROM sales_orders WHERE tenant_id=@TenantId AND order_no LIKE CONCAT(@Prefix,'%')",
             new { TenantId = tenantId, Prefix = prefix }, cancellationToken: ct));
@@ -387,7 +387,8 @@ public class QuotationService : IQuotationService
     /// <returns>자동 채번된 견적번호다.</returns>
     private async Task<string> GenerateQuoteNoAsync(string tenantId, DateTime quoteDate, CancellationToken ct)
     {
-        var prefix = $"QT-{quoteDate:yyyyMMdd}-";
+        // WO-11: 한글 prefix 통일 (견적서 = 견-)
+        var prefix = $"견-{quoteDate:yyyyMMdd}-";
         const string sql = """
                            SELECT COUNT(1)
                            FROM quotations

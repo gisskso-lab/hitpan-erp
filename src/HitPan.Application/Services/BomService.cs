@@ -804,9 +804,9 @@ public class BomService : IBomService
         var supply = orderQty * unitPrice;
         var vat = Math.Round(supply * 0.1m, 0, MidpointRounding.AwayFromZero);
 
-        // 2) 발주서 번호 채번(해당일자 순번)
+        // 2) 발주서 번호 채번(해당일자 순번) — WO-11 한글 prefix
         var today = DateTime.Today;
-        var prefix = $"PO-{today:yyyyMMdd}-";
+        var prefix = $"발-{today:yyyyMMdd}-";
         var cnt = await _db.QueryFirstOrDefaultAsync<int>(new CommandDefinition(
             "SELECT COUNT(*) FROM purchase_orders WHERE tenant_id=@TenantId AND po_no LIKE CONCAT(@Prefix, '%')",
             new { TenantId = tenantId, Prefix = prefix }, cancellationToken: ct)).ConfigureAwait(false);

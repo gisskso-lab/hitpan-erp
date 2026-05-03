@@ -80,9 +80,9 @@ public sealed class TaxInvoiceService : ITaxInvoiceService
             throw new TaxInvoiceException("already_issued", "이미 계산서가 발행된 거래명세서입니다.");
         }
 
-        // 3) 계산서 번호 생성 (TI-yyyyMMdd-NNN 패턴, 테넌트 일자별 순번)
+        // 3) 계산서 번호 생성 (세-yyyyMMdd-NNN 패턴, 테넌트 일자별 순번) — WO-11
         var now = DateTime.UtcNow;
-        var prefix = $"TI-{now:yyyyMMdd}-";
+        var prefix = $"세-{now:yyyyMMdd}-";
         var todayCount = await _db.ExecuteScalarAsync<int>(
             new CommandDefinition(
                 "SELECT COUNT(*) FROM tax_invoices WHERE tenant_id = @TenantId AND invoice_no LIKE @Prefix",

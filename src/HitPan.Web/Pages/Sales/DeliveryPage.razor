@@ -117,8 +117,9 @@
                       ?? _user.FindFirst(ClaimTypes.Name)?.Value
                       ?? "담당자";
         _draft = await DeliveryService.CreateDraftAsync(manager);
-        _draft.LinkedQuoteDocumentNo = $"QT-{_draft.SalesDate:yyyyMMdd}-001";
-        _draft.LinkedSalesOrderDocumentNo = $"SO-{_draft.SalesDate:yyyyMMdd}-001";
+        // WO-11 한글 prefix (견적·수주 폴백 placeholder)
+        _draft.LinkedQuoteDocumentNo = $"견-{_draft.SalesDate:yyyyMMdd}-001";
+        _draft.LinkedSalesOrderDocumentNo = $"수-{_draft.SalesDate:yyyyMMdd}-001";
         _itemCache = await ItemsApi.GetListAsync() ?? new();
         RefreshWorkflow();
         RecalculateSummary();
@@ -913,8 +914,9 @@
             Lines = lines,
             Density = DeliveryGridDensity.Normal,
             DailySequence = 1,
-            LinkedQuoteDocumentNo = $"QT-{detail.OrderDate:yyyyMMdd}-001",
-            LinkedSalesOrderDocumentNo = $"SO-{detail.OrderDate:yyyyMMdd}-001",
+            // WO-11 한글 prefix
+            LinkedQuoteDocumentNo = $"견-{detail.OrderDate:yyyyMMdd}-001",
+            LinkedSalesOrderDocumentNo = $"수-{detail.OrderDate:yyyyMMdd}-001",
             Status = detail.Status  // 확정/취소 버튼 분기용
         };
 
@@ -952,8 +954,9 @@
                       ?? state.User.FindFirst(ClaimTypes.Name)?.Value
                       ?? "담당자";
         _draft = await DeliveryService.CreateDraftAsync(manager);
-        _draft.LinkedQuoteDocumentNo = $"QT-{_draft.SalesDate:yyyyMMdd}-001";
-        _draft.LinkedSalesOrderDocumentNo = $"SO-{_draft.SalesDate:yyyyMMdd}-001";
+        // WO-11 한글 prefix
+        _draft.LinkedQuoteDocumentNo = $"견-{_draft.SalesDate:yyyyMMdd}-001";
+        _draft.LinkedSalesOrderDocumentNo = $"수-{_draft.SalesDate:yyyyMMdd}-001";
         _selectedLine = null;
         _hasUnsavedChanges = false;
         if (TabService.ActiveTabId is { } tabId)
