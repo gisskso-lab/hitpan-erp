@@ -167,16 +167,20 @@ public partial class SalesOrderList : ComponentBase
         await InvokeAsync(StateHasChanged);
     }
 
+    /// <summary>출고완료·취소 수주는 선택 대상에서 제외.</summary>
+    private static bool IsSelectable(SalesListItem row) =>
+        !string.Equals(row.Status, "closed", StringComparison.OrdinalIgnoreCase) &&
+        !string.Equals(row.Status, "cancelled", StringComparison.OrdinalIgnoreCase);
+
     /// <summary>
     /// 전체선택 체크 토글.
     /// </summary>
     private async Task ToggleAllAsync(bool value)
     {
-        _allSelected = value;
-        foreach (var row in _rows)
-        {
+        var selectable = _rows.Where(IsSelectable).ToList();
+        _allSelected = value && selectable.Count > 0;
+        foreach (var row in selectable)
             row.IsChecked = value;
-        }
 
         _selectedRows = _rows.Where(x => x.IsChecked).ToList();
         RecalculateSelectionSummary();
@@ -189,9 +193,10 @@ public partial class SalesOrderList : ComponentBase
     /// </summary>
     private async Task ToggleOneAsync(SalesListItem row, bool value)
     {
+        if (!IsSelectable(row)) return;
         row.IsChecked = value;
         _selectedRows = _rows.Where(x => x.IsChecked).ToList();
-        _allSelected = _rows.Count > 0 && _rows.All(x => x.IsChecked);
+        _allSelected = _rows.Count > 0 && _rows.Where(IsSelectable).All(x => x.IsChecked);
         RecalculateSelectionSummary();
         await InvokeAsync(StateHasChanged);
     }

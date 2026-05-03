@@ -23,6 +23,8 @@
                 <MudSelectItem T="string" Value="@("all")">전체</MudSelectItem>
                 <MudSelectItem T="string" Value="@("draft")">임시저장</MudSelectItem>
                 <MudSelectItem T="string" Value="@("confirmed")">확정</MudSelectItem>
+                <MudSelectItem T="string" Value="@("partial")">부분출고</MudSelectItem>
+                <MudSelectItem T="string" Value="@("closed")">출고완료</MudSelectItem>
                 <MudSelectItem T="string" Value="@("cancelled")">취소</MudSelectItem>
             </MudSelect>
 
@@ -67,7 +69,8 @@
                 <div @onclick:stopPropagation="true">
                     <MudCheckBox T="bool"
                                  Value="context.IsChecked"
-                                 ValueChanged="@(v => ToggleOneAsync(context, v))" />
+                                 ValueChanged="@(v => ToggleOneAsync(context, v))"
+                                 Disabled="@(string.Equals(context.Status, "closed", StringComparison.OrdinalIgnoreCase) || string.Equals(context.Status, "cancelled", StringComparison.OrdinalIgnoreCase))" />
                 </div>
             </MudTd>
             <MudTd @ondblclick="@(() => SelectRowAsync(context))" style="cursor:pointer">@context.OrderDate.ToString("yyyy-MM-dd")</MudTd>

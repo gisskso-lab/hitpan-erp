@@ -389,9 +389,9 @@ public class SalesService : ISalesService
                         GROUP BY order_id
                     ) s ON s.order_id = so.order_id
                     SET so.status = CASE
-                                       WHEN s.closed_cnt = s.total_cnt THEN 'confirmed'
-                                       WHEN s.closed_cnt > 0 OR s.partial_cnt > 0 THEN 'order'
-                                       ELSE 'draft'
+                                       WHEN s.closed_cnt = s.total_cnt THEN 'closed'
+                                       WHEN s.closed_cnt > 0 OR s.partial_cnt > 0 THEN 'partial'
+                                       ELSE 'confirmed'
                                     END,
                         so.updated_at = NOW(6)
                     WHERE so.order_id = @OrderId AND so.tenant_id = @TenantId
