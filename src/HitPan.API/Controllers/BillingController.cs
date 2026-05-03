@@ -82,6 +82,7 @@ public sealed class BillingController : ControllerBase
         var tenantId = HttpContext.Items["TenantId"]?.ToString();
         if (string.IsNullOrEmpty(tenantId)) return Forbid();
         var dto = await _service.GetCurrentSubscriptionAsync(tenantId, ct).ConfigureAwait(false);
+        if (dto is null) return NoContent();
         return Ok(dto);
     }
 

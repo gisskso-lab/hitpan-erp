@@ -98,7 +98,9 @@ public sealed class BillingService(HttpClient http)
     {
         try
         {
-            return await http.GetFromJsonAsync<SubscriptionModel>("api/billing/subscription", ct).ConfigureAwait(false);
+            var res = await http.GetAsync("api/billing/subscription", ct).ConfigureAwait(false);
+            if (!res.IsSuccessStatusCode || res.StatusCode == System.Net.HttpStatusCode.NoContent) return null;
+            return await res.Content.ReadFromJsonAsync<SubscriptionModel>(cancellationToken: ct).ConfigureAwait(false);
         }
         catch (Exception ex)
         {
