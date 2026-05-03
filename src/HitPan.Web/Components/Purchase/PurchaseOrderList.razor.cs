@@ -176,11 +176,10 @@ public partial class PurchaseOrderList : ComponentBase
     /// <returns>완료</returns>
     private async Task ToggleAllAsync(bool value)
     {
-        _allSelected = value;
-        foreach (var row in _rows)
-        {
+        var selectable = _rows.Where(IsSelectable).ToList();
+        _allSelected = value && selectable.Count > 0;
+        foreach (var row in selectable)
             row.IsChecked = value;
-        }
 
         _selectedRows = _rows.Where(x => x.IsChecked).ToList();
         RecalculateSelectionSummary();
@@ -196,12 +195,18 @@ public partial class PurchaseOrderList : ComponentBase
     /// <returns>완료</returns>
     private async Task ToggleOneAsync(PurchaseOrderListItem row, bool value)
     {
+        if (!IsSelectable(row)) return;
         row.IsChecked = value;
         _selectedRows = _rows.Where(x => x.IsChecked).ToList();
-        _allSelected = _rows.Count > 0 && _rows.All(x => x.IsChecked);
+        _allSelected = _rows.Count > 0 && _rows.Where(IsSelectable).All(x => x.IsChecked);
         RecalculateSelectionSummary();
         await InvokeAsync(StateHasChanged);
     }
+
+    /// <summary>입고완료·취소 발주서는 선택 대상에서 제외.</summary>
+    private static bool IsSelectable(PurchaseOrderListItem row) =>
+        !string.Equals(row.Status, "received", StringComparison.OrdinalIgnoreCase) &&
+        !string.Equals(row.Status, "cancelled", StringComparison.OrdinalIgnoreCase);
 
     /// <summary>
     /// 선택 행 일괄 확정.

@@ -68,7 +68,8 @@
                 <div @onclick:stopPropagation="true">
                     <MudCheckBox T="bool"
                                  Value="context.IsChecked"
-                                 ValueChanged="@(v => ToggleOneAsync(context, v))" />
+                                 ValueChanged="@(v => ToggleOneAsync(context, v))"
+                                 Disabled="@(string.Equals(context.Status, "received", StringComparison.OrdinalIgnoreCase) || string.Equals(context.Status, "cancelled", StringComparison.OrdinalIgnoreCase))" />
                 </div>
             </MudTd>
             <MudTd @ondblclick="@(() => SelectRowAsync(context))" style="cursor:pointer">@context.PoDate.ToString("yyyy-MM-dd")</MudTd>
