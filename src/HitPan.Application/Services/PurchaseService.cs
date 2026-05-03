@@ -1,6 +1,7 @@
 using System.Data;
 using Dapper;
 using HitPan.Application.DTOs.Purchase;
+using HitPan.Application.Events;
 using HitPan.Application.Interfaces;
 using HitPan.Domain.Entities;
 using HitPan.Domain.Enums;
@@ -13,13 +14,15 @@ public class PurchaseService : IPurchaseService
     private readonly ICurrentTenant _currentTenant;
     private readonly IDbConnection _db;
     private readonly IAuditService _audit;
+    private readonly IEventPublisher? _events;
 
-    public PurchaseService(IUnitOfWork unitOfWork, ICurrentTenant currentTenant, IDbConnection db, IAuditService audit)
+    public PurchaseService(IUnitOfWork unitOfWork, ICurrentTenant currentTenant, IDbConnection db, IAuditService audit, IEventPublisher? events = null)
     {
         _unitOfWork = unitOfWork;
         _currentTenant = currentTenant;
         _db = db;
         _audit = audit;
+        _events = events;
     }
 
     public async Task<string> CreateOrderAsync(CreatePurchaseOrderRequest request, CancellationToken ct = default)
@@ -344,6 +347,33 @@ public class PurchaseService : IPurchaseService
 
             // 감사로그
             await _audit.LogAsync("confirm", "purchase_receipt", receiptId, ct: ct);
+
+            // 6) 이벤트 발행 (트랜잭션 밖) — partner_balance.total_purchase + 안전재고 알림
+            //    WO-20260503-10 (사장님 발견): 이전엔 호출 안 해서 거래처 매입 잔고 0원으로 깨짐.
+            //    item_stock·monthly_summary 는 위 트랜잭션에서 이미 처리. 이벤트는 partner_balance만 책임.
+            if (_events is not null)
+            {
+                try
+                {
+                    var evt = new PurchaseConfirmedEvent(
+                        TenantId: receipt.TenantId,
+                        PoId: receipt.ReceiptId,
+                        PartnerId: receipt.PartnerId,
+                        TotalAmount: receipt.TotalAmount + receipt.VatAmount,
+                        Items: receiptItems.Select(it => new DeliveryItemEvent(
+                            ItemId: it.ItemId,
+                            Qty: it.Qty,
+                            UnitPrice: it.UnitPrice,
+                            Amount: it.Qty * it.UnitPrice)).ToList());
+                    await _events.PublishAsync("purchase.confirmed", evt, ct);
+                }
+                catch (Exception evtEx)
+                {
+                    // 본 거래는 이미 커밋 완료. 이벤트 실패해도 거래는 살린다.
+                    await _audit.LogAsync("event_failed", "purchase_receipt", receiptId,
+                        reason: $"purchase.confirmed: {evtEx.Message}", ct: ct);
+                }
+            }
         }
         catch
         {

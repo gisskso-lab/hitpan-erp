@@ -58,6 +58,10 @@ public sealed class SyncEventPublisher : IEventPublisher
 
     private async Task OnDeliveryConfirmed(DeliveryConfirmedEvent e, CancellationToken ct)
     {
+        // ※ item_stock·monthly_summary 갱신은 SalesService.ConfirmDeliveryAsync 동일 트랜잭션 내에서 이미 처리됨
+        //   (WO-20260503-10 갈래1: 이중 차감 방지 — OnBomAssembled 와 동일 패턴)
+        //   여기서는 partner_balance · 안전재고 알림만 담당 (이중 처리 방지)
+
         await _db.ExecuteAsync(
             new CommandDefinition(
                 """
@@ -76,44 +80,6 @@ public sealed class SyncEventPublisher : IEventPublisher
                 new { e.TenantId, e.PartnerId, Amount = e.TotalAmount },
                 cancellationToken: ct)).ConfigureAwait(false);
 
-        foreach (var item in e.Items)
-        {
-            await _db.ExecuteAsync(
-                new CommandDefinition(
-                    """
-                    INSERT INTO item_stock
-                      (stock_id, tenant_id, item_id,
-                       warehouse_id, current_qty,
-                       avg_cost, last_updated_at)
-                    VALUES
-                      (UUID(), @TenantId, @ItemId,
-                       'default', @Qty * -1,
-                       @UnitPrice, NOW(6))
-                    ON DUPLICATE KEY UPDATE
-                      current_qty = current_qty - @Qty,
-                      last_updated_at = NOW(6)
-                    """,
-                    new
-                    {
-                        e.TenantId,
-                        item.ItemId,
-                        item.Qty,
-                        item.UnitPrice
-                    },
-                    cancellationToken: ct)).ConfigureAwait(false);
-        }
-
-        // monthly_summary 가산 — 멱등 가드 (작4 P0-4)
-        await HitPan.Application.Services.MonthlySummaryGuard.TryApplyAsync(
-            _db, dbTx: null,
-            tenantId: e.TenantId,
-            date: DateTime.Now,
-            sourceType: "delivery_confirmed",
-            sourceId: e.DeliveryId,
-            field: HitPan.Application.Services.MonthlySummaryGuard.SummaryField.TotalSales,
-            amount: e.TotalAmount,
-            ct: ct).ConfigureAwait(false);
-
         // 사장님 헌법 (2026-04-27): 판매 확정으로 재고가 빠졌으니 안전재고 미달 자재가 새로 생겼을 수 있음.
         // BOM 트리거 외에서도 평소 안전망이 작동하도록 모든 트리거 끝에 CheckSafetyStockAsync 호출.
         // 상품마스터 화면이 stock_alerts 'pending' 을 읽어 배너로 노출.
@@ -122,6 +88,10 @@ public sealed class SyncEventPublisher : IEventPublisher
 
     private async Task OnDeliveryCancelled(DeliveryCancelledEvent c, CancellationToken ct)
     {
+        // ※ item_stock·monthly_summary 환원은 SalesService.CancelConfirmedDeliveryAsync 에서 처리됨
+        //   (WO-20260503-10 갈래1: 이중 환원 방지)
+        //   여기서는 partner_balance.total_sales 환원만 담당.
+
         await _db.ExecuteAsync(
             new CommandDefinition(
                 """
@@ -133,38 +103,14 @@ public sealed class SyncEventPublisher : IEventPublisher
                 """,
                 new { c.TenantId, c.PartnerId, Amount = c.TotalAmount },
                 cancellationToken: ct)).ConfigureAwait(false);
-
-        foreach (var item in c.Items)
-        {
-            await _db.ExecuteAsync(
-                new CommandDefinition(
-                    """
-                    UPDATE item_stock
-                    SET current_qty = current_qty + @Qty,
-                        last_updated_at = NOW(6)
-                    WHERE tenant_id = @TenantId
-                      AND item_id = @ItemId
-                    """,
-                    new { c.TenantId, item.ItemId, item.Qty },
-                    cancellationToken: ct)).ConfigureAwait(false);
-        }
-
-        var ym = DateTime.Now.ToString("yyyyMM");
-        await _db.ExecuteAsync(
-            new CommandDefinition(
-                """
-                UPDATE monthly_summary
-                SET total_sales = GREATEST(0, total_sales - @Amount),
-                    last_updated_at = NOW(6)
-                WHERE tenant_id = @TenantId
-                  AND `year_month` = @YearMonth
-                """,
-                new { c.TenantId, YearMonth = ym, Amount = c.TotalAmount },
-                cancellationToken: ct)).ConfigureAwait(false);
     }
 
     private async Task OnPurchaseConfirmed(PurchaseConfirmedEvent p, CancellationToken ct)
     {
+        // ※ item_stock·monthly_summary 갱신은 PurchaseService.ConfirmReceiptAsync 동일 트랜잭션 내에서 이미 처리됨
+        //   (WO-20260503-10 갈래1: 이중 가산 방지)
+        //   여기서는 partner_balance · 안전재고 알림만 담당.
+
         await _db.ExecuteAsync(
             new CommandDefinition(
                 """
@@ -182,48 +128,6 @@ public sealed class SyncEventPublisher : IEventPublisher
                 """,
                 new { p.TenantId, p.PartnerId, Amount = p.TotalAmount },
                 cancellationToken: ct)).ConfigureAwait(false);
-
-        foreach (var item in p.Items)
-        {
-            await _db.ExecuteAsync(
-                new CommandDefinition(
-                    """
-                    INSERT INTO item_stock
-                      (stock_id, tenant_id, item_id,
-                       warehouse_id, current_qty,
-                       avg_cost, last_updated_at)
-                    VALUES
-                      (UUID(), @TenantId, @ItemId,
-                       'default', @Qty,
-                       @UnitPrice, NOW(6))
-                    ON DUPLICATE KEY UPDATE
-                      avg_cost = (
-                        (current_qty * avg_cost + @Qty * @UnitPrice) /
-                        NULLIF(current_qty + @Qty, 0)
-                      ),
-                      current_qty = current_qty + @Qty,
-                      last_updated_at = NOW(6)
-                    """,
-                    new
-                    {
-                        p.TenantId,
-                        item.ItemId,
-                        item.Qty,
-                        item.UnitPrice
-                    },
-                    cancellationToken: ct)).ConfigureAwait(false);
-        }
-
-        // monthly_summary 가산 — 멱등 가드 (작4 P0-4)
-        await HitPan.Application.Services.MonthlySummaryGuard.TryApplyAsync(
-            _db, dbTx: null,
-            tenantId: p.TenantId,
-            date: DateTime.Now,
-            sourceType: "purchase_confirmed",
-            sourceId: p.PoId,
-            field: HitPan.Application.Services.MonthlySummaryGuard.SummaryField.TotalPurchase,
-            amount: p.TotalAmount,
-            ct: ct).ConfigureAwait(false);
 
         // 사장님 헌법 (2026-04-27): 매입 확정 후에도 안전재고 체크.
         // 입고된 자재가 안전재고 회복했는지(=pending alert 자동 정리는 별도 P1) +

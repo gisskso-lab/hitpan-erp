@@ -2,6 +2,7 @@ using System.Data;
 using Dapper;
 using HitPan.Application.DTOs.Sales;
 using HitPan.Application.DTOs.Purchase;
+using HitPan.Application.Events;
 using HitPan.Application.Interfaces;
 using HitPan.Domain.Entities;
 using HitPan.Domain.Enums;
@@ -427,6 +428,37 @@ public class SalesService : ISalesService
 
             // 감사로그 (트랜잭션 밖)
             await _audit.LogAsync("confirm", "sales_delivery", deliveryId, ct: ct);
+
+            // 6) 이벤트 발행 (트랜잭션 밖) — partner_balance + 안전재고 알림
+            //    WO-20260503-10 (사장님 발견): 이전엔 호출 안 해서 거래처 매출 잔고 0원으로 깨짐.
+            //    item_stock·monthly_summary 는 위 트랜잭션에서 이미 처리. 이벤트는 partner_balance만 책임.
+            try
+            {
+                var events = _services.GetService<IEventPublisher>();
+                if (events is not null)
+                {
+                    var evt = new DeliveryConfirmedEvent(
+                        TenantId: delivery.TenantId,
+                        DeliveryId: delivery.DeliveryId,
+                        PartnerId: delivery.PartnerId,
+                        SupplyAmount: delivery.TotalAmount,
+                        VatAmount: delivery.VatAmount,
+                        TotalAmount: delivery.TotalAmount + delivery.VatAmount,
+                        Items: lines.Select(l => new DeliveryItemEvent(
+                            ItemId: l.ItemId,
+                            Qty: l.Qty,
+                            UnitPrice: l.UnitPrice,
+                            Amount: l.Qty * l.UnitPrice)).ToList());
+                    await events.PublishAsync("delivery.confirmed", evt, ct);
+                }
+            }
+            catch (Exception evtEx)
+            {
+                // 본 거래는 이미 커밋 완료. 이벤트 실패해도 거래는 살린다 (베타 안전).
+                // partner_balance 정합성은 별도 재계산 작업으로 회복 가능.
+                await _audit.LogAsync("event_failed", "sales_delivery", deliveryId,
+                    reason: $"delivery.confirmed: {evtEx.Message}", ct: ct);
+            }
         }
         catch
         {
