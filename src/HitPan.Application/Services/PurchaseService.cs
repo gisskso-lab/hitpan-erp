@@ -330,6 +330,30 @@ public class PurchaseService : IPurchaseService
                     cancellationToken: ct));
             }
 
+            // 4-B) stock_alerts 닫기 — 이번 매입에 포함된 품목의 ordered 알림을 received로 전환
+            // 자동사슬로 생성된 발주가 매입 확정되면 알림이 사라져야 반복 발주를 막는다(§20 워크플로우 끊김 금지).
+            var confirmedItemIds = receiptItems.Select(x => x.ItemId).Distinct().ToList();
+            if (confirmedItemIds.Count > 0)
+            {
+                var inClause = string.Join(",", confirmedItemIds.Select((_, i) => $"@ItemId{i}"));
+                var alertParams = new DynamicParameters();
+                alertParams.Add("TenantId", receipt.TenantId);
+                for (var i = 0; i < confirmedItemIds.Count; i++)
+                    alertParams.Add($"ItemId{i}", confirmedItemIds[i]);
+
+                await conn.ExecuteAsync(new CommandDefinition(
+                    $"""
+                    UPDATE stock_alerts
+                    SET status = 'received', updated_at = NOW(6)
+                    WHERE tenant_id = @TenantId
+                      AND item_id IN ({inClause})
+                      AND status IN ('pending', 'ordered')
+                    """,
+                    alertParams,
+                    transaction: dbTx,
+                    cancellationToken: ct));
+            }
+
             // 5) 회계 자동 기표 (차변 매입+부가세대급금 / 대변 외상매입금)
             // PurchaseReceipt 엔티티에는 EmployeeId가 없으므로 null로 전달 (추후 도메인 확장 시 실제 사원 ID 연결).
             await AutoJournalHelper.RecordPurchaseConfirmAsync(

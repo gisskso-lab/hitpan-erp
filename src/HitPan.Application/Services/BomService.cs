@@ -778,14 +778,15 @@ public class BomService : IBomService
 
         // 1) 알림에서 item_id·부족수량 조회 — bom_items 에는 auto_order_* 컬럼이 없으므로
         //    items.auto_order_partner_id / auto_order_qty 만 사용 (사장님 보고 2026-04-26 회귀 수정).
-        var alert = await _db.QueryFirstOrDefaultAsync<(string ItemId, decimal ShortageQty, string? AutoOrderPartnerId, decimal AutoOrderQty, decimal PurchasePrice)>(
+        var alert = await _db.QueryFirstOrDefaultAsync<(string ItemId, decimal ShortageQty, string? AutoOrderPartnerId, decimal AutoOrderQty, decimal PurchasePrice, string Status)>(
             new CommandDefinition(
                 """
                 SELECT sa.item_id AS ItemId,
                        sa.shortage_qty AS ShortageQty,
                        i.auto_order_partner_id AS AutoOrderPartnerId,
                        COALESCE(NULLIF(i.auto_order_qty, 0), sa.shortage_qty) AS AutoOrderQty,
-                       COALESCE(i.purchase_price, i.cost_price, 0) AS PurchasePrice
+                       COALESCE(i.purchase_price, i.cost_price, 0) AS PurchasePrice,
+                       sa.status AS Status
                 FROM stock_alerts sa
                 LEFT JOIN items i ON i.item_id = sa.item_id AND i.tenant_id = sa.tenant_id
                 WHERE sa.alert_id = @AlertId AND sa.tenant_id = @TenantId
@@ -796,6 +797,11 @@ public class BomService : IBomService
 
         if (string.IsNullOrEmpty(alert.ItemId))
             throw new InvalidOperationException("알림 또는 품목을 찾을 수 없습니다.");
+
+        // 멱등 체크: 이미 발주됐거나 입고 완료된 알림은 재발주 차단
+        if (alert.Status != "pending")
+            throw new InvalidOperationException($"이미 처리된 알림입니다. (현재 상태: {alert.Status})");
+
         if (string.IsNullOrWhiteSpace(alert.AutoOrderPartnerId))
             throw new InvalidOperationException("자동발주 공급처가 설정되지 않았습니다. BOM 자재에서 '자동발주 공급처'를 먼저 지정하세요.");
 
