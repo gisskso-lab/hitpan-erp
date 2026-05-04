@@ -1062,3 +1062,109 @@ html, body {
     gap: 6px;
 }
 
+/* ── 업체 상세 — 연락처 원터치 액션 ── */
+.hp-contact-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-bottom: 8px;
+}
+.hp-contact-field {
+    flex: 1;
+    margin-bottom: 0 !important;
+}
+.hp-contact-btn {
+    flex-shrink: 0;
+    width: 40px;
+    height: 40px;
+    border-radius: 12px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    text-decoration: none;
+    transition: transform 0.12s, opacity 0.12s;
+}
+.hp-contact-btn:active { transform: scale(0.92); opacity: 0.8; }
+.hp-contact-btn--call  { background: #E8F5E9; color: #2E7D32; }
+.hp-contact-btn--email { background: #E3F2FD; color: #1565C0; }
+
+/* ── 업체 주소 — 네비게이션 버튼 행 ── */
+.hp-navi-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin: 6px 0 10px;
+    flex-wrap: wrap;
+}
+.hp-navi-label {
+    font-size: 12px;
+    color: var(--mud-palette-text-secondary);
+    font-family: "Noto Sans KR", sans-serif;
+    margin-right: 2px;
+}
+.hp-navi-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 5px 12px;
+    border-radius: 20px;
+    font-size: 12px;
+    font-weight: 600;
+    font-family: "Noto Sans KR", sans-serif;
+    text-decoration: none;
+    transition: transform 0.12s, opacity 0.12s;
+    white-space: nowrap;
+}
+.hp-navi-btn:active { transform: scale(0.93); opacity: 0.8; }
+.hp-navi-btn--kakao { background: #FEE500; color: #3A1D1D; }
+.hp-navi-btn--tmap  { background: #1A6DFF; color: #fff; }
+
+/* 모바일에서 연락처 버튼 더 크게 */
+@media (max-width: 767px) {
+    .hp-contact-btn {
+        width: 44px;
+        height: 44px;
+        border-radius: 14px;
+    }
+    .hp-navi-btn {
+        padding: 7px 14px;
+        font-size: 13px;
+    }
+}
+
+/* ── 모바일 업체 목록 — 테이블 → 카드 리스트 ── */
+@media (max-width: 767px) {
+    /* MudTable을 카드 스타일로 변환 */
+    .mud-table thead { display: none !important; }
+    .mud-table-row {
+        display: flex !important;
+        flex-wrap: wrap;
+        padding: 12px 14px !important;
+        border-bottom: 1px solid rgba(0,0,0,0.06) !important;
+        gap: 4px 8px;
+        align-items: center;
+    }
+    .mud-table-cell {
+        display: inline-flex !important;
+        border: none !important;
+        padding: 0 !important;
+        font-size: 13px;
+    }
+    /* 업체명 셀 — 굵게, 한 줄 전체 */
+    .mud-table-cell[data-label="업체명"] {
+        flex-basis: 100%;
+        font-weight: 700;
+        font-size: 15px;
+        color: var(--mud-palette-text-primary);
+    }
+    /* 코드 셀 숨김 (업체명으로 충분) */
+    .mud-table-cell[data-label="코드"] { display: none !important; }
+    /* 미수금·연체 — 오른쪽 정렬로 배지처럼 */
+    .mud-table-cell[data-label="미수금"],
+    .mud-table-cell[data-label="잔액"] {
+        margin-left: auto;
+        font-weight: 600;
+        color: #1565C0;
+    }
+}
+

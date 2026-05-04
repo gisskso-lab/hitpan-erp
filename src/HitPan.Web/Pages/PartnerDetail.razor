@@ -45,18 +45,68 @@ else
         <MudItem xs="12" md="6">
             <MudPaper Class="pa-4" Elevation="0" Style="border:1px solid var(--mud-palette-lines-default);border-radius:12px">
                 <MudText Typo="Typo.subtitle1" Class="mb-2">연락처</MudText>
-                <MudTextField @bind-Value="_model.Tel" Label="전화" Variant="Variant.Outlined" Margin="Margin.Dense" />
+
+                @* 업체 전화 + 원터치 전화걸기 *@
+                <div class="hp-contact-row">
+                    <MudTextField @bind-Value="_model.Tel" Label="전화" Variant="Variant.Outlined" Margin="Margin.Dense" Class="hp-contact-field" />
+                    @if (!string.IsNullOrWhiteSpace(_model.Tel))
+                    {
+                        <a href="tel:@_model.Tel" class="hp-contact-btn hp-contact-btn--call" title="전화걸기">
+                            <MudIcon Icon="@Icons.Material.Filled.Phone" Style="font-size:18px;" />
+                        </a>
+                    }
+                </div>
+
                 <MudTextField @bind-Value="_model.Fax" Label="팩스" Variant="Variant.Outlined" Margin="Margin.Dense" />
+
+                @* 주소 + 카카오/티맵 네비 버튼 *@
                 <div style="display:flex;gap:8px;align-items:end">
                     <MudTextField @bind-Value="_model.ZipCode" Label="우편번호" Variant="Variant.Outlined" Margin="Margin.Dense" ReadOnly="true" Style="flex:1" />
                     <MudButton Variant="Variant.Outlined" Size="Size.Small" OnClick="SearchAddress" Style="height:40px;white-space:nowrap">우편번호 찾기</MudButton>
                 </div>
                 <MudTextField @bind-Value="_model.Address" Label="주소" Variant="Variant.Outlined" Margin="Margin.Dense" ReadOnly="true" />
                 <MudTextField @bind-Value="_model.AddressDetail" Label="상세주소" Variant="Variant.Outlined" Margin="Margin.Dense" Placeholder="상세주소를 입력하세요" />
-                <MudTextField @bind-Value="_model.Email" Label="이메일" Variant="Variant.Outlined" Margin="Margin.Dense" />
+
+                @* 네비게이션 버튼 — 주소가 있을 때만 표시 *@
+                @if (!string.IsNullOrWhiteSpace(_model.Address))
+                {
+                    <div class="hp-navi-row">
+                        <span class="hp-navi-label">네비게이션</span>
+                        <a href="@KakaoNaviUrl" target="_blank" rel="noopener" class="hp-navi-btn hp-navi-btn--kakao">
+                            <img src="https://t1.kakaocdn.net/kakao_for_business/images/icon/favicon/favicon-16x16.png" width="14" height="14" alt="" style="border-radius:3px" />
+                            카카오내비
+                        </a>
+                        <a href="@TmapNaviUrl" target="_blank" rel="noopener" class="hp-navi-btn hp-navi-btn--tmap">
+                            <MudIcon Icon="@Icons.Material.Filled.Navigation" Style="font-size:14px;" />
+                            티맵
+                        </a>
+                    </div>
+                }
+
+                @* 이메일 + 바로 발송 *@
+                <div class="hp-contact-row">
+                    <MudTextField @bind-Value="_model.Email" Label="이메일" Variant="Variant.Outlined" Margin="Margin.Dense" Class="hp-contact-field" />
+                    @if (!string.IsNullOrWhiteSpace(_model.Email))
+                    {
+                        <a href="mailto:@_model.Email" class="hp-contact-btn hp-contact-btn--email" title="이메일 보내기">
+                            <MudIcon Icon="@Icons.Material.Filled.Email" Style="font-size:18px;" />
+                        </a>
+                    }
+                </div>
+
                 <MudTextField @bind-Value="_model.Homepage" Label="홈페이지" Variant="Variant.Outlined" Margin="Margin.Dense" />
                 <MudTextField @bind-Value="_model.ManagerName" Label="담당자명" Variant="Variant.Outlined" Margin="Margin.Dense" />
-                <MudTextField @bind-Value="_model.ManagerTel" Label="담당자 연락처" Variant="Variant.Outlined" Margin="Margin.Dense" />
+
+                @* 담당자 연락처 + 원터치 전화걸기 *@
+                <div class="hp-contact-row">
+                    <MudTextField @bind-Value="_model.ManagerTel" Label="담당자 연락처" Variant="Variant.Outlined" Margin="Margin.Dense" Class="hp-contact-field" />
+                    @if (!string.IsNullOrWhiteSpace(_model.ManagerTel))
+                    {
+                        <a href="tel:@_model.ManagerTel" class="hp-contact-btn hp-contact-btn--call" title="담당자에게 전화">
+                            <MudIcon Icon="@Icons.Material.Filled.Phone" Style="font-size:18px;" />
+                        </a>
+                    }
+                </div>
             </MudPaper>
         </MudItem>
 
@@ -102,6 +152,18 @@ else
     private bool _loading = true;
     private bool _saving;
     private bool _isNew;
+
+    private string FullAddress => string.IsNullOrWhiteSpace(_model.AddressDetail)
+        ? _model.Address ?? ""
+        : $"{_model.Address} {_model.AddressDetail}";
+
+    private string KakaoNaviUrl => Uri.EscapeDataString(FullAddress) is { } enc && enc.Length > 0
+        ? $"kakaomap://route?ep={enc}&by=CAR"
+        : "#";
+
+    private string TmapNaviUrl => Uri.EscapeDataString(FullAddress) is { } enc && enc.Length > 0
+        ? $"tmap://route?goalname={Uri.EscapeDataString(_model.PartnerName ?? "")}&goal={enc}"
+        : "#";
 
     protected override async Task OnParametersSetAsync()
     {
