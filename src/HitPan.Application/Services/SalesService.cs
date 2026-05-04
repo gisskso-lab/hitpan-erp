@@ -990,7 +990,23 @@ public class SalesService : ISalesService
                 new { Tid = tenantId, Pid = (string)header.partner_id },
                 transaction: tx, cancellationToken: ct));
 
-            // 6) monthly_summary 매출 역산 — ConfirmDeliveryAsync TryApplyAsync 대칭 차감
+            // 6) 회계 역분개 — RecordSalesConfirmAsync 대칭 (차변 매출+부가세예수금 / 대변 외상매출금)
+            if ((decimal)header.total_amount != 0m || (decimal)header.vat_amount != 0m)
+            {
+                await AutoJournalHelper.RecordSalesDeliveryCancelAsync(
+                    _db, tx,
+                    tenantId,
+                    deliveryId,
+                    (string)header.delivery_no,
+                    dd,
+                    (string)header.partner_id,
+                    (decimal)header.total_amount,
+                    (decimal)header.vat_amount,
+                    employeeId,
+                    ct);
+            }
+
+            // 7) monthly_summary 매출 역산 — ConfirmDeliveryAsync TryApplyAsync 대칭 차감
             await MonthlySummaryGuard.TryApplyAsync(
                 _db, tx,
                 tenantId: tenantId,
@@ -1001,7 +1017,7 @@ public class SalesService : ISalesService
                 amount: -((decimal)header.total_amount + (decimal)header.vat_amount),
                 ct: ct);
 
-            // 7) 상태 변경
+            // 8) 상태 변경
             await _db.ExecuteAsync(new CommandDefinition(
                 "UPDATE sales_deliveries SET status='cancelled', updated_at=NOW(6) WHERE delivery_id=@Id AND tenant_id=@Tid",
                 new { Id = deliveryId, Tid = tenantId },

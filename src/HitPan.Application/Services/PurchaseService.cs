@@ -853,7 +853,23 @@ public class PurchaseService : IPurchaseService
                 transaction: dbTx,
                 cancellationToken: ct));
 
-            // 5) 상태 전환
+            // 5) 회계 역분개 — RecordPurchaseConfirmAsync 대칭 (차변 외상매입금 / 대변 매입+부가세대급금)
+            if (totalAmount != 0m || vatAmount != 0m)
+            {
+                await AutoJournalHelper.RecordPurchaseReturnAsync(
+                    conn, dbTx!,
+                    tenantId,
+                    returnId,
+                    returnNo,
+                    rd,
+                    partnerId,
+                    totalAmount,
+                    vatAmount,
+                    employeeId,
+                    ct);
+            }
+
+            // 6) 상태 전환
             await conn.ExecuteAsync(new CommandDefinition(
                 "UPDATE purchase_returns SET status='confirmed', updated_at=NOW(6) WHERE return_id=@Id AND tenant_id=@Tid",
                 new { Id = returnId, Tid = tenantId },

@@ -120,6 +120,98 @@ internal static class AutoJournalHelper
     }
 
     /// <summary>
+    /// 매입반품 확정 역분개.
+    /// 원분개(매입확정) 반전: 차변 외상매입금(total) / 대변 매입(supply) + 부가세대급금(vat)
+    /// </summary>
+    public static async Task RecordPurchaseReturnAsync(
+        IDbConnection conn,
+        IDbTransaction tx,
+        string tenantId,
+        string sourceId,
+        string documentNo,
+        DateTime entryDate,
+        string? partnerId,
+        decimal supplyAmount,
+        decimal vatAmount,
+        string? employeeId,
+        CancellationToken ct)
+    {
+        var entryId = Guid.NewGuid().ToString();
+        var entryNo = $"JE-{entryDate:yyyyMMdd}-{Guid.NewGuid().ToString()[..8].ToUpperInvariant()}";
+        var total = supplyAmount + vatAmount;
+
+        await InsertEntryAsync(conn, tx, entryId, tenantId, entryNo, entryDate,
+            "purchase_return", sourceId, employeeId, $"매입반품 역분개: {documentNo}", ct);
+
+        // 차변 외상매입금 역산
+        if (total != 0m)
+        {
+            await InsertLineAsync(conn, tx, entryId, tenantId, AccountsPayable, "debit",
+                total, partnerId, $"매입채무취소 {documentNo}", ct);
+        }
+
+        // 대변 매입 역산
+        if (supplyAmount != 0m)
+        {
+            await InsertLineAsync(conn, tx, entryId, tenantId, PurchaseCost, "credit",
+                supplyAmount, partnerId, $"매입반품 {documentNo}", ct);
+        }
+
+        // 대변 부가세대급금 역산
+        if (vatAmount != 0m)
+        {
+            await InsertLineAsync(conn, tx, entryId, tenantId, VatReceivable, "credit",
+                vatAmount, partnerId, $"부가세대급금취소 {documentNo}", ct);
+        }
+    }
+
+    /// <summary>
+    /// 매출취소(거래명세서) 역분개.
+    /// 원분개(매출확정) 반전: 차변 매출(supply) + 부가세예수금(vat) / 대변 외상매출금(total)
+    /// </summary>
+    public static async Task RecordSalesDeliveryCancelAsync(
+        IDbConnection conn,
+        IDbTransaction tx,
+        string tenantId,
+        string sourceId,
+        string documentNo,
+        DateTime entryDate,
+        string? partnerId,
+        decimal supplyAmount,
+        decimal vatAmount,
+        string? employeeId,
+        CancellationToken ct)
+    {
+        var entryId = Guid.NewGuid().ToString();
+        var entryNo = $"JE-{entryDate:yyyyMMdd}-{Guid.NewGuid().ToString()[..8].ToUpperInvariant()}";
+        var total = supplyAmount + vatAmount;
+
+        await InsertEntryAsync(conn, tx, entryId, tenantId, entryNo, entryDate,
+            "sales_delivery_cancel", sourceId, employeeId, $"매출취소 역분개: {documentNo}", ct);
+
+        // 차변 매출 역산
+        if (supplyAmount != 0m)
+        {
+            await InsertLineAsync(conn, tx, entryId, tenantId, SalesRevenue, "debit",
+                supplyAmount, partnerId, $"매출취소 {documentNo}", ct);
+        }
+
+        // 차변 부가세예수금 역산
+        if (vatAmount != 0m)
+        {
+            await InsertLineAsync(conn, tx, entryId, tenantId, VatPayable, "debit",
+                vatAmount, partnerId, $"부가세예수금취소 {documentNo}", ct);
+        }
+
+        // 대변 외상매출금 역산
+        if (total != 0m)
+        {
+            await InsertLineAsync(conn, tx, entryId, tenantId, AccountsReceivable, "credit",
+                total, partnerId, $"매출채권취소 {documentNo}", ct);
+        }
+    }
+
+    /// <summary>
     /// 매입(매입명세서) 확정 기표.
     /// 차변: 매입 (supply) + 부가세대급금 (vat)
     /// 대변: 외상매입금 (supply + vat)
