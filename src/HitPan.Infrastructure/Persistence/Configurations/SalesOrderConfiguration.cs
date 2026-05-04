@@ -25,6 +25,7 @@ public sealed class SalesOrderConfiguration : IEntityTypeConfiguration<SalesOrde
         builder.Property(e => e.TotalAmount).HasColumnName("total_amount").HasColumnType("decimal(15,2)").IsRequired();
         builder.Property(e => e.VatAmount).HasColumnName("vat_amount").HasColumnType("decimal(15,2)").IsRequired();
         builder.Property(e => e.Memo).HasColumnName("memo").HasMaxLength(500);
+        builder.Property(e => e.IsAuto).HasColumnName("is_auto").IsRequired();
         builder.Property(e => e.CreatedAt).HasColumnName("created_at").IsRequired();
         builder.Property(e => e.CreatedBy).HasColumnName("created_by").HasMaxLength(36);
         builder.Property(e => e.UpdatedAt).HasColumnName("updated_at").IsRequired();

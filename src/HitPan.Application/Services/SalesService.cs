@@ -159,7 +159,8 @@ public class SalesService : ISalesService
                 Status = SalesOrderStatus.Closed,
                 TotalAmount = request.Items.Sum(x => x.SupplyAmount),
                 VatAmount = request.Items.Sum(x => x.VatAmount),
-                Memo = request.Memo
+                Memo = request.Memo,
+                IsAuto = true
             });
 
             foreach (var line in request.Items)
@@ -1008,6 +1009,7 @@ public class SalesService : ISalesService
                                ON p.partner_id = o.partner_id
                                   AND p.tenant_id = o.tenant_id
                            WHERE o.tenant_id = @TenantId
+                             AND o.is_auto = 0
                              AND (@From IS NULL OR o.order_date >= @From)
                              AND (@To IS NULL OR o.order_date <= @To)
                              AND (@Status IS NULL OR o.status = @Status)
