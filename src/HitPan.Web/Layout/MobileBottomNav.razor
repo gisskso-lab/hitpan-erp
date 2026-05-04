@@ -93,14 +93,11 @@
     {
         public static readonly BottomNavEntry[] All =
         {
-            new("견적", Icons.Material.Filled.RequestQuote, "/quotes", new[] { "TenantAdmin", "Manager", "User" },
-                WorkDocumentKind.SalesOrder),
-            new("매입", Icons.Material.Filled.LocalShipping, "/purchase", new[] { "TenantAdmin", "Manager" },
-                WorkDocumentKind.PurchaseReceipt),
-            new("판매", Icons.Material.Filled.PointOfSale, "/sales", new[] { "TenantAdmin", "Manager", "User" },
-                WorkDocumentKind.SalesDelivery),
-            new("재고", Icons.Material.Filled.Inventory, "/stock", null, null),
-            new("전체메뉴", Icons.Material.Filled.GridView, "/more", null, null)
+            new("홈",     Icons.Material.Filled.Home,        "/dashboard", null, null),
+            new("판매",   Icons.Material.Filled.Receipt,     "/sales",     new[] { "TenantAdmin", "Manager", "User" }, WorkDocumentKind.SalesDelivery),
+            new("수금",   Icons.Material.Filled.AttachMoney, "/collections", new[] { "TenantAdmin", "Manager" }, null),
+            new("재고",   Icons.Material.Filled.Inventory,   "/stock",     null, null),
+            new("전체메뉴", Icons.Material.Filled.GridView,  "/more",      null, null)
         };
     }
 }

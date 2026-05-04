@@ -1,0 +1,679 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>히트판 ERP — 모바일 전체메뉴 미리보기</title>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/icon?family=Material+Icons" rel="stylesheet">
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+    font-family: "Noto Sans KR", sans-serif;
+    background: #f2f4f6;
+    display: flex;
+    justify-content: center;
+    align-items: flex-start;
+    min-height: 100vh;
+    padding: 20px;
+    gap: 24px;
+    flex-wrap: wrap;
+}
+
+/* ──────────────────────────────────
+   폰 프레임
+────────────────────────────────── */
+.phone-frame {
+    width: 375px;
+    height: 812px;
+    background: #fff;
+    border-radius: 44px;
+    box-shadow: 0 20px 60px rgba(0,0,0,0.22), 0 0 0 2px #1a1a1a;
+    overflow: hidden;
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    flex-shrink: 0;
+}
+
+/* 노치 */
+.phone-notch {
+    position: absolute;
+    top: 0;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 126px;
+    height: 30px;
+    background: #1a1a1a;
+    border-radius: 0 0 18px 18px;
+    z-index: 100;
+}
+
+/* 상태바 */
+.phone-status {
+    height: 44px;
+    padding: 14px 24px 0;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-size: 13px;
+    font-weight: 600;
+    color: #111;
+    flex-shrink: 0;
+    background: #fff;
+    position: relative;
+    z-index: 10;
+}
+
+.phone-status-right {
+    display: flex;
+    gap: 6px;
+    align-items: center;
+    font-size: 12px;
+}
+
+/* 상단 헤더 */
+.app-header {
+    height: 48px;
+    background: #fff;
+    border-bottom: 1px solid #eee;
+    display: flex;
+    align-items: center;
+    padding: 0 16px;
+    gap: 10px;
+    flex-shrink: 0;
+}
+
+.app-header-brand {
+    width: 28px;
+    height: 28px;
+    border-radius: 8px;
+    background: #0F6E56;
+    color: #fff;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: 800;
+    font-size: 14px;
+}
+
+.app-header-title {
+    font-size: 15px;
+    font-weight: 700;
+    color: #111;
+}
+
+/* 스크롤 영역 */
+.phone-scroll {
+    flex: 1;
+    overflow-y: auto;
+    overflow-x: hidden;
+    background: #f2f4f6;
+    padding: 10px 10px 80px;
+    -webkit-overflow-scrolling: touch;
+}
+
+.phone-scroll::-webkit-scrollbar { display: none; }
+
+/* ──────────────────────────────────
+   폴더 카드
+────────────────────────────────── */
+.menu-groups { display: flex; flex-direction: column; gap: 8px; }
+
+.menu-folder {
+    background: #fff;
+    border-radius: 16px;
+    overflow: hidden;
+    box-shadow: 0 1px 4px rgba(0,0,0,0.06);
+    transition: box-shadow 0.18s;
+}
+
+.menu-folder.open {
+    box-shadow: 0 4px 16px rgba(0,0,0,0.10);
+}
+
+.menu-folder-header {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 14px 14px;
+    cursor: pointer;
+    user-select: none;
+    -webkit-tap-highlight-color: transparent;
+}
+
+.menu-folder-icon {
+    width: 40px;
+    height: 40px;
+    border-radius: 11px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+}
+
+.menu-folder-title {
+    flex: 1;
+    font-size: 15px;
+    font-weight: 600;
+    color: #111;
+}
+
+.quick-btn {
+    border: 1.5px solid rgba(15,110,86,0.5);
+    border-radius: 20px;
+    padding: 4px 10px;
+    font-size: 11px;
+    font-family: "Noto Sans KR", sans-serif;
+    font-weight: 600;
+    background: transparent;
+    cursor: pointer;
+    color: #0f6e56;
+    white-space: nowrap;
+    flex-shrink: 0;
+}
+
+.quick-btn:active { background: rgba(15,110,86,0.08); }
+
+.chevron {
+    display: flex;
+    align-items: center;
+    color: #999;
+    transition: transform 0.22s ease;
+}
+
+.menu-folder.open .chevron { transform: rotate(180deg); }
+
+/* 소메뉴 그리드 */
+.menu-items {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 2px;
+    max-height: 0;
+    overflow: hidden;
+    background: rgba(0,0,0,0.015);
+    padding: 0 10px;
+    border-top: 0px solid #eee;
+    transition: max-height 0.28s ease, padding 0.22s ease, border-top-width 0.1s;
+}
+
+.menu-folder.open .menu-items {
+    max-height: 600px;
+    padding: 6px 10px 14px;
+    border-top-width: 1px;
+}
+
+.menu-item {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 5px;
+    padding: 10px 2px 8px;
+    border: none;
+    background: transparent;
+    border-radius: 12px;
+    cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+    transition: background 0.12s, transform 0.12s;
+    text-decoration: none;
+    color: inherit;
+}
+
+.menu-item:active {
+    background: rgba(0,0,0,0.06);
+    transform: scale(0.93);
+}
+
+.menu-item-icon {
+    width: 46px;
+    height: 46px;
+    border-radius: 13px;
+    background: #fff;
+    border: 1px solid rgba(0,0,0,0.06);
+    box-shadow: 0 1px 5px rgba(0,0,0,0.08);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.menu-item-label {
+    font-size: 10px;
+    color: #333;
+    text-align: center;
+    line-height: 1.25;
+    max-width: 56px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+/* ──────────────────────────────────
+   하단 탭바
+────────────────────────────────── */
+.bottom-nav {
+    position: absolute;
+    bottom: 0; left: 0; right: 0;
+    height: 68px;
+    background: #fff;
+    border-top: 1px solid #eee;
+    display: flex;
+    align-items: stretch;
+    justify-content: space-around;
+    z-index: 50;
+    padding-bottom: 8px;
+}
+
+.bottom-nav-item {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 3px;
+    border: none;
+    background: transparent;
+    color: #999;
+    cursor: pointer;
+    font-family: "Noto Sans KR", sans-serif;
+    padding: 4px 0;
+    -webkit-tap-highlight-color: transparent;
+}
+
+.bottom-nav-item.active {
+    color: #0f6e56;
+    font-weight: 600;
+}
+
+.bottom-nav-item .material-icons { font-size: 22px; }
+
+.bottom-nav-label {
+    font-size: 10px;
+    line-height: 1.1;
+}
+
+/* 라벨 */
+.preview-label {
+    text-align: center;
+    font-size: 13px;
+    font-weight: 600;
+    color: #555;
+    margin-bottom: 8px;
+}
+</style>
+</head>
+<body>
+
+<!-- ════════════════════════════════════════
+     화면 1: 전체메뉴 (접힌 상태)
+════════════════════════════════════════ -->
+<div>
+<p class="preview-label">① 전체메뉴 — 접힌 상태</p>
+<div class="phone-frame">
+    <div class="phone-notch"></div>
+    <div class="phone-status">
+        <span>9:41</span>
+        <div class="phone-status-right">
+            <span class="material-icons" style="font-size:14px;">signal_cellular_4_bar</span>
+            <span class="material-icons" style="font-size:14px;">battery_full</span>
+        </div>
+    </div>
+    <div class="app-header">
+        <div class="app-header-brand">H</div>
+        <span class="app-header-title">전체 메뉴</span>
+    </div>
+
+    <div class="phone-scroll">
+        <div class="menu-groups">
+
+            <!-- 판매관리 -->
+            <div class="menu-folder">
+                <div class="menu-folder-header" onclick="toggle(this)">
+                    <div class="menu-folder-icon" style="background:#E3F2FD;color:#1565C0;">
+                        <span class="material-icons" style="font-size:20px;">point_of_sale</span>
+                    </div>
+                    <span class="menu-folder-title">판매관리</span>
+                    <button class="quick-btn" onclick="event.stopPropagation()">거래명세서</button>
+                    <div class="chevron"><span class="material-icons">expand_more</span></div>
+                </div>
+                <div class="menu-items">
+                    <button class="menu-item"><div class="menu-item-icon" style="color:#1565C0;"><span class="material-icons" style="font-size:20px;">request_quote</span></div><span class="menu-item-label">견적서</span></button>
+                    <button class="menu-item"><div class="menu-item-icon" style="color:#1565C0;"><span class="material-icons" style="font-size:20px;">list_alt</span></div><span class="menu-item-label">견적현황</span></button>
+                    <button class="menu-item"><div class="menu-item-icon" style="color:#1565C0;"><span class="material-icons" style="font-size:20px;">assignment</span></div><span class="menu-item-label">수주서</span></button>
+                    <button class="menu-item"><div class="menu-item-icon" style="color:#1565C0;"><span class="material-icons" style="font-size:20px;">receipt</span></div><span class="menu-item-label">거래명세서</span></button>
+                    <button class="menu-item"><div class="menu-item-icon" style="color:#1565C0;"><span class="material-icons" style="font-size:20px;">bar_chart</span></div><span class="menu-item-label">판매현황</span></button>
+                    <button class="menu-item"><div class="menu-item-icon" style="color:#1565C0;"><span class="material-icons" style="font-size:20px;">emoji_events</span></div><span class="menu-item-label">판매순위</span></button>
+                    <button class="menu-item"><div class="menu-item-icon" style="color:#1565C0;"><span class="material-icons" style="font-size:20px;">trending_up</span></div><span class="menu-item-label">수익성분석</span></button>
+                    <button class="menu-item"><div class="menu-item-icon" style="color:#1565C0;"><span class="material-icons" style="font-size:20px;">analytics</span></div><span class="menu-item-label">판매통계</span></button>
+                </div>
+            </div>
+
+            <!-- 매입관리 -->
+            <div class="menu-folder">
+                <div class="menu-folder-header" onclick="toggle(this)">
+                    <div class="menu-folder-icon" style="background:#FFF3E0;color:#E65100;">
+                        <span class="material-icons" style="font-size:20px;">shopping_cart</span>
+                    </div>
+                    <span class="menu-folder-title">매입관리</span>
+                    <button class="quick-btn" onclick="event.stopPropagation()">매입처리</button>
+                    <div class="chevron"><span class="material-icons">expand_more</span></div>
+                </div>
+                <div class="menu-items"></div>
+            </div>
+
+            <!-- 재고관리 -->
+            <div class="menu-folder">
+                <div class="menu-folder-header" onclick="toggle(this)">
+                    <div class="menu-folder-icon" style="background:#E0F7FA;color:#00695C;">
+                        <span class="material-icons" style="font-size:20px;">warehouse</span>
+                    </div>
+                    <span class="menu-folder-title">재고관리</span>
+                    <button class="quick-btn" onclick="event.stopPropagation()">재고현황</button>
+                    <div class="chevron"><span class="material-icons">expand_more</span></div>
+                </div>
+                <div class="menu-items"></div>
+            </div>
+
+            <!-- 회계관리 -->
+            <div class="menu-folder">
+                <div class="menu-folder-header" onclick="toggle(this)">
+                    <div class="menu-folder-icon" style="background:#EDE7F6;color:#4527A0;">
+                        <span class="material-icons" style="font-size:20px;">account_balance</span>
+                    </div>
+                    <span class="menu-folder-title">회계관리</span>
+                    <button class="quick-btn" onclick="event.stopPropagation()">수금</button>
+                    <div class="chevron"><span class="material-icons">expand_more</span></div>
+                </div>
+                <div class="menu-items"></div>
+            </div>
+
+            <!-- 계산서관리 -->
+            <div class="menu-folder">
+                <div class="menu-folder-header" onclick="toggle(this)">
+                    <div class="menu-folder-icon" style="background:#FCE4EC;color:#880E4F;">
+                        <span class="material-icons" style="font-size:20px;">description</span>
+                    </div>
+                    <span class="menu-folder-title">계산서관리</span>
+                    <button class="quick-btn" onclick="event.stopPropagation()">세금계산서</button>
+                    <div class="chevron"><span class="material-icons">expand_more</span></div>
+                </div>
+                <div class="menu-items"></div>
+            </div>
+
+            <!-- 업체관리 -->
+            <div class="menu-folder">
+                <div class="menu-folder-header" onclick="toggle(this)">
+                    <div class="menu-folder-icon" style="background:#F3E5F5;color:#6A1B9A;">
+                        <span class="material-icons" style="font-size:20px;">business</span>
+                    </div>
+                    <span class="menu-folder-title">업체관리</span>
+                    <div class="chevron"><span class="material-icons">expand_more</span></div>
+                </div>
+                <div class="menu-items"></div>
+            </div>
+
+            <!-- 상품관리 -->
+            <div class="menu-folder">
+                <div class="menu-folder-header" onclick="toggle(this)">
+                    <div class="menu-folder-icon" style="background:#E8F5E9;color:#1B5E20;">
+                        <span class="material-icons" style="font-size:20px;">inventory</span>
+                    </div>
+                    <span class="menu-folder-title">상품관리</span>
+                    <div class="chevron"><span class="material-icons">expand_more</span></div>
+                </div>
+                <div class="menu-items"></div>
+            </div>
+
+            <!-- 그룹웨어 -->
+            <div class="menu-folder">
+                <div class="menu-folder-header" onclick="toggle(this)">
+                    <div class="menu-folder-icon" style="background:#FFF8E1;color:#F57F17;">
+                        <span class="material-icons" style="font-size:20px;">groups</span>
+                    </div>
+                    <span class="menu-folder-title">그룹웨어</span>
+                    <div class="chevron"><span class="material-icons">expand_more</span></div>
+                </div>
+                <div class="menu-items"></div>
+            </div>
+
+            <!-- 계정관리 -->
+            <div class="menu-folder">
+                <div class="menu-folder-header" onclick="toggle(this)">
+                    <div class="menu-folder-icon" style="background:#ECEFF1;color:#37474F;">
+                        <span class="material-icons" style="font-size:20px;">manage_accounts</span>
+                    </div>
+                    <span class="menu-folder-title">계정관리</span>
+                    <div class="chevron"><span class="material-icons">expand_more</span></div>
+                </div>
+                <div class="menu-items"></div>
+            </div>
+
+        </div>
+    </div>
+
+    <!-- 하단 탭 -->
+    <div class="bottom-nav">
+        <button class="bottom-nav-item"><span class="material-icons">home</span><span class="bottom-nav-label">홈</span></button>
+        <button class="bottom-nav-item"><span class="material-icons">receipt</span><span class="bottom-nav-label">판매</span></button>
+        <button class="bottom-nav-item"><span class="material-icons">attach_money</span><span class="bottom-nav-label">수금</span></button>
+        <button class="bottom-nav-item"><span class="material-icons">inventory</span><span class="bottom-nav-label">재고</span></button>
+        <button class="bottom-nav-item active"><span class="material-icons">grid_view</span><span class="bottom-nav-label">전체메뉴</span></button>
+    </div>
+</div>
+</div>
+
+<!-- ════════════════════════════════════════
+     화면 2: 판매관리 폴더 열린 상태
+════════════════════════════════════════ -->
+<div>
+<p class="preview-label">② 판매관리 폴더 열림</p>
+<div class="phone-frame">
+    <div class="phone-notch"></div>
+    <div class="phone-status">
+        <span>9:41</span>
+        <div class="phone-status-right">
+            <span class="material-icons" style="font-size:14px;">signal_cellular_4_bar</span>
+            <span class="material-icons" style="font-size:14px;">battery_full</span>
+        </div>
+    </div>
+    <div class="app-header">
+        <div class="app-header-brand">H</div>
+        <span class="app-header-title">전체 메뉴</span>
+    </div>
+
+    <div class="phone-scroll">
+        <div class="menu-groups">
+
+            <!-- 판매관리 — 열림 -->
+            <div class="menu-folder open">
+                <div class="menu-folder-header" onclick="toggle(this)">
+                    <div class="menu-folder-icon" style="background:#E3F2FD;color:#1565C0;">
+                        <span class="material-icons" style="font-size:20px;">point_of_sale</span>
+                    </div>
+                    <span class="menu-folder-title">판매관리</span>
+                    <div class="chevron"><span class="material-icons">expand_more</span></div>
+                </div>
+                <div class="menu-items" style="max-height:600px;padding:6px 10px 14px;border-top-width:1px;">
+                    <button class="menu-item"><div class="menu-item-icon" style="color:#1565C0;"><span class="material-icons" style="font-size:20px;">request_quote</span></div><span class="menu-item-label">견적서</span></button>
+                    <button class="menu-item"><div class="menu-item-icon" style="color:#1565C0;"><span class="material-icons" style="font-size:20px;">list_alt</span></div><span class="menu-item-label">견적현황</span></button>
+                    <button class="menu-item"><div class="menu-item-icon" style="color:#1565C0;"><span class="material-icons" style="font-size:20px;">assignment</span></div><span class="menu-item-label">수주서</span></button>
+                    <button class="menu-item"><div class="menu-item-icon" style="color:#1565C0;"><span class="material-icons" style="font-size:20px;">list_alt</span></div><span class="menu-item-label">수주현황</span></button>
+                    <button class="menu-item" style="background:rgba(21,101,192,0.07);border-radius:12px;"><div class="menu-item-icon" style="color:#1565C0;box-shadow:0 0 0 2px #1565C0;"><span class="material-icons" style="font-size:20px;">receipt</span></div><span class="menu-item-label" style="font-weight:700;color:#1565C0;">거래명세서</span></button>
+                    <button class="menu-item"><div class="menu-item-icon" style="color:#1565C0;"><span class="material-icons" style="font-size:20px;">bar_chart</span></div><span class="menu-item-label">판매현황</span></button>
+                    <button class="menu-item"><div class="menu-item-icon" style="color:#1565C0;"><span class="material-icons" style="font-size:20px;">emoji_events</span></div><span class="menu-item-label">판매순위</span></button>
+                    <button class="menu-item"><div class="menu-item-icon" style="color:#1565C0;"><span class="material-icons" style="font-size:20px;">analytics</span></div><span class="menu-item-label">판매통계</span></button>
+                </div>
+            </div>
+
+            <!-- 매입관리 -->
+            <div class="menu-folder">
+                <div class="menu-folder-header" onclick="toggle(this)">
+                    <div class="menu-folder-icon" style="background:#FFF3E0;color:#E65100;">
+                        <span class="material-icons" style="font-size:20px;">shopping_cart</span>
+                    </div>
+                    <span class="menu-folder-title">매입관리</span>
+                    <button class="quick-btn" onclick="event.stopPropagation()">매입처리</button>
+                    <div class="chevron"><span class="material-icons">expand_more</span></div>
+                </div>
+                <div class="menu-items"></div>
+            </div>
+
+            <!-- 재고관리 -->
+            <div class="menu-folder">
+                <div class="menu-folder-header" onclick="toggle(this)">
+                    <div class="menu-folder-icon" style="background:#E0F7FA;color:#00695C;">
+                        <span class="material-icons" style="font-size:20px;">warehouse</span>
+                    </div>
+                    <span class="menu-folder-title">재고관리</span>
+                    <button class="quick-btn" onclick="event.stopPropagation()">재고현황</button>
+                    <div class="chevron"><span class="material-icons">expand_more</span></div>
+                </div>
+                <div class="menu-items"></div>
+            </div>
+
+            <!-- 회계관리 -->
+            <div class="menu-folder">
+                <div class="menu-folder-header" onclick="toggle(this)">
+                    <div class="menu-folder-icon" style="background:#EDE7F6;color:#4527A0;">
+                        <span class="material-icons" style="font-size:20px;">account_balance</span>
+                    </div>
+                    <span class="menu-folder-title">회계관리</span>
+                    <button class="quick-btn" onclick="event.stopPropagation()">수금</button>
+                    <div class="chevron"><span class="material-icons">expand_more</span></div>
+                </div>
+                <div class="menu-items"></div>
+            </div>
+
+            <!-- 계산서관리 -->
+            <div class="menu-folder">
+                <div class="menu-folder-header" onclick="toggle(this)">
+                    <div class="menu-folder-icon" style="background:#FCE4EC;color:#880E4F;">
+                        <span class="material-icons" style="font-size:20px;">description</span>
+                    </div>
+                    <span class="menu-folder-title">계산서관리</span>
+                    <button class="quick-btn" onclick="event.stopPropagation()">세금계산서</button>
+                    <div class="chevron"><span class="material-icons">expand_more</span></div>
+                </div>
+                <div class="menu-items"></div>
+            </div>
+
+        </div>
+    </div>
+
+    <div class="bottom-nav">
+        <button class="bottom-nav-item"><span class="material-icons">home</span><span class="bottom-nav-label">홈</span></button>
+        <button class="bottom-nav-item"><span class="material-icons">receipt</span><span class="bottom-nav-label">판매</span></button>
+        <button class="bottom-nav-item"><span class="material-icons">attach_money</span><span class="bottom-nav-label">수금</span></button>
+        <button class="bottom-nav-item"><span class="material-icons">inventory</span><span class="bottom-nav-label">재고</span></button>
+        <button class="bottom-nav-item active"><span class="material-icons">grid_view</span><span class="bottom-nav-label">전체메뉴</span></button>
+    </div>
+</div>
+</div>
+
+<!-- ════════════════════════════════════════
+     화면 3: 하단탭 홈 활성화
+════════════════════════════════════════ -->
+<div>
+<p class="preview-label">③ 하단 탭 — 홈 활성화</p>
+<div class="phone-frame">
+    <div class="phone-notch"></div>
+    <div class="phone-status">
+        <span>9:41</span>
+        <div class="phone-status-right">
+            <span class="material-icons" style="font-size:14px;">signal_cellular_4_bar</span>
+            <span class="material-icons" style="font-size:14px;">battery_full</span>
+        </div>
+    </div>
+    <div class="app-header">
+        <div class="app-header-brand">H</div>
+        <span class="app-header-title">히트판 ERP</span>
+    </div>
+
+    <!-- 대시보드 미니 프리뷰 -->
+    <div class="phone-scroll" style="background:#f2f4f6;padding:12px 12px 80px;">
+
+        <!-- KPI 카드 2열 -->
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px;">
+            <div style="background:#fff;border-radius:14px;padding:14px 12px;box-shadow:0 1px 4px rgba(0,0,0,0.06);">
+                <div style="font-size:10px;color:#888;margin-bottom:4px;">오늘 매출</div>
+                <div style="font-size:18px;font-weight:700;color:#1565C0;">₩2,840,000</div>
+                <div style="font-size:10px;color:#0f6e56;margin-top:2px;">▲ 12% 어제 대비</div>
+            </div>
+            <div style="background:#fff;border-radius:14px;padding:14px 12px;box-shadow:0 1px 4px rgba(0,0,0,0.06);">
+                <div style="font-size:10px;color:#888;margin-bottom:4px;">이번달 매입</div>
+                <div style="font-size:18px;font-weight:700;color:#E65100;">₩1,230,000</div>
+                <div style="font-size:10px;color:#999;margin-top:2px;">목표 대비 68%</div>
+            </div>
+            <div style="background:#fff;border-radius:14px;padding:14px 12px;box-shadow:0 1px 4px rgba(0,0,0,0.06);">
+                <div style="font-size:10px;color:#888;margin-bottom:4px;">미수금</div>
+                <div style="font-size:18px;font-weight:700;color:#880E4F;">₩580,000</div>
+                <div style="font-size:10px;color:#e53935;margin-top:2px;">3건 미수</div>
+            </div>
+            <div style="background:#fff;border-radius:14px;padding:14px 12px;box-shadow:0 1px 4px rgba(0,0,0,0.06);">
+                <div style="font-size:10px;color:#888;margin-bottom:4px;">재고 부족</div>
+                <div style="font-size:18px;font-weight:700;color:#00695C;">2건</div>
+                <div style="font-size:10px;color:#e53935;margin-top:2px;">안전재고 미달</div>
+            </div>
+        </div>
+
+        <!-- 결재 대기 알림 -->
+        <div style="background:#fff;border-radius:14px;padding:14px;box-shadow:0 1px 4px rgba(0,0,0,0.06);margin-bottom:8px;">
+            <div style="font-size:12px;font-weight:600;color:#111;margin-bottom:10px;display:flex;justify-content:space-between;">
+                <span>결재 대기</span>
+                <span style="background:#e53935;color:#fff;border-radius:10px;padding:1px 7px;font-size:11px;">3</span>
+            </div>
+            <div style="display:flex;flex-direction:column;gap:8px;">
+                <div style="display:flex;justify-content:space-between;align-items:center;font-size:12px;">
+                    <span style="color:#555;">거래명세서 발-20260504-001</span>
+                    <span style="color:#1565C0;font-weight:600;">검토중</span>
+                </div>
+                <div style="display:flex;justify-content:space-between;align-items:center;font-size:12px;">
+                    <span style="color:#555;">경비 신청 — 홍길동</span>
+                    <span style="color:#E65100;font-weight:600;">대기</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- 최근 거래 -->
+        <div style="background:#fff;border-radius:14px;padding:14px;box-shadow:0 1px 4px rgba(0,0,0,0.06);">
+            <div style="font-size:12px;font-weight:600;color:#111;margin-bottom:10px;">최근 거래</div>
+            <div style="display:flex;flex-direction:column;gap:8px;">
+                <div style="display:flex;justify-content:space-between;align-items:center;font-size:12px;border-bottom:1px solid #f0f0f0;padding-bottom:7px;">
+                    <div>
+                        <div style="font-weight:600;color:#111;">㈜한국무역</div>
+                        <div style="color:#888;font-size:10px;">거래명세서 · 오늘 14:22</div>
+                    </div>
+                    <span style="font-weight:700;color:#1565C0;">+1,200,000</span>
+                </div>
+                <div style="display:flex;justify-content:space-between;align-items:center;font-size:12px;">
+                    <div>
+                        <div style="font-weight:600;color:#111;">서울부품㈜</div>
+                        <div style="color:#888;font-size:10px;">매입확정 · 오늘 11:05</div>
+                    </div>
+                    <span style="font-weight:700;color:#E65100;">-480,000</span>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="bottom-nav">
+        <button class="bottom-nav-item active"><span class="material-icons">home</span><span class="bottom-nav-label">홈</span></button>
+        <button class="bottom-nav-item"><span class="material-icons">receipt</span><span class="bottom-nav-label">판매</span></button>
+        <button class="bottom-nav-item"><span class="material-icons">attach_money</span><span class="bottom-nav-label">수금</span></button>
+        <button class="bottom-nav-item"><span class="material-icons">inventory</span><span class="bottom-nav-label">재고</span></button>
+        <button class="bottom-nav-item"><span class="material-icons">grid_view</span><span class="bottom-nav-label">전체메뉴</span></button>
+    </div>
+</div>
+</div>
+
+<script>
+function toggle(header) {
+    const folder = header.closest('.menu-folder');
+    folder.classList.toggle('open');
+    // 퀵버튼 토글
+    const qb = header.querySelector('.quick-btn');
+    if (qb) qb.style.display = folder.classList.contains('open') ? 'none' : '';
+}
+</script>
+</body>
+</html>
