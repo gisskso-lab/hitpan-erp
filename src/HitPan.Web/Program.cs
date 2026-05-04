@@ -65,6 +65,7 @@ builder.Services.AddScoped<HrClientService>();
 builder.Services.AddScoped<ESignService>();
 builder.Services.AddScoped<LaborContractService>();
 builder.Services.AddScoped<ChatbotService>();
+builder.Services.AddScoped<BackofficeService>();
 builder.Services.AddTransient<HitPanApiAuthHandler>();
 builder.Services.AddScoped<TenantProfileService>();
 builder.Services.AddScoped(sp =>

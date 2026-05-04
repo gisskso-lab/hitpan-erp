@@ -1,0 +1,82 @@
+@using Microsoft.AspNetCore.Components.Authorization
+@inject NavigationManager Nav
+@inject AuthenticationStateProvider AuthState
+
+<div class="bo-sidebar">
+    <div class="bo-brand">
+        <div class="bo-brand-logo">HP</div>
+        <div>
+            <div class="bo-brand-title">@_brandTitle</div>
+            <div class="bo-brand-sub">@_brandSub</div>
+        </div>
+    </div>
+
+    <MudNavMenu Class="bo-nav">
+        @if (_isPlatformAdmin)
+        {
+            <MudNavLink Href="/admin/dashboard" Icon="@Icons.Material.Filled.Dashboard" Match="NavLinkMatch.All">
+                대시보드
+            </MudNavLink>
+            <MudNavLink Href="/admin/tenants" Icon="@Icons.Material.Filled.Business">
+                고객사 관리
+            </MudNavLink>
+            <MudNavLink Href="/admin/resellers" Icon="@Icons.Material.Filled.Store">
+                대리점 관리
+            </MudNavLink>
+            <MudNavLink Href="/admin/settlements" Icon="@Icons.Material.Filled.AccountBalance">
+                수수료 정산
+            </MudNavLink>
+        }
+        else
+        {
+            <MudNavLink Href="/partner/dashboard" Icon="@Icons.Material.Filled.Dashboard" Match="NavLinkMatch.All">
+                대시보드
+            </MudNavLink>
+            <MudNavLink Href="/partner/tenants" Icon="@Icons.Material.Filled.Business">
+                내 고객사
+            </MudNavLink>
+            <MudNavLink Href="/partner/commission" Icon="@Icons.Material.Filled.Payments">
+                수수료 내역
+            </MudNavLink>
+        }
+    </MudNavMenu>
+
+    <div class="bo-sidebar-footer">
+        <MudButton Variant="Variant.Text" Size="Size.Small"
+                   StartIcon="@Icons.Material.Filled.Logout"
+                   OnClick="LogoutAsync"
+                   Style="color: var(--mud-palette-text-secondary); font-size:0.8rem;">
+            로그아웃
+        </MudButton>
+    </div>
+</div>
+
+@code {
+    private bool _isPlatformAdmin;
+    private string _brandTitle = "히트판 백오피스";
+    private string _brandSub = "";
+
+    protected override async Task OnInitializedAsync()
+    {
+        var state = await AuthState.GetAuthenticationStateAsync();
+        var accountType = state.User.FindFirst("account_type")?.Value;
+        _isPlatformAdmin = accountType == "platform_admin";
+
+        if (_isPlatformAdmin)
+        {
+            _brandTitle = "히트판 백오피스";
+            _brandSub = "본사 관리";
+        }
+        else
+        {
+            var resellerName = state.User.FindFirst("name")?.Value ?? "";
+            _brandTitle = "히트판 파트너";
+            _brandSub = resellerName;
+        }
+    }
+
+    private void LogoutAsync()
+    {
+        Nav.NavigateTo("/backoffice/login", forceLoad: true);
+    }
+}

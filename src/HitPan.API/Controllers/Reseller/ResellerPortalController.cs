@@ -77,7 +77,7 @@ public class ResellerPortalController : ControllerBase
             var result = await _resellerService.GetMyTenantAsync(resellerId, tenantId, ct);
             return Ok(new { success = true, data = result });
         }
-        catch (UnauthorizedAccessException ex)
+        catch (UnauthorizedAccessException)
         {
             return Forbid();
         }

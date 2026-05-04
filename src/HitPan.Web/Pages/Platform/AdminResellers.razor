@@ -1,11 +1,296 @@
-@page "/admin/resellers"
+﻿@page "/admin/resellers"
+@layout PlatformLayout
 @attribute [Authorize]
+@inject BackofficeService Bo
+@inject ISnackbar Snackbar
+@using HitPan.Web.Models.Backoffice
+@using HitPan.Web.Services
 
-<PageTitle>대리점 관리</PageTitle>
-<MudContainer MaxWidth="MaxWidth.Small" Class="d-flex align-center justify-center" Style="height:calc(100vh - 120px)">
-    <MudPaper Class="pa-8 text-center" Elevation="0">
-        <MudIcon Icon="@Icons.Material.Filled.Construction" Size="Size.Large" Color="Color.Warning" Class="mb-4" />
-        <MudText Typo="Typo.h5" Class="mb-2">대리점 관리</MudText>
-        <MudText Typo="Typo.body1" Color="Color.Secondary">준비중입니다.</MudText>
-    </MudPaper>
-</MudContainer>
+<PageTitle>대리점 관리 — 히트판 백오피스</PageTitle>
+
+<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px;">
+    <div>
+        <MudText Typo="Typo.h5" Style="font-weight:600;">대리점 관리</MudText>
+        <MudText Typo="Typo.body2" Color="Color.Secondary">대리점 목록 및 수수료 정책 관리</MudText>
+    </div>
+</div>
+
+<MudPaper Class="pa-3 mb-4" Elevation="1" Style="border-radius:12px;">
+    <MudGrid Spacing="2" AlignItems="AlignItems.Center">
+        <MudItem xs="12" sm="5">
+            <MudTextField @bind-Value="_search" Label="검색" Variant="Variant.Outlined" Margin="Margin.Dense"
+                          Placeholder="대리점명, 사업자번호"
+                          Adornment="Adornment.End" AdornmentIcon="@Icons.Material.Filled.Search"
+                          OnKeyUp="@OnSearchKey" />
+        </MudItem>
+        <MudItem xs="6" sm="3">
+            <MudSelect @bind-Value="_statusFilter" Label="상태" Variant="Variant.Outlined" Margin="Margin.Dense"
+                       Clearable="true" T="string">
+                <MudSelectItem Value="@("active")">활성</MudSelectItem>
+                <MudSelectItem Value="@("suspended")">중지</MudSelectItem>
+                <MudSelectItem Value="@("terminated")">종료</MudSelectItem>
+            </MudSelect>
+        </MudItem>
+        <MudItem xs="6" sm="2">
+            <MudButton Variant="Variant.Filled" Color="Color.Primary" FullWidth="true"
+                       OnClick="LoadAsync" StartIcon="@Icons.Material.Filled.Refresh">
+                조회
+            </MudButton>
+        </MudItem>
+    </MudGrid>
+</MudPaper>
+
+@if (_loading)
+{
+    <MudProgressLinear Indeterminate="true" Color="Color.Primary" Class="mb-2" />
+}
+
+<MudPaper Elevation="1" Style="border-radius:12px;overflow:hidden;">
+    <MudDataGrid T="ResellerListItem" Items="_items" Loading="_loading"
+                 Hover="true" Dense="true"
+                 SortMode="SortMode.Single"
+                 RowClick="OnRowClick">
+        <Columns>
+            <PropertyColumn Property="x => x.ResellerCode" Title="코드" />
+            <PropertyColumn Property="x => x.ResellerName" Title="대리점명" />
+            <TemplateColumn Title="상태">
+                <CellTemplate>
+                    <MudChip T="string" Size="Size.Small" Color="@context.Item.StatusColor" Variant="Variant.Filled">
+                        @context.Item.StatusKo
+                    </MudChip>
+                </CellTemplate>
+            </TemplateColumn>
+            <PropertyColumn Property="x => x.CustomerCount" Title="고객사 수" />
+            <TemplateColumn Title="이번달 매출">
+                <CellTemplate>@context.Item.MonthlyRevenue.ToString("N0")원</CellTemplate>
+            </TemplateColumn>
+            <TemplateColumn Title="이번달 수수료">
+                <CellTemplate>@context.Item.MonthlyCommission.ToString("N0")원</CellTemplate>
+            </TemplateColumn>
+            <TemplateColumn Title="가입일">
+                <CellTemplate>@context.Item.JoinDate.ToString("yyyy-MM-dd")</CellTemplate>
+            </TemplateColumn>
+        </Columns>
+        <NoRecordsContent>
+            <MudText Typo="Typo.body2" Color="Color.Secondary" Class="pa-4">조회된 대리점이 없습니다.</MudText>
+        </NoRecordsContent>
+    </MudDataGrid>
+</MudPaper>
+
+@if (_total > _pageSize)
+{
+    <div style="display:flex;justify-content:center;margin-top:16px;">
+        <MudPagination Count="@((_total + _pageSize - 1) / _pageSize)"
+                       Selected="@_page" SelectedChanged="OnPageChanged"
+                       Color="Color.Primary" />
+    </div>
+}
+
+@if (_detail is not null)
+{
+    <MudDrawer @bind-Open="_drawerOpen" Anchor="Anchor.End" Width="460px" Elevation="4">
+        <MudDrawerHeader>
+            <div style="display:flex;align-items:center;justify-content:space-between;width:100%;">
+                <MudText Typo="Typo.h6" Style="font-weight:600;">@_detail.ResellerName</MudText>
+                <MudChip T="string" Size="Size.Small" Color="@_detail.StatusColor" Variant="Variant.Filled">@_detail.StatusKo</MudChip>
+            </div>
+        </MudDrawerHeader>
+        <MudTabs Elevation="0" Rounded="false" Class="px-0">
+            <MudTabPanel Text="기본 정보">
+                <div class="pa-4">
+                    <MudGrid Spacing="1">
+                        <MudItem xs="5"><MudText Typo="Typo.caption" Color="Color.Secondary">코드</MudText></MudItem>
+                        <MudItem xs="7"><MudText Typo="Typo.body2">@_detail.ResellerCode</MudText></MudItem>
+                        <MudItem xs="5"><MudText Typo="Typo.caption" Color="Color.Secondary">사업자번호</MudText></MudItem>
+                        <MudItem xs="7"><MudText Typo="Typo.body2">@_detail.BizNo</MudText></MudItem>
+                        <MudItem xs="5"><MudText Typo="Typo.caption" Color="Color.Secondary">대표자</MudText></MudItem>
+                        <MudItem xs="7"><MudText Typo="Typo.body2">@_detail.CeoName</MudText></MudItem>
+                        <MudItem xs="5"><MudText Typo="Typo.caption" Color="Color.Secondary">연락처</MudText></MudItem>
+                        <MudItem xs="7"><MudText Typo="Typo.body2">@(_detail.Tel ?? "-")</MudText></MudItem>
+                        <MudItem xs="5"><MudText Typo="Typo.caption" Color="Color.Secondary">주소</MudText></MudItem>
+                        <MudItem xs="7"><MudText Typo="Typo.body2">@(_detail.Address ?? "-")</MudText></MudItem>
+                        <MudItem xs="5"><MudText Typo="Typo.caption" Color="Color.Secondary">담당자</MudText></MudItem>
+                        <MudItem xs="7"><MudText Typo="Typo.body2">@(_detail.ContactPerson ?? "-")</MudText></MudItem>
+                        <MudItem xs="5"><MudText Typo="Typo.caption" Color="Color.Secondary">담당자 연락처</MudText></MudItem>
+                        <MudItem xs="7"><MudText Typo="Typo.body2">@(_detail.ContactPhone ?? "-")</MudText></MudItem>
+                        <MudItem xs="5"><MudText Typo="Typo.caption" Color="Color.Secondary">이메일</MudText></MudItem>
+                        <MudItem xs="7"><MudText Typo="Typo.body2">@(_detail.ContactEmail ?? "-")</MudText></MudItem>
+                        <MudItem xs="5"><MudText Typo="Typo.caption" Color="Color.Secondary">은행</MudText></MudItem>
+                        <MudItem xs="7"><MudText Typo="Typo.body2">@(_detail.BankName ?? "-") @(_detail.BankAccountMasked ?? "")</MudText></MudItem>
+                        <MudItem xs="5"><MudText Typo="Typo.caption" Color="Color.Secondary">예금주</MudText></MudItem>
+                        <MudItem xs="7"><MudText Typo="Typo.body2">@(_detail.AccountHolder ?? "-")</MudText></MudItem>
+                    </MudGrid>
+
+                    <MudDivider Class="my-3" />
+                    <MudText Typo="Typo.subtitle2" Color="Color.Secondary" Class="mb-2">상태 변경</MudText>
+                    <div style="display:flex;gap:8px;">
+                        <MudButton Size="Size.Small" Variant="Variant.Outlined" Color="Color.Success"
+                                   OnClick="@(() => ChangeResellerStatusAsync("active"))">활성화</MudButton>
+                        <MudButton Size="Size.Small" Variant="Variant.Outlined" Color="Color.Warning"
+                                   OnClick="@(() => ChangeResellerStatusAsync("suspended"))">중지</MudButton>
+                        <MudButton Size="Size.Small" Variant="Variant.Outlined" Color="Color.Error"
+                                   OnClick="@(() => ChangeResellerStatusAsync("terminated"))">종료</MudButton>
+                    </div>
+                </div>
+            </MudTabPanel>
+            <MudTabPanel Text="수수료 정책" OnClick="LoadCommissionsAsync">
+                <div class="pa-4">
+                    @if (_commissions is null)
+                    {
+                        <MudProgressCircular Indeterminate="true" Size="Size.Small" />
+                    }
+                    else if (_commissions.Count == 0)
+                    {
+                        <MudText Typo="Typo.body2" Color="Color.Secondary">등록된 수수료 정책이 없습니다.</MudText>
+                    }
+                    else
+                    {
+                        @foreach (var c in _commissions)
+                        {
+                            <div style="padding:10px 0;border-bottom:1px solid #f1f5f9;">
+                                <div style="display:flex;justify-content:space-between;">
+                                    <MudText Typo="Typo.body2" Style="font-weight:600;">@c.PlanKo</MudText>
+                                    <MudChip T="string" Size="Size.Small" Color="@(c.IsActive ? Color.Success : Color.Default)" Variant="Variant.Outlined">
+                                        @(c.IsActive ? "적용 중" : "비활성")
+                                    </MudChip>
+                                </div>
+                                <MudText Typo="Typo.caption" Color="Color.Secondary">
+                                    수수료율 @c.Rate.ToString("P1") | 적용시작 @c.EffectiveFrom.ToString("yyyy-MM-dd")
+                                </MudText>
+                            </div>
+                        }
+                    }
+                </div>
+            </MudTabPanel>
+            <MudTabPanel Text="계정" OnClick="LoadAccountsAsync">
+                <div class="pa-4">
+                    @if (_accounts is null)
+                    {
+                        <MudProgressCircular Indeterminate="true" Size="Size.Small" />
+                    }
+                    else if (_accounts.Count == 0)
+                    {
+                        <MudText Typo="Typo.body2" Color="Color.Secondary">등록된 계정이 없습니다.</MudText>
+                    }
+                    else
+                    {
+                        @foreach (var a in _accounts)
+                        {
+                            <div style="padding:10px 0;border-bottom:1px solid #f1f5f9;">
+                                <div style="display:flex;justify-content:space-between;">
+                                    <MudText Typo="Typo.body2" Style="font-weight:600;">@a.AccountName</MudText>
+                                    <MudChip T="string" Size="Size.Small" Color="@(a.IsActive ? Color.Success : Color.Default)" Variant="Variant.Outlined">
+                                        @(a.IsActive ? "활성" : "비활성")
+                                    </MudChip>
+                                </div>
+                                <MudText Typo="Typo.caption" Color="Color.Secondary">@a.Email | @a.Role</MudText>
+                            </div>
+                        }
+                    }
+                </div>
+            </MudTabPanel>
+        </MudTabs>
+    </MudDrawer>
+}
+
+@code {
+    private List<ResellerListItem> _items = new();
+    private ResellerDetail? _detail;
+    private List<CommissionPolicyItem>? _commissions;
+    private List<ResellerAccountItem>? _accounts;
+    private bool _loading;
+    private bool _drawerOpen;
+    private string? _search;
+    private string? _statusFilter;
+    private int _page = 1;
+    private int _pageSize = 20;
+    private int _total;
+
+    protected override async Task OnInitializedAsync() => await LoadAsync();
+
+    private async Task LoadAsync()
+    {
+        _loading = true;
+        try
+        {
+            var result = await Bo.GetResellersAsync(_statusFilter, _search, _page, _pageSize);
+            _items = result?.Items ?? new();
+            _total = result?.TotalCount ?? 0;
+        }
+        catch
+        {
+            Snackbar.Add("대리점 목록 로드 실패", Severity.Error);
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    private async Task OnRowClick(DataGridRowClickEventArgs<ResellerListItem> args)
+    {
+        _commissions = null;
+        _accounts = null;
+        try
+        {
+            _detail = await Bo.GetResellerDetailAsync(args.Item.ResellerId);
+            _drawerOpen = true;
+        }
+        catch
+        {
+            Snackbar.Add("상세 정보 로드 실패", Severity.Error);
+        }
+    }
+
+    private async Task LoadCommissionsAsync()
+    {
+        if (_detail is null || _commissions is not null) return;
+        try
+        {
+            _commissions = await Bo.GetResellerCommissionsAsync(_detail.ResellerId);
+        }
+        catch
+        {
+            Snackbar.Add("수수료 정책 로드 실패", Severity.Error);
+        }
+    }
+
+    private async Task LoadAccountsAsync()
+    {
+        if (_detail is null || _accounts is not null) return;
+        try
+        {
+            _accounts = await Bo.GetResellerAccountsAsync(_detail.ResellerId);
+        }
+        catch
+        {
+            Snackbar.Add("계정 목록 로드 실패", Severity.Error);
+        }
+    }
+
+    private async Task ChangeResellerStatusAsync(string status)
+    {
+        if (_detail is null) return;
+        try
+        {
+            await Bo.UpdateResellerStatusAsync(_detail.ResellerId, status);
+            Snackbar.Add("상태가 변경되었습니다", Severity.Success);
+            await LoadAsync();
+        }
+        catch
+        {
+            Snackbar.Add("상태 변경 실패", Severity.Error);
+        }
+    }
+
+    private async Task OnSearchKey(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter") await LoadAsync();
+    }
+
+    private async Task OnPageChanged(int page)
+    {
+        _page = page;
+        await LoadAsync();
+    }
+}

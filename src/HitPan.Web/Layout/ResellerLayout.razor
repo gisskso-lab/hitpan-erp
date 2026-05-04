@@ -1,12 +1,11 @@
 @inherits LayoutComponentBase
 
-<div class="hitpan-shell">
-    <aside class="hitpan-sidebar-aside" aria-label="메인 메뉴">
-        <Sidebar />
+<div class="bo-shell">
+    <aside class="bo-sidebar-aside">
+        <BackofficeSidebar />
     </aside>
-    <div class="hitpan-main">
-        <TopHeader />
-        <main class="hitpan-content mud-px-4 mud-py-4">
+    <div class="bo-main">
+        <main class="bo-content mud-pa-4">
             @Body
         </main>
     </div>

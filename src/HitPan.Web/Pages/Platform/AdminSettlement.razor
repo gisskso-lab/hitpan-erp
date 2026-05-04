@@ -1,0 +1,314 @@
+﻿@page "/admin/settlements"
+@layout PlatformLayout
+@attribute [Authorize]
+@inject BackofficeService Bo
+@inject ISnackbar Snackbar
+@using HitPan.Web.Models.Backoffice
+@using HitPan.Web.Services
+
+<PageTitle>수수료 정산 — 히트판 백오피스</PageTitle>
+
+<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px;">
+    <div>
+        <MudText Typo="Typo.h5" Style="font-weight:600;">수수료 정산</MudText>
+        <MudText Typo="Typo.body2" Color="Color.Secondary">대리점 수수료 정산 관리</MudText>
+    </div>
+    <MudButton Variant="Variant.Filled" Color="Color.Primary"
+               StartIcon="@Icons.Material.Filled.AutoAwesome"
+               OnClick="OpenGenerateDialog" Disabled="_busy">
+        정산 생성
+    </MudButton>
+</div>
+
+<MudPaper Class="pa-3 mb-4" Elevation="1" Style="border-radius:12px;">
+    <MudGrid Spacing="2" AlignItems="AlignItems.Center">
+        <MudItem xs="12" sm="3">
+            <MudTextField @bind-Value="_monthFilter" Label="정산월 (YYYY-MM)" Variant="Variant.Outlined"
+                          Margin="Margin.Dense" Placeholder="2026-04" />
+        </MudItem>
+        <MudItem xs="6" sm="3">
+            <MudSelect @bind-Value="_statusFilter" Label="상태" Variant="Variant.Outlined" Margin="Margin.Dense"
+                       Clearable="true" T="string">
+                <MudSelectItem Value="@("draft")">검토중</MudSelectItem>
+                <MudSelectItem Value="@("approved")">승인됨</MudSelectItem>
+                <MudSelectItem Value="@("paid")">지급완료</MudSelectItem>
+                <MudSelectItem Value="@("cancelled")">취소</MudSelectItem>
+            </MudSelect>
+        </MudItem>
+        <MudItem xs="6" sm="2">
+            <MudButton Variant="Variant.Filled" Color="Color.Primary" FullWidth="true"
+                       OnClick="LoadAsync" StartIcon="@Icons.Material.Filled.Refresh">
+                조회
+            </MudButton>
+        </MudItem>
+    </MudGrid>
+</MudPaper>
+
+@if (_loading)
+{
+    <MudProgressLinear Indeterminate="true" Color="Color.Primary" Class="mb-2" />
+}
+
+@if (_result is not null && (_result.MonthlyTotalRevenue > 0 || _result.MonthlyTotalCommission > 0))
+{
+    <MudGrid Spacing="2" Class="mb-4">
+        <MudItem xs="6" sm="3">
+            <MudPaper Class="pa-3" Elevation="1" Style="border-radius:10px;text-align:center;">
+                <MudText Typo="Typo.caption" Color="Color.Secondary">조회 기간 총 매출</MudText>
+                <MudText Typo="Typo.h6" Style="font-weight:700;">@_result.MonthlyTotalRevenue.ToString("N0")원</MudText>
+            </MudPaper>
+        </MudItem>
+        <MudItem xs="6" sm="3">
+            <MudPaper Class="pa-3" Elevation="1" Style="border-radius:10px;text-align:center;">
+                <MudText Typo="Typo.caption" Color="Color.Secondary">조회 기간 총 수수료</MudText>
+                <MudText Typo="Typo.h6" Style="font-weight:700;">@_result.MonthlyTotalCommission.ToString("N0")원</MudText>
+            </MudPaper>
+        </MudItem>
+    </MudGrid>
+}
+
+<MudPaper Elevation="1" Style="border-radius:12px;overflow:hidden;">
+    <MudDataGrid T="SettlementListItem" Items="_items" Loading="_loading"
+                 Hover="true" Dense="true" SortMode="SortMode.Single"
+                 RowClick="OnRowClick">
+        <Columns>
+            <PropertyColumn Property="x => x.SettlementMonth" Title="정산월" />
+            <PropertyColumn Property="x => x.ResellerName" Title="대리점" />
+            <PropertyColumn Property="x => x.ActiveCustomerCount" Title="활성 고객사" />
+            <TemplateColumn Title="총 매출">
+                <CellTemplate>@context.Item.TotalRevenue.ToString("N0")원</CellTemplate>
+            </TemplateColumn>
+            <TemplateColumn Title="수수료">
+                <CellTemplate>@context.Item.TotalCommission.ToString("N0")원</CellTemplate>
+            </TemplateColumn>
+            <TemplateColumn Title="지급액">
+                <CellTemplate><strong>@context.Item.PaymentAmount.ToString("N0")원</strong></CellTemplate>
+            </TemplateColumn>
+            <TemplateColumn Title="상태">
+                <CellTemplate>
+                    <MudChip T="string" Size="Size.Small" Color="@context.Item.StatusColor" Variant="Variant.Filled">
+                        @context.Item.StatusKo
+                    </MudChip>
+                </CellTemplate>
+            </TemplateColumn>
+            <TemplateColumn Title="지급일">
+                <CellTemplate>@(context.Item.PaymentDate.HasValue ? context.Item.PaymentDate.Value.ToString("yyyy-MM-dd") : "-")</CellTemplate>
+            </TemplateColumn>
+        </Columns>
+        <NoRecordsContent>
+            <MudText Typo="Typo.body2" Color="Color.Secondary" Class="pa-4">조회된 정산 내역이 없습니다.</MudText>
+        </NoRecordsContent>
+    </MudDataGrid>
+</MudPaper>
+
+@if (_total > _pageSize)
+{
+    <div style="display:flex;justify-content:center;margin-top:16px;">
+        <MudPagination Count="@((_total + _pageSize - 1) / _pageSize)"
+                       Selected="@_page" SelectedChanged="OnPageChanged"
+                       Color="Color.Primary" />
+    </div>
+}
+
+@if (_selected is not null)
+{
+    <MudDrawer @bind-Open="_drawerOpen" Anchor="Anchor.End" Width="380px" Elevation="4">
+        <MudDrawerHeader>
+            <MudText Typo="Typo.h6" Style="font-weight:600;">정산 상세</MudText>
+        </MudDrawerHeader>
+        <div class="pa-4">
+            <MudGrid Spacing="1" Class="mb-4">
+                <MudItem xs="5"><MudText Typo="Typo.caption" Color="Color.Secondary">대리점</MudText></MudItem>
+                <MudItem xs="7"><MudText Typo="Typo.body2">@_selected.ResellerName</MudText></MudItem>
+                <MudItem xs="5"><MudText Typo="Typo.caption" Color="Color.Secondary">정산월</MudText></MudItem>
+                <MudItem xs="7"><MudText Typo="Typo.body2">@_selected.SettlementMonth</MudText></MudItem>
+                <MudItem xs="5"><MudText Typo="Typo.caption" Color="Color.Secondary">총 매출</MudText></MudItem>
+                <MudItem xs="7"><MudText Typo="Typo.body2">@_selected.TotalRevenue.ToString("N0")원</MudText></MudItem>
+                <MudItem xs="5"><MudText Typo="Typo.caption" Color="Color.Secondary">수수료</MudText></MudItem>
+                <MudItem xs="7"><MudText Typo="Typo.body2">@_selected.TotalCommission.ToString("N0")원</MudText></MudItem>
+                <MudItem xs="5"><MudText Typo="Typo.caption" Color="Color.Secondary">공제 금액</MudText></MudItem>
+                <MudItem xs="7"><MudText Typo="Typo.body2">@_selected.DeductionAmount.ToString("N0")원</MudText></MudItem>
+                <MudItem xs="5"><MudText Typo="Typo.caption" Color="Color.Secondary">지급액</MudText></MudItem>
+                <MudItem xs="7"><MudText Typo="Typo.body2" Style="font-weight:700;">@_selected.PaymentAmount.ToString("N0")원</MudText></MudItem>
+                <MudItem xs="5"><MudText Typo="Typo.caption" Color="Color.Secondary">상태</MudText></MudItem>
+                <MudItem xs="7">
+                    <MudChip T="string" Size="Size.Small" Color="@_selected.StatusColor" Variant="Variant.Filled">@_selected.StatusKo</MudChip>
+                </MudItem>
+            </MudGrid>
+
+            <MudDivider Class="mb-3" />
+            <MudText Typo="Typo.subtitle2" Color="Color.Secondary" Class="mb-2">액션</MudText>
+            <div style="display:flex;flex-direction:column;gap:8px;">
+                @if (_selected.Status == "draft")
+                {
+                    <MudButton Variant="Variant.Filled" Color="Color.Info" FullWidth="true"
+                               OnClick="ApproveAsync" Disabled="_busy">승인</MudButton>
+                }
+                @if (_selected.Status == "approved")
+                {
+                    <MudButton Variant="Variant.Filled" Color="Color.Success" FullWidth="true"
+                               OnClick="PayAsync" Disabled="_busy">지급 처리</MudButton>
+                }
+                @if (_selected.Status is "draft" or "approved")
+                {
+                    <MudButton Variant="Variant.Outlined" Color="Color.Error" FullWidth="true"
+                               OnClick="CancelAsync" Disabled="_busy">취소</MudButton>
+                }
+            </div>
+        </div>
+    </MudDrawer>
+}
+
+@if (_generateOpen)
+{
+    <MudDialog Open="_generateOpen" Options="@(new DialogOptions { MaxWidth=MaxWidth.Small, FullWidth=true })">
+        <TitleContent><MudText Typo="Typo.h6">정산 생성</MudText></TitleContent>
+        <DialogContent>
+            <MudTextField @bind-Value="_generateMonth" Label="정산월 (YYYY-MM)" Variant="Variant.Outlined"
+                          FullWidth="true" Placeholder="2026-04" />
+        </DialogContent>
+        <DialogActions>
+            <MudButton OnClick="@(() => _generateOpen = false)">취소</MudButton>
+            <MudButton Color="Color.Primary" Variant="Variant.Filled" OnClick="GenerateAsync" Disabled="_busy">생성</MudButton>
+        </DialogActions>
+    </MudDialog>
+}
+
+@code {
+    private List<SettlementListItem> _items = new();
+    private PagedSettlementResult? _result;
+    private SettlementListItem? _selected;
+    private bool _loading;
+    private bool _drawerOpen;
+    private bool _generateOpen;
+    private bool _busy;
+    private string? _monthFilter;
+    private string? _statusFilter;
+    private string _generateMonth = "";
+    private int _page = 1;
+    private int _pageSize = 20;
+    private int _total;
+
+    protected override async Task OnInitializedAsync() => await LoadAsync();
+
+    private async Task LoadAsync()
+    {
+        _loading = true;
+        try
+        {
+            _result = await Bo.GetSettlementsAsync(_monthFilter, null, _statusFilter, _page, _pageSize);
+            _items = _result?.Items ?? new();
+            _total = _result?.TotalCount ?? 0;
+        }
+        catch
+        {
+            Snackbar.Add("정산 목록 로드 실패", Severity.Error);
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    private void OnRowClick(DataGridRowClickEventArgs<SettlementListItem> args)
+    {
+        _selected = args.Item;
+        _drawerOpen = true;
+    }
+
+    private void OpenGenerateDialog()
+    {
+        _generateMonth = DateTime.Now.AddMonths(-1).ToString("yyyy-MM");
+        _generateOpen = true;
+    }
+
+    private async Task GenerateAsync()
+    {
+        if (string.IsNullOrWhiteSpace(_generateMonth)) return;
+        _busy = true;
+        try
+        {
+            await Bo.GenerateSettlementsAsync(_generateMonth);
+            Snackbar.Add($"{_generateMonth} 정산이 생성되었습니다", Severity.Success);
+            _generateOpen = false;
+            await LoadAsync();
+        }
+        catch
+        {
+            Snackbar.Add("정산 생성 실패", Severity.Error);
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private async Task ApproveAsync()
+    {
+        if (_selected is null) return;
+        _busy = true;
+        try
+        {
+            await Bo.ApproveSettlementAsync(_selected.SettlementId, null);
+            Snackbar.Add("정산이 승인되었습니다", Severity.Success);
+            _drawerOpen = false;
+            await LoadAsync();
+        }
+        catch
+        {
+            Snackbar.Add("승인 실패", Severity.Error);
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private async Task PayAsync()
+    {
+        if (_selected is null) return;
+        _busy = true;
+        try
+        {
+            await Bo.PaySettlementAsync(_selected.SettlementId, DateTime.Today, null);
+            Snackbar.Add("지급 처리되었습니다", Severity.Success);
+            _drawerOpen = false;
+            await LoadAsync();
+        }
+        catch
+        {
+            Snackbar.Add("지급 처리 실패", Severity.Error);
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private async Task CancelAsync()
+    {
+        if (_selected is null) return;
+        _busy = true;
+        try
+        {
+            await Bo.CancelSettlementAsync(_selected.SettlementId, "관리자 취소");
+            Snackbar.Add("정산이 취소되었습니다", Severity.Success);
+            _drawerOpen = false;
+            await LoadAsync();
+        }
+        catch
+        {
+            Snackbar.Add("취소 실패", Severity.Error);
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private async Task OnPageChanged(int page)
+    {
+        _page = page;
+        await LoadAsync();
+    }
+}

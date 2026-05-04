@@ -1,11 +1,153 @@
 @page "/admin/dashboard"
+@layout PlatformLayout
 @attribute [Authorize]
+@inject BackofficeService Bo
+@inject ISnackbar Snackbar
+@using HitPan.Web.Models.Backoffice
+@using HitPan.Web.Services
 
-<PageTitle>본사 대시보드</PageTitle>
-<MudContainer MaxWidth="MaxWidth.Small" Class="d-flex align-center justify-center" Style="height:calc(100vh - 120px)">
-    <MudPaper Class="pa-8 text-center" Elevation="0">
-        <MudIcon Icon="@Icons.Material.Filled.Construction" Size="Size.Large" Color="Color.Warning" Class="mb-4" />
-        <MudText Typo="Typo.h5" Class="mb-2">본사 대시보드</MudText>
-        <MudText Typo="Typo.body1" Color="Color.Secondary">준비중입니다.</MudText>
-    </MudPaper>
-</MudContainer>
+<PageTitle>본사 대시보드 — 히트판 백오피스</PageTitle>
+
+<MudText Typo="Typo.h5" Class="mb-1" Style="font-weight:600;">본사 대시보드</MudText>
+<MudText Typo="Typo.body2" Color="Color.Secondary" Class="mb-5">
+    @DateTime.Now.ToString("yyyy년 M월 d일") 기준
+</MudText>
+
+@if (_loading)
+{
+    <MudProgressLinear Indeterminate="true" Color="Color.Primary" Class="mb-4" />
+}
+else if (_data is not null)
+{
+    <MudGrid Spacing="3" Class="mb-5">
+        <MudItem xs="12" sm="6" md="3">
+            <MudPaper Class="pa-4" Elevation="1" Style="border-radius:12px;">
+                <div style="display:flex;align-items:center;gap:12px;margin-bottom:8px;">
+                    <MudIcon Icon="@Icons.Material.Filled.Business" Color="Color.Primary" />
+                    <MudText Typo="Typo.body2" Color="Color.Secondary">전체 고객사</MudText>
+                </div>
+                <MudText Typo="Typo.h4" Style="font-weight:700;">@_data.TotalCustomers.ToString("N0")</MudText>
+                <MudText Typo="Typo.caption" Color="Color.Success">이번 달 +@_data.NewCustomersThisMonth</MudText>
+            </MudPaper>
+        </MudItem>
+        <MudItem xs="12" sm="6" md="3">
+            <MudPaper Class="pa-4" Elevation="1" Style="border-radius:12px;">
+                <div style="display:flex;align-items:center;gap:12px;margin-bottom:8px;">
+                    <MudIcon Icon="@Icons.Material.Filled.AccountBalance" Color="Color.Success" />
+                    <MudText Typo="Typo.body2" Color="Color.Secondary">월 청구 총액</MudText>
+                </div>
+                <MudText Typo="Typo.h4" Style="font-weight:700;">@_data.MonthlyBillingTotal.ToString("N0")원</MudText>
+                <MudText Typo="Typo.caption" Color="Color.Error">미납 @(_data.UnpaidCustomers)건</MudText>
+            </MudPaper>
+        </MudItem>
+        <MudItem xs="12" sm="6" md="3">
+            <MudPaper Class="pa-4" Elevation="1" Style="border-radius:12px;">
+                <div style="display:flex;align-items:center;gap:12px;margin-bottom:8px;">
+                    <MudIcon Icon="@Icons.Material.Filled.Store" Color="Color.Info" />
+                    <MudText Typo="Typo.body2" Color="Color.Secondary">활성 대리점</MudText>
+                </div>
+                <MudText Typo="Typo.h4" Style="font-weight:700;">@_data.ActiveResellers</MudText>
+            </MudPaper>
+        </MudItem>
+        <MudItem xs="12" sm="6" md="3">
+            <MudPaper Class="pa-4" Elevation="1" Style="border-radius:12px;">
+                <div style="display:flex;align-items:center;gap:12px;margin-bottom:8px;">
+                    <MudIcon Icon="@Icons.Material.Filled.Payments" Color="Color.Warning" />
+                    <MudText Typo="Typo.body2" Color="Color.Secondary">미지급 수수료</MudText>
+                </div>
+                <MudText Typo="Typo.h4" Style="font-weight:700;">@_data.PendingCommissionTotal.ToString("N0")원</MudText>
+            </MudPaper>
+        </MudItem>
+    </MudGrid>
+
+    <MudGrid Spacing="3">
+        <MudItem xs="12" md="7">
+            <MudPaper Class="pa-4" Elevation="1" Style="border-radius:12px;">
+                <MudText Typo="Typo.subtitle1" Style="font-weight:600;margin-bottom:16px;">월별 신규 고객사 추이</MudText>
+                @if (_data.MonthlyCustomerTrend.Count > 0)
+                {
+                    <div style="overflow-x:auto;">
+                        <table style="width:100%;border-collapse:collapse;font-size:0.85rem;">
+                            <thead>
+                                <tr style="border-bottom:1px solid #e2e8f0;">
+                                    <th style="text-align:left;padding:6px 8px;color:#64748b;">월</th>
+                                    <th style="text-align:right;padding:6px 8px;color:#64748b;">신규 고객사</th>
+                                    <th style="text-align:right;padding:6px 8px;color:#64748b;">그래프</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                @{
+                                    var maxVal = _data.MonthlyCustomerTrend.Max(x => x.NewCount);
+                                    if (maxVal == 0) maxVal = 1;
+                                }
+                                @foreach (var t in _data.MonthlyCustomerTrend)
+                                {
+                                    var pct = (double)t.NewCount / maxVal * 100;
+                                    <tr style="border-bottom:1px solid #f1f5f9;">
+                                        <td style="padding:8px;">@t.Month</td>
+                                        <td style="text-align:right;padding:8px;font-weight:600;">@t.NewCount</td>
+                                        <td style="padding:8px;width:120px;">
+                                            <div style="background:#e2e8f0;border-radius:4px;height:8px;">
+                                                <div style="background:#0f6e56;border-radius:4px;height:8px;width:@(pct.ToString("F0"))%;"></div>
+                                            </div>
+                                        </td>
+                                    </tr>
+                                }
+                            </tbody>
+                        </table>
+                    </div>
+                }
+                else
+                {
+                    <MudText Color="Color.Secondary" Typo="Typo.body2">데이터 없음</MudText>
+                }
+            </MudPaper>
+        </MudItem>
+        <MudItem xs="12" md="5">
+            <MudPaper Class="pa-4" Elevation="1" Style="border-radius:12px;">
+                <MudText Typo="Typo.subtitle1" Style="font-weight:600;margin-bottom:16px;">대리점 실적 TOP</MudText>
+                @if (_data.TopResellerPerformances.Count > 0)
+                {
+                    @foreach (var r in _data.TopResellerPerformances)
+                    {
+                        <div style="padding:10px 0;border-bottom:1px solid #f1f5f9;">
+                            <div style="display:flex;justify-content:space-between;align-items:center;">
+                                <MudText Typo="Typo.body2" Style="font-weight:600;">@r.ResellerName</MudText>
+                                <MudChip T="string" Size="Size.Small" Color="Color.Success" Variant="Variant.Filled">@r.CustomerCount 고객사</MudChip>
+                            </div>
+                            <div style="display:flex;justify-content:space-between;margin-top:4px;">
+                                <MudText Typo="Typo.caption" Color="Color.Secondary">매출 @r.MonthlyRevenue.ToString("N0")원</MudText>
+                                <MudText Typo="Typo.caption" Color="Color.Warning">수수료 @r.MonthlyCommission.ToString("N0")원</MudText>
+                            </div>
+                        </div>
+                    }
+                }
+                else
+                {
+                    <MudText Color="Color.Secondary" Typo="Typo.body2">데이터 없음</MudText>
+                }
+            </MudPaper>
+        </MudItem>
+    </MudGrid>
+}
+
+@code {
+    private AdminDashboardData? _data;
+    private bool _loading = true;
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            _data = await Bo.GetAdminDashboardAsync();
+        }
+        catch
+        {
+            Snackbar.Add("대시보드 데이터 로드 실패", Severity.Error);
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+}
