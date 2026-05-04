@@ -16,10 +16,10 @@
     <link href="https://fonts.googleapis.com/icon?family=Material+Icons" rel="stylesheet" />
     <link href="_content/MudBlazor/MudBlazor.min.css" rel="stylesheet" />
     <!-- 디자인 토큰 헌장 — 토스 B 컨셉 (사장님 결재 2026-04-29). app.css·hitpan.css는 보존. -->
-    <link rel="stylesheet" href="css/design-tokens.css?v=20260504c" />
-    <link rel="stylesheet" href="css/hp-toss.css?v=20260504c" />
-    <link rel="stylesheet" href="css/app.css?v=20260504c" />
-    <link rel="stylesheet" href="css/hitpan.css?v=20260504c" />
+    <link rel="stylesheet" href="css/design-tokens.css?v=20260504d" />
+    <link rel="stylesheet" href="css/hp-toss.css?v=20260504d" />
+    <link rel="stylesheet" href="css/app.css?v=20260504d" />
+    <link rel="stylesheet" href="css/hitpan.css?v=20260504d" />
     <link rel="icon" type="image/png" href="favicon.png" />
     <link href="HitPan.Web.styles.css" rel="stylesheet" />
 </head>
@@ -60,6 +60,25 @@
                 }
             }).open();
         }
+    </script>
+
+    <!-- 네비게이션 앱 딥링크 + 웹 폴백 -->
+    <script>
+        window.hitpan = window.hitpan || {};
+        window.hitpan.openNavi = function (deepLink, webUrl) {
+            // iframe trick: 딥링크 시도 후 300ms 안에 반응 없으면 웹으로 폴백
+            var iframe = document.createElement('iframe');
+            iframe.style.display = 'none';
+            document.body.appendChild(iframe);
+            iframe.src = deepLink;
+            setTimeout(function () {
+                document.body.removeChild(iframe);
+                // 앱이 열렸으면 페이지가 blur 상태 — 아니면 웹으로 이동
+                if (!document.hidden) {
+                    window.open(webUrl, '_blank', 'noopener');
+                }
+            }, 300);
+        };
     </script>
 
     <!-- 툴바 마우스 휠 → 가로 스크롤 변환 -->

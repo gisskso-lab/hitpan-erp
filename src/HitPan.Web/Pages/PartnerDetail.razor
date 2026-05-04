@@ -72,14 +72,16 @@ else
                 {
                     <div class="hp-navi-row">
                         <span class="hp-navi-label">네비게이션</span>
-                        <a href="@KakaoNaviUrl" target="_blank" rel="noopener" class="hp-navi-btn hp-navi-btn--kakao">
+                        <button type="button" class="hp-navi-btn hp-navi-btn--kakao"
+                                @onclick="OpenKakaoNavi">
                             <img src="https://t1.kakaocdn.net/kakao_for_business/images/icon/favicon/favicon-16x16.png" width="14" height="14" alt="" style="border-radius:3px" />
                             카카오내비
-                        </a>
-                        <a href="@TmapNaviUrl" target="_blank" rel="noopener" class="hp-navi-btn hp-navi-btn--tmap">
+                        </button>
+                        <button type="button" class="hp-navi-btn hp-navi-btn--tmap"
+                                @onclick="OpenTmapNavi">
                             <MudIcon Icon="@Icons.Material.Filled.Navigation" Style="font-size:14px;" />
                             티맵
-                        </a>
+                        </button>
                     </div>
                 }
 
@@ -157,13 +159,41 @@ else
         ? _model.Address ?? ""
         : $"{_model.Address} {_model.AddressDetail}";
 
-    private string KakaoNaviUrl => Uri.EscapeDataString(FullAddress) is { } enc && enc.Length > 0
-        ? $"kakaomap://route?ep={enc}&by=CAR"
-        : "#";
+    private async Task OpenKakaoNavi()
+    {
+        var addr = FullAddress;
+        if (string.IsNullOrWhiteSpace(addr)) return;
 
-    private string TmapNaviUrl => Uri.EscapeDataString(FullAddress) is { } enc && enc.Length > 0
-        ? $"tmap://route?goalname={Uri.EscapeDataString(_model.PartnerName ?? "")}&goal={enc}"
-        : "#";
+        // 1) 주소를 클립보드에 복사 (앱 내 붙여넣기용)
+        await JS.InvokeVoidAsync("navigator.clipboard.writeText", addr);
+
+        // 2) 카카오맵 앱 딥링크 시도 → 실패 시 웹 카카오맵으로 폴백
+        var enc = Uri.EscapeDataString(addr);
+        var nameEnc = Uri.EscapeDataString(_model.PartnerName ?? addr);
+        await JS.InvokeVoidAsync("hitpan.openNavi",
+            $"kakaomap://route?ep={enc}&by=CAR",
+            $"https://map.kakao.com/link/to/{nameEnc},{enc}");
+
+        Snackbar.Add($"주소가 클립보드에 복사됐어요. 앱에서 붙여넣기하세요.", Severity.Info, cfg => cfg.VisibleStateDuration = 2500);
+    }
+
+    private async Task OpenTmapNavi()
+    {
+        var addr = FullAddress;
+        if (string.IsNullOrWhiteSpace(addr)) return;
+
+        // 1) 주소를 클립보드에 복사
+        await JS.InvokeVoidAsync("navigator.clipboard.writeText", addr);
+
+        // 2) 티맵 앱 딥링크 시도 → 실패 시 티맵 웹으로 폴백
+        var enc = Uri.EscapeDataString(addr);
+        var nameEnc = Uri.EscapeDataString(_model.PartnerName ?? addr);
+        await JS.InvokeVoidAsync("hitpan.openNavi",
+            $"tmap://route?goalname={nameEnc}&goal={enc}",
+            $"https://tmap.life/?goal={enc}&goalname={nameEnc}");
+
+        Snackbar.Add($"주소가 클립보드에 복사됐어요. 앱에서 붙여넣기하세요.", Severity.Info, cfg => cfg.VisibleStateDuration = 2500);
+    }
 
     protected override async Task OnParametersSetAsync()
     {
