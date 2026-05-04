@@ -558,8 +558,11 @@ public partial class PurchaseReceiptPage : ComponentBase
         try
         {
             using var content = new StringContent("{}", System.Text.Encoding.UTF8, "application/json");
-            using var resp = await Http.PostAsync(
-                $"api/purchase/receipts/{Uri.EscapeDataString(_draft.Id)}/confirm", content);
+            content.Headers.TryAddWithoutValidation("Idempotency-Key", _draft.Id);
+            using var req = new HttpRequestMessage(HttpMethod.Post,
+                $"api/purchase/receipts/{Uri.EscapeDataString(_draft.Id)}/confirm") { Content = content };
+            req.Headers.TryAddWithoutValidation("Idempotency-Key", _draft.Id);
+            using var resp = await Http.SendAsync(req);
             if (!resp.IsSuccessStatusCode)
             {
                 var body = await resp.Content.ReadAsStringAsync();

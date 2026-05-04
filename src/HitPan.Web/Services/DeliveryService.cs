@@ -93,7 +93,9 @@ public sealed class DeliveryService(HttpClient http)
         }
 
         using var content = new StringContent("{}", Encoding.UTF8, "application/json");
-        using var resp = await http.PostAsync($"api/sales/deliveries/{draft.Id}/confirm", content, cancellationToken: ct);
+        using var req = new HttpRequestMessage(HttpMethod.Post, $"api/sales/deliveries/{draft.Id}/confirm") { Content = content };
+        req.Headers.TryAddWithoutValidation("Idempotency-Key", draft.Id);
+        using var resp = await http.SendAsync(req, ct);
         if (!resp.IsSuccessStatusCode)
         {
             // §절대원칙 #20 — 실패를 성공으로 위장하면 재고 미차감 무결성 붕괴.

@@ -245,10 +245,13 @@ public partial class PurchaseReceiptList : ComponentBase
         {
             try
             {
-                using var resp = await Http.PostAsJsonAsync(
-                    $"api/purchase/receipts/{Uri.EscapeDataString(id)}/confirm",
-                    new { },
-                    CancellationToken.None);
+                using var req = new HttpRequestMessage(HttpMethod.Post,
+                    $"api/purchase/receipts/{Uri.EscapeDataString(id)}/confirm")
+                {
+                    Content = new StringContent("{}", System.Text.Encoding.UTF8, "application/json")
+                };
+                req.Headers.TryAddWithoutValidation("Idempotency-Key", id);
+                using var resp = await Http.SendAsync(req, CancellationToken.None);
                 if (resp.IsSuccessStatusCode)
                 {
                     success.Add(id);
