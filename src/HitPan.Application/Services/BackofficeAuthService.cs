@@ -39,34 +39,38 @@ public class BackofficeAuthService : IBackofficeAuthService
         if (!(bool)admin.is_active)
             throw new UnauthorizedAccessException("비활성화된 계정입니다");
 
-        var valid = BCrypt.Net.BCrypt.Verify(request.Password, (string)admin.password_hash);
+        var valid = BCrypt.Net.BCrypt.Verify(request.Password, admin.password_hash.ToString());
         if (!valid)
             throw new UnauthorizedAccessException("이메일 또는 비밀번호가 올바르지 않습니다");
 
+        string adminId = admin.admin_id.ToString();
+        string adminName = admin.admin_name.ToString();
+        string adminRole = admin.role.ToString();
+
         await db.ExecuteAsync(
             "UPDATE platform_admins SET last_login_at = @Now WHERE admin_id = @AdminId",
-            new { Now = DateTime.UtcNow, AdminId = (string)admin.admin_id });
+            new { Now = DateTime.UtcNow, AdminId = adminId });
 
         var (accessToken, refreshToken, expiresAt) = CreateTokenPair(
-            sub: (string)admin.admin_id,
+            sub: adminId,
             accountType: "platform_admin",
-            role: (string)admin.role,
+            role: adminRole,
             extraClaims: new Dictionary<string, string>
             {
-                ["admin_id"] = (string)admin.admin_id,
-                ["name"] = (string)admin.admin_name
+                ["admin_id"] = adminId,
+                ["name"] = adminName
             });
 
-        await SaveRefreshTokenAsync(db, (string)admin.admin_id, "admin", refreshToken);
+        await SaveRefreshTokenAsync(db, adminId, "admin", refreshToken);
 
         return new AdminLoginResponse
         {
             AccessToken = accessToken,
             RefreshToken = refreshToken,
             ExpiresAt = expiresAt,
-            Role = (string)admin.role,
-            AdminName = (string)admin.admin_name,
-            AdminId = (string)admin.admin_id,
+            Role = adminRole,
+            AdminName = adminName,
+            AdminId = adminId,
             AccountType = "platform_admin"
         };
     }
@@ -90,41 +94,47 @@ public class BackofficeAuthService : IBackofficeAuthService
         if (!(bool)account.is_active)
             throw new UnauthorizedAccessException("비활성화된 계정입니다");
 
-        string resellerStatus = (string)account.reseller_status;
+        string resellerStatus = account.reseller_status.ToString();
         if (resellerStatus is "suspended" or "terminated")
             throw new UnauthorizedAccessException("소속 대리점이 현재 이용 중지 상태입니다");
 
-        var valid = BCrypt.Net.BCrypt.Verify(request.Password, (string)account.password_hash);
+        var valid = BCrypt.Net.BCrypt.Verify(request.Password, account.password_hash.ToString());
         if (!valid)
             throw new UnauthorizedAccessException("이메일 또는 비밀번호가 올바르지 않습니다");
 
+        string accountId = account.account_id.ToString();
+        string accountName = account.account_name.ToString();
+        string accountRole = account.role.ToString();
+        string resellerId = account.reseller_id.ToString();
+        string resellerName = account.reseller_name.ToString();
+
         await db.ExecuteAsync(
             "UPDATE reseller_accounts SET last_login_at = @Now WHERE account_id = @AccountId",
-            new { Now = DateTime.UtcNow, AccountId = (string)account.account_id });
+            new { Now = DateTime.UtcNow, AccountId = accountId });
 
         var (accessToken, refreshToken, expiresAt) = CreateTokenPair(
-            sub: (string)account.account_id,
+            sub: accountId,
             accountType: "reseller_admin",
-            role: (string)account.role,
+            role: accountRole,
             extraClaims: new Dictionary<string, string>
             {
-                ["account_id"] = (string)account.account_id,
-                ["reseller_id"] = (string)account.reseller_id,
-                ["name"] = (string)account.account_name
+                ["account_id"] = accountId,
+                ["reseller_id"] = resellerId,
+                ["name"] = accountName
             });
 
-        await SaveRefreshTokenAsync(db, (string)account.account_id, "reseller", refreshToken);
+        await SaveRefreshTokenAsync(db, accountId, "reseller", refreshToken);
 
         return new ResellerLoginResponse
         {
             AccessToken = accessToken,
             RefreshToken = refreshToken,
             ExpiresAt = expiresAt,
-            Role = (string)account.role,
-            AccountName = (string)account.account_name,
-            AccountId = (string)account.account_id,
-            ResellerId = (string)account.reseller_id,
-            ResellerName = (string)account.reseller_name,
+            Role = accountRole,
+            AccountName = accountName,
+            AccountId = accountId,
+            ResellerId = resellerId,
+            ResellerName = resellerName,
             AccountType = "reseller_admin"
         };
     }

@@ -26,7 +26,8 @@ public sealed class TenantMiddleware
             || path.StartsWithSegments("/swagger")
             || path.StartsWithSegments("/api/tenants/setup")
             || path.StartsWithSegments("/api/auth/login")
-            || path.StartsWithSegments("/api/auth/refresh"))
+            || path.StartsWithSegments("/api/auth/refresh")
+            || path.StartsWithSegments("/api/backoffice/auth"))
         {
             await _next(context);
             return;
