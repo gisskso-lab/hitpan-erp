@@ -818,23 +818,16 @@ public class PurchaseService : IPurchaseService
                     cancellationToken: ct));
             }
 
-            // 3) monthly_summary 매입 취소(차감)
-            await conn.ExecuteAsync(new CommandDefinition(
-                """
-                INSERT INTO monthly_summary (summary_id, tenant_id, `year_month`, total_sales, total_purchase, total_receipt, total_payment, last_updated_at)
-                VALUES (UUID(), @TenantId, @Ym, 0, -@Purchase, 0, 0, NOW(6))
-                ON DUPLICATE KEY UPDATE
-                  total_purchase = total_purchase - @Purchase,
-                  last_updated_at = NOW(6)
-                """,
-                new
-                {
-                    TenantId = tenantId,
-                    Ym = rd.ToString("yyyyMM"),
-                    Purchase = totalAmount + vatAmount
-                },
-                transaction: dbTx,
-                cancellationToken: ct));
+            // 3) monthly_summary 매입 역산 — MonthlySummaryGuard 멱등 가드 (ConfirmReceiptAsync 대칭)
+            await MonthlySummaryGuard.TryApplyAsync(
+                conn, dbTx,
+                tenantId: tenantId,
+                date: rd,
+                sourceType: "purchase_return_confirmed",
+                sourceId: returnId,
+                field: MonthlySummaryGuard.SummaryField.TotalPurchase,
+                amount: -(totalAmount + vatAmount),
+                ct: ct);
 
             // 4) partner_balance 매입 역산 (반품 확정 시 total_purchase 차감)
             await conn.ExecuteAsync(new CommandDefinition(
