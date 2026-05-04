@@ -1569,9 +1569,10 @@ public sealed class MdbMigrationService
             using var cmd = new OleDbCommand($"SELECT COUNT(*) FROM [{tableName}]", conn);
             return Convert.ToInt32(cmd.ExecuteScalar());
         }
-        catch
+        catch (Exception ex)
         {
-            return 0; // 테이블 없으면 0
+            _logger.LogDebug(ex, "[MDB] 테이블 {Table} COUNT 실패 — 테이블 없음으로 처리", tableName);
+            return 0;
         }
     }
 
