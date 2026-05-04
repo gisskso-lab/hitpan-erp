@@ -62,6 +62,20 @@
         }
     </script>
 
+    <!-- PDF/Excel 파일 열기 — iOS Safari 팝업 차단 우회 (a[download] click trick) -->
+    <script>
+        window.hitpan = window.hitpan || {};
+        window.hitpan.openFile = function (url) {
+            var a = document.createElement('a');
+            a.href = url;
+            a.target = '_blank';
+            a.rel = 'noopener';
+            document.body.appendChild(a);
+            a.click();
+            setTimeout(function () { document.body.removeChild(a); }, 500);
+        };
+    </script>
+
     <!-- 네비게이션 앱 딥링크 + 웹 폴백 -->
     <script>
         window.hitpan = window.hitpan || {};

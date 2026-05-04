@@ -21,13 +21,13 @@ public class DocumentService
     public async Task DownloadExcelAsync(string docType, string docId)
     {
         var url = await BuildDocumentUrlAsync(docType, docId, "excel");
-        await _js.InvokeVoidAsync("open", url, "_blank");
+        await _js.InvokeVoidAsync("hitpan.openFile", url);
     }
 
     public async Task DownloadPdfAsync(string docType, string docId)
     {
         var url = await BuildDocumentUrlAsync(docType, docId, "pdf");
-        await _js.InvokeVoidAsync("open", url, "_blank");
+        await _js.InvokeVoidAsync("hitpan.openFile", url);
     }
 
     /// <summary>
