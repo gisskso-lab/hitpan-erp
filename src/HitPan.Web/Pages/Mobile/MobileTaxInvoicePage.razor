@@ -1,0 +1,50 @@
+@page "/m/tax-invoice"
+@attribute [Authorize]
+@using HitPan.Web.Components.Mobile
+@using HitPan.Web.Models
+@using HitPan.Web.Services
+@inject DeliveryService DeliverySvc
+
+<PageTitle>세금계산서</PageTitle>
+
+<MobileDocList TItem="DeliveryListDto"
+               Title="세금계산서"
+               Icon="@Icons.Material.Filled.ReceiptLong"
+               IconColor="#880E4F"
+               Items="_rows"
+               Loading="_loading"
+               DateFrom="_from"
+               DateTo="_to"
+               DateFromChanged="@(d => { _from = d; _ = LoadAsync(); })"
+               DateToChanged="@(d => { _to = d; _ = LoadAsync(); })"
+               OnSearch="LoadAsync"
+               GetDocNo="@(r => r.DeliveryNo)"
+               GetPartner="@(r => r.PartnerName)"
+               GetDate="@(r => r.OrderDate)"
+               GetAmount="@(r => r.TotalAmount)"
+               GetStatus="@(r => r.Status)" />
+
+@code {
+    private List<DeliveryListDto> _rows = new();
+    private bool _loading = true;
+    private DateTime? _from = new DateTime(DateTime.Today.Year, DateTime.Today.Month, 1);
+    private DateTime? _to   = DateTime.Today;
+
+    protected override async Task OnInitializedAsync() => await LoadAsync();
+
+    private async Task LoadAsync()
+    {
+        _loading = true;
+        StateHasChanged();
+        try
+        {
+            var from = _from?.ToString("yyyy-MM-dd") ?? "";
+            var to   = _to?.ToString("yyyy-MM-dd")   ?? "";
+            var all  = await DeliverySvc.GetListAsync(from, to);
+            // 확정(invoiced/e-issued/confirmed) 상태만 세금계산서 목록에 표시
+            _rows = all.Where(d => d.Status is "invoiced" or "confirmed" or "e-issued").ToList();
+        }
+        catch { _rows = new(); }
+        _loading = false;
+    }
+}

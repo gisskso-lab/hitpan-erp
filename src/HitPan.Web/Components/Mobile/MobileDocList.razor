@@ -1,0 +1,179 @@
+@* 모바일 문서 목록 공통 컴포넌트 — 날짜 범위 + 검색 + 카드 리스트 *@
+@typeparam TItem
+@using MudBlazor
+
+<div class="hpm-sales">
+
+    @* ── 날짜 범위 피커 ── *@
+    <div class="hpm-date-bar">
+        <MudDatePicker Date="DateFrom"
+                       DateChanged="DateFromChanged"
+                       Label="시작일"
+                       DateFormat="MM/dd"
+                       Variant="Variant.Outlined"
+                       Margin="Margin.Dense"
+                       Class="hpm-date-picker" />
+        <span class="hpm-date-sep">~</span>
+        <MudDatePicker Date="DateTo"
+                       DateChanged="DateToChanged"
+                       Label="종료일"
+                       DateFormat="MM/dd"
+                       Variant="Variant.Outlined"
+                       Margin="Margin.Dense"
+                       Class="hpm-date-picker" />
+        <button class="hpm-date-search-btn" @onclick="OnSearchClick">
+            <MudIcon Icon="@Icons.Material.Filled.Search" Style="font-size:18px" />
+        </button>
+    </div>
+
+    @* ── 검색바 ── *@
+    <div class="hpm-search-bar">
+        <div class="hpm-search-input-wrap">
+            <MudIcon Icon="@Icons.Material.Filled.Search" Class="hpm-search-icon" />
+            <input class="hpm-search-input" placeholder="업체명 · 문서번호 검색"
+                   @bind="_search" @bind:event="oninput" @onkeyup="OnSearchKey" />
+            @if (!string.IsNullOrEmpty(_search))
+            {
+                <button class="hpm-search-clear" @onclick="ClearSearch">
+                    <MudIcon Icon="@Icons.Material.Filled.Close" Style="font-size:16px" />
+                </button>
+            }
+        </div>
+    </div>
+
+    @* ── 필터 칩 ── *@
+    <div class="hpm-filter-chips">
+        @foreach (var chip in _chips)
+        {
+            <button class="hpm-chip @(_activeChip == chip.Key ? "hpm-chip--active" : "")"
+                    @onclick="@(() => SetChip(chip.Key))">@chip.Label</button>
+        }
+    </div>
+
+    @* ── 카드 목록 ── *@
+    @if (Loading)
+    {
+        <div class="hpm-loading">
+            <MudProgressCircular Color="Color.Primary" Indeterminate="true" Size="Size.Small" />
+        </div>
+    }
+    else if (!_filtered.Any())
+    {
+        <div class="hpm-empty">
+            <MudIcon Icon="@Icons.Material.Outlined.Inbox" Style="font-size:48px;color:#ccc;" />
+            <p>조회된 문서가 없습니다</p>
+        </div>
+    }
+    else
+    {
+        <div class="hpm-card-list">
+            @foreach (var row in _filtered)
+            {
+                <div class="hpm-doc-card">
+                    <div class="hpm-doc-card-top">
+                        <div class="hpm-doc-partner">@GetPartner(row)</div>
+                        <div class="hpm-doc-amount">@GetAmount(row).ToString("N0")원</div>
+                    </div>
+                    <div class="hpm-doc-card-mid">
+                        <span class="hpm-doc-no">@GetDocNo(row)</span>
+                        <span class="hpm-doc-date">@GetDate(row).ToString("M월 d일")</span>
+                    </div>
+                    <div class="hpm-doc-card-bot">
+                        <span class="hpm-status-badge hpm-status-@GetStatus(row)">@StatusLabel(GetStatus(row))</span>
+                    </div>
+                </div>
+            }
+        </div>
+
+        <div class="hpm-list-footer">
+            총 @(_filtered.Count)건 &middot; @(_filtered.Sum(r => GetAmount(r)).ToString("N0"))원
+        </div>
+    }
+</div>
+
+@code {
+    [Parameter, EditorRequired] public string Title         { get; set; } = "";
+    [Parameter, EditorRequired] public string Icon          { get; set; } = "";
+    [Parameter, EditorRequired] public string IconColor     { get; set; } = "#0F6E56";
+    [Parameter, EditorRequired] public List<TItem> Items    { get; set; } = new();
+    [Parameter]                 public bool Loading         { get; set; }
+
+    [Parameter, EditorRequired] public DateTime? DateFrom   { get; set; }
+    [Parameter, EditorRequired] public DateTime? DateTo     { get; set; }
+    [Parameter, EditorRequired] public EventCallback<DateTime?> DateFromChanged { get; set; }
+    [Parameter, EditorRequired] public EventCallback<DateTime?> DateToChanged   { get; set; }
+    [Parameter]                 public EventCallback OnSearch                   { get; set; }
+
+    [Parameter, EditorRequired] public Func<TItem, string>   GetDocNo   { get; set; } = _ => "";
+    [Parameter, EditorRequired] public Func<TItem, string>   GetPartner { get; set; } = _ => "";
+    [Parameter, EditorRequired] public Func<TItem, DateTime> GetDate    { get; set; } = _ => DateTime.Today;
+    [Parameter, EditorRequired] public Func<TItem, decimal>  GetAmount  { get; set; } = _ => 0m;
+    [Parameter, EditorRequired] public Func<TItem, string>   GetStatus  { get; set; } = _ => "";
+
+    private string _search = "";
+    private string _activeChip = "month";
+    private List<TItem> _filtered = new();
+
+    private static readonly (string Key, string Label)[] _chips =
+    {
+        ("all",       "전체"),
+        ("today",     "오늘"),
+        ("week",      "이번 주"),
+        ("month",     "이번 달"),
+        ("draft",     "초안"),
+        ("confirmed", "확정"),
+    };
+
+    protected override void OnParametersSet() => ApplyFilter();
+
+    private void ApplyFilter()
+    {
+        var q = _search.Trim();
+        var list = string.IsNullOrEmpty(q)
+            ? Items.ToList()
+            : Items.Where(r =>
+                GetPartner(r).Contains(q, StringComparison.OrdinalIgnoreCase) ||
+                GetDocNo(r).Contains(q, StringComparison.OrdinalIgnoreCase)).ToList();
+
+        if (_activeChip is "draft" or "confirmed")
+            list = list.Where(r => GetStatus(r) == _activeChip).ToList();
+
+        _filtered = list;
+    }
+
+    private async Task SetChip(string key)
+    {
+        _activeChip = key;
+        ApplyFilter();
+        if (key is "draft" or "confirmed") return;
+        await OnSearch.InvokeAsync();
+    }
+
+    private void OnSearchKey(KeyboardEventArgs e)
+    {
+        ApplyFilter();
+        StateHasChanged();
+    }
+
+    private void ClearSearch()
+    {
+        _search = "";
+        ApplyFilter();
+        StateHasChanged();
+    }
+
+    private async Task OnSearchClick() => await OnSearch.InvokeAsync();
+
+    private static string StatusLabel(string s) => s switch
+    {
+        "confirmed"  => "확정",
+        "draft"      => "초안",
+        "cancelled"  => "취소",
+        "invoiced"   => "발행",
+        "e-issued"   => "전자발행",
+        "received"   => "입고완료",
+        "ordered"    => "발주",
+        "partial"    => "일부입고",
+        _            => s
+    };
+}

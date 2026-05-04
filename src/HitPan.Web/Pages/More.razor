@@ -2,6 +2,7 @@
 @attribute [Authorize]
 @inject NavigationManager Nav
 @inject WorkTabService TabService
+@inject IJSRuntime JS
 @using HitPan.Web.Models
 @using HitPan.Web.Services
 
@@ -51,12 +52,28 @@
 
 @code {
     private string? _openGroup;
+    private bool _isMobile;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            _isMobile = await JS.InvokeAsync<bool>("eval", "window.innerWidth <= 767");
+            StateHasChanged();
+        }
+    }
 
     private void ToggleGroup(string key) =>
         _openGroup = _openGroup == key ? null : key;
 
     private void Navigate(MenuEntry item)
     {
+        // 모바일에서는 모바일 카드 목록 경로가 있으면 그쪽으로 이동
+        if (_isMobile && !string.IsNullOrEmpty(item.MobileHref))
+        {
+            Nav.NavigateTo(item.MobileHref);
+            return;
+        }
         if (item.TabKind is { } kind)
             TabService.TryAddTab(kind);
         if (!string.IsNullOrEmpty(item.Href) && item.Href != "#")
@@ -65,7 +82,8 @@
 
     private sealed record MenuEntry(
         string Title, string MudIcon, string Href,
-        WorkDocumentKind? TabKind = null);
+        WorkDocumentKind? TabKind = null,
+        string? MobileHref = null);
 
     private sealed record MenuGroup(
         string Key, string Title, string MudIcon,
@@ -78,31 +96,31 @@
             "#E3F2FD", "#1565C0",
             new MenuEntry[]
             {
-                new("견적서",    Icons.Material.Filled.RequestQuote,  "#",  WorkDocumentKind.Quotation),
+                new("견적서",    Icons.Material.Filled.RequestQuote,  "#",  WorkDocumentKind.Quotation,      "/m/quotations"),
                 new("견적현황",  Icons.Material.Filled.ListAlt,       "/quotation-status"),
-                new("수주서",    Icons.Material.Filled.Assignment,    "#",  WorkDocumentKind.SalesOrder),
+                new("수주서",    Icons.Material.Filled.Assignment,    "#",  WorkDocumentKind.SalesOrder,     "/m/sales-orders"),
                 new("수주현황",  Icons.Material.Filled.ListAlt,       "/sales-order-status"),
-                new("거래명세서",Icons.Material.Filled.Receipt,       "#",  WorkDocumentKind.SalesDelivery),
+                new("거래명세서",Icons.Material.Filled.Receipt,       "#",  WorkDocumentKind.SalesDelivery,  "/m/sales"),
                 new("판매현황",  Icons.Material.Filled.BarChart,      "/sales/summary"),
                 new("판매순위",  Icons.Material.Filled.EmojiEvents,   "/sales/ranking"),
                 new("판매통계",  Icons.Material.Filled.Analytics,     "/sales/statistics"),
             },
-            new("거래명세서", Icons.Material.Filled.Receipt, "#", WorkDocumentKind.SalesDelivery)),
+            new("거래명세서", Icons.Material.Filled.Receipt, "#", WorkDocumentKind.SalesDelivery, "/m/sales")),
 
         new("purchase", "매입관리", Icons.Material.Filled.ShoppingCart,
             "#FFF3E0", "#E65100",
             new MenuEntry[]
             {
-                new("발주서",    Icons.Material.Filled.AddShoppingCart,  "#", WorkDocumentKind.PurchaseOrder),
+                new("발주서",    Icons.Material.Filled.AddShoppingCart,  "#", WorkDocumentKind.PurchaseOrder,   "/m/purchase-orders"),
                 new("발주현황",  Icons.Material.Filled.ListAlt,          "/purchase-order-status"),
-                new("매입처리",  Icons.Material.Filled.MoveToInbox,      "#", WorkDocumentKind.PurchaseReceipt),
+                new("매입처리",  Icons.Material.Filled.MoveToInbox,      "#", WorkDocumentKind.PurchaseReceipt, "/m/purchases"),
                 new("매입현황",  Icons.Material.Filled.ListAlt,          "/purchase-status"),
-                new("반품처리",  Icons.Material.Filled.AssignmentReturn, "#", WorkDocumentKind.Return),
+                new("반품처리",  Icons.Material.Filled.AssignmentReturn, "#", WorkDocumentKind.Return,          "/m/returns"),
                 new("반품현황",  Icons.Material.Filled.ListAlt,          "/return-status"),
                 new("매입순위",  Icons.Material.Filled.EmojiEvents,      "/purchase/ranking"),
                 new("매입통계",  Icons.Material.Filled.Analytics,        "/purchase/statistics"),
             },
-            new("매입처리", Icons.Material.Filled.MoveToInbox, "#", WorkDocumentKind.PurchaseReceipt)),
+            new("매입처리", Icons.Material.Filled.MoveToInbox, "#", WorkDocumentKind.PurchaseReceipt, "/m/purchases")),
 
         new("stock", "재고관리", Icons.Material.Filled.Warehouse,
             "#E0F7FA", "#00695C",
@@ -136,11 +154,11 @@
             "#FCE4EC", "#880E4F",
             new MenuEntry[]
             {
-                new("세금계산서",Icons.Material.Filled.ReceiptLong,  "/tax-invoice"),
+                new("세금계산서",Icons.Material.Filled.ReceiptLong,  "/tax-invoice", MobileHref: "/m/tax-invoice"),
                 new("범용인증서",Icons.Material.Filled.VpnKey,       "/tax/certificate"),
                 new("계산서통계",Icons.Material.Filled.BarChart,     "/tax-invoice-stats"),
             },
-            new("세금계산서", Icons.Material.Filled.ReceiptLong, "/tax-invoice")),
+            new("세금계산서", Icons.Material.Filled.ReceiptLong, "/tax-invoice", MobileHref: "/m/tax-invoice")),
 
         new("partners", "업체관리", Icons.Material.Filled.Business,
             "#F3E5F5", "#6A1B9A",

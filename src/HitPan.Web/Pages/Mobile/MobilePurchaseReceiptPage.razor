@@ -1,0 +1,43 @@
+@page "/m/purchases"
+@attribute [Authorize]
+@using HitPan.Web.Components.Mobile
+@using HitPan.Web.Models
+@using HitPan.Web.Services
+@inject DeliveryService DeliverySvc
+
+<PageTitle>매입처리</PageTitle>
+
+<MobileDocList TItem="PurchaseReceiptListItem"
+               Title="매입처리"
+               Icon="@Icons.Material.Filled.MoveToInbox"
+               IconColor="#E65100"
+               Items="_rows"
+               Loading="_loading"
+               DateFrom="_from"
+               DateTo="_to"
+               DateFromChanged="@(d => { _from = d; _ = LoadAsync(); })"
+               DateToChanged="@(d => { _to = d; _ = LoadAsync(); })"
+               OnSearch="LoadAsync"
+               GetDocNo="@(r => r.ReceiptNo)"
+               GetPartner="@(r => r.PartnerName)"
+               GetDate="@(r => r.ReceiptDate)"
+               GetAmount="@(r => r.TotalAmount)"
+               GetStatus="@(r => r.Status)" />
+
+@code {
+    private List<PurchaseReceiptListItem> _rows = new();
+    private bool _loading = true;
+    private DateTime? _from = new DateTime(DateTime.Today.Year, DateTime.Today.Month, 1);
+    private DateTime? _to   = DateTime.Today;
+
+    protected override async Task OnInitializedAsync() => await LoadAsync();
+
+    private async Task LoadAsync()
+    {
+        _loading = true;
+        StateHasChanged();
+        try { _rows = await DeliverySvc.GetPurchaseReceiptListAsync(_from, _to); }
+        catch { _rows = new(); }
+        _loading = false;
+    }
+}

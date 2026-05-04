@@ -1197,6 +1197,38 @@ html, body {
     background: #f2f4f6;
 }
 
+/* 날짜 필터 바 */
+.hpm-date-bar {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 10px 16px 6px;
+    background: #fff;
+    border-bottom: 1px solid #f0f0f0;
+}
+.hpm-date-bar .mud-input-slot { font-size: 13px; }
+.hpm-date-sep {
+    color: #999;
+    font-size: 13px;
+    flex-shrink: 0;
+}
+.hpm-date-search-btn {
+    flex-shrink: 0;
+    background: #0F6E56;
+    color: #fff;
+    border: none;
+    border-radius: 8px;
+    padding: 7px 14px;
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+    white-space: nowrap;
+}
+.hpm-date-search-btn:active { opacity: 0.85; }
+.hpm-date-picker { flex: 1; min-width: 0; }
+.hpm-date-picker .mud-input-outlined { font-size: 13px; }
+.hpm-date-picker .mud-input-label { font-size: 12px; }
+
 /* 검색바 */
 .hpm-search-bar {
     padding: 12px 16px 8px;
