@@ -324,6 +324,15 @@ public partial class PurchaseReceiptPage : ComponentBase
             return;
         }
 
+        // unit_price=0 인 라인이 있으면 확정 시 "합계 0원" 오류가 발생하므로 저장 전에 차단한다.
+        var zeroPriceLines = lines.Where(x => x.UnitPrice <= 0).ToList();
+        if (zeroPriceLines.Count > 0)
+        {
+            var names = string.Join(", ", zeroPriceLines.Select(x => x.ItemName ?? x.ItemId));
+            Snackbar.Add($"단가가 0원인 품목이 있습니다: {names}\n상품 마스터의 매입단가를 먼저 입력해주세요.", Severity.Warning);
+            return;
+        }
+
         // 각 라인은 서버에서 WarehouseId 필수이므로 라인 또는 헤더 기본값이 있어야 한다.
         foreach (var line in lines)
         {

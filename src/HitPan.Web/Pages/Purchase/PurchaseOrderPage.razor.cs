@@ -454,6 +454,12 @@ public partial class PurchaseOrderPage : ComponentBase
             return;
         }
 
+        if (_status == "Closed")
+        {
+            Snackbar.Add("이미 입고 완료된 발주서입니다. 매입전환이 불가합니다.", Severity.Warning);
+            return;
+        }
+
         var confirm = await DialogService.ShowMessageBoxAsync(
             "매입전환 확인",
             "현재 발주서를 매입명세서로 전환하시겠습니까?",
@@ -600,8 +606,14 @@ public partial class PurchaseOrderPage : ComponentBase
             Lines = lines
         };
         _deliveryDueDate = detail.ExpectedDate;
-        _status = string.Equals(detail.Status, "confirmed", StringComparison.OrdinalIgnoreCase)
-            ? "Confirmed" : "Draft";
+        _status = detail.Status?.ToLowerInvariant() switch
+        {
+            "confirmed" => "Confirmed",
+            "partial"   => "Partial",
+            "closed"    => "Closed",
+            "cancelled" => "Cancelled",
+            _           => "Draft"
+        };
         _isNew = false;
         _hasUnsavedChanges = false;
         _selectedLine = null;

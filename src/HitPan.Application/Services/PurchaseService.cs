@@ -552,6 +552,21 @@ public class PurchaseService : IPurchaseService
             throw new InvalidOperationException("발주서를 찾을 수 없습니다.");
         }
 
+        // 이 발주를 참조하는 미확정(draft) 매입명세가 이미 있으면 중복 전환 차단
+        var draftExists = await _db.ExecuteScalarAsync<int>(new CommandDefinition(
+            """
+            SELECT COUNT(1) FROM purchase_receipts
+            WHERE po_id = @PoId AND tenant_id = @TenantId AND status != 'Confirmed'
+            """,
+            new { PoId = poId, TenantId = tenantId },
+            cancellationToken: ct));
+        if (draftExists > 0)
+        {
+            throw new InvalidOperationException(
+                "이 발주에 대한 매입명세(미확정)가 이미 존재합니다. " +
+                "기존 매입명세서를 확정하거나 삭제한 후 다시 전환해주세요.");
+        }
+
         var items = await poItemRepo.FindAsync(x => x.PoId == poId);
         var receiptItems = items
             .Where(x => x.OrderedQty - x.ReceivedQty > 0)
