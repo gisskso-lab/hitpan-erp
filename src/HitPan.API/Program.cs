@@ -214,6 +214,7 @@ app.Use(async (ctx, next) =>
 });
 
 app.UseMiddleware<GlobalExceptionMiddleware>();
+app.UseMiddleware<HealthIpWhitelistMiddleware>(); // RED-3: /health IP 화이트리스트
 app.UseCors("BlazorWasmDev");
 
 // Blazor WASM 정적 파일 서빙 — 인증 전에 처리

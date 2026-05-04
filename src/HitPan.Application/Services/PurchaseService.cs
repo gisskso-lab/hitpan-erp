@@ -368,15 +368,32 @@ public class PurchaseService : IPurchaseService
                 null,
                 ct);
 
-            // 5) 전체 커밋
+            // 6) partner_balance 매입 가산 — 트랜잭션 내부에서 처리 (RED-1 보강)
+            await conn.ExecuteAsync(new CommandDefinition(
+                """
+                INSERT INTO partner_balance
+                  (balance_id, tenant_id, partner_id,
+                   total_sales, total_receipt, total_purchase, total_payment,
+                   last_updated_at)
+                VALUES
+                  (UUID(), @TenantId, @PartnerId, 0, 0, @Amount, 0, NOW(6))
+                ON DUPLICATE KEY UPDATE
+                  total_purchase  = total_purchase + @Amount,
+                  last_updated_at = NOW(6)
+                """,
+                new { TenantId = receipt.TenantId, PartnerId = receipt.PartnerId,
+                      Amount = receipt.TotalAmount + receipt.VatAmount },
+                transaction: dbTx, cancellationToken: ct));
+
+            // 7) 전체 커밋
             await tx.CommitAsync(ct);
 
             // 감사로그
             await _audit.LogAsync("confirm", "purchase_receipt", receiptId, ct: ct);
 
-            // 6) 이벤트 발행 (트랜잭션 밖) — partner_balance.total_purchase + 안전재고 알림
-            //    WO-20260503-10 (사장님 발견): 이전엔 호출 안 해서 거래처 매입 잔고 0원으로 깨짐.
-            //    item_stock·monthly_summary 는 위 트랜잭션에서 이미 처리. 이벤트는 partner_balance만 책임.
+            // 8) 이벤트 발행 (트랜잭션 밖) — 안전재고 알림 전용
+            //    partner_balance.total_purchase 는 트랜잭션 내부(6단계)에서 이미 처리됨 (RED-1 보강).
+            //    item_stock·monthly_summary 는 위 트랜잭션에서 이미 처리. 이벤트는 안전재고 알림만 책임.
             if (_events is not null)
             {
                 try

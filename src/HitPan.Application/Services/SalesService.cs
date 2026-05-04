@@ -473,15 +473,32 @@ public class SalesService : ISalesService
                 delivery.EmployeeId,
                 ct);
 
-            // 5) 전체 커밋 — EF + Dapper 쓰기가 원자적으로 확정
+            // 5) partner_balance 매출 가산 — 트랜잭션 내부에서 처리 (RED-1 보강)
+            //    이벤트 외부 발행 실패 시에도 partner_balance 정합성 보장.
+            await conn.ExecuteAsync(new CommandDefinition(
+                """
+                INSERT INTO partner_balance
+                  (balance_id, tenant_id, partner_id,
+                   total_sales, total_receipt, total_purchase, total_payment,
+                   last_updated_at)
+                VALUES
+                  (UUID(), @TenantId, @PartnerId, @Amount, 0, 0, 0, NOW(6))
+                ON DUPLICATE KEY UPDATE
+                  total_sales     = total_sales + @Amount,
+                  last_updated_at = NOW(6)
+                """,
+                new { TenantId = delivery.TenantId, PartnerId = delivery.PartnerId,
+                      Amount = delivery.TotalAmount + delivery.VatAmount },
+                transaction: dbTx, cancellationToken: ct));
+
+            // 6) 전체 커밋 — EF + Dapper 쓰기가 원자적으로 확정
             await tx.CommitAsync(ct);
 
             // 감사로그 (트랜잭션 밖)
             await _audit.LogAsync("confirm", "sales_delivery", deliveryId, ct: ct);
 
-            // 6) 이벤트 발행 (트랜잭션 밖) — partner_balance + 안전재고 알림
-            //    WO-20260503-10 (사장님 발견): 이전엔 호출 안 해서 거래처 매출 잔고 0원으로 깨짐.
-            //    item_stock·monthly_summary 는 위 트랜잭션에서 이미 처리. 이벤트는 partner_balance만 책임.
+            // 7) 이벤트 발행 (트랜잭션 밖) — 안전재고 알림 전용
+            //    partner_balance는 위 트랜잭션에서 이미 처리. 이벤트 실패해도 정합성 영향 없음.
             try
             {
                 var events = _services.GetService<IEventPublisher>();
@@ -504,8 +521,6 @@ public class SalesService : ISalesService
             }
             catch (Exception evtEx)
             {
-                // 본 거래는 이미 커밋 완료. 이벤트 실패해도 거래는 살린다 (베타 안전).
-                // partner_balance 정합성은 별도 재계산 작업으로 회복 가능.
                 await _audit.LogAsync("event_failed", "sales_delivery", deliveryId,
                     reason: $"delivery.confirmed: {evtEx.Message}", ct: ct);
             }
