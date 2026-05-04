@@ -66,26 +66,8 @@
     }
 </div>
 
-@* ─── Quick Action 4카드 (이미지 그대로 — 컬러풀 아이콘 + 화살표) ─── *@
-<div class="hp-quick-grid">
-    <div class="hp-quick-card" @onclick="@(() => Nav.NavigateTo("/sales-orders/new"))">
-        <div class="hp-quick-icon hp-q-green">
-            <MudIcon Icon="@Icons.Material.Filled.Add" Size="Size.Medium" />
-        </div>
-        <div class="hp-quick-title">새 수주 작성</div>
-        <div class="hp-quick-desc">고객사 주문을 빠르게 접수해요</div>
-        <MudIcon Icon="@Icons.Material.Filled.ArrowForward" Class="hp-quick-arrow" />
-    </div>
-
-    <div class="hp-quick-card" @onclick="@(() => Nav.NavigateTo("/purchase-order-status"))">
-        <div class="hp-quick-icon hp-q-blue">
-            <MudIcon Icon="@Icons.Material.Filled.AssignmentTurnedIn" Size="Size.Medium" />
-        </div>
-        <div class="hp-quick-title">발주 처리</div>
-        <div class="hp-quick-desc">대기 중인 발주를 빠르게 처리해요</div>
-        <MudIcon Icon="@Icons.Material.Filled.ArrowForward" Class="hp-quick-arrow" />
-    </div>
-
+@* ─── Quick Action 2카드 (조회성 메뉴 제거 — 세금계산서·미수금만 유지) ─── *@
+<div class="hp-quick-grid hp-quick-grid--2col">
     <div class="hp-quick-card" @onclick="@(() => Nav.NavigateTo("/tax-invoice"))">
         <div class="hp-quick-icon hp-q-pink">
             <MudIcon Icon="@Icons.Material.Filled.Receipt" Size="Size.Medium" />

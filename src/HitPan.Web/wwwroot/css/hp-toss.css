@@ -453,15 +453,23 @@ textarea:focus-visible {
     font-weight: var(--hp-fw-semi);
 }
 
-/* Quick Action 4카드 */
+/* Quick Action 그리드 */
 .hp-quick-grid {
     display: grid;
     grid-template-columns: repeat(4, 1fr);
     gap: var(--hp-space-4);
     margin-bottom: var(--hp-space-8);
 }
+/* 2개짜리: 절반 너비로 중앙 배치 */
+.hp-quick-grid--2col {
+    grid-template-columns: repeat(2, 1fr);
+    max-width: 640px;
+}
 @media (max-width: 1366px) { .hp-quick-grid { grid-template-columns: repeat(2, 1fr); } }
-@media (max-width: 768px)  { .hp-quick-grid { grid-template-columns: 1fr; } }
+@media (max-width: 768px)  {
+    .hp-quick-grid { grid-template-columns: 1fr; }
+    .hp-quick-grid--2col { grid-template-columns: repeat(2, 1fr); max-width: 100%; }
+}
 
 .hp-quick-card {
     background: var(--hp-surface-raised);

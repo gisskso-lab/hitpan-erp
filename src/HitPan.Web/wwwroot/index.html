@@ -62,32 +62,31 @@
         }
     </script>
 
-    <!-- PDF/Excel 파일 열기 — iOS Safari 팝업 차단 우회 (a[download] click trick) -->
+    <!-- 히트판 공용 JS 헬퍼 -->
     <script>
         window.hitpan = window.hitpan || {};
+
+        // PDF/Excel 열기 — iOS Safari 팝업 차단 우회 (<a> click trick)
         window.hitpan.openFile = function (url) {
             var a = document.createElement('a');
             a.href = url;
             a.target = '_blank';
-            a.rel = 'noopener';
+            a.rel = 'noopener noreferrer';
             document.body.appendChild(a);
             a.click();
-            setTimeout(function () { document.body.removeChild(a); }, 500);
+            setTimeout(function () {
+                if (a.parentNode) { a.parentNode.removeChild(a); }
+            }, 1000);
         };
-    </script>
 
-    <!-- 네비게이션 앱 딥링크 + 웹 폴백 -->
-    <script>
-        window.hitpan = window.hitpan || {};
+        // 네비게이션 앱 딥링크 + 웹 폴백
         window.hitpan.openNavi = function (deepLink, webUrl) {
-            // iframe trick: 딥링크 시도 후 300ms 안에 반응 없으면 웹으로 폴백
             var iframe = document.createElement('iframe');
             iframe.style.display = 'none';
             document.body.appendChild(iframe);
             iframe.src = deepLink;
             setTimeout(function () {
-                document.body.removeChild(iframe);
-                // 앱이 열렸으면 페이지가 blur 상태 — 아니면 웹으로 이동
+                if (iframe.parentNode) { iframe.parentNode.removeChild(iframe); }
                 if (!document.hidden) {
                     window.open(webUrl, '_blank', 'noopener');
                 }
