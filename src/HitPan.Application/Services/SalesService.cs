@@ -990,7 +990,18 @@ public class SalesService : ISalesService
                 new { Tid = tenantId, Pid = (string)header.partner_id },
                 transaction: tx, cancellationToken: ct));
 
-            // 6) 상태 변경
+            // 6) monthly_summary 매출 역산 — ConfirmDeliveryAsync TryApplyAsync 대칭 차감
+            await MonthlySummaryGuard.TryApplyAsync(
+                _db, tx,
+                tenantId: tenantId,
+                date: dd,
+                sourceType: "delivery_confirmed",
+                sourceId: deliveryId,
+                field: MonthlySummaryGuard.SummaryField.TotalSales,
+                amount: -((decimal)header.total_amount + (decimal)header.vat_amount),
+                ct: ct);
+
+            // 7) 상태 변경
             await _db.ExecuteAsync(new CommandDefinition(
                 "UPDATE sales_deliveries SET status='cancelled', updated_at=NOW(6) WHERE delivery_id=@Id AND tenant_id=@Tid",
                 new { Id = deliveryId, Tid = tenantId },

@@ -237,24 +237,26 @@ public sealed class TaxInvoiceService : ITaxInvoiceService
         string userId,
         CancellationToken ct = default)
     {
-        var existing = await _db.QueryFirstOrDefaultAsync<string?>(
+        var invoiceRow = await _db.QueryFirstOrDefaultAsync<(string? Status, string? InvoiceNo, string? PartnerId, DateTime IssuedAt, decimal AmountTotal, decimal VatTotal)>(
             new CommandDefinition(
-                "SELECT status FROM tax_invoices WHERE invoice_id = @InvoiceId AND tenant_id = @TenantId",
+                """
+                SELECT status AS Status, invoice_no AS InvoiceNo, partner_id AS PartnerId,
+                       issued_at AS IssuedAt, amount_total AS AmountTotal, vat_total AS VatTotal
+                  FROM tax_invoices
+                 WHERE invoice_id = @InvoiceId AND tenant_id = @TenantId
+                """,
                 new { InvoiceId = invoiceId, TenantId = tenantId },
                 cancellationToken: ct));
 
-        if (existing is null)
+        if (invoiceRow.Status is null)
         {
             throw new TaxInvoiceException("not_found", "계산서를 찾을 수 없습니다.");
         }
-        if (string.Equals(existing, "canceled", StringComparison.OrdinalIgnoreCase))
+        if (string.Equals(invoiceRow.Status, "canceled", StringComparison.OrdinalIgnoreCase))
         {
             throw new TaxInvoiceException("already_canceled", "이미 취소된 계산서입니다.");
         }
 
-        // UoW 트랜잭션 (작5 — UPDATE tax_invoices.status='canceled' + UPDATE sales_deliveries.tax_invoice_id=NULL 동일 tx)
-        //   역참조 환원 → 같은 거래명세서를 다시 발행 가능 (uk_tax_invoices_delivery는 issued만 차단하지 않음 → 별도 라운드 보강)
-        //   역분개·summary 차감은 별도 라운드 (4프로토콜 #4 쪼개기, 작2 §3 비범위)
         var now = DateTime.UtcNow;
         using var tx = await _unitOfWork.BeginTransactionAsync(ct);
         try
@@ -276,6 +278,24 @@ public sealed class TaxInvoiceService : ITaxInvoiceService
                     new { InvoiceId = invoiceId, TenantId = tenantId },
                     transaction: dbTx,
                     cancellationToken: ct));
+
+            // 역분개 — IssueAsync 기표의 차/대변 반전 (INSERT ONLY 원칙)
+            // 원분개: 차변 외상매출금(total) / 대변 매출(supply) + 부가세예수금(vat)
+            // 역분개: 차변 매출(supply) + 부가세예수금(vat) / 대변 외상매출금(total)
+            if (invoiceRow.AmountTotal != 0m || invoiceRow.VatTotal != 0m)
+            {
+                await AutoJournalHelper.RecordSalesCancelAsync(
+                    conn, dbTx!,
+                    tenantId,
+                    invoiceId,
+                    invoiceRow.InvoiceNo ?? invoiceId,
+                    invoiceRow.IssuedAt,
+                    invoiceRow.PartnerId,
+                    invoiceRow.AmountTotal,
+                    invoiceRow.VatTotal,
+                    userId,
+                    ct);
+            }
 
             await tx.CommitAsync(ct);
         }
