@@ -38,6 +38,10 @@ Thumbs.db
 # 빌드 산출물
 publish/
 dist/
+artifacts/sec01-build/
+artifacts/**/*.dll
+artifacts/**/*.exe
+artifacts/**/*.pdb
 
 # 테스트 결과
 TestResults/
