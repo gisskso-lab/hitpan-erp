@@ -1132,40 +1132,101 @@ html, body {
     }
 }
 
-/* ── 모바일 업체 목록 — 테이블 → 카드 리스트 ── */
+/* ════════════════════════════════════════
+   모바일 현황·통계·순위 — 테이블 가로스크롤 최적화
+   hitpan-card 안의 MudTable + 필터바 재배치
+════════════════════════════════════════ */
 @media (max-width: 767px) {
-    /* MudTable을 카드 스타일로 변환 */
-    .mud-table thead { display: none !important; }
-    .mud-table-row {
-        display: flex !important;
-        flex-wrap: wrap;
-        padding: 12px 14px !important;
-        border-bottom: 1px solid rgba(0,0,0,0.06) !important;
-        gap: 4px 8px;
-        align-items: center;
+
+    /* ── 필터바: 세로 스택 + 전체폭 ── */
+    .hitpan-filter-bar {
+        flex-direction: column;
+        gap: 8px;
     }
-    .mud-table-cell {
-        display: inline-flex !important;
-        border: none !important;
+    .hitpan-filter-bar > * {
+        width: 100% !important;
+        min-width: 0 !important;
+    }
+    .hitpan-filter-field,
+    .hitpan-filter-field--sm,
+    .hitpan-filter-field--md,
+    .hitpan-filter-field--lg {
+        min-width: 0 !important;
+        width: 100% !important;
+    }
+    .hitpan-filter-actions {
+        margin-left: 0;
+        width: 100%;
+        justify-content: flex-end;
+    }
+
+    /* ── hitpan-card / hitpan-section--flat 안 MudTable: 가로 스크롤 ── */
+    .hitpan-card,
+    .hitpan-section--flat {
+        overflow-x: auto !important;
+        -webkit-overflow-scrolling: touch;
+        border-radius: 0 !important;
+        margin: 0 !important;
+    }
+    /* 테이블 고정 높이 해제 → 자연 높이 */
+    .hitpan-card .mud-table-container,
+    .hitpan-section--flat .mud-table-container {
+        height: auto !important;
+        max-height: calc(100dvh - 320px);
+        overflow-y: auto;
+    }
+    /* 폰트·패딩 축소 */
+    .hitpan-card .mud-table-head .mud-table-cell,
+    .hitpan-section--flat .mud-table-head .mud-table-cell {
+        font-size: 11px !important;
+        padding: 6px 8px !important;
+        white-space: nowrap;
+    }
+    .hitpan-card .mud-table-body .mud-table-cell,
+    .hitpan-section--flat .mud-table-body .mud-table-cell {
+        font-size: 12px !important;
+        padding: 6px 8px !important;
+        white-space: nowrap;
+    }
+    /* 첫 번째 컬럼(레이블)은 좌측 고정 */
+    .hitpan-card .mud-table-body .mud-table-cell:first-child,
+    .hitpan-card .mud-table-head .mud-table-cell:first-child,
+    .hitpan-section--flat .mud-table-body .mud-table-cell:first-child,
+    .hitpan-section--flat .mud-table-head .mud-table-cell:first-child {
+        position: sticky;
+        left: 0;
+        z-index: 2;
+        background: #fff;
+        max-width: 120px;
+        min-width: 80px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+    .hitpan-card .mud-table-head .mud-table-cell:first-child,
+    .hitpan-section--flat .mud-table-head .mud-table-cell:first-child {
+        background: #fafafa;
+        z-index: 3;
+    }
+    /* 줄무늬 행에서 sticky 셀 배경 맞춤 */
+    .hitpan-card .mud-table-row:nth-child(odd) .mud-table-cell:first-child,
+    .hitpan-section--flat .mud-table-row:nth-child(odd) .mud-table-cell:first-child {
+        background: #fafafa;
+    }
+
+    /* ── MudPaper(SectionCard 내부) 패딩 제거 ── */
+    .hitpan-card.mud-paper {
         padding: 0 !important;
-        font-size: 13px;
     }
-    /* 업체명 셀 — 굵게, 한 줄 전체 */
-    .mud-table-cell[data-label="업체명"] {
-        flex-basis: 100%;
-        font-weight: 700;
-        font-size: 15px;
-        color: var(--mud-palette-text-primary);
+
+    /* ── 페이지 제목 영역 컴팩트 ── */
+    .mud-typography-h6 {
+        font-size: 16px !important;
     }
-    /* 코드 셀 숨김 (업체명으로 충분) */
-    .mud-table-cell[data-label="코드"] { display: none !important; }
-    /* 미수금·연체 — 오른쪽 정렬로 배지처럼 */
-    .mud-table-cell[data-label="미수금"],
-    .mud-table-cell[data-label="잔액"] {
-        margin-left: auto;
-        font-weight: 600;
-        color: #1565C0;
-    }
+
+    /* ── 필터 MudPaper 패딩 줄이기 ── */
+    .mud-paper.pa-4 { padding: 12px !important; }
+    .mud-paper.pa-3 { padding: 10px !important; }
 }
 
 /* ErrorBoundary 표시 */
