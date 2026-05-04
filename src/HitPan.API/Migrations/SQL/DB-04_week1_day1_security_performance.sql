@@ -21,7 +21,7 @@ CREATE TABLE IF NOT EXISTS audit_logs (
   INDEX idx_user    (user_id),
   INDEX idx_created (created_at),
   INDEX idx_ip      (ip_address)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE IF NOT EXISTS login_attempts (
   attempt_id   VARCHAR(36)  NOT NULL PRIMARY KEY,
@@ -31,7 +31,7 @@ CREATE TABLE IF NOT EXISTS login_attempts (
   attempted_at DATETIME(6)  NOT NULL DEFAULT NOW(6),
   INDEX idx_email_ip  (email, ip_address),
   INDEX idx_attempted (attempted_at)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE IF NOT EXISTS refresh_tokens (
   token_id     VARCHAR(36)  NOT NULL PRIMARY KEY,
@@ -45,7 +45,7 @@ CREATE TABLE IF NOT EXISTS refresh_tokens (
   INDEX idx_user    (user_id),
   INDEX idx_token   (token_hash),
   INDEX idx_expires (expires_at)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE IF NOT EXISTS user_sessions (
   session_id     VARCHAR(36)  NOT NULL PRIMARY KEY,
@@ -59,7 +59,7 @@ CREATE TABLE IF NOT EXISTS user_sessions (
   INDEX idx_user   (user_id),
   INDEX idx_tenant (tenant_id),
   INDEX idx_active (is_active)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE IF NOT EXISTS security_alerts (
   alert_id    VARCHAR(36)  NOT NULL PRIMARY KEY,
@@ -73,7 +73,7 @@ CREATE TABLE IF NOT EXISTS security_alerts (
   INDEX idx_tenant  (tenant_id),
   INDEX idx_type    (alert_type),
   INDEX idx_created (created_at)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- ━━━ STEP 2 — 성능 ━━━
 
@@ -91,7 +91,7 @@ CREATE TABLE IF NOT EXISTS partner_balance (
   UNIQUE KEY uk_tenant_partner (tenant_id, partner_id),
   INDEX idx_tenant (tenant_id),
   INDEX idx_balance (tenant_id, balance)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE IF NOT EXISTS item_stock (
   stock_id        VARCHAR(36)   NOT NULL PRIMARY KEY,
@@ -104,7 +104,7 @@ CREATE TABLE IF NOT EXISTS item_stock (
   UNIQUE KEY uk_tenant_item_wh (tenant_id, item_id, warehouse_id),
   INDEX idx_tenant (tenant_id),
   INDEX idx_low_stock (tenant_id, current_qty)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE IF NOT EXISTS monthly_summary (
   summary_id      VARCHAR(36)   NOT NULL PRIMARY KEY,
@@ -119,7 +119,7 @@ CREATE TABLE IF NOT EXISTS monthly_summary (
   UNIQUE KEY uk_tenant_month (tenant_id, `year_month`),
   INDEX idx_tenant (tenant_id),
   INDEX idx_month (tenant_id, `year_month`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE IF NOT EXISTS bom_cost_cache (
   cache_id           VARCHAR(36)   NOT NULL PRIMARY KEY,
@@ -131,7 +131,7 @@ CREATE TABLE IF NOT EXISTS bom_cost_cache (
   last_calculated_at DATETIME(6)   NOT NULL DEFAULT NOW(6),
   UNIQUE KEY uk_tenant_item (tenant_id, product_item_id),
   INDEX idx_dirty (tenant_id, is_dirty)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE IF NOT EXISTS ledger_balance_snapshot (
   snapshot_id     VARCHAR(36)   NOT NULL PRIMARY KEY,
@@ -143,4 +143,4 @@ CREATE TABLE IF NOT EXISTS ledger_balance_snapshot (
   UNIQUE KEY uk_ledger_snap (tenant_id, `year_month`, account_code),
   INDEX idx_tenant (tenant_id),
   INDEX idx_year_month (tenant_id, `year_month`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
