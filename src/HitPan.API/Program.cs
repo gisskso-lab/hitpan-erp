@@ -122,6 +122,9 @@ builder.Services.AddHostedService<IntegrityCheckService>();
 builder.Services.AddScoped<IESignatureService, ESignatureService>();
 builder.Services.AddScoped<ILaborContractService, LaborContractService>();
 builder.Services.AddSingleton<AccessTokenValidator>();
+// 백오피스 (본사 관리자 + 대리점 파트너)
+builder.Services.AddScoped<IBackofficeAuthService, BackofficeAuthService>();
+builder.Services.AddScoped<IResellerService, ResellerService>();
 builder.Services.AddJwtAuthentication();
 builder.Services.AddAuthorization(options =>
 {

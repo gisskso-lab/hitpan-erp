@@ -1562,7 +1562,7 @@ public sealed class MdbMigrationService
     }
 
     /// <summary>MDB 테이블 레코드 수를 카운트한다.</summary>
-    private static int CountMdbTable(OleDbConnection conn, string tableName)
+    private int CountMdbTable(OleDbConnection conn, string tableName)
     {
         try
         {
