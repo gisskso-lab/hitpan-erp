@@ -203,7 +203,7 @@ public class ExcelExportService
             // 할인율
             if (item != null && item.DiscountRate > 0)
             {
-                ws.Cell(currentRow, 7).Value = (double)item.DiscountRate;
+                ws.Cell(currentRow, 7).Value = item.DiscountRate;
                 ws.Cell(currentRow, 7).Style.NumberFormat.Format = "0.#";
             }
             else
@@ -451,7 +451,7 @@ public class ExcelExportService
     /// </summary>
     private static void SetAmountCell(IXLCell cell, decimal amount)
     {
-        cell.Value = (double)amount;
+        cell.Value = amount;
         cell.Style.NumberFormat.Format = NumberFormat;
         cell.Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Right;
         cell.Style.Font.FontName = FontName;
@@ -463,7 +463,7 @@ public class ExcelExportService
     /// </summary>
     private static void SetDecimalCell(IXLCell cell, decimal value)
     {
-        cell.Value = (double)value;
+        cell.Value = value;
         cell.Style.NumberFormat.Format = "#,##0.##";
         cell.Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Right;
         cell.Style.Font.FontName = FontName;
