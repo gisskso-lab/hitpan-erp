@@ -826,3 +826,106 @@ textarea:focus-visible {
     border: 2px solid var(--hp-surface-base);
 }
 ::-webkit-scrollbar-thumb:hover { background: var(--hp-border-strong); }
+
+
+/* ═══════════════════════════════════════════════
+ * 모바일 반응형 (≤ 767px) — Dashboard + KPI + 캘린더
+ * iOS 앱 스타일: 카드형, 세로 스택, 컴팩트
+ * ═══════════════════════════════════════════════ */
+@media (max-width: 767px) {
+
+    /* Hero — 타이틀 크기 축소 */
+    .hp-hero-row {
+        margin-bottom: 16px;
+    }
+    .hp-hero-title {
+        font-size: 26px;
+        letter-spacing: -0.02em;
+    }
+    .hp-hero-subtitle {
+        font-size: 14px;
+    }
+    .hp-hero-greeting {
+        font-size: 13px;
+        margin-bottom: 6px;
+    }
+
+    /* 경고 알림 카드 — 작게 */
+    .hp-alert-card {
+        padding: 12px 14px;
+        gap: 10px;
+    }
+    .hp-alert-icon { width: 34px; height: 34px; border-radius: 10px; }
+    .hp-alert-title { font-size: 13px; }
+    .hp-alert-desc  { font-size: 11px; }
+
+    /* Quick Action — 2×2 그리드 */
+    .hp-quick-grid {
+        grid-template-columns: repeat(2, 1fr);
+        gap: 10px;
+        margin-bottom: 16px;
+    }
+    .hp-quick-card {
+        padding: 16px 14px 14px;
+        min-height: 110px;
+        border-radius: 16px;
+    }
+    .hp-quick-icon {
+        width: 40px; height: 40px;
+        border-radius: 12px;
+        margin-bottom: 10px;
+    }
+    .hp-quick-title { font-size: 14px; }
+    .hp-quick-desc  { font-size: 11px; }
+    .hp-quick-arrow { right: 12px; bottom: 12px; }
+
+    /* KPI Hero 행 — 세로 스택 */
+    .hp-kpi-hero-row {
+        grid-template-columns: 1fr;
+        gap: 10px;
+        margin-bottom: 16px;
+    }
+    .hp-kpi-hero {
+        padding: 20px;
+        border-radius: 18px;
+    }
+    .hp-kpi-hero-value { font-size: 32px; }
+    .hp-kpi-hero-label { font-size: 13px; margin-bottom: 6px; }
+    .hp-kpi-hero-delta { font-size: 12px; padding: 4px 10px; }
+
+    .hp-kpi-card {
+        padding: 16px 18px;
+        border-radius: 16px;
+        display: flex;
+        flex-direction: row;
+        align-items: center;
+        gap: 14px;
+    }
+    .hp-kpi-label { font-size: 13px; margin-bottom: 0; flex: 1; }
+    .hp-kpi-value { font-size: 20px; margin-bottom: 0; }
+    .hp-kpi-delta { display: none; }
+
+    /* 연차 캘린더 — 컴팩트 */
+    .hp-cal-card {
+        padding: 16px;
+        border-radius: 16px;
+        margin-bottom: 80px;
+    }
+    .hp-cal-title { font-size: 17px; }
+    .hp-cal-cell  { min-height: 56px; padding: 4px; }
+    .hp-cal-blank { min-height: 56px; }
+    .hp-cal-day-num { font-size: 11px; }
+    .hp-cal-today .hp-cal-day-num {
+        width: 18px; height: 18px; font-size: 10px;
+    }
+    .hp-cal-chip  { font-size: 9px; padding: 1px 4px; }
+    .hp-cal-chip-mark { display: none; }
+    .hp-cal-legend { gap: 8px; margin-top: 10px; padding-top: 10px; }
+    .hp-cal-leg   { font-size: 10px; }
+    .hp-cal-leg-dot { width: 8px; height: 8px; }
+
+    /* 전체 메뉴 페이지 하단 여백 (탭바 68px + safe area) */
+    .hp-menu-page {
+        padding-bottom: calc(80px + env(safe-area-inset-bottom, 0px));
+    }
+}

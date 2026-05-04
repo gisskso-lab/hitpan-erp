@@ -1,21 +1,44 @@
-﻿@inherits LayoutComponentBase
+@inherits LayoutComponentBase
 @attribute [Authorize]
 @using HitPan.Web.Components
 @using Microsoft.AspNetCore.Components.Authorization
 @using MudBlazor
+@inject NavigationManager Nav
 
 <CascadingAuthenticationState>
     <AuthorizeView>
         <Authorized>
             <div class="hitpan-shell">
+
+                @* PC 전용 사이드바 — 모바일에서 CSS로 숨김 *@
                 <aside class="hitpan-sidebar-aside" aria-label="메인 메뉴">
                     <Sidebar />
                 </aside>
+
                 <div class="hitpan-main">
-                    <TopHeader />
+
+                    @* PC 전용 상단 헤더 — 모바일에서 CSS로 숨김 *@
+                    <div class="hp-pc-header">
+                        <TopHeader />
+                    </div>
+
+                    @* 모바일 전용 iOS 스타일 상단바 *@
+                    <div class="hp-mobile-header">
+                        <div class="hp-mobile-header-inner">
+                            <div class="hp-mobile-brand" @onclick="@(() => Nav.NavigateTo("/dashboard"))">
+                                <div class="hp-mobile-brand-mark">H</div>
+                                <span class="hp-mobile-brand-text">히트판 ERP</span>
+                            </div>
+                            <div class="hp-mobile-header-actions">
+                                <MobileHeaderActions />
+                            </div>
+                        </div>
+                    </div>
+
                     <main class="hitpan-content mud-px-4 mud-py-4">
                         @Body
                     </main>
+
                     <MobileBottomNav />
                 </div>
             </div>
