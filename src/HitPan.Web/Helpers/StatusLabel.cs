@@ -58,15 +58,19 @@ public static class StatusLabel
     };
 
     /// 수주서 (sales_orders) 상태.
-    public static string SalesOrder(string? status) => (status ?? "").Trim().ToLowerInvariant() switch
+    public static string SalesOrder(string? status, bool isAuto = false)
     {
-        "draft"     => "임시저장",
-        "confirmed" => "확정",
-        "partial"   => "부분출고",
-        "delivered" => "출고완료",
-        "cancelled" => "취소",
-        _           => status ?? ""
-    };
+        if (isAuto) return "자동생성";
+        return (status ?? "").Trim().ToLowerInvariant() switch
+        {
+            "draft"     => "임시저장",
+            "confirmed" => "확정",
+            "partial"   => "부분출고",
+            "delivered" => "출고완료",
+            "cancelled" => "취소",
+            _           => status ?? ""
+        };
+    }
 
     /// 거래명세서 (sales_deliveries) 상태 + 수금 진행도 결합 라벨.
     /// 수금 미완 = "확정 (미수)", 수금 완료 = "수금완료". 사장님 헌법.

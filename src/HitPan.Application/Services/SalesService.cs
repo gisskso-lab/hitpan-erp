@@ -517,11 +517,20 @@ public class SalesService : ISalesService
         }
 
         // 결재 트리거: 결재 설정이 ON이면 결재 문서 자동 생성 (커밋 이후 실행)
-        await ApprovalTriggerHelper.TryCreateApprovalAsync(_db,
-            "delivery", delivery.DeliveryId, delivery.DeliveryNo,
-            $"거래명세서 확정: {delivery.DeliveryNo}",
-            delivery.TotalAmount + delivery.VatAmount,
-            delivery.TenantId, delivery.EmployeeId ?? "system", "확정자", ct);
+        // 결재 트리거 실패는 거래 확정에 영향 없음 — 이미 커밋된 원장은 유효
+        try
+        {
+            await ApprovalTriggerHelper.TryCreateApprovalAsync(_db,
+                "delivery", delivery.DeliveryId, delivery.DeliveryNo,
+                $"거래명세서 확정: {delivery.DeliveryNo}",
+                delivery.TotalAmount + delivery.VatAmount,
+                delivery.TenantId, delivery.EmployeeId ?? "system", "확정자", ct);
+        }
+        catch (Exception ex)
+        {
+            // 결재 트리거 실패는 원장 무결성과 무관 — 로그만 남기고 무시
+            System.Diagnostics.Trace.TraceWarning($"[ApprovalTrigger] 거래명세서 {delivery.DeliveryNo} 결재 트리거 실패: {ex.Message}");
+        }
     }
 
     public async Task<DeliveryDetailDto?> GetDeliveryAsync(string deliveryId, string tenantId, CancellationToken ct = default)

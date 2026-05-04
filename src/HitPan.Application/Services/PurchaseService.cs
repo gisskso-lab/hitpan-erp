@@ -407,12 +407,19 @@ public class PurchaseService : IPurchaseService
             throw;
         }
 
-        // 결재 트리거 (커밋 이후 실행)
-        await ApprovalTriggerHelper.TryCreateApprovalAsync(_db,
-            "receipt", receipt.ReceiptId, receipt.ReceiptNo,
-            $"매입명세서 확정: {receipt.ReceiptNo}",
-            receipt.TotalAmount + receipt.VatAmount,
-            receipt.TenantId, "system", "확정자", ct);
+        // 결재 트리거 (커밋 이후 실행) — 실패해도 매입 확정 원장은 유효
+        try
+        {
+            await ApprovalTriggerHelper.TryCreateApprovalAsync(_db,
+                "receipt", receipt.ReceiptId, receipt.ReceiptNo,
+                $"매입명세서 확정: {receipt.ReceiptNo}",
+                receipt.TotalAmount + receipt.VatAmount,
+                receipt.TenantId, "system", "확정자", ct);
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Trace.TraceWarning($"[ApprovalTrigger] 매입명세서 {receipt.ReceiptNo} 결재 트리거 실패: {ex.Message}");
+        }
     }
 
     public async Task<List<PurchaseOrderListDto>> GetOrdersAsync(
@@ -813,12 +820,19 @@ public class PurchaseService : IPurchaseService
             throw;
         }
 
-        // 결재 트리거 (커밋 이후)
-        await ApprovalTriggerHelper.TryCreateApprovalAsync(_db,
-            "purchase_return", returnId, returnNo,
-            $"매입반품 확정: {returnNo}",
-            totalAmount + vatAmount,
-            tenantId, "system", "확정자", ct);
+        // 결재 트리거 (커밋 이후) — 실패해도 반품 확정 원장은 유효
+        try
+        {
+            await ApprovalTriggerHelper.TryCreateApprovalAsync(_db,
+                "purchase_return", returnId, returnNo,
+                $"매입반품 확정: {returnNo}",
+                totalAmount + vatAmount,
+                tenantId, "system", "확정자", ct);
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Trace.TraceWarning($"[ApprovalTrigger] 매입반품 {returnNo} 결재 트리거 실패: {ex.Message}");
+        }
     }
 
     // ─────────────────────────────────────────────────────────────────────

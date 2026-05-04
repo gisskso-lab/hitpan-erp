@@ -119,6 +119,7 @@ public sealed class SalesListItem
     public decimal TotalAmount { get; set; }
     public decimal VatAmount { get; set; }
     public string Status { get; set; } = string.Empty;
+    public bool IsAuto { get; set; }
 
     // UI only
     public bool IsChecked { get; set; }

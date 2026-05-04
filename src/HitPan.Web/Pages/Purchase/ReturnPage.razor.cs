@@ -331,8 +331,10 @@ public partial class ReturnPage : ComponentBase
         await InvokeAsync(StateHasChanged);
     }
 
+    private bool _isConfirming;
     private async Task ConfirmReturnAsync()
     {
+        if (_isConfirming) return;
         if (_draft is null || string.IsNullOrWhiteSpace(_draft.Id))
         {
             Snackbar.Add("저장된 반품 문서를 먼저 선택해주세요.", Severity.Warning);
@@ -360,16 +362,24 @@ public partial class ReturnPage : ComponentBase
             yesText: "반품확정", cancelText: "닫기");
         if (ok != true) return;
 
-        var (success, err) = await DeliveryService.ConfirmPurchaseReturnAsync(_draft.Id);
-        if (success)
+        _isConfirming = true;
+        try
         {
-            Snackbar.Add("반품 확정 완료 — Reverse 원장이 발행되었습니다.", Severity.Success);
-            _status = "Confirmed";
-            await InvokeAsync(StateHasChanged);
+            var (success, err) = await DeliveryService.ConfirmPurchaseReturnAsync(_draft.Id);
+            if (success)
+            {
+                Snackbar.Add("반품 확정 완료 — Reverse 원장이 발행되었습니다.", Severity.Success);
+                _status = "Confirmed";
+                await InvokeAsync(StateHasChanged);
+            }
+            else
+            {
+                Snackbar.Add($"반품 확정 실패: {err}", Severity.Error);
+            }
         }
-        else
+        finally
         {
-            Snackbar.Add($"반품 확정 실패: {err}", Severity.Error);
+            _isConfirming = false;
         }
     }
 

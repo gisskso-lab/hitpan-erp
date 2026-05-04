@@ -1,6 +1,7 @@
 using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
 using System.Text;
+using Dapper;
 using HitPan.Application.DTOs.Auth;
 using HitPan.Application.Interfaces;
 using HitPan.Domain.Entities;
@@ -78,7 +79,26 @@ public class AuthService : IAuthService
             throw new InvalidOperationException("JWT_SECRET environment variable is required.");
         }
 
-        return CreateLoginResponse(user, employee, secret, redirectToWelcome);
+        var response = CreateLoginResponse(user, employee, secret, redirectToWelcome);
+
+        // refresh token DB 저장 — 로그아웃 is_revoked=1 차단의 기준
+        var db = _unitOfWork.GetDbConnection();
+        // 이전 토큰 정리 후 새 토큰 INSERT
+        await db.ExecuteAsync(
+            "DELETE FROM refresh_tokens WHERE user_id = @UserId",
+            new { UserId = user.Id });
+        await db.ExecuteAsync(
+            @"INSERT INTO refresh_tokens (token_id, user_id, token_hash, expires_at, is_revoked)
+              VALUES (@TokenId, @UserId, @TokenHash, @ExpiresAt, 0)",
+            new
+            {
+                TokenId = Guid.NewGuid().ToString(),
+                UserId = user.Id,
+                TokenHash = response.RefreshToken,
+                ExpiresAt = DateTime.UtcNow.Add(RefreshTokenLifetime)
+            });
+
+        return response;
     }
 
     public async Task<LoginResponse> RefreshAsync(RefreshTokenRequest request, CancellationToken ct = default)
@@ -135,6 +155,16 @@ public class AuthService : IAuthService
         if (user is null)
         {
             throw new UnauthorizedAccessException("유효하지 않은 토큰입니다");
+        }
+
+        // 로그아웃된 토큰 차단 — DB에 해당 토큰이 없거나 is_revoked=1이면 차단
+        var conn = _unitOfWork.GetDbConnection();
+        var tokenRecord = await conn.ExecuteScalarAsync<int?>(
+            "SELECT is_revoked FROM refresh_tokens WHERE user_id = @UserId AND token_hash = @TokenHash",
+            new { UserId = userId, TokenHash = request.RefreshToken });
+        if (tokenRecord is null || tokenRecord.Value == 1)
+        {
+            throw new UnauthorizedAccessException("로그아웃된 토큰입니다. 다시 로그인해주세요.");
         }
 
         var employeeRepo = _unitOfWork.Repository<Employee>();

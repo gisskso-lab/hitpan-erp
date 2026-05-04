@@ -534,13 +534,16 @@ public partial class PurchaseReceiptPage : ComponentBase
     /// 매입 확정 — 서버 POST /api/purchase/receipts/{id}/confirm 호출.
     /// 서버에서 stock_ledger IN + item_stock 증가 + 월요약 갱신을 원자 트랜잭션으로 처리한다.
     /// </summary>
+    private bool _isConfirming;
     private async Task ConfirmAsync()
     {
+        if (_isConfirming) return;
         if (_draft is null || string.IsNullOrWhiteSpace(_draft.Id) || _isNew)
         {
             Snackbar.Add("먼저 매입명세서를 저장해주세요.", Severity.Warning);
             return;
         }
+        _isConfirming = true;
 
         var itemCount = _draft.Lines.Count(x => !x.IsPlaceholder);
         var totalQty = _draft.Lines.Where(x => !x.IsPlaceholder).Sum(x => x.Qty);
@@ -571,6 +574,10 @@ public partial class PurchaseReceiptPage : ComponentBase
         catch (Exception ex)
         {
             Snackbar.Add($"확정 중 오류: {ex.Message}", Severity.Error);
+        }
+        finally
+        {
+            _isConfirming = false;
         }
     }
 

@@ -1,5 +1,6 @@
 using HitPan.Application.DTOs.Sales;
 using HitPan.Application.Interfaces;
+using HitPan.Contracts.Idempotency;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
@@ -112,6 +113,7 @@ public class SalesController : ControllerBase
     }
 
     [HttpPost("deliveries/{id}/confirm")]
+    [IdempotencyKey]
     public async Task<IActionResult> ConfirmDelivery(string id, [FromBody] ConfirmDeliveryRequest request, CancellationToken ct)
     {
         var tenantId = HttpContext.Items["TenantId"]?.ToString();

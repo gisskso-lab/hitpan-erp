@@ -65,6 +65,7 @@ public class SalesOrderListDto
     public decimal SupplyAmount { get; set; }
     public string Status { get; set; } = string.Empty;
     public string? Memo { get; set; }
+    public bool IsAuto { get; set; }
 }
 
 /// <summary>수주서 단건 상세(헤더+라인) — 목록 → 편집 로드용.</summary>

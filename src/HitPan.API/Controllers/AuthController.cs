@@ -131,7 +131,7 @@ public class AuthController : ControllerBase
                     else db.Open();
                 }
                 await Dapper.SqlMapper.ExecuteAsync(db,
-                    "DELETE FROM refresh_tokens WHERE user_id = @UserId",
+                    "UPDATE refresh_tokens SET is_revoked = 1 WHERE user_id = @UserId",
                     new { UserId = userId });
                 await Dapper.SqlMapper.ExecuteAsync(db,
                     "DELETE FROM user_sessions WHERE user_id = @UserId",

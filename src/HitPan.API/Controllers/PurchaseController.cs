@@ -1,5 +1,6 @@
 using HitPan.Application.DTOs.Purchase;
 using HitPan.Application.Interfaces;
+using HitPan.Contracts.Idempotency;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
@@ -206,6 +207,7 @@ public class PurchaseController : ControllerBase
     }
 
     [HttpPost("receipts/{id}/confirm")]
+    [IdempotencyKey]
     public async Task<IActionResult> ConfirmReceipt(string id, [FromBody] ConfirmReceiptRequest request, CancellationToken ct)
     {
         var tenantId = HttpContext.Items["TenantId"]?.ToString();

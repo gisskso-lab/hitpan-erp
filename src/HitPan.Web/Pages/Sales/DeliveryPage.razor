@@ -384,14 +384,17 @@
         }
     }
 
+    private bool _isConfirming;
     private async Task ConfirmAsync()
     {
+        if (_isConfirming) return;
         if (_draft is null) return;
         if (string.IsNullOrWhiteSpace(_draft.DocumentNumber))
         {
             await SaveAsync();
         }
 
+        _isConfirming = true;
         try
         {
             await DeliveryService.ConfirmAsync(_draft);
@@ -422,6 +425,10 @@
             {
                 Snackbar.Add(msg, Severity.Error);
             }
+        }
+        finally
+        {
+            _isConfirming = false;
         }
     }
 
