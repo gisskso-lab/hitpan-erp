@@ -164,20 +164,22 @@
             "#F3E5F5", "#6A1B9A",
             new MenuEntry[]
             {
-                new("업체마스터",Icons.Material.Filled.People,       "/partners"),
+                new("업체마스터",Icons.Material.Filled.People,       "/partners",               MobileHref: "/m/partners"),
                 new("특별단가",  Icons.Material.Filled.LocalOffer,   "/partners/special-prices"),
                 new("업체원장",  Icons.Material.Filled.Book,         "/partners/ledger"),
-            }),
+            },
+            new("업체마스터", Icons.Material.Filled.People, "/partners", MobileHref: "/m/partners")),
 
         new("items", "상품관리", Icons.Material.Filled.Inventory,
             "#E8F5E9", "#1B5E20",
             new MenuEntry[]
             {
-                new("상품마스터",Icons.Material.Filled.Category,     "/items"),
+                new("상품마스터",Icons.Material.Filled.Category,     "/items",                  MobileHref: "/m/items"),
                 new("BOM",       Icons.Material.Filled.AccountTree,  "/bom"),
                 new("특별단가",  Icons.Material.Filled.LocalOffer,   "/items/special-prices"),
                 new("상품원장",  Icons.Material.Filled.Book,         "/items/ledger"),
-            }),
+            },
+            new("상품마스터", Icons.Material.Filled.Category, "/items", MobileHref: "/m/items")),
 
         new("groupware", "그룹웨어", Icons.Material.Filled.Groups,
             "#FFF8E1", "#F57F17",

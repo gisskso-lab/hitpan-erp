@@ -1586,3 +1586,137 @@ html, body {
 .hpm-action-bar-btn--primary  { background: #0F6E56; color: #fff; }
 .hpm-action-bar-btn--secondary { background: #f2f4f6; color: #333; }
 
+/* ════════════════════════════════════════
+   모바일 마스터 카드 (업체/상품) — hpm-master-*
+   /m/partners, /m/items
+════════════════════════════════════════ */
+.hpm-master {
+    padding: 0 0 100px;
+    min-height: 100vh;
+    background: #f2f4f6;
+}
+
+.hpm-master-card {
+    background: #fff;
+    margin: 8px 12px;
+    border-radius: 14px;
+    padding: 14px 16px;
+    box-shadow: 0 1px 4px rgba(0,0,0,0.07);
+    cursor: pointer;
+    transition: transform 0.12s, box-shadow 0.12s;
+    -webkit-tap-highlight-color: transparent;
+}
+.hpm-master-card:active { transform: scale(0.98); box-shadow: 0 1px 2px rgba(0,0,0,0.05); }
+
+.hpm-master-card-top {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 10px;
+}
+
+.hpm-master-avatar {
+    width: 40px;
+    height: 40px;
+    border-radius: 12px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 18px;
+    font-weight: 700;
+    color: #fff;
+    flex-shrink: 0;
+}
+
+.hpm-master-info {
+    flex: 1;
+    min-width: 0;
+}
+.hpm-master-name {
+    font-size: 15px;
+    font-weight: 600;
+    color: #1a1a1a;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.hpm-master-sub {
+    font-size: 12px;
+    color: #888;
+    margin-top: 2px;
+}
+.hpm-master-bizno { margin-left: 4px; }
+
+.hpm-master-badge-wrap {
+    flex-shrink: 0;
+    text-align: right;
+}
+.hpm-master-balance {
+    font-size: 13px;
+    font-weight: 700;
+    padding: 3px 8px;
+    border-radius: 20px;
+}
+.hpm-balance-pos { background: #FFF3E0; color: #E65100; }
+.hpm-balance-neg { background: #E8F5E9; color: #2E7D32; }
+
+.hpm-item-price {
+    font-size: 14px;
+    font-weight: 700;
+    color: #0F6E56;
+}
+
+.hpm-master-card-bot {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+    border-top: 1px solid #f5f5f5;
+    padding-top: 8px;
+}
+.hpm-master-contact {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 13px;
+    color: #1565C0;
+    text-decoration: none;
+    padding: 4px 8px;
+    border-radius: 8px;
+    background: #E3F2FD;
+}
+.hpm-master-grade {
+    font-size: 12px;
+    color: #888;
+    margin-left: auto;
+}
+
+.hpm-item-type-badge {
+    font-size: 11px;
+    font-weight: 600;
+    padding: 2px 8px;
+    border-radius: 20px;
+    background: #E8F5E9;
+    color: #1B5E20;
+}
+.hpm-item-unit {
+    font-size: 12px;
+    color: #888;
+}
+.hpm-item-stock {
+    font-size: 12px;
+    color: #555;
+    margin-left: auto;
+}
+.hpm-stock-low {
+    color: #C62828;
+    font-weight: 600;
+}
+
+/* PDF 버튼 강조 */
+.hpm-pdf-btn {
+    background: #FCE4EC !important;
+    color: #880E4F !important;
+    border-color: #F48FB1 !important;
+}
+

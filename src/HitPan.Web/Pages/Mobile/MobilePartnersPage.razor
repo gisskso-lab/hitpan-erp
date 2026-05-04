@@ -1,0 +1,179 @@
+@page "/m/partners"
+@attribute [Authorize]
+@using HitPan.Web.Models
+@using HitPan.Web.Services
+@inject PartnerMasterService PartnerSvc
+@inject NavigationManager Nav
+
+<PageTitle>업체마스터</PageTitle>
+
+<div class="hpm-master">
+
+    @* ── 검색바 ── *@
+    <div class="hpm-search-bar">
+        <div class="hpm-search-input-wrap">
+            <MudIcon Icon="@Icons.Material.Filled.Search" Class="hpm-search-icon" />
+            <input class="hpm-search-input" placeholder="업체명 · 사업자번호 검색"
+                   @bind="_search" @bind:event="oninput" @onkeyup="OnSearchKey" />
+            @if (!string.IsNullOrEmpty(_search))
+            {
+                <button class="hpm-search-clear" @onclick="ClearSearch">
+                    <MudIcon Icon="@Icons.Material.Filled.Close" Style="font-size:16px" />
+                </button>
+            }
+        </div>
+    </div>
+
+    @* ── 유형 필터 칩 ── *@
+    <div class="hpm-filter-chips">
+        @foreach (var chip in _chips)
+        {
+            <button class="hpm-chip @(_activeChip == chip.Key ? "hpm-chip--active" : "")"
+                    @onclick="@(() => SetChip(chip.Key))">@chip.Label</button>
+        }
+    </div>
+
+    @* ── 카드 목록 ── *@
+    @if (_loading)
+    {
+        <div class="hpm-loading">
+            <MudProgressCircular Color="Color.Primary" Indeterminate="true" Size="Size.Small" />
+        </div>
+    }
+    else if (!_filtered.Any())
+    {
+        <div class="hpm-empty">
+            <MudIcon Icon="@Icons.Material.Outlined.Business" Style="font-size:48px;color:#ccc;" />
+            <p>조회된 업체가 없습니다</p>
+        </div>
+    }
+    else
+    {
+        <div class="hpm-card-list">
+            @foreach (var row in _filtered)
+            {
+                <div class="hpm-master-card" @onclick="@(() => Nav.NavigateTo($"/partners/{row.PartnerId}"))">
+                    <div class="hpm-master-card-top">
+                        <div class="hpm-master-avatar" style="background:@AvatarColor(row.PartnerType)">
+                            @row.PartnerName[..1]
+                        </div>
+                        <div class="hpm-master-info">
+                            <div class="hpm-master-name">@row.PartnerName</div>
+                            <div class="hpm-master-sub">
+                                @PartnerTypeLabel(row.PartnerType)
+                                @if (!string.IsNullOrEmpty(row.BizNo))
+                                {
+                                    <span class="hpm-master-bizno">· @row.BizNo</span>
+                                }
+                            </div>
+                        </div>
+                        <div class="hpm-master-badge-wrap">
+                            @if (row.Balance != 0)
+                            {
+                                <span class="hpm-master-balance @(row.Balance > 0 ? "hpm-balance-pos" : "hpm-balance-neg")">
+                                    @row.Balance.ToString("N0")원
+                                </span>
+                            }
+                        </div>
+                    </div>
+                    <div class="hpm-master-card-bot">
+                        @if (!string.IsNullOrEmpty(row.Tel))
+                        {
+                            <a class="hpm-master-contact" href="tel:@row.Tel"
+                               @onclick:stopPropagation="true">
+                                <MudIcon Icon="@Icons.Material.Filled.Phone" Style="font-size:14px" />
+                                @row.Tel
+                            </a>
+                        }
+                        <span class="hpm-master-grade">등급 @row.PriceGrade</span>
+                    </div>
+                </div>
+            }
+        </div>
+
+        <div class="hpm-list-footer">
+            총 @(_filtered.Count)개 업체
+        </div>
+    }
+
+    @* ── FAB: 새 업체 등록 ── *@
+    <button class="hpm-fab" @onclick="@(() => Nav.NavigateTo("/partners/new"))" title="업체 등록">
+        <MudIcon Icon="@Icons.Material.Filled.Add" Style="font-size:26px;color:#fff" />
+    </button>
+</div>
+
+@code {
+    private List<PartnerListRow> _rows = new();
+    private List<PartnerListRow> _filtered = new();
+    private bool _loading = true;
+    private string _search = "";
+    private string _activeChip = "all";
+
+    private static readonly (string Key, string Label)[] _chips =
+    {
+        ("all",      "전체"),
+        ("customer", "매출처"),
+        ("vendor",   "매입처"),
+        ("both",     "매입+매출"),
+    };
+
+    protected override async Task OnInitializedAsync() => await LoadAsync();
+
+    private async Task LoadAsync()
+    {
+        _loading = true;
+        StateHasChanged();
+        try
+        {
+            var type = _activeChip == "all" ? null : _activeChip;
+            _rows = await PartnerSvc.GetListAsync(search: null, type: type);
+        }
+        catch { _rows = new(); }
+        ApplyFilter();
+        _loading = false;
+    }
+
+    private void ApplyFilter()
+    {
+        var q = _search.Trim();
+        _filtered = string.IsNullOrEmpty(q)
+            ? _rows.ToList()
+            : _rows.Where(r =>
+                r.PartnerName.Contains(q, StringComparison.OrdinalIgnoreCase) ||
+                (r.BizNo ?? "").Contains(q, StringComparison.OrdinalIgnoreCase)).ToList();
+    }
+
+    private async Task SetChip(string key)
+    {
+        _activeChip = key;
+        await LoadAsync();
+    }
+
+    private void OnSearchKey(KeyboardEventArgs e)
+    {
+        ApplyFilter();
+        StateHasChanged();
+    }
+
+    private void ClearSearch()
+    {
+        _search = "";
+        ApplyFilter();
+        StateHasChanged();
+    }
+
+    private static string PartnerTypeLabel(string t) => t switch
+    {
+        "customer" => "매출처",
+        "vendor"   => "매입처",
+        "both"     => "매입+매출",
+        _          => t
+    };
+
+    private static string AvatarColor(string t) => t switch
+    {
+        "customer" => "#1565C0",
+        "vendor"   => "#E65100",
+        _          => "#4527A0"
+    };
+}

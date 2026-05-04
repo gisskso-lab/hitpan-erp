@@ -22,7 +22,9 @@
                GetPartner="@(r => r.PartnerName)"
                GetDate="@(r => r.QuoteDate)"
                GetAmount="@(r => r.TotalAmount)"
-               GetStatus="@(r => r.Status)" />
+               GetStatus="@(r => r.Status)"
+               DocType="quotation"
+               GetId="@(r => r.QuoteId)" />
 
 @code {
     private List<QuotationListItem> _rows = new();

@@ -22,7 +22,9 @@
                GetPartner="@(r => r.PartnerName)"
                GetDate="@(r => r.ReceiptDate)"
                GetAmount="@(r => r.TotalAmount)"
-               GetStatus="@(r => r.Status)" />
+               GetStatus="@(r => r.Status)"
+               DocType="purchase-receipt"
+               GetId="@(r => r.ReceiptId)" />
 
 @code {
     private List<PurchaseReceiptListItem> _rows = new();

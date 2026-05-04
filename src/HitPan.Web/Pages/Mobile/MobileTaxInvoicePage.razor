@@ -22,7 +22,9 @@
                GetPartner="@(r => r.PartnerName)"
                GetDate="@(r => r.OrderDate)"
                GetAmount="@(r => r.TotalAmount)"
-               GetStatus="@(r => r.Status)" />
+               GetStatus="@(r => r.Status)"
+               DocType="tax-invoice"
+               GetId="@(r => r.DeliveryId)" />
 
 @code {
     private List<DeliveryListDto> _rows = new();

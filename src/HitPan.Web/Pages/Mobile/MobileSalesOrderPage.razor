@@ -22,7 +22,9 @@
                GetPartner="@(r => r.PartnerName)"
                GetDate="@(r => r.OrderDate)"
                GetAmount="@(r => r.TotalAmount)"
-               GetStatus="@(r => r.Status)" />
+               GetStatus="@(r => r.Status)"
+               DocType="sales-order"
+               GetId="@(r => r.OrderId)" />
 
 @code {
     private List<SalesListItem> _rows = new();

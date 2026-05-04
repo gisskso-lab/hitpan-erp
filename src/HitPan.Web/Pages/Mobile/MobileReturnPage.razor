@@ -22,7 +22,9 @@
                GetPartner="@(r => r.PartnerName)"
                GetDate="@(r => r.ReturnDate)"
                GetAmount="@(r => r.TotalAmount)"
-               GetStatus="@(r => r.Status)" />
+               GetStatus="@(r => r.Status)"
+               DocType="return"
+               GetId="@(r => r.ReturnId)" />
 
 @code {
     private List<PurchaseReturnListItem> _rows = new();
