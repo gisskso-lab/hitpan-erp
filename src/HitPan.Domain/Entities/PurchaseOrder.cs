@@ -17,4 +17,5 @@ public class PurchaseOrder : BaseEntity, ITenantEntity
     public decimal TotalAmount { get; set; }
     public decimal VatAmount { get; set; }
     public string? Memo { get; set; }
+    public bool IsAuto { get; set; }
 }

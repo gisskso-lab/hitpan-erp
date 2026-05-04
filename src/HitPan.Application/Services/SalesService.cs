@@ -1404,9 +1404,9 @@ public class SalesService : ISalesService
                 await _db.ExecuteAsync(new CommandDefinition(
                     """
                     INSERT INTO purchase_orders
-                      (po_id, tenant_id, po_no, partner_id, po_date, status, total_amount, vat_amount, memo, created_at, updated_at)
+                      (po_id, tenant_id, po_no, partner_id, po_date, status, total_amount, vat_amount, memo, is_auto, created_at, updated_at)
                     VALUES
-                      (@PoId, @Tid, @PoNo, @PartnerId, @PoDate, 'draft', @Supply, @Vat, @Memo, NOW(6), NOW(6))
+                      (@PoId, @Tid, @PoNo, @PartnerId, @PoDate, 'draft', @Supply, @Vat, @Memo, 1, NOW(6), NOW(6))
                     """,
                     new
                     {

@@ -116,6 +116,8 @@ builder.Services.AddScoped<IPartnerBalanceRepository, PartnerBalanceRepository>(
 builder.Services.AddScoped<IEventPublisher, SyncEventPublisher>();
 // 멱등 처리 — idempotency_keys 만료 정리 (DESIGN_PRINCIPLES §5.3 / 작업지시서 20260425작4)
 builder.Services.AddHostedService<IdempotencyCleanupService>();
+// 정합성 자동감지 — 재고 음수·monthly_summary 불일치 6h 주기 감지 → audit_trail 기록
+builder.Services.AddHostedService<IntegrityCheckService>();
 // 전자서명 (간편인증 Mock 4종 + 수동 3종) + 전자근로계약서
 builder.Services.AddScoped<IESignatureService, ESignatureService>();
 builder.Services.AddScoped<ILaborContractService, LaborContractService>();

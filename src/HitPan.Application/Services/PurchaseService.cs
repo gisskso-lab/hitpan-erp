@@ -447,6 +447,7 @@ public class PurchaseService : IPurchaseService
                                   AND p.tenant_id = po.tenant_id
                            WHERE po.tenant_id = @TenantId
                              AND po.is_deleted = 0
+                             AND po.is_auto = 0
                              AND (@From IS NULL OR po.po_date >= @From)
                              AND (@To IS NULL OR po.po_date <= @To)
                              AND (@Status IS NULL OR po.status = @Status)
