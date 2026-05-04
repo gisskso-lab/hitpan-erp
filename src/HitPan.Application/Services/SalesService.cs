@@ -134,6 +134,53 @@ public class SalesService : ISalesService
         var deliveryNo = await DocumentNumberHelper.NextNumberAsync(
             _db, _currentTenant.TenantId, "sales_deliveries", "delivery_no", prefix, ct);
 
+        // 다이렉트 판매(수주 없이 바로 거래명세서) → 정합성을 위해 수주 자동생성(closed 상태)
+        var linkedOrderId = request.OrderId;
+        if (string.IsNullOrWhiteSpace(linkedOrderId))
+        {
+            var orderRepo2 = _unitOfWork.Repository<SalesOrder>();
+            var orderItemRepo2 = _unitOfWork.Repository<SalesOrderItem>();
+
+            var orderPrefix = $"수-{date:yyyyMMdd}-";
+            var autoOrderNo = await DocumentNumberHelper.NextNumberAsync(
+                _db, _currentTenant.TenantId, "sales_orders", "order_no", orderPrefix, ct);
+
+            linkedOrderId = Guid.NewGuid().ToString();
+            await orderRepo2.AddAsync(new SalesOrder
+            {
+                Id = linkedOrderId,
+                OrderId = linkedOrderId,
+                TenantId = _currentTenant.TenantId,
+                OrderNo = autoOrderNo,
+                PartnerId = request.PartnerId,
+                EmployeeId = request.EmployeeId,
+                OrderDate = date,
+                DeliveryDate = date,
+                Status = SalesOrderStatus.Closed,
+                TotalAmount = request.Items.Sum(x => x.SupplyAmount),
+                VatAmount = request.Items.Sum(x => x.VatAmount),
+                Memo = request.Memo
+            });
+
+            foreach (var line in request.Items)
+            {
+                await orderItemRepo2.AddAsync(new SalesOrderItem
+                {
+                    Id = Guid.NewGuid().ToString(),
+                    OrderItemId = Guid.NewGuid().ToString(),
+                    OrderId = linkedOrderId,
+                    TenantId = _currentTenant.TenantId,
+                    ItemId = line.ItemId?.Trim() ?? string.Empty,
+                    OrderedQty = line.Qty,
+                    DeliveredQty = line.Qty,
+                    UnitPrice = line.UnitPrice,
+                    SupplyAmount = line.SupplyAmount,
+                    VatAmount = line.VatAmount,
+                    ItemStatus = "closed"
+                });
+            }
+        }
+
         var deliveryId = Guid.NewGuid().ToString();
         var delivery = new SalesDelivery
         {
@@ -141,7 +188,7 @@ public class SalesService : ISalesService
             DeliveryId = deliveryId,
             TenantId = _currentTenant.TenantId,
             DeliveryNo = deliveryNo,
-            OrderId = request.OrderId,
+            OrderId = linkedOrderId,
             PartnerId = request.PartnerId,
             EmployeeId = request.EmployeeId,
             DeliveryDate = date,
