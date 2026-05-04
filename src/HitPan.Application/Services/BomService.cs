@@ -455,15 +455,18 @@ public class BomService : IBomService
                         UserId = userId
                     }, transaction: tx, cancellationToken: ct)).ConfigureAwait(false);
 
-                // 자재 재고 실제 차감
-                await _db.ExecuteAsync(new CommandDefinition(
+                // 자재 재고 차감 — 재고 부족 시 음수 방지를 위해 조건부 UPDATE 후 0행이면 예외
+                var matUpdated = await _db.ExecuteAsync(new CommandDefinition(
                     """
                     UPDATE item_stock
-                    SET current_qty = GREATEST(current_qty - @Qty, 0), last_updated_at = NOW(6)
-                    WHERE tenant_id = @TenantId AND item_id = @ItemId
+                    SET current_qty = current_qty - @Qty, last_updated_at = NOW(6)
+                    WHERE tenant_id = @TenantId AND item_id = @ItemId AND current_qty >= @Qty
                     """,
                     new { TenantId = tenantId, ItemId = mat.ItemId, Qty = mat.RequiredQty },
                     transaction: tx, cancellationToken: ct)).ConfigureAwait(false);
+                if (matUpdated == 0)
+                    throw new InvalidOperationException(
+                        $"자재 재고 부족: 품목 {mat.ItemId}, 필요 수량 {mat.RequiredQty}. BOM 생산을 중단합니다.");
             }
 
             // 완성품 재고 증가 로그
@@ -618,14 +621,18 @@ public class BomService : IBomService
                     UserId = userId
                 }, transaction: tx, cancellationToken: ct)).ConfigureAwait(false);
 
-            await _db.ExecuteAsync(new CommandDefinition(
+            // BOM 해체 시 완제품 차감 — 재고 부족 시 음수 방지
+            var disassembleUpdated = await _db.ExecuteAsync(new CommandDefinition(
                 """
                 UPDATE item_stock
-                SET current_qty = GREATEST(current_qty - @Qty, 0), last_updated_at = NOW(6)
-                WHERE tenant_id=@TenantId AND item_id=@ItemId AND warehouse_id=@WarehouseId
+                SET current_qty = current_qty - @Qty, last_updated_at = NOW(6)
+                WHERE tenant_id=@TenantId AND item_id=@ItemId AND warehouse_id=@WarehouseId AND current_qty >= @Qty
                 """,
                 new { TenantId = tenantId, ItemId = bom.ProductItemId, WarehouseId = defaultWarehouseId, Qty = dto.ProduceQty },
                 transaction: tx, cancellationToken: ct)).ConfigureAwait(false);
+            if (disassembleUpdated == 0)
+                throw new InvalidOperationException(
+                    $"완제품 재고 부족: 품목 {bom.ProductItemId}, 필요 수량 {dto.ProduceQty}. BOM 해체를 중단합니다.");
 
             // 완제품 OUT 원장 (Reverse IN)
             await _db.ExecuteAsync(new CommandDefinition(

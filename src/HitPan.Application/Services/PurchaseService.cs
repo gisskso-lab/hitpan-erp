@@ -836,7 +836,24 @@ public class PurchaseService : IPurchaseService
                 transaction: dbTx,
                 cancellationToken: ct));
 
-            // 4) 상태 전환
+            // 4) partner_balance 매입 역산 (반품 확정 시 total_purchase 차감)
+            await conn.ExecuteAsync(new CommandDefinition(
+                """
+                INSERT INTO partner_balance
+                  (balance_id, tenant_id, partner_id,
+                   total_sales, total_receipt, total_purchase, total_payment,
+                   last_updated_at)
+                VALUES
+                  (UUID(), @TenantId, @PartnerId, 0, 0, -@Amount, 0, NOW(6))
+                ON DUPLICATE KEY UPDATE
+                  total_purchase  = total_purchase - @Amount,
+                  last_updated_at = NOW(6)
+                """,
+                new { TenantId = tenantId, PartnerId = partnerId, Amount = totalAmount + vatAmount },
+                transaction: dbTx,
+                cancellationToken: ct));
+
+            // 5) 상태 전환
             await conn.ExecuteAsync(new CommandDefinition(
                 "UPDATE purchase_returns SET status='confirmed', updated_at=NOW(6) WHERE return_id=@Id AND tenant_id=@Tid",
                 new { Id = returnId, Tid = tenantId },

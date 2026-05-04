@@ -133,26 +133,31 @@ public class QuotationItemDto
     /// <summary>
     /// 수량이다.
     /// </summary>
+    [Range(0.0001, double.MaxValue, ErrorMessage = "수량은 0보다 커야 합니다.")]
     public decimal Qty { get; set; }
 
     /// <summary>
     /// 단가다.
     /// </summary>
+    [Range(0, double.MaxValue, ErrorMessage = "단가는 음수일 수 없습니다.")]
     public decimal UnitPrice { get; set; }
 
     /// <summary>
     /// 할인율이다.
     /// </summary>
+    [Range(0, 100, ErrorMessage = "할인율은 0~100 사이여야 합니다.")]
     public decimal DiscountRate { get; set; }
 
     /// <summary>
     /// 공급가액이다.
     /// </summary>
+    [Range(0, double.MaxValue, ErrorMessage = "공급가액은 음수일 수 없습니다.")]
     public decimal Amount { get; set; }
 
     /// <summary>
     /// 부가세다.
     /// </summary>
+    [Range(0, double.MaxValue, ErrorMessage = "부가세는 음수일 수 없습니다.")]
     public decimal VatAmount { get; set; }
 
     /// <summary>
