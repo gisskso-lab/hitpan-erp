@@ -50,6 +50,7 @@ builder.Services.AddScoped<PositionService>();
 builder.Services.AddScoped<ApprovalLineService>();
 builder.Services.AddScoped<BillingService>();
 builder.Services.AddScoped<BackupService>();
+builder.Services.AddScoped<LogService>();
 builder.Services.AddScoped<BillsCardsBankService>();
 builder.Services.AddScoped<EmailClientService>();
 builder.Services.AddScoped<LeaveRequestService>();
