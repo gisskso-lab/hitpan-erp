@@ -36,7 +36,16 @@
                     </div>
 
                     <main class="hitpan-content mud-px-4 mud-py-4">
-                        @Body
+                        <ErrorBoundary>
+                            <ChildContent>@Body</ChildContent>
+                            <ErrorContent Context="ex">
+                                <div class="hp-error-boundary">
+                                    <MudIcon Icon="@Icons.Material.Filled.ErrorOutline" Style="font-size:40px;color:#e53935;" />
+                                    <p class="hp-error-msg">페이지 로드 중 오류가 발생했습니다.</p>
+                                    <MudButton Variant="Variant.Outlined" OnClick="@(() => Nav.NavigateTo("/dashboard"))">홈으로</MudButton>
+                                </div>
+                            </ErrorContent>
+                        </ErrorBoundary>
                     </main>
 
                     <MobileBottomNav />

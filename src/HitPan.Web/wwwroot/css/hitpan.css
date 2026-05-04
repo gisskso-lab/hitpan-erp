@@ -1168,3 +1168,389 @@ html, body {
     }
 }
 
+/* ErrorBoundary 표시 */
+.hp-error-boundary {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 16px;
+    padding: 60px 24px;
+    text-align: center;
+}
+.hp-error-msg {
+    font-size: 15px;
+    color: #555;
+    font-family: "Noto Sans KR", sans-serif;
+    margin: 0;
+}
+
+/* ════════════════════════════════════════
+   모바일 전용 판매 목록 / 상세 (hpm-*)
+   /m/sales, /m/sales/{id}
+════════════════════════════════════════ */
+
+/* 판매 목록 페이지 */
+.hpm-sales {
+    padding: 0 0 100px;
+    min-height: 100vh;
+    background: #f2f4f6;
+}
+
+/* 검색바 */
+.hpm-search-bar {
+    padding: 12px 16px 8px;
+    background: #fff;
+    position: sticky;
+    top: 0;
+    z-index: 10;
+    border-bottom: 1px solid rgba(0,0,0,0.06);
+}
+.hpm-search-input-wrap {
+    display: flex;
+    align-items: center;
+    background: #f2f4f6;
+    border-radius: 12px;
+    padding: 0 12px;
+    height: 42px;
+    gap: 8px;
+}
+.hpm-search-icon { color: #999; font-size: 20px !important; flex-shrink: 0; }
+.hpm-search-input {
+    flex: 1;
+    border: none;
+    background: transparent;
+    outline: none;
+    font-size: 15px;
+    font-family: "Noto Sans KR", sans-serif;
+    color: #111;
+}
+.hpm-search-input::placeholder { color: #aaa; }
+.hpm-search-clear {
+    border: none; background: transparent; padding: 0;
+    color: #aaa; cursor: pointer; display: flex; align-items: center;
+}
+
+/* 필터 칩 */
+.hpm-filter-chips {
+    display: flex;
+    gap: 6px;
+    padding: 10px 16px;
+    overflow-x: auto;
+    background: #fff;
+    scrollbar-width: none;
+}
+.hpm-filter-chips::-webkit-scrollbar { display: none; }
+.hpm-chip {
+    flex-shrink: 0;
+    border: 1.5px solid #e0e0e0;
+    border-radius: 20px;
+    padding: 5px 14px;
+    font-size: 13px;
+    font-family: "Noto Sans KR", sans-serif;
+    font-weight: 500;
+    background: #fff;
+    color: #666;
+    cursor: pointer;
+    transition: all 0.12s;
+    -webkit-tap-highlight-color: transparent;
+}
+.hpm-chip--active {
+    background: #0F6E56;
+    border-color: #0F6E56;
+    color: #fff;
+    font-weight: 700;
+}
+
+/* 카드 목록 */
+.hpm-card-list {
+    padding: 12px 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+.hpm-doc-card {
+    background: #fff;
+    border-radius: 16px;
+    padding: 16px;
+    box-shadow: 0 1px 6px rgba(0,0,0,0.07);
+    cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+    transition: transform 0.1s;
+}
+.hpm-doc-card:active { transform: scale(0.98); }
+
+.hpm-doc-card-top {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    margin-bottom: 6px;
+}
+.hpm-doc-partner {
+    font-size: 16px;
+    font-weight: 700;
+    color: #111;
+    font-family: "Noto Sans KR", sans-serif;
+}
+.hpm-doc-amount {
+    font-size: 16px;
+    font-weight: 700;
+    color: #0F6E56;
+    font-family: "JetBrains Mono", monospace;
+    font-variant-numeric: tabular-nums;
+}
+.hpm-doc-card-mid {
+    display: flex;
+    gap: 8px;
+    font-size: 12px;
+    color: #888;
+    margin-bottom: 10px;
+    font-family: "Noto Sans KR", sans-serif;
+}
+.hpm-doc-card-bot {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+}
+.hpm-doc-actions { display: flex; gap: 6px; }
+.hpm-action-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    border: 1px solid #e0e0e0;
+    border-radius: 20px;
+    padding: 4px 10px;
+    font-size: 12px;
+    font-family: "Noto Sans KR", sans-serif;
+    font-weight: 600;
+    background: #fff;
+    color: #555;
+    cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+}
+.hpm-action-btn:active { background: #f5f5f5; }
+
+/* 상태 배지 */
+.hpm-status-badge {
+    display: inline-block;
+    padding: 3px 9px;
+    border-radius: 20px;
+    font-size: 11px;
+    font-weight: 700;
+    font-family: "Noto Sans KR", sans-serif;
+}
+.hpm-status-confirmed { background: #E8F5E9; color: #2E7D32; }
+.hpm-status-draft     { background: #FFF8E1; color: #F57C00; }
+.hpm-status-cancelled { background: #FFEBEE; color: #C62828; }
+
+/* 로딩/비어있음 */
+.hpm-loading, .hpm-empty {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 60px 16px;
+    gap: 12px;
+    color: #aaa;
+    font-size: 14px;
+    font-family: "Noto Sans KR", sans-serif;
+}
+.hpm-list-footer {
+    text-align: center;
+    font-size: 12px;
+    color: #aaa;
+    padding: 8px 0 16px;
+    font-family: "Noto Sans KR", sans-serif;
+}
+
+/* FAB */
+.hpm-fab {
+    position: fixed;
+    bottom: calc(80px + env(safe-area-inset-bottom, 0px));
+    right: 20px;
+    width: 54px;
+    height: 54px;
+    border-radius: 27px;
+    background: #0F6E56;
+    border: none;
+    box-shadow: 0 4px 16px rgba(15,110,86,0.35);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    z-index: 20;
+    -webkit-tap-highlight-color: transparent;
+    transition: transform 0.12s, box-shadow 0.12s;
+}
+.hpm-fab:active { transform: scale(0.92); box-shadow: 0 2px 8px rgba(15,110,86,0.25); }
+
+/* ── 상세 페이지 ── */
+.hpm-detail {
+    min-height: 100vh;
+    background: #f2f4f6;
+    padding-bottom: 100px;
+}
+.hpm-detail-bar {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 0 16px;
+    height: 52px;
+    background: #fff;
+    border-bottom: 1px solid rgba(0,0,0,0.08);
+    position: sticky;
+    top: 0;
+    z-index: 10;
+}
+.hpm-back-btn, .hpm-bar-btn {
+    border: none; background: transparent; padding: 8px;
+    display: flex; align-items: center;
+    cursor: pointer; color: #333;
+    -webkit-tap-highlight-color: transparent;
+    border-radius: 20px;
+}
+.hpm-back-btn:active, .hpm-bar-btn:active { background: rgba(0,0,0,0.06); }
+.hpm-detail-title {
+    flex: 1;
+    font-size: 17px;
+    font-weight: 700;
+    color: #111;
+    font-family: "Noto Sans KR", sans-serif;
+}
+.hpm-detail-bar-actions { display: flex; gap: 2px; }
+
+/* 요약 카드 */
+.hpm-summary-card {
+    background: #fff;
+    margin: 16px;
+    border-radius: 18px;
+    padding: 20px;
+    box-shadow: 0 2px 10px rgba(0,0,0,0.08);
+}
+.hpm-summary-partner {
+    font-size: 20px;
+    font-weight: 800;
+    color: #111;
+    margin-bottom: 4px;
+    font-family: "Noto Sans KR", sans-serif;
+}
+.hpm-summary-amount {
+    font-size: 32px;
+    font-weight: 800;
+    color: #0F6E56;
+    font-family: "JetBrains Mono", monospace;
+    font-variant-numeric: tabular-nums;
+    margin-bottom: 8px;
+}
+.hpm-summary-meta {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 12px;
+    color: #888;
+    margin-bottom: 16px;
+    font-family: "Noto Sans KR", sans-serif;
+}
+.hpm-summary-amounts {
+    border-top: 1px solid #f0f0f0;
+    padding-top: 14px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+.hpm-summary-row {
+    display: flex;
+    justify-content: space-between;
+    font-size: 14px;
+    color: #555;
+    font-family: "Noto Sans KR", sans-serif;
+}
+.hpm-summary-total {
+    font-weight: 700;
+    font-size: 16px;
+    color: #111;
+    border-top: 1px solid #eee;
+    padding-top: 8px;
+    margin-top: 4px;
+}
+
+/* 품목 섹션 */
+.hpm-section-header {
+    padding: 0 16px 8px;
+    font-size: 13px;
+    font-weight: 600;
+    color: #888;
+    font-family: "Noto Sans KR", sans-serif;
+    letter-spacing: 0.02em;
+}
+.hpm-items {
+    padding: 0 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+.hpm-item-card {
+    background: #fff;
+    border-radius: 14px;
+    padding: 14px 16px;
+    box-shadow: 0 1px 4px rgba(0,0,0,0.06);
+}
+.hpm-item-top {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    margin-bottom: 4px;
+}
+.hpm-item-name {
+    font-size: 15px;
+    font-weight: 600;
+    color: #111;
+    font-family: "Noto Sans KR", sans-serif;
+}
+.hpm-item-amount {
+    font-size: 15px;
+    font-weight: 700;
+    color: #0F6E56;
+    font-family: "JetBrains Mono", monospace;
+}
+.hpm-item-bot {
+    display: flex;
+    justify-content: space-between;
+    font-size: 12px;
+    color: #888;
+    font-family: "Noto Sans KR", sans-serif;
+}
+
+/* 하단 고정 액션바 */
+.hpm-action-bar {
+    position: fixed;
+    bottom: calc(68px + env(safe-area-inset-bottom, 0px));
+    left: 0; right: 0;
+    padding: 12px 16px;
+    background: rgba(255,255,255,0.97);
+    backdrop-filter: blur(10px);
+    border-top: 1px solid rgba(0,0,0,0.08);
+    display: flex;
+    gap: 10px;
+    z-index: 20;
+}
+.hpm-action-bar-btn {
+    flex: 1;
+    height: 48px;
+    border-radius: 14px;
+    border: none;
+    font-size: 15px;
+    font-weight: 700;
+    font-family: "Noto Sans KR", sans-serif;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+    transition: transform 0.1s;
+}
+.hpm-action-bar-btn:active { transform: scale(0.96); }
+.hpm-action-bar-btn--primary  { background: #0F6E56; color: #fff; }
+.hpm-action-bar-btn--secondary { background: #f2f4f6; color: #333; }
+
