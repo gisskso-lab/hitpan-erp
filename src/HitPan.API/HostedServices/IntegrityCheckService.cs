@@ -10,7 +10,7 @@ namespace HitPan.API.HostedServices;
 //   - IdempotencyCleanupService 동일 패턴 (자체 커넥션, 싱글톤)
 public sealed class IntegrityCheckService : BackgroundService
 {
-    private static readonly TimeSpan CheckInterval = TimeSpan.FromHours(6);
+    private static readonly TimeSpan CheckInterval = TimeSpan.FromMinutes(10);
 
     private readonly ILogger<IntegrityCheckService> _logger;
 
