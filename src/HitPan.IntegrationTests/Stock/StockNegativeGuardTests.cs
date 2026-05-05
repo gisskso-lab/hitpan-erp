@@ -19,6 +19,7 @@ public class StockNegativeGuardTests : IAsyncLifetime
     {
         await _db.InitializeAsync();
         _tenantId = DbFixture.NewTestTenantId();
+        await _db.InsertTestTenantAsync(_tenantId);
     }
 
     public async Task DisposeAsync()
@@ -134,6 +135,7 @@ public class StockNegativeGuardTests : IAsyncLifetime
     public async Task GetStock_OtherTenantData_NotVisible()
     {
         var otherTenantId = DbFixture.NewTestTenantId();
+        await _db.InsertTestTenantAsync(otherTenantId);
         var itemId = await _db.InsertTestItemAsync(otherTenantId, "타테넌트상품");
         var warehouseId = await _db.InsertTestWarehouseAsync(otherTenantId);
         await _db.SetStockAsync(otherTenantId, itemId, warehouseId, 999m);

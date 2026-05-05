@@ -18,6 +18,7 @@ public class MonthlySummaryIdempotencyTests : IAsyncLifetime
     {
         await _db.InitializeAsync();
         _tenantId = DbFixture.NewTestTenantId();
+        await _db.InsertTestTenantAsync(_tenantId);
     }
 
     public async Task DisposeAsync()
@@ -53,7 +54,7 @@ public class MonthlySummaryIdempotencyTests : IAsyncLifetime
         // DB에서 실제 합산값 확인 — 한 번만 반영됐어야 함
         var ym = date.ToString("yyyyMM");
         var totalPurchase = await _db.Connection.QueryFirstOrDefaultAsync<decimal>(
-            "SELECT total_purchase FROM monthly_summary WHERE tenant_id = @T AND year_month = @Ym",
+            "SELECT total_purchase FROM monthly_summary WHERE tenant_id = @T AND `year_month` = @Ym",
             new { T = _tenantId, Ym = ym });
 
         Assert.Equal(amount, totalPurchase);
@@ -79,7 +80,7 @@ public class MonthlySummaryIdempotencyTests : IAsyncLifetime
 
         var ym = date.ToString("yyyyMM");
         var totalPurchase = await _db.Connection.QueryFirstOrDefaultAsync<decimal>(
-            "SELECT total_purchase FROM monthly_summary WHERE tenant_id = @T AND year_month = @Ym",
+            "SELECT total_purchase FROM monthly_summary WHERE tenant_id = @T AND `year_month` = @Ym",
             new { T = _tenantId, Ym = ym });
 
         Assert.Equal(amount * 2, totalPurchase);
@@ -102,7 +103,7 @@ public class MonthlySummaryIdempotencyTests : IAsyncLifetime
 
         var ym = date.ToString("yyyyMM");
         var row = await _db.Connection.QueryFirstOrDefaultAsync<(decimal Sales, decimal Purchase)>(
-            "SELECT total_sales AS Sales, total_purchase AS Purchase FROM monthly_summary WHERE tenant_id = @T AND year_month = @Ym",
+            "SELECT total_sales AS Sales, total_purchase AS Purchase FROM monthly_summary WHERE tenant_id = @T AND `year_month` = @Ym",
             new { T = _tenantId, Ym = ym });
 
         Assert.Equal(200_000m, row.Sales);
@@ -127,7 +128,7 @@ public class MonthlySummaryIdempotencyTests : IAsyncLifetime
 
         var ym = date.ToString("yyyyMM");
         var mySales = await _db.Connection.QueryFirstOrDefaultAsync<decimal>(
-            "SELECT total_sales FROM monthly_summary WHERE tenant_id = @T AND year_month = @Ym",
+            "SELECT total_sales FROM monthly_summary WHERE tenant_id = @T AND `year_month` = @Ym",
             new { T = _tenantId, Ym = ym });
 
         Assert.Equal(100_000m, mySales);  // 다른 tenant 금액이 섞이면 안 됨

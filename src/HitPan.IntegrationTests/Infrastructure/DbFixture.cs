@@ -31,6 +31,27 @@ public sealed class DbFixture : IAsyncLifetime
     /// <summary>테스트 격리용 테넌트 ID — UUID 형태(36자), 실제 tenant_id 컬럼 VARCHAR(36) 준수</summary>
     public static string NewTestTenantId() => Guid.NewGuid().ToString();
 
+    /// <summary>
+    /// 테스트용 tenant INSERT — tenants FK 제약 해소.
+    /// CleanupTenantAsync에서 삭제됨.
+    /// </summary>
+    public async Task InsertTestTenantAsync(string tenantId)
+    {
+        var code = tenantId[..8];
+        await Connection.ExecuteAsync(
+            """
+            INSERT IGNORE INTO tenants
+              (tenant_id, tenant_code, company_name, biz_no, ceo_name,
+               db_host, db_name, license_key_hash, reseller_tier,
+               created_at, updated_at)
+            VALUES
+              (@TenantId, @Code, '테스트회사', '000-00-00000', '테스트대표',
+               'localhost', 'hitpan_erp', 'test-hash', 0,
+               NOW(6), NOW(6))
+            """,
+            new { TenantId = tenantId, Code = code });
+    }
+
     /// <summary>테스트용 상품 INSERT 후 item_id 반환</summary>
     public async Task<string> InsertTestItemAsync(string tenantId, string itemName = "테스트상품", decimal safetyStock = 0)
     {
@@ -99,6 +120,7 @@ public sealed class DbFixture : IAsyncLifetime
         await Connection.ExecuteAsync("DELETE FROM monthly_summary WHERE tenant_id = @T", new { T = tenantId });
         await Connection.ExecuteAsync("DELETE FROM items WHERE tenant_id = @T", new { T = tenantId });
         await Connection.ExecuteAsync("DELETE FROM warehouses WHERE tenant_id = @T", new { T = tenantId });
+        await Connection.ExecuteAsync("DELETE FROM tenants WHERE tenant_id = @T", new { T = tenantId });
     }
 
     /// <summary>stock_ledger 직접 삽입 (실제 컬럼 기준)</summary>

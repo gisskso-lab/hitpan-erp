@@ -17,6 +17,7 @@ public class StockLedgerInsertOnlyTests : IAsyncLifetime
     {
         await _db.InitializeAsync();
         _tenantId = DbFixture.NewTestTenantId();
+        await _db.InsertTestTenantAsync(_tenantId);
     }
 
     public async Task DisposeAsync()
