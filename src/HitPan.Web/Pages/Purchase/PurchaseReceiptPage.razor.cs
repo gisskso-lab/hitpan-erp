@@ -344,6 +344,19 @@ public partial class PurchaseReceiptPage : ComponentBase
             }
         }
 
+        // 발주 미연결 상태(PoId=null) → 다이렉트 매입 안내
+        if (_isNew)
+        {
+            var proceed = await DialogService.ShowMessageBoxAsync(
+                "발주 없이 바로 매입 처리",
+                "발주서 없이 바로 매입합니다.\n" +
+                "발주 이력이 자동으로 생성되어 원장에 기록됩니다.\n\n" +
+                "발주서를 먼저 등록하려면 [취소]를 누르고 발주 메뉴에서 진행해주세요.",
+                yesText: "바로 매입",
+                cancelText: "취소");
+            if (proceed != true) return;
+        }
+
         // 추후 PurchaseService 연동 필요: Blazor WebAssembly 가 Application 을 참조하지 않으므로 현재는 JSON DTO 로만 직렬화한다.
         var request = new PurchaseReceiptCreateJsonRequest
         {
