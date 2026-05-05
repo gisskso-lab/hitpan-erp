@@ -1,3 +1,5 @@
+using System.ComponentModel.DataAnnotations;
+
 namespace HitPan.Application.DTOs.Stock;
 
 // ── 재고 실사·조정 ──
@@ -7,7 +9,10 @@ public class StockAdjustRequest
 {
     public string ItemId { get; set; } = string.Empty;
     public string WarehouseId { get; set; } = string.Empty;
+
+    [Range(0, double.MaxValue, ErrorMessage = "실사 수량은 음수일 수 없습니다.")]
     public decimal ActualQty { get; set; }      // 실사 수량
+
     public string? Reason { get; set; }          // 조정 사유
 }
 
@@ -32,7 +37,10 @@ public class StockTransferRequest
     public string ItemId { get; set; } = string.Empty;
     public string FromWarehouseId { get; set; } = string.Empty;
     public string ToWarehouseId { get; set; } = string.Empty;
+
+    [Range(0.0001, double.MaxValue, ErrorMessage = "이송 수량은 0보다 커야 합니다.")]
     public decimal Qty { get; set; }
+
     public string? Memo { get; set; }
 }
 

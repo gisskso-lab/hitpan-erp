@@ -1,3 +1,5 @@
+using System.ComponentModel.DataAnnotations;
+
 namespace HitPan.Application.DTOs.Item;
 
 public class ItemListDto
@@ -65,20 +67,25 @@ public class CreateItemDto
 
     public string? Spec { get; set; }
 
+    [Range(0, double.MaxValue, ErrorMessage = "매입단가는 음수일 수 없습니다.")]
     public decimal PurchasePrice { get; set; }
 
+    [Range(0, double.MaxValue, ErrorMessage = "판매단가는 음수일 수 없습니다.")]
     public decimal SalePrice { get; set; }
 
+    [Range(0, double.MaxValue, ErrorMessage = "표준단가는 음수일 수 없습니다.")]
     public decimal StandardPrice { get; set; }
 
     public string TaxType { get; set; } = "taxable";
 
+    [Range(0, double.MaxValue, ErrorMessage = "안전재고는 음수일 수 없습니다.")]
     public decimal SafetyStock { get; set; }
 
     public bool AutoOrderEnabled { get; set; }
 
     public string? AutoOrderPartnerId { get; set; }
 
+    [Range(0, double.MaxValue, ErrorMessage = "자동발주수량은 음수일 수 없습니다.")]
     public decimal AutoOrderQty { get; set; }
 
     // 사장님 헌법 (2026-04-26): 자동발주 시 매입확정까지 자동 사슬.

@@ -1,3 +1,5 @@
+using System.ComponentModel.DataAnnotations;
+
 namespace HitPan.Application.DTOs.Finance;
 
 // ═══ Bills (어음) ═══════════════════════════════════════════
@@ -28,7 +30,10 @@ public sealed class CreateBillRequest
     public string? PartnerId { get; set; }
     public DateTime IssueDate { get; set; }
     public DateTime? MaturityDate { get; set; }
+
+    [Range(0.01, double.MaxValue, ErrorMessage = "어음금액은 0보다 커야 합니다.")]
     public decimal Amount { get; set; }
+
     public string? Remark { get; set; }
 }
 
@@ -74,9 +79,16 @@ public sealed class CreateCardPaymentRequest
     public string? CardCompany { get; set; }
     public string? HolderName { get; set; }
     public DateTime PaymentDate { get; set; }
+
+    [Range(0.01, double.MaxValue, ErrorMessage = "카드결제 총액은 0보다 커야 합니다.")]
     public decimal TotalAmount { get; set; }
+
+    [Range(0, double.MaxValue, ErrorMessage = "할부금액은 음수일 수 없습니다.")]
     public decimal InstallmentAmount { get; set; }
+
+    [Range(0, 60, ErrorMessage = "할부개월은 0~60 사이여야 합니다.")]
     public int InstallmentMonths { get; set; }
+
     public string? Remark { get; set; }
     public List<CreateCardPaymentLineRequest> Lines { get; set; } = new();
 }
@@ -85,7 +97,10 @@ public sealed class CreateCardPaymentLineRequest
 {
     public string? PartnerId { get; set; }
     public DateTime TxDate { get; set; }
+
+    [Range(0.01, double.MaxValue, ErrorMessage = "거래금액은 0보다 커야 합니다.")]
     public decimal Amount { get; set; }
+
     public string? Remark { get; set; }
 }
 
@@ -112,7 +127,10 @@ public sealed class CreateBankTxRequest
     public string? BankName { get; set; }
     public DateTime TxDate { get; set; }
     public string TxType { get; set; } = "1";
+
+    [Range(0.01, double.MaxValue, ErrorMessage = "거래금액은 0보다 커야 합니다.")]
     public decimal Amount { get; set; }
+
     public decimal? BalanceAfter { get; set; }
     public string? PartnerId { get; set; }
     public string? Description { get; set; }

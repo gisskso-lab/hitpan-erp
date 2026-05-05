@@ -1,3 +1,5 @@
+using System.ComponentModel.DataAnnotations;
+
 namespace HitPan.Application.DTOs.Approval;
 
 // ── 현금출납장 ──
@@ -25,7 +27,10 @@ public class CreateCashbookRequest
     public string? Category { get; set; }
     public string? PartnerId { get; set; }
     public string Description { get; set; } = string.Empty;
+
+    [Range(0.01, double.MaxValue, ErrorMessage = "금액은 0보다 커야 합니다.")]
     public decimal Amount { get; set; }
+
     public string PaymentMethod { get; set; } = "cash";
     public string? Memo { get; set; }
 }
@@ -81,8 +86,13 @@ public class CreateExpenseRequest
     public DateTime ExpenseDate { get; set; }
     public string Category { get; set; } = string.Empty;
     public string Description { get; set; } = string.Empty;
+
+    [Range(0.01, double.MaxValue, ErrorMessage = "경비금액은 0보다 커야 합니다.")]
     public decimal Amount { get; set; }
+
+    [Range(0, double.MaxValue, ErrorMessage = "부가세는 음수일 수 없습니다.")]
     public decimal VatAmount { get; set; }
+
     public string PaymentMethod { get; set; } = "card";
     public bool ReceiptYn { get; set; } = true;
     public string? Memo { get; set; }

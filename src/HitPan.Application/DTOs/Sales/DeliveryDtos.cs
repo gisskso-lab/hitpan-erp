@@ -1,3 +1,5 @@
+using System.ComponentModel.DataAnnotations;
+
 namespace HitPan.Application.DTOs.Sales;
 
 public class DeliveryListDto
@@ -45,9 +47,16 @@ public class UpdateDeliveryDto
 {
     public DateTime OrderDate { get; set; }
     public string PartnerId { get; set; } = string.Empty;
+
+    [Range(0, double.MaxValue, ErrorMessage = "현금수령액은 음수일 수 없습니다.")]
     public decimal CashAmount { get; set; }
+
+    [Range(0, double.MaxValue, ErrorMessage = "카드수령액은 음수일 수 없습니다.")]
     public decimal CardAmount { get; set; }
+
+    [Range(0, double.MaxValue, ErrorMessage = "할인금액은 음수일 수 없습니다.")]
     public decimal DiscountAmount { get; set; }
+
     public string? Memo { get; set; }
     public List<DeliveryItemDto> Items { get; set; } = new();
 }

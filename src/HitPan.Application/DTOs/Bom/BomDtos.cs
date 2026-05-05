@@ -1,3 +1,5 @@
+using System.ComponentModel.DataAnnotations;
+
 namespace HitPan.Application.DTOs.Bom;
 
 public class BomListDto
@@ -71,16 +73,25 @@ public class CreateBomItemDto
 {
     public int SeqNo { get; set; }
     public string MaterialItemId { get; set; } = "";
+
+    [Range(0.0001, double.MaxValue, ErrorMessage = "수량은 0보다 커야 합니다.")]
     public decimal Qty { get; set; }
+
     public string Unit { get; set; } = "EA";
+
+    [Range(0, 100, ErrorMessage = "로스율은 0~100 사이여야 합니다.")]
     public decimal LossRate { get; set; }
+
     public string? Memo { get; set; }
 }
 
 public class BomAssembleDto
 {
     public string BomId { get; set; } = "";
+
+    [Range(0.0001, double.MaxValue, ErrorMessage = "생산 수량은 0보다 커야 합니다.")]
     public decimal ProduceQty { get; set; }
+
     public string? Memo { get; set; }
 }
 
