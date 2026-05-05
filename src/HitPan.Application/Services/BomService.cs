@@ -534,6 +534,23 @@ public class BomService : IBomService
                       BomId = dto.BomId, DocNo = bom.BomName, Qty = dto.ProduceQty, Cost = unitProductionCost },
                 transaction: tx, cancellationToken: ct)).ConfigureAwait(false);
 
+            // 회계 기표 — BOM 생산 원가 반영 (INSERT ONLY)
+            // 차변: 재공품(제품) — 완성품 원가 전입
+            // 대변: 원재료 — 자재 원가 출고
+            var totalMaterialCost = productionCost;
+            if (totalMaterialCost != 0m)
+            {
+                await AutoJournalHelper.RecordBomProductionAsync(
+                    _db, tx,
+                    tenantId,
+                    dto.BomId,
+                    bom.BomName,
+                    DateTime.UtcNow,
+                    totalMaterialCost,
+                    userId,
+                    ct);
+            }
+
             tx.Commit();
 
             // 감사로그 — BOM assemble (자재차감 + 완성품증가)
@@ -698,6 +715,22 @@ public class BomService : IBomService
                     new { TenantId = tenantId, ItemId = item.MaterialItemId, WarehouseId = defaultWarehouseId,
                           BomId = dto.BomId, DocNo = bom.BomName, Qty = requiredQty, Cost = matUnitCost },
                     transaction: tx, cancellationToken: ct)).ConfigureAwait(false);
+            }
+
+            // 회계 역분개 — BOM 해체 (생산 기표의 정확한 Reverse, INSERT ONLY)
+            // 차변: 원재료 — 자재 원가 복귀
+            // 대변: 재공품(제품) — 완성품 원가 역산
+            if (unitProductionCost != 0m)
+            {
+                await AutoJournalHelper.RecordBomDisassembleAsync(
+                    _db, tx,
+                    tenantId,
+                    dto.BomId,
+                    bom.BomName,
+                    DateTime.UtcNow,
+                    unitProductionCost * dto.ProduceQty,
+                    userId,
+                    ct);
             }
 
             tx.Commit();

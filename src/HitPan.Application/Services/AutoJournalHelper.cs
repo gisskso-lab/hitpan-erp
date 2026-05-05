@@ -258,6 +258,71 @@ internal static class AutoJournalHelper
         }
     }
 
+    public const string RawMaterials = "14600";          // 원재료 (차변/대변)
+    public const string WorkInProcess = "16900";          // 재공품 (차변/대변)
+
+    /// <summary>
+    /// BOM 생산 기표.
+    /// 차변: 재공품(완성품 원가 전입)
+    /// 대변: 원재료(자재 원가 출고)
+    /// </summary>
+    public static async Task RecordBomProductionAsync(
+        IDbConnection conn,
+        IDbTransaction tx,
+        string tenantId,
+        string sourceId,
+        string documentNo,
+        DateTime entryDate,
+        decimal totalCost,
+        string? employeeId,
+        CancellationToken ct)
+    {
+        var entryId = Guid.NewGuid().ToString();
+        var entryNo = $"JE-{entryDate:yyyyMMdd}-{Guid.NewGuid().ToString()[..8].ToUpperInvariant()}";
+
+        await InsertEntryAsync(conn, tx, entryId, tenantId, entryNo, entryDate,
+            "bom_production", sourceId, employeeId, $"BOM생산 원가기표: {documentNo}", ct);
+
+        if (totalCost != 0m)
+        {
+            await InsertLineAsync(conn, tx, entryId, tenantId, WorkInProcess, "debit",
+                totalCost, null, $"재공품 전입 {documentNo}", ct);
+            await InsertLineAsync(conn, tx, entryId, tenantId, RawMaterials, "credit",
+                totalCost, null, $"원재료 출고 {documentNo}", ct);
+        }
+    }
+
+    /// <summary>
+    /// BOM 해체 역분개 — RecordBomProductionAsync 의 정확한 Reverse.
+    /// 차변: 원재료(자재 원가 복귀)
+    /// 대변: 재공품(완성품 원가 역산)
+    /// </summary>
+    public static async Task RecordBomDisassembleAsync(
+        IDbConnection conn,
+        IDbTransaction tx,
+        string tenantId,
+        string sourceId,
+        string documentNo,
+        DateTime entryDate,
+        decimal totalCost,
+        string? employeeId,
+        CancellationToken ct)
+    {
+        var entryId = Guid.NewGuid().ToString();
+        var entryNo = $"JE-{entryDate:yyyyMMdd}-{Guid.NewGuid().ToString()[..8].ToUpperInvariant()}";
+
+        await InsertEntryAsync(conn, tx, entryId, tenantId, entryNo, entryDate,
+            "bom_disassemble", sourceId, employeeId, $"BOM해체 역분개: {documentNo}", ct);
+
+        if (totalCost != 0m)
+        {
+            await InsertLineAsync(conn, tx, entryId, tenantId, RawMaterials, "debit",
+                totalCost, null, $"원재료 복귀 {documentNo}", ct);
+            await InsertLineAsync(conn, tx, entryId, tenantId, WorkInProcess, "credit",
+                totalCost, null, $"재공품 역산 {documentNo}", ct);
+        }
+    }
+
     private static Task InsertEntryAsync(
         IDbConnection conn, IDbTransaction tx,
         string entryId, string tenantId, string entryNo, DateTime entryDate,
