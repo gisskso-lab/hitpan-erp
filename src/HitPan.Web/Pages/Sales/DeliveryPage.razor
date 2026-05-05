@@ -317,16 +317,6 @@
         {
             if (_isNew)
             {
-                // 새 거래명세서는 수주를 자동 생성하는 다이렉트 판매 흐름임을 안내
-                var proceed = await DialogService.ShowMessageBoxAsync(
-                    "바로 거래명세서 발행",
-                    "수주 없이 바로 거래명세서를 발행합니다.\n" +
-                    "수주 이력이 자동으로 생성되어 원장에 기록됩니다.\n\n" +
-                    "수주를 먼저 등록하려면 [취소]를 누르고 수주 메뉴에서 진행해주세요.",
-                    yesText: "바로 발행",
-                    cancelText: "취소");
-                if (proceed != true) return;
-
                 var result = await DeliveryService.SaveAsync(_draft);
                 if (!result.Success || string.IsNullOrWhiteSpace(result.DocumentNumber))
                 {
