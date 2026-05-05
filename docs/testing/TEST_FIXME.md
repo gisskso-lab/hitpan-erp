@@ -21,6 +21,15 @@
 | BOM 자재 부족 시 DB 차단 | `UPDATE WHERE current_qty >= @Qty` 실제 DB 필요 | `BomWorkflowTests.cs` |
 | 세금계산서 역분개 | 현재 비범위(작2 §3) — 구현 시 추가 | `TaxInvoiceWorkflowTests.cs` |
 
+## 통합 테스트 인프라 수정 필요 (DbFixture)
+
+| 항목 | 문제 | 수정 방법 |
+|---|---|---|
+| `DbFixture.InsertTestWarehouseAsync` | `warehouses.tenant_id → tenants` FK 제약으로 신규 UUID tenant_id 삽입 불가 | `InitializeAsync()`에서 테스트 tenant 행 먼저 INSERT, 또는 기존 테스트 계정(tenant-001) 재사용 |
+| `DbFixture.InsertTestItemAsync` | 동일 FK 문제 (`items.tenant_id → tenants`) | 동일 해결 |
+| `monthly_summary_sources.source_type` | `VARCHAR(32)` — `"purchase_receipt_confirmed"` 30자로 통과하나 확인 필요 | 실행 후 확인 |
+| 테스트 데이터 격리 전략 | 신규 UUID tenant는 FK 때문에 사용 불가 | 기존 `tenant-001` 사용 + 테스트 후 생성 데이터만 삭제, 또는 FK_CHECKS=0 세션 설정 |
+
 ## 구현 완료 후 추가할 테스트
 
 | 항목 | 조건 |
