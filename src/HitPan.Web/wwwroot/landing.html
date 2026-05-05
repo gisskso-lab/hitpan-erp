@@ -1,0 +1,527 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<meta name="description" content="히트판 ERP — 중소기업을 위한 올인원 ERP. 설명서 없이 처음부터 쓸 수 있는 업무 솔루션. 지금 베타 신청하세요." />
+<title>히트판 ERP — 처음 쓰는 사람도 그냥 되는 ERP</title>
+<link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin />
+<link rel="stylesheet" as="style" crossorigin
+      href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.css" />
+<style>
+*, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+
+:root {
+  --brand:       #0F6E56;
+  --brand-dark:  #0A5240;
+  --brand-light: #E6F4F0;
+  --text-1:      #0F1419;
+  --text-2:      #3D4852;
+  --text-3:      #6B7280;
+  --surface:     #FAFBFC;
+  --card:        #FFFFFF;
+  --border:      #EAEDF0;
+  --radius-md:   6px;
+  --radius-lg:   10px;
+  --radius-xl:   16px;
+  --shadow-sm:   0 1px 3px rgba(15,20,25,.06), 0 1px 2px rgba(15,20,25,.04);
+  --shadow-md:   0 4px 8px rgba(15,20,25,.06), 0 2px 4px rgba(15,20,25,.04);
+  --shadow-lg:   0 10px 20px rgba(15,20,25,.08), 0 4px 8px rgba(15,20,25,.04);
+  --font: "Pretendard Variable", "Pretendard", -apple-system, BlinkMacSystemFont,
+          "Apple SD Gothic Neo", "Noto Sans KR", sans-serif;
+}
+
+html { scroll-behavior: smooth; }
+body {
+  font-family: var(--font);
+  font-size: 15px;
+  line-height: 1.6;
+  color: var(--text-1);
+  background: var(--surface);
+  -webkit-font-smoothing: antialiased;
+}
+
+a { color: inherit; text-decoration: none; }
+
+/* ── 헤더 ── */
+header {
+  position: sticky; top: 0; z-index: 100;
+  background: rgba(255,255,255,.92);
+  backdrop-filter: blur(12px);
+  border-bottom: 1px solid var(--border);
+}
+.header-inner {
+  max-width: 1080px; margin: 0 auto;
+  padding: 0 24px;
+  height: 60px;
+  display: flex; align-items: center; justify-content: space-between;
+}
+.logo {
+  display: flex; align-items: center; gap: 10px;
+  font-size: 18px; font-weight: 700; letter-spacing: -.02em;
+}
+.logo-mark {
+  width: 32px; height: 32px; border-radius: 8px;
+  background: linear-gradient(135deg, var(--brand), var(--brand-dark));
+  display: grid; place-items: center;
+  color: #fff; font-size: 14px; font-weight: 700;
+  box-shadow: var(--shadow-sm);
+}
+.header-cta {
+  background: var(--brand); color: #fff;
+  border: none; border-radius: var(--radius-md);
+  padding: 8px 18px; font-size: 14px; font-weight: 600;
+  cursor: pointer; transition: background .15s;
+}
+.header-cta:hover { background: var(--brand-dark); }
+
+/* ── 히어로 ── */
+.hero {
+  max-width: 1080px; margin: 0 auto;
+  padding: 80px 24px 64px;
+  display: grid; grid-template-columns: 1fr 420px; gap: 64px; align-items: center;
+}
+.hero-badge {
+  display: inline-flex; align-items: center; gap: 6px;
+  background: var(--brand-light); color: var(--brand);
+  border-radius: var(--radius-lg); padding: 4px 12px;
+  font-size: 13px; font-weight: 600; margin-bottom: 20px;
+}
+.hero-badge::before {
+  content: ""; width: 6px; height: 6px; border-radius: 50%;
+  background: var(--brand); animation: pulse 2s infinite;
+}
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: .4; }
+}
+.hero h1 {
+  font-size: clamp(28px, 4vw, 42px);
+  font-weight: 700; line-height: 1.2;
+  letter-spacing: -.02em; margin-bottom: 20px;
+}
+.hero h1 em { color: var(--brand); font-style: normal; }
+.hero p {
+  font-size: 16px; color: var(--text-2); line-height: 1.7;
+  margin-bottom: 32px; max-width: 440px;
+}
+.hero-actions { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
+.btn-primary {
+  background: var(--brand); color: #fff;
+  border: none; border-radius: var(--radius-md);
+  padding: 13px 28px; font-size: 15px; font-weight: 600;
+  cursor: pointer; transition: background .15s, transform .1s;
+}
+.btn-primary:hover { background: var(--brand-dark); transform: translateY(-1px); }
+.btn-primary:active { transform: translateY(0); }
+.hero-note { font-size: 13px; color: var(--text-3); }
+
+/* 히어로 오른쪽 — 통계 카드 */
+.hero-stats {
+  display: grid; grid-template-columns: 1fr 1fr; gap: 12px;
+}
+.stat-card {
+  background: var(--card); border: 1px solid var(--border);
+  border-radius: var(--radius-lg); padding: 20px;
+  box-shadow: var(--shadow-sm);
+}
+.stat-icon {
+  width: 36px; height: 36px; border-radius: var(--radius-md);
+  display: grid; place-items: center;
+  font-size: 18px; margin-bottom: 10px;
+}
+.stat-num { font-size: 24px; font-weight: 700; letter-spacing: -.02em; color: var(--text-1); }
+.stat-label { font-size: 12px; color: var(--text-3); margin-top: 2px; }
+.stat-card.accent { background: var(--brand); border-color: var(--brand); grid-column: span 2; }
+.stat-card.accent .stat-num,
+.stat-card.accent .stat-label { color: #fff; }
+.stat-card.accent .stat-icon { background: rgba(255,255,255,.15); }
+
+/* ── 기능 3가지 ── */
+.features {
+  background: var(--card); border-top: 1px solid var(--border); border-bottom: 1px solid var(--border);
+  padding: 64px 24px;
+}
+.features-inner { max-width: 1080px; margin: 0 auto; }
+.section-label {
+  font-size: 13px; font-weight: 600; color: var(--brand);
+  text-transform: uppercase; letter-spacing: .06em; margin-bottom: 12px;
+}
+.section-title {
+  font-size: clamp(22px, 3vw, 30px); font-weight: 700;
+  letter-spacing: -.02em; margin-bottom: 8px;
+}
+.section-sub { font-size: 15px; color: var(--text-2); margin-bottom: 48px; }
+.feature-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 24px; }
+.feature-card {
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: var(--radius-xl); padding: 28px;
+  transition: box-shadow .2s, transform .2s;
+}
+.feature-card:hover { box-shadow: var(--shadow-md); transform: translateY(-2px); }
+.feature-icon {
+  width: 48px; height: 48px; border-radius: var(--radius-lg);
+  background: var(--brand-light); display: grid; place-items: center;
+  font-size: 22px; margin-bottom: 16px;
+}
+.feature-card h3 { font-size: 16px; font-weight: 700; margin-bottom: 8px; }
+.feature-card p { font-size: 14px; color: var(--text-2); line-height: 1.6; }
+
+/* ── 워크플로우 흐름 ── */
+.workflow { padding: 64px 24px; }
+.workflow-inner { max-width: 1080px; margin: 0 auto; }
+.flow-steps {
+  display: grid; grid-template-columns: repeat(6, 1fr); gap: 0;
+  margin-top: 40px; position: relative;
+}
+.flow-steps::before {
+  content: ""; position: absolute;
+  top: 28px; left: calc(100% / 12); right: calc(100% / 12);
+  height: 2px; background: var(--border);
+}
+.flow-step { text-align: center; position: relative; padding: 0 8px; }
+.flow-dot {
+  width: 56px; height: 56px; border-radius: 50%;
+  background: var(--card); border: 2px solid var(--border);
+  display: grid; place-items: center; margin: 0 auto 12px;
+  font-size: 20px; position: relative; z-index: 1;
+  box-shadow: var(--shadow-sm);
+  transition: border-color .2s, box-shadow .2s;
+}
+.flow-step:hover .flow-dot {
+  border-color: var(--brand); box-shadow: 0 0 0 4px var(--brand-light);
+}
+.flow-step h4 { font-size: 13px; font-weight: 600; margin-bottom: 4px; }
+.flow-step p  { font-size: 12px; color: var(--text-3); }
+
+/* ── 신청 폼 ── */
+.signup {
+  background: linear-gradient(135deg, var(--brand) 0%, var(--brand-dark) 100%);
+  padding: 64px 24px;
+}
+.signup-inner {
+  max-width: 640px; margin: 0 auto; text-align: center;
+}
+.signup-inner .section-label { color: rgba(255,255,255,.7); }
+.signup-inner .section-title,
+.signup-inner .section-sub { color: #fff; }
+.signup-inner .section-sub { color: rgba(255,255,255,.8); }
+
+.form-card {
+  background: var(--card); border-radius: var(--radius-xl);
+  padding: 32px; margin-top: 32px; text-align: left;
+  box-shadow: var(--shadow-lg);
+}
+.form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 16px; }
+.form-group { display: flex; flex-direction: column; gap: 6px; }
+.form-group label { font-size: 13px; font-weight: 600; color: var(--text-2); }
+.form-group label .req { color: var(--brand); margin-left: 2px; }
+.form-group input,
+.form-group select,
+.form-group textarea {
+  border: 1px solid var(--border); border-radius: var(--radius-md);
+  padding: 10px 12px; font-size: 14px; font-family: var(--font);
+  background: var(--surface); color: var(--text-1);
+  transition: border-color .15s, box-shadow .15s;
+  outline: none;
+}
+.form-group input:focus,
+.form-group select:focus,
+.form-group textarea:focus {
+  border-color: var(--brand);
+  box-shadow: 0 0 0 3px rgba(15,110,86,.12);
+}
+.form-group textarea { resize: vertical; min-height: 80px; }
+.form-full { grid-column: span 2; }
+.form-submit {
+  width: 100%; background: var(--brand); color: #fff;
+  border: none; border-radius: var(--radius-md);
+  padding: 14px; font-size: 15px; font-weight: 600;
+  cursor: pointer; margin-top: 8px;
+  transition: background .15s, transform .1s;
+}
+.form-submit:hover  { background: var(--brand-dark); transform: translateY(-1px); }
+.form-submit:active { transform: translateY(0); }
+.form-submit:disabled { opacity: .6; cursor: not-allowed; transform: none; }
+.form-note { font-size: 12px; color: var(--text-3); text-align: center; margin-top: 12px; }
+
+/* 성공 메시지 */
+.form-success {
+  display: none; text-align: center; padding: 24px 0;
+}
+.form-success .success-icon {
+  width: 56px; height: 56px; border-radius: 50%;
+  background: var(--brand-light); display: grid; place-items: center;
+  font-size: 26px; margin: 0 auto 16px;
+}
+.form-success h3 { font-size: 18px; font-weight: 700; margin-bottom: 8px; }
+.form-success p  { font-size: 14px; color: var(--text-2); }
+
+/* ── 푸터 ── */
+footer {
+  border-top: 1px solid var(--border);
+  padding: 32px 24px;
+  text-align: center;
+  font-size: 13px; color: var(--text-3);
+}
+footer a { color: var(--brand); }
+
+/* ── 반응형 ── */
+@media (max-width: 768px) {
+  .hero { grid-template-columns: 1fr; gap: 40px; padding: 48px 20px 40px; }
+  .hero-stats { display: none; }
+  .feature-grid { grid-template-columns: 1fr; }
+  .flow-steps { grid-template-columns: repeat(3, 1fr); gap: 16px; }
+  .flow-steps::before { display: none; }
+  .form-row { grid-template-columns: 1fr; }
+  .form-full { grid-column: span 1; }
+}
+</style>
+</head>
+<body>
+
+<!-- 헤더 -->
+<header>
+  <div class="header-inner">
+    <div class="logo">
+      <div class="logo-mark">H</div>
+      히트판 ERP
+    </div>
+    <button class="header-cta" onclick="document.getElementById('signup').scrollIntoView({behavior:'smooth'})">
+      베타 신청하기
+    </button>
+  </div>
+</header>
+
+<!-- 히어로 -->
+<section>
+  <div class="hero">
+    <div>
+      <div class="hero-badge">🚀 베타 출시 — 선착순 20개사</div>
+      <h1>처음 쓰는 사람도<br><em>그냥 되는</em> ERP</h1>
+      <p>
+        설명서 없이, 교육 없이, 현장 직원이 앉아서 바로 시작합니다.<br>
+        매입·판매·재고·회계를 한 화면에서. 히트판 ERP.
+      </p>
+      <div class="hero-actions">
+        <button class="btn-primary" onclick="document.getElementById('signup').scrollIntoView({behavior:'smooth'})">
+          무료 베타 신청 →
+        </button>
+        <span class="hero-note">베타 기간 무료 · 설치 1분 · 데이터 보장</span>
+      </div>
+    </div>
+    <div class="hero-stats">
+      <div class="stat-card">
+        <div class="stat-icon" style="background:#E6F4F0">📦</div>
+        <div class="stat-num">6단계</div>
+        <div class="stat-label">완성된 업무 흐름</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-icon" style="background:#E8F1FB">⚡</div>
+        <div class="stat-num">1분</div>
+        <div class="stat-label">원클릭 설치</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-icon" style="background:#FDF3E2">🔒</div>
+        <div class="stat-num">AES-256</div>
+        <div class="stat-label">데이터 암호화</div>
+      </div>
+      <div class="stat-card accent">
+        <div class="stat-icon">🎯</div>
+        <div class="stat-num">베타 20개사</div>
+        <div class="stat-label">선착순 마감 · 지금 신청하세요</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- 핵심 기능 3가지 -->
+<section class="features">
+  <div class="features-inner">
+    <div class="section-label">Core Features</div>
+    <div class="section-title">업무가 끊기지 않습니다</div>
+    <div class="section-sub">발주부터 세금계산서까지 — 한 번 입력으로 모든 장부가 자동 반영됩니다.</div>
+    <div class="feature-grid">
+      <div class="feature-card">
+        <div class="feature-icon">🛒</div>
+        <h3>매입 · 판매 일괄 처리</h3>
+        <p>발주 → 매입 → 재고 반영이 한 흐름으로 이어집니다. 거래명세서 확정 한 번으로 재고·미수금·회계가 동시에 업데이트됩니다.</p>
+      </div>
+      <div class="feature-card">
+        <div class="feature-icon">📊</div>
+        <h3>실시간 재고 · 원장</h3>
+        <p>품목별 재고 현황, 거래처별 잔액, 월별 손익이 언제나 최신 상태로 보입니다. 엑셀 따로 정리할 필요가 없습니다.</p>
+      </div>
+      <div class="feature-card">
+        <div class="feature-icon">🧾</div>
+        <h3>세금계산서 · 회계 자동화</h3>
+        <p>거래명세서에서 세금계산서 발행까지 클릭 하나. 분개는 자동 생성되고 부가세 신고 자료도 바로 조회됩니다.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- 워크플로우 6단계 -->
+<section class="workflow">
+  <div class="workflow-inner">
+    <div class="section-label">Workflow</div>
+    <div class="section-title">6단계 업무 흐름, 한 시스템에</div>
+    <div class="section-sub">더존·이카운트처럼 복잡하지 않습니다. 현장 직원 눈높이에 맞췄습니다.</div>
+    <div class="flow-steps">
+      <div class="flow-step">
+        <div class="flow-dot">⚙️</div>
+        <h4>설정</h4>
+        <p>사원·권한 등록</p>
+      </div>
+      <div class="flow-step">
+        <div class="flow-dot">🏢</div>
+        <h4>마스터</h4>
+        <p>업체·상품 등록</p>
+      </div>
+      <div class="flow-step">
+        <div class="flow-dot">📥</div>
+        <h4>매입</h4>
+        <p>발주 → 입고</p>
+      </div>
+      <div class="flow-step">
+        <div class="flow-dot">📤</div>
+        <h4>판매</h4>
+        <p>수주 → 명세서</p>
+      </div>
+      <div class="flow-step">
+        <div class="flow-dot">📈</div>
+        <h4>현황</h4>
+        <p>재고·매출 조회</p>
+      </div>
+      <div class="flow-step">
+        <div class="flow-dot">💰</div>
+        <h4>재무</h4>
+        <p>회계·세금계산서</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- 베타 신청 폼 -->
+<section class="signup" id="signup">
+  <div class="signup-inner">
+    <div class="section-label">Beta Program</div>
+    <div class="section-title">베타 신청 — 선착순 20개사</div>
+    <div class="section-sub">베타 기간 완전 무료. 설치부터 사용까지 전담 지원합니다.</div>
+
+    <div class="form-card">
+      <div id="form-area">
+        <div class="form-row">
+          <div class="form-group">
+            <label>회사명 <span class="req">*</span></label>
+            <input type="text" id="companyName" placeholder="(주)히트판" maxlength="100" />
+          </div>
+          <div class="form-group">
+            <label>담당자명 <span class="req">*</span></label>
+            <input type="text" id="contactName" placeholder="홍길동" maxlength="50" />
+          </div>
+        </div>
+        <div class="form-row">
+          <div class="form-group">
+            <label>연락처 <span class="req">*</span></label>
+            <input type="tel" id="phone" placeholder="010-0000-0000" maxlength="20" />
+          </div>
+          <div class="form-group">
+            <label>이메일 <span class="req">*</span></label>
+            <input type="email" id="email" placeholder="hong@company.com" maxlength="100" />
+          </div>
+        </div>
+        <div class="form-row">
+          <div class="form-group form-full">
+            <label>직원 수</label>
+            <select id="employeeCnt">
+              <option value="">선택 (선택사항)</option>
+              <option value="1-5">1~5명</option>
+              <option value="6-20">6~20명</option>
+              <option value="21-50">21~50명</option>
+              <option value="51+">51명 이상</option>
+            </select>
+          </div>
+        </div>
+        <div class="form-row">
+          <div class="form-group form-full">
+            <label>문의사항</label>
+            <textarea id="message" placeholder="현재 사용 중인 솔루션이나 불편한 점을 알려주시면 맞춤 안내를 드립니다."></textarea>
+          </div>
+        </div>
+        <button class="form-submit" id="submitBtn" onclick="submitForm()">
+          무료 베타 신청하기
+        </button>
+        <div class="form-note">
+          제출하신 정보는 베타 프로그램 운영 목적으로만 사용됩니다.
+        </div>
+      </div>
+
+      <div class="form-success" id="form-success">
+        <div class="success-icon">✅</div>
+        <h3>신청이 완료되었습니다!</h3>
+        <p>빠른 시간 내 담당자가 연락드리겠습니다.<br>히트판 ERP와 함께해 주셔서 감사합니다.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- 푸터 -->
+<footer>
+  <p>© 2026 히트판 ERP · <a href="mailto:support@hitpan.kr">support@hitpan.kr</a></p>
+  <p style="margin-top:6px">중소기업을 위한 올인원 ERP 솔루션</p>
+</footer>
+
+<script>
+const API_BASE = 'http://localhost:5257';
+
+async function submitForm() {
+  const btn = document.getElementById('submitBtn');
+  const companyName = document.getElementById('companyName').value.trim();
+  const contactName = document.getElementById('contactName').value.trim();
+  const phone       = document.getElementById('phone').value.trim();
+  const email       = document.getElementById('email').value.trim();
+  const employeeCnt = document.getElementById('employeeCnt').value;
+  const message     = document.getElementById('message').value.trim();
+
+  if (!companyName || !contactName || !phone || !email) {
+    alert('회사명, 담당자명, 연락처, 이메일은 필수 항목입니다.');
+    return;
+  }
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    alert('이메일 형식을 확인해주세요.');
+    return;
+  }
+
+  btn.disabled = true;
+  btn.textContent = '신청 중...';
+
+  try {
+    const res = await fetch(API_BASE + '/api/landing/beta-signup', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ companyName, contactName, phone, email, employeeCnt, message })
+    });
+    const data = await res.json();
+    if (res.ok && data.success) {
+      document.getElementById('form-area').style.display = 'none';
+      document.getElementById('form-success').style.display = 'block';
+    } else {
+      alert(data.message || '신청 중 오류가 발생했습니다. 다시 시도해주세요.');
+      btn.disabled = false;
+      btn.textContent = '무료 베타 신청하기';
+    }
+  } catch (e) {
+    alert('서버에 연결할 수 없습니다. 잠시 후 다시 시도해주세요.');
+    btn.disabled = false;
+    btn.textContent = '무료 베타 신청하기';
+  }
+}
+
+// 엔터키 제출
+document.addEventListener('keydown', function(e) {
+  if (e.key === 'Enter' && e.target.tagName !== 'TEXTAREA') submitForm();
+});
+</script>
+</body>
+</html>
