@@ -30,7 +30,7 @@ public class CreateReceiptItemRequest
     [Range(0.0001, double.MaxValue, ErrorMessage = "수량은 0보다 커야 합니다.")]
     public decimal Qty { get; set; }
 
-    [Range(0, double.MaxValue, ErrorMessage = "단가는 음수일 수 없습니다.")]
+    [Range(0.0001, double.MaxValue, ErrorMessage = "단가는 0보다 커야 합니다.")]
     public decimal UnitPrice { get; set; }
 
     [Range(0, double.MaxValue, ErrorMessage = "공급가액은 음수일 수 없습니다.")]

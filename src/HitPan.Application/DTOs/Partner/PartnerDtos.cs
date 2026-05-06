@@ -1,3 +1,5 @@
+using System.ComponentModel.DataAnnotations;
+
 namespace HitPan.Application.DTOs.Partner;
 
 public class PartnerListDto
@@ -58,44 +60,63 @@ public class PartnerDetailDto : PartnerListDto
 
 public class CreatePartnerDto
 {
+    [Required]
+    [MaxLength(100)]
     public string PartnerName { get; set; } = "";
 
+    [MaxLength(20)]
     public string PartnerType { get; set; } = "both";
 
+    [MaxLength(20)]
     public string? PartnerCode { get; set; }
 
+    [MaxLength(12)]
     public string? BizNo { get; set; }
 
+    [MaxLength(50)]
     public string? CeoName { get; set; }
 
+    [MaxLength(50)]
     public string? BizType { get; set; }
 
+    [MaxLength(50)]
     public string? BizItem { get; set; }
 
+    [MaxLength(20)]
     public string? Tel { get; set; }
 
+    [MaxLength(20)]
     public string? Fax { get; set; }
 
+    [MaxLength(10)]
     public string? ZipCode { get; set; }
 
+    [MaxLength(200)]
     public string? Address { get; set; }
 
+    [MaxLength(200)]
     public string? AddressDetail { get; set; }
 
+    [MaxLength(100)]
     public string? Email { get; set; }
 
+    [MaxLength(50)]
     public string? ManagerName { get; set; }
 
+    [MaxLength(20)]
     public string? ManagerTel { get; set; }
 
     public decimal CreditLimit { get; set; }
 
+    [MaxLength(1)]
     public string PriceGrade { get; set; } = "A";
 
+    [MaxLength(20)]
     public string TaxType { get; set; } = "taxable";
 
     public int PaymentTerms { get; set; } = 30;
 
+    [MaxLength(500)]
     public string? Memo { get; set; }
 }
 

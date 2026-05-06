@@ -55,16 +55,23 @@ public class ItemDetailDto : ItemListDto
 
 public class CreateItemDto
 {
+    [Required]
+    [MaxLength(100)]
     public string ItemName { get; set; } = "";
 
+    [MaxLength(30)]
     public string? ItemCode { get; set; }
 
+    [MaxLength(50)]
     public string? ItemGroup { get; set; }
 
+    [MaxLength(20)]
     public string ItemType { get; set; } = "product";
 
+    [MaxLength(10)]
     public string Unit { get; set; } = "EA";
 
+    [MaxLength(100)]
     public string? Spec { get; set; }
 
     [Range(0, double.MaxValue, ErrorMessage = "매입단가는 음수일 수 없습니다.")]
@@ -91,8 +98,10 @@ public class CreateItemDto
     // 사장님 헌법 (2026-04-26): 자동발주 시 매입확정까지 자동 사슬.
     public bool AutoReceiveOnOrder { get; set; }
 
+    [MaxLength(50)]
     public string? Barcode { get; set; }
 
+    [MaxLength(500)]
     public string? Memo { get; set; }
 }
 

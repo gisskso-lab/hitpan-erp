@@ -43,6 +43,7 @@ Log.Logger = new LoggerConfiguration()
 
 var builder = WebApplication.CreateBuilder(args);
 builder.Host.UseSerilog();
+builder.Host.UseWindowsService();
 
 // EXE 옆 wwwroot가 있으면 WebRoot로 설정 (installer 모드)
 var exeDir = Path.GetDirectoryName(Environment.ProcessPath) ?? AppContext.BaseDirectory;
@@ -225,7 +226,19 @@ var hasBlazor = File.Exists(Path.Combine(builder.Environment.WebRootPath ?? "", 
 if (hasBlazor)
 {
     app.UseBlazorFrameworkFiles();
-    app.UseStaticFiles();
+    app.UseStaticFiles(new StaticFileOptions
+    {
+        OnPrepareResponse = ctx =>
+        {
+            var file = ctx.File.Name;
+            if (file == "appsettings.json" || file == "index.html" || file.EndsWith(".json"))
+            {
+                ctx.Context.Response.Headers["Cache-Control"] = "no-cache, no-store, must-revalidate";
+                ctx.Context.Response.Headers["Pragma"] = "no-cache";
+                ctx.Context.Response.Headers["Expires"] = "0";
+            }
+        }
+    });
 }
 
 app.UseMiddleware<AuditLogMiddleware>();
@@ -241,6 +254,9 @@ app.UseMiddleware<SessionLimitMiddleware>();
 app.UseMiddleware<IdempotencyMiddleware>();
 
 app.MapControllers();
+
+// /api/* 경로는 컨트롤러가 없으면 404 반환 (Blazor fallback이 가로채지 않도록)
+app.Map("/api/{**slug}", () => Results.NotFound(new { message = "요청한 API 엔드포인트를 찾을 수 없습니다." }));
 
 if (hasBlazor)
 {
