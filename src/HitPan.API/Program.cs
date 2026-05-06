@@ -255,8 +255,6 @@ app.UseMiddleware<IdempotencyMiddleware>();
 
 app.MapControllers();
 
-// /api/* 경로는 컨트롤러가 없으면 404 반환 (Blazor fallback이 가로채지 않도록)
-app.Map("/api/{**slug}", () => Results.NotFound(new { message = "요청한 API 엔드포인트를 찾을 수 없습니다." }));
 
 if (hasBlazor)
 {

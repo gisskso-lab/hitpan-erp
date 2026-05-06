@@ -1,12 +1,138 @@
 @page "/stock/ledger"
 @namespace HitPan.Web.Pages.StockUi
 @attribute [Authorize]
+@using HitPan.Web.Models
+@using HitPan.Web.Services
+@using System.Net.Http.Json
+@inject HttpClient Http
+@inject ItemMasterService ItemSvc
+@inject PartnerMasterService PartnerSvc
+@inject IJSRuntime Js
 
 <PageTitle>각종 수불부</PageTitle>
-<MudContainer MaxWidth="MaxWidth.Small" Class="d-flex align-center justify-center" Style="height:calc(100vh - 120px)">
-    <MudPaper Class="pa-8 text-center" Elevation="0">
-        <MudIcon Icon="@Icons.Material.Filled.Construction" Size="Size.Large" Color="Color.Warning" Class="mb-4" />
-        <MudText Typo="Typo.h5" Class="mb-2">각종 수불부</MudText>
-        <MudText Typo="Typo.body1" Color="Color.Secondary">준비중입니다.</MudText>
-    </MudPaper>
-</MudContainer>
+<PageHeader Title="각종 수불부" Subtitle="상품별 · 업체별 입출고 이력 조회" />
+
+<MudPaper Class="pa-3 mb-3" Elevation="0" Style="border:1px solid var(--mud-palette-lines-default);border-radius:12px">
+    <div class="hitpan-filter-bar">
+        <div class="hitpan-filter-field hitpan-filter-field--sm">
+            <MudSelect T="string" Label="수불부 종류" @bind-Value="_viewType" Variant="Variant.Outlined" Margin="Margin.Dense">
+                <MudSelectItem Value="@("item")">상품별 수불부</MudSelectItem>
+                <MudSelectItem Value="@("partner")">업체별 수불부</MudSelectItem>
+            </MudSelect>
+        </div>
+        <div class="hitpan-filter-field hitpan-filter-field--sm">
+            <MudDatePicker @bind-Date="_from" Label="시작일" Variant="Variant.Outlined" Margin="Margin.Dense" DateFormat="yyyy-MM-dd" />
+        </div>
+        <div class="hitpan-filter-field hitpan-filter-field--sm">
+            <MudDatePicker @bind-Date="_to" Label="종료일" Variant="Variant.Outlined" Margin="Margin.Dense" DateFormat="yyyy-MM-dd" />
+        </div>
+        @if (_viewType == "item")
+        {
+            <div class="hitpan-filter-field hitpan-filter-field--md">
+                <MudAutocomplete T="ItemListModel" Label="상품명 검색"
+                    Value="_selectedItem" ValueChanged="OnItemSelected"
+                    SearchFunc="SearchItem" ToStringFunc="@(i => i?.ItemName ?? "")"
+                    Variant="Variant.Outlined" Margin="Margin.Dense" Dense="true"
+                    ResetValueOnEmptyText="true" CoerceText="false" />
+            </div>
+        }
+        else
+        {
+            <div class="hitpan-filter-field hitpan-filter-field--md">
+                <MudAutocomplete T="PartnerListRow" Label="업체명 검색"
+                    Value="_selectedPartner" ValueChanged="OnPartnerSelected"
+                    SearchFunc="SearchPartner" ToStringFunc="@(p => p?.PartnerName ?? "")"
+                    Variant="Variant.Outlined" Margin="Margin.Dense" Dense="true"
+                    ResetValueOnEmptyText="true" CoerceText="false" />
+            </div>
+        }
+        <div class="hitpan-filter-actions">
+            <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="SearchAsync">조회</MudButton>
+            <MudButton Variant="Variant.Outlined" Size="Size.Small" StartIcon="@Icons.Material.Filled.Print" OnClick="PrintAsync">인쇄</MudButton>
+        </div>
+    </div>
+</MudPaper>
+
+<MudPaper Elevation="0" Class="hitpan-card" Style="overflow:hidden">
+    <MudTable T="StockLedgerRow" Items="_data" Dense="true" Hover="true" Striped="true" FixedHeader="true" Height="calc(100vh - 300px)">
+        <HeaderContent>
+            <MudTh>@(_viewType == "item" ? "품목명" : "업체명")</MudTh>
+            <MudTh Style="text-align:right">입고수량</MudTh>
+            <MudTh Style="text-align:right">출고수량</MudTh>
+            <MudTh Style="text-align:right">잔량</MudTh>
+            <MudTh Style="text-align:right">입고금액</MudTh>
+            <MudTh Style="text-align:right">출고금액</MudTh>
+        </HeaderContent>
+        <RowTemplate>
+            <MudTd>@context.Label</MudTd>
+            <MudTd Style="text-align:right">@context.QtyIn.ToString("N1")</MudTd>
+            <MudTd Style="text-align:right">@context.QtyOut.ToString("N1")</MudTd>
+            <MudTd Style="text-align:right;font-weight:600">@context.Balance.ToString("N1")</MudTd>
+            <MudTd Style="text-align:right">@context.AmountIn.ToString("N0")</MudTd>
+            <MudTd Style="text-align:right">@context.AmountOut.ToString("N0")</MudTd>
+        </RowTemplate>
+        <NoRecordsContent><MudText Class="pa-4" Style="color:var(--hitpan-text-faint)">조회된 수불부 데이터가 없습니다.</MudText></NoRecordsContent>
+    </MudTable>
+</MudPaper>
+
+@code {
+    private string _viewType = "item";
+    private DateTime? _from = DateTime.Today.AddDays(-30);
+    private DateTime? _to = DateTime.Today;
+    private ItemListModel? _selectedItem;
+    private PartnerListRow? _selectedPartner;
+    private List<ItemListModel> _items = new();
+    private List<PartnerListRow> _partners = new();
+    private List<StockLedgerRow> _data = new();
+
+    protected override async Task OnInitializedAsync()
+    {
+        var itemTask = ItemSvc.GetListAsync();
+        var partnerTask = PartnerSvc.GetListAsync();
+        await Task.WhenAll(itemTask, partnerTask);
+        _items = itemTask.Result ?? new();
+        _partners = partnerTask.Result ?? new();
+        await SearchAsync();
+    }
+
+    private void OnItemSelected(ItemListModel? item) => _selectedItem = item;
+    private void OnPartnerSelected(PartnerListRow? p) => _selectedPartner = p;
+
+    private Task<IEnumerable<ItemListModel>> SearchItem(string? value, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(value)) return Task.FromResult(_items.AsEnumerable());
+        return Task.FromResult(_items.Where(i =>
+            i.ItemName.Contains(value, StringComparison.OrdinalIgnoreCase) ||
+            i.ItemCode.Contains(value, StringComparison.OrdinalIgnoreCase)));
+    }
+
+    private Task<IEnumerable<PartnerListRow>> SearchPartner(string? value, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(value)) return Task.FromResult(_partners.AsEnumerable());
+        return Task.FromResult(_partners.Where(p =>
+            p.PartnerName.Contains(value, StringComparison.OrdinalIgnoreCase) ||
+            p.PartnerCode.Contains(value, StringComparison.OrdinalIgnoreCase)));
+    }
+
+    private async Task SearchAsync()
+    {
+        var qs = new List<string> { $"view={_viewType}" };
+        if (_from.HasValue) qs.Add($"from={_from:yyyy-MM-dd}");
+        if (_to.HasValue) qs.Add($"to={_to:yyyy-MM-dd}");
+        if (_viewType == "item" && _selectedItem is not null)
+            qs.Add($"partner={Uri.EscapeDataString(_selectedItem.ItemName)}");
+        if (_viewType == "partner" && _selectedPartner is not null)
+            qs.Add($"partner={Uri.EscapeDataString(_selectedPartner.PartnerName)}");
+        try
+        {
+            _data = await Http.GetFromJsonAsync<List<StockLedgerRow>>("api/reports/stock-ledger?" + string.Join("&", qs)) ?? new();
+        }
+        catch
+        {
+            _data = new();
+        }
+        StateHasChanged();
+    }
+
+    private async Task PrintAsync() => await Js.InvokeVoidAsync("print");
+}

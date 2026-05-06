@@ -9,9 +9,9 @@
 
 <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
     <MudText Typo="Typo.h6">내가 보낸 결재</MudText>
-    <MudText Style="font-size:12px;color:var(--mud-palette-text-secondary)">
-        내가 기안한 결재 문서 진행 현황
-    </MudText>
+    <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Add" OnClick="@(() => _newDraftOpen = true)">
+        기안 작성
+    </MudButton>
 </div>
 
 @if (_loading)
@@ -58,6 +58,23 @@ else
     </MudPaper>
 }
 
+@* ── 기안 작성 다이얼로그 ── *@
+<MudDialog @bind-Visible="_newDraftOpen" Options="@(new DialogOptions { MaxWidth = MaxWidth.Small, FullWidth = true })">
+    <TitleContent><MudText Typo="Typo.h6">기안 작성</MudText></TitleContent>
+    <DialogContent>
+        <MudText Typo="Typo.body2" Color="Color.Secondary" Class="mb-4">
+            경비처리, 발주, 거래명세서 등 각 문서에서 결재요청 버튼을 사용하거나,<br />
+            아래에서 문서 유형을 선택해 해당 화면으로 이동하세요.
+        </MudText>
+        <MudList T="string" Dense="true">
+            <MudListItem T="string" Icon="@Icons.Material.Filled.Receipt" Href="/accounting/expenses">경비처리 →</MudListItem>
+            <MudListItem T="string" Icon="@Icons.Material.Filled.ShoppingCart" Href="/purchase-orders">발주 →</MudListItem>
+            <MudListItem T="string" Icon="@Icons.Material.Filled.LocalShipping" Href="/deliveries">거래명세서 →</MudListItem>
+        </MudList>
+    </DialogContent>
+    <DialogActions><MudButton OnClick="@(() => _newDraftOpen = false)">닫기</MudButton></DialogActions>
+</MudDialog>
+
 @* ── 상세 다이얼로그 ── *@
 @if (_detail is not null)
 {
@@ -94,6 +111,7 @@ else
     private ApprovalDetailModel? _detail;
     private bool _loading = true;
     private bool _showDetail;
+    private bool _newDraftOpen;
 
     protected override async Task OnInitializedAsync()
     {

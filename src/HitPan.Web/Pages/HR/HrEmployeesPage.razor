@@ -1,12 +1,140 @@
 @page "/hr/employees"
 @namespace HitPan.Web.Pages.HrUi
 @attribute [Authorize]
+@using HitPan.Web.Models
+@using HitPan.Web.Services
+@inject EmployeeService EmpSvc
+@inject NavigationManager Nav
 
-<PageTitle>직원 등록·수정</PageTitle>
-<MudContainer MaxWidth="MaxWidth.Small" Class="d-flex align-center justify-center" Style="height:calc(100vh - 120px)">
-    <MudPaper Class="pa-8 text-center" Elevation="0">
-        <MudIcon Icon="@Icons.Material.Filled.PersonAdd" Size="Size.Large" Color="Color.Warning" Class="mb-4" />
-        <MudText Typo="Typo.h5" Class="mb-2">직원 등록·수정</MudText>
-        <MudText Typo="Typo.body1" Color="Color.Secondary">준비중입니다.</MudText>
+<PageTitle>직원 현황</PageTitle>
+<PageHeader Title="직원 현황" Subtitle="인사 등록된 전체 직원 조회 · 상세 수정은 사원관리에서" />
+
+@if (_loading)
+{
+    <MudProgressLinear Indeterminate="true" Color="Color.Primary" />
+}
+else
+{
+    @* 요약 카드 *@
+    <MudGrid Spacing="2" Class="mb-3">
+        <MudItem xs="6" md="3">
+            <MudPaper Elevation="0" Class="pa-3 hitpan-card text-center">
+                <MudText Typo="Typo.h5" Style="font-weight:700;color:var(--mud-palette-primary)">@_items.Count</MudText>
+                <MudText Typo="Typo.caption">전체 직원</MudText>
+            </MudPaper>
+        </MudItem>
+        <MudItem xs="6" md="3">
+            <MudPaper Elevation="0" Class="pa-3 hitpan-card text-center">
+                <MudText Typo="Typo.h5" Style="font-weight:700;color:var(--mud-palette-success)">@_items.Count(e => e.IsActive)</MudText>
+                <MudText Typo="Typo.caption">재직중</MudText>
+            </MudPaper>
+        </MudItem>
+        <MudItem xs="6" md="3">
+            <MudPaper Elevation="0" Class="pa-3 hitpan-card text-center">
+                <MudText Typo="Typo.h5" Style="font-weight:700;color:var(--mud-palette-warning)">@_items.Count(e => !e.IsActive)</MudText>
+                <MudText Typo="Typo.caption">퇴직</MudText>
+            </MudPaper>
+        </MudItem>
+        <MudItem xs="6" md="3">
+            <MudPaper Elevation="0" Class="pa-3 hitpan-card text-center">
+                <MudText Typo="Typo.h5" Style="font-weight:700;color:var(--mud-palette-info)">@_items.Count(e => e.HasUserAccount)</MudText>
+                <MudText Typo="Typo.caption">계정 있음</MudText>
+            </MudPaper>
+        </MudItem>
+    </MudGrid>
+
+    @* 목록 *@
+    <MudPaper Elevation="0" Class="hitpan-card">
+        <MudTable Items="_filtered" Dense="true" Hover="true" Striped="true"
+                  FixedHeader="true" Height="calc(100vh - 340px)"
+                  OnRowClick="OnRowClick" T="EmployeeListItemModel">
+            <ToolBarContent>
+                <MudTextField @bind-Value="_search" Placeholder="이름·부서·직급 검색"
+                              Adornment="Adornment.Start" AdornmentIcon="@Icons.Material.Filled.Search"
+                              Variant="Variant.Outlined" Margin="Margin.Dense"
+                              Immediate="true" DebounceInterval="200"
+                              Style="max-width:260px" />
+                <MudSpacer />
+                <MudSelect T="string" @bind-Value="_filterStatus" Label="상태" Variant="Variant.Outlined"
+                           Margin="Margin.Dense" Style="max-width:120px">
+                    <MudSelectItem Value="@("all")">전체</MudSelectItem>
+                    <MudSelectItem Value="@("active")">재직중</MudSelectItem>
+                    <MudSelectItem Value="@("inactive")">퇴직</MudSelectItem>
+                </MudSelect>
+                <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Settings"
+                           Class="ml-2" Href="/employees" Target="_self">
+                    사원관리로 이동
+                </MudButton>
+            </ToolBarContent>
+            <HeaderContent>
+                <MudTh>사번</MudTh>
+                <MudTh>성명</MudTh>
+                <MudTh>부서</MudTh>
+                <MudTh>직급</MudTh>
+                <MudTh>직책</MudTh>
+                <MudTh Style="text-align:center">연차부여</MudTh>
+                <MudTh Style="text-align:center">연차사용</MudTh>
+                <MudTh Style="text-align:center">연차잔여</MudTh>
+                <MudTh Style="text-align:center">계정</MudTh>
+                <MudTh Style="text-align:center">상태</MudTh>
+            </HeaderContent>
+            <RowTemplate>
+                <MudTd>@context.EmpNo</MudTd>
+                <MudTd Style="font-weight:600">@context.EmpName</MudTd>
+                <MudTd>@(context.DeptName ?? "-")</MudTd>
+                <MudTd>@(context.Position ?? "-")</MudTd>
+                <MudTd>@(context.JobTitle ?? "-")</MudTd>
+                <MudTd Style="text-align:center">@context.AnnualLeaveTotal.ToString("N1")</MudTd>
+                <MudTd Style="text-align:center">@context.AnnualLeaveUsed.ToString("N1")</MudTd>
+                <MudTd Style="text-align:center;font-weight:600" Class="@(context.AnnualLeaveRemaining < 0 ? "mud-error-text" : "")">
+                    @context.AnnualLeaveRemaining.ToString("N1")
+                </MudTd>
+                <MudTd Style="text-align:center">
+                    @if (context.HasUserAccount)
+                    {
+                        <MudIcon Icon="@Icons.Material.Filled.CheckCircle" Color="Color.Success" Size="Size.Small" />
+                    }
+                    else
+                    {
+                        <MudIcon Icon="@Icons.Material.Outlined.RadioButtonUnchecked" Color="Color.Default" Size="Size.Small" />
+                    }
+                </MudTd>
+                <MudTd Style="text-align:center">
+                    <MudChip T="string" Size="Size.Small" Variant="Variant.Filled"
+                             Color="@(context.IsActive ? Color.Success : Color.Default)">
+                        @(context.IsActive ? "재직" : "퇴직")
+                    </MudChip>
+                </MudTd>
+            </RowTemplate>
+            <NoRecordsContent>
+                <MudText Class="pa-4" Style="color:var(--hitpan-text-faint)">검색 결과가 없습니다.</MudText>
+            </NoRecordsContent>
+        </MudTable>
     </MudPaper>
-</MudContainer>
+}
+
+@code {
+    private List<EmployeeListItemModel> _items = new();
+    private string _search = "";
+    private string _filterStatus = "all";
+    private bool _loading = true;
+
+    private IEnumerable<EmployeeListItemModel> _filtered => _items
+        .Where(e => _filterStatus == "all" || (_filterStatus == "active" ? e.IsActive : !e.IsActive))
+        .Where(e => string.IsNullOrWhiteSpace(_search) ||
+                    e.EmpName.Contains(_search, StringComparison.OrdinalIgnoreCase) ||
+                    (e.DeptName ?? "").Contains(_search, StringComparison.OrdinalIgnoreCase) ||
+                    (e.Position ?? "").Contains(_search, StringComparison.OrdinalIgnoreCase));
+
+    protected override async Task OnInitializedAsync()
+    {
+        _items = await EmpSvc.GetListAsync();
+        _loading = false;
+    }
+
+    private void OnRowClick(TableRowClickEventArgs<EmployeeListItemModel> args)
+    {
+        if (args.Item is null) return;
+        Nav.NavigateTo($"/employees");
+    }
+}
