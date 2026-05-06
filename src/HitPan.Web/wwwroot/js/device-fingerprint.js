@@ -5,23 +5,20 @@ window.hitpanDevice = {
     // 브라우저 환경값 기반 간이 해시 (SHA-256이 아니라 js 내장 문자열 해시).
     // 서버 쪽 fingerprint 컬럼은 SHA-256 문자열 폭에 맞춰놨지만, 길이 제약만 맞으면 됨.
     getFingerprint: function () {
-        var parts = [
-            navigator.userAgent,
-            navigator.platform,
-            screen.width + 'x' + screen.height,
-            (Intl && Intl.DateTimeFormat) ? Intl.DateTimeFormat().resolvedOptions().timeZone : '',
-            navigator.language || ''
-        ];
-        var s = parts.join('|');
-        var hash = 0;
-        for (var i = 0; i < s.length; i++) {
-            hash = ((hash << 5) - hash) + s.charCodeAt(i);
-            hash |= 0;
-        }
-        // 16진수 16자리 패딩
-        var hex = Math.abs(hash).toString(16);
-        while (hex.length < 16) hex = '0' + hex;
-        return hex;
+        try {
+            var key = 'hitpan_fp_id';
+            var id = localStorage.getItem(key);
+            if (!id) {
+                id = (typeof crypto !== 'undefined' && crypto.randomUUID)
+                    ? crypto.randomUUID()
+                    : 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function (c) {
+                        var r = Math.random() * 16 | 0;
+                        return (c === 'x' ? r : (r & 0x3 | 0x8)).toString(16);
+                    });
+                localStorage.setItem(key, id);
+            }
+            return id;
+        } catch (e) { return ''; }
     },
 
     // UA 기반 디바이스 타입 간이 판별
