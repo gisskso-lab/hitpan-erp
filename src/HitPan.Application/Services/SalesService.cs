@@ -457,7 +457,7 @@ public class SalesService : ISalesService
                 sourceType: "delivery_confirmed",
                 sourceId: delivery.DeliveryId,
                 field: MonthlySummaryGuard.SummaryField.TotalSales,
-                amount: delivery.TotalAmount + delivery.VatAmount,
+                amount: delivery.TotalAmount,
                 ct: ct);
 
             // 4) 회계 자동 기표 (차변 외상매출금 / 대변 매출+부가세예수금)
@@ -488,7 +488,7 @@ public class SalesService : ISalesService
                   last_updated_at = NOW(6)
                 """,
                 new { TenantId = delivery.TenantId, PartnerId = delivery.PartnerId,
-                      Amount = delivery.TotalAmount + delivery.VatAmount },
+                      Amount = delivery.TotalAmount },
                 transaction: dbTx, cancellationToken: ct));
 
             // 6) 전체 커밋 — EF + Dapper 쓰기가 원자적으로 확정
@@ -979,7 +979,7 @@ public class SalesService : ISalesService
             await _db.ExecuteAsync(new CommandDefinition(
                 """
                 UPDATE partner_balance pb
-                SET total_sales = COALESCE((SELECT SUM(total_amount+vat_amount) FROM sales_deliveries
+                SET total_sales = COALESCE((SELECT SUM(total_amount) FROM sales_deliveries
                                             WHERE tenant_id=@Tid AND partner_id=@Pid AND status='confirmed'), 0),
                     total_receipt = COALESCE((SELECT SUM(amount) FROM collections
                                               WHERE tenant_id=@Tid AND partner_id=@Pid AND is_active=1
@@ -1014,7 +1014,7 @@ public class SalesService : ISalesService
                 sourceType: "delivery_confirmed",
                 sourceId: deliveryId,
                 field: MonthlySummaryGuard.SummaryField.TotalSales,
-                amount: -((decimal)header.total_amount + (decimal)header.vat_amount),
+                amount: -(decimal)header.total_amount,
                 ct: ct);
 
             // 8) 상태 변경

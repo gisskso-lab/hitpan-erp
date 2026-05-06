@@ -138,19 +138,7 @@ public sealed class SyncEventPublisher : IEventPublisher
     private async Task OnBomAssembled(BomAssembledEvent b, CancellationToken ct)
     {
         // ※ item_stock 업데이트는 BomService.AssembleAsync에서 이미 처리됨
-        //   여기서는 월별 요약·안전재고 알림만 담당 (이중 처리 방지)
-
-        // monthly_summary 가산 — 멱등 가드 (작4 P0-4)
-        var bomCost = b.ProductionCost * b.ProducedQty;
-        await HitPan.Application.Services.MonthlySummaryGuard.TryApplyAsync(
-            _db, dbTx: null,
-            tenantId: b.TenantId,
-            date: DateTime.Now,
-            sourceType: "bom_assembled",
-            sourceId: b.BomId,
-            field: HitPan.Application.Services.MonthlySummaryGuard.SummaryField.TotalPurchase,
-            amount: bomCost,
-            ct: ct).ConfigureAwait(false);
+        // ※ BOM 제조원가는 내부 제조비용이므로 total_purchase(외부 매입)에 가산하지 않음 (20260506작3 봉합)
 
         await CheckSafetyStockAsync(b.TenantId, b.Materials.Select(x => x.ItemId).ToList(), ct).ConfigureAwait(false);
     }

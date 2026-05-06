@@ -348,7 +348,7 @@ public class StockService : IStockService
                    CASE WHEN l.move_type = 'in' THEN l.qty_in ELSE -l.qty_out END AS DiffQty,
                    CASE WHEN l.move_type = 'in' THEN l.qty_in ELSE l.qty_out END AS ActualQty,
                    CASE WHEN l.move_type = 'in' THEN 'increase' ELSE 'decrease' END AS AdjustType,
-                   l.created_at AS AdjustedAt
+                   l.ledger_date AS AdjustedAt
             FROM stock_ledger l
             JOIN items i ON i.item_id = l.item_id AND i.tenant_id = l.tenant_id
             LEFT JOIN warehouses w ON w.warehouse_id = l.warehouse_id AND w.tenant_id = l.tenant_id
@@ -356,7 +356,7 @@ public class StockService : IStockService
               AND l.source_type = 'adjustment'
               AND (@From IS NULL OR l.ledger_date >= @From)
               AND (@To IS NULL OR l.ledger_date <= @To)
-            ORDER BY l.created_at DESC
+            ORDER BY l.ledger_date DESC
             """;
         var rows = await _dbConnection.QueryAsync<StockAdjustResultDto>(
             new CommandDefinition(sql, new { TenantId = tenantId, From = from, To = to }, cancellationToken: ct)).ConfigureAwait(false);

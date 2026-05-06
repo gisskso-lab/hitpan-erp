@@ -112,11 +112,13 @@ public class PurchaseController : ControllerBase
     }
 
     [HttpGet("returns")]
-    public async Task<IActionResult> GetReturns([FromQuery] DateTime? from, [FromQuery] DateTime? to, CancellationToken ct)
+    public async Task<IActionResult> GetReturns([FromQuery] string? from, [FromQuery] string? to, CancellationToken ct)
     {
         var tenantId = HttpContext.Items["TenantId"]?.ToString();
         if (string.IsNullOrEmpty(tenantId)) return Forbid();
-        var result = await _purchaseService.GetReturnsAsync(tenantId, from, to, ct);
+        DateTime? fromDate = DateTime.TryParse(from, out var fd) ? fd : null;
+        DateTime? toDate = DateTime.TryParse(to, out var td) ? td : null;
+        var result = await _purchaseService.GetReturnsAsync(tenantId, fromDate, toDate, ct);
         return Ok(result);
     }
 

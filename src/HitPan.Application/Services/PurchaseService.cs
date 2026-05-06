@@ -295,7 +295,7 @@ public class PurchaseService : IPurchaseService
                 sourceType: "purchase_receipt_confirmed",
                 sourceId: receipt.ReceiptId,
                 field: MonthlySummaryGuard.SummaryField.TotalPurchase,
-                amount: receipt.TotalAmount + receipt.VatAmount,
+                amount: receipt.TotalAmount,
                 ct: ct);
 
             // 4-A) PO 헤더 status 동기화 — receipt.PoId 가 있을 때만.
@@ -382,7 +382,7 @@ public class PurchaseService : IPurchaseService
                   last_updated_at = NOW(6)
                 """,
                 new { TenantId = receipt.TenantId, PartnerId = receipt.PartnerId,
-                      Amount = receipt.TotalAmount + receipt.VatAmount },
+                      Amount = receipt.TotalAmount },
                 transaction: dbTx, cancellationToken: ct));
 
             // 7) 전체 커밋
@@ -826,7 +826,7 @@ public class PurchaseService : IPurchaseService
                 sourceType: "purchase_return_confirmed",
                 sourceId: returnId,
                 field: MonthlySummaryGuard.SummaryField.TotalPurchase,
-                amount: -(totalAmount + vatAmount),
+                amount: -totalAmount,
                 ct: ct);
 
             // 4) partner_balance 매입 역산 (반품 확정 시 total_purchase 차감)
@@ -842,7 +842,7 @@ public class PurchaseService : IPurchaseService
                   total_purchase  = total_purchase - @Amount,
                   last_updated_at = NOW(6)
                 """,
-                new { TenantId = tenantId, PartnerId = partnerId, Amount = totalAmount + vatAmount },
+                new { TenantId = tenantId, PartnerId = partnerId, Amount = totalAmount },
                 transaction: dbTx,
                 cancellationToken: ct));
 
