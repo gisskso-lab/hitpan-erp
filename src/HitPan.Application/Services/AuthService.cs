@@ -1,5 +1,6 @@
 using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
+using System.Security.Cryptography;
 using System.Text;
 using Dapper;
 using HitPan.Application.DTOs.Auth;
@@ -94,7 +95,7 @@ public class AuthService : IAuthService
             {
                 TokenId = Guid.NewGuid().ToString(),
                 UserId = user.Id,
-                TokenHash = response.RefreshToken,
+                TokenHash = HashToken(response.RefreshToken),
                 ExpiresAt = DateTime.UtcNow.Add(RefreshTokenLifetime)
             });
 
@@ -161,7 +162,7 @@ public class AuthService : IAuthService
         var conn = _unitOfWork.GetDbConnection();
         var tokenRecord = await conn.ExecuteScalarAsync<int?>(
             "SELECT is_revoked FROM refresh_tokens WHERE user_id = @UserId AND token_hash = @TokenHash",
-            new { UserId = userId, TokenHash = request.RefreshToken });
+            new { UserId = userId, TokenHash = HashToken(request.RefreshToken) });
         if (tokenRecord is null || tokenRecord.Value == 1)
         {
             throw new UnauthorizedAccessException("로그아웃된 토큰입니다. 다시 로그인해주세요.");
@@ -236,6 +237,9 @@ public class AuthService : IAuthService
             RedirectToWelcome = redirectToWelcome
         };
     }
+
+    private static string HashToken(string token)
+        => Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(token)));
 
     private static string MapLegacyRole(string role)
     {
