@@ -1,12 +1,247 @@
 @page "/accounting/accounts"
 @namespace HitPan.Web.Pages.FinanceUi
 @attribute [Authorize]
+@using HitPan.Web.Models
+@using HitPan.Web.Services
+@inject AccountService AccSvc
+@inject ISnackbar Snackbar
+@inject IDialogService Dialog
 
 <PageTitle>계정과목</PageTitle>
-<MudContainer MaxWidth="MaxWidth.Small" Class="d-flex align-center justify-center" Style="height:calc(100vh - 120px)">
-    <MudPaper Class="pa-8 text-center" Elevation="0">
-        <MudIcon Icon="@Icons.Material.Filled.Construction" Size="Size.Large" Color="Color.Warning" Class="mb-4" />
-        <MudText Typo="Typo.h5" Class="mb-2">계정과목</MudText>
-        <MudText Typo="Typo.body1" Color="Color.Secondary">준비중입니다.</MudText>
+<PageHeader Title="계정과목" Subtitle="회계 계정과목 관리 · 수익·비용·자산·부채·자본" />
+
+@if (_loading)
+{
+    <MudProgressLinear Indeterminate="true" Color="Color.Primary" />
+}
+else
+{
+    @* 상단 도구바 *@
+    <MudPaper Elevation="0" Class="pa-3 mb-3 hitpan-card">
+        <div class="d-flex align-center gap-2 flex-wrap">
+            <MudSelect T="string" @bind-Value="_filterType" Label="유형" Variant="Variant.Outlined"
+                       Margin="Margin.Dense" Style="max-width:140px">
+                <MudSelectItem Value="@("all")">전체</MudSelectItem>
+                <MudSelectItem Value="@("asset")">자산</MudSelectItem>
+                <MudSelectItem Value="@("liability")">부채</MudSelectItem>
+                <MudSelectItem Value="@("equity")">자본</MudSelectItem>
+                <MudSelectItem Value="@("revenue")">수익</MudSelectItem>
+                <MudSelectItem Value="@("expense")">비용</MudSelectItem>
+            </MudSelect>
+            <MudTextField @bind-Value="_search" Placeholder="계정코드·계정명 검색"
+                          Adornment="Adornment.Start" AdornmentIcon="@Icons.Material.Filled.Search"
+                          Variant="Variant.Outlined" Margin="Margin.Dense" Immediate="true"
+                          Style="max-width:240px" />
+            <MudSpacer />
+            <MudButton Variant="Variant.Filled" Color="Color.Primary"
+                       StartIcon="@Icons.Material.Filled.Add" OnClick="OpenCreateDialog">
+                계정과목 추가
+            </MudButton>
+        </div>
     </MudPaper>
-</MudContainer>
+
+    @* 목록 *@
+    <MudPaper Elevation="0" Class="hitpan-card">
+        <MudTable Items="_filtered" Dense="true" Hover="true" Striped="true"
+                  FixedHeader="true" Height="calc(100vh - 300px)" T="AccountModel">
+            <HeaderContent>
+                <MudTh>계정코드</MudTh>
+                <MudTh>계정명</MudTh>
+                <MudTh Style="text-align:center">유형</MudTh>
+                <MudTh>상위계정</MudTh>
+                <MudTh Style="text-align:center">상태</MudTh>
+                <MudTh Style="text-align:center">관리</MudTh>
+            </HeaderContent>
+            <RowTemplate>
+                <MudTd Style="font-weight:600">@context.AccountCode</MudTd>
+                <MudTd>@context.AccountName</MudTd>
+                <MudTd Style="text-align:center">
+                    <MudChip T="string" Size="Size.Small" Variant="Variant.Filled"
+                             Color="@GetTypeColor(context.AccountType)">
+                        @context.AccountTypeLabel
+                    </MudChip>
+                </MudTd>
+                <MudTd>@(context.ParentCode ?? "-")</MudTd>
+                <MudTd Style="text-align:center">
+                    <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined"
+                             Color="@(context.IsActive ? Color.Success : Color.Default)">
+                        @(context.IsActive ? "사용" : "미사용")
+                    </MudChip>
+                </MudTd>
+                <MudTd Style="text-align:center">
+                    <MudIconButton Icon="@Icons.Material.Filled.Edit" Size="Size.Small"
+                                   OnClick="@(() => OpenEditDialog(context))" />
+                    <MudIconButton Icon="@Icons.Material.Filled.Delete" Size="Size.Small"
+                                   Color="Color.Error" OnClick="@(() => DeleteAsync(context))" />
+                </MudTd>
+            </RowTemplate>
+            <NoRecordsContent>
+                <MudText Class="pa-4" Style="color:var(--hitpan-text-faint)">등록된 계정과목이 없습니다.</MudText>
+            </NoRecordsContent>
+        </MudTable>
+    </MudPaper>
+}
+
+@* 추가/수정 폼 다이얼로그 *@
+<MudDialog @bind-IsVisible="_dialogOpen">
+    <TitleContent>
+        <MudText Typo="Typo.h6">@(_editMode ? "계정과목 수정" : "계정과목 추가")</MudText>
+    </TitleContent>
+    <DialogContent>
+        <MudGrid Spacing="2">
+            @if (!_editMode)
+            {
+                <MudItem xs="12">
+                    <MudTextField @bind-Value="_form.AccountCode" Label="계정코드" Variant="Variant.Outlined"
+                                  Margin="Margin.Dense" Placeholder="예: 10100" />
+                </MudItem>
+            }
+            <MudItem xs="12">
+                <MudTextField @bind-Value="_form.AccountName" Label="계정명" Variant="Variant.Outlined"
+                              Margin="Margin.Dense" />
+            </MudItem>
+            @if (!_editMode)
+            {
+                <MudItem xs="12">
+                    <MudSelect T="string" @bind-Value="_form.AccountType" Label="유형"
+                               Variant="Variant.Outlined" Margin="Margin.Dense">
+                        <MudSelectItem Value="@("asset")">자산</MudSelectItem>
+                        <MudSelectItem Value="@("liability")">부채</MudSelectItem>
+                        <MudSelectItem Value="@("equity")">자본</MudSelectItem>
+                        <MudSelectItem Value="@("revenue")">수익</MudSelectItem>
+                        <MudSelectItem Value="@("expense")">비용</MudSelectItem>
+                    </MudSelect>
+                </MudItem>
+                <MudItem xs="12">
+                    <MudTextField @bind-Value="_form.ParentCode" Label="상위계정코드 (선택)"
+                                  Variant="Variant.Outlined" Margin="Margin.Dense" />
+                </MudItem>
+            }
+            @if (_editMode)
+            {
+                <MudItem xs="12">
+                    <MudSwitch @bind-Value="_formActive" Label="사용 여부" Color="Color.Primary" />
+                </MudItem>
+            }
+            <MudItem xs="12">
+                <MudNumericField T="int" @bind-Value="_form.SortOrder" Label="정렬순서"
+                                 Variant="Variant.Outlined" Margin="Margin.Dense" />
+            </MudItem>
+        </MudGrid>
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="@(() => _dialogOpen = false)">취소</MudButton>
+        <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="SaveAsync">저장</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    private List<AccountModel> _items = new();
+    private bool _loading = true;
+    private string _filterType = "all";
+    private string _search = "";
+    private bool _dialogOpen;
+    private bool _editMode;
+    private string _editCode = "";
+    private bool _formActive = true;
+
+    private CreateAccountModel _form = new();
+
+    private IEnumerable<AccountModel> _filtered => _items
+        .Where(a => _filterType == "all" || a.AccountType == _filterType)
+        .Where(a => string.IsNullOrWhiteSpace(_search) ||
+                    a.AccountCode.Contains(_search, StringComparison.OrdinalIgnoreCase) ||
+                    a.AccountName.Contains(_search, StringComparison.OrdinalIgnoreCase));
+
+    protected override async Task OnInitializedAsync()
+    {
+        _items = await AccSvc.GetListAsync();
+        _loading = false;
+    }
+
+    private void OpenCreateDialog()
+    {
+        _editMode = false;
+        _form = new CreateAccountModel();
+        _dialogOpen = true;
+    }
+
+    private void OpenEditDialog(AccountModel item)
+    {
+        _editMode = true;
+        _editCode = item.AccountCode;
+        _form = new CreateAccountModel
+        {
+            AccountCode = item.AccountCode,
+            AccountName = item.AccountName,
+            AccountType = item.AccountType,
+            ParentCode = item.ParentCode,
+            SortOrder = item.SortOrder
+        };
+        _formActive = item.IsActive;
+        _dialogOpen = true;
+    }
+
+    private async Task SaveAsync()
+    {
+        bool ok;
+        if (_editMode)
+        {
+            ok = await AccSvc.UpdateAsync(_editCode, new UpdateAccountModel
+            {
+                AccountName = _form.AccountName,
+                IsActive = _formActive,
+                SortOrder = _form.SortOrder
+            });
+        }
+        else
+        {
+            if (string.IsNullOrWhiteSpace(_form.AccountCode) || string.IsNullOrWhiteSpace(_form.AccountName))
+            {
+                Snackbar.Add("계정코드와 계정명을 입력하세요.", Severity.Warning);
+                return;
+            }
+            ok = await AccSvc.CreateAsync(_form);
+        }
+
+        if (ok)
+        {
+            Snackbar.Add(_editMode ? "수정됐습니다." : "추가됐습니다.", Severity.Success);
+            _dialogOpen = false;
+            _items = await AccSvc.GetListAsync();
+        }
+        else
+        {
+            Snackbar.Add("저장에 실패했습니다.", Severity.Error);
+        }
+    }
+
+    private async Task DeleteAsync(AccountModel item)
+    {
+        var confirm = await Dialog.ShowMessageBoxAsync("삭제 확인",
+            $"'{item.AccountName}' 계정과목을 삭제합니다. 계속하시겠습니까?",
+            yesText: "삭제", cancelText: "취소");
+        if (confirm != true) return;
+
+        var ok = await AccSvc.DeleteAsync(item.AccountCode);
+        if (ok)
+        {
+            Snackbar.Add("삭제됐습니다.", Severity.Success);
+            _items = await AccSvc.GetListAsync();
+        }
+        else
+        {
+            Snackbar.Add("삭제에 실패했습니다.", Severity.Error);
+        }
+    }
+
+    private static Color GetTypeColor(string type) => type switch
+    {
+        "asset" => Color.Info,
+        "liability" => Color.Warning,
+        "equity" => Color.Secondary,
+        "revenue" => Color.Success,
+        "expense" => Color.Error,
+        _ => Color.Default
+    };
+}

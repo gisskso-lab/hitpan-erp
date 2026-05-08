@@ -138,4 +138,45 @@ public class FinanceController : ControllerBase
         if (string.IsNullOrEmpty(tid)) return Forbid();
         return Ok(await _svc.GetDashboardAsync(tid, ct));
     }
+
+    // ── 계정과목 ──
+
+    [HttpGet("accounts")]
+    [RequirePermission("ACCOUNTING", "view")]
+    public async Task<IActionResult> GetAccounts(CancellationToken ct)
+    {
+        var tid = HttpContext.Items["TenantId"]?.ToString();
+        if (string.IsNullOrEmpty(tid)) return Forbid();
+        return Ok(await _svc.GetAccountsAsync(tid, ct));
+    }
+
+    [HttpPost("accounts")]
+    [RequirePermission("ACCOUNTING", "create")]
+    public async Task<IActionResult> CreateAccount([FromBody] CreateAccountRequest req, CancellationToken ct)
+    {
+        var tid = HttpContext.Items["TenantId"]?.ToString();
+        if (string.IsNullOrEmpty(tid)) return Forbid();
+        var code = await _svc.CreateAccountAsync(tid, req, ct);
+        return Created($"/api/finance/accounts/{code}", new { code });
+    }
+
+    [HttpPut("accounts/{code}")]
+    [RequirePermission("ACCOUNTING", "update")]
+    public async Task<IActionResult> UpdateAccount(string code, [FromBody] UpdateAccountRequest req, CancellationToken ct)
+    {
+        var tid = HttpContext.Items["TenantId"]?.ToString();
+        if (string.IsNullOrEmpty(tid)) return Forbid();
+        await _svc.UpdateAccountAsync(tid, code, req, ct);
+        return Ok(new { message = "수정됨" });
+    }
+
+    [HttpDelete("accounts/{code}")]
+    [RequirePermission("ACCOUNTING", "delete")]
+    public async Task<IActionResult> DeleteAccount(string code, CancellationToken ct)
+    {
+        var tid = HttpContext.Items["TenantId"]?.ToString();
+        if (string.IsNullOrEmpty(tid)) return Forbid();
+        await _svc.DeleteAccountAsync(tid, code, ct);
+        return Ok(new { message = "삭제됨" });
+    }
 }

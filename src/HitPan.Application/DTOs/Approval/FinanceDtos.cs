@@ -197,3 +197,31 @@ public class LowStockItem
     public decimal CurrentQty { get; set; }
     public decimal SafetyStock { get; set; }
 }
+
+// ── 계정과목 ──
+
+public class AccountDto
+{
+    public string AccountCode { get; set; } = string.Empty;
+    public string AccountName { get; set; } = string.Empty;
+    public string AccountType { get; set; } = string.Empty;
+    public string? ParentCode { get; set; }
+    public bool IsActive { get; set; }
+    public int SortOrder { get; set; }
+}
+
+public class CreateAccountRequest
+{
+    public string AccountCode { get; set; } = string.Empty;
+    public string AccountName { get; set; } = string.Empty;
+    public string AccountType { get; set; } = "asset";
+    public string? ParentCode { get; set; }
+    public int SortOrder { get; set; }
+}
+
+public class UpdateAccountRequest
+{
+    public string AccountName { get; set; } = string.Empty;
+    public bool IsActive { get; set; } = true;
+    public int SortOrder { get; set; }
+}

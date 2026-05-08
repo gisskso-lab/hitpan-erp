@@ -54,6 +54,7 @@ builder.Services.AddScoped<LogService>();
 builder.Services.AddScoped<BillsCardsBankService>();
 builder.Services.AddScoped<EmailClientService>();
 builder.Services.AddScoped<LeaveRequestService>();
+builder.Services.AddScoped<AccountService>();
 builder.Services.AddScoped<DocumentService>();
 builder.Services.AddScoped<SpecialPriceService>();
 builder.Services.AddScoped<ApprovalService>();

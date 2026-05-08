@@ -565,6 +565,58 @@ public class FinanceService : IFinanceService
         return dto;
     }
 
+    // ═══════════════════════════════════════
+    // 계정과목
+    // ═══════════════════════════════════════
+
+    public async Task<List<AccountDto>> GetAccountsAsync(string tenantId, CancellationToken ct = default)
+    {
+        await EnsureOpenAsync(ct);
+        return (await _db.QueryAsync<AccountDto>(new CommandDefinition(
+            """
+            SELECT account_code AS AccountCode, account_name AS AccountName,
+                   account_type AS AccountType, parent_code AS ParentCode,
+                   is_active AS IsActive, sort_order AS SortOrder
+            FROM accounts
+            WHERE tenant_id = @TenantId
+            ORDER BY sort_order, account_code
+            """,
+            new { TenantId = tenantId }, cancellationToken: ct))).ToList();
+    }
+
+    public async Task<string> CreateAccountAsync(string tenantId, CreateAccountRequest req, CancellationToken ct = default)
+    {
+        await EnsureOpenAsync(ct);
+        await _db.ExecuteAsync(new CommandDefinition(
+            """
+            INSERT INTO accounts (account_code, tenant_id, account_name, account_type, parent_code, is_active, sort_order)
+            VALUES (@AccountCode, @TenantId, @AccountName, @AccountType, @ParentCode, 1, @SortOrder)
+            """,
+            new { req.AccountCode, TenantId = tenantId, req.AccountName, req.AccountType, req.ParentCode, req.SortOrder },
+            cancellationToken: ct));
+        return req.AccountCode;
+    }
+
+    public async Task UpdateAccountAsync(string tenantId, string accountCode, UpdateAccountRequest req, CancellationToken ct = default)
+    {
+        await EnsureOpenAsync(ct);
+        await _db.ExecuteAsync(new CommandDefinition(
+            """
+            UPDATE accounts SET account_name = @AccountName, is_active = @IsActive, sort_order = @SortOrder
+            WHERE tenant_id = @TenantId AND account_code = @AccountCode
+            """,
+            new { req.AccountName, req.IsActive, req.SortOrder, TenantId = tenantId, AccountCode = accountCode },
+            cancellationToken: ct));
+    }
+
+    public async Task DeleteAccountAsync(string tenantId, string accountCode, CancellationToken ct = default)
+    {
+        await EnsureOpenAsync(ct);
+        await _db.ExecuteAsync(new CommandDefinition(
+            "DELETE FROM accounts WHERE tenant_id = @TenantId AND account_code = @AccountCode",
+            new { TenantId = tenantId, AccountCode = accountCode }, cancellationToken: ct));
+    }
+
     private async Task EnsureOpenAsync(CancellationToken ct)
     {
         if (_db.State == ConnectionState.Open) return;

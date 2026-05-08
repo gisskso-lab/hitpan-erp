@@ -94,3 +94,40 @@ public class ProfitSummaryModel
     public decimal NetProfit { get; set; }
     public decimal ProfitRate { get; set; }
 }
+
+// ── 계정과목 ──
+public class AccountModel
+{
+    public string AccountCode { get; set; } = string.Empty;
+    public string AccountName { get; set; } = string.Empty;
+    public string AccountType { get; set; } = string.Empty;
+    public string? ParentCode { get; set; }
+    public bool IsActive { get; set; } = true;
+    public int SortOrder { get; set; }
+
+    public string AccountTypeLabel => AccountType switch
+    {
+        "asset" => "자산",
+        "liability" => "부채",
+        "equity" => "자본",
+        "revenue" => "수익",
+        "expense" => "비용",
+        _ => AccountType
+    };
+}
+
+public class CreateAccountModel
+{
+    public string AccountCode { get; set; } = string.Empty;
+    public string AccountName { get; set; } = string.Empty;
+    public string AccountType { get; set; } = "asset";
+    public string? ParentCode { get; set; }
+    public int SortOrder { get; set; }
+}
+
+public class UpdateAccountModel
+{
+    public string AccountName { get; set; } = string.Empty;
+    public bool IsActive { get; set; } = true;
+    public int SortOrder { get; set; }
+}

@@ -29,4 +29,10 @@ public interface IFinanceService
 
     // 대시보드
     Task<DashboardSummaryDto> GetDashboardAsync(string tenantId, CancellationToken ct = default);
+
+    // 계정과목
+    Task<List<AccountDto>> GetAccountsAsync(string tenantId, CancellationToken ct = default);
+    Task<string> CreateAccountAsync(string tenantId, CreateAccountRequest req, CancellationToken ct = default);
+    Task UpdateAccountAsync(string tenantId, string accountCode, UpdateAccountRequest req, CancellationToken ct = default);
+    Task DeleteAccountAsync(string tenantId, string accountCode, CancellationToken ct = default);
 }
