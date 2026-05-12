@@ -34,8 +34,9 @@ ALTER TABLE partners
     ADD COLUMN card_commission_rate DECIMAL(5,2) DEFAULT 0 COMMENT '카드 수수료율 (buy_cardyul)',
     ADD COLUMN classification_code VARCHAR(30) NULL COMMENT '분류 코드 (buy_ccode)',
     ADD COLUMN manager_department VARCHAR(30) NULL COMMENT '담당 부서 (buy_damdangbu)',
-    ADD COLUMN price_grade_code VARCHAR(10) NULL COMMENT '단가등급 코드 (buy_DOSCODE) — 옵션 H',
-    ADD COLUMN price_grade TINYINT DEFAULT 1 COMMENT '단가등급 1~5 (옵션 H 결정 결과)',
+    ADD COLUMN price_grade_code VARCHAR(10) NULL COMMENT '단가등급 원본 코드 (buy_DOSCODE) — 옵션 H 원본 보존',
+    -- price_grade는 기존 CHAR(1) DEFAULT 'A' 컬럼 사용 (사장님 결재 2026-05-12 A안 — 충돌 회피)
+    -- IF NOT EXISTS 멱등 안전모드로 신규 TINYINT 추가 자동 차단됨 = 데이터 무손실
     ADD COLUMN legacy_extra VARCHAR(30) NULL COMMENT '레거시 예비 (buy_fil)',
     ADD COLUMN discount_rate DECIMAL(5,2) DEFAULT 0 COMMENT '할인율 (buy_halyul)',
     ADD COLUMN keyman_birth VARCHAR(10) NULL COMMENT '키맨 생일 (buy_keybirth)',

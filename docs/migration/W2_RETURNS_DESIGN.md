@@ -117,13 +117,17 @@ INSERT INTO stock_ledger (
 
 ```
 DOCF8 마이그 시 buy_DOSCODE 읽기
-  ├─ 값 있음 + 옳은 형식 (A/B/C/1/2/3 등)
-  │   → partners.price_grade = buy_DOSCODE 매핑 (옵션 B 경로)
+  ├─ 값 있음 + 옳은 형식 (A~E or 1~5)
+  │   → partners.price_grade = 매핑된 CHAR (옵션 B 경로)
+  │     예: '1'→'A', '2'→'B', ...; 또는 'A'→'A' 그대로
   ├─ 값 없음 + 거래 이력 있음 (DOCFB 행 존재)
   │   → 거래 단가 분석 → 자동 등급 추론 (옵션 D 경로)
   └─ 값 없음 + 거래 이력 없음 (신규 셋업)
-      → partners.price_grade = 1 (기본값, ERP매니저 제안)
+      → partners.price_grade = 'A' (기본값, ERP매니저 제안)
 ```
+
+⚠️ **사장님 결재 2026-05-12 A안:** partners.price_grade는 기존 CHAR(1) DEFAULT 'A' 그대로 사용.
+원본 buy_DOSCODE 값은 신규 컬럼 `price_grade_code VARCHAR(10)`에 보존.
 
 ### 4.2 stock_ledger.unit_price 처리
 
@@ -139,22 +143,22 @@ DOCF8 마이그 시 buy_DOSCODE 읽기
 ```csharp
 // DOCF8 → partners 마이그 시
 var doscode = GetStr(row, "buy_DOSCODE")?.Trim();
-int priceGrade;
+string priceGrade;  // CHAR(1) — A~E (A안 결재 2026-05-12)
 
 if (!string.IsNullOrEmpty(doscode) && IsValidGradeFormat(doscode))
 {
-    // 경로 B: 컬럼 값 직접 매핑
-    priceGrade = MapDoscodeToGrade(doscode);  // "A"→1, "B"→2, ...
+    // 경로 B: 컬럼 값 직접 매핑 (1~5 → A~E, 또는 A~E 그대로)
+    priceGrade = MapDoscodeToGrade(doscode);  // "1"→"A", "A"→"A", etc.
 }
 else
 {
-    // 경로 D 또는 기본값: 거래 이력 분석 (별도 후처리 단계)
-    // 마이그 1차 = 기본값 1
-    // 마이그 2차 (post-process) = DOCFB 분석 후 ALTER price_grade
-    priceGrade = 1;
+    // 경로 D 또는 기본값: 거래 이력 분석은 W3 post-process
+    // 마이그 1차 = 기본값 'A'
+    priceGrade = "A";
 }
 
 partners.PriceGrade = priceGrade;
+partners.PriceGradeCode = doscode;  // 원본 보존
 ```
 
 ### 4.4 반품(DOCFB) 측 영향 = 0

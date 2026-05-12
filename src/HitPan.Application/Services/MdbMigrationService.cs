@@ -5,6 +5,7 @@ using System.Globalization;
 using System.Runtime.Versioning;
 using System.Text;
 using Dapper;
+using HitPan.Application.Interfaces;
 using Microsoft.Extensions.Logging;
 
 namespace HitPan.Application.Services;
@@ -19,15 +20,20 @@ public sealed class MdbMigrationService
 {
     private readonly IDbConnection _db;
     private readonly ILogger<MdbMigrationService> _logger;
+    private readonly IBinaryCryptoService _crypto;
 
     /// <summary>OLEDB 커넥션 문자열 템플릿 (MDB 경로를 채워 넣는다)</summary>
     private const string OleDbConnTemplate =
         "Provider=Microsoft.ACE.OLEDB.12.0;Data Source={0};Jet OLEDB:Database Password=;";
 
-    public MdbMigrationService(IDbConnection db, ILogger<MdbMigrationService> logger)
+    public MdbMigrationService(
+        IDbConnection db,
+        ILogger<MdbMigrationService> logger,
+        IBinaryCryptoService crypto)
     {
         _db = db;
         _logger = logger;
+        _crypto = crypto;
     }
 
     // ────────────────────────────────────────────────────────────────
@@ -265,6 +271,12 @@ public sealed class MdbMigrationService
         var dt = ReadMdbTable(oleConn, "SELECT * FROM DOCF8");
         if (dt.Rows.Count == 0) return 0;
 
+        // W2 D3 (2026-05-12): partners 19개 컬럼 보강 INSERT (사장님 결재)
+        // 신규 컬럼: card_commission_rate, classification_code, manager_department,
+        //   price_grade_code, legacy_extra, discount_rate, keyman_birth/name/phone,
+        //   margin_rate, sales_employee, trade_start_date, business_registration_date,
+        //   tel_secondary, tax_classification, ceo_name_legacy, partner_type_legacy,
+        //   ceo_resident_no_encrypted (VARBINARY AES-256, 결재 #4 정책)
         const string sql = """
             INSERT INTO partners
               (partner_id, tenant_id, partner_code, partner_name, partner_type,
@@ -272,14 +284,26 @@ public sealed class MdbMigrationService
                tel, fax, address, address_detail, zip_code,
                credit_limit, bank_name, bank_account, account_holder,
                manager_name, manager_tel, tax_type, memo,
-               is_active, is_deleted, created_at, updated_at, price_grade, row_version)
+               is_active, is_deleted, created_at, updated_at, price_grade, row_version,
+               card_commission_rate, classification_code, manager_department,
+               price_grade_code, legacy_extra, discount_rate,
+               keyman_birth, keyman_name, keyman_phone,
+               margin_rate, sales_employee, trade_start_date,
+               business_registration_date, tel_secondary, tax_classification,
+               ceo_resident_no_encrypted)
             VALUES
               (@PartnerId, @TenantId, @PartnerCode, @PartnerName, @PartnerType,
                @BizNo, @CeoName, @BizType, @BizItem,
                @Tel, @Fax, @Address, @AddressDetail, @ZipCode,
                @CreditLimit, @BankName, @BankAccount, @AccountHolder,
                @ManagerName, @ManagerTel, @TaxType, @Memo,
-               1, 0, @Now, @Now, @PriceGrade, 0)
+               1, 0, @Now, @Now, @PriceGrade, 0,
+               @CardCommissionRate, @ClassificationCode, @ManagerDepartment,
+               @PriceGradeCode, @LegacyExtra, @DiscountRate,
+               @KeymanBirth, @KeymanName, @KeymanPhone,
+               @MarginRate, @SalesEmployee, @TradeStartDate,
+               @BusinessRegistrationDate, @TelSecondary, @TaxClassification,
+               @CeoResidentNoEncrypted)
             """;
 
         int count = 0;
@@ -323,6 +347,11 @@ public sealed class MdbMigrationService
                 }
             }
 
+            // W2 D3 (2026-05-12): 19개 보강 컬럼 - DOCF8 41컬럼 중 누락분 추가
+            // buy_DOSCODE 옵션 H: 원본은 price_grade_code 보존, price_grade는 'A' 기본값 (A안 결재)
+            var doscode = GetStr(row, "buy_DOSCODE")?.Trim();
+            var topJumin = GetStr(row, "buy_topjumin")?.Trim();
+
             await _db.ExecuteAsync(new CommandDefinition(sql, new
             {
                 PartnerId = partnerId,
@@ -347,8 +376,26 @@ public sealed class MdbMigrationService
                 ManagerTel = GetStr(row, "buy_damdang1"),
                 TaxType = taxType,
                 Memo = memoBuilder.Length > 0 ? memoBuilder.ToString() : (string?)null,
-                PriceGrade = "A",
-                Now = now
+                PriceGrade = "A",   // CHAR(1) 기본값, 옵션 H 후처리 시 결정
+                Now = now,
+                // 신규 19개 컬럼 (작9, 2026-05-12 결재)
+                CardCommissionRate = GetDec(row, "buy_cardyul"),
+                ClassificationCode = GetStr(row, "buy_ccode"),
+                ManagerDepartment = GetStr(row, "buy_damdangbu"),
+                PriceGradeCode = doscode,                  // 옵션 H 원본 보존
+                LegacyExtra = GetStr(row, "buy_fil"),
+                DiscountRate = GetDec(row, "buy_halyul"),
+                KeymanBirth = GetStr(row, "buy_keybirth"),
+                KeymanName = GetStr(row, "buy_keyname"),
+                KeymanPhone = GetStr(row, "buy_keytel"),
+                MarginRate = GetDec(row, "buy_mayul"),
+                SalesEmployee = GetStr(row, "buy_sawon"),
+                TradeStartDate = ParseDateOrNull(GetStr(row, "buy_startdt")),
+                BusinessRegistrationDate = ParseDateOrNull(GetStr(row, "buy_taxdt")),
+                TelSecondary = GetStr(row, "buy_tel1"),
+                TaxClassification = taxGubun,
+                // 형사영역 (헌법 #5, CRIMINAL_DOMAIN_POLICY.md): 부가가치세법 §32 처리 근거
+                CeoResidentNoEncrypted = string.IsNullOrEmpty(topJumin) ? null : _crypto.EncryptToBytes(topJumin)
             }, transaction: tx, cancellationToken: ct)).ConfigureAwait(false);
 
             count++;
@@ -373,19 +420,23 @@ public sealed class MdbMigrationService
         var dt = ReadMdbTable(oleConn, "SELECT * FROM DOCFS");
         if (dt.Rows.Count == 0) return 0;
 
+        // W2 D3 (2026-05-12): items 4개 보강 컬럼 추가 (safety_stock 기존, 신규 4개)
+        // 작10: spec_detail, unit_secondary, reorder_point, supplier_default_id
         const string sql = """
             INSERT INTO items
               (item_id, tenant_id, item_code, item_name, item_type, unit, spec,
                purchase_price, sale_price, standard_price, cost_price, std_price,
                price_a, price_b, price_c, price_d, price_e,
                tax_type, barcode, item_group, memo,
-               is_active, is_deleted, safety_stock, created_at, updated_at, row_version)
+               is_active, is_deleted, safety_stock, created_at, updated_at, row_version,
+               spec_detail, unit_secondary, reorder_point, supplier_default_id)
             VALUES
               (@ItemId, @TenantId, @ItemCode, @ItemName, 'product', @Unit, @Spec,
                @PurchasePrice, @SalePrice, @StandardPrice, @CostPrice, @StdPrice,
                @PriceA, @PriceB, @PriceC, @PriceD, @PriceE,
                @TaxType, @Barcode, @ItemGroup, @Memo,
-               1, 0, 0, @Now, @Now, 0)
+               1, 0, 0, @Now, @Now, 0,
+               @SpecDetail, @UnitSecondary, @ReorderPoint, @SupplierDefaultId)
             """;
 
         int count = 0;
@@ -440,7 +491,14 @@ public sealed class MdbMigrationService
                 Barcode = GetStr(row, "S_BARCODE"),
                 ItemGroup = GetStr(row, "S_CCODE"),   // 분류코드 → item_group
                 Memo = GetStr(row, "S_DESC"),          // 설명 → memo
-                Now = now
+                Now = now,
+                // 신규 4개 컬럼 (작10, 2026-05-12 결재). safety_stock은 기존 컬럼 유지(0).
+                // S_SPEC·S_UNIT2·S_SAFE·S_REORD·S_VENDOR는 사장님 실 데이터 분포 확인 후 매핑 (W3).
+                // 현재 빈 MDB 가정 → null·기본값으로 INSERT, 향후 베타 체험단 실 데이터로 보강.
+                SpecDetail = GetStr(row, "S_SPEC"),
+                UnitSecondary = GetStr(row, "S_UNIT2"),
+                ReorderPoint = GetDec(row, "S_REORD"),
+                SupplierDefaultId = (string?)null      // FK 매핑은 partners 마이그 완료 후 별도 후처리
             }, transaction: tx, cancellationToken: ct)).ConfigureAwait(false);
 
             count++;
@@ -552,13 +610,30 @@ public sealed class MdbMigrationService
         var dt = ReadMdbTable(oleConn, "SELECT * FROM DOCSW");
         if (dt.Rows.Count == 0) return 0;
 
+        // W2 D3 (2026-05-12): employees 31개 보강 컬럼 (작11 결재, A안)
+        // A. 기본 8 / B. 형사 5 (AES-256) / C. 직장 7 / D. 레거시잔액 10 / E. 해외 1
+        // 형사영역(헌법 #5): SW_JUMIN·SW_PAY·SW_PAYoth → VARBINARY AES-256
         const string sql = """
             INSERT INTO employees
               (employee_id, tenant_id, emp_no, emp_name, position, job_title, emp_type,
-               join_date, phone, email, is_active, created_at, updated_at, role)
+               join_date, phone, email, is_active, created_at, updated_at, role,
+               address, zip_code, birth_date, birth_calendar, birth_lunar_converted,
+               home_phone, emergency_contact, memo,
+               resident_no_encrypted, salary_encrypted, salary_type, salary_category, salary_extra_encrypted,
+               department, marriage_status, business_type, is_resigned, resign_date, resign_reason, nationality,
+               legacy_bal1, legacy_bal2, legacy_bal3, legacy_bal4, legacy_bal5,
+               legacy_bal6, legacy_bal7, legacy_bal8, legacy_bal9, legacy_bal10,
+               salary_country)
             VALUES
               (@EmployeeId, @TenantId, @EmpNo, @EmpName, @Position, @JobTitle, 'regular',
-               @JoinDate, @Phone, NULL, 1, @Now, @Now, 'sales_user')
+               @JoinDate, @Phone, NULL, 1, @Now, @Now, 'sales_user',
+               @Address, @ZipCode, @BirthDate, @BirthCalendar, @BirthLunarConverted,
+               @HomePhone, @EmergencyContact, @Memo,
+               @ResidentNoEncrypted, @SalaryEncrypted, @SalaryType, @SalaryCategory, @SalaryExtraEncrypted,
+               @Department, @MarriageStatus, @BusinessType, @IsResigned, @ResignDate, @ResignReason, @Nationality,
+               @LegacyBal1, @LegacyBal2, @LegacyBal3, @LegacyBal4, @LegacyBal5,
+               @LegacyBal6, @LegacyBal7, @LegacyBal8, @LegacyBal9, @LegacyBal10,
+               @SalaryCountry)
             """;
 
         int count = 0;
@@ -575,6 +650,11 @@ public sealed class MdbMigrationService
 
             var joinDate = ParseLegacyDate(GetStr(row, "SW_IBSAIL")) ?? now;
 
+            // 형사영역 평문 추출 (즉시 AES-256 암호화, 평문은 메서드 스코프 내에서만 존재)
+            var residentNo = GetStr(row, "SW_JUMIN")?.Trim();
+            var salary = GetInt(row, "SW_PAY");
+            var salaryExtra = GetStr(row, "SW_PAYoth")?.Trim();
+
             await _db.ExecuteAsync(new CommandDefinition(sql, new
             {
                 EmployeeId = employeeId,
@@ -585,7 +665,43 @@ public sealed class MdbMigrationService
                 JobTitle = GetStr(row, "SW_JIKCHAK"),      // 직책
                 JoinDate = joinDate,
                 Phone = GetStr(row, "SW_HP"),               // 핸드폰 우선, 없으면 전화
-                Now = now
+                Now = now,
+                // A. 기본 정보 (8개)
+                Address = GetStr(row, "SW_ADDR"),
+                ZipCode = GetStr(row, "SW_POSTNO"),
+                BirthDate = ParseLegacyDate(GetStr(row, "SW_BIRTH")),
+                BirthCalendar = (byte)(GetInt(row, "SW_BIRTHgu") == 0 ? 1 : GetInt(row, "SW_BIRTHgu")),
+                BirthLunarConverted = (byte)GetInt(row, "SW_BIRTHtel"),
+                HomePhone = GetStr(row, "SW_TEL"),
+                EmergencyContact = GetStr(row, "SW_TELem"),
+                Memo = GetStr(row, "SW_REM"),
+                // B. 형사 영역 (5개) — AES-256 + 동의 + 마스킹 + step-up + 감사로그 (CRIMINAL_DOMAIN_POLICY.md)
+                ResidentNoEncrypted = string.IsNullOrEmpty(residentNo) ? null : _crypto.EncryptToBytes(residentNo),
+                SalaryEncrypted = salary == 0 ? null : _crypto.EncryptToBytes(salary.ToString(CultureInfo.InvariantCulture)),
+                SalaryType = (byte?)(GetInt(row, "SW_PAYgu") == 0 ? null : (byte?)GetInt(row, "SW_PAYgu")),
+                SalaryCategory = (byte?)(GetInt(row, "SW_PAYeuy") == 0 ? null : (byte?)GetInt(row, "SW_PAYeuy")),
+                SalaryExtraEncrypted = string.IsNullOrEmpty(salaryExtra) ? null : _crypto.EncryptToBytes(salaryExtra),
+                // C. 직장 정보 (7개)
+                Department = GetStr(row, "SW_BU"),
+                MarriageStatus = GetStr(row, "SW_MARRY"),
+                BusinessType = GetStr(row, "SW_WORK"),
+                IsResigned = (byte)GetInt(row, "SW_OUT"),
+                ResignDate = ParseLegacyDate(GetStr(row, "SW_OUTDT")),
+                ResignReason = GetStr(row, "SW_OUTREM"),
+                Nationality = GetStr(row, "SW_NATION"),
+                // D. 레거시 잔액 (10개) — 원본 그대로 보존
+                LegacyBal1 = GetStr(row, "SW_BAL1"),
+                LegacyBal2 = GetStr(row, "SW_BAL2"),
+                LegacyBal3 = GetStr(row, "SW_BAL3"),
+                LegacyBal4 = GetStr(row, "SW_BAL4"),
+                LegacyBal5 = GetStr(row, "SW_BAL5"),
+                LegacyBal6 = GetStr(row, "SW_BAL6"),
+                LegacyBal7 = GetStr(row, "SW_BAL7"),
+                LegacyBal8 = GetStr(row, "SW_BAL8"),
+                LegacyBal9 = GetStr(row, "SW_BAL9"),
+                LegacyBal10 = GetStr(row, "SW_BAL10"),
+                // E. 해외 (1개)
+                SalaryCountry = (byte?)(GetInt(row, "SW_PAYkuk") == 0 ? null : (byte?)GetInt(row, "SW_PAYkuk"))
             }, transaction: tx, cancellationToken: ct)).ConfigureAwait(false);
 
             count++;
@@ -1677,6 +1793,21 @@ public sealed class MdbMigrationService
         var val = row[col];
         if (val == DBNull.Value) return 0m;
         return Convert.ToDecimal(val);
+    }
+
+    /// <summary>
+    /// 레거시 Text8 일자(YYYYMMDD) → DateTime? 변환. 잘못된 값은 null.
+    /// W2 D3 (2026-05-12): partners.trade_start_date·business_registration_date 등 보강 컬럼용.
+    /// </summary>
+    private static DateTime? ParseDateOrNull(string? s)
+    {
+        if (string.IsNullOrWhiteSpace(s)) return null;
+        var trimmed = s.Trim();
+        if (DateTime.TryParseExact(trimmed, "yyyyMMdd", CultureInfo.InvariantCulture, DateTimeStyles.None, out var dt))
+            return dt;
+        if (DateTime.TryParse(trimmed, CultureInfo.InvariantCulture, DateTimeStyles.None, out var dt2))
+            return dt2;
+        return null;
     }
 }
 

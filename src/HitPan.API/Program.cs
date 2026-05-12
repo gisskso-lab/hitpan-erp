@@ -64,6 +64,8 @@ builder.Services.AddDataProtection();  // DPAPI 기반 비밀번호 보호 (인�
 builder.Services.AddScoped<CurrentTenant>();
 builder.Services.AddScoped<ICurrentTenant>(sp => sp.GetRequiredService<CurrentTenant>());
 builder.Services.AddSingleton<IEncryptionService, EncryptionService>();
+// W2 D3 (2026-05-12 A-2 결재): MdbMigrationService 형사영역 처리용 추상화 어댑터
+builder.Services.AddSingleton<HitPan.Application.Interfaces.IBinaryCryptoService, BinaryCryptoServiceAdapter>();
 builder.Services.AddSingleton<IHashService, HashService>();
 builder.Services.AddInfrastructure();
 builder.Services.AddScoped<IUnitOfWork, UnitOfWork>();
