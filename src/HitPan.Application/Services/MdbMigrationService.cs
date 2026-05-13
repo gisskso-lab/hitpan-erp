@@ -22,9 +22,13 @@ public sealed class MdbMigrationService
     private readonly ILogger<MdbMigrationService> _logger;
     private readonly IBinaryCryptoService _crypto;
 
-    /// <summary>OLEDB 커넥션 문자열 템플릿 (MDB 경로를 채워 넣는다)</summary>
+    /// <summary>OLEDB 커넥션 문자열 템플릿 (MDB 경로 + 선택적 비번)</summary>
+    /// 핫픽스 2026-05-13: 사장님 MDB(비번 7618968) 지원 — 결재 #13.
     private const string OleDbConnTemplate =
-        "Provider=Microsoft.ACE.OLEDB.12.0;Data Source={0};Jet OLEDB:Database Password=;";
+        "Provider=Microsoft.ACE.OLEDB.12.0;Data Source={0};Jet OLEDB:Database Password={1};";
+
+    /// <summary>현재 마이그 호출의 MDB 비번 (AsyncLocal 컨텍스트 — overload 시그니처 보존하면서 비번 전달).</summary>
+    private static readonly AsyncLocal<string?> _mdbPasswordContext = new();
 
     public MdbMigrationService(
         IDbConnection db,
@@ -45,15 +49,45 @@ public sealed class MdbMigrationService
     /// </summary>
     public async Task<MdbMigrationResult> MigrateAsync(
         string folderPath, string tenantId, CancellationToken ct = default)
+        => await MigrateAsync(folderPath, tenantId, mdbPassword: null, ct).ConfigureAwait(false);
+
+    /// <summary>
+    /// MDB 비번을 받는 overload (핫픽스 2026-05-13).
+    /// 비번이 걸린 레거시 히트판 MDB(예: 7618968) 처리용.
+    /// </summary>
+    public async Task<MdbMigrationResult> MigrateAsync(
+        string folderPath, string tenantId, string? mdbPassword, CancellationToken ct = default)
     {
         var (pyojunPath, pandataPath, _) = ResolveMdbPaths(folderPath);
-        return await MigrateAsync(pyojunPath, pandataPath, tenantId, ct).ConfigureAwait(false);
+        _mdbPasswordContext.Value = mdbPassword;
+        try
+        {
+            return await MigrateCoreAsync(pyojunPath, pandataPath, tenantId, ct).ConfigureAwait(false);
+        }
+        finally
+        {
+            _mdbPasswordContext.Value = null;
+        }
     }
 
     /// <summary>
     /// MDB 폴더 내 테이블 건수 미리보기 (실제 import 없음).
     /// </summary>
     public Task<Dictionary<string, int>> PreviewAsync(
+        string folderPath, string tenantId, CancellationToken ct = default)
+        => PreviewAsync(folderPath, tenantId, mdbPassword: null, ct);
+
+    /// <summary>
+    /// MDB 비번을 받는 Preview overload (핫픽스 2026-05-13).
+    /// </summary>
+    public Task<Dictionary<string, int>> PreviewAsync(
+        string folderPath, string tenantId, string? mdbPassword, CancellationToken ct = default)
+    {
+        _mdbPasswordContext.Value = mdbPassword;
+        return PreviewCoreAsync(folderPath, tenantId, ct);
+    }
+
+    private Task<Dictionary<string, int>> PreviewCoreAsync(
         string folderPath, string tenantId, CancellationToken ct = default)
     {
         var (pyojunPath, pandataPath, potherPath) = ResolveMdbPaths(folderPath);
@@ -106,7 +140,7 @@ public sealed class MdbMigrationService
     /// <summary>
     /// 3개 MDB 파일을 읽어 지정 tenant_id로 MariaDB에 마이그레이션한다.
     /// </summary>
-    private async Task<MdbMigrationResult> MigrateAsync(
+    private async Task<MdbMigrationResult> MigrateCoreAsync(
         string pyojunPath,
         string pandataPath,
         string tenantId,
@@ -1704,10 +1738,12 @@ public sealed class MdbMigrationService
         _db.Open();
     }
 
-    /// <summary>OLEDB로 MDB 파일을 열어 OleDbConnection을 반환한다.</summary>
+    /// <summary>OLEDB로 MDB 파일을 열어 OleDbConnection을 반환한다.
+    /// 핫픽스 2026-05-13: AsyncLocal `_mdbPasswordContext`에서 비번 자동 주입.</summary>
     private static OleDbConnection OpenOleDb(string mdbPath)
     {
-        var connStr = string.Format(OleDbConnTemplate, mdbPath);
+        var password = _mdbPasswordContext.Value ?? string.Empty;
+        var connStr = string.Format(OleDbConnTemplate, mdbPath, password);
         var conn = new OleDbConnection(connStr);
         conn.Open();
         return conn;

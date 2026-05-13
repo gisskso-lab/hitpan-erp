@@ -34,6 +34,7 @@ public static class SensitiveFieldMasking
         var pattern = @"(\d{2,3})-?(\d{3,4})-?(\d{4})";
         var match = Regex.Match(plain, pattern);
         if (!match.Success) return "***";
+        // 결재 #3 (2026-05-13): 가운데 자리 수와 무관하게 ****(4개) 일관 마스킹 — 자릿수 추정 방지
         return $"{match.Groups[1].Value}-****-{match.Groups[3].Value}";
     }
 }

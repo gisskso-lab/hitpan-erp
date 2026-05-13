@@ -22,11 +22,18 @@
 <MudPaper Elevation="0" Class="pa-4 mb-4" Style="border:0.5px solid var(--mud-palette-lines-default);border-radius:12px">
     <MudText Typo="Typo.subtitle2" Class="mb-3">기존 히트판 설치 폴더</MudText>
     <MudGrid Spacing="2">
-        <MudItem xs="12" md="8">
+        <MudItem xs="12" md="6">
             <MudTextField T="string" Label="MDB 폴더 경로" @bind-Value="_folderPath"
                           Variant="Variant.Outlined" Margin="Margin.Dense"
                           Placeholder="예: C:\HITWIN"
                           HelperText="기존 히트판이 설치된 폴더 경로를 입력하세요 (보통 C:\HITWIN)" />
+        </MudItem>
+        <MudItem xs="12" md="2">
+            @* 핫픽스 2026-05-13: 레거시 MDB 비번 입력 칸 (예: 7618968) *@
+            <MudTextField T="string" Label="MDB 비밀번호" @bind-Value="_mdbPassword"
+                          Variant="Variant.Outlined" Margin="Margin.Dense"
+                          InputType="InputType.Password"
+                          HelperText="MDB에 비번이 걸려있으면 입력 (없으면 비워두세요)" />
         </MudItem>
         <MudItem xs="12" md="2">
             <MudButton Variant="Variant.Outlined" Color="Color.Primary"
@@ -146,6 +153,7 @@
 @code {
     /* ── 상태 변수 ── */
     private string _folderPath = @"C:\HITWIN";
+    private string _mdbPassword = ""; // 핫픽스 2026-05-13: 레거시 MDB 비번
     private bool _loading;
     private string _statusMessage = "";
     private Dictionary<string, int>? _previewResult;
@@ -163,8 +171,13 @@
             _migrationRows.Clear();
             StateHasChanged();
 
-            _previewResult = await Http.GetFromJsonAsync<Dictionary<string, int>>(
-                $"api/migration/legacy-mdb/preview?folderPath={Uri.EscapeDataString(_folderPath)}");
+            // 핫픽스 2026-05-13: 비번 파라미터 추가
+            var url = $"api/migration/legacy-mdb/preview?folderPath={Uri.EscapeDataString(_folderPath)}";
+            if (!string.IsNullOrEmpty(_mdbPassword))
+            {
+                url += $"&mdbPassword={Uri.EscapeDataString(_mdbPassword)}";
+            }
+            _previewResult = await Http.GetFromJsonAsync<Dictionary<string, int>>(url);
 
             if (_previewResult == null || _previewResult.Count == 0)
             {
@@ -196,8 +209,8 @@
             _statusMessage = "데이터 이관 중... 잠시 기다려주세요.";
             StateHasChanged();
 
-            // POST 요청 — 폴더 경로를 body로 전달
-            var payload = new { folderPath = _folderPath };
+            // POST 요청 — 폴더 경로 + 비번 (핫픽스 2026-05-13)
+            var payload = new { folderPath = _folderPath, mdbPassword = string.IsNullOrEmpty(_mdbPassword) ? null : _mdbPassword };
             var response = await Http.PostAsJsonAsync("api/migration/legacy-mdb", payload);
 
             if (!response.IsSuccessStatusCode)

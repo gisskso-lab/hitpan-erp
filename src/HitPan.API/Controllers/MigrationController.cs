@@ -28,9 +28,13 @@ public sealed class MigrationController : ControllerBase
     /// <summary>
     /// MDB 폴더 내 테이블 건수 미리보기 (실제 import 없음)
     /// - 마이그레이션 전 데이터 규모를 확인할 때 사용
+    /// - 핫픽스 2026-05-13: mdbPassword 파라미터 추가 (비번 걸린 레거시 MDB 지원)
     /// </summary>
     [HttpGet("legacy-mdb/preview")]
-    public async Task<IActionResult> PreviewLegacyMdb([FromQuery] string folderPath, CancellationToken ct)
+    public async Task<IActionResult> PreviewLegacyMdb(
+        [FromQuery] string folderPath,
+        [FromQuery] string? mdbPassword,
+        CancellationToken ct)
     {
         // tenant_id는 JWT 클레임 기반 TenantMiddleware에서 설정
         var tenantId = HttpContext.Items["TenantId"]?.ToString();
@@ -48,7 +52,7 @@ public sealed class MigrationController : ControllerBase
         try
         {
             // preview = true: 건수만 조회, 실제 데이터 이관 없음
-            var result = await _migrationService.PreviewAsync(folderPath, tenantId, ct).ConfigureAwait(false);
+            var result = await _migrationService.PreviewAsync(folderPath, tenantId, mdbPassword, ct).ConfigureAwait(false);
             return Ok(result);
         }
         catch (FileNotFoundException ex)
@@ -60,6 +64,11 @@ public sealed class MigrationController : ControllerBase
         {
             // MDB 파일 형식 오류 등
             return BadRequest(new { message = ex.Message });
+        }
+        catch (System.Data.OleDb.OleDbException ex)
+        {
+            // 비번 불일치·암호화된 MDB 등 OLEDB 단계 오류 — 사용자에게 정확히 안내
+            return BadRequest(new { message = $"MDB 파일을 열 수 없습니다. 비번을 확인해주세요. (상세: {ex.Message})" });
         }
     }
 
@@ -86,7 +95,7 @@ public sealed class MigrationController : ControllerBase
         try
         {
             // 실제 마이그레이션 실행 — 테이블별 이관 건수 반환
-            var result = await _migrationService.MigrateAsync(request.FolderPath, tenantId, ct).ConfigureAwait(false);
+            var result = await _migrationService.MigrateAsync(request.FolderPath, tenantId, request.MdbPassword, ct).ConfigureAwait(false);
             return Ok(result);
         }
         catch (FileNotFoundException ex)
@@ -98,6 +107,11 @@ public sealed class MigrationController : ControllerBase
         {
             // 데이터 무결성 오류, MDB 파일 형식 오류 등
             return BadRequest(new { message = ex.Message });
+        }
+        catch (System.Data.OleDb.OleDbException ex)
+        {
+            // 비번 불일치·OLEDB 단계 오류 (핫픽스 2026-05-13)
+            return BadRequest(new { message = $"MDB 파일을 열 수 없습니다. 비번을 확인해주세요. (상세: {ex.Message})" });
         }
     }
 }
@@ -111,4 +125,11 @@ public record MdbMigrationRequest
     /// 레거시 MDB 파일이 위치한 폴더 경로
     /// </summary>
     public string FolderPath { get; init; } = string.Empty;
+
+    /// <summary>
+    /// MDB 파일 비밀번호 (선택사항, 핫픽스 2026-05-13).
+    /// 레거시 히트판 MDB는 비번이 걸려있는 경우가 있다 (예: 7618968).
+    /// 비번이 없으면 null 또는 빈 문자열.
+    /// </summary>
+    public string? MdbPassword { get; init; }
 }
