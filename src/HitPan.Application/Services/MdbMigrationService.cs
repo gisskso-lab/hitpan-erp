@@ -5,6 +5,7 @@ using System.Globalization;
 using System.Runtime.Versioning;
 using System.Text;
 using Dapper;
+using HitPan.Application.Common;
 using HitPan.Application.Interfaces;
 using Microsoft.Extensions.Logging;
 
@@ -454,8 +455,10 @@ public sealed class MdbMigrationService
                 TableName = tableName,
                 ErrorType = errorType,
                 Severity = severity,
-                Message = Truncate(ex.Message, 65535),
-                Detail = Truncate(ex.ToString(), 65535),
+                // WS-20260514-06 (SEC-02): MariaDB 예외 메시지에 박힐 수 있는 PII(주민/사업자/전화/이메일/계좌)
+                // 마스킹 후 저장. 개인정보보호법 §29 안전조치의무 충족.
+                Message = SensitiveFieldMasking.MaskTextPII(Truncate(ex.Message, 65535)),
+                Detail = SensitiveFieldMasking.MaskTextPII(Truncate(ex.ToString(), 65535)),
                 RawData = encryptedRaw,
                 Now = DateTime.UtcNow,
             }, cancellationToken: ct)).ConfigureAwait(false);
@@ -538,9 +541,15 @@ public sealed class MdbMigrationService
         }
     }
 
-    /// <summary>세션 종료 시 자동 복원되지만 명시적으로 원복 (방어).</summary>
+    /// <summary>
+    /// 세션 종료 시 자동 복원되지만 명시적으로 원복 (방어).
+    /// WS-20260514-07 (SEC-04): 원복 실패 시 connection을 강제 Dispose해
+    /// pool에 fk_checks=0/unique_checks=0/innodb_flush=2 상태로 반환되는 것을 차단한다.
+    /// (헌법 #15: silent swallow 금지, #20: 다른 컨트롤러로 오염 전파 차단)
+    /// </summary>
     private async Task RestoreMigrationSessionTuningAsync(CancellationToken ct)
     {
+        var allRestored = false;
         try
         {
             await _db.ExecuteAsync(new CommandDefinition(
@@ -549,10 +558,32 @@ public sealed class MdbMigrationService
                 "SET SESSION foreign_key_checks = 1", cancellationToken: ct)).ConfigureAwait(false);
             await _db.ExecuteAsync(new CommandDefinition(
                 "SET SESSION unique_checks = 1", cancellationToken: ct)).ConfigureAwait(false);
+            allRestored = true;
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "[MDB마이그레이션] 세션 튜닝 원복 실패 — 세션 종료 시 자동 복원됨");
+            _logger.LogError(ex,
+                "[MDB마이그레이션] 세션 튜닝 원복 실패 — connection 강제 Dispose로 pool 오염 차단 (WS-07)");
+        }
+        finally
+        {
+            if (!allRestored)
+            {
+                // 원복 미완료 connection은 pool 반환 절대 금지.
+                // Close + Dispose로 물리 소켓 폐기 → 다른 요청 오염 0.
+                try
+                {
+                    if (_db.State == ConnectionState.Open) _db.Close();
+                    _db.Dispose();
+                    _logger.LogWarning(
+                        "[MDB마이그레이션] 오염 가능 connection 강제 폐기 완료 (pool 반환 차단)");
+                }
+                catch (Exception disposeEx)
+                {
+                    _logger.LogError(disposeEx,
+                        "[MDB마이그레이션] connection Dispose 실패 — 운영자 즉시 점검 필요");
+                }
+            }
         }
     }
 
@@ -635,6 +666,22 @@ public sealed class MdbMigrationService
         foreach (DataRow row in dt.Rows)
         {
             var buyCode = GetInt(row, "buy_code");
+            var partnerCode = $"MIG-{buyCode:D5}";
+
+            // WS-20260514-08 (CODE-06): 멱등성 — 같은 partner_code 이미 있으면 기존 partner_id 매핑하고 INSERT skip.
+            // uq_tenant_code(tenant_id, partner_code) UNIQUE 활용. 재실행 시 중복 INSERT 방지.
+            var existingId = await _db.ExecuteScalarAsync<string?>(new CommandDefinition(
+                "SELECT partner_id FROM partners WHERE tenant_id = @TenantId AND partner_code = @Code LIMIT 1",
+                new { TenantId = tenantId, Code = partnerCode },
+                transaction: tx, cancellationToken: ct)).ConfigureAwait(false);
+
+            if (!string.IsNullOrEmpty(existingId))
+            {
+                // 이미 존재 → 기존 ID로 매핑만 갱신, INSERT skip (멱등)
+                partnerMap[buyCode] = existingId;
+                continue;
+            }
+
             var partnerId = Guid.NewGuid().ToString();
 
             // buy_code → partner_id 매핑 저장 (이후 거래 FK 참조용)
@@ -681,7 +728,7 @@ public sealed class MdbMigrationService
             {
                 PartnerId = partnerId,
                 TenantId = tenantId,
-                PartnerCode = $"MIG-{buyCode:D5}",  // 레거시 코드 기반 partner_code 생성
+                PartnerCode = partnerCode,           // 레거시 코드 기반 partner_code (멱등 키, WS-08)
                 PartnerName = GetStr(row, "buy_name"),
                 PartnerType = partnerType,
                 BizNo = GetStr(row, "buy_taxno"),          // 사업자번호
@@ -1399,22 +1446,30 @@ public sealed class MdbMigrationService
         var dt = ReadMdbTable(oleConn, "SELECT * FROM DOCF5 ORDER BY S_YMD, S_BUY");
         if (dt.Rows.Count == 0) return 0;
 
+        // WS-20260514-08 (CODE-06): INSERT IGNORE + 멱등 키 source_type/source_id.
+        // uq_collections_source(tenant_id, source_type, source_id) UNIQUE 활용 (WS-10에서 추가).
+        // 재실행 시 같은 source_id 중복 INSERT 자동 차단.
         const string sql = """
-            INSERT INTO collections
+            INSERT IGNORE INTO collections
               (collection_id, tenant_id, partner_id, collection_date, amount,
-               collection_method, memo, is_active, created_at, updated_at)
+               collection_method, memo, is_active, created_at, updated_at,
+               source_type, source_id)
             VALUES
               (@CollectionId, @TenantId, @PartnerId, @CollectionDate, @Amount,
-               @Method, @Memo, 1, @Now, @Now)
+               @Method, @Memo, 1, @Now, @Now,
+               'migration', @SourceId)
             """;
 
         int count = 0;
+        int rowIdx = 0;
         foreach (DataRow row in dt.Rows)
         {
+            rowIdx++;
             var buyCode = GetInt(row, "S_BUY");
             if (!partnerMap.TryGetValue(buyCode, out var partnerId)) continue;
 
-            var collDate = ParseLegacyDate(GetStr(row, "S_YMD")) ?? now;
+            var ymd = GetStr(row, "S_YMD");
+            var collDate = ParseLegacyDate(ymd) ?? now;
 
             // S_GU(구분)에 따라 수금방법 추정
             var gu = GetStr(row, "S_GU");
@@ -1431,6 +1486,10 @@ public sealed class MdbMigrationService
             var amount = GetDec(row, "S_SUK");
             if (amount == 0) amount = GetDec(row, "S_BAL");
 
+            // WS-08 멱등 키: DOCF5에 시퀀스 컬럼 없음 → 정렬 ORDER BY 후 rowIdx 사용.
+            // 동일 MDB 두 번 마이그 시 같은 ORDER BY → 같은 rowIdx → 같은 source_id → INSERT IGNORE skip.
+            var sourceId = $"mig-{ymd}-{buyCode}-{rowIdx:D6}";
+
             await _db.ExecuteAsync(new CommandDefinition(sql, new
             {
                 CollectionId = Guid.NewGuid().ToString(),
@@ -1440,7 +1499,8 @@ public sealed class MdbMigrationService
                 Amount = amount,
                 Method = method,
                 Memo = GetStr(row, "S_REM"),
-                Now = now
+                Now = now,
+                SourceId = sourceId,
             }, transaction: tx, cancellationToken: ct)).ConfigureAwait(false);
 
             count++;

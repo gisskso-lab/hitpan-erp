@@ -37,4 +37,51 @@ public static class SensitiveFieldMasking
         // 결재 #3 (2026-05-13): 가운데 자리 수와 무관하게 ****(4개) 일관 마스킹 — 자릿수 추정 방지
         return $"{match.Groups[1].Value}-****-{match.Groups[3].Value}";
     }
+
+    // ──────────────────────────────────────────────
+    // WS-20260514-06 (2026-05-14): 자유 텍스트 PII 마스킹
+    // MariaDB 예외 메시지·stack trace 같은 자유 텍스트에서 PII 패턴 검출 + 일괄 마스킹.
+    // 헌법 #5, #22 / 개인정보보호법 §29 안전조치의무
+    // ──────────────────────────────────────────────
+
+    /// <summary>주민번호 패턴: '880101-1234567' (선행 7자리 보존, 뒤 7자리 마스킹).</summary>
+    private static readonly Regex _residentNoPattern =
+        new(@"\b(\d{6})-?[1-4]\d{6}\b", RegexOptions.Compiled);
+
+    /// <summary>사업자등록번호 패턴: '123-45-67890' (가운데 5자리 마스킹).</summary>
+    private static readonly Regex _bizNoPattern =
+        new(@"\b(\d{3})-?(\d{2})-?(\d{5})\b", RegexOptions.Compiled);
+
+    /// <summary>전화번호 패턴: 010-XXXX-XXXX / 02-XXX-XXXX / 070-XXXX-XXXX.</summary>
+    private static readonly Regex _phonePattern =
+        new(@"\b(01[016789]|02|0[3-6][1-5]|070)-?(\d{3,4})-?(\d{4})\b", RegexOptions.Compiled);
+
+    /// <summary>이메일 패턴: 'user@domain.com' (앞 1자만 보존).</summary>
+    private static readonly Regex _emailPattern =
+        new(@"\b([A-Za-z0-9])[A-Za-z0-9._%+-]*@([A-Za-z0-9.-]+\.[A-Za-z]{2,})\b", RegexOptions.Compiled);
+
+    /// <summary>계좌번호 패턴: 연속 9~16자리 숫자 (전화·주민·사업자 매칭 후 잔여 처리).</summary>
+    private static readonly Regex _accountPattern =
+        new(@"\b\d{9,16}\b", RegexOptions.Compiled);
+
+    /// <summary>
+    /// 자유 텍스트(예외 메시지·stack trace)에서 PII 패턴 검출 + 마스킹.
+    /// 적용 순서: 주민번호 → 사업자번호 → 전화번호 → 이메일 → 계좌번호 (긴 패턴 우선).
+    /// </summary>
+    public static string MaskTextPII(string? text)
+    {
+        if (string.IsNullOrEmpty(text)) return string.Empty;
+
+        var masked = text;
+        masked = _residentNoPattern.Replace(masked, m => $"{m.Groups[1].Value}-*******");
+        masked = _bizNoPattern.Replace(masked, m => $"***-**-{m.Groups[3].Value}");
+        masked = _phonePattern.Replace(masked, m => $"{m.Groups[1].Value}-****-{m.Groups[3].Value}");
+        masked = _emailPattern.Replace(masked, m => $"{m.Groups[1].Value}***@{m.Groups[2].Value}");
+        masked = _accountPattern.Replace(masked, m =>
+        {
+            var v = m.Value;
+            return v.Length >= 4 ? $"****{v.Substring(v.Length - 4)}" : "***";
+        });
+        return masked;
+    }
 }
