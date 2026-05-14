@@ -56,13 +56,62 @@
     </MudGrid>
 </MudPaper>
 
-@* 진행 상태 표시 *@
+@* P0 #6 (2026-05-14): Sticky 헤더 — 마이그 진행 중 항상 상단 고정 가시화 *@
 @if (_loading)
 {
-    <MudProgressLinear Indeterminate="true" Color="Color.Primary" Class="mb-4" />
-    <MudText Typo="Typo.body2" Align="Align.Center" Class="mb-4" Style="color:var(--mud-palette-text-secondary)">
-        @_statusMessage
-    </MudText>
+    <div style="position:sticky;top:0;z-index:50;background:var(--mud-palette-background);padding:12px 0;border-bottom:1px solid var(--mud-palette-lines-default);margin-bottom:16px">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+            <MudText Typo="Typo.subtitle2">
+                <MudIcon Icon="@Icons.Material.Filled.Sync" Size="Size.Small" Class="mr-1" Style="animation:spin 2s linear infinite" />
+                마이그레이션 진행 중
+            </MudText>
+            <MudText Typo="Typo.body2" Style="color:var(--mud-palette-text-secondary)">
+                @_completedTables / @_totalTables 완료 · 경과 @(_elapsedSeconds)초
+            </MudText>
+        </div>
+        <MudProgressLinear Color="Color.Primary" Value="@_progressPercent" Class="mb-2" Style="height:8px" />
+        <MudText Typo="Typo.caption" Style="color:var(--mud-palette-text-secondary)">
+            @_statusMessage
+        </MudText>
+    </div>
+
+    @* 테이블별 카드 그리드 — 16개 테이블 진행 상태 *@
+    <MudGrid Spacing="2" Class="mb-4">
+        @foreach (var t in _tableCards)
+        {
+            <MudItem xs="6" sm="4" md="3" lg="2">
+                <MudPaper Elevation="0" Class="pa-2"
+                          Style="@($"border:1px solid {GetCardBorder(t.Status)};border-radius:8px;background:{GetCardBg(t.Status)};min-height:78px")">
+                    <div style="display:flex;align-items:center;gap:4px;margin-bottom:4px">
+                        <MudIcon Icon="@GetStatusIcon(t.Status)" Size="Size.Small" Color="@GetStatusColor(t.Status)" />
+                        <MudText Typo="Typo.body2" Style="font-weight:500;font-size:12px">@t.Label</MudText>
+                    </div>
+                    <MudText Typo="Typo.body2" Style="font-size:11px;color:var(--mud-palette-text-secondary)">
+                        @if (t.Status == "completed")
+                        {
+                            @($"{t.Rows:N0}행 · {t.ElapsedMs / 1000.0:F1}s")
+                        }
+                        else if (t.Status == "running")
+                        {
+                            <span>진행 중...</span>
+                        }
+                        else if (t.Status == "failed")
+                        {
+                            <span style="color:var(--mud-palette-error)">@(t.ErrorMessage ?? "실패")</span>
+                        }
+                        else
+                        {
+                            <span>대기</span>
+                        }
+                    </MudText>
+                </MudPaper>
+            </MudItem>
+        }
+    </MudGrid>
+
+    <style>
+        @@keyframes spin { from { transform:rotate(0deg) } to { transform:rotate(360deg) } }
+    </style>
 }
 
 @* 미리보기 / 결과 2단 레이아웃 *@
@@ -160,6 +209,62 @@
     private MigrationResult? _migrationResult;
     private List<MigrationRow> _migrationRows = new();
 
+    /* ── P0 #6 (2026-05-14): 테이블별 진행 카드 ── */
+    private List<TableCard> _tableCards = BuildInitialCards();
+    private int _completedTables;
+    private int _totalTables = 13; // PYOJUN(1, 묶음) + PANDATA 11 + warehouse_migration(1)
+    private int _elapsedSeconds;
+    private double _progressPercent => _totalTables == 0 ? 0 : (double)_completedTables / _totalTables * 100.0;
+
+    private static List<TableCard> BuildInitialCards() => new()
+    {
+        new("warehouse_migration", "기본창고"),
+        new("pyojun_master", "마스터(업체+상품+BOM+사원)"),
+        new("transactions", "거래 명세(매입/매출)"),
+        new("stock_ledger", "재고원장(입출고)"),
+        new("collections", "수금"),
+        new("cashbook", "경비(현금출납)"),
+        new("expenses", "전표(비용처리)"),
+        new("purchase_orders", "매입발주"),
+        new("sales_orders", "매출주문"),
+        new("tax_invoices", "세금계산서"),
+        new("bills", "어음"),
+        new("card_payments", "카드결제"),
+        new("bank_transactions", "은행거래"),
+    };
+
+    private static string GetStatusIcon(string status) => status switch
+    {
+        "completed" => Icons.Material.Filled.CheckCircle,
+        "running"   => Icons.Material.Filled.Sync,
+        "failed"    => Icons.Material.Filled.Error,
+        _           => Icons.Material.Outlined.RadioButtonUnchecked,
+    };
+
+    private static Color GetStatusColor(string status) => status switch
+    {
+        "completed" => Color.Success,
+        "running"   => Color.Primary,
+        "failed"    => Color.Error,
+        _           => Color.Default,
+    };
+
+    private static string GetCardBorder(string status) => status switch
+    {
+        "completed" => "var(--mud-palette-success)",
+        "running"   => "var(--mud-palette-primary)",
+        "failed"    => "var(--mud-palette-error)",
+        _           => "var(--mud-palette-lines-default)",
+    };
+
+    private static string GetCardBg(string status) => status switch
+    {
+        "completed" => "rgba(76,175,80,0.06)",
+        "running"   => "rgba(33,150,243,0.08)",
+        "failed"    => "rgba(244,67,54,0.06)",
+        _           => "transparent",
+    };
+
     /* ── 미리보기 ── */
     private async Task PreviewAsync()
     {
@@ -207,6 +312,10 @@
         {
             _loading = true;
             _statusMessage = "마이그레이션 시작 중...";
+            // P0 #6 (2026-05-14): 카드 초기화 (이전 잡 상태 잔재 제거).
+            _tableCards = BuildInitialCards();
+            _completedTables = 0;
+            _elapsedSeconds = 0;
             StateHasChanged();
 
             // 1) Start — 즉시 JobId 반환 (1초 내, 524 안 걸림)
@@ -243,6 +352,24 @@
                 if (status is null) continue;
 
                 _statusMessage = $"[{status.Status}] {status.CurrentStep} (경과 {status.ElapsedSeconds}초)";
+                _elapsedSeconds = status.ElapsedSeconds;
+
+                // P0 #6 (2026-05-14): 테이블별 카드 갱신.
+                if (status.TableProgress is not null)
+                {
+                    foreach (var card in _tableCards)
+                    {
+                        if (status.TableProgress.TryGetValue(card.Key, out var p))
+                        {
+                            card.Status = p.Status;
+                            card.Rows = p.Rows;
+                            card.ElapsedMs = p.ElapsedMs;
+                            card.ErrorMessage = p.ErrorMessage;
+                        }
+                    }
+                    _completedTables = _tableCards.Count(c => c.Status is "completed" or "failed");
+                }
+
                 StateHasChanged();
 
                 if (status.Status == "completed" && status.Result is not null)
@@ -312,6 +439,27 @@
         public int ElapsedSeconds { get; set; }
         public MigrationResult? Result { get; set; }
         public string? ErrorMessage { get; set; }
+        public Dictionary<string, TableProgressDto>? TableProgress { get; set; }
+    }
+
+    /// <summary>P0 #6 (2026-05-14): 테이블별 진행 상태 — Sticky 카드용.</summary>
+    private class TableProgressDto
+    {
+        public string Status { get; set; } = "pending";
+        public int Rows { get; set; }
+        public long ElapsedMs { get; set; }
+        public string? ErrorMessage { get; set; }
+    }
+
+    private sealed class TableCard
+    {
+        public string Key { get; }
+        public string Label { get; }
+        public string Status { get; set; } = "pending";
+        public int Rows { get; set; }
+        public long ElapsedMs { get; set; }
+        public string? ErrorMessage { get; set; }
+        public TableCard(string key, string label) { Key = key; Label = label; }
     }
 
     /* ── DTO: 미리보기 결과 — Dictionary<string, int> 직접 사용 ── */

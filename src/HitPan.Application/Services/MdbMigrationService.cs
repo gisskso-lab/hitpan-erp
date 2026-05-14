@@ -34,6 +34,10 @@ public sealed class MdbMigrationService
     /// P0 #5 (2026-05-14): null이면 에러 저장 skip (legacy overload 호환).</summary>
     private static readonly AsyncLocal<string?> _jobIdContext = new();
 
+    /// <summary>P0 #6 (2026-05-14): 테이블별 진행 상태 콜백 (UI Sticky/카드 가시화).
+    /// (tableName, status, rows, elapsedMs, errorMsg) — controller에서 jobStore 업데이트로 연결.</summary>
+    private static readonly AsyncLocal<Action<string, string, int, long, string?>?> _progressCallback = new();
+
     public MdbMigrationService(
         IDbConnection db,
         ILogger<MdbMigrationService> logger,
@@ -67,12 +71,22 @@ public sealed class MdbMigrationService
     /// jobId까지 받는 정식 overload (P0 #5, 2026-05-14).
     /// jobId가 있으면 테이블 실패 시 migration_errors에 AES 암호화 raw_data 저장.
     /// </summary>
-    public async Task<MdbMigrationResult> MigrateAsync(
+    public Task<MdbMigrationResult> MigrateAsync(
         string folderPath, string tenantId, string? mdbPassword, string? jobId, CancellationToken ct = default)
+        => MigrateAsync(folderPath, tenantId, mdbPassword, jobId, progressCallback: null, ct);
+
+    /// <summary>
+    /// 진행 상태 콜백까지 받는 정식 overload (P0 #6, 2026-05-14).
+    /// progressCallback(tableName, status, rows, elapsedMs, errorMsg) — UI 가시화용.
+    /// </summary>
+    public async Task<MdbMigrationResult> MigrateAsync(
+        string folderPath, string tenantId, string? mdbPassword, string? jobId,
+        Action<string, string, int, long, string?>? progressCallback, CancellationToken ct = default)
     {
         var (pyojunPath, pandataPath, _) = ResolveMdbPaths(folderPath);
         _mdbPasswordContext.Value = mdbPassword;
         _jobIdContext.Value = jobId;
+        _progressCallback.Value = progressCallback;
         try
         {
             return await MigrateCoreAsync(pyojunPath, pandataPath, tenantId, ct).ConfigureAwait(false);
@@ -81,6 +95,7 @@ public sealed class MdbMigrationService
         {
             _mdbPasswordContext.Value = null;
             _jobIdContext.Value = null;
+            _progressCallback.Value = null;
         }
     }
 
@@ -347,6 +362,9 @@ public sealed class MdbMigrationService
         bool continueOnFail = true, string mdbFile = "PANDATA")
     {
         var sw = System.Diagnostics.Stopwatch.StartNew();
+        var cb = _progressCallback.Value;
+        cb?.Invoke(tableName, "running", 0, 0, null);
+
         IDbTransaction? tx = null;
         try
         {
@@ -357,12 +375,14 @@ public sealed class MdbMigrationService
             _logger.LogInformation(
                 "[MDB마이그레이션] {Table} 완료: {Rows}행, {Elapsed}ms",
                 tableName, rows, sw.ElapsedMilliseconds);
+            cb?.Invoke(tableName, "completed", rows, sw.ElapsedMilliseconds, null);
         }
         catch (OperationCanceledException)
         {
             // 취소는 에러 저장 대상 아님 (사용자 의도된 중단).
             sw.Stop();
             try { tx?.Rollback(); } catch { /* swallow during cancel */ }
+            cb?.Invoke(tableName, "failed", 0, sw.ElapsedMilliseconds, "취소됨");
             throw;
         }
         catch (Exception ex)
@@ -373,6 +393,8 @@ public sealed class MdbMigrationService
             _logger.LogError(ex,
                 "[MDB마이그레이션] {Table} 실패 ({Elapsed}ms, continueOnFail={Continue})",
                 tableName, sw.ElapsedMilliseconds, continueOnFail);
+            cb?.Invoke(tableName, "failed", 0, sw.ElapsedMilliseconds,
+                $"{ex.GetType().Name}: {Truncate(ex.Message, 200)}");
 
             // migration_errors에 AES 암호화 raw_data 저장 (jobId 있을 때만, 헌법 #5).
             await TryInsertMigrationErrorAsync(tableName, mdbFile, ex, ct).ConfigureAwait(false);

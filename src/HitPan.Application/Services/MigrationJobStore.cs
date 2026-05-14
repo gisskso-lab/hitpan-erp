@@ -102,6 +102,22 @@ public sealed class MigrationJob
     public DateTime? FinishedAt { get; set; }
     public MigrationJobResult? Result { get; set; }
     public string? ErrorMessage { get; set; }
+
+    /// <summary>P0 #6 (2026-05-14): 테이블별 진행 상태 — UI Sticky/카드 가시화용.
+    /// key = table_name (snake_case), value = 진행 정보.</summary>
+    public ConcurrentDictionary<string, MigrationTableProgress> TableProgress { get; } = new();
+}
+
+/// <summary>P0 #6 (2026-05-14): 테이블 단위 진행 상태 노출 DTO.</summary>
+public sealed class MigrationTableProgress
+{
+    /// <summary>pending | running | completed | failed</summary>
+    public string Status { get; set; } = "pending";
+    public int Rows { get; set; }
+    public DateTime? StartedAt { get; set; }
+    public DateTime? FinishedAt { get; set; }
+    public long ElapsedMs { get; set; }
+    public string? ErrorMessage { get; set; }
 }
 
 public sealed class MigrationJobResult

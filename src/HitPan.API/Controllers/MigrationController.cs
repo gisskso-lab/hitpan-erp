@@ -206,8 +206,26 @@ public sealed class MigrationController : ControllerBase
                 await storeBg.SyncToDbAsync(job.JobId, "running");
 
                 _jobStore.Update(job.JobId, j => j.CurrentStep = "MDB 읽기 + Bulk INSERT 진행 중...");
-                // P0 #5 (2026-05-14): jobId 전달 — 테이블 실패 시 migration_errors AES 저장용.
-                var result = await svc.MigrateAsync(request.FolderPath, tenantId, request.MdbPassword, job.JobId, CancellationToken.None);
+                // P0 #5 (2026-05-14): jobId — migration_errors AES 저장용.
+                // P0 #6 (2026-05-14): 진행 콜백 — UI Sticky/카드 가시화.
+                var jobIdLocal = job.JobId;
+                var result = await svc.MigrateAsync(
+                    request.FolderPath, tenantId, request.MdbPassword, jobIdLocal,
+                    progressCallback: (table, status, rows, elapsedMs, err) =>
+                    {
+                        _jobStore.Update(jobIdLocal, j =>
+                        {
+                            var prog = j.TableProgress.GetOrAdd(table, _ => new MigrationTableProgress());
+                            prog.Status = status;
+                            prog.Rows = rows;
+                            prog.ElapsedMs = elapsedMs;
+                            prog.ErrorMessage = err;
+                            if (status == "running") prog.StartedAt ??= DateTime.UtcNow;
+                            if (status is "completed" or "failed") prog.FinishedAt = DateTime.UtcNow;
+                            j.CurrentStep = status == "running" ? $"진행 중: {table}" : $"{table} {status}";
+                        });
+                    },
+                    CancellationToken.None);
 
                 _jobStore.Update(job.JobId, j =>
                 {
@@ -255,6 +273,7 @@ public sealed class MigrationController : ControllerBase
         if (job is null) return NotFound(new { message = "잡 ID를 찾을 수 없습니다." });
         if (job.TenantId != tenantId) return Forbid();
 
+        // P0 #6 (2026-05-14): tableProgress 추가 — UI Sticky/카드 가시화.
         return Ok(new
         {
             jobId = job.JobId,
@@ -264,7 +283,16 @@ public sealed class MigrationController : ControllerBase
             finishedAt = job.FinishedAt,
             result = job.Result,
             errorMessage = job.ErrorMessage,
-            elapsedSeconds = (int)((job.FinishedAt ?? DateTime.UtcNow) - job.StartedAt).TotalSeconds
+            elapsedSeconds = (int)((job.FinishedAt ?? DateTime.UtcNow) - job.StartedAt).TotalSeconds,
+            tableProgress = job.TableProgress.ToDictionary(
+                kv => kv.Key,
+                kv => new
+                {
+                    status = kv.Value.Status,
+                    rows = kv.Value.Rows,
+                    elapsedMs = kv.Value.ElapsedMs,
+                    errorMessage = kv.Value.ErrorMessage,
+                })
         });
     }
 }
