@@ -1420,8 +1420,13 @@ public sealed class MdbMigrationService
             if (gubun.Equals("S", StringComparison.OrdinalIgnoreCase))
             {
                 // ── 판매 ──
-                var orderId = Guid.NewGuid().ToString();
                 var orderNo = $"MIG-SO-{soSeq:D5}";
+                // 봉합 2026-05-14: 기존 order_id 재사용 (FK 보존, 재마이그 덮어쓰기)
+                var existingOrderId = await Db.ExecuteScalarAsync<string?>(new CommandDefinition(
+                    "SELECT order_id FROM sales_orders WHERE tenant_id = @TenantId AND order_no = @OrderNo LIMIT 1",
+                    new { TenantId = tenantId, OrderNo = orderNo },
+                    transaction: tx, cancellationToken: ct)).ConfigureAwait(false);
+                var orderId = !string.IsNullOrEmpty(existingOrderId) ? existingOrderId : Guid.NewGuid().ToString();
 
                 await Db.ExecuteAsync(new CommandDefinition(soSql, new
                 {
@@ -1436,6 +1441,14 @@ public sealed class MdbMigrationService
                     Memo = $"레거시 전표번호: {slipNo}",
                     Now = now
                 }, transaction: tx, cancellationToken: ct)).ConfigureAwait(false);
+
+                // 봉합 2026-05-14: 기존 items 삭제 후 재삽입 (재마이그 시 라인 중복 방지)
+                if (!string.IsNullOrEmpty(existingOrderId))
+                {
+                    await Db.ExecuteAsync(new CommandDefinition(
+                        "DELETE FROM sales_order_items WHERE order_id = @OrderId",
+                        new { OrderId = orderId }, transaction: tx, cancellationToken: ct)).ConfigureAwait(false);
+                }
 
                 // 상세 INSERT
                 if (details != null)
@@ -1466,8 +1479,13 @@ public sealed class MdbMigrationService
             else if (gubun.Equals("B", StringComparison.OrdinalIgnoreCase))
             {
                 // ── 매입 ──
-                var poId = Guid.NewGuid().ToString();
                 var poNo = $"MIG-PO-{poSeq:D5}";
+                // 봉합 2026-05-14: 기존 po_id 재사용 (FK 보존, 재마이그 덮어쓰기)
+                var existingPoId = await Db.ExecuteScalarAsync<string?>(new CommandDefinition(
+                    "SELECT po_id FROM purchase_orders WHERE tenant_id = @TenantId AND po_no = @PoNo LIMIT 1",
+                    new { TenantId = tenantId, PoNo = poNo },
+                    transaction: tx, cancellationToken: ct)).ConfigureAwait(false);
+                var poId = !string.IsNullOrEmpty(existingPoId) ? existingPoId : Guid.NewGuid().ToString();
 
                 await Db.ExecuteAsync(new CommandDefinition(poSql, new
                 {
@@ -1482,6 +1500,14 @@ public sealed class MdbMigrationService
                     Memo = $"레거시 전표번호: {slipNo}",
                     Now = now
                 }, transaction: tx, cancellationToken: ct)).ConfigureAwait(false);
+
+                // 봉합 2026-05-14: 기존 items 삭제 후 재삽입
+                if (!string.IsNullOrEmpty(existingPoId))
+                {
+                    await Db.ExecuteAsync(new CommandDefinition(
+                        "DELETE FROM purchase_order_items WHERE po_id = @PoId",
+                        new { PoId = poId }, transaction: tx, cancellationToken: ct)).ConfigureAwait(false);
+                }
 
                 // 상세 INSERT
                 if (details != null)
@@ -1673,14 +1699,37 @@ public sealed class MdbMigrationService
         var sw = System.Diagnostics.Stopwatch.StartNew();
         var stageTable = $"stock_ledger_stage_{Guid.NewGuid():N}".Substring(0, 40);
 
-        // 1) 세션 한정 TEMPORARY staging 테이블 생성. LIKE로 컬럼·인덱스 동일하게 복제하되
-        //    UNIQUE 인덱스는 일단 유지 (BulkCopy 도중에도 충돌 0 가정 — 같은 잡 내 새 데이터).
+        // 1) 세션 한정 TEMPORARY staging 테이블 생성. LIKE로 컬럼·인덱스 동일하게 복제.
+        //    봉합 2026-05-14: BulkCopy "copied vs inserted" 예외 방지 — stage의 UNIQUE 인덱스 제거.
+        //    stage에는 모든 row를 그대로 적재하고, INSERT IGNORE SELECT 단계에서 본 테이블 UNIQUE로 중복 거름.
         //    TEMPORARY 테이블은 세션 종료(=conn DisposeAsync) 시 자동 DROP.
         var createSql = $"CREATE TEMPORARY TABLE `{stageTable}` LIKE stock_ledger";
         using (var createCmd = new MySqlCommand(createSql, conn, tx))
         {
             createCmd.CommandTimeout = 60;
             await createCmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
+        }
+
+        // 봉합 2026-05-14: stage의 UNIQUE 인덱스 일소 → BulkCopy 무손실 적재.
+        // information_schema에서 stock_ledger의 UNIQUE 인덱스명 조회 후 stage에서 DROP.
+        var uniqueIndexes = (await Db.QueryAsync<string>(new CommandDefinition(
+            "SELECT DISTINCT index_name FROM information_schema.statistics " +
+            "WHERE table_schema = DATABASE() AND table_name = 'stock_ledger' " +
+            "  AND non_unique = 0 AND index_name <> 'PRIMARY'",
+            transaction: tx, cancellationToken: ct)).ConfigureAwait(false)).ToList();
+        foreach (var idx in uniqueIndexes)
+        {
+            try
+            {
+                using var dropIdxCmd = new MySqlCommand($"ALTER TABLE `{stageTable}` DROP INDEX `{idx}`", conn, tx);
+                dropIdxCmd.CommandTimeout = 30;
+                await dropIdxCmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
+            }
+            catch (Exception idxEx)
+            {
+                _logger.LogWarning(idxEx,
+                    "[MDB마이그레이션] stage({Table}) UNIQUE 인덱스 {Idx} DROP 실패 — 계속 진행", stageTable, idx);
+            }
         }
 
         try
@@ -2125,7 +2174,13 @@ public sealed class MdbMigrationService
             var poDate = ParseLegacyDate(GetStr(first, "IU_ODT")) ?? now;
             decimal supply = g.Sum(r => GetDec(r, "IU_AMT"));
             decimal vat = g.Sum(r => GetDec(r, "IU_VAT"));
-            var poId = Guid.NewGuid().ToString();
+
+            // 봉합 2026-05-14: 기존 po_id 재사용 + 자식 row 삭제 (FK 보존, 재마이그 덮어쓰기)
+            var existingPoId = await Db.ExecuteScalarAsync<string?>(new CommandDefinition(
+                "SELECT po_id FROM purchase_orders WHERE tenant_id = @TenantId AND po_no = @PoNo LIMIT 1",
+                new { TenantId = tenantId, PoNo = poNo },
+                transaction: tx, cancellationToken: ct)).ConfigureAwait(false);
+            var poId = !string.IsNullOrEmpty(existingPoId) ? existingPoId : Guid.NewGuid().ToString();
 
             await Db.ExecuteAsync(new CommandDefinition(headSql, new
             {
@@ -2134,6 +2189,13 @@ public sealed class MdbMigrationService
                 Memo = GetStr(first, "IU_REM"), Now = now
             }, transaction: tx, cancellationToken: ct)).ConfigureAwait(false);
             headCount++;
+
+            if (!string.IsNullOrEmpty(existingPoId))
+            {
+                await Db.ExecuteAsync(new CommandDefinition(
+                    "DELETE FROM purchase_order_items WHERE po_id = @PoId",
+                    new { PoId = poId }, transaction: tx, cancellationToken: ct)).ConfigureAwait(false);
+            }
 
             foreach (var r in g)
             {
@@ -2208,7 +2270,13 @@ public sealed class MdbMigrationService
             var soDate = ParseLegacyDate(GetStr(first, "IO_ODT")) ?? now;
             decimal supply = g.Sum(r => GetDec(r, "IO_AMT"));
             decimal vat = g.Sum(r => GetDec(r, "IO_VAT"));
-            var orderId = Guid.NewGuid().ToString();
+
+            // 봉합 2026-05-14: 기존 order_id 재사용 + 자식 row 삭제 (FK 보존, 재마이그 덮어쓰기)
+            var existingOrderId = await Db.ExecuteScalarAsync<string?>(new CommandDefinition(
+                "SELECT order_id FROM sales_orders WHERE tenant_id = @TenantId AND order_no = @OrderNo LIMIT 1",
+                new { TenantId = tenantId, OrderNo = soNo },
+                transaction: tx, cancellationToken: ct)).ConfigureAwait(false);
+            var orderId = !string.IsNullOrEmpty(existingOrderId) ? existingOrderId : Guid.NewGuid().ToString();
 
             await Db.ExecuteAsync(new CommandDefinition(headSql, new
             {
@@ -2217,6 +2285,13 @@ public sealed class MdbMigrationService
                 Memo = GetStr(first, "IO_REM"), Now = now
             }, transaction: tx, cancellationToken: ct)).ConfigureAwait(false);
             headCount++;
+
+            if (!string.IsNullOrEmpty(existingOrderId))
+            {
+                await Db.ExecuteAsync(new CommandDefinition(
+                    "DELETE FROM sales_order_items WHERE order_id = @OrderId",
+                    new { OrderId = orderId }, transaction: tx, cancellationToken: ct)).ConfigureAwait(false);
+            }
 
             foreach (var r in g)
             {
