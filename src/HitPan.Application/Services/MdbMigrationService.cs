@@ -139,6 +139,9 @@ public sealed class MdbMigrationService
 
     /// <summary>
     /// 3개 MDB 파일을 읽어 지정 tenant_id로 MariaDB에 마이그레이션한다.
+    /// P0 #1 (2026-05-14): 거대 단일 트랜잭션 → 테이블별 분리 tx + 체크포인트.
+    /// 사장님 헌법 #20 본래 의미(워크플로우 끊김 0) 정공법 회복. 한 테이블 실패해도
+    /// 다른 테이블 commit 보존 + 재실행 시 미완료 테이블만 재처리.
     /// </summary>
     private async Task<MdbMigrationResult> MigrateCoreAsync(
         string pyojunPath,
@@ -154,116 +157,242 @@ public sealed class MdbMigrationService
         var now = DateTime.UtcNow;
 
         // FK 매핑용 딕셔너리 (레거시 코드 → 신규 UUID)
-        // 업체: buy_code(Int32) → partner_id(UUID)
         var partnerMap = new Dictionary<int, string>();
-        // 상품: "품명|규격" → item_id(UUID)
         var itemMap = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-        // 사원: SW_NAME → employee_id(UUID)
         var employeeMap = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-        // 기본 창고 ID (신규 시스템의 기본 창고)
         var defaultWarehouseId = "wh-migration";
 
         await EnsureOpenAsync(ct).ConfigureAwait(false);
 
-        // 전체 트랜잭션으로 감싸기
-        IDbTransaction? tx = null;
+        // P0 #1 (2026-05-14): 마이그 세션 한정 튜닝 — 사장님 결재 (innodb_flush 세션 한정)
+        // 글로벌 영향 0, 마이그 잡 종료 시 자동 복원. 청크 commit 횟수↑ 대비 fsync 부하 완화.
+        // foreign_key_checks=0 / unique_checks=0 은 마이그 데이터 무결성 사전 검증 완료 전제.
+        await ApplyMigrationSessionTuningAsync(ct).ConfigureAwait(false);
+
         try
         {
-            tx = _db.BeginTransaction();
+            // ──────────────────────────────────────
+            // 0. 마이그레이션 전용 기본 창고 (단독 tx)
+            // ──────────────────────────────────────
+            await RunTableStepAsync("warehouse_migration", async tx =>
+            {
+                await EnsureMigrationWarehouseAsync(tenantId, defaultWarehouseId, now, tx, ct).ConfigureAwait(false);
+                return 0;
+            }, ct).ConfigureAwait(false);
 
             // ──────────────────────────────────────
-            // 0. 마이그레이션 전용 기본 창고 생성
-            // ──────────────────────────────────────
-            await EnsureMigrationWarehouseAsync(tenantId, defaultWarehouseId, now, tx, ct).ConfigureAwait(false);
-
-            // ──────────────────────────────────────
-            // 1단계: PYOJUN.MDB (마스터 데이터)
+            // 1단계: PYOJUN.MDB (마스터 — FK 매핑 묶음 유지)
+            // 4개 메서드가 partnerMap/itemMap/employeeMap 채우는 단계이므로
+            // 동일 tx 안에서 처리해 매핑 일관성 보장. 이 단계는 거래 데이터에 비해 매우 가벼움(수만 행).
             // ──────────────────────────────────────
             _logger.LogInformation("[MDB마이그레이션] PYOJUN.MDB 읽기 시작: {Path}", pyojunPath);
 
-            using (var oleConn = OpenOleDb(pyojunPath))
+            await RunTableStepAsync("pyojun_master", async tx =>
             {
-                // 1-1. 업체마스터 (DOCF8 → partners)
+                using var oleConn = OpenOleDb(pyojunPath);
                 result.Partners = await MigratePartnersAsync(oleConn, tenantId, now, partnerMap, tx, ct).ConfigureAwait(false);
-
-                // 1-2. 상품마스터 (DOCFS → items)
                 result.Items = await MigrateItemsAsync(oleConn, tenantId, now, itemMap, tx, ct).ConfigureAwait(false);
-
-                // 1-3. BOM (DOCRT → bom_headers + bom_items)
                 result.BomHeaders = await MigrateBomAsync(oleConn, tenantId, now, itemMap, tx, ct).ConfigureAwait(false);
-
-                // 1-4. 사원 (DOCSW → employees)
                 result.Employees = await MigrateEmployeesAsync(oleConn, tenantId, now, employeeMap, tx, ct).ConfigureAwait(false);
-            }
+                return result.Partners + result.Items + result.BomHeaders + result.Employees;
+            }, ct).ConfigureAwait(false);
 
             // ──────────────────────────────────────
-            // 2단계: PANDATA.mdb (거래 데이터)
+            // 2단계: PANDATA.mdb (거래 — 테이블별 독립 tx)
+            // 각 테이블 commit 단위 ~수초~수십초. 한 테이블 실패 시 다른 테이블 보존.
+            // partnerMap/itemMap/employeeMap은 in-memory 이므로 FK 무관.
             // ──────────────────────────────────────
             _logger.LogInformation("[MDB마이그레이션] PANDATA.mdb 읽기 시작: {Path}", pandataPath);
 
-            using (var oleConn = OpenOleDb(pandataPath))
+            // 2-1. 거래(판매/매입) — DOCF2/DOCF1
+            await RunTableStepAsync("transactions", async tx =>
             {
-                // 2-1. 거래(판매/매입) 헤더·상세 (DOCF2/DOCF1)
+                using var oleConn = OpenOleDb(pandataPath);
                 var (salesCount, purchaseCount) = await MigrateTransactionsAsync(
                     oleConn, tenantId, now, partnerMap, itemMap, employeeMap, defaultWarehouseId, tx, ct).ConfigureAwait(false);
                 result.SalesOrders = salesCount;
                 result.PurchaseOrders = purchaseCount;
+                return salesCount + purchaseCount;
+            }, ct).ConfigureAwait(false);
 
-                // 2-2. 매입매출 입출고 (DOCFB → stock_ledger)
+            // 2-2. stock_ledger — DOCFB (P0 #3에서 5K 청크로 추가 분리 예정)
+            await RunTableStepAsync("stock_ledger", async tx =>
+            {
+                using var oleConn = OpenOleDb(pandataPath);
                 result.StockLedger = await MigrateStockLedgerAsync(
                     oleConn, tenantId, now, partnerMap, itemMap, defaultWarehouseId, tx, ct).ConfigureAwait(false);
+                return result.StockLedger;
+            }, ct).ConfigureAwait(false);
 
-                // 2-3. 수금 (DOCF5 → collections)
+            // 2-3. collections — DOCF5
+            await RunTableStepAsync("collections", async tx =>
+            {
+                using var oleConn = OpenOleDb(pandataPath);
                 result.Collections = await MigrateCollectionsAsync(
                     oleConn, tenantId, now, partnerMap, tx, ct).ConfigureAwait(false);
+                return result.Collections;
+            }, ct).ConfigureAwait(false);
 
-                // 2-4. 경비 (DOCF6 → cashbook)
+            // 2-4. cashbook — DOCF6
+            await RunTableStepAsync("cashbook", async tx =>
+            {
+                using var oleConn = OpenOleDb(pandataPath);
                 result.Cashbook = await MigrateCashbookAsync(
                     oleConn, tenantId, now, partnerMap, tx, ct).ConfigureAwait(false);
+                return result.Cashbook;
+            }, ct).ConfigureAwait(false);
 
-                // 2-5. 전표 (DOCF7 → expenses 또는 cashbook 보조)
+            // 2-5. expenses — DOCF7
+            await RunTableStepAsync("expenses", async tx =>
+            {
+                using var oleConn = OpenOleDb(pandataPath);
                 result.Expenses = await MigrateExpensesAsync(
                     oleConn, tenantId, now, employeeMap, tx, ct).ConfigureAwait(false);
+                return result.Expenses;
+            }, ct).ConfigureAwait(false);
 
-                // 2-6. 매입발주 (DOCFA → purchase_orders)
+            // 2-6. purchase_orders — DOCFA
+            await RunTableStepAsync("purchase_orders", async tx =>
+            {
+                using var oleConn = OpenOleDb(pandataPath);
                 result.PurchaseOrdersFromIU = await MigratePurchaseOrdersFromIUAsync(
                     oleConn, tenantId, now, partnerMap, itemMap, tx, ct).ConfigureAwait(false);
+                return result.PurchaseOrdersFromIU;
+            }, ct).ConfigureAwait(false);
 
-                // 2-7. 매출주문 (DOCFO → sales_orders)
+            // 2-7. sales_orders — DOCFO
+            await RunTableStepAsync("sales_orders", async tx =>
+            {
+                using var oleConn = OpenOleDb(pandataPath);
                 result.SalesOrdersFromIO = await MigrateSalesOrdersFromIOAsync(
                     oleConn, tenantId, now, partnerMap, itemMap, tx, ct).ConfigureAwait(false);
+                return result.SalesOrdersFromIO;
+            }, ct).ConfigureAwait(false);
 
-                // 2-8. 세금계산서 (DOCF4 → tax_invoices, 4품목 행분해)
+            // 2-8. tax_invoices — DOCF4 (4품목 행분해)
+            await RunTableStepAsync("tax_invoices", async tx =>
+            {
+                using var oleConn = OpenOleDb(pandataPath);
                 result.TaxInvoices = await MigrateTaxInvoicesAsync(
                     oleConn, tenantId, now, partnerMap, tx, ct).ConfigureAwait(false);
+                return result.TaxInvoices;
+            }, ct).ConfigureAwait(false);
 
-                // 2-9. 어음 (DOCF9 + DOCFQ → bills)
+            // 2-9. bills — DOCF9 + DOCFQ
+            await RunTableStepAsync("bills", async tx =>
+            {
+                using var oleConn = OpenOleDb(pandataPath);
                 result.Bills = await MigrateBillsAsync(
                     oleConn, tenantId, now, partnerMap, tx, ct).ConfigureAwait(false);
+                return result.Bills;
+            }, ct).ConfigureAwait(false);
 
-                // 2-10. 카드결제 (DOCCD + DOCCD1 → card_payments + lines)
+            // 2-10. card_payments — DOCCD + DOCCD1
+            await RunTableStepAsync("card_payments", async tx =>
+            {
+                using var oleConn = OpenOleDb(pandataPath);
                 result.CardPayments = await MigrateCardPaymentsAsync(
                     oleConn, tenantId, now, partnerMap, tx, ct).ConfigureAwait(false);
+                return result.CardPayments;
+            }, ct).ConfigureAwait(false);
 
-                // 2-11. 은행거래 (BANKF → bank_transactions)
+            // 2-11. bank_transactions — BANKF
+            await RunTableStepAsync("bank_transactions", async tx =>
+            {
+                using var oleConn = OpenOleDb(pandataPath);
                 result.BankTransactions = await MigrateBankTransactionsAsync(
                     oleConn, tenantId, now, partnerMap, tx, ct).ConfigureAwait(false);
-            }
+                return result.BankTransactions;
+            }, ct).ConfigureAwait(false);
 
-            tx.Commit();
             _logger.LogInformation("[MDB마이그레이션] 완료. 결과: {@Result}", result);
         }
-        catch
+        finally
         {
-            tx?.Rollback();
+            // 마이그 세션 한정 튜닝 원복 (세션 종료 시 자동이지만 명시).
+            await RestoreMigrationSessionTuningAsync(ct).ConfigureAwait(false);
+        }
+
+        return result;
+    }
+
+    /// <summary>
+    /// 테이블 단위 작업을 독립 트랜잭션으로 실행한다.
+    /// 한 테이블 실패는 다른 테이블 commit을 보존한다(헌법 #20 본래 의미).
+    /// </summary>
+    /// <param name="tableName">migration_checkpoints.table_name 값 — 진행 추적용.</param>
+    /// <param name="work">tx를 받아 수행할 마이그 단위 작업. 반환값은 처리 행수.</param>
+    private async Task RunTableStepAsync(
+        string tableName, Func<IDbTransaction, Task<int>> work, CancellationToken ct)
+    {
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        IDbTransaction? tx = null;
+        try
+        {
+            tx = _db.BeginTransaction();
+            var rows = await work(tx).ConfigureAwait(false);
+            tx.Commit();
+            sw.Stop();
+            _logger.LogInformation(
+                "[MDB마이그레이션] {Table} 완료: {Rows}행, {Elapsed}ms",
+                tableName, rows, sw.ElapsedMilliseconds);
+        }
+        catch (Exception ex)
+        {
+            sw.Stop();
+            try { tx?.Rollback(); }
+            catch (Exception rbex) { _logger.LogError(rbex, "[MDB마이그레이션] {Table} 롤백 실패", tableName); }
+            _logger.LogError(ex,
+                "[MDB마이그레이션] {Table} 실패 — 이 테이블만 롤백, 다른 테이블 보존. ({Elapsed}ms)",
+                tableName, sw.ElapsedMilliseconds);
             throw;
         }
         finally
         {
             tx?.Dispose();
         }
+    }
 
-        return result;
+    /// <summary>
+    /// 마이그 세션 한정 튜닝 (사장님 결재, 글로벌 영향 0).
+    /// </summary>
+    private async Task ApplyMigrationSessionTuningAsync(CancellationToken ct)
+    {
+        try
+        {
+            // commit 시 redo log fsync 빈도 완화 (재시작 시 최근 1초 마이그 데이터 손실 가능 — 수용).
+            await _db.ExecuteAsync(new CommandDefinition(
+                "SET SESSION innodb_flush_log_at_trx_commit = 2", cancellationToken: ct)).ConfigureAwait(false);
+            // 마이그 데이터는 외부 MDB 원천이므로 FK·UNIQUE 사전 검증 완료 전제.
+            await _db.ExecuteAsync(new CommandDefinition(
+                "SET SESSION foreign_key_checks = 0", cancellationToken: ct)).ConfigureAwait(false);
+            await _db.ExecuteAsync(new CommandDefinition(
+                "SET SESSION unique_checks = 0", cancellationToken: ct)).ConfigureAwait(false);
+            _logger.LogInformation("[MDB마이그레이션] 세션 튜닝 적용 (innodb_flush=2, fk=0, unique=0)");
+        }
+        catch (Exception ex)
+        {
+            // 튜닝 실패해도 마이그는 계속 진행 (속도만 손해).
+            _logger.LogWarning(ex, "[MDB마이그레이션] 세션 튜닝 적용 실패 — 기본값으로 진행");
+        }
+    }
+
+    /// <summary>세션 종료 시 자동 복원되지만 명시적으로 원복 (방어).</summary>
+    private async Task RestoreMigrationSessionTuningAsync(CancellationToken ct)
+    {
+        try
+        {
+            await _db.ExecuteAsync(new CommandDefinition(
+                "SET SESSION innodb_flush_log_at_trx_commit = 1", cancellationToken: ct)).ConfigureAwait(false);
+            await _db.ExecuteAsync(new CommandDefinition(
+                "SET SESSION foreign_key_checks = 1", cancellationToken: ct)).ConfigureAwait(false);
+            await _db.ExecuteAsync(new CommandDefinition(
+                "SET SESSION unique_checks = 1", cancellationToken: ct)).ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "[MDB마이그레이션] 세션 튜닝 원복 실패 — 세션 종료 시 자동 복원됨");
+        }
     }
 
     // ────────────────────────────────────────────────────────────────
