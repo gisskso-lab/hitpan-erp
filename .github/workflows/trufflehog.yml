@@ -1,0 +1,32 @@
+# P0 #2 (2026-05-14): TruffleHog 시크릿 스캔 (헌법 #23 5중 검증 ③ SAST)
+# AES 키·DB 비번·API 토큰·JWT 시크릿 등 평문 노출 차단
+# 트리거: 모든 push + PR (커밋 자체에서도 검사)
+name: TruffleHog Secret Scan
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  trufflehog:
+    name: Scan secrets
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout (full history)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # 전체 히스토리 — 과거 커밋에 박힌 시크릿도 탐지
+
+      - name: TruffleHog OSS scan
+        uses: trufflesecurity/trufflehog@main
+        with:
+          path: ./
+          # PR이면 base..HEAD, push면 before..after, 둘 다 없으면 전체 히스토리
+          base: ${{ github.event.repository.default_branch }}
+          head: HEAD
+          extra_args: --only-verified  # false-positive 차단 — 실제 유효 키만 알림

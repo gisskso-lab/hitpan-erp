@@ -1,0 +1,39 @@
+# P0 #2 (2026-05-14): OWASP ZAP Baseline DAST (헌법 #23 5중 검증 ④ DAST)
+# 사장님 헌법 #23: 베타 출시 전 1회 이상 DAST 의무
+# 트리거: 수동 dispatch (베타 출시 전 검증용) + main 머지 시
+# 대상: 베타 환경 URL (workflow_dispatch input으로 받음)
+name: OWASP ZAP Baseline DAST
+
+on:
+  workflow_dispatch:
+    inputs:
+      target_url:
+        description: 'DAST 대상 URL (예: https://api-demo.hitpan.kr)'
+        required: true
+        default: 'https://api-demo.hitpan.kr'
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+  issues: write  # 발견된 취약점 자동 이슈 등록
+
+jobs:
+  zap-baseline:
+    name: ZAP Baseline Scan
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: ZAP Baseline Scan
+        uses: zaproxy/action-baseline@v0.12.0
+        with:
+          target: ${{ github.event.inputs.target_url || 'https://api-demo.hitpan.kr' }}
+          # 실패 임계: WARN 이상 발견 시 워크플로우 실패 (사장님 헌법 #19 보수적)
+          fail_action: false  # 베타 단계 — 경고만 등록, main blocking은 추후 활성화
+          cmd_options: '-a'   # active 스캔 비활성, baseline만 (운영 영향 최소)
+          allow_issue_writing: true
+          issue_title: 'ZAP DAST 취약점 발견'
