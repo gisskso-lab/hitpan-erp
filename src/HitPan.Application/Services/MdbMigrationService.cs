@@ -778,7 +778,7 @@ public sealed class MdbMigrationService
         Dictionary<int, string> partnerMap, IDbTransaction tx, CancellationToken ct)
     {
         // P0 #4 (2026-05-14): ORDER BY 추가 — 헌법 #13 멱등 순서 보장 (DB매니저 권고).
-        var dt = ReadMdbTable(oleConn, "SELECT * FROM DOCF8 ORDER BY B_BUY");
+        var dt = ReadMdbTable(oleConn, "SELECT * FROM DOCF8 ORDER BY buy_code");
         if (dt.Rows.Count == 0) return 0;
 
         // W2 D3 (2026-05-12): partners 19개 컬럼 보강 INSERT (사장님 결재)
@@ -787,6 +787,8 @@ public sealed class MdbMigrationService
         //   margin_rate, sales_employee, trade_start_date, business_registration_date,
         //   tel_secondary, tax_classification, ceo_name_legacy, partner_type_legacy,
         //   ceo_resident_no_encrypted (VARBINARY AES-256, 결재 #4 정책)
+        // 봉합 2026-05-14 (사장님 지시): 같은 MDB 재마이그 시 덮어쓰기 — ON DUPLICATE KEY UPDATE.
+        // uq_tenant_code(tenant_id, partner_code) 충돌 시 최신 데이터로 갱신. partner_id는 기존 보존(FK 무결성).
         const string sql = """
             INSERT INTO partners
               (partner_id, tenant_id, partner_code, partner_name, partner_type,
@@ -814,6 +816,31 @@ public sealed class MdbMigrationService
                @MarginRate, @SalesEmployee, @TradeStartDate,
                @BusinessRegistrationDate, @TelSecondary, @TaxClassification,
                @CeoResidentNoEncrypted, @MigratedSourceHash)
+            ON DUPLICATE KEY UPDATE
+              partner_name = VALUES(partner_name),
+              partner_type = VALUES(partner_type),
+              biz_no = VALUES(biz_no), ceo_name = VALUES(ceo_name),
+              biz_type = VALUES(biz_type), biz_item = VALUES(biz_item),
+              tel = VALUES(tel), fax = VALUES(fax),
+              address = VALUES(address), address_detail = VALUES(address_detail), zip_code = VALUES(zip_code),
+              credit_limit = VALUES(credit_limit),
+              bank_name = VALUES(bank_name), bank_account = VALUES(bank_account), account_holder = VALUES(account_holder),
+              manager_name = VALUES(manager_name), manager_tel = VALUES(manager_tel),
+              tax_type = VALUES(tax_type), memo = VALUES(memo),
+              updated_at = VALUES(updated_at), price_grade = VALUES(price_grade),
+              card_commission_rate = VALUES(card_commission_rate),
+              classification_code = VALUES(classification_code),
+              manager_department = VALUES(manager_department),
+              price_grade_code = VALUES(price_grade_code),
+              legacy_extra = VALUES(legacy_extra),
+              discount_rate = VALUES(discount_rate),
+              keyman_birth = VALUES(keyman_birth), keyman_name = VALUES(keyman_name), keyman_phone = VALUES(keyman_phone),
+              margin_rate = VALUES(margin_rate), sales_employee = VALUES(sales_employee),
+              trade_start_date = VALUES(trade_start_date),
+              business_registration_date = VALUES(business_registration_date),
+              tel_secondary = VALUES(tel_secondary), tax_classification = VALUES(tax_classification),
+              ceo_resident_no_encrypted = VALUES(ceo_resident_no_encrypted),
+              migrated_source_hash = VALUES(migrated_source_hash)
             """;
 
         int count = 0;
@@ -822,21 +849,14 @@ public sealed class MdbMigrationService
             var buyCode = GetInt(row, "buy_code");
             var partnerCode = $"MIG-{buyCode:D5}";
 
-            // WS-20260514-08 (CODE-06): 멱등성 — 같은 partner_code 이미 있으면 기존 partner_id 매핑하고 INSERT skip.
-            // uq_tenant_code(tenant_id, partner_code) UNIQUE 활용. 재실행 시 중복 INSERT 방지.
+            // 봉합 2026-05-14: 사장님 지시 — 같은 MDB 재마이그 시 덮어쓰기.
+            // 기존 partner_id 있으면 재사용 (FK 보존), INSERT ... ON DUPLICATE KEY UPDATE로 최신 데이터 갱신.
             var existingId = await Db.ExecuteScalarAsync<string?>(new CommandDefinition(
                 "SELECT partner_id FROM partners WHERE tenant_id = @TenantId AND partner_code = @Code LIMIT 1",
                 new { TenantId = tenantId, Code = partnerCode },
                 transaction: tx, cancellationToken: ct)).ConfigureAwait(false);
 
-            if (!string.IsNullOrEmpty(existingId))
-            {
-                // 이미 존재 → 기존 ID로 매핑만 갱신, INSERT skip (멱등)
-                partnerMap[buyCode] = existingId;
-                continue;
-            }
-
-            var partnerId = Guid.NewGuid().ToString();
+            var partnerId = !string.IsNullOrEmpty(existingId) ? existingId : Guid.NewGuid().ToString();
 
             // buy_code → partner_id 매핑 저장 (이후 거래 FK 참조용)
             partnerMap[buyCode] = partnerId;
@@ -951,6 +971,7 @@ public sealed class MdbMigrationService
 
         // W2 D3 (2026-05-12): items 4개 보강 컬럼 추가 (safety_stock 기존, 신규 4개)
         // 작10: spec_detail, unit_secondary, reorder_point, supplier_default_id
+        // 봉합 2026-05-14: 사장님 정공법 — 같은 MDB 재마이그 시 덮어쓰기 (uq_tenant_code 충돌 방지)
         const string sql = """
             INSERT INTO items
               (item_id, tenant_id, item_code, item_name, item_type, unit, spec,
@@ -966,6 +987,16 @@ public sealed class MdbMigrationService
                @TaxType, @Barcode, @ItemGroup, @Memo,
                1, 0, 0, @Now, @Now, 0,
                @SpecDetail, @UnitSecondary, @ReorderPoint, @SupplierDefaultId)
+            ON DUPLICATE KEY UPDATE
+              item_name = VALUES(item_name), unit = VALUES(unit), spec = VALUES(spec),
+              purchase_price = VALUES(purchase_price), sale_price = VALUES(sale_price),
+              standard_price = VALUES(standard_price), cost_price = VALUES(cost_price), std_price = VALUES(std_price),
+              price_a = VALUES(price_a), price_b = VALUES(price_b), price_c = VALUES(price_c),
+              price_d = VALUES(price_d), price_e = VALUES(price_e),
+              tax_type = VALUES(tax_type), barcode = VALUES(barcode), item_group = VALUES(item_group),
+              memo = VALUES(memo), updated_at = VALUES(updated_at),
+              spec_detail = VALUES(spec_detail), unit_secondary = VALUES(unit_secondary),
+              reorder_point = VALUES(reorder_point), supplier_default_id = VALUES(supplier_default_id)
             """;
 
         int count = 0;
@@ -978,8 +1009,15 @@ public sealed class MdbMigrationService
             // 품명이 비어있으면 건너뜀
             if (string.IsNullOrWhiteSpace(pumName)) continue;
 
-            var itemId = Guid.NewGuid().ToString();
             var itemKey = BuildItemKey(pumName, spec);
+            var itemCode = $"MIG-{seq:D5}";
+
+            // 봉합 2026-05-14: 기존 item_id 재사용 (FK 보존)
+            var existingId = await Db.ExecuteScalarAsync<string?>(new CommandDefinition(
+                "SELECT item_id FROM items WHERE tenant_id = @TenantId AND item_code = @Code LIMIT 1",
+                new { TenantId = tenantId, Code = itemCode },
+                transaction: tx, cancellationToken: ct)).ConfigureAwait(false);
+            var itemId = !string.IsNullOrEmpty(existingId) ? existingId : Guid.NewGuid().ToString();
 
             // 동일 품명+규격 중복 시 첫 번째만 사용
             if (!itemMap.TryAdd(itemKey, itemId)) continue;
@@ -1002,7 +1040,7 @@ public sealed class MdbMigrationService
             {
                 ItemId = itemId,
                 TenantId = tenantId,
-                ItemCode = $"MIG-{seq:D5}",   // 자동 생성 item_code
+                ItemCode = itemCode,   // 자동 생성 item_code (멱등 SELECT/INSERT 공통)
                 ItemName = pumName,
                 Unit = string.IsNullOrWhiteSpace(GetStr(row, "S_DANW")) ? "EA" : GetStr(row, "S_DANW"),
                 Spec = spec,
@@ -1164,6 +1202,27 @@ public sealed class MdbMigrationService
                @LegacyBal1, @LegacyBal2, @LegacyBal3, @LegacyBal4, @LegacyBal5,
                @LegacyBal6, @LegacyBal7, @LegacyBal8, @LegacyBal9, @LegacyBal10,
                @SalaryCountry)
+            ON DUPLICATE KEY UPDATE
+              emp_name = VALUES(emp_name), position = VALUES(position), job_title = VALUES(job_title),
+              join_date = VALUES(join_date), phone = VALUES(phone),
+              updated_at = VALUES(updated_at), address = VALUES(address), zip_code = VALUES(zip_code),
+              birth_date = VALUES(birth_date), birth_calendar = VALUES(birth_calendar),
+              birth_lunar_converted = VALUES(birth_lunar_converted),
+              home_phone = VALUES(home_phone), emergency_contact = VALUES(emergency_contact), memo = VALUES(memo),
+              resident_no_encrypted = VALUES(resident_no_encrypted),
+              salary_encrypted = VALUES(salary_encrypted),
+              salary_type = VALUES(salary_type), salary_category = VALUES(salary_category),
+              salary_extra_encrypted = VALUES(salary_extra_encrypted),
+              department = VALUES(department), marriage_status = VALUES(marriage_status),
+              business_type = VALUES(business_type), is_resigned = VALUES(is_resigned),
+              resign_date = VALUES(resign_date), resign_reason = VALUES(resign_reason),
+              nationality = VALUES(nationality),
+              legacy_bal1 = VALUES(legacy_bal1), legacy_bal2 = VALUES(legacy_bal2),
+              legacy_bal3 = VALUES(legacy_bal3), legacy_bal4 = VALUES(legacy_bal4),
+              legacy_bal5 = VALUES(legacy_bal5), legacy_bal6 = VALUES(legacy_bal6),
+              legacy_bal7 = VALUES(legacy_bal7), legacy_bal8 = VALUES(legacy_bal8),
+              legacy_bal9 = VALUES(legacy_bal9), legacy_bal10 = VALUES(legacy_bal10),
+              salary_country = VALUES(salary_country)
             """;
 
         int count = 0;
@@ -1173,7 +1232,14 @@ public sealed class MdbMigrationService
             var name = GetStr(row, "SW_NAME");
             if (string.IsNullOrWhiteSpace(name)) continue;
 
-            var employeeId = Guid.NewGuid().ToString();
+            var empNo = $"MIG-{seq:D4}";
+
+            // 봉합 2026-05-14: 기존 employee_id 재사용 (FK 보존, 재마이그 시 덮어쓰기)
+            var existingEmpId = await Db.ExecuteScalarAsync<string?>(new CommandDefinition(
+                "SELECT employee_id FROM employees WHERE tenant_id = @TenantId AND emp_no = @EmpNo LIMIT 1",
+                new { TenantId = tenantId, EmpNo = empNo },
+                transaction: tx, cancellationToken: ct)).ConfigureAwait(false);
+            var employeeId = !string.IsNullOrEmpty(existingEmpId) ? existingEmpId : Guid.NewGuid().ToString();
 
             // 동일 이름 중복 시 첫 번째만 사용 (레거시는 이름 기반 참조)
             employeeMap.TryAdd(name, employeeId);
@@ -1189,7 +1255,7 @@ public sealed class MdbMigrationService
             {
                 EmployeeId = employeeId,
                 TenantId = tenantId,
-                EmpNo = $"MIG-{seq:D4}",
+                EmpNo = empNo,
                 EmpName = name,
                 Position = GetStr(row, "SW_JIKKUB"),       // 직급
                 JobTitle = GetStr(row, "SW_JIKCHAK"),      // 직책
@@ -1263,7 +1329,7 @@ public sealed class MdbMigrationService
         // 헤더 로드
         var headerDt = ReadMdbTable(oleConn, "SELECT * FROM DOCF2 ORDER BY K2_NO");
         // 상세 로드 (라인 순서 보존)
-        var detailDt = ReadMdbTable(oleConn, "SELECT * FROM DOCF1 ORDER BY KA_NO, KA_SUN");
+        var detailDt = ReadMdbTable(oleConn, "SELECT * FROM DOCF1 ORDER BY KA_NO, KA_NO1");
 
         if (headerDt.Rows.Count == 0) return (0, 0);
 
@@ -1277,7 +1343,7 @@ public sealed class MdbMigrationService
             detailsByNo[no].Add(row);
         }
 
-        // 판매 주문 INSERT SQL
+        // 판매 주문 INSERT SQL — 봉합 2026-05-14: 재마이그 덮어쓰기 (uq_order_no 충돌 방지)
         const string soSql = """
             INSERT INTO sales_orders
               (order_id, tenant_id, order_no, partner_id, employee_id, order_date,
@@ -1285,6 +1351,11 @@ public sealed class MdbMigrationService
             VALUES
               (@OrderId, @TenantId, @OrderNo, @PartnerId, @EmployeeId, @OrderDate,
                'draft', @TotalAmount, @VatAmount, @Memo, @Now, @Now, 0)
+            ON DUPLICATE KEY UPDATE
+              partner_id = VALUES(partner_id), employee_id = VALUES(employee_id),
+              order_date = VALUES(order_date), total_amount = VALUES(total_amount),
+              vat_amount = VALUES(vat_amount), memo = VALUES(memo),
+              updated_at = VALUES(updated_at)
             """;
         const string soItemSql = """
             INSERT INTO sales_order_items
@@ -1295,7 +1366,7 @@ public sealed class MdbMigrationService
                @UnitPrice, @SupplyAmount, @VatAmount, 'pending')
             """;
 
-        // 매입 주문 INSERT SQL
+        // 매입 주문 INSERT SQL — 봉합 2026-05-14: 재마이그 덮어쓰기 (uq_po_no 충돌 방지)
         const string poSql = """
             INSERT INTO purchase_orders
               (po_id, tenant_id, po_no, partner_id, employee_id, po_date,
@@ -1303,6 +1374,11 @@ public sealed class MdbMigrationService
             VALUES
               (@PoId, @TenantId, @PoNo, @PartnerId, @EmployeeId, @PoDate,
                'draft', @TotalAmount, @VatAmount, @Memo, @Now, @Now, 0)
+            ON DUPLICATE KEY UPDATE
+              partner_id = VALUES(partner_id), employee_id = VALUES(employee_id),
+              po_date = VALUES(po_date), total_amount = VALUES(total_amount),
+              vat_amount = VALUES(vat_amount), memo = VALUES(memo),
+              updated_at = VALUES(updated_at)
             """;
         const string poItemSql = """
             INSERT INTO purchase_order_items
@@ -1926,12 +2002,18 @@ public sealed class MdbMigrationService
                @Memo, 1, @Now)
             """;
 
+        // 봉합 2026-05-14: 레거시 매핑 누락 사원용 placeholder employee 확보 (employee_id NOT NULL DDL 정합).
+        var fallbackEmployeeId = await EnsureLegacyFallbackEmployeeAsync(tenantId, now, tx, ct).ConfigureAwait(false);
+
         int count = 0;
         foreach (DataRow row in dt.Rows)
         {
             var expDate = ParseLegacyDate(GetStr(row, "SC_DT")) ?? now;
             var sawon = GetStr(row, "SC_SAWON");
-            employeeMap.TryGetValue(sawon, out var employeeId);
+            if (!employeeMap.TryGetValue(sawon, out var employeeId) || string.IsNullOrWhiteSpace(employeeId))
+            {
+                employeeId = fallbackEmployeeId; // 매핑 누락 → 레거시 placeholder 사원
+            }
 
             // 차변/대변 중 큰 쪽이 금액
             var cr = GetDec(row, "SC_CR");   // 차변
@@ -1963,6 +2045,33 @@ public sealed class MdbMigrationService
         return count;
     }
 
+    /// <summary>
+    /// 봉합 2026-05-14: 레거시 마이그용 placeholder employee 확보.
+    /// SC_SAWON 등 사원코드가 employees와 매핑 안 되는 row를 흡수해서 NOT NULL FK 만족.
+    /// 동일 tenant 중복 호출 시 기존 row 재사용 (멱등).
+    /// </summary>
+    private async Task<string> EnsureLegacyFallbackEmployeeAsync(string tenantId, DateTime now, IDbTransaction tx, CancellationToken ct)
+    {
+        const string empNo = "LEGACY_FALLBACK";
+        var existing = await Db.ExecuteScalarAsync<string?>(new CommandDefinition(
+            "SELECT employee_id FROM employees WHERE tenant_id = @TenantId AND emp_no = @EmpNo LIMIT 1",
+            new { TenantId = tenantId, EmpNo = empNo }, transaction: tx, cancellationToken: ct)).ConfigureAwait(false);
+        if (!string.IsNullOrEmpty(existing)) return existing;
+
+        var id = Guid.NewGuid().ToString();
+        await Db.ExecuteAsync(new CommandDefinition("""
+            INSERT INTO employees
+              (employee_id, tenant_id, emp_no, emp_name, emp_type, join_date,
+               is_active, created_at, updated_at, role)
+            VALUES
+              (@Id, @TenantId, @EmpNo, '레거시이관', 'regular', @Now,
+               1, @Now, @Now, 'sales_user')
+            """,
+            new { Id = id, TenantId = tenantId, EmpNo = empNo, Now = now },
+            transaction: tx, cancellationToken: ct)).ConfigureAwait(false);
+        return id;
+    }
+
     // ────────────────────────────────────────────────────────────────
     // 2-6. 매입발주 (DOCFA → purchase_orders + purchase_order_items)
     // ────────────────────────────────────────────────────────────────
@@ -1979,21 +2088,27 @@ public sealed class MdbMigrationService
         var dt = ReadMdbTable(oleConn, "SELECT * FROM DOCFA ORDER BY IU_NO, IU_SUN");
         if (dt.Rows.Count == 0) return 0;
 
+        // 봉합 2026-05-14: DDL 정합 + 재마이그 덮어쓰기 (uq_po_no 충돌 방지)
         const string headSql = """
             INSERT INTO purchase_orders
-              (po_id, tenant_id, po_no, po_date, partner_id, total_supply, total_vat, total_amount,
-               status, remark, created_at, updated_at)
+              (po_id, tenant_id, po_no, po_date, partner_id, total_amount, vat_amount,
+               status, memo, created_at, updated_at)
             VALUES
-              (@PoId, @TenantId, @PoNo, @PoDate, @PartnerId, @Supply, @Vat, @Total,
-               'confirmed', @Remark, @Now, @Now)
+              (@PoId, @TenantId, @PoNo, @PoDate, @PartnerId, @Total, @Vat,
+               'ordered', @Memo, @Now, @Now)
+            ON DUPLICATE KEY UPDATE
+              po_date = VALUES(po_date), partner_id = VALUES(partner_id),
+              total_amount = VALUES(total_amount), vat_amount = VALUES(vat_amount),
+              memo = VALUES(memo), updated_at = VALUES(updated_at)
             """;
+        // 봉합 2026-05-14: DDL 정합 — purchase_order_items는 ordered_qty/received_qty/item_status (seq/item_name/spec/total_amount/remark 없음).
         const string lineSql = """
             INSERT INTO purchase_order_items
-              (po_item_id, po_id, tenant_id, seq, item_id, item_name, spec, qty, unit_price,
-               supply_amount, vat_amount, total_amount, remark)
+              (po_item_id, po_id, tenant_id, item_id, ordered_qty, received_qty,
+               unit_price, supply_amount, vat_amount, item_status)
             VALUES
-              (@LineId, @PoId, @TenantId, @Seq, @ItemId, @ItemName, @Spec, @Qty, @UnitPrice,
-               @Supply, @Vat, @Total, @Remark)
+              (@LineId, @PoId, @TenantId, @ItemId, @Qty, 0,
+               @UnitPrice, @Supply, @Vat, 'pending')
             """;
 
         // 헤더 그룹화
@@ -2015,18 +2130,17 @@ public sealed class MdbMigrationService
             await Db.ExecuteAsync(new CommandDefinition(headSql, new
             {
                 PoId = poId, TenantId = tenantId, PoNo = poNo, PoDate = poDate,
-                PartnerId = partnerId, Supply = supply, Vat = vat, Total = supply + vat,
-                Remark = GetStr(first, "IU_REM"), Now = now
+                PartnerId = partnerId, Vat = vat, Total = supply + vat,
+                Memo = GetStr(first, "IU_REM"), Now = now
             }, transaction: tx, cancellationToken: ct)).ConfigureAwait(false);
             headCount++;
 
-            int seq = 1;
             foreach (var r in g)
             {
                 var pum = GetStr(r, "IU_PUM");
                 var ku = GetStr(r, "IU_KU");
                 var key = $"{pum}|{ku}";
-                itemMap.TryGetValue(key, out var itemId);
+                if (!itemMap.TryGetValue(key, out var itemId) || string.IsNullOrWhiteSpace(itemId)) continue;
                 var qty = GetDec(r, "IU_QTY");
                 var dan = GetDec(r, "IU_DAN");
                 var amt = GetDec(r, "IU_AMT");
@@ -2034,9 +2148,7 @@ public sealed class MdbMigrationService
                 await Db.ExecuteAsync(new CommandDefinition(lineSql, new
                 {
                     LineId = Guid.NewGuid().ToString(), PoId = poId, TenantId = tenantId,
-                    Seq = seq++, ItemId = itemId, ItemName = pum, Spec = ku,
-                    Qty = qty, UnitPrice = dan, Supply = amt, Vat = v, Total = amt + v,
-                    Remark = GetStr(r, "IU_REM")
+                    ItemId = itemId, Qty = qty, UnitPrice = dan, Supply = amt, Vat = v
                 }, transaction: tx, cancellationToken: ct)).ConfigureAwait(false);
             }
         }
@@ -2060,21 +2172,27 @@ public sealed class MdbMigrationService
         var dt = ReadMdbTable(oleConn, "SELECT * FROM DOCFO ORDER BY IO_NO, IO_SUN");
         if (dt.Rows.Count == 0) return 0;
 
+        // 봉합 2026-05-14: DDL 정합 + 재마이그 덮어쓰기 (uq_order_no 충돌 방지)
         const string headSql = """
             INSERT INTO sales_orders
-              (so_id, tenant_id, so_no, so_date, partner_id, total_supply, total_vat, total_amount,
-               status, remark, created_at, updated_at)
+              (order_id, tenant_id, order_no, order_date, partner_id, total_amount, vat_amount,
+               status, memo, created_at, updated_at)
             VALUES
-              (@SoId, @TenantId, @SoNo, @SoDate, @PartnerId, @Supply, @Vat, @Total,
-               'confirmed', @Remark, @Now, @Now)
+              (@OrderId, @TenantId, @OrderNo, @OrderDate, @PartnerId, @Total, @Vat,
+               'order', @Memo, @Now, @Now)
+            ON DUPLICATE KEY UPDATE
+              order_date = VALUES(order_date), partner_id = VALUES(partner_id),
+              total_amount = VALUES(total_amount), vat_amount = VALUES(vat_amount),
+              memo = VALUES(memo), updated_at = VALUES(updated_at)
             """;
+        // 봉합 2026-05-14: DDL 정합 — sales_order_items는 order_item_id/order_id/ordered_qty/delivered_qty/item_status.
         const string lineSql = """
             INSERT INTO sales_order_items
-              (so_item_id, so_id, tenant_id, seq, item_id, item_name, spec, qty, unit_price,
-               supply_amount, vat_amount, total_amount, remark)
+              (order_item_id, order_id, tenant_id, item_id, ordered_qty, delivered_qty,
+               unit_price, supply_amount, vat_amount, item_status)
             VALUES
-              (@LineId, @SoId, @TenantId, @Seq, @ItemId, @ItemName, @Spec, @Qty, @UnitPrice,
-               @Supply, @Vat, @Total, @Remark)
+              (@LineId, @OrderId, @TenantId, @ItemId, @Qty, 0,
+               @UnitPrice, @Supply, @Vat, 'pending')
             """;
 
         var groups = dt.AsEnumerable().GroupBy(r => GetStr(r, "IO_NO"));
@@ -2090,33 +2208,30 @@ public sealed class MdbMigrationService
             var soDate = ParseLegacyDate(GetStr(first, "IO_ODT")) ?? now;
             decimal supply = g.Sum(r => GetDec(r, "IO_AMT"));
             decimal vat = g.Sum(r => GetDec(r, "IO_VAT"));
-            var soId = Guid.NewGuid().ToString();
+            var orderId = Guid.NewGuid().ToString();
 
             await Db.ExecuteAsync(new CommandDefinition(headSql, new
             {
-                SoId = soId, TenantId = tenantId, SoNo = soNo, SoDate = soDate,
-                PartnerId = partnerId, Supply = supply, Vat = vat, Total = supply + vat,
-                Remark = GetStr(first, "IO_REM"), Now = now
+                OrderId = orderId, TenantId = tenantId, OrderNo = soNo, OrderDate = soDate,
+                PartnerId = partnerId, Vat = vat, Total = supply + vat,
+                Memo = GetStr(first, "IO_REM"), Now = now
             }, transaction: tx, cancellationToken: ct)).ConfigureAwait(false);
             headCount++;
 
-            int seq = 1;
             foreach (var r in g)
             {
                 var pum = GetStr(r, "IO_PUM");
                 var ku = GetStr(r, "IO_KU");
                 var key = $"{pum}|{ku}";
-                itemMap.TryGetValue(key, out var itemId);
+                if (!itemMap.TryGetValue(key, out var itemId) || string.IsNullOrWhiteSpace(itemId)) continue;
                 var qty = GetDec(r, "IO_QTY");
                 var dan = GetDec(r, "IO_DAN");
                 var amt = GetDec(r, "IO_AMT");
                 var v = GetDec(r, "IO_VAT");
                 await Db.ExecuteAsync(new CommandDefinition(lineSql, new
                 {
-                    LineId = Guid.NewGuid().ToString(), SoId = soId, TenantId = tenantId,
-                    Seq = seq++, ItemId = itemId, ItemName = pum, Spec = ku,
-                    Qty = qty, UnitPrice = dan, Supply = amt, Vat = v, Total = amt + v,
-                    Remark = GetStr(r, "IO_REM")
+                    LineId = Guid.NewGuid().ToString(), OrderId = orderId, TenantId = tenantId,
+                    ItemId = itemId, Qty = qty, UnitPrice = dan, Supply = amt, Vat = v
                 }, transaction: tx, cancellationToken: ct)).ConfigureAwait(false);
             }
         }
@@ -2395,7 +2510,7 @@ public sealed class MdbMigrationService
         IDbTransaction tx, CancellationToken ct)
     {
         // P0 #4 (2026-05-14): ORDER BY 추가 — 헌법 #13 멱등 순서 보장 (계좌+거래일).
-        var dt = ReadMdbTable(oleConn, "SELECT * FROM BANKF ORDER BY BK_NO, BK_DT");
+        var dt = ReadMdbTable(oleConn, "SELECT * FROM BANKF ORDER BY BK_NO, BK_YMD");
         if (dt.Rows.Count == 0) return 0;
 
         const string sql = """
@@ -2463,7 +2578,7 @@ public sealed class MdbMigrationService
         IDbTransaction tx, CancellationToken ct)
     {
         DataTable dt;
-        try { dt = ReadMdbTable(oleConn, "SELECT * FROM DOCNM ORDER BY NM_CODE"); }
+        try { dt = ReadMdbTable(oleConn, "SELECT * FROM DOCNM ORDER BY nam_OWNER"); }
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "[MDB마이그레이션] DOCNM 테이블 읽기 실패 — POTHER에 없음 가능, skip");
@@ -2532,7 +2647,7 @@ public sealed class MdbMigrationService
         IDbTransaction tx, CancellationToken ct)
     {
         DataTable dt;
-        try { dt = ReadMdbTable(oleConn, "SELECT * FROM DOCAS ORDER BY AS_NO"); }
+        try { dt = ReadMdbTable(oleConn, "SELECT * FROM DOCAS ORDER BY AS_DT, AS_TM"); }
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "[MDB마이그레이션] DOCAS 테이블 읽기 실패 — POTHER에 없음 가능, skip");
@@ -2598,7 +2713,7 @@ public sealed class MdbMigrationService
         IDbTransaction tx, CancellationToken ct)
     {
         DataTable dt;
-        try { dt = ReadMdbTable(oleConn, "SELECT * FROM DELIVERY ORDER BY DL_NO"); }
+        try { dt = ReadMdbTable(oleConn, "SELECT * FROM DELIVERY ORDER BY DEL_DATE, DEL_TIME"); }
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "[MDB마이그레이션] DELIVERY 테이블 읽기 실패 — POTHER에 없음 가능, skip");
@@ -2666,7 +2781,7 @@ public sealed class MdbMigrationService
         IDbTransaction tx, CancellationToken ct)
     {
         DataTable dt;
-        try { dt = ReadMdbTable(oleConn, "SELECT * FROM CALENDAR ORDER BY CAL_DT"); }
+        try { dt = ReadMdbTable(oleConn, "SELECT * FROM CALENDAR ORDER BY CALENDAR_YMD"); }
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "[MDB마이그레이션] CALENDAR 테이블 읽기 실패 — POTHER에 없음 가능, skip");

@@ -66,7 +66,13 @@ public static class AuthExtensions
                 {
                     OnMessageReceived = ctx =>
                     {
-                        var t = ctx.Request.Query["token"].FirstOrDefault();
+                        // 봉합 2026-05-14: SignalR JS 클라이언트 표준 access_token + 기존 token 둘 다 수용
+                        // SignalR WebSocket 업그레이드 시 헤더 못 실어 ?access_token=...로 옴 (헌법 #26 봉합)
+                        var t = ctx.Request.Query["access_token"].FirstOrDefault();
+                        if (string.IsNullOrEmpty(t))
+                        {
+                            t = ctx.Request.Query["token"].FirstOrDefault();
+                        }
                         if (!string.IsNullOrEmpty(t))
                         {
                             ctx.Token = t;
