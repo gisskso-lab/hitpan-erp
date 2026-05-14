@@ -1,4 +1,5 @@
 using HitPan.API.Authorization;
+using HitPan.Application.Common;
 using HitPan.Application.DTOs.Approval;
 using HitPan.Application.Interfaces;
 using Microsoft.AspNetCore.Authorization;
@@ -30,6 +31,28 @@ public class CollectionController : ControllerBase
         var tenantId = HttpContext.Items["TenantId"]?.ToString();
         if (string.IsNullOrEmpty(tenantId)) return Forbid();
         return Ok(await _collectionService.GetCollectionsAsync(tenantId, from, to, partnerId, ct));
+    }
+
+    /// <summary>
+    /// 수금 목록 — 서버 페이지네이션 (2026-05-13 야간 신규, 헌법 #25 정공법).
+    /// 기존 GetCollections(/collections) 유지 — Razor ServerData 전환 시 이 엔드포인트 사용.
+    /// </summary>
+    [HttpGet("collections/paged")]
+    [RequirePermission("COLLECTION", "view")]
+    public async Task<IActionResult> GetCollectionsPaged(
+        [FromQuery] int page = 1,
+        [FromQuery] int pageSize = 50,
+        [FromQuery] DateTime? from = null,
+        [FromQuery] DateTime? to = null,
+        [FromQuery] string? partnerId = null,
+        CancellationToken ct = default)
+    {
+        var tenantId = HttpContext.Items["TenantId"]?.ToString();
+        if (string.IsNullOrEmpty(tenantId)) return Forbid();
+
+        var req = new PagedRequest { Page = page, PageSize = pageSize };
+        var result = await _collectionService.GetCollectionsPagedAsync(tenantId, req, from, to, partnerId, ct);
+        return Ok(result);
     }
 
     /// <summary>수금 등록</summary>

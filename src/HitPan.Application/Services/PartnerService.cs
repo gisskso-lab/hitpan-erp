@@ -1,6 +1,7 @@
 using System.Data;
 using System.Data.Common;
 using Dapper;
+using HitPan.Application.Common;
 using HitPan.Application.DTOs.Partner;
 using HitPan.Application.DTOs.Sales;
 using HitPan.Application.Interfaces;
@@ -201,6 +202,7 @@ public sealed class PartnerService : IPartnerService
                                   LOWER(p.partner_type) = LOWER(@Type) OR
                                   LOWER(p.partner_type) = 'both')
                            ORDER BY p.partner_name
+                           LIMIT 500
                            """;
 
         var rows = await _db.QueryAsync<PartnerListDto>(new CommandDefinition(
@@ -209,6 +211,80 @@ public sealed class PartnerService : IPartnerService
             cancellationToken: ct)).ConfigureAwait(false);
 
         return rows.ToList();
+    }
+
+    /// <summary>
+    /// 서버 페이지네이션 버전 (2026-05-13 야간, 헌법 #25 정공법).
+    /// 기존 GetPartnerListAsync는 그대로 유지 — Razor가 ServerData 패턴으로 전환 시 이 메서드 사용.
+    /// SQL 본문은 GetPartnerListAsync와 동일 — LIMIT/OFFSET + COUNT 분리만 추가.
+    /// </summary>
+    public async Task<PagedResult<PartnerListDto>> GetPartnerListPagedAsync(
+        string tenantId, PagedRequest req, string? type = null, CancellationToken ct = default)
+    {
+        await EnsureOpenAsync(ct).ConfigureAwait(false);
+
+        const string whereSql = """
+                                FROM partners p
+                                LEFT JOIN partner_balance pb
+                                  ON pb.tenant_id = p.tenant_id
+                                 AND pb.partner_id = p.partner_id
+                                WHERE p.tenant_id = @TenantId
+                                  AND (p.is_deleted = 0 OR p.is_deleted IS NULL)
+                                  AND (@Search IS NULL OR @Search = '' OR
+                                       p.partner_name LIKE CONCAT('%', @Search, '%') OR
+                                       IFNULL(p.partner_code, '') LIKE CONCAT('%', @Search, '%'))
+                                  AND (@Type IS NULL OR @Type = '' OR
+                                       LOWER(p.partner_type) = LOWER(@Type) OR
+                                       LOWER(p.partner_type) = 'both')
+                                """;
+
+        var countSql = $"SELECT COUNT(*) {whereSql}";
+
+        var listSql = $"""
+                       SELECT
+                         p.partner_id AS PartnerId,
+                         IFNULL(p.partner_code, '') AS PartnerCode,
+                         p.partner_name AS PartnerName,
+                         LOWER(p.partner_type) AS PartnerType,
+                         p.biz_no AS BizNo,
+                         p.ceo_name AS CeoName,
+                         p.tel AS Tel,
+                         p.email AS Email,
+                         p.manager_name AS ManagerName,
+                         IFNULL(p.price_grade, 'A') AS PriceGrade,
+                         IFNULL(p.credit_limit, 0) AS CreditLimit,
+                         COALESCE(pb.balance, 0) AS Balance,
+                         p.is_active AS IsActive,
+                         p.created_at AS CreatedAt
+                       {whereSql}
+                       ORDER BY p.partner_name
+                       LIMIT @Take OFFSET @Skip
+                       """;
+
+        var parameters = new
+        {
+            TenantId = tenantId,
+            Search = req.Search?.Trim(),
+            Type = type?.Trim(),
+            req.Skip,
+            req.Take
+        };
+
+        var totalCount = await _db.ExecuteScalarAsync<int>(new CommandDefinition(
+            countSql, parameters, cancellationToken: ct)).ConfigureAwait(false);
+
+        var items = totalCount == 0
+            ? new List<PartnerListDto>()
+            : (await _db.QueryAsync<PartnerListDto>(new CommandDefinition(
+                listSql, parameters, cancellationToken: ct)).ConfigureAwait(false)).ToList();
+
+        return new PagedResult<PartnerListDto>
+        {
+            Page = req.Page,
+            PageSize = req.Take,
+            TotalCount = totalCount,
+            Items = items
+        };
     }
 
     public async Task<PartnerDetailDto?> GetPartnerDetailAsync(string partnerId, string tenantId, CancellationToken ct = default)

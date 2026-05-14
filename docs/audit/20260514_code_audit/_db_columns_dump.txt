@@ -1,0 +1,348 @@
+TABLE_NAME	COLUMN_NAME	COLUMN_TYPE	IS_NULLABLE	COLUMN_KEY	COLUMN_DEFAULT	COLLATION_NAME	COLUMN_COMMENT
+bom_headers	bom_id	varchar(36)	NO	PRI	NULL	utf8mb4_unicode_ci	
+bom_headers	tenant_id	varchar(36)	NO	MUL	NULL	utf8mb4_unicode_ci	
+bom_headers	product_item_id	varchar(36)	NO		NULL	utf8mb4_unicode_ci	
+bom_headers	bom_name	varchar(100)	NO		NULL	utf8mb4_unicode_ci	
+bom_headers	bom_version	int(11)	NO		1	NULL	
+bom_headers	is_default	tinyint(1)	NO		1	NULL	
+bom_headers	is_active	tinyint(1)	NO		1	NULL	
+bom_headers	memo	text	YES		NULL	utf8mb4_unicode_ci	
+bom_headers	created_at	datetime(6)	NO		current_timestamp(6)	NULL	
+bom_headers	updated_at	datetime(6)	NO		current_timestamp(6)	NULL	
+bom_items	bom_item_id	varchar(36)	NO	PRI	NULL	utf8mb4_unicode_ci	
+bom_items	bom_id	varchar(36)	NO	MUL	NULL	utf8mb4_unicode_ci	
+bom_items	tenant_id	varchar(36)	NO	MUL	NULL	utf8mb4_unicode_ci	
+bom_items	seq_no	int(11)	NO		1	NULL	
+bom_items	material_item_id	varchar(36)	NO		NULL	utf8mb4_unicode_ci	
+bom_items	qty	decimal(10,2)	NO		1.00	NULL	
+bom_items	unit	varchar(20)	NO		'EA'	utf8mb4_unicode_ci	
+bom_items	loss_rate	decimal(5,2)	NO		0.00	NULL	
+bom_items	memo	varchar(200)	YES		NULL	utf8mb4_unicode_ci	
+collections	collection_id	varchar(36)	NO	PRI	NULL	utf8mb4_unicode_ci	수금 PK
+collections	tenant_id	varchar(36)	NO	MUL	NULL	utf8mb4_unicode_ci	테넌트 ID
+collections	partner_id	varchar(36)	NO		NULL	utf8mb4_unicode_ci	거래처 ID
+collections	collection_date	date	NO		NULL	NULL	수금일
+collections	amount	decimal(15,2)	NO		NULL	NULL	수금액
+collections	collection_method	varchar(20)	NO		'cash'	utf8mb4_unicode_ci	수금수단 (cash, bank_transfer, check, card, note)
+collections	ref_doc_type	varchar(30)	YES		NULL	utf8mb4_unicode_ci	관련 문서유형 (delivery, tax_invoice 등)
+collections	ref_doc_id	varchar(36)	YES		NULL	utf8mb4_unicode_ci	관련 문서 ID
+collections	memo	varchar(500)	YES		NULL	utf8mb4_unicode_ci	비고
+collections	is_active	tinyint(1)	NO		1	NULL	
+collections	created_at	datetime(6)	NO		current_timestamp(6)	NULL	
+collections	created_by	varchar(36)	YES		NULL	utf8mb4_unicode_ci	
+collections	updated_at	datetime(6)	NO		current_timestamp(6)	NULL	
+collections	updated_by	varchar(36)	YES		NULL	utf8mb4_unicode_ci	
+employees	employee_id	varchar(36)	NO	PRI	NULL	utf8mb4_unicode_ci	
+employees	tenant_id	varchar(36)	NO	MUL	NULL	utf8mb4_unicode_ci	
+employees	user_id	varchar(36)	YES		NULL	utf8mb4_unicode_ci	
+employees	emp_no	varchar(20)	NO		NULL	utf8mb4_unicode_ci	
+employees	emp_name	varchar(50)	NO		NULL	utf8mb4_unicode_ci	
+employees	dept_id	varchar(36)	YES		NULL	utf8mb4_unicode_ci	
+employees	position	varchar(30)	YES		NULL	utf8mb4_unicode_ci	
+employees	job_title	varchar(30)	YES		NULL	utf8mb4_unicode_ci	
+employees	emp_type	longtext	NO		NULL	utf8mb4_unicode_ci	
+employees	join_date	datetime(6)	NO		NULL	NULL	
+employees	resign_date	datetime(6)	YES		NULL	NULL	
+employees	birth_date	varchar(200)	YES		NULL	utf8mb4_unicode_ci	
+employees	id_no_hash	varchar(256)	YES		NULL	utf8mb4_unicode_ci	
+employees	phone	varchar(20)	YES		NULL	utf8mb4_unicode_ci	
+employees	email	varchar(100)	YES		NULL	utf8mb4_unicode_ci	
+employees	bank_name	varchar(30)	YES		NULL	utf8mb4_unicode_ci	
+employees	bank_account	varchar(200)	YES		NULL	utf8mb4_unicode_ci	
+employees	base_salary	varchar(200)	YES		NULL	utf8mb4_unicode_ci	
+employees	is_active	tinyint(1)	NO		NULL	NULL	
+employees	created_at	datetime(6)	NO		NULL	NULL	
+employees	created_by	varchar(36)	YES		NULL	utf8mb4_unicode_ci	
+employees	updated_at	datetime(6)	NO		NULL	NULL	
+employees	updated_by	varchar(36)	YES		NULL	utf8mb4_unicode_ci	
+employees	role	varchar(30)	NO		'sales_user'	utf8mb4_unicode_ci	???? ???? Role
+employees	annual_leave_total	decimal(5,1)	NO		0.0	NULL	???? ?ο? ???ϼ?
+employees	annual_leave_used	decimal(5,1)	NO		0.0	NULL	???? ???? ?ϼ?
+employees	address	varchar(120)	YES		NULL	utf8mb4_unicode_ci	?? (SW_ADDR)
+employees	zip_code	varchar(10)	YES		NULL	utf8mb4_unicode_ci	???? (SW_POSTNO)
+employees	birth_calendar	tinyint(4)	YES		1	NULL	1=??, 2=??
+employees	birth_lunar_converted	tinyint(4)	YES		0	NULL	?? ??
+employees	home_phone	varchar(20)	YES		NULL	utf8mb4_unicode_ci	??? (SW_TEL)
+employees	emergency_contact	varchar(30)	YES		NULL	utf8mb4_unicode_ci	????? (SW_TELem)
+employees	memo	text	YES		NULL	utf8mb4_unicode_ci	?? (SW_REM)
+employees	resident_no_encrypted	varbinary(255)	YES		NULL	NULL	???? AES-256 (SW_JUMIN, ???? ?127??164 + 4????)
+employees	salary_encrypted	varbinary(255)	YES		NULL	NULL	?? AES-256 (SW_PAY, ????? ?48 + ??????? ?29)
+employees	salary_type	tinyint(4)	YES		NULL	NULL	?? ?? (SW_PAYgu)
+employees	salary_category	tinyint(4)	YES		NULL	NULL	?? ?? (SW_PAYeuy)
+employees	salary_extra_encrypted	varbinary(500)	YES		NULL	NULL	?? ?? AES-256 (SW_PAYoth)
+employees	department	varchar(50)	YES		NULL	utf8mb4_unicode_ci	?? (SW_BU)
+employees	marriage_status	varchar(2)	YES		NULL	utf8mb4_unicode_ci	?? ?? (SW_MARRY)
+employees	business_type	varchar(50)	YES		NULL	utf8mb4_unicode_ci	?? ?? (SW_WORK)
+employees	is_resigned	tinyint(4)	YES		0	NULL	?? ?? (SW_OUT)
+employees	resign_reason	varchar(80)	YES		NULL	utf8mb4_unicode_ci	?? ?? (SW_OUTREM)
+employees	nationality	varchar(30)	YES		NULL	utf8mb4_unicode_ci	?? (SW_NATION)
+employees	legacy_bal1	varchar(150)	YES		NULL	utf8mb4_unicode_ci	
+employees	legacy_bal2	varchar(150)	YES		NULL	utf8mb4_unicode_ci	
+employees	legacy_bal3	varchar(150)	YES		NULL	utf8mb4_unicode_ci	
+employees	legacy_bal4	varchar(150)	YES		NULL	utf8mb4_unicode_ci	
+employees	legacy_bal5	varchar(150)	YES		NULL	utf8mb4_unicode_ci	
+employees	legacy_bal6	varchar(150)	YES		NULL	utf8mb4_unicode_ci	
+employees	legacy_bal7	varchar(150)	YES		NULL	utf8mb4_unicode_ci	
+employees	legacy_bal8	varchar(150)	YES		NULL	utf8mb4_unicode_ci	
+employees	legacy_bal9	varchar(150)	YES		NULL	utf8mb4_unicode_ci	
+employees	legacy_bal10	varchar(150)	YES		NULL	utf8mb4_unicode_ci	
+employees	salary_country	tinyint(4)	YES		NULL	NULL	?? ?? ?? (SW_PAYkuk)
+items	item_id	varchar(36)	NO	PRI	NULL	utf8mb4_unicode_ci	
+items	tenant_id	varchar(36)	NO	MUL	NULL	utf8mb4_unicode_ci	
+items	item_code	varchar(30)	NO		NULL	utf8mb4_unicode_ci	
+items	item_name	varchar(100)	NO		NULL	utf8mb4_unicode_ci	
+items	item_type	longtext	NO		NULL	utf8mb4_unicode_ci	
+items	category_id	varchar(36)	YES		NULL	utf8mb4_unicode_ci	
+items	unit	varchar(10)	NO		NULL	utf8mb4_unicode_ci	
+items	std_price	decimal(15,2)	YES		NULL	NULL	
+items	price_a	decimal(15,2)	YES		NULL	NULL	
+items	price_b	decimal(15,2)	YES		NULL	NULL	
+items	price_c	decimal(15,2)	YES		NULL	NULL	
+items	price_d	decimal(15,2)	YES		NULL	NULL	
+items	price_e	decimal(15,2)	YES		NULL	NULL	
+items	cost_price	decimal(15,2)	YES		NULL	NULL	
+items	tax_type	varchar(20)	NO		'taxable'	utf8mb4_unicode_ci	
+items	safe_stock	decimal(15,3)	YES		NULL	NULL	
+items	is_active	tinyint(1)	NO		NULL	NULL	
+items	memo	varchar(500)	YES		NULL	utf8mb4_unicode_ci	
+items	created_at	datetime(6)	NO		NULL	NULL	
+items	created_by	varchar(36)	YES		NULL	utf8mb4_unicode_ci	
+items	updated_at	datetime(6)	NO		NULL	NULL	
+items	updated_by	varchar(36)	YES		NULL	utf8mb4_unicode_ci	
+items	is_deleted	tinyint(1)	NO		0	NULL	
+items	deleted_at	datetime(6)	YES		NULL	NULL	
+items	item_group	varchar(50)	YES		NULL	utf8mb4_unicode_ci	
+items	spec	varchar(100)	YES		NULL	utf8mb4_unicode_ci	
+items	purchase_price	decimal(15,2)	NO		0.00	NULL	
+items	sale_price	decimal(15,2)	NO		0.00	NULL	
+items	standard_price	decimal(15,2)	NO		0.00	NULL	
+items	safety_stock	decimal(10,2)	NO		0.00	NULL	
+items	barcode	varchar(50)	YES		NULL	utf8mb4_unicode_ci	
+items	row_version	int(11)	NO		0	NULL	
+items	auto_order_enabled	tinyint(1)	NO		0	NULL	
+items	auto_order_partner_id	varchar(36)	YES		NULL	utf8mb4_unicode_ci	
+items	auto_order_qty	decimal(10,2)	NO		0.00	NULL	
+items	auto_receive_on_order	tinyint(1)	NO		0	NULL	
+items	spec_detail	varchar(80)	YES		NULL	utf8mb4_unicode_ci	?? ?? (S_SPEC)
+items	unit_secondary	varchar(10)	YES		NULL	utf8mb4_unicode_ci	2? ?? (S_UNIT2)
+items	reorder_point	decimal(15,3)	YES		0.000	NULL	??? ?? (S_REORD)
+items	supplier_default_id	char(36)	YES		NULL	utf8mb4_unicode_ci	?? ??? (S_VENDOR FK)
+journal_lines	line_id	bigint(20)	NO	PRI	NULL	NULL	
+journal_lines	entry_id	varchar(36)	NO	MUL	NULL	utf8mb4_unicode_ci	
+journal_lines	tenant_id	varchar(36)	NO	MUL	NULL	utf8mb4_unicode_ci	
+journal_lines	account_code	varchar(10)	NO		NULL	utf8mb4_unicode_ci	
+journal_lines	debit_amount	decimal(15,2)	NO		0.00	NULL	
+journal_lines	credit_amount	decimal(15,2)	NO		0.00	NULL	
+journal_lines	partner_id	varchar(36)	YES		NULL	utf8mb4_unicode_ci	
+journal_lines	memo	varchar(200)	YES		NULL	utf8mb4_unicode_ci	
+journal_lines	created_at	datetime(6)	NO		current_timestamp(6)	NULL	
+migration_checkpoints	checkpoint_id	char(36)	NO	PRI	NULL	utf8mb4_unicode_ci	
+migration_checkpoints	job_id	char(36)	NO	MUL	NULL	utf8mb4_unicode_ci	
+migration_checkpoints	tenant_id	char(36)	NO	MUL	NULL	utf8mb4_unicode_ci	
+migration_checkpoints	mdb_file	varchar(50)	NO		NULL	utf8mb4_unicode_ci	
+migration_checkpoints	table_name	varchar(50)	NO		NULL	utf8mb4_unicode_ci	
+migration_checkpoints	table_order	smallint(5) unsigned	NO		NULL	NULL	
+migration_checkpoints	status	enum('pending','running','done','failed','skipped')	NO		'pending'	utf8mb4_unicode_ci	
+migration_checkpoints	total_rows	int(10) unsigned	YES		0	NULL	
+migration_checkpoints	processed_count	int(10) unsigned	YES		0	NULL	
+migration_checkpoints	last_pk_value	longtext	YES		NULL	utf8mb4_bin	
+migration_checkpoints	chunk_size	smallint(5) unsigned	YES		1000	NULL	
+migration_checkpoints	started_at	datetime	YES		NULL	NULL	
+migration_checkpoints	completed_at	datetime	YES		NULL	NULL	
+migration_checkpoints	avg_commit_ms	int(10) unsigned	YES		0	NULL	
+migration_checkpoints	last_error	text	YES		NULL	utf8mb4_unicode_ci	
+migration_checkpoints	retry_count	tinyint(3) unsigned	YES		0	NULL	
+migration_checkpoints	created_at	datetime	NO		current_timestamp()	NULL	
+migration_checkpoints	updated_at	datetime	NO		current_timestamp()	NULL	
+migration_errors	error_id	char(36)	NO	PRI	NULL	utf8mb4_unicode_ci	
+migration_errors	job_id	char(36)	NO	MUL	NULL	utf8mb4_unicode_ci	
+migration_errors	tenant_id	char(36)	NO	MUL	NULL	utf8mb4_unicode_ci	
+migration_errors	checkpoint_id	char(36)	YES		NULL	utf8mb4_unicode_ci	
+migration_errors	mdb_file	varchar(50)	NO		NULL	utf8mb4_unicode_ci	
+migration_errors	table_name	varchar(50)	NO		NULL	utf8mb4_unicode_ci	
+migration_errors	row_pk_value	longtext	YES		NULL	utf8mb4_bin	
+migration_errors	row_offset	int(10) unsigned	YES		NULL	NULL	
+migration_errors	error_type	enum('encoding','fk_missing','duplicate','schema','constraint','timeout','other')	NO		NULL	utf8mb4_unicode_ci	
+migration_errors	error_severity	enum('warning','error','critical')	NO		'error'	utf8mb4_unicode_ci	
+migration_errors	error_code	varchar(20)	YES		NULL	utf8mb4_unicode_ci	
+migration_errors	error_message	text	NO		NULL	utf8mb4_unicode_ci	
+migration_errors	error_detail	text	YES		NULL	utf8mb4_unicode_ci	
+migration_errors	raw_data	longtext	YES		NULL	utf8mb4_bin	
+migration_errors	is_resolved	tinyint(3) unsigned	YES	MUL	0	NULL	
+migration_errors	resolved_at	datetime	YES		NULL	NULL	
+migration_errors	resolved_by	char(36)	YES		NULL	utf8mb4_unicode_ci	
+migration_errors	resolution_note	text	YES		NULL	utf8mb4_unicode_ci	
+migration_errors	occurred_at	datetime	NO		NULL	NULL	
+migration_errors	created_at	datetime	NO		current_timestamp()	NULL	
+migration_jobs	job_id	char(36)	NO	PRI	NULL	utf8mb4_unicode_ci	
+migration_jobs	tenant_id	char(36)	NO	MUL	NULL	utf8mb4_unicode_ci	
+migration_jobs	initiated_by	char(36)	NO		NULL	utf8mb4_unicode_ci	
+migration_jobs	source_folder	varchar(500)	NO		NULL	utf8mb4_unicode_ci	
+migration_jobs	status	enum('pending','preview','running','paused','completed','failed','canceled')	NO		'pending'	utf8mb4_unicode_ci	
+migration_jobs	total_tables	smallint(5) unsigned	YES		0	NULL	
+migration_jobs	completed_tables	smallint(5) unsigned	YES		0	NULL	
+migration_jobs	total_rows	int(10) unsigned	YES		0	NULL	
+migration_jobs	processed_rows	int(10) unsigned	YES		0	NULL	
+migration_jobs	skipped_rows	int(10) unsigned	YES		0	NULL	
+migration_jobs	error_rows	int(10) unsigned	YES		0	NULL	
+migration_jobs	preview_at	datetime	YES		NULL	NULL	
+migration_jobs	started_at	datetime	YES		NULL	NULL	
+migration_jobs	paused_at	datetime	YES		NULL	NULL	
+migration_jobs	completed_at	datetime	YES		NULL	NULL	
+migration_jobs	error_summary	text	YES		NULL	utf8mb4_unicode_ci	
+migration_jobs	checkpoint_data	longtext	YES		NULL	utf8mb4_bin	
+migration_jobs	client_ip	varchar(45)	YES		NULL	utf8mb4_unicode_ci	
+migration_jobs	user_agent	varchar(255)	YES		NULL	utf8mb4_unicode_ci	
+migration_jobs	created_at	datetime	NO		current_timestamp()	NULL	
+migration_jobs	updated_at	datetime	NO		current_timestamp()	NULL	
+partners	partner_id	varchar(36)	NO	PRI	NULL	utf8mb4_unicode_ci	
+partners	tenant_id	varchar(36)	NO	MUL	NULL	utf8mb4_unicode_ci	
+partners	partner_code	varchar(20)	NO		NULL	utf8mb4_unicode_ci	
+partners	partner_name	varchar(100)	NO		NULL	utf8mb4_unicode_ci	
+partners	partner_type	longtext	NO		NULL	utf8mb4_unicode_ci	
+partners	biz_no	varchar(12)	YES		NULL	utf8mb4_unicode_ci	
+partners	ceo_name	varchar(50)	YES		NULL	utf8mb4_unicode_ci	
+partners	biz_type	varchar(50)	YES		NULL	utf8mb4_unicode_ci	
+partners	biz_item	varchar(50)	YES		NULL	utf8mb4_unicode_ci	
+partners	tel	varchar(20)	YES		NULL	utf8mb4_unicode_ci	
+partners	fax	varchar(20)	YES		NULL	utf8mb4_unicode_ci	
+partners	email	varchar(100)	YES		NULL	utf8mb4_unicode_ci	
+partners	address	varchar(200)	YES		NULL	utf8mb4_unicode_ci	
+partners	address_detail	varchar(200)	YES		NULL	utf8mb4_unicode_ci	
+partners	credit_limit	decimal(15,2)	YES		NULL	NULL	
+partners	payment_terms	tinyint(3) unsigned	YES		NULL	NULL	
+partners	bank_name	varchar(30)	YES		NULL	utf8mb4_unicode_ci	
+partners	bank_account	varchar(200)	YES		NULL	utf8mb4_unicode_ci	
+partners	account_holder	varchar(30)	YES		NULL	utf8mb4_unicode_ci	
+partners	is_active	tinyint(1)	NO		NULL	NULL	
+partners	memo	varchar(500)	YES		NULL	utf8mb4_unicode_ci	
+partners	created_at	datetime(6)	NO		NULL	NULL	
+partners	created_by	varchar(36)	YES		NULL	utf8mb4_unicode_ci	
+partners	updated_at	datetime(6)	NO		NULL	NULL	
+partners	updated_by	varchar(36)	YES		NULL	utf8mb4_unicode_ci	
+partners	is_deleted	tinyint(1)	NO		0	NULL	
+partners	deleted_at	datetime(6)	YES		NULL	NULL	
+partners	zip_code	varchar(10)	YES		NULL	utf8mb4_unicode_ci	
+partners	manager_name	varchar(50)	YES		NULL	utf8mb4_unicode_ci	
+partners	manager_tel	varchar(20)	YES		NULL	utf8mb4_unicode_ci	
+partners	price_grade	char(1)	NO		'A'	utf8mb4_unicode_ci	
+partners	tax_type	varchar(20)	NO		'taxable'	utf8mb4_unicode_ci	
+partners	row_version	int(11)	NO		0	NULL	
+partners	card_commission_rate	decimal(5,2)	YES		0.00	NULL	?? ???? (buy_cardyul)
+partners	classification_code	varchar(30)	YES		NULL	utf8mb4_unicode_ci	?? ?? (buy_ccode)
+partners	manager_department	varchar(30)	YES		NULL	utf8mb4_unicode_ci	?? ?? (buy_damdangbu)
+partners	price_grade_code	varchar(10)	YES		NULL	utf8mb4_unicode_ci	???? ?? (buy_DOSCODE)
+partners	legacy_extra	varchar(30)	YES		NULL	utf8mb4_unicode_ci	??? ?? (buy_fil)
+partners	discount_rate	decimal(5,2)	YES		0.00	NULL	??? (buy_halyul)
+partners	keyman_birth	varchar(10)	YES		NULL	utf8mb4_unicode_ci	?? ?? (buy_keybirth)
+partners	keyman_name	varchar(50)	YES		NULL	utf8mb4_unicode_ci	?? ?? (buy_keyname)
+partners	keyman_phone	varchar(20)	YES		NULL	utf8mb4_unicode_ci	?? ??? (buy_keytel)
+partners	margin_rate	decimal(5,2)	YES		0.00	NULL	??? (buy_mayul)
+partners	sales_employee	varchar(30)	YES		NULL	utf8mb4_unicode_ci	?? ???? (buy_sawon)
+partners	trade_start_date	date	YES		NULL	NULL	?? ??? (buy_startdt)
+partners	business_registration_date	date	YES		NULL	NULL	?????? (buy_taxdt)
+partners	tel_secondary	varchar(20)	YES		NULL	utf8mb4_unicode_ci	?? 2? (buy_tel1)
+partners	tax_classification	varchar(10)	YES		NULL	utf8mb4_unicode_ci	?? ?? (buy_taxgubun)
+partners	ceo_resident_no_encrypted	varbinary(255)	YES		NULL	NULL	?? ???? AES-256 (buy_topjumin)
+purchase_orders	po_id	varchar(36)	NO	PRI	NULL	utf8mb4_unicode_ci	
+purchase_orders	tenant_id	varchar(36)	NO	MUL	NULL	utf8mb4_unicode_ci	
+purchase_orders	po_no	varchar(20)	NO		NULL	utf8mb4_unicode_ci	
+purchase_orders	partner_id	varchar(36)	NO	MUL	NULL	utf8mb4_unicode_ci	
+purchase_orders	employee_id	varchar(36)	YES		NULL	utf8mb4_unicode_ci	
+purchase_orders	po_date	date	NO		NULL	NULL	
+purchase_orders	expected_date	date	YES		NULL	NULL	
+purchase_orders	status	enum('draft','ordered','partial','received','cancelled')	NO	MUL	'draft'	utf8mb4_unicode_ci	
+purchase_orders	total_amount	decimal(15,2)	NO		NULL	NULL	
+purchase_orders	vat_amount	decimal(15,2)	NO		NULL	NULL	
+purchase_orders	memo	varchar(500)	YES		NULL	utf8mb4_unicode_ci	
+purchase_orders	is_auto	tinyint(1)	NO		0	NULL	
+purchase_orders	created_at	datetime(6)	NO		NULL	NULL	
+purchase_orders	created_by	varchar(36)	YES		NULL	utf8mb4_unicode_ci	
+purchase_orders	updated_at	datetime(6)	NO		NULL	NULL	
+purchase_orders	updated_by	varchar(36)	YES		NULL	utf8mb4_unicode_ci	
+purchase_orders	is_deleted	tinyint(1)	NO		0	NULL	
+purchase_orders	deleted_at	datetime(6)	YES		NULL	NULL	
+sales_deliveries	delivery_id	varchar(36)	NO	PRI	NULL	utf8mb4_unicode_ci	
+sales_deliveries	tenant_id	varchar(36)	NO	MUL	NULL	utf8mb4_unicode_ci	
+sales_deliveries	delivery_no	varchar(20)	NO		NULL	utf8mb4_unicode_ci	
+sales_deliveries	order_id	varchar(36)	YES		NULL	utf8mb4_unicode_ci	
+sales_deliveries	partner_id	varchar(36)	NO	MUL	NULL	utf8mb4_unicode_ci	
+sales_deliveries	employee_id	varchar(36)	YES		NULL	utf8mb4_unicode_ci	
+sales_deliveries	delivery_date	date	NO		NULL	NULL	
+sales_deliveries	source_type	varchar(20)	NO		NULL	utf8mb4_unicode_ci	
+sales_deliveries	status	longtext	NO		NULL	utf8mb4_unicode_ci	
+sales_deliveries	total_amount	decimal(15,2)	NO		NULL	NULL	
+sales_deliveries	vat_amount	decimal(15,2)	NO		NULL	NULL	
+sales_deliveries	memo	varchar(500)	YES		NULL	utf8mb4_unicode_ci	
+sales_deliveries	created_at	datetime(6)	NO		NULL	NULL	
+sales_deliveries	created_by	varchar(36)	YES		NULL	utf8mb4_unicode_ci	
+sales_deliveries	updated_at	datetime(6)	NO		NULL	NULL	
+sales_deliveries	updated_by	varchar(36)	YES		NULL	utf8mb4_unicode_ci	
+sales_deliveries	is_deleted	tinyint(1)	NO		0	NULL	
+sales_deliveries	deleted_at	datetime(6)	YES		NULL	NULL	
+sales_deliveries	tax_invoice_id	varchar(36)	YES	MUL	NULL	utf8mb4_unicode_ci	발행된 세금계산서 ID (tax_invoices.invoice_id 역참조). 미발행 시 NULL. 취소 시 NULL로 환원.
+sales_orders	order_id	varchar(36)	NO	PRI	NULL	utf8mb4_unicode_ci	
+sales_orders	tenant_id	varchar(36)	NO	MUL	NULL	utf8mb4_unicode_ci	
+sales_orders	order_no	varchar(20)	NO		NULL	utf8mb4_unicode_ci	
+sales_orders	partner_id	varchar(36)	NO	MUL	NULL	utf8mb4_unicode_ci	
+sales_orders	employee_id	varchar(36)	YES		NULL	utf8mb4_unicode_ci	
+sales_orders	order_date	date	NO		NULL	NULL	
+sales_orders	delivery_date	date	YES		NULL	NULL	
+sales_orders	status	enum('draft','quotation','order','confirmed','partial','closed','invoiced','cancelled')	NO	MUL	'draft'	utf8mb4_unicode_ci	
+sales_orders	total_amount	decimal(15,2)	NO		NULL	NULL	
+sales_orders	vat_amount	decimal(15,2)	NO		NULL	NULL	
+sales_orders	memo	varchar(500)	YES		NULL	utf8mb4_unicode_ci	
+sales_orders	created_at	datetime(6)	NO		NULL	NULL	
+sales_orders	created_by	varchar(36)	YES		NULL	utf8mb4_unicode_ci	
+sales_orders	updated_at	datetime(6)	NO		NULL	NULL	
+sales_orders	updated_by	varchar(36)	YES		NULL	utf8mb4_unicode_ci	
+sales_orders	is_deleted	tinyint(1)	NO		0	NULL	
+sales_orders	deleted_at	datetime(6)	YES		NULL	NULL	
+sales_orders	is_auto	tinyint(1)	NO		0	NULL	???̷?Ʈ ?Ǹ? ?? ?ڵ????? ???? (???? ǥ?? ????)
+stock_ledger	ledger_id	bigint(20)	NO	PRI	NULL	NULL	
+stock_ledger	tenant_id	varchar(36)	NO	MUL	NULL	utf8mb4_unicode_ci	
+stock_ledger	item_id	varchar(36)	NO		NULL	utf8mb4_unicode_ci	
+stock_ledger	warehouse_id	varchar(36)	NO		NULL	utf8mb4_unicode_ci	
+stock_ledger	partner_id	varchar(36)	YES		NULL	utf8mb4_unicode_ci	
+stock_ledger	employee_id	varchar(36)	YES		NULL	utf8mb4_unicode_ci	
+stock_ledger	ledger_date	date	NO		NULL	NULL	
+stock_ledger	ym	varchar(7)	NO		NULL	utf8mb4_unicode_ci	
+stock_ledger	move_type	longtext	NO		NULL	utf8mb4_unicode_ci	
+stock_ledger	source_type	varchar(30)	NO		NULL	utf8mb4_unicode_ci	
+stock_ledger	source_id	varchar(36)	NO		NULL	utf8mb4_unicode_ci	
+stock_ledger	doc_no	varchar(20)	YES		NULL	utf8mb4_unicode_ci	
+stock_ledger	qty_in	decimal(15,3)	NO		NULL	NULL	
+stock_ledger	qty_out	decimal(15,3)	NO		NULL	NULL	
+stock_ledger	unit_cost	decimal(15,4)	YES		NULL	NULL	
+stock_ledger	supply_amount	decimal(15,2)	YES		NULL	NULL	
+stock_ledger	memo	varchar(200)	YES		NULL	utf8mb4_unicode_ci	
+tax_invoices	invoice_id	varchar(36)	NO	PRI	NULL	utf8mb4_unicode_ci	
+tax_invoices	tenant_id	varchar(36)	NO	MUL	NULL	utf8mb4_unicode_ci	
+tax_invoices	delivery_id	varchar(36)	NO	UNI	NULL	utf8mb4_unicode_ci	거래명세서 FK (sales_deliveries.delivery_id)
+tax_invoices	invoice_no	varchar(32)	NO		NULL	utf8mb4_unicode_ci	계산서 번호 (테넌트별 고유)
+tax_invoices	issued_at	datetime(6)	NO		NULL	NULL	
+tax_invoices	issued_by	varchar(36)	NO		NULL	utf8mb4_unicode_ci	발행자 user_id (감사 추적)
+tax_invoices	amount_total	decimal(15,2)	NO		NULL	NULL	공급가액
+tax_invoices	vat_total	decimal(15,2)	NO		NULL	NULL	부가세
+tax_invoices	status	varchar(16)	NO	MUL	'issued'	utf8mb4_unicode_ci	issued | canceled
+tax_invoices	etax_status	varchar(16)	NO		'pending'	utf8mb4_unicode_ci	pending | issued | failed
+tax_invoices	etax_issued_at	datetime(6)	YES		NULL	NULL	
+tax_invoices	idempotency_key	varchar(64)	YES		NULL	utf8mb4_unicode_ci	발행 요청 시 사용된 Idempotency-Key 헤더 값
+tax_invoices	created_at	datetime(6)	NO		current_timestamp(6)	NULL	
+tax_invoices	updated_at	datetime(6)	NO		current_timestamp(6)	NULL	
+tax_invoices	etax_scheduled_at	datetime(6)	YES		NULL	NULL	② 전자발행 예약 시각
+tax_invoices	etax_mode	varchar(20)	YES		'scheduled'	utf8mb4_unicode_ci	scheduled(기본)/immediate(즉시발행)
+tax_invoices	etax_confirmed_at	datetime(6)	YES		NULL	NULL	③ 전자발행 확정 시각 (홈택스 전송 완료)
+tax_invoices	hometax_approval_no	varchar(50)	YES		NULL	utf8mb4_unicode_ci	홈택스 승인번호
+tax_invoices	hometax_response	text	YES		NULL	utf8mb4_unicode_ci	홈택스 응답 원문 (감사용)
+tax_invoices	amendment_of	varchar(36)	YES	MUL	NULL	utf8mb4_unicode_ci	수정계산서일 경우 원본 PK
+tax_invoices	amendment_reason	varchar(200)	YES		NULL	utf8mb4_unicode_ci	수정계산서 사유
+warehouses	warehouse_id	varchar(36)	NO	PRI	NULL	utf8mb4_unicode_ci	
+warehouses	tenant_id	varchar(36)	NO	MUL	NULL	utf8mb4_unicode_ci	
+warehouses	wh_code	varchar(20)	NO		NULL	utf8mb4_unicode_ci	
+warehouses	wh_name	varchar(50)	NO		NULL	utf8mb4_unicode_ci	
+warehouses	wh_type	longtext	NO		NULL	utf8mb4_unicode_ci	
+warehouses	location	varchar(100)	YES		NULL	utf8mb4_unicode_ci	
+warehouses	is_active	tinyint(1)	NO		NULL	NULL	
+warehouses	created_at	datetime(6)	NO		NULL	NULL	
+warehouses	updated_at	datetime(6)	NO		NULL	NULL	

@@ -1,4 +1,5 @@
 using System.Security.Claims;
+using HitPan.Application.Common;
 using HitPan.Application.DTOs.Partner;
 using HitPan.Application.Interfaces;
 using Microsoft.AspNetCore.Authorization;
@@ -30,6 +31,27 @@ public class PartnerController : ControllerBase
 
         var list = await _partnerService.GetPartnerListAsync(tenantId, search, type, ct).ConfigureAwait(false);
         return Ok(list);
+    }
+
+    /// <summary>
+    /// 서버 페이지네이션 버전 (2026-05-13 야간 신규, 헌법 #25 정공법).
+    /// 기존 GetList(/) 유지 — Razor가 ServerData 패턴으로 전환 시 이 엔드포인트 사용.
+    /// </summary>
+    [HttpGet("paged")]
+    [Authorize(Policy = "TenantOnly")]
+    public async Task<IActionResult> GetListPaged(
+        [FromQuery] int page = 1,
+        [FromQuery] int pageSize = 50,
+        [FromQuery] string? search = null,
+        [FromQuery] string? type = null,
+        CancellationToken ct = default)
+    {
+        var tenantId = HttpContext.Items["TenantId"]?.ToString();
+        if (string.IsNullOrEmpty(tenantId)) return Forbid();
+
+        var req = new PagedRequest { Page = page, PageSize = pageSize, Search = search };
+        var result = await _partnerService.GetPartnerListPagedAsync(tenantId, req, type, ct).ConfigureAwait(false);
+        return Ok(result);
     }
 
     [HttpGet("search")]

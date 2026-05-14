@@ -1,3 +1,4 @@
+using HitPan.Application.Common;
 using HitPan.Application.DTOs.Partner;
 using HitPan.Application.DTOs.Sales;
 
@@ -18,6 +19,9 @@ public interface IPartnerService
     Task<List<PartnerSearchDto>> SearchPartnersAsync(string tenantId, string keyword, CancellationToken ct = default);
 
     Task<List<PartnerListDto>> GetPartnerListAsync(string tenantId, string? search = null, string? type = null, CancellationToken ct = default);
+
+    /// <summary>서버 페이지네이션 버전 (2026-05-13 야간 신규).</summary>
+    Task<PagedResult<PartnerListDto>> GetPartnerListPagedAsync(string tenantId, PagedRequest req, string? type = null, CancellationToken ct = default);
 
     Task<PartnerDetailDto?> GetPartnerDetailAsync(string partnerId, string tenantId, CancellationToken ct = default);
 

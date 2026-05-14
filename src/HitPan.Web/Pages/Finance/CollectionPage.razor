@@ -88,9 +88,14 @@ else if (!_showHistory)
 }
 else
 {
-    @* === 수금 이력 모드 === *@
+    @* === 수금 이력 모드 (2026-05-13 야간: ServerData 패턴, 122만건 대응) === *@
     <SectionCard Title="수금 이력" Icon="@Icons.Material.Filled.Receipt">
-        <MudTable Items="_history" Dense="true" Hover="true" T="CollectionModel">
+        <MudTable T="CollectionModel"
+                  ServerData="LoadHistoryServerDataAsync"
+                  @ref="_historyTable"
+                  Dense="true" Hover="true"
+                  Loading="@_loading" LoadingProgressColor="Color.Primary"
+                  RowsPerPage="50">
             <HeaderContent>
                 <MudTh>수금일</MudTh>
                 <MudTh>거래처</MudTh>
@@ -287,8 +292,8 @@ else
     private decimal _totalOutstanding;
     private int _overdueCount;
 
-    // 이력
-    private List<CollectionModel> _history = new();
+    // 이력 — 2026-05-13: ServerData 패턴으로 전환. _history는 더 이상 사용 안 함.
+    private MudTable<CollectionModel>? _historyTable;
 
     // 다이얼로그: 전표 펼침
     private bool _docsDialogVisible;
@@ -343,14 +348,27 @@ else
         _loading = false;
     }
 
-    private async Task ToggleHistory()
+    private void ToggleHistory()
     {
         _showHistory = !_showHistory;
-        if (_showHistory)
+        // ServerData 패턴 — MudTable이 첫 렌더 시 자동으로 LoadHistoryServerDataAsync 호출.
+    }
+
+    /// <summary>
+    /// 수금 이력 ServerData 콜백 (2026-05-13 야간 신규, 헌법 #25 정공법).
+    /// 122만건 collections 대비 서버 페이지네이션.
+    /// </summary>
+    private async Task<TableData<CollectionModel>> LoadHistoryServerDataAsync(TableState state, CancellationToken ct)
+    {
+        _loading = true;
+        try
         {
-            _loading = true;
-            StateHasChanged();
-            _history = await CollSvc.GetCollectionsAsync();
+            var page = state.Page + 1;
+            var paged = await CollSvc.GetCollectionsPagedAsync(page, state.PageSize, ct: ct);
+            return new TableData<CollectionModel> { Items = paged.Items, TotalItems = paged.TotalCount };
+        }
+        finally
+        {
             _loading = false;
         }
     }

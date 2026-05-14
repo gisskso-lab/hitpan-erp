@@ -1,3 +1,4 @@
+using HitPan.Application.Common;
 using HitPan.Application.DTOs.Approval;
 
 namespace HitPan.Application.Interfaces;
@@ -7,6 +8,9 @@ public interface ICollectionService
 {
     // ── 수금 ──
     Task<List<CollectionListDto>> GetCollectionsAsync(string tenantId, DateTime? from = null, DateTime? to = null, string? partnerId = null, CancellationToken ct = default);
+
+    /// <summary>서버 페이지네이션 버전 (2026-05-13 야간 신규).</summary>
+    Task<PagedResult<CollectionListDto>> GetCollectionsPagedAsync(string tenantId, PagedRequest req, DateTime? from = null, DateTime? to = null, string? partnerId = null, CancellationToken ct = default);
     Task<string> CreateCollectionAsync(CreateCollectionRequest request, string tenantId, string userId, CancellationToken ct = default);
     Task DeleteCollectionAsync(string collectionId, string tenantId, CancellationToken ct = default);
 

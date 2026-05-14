@@ -21,6 +21,26 @@ public sealed class CollectionPaymentService(HttpClient http)
         catch { return new(); }
     }
 
+    /// <summary>
+    /// 서버 페이지네이션 버전 (2026-05-13 야간 신규).
+    /// 기존 GetCollectionsAsync 유지 — ServerData 전환 시 이 메서드 사용.
+    /// </summary>
+    public async Task<PagedResponse<CollectionModel>> GetCollectionsPagedAsync(
+        int page, int pageSize,
+        DateTime? from = null, DateTime? to = null, string? partnerId = null,
+        CancellationToken ct = default)
+    {
+        try
+        {
+            var q = $"api/collections/paged?page={page}&pageSize={pageSize}";
+            if (from.HasValue) q += $"&from={from:yyyy-MM-dd}";
+            if (to.HasValue) q += $"&to={to:yyyy-MM-dd}";
+            if (!string.IsNullOrEmpty(partnerId)) q += $"&partnerId={Uri.EscapeDataString(partnerId)}";
+            return await http.GetFromJsonAsync<PagedResponse<CollectionModel>>(q, ct) ?? new();
+        }
+        catch { return new(); }
+    }
+
     public async Task<bool> CreateCollectionAsync(CreateCollectionModel model, CancellationToken ct = default)
     {
         try { using var r = await http.PostAsJsonAsync("api/collections", model, ct); return r.IsSuccessStatusCode; }

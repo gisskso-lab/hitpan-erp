@@ -78,7 +78,9 @@ builder.Services.AddScoped(sp =>
     {
         InnerHandler = new HttpClientHandler()
     };
-    return new HttpClient(handler) { BaseAddress = apiUri };
+    // 핫픽스 2026-05-13: 거래처별 네트워크·데이터 크기·환경 차이 고려.
+    // MDB 마이그 1년치 100만+건 처리 + 느린 회선 대응 — 기본 100초 → 10분.
+    return new HttpClient(handler) { BaseAddress = apiUri, Timeout = TimeSpan.FromMinutes(10) };
 });
 
 await builder.Build().RunAsync();

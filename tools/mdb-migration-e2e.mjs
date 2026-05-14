@@ -18,7 +18,8 @@ import path from 'path';
 const WEB_URL = 'http://localhost:5234';
 const API_URL = 'http://localhost:5257';
 const MDB_FOLDER = 'C:\\Users\\소순근\\Desktop\\BK_2026-02-20-175608';
-const LOGIN_ID = 'tenant@hitpan.kr';
+const MDB_PASSWORD = '7618968';
+const LOGIN_ID = 'admin@hitpan.kr';
 const LOGIN_PW = 'Admin1234!';
 
 const SCREENSHOT_DIR = path.join(process.cwd(), 'tools', 'screenshots', `mdb-migration-${Date.now()}`);
@@ -92,10 +93,19 @@ async function main() {
         await page.waitForTimeout(2000);
         await shot(page, '04-mdb-migration-page');
 
-        // 3. MDB 폴더 경로 입력
-        log('[3/6] MDB 폴더 경로 입력');
-        const folderInput = page.locator('input[placeholder*="C:\\\\HITWIN"], label:has-text("MDB 폴더 경로") + div input, input').filter({ hasNot: page.locator('[type="password"]') }).first();
+        // 3. MDB 폴더 경로 + 비번 입력
+        log('[3/6] MDB 폴더 경로 + 비번 입력');
+        // MudTextField 라벨 기반 입력 (Blazor 양방향 바인딩 위해 Tab 키 사용)
+        const folderInput = page.getByLabel('MDB 폴더 경로');
+        await folderInput.click();
         await folderInput.fill(MDB_FOLDER);
+        await folderInput.press('Tab');
+
+        const pwInput = page.getByLabel('MDB 비밀번호');
+        await pwInput.click();
+        await pwInput.fill(MDB_PASSWORD);
+        await pwInput.press('Tab');
+        await page.waitForTimeout(500);
         await shot(page, '05-folder-path-entered');
 
         // 4. 미리보기 버튼 클릭

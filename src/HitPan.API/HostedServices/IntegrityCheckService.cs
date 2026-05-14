@@ -68,21 +68,25 @@ public sealed class IntegrityCheckService : BackgroundService
             }
 
             // ② monthly_summary vs journal_lines 매출 불일치 감지 (당월)
-            var ym = DateTime.UtcNow.ToString("yyyy-MM");
+            // monthly_summary.year_month는 char(6) 'YYYYMM' 형식
+            var ym = DateTime.UtcNow.ToString("yyyyMM");
             var mismatches = await conn.QueryAsync<(string TenantId, decimal SummaryAmt, decimal JournalAmt)>(
                 new CommandDefinition(
                     """
                     SELECT ms.tenant_id AS TenantId,
                            ms.total_sales AS SummaryAmt,
-                           COALESCE(SUM(jl.credit), 0) AS JournalAmt
+                           COALESCE(SUM(jl.credit_amount), 0) AS JournalAmt
                     FROM monthly_summary ms
                     LEFT JOIN journal_lines jl
                         ON jl.tenant_id = ms.tenant_id
-                        AND DATE_FORMAT(jl.entry_date, '%Y-%m') = ms.ym
                         AND jl.account_code = '4010'
-                    WHERE ms.ym = @Ym
+                    LEFT JOIN journal_entries je
+                        ON je.entry_id = jl.entry_id
+                        AND je.tenant_id = jl.tenant_id
+                        AND je.ym = ms.year_month
+                    WHERE ms.year_month = @Ym
                     GROUP BY ms.tenant_id, ms.total_sales
-                    HAVING ABS(ms.total_sales - COALESCE(SUM(jl.credit), 0)) > 1
+                    HAVING ABS(ms.total_sales - COALESCE(SUM(jl.credit_amount), 0)) > 1
                     LIMIT 50
                     """,
                     new { Ym = ym },

@@ -200,54 +200,92 @@
         }
     }
 
-    /* ── 마이그레이션 시작 ── */
+    /* ── 마이그레이션 시작 — 2026-05-14: 백그라운드 잡 + 폴링 (Cloudflare 524 회피) ── */
     private async Task StartMigrationAsync()
     {
         try
         {
             _loading = true;
-            _statusMessage = "데이터 이관 중... 잠시 기다려주세요.";
+            _statusMessage = "마이그레이션 시작 중...";
             StateHasChanged();
 
-            // POST 요청 — 폴더 경로 + 비번 (핫픽스 2026-05-13)
+            // 1) Start — 즉시 JobId 반환 (1초 내, 524 안 걸림)
             var payload = new { folderPath = _folderPath, mdbPassword = string.IsNullOrEmpty(_mdbPassword) ? null : _mdbPassword };
-            var response = await Http.PostAsJsonAsync("api/migration/legacy-mdb", payload);
-
-            if (!response.IsSuccessStatusCode)
+            var startResp = await Http.PostAsJsonAsync("api/migration/legacy-mdb/start", payload);
+            if (!startResp.IsSuccessStatusCode)
             {
-                var errorText = await response.Content.ReadAsStringAsync();
-                Snackbar.Add($"이관 실패 ({(int)response.StatusCode}): {errorText}", Severity.Error);
+                var err = await startResp.Content.ReadAsStringAsync();
+                Snackbar.Add($"시작 실패 ({(int)startResp.StatusCode}): {err}", Severity.Error);
+                return;
+            }
+            var startBody = await startResp.Content.ReadFromJsonAsync<StartResponse>();
+            var jobId = startBody?.JobId;
+            if (string.IsNullOrEmpty(jobId))
+            {
+                Snackbar.Add("잡 ID를 받지 못했습니다.", Severity.Error);
                 return;
             }
 
-            _migrationResult = await response.Content.ReadFromJsonAsync<MigrationResult>();
-
-            if (_migrationResult != null)
+            // 2) Poll — 2초마다 진행률 조회 (최대 30분)
+            var maxAttempts = 900; // 30분 = 1800초 ÷ 2초
+            for (int i = 0; i < maxAttempts; i++)
             {
-                // 결과를 테이블 행으로 변환
-                _migrationRows = new List<MigrationRow>
+                await Task.Delay(2000);
+                var statusResp = await Http.GetAsync($"api/migration/legacy-mdb/status/{jobId}");
+                if (!statusResp.IsSuccessStatusCode)
                 {
-                    new("업체(거래처)", _migrationResult.Partners),
-                    new("상품(품목)", _migrationResult.Items),
-                    new("BOM(자재명세서)", _migrationResult.BomHeaders),
-                    new("사원", _migrationResult.Employees),
-                    new("거래명세 매입(K2)", _migrationResult.PurchaseOrders),
-                    new("거래명세 매출(K2)", _migrationResult.SalesOrders),
-                    new("매입발주(IU)", _migrationResult.PurchaseOrdersFromIU),
-                    new("매출주문(IO)", _migrationResult.SalesOrdersFromIO),
-                    new("세금계산서(TX)", _migrationResult.TaxInvoices),
-                    new("재고원장(입출고)", _migrationResult.StockLedger),
-                    new("수금", _migrationResult.Collections),
-                    new("경비(현금출납)", _migrationResult.Cashbook),
-                    new("전표(비용처리)", _migrationResult.Expenses),
-                    new("어음(EU+EQ)", _migrationResult.Bills),
-                    new("카드결제(CD)", _migrationResult.CardPayments),
-                    new("은행거래(BANKF)", _migrationResult.BankTransactions),
-                };
+                    // 일시적 네트워크 오류 — 계속 폴링
+                    _statusMessage = $"진행률 조회 일시 실패 (재시도 {i+1}/{maxAttempts})";
+                    StateHasChanged();
+                    continue;
+                }
+                var status = await statusResp.Content.ReadFromJsonAsync<JobStatus>();
+                if (status is null) continue;
 
-                var total = _migrationRows.Sum(r => r.Count);
-                Snackbar.Add($"이관 완료! 총 {total:N0}건 가져옴", Severity.Success);
+                _statusMessage = $"[{status.Status}] {status.CurrentStep} (경과 {status.ElapsedSeconds}초)";
+                StateHasChanged();
+
+                if (status.Status == "completed" && status.Result is not null)
+                {
+                    _migrationResult = new MigrationResult
+                    {
+                        Partners = status.Result.Partners, Items = status.Result.Items, BomHeaders = status.Result.BomHeaders,
+                        Employees = status.Result.Employees, PurchaseOrders = status.Result.PurchaseOrders, SalesOrders = status.Result.SalesOrders,
+                        StockLedger = status.Result.StockLedger, Collections = status.Result.Collections, Cashbook = status.Result.Cashbook,
+                        Expenses = status.Result.Expenses, PurchaseOrdersFromIU = status.Result.PurchaseOrdersFromIU,
+                        SalesOrdersFromIO = status.Result.SalesOrdersFromIO, TaxInvoices = status.Result.TaxInvoices,
+                        Bills = status.Result.Bills, CardPayments = status.Result.CardPayments, BankTransactions = status.Result.BankTransactions
+                    };
+                    _migrationRows = new List<MigrationRow>
+                    {
+                        new("업체(거래처)", _migrationResult.Partners),
+                        new("상품(품목)", _migrationResult.Items),
+                        new("BOM(자재명세서)", _migrationResult.BomHeaders),
+                        new("사원", _migrationResult.Employees),
+                        new("거래명세 매입(K2)", _migrationResult.PurchaseOrders),
+                        new("거래명세 매출(K2)", _migrationResult.SalesOrders),
+                        new("매입발주(IU)", _migrationResult.PurchaseOrdersFromIU),
+                        new("매출주문(IO)", _migrationResult.SalesOrdersFromIO),
+                        new("세금계산서(TX)", _migrationResult.TaxInvoices),
+                        new("재고원장(입출고)", _migrationResult.StockLedger),
+                        new("수금", _migrationResult.Collections),
+                        new("경비(현금출납)", _migrationResult.Cashbook),
+                        new("전표(비용처리)", _migrationResult.Expenses),
+                        new("어음(EU+EQ)", _migrationResult.Bills),
+                        new("카드결제(CD)", _migrationResult.CardPayments),
+                        new("은행거래(BANKF)", _migrationResult.BankTransactions),
+                    };
+                    var total = _migrationRows.Sum(r => r.Count);
+                    Snackbar.Add($"이관 완료! 총 {total:N0}건 (경과 {status.ElapsedSeconds}초)", Severity.Success);
+                    return;
+                }
+                if (status.Status == "failed")
+                {
+                    Snackbar.Add($"이관 실패: {status.ErrorMessage}", Severity.Error);
+                    return;
+                }
             }
+            Snackbar.Add("폴링 타임아웃 (30분). 백엔드 로그를 확인하세요.", Severity.Warning);
         }
         catch (Exception ex)
         {
@@ -258,6 +296,22 @@
             _loading = false;
             _statusMessage = "";
         }
+    }
+
+    private class StartResponse
+    {
+        public string JobId { get; set; } = "";
+        public string Status { get; set; } = "";
+    }
+
+    private class JobStatus
+    {
+        public string JobId { get; set; } = "";
+        public string Status { get; set; } = "";
+        public string CurrentStep { get; set; } = "";
+        public int ElapsedSeconds { get; set; }
+        public MigrationResult? Result { get; set; }
+        public string? ErrorMessage { get; set; }
     }
 
     /* ── DTO: 미리보기 결과 — Dictionary<string, int> 직접 사용 ── */
@@ -286,4 +340,5 @@
 
     /* ── 테이블 행 표시용 레코드 ── */
     private record MigrationRow(string Name, int Count);
+
 }

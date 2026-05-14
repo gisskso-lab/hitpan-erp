@@ -22,7 +22,9 @@ public static class InfrastructureExtensions
 
         // DefaultCommandTimeout=90: 저장 후 partner_balance 집계 뷰가 대량 집계를 할 때
         // 기본 30초로는 부족해 Command Timeout → 롤백 → 유실이 발생. 90초 안전마진.
-        var connStr = $"Server={host};Port={port};Database={db};User={user};Password={pwd};DefaultCommandTimeout=90;";
+        // 2026-05-13 야간 #3: AllowLoadLocalInfile=true — MySqlBulkCopy(LOAD DATA LOCAL INFILE) 활성화.
+        // 마이그 성능 8분→30초 목표. 일반 쿼리에는 영향 없음.
+        var connStr = $"Server={host};Port={port};Database={db};User={user};Password={pwd};DefaultCommandTimeout=90;AllowLoadLocalInfile=true;";
         // v1.0.6: AutoDetect는 기동 시 DB 연결을 선행 호출 → 설치 직후 타이밍 민감 구간에서 지연·크래시 유발.
         // 설치파일은 MariaDB 11.4 MSI를 동봉하므로 고정 버전으로 안정화.
         var serverVersion = new MariaDbServerVersion(new Version(11, 4, 0));

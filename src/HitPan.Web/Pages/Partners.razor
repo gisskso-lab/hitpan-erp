@@ -53,13 +53,16 @@
     </MudGrid>
 </MudPaper>
 
-@if (_loading)
-{
-    <MudProgressLinear Indeterminate="true" Color="Color.Primary" />
-}
-else
-{
-    <MudTable Items="_rows" Dense="true" Hover="true" Striped="true" FixedHeader="true" Height="calc(100vh - 240px)">
+<MudTable T="PartnerListRow"
+          ServerData="LoadServerDataAsync"
+          @ref="_table"
+          Dense="true" Hover="true" Striped="true"
+          FixedHeader="true" Height="calc(100vh - 240px)"
+          Loading="@_loading" LoadingProgressColor="Color.Primary"
+          RowsPerPage="50">
+    <ToolBarContent>
+        <MudText Typo="Typo.subtitle2">전체 @_totalCount.ToString("N0") 건</MudText>
+    </ToolBarContent>
         <HeaderContent>
             <MudTh>코드</MudTh>
             <MudTh>업체명</MudTh>
@@ -106,34 +109,56 @@ else
                                OnClick="@(() => DeleteAsync(context))" />
             </MudTd>
         </RowTemplate>
-    </MudTable>
-}
+    <PagerContent>
+        <MudTablePager PageSizeOptions="new[]{25,50,100,200}" />
+    </PagerContent>
+    <NoRecordsContent>
+        <MudText Align="Align.Center" Class="pa-4">조회된 업체가 없습니다.</MudText>
+    </NoRecordsContent>
+</MudTable>
 
 @code {
-    private List<PartnerListRow> _rows = new();
+    private MudTable<PartnerListRow>? _table;
     private List<PartnerAgingRow> _aging = new();
     private string _search = "";
     private string _type = "";
-    private bool _loading = true;
+    private bool _loading = false;
+    private int _totalCount;
 
     protected override async Task OnInitializedAsync()
     {
-        await ReloadAsync();
+        // aging 데이터만 별도 로드 (페이지네이션 무관, 작은 데이터)
+        _aging = await PartnersApi.GetAgingAsync();
+    }
+
+    /// <summary>
+    /// MudTable ServerData 콜백 — 페이지 전환·정렬·필터 시 호출됨.
+    /// 2026-05-13 야간: 100만건 대비 서버 페이지네이션 패턴.
+    /// </summary>
+    private async Task<TableData<PartnerListRow>> LoadServerDataAsync(TableState state, CancellationToken ct)
+    {
+        _loading = true;
+        try
+        {
+            var page = state.Page + 1; // MudBlazor는 0-based
+            var paged = await PartnersApi.GetListPagedAsync(
+                page, state.PageSize,
+                string.IsNullOrWhiteSpace(_search) ? null : _search,
+                string.IsNullOrWhiteSpace(_type) ? null : _type,
+                ct);
+            _totalCount = paged.TotalCount;
+            return new TableData<PartnerListRow> { Items = paged.Items, TotalItems = paged.TotalCount };
+        }
+        finally
+        {
+            _loading = false;
+        }
     }
 
     private async Task ReloadAsync()
     {
-        _loading = true;
-        StateHasChanged();
-        var rowsTask = PartnersApi.GetListAsync(
-            string.IsNullOrWhiteSpace(_search) ? null : _search,
-            string.IsNullOrWhiteSpace(_type) ? null : _type);
-        var agingTask = PartnersApi.GetAgingAsync();
-        await Task.WhenAll(rowsTask, agingTask);
-        _rows = rowsTask.Result;
-        _aging = agingTask.Result;
-        _loading = false;
-        StateHasChanged();
+        if (_table is not null)
+            await _table.ReloadServerData();
     }
 
     // 거래처 id로 연체 행 lookup (미사용 시 null)

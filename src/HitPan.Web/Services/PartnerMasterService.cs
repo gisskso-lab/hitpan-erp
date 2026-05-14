@@ -40,6 +40,39 @@ public sealed class PartnerMasterService(HttpClient http)
         }
     }
 
+    /// <summary>
+    /// 서버 페이지네이션 버전 (2026-05-13 야간 신규).
+    /// 기존 GetListAsync 유지 — ServerData 전환 시 이 메서드 사용.
+    /// </summary>
+    public async Task<PagedResponse<PartnerListRow>> GetListPagedAsync(
+        int page, int pageSize,
+        string? search = null,
+        string? type = null,
+        CancellationToken ct = default)
+    {
+        try
+        {
+            var qs = new List<string>
+            {
+                "page=" + page,
+                "pageSize=" + pageSize
+            };
+            if (!string.IsNullOrWhiteSpace(search))
+                qs.Add("search=" + Uri.EscapeDataString(search.Trim()));
+            if (!string.IsNullOrWhiteSpace(type))
+                qs.Add("type=" + Uri.EscapeDataString(type.Trim()));
+
+            var path = "api/partners/paged?" + string.Join("&", qs);
+            var res = await http.GetFromJsonAsync<PagedResponse<PartnerListRow>>(path, JsonOptions, ct);
+            return res ?? new PagedResponse<PartnerListRow>();
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[PartnerMasterService.GetListPagedAsync] Error: {ex.Message}");
+            return new PagedResponse<PartnerListRow>();
+        }
+    }
+
     public async Task<PartnerDetailModel?> GetAsync(string id, CancellationToken ct = default)
     {
         try

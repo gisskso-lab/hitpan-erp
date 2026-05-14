@@ -2,7 +2,9 @@ using System.Runtime.Versioning;
 using HitPan.Application.Services;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
+#pragma warning disable CA1416
 
 namespace HitPan.API.Controllers;
 
@@ -21,11 +23,19 @@ public sealed class MigrationController : ControllerBase
 {
     private readonly MdbMigrationService _migrationService;
     private readonly ILogger<MigrationController> _logger;
+    private readonly MigrationJobStore _jobStore;
+    private readonly IServiceScopeFactory _scopeFactory;
 
-    public MigrationController(MdbMigrationService migrationService, ILogger<MigrationController> logger)
+    public MigrationController(
+        MdbMigrationService migrationService,
+        ILogger<MigrationController> logger,
+        MigrationJobStore jobStore,
+        IServiceScopeFactory scopeFactory)
     {
         _migrationService = migrationService;
         _logger = logger;
+        _jobStore = jobStore;
+        _scopeFactory = scopeFactory;
     }
 
     /// <summary>
@@ -163,6 +173,90 @@ public sealed class MigrationController : ControllerBase
             _logger.LogError(ex, "[Migrate] 미처리 예외 folder={Folder}", request.FolderPath);
             return StatusCode(500, new { message = $"마이그레이션 실행 중 오류: {ex.GetType().Name} - {ex.Message}" });
         }
+    }
+
+    /// <summary>
+    /// 2026-05-14: 백그라운드 마이그 시작 — Cloudflare 524 회피용.
+    /// POST 즉시 JobId 반환 (1초 내). 진행률은 /status/{jobId} GET 폴링.
+    /// </summary>
+    [HttpPost("legacy-mdb/start")]
+    public IActionResult StartMigrationJob([FromBody] MdbMigrationRequest request)
+    {
+        var tenantId = HttpContext.Items["TenantId"]?.ToString();
+        if (string.IsNullOrEmpty(tenantId)) return Forbid();
+        if (string.IsNullOrWhiteSpace(request.FolderPath))
+            return BadRequest(new { message = "MDB 폴더 경로를 입력해주세요." });
+
+        var job = _jobStore.Create(tenantId);
+
+        // 백그라운드 실행 — HttpContext 끊김 무관, 새 스코프로 서비스 해결.
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                _jobStore.Update(job.JobId, j => { j.Status = "running"; j.CurrentStep = "초기화"; });
+
+                using var scope = _scopeFactory.CreateScope();
+                var svc = scope.ServiceProvider.GetRequiredService<MdbMigrationService>();
+
+                _jobStore.Update(job.JobId, j => j.CurrentStep = "MDB 읽기 + Bulk INSERT 진행 중...");
+                var result = await svc.MigrateAsync(request.FolderPath, tenantId, request.MdbPassword, CancellationToken.None);
+
+                _jobStore.Update(job.JobId, j =>
+                {
+                    j.Status = "completed";
+                    j.CurrentStep = "완료";
+                    j.FinishedAt = DateTime.UtcNow;
+                    j.Result = new MigrationJobResult
+                    {
+                        Partners = result.Partners, Items = result.Items, BomHeaders = result.BomHeaders,
+                        Employees = result.Employees, SalesOrders = result.SalesOrders, PurchaseOrders = result.PurchaseOrders,
+                        StockLedger = result.StockLedger, Collections = result.Collections, Cashbook = result.Cashbook,
+                        Expenses = result.Expenses, PurchaseOrdersFromIU = result.PurchaseOrdersFromIU,
+                        SalesOrdersFromIO = result.SalesOrdersFromIO, TaxInvoices = result.TaxInvoices,
+                        Bills = result.Bills, CardPayments = result.CardPayments, BankTransactions = result.BankTransactions
+                    };
+                });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "[Migrate-Job] {JobId} 실패", job.JobId);
+                _jobStore.Update(job.JobId, j =>
+                {
+                    j.Status = "failed";
+                    j.ErrorMessage = $"{ex.GetType().Name}: {ex.Message}";
+                    j.FinishedAt = DateTime.UtcNow;
+                });
+            }
+        });
+
+        return Accepted(new { jobId = job.JobId, status = "queued" });
+    }
+
+    /// <summary>
+    /// 마이그 잡 진행 상태 조회 — Razor가 2초마다 폴링.
+    /// </summary>
+    [HttpGet("legacy-mdb/status/{jobId}")]
+    public IActionResult GetMigrationJobStatus(string jobId)
+    {
+        var tenantId = HttpContext.Items["TenantId"]?.ToString();
+        if (string.IsNullOrEmpty(tenantId)) return Forbid();
+
+        var job = _jobStore.Get(jobId);
+        if (job is null) return NotFound(new { message = "잡 ID를 찾을 수 없습니다." });
+        if (job.TenantId != tenantId) return Forbid();
+
+        return Ok(new
+        {
+            jobId = job.JobId,
+            status = job.Status,
+            currentStep = job.CurrentStep,
+            startedAt = job.StartedAt,
+            finishedAt = job.FinishedAt,
+            result = job.Result,
+            errorMessage = job.ErrorMessage,
+            elapsedSeconds = (int)((job.FinishedAt ?? DateTime.UtcNow) - job.StartedAt).TotalSeconds
+        });
     }
 }
 

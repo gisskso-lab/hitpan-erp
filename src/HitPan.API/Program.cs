@@ -114,7 +114,10 @@ builder.Services.AddScoped<ExcelImportService>();
 // MdbMigrationService는 Windows 전용 (Jet OLEDB). 헌법 #19 warnings 0 준수: 호출 사이트만 pragma로 억제.
 #pragma warning disable CA1416  // Windows 전용 — Linux 컨테이너 배포 시 호출 안 됨 (MigrationController가 [SupportedOSPlatform("windows")])
 builder.Services.AddScoped<MdbMigrationService>();
+// 2026-05-14: 마이그 백그라운드 잡 진행률 저장소 (524 회피용 폴링 패턴).
+builder.Services.AddSingleton<MigrationJobStore>();
 #pragma warning restore CA1416
+// 메시지큐 제거 (2026-05-13 사장님 지시) — bulk INSERT로 마이그 빠르게 종료, 큐 불필요.
 builder.Services.AddScoped<IPartnerBalanceRepository, PartnerBalanceRepository>();
 builder.Services.AddScoped<IEventPublisher, SyncEventPublisher>();
 // 멱등 처리 — idempotency_keys 만료 정리 (DESIGN_PRINCIPLES §5.3 / 작업지시서 20260425작4)

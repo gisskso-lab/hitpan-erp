@@ -1,6 +1,7 @@
 using System.Data;
 using System.Data.Common;
 using Dapper;
+using HitPan.Application.Common;
 using HitPan.Application.DTOs.Approval;
 using HitPan.Application.Interfaces;
 
@@ -38,7 +39,7 @@ public class CollectionService : ICollectionService
         if (from.HasValue) sql += " AND c.collection_date >= @From";
         if (to.HasValue) sql += " AND c.collection_date <= @To";
         if (!string.IsNullOrEmpty(partnerId)) sql += " AND c.partner_id = @PartnerId";
-        sql += " ORDER BY c.collection_date DESC, c.created_at DESC";
+        sql += " ORDER BY c.collection_date DESC, c.created_at DESC LIMIT 500";
 
         var rows = (await _db.QueryAsync<CollectionListDto>(new CommandDefinition(
             sql, new { TenantId = tenantId, From = from, To = to, PartnerId = partnerId },
@@ -48,6 +49,73 @@ public class CollectionService : ICollectionService
             r.CollectionMethodLabel = ApprovalService.MethodLabels.GetValueOrDefault(r.CollectionMethod, r.CollectionMethod);
 
         return rows;
+    }
+
+    /// <summary>
+    /// 서버 페이지네이션 버전 (2026-05-13 야간, 헌법 #25 정공법).
+    /// 기존 GetCollectionsAsync 유지 — ServerData 전환 시 이 메서드 사용.
+    /// </summary>
+    public async Task<PagedResult<CollectionListDto>> GetCollectionsPagedAsync(
+        string tenantId, PagedRequest req,
+        DateTime? from = null, DateTime? to = null, string? partnerId = null,
+        CancellationToken ct = default)
+    {
+        await EnsureOpenAsync(ct);
+
+        // 성능: COUNT는 JOIN 없이 collections만 스캔, SELECT만 partners JOIN.
+        var countWhere = """
+                         FROM collections c
+                         WHERE c.tenant_id = @TenantId AND c.is_active = 1
+                         """;
+        var listWhere = """
+                        FROM collections c
+                        LEFT JOIN partners p ON p.partner_id = c.partner_id
+                        WHERE c.tenant_id = @TenantId AND c.is_active = 1
+                        """;
+        if (from.HasValue) { countWhere += " AND c.collection_date >= @From"; listWhere += " AND c.collection_date >= @From"; }
+        if (to.HasValue) { countWhere += " AND c.collection_date <= @To"; listWhere += " AND c.collection_date <= @To"; }
+        if (!string.IsNullOrEmpty(partnerId)) { countWhere += " AND c.partner_id = @PartnerId"; listWhere += " AND c.partner_id = @PartnerId"; }
+
+        var countSql = $"SELECT COUNT(*) {countWhere}";
+
+        var listSql = $"""
+                       SELECT c.collection_id AS CollectionId, c.partner_id AS PartnerId,
+                              p.partner_name AS PartnerName, c.collection_date AS CollectionDate,
+                              c.amount AS Amount, c.collection_method AS CollectionMethod,
+                              c.ref_doc_type AS RefDocType, c.ref_doc_id AS RefDocId, c.memo AS Memo
+                       {listWhere}
+                       ORDER BY c.collection_date DESC, c.created_at DESC
+                       LIMIT @Take OFFSET @Skip
+                       """;
+
+        var parameters = new
+        {
+            TenantId = tenantId,
+            From = from,
+            To = to,
+            PartnerId = partnerId,
+            req.Skip,
+            req.Take
+        };
+
+        var totalCount = await _db.ExecuteScalarAsync<int>(new CommandDefinition(
+            countSql, parameters, cancellationToken: ct));
+
+        var items = totalCount == 0
+            ? new List<CollectionListDto>()
+            : (await _db.QueryAsync<CollectionListDto>(new CommandDefinition(
+                listSql, parameters, cancellationToken: ct))).ToList();
+
+        foreach (var r in items)
+            r.CollectionMethodLabel = ApprovalService.MethodLabels.GetValueOrDefault(r.CollectionMethod, r.CollectionMethod);
+
+        return new PagedResult<CollectionListDto>
+        {
+            Page = req.Page,
+            PageSize = req.Take,
+            TotalCount = totalCount,
+            Items = items
+        };
     }
 
     public async Task<string> CreateCollectionAsync(CreateCollectionRequest request, string tenantId, string userId, CancellationToken ct = default)
