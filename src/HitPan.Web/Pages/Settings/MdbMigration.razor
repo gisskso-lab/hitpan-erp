@@ -1,8 +1,13 @@
 @page "/settings/mdb-migration"
 @namespace HitPan.Web.Pages.SettingsUi
 @attribute [Authorize]
+@using Microsoft.AspNetCore.SignalR.Client
+@using HitPan.Web.Models
+@using HitPan.Web.Providers
 @inject HttpClient Http
 @inject ISnackbar Snackbar
+@inject HitPanProtectedLocalStorage Storage
+@implements IAsyncDisposable
 
 <PageTitle>데이터 이관</PageTitle>
 
@@ -305,7 +310,12 @@
         }
     }
 
-    /* ── 마이그레이션 시작 — 2026-05-14: 백그라운드 잡 + 폴링 (Cloudflare 524 회피) ── */
+    /* ── SignalR HubConnection (정공법 CODE-01, 2026-05-14) ── */
+    private HubConnection? _hub;
+    private string? _currentJobId;
+    private System.Threading.CancellationTokenSource? _elapsedCts;
+
+    /* ── 마이그레이션 시작 — 정공법 CODE-01 (2026-05-14): SignalR push (폴링 폐기) ── */
     private async Task StartMigrationAsync()
     {
         try
@@ -334,85 +344,125 @@
                 Snackbar.Add("잡 ID를 받지 못했습니다.", Severity.Error);
                 return;
             }
+            _currentJobId = jobId;
 
-            // 2) Poll — 2초마다 진행률 조회 (최대 30분)
-            var maxAttempts = 900; // 30분 = 1800초 ÷ 2초
-            for (int i = 0; i < maxAttempts; i++)
+            // 2) SignalR Hub 연결 — 폴링 폐기, 서버 push로 즉시 갱신.
+            var tokenResult = await Storage.GetAsync<string>(AuthStorageKeys.AccessToken);
+            var token = tokenResult.Success ? tokenResult.Value : null;
+            // BaseAddress 절대 URL — Http.BaseAddress는 Program.cs에서 apiUri 끝 슬래시 포함.
+            var hubUrl = new Uri(Http.BaseAddress!, "hubs/migration").ToString();
+
+            _hub = new HubConnectionBuilder()
+                .WithUrl(hubUrl, options =>
+                {
+                    options.AccessTokenProvider = () => Task.FromResult<string?>(token);
+                })
+                .WithAutomaticReconnect()
+                .Build();
+
+            // 테이블별 진행률 수신.
+            _hub.On<ProgressPayload>("ProgressUpdate", payload =>
             {
-                await Task.Delay(2000);
-                var statusResp = await Http.GetAsync($"api/migration/legacy-mdb/status/{jobId}");
-                if (!statusResp.IsSuccessStatusCode)
+                var card = _tableCards.FirstOrDefault(c => c.Key == payload.TableName);
+                if (card is not null)
                 {
-                    // 일시적 네트워크 오류 — 계속 폴링
-                    _statusMessage = $"진행률 조회 일시 실패 (재시도 {i+1}/{maxAttempts})";
-                    StateHasChanged();
-                    continue;
+                    card.Status = payload.Status;
+                    card.Rows = payload.Rows;
+                    card.ElapsedMs = payload.ElapsedMs;
+                    card.ErrorMessage = payload.ErrorMessage;
                 }
-                var status = await statusResp.Content.ReadFromJsonAsync<JobStatus>();
-                if (status is null) continue;
+                _completedTables = _tableCards.Count(c => c.Status is "completed" or "failed");
+                _statusMessage = payload.Status == "running"
+                    ? $"진행 중: {payload.TableName}"
+                    : $"{payload.TableName} {payload.Status}";
+                InvokeAsync(StateHasChanged);
+            });
 
-                _statusMessage = $"[{status.Status}] {status.CurrentStep} (경과 {status.ElapsedSeconds}초)";
-                _elapsedSeconds = status.ElapsedSeconds;
-
-                // P0 #6 (2026-05-14): 테이블별 카드 갱신.
-                if (status.TableProgress is not null)
+            // 잡 종료 수신 — 최종 result는 별도 GET 1회로 가져옴 (Hub payload 크기 최소화).
+            var completionTcs = new TaskCompletionSource<JobStatus?>();
+            _hub.On<JobCompletedPayload>("JobCompleted", async payload =>
+            {
+                try
                 {
-                    foreach (var card in _tableCards)
+                    if (payload.Status == "completed")
                     {
-                        if (status.TableProgress.TryGetValue(card.Key, out var p))
+                        // 최종 결과 1회 조회 (status endpoint 재사용).
+                        var statusResp = await Http.GetAsync($"api/migration/legacy-mdb/status/{jobId}");
+                        if (statusResp.IsSuccessStatusCode)
                         {
-                            card.Status = p.Status;
-                            card.Rows = p.Rows;
-                            card.ElapsedMs = p.ElapsedMs;
-                            card.ErrorMessage = p.ErrorMessage;
+                            var status = await statusResp.Content.ReadFromJsonAsync<JobStatus>();
+                            completionTcs.TrySetResult(status);
+                            return;
                         }
                     }
-                    _completedTables = _tableCards.Count(c => c.Status is "completed" or "failed");
+                    completionTcs.TrySetResult(new JobStatus { JobId = jobId, Status = payload.Status, ErrorMessage = payload.ErrorMessage });
                 }
-
-                StateHasChanged();
-
-                if (status.Status == "completed" && status.Result is not null)
+                catch (Exception ex)
                 {
-                    _migrationResult = new MigrationResult
-                    {
-                        Partners = status.Result.Partners, Items = status.Result.Items, BomHeaders = status.Result.BomHeaders,
-                        Employees = status.Result.Employees, PurchaseOrders = status.Result.PurchaseOrders, SalesOrders = status.Result.SalesOrders,
-                        StockLedger = status.Result.StockLedger, Collections = status.Result.Collections, Cashbook = status.Result.Cashbook,
-                        Expenses = status.Result.Expenses, PurchaseOrdersFromIU = status.Result.PurchaseOrdersFromIU,
-                        SalesOrdersFromIO = status.Result.SalesOrdersFromIO, TaxInvoices = status.Result.TaxInvoices,
-                        Bills = status.Result.Bills, CardPayments = status.Result.CardPayments, BankTransactions = status.Result.BankTransactions
-                    };
-                    _migrationRows = new List<MigrationRow>
-                    {
-                        new("업체(거래처)", _migrationResult.Partners),
-                        new("상품(품목)", _migrationResult.Items),
-                        new("BOM(자재명세서)", _migrationResult.BomHeaders),
-                        new("사원", _migrationResult.Employees),
-                        new("거래명세 매입(K2)", _migrationResult.PurchaseOrders),
-                        new("거래명세 매출(K2)", _migrationResult.SalesOrders),
-                        new("매입발주(IU)", _migrationResult.PurchaseOrdersFromIU),
-                        new("매출주문(IO)", _migrationResult.SalesOrdersFromIO),
-                        new("세금계산서(TX)", _migrationResult.TaxInvoices),
-                        new("재고원장(입출고)", _migrationResult.StockLedger),
-                        new("수금", _migrationResult.Collections),
-                        new("경비(현금출납)", _migrationResult.Cashbook),
-                        new("전표(비용처리)", _migrationResult.Expenses),
-                        new("어음(EU+EQ)", _migrationResult.Bills),
-                        new("카드결제(CD)", _migrationResult.CardPayments),
-                        new("은행거래(BANKF)", _migrationResult.BankTransactions),
-                    };
-                    var total = _migrationRows.Sum(r => r.Count);
-                    Snackbar.Add($"이관 완료! 총 {total:N0}건 (경과 {status.ElapsedSeconds}초)", Severity.Success);
-                    return;
+                    completionTcs.TrySetException(ex);
                 }
-                if (status.Status == "failed")
-                {
-                    Snackbar.Add($"이관 실패: {status.ErrorMessage}", Severity.Error);
-                    return;
-                }
+            });
+
+            await _hub.StartAsync();
+            await _hub.InvokeAsync("SubscribeJob", jobId);
+
+            // 경과 초 카운터 (UI용, 1초 tick).
+            _elapsedCts = new System.Threading.CancellationTokenSource();
+            _ = TickElapsedAsync(_elapsedCts.Token);
+
+            // 잡 종료 대기 (최대 60분 — Hub disconnect 대비 안전망).
+            var timeout = Task.Delay(TimeSpan.FromMinutes(60));
+            var finished = await Task.WhenAny(completionTcs.Task, timeout);
+            if (finished == timeout)
+            {
+                Snackbar.Add("이관 타임아웃 (60분). 백엔드 로그를 확인하세요.", Severity.Warning);
+                return;
             }
-            Snackbar.Add("폴링 타임아웃 (30분). 백엔드 로그를 확인하세요.", Severity.Warning);
+
+            var finalStatus = await completionTcs.Task;
+            if (finalStatus is null)
+            {
+                Snackbar.Add("이관 결과를 받지 못했습니다.", Severity.Warning);
+                return;
+            }
+
+            if (finalStatus.Status == "completed" && finalStatus.Result is not null)
+            {
+                _migrationResult = new MigrationResult
+                {
+                    Partners = finalStatus.Result.Partners, Items = finalStatus.Result.Items, BomHeaders = finalStatus.Result.BomHeaders,
+                    Employees = finalStatus.Result.Employees, PurchaseOrders = finalStatus.Result.PurchaseOrders, SalesOrders = finalStatus.Result.SalesOrders,
+                    StockLedger = finalStatus.Result.StockLedger, Collections = finalStatus.Result.Collections, Cashbook = finalStatus.Result.Cashbook,
+                    Expenses = finalStatus.Result.Expenses, PurchaseOrdersFromIU = finalStatus.Result.PurchaseOrdersFromIU,
+                    SalesOrdersFromIO = finalStatus.Result.SalesOrdersFromIO, TaxInvoices = finalStatus.Result.TaxInvoices,
+                    Bills = finalStatus.Result.Bills, CardPayments = finalStatus.Result.CardPayments, BankTransactions = finalStatus.Result.BankTransactions
+                };
+                _migrationRows = new List<MigrationRow>
+                {
+                    new("업체(거래처)", _migrationResult.Partners),
+                    new("상품(품목)", _migrationResult.Items),
+                    new("BOM(자재명세서)", _migrationResult.BomHeaders),
+                    new("사원", _migrationResult.Employees),
+                    new("거래명세 매입(K2)", _migrationResult.PurchaseOrders),
+                    new("거래명세 매출(K2)", _migrationResult.SalesOrders),
+                    new("매입발주(IU)", _migrationResult.PurchaseOrdersFromIU),
+                    new("매출주문(IO)", _migrationResult.SalesOrdersFromIO),
+                    new("세금계산서(TX)", _migrationResult.TaxInvoices),
+                    new("재고원장(입출고)", _migrationResult.StockLedger),
+                    new("수금", _migrationResult.Collections),
+                    new("경비(현금출납)", _migrationResult.Cashbook),
+                    new("전표(비용처리)", _migrationResult.Expenses),
+                    new("어음(EU+EQ)", _migrationResult.Bills),
+                    new("카드결제(CD)", _migrationResult.CardPayments),
+                    new("은행거래(BANKF)", _migrationResult.BankTransactions),
+                };
+                var total = _migrationRows.Sum(r => r.Count);
+                Snackbar.Add($"이관 완료! 총 {total:N0}건 (경과 {_elapsedSeconds}초)", Severity.Success);
+            }
+            else if (finalStatus.Status == "failed")
+            {
+                Snackbar.Add($"이관 실패: {finalStatus.ErrorMessage}", Severity.Error);
+            }
         }
         catch (Exception ex)
         {
@@ -420,9 +470,73 @@
         }
         finally
         {
+            _elapsedCts?.Cancel();
+            _elapsedCts?.Dispose();
+            _elapsedCts = null;
+            if (_hub is not null)
+            {
+                try { await _hub.DisposeAsync(); }
+                catch (Exception ex)
+                {
+                    // 헌법 #15 빈 catch 금지 — dispose 실패는 사용자에게 무영향, 디버그 로그만.
+                    Console.Error.WriteLine($"[MdbMigration] Hub dispose 실패: {ex.Message}");
+                }
+                _hub = null;
+            }
             _loading = false;
             _statusMessage = "";
         }
+    }
+
+    /// <summary>경과 초 1초 tick — Sticky 헤더 표시용.</summary>
+    private async Task TickElapsedAsync(System.Threading.CancellationToken ct)
+    {
+        try
+        {
+            while (!ct.IsCancellationRequested)
+            {
+                await Task.Delay(1000, ct);
+                _elapsedSeconds++;
+                await InvokeAsync(StateHasChanged);
+            }
+        }
+        catch (TaskCanceledException)
+        {
+            // 정상 종료 — 빈 catch 아님(예외 타입 명시).
+        }
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        _elapsedCts?.Cancel();
+        _elapsedCts?.Dispose();
+        if (_hub is not null)
+        {
+            try { await _hub.DisposeAsync(); }
+            catch (Exception ex)
+            {
+                Console.Error.WriteLine($"[MdbMigration] Hub dispose 실패: {ex.Message}");
+            }
+        }
+    }
+
+    /// <summary>SignalR 진행 페이로드 — 서버 MigrationProgressService payload와 일치.</summary>
+    private class ProgressPayload
+    {
+        public string JobId { get; set; } = "";
+        public string TableName { get; set; } = "";
+        public string Status { get; set; } = "pending";
+        public int Rows { get; set; }
+        public long ElapsedMs { get; set; }
+        public string? ErrorMessage { get; set; }
+    }
+
+    /// <summary>SignalR 잡 종료 페이로드.</summary>
+    private class JobCompletedPayload
+    {
+        public string JobId { get; set; } = "";
+        public string Status { get; set; } = "";
+        public string? ErrorMessage { get; set; }
     }
 
     private class StartResponse

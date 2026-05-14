@@ -1,3 +1,4 @@
+using HitPan.Application.Interfaces;
 using HitPan.Infrastructure.Persistence;
 using HitPan.Infrastructure.Persistence.Seed;
 using Microsoft.EntityFrameworkCore;
@@ -35,6 +36,13 @@ public static class InfrastructureExtensions
                 serverVersion,
                 x => x.MigrationsAssembly("HitPan.Infrastructure")));
         services.AddScoped<IDbConnection>(_ => new MySqlConnection(connStr));
+
+        // 2026-05-14 정공법(축 3, SEC-04): 마이그 전용 connection 풀을 일반 컨트롤러 풀과 물리 분리.
+        // ApplicationName/Timeout/AllowLoadLocalInfile/PoolSize가 달라 MySqlConnector가 별도 pool 인스턴스 유지.
+        // → SET SESSION fk/unique/innodb_flush가 새도록 만들어도 일반 컨트롤러 connection 0 오염.
+        // Singleton: factory는 conn string만 캐싱하고 매 호출 새 connection 발급 → thread-safe.
+        services.AddSingleton<IMigrationDbConnectionFactory, MigrationDbConnectionFactory>();
+
         services.AddScoped<CommonCodeSeeder>();
         services.AddScoped<SystemSeeder>();
 

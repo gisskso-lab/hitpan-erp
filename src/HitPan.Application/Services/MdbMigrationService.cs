@@ -8,6 +8,7 @@ using Dapper;
 using HitPan.Application.Common;
 using HitPan.Application.Interfaces;
 using Microsoft.Extensions.Logging;
+using MySqlConnector;
 
 namespace HitPan.Application.Services;
 
@@ -22,6 +23,33 @@ public sealed class MdbMigrationService
     private readonly IDbConnection _db;
     private readonly ILogger<MdbMigrationService> _logger;
     private readonly IBinaryCryptoService _crypto;
+
+    /// <summary>
+    /// 정공법 (사장님 6축 명령 2026-05-14, 축 3 SEC-04):
+    /// 마이그 전용 connection 풀 factory. null이면 legacy 단일 _db로 fallback (기존 호출자 호환).
+    /// </summary>
+    private readonly IMigrationDbConnectionFactory? _migrationFactory;
+
+    /// <summary>
+    /// 잡 단위 전용 DbConnection (정공법 축 3). RunTableStepAsync가 잡 시작 시 set,
+    /// 종료 시 clear. Db 속성이 이걸 우선 반환 → Migrate* 메서드들이 잡 conn 사용.
+    /// AsyncLocal이라 PANDATA 11개 Task.WhenAll 병렬 시 각 잡이 독립 컨텍스트 유지 (헌법 #16).
+    /// </summary>
+    private static readonly AsyncLocal<IDbConnection?> _jobConnection = new();
+
+    /// <summary>
+    /// 잡 단위 전용 트랜잭션. RunTableStepAsync가 BeginTransaction 직후 set.
+    /// Migrate* 메서드 안에서 `transaction: CurrentTx` 형태로 참조해도 되지만 기존 코드는
+    /// 시그니처로 tx를 받으므로 본 필드는 향후 확장용(현재는 미사용).
+    /// </summary>
+    private static readonly AsyncLocal<IDbTransaction?> _jobTransaction = new();
+
+    /// <summary>
+    /// 잡 단위 conn 우선, 없으면 legacy _db (생성자 주입된 단일 conn).
+    /// 기존 Migrate* 메서드들의 `Db.ExecuteAsync(...)` 호출을 `Db.ExecuteAsync(...)`로 바꾸면
+    /// 잡이 RunTableStepAsync 안에 있을 때 자동으로 전용 풀 conn을 쓴다.
+    /// </summary>
+    private IDbConnection Db => _jobConnection.Value ?? _db;
 
     /// <summary>OLEDB 커넥션 문자열 템플릿 (MDB 경로 + 선택적 비번)</summary>
     /// 핫픽스 2026-05-13: 사장님 MDB(비번 7618968) 지원 — 결재 #13.
@@ -42,11 +70,13 @@ public sealed class MdbMigrationService
     public MdbMigrationService(
         IDbConnection db,
         ILogger<MdbMigrationService> logger,
-        IBinaryCryptoService crypto)
+        IBinaryCryptoService crypto,
+        IMigrationDbConnectionFactory? migrationFactory = null)
     {
         _db = db;
         _logger = logger;
         _crypto = crypto;
+        _migrationFactory = migrationFactory;
     }
 
     // ────────────────────────────────────────────────────────────────
@@ -192,12 +222,15 @@ public sealed class MdbMigrationService
         var employeeMap = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         var defaultWarehouseId = "wh-migration";
 
-        await EnsureOpenAsync(ct).ConfigureAwait(false);
-
-        // P0 #1 (2026-05-14): 마이그 세션 한정 튜닝 — 사장님 결재 (innodb_flush 세션 한정)
-        // 글로벌 영향 0, 마이그 잡 종료 시 자동 복원. 청크 commit 횟수↑ 대비 fsync 부하 완화.
-        // foreign_key_checks=0 / unique_checks=0 은 마이그 데이터 무결성 사전 검증 완료 전제.
-        await ApplyMigrationSessionTuningAsync(ct).ConfigureAwait(false);
+        // 정공법(축 3): factory가 있으면 잡-local 세션 튜닝(RunTableStepAsync 내부)으로 처리하므로
+        // 글로벌 _db에 튜닝 적용할 필요 없음. legacy 모드일 때만 기존 봉합 경로 유지.
+        var useMigrationPool = _migrationFactory is not null;
+        if (!useMigrationPool)
+        {
+            await EnsureOpenAsync(ct).ConfigureAwait(false);
+            // P0 #1 (2026-05-14): 마이그 세션 한정 튜닝 (legacy fallback).
+            await ApplyMigrationSessionTuningAsync(ct).ConfigureAwait(false);
+        }
 
         try
         {
@@ -235,113 +268,125 @@ public sealed class MdbMigrationService
             // ──────────────────────────────────────
             _logger.LogInformation("[MDB마이그레이션] PANDATA.mdb 읽기 시작: {Path}", pandataPath);
 
-            // 2-1. 거래(판매/매입) — DOCF2/DOCF1
-            await RunTableStepAsync("transactions", async tx =>
+            // ──────────────────────────────────────
+            // 정공법(축 1) 사장님 6축 명령 2026-05-14:
+            //   PANDATA 11개 테이블 Task.WhenAll 병렬 (factory 모드만).
+            //   각 테이블은 RunTableStepAsync 안에서 독립 conn 발급 — 헌법 #16 thread-safe.
+            //   partnerMap/itemMap/employeeMap/defaultWarehouseId는 read-only로 공유 (안전).
+            //   legacy 모드(_factory==null)는 단일 _db라 병렬 불가 → 순차 fallback 유지.
+            // ──────────────────────────────────────
+            var pandataJobs = new List<Func<Task>>
             {
-                using var oleConn = OpenOleDb(pandataPath);
-                var (salesCount, purchaseCount) = await MigrateTransactionsAsync(
-                    oleConn, tenantId, now, partnerMap, itemMap, employeeMap, defaultWarehouseId, tx, ct).ConfigureAwait(false);
-                result.SalesOrders = salesCount;
-                result.PurchaseOrders = purchaseCount;
-                return salesCount + purchaseCount;
-            }, ct).ConfigureAwait(false);
+                () => RunTableStepAsync("transactions", async tx =>
+                {
+                    using var oleConn = OpenOleDb(pandataPath);
+                    var (salesCount, purchaseCount) = await MigrateTransactionsAsync(
+                        oleConn, tenantId, now, partnerMap, itemMap, employeeMap, defaultWarehouseId, tx, ct).ConfigureAwait(false);
+                    result.SalesOrders = salesCount;
+                    result.PurchaseOrders = purchaseCount;
+                    return salesCount + purchaseCount;
+                }, ct),
+                () => RunTableStepAsync("stock_ledger", async tx =>
+                {
+                    using var oleConn = OpenOleDb(pandataPath);
+                    result.StockLedger = await MigrateStockLedgerAsync(
+                        oleConn, tenantId, now, partnerMap, itemMap, defaultWarehouseId, tx, ct).ConfigureAwait(false);
+                    return result.StockLedger;
+                }, ct),
+                () => RunTableStepAsync("collections", async tx =>
+                {
+                    using var oleConn = OpenOleDb(pandataPath);
+                    result.Collections = await MigrateCollectionsAsync(
+                        oleConn, tenantId, now, partnerMap, tx, ct).ConfigureAwait(false);
+                    return result.Collections;
+                }, ct),
+                () => RunTableStepAsync("cashbook", async tx =>
+                {
+                    using var oleConn = OpenOleDb(pandataPath);
+                    result.Cashbook = await MigrateCashbookAsync(
+                        oleConn, tenantId, now, partnerMap, tx, ct).ConfigureAwait(false);
+                    return result.Cashbook;
+                }, ct),
+                () => RunTableStepAsync("expenses", async tx =>
+                {
+                    using var oleConn = OpenOleDb(pandataPath);
+                    result.Expenses = await MigrateExpensesAsync(
+                        oleConn, tenantId, now, employeeMap, tx, ct).ConfigureAwait(false);
+                    return result.Expenses;
+                }, ct),
+                () => RunTableStepAsync("purchase_orders", async tx =>
+                {
+                    using var oleConn = OpenOleDb(pandataPath);
+                    result.PurchaseOrdersFromIU = await MigratePurchaseOrdersFromIUAsync(
+                        oleConn, tenantId, now, partnerMap, itemMap, tx, ct).ConfigureAwait(false);
+                    return result.PurchaseOrdersFromIU;
+                }, ct),
+                () => RunTableStepAsync("sales_orders", async tx =>
+                {
+                    using var oleConn = OpenOleDb(pandataPath);
+                    result.SalesOrdersFromIO = await MigrateSalesOrdersFromIOAsync(
+                        oleConn, tenantId, now, partnerMap, itemMap, tx, ct).ConfigureAwait(false);
+                    return result.SalesOrdersFromIO;
+                }, ct),
+                () => RunTableStepAsync("tax_invoices", async tx =>
+                {
+                    using var oleConn = OpenOleDb(pandataPath);
+                    result.TaxInvoices = await MigrateTaxInvoicesAsync(
+                        oleConn, tenantId, now, partnerMap, tx, ct).ConfigureAwait(false);
+                    return result.TaxInvoices;
+                }, ct),
+                () => RunTableStepAsync("bills", async tx =>
+                {
+                    using var oleConn = OpenOleDb(pandataPath);
+                    result.Bills = await MigrateBillsAsync(
+                        oleConn, tenantId, now, partnerMap, tx, ct).ConfigureAwait(false);
+                    return result.Bills;
+                }, ct),
+                () => RunTableStepAsync("card_payments", async tx =>
+                {
+                    using var oleConn = OpenOleDb(pandataPath);
+                    result.CardPayments = await MigrateCardPaymentsAsync(
+                        oleConn, tenantId, now, partnerMap, tx, ct).ConfigureAwait(false);
+                    return result.CardPayments;
+                }, ct),
+                () => RunTableStepAsync("bank_transactions", async tx =>
+                {
+                    using var oleConn = OpenOleDb(pandataPath);
+                    result.BankTransactions = await MigrateBankTransactionsAsync(
+                        oleConn, tenantId, now, partnerMap, tx, ct).ConfigureAwait(false);
+                    return result.BankTransactions;
+                }, ct),
+            };
 
-            // 2-2. stock_ledger — DOCFB (P0 #3에서 5K 청크로 추가 분리 예정)
-            await RunTableStepAsync("stock_ledger", async tx =>
+            if (useMigrationPool)
             {
-                using var oleConn = OpenOleDb(pandataPath);
-                result.StockLedger = await MigrateStockLedgerAsync(
-                    oleConn, tenantId, now, partnerMap, itemMap, defaultWarehouseId, tx, ct).ConfigureAwait(false);
-                return result.StockLedger;
-            }, ct).ConfigureAwait(false);
-
-            // 2-3. collections — DOCF5
-            await RunTableStepAsync("collections", async tx =>
+                // 정공법: 11개 잡 Task.WhenAll. 각 잡 내부에서 독립 conn 발급(헌법 #16).
+                // RunTableStepAsync는 continueOnFail=true 기본이라 한 테이블 실패가 다른 테이블 막지 않음.
+                _logger.LogInformation("[MDB마이그레이션] PANDATA 11개 테이블 병렬 실행 시작 (정공법 축 1)");
+                var sw = System.Diagnostics.Stopwatch.StartNew();
+                await Task.WhenAll(pandataJobs.Select(j => j())).ConfigureAwait(false);
+                sw.Stop();
+                _logger.LogInformation(
+                    "[MDB마이그레이션] PANDATA 11개 병렬 완료 ({Elapsed}ms)", sw.ElapsedMilliseconds);
+            }
+            else
             {
-                using var oleConn = OpenOleDb(pandataPath);
-                result.Collections = await MigrateCollectionsAsync(
-                    oleConn, tenantId, now, partnerMap, tx, ct).ConfigureAwait(false);
-                return result.Collections;
-            }, ct).ConfigureAwait(false);
-
-            // 2-4. cashbook — DOCF6
-            await RunTableStepAsync("cashbook", async tx =>
-            {
-                using var oleConn = OpenOleDb(pandataPath);
-                result.Cashbook = await MigrateCashbookAsync(
-                    oleConn, tenantId, now, partnerMap, tx, ct).ConfigureAwait(false);
-                return result.Cashbook;
-            }, ct).ConfigureAwait(false);
-
-            // 2-5. expenses — DOCF7
-            await RunTableStepAsync("expenses", async tx =>
-            {
-                using var oleConn = OpenOleDb(pandataPath);
-                result.Expenses = await MigrateExpensesAsync(
-                    oleConn, tenantId, now, employeeMap, tx, ct).ConfigureAwait(false);
-                return result.Expenses;
-            }, ct).ConfigureAwait(false);
-
-            // 2-6. purchase_orders — DOCFA
-            await RunTableStepAsync("purchase_orders", async tx =>
-            {
-                using var oleConn = OpenOleDb(pandataPath);
-                result.PurchaseOrdersFromIU = await MigratePurchaseOrdersFromIUAsync(
-                    oleConn, tenantId, now, partnerMap, itemMap, tx, ct).ConfigureAwait(false);
-                return result.PurchaseOrdersFromIU;
-            }, ct).ConfigureAwait(false);
-
-            // 2-7. sales_orders — DOCFO
-            await RunTableStepAsync("sales_orders", async tx =>
-            {
-                using var oleConn = OpenOleDb(pandataPath);
-                result.SalesOrdersFromIO = await MigrateSalesOrdersFromIOAsync(
-                    oleConn, tenantId, now, partnerMap, itemMap, tx, ct).ConfigureAwait(false);
-                return result.SalesOrdersFromIO;
-            }, ct).ConfigureAwait(false);
-
-            // 2-8. tax_invoices — DOCF4 (4품목 행분해)
-            await RunTableStepAsync("tax_invoices", async tx =>
-            {
-                using var oleConn = OpenOleDb(pandataPath);
-                result.TaxInvoices = await MigrateTaxInvoicesAsync(
-                    oleConn, tenantId, now, partnerMap, tx, ct).ConfigureAwait(false);
-                return result.TaxInvoices;
-            }, ct).ConfigureAwait(false);
-
-            // 2-9. bills — DOCF9 + DOCFQ
-            await RunTableStepAsync("bills", async tx =>
-            {
-                using var oleConn = OpenOleDb(pandataPath);
-                result.Bills = await MigrateBillsAsync(
-                    oleConn, tenantId, now, partnerMap, tx, ct).ConfigureAwait(false);
-                return result.Bills;
-            }, ct).ConfigureAwait(false);
-
-            // 2-10. card_payments — DOCCD + DOCCD1
-            await RunTableStepAsync("card_payments", async tx =>
-            {
-                using var oleConn = OpenOleDb(pandataPath);
-                result.CardPayments = await MigrateCardPaymentsAsync(
-                    oleConn, tenantId, now, partnerMap, tx, ct).ConfigureAwait(false);
-                return result.CardPayments;
-            }, ct).ConfigureAwait(false);
-
-            // 2-11. bank_transactions — BANKF
-            await RunTableStepAsync("bank_transactions", async tx =>
-            {
-                using var oleConn = OpenOleDb(pandataPath);
-                result.BankTransactions = await MigrateBankTransactionsAsync(
-                    oleConn, tenantId, now, partnerMap, tx, ct).ConfigureAwait(false);
-                return result.BankTransactions;
-            }, ct).ConfigureAwait(false);
+                // legacy: 단일 _db라 병렬 불가. 순차 실행.
+                foreach (var job in pandataJobs)
+                {
+                    await job().ConfigureAwait(false);
+                }
+            }
 
             _logger.LogInformation("[MDB마이그레이션] 완료. 결과: {@Result}", result);
         }
         finally
         {
-            // 마이그 세션 한정 튜닝 원복 (세션 종료 시 자동이지만 명시).
-            await RestoreMigrationSessionTuningAsync(ct).ConfigureAwait(false);
+            // legacy 모드에서만 글로벌 _db 튜닝 원복 (정공법 모드는 잡 conn DisposeAsync로 자동 처리됨).
+            if (!useMigrationPool)
+            {
+                await RestoreMigrationSessionTuningAsync(ct).ConfigureAwait(false);
+            }
         }
 
         return result;
@@ -366,10 +411,28 @@ public sealed class MdbMigrationService
         var cb = _progressCallback.Value;
         cb?.Invoke(tableName, "running", 0, 0, null);
 
+        // 정공법(축 3): 마이그 factory가 있으면 잡 전용 conn을 발급해 일반 컨트롤러 풀과 0 공유.
+        // factory가 없으면(legacy 호환 — 단위 테스트 등) 기존 _db로 fallback.
+        System.Data.Common.DbConnection? jobConn = null;
+        IDbConnection effectiveConn;
+        if (_migrationFactory is not null)
+        {
+            jobConn = await _migrationFactory.CreateOpenAsync(ct).ConfigureAwait(false);
+            effectiveConn = jobConn;
+            _jobConnection.Value = jobConn;
+            // 잡 전용 세션 튜닝: pool 반환 시 ConnectionReset으로 자동 원복되므로 안전.
+            await ApplyJobSessionTuningAsync(effectiveConn, ct).ConfigureAwait(false);
+        }
+        else
+        {
+            effectiveConn = _db;
+        }
+
         IDbTransaction? tx = null;
         try
         {
-            tx = _db.BeginTransaction();
+            tx = effectiveConn.BeginTransaction();
+            _jobTransaction.Value = tx;
             var rows = await work(tx).ConfigureAwait(false);
             tx.Commit();
             sw.Stop();
@@ -382,7 +445,13 @@ public sealed class MdbMigrationService
         {
             // 취소는 에러 저장 대상 아님 (사용자 의도된 중단).
             sw.Stop();
-            try { tx?.Rollback(); } catch { /* swallow during cancel */ }
+            // 헌법 #15: 빈 catch 금지 — rollback 실패도 운영자 추적 가능하도록 WARN.
+            try { tx?.Rollback(); }
+            catch (Exception rbex)
+            {
+                _logger.LogWarning(rbex,
+                    "[MDB마이그레이션] {Table} 취소 중 롤백 실패 (무시하고 cancel 전파)", tableName);
+            }
             cb?.Invoke(tableName, "failed", 0, sw.ElapsedMilliseconds, "취소됨");
             throw;
         }
@@ -405,6 +474,41 @@ public sealed class MdbMigrationService
         finally
         {
             tx?.Dispose();
+            _jobTransaction.Value = null;
+            // 잡 conn 정리: AsyncLocal clear → 다음 잡(또는 일반 컨트롤러)에 누수 0.
+            // DisposeAsync로 pool 반환 (MySqlConnector가 ConnectionReset=true 기본으로 SET SESSION 원복).
+            _jobConnection.Value = null;
+            if (jobConn is not null)
+            {
+                try { await jobConn.DisposeAsync().ConfigureAwait(false); }
+                catch (Exception dex)
+                {
+                    _logger.LogWarning(dex,
+                        "[MDB마이그레이션] {Table} 잡 conn Dispose 실패 (pool에 비정상 반환 가능)", tableName);
+                }
+            }
+        }
+    }
+
+    /// <summary>
+    /// 잡 단위 세션 튜닝 — 정공법 축 3.
+    /// 잡 conn에만 적용되므로 일반 컨트롤러는 0 영향. 잡 종료 시 DisposeAsync로 pool reset.
+    /// </summary>
+    private async Task ApplyJobSessionTuningAsync(IDbConnection conn, CancellationToken ct)
+    {
+        try
+        {
+            await conn.ExecuteAsync(new CommandDefinition(
+                "SET SESSION innodb_flush_log_at_trx_commit = 2", cancellationToken: ct)).ConfigureAwait(false);
+            await conn.ExecuteAsync(new CommandDefinition(
+                "SET SESSION foreign_key_checks = 0", cancellationToken: ct)).ConfigureAwait(false);
+            await conn.ExecuteAsync(new CommandDefinition(
+                "SET SESSION unique_checks = 0", cancellationToken: ct)).ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            // 튜닝 실패해도 잡은 계속 (속도만 손해, 안전성 OK).
+            _logger.LogWarning(ex, "[MDB마이그레이션] 잡 세션 튜닝 적용 실패 — 기본값으로 진행");
         }
     }
 
@@ -432,7 +536,7 @@ public sealed class MdbMigrationService
             var severity = "error";
 
             // tenant_id는 migration_jobs에서 조회 (1회). 못 찾으면 placeholder.
-            var tenantId = await _db.ExecuteScalarAsync<string?>(new CommandDefinition(
+            var tenantId = await Db.ExecuteScalarAsync<string?>(new CommandDefinition(
                 "SELECT tenant_id FROM migration_jobs WHERE job_id = @JobId LIMIT 1",
                 new { JobId = jobId }, cancellationToken: ct)).ConfigureAwait(false) ?? "unknown";
 
@@ -446,7 +550,7 @@ public sealed class MdbMigrationService
                    @ErrorType, @Severity, @Message, @Detail,
                    @RawData, @Now, @Now)
                 """;
-            await _db.ExecuteAsync(new CommandDefinition(sql, new
+            await Db.ExecuteAsync(new CommandDefinition(sql, new
             {
                 ErrorId = Guid.NewGuid().ToString(),
                 JobId = jobId,
@@ -525,12 +629,12 @@ public sealed class MdbMigrationService
         try
         {
             // commit 시 redo log fsync 빈도 완화 (재시작 시 최근 1초 마이그 데이터 손실 가능 — 수용).
-            await _db.ExecuteAsync(new CommandDefinition(
+            await Db.ExecuteAsync(new CommandDefinition(
                 "SET SESSION innodb_flush_log_at_trx_commit = 2", cancellationToken: ct)).ConfigureAwait(false);
             // 마이그 데이터는 외부 MDB 원천이므로 FK·UNIQUE 사전 검증 완료 전제.
-            await _db.ExecuteAsync(new CommandDefinition(
+            await Db.ExecuteAsync(new CommandDefinition(
                 "SET SESSION foreign_key_checks = 0", cancellationToken: ct)).ConfigureAwait(false);
-            await _db.ExecuteAsync(new CommandDefinition(
+            await Db.ExecuteAsync(new CommandDefinition(
                 "SET SESSION unique_checks = 0", cancellationToken: ct)).ConfigureAwait(false);
             _logger.LogInformation("[MDB마이그레이션] 세션 튜닝 적용 (innodb_flush=2, fk=0, unique=0)");
         }
@@ -552,11 +656,11 @@ public sealed class MdbMigrationService
         var allRestored = false;
         try
         {
-            await _db.ExecuteAsync(new CommandDefinition(
+            await Db.ExecuteAsync(new CommandDefinition(
                 "SET SESSION innodb_flush_log_at_trx_commit = 1", cancellationToken: ct)).ConfigureAwait(false);
-            await _db.ExecuteAsync(new CommandDefinition(
+            await Db.ExecuteAsync(new CommandDefinition(
                 "SET SESSION foreign_key_checks = 1", cancellationToken: ct)).ConfigureAwait(false);
-            await _db.ExecuteAsync(new CommandDefinition(
+            await Db.ExecuteAsync(new CommandDefinition(
                 "SET SESSION unique_checks = 1", cancellationToken: ct)).ConfigureAwait(false);
             allRestored = true;
         }
@@ -573,8 +677,8 @@ public sealed class MdbMigrationService
                 // Close + Dispose로 물리 소켓 폐기 → 다른 요청 오염 0.
                 try
                 {
-                    if (_db.State == ConnectionState.Open) _db.Close();
-                    _db.Dispose();
+                    if (Db.State == ConnectionState.Open) Db.Close();
+                    Db.Dispose();
                     _logger.LogWarning(
                         "[MDB마이그레이션] 오염 가능 connection 강제 폐기 완료 (pool 반환 차단)");
                 }
@@ -596,7 +700,7 @@ public sealed class MdbMigrationService
         string tenantId, string warehouseId, DateTime now, IDbTransaction tx, CancellationToken ct)
     {
         const string checkSql = "SELECT COUNT(*) FROM warehouses WHERE warehouse_id = @Id AND tenant_id = @TenantId";
-        var exists = await _db.ExecuteScalarAsync<int>(
+        var exists = await Db.ExecuteScalarAsync<int>(
             new CommandDefinition(checkSql, new { Id = warehouseId, TenantId = tenantId },
                 transaction: tx, cancellationToken: ct)).ConfigureAwait(false);
 
@@ -606,7 +710,7 @@ public sealed class MdbMigrationService
             INSERT INTO warehouses (warehouse_id, tenant_id, wh_code, wh_name, wh_type, location, is_active, created_at, updated_at)
             VALUES (@Id, @TenantId, 'WH-MIG', '마이그레이션창고', 'normal', '레거시 데이터 이관용', 1, @Now, @Now)
             """;
-        await _db.ExecuteAsync(new CommandDefinition(sql,
+        await Db.ExecuteAsync(new CommandDefinition(sql,
             new { Id = warehouseId, TenantId = tenantId, Now = now },
             transaction: tx, cancellationToken: ct)).ConfigureAwait(false);
     }
@@ -670,7 +774,7 @@ public sealed class MdbMigrationService
 
             // WS-20260514-08 (CODE-06): 멱등성 — 같은 partner_code 이미 있으면 기존 partner_id 매핑하고 INSERT skip.
             // uq_tenant_code(tenant_id, partner_code) UNIQUE 활용. 재실행 시 중복 INSERT 방지.
-            var existingId = await _db.ExecuteScalarAsync<string?>(new CommandDefinition(
+            var existingId = await Db.ExecuteScalarAsync<string?>(new CommandDefinition(
                 "SELECT partner_id FROM partners WHERE tenant_id = @TenantId AND partner_code = @Code LIMIT 1",
                 new { TenantId = tenantId, Code = partnerCode },
                 transaction: tx, cancellationToken: ct)).ConfigureAwait(false);
@@ -724,7 +828,7 @@ public sealed class MdbMigrationService
             var doscode = GetStr(row, "buy_DOSCODE")?.Trim();
             var topJumin = GetStr(row, "buy_topjumin")?.Trim();
 
-            await _db.ExecuteAsync(new CommandDefinition(sql, new
+            await Db.ExecuteAsync(new CommandDefinition(sql, new
             {
                 PartnerId = partnerId,
                 TenantId = tenantId,
@@ -842,7 +946,7 @@ public sealed class MdbMigrationService
             var salePrice = GetDec(row, "S_PDAN");         // 판매단가
             var costPrice = GetDec(row, "S_JEK");          // 재고단가
 
-            await _db.ExecuteAsync(new CommandDefinition(sql, new
+            await Db.ExecuteAsync(new CommandDefinition(sql, new
             {
                 ItemId = itemId,
                 TenantId = tenantId,
@@ -929,7 +1033,7 @@ public sealed class MdbMigrationService
             var bomId = Guid.NewGuid().ToString();
             var bomName = $"MIG-BOM-{GetStr(details[0], "RT_PUM")}";
 
-            await _db.ExecuteAsync(new CommandDefinition(headerSql, new
+            await Db.ExecuteAsync(new CommandDefinition(headerSql, new
             {
                 BomId = bomId,
                 TenantId = tenantId,
@@ -948,7 +1052,7 @@ public sealed class MdbMigrationService
                     continue;
                 }
 
-                await _db.ExecuteAsync(new CommandDefinition(itemSql, new
+                await Db.ExecuteAsync(new CommandDefinition(itemSql, new
                 {
                     BomItemId = Guid.NewGuid().ToString(),
                     BomId = bomId,
@@ -1029,7 +1133,7 @@ public sealed class MdbMigrationService
             var salary = GetInt(row, "SW_PAY");
             var salaryExtra = GetStr(row, "SW_PAYoth")?.Trim();
 
-            await _db.ExecuteAsync(new CommandDefinition(sql, new
+            await Db.ExecuteAsync(new CommandDefinition(sql, new
             {
                 EmployeeId = employeeId,
                 TenantId = tenantId,
@@ -1191,7 +1295,7 @@ public sealed class MdbMigrationService
                 var orderId = Guid.NewGuid().ToString();
                 var orderNo = $"MIG-SO-{soSeq:D5}";
 
-                await _db.ExecuteAsync(new CommandDefinition(soSql, new
+                await Db.ExecuteAsync(new CommandDefinition(soSql, new
                 {
                     OrderId = orderId,
                     TenantId = tenantId,
@@ -1214,7 +1318,7 @@ public sealed class MdbMigrationService
                         itemMap.TryGetValue(itemKey, out var itemItemId);
                         if (string.IsNullOrEmpty(itemItemId)) continue;
 
-                        await _db.ExecuteAsync(new CommandDefinition(soItemSql, new
+                        await Db.ExecuteAsync(new CommandDefinition(soItemSql, new
                         {
                             ItemId = Guid.NewGuid().ToString(),
                             OrderId = orderId,
@@ -1237,7 +1341,7 @@ public sealed class MdbMigrationService
                 var poId = Guid.NewGuid().ToString();
                 var poNo = $"MIG-PO-{poSeq:D5}";
 
-                await _db.ExecuteAsync(new CommandDefinition(poSql, new
+                await Db.ExecuteAsync(new CommandDefinition(poSql, new
                 {
                     PoId = poId,
                     TenantId = tenantId,
@@ -1260,7 +1364,7 @@ public sealed class MdbMigrationService
                         itemMap.TryGetValue(itemKey, out var itemItemId);
                         if (string.IsNullOrEmpty(itemItemId)) continue;
 
-                        await _db.ExecuteAsync(new CommandDefinition(poItemSql, new
+                        await Db.ExecuteAsync(new CommandDefinition(poItemSql, new
                         {
                             ItemId = Guid.NewGuid().ToString(),
                             PoId = poId,
@@ -1299,10 +1403,15 @@ public sealed class MdbMigrationService
         string defaultWarehouseId,
         IDbTransaction tx, CancellationToken ct)
     {
-        // P0 #3 (2026-05-14): row-by-row INSERT → 1000행 청크 INSERT IGNORE 멱등.
-        // 116K 행 × 1 RTT = 30분+ → 116K / 1000 = 116 RTT = 수초.
-        // 멱등 키: uq_stock_ledger_source UNIQUE (tenant_id, source_type, source_id, item_id, move_type) HASH —
-        // 재실행 시 IGNORE로 중복 차단. 헌법 #3 INSERT ONLY 원칙 유지.
+        // 정공법(축 1, 사장님 6축 명령 2026-05-14):
+        //   기존 1000행 청크 INSERT IGNORE(수~30분) → MySqlBulkCopy(LOAD DATA LOCAL INFILE) 단일 호출(수초).
+        //   멱등성 유지 패턴:
+        //     ① CREATE TEMPORARY TABLE stock_ledger_stage_xxx LIKE stock_ledger
+        //     ② MySqlBulkCopy로 stage에 일괄 적재 (네트워크 1 RTT, 5~10초)
+        //     ③ INSERT IGNORE INTO stock_ledger SELECT FROM stage  (UNIQUE 키로 중복 차단)
+        //     ④ DROP TEMPORARY TABLE
+        //   세션 한정 임시테이블이므로 잡 conn 종료 시 자동 소멸 — 누수 0.
+        //   factory 모드(MySqlConnection 확보 가능)일 때만 활성화. legacy 모드는 기존 청크 경로로 fallback.
         const int ChunkSize = 1000;
         const string ColumnList =
             "(tenant_id, item_id, warehouse_id, partner_id, ledger_date, ym, " +
@@ -1350,7 +1459,14 @@ public sealed class MdbMigrationService
 
         if (rows.Count == 0) return 0;
 
-        // 2단계: 청크 단위 INSERT IGNORE (멱등성 자동).
+        // 정공법 BulkCopy 경로: 잡 conn이 MySqlConnection 인스턴스일 때(=정공법 모드) 활성화.
+        // legacy 모드(_db가 다른 IDbConnection 구현)는 아래 청크 INSERT IGNORE로 fallback.
+        if (Db is MySqlConnection mysqlConn && tx is MySqlTransaction mysqlTx)
+        {
+            return await BulkCopyStockLedgerAsync(mysqlConn, mysqlTx, rows, ct).ConfigureAwait(false);
+        }
+
+        // 2단계 (legacy fallback): 청크 단위 INSERT IGNORE (멱등성 자동).
         int inserted = 0;
         int chunkIdx = 0;
         var totalChunks = (rows.Count + ChunkSize - 1) / ChunkSize;
@@ -1392,7 +1508,7 @@ public sealed class MdbMigrationService
                 dyn.Add("M" + i, r.Memo);
             }
 
-            var affected = await _db.ExecuteAsync(new CommandDefinition(
+            var affected = await Db.ExecuteAsync(new CommandDefinition(
                 sb.ToString(), dyn, transaction: tx, cancellationToken: ct)).ConfigureAwait(false);
             inserted += affected;
 
@@ -1409,6 +1525,146 @@ public sealed class MdbMigrationService
             "[MDB마이그레이션] 입출고(stock_ledger) 완료: 후보 {Total}행 → INSERT {Inserted}행 (중복 IGNORE = {Skipped})",
             rows.Count, inserted, rows.Count - inserted);
         return inserted;
+    }
+
+    /// <summary>
+    /// 정공법(축 1) MySqlBulkCopy 경로: TEMPORARY staging → INSERT IGNORE SELECT.
+    /// 116K 행 기준 청크 INSERT IGNORE(수십초~수분) → 5~10초 목표.
+    /// 멱등 키 uq_stock_ledger_source UNIQUE(tenant_id, source_type, source_id, item_id, move_type)로
+    /// 재실행 중복은 IGNORE로 차단. 헌법 #3 INSERT ONLY 원장 원칙 유지.
+    /// </summary>
+    private async Task<int> BulkCopyStockLedgerAsync(
+        MySqlConnection conn, MySqlTransaction tx, List<StockLedgerRow> rows, CancellationToken ct)
+    {
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        var stageTable = $"stock_ledger_stage_{Guid.NewGuid():N}".Substring(0, 40);
+
+        // 1) 세션 한정 TEMPORARY staging 테이블 생성. LIKE로 컬럼·인덱스 동일하게 복제하되
+        //    UNIQUE 인덱스는 일단 유지 (BulkCopy 도중에도 충돌 0 가정 — 같은 잡 내 새 데이터).
+        //    TEMPORARY 테이블은 세션 종료(=conn DisposeAsync) 시 자동 DROP.
+        var createSql = $"CREATE TEMPORARY TABLE `{stageTable}` LIKE stock_ledger";
+        using (var createCmd = new MySqlCommand(createSql, conn, tx))
+        {
+            createCmd.CommandTimeout = 60;
+            await createCmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
+        }
+
+        try
+        {
+            // 2) DataTable 빌드 (BulkCopy는 IDataReader/DataTable 입력).
+            //    stock_ledger 본 테이블의 컬럼 순서/타입과 정확히 맞춰야 함 — LIKE 복제했으므로 동일.
+            //    ledger_id/created_at 등 default/auto 컬럼은 ColumnMappings로 skip하고 명시 컬럼만 적재.
+            var dataTable = BuildStockLedgerDataTable(rows);
+
+            // MySqlBulkCopy는 IDisposable 미구현 — using 없이 사용 (내부 리소스는 호출당 정리).
+            var bulk = new MySqlBulkCopy(conn, tx)
+            {
+                DestinationTableName = stageTable,
+                BulkCopyTimeout = 600,
+            };
+            // 컬럼 매핑: DataTable 인덱스 → staging 테이블 컬럼명.
+            var cols = new[]
+            {
+                "tenant_id", "item_id", "warehouse_id", "partner_id", "ledger_date", "ym",
+                "move_type", "source_type", "source_id", "doc_no", "qty_in", "qty_out",
+                "unit_cost", "supply_amount", "memo",
+            };
+            for (int i = 0; i < cols.Length; i++)
+            {
+                bulk.ColumnMappings.Add(new MySqlBulkCopyColumnMapping(i, cols[i]));
+            }
+
+            var bulkResult = await bulk.WriteToServerAsync(dataTable, ct).ConfigureAwait(false);
+            _logger.LogInformation(
+                "[MDB마이그레이션] stock_ledger BulkCopy 적재: {Rows}행, warnings={Warn}, {Elapsed}ms",
+                bulkResult.RowsInserted, bulkResult.Warnings.Count, sw.ElapsedMilliseconds);
+
+            // 3) INSERT IGNORE 본 테이블 (UNIQUE 충돌 시 skip → 멱등).
+            var insertSql = $"""
+                INSERT IGNORE INTO stock_ledger
+                  (tenant_id, item_id, warehouse_id, partner_id, ledger_date, ym,
+                   move_type, source_type, source_id, doc_no, qty_in, qty_out,
+                   unit_cost, supply_amount, memo)
+                SELECT
+                   tenant_id, item_id, warehouse_id, partner_id, ledger_date, ym,
+                   move_type, source_type, source_id, doc_no, qty_in, qty_out,
+                   unit_cost, supply_amount, memo
+                FROM `{stageTable}`
+                """;
+            int inserted;
+            using (var insertCmd = new MySqlCommand(insertSql, conn, tx))
+            {
+                insertCmd.CommandTimeout = 600;
+                inserted = await insertCmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
+            }
+
+            sw.Stop();
+            _logger.LogInformation(
+                "[MDB마이그레이션] stock_ledger 정공법 완료: 후보 {Total}행 → INSERT {Inserted}행 (중복 IGNORE={Skipped}, 총 {Elapsed}ms)",
+                rows.Count, inserted, rows.Count - inserted, sw.ElapsedMilliseconds);
+            return inserted;
+        }
+        finally
+        {
+            // TEMPORARY는 세션 종료 시 auto-drop이지만 명시 DROP으로 잡 내 메모리 즉시 해제.
+            try
+            {
+                using var dropCmd = new MySqlCommand($"DROP TEMPORARY TABLE IF EXISTS `{stageTable}`", conn, tx);
+                dropCmd.CommandTimeout = 30;
+                await dropCmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
+            }
+            catch (Exception dex)
+            {
+                // 헌법 #15: silent 금지. drop 실패해도 세션 종료 시 auto-drop 보장 → WARN만.
+                _logger.LogWarning(dex,
+                    "[MDB마이그레이션] stock_ledger staging({Table}) DROP 실패 — 세션 종료 시 auto-drop 예정",
+                    stageTable);
+            }
+        }
+    }
+
+    /// <summary>
+    /// BulkCopy 입력용 DataTable 빌드. 컬럼 순서는 stock_ledger 컬럼 매핑(ColumnMappings)과 1:1 일치.
+    /// </summary>
+    private static DataTable BuildStockLedgerDataTable(List<StockLedgerRow> rows)
+    {
+        var dt = new DataTable();
+        dt.Columns.Add("tenant_id", typeof(string));
+        dt.Columns.Add("item_id", typeof(string));
+        dt.Columns.Add("warehouse_id", typeof(string));
+        dt.Columns.Add("partner_id", typeof(string));
+        dt.Columns.Add("ledger_date", typeof(DateTime));
+        dt.Columns.Add("ym", typeof(string));
+        dt.Columns.Add("move_type", typeof(string));
+        dt.Columns.Add("source_type", typeof(string));
+        dt.Columns.Add("source_id", typeof(string));
+        dt.Columns.Add("doc_no", typeof(string));
+        dt.Columns.Add("qty_in", typeof(decimal));
+        dt.Columns.Add("qty_out", typeof(decimal));
+        dt.Columns.Add("unit_cost", typeof(decimal));
+        dt.Columns.Add("supply_amount", typeof(decimal));
+        dt.Columns.Add("memo", typeof(string));
+
+        foreach (var r in rows)
+        {
+            dt.Rows.Add(
+                r.TenantId,
+                r.ItemId,
+                r.WarehouseId,
+                (object?)r.PartnerId ?? DBNull.Value,
+                r.LedgerDate,
+                r.Ym,
+                r.MoveType,
+                "migration",
+                r.SourceId,
+                (object?)r.DocNo ?? DBNull.Value,
+                r.QtyIn,
+                r.QtyOut,
+                r.UnitCost,
+                r.SupplyAmount,
+                (object?)r.Memo ?? DBNull.Value);
+        }
+        return dt;
     }
 
     /// <summary>stock_ledger 청크 INSERT용 임시 row DTO.</summary>
@@ -1490,7 +1746,7 @@ public sealed class MdbMigrationService
             // 동일 MDB 두 번 마이그 시 같은 ORDER BY → 같은 rowIdx → 같은 source_id → INSERT IGNORE skip.
             var sourceId = $"mig-{ymd}-{buyCode}-{rowIdx:D6}";
 
-            await _db.ExecuteAsync(new CommandDefinition(sql, new
+            await Db.ExecuteAsync(new CommandDefinition(sql, new
             {
                 CollectionId = Guid.NewGuid().ToString(),
                 TenantId = tenantId,
@@ -1556,7 +1812,7 @@ public sealed class MdbMigrationService
             var description = $"{jenCha} {jekDae}".Trim();
             if (string.IsNullOrWhiteSpace(description)) description = "레거시 경비 이관";
 
-            await _db.ExecuteAsync(new CommandDefinition(sql, new
+            await Db.ExecuteAsync(new CommandDefinition(sql, new
             {
                 CashbookId = Guid.NewGuid().ToString(),
                 TenantId = tenantId,
@@ -1622,7 +1878,7 @@ public sealed class MdbMigrationService
             var description = GetStr(row, "SC_JEK");    // 적요
             if (string.IsNullOrWhiteSpace(description)) description = "레거시 전표 이관";
 
-            await _db.ExecuteAsync(new CommandDefinition(sql, new
+            await Db.ExecuteAsync(new CommandDefinition(sql, new
             {
                 ExpenseId = Guid.NewGuid().ToString(),
                 TenantId = tenantId,
@@ -1691,7 +1947,7 @@ public sealed class MdbMigrationService
             decimal vat = g.Sum(r => GetDec(r, "IU_VAT"));
             var poId = Guid.NewGuid().ToString();
 
-            await _db.ExecuteAsync(new CommandDefinition(headSql, new
+            await Db.ExecuteAsync(new CommandDefinition(headSql, new
             {
                 PoId = poId, TenantId = tenantId, PoNo = poNo, PoDate = poDate,
                 PartnerId = partnerId, Supply = supply, Vat = vat, Total = supply + vat,
@@ -1710,7 +1966,7 @@ public sealed class MdbMigrationService
                 var dan = GetDec(r, "IU_DAN");
                 var amt = GetDec(r, "IU_AMT");
                 var v = GetDec(r, "IU_VAT");
-                await _db.ExecuteAsync(new CommandDefinition(lineSql, new
+                await Db.ExecuteAsync(new CommandDefinition(lineSql, new
                 {
                     LineId = Guid.NewGuid().ToString(), PoId = poId, TenantId = tenantId,
                     Seq = seq++, ItemId = itemId, ItemName = pum, Spec = ku,
@@ -1771,7 +2027,7 @@ public sealed class MdbMigrationService
             decimal vat = g.Sum(r => GetDec(r, "IO_VAT"));
             var soId = Guid.NewGuid().ToString();
 
-            await _db.ExecuteAsync(new CommandDefinition(headSql, new
+            await Db.ExecuteAsync(new CommandDefinition(headSql, new
             {
                 SoId = soId, TenantId = tenantId, SoNo = soNo, SoDate = soDate,
                 PartnerId = partnerId, Supply = supply, Vat = vat, Total = supply + vat,
@@ -1790,7 +2046,7 @@ public sealed class MdbMigrationService
                 var dan = GetDec(r, "IO_DAN");
                 var amt = GetDec(r, "IO_AMT");
                 var v = GetDec(r, "IO_VAT");
-                await _db.ExecuteAsync(new CommandDefinition(lineSql, new
+                await Db.ExecuteAsync(new CommandDefinition(lineSql, new
                 {
                     LineId = Guid.NewGuid().ToString(), SoId = soId, TenantId = tenantId,
                     Seq = seq++, ItemId = itemId, ItemName = pum, Spec = ku,
@@ -1852,7 +2108,7 @@ public sealed class MdbMigrationService
 
             try
             {
-                await _db.ExecuteAsync(new CommandDefinition(sql, new
+                await Db.ExecuteAsync(new CommandDefinition(sql, new
                 {
                     Id = Guid.NewGuid().ToString(), TenantId = tenantId,
                     No = no, Date = d, Type = typeCode,
@@ -1912,7 +2168,7 @@ public sealed class MdbMigrationService
             var billType = cla == "2" ? "P" : "R";
             var partnerName = GetStr(r, "EU_BUY");
 
-            await _db.ExecuteAsync(new CommandDefinition(sql, new
+            await Db.ExecuteAsync(new CommandDefinition(sql, new
             {
                 Id = Guid.NewGuid().ToString(), TenantId = tenantId,
                 Type = billType, No = no,
@@ -1939,7 +2195,7 @@ public sealed class MdbMigrationService
             var cla = GetStr(r, "EQ_CLA");
             var billType = cla == "2" ? "P" : "R";
 
-            await _db.ExecuteAsync(new CommandDefinition(sql, new
+            await Db.ExecuteAsync(new CommandDefinition(sql, new
             {
                 Id = Guid.NewGuid().ToString(), TenantId = tenantId,
                 Type = billType, No = no,
@@ -2022,7 +2278,7 @@ public sealed class MdbMigrationService
                 if (months < 0 || months > 36) months = 0;
             }
 
-            await _db.ExecuteAsync(new CommandDefinition(headSql, new
+            await Db.ExecuteAsync(new CommandDefinition(headSql, new
             {
                 Id = headerId, TenantId = tenantId,
                 CardNo = cdNo, CardCompany = GetStr(r, "CD_BANK"), HolderName = GetStr(r, "CD_NAME"),
@@ -2040,7 +2296,7 @@ public sealed class MdbMigrationService
                 {
                     var sBuy = GetInt(lr, "CD1_SBUY");
                     partnerMap.TryGetValue(sBuy, out var partnerId);
-                    await _db.ExecuteAsync(new CommandDefinition(lineSql, new
+                    await Db.ExecuteAsync(new CommandDefinition(lineSql, new
                     {
                         LineId = Guid.NewGuid().ToString(), HeaderId = headerId, TenantId = tenantId,
                         Seq = seq++, PartnerId = partnerId, PartnerNameLegacy = (string?)null,
@@ -2097,7 +2353,7 @@ public sealed class MdbMigrationService
             var sBuy = GetInt(r, "BK_SBUY");
             partnerMap.TryGetValue(sBuy, out var partnerId);
 
-            await _db.ExecuteAsync(new CommandDefinition(sql, new
+            await Db.ExecuteAsync(new CommandDefinition(sql, new
             {
                 Id = Guid.NewGuid().ToString(), TenantId = tenantId,
                 AccountNo = accNo, BankName = GetStr(r, "BK_CLA"),
@@ -2161,13 +2417,13 @@ public sealed class MdbMigrationService
     /// <summary>MariaDB 커넥션이 닫혀있으면 비동기로 열어준다.</summary>
     private async Task EnsureOpenAsync(CancellationToken ct)
     {
-        if (_db.State == ConnectionState.Open) return;
+        if (Db.State == ConnectionState.Open) return;
         if (_db is DbConnection dbConnection)
         {
             await dbConnection.OpenAsync(ct).ConfigureAwait(false);
             return;
         }
-        _db.Open();
+        Db.Open();
     }
 
     /// <summary>OLEDB로 MDB 파일을 열어 OleDbConnection을 반환한다.

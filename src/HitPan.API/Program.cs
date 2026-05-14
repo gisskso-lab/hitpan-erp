@@ -3,6 +3,7 @@ using HitPan.Application.Interfaces;
 using HitPan.Application.Services;
 using HitPan.API.Extensions;
 using HitPan.API.HostedServices;
+using HitPan.API.Hubs;
 using HitPan.API.Middleware;
 using HitPan.API.Services;
 using HitPan.Infrastructure.Events;
@@ -174,6 +175,11 @@ builder.Services.AddAuthorization(options =>
 builder.Services.AddControllers();
 builder.Services.AddSwaggerWithJwt();
 
+// 정공법 CODE-01 (2026-05-14): 마이그 진행률 SignalR push.
+// 봉합(2초 폴링 900회/30분) → 정공법(서버 push 0회 폴링) 전환.
+builder.Services.AddSignalR();
+builder.Services.AddSingleton<IMigrationProgressService, MigrationProgressService>();
+
 builder.Services.AddCors(options =>
 {
     options.AddPolicy("BlazorWasmDev", policy =>
@@ -182,7 +188,9 @@ builder.Services.AddCors(options =>
         // §#18 본사 미수신과는 무관 — 이건 고객사 본인 ERP의 Web↔API 통신.
         policy.SetIsOriginAllowed(_ => true)
             .AllowAnyHeader()
-            .AllowAnyMethod();
+            .AllowAnyMethod()
+            // 정공법 CODE-01 (2026-05-14): SignalR WebSocket/LongPolling은 자격증명 필요 → AllowCredentials.
+            .AllowCredentials();
     });
 });
 
@@ -261,6 +269,8 @@ app.UseMiddleware<SessionLimitMiddleware>();
 app.UseMiddleware<IdempotencyMiddleware>();
 
 app.MapControllers();
+// 정공법 CODE-01 (2026-05-14): 마이그 진행률 Hub.
+app.MapHub<MigrationProgressHub>("/hubs/migration");
 
 
 if (hasBlazor)

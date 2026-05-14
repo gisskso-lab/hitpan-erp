@@ -1,4 +1,5 @@
 using System.Runtime.Versioning;
+using HitPan.Application.Interfaces;
 using HitPan.Application.Services;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -25,17 +26,20 @@ public sealed class MigrationController : ControllerBase
     private readonly ILogger<MigrationController> _logger;
     private readonly MigrationJobStore _jobStore;
     private readonly IServiceScopeFactory _scopeFactory;
+    private readonly IMigrationProgressService _progress;
 
     public MigrationController(
         MdbMigrationService migrationService,
         ILogger<MigrationController> logger,
         MigrationJobStore jobStore,
-        IServiceScopeFactory scopeFactory)
+        IServiceScopeFactory scopeFactory,
+        IMigrationProgressService progress)
     {
         _migrationService = migrationService;
         _logger = logger;
         _jobStore = jobStore;
         _scopeFactory = scopeFactory;
+        _progress = progress;
     }
 
     /// <summary>
@@ -213,6 +217,9 @@ public sealed class MigrationController : ControllerBase
                     request.FolderPath, tenantId, request.MdbPassword, jobIdLocal,
                     progressCallback: (table, status, rows, elapsedMs, err) =>
                     {
+                        // 정공법 CODE-01 (2026-05-14): in-memory 봉합(_jobStore) + SignalR push(_progress) 병행.
+                        // _jobStore는 폴링 fallback / DB sync 용도로 유지(dead code 아님).
+                        // _progress는 정공법 — 서버 push 즉시 Blazor 화면 갱신.
                         _jobStore.Update(jobIdLocal, j =>
                         {
                             var prog = j.TableProgress.GetOrAdd(table, _ => new MigrationTableProgress());
@@ -224,6 +231,8 @@ public sealed class MigrationController : ControllerBase
                             if (status is "completed" or "failed") prog.FinishedAt = DateTime.UtcNow;
                             j.CurrentStep = status == "running" ? $"진행 중: {table}" : $"{table} {status}";
                         });
+                        // SignalR push (fire-and-forget — 백그라운드 잡 흐름 막지 않음).
+                        _ = _progress.UpdateAsync(jobIdLocal, table, status, rows, elapsedMs, err);
                     },
                     CancellationToken.None);
 
@@ -243,6 +252,7 @@ public sealed class MigrationController : ControllerBase
                     };
                 });
                 await storeBg.SyncToDbAsync(job.JobId, "completed", DateTime.UtcNow);
+                await _progress.CompleteJobAsync(job.JobId, "completed");
             }
             catch (Exception ex)
             {
@@ -254,6 +264,7 @@ public sealed class MigrationController : ControllerBase
                     j.FinishedAt = DateTime.UtcNow;
                 });
                 await storeBg.SyncToDbAsync(job.JobId, "failed", DateTime.UtcNow);
+                await _progress.CompleteJobAsync(job.JobId, "failed", ex.Message);
             }
         });
 
