@@ -1087,21 +1087,21 @@ public sealed class MdbMigrationService
         string defaultWarehouseId,
         IDbTransaction tx, CancellationToken ct)
     {
-        var dt = ReadMdbTable(oleConn, "SELECT * FROM DOCFB");
+        // P0 #3 (2026-05-14): row-by-row INSERT → 1000행 청크 INSERT IGNORE 멱등.
+        // 116K 행 × 1 RTT = 30분+ → 116K / 1000 = 116 RTT = 수초.
+        // 멱등 키: uq_stock_ledger_source UNIQUE (tenant_id, source_type, source_id, item_id, move_type) HASH —
+        // 재실행 시 IGNORE로 중복 차단. 헌법 #3 INSERT ONLY 원칙 유지.
+        const int ChunkSize = 1000;
+        const string ColumnList =
+            "(tenant_id, item_id, warehouse_id, partner_id, ledger_date, ym, " +
+            "move_type, source_type, source_id, doc_no, qty_in, qty_out, " +
+            "unit_cost, supply_amount, memo)";
+
+        var dt = ReadMdbTable(oleConn, "SELECT * FROM DOCFB ORDER BY IJ_DT, IJ_SEQ");
         if (dt.Rows.Count == 0) return 0;
 
-        const string sql = """
-            INSERT INTO stock_ledger
-              (tenant_id, item_id, warehouse_id, partner_id, ledger_date, ym,
-               move_type, source_type, source_id, doc_no, qty_in, qty_out,
-               unit_cost, supply_amount, memo)
-            VALUES
-              (@TenantId, @ItemId, @WarehouseId, @PartnerId, @LedgerDate, @Ym,
-               @MoveType, 'migration', @SourceId, @DocNo, @QtyIn, @QtyOut,
-               @UnitCost, @SupplyAmount, @Memo)
-            """;
-
-        int count = 0;
+        // 1단계: in-memory에서 모든 row 변환·필터 (item 매핑 없으면 skip).
+        var rows = new List<StockLedgerRow>(dt.Rows.Count);
         foreach (DataRow row in dt.Rows)
         {
             var itemKey = BuildItemKey(GetStr(row, "IJ_PUM"), GetStr(row, "IJ_KU"));
@@ -1112,41 +1112,110 @@ public sealed class MdbMigrationService
 
             var dtStr = GetStr(row, "IJ_DT");
             var ledgerDate = ParseLegacyDate(dtStr) ?? now;
-            var ym = ledgerDate.ToString("yyyy-MM");
-
-            // IJ_IO: "I"=입고(in), "O"=출고(out)
             var io = GetStr(row, "IJ_IO").ToUpperInvariant();
             var moveType = io == "I" ? "in" : "out";
             var qty = GetDec(row, "IJ_QTY");
-            var unitCost = qty != 0 ? GetDec(row, "IJ_AMT") / qty : 0m;
+            var amt = GetDec(row, "IJ_AMT");
 
-            // 창고: IJ_CHANG이 있으면 사용, 없으면 기본 창고
-            var changStr = GetStr(row, "IJ_CHANG");
-            var warehouseId = string.IsNullOrWhiteSpace(changStr) ? defaultWarehouseId : defaultWarehouseId;
-
-            await _db.ExecuteAsync(new CommandDefinition(sql, new
+            rows.Add(new StockLedgerRow
             {
                 TenantId = tenantId,
                 ItemId = itemId,
-                WarehouseId = warehouseId,
+                WarehouseId = defaultWarehouseId,
                 PartnerId = partnerId,
                 LedgerDate = ledgerDate,
-                Ym = ym,
+                Ym = ledgerDate.ToString("yyyy-MM"),
                 MoveType = moveType,
-                SourceId = $"mig-{GetStr(row, "IJ_DT")}-{GetShort(row, "IJ_SEQ")}",
+                SourceId = $"mig-{dtStr}-{GetShort(row, "IJ_SEQ")}",
                 DocNo = GetStr(row, "IJ_TAXNO"),
                 QtyIn = io == "I" ? qty : 0m,
                 QtyOut = io == "O" ? qty : 0m,
-                UnitCost = unitCost,
-                SupplyAmount = GetDec(row, "IJ_AMT"),
-                Memo = GetStr(row, "IJ_REM")
-            }, transaction: tx, cancellationToken: ct)).ConfigureAwait(false);
-
-            count++;
+                UnitCost = qty != 0 ? amt / qty : 0m,
+                SupplyAmount = amt,
+                Memo = GetStr(row, "IJ_REM"),
+            });
         }
 
-        _logger.LogInformation("[MDB마이그레이션] 입출고(stock_ledger) {Count}건 이관 완료", count);
-        return count;
+        if (rows.Count == 0) return 0;
+
+        // 2단계: 청크 단위 INSERT IGNORE (멱등성 자동).
+        int inserted = 0;
+        int chunkIdx = 0;
+        var totalChunks = (rows.Count + ChunkSize - 1) / ChunkSize;
+
+        for (int offset = 0; offset < rows.Count; offset += ChunkSize)
+        {
+            ct.ThrowIfCancellationRequested();
+            chunkIdx++;
+            var chunk = rows.GetRange(offset, Math.Min(ChunkSize, rows.Count - offset));
+
+            var sb = new StringBuilder();
+            sb.Append("INSERT IGNORE INTO stock_ledger ").Append(ColumnList).Append(" VALUES ");
+            var dyn = new DynamicParameters();
+            for (int i = 0; i < chunk.Count; i++)
+            {
+                if (i > 0) sb.Append(',');
+                sb.Append('(')
+                  .Append("@T").Append(i).Append(",@I").Append(i).Append(",@W").Append(i)
+                  .Append(",@P").Append(i).Append(",@LD").Append(i).Append(",@YM").Append(i)
+                  .Append(",@MT").Append(i).Append(",'migration',@SI").Append(i)
+                  .Append(",@DN").Append(i).Append(",@QI").Append(i).Append(",@QO").Append(i)
+                  .Append(",@UC").Append(i).Append(",@SA").Append(i).Append(",@M").Append(i)
+                  .Append(')');
+
+                var r = chunk[i];
+                dyn.Add("T" + i, r.TenantId);
+                dyn.Add("I" + i, r.ItemId);
+                dyn.Add("W" + i, r.WarehouseId);
+                dyn.Add("P" + i, r.PartnerId);
+                dyn.Add("LD" + i, r.LedgerDate);
+                dyn.Add("YM" + i, r.Ym);
+                dyn.Add("MT" + i, r.MoveType);
+                dyn.Add("SI" + i, r.SourceId);
+                dyn.Add("DN" + i, r.DocNo);
+                dyn.Add("QI" + i, r.QtyIn);
+                dyn.Add("QO" + i, r.QtyOut);
+                dyn.Add("UC" + i, r.UnitCost);
+                dyn.Add("SA" + i, r.SupplyAmount);
+                dyn.Add("M" + i, r.Memo);
+            }
+
+            var affected = await _db.ExecuteAsync(new CommandDefinition(
+                sb.ToString(), dyn, transaction: tx, cancellationToken: ct)).ConfigureAwait(false);
+            inserted += affected;
+
+            // 청크 5개마다 진행률 로그 (5000행 단위) — UI 폴링과 페이스 맞춤.
+            if (chunkIdx % 5 == 0 || chunkIdx == totalChunks)
+            {
+                _logger.LogInformation(
+                    "[MDB마이그레이션] stock_ledger 청크 {Chunk}/{Total} 처리 ({Done}/{Total2}행, INSERT IGNORE 누적={Inserted})",
+                    chunkIdx, totalChunks, offset + chunk.Count, rows.Count, inserted);
+            }
+        }
+
+        _logger.LogInformation(
+            "[MDB마이그레이션] 입출고(stock_ledger) 완료: 후보 {Total}행 → INSERT {Inserted}행 (중복 IGNORE = {Skipped})",
+            rows.Count, inserted, rows.Count - inserted);
+        return inserted;
+    }
+
+    /// <summary>stock_ledger 청크 INSERT용 임시 row DTO.</summary>
+    private sealed class StockLedgerRow
+    {
+        public string TenantId { get; set; } = string.Empty;
+        public string ItemId { get; set; } = string.Empty;
+        public string WarehouseId { get; set; } = string.Empty;
+        public string? PartnerId { get; set; }
+        public DateTime LedgerDate { get; set; }
+        public string Ym { get; set; } = string.Empty;
+        public string MoveType { get; set; } = string.Empty;
+        public string SourceId { get; set; } = string.Empty;
+        public string? DocNo { get; set; }
+        public decimal QtyIn { get; set; }
+        public decimal QtyOut { get; set; }
+        public decimal UnitCost { get; set; }
+        public decimal SupplyAmount { get; set; }
+        public string? Memo { get; set; }
     }
 
     // ────────────────────────────────────────────────────────────────
