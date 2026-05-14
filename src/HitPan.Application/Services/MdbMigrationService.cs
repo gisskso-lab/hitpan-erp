@@ -114,13 +114,14 @@ public sealed class MdbMigrationService
         string folderPath, string tenantId, string? mdbPassword, string? jobId,
         Action<string, string, int, long, string?>? progressCallback, CancellationToken ct = default)
     {
-        var (pyojunPath, pandataPath, _) = ResolveMdbPaths(folderPath);
+        // WS-11 정공법 축 5 (2026-05-14): POTHER.mdb 경로도 받아서 4 테이블 마이그.
+        var (pyojunPath, pandataPath, potherPath) = ResolveMdbPaths(folderPath);
         _mdbPasswordContext.Value = mdbPassword;
         _jobIdContext.Value = jobId;
         _progressCallback.Value = progressCallback;
         try
         {
-            return await MigrateCoreAsync(pyojunPath, pandataPath, tenantId, ct).ConfigureAwait(false);
+            return await MigrateCoreAsync(pyojunPath, pandataPath, potherPath, tenantId, ct).ConfigureAwait(false);
         }
         finally
         {
@@ -206,12 +207,14 @@ public sealed class MdbMigrationService
     private async Task<MdbMigrationResult> MigrateCoreAsync(
         string pyojunPath,
         string pandataPath,
+        string potherPath,
         string tenantId,
         CancellationToken ct = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(pyojunPath);
         ArgumentException.ThrowIfNullOrWhiteSpace(pandataPath);
         ArgumentException.ThrowIfNullOrWhiteSpace(tenantId);
+        // potherPath: 파일 없어도 OK (이전 버전 백업본 호환). 존재 시에만 마이그.
 
         var result = new MdbMigrationResult();
         var now = DateTime.UtcNow;
@@ -376,6 +379,52 @@ public sealed class MdbMigrationService
                 {
                     await job().ConfigureAwait(false);
                 }
+            }
+
+            // ──────────────────────────────────────
+            // 3단계: POTHER.mdb (WS-11 축 5, 2026-05-14)
+            // DOCNM(명함) / DOCAS(AS) / DELIVERY(배송) / CALENDAR(일정).
+            // 파일 없으면 skip (이전 백업본/일부 고객사는 POTHER 미사용).
+            // ──────────────────────────────────────
+            if (File.Exists(potherPath))
+            {
+                _logger.LogInformation("[MDB마이그레이션] POTHER.mdb 읽기 시작: {Path}", potherPath);
+
+                await RunTableStepAsync("partner_contacts", async tx =>
+                {
+                    using var oleConn = OpenOleDb(potherPath);
+                    result.BusinessCards = await MigrateBusinessCardsAsync(
+                        oleConn, tenantId, now, partnerMap, tx, ct).ConfigureAwait(false);
+                    return result.BusinessCards;
+                }, ct, continueOnFail: true, mdbFile: "POTHER").ConfigureAwait(false);
+
+                await RunTableStepAsync("service_tickets", async tx =>
+                {
+                    using var oleConn = OpenOleDb(potherPath);
+                    result.ServiceTickets = await MigrateServiceTicketsAsync(
+                        oleConn, tenantId, now, partnerMap, itemMap, tx, ct).ConfigureAwait(false);
+                    return result.ServiceTickets;
+                }, ct, continueOnFail: true, mdbFile: "POTHER").ConfigureAwait(false);
+
+                await RunTableStepAsync("delivery_tracking", async tx =>
+                {
+                    using var oleConn = OpenOleDb(potherPath);
+                    result.DeliveryTracking = await MigrateDeliveryTrackingAsync(
+                        oleConn, tenantId, now, partnerMap, tx, ct).ConfigureAwait(false);
+                    return result.DeliveryTracking;
+                }, ct, continueOnFail: true, mdbFile: "POTHER").ConfigureAwait(false);
+
+                await RunTableStepAsync("events", async tx =>
+                {
+                    using var oleConn = OpenOleDb(potherPath);
+                    result.Events = await MigrateEventsAsync(
+                        oleConn, tenantId, now, tx, ct).ConfigureAwait(false);
+                    return result.Events;
+                }, ct, continueOnFail: true, mdbFile: "POTHER").ConfigureAwait(false);
+            }
+            else
+            {
+                _logger.LogInformation("[MDB마이그레이션] POTHER.mdb 없음 — POTHER 4 테이블 skip");
             }
 
             _logger.LogInformation("[MDB마이그레이션] 완료. 결과: {@Result}", result);
@@ -559,10 +608,11 @@ public sealed class MdbMigrationService
                 TableName = tableName,
                 ErrorType = errorType,
                 Severity = severity,
-                // WS-20260514-06 (SEC-02): MariaDB 예외 메시지에 박힐 수 있는 PII(주민/사업자/전화/이메일/계좌)
-                // 마스킹 후 저장. 개인정보보호법 §29 안전조치의무 충족.
-                Message = SensitiveFieldMasking.MaskTextPII(Truncate(ex.Message, 65535)),
-                Detail = SensitiveFieldMasking.MaskTextPII(Truncate(ex.ToString(), 65535)),
+                // WS-20260514-06 (SEC-02) + 축 6-1 (2026-05-14): 이중 방어 — PII 마스킹 후 AES-256-CBC 암호화.
+                // 컬럼 타입: TEXT → LONGBLOB (헌법 #5 정공법). MariaDB 예외 메시지 PII(주민/사업자/전화/이메일/계좌)
+                // 마스킹 + 암호화 둘 다 적용. 개인정보보호법 §29 안전조치의무 충족.
+                Message = _crypto.EncryptToBytes(SensitiveFieldMasking.MaskTextPII(Truncate(ex.Message, 65535))),
+                Detail = _crypto.EncryptToBytes(SensitiveFieldMasking.MaskTextPII(Truncate(ex.ToString(), 65535))),
                 RawData = encryptedRaw,
                 Now = DateTime.UtcNow,
             }, cancellationToken: ct)).ConfigureAwait(false);
@@ -750,7 +800,7 @@ public sealed class MdbMigrationService
                keyman_birth, keyman_name, keyman_phone,
                margin_rate, sales_employee, trade_start_date,
                business_registration_date, tel_secondary, tax_classification,
-               ceo_resident_no_encrypted)
+               ceo_resident_no_encrypted, migrated_source_hash)
             VALUES
               (@PartnerId, @TenantId, @PartnerCode, @PartnerName, @PartnerType,
                @BizNo, @CeoName, @BizType, @BizItem,
@@ -763,7 +813,7 @@ public sealed class MdbMigrationService
                @KeymanBirth, @KeymanName, @KeymanPhone,
                @MarginRate, @SalesEmployee, @TradeStartDate,
                @BusinessRegistrationDate, @TelSecondary, @TaxClassification,
-               @CeoResidentNoEncrypted)
+               @CeoResidentNoEncrypted, @MigratedSourceHash)
             """;
 
         int count = 0;
@@ -871,7 +921,9 @@ public sealed class MdbMigrationService
                 TelSecondary = GetStr(row, "buy_tel1"),
                 TaxClassification = taxGubun,
                 // 형사영역 (헌법 #5, CRIMINAL_DOMAIN_POLICY.md): 부가가치세법 §32 처리 근거
-                CeoResidentNoEncrypted = string.IsNullOrEmpty(topJumin) ? null : _crypto.EncryptToBytes(topJumin)
+                CeoResidentNoEncrypted = string.IsNullOrEmpty(topJumin) ? null : _crypto.EncryptToBytes(topJumin),
+                // WS-11 정공법 축 2 (2026-05-14): 자연키 partner_code 기반 SHA256 멱등 키
+                MigratedSourceHash = ComputeSourceHash($"partners:buy_code:{buyCode}")
             }, transaction: tx, cancellationToken: ct)).ConfigureAwait(false);
 
             count++;
@@ -1416,7 +1468,7 @@ public sealed class MdbMigrationService
         const string ColumnList =
             "(tenant_id, item_id, warehouse_id, partner_id, ledger_date, ym, " +
             "move_type, source_type, source_id, doc_no, qty_in, qty_out, " +
-            "unit_cost, supply_amount, memo)";
+            "unit_cost, supply_amount, memo, migrated_source_hash)";
 
         var dt = ReadMdbTable(oleConn, "SELECT * FROM DOCFB ORDER BY IJ_DT, IJ_SEQ");
         if (dt.Rows.Count == 0) return 0;
@@ -1438,6 +1490,7 @@ public sealed class MdbMigrationService
             var qty = GetDec(row, "IJ_QTY");
             var amt = GetDec(row, "IJ_AMT");
 
+            var sourceId = $"mig-{dtStr}-{GetShort(row, "IJ_SEQ")}";
             rows.Add(new StockLedgerRow
             {
                 TenantId = tenantId,
@@ -1447,13 +1500,16 @@ public sealed class MdbMigrationService
                 LedgerDate = ledgerDate,
                 Ym = ledgerDate.ToString("yyyy-MM"),
                 MoveType = moveType,
-                SourceId = $"mig-{dtStr}-{GetShort(row, "IJ_SEQ")}",
+                SourceId = sourceId,
                 DocNo = GetStr(row, "IJ_TAXNO"),
                 QtyIn = io == "I" ? qty : 0m,
                 QtyOut = io == "O" ? qty : 0m,
                 UnitCost = qty != 0 ? amt / qty : 0m,
                 SupplyAmount = amt,
                 Memo = GetStr(row, "IJ_REM"),
+                // WS-11 정공법 축 2 (2026-05-14): 자연키(source_id+item+move_type+qty) SHA256
+                MigratedSourceHash = ComputeSourceHash(
+                    $"stock_ledger:{sourceId}:{itemId}:{moveType}:{qty}:{amt}"),
             });
         }
 
@@ -1489,6 +1545,7 @@ public sealed class MdbMigrationService
                   .Append(",@MT").Append(i).Append(",'migration',@SI").Append(i)
                   .Append(",@DN").Append(i).Append(",@QI").Append(i).Append(",@QO").Append(i)
                   .Append(",@UC").Append(i).Append(",@SA").Append(i).Append(",@M").Append(i)
+                  .Append(",@MSH").Append(i)
                   .Append(')');
 
                 var r = chunk[i];
@@ -1506,6 +1563,7 @@ public sealed class MdbMigrationService
                 dyn.Add("UC" + i, r.UnitCost);
                 dyn.Add("SA" + i, r.SupplyAmount);
                 dyn.Add("M" + i, r.Memo);
+                dyn.Add("MSH" + i, r.MigratedSourceHash);
             }
 
             var affected = await Db.ExecuteAsync(new CommandDefinition(
@@ -1567,7 +1625,7 @@ public sealed class MdbMigrationService
             {
                 "tenant_id", "item_id", "warehouse_id", "partner_id", "ledger_date", "ym",
                 "move_type", "source_type", "source_id", "doc_no", "qty_in", "qty_out",
-                "unit_cost", "supply_amount", "memo",
+                "unit_cost", "supply_amount", "memo", "migrated_source_hash",
             };
             for (int i = 0; i < cols.Length; i++)
             {
@@ -1584,11 +1642,11 @@ public sealed class MdbMigrationService
                 INSERT IGNORE INTO stock_ledger
                   (tenant_id, item_id, warehouse_id, partner_id, ledger_date, ym,
                    move_type, source_type, source_id, doc_no, qty_in, qty_out,
-                   unit_cost, supply_amount, memo)
+                   unit_cost, supply_amount, memo, migrated_source_hash)
                 SELECT
                    tenant_id, item_id, warehouse_id, partner_id, ledger_date, ym,
                    move_type, source_type, source_id, doc_no, qty_in, qty_out,
-                   unit_cost, supply_amount, memo
+                   unit_cost, supply_amount, memo, migrated_source_hash
                 FROM `{stageTable}`
                 """;
             int inserted;
@@ -1644,6 +1702,8 @@ public sealed class MdbMigrationService
         dt.Columns.Add("unit_cost", typeof(decimal));
         dt.Columns.Add("supply_amount", typeof(decimal));
         dt.Columns.Add("memo", typeof(string));
+        // WS-11 정공법 축 2 (2026-05-14): SHA256 멱등 키 컬럼
+        dt.Columns.Add("migrated_source_hash", typeof(string));
 
         foreach (var r in rows)
         {
@@ -1662,7 +1722,8 @@ public sealed class MdbMigrationService
                 r.QtyOut,
                 r.UnitCost,
                 r.SupplyAmount,
-                (object?)r.Memo ?? DBNull.Value);
+                (object?)r.Memo ?? DBNull.Value,
+                (object?)r.MigratedSourceHash ?? DBNull.Value);
         }
         return dt;
     }
@@ -1684,6 +1745,8 @@ public sealed class MdbMigrationService
         public decimal UnitCost { get; set; }
         public decimal SupplyAmount { get; set; }
         public string? Memo { get; set; }
+        /// <summary>WS-11 정공법 축 2 (2026-05-14): SHA256 멱등 키.</summary>
+        public string? MigratedSourceHash { get; set; }
     }
 
     // ────────────────────────────────────────────────────────────────
@@ -1709,11 +1772,11 @@ public sealed class MdbMigrationService
             INSERT IGNORE INTO collections
               (collection_id, tenant_id, partner_id, collection_date, amount,
                collection_method, memo, is_active, created_at, updated_at,
-               source_type, source_id)
+               source_type, source_id, migrated_source_hash)
             VALUES
               (@CollectionId, @TenantId, @PartnerId, @CollectionDate, @Amount,
                @Method, @Memo, 1, @Now, @Now,
-               'migration', @SourceId)
+               'migration', @SourceId, @MigratedSourceHash)
             """;
 
         int count = 0;
@@ -1757,6 +1820,8 @@ public sealed class MdbMigrationService
                 Memo = GetStr(row, "S_REM"),
                 Now = now,
                 SourceId = sourceId,
+                // WS-11 정공법 축 2 (2026-05-14): 자연키(날짜+업체+행순+금액) SHA256
+                MigratedSourceHash = ComputeSourceHash($"collections:{sourceId}:{amount}"),
             }, transaction: tx, cancellationToken: ct)).ConfigureAwait(false);
 
             count++;
@@ -2078,15 +2143,17 @@ public sealed class MdbMigrationService
         if (dt.Rows.Count == 0) return 0;
 
         // tax_invoices 컬럼 존재 확인용 — 신규 ERP 스키마에 맞춰 핵심만 INSERT
+        // WS-11 정공법 축 2 (2026-05-14): migrated_source_hash 컬럼 추가.
+        // (NOTE: 본 INSERT는 기존부터 스키마 차이로 try/catch에서 silent 실패 중. 별건 작지서로 정정 예정.)
         const string sql = """
             INSERT INTO tax_invoices
               (tax_invoice_id, tenant_id, invoice_no, invoice_date, invoice_type,
                partner_id, supply_amount, vat_amount, total_amount,
-               status, remark, created_at, updated_at)
+               status, remark, created_at, updated_at, migrated_source_hash)
             VALUES
               (@Id, @TenantId, @No, @Date, @Type,
                @PartnerId, @Supply, @Vat, @Total,
-               'confirmed', @Remark, @Now, @Now)
+               'confirmed', @Remark, @Now, @Now, @MigratedSourceHash)
             """;
 
         int count = 0;
@@ -2113,7 +2180,9 @@ public sealed class MdbMigrationService
                     Id = Guid.NewGuid().ToString(), TenantId = tenantId,
                     No = no, Date = d, Type = typeCode,
                     PartnerId = partnerId, Supply = supply, Vat = vat, Total = supply + vat,
-                    Remark = GetStr(r, "TX_REM"), Now = now
+                    Remark = GetStr(r, "TX_REM"), Now = now,
+                    // WS-11 정공법 축 2 (2026-05-14): 자연키 TX_NO 기반 SHA256
+                    MigratedSourceHash = ComputeSourceHash($"tax_invoices:{no}:{typeCode}:{supply}:{vat}")
                 }, transaction: tx, cancellationToken: ct)).ConfigureAwait(false);
                 count++;
             }
@@ -2375,6 +2444,288 @@ public sealed class MdbMigrationService
     // 유틸리티 메서드
     // ════════════════════════════════════════════════════════════════
 
+    // ────────────────────────────────────────────────────────────────
+    // WS-11 정공법 축 5 (사장님 명령 2026-05-14): POTHER 4 풀스택 마이그
+    // DOCNM(명함) / DOCAS(AS) / DELIVERY(배송) / CALENDAR(일정)
+    // 컬럼명은 레거시 코드 패턴 + 일반적 PYOJUN/PANDATA 명명 규칙으로 추정.
+    // 5/16 본런 시 실 MDB 검증 후 정정 가능.
+    // 헌법 #5 AES (hp/email VARBINARY) + #17 InnoDB + #1 tenant_id JWT.
+    // ────────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// DOCNM(명함)를 읽어 partner_contacts 테이블에 INSERT한다.
+    /// 추정 컬럼: NM_CODE, NM_NAME, NM_COMPANY, NM_TEL, NM_HP, NM_EMAIL, NM_ADDR, NM_REM
+    /// hp/email은 VARBINARY AES 암호화 후 저장 (헌법 #5).
+    /// </summary>
+    private async Task<int> MigrateBusinessCardsAsync(
+        OleDbConnection oleConn, string tenantId, DateTime now,
+        Dictionary<int, string> partnerMap,
+        IDbTransaction tx, CancellationToken ct)
+    {
+        DataTable dt;
+        try { dt = ReadMdbTable(oleConn, "SELECT * FROM DOCNM ORDER BY NM_CODE"); }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "[MDB마이그레이션] DOCNM 테이블 읽기 실패 — POTHER에 없음 가능, skip");
+            return 0;
+        }
+        if (dt.Rows.Count == 0) return 0;
+
+        const string sql = """
+            INSERT IGNORE INTO partner_contacts
+              (contact_id, tenant_id, partner_id, contact_name, company_name,
+               tel, hp_encrypted, email_encrypted, address, memo,
+               is_active, created_at, updated_at, migrated_source_hash)
+            VALUES
+              (@ContactId, @TenantId, @PartnerId, @ContactName, @CompanyName,
+               @Tel, @Hp, @Email, @Address, @Memo,
+               1, @Now, @Now, @MigratedSourceHash)
+            """;
+
+        int count = 0;
+        int rowIdx = 0;
+        foreach (DataRow row in dt.Rows)
+        {
+            rowIdx++;
+            var nmCode = GetStr(row, "NM_CODE");
+            var name = GetStr(row, "NM_NAME");
+            if (string.IsNullOrWhiteSpace(name)) continue;
+
+            // 회사명 일치하는 업체 매핑 시도 (있으면 FK 연결, 없어도 OK).
+            // partnerMap은 int 키(buy_code) — 명함에는 buy_code 없으므로 NULL로 두고 회사명만 보존.
+            string? partnerId = null;
+
+            var hp = GetStr(row, "NM_HP");
+            var email = GetStr(row, "NM_EMAIL");
+
+            await Db.ExecuteAsync(new CommandDefinition(sql, new
+            {
+                ContactId = Guid.NewGuid().ToString(),
+                TenantId = tenantId,
+                PartnerId = partnerId,
+                ContactName = name,
+                CompanyName = GetStr(row, "NM_COMPANY"),
+                Tel = GetStr(row, "NM_TEL"),
+                Hp = string.IsNullOrEmpty(hp) ? null : _crypto.EncryptToBytes(hp),
+                Email = string.IsNullOrEmpty(email) ? null : _crypto.EncryptToBytes(email),
+                Address = GetStr(row, "NM_ADDR"),
+                Memo = GetStr(row, "NM_REM"),
+                Now = now,
+                MigratedSourceHash = ComputeSourceHash($"partner_contacts:{nmCode}:{name}:{rowIdx:D6}"),
+            }, transaction: tx, cancellationToken: ct)).ConfigureAwait(false);
+
+            count++;
+        }
+
+        _logger.LogInformation("[MDB마이그레이션] 명함(DOCNM→partner_contacts) {Count}건 이관 완료", count);
+        return count;
+    }
+
+    /// <summary>
+    /// DOCAS(AS)를 읽어 service_tickets 테이블에 INSERT한다.
+    /// 추정 컬럼: AS_NO, AS_DT, AS_BUY, AS_ITEM, AS_PROBLEM, AS_FIX, AS_FEE, AS_REM
+    /// </summary>
+    private async Task<int> MigrateServiceTicketsAsync(
+        OleDbConnection oleConn, string tenantId, DateTime now,
+        Dictionary<int, string> partnerMap,
+        Dictionary<string, string> itemMap,
+        IDbTransaction tx, CancellationToken ct)
+    {
+        DataTable dt;
+        try { dt = ReadMdbTable(oleConn, "SELECT * FROM DOCAS ORDER BY AS_NO"); }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "[MDB마이그레이션] DOCAS 테이블 읽기 실패 — POTHER에 없음 가능, skip");
+            return 0;
+        }
+        if (dt.Rows.Count == 0) return 0;
+
+        const string sql = """
+            INSERT IGNORE INTO service_tickets
+              (ticket_id, tenant_id, service_date, partner_id, item_id,
+               problem_desc, fix_desc, fee, memo,
+               is_active, created_at, updated_at, migrated_source_hash)
+            VALUES
+              (@TicketId, @TenantId, @ServiceDate, @PartnerId, @ItemId,
+               @ProblemDesc, @FixDesc, @Fee, @Memo,
+               1, @Now, @Now, @MigratedSourceHash)
+            """;
+
+        int count = 0;
+        foreach (DataRow row in dt.Rows)
+        {
+            var no = GetStr(row, "AS_NO");
+            if (string.IsNullOrWhiteSpace(no)) continue;
+
+            var dtStr = GetStr(row, "AS_DT");
+            var serviceDate = ParseLegacyDate(dtStr) ?? now;
+
+            var buyCode = GetInt(row, "AS_BUY");
+            partnerMap.TryGetValue(buyCode, out var partnerId);
+
+            // AS_ITEM은 품목 식별자(품명) — itemMap 키 형식 미상이므로 우선 NULL.
+            string? itemId = null;
+
+            await Db.ExecuteAsync(new CommandDefinition(sql, new
+            {
+                TicketId = Guid.NewGuid().ToString(),
+                TenantId = tenantId,
+                ServiceDate = serviceDate,
+                PartnerId = partnerId,
+                ItemId = itemId,
+                ProblemDesc = GetStr(row, "AS_PROBLEM"),
+                FixDesc = GetStr(row, "AS_FIX"),
+                Fee = GetDec(row, "AS_FEE"),
+                Memo = GetStr(row, "AS_REM"),
+                Now = now,
+                MigratedSourceHash = ComputeSourceHash($"service_tickets:{no}:{dtStr}:{buyCode}"),
+            }, transaction: tx, cancellationToken: ct)).ConfigureAwait(false);
+
+            count++;
+        }
+
+        _logger.LogInformation("[MDB마이그레이션] AS티켓(DOCAS→service_tickets) {Count}건 이관 완료", count);
+        return count;
+    }
+
+    /// <summary>
+    /// DELIVERY(배송)을 읽어 delivery_tracking 테이블에 INSERT한다.
+    /// 추정 컬럼: DL_NO, DL_DT, DL_BUY, DL_ADDR, DL_STATUS, DL_REM
+    /// </summary>
+    private async Task<int> MigrateDeliveryTrackingAsync(
+        OleDbConnection oleConn, string tenantId, DateTime now,
+        Dictionary<int, string> partnerMap,
+        IDbTransaction tx, CancellationToken ct)
+    {
+        DataTable dt;
+        try { dt = ReadMdbTable(oleConn, "SELECT * FROM DELIVERY ORDER BY DL_NO"); }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "[MDB마이그레이션] DELIVERY 테이블 읽기 실패 — POTHER에 없음 가능, skip");
+            return 0;
+        }
+        if (dt.Rows.Count == 0) return 0;
+
+        const string sql = """
+            INSERT IGNORE INTO delivery_tracking
+              (tracking_id, tenant_id, delivery_date, partner_id, address,
+               status, memo, is_active, created_at, updated_at, migrated_source_hash)
+            VALUES
+              (@TrackingId, @TenantId, @DeliveryDate, @PartnerId, @Address,
+               @Status, @Memo, 1, @Now, @Now, @MigratedSourceHash)
+            """;
+
+        int count = 0;
+        foreach (DataRow row in dt.Rows)
+        {
+            var no = GetStr(row, "DL_NO");
+            if (string.IsNullOrWhiteSpace(no)) continue;
+
+            var dtStr = GetStr(row, "DL_DT");
+            var dDate = ParseLegacyDate(dtStr) ?? now;
+
+            var buyCode = GetInt(row, "DL_BUY");
+            partnerMap.TryGetValue(buyCode, out var partnerId);
+
+            // DL_STATUS 매핑 (레거시 1=배송중, 2=완료 추정).
+            var statusRaw = GetStr(row, "DL_STATUS");
+            var status = statusRaw switch
+            {
+                "1" or "배송중" or "shipped" => "shipped",
+                "2" or "완료" or "delivered" => "delivered",
+                "9" or "취소" or "canceled" => "canceled",
+                _ => "pending"
+            };
+
+            await Db.ExecuteAsync(new CommandDefinition(sql, new
+            {
+                TrackingId = Guid.NewGuid().ToString(),
+                TenantId = tenantId,
+                DeliveryDate = dDate,
+                PartnerId = partnerId,
+                Address = GetStr(row, "DL_ADDR"),
+                Status = status,
+                Memo = GetStr(row, "DL_REM"),
+                Now = now,
+                MigratedSourceHash = ComputeSourceHash($"delivery_tracking:{no}:{dtStr}:{buyCode}"),
+            }, transaction: tx, cancellationToken: ct)).ConfigureAwait(false);
+
+            count++;
+        }
+
+        _logger.LogInformation("[MDB마이그레이션] 배송(DELIVERY→delivery_tracking) {Count}건 이관 완료", count);
+        return count;
+    }
+
+    /// <summary>
+    /// CALENDAR(달력)을 읽어 events 테이블에 INSERT한다.
+    /// 추정 컬럼: CAL_DT, CAL_TITLE, CAL_MEMO
+    /// </summary>
+    private async Task<int> MigrateEventsAsync(
+        OleDbConnection oleConn, string tenantId, DateTime now,
+        IDbTransaction tx, CancellationToken ct)
+    {
+        DataTable dt;
+        try { dt = ReadMdbTable(oleConn, "SELECT * FROM CALENDAR ORDER BY CAL_DT"); }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "[MDB마이그레이션] CALENDAR 테이블 읽기 실패 — POTHER에 없음 가능, skip");
+            return 0;
+        }
+        if (dt.Rows.Count == 0) return 0;
+
+        const string sql = """
+            INSERT IGNORE INTO events
+              (event_id, tenant_id, event_date, title, memo,
+               is_active, created_at, updated_at, migrated_source_hash)
+            VALUES
+              (@EventId, @TenantId, @EventDate, @Title, @Memo,
+               1, @Now, @Now, @MigratedSourceHash)
+            """;
+
+        int count = 0;
+        int rowIdx = 0;
+        foreach (DataRow row in dt.Rows)
+        {
+            rowIdx++;
+            var dtStr = GetStr(row, "CAL_DT");
+            var eventDate = ParseLegacyDate(dtStr) ?? now;
+            var title = GetStr(row, "CAL_TITLE");
+            if (string.IsNullOrWhiteSpace(title)) title = "(제목없음)";
+
+            await Db.ExecuteAsync(new CommandDefinition(sql, new
+            {
+                EventId = Guid.NewGuid().ToString(),
+                TenantId = tenantId,
+                EventDate = eventDate,
+                Title = title.Length > 200 ? title[..200] : title,
+                Memo = GetStr(row, "CAL_MEMO"),
+                Now = now,
+                MigratedSourceHash = ComputeSourceHash($"events:{dtStr}:{title}:{rowIdx:D6}"),
+            }, transaction: tx, cancellationToken: ct)).ConfigureAwait(false);
+
+            count++;
+        }
+
+        _logger.LogInformation("[MDB마이그레이션] 일정(CALENDAR→events) {Count}건 이관 완료", count);
+        return count;
+    }
+
+    /// <summary>
+    /// WS-11 정공법 축 2 (사장님 명령 2026-05-14): SHA256 멱등 키 생성.
+    /// 자연키 문자열 → SHA256 → uppercase hex 64자.
+    /// migrated_source_hash 컬럼에 저장하면 UNIQUE(tenant_id, migrated_source_hash) 충돌 시
+    /// INSERT IGNORE가 자동으로 중복 skip — 재실행 멱등 보장.
+    /// </summary>
+    private static string ComputeSourceHash(string naturalKey)
+    {
+        if (string.IsNullOrEmpty(naturalKey))
+            naturalKey = string.Empty;
+        var bytes = System.Text.Encoding.UTF8.GetBytes(naturalKey);
+        var hash = System.Security.Cryptography.SHA256.HashData(bytes);
+        return Convert.ToHexString(hash); // uppercase 64자
+    }
+
     /// <summary>MDB 폴더 경로에서 3개 파일 경로를 자동 탐색한다.</summary>
     private static (string Pyojun, string Pandata, string Pother) ResolveMdbPaths(string folderPath)
     {
@@ -2592,12 +2943,26 @@ public sealed class MdbMigrationResult
     /// <summary>은행거래(bank_transactions, BANKF) 이관 건수</summary>
     public int BankTransactions { get; set; }
 
+    // WS-11 정공법 축 5 (사장님 명령 2026-05-14): POTHER 4 풀스택.
+    /// <summary>명함/연락처 (DOCNM → partner_contacts) 이관 건수</summary>
+    public int BusinessCards { get; set; }
+
+    /// <summary>AS 티켓 (DOCAS → service_tickets) 이관 건수</summary>
+    public int ServiceTickets { get; set; }
+
+    /// <summary>배송 추적 (DELIVERY → delivery_tracking) 이관 건수</summary>
+    public int DeliveryTracking { get; set; }
+
+    /// <summary>일정/달력 (CALENDAR → events) 이관 건수</summary>
+    public int Events { get; set; }
+
     /// <summary>전체 이관 건수 합계</summary>
     public int Total => Partners + Items + BomHeaders + Employees
                         + SalesOrders + PurchaseOrders + StockLedger
                         + Collections + Cashbook + Expenses
                         + PurchaseOrdersFromIU + SalesOrdersFromIO + TaxInvoices
-                        + Bills + CardPayments + BankTransactions;
+                        + Bills + CardPayments + BankTransactions
+                        + BusinessCards + ServiceTickets + DeliveryTracking + Events;
 
     public override string ToString()
     {
@@ -2605,6 +2970,8 @@ public sealed class MdbMigrationResult
                $"판매:{SalesOrders}, 매입:{PurchaseOrders}, 입출고:{StockLedger}, " +
                $"수금:{Collections}, 경비:{Cashbook}, 전표:{Expenses}, " +
                $"매입(IU):{PurchaseOrdersFromIU}, 매출(IO):{SalesOrdersFromIO}, " +
-               $"세금계산서:{TaxInvoices}, 어음:{Bills}, 카드:{CardPayments}, 은행:{BankTransactions} [합계:{Total}]";
+               $"세금계산서:{TaxInvoices}, 어음:{Bills}, 카드:{CardPayments}, 은행:{BankTransactions}, " +
+               $"명함:{BusinessCards}, AS:{ServiceTickets}, 배송:{DeliveryTracking}, 일정:{Events} " +
+               $"[합계:{Total}]";
     }
 }

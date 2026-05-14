@@ -41,7 +41,8 @@ jobs:
         uses: github/codeql-action/init@v3
         with:
           languages: ${{ matrix.language }}
-          queries: security-and-quality
+          # 축 6-3 (2026-05-14): security-extended 추가 — 추가 보안 패턴 (헌법 #23 ③ 보강).
+          queries: security-extended,security-and-quality
 
       - name: Build solution
         run: dotnet build src/HitPan.sln --configuration Release --nologo /p:TreatWarningsAsErrors=false

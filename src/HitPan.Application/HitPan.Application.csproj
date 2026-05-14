@@ -3,6 +3,10 @@
   <ItemGroup>
     <ProjectReference Include="..\HitPan.Domain\HitPan.Domain.csproj" />
     <ProjectReference Include="..\HitPan.Contracts\HitPan.Contracts.csproj" />
+    <!-- 축 6-4 (2026-05-14): 헌법 #15·#16 자동 검출 Roslyn Analyzer. -->
+    <ProjectReference Include="..\HitPan.Analyzers\HitPan.Analyzers.csproj"
+                      OutputItemType="Analyzer"
+                      ReferenceOutputAssembly="false" />
   </ItemGroup>
 
   <ItemGroup>

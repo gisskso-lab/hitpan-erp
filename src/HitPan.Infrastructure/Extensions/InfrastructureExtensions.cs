@@ -46,6 +46,12 @@ public static class InfrastructureExtensions
         services.AddScoped<CommonCodeSeeder>();
         services.AddScoped<SystemSeeder>();
 
+        // WS-11 정공법 축 5 (사장님 명령 2026-05-14): POTHER 4 리포지토리 DI 등록.
+        services.AddScoped<IPartnerContactRepository, PartnerContactRepository>();
+        services.AddScoped<IServiceTicketRepository, ServiceTicketRepository>();
+        services.AddScoped<IDeliveryTrackingRepository, DeliveryTrackingRepository>();
+        services.AddScoped<ICalendarEventRepository, CalendarEventRepository>();
+
         return services;
     }
 }

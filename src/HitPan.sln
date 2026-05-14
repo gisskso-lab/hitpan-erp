@@ -17,6 +17,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "HitPan.Contracts", "HitPan.
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "HitPan.Tests", "HitPan.Tests\HitPan.Tests.csproj", "{6A081A86-81B4-426E-B3E1-95EFC8C8E39E}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "HitPan.Analyzers", "HitPan.Analyzers\HitPan.Analyzers.csproj", "{6C6AC72D-6B82-43EF-BC1A-72C7105CFE55}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -111,6 +113,18 @@ Global
 		{6A081A86-81B4-426E-B3E1-95EFC8C8E39E}.Release|x64.Build.0 = Release|Any CPU
 		{6A081A86-81B4-426E-B3E1-95EFC8C8E39E}.Release|x86.ActiveCfg = Release|Any CPU
 		{6A081A86-81B4-426E-B3E1-95EFC8C8E39E}.Release|x86.Build.0 = Release|Any CPU
+		{6C6AC72D-6B82-43EF-BC1A-72C7105CFE55}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{6C6AC72D-6B82-43EF-BC1A-72C7105CFE55}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{6C6AC72D-6B82-43EF-BC1A-72C7105CFE55}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{6C6AC72D-6B82-43EF-BC1A-72C7105CFE55}.Debug|x64.Build.0 = Debug|Any CPU
+		{6C6AC72D-6B82-43EF-BC1A-72C7105CFE55}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{6C6AC72D-6B82-43EF-BC1A-72C7105CFE55}.Debug|x86.Build.0 = Debug|Any CPU
+		{6C6AC72D-6B82-43EF-BC1A-72C7105CFE55}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{6C6AC72D-6B82-43EF-BC1A-72C7105CFE55}.Release|Any CPU.Build.0 = Release|Any CPU
+		{6C6AC72D-6B82-43EF-BC1A-72C7105CFE55}.Release|x64.ActiveCfg = Release|Any CPU
+		{6C6AC72D-6B82-43EF-BC1A-72C7105CFE55}.Release|x64.Build.0 = Release|Any CPU
+		{6C6AC72D-6B82-43EF-BC1A-72C7105CFE55}.Release|x86.ActiveCfg = Release|Any CPU
+		{6C6AC72D-6B82-43EF-BC1A-72C7105CFE55}.Release|x86.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
