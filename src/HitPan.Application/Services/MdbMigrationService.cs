@@ -570,7 +570,8 @@ public sealed class MdbMigrationService
         OleDbConnection oleConn, string tenantId, DateTime now,
         Dictionary<int, string> partnerMap, IDbTransaction tx, CancellationToken ct)
     {
-        var dt = ReadMdbTable(oleConn, "SELECT * FROM DOCF8");
+        // P0 #4 (2026-05-14): ORDER BY 추가 — 헌법 #13 멱등 순서 보장 (DB매니저 권고).
+        var dt = ReadMdbTable(oleConn, "SELECT * FROM DOCF8 ORDER BY B_BUY");
         if (dt.Rows.Count == 0) return 0;
 
         // W2 D3 (2026-05-12): partners 19개 컬럼 보강 INSERT (사장님 결재)
@@ -719,7 +720,8 @@ public sealed class MdbMigrationService
         OleDbConnection oleConn, string tenantId, DateTime now,
         Dictionary<string, string> itemMap, IDbTransaction tx, CancellationToken ct)
     {
-        var dt = ReadMdbTable(oleConn, "SELECT * FROM DOCFS");
+        // P0 #4 (2026-05-14): ORDER BY 추가 — 헌법 #13 멱등 순서 보장.
+        var dt = ReadMdbTable(oleConn, "SELECT * FROM DOCFS ORDER BY S_PUM, S_KU");
         if (dt.Rows.Count == 0) return 0;
 
         // W2 D3 (2026-05-12): items 4개 보강 컬럼 추가 (safety_stock 기존, 신규 4개)
@@ -909,7 +911,8 @@ public sealed class MdbMigrationService
         OleDbConnection oleConn, string tenantId, DateTime now,
         Dictionary<string, string> employeeMap, IDbTransaction tx, CancellationToken ct)
     {
-        var dt = ReadMdbTable(oleConn, "SELECT * FROM DOCSW");
+        // P0 #4 (2026-05-14): ORDER BY 추가 — 헌법 #13 멱등 순서 보장.
+        var dt = ReadMdbTable(oleConn, "SELECT * FROM DOCSW ORDER BY SW_NAME");
         if (dt.Rows.Count == 0) return 0;
 
         // W2 D3 (2026-05-12): employees 31개 보강 컬럼 (작11 결재, A안)
@@ -1031,10 +1034,11 @@ public sealed class MdbMigrationService
         string defaultWarehouseId,
         IDbTransaction tx, CancellationToken ct)
     {
+        // P0 #4 (2026-05-14): ORDER BY 추가 — 헌법 #13 멱등 순서 보장.
         // 헤더 로드
-        var headerDt = ReadMdbTable(oleConn, "SELECT * FROM DOCF2");
-        // 상세 로드
-        var detailDt = ReadMdbTable(oleConn, "SELECT * FROM DOCF1");
+        var headerDt = ReadMdbTable(oleConn, "SELECT * FROM DOCF2 ORDER BY K2_NO");
+        // 상세 로드 (라인 순서 보존)
+        var detailDt = ReadMdbTable(oleConn, "SELECT * FROM DOCF1 ORDER BY KA_NO, KA_SUN");
 
         if (headerDt.Rows.Count == 0) return (0, 0);
 
@@ -1369,7 +1373,8 @@ public sealed class MdbMigrationService
         Dictionary<int, string> partnerMap,
         IDbTransaction tx, CancellationToken ct)
     {
-        var dt = ReadMdbTable(oleConn, "SELECT * FROM DOCF5");
+        // P0 #4 (2026-05-14): ORDER BY 추가 — 헌법 #13 멱등 순서 보장 (수금 날짜+업체).
+        var dt = ReadMdbTable(oleConn, "SELECT * FROM DOCF5 ORDER BY S_YMD, S_BUY");
         if (dt.Rows.Count == 0) return 0;
 
         const string sql = """
@@ -1435,7 +1440,8 @@ public sealed class MdbMigrationService
         Dictionary<int, string> partnerMap,
         IDbTransaction tx, CancellationToken ct)
     {
-        var dt = ReadMdbTable(oleConn, "SELECT * FROM DOCF6");
+        // P0 #4 (2026-05-14): ORDER BY 추가 — 헌법 #13 멱등 순서 보장 (경비 날짜).
+        var dt = ReadMdbTable(oleConn, "SELECT * FROM DOCF6 ORDER BY AC_YMD");
         if (dt.Rows.Count == 0) return 0;
 
         const string sql = """
@@ -1502,7 +1508,8 @@ public sealed class MdbMigrationService
         Dictionary<string, string> employeeMap,
         IDbTransaction tx, CancellationToken ct)
     {
-        var dt = ReadMdbTable(oleConn, "SELECT * FROM DOCF7");
+        // P0 #4 (2026-05-14): ORDER BY 추가 — 헌법 #13 멱등 순서 보장 (전표 날짜).
+        var dt = ReadMdbTable(oleConn, "SELECT * FROM DOCF7 ORDER BY SC_DT");
         if (dt.Rows.Count == 0) return 0;
 
         const string sql = """
@@ -1728,7 +1735,8 @@ public sealed class MdbMigrationService
         Dictionary<int, string> partnerMap,
         IDbTransaction tx, CancellationToken ct)
     {
-        var dt = ReadMdbTable(oleConn, "SELECT * FROM DOCF4");
+        // P0 #4 (2026-05-14): ORDER BY 추가 — 헌법 #13 멱등 순서 보장 (세금계산서 번호).
+        var dt = ReadMdbTable(oleConn, "SELECT * FROM DOCF4 ORDER BY TX_NO");
         if (dt.Rows.Count == 0) return 0;
 
         // tax_invoices 컬럼 존재 확인용 — 신규 ERP 스키마에 맞춰 핵심만 INSERT
@@ -1809,7 +1817,8 @@ public sealed class MdbMigrationService
         int count = 0;
 
         // ── DOCF9: 어음 발행 ──
-        var dt9 = ReadMdbTable(oleConn, "SELECT * FROM DOCF9");
+        // P0 #4 (2026-05-14): ORDER BY 추가 — 헌법 #13 멱등 순서 보장 (어음 발행번호).
+        var dt9 = ReadMdbTable(oleConn, "SELECT * FROM DOCF9 ORDER BY EU_NO");
         foreach (DataRow r in dt9.Rows)
         {
             var no = GetStr(r, "EU_NO");
@@ -1836,7 +1845,8 @@ public sealed class MdbMigrationService
         }
 
         // ── DOCFQ: 어음 만기/회수 (별건으로 INSERT) ──
-        var dtQ = ReadMdbTable(oleConn, "SELECT * FROM DOCFQ");
+        // P0 #4 (2026-05-14): ORDER BY 추가 — 헌법 #13 멱등 순서 보장 (어음 만기번호).
+        var dtQ = ReadMdbTable(oleConn, "SELECT * FROM DOCFQ ORDER BY EQ_NO");
         foreach (DataRow r in dtQ.Rows)
         {
             var no = GetStr(r, "EQ_NO");
@@ -1878,7 +1888,8 @@ public sealed class MdbMigrationService
         Dictionary<int, string> partnerMap,
         IDbTransaction tx, CancellationToken ct)
     {
-        var dt = ReadMdbTable(oleConn, "SELECT * FROM DOCCD");
+        // P0 #4 (2026-05-14): ORDER BY 추가 — 헌법 #13 멱등 순서 보장 (카드결제 번호).
+        var dt = ReadMdbTable(oleConn, "SELECT * FROM DOCCD ORDER BY CD_CDNO");
         if (dt.Rows.Count == 0) return 0;
 
         const string headSql = """
@@ -1901,7 +1912,8 @@ public sealed class MdbMigrationService
             """;
 
         // CD1 라인을 CD_CDNO 기준 사전에 적재
-        var dt1 = ReadMdbTable(oleConn, "SELECT * FROM DOCCD1");
+        // P0 #4 (2026-05-14): ORDER BY 추가 — 헌법 #13 멱등 순서 보장 (카드 라인).
+        var dt1 = ReadMdbTable(oleConn, "SELECT * FROM DOCCD1 ORDER BY CD1_NO");
         var lineMap = new Dictionary<string, List<DataRow>>(StringComparer.OrdinalIgnoreCase);
         foreach (DataRow lr in dt1.Rows)
         {
@@ -1975,7 +1987,8 @@ public sealed class MdbMigrationService
         Dictionary<int, string> partnerMap,
         IDbTransaction tx, CancellationToken ct)
     {
-        var dt = ReadMdbTable(oleConn, "SELECT * FROM BANKF");
+        // P0 #4 (2026-05-14): ORDER BY 추가 — 헌법 #13 멱등 순서 보장 (계좌+거래일).
+        var dt = ReadMdbTable(oleConn, "SELECT * FROM BANKF ORDER BY BK_NO, BK_DT");
         if (dt.Rows.Count == 0) return 0;
 
         const string sql = """
