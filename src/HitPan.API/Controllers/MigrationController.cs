@@ -180,27 +180,34 @@ public sealed class MigrationController : ControllerBase
     /// POST 즉시 JobId 반환 (1초 내). 진행률은 /status/{jobId} GET 폴링.
     /// </summary>
     [HttpPost("legacy-mdb/start")]
-    public IActionResult StartMigrationJob([FromBody] MdbMigrationRequest request)
+    public async Task<IActionResult> StartMigrationJob([FromBody] MdbMigrationRequest request)
     {
         var tenantId = HttpContext.Items["TenantId"]?.ToString();
         if (string.IsNullOrEmpty(tenantId)) return Forbid();
         if (string.IsNullOrWhiteSpace(request.FolderPath))
             return BadRequest(new { message = "MDB 폴더 경로를 입력해주세요." });
 
-        var job = _jobStore.Create(tenantId);
+        // P0 #5 (2026-05-14): migration_jobs DB INSERT — migration_errors FK 충족.
+        var userId = HttpContext.Items["UserId"]?.ToString() ?? tenantId;
+        var clientIp = HttpContext.Connection.RemoteIpAddress?.ToString();
+        var userAgent = Request.Headers.UserAgent.ToString();
+        var job = await _jobStore.CreateAsync(tenantId, userId, request.FolderPath, clientIp, userAgent);
 
         // 백그라운드 실행 — HttpContext 끊김 무관, 새 스코프로 서비스 해결.
         _ = Task.Run(async () =>
         {
+            // 백그라운드 안의 모든 DB 작업은 새 scope의 connection 사용 (HttpContext scoped 무관).
+            using var scope = _scopeFactory.CreateScope();
+            var svc = scope.ServiceProvider.GetRequiredService<MdbMigrationService>();
+            var storeBg = scope.ServiceProvider.GetRequiredService<MigrationJobStore>();
             try
             {
                 _jobStore.Update(job.JobId, j => { j.Status = "running"; j.CurrentStep = "초기화"; });
-
-                using var scope = _scopeFactory.CreateScope();
-                var svc = scope.ServiceProvider.GetRequiredService<MdbMigrationService>();
+                await storeBg.SyncToDbAsync(job.JobId, "running");
 
                 _jobStore.Update(job.JobId, j => j.CurrentStep = "MDB 읽기 + Bulk INSERT 진행 중...");
-                var result = await svc.MigrateAsync(request.FolderPath, tenantId, request.MdbPassword, CancellationToken.None);
+                // P0 #5 (2026-05-14): jobId 전달 — 테이블 실패 시 migration_errors AES 저장용.
+                var result = await svc.MigrateAsync(request.FolderPath, tenantId, request.MdbPassword, job.JobId, CancellationToken.None);
 
                 _jobStore.Update(job.JobId, j =>
                 {
@@ -217,6 +224,7 @@ public sealed class MigrationController : ControllerBase
                         Bills = result.Bills, CardPayments = result.CardPayments, BankTransactions = result.BankTransactions
                     };
                 });
+                await storeBg.SyncToDbAsync(job.JobId, "completed", DateTime.UtcNow);
             }
             catch (Exception ex)
             {
@@ -227,6 +235,7 @@ public sealed class MigrationController : ControllerBase
                     j.ErrorMessage = $"{ex.GetType().Name}: {ex.Message}";
                     j.FinishedAt = DateTime.UtcNow;
                 });
+                await storeBg.SyncToDbAsync(job.JobId, "failed", DateTime.UtcNow);
             }
         });
 

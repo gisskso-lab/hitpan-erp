@@ -30,6 +30,10 @@ public sealed class MdbMigrationService
     /// <summary>현재 마이그 호출의 MDB 비번 (AsyncLocal 컨텍스트 — overload 시그니처 보존하면서 비번 전달).</summary>
     private static readonly AsyncLocal<string?> _mdbPasswordContext = new();
 
+    /// <summary>현재 마이그 호출의 job_id (AsyncLocal — migration_errors INSERT 시 사용).
+    /// P0 #5 (2026-05-14): null이면 에러 저장 skip (legacy overload 호환).</summary>
+    private static readonly AsyncLocal<string?> _jobIdContext = new();
+
     public MdbMigrationService(
         IDbConnection db,
         ILogger<MdbMigrationService> logger,
@@ -55,11 +59,20 @@ public sealed class MdbMigrationService
     /// MDB 비번을 받는 overload (핫픽스 2026-05-13).
     /// 비번이 걸린 레거시 히트판 MDB(예: 7618968) 처리용.
     /// </summary>
-    public async Task<MdbMigrationResult> MigrateAsync(
+    public Task<MdbMigrationResult> MigrateAsync(
         string folderPath, string tenantId, string? mdbPassword, CancellationToken ct = default)
+        => MigrateAsync(folderPath, tenantId, mdbPassword, jobId: null, ct);
+
+    /// <summary>
+    /// jobId까지 받는 정식 overload (P0 #5, 2026-05-14).
+    /// jobId가 있으면 테이블 실패 시 migration_errors에 AES 암호화 raw_data 저장.
+    /// </summary>
+    public async Task<MdbMigrationResult> MigrateAsync(
+        string folderPath, string tenantId, string? mdbPassword, string? jobId, CancellationToken ct = default)
     {
         var (pyojunPath, pandataPath, _) = ResolveMdbPaths(folderPath);
         _mdbPasswordContext.Value = mdbPassword;
+        _jobIdContext.Value = jobId;
         try
         {
             return await MigrateCoreAsync(pyojunPath, pandataPath, tenantId, ct).ConfigureAwait(false);
@@ -67,6 +80,7 @@ public sealed class MdbMigrationService
         finally
         {
             _mdbPasswordContext.Value = null;
+            _jobIdContext.Value = null;
         }
     }
 
@@ -172,13 +186,13 @@ public sealed class MdbMigrationService
         try
         {
             // ──────────────────────────────────────
-            // 0. 마이그레이션 전용 기본 창고 (단독 tx)
+            // 0. 마이그레이션 전용 기본 창고 (단독 tx) — 실패 시 throw (마스터 필수)
             // ──────────────────────────────────────
             await RunTableStepAsync("warehouse_migration", async tx =>
             {
                 await EnsureMigrationWarehouseAsync(tenantId, defaultWarehouseId, now, tx, ct).ConfigureAwait(false);
                 return 0;
-            }, ct).ConfigureAwait(false);
+            }, ct, continueOnFail: false, mdbFile: "(infra)").ConfigureAwait(false);
 
             // ──────────────────────────────────────
             // 1단계: PYOJUN.MDB (마스터 — FK 매핑 묶음 유지)
@@ -187,6 +201,7 @@ public sealed class MdbMigrationService
             // ──────────────────────────────────────
             _logger.LogInformation("[MDB마이그레이션] PYOJUN.MDB 읽기 시작: {Path}", pyojunPath);
 
+            // PYOJUN(마스터)는 실패 시 throw — partnerMap/itemMap 못 채우면 PANDATA가 무의미.
             await RunTableStepAsync("pyojun_master", async tx =>
             {
                 using var oleConn = OpenOleDb(pyojunPath);
@@ -195,7 +210,7 @@ public sealed class MdbMigrationService
                 result.BomHeaders = await MigrateBomAsync(oleConn, tenantId, now, itemMap, tx, ct).ConfigureAwait(false);
                 result.Employees = await MigrateEmployeesAsync(oleConn, tenantId, now, employeeMap, tx, ct).ConfigureAwait(false);
                 return result.Partners + result.Items + result.BomHeaders + result.Employees;
-            }, ct).ConfigureAwait(false);
+            }, ct, continueOnFail: false, mdbFile: "PYOJUN").ConfigureAwait(false);
 
             // ──────────────────────────────────────
             // 2단계: PANDATA.mdb (거래 — 테이블별 독립 tx)
@@ -319,11 +334,17 @@ public sealed class MdbMigrationService
     /// <summary>
     /// 테이블 단위 작업을 독립 트랜잭션으로 실행한다.
     /// 한 테이블 실패는 다른 테이블 commit을 보존한다(헌법 #20 본래 의미).
+    /// P0 #5 (2026-05-14): 테이블 실패 시 migration_errors에 AES 암호화 raw_data 저장 후
+    /// continueOnFail=true면 다음 테이블 계속, false면 throw.
     /// </summary>
     /// <param name="tableName">migration_checkpoints.table_name 값 — 진행 추적용.</param>
     /// <param name="work">tx를 받아 수행할 마이그 단위 작업. 반환값은 처리 행수.</param>
+    /// <param name="ct">취소 토큰.</param>
+    /// <param name="continueOnFail">true면 실패해도 다음 테이블 진행. false면 throw (마스터 단계용).</param>
+    /// <param name="mdbFile">에러 저장 시 mdb_file 컬럼 값 (예: PYOJUN/PANDATA).</param>
     private async Task RunTableStepAsync(
-        string tableName, Func<IDbTransaction, Task<int>> work, CancellationToken ct)
+        string tableName, Func<IDbTransaction, Task<int>> work, CancellationToken ct,
+        bool continueOnFail = true, string mdbFile = "PANDATA")
     {
         var sw = System.Diagnostics.Stopwatch.StartNew();
         IDbTransaction? tx = null;
@@ -337,21 +358,139 @@ public sealed class MdbMigrationService
                 "[MDB마이그레이션] {Table} 완료: {Rows}행, {Elapsed}ms",
                 tableName, rows, sw.ElapsedMilliseconds);
         }
+        catch (OperationCanceledException)
+        {
+            // 취소는 에러 저장 대상 아님 (사용자 의도된 중단).
+            sw.Stop();
+            try { tx?.Rollback(); } catch { /* swallow during cancel */ }
+            throw;
+        }
         catch (Exception ex)
         {
             sw.Stop();
             try { tx?.Rollback(); }
             catch (Exception rbex) { _logger.LogError(rbex, "[MDB마이그레이션] {Table} 롤백 실패", tableName); }
             _logger.LogError(ex,
-                "[MDB마이그레이션] {Table} 실패 — 이 테이블만 롤백, 다른 테이블 보존. ({Elapsed}ms)",
-                tableName, sw.ElapsedMilliseconds);
-            throw;
+                "[MDB마이그레이션] {Table} 실패 ({Elapsed}ms, continueOnFail={Continue})",
+                tableName, sw.ElapsedMilliseconds, continueOnFail);
+
+            // migration_errors에 AES 암호화 raw_data 저장 (jobId 있을 때만, 헌법 #5).
+            await TryInsertMigrationErrorAsync(tableName, mdbFile, ex, ct).ConfigureAwait(false);
+
+            if (!continueOnFail) throw;
         }
         finally
         {
             tx?.Dispose();
         }
     }
+
+    /// <summary>
+    /// 테이블 단위 실패를 migration_errors에 저장한다 (헌법 #5 AES + #15 silent swallow 금지).
+    /// jobId가 null이면 skip(legacy overload 호환). 에러 저장 자체가 실패해도 마이그 계속.
+    /// </summary>
+    private async Task TryInsertMigrationErrorAsync(
+        string tableName, string mdbFile, Exception ex, CancellationToken ct)
+    {
+        var jobId = _jobIdContext.Value;
+        if (string.IsNullOrWhiteSpace(jobId))
+        {
+            _logger.LogDebug("[MDB마이그레이션] jobId 없음 — migration_errors 저장 skip ({Table})", tableName);
+            return;
+        }
+
+        try
+        {
+            // raw_data: 실패 컨텍스트 직렬화 후 AES-256-CBC 암호화 (헌법 #5 정공법, VARBINARY LONGBLOB).
+            var rawPlain = $"{{\"table\":\"{tableName}\",\"mdb\":\"{mdbFile}\",\"exception\":\"{EscapeJson(ex.GetType().Name)}\",\"message\":\"{EscapeJson(ex.Message)}\",\"stack\":\"{EscapeJson(ex.StackTrace ?? string.Empty)}\"}}";
+            var encryptedRaw = _crypto.EncryptToBytes(rawPlain);
+
+            var errorType = MapErrorType(ex);
+            var severity = "error";
+
+            // tenant_id는 migration_jobs에서 조회 (1회). 못 찾으면 placeholder.
+            var tenantId = await _db.ExecuteScalarAsync<string?>(new CommandDefinition(
+                "SELECT tenant_id FROM migration_jobs WHERE job_id = @JobId LIMIT 1",
+                new { JobId = jobId }, cancellationToken: ct)).ConfigureAwait(false) ?? "unknown";
+
+            const string sql = """
+                INSERT INTO migration_errors
+                  (error_id, job_id, tenant_id, mdb_file, table_name,
+                   error_type, error_severity, error_message, error_detail,
+                   raw_data, occurred_at, created_at)
+                VALUES
+                  (@ErrorId, @JobId, @TenantId, @MdbFile, @TableName,
+                   @ErrorType, @Severity, @Message, @Detail,
+                   @RawData, @Now, @Now)
+                """;
+            await _db.ExecuteAsync(new CommandDefinition(sql, new
+            {
+                ErrorId = Guid.NewGuid().ToString(),
+                JobId = jobId,
+                TenantId = tenantId,
+                MdbFile = mdbFile,
+                TableName = tableName,
+                ErrorType = errorType,
+                Severity = severity,
+                Message = Truncate(ex.Message, 65535),
+                Detail = Truncate(ex.ToString(), 65535),
+                RawData = encryptedRaw,
+                Now = DateTime.UtcNow,
+            }, cancellationToken: ct)).ConfigureAwait(false);
+
+            _logger.LogInformation(
+                "[MDB마이그레이션] migration_errors 저장 완료 (job={JobId}, table={Table}, type={Type})",
+                jobId, tableName, errorType);
+        }
+        catch (Exception logEx)
+        {
+            // 에러 저장 자체 실패 — 마이그 본 흐름 막지 않음 (헌법 #15: silent 금지, WARN 남김).
+            _logger.LogWarning(logEx,
+                "[MDB마이그레이션] migration_errors 저장 실패 — 본 마이그는 계속 진행 ({Table})", tableName);
+        }
+    }
+
+    /// <summary>예외 타입 → migration_errors.error_type enum 매핑.</summary>
+    private static string MapErrorType(Exception ex)
+    {
+        var msg = ex.Message?.ToLowerInvariant() ?? string.Empty;
+        var typeName = ex.GetType().Name;
+
+        if (typeName.Contains("Timeout", StringComparison.OrdinalIgnoreCase)) return "timeout";
+        if (msg.Contains("duplicate") || msg.Contains("unique")) return "duplicate";
+        if (msg.Contains("foreign key") || msg.Contains("fk_")) return "fk_missing";
+        if (msg.Contains("encoding") || msg.Contains("charset")) return "encoding";
+        if (msg.Contains("constraint") || msg.Contains("check")) return "constraint";
+        if (msg.Contains("schema") || msg.Contains("column") || msg.Contains("table")) return "schema";
+        return "other";
+    }
+
+    /// <summary>JSON 문자열 이스케이프 (제어문자 + 특수문자).</summary>
+    private static string EscapeJson(string s)
+    {
+        if (string.IsNullOrEmpty(s)) return string.Empty;
+        var sb = new StringBuilder(s.Length + 8);
+        foreach (var c in s)
+        {
+            switch (c)
+            {
+                case '"': sb.Append("\\\""); break;
+                case '\\': sb.Append("\\\\"); break;
+                case '\n': sb.Append("\\n"); break;
+                case '\r': sb.Append("\\r"); break;
+                case '\t': sb.Append("\\t"); break;
+                default:
+                    if (c < 0x20) sb.Append($"\\u{(int)c:x4}");
+                    else sb.Append(c);
+                    break;
+            }
+        }
+        return sb.ToString();
+    }
+
+    /// <summary>문자열 길이 제한 (text 컬럼 65535 보호).</summary>
+    private static string Truncate(string s, int max)
+        => string.IsNullOrEmpty(s) ? string.Empty : (s.Length <= max ? s : s.Substring(0, max));
 
     /// <summary>
     /// 마이그 세션 한정 튜닝 (사장님 결재, 글로벌 영향 0).
