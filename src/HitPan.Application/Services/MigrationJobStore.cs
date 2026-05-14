@@ -12,7 +12,11 @@ namespace HitPan.Application.Services;
 /// </summary>
 public sealed class MigrationJobStore
 {
-    private readonly ConcurrentDictionary<string, MigrationJob> _jobs = new();
+    // CODE-01 즉시 봉합 (2026-05-14 18:50): IDbConnection이 Scoped라서 store도 Scoped 등록 필요.
+    // 그러나 jobId 진행 상태는 모든 요청이 공유해야 하므로 dictionary는 static 유지.
+    // 검증팀 1차 의견("CODE-01은 다음 사이클")이 옳았으나, WS-10에서 IDbConnection 주입하면서
+    // ASP.NET Core DI validation이 즉시 부팅 차단 → 19:00 참관 30분 전 봉합.
+    private static readonly ConcurrentDictionary<string, MigrationJob> _jobs = new();
     private readonly IDbConnection _db;
 
     public MigrationJobStore(IDbConnection db)

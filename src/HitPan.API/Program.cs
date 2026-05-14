@@ -115,7 +115,9 @@ builder.Services.AddScoped<ExcelImportService>();
 #pragma warning disable CA1416  // Windows 전용 — Linux 컨테이너 배포 시 호출 안 됨 (MigrationController가 [SupportedOSPlatform("windows")])
 builder.Services.AddScoped<MdbMigrationService>();
 // 2026-05-14: 마이그 백그라운드 잡 진행률 저장소 (524 회피용 폴링 패턴).
-builder.Services.AddSingleton<MigrationJobStore>();
+// CODE-01 봉합 (2026-05-14 18:50): IDbConnection Scoped 의존성 → store도 Scoped.
+// jobId 진행 상태는 static ConcurrentDictionary로 모든 요청 공유 (MigrationJobStore 내부).
+builder.Services.AddScoped<MigrationJobStore>();
 #pragma warning restore CA1416
 // 메시지큐 제거 (2026-05-13 사장님 지시) — bulk INSERT로 마이그 빠르게 종료, 큐 불필요.
 builder.Services.AddScoped<IPartnerBalanceRepository, PartnerBalanceRepository>();
