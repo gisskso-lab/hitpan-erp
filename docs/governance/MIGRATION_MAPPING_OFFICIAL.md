@@ -201,17 +201,58 @@ MSSQL 측 동일 쿼리 → diff 비교 → 누락 또는 추가 데이터 식�
 
 ## 8. 5/16~5/17 마이그 마무리 작업지시서
 
-### 우선순위 1 (5/16 새벽~오전, 백엔드 개발자 3·4)
-- WS-20260515-MIG-01: 진범 #1 (수금 BulkCopy) — S_SUN 컬럼 추가 + sourceId 정정
-- WS-20260515-MIG-02: 1분 절대 (collections·bank_transactions·cashbook·expenses) BulkCopy 전환
+### ✅ 5/15 PM 자체 진행 완료
+- **진범 #1 (collections 봉합)** — commit `712ce65`. S_SUN+S_GU 공식 멱등 키 반영
+- **진범 #2 (K2 partner fallback)** — commit `44a0661`. EnsureLegacyFallbackPartnerAsync 신규, 워크플로우 끊김 0
 
-### 우선순위 2 (5/16 오후, 백엔드 + DB)
-- WS-20260515-MIG-03: 진범 #2 (K2 partner fallback) — EnsureLegacyUnknownPartner
-- WS-20260515-MIG-04: 진범 #3 (세금계산서 DDL 정합) — TX_* 13컬럼 + 4 품목 분해
+### 우선순위 1 (5/16 새벽, 본부장 입회 + DB매니저)
+- **demo.hitpan.kr 실측 검증** — `tools/mariadb_vs_mssql_check.sql` 실행, 13/13 PASS 카드 갱신 (사장님 B 결정으로 연기됨)
+
+### 우선순위 2 (5/16 오전, 백엔드 매니저 + DB매니저)
+- **WS-MIG-03 (진범 #3 세금계산서 DDL)** — TX_* 13컬럼 추가 + 4 품목 인라인 → tax_invoice_items 분해
+- **WS-MIG-04 (1분 절대 잔여 3종)** — bank_transactions/cashbook/expenses ALTER TABLE + BulkCopy
 
 ### 우선순위 3 (5/17 종일)
-- WS-20260515-MIG-05: 워크플로우 ID 연결 (IJ_TAXNO + IJ_TAXBUY 매핑)
-- WS-20260515-MIG-06: demo 실측 13/13 PASS + 60초 절대 검증
+- WS-MIG-05: 워크플로우 ID 연결 (IJ_TAXNO + IJ_TAXBUY 매핑)
+- WS-MIG-06: demo 실측 13/13 PASS + 60초 절대 검증
+
+---
+
+## 8-A. ⭐ 5/15 PM 추가 발견 — 우리 코드 PK 컬럼 누락 매트릭스
+
+DOCF6 / DOCF7 / BANKF 인덱스 전수 추출 결과 (`sqlcmd sys.indexes`), **우리 코드가 PK 일부 컬럼을 안 읽는** 사실 확인.
+
+| 테이블 | MSSQL PK | 우리 코드 읽음 | 누락 | 영향 |
+|---|---|---|---|---|
+| BANKF | `BK_NO + BK_YMD + BK_JWASU + BK_JEN` | BK_NO, BK_YMD, BK_JEN | **BK_JWASU (smallint)** | 멱등 키 미존재, 재마이그 중복 |
+| DOCF6 (cashbook) | `AC_YMD + AC_JWASU + AC_JEN` | AC_YMD, AC_SGU | **AC_JWASU + AC_JEN** | PK 2/3 누락 |
+| DOCF7 (expenses) | `SC_KCODE + SC_DT + SC_SAWON + SC_SUN` | SC_KCODE, SC_DT, SC_SAWON | **SC_SUN (smallint)** | 동일 사원·동일 일자 다중 전표 분리 불가 |
+
+### 5/16 봉합 액션 (WS-MIG-04 명세서에 반영)
+
+```csharp
+// 1) MDB 읽기 SQL에 누락 컬럼 추가:
+"SELECT * FROM BANKF ORDER BY BK_NO, BK_YMD, BK_JWASU, BK_JEN"
+"SELECT * FROM DOCF6 ORDER BY AC_YMD, AC_JWASU, AC_JEN"
+"SELECT * FROM DOCF7 ORDER BY SC_KCODE, SC_DT, SC_SAWON, SC_SUN"
+
+// 2) sourceId 정답 패턴:
+sourceId = $"mig-{BK_NO}-{BK_YMD}-{bkJwasu}-{BK_JEN}";        // bank_transactions
+sourceId = $"mig-{AC_YMD}-{acJwasu}-{AC_JEN}";                // cashbook
+sourceId = $"mig-{SC_KCODE}-{SC_DT}-{SC_SAWON}-{scSun:D5}";   // expenses
+
+// 3) DDL ALTER TABLE (DB매니저):
+ALTER TABLE bank_transactions ADD COLUMN source_type VARCHAR(30) NULL,
+                              ADD COLUMN source_id VARCHAR(80) NULL,
+                              ADD COLUMN migrated_source_hash VARCHAR(64) NULL,
+                              ADD UNIQUE KEY uq_bank_tx_source (tenant_id, source_type, source_id);
+-- cashbook / expenses 동일 패턴 적용
+```
+
+### 멱등성 의미
+- 멱등 키 = MDB 자체 PK 그대로 보존 → 재마이그 시 INSERT IGNORE 자동 차단
+- 인위적 rowIdx 패턴 폐기 (5/14 collections 사고와 같은 ORDER BY tie-break 비결정성 제거)
+- 진범 #1 collections와 정확히 동일한 패턴 적용
 
 ---
 
