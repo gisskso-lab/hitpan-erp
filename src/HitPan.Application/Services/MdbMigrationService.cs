@@ -1880,43 +1880,31 @@ public sealed class MdbMigrationService
 
     /// <summary>
     /// DOCF5(수금)를 읽어 collections 테이블에 INSERT한다.
+    /// 헌법 #26 1분 절대 원칙(2026-05-14): DOCF5 60만건+ 환경에서 row-by-row INSERT는 Lock wait timeout.
+    /// stock_ledger와 동일한 MySqlBulkCopy 정공법(staging → INSERT IGNORE SELECT)으로 봉합.
     /// </summary>
     private async Task<int> MigrateCollectionsAsync(
         OleDbConnection oleConn, string tenantId, DateTime now,
         Dictionary<int, string> partnerMap,
         IDbTransaction tx, CancellationToken ct)
     {
-        // P0 #4 (2026-05-14): ORDER BY 추가 — 헌법 #13 멱등 순서 보장 (수금 날짜+업체).
-        var dt = ReadMdbTable(oleConn, "SELECT * FROM DOCF5 ORDER BY S_YMD, S_BUY");
+        // 2026-05-15 MSSQL 공식 마이그 정답서 반영:
+        //   PK = S_BUY + S_YMD + S_SUN(+S_GU) — S_SUN(smallint)이 공식 멱등 키.
+        //   ORDER BY 도 동일 순서로 정렬해 row 순서 결정성 보장.
+        var dt = ReadMdbTable(oleConn, "SELECT * FROM DOCF5 ORDER BY S_BUY, S_YMD, S_SUN");
         if (dt.Rows.Count == 0) return 0;
 
-        // WS-20260514-08 (CODE-06): INSERT IGNORE + 멱등 키 source_type/source_id.
-        // uq_collections_source(tenant_id, source_type, source_id) UNIQUE 활용 (WS-10에서 추가).
-        // 재실행 시 같은 source_id 중복 INSERT 자동 차단.
-        const string sql = """
-            INSERT IGNORE INTO collections
-              (collection_id, tenant_id, partner_id, collection_date, amount,
-               collection_method, memo, is_active, created_at, updated_at,
-               source_type, source_id, migrated_source_hash)
-            VALUES
-              (@CollectionId, @TenantId, @PartnerId, @CollectionDate, @Amount,
-               @Method, @Memo, 1, @Now, @Now,
-               'migration', @SourceId, @MigratedSourceHash)
-            """;
-
-        int count = 0;
-        int rowIdx = 0;
+        // 1단계: in-memory row 변환 (partner 매핑 없으면 skip — 진범 #2와 별개).
+        var rows = new List<CollectionRow>(dt.Rows.Count);
         foreach (DataRow row in dt.Rows)
         {
-            rowIdx++;
             var buyCode = GetInt(row, "S_BUY");
             if (!partnerMap.TryGetValue(buyCode, out var partnerId)) continue;
 
             var ymd = GetStr(row, "S_YMD");
             var collDate = ParseLegacyDate(ymd) ?? now;
-
-            // S_GU(구분)에 따라 수금방법 추정
             var gu = GetStr(row, "S_GU");
+            var sSun = GetInt(row, "S_SUN");
             var method = gu switch
             {
                 "현금" or "1" => "cash",
@@ -1925,16 +1913,12 @@ public sealed class MdbMigrationService
                 "수표" or "4" => "check",
                 _ => "bank_transfer"
             };
-
-            // S_SUK(수금금액)을 사용. 없으면 S_BAL(발생금액) 사용
             var amount = GetDec(row, "S_SUK");
             if (amount == 0) amount = GetDec(row, "S_BAL");
 
-            // WS-08 멱등 키: DOCF5에 시퀀스 컬럼 없음 → 정렬 ORDER BY 후 rowIdx 사용.
-            // 동일 MDB 두 번 마이그 시 같은 ORDER BY → 같은 rowIdx → 같은 source_id → INSERT IGNORE skip.
-            var sourceId = $"mig-{ymd}-{buyCode}-{rowIdx:D6}";
-
-            await Db.ExecuteAsync(new CommandDefinition(sql, new
+            // 공식 멱등 키: S_BUY + S_YMD + S_SUN + S_GU (인위적 rowIdx 폐기).
+            var sourceId = $"mig-{buyCode}-{ymd}-{sSun:D5}-{(string.IsNullOrEmpty(gu) ? "_" : gu)}";
+            rows.Add(new CollectionRow
             {
                 CollectionId = Guid.NewGuid().ToString(),
                 TenantId = tenantId,
@@ -1945,15 +1929,185 @@ public sealed class MdbMigrationService
                 Memo = GetStr(row, "S_REM"),
                 Now = now,
                 SourceId = sourceId,
-                // WS-11 정공법 축 2 (2026-05-14): 자연키(날짜+업체+행순+금액) SHA256
                 MigratedSourceHash = ComputeSourceHash($"collections:{sourceId}:{amount}"),
-            }, transaction: tx, cancellationToken: ct)).ConfigureAwait(false);
-
-            count++;
+            });
         }
 
-        _logger.LogInformation("[MDB마이그레이션] 수금 {Count}건 이관 완료", count);
+        if (rows.Count == 0) return 0;
+
+        // 정공법 BulkCopy 경로: 잡 conn이 MySqlConnection일 때 활성화 (헌법 #26 1분 절대).
+        if (Db is MySqlConnection mysqlConn && tx is MySqlTransaction mysqlTx)
+        {
+            return await BulkCopyCollectionsAsync(mysqlConn, mysqlTx, rows, ct).ConfigureAwait(false);
+        }
+
+        // legacy fallback: row-by-row INSERT IGNORE (Lock timeout 위험 — factory 모드 전용 권장).
+        const string sql = """
+            INSERT IGNORE INTO collections
+              (collection_id, tenant_id, partner_id, collection_date, amount,
+               collection_method, memo, is_active, created_at, updated_at,
+               source_type, source_id, migrated_source_hash)
+            VALUES
+              (@CollectionId, @TenantId, @PartnerId, @CollectionDate, @Amount,
+               @Method, @Memo, 1, @Now, @Now,
+               'migration', @SourceId, @MigratedSourceHash)
+            """;
+        int count = 0;
+        foreach (var r in rows)
+        {
+            await Db.ExecuteAsync(new CommandDefinition(sql, r,
+                transaction: tx, cancellationToken: ct)).ConfigureAwait(false);
+            count++;
+        }
+        _logger.LogInformation("[MDB마이그레이션] 수금 {Count}건 이관 완료(legacy fallback)", count);
         return count;
+    }
+
+    /// <summary>
+    /// 정공법(축 1) MySqlBulkCopy 경로 — collections.
+    /// stock_ledger와 동일 패턴: TEMPORARY staging → BulkCopy → INSERT IGNORE SELECT.
+    /// </summary>
+    private async Task<int> BulkCopyCollectionsAsync(
+        MySqlConnection conn, MySqlTransaction tx, List<CollectionRow> rows, CancellationToken ct)
+    {
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        var stageTable = $"collections_stage_{Guid.NewGuid():N}".Substring(0, 40);
+
+        var createSql = $"CREATE TEMPORARY TABLE `{stageTable}` LIKE collections";
+        using (var createCmd = new MySqlCommand(createSql, conn, tx))
+        {
+            createCmd.CommandTimeout = 60;
+            await createCmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
+        }
+
+        var uniqueIndexes = (await Db.QueryAsync<string>(new CommandDefinition(
+            "SELECT DISTINCT index_name FROM information_schema.statistics " +
+            "WHERE table_schema = DATABASE() AND table_name = 'collections' " +
+            "  AND non_unique = 0 AND index_name <> 'PRIMARY'",
+            transaction: tx, cancellationToken: ct)).ConfigureAwait(false)).ToList();
+        foreach (var idx in uniqueIndexes)
+        {
+            try
+            {
+                using var dropIdxCmd = new MySqlCommand(
+                    $"ALTER TABLE `{stageTable}` DROP INDEX `{idx}`", conn, tx);
+                dropIdxCmd.CommandTimeout = 30;
+                await dropIdxCmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
+            }
+            catch (Exception idxEx)
+            {
+                _logger.LogWarning(idxEx,
+                    "[MDB마이그레이션] collections stage({Table}) UNIQUE 인덱스 {Idx} DROP 실패",
+                    stageTable, idx);
+            }
+        }
+
+        try
+        {
+            var dataTable = BuildCollectionsDataTable(rows);
+            var bulk = new MySqlBulkCopy(conn, tx)
+            {
+                DestinationTableName = stageTable,
+                BulkCopyTimeout = 600,
+            };
+            var cols = new[]
+            {
+                "collection_id", "tenant_id", "partner_id", "collection_date", "amount",
+                "collection_method", "memo", "is_active", "created_at", "updated_at",
+                "source_type", "source_id", "migrated_source_hash",
+            };
+            for (int i = 0; i < cols.Length; i++)
+            {
+                bulk.ColumnMappings.Add(new MySqlBulkCopyColumnMapping(i, cols[i]));
+            }
+
+            var bulkResult = await bulk.WriteToServerAsync(dataTable, ct).ConfigureAwait(false);
+            _logger.LogInformation(
+                "[MDB마이그레이션] collections BulkCopy 적재: {Rows}행, warnings={Warn}, {Elapsed}ms",
+                bulkResult.RowsInserted, bulkResult.Warnings.Count, sw.ElapsedMilliseconds);
+
+            var insertSql = $"""
+                INSERT IGNORE INTO collections
+                  (collection_id, tenant_id, partner_id, collection_date, amount,
+                   collection_method, memo, is_active, created_at, updated_at,
+                   source_type, source_id, migrated_source_hash)
+                SELECT
+                   collection_id, tenant_id, partner_id, collection_date, amount,
+                   collection_method, memo, is_active, created_at, updated_at,
+                   source_type, source_id, migrated_source_hash
+                FROM `{stageTable}`
+                """;
+            int inserted;
+            using (var insertCmd = new MySqlCommand(insertSql, conn, tx))
+            {
+                insertCmd.CommandTimeout = 600;
+                inserted = await insertCmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
+            }
+
+            sw.Stop();
+            _logger.LogInformation(
+                "[MDB마이그레이션] collections 정공법 완료: 후보 {Total}행 → INSERT {Inserted}행 (중복 IGNORE={Skipped}, 총 {Elapsed}ms)",
+                rows.Count, inserted, rows.Count - inserted, sw.ElapsedMilliseconds);
+            return inserted;
+        }
+        finally
+        {
+            try
+            {
+                using var dropCmd = new MySqlCommand(
+                    $"DROP TEMPORARY TABLE IF EXISTS `{stageTable}`", conn, tx);
+                dropCmd.CommandTimeout = 30;
+                await dropCmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
+            }
+            catch (Exception dex)
+            {
+                _logger.LogWarning(dex,
+                    "[MDB마이그레이션] collections staging({Table}) DROP 실패 — 세션 종료 시 auto-drop 예정",
+                    stageTable);
+            }
+        }
+    }
+
+    private static DataTable BuildCollectionsDataTable(List<CollectionRow> rows)
+    {
+        var dt = new DataTable();
+        dt.Columns.Add("collection_id", typeof(string));
+        dt.Columns.Add("tenant_id", typeof(string));
+        dt.Columns.Add("partner_id", typeof(string));
+        dt.Columns.Add("collection_date", typeof(DateTime));
+        dt.Columns.Add("amount", typeof(decimal));
+        dt.Columns.Add("collection_method", typeof(string));
+        dt.Columns.Add("memo", typeof(string));
+        dt.Columns.Add("is_active", typeof(byte));
+        dt.Columns.Add("created_at", typeof(DateTime));
+        dt.Columns.Add("updated_at", typeof(DateTime));
+        dt.Columns.Add("source_type", typeof(string));
+        dt.Columns.Add("source_id", typeof(string));
+        dt.Columns.Add("migrated_source_hash", typeof(string));
+
+        foreach (var r in rows)
+        {
+            dt.Rows.Add(
+                r.CollectionId, r.TenantId, r.PartnerId, r.CollectionDate, r.Amount,
+                r.Method, (object?)r.Memo ?? DBNull.Value, (byte)1, r.Now, r.Now,
+                "migration", r.SourceId, (object?)r.MigratedSourceHash ?? DBNull.Value);
+        }
+        return dt;
+    }
+
+    /// <summary>collections 마이그 임시 row DTO. legacy fallback의 Dapper 매개변수와도 호환.</summary>
+    private sealed class CollectionRow
+    {
+        public string CollectionId { get; set; } = string.Empty;
+        public string TenantId { get; set; } = string.Empty;
+        public string PartnerId { get; set; } = string.Empty;
+        public DateTime CollectionDate { get; set; }
+        public decimal Amount { get; set; }
+        public string Method { get; set; } = "bank_transfer";
+        public string? Memo { get; set; }
+        public DateTime Now { get; set; }
+        public string SourceId { get; set; } = string.Empty;
+        public string? MigratedSourceHash { get; set; }
     }
 
     // ────────────────────────────────────────────────────────────────
