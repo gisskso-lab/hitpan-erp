@@ -2158,41 +2158,36 @@ public sealed class MdbMigrationService
         Dictionary<int, string> partnerMap,
         IDbTransaction tx, CancellationToken ct)
     {
-        // P0 #4 (2026-05-14): ORDER BY 추가 — 헌법 #13 멱등 순서 보장 (경비 날짜).
-        var dt = ReadMdbTable(oleConn, "SELECT * FROM DOCF6 ORDER BY AC_YMD");
+        // 2026-05-15 1분 절대 봉합 (WS-MIG-04):
+        //   PK 정답 = AC_YMD + AC_JWASU + AC_JEN (MSSQL DOCF6 sys.indexes 추출).
+        //   collections 패턴 동형 — BulkCopy 분기 + 멱등 키 + UNIQUE.
+        var dt = ReadMdbTable(oleConn, "SELECT * FROM DOCF6 ORDER BY AC_YMD, AC_JWASU, AC_JEN");
         if (dt.Rows.Count == 0) return 0;
 
-        const string sql = """
-            INSERT INTO cashbook
-              (cashbook_id, tenant_id, tx_date, tx_type, category, partner_id,
-               description, income_amount, expense_amount, balance,
-               payment_method, memo, is_active, created_at)
-            VALUES
-              (@CashbookId, @TenantId, @TxDate, @TxType, '경비', @PartnerId,
-               @Description, @IncomeAmount, @ExpenseAmount, 0,
-               'cash', @Memo, 1, @Now)
-            """;
-
-        int count = 0;
+        var rows = new List<CashbookRow>(dt.Rows.Count);
         foreach (DataRow row in dt.Rows)
         {
-            var txDate = ParseLegacyDate(GetStr(row, "AC_YMD")) ?? now;
+            var ymd = GetStr(row, "AC_YMD");
+            var acJwasu = GetInt(row, "AC_JWASU");
+            var acJen = GetStr(row, "AC_JEN");           // 적요차
+            var txDate = ParseLegacyDate(ymd) ?? now;
             var amt = GetDec(row, "AC_AMT");
 
             var buyCode = GetInt(row, "AC_SBUY");
             partnerMap.TryGetValue(buyCode, out var partnerId);
 
-            // AC_SGU(구분)에 따라 입출금 판단
+            // AC_SGU(구분)에 따라 입출금 판단 — 기존 로직 유지
             var gu = GetStr(row, "AC_SGU");
             var isExpense = true; // 기본적으로 경비(지출)로 처리
 
             // 적요(차/대) 합쳐서 description
-            var jenCha = GetStr(row, "AC_JEN");   // 적요차
-            var jekDae = GetStr(row, "AC_JEK");   // 적요대
-            var description = $"{jenCha} {jekDae}".Trim();
+            var jekDae = GetStr(row, "AC_JEK");          // 적요대
+            var description = $"{acJen} {jekDae}".Trim();
             if (string.IsNullOrWhiteSpace(description)) description = "레거시 경비 이관";
 
-            await Db.ExecuteAsync(new CommandDefinition(sql, new
+            // 공식 멱등 키: AC_YMD + AC_JWASU + AC_JEN
+            var sourceId = $"mig-{ymd}-{acJwasu:D5}-{(string.IsNullOrEmpty(acJen) ? "_" : acJen)}";
+            rows.Add(new CashbookRow
             {
                 CashbookId = Guid.NewGuid().ToString(),
                 TenantId = tenantId,
@@ -2202,15 +2197,199 @@ public sealed class MdbMigrationService
                 Description = description.Length > 200 ? description[..200] : description,
                 IncomeAmount = isExpense ? 0m : amt,
                 ExpenseAmount = isExpense ? amt : 0m,
-                Memo = GetStr(row, "AC_cheri"),   // 처리 → memo
-                Now = now
-            }, transaction: tx, cancellationToken: ct)).ConfigureAwait(false);
-
-            count++;
+                Memo = GetStr(row, "AC_cheri"),
+                Now = now,
+                SourceId = sourceId,
+                MigratedSourceHash = ComputeSourceHash($"cashbook:{sourceId}:{amt}"),
+            });
         }
 
-        _logger.LogInformation("[MDB마이그레이션] 경비(cashbook) {Count}건 이관 완료", count);
+        if (rows.Count == 0) return 0;
+
+        // 정공법 BulkCopy 경로 (헌법 #26 1분 절대)
+        if (Db is MySqlConnection mysqlConn && tx is MySqlTransaction mysqlTx)
+        {
+            return await BulkCopyCashbookAsync(mysqlConn, mysqlTx, rows, ct).ConfigureAwait(false);
+        }
+
+        // legacy fallback: row-by-row INSERT IGNORE
+        const string sql = """
+            INSERT IGNORE INTO cashbook
+              (cashbook_id, tenant_id, tx_date, tx_type, category, partner_id,
+               description, income_amount, expense_amount, balance,
+               payment_method, memo, is_active, created_at,
+               source_type, source_id, migrated_source_hash)
+            VALUES
+              (@CashbookId, @TenantId, @TxDate, @TxType, '경비', @PartnerId,
+               @Description, @IncomeAmount, @ExpenseAmount, 0,
+               'cash', @Memo, 1, @Now,
+               'migration', @SourceId, @MigratedSourceHash)
+            """;
+        int count = 0;
+        foreach (var r in rows)
+        {
+            await Db.ExecuteAsync(new CommandDefinition(sql, r,
+                transaction: tx, cancellationToken: ct)).ConfigureAwait(false);
+            count++;
+        }
+        _logger.LogInformation("[MDB마이그레이션] 경비(cashbook) {Count}건 이관 완료(legacy fallback)", count);
         return count;
+    }
+
+    /// <summary>
+    /// 정공법 MySqlBulkCopy 경로 — cashbook. collections와 동형 (WS-MIG-04).
+    /// </summary>
+    private async Task<int> BulkCopyCashbookAsync(
+        MySqlConnection conn, MySqlTransaction tx, List<CashbookRow> rows, CancellationToken ct)
+    {
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        var stageTable = $"cashbook_stage_{Guid.NewGuid():N}".Substring(0, 40);
+
+        var createSql = $"CREATE TEMPORARY TABLE `{stageTable}` LIKE cashbook";
+        using (var createCmd = new MySqlCommand(createSql, conn, tx))
+        {
+            createCmd.CommandTimeout = 60;
+            await createCmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
+        }
+
+        var uniqueIndexes = (await Db.QueryAsync<string>(new CommandDefinition(
+            "SELECT DISTINCT index_name FROM information_schema.statistics " +
+            "WHERE table_schema = DATABASE() AND table_name = 'cashbook' " +
+            "  AND non_unique = 0 AND index_name <> 'PRIMARY'",
+            transaction: tx, cancellationToken: ct)).ConfigureAwait(false)).ToList();
+        foreach (var idx in uniqueIndexes)
+        {
+            try
+            {
+                using var dropIdxCmd = new MySqlCommand(
+                    $"ALTER TABLE `{stageTable}` DROP INDEX `{idx}`", conn, tx);
+                dropIdxCmd.CommandTimeout = 30;
+                await dropIdxCmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
+            }
+            catch (Exception idxEx)
+            {
+                _logger.LogWarning(idxEx,
+                    "[MDB마이그레이션] cashbook stage({Table}) UNIQUE 인덱스 {Idx} DROP 실패",
+                    stageTable, idx);
+            }
+        }
+
+        try
+        {
+            var dataTable = BuildCashbookDataTable(rows);
+            var bulk = new MySqlBulkCopy(conn, tx)
+            {
+                DestinationTableName = stageTable,
+                BulkCopyTimeout = 600,
+            };
+            var cols = new[]
+            {
+                "cashbook_id", "tenant_id", "tx_date", "tx_type", "category", "partner_id",
+                "description", "income_amount", "expense_amount", "balance",
+                "payment_method", "memo", "is_active", "created_at",
+                "source_type", "source_id", "migrated_source_hash",
+            };
+            for (int i = 0; i < cols.Length; i++)
+            {
+                bulk.ColumnMappings.Add(new MySqlBulkCopyColumnMapping(i, cols[i]));
+            }
+
+            var bulkResult = await bulk.WriteToServerAsync(dataTable, ct).ConfigureAwait(false);
+            _logger.LogInformation(
+                "[MDB마이그레이션] cashbook BulkCopy 적재: {Rows}행, warnings={Warn}, {Elapsed}ms",
+                bulkResult.RowsInserted, bulkResult.Warnings.Count, sw.ElapsedMilliseconds);
+
+            var insertSql = $"""
+                INSERT IGNORE INTO cashbook
+                  (cashbook_id, tenant_id, tx_date, tx_type, category, partner_id,
+                   description, income_amount, expense_amount, balance,
+                   payment_method, memo, is_active, created_at,
+                   source_type, source_id, migrated_source_hash)
+                SELECT
+                   cashbook_id, tenant_id, tx_date, tx_type, category, partner_id,
+                   description, income_amount, expense_amount, balance,
+                   payment_method, memo, is_active, created_at,
+                   source_type, source_id, migrated_source_hash
+                FROM `{stageTable}`
+                """;
+            int inserted;
+            using (var insertCmd = new MySqlCommand(insertSql, conn, tx))
+            {
+                insertCmd.CommandTimeout = 600;
+                inserted = await insertCmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
+            }
+
+            sw.Stop();
+            _logger.LogInformation(
+                "[MDB마이그레이션] cashbook 정공법 완료: 후보 {Total}행 → INSERT {Inserted}행 (중복 IGNORE={Skipped}, 총 {Elapsed}ms)",
+                rows.Count, inserted, rows.Count - inserted, sw.ElapsedMilliseconds);
+            return inserted;
+        }
+        finally
+        {
+            try
+            {
+                using var dropCmd = new MySqlCommand(
+                    $"DROP TEMPORARY TABLE IF EXISTS `{stageTable}`", conn, tx);
+                dropCmd.CommandTimeout = 30;
+                await dropCmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
+            }
+            catch (Exception dex)
+            {
+                _logger.LogWarning(dex,
+                    "[MDB마이그레이션] cashbook staging({Table}) DROP 실패 — 세션 종료 시 auto-drop 예정",
+                    stageTable);
+            }
+        }
+    }
+
+    private static DataTable BuildCashbookDataTable(List<CashbookRow> rows)
+    {
+        var dt = new DataTable();
+        dt.Columns.Add("cashbook_id", typeof(string));
+        dt.Columns.Add("tenant_id", typeof(string));
+        dt.Columns.Add("tx_date", typeof(DateTime));
+        dt.Columns.Add("tx_type", typeof(string));
+        dt.Columns.Add("category", typeof(string));
+        dt.Columns.Add("partner_id", typeof(string));
+        dt.Columns.Add("description", typeof(string));
+        dt.Columns.Add("income_amount", typeof(decimal));
+        dt.Columns.Add("expense_amount", typeof(decimal));
+        dt.Columns.Add("balance", typeof(decimal));
+        dt.Columns.Add("payment_method", typeof(string));
+        dt.Columns.Add("memo", typeof(string));
+        dt.Columns.Add("is_active", typeof(byte));
+        dt.Columns.Add("created_at", typeof(DateTime));
+        dt.Columns.Add("source_type", typeof(string));
+        dt.Columns.Add("source_id", typeof(string));
+        dt.Columns.Add("migrated_source_hash", typeof(string));
+
+        foreach (var r in rows)
+        {
+            dt.Rows.Add(
+                r.CashbookId, r.TenantId, r.TxDate, r.TxType, "경비",
+                (object?)r.PartnerId ?? DBNull.Value, r.Description,
+                r.IncomeAmount, r.ExpenseAmount, 0m,
+                "cash", (object?)r.Memo ?? DBNull.Value, (byte)1, r.Now,
+                "migration", r.SourceId, (object?)r.MigratedSourceHash ?? DBNull.Value);
+        }
+        return dt;
+    }
+
+    private sealed class CashbookRow
+    {
+        public string CashbookId { get; set; } = string.Empty;
+        public string TenantId { get; set; } = string.Empty;
+        public DateTime TxDate { get; set; }
+        public string TxType { get; set; } = "expense";
+        public string? PartnerId { get; set; }
+        public string Description { get; set; } = string.Empty;
+        public decimal IncomeAmount { get; set; }
+        public decimal ExpenseAmount { get; set; }
+        public string? Memo { get; set; }
+        public DateTime Now { get; set; }
+        public string SourceId { get; set; } = string.Empty;
+        public string? MigratedSourceHash { get; set; }
     }
 
     // ────────────────────────────────────────────────────────────────
@@ -2226,62 +2405,240 @@ public sealed class MdbMigrationService
         Dictionary<string, string> employeeMap,
         IDbTransaction tx, CancellationToken ct)
     {
-        // P0 #4 (2026-05-14): ORDER BY 추가 — 헌법 #13 멱등 순서 보장 (전표 날짜).
-        var dt = ReadMdbTable(oleConn, "SELECT * FROM DOCF7 ORDER BY SC_DT");
+        // 2026-05-15 1분 절대 봉합 (WS-MIG-04):
+        //   PK 정답 = SC_KCODE + SC_DT + SC_SAWON + SC_SUN (MSSQL DOCF7 sys.indexes 추출).
+        //   collections 패턴 동형 — BulkCopy 분기 + 멱등 키 + UNIQUE.
+        var dt = ReadMdbTable(oleConn, "SELECT * FROM DOCF7 ORDER BY SC_KCODE, SC_DT, SC_SAWON, SC_SUN");
         if (dt.Rows.Count == 0) return 0;
-
-        const string sql = """
-            INSERT INTO expenses
-              (expense_id, tenant_id, expense_date, employee_id, category, description,
-               amount, vat_amount, payment_method, receipt_yn, approval_status,
-               memo, is_active, created_at)
-            VALUES
-              (@ExpenseId, @TenantId, @ExpenseDate, @EmployeeId, @Category, @Description,
-               @Amount, 0, 'cash', 0, 'approved',
-               @Memo, 1, @Now)
-            """;
 
         // 봉합 2026-05-14: 레거시 매핑 누락 사원용 placeholder employee 확보 (employee_id NOT NULL DDL 정합).
         var fallbackEmployeeId = await EnsureLegacyFallbackEmployeeAsync(tenantId, now, tx, ct).ConfigureAwait(false);
 
-        int count = 0;
+        var rows = new List<ExpenseRow>(dt.Rows.Count);
         foreach (DataRow row in dt.Rows)
         {
-            var expDate = ParseLegacyDate(GetStr(row, "SC_DT")) ?? now;
-            var sawon = GetStr(row, "SC_SAWON");
-            if (!employeeMap.TryGetValue(sawon, out var employeeId) || string.IsNullOrWhiteSpace(employeeId))
+            var scKcode = GetStr(row, "SC_KCODE");
+            var scDt = GetStr(row, "SC_DT");
+            var scSawon = GetStr(row, "SC_SAWON");
+            var scSun = GetInt(row, "SC_SUN");
+
+            var expDate = ParseLegacyDate(scDt) ?? now;
+            if (!employeeMap.TryGetValue(scSawon, out var employeeId) || string.IsNullOrWhiteSpace(employeeId))
             {
-                employeeId = fallbackEmployeeId; // 매핑 누락 → 레거시 placeholder 사원
+                employeeId = fallbackEmployeeId;
             }
 
             // 차변/대변 중 큰 쪽이 금액
-            var cr = GetDec(row, "SC_CR");   // 차변
-            var dr = GetDec(row, "SC_DR");   // 대변
+            var cr = GetDec(row, "SC_CR");
+            var dr = GetDec(row, "SC_DR");
             var amount = cr > 0 ? cr : dr;
             if (amount == 0) continue;
 
-            var costCode = GetStr(row, "SC_KCODE");     // 비용코드
-            var description = GetStr(row, "SC_JEK");    // 적요
+            var description = GetStr(row, "SC_JEK");
             if (string.IsNullOrWhiteSpace(description)) description = "레거시 전표 이관";
 
-            await Db.ExecuteAsync(new CommandDefinition(sql, new
+            // 공식 멱등 키: SC_KCODE + SC_DT + SC_SAWON + SC_SUN
+            var sourceId = $"mig-{(string.IsNullOrEmpty(scKcode) ? "_" : scKcode)}-{scDt}-{(string.IsNullOrEmpty(scSawon) ? "_" : scSawon)}-{scSun:D5}";
+            rows.Add(new ExpenseRow
             {
                 ExpenseId = Guid.NewGuid().ToString(),
                 TenantId = tenantId,
                 ExpenseDate = expDate,
                 EmployeeId = employeeId,
-                Category = string.IsNullOrWhiteSpace(costCode) ? "기타" : costCode,
+                Category = string.IsNullOrWhiteSpace(scKcode) ? "기타" : scKcode,
                 Description = description.Length > 200 ? description[..200] : description,
                 Amount = amount,
                 Memo = GetStr(row, "SC_REM"),
-                Now = now
-            }, transaction: tx, cancellationToken: ct)).ConfigureAwait(false);
-
-            count++;
+                Now = now,
+                SourceId = sourceId,
+                MigratedSourceHash = ComputeSourceHash($"expenses:{sourceId}:{amount}"),
+            });
         }
 
-        _logger.LogInformation("[MDB마이그레이션] 전표(expenses) {Count}건 이관 완료", count);
+        if (rows.Count == 0) return 0;
+
+        // 정공법 BulkCopy 경로
+        if (Db is MySqlConnection mysqlConn && tx is MySqlTransaction mysqlTx)
+        {
+            return await BulkCopyExpensesAsync(mysqlConn, mysqlTx, rows, ct).ConfigureAwait(false);
+        }
+
+        // legacy fallback
+        const string sql = """
+            INSERT IGNORE INTO expenses
+              (expense_id, tenant_id, expense_date, employee_id, category, description,
+               amount, vat_amount, payment_method, receipt_yn, approval_status,
+               memo, is_active, created_at,
+               source_type, source_id, migrated_source_hash)
+            VALUES
+              (@ExpenseId, @TenantId, @ExpenseDate, @EmployeeId, @Category, @Description,
+               @Amount, 0, 'cash', 0, 'approved',
+               @Memo, 1, @Now,
+               'migration', @SourceId, @MigratedSourceHash)
+            """;
+        int count = 0;
+        foreach (var r in rows)
+        {
+            await Db.ExecuteAsync(new CommandDefinition(sql, r,
+                transaction: tx, cancellationToken: ct)).ConfigureAwait(false);
+            count++;
+        }
+        _logger.LogInformation("[MDB마이그레이션] 전표(expenses) {Count}건 이관 완료(legacy fallback)", count);
         return count;
+    }
+
+    /// <summary>
+    /// 정공법 MySqlBulkCopy 경로 — expenses. collections와 동형 (WS-MIG-04).
+    /// </summary>
+    private async Task<int> BulkCopyExpensesAsync(
+        MySqlConnection conn, MySqlTransaction tx, List<ExpenseRow> rows, CancellationToken ct)
+    {
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        var stageTable = $"expenses_stage_{Guid.NewGuid():N}".Substring(0, 40);
+
+        var createSql = $"CREATE TEMPORARY TABLE `{stageTable}` LIKE expenses";
+        using (var createCmd = new MySqlCommand(createSql, conn, tx))
+        {
+            createCmd.CommandTimeout = 60;
+            await createCmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
+        }
+
+        var uniqueIndexes = (await Db.QueryAsync<string>(new CommandDefinition(
+            "SELECT DISTINCT index_name FROM information_schema.statistics " +
+            "WHERE table_schema = DATABASE() AND table_name = 'expenses' " +
+            "  AND non_unique = 0 AND index_name <> 'PRIMARY'",
+            transaction: tx, cancellationToken: ct)).ConfigureAwait(false)).ToList();
+        foreach (var idx in uniqueIndexes)
+        {
+            try
+            {
+                using var dropIdxCmd = new MySqlCommand(
+                    $"ALTER TABLE `{stageTable}` DROP INDEX `{idx}`", conn, tx);
+                dropIdxCmd.CommandTimeout = 30;
+                await dropIdxCmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
+            }
+            catch (Exception idxEx)
+            {
+                _logger.LogWarning(idxEx,
+                    "[MDB마이그레이션] expenses stage({Table}) UNIQUE 인덱스 {Idx} DROP 실패",
+                    stageTable, idx);
+            }
+        }
+
+        try
+        {
+            var dataTable = BuildExpensesDataTable(rows);
+            var bulk = new MySqlBulkCopy(conn, tx)
+            {
+                DestinationTableName = stageTable,
+                BulkCopyTimeout = 600,
+            };
+            var cols = new[]
+            {
+                "expense_id", "tenant_id", "expense_date", "employee_id", "category", "description",
+                "amount", "vat_amount", "payment_method", "receipt_yn", "approval_status",
+                "memo", "is_active", "created_at",
+                "source_type", "source_id", "migrated_source_hash",
+            };
+            for (int i = 0; i < cols.Length; i++)
+            {
+                bulk.ColumnMappings.Add(new MySqlBulkCopyColumnMapping(i, cols[i]));
+            }
+
+            var bulkResult = await bulk.WriteToServerAsync(dataTable, ct).ConfigureAwait(false);
+            _logger.LogInformation(
+                "[MDB마이그레이션] expenses BulkCopy 적재: {Rows}행, warnings={Warn}, {Elapsed}ms",
+                bulkResult.RowsInserted, bulkResult.Warnings.Count, sw.ElapsedMilliseconds);
+
+            var insertSql = $"""
+                INSERT IGNORE INTO expenses
+                  (expense_id, tenant_id, expense_date, employee_id, category, description,
+                   amount, vat_amount, payment_method, receipt_yn, approval_status,
+                   memo, is_active, created_at,
+                   source_type, source_id, migrated_source_hash)
+                SELECT
+                   expense_id, tenant_id, expense_date, employee_id, category, description,
+                   amount, vat_amount, payment_method, receipt_yn, approval_status,
+                   memo, is_active, created_at,
+                   source_type, source_id, migrated_source_hash
+                FROM `{stageTable}`
+                """;
+            int inserted;
+            using (var insertCmd = new MySqlCommand(insertSql, conn, tx))
+            {
+                insertCmd.CommandTimeout = 600;
+                inserted = await insertCmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
+            }
+
+            sw.Stop();
+            _logger.LogInformation(
+                "[MDB마이그레이션] expenses 정공법 완료: 후보 {Total}행 → INSERT {Inserted}행 (중복 IGNORE={Skipped}, 총 {Elapsed}ms)",
+                rows.Count, inserted, rows.Count - inserted, sw.ElapsedMilliseconds);
+            return inserted;
+        }
+        finally
+        {
+            try
+            {
+                using var dropCmd = new MySqlCommand(
+                    $"DROP TEMPORARY TABLE IF EXISTS `{stageTable}`", conn, tx);
+                dropCmd.CommandTimeout = 30;
+                await dropCmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
+            }
+            catch (Exception dex)
+            {
+                _logger.LogWarning(dex,
+                    "[MDB마이그레이션] expenses staging({Table}) DROP 실패 — 세션 종료 시 auto-drop 예정",
+                    stageTable);
+            }
+        }
+    }
+
+    private static DataTable BuildExpensesDataTable(List<ExpenseRow> rows)
+    {
+        var dt = new DataTable();
+        dt.Columns.Add("expense_id", typeof(string));
+        dt.Columns.Add("tenant_id", typeof(string));
+        dt.Columns.Add("expense_date", typeof(DateTime));
+        dt.Columns.Add("employee_id", typeof(string));
+        dt.Columns.Add("category", typeof(string));
+        dt.Columns.Add("description", typeof(string));
+        dt.Columns.Add("amount", typeof(decimal));
+        dt.Columns.Add("vat_amount", typeof(decimal));
+        dt.Columns.Add("payment_method", typeof(string));
+        dt.Columns.Add("receipt_yn", typeof(byte));
+        dt.Columns.Add("approval_status", typeof(string));
+        dt.Columns.Add("memo", typeof(string));
+        dt.Columns.Add("is_active", typeof(byte));
+        dt.Columns.Add("created_at", typeof(DateTime));
+        dt.Columns.Add("source_type", typeof(string));
+        dt.Columns.Add("source_id", typeof(string));
+        dt.Columns.Add("migrated_source_hash", typeof(string));
+
+        foreach (var r in rows)
+        {
+            dt.Rows.Add(
+                r.ExpenseId, r.TenantId, r.ExpenseDate, r.EmployeeId, r.Category, r.Description,
+                r.Amount, 0m, "cash", (byte)0, "approved",
+                (object?)r.Memo ?? DBNull.Value, (byte)1, r.Now,
+                "migration", r.SourceId, (object?)r.MigratedSourceHash ?? DBNull.Value);
+        }
+        return dt;
+    }
+
+    private sealed class ExpenseRow
+    {
+        public string ExpenseId { get; set; } = string.Empty;
+        public string TenantId { get; set; } = string.Empty;
+        public DateTime ExpenseDate { get; set; }
+        public string EmployeeId { get; set; } = string.Empty;
+        public string Category { get; set; } = "기타";
+        public string Description { get; set; } = string.Empty;
+        public decimal Amount { get; set; }
+        public string? Memo { get; set; }
+        public DateTime Now { get; set; }
+        public string SourceId { get; set; } = string.Empty;
+        public string? MigratedSourceHash { get; set; }
     }
 
     /// <summary>
@@ -2518,58 +2875,144 @@ public sealed class MdbMigrationService
         Dictionary<int, string> partnerMap,
         IDbTransaction tx, CancellationToken ct)
     {
-        // P0 #4 (2026-05-14): ORDER BY 추가 — 헌법 #13 멱등 순서 보장 (세금계산서 번호).
-        var dt = ReadMdbTable(oleConn, "SELECT * FROM DOCF4 ORDER BY TX_NO");
+        // 2026-05-15 진범 #3 봉합 (WS-MIG-03):
+        //   PK 정답 = TX_IO + TX_NO (MSSQL DOCF4 sys.indexes 추출).
+        //   DDL: delivery_id NULL 허용 + direction/tax_no/items 신규.
+        //   tax_invoice_items 별도 테이블에 TX_PUM1~4 인라인 분해.
+        //   13/13 PASS 달성 — 5/14 12/13 PASS 잔여 1건이 이것.
+        //
+        //   ⚠️ 헌법 §"마이그 예외" (사장님 결재 2026-05-14):
+        //   거래명세서/세금계산서 정합성 무시하고 레거시 그대로 이관.
+        //   delivery_id NULL이라도 source_id 멱등 키로 추적.
+        var dt = ReadMdbTable(oleConn, "SELECT * FROM DOCF4 ORDER BY TX_IO, TX_NO");
         if (dt.Rows.Count == 0) return 0;
 
-        // tax_invoices 컬럼 존재 확인용 — 신규 ERP 스키마에 맞춰 핵심만 INSERT
-        // WS-11 정공법 축 2 (2026-05-14): migrated_source_hash 컬럼 추가.
-        // (NOTE: 본 INSERT는 기존부터 스키마 차이로 try/catch에서 silent 실패 중. 별건 작지서로 정정 예정.)
-        const string sql = """
+        const string headerSql = """
             INSERT INTO tax_invoices
-              (tax_invoice_id, tenant_id, invoice_no, invoice_date, invoice_type,
-               partner_id, supply_amount, vat_amount, total_amount,
-               status, remark, created_at, updated_at, migrated_source_hash)
+              (tax_invoice_id, tenant_id,
+               direction, tax_no, issue_date_yyyymmdd, partner_code, seq_no,
+               sent_at_yyyymmdd, read_at_yyyymmdd, reported_at_yyyymmdd,
+               remark1, remark2,
+               invoice_no, invoice_date, invoice_type, partner_id,
+               supply_amount, vat_amount, total_amount,
+               status, remark,
+               source_type, source_id, migrated_source_hash,
+               created_at, updated_at)
             VALUES
-              (@Id, @TenantId, @No, @Date, @Type,
-               @PartnerId, @Supply, @Vat, @Total,
-               'confirmed', @Remark, @Now, @Now, @MigratedSourceHash)
+              (@Id, @TenantId,
+               @Direction, @TaxNo, @IssueDate, @PartnerCode, @SeqNo,
+               @SentDt, @ReadDt, @ReportDt,
+               @Rem1, @Rem2,
+               @TaxNo, @InvoiceDate, @Type, @PartnerId,
+               @Supply, @Vat, @Total,
+               'confirmed', @Remark,
+               'migration', @SourceId, @Hash,
+               @Now, @Now)
+            ON DUPLICATE KEY UPDATE
+              supply_amount = VALUES(supply_amount),
+              vat_amount = VALUES(vat_amount),
+              total_amount = VALUES(total_amount),
+              updated_at = VALUES(updated_at)
+            """;
+
+        const string lineSql = """
+            INSERT IGNORE INTO tax_invoice_items
+              (tax_invoice_item_id, invoice_id, tenant_id, line_no,
+               item_name, quantity, unit_price, supply_amount, vat_amount, created_at)
+            VALUES
+              (@LineId, @InvoiceId, @TenantId, @LineNo,
+               @ItemName, @Qty, @UnitPrice, @Supply, @Vat, @Now)
             """;
 
         int count = 0;
         foreach (DataRow r in dt.Rows)
         {
-            var no = GetStr(r, "TX_NO");
-            if (string.IsNullOrWhiteSpace(no)) continue;
-            var buyCode = GetInt(r, "TX_BUY");
-            if (!partnerMap.TryGetValue(buyCode, out var partnerId)) continue;
+            var io = GetStr(r, "TX_IO");
+            var txNo = GetStr(r, "TX_NO");
+            if (string.IsNullOrWhiteSpace(txNo)) continue;
 
-            var d = ParseLegacyDate(GetStr(r, "TX_PDT")) ?? now;
-            // TX_GU = 발행구분 ('1'=매출/발행, '2'=매입/수취 추정)
-            var gu = GetStr(r, "TX_GU");
-            var typeCode = gu == "2" ? "purchase" : "sales";
+            // direction 정규화 (S=매출, B=매입). TX_IO 비면 TX_GU에서 추정.
+            if (string.IsNullOrWhiteSpace(io))
+            {
+                var gu = GetStr(r, "TX_GU");
+                io = gu == "2" ? "B" : "S";
+            }
+            var typeCode = io == "B" ? "purchase" : "sales";
 
-            // 4품목 합산
-            decimal supply = GetDec(r, "TX_KUM1") + GetDec(r, "TX_KUM2") + GetDec(r, "TX_KUM3") + GetDec(r, "TX_KUM4");
-            decimal vat = GetDec(r, "TX_VAT1") + GetDec(r, "TX_VAT2") + GetDec(r, "TX_VAT3") + GetDec(r, "TX_VAT4");
+            // partner_code는 NOT NULL 허용 컬럼 — 매핑 실패해도 NULL 저장 (워크플로우 끊김 0, 헌법 #20)
+            var partnerCode = GetInt(r, "TX_BUY");
+            partnerMap.TryGetValue(partnerCode, out var partnerId);
+
+            var issueDateStr = GetStr(r, "TX_PDT");
+            var invoiceDate = ParseLegacyDate(issueDateStr) ?? now;
+
+            // 4품목 합산 (헤더 amount용)
+            decimal supply = 0, vat = 0;
+            for (int i = 1; i <= 4; i++)
+            {
+                supply += GetDec(r, $"TX_KUM{i}");
+                vat += GetDec(r, $"TX_VAT{i}");
+            }
+
+            // 공식 멱등 키: TX_IO + TX_NO
+            var sourceId = $"mig-{(string.IsNullOrEmpty(io) ? "_" : io)}-{txNo}";
+            var invoiceId = Guid.NewGuid().ToString();
 
             try
             {
-                await Db.ExecuteAsync(new CommandDefinition(sql, new
+                await Db.ExecuteAsync(new CommandDefinition(headerSql, new
                 {
-                    Id = Guid.NewGuid().ToString(), TenantId = tenantId,
-                    No = no, Date = d, Type = typeCode,
-                    PartnerId = partnerId, Supply = supply, Vat = vat, Total = supply + vat,
-                    Remark = GetStr(r, "TX_REM"), Now = now,
-                    // WS-11 정공법 축 2 (2026-05-14): 자연키 TX_NO 기반 SHA256
-                    MigratedSourceHash = ComputeSourceHash($"tax_invoices:{no}:{typeCode}:{supply}:{vat}")
+                    Id = invoiceId,
+                    TenantId = tenantId,
+                    Direction = io,
+                    TaxNo = txNo,
+                    IssueDate = issueDateStr,
+                    PartnerCode = partnerCode == 0 ? (int?)null : partnerCode,
+                    SeqNo = (short?)(GetInt(r, "TX_SEQ") == 0 ? null : (short?)GetInt(r, "TX_SEQ")),
+                    SentDt = GetStr(r, "TX_SENDDT"),
+                    ReadDt = GetStr(r, "TX_READDT"),
+                    ReportDt = GetStr(r, "TX_REPORTDT"),
+                    Rem1 = GetStr(r, "TX_REM"),
+                    Rem2 = GetStr(r, "TX_REM1"),
+                    InvoiceDate = invoiceDate,
+                    Type = typeCode,
+                    PartnerId = partnerId,
+                    Supply = supply,
+                    Vat = vat,
+                    Total = supply + vat,
+                    Remark = GetStr(r, "TX_REM"),
+                    SourceId = sourceId,
+                    Hash = ComputeSourceHash($"tax_invoices:{sourceId}:{supply}:{vat}"),
+                    Now = now,
                 }, transaction: tx, cancellationToken: ct)).ConfigureAwait(false);
+
+                // 4 품목 인라인 분해 (tax_invoice_items)
+                for (int i = 1; i <= 4; i++)
+                {
+                    var pum = GetStr(r, $"TX_PUM{i}");
+                    if (string.IsNullOrWhiteSpace(pum)) continue;
+                    var pumName = pum.Length > 100 ? pum[..100] : pum;
+                    await Db.ExecuteAsync(new CommandDefinition(lineSql, new
+                    {
+                        LineId = Guid.NewGuid().ToString(),
+                        InvoiceId = invoiceId,
+                        TenantId = tenantId,
+                        LineNo = (short)i,
+                        ItemName = pumName,
+                        Qty = GetDec(r, $"TX_SU{i}"),
+                        UnitPrice = GetDec(r, $"TX_DAN{i}"),
+                        Supply = GetDec(r, $"TX_KUM{i}"),
+                        Vat = GetDec(r, $"TX_VAT{i}"),
+                        Now = now,
+                    }, transaction: tx, cancellationToken: ct)).ConfigureAwait(false);
+                }
                 count++;
             }
             catch (Exception ex)
             {
-                // 신규 tax_invoices 스키마와 컬럼명이 안 맞으면 로그만 남기고 계속.
-                _logger.LogWarning(ex, "[MDB마이그레이션] 세금계산서 {No} INSERT 실패 — 스키마 차이 가능성", no);
+                _logger.LogWarning(ex,
+                    "[MDB마이그레이션] 세금계산서 TX_IO={Io} TX_NO={No} INSERT 실패 — DDL ALTER 미실행 가능성",
+                    io, txNo);
             }
         }
 
@@ -2774,50 +3217,238 @@ public sealed class MdbMigrationService
         Dictionary<int, string> partnerMap,
         IDbTransaction tx, CancellationToken ct)
     {
-        // P0 #4 (2026-05-14): ORDER BY 추가 — 헌법 #13 멱등 순서 보장 (계좌+거래일).
-        var dt = ReadMdbTable(oleConn, "SELECT * FROM BANKF ORDER BY BK_NO, BK_YMD");
+        // 2026-05-15 1분 절대 봉합 (WS-MIG-04):
+        //   PK 정답 = BK_NO + BK_YMD + BK_JWASU + BK_JEN (MSSQL BANKF sys.indexes 추출).
+        //   BK_JWASU (smallint) = 좌수, 5/14까지 안 읽던 컬럼.
+        //   collections 패턴 동형 — BulkCopy 분기 + 멱등 키 + UNIQUE.
+        var dt = ReadMdbTable(oleConn, "SELECT * FROM BANKF ORDER BY BK_NO, BK_YMD, BK_JWASU, BK_JEN");
         if (dt.Rows.Count == 0) return 0;
 
-        const string sql = """
-            INSERT INTO bank_transactions
-              (bank_tx_id, tenant_id, account_no, bank_name, tx_date, tx_type,
-               amount, partner_id, partner_name_legacy, description, remark,
-               imported_from, legacy_source, created_at)
-            VALUES
-              (@Id, @TenantId, @AccountNo, @BankName, @TxDate, @TxType,
-               @Amount, @PartnerId, @PartnerNameLegacy, @Description, @Remark,
-               'mdb_legacy', 'BANKF', @Now)
-            """;
-
-        int count = 0;
+        var rows = new List<BankTxRow>(dt.Rows.Count);
         foreach (DataRow r in dt.Rows)
         {
-            var accNo = GetStr(r, "BK_NO");
-            if (string.IsNullOrWhiteSpace(accNo)) continue;
+            var bkNo = GetStr(r, "BK_NO");
+            if (string.IsNullOrWhiteSpace(bkNo)) continue;
+            var bkYmd = GetStr(r, "BK_YMD");
+            var bkJwasu = GetInt(r, "BK_JWASU");
+            var bkJen = GetStr(r, "BK_JEN");
+
             var amt = GetDec(r, "BK_AMT");
             if (amt <= 0) continue;
 
-            var jen = GetStr(r, "BK_JEN");
-            var txType = jen == "2" ? "2" : "1";   // 1=입금, 2=출금
+            // BK_JEN 자체가 PK 일부지만 추가로 1/2 입출금 구분으로도 사용 (기존 로직 유지)
+            var txType = bkJen == "2" ? "2" : "1";   // 1=입금, 2=출금
             var sBuy = GetInt(r, "BK_SBUY");
             partnerMap.TryGetValue(sBuy, out var partnerId);
 
-            await Db.ExecuteAsync(new CommandDefinition(sql, new
+            // 공식 멱등 키: BK_NO + BK_YMD + BK_JWASU + BK_JEN
+            var sourceId = $"mig-{bkNo}-{bkYmd}-{bkJwasu:D5}-{(string.IsNullOrEmpty(bkJen) ? "_" : bkJen)}";
+            rows.Add(new BankTxRow
             {
-                Id = Guid.NewGuid().ToString(), TenantId = tenantId,
-                AccountNo = accNo, BankName = GetStr(r, "BK_CLA"),
-                TxDate = ParseLegacyDate(GetStr(r, "BK_YMD")) ?? now,
-                TxType = txType, Amount = amt,
-                PartnerId = partnerId, PartnerNameLegacy = (string?)null,
+                Id = Guid.NewGuid().ToString(),
+                TenantId = tenantId,
+                AccountNo = bkNo,
+                BankName = GetStr(r, "BK_CLA"),
+                TxDate = ParseLegacyDate(bkYmd) ?? now,
+                TxType = txType,
+                Amount = amt,
+                PartnerId = partnerId,
                 Description = GetStr(r, "BK_JEK"),
                 Remark = GetStr(r, "BK_cheri"),
-                Now = now
-            }, transaction: tx, cancellationToken: ct)).ConfigureAwait(false);
-            count++;
+                Now = now,
+                SourceId = sourceId,
+                MigratedSourceHash = ComputeSourceHash($"bank_transactions:{sourceId}:{amt}"),
+            });
         }
 
-        _logger.LogInformation("[MDB마이그레이션] 은행거래(BANKF→bank_transactions) {Count}건 이관 완료", count);
+        if (rows.Count == 0) return 0;
+
+        // 정공법 BulkCopy 경로
+        if (Db is MySqlConnection mysqlConn && tx is MySqlTransaction mysqlTx)
+        {
+            return await BulkCopyBankTransactionsAsync(mysqlConn, mysqlTx, rows, ct).ConfigureAwait(false);
+        }
+
+        // legacy fallback
+        const string sql = """
+            INSERT IGNORE INTO bank_transactions
+              (bank_tx_id, tenant_id, account_no, bank_name, tx_date, tx_type,
+               amount, partner_id, partner_name_legacy, description, remark,
+               imported_from, legacy_source, created_at,
+               source_type, source_id, migrated_source_hash)
+            VALUES
+              (@Id, @TenantId, @AccountNo, @BankName, @TxDate, @TxType,
+               @Amount, @PartnerId, NULL, @Description, @Remark,
+               'mdb_legacy', 'BANKF', @Now,
+               'migration', @SourceId, @MigratedSourceHash)
+            """;
+        int count = 0;
+        foreach (var row in rows)
+        {
+            await Db.ExecuteAsync(new CommandDefinition(sql, row,
+                transaction: tx, cancellationToken: ct)).ConfigureAwait(false);
+            count++;
+        }
+        _logger.LogInformation("[MDB마이그레이션] 은행거래(BANKF→bank_transactions) {Count}건 이관 완료(legacy fallback)", count);
         return count;
+    }
+
+    /// <summary>
+    /// 정공법 MySqlBulkCopy 경로 — bank_transactions. collections와 동형 (WS-MIG-04).
+    /// </summary>
+    private async Task<int> BulkCopyBankTransactionsAsync(
+        MySqlConnection conn, MySqlTransaction tx, List<BankTxRow> rows, CancellationToken ct)
+    {
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        var stageTable = $"bank_tx_stage_{Guid.NewGuid():N}".Substring(0, 40);
+
+        var createSql = $"CREATE TEMPORARY TABLE `{stageTable}` LIKE bank_transactions";
+        using (var createCmd = new MySqlCommand(createSql, conn, tx))
+        {
+            createCmd.CommandTimeout = 60;
+            await createCmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
+        }
+
+        var uniqueIndexes = (await Db.QueryAsync<string>(new CommandDefinition(
+            "SELECT DISTINCT index_name FROM information_schema.statistics " +
+            "WHERE table_schema = DATABASE() AND table_name = 'bank_transactions' " +
+            "  AND non_unique = 0 AND index_name <> 'PRIMARY'",
+            transaction: tx, cancellationToken: ct)).ConfigureAwait(false)).ToList();
+        foreach (var idx in uniqueIndexes)
+        {
+            try
+            {
+                using var dropIdxCmd = new MySqlCommand(
+                    $"ALTER TABLE `{stageTable}` DROP INDEX `{idx}`", conn, tx);
+                dropIdxCmd.CommandTimeout = 30;
+                await dropIdxCmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
+            }
+            catch (Exception idxEx)
+            {
+                _logger.LogWarning(idxEx,
+                    "[MDB마이그레이션] bank_transactions stage({Table}) UNIQUE 인덱스 {Idx} DROP 실패",
+                    stageTable, idx);
+            }
+        }
+
+        try
+        {
+            var dataTable = BuildBankTxDataTable(rows);
+            var bulk = new MySqlBulkCopy(conn, tx)
+            {
+                DestinationTableName = stageTable,
+                BulkCopyTimeout = 600,
+            };
+            var cols = new[]
+            {
+                "bank_tx_id", "tenant_id", "account_no", "bank_name", "tx_date", "tx_type",
+                "amount", "partner_id", "partner_name_legacy", "description", "remark",
+                "imported_from", "legacy_source", "created_at",
+                "source_type", "source_id", "migrated_source_hash",
+            };
+            for (int i = 0; i < cols.Length; i++)
+            {
+                bulk.ColumnMappings.Add(new MySqlBulkCopyColumnMapping(i, cols[i]));
+            }
+
+            var bulkResult = await bulk.WriteToServerAsync(dataTable, ct).ConfigureAwait(false);
+            _logger.LogInformation(
+                "[MDB마이그레이션] bank_transactions BulkCopy 적재: {Rows}행, warnings={Warn}, {Elapsed}ms",
+                bulkResult.RowsInserted, bulkResult.Warnings.Count, sw.ElapsedMilliseconds);
+
+            var insertSql = $"""
+                INSERT IGNORE INTO bank_transactions
+                  (bank_tx_id, tenant_id, account_no, bank_name, tx_date, tx_type,
+                   amount, partner_id, partner_name_legacy, description, remark,
+                   imported_from, legacy_source, created_at,
+                   source_type, source_id, migrated_source_hash)
+                SELECT
+                   bank_tx_id, tenant_id, account_no, bank_name, tx_date, tx_type,
+                   amount, partner_id, partner_name_legacy, description, remark,
+                   imported_from, legacy_source, created_at,
+                   source_type, source_id, migrated_source_hash
+                FROM `{stageTable}`
+                """;
+            int inserted;
+            using (var insertCmd = new MySqlCommand(insertSql, conn, tx))
+            {
+                insertCmd.CommandTimeout = 600;
+                inserted = await insertCmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
+            }
+
+            sw.Stop();
+            _logger.LogInformation(
+                "[MDB마이그레이션] bank_transactions 정공법 완료: 후보 {Total}행 → INSERT {Inserted}행 (중복 IGNORE={Skipped}, 총 {Elapsed}ms)",
+                rows.Count, inserted, rows.Count - inserted, sw.ElapsedMilliseconds);
+            return inserted;
+        }
+        finally
+        {
+            try
+            {
+                using var dropCmd = new MySqlCommand(
+                    $"DROP TEMPORARY TABLE IF EXISTS `{stageTable}`", conn, tx);
+                dropCmd.CommandTimeout = 30;
+                await dropCmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
+            }
+            catch (Exception dex)
+            {
+                _logger.LogWarning(dex,
+                    "[MDB마이그레이션] bank_transactions staging({Table}) DROP 실패 — 세션 종료 시 auto-drop 예정",
+                    stageTable);
+            }
+        }
+    }
+
+    private static DataTable BuildBankTxDataTable(List<BankTxRow> rows)
+    {
+        var dt = new DataTable();
+        dt.Columns.Add("bank_tx_id", typeof(string));
+        dt.Columns.Add("tenant_id", typeof(string));
+        dt.Columns.Add("account_no", typeof(string));
+        dt.Columns.Add("bank_name", typeof(string));
+        dt.Columns.Add("tx_date", typeof(DateTime));
+        dt.Columns.Add("tx_type", typeof(string));
+        dt.Columns.Add("amount", typeof(decimal));
+        dt.Columns.Add("partner_id", typeof(string));
+        dt.Columns.Add("partner_name_legacy", typeof(string));
+        dt.Columns.Add("description", typeof(string));
+        dt.Columns.Add("remark", typeof(string));
+        dt.Columns.Add("imported_from", typeof(string));
+        dt.Columns.Add("legacy_source", typeof(string));
+        dt.Columns.Add("created_at", typeof(DateTime));
+        dt.Columns.Add("source_type", typeof(string));
+        dt.Columns.Add("source_id", typeof(string));
+        dt.Columns.Add("migrated_source_hash", typeof(string));
+
+        foreach (var r in rows)
+        {
+            dt.Rows.Add(
+                r.Id, r.TenantId, r.AccountNo, (object?)r.BankName ?? DBNull.Value,
+                r.TxDate, r.TxType, r.Amount,
+                (object?)r.PartnerId ?? DBNull.Value, DBNull.Value,
+                (object?)r.Description ?? DBNull.Value, (object?)r.Remark ?? DBNull.Value,
+                "mdb_legacy", "BANKF", r.Now,
+                "migration", r.SourceId, (object?)r.MigratedSourceHash ?? DBNull.Value);
+        }
+        return dt;
+    }
+
+    private sealed class BankTxRow
+    {
+        public string Id { get; set; } = string.Empty;
+        public string TenantId { get; set; } = string.Empty;
+        public string AccountNo { get; set; } = string.Empty;
+        public string? BankName { get; set; }
+        public DateTime TxDate { get; set; }
+        public string TxType { get; set; } = "1";
+        public decimal Amount { get; set; }
+        public string? PartnerId { get; set; }
+        public string? Description { get; set; }
+        public string? Remark { get; set; }
+        public DateTime Now { get; set; }
+        public string SourceId { get; set; } = string.Empty;
+        public string? MigratedSourceHash { get; set; }
     }
 
     // ════════════════════════════════════════════════════════════════
