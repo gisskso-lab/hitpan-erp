@@ -17,9 +17,12 @@
 ALTER TABLE tax_invoices
   MODIFY delivery_id VARCHAR(36) NULL;
 
--- 1-2. delivery_id UNIQUE 인덱스 DROP (마이그 row가 NULL 다수일 수 있어 충돌 회피)
+-- 1-2. delivery_id UNIQUE → INDEX 변경 (FK fk_tax_invoices_delivery 보존 + NULL 다수 허용)
+--      ⚠️ 정정 2026-05-15 PM 실측: 인덱스 실제 이름은 `uk_tax_invoices_delivery`,
+--      sales_deliveries FK가 이 인덱스 참조 중이므로 DROP 불가 → UNIQUE만 풀고 일반 INDEX로 재생성.
 ALTER TABLE tax_invoices
-  DROP INDEX `delivery_id`;
+  DROP INDEX uk_tax_invoices_delivery,
+  ADD INDEX idx_tax_invoices_delivery (delivery_id);
 
 -- 1-3. TX_* 레거시 매핑 컬럼 추가
 ALTER TABLE tax_invoices
@@ -35,10 +38,11 @@ ALTER TABLE tax_invoices
   ADD COLUMN remark2 VARCHAR(100) NULL COMMENT 'TX_REM1 비고2';
 
 -- 1-4. 멱등 키 + 워크플로우 추적 컬럼
+--      ⚠️ 정정 2026-05-15 PM 실측: tax_invoices.migrated_source_hash는
+--      5/14 commit 7a48787에서 이미 추가됨. 신규 추가는 source_type + source_id 2건만.
 ALTER TABLE tax_invoices
   ADD COLUMN source_type VARCHAR(30) NULL COMMENT '멱등 추적 (migration|api|ui)',
-  ADD COLUMN source_id VARCHAR(80) NULL COMMENT '레거시 PK 조합 (TX_IO+TX_NO)',
-  ADD COLUMN migrated_source_hash VARCHAR(64) NULL COMMENT 'SHA-256 무결성 해시';
+  ADD COLUMN source_id VARCHAR(80) NULL COMMENT '레거시 PK 조합 (TX_IO+TX_NO)';
 
 -- 1-5. UNIQUE 인덱스 (TX_IO+TX_NO 정답 PK 기반)
 ALTER TABLE tax_invoices
@@ -62,6 +66,7 @@ CREATE TABLE IF NOT EXISTS tax_invoice_items (
   CONSTRAINT fk_tax_invoice_items_invoice
     FOREIGN KEY (invoice_id) REFERENCES tax_invoices(invoice_id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+-- ⚠️ 정정 2026-05-15 PM 실측: tax_invoices PK 컬럼명은 `invoice_id` (tax_invoice_id 아님).
 -- 헌법 #17 정합: 신규 테이블은 ENGINE=InnoDB 명시
 
 -- ---------------------------------------------------------------------

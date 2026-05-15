@@ -2889,7 +2889,7 @@ public sealed class MdbMigrationService
 
         const string headerSql = """
             INSERT INTO tax_invoices
-              (tax_invoice_id, tenant_id,
+              (invoice_id, tenant_id,
                direction, tax_no, issue_date_yyyymmdd, partner_code, seq_no,
                sent_at_yyyymmdd, read_at_yyyymmdd, reported_at_yyyymmdd,
                remark1, remark2,
