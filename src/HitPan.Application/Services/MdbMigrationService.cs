@@ -1391,6 +1391,11 @@ public sealed class MdbMigrationService
 
         int salesCount = 0, purchaseCount = 0;
         int soSeq = 1, poSeq = 1;
+        int fallbackUsed = 0;
+
+        // 진범 #2 봉합 (2026-05-15): K2_BUYC 매핑 실패 시 LEGACY_UNKNOWN_PARTNER로 매핑.
+        // 기존 continue 폐기 — 워크플로우 끊김 절대 금지 (헌법 #20). 레거시 거래 0건 손실.
+        string? fallbackPartnerIdLazy = null;
 
         foreach (DataRow header in headerDt.Rows)
         {
@@ -1403,12 +1408,14 @@ public sealed class MdbMigrationService
             var dtStr = GetStr(header, "K2_DT");            // 일자(YYYYMMDD)
             var orderDate = ParseLegacyDate(dtStr) ?? now;
 
-            // 업체 매핑
+            // 업체 매핑 — 실패 시 LEGACY_UNKNOWN_PARTNER fallback (진범 #2 봉합)
             partnerMap.TryGetValue(buyCode, out var partnerId);
             if (string.IsNullOrEmpty(partnerId))
             {
-                _logger.LogWarning("[MDB마이그레이션] 거래 업체코드 매핑 실패: {Code}, 전표: {SlipNo}", buyCode, slipNo);
-                continue;
+                fallbackPartnerIdLazy ??= await EnsureLegacyFallbackPartnerAsync(tenantId, now, tx, ct).ConfigureAwait(false);
+                partnerId = fallbackPartnerIdLazy;
+                fallbackUsed++;
+                _logger.LogDebug("[MDB마이그레이션] K2 업체 fallback 매핑: 코드={Code}, 전표={SlipNo}", buyCode, slipNo);
             }
 
             // 사원 매핑 (없으면 null)
@@ -1538,8 +1545,37 @@ public sealed class MdbMigrationService
             }
         }
 
-        _logger.LogInformation("[MDB마이그레이션] 판매 {Sales}건, 매입 {Purchase}건 이관 완료", salesCount, purchaseCount);
+        _logger.LogInformation(
+            "[MDB마이그레이션] 판매 {Sales}건, 매입 {Purchase}건 이관 완료 (fallback partner 사용={Fallback}건)",
+            salesCount, purchaseCount, fallbackUsed);
         return (salesCount, purchaseCount);
+    }
+
+    /// <summary>
+    /// 진범 #2 봉합 (2026-05-15): K2_BUYC 매핑 실패 시 사용할 LEGACY_UNKNOWN_PARTNER 거래처를 멱등 보장.
+    /// 헌법 #20 (워크플로우 끊김 금지) — 거래 헤더는 절대 손실 안 됨.
+    /// </summary>
+    private async Task<string> EnsureLegacyFallbackPartnerAsync(string tenantId, DateTime now, IDbTransaction tx, CancellationToken ct)
+    {
+        const string partnerCode = "LEGACY_UNKNOWN_PARTNER";
+        var existing = await Db.ExecuteScalarAsync<string?>(new CommandDefinition(
+            "SELECT partner_id FROM partners WHERE tenant_id = @TenantId AND partner_code = @Code LIMIT 1",
+            new { TenantId = tenantId, Code = partnerCode }, transaction: tx, cancellationToken: ct)).ConfigureAwait(false);
+        if (!string.IsNullOrEmpty(existing)) return existing;
+
+        var id = Guid.NewGuid().ToString();
+        await Db.ExecuteAsync(new CommandDefinition("""
+            INSERT INTO partners
+              (partner_id, tenant_id, partner_code, partner_name, partner_type,
+               is_active, is_deleted, created_at, updated_at, memo)
+            VALUES
+              (@Id, @TenantId, @Code, '레거시 미식별 거래처', 'customer',
+               1, 0, @Now, @Now, '진범 #2 봉합 — K2_BUYC 매핑 실패 거래의 fallback 거래처')
+            """,
+            new { Id = id, TenantId = tenantId, Code = partnerCode, Now = now },
+            transaction: tx, cancellationToken: ct)).ConfigureAwait(false);
+        _logger.LogInformation("[MDB마이그레이션] LEGACY_UNKNOWN_PARTNER fallback 거래처 생성: {Id}", id);
+        return id;
     }
 
     // ────────────────────────────────────────────────────────────────
