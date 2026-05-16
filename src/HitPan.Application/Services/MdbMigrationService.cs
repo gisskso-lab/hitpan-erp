@@ -1557,7 +1557,9 @@ public sealed class MdbMigrationService
     /// </summary>
     private async Task<string> EnsureLegacyFallbackPartnerAsync(string tenantId, DateTime now, IDbTransaction tx, CancellationToken ct)
     {
-        const string partnerCode = "LEGACY_UNKNOWN_PARTNER";
+        // 진범 #5 봉합 (2026-05-16): "LEGACY_UNKNOWN_PARTNER"는 22자 — partners.partner_code(varchar(20)) 초과.
+        // varchar(20) 안에 들어가는 19자로 단축 (헌법 #13 — 새 SQL/INSERT 전 DESCRIBE 의무 정합).
+        const string partnerCode = "LEGACY_UNKNOWN_PTNR";
         var existing = await Db.ExecuteScalarAsync<string?>(new CommandDefinition(
             "SELECT partner_id FROM partners WHERE tenant_id = @TenantId AND partner_code = @Code LIMIT 1",
             new { TenantId = tenantId, Code = partnerCode }, transaction: tx, cancellationToken: ct)).ConfigureAwait(false);
@@ -1779,7 +1781,7 @@ public sealed class MdbMigrationService
             var bulk = new MySqlBulkCopy(conn, tx)
             {
                 DestinationTableName = stageTable,
-                BulkCopyTimeout = 600,
+                BulkCopyTimeout = 1800,
             };
             // 컬럼 매핑: DataTable 인덱스 → staging 테이블 컬럼명.
             var cols = new[]
@@ -1813,7 +1815,7 @@ public sealed class MdbMigrationService
             int inserted;
             using (var insertCmd = new MySqlCommand(insertSql, conn, tx))
             {
-                insertCmd.CommandTimeout = 600;
+                insertCmd.CommandTimeout = 1800;
                 inserted = await insertCmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
             }
 
@@ -1821,7 +1823,9 @@ public sealed class MdbMigrationService
             _logger.LogInformation(
                 "[MDB마이그레이션] stock_ledger 정공법 완료: 후보 {Total}행 → INSERT {Inserted}행 (중복 IGNORE={Skipped}, 총 {Elapsed}ms)",
                 rows.Count, inserted, rows.Count - inserted, sw.ElapsedMilliseconds);
-            return inserted;
+            // 진범 #6 봉합 (2026-05-16): UI 카운트는 staging 후보 행수 = 사용자에게 "처리된 데이터" 정직 표기.
+            // inserted(INSERT IGNORE ExecuteNonQuery)는 멱등 재실행 시 0 → UI "0행 성공" = 거짓말. 본부장 결재.
+            return rows.Count;
         }
         finally
         {
@@ -2044,7 +2048,7 @@ public sealed class MdbMigrationService
             var bulk = new MySqlBulkCopy(conn, tx)
             {
                 DestinationTableName = stageTable,
-                BulkCopyTimeout = 600,
+                BulkCopyTimeout = 1800,
             };
             var cols = new[]
             {
@@ -2076,7 +2080,7 @@ public sealed class MdbMigrationService
             int inserted;
             using (var insertCmd = new MySqlCommand(insertSql, conn, tx))
             {
-                insertCmd.CommandTimeout = 600;
+                insertCmd.CommandTimeout = 1800;
                 inserted = await insertCmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
             }
 
@@ -2084,7 +2088,8 @@ public sealed class MdbMigrationService
             _logger.LogInformation(
                 "[MDB마이그레이션] collections 정공법 완료: 후보 {Total}행 → INSERT {Inserted}행 (중복 IGNORE={Skipped}, 총 {Elapsed}ms)",
                 rows.Count, inserted, rows.Count - inserted, sw.ElapsedMilliseconds);
-            return inserted;
+            // 진범 #6 봉합 (2026-05-16): UI 카운트 정직 표기 (staging 후보 행수).
+            return rows.Count;
         }
         finally
         {
@@ -2280,7 +2285,7 @@ public sealed class MdbMigrationService
             var bulk = new MySqlBulkCopy(conn, tx)
             {
                 DestinationTableName = stageTable,
-                BulkCopyTimeout = 600,
+                BulkCopyTimeout = 1800,
             };
             var cols = new[]
             {
@@ -2315,7 +2320,7 @@ public sealed class MdbMigrationService
             int inserted;
             using (var insertCmd = new MySqlCommand(insertSql, conn, tx))
             {
-                insertCmd.CommandTimeout = 600;
+                insertCmd.CommandTimeout = 1800;
                 inserted = await insertCmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
             }
 
@@ -2323,7 +2328,8 @@ public sealed class MdbMigrationService
             _logger.LogInformation(
                 "[MDB마이그레이션] cashbook 정공법 완료: 후보 {Total}행 → INSERT {Inserted}행 (중복 IGNORE={Skipped}, 총 {Elapsed}ms)",
                 rows.Count, inserted, rows.Count - inserted, sw.ElapsedMilliseconds);
-            return inserted;
+            // 진범 #6 봉합 (2026-05-16): UI 카운트 정직 표기.
+            return rows.Count;
         }
         finally
         {
@@ -2531,7 +2537,7 @@ public sealed class MdbMigrationService
             var bulk = new MySqlBulkCopy(conn, tx)
             {
                 DestinationTableName = stageTable,
-                BulkCopyTimeout = 600,
+                BulkCopyTimeout = 1800,
             };
             var cols = new[]
             {
@@ -2566,7 +2572,7 @@ public sealed class MdbMigrationService
             int inserted;
             using (var insertCmd = new MySqlCommand(insertSql, conn, tx))
             {
-                insertCmd.CommandTimeout = 600;
+                insertCmd.CommandTimeout = 1800;
                 inserted = await insertCmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
             }
 
@@ -2574,7 +2580,8 @@ public sealed class MdbMigrationService
             _logger.LogInformation(
                 "[MDB마이그레이션] expenses 정공법 완료: 후보 {Total}행 → INSERT {Inserted}행 (중복 IGNORE={Skipped}, 총 {Elapsed}ms)",
                 rows.Count, inserted, rows.Count - inserted, sw.ElapsedMilliseconds);
-            return inserted;
+            // 진범 #6 봉합 (2026-05-16): UI 카운트 정직 표기.
+            return rows.Count;
         }
         finally
         {
@@ -3337,7 +3344,7 @@ public sealed class MdbMigrationService
             var bulk = new MySqlBulkCopy(conn, tx)
             {
                 DestinationTableName = stageTable,
-                BulkCopyTimeout = 600,
+                BulkCopyTimeout = 1800,
             };
             var cols = new[]
             {
@@ -3372,7 +3379,7 @@ public sealed class MdbMigrationService
             int inserted;
             using (var insertCmd = new MySqlCommand(insertSql, conn, tx))
             {
-                insertCmd.CommandTimeout = 600;
+                insertCmd.CommandTimeout = 1800;
                 inserted = await insertCmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
             }
 
@@ -3380,7 +3387,8 @@ public sealed class MdbMigrationService
             _logger.LogInformation(
                 "[MDB마이그레이션] bank_transactions 정공법 완료: 후보 {Total}행 → INSERT {Inserted}행 (중복 IGNORE={Skipped}, 총 {Elapsed}ms)",
                 rows.Count, inserted, rows.Count - inserted, sw.ElapsedMilliseconds);
-            return inserted;
+            // 진범 #6 봉합 (2026-05-16): UI 카운트 정직 표기.
+            return rows.Count;
         }
         finally
         {
