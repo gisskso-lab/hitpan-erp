@@ -2894,31 +2894,32 @@ public sealed class MdbMigrationService
         var dt = ReadMdbTable(oleConn, "SELECT * FROM DOCF4 ORDER BY TX_IO, TX_NO");
         if (dt.Rows.Count == 0) return 0;
 
+        // 진범 #10 봉합 (2026-05-17): tax_invoices 실제 DB 스키마와 정합.
+        // 5/13 시드 스키마 (invoice_date·invoice_type·supply_amount·total_amount·partner_id·remark) 폐기.
+        // 현재 스키마: invoice_no·issued_at·issued_by·amount_total·vat_total·status + 신규 ALTER 컬럼들 유지.
+        // 5/15 PM 봉합 시 invoice_id PK만 정정하고 컬럼명·타입 7군 미확인 = PM 책임 영역 (5/17 사장님 결재 봉합).
         const string headerSql = """
             INSERT INTO tax_invoices
               (invoice_id, tenant_id,
+               invoice_no, issued_at, issued_by,
+               amount_total, vat_total, status,
                direction, tax_no, issue_date_yyyymmdd, partner_code, seq_no,
                sent_at_yyyymmdd, read_at_yyyymmdd, reported_at_yyyymmdd,
                remark1, remark2,
-               invoice_no, invoice_date, invoice_type, partner_id,
-               supply_amount, vat_amount, total_amount,
-               status, remark,
                source_type, source_id, migrated_source_hash,
                created_at, updated_at)
             VALUES
               (@Id, @TenantId,
+               @TaxNo, @IssuedAt, @IssuedBy,
+               @AmountTotal, @VatTotal, 'issued',
                @Direction, @TaxNo, @IssueDate, @PartnerCode, @SeqNo,
                @SentDt, @ReadDt, @ReportDt,
                @Rem1, @Rem2,
-               @TaxNo, @InvoiceDate, @Type, @PartnerId,
-               @Supply, @Vat, @Total,
-               'confirmed', @Remark,
                'migration', @SourceId, @Hash,
                @Now, @Now)
             ON DUPLICATE KEY UPDATE
-              supply_amount = VALUES(supply_amount),
-              vat_amount = VALUES(vat_amount),
-              total_amount = VALUES(total_amount),
+              amount_total = VALUES(amount_total),
+              vat_total = VALUES(vat_total),
               updated_at = VALUES(updated_at)
             """;
 
@@ -2967,6 +2968,8 @@ public sealed class MdbMigrationService
 
             try
             {
+                // 진범 #10 봉합 (2026-05-17): @IssuedAt/IssuedBy/AmountTotal/VatTotal로 변경.
+                // invoice_date(date)→issued_at(datetime6), partner_id→삭제(partner_code로), remark→remark1·remark2.
                 await Db.ExecuteAsync(new CommandDefinition(headerSql, new
                 {
                     Id = invoiceId,
@@ -2981,13 +2984,10 @@ public sealed class MdbMigrationService
                     ReportDt = GetStr(r, "TX_REPORTDT"),
                     Rem1 = GetStr(r, "TX_REM"),
                     Rem2 = GetStr(r, "TX_REM1"),
-                    InvoiceDate = invoiceDate,
-                    Type = typeCode,
-                    PartnerId = partnerId,
-                    Supply = supply,
-                    Vat = vat,
-                    Total = supply + vat,
-                    Remark = GetStr(r, "TX_REM"),
+                    IssuedAt = invoiceDate,                        // datetime6 (DB issued_at NOT NULL)
+                    IssuedBy = tenantId,                            // 마이그 잡 발행자 = 테넌트 (헌법 #2 정합, NOT NULL 봉합)
+                    AmountTotal = supply,
+                    VatTotal = vat,
                     SourceId = sourceId,
                     Hash = ComputeSourceHash($"tax_invoices:{sourceId}:{supply}:{vat}"),
                     Now = now,
