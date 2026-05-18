@@ -4183,11 +4183,13 @@ public sealed class MdbMigrationService
         {
             var headerDt = BuildReceiptHeaderDataTable(headers);
             var headerBulk = new MySqlBulkCopy(conn, tx) { DestinationTableName = headerStage, BulkCopyTimeout = 86400 };
+            // 봉합 2026-05-18 진범 #14: purchase_receipts 스키마에 updated_at 컬럼 없음.
+            // sales_deliveries(updated_at 있음)와 다른 스키마 — PM 오설계 정정.
             var headerCols = new[]
             {
                 "receipt_id", "tenant_id", "receipt_no", "partner_id", "receipt_date",
                 "source_type", "status", "total_amount", "vat_amount", "memo",
-                "created_at", "updated_at",
+                "created_at",
                 "source_id", "legacy_tax_no", "legacy_buy_code", "migrated_source_hash",
             };
             for (int i = 0; i < headerCols.Length; i++)
@@ -4214,12 +4216,12 @@ public sealed class MdbMigrationService
                 INSERT IGNORE INTO purchase_receipts
                   (receipt_id, tenant_id, receipt_no, partner_id, receipt_date,
                    source_type, status, total_amount, vat_amount, memo,
-                   created_at, updated_at,
+                   created_at,
                    source_id, legacy_tax_no, legacy_buy_code, migrated_source_hash)
                 SELECT
                    receipt_id, tenant_id, receipt_no, partner_id, receipt_date,
                    source_type, status, total_amount, vat_amount, memo,
-                   created_at, updated_at,
+                   created_at,
                    source_id, legacy_tax_no, legacy_buy_code, migrated_source_hash
                 FROM `{headerStage}`
                 """;
@@ -4317,6 +4319,7 @@ public sealed class MdbMigrationService
 
     private static DataTable BuildReceiptHeaderDataTable(List<ReceiptHeaderRow> rows)
     {
+        // 봉합 2026-05-18 진범 #14: purchase_receipts에 updated_at 컬럼 없음 (sales_deliveries와 스키마 다름).
         var dt = new DataTable();
         dt.Columns.Add("receipt_id", typeof(string));
         dt.Columns.Add("tenant_id", typeof(string));
@@ -4329,7 +4332,6 @@ public sealed class MdbMigrationService
         dt.Columns.Add("vat_amount", typeof(decimal));
         dt.Columns.Add("memo", typeof(string));
         dt.Columns.Add("created_at", typeof(DateTime));
-        dt.Columns.Add("updated_at", typeof(DateTime));
         dt.Columns.Add("source_id", typeof(string));
         dt.Columns.Add("legacy_tax_no", typeof(int));
         dt.Columns.Add("legacy_buy_code", typeof(int));
@@ -4339,7 +4341,7 @@ public sealed class MdbMigrationService
         {
             dt.Rows.Add(r.ReceiptId, r.TenantId, r.ReceiptNo, r.PartnerId, r.ReceiptDate,
                 r.SourceType, r.Status, r.TotalAmount, r.VatAmount,
-                (object?)r.Memo ?? DBNull.Value, r.Now, r.Now,
+                (object?)r.Memo ?? DBNull.Value, r.Now,
                 r.SourceId,
                 (object?)r.LegacyTaxNo ?? DBNull.Value,
                 (object?)r.LegacyBuyCode ?? DBNull.Value,
@@ -4690,17 +4692,19 @@ public sealed class MdbMigrationService
         using (var cmd = new MySqlCommand($"CREATE TEMPORARY TABLE `{lineStage}` LIKE journal_lines", conn, tx))
         { cmd.CommandTimeout = 60; await cmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false); }
         await DropStageUniqueIndexesAsync(conn, tx, lineStage, "journal_lines", ct).ConfigureAwait(false);
-        // line_id auto_increment 컬럼 무시 — staging에는 NULL 허용
+        // 봉합 2026-05-18 진범 #15: staging에서 line_id auto_increment 컬럼 자체를 DROP.
+        // MODIFY NULL만으로는 BulkCopy 컬럼 매핑 시 PK 충돌 발생 ("23170 copied but 1 inserted").
+        // 본테이블 INSERT IGNORE SELECT 시 line_id 컬럼은 SELECT 안 하므로 자동 생성.
         try
         {
-            using var alterCmd = new MySqlCommand(
-                $"ALTER TABLE `{lineStage}` MODIFY line_id BIGINT NULL", conn, tx);
-            alterCmd.CommandTimeout = 30;
-            await alterCmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
+            using var dropPkCmd = new MySqlCommand(
+                $"ALTER TABLE `{lineStage}` DROP PRIMARY KEY, DROP COLUMN line_id", conn, tx);
+            dropPkCmd.CommandTimeout = 30;
+            await dropPkCmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "[MDB마이그레이션] {Stage} line_id NULL 변경 실패", lineStage);
+            _logger.LogWarning(ex, "[MDB마이그레이션] {Stage} line_id DROP 실패 — 적재 시도 (대안 fallback)", lineStage);
         }
 
         try
