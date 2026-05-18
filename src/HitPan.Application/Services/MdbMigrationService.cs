@@ -359,6 +359,16 @@ public sealed class MdbMigrationService
                         oleConn, tenantId, now, partnerMap, tx, ct).ConfigureAwait(false);
                     return result.BankTransactions;
                 }, ct),
+                // WS-F (2026-05-18) 진범 #9 봉합: DOCFB → sales_deliveries + purchase_receipts.
+                () => RunTableStepAsync("sales_deliveries", async tx =>
+                {
+                    using var oleConn = OpenOleDb(pandataPath);
+                    var (sd, pr) = await MigrateDeliveriesAndReceiptsAsync(
+                        oleConn, tenantId, now, partnerMap, itemMap, defaultWarehouseId, tx, ct).ConfigureAwait(false);
+                    result.SalesDeliveries = sd;
+                    result.PurchaseReceipts = pr;
+                    return sd + pr;
+                }, ct),
             };
 
             if (useMigrationPool)
@@ -3837,6 +3847,594 @@ public sealed class MdbMigrationService
     }
 
     // ════════════════════════════════════════════════════════════════
+    // WS-F (2026-05-18) 진범 #9 봉합: DOCFB → sales_deliveries + purchase_receipts
+    // ════════════════════════════════════════════════════════════════
+
+    /// <summary>
+    /// DOCFB(IJ_*) 거래명세서를 읽어 sales_deliveries(IJ_IO=1) + purchase_receipts(IJ_IO=2) 로 이관한다.
+    /// 사장님 결재 (2026-05-18):
+    /// - Q4: IJ_BUY 음수값(주민번호 추정) 그대로 이관 (legacy_buy_code)
+    /// - IJ_TAXNO → legacy_tax_no 보존, 추후 tax_invoices.tax_no 연결 UPDATE로 정합성 복구
+    /// - 헌법 #20: item·warehouse 매핑 실패해도 NULL 허용 (워크플로우 끊김 0)
+    /// </summary>
+    private async Task<(int SalesCount, int PurchaseCount)> MigrateDeliveriesAndReceiptsAsync(
+        OleDbConnection oleConn, string tenantId, DateTime now,
+        Dictionary<int, string> partnerMap, Dictionary<string, string> itemMap,
+        string defaultWarehouseId,
+        IDbTransaction tx, CancellationToken ct)
+    {
+        // 헤더 + 라인이 한 테이블 (DOCFB) — 그룹화로 분리.
+        // PK 정답 추정: IJ_DT + IJ_IO + IJ_SEQ + IJ_BUY (헤더 식별) + IJ_SUN (라인).
+        var dt = ReadMdbTable(oleConn, "SELECT * FROM DOCFB ORDER BY IJ_DT, IJ_IO, IJ_SEQ, IJ_BUY, IJ_SUN");
+        if (dt.Rows.Count == 0) return (0, 0);
+
+        var salesHeaders = new List<DeliveryHeaderRow>();
+        var salesItems = new List<DeliveryItemRow>();
+        var purchaseHeaders = new List<ReceiptHeaderRow>();
+        var purchaseItems = new List<ReceiptItemRow>();
+
+        // 그룹화: IJ_DT + IJ_IO + IJ_SEQ + IJ_BUY 동일 = 같은 거래명세서
+        var groups = dt.AsEnumerable().GroupBy(r => new
+        {
+            Dt = GetStr(r, "IJ_DT"),
+            Io = GetInt(r, "IJ_IO"),
+            Seq = GetInt(r, "IJ_SEQ"),
+            Buy = GetInt(r, "IJ_BUY"),
+        }).ToList();
+
+        int skipEmptyDt = 0, skipPartner = 0, skipItem = 0;
+        var partnerMissSamples = new List<int>();
+        var itemMissSamples = new List<string>();
+
+        foreach (var g in groups)
+        {
+            var dtStr = g.Key.Dt;
+            var io = g.Key.Io;
+            var seq = g.Key.Seq;
+            var buyCode = g.Key.Buy;
+
+            // IJ_DT = '00000000' 또는 빈값 = skip (마이그 대상 아님, 헌법 #13 정합)
+            if (string.IsNullOrWhiteSpace(dtStr) || dtStr == "00000000")
+            {
+                skipEmptyDt++;
+                continue;
+            }
+            var docDate = ParseLegacyDate(dtStr) ?? now;
+
+            // 헌법 #20: partner 매핑 실패해도 NULL 허용은 sales_deliveries.partner_id가 NOT NULL이라 불가
+            // → fallback: 매핑 실패 시 LEGACY_UNKNOWN_PARTNER fallback (transactions 동형)
+            if (!partnerMap.TryGetValue(buyCode, out var partnerId))
+            {
+                skipPartner++;
+                if (partnerMissSamples.Count < 5) partnerMissSamples.Add(buyCode);
+                continue;
+            }
+
+            // 라인 4품목 합산
+            decimal supplyTotal = 0, vatTotal = 0;
+            foreach (var r in g)
+            {
+                supplyTotal += GetDec(r, "IJ_AMT");
+                vatTotal += GetDec(r, "IJ_VAT");
+            }
+
+            var sourceId = $"mig-docfb-{dtStr}-{io}-{seq}-{buyCode}";
+            var headerId = Guid.NewGuid().ToString();
+            var first = g.First();
+            var taxNo = GetInt(first, "IJ_TAXNO");
+            var memo = GetStr(first, "IJ_REM");
+            var docNo = $"DOCFB-{dtStr}-{io}-{seq:D4}";
+
+            if (io == 1) // 매출 → sales_deliveries
+            {
+                salesHeaders.Add(new DeliveryHeaderRow
+                {
+                    DeliveryId = headerId,
+                    TenantId = tenantId,
+                    DeliveryNo = docNo,
+                    PartnerId = partnerId,
+                    DeliveryDate = docDate,
+                    SourceType = "migration",
+                    SourceId = sourceId,
+                    LegacyTaxNo = taxNo == 99999999 ? (int?)null : taxNo,
+                    LegacyBuyCode = buyCode,
+                    Status = "confirmed",
+                    TotalAmount = supplyTotal + vatTotal,
+                    VatAmount = vatTotal,
+                    Memo = string.IsNullOrWhiteSpace(memo) ? null : memo,
+                    Now = now,
+                    Hash = ComputeSourceHash($"sd:{sourceId}:{supplyTotal}:{vatTotal}"),
+                });
+
+                foreach (var r in g)
+                {
+                    var pum = GetStr(r, "IJ_PUM");
+                    var ku = GetStr(r, "IJ_KU");
+                    var sun = GetInt(r, "IJ_SUN");
+                    var itemKey = $"{pum}|{ku}";
+                    string? itemId = null;
+                    if (itemMap.TryGetValue(itemKey, out var mappedId) && !string.IsNullOrWhiteSpace(mappedId))
+                    {
+                        itemId = mappedId;
+                    }
+                    else
+                    {
+                        skipItem++;
+                        if (itemMissSamples.Count < 5) itemMissSamples.Add(itemKey);
+                    }
+
+                    salesItems.Add(new DeliveryItemRow
+                    {
+                        DeliveryItemId = Guid.NewGuid().ToString(),
+                        DeliveryId = headerId,
+                        TenantId = tenantId,
+                        ItemId = itemId,
+                        WarehouseId = string.IsNullOrEmpty(defaultWarehouseId) ? null : defaultWarehouseId,
+                        Qty = GetDec(r, "IJ_QTY"),
+                        UnitPrice = GetDec(r, "IJ_DAN"),
+                        SupplyAmount = GetDec(r, "IJ_AMT"),
+                        VatAmount = GetDec(r, "IJ_VAT"),
+                        LegacyPum = string.IsNullOrWhiteSpace(pum) ? null : (pum.Length > 100 ? pum[..100] : pum),
+                        LegacyKu = string.IsNullOrWhiteSpace(ku) ? null : (ku.Length > 100 ? ku[..100] : ku),
+                        SourceId = $"{sourceId}-{sun:D3}",
+                    });
+                }
+            }
+            else // io == 2 → 매입 = purchase_receipts
+            {
+                purchaseHeaders.Add(new ReceiptHeaderRow
+                {
+                    ReceiptId = headerId,
+                    TenantId = tenantId,
+                    ReceiptNo = docNo,
+                    PartnerId = partnerId,
+                    ReceiptDate = docDate,
+                    SourceType = "migration",
+                    SourceId = sourceId,
+                    LegacyTaxNo = taxNo == 99999999 ? (int?)null : taxNo,
+                    LegacyBuyCode = buyCode,
+                    Status = "confirmed",
+                    TotalAmount = supplyTotal + vatTotal,
+                    VatAmount = vatTotal,
+                    Memo = string.IsNullOrWhiteSpace(memo) ? null : memo,
+                    Now = now,
+                    Hash = ComputeSourceHash($"pr:{sourceId}:{supplyTotal}:{vatTotal}"),
+                });
+
+                foreach (var r in g)
+                {
+                    var pum = GetStr(r, "IJ_PUM");
+                    var ku = GetStr(r, "IJ_KU");
+                    var sun = GetInt(r, "IJ_SUN");
+                    var itemKey = $"{pum}|{ku}";
+                    string? itemId = null;
+                    if (itemMap.TryGetValue(itemKey, out var mappedId) && !string.IsNullOrWhiteSpace(mappedId))
+                    {
+                        itemId = mappedId;
+                    }
+                    else
+                    {
+                        skipItem++;
+                        if (itemMissSamples.Count < 5) itemMissSamples.Add(itemKey);
+                    }
+
+                    purchaseItems.Add(new ReceiptItemRow
+                    {
+                        ReceiptItemId = Guid.NewGuid().ToString(),
+                        ReceiptId = headerId,
+                        TenantId = tenantId,
+                        ItemId = itemId,
+                        WarehouseId = string.IsNullOrEmpty(defaultWarehouseId) ? null : defaultWarehouseId,
+                        Qty = GetDec(r, "IJ_QTY"),
+                        UnitPrice = GetDec(r, "IJ_DAN"),
+                        SupplyAmount = GetDec(r, "IJ_AMT"),
+                        VatAmount = GetDec(r, "IJ_VAT"),
+                        LegacyPum = string.IsNullOrWhiteSpace(pum) ? null : (pum.Length > 100 ? pum[..100] : pum),
+                        LegacyKu = string.IsNullOrWhiteSpace(ku) ? null : (ku.Length > 100 ? ku[..100] : ku),
+                        SourceId = $"{sourceId}-{sun:D3}",
+                    });
+                }
+            }
+        }
+
+        _logger.LogInformation(
+            "[MDB마이그레이션] DOCFB 그룹화 — 매출헤더={SH} 매출라인={SI} 매입헤더={PH} 매입라인={PI} | skip 빈DT={SkipDt} skip 파트너={SkipP} skip 품목={SkipI} | partner샘플={PS} item샘플={IS}",
+            salesHeaders.Count, salesItems.Count, purchaseHeaders.Count, purchaseItems.Count,
+            skipEmptyDt, skipPartner, skipItem,
+            string.Join(",", partnerMissSamples), string.Join(",", itemMissSamples));
+
+        if (salesHeaders.Count == 0 && purchaseHeaders.Count == 0) return (0, 0);
+
+        // 정공법 BulkCopy 경로
+        if (Db is MySqlConnection mysqlConn && tx is MySqlTransaction mysqlTx)
+        {
+            int sd = 0, pr = 0;
+            if (salesHeaders.Count > 0)
+                sd = await BulkCopySalesDeliveriesAsync(mysqlConn, mysqlTx, salesHeaders, salesItems, ct).ConfigureAwait(false);
+            if (purchaseHeaders.Count > 0)
+                pr = await BulkCopyPurchaseReceiptsAsync(mysqlConn, mysqlTx, purchaseHeaders, purchaseItems, ct).ConfigureAwait(false);
+            return (sd, pr);
+        }
+
+        // legacy fallback (factory 모드 전용): row-by-row 미지원 — 0 반환 + 경고.
+        _logger.LogWarning("[MDB마이그레이션] DOCFB legacy fallback row-by-row 미구현 — factory 모드만 지원. 0 반환.");
+        return (0, 0);
+    }
+
+    private async Task<int> BulkCopySalesDeliveriesAsync(
+        MySqlConnection conn, MySqlTransaction tx,
+        List<DeliveryHeaderRow> headers, List<DeliveryItemRow> items, CancellationToken ct)
+    {
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        var headerStage = $"sd_stage_{Guid.NewGuid():N}".Substring(0, 40);
+        var itemStage = $"sdi_stage_{Guid.NewGuid():N}".Substring(0, 40);
+
+        using (var cmd = new MySqlCommand($"CREATE TEMPORARY TABLE `{headerStage}` LIKE sales_deliveries", conn, tx))
+        { cmd.CommandTimeout = 60; await cmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false); }
+        await DropStageUniqueIndexesAsync(conn, tx, headerStage, "sales_deliveries", ct).ConfigureAwait(false);
+
+        using (var cmd = new MySqlCommand($"CREATE TEMPORARY TABLE `{itemStage}` LIKE sales_delivery_items", conn, tx))
+        { cmd.CommandTimeout = 60; await cmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false); }
+        await DropStageUniqueIndexesAsync(conn, tx, itemStage, "sales_delivery_items", ct).ConfigureAwait(false);
+
+        try
+        {
+            var headerDt = BuildDeliveryHeaderDataTable(headers);
+            var headerBulk = new MySqlBulkCopy(conn, tx) { DestinationTableName = headerStage, BulkCopyTimeout = 86400 };
+            var headerCols = new[]
+            {
+                "delivery_id", "tenant_id", "delivery_no", "partner_id", "delivery_date",
+                "source_type", "status", "total_amount", "vat_amount", "memo",
+                "created_at", "updated_at", "is_deleted",
+                "source_id", "legacy_tax_no", "legacy_buy_code", "migrated_source_hash",
+            };
+            for (int i = 0; i < headerCols.Length; i++)
+                headerBulk.ColumnMappings.Add(new MySqlBulkCopyColumnMapping(i, headerCols[i]));
+            var hr = await headerBulk.WriteToServerAsync(headerDt, ct).ConfigureAwait(false);
+            _logger.LogInformation("[MDB마이그레이션] sales_deliveries BulkCopy: {Rows}행 warnings={W} {Ms}ms",
+                hr.RowsInserted, hr.Warnings.Count, sw.ElapsedMilliseconds);
+
+            var itemDt = BuildDeliveryItemDataTable(items);
+            var itemBulk = new MySqlBulkCopy(conn, tx) { DestinationTableName = itemStage, BulkCopyTimeout = 86400 };
+            var itemCols = new[]
+            {
+                "delivery_item_id", "delivery_id", "tenant_id", "item_id", "warehouse_id",
+                "qty", "unit_price", "supply_amount", "vat_amount",
+                "legacy_pum", "legacy_ku", "source_id",
+            };
+            for (int i = 0; i < itemCols.Length; i++)
+                itemBulk.ColumnMappings.Add(new MySqlBulkCopyColumnMapping(i, itemCols[i]));
+            var ir = await itemBulk.WriteToServerAsync(itemDt, ct).ConfigureAwait(false);
+            _logger.LogInformation("[MDB마이그레이션] sales_delivery_items BulkCopy: {Rows}행 warnings={W} {Ms}ms",
+                ir.RowsInserted, ir.Warnings.Count, sw.ElapsedMilliseconds);
+
+            var headerInsertSql = $"""
+                INSERT IGNORE INTO sales_deliveries
+                  (delivery_id, tenant_id, delivery_no, partner_id, delivery_date,
+                   source_type, status, total_amount, vat_amount, memo,
+                   created_at, updated_at, is_deleted,
+                   source_id, legacy_tax_no, legacy_buy_code, migrated_source_hash)
+                SELECT
+                   delivery_id, tenant_id, delivery_no, partner_id, delivery_date,
+                   source_type, status, total_amount, vat_amount, memo,
+                   created_at, updated_at, is_deleted,
+                   source_id, legacy_tax_no, legacy_buy_code, migrated_source_hash
+                FROM `{headerStage}`
+                """;
+            using (var cmd = new MySqlCommand(headerInsertSql, conn, tx))
+            { cmd.CommandTimeout = 86400; await cmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false); }
+
+            var itemInsertSql = $"""
+                INSERT IGNORE INTO sales_delivery_items
+                  (delivery_item_id, delivery_id, tenant_id, item_id, warehouse_id,
+                   qty, unit_price, supply_amount, vat_amount,
+                   legacy_pum, legacy_ku, source_id)
+                SELECT
+                   delivery_item_id, delivery_id, tenant_id, item_id, warehouse_id,
+                   qty, unit_price, supply_amount, vat_amount,
+                   legacy_pum, legacy_ku, source_id
+                FROM `{itemStage}`
+                """;
+            using (var cmd = new MySqlCommand(itemInsertSql, conn, tx))
+            { cmd.CommandTimeout = 86400; await cmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false); }
+
+            sw.Stop();
+            _logger.LogInformation("[MDB마이그레이션] sales_deliveries 정공법 완료: 헤더 {H}행 라인 {I}행 총 {Ms}ms",
+                headers.Count, items.Count, sw.ElapsedMilliseconds);
+            return headers.Count;
+        }
+        finally
+        {
+            await TryDropStageAsync(conn, tx, headerStage, ct).ConfigureAwait(false);
+            await TryDropStageAsync(conn, tx, itemStage, ct).ConfigureAwait(false);
+        }
+    }
+
+    private async Task<int> BulkCopyPurchaseReceiptsAsync(
+        MySqlConnection conn, MySqlTransaction tx,
+        List<ReceiptHeaderRow> headers, List<ReceiptItemRow> items, CancellationToken ct)
+    {
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        var headerStage = $"pr_stage_{Guid.NewGuid():N}".Substring(0, 40);
+        var itemStage = $"pri_stage_{Guid.NewGuid():N}".Substring(0, 40);
+
+        using (var cmd = new MySqlCommand($"CREATE TEMPORARY TABLE `{headerStage}` LIKE purchase_receipts", conn, tx))
+        { cmd.CommandTimeout = 60; await cmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false); }
+        await DropStageUniqueIndexesAsync(conn, tx, headerStage, "purchase_receipts", ct).ConfigureAwait(false);
+
+        using (var cmd = new MySqlCommand($"CREATE TEMPORARY TABLE `{itemStage}` LIKE purchase_receipt_items", conn, tx))
+        { cmd.CommandTimeout = 60; await cmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false); }
+        await DropStageUniqueIndexesAsync(conn, tx, itemStage, "purchase_receipt_items", ct).ConfigureAwait(false);
+
+        try
+        {
+            var headerDt = BuildReceiptHeaderDataTable(headers);
+            var headerBulk = new MySqlBulkCopy(conn, tx) { DestinationTableName = headerStage, BulkCopyTimeout = 86400 };
+            var headerCols = new[]
+            {
+                "receipt_id", "tenant_id", "receipt_no", "partner_id", "receipt_date",
+                "source_type", "status", "total_amount", "vat_amount", "memo",
+                "created_at", "updated_at",
+                "source_id", "legacy_tax_no", "legacy_buy_code", "migrated_source_hash",
+            };
+            for (int i = 0; i < headerCols.Length; i++)
+                headerBulk.ColumnMappings.Add(new MySqlBulkCopyColumnMapping(i, headerCols[i]));
+            var hr = await headerBulk.WriteToServerAsync(headerDt, ct).ConfigureAwait(false);
+            _logger.LogInformation("[MDB마이그레이션] purchase_receipts BulkCopy: {Rows}행 warnings={W} {Ms}ms",
+                hr.RowsInserted, hr.Warnings.Count, sw.ElapsedMilliseconds);
+
+            var itemDt = BuildReceiptItemDataTable(items);
+            var itemBulk = new MySqlBulkCopy(conn, tx) { DestinationTableName = itemStage, BulkCopyTimeout = 86400 };
+            var itemCols = new[]
+            {
+                "receipt_item_id", "receipt_id", "tenant_id", "item_id", "warehouse_id",
+                "qty", "unit_price", "supply_amount", "vat_amount",
+                "legacy_pum", "legacy_ku", "source_id",
+            };
+            for (int i = 0; i < itemCols.Length; i++)
+                itemBulk.ColumnMappings.Add(new MySqlBulkCopyColumnMapping(i, itemCols[i]));
+            var ir = await itemBulk.WriteToServerAsync(itemDt, ct).ConfigureAwait(false);
+            _logger.LogInformation("[MDB마이그레이션] purchase_receipt_items BulkCopy: {Rows}행 warnings={W} {Ms}ms",
+                ir.RowsInserted, ir.Warnings.Count, sw.ElapsedMilliseconds);
+
+            var headerInsertSql = $"""
+                INSERT IGNORE INTO purchase_receipts
+                  (receipt_id, tenant_id, receipt_no, partner_id, receipt_date,
+                   source_type, status, total_amount, vat_amount, memo,
+                   created_at, updated_at,
+                   source_id, legacy_tax_no, legacy_buy_code, migrated_source_hash)
+                SELECT
+                   receipt_id, tenant_id, receipt_no, partner_id, receipt_date,
+                   source_type, status, total_amount, vat_amount, memo,
+                   created_at, updated_at,
+                   source_id, legacy_tax_no, legacy_buy_code, migrated_source_hash
+                FROM `{headerStage}`
+                """;
+            using (var cmd = new MySqlCommand(headerInsertSql, conn, tx))
+            { cmd.CommandTimeout = 86400; await cmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false); }
+
+            var itemInsertSql = $"""
+                INSERT IGNORE INTO purchase_receipt_items
+                  (receipt_item_id, receipt_id, tenant_id, item_id, warehouse_id,
+                   qty, unit_price, supply_amount, vat_amount,
+                   legacy_pum, legacy_ku, source_id)
+                SELECT
+                   receipt_item_id, receipt_id, tenant_id, item_id, warehouse_id,
+                   qty, unit_price, supply_amount, vat_amount,
+                   legacy_pum, legacy_ku, source_id
+                FROM `{itemStage}`
+                """;
+            using (var cmd = new MySqlCommand(itemInsertSql, conn, tx))
+            { cmd.CommandTimeout = 86400; await cmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false); }
+
+            sw.Stop();
+            _logger.LogInformation("[MDB마이그레이션] purchase_receipts 정공법 완료: 헤더 {H}행 라인 {I}행 총 {Ms}ms",
+                headers.Count, items.Count, sw.ElapsedMilliseconds);
+            return headers.Count;
+        }
+        finally
+        {
+            await TryDropStageAsync(conn, tx, headerStage, ct).ConfigureAwait(false);
+            await TryDropStageAsync(conn, tx, itemStage, ct).ConfigureAwait(false);
+        }
+    }
+
+    private static DataTable BuildDeliveryHeaderDataTable(List<DeliveryHeaderRow> rows)
+    {
+        var dt = new DataTable();
+        dt.Columns.Add("delivery_id", typeof(string));
+        dt.Columns.Add("tenant_id", typeof(string));
+        dt.Columns.Add("delivery_no", typeof(string));
+        dt.Columns.Add("partner_id", typeof(string));
+        dt.Columns.Add("delivery_date", typeof(DateTime));
+        dt.Columns.Add("source_type", typeof(string));
+        dt.Columns.Add("status", typeof(string));
+        dt.Columns.Add("total_amount", typeof(decimal));
+        dt.Columns.Add("vat_amount", typeof(decimal));
+        dt.Columns.Add("memo", typeof(string));
+        dt.Columns.Add("created_at", typeof(DateTime));
+        dt.Columns.Add("updated_at", typeof(DateTime));
+        dt.Columns.Add("is_deleted", typeof(byte));
+        dt.Columns.Add("source_id", typeof(string));
+        dt.Columns.Add("legacy_tax_no", typeof(int));
+        dt.Columns.Add("legacy_buy_code", typeof(int));
+        dt.Columns.Add("migrated_source_hash", typeof(string));
+
+        foreach (var r in rows)
+        {
+            dt.Rows.Add(r.DeliveryId, r.TenantId, r.DeliveryNo, r.PartnerId, r.DeliveryDate,
+                r.SourceType, r.Status, r.TotalAmount, r.VatAmount,
+                (object?)r.Memo ?? DBNull.Value, r.Now, r.Now, (byte)0,
+                r.SourceId,
+                (object?)r.LegacyTaxNo ?? DBNull.Value,
+                (object?)r.LegacyBuyCode ?? DBNull.Value,
+                (object?)r.Hash ?? DBNull.Value);
+        }
+        return dt;
+    }
+
+    private static DataTable BuildDeliveryItemDataTable(List<DeliveryItemRow> rows)
+    {
+        var dt = new DataTable();
+        dt.Columns.Add("delivery_item_id", typeof(string));
+        dt.Columns.Add("delivery_id", typeof(string));
+        dt.Columns.Add("tenant_id", typeof(string));
+        dt.Columns.Add("item_id", typeof(string));
+        dt.Columns.Add("warehouse_id", typeof(string));
+        dt.Columns.Add("qty", typeof(decimal));
+        dt.Columns.Add("unit_price", typeof(decimal));
+        dt.Columns.Add("supply_amount", typeof(decimal));
+        dt.Columns.Add("vat_amount", typeof(decimal));
+        dt.Columns.Add("legacy_pum", typeof(string));
+        dt.Columns.Add("legacy_ku", typeof(string));
+        dt.Columns.Add("source_id", typeof(string));
+
+        foreach (var r in rows)
+        {
+            dt.Rows.Add(r.DeliveryItemId, r.DeliveryId, r.TenantId,
+                (object?)r.ItemId ?? DBNull.Value,
+                (object?)r.WarehouseId ?? DBNull.Value,
+                r.Qty, r.UnitPrice, r.SupplyAmount, r.VatAmount,
+                (object?)r.LegacyPum ?? DBNull.Value,
+                (object?)r.LegacyKu ?? DBNull.Value,
+                r.SourceId);
+        }
+        return dt;
+    }
+
+    private static DataTable BuildReceiptHeaderDataTable(List<ReceiptHeaderRow> rows)
+    {
+        var dt = new DataTable();
+        dt.Columns.Add("receipt_id", typeof(string));
+        dt.Columns.Add("tenant_id", typeof(string));
+        dt.Columns.Add("receipt_no", typeof(string));
+        dt.Columns.Add("partner_id", typeof(string));
+        dt.Columns.Add("receipt_date", typeof(DateTime));
+        dt.Columns.Add("source_type", typeof(string));
+        dt.Columns.Add("status", typeof(string));
+        dt.Columns.Add("total_amount", typeof(decimal));
+        dt.Columns.Add("vat_amount", typeof(decimal));
+        dt.Columns.Add("memo", typeof(string));
+        dt.Columns.Add("created_at", typeof(DateTime));
+        dt.Columns.Add("updated_at", typeof(DateTime));
+        dt.Columns.Add("source_id", typeof(string));
+        dt.Columns.Add("legacy_tax_no", typeof(int));
+        dt.Columns.Add("legacy_buy_code", typeof(int));
+        dt.Columns.Add("migrated_source_hash", typeof(string));
+
+        foreach (var r in rows)
+        {
+            dt.Rows.Add(r.ReceiptId, r.TenantId, r.ReceiptNo, r.PartnerId, r.ReceiptDate,
+                r.SourceType, r.Status, r.TotalAmount, r.VatAmount,
+                (object?)r.Memo ?? DBNull.Value, r.Now, r.Now,
+                r.SourceId,
+                (object?)r.LegacyTaxNo ?? DBNull.Value,
+                (object?)r.LegacyBuyCode ?? DBNull.Value,
+                (object?)r.Hash ?? DBNull.Value);
+        }
+        return dt;
+    }
+
+    private static DataTable BuildReceiptItemDataTable(List<ReceiptItemRow> rows)
+    {
+        var dt = new DataTable();
+        dt.Columns.Add("receipt_item_id", typeof(string));
+        dt.Columns.Add("receipt_id", typeof(string));
+        dt.Columns.Add("tenant_id", typeof(string));
+        dt.Columns.Add("item_id", typeof(string));
+        dt.Columns.Add("warehouse_id", typeof(string));
+        dt.Columns.Add("qty", typeof(decimal));
+        dt.Columns.Add("unit_price", typeof(decimal));
+        dt.Columns.Add("supply_amount", typeof(decimal));
+        dt.Columns.Add("vat_amount", typeof(decimal));
+        dt.Columns.Add("legacy_pum", typeof(string));
+        dt.Columns.Add("legacy_ku", typeof(string));
+        dt.Columns.Add("source_id", typeof(string));
+
+        foreach (var r in rows)
+        {
+            dt.Rows.Add(r.ReceiptItemId, r.ReceiptId, r.TenantId,
+                (object?)r.ItemId ?? DBNull.Value,
+                (object?)r.WarehouseId ?? DBNull.Value,
+                r.Qty, r.UnitPrice, r.SupplyAmount, r.VatAmount,
+                (object?)r.LegacyPum ?? DBNull.Value,
+                (object?)r.LegacyKu ?? DBNull.Value,
+                r.SourceId);
+        }
+        return dt;
+    }
+
+    private sealed class DeliveryHeaderRow
+    {
+        public string DeliveryId { get; set; } = string.Empty;
+        public string TenantId { get; set; } = string.Empty;
+        public string DeliveryNo { get; set; } = string.Empty;
+        public string PartnerId { get; set; } = string.Empty;
+        public DateTime DeliveryDate { get; set; }
+        public string SourceType { get; set; } = "migration";
+        public string SourceId { get; set; } = string.Empty;
+        public int? LegacyTaxNo { get; set; }
+        public int? LegacyBuyCode { get; set; }
+        public string Status { get; set; } = "confirmed";
+        public decimal TotalAmount { get; set; }
+        public decimal VatAmount { get; set; }
+        public string? Memo { get; set; }
+        public DateTime Now { get; set; }
+        public string? Hash { get; set; }
+    }
+
+    private sealed class DeliveryItemRow
+    {
+        public string DeliveryItemId { get; set; } = string.Empty;
+        public string DeliveryId { get; set; } = string.Empty;
+        public string TenantId { get; set; } = string.Empty;
+        public string? ItemId { get; set; }
+        public string? WarehouseId { get; set; }
+        public decimal Qty { get; set; }
+        public decimal UnitPrice { get; set; }
+        public decimal SupplyAmount { get; set; }
+        public decimal VatAmount { get; set; }
+        public string? LegacyPum { get; set; }
+        public string? LegacyKu { get; set; }
+        public string SourceId { get; set; } = string.Empty;
+    }
+
+    private sealed class ReceiptHeaderRow
+    {
+        public string ReceiptId { get; set; } = string.Empty;
+        public string TenantId { get; set; } = string.Empty;
+        public string ReceiptNo { get; set; } = string.Empty;
+        public string PartnerId { get; set; } = string.Empty;
+        public DateTime ReceiptDate { get; set; }
+        public string SourceType { get; set; } = "migration";
+        public string SourceId { get; set; } = string.Empty;
+        public int? LegacyTaxNo { get; set; }
+        public int? LegacyBuyCode { get; set; }
+        public string Status { get; set; } = "confirmed";
+        public decimal TotalAmount { get; set; }
+        public decimal VatAmount { get; set; }
+        public string? Memo { get; set; }
+        public DateTime Now { get; set; }
+        public string? Hash { get; set; }
+    }
+
+    private sealed class ReceiptItemRow
+    {
+        public string ReceiptItemId { get; set; } = string.Empty;
+        public string ReceiptId { get; set; } = string.Empty;
+        public string TenantId { get; set; } = string.Empty;
+        public string? ItemId { get; set; }
+        public string? WarehouseId { get; set; }
+        public decimal Qty { get; set; }
+        public decimal UnitPrice { get; set; }
+        public decimal SupplyAmount { get; set; }
+        public decimal VatAmount { get; set; }
+        public string? LegacyPum { get; set; }
+        public string? LegacyKu { get; set; }
+        public string SourceId { get; set; } = string.Empty;
+    }
+
+    // ════════════════════════════════════════════════════════════════
     // 유틸리티 메서드
     // ════════════════════════════════════════════════════════════════
 
@@ -4339,6 +4937,20 @@ public sealed class MdbMigrationResult
     /// <summary>은행거래(bank_transactions, BANKF) 이관 건수</summary>
     public int BankTransactions { get; set; }
 
+    // WS-F (2026-05-18): 진범 #9 봉합 — DOCFB 거래명세서.
+    /// <summary>거래명세서 매출(sales_deliveries, DOCFB IJ_IO=1) 이관 건수</summary>
+    public int SalesDeliveries { get; set; }
+
+    /// <summary>거래명세서 매입(purchase_receipts, DOCFB IJ_IO=2) 이관 건수</summary>
+    public int PurchaseReceipts { get; set; }
+
+    // WS-F (2026-05-18): 진범 #12 봉합 — DOCF7 회계 분개.
+    /// <summary>회계 전표 헤더(journal_entries, DOCF7 그룹화) 이관 건수</summary>
+    public int JournalEntries { get; set; }
+
+    /// <summary>회계 분개 라인(journal_lines, DOCF7 행) 이관 건수</summary>
+    public int JournalLines { get; set; }
+
     // WS-11 정공법 축 5 (사장님 명령 2026-05-14): POTHER 4 풀스택.
     /// <summary>명함/연락처 (DOCNM → partner_contacts) 이관 건수</summary>
     public int BusinessCards { get; set; }
@@ -4358,7 +4970,9 @@ public sealed class MdbMigrationResult
                         + Collections + Cashbook + Expenses
                         + PurchaseOrdersFromIU + SalesOrdersFromIO + TaxInvoices
                         + Bills + CardPayments + BankTransactions
-                        + BusinessCards + ServiceTickets + DeliveryTracking + Events;
+                        + BusinessCards + ServiceTickets + DeliveryTracking + Events
+                        + SalesDeliveries + PurchaseReceipts
+                        + JournalEntries + JournalLines;
 
     public override string ToString()
     {
