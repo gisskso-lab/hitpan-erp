@@ -382,6 +382,27 @@ public sealed class MdbMigrationService
                     result.JournalLines = jl;
                     return je + jl;
                 }, ct),
+                // 진범 #23-Q 봉합 (2026-05-18): 견적서 잡 스켈레터.
+                // 사장님 자문: 레거시 견적은 별도 화면 → 별도 MDB 테이블 추정.
+                // ERP 매니저 확정 전까지 테이블 후보 자동 탐색(DOCFD/DOCFE/DOCFC/QUOT) 시도.
+                () => RunTableStepAsync("quotations", async tx =>
+                {
+                    using var oleConn = OpenOleDb(pandataPath);
+                    result.Quotations = await MigrateQuotationsAsync(
+                        oleConn, tenantId, now, partnerMap, itemMap, tx, ct).ConfigureAwait(false);
+                    return result.Quotations;
+                }, ct),
+                // 진범 #23-R 봉합 (2026-05-18): 반품 잡 스켈레터.
+                // 사장님 자문: 반품 코드 패턴 미확정. IO=3,4 또는 별도 테이블 자동 탐색.
+                () => RunTableStepAsync("sales_returns", async tx =>
+                {
+                    using var oleConn = OpenOleDb(pandataPath);
+                    var (sr, pr) = await MigrateReturnsAsync(
+                        oleConn, tenantId, now, partnerMap, itemMap, tx, ct).ConfigureAwait(false);
+                    result.SalesReturns = sr;
+                    result.PurchaseReturns = pr;
+                    return sr + pr;
+                }, ct),
             };
 
             if (useMigrationPool)
@@ -4121,6 +4142,13 @@ public sealed class MdbMigrationService
             _logger.LogInformation("[MDB마이그레이션] sales_delivery_items BulkCopy: {Rows}행 warnings={W} {Ms}ms",
                 ir.RowsInserted, ir.Warnings.Count, sw.ElapsedMilliseconds);
 
+            // 진범 #21 봉합 (2026-05-18): source_id 중복 진단 (INSERT IGNORE 손실 원인).
+            int distinctSourceId = 0;
+            using (var cmd = new MySqlCommand($"SELECT COUNT(DISTINCT source_id) FROM `{headerStage}`", conn, tx))
+            { cmd.CommandTimeout = 86400; distinctSourceId = Convert.ToInt32(await cmd.ExecuteScalarAsync(ct).ConfigureAwait(false) ?? 0); }
+            _logger.LogInformation("[MDB마이그레이션] sales_deliveries 진범 #21 진단: staging {S}행 / DISTINCT source_id={D}행 (중복={Dup}건)",
+                headers.Count, distinctSourceId, headers.Count - distinctSourceId);
+
             var headerInsertSql = $"""
                 INSERT IGNORE INTO sales_deliveries
                   (delivery_id, tenant_id, delivery_no, partner_id, delivery_date,
@@ -4134,8 +4162,11 @@ public sealed class MdbMigrationService
                    source_id, legacy_tax_no, legacy_buy_code, migrated_source_hash
                 FROM `{headerStage}`
                 """;
+            int insertedHeaders = 0;
             using (var cmd = new MySqlCommand(headerInsertSql, conn, tx))
-            { cmd.CommandTimeout = 86400; await cmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false); }
+            { cmd.CommandTimeout = 86400; insertedHeaders = await cmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false); }
+            _logger.LogInformation("[MDB마이그레이션] sales_deliveries INSERT IGNORE 결과: {Ins}행 / staging {Stg}행 (손실 {Loss}건)",
+                insertedHeaders, headers.Count, headers.Count - insertedHeaders);
 
             var itemInsertSql = $"""
                 INSERT IGNORE INTO sales_delivery_items
@@ -4148,13 +4179,16 @@ public sealed class MdbMigrationService
                    legacy_pum, legacy_ku, source_id
                 FROM `{itemStage}`
                 """;
+            int insertedItems = 0;
             using (var cmd = new MySqlCommand(itemInsertSql, conn, tx))
-            { cmd.CommandTimeout = 86400; await cmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false); }
+            { cmd.CommandTimeout = 86400; insertedItems = await cmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false); }
+            _logger.LogInformation("[MDB마이그레이션] sales_delivery_items INSERT IGNORE 결과: {Ins}행 / staging {Stg}행",
+                insertedItems, items.Count);
 
             sw.Stop();
-            _logger.LogInformation("[MDB마이그레이션] sales_deliveries 정공법 완료: 헤더 {H}행 라인 {I}행 총 {Ms}ms",
-                headers.Count, items.Count, sw.ElapsedMilliseconds);
-            return headers.Count;
+            _logger.LogInformation("[MDB마이그레이션] sales_deliveries 정공법 완료: 후보 {H}행 → INSERT {Ins}행 / items {Ic}→{Ii}행 총 {Ms}ms",
+                headers.Count, insertedHeaders, items.Count, insertedItems, sw.ElapsedMilliseconds);
+            return insertedHeaders;
         }
         finally
         {
@@ -4212,6 +4246,13 @@ public sealed class MdbMigrationService
             _logger.LogInformation("[MDB마이그레이션] purchase_receipt_items BulkCopy: {Rows}행 warnings={W} {Ms}ms",
                 ir.RowsInserted, ir.Warnings.Count, sw.ElapsedMilliseconds);
 
+            // 진범 #21 봉합 (2026-05-18): source_id 중복 진단.
+            int distinctSourceId = 0;
+            using (var cmd = new MySqlCommand($"SELECT COUNT(DISTINCT source_id) FROM `{headerStage}`", conn, tx))
+            { cmd.CommandTimeout = 86400; distinctSourceId = Convert.ToInt32(await cmd.ExecuteScalarAsync(ct).ConfigureAwait(false) ?? 0); }
+            _logger.LogInformation("[MDB마이그레이션] purchase_receipts 진범 #21 진단: staging {S}행 / DISTINCT source_id={D}행 (중복={Dup}건)",
+                headers.Count, distinctSourceId, headers.Count - distinctSourceId);
+
             var headerInsertSql = $"""
                 INSERT IGNORE INTO purchase_receipts
                   (receipt_id, tenant_id, receipt_no, partner_id, receipt_date,
@@ -4225,8 +4266,11 @@ public sealed class MdbMigrationService
                    source_id, legacy_tax_no, legacy_buy_code, migrated_source_hash
                 FROM `{headerStage}`
                 """;
+            int insertedHeaders = 0;
             using (var cmd = new MySqlCommand(headerInsertSql, conn, tx))
-            { cmd.CommandTimeout = 86400; await cmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false); }
+            { cmd.CommandTimeout = 86400; insertedHeaders = await cmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false); }
+            _logger.LogInformation("[MDB마이그레이션] purchase_receipts INSERT IGNORE 결과: {Ins}행 / staging {Stg}행 (손실 {Loss}건)",
+                insertedHeaders, headers.Count, headers.Count - insertedHeaders);
 
             var itemInsertSql = $"""
                 INSERT IGNORE INTO purchase_receipt_items
@@ -4239,13 +4283,16 @@ public sealed class MdbMigrationService
                    legacy_pum, legacy_ku, source_id
                 FROM `{itemStage}`
                 """;
+            int insertedItems = 0;
             using (var cmd = new MySqlCommand(itemInsertSql, conn, tx))
-            { cmd.CommandTimeout = 86400; await cmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false); }
+            { cmd.CommandTimeout = 86400; insertedItems = await cmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false); }
+            _logger.LogInformation("[MDB마이그레이션] purchase_receipt_items INSERT IGNORE 결과: {Ins}행 / staging {Stg}행",
+                insertedItems, items.Count);
 
             sw.Stop();
-            _logger.LogInformation("[MDB마이그레이션] purchase_receipts 정공법 완료: 헤더 {H}행 라인 {I}행 총 {Ms}ms",
-                headers.Count, items.Count, sw.ElapsedMilliseconds);
-            return headers.Count;
+            _logger.LogInformation("[MDB마이그레이션] purchase_receipts 정공법 완료: 후보 {H}행 → INSERT {Ins}행 / items {Ic}→{Ii}행 총 {Ms}ms",
+                headers.Count, insertedHeaders, items.Count, insertedItems, sw.ElapsedMilliseconds);
+            return insertedHeaders;
         }
         finally
         {
@@ -5215,6 +5262,90 @@ public sealed class MdbMigrationService
     }
 
     /// <summary>
+    /// 진범 #23 봉합 (2026-05-18): MDB 테이블 후보 자동 탐색.
+    /// OleDbConnection.GetSchema("Tables")로 사용 가능 테이블 목록 조회 후 후보 중 첫 매칭 반환.
+    /// 없으면 null 반환 (호출자가 skip 처리).
+    /// </summary>
+    private static string? FindMdbTable(OleDbConnection conn, params string[] candidates)
+    {
+        try
+        {
+            var schema = conn.GetSchema("Tables");
+            var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (System.Data.DataRow r in schema.Rows)
+            {
+                var name = r["TABLE_NAME"]?.ToString();
+                if (!string.IsNullOrEmpty(name)) names.Add(name);
+            }
+            return candidates.FirstOrDefault(c => names.Contains(c));
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// 진범 #23-Q 봉합 (2026-05-18): 견적서 마이그.
+    /// 사장님 자문: 레거시 견적은 별도 화면 → 별도 MDB 테이블.
+    /// 후보: DOCFD / DOCFE / DOCFC / DOCFG / QUOT (ERP 매니저 확정 전 자동 탐색).
+    /// </summary>
+    private async Task<int> MigrateQuotationsAsync(
+        OleDbConnection oleConn, string tenantId, DateTime now,
+        Dictionary<int, string> partnerMap, Dictionary<string, string> itemMap,
+        IDbTransaction tx, CancellationToken ct)
+    {
+        var table = FindMdbTable(oleConn, "DOCFD", "DOCFE", "DOCFC", "DOCFG", "QUOT");
+        if (table is null)
+        {
+            _logger.LogWarning("[MDB마이그레이션] 진범 #23-Q: 견적서 후보 테이블(DOCFD/DOCFE/DOCFC/DOCFG/QUOT) 없음 — skip. ERP 매니저 확정 필요.");
+            return 0;
+        }
+
+        _logger.LogInformation("[MDB마이그레이션] 진범 #23-Q: 견적서 후보 테이블 발견 = {Table}. 컬럼 구조 자문 필요 — 본 빌드는 skip.", table);
+        // 컬럼 구조 자문 결재 후 후속 빌드에서 INSERT 구현. 본 스켈레터는 ERP 매니저 자문 트리거용.
+        return 0;
+    }
+
+    /// <summary>
+    /// 진범 #23-R 봉합 (2026-05-18): 반품 마이그.
+    /// 사장님 자문: 반품 코드 패턴 미확정. 후보 ① DOCFB IO=3,4 / ② 별도 테이블(DOCFR·DOCRT·RTN).
+    /// 1차 시도: DOCFB IO 분포 통계 수집 → 3·4 존재 시 자문 트리거. 없으면 별도 테이블 탐색.
+    /// </summary>
+    private async Task<(int sales, int purchase)> MigrateReturnsAsync(
+        OleDbConnection oleConn, string tenantId, DateTime now,
+        Dictionary<int, string> partnerMap, Dictionary<string, string> itemMap,
+        IDbTransaction tx, CancellationToken ct)
+    {
+        // 1차: DOCFB IO 값 분포 확인
+        try
+        {
+            var dist = ReadMdbTable(oleConn, "SELECT IJ_IO, COUNT(*) AS cnt FROM DOCFB GROUP BY IJ_IO");
+            var ioBreakdown = new List<string>();
+            foreach (System.Data.DataRow r in dist.Rows)
+            {
+                ioBreakdown.Add($"IO={r["IJ_IO"]}:{r["cnt"]}");
+            }
+            _logger.LogInformation("[MDB마이그레이션] 진범 #23-R: DOCFB IO 분포 = {Dist}", string.Join(" / ", ioBreakdown));
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "[MDB마이그레이션] 진범 #23-R: DOCFB IO 분포 조회 실패");
+        }
+
+        // 2차: 별도 반품 테이블 후보 탐색
+        var table = FindMdbTable(oleConn, "DOCFR", "DOCRT", "DOCFRN", "RTN", "RETURN");
+        if (table is null)
+        {
+            _logger.LogWarning("[MDB마이그레이션] 진범 #23-R: 별도 반품 테이블 없음. DOCFB IO=3·4 또는 음수 금액으로 처리 추정. ERP 매니저 자문 필요.");
+            return (0, 0);
+        }
+
+        _logger.LogInformation("[MDB마이그레이션] 진범 #23-R: 반품 후보 테이블 발견 = {Table}. 컬럼 구조 자문 필요 — 본 빌드는 skip.", table);
+        return (0, 0);
+    }
+
+    /// <summary>
     /// 레거시 날짜 문자열("YYYYMMDD" 또는 "YYYY-MM-DD" 등)을 DateTime으로 변환한다.
     /// 변환 실패 시 null 반환.
     /// </summary>
@@ -5372,6 +5503,16 @@ public sealed class MdbMigrationResult
 
     /// <summary>회계 분개 라인(journal_lines, DOCF7 행) 이관 건수</summary>
     public int JournalLines { get; set; }
+
+    // 진범 #23 봉합 (2026-05-18): 견적·반품 잡 스켈레터.
+    /// <summary>견적서(quotations, 후보 DOCFD/DOCFE/DOCFC) 이관 건수 — ERP 매니저 자문 후 본구현.</summary>
+    public int Quotations { get; set; }
+
+    /// <summary>매출 반품(sales_returns) 이관 건수 — IO 분포 또는 별도 테이블 자문 후 본구현.</summary>
+    public int SalesReturns { get; set; }
+
+    /// <summary>매입 반품(purchase_returns) 이관 건수 — IO 분포 또는 별도 테이블 자문 후 본구현.</summary>
+    public int PurchaseReturns { get; set; }
 
     // WS-11 정공법 축 5 (사장님 명령 2026-05-14): POTHER 4 풀스택.
     /// <summary>명함/연락처 (DOCNM → partner_contacts) 이관 건수</summary>

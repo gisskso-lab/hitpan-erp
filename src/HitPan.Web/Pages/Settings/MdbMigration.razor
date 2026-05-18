@@ -8,6 +8,7 @@
 @inject ISnackbar Snackbar
 @inject IDialogService DialogService
 @inject HitPanProtectedLocalStorage Storage
+@inject HitPan.Web.Services.IAuthService Auth
 @implements IAsyncDisposable
 
 <PageTitle>데이터 이관</PageTitle>
@@ -225,7 +226,8 @@
     private List<TableCard> _tableCards = BuildInitialCards();
     private int _completedTables;
     // 진범 #20 봉합 (2026-05-18): WS-D-1·D-2 신규 잡 2개 추가 (sales_deliveries·journal_entries).
-    private int _totalTables = 15; // PYOJUN(1) + PANDATA 11 + warehouse(1) + sales_deliveries(1) + journal_entries(1)
+    // 진범 #23 봉합 (2026-05-18): 견적·반품 잡 2개 추가 (quotations·sales_returns).
+    private int _totalTables = 17;
     private int _elapsedSeconds;
     private double _progressPercent => _totalTables == 0 ? 0 : (double)_completedTables / _totalTables * 100.0;
 
@@ -253,6 +255,9 @@
         // 진범 #20 봉합 (2026-05-18): WS-D-1·D-2 신규 잡 — 거래명세서·회계분개.
         new("sales_deliveries", "거래명세서(매출+매입)"),
         new("journal_entries", "회계전표·분개"),
+        // 진범 #23 봉합 (2026-05-18): 견적·반품 — ERP 매니저 자문 후 본구현.
+        new("quotations", "견적서(자문대기)"),
+        new("sales_returns", "반품(자문대기)"),
     };
 
     private static string GetStatusIcon(string status) => status switch
@@ -403,8 +408,17 @@
                 {
                     if (payload.Status == "completed")
                     {
-                        // 최종 결과 1회 조회 (status endpoint 재사용).
+                        // 진범 #22 봉합 (2026-05-18): 장시간 마이그 도중 JWT 만료 → status GET 401.
+                        // 1차 시도 → 401이면 RefreshAsync 후 재시도 1회.
                         var statusResp = await Http.GetAsync($"api/migration/legacy-mdb/status/{jobId}");
+                        if (statusResp.StatusCode == System.Net.HttpStatusCode.Unauthorized)
+                        {
+                            var refreshed = await Auth.RefreshAsync();
+                            if (refreshed)
+                            {
+                                statusResp = await Http.GetAsync($"api/migration/legacy-mdb/status/{jobId}");
+                            }
+                        }
                         if (statusResp.IsSuccessStatusCode)
                         {
                             var status = await statusResp.Content.ReadFromJsonAsync<JobStatus>();
