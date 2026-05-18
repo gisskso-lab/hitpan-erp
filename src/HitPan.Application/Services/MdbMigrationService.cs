@@ -369,6 +369,16 @@ public sealed class MdbMigrationService
                     result.PurchaseReceipts = pr;
                     return sd + pr;
                 }, ct),
+                // WS-F (2026-05-18) 진범 #12 봉합: DOCF7 → journal_entries + journal_lines.
+                () => RunTableStepAsync("journal_entries", async tx =>
+                {
+                    using var oleConn = OpenOleDb(pandataPath);
+                    var (je, jl) = await MigrateJournalAsync(
+                        oleConn, tenantId, now, tx, ct).ConfigureAwait(false);
+                    result.JournalEntries = je;
+                    result.JournalLines = jl;
+                    return je + jl;
+                }, ct),
             };
 
             if (useMigrationPool)
@@ -4432,6 +4442,333 @@ public sealed class MdbMigrationService
         public string? LegacyPum { get; set; }
         public string? LegacyKu { get; set; }
         public string SourceId { get; set; } = string.Empty;
+    }
+
+    // ════════════════════════════════════════════════════════════════
+    // WS-F (2026-05-18) 진범 #12 봉합: DOCF7 → journal_entries + journal_lines
+    // 사장님 결재 Q2 (source_type='migration' 격리) + Q5 (SC_KCODE 그대로 ERP 추후 매핑)
+    // ════════════════════════════════════════════════════════════════
+
+    /// <summary>
+    /// DOCF7(SC_*) 회계분개를 읽어 journal_entries(헤더, SC_DT+SC_SUN 그룹화) + journal_lines(차/대변 라인) 로 이관한다.
+    /// 한 DOCF7 행 = 한 분개 라인 (SC_CR=대변 또는 SC_DR=차변 중 하나만 채워짐).
+    ///
+    /// 사장님 결재 (2026-05-18):
+    /// - Q2: source_type='migration'으로 운영 자동분개와 격리
+    /// - Q5: SC_KCODE 4자리 그대로 account_code에 저장 (ERP 매니저가 추후 5자리 표준코드로 UPDATE)
+    ///
+    /// accounts 마스터에 SC_KCODE 누락분은 자동 INSERT IGNORE (account_type='unmapped').
+    /// </summary>
+    private async Task<(int Entries, int Lines)> MigrateJournalAsync(
+        OleDbConnection oleConn, string tenantId, DateTime now,
+        IDbTransaction tx, CancellationToken ct)
+    {
+        // PK 추정 = SC_DT + SC_SUN + SC_KCODE + SC_BNO (라인 식별).
+        // 헤더 그룹화 = SC_DT + SC_SUN.
+        var dt = ReadMdbTable(oleConn, "SELECT * FROM DOCF7 ORDER BY SC_DT, SC_SUN, SC_KCODE");
+        if (dt.Rows.Count == 0) return (0, 0);
+
+        var entries = new List<JournalEntryRow>();
+        var lines = new List<JournalLineRow>();
+        var seenKcodes = new HashSet<string>();
+
+        var groups = dt.AsEnumerable().GroupBy(r => new
+        {
+            Dt = GetStr(r, "SC_DT"),
+            Sun = GetInt(r, "SC_SUN"),
+        }).ToList();
+
+        int skipEmptyDt = 0, lineSeq = 0;
+        int unbalancedCount = 0;
+
+        foreach (var g in groups)
+        {
+            var dtStr = g.Key.Dt;
+            if (string.IsNullOrWhiteSpace(dtStr) || dtStr == "00000000")
+            {
+                skipEmptyDt++;
+                continue;
+            }
+            var entryDate = ParseLegacyDate(dtStr) ?? now;
+            var ym = entryDate.ToString("yyyy-MM");
+
+            var sourceId = $"mig-docf7-{dtStr}-{g.Key.Sun:D4}";
+            var entryId = Guid.NewGuid().ToString();
+            var entryNo = $"JE-MIG-{dtStr}-{g.Key.Sun:D4}";
+            var firstJek = GetStr(g.First(), "SC_JEK");
+            var description = string.IsNullOrWhiteSpace(firstJek) ? $"DOCF7 마이그 분개 {dtStr}" : firstJek;
+            if (description.Length > 200) description = description[..200];
+
+            entries.Add(new JournalEntryRow
+            {
+                EntryId = entryId,
+                TenantId = tenantId,
+                EntryNo = entryNo,
+                EntryDate = entryDate,
+                Ym = ym,
+                Description = description,
+                SourceType = "migration",
+                SourceId = sourceId,
+                IsConfirmed = (byte)1,
+                ConfirmedAt = now,
+                Now = now,
+            });
+
+            decimal debitSum = 0, creditSum = 0;
+            foreach (var r in g)
+            {
+                var kcode = GetStr(r, "SC_KCODE");
+                if (string.IsNullOrWhiteSpace(kcode)) continue;
+                if (kcode.Length > 10) kcode = kcode[..10];
+                seenKcodes.Add(kcode);
+
+                var cr = GetDec(r, "SC_CR");
+                var dr = GetDec(r, "SC_DR");
+                if (cr == 0 && dr == 0) continue; // 빈 라인 skip (헌법 chk_jl_debit_or_credit 정합)
+
+                var jek = GetStr(r, "SC_JEK");
+                var memo = string.IsNullOrWhiteSpace(jek) ? null : (jek.Length > 200 ? jek[..200] : jek);
+                debitSum += dr;
+                creditSum += cr;
+
+                lineSeq++;
+                lines.Add(new JournalLineRow
+                {
+                    EntryId = entryId,
+                    TenantId = tenantId,
+                    AccountCode = kcode,
+                    DebitAmount = dr,
+                    CreditAmount = cr,
+                    PartnerId = null,
+                    Memo = memo,
+                    SourceId = $"{sourceId}-{lineSeq:D6}",
+                    Now = now,
+                });
+            }
+
+            if (debitSum != creditSum)
+            {
+                unbalancedCount++;
+            }
+        }
+
+        _logger.LogInformation(
+            "[MDB마이그레이션] DOCF7 그룹화 — 엔트리={E} 라인={L} 미사용 KCODE={K} | skip 빈DT={SkipDt} 차/대변 불균형={Unb} (헌법 §회계 — 마이그 예외 허용)",
+            entries.Count, lines.Count, seenKcodes.Count, skipEmptyDt, unbalancedCount);
+
+        if (entries.Count == 0) return (0, 0);
+
+        // accounts 마스터 자동 시드 (SC_KCODE 누락분 INSERT IGNORE, ERP 매니저 추후 UPDATE)
+        await SeedAccountsForMigrationAsync(tenantId, seenKcodes, tx, ct, now).ConfigureAwait(false);
+
+        // 정공법 BulkCopy
+        if (Db is MySqlConnection mysqlConn && tx is MySqlTransaction mysqlTx)
+        {
+            return await BulkCopyJournalAsync(mysqlConn, mysqlTx, entries, lines, ct).ConfigureAwait(false);
+        }
+
+        _logger.LogWarning("[MDB마이그레이션] DOCF7 legacy fallback 미지원 — factory 모드만 가능. 0 반환.");
+        return (0, 0);
+    }
+
+    /// <summary>
+    /// SC_KCODE에 등장한 4자리 코드를 accounts 마스터에 INSERT IGNORE.
+    /// ERP 매니저가 추후 account_name·account_type을 UPDATE (Q5 결재).
+    /// </summary>
+    private async Task SeedAccountsForMigrationAsync(
+        string tenantId, HashSet<string> kcodes, IDbTransaction tx, CancellationToken ct, DateTime now)
+    {
+        if (kcodes.Count == 0) return;
+        const string sql = """
+            INSERT IGNORE INTO accounts
+              (account_code, tenant_id, account_name, account_type, is_active, sort_order, created_at)
+            VALUES
+              (@Code, @TenantId, @Name, 'unmapped', 1, 9999, @Now)
+            """;
+        int inserted = 0;
+        foreach (var code in kcodes)
+        {
+            var r = await Db.ExecuteAsync(new CommandDefinition(sql, new
+            {
+                Code = code,
+                TenantId = tenantId,
+                Name = $"[마이그 미매핑] {code}",
+                Now = now,
+            }, transaction: tx, cancellationToken: ct)).ConfigureAwait(false);
+            inserted += r;
+        }
+        _logger.LogInformation(
+            "[MDB마이그레이션] accounts 자동 시드: {Inserted}건 (총 {Total} KCODE, 기존 매핑 제외)",
+            inserted, kcodes.Count);
+    }
+
+    private async Task<(int Entries, int Lines)> BulkCopyJournalAsync(
+        MySqlConnection conn, MySqlTransaction tx,
+        List<JournalEntryRow> entries, List<JournalLineRow> lines, CancellationToken ct)
+    {
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        var entryStage = $"je_stage_{Guid.NewGuid():N}".Substring(0, 40);
+        var lineStage = $"jl_stage_{Guid.NewGuid():N}".Substring(0, 40);
+
+        using (var cmd = new MySqlCommand($"CREATE TEMPORARY TABLE `{entryStage}` LIKE journal_entries", conn, tx))
+        { cmd.CommandTimeout = 60; await cmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false); }
+        await DropStageUniqueIndexesAsync(conn, tx, entryStage, "journal_entries", ct).ConfigureAwait(false);
+
+        using (var cmd = new MySqlCommand($"CREATE TEMPORARY TABLE `{lineStage}` LIKE journal_lines", conn, tx))
+        { cmd.CommandTimeout = 60; await cmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false); }
+        await DropStageUniqueIndexesAsync(conn, tx, lineStage, "journal_lines", ct).ConfigureAwait(false);
+        // line_id auto_increment 컬럼 무시 — staging에는 NULL 허용
+        try
+        {
+            using var alterCmd = new MySqlCommand(
+                $"ALTER TABLE `{lineStage}` MODIFY line_id BIGINT NULL", conn, tx);
+            alterCmd.CommandTimeout = 30;
+            await alterCmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "[MDB마이그레이션] {Stage} line_id NULL 변경 실패", lineStage);
+        }
+
+        try
+        {
+            var entryDt = BuildJournalEntryDataTable(entries);
+            var entryBulk = new MySqlBulkCopy(conn, tx) { DestinationTableName = entryStage, BulkCopyTimeout = 86400 };
+            var entryCols = new[]
+            {
+                "entry_id", "tenant_id", "entry_no", "entry_date", "ym", "description",
+                "source_type", "source_id", "is_confirmed", "confirmed_at", "created_at",
+            };
+            for (int i = 0; i < entryCols.Length; i++)
+                entryBulk.ColumnMappings.Add(new MySqlBulkCopyColumnMapping(i, entryCols[i]));
+            var er = await entryBulk.WriteToServerAsync(entryDt, ct).ConfigureAwait(false);
+            _logger.LogInformation("[MDB마이그레이션] journal_entries BulkCopy: {Rows}행 warnings={W} {Ms}ms",
+                er.RowsInserted, er.Warnings.Count, sw.ElapsedMilliseconds);
+
+            var lineDt = BuildJournalLineDataTable(lines);
+            var lineBulk = new MySqlBulkCopy(conn, tx) { DestinationTableName = lineStage, BulkCopyTimeout = 86400 };
+            var lineCols = new[]
+            {
+                "entry_id", "tenant_id", "account_code", "debit_amount", "credit_amount",
+                "partner_id", "memo", "source_id", "created_at",
+            };
+            for (int i = 0; i < lineCols.Length; i++)
+                lineBulk.ColumnMappings.Add(new MySqlBulkCopyColumnMapping(i, lineCols[i]));
+            var lr = await lineBulk.WriteToServerAsync(lineDt, ct).ConfigureAwait(false);
+            _logger.LogInformation("[MDB마이그레이션] journal_lines BulkCopy: {Rows}행 warnings={W} {Ms}ms",
+                lr.RowsInserted, lr.Warnings.Count, sw.ElapsedMilliseconds);
+
+            var entryInsertSql = $"""
+                INSERT IGNORE INTO journal_entries
+                  (entry_id, tenant_id, entry_no, entry_date, ym, description,
+                   source_type, source_id, is_confirmed, confirmed_at, created_at)
+                SELECT
+                   entry_id, tenant_id, entry_no, entry_date, ym, description,
+                   source_type, source_id, is_confirmed, confirmed_at, created_at
+                FROM `{entryStage}`
+                """;
+            int entryInserted;
+            using (var cmd = new MySqlCommand(entryInsertSql, conn, tx))
+            { cmd.CommandTimeout = 86400; entryInserted = await cmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false); }
+
+            var lineInsertSql = $"""
+                INSERT IGNORE INTO journal_lines
+                  (entry_id, tenant_id, account_code, debit_amount, credit_amount,
+                   partner_id, memo, source_id, created_at)
+                SELECT
+                   entry_id, tenant_id, account_code, debit_amount, credit_amount,
+                   partner_id, memo, source_id, created_at
+                FROM `{lineStage}`
+                """;
+            int lineInserted;
+            using (var cmd = new MySqlCommand(lineInsertSql, conn, tx))
+            { cmd.CommandTimeout = 86400; lineInserted = await cmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false); }
+
+            sw.Stop();
+            _logger.LogInformation("[MDB마이그레이션] journal 정공법 완료: 엔트리 {E}/{ET}행 라인 {L}/{LT}행 총 {Ms}ms",
+                entryInserted, entries.Count, lineInserted, lines.Count, sw.ElapsedMilliseconds);
+            return (entries.Count, lines.Count);
+        }
+        finally
+        {
+            await TryDropStageAsync(conn, tx, entryStage, ct).ConfigureAwait(false);
+            await TryDropStageAsync(conn, tx, lineStage, ct).ConfigureAwait(false);
+        }
+    }
+
+    private static DataTable BuildJournalEntryDataTable(List<JournalEntryRow> rows)
+    {
+        var dt = new DataTable();
+        dt.Columns.Add("entry_id", typeof(string));
+        dt.Columns.Add("tenant_id", typeof(string));
+        dt.Columns.Add("entry_no", typeof(string));
+        dt.Columns.Add("entry_date", typeof(DateTime));
+        dt.Columns.Add("ym", typeof(string));
+        dt.Columns.Add("description", typeof(string));
+        dt.Columns.Add("source_type", typeof(string));
+        dt.Columns.Add("source_id", typeof(string));
+        dt.Columns.Add("is_confirmed", typeof(byte));
+        dt.Columns.Add("confirmed_at", typeof(DateTime));
+        dt.Columns.Add("created_at", typeof(DateTime));
+
+        foreach (var r in rows)
+        {
+            dt.Rows.Add(r.EntryId, r.TenantId, r.EntryNo, r.EntryDate, r.Ym, r.Description,
+                r.SourceType, r.SourceId, r.IsConfirmed,
+                (object?)r.ConfirmedAt ?? DBNull.Value, r.Now);
+        }
+        return dt;
+    }
+
+    private static DataTable BuildJournalLineDataTable(List<JournalLineRow> rows)
+    {
+        var dt = new DataTable();
+        dt.Columns.Add("entry_id", typeof(string));
+        dt.Columns.Add("tenant_id", typeof(string));
+        dt.Columns.Add("account_code", typeof(string));
+        dt.Columns.Add("debit_amount", typeof(decimal));
+        dt.Columns.Add("credit_amount", typeof(decimal));
+        dt.Columns.Add("partner_id", typeof(string));
+        dt.Columns.Add("memo", typeof(string));
+        dt.Columns.Add("source_id", typeof(string));
+        dt.Columns.Add("created_at", typeof(DateTime));
+
+        foreach (var r in rows)
+        {
+            dt.Rows.Add(r.EntryId, r.TenantId, r.AccountCode, r.DebitAmount, r.CreditAmount,
+                (object?)r.PartnerId ?? DBNull.Value,
+                (object?)r.Memo ?? DBNull.Value,
+                r.SourceId, r.Now);
+        }
+        return dt;
+    }
+
+    private sealed class JournalEntryRow
+    {
+        public string EntryId { get; set; } = string.Empty;
+        public string TenantId { get; set; } = string.Empty;
+        public string EntryNo { get; set; } = string.Empty;
+        public DateTime EntryDate { get; set; }
+        public string Ym { get; set; } = string.Empty;
+        public string Description { get; set; } = string.Empty;
+        public string SourceType { get; set; } = "migration";
+        public string SourceId { get; set; } = string.Empty;
+        public byte IsConfirmed { get; set; } = 1;
+        public DateTime? ConfirmedAt { get; set; }
+        public DateTime Now { get; set; }
+    }
+
+    private sealed class JournalLineRow
+    {
+        public string EntryId { get; set; } = string.Empty;
+        public string TenantId { get; set; } = string.Empty;
+        public string AccountCode { get; set; } = string.Empty;
+        public decimal DebitAmount { get; set; }
+        public decimal CreditAmount { get; set; }
+        public string? PartnerId { get; set; }
+        public string? Memo { get; set; }
+        public string SourceId { get; set; } = string.Empty;
+        public DateTime Now { get; set; }
     }
 
     // ════════════════════════════════════════════════════════════════
