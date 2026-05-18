@@ -2715,15 +2715,23 @@ public sealed class MdbMigrationService
             """;
 
         // 헤더 그룹화
-        var groups = dt.AsEnumerable().GroupBy(r => GetStr(r, "IU_NO"));
+        var groups = dt.AsEnumerable().GroupBy(r => GetStr(r, "IU_NO")).ToList();
         int headCount = 0;
+        // WS-E 진범 #13 진단 (2026-05-18): 매핑 실패 skip 카운트 추적.
+        int skipEmptyPoNo = 0, skipPartner = 0, skipItem = 0;
+        var partnerMissSamples = new List<int>();
         foreach (var g in groups)
         {
             var poNo = g.Key;
-            if (string.IsNullOrWhiteSpace(poNo)) continue;
+            if (string.IsNullOrWhiteSpace(poNo)) { skipEmptyPoNo++; continue; }
             var first = g.First();
             var buyCode = GetInt(first, "IU_BUY");
-            if (!partnerMap.TryGetValue(buyCode, out var partnerId)) continue;
+            if (!partnerMap.TryGetValue(buyCode, out var partnerId))
+            {
+                skipPartner++;
+                if (partnerMissSamples.Count < 5) partnerMissSamples.Add(buyCode);
+                continue;
+            }
 
             var poDate = ParseLegacyDate(GetStr(first, "IU_ODT")) ?? now;
             decimal supply = g.Sum(r => GetDec(r, "IU_AMT"));
@@ -2756,7 +2764,11 @@ public sealed class MdbMigrationService
                 var pum = GetStr(r, "IU_PUM");
                 var ku = GetStr(r, "IU_KU");
                 var key = $"{pum}|{ku}";
-                if (!itemMap.TryGetValue(key, out var itemId) || string.IsNullOrWhiteSpace(itemId)) continue;
+                if (!itemMap.TryGetValue(key, out var itemId) || string.IsNullOrWhiteSpace(itemId))
+                {
+                    skipItem++;
+                    continue;
+                }
                 var qty = GetDec(r, "IU_QTY");
                 var dan = GetDec(r, "IU_DAN");
                 var amt = GetDec(r, "IU_AMT");
@@ -2769,7 +2781,11 @@ public sealed class MdbMigrationService
             }
         }
 
-        _logger.LogInformation("[MDB마이그레이션] 매입발주(DOCFA→purchase_orders) {Count}건 이관 완료", headCount);
+        // WS-E 진범 #13 진단 (2026-05-18): MDB 원천 vs INSERT + skip 사유 동시 로그.
+        _logger.LogInformation(
+            "[MDB마이그레이션] 매입발주(DOCFA→purchase_orders) MDB행수={Mdb} 헤더그룹={Groups} INSERT={Count} | skip 빈PoNo={SkipEmpty} skip 파트너매핑실패={SkipPartner} skip 품목매핑실패={SkipItem} | 매핑누락 partner 샘플 IU_BUY={PartnerSamples}",
+            dt.Rows.Count, groups.Count, headCount, skipEmptyPoNo, skipPartner, skipItem,
+            string.Join(",", partnerMissSamples));
         return headCount;
     }
 
@@ -2811,15 +2827,23 @@ public sealed class MdbMigrationService
                @UnitPrice, @Supply, @Vat, 'pending')
             """;
 
-        var groups = dt.AsEnumerable().GroupBy(r => GetStr(r, "IO_NO"));
+        var groups = dt.AsEnumerable().GroupBy(r => GetStr(r, "IO_NO")).ToList();
         int headCount = 0;
+        // WS-E 진범 #13 진단 (2026-05-18): 매핑 실패 skip 카운트 추적.
+        int skipEmptySoNo = 0, skipPartner = 0, skipItem = 0;
+        var partnerMissSamples = new List<int>();
         foreach (var g in groups)
         {
             var soNo = g.Key;
-            if (string.IsNullOrWhiteSpace(soNo)) continue;
+            if (string.IsNullOrWhiteSpace(soNo)) { skipEmptySoNo++; continue; }
             var first = g.First();
             var buyCode = GetInt(first, "IO_BUY");
-            if (!partnerMap.TryGetValue(buyCode, out var partnerId)) continue;
+            if (!partnerMap.TryGetValue(buyCode, out var partnerId))
+            {
+                skipPartner++;
+                if (partnerMissSamples.Count < 5) partnerMissSamples.Add(buyCode);
+                continue;
+            }
 
             var soDate = ParseLegacyDate(GetStr(first, "IO_ODT")) ?? now;
             decimal supply = g.Sum(r => GetDec(r, "IO_AMT"));
@@ -2852,7 +2876,11 @@ public sealed class MdbMigrationService
                 var pum = GetStr(r, "IO_PUM");
                 var ku = GetStr(r, "IO_KU");
                 var key = $"{pum}|{ku}";
-                if (!itemMap.TryGetValue(key, out var itemId) || string.IsNullOrWhiteSpace(itemId)) continue;
+                if (!itemMap.TryGetValue(key, out var itemId) || string.IsNullOrWhiteSpace(itemId))
+                {
+                    skipItem++;
+                    continue;
+                }
                 var qty = GetDec(r, "IO_QTY");
                 var dan = GetDec(r, "IO_DAN");
                 var amt = GetDec(r, "IO_AMT");
@@ -2865,7 +2893,11 @@ public sealed class MdbMigrationService
             }
         }
 
-        _logger.LogInformation("[MDB마이그레이션] 매출주문(DOCFO→sales_orders) {Count}건 이관 완료", headCount);
+        // WS-E 진범 #13 진단 (2026-05-18): MDB 원천 vs INSERT + skip 사유 동시 로그.
+        _logger.LogInformation(
+            "[MDB마이그레이션] 매출주문(DOCFO→sales_orders) MDB행수={Mdb} 헤더그룹={Groups} INSERT={Count} | skip 빈SoNo={SkipEmpty} skip 파트너매핑실패={SkipPartner} skip 품목매핑실패={SkipItem} | 매핑누락 partner 샘플 IO_BUY={PartnerSamples}",
+            dt.Rows.Count, groups.Count, headCount, skipEmptySoNo, skipPartner, skipItem,
+            string.Join(",", partnerMissSamples));
         return headCount;
     }
 
