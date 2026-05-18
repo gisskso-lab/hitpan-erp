@@ -224,7 +224,8 @@
     /* ── P0 #6 (2026-05-14): 테이블별 진행 카드 ── */
     private List<TableCard> _tableCards = BuildInitialCards();
     private int _completedTables;
-    private int _totalTables = 13; // PYOJUN(1, 묶음) + PANDATA 11 + warehouse_migration(1)
+    // 진범 #20 봉합 (2026-05-18): WS-D-1·D-2 신규 잡 2개 추가 (sales_deliveries·journal_entries).
+    private int _totalTables = 15; // PYOJUN(1) + PANDATA 11 + warehouse(1) + sales_deliveries(1) + journal_entries(1)
     private int _elapsedSeconds;
     private double _progressPercent => _totalTables == 0 ? 0 : (double)_completedTables / _totalTables * 100.0;
 
@@ -238,7 +239,7 @@
     {
         new("warehouse_migration", "기본창고"),
         new("pyojun_master", "마스터(업체+상품+BOM+사원)"),
-        new("transactions", "거래 명세(매입/매출)"),
+        new("transactions", "거래 헤더(DOCF1+F2)"),
         new("stock_ledger", "재고원장(입출고)"),
         new("collections", "수금"),
         new("cashbook", "경비(현금출납)"),
@@ -249,6 +250,9 @@
         new("bills", "어음"),
         new("card_payments", "카드결제"),
         new("bank_transactions", "은행거래"),
+        // 진범 #20 봉합 (2026-05-18): WS-D-1·D-2 신규 잡 — 거래명세서·회계분개.
+        new("sales_deliveries", "거래명세서(매출+매입)"),
+        new("journal_entries", "회계전표·분개"),
     };
 
     private static string GetStatusIcon(string status) => status switch
