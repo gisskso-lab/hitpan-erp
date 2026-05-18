@@ -261,6 +261,9 @@ public sealed class MdbMigrationService
                 result.Items = await MigrateItemsAsync(oleConn, tenantId, now, itemMap, tx, ct).ConfigureAwait(false);
                 result.BomHeaders = await MigrateBomAsync(oleConn, tenantId, now, itemMap, tx, ct).ConfigureAwait(false);
                 result.Employees = await MigrateEmployeesAsync(oleConn, tenantId, now, employeeMap, tx, ct).ConfigureAwait(false);
+                // WS-D-2 후속 (2026-05-18): PYOJUN.COSTNO → accounts 마스터 시드 (99건).
+                // ERP 매니저 추후 한국 표준 5자리 매핑 UPDATE 전 자동 시드.
+                await MigrateAccountsFromCOSTNOAsync(oleConn, tenantId, now, tx, ct).ConfigureAwait(false);
                 return result.Partners + result.Items + result.BomHeaders + result.Employees;
             }, ct, continueOnFail: false, mdbFile: "PYOJUN").ConfigureAwait(false);
 
@@ -4572,8 +4575,78 @@ public sealed class MdbMigrationService
     }
 
     /// <summary>
+    /// WS-D-2 후속 (2026-05-18): PYOJUN.COSTNO 마스터 → accounts 시드.
+    /// 99건 SC_KCODE에 대응되는 한글 계정명(CT_DESC) 자동 시드.
+    /// 사장님 사후승인 박제 (전결재 OK, 2026-05-18 점심시간).
+    /// COSTNO 컬럼: CT_CODE / CT_DESC / CT_REM (기본 마진율 또는 분류 추정)
+    /// </summary>
+    private async Task MigrateAccountsFromCOSTNOAsync(
+        OleDbConnection oleConn, string tenantId, DateTime now,
+        IDbTransaction tx, CancellationToken ct)
+    {
+        var dt = ReadMdbTable(oleConn, "SELECT CT_CODE, CT_DESC, CT_REM FROM COSTNO ORDER BY CT_CODE");
+        if (dt.Rows.Count == 0)
+        {
+            _logger.LogInformation("[MDB마이그레이션] PYOJUN.COSTNO 비어있음 — accounts 시드 skip");
+            return;
+        }
+
+        // CT_CODE 첫 자리 = 계정 분류 추정 (PM 분석):
+        //   1xxx = 비용 (식대·영업경비·급여·접대비 등)
+        //   2xxx = 부채/자본 (가불금·선수금·법인카드·부가세예수금 등)
+        //   5xxx = 카드 (LG카드·삼성카드·국민카드 등)
+        const string sql = """
+            INSERT INTO accounts
+              (account_code, tenant_id, account_name, account_type, is_active, sort_order, created_at)
+            VALUES
+              (@Code, @TenantId, @Name, @Type, 1, @Sort, @Now)
+            ON DUPLICATE KEY UPDATE
+              account_name = VALUES(account_name),
+              account_type = VALUES(account_type),
+              sort_order = VALUES(sort_order)
+            """;
+
+        int inserted = 0;
+        foreach (DataRow r in dt.Rows)
+        {
+            var code = GetStr(r, "CT_CODE");
+            if (string.IsNullOrWhiteSpace(code)) continue;
+            if (code.Length > 10) code = code[..10];
+
+            var name = GetStr(r, "CT_DESC");
+            if (string.IsNullOrWhiteSpace(name)) name = $"[미명명] {code}";
+            if (name.Length > 100) name = name[..100];
+
+            // 분류 자동 추정 (ERP 매니저 추후 정정)
+            var type = code.StartsWith("1") ? "expense"
+                     : code.StartsWith("2") ? "liability"
+                     : code.StartsWith("5") ? "card"
+                     : "unmapped";
+
+            // 정렬 = CT_CODE 그대로 (int 변환)
+            int sort = int.TryParse(code, out var s) ? s : 9999;
+
+            var rows = await Db.ExecuteAsync(new CommandDefinition(sql, new
+            {
+                Code = code,
+                TenantId = tenantId,
+                Name = name,
+                Type = type,
+                Sort = sort,
+                Now = now,
+            }, transaction: tx, cancellationToken: ct)).ConfigureAwait(false);
+            inserted += rows;
+        }
+
+        _logger.LogInformation(
+            "[MDB마이그레이션] PYOJUN.COSTNO → accounts 마스터 시드: {Inserted}건 (총 {Total}건)",
+            inserted, dt.Rows.Count);
+    }
+
+    /// <summary>
     /// SC_KCODE에 등장한 4자리 코드를 accounts 마스터에 INSERT IGNORE.
-    /// ERP 매니저가 추후 account_name·account_type을 UPDATE (Q5 결재).
+    /// COSTNO에 없는 코드만 fallback ('unmapped' 분류).
+    /// ERP 매니저가 추후 한국 표준 5자리 + 계정명 UPDATE (Q5 결재).
     /// </summary>
     private async Task SeedAccountsForMigrationAsync(
         string tenantId, HashSet<string> kcodes, IDbTransaction tx, CancellationToken ct, DateTime now)
