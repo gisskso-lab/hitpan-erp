@@ -6,6 +6,7 @@
 @using HitPan.Web.Providers
 @inject HttpClient Http
 @inject ISnackbar Snackbar
+@inject IDialogService DialogService
 @inject HitPanProtectedLocalStorage Storage
 @implements IAsyncDisposable
 
@@ -78,6 +79,12 @@
         <MudText Typo="Typo.caption" Style="color:var(--mud-palette-text-secondary)">
             @_statusMessage
         </MudText>
+        @if (_cancelRequested)
+        {
+            <MudText Typo="Typo.caption" Color="Color.Warning" Class="mt-1">
+                중단 요청됨 — 안전 종료까지 잠시 기다려 주세요.
+            </MudText>
+        }
     </div>
 
     @* 테이블별 카드 그리드 — 16개 테이블 진행 상태 *@
@@ -220,6 +227,12 @@
     private int _totalTables = 13; // PYOJUN(1, 묶음) + PANDATA 11 + warehouse_migration(1)
     private int _elapsedSeconds;
     private double _progressPercent => _totalTables == 0 ? 0 : (double)_completedTables / _totalTables * 100.0;
+
+    // 헌법 #26 v3 (2026-05-18): 10분·30분·1시간 시점 Y/n 다이얼로그 발동 트래커
+    private readonly HashSet<int> _dialogShownAt = new();
+    // 중단 요청 플래그 — Snackbar 안내용. 서버 측 강제 취소는 후속 작업(SignalR Cancel).
+    private bool _cancelRequested;
+    private static readonly int[] DialogThresholds = { 600, 1800, 3600 };
 
     private static List<TableCard> BuildInitialCards() => new()
     {
@@ -488,7 +501,7 @@
         }
     }
 
-    /// <summary>경과 초 1초 tick — Sticky 헤더 표시용.</summary>
+    /// <summary>경과 초 1초 tick — Sticky 헤더 표시용 + 헌법 #26 v3 Y/n 다이얼로그.</summary>
     private async Task TickElapsedAsync(System.Threading.CancellationToken ct)
     {
         try
@@ -498,11 +511,45 @@
                 await Task.Delay(1000, ct);
                 _elapsedSeconds++;
                 await InvokeAsync(StateHasChanged);
+
+                // 헌법 #26 v3 (2026-05-18 사장님 결재): 10분·30분·1시간 경과 시 진행 확인 다이얼로그.
+                // 사장님 안: "데이터 양이 많아 작업이 지연되고 있습니다. 계속 진행하시겠습니까?" Y/n
+                foreach (var threshold in DialogThresholds)
+                {
+                    if (_elapsedSeconds == threshold && _dialogShownAt.Add(threshold))
+                    {
+                        await ShowContinueDialogAsync(threshold);
+                    }
+                }
             }
         }
         catch (TaskCanceledException)
         {
             // 정상 종료 — 빈 catch 아님(예외 타입 명시).
+        }
+    }
+
+    /// <summary>
+    /// 헌법 #26 v3 Y/n 다이얼로그 — 10분·30분·1시간 경과 시 고객 통제권 부여.
+    /// "계속 진행" 선택 시 다음 임계값까지 대기, "중단" 선택 시 _cancelRequested=true.
+    /// </summary>
+    private async Task ShowContinueDialogAsync(int threshold)
+    {
+        var minutes = threshold / 60;
+        var parameters = new DialogParameters
+        {
+            ["ContentText"] = $"데이터 양이 많아 작업이 지연되고 있습니다 (경과 {minutes}분). 계속 진행하시겠습니까?",
+            ["ButtonText"] = "계속 진행",
+            ["CancelText"] = "중단",
+            ["Color"] = Color.Primary,
+        };
+        var options = new DialogOptions { CloseButton = false, BackdropClick = false };
+        var dialog = await DialogService.ShowAsync<MudMessageBox>($"마이그 진행 확인 ({minutes}분 경과)", parameters, options);
+        var result = await dialog.Result;
+        if (result is not null && !result.Canceled && result.Data is bool ok && !ok)
+        {
+            _cancelRequested = true;
+            Snackbar.Add("중단 요청을 받았습니다. 진행 중인 작업이 안전하게 마무리되면 종료됩니다.", Severity.Warning);
         }
     }
 

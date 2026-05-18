@@ -1781,7 +1781,7 @@ public sealed class MdbMigrationService
             var bulk = new MySqlBulkCopy(conn, tx)
             {
                 DestinationTableName = stageTable,
-                BulkCopyTimeout = 1800,
+                BulkCopyTimeout = 86400,
             };
             // 컬럼 매핑: DataTable 인덱스 → staging 테이블 컬럼명.
             var cols = new[]
@@ -1815,7 +1815,7 @@ public sealed class MdbMigrationService
             int inserted;
             using (var insertCmd = new MySqlCommand(insertSql, conn, tx))
             {
-                insertCmd.CommandTimeout = 1800;
+                insertCmd.CommandTimeout = 86400;
                 inserted = await insertCmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
             }
 
@@ -2048,7 +2048,7 @@ public sealed class MdbMigrationService
             var bulk = new MySqlBulkCopy(conn, tx)
             {
                 DestinationTableName = stageTable,
-                BulkCopyTimeout = 1800,
+                BulkCopyTimeout = 86400,
             };
             var cols = new[]
             {
@@ -2080,7 +2080,7 @@ public sealed class MdbMigrationService
             int inserted;
             using (var insertCmd = new MySqlCommand(insertSql, conn, tx))
             {
-                insertCmd.CommandTimeout = 1800;
+                insertCmd.CommandTimeout = 86400;
                 inserted = await insertCmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
             }
 
@@ -2285,7 +2285,7 @@ public sealed class MdbMigrationService
             var bulk = new MySqlBulkCopy(conn, tx)
             {
                 DestinationTableName = stageTable,
-                BulkCopyTimeout = 1800,
+                BulkCopyTimeout = 86400,
             };
             var cols = new[]
             {
@@ -2320,7 +2320,7 @@ public sealed class MdbMigrationService
             int inserted;
             using (var insertCmd = new MySqlCommand(insertSql, conn, tx))
             {
-                insertCmd.CommandTimeout = 1800;
+                insertCmd.CommandTimeout = 86400;
                 inserted = await insertCmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
             }
 
@@ -2537,7 +2537,7 @@ public sealed class MdbMigrationService
             var bulk = new MySqlBulkCopy(conn, tx)
             {
                 DestinationTableName = stageTable,
-                BulkCopyTimeout = 1800,
+                BulkCopyTimeout = 86400,
             };
             var cols = new[]
             {
@@ -2572,7 +2572,7 @@ public sealed class MdbMigrationService
             int inserted;
             using (var insertCmd = new MySqlCommand(insertSql, conn, tx))
             {
-                insertCmd.CommandTimeout = 1800;
+                insertCmd.CommandTimeout = 86400;
                 inserted = await insertCmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
             }
 
@@ -2891,13 +2891,97 @@ public sealed class MdbMigrationService
         //   ⚠️ 헌법 §"마이그 예외" (사장님 결재 2026-05-14):
         //   거래명세서/세금계산서 정합성 무시하고 레거시 그대로 이관.
         //   delivery_id NULL이라도 source_id 멱등 키로 추적.
+        //
+        // 2026-05-18 WS-A 진범 #4 봉합: BulkCopy 분기 신설 (header + items 2단계 staging).
+        // row-by-row INSERT 66,603건 × 5 = 332,015 왕복 → 단일 BulkCopy 2회.
         var dt = ReadMdbTable(oleConn, "SELECT * FROM DOCF4 ORDER BY TX_IO, TX_NO");
         if (dt.Rows.Count == 0) return 0;
 
+        // 1단계: in-memory row 변환 (header + items 동시 빌드)
+        var headerRows = new List<TaxInvoiceHeaderRow>(dt.Rows.Count);
+        var itemRows = new List<TaxInvoiceItemRow>(dt.Rows.Count * 2);
+
+        foreach (DataRow r in dt.Rows)
+        {
+            var io = GetStr(r, "TX_IO");
+            var txNo = GetStr(r, "TX_NO");
+            if (string.IsNullOrWhiteSpace(txNo)) continue;
+
+            if (string.IsNullOrWhiteSpace(io))
+            {
+                var gu = GetStr(r, "TX_GU");
+                io = gu == "2" ? "B" : "S";
+            }
+
+            var partnerCode = GetInt(r, "TX_BUY");
+            var issueDateStr = GetStr(r, "TX_PDT");
+            var invoiceDate = ParseLegacyDate(issueDateStr) ?? now;
+
+            decimal supply = 0, vat = 0;
+            for (int i = 1; i <= 4; i++)
+            {
+                supply += GetDec(r, $"TX_KUM{i}");
+                vat += GetDec(r, $"TX_VAT{i}");
+            }
+
+            var sourceId = $"mig-{(string.IsNullOrEmpty(io) ? "_" : io)}-{txNo}";
+            var invoiceId = Guid.NewGuid().ToString();
+
+            headerRows.Add(new TaxInvoiceHeaderRow
+            {
+                InvoiceId = invoiceId,
+                TenantId = tenantId,
+                InvoiceNo = txNo,
+                IssuedAt = invoiceDate,
+                IssuedBy = tenantId,
+                AmountTotal = supply,
+                VatTotal = vat,
+                Direction = io,
+                TaxNo = txNo,
+                IssueDate = issueDateStr,
+                PartnerCode = partnerCode == 0 ? (int?)null : partnerCode,
+                SeqNo = (short?)(GetInt(r, "TX_SEQ") == 0 ? null : (short?)GetInt(r, "TX_SEQ")),
+                SentDt = GetStr(r, "TX_SENDDT"),
+                ReadDt = GetStr(r, "TX_READDT"),
+                ReportDt = GetStr(r, "TX_REPORTDT"),
+                Rem1 = GetStr(r, "TX_REM"),
+                Rem2 = GetStr(r, "TX_REM1"),
+                SourceId = sourceId,
+                Hash = ComputeSourceHash($"tax_invoices:{sourceId}:{supply}:{vat}"),
+                Now = now,
+            });
+
+            for (int i = 1; i <= 4; i++)
+            {
+                var pum = GetStr(r, $"TX_PUM{i}");
+                if (string.IsNullOrWhiteSpace(pum)) continue;
+                var pumName = pum.Length > 100 ? pum[..100] : pum;
+                itemRows.Add(new TaxInvoiceItemRow
+                {
+                    LineId = Guid.NewGuid().ToString(),
+                    InvoiceId = invoiceId,
+                    TenantId = tenantId,
+                    LineNo = (short)i,
+                    ItemName = pumName,
+                    Qty = GetDec(r, $"TX_SU{i}"),
+                    UnitPrice = GetDec(r, $"TX_DAN{i}"),
+                    Supply = GetDec(r, $"TX_KUM{i}"),
+                    Vat = GetDec(r, $"TX_VAT{i}"),
+                    Now = now,
+                });
+            }
+        }
+
+        if (headerRows.Count == 0) return 0;
+
+        // 정공법 BulkCopy 경로: 잡 conn이 MySqlConnection일 때 활성화 (헌법 #26 v3).
+        if (Db is MySqlConnection mysqlConn && tx is MySqlTransaction mysqlTx)
+        {
+            return await BulkCopyTaxInvoicesAsync(mysqlConn, mysqlTx, headerRows, itemRows, ct).ConfigureAwait(false);
+        }
+
+        // legacy fallback: row-by-row INSERT (factory 모드 전용 권장).
         // 진범 #10 봉합 (2026-05-17): tax_invoices 실제 DB 스키마와 정합.
-        // 5/13 시드 스키마 (invoice_date·invoice_type·supply_amount·total_amount·partner_id·remark) 폐기.
-        // 현재 스키마: invoice_no·issued_at·issued_by·amount_total·vat_total·status + 신규 ALTER 컬럼들 유지.
-        // 5/15 PM 봉합 시 invoice_id PK만 정정하고 컬럼명·타입 7군 미확인 = PM 책임 영역 (5/17 사장님 결재 봉합).
         const string headerSql = """
             INSERT INTO tax_invoices
               (invoice_id, tenant_id,
@@ -2933,98 +3017,359 @@ public sealed class MdbMigrationService
             """;
 
         int count = 0;
-        foreach (DataRow r in dt.Rows)
+        foreach (var hr in headerRows)
         {
-            var io = GetStr(r, "TX_IO");
-            var txNo = GetStr(r, "TX_NO");
-            if (string.IsNullOrWhiteSpace(txNo)) continue;
-
-            // direction 정규화 (S=매출, B=매입). TX_IO 비면 TX_GU에서 추정.
-            if (string.IsNullOrWhiteSpace(io))
-            {
-                var gu = GetStr(r, "TX_GU");
-                io = gu == "2" ? "B" : "S";
-            }
-            var typeCode = io == "B" ? "purchase" : "sales";
-
-            // partner_code는 NOT NULL 허용 컬럼 — 매핑 실패해도 NULL 저장 (워크플로우 끊김 0, 헌법 #20)
-            var partnerCode = GetInt(r, "TX_BUY");
-            partnerMap.TryGetValue(partnerCode, out var partnerId);
-
-            var issueDateStr = GetStr(r, "TX_PDT");
-            var invoiceDate = ParseLegacyDate(issueDateStr) ?? now;
-
-            // 4품목 합산 (헤더 amount용)
-            decimal supply = 0, vat = 0;
-            for (int i = 1; i <= 4; i++)
-            {
-                supply += GetDec(r, $"TX_KUM{i}");
-                vat += GetDec(r, $"TX_VAT{i}");
-            }
-
-            // 공식 멱등 키: TX_IO + TX_NO
-            var sourceId = $"mig-{(string.IsNullOrEmpty(io) ? "_" : io)}-{txNo}";
-            var invoiceId = Guid.NewGuid().ToString();
-
             try
             {
-                // 진범 #10 봉합 (2026-05-17): @IssuedAt/IssuedBy/AmountTotal/VatTotal로 변경.
-                // invoice_date(date)→issued_at(datetime6), partner_id→삭제(partner_code로), remark→remark1·remark2.
                 await Db.ExecuteAsync(new CommandDefinition(headerSql, new
                 {
-                    Id = invoiceId,
-                    TenantId = tenantId,
-                    Direction = io,
-                    TaxNo = txNo,
-                    IssueDate = issueDateStr,
-                    PartnerCode = partnerCode == 0 ? (int?)null : partnerCode,
-                    SeqNo = (short?)(GetInt(r, "TX_SEQ") == 0 ? null : (short?)GetInt(r, "TX_SEQ")),
-                    SentDt = GetStr(r, "TX_SENDDT"),
-                    ReadDt = GetStr(r, "TX_READDT"),
-                    ReportDt = GetStr(r, "TX_REPORTDT"),
-                    Rem1 = GetStr(r, "TX_REM"),
-                    Rem2 = GetStr(r, "TX_REM1"),
-                    IssuedAt = invoiceDate,                        // datetime6 (DB issued_at NOT NULL)
-                    IssuedBy = tenantId,                            // 마이그 잡 발행자 = 테넌트 (헌법 #2 정합, NOT NULL 봉합)
-                    AmountTotal = supply,
-                    VatTotal = vat,
-                    SourceId = sourceId,
-                    Hash = ComputeSourceHash($"tax_invoices:{sourceId}:{supply}:{vat}"),
-                    Now = now,
+                    Id = hr.InvoiceId,
+                    TenantId = hr.TenantId,
+                    Direction = hr.Direction,
+                    TaxNo = hr.TaxNo,
+                    IssueDate = hr.IssueDate,
+                    PartnerCode = hr.PartnerCode,
+                    SeqNo = hr.SeqNo,
+                    SentDt = hr.SentDt,
+                    ReadDt = hr.ReadDt,
+                    ReportDt = hr.ReportDt,
+                    Rem1 = hr.Rem1,
+                    Rem2 = hr.Rem2,
+                    IssuedAt = hr.IssuedAt,
+                    IssuedBy = hr.IssuedBy,
+                    AmountTotal = hr.AmountTotal,
+                    VatTotal = hr.VatTotal,
+                    SourceId = hr.SourceId,
+                    Hash = hr.Hash,
+                    Now = hr.Now,
                 }, transaction: tx, cancellationToken: ct)).ConfigureAwait(false);
-
-                // 4 품목 인라인 분해 (tax_invoice_items)
-                for (int i = 1; i <= 4; i++)
-                {
-                    var pum = GetStr(r, $"TX_PUM{i}");
-                    if (string.IsNullOrWhiteSpace(pum)) continue;
-                    var pumName = pum.Length > 100 ? pum[..100] : pum;
-                    await Db.ExecuteAsync(new CommandDefinition(lineSql, new
-                    {
-                        LineId = Guid.NewGuid().ToString(),
-                        InvoiceId = invoiceId,
-                        TenantId = tenantId,
-                        LineNo = (short)i,
-                        ItemName = pumName,
-                        Qty = GetDec(r, $"TX_SU{i}"),
-                        UnitPrice = GetDec(r, $"TX_DAN{i}"),
-                        Supply = GetDec(r, $"TX_KUM{i}"),
-                        Vat = GetDec(r, $"TX_VAT{i}"),
-                        Now = now,
-                    }, transaction: tx, cancellationToken: ct)).ConfigureAwait(false);
-                }
                 count++;
             }
             catch (Exception ex)
             {
                 _logger.LogWarning(ex,
-                    "[MDB마이그레이션] 세금계산서 TX_IO={Io} TX_NO={No} INSERT 실패 — DDL ALTER 미실행 가능성",
-                    io, txNo);
+                    "[MDB마이그레이션] 세금계산서 TX_NO={No} INSERT 실패 — DDL ALTER 미실행 가능성",
+                    hr.TaxNo);
             }
         }
 
-        _logger.LogInformation("[MDB마이그레이션] 세금계산서(DOCF4→tax_invoices) {Count}건 이관 완료", count);
+        foreach (var ir in itemRows)
+        {
+            try
+            {
+                await Db.ExecuteAsync(new CommandDefinition(lineSql, new
+                {
+                    LineId = ir.LineId,
+                    InvoiceId = ir.InvoiceId,
+                    TenantId = ir.TenantId,
+                    LineNo = ir.LineNo,
+                    ItemName = ir.ItemName,
+                    Qty = ir.Qty,
+                    UnitPrice = ir.UnitPrice,
+                    Supply = ir.Supply,
+                    Vat = ir.Vat,
+                    Now = ir.Now,
+                }, transaction: tx, cancellationToken: ct)).ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex,
+                    "[MDB마이그레이션] tax_invoice_items INSERT 실패 InvoiceId={Id} LineNo={No}",
+                    ir.InvoiceId, ir.LineNo);
+            }
+        }
+
+        _logger.LogInformation("[MDB마이그레이션] 세금계산서(DOCF4→tax_invoices) {Count}건 이관 완료(legacy fallback)", count);
         return count;
+    }
+
+    /// <summary>
+    /// 정공법(축 1) MySqlBulkCopy 경로 — tax_invoices + tax_invoice_items 2단계 staging.
+    /// collections·stock_ledger 동형 패턴 (WS-20260518-A 진범 #4 봉합).
+    /// </summary>
+    private async Task<int> BulkCopyTaxInvoicesAsync(
+        MySqlConnection conn, MySqlTransaction tx,
+        List<TaxInvoiceHeaderRow> headerRows,
+        List<TaxInvoiceItemRow> itemRows,
+        CancellationToken ct)
+    {
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        var headerStage = $"tax_invoices_stage_{Guid.NewGuid():N}".Substring(0, 40);
+        var itemStage = $"tax_invoice_items_stage_{Guid.NewGuid():N}".Substring(0, 40);
+
+        // ── 1) header staging 생성 + UNIQUE DROP ──
+        using (var createCmd = new MySqlCommand($"CREATE TEMPORARY TABLE `{headerStage}` LIKE tax_invoices", conn, tx))
+        {
+            createCmd.CommandTimeout = 60;
+            await createCmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
+        }
+        await DropStageUniqueIndexesAsync(conn, tx, headerStage, "tax_invoices", ct).ConfigureAwait(false);
+
+        // ── 2) items staging 생성 + UNIQUE DROP ──
+        using (var createCmd = new MySqlCommand($"CREATE TEMPORARY TABLE `{itemStage}` LIKE tax_invoice_items", conn, tx))
+        {
+            createCmd.CommandTimeout = 60;
+            await createCmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
+        }
+        await DropStageUniqueIndexesAsync(conn, tx, itemStage, "tax_invoice_items", ct).ConfigureAwait(false);
+
+        try
+        {
+            // ── 3) header BulkCopy ──
+            var headerDt = BuildTaxInvoiceHeaderDataTable(headerRows);
+            var headerBulk = new MySqlBulkCopy(conn, tx)
+            {
+                DestinationTableName = headerStage,
+                BulkCopyTimeout = 86400,
+            };
+            var headerCols = new[]
+            {
+                "invoice_id", "tenant_id", "invoice_no", "issued_at", "issued_by",
+                "amount_total", "vat_total", "status",
+                "direction", "tax_no", "issue_date_yyyymmdd", "partner_code", "seq_no",
+                "sent_at_yyyymmdd", "read_at_yyyymmdd", "reported_at_yyyymmdd",
+                "remark1", "remark2",
+                "source_type", "source_id", "migrated_source_hash",
+                "created_at", "updated_at",
+            };
+            for (int i = 0; i < headerCols.Length; i++)
+            {
+                headerBulk.ColumnMappings.Add(new MySqlBulkCopyColumnMapping(i, headerCols[i]));
+            }
+            var headerResult = await headerBulk.WriteToServerAsync(headerDt, ct).ConfigureAwait(false);
+            _logger.LogInformation(
+                "[MDB마이그레이션] tax_invoices BulkCopy 적재: {Rows}행, warnings={Warn}, {Elapsed}ms",
+                headerResult.RowsInserted, headerResult.Warnings.Count, sw.ElapsedMilliseconds);
+
+            // ── 4) items BulkCopy ──
+            var itemDt = BuildTaxInvoiceItemDataTable(itemRows);
+            var itemBulk = new MySqlBulkCopy(conn, tx)
+            {
+                DestinationTableName = itemStage,
+                BulkCopyTimeout = 86400,
+            };
+            var itemCols = new[]
+            {
+                "tax_invoice_item_id", "invoice_id", "tenant_id", "line_no",
+                "item_name", "quantity", "unit_price", "supply_amount", "vat_amount", "created_at",
+            };
+            for (int i = 0; i < itemCols.Length; i++)
+            {
+                itemBulk.ColumnMappings.Add(new MySqlBulkCopyColumnMapping(i, itemCols[i]));
+            }
+            var itemResult = await itemBulk.WriteToServerAsync(itemDt, ct).ConfigureAwait(false);
+            _logger.LogInformation(
+                "[MDB마이그레이션] tax_invoice_items BulkCopy 적재: {Rows}행, warnings={Warn}, {Elapsed}ms",
+                itemResult.RowsInserted, itemResult.Warnings.Count, sw.ElapsedMilliseconds);
+
+            // ── 5) header staging → tax_invoices INSERT IGNORE SELECT ──
+            // 진범 #10 스키마 정합 유지 (issued_at·issued_by·amount_total·vat_total).
+            var headerInsertSql = $"""
+                INSERT IGNORE INTO tax_invoices
+                  (invoice_id, tenant_id, invoice_no, issued_at, issued_by,
+                   amount_total, vat_total, status,
+                   direction, tax_no, issue_date_yyyymmdd, partner_code, seq_no,
+                   sent_at_yyyymmdd, read_at_yyyymmdd, reported_at_yyyymmdd,
+                   remark1, remark2,
+                   source_type, source_id, migrated_source_hash,
+                   created_at, updated_at)
+                SELECT
+                   invoice_id, tenant_id, invoice_no, issued_at, issued_by,
+                   amount_total, vat_total, status,
+                   direction, tax_no, issue_date_yyyymmdd, partner_code, seq_no,
+                   sent_at_yyyymmdd, read_at_yyyymmdd, reported_at_yyyymmdd,
+                   remark1, remark2,
+                   source_type, source_id, migrated_source_hash,
+                   created_at, updated_at
+                FROM `{headerStage}`
+                """;
+            int headerInserted;
+            using (var insertCmd = new MySqlCommand(headerInsertSql, conn, tx))
+            {
+                insertCmd.CommandTimeout = 86400;
+                headerInserted = await insertCmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
+            }
+
+            // ── 6) items staging → tax_invoice_items INSERT IGNORE SELECT ──
+            var itemInsertSql = $"""
+                INSERT IGNORE INTO tax_invoice_items
+                  (tax_invoice_item_id, invoice_id, tenant_id, line_no,
+                   item_name, quantity, unit_price, supply_amount, vat_amount, created_at)
+                SELECT
+                   tax_invoice_item_id, invoice_id, tenant_id, line_no,
+                   item_name, quantity, unit_price, supply_amount, vat_amount, created_at
+                FROM `{itemStage}`
+                """;
+            int itemInserted;
+            using (var insertCmd = new MySqlCommand(itemInsertSql, conn, tx))
+            {
+                insertCmd.CommandTimeout = 86400;
+                itemInserted = await insertCmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
+            }
+
+            sw.Stop();
+            _logger.LogInformation(
+                "[MDB마이그레이션] tax_invoices 정공법 완료: 헤더 후보 {HTotal}행 → INSERT {HIns}행, 품목 후보 {ITotal}행 → INSERT {IIns}행, 총 {Elapsed}ms",
+                headerRows.Count, headerInserted, itemRows.Count, itemInserted, sw.ElapsedMilliseconds);
+            return headerRows.Count;
+        }
+        finally
+        {
+            await TryDropStageAsync(conn, tx, headerStage, ct).ConfigureAwait(false);
+            await TryDropStageAsync(conn, tx, itemStage, ct).ConfigureAwait(false);
+        }
+    }
+
+    private async Task DropStageUniqueIndexesAsync(
+        MySqlConnection conn, MySqlTransaction tx, string stageTable, string srcTable, CancellationToken ct)
+    {
+        var idxs = (await Db.QueryAsync<string>(new CommandDefinition(
+            "SELECT DISTINCT index_name FROM information_schema.statistics " +
+            "WHERE table_schema = DATABASE() AND table_name = @t " +
+            "  AND non_unique = 0 AND index_name <> 'PRIMARY'",
+            new { t = srcTable }, transaction: tx, cancellationToken: ct)).ConfigureAwait(false)).ToList();
+        foreach (var idx in idxs)
+        {
+            try
+            {
+                using var dropCmd = new MySqlCommand(
+                    $"ALTER TABLE `{stageTable}` DROP INDEX `{idx}`", conn, tx);
+                dropCmd.CommandTimeout = 30;
+                await dropCmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex,
+                    "[MDB마이그레이션] {Stage} UNIQUE 인덱스 {Idx} DROP 실패", stageTable, idx);
+            }
+        }
+    }
+
+    private async Task TryDropStageAsync(
+        MySqlConnection conn, MySqlTransaction tx, string stageTable, CancellationToken ct)
+    {
+        try
+        {
+            using var dropCmd = new MySqlCommand(
+                $"DROP TEMPORARY TABLE IF EXISTS `{stageTable}`", conn, tx);
+            dropCmd.CommandTimeout = 30;
+            await dropCmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex,
+                "[MDB마이그레이션] {Stage} DROP 실패 — 세션 종료 시 auto-drop 예정", stageTable);
+        }
+    }
+
+    private static DataTable BuildTaxInvoiceHeaderDataTable(List<TaxInvoiceHeaderRow> rows)
+    {
+        var dt = new DataTable();
+        dt.Columns.Add("invoice_id", typeof(string));
+        dt.Columns.Add("tenant_id", typeof(string));
+        dt.Columns.Add("invoice_no", typeof(string));
+        dt.Columns.Add("issued_at", typeof(DateTime));
+        dt.Columns.Add("issued_by", typeof(string));
+        dt.Columns.Add("amount_total", typeof(decimal));
+        dt.Columns.Add("vat_total", typeof(decimal));
+        dt.Columns.Add("status", typeof(string));
+        dt.Columns.Add("direction", typeof(string));
+        dt.Columns.Add("tax_no", typeof(string));
+        dt.Columns.Add("issue_date_yyyymmdd", typeof(string));
+        dt.Columns.Add("partner_code", typeof(int));
+        dt.Columns.Add("seq_no", typeof(short));
+        dt.Columns.Add("sent_at_yyyymmdd", typeof(string));
+        dt.Columns.Add("read_at_yyyymmdd", typeof(string));
+        dt.Columns.Add("reported_at_yyyymmdd", typeof(string));
+        dt.Columns.Add("remark1", typeof(string));
+        dt.Columns.Add("remark2", typeof(string));
+        dt.Columns.Add("source_type", typeof(string));
+        dt.Columns.Add("source_id", typeof(string));
+        dt.Columns.Add("migrated_source_hash", typeof(string));
+        dt.Columns.Add("created_at", typeof(DateTime));
+        dt.Columns.Add("updated_at", typeof(DateTime));
+
+        foreach (var r in rows)
+        {
+            dt.Rows.Add(
+                r.InvoiceId, r.TenantId, r.InvoiceNo, r.IssuedAt, r.IssuedBy,
+                r.AmountTotal, r.VatTotal, "issued",
+                (object?)r.Direction ?? DBNull.Value,
+                (object?)r.TaxNo ?? DBNull.Value,
+                (object?)r.IssueDate ?? DBNull.Value,
+                (object?)r.PartnerCode ?? DBNull.Value,
+                (object?)r.SeqNo ?? DBNull.Value,
+                (object?)r.SentDt ?? DBNull.Value,
+                (object?)r.ReadDt ?? DBNull.Value,
+                (object?)r.ReportDt ?? DBNull.Value,
+                (object?)r.Rem1 ?? DBNull.Value,
+                (object?)r.Rem2 ?? DBNull.Value,
+                "migration", r.SourceId,
+                (object?)r.Hash ?? DBNull.Value,
+                r.Now, r.Now);
+        }
+        return dt;
+    }
+
+    private static DataTable BuildTaxInvoiceItemDataTable(List<TaxInvoiceItemRow> rows)
+    {
+        var dt = new DataTable();
+        dt.Columns.Add("tax_invoice_item_id", typeof(string));
+        dt.Columns.Add("invoice_id", typeof(string));
+        dt.Columns.Add("tenant_id", typeof(string));
+        dt.Columns.Add("line_no", typeof(short));
+        dt.Columns.Add("item_name", typeof(string));
+        dt.Columns.Add("quantity", typeof(decimal));
+        dt.Columns.Add("unit_price", typeof(decimal));
+        dt.Columns.Add("supply_amount", typeof(decimal));
+        dt.Columns.Add("vat_amount", typeof(decimal));
+        dt.Columns.Add("created_at", typeof(DateTime));
+
+        foreach (var r in rows)
+        {
+            dt.Rows.Add(
+                r.LineId, r.InvoiceId, r.TenantId, r.LineNo,
+                r.ItemName, r.Qty, r.UnitPrice, r.Supply, r.Vat, r.Now);
+        }
+        return dt;
+    }
+
+    private sealed class TaxInvoiceHeaderRow
+    {
+        public string InvoiceId { get; set; } = string.Empty;
+        public string TenantId { get; set; } = string.Empty;
+        public string InvoiceNo { get; set; } = string.Empty;
+        public DateTime IssuedAt { get; set; }
+        public string IssuedBy { get; set; } = string.Empty;
+        public decimal AmountTotal { get; set; }
+        public decimal VatTotal { get; set; }
+        public string? Direction { get; set; }
+        public string? TaxNo { get; set; }
+        public string? IssueDate { get; set; }
+        public int? PartnerCode { get; set; }
+        public short? SeqNo { get; set; }
+        public string? SentDt { get; set; }
+        public string? ReadDt { get; set; }
+        public string? ReportDt { get; set; }
+        public string? Rem1 { get; set; }
+        public string? Rem2 { get; set; }
+        public string SourceId { get; set; } = string.Empty;
+        public string? Hash { get; set; }
+        public DateTime Now { get; set; }
+    }
+
+    private sealed class TaxInvoiceItemRow
+    {
+        public string LineId { get; set; } = string.Empty;
+        public string InvoiceId { get; set; } = string.Empty;
+        public string TenantId { get; set; } = string.Empty;
+        public short LineNo { get; set; }
+        public string ItemName { get; set; } = string.Empty;
+        public decimal Qty { get; set; }
+        public decimal UnitPrice { get; set; }
+        public decimal Supply { get; set; }
+        public decimal Vat { get; set; }
+        public DateTime Now { get; set; }
     }
 
     // ────────────────────────────────────────────────────────────────
@@ -3344,7 +3689,7 @@ public sealed class MdbMigrationService
             var bulk = new MySqlBulkCopy(conn, tx)
             {
                 DestinationTableName = stageTable,
-                BulkCopyTimeout = 1800,
+                BulkCopyTimeout = 86400,
             };
             var cols = new[]
             {
@@ -3379,7 +3724,7 @@ public sealed class MdbMigrationService
             int inserted;
             using (var insertCmd = new MySqlCommand(insertSql, conn, tx))
             {
-                insertCmd.CommandTimeout = 1800;
+                insertCmd.CommandTimeout = 86400;
                 inserted = await insertCmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
             }
 
