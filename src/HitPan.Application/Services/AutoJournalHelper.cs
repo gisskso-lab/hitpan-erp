@@ -44,6 +44,15 @@ internal static class AutoJournalHelper
         string? employeeId,
         CancellationToken ct)
     {
+        // WS-D-2 (2026-05-18) 마이그 분개 중복 방지 가드.
+        // 마이그된 거래(source_type='migration')는 DOCF7 분개로 이미 기표됨.
+        // 사용자가 재확정 누르면 운영 자동 분개가 중복 INSERT — 차단.
+        // 헌법 #3 INSERT ONLY + 사장님 격언 "끝 숫자" 정합.
+        if (await IsAlreadyJournaledFromMigrationAsync(conn, tx, tenantId, sourceId, ct).ConfigureAwait(false))
+        {
+            return;
+        }
+
         var entryId = Guid.NewGuid().ToString();
         var entryNo = $"JE-{entryDate:yyyyMMdd}-{Guid.NewGuid().ToString()[..8].ToUpperInvariant()}";
         var total = supplyAmount + vatAmount;
@@ -229,6 +238,12 @@ internal static class AutoJournalHelper
         string? employeeId,
         CancellationToken ct)
     {
+        // WS-D-2 (2026-05-18) 마이그 분개 중복 방지 가드.
+        if (await IsAlreadyJournaledFromMigrationAsync(conn, tx, tenantId, sourceId, ct).ConfigureAwait(false))
+        {
+            return;
+        }
+
         var entryId = Guid.NewGuid().ToString();
         var entryNo = $"JE-{entryDate:yyyyMMdd}-{Guid.NewGuid().ToString()[..8].ToUpperInvariant()}";
         var total = supplyAmount + vatAmount;
@@ -321,6 +336,38 @@ internal static class AutoJournalHelper
             await InsertLineAsync(conn, tx, entryId, tenantId, WorkInProcess, "credit",
                 totalCost, null, $"재공품 역산 {documentNo}", ct);
         }
+    }
+
+    /// <summary>
+    /// WS-D-2 (2026-05-18) 마이그 분개 중복 방지 가드.
+    /// 사장님 결재 Q2: 마이그 분개(source_type='migration')는 DOCF7 이관 시 이미 기표됨.
+    /// 사용자가 마이그된 거래에 대해 재확정 누를 때 운영 자동 분개 중복 INSERT 차단.
+    ///
+    /// 검사 기준: 동일 tenant_id에서 sourceId(=delivery_id/po_id 등)가
+    /// source_type='migration' journal_entries에 이미 존재하면 true.
+    /// </summary>
+    private static async Task<bool> IsAlreadyJournaledFromMigrationAsync(
+        IDbConnection conn, IDbTransaction tx,
+        string tenantId, string sourceId, CancellationToken ct)
+    {
+        // sourceId가 마이그 entry의 sourceId 패턴(mig-docf7-*)일 가능성과,
+        // 마이그된 거래명세서 ID(GUID)일 가능성 둘 다 검사.
+        // 1) sales_deliveries / purchase_receipts에서 source_type='migration' 확인.
+        var checkSql = """
+            SELECT 1 FROM (
+              SELECT delivery_id AS id, source_type FROM sales_deliveries
+                WHERE tenant_id = @TenantId AND delivery_id = @SourceId
+              UNION ALL
+              SELECT receipt_id AS id, source_type FROM purchase_receipts
+                WHERE tenant_id = @TenantId AND receipt_id = @SourceId
+            ) t
+            WHERE t.source_type = 'migration'
+            LIMIT 1
+            """;
+        var exists = await conn.ExecuteScalarAsync<int?>(new CommandDefinition(
+            checkSql, new { TenantId = tenantId, SourceId = sourceId },
+            transaction: tx, cancellationToken: ct)).ConfigureAwait(false);
+        return exists.HasValue;
     }
 
     private static Task InsertEntryAsync(
