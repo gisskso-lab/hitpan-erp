@@ -4093,7 +4093,7 @@ public sealed class MdbMigrationService
         try
         {
             var headerDt = BuildDeliveryHeaderDataTable(headers);
-            var headerBulk = new MySqlBulkCopy(conn, tx) { DestinationTableName = headerStage, BulkCopyTimeout = 86400 };
+            var headerBulk = new MySqlBulkCopy(conn, tx) { DestinationTableName = headerStage, BulkCopyTimeout = 86400, ConflictOption = MySqlBulkLoaderConflictOption.Ignore };
             var headerCols = new[]
             {
                 "delivery_id", "tenant_id", "delivery_no", "partner_id", "delivery_date",
@@ -4108,7 +4108,7 @@ public sealed class MdbMigrationService
                 hr.RowsInserted, hr.Warnings.Count, sw.ElapsedMilliseconds);
 
             var itemDt = BuildDeliveryItemDataTable(items);
-            var itemBulk = new MySqlBulkCopy(conn, tx) { DestinationTableName = itemStage, BulkCopyTimeout = 86400 };
+            var itemBulk = new MySqlBulkCopy(conn, tx) { DestinationTableName = itemStage, BulkCopyTimeout = 86400, ConflictOption = MySqlBulkLoaderConflictOption.Ignore };
             var itemCols = new[]
             {
                 "delivery_item_id", "delivery_id", "tenant_id", "item_id", "warehouse_id",
@@ -4182,7 +4182,7 @@ public sealed class MdbMigrationService
         try
         {
             var headerDt = BuildReceiptHeaderDataTable(headers);
-            var headerBulk = new MySqlBulkCopy(conn, tx) { DestinationTableName = headerStage, BulkCopyTimeout = 86400 };
+            var headerBulk = new MySqlBulkCopy(conn, tx) { DestinationTableName = headerStage, BulkCopyTimeout = 86400, ConflictOption = MySqlBulkLoaderConflictOption.Ignore };
             // 봉합 2026-05-18 진범 #14: purchase_receipts 스키마에 updated_at 컬럼 없음.
             // sales_deliveries(updated_at 있음)와 다른 스키마 — PM 오설계 정정.
             var headerCols = new[]
@@ -4199,7 +4199,7 @@ public sealed class MdbMigrationService
                 hr.RowsInserted, hr.Warnings.Count, sw.ElapsedMilliseconds);
 
             var itemDt = BuildReceiptItemDataTable(items);
-            var itemBulk = new MySqlBulkCopy(conn, tx) { DestinationTableName = itemStage, BulkCopyTimeout = 86400 };
+            var itemBulk = new MySqlBulkCopy(conn, tx) { DestinationTableName = itemStage, BulkCopyTimeout = 86400, ConflictOption = MySqlBulkLoaderConflictOption.Ignore };
             var itemCols = new[]
             {
                 "receipt_item_id", "receipt_id", "tenant_id", "item_id", "warehouse_id",
@@ -4710,7 +4710,7 @@ public sealed class MdbMigrationService
         try
         {
             var entryDt = BuildJournalEntryDataTable(entries);
-            var entryBulk = new MySqlBulkCopy(conn, tx) { DestinationTableName = entryStage, BulkCopyTimeout = 86400 };
+            var entryBulk = new MySqlBulkCopy(conn, tx) { DestinationTableName = entryStage, BulkCopyTimeout = 86400, ConflictOption = MySqlBulkLoaderConflictOption.Ignore };
             var entryCols = new[]
             {
                 "entry_id", "tenant_id", "entry_no", "entry_date", "ym", "description",
@@ -4723,7 +4723,15 @@ public sealed class MdbMigrationService
                 er.RowsInserted, er.Warnings.Count, sw.ElapsedMilliseconds);
 
             var lineDt = BuildJournalLineDataTable(lines);
-            var lineBulk = new MySqlBulkCopy(conn, tx) { DestinationTableName = lineStage, BulkCopyTimeout = 86400 };
+            // 봉합 2026-05-18 진범 #17: ConflictOption.Ignore = staging UNIQUE 충돌 무시.
+            // 5/18 마이그 #4 결과: "27661 copied but only 23994 inserted" 예외로 트랜잭션 ROLLBACK.
+            // = source_id 멱등 키 중복 3,667행을 정상 IGNORE해야 하나 MySqlBulkCopy가 예외 throw.
+            var lineBulk = new MySqlBulkCopy(conn, tx)
+            {
+                DestinationTableName = lineStage,
+                BulkCopyTimeout = 86400,
+                ConflictOption = MySqlBulkLoaderConflictOption.Ignore,
+            };
             var lineCols = new[]
             {
                 "entry_id", "tenant_id", "account_code", "debit_amount", "credit_amount",
