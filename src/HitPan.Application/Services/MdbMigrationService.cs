@@ -283,15 +283,12 @@ public sealed class MdbMigrationService
             // ──────────────────────────────────────
             var pandataJobs = new List<Func<Task>>
             {
-                () => RunTableStepAsync("transactions", async tx =>
-                {
-                    using var oleConn = OpenOleDb(pandataPath);
-                    var (salesCount, purchaseCount) = await MigrateTransactionsAsync(
-                        oleConn, tenantId, now, partnerMap, itemMap, employeeMap, defaultWarehouseId, tx, ct).ConfigureAwait(false);
-                    result.SalesOrders = salesCount;
-                    result.PurchaseOrders = purchaseCount;
-                    return salesCount + purchaseCount;
-                }, ct),
+                // 진범 #24 봉합 (2026-05-20, 사장님 자문 #3 옵션 A 결재): DOCF1/F2 잡 제거.
+                // ERP 매니저 확정: DOCF1/F2는 옛 ERP 거래 헤더 — DOCFB로 통합되며 deprecated.
+                // fallback partner 170건은 DOCFB IO=1/2에서 정합 마이그됨. transactions 잡 영구 제거.
+                // sales_orders/purchase_orders는 MigrateSalesOrdersFromIOAsync (DOCFO) +
+                // MigratePurchaseOrdersFromIUAsync (DOCFA) 잡으로 정상 마이그.
+                // UI 카드 "transactions" 폐기 → 17개 → 16개 (Razor 별도 정정).
                 () => RunTableStepAsync("stock_ledger", async tx =>
                 {
                     using var oleConn = OpenOleDb(pandataPath);
@@ -1624,6 +1621,40 @@ public sealed class MdbMigrationService
         return id;
     }
 
+    /// <summary>
+    /// 진범 #34 봉합 (2026-05-20, 사장님 자문 #5 Q5-1 옵션 A 결재):
+    /// itemMap에 매핑 실패한 DOCFB/DOCFO/DOCFA 라인을 위한 fallback item 1개.
+    /// 헌법 #20 워크플로우 끊김 0 보장 (item_id NULL 허용 폐기).
+    /// legacy_pum/legacy_ku는 라인에 원본 보존 → 운영 화면에서 "📦 레거시 [원본명] (마스터 미등록)" 표시.
+    /// </summary>
+    private async Task<string> EnsureLegacyFallbackItemAsync(string tenantId, DateTime now, IDbTransaction tx, CancellationToken ct)
+    {
+        // item_code varchar(30) — "LEGACY_UNKNOWN_ITEM" 19자 정합.
+        const string itemCode = "LEGACY_UNKNOWN_ITEM";
+        var existing = await Db.ExecuteScalarAsync<string?>(new CommandDefinition(
+            "SELECT item_id FROM items WHERE tenant_id = @TenantId AND item_code = @Code LIMIT 1",
+            new { TenantId = tenantId, Code = itemCode }, transaction: tx, cancellationToken: ct)).ConfigureAwait(false);
+        if (!string.IsNullOrEmpty(existing)) return existing;
+
+        var id = Guid.NewGuid().ToString();
+        await Db.ExecuteAsync(new CommandDefinition("""
+            INSERT INTO items
+              (item_id, tenant_id, item_code, item_name, item_type, unit,
+               tax_type, is_active, is_deleted, memo,
+               purchase_price, sale_price, standard_price, safety_stock,
+               created_at, updated_at, row_version)
+            VALUES
+              (@Id, @TenantId, @Code, '레거시 미등록 품목', 'product', 'EA',
+               'taxable', 1, 0, '진범 #34 봉합 — itemMap 매핑 실패 라인의 fallback item. legacy_pum/legacy_ku로 원본 추적.',
+               0, 0, 0, 0,
+               @Now, @Now, 0)
+            """,
+            new { Id = id, TenantId = tenantId, Code = itemCode, Now = now },
+            transaction: tx, cancellationToken: ct)).ConfigureAwait(false);
+        _logger.LogInformation("[MDB마이그레이션] LEGACY_UNKNOWN_ITEM fallback 품목 생성: {Id}", id);
+        return id;
+    }
+
     // ────────────────────────────────────────────────────────────────
     // 2-2. 매입매출 입출고 (DOCFB → stock_ledger)
     // ────────────────────────────────────────────────────────────────
@@ -2807,7 +2838,8 @@ public sealed class MdbMigrationService
             {
                 var pum = GetStr(r, "IU_PUM");
                 var ku = GetStr(r, "IU_KU");
-                var key = $"{pum}|{ku}";
+                // 진범 #46 봉합 (2026-05-20): BuildItemKey 헬퍼 적용 (Trim + 빈 spec 처리).
+                var key = BuildItemKey(pum, ku);
                 if (!itemMap.TryGetValue(key, out var itemId) || string.IsNullOrWhiteSpace(itemId))
                 {
                     skipItem++;
@@ -2919,7 +2951,8 @@ public sealed class MdbMigrationService
             {
                 var pum = GetStr(r, "IO_PUM");
                 var ku = GetStr(r, "IO_KU");
-                var key = $"{pum}|{ku}";
+                // 진범 #46 봉합 (2026-05-20): BuildItemKey 헬퍼 적용.
+                var key = BuildItemKey(pum, ku);
                 if (!itemMap.TryGetValue(key, out var itemId) || string.IsNullOrWhiteSpace(itemId))
                 {
                     skipItem++;
@@ -3000,7 +3033,12 @@ public sealed class MdbMigrationService
                 vat += GetDec(r, $"TX_VAT{i}");
             }
 
-            var sourceId = $"mig-{(string.IsNullOrEmpty(io) ? "_" : io)}-{txNo}";
+            // 진범 #71 옵션 2-B 봉합 (2026-05-20, 사장님 결재):
+            // 기존 source_id = mig-{io}-{txNo} — DOCF4 원본에서 같은 (io, txNo) 조합 row 652쌍 중복 staging.
+            // TX_SEQ 컬럼으로 세분화 + TX_PDT 발행일 백업키 추가로 절대 유일성 보장.
+            var txSeqRaw = GetInt(r, "TX_SEQ");
+            var sourceIdSeq = txSeqRaw == 0 ? "0" : txSeqRaw.ToString();
+            var sourceId = $"mig-{(string.IsNullOrEmpty(io) ? "_" : io)}-{txNo}-{sourceIdSeq}-{issueDateStr}";
             var invoiceId = Guid.NewGuid().ToString();
 
             headerRows.Add(new TaxInvoiceHeaderRow
@@ -3238,8 +3276,61 @@ public sealed class MdbMigrationService
                 "[MDB마이그레이션] tax_invoice_items BulkCopy 적재: {Rows}행, warnings={Warn}, {Elapsed}ms",
                 itemResult.RowsInserted, itemResult.Warnings.Count, sw.ElapsedMilliseconds);
 
-            // ── 5) header staging → tax_invoices INSERT IGNORE SELECT ──
-            // 진범 #10 스키마 정합 유지 (issued_at·issued_by·amount_total·vat_total).
+            // ── 5) header staging → tax_invoices INSERT SELECT (#71 옵션 3 진단) ──
+            // 진범 #10 스키마 정합 유지 + #71 옵션 3: 본 테이블 4 UNIQUE silent IGNORE 정체 노출
+            // staging에서 LEFT JOIN으로 충돌 분포 진단 → 실제 INSERT는 IGNORE 유지 (마이그 살림)
+            var diagHeaderSql = $"""
+                SELECT
+                  SUM(CASE WHEN t1.invoice_id IS NOT NULL THEN 1 ELSE 0 END) AS invoice_no_collision,
+                  SUM(CASE WHEN t2.invoice_id IS NOT NULL AND t1.invoice_id IS NULL THEN 1 ELSE 0 END) AS source_hash_collision,
+                  SUM(CASE WHEN t3.invoice_id IS NOT NULL AND t1.invoice_id IS NULL AND t2.invoice_id IS NULL THEN 1 ELSE 0 END) AS io_no_collision,
+                  SUM(CASE WHEN t4.invoice_id IS NOT NULL AND t1.invoice_id IS NULL AND t2.invoice_id IS NULL AND t3.invoice_id IS NULL THEN 1 ELSE 0 END) AS source_id_collision,
+                  SUM(CASE WHEN t1.invoice_id IS NULL AND t2.invoice_id IS NULL AND t3.invoice_id IS NULL AND t4.invoice_id IS NULL THEN 1 ELSE 0 END) AS no_collision
+                FROM `{headerStage}` s
+                LEFT JOIN tax_invoices t1 ON s.tenant_id = t1.tenant_id AND s.invoice_no = t1.invoice_no
+                LEFT JOIN tax_invoices t2 ON s.tenant_id = t2.tenant_id AND s.migrated_source_hash = t2.migrated_source_hash
+                LEFT JOIN tax_invoices t3 ON s.tenant_id = t3.tenant_id AND s.direction = t3.direction AND s.tax_no = t3.tax_no
+                LEFT JOIN tax_invoices t4 ON s.tenant_id = t4.tenant_id AND s.source_type = t4.source_type AND s.source_id = t4.source_id
+                """;
+            using (var diagCmd = new MySqlCommand(diagHeaderSql, conn, tx))
+            {
+                diagCmd.CommandTimeout = 86400;
+                using var rd = await diagCmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
+                if (await rd.ReadAsync(ct).ConfigureAwait(false))
+                {
+                    _logger.LogWarning(
+                        "[#71 진단] tax_invoices staging 충돌 분포: invoice_no={A}, source_hash={B}, io_no={C}, source_id={D}, no_collision={E}",
+                        rd.IsDBNull(0) ? 0 : rd.GetInt64(0),
+                        rd.IsDBNull(1) ? 0 : rd.GetInt64(1),
+                        rd.IsDBNull(2) ? 0 : rd.GetInt64(2),
+                        rd.IsDBNull(3) ? 0 : rd.GetInt64(3),
+                        rd.IsDBNull(4) ? 0 : rd.GetInt64(4));
+                }
+            }
+
+            // #71 진단 단순화: 각 UNIQUE 키별 자기중복 행 수 (중복 그룹 행 수 합산)
+            var diagHeaderSelfDupSql = $"""
+                SELECT
+                  (SELECT COALESCE(SUM(c), 0) FROM (SELECT COUNT(*) AS c FROM `{headerStage}` GROUP BY tenant_id, invoice_no HAVING COUNT(*) > 1) a) AS dup_invoice_no,
+                  (SELECT COALESCE(SUM(c), 0) FROM (SELECT COUNT(*) AS c FROM `{headerStage}` GROUP BY tenant_id, direction, tax_no HAVING COUNT(*) > 1) b) AS dup_io_no,
+                  (SELECT COALESCE(SUM(c), 0) FROM (SELECT COUNT(*) AS c FROM `{headerStage}` GROUP BY tenant_id, source_type, source_id HAVING COUNT(*) > 1) d) AS dup_source_id,
+                  (SELECT COALESCE(SUM(c), 0) FROM (SELECT COUNT(*) AS c FROM `{headerStage}` GROUP BY tenant_id, migrated_source_hash HAVING COUNT(*) > 1) e) AS dup_source_hash
+                """;
+            using (var dupCmd = new MySqlCommand(diagHeaderSelfDupSql, conn, tx))
+            {
+                dupCmd.CommandTimeout = 86400;
+                using var rd = await dupCmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
+                if (await rd.ReadAsync(ct).ConfigureAwait(false))
+                {
+                    _logger.LogWarning(
+                        "[#71 진단] tax_invoices staging 자기중복: invoice_no={A}, io_no={B}, source_id={C}, source_hash={D}",
+                        rd.IsDBNull(0) ? 0 : rd.GetInt64(0),
+                        rd.IsDBNull(1) ? 0 : rd.GetInt64(1),
+                        rd.IsDBNull(2) ? 0 : rd.GetInt64(2),
+                        rd.IsDBNull(3) ? 0 : rd.GetInt64(3));
+                }
+            }
+
             var headerInsertSql = $"""
                 INSERT IGNORE INTO tax_invoices
                   (invoice_id, tenant_id, invoice_no, issued_at, issued_by,
@@ -3919,6 +4010,8 @@ public sealed class MdbMigrationService
         int skipEmptyDt = 0, skipPartner = 0, skipItem = 0;
         var partnerMissSamples = new List<int>();
         var itemMissSamples = new List<string>();
+        // 진범 #34 봉합 (2026-05-20, 자문 #5 옵션 A): fallback item lazy 초기화.
+        string? fallbackItemIdLazy = null;
 
         foreach (var g in groups)
         {
@@ -3957,7 +4050,10 @@ public sealed class MdbMigrationService
             var first = g.First();
             var taxNo = GetInt(first, "IJ_TAXNO");
             var memo = GetStr(first, "IJ_REM");
-            var docNo = $"DOCFB-{dtStr}-{io}-{seq:D4}";
+            // 진범 #21 봉합 (2026-05-20): buyCode 누락 → uq_delivery_no/uq_receipt_no 99,450건 충돌.
+            // sourceId 패턴($"mig-docfb-{dtStr}-{io}-{seq}-{buyCode}")과 동일하게 buyCode 포함.
+            // 사장님 자문 #6 옵션 A 결재: 레거시 패턴 그대로 + legacy_buy_code 별도 보존.
+            var docNo = $"DOCFB-{dtStr}-{io}-{seq:D4}-{buyCode}";
 
             if (io == 1) // 매출 → sales_deliveries
             {
@@ -3985,7 +4081,8 @@ public sealed class MdbMigrationService
                     var pum = GetStr(r, "IJ_PUM");
                     var ku = GetStr(r, "IJ_KU");
                     var sun = GetInt(r, "IJ_SUN");
-                    var itemKey = $"{pum}|{ku}";
+                    // 진범 #46 봉합 (2026-05-20): BuildItemKey 헬퍼 적용.
+                    var itemKey = BuildItemKey(pum, ku);
                     string? itemId = null;
                     if (itemMap.TryGetValue(itemKey, out var mappedId) && !string.IsNullOrWhiteSpace(mappedId))
                     {
@@ -3995,6 +4092,10 @@ public sealed class MdbMigrationService
                     {
                         skipItem++;
                         if (itemMissSamples.Count < 5) itemMissSamples.Add(itemKey);
+                        // 진범 #34 봉합 (2026-05-20, 사장님 자문 #5 Q5-1 옵션 A):
+                        // fallback item 사용 — 라인 보존 100% (헌법 #20 워크플로우 끊김 0).
+                        fallbackItemIdLazy ??= await EnsureLegacyFallbackItemAsync(tenantId, now, tx, ct).ConfigureAwait(false);
+                        itemId = fallbackItemIdLazy;
                     }
 
                     salesItems.Add(new DeliveryItemRow
@@ -4040,7 +4141,8 @@ public sealed class MdbMigrationService
                     var pum = GetStr(r, "IJ_PUM");
                     var ku = GetStr(r, "IJ_KU");
                     var sun = GetInt(r, "IJ_SUN");
-                    var itemKey = $"{pum}|{ku}";
+                    // 진범 #46 봉합 (2026-05-20): BuildItemKey 헬퍼 적용.
+                    var itemKey = BuildItemKey(pum, ku);
                     string? itemId = null;
                     if (itemMap.TryGetValue(itemKey, out var mappedId) && !string.IsNullOrWhiteSpace(mappedId))
                     {
@@ -4050,6 +4152,9 @@ public sealed class MdbMigrationService
                     {
                         skipItem++;
                         if (itemMissSamples.Count < 5) itemMissSamples.Add(itemKey);
+                        // 진범 #34 봉합 (2026-05-20, 사장님 자문 #5 옵션 A): fallback item.
+                        fallbackItemIdLazy ??= await EnsureLegacyFallbackItemAsync(tenantId, now, tx, ct).ConfigureAwait(false);
+                        itemId = fallbackItemIdLazy;
                     }
 
                     purchaseItems.Add(new ReceiptItemRow
@@ -4524,10 +4629,14 @@ public sealed class MdbMigrationService
         var lines = new List<JournalLineRow>();
         var seenKcodes = new HashSet<string>();
 
+        // 진범 #40 봉합 (2026-05-20, ERP매니저 자문 #7 Q7-4 옵션 A):
+        // SC_SUN(라인 순번) → SC_JEN(분개번호) 그룹화 재설계.
+        // 30년 회계 표준 패턴 — 한 거래 entry 안에 차변+대변 양쪽 라인 = 균형 회복.
+        // 9차 박제: 23,147/23,152 entry 불균형 (99.98%) → 예상 0~5% 회복.
         var groups = dt.AsEnumerable().GroupBy(r => new
         {
             Dt = GetStr(r, "SC_DT"),
-            Sun = GetInt(r, "SC_SUN"),
+            Jen = GetStr(r, "SC_JEN"),
         }).ToList();
 
         int skipEmptyDt = 0, lineSeq = 0;
@@ -4544,9 +4653,11 @@ public sealed class MdbMigrationService
             var entryDate = ParseLegacyDate(dtStr) ?? now;
             var ym = entryDate.ToString("yyyy-MM");
 
-            var sourceId = $"mig-docf7-{dtStr}-{g.Key.Sun:D4}";
+            // 진범 #40 봉합: SC_JEN(분개번호) 사용. 빈값 시 fallback "0000".
+            var jenStr = string.IsNullOrWhiteSpace(g.Key.Jen) ? "0000" : g.Key.Jen.Trim();
+            var sourceId = $"mig-docf7-{dtStr}-{jenStr}";
             var entryId = Guid.NewGuid().ToString();
-            var entryNo = $"JE-MIG-{dtStr}-{g.Key.Sun:D4}";
+            var entryNo = $"JE-MIG-{dtStr}-{jenStr}";
             var firstJek = GetStr(g.First(), "SC_JEK");
             var description = string.IsNullOrWhiteSpace(firstJek) ? $"DOCF7 마이그 분개 {dtStr}" : firstJek;
             if (description.Length > 200) description = description[..200];
@@ -4574,9 +4685,18 @@ public sealed class MdbMigrationService
                 if (kcode.Length > 10) kcode = kcode[..10];
                 seenKcodes.Add(kcode);
 
-                var cr = GetDec(r, "SC_CR");
-                var dr = GetDec(r, "SC_DR");
-                if (cr == 0 && dr == 0) continue; // 빈 라인 skip (헌법 chk_jl_debit_or_credit 정합)
+                // 진범 #76 봉합 (2026-05-20, 사장님 결재):
+                // 레거시 DOCF7 명명 규칙: SC_CR = 차변(실제 debit), SC_DR = 대변(실제 credit).
+                // expenses 코드(line 2482) 주석 확정: "SC_CR(차변)이 양수면 지출, SC_DR(대변)이 양수면 수입".
+                // 5/20 14차 마이그 DB 실측: 1xxx 자산/비용 22,674라인 100% credit_amount 적재 = 표준 위반.
+                // 봉합: SC_CR → debit, SC_DR → credit (1줄 swap).
+                var rawCr = GetDec(r, "SC_CR");
+                var rawDr = GetDec(r, "SC_DR");
+                if (rawCr == 0 && rawDr == 0) continue; // 빈 라인 skip (헌법 chk_jl_debit_or_credit 정합)
+
+                // 라벨 정정: 레거시 명명 → ERP 표준 매핑
+                var dr = rawCr;  // SC_CR (레거시) = 실제 차변
+                var cr = rawDr;  // SC_DR (레거시) = 실제 대변
 
                 var jek = GetStr(r, "SC_JEK");
                 var memo = string.IsNullOrWhiteSpace(jek) ? null : (jek.Length > 200 ? jek[..200] : jek);
@@ -4584,6 +4704,11 @@ public sealed class MdbMigrationService
                 creditSum += cr;
 
                 lineSeq++;
+                // 진범 #70 옵션 2-A 봉합 (2026-05-20, 사장님 결재):
+                // 기존 source_id = "{sourceId}-{lineSeq:D6}" — DOCF7 원본 (SC_DT, SC_JEN) 그룹화 시
+                // 3,667건 source_id 중복 staging UNIQUE 충돌 (5/18 진범 #17 잔존).
+                // 옵션 2-A: account_code + 부호(D/C) 추가로 라인 단위 절대 유일성 보장.
+                var drCr = dr != 0 ? "D" : "C";
                 lines.Add(new JournalLineRow
                 {
                     EntryId = entryId,
@@ -4593,7 +4718,7 @@ public sealed class MdbMigrationService
                     CreditAmount = cr,
                     PartnerId = null,
                     Memo = memo,
-                    SourceId = $"{sourceId}-{lineSeq:D6}",
+                    SourceId = $"{sourceId}-{kcode}-{drCr}-{lineSeq:D6}",
                     Now = now,
                 });
             }
@@ -4802,6 +4927,46 @@ public sealed class MdbMigrationService
             int entryInserted;
             using (var cmd = new MySqlCommand(entryInsertSql, conn, tx))
             { cmd.CommandTimeout = 86400; entryInserted = await cmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false); }
+
+            // ── #70 옵션 3 진단: journal_lines 손실 분포 노출 ──
+            var diagLineSql = $"""
+                SELECT
+                  SUM(CASE WHEN s.debit_amount > 0 AND s.credit_amount > 0 THEN 1 ELSE 0 END) AS check_both_positive,
+                  SUM(CASE WHEN s.debit_amount = 0 AND s.credit_amount = 0 THEN 1 ELSE 0 END) AS check_both_zero,
+                  SUM(CASE WHEN s.debit_amount < 0 OR s.credit_amount < 0 THEN 1 ELSE 0 END) AS check_negative,
+                  SUM(CASE WHEN t.line_id IS NOT NULL THEN 1 ELSE 0 END) AS uq_source_collision,
+                  COUNT(*) AS staging_total
+                FROM `{lineStage}` s
+                LEFT JOIN journal_lines t ON s.tenant_id = t.tenant_id AND s.source_id = t.source_id
+                """;
+            using (var diagCmd = new MySqlCommand(diagLineSql, conn, tx))
+            {
+                diagCmd.CommandTimeout = 86400;
+                using var rd = await diagCmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
+                if (await rd.ReadAsync(ct).ConfigureAwait(false))
+                {
+                    _logger.LogWarning(
+                        "[#70 진단] journal_lines staging 손실 분포: CHECK_both_positive={A}, CHECK_both_zero={B}, CHECK_negative={C}, uq_source_collision={D}, staging_total={E}",
+                        rd.IsDBNull(0) ? 0 : rd.GetInt64(0),
+                        rd.IsDBNull(1) ? 0 : rd.GetInt64(1),
+                        rd.IsDBNull(2) ? 0 : rd.GetInt64(2),
+                        rd.IsDBNull(3) ? 0 : rd.GetInt64(3),
+                        rd.IsDBNull(4) ? 0 : rd.GetInt64(4));
+                }
+            }
+
+            var diagLineSelfDupSql = $"""
+                SELECT COUNT(*) FROM (
+                  SELECT tenant_id, source_id FROM `{lineStage}`
+                  GROUP BY tenant_id, source_id HAVING COUNT(*) > 1
+                ) x
+                """;
+            using (var dupCmd = new MySqlCommand(diagLineSelfDupSql, conn, tx))
+            {
+                dupCmd.CommandTimeout = 86400;
+                var dup = await dupCmd.ExecuteScalarAsync(ct).ConfigureAwait(false);
+                _logger.LogWarning("[#70 진단] journal_lines staging 자기중복 source_id 그룹: {Cnt}", dup ?? 0);
+            }
 
             var lineInsertSql = $"""
                 INSERT IGNORE INTO journal_lines

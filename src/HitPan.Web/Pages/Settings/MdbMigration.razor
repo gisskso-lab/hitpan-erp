@@ -102,7 +102,26 @@
                     <MudText Typo="Typo.body2" Style="font-size:11px;color:var(--mud-palette-text-secondary)">
                         @if (t.Status == "completed")
                         {
-                            @($"{t.Rows:N0}행 · {t.ElapsedMs / 1000.0:F1}s")
+                            @* 진범 #69 봉합 (2026-05-20, 옵션 B'): hover 시 INSERT/중복 상세 표시. *@
+                            <MudTooltip Arrow="true" Placement="Placement.Top">
+                                <ChildContent>
+                                    @($"{t.Rows:N0}행 · {t.ElapsedMs / 1000.0:F1}s")
+                                    @if (t.SkippedRows > 0)
+                                    {
+                                        <span style="color:var(--mud-palette-warning);font-weight:500">&nbsp;⚠</span>
+                                    }
+                                </ChildContent>
+                                <TooltipContent>
+                                    <div style="text-align:left">
+                                        <div>후보 (staging) : @t.Rows.ToString("N0")행</div>
+                                        <div>INSERT 적재 : @((t.InsertedRows > 0 ? t.InsertedRows : t.Rows).ToString("N0"))행</div>
+                                        @if (t.SkippedRows > 0)
+                                        {
+                                            <div style="color:#ffb74d">중복 차단 : @t.SkippedRows.ToString("N0")건</div>
+                                        }
+                                    </div>
+                                </TooltipContent>
+                            </MudTooltip>
                         }
                         else if (t.Status == "running")
                         {
@@ -227,7 +246,8 @@
     private int _completedTables;
     // 진범 #20 봉합 (2026-05-18): WS-D-1·D-2 신규 잡 2개 추가 (sales_deliveries·journal_entries).
     // 진범 #23 봉합 (2026-05-18): 견적·반품 잡 2개 추가 (quotations·sales_returns).
-    private int _totalTables = 17;
+    // 진범 #24 봉합 (2026-05-20, 사장님 자문 #3 옵션 A): DOCF1/F2 transactions 잡 제거 (17→16).
+    private int _totalTables = 16;
     private int _elapsedSeconds;
     private double _progressPercent => _totalTables == 0 ? 0 : (double)_completedTables / _totalTables * 100.0;
 
@@ -241,7 +261,7 @@
     {
         new("warehouse_migration", "기본창고"),
         new("pyojun_master", "마스터(업체+상품+BOM+사원)"),
-        new("transactions", "거래 헤더(DOCF1+F2)"),
+        // 진범 #24 봉합 (2026-05-20, 자문 #3 옵션 A): transactions 카드 제거.
         new("stock_ledger", "재고원장(입출고)"),
         new("collections", "수금"),
         new("cashbook", "경비(현금출납)"),
@@ -638,6 +658,13 @@
         public int Rows { get; set; }
         public long ElapsedMs { get; set; }
         public string? ErrorMessage { get; set; }
+        // 진범 #69 봉합 (2026-05-20, 사장님 결재 옵션 B'): UI staging 사기 차단.
+        // 후보(BulkCopy staging) vs INSERT 적재 vs 중복 차단 3중 투명 표시 (hover 상세).
+        // Rows = 후보(staging) — 카드 본문에 표시 (기존 호환).
+        // InsertedRows = 실 INSERT 적재 (DB 실측 일치) — hover 툴팁에 표시.
+        // SkippedRows = 중복 IGNORE — hover 툴팁에 표시.
+        public int InsertedRows { get; set; }
+        public int SkippedRows { get; set; }
         public TableCard(string key, string label) { Key = key; Label = label; }
     }
 
