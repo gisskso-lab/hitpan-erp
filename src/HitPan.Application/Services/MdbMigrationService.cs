@@ -1132,9 +1132,14 @@ public sealed class MdbMigrationService
         var dt = ReadMdbTable(oleConn, "SELECT * FROM DOCRT ORDER BY RT_PUM, RT_KU, RT_SUN");
         if (dt.Rows.Count == 0) return 0;
 
+        // BOM 중복 봉합 (2026-05-24 사장님 결재): UPSERT + source_id 멱등 → 28차 38건 (원본 31 + 7중복) 박멸.
         const string headerSql = """
-            INSERT INTO bom_headers (bom_id, tenant_id, product_item_id, bom_name, bom_version, is_default, is_active, memo, created_at, updated_at)
-            VALUES (@BomId, @TenantId, @ProductItemId, @BomName, 1, 1, 1, '레거시 MDB에서 이관된 BOM', @Now, @Now)
+            INSERT INTO bom_headers (bom_id, tenant_id, product_item_id, bom_name, bom_version, is_default, is_active, memo, source_id, created_at, updated_at)
+            VALUES (@BomId, @TenantId, @ProductItemId, @BomName, 1, 1, 1, '레거시 MDB에서 이관된 BOM', @SourceId, @Now, @Now)
+            ON DUPLICATE KEY UPDATE
+              product_item_id = VALUES(product_item_id),
+              bom_name = VALUES(bom_name),
+              updated_at = VALUES(updated_at)
             """;
 
         const string itemSql = """
@@ -1152,16 +1157,23 @@ public sealed class MdbMigrationService
         }
 
         int headerCount = 0;
+        int fallbackProduct = 0, fallbackMaterial = 0;
         foreach (var (productKey, details) in groups)
         {
-            // 완성품이 items에 없으면 BOM 생성 불가 → 건너뜀
+            // 진범 #78 옵션 H-1 봉합 (2026-05-24 사장님 결재): 완제품별 MIG-AUTO-ITEM 자동 등록 (BOM 100% 정합).
             if (!itemMap.TryGetValue(productKey, out var productItemId))
             {
-                _logger.LogWarning("[MDB마이그레이션] BOM 완성품 매핑 실패: {Key}", productKey);
-                continue;
+                productItemId = await EnsureMigAutoItemAsync(tenantId, productKey, now, tx, ct).ConfigureAwait(false);
+                fallbackProduct++;
             }
 
-            var bomId = Guid.NewGuid().ToString();
+            // BOM 중복 봉합: source_id 멱등 + 기존 PK 재사용 (UPSERT 정합).
+            var sourceId = $"DOCRT-{productKey}";
+            var existingBomId = await Db.ExecuteScalarAsync<string?>(new CommandDefinition(
+                "SELECT bom_id FROM bom_headers WHERE tenant_id = @TenantId AND source_id = @SourceId LIMIT 1",
+                new { TenantId = tenantId, SourceId = sourceId },
+                transaction: tx, cancellationToken: ct)).ConfigureAwait(false);
+            var bomId = !string.IsNullOrEmpty(existingBomId) ? existingBomId : Guid.NewGuid().ToString();
             var bomName = $"MIG-BOM-{GetStr(details[0], "RT_PUM")}";
 
             await Db.ExecuteAsync(new CommandDefinition(headerSql, new
@@ -1170,17 +1182,27 @@ public sealed class MdbMigrationService
                 TenantId = tenantId,
                 ProductItemId = productItemId,
                 BomName = bomName.Length > 100 ? bomName[..100] : bomName,
+                SourceId = sourceId,
                 Now = now
             }, transaction: tx, cancellationToken: ct)).ConfigureAwait(false);
+
+            // 재마이그 덮어쓰기: 기존 자식 라인 삭제 (FK 보존).
+            if (!string.IsNullOrEmpty(existingBomId))
+            {
+                await Db.ExecuteAsync(new CommandDefinition(
+                    "DELETE FROM bom_items WHERE bom_id = @BomId",
+                    new { BomId = bomId }, transaction: tx, cancellationToken: ct)).ConfigureAwait(false);
+            }
 
             // 자재 상세 INSERT
             foreach (var detail in details)
             {
                 var materialKey = BuildItemKey(GetStr(detail, "RT_RPUM"), GetStr(detail, "RT_RKU"));
+                // 진범 #78 옵션 H-1 봉합 (2026-05-24): 자재별 MIG-AUTO-ITEM 자동 등록 (BOM bom_items 100% 정합).
                 if (!itemMap.TryGetValue(materialKey, out var materialItemId))
                 {
-                    _logger.LogWarning("[MDB마이그레이션] BOM 자재 매핑 실패: {Key}", materialKey);
-                    continue;
+                    materialItemId = await EnsureMigAutoItemAsync(tenantId, materialKey, now, tx, ct).ConfigureAwait(false);
+                    fallbackMaterial++;
                 }
 
                 await Db.ExecuteAsync(new CommandDefinition(itemSql, new
@@ -1199,7 +1221,7 @@ public sealed class MdbMigrationService
             headerCount++;
         }
 
-        _logger.LogInformation("[MDB마이그레이션] BOM {Count}건 이관 완료", headerCount);
+        _logger.LogInformation("[MDB마이그레이션] BOM {Count}건 이관 완료 (#78 봉합 fallback 완성품={FbProd} 자재={FbMat})", headerCount, fallbackProduct, fallbackMaterial);
         return headerCount;
     }
 
@@ -1652,6 +1674,42 @@ public sealed class MdbMigrationService
             new { Id = id, TenantId = tenantId, Code = itemCode, Now = now },
             transaction: tx, cancellationToken: ct)).ConfigureAwait(false);
         _logger.LogInformation("[MDB마이그레이션] LEGACY_UNKNOWN_ITEM fallback 품목 생성: {Id}", id);
+        return id;
+    }
+
+    /// <summary>
+    /// 진범 #78 옵션 H-1 봉합 (2026-05-24 사장님 결재):
+    /// BOM 완제품·자재 매핑 실패 시 완제품별로 별도 MIG-AUTO-ITEM-{hash} 자동 등록.
+    /// LEGACY_UNKNOWN_ITEM 단일 fallback과 달리 각 BOM마다 독립 product_item_id → BOM 100% 정합 보장.
+    /// item_code prefix: "MIG-AUTO-" → 사장님 ERP UI에서 식별 + 1클릭 정리 가능.
+    /// </summary>
+    private async Task<string> EnsureMigAutoItemAsync(string tenantId, string legacyKey, DateTime now, IDbTransaction tx, CancellationToken ct)
+    {
+        // item_code varchar(30) — "MIG-AUTO-" 9자 + hash 8자 = 17자 안전.
+        var keyHash = ComputeSourceHash($"mig-auto:{legacyKey}").Substring(0, 12);
+        var itemCode = $"MIG-AUTO-{keyHash}";
+        var existing = await Db.ExecuteScalarAsync<string?>(new CommandDefinition(
+            "SELECT item_id FROM items WHERE tenant_id = @TenantId AND item_code = @Code LIMIT 1",
+            new { TenantId = tenantId, Code = itemCode }, transaction: tx, cancellationToken: ct)).ConfigureAwait(false);
+        if (!string.IsNullOrEmpty(existing)) return existing;
+
+        var id = Guid.NewGuid().ToString();
+        var itemName = legacyKey.Length > 50 ? legacyKey[..50] : legacyKey;
+        await Db.ExecuteAsync(new CommandDefinition("""
+            INSERT INTO items
+              (item_id, tenant_id, item_code, item_name, item_type, unit,
+               tax_type, is_active, is_deleted, memo,
+               purchase_price, sale_price, standard_price, safety_stock,
+               created_at, updated_at, row_version)
+            VALUES
+              (@Id, @TenantId, @Code, @Name, 'product', 'EA',
+               'taxable', 1, 0, '진범 #78 옵션 H-1 봉합 — BOM 완제품·자재 자동 등록. 사장님 검토 후 정리.',
+               0, 0, 0, 0,
+               @Now, @Now, 0)
+            """,
+            new { Id = id, TenantId = tenantId, Code = itemCode, Name = itemName, Now = now },
+            transaction: tx, cancellationToken: ct)).ConfigureAwait(false);
+        _logger.LogWarning("[#78 H-1] MIG-AUTO-ITEM 자동 등록: code={Code} name={Name}", itemCode, itemName);
         return id;
     }
 
@@ -2840,10 +2898,12 @@ public sealed class MdbMigrationService
                 var ku = GetStr(r, "IU_KU");
                 // 진범 #46 봉합 (2026-05-20): BuildItemKey 헬퍼 적용 (Trim + 빈 spec 처리).
                 var key = BuildItemKey(pum, ku);
-                if (!itemMap.TryGetValue(key, out var itemId) || string.IsNullOrWhiteSpace(itemId))
+                string? itemId;
+                if (!itemMap.TryGetValue(key, out itemId) || string.IsNullOrWhiteSpace(itemId))
                 {
+                    // 진범 #80 봉합 (2026-05-21 사장님 결재): fallback item 사용 (헌법 #20 워크플로우 끊김 0).
+                    itemId = await EnsureLegacyFallbackItemAsync(tenantId, now, tx, ct).ConfigureAwait(false);
                     skipItem++;
-                    continue;
                 }
                 var qty = GetDec(r, "IU_QTY");
                 var dan = GetDec(r, "IU_DAN");
@@ -2953,10 +3013,12 @@ public sealed class MdbMigrationService
                 var ku = GetStr(r, "IO_KU");
                 // 진범 #46 봉합 (2026-05-20): BuildItemKey 헬퍼 적용.
                 var key = BuildItemKey(pum, ku);
-                if (!itemMap.TryGetValue(key, out var itemId) || string.IsNullOrWhiteSpace(itemId))
+                string? itemId;
+                if (!itemMap.TryGetValue(key, out itemId) || string.IsNullOrWhiteSpace(itemId))
                 {
+                    // 진범 #81 봉합 (2026-05-21 사장님 결재): fallback item 사용 (헌법 #20).
+                    itemId = await EnsureLegacyFallbackItemAsync(tenantId, now, tx, ct).ConfigureAwait(false);
                     skipItem++;
-                    continue;
                 }
                 var qty = GetDec(r, "IO_QTY");
                 var dan = GetDec(r, "IO_DAN");
@@ -3006,6 +3068,16 @@ public sealed class MdbMigrationService
         var dt = ReadMdbTable(oleConn, "SELECT * FROM DOCF4 ORDER BY TX_IO, TX_NO");
         if (dt.Rows.Count == 0) return 0;
 
+        // C-2 봉합 (2026-05-21, 사장님 결재): 본 테이블 source_id → invoice_id 사전 로딩.
+        // C안 UPSERT FK 사고: Guid.NewGuid() 새 PK → tax_invoice_items FK fail.
+        // 해결: 기존 source_id 매칭 시 PK 재사용 → UPSERT 같은 PK 매칭 → 자식 FK 보존.
+        var existingInvoiceMap = (await Db.QueryAsync<(string SourceId, string InvoiceId)>(
+            new CommandDefinition(
+                "SELECT source_id, invoice_id FROM tax_invoices WHERE tenant_id = @T AND source_id IS NOT NULL",
+                new { T = tenantId }, transaction: tx, cancellationToken: ct)).ConfigureAwait(false))
+            .ToDictionary(x => x.SourceId, x => x.InvoiceId);
+        _logger.LogInformation("[#C-2 봉합] tax_invoices 사전 PK 매핑 로딩: {Count}건", existingInvoiceMap.Count);
+
         // 1단계: in-memory row 변환 (header + items 동시 빌드)
         var headerRows = new List<TaxInvoiceHeaderRow>(dt.Rows.Count);
         var itemRows = new List<TaxInvoiceItemRow>(dt.Rows.Count * 2);
@@ -3033,19 +3105,27 @@ public sealed class MdbMigrationService
                 vat += GetDec(r, $"TX_VAT{i}");
             }
 
-            // 진범 #71 옵션 2-B 봉합 (2026-05-20, 사장님 결재):
-            // 기존 source_id = mig-{io}-{txNo} — DOCF4 원본에서 같은 (io, txNo) 조합 row 652쌍 중복 staging.
-            // TX_SEQ 컬럼으로 세분화 + TX_PDT 발행일 백업키 추가로 절대 유일성 보장.
+            // 진범 #71 옵션 A 봉합 (2026-05-21, 사장님 결재):
+            // 18차 진단: staging 자기중복 invoice_no=1,304건 (DOCFT 원본 TX_NO 중복).
+            // 본 테이블 uk_tax_invoices_invoice_no UNIQUE에서 652건 silent IGNORE 손실.
+            // invoice_no를 {txNo}-{txSeq}-{txPdt} suffix로 유일화 — 의미 보존 + 마이그 분리.
+            // 진범 #71 옵션 F 봉합 (2026-05-21, 사장님 결재): TX_REM hash 8자 추가 suffix (잔존 21쌍 자기중복 박멸).
             var txSeqRaw = GetInt(r, "TX_SEQ");
             var sourceIdSeq = txSeqRaw == 0 ? "0" : txSeqRaw.ToString();
-            var sourceId = $"mig-{(string.IsNullOrEmpty(io) ? "_" : io)}-{txNo}-{sourceIdSeq}-{issueDateStr}";
-            var invoiceId = Guid.NewGuid().ToString();
+            var txRem = GetStr(r, "TX_REM") ?? string.Empty;
+            var txRemHash = ComputeSourceHash($"tx_rem:{txRem}").Substring(0, 8);
+            var sourceId = $"mig-{(string.IsNullOrEmpty(io) ? "_" : io)}-{txNo}-{sourceIdSeq}-{issueDateStr}-{txRemHash}";
+            var invoiceNoUnique = $"{txNo}-{sourceIdSeq}-{(string.IsNullOrEmpty(issueDateStr) ? "0" : issueDateStr)}-{txRemHash}";
+            // C-2 봉합: 기존 PK 재사용
+            var invoiceId = existingInvoiceMap.TryGetValue(sourceId, out var existingInvId)
+                ? existingInvId
+                : Guid.NewGuid().ToString();
 
             headerRows.Add(new TaxInvoiceHeaderRow
             {
                 InvoiceId = invoiceId,
                 TenantId = tenantId,
-                InvoiceNo = txNo,
+                InvoiceNo = invoiceNoUnique,
                 IssuedAt = invoiceDate,
                 IssuedBy = tenantId,
                 AmountTotal = supply,
@@ -3331,8 +3411,9 @@ public sealed class MdbMigrationService
                 }
             }
 
+            // C안 UPSERT 봉합 (2026-05-21, 사장님 결재)
             var headerInsertSql = $"""
-                INSERT IGNORE INTO tax_invoices
+                INSERT INTO tax_invoices
                   (invoice_id, tenant_id, invoice_no, issued_at, issued_by,
                    amount_total, vat_total, status,
                    direction, tax_no, issue_date_yyyymmdd, partner_code, seq_no,
@@ -3349,6 +3430,19 @@ public sealed class MdbMigrationService
                    source_type, source_id, migrated_source_hash,
                    created_at, updated_at
                 FROM `{headerStage}`
+                ON DUPLICATE KEY UPDATE
+                  issued_at = VALUES(issued_at), issued_by = VALUES(issued_by),
+                  amount_total = VALUES(amount_total), vat_total = VALUES(vat_total),
+                  status = VALUES(status),
+                  direction = VALUES(direction), tax_no = VALUES(tax_no),
+                  issue_date_yyyymmdd = VALUES(issue_date_yyyymmdd),
+                  partner_code = VALUES(partner_code), seq_no = VALUES(seq_no),
+                  sent_at_yyyymmdd = VALUES(sent_at_yyyymmdd),
+                  read_at_yyyymmdd = VALUES(read_at_yyyymmdd),
+                  reported_at_yyyymmdd = VALUES(reported_at_yyyymmdd),
+                  remark1 = VALUES(remark1), remark2 = VALUES(remark2),
+                  migrated_source_hash = VALUES(migrated_source_hash),
+                  updated_at = VALUES(updated_at)
                 """;
             int headerInserted;
             using (var insertCmd = new MySqlCommand(headerInsertSql, conn, tx))
@@ -3357,7 +3451,29 @@ public sealed class MdbMigrationService
                 headerInserted = await insertCmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
             }
 
-            // ── 6) items staging → tax_invoice_items INSERT IGNORE SELECT ──
+            // C-3 봉합 (2026-05-21, 사장님 결재): items의 invoice_id를 본 테이블 매칭된 invoice_id로 재매핑.
+            // 자기중복 42쌍 + UPSERT 매칭 후 staging의 invoice_id가 본 테이블 PK와 다를 수 있음 → FK fail.
+            // staging 안에서 invoice_no(header staging) 기준 본 테이블 invoice_id로 UPDATE.
+            var reMapItemSql = $"""
+                UPDATE `{itemStage}` s
+                INNER JOIN `{headerStage}` hs ON s.invoice_id = hs.invoice_id
+                INNER JOIN tax_invoices t ON t.tenant_id = hs.tenant_id AND t.invoice_no = hs.invoice_no
+                SET s.invoice_id = t.invoice_id
+                """;
+            int reMapped = 0;
+            try
+            {
+                using var reMapCmd = new MySqlCommand(reMapItemSql, conn, tx);
+                reMapCmd.CommandTimeout = 86400;
+                reMapped = await reMapCmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
+                _logger.LogWarning("[C-3 봉합] tax_invoice_items invoice_id 재매핑: {Rows}행", reMapped);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "[C-3 봉합] tax_invoice_items 재매핑 실패 — INSERT IGNORE 폴백");
+            }
+
+            // ── 6) items staging → tax_invoice_items UPSERT (C-5 폴백: INSERT IGNORE) ──
             var itemInsertSql = $"""
                 INSERT IGNORE INTO tax_invoice_items
                   (tax_invoice_item_id, invoice_id, tenant_id, line_no,
@@ -3552,15 +3668,23 @@ public sealed class MdbMigrationService
         Dictionary<int, string> partnerMap,
         IDbTransaction tx, CancellationToken ct)
     {
+        // 진범 #82 봉합 (2026-05-21): source_id 멱등 키 + C안 UPSERT (사장님 결재) — 재마이그 정확 반영
         const string sql = """
             INSERT INTO bills
               (bill_id, tenant_id, bill_type, bill_no, bank_name, issue_place,
                partner_id, partner_name_legacy,
-               issue_date, maturity_date, amount, status, remark, legacy_source, created_at, updated_at)
+               issue_date, maturity_date, amount, status, remark, legacy_source, source_id, created_at, updated_at)
             VALUES
               (@Id, @TenantId, @Type, @No, @Bank, @IssuePlace,
                @PartnerId, @PartnerNameLegacy,
-               @IssueDate, @MaturityDate, @Amount, @Status, @Remark, @Source, @Now, @Now)
+               @IssueDate, @MaturityDate, @Amount, @Status, @Remark, @Source, @SourceId, @Now, @Now)
+            ON DUPLICATE KEY UPDATE
+              bill_type = VALUES(bill_type), bill_no = VALUES(bill_no),
+              bank_name = VALUES(bank_name), issue_place = VALUES(issue_place),
+              partner_name_legacy = VALUES(partner_name_legacy),
+              issue_date = VALUES(issue_date), maturity_date = VALUES(maturity_date),
+              amount = VALUES(amount), status = VALUES(status), remark = VALUES(remark),
+              updated_at = VALUES(updated_at)
             """;
 
         int count = 0;
@@ -3588,7 +3712,9 @@ public sealed class MdbMigrationService
                 IssueDate = ParseLegacyDate(GetStr(r, "EU_BDT")) ?? now,
                 MaturityDate = ParseLegacyDate(GetStr(r, "EU_MDT")),
                 Amount = amt, Status = "issued",
-                Remark = GetStr(r, "EU_REM"), Source = "DOCF9", Now = now
+                Remark = GetStr(r, "EU_REM"), Source = "DOCF9",
+                SourceId = $"DOCF9-{no}-{billType}",
+                Now = now
             }, transaction: tx, cancellationToken: ct)).ConfigureAwait(false);
             count++;
         }
@@ -3615,7 +3741,9 @@ public sealed class MdbMigrationService
                 IssueDate = ParseLegacyDate(GetStr(r, "EQ_BDT")) ?? now,
                 MaturityDate = ParseLegacyDate(GetStr(r, "EQ_MDT")),
                 Amount = amt, Status = "paid",
-                Remark = GetStr(r, "EQ_REM"), Source = "DOCFQ", Now = now
+                Remark = GetStr(r, "EQ_REM"), Source = "DOCFQ",
+                SourceId = $"DOCFQ-{no}-{billType}",
+                Now = now
             }, transaction: tx, cancellationToken: ct)).ConfigureAwait(false);
             count++;
         }
@@ -3641,15 +3769,22 @@ public sealed class MdbMigrationService
         var dt = ReadMdbTable(oleConn, "SELECT * FROM DOCCD ORDER BY CD_CDNO");
         if (dt.Rows.Count == 0) return 0;
 
+        // 진범 #82 봉합 (2026-05-21): source_id 멱등 키 + C안 UPSERT (사장님 결재)
         const string headSql = """
             INSERT INTO card_payments
               (card_payment_id, tenant_id, card_no, card_company, holder_name,
                payment_date, total_amount, installment_amount, installment_months,
-               status, remark, legacy_source, created_at, updated_at)
+               status, remark, legacy_source, source_id, created_at, updated_at)
             VALUES
               (@Id, @TenantId, @CardNo, @CardCompany, @HolderName,
                @PayDate, @TotalAmount, @InstallmentAmount, @InstallmentMonths,
-               @Status, @Remark, 'DOCCD', @Now, @Now)
+               @Status, @Remark, 'DOCCD', @SourceId, @Now, @Now)
+            ON DUPLICATE KEY UPDATE
+              card_no = VALUES(card_no), card_company = VALUES(card_company),
+              holder_name = VALUES(holder_name), payment_date = VALUES(payment_date),
+              total_amount = VALUES(total_amount), installment_amount = VALUES(installment_amount),
+              installment_months = VALUES(installment_months), status = VALUES(status),
+              remark = VALUES(remark), updated_at = VALUES(updated_at)
             """;
         const string lineSql = """
             INSERT INTO card_payment_lines
@@ -3678,7 +3813,11 @@ public sealed class MdbMigrationService
             var cdNo = GetStr(r, "CD_CDNO");
             if (string.IsNullOrWhiteSpace(cdNo)) continue;
             var amt = GetDec(r, "CD_MAMT");
-            if (amt <= 0) continue;
+            // 진범 #87 봉합 (2026-05-21 사장님 결재): 0원·음수 스킵 폐기 (헌법 #15 catch swallow 정합).
+            if (amt < 0) {
+                _logger.LogWarning("[#87 봉합] CD_CDNO={CdNo} CD_MAMT={Amt} 음수 → 절대값 적재", cdNo, amt);
+                amt = Math.Abs(amt);
+            }
 
             var headerId = Guid.NewGuid().ToString();
             var hal = GetDec(r, "CD_HAL");          // 할부원금 추정
@@ -3689,13 +3828,17 @@ public sealed class MdbMigrationService
                 if (months < 0 || months > 36) months = 0;
             }
 
+            // 진범 #91 봉합 (2026-05-24 사장님 결재): CD_CDNO 자기중복 21종 → SourceId에 CD_DT + amt + rowIdx 추가 (잔존 29건 회복).
+            var cdDt = GetStr(r, "CD_DT") ?? string.Empty;
             await Db.ExecuteAsync(new CommandDefinition(headSql, new
             {
                 Id = headerId, TenantId = tenantId,
                 CardNo = cdNo, CardCompany = GetStr(r, "CD_BANK"), HolderName = GetStr(r, "CD_NAME"),
                 PayDate = ParseLegacyDate(GetStr(r, "CD_DT")) ?? now,
                 TotalAmount = amt, InstallmentAmount = hal, InstallmentMonths = months,
-                Status = "settled", Remark = GetStr(r, "CD_MREM"), Now = now
+                Status = "settled", Remark = GetStr(r, "CD_MREM"),
+                SourceId = $"DOCCD-{cdNo}-{cdDt}-{amt:0}-{headCount + 1:D3}",
+                Now = now
             }, transaction: tx, cancellationToken: ct)).ConfigureAwait(false);
             headCount++;
 
@@ -3993,6 +4136,23 @@ public sealed class MdbMigrationService
         var dt = ReadMdbTable(oleConn, "SELECT * FROM DOCFB ORDER BY IJ_DT, IJ_IO, IJ_SEQ, IJ_BUY, IJ_SUN");
         if (dt.Rows.Count == 0) return (0, 0);
 
+        // C-2 봉합 (2026-05-21, 사장님 결재): 본 테이블에서 source_id → PK 사전 로딩.
+        // C안 UPSERT FK 사고 박제: Guid.NewGuid()로 새 PK 만들면 자식 FK 깨짐.
+        // 해결: 기존 source_id가 본 테이블에 있으면 그 PK 재사용 → UPSERT 시 같은 PK로 매칭 → 자식 FK 보존.
+        var existingDeliveryMap = (await Db.QueryAsync<(string SourceId, string DeliveryId)>(
+            new CommandDefinition(
+                "SELECT source_id, delivery_id FROM sales_deliveries WHERE tenant_id = @T AND source_type = 'migration' AND source_id IS NOT NULL",
+                new { T = tenantId }, transaction: tx, cancellationToken: ct)).ConfigureAwait(false))
+            .ToDictionary(x => x.SourceId, x => x.DeliveryId);
+        var existingReceiptMap = (await Db.QueryAsync<(string SourceId, string ReceiptId)>(
+            new CommandDefinition(
+                "SELECT source_id, receipt_id FROM purchase_receipts WHERE tenant_id = @T AND source_type = 'migration' AND source_id IS NOT NULL",
+                new { T = tenantId }, transaction: tx, cancellationToken: ct)).ConfigureAwait(false))
+            .ToDictionary(x => x.SourceId, x => x.ReceiptId);
+        _logger.LogInformation(
+            "[#C-2 봉합] DOCFB 사전 PK 매핑 로딩: sales_deliveries={SD}, purchase_receipts={PR}",
+            existingDeliveryMap.Count, existingReceiptMap.Count);
+
         var salesHeaders = new List<DeliveryHeaderRow>();
         var salesItems = new List<DeliveryItemRow>();
         var purchaseHeaders = new List<ReceiptHeaderRow>();
@@ -4046,7 +4206,12 @@ public sealed class MdbMigrationService
             }
 
             var sourceId = $"mig-docfb-{dtStr}-{io}-{seq}-{buyCode}";
-            var headerId = Guid.NewGuid().ToString();
+            // C-2 봉합: 기존 PK 재사용 (sales=io1, purchase=io2)
+            string headerId;
+            if (io == 1)
+                headerId = existingDeliveryMap.TryGetValue(sourceId, out var ed) ? ed : Guid.NewGuid().ToString();
+            else
+                headerId = existingReceiptMap.TryGetValue(sourceId, out var er) ? er : Guid.NewGuid().ToString();
             var first = g.First();
             var taxNo = GetInt(first, "IJ_TAXNO");
             var memo = GetStr(first, "IJ_REM");
@@ -4254,8 +4419,9 @@ public sealed class MdbMigrationService
             _logger.LogInformation("[MDB마이그레이션] sales_deliveries 진범 #21 진단: staging {S}행 / DISTINCT source_id={D}행 (중복={Dup}건)",
                 headers.Count, distinctSourceId, headers.Count - distinctSourceId);
 
+            // C안 UPSERT 봉합 (2026-05-21, 사장님 결재): 재마이그 시 봉합 데이터 반영 + 신규 데이터 보존
             var headerInsertSql = $"""
-                INSERT IGNORE INTO sales_deliveries
+                INSERT INTO sales_deliveries
                   (delivery_id, tenant_id, delivery_no, partner_id, delivery_date,
                    source_type, status, total_amount, vat_amount, memo,
                    created_at, updated_at, is_deleted,
@@ -4266,12 +4432,37 @@ public sealed class MdbMigrationService
                    created_at, updated_at, is_deleted,
                    source_id, legacy_tax_no, legacy_buy_code, migrated_source_hash
                 FROM `{headerStage}`
+                ON DUPLICATE KEY UPDATE
+                  partner_id = VALUES(partner_id), delivery_date = VALUES(delivery_date),
+                  status = VALUES(status), total_amount = VALUES(total_amount),
+                  vat_amount = VALUES(vat_amount), memo = VALUES(memo),
+                  updated_at = VALUES(updated_at),
+                  legacy_tax_no = VALUES(legacy_tax_no), legacy_buy_code = VALUES(legacy_buy_code),
+                  migrated_source_hash = VALUES(migrated_source_hash)
                 """;
             int insertedHeaders = 0;
             using (var cmd = new MySqlCommand(headerInsertSql, conn, tx))
             { cmd.CommandTimeout = 86400; insertedHeaders = await cmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false); }
             _logger.LogInformation("[MDB마이그레이션] sales_deliveries INSERT IGNORE 결과: {Ins}행 / staging {Stg}행 (손실 {Loss}건)",
                 insertedHeaders, headers.Count, headers.Count - insertedHeaders);
+
+            // C-3 봉합: items의 delivery_id를 본 테이블 매칭된 delivery_id로 재매핑 (source_id 기준)
+            try
+            {
+                using var reMapCmd = new MySqlCommand($"""
+                    UPDATE `{itemStage}` s
+                    INNER JOIN `{headerStage}` hs ON s.delivery_id = hs.delivery_id
+                    INNER JOIN sales_deliveries t ON t.tenant_id = hs.tenant_id AND t.source_id = hs.source_id
+                    SET s.delivery_id = t.delivery_id
+                    """, conn, tx);
+                reMapCmd.CommandTimeout = 86400;
+                var rm = await reMapCmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
+                _logger.LogWarning("[C-3 봉합] sales_delivery_items delivery_id 재매핑: {Rows}행", rm);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "[C-3 봉합] sales_delivery_items 재매핑 실패 — INSERT IGNORE 폴백");
+            }
 
             var itemInsertSql = $"""
                 INSERT IGNORE INTO sales_delivery_items
@@ -4358,8 +4549,9 @@ public sealed class MdbMigrationService
             _logger.LogInformation("[MDB마이그레이션] purchase_receipts 진범 #21 진단: staging {S}행 / DISTINCT source_id={D}행 (중복={Dup}건)",
                 headers.Count, distinctSourceId, headers.Count - distinctSourceId);
 
+            // C안 UPSERT 봉합 (2026-05-21, 사장님 결재)
             var headerInsertSql = $"""
-                INSERT IGNORE INTO purchase_receipts
+                INSERT INTO purchase_receipts
                   (receipt_id, tenant_id, receipt_no, partner_id, receipt_date,
                    source_type, status, total_amount, vat_amount, memo,
                    created_at,
@@ -4370,12 +4562,36 @@ public sealed class MdbMigrationService
                    created_at,
                    source_id, legacy_tax_no, legacy_buy_code, migrated_source_hash
                 FROM `{headerStage}`
+                ON DUPLICATE KEY UPDATE
+                  partner_id = VALUES(partner_id), receipt_date = VALUES(receipt_date),
+                  status = VALUES(status), total_amount = VALUES(total_amount),
+                  vat_amount = VALUES(vat_amount), memo = VALUES(memo),
+                  legacy_tax_no = VALUES(legacy_tax_no), legacy_buy_code = VALUES(legacy_buy_code),
+                  migrated_source_hash = VALUES(migrated_source_hash)
                 """;
             int insertedHeaders = 0;
             using (var cmd = new MySqlCommand(headerInsertSql, conn, tx))
             { cmd.CommandTimeout = 86400; insertedHeaders = await cmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false); }
             _logger.LogInformation("[MDB마이그레이션] purchase_receipts INSERT IGNORE 결과: {Ins}행 / staging {Stg}행 (손실 {Loss}건)",
                 insertedHeaders, headers.Count, headers.Count - insertedHeaders);
+
+            // C-3 봉합: items의 receipt_id를 본 테이블 매칭된 receipt_id로 재매핑
+            try
+            {
+                using var reMapCmd = new MySqlCommand($"""
+                    UPDATE `{itemStage}` s
+                    INNER JOIN `{headerStage}` hs ON s.receipt_id = hs.receipt_id
+                    INNER JOIN purchase_receipts t ON t.tenant_id = hs.tenant_id AND t.source_id = hs.source_id
+                    SET s.receipt_id = t.receipt_id
+                    """, conn, tx);
+                reMapCmd.CommandTimeout = 86400;
+                var rm = await reMapCmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
+                _logger.LogWarning("[C-3 봉합] purchase_receipt_items receipt_id 재매핑: {Rows}행", rm);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "[C-3 봉합] purchase_receipt_items 재매핑 실패 — INSERT IGNORE 폴백");
+            }
 
             var itemInsertSql = $"""
                 INSERT IGNORE INTO purchase_receipt_items
@@ -4894,26 +5110,122 @@ public sealed class MdbMigrationService
             _logger.LogInformation("[MDB마이그레이션] journal_entries BulkCopy: {Rows}행 warnings={W} {Ms}ms",
                 er.RowsInserted, er.Warnings.Count, sw.ElapsedMilliseconds);
 
-            var lineDt = BuildJournalLineDataTable(lines);
-            // 봉합 2026-05-18 진범 #17: ConflictOption.Ignore = staging UNIQUE 충돌 무시.
-            // 5/18 마이그 #4 결과: "27661 copied but only 23994 inserted" 예외로 트랜잭션 ROLLBACK.
-            // = source_id 멱등 키 중복 3,667행을 정상 IGNORE해야 하나 MySqlBulkCopy가 예외 throw.
-            var lineBulk = new MySqlBulkCopy(conn, tx)
+            // 진범 #70 옵션 A 봉합 (2026-05-21, 18차 진단 결과):
+            // 진단 로그: uq_source_collision=23994/staging_total=23994 → 원본 lines에 source_id 중복.
+            // BuildJournalLineDataTable 직전에 lines를 source_id DISTINCT 처리 + 손실 카운트 로깅.
+            // 기존 BulkCopy ConflictOption.Ignore는 silent IGNORE로 3,667건 손실 (정체 안 노출).
+            var linesBeforeDistinct = lines.Count;
+            lines = lines
+                .GroupBy(l => $"{l.TenantId}|{l.SourceId}")
+                .Select(g => g.First())
+                .ToList();
+            var linesAfterDistinct = lines.Count;
+            if (linesBeforeDistinct != linesAfterDistinct)
             {
-                DestinationTableName = lineStage,
-                BulkCopyTimeout = 86400,
-                ConflictOption = MySqlBulkLoaderConflictOption.Ignore,
-            };
-            var lineCols = new[]
+                _logger.LogWarning(
+                    "[#70 봉합] journal_lines source_id 중복 사전 제거: {Before} → {After} (제거 {Diff}건)",
+                    linesBeforeDistinct, linesAfterDistinct, linesBeforeDistinct - linesAfterDistinct);
+            }
+            // 진범 #70 옵션 D 봉합 (2026-05-21, 21차 결과):
+            // 21차도 IGNORE 3,667 동일 → TEMPORARY 테이블은 information_schema에 안 노출 (MariaDB 한계).
+            // 옵션 D: SHOW CREATE TABLE로 staging 정의 직접 조회 + UNIQUE/CONSTRAINT 정규식 파싱 + DROP.
+            string? stageCreate = null;
+            try
             {
-                "entry_id", "tenant_id", "account_code", "debit_amount", "credit_amount",
-                "partner_id", "memo", "source_id", "created_at",
-            };
-            for (int i = 0; i < lineCols.Length; i++)
-                lineBulk.ColumnMappings.Add(new MySqlBulkCopyColumnMapping(i, lineCols[i]));
-            var lr = await lineBulk.WriteToServerAsync(lineDt, ct).ConfigureAwait(false);
-            _logger.LogInformation("[MDB마이그레이션] journal_lines BulkCopy: {Rows}행 warnings={W} {Ms}ms",
-                lr.RowsInserted, lr.Warnings.Count, sw.ElapsedMilliseconds);
+                using var showCmd = new MySqlCommand($"SHOW CREATE TABLE `{lineStage}`", conn, tx);
+                showCmd.CommandTimeout = 30;
+                using var rd = await showCmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
+                if (await rd.ReadAsync(ct).ConfigureAwait(false))
+                    stageCreate = rd.GetString(1);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "[#70 옵션D] SHOW CREATE TABLE {Stage} 실패", lineStage);
+            }
+            _logger.LogWarning("[#70 옵션D] staging {Stage} 정의:\n{Create}", lineStage, stageCreate ?? "<null>");
+
+            if (!string.IsNullOrEmpty(stageCreate))
+            {
+                var uniqueRegex = new System.Text.RegularExpressions.Regex(@"UNIQUE KEY `([^`]+)`", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+                foreach (System.Text.RegularExpressions.Match m in uniqueRegex.Matches(stageCreate))
+                {
+                    var idxName = m.Groups[1].Value;
+                    try
+                    {
+                        using var dropC = new MySqlCommand($"ALTER TABLE `{lineStage}` DROP INDEX `{idxName}`", conn, tx);
+                        dropC.CommandTimeout = 30;
+                        await dropC.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
+                        _logger.LogWarning("[#70 옵션D] staging {Stage} UNIQUE {Idx} DROP 성공", lineStage, idxName);
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogWarning(ex, "[#70 옵션D] staging {Stage} UNIQUE {Idx} DROP 실패", lineStage, idxName);
+                    }
+                }
+                var fkRegex = new System.Text.RegularExpressions.Regex(@"CONSTRAINT `([^`]+)` FOREIGN KEY", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+                foreach (System.Text.RegularExpressions.Match m in fkRegex.Matches(stageCreate))
+                {
+                    var fkName = m.Groups[1].Value;
+                    try
+                    {
+                        using var dropC = new MySqlCommand($"ALTER TABLE `{lineStage}` DROP FOREIGN KEY `{fkName}`", conn, tx);
+                        dropC.CommandTimeout = 30;
+                        await dropC.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
+                        _logger.LogWarning("[#70 옵션D] staging {Stage} FK {Fk} DROP 성공", lineStage, fkName);
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogWarning(ex, "[#70 옵션D] staging {Stage} FK {Fk} DROP 실패", lineStage, fkName);
+                    }
+                }
+            }
+
+            int lineInsertSuccess = 0, lineInsertSkip = 0, lineInsertFail = 0;
+            var rowInsertSql = $"INSERT IGNORE INTO `{lineStage}` (entry_id, tenant_id, account_code, debit_amount, credit_amount, partner_id, memo, source_id, created_at) VALUES (@eid, @tid, @acc, @dr, @cr, @pid, @memo, @sid, @now)";
+            using (var rowCmd = new MySqlCommand(rowInsertSql, conn, tx))
+            {
+                rowCmd.CommandTimeout = 86400;
+                rowCmd.Parameters.Add("@eid", MySqlConnector.MySqlDbType.VarChar, 36);
+                rowCmd.Parameters.Add("@tid", MySqlConnector.MySqlDbType.VarChar, 36);
+                rowCmd.Parameters.Add("@acc", MySqlConnector.MySqlDbType.VarChar, 10);
+                rowCmd.Parameters.Add("@dr", MySqlConnector.MySqlDbType.Decimal);
+                rowCmd.Parameters.Add("@cr", MySqlConnector.MySqlDbType.Decimal);
+                rowCmd.Parameters.Add("@pid", MySqlConnector.MySqlDbType.VarChar, 36);
+                rowCmd.Parameters.Add("@memo", MySqlConnector.MySqlDbType.VarChar, 200);
+                rowCmd.Parameters.Add("@sid", MySqlConnector.MySqlDbType.VarChar, 80);
+                rowCmd.Parameters.Add("@now", MySqlConnector.MySqlDbType.DateTime);
+                await rowCmd.PrepareAsync(ct).ConfigureAwait(false);
+
+                foreach (var l in lines)
+                {
+                    rowCmd.Parameters["@eid"].Value = l.EntryId;
+                    rowCmd.Parameters["@tid"].Value = l.TenantId;
+                    rowCmd.Parameters["@acc"].Value = l.AccountCode;
+                    rowCmd.Parameters["@dr"].Value = l.DebitAmount;
+                    rowCmd.Parameters["@cr"].Value = l.CreditAmount;
+                    rowCmd.Parameters["@pid"].Value = (object?)l.PartnerId ?? DBNull.Value;
+                    rowCmd.Parameters["@memo"].Value = (object?)l.Memo ?? DBNull.Value;
+                    rowCmd.Parameters["@sid"].Value = l.SourceId;
+                    rowCmd.Parameters["@now"].Value = l.Now;
+                    try
+                    {
+                        var rc = await rowCmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
+                        if (rc == 1) lineInsertSuccess++;
+                        else lineInsertSkip++;
+                    }
+                    catch (MySqlConnector.MySqlException ex)
+                    {
+                        lineInsertFail++;
+                        if (lineInsertFail <= 10)
+                            _logger.LogWarning(ex, "[#70 봉합] journal_lines row INSERT 실패 #{N}: source_id={SourceId}, account={Acc}, dr={Dr}, cr={Cr}",
+                                lineInsertFail, l.SourceId, l.AccountCode, l.DebitAmount, l.CreditAmount);
+                    }
+                }
+            }
+            _logger.LogInformation(
+                "[MDB마이그레이션] journal_lines row-by-row INSERT: 입력 {Total}행 → 성공 {OK} / IGNORE {Skip} / 실패 {Fail}, {Ms}ms",
+                lines.Count, lineInsertSuccess, lineInsertSkip, lineInsertFail, sw.ElapsedMilliseconds);
+            // 형식 호환용 변수 (이후 코드에서 lr.RowsInserted 미참조 검증 완료)
 
             var entryInsertSql = $"""
                 INSERT IGNORE INTO journal_entries
@@ -5091,7 +5403,9 @@ public sealed class MdbMigrationService
         IDbTransaction tx, CancellationToken ct)
     {
         DataTable dt;
-        try { dt = ReadMdbTable(oleConn, "SELECT * FROM DOCNM ORDER BY nam_OWNER"); }
+        // 진범 #88 v2 봉합 (2026-05-24 사장님 결재): POTHER 실측 컬럼명 nam_* (소문자) 정합.
+        // 실제 컬럼: nam_OWNER, nam_name, nam_com, nam_tel, nam_hp, nam_EMAIL, nam_addr, nam_rem1
+        try { dt = ReadMdbTable(oleConn, "SELECT * FROM DOCNM"); }
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "[MDB마이그레이션] DOCNM 테이블 읽기 실패 — POTHER에 없음 가능, skip");
@@ -5115,16 +5429,18 @@ public sealed class MdbMigrationService
         foreach (DataRow row in dt.Rows)
         {
             rowIdx++;
-            var nmCode = GetStr(row, "NM_CODE");
-            var name = GetStr(row, "NM_NAME");
-            if (string.IsNullOrWhiteSpace(name)) continue;
+            // 진범 #88 v2 (2026-05-24): nam_name 우선, fallback nam_OWNER (둘 다 비면 "명함#{rowIdx}")
+            var name = GetStr(row, "nam_name");
+            if (string.IsNullOrWhiteSpace(name)) name = GetStr(row, "nam_OWNER");
+            if (string.IsNullOrWhiteSpace(name)) name = $"명함#{rowIdx}";
 
             // 회사명 일치하는 업체 매핑 시도 (있으면 FK 연결, 없어도 OK).
             // partnerMap은 int 키(buy_code) — 명함에는 buy_code 없으므로 NULL로 두고 회사명만 보존.
             string? partnerId = null;
 
-            var hp = GetStr(row, "NM_HP");
-            var email = GetStr(row, "NM_EMAIL");
+            var hp = GetStr(row, "nam_hp");
+            var email = GetStr(row, "nam_EMAIL");
+            var memo = $"{GetStr(row, "nam_rem1")} {GetStr(row, "nam_rem2")} {GetStr(row, "nam_rem3")}".Trim();
 
             await Db.ExecuteAsync(new CommandDefinition(sql, new
             {
@@ -5132,14 +5448,14 @@ public sealed class MdbMigrationService
                 TenantId = tenantId,
                 PartnerId = partnerId,
                 ContactName = name,
-                CompanyName = GetStr(row, "NM_COMPANY"),
-                Tel = GetStr(row, "NM_TEL"),
+                CompanyName = GetStr(row, "nam_com"),
+                Tel = GetStr(row, "nam_tel"),
                 Hp = string.IsNullOrEmpty(hp) ? null : _crypto.EncryptToBytes(hp),
                 Email = string.IsNullOrEmpty(email) ? null : _crypto.EncryptToBytes(email),
-                Address = GetStr(row, "NM_ADDR"),
-                Memo = GetStr(row, "NM_REM"),
+                Address = GetStr(row, "nam_addr"),
+                Memo = string.IsNullOrWhiteSpace(memo) ? null : memo,
                 Now = now,
-                MigratedSourceHash = ComputeSourceHash($"partner_contacts:{nmCode}:{name}:{rowIdx:D6}"),
+                MigratedSourceHash = ComputeSourceHash($"partner_contacts:{name}:{GetStr(row, "nam_com")}:{rowIdx:D6}"),
             }, transaction: tx, cancellationToken: ct)).ConfigureAwait(false);
 
             count++;
@@ -5160,7 +5476,8 @@ public sealed class MdbMigrationService
         IDbTransaction tx, CancellationToken ct)
     {
         DataTable dt;
-        try { dt = ReadMdbTable(oleConn, "SELECT * FROM DOCAS ORDER BY AS_DT, AS_TM"); }
+        // 진범 #89 v2 봉합 (2026-05-24 사장님 결재): POTHER 실측 컬럼 (AS_NO 없음, AS_DT+AS_TM+AS_BUY+AS_GU+AS_YO1+AS_CH1+AS_COST).
+        try { dt = ReadMdbTable(oleConn, "SELECT * FROM DOCAS"); }
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "[MDB마이그레이션] DOCAS 테이블 읽기 실패 — POTHER에 없음 가능, skip");
@@ -5180,19 +5497,22 @@ public sealed class MdbMigrationService
             """;
 
         int count = 0;
+        int rowIdx = 0;
         foreach (DataRow row in dt.Rows)
         {
-            var no = GetStr(row, "AS_NO");
-            if (string.IsNullOrWhiteSpace(no)) continue;
-
+            rowIdx++;
+            // 진범 #89 v2 (2026-05-24): AS_NO 없음 → rowIdx 기반 멱등 (행 위치 + AS_DT + AS_TM + AS_BUY)
             var dtStr = GetStr(row, "AS_DT");
+            var tmStr = GetStr(row, "AS_TM");
             var serviceDate = ParseLegacyDate(dtStr) ?? now;
 
             var buyCode = GetInt(row, "AS_BUY");
             partnerMap.TryGetValue(buyCode, out var partnerId);
-
-            // AS_ITEM은 품목 식별자(품명) — itemMap 키 형식 미상이므로 우선 NULL.
             string? itemId = null;
+
+            var problem = $"{GetStr(row, "AS_YO1")} {GetStr(row, "AS_YO2")}".Trim();
+            var fix = $"{GetStr(row, "AS_CH1")} {GetStr(row, "AS_CH2")}".Trim();
+            var memoStr = $"구분:{GetStr(row, "AS_GU")} 접수:{tmStr} 담당:{GetStr(row, "AS_CHDAM")}/{GetStr(row, "AS_JEBDAM")} 행구:{GetStr(row, "AS_HANGGU")} KKK:{GetStr(row, "AS_KKK")}".Trim();
 
             await Db.ExecuteAsync(new CommandDefinition(sql, new
             {
@@ -5201,12 +5521,12 @@ public sealed class MdbMigrationService
                 ServiceDate = serviceDate,
                 PartnerId = partnerId,
                 ItemId = itemId,
-                ProblemDesc = GetStr(row, "AS_PROBLEM"),
-                FixDesc = GetStr(row, "AS_FIX"),
-                Fee = GetDec(row, "AS_FEE"),
-                Memo = GetStr(row, "AS_REM"),
+                ProblemDesc = string.IsNullOrWhiteSpace(problem) ? null : problem,
+                FixDesc = string.IsNullOrWhiteSpace(fix) ? null : fix,
+                Fee = GetDec(row, "AS_COST"),
+                Memo = memoStr,
                 Now = now,
-                MigratedSourceHash = ComputeSourceHash($"service_tickets:{no}:{dtStr}:{buyCode}"),
+                MigratedSourceHash = ComputeSourceHash($"service_tickets:{dtStr}:{tmStr}:{buyCode}:{rowIdx:D6}"),
             }, transaction: tx, cancellationToken: ct)).ConfigureAwait(false);
 
             count++;
