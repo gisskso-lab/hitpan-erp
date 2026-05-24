@@ -53,6 +53,8 @@ builder.Services.AddScoped<BackupService>();
 builder.Services.AddScoped<LogService>();
 builder.Services.AddScoped<BillsCardsBankService>();
 builder.Services.AddScoped<EmailClientService>();
+// 작B v3.0 (2026-05-26): 전자세금계산서 인증서 등록 (방식 A 다이렉트)
+builder.Services.AddScoped<TaxInvoiceCertClientService>();
 builder.Services.AddScoped<LeaveRequestService>();
 builder.Services.AddScoped<AccountService>();
 builder.Services.AddScoped<DocumentService>();

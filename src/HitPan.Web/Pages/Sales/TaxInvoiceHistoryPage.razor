@@ -1,0 +1,162 @@
+@page "/sales/tax-invoice-history"
+@namespace HitPan.Web.Pages.SalesUi
+@attribute [Authorize]
+@inject ISnackbar Snackbar
+
+<PageTitle>전자세금계산서 발행 이력</PageTitle>
+
+<PageHeader Title="전자세금계산서 발행 이력" Subtitle="다이렉트 발행·반송·취소·수정 통합 이력 (방식 A 정합)">
+    <Actions>
+        <MudButton Variant="Variant.Outlined" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Refresh"
+                   OnClick="RefreshAsync" Disabled="@_busy">새로고침</MudButton>
+    </Actions>
+</PageHeader>
+
+<MudGrid Spacing="2" Class="mb-3">
+    <MudItem xs="6" md="3">
+        <MudPaper Class="pa-3" Elevation="1">
+            <MudText Typo="Typo.caption">정상 발행</MudText>
+            <MudText Typo="Typo.h5" Color="Color.Success">@_stats.Issued</MudText>
+        </MudPaper>
+    </MudItem>
+    <MudItem xs="6" md="3">
+        <MudPaper Class="pa-3" Elevation="1">
+            <MudText Typo="Typo.caption">반송</MudText>
+            <MudText Typo="Typo.h5" Color="Color.Warning">@_stats.Bounced</MudText>
+        </MudPaper>
+    </MudItem>
+    <MudItem xs="6" md="3">
+        <MudPaper Class="pa-3" Elevation="1">
+            <MudText Typo="Typo.caption">취소</MudText>
+            <MudText Typo="Typo.h5" Color="Color.Error">@_stats.Cancelled</MudText>
+        </MudPaper>
+    </MudItem>
+    <MudItem xs="6" md="3">
+        <MudPaper Class="pa-3" Elevation="1">
+            <MudText Typo="Typo.caption">대기·점검</MudText>
+            <MudText Typo="Typo.h5" Color="Color.Info">@_stats.Pending</MudText>
+        </MudPaper>
+    </MudItem>
+</MudGrid>
+
+<SectionCard Title="발행 이력">
+    <MudTable Items="@_items" Hover="true" Dense="true" Loading="@_busy" Striped="true">
+        <HeaderContent>
+            <MudTh>발행일</MudTh>
+            <MudTh>승인번호</MudTh>
+            <MudTh>공급자</MudTh>
+            <MudTh>공급받는자</MudTh>
+            <MudTh Style="text-align:right">금액</MudTh>
+            <MudTh>상태</MudTh>
+            <MudTh>관리</MudTh>
+        </HeaderContent>
+        <RowTemplate>
+            <MudTd>@context.IssuedAt.ToString("yyyy-MM-dd HH:mm")</MudTd>
+            <MudTd Style="font-family: monospace; font-size: 12px;">@context.ApprovalNumber</MudTd>
+            <MudTd>@context.SupplierName</MudTd>
+            <MudTd>@context.ReceiverName</MudTd>
+            <MudTd Style="text-align:right">@context.TotalAmount.ToString("N0")원</MudTd>
+            <MudTd>
+                <MudChip T="string" Size="Size.Small" Color="@GetStatusColor(context.Status)">
+                    @GetStatusName(context.Status)
+                </MudChip>
+            </MudTd>
+            <MudTd>
+                @if (context.Status == "Issued" || context.Status == "Approved")
+                {
+                    <MudButton Size="Size.Small" Variant="Variant.Text" Color="Color.Error"
+                               OnClick="@(() => OnCancelClick(context))">취소</MudButton>
+                }
+                @if (context.Status == "Bounced")
+                {
+                    <MudButton Size="Size.Small" Variant="Variant.Text" Color="Color.Warning"
+                               OnClick="@(() => OnResendClick(context))">재발행</MudButton>
+                }
+                <MudButton Size="Size.Small" Variant="Variant.Text"
+                           OnClick="@(() => OnViewDetail(context))">상세</MudButton>
+            </MudTd>
+        </RowTemplate>
+        <NoRecordsContent>
+            <MudText Typo="Typo.body2" Class="pa-4 text-center">발행 이력이 없습니다.</MudText>
+        </NoRecordsContent>
+    </MudTable>
+</SectionCard>
+
+@code {
+    private List<HistoryItemDto> _items = new();
+    private HistoryStatsDto _stats = new();
+    private bool _busy;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await RefreshAsync();
+    }
+
+    private async Task RefreshAsync()
+    {
+        _busy = true;
+        try
+        {
+            // TODO (W3 가도): /api/sales/tax-invoices/history 엔드포인트 연결
+            // 현재는 UI 골격만 박제 — 6/8 사장님 첫 실발급 가도 직후 API 연결
+            await Task.Delay(100);
+            _items = new();
+            _stats = new();
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private void OnCancelClick(HistoryItemDto item)
+    {
+        Snackbar.Add($"취소 요청: {item.ApprovalNumber} (W3 가도 시 백엔드 연결)", Severity.Info);
+    }
+
+    private void OnResendClick(HistoryItemDto item)
+    {
+        Snackbar.Add($"재발행 요청: {item.ApprovalNumber} (W3 가도 시 백엔드 연결)", Severity.Info);
+    }
+
+    private void OnViewDetail(HistoryItemDto item)
+    {
+        Snackbar.Add($"상세: {item.ApprovalNumber} (W3 가도 시 다이얼로그 연결)", Severity.Info);
+    }
+
+    private Color GetStatusColor(string status) => status switch
+    {
+        "Issued" => Color.Success,
+        "Approved" => Color.Success,
+        "Bounced" => Color.Warning,
+        "Cancelled" => Color.Error,
+        "Pending" => Color.Info,
+        _ => Color.Default
+    };
+
+    private string GetStatusName(string status) => status switch
+    {
+        "Issued" => "발행됨",
+        "Approved" => "승인됨",
+        "Bounced" => "반송",
+        "Cancelled" => "취소",
+        "Pending" => "대기",
+        _ => status
+    };
+
+    public record HistoryItemDto(
+        DateTime IssuedAt,
+        string ApprovalNumber,
+        string SupplierName,
+        string ReceiverName,
+        decimal TotalAmount,
+        string Status);
+
+    public record HistoryStatsDto
+    {
+        public int Issued { get; init; }
+        public int Bounced { get; init; }
+        public int Cancelled { get; init; }
+        public int Pending { get; init; }
+    }
+}

@@ -100,6 +100,33 @@ builder.Services.AddScoped<IBillsCardsBankService, BillsCardsBankService>();
 builder.Services.AddScoped<IPasswordEncryptor, PasswordEncryptorAdapter>();
 builder.Services.AddScoped<IPdfRenderService, PdfRenderService>();
 builder.Services.AddScoped<IEmailService, EmailService>();
+// 작B v3.0 (2026-05-26): 전자세금계산서 방식 A 다이렉트 — 사장님 결재 5/25 22:00 + 23:00
+// 헌법 #22 (본사 데이터 0) + #23 (5중 검증) + #25 (3대 원칙) + 보안 매니저 1·2 + Red Team 본질 진단
+builder.Services.AddSingleton<HitPan.Application.Services.Security.ITpmKeyService,
+    HitPan.Application.Services.Security.TpmKeyService>();
+builder.Services.AddScoped<HitPan.Application.Services.Security.IDoubleEncryptionService,
+    HitPan.Application.Services.Security.DoubleEncryptionService>();
+builder.Services.AddSingleton<HitPan.Application.Services.Security.ICertStorageService,
+    HitPan.Application.Services.Security.CertStorageService>();
+// W2 본질 보강 (Red Team 1순위): 원격제어 감지
+builder.Services.AddSingleton<HitPan.Application.Services.Security.IRemoteControlDetector,
+    HitPan.Application.Services.Security.RemoteControlDetector>();
+// W2 본질 보강 (보안 매니저 2 권고): 메모리 보호 + 워치독 22 시나리오
+builder.Services.AddSingleton<HitPan.Application.Services.Security.ISecureMemoryService,
+    HitPan.Application.Services.Security.SecureMemoryService>();
+builder.Services.AddScoped<HitPan.Application.Services.Security.ICertIntegrityWatchdog,
+    HitPan.Application.Services.Security.CertIntegrityWatchdog>();
+builder.Services.AddScoped<HitPan.Application.Services.TaxInvoice.ITaxInvoiceXmlBuilder,
+    HitPan.Application.Services.TaxInvoice.TaxInvoiceXmlBuilder>();
+var hometaxOptions = builder.Configuration.GetSection("Hometax")
+    .Get<HitPan.Application.Services.TaxInvoice.HometaxOptions>()
+    ?? new HitPan.Application.Services.TaxInvoice.HometaxOptions();
+builder.Services.AddSingleton(hometaxOptions);
+builder.Services.AddHttpClient<HitPan.Application.Services.TaxInvoice.ITaxInvoiceProvider,
+    HitPan.Application.Services.TaxInvoice.DirectHometaxProvider>(client =>
+{
+    client.Timeout = TimeSpan.FromSeconds(hometaxOptions.TimeoutSeconds);
+});
 builder.Services.AddScoped<ILeaveRequestService, LeaveRequestService>();
 builder.Services.AddScoped<IReportService, ReportService>();
 builder.Services.AddScoped<IApprovalService, ApprovalService>();

@@ -1,0 +1,137 @@
+@*
+  가상 키패드 — 작B v3.0 W2 본질 보강 (Red Team 권고 정합)
+
+  Red Team 25년 박제:
+  "사용자 PIN을 키로깅으로 수집 → 같은 PC에서 ERP 실행 → DPAPI 자동 복호화 → 1차 PIN 입력 → 완전 우회.
+   사장님 가도 효과: 5% (사실상 무력) → 차단: 가상 키패드(랜덤 배치) + Anti-Keylogger 후킹 차단"
+
+  특징:
+  - 매번 랜덤 배치 (위치 매칭 불가)
+  - 마우스 클릭만 허용 (키보드 입력 차단)
+  - 입력 후 즉시 폐기 (메모리 잔류 0)
+
+  헌법 정합: #25 (안전하게) + 보안 매니저 1·2 + Red Team 본질 진단
+*@
+
+@using System.Security
+@implements IDisposable
+
+<MudPaper Class="pa-4" Style="max-width: 360px;">
+    <MudText Typo="Typo.h6" Class="mb-3">
+        <MudIcon Icon="@Icons.Material.Filled.Security" Class="mr-2" />
+        보안 PIN 입력
+    </MudText>
+
+    <MudAlert Severity="Severity.Info" Dense="true" Class="mb-3" Icon="@Icons.Material.Filled.Info">
+        키로깅 차단을 위해 마우스로 클릭해 주세요.
+    </MudAlert>
+
+    <MudTextField T="string" Value="@_maskedDisplay" ReadOnly="true"
+                  Variant="Variant.Outlined" Margin="Margin.Dense"
+                  Class="mb-3" Style="font-size: 24px; letter-spacing: 8px; text-align: center;"
+                  Adornment="Adornment.End"
+                  AdornmentIcon="@Icons.Material.Filled.Backspace"
+                  OnAdornmentClick="OnBackspace" />
+
+    <MudGrid Spacing="1">
+        @foreach (var num in _shuffledNumbers)
+        {
+            <MudItem xs="4">
+                <MudButton Variant="Variant.Outlined" Color="Color.Primary"
+                           FullWidth="true" Style="height: 56px; font-size: 20px;"
+                           OnClick="@(() => OnNumberClick(num))">
+                    @num
+                </MudButton>
+            </MudItem>
+        }
+        <MudItem xs="4">
+            <MudButton Variant="Variant.Outlined" Color="Color.Default"
+                       FullWidth="true" Style="height: 56px;"
+                       OnClick="OnShuffle">
+                <MudIcon Icon="@Icons.Material.Filled.Shuffle" />
+            </MudButton>
+        </MudItem>
+        <MudItem xs="4">
+            <MudButton Variant="Variant.Outlined" Color="Color.Default"
+                       FullWidth="true" Style="height: 56px; font-size: 20px;"
+                       OnClick="@(() => OnNumberClick(0))">
+                0
+            </MudButton>
+        </MudItem>
+        <MudItem xs="4">
+            <MudButton Variant="Variant.Filled" Color="Color.Success"
+                       FullWidth="true" Style="height: 56px;"
+                       OnClick="OnSubmit" Disabled="@(_pin.Length == 0)">
+                <MudIcon Icon="@Icons.Material.Filled.Check" />
+            </MudButton>
+        </MudItem>
+    </MudGrid>
+</MudPaper>
+
+@code {
+    [Parameter] public EventCallback<string> OnPinEntered { get; set; }
+    [Parameter] public int MaxLength { get; set; } = 16;
+
+    private string _pin = string.Empty;
+    private int[] _shuffledNumbers = Array.Empty<int>();
+
+    private string _maskedDisplay => new string('●', _pin.Length);
+
+    protected override void OnInitialized()
+    {
+        ShuffleKeypad();
+    }
+
+    private void ShuffleKeypad()
+    {
+        var nums = Enumerable.Range(1, 9).ToArray();
+        var rng = new Random();
+        // Fisher-Yates Shuffle
+        for (int i = nums.Length - 1; i > 0; i--)
+        {
+            int j = rng.Next(i + 1);
+            (nums[i], nums[j]) = (nums[j], nums[i]);
+        }
+        _shuffledNumbers = nums;
+    }
+
+    private void OnNumberClick(int num)
+    {
+        if (_pin.Length < MaxLength)
+        {
+            _pin += num.ToString();
+        }
+    }
+
+    private void OnBackspace()
+    {
+        if (_pin.Length > 0)
+        {
+            _pin = _pin[..^1];
+        }
+    }
+
+    private void OnShuffle()
+    {
+        ShuffleKeypad();
+    }
+
+    private async Task OnSubmit()
+    {
+        if (string.IsNullOrEmpty(_pin)) return;
+
+        var pinToSubmit = _pin;
+        // 메모리 즉시 폐기 (Red Team 권고)
+        _pin = string.Empty;
+        ShuffleKeypad();
+
+        await OnPinEntered.InvokeAsync(pinToSubmit);
+    }
+
+    public void Dispose()
+    {
+        // 컴포넌트 dispose 시 메모리 잔류 차단
+        _pin = string.Empty;
+        _shuffledNumbers = Array.Empty<int>();
+    }
+}

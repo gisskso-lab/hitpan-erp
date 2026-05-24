@@ -4,9 +4,7 @@
     <ProjectReference Include="..\HitPan.Domain\HitPan.Domain.csproj" />
     <ProjectReference Include="..\HitPan.Contracts\HitPan.Contracts.csproj" />
     <!-- 축 6-4 (2026-05-14): 헌법 #15·#16 자동 검출 Roslyn Analyzer. -->
-    <ProjectReference Include="..\HitPan.Analyzers\HitPan.Analyzers.csproj"
-                      OutputItemType="Analyzer"
-                      ReferenceOutputAssembly="false" />
+    <ProjectReference Include="..\HitPan.Analyzers\HitPan.Analyzers.csproj" OutputItemType="Analyzer" ReferenceOutputAssembly="false" />
   </ItemGroup>
 
   <ItemGroup>
@@ -20,6 +18,8 @@
     <PackageReference Include="QuestPDF" Version="2026.2.4" />
     <PackageReference Include="System.IdentityModel.Tokens.Jwt" Version="[8.0.0,9.0.0)" />
     <PackageReference Include="Microsoft.IdentityModel.Tokens" Version="[8.0.0,9.0.0)" />
+    <PackageReference Include="System.Security.Cryptography.ProtectedData" Version="8.0.0" />
+    <PackageReference Include="System.Security.Cryptography.Xml" Version="9.0.8" />
   </ItemGroup>
 
   <PropertyGroup>
