@@ -248,6 +248,191 @@ public sealed class UnifiedCalendarController : ControllerBase
         });
     }
 
+    // ====================================================================
+    // schedules CRUD (사장님 결재 2026-05-26 가도 — 통합 캘린더 보강)
+    // §#2 tenant_id JWT 클레임 전용 / §#13 DESCRIBE 정합 / §#15 빈 catch 금지 / §#22 본사 0
+    // ====================================================================
+
+    /// <summary>일정 생성.</summary>
+    [HttpPost("schedules")]
+    public async Task<IActionResult> CreateSchedule([FromBody] ScheduleUpsertDto dto, CancellationToken ct)
+    {
+        var tenantId = HttpContext.Items["TenantId"]?.ToString();
+        if (string.IsNullOrEmpty(tenantId)) return Forbid();
+        if (dto is null || string.IsNullOrWhiteSpace(dto.Title)) return BadRequest(new { message = "title is required" });
+        if (dto.StartAt == default) return BadRequest(new { message = "startAt is required" });
+
+        var userId = HttpContext.Items["UserId"]?.ToString();
+        var id = Guid.NewGuid().ToString();
+
+        const string sql = @"
+            INSERT INTO schedules
+              (schedule_id, tenant_id, title, schedule_type, start_at, end_at,
+               partner_id, partner_name, participant_id, participant_name,
+               memo, is_completed, created_at, created_by, updated_at, updated_by)
+            VALUES
+              (@Id, @TenantId, @Title, @Type, @StartAt, @EndAt,
+               @PartnerId, @PartnerName, @ParticipantId, @ParticipantName,
+               @Memo, 0, NOW(6), @UserId, NOW(6), @UserId);";
+
+        try
+        {
+            await using var db = new MySqlConnection(_connStr);
+            await db.OpenAsync(ct).ConfigureAwait(false);
+            await db.ExecuteAsync(new CommandDefinition(sql, new
+            {
+                Id = id,
+                TenantId = tenantId,
+                Title = dto.Title!.Trim(),
+                Type = string.IsNullOrWhiteSpace(dto.ScheduleType) ? "issue" : dto.ScheduleType,
+                StartAt = dto.StartAt,
+                EndAt = dto.EndAt,
+                PartnerId = string.IsNullOrWhiteSpace(dto.PartnerId) ? null : dto.PartnerId,
+                PartnerName = string.IsNullOrWhiteSpace(dto.PartnerName) ? null : dto.PartnerName,
+                ParticipantId = string.IsNullOrWhiteSpace(dto.ParticipantId) ? null : dto.ParticipantId,
+                ParticipantName = string.IsNullOrWhiteSpace(dto.ParticipantName) ? null : dto.ParticipantName,
+                Memo = string.IsNullOrWhiteSpace(dto.Memo) ? null : dto.Memo,
+                UserId = userId
+            }, cancellationToken: ct)).ConfigureAwait(false);
+
+            return Ok(new { scheduleId = id });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "[UnifiedCalendar.CreateSchedule] 생성 실패 tenant={TenantId}", tenantId);
+            return StatusCode(500, new { message = "일정 생성에 실패했습니다." });
+        }
+    }
+
+    /// <summary>일정 수정.</summary>
+    [HttpPut("schedules/{id}")]
+    public async Task<IActionResult> UpdateSchedule(string id, [FromBody] ScheduleUpsertDto dto, CancellationToken ct)
+    {
+        var tenantId = HttpContext.Items["TenantId"]?.ToString();
+        if (string.IsNullOrEmpty(tenantId)) return Forbid();
+        if (string.IsNullOrWhiteSpace(id)) return BadRequest(new { message = "id is required" });
+        if (dto is null || string.IsNullOrWhiteSpace(dto.Title)) return BadRequest(new { message = "title is required" });
+
+        var userId = HttpContext.Items["UserId"]?.ToString();
+
+        const string sql = @"
+            UPDATE schedules
+            SET title=@Title, schedule_type=@Type, start_at=@StartAt, end_at=@EndAt,
+                partner_id=@PartnerId, partner_name=@PartnerName,
+                participant_id=@ParticipantId, participant_name=@ParticipantName,
+                memo=@Memo, updated_at=NOW(6), updated_by=@UserId
+            WHERE schedule_id=@Id AND tenant_id=@TenantId;";
+
+        try
+        {
+            await using var db = new MySqlConnection(_connStr);
+            await db.OpenAsync(ct).ConfigureAwait(false);
+            var affected = await db.ExecuteAsync(new CommandDefinition(sql, new
+            {
+                Id = id,
+                TenantId = tenantId,
+                Title = dto.Title!.Trim(),
+                Type = string.IsNullOrWhiteSpace(dto.ScheduleType) ? "issue" : dto.ScheduleType,
+                StartAt = dto.StartAt,
+                EndAt = dto.EndAt,
+                PartnerId = string.IsNullOrWhiteSpace(dto.PartnerId) ? null : dto.PartnerId,
+                PartnerName = string.IsNullOrWhiteSpace(dto.PartnerName) ? null : dto.PartnerName,
+                ParticipantId = string.IsNullOrWhiteSpace(dto.ParticipantId) ? null : dto.ParticipantId,
+                ParticipantName = string.IsNullOrWhiteSpace(dto.ParticipantName) ? null : dto.ParticipantName,
+                Memo = string.IsNullOrWhiteSpace(dto.Memo) ? null : dto.Memo,
+                UserId = userId
+            }, cancellationToken: ct)).ConfigureAwait(false);
+
+            if (affected == 0) return NotFound(new { message = "일정을 찾을 수 없습니다." });
+            return Ok(new { scheduleId = id });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "[UnifiedCalendar.UpdateSchedule] 수정 실패 tenant={TenantId} id={Id}", tenantId, id);
+            return StatusCode(500, new { message = "일정 수정에 실패했습니다." });
+        }
+    }
+
+    /// <summary>일정 삭제.</summary>
+    [HttpDelete("schedules/{id}")]
+    public async Task<IActionResult> DeleteSchedule(string id, CancellationToken ct)
+    {
+        var tenantId = HttpContext.Items["TenantId"]?.ToString();
+        if (string.IsNullOrEmpty(tenantId)) return Forbid();
+        if (string.IsNullOrWhiteSpace(id)) return BadRequest(new { message = "id is required" });
+
+        const string sql = @"DELETE FROM schedules WHERE schedule_id=@Id AND tenant_id=@TenantId;";
+
+        try
+        {
+            await using var db = new MySqlConnection(_connStr);
+            await db.OpenAsync(ct).ConfigureAwait(false);
+            var affected = await db.ExecuteAsync(new CommandDefinition(sql,
+                new { Id = id, TenantId = tenantId }, cancellationToken: ct)).ConfigureAwait(false);
+
+            if (affected == 0) return NotFound(new { message = "일정을 찾을 수 없습니다." });
+            return Ok(new { scheduleId = id });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "[UnifiedCalendar.DeleteSchedule] 삭제 실패 tenant={TenantId} id={Id}", tenantId, id);
+            return StatusCode(500, new { message = "일정 삭제에 실패했습니다." });
+        }
+    }
+
+    /// <summary>완료 토글.</summary>
+    [HttpPatch("schedules/{id}/complete")]
+    public async Task<IActionResult> ToggleComplete(string id, [FromBody] ToggleCompleteDto? body, CancellationToken ct)
+    {
+        var tenantId = HttpContext.Items["TenantId"]?.ToString();
+        if (string.IsNullOrEmpty(tenantId)) return Forbid();
+        if (string.IsNullOrWhiteSpace(id)) return BadRequest(new { message = "id is required" });
+
+        var userId = HttpContext.Items["UserId"]?.ToString();
+
+        // body 미지정 시 토글, 지정 시 강제 설정.
+        string sql = body is null
+            ? @"UPDATE schedules SET is_completed = 1 - is_completed, updated_at=NOW(6), updated_by=@UserId
+                WHERE schedule_id=@Id AND tenant_id=@TenantId;"
+            : @"UPDATE schedules SET is_completed=@Value, updated_at=NOW(6), updated_by=@UserId
+                WHERE schedule_id=@Id AND tenant_id=@TenantId;";
+
+        try
+        {
+            await using var db = new MySqlConnection(_connStr);
+            await db.OpenAsync(ct).ConfigureAwait(false);
+            var affected = await db.ExecuteAsync(new CommandDefinition(sql,
+                new { Id = id, TenantId = tenantId, UserId = userId, Value = (body?.IsCompleted ?? false) ? 1 : 0 },
+                cancellationToken: ct)).ConfigureAwait(false);
+
+            if (affected == 0) return NotFound(new { message = "일정을 찾을 수 없습니다." });
+            return Ok(new { scheduleId = id });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "[UnifiedCalendar.ToggleComplete] 토글 실패 tenant={TenantId} id={Id}", tenantId, id);
+            return StatusCode(500, new { message = "완료 토글에 실패했습니다." });
+        }
+    }
+
+    public sealed class ScheduleUpsertDto
+    {
+        public string? Title { get; set; }
+        public string? ScheduleType { get; set; }
+        public DateTime StartAt { get; set; }
+        public DateTime? EndAt { get; set; }
+        public string? PartnerId { get; set; }
+        public string? PartnerName { get; set; }
+        public string? ParticipantId { get; set; }
+        public string? ParticipantName { get; set; }
+        public string? Memo { get; set; }
+    }
+
+    public sealed class ToggleCompleteDto
+    {
+        public bool IsCompleted { get; set; }
+    }
+
     private sealed class DayBuckets
     {
         public int Collection { get; set; }

@@ -92,3 +92,31 @@ public sealed class UnifiedDayDetailModel
         public bool IsCompleted { get; set; }
     }
 }
+
+/// <summary>일정 생성 모델 (사장님 결재 2026-05-26 가도).</summary>
+public sealed class CreateScheduleModel
+{
+    public string Title { get; set; } = string.Empty;
+    public string ScheduleType { get; set; } = "issue"; // meeting/todo/reminder/issue
+    public DateTime StartAt { get; set; }
+    public DateTime? EndAt { get; set; }
+    public string? PartnerId { get; set; }
+    public string? PartnerName { get; set; }
+    public string? ParticipantId { get; set; }
+    public string? ParticipantName { get; set; }
+    public string? Memo { get; set; }
+}
+
+/// <summary>일정 수정 모델 (사장님 결재 2026-05-26 가도).</summary>
+public sealed class UpdateScheduleModel
+{
+    public string Title { get; set; } = string.Empty;
+    public string ScheduleType { get; set; } = "issue";
+    public DateTime StartAt { get; set; }
+    public DateTime? EndAt { get; set; }
+    public string? PartnerId { get; set; }
+    public string? PartnerName { get; set; }
+    public string? ParticipantId { get; set; }
+    public string? ParticipantName { get; set; }
+    public string? Memo { get; set; }
+}

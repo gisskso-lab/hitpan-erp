@@ -123,9 +123,18 @@
    기존 LeaveCalendar는 롤백 영역으로 주석 보존. *@
 @*<LeaveCalendar />*@
 <UnifiedCalendar OnDayClicked="OnCalendarDayClicked" />
-<UnifiedDayDetailModal IsOpen="_modalOpen"
+<UnifiedDayDetailModal @ref="_dayDetailRef"
+                       IsOpen="_modalOpen"
                        SelectedDate="_modalDate"
-                       OnClosed="OnModalClosed" />
+                       OnClosed="OnModalClosed"
+                       OnAddRequested="OnAddSchedule"
+                       OnEditRequested="OnEditSchedule" />
+@* 5/26 가도: 일정 추가/수정 모달 (CRUD) *@
+<ScheduleEditModal IsOpen="_editOpen"
+                   SelectedDate="_editDate"
+                   EditTarget="_editTarget"
+                   OnClosed="OnEditClosed"
+                   OnSaved="OnEditSaved" />
 
 @* 사장님 결재 2026-05-26 ("모두갤재!!! 즉시 가도"): 9시 출근 첫 로그인 시 일일 브리핑 자동 팝업.
    하루 1번 (localStorage 날짜 키 hitpan_briefing_dismissed_YYYYMMDD).
@@ -142,6 +151,12 @@
     // 5/26 사장님 결재: 통합 캘린더 카드 모달 상태.
     private bool _modalOpen;
     private DateTime _modalDate;
+    private UnifiedDayDetailModal? _dayDetailRef;
+
+    // 5/26 가도: 일정 추가/수정 모달 상태.
+    private bool _editOpen;
+    private DateTime _editDate;
+    private UnifiedDayDetailModel.IssueItem? _editTarget;
 
     // 5/26 사장님 결재: 일일 브리핑 팝업 (9시 출근 첫 로그인 1회).
     private bool _briefingOpen;
@@ -155,6 +170,35 @@
     private void OnModalClosed()
     {
         _modalOpen = false;
+    }
+
+    private void OnAddSchedule(DateTime date)
+    {
+        _editDate = date;
+        _editTarget = null;
+        _editOpen = true;
+    }
+
+    private void OnEditSchedule(UnifiedDayDetailModel.IssueItem item)
+    {
+        _editDate = _modalDate;
+        _editTarget = item;
+        _editOpen = true;
+    }
+
+    private void OnEditClosed()
+    {
+        _editOpen = false;
+        _editTarget = null;
+    }
+
+    private async Task OnEditSaved()
+    {
+        // 카드 모달이 열려 있으면 데이터 재조회.
+        if (_dayDetailRef != null)
+        {
+            await _dayDetailRef.ReloadAsync();
+        }
     }
 
     private void OnBriefingClosed()

@@ -39,4 +39,98 @@ public sealed class UnifiedCalendarService(HttpClient http)
             return null;
         }
     }
+
+    // ─── 사장님 결재 2026-05-26 가도: schedules CRUD 4종 ───
+    // §#15 빈 catch 금지 / §#22 본사 0 (모두 고객 PC 로컬 호출)
+
+    /// <summary>일정 생성.</summary>
+    public async Task<string?> CreateScheduleAsync(CreateScheduleModel model, CancellationToken ct = default)
+    {
+        try
+        {
+            var res = await http.PostAsJsonAsync("api/dashboard/schedules", model, ct).ConfigureAwait(false);
+            if (!res.IsSuccessStatusCode)
+            {
+                Console.Error.WriteLine($"[UnifiedCalendarService.CreateScheduleAsync] HTTP {(int)res.StatusCode}");
+                return null;
+            }
+            var payload = await res.Content.ReadFromJsonAsync<ScheduleIdResponse>(cancellationToken: ct).ConfigureAwait(false);
+            return payload?.ScheduleId;
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine($"[UnifiedCalendarService.CreateScheduleAsync] {ex.GetType().Name}: {ex.Message}");
+            return null;
+        }
+    }
+
+    /// <summary>일정 수정.</summary>
+    public async Task<bool> UpdateScheduleAsync(string id, UpdateScheduleModel model, CancellationToken ct = default)
+    {
+        try
+        {
+            var res = await http.PutAsJsonAsync($"api/dashboard/schedules/{id}", model, ct).ConfigureAwait(false);
+            if (!res.IsSuccessStatusCode)
+            {
+                Console.Error.WriteLine($"[UnifiedCalendarService.UpdateScheduleAsync] HTTP {(int)res.StatusCode}");
+                return false;
+            }
+            return true;
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine($"[UnifiedCalendarService.UpdateScheduleAsync] {ex.GetType().Name}: {ex.Message}");
+            return false;
+        }
+    }
+
+    /// <summary>일정 삭제.</summary>
+    public async Task<bool> DeleteScheduleAsync(string id, CancellationToken ct = default)
+    {
+        try
+        {
+            var res = await http.DeleteAsync($"api/dashboard/schedules/{id}", ct).ConfigureAwait(false);
+            if (!res.IsSuccessStatusCode)
+            {
+                Console.Error.WriteLine($"[UnifiedCalendarService.DeleteScheduleAsync] HTTP {(int)res.StatusCode}");
+                return false;
+            }
+            return true;
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine($"[UnifiedCalendarService.DeleteScheduleAsync] {ex.GetType().Name}: {ex.Message}");
+            return false;
+        }
+    }
+
+    /// <summary>완료 토글. isCompleted=null이면 서버 토글, 값 지정 시 강제 설정.</summary>
+    public async Task<bool> ToggleCompleteAsync(string id, bool? isCompleted = null, CancellationToken ct = default)
+    {
+        try
+        {
+            var body = isCompleted.HasValue ? new { isCompleted = isCompleted.Value } : null;
+            var req = new HttpRequestMessage(HttpMethod.Patch, $"api/dashboard/schedules/{id}/complete")
+            {
+                Content = System.Net.Http.Json.JsonContent.Create(body)
+            };
+            var res = await http.SendAsync(req, ct).ConfigureAwait(false);
+            if (!res.IsSuccessStatusCode)
+            {
+                Console.Error.WriteLine($"[UnifiedCalendarService.ToggleCompleteAsync] HTTP {(int)res.StatusCode}");
+                return false;
+            }
+            return true;
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine($"[UnifiedCalendarService.ToggleCompleteAsync] {ex.GetType().Name}: {ex.Message}");
+            return false;
+        }
+    }
+
+    private sealed class ScheduleIdResponse
+    {
+        public string? ScheduleId { get; set; }
+    }
 }

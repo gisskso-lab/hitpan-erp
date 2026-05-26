@@ -8,6 +8,7 @@
 @using HitPan.Web.Services
 @inject UnifiedCalendarService UnifiedSvc
 @inject NavigationManager Nav
+@inject IJSRuntime JS
 
 @if (IsOpen)
 {
@@ -54,6 +55,7 @@
                                             </div>
                                         </div>
                                         <div class="hp-udm-row-action">
+                                            @* TODO: refDocId 기반 단건 라우팅은 별도 작지서. 현재는 목록 페이지로. *@
                                             <button class="hp-udm-btn" @onclick="() => GoDelivery(c.RefDocId)">거래명세서</button>
                                         </div>
                                     </li>
@@ -145,9 +147,11 @@
                                 {
                                     <li class="hp-udm-row">
                                         <div class="hp-udm-row-main">
-                                            <div class="hp-udm-row-title">
-                                                @(i.IsCompleted ? "✓ " : "")@i.Title
-                                            </div>
+                                            <label class="hp-udm-issue-title">
+                                                <input type="checkbox" checked="@i.IsCompleted"
+                                                       @onchange="() => ToggleIssueComplete(i)" />
+                                                <span class="@(i.IsCompleted ? "hp-udm-done" : "")">@i.Title</span>
+                                            </label>
                                             <div class="hp-udm-row-sub">
                                                 @i.StartAt.ToString("HH:mm")
                                                 @if (!string.IsNullOrEmpty(i.PartnerName)) { <span> · @i.PartnerName</span> }
@@ -155,7 +159,8 @@
                                             </div>
                                         </div>
                                         <div class="hp-udm-row-action">
-                                            <button class="hp-udm-btn">수정</button>
+                                            <button class="hp-udm-btn" @onclick="() => EditIssue(i)">수정</button>
+                                            <button class="hp-udm-btn hp-udm-btn-danger" @onclick="() => DeleteIssue(i)">삭제</button>
                                         </div>
                                     </li>
                                 }
@@ -231,6 +236,10 @@
         transition:all .15s;
     }
     .hp-udm-btn:hover { background:#F3F4F6; border-color:rgba(0,0,0,0.16); }
+    .hp-udm-btn-danger { color:#B91C1C; }
+    .hp-udm-btn-danger:hover { background:rgba(239,68,68,0.08); border-color:rgba(239,68,68,0.24); }
+    .hp-udm-issue-title { display:flex; align-items:center; gap:6px; font-size:14px; font-weight:600; color:#1F2937; cursor:pointer; }
+    .hp-udm-done { text-decoration:line-through; color:#9CA3AF; }
     .hp-udm-badge {
         display:inline-block; margin-left:6px; font-size:10px; padding:2px 6px;
         border-radius:6px; font-weight:600;
@@ -254,6 +263,8 @@
     [Parameter] public DateTime SelectedDate { get; set; }
     [Parameter] public EventCallback OnClosed { get; set; }
     [Parameter] public EventCallback<DateTime> OnAddRequested { get; set; }
+    // 사장님 결재 2026-05-26 가도: 이슈 수정 콜백 (수정 모달 부모 제어).
+    [Parameter] public EventCallback<UnifiedDayDetailModel.IssueItem> OnEditRequested { get; set; }
 
     private UnifiedDayDetailModel? _data;
     private bool _loading;
@@ -278,6 +289,52 @@
         StateHasChanged();
     }
 
+    /// <summary>외부(부모) 에서 저장/삭제 후 재조회 트리거.</summary>
+    public Task ReloadAsync() => LoadAsync();
+
+    private async Task ToggleIssueComplete(UnifiedDayDetailModel.IssueItem item)
+    {
+        if (string.IsNullOrEmpty(item.Id)) return;
+        // optimistic
+        item.IsCompleted = !item.IsCompleted;
+        StateHasChanged();
+        var ok = await UnifiedSvc.ToggleCompleteAsync(item.Id, item.IsCompleted);
+        if (!ok)
+        {
+            // rollback
+            item.IsCompleted = !item.IsCompleted;
+            StateHasChanged();
+        }
+    }
+
+    private async Task EditIssue(UnifiedDayDetailModel.IssueItem item)
+    {
+        if (OnEditRequested.HasDelegate) await OnEditRequested.InvokeAsync(item);
+    }
+
+    private async Task DeleteIssue(UnifiedDayDetailModel.IssueItem item)
+    {
+        if (string.IsNullOrEmpty(item.Id)) return;
+        try
+        {
+            var confirmed = await JS.InvokeAsync<bool>("confirm", "이 일정을 삭제하시겠습니까?");
+            if (!confirmed) return;
+        }
+        catch (Exception ex)
+        {
+            // §원칙 #15 — silent swallow 금지.
+            Console.Error.WriteLine($"[UnifiedDayDetailModal.DeleteIssue.confirm] {ex.GetType().Name}: {ex.Message}");
+            return;
+        }
+
+        var ok = await UnifiedSvc.DeleteScheduleAsync(item.Id);
+        if (ok)
+        {
+            _data?.Issues.Remove(item);
+            StateHasChanged();
+        }
+    }
+
     private async Task Close()
     {
         if (OnClosed.HasDelegate) await OnClosed.InvokeAsync();
@@ -298,15 +355,18 @@
 
     private void GoDelivery(string? refDocId)
     {
-        Nav.NavigateTo("/sales/deliveries");
+        // TODO(라우팅): refDocId 기반 단건 라우팅(/sales/deliveries/{id}) 미구현 — 목록으로.
+        Nav.NavigateTo("/deliveries");
     }
     private void GoPurchase()
     {
+        // TODO(라우팅): 매입 원장 단건 라우팅 미구현 — 매입 목록(/purchase)으로.
         Nav.NavigateTo("/purchase");
     }
     private void GoLeaveRequest()
     {
-        Nav.NavigateTo("/hr/leave-requests");
+        // 연차 신청서 — 실제 라우트 /hr/leave-request (단수형).
+        Nav.NavigateTo("/hr/leave-request");
     }
 
     private static string LeaveTypeLabel(string? type) => type switch
