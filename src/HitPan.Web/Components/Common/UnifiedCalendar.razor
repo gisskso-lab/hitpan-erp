@@ -1,0 +1,279 @@
+@*
+    UnifiedCalendar — 4축 통합 캘린더 (사장님 결재 2026-05-26)
+
+    4축: 수금 🟢 #10B981 / 입금 🟡 #F59E0B / 연차 🔵 #3B82F6 / 이슈 🟣 #A855F7
+    셀에 색깔 동그라미 (최대 4개), 클릭 시 OnDayClicked 이벤트 발사.
+    상단 4축 필터 토글, 이번달 4축 통계, 글래스모피즘 디자인.
+*@
+@using HitPan.Web.Models
+@using HitPan.Web.Services
+@inject UnifiedCalendarService UnifiedSvc
+
+<div class="hp-ucal-card">
+
+    @* 헤더: 제목 + 월 네비 *@
+    <div class="hp-ucal-header">
+        <div>
+            <h2 class="hp-ucal-title">@(_year)년 @(_month)월 통합 일정</h2>
+            <p class="hp-ucal-sub">
+                @if (_data is not null)
+                {
+                    <text>
+                        수금 <strong style="color:#10B981">@_data.Totals.Collection</strong> ·
+                        입금 <strong style="color:#F59E0B">@_data.Totals.Payment</strong> ·
+                        연차 <strong style="color:#3B82F6">@_data.Totals.Leave</strong> ·
+                        이슈 <strong style="color:#A855F7">@_data.Totals.Issue</strong>
+                    </text>
+                }
+                else if (_loading)
+                {
+                    <text>불러오는 중...</text>
+                }
+                else
+                {
+                    <text>이번달 일정이 없습니다 ☀️</text>
+                }
+            </p>
+        </div>
+        <div class="hp-ucal-nav">
+            <button class="hp-ucal-nav-btn" @onclick="PrevMonth" aria-label="이전 달">
+                <MudIcon Icon="@Icons.Material.Filled.ChevronLeft" Size="Size.Small" />
+            </button>
+            <button class="hp-ucal-nav-btn hp-ucal-nav-today" @onclick="GoToday">오늘</button>
+            <button class="hp-ucal-nav-btn" @onclick="NextMonth" aria-label="다음 달">
+                <MudIcon Icon="@Icons.Material.Filled.ChevronRight" Size="Size.Small" />
+            </button>
+        </div>
+    </div>
+
+    @* 필터 토글 4개 *@
+    <div class="hp-ucal-filters">
+        <button class="hp-ucal-filter @(_showCollection ? "active" : "")" style="--c:#10B981"
+                @onclick="() => Toggle(0)">
+            <span class="hp-ucal-dot" style="background:#10B981"></span>수금
+        </button>
+        <button class="hp-ucal-filter @(_showPayment ? "active" : "")" style="--c:#F59E0B"
+                @onclick="() => Toggle(1)">
+            <span class="hp-ucal-dot" style="background:#F59E0B"></span>입금
+        </button>
+        <button class="hp-ucal-filter @(_showLeave ? "active" : "")" style="--c:#3B82F6"
+                @onclick="() => Toggle(2)">
+            <span class="hp-ucal-dot" style="background:#3B82F6"></span>연차
+        </button>
+        <button class="hp-ucal-filter @(_showIssue ? "active" : "")" style="--c:#A855F7"
+                @onclick="() => Toggle(3)">
+            <span class="hp-ucal-dot" style="background:#A855F7"></span>이슈
+        </button>
+    </div>
+
+    @* 요일 헤더 *@
+    <div class="hp-ucal-weekdays">
+        <div class="hp-ucal-wd hp-ucal-wd-sun">일</div>
+        <div class="hp-ucal-wd">월</div>
+        <div class="hp-ucal-wd">화</div>
+        <div class="hp-ucal-wd">수</div>
+        <div class="hp-ucal-wd">목</div>
+        <div class="hp-ucal-wd">금</div>
+        <div class="hp-ucal-wd hp-ucal-wd-sat">토</div>
+    </div>
+
+    @if (_loading)
+    {
+        <div class="hp-ucal-empty">
+            <MudProgressCircular Color="Color.Primary" Indeterminate="true" Size="Size.Small" />
+            <span style="margin-left:8px;color:var(--hp-text-tertiary)">불러오는 중...</span>
+        </div>
+    }
+    else
+    {
+        var firstDay = new DateTime(_year, _month, 1);
+        var leadingBlanks = (int)firstDay.DayOfWeek;
+        var dayCount = _data?.DayCount ?? DateTime.DaysInMonth(_year, _month);
+        var byDay = _data?.Days.ToDictionary(d => d.Day) ?? new Dictionary<int, UnifiedCalendarDay>();
+
+        <div class="hp-ucal-grid">
+            @for (int i = 0; i < leadingBlanks; i++)
+            {
+                <div class="hp-ucal-cell hp-ucal-blank"></div>
+            }
+
+            @for (int d = 1; d <= dayCount; d++)
+            {
+                var dayNum = d;
+                var date = new DateTime(_year, _month, dayNum);
+                var dow = (int)date.DayOfWeek;
+                var isToday = date.Date == DateTime.Today;
+                var cellCls = "hp-ucal-cell"
+                    + (dow == 0 ? " hp-ucal-sun" : "")
+                    + (dow == 6 ? " hp-ucal-sat" : "")
+                    + (isToday ? " hp-ucal-today" : "");
+                byDay.TryGetValue(dayNum, out var info);
+
+                <div class="@cellCls" @onclick="() => OnCellClicked(date)">
+                    <div class="hp-ucal-day-num">@dayNum</div>
+                    @if (info is not null)
+                    {
+                        <div class="hp-ucal-dots">
+                            @if (_showCollection && info.Collection > 0)
+                            {
+                                <span class="hp-ucal-cdot" style="background:#10B981" title="@($"수금 {info.Collection}건")">
+                                    @if (info.Collection > 1) { <small>@info.Collection</small> }
+                                </span>
+                            }
+                            @if (_showPayment && info.Payment > 0)
+                            {
+                                <span class="hp-ucal-cdot" style="background:#F59E0B" title="@($"입금 {info.Payment}건")">
+                                    @if (info.Payment > 1) { <small>@info.Payment</small> }
+                                </span>
+                            }
+                            @if (_showLeave && info.Leave > 0)
+                            {
+                                <span class="hp-ucal-cdot" style="background:#3B82F6" title="@($"연차 {info.Leave}건")">
+                                    @if (info.Leave > 1) { <small>@info.Leave</small> }
+                                </span>
+                            }
+                            @if (_showIssue && info.Issue > 0)
+                            {
+                                <span class="hp-ucal-cdot" style="background:#A855F7" title="@($"이슈 {info.Issue}건")">
+                                    @if (info.Issue > 1) { <small>@info.Issue</small> }
+                                </span>
+                            }
+                        </div>
+                    }
+                </div>
+            }
+
+            @{
+                var totalCells = leadingBlanks + dayCount;
+                var trailingBlanks = (7 - (totalCells % 7)) % 7;
+            }
+
+            @for (int i = 0; i < trailingBlanks; i++)
+            {
+                <div class="hp-ucal-cell hp-ucal-blank"></div>
+            }
+        </div>
+    }
+</div>
+
+<style>
+    /* 글래스모피즘 — 사장님 결재 2026-05-26 */
+    .hp-ucal-card {
+        background: rgba(255,255,255,0.72);
+        backdrop-filter: blur(20px);
+        -webkit-backdrop-filter: blur(20px);
+        border: 1px solid rgba(255,255,255,0.5);
+        border-radius: 20px;
+        padding: 24px;
+        box-shadow: 0 8px 32px rgba(31,38,135,0.08);
+    }
+    .hp-ucal-header { display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:16px; }
+    .hp-ucal-title { font-size:18px; font-weight:700; margin:0 0 4px 0; color:#1F2937; }
+    .hp-ucal-sub { font-size:13px; color:#6B7280; margin:0; }
+    .hp-ucal-nav { display:flex; gap:6px; }
+    .hp-ucal-nav-btn {
+        border:1px solid rgba(0,0,0,0.08); background:rgba(255,255,255,0.6); border-radius:10px;
+        padding:6px 12px; cursor:pointer; font-size:13px; color:#374151;
+        transition:all .15s; min-width:34px;
+    }
+    .hp-ucal-nav-btn:hover { background:rgba(0,0,0,0.04); }
+    .hp-ucal-nav-today { font-weight:600; }
+    .hp-ucal-filters { display:flex; gap:8px; flex-wrap:wrap; margin-bottom:16px; }
+    .hp-ucal-filter {
+        display:inline-flex; align-items:center; gap:6px;
+        border:1px solid rgba(0,0,0,0.08); background:rgba(255,255,255,0.5);
+        border-radius:999px; padding:6px 14px; cursor:pointer;
+        font-size:13px; color:#9CA3AF; opacity:.55; transition:all .15s;
+    }
+    .hp-ucal-filter.active { color:var(--c); border-color:var(--c); opacity:1; background:rgba(255,255,255,0.85); }
+    .hp-ucal-dot { display:inline-block; width:8px; height:8px; border-radius:50%; }
+    .hp-ucal-weekdays { display:grid; grid-template-columns:repeat(7,1fr); gap:4px; margin-bottom:6px; }
+    .hp-ucal-wd { text-align:center; font-size:12px; color:#6B7280; padding:6px 0; font-weight:600; }
+    .hp-ucal-wd-sun { color:#EF4444; }
+    .hp-ucal-wd-sat { color:#3B82F6; }
+    .hp-ucal-grid { display:grid; grid-template-columns:repeat(7,1fr); gap:4px; }
+    .hp-ucal-cell {
+        min-height:78px; background:rgba(255,255,255,0.55); border:1px solid rgba(0,0,0,0.04);
+        border-radius:12px; padding:6px 8px; cursor:pointer; transition:all .15s;
+        display:flex; flex-direction:column;
+    }
+    .hp-ucal-cell:hover:not(.hp-ucal-blank) {
+        background:rgba(255,255,255,0.9); transform:translateY(-1px);
+        box-shadow:0 4px 12px rgba(0,0,0,0.06);
+    }
+    .hp-ucal-blank { background:transparent; border-color:transparent; cursor:default; }
+    .hp-ucal-day-num { font-size:13px; font-weight:600; color:#374151; margin-bottom:4px; }
+    .hp-ucal-sun .hp-ucal-day-num { color:#EF4444; }
+    .hp-ucal-sat .hp-ucal-day-num { color:#3B82F6; }
+    .hp-ucal-today { background:rgba(59,130,246,0.08); border-color:rgba(59,130,246,0.3); }
+    .hp-ucal-today .hp-ucal-day-num { color:#1D4ED8; font-weight:700; }
+    .hp-ucal-dots { display:flex; flex-wrap:wrap; gap:4px; margin-top:auto; }
+    .hp-ucal-cdot {
+        display:inline-flex; align-items:center; justify-content:center;
+        min-width:14px; height:14px; border-radius:50%; padding:0 4px;
+        font-size:10px; color:white; font-weight:700;
+    }
+    .hp-ucal-cdot small { font-size:9px; font-weight:700; line-height:1; }
+    .hp-ucal-empty { text-align:center; padding:32px 0; }
+</style>
+
+@code {
+    [Parameter] public EventCallback<DateTime> OnDayClicked { get; set; }
+
+    private UnifiedCalendarModel? _data;
+    private int _year = DateTime.Today.Year;
+    private int _month = DateTime.Today.Month;
+    private bool _loading = true;
+    private bool _showCollection = true;
+    private bool _showPayment = true;
+    private bool _showLeave = true;
+    private bool _showIssue = true;
+
+    protected override async Task OnInitializedAsync() => await LoadAsync();
+
+    private async Task LoadAsync()
+    {
+        _loading = true;
+        StateHasChanged();
+        _data = await UnifiedSvc.GetMonthlyAsync(_year, _month);
+        _loading = false;
+        StateHasChanged();
+    }
+
+    private async Task PrevMonth()
+    {
+        var d = new DateTime(_year, _month, 1).AddMonths(-1);
+        _year = d.Year; _month = d.Month;
+        await LoadAsync();
+    }
+    private async Task NextMonth()
+    {
+        var d = new DateTime(_year, _month, 1).AddMonths(1);
+        _year = d.Year; _month = d.Month;
+        await LoadAsync();
+    }
+    private async Task GoToday()
+    {
+        _year = DateTime.Today.Year; _month = DateTime.Today.Month;
+        await LoadAsync();
+    }
+
+    private void Toggle(int axis)
+    {
+        switch (axis)
+        {
+            case 0: _showCollection = !_showCollection; break;
+            case 1: _showPayment = !_showPayment; break;
+            case 2: _showLeave = !_showLeave; break;
+            case 3: _showIssue = !_showIssue; break;
+        }
+    }
+
+    private async Task OnCellClicked(DateTime date)
+    {
+        if (OnDayClicked.HasDelegate)
+        {
+            await OnDayClicked.InvokeAsync(date);
+        }
+    }
+}

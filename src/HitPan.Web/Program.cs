@@ -56,6 +56,8 @@ builder.Services.AddScoped<EmailClientService>();
 // 작B v3.0 (2026-05-26): 전자세금계산서 인증서 등록 (방식 A 다이렉트)
 builder.Services.AddScoped<TaxInvoiceCertClientService>();
 builder.Services.AddScoped<LeaveRequestService>();
+// 작20260526 (사장님 결재): 통합 캘린더 + 카드 모달 가도.
+builder.Services.AddScoped<UnifiedCalendarService>();
 builder.Services.AddScoped<AccountService>();
 builder.Services.AddScoped<DocumentService>();
 builder.Services.AddScoped<SpecialPriceService>();

@@ -1,0 +1,380 @@
+@*
+    DailyBriefingModal — 사장님 9시 출근 첫 로그인 시 자동 표시되는 일일 브리핑 팝업.
+    사장님 결재 2026-05-26 ("모두갤재!!! 즉시 가도")
+
+    본질:
+    - 사장님이 출근 → 로그인 → 자동 1회 팝업 (하루 1번)
+    - 4축 일정 요약(수금/입금/연차/이슈) + 현금 흐름(수금-입금)
+    - "오늘 그만 보기" 클릭 시 그날 끝까지 안 보임 (localStorage 날짜 키)
+    - 일정 0건이면 "평온한 하루입니다 ☕"
+    - UnifiedDayDetailModal과 톤·spring 애니메이션·색상 일관성 유지
+
+    헌법 정합:
+    - #15 빈 catch 금지 — Console.Error.WriteLine 로그 남김
+    - #22 본사 전송 0 — localStorage(고객 PC)만 사용
+    - #24 "팝업 설정에서 끌 수 있어요" 안내 — 가르침 의무
+    - #25 쉽게(자동)·정확하게(4축)·안전하게(조회 only)
+*@
+@using HitPan.Web.Models
+@using HitPan.Web.Services
+@inject UnifiedCalendarService UnifiedSvc
+@inject IJSRuntime JS
+
+@if (IsOpen)
+{
+    <div class="hp-brief-backdrop" @onclick="Close" @onkeydown="OnKeyDown" tabindex="-1">
+        <div class="hp-brief-modal" @onclick:stopPropagation="true">
+            <div class="hp-brief-header">
+                <div>
+                    <h2 class="hp-brief-title">
+                        @(_greeting) 사장님 ☀️
+                    </h2>
+                    <p class="hp-brief-sub">@DateTime.Today.ToString("yyyy년 M월 d일 (ddd)") · 오늘의 일정 브리핑</p>
+                </div>
+                <button class="hp-brief-close" @onclick="Close" aria-label="닫기">
+                    <MudIcon Icon="@Icons.Material.Filled.Close" Size="Size.Small" />
+                </button>
+            </div>
+
+            @if (_loading)
+            {
+                <div class="hp-brief-loading">
+                    <MudProgressCircular Color="Color.Primary" Indeterminate="true" Size="Size.Small" />
+                    <span style="margin-left:8px">오늘 일정을 불러오는 중...</span>
+                </div>
+            }
+            else if (_data == null || _totalCount == 0)
+            {
+                @* 일정 0건: 평온한 하루 메시지 *@
+                <div class="hp-brief-empty">
+                    <div class="hp-brief-empty-icon">☕</div>
+                    <div class="hp-brief-empty-title">오늘은 평온한 하루입니다</div>
+                    <div class="hp-brief-empty-sub">등록된 일정이 없어요. 여유로운 하루 보내세요.</div>
+                </div>
+            }
+            else
+            {
+                <div class="hp-brief-body">
+                    @* 4축 카드 그리드 *@
+                    <div class="hp-brief-grid">
+                        @* 수금 *@
+                        <div class="hp-brief-card" style="--accent:#10B981">
+                            <div class="hp-brief-card-label">수금</div>
+                            <div class="hp-brief-card-count">@(_data!.Collections.Count)건</div>
+                            @if (_data.Collections.Count > 0)
+                            {
+                                <div class="hp-brief-card-preview">
+                                    @(_data.Collections[0].PartnerName ?? "(거래처 미상)")
+                                    @if (_data.Collections.Count > 1) { <span class="hp-brief-more">외 @(_data.Collections.Count - 1)건</span> }
+                                </div>
+                                <div class="hp-brief-card-amount">@FormatMoney(_data.Collections.Sum(c => c.Amount))</div>
+                            }
+                            else
+                            {
+                                <div class="hp-brief-card-preview hp-brief-card-empty">예정 없음</div>
+                            }
+                        </div>
+
+                        @* 입금 *@
+                        <div class="hp-brief-card" style="--accent:#F59E0B">
+                            <div class="hp-brief-card-label">입금</div>
+                            <div class="hp-brief-card-count">@(_data.Payments.Count)건</div>
+                            @if (_data.Payments.Count > 0)
+                            {
+                                <div class="hp-brief-card-preview">
+                                    @(_data.Payments[0].PartnerName ?? _data.Payments[0].Description ?? "(거래처 미상)")
+                                    @if (_data.Payments.Count > 1) { <span class="hp-brief-more">외 @(_data.Payments.Count - 1)건</span> }
+                                </div>
+                                <div class="hp-brief-card-amount">@FormatMoney(_data.Payments.Sum(p => p.Amount))</div>
+                            }
+                            else
+                            {
+                                <div class="hp-brief-card-preview hp-brief-card-empty">예정 없음</div>
+                            }
+                        </div>
+
+                        @* 연차 *@
+                        <div class="hp-brief-card" style="--accent:#3B82F6">
+                            <div class="hp-brief-card-label">연차</div>
+                            <div class="hp-brief-card-count">@(_data.Leaves.Count)건</div>
+                            @if (_data.Leaves.Count > 0)
+                            {
+                                <div class="hp-brief-card-preview">
+                                    @(_data.Leaves[0].EmpName ?? "(직원 미상)")
+                                    @if (_data.Leaves.Count > 1) { <span class="hp-brief-more">외 @(_data.Leaves.Count - 1)명</span> }
+                                </div>
+                                <div class="hp-brief-card-amount hp-brief-card-thin">@LeaveTypeLabel(_data.Leaves[0].LeaveType)</div>
+                            }
+                            else
+                            {
+                                <div class="hp-brief-card-preview hp-brief-card-empty">없음</div>
+                            }
+                        </div>
+
+                        @* 이슈 *@
+                        <div class="hp-brief-card" style="--accent:#A855F7">
+                            <div class="hp-brief-card-label">이슈/일정</div>
+                            <div class="hp-brief-card-count">@(_data.Issues.Count)건</div>
+                            @if (_data.Issues.Count > 0)
+                            {
+                                <div class="hp-brief-card-preview">
+                                    @(_data.Issues[0].Title ?? "(제목 없음)")
+                                    @if (_data.Issues.Count > 1) { <span class="hp-brief-more">외 @(_data.Issues.Count - 1)건</span> }
+                                </div>
+                                <div class="hp-brief-card-amount hp-brief-card-thin">@(_data.Issues[0].StartAt.ToString("HH:mm"))</div>
+                            }
+                            else
+                            {
+                                <div class="hp-brief-card-preview hp-brief-card-empty">없음</div>
+                            }
+                        </div>
+                    </div>
+
+                    @* 현금 흐름 요약 *@
+                    <div class="hp-brief-cashflow">
+                        <div class="hp-brief-cashflow-row">
+                            <span class="hp-brief-cashflow-label">오늘 예상 수금</span>
+                            <span class="hp-brief-cashflow-pos">+ @FormatMoney(_collectionSum)</span>
+                        </div>
+                        <div class="hp-brief-cashflow-row">
+                            <span class="hp-brief-cashflow-label">오늘 예상 입금(지출)</span>
+                            <span class="hp-brief-cashflow-neg">− @FormatMoney(_paymentSum)</span>
+                        </div>
+                        <div class="hp-brief-cashflow-divider"></div>
+                        <div class="hp-brief-cashflow-row hp-brief-cashflow-total">
+                            <span class="hp-brief-cashflow-label">순 현금 흐름</span>
+                            <span style="color:@CashflowColor;font-weight:800;font-size:18px">
+                                @(_cashflow >= 0 ? "+ " : "− ")@FormatMoney(Math.Abs(_cashflow))
+                            </span>
+                        </div>
+                    </div>
+                </div>
+            }
+
+            <div class="hp-brief-footer">
+                <button class="hp-brief-btn hp-brief-btn-ghost" @onclick="DismissForToday">오늘 그만 보기</button>
+                <button class="hp-brief-btn hp-brief-btn-ghost" @onclick="Close">닫기</button>
+                <button class="hp-brief-btn hp-brief-btn-primary" @onclick="GoDetail">
+                    자세히 보기
+                    <MudIcon Icon="@Icons.Material.Filled.ArrowForward" Size="Size.Small" />
+                </button>
+            </div>
+
+            <div class="hp-brief-hint">
+                이 팝업은 설정에서 끌 수 있어요.
+            </div>
+        </div>
+    </div>
+}
+
+<style>
+    .hp-brief-backdrop {
+        position:fixed; inset:0; background:rgba(15,23,42,0.45);
+        backdrop-filter:blur(6px); -webkit-backdrop-filter:blur(6px);
+        display:flex; align-items:center; justify-content:center; z-index:9100;
+        animation:hp-brief-fade .18s ease-out;
+    }
+    @@keyframes hp-brief-fade { from{opacity:0} to{opacity:1} }
+    .hp-brief-modal {
+        background:rgba(255,255,255,0.95); backdrop-filter:blur(24px);
+        border-radius:24px; padding:28px; width:min(680px, 92vw);
+        max-height:88vh; overflow-y:auto;
+        box-shadow:0 24px 64px rgba(15,23,42,0.25);
+        animation:hp-brief-scale .26s cubic-bezier(.34,1.56,.64,1);
+    }
+    @@keyframes hp-brief-scale { from{transform:scale(.92);opacity:0} to{transform:scale(1);opacity:1} }
+    .hp-brief-header { display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:20px; }
+    .hp-brief-title { font-size:22px; font-weight:800; margin:0 0 4px 0; color:#1F2937; }
+    .hp-brief-sub { font-size:13px; color:#6B7280; margin:0; }
+    .hp-brief-close {
+        background:rgba(0,0,0,0.04); border:none; border-radius:50%;
+        width:34px; height:34px; cursor:pointer; display:flex;
+        align-items:center; justify-content:center; transition:all .15s;
+    }
+    .hp-brief-close:hover { background:rgba(0,0,0,0.08); }
+    .hp-brief-loading { text-align:center; padding:48px 0; }
+    .hp-brief-body { display:flex; flex-direction:column; gap:16px; }
+    .hp-brief-grid {
+        display:grid; grid-template-columns:1fr 1fr; gap:12px;
+    }
+    @@media (max-width:520px) { .hp-brief-grid { grid-template-columns:1fr; } }
+    .hp-brief-card {
+        background:rgba(248,250,252,0.7); border-radius:14px; padding:14px 16px;
+        border-left:4px solid var(--accent);
+        transition:transform .2s cubic-bezier(.34,1.56,.64,1), box-shadow .2s;
+    }
+    .hp-brief-card:hover { transform:translateY(-2px); box-shadow:0 8px 20px rgba(0,0,0,0.06); }
+    .hp-brief-card-label { font-size:13px; font-weight:700; color:var(--accent); }
+    .hp-brief-card-count { font-size:24px; font-weight:800; color:#1F2937; margin-top:2px; }
+    .hp-brief-card-preview { font-size:13px; color:#374151; margin-top:6px; font-weight:600; }
+    .hp-brief-card-preview.hp-brief-card-empty { color:#9CA3AF; font-weight:400; }
+    .hp-brief-more { font-size:11px; color:#9CA3AF; font-weight:400; margin-left:4px; }
+    .hp-brief-card-amount { font-size:14px; color:#6B7280; margin-top:4px; font-weight:600; }
+    .hp-brief-card-thin { font-weight:400; }
+    .hp-brief-cashflow {
+        background:linear-gradient(135deg, rgba(248,250,252,0.9), rgba(241,245,249,0.9));
+        border-radius:14px; padding:14px 18px;
+        border:1px solid rgba(0,0,0,0.04);
+    }
+    .hp-brief-cashflow-row {
+        display:flex; justify-content:space-between; align-items:center;
+        padding:4px 0; font-size:13px;
+    }
+    .hp-brief-cashflow-label { color:#6B7280; }
+    .hp-brief-cashflow-pos { color:#10B981; font-weight:700; }
+    .hp-brief-cashflow-neg { color:#EF4444; font-weight:700; }
+    .hp-brief-cashflow-divider { height:1px; background:rgba(0,0,0,0.06); margin:6px 0; }
+    .hp-brief-cashflow-total .hp-brief-cashflow-label { color:#1F2937; font-weight:700; }
+    .hp-brief-empty {
+        text-align:center; padding:40px 12px;
+    }
+    .hp-brief-empty-icon { font-size:48px; margin-bottom:12px; }
+    .hp-brief-empty-title { font-size:17px; font-weight:700; color:#1F2937; }
+    .hp-brief-empty-sub { font-size:13px; color:#6B7280; margin-top:4px; }
+    .hp-brief-footer {
+        margin-top:22px; display:flex; justify-content:flex-end; gap:8px; flex-wrap:wrap;
+    }
+    .hp-brief-btn {
+        display:inline-flex; align-items:center; gap:6px;
+        border-radius:12px; padding:10px 16px; font-size:13px; font-weight:600;
+        cursor:pointer; transition:all .15s; border:none;
+    }
+    .hp-brief-btn-ghost {
+        background:rgba(0,0,0,0.04); color:#374151;
+    }
+    .hp-brief-btn-ghost:hover { background:rgba(0,0,0,0.08); }
+    .hp-brief-btn-primary {
+        background:linear-gradient(135deg,#3B82F6,#6366F1); color:white;
+        box-shadow:0 4px 12px rgba(59,130,246,0.3);
+    }
+    .hp-brief-btn-primary:hover { transform:translateY(-1px); box-shadow:0 6px 16px rgba(59,130,246,0.4); }
+    .hp-brief-hint {
+        margin-top:10px; text-align:center;
+        font-size:11px; color:#9CA3AF;
+    }
+</style>
+
+@code {
+    [Parameter] public bool IsOpen { get; set; }
+    [Parameter] public EventCallback OnClosed { get; set; }
+    [Parameter] public EventCallback<DateTime> OnDetailRequested { get; set; }
+
+    private UnifiedDayDetailModel? _data;
+    private bool _loading;
+    private bool _loadedOnce;
+    private decimal _collectionSum;
+    private decimal _paymentSum;
+    private decimal _cashflow;
+    private int _totalCount;
+    private string _greeting = "좋은 아침이에요,";
+
+    private string CashflowColor =>
+        _cashflow > 0 ? "#10B981" : _cashflow < 0 ? "#EF4444" : "#6B7280";
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (IsOpen && !_loadedOnce)
+        {
+            _loadedOnce = true;
+            _greeting = GetGreeting(DateTime.Now.Hour);
+            await LoadAsync();
+        }
+        else if (!IsOpen)
+        {
+            // 모달 닫히면 다음 표시(테스트) 위해 재로딩 가능하게.
+            _loadedOnce = false;
+        }
+    }
+
+    private static string GetGreeting(int hour) => hour switch
+    {
+        < 11 => "좋은 아침이에요,",
+        < 14 => "좋은 점심이에요,",
+        < 18 => "좋은 오후예요,",
+        _ => "수고 많으십니다,",
+    };
+
+    private async Task LoadAsync()
+    {
+        _loading = true;
+        StateHasChanged();
+        try
+        {
+            _data = await UnifiedSvc.GetDayDetailAsync(DateTime.Today);
+            if (_data != null)
+            {
+                _collectionSum = _data.Collections.Sum(c => c.Amount);
+                _paymentSum = _data.Payments.Sum(p => p.Amount);
+                _cashflow = _collectionSum - _paymentSum;
+                _totalCount = _data.Collections.Count + _data.Payments.Count
+                             + _data.Leaves.Count + _data.Issues.Count;
+            }
+            else
+            {
+                _totalCount = 0;
+            }
+        }
+        catch (Exception ex)
+        {
+            // §원칙 #15 — silent swallow 금지.
+            Console.Error.WriteLine($"[DailyBriefingModal.LoadAsync] {ex.GetType().Name}: {ex.Message}");
+            _data = null;
+            _totalCount = 0;
+        }
+        finally
+        {
+            _loading = false;
+            StateHasChanged();
+        }
+    }
+
+    private async Task Close()
+    {
+        if (OnClosed.HasDelegate) await OnClosed.InvokeAsync();
+    }
+
+    private async Task OnKeyDown(KeyboardEventArgs e)
+    {
+        if (e.Key == "Escape") await Close();
+    }
+
+    private async Task DismissForToday()
+    {
+        try
+        {
+            var key = $"hitpan_briefing_dismissed_{DateTime.Today:yyyyMMdd}";
+            // §원칙 #22 — 본사 전송 0. localStorage(고객 PC)만 사용.
+            await JS.InvokeVoidAsync("hitpanStorage_set", key, "1");
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine($"[DailyBriefingModal.DismissForToday] {ex.GetType().Name}: {ex.Message}");
+        }
+        await Close();
+    }
+
+    private async Task GoDetail()
+    {
+        if (OnDetailRequested.HasDelegate)
+        {
+            await OnDetailRequested.InvokeAsync(DateTime.Today);
+        }
+        await Close();
+    }
+
+    private static string FormatMoney(decimal amount)
+    {
+        if (Math.Abs(amount) >= 100_000_000m) return $"{(amount / 100_000_000m):N1}억원";
+        if (Math.Abs(amount) >= 10_000m)      return $"{(amount / 10_000m):N0}만원";
+        return $"{amount:N0}원";
+    }
+
+    private static string LeaveTypeLabel(string? type) => type switch
+    {
+        "annual"   => "연차",
+        "half"     => "반차",
+        "sick"     => "병가",
+        "official" => "공가",
+        _ => type ?? ""
+    };
+}
