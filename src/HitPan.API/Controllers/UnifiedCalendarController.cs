@@ -1,3 +1,4 @@
+using System.Data;
 using Dapper;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -9,19 +10,19 @@ namespace HitPan.API.Controllers;
 /// 통합 캘린더 API — 4축(수금/입금/연차/이슈) 통합 조회 컨트롤러.
 /// 사장님 결재 2026-05-26 (통합 캘린더 + 카드 모달 가도).
 /// §#2 tenant_id JWT 클레임 전용 / §#4 decimal / §#15 빈 catch 금지 / §#16 QueryMultipleAsync.
+/// 5/26 봉합: GetConnectionString → IDbConnection DI 주입 (히트판 정합 패턴).
 /// </summary>
 [ApiController]
 [Route("api/dashboard")]
 [Authorize]
 public sealed class UnifiedCalendarController : ControllerBase
 {
-    private readonly string _connStr;
+    private readonly IDbConnection _db;
     private readonly ILogger<UnifiedCalendarController> _logger;
 
-    public UnifiedCalendarController(IConfiguration config, ILogger<UnifiedCalendarController> logger)
+    public UnifiedCalendarController(IDbConnection db, ILogger<UnifiedCalendarController> logger)
     {
-        _connStr = config.GetConnectionString("DefaultConnection")
-                   ?? throw new InvalidOperationException("DB 연결 문자열이 없습니다.");
+        _db = db;
         _logger = logger;
     }
 
@@ -41,10 +42,10 @@ public sealed class UnifiedCalendarController : ControllerBase
 
         // §#16: MySqlConnection + Task.WhenAll 금지 → QueryMultipleAsync 단일 커넥션 직렬 실행.
         const string sql = @"
-            -- 1) 수금 (collections)
+            -- 1) 수금 (collections) — §#13 DESCRIBE 정합: is_active 컬럼 없음 (5/26 봉합)
             SELECT collection_date AS Day, COUNT(*) AS Cnt, SUM(amount) AS Amt
             FROM collections
-            WHERE tenant_id=@TenantId AND is_active=1
+            WHERE tenant_id=@TenantId
               AND collection_date BETWEEN @MonthStart AND @MonthEnd
             GROUP BY collection_date;
 
@@ -70,10 +71,10 @@ public sealed class UnifiedCalendarController : ControllerBase
 
         try
         {
-            await using var db = new MySqlConnection(_connStr);
-            await db.OpenAsync(ct).ConfigureAwait(false);
+            // §5/26 봉합: IDbConnection DI 주입 사용
+            if (_db.State != ConnectionState.Open) ((System.Data.Common.DbConnection)_db).Open();
 
-            using var multi = await db.QueryMultipleAsync(new CommandDefinition(
+            using var multi = await _db.QueryMultipleAsync(new CommandDefinition(
                 sql,
                 new { TenantId = tenantId, MonthStart = monthStart.Date, MonthEnd = monthEnd.Date },
                 cancellationToken: ct)).ConfigureAwait(false);
@@ -100,15 +101,15 @@ public sealed class UnifiedCalendarController : ControllerBase
         // 4) 이슈(schedules) — 별도 try (테이블 미존재 가능)
         try
         {
-            await using var db2 = new MySqlConnection(_connStr);
-            await db2.OpenAsync(ct).ConfigureAwait(false);
+            // §5/26 봉합: IDbConnection DI 주입 사용
+            if (_db.State != ConnectionState.Open) ((System.Data.Common.DbConnection)_db).Open();
             const string issueSql = @"
                 SELECT DATE(start_at) AS Day, COUNT(*) AS Cnt, 0 AS Amt
                 FROM schedules
                 WHERE tenant_id=@TenantId
                   AND start_at >= @MonthStart AND start_at < @MonthEndExclusive
                 GROUP BY DATE(start_at)";
-            var rows = await db2.QueryAsync<DayAgg>(new CommandDefinition(
+            var rows = await _db.QueryAsync<DayAgg>(new CommandDefinition(
                 issueSql,
                 new { TenantId = tenantId, MonthStart = monthStart, MonthEndExclusive = monthStart.AddMonths(1) },
                 cancellationToken: ct)).ConfigureAwait(false);
@@ -176,7 +177,7 @@ public sealed class UnifiedCalendarController : ControllerBase
                    c.ref_doc_type AS RefDocType, c.ref_doc_id AS RefDocId
             FROM collections c
             LEFT JOIN partners p ON p.partner_id = c.partner_id AND p.tenant_id = c.tenant_id
-            WHERE c.tenant_id=@TenantId AND c.is_active=1 AND c.collection_date=@Day;
+            WHERE c.tenant_id=@TenantId AND c.collection_date=@Day;
 
             SELECT bt.bank_tx_id AS Id, bt.partner_id AS PartnerId,
                    COALESCE(p.partner_name, bt.partner_name_legacy) AS PartnerName,
@@ -199,9 +200,9 @@ public sealed class UnifiedCalendarController : ControllerBase
 
         try
         {
-            await using var db = new MySqlConnection(_connStr);
-            await db.OpenAsync(ct).ConfigureAwait(false);
-            using var multi = await db.QueryMultipleAsync(new CommandDefinition(
+            // §5/26 봉합: IDbConnection DI 주입 사용
+            if (_db.State != ConnectionState.Open) ((System.Data.Common.DbConnection)_db).Open();
+            using var multi = await _db.QueryMultipleAsync(new CommandDefinition(
                 sql, new { TenantId = tenantId, Day = dayStart }, cancellationToken: ct)).ConfigureAwait(false);
 
             collections.AddRange((await multi.ReadAsync().ConfigureAwait(false)).Cast<object>());
@@ -216,8 +217,8 @@ public sealed class UnifiedCalendarController : ControllerBase
         // schedules는 미생성 가능 → 별도 try
         try
         {
-            await using var db2 = new MySqlConnection(_connStr);
-            await db2.OpenAsync(ct).ConfigureAwait(false);
+            // §5/26 봉합: IDbConnection DI 주입 사용
+            if (_db.State != ConnectionState.Open) ((System.Data.Common.DbConnection)_db).Open();
             const string issueSql = @"
                 SELECT schedule_id AS Id, title AS Title, schedule_type AS Type,
                        start_at AS StartAt, end_at AS EndAt,
@@ -227,7 +228,7 @@ public sealed class UnifiedCalendarController : ControllerBase
                 FROM schedules
                 WHERE tenant_id=@TenantId
                   AND start_at >= @DayStart AND start_at < @DayEnd";
-            var rows = await db2.QueryAsync(new CommandDefinition(
+            var rows = await _db.QueryAsync(new CommandDefinition(
                 issueSql,
                 new { TenantId = tenantId, DayStart = dayStart, DayEnd = dayEnd },
                 cancellationToken: ct)).ConfigureAwait(false);
@@ -277,9 +278,9 @@ public sealed class UnifiedCalendarController : ControllerBase
 
         try
         {
-            await using var db = new MySqlConnection(_connStr);
-            await db.OpenAsync(ct).ConfigureAwait(false);
-            await db.ExecuteAsync(new CommandDefinition(sql, new
+            // §5/26 봉합: IDbConnection DI 주입 사용
+            if (_db.State != ConnectionState.Open) ((System.Data.Common.DbConnection)_db).Open();
+            await _db.ExecuteAsync(new CommandDefinition(sql, new
             {
                 Id = id,
                 TenantId = tenantId,
@@ -325,9 +326,9 @@ public sealed class UnifiedCalendarController : ControllerBase
 
         try
         {
-            await using var db = new MySqlConnection(_connStr);
-            await db.OpenAsync(ct).ConfigureAwait(false);
-            var affected = await db.ExecuteAsync(new CommandDefinition(sql, new
+            // §5/26 봉합: IDbConnection DI 주입 사용
+            if (_db.State != ConnectionState.Open) ((System.Data.Common.DbConnection)_db).Open();
+            var affected = await _db.ExecuteAsync(new CommandDefinition(sql, new
             {
                 Id = id,
                 TenantId = tenantId,
@@ -365,9 +366,9 @@ public sealed class UnifiedCalendarController : ControllerBase
 
         try
         {
-            await using var db = new MySqlConnection(_connStr);
-            await db.OpenAsync(ct).ConfigureAwait(false);
-            var affected = await db.ExecuteAsync(new CommandDefinition(sql,
+            // §5/26 봉합: IDbConnection DI 주입 사용
+            if (_db.State != ConnectionState.Open) ((System.Data.Common.DbConnection)_db).Open();
+            var affected = await _db.ExecuteAsync(new CommandDefinition(sql,
                 new { Id = id, TenantId = tenantId }, cancellationToken: ct)).ConfigureAwait(false);
 
             if (affected == 0) return NotFound(new { message = "일정을 찾을 수 없습니다." });
@@ -399,9 +400,9 @@ public sealed class UnifiedCalendarController : ControllerBase
 
         try
         {
-            await using var db = new MySqlConnection(_connStr);
-            await db.OpenAsync(ct).ConfigureAwait(false);
-            var affected = await db.ExecuteAsync(new CommandDefinition(sql,
+            // §5/26 봉합: IDbConnection DI 주입 사용
+            if (_db.State != ConnectionState.Open) ((System.Data.Common.DbConnection)_db).Open();
+            var affected = await _db.ExecuteAsync(new CommandDefinition(sql,
                 new { Id = id, TenantId = tenantId, UserId = userId, Value = (body?.IsCompleted ?? false) ? 1 : 0 },
                 cancellationToken: ct)).ConfigureAwait(false);
 
