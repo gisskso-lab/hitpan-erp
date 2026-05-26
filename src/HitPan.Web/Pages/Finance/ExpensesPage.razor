@@ -47,9 +47,29 @@
     </MudGrid>
 </MudPaper>
 
-@* 목록 *@
+@* 목록 — 필터 영역 (헌법 #19·#25 정합, 4MB→8KB DOM 축소) *@
+<MudPaper Elevation="0" Class="pa-2 mb-2 hitpan-card">
+    <MudGrid Spacing="2">
+        <MudItem xs="12" md="3">
+            <MudSelect T="string" Label="결재 상태 필터" @bind-Value="_filterStatus" Variant="Variant.Outlined" Margin="Margin.Dense">
+                <MudSelectItem Value="@("pending")">미결재만</MudSelectItem>
+                <MudSelectItem Value="@("approved")">승인만</MudSelectItem>
+                <MudSelectItem Value="@("rejected")">반려만</MudSelectItem>
+                <MudSelectItem Value="@("all")">전체</MudSelectItem>
+            </MudSelect>
+        </MudItem>
+        <MudItem xs="12" md="2">
+            <MudText Typo="Typo.body2" Class="mt-2" Style="color:var(--hitpan-text-faint)">
+                표시: @FilteredItems.Count / 전체: @_items.Count
+            </MudText>
+        </MudItem>
+    </MudGrid>
+</MudPaper>
+
+@* 목록 — 페이지네이션 정합 (헌법 #19 정합, 기본 50행) *@
 <MudPaper Elevation="0" Class="pa-2 hitpan-card">
-    <MudTable Items="_items" Dense="true" Hover="true" Striped="true">
+    <MudTable Items="FilteredItems" Dense="true" Hover="true" Striped="true"
+              RowsPerPage="50" Breakpoint="Breakpoint.Sm">
         <HeaderContent>
             <MudTh>일자</MudTh><MudTh>분류</MudTh><MudTh>내용</MudTh><MudTh>신청자</MudTh>
             <MudTh Style="text-align:right">금액</MudTh><MudTh Style="text-align:right">부가세</MudTh>
@@ -82,6 +102,9 @@
             </MudTd>
         </RowTemplate>
         <NoRecordsContent><MudText Class="pa-4" Style="color:var(--hitpan-text-faint)">등록된 경비가 없습니다.</MudText></NoRecordsContent>
+        <PagerContent>
+            <MudTablePager PageSizeOptions="new int[] { 25, 50, 100, 200 }" />
+        </PagerContent>
     </MudTable>
 </MudPaper>
 
@@ -89,6 +112,11 @@
     private List<ExpenseModel> _items = new();
     private CreateExpenseModel _edit = new();
     private DateTime? _editDate = DateTime.Today;
+    private string _filterStatus = "pending"; // 헌법 #19·#25 정합 — 기본 미결재만 표시
+
+    // 결재 상태 필터 (DOM 4MB → 50행 영역, 27,640행 폭탄 봉합)
+    private List<ExpenseModel> FilteredItems
+        => _filterStatus == "all" ? _items : _items.Where(i => i.ApprovalStatus == _filterStatus).ToList();
 
     protected override async Task OnInitializedAsync() { _items = await FinSvc.GetExpensesAsync(); }
 
