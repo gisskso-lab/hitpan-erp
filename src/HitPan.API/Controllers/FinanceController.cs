@@ -76,11 +76,12 @@ public class FinanceController : ControllerBase
 
     [HttpGet("expenses")]
     [RequirePermission("ACCOUNTING", "view")]
-    public async Task<IActionResult> GetExpenses([FromQuery] DateTime? from, [FromQuery] DateTime? to, CancellationToken ct)
+    public async Task<IActionResult> GetExpenses([FromQuery] DateTime? from, [FromQuery] DateTime? to, [FromQuery] int? limit, CancellationToken ct)
     {
         var tid = HttpContext.Items["TenantId"]?.ToString();
         if (string.IsNullOrEmpty(tid)) return Forbid();
-        return Ok(await _svc.GetExpensesAsync(tid, from, to, ct));
+        // 헌법 #19 정합 — limit 미지정 시 500 (5/26 진범 #4·#7: 27,640건 폭탄 봉합)
+        return Ok(await _svc.GetExpensesAsync(tid, from, to, limit ?? 500, ct));
     }
 
     [HttpPost("expenses")]

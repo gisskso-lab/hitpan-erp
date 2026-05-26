@@ -18,6 +18,8 @@ public interface IFinanceService
 
     // 경비
     Task<List<ExpenseDto>> GetExpensesAsync(string tenantId, DateTime? from, DateTime? to, CancellationToken ct = default);
+    // 헌법 #19 정합 — limit 추가 시그니처 (5/26 진범 #4·#7 봉합)
+    Task<List<ExpenseDto>> GetExpensesAsync(string tenantId, DateTime? from, DateTime? to, int limit, CancellationToken ct = default);
     Task<string> CreateExpenseAsync(CreateExpenseRequest req, string tenantId, string userId, CancellationToken ct = default);
     Task ApproveExpenseAsync(string expenseId, string tenantId, string action, CancellationToken ct = default);
 

@@ -183,8 +183,14 @@ public class FinanceService : IFinanceService
     // ═══════════════════════════════════════
 
     public async Task<List<ExpenseDto>> GetExpensesAsync(string tenantId, DateTime? from, DateTime? to, CancellationToken ct = default)
+        => await GetExpensesAsync(tenantId, from, to, 500, ct);
+
+    // 헌법 #19·#25 정합 — limit 기본 500으로 제한 (5/26 진범 #4·#7: 27,640건 폭탄 봉합)
+    public async Task<List<ExpenseDto>> GetExpensesAsync(string tenantId, DateTime? from, DateTime? to, int limit, CancellationToken ct = default)
     {
         await EnsureOpenAsync(ct);
+
+        if (limit <= 0 || limit > 5000) limit = 500;
 
         // 경리 직접 등록 경비
         var sql1 = """
@@ -216,10 +222,10 @@ public class FinanceService : IFinanceService
         if (from.HasValue) sql2 += " AND r.request_date >= @From";
         if (to.HasValue) sql2 += " AND r.request_date <= @To";
 
-        var sql = $"({sql1}) UNION ALL ({sql2}) ORDER BY ExpenseDate DESC";
+        var sql = $"({sql1}) UNION ALL ({sql2}) ORDER BY ExpenseDate DESC LIMIT @Limit";
 
         return (await _db.QueryAsync<ExpenseDto>(new CommandDefinition(
-            sql, new { TenantId = tenantId, From = from, To = to }, cancellationToken: ct))).ToList();
+            sql, new { TenantId = tenantId, From = from, To = to, Limit = limit }, cancellationToken: ct))).ToList();
     }
 
     public async Task<string> CreateExpenseAsync(CreateExpenseRequest req, string tenantId, string userId, CancellationToken ct = default)

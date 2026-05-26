@@ -46,13 +46,14 @@ public sealed class FinanceClientService(HttpClient http)
         catch { return null; }
     }
 
-    // 경비
-    public async Task<List<ExpenseModel>> GetExpensesAsync(DateTime? from = null, DateTime? to = null, CancellationToken ct = default)
+    // 경비 — 헌법 #19·#25 정합 (5/26 진범 #4·#7 봉합)
+    // default: 최근 30일 + limit 500. 호출자가 명시적으로 from/to 지정 시 그대로 전달.
+    public async Task<List<ExpenseModel>> GetExpensesAsync(DateTime? from = null, DateTime? to = null, int limit = 500, CancellationToken ct = default)
     {
-        var q = "api/finance/expenses?";
-        if (from.HasValue) q += $"from={from:yyyy-MM-dd}&";
-        if (to.HasValue) q += $"to={to:yyyy-MM-dd}&";
-        try { return await http.GetFromJsonAsync<List<ExpenseModel>>(q.TrimEnd('&', '?'), ct) ?? new(); }
+        var effFrom = from ?? DateTime.Today.AddDays(-30);
+        var effTo = to ?? DateTime.Today;
+        var q = $"api/finance/expenses?from={effFrom:yyyy-MM-dd}&to={effTo:yyyy-MM-dd}&limit={limit}";
+        try { return await http.GetFromJsonAsync<List<ExpenseModel>>(q, ct) ?? new(); }
         catch { return new(); }
     }
 
