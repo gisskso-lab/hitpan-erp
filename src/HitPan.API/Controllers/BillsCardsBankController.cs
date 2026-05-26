@@ -80,10 +80,12 @@ public sealed class BillsCardsBankController : HitPanControllerBase
     public async Task<IActionResult> ListBankTx(
         [FromQuery] string? accountNo,
         [FromQuery] DateTime? from, [FromQuery] DateTime? to,
+        [FromQuery] int? limit,
         CancellationToken ct = default)
     {
         if (EnsureTenant() is { } err) return err;
-        var rows = await _service.ListBankTxAsync(TenantId!, accountNo, from, to, ct).ConfigureAwait(false);
+        // 헌법 #19 정합 — limit 미지정 시 500 (5/27 P1-4: 3,770행 폭탄 봉합)
+        var rows = await _service.ListBankTxAsync(TenantId!, accountNo, from, to, limit ?? 500, ct).ConfigureAwait(false);
         return Ok(rows);
     }
 

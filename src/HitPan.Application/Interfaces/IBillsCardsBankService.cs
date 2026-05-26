@@ -17,5 +17,7 @@ public interface IBillsCardsBankService
 
     // Bank Transactions (INSERT ONLY)
     Task<List<BankTxDto>> ListBankTxAsync(string tenantId, string? accountNo, DateTime? from, DateTime? to, CancellationToken ct = default);
+    // 헌법 #19 정합 — limit 시그니처 (5/27 P1-4 봉합)
+    Task<List<BankTxDto>> ListBankTxAsync(string tenantId, string? accountNo, DateTime? from, DateTime? to, int limit, CancellationToken ct = default);
     Task<string> CreateBankTxAsync(string tenantId, CreateBankTxRequest req, CancellationToken ct = default);
 }

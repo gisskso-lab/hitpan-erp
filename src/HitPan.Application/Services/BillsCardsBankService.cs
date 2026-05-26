@@ -188,8 +188,14 @@ public sealed class BillsCardsBankService : IBillsCardsBankService
 
     // ═══ Bank Transactions (INSERT ONLY) ═══════════════════
     public async Task<List<BankTxDto>> ListBankTxAsync(string tenantId, string? accountNo, DateTime? from, DateTime? to, CancellationToken ct = default)
+        => await ListBankTxAsync(tenantId, accountNo, from, to, 500, ct).ConfigureAwait(false);
+
+    // 헌법 #19·#25 정합 — 5/27 P1-4 봉합 (demo 1차 audit: 3,770행 폭탄 / 32초 로드)
+    public async Task<List<BankTxDto>> ListBankTxAsync(string tenantId, string? accountNo, DateTime? from, DateTime? to, int limit, CancellationToken ct = default)
     {
         await EnsureOpenAsync(ct).ConfigureAwait(false);
+
+        if (limit <= 0 || limit > 5000) limit = 500;
 
         const string sql = """
             SELECT b.bank_tx_id AS BankTxId, b.account_no AS AccountNo, b.bank_name AS BankName,
@@ -203,9 +209,10 @@ public sealed class BillsCardsBankService : IBillsCardsBankService
               AND (@From IS NULL OR b.tx_date >= @From)
               AND (@To IS NULL OR b.tx_date <= @To)
             ORDER BY b.tx_date DESC, b.created_at DESC
+            LIMIT @Limit
             """;
         var rows = await _db.QueryAsync<BankTxDto>(new CommandDefinition(sql,
-            new { TenantId = tenantId, AccountNo = accountNo, From = from, To = to },
+            new { TenantId = tenantId, AccountNo = accountNo, From = from, To = to, Limit = limit },
             cancellationToken: ct)).ConfigureAwait(false);
         return rows.ToList();
     }

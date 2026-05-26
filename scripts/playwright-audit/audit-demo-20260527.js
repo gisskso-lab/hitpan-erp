@@ -6,12 +6,12 @@ const { chromium } = require('playwright');
 const fs = require('fs');
 const path = require('path');
 
-const WEB_URL = 'http://localhost:5234';
-const API_URL = 'http://localhost:5257';
+const WEB_URL = 'https://demo.hitpan.kr';
+const API_URL = 'https://api-demo.hitpan.kr';
 const EMAIL = 'admin@hitpan.kr';
 const PASSWORD = 'Admin1234!';
 const STAMP = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
-const OUT_DIR = path.join(__dirname, 'screenshots', `local-${STAMP}`);
+const OUT_DIR = path.join(__dirname, 'screenshots', `demo-${STAMP}`);
 
 // 6단계 워크플로우 순서 (헌법 #20 정합) — Sidebar.razor 추출
 const MENUS = [

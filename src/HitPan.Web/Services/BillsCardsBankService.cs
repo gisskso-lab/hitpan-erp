@@ -75,15 +75,21 @@ public sealed class BillsCardsBankService(HttpClient http)
     }
 
     // ─── Bank Tx ────────────────────────────────────────
-    public async Task<List<BankTxModel>> ListBankTxAsync(string? accountNo, DateTime? from, DateTime? to, CancellationToken ct = default)
+    // 헌법 #19·#25 정합 — default from=Today-30, to=Today, limit=500 (5/27 P1-4 봉합)
+    public async Task<List<BankTxModel>> ListBankTxAsync(string? accountNo, DateTime? from, DateTime? to, int limit = 500, CancellationToken ct = default)
     {
         try
         {
-            var qs = new List<string>();
+            var effFrom = from ?? DateTime.Today.AddDays(-30);
+            var effTo = to ?? DateTime.Today;
+            var qs = new List<string>
+            {
+                $"from={effFrom:yyyy-MM-dd}",
+                $"to={effTo:yyyy-MM-dd}",
+                $"limit={limit}"
+            };
             if (!string.IsNullOrEmpty(accountNo)) qs.Add($"accountNo={Uri.EscapeDataString(accountNo)}");
-            if (from.HasValue) qs.Add($"from={from:yyyy-MM-dd}");
-            if (to.HasValue) qs.Add($"to={to:yyyy-MM-dd}");
-            var url = "api/finance/bank-transactions" + (qs.Count > 0 ? "?" + string.Join("&", qs) : "");
+            var url = "api/finance/bank-transactions?" + string.Join("&", qs);
             return await http.GetFromJsonAsync<List<BankTxModel>>(url, ct).ConfigureAwait(false) ?? new();
         }
         catch (Exception ex) { Console.Error.WriteLine($"[Bank.List] {ex.Message}"); return new(); }
