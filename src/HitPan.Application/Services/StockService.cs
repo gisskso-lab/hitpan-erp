@@ -304,7 +304,7 @@ public class StockService : IStockService
             }
             catch
             {
-                try { tx.Rollback(); } catch { /* 이미 닫힌 tx */ }
+                try { tx.Rollback(); } catch (Exception rbex) { Console.Error.WriteLine($"[StockService] rollback failed: {rbex.Message}"); }
                 throw;
             }
         }
@@ -472,7 +472,7 @@ public class StockService : IStockService
         }
         catch
         {
-            try { tx.Rollback(); } catch { /* 이미 닫힌 tx */ }
+            try { tx.Rollback(); } catch (Exception rbex) { Console.Error.WriteLine($"[StockService] rollback failed: {rbex.Message}"); }
             throw;
         }
 

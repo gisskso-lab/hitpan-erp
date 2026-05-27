@@ -126,9 +126,10 @@ public sealed class IntegrityCheckService : BackgroundService
                     new { TenantId = tenantId, EntityType = entityType, EntityId = entityId, Reason = reason },
                     cancellationToken: ct));
         }
-        catch
+        catch (Exception auditEx)
         {
-            // audit_trail 기록 실패는 감지 흐름 자체를 멈추지 않는다
+            // audit_trail 기록 실패는 감지 흐름 자체를 멈추지 않는다 (헌법 #15 정합 로그, static 컨텍스트라 Console 사용)
+            Console.Error.WriteLine($"[IntegrityCheckService] audit_trail 기록 실패: {auditEx.Message}");
         }
     }
 

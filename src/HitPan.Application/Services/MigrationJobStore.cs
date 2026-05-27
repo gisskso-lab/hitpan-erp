@@ -88,9 +88,10 @@ public sealed class MigrationJobStore
                 JobId = jobId, Status = status, Finished = finishedAt, Now = DateTime.UtcNow,
             })).ConfigureAwait(false);
         }
-        catch
+        catch (Exception ex)
         {
-            // best-effort — 동기화 실패는 본 마이그 흐름 막지 않음.
+            // best-effort — 동기화 실패는 본 마이그 흐름 막지 않음. 헌법 #15 정합 로그.
+            Console.Error.WriteLine($"[MigrationJobStore] sync failed (best-effort): {ex.Message}");
         }
     }
 }

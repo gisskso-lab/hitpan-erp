@@ -139,7 +139,7 @@ public sealed class TaxInvoiceService : ITaxInvoiceService
         }
         catch
         {
-            try { await tx.RollbackAsync(ct); } catch { /* 이미 닫힌 tx */ }
+            try { await tx.RollbackAsync(ct); } catch (Exception rbex) { Console.Error.WriteLine($"[TaxInvoiceService] rollback failed: {rbex.Message}"); }
             throw;
         }
 
@@ -301,7 +301,7 @@ public sealed class TaxInvoiceService : ITaxInvoiceService
         }
         catch
         {
-            try { await tx.RollbackAsync(ct); } catch { /* 이미 닫힌 tx */ }
+            try { await tx.RollbackAsync(ct); } catch (Exception rbex) { Console.Error.WriteLine($"[TaxInvoiceService] rollback failed: {rbex.Message}"); }
             throw;
         }
 

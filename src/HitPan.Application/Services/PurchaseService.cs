@@ -420,7 +420,7 @@ public class PurchaseService : IPurchaseService
         }
         catch
         {
-            try { await tx.RollbackAsync(ct); } catch { /* 이미 닫힌 tx */ }
+            try { await tx.RollbackAsync(ct); } catch (Exception rbex) { Console.Error.WriteLine($"[PurchaseService] rollback failed: {rbex.Message}"); }
             throw;
         }
 
@@ -875,7 +875,7 @@ public class PurchaseService : IPurchaseService
         }
         catch
         {
-            try { await tx.RollbackAsync(ct); } catch { /* 이미 닫힌 tx */ }
+            try { await tx.RollbackAsync(ct); } catch (Exception rbex) { Console.Error.WriteLine($"[PurchaseService] rollback failed: {rbex.Message}"); }
             throw;
         }
 
@@ -928,7 +928,7 @@ public class PurchaseService : IPurchaseService
         }
         catch
         {
-            try { await tx.RollbackAsync(ct); } catch { /* 이미 닫힌 tx */ }
+            try { await tx.RollbackAsync(ct); } catch (Exception rbex) { Console.Error.WriteLine($"[PurchaseService] rollback failed: {rbex.Message}"); }
             throw;
         }
     }
@@ -1185,7 +1185,7 @@ public class PurchaseService : IPurchaseService
         }
         catch
         {
-            try { await tx.RollbackAsync(ct); } catch { /* 이미 닫힌 tx */ }
+            try { await tx.RollbackAsync(ct); } catch (Exception rbex) { Console.Error.WriteLine($"[PurchaseService] rollback failed: {rbex.Message}"); }
             throw;
         }
     }

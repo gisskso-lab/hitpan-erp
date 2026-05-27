@@ -70,9 +70,10 @@ public sealed class AuditLogMiddleware
                     },
                     cancellationToken: context.RequestAborted)).ConfigureAwait(false);
         }
-        catch
+        catch (Exception logEx)
         {
-            // 로깅 실패해도 요청은 이미 완료됨
+            // 로깅 실패해도 요청은 이미 완료됨 (헌법 #15 정합 로그)
+            Console.Error.WriteLine($"[AuditLogMiddleware] audit log insert failed: {logEx.Message}");
         }
     }
 

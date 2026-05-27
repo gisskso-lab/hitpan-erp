@@ -86,9 +86,10 @@ public sealed class RemoteControlDetector : IRemoteControlDetector
                         return true;
                     }
                 }
-                catch (InvalidOperationException)
+                catch (InvalidOperationException procEx)
                 {
-                    // 프로세스 접근 권한 없음 (시스템 프로세스) — 무시
+                    // 프로세스 접근 권한 없음 (시스템 프로세스) — 무시 (헌법 #15 정합 로그)
+                    _logger.LogDebug(procEx, "원격제어 감지: 프로세스 접근 권한 없음 (정상 — 시스템 프로세스)");
                 }
                 finally
                 {
@@ -124,7 +125,7 @@ public sealed class RemoteControlDetector : IRemoteControlDetector
                             found.Add(displayName);
                     }
                 }
-                catch (InvalidOperationException) { /* 권한 없음 무시 */ }
+                catch (InvalidOperationException procEx) { _logger.LogDebug(procEx, "활성 원격제어 도구 조회: 프로세스 접근 권한 없음 (정상)"); }
                 finally { proc.Dispose(); }
             }
         }

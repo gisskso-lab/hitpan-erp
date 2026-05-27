@@ -527,7 +527,7 @@ public class SalesService : ISalesService
         }
         catch
         {
-            try { await tx.RollbackAsync(ct); } catch { /* 이미 닫힌 tx */ }
+            try { await tx.RollbackAsync(ct); } catch (Exception rbex) { Console.Error.WriteLine($"[SalesService] rollback failed: {rbex.Message}"); }
             throw;
         }
 
@@ -822,7 +822,7 @@ public class SalesService : ISalesService
         }
         catch
         {
-            try { tx.Rollback(); } catch { /* already closed */ }
+            try { tx.Rollback(); } catch (Exception rbex) { Console.Error.WriteLine($"[SalesService] rollback failed: {rbex.Message}"); }
             throw;
         }
     }
@@ -1031,7 +1031,7 @@ public class SalesService : ISalesService
         }
         catch
         {
-            try { tx.Rollback(); } catch { /* already closed */ }
+            try { tx.Rollback(); } catch (Exception rbex) { Console.Error.WriteLine($"[SalesService] rollback failed: {rbex.Message}"); }
             throw;
         }
     }
@@ -1521,7 +1521,7 @@ public class SalesService : ISalesService
             }
             catch (Exception ex)
             {
-                try { tx.Rollback(); } catch { /* 이미 닫힌 tx */ }
+                try { tx.Rollback(); } catch (Exception rbex) { Console.Error.WriteLine($"[SalesService] rollback failed: {rbex.Message}"); }
                 results.Add(new AutoOrderResultDto
                 {
                     Success = false,

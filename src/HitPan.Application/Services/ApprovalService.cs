@@ -471,7 +471,7 @@ public class ApprovalService : IApprovalService
         }
         catch
         {
-            try { tx.Rollback(); } catch { /* 이미 닫힌 tx — 원본 예외 보존 */ }
+            try { tx.Rollback(); } catch (Exception rbex) { Console.Error.WriteLine($"[ApprovalService] rollback failed: {rbex.Message}"); }
             throw;
         }
     }

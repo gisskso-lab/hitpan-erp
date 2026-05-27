@@ -445,9 +445,10 @@ public sealed class BackupService : IBackupService
                     }
                 }
             }
-            catch (Exception)
+            catch (Exception pathEx)
             {
-                // PATH 검색 실패는 fallback 으로 진행
+                // PATH 검색 실패는 fallback 으로 진행 (헌법 #15 정합 로그)
+                Console.Error.WriteLine($"[BackupService] PATH search failed: {pathEx.Message}");
             }
         }
         // Fallback — MariaDB 11.4 기본 설치 경로

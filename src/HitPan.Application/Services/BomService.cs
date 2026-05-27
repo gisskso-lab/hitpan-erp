@@ -571,7 +571,8 @@ public class BomService : IBomService
         }
         catch
         {
-            try { tx.Rollback(); } catch { /* 이미 닫힌 tx */ }
+            try { tx.Rollback(); }
+            catch (Exception rbex) { Console.Error.WriteLine($"[BomService] rollback failed: {rbex.Message}"); }
             throw;
         }
     }
@@ -741,7 +742,8 @@ public class BomService : IBomService
         }
         catch
         {
-            try { tx.Rollback(); } catch { /* 이미 닫힌 tx */ }
+            try { tx.Rollback(); }
+            catch (Exception rbex) { Console.Error.WriteLine($"[BomService] rollback failed: {rbex.Message}"); }
             throw;
         }
     }
@@ -909,7 +911,8 @@ public class BomService : IBomService
         }
         catch
         {
-            try { tx.Rollback(); } catch { /* closed */ }
+            try { tx.Rollback(); }
+            catch (Exception rbex) { Console.Error.WriteLine($"[BomService] rollback failed: {rbex.Message}"); }
             throw;
         }
     }
