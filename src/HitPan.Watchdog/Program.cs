@@ -4,6 +4,11 @@ using HitPan.Watchdog;
 using HitPan.Watchdog.Stages;
 using HitPan.Watchdog.Telemetry;
 
+if (args.Length > 0 && (args[0] == "--health" || args[0] == "-h" || args[0] == "/health"))
+{
+    return await HealthProbe.RunAsync(args);
+}
+
 var builder = Host.CreateApplicationBuilder(args);
 
 builder.Services.AddWindowsService(opts =>
@@ -33,6 +38,7 @@ builder.Services.AddHostedService<Worker>();
 
 var host = builder.Build();
 await host.RunAsync();
+return 0;
 
 [SupportedOSPlatform("windows")]
 static void EnsureEventSource(string sourceName)
