@@ -154,6 +154,8 @@ builder.Services.AddScoped<IEventPublisher, SyncEventPublisher>();
 builder.Services.AddHostedService<IdempotencyCleanupService>();
 // 정합성 자동감지 — 재고 음수·monthly_summary 불일치 6h 주기 감지 → audit_trail 기록
 builder.Services.AddHostedService<IntegrityCheckService>();
+// 워치독 emergency → CS 자동 발신 (헌법 #28-F, appsettings.CsAutoDispatch.Enabled=true 시만)
+builder.Services.AddHostedService<HitPan.API.Services.CsAutoDispatchService>();
 // 전자서명 (간편인증 Mock 4종 + 수동 3종) + 전자근로계약서
 builder.Services.AddScoped<IESignatureService, ESignatureService>();
 builder.Services.AddScoped<ILaborContractService, LaborContractService>();
@@ -261,6 +263,7 @@ app.Use(async (ctx, next) =>
 
 app.UseMiddleware<GlobalExceptionMiddleware>();
 app.UseMiddleware<HealthIpWhitelistMiddleware>(); // RED-3: /health IP 화이트리스트
+app.UseMiddleware<WatchdogBearerMiddleware>();    // 헌법 #22·#28: /watchdog/* Bearer 검증
 app.UseCors("BlazorWasmDev");
 
 // Blazor WASM 정적 파일 서빙 — 인증 전에 처리
