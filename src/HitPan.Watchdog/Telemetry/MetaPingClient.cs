@@ -5,6 +5,9 @@ using System.Security.Authentication;
 using System.Security.Cryptography;
 using System.Text;
 using Microsoft.Extensions.Options;
+using Polly;
+using Polly.CircuitBreaker;
+using Polly.Timeout;
 
 namespace HitPan.Watchdog.Telemetry;
 
@@ -13,6 +16,7 @@ public class MetaPingClient
     private readonly ILogger<MetaPingClient> _logger;
     private readonly WatchdogOptions _options;
     private readonly HttpClient _http;
+    private readonly ResiliencePipeline<HttpResponseMessage> _pipeline;
     private static readonly HashSet<string> ForbiddenFields = new(StringComparer.OrdinalIgnoreCase)
     {
         "tenant_id", "tenant_name", "company_name",
@@ -35,6 +39,26 @@ public class MetaPingClient
             }
         };
         _http = new HttpClient(handler) { Timeout = TimeSpan.FromSeconds(10) };
+
+        _pipeline = new ResiliencePipelineBuilder<HttpResponseMessage>()
+            .AddRetry(new Polly.Retry.RetryStrategyOptions<HttpResponseMessage>
+            {
+                MaxRetryAttempts = 3,
+                Delay = TimeSpan.FromSeconds(2),
+                BackoffType = DelayBackoffType.Exponential,
+                ShouldHandle = new PredicateBuilder<HttpResponseMessage>()
+                    .Handle<HttpRequestException>()
+                    .Handle<TimeoutRejectedException>()
+            })
+            .AddCircuitBreaker(new CircuitBreakerStrategyOptions<HttpResponseMessage>
+            {
+                FailureRatio = 0.5,
+                MinimumThroughput = 3,
+                SamplingDuration = TimeSpan.FromSeconds(30),
+                BreakDuration = TimeSpan.FromSeconds(60)
+            })
+            .AddTimeout(TimeSpan.FromSeconds(30))
+            .Build();
     }
 
     public async Task SendAsync(MetaPingPayload payload, CancellationToken ct = default)
@@ -53,14 +77,25 @@ public class MetaPingClient
             };
             req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", GetBearerToken(payload.TenantIdHash));
 
-            var r = await _http.SendAsync(req, ct);
+            var r = await _pipeline.ExecuteAsync(async token => await _http.SendAsync(CloneRequest(req), token), ct);
             if (!r.IsSuccessStatusCode)
                 _logger.LogWarning("MetaPing: HTTP {Code}", (int)r.StatusCode);
+        }
+        catch (BrokenCircuitException)
+        {
+            _logger.LogError("MetaPing: circuit breaker open — HQ unreachable");
         }
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "MetaPing: send failure");
         }
+    }
+
+    private static HttpRequestMessage CloneRequest(HttpRequestMessage src)
+    {
+        var clone = new HttpRequestMessage(src.Method, src.RequestUri) { Content = src.Content };
+        foreach (var h in src.Headers) clone.Headers.TryAddWithoutValidation(h.Key, h.Value);
+        return clone;
     }
 
     public async Task NotifyEmergencyAsync(string reason, string? stage, CancellationToken ct = default)

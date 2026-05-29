@@ -1,3 +1,5 @@
+using System.Diagnostics;
+using System.Runtime.Versioning;
 using HitPan.Watchdog;
 using HitPan.Watchdog.Stages;
 using HitPan.Watchdog.Telemetry;
@@ -8,6 +10,10 @@ builder.Services.AddWindowsService(opts =>
 {
     opts.ServiceName = "HitPanWatchdog";
 });
+
+EnsureEventSource("HitPanWatchdog");
+
+builder.Logging.AddEventLog(opts => { opts.SourceName = "HitPanWatchdog"; });
 
 builder.Services.AddOptions<WatchdogOptions>()
     .Bind(builder.Configuration.GetSection("Watchdog"));
@@ -27,3 +33,17 @@ builder.Services.AddHostedService<Worker>();
 
 var host = builder.Build();
 await host.RunAsync();
+
+[SupportedOSPlatform("windows")]
+static void EnsureEventSource(string sourceName)
+{
+    try
+    {
+        if (!EventLog.SourceExists(sourceName))
+            EventLog.CreateEventSource(sourceName, "Application");
+    }
+    catch
+    {
+        // 관리자 권한 부재 시 무시 — appsettings 기반 콘솔 로그로 fallback
+    }
+}
