@@ -22,10 +22,13 @@
 ## 웹 폼 입력값
 
 ### Company Information
-- **Company**: 주식회사 히트판 (HitPan Co., Ltd.)
-- **Contact Name**: 보안 매니저 2 (박제 예정)
-- **Email**: security@hitpan.kr
-- **Phone**: (박제 예정, +82 형식)
+- **Company**: {{회사명}} (HitPan Co., Ltd.)
+- **Business Reg. No.**: {{사업자번호}}
+- **Address**: {{본사주소}}
+- **Contact Name**: 보안 매니저 2
+- **Email**: {{회신메일}}
+- **Phone**: {{보안2직통}}
+- **Main Office**: {{대표전화}}
 - **Country**: South Korea
 
 ### Product Information
