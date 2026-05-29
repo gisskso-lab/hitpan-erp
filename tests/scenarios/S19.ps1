@@ -1,6 +1,8 @@
 # S19 — XSS (저장 시 HTML escape 확인)
 param([string]$HealthUrl)
-$baseUrl = ([Uri]$HealthUrl).GetLeftPart([UriPartial]::Authority)
+$webHost = ([Uri]$HealthUrl).Host
+$apiHost = if ($webHost -like 'api-*') { $webHost } else { "api-$webHost" }
+$baseUrl = "https://$apiHost"
 $xss = '<script>alert("xss")</script>'
 try {
     $r = Invoke-WebRequest -Uri "$baseUrl/api/items?q=" + [Uri]::EscapeDataString($xss) `
