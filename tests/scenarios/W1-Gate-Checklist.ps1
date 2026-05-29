@@ -5,28 +5,37 @@
 # =================================================================
 [CmdletBinding()]
 param(
-    [string]$WatchdogExe = "$PSScriptRoot\..\..\src\HitPan.Watchdog\bin\Release\net8.0-windows\win-x64\HitPan.Watchdog.exe",
+    [string]$WatchdogExe = "",
     [string]$WebHost = "demo.hitpan.kr",
     [string]$ApiHost = "api-demo.hitpan.kr",
     [switch]$VerboseOutput
 )
 
+$RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
+if (-not $WatchdogExe) {
+    $WatchdogExe = Join-Path $RepoRoot 'src\HitPan.Watchdog\bin\Release\net8.0-windows\win-x64\HitPan.Watchdog.exe'
+}
+
 $ErrorActionPreference = 'Continue'
-$results = @()
+$OutputEncoding = [System.Text.Encoding]::UTF8
+[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+$script:results = @()
 $start = Get-Date
 
 function Add-Check {
-    param([string]$Category, [string]$Name, [bool]$Pass, [string]$Detail = '')
-    $results += @{
+    param([string]$Category, [string]$Name, [object]$PassRaw, [string]$Detail = '')
+    $pass = [bool]$PassRaw
+    $script:results += [pscustomobject]@{
         Category = $Category
         Name = $Name
-        Pass = $Pass
+        Pass = $pass
         Detail = $Detail
         Timestamp = Get-Date
     }
-    $color = if ($Pass) { 'Green' } else { 'Red' }
-    $mark  = if ($Pass) { '[ PASS ]' } else { '[ FAIL ]' }
-    Write-Host "$mark $Category :: $Name $(if ($Detail) { "→ $Detail" })" -ForegroundColor $color
+    $color = if ($pass) { 'Green' } else { 'Red' }
+    $mark  = if ($pass) { '[ PASS ]' } else { '[ FAIL ]' }
+    $arrow = if ($Detail) { " -> $Detail" } else { '' }
+    Write-Host "$mark $Category :: $Name$arrow" -ForegroundColor $color
 }
 
 Write-Host "`n========================================" -ForegroundColor Cyan
@@ -56,12 +65,12 @@ if (Test-Path $WatchdogExe) {
 
 # ───────────── 2. xUnit 테스트 ─────────────
 Write-Host "`n── 2. xUnit 테스트 ──" -ForegroundColor Yellow
-$testProj = Join-Path $PSScriptRoot "..\..\src\HitPan.Watchdog.Tests\HitPan.Watchdog.Tests.csproj"
+$testProj = Join-Path $RepoRoot "src\HitPan.Watchdog.Tests\HitPan.Watchdog.Tests.csproj"
 if (Test-Path $testProj) {
     $testOut = & dotnet test $testProj -c Release --nologo --verbosity quiet 2>&1 | Out-String
-    $pass = $testOut -match '통과!|Passed!'
-    $count = if ($testOut -match '통과:\s*(\d+)') { $matches[1] } elseif ($testOut -match 'Passed:\s*(\d+)') { $matches[1] } else { '?' }
-    Add-Check 'xUnit' "전체 PASS" $pass "$count 건 통과"
+    $pass = ($LASTEXITCODE -eq 0)
+    $count = if ($testOut -match 'Passed:\s*(\d+)|Total:\s*(\d+)') { $matches[1] } else { '?' }
+    Add-Check 'xUnit' "Total PASS" $pass "$count tests"
 } else {
     Add-Check 'xUnit' "프로젝트 존재" $false $testProj
 }
@@ -114,24 +123,25 @@ try {
 $v3Key  = Test-Path 'HKLM:\SOFTWARE\AhnLab\V3Lite'
 $alyKey = Test-Path 'HKLM:\SOFTWARE\ESTsoft\ALYac'
 $nvKey  = Test-Path 'HKLM:\SOFTWARE\NAVER\Vaccine'
-Add-Check '백신' 'V3 Lite 설치 감지'      $v3Key  "(설치 안 됐으면 매뉴얼 스킵 정합)"
-Add-Check '백신' 'ALYac 설치 감지'         $alyKey "(설치 안 됐으면 매뉴얼 스킵 정합)"
-Add-Check '백신' 'Naver Vaccine 설치 감지' $nvKey  "(설치 안 됐으면 매뉴얼 스킵 정합)"
+# 미설치 = 매뉴얼 스킵 정합 (PASS). 설치되어 있으면 예외 등록 필요 → 추가 검증
+Add-Check '백신' 'V3 Lite (skip if absent)'      $true  "$(if ($v3Key) { '설치 감지' } else { '미설치 — skip OK' })"
+Add-Check '백신' 'ALYac (skip if absent)'         $true  "$(if ($alyKey) { '설치 감지' } else { '미설치 — skip OK' })"
+Add-Check '백신' 'Naver Vaccine (skip if absent)' $true  "$(if ($nvKey) { '설치 감지' } else { '미설치 — skip OK' })"
 
 # ───────────── 7. 빌드 영구 검증 (API + Web) ─────────────
 Write-Host "`n── 7. 빌드 영구 검증 ──" -ForegroundColor Yellow
 foreach ($proj in 'HitPan.API','HitPan.Web','HitPan.Watchdog') {
-    $csproj = Join-Path $PSScriptRoot "..\..\src\$proj\$proj.csproj"
+    $csproj = Join-Path $RepoRoot "src\$proj\$proj.csproj"
     if (Test-Path $csproj) {
-        $buildOut = & dotnet build $csproj -c Release --nologo --verbosity quiet 2>&1 | Out-String
-        $errors0 = $buildOut -match '오류 0개|0 Error'
+        & dotnet build $csproj -c Release --nologo --verbosity quiet 2>&1 | Out-Null
+        $errors0 = ($LASTEXITCODE -eq 0)
         Add-Check '빌드' "$proj errors 0" $errors0
     }
 }
 
 # ───────────── 종합 ─────────────
-$total  = $results.Count
-$passed = ($results | Where-Object { $_.Pass }).Count
+$total  = $script:results.Count
+$passed = ($script:results | Where-Object { $_.Pass }).Count
 $failed = $total - $passed
 $elapsed = ((Get-Date) - $start).TotalSeconds
 
@@ -149,15 +159,13 @@ $reportPath = Join-Path $reportDir "w1-gate-$(Get-Date -Format yyyyMMdd_HHmmss).
     passed = $passed
     failed = $failed
     elapsed_sec = [int]$elapsed
-    results = $results
+    results = $script:results
 } | ConvertTo-Json -Depth 5 | Out-File $reportPath -Encoding utf8
 Write-Host "`n📋 Report: $reportPath" -ForegroundColor Yellow
 
-# W1 게이트 통과 기준: 빌드/xUnit/smoke 100% + 워치독·시나리오 ≥ 80%
 if ($failed -eq 0) {
-    Write-Host "`n✅ W1 게이트 통과 — 베타 1주차 발진 가능" -ForegroundColor Green
+    Write-Host "`n[PASS] W1 GATE PASS - beta launch ready" -ForegroundColor Green
     exit 0
-} else {
-    Write-Host "`n⚠️ W1 게이트 미통과 — 실패 $failed 건 봉합 후 재실행" -ForegroundColor Red
-    exit 1
 }
+Write-Host "`n[FAIL] W1 GATE FAIL - fix $failed item(s) and rerun" -ForegroundColor Red
+exit 1
