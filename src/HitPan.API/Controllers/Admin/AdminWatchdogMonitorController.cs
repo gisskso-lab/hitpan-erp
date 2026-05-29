@@ -23,7 +23,15 @@ public sealed class AdminWatchdogMonitorController : ControllerBase
         _logger = logger;
     }
 
+    /// <summary>본사 백오피스 워치독 모니터링 요약 (실시간).</summary>
+    /// <remarks>healthy/recovering/down 카운터 + 월간 SLA + 환불 대상. 집계·해시만 반환 (헌법 #22).</remarks>
+    /// <response code="200">요약 JSON 반환</response>
+    /// <response code="401">PlatformOnly 정책 위반</response>
+    /// <response code="500">DB 조회 실패</response>
     [HttpGet("summary")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(StatusCodes.Status500InternalServerError)]
     public async Task<IActionResult> GetSummary(CancellationToken ct)
     {
         try
@@ -80,7 +88,16 @@ public sealed class AdminWatchdogMonitorController : ControllerBase
         }
     }
 
+    /// <summary>최근 N시간 emergency 알림 목록 (기본 24시간, 최대 720시간).</summary>
+    /// <remarks>cs_notified_at·cs_resolved_at 상태별 색상 구분. tenant_id_hash 앞 12자만 노출.</remarks>
+    /// <param name="hours">조회 시간 (1~720, 기본 24)</param>
+    /// <response code="200">최대 100건 반환</response>
+    /// <response code="401">PlatformOnly 정책 위반</response>
+    /// <response code="500">DB 조회 실패</response>
     [HttpGet("emergencies")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(StatusCodes.Status500InternalServerError)]
     public async Task<IActionResult> GetEmergencies([FromQuery] int hours = 24, CancellationToken ct = default)
     {
         if (hours <= 0 || hours > 720) hours = 24;

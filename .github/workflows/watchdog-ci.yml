@@ -1,0 +1,122 @@
+name: Watchdog CI
+
+on:
+  push:
+    branches: [develop, main]
+    paths:
+      - 'src/HitPan.Watchdog/**'
+      - 'src/HitPan.Watchdog.Tests/**'
+      - 'installer/**'
+      - 'tests/scenarios/**'
+      - '.github/workflows/watchdog-ci.yml'
+  pull_request:
+    branches: [develop, main]
+    paths:
+      - 'src/HitPan.Watchdog/**'
+      - 'src/HitPan.Watchdog.Tests/**'
+      - 'installer/**'
+      - 'tests/scenarios/**'
+
+permissions:
+  contents: read
+
+jobs:
+  build-and-test:
+    name: Watchdog Build + xUnit (errors 0 warnings 0)
+    runs-on: windows-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET 8
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Build Watchdog (TreatWarningsAsErrors)
+        run: dotnet build src/HitPan.Watchdog/HitPan.Watchdog.csproj -c Release --nologo
+
+      - name: Build Watchdog.Tests
+        run: dotnet build src/HitPan.Watchdog.Tests/HitPan.Watchdog.Tests.csproj -c Release --nologo
+
+      - name: Run xUnit (expect 34/34 PASS)
+        run: dotnet test src/HitPan.Watchdog.Tests/HitPan.Watchdog.Tests.csproj -c Release --no-build --nologo --verbosity normal
+
+      - name: Publish single-file EXE (smoke)
+        run: |
+          dotnet publish src/HitPan.Watchdog/HitPan.Watchdog.csproj `
+            -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true `
+            -o ./publish-watchdog
+          if (-not (Test-Path ./publish-watchdog/HitPan.Watchdog.exe)) {
+            throw "Publish output missing"
+          }
+          $size = (Get-Item ./publish-watchdog/HitPan.Watchdog.exe).Length / 1MB
+          Write-Output "Publish size: $([int]$size) MB"
+
+      - name: Health probe smoke (--health)
+        run: |
+          $env:HITPAN_TENANT_ID = "ci-runner"
+          $out = & ./publish-watchdog/HitPan.Watchdog.exe --health 2>&1 | Out-String
+          Write-Output $out
+          if ($out -notmatch '"OverallStatus"') {
+            throw "Health probe did not emit OverallStatus"
+          }
+        shell: pwsh
+
+      - name: Upload publish artifact
+        if: github.event_name == 'pull_request'
+        uses: actions/upload-artifact@v4
+        with:
+          name: hitpan-watchdog-${{ github.sha }}
+          path: ./publish-watchdog/HitPan.Watchdog.exe
+          retention-days: 7
+
+  installer-validate:
+    name: Installer Inno Setup Lint
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Validate ISS file syntax
+        run: |
+          if [ ! -f installer/HitPanSetup.iss ]; then
+            echo "ISS file missing"; exit 1
+          fi
+          # 필수 섹션 박제
+          for section in '\[Setup\]' '\[Files\]' '\[Run\]' '\[Code\]'; do
+            if ! grep -qE "$section" installer/HitPanSetup.iss; then
+              echo "Missing section: $section"; exit 1
+            fi
+          done
+          # 필수 PowerShell 스크립트 5종 박제
+          for ps in AntivirusExceptions FirewallRules InstallCloudflared InstallWatchdog SelfCheck; do
+            if [ ! -f "installer/scripts/$ps.ps1" ]; then
+              echo "Missing script: installer/scripts/$ps.ps1"; exit 1
+            fi
+          done
+          echo "Installer artifacts validated"
+
+  scenario-lint:
+    name: Scenario PowerShell Syntax Check
+    runs-on: windows-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Parse PowerShell scripts (Pester-free syntax check)
+        run: |
+          $errs = @()
+          Get-ChildItem tests/scenarios -Filter *.ps1 -Recurse | ForEach-Object {
+            $null = [System.Management.Automation.PSParser]::Tokenize((Get-Content -Raw $_.FullName), [ref]$errs)
+            if ($errs.Count -gt 0) {
+              Write-Host "::error file=$($_.FullName)::Parse errors: $($errs.Count)"
+              exit 1
+            }
+          }
+          Write-Output "All scenario scripts parsed OK"
+        shell: pwsh

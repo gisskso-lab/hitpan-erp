@@ -51,7 +51,17 @@ public sealed class WatchdogController : ControllerBase
         string? stage,
         DateTime timestamp);
 
+    /// <summary>워치독 메타 ping 수신 (5분 주기, 헌법 #22 정합).</summary>
+    /// <remarks>고객 PC HitPan.Watchdog → 본사 push. tenant_id 원본·업무 데이터 일체 금지.</remarks>
+    /// <response code="200">수신 완료, 다음 ping 권장 주기 반환</response>
+    /// <response code="400">payload 검증 실패 (금지 필드 탐지 등)</response>
+    /// <response code="401">Bearer 토큰 누락 또는 무효 (WatchdogBearerMiddleware)</response>
+    /// <response code="500">본사 DB 저장 실패</response>
     [HttpPost("ping")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(StatusCodes.Status500InternalServerError)]
     public async Task<IActionResult> Ping([FromBody] MetaPingDto p, CancellationToken ct)
     {
         if (p is null) return BadRequest(new { error = "payload required" });
@@ -102,7 +112,17 @@ public sealed class WatchdogController : ControllerBase
         }
     }
 
+    /// <summary>워치독 emergency 알림 수신 (cool down 5회 초과 시, 헌법 #28-F).</summary>
+    /// <remarks>본사 CS 자동 발신 트리거. CsAutoDispatchService가 5분 주기로 cs_notified_at NULL 행 처리.</remarks>
+    /// <response code="200">수신 완료</response>
+    /// <response code="400">payload 검증 실패</response>
+    /// <response code="401">Bearer 토큰 누락 또는 무효</response>
+    /// <response code="500">본사 DB 저장 실패</response>
     [HttpPost("emergency")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(StatusCodes.Status500InternalServerError)]
     public async Task<IActionResult> Emergency([FromBody] EmergencyDto p, CancellationToken ct)
     {
         if (p is null) return BadRequest(new { error = "payload required" });
