@@ -1,0 +1,175 @@
+@* 작지① 잔여: 상품마스터 규격 1:N CRUD 영역 (사장님 작업지시 2026-05-31)
+   ItemDetail.razor 내에서 사용 — items.spec 단일 컬럼 외 다중 규격 박제 *@
+@using System.Net.Http.Json
+@inject HttpClient Http
+@inject ISnackbar Snackbar
+
+@if (string.IsNullOrEmpty(ItemId))
+{
+    <MudAlert Severity="Severity.Info" Dense="true">상품을 먼저 저장한 뒤 다중 규격을 등록할 수 있습니다.</MudAlert>
+}
+else
+{
+    <MudPaper Class="pa-3" Elevation="0" Style="border:1px solid var(--mud-palette-lines-default);border-radius:12px">
+        <div style="display:flex; align-items:center; justify-content:space-between;">
+            <MudText Typo="Typo.subtitle1">규격 목록 (콤보박스 옵션)</MudText>
+            <MudIconButton Icon="@Icons.Material.Filled.Refresh" Size="Size.Small" OnClick="LoadAsync" />
+        </div>
+
+        @if (_loading)
+        {
+            <MudProgressLinear Indeterminate="true" Color="Color.Primary" />
+        }
+        else
+        {
+            <MudTable Items="_specs" Dense="true" Hover="true" Class="mt-2">
+                <HeaderContent>
+                    <MudTh Style="width:60px;">정렬</MudTh>
+                    <MudTh>규격값</MudTh>
+                    <MudTh Style="width:80px;">기본</MudTh>
+                    <MudTh Style="width:120px;"></MudTh>
+                </HeaderContent>
+                <RowTemplate>
+                    <MudTd>@context.DisplayOrder</MudTd>
+                    <MudTd>@context.SpecValue</MudTd>
+                    <MudTd>@(context.IsDefault ? "★" : "")</MudTd>
+                    <MudTd>
+                        <MudIconButton Icon="@Icons.Material.Filled.Delete" Size="Size.Small" Color="Color.Error"
+                                       OnClick="@(() => DeactivateAsync(context))" />
+                    </MudTd>
+                </RowTemplate>
+                <NoRecordsContent>
+                    <MudText Typo="Typo.body2" Class="pa-2 mud-text-secondary">등록된 규격이 없습니다.</MudText>
+                </NoRecordsContent>
+            </MudTable>
+
+            <MudDivider Class="my-3" />
+
+            <MudGrid>
+                <MudItem xs="12" md="6">
+                    <MudTextField T="string" @bind-Value="_newSpec" Label="신규 규격값" Margin="Margin.Dense" Placeholder="예: 100×200×3mm, M8×30" />
+                </MudItem>
+                <MudItem xs="6" md="3">
+                    <MudNumericField T="int" @bind-Value="_newOrder" Label="정렬 순서" Margin="Margin.Dense" />
+                </MudItem>
+                <MudItem xs="6" md="3">
+                    <MudCheckBox T="bool" @bind-Value="_newDefault" Label="기본" Dense="true" />
+                </MudItem>
+                <MudItem xs="12">
+                    <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Add"
+                               OnClick="AddAsync" Disabled="@(_busy || string.IsNullOrWhiteSpace(_newSpec))">
+                        @(_busy ? "추가 중…" : "규격 추가")
+                    </MudButton>
+                </MudItem>
+            </MudGrid>
+        }
+    </MudPaper>
+}
+
+@code {
+    [Parameter] public string? ItemId { get; set; }
+
+    private List<ItemSpecDto> _specs = new();
+    private bool _loading;
+    private bool _busy;
+    private string _newSpec = string.Empty;
+    private int _newOrder;
+    private bool _newDefault;
+    private string? _loadedItemId;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (!string.IsNullOrEmpty(ItemId) && ItemId != _loadedItemId)
+        {
+            await LoadAsync();
+            _loadedItemId = ItemId;
+        }
+    }
+
+    private async Task LoadAsync()
+    {
+        if (string.IsNullOrEmpty(ItemId)) return;
+        _loading = true;
+        try
+        {
+            var list = await Http.GetFromJsonAsync<List<ItemSpecDto>>($"api/items/{ItemId}/specs?activeOnly=true");
+            _specs = list ?? new();
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"규격 조회 실패: {ex.Message}", Severity.Error);
+            _specs = new();
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    private async Task AddAsync()
+    {
+        if (string.IsNullOrEmpty(ItemId) || string.IsNullOrWhiteSpace(_newSpec)) return;
+        _busy = true;
+        try
+        {
+            var resp = await Http.PostAsJsonAsync($"api/items/{ItemId}/specs", new
+            {
+                specValue = _newSpec.Trim(),
+                displayOrder = _newOrder,
+                isDefault = _newDefault
+            });
+
+            if (resp.IsSuccessStatusCode)
+            {
+                Snackbar.Add("규격 추가 완료", Severity.Success);
+                _newSpec = string.Empty;
+                _newDefault = false;
+                await LoadAsync();
+            }
+            else
+            {
+                var body = await resp.Content.ReadAsStringAsync();
+                Snackbar.Add($"규격 추가 실패 ({(int)resp.StatusCode}): {body}", Severity.Error);
+            }
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"규격 추가 실패: {ex.Message}", Severity.Error);
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private async Task DeactivateAsync(ItemSpecDto spec)
+    {
+        try
+        {
+            var resp = await Http.DeleteAsync($"api/items/{ItemId}/specs/{spec.SpecId}");
+            if (resp.IsSuccessStatusCode)
+            {
+                Snackbar.Add("규격 비활성화 완료", Severity.Success);
+                await LoadAsync();
+            }
+            else
+            {
+                Snackbar.Add($"비활성화 실패 ({(int)resp.StatusCode})", Severity.Error);
+            }
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"비활성화 실패: {ex.Message}", Severity.Error);
+        }
+    }
+
+    private sealed class ItemSpecDto
+    {
+        public string SpecId { get; set; } = string.Empty;
+        public string ItemId { get; set; } = string.Empty;
+        public string SpecValue { get; set; } = string.Empty;
+        public int DisplayOrder { get; set; }
+        public bool IsDefault { get; set; }
+        public bool IsActive { get; set; } = true;
+    }
+}

@@ -38,9 +38,15 @@ else
                     <MudSelectItem Value="@("semi_finished")">반제품</MudSelectItem>
                     <MudSelectItem Value="@("finished")">완제품</MudSelectItem>
                 </MudSelect>
-                <MudTextField @bind-Value="_model.Spec" Label="규격" Variant="Variant.Outlined" Margin="Margin.Dense" />
+                <MudTextField @bind-Value="_model.Spec" Label="기본 규격(단일)" Variant="Variant.Outlined" Margin="Margin.Dense"
+                              HelperText="그리드 콤보박스의 옵션은 아래 '규격 목록'에서 다중 등록" />
                 <MudTextField @bind-Value="_model.Unit" Label="단위" Variant="Variant.Outlined" Margin="Margin.Dense" />
             </MudPaper>
+        </MudItem>
+
+        @* 작지① 잔여: 상품 규격 1:N CRUD (사장님 작업지시 2026-05-31) *@
+        <MudItem xs="12">
+            <ItemSpecManager ItemId="@Id" />
         </MudItem>
 
         <MudItem xs="12" md="6">
