@@ -24,6 +24,10 @@ public partial class ReturnPage : ComponentBase
     private string _returnType = "purchase_return";
     private bool _isNew = true;
 
+    // 작지 #3 반품 전용 컬럼 (사장님 작업지시 2026-05-31)
+    private string? _returnReason;
+    private string? _returnReasonMemo;
+
     protected override async Task OnInitializedAsync()
     {
         _itemCache = await ItemsApi.GetListAsync() ?? new();

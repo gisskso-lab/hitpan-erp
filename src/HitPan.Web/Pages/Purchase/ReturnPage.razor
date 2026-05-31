@@ -78,13 +78,16 @@
         </MudToolBar>
 
         <div class="return-grid-wrap">
-            <PurchaseOrderGrid Lines="_draft.Lines"
-                               Density="_draft.Density"
-                               Summary="_summary"
-                               Status="_status"
-                               ItemCache="_itemCache"
-                               OnChanged="OnGridChangedAsync"
-                               SelectedLineChanged="OnSelectedLineChangedAsync" />
+            @* 작지 #3 반품 전용 그리드 (사장님 작업지시 2026-05-31) — PurchaseOrderGrid 재사용 한계 봉합 *@
+            <PurchaseReturnGrid Lines="_draft.Lines"
+                                Density="_draft.Density"
+                                Summary="_summary"
+                                Status="_status"
+                                ItemCache="_itemCache"
+                                OnChanged="OnGridChangedAsync"
+                                SelectedLineChanged="OnSelectedLineChangedAsync"
+                                @bind-ReturnReason="_returnReason"
+                                @bind-ReturnReasonMemo="_returnReasonMemo" />
         </div>
 
         <MudPaper Class="pa-3 mt-2">

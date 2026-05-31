@@ -14,6 +14,12 @@ public class CreatePurchaseReturnRequest
     public DateTime ReturnDate { get; set; }
     public string? Memo { get; set; }
 
+    // 작지③ 반품 전용 컬럼 (사장님 작업지시 2026-05-31)
+    // defect·wrong_item·over_qty·customer_cancel·etc
+    public string? ReturnReason { get; set; }
+    [MaxLength(500)]
+    public string? ReturnReasonMemo { get; set; }
+
     [Required]
     [MinLength(1)]
     public List<CreatePurchaseReturnItemRequest> Items { get; set; } = new();
@@ -47,6 +53,10 @@ public class UpdatePurchaseReturnRequest
 
     public DateTime ReturnDate { get; set; }
     public string? Memo { get; set; }
+
+    public string? ReturnReason { get; set; }
+    [MaxLength(500)]
+    public string? ReturnReasonMemo { get; set; }
 
     [Required]
     [MinLength(1)]

@@ -1,0 +1,107 @@
+@using HitPan.Web.Models
+@namespace HitPan.Web.Components.Purchase
+
+@* 작지 #3 반품 전용 그리드 (사장님 작업지시 2026-05-31)
+   PurchaseOrderGrid 재사용 한계 봉합 — 반품 사유 컬럼 + 반품 사유 메모 박제 *@
+
+<MudPaper Class="pa-2 mb-2" Elevation="0">
+    <MudGrid>
+        <MudItem xs="12" md="4">
+            <MudSelect T="string" @bind-Value="ReturnReason" Label="반품 사유" Margin="Margin.Dense" Variant="Variant.Outlined">
+                <MudSelectItem Value="@("defect")">불량</MudSelectItem>
+                <MudSelectItem Value="@("wrong_item")">오배송</MudSelectItem>
+                <MudSelectItem Value="@("over_qty")">수량초과</MudSelectItem>
+                <MudSelectItem Value="@("customer_cancel")">고객취소</MudSelectItem>
+                <MudSelectItem Value="@("etc")">기타</MudSelectItem>
+            </MudSelect>
+        </MudItem>
+        <MudItem xs="12" md="8">
+            <MudTextField T="string" @bind-Value="ReturnReasonMemo" Label="반품 사유 상세 (자유 입력)" Margin="Margin.Dense" Variant="Variant.Outlined" MaxLength="500" />
+        </MudItem>
+    </MudGrid>
+</MudPaper>
+
+<MudTable T="DeliveryLineModel" Items="Lines" Dense="true" Hover="true" Striped="true" FixedHeader="true" Height="calc(100vh - 420px)">
+    <HeaderContent>
+        <MudTh Style="width:48px"><MudCheckBox T="bool" Value="_allSelected" ValueChanged="ToggleAllAsync" /></MudTh>
+        <MudTh Style="width:60px">No</MudTh>
+        <MudTh>품명</MudTh>
+        <MudTh>규격</MudTh>
+        <MudTh Style="width:90px">단위</MudTh>
+        <MudTh Class="text-right">반품수량</MudTh>
+        <MudTh Class="text-right">단가</MudTh>
+        <MudTh Class="text-right">금액</MudTh>
+        <MudTh Class="text-right">부가세액</MudTh>
+        <MudTh>품목별 사유</MudTh>
+    </HeaderContent>
+    <RowTemplate>
+        <MudTd><MudCheckBox T="bool" Value="context.IsSelected" ValueChanged="@(v => { context.IsSelected = v; _allSelected = Lines.Where(x => !x.IsPlaceholder).All(x => x.IsSelected); })" /></MudTd>
+        <MudTd>@context.No</MudTd>
+        <MudTd><MudAutocomplete T="string" Value="context.ItemName" SearchFunc="SearchItemAsync"
+            ValueChanged="@(v => { context.ItemName = v; context.IsPlaceholder = false; AutoFillItem(context, v); NotifyChanged(); })"
+            Margin="Margin.Dense" Dense="true" Placeholder="품명 검색" /></MudTd>
+        <MudTd>
+            <ItemSpecAutocomplete ItemId="@context.ItemId" Value="@context.Spec"
+                                   ValueChanged="@(v => { context.Spec = v; NotifyChanged(); })" />
+        </MudTd>
+        <MudTd><MudTextField T="string" Value="context.Unit" ValueChanged="@(v => { context.Unit = v; NotifyChanged(); })" Margin="Margin.Dense" /></MudTd>
+        <MudTd><MudNumericField T="decimal" Value="context.Qty" ValueChanged="@(v => { context.Qty = v; RecalcLine(context); })" Margin="Margin.Dense" /></MudTd>
+        <MudTd><MudNumericField T="decimal" Value="context.UnitPrice" ValueChanged="@(v => { context.UnitPrice = v; RecalcLine(context); })" Margin="Margin.Dense" /></MudTd>
+        <MudTd Class="text-right">@context.Amount.ToString("N0")</MudTd>
+        <MudTd Class="text-right">@context.VatAmount.ToString("N0")</MudTd>
+        <MudTd><MudTextField T="string" Value="context.Note" ValueChanged="@(v => { context.Note = v; NotifyChanged(); })" Margin="Margin.Dense" Placeholder="품목별 반품 사유" /></MudTd>
+    </RowTemplate>
+    <NoRecordsContent><MudText Typo="Typo.body2" Class="pa-4">반품 품목이 없습니다.</MudText></NoRecordsContent>
+</MudTable>
+
+@code {
+    private bool _allSelected;
+
+    [Parameter, EditorRequired] public List<DeliveryLineModel> Lines { get; set; } = default!;
+    [Parameter] public DeliveryGridDensity Density { get; set; }
+    [Parameter] public DeliverySummaryModel Summary { get; set; } = new();
+    [Parameter] public string Status { get; set; } = "draft";
+    [Parameter] public EventCallback OnChanged { get; set; }
+    [Parameter] public EventCallback<DeliveryLineModel?> SelectedLineChanged { get; set; }
+    [Parameter] public List<ItemListModel>? ItemCache { get; set; }
+
+    [Parameter] public string? ReturnReason { get; set; }
+    [Parameter] public EventCallback<string?> ReturnReasonChanged { get; set; }
+    [Parameter] public string? ReturnReasonMemo { get; set; }
+    [Parameter] public EventCallback<string?> ReturnReasonMemoChanged { get; set; }
+
+    private Task<IEnumerable<string>> SearchItemAsync(string value, CancellationToken ct)
+    {
+        if (ItemCache is null) return Task.FromResult(Enumerable.Empty<string>());
+        if (string.IsNullOrWhiteSpace(value)) return Task.FromResult(ItemCache.Select(i => i.ItemName).Distinct());
+        return Task.FromResult(ItemCache.Where(i => i.ItemName.Contains(value, StringComparison.OrdinalIgnoreCase)).Select(i => i.ItemName).Distinct());
+    }
+
+    private void AutoFillItem(DeliveryLineModel line, string itemName)
+    {
+        if (ItemCache is null) return;
+        var item = ItemCache.FirstOrDefault(i => i.ItemName == itemName);
+        if (item is null) return;
+        line.ItemId = item.ItemId;
+        line.Spec = item.Spec ?? "";
+        line.Unit = item.Unit;
+        line.UnitPrice = item.PurchasePrice;
+    }
+
+    private async Task ToggleAllAsync(bool value)
+    {
+        _allSelected = value;
+        foreach (var l in Lines.Where(x => !x.IsPlaceholder)) l.IsSelected = value;
+    }
+
+    private void RecalcLine(DeliveryLineModel line)
+    {
+        Summary.SupplyAmount = Lines.Where(x => !x.IsPlaceholder).Sum(x => x.Amount);
+        Summary.VatAmount = Lines.Where(x => !x.IsPlaceholder).Sum(x => x.VatAmount);
+        Summary.TotalAmount = Summary.SupplyAmount + Summary.VatAmount;
+        OnChanged.InvokeAsync();
+        StateHasChanged();
+    }
+
+    private void NotifyChanged() => OnChanged.InvokeAsync();
+}

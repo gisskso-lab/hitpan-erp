@@ -74,6 +74,13 @@ public class ItemSpecService : IItemSpecService
             },
             cancellationToken: ct));
 
+        // 작지 #4 동기화 정책 (사장님 작업지시 2026-05-31)
+        // is_default=1로 신규 박제 시 items.spec도 동일값으로 sync
+        if (request.IsDefault)
+        {
+            await SyncItemsSpecColumnAsync(db, tenantId, itemId, request.SpecValue, ct);
+        }
+
         _logger.LogInformation("ItemSpec created: tenant={Tenant} item={Item} spec={Spec}",
             tenantId, itemId, request.SpecValue);
 
@@ -127,6 +134,12 @@ public class ItemSpecService : IItemSpecService
             throw new InvalidOperationException($"해당 규격을 찾을 수 없습니다. spec_id={specId}");
         }
 
+        // 작지 #4 동기화 (사장님 작업지시 2026-05-31)
+        if (request.IsDefault && request.IsActive)
+        {
+            await SyncItemsSpecColumnAsync(db, tenantId, itemId, request.SpecValue, ct);
+        }
+
         return new ItemSpecDto
         {
             SpecId = specId,
@@ -148,5 +161,25 @@ public class ItemSpecService : IItemSpecService
 
         _logger.LogInformation("ItemSpec deactivated: tenant={Tenant} item={Item} spec={Spec}",
             tenantId, itemId, specId);
+    }
+
+    // 작지 #4 동기화 정책 (사장님 작업지시 2026-05-31)
+    // item_specs(is_default=1) 변경 시 → items.spec 컬럼에 자동 sync
+    // 기존 코드(items.spec 단일 컬럼 사용)와 신규 코드(item_specs 1:N) 호환 보장
+    private async Task SyncItemsSpecColumnAsync(System.Data.IDbConnection db, string tenantId, string itemId, string specValue, CancellationToken ct)
+    {
+        try
+        {
+            await db.ExecuteAsync(new CommandDefinition(
+                @"UPDATE items SET spec = @Spec
+                  WHERE tenant_id = @TenantId AND item_id = @ItemId AND COALESCE(spec, '') <> @Spec",
+                new { TenantId = tenantId, ItemId = itemId, Spec = specValue },
+                cancellationToken: ct));
+        }
+        catch (Exception ex)
+        {
+            // items 테이블 spec 컬럼 미존재 등 = silent OK (헌법 #15 정합 log만)
+            _logger.LogWarning(ex, "items.spec sync failed: tenant={Tenant} item={Item}", tenantId, itemId);
+        }
     }
 }

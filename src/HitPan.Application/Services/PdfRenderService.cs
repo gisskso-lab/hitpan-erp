@@ -18,10 +18,12 @@ public sealed class PdfRenderService : IPdfRenderService
 {
     private readonly IDbConnection _db;
     private readonly ILogger<PdfRenderService> _logger;
+    private readonly IFormTemplateService? _formTemplateService;
 
-    public PdfRenderService(IDbConnection db, ILogger<PdfRenderService> logger)
+    public PdfRenderService(IDbConnection db, ILogger<PdfRenderService> logger,
+        IFormTemplateService? formTemplateService = null)
     {
-        _db = db; _logger = logger;
+        _db = db; _logger = logger; _formTemplateService = formTemplateService;
         QuestPDF.Settings.License = LicenseType.Community;
     }
 
@@ -32,22 +34,43 @@ public sealed class PdfRenderService : IPdfRenderService
         var data = await LoadDocumentAsync(tenantId, documentType, documentId, ct).ConfigureAwait(false);
         var company = await LoadCompanyAsync(tenantId, ct).ConfigureAwait(false);
 
+        // 작지② 양식 분기 (사장님 작업지시 2026-05-31)
+        // form_templates에서 paper_mode + 여백 + 토글 로드 → plain·preprint 분기
+        var template = await TryLoadTemplateAsync(tenantId, documentType, ct).ConfigureAwait(false);
+        var isPreprint = template?.PaperMode == "preprint";
+        var showHeader = template?.ShowCompanyLogo ?? true;
+        var showBorder = template?.ShowBorder ?? true;
+        var marginTop = (float)(template?.MarginTopMm ?? 20);
+        var marginLeft = (float)(template?.MarginLeftMm ?? 20);
+        var marginRight = (float)(template?.MarginRightMm ?? 20);
+        var marginBottom = (float)(template?.MarginBottomMm ?? 20);
+
         var bytes = Document.Create(c =>
         {
             c.Page(page =>
             {
                 page.Size(PageSizes.A4);
-                page.Margin(2, Unit.Centimetre);
+                page.MarginTop(marginTop, Unit.Millimetre);
+                page.MarginLeft(marginLeft, Unit.Millimetre);
+                page.MarginRight(marginRight, Unit.Millimetre);
+                page.MarginBottom(marginBottom, Unit.Millimetre);
                 page.DefaultTextStyle(t => t.FontFamily("Malgun Gothic").FontSize(10));
                 page.PageColor(Colors.White);
 
-                page.Header().Element(e => ComposeHeader(e, data, company));
-                page.Content().Element(e => ComposeBody(e, data));
-                page.Footer().AlignCenter().Text(t =>
+                // preprint(양식용지): 헤더·테두리 미렌더, 필드값만 박제
+                if (!isPreprint && showHeader)
                 {
-                    t.Span("Page ").FontSize(8); t.CurrentPageNumber().FontSize(8);
-                    t.Span(" / ").FontSize(8); t.TotalPages().FontSize(8);
-                });
+                    page.Header().Element(e => ComposeHeader(e, data, company));
+                }
+                page.Content().Element(e => ComposeBody(e, data, isPreprint, showBorder));
+                if (!isPreprint)
+                {
+                    page.Footer().AlignCenter().Text(t =>
+                    {
+                        t.Span("Page ").FontSize(8); t.CurrentPageNumber().FontSize(8);
+                        t.Span(" / ").FontSize(8); t.TotalPages().FontSize(8);
+                    });
+                }
             });
         }).GeneratePdf();
 
@@ -95,12 +118,19 @@ public sealed class PdfRenderService : IPdfRenderService
         });
     }
 
-    private static void ComposeBody(IContainer e, DocumentSnapshot d)
+    private static void ComposeBody(IContainer e, DocumentSnapshot d, bool isPreprint = false, bool showBorder = true)
     {
+        // preprint(양식용지): 거래처·합계 박스 테두리·헤더 미렌더, 필드값만 좌표 박제
+        if (isPreprint)
+        {
+            ComposeBodyPreprint(e, d);
+            return;
+        }
+        var borderWidth = showBorder ? 0.5f : 0f;
         e.PaddingTop(10).Column(col =>
         {
             // 거래처 박스
-            col.Item().PaddingBottom(8).Border(0.5f).BorderColor(Colors.Grey.Lighten1).Padding(8).Column(p =>
+            col.Item().PaddingBottom(8).Border(borderWidth).BorderColor(Colors.Grey.Lighten1).Padding(8).Column(p =>
             {
                 p.Item().Text("[ 거래처 정보 ]").FontSize(9).SemiBold();
                 p.Item().PaddingTop(4).Row(r =>
@@ -416,5 +446,103 @@ public sealed class PdfRenderService : IPdfRenderService
         public string? RepresentativeName { get; set; }
         public string? Address { get; set; }
         public string? Phone { get; set; }
+    }
+
+    // 작지② paper_mode preprint 렌더링 — 시판 양식용지에 필드값만 좌표 박제
+    // 테두리·헤더·푸터·합계 박스 모두 미렌더. 라인 데이터만 표 형태로 박제.
+    private static void ComposeBodyPreprint(IContainer e, DocumentSnapshot d)
+    {
+        e.Column(col =>
+        {
+            // 거래처명 + 일자 — 양식용지 상단 좌표 (라벨 없음, 값만)
+            col.Item().Row(r =>
+            {
+                r.RelativeItem().Text(d.PartnerName).FontSize(11);
+                r.RelativeItem().AlignRight().Text(d.DocDate.ToString("yyyy-MM-dd")).FontSize(10);
+            });
+
+            // 라인 — 양식용지 본문 영역 (테두리 0, 좌표 박제)
+            col.Item().PaddingTop(40).Table(tbl =>
+            {
+                tbl.ColumnsDefinition(c =>
+                {
+                    c.ConstantColumn(25);
+                    c.RelativeColumn(3);
+                    c.RelativeColumn(2);
+                    c.ConstantColumn(50);
+                    c.ConstantColumn(70);
+                    c.ConstantColumn(80);
+                    c.ConstantColumn(60);
+                    c.ConstantColumn(80);
+                });
+                int seq = 1;
+                foreach (var line in d.Lines)
+                {
+                    tbl.Cell().Padding(2).AlignCenter().Text($"{seq++}").FontSize(9);
+                    tbl.Cell().Padding(2).Text(line.ItemName).FontSize(9);
+                    tbl.Cell().Padding(2).Text(line.Spec ?? "").FontSize(9);
+                    tbl.Cell().Padding(2).AlignRight().Text(line.Qty.ToString("N1")).FontSize(9);
+                    tbl.Cell().Padding(2).AlignRight().Text(line.UnitPrice.ToString("N0")).FontSize(9);
+                    tbl.Cell().Padding(2).AlignRight().Text(line.Supply.ToString("N0")).FontSize(9);
+                    tbl.Cell().Padding(2).AlignRight().Text(line.Vat.ToString("N0")).FontSize(9);
+                    tbl.Cell().Padding(2).AlignRight().Text(line.Total.ToString("N0")).FontSize(9);
+                }
+            });
+
+            // 합계만 (라벨 없음, 양식용지 합계 박스 좌표)
+            col.Item().PaddingTop(20).AlignRight().Text(d.TotalAmount.ToString("N0")).FontSize(11).Bold();
+        });
+    }
+
+    // form_templates 조회 — 미존재 시 null (기존 plain 동작 정합)
+    private async Task<FormTemplateInfo?> TryLoadTemplateAsync(string tenantId, string documentType, CancellationToken ct)
+    {
+        if (_formTemplateService is null) return null;
+
+        // documentType → form_type 매핑
+        var formType = documentType switch
+        {
+            "quotation" => "estimate",
+            "sales_order" => "sales_order",
+            "delivery" => "delivery",
+            "purchase_order" => "purchase_order",
+            "purchase_receipt" => "receipt",
+            "purchase_return" => "purchase_return",
+            "tax_invoice" => "tax_invoice",
+            _ => null
+        };
+        if (formType is null) return null;
+
+        try
+        {
+            var dto = await _formTemplateService.GetDefaultAsync(tenantId, formType, ct).ConfigureAwait(false);
+            if (dto is null) return null;
+            return new FormTemplateInfo
+            {
+                PaperMode = dto.PaperMode,
+                MarginTopMm = dto.MarginTopMm,
+                MarginLeftMm = dto.MarginLeftMm,
+                MarginRightMm = dto.MarginRightMm,
+                MarginBottomMm = dto.MarginBottomMm,
+                ShowCompanyLogo = dto.ShowCompanyLogo,
+                ShowBorder = dto.ShowBorder
+            };
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "form_templates 조회 실패 - tenant={Tenant} type={Type}, 기본 plain 가도", tenantId, formType);
+            return null;
+        }
+    }
+
+    private sealed class FormTemplateInfo
+    {
+        public string PaperMode { get; set; } = "plain";
+        public decimal MarginTopMm { get; set; } = 20;
+        public decimal MarginLeftMm { get; set; } = 20;
+        public decimal MarginRightMm { get; set; } = 20;
+        public decimal MarginBottomMm { get; set; } = 20;
+        public bool ShowCompanyLogo { get; set; } = true;
+        public bool ShowBorder { get; set; } = true;
     }
 }
