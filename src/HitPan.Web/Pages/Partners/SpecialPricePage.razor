@@ -4,6 +4,7 @@
 @using HitPan.Web.Services
 @inject SpecialPriceService SpService
 @inject IDialogService DialogService
+@inject PartnerMasterService PartnersApi
 
 <div class="sp-page">
     <MudPaper Elevation="0" Class="pa-3 mb-2" Style="border-bottom:1px solid #E5E7EB">
@@ -194,10 +195,18 @@
     private string RowStyle(SpecialPriceItem item, int index)
         => "height:36px;font-size:13px;";
 
-    private Task<IEnumerable<string>> SearchPartner(string value, CancellationToken ct)
+    // P0 #4 — 거래처 자동완성 (PartnerMasterService 캐시 활용)
+    private List<HitPan.Web.Models.PartnerListRow>? _partnerCache;
+    private async Task<IEnumerable<string>> SearchPartner(string value, CancellationToken ct)
     {
-        // TODO: 업체 검색 API 연동
-        return Task.FromResult<IEnumerable<string>>(new List<string>());
+        _partnerCache ??= await PartnersApi.GetListAsync(ct: ct) ?? new();
+        if (string.IsNullOrWhiteSpace(value))
+            return _partnerCache.Select(p => p.PartnerName).Distinct().Take(20);
+        return _partnerCache
+            .Where(p => p.PartnerName.Contains(value, StringComparison.OrdinalIgnoreCase))
+            .Select(p => p.PartnerName)
+            .Distinct()
+            .Take(20);
     }
 
     private void FilterGrid(KeyboardEventArgs e)

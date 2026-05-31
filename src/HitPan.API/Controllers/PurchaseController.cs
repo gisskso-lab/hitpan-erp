@@ -155,6 +155,40 @@ public class PurchaseController : ControllerBase
         }
     }
 
+    // P0 #1 — 매입반품 신규 작성 (receipt_id 없이도 가능)
+    [HttpPost("returns")]
+    public async Task<IActionResult> CreateReturn([FromBody] CreatePurchaseReturnRequest request, CancellationToken ct)
+    {
+        var tenantId = HttpContext.Items["TenantId"]?.ToString();
+        if (string.IsNullOrEmpty(tenantId)) return Forbid();
+        try
+        {
+            var (returnId, returnNo) = await _purchaseService.CreatePurchaseReturnAsync(request, tenantId, ct);
+            return Created($"/api/purchase/returns/{returnId}", new { returnId, returnNo });
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(new { message = ex.Message });
+        }
+    }
+
+    // P0 #1 — draft 상태 매입반품 수정
+    [HttpPut("returns/{id}")]
+    public async Task<IActionResult> UpdateReturn(string id, [FromBody] UpdatePurchaseReturnRequest request, CancellationToken ct)
+    {
+        var tenantId = HttpContext.Items["TenantId"]?.ToString();
+        if (string.IsNullOrEmpty(tenantId)) return Forbid();
+        try
+        {
+            await _purchaseService.UpdatePurchaseReturnAsync(id, request, tenantId, ct);
+            return NoContent();
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(new { message = ex.Message });
+        }
+    }
+
     [HttpPost("receipts/{id}/convert-to-return")]
     public async Task<IActionResult> ConvertReceiptToReturn(string id, CancellationToken ct)
     {

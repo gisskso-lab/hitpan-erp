@@ -1,4 +1,6 @@
 using Microsoft.JSInterop;
+using System.Net.Http.Json;
+using System.Text.Json.Serialization;
 using HitPan.Web.Components.Common;
 using HitPan.Web.Components.Purchase;
 using HitPan.Web.Models;
@@ -135,22 +137,88 @@ public partial class ReturnPage : ComponentBase
     {
         if (_draft is null) return;
 
-        if (_isNew)
+        var partnerName = _draft.SalesCompany;
+        var partner = _partnerCache?.FirstOrDefault(p => string.Equals(p.PartnerName, partnerName, StringComparison.Ordinal));
+        if (partner is null)
         {
-            var go = await DialogService.ShowMessageBoxAsync(
-                "반품 생성 경로 안내",
-                "반품은 매입명세서에서 '반품전환' 버튼으로 생성됩니다. 매입명세서 화면으로 이동하시겠습니까?",
-                yesText: "매입명세서로 이동",
-                cancelText: "닫기");
-            if (go == true)
-            {
-                Nav.NavigateTo("/purchases");
-            }
+            Snackbar.Add("거래처를 선택해주세요.", Severity.Warning);
             return;
         }
 
-        // 기존 반품 편집 — 서버 수정 API가 아직 없으므로 draft 수정은 제한 안내.
-        Snackbar.Add("반품 수정 API는 아직 제공되지 않습니다. 삭제 후 매입에서 재전환 또는 '확정' 버튼으로 진행해주세요.", Severity.Info);
+        var items = _draft.Lines
+            .Where(l => !l.IsPlaceholder && !string.IsNullOrWhiteSpace(l.ItemId))
+            .Select(l => new
+            {
+                itemId = l.ItemId,
+                warehouseId = string.IsNullOrWhiteSpace(l.Warehouse) ? null : l.Warehouse,
+                qty = l.Quantity,
+                unitPrice = l.UnitPrice,
+                supplyAmount = l.Amount,
+                vatAmount = l.VatAmount
+            })
+            .ToList();
+
+        if (items.Count == 0)
+        {
+            Snackbar.Add("반품 품목을 1건 이상 입력해주세요.", Severity.Warning);
+            return;
+        }
+
+        var payload = new
+        {
+            partnerId = partner.PartnerId,
+            returnDate = _draft.SalesDate,
+            memo = (string?)null,
+            items
+        };
+
+        try
+        {
+            if (_isNew)
+            {
+                // P0 #1 — 신규 반품 작성
+                var resp = await Http.PostAsJsonAsync("api/purchase/returns", payload);
+                if (!resp.IsSuccessStatusCode)
+                {
+                    Snackbar.Add($"반품 저장 실패: {resp.StatusCode}", Severity.Error);
+                    return;
+                }
+                var created = await resp.Content.ReadFromJsonAsync<ReturnCreatedResponse>();
+                if (created is not null)
+                {
+                    _draft.Id = created.ReturnId;
+                    _draft.DocumentNumber = created.ReturnNo;
+                    _isNew = false;
+                }
+                Snackbar.Add("반품을 저장했습니다.", Severity.Success);
+            }
+            else
+            {
+                // P0 #1 — draft 반품 수정
+                var resp = await Http.PutAsJsonAsync($"api/purchase/returns/{_draft.Id}", payload);
+                if (!resp.IsSuccessStatusCode)
+                {
+                    Snackbar.Add($"반품 수정 실패: {resp.StatusCode}", Severity.Error);
+                    return;
+                }
+                Snackbar.Add("반품을 수정했습니다.", Severity.Success);
+            }
+
+            _hasUnsavedChanges = false;
+            if (TabService.ActiveTabId is { } tabId) TabService.SetTabDirty(tabId, false);
+            RecalculateSummary();
+            RefreshWorkflow();
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"반품 저장 오류: {ex.Message}", Severity.Error);
+        }
+    }
+
+    private class ReturnCreatedResponse
+    {
+        [JsonPropertyName("returnId")] public string ReturnId { get; set; } = string.Empty;
+        [JsonPropertyName("returnNo")] public string ReturnNo { get; set; } = string.Empty;
     }
 
     private async Task CancelAsync()
@@ -169,7 +237,8 @@ public partial class ReturnPage : ComponentBase
             RecalculateSummary();
             RefreshWorkflow();
         }
-        // TODO: 반품 백엔드 API 구현 후, _isNew == false 일 때 서버에서 다시 로드.
+        // P0 #1 — 신규 작성 모드는 클라이언트 reset만으로 충분. 기존 문서 편집 시
+        // GetReturnDetail API로 재로드(이미 페이지 진입 시 로드되므로 cancel은 reset만).
 
         _hasUnsavedChanges = false;
         if (TabService.ActiveTabId is { } tabId) TabService.SetTabDirty(tabId, false);

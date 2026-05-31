@@ -727,6 +727,140 @@ public class PurchaseService : IPurchaseService
         return (returnId, returnNo);
     }
 
+    // ─────────────────────────────────────────────────────────────────────
+    // P0 #1 — 매입반품 신규 작성 (헌법 #20 흐름 끊김 봉합)
+    // receipt_id 없이도 발행 가능. status='draft' 로 INSERT (헌법 #6 정합).
+    // ─────────────────────────────────────────────────────────────────────
+    public async Task<(string ReturnId, string ReturnNo)> CreatePurchaseReturnAsync(
+        CreatePurchaseReturnRequest request, string tenantId, CancellationToken ct = default)
+    {
+        if (request is null) throw new ArgumentNullException(nameof(request));
+        if (string.IsNullOrEmpty(request.PartnerId)) throw new InvalidOperationException("거래처는 필수입니다.");
+        if (request.Items is null || request.Items.Count == 0) throw new InvalidOperationException("반품 품목은 1건 이상이어야 합니다.");
+
+        if (_db.State != System.Data.ConnectionState.Open)
+        {
+            if (_db is System.Data.Common.DbConnection dbConn)
+                await dbConn.OpenAsync(ct);
+            else
+                _db.Open();
+        }
+
+        var returnDate = request.ReturnDate == default ? DateTime.UtcNow.Date : request.ReturnDate.Date;
+        var prefix = $"매반-{returnDate:yyyyMMdd}-";
+        var cnt = await _db.QueryFirstOrDefaultAsync<int>(new CommandDefinition(
+            "SELECT COUNT(*) FROM purchase_returns WHERE tenant_id=@Tid AND return_no LIKE CONCAT(@Pfx,'%')",
+            new { Tid = tenantId, Pfx = prefix }, cancellationToken: ct));
+        var returnNo = $"{prefix}{cnt + 1:000}";
+        var returnId = Guid.NewGuid().ToString();
+
+        decimal totalAmount = 0, totalVat = 0;
+        foreach (var it in request.Items)
+        {
+            totalAmount += it.SupplyAmount;
+            totalVat += it.VatAmount;
+        }
+
+        await _db.ExecuteAsync(new CommandDefinition(
+            @"INSERT INTO purchase_returns (return_id, tenant_id, return_no, receipt_id, partner_id,
+                return_date, return_type, status, total_amount, vat_amount, memo, created_at, updated_at)
+              VALUES (@ReturnId, @Tid, @ReturnNo, @ReceiptId, @PartnerId,
+                @ReturnDate, 'purchase_return', 'draft', @Total, @Vat, @Memo, NOW(6), NOW(6))",
+            new
+            {
+                ReturnId = returnId, Tid = tenantId, ReturnNo = returnNo,
+                ReceiptId = request.ReceiptId,
+                PartnerId = request.PartnerId,
+                ReturnDate = returnDate, Total = totalAmount, Vat = totalVat,
+                Memo = request.Memo
+            }, cancellationToken: ct));
+
+        foreach (var it in request.Items)
+        {
+            await _db.ExecuteAsync(new CommandDefinition(
+                @"INSERT INTO purchase_return_items (return_item_id, return_id, tenant_id,
+                    item_id, qty, unit_price, supply_amount, vat_amount, warehouse_id)
+                  VALUES (UUID(), @ReturnId, @Tid, @ItemId, @Qty, @Price, @Supply, @Vat, @Wh)",
+                new
+                {
+                    ReturnId = returnId, Tid = tenantId,
+                    ItemId = it.ItemId, Qty = it.Qty,
+                    Price = it.UnitPrice, Supply = it.SupplyAmount,
+                    Vat = it.VatAmount, Wh = it.WarehouseId
+                }, cancellationToken: ct));
+        }
+
+        return (returnId, returnNo);
+    }
+
+    // ─────────────────────────────────────────────────────────────────────
+    // P0 #1 — draft 상태 매입반품 수정 (confirmed/deleted 수정 절대 금지, 헌법 #6 정합)
+    // ─────────────────────────────────────────────────────────────────────
+    public async Task UpdatePurchaseReturnAsync(
+        string returnId, UpdatePurchaseReturnRequest request, string tenantId, CancellationToken ct = default)
+    {
+        if (request is null) throw new ArgumentNullException(nameof(request));
+        if (string.IsNullOrEmpty(request.PartnerId)) throw new InvalidOperationException("거래처는 필수입니다.");
+        if (request.Items is null || request.Items.Count == 0) throw new InvalidOperationException("반품 품목은 1건 이상이어야 합니다.");
+
+        if (_db.State != System.Data.ConnectionState.Open)
+        {
+            if (_db is System.Data.Common.DbConnection dbConn)
+                await dbConn.OpenAsync(ct);
+            else
+                _db.Open();
+        }
+
+        var current = await _db.QueryFirstOrDefaultAsync<dynamic>(new CommandDefinition(
+            "SELECT return_id, status FROM purchase_returns WHERE return_id=@Id AND tenant_id=@Tid",
+            new { Id = returnId, Tid = tenantId }, cancellationToken: ct))
+            ?? throw new InvalidOperationException("반품 문서를 찾을 수 없습니다.");
+
+        var status = (string)current.status;
+        if (!string.Equals(status, "draft", StringComparison.OrdinalIgnoreCase))
+            throw new InvalidOperationException($"draft 상태만 수정 가능합니다. (현재: {status})");
+
+        var returnDate = request.ReturnDate == default ? DateTime.UtcNow.Date : request.ReturnDate.Date;
+        decimal totalAmount = 0, totalVat = 0;
+        foreach (var it in request.Items)
+        {
+            totalAmount += it.SupplyAmount;
+            totalVat += it.VatAmount;
+        }
+
+        await _db.ExecuteAsync(new CommandDefinition(
+            @"UPDATE purchase_returns
+              SET partner_id=@PartnerId, return_date=@ReturnDate,
+                  total_amount=@Total, vat_amount=@Vat, memo=@Memo, updated_at=NOW(6)
+              WHERE return_id=@Id AND tenant_id=@Tid AND status='draft'",
+            new
+            {
+                Id = returnId, Tid = tenantId,
+                PartnerId = request.PartnerId, ReturnDate = returnDate,
+                Total = totalAmount, Vat = totalVat, Memo = request.Memo
+            }, cancellationToken: ct));
+
+        // 기존 라인 삭제 후 신규 라인 INSERT (헌법 #3 INSERT ONLY 원장과는 별개 — purchase_return_items는 헤더 종속 테이블).
+        await _db.ExecuteAsync(new CommandDefinition(
+            "DELETE FROM purchase_return_items WHERE return_id=@Id AND tenant_id=@Tid",
+            new { Id = returnId, Tid = tenantId }, cancellationToken: ct));
+
+        foreach (var it in request.Items)
+        {
+            await _db.ExecuteAsync(new CommandDefinition(
+                @"INSERT INTO purchase_return_items (return_item_id, return_id, tenant_id,
+                    item_id, qty, unit_price, supply_amount, vat_amount, warehouse_id)
+                  VALUES (UUID(), @ReturnId, @Tid, @ItemId, @Qty, @Price, @Supply, @Vat, @Wh)",
+                new
+                {
+                    ReturnId = returnId, Tid = tenantId,
+                    ItemId = it.ItemId, Qty = it.Qty,
+                    Price = it.UnitPrice, Supply = it.SupplyAmount,
+                    Vat = it.VatAmount, Wh = it.WarehouseId
+                }, cancellationToken: ct));
+        }
+    }
+
     // 결재 트리거는 ApprovalTriggerHelper.TryCreateApprovalAsync로 통합됨
 
     // ─────────────────────────────────────────────────────────────────────

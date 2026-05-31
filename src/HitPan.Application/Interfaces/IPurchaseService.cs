@@ -73,4 +73,17 @@ public interface IPurchaseService
         string returnId,
         string tenantId,
         CancellationToken ct = default);
+
+    // P0 #1 — 매입반품 신규 작성 (헌법 #20 흐름 끊김 봉합).
+    Task<(string ReturnId, string ReturnNo)> CreatePurchaseReturnAsync(
+        CreatePurchaseReturnRequest request,
+        string tenantId,
+        CancellationToken ct = default);
+
+    // P0 #1 — draft 상태 매입반품 수정.
+    Task UpdatePurchaseReturnAsync(
+        string returnId,
+        UpdatePurchaseReturnRequest request,
+        string tenantId,
+        CancellationToken ct = default);
 }

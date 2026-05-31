@@ -7,6 +7,7 @@
 @using HitPan.Web.Services
 @inject UnifiedCalendarService UnifiedSvc
 @inject IJSRuntime JS
+@inject PartnerMasterService PartnersApi
 
 @if (IsOpen)
 {
@@ -58,18 +59,22 @@
                     </div>
                 </div>
 
-                @* 거래처 *@
+                @* 거래처 — P0 #4 datalist 자동완성 *@
                 <div class="hp-sem-row">
                     <label class="hp-sem-label">거래처 (선택)</label>
-                    <input class="hp-sem-input" @bind="_partnerName" placeholder="거래처명 입력 (자동완성 추후)" />
-                    @* TODO: 거래처 자동완성 컴포넌트 연동 (PartnerSearchPopover 등 별도 작지서) *@
+                    <input class="hp-sem-input" list="hp-sem-partner-list" @bind="_partnerName" @oninput="OnPartnerInput" placeholder="거래처명 입력" />
+                    <datalist id="hp-sem-partner-list">
+                        @foreach (var name in _partnerSuggestions)
+                        {
+                            <option value="@name"></option>
+                        }
+                    </datalist>
                 </div>
 
-                @* 관련 직원 *@
+                @* 관련 직원 — 직원 자동완성은 별도 작지서 (employee 검색 API 부재) *@
                 <div class="hp-sem-row">
                     <label class="hp-sem-label">관련 직원 (선택)</label>
-                    <input class="hp-sem-input" @bind="_participantName" placeholder="직원명 입력 (자동완성 추후)" />
-                    @* TODO: 직원 자동완성 컴포넌트 연동 (별도 작지서) *@
+                    <input class="hp-sem-input" @bind="_participantName" placeholder="직원명 입력" />
                 </div>
 
                 @* 메모 *@
@@ -197,9 +202,35 @@
     private DateTime _lastBoundDate = DateTime.MinValue;
     private string? _lastBoundId;
 
-    // 거래처/직원 id는 자동완성 연동 시 채워짐 (현재 TODO).
+    // 거래처/직원 id는 자동완성 연동 시 채워짐.
     private string? _partnerId;
     private string? _participantId;
+
+    // P0 #4 — 거래처 자동완성 캐시 + 제안 목록
+    private List<PartnerListRow>? _partnerCache;
+    private IReadOnlyList<string> _partnerSuggestions = Array.Empty<string>();
+
+    private async Task OnPartnerInput(ChangeEventArgs e)
+    {
+        var value = e.Value?.ToString() ?? string.Empty;
+        _partnerName = value;
+        _partnerCache ??= await PartnersApi.GetListAsync() ?? new();
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            _partnerSuggestions = _partnerCache.Select(p => p.PartnerName).Distinct().Take(10).ToList();
+        }
+        else
+        {
+            _partnerSuggestions = _partnerCache
+                .Where(p => p.PartnerName.Contains(value, StringComparison.OrdinalIgnoreCase))
+                .Select(p => p.PartnerName)
+                .Distinct()
+                .Take(10)
+                .ToList();
+        }
+        var match = _partnerCache.FirstOrDefault(p => string.Equals(p.PartnerName, value, StringComparison.Ordinal));
+        _partnerId = match?.PartnerId;
+    }
 
     private readonly List<TypeOption> _typeOptions = new()
     {

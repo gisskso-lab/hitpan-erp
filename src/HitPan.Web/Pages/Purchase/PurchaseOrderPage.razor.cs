@@ -354,8 +354,8 @@ public partial class PurchaseOrderPage : ComponentBase
     {
         if (!_isNew && _draft is not null && !string.IsNullOrWhiteSpace(_draft.Id))
         {
-            // TODO: 발주서 상세 조회 API 연동 후 서버에서 다시 로드.
-            // 현재는 더티 플래그만 해제한다.
+            // P0 #2 — 서버에서 다시 로드 (취소 시 편집 내용 폐기 + draft 복원)
+            await ReloadOrderFromServerAsync(_draft.Id);
         }
         else
         {
@@ -381,6 +381,70 @@ public partial class PurchaseOrderPage : ComponentBase
 
         Snackbar.Add("변경사항을 취소했습니다.", Severity.Info);
         await InvokeAsync(StateHasChanged);
+    }
+
+    // P0 #2 — 발주서 단건 상세 조회 후 _draft 복원
+    private async Task ReloadOrderFromServerAsync(string poId)
+    {
+        try
+        {
+            var detail = await Http.GetFromJsonAsync<PurchaseOrderDetailResponse>($"api/purchase/orders/{poId}");
+            if (detail is null) return;
+
+            _draft = new DeliveryDraftModel
+            {
+                Id = detail.PoId,
+                DocumentNumber = detail.PoNo,
+                DocumentType = "발주",
+                SalesDate = detail.PoDate,
+                PartnerId = detail.PartnerId,
+                SalesCompany = detail.PartnerName,
+                ManagerName = "담당자",
+                Status = detail.Status,
+                Lines = detail.Items.Select((it, idx) => new DeliveryLineModel
+                {
+                    No = idx + 1,
+                    ItemId = it.ItemId,
+                    ItemName = it.ItemName,
+                    Spec = it.Spec ?? string.Empty,
+                    Unit = it.Unit ?? "EA",
+                    Quantity = it.Qty,
+                    UnitPrice = it.UnitPrice
+                }).ToList()
+            };
+            _deliveryDueDate = detail.ExpectedDate;
+            _status = detail.Status;
+            RecalculateSummary();
+            RefreshWorkflow();
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"발주서 재로드 실패: {ex.Message}", Severity.Warning);
+        }
+    }
+
+    private class PurchaseOrderDetailResponse
+    {
+        [JsonPropertyName("poId")] public string PoId { get; set; } = string.Empty;
+        [JsonPropertyName("poNo")] public string PoNo { get; set; } = string.Empty;
+        [JsonPropertyName("poDate")] public DateTime PoDate { get; set; }
+        [JsonPropertyName("expectedDate")] public DateTime? ExpectedDate { get; set; }
+        [JsonPropertyName("partnerId")] public string PartnerId { get; set; } = string.Empty;
+        [JsonPropertyName("partnerName")] public string PartnerName { get; set; } = string.Empty;
+        [JsonPropertyName("status")] public string Status { get; set; } = "Draft";
+        [JsonPropertyName("items")] public List<PurchaseOrderDetailItem> Items { get; set; } = new();
+    }
+
+    private class PurchaseOrderDetailItem
+    {
+        [JsonPropertyName("itemId")] public string ItemId { get; set; } = string.Empty;
+        [JsonPropertyName("itemName")] public string ItemName { get; set; } = string.Empty;
+        [JsonPropertyName("spec")] public string? Spec { get; set; }
+        [JsonPropertyName("unit")] public string? Unit { get; set; }
+        [JsonPropertyName("qty")] public decimal Qty { get; set; }
+        [JsonPropertyName("unitPrice")] public decimal UnitPrice { get; set; }
+        [JsonPropertyName("supplyAmount")] public decimal SupplyAmount { get; set; }
+        [JsonPropertyName("vatAmount")] public decimal VatAmount { get; set; }
     }
 
     /// <summary>
