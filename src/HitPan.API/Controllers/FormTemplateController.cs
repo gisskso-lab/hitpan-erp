@@ -42,7 +42,7 @@ public class FormTemplateController : ControllerBase
     }
 
     [HttpPost]
-    [Authorize(Roles = "tenant_admin")]
+    [Authorize(Roles = "system_admin,tenant_admin")]
     public async Task<IActionResult> Create([FromBody] CreateFormTemplateRequest request, CancellationToken ct)
     {
         var tenantId = HttpContext.Items["TenantId"]?.ToString();
@@ -61,7 +61,7 @@ public class FormTemplateController : ControllerBase
     }
 
     [HttpPut("{templateId}")]
-    [Authorize(Roles = "tenant_admin")]
+    [Authorize(Roles = "system_admin,tenant_admin")]
     public async Task<IActionResult> Update(string templateId, [FromBody] UpdateFormTemplateRequest request, CancellationToken ct)
     {
         var tenantId = HttpContext.Items["TenantId"]?.ToString();
@@ -80,7 +80,7 @@ public class FormTemplateController : ControllerBase
     }
 
     [HttpDelete("{templateId}")]
-    [Authorize(Roles = "tenant_admin")]
+    [Authorize(Roles = "system_admin,tenant_admin")]
     public async Task<IActionResult> Deactivate(string templateId, CancellationToken ct)
     {
         var tenantId = HttpContext.Items["TenantId"]?.ToString();
@@ -91,7 +91,7 @@ public class FormTemplateController : ControllerBase
     }
 
     [HttpPost("seed-defaults")]
-    [Authorize(Roles = "tenant_admin")]
+    [Authorize(Roles = "system_admin,tenant_admin")]
     public async Task<IActionResult> SeedDefaults(CancellationToken ct)
     {
         var tenantId = HttpContext.Items["TenantId"]?.ToString();

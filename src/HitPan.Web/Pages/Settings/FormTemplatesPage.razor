@@ -1,6 +1,6 @@
 @page "/settings/form-templates"
 @namespace HitPan.Web.Pages.SettingsUi
-@attribute [Authorize(Roles = "tenant_admin")]
+@attribute [Authorize(Roles = "system_admin,tenant_admin")]
 @using System.Net.Http.Json
 @inject HttpClient Http
 @inject ISnackbar Snackbar
