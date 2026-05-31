@@ -20,7 +20,11 @@
         <MudTd><MudAutocomplete T="string" Value="context.ItemName" SearchFunc="SearchItemAsync"
             ValueChanged="@(v => { context.ItemName = v; context.IsPlaceholder = false; AutoFillItem(context, v); NotifyChanged(); })"
             Margin="Margin.Dense" Dense="true" Placeholder="품명 검색" /></MudTd>
-        <MudTd><MudTextField T="string" Value="context.Spec" ValueChanged="@(v => { context.Spec = v; NotifyChanged(); })" Margin="Margin.Dense" /></MudTd>
+        <MudTd>
+            @* 작지① 규격 콤보박스 (사장님 작업지시 2026-05-31) *@
+            <ItemSpecAutocomplete ItemId="@context.ItemId" Value="@context.Spec"
+                                   ValueChanged="@(v => { context.Spec = v; NotifyChanged(); })" />
+        </MudTd>
         <MudTd><MudTextField T="string" Value="context.Unit" ValueChanged="@(v => { context.Unit = v; NotifyChanged(); })" Margin="Margin.Dense" /></MudTd>
         <MudTd><MudNumericField T="decimal" Value="context.Qty" ValueChanged="@(v => { context.Qty = v; RecalcLine(context); })" Margin="Margin.Dense" /></MudTd>
         <MudTd><MudNumericField T="decimal" Value="context.UnitPrice" ValueChanged="@(v => { context.UnitPrice = v; RecalcLine(context); })" Margin="Margin.Dense" /></MudTd>
