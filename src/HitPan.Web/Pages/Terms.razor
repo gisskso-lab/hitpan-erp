@@ -1,0 +1,154 @@
+@page "/terms"
+@layout EmptyLayout
+@attribute [Microsoft.AspNetCore.Authorization.Authorize]
+@inject HttpClient Http
+@inject NavigationManager Navigation
+@inject ISnackbar Snackbar
+@using System.Net.Http.Json
+
+<PageTitle>약관 동의 — 히트판 ERP</PageTitle>
+
+<div class="hitpan-terms-page" style="min-height:100vh; display:flex; align-items:center; justify-content:center; padding:24px; background:#F5F7FA;">
+    <MudPaper Class="pa-8" Elevation="4" Style="max-width:720px; width:100%;">
+        <MudText Typo="Typo.h5" Class="mb-2">히트판 ERP 약관 동의</MudText>
+        <MudText Typo="Typo.body2" Class="mud-text-secondary mb-6">
+            첫 로그인 시 아래 4가지 약관에 모두 동의해야 서비스를 이용하실 수 있습니다.
+            (전자상거래법 · 개인정보보호법 · 헌법 #24 책임 분산)
+        </MudText>
+
+        @if (_loading)
+        {
+            <MudProgressLinear Indeterminate="true" Color="Color.Primary" />
+        }
+        else if (_alreadyAgreed)
+        {
+            <MudAlert Severity="Severity.Success">이미 약관에 동의하셨습니다. 메인으로 이동합니다.</MudAlert>
+        }
+        else
+        {
+            <MudList T="string" Dense="true">
+                <MudListItem T="string">
+                    <MudCheckBox @bind-Value="_agreeService" Color="Color.Primary" Dense="true" Label="(필수) 서비스 이용 약관에 동의합니다." />
+                    <MudLink Href="/legal/service.html" Target="_blank" Class="ml-8">전문 보기</MudLink>
+                </MudListItem>
+                <MudListItem T="string">
+                    <MudCheckBox @bind-Value="_agreePrivacy" Color="Color.Primary" Dense="true" Label="(필수) 개인정보 처리 방침에 동의합니다." />
+                    <MudLink Href="/legal/privacy.html" Target="_blank" Class="ml-8">전문 보기</MudLink>
+                </MudListItem>
+                <MudListItem T="string">
+                    <MudCheckBox @bind-Value="_agreeSubscription" Color="Color.Primary" Dense="true" Label="(필수) 유료 구독·환불 약관에 동의합니다." />
+                    <MudLink Href="/legal/subscription.html" Target="_blank" Class="ml-8">전문 보기</MudLink>
+                </MudListItem>
+                <MudListItem T="string">
+                    <MudCheckBox @bind-Value="_agreeDataOwnership" Color="Color.Primary" Dense="true" Label="(필수) 데이터 주권·책임 분산에 동의합니다. (헌법 #22·#24)" />
+                    <MudLink Href="/legal/data-ownership.html" Target="_blank" Class="ml-8">전문 보기</MudLink>
+                </MudListItem>
+                <MudListItem T="string">
+                    <MudCheckBox @bind-Value="_agreeMarketing" Color="Color.Secondary" Dense="true" Label="(선택) 마케팅 정보 수신에 동의합니다." />
+                </MudListItem>
+            </MudList>
+
+            <MudDivider Class="my-4" />
+
+            <MudButton Variant="Variant.Filled" Color="Color.Primary" FullWidth="true"
+                       Disabled="@(_busy || !_allRequiredChecked)"
+                       OnClick="OnAgreeAsync">
+                @(_busy ? "처리 중…" : "동의하고 계속")
+            </MudButton>
+
+            @if (!string.IsNullOrEmpty(_error))
+            {
+                <MudAlert Severity="Severity.Error" Class="mt-4">@_error</MudAlert>
+            }
+        }
+    </MudPaper>
+</div>
+
+@code {
+    private const string TermsVersion = "v2.0.0";
+
+    private bool _loading = true;
+    private bool _busy;
+    private bool _alreadyAgreed;
+    private string? _error;
+
+    private bool _agreeService;
+    private bool _agreePrivacy;
+    private bool _agreeSubscription;
+    private bool _agreeDataOwnership;
+    private bool _agreeMarketing;
+
+    private bool _allRequiredChecked =>
+        _agreeService && _agreePrivacy && _agreeSubscription && _agreeDataOwnership;
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            var status = await Http.GetFromJsonAsync<TermsConsentStatusDto>("api/auth/terms/status");
+            if (status?.HasAgreed == true)
+            {
+                _alreadyAgreed = true;
+                _ = Task.Delay(800).ContinueWith(_ => InvokeAsync(() => Navigation.NavigateTo("/", forceLoad: true)));
+            }
+        }
+        catch (Exception ex)
+        {
+            _error = $"상태 조회 실패: {ex.Message}";
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    private async Task OnAgreeAsync()
+    {
+        if (!_allRequiredChecked)
+        {
+            _error = "필수 약관 4건 모두 체크해주세요.";
+            return;
+        }
+
+        _busy = true;
+        _error = null;
+        try
+        {
+            var resp = await Http.PostAsJsonAsync("api/auth/terms/agree", new
+            {
+                agreeService = _agreeService,
+                agreePrivacy = _agreePrivacy,
+                agreeSubscription = _agreeSubscription,
+                agreeDataOwnership = _agreeDataOwnership,
+                agreeMarketing = (bool?)_agreeMarketing,
+                termsVersion = TermsVersion
+            });
+
+            if (resp.IsSuccessStatusCode)
+            {
+                Snackbar.Add("약관 동의가 기록되었습니다.", Severity.Success);
+                Navigation.NavigateTo("/", forceLoad: true);
+            }
+            else
+            {
+                var body = await resp.Content.ReadAsStringAsync();
+                _error = $"동의 처리 실패 ({(int)resp.StatusCode}): {body}";
+            }
+        }
+        catch (Exception ex)
+        {
+            _error = $"동의 처리 실패: {ex.Message}";
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private sealed class TermsConsentStatusDto
+    {
+        public bool HasAgreed { get; set; }
+        public string? TermsVersion { get; set; }
+        public DateTime? AgreedAt { get; set; }
+    }
+}

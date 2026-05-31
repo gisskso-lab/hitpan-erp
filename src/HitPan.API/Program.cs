@@ -97,6 +97,7 @@ builder.Services.AddScoped<IBillingProvider, ManualBillingProvider>();
 builder.Services.AddScoped<IBillingService, BillingService>();
 builder.Services.AddScoped<IBackupService, BackupService>();
 builder.Services.AddScoped<IBillsCardsBankService, BillsCardsBankService>();
+builder.Services.AddScoped<ITermsConsentService, TermsConsentService>();  // 헌법 #24 약관 4건 강제 동의
 builder.Services.AddScoped<IPasswordEncryptor, PasswordEncryptorAdapter>();
 builder.Services.AddScoped<IPdfRenderService, PdfRenderService>();
 builder.Services.AddScoped<IEmailService, EmailService>();
@@ -295,6 +296,7 @@ app.UseAuthorization();
 app.UseMiddleware<RateLimitMiddleware>();
 app.UseMiddleware<TenantMiddleware>();
 app.UseMiddleware<SessionLimitMiddleware>();
+app.UseMiddleware<TermsConsentMiddleware>();  // 헌법 #24: 첫 로그인 약관 4건 강제 동의 검증
 // 멱등 처리: TenantMiddleware 이후 (tenantId 필요), MapControllers 이전 — [IdempotencyKey] 옵트인 액션만 영향 (DESIGN_PRINCIPLES §5.3 / 작업지시서 20260425작4)
 app.UseMiddleware<IdempotencyMiddleware>();
 
