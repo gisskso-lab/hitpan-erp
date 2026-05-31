@@ -78,8 +78,20 @@
     <script>
         window.hitpan = window.hitpan || {};
 
-        // PDF/Excel 열기 — iOS Safari 팝업 차단 우회 (<a> click trick)
+        // PDF/Excel 열기 — iOS Safari 팝업 차단 우회 (<a> click trick) + 모바일 PDF 봉합
+        // 모바일(iOS/Android)에서는 _blank 시 PDF가 빈 화면으로 뜨는 버그 봉합 →
+        //   동일 창에서 location.href 로 강제 (Safari는 PDF 미리보기 인라인, Chrome은 다운로드)
         window.hitpan.openFile = function (url) {
+            var ua = (navigator.userAgent || '').toLowerCase();
+            var isMobile = /iphone|ipad|ipod|android/.test(ua);
+            var isPdf = /\/pdf(\?|$)|\.pdf(\?|$)/i.test(url);
+
+            // 모바일 + PDF = 동일 창 이동 (Safari 인라인 미리보기 정합)
+            if (isMobile && isPdf) {
+                window.location.href = url;
+                return;
+            }
+
             var a = document.createElement('a');
             a.href = url;
             a.target = '_blank';

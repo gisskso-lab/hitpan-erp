@@ -1,7 +1,10 @@
 @page "/sales/tax-invoice-history"
 @namespace HitPan.Web.Pages.SalesUi
 @attribute [Authorize]
+@using System.Net.Http.Json
+@using System.Text.Json.Serialization
 @inject ISnackbar Snackbar
+@inject HttpClient Http
 
 <PageTitle>전자세금계산서 발행 이력</PageTitle>
 
@@ -97,9 +100,29 @@
         _busy = true;
         try
         {
-            // TODO (W3 가도): /api/sales/tax-invoices/history 엔드포인트 연결
-            // 현재는 UI 골격만 박제 — 6/8 사장님 첫 실발급 가도 직후 API 연결
-            await Task.Delay(100);
+            // 기존 List API (`GET /api/sales/tax-invoices`) 활용 — 별도 history 엔드포인트 불필요.
+            var list = await Http.GetFromJsonAsync<List<TaxInvoiceListRow>>("api/sales/tax-invoices") ?? new();
+
+            _items = list.Select(r => new HistoryItemDto(
+                r.IssueDate ?? r.CreatedAt ?? DateTime.MinValue,
+                r.ApprovalNumber ?? string.Empty,
+                r.SupplierName ?? string.Empty,
+                r.ReceiverName ?? string.Empty,
+                r.TotalAmount,
+                r.Status ?? "Pending"
+            )).ToList();
+
+            _stats = new HistoryStatsDto
+            {
+                Issued = _items.Count(i => i.Status == "Issued" || i.Status == "Approved"),
+                Bounced = _items.Count(i => i.Status == "Bounced"),
+                Cancelled = _items.Count(i => i.Status == "Cancelled"),
+                Pending = _items.Count(i => i.Status == "Pending")
+            };
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"이력 조회 실패: {ex.Message}", Severity.Warning);
             _items = new();
             _stats = new();
         }
@@ -107,6 +130,18 @@
         {
             _busy = false;
         }
+    }
+
+    private class TaxInvoiceListRow
+    {
+        [JsonPropertyName("invoiceId")] public string InvoiceId { get; set; } = string.Empty;
+        [JsonPropertyName("approvalNumber")] public string? ApprovalNumber { get; set; }
+        [JsonPropertyName("issueDate")] public DateTime? IssueDate { get; set; }
+        [JsonPropertyName("createdAt")] public DateTime? CreatedAt { get; set; }
+        [JsonPropertyName("supplierName")] public string? SupplierName { get; set; }
+        [JsonPropertyName("receiverName")] public string? ReceiverName { get; set; }
+        [JsonPropertyName("totalAmount")] public decimal TotalAmount { get; set; }
+        [JsonPropertyName("status")] public string? Status { get; set; }
     }
 
     private void OnCancelClick(HistoryItemDto item)

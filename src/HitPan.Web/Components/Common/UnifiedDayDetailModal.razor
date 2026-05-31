@@ -55,7 +55,7 @@
                                             </div>
                                         </div>
                                         <div class="hp-udm-row-action">
-                                            @* TODO: refDocId 기반 단건 라우팅은 별도 작지서. 현재는 목록 페이지로. *@
+                                            @* refDocId 있으면 query string으로 단건 진입, 없으면 목록 *@
                                             <button class="hp-udm-btn" @onclick="() => GoDelivery(c.RefDocId)">거래명세서</button>
                                         </div>
                                     </li>
@@ -355,13 +355,18 @@
 
     private void GoDelivery(string? refDocId)
     {
-        // TODO(라우팅): refDocId 기반 단건 라우팅(/sales/deliveries/{id}) 미구현 — 목록으로.
-        Nav.NavigateTo("/deliveries");
+        // 거래명세서 단건 = query string id 전달 (DeliveryPage 진입 후 자동 로드).
+        var target = string.IsNullOrWhiteSpace(refDocId)
+            ? "/deliveries"
+            : $"/deliveries?id={Uri.EscapeDataString(refDocId)}";
+        Nav.NavigateTo(target);
     }
-    private void GoPurchase()
+    private void GoPurchase(string? refDocId = null)
     {
-        // TODO(라우팅): 매입 원장 단건 라우팅 미구현 — 매입 목록(/purchase)으로.
-        Nav.NavigateTo("/purchase");
+        var target = string.IsNullOrWhiteSpace(refDocId)
+            ? "/purchase"
+            : $"/purchase?id={Uri.EscapeDataString(refDocId)}";
+        Nav.NavigateTo(target);
     }
     private void GoLeaveRequest()
     {

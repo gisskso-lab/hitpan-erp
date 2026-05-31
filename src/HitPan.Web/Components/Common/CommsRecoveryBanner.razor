@@ -1,0 +1,161 @@
+@*
+    CommsRecoveryBanner — WS-12 1클릭 통신 봉합 UI (P1 박제)
+    1분 주기 /health 폴링 → 끊김 감지 → 상단 배너 + 1클릭 봉합
+    헌법 #27 (통신 무결성) + #28 (자동 봉합)
+*@
+@using System.Net.Http
+@using System.Threading
+@inject HttpClient Http
+@inject NavigationManager Nav
+@implements IDisposable
+
+@if (_state == CommsState.Down)
+{
+    <div class="hp-comms-banner hp-comms-banner-down" role="alert">
+        <div class="hp-comms-banner-icon">⚠️</div>
+        <div class="hp-comms-banner-message">
+            <strong>서버 통신이 불안정합니다.</strong>
+            <span class="hp-comms-banner-sub">@_lastError</span>
+        </div>
+        <button class="hp-comms-banner-action" @onclick="OnRecoverClick" disabled="@_busy">
+            @(_busy ? "봉합 중..." : "🔧 1클릭 봉합")
+        </button>
+    </div>
+}
+else if (_state == CommsState.Recovering)
+{
+    <div class="hp-comms-banner hp-comms-banner-recover" role="status">
+        <div class="hp-comms-banner-icon">🔄</div>
+        <div class="hp-comms-banner-message">
+            <strong>자동 봉합 진행 중...</strong>
+            <span class="hp-comms-banner-sub">최대 5분 이내 복구 시도. 잠시만 기다려주세요.</span>
+        </div>
+    </div>
+}
+
+<style>
+    .hp-comms-banner {
+        position: sticky; top: 0; z-index: 9999;
+        display: flex; align-items: center; gap: 14px;
+        padding: 10px 18px; border-bottom: 1px solid rgba(0,0,0,0.08);
+        font-size: 14px; box-shadow: 0 2px 6px rgba(0,0,0,0.06);
+        animation: hp-comms-fade-in .25s ease-out;
+    }
+    .hp-comms-banner-down { background: #FEF2F2; color: #991B1B; }
+    .hp-comms-banner-recover { background: #FFFBEB; color: #92400E; }
+    .hp-comms-banner-icon { font-size: 22px; }
+    .hp-comms-banner-message { flex: 1; display: flex; flex-direction: column; }
+    .hp-comms-banner-sub { font-size: 12px; opacity: .78; margin-top: 2px; }
+    .hp-comms-banner-action {
+        background: #DC2626; color: white; border: none;
+        border-radius: 8px; padding: 8px 16px; font-size: 13px;
+        font-weight: 600; cursor: pointer; transition: background .15s;
+    }
+    .hp-comms-banner-action:hover { background: #B91C1C; }
+    .hp-comms-banner-action:disabled { background: #9CA3AF; cursor: not-allowed; }
+    @@keyframes hp-comms-fade-in {
+        from { opacity: 0; transform: translateY(-8px); }
+        to { opacity: 1; transform: translateY(0); }
+    }
+</style>
+
+@code {
+    private enum CommsState { Healthy, Down, Recovering }
+
+    private CommsState _state = CommsState.Healthy;
+    private string _lastError = string.Empty;
+    private bool _busy;
+    private CancellationTokenSource? _cts;
+    private Timer? _timer;
+    private int _consecutiveFailures;
+
+    // 폴링 주기 (헌법 #27 정합: 통신 무결성 = 1분 박제)
+    private const int PollIntervalMs = 60_000;
+
+    // 끊김 판정 임계치 (3회 연속 실패 = Down)
+    private const int FailureThreshold = 3;
+
+    protected override void OnInitialized()
+    {
+        _cts = new CancellationTokenSource();
+        // 초기 폴링 5초 후 시작 (페이지 로드 직후 부담 줄이기)
+        _timer = new Timer(async _ => await PollHealthAsync(), null, 5_000, PollIntervalMs);
+    }
+
+    private async Task PollHealthAsync()
+    {
+        if (_cts?.IsCancellationRequested == true) return;
+        try
+        {
+            using var req = new HttpRequestMessage(HttpMethod.Get, "health");
+            using var cts = CancellationTokenSource.CreateLinkedTokenSource(_cts!.Token);
+            cts.CancelAfter(TimeSpan.FromSeconds(8));
+            var resp = await Http.SendAsync(req, cts.Token);
+            if (resp.IsSuccessStatusCode)
+            {
+                _consecutiveFailures = 0;
+                if (_state != CommsState.Healthy)
+                {
+                    _state = CommsState.Healthy;
+                    await InvokeAsync(StateHasChanged);
+                }
+            }
+            else
+            {
+                _consecutiveFailures++;
+                await HandleFailureAsync($"HTTP {(int)resp.StatusCode}");
+            }
+        }
+        catch (Exception ex)
+        {
+            _consecutiveFailures++;
+            await HandleFailureAsync(ex.Message);
+        }
+    }
+
+    private async Task HandleFailureAsync(string detail)
+    {
+        if (_consecutiveFailures >= FailureThreshold && _state == CommsState.Healthy)
+        {
+            _state = CommsState.Down;
+            _lastError = $"마지막 응답: {detail}";
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    private async Task OnRecoverClick()
+    {
+        if (_busy) return;
+        _busy = true;
+        _state = CommsState.Recovering;
+        StateHasChanged();
+
+        // 1. 즉시 헬스 재폴링 (워치독이 백그라운드에서 봉합 중일 가능성)
+        try
+        {
+            await PollHealthAsync();
+            if (_state == CommsState.Healthy)
+            {
+                _busy = false;
+                return;
+            }
+
+            // 2. 10초 대기 + 재시도 (워치독 WS-28-C TunnelSecret 재발급 등 평균 3분 이내)
+            await Task.Delay(10_000);
+            _consecutiveFailures = 0;
+            await PollHealthAsync();
+        }
+        finally
+        {
+            _busy = false;
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    public void Dispose()
+    {
+        _cts?.Cancel();
+        _timer?.Dispose();
+        _cts?.Dispose();
+    }
+}

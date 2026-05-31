@@ -1,6 +1,7 @@
 @inherits LayoutComponentBase
 @attribute [Authorize]
 @using HitPan.Web.Components
+@using HitPan.Web.Components.Common
 @using Microsoft.AspNetCore.Components.Authorization
 @using MudBlazor
 @inject NavigationManager Nav
@@ -34,6 +35,9 @@
                             </div>
                         </div>
                     </div>
+
+                    @* WS-12 1클릭 통신 봉합 배너 (헌법 #27 정합) *@
+                    <CommsRecoveryBanner />
 
                     <main class="hitpan-content mud-px-4 mud-py-4">
                         <ErrorBoundary>
