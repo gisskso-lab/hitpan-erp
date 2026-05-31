@@ -1,0 +1,164 @@
+﻿@using HitPan.Web.Helpers
+@using HitPan.Web.Models
+@using HitPan.Web.Services
+@inject AuthenticationStateProvider AuthStateProvider
+@inject WorkTabService TabService
+@inject ApprovalService ApprovalSvc
+
+<MudNavMenu>
+    <MudNavLink Href="/dashboard" Icon="@Icons.Material.Filled.Dashboard">
+        대시보드
+    </MudNavLink>
+
+    <MudNavGroup Title="결재함" Icon="@Icons.Material.Filled.Notifications" Expanded="false">
+        <MudNavLink Href="/approval/pending" Icon="@Icons.Material.Filled.HourglassTop">
+            결재 대기
+            @if (_approvalPendingCount > 0)
+            {
+                <MudChip T="string" Size="Size.Small" Color="Color.Error" Variant="Variant.Filled" Class="ml-2">@_approvalPendingCount</MudChip>
+            }
+        </MudNavLink>
+        <MudNavLink Href="/approval/sent" Icon="@Icons.Material.Filled.Send">내가 보낸 결재</MudNavLink>
+        <MudNavLink Href="/approval/completed" Icon="@Icons.Material.Filled.CheckCircle">완료된 결재</MudNavLink>
+    </MudNavGroup>
+
+    <MudNavGroup Title="설정" Icon="@Icons.Material.Filled.Settings" Expanded="false">
+        <MudNavLink Href="/company" Icon="@Icons.Material.Filled.Business">사용자정보 설정</MudNavLink>
+        <MudNavLink Href="/users" Icon="@Icons.Material.Filled.PersonAdd">사용자 추가·관리</MudNavLink>
+        <MudNavLink Href="/users/permissions" Icon="@Icons.Material.Filled.Lock">권한 설정</MudNavLink>
+        <MudNavLink Href="/employees" Icon="@Icons.Material.Filled.People">사원관리</MudNavLink>
+        <MudNavLink Href="/settings" Icon="@Icons.Material.Filled.Tune">사용환경 설정</MudNavLink>
+        <MudNavLink Href="/print-settings" Icon="@Icons.Material.Filled.Print">양식(인쇄)정보 설정</MudNavLink>
+        <MudNavLink Href="/settings/approval" Icon="@Icons.Material.Filled.Rule">결재 설정</MudNavLink>
+        <MudNavLink Href="/settings/devices" Icon="@Icons.Material.Filled.Devices">등록 기기 관리</MudNavLink>
+        <MudNavLink Href="/settings/mdb-migration" Icon="@Icons.Material.Filled.SwapHoriz">데이터 이관</MudNavLink>
+    </MudNavGroup>
+
+    <MudNavGroup Title="업체 관리" Icon="@Icons.Material.Filled.Business" Expanded="false">
+        <MudNavLink Href="/partners" Icon="@Icons.Material.Filled.People">업체 마스터</MudNavLink>
+        <MudNavLink Href="/partners/special-prices" Icon="@Icons.Material.Filled.LocalOffer">업체 특별단가</MudNavLink>
+        <MudNavLink Href="/partners/ledger" Icon="@Icons.Material.Filled.Book">업체별 원장</MudNavLink>
+    </MudNavGroup>
+
+    <MudNavGroup Title="상품 관리" Icon="@Icons.Material.Filled.Inventory" Expanded="false">
+        <MudNavLink Href="/items" Icon="@Icons.Material.Filled.Category">상품 마스터</MudNavLink>
+        <MudNavLink Href="/bom" Icon="@Icons.Material.Filled.AccountTree">BOM 자재명세서</MudNavLink>
+        <MudNavLink Href="/items/special-prices" Icon="@Icons.Material.Filled.LocalOffer">상품 특별단가</MudNavLink>
+        <MudNavLink Href="/items/ledger" Icon="@Icons.Material.Filled.Book">상품별 원장</MudNavLink>
+    </MudNavGroup>
+
+    <MudNavGroup Title="판매" Icon="@Icons.Material.Filled.PointOfSale" Expanded="false">
+        <MudNavLink Icon="@Icons.Material.Filled.RequestQuote" OnClick="@(() => TabService.TryAddTab(WorkDocumentKind.Quotation))">견적서</MudNavLink>
+        <MudNavLink Href="/quotation-status" Icon="@Icons.Material.Filled.ListAlt">견적현황</MudNavLink>
+        <MudNavLink Icon="@Icons.Material.Filled.Assignment" OnClick="@(() => TabService.TryAddTab(WorkDocumentKind.SalesOrder))">수주서</MudNavLink>
+        <MudNavLink Href="/sales-order-status" Icon="@Icons.Material.Filled.ListAlt">수주현황</MudNavLink>
+        <MudNavLink Icon="@Icons.Material.Filled.Receipt" OnClick="@(() => TabService.TryAddTab(WorkDocumentKind.SalesDelivery))">거래명세서</MudNavLink>
+        <MudNavLink Href="/sales/summary" Icon="@Icons.Material.Filled.BarChart">판매현황</MudNavLink>
+        <MudNavLink Href="/sales/ranking" Icon="@Icons.Material.Filled.EmojiEvents">판매순위표</MudNavLink>
+        <MudNavLink Href="/sales/profitability" Icon="@Icons.Material.Filled.TrendingUp">판매수익성분석</MudNavLink>
+        <MudNavLink Href="/sales/statistics" Icon="@Icons.Material.Filled.Analytics">판매통계</MudNavLink>
+        <MudNavLink Href="/tax-invoice" Icon="@Icons.Material.Filled.Description">세금계산서</MudNavLink>
+    </MudNavGroup>
+
+    <MudNavGroup Title="매입" Icon="@Icons.Material.Filled.ShoppingCart" Expanded="false">
+        <MudNavLink Icon="@Icons.Material.Filled.AddShoppingCart" OnClick="@(() => TabService.TryAddTab(WorkDocumentKind.PurchaseOrder))">발주서</MudNavLink>
+        <MudNavLink Href="/purchase-order-status" Icon="@Icons.Material.Filled.ListAlt">발주현황</MudNavLink>
+        <MudNavLink Icon="@Icons.Material.Filled.MoveToInbox" OnClick="@(() => TabService.TryAddTab(WorkDocumentKind.PurchaseReceipt))">매입 처리</MudNavLink>
+        <MudNavLink Href="/purchase-status" Icon="@Icons.Material.Filled.ListAlt">매입현황</MudNavLink>
+        <MudNavLink Href="/purchase/ranking" Icon="@Icons.Material.Filled.EmojiEvents">매입순위표</MudNavLink>
+        <MudNavLink Href="/purchase/statistics" Icon="@Icons.Material.Filled.Analytics">매입통계</MudNavLink>
+        <MudNavLink Icon="@Icons.Material.Filled.AssignmentReturn" OnClick="@(() => TabService.TryAddTab(WorkDocumentKind.Return))">반품 처리</MudNavLink>
+        <MudNavLink Href="/return-status" Icon="@Icons.Material.Filled.ListAlt">반품현황</MudNavLink>
+    </MudNavGroup>
+
+    <MudNavGroup Title="재고" Icon="@Icons.Material.Filled.Warehouse" Expanded="false">
+        <MudNavLink Href="/stock" Icon="@Icons.Material.Filled.Inventory2">재고 현황</MudNavLink>
+        <MudNavLink Href="/stock/ledger" Icon="@Icons.Material.Filled.ListAlt">각종 수불부</MudNavLink>
+        <MudNavLink Href="/stock/adjust" Icon="@Icons.Material.Filled.Tune">재고 실사·조정</MudNavLink>
+        <MudNavLink Href="/stock/transfer" Icon="@Icons.Material.Filled.SwapHoriz">재고이송</MudNavLink>
+        <MudNavLink Href="/stock/transfer-status" Icon="@Icons.Material.Filled.ListAlt">재고이송 현황</MudNavLink>
+        <MudNavLink Href="/stock/warehouse-manage" Icon="@Icons.Material.Filled.Warehouse">창고 관리</MudNavLink>
+        <MudNavLink Href="/stock/warehouse-split" Icon="@Icons.Material.Filled.AccountTree">창고분리 (자사/3PL)</MudNavLink>
+    </MudNavGroup>
+
+    <MudNavGroup Title="수금·지급" Icon="@Icons.Material.Filled.AccountBalance" Expanded="false">
+        <MudNavLink Href="/collections" Icon="@Icons.Material.Filled.AttachMoney">수금</MudNavLink>
+        <MudNavLink Href="/payments" Icon="@Icons.Material.Filled.Money">지급</MudNavLink>
+    </MudNavGroup>
+
+    <MudNavGroup Title="경리·세무" Icon="@Icons.Material.Filled.Calculate" Expanded="false">
+        <MudNavLink Href="/accounting/cashbook" Icon="@Icons.Material.Filled.AccountBalanceWallet">현금출납장</MudNavLink>
+        <MudNavLink Href="/accounting/purchase-sales" Icon="@Icons.Material.Filled.MenuBook">매입매출장</MudNavLink>
+        <MudNavLink Href="/accounting/vat" Icon="@Icons.Material.Filled.RequestPage">부가세 신고자료</MudNavLink>
+        <MudNavLink Href="/tax-invoice-stats" Icon="@Icons.Material.Filled.BarChart">세금계산서 통계</MudNavLink>
+        <MudNavLink Href="/accounting/expenses" Icon="@Icons.Material.Filled.Receipt">경비 처리</MudNavLink>
+        <MudNavLink Href="/accounting/profit" Icon="@Icons.Material.Filled.TrendingUp">손익 현황</MudNavLink>
+        <MudNavLink Href="/accounting/export" Icon="@Icons.Material.Filled.Send">세무사 자료 보내기</MudNavLink>
+        <MudNavLink Href="/accounting/monthly-closing" Icon="@Icons.Material.Filled.Lock">월마감</MudNavLink>
+    </MudNavGroup>
+
+    @* 전자세금계산서관리 — 인증서·계산서 발행·홈택스 전용 공간 (2026-04-24 사장님 지시로 메뉴명 변경) *@
+    <MudNavGroup Title="전자세금계산서관리" Icon="@Icons.Material.Filled.Gavel" Expanded="false">
+        <MudNavLink Href="/tax/certificate" Icon="@Icons.Material.Filled.VpnKey">
+            범용인증서 관리
+        </MudNavLink>
+        <MudNavLink Icon="@Icons.Material.Filled.ReceiptLong" Disabled="true">
+            전자세금계산서 관리
+            <MudChip T="string" Size="Size.Small" Variant="Variant.Text" Color="Color.Default" Class="ml-2">준비 중</MudChip>
+        </MudNavLink>
+        <MudNavLink Icon="@Icons.Material.Filled.CloudSync" Disabled="true">
+            홈택스 연동 설정
+            <MudChip T="string" Size="Size.Small" Variant="Variant.Text" Color="Color.Default" Class="ml-2">준비 중</MudChip>
+        </MudNavLink>
+    </MudNavGroup>
+
+    <MudNavGroup Title="인사·근태" Icon="@Icons.Material.Filled.Badge" Expanded="false">
+        <MudNavLink Href="/hr/attendance" Icon="@Icons.Material.Filled.AccessTime">근태 관리</MudNavLink>
+        <MudNavLink Href="/hr/leave" Icon="@Icons.Material.Filled.EventAvailable">휴가·연차</MudNavLink>
+        <MudNavLink Href="/hr/expense-request" Icon="@Icons.Material.Filled.ReceiptLong">경비 신청</MudNavLink>
+        <MudNavLink Href="/hr/labor-contracts" Icon="@Icons.Material.Filled.Description">전자근로계약서</MudNavLink>
+        <MudNavLink Href="/hr/esign-history" Icon="@Icons.Material.Filled.History">전자서명 이력</MudNavLink>
+    </MudNavGroup>
+
+    @if (IsPlatformAdmin)
+    {
+        <MudNavGroup Title="본사 관리" Icon="@Icons.Material.Filled.CorporateFare" Expanded="true">
+            <MudNavLink Href="/admin/dashboard" Icon="@Icons.Material.Filled.Dashboard">본사 대시보드</MudNavLink>
+            <MudNavLink Href="/admin/resellers" Icon="@Icons.Material.Filled.Store">대리점 관리</MudNavLink>
+            <MudNavLink Href="/admin/tenants" Icon="@Icons.Material.Filled.Business">고객사 관리</MudNavLink>
+            <MudNavLink Href="/admin/commission" Icon="@Icons.Material.Filled.Percent">수수료 정책</MudNavLink>
+        </MudNavGroup>
+    }
+
+    @if (IsReseller)
+    {
+        <MudNavGroup Title="대리점 관리" Icon="@Icons.Material.Filled.Store" Expanded="true">
+            <MudNavLink Href="/reseller/dashboard" Icon="@Icons.Material.Filled.Dashboard">대리점 대시보드</MudNavLink>
+            <MudNavLink Href="/reseller/tenants" Icon="@Icons.Material.Filled.Business">고객사 관리</MudNavLink>
+            <MudNavLink Href="/reseller/commission" Icon="@Icons.Material.Filled.Percent">수수료 현황</MudNavLink>
+            <MudNavLink Href="/reseller/settlement" Icon="@Icons.Material.Filled.AccountBalance">정산 내역</MudNavLink>
+        </MudNavGroup>
+    }
+</MudNavMenu>
+
+@code {
+    private string AccountType { get; set; } = string.Empty;
+    private int _approvalPendingCount;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var state = await AuthStateProvider.GetAuthenticationStateAsync();
+        AccountType = AccountTypeHelper.GetAccountType(state.User);
+
+        // 결재 대기 건수 로딩
+        try { var pending = await ApprovalSvc.GetPendingAsync(); _approvalPendingCount = pending.Count; }
+        catch { _approvalPendingCount = 0; }
+    }
+
+    private bool IsPlatformAdmin =>
+        AccountType == "platform_admin";
+
+    private bool IsReseller =>
+        AccountType == "reseller" ||
+        AccountType == "reseller_admin";
+}

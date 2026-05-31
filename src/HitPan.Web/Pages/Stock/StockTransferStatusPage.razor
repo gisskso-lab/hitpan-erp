@@ -97,8 +97,9 @@
             var path = "api/stock/transfer/history" + (qs.Any() ? "?" + string.Join("&", qs) : "");
             _data = await Http.GetFromJsonAsync<List<TransferStatusRow>>(path) ?? new();
         }
-        catch
+        catch (Exception _hp15Ex)
         {
+            Console.Error.WriteLine($"[HP15] " + _hp15Ex.GetType().Name + ": " + _hp15Ex.Message);
             _data = new();
         }
         finally

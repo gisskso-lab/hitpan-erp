@@ -117,8 +117,9 @@
         {
             _warehouses = await Http.GetFromJsonAsync<List<WarehouseOption>>("api/warehouses") ?? new();
         }
-        catch
+        catch (Exception _hp15Ex)
         {
+            Console.Error.WriteLine($"[HP15] " + _hp15Ex.GetType().Name + ": " + _hp15Ex.Message);
             _warehouses = new();
         }
     }
@@ -177,8 +178,9 @@
                 _fromWarehouse = matched.Code;
             }
         }
-        catch
+        catch (Exception _hp15Ex)
         {
+            Console.Error.WriteLine($"[HP15] " + _hp15Ex.GetType().Name + ": " + _hp15Ex.Message);
             // 자동 셋팅 실패해도 사용자가 수동 선택하면 됨 — 묵음.
         }
     }
@@ -213,8 +215,9 @@
             var result = await Http.GetFromJsonAsync<BalanceResult>(path);
             _availableQty = result?.Qty ?? 0;
         }
-        catch
+        catch (Exception _hp15Ex)
         {
+            Console.Error.WriteLine($"[HP15] " + _hp15Ex.GetType().Name + ": " + _hp15Ex.Message);
             _availableQty = null;
         }
         StateHasChanged();
@@ -302,8 +305,9 @@
             var to = DateTime.Today.ToString("yyyy-MM-dd");
             _recentTransfers = await Http.GetFromJsonAsync<List<TransferRow>>($"api/stock/transfer/history?from={from}&to={to}") ?? new();
         }
-        catch
+        catch (Exception _hp15Ex)
         {
+            Console.Error.WriteLine($"[HP15] " + _hp15Ex.GetType().Name + ": " + _hp15Ex.Message);
             _recentTransfers = new();
         }
         finally

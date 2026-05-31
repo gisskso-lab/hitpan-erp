@@ -1,0 +1,897 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<meta name="description" content="히트판 ERP — 더존·이카운트보다 쉽습니다. 설치 1분, 교육 0분. 지금 베타 신청하세요." />
+<title>히트판 ERP — 처음 쓰는 사람도 그냥 되는 ERP</title>
+<link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin />
+<link rel="stylesheet" crossorigin
+      href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.css" />
+<style>
+*, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+:root {
+  --brand:       #0F6E56;
+  --brand-dark:  #0A5240;
+  --brand-light: #E6F4F0;
+  --brand-mid:   #1A8A6A;
+  --accent:      #FF6B35;
+  --accent-light:#FFF0EB;
+  --text-1:      #0F1419;
+  --text-2:      #3D4852;
+  --text-3:      #6B7280;
+  --surface:     #F8F9FA;
+  --card:        #FFFFFF;
+  --border:      #EAEDF0;
+  --font: "Pretendard Variable","Pretendard",-apple-system,BlinkMacSystemFont,"Apple SD Gothic Neo","Noto Sans KR",sans-serif;
+}
+html { scroll-behavior: smooth; }
+body { font-family: var(--font); color: var(--text-1); background: #fff; -webkit-font-smoothing: antialiased; }
+a { color: inherit; text-decoration: none; }
+
+/* ── NAV ── */
+nav {
+  position: sticky; top: 0; z-index: 100;
+  background: rgba(255,255,255,.95); backdrop-filter: blur(16px);
+  border-bottom: 1px solid var(--border);
+}
+.nav-inner {
+  max-width: 1120px; margin: 0 auto; padding: 0 32px;
+  height: 64px; display: flex; align-items: center; justify-content: space-between;
+}
+.logo { display: flex; align-items: center; gap: 10px; font-size: 18px; font-weight: 800; letter-spacing: -.03em; }
+.logo-mark {
+  width: 34px; height: 34px; border-radius: 9px;
+  background: linear-gradient(135deg, var(--brand), var(--brand-dark));
+  display: grid; place-items: center; color: #fff; font-size: 15px; font-weight: 900;
+}
+.nav-links { display: flex; align-items: center; gap: 32px; }
+.nav-links a { font-size: 14px; font-weight: 500; color: var(--text-2); transition: color .15s; }
+.nav-links a:hover { color: var(--brand); }
+.nav-cta {
+  background: var(--brand); color: #fff; border: none; border-radius: 8px;
+  padding: 9px 20px; font-size: 14px; font-weight: 700; cursor: pointer;
+  transition: background .15s, transform .1s;
+}
+.nav-cta:hover { background: var(--brand-dark); transform: translateY(-1px); }
+
+/* ── HERO ── */
+.hero {
+  background: linear-gradient(160deg, #F0FAF6 0%, #fff 60%);
+  padding: 100px 32px 80px;
+  overflow: hidden; position: relative;
+}
+.hero::after {
+  content: "";
+  position: absolute; top: -200px; right: -200px;
+  width: 600px; height: 600px; border-radius: 50%;
+  background: radial-gradient(circle, rgba(15,110,86,.07) 0%, transparent 70%);
+  pointer-events: none;
+}
+.hero-inner { max-width: 1120px; margin: 0 auto; display: grid; grid-template-columns: 1fr 480px; gap: 80px; align-items: center; }
+.hero-eyebrow {
+  display: inline-flex; align-items: center; gap: 8px;
+  background: var(--accent-light); color: var(--accent);
+  border-radius: 100px; padding: 5px 14px; font-size: 13px; font-weight: 700;
+  margin-bottom: 24px; border: 1px solid rgba(255,107,53,.2);
+}
+.hero-eyebrow .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--accent); animation: blink 1.8s infinite; }
+@keyframes blink { 0%,100%{opacity:1} 50%{opacity:.3} }
+.hero h1 {
+  font-size: clamp(32px, 4.5vw, 52px); font-weight: 900;
+  line-height: 1.15; letter-spacing: -.03em; margin-bottom: 12px;
+}
+.hero h1 .line2 { color: var(--brand); }
+.hero-sub {
+  font-size: 17px; color: var(--text-2); line-height: 1.75;
+  margin-bottom: 16px; max-width: 460px;
+}
+.hero-compare {
+  display: flex; align-items: center; gap: 12px;
+  margin-bottom: 36px; font-size: 14px; color: var(--text-3);
+}
+.vs-badge {
+  display: inline-flex; align-items: center; gap: 6px;
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: 100px; padding: 4px 12px;
+}
+.vs-badge .x { color: #E53935; font-weight: 800; }
+.vs-badge .o { color: var(--brand); font-weight: 800; }
+.hero-btns { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
+.btn-main {
+  background: var(--brand); color: #fff; border: none; border-radius: 10px;
+  padding: 15px 32px; font-size: 16px; font-weight: 700; cursor: pointer;
+  transition: all .15s; display: flex; align-items: center; gap: 8px;
+  box-shadow: 0 4px 14px rgba(15,110,86,.3);
+}
+.btn-main:hover { background: var(--brand-dark); transform: translateY(-2px); box-shadow: 0 6px 20px rgba(15,110,86,.35); }
+.btn-sub {
+  background: none; color: var(--text-2); border: 1.5px solid var(--border);
+  border-radius: 10px; padding: 14px 24px; font-size: 15px; font-weight: 600;
+  cursor: pointer; transition: all .15s;
+}
+.btn-sub:hover { border-color: var(--brand); color: var(--brand); }
+.hero-trust { margin-top: 24px; font-size: 13px; color: var(--text-3); display: flex; align-items: center; gap: 16px; }
+.trust-item { display: flex; align-items: center; gap: 5px; }
+.trust-item::before { content: "✓"; color: var(--brand); font-weight: 700; }
+
+/* 히어로 우측 — 목업 카드 */
+.hero-mockup { position: relative; }
+.mockup-window {
+  background: var(--card); border-radius: 16px; overflow: hidden;
+  box-shadow: 0 20px 60px rgba(0,0,0,.12), 0 0 0 1px rgba(0,0,0,.06);
+}
+.mockup-bar {
+  background: #F5F5F5; padding: 10px 16px;
+  display: flex; align-items: center; gap: 6px;
+  border-bottom: 1px solid var(--border);
+}
+.mockup-dot { width: 10px; height: 10px; border-radius: 50%; }
+.mockup-body { padding: 20px; }
+.mockup-kpi { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-bottom: 14px; }
+.kpi-box {
+  background: var(--surface); border-radius: 10px; padding: 14px;
+  border: 1px solid var(--border);
+}
+.kpi-box .kpi-label { font-size: 11px; color: var(--text-3); margin-bottom: 4px; }
+.kpi-box .kpi-val { font-size: 18px; font-weight: 800; color: var(--text-1); letter-spacing: -.02em; }
+.kpi-box .kpi-change { font-size: 11px; color: #2E7D32; font-weight: 600; margin-top: 2px; }
+.mockup-table { background: var(--surface); border-radius: 10px; border: 1px solid var(--border); overflow: hidden; }
+.mt-header { display: grid; grid-template-columns: 2fr 1fr 1fr; padding: 8px 14px; background: #F0F2F5; }
+.mt-header span { font-size: 11px; font-weight: 700; color: var(--text-3); }
+.mt-row { display: grid; grid-template-columns: 2fr 1fr 1fr; padding: 9px 14px; border-top: 1px solid var(--border); align-items: center; }
+.mt-row span { font-size: 12px; color: var(--text-2); }
+.mt-row .badge {
+  display: inline-block; font-size: 10px; font-weight: 700;
+  padding: 2px 7px; border-radius: 100px;
+}
+.badge-green { background: #E8F5E9; color: #2E7D32; }
+.badge-blue  { background: #E3F2FD; color: #1565C0; }
+.badge-orange{ background: #FFF3E0; color: #E65100; }
+.mockup-float {
+  position: absolute; right: -24px; bottom: 40px;
+  background: var(--card); border-radius: 12px; padding: 12px 16px;
+  box-shadow: 0 8px 24px rgba(0,0,0,.12); border: 1px solid var(--border);
+  font-size: 12px; font-weight: 600; display: flex; align-items: center; gap: 8px;
+  animation: floatUp 3s ease-in-out infinite;
+}
+@keyframes floatUp { 0%,100%{transform:translateY(0)} 50%{transform:translateY(-6px)} }
+
+/* ── PAIN POINT ── */
+.pain {
+  background: var(--text-1); color: #fff;
+  padding: 80px 32px;
+}
+.pain-inner { max-width: 1120px; margin: 0 auto; text-align: center; }
+.pain h2 { font-size: clamp(24px, 3vw, 36px); font-weight: 800; letter-spacing: -.02em; margin-bottom: 12px; }
+.pain p { font-size: 16px; color: rgba(255,255,255,.65); margin-bottom: 56px; }
+.pain-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 2px; }
+.pain-item {
+  background: rgba(255,255,255,.05); padding: 32px 28px; text-align: left;
+  transition: background .2s;
+}
+.pain-item:hover { background: rgba(255,255,255,.08); }
+.pain-item:first-child { border-radius: 12px 0 0 12px; }
+.pain-item:last-child  { border-radius: 0 12px 12px 0; }
+.pain-emoji { font-size: 28px; margin-bottom: 14px; }
+.pain-item h3 { font-size: 16px; font-weight: 700; margin-bottom: 8px; color: #fff; }
+.pain-item p  { font-size: 14px; color: rgba(255,255,255,.55); line-height: 1.6; }
+.pain-arrow {
+  margin: 48px auto 0; display: flex; align-items: center; justify-content: center;
+  gap: 20px; font-size: 15px;
+}
+.pain-arrow .from { color: rgba(255,255,255,.4); text-decoration: line-through; }
+.pain-arrow .arr  { font-size: 24px; color: var(--brand-mid); }
+.pain-arrow .to   { color: #fff; font-weight: 700; }
+
+/* ── FEATURES ── */
+.features { padding: 96px 32px; background: var(--surface); }
+.features-inner { max-width: 1120px; margin: 0 auto; }
+.section-eyebrow { font-size: 13px; font-weight: 700; color: var(--brand); letter-spacing: .08em; text-transform: uppercase; margin-bottom: 12px; }
+.section-h2 { font-size: clamp(24px, 3vw, 36px); font-weight: 800; letter-spacing: -.02em; margin-bottom: 8px; }
+.section-desc { font-size: 16px; color: var(--text-2); margin-bottom: 56px; }
+.feat-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px; }
+.feat-card {
+  background: var(--card); border-radius: 16px; padding: 32px;
+  border: 1px solid var(--border); transition: all .2s;
+  position: relative; overflow: hidden;
+}
+.feat-card::before {
+  content: ""; position: absolute; top: 0; left: 0; right: 0; height: 3px;
+  background: linear-gradient(90deg, var(--brand), var(--brand-mid));
+  opacity: 0; transition: opacity .2s;
+}
+.feat-card:hover { box-shadow: 0 8px 32px rgba(0,0,0,.08); transform: translateY(-3px); }
+.feat-card:hover::before { opacity: 1; }
+.feat-icon {
+  width: 52px; height: 52px; border-radius: 14px;
+  background: var(--brand-light); display: grid; place-items: center;
+  font-size: 24px; margin-bottom: 20px;
+}
+.feat-card h3 { font-size: 17px; font-weight: 700; margin-bottom: 10px; }
+.feat-card p  { font-size: 14px; color: var(--text-2); line-height: 1.65; }
+.feat-tag {
+  display: inline-block; margin-top: 16px;
+  background: var(--brand-light); color: var(--brand);
+  font-size: 11px; font-weight: 700; padding: 3px 9px; border-radius: 100px;
+}
+
+/* ── COMPARE ── */
+.compare { padding: 96px 32px; background: #fff; }
+.compare-inner { max-width: 860px; margin: 0 auto; }
+.compare-table { width: 100%; border-collapse: collapse; margin-top: 48px; }
+.compare-table th {
+  padding: 16px 20px; font-size: 14px; font-weight: 700;
+  background: var(--surface); border-bottom: 2px solid var(--border);
+}
+.compare-table th.hitpan { background: var(--brand); color: #fff; border-radius: 8px 8px 0 0; }
+.compare-table td {
+  padding: 14px 20px; font-size: 14px; color: var(--text-2);
+  border-bottom: 1px solid var(--border); text-align: center;
+}
+.compare-table td:first-child { text-align: left; font-weight: 600; color: var(--text-1); }
+.compare-table td.hitpan { color: var(--brand); font-weight: 700; background: rgba(15,110,86,.04); }
+.compare-table tr:last-child td { border-bottom: none; }
+.ico-o { color: var(--brand); font-size: 18px; }
+.ico-x { color: #BDBDBD; font-size: 18px; }
+.ico-tri { color: #FFA000; font-size: 16px; }
+
+/* ── WORKFLOW ── */
+.workflow { padding: 96px 32px; background: var(--surface); }
+.workflow-inner { max-width: 1120px; margin: 0 auto; }
+.flow-row {
+  display: grid; grid-template-columns: repeat(6, 1fr);
+  gap: 0; margin-top: 48px; position: relative;
+}
+.flow-row::before {
+  content: ""; position: absolute;
+  top: 32px; left: 8.33%; right: 8.33%;
+  height: 2px;
+  background: linear-gradient(90deg, var(--brand-light), var(--brand), var(--brand-light));
+}
+.flow-item { text-align: center; padding: 0 8px; }
+.flow-circle {
+  width: 64px; height: 64px; border-radius: 50%;
+  background: var(--card); border: 2px solid var(--border);
+  display: grid; place-items: center; margin: 0 auto 14px;
+  font-size: 24px; position: relative; z-index: 1;
+  box-shadow: 0 2px 8px rgba(0,0,0,.06);
+  transition: all .2s;
+}
+.flow-item:hover .flow-circle {
+  border-color: var(--brand); background: var(--brand-light);
+  transform: scale(1.1);
+}
+.flow-item h4 { font-size: 14px; font-weight: 700; margin-bottom: 4px; }
+.flow-item p  { font-size: 12px; color: var(--text-3); }
+.flow-num {
+  position: absolute; top: -6px; right: -6px;
+  width: 20px; height: 20px; border-radius: 50%;
+  background: var(--brand); color: #fff;
+  font-size: 10px; font-weight: 800;
+  display: grid; place-items: center;
+}
+
+/* ── PRICING ── */
+.pricing { padding: 96px 32px; background: #fff; }
+.pricing-inner { max-width: 1120px; margin: 0 auto; }
+.pricing-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 24px; margin-top: 48px; }
+.price-card {
+  border-radius: 20px; padding: 36px 32px;
+  border: 2px solid var(--border); position: relative; transition: all .2s;
+}
+.price-card:hover { transform: translateY(-4px); box-shadow: 0 12px 40px rgba(0,0,0,.1); }
+.price-card.featured {
+  border-color: var(--brand); background: var(--brand);
+  color: #fff;
+}
+.price-recommend {
+  position: absolute; top: -14px; left: 50%; transform: translateX(-50%);
+  background: var(--accent); color: #fff; border-radius: 100px;
+  padding: 4px 16px; font-size: 12px; font-weight: 700; white-space: nowrap;
+}
+.price-tier { font-size: 13px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; margin-bottom: 8px; opacity: .7; }
+.price-amount { font-size: 40px; font-weight: 900; letter-spacing: -.03em; margin-bottom: 4px; }
+.price-amount span { font-size: 16px; font-weight: 500; opacity: .7; }
+.price-desc { font-size: 13px; opacity: .65; margin-bottom: 28px; }
+.price-features { list-style: none; display: flex; flex-direction: column; gap: 10px; margin-bottom: 32px; }
+.price-features li { font-size: 14px; display: flex; align-items: center; gap: 8px; }
+.price-features li::before { content: "✓"; font-weight: 800; color: var(--brand); flex-shrink: 0; }
+.price-card.featured .price-features li::before { color: rgba(255,255,255,.8); }
+.price-btn {
+  width: 100%; padding: 13px; border-radius: 10px;
+  font-size: 15px; font-weight: 700; cursor: pointer; border: none; transition: all .15s;
+}
+.price-btn-default { background: var(--brand-light); color: var(--brand); }
+.price-btn-default:hover { background: var(--brand); color: #fff; }
+.price-btn-featured { background: #fff; color: var(--brand); }
+.price-btn-featured:hover { background: rgba(255,255,255,.9); }
+.price-beta {
+  text-align: center; margin-top: 24px;
+  font-size: 14px; color: var(--text-3);
+}
+.price-beta strong { color: var(--brand); }
+
+/* ── CTA BAND ── */
+.cta-band {
+  background: linear-gradient(135deg, var(--brand) 0%, var(--brand-dark) 100%);
+  padding: 80px 32px; text-align: center;
+}
+.cta-band-inner { max-width: 680px; margin: 0 auto; }
+.cta-band h2 { font-size: clamp(26px, 3.5vw, 40px); font-weight: 900; color: #fff; letter-spacing: -.02em; margin-bottom: 12px; }
+.cta-band p { font-size: 16px; color: rgba(255,255,255,.75); margin-bottom: 36px; }
+.cta-counter {
+  display: inline-flex; align-items: center; gap: 8px;
+  background: rgba(255,255,255,.15); border-radius: 100px;
+  padding: 8px 20px; margin-bottom: 28px;
+  font-size: 14px; color: rgba(255,255,255,.9); font-weight: 600;
+}
+.counter-num { font-size: 20px; font-weight: 900; color: #fff; }
+.btn-cta-white {
+  background: #fff; color: var(--brand); border: none; border-radius: 12px;
+  padding: 16px 40px; font-size: 17px; font-weight: 800; cursor: pointer;
+  transition: all .15s; box-shadow: 0 4px 20px rgba(0,0,0,.15);
+  display: inline-block;
+}
+.btn-cta-white:hover { transform: translateY(-2px); box-shadow: 0 8px 30px rgba(0,0,0,.2); }
+
+/* ── SIGNUP FORM ── */
+.signup-section { padding: 80px 32px; background: var(--surface); }
+.signup-inner { max-width: 600px; margin: 0 auto; }
+.form-card {
+  background: var(--card); border-radius: 20px; padding: 40px;
+  box-shadow: 0 4px 24px rgba(0,0,0,.06); border: 1px solid var(--border);
+}
+.form-title { font-size: 22px; font-weight: 800; margin-bottom: 6px; }
+.form-subtitle { font-size: 14px; color: var(--text-3); margin-bottom: 28px; }
+.form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-bottom: 14px; }
+.form-group { display: flex; flex-direction: column; gap: 6px; }
+.form-group label { font-size: 13px; font-weight: 600; color: var(--text-2); }
+.req { color: var(--accent); }
+.form-group input, .form-group select, .form-group textarea {
+  border: 1.5px solid var(--border); border-radius: 10px;
+  padding: 11px 14px; font-size: 14px; font-family: var(--font);
+  background: var(--surface); color: var(--text-1); outline: none;
+  transition: border-color .15s, box-shadow .15s;
+}
+.form-group input:focus, .form-group select:focus, .form-group textarea:focus {
+  border-color: var(--brand); box-shadow: 0 0 0 3px rgba(15,110,86,.1);
+}
+.form-full { grid-column: span 2; }
+.form-submit {
+  width: 100%; background: var(--brand); color: #fff;
+  border: none; border-radius: 12px; padding: 15px;
+  font-size: 16px; font-weight: 700; cursor: pointer; margin-top: 6px;
+  transition: all .15s; box-shadow: 0 4px 12px rgba(15,110,86,.25);
+}
+.form-submit:hover { background: var(--brand-dark); transform: translateY(-1px); }
+.form-submit:disabled { opacity: .6; cursor: not-allowed; transform: none; }
+.form-note { font-size: 12px; color: var(--text-3); text-align: center; margin-top: 12px; }
+.form-success { display: none; text-align: center; padding: 32px 0; }
+.success-circle { width: 64px; height: 64px; border-radius: 50%; background: var(--brand-light); display: grid; place-items: center; font-size: 28px; margin: 0 auto 16px; }
+.form-success h3 { font-size: 20px; font-weight: 800; margin-bottom: 8px; }
+.form-success p { font-size: 14px; color: var(--text-2); }
+
+/* ── FOOTER ── */
+footer {
+  background: var(--text-1); color: rgba(255,255,255,.5);
+  padding: 48px 32px 32px;
+}
+.footer-inner { max-width: 1120px; margin: 0 auto; }
+.footer-top { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 32px; }
+.footer-logo { display: flex; align-items: center; gap: 10px; color: #fff; font-size: 16px; font-weight: 800; }
+.footer-links { display: flex; gap: 24px; }
+.footer-links a { font-size: 13px; color: rgba(255,255,255,.5); transition: color .15s; }
+.footer-links a:hover { color: #fff; }
+.footer-bottom { border-top: 1px solid rgba(255,255,255,.08); padding-top: 24px; font-size: 13px; }
+
+/* ── RESPONSIVE ── */
+@media (max-width: 900px) {
+  .hero-inner { grid-template-columns: 1fr; gap: 40px; }
+  .hero-mockup { display: none; }
+  .feat-grid { grid-template-columns: 1fr 1fr; }
+  .flow-row { grid-template-columns: repeat(3, 1fr); gap: 20px; }
+  .flow-row::before { display: none; }
+  .pain-grid { grid-template-columns: 1fr; }
+  .pain-item:first-child { border-radius: 12px 12px 0 0; }
+  .pain-item:last-child  { border-radius: 0 0 12px 12px; }
+  .pricing-grid { grid-template-columns: 1fr; max-width: 400px; }
+  .compare-table { font-size: 13px; }
+  .footer-top { flex-direction: column; gap: 20px; }
+  .nav-links { display: none; }
+  .form-row { grid-template-columns: 1fr; }
+  .form-full { grid-column: span 1; }
+}
+@media (max-width: 600px) {
+  .hero { padding: 60px 20px 48px; }
+  .feat-grid { grid-template-columns: 1fr; }
+  .hero h1 { font-size: 30px; }
+}
+</style>
+</head>
+<body>
+
+<!-- NAV -->
+<nav>
+  <div class="nav-inner">
+    <div class="logo">
+      <div class="logo-mark">H</div>
+      히트판 ERP
+    </div>
+    <div class="nav-links">
+      <a href="#features">기능</a>
+      <a href="#compare">비교</a>
+      <a href="#pricing">요금</a>
+      <a href="#signup">베타 신청</a>
+    </div>
+    <button class="nav-cta" onclick="scrollTo('signup')">베타 신청 →</button>
+  </div>
+</nav>
+
+<!-- HERO -->
+<section class="hero">
+  <div class="hero-inner">
+    <div>
+      <div class="hero-eyebrow">
+        <span class="dot"></span>
+        베타 모집 중 — 선착순 20개사
+      </div>
+      <h1>처음 쓰는 사람도<br><span class="line2">그냥 되는 ERP</span></h1>
+      <p class="hero-sub">
+        현장 직원이 설명서 없이 앉아서 바로 씁니다.<br>
+        매입·판매·재고·회계가 한 흐름으로 이어집니다.
+      </p>
+      <div class="hero-compare">
+        <div class="vs-badge"><span class="x">✕</span> 기존 ERP 교육 3일</div>
+        <div class="vs-badge"><span class="x">✕</span> 복잡한 매뉴얼</div>
+        <div class="vs-badge"><span class="o">✓</span> 히트판 교육 0분</div>
+      </div>
+      <div class="hero-btns">
+        <button class="btn-main" onclick="scrollTo('signup')">무료 베타 신청 →</button>
+        <button class="btn-sub" onclick="scrollTo('features')">기능 보기</button>
+      </div>
+      <div class="hero-trust">
+        <div class="trust-item">베타 기간 완전 무료</div>
+        <div class="trust-item">설치 1분</div>
+        <div class="trust-item">데이터 보장</div>
+      </div>
+    </div>
+    <div class="hero-mockup">
+      <div class="mockup-window">
+        <div class="mockup-bar">
+          <div class="mockup-dot" style="background:#FF5F57"></div>
+          <div class="mockup-dot" style="background:#FEBC2E"></div>
+          <div class="mockup-dot" style="background:#28C840"></div>
+        </div>
+        <div class="mockup-body">
+          <div class="mockup-kpi">
+            <div class="kpi-box">
+              <div class="kpi-label">이번달 매출</div>
+              <div class="kpi-val">₩24.8M</div>
+              <div class="kpi-change">▲ 12.4%</div>
+            </div>
+            <div class="kpi-box">
+              <div class="kpi-label">재고 품목</div>
+              <div class="kpi-val">1,284</div>
+              <div class="kpi-change">정상</div>
+            </div>
+            <div class="kpi-box">
+              <div class="kpi-label">미수금</div>
+              <div class="kpi-val">₩3.2M</div>
+              <div class="kpi-change" style="color:#E53935">▼ 2건</div>
+            </div>
+          </div>
+          <div class="mockup-table">
+            <div class="mt-header">
+              <span>거래처</span><span>금액</span><span>상태</span>
+            </div>
+            <div class="mt-row">
+              <span>㈜삼성전자</span>
+              <span>₩8,400,000</span>
+              <span><span class="badge badge-green">완료</span></span>
+            </div>
+            <div class="mt-row">
+              <span>LG화학</span>
+              <span>₩3,200,000</span>
+              <span><span class="badge badge-blue">진행</span></span>
+            </div>
+            <div class="mt-row">
+              <span>현대모비스</span>
+              <span>₩5,700,000</span>
+              <span><span class="badge badge-orange">대기</span></span>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="mockup-float">
+        ✅ 거래명세서 확정 → 재고 자동 반영
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- PAIN POINT -->
+<section class="pain">
+  <div class="pain-inner">
+    <h2>지금 쓰는 ERP, 이런 불만 없으신가요?</h2>
+    <p>중소기업 ERP 담당자 300명에게 물었습니다</p>
+    <div class="pain-grid">
+      <div class="pain-item">
+        <div class="pain-emoji">😫</div>
+        <h3>"교육만 3일, 쓰기까지 한 달"</h3>
+        <p>신입 직원이 ERP 쓰려면 담당자가 옆에 붙어 있어야 합니다. 매뉴얼만 200페이지.</p>
+      </div>
+      <div class="pain-item">
+        <div class="pain-emoji">💸</div>
+        <h3>"쓸 기능만 쓰는데 비용은 풀패키지"</h3>
+        <p>필요한 기능 3가지인데 20가지 기능 값을 냅니다. 중소기업엔 과분한 구조.</p>
+      </div>
+      <div class="pain-item">
+        <div class="pain-emoji">🐢</div>
+        <h3>"버튼 눌렀는데 5초 기다려야 넘어가"</h3>
+        <p>클라우드 ERP인데 느립니다. 데이터 쌓일수록 더 느려집니다. 현장 직원이 제일 싫어하는 것.</p>
+      </div>
+    </div>
+    <div class="pain-arrow">
+      <span class="from">복잡한 기존 ERP</span>
+      <span class="arr">→</span>
+      <span class="to">히트판 ERP — 처음 보는 사람이 혼자 씁니다</span>
+    </div>
+  </div>
+</section>
+
+<!-- FEATURES -->
+<section class="features" id="features">
+  <div class="features-inner">
+    <div class="section-eyebrow">Core Features</div>
+    <div class="section-h2">업무가 끊기지 않습니다</div>
+    <div class="section-desc">발주부터 세금계산서까지 — 한 번 입력으로 모든 장부가 자동 반영됩니다.</div>
+    <div class="feat-grid">
+      <div class="feat-card">
+        <div class="feat-icon">🛒</div>
+        <h3>매입 · 판매 일괄 처리</h3>
+        <p>발주 → 매입 → 재고 반영이 한 흐름으로 이어집니다. 거래명세서 확정 한 번으로 재고·미수금·회계가 동시에 업데이트됩니다.</p>
+        <span class="feat-tag">자동 재고 반영</span>
+      </div>
+      <div class="feat-card">
+        <div class="feat-icon">📊</div>
+        <h3>실시간 재고 · 원장</h3>
+        <p>품목별 재고 현황, 거래처별 잔액, 월별 손익이 언제나 최신 상태로 보입니다. 엑셀 따로 정리할 필요가 없습니다.</p>
+        <span class="feat-tag">실시간 대시보드</span>
+      </div>
+      <div class="feat-card">
+        <div class="feat-icon">🧾</div>
+        <h3>세금계산서 · 회계 자동화</h3>
+        <p>거래명세서에서 세금계산서 발행까지 클릭 하나. 분개는 자동 생성되고 부가세 신고 자료도 바로 조회됩니다.</p>
+        <span class="feat-tag">자동 분개</span>
+      </div>
+      <div class="feat-card">
+        <div class="feat-icon">🔒</div>
+        <h3>내 서버, 내 데이터</h3>
+        <p>클라우드 서버에 올리지 않습니다. 우리 회사 PC에 데이터가 있습니다. AES-256 암호화. 외부 유출 구조적으로 불가.</p>
+        <span class="feat-tag">로컬 DB 보안</span>
+      </div>
+      <div class="feat-card">
+        <div class="feat-icon">⚡</div>
+        <h3>원클릭 설치 · 1분 완료</h3>
+        <p>EXE 파일 하나 실행하면 끝입니다. IT 담당자 없어도 됩니다. 대표님이 직접 설치하실 수 있습니다.</p>
+        <span class="feat-tag">설치 1분</span>
+      </div>
+      <div class="feat-card">
+        <div class="feat-icon">👥</div>
+        <h3>역할별 권한 관리</h3>
+        <p>구매담당은 매입만, 경리는 회계만, 대표는 전체 조회. 직급별 화면 접근 권한을 직접 설정하세요.</p>
+        <span class="feat-tag">세밀한 권한 제어</span>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- COMPARE -->
+<section class="compare" id="compare">
+  <div class="compare-inner">
+    <div style="text-align:center">
+      <div class="section-eyebrow">Comparison</div>
+      <div class="section-h2">왜 히트판인가요?</div>
+      <div class="section-desc">중소기업에 필요한 것만, 가장 쉽게</div>
+    </div>
+    <table class="compare-table">
+      <thead>
+        <tr>
+          <th style="text-align:left">항목</th>
+          <th>일반 ERP A</th>
+          <th>일반 ERP B</th>
+          <th class="hitpan">히트판 ERP</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>초기 교육 시간</td>
+          <td>3~5일</td>
+          <td>1~2일</td>
+          <td class="hitpan"><strong>0분</strong></td>
+        </tr>
+        <tr>
+          <td>설치 시간</td>
+          <td>반나절 이상</td>
+          <td>클라우드 즉시</td>
+          <td class="hitpan"><strong>1분</strong></td>
+        </tr>
+        <tr>
+          <td>데이터 저장 위치</td>
+          <td>클라우드</td>
+          <td>클라우드</td>
+          <td class="hitpan"><strong>내 서버</strong></td>
+        </tr>
+        <tr>
+          <td>중소기업 맞춤</td>
+          <td><span class="ico-tri">△</span></td>
+          <td><span class="ico-o">✓</span></td>
+          <td class="hitpan"><span class="ico-o">✓</span></td>
+        </tr>
+        <tr>
+          <td>월 비용 (5인 기준)</td>
+          <td>20만원~</td>
+          <td>5만원~</td>
+          <td class="hitpan"><strong>2.9만원~</strong></td>
+        </tr>
+        <tr>
+          <td>베타 무료 체험</td>
+          <td><span class="ico-x">✕</span></td>
+          <td><span class="ico-tri">△</span></td>
+          <td class="hitpan"><span class="ico-o">✓</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<!-- WORKFLOW -->
+<section class="workflow">
+  <div class="workflow-inner">
+    <div class="section-eyebrow">Workflow</div>
+    <div class="section-h2">6단계, 한 시스템에</div>
+    <div class="section-desc">현장 직원 눈높이에 맞춘 순서. 헷갈릴 수가 없습니다.</div>
+    <div class="flow-row">
+      <div class="flow-item">
+        <div class="flow-circle">⚙️<div class="flow-num">1</div></div>
+        <h4>설정</h4>
+        <p>사원·권한</p>
+      </div>
+      <div class="flow-item">
+        <div class="flow-circle">🏢<div class="flow-num">2</div></div>
+        <h4>마스터</h4>
+        <p>업체·상품</p>
+      </div>
+      <div class="flow-item">
+        <div class="flow-circle">📥<div class="flow-num">3</div></div>
+        <h4>매입</h4>
+        <p>발주→입고</p>
+      </div>
+      <div class="flow-item">
+        <div class="flow-circle">📤<div class="flow-num">4</div></div>
+        <h4>판매</h4>
+        <p>수주→명세서</p>
+      </div>
+      <div class="flow-item">
+        <div class="flow-circle">📈<div class="flow-num">5</div></div>
+        <h4>현황</h4>
+        <p>재고·매출</p>
+      </div>
+      <div class="flow-item">
+        <div class="flow-circle">💰<div class="flow-num">6</div></div>
+        <h4>재무</h4>
+        <p>회계·세금계산서</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- PRICING -->
+<section class="pricing" id="pricing">
+  <div class="pricing-inner">
+    <div style="text-align:center">
+      <div class="section-eyebrow">Pricing</div>
+      <div class="section-h2">합리적인 요금제</div>
+      <div class="section-desc">베타 기간은 모든 플랜 무료입니다</div>
+    </div>
+    <div class="pricing-grid">
+      <div class="price-card">
+        <div class="price-tier">Starter</div>
+        <div class="price-amount">29,000<span>원/월</span></div>
+        <div class="price-desc">1~5인 소규모 사업장</div>
+        <ul class="price-features">
+          <li>매입·판매·재고 기본 기능</li>
+          <li>기기 3대 포함</li>
+          <li>이메일 지원</li>
+          <li>1GB 데이터</li>
+        </ul>
+        <button class="price-btn price-btn-default" onclick="scrollTo('signup')">베타 무료 신청</button>
+      </div>
+      <div class="price-card featured">
+        <div class="price-recommend">가장 인기</div>
+        <div class="price-tier">Business</div>
+        <div class="price-amount">59,000<span>원/월</span></div>
+        <div class="price-desc">6~20인 성장하는 회사</div>
+        <ul class="price-features">
+          <li>모든 기능 포함</li>
+          <li>기기 10대 포함</li>
+          <li>전화·카카오 지원</li>
+          <li>회계·세금계산서 자동화</li>
+          <li>그룹웨어·결재</li>
+        </ul>
+        <button class="price-btn price-btn-featured" onclick="scrollTo('signup')">베타 무료 신청</button>
+      </div>
+      <div class="price-card">
+        <div class="price-tier">Enterprise</div>
+        <div class="price-amount">100,000<span>원/월</span></div>
+        <div class="price-desc">21인 이상 중견기업</div>
+        <ul class="price-features">
+          <li>기기 무제한</li>
+          <li>전담 CS 매니저</li>
+          <li>맞춤 설정 지원</li>
+          <li>데이터 무제한</li>
+          <li>AI CS 챗봇 포함</li>
+        </ul>
+        <button class="price-btn price-btn-default" onclick="scrollTo('signup')">베타 무료 신청</button>
+      </div>
+    </div>
+    <div class="price-beta">베타 기간 동안 <strong>모든 플랜 무료</strong> · 베타 종료 후 선택 가능 · 언제든 취소</div>
+  </div>
+</section>
+
+<!-- CTA BAND -->
+<section class="cta-band">
+  <div class="cta-band-inner">
+    <div class="cta-counter">
+      현재 <span class="counter-num" id="cnt">7</span>개사 신청 완료 · 20개사 마감
+    </div>
+    <h2>지금 신청하면<br>베타 기간 전부 무료입니다</h2>
+    <p>설치부터 사용까지 전담 지원합니다. 카드 등록 없이 바로 시작하세요.</p>
+    <button class="btn-cta-white" onclick="scrollTo('signup')">무료 베타 신청하기 →</button>
+  </div>
+</section>
+
+<!-- SIGNUP FORM -->
+<section class="signup-section" id="signup">
+  <div class="signup-inner">
+    <div class="form-card">
+      <div id="form-area">
+        <div class="form-title">베타 신청 — 선착순 20개사</div>
+        <div class="form-subtitle">베타 기간 완전 무료 · 담당자가 직접 연락드립니다</div>
+        <div class="form-row">
+          <div class="form-group">
+            <label>회사명 <span class="req">*</span></label>
+            <input type="text" id="companyName" placeholder="(주)히트판" maxlength="100" />
+          </div>
+          <div class="form-group">
+            <label>담당자명 <span class="req">*</span></label>
+            <input type="text" id="contactName" placeholder="홍길동" maxlength="50" />
+          </div>
+        </div>
+        <div class="form-row">
+          <div class="form-group">
+            <label>연락처 <span class="req">*</span></label>
+            <input type="tel" id="phone" placeholder="010-0000-0000" maxlength="20" />
+          </div>
+          <div class="form-group">
+            <label>이메일 <span class="req">*</span></label>
+            <input type="email" id="email" placeholder="hong@company.com" maxlength="100" />
+          </div>
+        </div>
+        <div class="form-row">
+          <div class="form-group form-full">
+            <label>직원 수</label>
+            <select id="employeeCnt">
+              <option value="">선택 (선택사항)</option>
+              <option value="1-5">1~5명</option>
+              <option value="6-20">6~20명</option>
+              <option value="21-50">21~50명</option>
+              <option value="51+">51명 이상</option>
+            </select>
+          </div>
+        </div>
+        <div class="form-row">
+          <div class="form-group form-full">
+            <label>현재 사용 중인 ERP / 문의사항</label>
+            <textarea id="message" rows="3" placeholder="현재 쓰는 ERP나 불편한 점을 알려주시면 맞춤 안내를 드립니다."></textarea>
+          </div>
+        </div>
+        <button class="form-submit" id="submitBtn" onclick="submitForm()">무료 베타 신청하기 →</button>
+        <div class="form-note">제출하신 정보는 베타 프로그램 운영 목적으로만 사용됩니다.</div>
+      </div>
+      <div class="form-success" id="form-success">
+        <div class="success-circle">✅</div>
+        <h3>신청 완료!</h3>
+        <p>담당자가 1영업일 내 연락드립니다.<br>히트판 ERP와 함께해 주셔서 감사합니다.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- FOOTER -->
+<footer>
+  <div class="footer-inner">
+    <div class="footer-top">
+      <div class="footer-logo">
+        <div class="logo-mark">H</div>
+        히트판 ERP
+      </div>
+      <div class="footer-links">
+        <a href="mailto:support@hitpan.kr">support@hitpan.kr</a>
+        <a href="#">개인정보처리방침</a>
+        <a href="#">이용약관</a>
+      </div>
+    </div>
+    <div class="footer-bottom">
+      © 2026 히트판 ERP · 중소기업을 위한 올인원 ERP 솔루션
+    </div>
+  </div>
+</footer>
+
+<script>
+const API_BASE = 'https://api-demo.hitpan.kr';
+
+function scrollTo(id) {
+  document.getElementById(id).scrollIntoView({ behavior: 'smooth' });
+}
+
+// 신청자 수 카운터 애니메이션
+(function() {
+  const el = document.getElementById('cnt');
+  let n = 0, target = 7;
+  const t = setInterval(() => {
+    n++; el.textContent = n;
+    if (n >= target) clearInterval(t);
+  }, 120);
+})();
+
+async function submitForm() {
+  const btn = document.getElementById('submitBtn');
+  const companyName = document.getElementById('companyName').value.trim();
+  const contactName = document.getElementById('contactName').value.trim();
+  const phone       = document.getElementById('phone').value.trim();
+  const email       = document.getElementById('email').value.trim();
+  const employeeCnt = document.getElementById('employeeCnt').value;
+  const message     = document.getElementById('message').value.trim();
+
+  if (!companyName || !contactName || !phone || !email) {
+    alert('회사명, 담당자명, 연락처, 이메일은 필수 항목입니다.');
+    return;
+  }
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    alert('이메일 형식을 확인해주세요.');
+    return;
+  }
+
+  btn.disabled = true;
+  btn.textContent = '신청 중...';
+
+  try {
+    const res = await fetch(API_BASE + '/api/landing/beta-signup', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ companyName, contactName, phone, email, employeeCnt, message })
+    });
+    const data = await res.json();
+    if (res.ok && data.success) {
+      document.getElementById('form-area').style.display = 'none';
+      document.getElementById('form-success').style.display = 'block';
+    } else {
+      alert(data.message || '신청 중 오류가 발생했습니다. 다시 시도해주세요.');
+      btn.disabled = false;
+      btn.textContent = '무료 베타 신청하기 →';
+    }
+  } catch {
+    alert('서버에 연결할 수 없습니다. 잠시 후 다시 시도해주세요.');
+    btn.disabled = false;
+    btn.textContent = '무료 베타 신청하기 →';
+  }
+}
+
+document.addEventListener('keydown', e => {
+  if (e.key === 'Enter' && e.target.tagName !== 'TEXTAREA') submitForm();
+});
+</script>
+</body>
+</html>

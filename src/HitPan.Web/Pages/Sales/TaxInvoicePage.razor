@@ -270,8 +270,9 @@
             var detail = await DeliveryService.GetAsync(item.DeliveryId);
             _detailLines = detail?.Items ?? new();
         }
-        catch
+        catch (Exception _hp15Ex)
         {
+            Console.Error.WriteLine($"[HP15] " + _hp15Ex.GetType().Name + ": " + _hp15Ex.Message);
             _detailLines = new();
         }
         _detailOpen = true;

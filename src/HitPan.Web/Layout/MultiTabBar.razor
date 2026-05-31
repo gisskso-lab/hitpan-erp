@@ -86,8 +86,9 @@
 
             await TenantProfile.LoadAsync();
         }
-        catch
+        catch (Exception _hp15Ex)
         {
+            Console.Error.WriteLine($"[HP15] " + _hp15Ex.GetType().Name + ": " + _hp15Ex.Message);
             _userName = null;
             TenantProfile.Clear();
         }

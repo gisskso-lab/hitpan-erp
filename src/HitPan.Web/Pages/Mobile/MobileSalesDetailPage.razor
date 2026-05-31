@@ -131,8 +131,9 @@
         {
             await DocSvc.DownloadPdfAsync("delivery", Id);
         }
-        catch
+        catch (Exception _hp15Ex)
         {
+            Console.Error.WriteLine($"[HP15] " + _hp15Ex.GetType().Name + ": " + _hp15Ex.Message);
             Snackbar.Add("PDF 생성 중입니다. 잠시 후 다시 시도해주세요.", Severity.Info);
         }
     }
@@ -145,8 +146,9 @@
         {
             await Js.InvokeVoidAsync("navigator.share", new { title = "거래명세서", text });
         }
-        catch
+        catch (Exception _hp15Ex)
         {
+            Console.Error.WriteLine($"[HP15] " + _hp15Ex.GetType().Name + ": " + _hp15Ex.Message);
             await Js.InvokeVoidAsync("navigator.clipboard.writeText", text);
             Snackbar.Add("클립보드에 복사되었습니다.", Severity.Success);
         }

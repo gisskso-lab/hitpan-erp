@@ -169,8 +169,9 @@
             var pending = await ApprovalSvc.GetPendingAsync();
             _approvalPendingCount = pending.Count;
         }
-        catch
+        catch (Exception _hp15Ex)
         {
+            Console.Error.WriteLine($"[HP15] " + _hp15Ex.GetType().Name + ": " + _hp15Ex.Message);
             // §원칙 #15 빈 catch 금지 적용 대상 — 사이드바 카운트는 베타 단계 silent OK.
             // 본 진단 로그는 ApprovalService 내부에서 처리하므로 여기선 안전 대체값.
             _approvalPendingCount = 0;

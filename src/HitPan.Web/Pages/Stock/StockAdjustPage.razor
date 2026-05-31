@@ -118,8 +118,9 @@
         {
             _warehouses = await Http.GetFromJsonAsync<List<WarehouseOption>>("api/warehouses") ?? new();
         }
-        catch
+        catch (Exception _hp15Ex)
         {
+            Console.Error.WriteLine($"[HP15] " + _hp15Ex.GetType().Name + ": " + _hp15Ex.Message);
             _warehouses = new();
         }
     }
@@ -202,8 +203,9 @@
             var path = "api/stock/adjust/history" + (qs.Any() ? "?" + string.Join("&", qs) : "");
             _history = await Http.GetFromJsonAsync<List<AdjustHistoryRow>>(path) ?? new();
         }
-        catch
+        catch (Exception _hp15Ex)
         {
+            Console.Error.WriteLine($"[HP15] " + _hp15Ex.GetType().Name + ": " + _hp15Ex.Message);
             _history = new();
         }
         finally

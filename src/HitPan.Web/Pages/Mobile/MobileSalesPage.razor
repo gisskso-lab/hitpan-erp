@@ -163,8 +163,9 @@
         {
             await DocSvc.DownloadPdfAsync("delivery", row.DeliveryId);
         }
-        catch
+        catch (Exception _hp15Ex)
         {
+            Console.Error.WriteLine($"[HP15] " + _hp15Ex.GetType().Name + ": " + _hp15Ex.Message);
             Snackbar.Add("PDF 준비 중입니다.", Severity.Info);
         }
     }

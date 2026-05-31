@@ -51,8 +51,9 @@
             var status = await Http.GetFromJsonAsync<TermsConsentStatusDto>("api/auth/terms/status");
             _requiresConsent = status?.HasAgreed != true;
         }
-        catch
+        catch (Exception _hp15Ex)
         {
+            Console.Error.WriteLine($"[HP15] " + _hp15Ex.GetType().Name + ": " + _hp15Ex.Message);
             // 401·테이블 부재 등은 강제 안내 보류 (헌법 #15 silent swallow 회피 위해 false 유지)
             _requiresConsent = false;
         }

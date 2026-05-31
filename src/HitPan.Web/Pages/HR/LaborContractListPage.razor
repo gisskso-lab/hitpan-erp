@@ -215,8 +215,9 @@
             await JS.InvokeVoidAsync("navigator.clipboard.writeText", url);
             Snackbar.Add("서명 요청 URL이 복사되었습니다.", Severity.Success);
         }
-        catch
+        catch (Exception _hp15Ex)
         {
+            Console.Error.WriteLine($"[HP15] " + _hp15Ex.GetType().Name + ": " + _hp15Ex.Message);
             Snackbar.Add($"복사 실패: {url}", Severity.Warning);
         }
     }

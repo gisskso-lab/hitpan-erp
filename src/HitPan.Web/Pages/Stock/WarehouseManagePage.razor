@@ -100,8 +100,9 @@ else
         {
             _warehouses = await Http.GetFromJsonAsync<List<WarehouseViewModel>>("api/warehouses") ?? new();
         }
-        catch
+        catch (Exception _hp15Ex)
         {
+            Console.Error.WriteLine($"[HP15] " + _hp15Ex.GetType().Name + ": " + _hp15Ex.Message);
             Snackbar.Add("창고 목록을 불러오지 못했습니다.", Severity.Error);
         }
         _loading = false;
@@ -166,8 +167,9 @@ else
                 Snackbar.Add("저장에 실패했습니다.", Severity.Error);
             }
         }
-        catch
+        catch (Exception _hp15Ex)
         {
+            Console.Error.WriteLine($"[HP15] " + _hp15Ex.GetType().Name + ": " + _hp15Ex.Message);
             Snackbar.Add("서버 오류가 발생했습니다.", Severity.Error);
         }
         _saving = false;
@@ -195,8 +197,9 @@ else
                 Snackbar.Add("삭제에 실패했습니다.", Severity.Error);
             }
         }
-        catch
+        catch (Exception _hp15Ex)
         {
+            Console.Error.WriteLine($"[HP15] " + _hp15Ex.GetType().Name + ": " + _hp15Ex.Message);
             Snackbar.Add("서버 오류가 발생했습니다.", Severity.Error);
         }
     }

@@ -92,8 +92,9 @@
                 _kpi = result.Kpi ?? new();
             }
         }
-        catch
+        catch (Exception _hp15Ex)
         {
+            Console.Error.WriteLine($"[HP15] " + _hp15Ex.GetType().Name + ": " + _hp15Ex.Message);
             _rows = new();
             _kpi = new();
         }

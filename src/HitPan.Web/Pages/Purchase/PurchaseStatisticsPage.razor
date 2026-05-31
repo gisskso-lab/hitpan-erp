@@ -134,8 +134,9 @@
         {
             _reportData = await Http.GetFromJsonAsync<List<ReportRow>>(path) ?? new();
         }
-        catch
+        catch (Exception _hp15Ex)
         {
+            Console.Error.WriteLine($"[HP15] " + _hp15Ex.GetType().Name + ": " + _hp15Ex.Message);
             _reportData = new();
         }
         StateHasChanged();
