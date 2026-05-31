@@ -1,3 +1,5 @@
+using System.Data;
+using System.Data.Common;
 using Dapper;
 using HitPan.Application.DTOs.Item;
 using HitPan.Application.Interfaces;
@@ -24,13 +26,16 @@ public class ItemSpecService : IItemSpecService
         if (string.IsNullOrWhiteSpace(itemId)) throw new ArgumentException("item_id required", nameof(itemId));
 
         var db = _unitOfWork.GetDbConnection();
+        await EnsureOpenAsync(db, ct).ConfigureAwait(false);
+        // 진범 #99 봉합 (2026-05-31): DB-76 시드의 UUID() 함수가 MySqlConnector 메타에 Guid 힌트 박제
+        // → SELECT 시 Guid 반환 → string DTO 충돌 → CAST AS CHAR 명시로 string 강제 정합
         var sql = activeOnly
-            ? @"SELECT spec_id AS SpecId, item_id AS ItemId, spec_value AS SpecValue,
+            ? @"SELECT CAST(spec_id AS CHAR) AS SpecId, CAST(item_id AS CHAR) AS ItemId, spec_value AS SpecValue,
                        display_order AS DisplayOrder, is_default AS IsDefault, is_active AS IsActive
                 FROM item_specs
                 WHERE tenant_id = @TenantId AND item_id = @ItemId AND is_active = 1
                 ORDER BY is_default DESC, display_order ASC, spec_value ASC"
-            : @"SELECT spec_id AS SpecId, item_id AS ItemId, spec_value AS SpecValue,
+            : @"SELECT CAST(spec_id AS CHAR) AS SpecId, CAST(item_id AS CHAR) AS ItemId, spec_value AS SpecValue,
                        display_order AS DisplayOrder, is_default AS IsDefault, is_active AS IsActive
                 FROM item_specs
                 WHERE tenant_id = @TenantId AND item_id = @ItemId
@@ -48,6 +53,7 @@ public class ItemSpecService : IItemSpecService
 
         var specId = Guid.NewGuid().ToString();
         var db = _unitOfWork.GetDbConnection();
+        await EnsureOpenAsync(db, ct).ConfigureAwait(false);
 
         // is_default=1 신규 시 기존 default 해제 (1:N 중 default 1개만)
         if (request.IsDefault)
@@ -101,6 +107,7 @@ public class ItemSpecService : IItemSpecService
             throw new InvalidOperationException("규격값은 비어있을 수 없습니다.");
 
         var db = _unitOfWork.GetDbConnection();
+        await EnsureOpenAsync(db, ct).ConfigureAwait(false);
 
         if (request.IsDefault)
         {
@@ -154,6 +161,7 @@ public class ItemSpecService : IItemSpecService
     public async Task DeactivateAsync(string tenantId, string itemId, string specId, CancellationToken ct = default)
     {
         var db = _unitOfWork.GetDbConnection();
+        await EnsureOpenAsync(db, ct).ConfigureAwait(false);
         await db.ExecuteAsync(new CommandDefinition(
             @"UPDATE item_specs SET is_active = 0
               WHERE tenant_id = @TenantId AND item_id = @ItemId AND spec_id = @SpecId",
@@ -163,10 +171,23 @@ public class ItemSpecService : IItemSpecService
             tenantId, itemId, specId);
     }
 
+    // EF Core Lazy connection 봉합 (진범 #99, 사장님 결재 2026-05-31)
+    // UnitOfWork.GetDbConnection()은 Closed 상태로 반환될 수 있음 → 명시 OPEN 보장
+    private static async Task EnsureOpenAsync(IDbConnection db, CancellationToken ct)
+    {
+        if (db.State == ConnectionState.Open) return;
+        if (db is DbConnection c)
+        {
+            await c.OpenAsync(ct).ConfigureAwait(false);
+            return;
+        }
+        db.Open();
+    }
+
     // 작지 #4 동기화 정책 (사장님 작업지시 2026-05-31)
     // item_specs(is_default=1) 변경 시 → items.spec 컬럼에 자동 sync
     // 기존 코드(items.spec 단일 컬럼 사용)와 신규 코드(item_specs 1:N) 호환 보장
-    private async Task SyncItemsSpecColumnAsync(System.Data.IDbConnection db, string tenantId, string itemId, string specValue, CancellationToken ct)
+    private async Task SyncItemsSpecColumnAsync(IDbConnection db, string tenantId, string itemId, string specValue, CancellationToken ct)
     {
         try
         {
