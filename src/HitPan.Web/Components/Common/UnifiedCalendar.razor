@@ -7,7 +7,9 @@
 *@
 @using HitPan.Web.Models
 @using HitPan.Web.Services
+@using Microsoft.AspNetCore.Components.Authorization
 @inject UnifiedCalendarService UnifiedSvc
+@inject AuthenticationStateProvider AuthProvider
 
 <div class="hp-ucal-card">
 
@@ -229,12 +231,31 @@
     private bool _showLeave = true;
     private bool _showIssue = true;
 
-    protected override async Task OnInitializedAsync() => await LoadAsync();
+    // 진범 #100 봉합 (2026-05-31): OnInitializedAsync는 WASM 부팅 초기 → fetch 실패
+    // OnAfterRenderAsync(firstRender) 시점이면 인증 핸들러·런타임 모두 정합
+    private bool _firstLoadDone;
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender && !_firstLoadDone)
+        {
+            _firstLoadDone = true;
+            await LoadAsync();
+        }
+    }
 
     private async Task LoadAsync()
     {
         _loading = true;
         StateHasChanged();
+        // 진범 #100 봉합 (2026-05-31): 부팅 직후 첫 호출 시 인증 핸들러 토큰 미주입 → fetch 실패
+        // AuthenticationState 완료 대기 후 호출 (토큰 핸들러 정합 보장)
+        var auth = await AuthProvider.GetAuthenticationStateAsync();
+        if (auth.User?.Identity?.IsAuthenticated != true)
+        {
+            _loading = false;
+            StateHasChanged();
+            return;
+        }
         _data = await UnifiedSvc.GetMonthlyAsync(_year, _month);
         _loading = false;
         StateHasChanged();

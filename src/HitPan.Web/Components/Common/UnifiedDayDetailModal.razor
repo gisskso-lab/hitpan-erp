@@ -6,9 +6,11 @@
 *@
 @using HitPan.Web.Models
 @using HitPan.Web.Services
+@using Microsoft.AspNetCore.Components.Authorization
 @inject UnifiedCalendarService UnifiedSvc
 @inject NavigationManager Nav
 @inject IJSRuntime JS
+@inject AuthenticationStateProvider AuthProvider
 
 @if (IsOpen)
 {
@@ -284,6 +286,14 @@
     {
         _loading = true;
         StateHasChanged();
+        // 진범 #100 봉합 (2026-05-31): 인증 상태 완료 대기 후 호출
+        var auth = await AuthProvider.GetAuthenticationStateAsync();
+        if (auth.User?.Identity?.IsAuthenticated != true)
+        {
+            _loading = false;
+            StateHasChanged();
+            return;
+        }
         _data = await UnifiedSvc.GetDayDetailAsync(SelectedDate);
         _loading = false;
         StateHasChanged();
