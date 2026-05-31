@@ -1,0 +1,108 @@
+@* 작지① 그리드 규격 콤보박스 (사장님 작업지시 2026-05-31)
+   - 품명 선택 시 ItemId 박제 → 해당 상품의 등록된 규격 옵션 표시
+   - 옵션 없을 시 공란 OR 텍스트박스처럼 직접 입력 가능
+   - 직접 입력값도 그대로 전송 (DB 미저장 임시값 OK)
+*@
+@using System.Net.Http.Json
+@inject HttpClient Http
+
+<MudAutocomplete T="string"
+                 Value="@Value"
+                 ValueChanged="OnValueChangedAsync"
+                 SearchFunc="SearchAsync"
+                 CoerceText="false"
+                 CoerceValue="true"
+                 Clearable="true"
+                 Dense="true"
+                 Margin="Margin.Dense"
+                 Variant="Variant.Outlined"
+                 Disabled="@Disabled"
+                 Placeholder="@(string.IsNullOrEmpty(ItemId) ? "품명 먼저 선택" : "규격 선택 또는 직접 입력")"
+                 ResetValueOnEmptyText="false"
+                 ShowProgressIndicator="@_loading"
+                 MaxItems="50" />
+
+@code {
+    [Parameter] public string? ItemId { get; set; }
+    [Parameter] public string? Value { get; set; }
+    [Parameter] public EventCallback<string?> ValueChanged { get; set; }
+    [Parameter] public bool Disabled { get; set; }
+
+    private List<string> _options = new();
+    private bool _loading;
+    private string? _loadedItemId;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (!string.IsNullOrEmpty(ItemId) && ItemId != _loadedItemId)
+        {
+            await LoadOptionsAsync();
+        }
+        else if (string.IsNullOrEmpty(ItemId) && _loadedItemId != null)
+        {
+            _options.Clear();
+            _loadedItemId = null;
+        }
+    }
+
+    private async Task LoadOptionsAsync()
+    {
+        if (string.IsNullOrEmpty(ItemId)) return;
+
+        _loading = true;
+        StateHasChanged();
+
+        try
+        {
+            var list = await Http.GetFromJsonAsync<List<ItemSpecOption>>($"api/items/{ItemId}/specs?activeOnly=true");
+            _options = list?.Select(s => s.SpecValue).ToList() ?? new();
+            _loadedItemId = ItemId;
+        }
+        catch (Exception _hp15Ex)
+        {
+            Console.Error.WriteLine($"[HP15] ItemSpec load: " + _hp15Ex.GetType().Name + ": " + _hp15Ex.Message);
+            _options = new();
+        }
+        finally
+        {
+            _loading = false;
+            StateHasChanged();
+        }
+    }
+
+    private Task<IEnumerable<string>> SearchAsync(string? query, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(query))
+        {
+            return Task.FromResult<IEnumerable<string>>(_options);
+        }
+
+        var filtered = _options
+            .Where(o => o.Contains(query, StringComparison.OrdinalIgnoreCase))
+            .ToList();
+
+        // 직접 입력값이 옵션에 없으면 첫 번째로 박제 (사용자 자유 입력 보장)
+        if (!filtered.Any(o => string.Equals(o, query, StringComparison.OrdinalIgnoreCase)))
+        {
+            filtered.Insert(0, query);
+        }
+
+        return Task.FromResult<IEnumerable<string>>(filtered);
+    }
+
+    private async Task OnValueChangedAsync(string? newValue)
+    {
+        Value = newValue;
+        if (ValueChanged.HasDelegate)
+        {
+            await ValueChanged.InvokeAsync(newValue);
+        }
+    }
+
+    private sealed class ItemSpecOption
+    {
+        public string SpecValue { get; set; } = string.Empty;
+        public int DisplayOrder { get; set; }
+        public bool IsDefault { get; set; }
+    }
+}
