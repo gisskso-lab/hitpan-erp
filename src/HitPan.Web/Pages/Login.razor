@@ -98,7 +98,12 @@
                 return;
             }
 
-            if (result.Data?.RedirectToWelcome == true)
+            // 헌법 #24: 약관 v2.0.0 미동의 시 /terms 강제 이동 (welcome·메인보다 우선)
+            if (result.Data?.RequiresTermsConsent == true)
+            {
+                Navigation.NavigateTo("/terms", forceLoad: true);
+            }
+            else if (result.Data?.RedirectToWelcome == true)
             {
                 Navigation.NavigateTo("/welcome", forceLoad: true);
             }

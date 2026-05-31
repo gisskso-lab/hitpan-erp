@@ -30,6 +30,9 @@ public sealed class LoginApiResponse
     public string Role { get; set; } = string.Empty;
     public bool RedirectToWelcome { get; set; }
     public string? DeviceId { get; set; }
+
+    // 헌법 #24: 약관 v2.0.0 미동의 시 true (Login.razor에서 /terms 강제 이동)
+    public bool RequiresTermsConsent { get; set; }
 }
 
 public sealed class RefreshTokenRequestDto

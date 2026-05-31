@@ -17,4 +17,10 @@ public class LoginResponse
     /// fingerprint가 없거나 이미 등록된 경우 null일 수 있음.
     /// </summary>
     public string? DeviceId { get; set; }
+
+    /// <summary>
+    /// 헌법 #24 약관 v2.0.0 미동의 시 true → 클라이언트가 /terms 강제 이동.
+    /// AuthController에서 ITermsConsentService.HasAgreedAsync 결과로 박제.
+    /// </summary>
+    public bool RequiresTermsConsent { get; set; }
 }

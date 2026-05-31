@@ -1,0 +1,70 @@
+@* 헌법 #24: 약관 v2.0.0 미동의 안내 배너 — MainLayout 상단 박제.
+   /terms 페이지 자체는 표시 안 함. 미동의 + /terms 외 경로에서만 표시. *@
+@using HitPan.Web.Models
+@using Microsoft.JSInterop
+@using System.Net.Http.Json
+@inject NavigationManager Nav
+@inject HttpClient Http
+@implements IDisposable
+
+@if (_requiresConsent && !_onTermsPage)
+{
+    <MudAlert Severity="Severity.Warning" Variant="Variant.Filled" Dense="true" Class="ma-2"
+              ContentAlignment="HorizontalAlignment.Left" NoIcon="false">
+        <div style="display:flex; align-items:center; justify-content:space-between; gap:12px;">
+            <span><strong>약관 v2.0.0 동의가 필요합니다.</strong> 필수 4건에 동의해야 서비스를 계속 이용할 수 있습니다.</span>
+            <MudButton Color="Color.Inherit" Variant="Variant.Outlined" Size="Size.Small"
+                       OnClick="@(() => Nav.NavigateTo("/terms"))">
+                약관 동의하러 가기
+            </MudButton>
+        </div>
+    </MudAlert>
+}
+
+@code {
+    private bool _requiresConsent;
+    private bool _onTermsPage;
+
+    protected override async Task OnInitializedAsync()
+    {
+        Nav.LocationChanged += OnLocationChanged;
+        UpdateOnTermsPage();
+        await CheckStatusAsync();
+    }
+
+    private void OnLocationChanged(object? sender, Microsoft.AspNetCore.Components.Routing.LocationChangedEventArgs e)
+    {
+        UpdateOnTermsPage();
+        InvokeAsync(StateHasChanged);
+    }
+
+    private void UpdateOnTermsPage()
+    {
+        var path = Nav.ToBaseRelativePath(Nav.Uri).Trim('/').ToLowerInvariant();
+        _onTermsPage = path.StartsWith("terms") || path.StartsWith("login") || path.StartsWith("welcome");
+    }
+
+    private async Task CheckStatusAsync()
+    {
+        try
+        {
+            var status = await Http.GetFromJsonAsync<TermsConsentStatusDto>("api/auth/terms/status");
+            _requiresConsent = status?.HasAgreed != true;
+        }
+        catch
+        {
+            // 401·테이블 부재 등은 강제 안내 보류 (헌법 #15 silent swallow 회피 위해 false 유지)
+            _requiresConsent = false;
+        }
+    }
+
+    public void Dispose()
+    {
+        Nav.LocationChanged -= OnLocationChanged;
+    }
+
+    private sealed class TermsConsentStatusDto
+    {
+        public bool HasAgreed { get; set; }
+    }
+}

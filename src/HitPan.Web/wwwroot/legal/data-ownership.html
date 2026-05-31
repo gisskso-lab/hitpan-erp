@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>데이터 주권·책임 분산 약관 v2.0.0 — 히트판 ERP</title>
+    <style>
+        body { font-family: 'Noto Sans KR', sans-serif; max-width: 820px; margin: 0 auto; padding: 32px 24px; line-height: 1.7; color: #1a1a1a; }
+        h1 { font-size: 24px; border-bottom: 2px solid #1976d2; padding-bottom: 12px; }
+        h2 { font-size: 18px; margin-top: 32px; color: #1976d2; }
+        h3 { font-size: 16px; margin-top: 20px; }
+        .meta { color: #666; font-size: 13px; margin-bottom: 24px; }
+        .notice { background: #FFF8E1; border-left: 4px solid #F9A825; padding: 12px 16px; margin: 16px 0; }
+        .quote { background: #F5F7FA; border-left: 4px solid #1976d2; padding: 16px; margin: 16px 0; font-style: italic; }
+        ol, ul { padding-left: 24px; }
+        li { margin: 4px 0; }
+        table { width: 100%; border-collapse: collapse; margin: 12px 0; }
+        th, td { border: 1px solid #ddd; padding: 8px; text-align: left; font-size: 14px; vertical-align: top; }
+        th { background: #F5F7FA; }
+    </style>
+</head>
+<body>
+
+<h1>데이터 주권·책임 분산 약관</h1>
+<div class="meta">버전 v2.0.0 · 시행일 2026-06-04 · 헌법 #22·#24 정합</div>
+
+<div class="quote">
+    "본사가 안 가지면 본사가 털릴 일 없다. 본사가 안 알면 본사가 책임질 일 없다.<br>
+    사장님 데이터는 사장님 것이다."<br>
+    — 히트판 데이터 주권 헌법 (2026-05-12)
+</div>
+
+<h2>1. 데이터 주권의 원칙</h2>
+<ol>
+    <li>회원이 히트판 ERP에 입력·저장한 모든 업무 데이터(매출·매입·원장·거래처·직원·세금계산서 등)는 회원의 PC에 보관되며, 그 소유권과 처분권은 전적으로 회원에게 속합니다.</li>
+    <li>회사는 회원의 업무 데이터를 보유·열람·전송하지 않습니다 (회사 데이터 최소주의).</li>
+    <li>회사가 보유하는 정보는 SaaS 운영에 필수적인 메타정보(라이선스·결제·접속 카운터·통신 상태)에 한정됩니다.</li>
+</ol>
+
+<h2>2. 책임 분산 — 3축 (헌법 #24)</h2>
+<table>
+    <thead>
+        <tr><th>주체</th><th>책임 영역</th><th>예시</th></tr>
+    </thead>
+    <tbody>
+        <tr>
+            <td><strong>회사 책임</strong></td>
+            <td>SaaS 결제·부모계정 인증·백오피스 메타정보·본사 인프라</td>
+            <td>결제 사고·라이선스 발급 오류·본사 서버 다운</td>
+        </tr>
+        <tr>
+            <td><strong>회원 책임</strong></td>
+            <td>회원 PC·자식계정 관리·백업 보관·내부 망</td>
+            <td>PC 파손·백업 미보관 손실·자식계정 비밀번호 유출</td>
+        </tr>
+        <tr>
+            <td><strong>제3자 책임</strong></td>
+            <td>PG·인증·통신사 등 외부 서비스</td>
+            <td>카카오·토스·이세로·메이크빌·Cloudflare·PG 사고</td>
+        </tr>
+    </tbody>
+</table>
+
+<h2>3. 회사의 가르침 의무 (책임 분산 ≠ 방치)</h2>
+<p>회사는 회원이 자기 책임 영역을 수행할 수 있도록 다음을 충분히 제공할 의무를 부담합니다.</p>
+<ul>
+    <li>가이드·매뉴얼·튜토리얼 (서면·영상)</li>
+    <li>AI 챗봇 (24시간 자동 안내)</li>
+    <li>콜센터 (영업시간 내)</li>
+    <li>1클릭 봉합 매뉴얼 (백신·통신 사고 등)</li>
+</ul>
+
+<h2>4. 백업의 회원 책임</h2>
+<ol>
+    <li>회원은 자신의 PC에 보관된 업무 데이터를 정기적으로 백업할 의무가 있으며, 백업 미보관으로 인한 손실은 회원의 책임입니다.</li>
+    <li>회사는 본사 클라우드에 회원 데이터를 백업하지 않으며, 만약 회원이 별도로 본사 백업 옵션을 선택할 경우 데이터는 E2E 암호화되어 본사도 내용을 알 수 없습니다.</li>
+    <li>회사는 백업 권장 주기·방법·복원 매뉴얼을 충분히 제공합니다.</li>
+</ol>
+
+<h2>5. 회원 데이터의 이관·반출</h2>
+<ol>
+    <li>회원은 언제든지 자신의 데이터를 백업·이관·삭제할 수 있으며, 회사는 이를 제한하지 않습니다.</li>
+    <li>구독 해지 시에도 회원 PC의 데이터는 그대로 유지되며 (라이선스만 만료), 회원이 직접 백업·이관해야 합니다.</li>
+</ol>
+
+<h2>6. 제3자 서비스 사고 시</h2>
+<p>제3자(PG·인증·통신사 등)의 사고로 발생한 손해는 해당 제3자가 1차적으로 책임을 부담합니다. 회사는 제3자 사고 발생 시 회원에게 신속히 통지하고, 합리적인 범위 내에서 회복 조치에 협력합니다.</p>
+
+<h2>7. 약관 동의의 효력</h2>
+<p>회원이 본 약관에 동의함으로써, 위 책임 분산 3축을 이해하고 자신의 책임 영역을 인지한 것으로 봅니다. 회사는 본 약관에 명시된 회원 책임 영역의 사고에 대해서는 책임을 부담하지 않습니다.</p>
+
+<div class="notice">
+    <strong>요약:</strong> 사장님 데이터는 사장님 것입니다. 회사는 SaaS 기능과 가르침으로 사장님을 돕습니다. 백업·자식계정·PC 관리는 사장님이, 결제·인증·통신 인프라는 회사가 책임집니다.
+</div>
+
+<p style="margin-top: 40px; color: #666; font-size: 13px;">
+    부칙: 본 약관은 2026년 6월 4일부터 시행합니다. (v2.0.0)
+</p>
+
+</body>
+</html>

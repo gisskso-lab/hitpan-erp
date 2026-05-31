@@ -10,20 +10,25 @@ namespace HitPan.API.Controllers;
 [Route("api/auth")]
 public class AuthController : ControllerBase
 {
+    private const string CurrentTermsVersion = "v2.0.0";
+
     private readonly IAuthService _authService;
     private readonly IHrService _hrService;
     private readonly ITenantDeviceService _deviceService;
+    private readonly ITermsConsentService _termsConsentService;
     private readonly ILogger<AuthController> _logger;
 
     public AuthController(
         IAuthService authService,
         IHrService hrService,
         ITenantDeviceService deviceService,
+        ITermsConsentService termsConsentService,
         ILogger<AuthController> logger)
     {
         _authService = authService;
         _hrService = hrService;
         _deviceService = deviceService;
+        _termsConsentService = termsConsentService;
         _logger = logger;
     }
 
@@ -96,6 +101,29 @@ public class AuthController : ControllerBase
                 {
                     // 출근 기록 실패는 로그인 자체를 막지 않지만 운영 추적을 위해 로그 남김
                     _logger.LogWarning(ex, "자동 출근 기록 실패 — TenantId: {TenantId}", response.TenantId);
+                }
+            }
+
+            // 헌법 #24: 약관 v2.0.0 동의 여부 박제 (미동의 시 /terms 강제 이동)
+            if (!string.IsNullOrEmpty(response.TenantId))
+            {
+                try
+                {
+                    var handler = new System.IdentityModel.Tokens.Jwt.JwtSecurityTokenHandler();
+                    var jwt = handler.ReadJwtToken(response.AccessToken);
+                    var userId = jwt.Claims.FirstOrDefault(c => c.Type == "user_id")?.Value;
+                    if (!string.IsNullOrEmpty(userId))
+                    {
+                        var hasAgreed = await _termsConsentService.HasAgreedAsync(
+                            response.TenantId, userId, CurrentTermsVersion, ct);
+                        response.RequiresTermsConsent = !hasAgreed;
+                    }
+                }
+                catch (Exception ex)
+                {
+                    // 테이블 부재 등 인프라 사고 = 동의 강제 보류 (베타 1주차 정합, 헌법 #15 silent swallow 금지)
+                    _logger.LogWarning(ex, "약관 동의 상태 조회 실패 — TenantId: {TenantId}", response.TenantId);
+                    response.RequiresTermsConsent = false;
                 }
             }
 
