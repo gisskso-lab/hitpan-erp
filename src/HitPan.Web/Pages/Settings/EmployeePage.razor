@@ -1,6 +1,7 @@
 @page "/employees"
 @namespace HitPan.Web.Pages.SettingsUi
-@attribute [Authorize]
+@* 사원 관리 = 대표·HR 관리자만 (헌법 #7 정합) *@
+@attribute [Authorize(Roles = "system_admin,tenant_admin,TenantAdmin,hr_manager")]
 @using HitPan.Web.Models
 @using HitPan.Web.Services
 
