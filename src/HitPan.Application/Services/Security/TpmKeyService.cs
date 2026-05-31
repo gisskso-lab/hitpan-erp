@@ -133,7 +133,7 @@ public sealed class TpmKeyService : ITpmKeyService
             Array.Clear(unsealed, 0, unsealed.Length);
             return true;
         }
-        catch
+        catch (Exception)
         {
             // 마더보드 교체·BIOS 리셋·TPM 무효화 = 워치독 WS-23 트리거
             _logger.LogWarning("TPM 봉인 키 무효화 감지 (워치독 WS-23 트리거 영역)");

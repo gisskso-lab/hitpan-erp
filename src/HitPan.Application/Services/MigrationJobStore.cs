@@ -53,7 +53,7 @@ public sealed class MigrationJobStore
                 ClientIp = clientIp, UserAgent = userAgent,
             })).ConfigureAwait(false);
         }
-        catch
+        catch (Exception)
         {
             // DB INSERT 실패 시 in-memory도 제거 — FK 미충족 잡 잔재 차단.
             _jobs.TryRemove(job.JobId, out _);

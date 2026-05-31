@@ -178,7 +178,7 @@ public sealed class BillsCardsBankService : IBillsCardsBankService
             tx.Commit();
             return headerId;
         }
-        catch
+        catch (Exception)
         {
             tx?.Rollback();
             throw;

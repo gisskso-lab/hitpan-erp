@@ -47,7 +47,7 @@ public class TermsConsentController : ControllerBase
                 AgreedAt = (DateTime)row.agreed_at
             });
         }
-        catch
+        catch (Exception)
         {
             // user_terms_consent 테이블 미적용 환경 = 동의 미요구 (베타 1주차 정합)
             return Ok(new TermsConsentStatus { HasAgreed = false });

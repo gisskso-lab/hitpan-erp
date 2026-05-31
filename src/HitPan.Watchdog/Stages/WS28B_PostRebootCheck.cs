@@ -34,7 +34,7 @@ public class WS28B_PostRebootCheck
             var uptime = TimeSpan.FromMilliseconds(Environment.TickCount64);
             return uptime.TotalMinutes < 5;
         }
-        catch
+        catch (Exception)
         {
             return false;
         }

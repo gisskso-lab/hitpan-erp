@@ -12,7 +12,7 @@ public sealed class AccountService(HttpClient http)
             return await http.GetFromJsonAsync<List<AccountModel>>("api/finance/accounts", ct).ConfigureAwait(false)
                    ?? new List<AccountModel>();
         }
-        catch
+        catch (Exception)
         {
             return new List<AccountModel>();
         }

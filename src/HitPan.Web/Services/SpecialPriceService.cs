@@ -20,7 +20,7 @@ public class SpecialPriceService
                        "api/partners/" + partnerId + "/special-prices")
                    ?? new List<SpecialPriceItem>();
         }
-        catch
+        catch (Exception)
         {
             return new List<SpecialPriceItem>();
         }
@@ -34,7 +34,7 @@ public class SpecialPriceService
                 "api/partners/" + partnerId + "/special-prices", dto);
             return res.IsSuccessStatusCode;
         }
-        catch
+        catch (Exception)
         {
             return false;
         }
@@ -48,7 +48,7 @@ public class SpecialPriceService
                 "api/partners/" + partnerId + "/special-prices/" + itemId);
             return res.IsSuccessStatusCode;
         }
-        catch
+        catch (Exception)
         {
             return false;
         }

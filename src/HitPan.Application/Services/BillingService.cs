@@ -192,7 +192,7 @@ public sealed class BillingService : IBillingService
             tx.Commit();
             return paymentMethodId;
         }
-        catch
+        catch (Exception)
         {
             tx.Rollback();
             throw;
@@ -223,7 +223,7 @@ public sealed class BillingService : IBillingService
 
             tx.Commit();
         }
-        catch
+        catch (Exception)
         {
             tx.Rollback();
             throw;

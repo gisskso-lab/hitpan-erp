@@ -28,7 +28,7 @@ public sealed class ESignService(HttpClient http)
             return await http.GetFromJsonAsync<List<ESignHistoryModel>>(url, ct).ConfigureAwait(false)
                    ?? new List<ESignHistoryModel>();
         }
-        catch
+        catch (Exception)
         {
             return new List<ESignHistoryModel>();
         }
@@ -45,7 +45,7 @@ public sealed class ESignService(HttpClient http)
             if (!res.IsSuccessStatusCode) return null;
             return await res.Content.ReadFromJsonAsync<ESignResponseModel>(cancellationToken: ct).ConfigureAwait(false);
         }
-        catch
+        catch (Exception)
         {
             return null;
         }
@@ -64,7 +64,7 @@ public sealed class ESignService(HttpClient http)
                 ct).ConfigureAwait(false);
             return res.IsSuccessStatusCode;
         }
-        catch
+        catch (Exception)
         {
             return false;
         }

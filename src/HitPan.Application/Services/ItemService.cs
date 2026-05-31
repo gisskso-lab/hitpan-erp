@@ -4,6 +4,8 @@ using Dapper;
 using HitPan.Application.DTOs.Item;
 using HitPan.Application.Interfaces;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 
 namespace HitPan.Application.Services;
 
@@ -329,8 +331,9 @@ public sealed class ItemService : IItemService
             }
             catch (Exception ex)
             {
-                // BOM 재계산 실패는 상품 수정 자체를 막지 않음 — 경고 로그만 남김.
-                Console.WriteLine($"[ItemService.UpdateAsync] BOM recalc failed for material {itemId}: {ex.Message}");
+                // BOM 재계산 실패는 상품 수정 자체를 막지 않음 — 경고 로그만 남김 (헌법 #15 정합)
+                var logger = _services.GetService<ILogger<ItemService>>() ?? (ILogger)NullLogger.Instance;
+                logger.LogWarning(ex, "[ItemService.UpdateAsync] BOM recalc failed for material {ItemId}", itemId);
             }
         }
     }

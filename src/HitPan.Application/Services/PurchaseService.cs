@@ -418,7 +418,7 @@ public class PurchaseService : IPurchaseService
                 }
             }
         }
-        catch
+        catch (Exception)
         {
             try { await tx.RollbackAsync(ct); } catch (Exception rbex) { Console.Error.WriteLine($"[PurchaseService] rollback failed: {rbex.Message}"); }
             throw;
@@ -1007,7 +1007,7 @@ public class PurchaseService : IPurchaseService
 
             await _audit.LogAsync("confirm", "purchase_return", returnId, ct: ct);
         }
-        catch
+        catch (Exception)
         {
             try { await tx.RollbackAsync(ct); } catch (Exception rbex) { Console.Error.WriteLine($"[PurchaseService] rollback failed: {rbex.Message}"); }
             throw;
@@ -1060,7 +1060,7 @@ public class PurchaseService : IPurchaseService
             await tx.CommitAsync(ct);
             await _audit.LogAsync("delete", "purchase_return", returnId, ct: ct);
         }
-        catch
+        catch (Exception)
         {
             try { await tx.RollbackAsync(ct); } catch (Exception rbex) { Console.Error.WriteLine($"[PurchaseService] rollback failed: {rbex.Message}"); }
             throw;
@@ -1317,7 +1317,7 @@ public class PurchaseService : IPurchaseService
             await tx.CommitAsync(ct);
             await _audit.LogAsync("delete", "purchase_receipt", receiptId, ct: ct);
         }
-        catch
+        catch (Exception)
         {
             try { await tx.RollbackAsync(ct); } catch (Exception rbex) { Console.Error.WriteLine($"[PurchaseService] rollback failed: {rbex.Message}"); }
             throw;

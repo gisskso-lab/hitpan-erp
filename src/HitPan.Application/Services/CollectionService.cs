@@ -171,7 +171,7 @@ public class CollectionService : ICollectionService
 
             return id;
         }
-        catch
+        catch (Exception)
         {
             try { tx.Rollback(); } catch (Exception rbex) { Console.Error.WriteLine($"[CollectionService] rollback failed: {rbex.Message}"); }
             throw;
@@ -211,7 +211,7 @@ public class CollectionService : ICollectionService
             var beforeJson = $"{{\"partner_id\":\"{col.PartnerId}\",\"amount\":{col.Amount}}}";
             await _audit.LogAsync("delete", "collection", collectionId, beforeJson: beforeJson, ct: ct);
         }
-        catch
+        catch (Exception)
         {
             try { tx.Rollback(); } catch (Exception rbex) { Console.Error.WriteLine($"[CollectionService] rollback failed: {rbex.Message}"); }
             throw;
@@ -302,7 +302,7 @@ public class CollectionService : ICollectionService
 
             return id;
         }
-        catch
+        catch (Exception)
         {
             try { tx.Rollback(); } catch (Exception rbex) { Console.Error.WriteLine($"[CollectionService] rollback failed: {rbex.Message}"); }
             throw;
@@ -340,7 +340,7 @@ public class CollectionService : ICollectionService
             var beforeJson = $"{{\"partner_id\":\"{pay.PartnerId}\",\"amount\":{pay.Amount}}}";
             await _audit.LogAsync("delete", "payment", paymentId, beforeJson: beforeJson, ct: ct);
         }
-        catch
+        catch (Exception)
         {
             try { tx.Rollback(); } catch (Exception rbex) { Console.Error.WriteLine($"[CollectionService] rollback failed: {rbex.Message}"); }
             throw;

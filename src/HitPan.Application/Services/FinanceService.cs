@@ -84,7 +84,7 @@ public class FinanceService : IFinanceService
 
             return id;
         }
-        catch
+        catch (Exception)
         {
             try { tx.Rollback(); } catch (Exception rbex) { Console.Error.WriteLine($"[FinanceService] rollback failed: {rbex.Message}"); }
             throw;

@@ -229,7 +229,7 @@ public sealed class ChatbotService : IChatbotService
                             cancellationToken: ct)).ConfigureAwait(false);
                     }
                 }
-                catch
+                catch (Exception)
                 {
                     // JSON 파싱 실패는 무시 — 피드백 기록은 이미 완료됨
                 }

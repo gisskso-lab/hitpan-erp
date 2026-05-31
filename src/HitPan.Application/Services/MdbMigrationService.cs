@@ -5764,7 +5764,7 @@ public sealed class MdbMigrationService
             }
             return candidates.FirstOrDefault(c => names.Contains(c));
         }
-        catch
+        catch (Exception)
         {
             return null;
         }

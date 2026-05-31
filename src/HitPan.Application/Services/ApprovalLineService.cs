@@ -129,7 +129,7 @@ public sealed class ApprovalLineService : IApprovalLineService
             tx.Commit();
             return lineId;
         }
-        catch
+        catch (Exception)
         {
             tx.Rollback();
             throw;
@@ -184,7 +184,7 @@ public sealed class ApprovalLineService : IApprovalLineService
 
             tx.Commit();
         }
-        catch
+        catch (Exception)
         {
             tx.Rollback();
             throw;
@@ -224,7 +224,7 @@ public sealed class ApprovalLineService : IApprovalLineService
 
             tx.Commit();
         }
-        catch
+        catch (Exception)
         {
             tx.Rollback();
             throw;

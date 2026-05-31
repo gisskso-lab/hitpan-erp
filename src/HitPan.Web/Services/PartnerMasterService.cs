@@ -180,7 +180,7 @@ public sealed class PartnerMasterService(HttpClient http)
             var rows = await http.GetFromJsonAsync<List<PartnerAgingRow>>("api/partners/aging", JsonOptions, ct);
             return rows ?? new();
         }
-        catch
+        catch (Exception)
         {
             return new();
         }

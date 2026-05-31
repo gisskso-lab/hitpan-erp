@@ -14,7 +14,7 @@ public sealed class TenantProfileService(HttpClient http)
             var me = await http.GetFromJsonAsync<TenantMeClientDto>("api/tenants/me", cancellationToken: ct);
             CompanyName = string.IsNullOrWhiteSpace(me?.CompanyName) ? null : me!.CompanyName;
         }
-        catch
+        catch (Exception)
         {
             CompanyName = null;
         }

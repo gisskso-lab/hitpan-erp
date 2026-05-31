@@ -525,7 +525,7 @@ public class SalesService : ISalesService
                     reason: $"delivery.confirmed: {evtEx.Message}", ct: ct);
             }
         }
-        catch
+        catch (Exception)
         {
             try { await tx.RollbackAsync(ct); } catch (Exception rbex) { Console.Error.WriteLine($"[SalesService] rollback failed: {rbex.Message}"); }
             throw;
@@ -820,7 +820,7 @@ public class SalesService : ISalesService
 
             tx.Commit();
         }
-        catch
+        catch (Exception)
         {
             try { tx.Rollback(); } catch (Exception rbex) { Console.Error.WriteLine($"[SalesService] rollback failed: {rbex.Message}"); }
             throw;
@@ -1029,7 +1029,7 @@ public class SalesService : ISalesService
                 beforeJson: $"{{\"status\":\"confirmed\"}}",
                 afterJson: $"{{\"status\":\"cancelled\",\"reverse_ledger\":true}}", ct: ct);
         }
-        catch
+        catch (Exception)
         {
             try { tx.Rollback(); } catch (Exception rbex) { Console.Error.WriteLine($"[SalesService] rollback failed: {rbex.Message}"); }
             throw;

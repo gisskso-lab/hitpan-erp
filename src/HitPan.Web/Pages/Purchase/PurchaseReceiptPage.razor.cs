@@ -51,7 +51,7 @@ public partial class PurchaseReceiptPage : ComponentBase
         {
             _warehouses = await Http.GetFromJsonAsync<List<WarehouseSimple>>("api/warehouses") ?? new();
         }
-        catch
+        catch (Exception)
         {
             _warehouses = new();
         }

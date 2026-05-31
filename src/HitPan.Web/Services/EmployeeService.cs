@@ -15,7 +15,7 @@ public sealed class EmployeeService(HttpClient http)
             return await http.GetFromJsonAsync<List<EmployeeListItemModel>>("api/employees", ct).ConfigureAwait(false)
                    ?? new List<EmployeeListItemModel>();
         }
-        catch
+        catch (Exception)
         {
             return new List<EmployeeListItemModel>();
         }
@@ -27,7 +27,7 @@ public sealed class EmployeeService(HttpClient http)
         {
             return await http.GetFromJsonAsync<EmployeeDetailModel>($"api/employees/{Uri.EscapeDataString(id)}", ct).ConfigureAwait(false);
         }
-        catch
+        catch (Exception)
         {
             return null;
         }
@@ -60,7 +60,7 @@ public sealed class EmployeeService(HttpClient http)
             using var res = await http.PutAsJsonAsync($"api/employees/{Uri.EscapeDataString(id)}", request, ct).ConfigureAwait(false);
             return res.IsSuccessStatusCode;
         }
-        catch
+        catch (Exception)
         {
             return false;
         }
@@ -73,7 +73,7 @@ public sealed class EmployeeService(HttpClient http)
             using var res = await http.DeleteAsync($"api/employees/{Uri.EscapeDataString(id)}", ct).ConfigureAwait(false);
             return res.IsSuccessStatusCode;
         }
-        catch
+        catch (Exception)
         {
             return false;
         }

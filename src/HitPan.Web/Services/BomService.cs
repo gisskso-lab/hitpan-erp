@@ -11,7 +11,7 @@ public sealed class BomService(HttpClient http)
         {
             return await http.GetFromJsonAsync<List<BomListModel>>("api/bom", ct).ConfigureAwait(false);
         }
-        catch
+        catch (Exception)
         {
             return null;
         }
@@ -23,7 +23,7 @@ public sealed class BomService(HttpClient http)
         {
             return await http.GetFromJsonAsync<BomDetailModel>($"api/bom/{Uri.EscapeDataString(id)}", ct);
         }
-        catch
+        catch (Exception)
         {
             return null;
         }
@@ -117,7 +117,7 @@ public sealed class BomService(HttpClient http)
             var body = await res.Content.ReadFromJsonAsync<BomCreateResult>(cancellationToken: ct);
             return (true, body?.Id);
         }
-        catch
+        catch (Exception)
         {
             return (false, null);
         }
@@ -130,7 +130,7 @@ public sealed class BomService(HttpClient http)
             using var res = await http.PutAsJsonAsync($"api/bom/{Uri.EscapeDataString(id)}", model, ct);
             return res.IsSuccessStatusCode;
         }
-        catch
+        catch (Exception)
         {
             return false;
         }
@@ -143,7 +143,7 @@ public sealed class BomService(HttpClient http)
             using var res = await http.DeleteAsync($"api/bom/{Uri.EscapeDataString(id)}", ct);
             return res.IsSuccessStatusCode;
         }
-        catch
+        catch (Exception)
         {
             return false;
         }
@@ -157,7 +157,7 @@ public sealed class BomService(HttpClient http)
         {
             return await http.GetFromJsonAsync<List<StockAlertModel>>("api/bom/alerts", ct).ConfigureAwait(false);
         }
-        catch
+        catch (Exception)
         {
             return null;
         }
@@ -170,7 +170,7 @@ public sealed class BomService(HttpClient http)
             using var res = await http.PostAsync($"api/bom/alerts/{alertId}/dismiss", null, ct).ConfigureAwait(false);
             return res.IsSuccessStatusCode;
         }
-        catch
+        catch (Exception)
         {
             return false;
         }
@@ -183,7 +183,7 @@ public sealed class BomService(HttpClient http)
             using var res = await http.PostAsync($"api/bom/alerts/{alertId}/order", null, ct).ConfigureAwait(false);
             return res.IsSuccessStatusCode;
         }
-        catch
+        catch (Exception)
         {
             return false;
         }
@@ -198,7 +198,7 @@ public sealed class BomService(HttpClient http)
                 new { itemType }, ct);
             return res.IsSuccessStatusCode;
         }
-        catch
+        catch (Exception)
         {
             return false;
         }

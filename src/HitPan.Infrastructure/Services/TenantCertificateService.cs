@@ -138,7 +138,7 @@ public sealed class TenantCertificateService : ITenantCertificateService
 
             return certId;
         }
-        catch
+        catch (Exception)
         {
             try { tx.Rollback(); } catch { /* 이미 닫힌 tx */ }
             throw;
@@ -178,7 +178,7 @@ public sealed class TenantCertificateService : ITenantCertificateService
 
             await _audit.LogAsync("update", "certificate", certId, afterJson: "{\"is_primary\":true}", ct: ct);
         }
-        catch
+        catch (Exception)
         {
             try { tx.Rollback(); } catch { /* 이미 닫힌 tx */ }
             throw;

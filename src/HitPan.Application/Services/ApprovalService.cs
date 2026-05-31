@@ -469,7 +469,7 @@ public class ApprovalService : IApprovalService
             await _audit.LogAsync("state_change", "approval", approvalId,
                 afterJson: afterJson, reason: request.Comment, ct: ct);
         }
-        catch
+        catch (Exception)
         {
             try { tx.Rollback(); } catch (Exception rbex) { Console.Error.WriteLine($"[ApprovalService] rollback failed: {rbex.Message}"); }
             throw;

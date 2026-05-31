@@ -65,7 +65,7 @@ public sealed class AccessTokenValidator
 
             return principal;
         }
-        catch
+        catch (Exception)
         {
             return null;
         }

@@ -135,7 +135,7 @@ public sealed class IdempotencyMiddleware
         {
             await _next(context);
         }
-        catch
+        catch (Exception)
         {
             context.Response.Body = originalBody;
             throw;

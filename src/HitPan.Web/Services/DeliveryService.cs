@@ -162,7 +162,7 @@ public sealed class DeliveryService(HttpClient http)
             return await http.GetFromJsonAsync<List<DeliveryListDto>>(query.ToString(), JsonOptions, ct)
                    ?? new List<DeliveryListDto>();
         }
-        catch
+        catch (Exception)
         {
             return new List<DeliveryListDto>();
         }
@@ -200,7 +200,7 @@ public sealed class DeliveryService(HttpClient http)
                 Status = d.Status
             }).ToList();
         }
-        catch
+        catch (Exception)
         {
             return new List<SalesListItem>();
         }
@@ -269,7 +269,7 @@ public sealed class DeliveryService(HttpClient http)
                 JsonOptions,
                 ct);
         }
-        catch
+        catch (Exception)
         {
             return null;
         }
@@ -288,7 +288,7 @@ public sealed class DeliveryService(HttpClient http)
                 ct);
             return res.IsSuccessStatusCode;
         }
-        catch
+        catch (Exception)
         {
             return false;
         }
@@ -303,7 +303,7 @@ public sealed class DeliveryService(HttpClient http)
                 ct);
             return res.IsSuccessStatusCode;
         }
-        catch
+        catch (Exception)
         {
             return false;
         }
@@ -341,7 +341,7 @@ public sealed class DeliveryService(HttpClient http)
                        ct)
                    ?? new List<PartnerSearchResult>();
         }
-        catch
+        catch (Exception)
         {
             return new List<PartnerSearchResult>();
         }
@@ -364,7 +364,7 @@ public sealed class DeliveryService(HttpClient http)
 
             return list;
         }
-        catch
+        catch (Exception)
         {
             return new List<PurchaseOrderListItem>();
         }
@@ -387,7 +387,7 @@ public sealed class DeliveryService(HttpClient http)
 
             return list;
         }
-        catch
+        catch (Exception)
         {
             return new List<PurchaseReceiptListItem>();
         }
@@ -403,7 +403,7 @@ public sealed class DeliveryService(HttpClient http)
                 JsonOptions,
                 ct);
         }
-        catch
+        catch (Exception)
         {
             return null;
         }
@@ -480,7 +480,7 @@ public sealed class DeliveryService(HttpClient http)
                 $"api/sales/deliveries/{Uri.EscapeDataString(deliveryId)}/auto-order-candidates",
                 JsonOptions, ct) ?? new();
         }
-        catch
+        catch (Exception)
         {
             return new();
         }
@@ -502,7 +502,7 @@ public sealed class DeliveryService(HttpClient http)
             if (!resp.IsSuccessStatusCode) return new();
             return await resp.Content.ReadFromJsonAsync<List<AutoOrderResultModel>>(JsonOptions, ct) ?? new();
         }
-        catch
+        catch (Exception)
         {
             return new();
         }
@@ -516,7 +516,7 @@ public sealed class DeliveryService(HttpClient http)
             return await http.GetFromJsonAsync<PurchaseOrderDetailModel>(
                 $"api/purchase/orders/{Uri.EscapeDataString(poId)}", JsonOptions, ct);
         }
-        catch
+        catch (Exception)
         {
             return null;
         }
@@ -547,7 +547,7 @@ public sealed class DeliveryService(HttpClient http)
             return await http.GetFromJsonAsync<SalesOrderDetailModel>(
                 $"api/sales/orders/{Uri.EscapeDataString(orderId)}", JsonOptions, ct);
         }
-        catch
+        catch (Exception)
         {
             return null;
         }
@@ -578,7 +578,7 @@ public sealed class DeliveryService(HttpClient http)
             return await http.GetFromJsonAsync<PurchaseReturnDetailModel>(
                 $"api/purchase/returns/{Uri.EscapeDataString(returnId)}", JsonOptions, ct);
         }
-        catch
+        catch (Exception)
         {
             return null;
         }
@@ -610,7 +610,7 @@ public sealed class DeliveryService(HttpClient http)
                 new StringContent("{}", Encoding.UTF8, "application/json"), ct);
             return resp.IsSuccessStatusCode;
         }
-        catch
+        catch (Exception)
         {
             return false;
         }

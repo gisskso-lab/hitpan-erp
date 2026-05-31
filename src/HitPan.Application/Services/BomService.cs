@@ -569,7 +569,7 @@ public class BomService : IBomService
                     materials),
                 ct).ConfigureAwait(false);
         }
-        catch
+        catch (Exception)
         {
             try { tx.Rollback(); }
             catch (Exception rbex) { Console.Error.WriteLine($"[BomService] rollback failed: {rbex.Message}"); }
@@ -740,7 +740,7 @@ public class BomService : IBomService
                 afterJson: $"{{\"product_item_id\":\"{bom.ProductItemId}\",\"produce_qty\":{dto.ProduceQty},\"material_count\":{bom.Items.Count}}}",
                 ct: ct);
         }
-        catch
+        catch (Exception)
         {
             try { tx.Rollback(); }
             catch (Exception rbex) { Console.Error.WriteLine($"[BomService] rollback failed: {rbex.Message}"); }
@@ -909,7 +909,7 @@ public class BomService : IBomService
 
             tx.Commit();
         }
-        catch
+        catch (Exception)
         {
             try { tx.Rollback(); }
             catch (Exception rbex) { Console.Error.WriteLine($"[BomService] rollback failed: {rbex.Message}"); }

@@ -34,7 +34,7 @@ public sealed class HitPanProtectedLocalStorage(IJSRuntime jsRuntime)
             var deserialized = JsonSerializer.Deserialize<T>(json, JsonOptions);
             return new HitPanStorageResult<T>(true, deserialized);
         }
-        catch
+        catch (Exception)
         {
             return new HitPanStorageResult<T>(false, default);
         }

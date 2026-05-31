@@ -100,7 +100,7 @@ public static class HealthProbe
             var principal = new System.Security.Principal.WindowsPrincipal(identity);
             return principal.IsInRole(System.Security.Principal.WindowsBuiltInRole.Administrator);
         }
-        catch
+        catch (Exception)
         {
             return false;
         }

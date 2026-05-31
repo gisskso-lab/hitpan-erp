@@ -19,7 +19,7 @@ public sealed class SettingsService(HttpClient http)
             return await http.GetFromJsonAsync<TenantSettingsModel>("api/settings", JsonOptions, ct)
                 .ConfigureAwait(false);
         }
-        catch
+        catch (Exception)
         {
             return null;
         }
@@ -32,7 +32,7 @@ public sealed class SettingsService(HttpClient http)
             using var res = await http.PutAsJsonAsync("api/settings", model, ct).ConfigureAwait(false);
             return res.IsSuccessStatusCode;
         }
-        catch
+        catch (Exception)
         {
             return false;
         }
@@ -48,7 +48,7 @@ public sealed class SettingsService(HttpClient http)
             using var res = await http.PutAsJsonAsync("api/settings/company", model, ct).ConfigureAwait(false);
             return res.IsSuccessStatusCode;
         }
-        catch
+        catch (Exception)
         {
             return false;
         }
@@ -64,7 +64,7 @@ public sealed class SettingsService(HttpClient http)
             return await http.GetFromJsonAsync<TenantCompanyModel>("api/settings/company", JsonOptions, ct)
                 .ConfigureAwait(false);
         }
-        catch
+        catch (Exception)
         {
             return null;
         }
@@ -86,7 +86,7 @@ public sealed class SettingsService(HttpClient http)
                 .ConfigureAwait(false);
             return body?.Valid == true;
         }
-        catch
+        catch (Exception)
         {
             return false;
         }

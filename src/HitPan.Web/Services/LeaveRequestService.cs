@@ -18,7 +18,7 @@ public sealed class LeaveRequestService(HttpClient http)
             return await http.GetFromJsonAsync<List<LeaveRequestModel>>(path, ct).ConfigureAwait(false)
                    ?? new List<LeaveRequestModel>();
         }
-        catch
+        catch (Exception)
         {
             return new List<LeaveRequestModel>();
         }
@@ -48,7 +48,7 @@ public sealed class LeaveRequestService(HttpClient http)
             using var res = await http.PostAsJsonAsync("api/leave-requests", request, ct).ConfigureAwait(false);
             return res.IsSuccessStatusCode;
         }
-        catch
+        catch (Exception)
         {
             return false;
         }
@@ -64,7 +64,7 @@ public sealed class LeaveRequestService(HttpClient http)
                 ct).ConfigureAwait(false);
             return res.IsSuccessStatusCode;
         }
-        catch
+        catch (Exception)
         {
             return false;
         }
@@ -80,7 +80,7 @@ public sealed class LeaveRequestService(HttpClient http)
                 ct).ConfigureAwait(false);
             return res.IsSuccessStatusCode;
         }
-        catch
+        catch (Exception)
         {
             return false;
         }

@@ -13,7 +13,7 @@ public sealed class PermissionService(HttpClient http)
                 .GetFromJsonAsync<List<UserPermissionModel>>("api/permissions", ct)
                 .ConfigureAwait(false);
         }
-        catch
+        catch (Exception)
         {
             return null;
         }
@@ -27,7 +27,7 @@ public sealed class PermissionService(HttpClient http)
                 .GetFromJsonAsync<UserPermissionModel>($"api/permissions/{Uri.EscapeDataString(userId)}", ct)
                 .ConfigureAwait(false);
         }
-        catch
+        catch (Exception)
         {
             return null;
         }
@@ -42,7 +42,7 @@ public sealed class PermissionService(HttpClient http)
                 .ConfigureAwait(false);
             return res.IsSuccessStatusCode;
         }
-        catch
+        catch (Exception)
         {
             return false;
         }

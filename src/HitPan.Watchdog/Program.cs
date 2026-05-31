@@ -48,7 +48,7 @@ static void EnsureEventSource(string sourceName)
         if (!EventLog.SourceExists(sourceName))
             EventLog.CreateEventSource(sourceName, "Application");
     }
-    catch
+    catch (Exception)
     {
         // 관리자 권한 부재 시 무시 — appsettings 기반 콘솔 로그로 fallback
     }

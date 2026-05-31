@@ -30,7 +30,7 @@ public sealed class LaborContractService(HttpClient http)
             return await http.GetFromJsonAsync<List<LaborContractListModel>>(url, ct).ConfigureAwait(false)
                    ?? new List<LaborContractListModel>();
         }
-        catch
+        catch (Exception)
         {
             return new List<LaborContractListModel>();
         }
@@ -46,7 +46,7 @@ public sealed class LaborContractService(HttpClient http)
             return await http.GetFromJsonAsync<LaborContractDetailModel>(
                 $"api/labor-contracts/{Uri.EscapeDataString(id)}", ct).ConfigureAwait(false);
         }
-        catch
+        catch (Exception)
         {
             return null;
         }
@@ -66,7 +66,7 @@ public sealed class LaborContractService(HttpClient http)
                 .ConfigureAwait(false);
             return created?.ContractId;
         }
-        catch
+        catch (Exception)
         {
             return null;
         }
@@ -85,7 +85,7 @@ public sealed class LaborContractService(HttpClient http)
                 ct).ConfigureAwait(false);
             return res.IsSuccessStatusCode;
         }
-        catch
+        catch (Exception)
         {
             return false;
         }
@@ -104,7 +104,7 @@ public sealed class LaborContractService(HttpClient http)
                 ct).ConfigureAwait(false);
             return res.IsSuccessStatusCode;
         }
-        catch
+        catch (Exception)
         {
             return false;
         }

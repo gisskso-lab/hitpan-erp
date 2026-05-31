@@ -302,7 +302,7 @@ public class StockService : IStockService
 
                 tx.Commit();
             }
-            catch
+            catch (Exception)
             {
                 try { tx.Rollback(); } catch (Exception rbex) { Console.Error.WriteLine($"[StockService] rollback failed: {rbex.Message}"); }
                 throw;
@@ -470,7 +470,7 @@ public class StockService : IStockService
 
             tx.Commit();
         }
-        catch
+        catch (Exception)
         {
             try { tx.Rollback(); } catch (Exception rbex) { Console.Error.WriteLine($"[StockService] rollback failed: {rbex.Message}"); }
             throw;

@@ -137,7 +137,7 @@ public sealed class TaxInvoiceService : ITaxInvoiceService
 
             await tx.CommitAsync(ct);
         }
-        catch
+        catch (Exception)
         {
             try { await tx.RollbackAsync(ct); } catch (Exception rbex) { Console.Error.WriteLine($"[TaxInvoiceService] rollback failed: {rbex.Message}"); }
             throw;
@@ -299,7 +299,7 @@ public sealed class TaxInvoiceService : ITaxInvoiceService
 
             await tx.CommitAsync(ct);
         }
-        catch
+        catch (Exception)
         {
             try { await tx.RollbackAsync(ct); } catch (Exception rbex) { Console.Error.WriteLine($"[TaxInvoiceService] rollback failed: {rbex.Message}"); }
             throw;

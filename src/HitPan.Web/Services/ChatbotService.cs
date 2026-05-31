@@ -54,7 +54,7 @@ public sealed class ChatbotService(HttpClient http)
             return await http.GetFromJsonAsync<TokenQuotaModel>("api/chatbot/quota", ct)
                 .ConfigureAwait(false);
         }
-        catch
+        catch (Exception)
         {
             return null;
         }
@@ -71,7 +71,7 @@ public sealed class ChatbotService(HttpClient http)
                 $"api/chatbot/kb/popular?limit={limit}", ct).ConfigureAwait(false);
             return list ?? new();
         }
-        catch
+        catch (Exception)
         {
             return new();
         }
