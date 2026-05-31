@@ -67,4 +67,58 @@ public class LandingController : ControllerBase
             return StatusCode(500, new BetaSignupResponse { Success = false, Message = "서버 오류가 발생했습니다. 잠시 후 다시 시도해주세요." });
         }
     }
+
+    // ── 작9 정식 가입 흐름 스켈레톤 (W2 매니저 가도) ─────────────────────────
+    // 사업자번호 검증 → 가입 임시 박제 → OTP 발송 → 결재 → 라이선스 자동 발급
+    // 외부 의존: 사업자번호 검증 API · 토스 키 · SMTP (사장님 결재 영역)
+
+    /// <summary>정식 가입 1단계 — 회사·대표 정보 박제 (W2 매니저 가도)</summary>
+    [HttpPost("signup")]
+    public IActionResult Signup([FromBody] HitPan.Application.DTOs.Landing.SignupRequest request, CancellationToken ct)
+    {
+        if (!request.AgreeTerms || !request.AgreePrivacy)
+            return BadRequest(new HitPan.Application.DTOs.Landing.SignupResponse { Success = false, Message = "필수 약관 동의가 필요합니다." });
+
+        _logger.LogInformation("[Signup] 가입 요청 박제 — Company={C} BizNo={B} Email={E}",
+            request.CompanyName, request.BizNo, request.Email);
+
+        return Accepted(new HitPan.Application.DTOs.Landing.SignupResponse
+        {
+            Success = true,
+            Message = "가입 요청 박제 완료 — W2 매니저 가도 (사업자번호 검증 + OTP 발송 영역)",
+            SignupToken = Guid.NewGuid().ToString()
+        });
+    }
+
+    /// <summary>정식 가입 2단계 — 이메일 OTP 발송 (W2 매니저 가도, SMTP 7월 박제 영역)</summary>
+    [HttpPost("signup/otp/send")]
+    public IActionResult SendOtp([FromBody] HitPan.Application.DTOs.Landing.OtpRequestDto request, CancellationToken ct)
+    {
+        _logger.LogInformation("[Signup] OTP 발송 요청 박제 — Email={E}", request.Email);
+        return Accepted(new { success = true, message = "OTP 발송 요청 박제 완료 — W2 매니저 가도 (SMTP)" });
+    }
+
+    /// <summary>정식 가입 3단계 — OTP 검증 + 결재 URL 발급 (W2 매니저 가도, 토스 키 사장님 결재 영역)</summary>
+    [HttpPost("signup/otp/verify")]
+    public IActionResult VerifyOtp([FromBody] HitPan.Application.DTOs.Landing.OtpVerifyDto request, CancellationToken ct)
+    {
+        _logger.LogInformation("[Signup] OTP 검증 요청 박제 — Token={T}", request.SignupToken);
+        return Accepted(new HitPan.Application.DTOs.Landing.OtpVerifyResponse
+        {
+            Verified = false,
+            Message = "OTP 검증 W2 매니저 가도 — 6/4 백엔드 매니저 발진"
+        });
+    }
+
+    /// <summary>EXE 다운로드 전 라이선스 키 검증 (W2 매니저 가도)</summary>
+    [HttpPost("license/claim")]
+    public IActionResult ClaimLicense([FromBody] HitPan.Application.DTOs.Landing.LicenseClaimRequest request, CancellationToken ct)
+    {
+        _logger.LogInformation("[Signup] 라이선스 검증 요청 박제 — Key={K}", request.LicenseKey);
+        return Accepted(new HitPan.Application.DTOs.Landing.LicenseClaimResponse
+        {
+            Valid = false,
+            Message = "라이선스 검증 W2 매니저 가도 — LicenseIssueService 신규 발진 후 동작"
+        });
+    }
 }

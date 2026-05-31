@@ -213,4 +213,43 @@ public sealed class UserController : ControllerBase
         var result = await _userService.BulkCreateAsync(rows, tenantId, ct).ConfigureAwait(false);
         return Ok(result);
     }
+
+    // ── 작10 자식 계정 발급 스켈레톤 (W2 매니저 가도) ─────────────────────────
+    // 부모(대표) 계정만 호출 가능 — TenantAdminOnly Policy
+    // 권한 매핑 영역은 UserPermissionService 확장 (매니저 가도)
+
+    [HttpPost("children")]
+    [Authorize(Policy = "TenantAdminOnly")]
+    public IActionResult CreateChild([FromBody] CreateChildUserRequest request, CancellationToken ct)
+    {
+        var tenantId = HttpContext.Items["TenantId"]?.ToString();
+        var parentUserId = HttpContext.Items["UserId"]?.ToString();
+        if (string.IsNullOrEmpty(tenantId) || string.IsNullOrEmpty(parentUserId)) return Forbid();
+
+        return Accepted(new
+        {
+            success = true,
+            message = "자식 계정 발급 요청 박제 완료 — W2 매니저 가도 (UserPermissionService 확장 영역)",
+            tenantId,
+            parentUserId,
+            email = request.Email,
+            role = request.Role
+        });
+    }
+
+    [HttpPut("children/{id}/status")]
+    [Authorize(Policy = "TenantAdminOnly")]
+    public IActionResult UpdateChildStatus(string id, [FromBody] UpdateChildUserStatusRequest request, CancellationToken ct)
+    {
+        var tenantId = HttpContext.Items["TenantId"]?.ToString();
+        if (string.IsNullOrEmpty(tenantId)) return Forbid();
+
+        return Accepted(new
+        {
+            success = true,
+            message = "자식 계정 상태 변경 요청 박제 완료 — W2 매니저 가도",
+            userId = id,
+            newStatus = request.Status
+        });
+    }
 }
