@@ -6,7 +6,7 @@
 //              details JSON 에 평문 사업자 정보 박제 금지
 // ============================================================================
 
-namespace HitPan.Shared.Models.Backoffice;
+namespace HitPan.Domain.Entities.Backoffice;
 
 /// <summary>
 /// 본사 운영 감사로그. INSERT ONLY. 월별 파티셔닝(DB 차원).

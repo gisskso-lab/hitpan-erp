@@ -5,7 +5,7 @@
 // 헌법 #11   : 권한은 Owner가 직접 부여 (템플릿 금지)
 // ============================================================================
 
-namespace HitPan.Shared.Models.Backoffice;
+namespace HitPan.Domain.Entities.Backoffice;
 
 /// <summary>본사 운영 계정 Role.</summary>
 public enum PlatformRole

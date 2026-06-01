@@ -17,6 +17,29 @@
 --                      : 평문 사업자번호·상호·대표자·주소·이메일·휴대폰 컬럼 0
 --   #29 인프라 사전결재 : DDL 실행은 사장님 결재 후 (이 파일은 박제만)
 --
+-- 🔥 4중 분리 박제 (사장님 2026-06-01 야간 모두결재)
+--   - DB 분리: hitpan_backoffice (이 파일, 본사 클라우드) ↔ hitpan_erp (고객 PC 로컬)
+--   - 코드 분리: HitPan.Backoffice.Web/API (클라우드) ↔ HitPan.Web/API (고객 PC)
+--   - 도메인 분리: backoffice.hitpan.kr / hitpan.kr / {고객사}.hitpan.kr (가비아 서브)
+--   - 네트워크 분리: Cloudflare WAF (본사) ↔ cloudflared 터널 (고객 PC)
+--   - 사장님 격언: "히트판 웹은 로컬, 백오피스는 클라우드"
+
+-- ============================================================================
+-- [0] Schema 생성 (본사 클라우드 신규 DB 인스턴스)
+-- ============================================================================
+-- 본사 클라우드 MariaDB 11.4.10 에서 실행 (고객 PC 로컬 hitpan_erp 와 물리 분리)
+-- 사장님 결재 후 DDL 실행:
+--   CREATE DATABASE IF NOT EXISTS hitpan_backoffice
+--     DEFAULT CHARACTER SET utf8mb4
+--     DEFAULT COLLATE utf8mb4_unicode_ci;
+--   USE hitpan_backoffice;
+--
+-- 운영계정 (백오피스 서비스 전용, 최소 권한):
+--   CREATE USER 'hitpan_backoffice_app'@'%' IDENTIFIED BY '<HSM 보관>';
+--   GRANT SELECT, INSERT, UPDATE ON hitpan_backoffice.* TO 'hitpan_backoffice_app'@'%';
+--   -- DELETE 권한 없음 (감사로그 INSERT ONLY 정합)
+--   FLUSH PRIVILEGES;
+--
 -- 8명제 정합
 --   #1 KYC 1회 후 즉시 폐기      : ntsapi_raw_hash 만 보유 (원문 메모리 폐기)
 --   #2 시리얼 본사 발급          : tenants.serial = HP-YYMM-XXXXXXXX-CRC

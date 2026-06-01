@@ -5,7 +5,7 @@
 // 헌법 #16   : 이메일·SMS 채널은 독립 MySqlConnection 으로 전송
 // ============================================================================
 
-namespace HitPan.Shared.Models.Backoffice;
+namespace HitPan.Domain.Entities.Backoffice;
 
 /// <summary>분실 복구 대상 시리얼 유형.</summary>
 public enum RecoverySerialType

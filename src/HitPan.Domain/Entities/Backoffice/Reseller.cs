@@ -5,7 +5,7 @@
 // 절대 금지   : 평문 사업자번호 / 상호 / 대표자 / 주소 / 이메일 / 휴대폰
 // ============================================================================
 
-namespace HitPan.Shared.Models.Backoffice;
+namespace HitPan.Domain.Entities.Backoffice;
 
 /// <summary>
 /// 대리점 마스터. 고객사와 동일 패턴 (시리얼 PK + 해시 only).

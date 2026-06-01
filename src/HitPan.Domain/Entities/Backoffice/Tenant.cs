@@ -10,7 +10,7 @@
 //   - tenant_id 파라미터 수신 (JWT 클레임 only — 헌법 #2)
 // ============================================================================
 
-namespace HitPan.Shared.Models.Backoffice;
+namespace HitPan.Domain.Entities.Backoffice;
 
 /// <summary>
 /// 백오피스 고객사 마스터. 8명제 #3 평문 0 — 해시·메타·구독 상태만 보유.
