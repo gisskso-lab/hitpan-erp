@@ -1,0 +1,59 @@
+@*
+    WS-20260601-18 대리점 백오피스 사이드바 (8명제 #6 대리점 자기 고객만)
+    작성일: 2026-06-01 / 작성팀: 프론트 매니저 + 수석 웹디자이너
+    절대 원칙:
+      - 기존 BackofficeSidebar.razor 덮어쓰기 금지 (헌법 #1) → 신규 분리
+      - 대리점은 자기 고객사만 노출 (행 수준 권한, 백엔드 강제)
+*@
+
+@using Microsoft.AspNetCore.Components.Authorization
+@inject NavigationManager Nav
+@inject AuthenticationStateProvider AuthState
+
+<div class="bo-sidebar">
+    <div class="bo-brand">
+        <div class="bo-brand-logo">HP</div>
+        <div>
+            <div class="bo-brand-title">히트판 파트너</div>
+            <div class="bo-brand-sub">@_resellerName</div>
+        </div>
+    </div>
+
+    <MudNavMenu Class="bo-nav">
+        <MudNavLink Href="/partner/dashboard" Icon="@Icons.Material.Filled.Dashboard" Match="NavLinkMatch.All">
+            대시보드
+        </MudNavLink>
+        <MudNavLink Href="/partner/tenants" Icon="@Icons.Material.Filled.Business">
+            내 고객사
+        </MudNavLink>
+        <MudNavLink Href="/partner/cs" Icon="@Icons.Material.Filled.SupportAgent">
+            CS 티켓
+        </MudNavLink>
+        <MudNavLink Href="/partner/commission" Icon="@Icons.Material.Filled.Payments">
+            수수료 내역
+        </MudNavLink>
+    </MudNavMenu>
+
+    <div class="bo-sidebar-footer">
+        <MudButton Variant="Variant.Text" Size="Size.Small"
+                   StartIcon="@Icons.Material.Filled.Logout"
+                   OnClick="Logout"
+                   Style="color: var(--mud-palette-text-secondary); font-size:0.8rem;">
+            로그아웃
+        </MudButton>
+    </div>
+</div>
+
+@code {
+    private string _resellerName = "대리점";
+
+    protected override async Task OnInitializedAsync()
+    {
+        var state = await AuthState.GetAuthenticationStateAsync();
+        _resellerName = state.User.FindFirst("name")?.Value
+                        ?? state.User.FindFirst("reseller_name")?.Value
+                        ?? "대리점";
+    }
+
+    private void Logout() => Nav.NavigateTo("/backoffice/login", forceLoad: true);
+}

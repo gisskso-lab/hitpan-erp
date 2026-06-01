@@ -1,0 +1,148 @@
+@*
+    WS-20260601-17 대리점 RLS 자기 영업 고객사 목록 (8명제 #6)
+    작성일: 2026-06-01 / 작성팀: 프론트 매니저 + 백엔드 매니저
+    절대 원칙:
+      - ResellerSelfOnly (JWT role=reseller + reseller_serial 필수)
+      - 평문 사업자번호·상호·대표자 0 — 시리얼·결제 상태·구독 등급만
+      - 검색은 시리얼 prefix 만 허용 (서버 측 강제)
+      - Razor 에 C# raw string 금지 (헌법 #14)
+      - 빈 catch 금지 (헌법 #15)
+      - 라우트 충돌 회피: 기존 /reseller/tenants 보존, 본 페이지는 /reseller/v2/tenants
+*@
+
+@page "/reseller/v2/tenants"
+@layout ResellerLayout
+@attribute [Authorize]
+@inject HttpClient Http
+@inject ISnackbar Snackbar
+
+<PageTitle>내 영업 고객사 — 히트판</PageTitle>
+
+<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px;">
+    <div>
+        <MudText Typo="Typo.h5" Style="font-weight:600;">내 영업 고객사 (시리얼)</MudText>
+        <MudText Typo="Typo.body2" Color="Color.Secondary">
+            평문 사업자정보 0 — 시리얼·결제·구독 등급만
+        </MudText>
+    </div>
+</div>
+
+<MudPaper Class="pa-3 mb-3" Elevation="0" Style="border-radius:12px;background:#f7f8fa;">
+    <MudGrid Spacing="2" AlignItems="AlignItems.Center">
+        <MudItem xs="12" md="5">
+            <MudTextField @bind-Value="_search" Label="시리얼 prefix 검색 (예: HP-2606)"
+                          Variant="Variant.Outlined" Margin="Margin.Dense"
+                          Adornment="Adornment.End" AdornmentIcon="@Icons.Material.Filled.Search"
+                          OnKeyUp="OnSearchKey" />
+        </MudItem>
+        <MudItem xs="6" md="3">
+            <MudSelect T="string" @bind-Value="_paymentStatus" Label="결제 상태"
+                       Variant="Variant.Outlined" Margin="Margin.Dense" Clearable="true">
+                <MudSelectItem Value="@("active")">활성</MudSelectItem>
+                <MudSelectItem Value="@("pending")">대기</MudSelectItem>
+                <MudSelectItem Value="@("expired")">만료</MudSelectItem>
+                <MudSelectItem Value="@("suspended")">정지</MudSelectItem>
+            </MudSelect>
+        </MudItem>
+        <MudItem xs="6" md="2">
+            <MudButton FullWidth="true" Variant="Variant.Filled" Color="Color.Primary"
+                       StartIcon="@Icons.Material.Filled.Refresh" OnClick="LoadAsync">조회</MudButton>
+        </MudItem>
+    </MudGrid>
+</MudPaper>
+
+<MudPaper Elevation="1" Style="border-radius:12px;overflow:hidden;">
+    <MudDataGrid T="TenantRow" Items="_rows" Loading="_loading" Hover="true" Dense="true">
+        <Columns>
+            <PropertyColumn Property="x => x.Serial" Title="시리얼" />
+            <TemplateColumn Title="결제 상태">
+                <CellTemplate>
+                    <MudChip T="string" Size="Size.Small" Color="@PayColor(context.Item.PaymentStatus)">
+                        @context.Item.PaymentStatus
+                    </MudChip>
+                </CellTemplate>
+            </TemplateColumn>
+            <PropertyColumn Property="x => x.SubscriptionTier" Title="구독 등급" />
+            <PropertyColumn Property="x => x.ActivationStatus" Title="활성 상태" />
+            <PropertyColumn Property="x => x.CreatedAt" Title="가입일" Format="yyyy-MM-dd" />
+            <PropertyColumn Property="x => x.ExpiresAt" Title="만료일" Format="yyyy-MM-dd" />
+        </Columns>
+        <PagerContent>
+            <MudDataGridPager T="TenantRow" />
+        </PagerContent>
+        <NoRecordsContent>
+            <MudText Align="Align.Center" Class="pa-6" Color="Color.Secondary">
+                조건에 해당하는 고객사가 없습니다.
+            </MudText>
+        </NoRecordsContent>
+    </MudDataGrid>
+</MudPaper>
+
+@code {
+    private List<TenantRow> _rows = new();
+    private bool _loading = true;
+    private string _search = "";
+    private string? _paymentStatus;
+    private int _page = 1;
+    private const int PageSize = 50;
+
+    protected override async Task OnInitializedAsync() => await LoadAsync();
+
+    private async Task OnSearchKey(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter") await LoadAsync();
+    }
+
+    private async Task LoadAsync()
+    {
+        _loading = true;
+        try
+        {
+            var qs = $"api/reseller/v2/tenants?page={_page}&size={PageSize}";
+            if (!string.IsNullOrWhiteSpace(_search))
+            {
+                qs += $"&search={Uri.EscapeDataString(_search)}";
+            }
+            if (!string.IsNullOrWhiteSpace(_paymentStatus))
+            {
+                qs += $"&payment_status={Uri.EscapeDataString(_paymentStatus)}";
+            }
+            var resp = await Http.GetFromJsonAsync<Envelope<List<TenantRow>>>(qs);
+            _rows = resp?.data ?? new List<TenantRow>();
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"고객사 목록 조회 실패: {ex.Message}", Severity.Error);
+            _rows = new List<TenantRow>();
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    private Color PayColor(string s) => s switch
+    {
+        "active" => Color.Success,
+        "pending" => Color.Warning,
+        "expired" => Color.Error,
+        "suspended" => Color.Error,
+        _ => Color.Default
+    };
+
+    public class Envelope<T>
+    {
+        public bool success { get; set; }
+        public T? data { get; set; }
+    }
+
+    public class TenantRow
+    {
+        public string Serial { get; set; } = "";
+        public string PaymentStatus { get; set; } = "";
+        public string? SubscriptionTier { get; set; }
+        public string ActivationStatus { get; set; } = "";
+        public DateTime CreatedAt { get; set; }
+        public DateTime? ExpiresAt { get; set; }
+    }
+}

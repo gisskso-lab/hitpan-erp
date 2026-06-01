@@ -1,0 +1,153 @@
+@*
+    WS-20260601-18 본사 백오피스 — CS 티켓 전체 목록 (8명제 #7 본사 전권)
+    작성일: 2026-06-01 / 작성팀: 프론트 매니저 + 백엔드 매니저
+    절대 원칙:
+      - PlatformOnlyV2 (owner/manager/staff 전원 열람)
+      - 평문 사업자번호·상호·대표자 노출 금지 → 마스킹·시리얼만
+      - Razor에 C# raw string 금지 (헌법 #14)
+      - 빈 catch 금지 (헌법 #15)
+*@
+
+@page "/admin/cs"
+@layout PlatformLayout
+@attribute [Authorize(Policy = "PlatformOnlyV2")]
+@inject HttpClient Http
+@inject ISnackbar Snackbar
+
+<PageTitle>CS 티켓 — 히트판 백오피스</PageTitle>
+
+<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px;">
+    <div>
+        <MudText Typo="Typo.h5" Style="font-weight:600;">CS 티켓 전체</MudText>
+        <MudText Typo="Typo.body2" Color="Color.Secondary">
+            본사 전권 — 시리얼 단위 추적 (평문 사업자정보 0)
+        </MudText>
+    </div>
+    <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Refresh"
+               OnClick="LoadAsync">새로고침</MudButton>
+</div>
+
+<MudPaper Class="pa-3 mb-3" Elevation="0" Style="border-radius:12px;background:#f7f8fa;">
+    <MudGrid Spacing="2">
+        <MudItem xs="12" md="4">
+            <MudTextField @bind-Value="_keyword" Label="검색 (시리얼·티켓번호)" Variant="Variant.Outlined"
+                          Margin="Margin.Dense" Immediate="true" OnKeyUp="OnSearchKey" />
+        </MudItem>
+        <MudItem xs="6" md="3">
+            <MudSelect T="string" @bind-Value="_statusFilter" Label="상태" Variant="Variant.Outlined" Margin="Margin.Dense">
+                <MudSelectItem Value="@("all")">전체</MudSelectItem>
+                <MudSelectItem Value="@("open")">처리중</MudSelectItem>
+                <MudSelectItem Value="@("pending")">대기</MudSelectItem>
+                <MudSelectItem Value="@("closed")">완료</MudSelectItem>
+            </MudSelect>
+        </MudItem>
+        <MudItem xs="6" md="3">
+            <MudSelect T="string" @bind-Value="_priorityFilter" Label="우선순위" Variant="Variant.Outlined" Margin="Margin.Dense">
+                <MudSelectItem Value="@("all")">전체</MudSelectItem>
+                <MudSelectItem Value="@("p0")">P0</MudSelectItem>
+                <MudSelectItem Value="@("p1")">P1</MudSelectItem>
+                <MudSelectItem Value="@("p2")">P2</MudSelectItem>
+            </MudSelect>
+        </MudItem>
+        <MudItem xs="12" md="2">
+            <MudButton FullWidth="true" Variant="Variant.Filled" Color="Color.Primary"
+                       StartIcon="@Icons.Material.Filled.Search" OnClick="LoadAsync">조회</MudButton>
+        </MudItem>
+    </MudGrid>
+</MudPaper>
+
+<MudPaper Elevation="1" Style="border-radius:12px;overflow:hidden;">
+    <MudDataGrid T="CsTicketRow" Items="_rows" Loading="_loading"
+                 Hover="true" Dense="true" SortMode="SortMode.Single">
+        <Columns>
+            <PropertyColumn Property="x => x.TicketNo" Title="티켓번호" />
+            <PropertyColumn Property="x => x.SerialMasked" Title="시리얼 (마스킹)" />
+            <TemplateColumn Title="우선순위">
+                <CellTemplate>
+                    <MudChip T="string" Size="Size.Small" Color="@PriColor(context.Item.Priority)">
+                        @context.Item.Priority.ToUpper()
+                    </MudChip>
+                </CellTemplate>
+            </TemplateColumn>
+            <PropertyColumn Property="x => x.Subject" Title="제목" />
+            <TemplateColumn Title="상태">
+                <CellTemplate>
+                    <MudChip T="string" Size="Size.Small" Color="@StatusColor(context.Item.Status)">
+                        @context.Item.Status
+                    </MudChip>
+                </CellTemplate>
+            </TemplateColumn>
+            <PropertyColumn Property="x => x.OpenedAt" Title="접수" Format="yyyy-MM-dd HH:mm" />
+            <PropertyColumn Property="x => x.Assignee" Title="담당자" />
+        </Columns>
+        <PagerContent>
+            <MudDataGridPager T="CsTicketRow" />
+        </PagerContent>
+        <NoRecordsContent>
+            <MudText Align="Align.Center" Class="pa-6" Color="Color.Secondary">
+                조건에 해당하는 CS 티켓이 없습니다.
+            </MudText>
+        </NoRecordsContent>
+    </MudDataGrid>
+</MudPaper>
+
+@code {
+    private List<CsTicketRow> _rows = new();
+    private bool _loading = true;
+    private string _keyword = "";
+    private string _statusFilter = "all";
+    private string _priorityFilter = "all";
+
+    protected override async Task OnInitializedAsync() => await LoadAsync();
+
+    private async Task OnSearchKey(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter") await LoadAsync();
+    }
+
+    private async Task LoadAsync()
+    {
+        _loading = true;
+        try
+        {
+            // WS-13 CS API 결합 가도. 현 시점 빈 목록 박제 (평문 0 원칙).
+            await Task.Yield();
+            _rows = new List<CsTicketRow>();
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"CS 티켓 조회 실패: {ex.Message}", Severity.Error);
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    private Color StatusColor(string s) => s switch
+    {
+        "open" => Color.Warning,
+        "pending" => Color.Info,
+        "closed" => Color.Success,
+        _ => Color.Default
+    };
+
+    private Color PriColor(string p) => p switch
+    {
+        "p0" => Color.Error,
+        "p1" => Color.Warning,
+        "p2" => Color.Info,
+        _ => Color.Default
+    };
+
+    public class CsTicketRow
+    {
+        public string TicketNo { get; set; } = "";
+        public string SerialMasked { get; set; } = "";
+        public string Priority { get; set; } = "p2";
+        public string Subject { get; set; } = "";
+        public string Status { get; set; } = "open";
+        public DateTime OpenedAt { get; set; }
+        public string Assignee { get; set; } = "";
+    }
+}

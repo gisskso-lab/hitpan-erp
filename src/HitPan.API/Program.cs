@@ -185,6 +185,8 @@ builder.Services.AddSingleton<AccessTokenValidator>();
 // 백오피스 (본사 관리자 + 대리점 파트너)
 builder.Services.AddScoped<IBackofficeAuthService, BackofficeAuthService>();
 builder.Services.AddScoped<IResellerService, ResellerService>();
+// WS-20260601-17: 대리점 RLS 셀프 서비스 (8명제 #6·#7 — JWT reseller_serial 강제, 평문 0)
+builder.Services.AddScoped<HitPan.API.Services.IResellerRlsService, HitPan.API.Services.ResellerRlsService>();
 builder.Services.AddJwtAuthentication();
 builder.Services.AddAuthorization(options =>
 {
