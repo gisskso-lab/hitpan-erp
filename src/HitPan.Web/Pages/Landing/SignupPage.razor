@@ -40,6 +40,11 @@
                 <input type="text" value="@_planLabel" readonly />
             </div>
 
+            <div class="field">
+                <label>사업자등록증 *</label>
+                <BizLicenseUploader OnUploaded="OnBizUploaded" />
+            </div>
+
             <div class="terms">
                 <label><input type="checkbox" @bind="_form.AgreeService" /> [필수] 서비스 이용약관 동의 <a href="/legal/service.html" target="_blank">전문</a></label>
                 <label><input type="checkbox" @bind="_form.AgreePrivacy" /> [필수] 개인정보 처리방침 동의 <a href="/legal/privacy.html" target="_blank">전문</a></label>
@@ -66,6 +71,12 @@
     private bool _submitting;
     private string? _error;
     private string _planLabel = "스탠다드 (59,000원/월)";
+    private bool _bizUploaded;
+
+    private void OnBizUploaded(BizLicenseUploader.UploadResult result)
+    {
+        _bizUploaded = true;
+    }
 
     [SupplyParameterFromQuery]
     public string? Plan { get; set; }
@@ -86,6 +97,11 @@
         if (!_form.AgreeService || !_form.AgreePrivacy || !_form.AgreeOutsourcing)
         {
             _error = "필수 약관 3건에 모두 동의해주세요.";
+            return;
+        }
+        if (!_bizUploaded)
+        {
+            _error = "사업자등록증을 업로드해주세요.";
             return;
         }
 

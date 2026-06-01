@@ -2,96 +2,144 @@
 @layout LandingLayout
 @using Microsoft.AspNetCore.Components
 
+@*
+  HomePage — 랜딩 홈 (WS-20260601-12, 2026-06-01 박제)
+  - 2버튼 UI: 신규등록(그린 64%) + 계정분실/문의(오렌지 36%)
+  - 슬로건 1줄 + 신뢰뱃지 3개(메이크빌·바른·KISA)
+  - 스크롤 0 / 8pt grid / 버튼 56px h / 라운드 12px
+*@
+
 <PageTitle>히트판 ERP — 처음 쓰는 사람도 그냥 되는 ERP</PageTitle>
 
-<section class="hero">
+<section class="landing-hero">
     <div class="landing-container hero-inner">
-        <div class="hero-text">
-            <span class="badge">베타 신청 진행 중</span>
-            <h1>처음 쓰는 사람도<br />3분 안에 쓸 수 있는 ERP</h1>
-            <p class="lead">설치 5분, 교육 0분. 공유기 설정 없습니다.<br />더존·이카운트보다 쉽습니다.</p>
-            <div class="hero-cta">
-                <a href="/pricing" class="btn btn-primary">요금제 보기</a>
-                <a href="/signup" class="btn btn-outline">무료 체험 시작</a>
-            </div>
-            <div class="hero-points">
-                <span>✓ 데이터 주권 본인 PC</span>
-                <span>✓ 모바일 동등 시민</span>
-                <span>✓ AI 챗봇 24/7</span>
-            </div>
-        </div>
-        <div class="hero-visual">
-            <div class="visual-card">
-                <div class="visual-row" style="background:#E6F4F0; color:#0A5240;">매출 ₩12,450,000</div>
-                <div class="visual-row" style="background:#FFF0EB; color:#B7390B;">매입 ₩7,820,000</div>
-                <div class="visual-row" style="background:#F3F4F6; color:#0F1419;">재고 1,247건</div>
-            </div>
-        </div>
-    </div>
-</section>
+        <span class="badge">베타 신청 진행 중</span>
+        <h1 class="slogan">처음 쓰는 사람도 3분 안에 쓰는 ERP</h1>
 
-<section class="features">
-    <div class="landing-container">
-        <h2>왜 히트판인가</h2>
-        <div class="feature-grid">
-            <div class="feature">
-                <div class="ic">🔒</div>
-                <h3>데이터 주권 본인 PC</h3>
-                <p>모든 업무 데이터는 사장님 PC에. 본사는 메타정보만 봅니다.<br />쿠팡·SKT 사고 시대의 진짜 안전.</p>
-            </div>
-            <div class="feature">
-                <div class="ic">⚡</div>
-                <h3>설치 10분 완성</h3>
-                <p>EXE 더블 클릭 → 라이선스 키 입력 한 번. 공유기 설정 0건.</p>
-            </div>
-            <div class="feature">
-                <div class="ic">📱</div>
-                <h3>모바일 동등 시민</h3>
-                <p>현장에서 즉시 견적·발주·매입. PC와 같은 데이터.</p>
-            </div>
-            <div class="feature">
-                <div class="ic">🤖</div>
-                <h3>AI CS 24/7</h3>
-                <p>"히트판에게 물어보세요" — 매뉴얼 없이도 막힘 없이.</p>
-            </div>
+        <div class="two-button-row">
+            <a href="/signup" class="btn-green" aria-label="신규 등록 (그린)">
+                <span class="btn-title">신규 등록</span>
+                <span class="btn-sub">사업자등록증 1장이면 3분 가입</span>
+            </a>
+            <a href="/recover" class="btn-orange" aria-label="계정 분실 · 문의 (오렌지)">
+                <span class="btn-title">계정 분실 · 문의</span>
+                <span class="btn-sub">이메일·휴대폰 분실 복구</span>
+            </a>
         </div>
-    </div>
-</section>
 
-<section class="cta-section">
-    <div class="landing-container">
-        <h2>지금 베타 신청하세요</h2>
-        <p>먼저 사용한 분들께 평생 50% 할인.</p>
-        <a href="/signup" class="btn btn-primary btn-lg">무료 체험 시작</a>
+        <div class="trust-badges">
+            <span class="trust-badge">
+                <span class="trust-dot trust-makebill"></span>
+                메이크빌 기술협력
+            </span>
+            <span class="trust-badge">
+                <span class="trust-dot trust-barun"></span>
+                바른 법무자문
+            </span>
+            <span class="trust-badge">
+                <span class="trust-dot trust-kisa"></span>
+                KISA ISMS 준비
+            </span>
+        </div>
     </div>
 </section>
 
 <style>
-.hero { padding: 80px 0; background: linear-gradient(135deg, #F0F9F5 0%, #FFFFFF 100%); }
-.hero-inner { display: grid; grid-template-columns: 1.2fr 1fr; gap: 48px; align-items: center; }
-.badge { display: inline-block; background: #FFF0EB; color: #B7390B; padding: 4px 12px; border-radius: 16px; font-size: 13px; font-weight: 600; margin-bottom: 16px; }
-.hero h1 { font-size: 48px; line-height: 1.2; margin-bottom: 16px; color: #0F1419; }
-.lead { font-size: 18px; color: #4B5563; margin-bottom: 24px; }
-.hero-cta { display: flex; gap: 12px; margin-bottom: 24px; }
-.btn { display: inline-block; padding: 12px 24px; border-radius: 8px; text-decoration: none; font-weight: 600; }
-.btn-primary { background: #0F6E56; color: #fff; }
-.btn-primary:hover { background: #0A5240; }
-.btn-outline { background: #fff; color: #0F6E56; border: 2px solid #0F6E56; }
-.btn-lg { padding: 16px 32px; font-size: 16px; }
-.hero-points { display: flex; gap: 16px; color: #6B7280; font-size: 14px; flex-wrap: wrap; }
-.visual-card { background: #fff; border-radius: 16px; padding: 24px; box-shadow: 0 20px 50px rgba(15, 110, 86, 0.15); }
-.visual-row { padding: 16px; border-radius: 12px; margin-bottom: 12px; font-weight: 700; font-size: 18px; }
-.features { padding: 80px 0; }
-.features h2 { text-align: center; font-size: 32px; margin-bottom: 48px; }
-.feature-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 24px; }
-.feature { background: #fff; border: 1px solid #E5E7EB; border-radius: 16px; padding: 24px; }
-.feature .ic { font-size: 32px; margin-bottom: 12px; }
-.feature h3 { font-size: 18px; margin-bottom: 8px; }
-.feature p { color: #6B7280; font-size: 14px; line-height: 1.6; }
-.cta-section { padding: 80px 0; background: #0F6E56; color: #fff; text-align: center; }
-.cta-section h2 { font-size: 32px; margin-bottom: 12px; }
-.cta-section p { font-size: 18px; margin-bottom: 24px; opacity: 0.9; }
-.cta-section .btn-primary { background: #FF6B35; }
-.cta-section .btn-primary:hover { background: #E55A2A; }
-@@media (max-width: 768px) { .hero-inner { grid-template-columns: 1fr; } .hero h1 { font-size: 32px; } }
+.landing-hero {
+    padding: 64px 0 48px;
+    background: linear-gradient(135deg, #F0F9F5 0%, #FFFFFF 100%);
+    min-height: calc(100vh - 200px);
+    display: flex;
+    align-items: center;
+}
+.hero-inner {
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    max-width: 880px;
+    width: 100%;
+    margin: 0 auto;
+    padding: 0 24px;
+}
+.badge {
+    align-self: flex-start;
+    background: #FFF0EB;
+    color: #B7390B;
+    padding: 8px 16px;
+    border-radius: 16px;
+    font-size: 13px;
+    font-weight: 600;
+    margin-bottom: 16px;
+}
+.slogan {
+    font-size: 40px;
+    line-height: 1.25;
+    color: #0F1419;
+    font-weight: 800;
+    margin: 0 0 32px;
+}
+
+.two-button-row {
+    display: grid;
+    grid-template-columns: 64fr 36fr;
+    gap: 16px;
+    margin-bottom: 32px;
+}
+.btn-green, .btn-orange {
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    min-height: 96px;
+    padding: 16px 24px;
+    border-radius: 12px;
+    text-decoration: none;
+    font-weight: 700;
+    transition: transform 0.12s ease, box-shadow 0.12s ease, background 0.12s ease;
+    text-align: center;
+}
+.btn-green {
+    background: #0F6E56;
+    color: #FFFFFF;
+    box-shadow: 0 8px 24px rgba(15, 110, 86, 0.20);
+}
+.btn-green:hover { background: #0A5240; transform: translateY(-2px); box-shadow: 0 12px 28px rgba(15, 110, 86, 0.28); }
+.btn-orange {
+    background: #FF6B35;
+    color: #FFFFFF;
+    box-shadow: 0 8px 24px rgba(255, 107, 53, 0.20);
+}
+.btn-orange:hover { background: #E55A2A; transform: translateY(-2px); box-shadow: 0 12px 28px rgba(255, 107, 53, 0.28); }
+.btn-title { font-size: 20px; line-height: 1.2; }
+.btn-sub { font-size: 13px; opacity: 0.92; margin-top: 8px; font-weight: 500; }
+
+.trust-badges {
+    display: flex;
+    gap: 16px;
+    flex-wrap: wrap;
+    justify-content: center;
+}
+.trust-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    background: #FFFFFF;
+    border: 1px solid #E5E7EB;
+    border-radius: 999px;
+    padding: 8px 16px;
+    color: #4B5563;
+    font-size: 13px;
+    font-weight: 600;
+}
+.trust-dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
+.trust-makebill { background: #0F6E56; }
+.trust-barun { background: #1F4E79; }
+.trust-kisa { background: #B7390B; }
+
+@@media (max-width: 640px) {
+    .slogan { font-size: 28px; margin-bottom: 24px; }
+    .two-button-row { grid-template-columns: 1fr; }
+    .btn-green, .btn-orange { min-height: 72px; }
+    .btn-title { font-size: 18px; }
+}
 </style>

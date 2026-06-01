@@ -210,6 +210,42 @@ builder.Services.AddAuthorization(options =>
         policy.RequireAssertion(ctx =>
             ctx.User.HasClaim("account_type", "tenant_admin") ||
             ctx.User.HasClaim("account_type", "platform_admin")));
+
+    // ─────────────────────────────────────────────────────────────
+    // WS-20260601-16: 백오피스/랜딩 4계층 권한 정책 (2026-06-01).
+    // 8대 명제 백오피스/랜딩 마스터 설계 §JWT 4계층 박제.
+    // 기존 PlatformOnly(account_type=platform_admin)와 정합 유지:
+    //   - role 클레임이 있으면 role 우선, 없으면 account_type fallback.
+    // 헌법 #1 (덮어쓰기 금지) 준수: 기존 정책 손대지 않고 추가만.
+    // 헌법 #2 정합: reseller_serial 클레임은 JWT에서만 수신.
+    // ─────────────────────────────────────────────────────────────
+
+    // OwnerOnly: role=owner — 사장님 본인 (최상위)
+    options.AddPolicy("OwnerOnly", policy =>
+        policy.RequireAssertion(ctx =>
+            ctx.User.HasClaim("role", "owner")));
+
+    // PlatformManagerOrAbove: role=owner OR platform_manager
+    options.AddPolicy("PlatformManagerOrAbove", policy =>
+        policy.RequireAssertion(ctx =>
+            ctx.User.HasClaim("role", "owner") ||
+            ctx.User.HasClaim("role", "platform_manager")));
+
+    // PlatformOnlyV2: role=owner OR platform_manager OR platform_staff
+    // 기존 PlatformOnly와 별도 정책으로 추가 (덮어쓰기 금지).
+    // 신규 백오피스/랜딩 컨트롤러는 PlatformOnlyV2 사용.
+    options.AddPolicy("PlatformOnlyV2", policy =>
+        policy.RequireAssertion(ctx =>
+            ctx.User.HasClaim("role", "owner") ||
+            ctx.User.HasClaim("role", "platform_manager") ||
+            ctx.User.HasClaim("role", "platform_staff")));
+
+    // ResellerSelfOnly: role=reseller + reseller_serial 클레임 보유 필수
+    // 자기 시리얼 외 데이터 접근 금지 — RLS는 BackofficeRepositoryBase에서 강제.
+    options.AddPolicy("ResellerSelfOnly", policy =>
+        policy.RequireAssertion(ctx =>
+            ctx.User.HasClaim("role", "reseller") &&
+            !string.IsNullOrWhiteSpace(ctx.User.FindFirst("reseller_serial")?.Value)));
 });
 builder.Services.AddControllers();
 builder.Services.AddSwaggerWithJwt();
