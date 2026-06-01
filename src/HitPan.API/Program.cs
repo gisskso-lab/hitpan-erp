@@ -104,6 +104,9 @@ builder.Services.AddScoped<ISyncTokenService, SyncTokenService>();  // 백오피
 builder.Services.AddScoped<ISyncService, SyncService>();  // 백오피스 Pull 직원·기기 (헌법 #18·#22)
 builder.Services.AddScoped<ICloudflareProvisioningService, CloudflareProvisioningService>();  // 프로비저닝 스켈레톤 (헌법 #29 사장님 결재 2026-06-01)
 builder.Services.AddScoped<ITossWebhookService, TossWebhookService>();  // 토스페이먼츠 Webhook (사장님 결재 2026-06-01)
+builder.Services.AddScoped<ITenantSnapshotService, TenantSnapshotService>();  // 백오피스 Pull 복사본 조회 (사장님 결재 2026-06-01)
+builder.Services.AddScoped<IRefundService, RefundService>();  // 백오피스 환불 처리 (사장님 결재 2026-06-01)
+builder.Services.AddScoped<IResellerApplicationService, ResellerApplicationService>();  // 대리점 신청 (사장님 결재 2026-06-01)
 builder.Services.AddScoped<IPasswordEncryptor, PasswordEncryptorAdapter>();
 builder.Services.AddScoped<IPdfRenderService, PdfRenderService>();
 builder.Services.AddScoped<IEmailService, EmailService>();

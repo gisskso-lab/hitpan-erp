@@ -11,12 +11,55 @@ namespace HitPan.API.Controllers.Admin;
 public class AdminTenantController : ControllerBase
 {
     private readonly IResellerService _resellerService;
+    private readonly ITenantSnapshotService _snapshotService;
     private readonly ILogger<AdminTenantController> _logger;
 
-    public AdminTenantController(IResellerService resellerService, ILogger<AdminTenantController> logger)
+    public AdminTenantController(
+        IResellerService resellerService,
+        ITenantSnapshotService snapshotService,
+        ILogger<AdminTenantController> logger)
     {
         _resellerService = resellerService;
+        _snapshotService = snapshotService;
         _logger = logger;
+    }
+
+    /// <summary>
+    /// Pull 복사본 — 직원 조회 전용 (헌법 #18: 5컬럼만, 수정 불가)
+    /// </summary>
+    [HttpGet("{tenantId}/employees")]
+    public async Task<IActionResult> GetTenantEmployees(string tenantId, CancellationToken ct)
+    {
+        try
+        {
+            var rows = await _snapshotService.GetEmployeesAsync(tenantId, ct);
+            var lastSync = await _snapshotService.GetLastSyncAtAsync(tenantId, ct);
+            return Ok(new { success = true, data = new { items = rows, lastSyncAt = lastSync } });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "[AdminTenant] 직원 snapshot 조회 실패 — {TenantId}", tenantId);
+            return StatusCode(500, new { success = false, message = "서버 오류가 발생했습니다" });
+        }
+    }
+
+    /// <summary>
+    /// Pull 복사본 — 기기 조회 전용 (헌법 #18: 3컬럼만, 수정 불가)
+    /// </summary>
+    [HttpGet("{tenantId}/devices")]
+    public async Task<IActionResult> GetTenantDevices(string tenantId, CancellationToken ct)
+    {
+        try
+        {
+            var rows = await _snapshotService.GetDevicesAsync(tenantId, ct);
+            var lastSync = await _snapshotService.GetLastSyncAtAsync(tenantId, ct);
+            return Ok(new { success = true, data = new { items = rows, lastSyncAt = lastSync } });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "[AdminTenant] 기기 snapshot 조회 실패 — {TenantId}", tenantId);
+            return StatusCode(500, new { success = false, message = "서버 오류가 발생했습니다" });
+        }
     }
 
     [HttpGet]

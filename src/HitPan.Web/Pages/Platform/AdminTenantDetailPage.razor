@@ -1,0 +1,213 @@
+@page "/admin/tenants/{TenantId}"
+@layout PlatformLayout
+@attribute [Authorize]
+@inject BackofficeService Bo
+@inject HttpClient Http
+@inject ISnackbar Snackbar
+@inject NavigationManager Nav
+@using HitPan.Web.Models.Backoffice
+@using HitPan.Web.Services
+
+<PageTitle>고객사 상세 — 히트판 백오피스</PageTitle>
+
+<div style="display:flex;align-items:center;gap:8px;margin-bottom:16px;">
+    <MudButton Variant="Variant.Text" StartIcon="@Icons.Material.Filled.ArrowBack"
+               OnClick='() => Nav.NavigateTo("/admin/tenants")'>목록으로</MudButton>
+    <MudText Typo="Typo.h5" Style="font-weight:600;">@(_detail?.CompanyName ?? "...")</MudText>
+</div>
+
+@if (_loading)
+{
+    <MudProgressLinear Indeterminate="true" />
+}
+else if (_detail is null)
+{
+    <MudAlert Severity="Severity.Warning">고객사를 찾을 수 없습니다.</MudAlert>
+}
+else
+{
+    <MudPaper Class="pa-4 mb-4" Elevation="1" Style="border-radius:12px;">
+        <MudGrid>
+            <MudItem xs="12" sm="6" md="3">
+                <MudText Typo="Typo.caption" Color="Color.Secondary">대표자</MudText>
+                <MudText>@_detail.CeoName</MudText>
+            </MudItem>
+            <MudItem xs="12" sm="6" md="3">
+                <MudText Typo="Typo.caption" Color="Color.Secondary">사업자번호</MudText>
+                <MudText>@_detail.BizNo</MudText>
+            </MudItem>
+            <MudItem xs="12" sm="6" md="3">
+                <MudText Typo="Typo.caption" Color="Color.Secondary">요금제</MudText>
+                <MudText>@(_detail.PlanType ?? "-")</MudText>
+            </MudItem>
+            <MudItem xs="12" sm="6" md="3">
+                <MudText Typo="Typo.caption" Color="Color.Secondary">상태</MudText>
+                <MudChip T="string" Color="@StatusColor(_detail.Status)" Size="Size.Small">@_detail.StatusKo</MudChip>
+            </MudItem>
+            <MudItem xs="12" sm="6" md="3">
+                <MudText Typo="Typo.caption" Color="Color.Secondary">연락처</MudText>
+                <MudText>@(_detail.Tel ?? "-")</MudText>
+            </MudItem>
+            <MudItem xs="12" sm="6" md="3">
+                <MudText Typo="Typo.caption" Color="Color.Secondary">가입일</MudText>
+                <MudText>@_detail.CreatedAt.ToString("yyyy-MM-dd")</MudText>
+            </MudItem>
+            <MudItem xs="12" sm="6" md="3">
+                <MudText Typo="Typo.caption" Color="Color.Secondary">직원 (Pull)</MudText>
+                <MudText>@_employees.Count 명</MudText>
+            </MudItem>
+            <MudItem xs="12" sm="6" md="3">
+                <MudText Typo="Typo.caption" Color="Color.Secondary">기기 (Pull)</MudText>
+                <MudText>@_devices.Count 대</MudText>
+            </MudItem>
+        </MudGrid>
+    </MudPaper>
+
+    @if (_lastSyncAt is null)
+    {
+        <MudAlert Severity="Severity.Warning" Class="mb-3">
+            ⚠ 아직 ERP에서 동기화된 데이터가 없습니다. 고객 PC가 켜져 있고 Sync 토큰이 설정되었는지 확인하세요.
+        </MudAlert>
+    }
+    else if (DateTime.UtcNow - _lastSyncAt.Value > TimeSpan.FromMinutes(30))
+    {
+        <MudAlert Severity="Severity.Warning" Class="mb-3">
+            ⚠ 마지막 동기화 시각: @_lastSyncAt.Value.ToLocalTime().ToString("yyyy-MM-dd HH:mm") (@((DateTime.UtcNow - _lastSyncAt.Value).TotalMinutes.ToString("F0"))분 전).
+            5분 주기 Pull이 정상 동작하지 않을 수 있습니다.
+        </MudAlert>
+    }
+    else
+    {
+        <MudText Typo="Typo.caption" Color="Color.Secondary" Class="mb-3">
+            ✓ 마지막 동기화: @_lastSyncAt.Value.ToLocalTime().ToString("yyyy-MM-dd HH:mm")
+        </MudText>
+    }
+
+    <MudTabs Elevation="1" Rounded="true" ApplyEffectsToContainer="true" PanelClass="pa-4">
+        <MudTabPanel Text="@($"직원 ({_employees.Count})")">
+            <MudAlert Severity="Severity.Info" Class="mb-3" Dense="true">
+                🔒 본사는 Pull 복사본만 봅니다. 수정·삭제는 ERP 고객 PC에서만. (헌법 #18·#22)
+            </MudAlert>
+            <MudTable Items="_employees" Hover="true" Dense="true">
+                <HeaderContent>
+                    <MudTh>이름</MudTh>
+                    <MudTh>이메일</MudTh>
+                    <MudTh>직급</MudTh>
+                    <MudTh>재직여부</MudTh>
+                </HeaderContent>
+                <RowTemplate>
+                    <MudTd>@context.Name</MudTd>
+                    <MudTd>@context.Email</MudTd>
+                    <MudTd>@(context.Position ?? "-")</MudTd>
+                    <MudTd>
+                        @if (context.IsActive)
+                        {
+                            <MudChip T="string" Color="Color.Success" Size="Size.Small">재직</MudChip>
+                        }
+                        else
+                        {
+                            <MudChip T="string" Color="Color.Default" Size="Size.Small">퇴직</MudChip>
+                        }
+                    </MudTd>
+                </RowTemplate>
+                <NoRecordsContent>
+                    <MudText Align="Align.Center" Class="pa-4" Color="Color.Secondary">
+                        Pull된 직원 데이터가 없습니다.
+                    </MudText>
+                </NoRecordsContent>
+            </MudTable>
+        </MudTabPanel>
+
+        <MudTabPanel Text="@($"기기 ({_devices.Count})")">
+            <MudAlert Severity="Severity.Info" Class="mb-3" Dense="true">
+                🔒 본사는 기기 메타정보만 봅니다. (헌법 #18·#22)
+            </MudAlert>
+            <MudTable Items="_devices" Hover="true" Dense="true">
+                <HeaderContent>
+                    <MudTh>기기명</MudTh>
+                    <MudTh>등록일</MudTh>
+                </HeaderContent>
+                <RowTemplate>
+                    <MudTd>@(context.DeviceName ?? "(이름 없음)")</MudTd>
+                    <MudTd>@context.RegisteredAt.ToLocalTime().ToString("yyyy-MM-dd HH:mm")</MudTd>
+                </RowTemplate>
+                <NoRecordsContent>
+                    <MudText Align="Align.Center" Class="pa-4" Color="Color.Secondary">
+                        Pull된 기기 데이터가 없습니다.
+                    </MudText>
+                </NoRecordsContent>
+            </MudTable>
+        </MudTabPanel>
+    </MudTabs>
+}
+
+@code {
+    [Parameter] public string TenantId { get; set; } = "";
+
+    private AdminTenantDetail? _detail;
+    private List<SnapshotEmployeeRow> _employees = new();
+    private List<SnapshotDeviceRow> _devices = new();
+    private DateTime? _lastSyncAt;
+    private bool _loading = true;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadAsync();
+    }
+
+    private async Task LoadAsync()
+    {
+        _loading = true;
+        try
+        {
+            _detail = await Bo.GetAdminTenantAsync(TenantId);
+
+            var empRes = await Http.GetFromJsonAsync<EmployeesResponse>($"api/admin/tenants/{TenantId}/employees");
+            if (empRes?.Data?.Items is not null) _employees = empRes.Data.Items.ToList();
+            _lastSyncAt = empRes?.Data?.LastSyncAt;
+
+            var devRes = await Http.GetFromJsonAsync<DevicesResponse>($"api/admin/tenants/{TenantId}/devices");
+            if (devRes?.Data?.Items is not null) _devices = devRes.Data.Items.ToList();
+            _lastSyncAt ??= devRes?.Data?.LastSyncAt;
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"조회 실패: {ex.Message}", Severity.Error);
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    private Color StatusColor(string? status) => status switch
+    {
+        "active" => Color.Success,
+        "trial" => Color.Info,
+        "suspended" => Color.Warning,
+        "expired" => Color.Error,
+        _ => Color.Default
+    };
+
+    private class EmployeesResponse { public SnapshotPayload<SnapshotEmployeeRow>? Data { get; set; } }
+    private class DevicesResponse { public SnapshotPayload<SnapshotDeviceRow>? Data { get; set; } }
+    private class SnapshotPayload<T>
+    {
+        public IEnumerable<T>? Items { get; set; }
+        public DateTime? LastSyncAt { get; set; }
+    }
+    private class SnapshotEmployeeRow
+    {
+        public string EmployeeId { get; set; } = "";
+        public string Name { get; set; } = "";
+        public string Email { get; set; } = "";
+        public string? Position { get; set; }
+        public bool IsActive { get; set; }
+    }
+    private class SnapshotDeviceRow
+    {
+        public string DeviceId { get; set; } = "";
+        public string? DeviceName { get; set; }
+        public DateTime RegisteredAt { get; set; }
+    }
+}
