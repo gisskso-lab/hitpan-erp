@@ -1,0 +1,103 @@
+﻿<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:w="urn:schemas-microsoft-com:office:word" xmlns="http://www.w3.org/TR/REC-html40">
+<head>
+<meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
+<meta name="ProgId" content="Word.Document">
+<meta name="Generator" content="Microsoft Word">
+<title>12_통합테스트시나리오</title>
+<!--[if gte mso 9]>
+<xml>
+<w:WordDocument>
+<w:View>Print</w:View>
+<w:Zoom>100</w:Zoom>
+</w:WordDocument>
+</xml>
+<![endif]-->
+<style>
+body { font-family: 'Malgun Gothic', sans-serif; font-size: 11pt; line-height: 1.6; }
+table { border-collapse: collapse; }
+</style>
+</head>
+<body><p><h1 style="border-bottom:2px solid #333;padding-bottom:5px;color:#1976D2;">12. 통합 테스트 시나리오 — Playwright</h1></p><p><blockquote style="border-left:4px solid #1976D2;padding-left:10px;color:#555;margin:10px 0;"><strong>작성일</strong>: 2026-06-01 / PM 브라운킴</blockquote>
+<blockquote style="border-left:4px solid #1976D2;padding-left:10px;color:#555;margin:10px 0;"><strong>프레임워크</strong>: Playwright (Node.js)</blockquote>
+<blockquote style="border-left:4px solid #1976D2;padding-left:10px;color:#555;margin:10px 0;"><strong>스크립트 위치</strong>: <code style='background:#eee;font-family:Consolas;font-size:9pt;padding:1px 4px;'>scripts/playwright-audit/</code></blockquote>
+<blockquote style="border-left:4px solid #1976D2;padding-left:10px;color:#555;margin:10px 0;"><strong>리포트</strong>: <code style='background:#eee;font-family:Consolas;font-size:9pt;padding:1px 4px;'>tests/scenarios/reports/</code></blockquote></p><p><hr style="border:none;border-top:1px solid #ccc;"></p><p><h2 style="border-bottom:1px solid #999;padding-bottom:3px;color:#1976D2;">1. 시나리오 분류</h2></p><p><h3 style="color:#333;">1.1 화면 진입 전수조사 (audit-full-erp-20260531.js)</h3>
+<ul><li>87개 ERP 라우트 진입 + 키워드 매칭</li>
+<li>카테고리별: 설정 16 / 마스터 8 / 매입 9 / 판매 12 / 재고 7 / 재무 14 / 인사 15 / 결재 3 / 공통 3</li></p><p></ul><h3 style="color:#333;">1.2 워크플로우 3흐름 API (audit-final-20260531.js)</h3>
+<ul><li>매입: 발주 → 매입 → 재고</li>
+<li>BOM: BOM 마스터 조회</li>
+<li>판매: 견적 → 수주 → 거래명세서 → 세금계산서</li></p><p></ul><h3 style="color:#333;">1.3 그리드 콤보 동적 로드 (audit-spec-combo.js)</h3>
+<ul><li>견적서 → 라인 추가 → 품명 선택 → 규격 콤보 옵션 로드</li></p><p></ul><h3 style="color:#333;">1.4 모바일 반응형 (audit-final-20260531.js mobile)</h3>
+<ul><li>iPhone 13 viewport (390x844)</li>
+<li>가로 스크롤 0건 검증</li>
+<li>5개 핵심 화면</li></p><p></ul><h3 style="color:#333;">1.5 콘솔 에러 진단 (audit-erp-99-v3c.js)</h3>
+<ul><li>WASM 부팅 직후 fetch 실패 진단</li>
+<li>진범 #100 검증</li></p><p></ul>---</p><p><h2 style="border-bottom:1px solid #999;padding-bottom:3px;color:#1976D2;">2. 토큰 박제 패턴 (필수)</h2></p><p><h3 style="color:#333;">HitPanProtectedLocalStorage 정합</h3>
+<pre style='background:#f4f4f4;padding:8px;font-family:Consolas;font-size:9pt;border:1px solid #ddd;'>const key = `hitpan_access_token`;
+const value = btoa(JSON.stringify(rawToken));  // Base64(JSON)
+localStorage.setItem(key, value);</pre></p><p>3개 키 박제 필수:
+<ul><li><code style='background:#eee;font-family:Consolas;font-size:9pt;padding:1px 4px;'>hitpan_access_token</code></li>
+<li><code style='background:#eee;font-family:Consolas;font-size:9pt;padding:1px 4px;'>hitpan_refresh_token</code></li>
+<li><code style='background:#eee;font-family:Consolas;font-size:9pt;padding:1px 4px;'>hitpan_user_name</code></li></p><p></ul>---</p><p><h2 style="border-bottom:1px solid #999;padding-bottom:3px;color:#1976D2;">3. 시나리오 상세</h2></p><p><h3 style="color:#333;">3.1 로그인 → 87 화면 전수</h3>
+<pre style='background:#f4f4f4;padding:8px;font-family:Consolas;font-size:9pt;border:1px solid #ddd;'>1. POST /api/auth/login → JWT 발급
+2. localStorage 박제 (3 keys)
+3. /dashboard 진입 → 4.5초 대기 (WASM 부팅)
+4. for 87 routes:
+   - goto(route)
+   - waitForNetworkIdle
+   - 본문 텍스트 추출
+   - 키워드 매칭 + FAIL_KW 차단
+   - 콘솔 에러 수집
+5. 카테고리별 점수 + 총점</pre></p><p><h3 style="color:#333;">3.2 워크플로우 3흐름 E2E (계획)</h3>
+<pre style='background:#f4f4f4;padding:8px;font-family:Consolas;font-size:9pt;border:1px solid #ddd;'>[매입]
+1. POST /api/partners → 신규 거래처
+2. POST /api/items → 신규 상품
+3. POST /api/purchase-orders → 발주
+4. POST /api/purchases → 매입 입고
+5. GET /api/stock → 재고 +N 확인
+6. POST /api/returns → 반품
+7. GET /api/stock → 재고 -N 확인
+
+[BOM]
+1. POST /api/bom → BOM 등록
+2. POST /api/bom/{id}/produce → 생산
+3. GET /api/stock → 완제품 +N + 자재 -각각 확인
+
+[판매]
+1. POST /api/quotations → 견적
+2. POST /api/sales/orders/from-quotation → 수주
+3. POST /api/delivery → 거래명세서
+4. GET /api/stock → 재고 -N 확인
+5. POST /api/sales/tax-invoices → 세금계산서</pre></p><p><h3 style="color:#333;">3.3 그리드 콤보 UI 클릭 (audit-spec-combo.js)</h3>
+<pre style='background:#f4f4f4;padding:8px;font-family:Consolas;font-size:9pt;border:1px solid #ddd;'>1. /quotations 진입
+2. "신규" 버튼 클릭
+3. 거래처 선택
+4. "라인 추가" 클릭
+5. 품명 검색 → 선택
+6. 규격 콤보 옵션 N건 로드 확인
+7. 직접 입력 가능 확인 (CoerceValue=true)</pre></p><p><h3 style="color:#333;">3.4 모바일 반응형</h3>
+<pre style='background:#f4f4f4;padding:8px;font-family:Consolas;font-size:9pt;border:1px solid #ddd;'>1. iPhone 13 viewport 박제
+2. 5개 핵심 화면 진입
+3. document.scrollWidth vs clientWidth 검증
+4. hasHorizontal = scrollWidth &gt; clientWidth + 2
+5. 가로 스크롤 0건 (PASS) 검증</pre></p><p><h3 style="color:#333;">3.5 EVF 6대 영역 (베타 출시 게이트, 미구현)</h3>
+<ul><li><strong>부하</strong>: k6 / Locust 10명 동시 100요청</li>
+<li><strong>장애</strong>: API 종료 시 fallback / cloudflared 다운</li>
+<li><strong>악의</strong>: ZAP 자동 스캔 (SQL injection, XSS)</li>
+<li><strong>혼돈</strong>: 랜덤 입력 / 동시 클릭 / 비정상 순서</li>
+<li><strong>무지</strong>: UX 테스트 (3분 안에 매뉴얼 없이)</li>
+<li><strong>노후</strong>: 3년 누적 데이터 시뮬레이션</li></p><p></ul>---</p><p><h2 style="border-bottom:1px solid #999;padding-bottom:3px;color:#1976D2;">4. 실행 명령</h2></p><p><pre style='background:#f4f4f4;padding:8px;font-family:Consolas;font-size:9pt;border:1px solid #ddd;'>cd scripts/playwright-audit
+node audit-final-20260531.js       # 종합 (API 풀스택 + UI + 모바일)
+node audit-full-erp-20260531.js    # 87 화면 전수
+node audit-spec-combo.js           # 그리드 콤보
+node audit-erp-99-v3c.js           # 콘솔 에러 진단</pre></p><p><hr style="border:none;border-top:1px solid #ccc;"></p><p><h2 style="border-bottom:1px solid #999;padding-bottom:3px;color:#1976D2;">5. 합격 기준</h2></p><p><table style='border-collapse:collapse;margin:10px 0;'><thead><tr><th style='border:1px solid #aaa;padding:4px 8px;background:#e3f2fd;'>시나리오</th><th style='border:1px solid #aaa;padding:4px 8px;background:#e3f2fd;'>기준</th><th style='border:1px solid #aaa;padding:4px 8px;background:#e3f2fd;'>현재</th></tr></thead><tbody><tr><td style='border:1px solid #aaa;padding:4px 8px;'>87 화면 진입</td><td style='border:1px solid #aaa;padding:4px 8px;'>100%</td><td style='border:1px solid #aaa;padding:4px 8px;'>98% (85/87)</td></tr>
+<tr><td style='border:1px solid #aaa;padding:4px 8px;'>워크플로우 3흐름 API</td><td style='border:1px solid #aaa;padding:4px 8px;'>200 OK</td><td style='border:1px solid #aaa;padding:4px 8px;'>✅</td></tr>
+<tr><td style='border:1px solid #aaa;padding:4px 8px;'>그리드 콤보 API</td><td style='border:1px solid #aaa;padding:4px 8px;'>200 OK</td><td style='border:1px solid #aaa;padding:4px 8px;'>✅</td></tr>
+<tr><td style='border:1px solid #aaa;padding:4px 8px;'>모바일 가로 스크롤</td><td style='border:1px solid #aaa;padding:4px 8px;'>0건</td><td style='border:1px solid #aaa;padding:4px 8px;'>✅ 5/5</td></tr>
+<tr><td style='border:1px solid #aaa;padding:4px 8px;'>실데이터 E2E</td><td style='border:1px solid #aaa;padding:4px 8px;'>100%</td><td style='border:1px solid #aaa;padding:4px 8px;'>⚠ 미실측</td></tr>
+<tr><td style='border:1px solid #aaa;padding:4px 8px;'>EVF 6대</td><td style='border:1px solid #aaa;padding:4px 8px;'>통과</td><td style='border:1px solid #aaa;padding:4px 8px;'>⚠ 미실측 (베타 게이트)</td></tr></tbody></table>
+<hr style="border:none;border-top:1px solid #ccc;"></p><p><h2 style="border-bottom:1px solid #999;padding-bottom:3px;color:#1976D2;">6. 헌법 정합</h2></p><p><ul><li><strong>헌법 #20 (워크플로우 끊김 금지)</strong>: 3흐름 E2E 통과 필수</li>
+<li><strong>헌법 #25 (3분 안에)</strong>: 무지 EVF</li>
+<li><strong>헌법 #27 (통신 무결성)</strong>: 장애 EVF 17개 시나리오</li>
+<li><strong>헌법 #31 (백신 호환)</strong>: 백신 5종 격리 0건</li>
+</ul></p></body>
+</html>

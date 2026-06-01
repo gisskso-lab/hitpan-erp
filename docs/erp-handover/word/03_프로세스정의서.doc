@@ -1,0 +1,192 @@
+﻿<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:w="urn:schemas-microsoft-com:office:word" xmlns="http://www.w3.org/TR/REC-html40">
+<head>
+<meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
+<meta name="ProgId" content="Word.Document">
+<meta name="Generator" content="Microsoft Word">
+<title>03_프로세스정의서</title>
+<!--[if gte mso 9]>
+<xml>
+<w:WordDocument>
+<w:View>Print</w:View>
+<w:Zoom>100</w:Zoom>
+</w:WordDocument>
+</xml>
+<![endif]-->
+<style>
+body { font-family: 'Malgun Gothic', sans-serif; font-size: 11pt; line-height: 1.6; }
+table { border-collapse: collapse; }
+</style>
+</head>
+<body><p><h1 style="border-bottom:2px solid #333;padding-bottom:5px;color:#1976D2;">03. 프로세스정의서 — 워크플로우 3흐름 상세</h1></p><p><blockquote style="border-left:4px solid #1976D2;padding-left:10px;color:#555;margin:10px 0;"><strong>작성일</strong>: 2026-06-01 / PM 브라운킴</blockquote>
+<blockquote style="border-left:4px solid #1976D2;padding-left:10px;color:#555;margin:10px 0;"><strong>헌법</strong>: #20 (워크플로우 끊김 절대 금지) 절대 정합</blockquote></p><p><hr style="border:none;border-top:1px solid #ccc;"></p><p><h2 style="border-bottom:1px solid #999;padding-bottom:3px;color:#1976D2;">1. 흐름 1 — 매입 프로세스</h2></p><p><h3 style="color:#333;">1.1 프로세스 다이어그램</h3>
+<pre style='background:#f4f4f4;padding:8px;font-family:Consolas;font-size:9pt;border:1px solid #ddd;'>[Actor: 구매담당]
+    │
+    ▼
+┌─────────────┐         ┌─────────────┐         ┌──────────────┐
+│  발주서 작성   │ ──────► │  매입명세서 발행 │ ──────► │  반품 (선택)   │
+│ (purchase_   │ confirm │ (purchases   │ confirm │ (purchase_   │
+│  orders)     │         │  receipts)   │         │  returns)    │
+└─────────────┘         └─────────────┘         └──────────────┘
+                                │                        │
+                                ▼ confirmed              ▼ confirmed
+                        ┌────────────────────────────────────┐
+                        │  stock_ledger INSERT (헌법 #3 #6)   │
+                        │  매입: +N / 반품: -N                │
+                        └────────────────────────────────────┘
+                                        │
+                                        ▼
+                        ┌────────────────────────────────────┐
+                        │  journal_lines INSERT (원장 반영)   │
+                        │  차변: 재고자산 / 대변: 외상매입금   │
+                        └────────────────────────────────────┘</pre></p><p><h3 style="color:#333;">1.2 상태 전이</h3>
+<table style='border-collapse:collapse;margin:10px 0;'><thead><tr><th style='border:1px solid #aaa;padding:4px 8px;background:#e3f2fd;'>상태</th><th style='border:1px solid #aaa;padding:4px 8px;background:#e3f2fd;'>의미</th><th style='border:1px solid #aaa;padding:4px 8px;background:#e3f2fd;'>다음 가능 상태</th></tr></thead><tbody><tr><td style='border:1px solid #aaa;padding:4px 8px;'><code style='background:#eee;font-family:Consolas;font-size:9pt;padding:1px 4px;'>draft</code></td><td style='border:1px solid #aaa;padding:4px 8px;'>작성 중</td><td style='border:1px solid #aaa;padding:4px 8px;'>confirmed, cancelled</td></tr>
+<tr><td style='border:1px solid #aaa;padding:4px 8px;'><code style='background:#eee;font-family:Consolas;font-size:9pt;padding:1px 4px;'>confirmed</code></td><td style='border:1px solid #aaa;padding:4px 8px;'>확정 (원장 반영)</td><td style='border:1px solid #aaa;padding:4px 8px;'>partial, completed</td></tr>
+<tr><td style='border:1px solid #aaa;padding:4px 8px;'><code style='background:#eee;font-family:Consolas;font-size:9pt;padding:1px 4px;'>partial</code></td><td style='border:1px solid #aaa;padding:4px 8px;'>일부 입고</td><td style='border:1px solid #aaa;padding:4px 8px;'>completed</td></tr>
+<tr><td style='border:1px solid #aaa;padding:4px 8px;'><code style='background:#eee;font-family:Consolas;font-size:9pt;padding:1px 4px;'>completed</code></td><td style='border:1px solid #aaa;padding:4px 8px;'>완료</td><td style='border:1px solid #aaa;padding:4px 8px;'>(종결)</td></tr>
+<tr><td style='border:1px solid #aaa;padding:4px 8px;'><code style='background:#eee;font-family:Consolas;font-size:9pt;padding:1px 4px;'>cancelled</code></td><td style='border:1px solid #aaa;padding:4px 8px;'>취소</td><td style='border:1px solid #aaa;padding:4px 8px;'>(종결)</td></tr></tbody></table>
+<h3 style="color:#333;">1.3 절대 규칙</h3>
+<ul><li>헌법 #6: 원장 반영은 <strong>confirmed 시점</strong>에만</li>
+<li>헌법 #3: stock_ledger / journal_lines <strong>INSERT ONLY</strong></li>
+<li>헌법 #20: 매입 → 재고 반영 끊기면 즉시 P0</li></p><p></ul><h3 style="color:#333;">1.4 화면 흐름</h3>
+1. <code style='background:#eee;font-family:Consolas;font-size:9pt;padding:1px 4px;'>/purchase-orders</code> (발주서) → 신규 작성 → 라인 추가 → 저장(draft) → 확정(confirmed)
+2. <code style='background:#eee;font-family:Consolas;font-size:9pt;padding:1px 4px;'>/purchases</code> (매입명세서) → 발주에서 가져오기 OR 신규 → 입고처리 → 확정
+3. <code style='background:#eee;font-family:Consolas;font-size:9pt;padding:1px 4px;'>/returns</code> (반품) → 매입에서 가져오기 → 반품 사유 입력 → 확정
+4. <code style='background:#eee;font-family:Consolas;font-size:9pt;padding:1px 4px;'>/stock</code> (재고현황) → 자동 반영 확인</p><p><hr style="border:none;border-top:1px solid #ccc;"></p><p><h2 style="border-bottom:1px solid #999;padding-bottom:3px;color:#1976D2;">2. 흐름 2 — BOM 생산 프로세스</h2></p><p><h3 style="color:#333;">2.1 프로세스 다이어그램</h3>
+<pre style='background:#f4f4f4;padding:8px;font-family:Consolas;font-size:9pt;border:1px solid #ddd;'>[Actor: 생산담당]
+    │
+    ▼
+┌──────────────┐        ┌──────────────┐
+│  BOM 마스터    │ ─────► │  생산 명령    │
+│  (bom_headers)│        │  (confirmed)  │
+│  + bom_items │        │              │
+└──────────────┘        └──────────────┘
+                                │
+                                ▼ 동일 트랜잭션 (헌법 #20)
+                        ┌─────────────────────────────────────┐
+                        │  stock_ledger INSERT (2 entries)    │
+                        │  ① 완제품 +1                         │
+                        │  ② 자재 N건 -각각의 quantity         │
+                        └─────────────────────────────────────┘
+                                │
+                                ▼
+                        ┌─────────────────────────────────────┐
+                        │  bom_cost_cache UPDATE (단가 캐시)   │
+                        └─────────────────────────────────────┘</pre></p><p><h3 style="color:#333;">2.2 절대 규칙</h3>
+<ul><li>완제품↑ + 자재↓ 는 <strong>반드시 동일 트랜잭션</strong> (롤백 가능)</li>
+<li>자재 부족 시 생산 명령 거부 (재고 음수 금지)</li>
+<li>BomService는 <code style='background:#eee;font-family:Consolas;font-size:9pt;padding:1px 4px;'>EnsureOpenAsync</code> 패턴 정합 (DbConnection 안전)</li></p><p></ul><h3 style="color:#333;">2.3 화면 흐름</h3>
+1. <code style='background:#eee;font-family:Consolas;font-size:9pt;padding:1px 4px;'>/bom</code> (BOM 마스터) → 신규 → 완제품 + 자재 N건 + 수량
+2. <code style='background:#eee;font-family:Consolas;font-size:9pt;padding:1px 4px;'>/bom/{Id}</code> (상세) → 생산 명령 → 확정
+3. <code style='background:#eee;font-family:Consolas;font-size:9pt;padding:1px 4px;'>/stock</code> → 자동 반영 확인</p><p><hr style="border:none;border-top:1px solid #ccc;"></p><p><h2 style="border-bottom:1px solid #999;padding-bottom:3px;color:#1976D2;">3. 흐름 3 — 판매 프로세스</h2></p><p><h3 style="color:#333;">3.1 프로세스 다이어그램</h3>
+<pre style='background:#f4f4f4;padding:8px;font-family:Consolas;font-size:9pt;border:1px solid #ddd;'>[Actor: 영업담당]
+    │
+    ▼
+┌──────────┐    ┌──────────┐    ┌────────────┐    ┌──────────────┐
+│ 견적서    │───►│ 수주서    │───►│ 거래명세서  │───►│ 세금계산서    │
+│(quotations)│   │(sales_   │   │(deliveries)│   │(tax_invoices)│
+│           │    │ orders)  │    │            │    │              │
+└──────────┘    └──────────┘    └────────────┘    └──────────────┘
+                                       │                  │
+                                       ▼ confirmed        ▼ confirmed
+                            ┌────────────────────────────────────┐
+                            │  stock_ledger INSERT (재고 -N)     │
+                            │  journal_lines INSERT (외상매출금)  │
+                            └────────────────────────────────────┘
+                                            │
+                                            ▼
+                                ┌────────────────────────┐
+                                │  매출·경리·세무 반영     │
+                                │  (메이크빌 ASP 외주)    │
+                                └────────────────────────┘</pre></p><p><h3 style="color:#333;">3.2 단축 경로 (헌법 #20)</h3>
+<ul><li>견적 생략 → 수주 → 거래명세서: ✅ 허용</li>
+<li>수주 생략 → 거래명세서: ✅ 허용 ("바로 명세서")</li>
+<li>거래명세서 생략 → 세금계산서: ❌ 금지 (출고 무결성)</li></p><p></ul><h3 style="color:#333;">3.3 세금계산서 분리 (3계층, 2026-04-24 결재)</h3>
+<table style='border-collapse:collapse;margin:10px 0;'><thead><tr><th style='border:1px solid #aaa;padding:4px 8px;background:#e3f2fd;'>계층</th><th style='border:1px solid #aaa;padding:4px 8px;background:#e3f2fd;'>시스템</th><th style='border:1px solid #aaa;padding:4px 8px;background:#e3f2fd;'>용도</th></tr></thead><tbody><tr><td style='border:1px solid #aaa;padding:4px 8px;'>L1</td><td style='border:1px solid #aaa;padding:4px 8px;'>tax_invoices (로컬 DB)</td><td style='border:1px solid #aaa;padding:4px 8px;'>발행 원장</td></tr>
+<tr><td style='border:1px solid #aaa;padding:4px 8px;'>L2</td><td style='border:1px solid #aaa;padding:4px 8px;'>메이크빌 ASP</td><td style='border:1px solid #aaa;padding:4px 8px;'>외부 전송 (인쇄·메일·문자)</td></tr>
+<tr><td style='border:1px solid #aaa;padding:4px 8px;'>L3</td><td style='border:1px solid #aaa;padding:4px 8px;'>홈택스 API (외주 검토)</td><td style='border:1px solid #aaa;padding:4px 8px;'>국세청 전송</td></tr></tbody></table>
+<h3 style="color:#333;">3.4 화면 흐름</h3>
+1. <code style='background:#eee;font-family:Consolas;font-size:9pt;padding:1px 4px;'>/quotations</code> (견적) → 작성 → PDF/메일 발송
+2. <code style='background:#eee;font-family:Consolas;font-size:9pt;padding:1px 4px;'>/sales-orders</code> (수주) → 견적에서 가져오기 OR 신규
+3. <code style='background:#eee;font-family:Consolas;font-size:9pt;padding:1px 4px;'>/deliveries</code> (거래명세서) → 수주에서 가져오기 → 발행 → 재고 차감
+4. <code style='background:#eee;font-family:Consolas;font-size:9pt;padding:1px 4px;'>/tax-invoice</code> (세금계산서) → 거래명세에서 가져오기 → 발행</p><p><hr style="border:none;border-top:1px solid #ccc;"></p><p><h2 style="border-bottom:1px solid #999;padding-bottom:3px;color:#1976D2;">4. 부가 프로세스 — 결재</h2></p><p><h3 style="color:#333;">4.1 결재 라인 흐름</h3>
+<pre style='background:#f4f4f4;padding:8px;font-family:Consolas;font-size:9pt;border:1px solid #ddd;'>문서 작성
+    │
+    ▼
+결재 요청 (approval_documents INSERT)
+    │
+    ▼
+approval_line_steps 순서대로
+    │
+    ├─ 1단계 검토자 → 승인/반려
+    ├─ 2단계 부장 → 승인/반려
+    └─ N단계 대표 → 최종 승인
+    │
+    ▼
+완료 (approval_history INSERT, 원본 문서 confirmed)</pre></p><p><h3 style="color:#333;">4.2 적용 대상</h3>
+<ul><li>발주서 / 매입명세서 / 반품</li>
+<li>견적서 / 수주서 / 거래명세서</li>
+<li>경비 신청 / 연차 신청 / 초과근무</li>
+<li>근로계약 / 기타 인사</li></p><p></ul><h3 style="color:#333;">4.3 화면 흐름</h3>
+1. 어떤 문서든 "결재 요청" 클릭 → <code style='background:#eee;font-family:Consolas;font-size:9pt;padding:1px 4px;'>/approval/sent</code>
+2. 결재자: <code style='background:#eee;font-family:Consolas;font-size:9pt;padding:1px 4px;'>/approval/pending</code> → 승인/반려
+3. 완료: <code style='background:#eee;font-family:Consolas;font-size:9pt;padding:1px 4px;'>/approval/completed</code></p><p><hr style="border:none;border-top:1px solid #ccc;"></p><p><h2 style="border-bottom:1px solid #999;padding-bottom:3px;color:#1976D2;">5. 부가 프로세스 — 인사</h2></p><p><h3 style="color:#333;">5.1 채용 → 근로계약 → 서명</h3>
+<pre style='background:#f4f4f4;padding:8px;font-family:Consolas;font-size:9pt;border:1px solid #ddd;'>사원 등록 (employees)
+    │
+    ▼
+근로계약 작성 (labor_contracts, /hr/labor-contracts/create)
+    │
+    ▼
+간편 인증 (카카오/토스/금융/PASS, 헌법 #esign)
+    │
+    ▼
+전자서명 (esign_records INSERT)
+    │
+    ▼
+서명 이력 (/hr/esign-history)</pre></p><p><h3 style="color:#333;">5.2 연차 신청 → 결재 → 차감</h3>
+<pre style='background:#f4f4f4;padding:8px;font-family:Consolas;font-size:9pt;border:1px solid #ddd;'>연차 신청 (/hr/leave-request, leave_requests INSERT draft)
+    │
+    ▼
+결재 라인 → 승인
+    │
+    ▼
+연차 잔여 일수 차감 (employees 컬럼 UPDATE 또는 별도 ledger)
+    │
+    ▼
+연차 달력 표시 (/hr/leave-calendar)</pre></p><p><hr style="border:none;border-top:1px solid #ccc;"></p><p><h2 style="border-bottom:1px solid #999;padding-bottom:3px;color:#1976D2;">6. 데이터 흐름 — 본사 vs 고객 (헌법 #22)</h2></p><p><h3 style="color:#333;">6.1 본사로 전송 허용 (메타정보)</h3>
+<ul><li>가입·결제·라이선스 키</li>
+<li>텔레메트리 (워치독 핑, 헌법 #30)</li>
+<li>CS 토큰 (JIT, 단방향)</li>
+<li>대리점 영업 데이터</li></p><p></ul><h3 style="color:#333;">6.2 본사로 전송 절대 금지 (헌법 #18 v3)</h3>
+<ul><li>매출/매입/원장</li>
+<li>거래처/직원/상품</li>
+<li>재고/세금계산서/결재</li>
+<li>백업조차 E2E 암호화 (본사가 내용 모름)</li></p><p></ul><h3 style="color:#333;">6.3 데이터 흐름 다이어그램</h3>
+<pre style='background:#f4f4f4;padding:8px;font-family:Consolas;font-size:9pt;border:1px solid #ddd;'>┌─────────────────┐         ┌──────────────────┐
+│ 고객 PC (로컬)   │         │ 본사 서버 (SaaS)  │
+│                 │         │                  │
+│ ・MariaDB        │ ───X──► │ ・billing_*       │
+│ ・모든 업무 데이터 │  업무   │ ・licenses        │
+│ ・E2E 백업       │  데이터 │ ・watchdog_pings  │
+│                 │  금지   │ ・platform_*      │
+│                 │         │                  │
+│                 │ ──────► │ (메타정보만)      │
+│                 │ 가입·결제 │                  │
+│                 │ 라이선스  │                  │
+└─────────────────┘         └──────────────────┘
+        ▲                            │
+        │                            │
+        │     Cloudflare 터널         │
+        │     (UDP 7844)              │
+        └────────────────────────────┘</pre></p><p><hr style="border:none;border-top:1px solid #ccc;"></p><p><h2 style="border-bottom:1px solid #999;padding-bottom:3px;color:#1976D2;">7. 통신 무결성 (헌법 #27)</h2></p><p><h3 style="color:#333;">7.1 워치독 17개 시나리오</h3>
+<table style='border-collapse:collapse;margin:10px 0;'><thead><tr><th style='border:1px solid #aaa;padding:4px 8px;background:#e3f2fd;'>영역</th><th style='border:1px solid #aaa;padding:4px 8px;background:#e3f2fd;'>시나리오</th><th style='border:1px solid #aaa;padding:4px 8px;background:#e3f2fd;'>5분 자동 복구</th></tr></thead><tbody><tr><td style='border:1px solid #aaa;padding:4px 8px;'>인프라 (3)</td><td style='border:1px solid #aaa;padding:4px 8px;'>cloudflared 종료 / Windows Update / TunnelSecret</td><td style='border:1px solid #aaa;padding:4px 8px;'>✅</td></tr>
+<tr><td style='border:1px solid #aaa;padding:4px 8px;'>네트워크 (3)</td><td style='border:1px solid #aaa;padding:4px 8px;'>DNS 실패 / 방화벽 차단 / WiFi 끊김</td><td style='border:1px solid #aaa;padding:4px 8px;'>✅</td></tr>
+<tr><td style='border:1px solid #aaa;padding:4px 8px;'>보안 SW (3)</td><td style='border:1px solid #aaa;padding:4px 8px;'>Defender 격리 / 백신 격리 / EDR 차단</td><td style='border:1px solid #aaa;padding:4px 8px;'>✅</td></tr>
+<tr><td style='border:1px solid #aaa;padding:4px 8px;'>자격증명 (2)</td><td style='border:1px solid #aaa;padding:4px 8px;'>JWT 만료 / Refresh 실패</td><td style='border:1px solid #aaa;padding:4px 8px;'>✅</td></tr>
+<tr><td style='border:1px solid #aaa;padding:4px 8px;'>물리 (2)</td><td style='border:1px solid #aaa;padding:4px 8px;'>디스크 풀 / UPS 다운</td><td style='border:1px solid #aaa;padding:4px 8px;'>⚠</td></tr>
+<tr><td style='border:1px solid #aaa;padding:4px 8px;'>인적 (2)</td><td style='border:1px solid #aaa;padding:4px 8px;'>무허가 조작 / 비밀번호 분실</td><td style='border:1px solid #aaa;padding:4px 8px;'>⚠</td></tr>
+<tr><td style='border:1px solid #aaa;padding:4px 8px;'>외부 공격 (2)</td><td style='border:1px solid #aaa;padding:4px 8px;'>Brute Force / DDoS</td><td style='border:1px solid #aaa;padding:4px 8px;'>⚠</td></tr></tbody></table>
+<hr style="border:none;border-top:1px solid #ccc;"></p><p><h2 style="border-bottom:1px solid #999;padding-bottom:3px;color:#1976D2;">8. 통신 끊김 시 클라이언트 복구 (Phase 6 미완)</h2>
+<ul><li>Phase 6 워치독 EXE 강제 내장 (헌법 #28·#30)</li>
+<li>베타 출시 절대 게이트</li>
+</ul></p></body>
+</html>

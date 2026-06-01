@@ -1,0 +1,215 @@
+﻿<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:w="urn:schemas-microsoft-com:office:word" xmlns="http://www.w3.org/TR/REC-html40">
+<head>
+<meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
+<meta name="ProgId" content="Word.Document">
+<meta name="Generator" content="Microsoft Word">
+<title>07_ERD</title>
+<!--[if gte mso 9]>
+<xml>
+<w:WordDocument>
+<w:View>Print</w:View>
+<w:Zoom>100</w:Zoom>
+</w:WordDocument>
+</xml>
+<![endif]-->
+<style>
+body { font-family: 'Malgun Gothic', sans-serif; font-size: 11pt; line-height: 1.6; }
+table { border-collapse: collapse; }
+</style>
+</head>
+<body><p><h1 style="border-bottom:2px solid #333;padding-bottom:5px;color:#1976D2;">07. ERD — 137개 테이블 관계도</h1></p><p><blockquote style="border-left:4px solid #1976D2;padding-left:10px;color:#555;margin:10px 0;"><strong>작성일</strong>: 2026-06-01 / PM 브라운킴 + DB 매니저</blockquote>
+<blockquote style="border-left:4px solid #1976D2;padding-left:10px;color:#555;margin:10px 0;"><strong>DB</strong>: MariaDB 11.4.10 / hitpan_erp / utf8mb4_unicode_ci</blockquote>
+<blockquote style="border-left:4px solid #1976D2;padding-left:10px;color:#555;margin:10px 0;"><strong>상세 컬럼</strong>: <code style='background:#eee;font-family:Consolas;font-size:9pt;padding:1px 4px;'>08_테이블정의서.md</code> 참조</blockquote></p><p><hr style="border:none;border-top:1px solid #ccc;"></p><p><h2 style="border-bottom:1px solid #999;padding-bottom:3px;color:#1976D2;">1. 전체 구조 (10대 영역)</h2></p><p><pre style='background:#f4f4f4;padding:8px;font-family:Consolas;font-size:9pt;border:1px solid #ddd;'>                        ┌────────────────────┐
+                        │   tenants (테넌트)   │
+                        │   ↓ tenant_id 키    │
+                        └────────────────────┘
+                                  │
+            ┌─────────────────────┼─────────────────────┐
+            ▼                     ▼                     ▼
+    ┌──────────────┐      ┌──────────────┐      ┌──────────────┐
+    │  마스터        │      │  업무 트랜잭션  │      │  HR·결재      │
+    │ ・partners    │      │ ・매입         │      │ ・employees   │
+    │ ・items       │      │ ・판매         │      │ ・approval_*  │
+    │ ・bom_*       │      │ ・재고         │      │ ・hr_*        │
+    │ ・warehouses  │      │ ・재무·회계     │      │ ・labor_*     │
+    └──────────────┘      └──────────────┘      └──────────────┘
+            │                     │                     │
+            └─────────────────────┼─────────────────────┘
+                                  ▼
+                        ┌────────────────────┐
+                        │  원장 INSERT ONLY   │
+                        │ ・stock_ledger     │
+                        │ ・journal_lines    │
+                        └────────────────────┘</pre></p><p><hr style="border:none;border-top:1px solid #ccc;"></p><p><h2 style="border-bottom:1px solid #999;padding-bottom:3px;color:#1976D2;">2. 영역별 ERD</h2></p><p><h3 style="color:#333;">2.1 인증·테넌트</h3>
+<pre style='background:#f4f4f4;padding:8px;font-family:Consolas;font-size:9pt;border:1px solid #ddd;'>tenants ◄──┐
+   │       │
+   ├──► users ──► refresh_tokens
+   │       │
+   │       └──► audit_logs
+   │       └──► login_attempts
+   │       └──► user_terms_consent
+   │
+   ├──► employees ──► positions, departments
+   ├──► permissions
+   ├──► devices ──► device_login_logs
+   └──► tenant_certificates (AES-256)</pre></p><p><h3 style="color:#333;">2.2 마스터</h3>
+<pre style='background:#f4f4f4;padding:8px;font-family:Consolas;font-size:9pt;border:1px solid #ddd;'>partners ──► partner_contacts
+   │      ──► partner_special_prices ──► items
+   │      ──► partner_balance
+   │
+items ──► item_groups
+   │   ──► item_specs (DB-73, 진범 #99 봉합)
+   │   ──► item_special_prices ──► partners
+   │   ──► item_stock
+   │   ──► inventory_lots
+   │
+bom_headers ──► bom_items ──► items
+              ──► bom_cost_cache</pre></p><p><h3 style="color:#333;">2.3 매입</h3>
+<pre style='background:#f4f4f4;padding:8px;font-family:Consolas;font-size:9pt;border:1px solid #ddd;'>purchase_orders ──► purchase_order_items ──► items
+       │                                 ──► warehouses
+       │
+       ▼ (confirmed)
+purchase_receipts ──► purchase_receipt_items
+       │                       │
+       ▼                       ▼ stock_ledger INSERT (+N)
+purchase_returns ──► purchase_return_items
+       │           ──► return_reason (DB-75)
+       ▼
+   stock_ledger INSERT (-N)</pre></p><p><h3 style="color:#333;">2.4 판매</h3>
+<pre style='background:#f4f4f4;padding:8px;font-family:Consolas;font-size:9pt;border:1px solid #ddd;'>quotations ──► quotation_items ──► items
+   │
+   ▼ (변환)
+sales_orders ──► (custom_order_specs)
+   │
+   ▼ (변환)
+deliveries ──► delivery_tracking
+   │   │
+   │   └──► stock_ledger INSERT (-N) + journal_lines
+   │
+   ▼
+tax_invoices (L1) ──► etax_send_history (L2 메이크빌)</pre></p><p><h3 style="color:#333;">2.5 재고</h3>
+<pre style='background:#f4f4f4;padding:8px;font-family:Consolas;font-size:9pt;border:1px solid #ddd;'>warehouses ──► item_stock
+            ──► stock_ledger (INSERT ONLY, 헌법 #3)
+                  ├─ source_type: purchase / sale / adjust / transfer / bom_in / bom_out
+                  └─ partition by tenant_id</pre></p><p><h3 style="color:#333;">2.6 재무·회계</h3>
+<pre style='background:#f4f4f4;padding:8px;font-family:Consolas;font-size:9pt;border:1px solid #ddd;'>accounts (DB-32 시드)
+   │
+   ├──► journal_entries ──► journal_lines (INSERT ONLY)
+   │                          (UNIQUE source_type+source_id, DB-35)
+   │
+   ├──► monthly_closing ──► monthly_summary
+   │
+   ├──► partner_balance (매입·매출 잔액)
+   │
+   ├──► bank_transactions
+   ├──► card_payments ──► card_payment_lines
+   ├──► bills (어음·수표)
+   ├──► cashbook (현금 출납)
+   ├──► expenses
+   ├──► collections (수금)
+   ├──► payments (지급)
+   └──► ledger_balance_snapshot</pre></p><p><h3 style="color:#333;">2.7 결재·HR</h3>
+<pre style='background:#f4f4f4;padding:8px;font-family:Consolas;font-size:9pt;border:1px solid #ddd;'>approval_lines ──► approval_line_steps ──► users
+   │
+   ▼
+approval_documents ──► approval_doc_lines ──► (원본 문서: quotations, sales_orders, ...)
+   │              ──► approval_history
+   │
+employees ──► attendance
+          ──► leave_requests ──► approval_*
+          ──► overtime
+          ──► hr_expense_requests ──► approval_*
+          ──► labor_contracts ──► esign_records
+          ──► evaluations</pre></p><p><h3 style="color:#333;">2.8 AI·CS</h3>
+<pre style='background:#f4f4f4;padding:8px;font-family:Consolas;font-size:9pt;border:1px solid #ddd;'>ai_conversations ◄── users
+ai_usage_logs ◄── tenants
+hitpan_knowledge (RAG 벡터)
+chatbot_sessions (옵션)</pre></p><p><h3 style="color:#333;">2.9 백오피스·대리점 (본사 영역, 헌법 #18·#22)</h3>
+<pre style='background:#f4f4f4;padding:8px;font-family:Consolas;font-size:9pt;border:1px solid #ddd;'>platforms
+   │
+   ├──► platform_admins
+   ├──► resellers ──► reseller_accounts
+   │              ──► reseller_customers (tenant_id 매핑)
+   │              ──► reseller_commissions
+   │              ──► reseller_promotions
+   │              ──► reseller_revenues
+   │              ──► reseller_payouts
+   │
+   ├──► commission_settlements
+   └──► backoffice_refresh_tokens</pre></p><p><h3 style="color:#333;">2.10 시스템·운영</h3>
+<pre style='background:#f4f4f4;padding:8px;font-family:Consolas;font-size:9pt;border:1px solid #ddd;'>backup_settings ──► backup_history
+migration_jobs ──► migration_checkpoints, migration_errors
+watchdog_pings (헌법 #27·#30)
+licenses (헌법 #71 token_hash)
+billing_subscriptions ──► billing_invoices
+                      ──► billing_payment_methods (AES-256)
+                      ──► billing_payment_attempts
+email_settings ──► email_send_history, email_attachment_history
+form_templates (DB-74, 양식 박제)
+custom_order_specs
+events (도메인 이벤트)
+idempotency_keys (POST 멱등성)
+common_codes
+audit_trail</pre></p><p><hr style="border:none;border-top:1px solid #ccc;"></p><p><h2 style="border-bottom:1px solid #999;padding-bottom:3px;color:#1976D2;">3. 핵심 외래키 (54건)</h2></p><p><table style='border-collapse:collapse;margin:10px 0;'><thead><tr><th style='border:1px solid #aaa;padding:4px 8px;background:#e3f2fd;'>자식 테이블</th><th style='border:1px solid #aaa;padding:4px 8px;background:#e3f2fd;'>FK 컬럼</th><th style='border:1px solid #aaa;padding:4px 8px;background:#e3f2fd;'>부모 테이블</th><th style='border:1px solid #aaa;padding:4px 8px;background:#e3f2fd;'>부모 컬럼</th></tr></thead><tbody><tr><td style='border:1px solid #aaa;padding:4px 8px;'>ai_conversations</td><td style='border:1px solid #aaa;padding:4px 8px;'>user_id</td><td style='border:1px solid #aaa;padding:4px 8px;'>users</td><td style='border:1px solid #aaa;padding:4px 8px;'>user_id</td></tr>
+<tr><td style='border:1px solid #aaa;padding:4px 8px;'>ai_usage_logs</td><td style='border:1px solid #aaa;padding:4px 8px;'>tenant_id</td><td style='border:1px solid #aaa;padding:4px 8px;'>tenants</td><td style='border:1px solid #aaa;padding:4px 8px;'>tenant_id</td></tr>
+<tr><td style='border:1px solid #aaa;padding:4px 8px;'>billing_invoices</td><td style='border:1px solid #aaa;padding:4px 8px;'>tenant_id</td><td style='border:1px solid #aaa;padding:4px 8px;'>tenants</td><td style='border:1px solid #aaa;padding:4px 8px;'>tenant_id</td></tr>
+<tr><td style='border:1px solid #aaa;padding:4px 8px;'>bom_headers</td><td style='border:1px solid #aaa;padding:4px 8px;'>tenant_id</td><td style='border:1px solid #aaa;padding:4px 8px;'>tenants</td><td style='border:1px solid #aaa;padding:4px 8px;'>tenant_id</td></tr>
+<tr><td style='border:1px solid #aaa;padding:4px 8px;'>bom_items</td><td style='border:1px solid #aaa;padding:4px 8px;'>bom_id</td><td style='border:1px solid #aaa;padding:4px 8px;'>bom_headers</td><td style='border:1px solid #aaa;padding:4px 8px;'>bom_id</td></tr>
+<tr><td style='border:1px solid #aaa;padding:4px 8px;'>commission_settlements</td><td style='border:1px solid #aaa;padding:4px 8px;'>approved_by</td><td style='border:1px solid #aaa;padding:4px 8px;'>platform_admins</td><td style='border:1px solid #aaa;padding:4px 8px;'>admin_id</td></tr>
+<tr><td style='border:1px solid #aaa;padding:4px 8px;'>commission_settlements</td><td style='border:1px solid #aaa;padding:4px 8px;'>reseller_id</td><td style='border:1px solid #aaa;padding:4px 8px;'>resellers</td><td style='border:1px solid #aaa;padding:4px 8px;'>reseller_id</td></tr>
+<tr><td style='border:1px solid #aaa;padding:4px 8px;'>custom_order_specs</td><td style='border:1px solid #aaa;padding:4px 8px;'>order_id</td><td style='border:1px solid #aaa;padding:4px 8px;'>sales_orders</td><td style='border:1px solid #aaa;padding:4px 8px;'>order_id</td></tr>
+<tr><td style='border:1px solid #aaa;padding:4px 8px;'>departments</td><td style='border:1px solid #aaa;padding:4px 8px;'>tenant_id</td><td style='border:1px solid #aaa;padding:4px 8px;'>tenants</td><td style='border:1px solid #aaa;padding:4px 8px;'>tenant_id</td></tr>
+<tr><td style='border:1px solid #aaa;padding:4px 8px;'>employees</td><td style='border:1px solid #aaa;padding:4px 8px;'>tenant_id</td><td style='border:1px solid #aaa;padding:4px 8px;'>tenants</td><td style='border:1px solid #aaa;padding:4px 8px;'>tenant_id</td></tr>
+<tr><td style='border:1px solid #aaa;padding:4px 8px;'>esign_records</td><td style='border:1px solid #aaa;padding:4px 8px;'>user_id</td><td style='border:1px solid #aaa;padding:4px 8px;'>users</td><td style='border:1px solid #aaa;padding:4px 8px;'>user_id</td></tr>
+<tr><td style='border:1px solid #aaa;padding:4px 8px;'>esign_records</td><td style='border:1px solid #aaa;padding:4px 8px;'>tenant_id</td><td style='border:1px solid #aaa;padding:4px 8px;'>tenants</td><td style='border:1px solid #aaa;padding:4px 8px;'>tenant_id</td></tr>
+<tr><td style='border:1px solid #aaa;padding:4px 8px;'>etax_send_history</td><td style='border:1px solid #aaa;padding:4px 8px;'>tax_invoice_id</td><td style='border:1px solid #aaa;padding:4px 8px;'>tax_invoices</td><td style='border:1px solid #aaa;padding:4px 8px;'>invoice_id</td></tr>
+<tr><td style='border:1px solid #aaa;padding:4px 8px;'>inventory_lots</td><td style='border:1px solid #aaa;padding:4px 8px;'>item_id</td><td style='border:1px solid #aaa;padding:4px 8px;'>items</td><td style='border:1px solid #aaa;padding:4px 8px;'>item_id</td></tr>
+<tr><td style='border:1px solid #aaa;padding:4px 8px;'>journal_entries</td><td style='border:1px solid #aaa;padding:4px 8px;'>tenant_id</td><td style='border:1px solid #aaa;padding:4px 8px;'>tenants</td><td style='border:1px solid #aaa;padding:4px 8px;'>tenant_id</td></tr>
+<tr><td style='border:1px solid #aaa;padding:4px 8px;'>journal_lines</td><td style='border:1px solid #aaa;padding:4px 8px;'>entry_id</td><td style='border:1px solid #aaa;padding:4px 8px;'>journal_entries</td><td style='border:1px solid #aaa;padding:4px 8px;'>entry_id</td></tr>
+<tr><td style='border:1px solid #aaa;padding:4px 8px;'>journal_lines</td><td style='border:1px solid #aaa;padding:4px 8px;'>account_code</td><td style='border:1px solid #aaa;padding:4px 8px;'>accounts</td><td style='border:1px solid #aaa;padding:4px 8px;'>account_code</td></tr>
+<tr><td style='border:1px solid #aaa;padding:4px 8px;'>journal_lines</td><td style='border:1px solid #aaa;padding:4px 8px;'>tenant_id</td><td style='border:1px solid #aaa;padding:4px 8px;'>accounts</td><td style='border:1px solid #aaa;padding:4px 8px;'>tenant_id</td></tr>
+<tr><td style='border:1px solid #aaa;padding:4px 8px;'>labor_contracts</td><td style='border:1px solid #aaa;padding:4px 8px;'>tenant_id</td><td style='border:1px solid #aaa;padding:4px 8px;'>tenants</td><td style='border:1px solid #aaa;padding:4px 8px;'>tenant_id</td></tr>
+<tr><td style='border:1px solid #aaa;padding:4px 8px;'>material_price_history</td><td style='border:1px solid #aaa;padding:4px 8px;'>item_id</td><td style='border:1px solid #aaa;padding:4px 8px;'>items</td><td style='border:1px solid #aaa;padding:4px 8px;'>item_id</td></tr>
+<tr><td style='border:1px solid #aaa;padding:4px 8px;'>migration_checkpoints</td><td style='border:1px solid #aaa;padding:4px 8px;'>job_id</td><td style='border:1px solid #aaa;padding:4px 8px;'>migration_jobs</td><td style='border:1px solid #aaa;padding:4px 8px;'>job_id</td></tr>
+<tr><td style='border:1px solid #aaa;padding:4px 8px;'>migration_errors</td><td style='border:1px solid #aaa;padding:4px 8px;'>job_id</td><td style='border:1px solid #aaa;padding:4px 8px;'>migration_jobs</td><td style='border:1px solid #aaa;padding:4px 8px;'>job_id</td></tr>
+<tr><td style='border:1px solid #aaa;padding:4px 8px;'>mold_assets</td><td style='border:1px solid #aaa;padding:4px 8px;'>product_item_id</td><td style='border:1px solid #aaa;padding:4px 8px;'>items</td><td style='border:1px solid #aaa;padding:4px 8px;'>item_id</td></tr>
+<tr><td style='border:1px solid #aaa;padding:4px 8px;'>mold_production_log</td><td style='border:1px solid #aaa;padding:4px 8px;'>mold_id</td><td style='border:1px solid #aaa;padding:4px 8px;'>mold_assets</td><td style='border:1px solid #aaa;padding:4px 8px;'>mold_id</td></tr>
+<tr><td style='border:1px solid #aaa;padding:4px 8px;'>partners</td><td style='border:1px solid #aaa;padding:4px 8px;'>tenant_id</td><td style='border:1px solid #aaa;padding:4px 8px;'>tenants</td><td style='border:1px solid #aaa;padding:4px 8px;'>tenant_id</td></tr>
+<tr><td style='border:1px solid #aaa;padding:4px 8px;'>purchase_orders</td><td style='border:1px solid #aaa;padding:4px 8px;'>partner_id</td><td style='border:1px solid #aaa;padding:4px 8px;'>partners</td><td style='border:1px solid #aaa;padding:4px 8px;'>partner_id</td></tr>
+<tr><td style='border:1px solid #aaa;padding:4px 8px;'>purchase_orders</td><td style='border:1px solid #aaa;padding:4px 8px;'>tenant_id</td><td style='border:1px solid #aaa;padding:4px 8px;'>tenants</td><td style='border:1px solid #aaa;padding:4px 8px;'>tenant_id</td></tr>
+<tr><td style='border:1px solid #aaa;padding:4px 8px;'>purchase_order_items</td><td style='border:1px solid #aaa;padding:4px 8px;'>po_id</td><td style='border:1px solid #aaa;padding:4px 8px;'>purchase_orders</td><td style='border:1px solid #aaa;padding:4px 8px;'>po_id</td></tr>
+<tr><td style='border:1px solid #aaa;padding:4px 8px;'>purchase_receipts</td><td style='border:1px solid #aaa;padding:4px 8px;'>partner_id</td><td style='border:1px solid #aaa;padding:4px 8px;'>partners</td><td style='border:1px solid #aaa;padding:4px 8px;'>partner_id</td></tr>
+<tr><td style='border:1px solid #aaa;padding:4px 8px;'>purchase_receipts</td><td style='border:1px solid #aaa;padding:4px 8px;'>tenant_id</td><td style='border:1px solid #aaa;padding:4px 8px;'>tenants</td><td style='border:1px solid #aaa;padding:4px 8px;'>tenant_id</td></tr>
+<tr><td style='border:1px solid #aaa;padding:4px 8px;'>purchase_receipt_items</td><td style='border:1px solid #aaa;padding:4px 8px;'>receipt_id</td><td style='border:1px solid #aaa;padding:4px 8px;'>purchase_receipts</td><td style='border:1px solid #aaa;padding:4px 8px;'>receipt_id</td></tr>
+<tr><td style='border:1px solid #aaa;padding:4px 8px;'>reseller_accounts</td><td style='border:1px solid #aaa;padding:4px 8px;'>reseller_id</td><td style='border:1px solid #aaa;padding:4px 8px;'>resellers</td><td style='border:1px solid #aaa;padding:4px 8px;'>reseller_id</td></tr>
+<tr><td style='border:1px solid #aaa;padding:4px 8px;'>reseller_commissions</td><td style='border:1px solid #aaa;padding:4px 8px;'>reseller_id</td><td style='border:1px solid #aaa;padding:4px 8px;'>resellers</td><td style='border:1px solid #aaa;padding:4px 8px;'>reseller_id</td></tr>
+<tr><td style='border:1px solid #aaa;padding:4px 8px;'>sales_deliveries</td><td style='border:1px solid #aaa;padding:4px 8px;'>partner_id</td><td style='border:1px solid #aaa;padding:4px 8px;'>partners</td><td style='border:1px solid #aaa;padding:4px 8px;'>partner_id</td></tr>
+<tr><td style='border:1px solid #aaa;padding:4px 8px;'>sales_deliveries</td><td style='border:1px solid #aaa;padding:4px 8px;'>tenant_id</td><td style='border:1px solid #aaa;padding:4px 8px;'>tenants</td><td style='border:1px solid #aaa;padding:4px 8px;'>tenant_id</td></tr>
+<tr><td style='border:1px solid #aaa;padding:4px 8px;'>sales_delivery_items</td><td style='border:1px solid #aaa;padding:4px 8px;'>delivery_id</td><td style='border:1px solid #aaa;padding:4px 8px;'>sales_deliveries</td><td style='border:1px solid #aaa;padding:4px 8px;'>delivery_id</td></tr>
+<tr><td style='border:1px solid #aaa;padding:4px 8px;'>sales_orders</td><td style='border:1px solid #aaa;padding:4px 8px;'>partner_id</td><td style='border:1px solid #aaa;padding:4px 8px;'>partners</td><td style='border:1px solid #aaa;padding:4px 8px;'>partner_id</td></tr>
+<tr><td style='border:1px solid #aaa;padding:4px 8px;'>sales_orders</td><td style='border:1px solid #aaa;padding:4px 8px;'>tenant_id</td><td style='border:1px solid #aaa;padding:4px 8px;'>tenants</td><td style='border:1px solid #aaa;padding:4px 8px;'>tenant_id</td></tr>
+<tr><td style='border:1px solid #aaa;padding:4px 8px;'>sales_order_items</td><td style='border:1px solid #aaa;padding:4px 8px;'>order_id</td><td style='border:1px solid #aaa;padding:4px 8px;'>sales_orders</td><td style='border:1px solid #aaa;padding:4px 8px;'>order_id</td></tr>
+<tr><td style='border:1px solid #aaa;padding:4px 8px;'>sales_returns</td><td style='border:1px solid #aaa;padding:4px 8px;'>partner_id</td><td style='border:1px solid #aaa;padding:4px 8px;'>partners</td><td style='border:1px solid #aaa;padding:4px 8px;'>partner_id</td></tr>
+<tr><td style='border:1px solid #aaa;padding:4px 8px;'>sales_returns</td><td style='border:1px solid #aaa;padding:4px 8px;'>delivery_id</td><td style='border:1px solid #aaa;padding:4px 8px;'>sales_deliveries</td><td style='border:1px solid #aaa;padding:4px 8px;'>delivery_id</td></tr>
+<tr><td style='border:1px solid #aaa;padding:4px 8px;'>sales_return_items</td><td style='border:1px solid #aaa;padding:4px 8px;'>warehouse_id</td><td style='border:1px solid #aaa;padding:4px 8px;'>warehouses</td><td style='border:1px solid #aaa;padding:4px 8px;'>warehouse_id</td></tr>
+<tr><td style='border:1px solid #aaa;padding:4px 8px;'>sales_return_items</td><td style='border:1px solid #aaa;padding:4px 8px;'>return_id</td><td style='border:1px solid #aaa;padding:4px 8px;'>sales_returns</td><td style='border:1px solid #aaa;padding:4px 8px;'>return_id</td></tr>
+<tr><td style='border:1px solid #aaa;padding:4px 8px;'>sales_return_items</td><td style='border:1px solid #aaa;padding:4px 8px;'>item_id</td><td style='border:1px solid #aaa;padding:4px 8px;'>items</td><td style='border:1px solid #aaa;padding:4px 8px;'>item_id</td></tr>
+<tr><td style='border:1px solid #aaa;padding:4px 8px;'>sales_return_items</td><td style='border:1px solid #aaa;padding:4px 8px;'>delivery_item_id</td><td style='border:1px solid #aaa;padding:4px 8px;'>sales_delivery_items</td><td style='border:1px solid #aaa;padding:4px 8px;'>delivery_item_id</td></tr>
+<tr><td style='border:1px solid #aaa;padding:4px 8px;'>tax_invoices</td><td style='border:1px solid #aaa;padding:4px 8px;'>tenant_id</td><td style='border:1px solid #aaa;padding:4px 8px;'>tenants</td><td style='border:1px solid #aaa;padding:4px 8px;'>tenant_id</td></tr>
+<tr><td style='border:1px solid #aaa;padding:4px 8px;'>tax_invoices</td><td style='border:1px solid #aaa;padding:4px 8px;'>delivery_id</td><td style='border:1px solid #aaa;padding:4px 8px;'>sales_deliveries</td><td style='border:1px solid #aaa;padding:4px 8px;'>delivery_id</td></tr>
+<tr><td style='border:1px solid #aaa;padding:4px 8px;'>tax_invoice_items</td><td style='border:1px solid #aaa;padding:4px 8px;'>invoice_id</td><td style='border:1px solid #aaa;padding:4px 8px;'>tax_invoices</td><td style='border:1px solid #aaa;padding:4px 8px;'>invoice_id</td></tr>
+<tr><td style='border:1px solid #aaa;padding:4px 8px;'>tenants</td><td style='border:1px solid #aaa;padding:4px 8px;'>reseller_id</td><td style='border:1px solid #aaa;padding:4px 8px;'>resellers</td><td style='border:1px solid #aaa;padding:4px 8px;'>reseller_id</td></tr>
+<tr><td style='border:1px solid #aaa;padding:4px 8px;'>tenant_devices</td><td style='border:1px solid #aaa;padding:4px 8px;'>user_id</td><td style='border:1px solid #aaa;padding:4px 8px;'>users</td><td style='border:1px solid #aaa;padding:4px 8px;'>user_id</td></tr>
+<tr><td style='border:1px solid #aaa;padding:4px 8px;'>tenant_devices</td><td style='border:1px solid #aaa;padding:4px 8px;'>tenant_id</td><td style='border:1px solid #aaa;padding:4px 8px;'>tenants</td><td style='border:1px solid #aaa;padding:4px 8px;'>tenant_id</td></tr>
+<tr><td style='border:1px solid #aaa;padding:4px 8px;'>users</td><td style='border:1px solid #aaa;padding:4px 8px;'>tenant_id</td><td style='border:1px solid #aaa;padding:4px 8px;'>tenants</td><td style='border:1px solid #aaa;padding:4px 8px;'>tenant_id</td></tr>
+<tr><td style='border:1px solid #aaa;padding:4px 8px;'>warehouses</td><td style='border:1px solid #aaa;padding:4px 8px;'>tenant_id</td><td style='border:1px solid #aaa;padding:4px 8px;'>tenants</td><td style='border:1px solid #aaa;padding:4px 8px;'>tenant_id</td></tr>
+<tr><td style='border:1px solid #aaa;padding:4px 8px;'>work_in_process</td><td style='border:1px solid #aaa;padding:4px 8px;'>item_id</td><td style='border:1px solid #aaa;padding:4px 8px;'>items</td><td style='border:1px solid #aaa;padding:4px 8px;'>item_id</td></tr></tbody></table>
+<hr style="border:none;border-top:1px solid #ccc;"></p><p><h2 style="border-bottom:1px solid #999;padding-bottom:3px;color:#1976D2;">4. 절대 원칙 정합 (ERD 관점)</h2></p><p><ul><li><strong>헌법 #2 (멀티테넌트)</strong>: 모든 업무 테이블 <code style='background:#eee;font-family:Consolas;font-size:9pt;padding:1px 4px;'>tenant_id</code> 컬럼 + JWT 클레임 검증</li>
+<li><strong>헌법 #3 (INSERT ONLY 원장)</strong>: <code style='background:#eee;font-family:Consolas;font-size:9pt;padding:1px 4px;'>stock_ledger</code>, <code style='background:#eee;font-family:Consolas;font-size:9pt;padding:1px 4px;'>journal_lines</code> UPDATE/DELETE 금지</li>
+<li><strong>헌법 #5 (암호화)</strong>: <code style='background:#eee;font-family:Consolas;font-size:9pt;padding:1px 4px;'>tenant_certificates.private_key_enc</code>, <code style='background:#eee;font-family:Consolas;font-size:9pt;padding:1px 4px;'>billing_payment_methods.card_number_enc</code>, <code style='background:#eee;font-family:Consolas;font-size:9pt;padding:1px 4px;'>email_settings.smtp_password_enc</code> 등 AES-256</li>
+<li><strong>헌법 #6 (confirmed 시점 원장)</strong>: status='confirmed' 트리거로만 원장 INSERT</li>
+<li><strong>헌법 #17 (InnoDB)</strong>: 137개 전체 ENGINE=InnoDB 명시</li>
+<li><strong>헌법 #18·#22 (본사 데이터 최소주의)</strong>:</li>
+  </ul>- 본사 보유: <code style='background:#eee;font-family:Consolas;font-size:9pt;padding:1px 4px;'>tenants</code>, <code style='background:#eee;font-family:Consolas;font-size:9pt;padding:1px 4px;'>licenses</code>, <code style='background:#eee;font-family:Consolas;font-size:9pt;padding:1px 4px;'>billing_*</code>, <code style='background:#eee;font-family:Consolas;font-size:9pt;padding:1px 4px;'>platforms</code>, <code style='background:#eee;font-family:Consolas;font-size:9pt;padding:1px 4px;'>platform_admins</code>, <code style='background:#eee;font-family:Consolas;font-size:9pt;padding:1px 4px;'>resellers</code>, <code style='background:#eee;font-family:Consolas;font-size:9pt;padding:1px 4px;'>reseller_*</code>, <code style='background:#eee;font-family:Consolas;font-size:9pt;padding:1px 4px;'>commission_*</code>, <code style='background:#eee;font-family:Consolas;font-size:9pt;padding:1px 4px;'>watchdog_pings</code>, <code style='background:#eee;font-family:Consolas;font-size:9pt;padding:1px 4px;'>beta_signups</code>
+  - 본사 미보유: 매입·매출·원장·거래처·직원·재고·세금계산서·결재 — 전부 고객 PC</p><p></p></body>
+</html>

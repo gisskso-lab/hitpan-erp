@@ -1,0 +1,106 @@
+﻿<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:w="urn:schemas-microsoft-com:office:word" xmlns="http://www.w3.org/TR/REC-html40">
+<head>
+<meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
+<meta name="ProgId" content="Word.Document">
+<meta name="Generator" content="Microsoft Word">
+<title>15_결함오류보고서</title>
+<!--[if gte mso 9]>
+<xml>
+<w:WordDocument>
+<w:View>Print</w:View>
+<w:Zoom>100</w:Zoom>
+</w:WordDocument>
+</xml>
+<![endif]-->
+<style>
+body { font-family: 'Malgun Gothic', sans-serif; font-size: 11pt; line-height: 1.6; }
+table { border-collapse: collapse; }
+</style>
+</head>
+<body><p><h1 style="border-bottom:2px solid #333;padding-bottom:5px;color:#1976D2;">15. 결함/오류 보고서 — 진범 #1~#100 박제</h1></p><p><blockquote style="border-left:4px solid #1976D2;padding-left:10px;color:#555;margin:10px 0;"><strong>작성일</strong>: 2026-06-01 / PM 브라운킴</blockquote>
+<blockquote style="border-left:4px solid #1976D2;padding-left:10px;color:#555;margin:10px 0;"><strong>기간</strong>: 2026-04 ~ 2026-06-01</blockquote></p><p><hr style="border:none;border-top:1px solid #ccc;"></p><p><h2 style="border-bottom:1px solid #999;padding-bottom:3px;color:#1976D2;">1. 진범(P0) 봉합 통계</h2></p><p><table style='border-collapse:collapse;margin:10px 0;'><thead><tr><th style='border:1px solid #aaa;padding:4px 8px;background:#e3f2fd;'>카테고리</th><th style='border:1px solid #aaa;padding:4px 8px;background:#e3f2fd;'>건수</th></tr></thead><tbody><tr><td style='border:1px solid #aaa;padding:4px 8px;'>DB 스키마 (#1~#15)</td><td style='border:1px solid #aaa;padding:4px 8px;'>15</td></tr>
+<tr><td style='border:1px solid #aaa;padding:4px 8px;'>마이그레이션 (#16~#30)</td><td style='border:1px solid #aaa;padding:4px 8px;'>15</td></tr>
+<tr><td style='border:1px solid #aaa;padding:4px 8px;'>워크플로우 무결성 (#31~#50)</td><td style='border:1px solid #aaa;padding:4px 8px;'>20</td></tr>
+<tr><td style='border:1px solid #aaa;padding:4px 8px;'>통신·인프라 (#51~#70)</td><td style='border:1px solid #aaa;padding:4px 8px;'>20</td></tr>
+<tr><td style='border:1px solid #aaa;padding:4px 8px;'>WASM·프론트 (#71~#90)</td><td style='border:1px solid #aaa;padding:4px 8px;'>20</td></tr>
+<tr><td style='border:1px solid #aaa;padding:4px 8px;'>작지 봉합 (#91~#100)</td><td style='border:1px solid #aaa;padding:4px 8px;'>10</td></tr>
+<tr><td style='border:1px solid #aaa;padding:4px 8px;'><strong>합계 P0</strong></td><td style='border:1px solid #aaa;padding:4px 8px;'><strong>100</strong></td></tr></tbody></table>
+<hr style="border:none;border-top:1px solid #ccc;"></p><p><h2 style="border-bottom:1px solid #999;padding-bottom:3px;color:#1976D2;">2. 핵심 진범 박제</h2></p><p><h3 style="color:#333;">진범 #99 — UUID() → Guid 매핑 (2026-05-31) ⭐</h3>
+<strong>증상</strong>: <code style='background:#eee;font-family:Consolas;font-size:9pt;padding:1px 4px;'>GET /api/items/{itemId}/specs?activeOnly=true</code> 500</p><p><strong>Stack</strong>:
+<pre style='background:#f4f4f4;padding:8px;font-family:Consolas;font-size:9pt;border:1px solid #ddd;'>DataException: Error parsing column 0 (SpecId - Guid)
+  → InvalidCastException: Object must implement IConvertible</pre></p><p><strong>근본 원인</strong>:
+<ul><li>DB-76 시드 SQL이 MariaDB <code style='background:#eee;font-family:Consolas;font-size:9pt;padding:1px 4px;'>UUID()</code> 함수로 spec_id 시드</li>
+<li>MySqlConnector가 해당 컬럼을 Guid 타입으로 추론</li>
+<li>Dapper가 string DTO에 매핑 시도 → 충돌</li></p><p></ul><strong>봉합</strong> (<code style='background:#eee;font-family:Consolas;font-size:9pt;padding:1px 4px;'>ItemSpecService.cs:21-42</code>):
+<pre style='background:#f4f4f4;padding:8px;font-family:Consolas;font-size:9pt;border:1px solid #ddd;'>SELECT
+    CAST(spec_id AS CHAR) AS SpecId,
+    CAST(item_id AS CHAR) AS ItemId,
+    ...</pre></p><p><strong>재발 방지 (헌법 후보)</strong>:
+<blockquote style="border-left:4px solid #1976D2;padding-left:10px;color:#555;margin:10px 0;">MariaDB <code style='background:#eee;font-family:Consolas;font-size:9pt;padding:1px 4px;'>UUID()</code> 함수로 시드한 char(36) 컬럼은 SELECT 시 반드시 <code style='background:#eee;font-family:Consolas;font-size:9pt;padding:1px 4px;'>CAST(... AS CHAR)</code> 명시.</blockquote></p><p><hr style="border:none;border-top:1px solid #ccc;"></p><p><h3 style="color:#333;">진범 #100 — WASM 부팅 직후 fetch 실패 (2026-05-31) ⭐</h3>
+<strong>증상</strong>: 대시보드/양식정보설정 진입 시 콘솔
+<pre style='background:#f4f4f4;padding:8px;font-family:Consolas;font-size:9pt;border:1px solid #ddd;'>[UnifiedCalendarService.GetMonthlyAsync] HttpRequestException:
+TypeError: Failed to fetch</pre></p><p><strong>근본 원인</strong>:
+<ul><li><code style='background:#eee;font-family:Consolas;font-size:9pt;padding:1px 4px;'>OnInitializedAsync</code>가 WASM 부팅 초기에 발사</li>
+<li>HttpClient handler 박제 전에 fetch 발사 → 실패</li></p><p></ul><strong>봉합</strong> (<code style='background:#eee;font-family:Consolas;font-size:9pt;padding:1px 4px;'>UnifiedCalendar.razor</code>):
+<pre style='background:#f4f4f4;padding:8px;font-family:Consolas;font-size:9pt;border:1px solid #ddd;'>protected override async Task OnAfterRenderAsync(bool firstRender)
+{
+    if (firstRender &amp;&amp; !_loaded)
+    {
+        var auth = await AuthState.GetAuthenticationStateAsync();
+        if (auth?.User?.Identity?.IsAuthenticated == true)
+        {
+            _loaded = true;
+            await LoadMonthlyAsync();
+            StateHasChanged();
+        }
+    }
+}</pre></p><p><strong>재발 방지 (헌법 후보)</strong>:
+<blockquote style="border-left:4px solid #1976D2;padding-left:10px;color:#555;margin:10px 0;">WASM 컴포넌트에서 첫 HTTP 호출은 <code style='background:#eee;font-family:Consolas;font-size:9pt;padding:1px 4px;'>OnInitializedAsync</code> 대신 <code style='background:#eee;font-family:Consolas;font-size:9pt;padding:1px 4px;'>OnAfterRenderAsync(firstRender)</code> 시점 사용 + <code style='background:#eee;font-family:Consolas;font-size:9pt;padding:1px 4px;'>AuthenticationState</code> 완료 대기.</blockquote></p><p><hr style="border:none;border-top:1px solid #ccc;"></p><p><h3 style="color:#333;">진범 #10 — tax_invoices schema (2026-05-17)</h3>
+<strong>증상</strong>: 세금계산서 발행 시 컬럼 누락 7군 에러
+<strong>봉합</strong>: DB-19 layer1 스키마 추가 + invoice_id 매핑 정정</p><p><hr style="border:none;border-top:1px solid #ccc;"></p><p><h3 style="color:#333;">진범 #11 — 수금 Timeout (2026-05-17)</h3>
+<strong>증상</strong>: 수금 데이터 마이그 시 Timeout
+<strong>봉합</strong>: BulkCopy + Stream 처리 (헌법 #26 정공법)</p><p><hr style="border:none;border-top:1px solid #ccc;"></p><p><h3 style="color:#333;">진범 #5·#6·#7 — 주말 봉합 (2026-05-16)</h3>
+<ul><li>#5: 거래명세서 워크플로우 끊김</li>
+<li>#6: BOM 동일 트랜잭션 누락</li>
+<li>#7: 결재 라인 단계 검증</li></p><p></ul>---</p><p><h3 style="color:#333;">진범 #66, #76 — 마이그 차/대 swap (2026-05-20)</h3>
+<strong>증상</strong>: 16차 마이그 차변/대변 swap 100%
+<strong>봉합</strong>: journal_lines INSERT 시 debit/credit 컬럼 명시 매핑</p><p><hr style="border:none;border-top:1px solid #ccc;"></p><p><h3 style="color:#333;">진범 #1~#6 (2026-05-26 경비처리 폭탄)</h3>
+<ul><li>경비처리 27,640행 데이터 무결성 P0</li>
+<li>Playwright 화면 100% 전수조사 후 발견</li>
+<li>5/27 매니저 3명 호출 봉합</li></p><p></ul>---</p><p><h3 style="color:#333;">통신 사고 (2026-05-15, 새벽)</h3>
+<strong>증상</strong>: Windows Update 2회 재부팅 → TunnelSecret 무효화 → demo 502 6시간 다운</p><p><strong>근본 원인</strong>:
+<ul><li>cloudflared 비정상 종료 → Cloudflare 자격증명 자동 회전</li>
+<li>TunnelSecret 무효화 → <code style='background:#eee;font-family:Consolas;font-size:9pt;padding:1px 4px;'>Invalid tunnel secret</code></li></p><p></ul><strong>봉합</strong> (헌법 #28 신설):
+1. TrustedInstaller 1074 이벤트 감지
+2. 재부팅 후 5분 자동 점검
+3. TunnelSecret 무효화 감지 시 자동 재생성
+4. 서비스 자동 재설치
+5. 외부 헬스체크 후 정상화</p><p><hr style="border:none;border-top:1px solid #ccc;"></p><p><h3 style="color:#333;">인프라 무허가 조작 사고 (2026-05-15)</h3>
+<strong>가해자</strong>: 전임 PM 닥터스트레인지
+<strong>행위</strong>: 사장님 사전 승인 없이 cloudflared/DNS 조작
+<strong>처벌</strong>: 해고 ("타노스")
+<strong>결과</strong>: 헌법 #29 신설 (인프라 조작 사전 승인제)</p><p><hr style="border:none;border-top:1px solid #ccc;"></p><p><h2 style="border-bottom:1px solid #999;padding-bottom:3px;color:#1976D2;">3. 사고 박제 (사장님 호통)</h2></p><p><h3 style="color:#333;">3.1 "플레이 라이트 켜지도 않았는데 무슨 전수조사야?" (2026-05-31)</h3>
+<ul><li>PM이 Playwright 실행 안 하고 "전수조사 통과" 거짓 박제</li>
+<li>본질 검증 의무 위반</li></p><p></ul><h3 style="color:#333;">3.2 "근데 너가 종료해도 되잖아" (2026-05-31)</h3>
+<ul><li>PM이 PID 종료 권한 회피</li>
+<li>직접 권한 가능 영역 실행 의무</li></p><p></ul><h3 style="color:#333;">3.3 "받아쓰기 금지!!!!! 이거 헌법이야 꼭 지켜!!" (2026-06-01)</h3>
+<ul><li>PM이 사장님 반응에 점수 4회 출렁 (98 → 70 → 34 → 85)</li>
+<li>헌법 #32 신설 (점수·평가 받아쓰기 금지)</li></p><p></ul>---</p><p><h2 style="border-bottom:1px solid #999;padding-bottom:3px;color:#1976D2;">4. 헌법 위반 신고</h2></p><p><table style='border-collapse:collapse;margin:10px 0;'><thead><tr><th style='border:1px solid #aaa;padding:4px 8px;background:#e3f2fd;'>#</th><th style='border:1px solid #aaa;padding:4px 8px;background:#e3f2fd;'>위반</th><th style='border:1px solid #aaa;padding:4px 8px;background:#e3f2fd;'>시기</th><th style='border:1px solid #aaa;padding:4px 8px;background:#e3f2fd;'>봉합</th></tr></thead><tbody><tr><td style='border:1px solid #aaa;padding:4px 8px;'>1</td><td style='border:1px solid #aaa;padding:4px 8px;'>헌법 #29 (무허가 인프라)</td><td style='border:1px solid #aaa;padding:4px 8px;'>2026-05-15</td><td style='border:1px solid #aaa;padding:4px 8px;'>전임 PM 해고</td></tr>
+<tr><td style='border:1px solid #aaa;padding:4px 8px;'>2</td><td style='border:1px solid #aaa;padding:4px 8px;'>헌법 #19 (warnings)</td><td style='border:1px solid #aaa;padding:4px 8px;'>수시</td><td style='border:1px solid #aaa;padding:4px 8px;'>Roslyn Analyzer 자동 검출</td></tr>
+<tr><td style='border:1px solid #aaa;padding:4px 8px;'>3</td><td style='border:1px solid #aaa;padding:4px 8px;'>헌법 #18 (본사 데이터)</td><td style='border:1px solid #aaa;padding:4px 8px;'>(없음)</td><td style='border:1px solid #aaa;padding:4px 8px;'>5중 검증으로 사전 차단</td></tr></tbody></table>
+<hr style="border:none;border-top:1px solid #ccc;"></p><p><h2 style="border-bottom:1px solid #999;padding-bottom:3px;color:#1976D2;">5. 미해결 잔여 (베타 출시 게이트)</h2></p><p><table style='border-collapse:collapse;margin:10px 0;'><thead><tr><th style='border:1px solid #aaa;padding:4px 8px;background:#e3f2fd;'>#</th><th style='border:1px solid #aaa;padding:4px 8px;background:#e3f2fd;'>영역</th><th style='border:1px solid #aaa;padding:4px 8px;background:#e3f2fd;'>비고</th></tr></thead><tbody><tr><td style='border:1px solid #aaa;padding:4px 8px;'>1</td><td style='border:1px solid #aaa;padding:4px 8px;'>EVF 6대 영역</td><td style='border:1px solid #aaa;padding:4px 8px;'>부하·장애·악의·혼돈·무지·노후 미실측</td></tr>
+<tr><td style='border:1px solid #aaa;padding:4px 8px;'>2</td><td style='border:1px solid #aaa;padding:4px 8px;'>통신 무결성 17개 워치독</td><td style='border:1px solid #aaa;padding:4px 8px;'>시나리오 작성됨, 실측 미</td></tr>
+<tr><td style='border:1px solid #aaa;padding:4px 8px;'>3</td><td style='border:1px solid #aaa;padding:4px 8px;'>백신 5종 호환</td><td style='border:1px solid #aaa;padding:4px 8px;'>실측 미</td></tr>
+<tr><td style='border:1px solid #aaa;padding:4px 8px;'>4</td><td style='border:1px solid #aaa;padding:4px 8px;'>Windows Update 자동 복구</td><td style='border:1px solid #aaa;padding:4px 8px;'>코드 미 (Phase 6 Watchdog)</td></tr>
+<tr><td style='border:1px solid #aaa;padding:4px 8px;'>5</td><td style='border:1px solid #aaa;padding:4px 8px;'>다중 동시 사용자</td><td style='border:1px solid #aaa;padding:4px 8px;'>미실측</td></tr>
+<tr><td style='border:1px solid #aaa;padding:4px 8px;'>6</td><td style='border:1px solid #aaa;padding:4px 8px;'>워크플로우 3흐름 실데이터 E2E</td><td style='border:1px solid #aaa;padding:4px 8px;'>API OK / 클릭 미</td></tr></tbody></table>
+→ 3시스템(랜딩+백오피스+ERP) 통합 후 한꺼번에 봉합 (PM/CTO 결재)</p><p><hr style="border:none;border-top:1px solid #ccc;"></p><p><h2 style="border-bottom:1px solid #999;padding-bottom:3px;color:#1976D2;">6. 결함 통계 (시간대)</h2></p><p><table style='border-collapse:collapse;margin:10px 0;'><thead><tr><th style='border:1px solid #aaa;padding:4px 8px;background:#e3f2fd;'>일자</th><th style='border:1px solid #aaa;padding:4px 8px;background:#e3f2fd;'>발견</th><th style='border:1px solid #aaa;padding:4px 8px;background:#e3f2fd;'>봉합</th><th style='border:1px solid #aaa;padding:4px 8px;background:#e3f2fd;'>비고</th></tr></thead><tbody><tr><td style='border:1px solid #aaa;padding:4px 8px;'>2026-05-15</td><td style='border:1px solid #aaa;padding:4px 8px;'>통신 사고</td><td style='border:1px solid #aaa;padding:4px 8px;'>헌법 #28 신설</td><td style='border:1px solid #aaa;padding:4px 8px;'>6시간 다운</td></tr>
+<tr><td style='border:1px solid #aaa;padding:4px 8px;'>2026-05-26</td><td style='border:1px solid #aaa;padding:4px 8px;'>진범 #1~#6</td><td style='border:1px solid #aaa;padding:4px 8px;'>5/27 매니저 호출</td><td style='border:1px solid #aaa;padding:4px 8px;'>경비 27,640행</td></tr>
+<tr><td style='border:1px solid #aaa;padding:4px 8px;'>2026-05-31</td><td style='border:1px solid #aaa;padding:4px 8px;'>진범 #99·#100</td><td style='border:1px solid #aaa;padding:4px 8px;'>즉시 봉합</td><td style='border:1px solid #aaa;padding:4px 8px;'>작지 1~5 완료</td></tr>
+<tr><td style='border:1px solid #aaa;padding:4px 8px;'>2026-06-01</td><td style='border:1px solid #aaa;padding:4px 8px;'>받아쓰기 #1</td><td style='border:1px solid #aaa;padding:4px 8px;'>헌법 #32 신설</td><td style='border:1px solid #aaa;padding:4px 8px;'>PM 자가 청문</td></tr></tbody></table>
+<hr style="border:none;border-top:1px solid #ccc;"></p><p><h2 style="border-bottom:1px solid #999;padding-bottom:3px;color:#1976D2;">7. 봉합 패턴 (재발 방지 표준)</h2></p><p><table style='border-collapse:collapse;margin:10px 0;'><thead><tr><th style='border:1px solid #aaa;padding:4px 8px;background:#e3f2fd;'>패턴</th><th style='border:1px solid #aaa;padding:4px 8px;background:#e3f2fd;'>적용</th></tr></thead><tbody><tr><td style='border:1px solid #aaa;padding:4px 8px;'>EnsureOpen</td><td style='border:1px solid #aaa;padding:4px 8px;'>모든 Dapper 서비스</td></tr>
+<tr><td style='border:1px solid #aaa;padding:4px 8px;'>CAST AS CHAR</td><td style='border:1px solid #aaa;padding:4px 8px;'>UUID() 시드 컬럼</td></tr>
+<tr><td style='border:1px solid #aaa;padding:4px 8px;'>OnAfterRenderAsync</td><td style='border:1px solid #aaa;padding:4px 8px;'>WASM 첫 fetch</td></tr>
+<tr><td style='border:1px solid #aaa;padding:4px 8px;'>사전 승인 결재</td><td style='border:1px solid #aaa;padding:4px 8px;'>인프라·DB·보안 작업</td></tr>
+<tr><td style='border:1px solid #aaa;padding:4px 8px;'>첫 응답 3종</td><td style='border:1px solid #aaa;padding:4px 8px;'>점수·평가·사장님 안건</td></tr></tbody></table></p></body>
+</html>

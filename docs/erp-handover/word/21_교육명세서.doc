@@ -1,0 +1,112 @@
+﻿<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:w="urn:schemas-microsoft-com:office:word" xmlns="http://www.w3.org/TR/REC-html40">
+<head>
+<meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
+<meta name="ProgId" content="Word.Document">
+<meta name="Generator" content="Microsoft Word">
+<title>21_교육명세서</title>
+<!--[if gte mso 9]>
+<xml>
+<w:WordDocument>
+<w:View>Print</w:View>
+<w:Zoom>100</w:Zoom>
+</w:WordDocument>
+</xml>
+<![endif]-->
+<style>
+body { font-family: 'Malgun Gothic', sans-serif; font-size: 11pt; line-height: 1.6; }
+table { border-collapse: collapse; }
+</style>
+</head>
+<body><p><h1 style="border-bottom:2px solid #333;padding-bottom:5px;color:#1976D2;">21. 교육(인수) 명세서 — 어벤져스 팀별 학습 커리큘럼</h1></p><p><blockquote style="border-left:4px solid #1976D2;padding-left:10px;color:#555;margin:10px 0;"><strong>작성일</strong>: 2026-06-01 / PM 브라운킴 + AI수석</blockquote></p><p><hr style="border:none;border-top:1px solid #ccc;"></p><p><h2 style="border-bottom:1px solid #999;padding-bottom:3px;color:#1976D2;">1. 학습 목표</h2></p><p>각 어벤져스 매니저가 ERP 전체를 이해하고, 백오피스·랜딩페이지 설계 시 ERP와의 정합성을 자율적으로 판단할 수 있도록.</p><p><hr style="border:none;border-top:1px solid #ccc;"></p><p><h2 style="border-bottom:1px solid #999;padding-bottom:3px;color:#1976D2;">2. 공통 필수 (모든 매니저)</h2></p><p><h3 style="color:#333;">2.1 헌법 32개 정독 (2시간)</h3>
+<ul><li><code style='background:#eee;font-family:Consolas;font-size:9pt;padding:1px 4px;'>CLAUDE.md</code> 절대원칙 25개 + 추가 7개</li>
+<li>23번 매뉴얼 정독 + 자가 질문 작성</li></p><p></ul><h3 style="color:#333;">2.2 6단계 워크플로우 이해 (1시간)</h3>
+<ul><li>02_기능차트 + 03_프로세스정의서</li></p><p></ul><h3 style="color:#333;">2.3 워크플로우 3흐름 실측 (3시간)</h3>
+<ul><li>매입·BOM·판매 직접 클릭</li>
+<li>헌법 #20 정합 자가 확인</li></p><p></ul><h3 style="color:#333;">2.4 진범 #99·#100 박제 패턴 학습 (1시간)</h3>
+<ul><li>15_결함오류보고서</li>
+<li>UUID 회피 + OnAfterRenderAsync 패턴</li></p><p></ul>---</p><p><h2 style="border-bottom:1px solid #999;padding-bottom:3px;color:#1976D2;">3. 매니저별 특화 학습</h2></p><p><h3 style="color:#333;">3.1 AI수석 (구조·프롬프트·검증)</h3>
+<table style='border-collapse:collapse;margin:10px 0;'><thead><tr><th style='border:1px solid #aaa;padding:4px 8px;background:#e3f2fd;'>학습</th><th style='border:1px solid #aaa;padding:4px 8px;background:#e3f2fd;'>시간</th><th style='border:1px solid #aaa;padding:4px 8px;background:#e3f2fd;'>자료</th></tr></thead><tbody><tr><td style='border:1px solid #aaa;padding:4px 8px;'>헌법 32개 + AI 협업 5중 검증</td><td style='border:1px solid #aaa;padding:4px 8px;'>3h</td><td style='border:1px solid #aaa;padding:4px 8px;'>CLAUDE.md, 10번</td></tr>
+<tr><td style='border:1px solid #aaa;padding:4px 8px;'>프롬프트 설계 패턴</td><td style='border:1px solid #aaa;padding:4px 8px;'>2h</td><td style='border:1px solid #aaa;padding:4px 8px;'>13번</td></tr>
+<tr><td style='border:1px solid #aaa;padding:4px 8px;'>통합 테스트 시나리오</td><td style='border:1px solid #aaa;padding:4px 8px;'>2h</td><td style='border:1px solid #aaa;padding:4px 8px;'>12번</td></tr>
+<tr><td style='border:1px solid #aaa;padding:4px 8px;'>현재 상태 PM/CTO 관점</td><td style='border:1px solid #aaa;padding:4px 8px;'>1h</td><td style='border:1px solid #aaa;padding:4px 8px;'>23번</td></tr>
+<tr><td style='border:1px solid #aaa;padding:4px 8px;'><strong>자가 과제</strong></td><td style='border:1px solid #aaa;padding:4px 8px;'></td><td style='border:1px solid #aaa;padding:4px 8px;'>받아쓰기 방지 첫 응답 3종 작성</td></tr></tbody></table>
+<h3 style="color:#333;">3.2 백엔드 매니저</h3>
+<table style='border-collapse:collapse;margin:10px 0;'><thead><tr><th style='border:1px solid #aaa;padding:4px 8px;background:#e3f2fd;'>학습</th><th style='border:1px solid #aaa;padding:4px 8px;background:#e3f2fd;'>시간</th><th style='border:1px solid #aaa;padding:4px 8px;background:#e3f2fd;'>자료</th></tr></thead><tbody><tr><td style='border:1px solid #aaa;padding:4px 8px;'>Controller 56개 + Service 55개 인벤토리</td><td style='border:1px solid #aaa;padding:4px 8px;'>3h</td><td style='border:1px solid #aaa;padding:4px 8px;'>09번</td></tr>
+<tr><td style='border:1px solid #aaa;padding:4px 8px;'>Dapper EnsureOpen + CAST 패턴</td><td style='border:1px solid #aaa;padding:4px 8px;'>2h</td><td style='border:1px solid #aaa;padding:4px 8px;'>10번, 15번</td></tr>
+<tr><td style='border:1px solid #aaa;padding:4px 8px;'>API endpoint 명세</td><td style='border:1px solid #aaa;padding:4px 8px;'>2h</td><td style='border:1px solid #aaa;padding:4px 8px;'>04번</td></tr>
+<tr><td style='border:1px solid #aaa;padding:4px 8px;'>단위 테스트 시나리오</td><td style='border:1px solid #aaa;padding:4px 8px;'>2h</td><td style='border:1px solid #aaa;padding:4px 8px;'>11번</td></tr>
+<tr><td style='border:1px solid #aaa;padding:4px 8px;'><strong>자가 과제</strong></td><td style='border:1px solid #aaa;padding:4px 8px;'></td><td style='border:1px solid #aaa;padding:4px 8px;'>신규 endpoint 1개 설계 + Roslyn Analyzer 통과</td></tr></tbody></table>
+<h3 style="color:#333;">3.3 DB 매니저</h3>
+<table style='border-collapse:collapse;margin:10px 0;'><thead><tr><th style='border:1px solid #aaa;padding:4px 8px;background:#e3f2fd;'>학습</th><th style='border:1px solid #aaa;padding:4px 8px;background:#e3f2fd;'>시간</th><th style='border:1px solid #aaa;padding:4px 8px;background:#e3f2fd;'>자료</th></tr></thead><tbody><tr><td style='border:1px solid #aaa;padding:4px 8px;'>137개 테이블 컬럼 정독</td><td style='border:1px solid #aaa;padding:4px 8px;'>4h</td><td style='border:1px solid #aaa;padding:4px 8px;'>08번</td></tr>
+<tr><td style='border:1px solid #aaa;padding:4px 8px;'>ERD 영역 10개</td><td style='border:1px solid #aaa;padding:4px 8px;'>2h</td><td style='border:1px solid #aaa;padding:4px 8px;'>07번</td></tr>
+<tr><td style='border:1px solid #aaa;padding:4px 8px;'>INSERT ONLY 원장 패턴</td><td style='border:1px solid #aaa;padding:4px 8px;'>2h</td><td style='border:1px solid #aaa;padding:4px 8px;'>03번 (헌법 #3)</td></tr>
+<tr><td style='border:1px solid #aaa;padding:4px 8px;'>마이그 정공법 5축+α</td><td style='border:1px solid #aaa;padding:4px 8px;'>2h</td><td style='border:1px solid #aaa;padding:4px 8px;'>17번 (헌법 #26)</td></tr>
+<tr><td style='border:1px solid #aaa;padding:4px 8px;'><strong>자가 과제</strong></td><td style='border:1px solid #aaa;padding:4px 8px;'></td><td style='border:1px solid #aaa;padding:4px 8px;'>신규 테이블 1개 DDL 작성 (InnoDB·utf8mb4·tenant_id)</td></tr></tbody></table>
+<h3 style="color:#333;">3.4 보안 매니저 1·2</h3>
+<table style='border-collapse:collapse;margin:10px 0;'><thead><tr><th style='border:1px solid #aaa;padding:4px 8px;background:#e3f2fd;'>학습</th><th style='border:1px solid #aaa;padding:4px 8px;background:#e3f2fd;'>시간</th><th style='border:1px solid #aaa;padding:4px 8px;background:#e3f2fd;'>자료</th></tr></thead><tbody><tr><td style='border:1px solid #aaa;padding:4px 8px;'>헌법 #5·#7·#22·#23·#31 정독</td><td style='border:1px solid #aaa;padding:4px 8px;'>3h</td><td style='border:1px solid #aaa;padding:4px 8px;'>10번</td></tr>
+<tr><td style='border:1px solid #aaa;padding:4px 8px;'>5중 검증 체크리스트</td><td style='border:1px solid #aaa;padding:4px 8px;'>2h</td><td style='border:1px solid #aaa;padding:4px 8px;'>22번</td></tr>
+<tr><td style='border:1px solid #aaa;padding:4px 8px;'>통신 무결성 17개</td><td style='border:1px solid #aaa;padding:4px 8px;'>2h</td><td style='border:1px solid #aaa;padding:4px 8px;'>03번 (헌법 #27)</td></tr>
+<tr><td style='border:1px solid #aaa;padding:4px 8px;'>Windows Update 자동 복구</td><td style='border:1px solid #aaa;padding:4px 8px;'>2h</td><td style='border:1px solid #aaa;padding:4px 8px;'>17번 (헌법 #28)</td></tr>
+<tr><td style='border:1px solid #aaa;padding:4px 8px;'><strong>자가 과제</strong></td><td style='border:1px solid #aaa;padding:4px 8px;'></td><td style='border:1px solid #aaa;padding:4px 8px;'>백신 5종 호환 시나리오 작성</td></tr></tbody></table>
+<h3 style="color:#333;">3.5 프론트 매니저</h3>
+<table style='border-collapse:collapse;margin:10px 0;'><thead><tr><th style='border:1px solid #aaa;padding:4px 8px;background:#e3f2fd;'>학습</th><th style='border:1px solid #aaa;padding:4px 8px;background:#e3f2fd;'>시간</th><th style='border:1px solid #aaa;padding:4px 8px;background:#e3f2fd;'>자료</th></tr></thead><tbody><tr><td style='border:1px solid #aaa;padding:4px 8px;'>Razor 136개 + Component 80개 인벤토리</td><td style='border:1px solid #aaa;padding:4px 8px;'>3h</td><td style='border:1px solid #aaa;padding:4px 8px;'>09번</td></tr>
+<tr><td style='border:1px solid #aaa;padding:4px 8px;'>WASM 첫 fetch 패턴 (진범 #100)</td><td style='border:1px solid #aaa;padding:4px 8px;'>2h</td><td style='border:1px solid #aaa;padding:4px 8px;'>10번, 15번</td></tr>
+<tr><td style='border:1px solid #aaa;padding:4px 8px;'>MudBlazor 9.3 패턴</td><td style='border:1px solid #aaa;padding:4px 8px;'>2h</td><td style='border:1px solid #aaa;padding:4px 8px;'>06번</td></tr>
+<tr><td style='border:1px solid #aaa;padding:4px 8px;'>ItemSpecAutocomplete 동적 로드</td><td style='border:1px solid #aaa;padding:4px 8px;'>1h</td><td style='border:1px solid #aaa;padding:4px 8px;'>06번</td></tr>
+<tr><td style='border:1px solid #aaa;padding:4px 8px;'><strong>자가 과제</strong></td><td style='border:1px solid #aaa;padding:4px 8px;'></td><td style='border:1px solid #aaa;padding:4px 8px;'>신규 그리드 1개 ItemSpecAutocomplete 박제</td></tr></tbody></table>
+<h3 style="color:#333;">3.6 수석 웹디자이너</h3>
+<table style='border-collapse:collapse;margin:10px 0;'><thead><tr><th style='border:1px solid #aaa;padding:4px 8px;background:#e3f2fd;'>학습</th><th style='border:1px solid #aaa;padding:4px 8px;background:#e3f2fd;'>시간</th><th style='border:1px solid #aaa;padding:4px 8px;background:#e3f2fd;'>자료</th></tr></thead><tbody><tr><td style='border:1px solid #aaa;padding:4px 8px;'>UI 설계서 + 한 화면 완결 원칙</td><td style='border:1px solid #aaa;padding:4px 8px;'>3h</td><td style='border:1px solid #aaa;padding:4px 8px;'>06번</td></tr>
+<tr><td style='border:1px solid #aaa;padding:4px 8px;'>더존·이카운트 벤치마크 차별화</td><td style='border:1px solid #aaa;padding:4px 8px;'>2h</td><td style='border:1px solid #aaa;padding:4px 8px;'>06번 §12</td></tr>
+<tr><td style='border:1px solid #aaa;padding:4px 8px;'>사용자 매뉴얼 (3분 원칙)</td><td style='border:1px solid #aaa;padding:4px 8px;'>2h</td><td style='border:1px solid #aaa;padding:4px 8px;'>19번</td></tr>
+<tr><td style='border:1px solid #aaa;padding:4px 8px;'><strong>자가 과제</strong></td><td style='border:1px solid #aaa;padding:4px 8px;'></td><td style='border:1px solid #aaa;padding:4px 8px;'>신규 화면 1개 와이어프레임 (3분 안에 쓸 수 있게)</td></tr></tbody></table>
+<h3 style="color:#333;">3.7 ERP 매니저</h3>
+<table style='border-collapse:collapse;margin:10px 0;'><thead><tr><th style='border:1px solid #aaa;padding:4px 8px;background:#e3f2fd;'>학습</th><th style='border:1px solid #aaa;padding:4px 8px;background:#e3f2fd;'>시간</th><th style='border:1px solid #aaa;padding:4px 8px;background:#e3f2fd;'>자료</th></tr></thead><tbody><tr><td style='border:1px solid #aaa;padding:4px 8px;'>6단계 워크플로우 정독</td><td style='border:1px solid #aaa;padding:4px 8px;'>2h</td><td style='border:1px solid #aaa;padding:4px 8px;'>02번, 03번</td></tr>
+<tr><td style='border:1px solid #aaa;padding:4px 8px;'>워크플로우 3흐름 + 끊김 절대 금지</td><td style='border:1px solid #aaa;padding:4px 8px;'>3h</td><td style='border:1px solid #aaa;padding:4px 8px;'>03번 (헌법 #20)</td></tr>
+<tr><td style='border:1px solid #aaa;padding:4px 8px;'>사용자 매뉴얼 검토</td><td style='border:1px solid #aaa;padding:4px 8px;'>2h</td><td style='border:1px solid #aaa;padding:4px 8px;'>19번</td></tr>
+<tr><td style='border:1px solid #aaa;padding:4px 8px;'>더존·이카운트 30년 경험 박제 정리</td><td style='border:1px solid #aaa;padding:4px 8px;'>3h</td><td style='border:1px solid #aaa;padding:4px 8px;'>메모리</td></tr>
+<tr><td style='border:1px solid #aaa;padding:4px 8px;'><strong>자가 과제</strong></td><td style='border:1px solid #aaa;padding:4px 8px;'></td><td style='border:1px solid #aaa;padding:4px 8px;'>"이 화면, 3분 안에 쓸 수 있냐?" 87개 평가</td></tr></tbody></table>
+<h3 style="color:#333;">3.8 기술영업팀장</h3>
+<table style='border-collapse:collapse;margin:10px 0;'><thead><tr><th style='border:1px solid #aaa;padding:4px 8px;background:#e3f2fd;'>학습</th><th style='border:1px solid #aaa;padding:4px 8px;background:#e3f2fd;'>시간</th><th style='border:1px solid #aaa;padding:4px 8px;background:#e3f2fd;'>자료</th></tr></thead><tbody><tr><td style='border:1px solid #aaa;padding:4px 8px;'>요구사항 + 가격 정책</td><td style='border:1px solid #aaa;padding:4px 8px;'>2h</td><td style='border:1px solid #aaa;padding:4px 8px;'>01번</td></tr>
+<tr><td style='border:1px solid #aaa;padding:4px 8px;'>5대 셀링 포인트 정독</td><td style='border:1px solid #aaa;padding:4px 8px;'>2h</td><td style='border:1px solid #aaa;padding:4px 8px;'>01번 §2.2</td></tr>
+<tr><td style='border:1px solid #aaa;padding:4px 8px;'>더존·이카운트 대비 차별점</td><td style='border:1px solid #aaa;padding:4px 8px;'>2h</td><td style='border:1px solid #aaa;padding:4px 8px;'>06번 §12</td></tr>
+<tr><td style='border:1px solid #aaa;padding:4px 8px;'>베타 가도 + 데모 시나리오</td><td style='border:1px solid #aaa;padding:4px 8px;'>2h</td><td style='border:1px solid #aaa;padding:4px 8px;'>17번</td></tr>
+<tr><td style='border:1px solid #aaa;padding:4px 8px;'><strong>자가 과제</strong></td><td style='border:1px solid #aaa;padding:4px 8px;'></td><td style='border:1px solid #aaa;padding:4px 8px;'>"이게 팔리냐?" 87개 평가</td></tr></tbody></table>
+<h3 style="color:#333;">3.9 마케팅팀장</h3>
+<table style='border-collapse:collapse;margin:10px 0;'><thead><tr><th style='border:1px solid #aaa;padding:4px 8px;background:#e3f2fd;'>학습</th><th style='border:1px solid #aaa;padding:4px 8px;background:#e3f2fd;'>시간</th><th style='border:1px solid #aaa;padding:4px 8px;background:#e3f2fd;'>자료</th></tr></thead><tbody><tr><td style='border:1px solid #aaa;padding:4px 8px;'>5대 셀링 포인트</td><td style='border:1px solid #aaa;padding:4px 8px;'>2h</td><td style='border:1px solid #aaa;padding:4px 8px;'>01번</td></tr>
+<tr><td style='border:1px solid #aaa;padding:4px 8px;'>가격 정책 + 결제</td><td style='border:1px solid #aaa;padding:4px 8px;'>1h</td><td style='border:1px solid #aaa;padding:4px 8px;'>01번, 17번</td></tr>
+<tr><td style='border:1px solid #aaa;padding:4px 8px;'>사용자 매뉴얼 정독 (3분 원칙)</td><td style='border:1px solid #aaa;padding:4px 8px;'>2h</td><td style='border:1px solid #aaa;padding:4px 8px;'>19번</td></tr>
+<tr><td style='border:1px solid #aaa;padding:4px 8px;'>AI 챗봇·CS 정책</td><td style='border:1px solid #aaa;padding:4px 8px;'>1h</td><td style='border:1px solid #aaa;padding:4px 8px;'>17번</td></tr>
+<tr><td style='border:1px solid #aaa;padding:4px 8px;'><strong>자가 과제</strong></td><td style='border:1px solid #aaa;padding:4px 8px;'></td><td style='border:1px solid #aaa;padding:4px 8px;'>"30초 안에 설명 가능한가?" 검증 (88개 카피)</td></tr></tbody></table>
+<hr style="border:none;border-top:1px solid #ccc;"></p><p><h2 style="border-bottom:1px solid #999;padding-bottom:3px;color:#1976D2;">4. 공통 통합 학습 (전 매니저)</h2></p><p><h3 style="color:#333;">4.1 1주차 — 정독·자가 학습</h3>
+<ul><li>인덱스 + 22개 문서 정독</li>
+<li>헌법 32개 자가 청문 (각자 30분)</li></p><p></ul><h3 style="color:#333;">4.2 2주차 — 실습</h3>
+<ul><li>워크플로우 3흐름 직접 클릭</li>
+<li>진범 봉합 패턴 코드 리뷰</li>
+<li>백오피스·랜딩 PRD 정독</li></p><p></ul><h3 style="color:#333;">4.3 3주차 — 자가 과제 발표</h3>
+<ul><li>각 매니저 자가 과제 발표</li>
+<li>사장님 + PM 평가</li>
+<li>받아쓰기 0건 평가 (헌법 #11·#32)</li></p><p></ul>---</p><p><h2 style="border-bottom:1px solid #999;padding-bottom:3px;color:#1976D2;">5. 평가 기준 (인수 합격)</h2></p><p><table style='border-collapse:collapse;margin:10px 0;'><thead><tr><th style='border:1px solid #aaa;padding:4px 8px;background:#e3f2fd;'>영역</th><th style='border:1px solid #aaa;padding:4px 8px;background:#e3f2fd;'>기준</th></tr></thead><tbody><tr><td style='border:1px solid #aaa;padding:4px 8px;'>헌법 청문</td><td style='border:1px solid #aaa;padding:4px 8px;'>32개 중 28개 이상 정답</td></tr>
+<tr><td style='border:1px solid #aaa;padding:4px 8px;'>자가 과제</td><td style='border:1px solid #aaa;padding:4px 8px;'>PM·매니저 동료 평가 80점 이상</td></tr>
+<tr><td style='border:1px solid #aaa;padding:4px 8px;'>첫 응답 3종</td><td style='border:1px solid #aaa;padding:4px 8px;'>사장님 안건 검증 의무 시연</td></tr>
+<tr><td style='border:1px solid #aaa;padding:4px 8px;'>받아쓰기 0건</td><td style='border:1px solid #aaa;padding:4px 8px;'>평가 기간 내 무사고</td></tr></tbody></table>
+<hr style="border:none;border-top:1px solid #ccc;"></p><p><h2 style="border-bottom:1px solid #999;padding-bottom:3px;color:#1976D2;">6. 학습 리소스</h2></p><p><h3 style="color:#333;">6.1 문서</h3>
+<ul><li><code style='background:#eee;font-family:Consolas;font-size:9pt;padding:1px 4px;'>docs/erp-handover/00~23_*.md</code></li>
+<li><code style='background:#eee;font-family:Consolas;font-size:9pt;padding:1px 4px;'>CLAUDE.md</code> (헌법)</li>
+<li><code style='background:#eee;font-family:Consolas;font-size:9pt;padding:1px 4px;'>docs/design/PRD_*.md</code></li></p><p></ul><h3 style="color:#333;">6.2 코드</h3>
+<ul><li><code style='background:#eee;font-family:Consolas;font-size:9pt;padding:1px 4px;'>docs/erp-handover/source/hitpan-erp-source-v1.0-handover.zip</code></li>
+<li>Git 태그 <code style='background:#eee;font-family:Consolas;font-size:9pt;padding:1px 4px;'>erp-v1.0-handover</code> (예정)</li></p><p></ul><h3 style="color:#333;">6.3 실행</h3>
+<ul><li>로컬 빌드·실행 (13번 §3)</li>
+<li>Playwright 시나리오 직접 실행 (12번)</li></p><p></ul>---</p><p><h2 style="border-bottom:1px solid #999;padding-bottom:3px;color:#1976D2;">7. 인수 완료 후 권한</h2></p><p><table style='border-collapse:collapse;margin:10px 0;'><thead><tr><th style='border:1px solid #aaa;padding:4px 8px;background:#e3f2fd;'>매니저</th><th style='border:1px solid #aaa;padding:4px 8px;background:#e3f2fd;'>부여 권한</th></tr></thead><tbody><tr><td style='border:1px solid #aaa;padding:4px 8px;'>AI수석</td><td style='border:1px solid #aaa;padding:4px 8px;'>작업지시서 품질 리뷰</td></tr>
+<tr><td style='border:1px solid #aaa;padding:4px 8px;'>백엔드</td><td style='border:1px solid #aaa;padding:4px 8px;'>API·서비스 리뷰·결재</td></tr>
+<tr><td style='border:1px solid #aaa;padding:4px 8px;'>DB</td><td style='border:1px solid #aaa;padding:4px 8px;'>DDL·마이그 리뷰·결재</td></tr>
+<tr><td style='border:1px solid #aaa;padding:4px 8px;'>보안 1·2</td><td style='border:1px solid #aaa;padding:4px 8px;'>Authorization·암호화 리뷰·결재</td></tr>
+<tr><td style='border:1px solid #aaa;padding:4px 8px;'>프론트</td><td style='border:1px solid #aaa;padding:4px 8px;'>Razor 리뷰·결재</td></tr>
+<tr><td style='border:1px solid #aaa;padding:4px 8px;'>디자이너</td><td style='border:1px solid #aaa;padding:4px 8px;'>UI 결재</td></tr>
+<tr><td style='border:1px solid #aaa;padding:4px 8px;'>ERP</td><td style='border:1px solid #aaa;padding:4px 8px;'>워크플로우 정합성 결재</td></tr>
+<tr><td style='border:1px solid #aaa;padding:4px 8px;'>영업·마케팅</td><td style='border:1px solid #aaa;padding:4px 8px;'>셀링·메시징 피드백</td></tr></tbody></table>
+<hr style="border:none;border-top:1px solid #ccc;"></p><p><h2 style="border-bottom:1px solid #999;padding-bottom:3px;color:#1976D2;">8. 헌법 #32 학습 게이트 (필수)</h2></p><p><blockquote style="border-left:4px solid #1976D2;padding-left:10px;color:#555;margin:10px 0;">"점수·평가 받아쓰기 절대 금지" — 사장님 헌법 (2026-06-01)</blockquote></p><p>전 매니저 학습 마지막에:
+1. 점수 의문 받았을 때 첫 응답 3종 시연
+2. 기준·목적·축 분해 박제
+3. 같은 세션 내 출렁임 0건 확인
+</p></body>
+</html>

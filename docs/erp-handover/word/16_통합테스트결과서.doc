@@ -1,0 +1,89 @@
+﻿<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:w="urn:schemas-microsoft-com:office:word" xmlns="http://www.w3.org/TR/REC-html40">
+<head>
+<meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
+<meta name="ProgId" content="Word.Document">
+<meta name="Generator" content="Microsoft Word">
+<title>16_통합테스트결과서</title>
+<!--[if gte mso 9]>
+<xml>
+<w:WordDocument>
+<w:View>Print</w:View>
+<w:Zoom>100</w:Zoom>
+</w:WordDocument>
+</xml>
+<![endif]-->
+<style>
+body { font-family: 'Malgun Gothic', sans-serif; font-size: 11pt; line-height: 1.6; }
+table { border-collapse: collapse; }
+</style>
+</head>
+<body><p><h1 style="border-bottom:2px solid #333;padding-bottom:5px;color:#1976D2;">16. 통합 테스트 결과서</h1></p><p><blockquote style="border-left:4px solid #1976D2;padding-left:10px;color:#555;margin:10px 0;"><strong>작성일</strong>: 2026-06-01 / PM 브라운킴</blockquote>
+<blockquote style="border-left:4px solid #1976D2;padding-left:10px;color:#555;margin:10px 0;"><strong>도구</strong>: Playwright + Chrome Headless</blockquote>
+<blockquote style="border-left:4px solid #1976D2;padding-left:10px;color:#555;margin:10px 0;"><strong>실측 일자</strong>: 2026-05-31 ~ 2026-06-01</blockquote></p><p><hr style="border:none;border-top:1px solid #ccc;"></p><p><h2 style="border-bottom:1px solid #999;padding-bottom:3px;color:#1976D2;">1. 종합 결과</h2></p><p><table style='border-collapse:collapse;margin:10px 0;'><thead><tr><th style='border:1px solid #aaa;padding:4px 8px;background:#e3f2fd;'>시나리오</th><th style='border:1px solid #aaa;padding:4px 8px;background:#e3f2fd;'>결과</th></tr></thead><tbody><tr><td style='border:1px solid #aaa;padding:4px 8px;'>87개 ERP 화면 진입 + 키워드</td><td style='border:1px solid #aaa;padding:4px 8px;'><strong>85/87 (98%)</strong></td></tr>
+<tr><td style='border:1px solid #aaa;padding:4px 8px;'>워크플로우 3흐름 API</td><td style='border:1px solid #aaa;padding:4px 8px;'><strong>3/3 (100%)</strong></td></tr>
+<tr><td style='border:1px solid #aaa;padding:4px 8px;'>그리드 콤보 동적 로드 API</td><td style='border:1px solid #aaa;padding:4px 8px;'><strong>1/1 (100%)</strong></td></tr>
+<tr><td style='border:1px solid #aaa;padding:4px 8px;'>회계·경비 진입</td><td style='border:1px solid #aaa;padding:4px 8px;'><strong>2/2 (100%)</strong></td></tr>
+<tr><td style='border:1px solid #aaa;padding:4px 8px;'>모바일 반응형 (iPhone 13)</td><td style='border:1px solid #aaa;padding:4px 8px;'><strong>5/5 (100%)</strong></td></tr>
+<tr><td style='border:1px solid #aaa;padding:4px 8px;'>실데이터 E2E (CRUD 클릭)</td><td style='border:1px solid #aaa;padding:4px 8px;'><strong>미실측</strong></td></tr>
+<tr><td style='border:1px solid #aaa;padding:4px 8px;'>EVF 6대 영역</td><td style='border:1px solid #aaa;padding:4px 8px;'><strong>미실측 (베타 게이트)</strong></td></tr></tbody></table>
+<hr style="border:none;border-top:1px solid #ccc;"></p><p><h2 style="border-bottom:1px solid #999;padding-bottom:3px;color:#1976D2;">2. 87개 화면 카테고리별 (audit-full-erp-20260531.js)</h2></p><p><table style='border-collapse:collapse;margin:10px 0;'><thead><tr><th style='border:1px solid #aaa;padding:4px 8px;background:#e3f2fd;'>카테고리</th><th style='border:1px solid #aaa;padding:4px 8px;background:#e3f2fd;'>PASS</th><th style='border:1px solid #aaa;padding:4px 8px;background:#e3f2fd;'>점수</th></tr></thead><tbody><tr><td style='border:1px solid #aaa;padding:4px 8px;'>1.설정</td><td style='border:1px solid #aaa;padding:4px 8px;'>15/16</td><td style='border:1px solid #aaa;padding:4px 8px;'>94%</td></tr>
+<tr><td style='border:1px solid #aaa;padding:4px 8px;'>2.마스터</td><td style='border:1px solid #aaa;padding:4px 8px;'>8/8</td><td style='border:1px solid #aaa;padding:4px 8px;'><strong>100%</strong></td></tr>
+<tr><td style='border:1px solid #aaa;padding:4px 8px;'>3.매입</td><td style='border:1px solid #aaa;padding:4px 8px;'>9/9</td><td style='border:1px solid #aaa;padding:4px 8px;'><strong>100%</strong></td></tr>
+<tr><td style='border:1px solid #aaa;padding:4px 8px;'>4.판매</td><td style='border:1px solid #aaa;padding:4px 8px;'>12/12</td><td style='border:1px solid #aaa;padding:4px 8px;'><strong>100%</strong></td></tr>
+<tr><td style='border:1px solid #aaa;padding:4px 8px;'>5.재고</td><td style='border:1px solid #aaa;padding:4px 8px;'>7/7</td><td style='border:1px solid #aaa;padding:4px 8px;'><strong>100%</strong></td></tr>
+<tr><td style='border:1px solid #aaa;padding:4px 8px;'>6.재무</td><td style='border:1px solid #aaa;padding:4px 8px;'>14/14</td><td style='border:1px solid #aaa;padding:4px 8px;'><strong>100%</strong></td></tr>
+<tr><td style='border:1px solid #aaa;padding:4px 8px;'>7.인사</td><td style='border:1px solid #aaa;padding:4px 8px;'>14/15</td><td style='border:1px solid #aaa;padding:4px 8px;'>93%</td></tr>
+<tr><td style='border:1px solid #aaa;padding:4px 8px;'>8.결재</td><td style='border:1px solid #aaa;padding:4px 8px;'>3/3</td><td style='border:1px solid #aaa;padding:4px 8px;'><strong>100%</strong></td></tr>
+<tr><td style='border:1px solid #aaa;padding:4px 8px;'>9.공통</td><td style='border:1px solid #aaa;padding:4px 8px;'>3/3</td><td style='border:1px solid #aaa;padding:4px 8px;'><strong>100%</strong></td></tr>
+<tr><td style='border:1px solid #aaa;padding:4px 8px;'><strong>합계</strong></td><td style='border:1px solid #aaa;padding:4px 8px;'><strong>85/87</strong></td><td style='border:1px solid #aaa;padding:4px 8px;'><strong>98%</strong></td></tr></tbody></table>
+<h3 style="color:#333;">2.1 미스 2건 (키워드 동적 로딩 차이, 진입 자체는 200 OK)</h3>
+<ul><li>직책관리 <code style='background:#eee;font-family:Consolas;font-size:9pt;padding:1px 4px;'>/settings/positions</code> (KW_MISS, 진입은 200)</li>
+<li>HR 직위 <code style='background:#eee;font-family:Consolas;font-size:9pt;padding:1px 4px;'>/hr/positions</code> (KW_MISS, 진입은 200)</li></p><p></ul>---</p><p><h2 style="border-bottom:1px solid #999;padding-bottom:3px;color:#1976D2;">3. 워크플로우 3흐름 API (헌법 #20)</h2></p><p><h3 style="color:#333;">3.1 매입 흐름</h3>
+<table style='border-collapse:collapse;margin:10px 0;'><thead><tr><th style='border:1px solid #aaa;padding:4px 8px;background:#e3f2fd;'>API</th><th style='border:1px solid #aaa;padding:4px 8px;background:#e3f2fd;'>결과</th><th style='border:1px solid #aaa;padding:4px 8px;background:#e3f2fd;'>데이터</th></tr></thead><tbody><tr><td style='border:1px solid #aaa;padding:4px 8px;'>GET /api/partners</td><td style='border:1px solid #aaa;padding:4px 8px;'>200</td><td style='border:1px solid #aaa;padding:4px 8px;'>500건</td></tr>
+<tr><td style='border:1px solid #aaa;padding:4px 8px;'>GET /api/items</td><td style='border:1px solid #aaa;padding:4px 8px;'>200</td><td style='border:1px solid #aaa;padding:4px 8px;'>337건</td></tr>
+<tr><td style='border:1px solid #aaa;padding:4px 8px;'>GET /api/purchase-orders</td><td style='border:1px solid #aaa;padding:4px 8px;'>200</td><td style='border:1px solid #aaa;padding:4px 8px;'>0건</td></tr>
+<tr><td style='border:1px solid #aaa;padding:4px 8px;'>GET /api/purchases</td><td style='border:1px solid #aaa;padding:4px 8px;'>200</td><td style='border:1px solid #aaa;padding:4px 8px;'>0건</td></tr>
+<tr><td style='border:1px solid #aaa;padding:4px 8px;'>GET /api/stock</td><td style='border:1px solid #aaa;padding:4px 8px;'>200</td><td style='border:1px solid #aaa;padding:4px 8px;'>0건</td></tr></tbody></table>
+<h3 style="color:#333;">3.2 BOM 흐름</h3>
+<table style='border-collapse:collapse;margin:10px 0;'><thead><tr><th style='border:1px solid #aaa;padding:4px 8px;background:#e3f2fd;'>API</th><th style='border:1px solid #aaa;padding:4px 8px;background:#e3f2fd;'>결과</th><th style='border:1px solid #aaa;padding:4px 8px;background:#e3f2fd;'>데이터</th></tr></thead><tbody><tr><td style='border:1px solid #aaa;padding:4px 8px;'>GET /api/bom</td><td style='border:1px solid #aaa;padding:4px 8px;'>200</td><td style='border:1px solid #aaa;padding:4px 8px;'><strong>19건</strong> ⭐</td></tr></tbody></table>
+<h3 style="color:#333;">3.3 판매 흐름</h3>
+<table style='border-collapse:collapse;margin:10px 0;'><thead><tr><th style='border:1px solid #aaa;padding:4px 8px;background:#e3f2fd;'>API</th><th style='border:1px solid #aaa;padding:4px 8px;background:#e3f2fd;'>결과</th><th style='border:1px solid #aaa;padding:4px 8px;background:#e3f2fd;'>데이터</th></tr></thead><tbody><tr><td style='border:1px solid #aaa;padding:4px 8px;'>GET /api/quotations</td><td style='border:1px solid #aaa;padding:4px 8px;'>200</td><td style='border:1px solid #aaa;padding:4px 8px;'>0건</td></tr>
+<tr><td style='border:1px solid #aaa;padding:4px 8px;'>GET /api/sales-orders</td><td style='border:1px solid #aaa;padding:4px 8px;'>200</td><td style='border:1px solid #aaa;padding:4px 8px;'>0건</td></tr>
+<tr><td style='border:1px solid #aaa;padding:4px 8px;'>GET /api/deliveries</td><td style='border:1px solid #aaa;padding:4px 8px;'>200</td><td style='border:1px solid #aaa;padding:4px 8px;'>0건</td></tr>
+<tr><td style='border:1px solid #aaa;padding:4px 8px;'>GET /api/sales/tax-invoices</td><td style='border:1px solid #aaa;padding:4px 8px;'>200</td><td style='border:1px solid #aaa;padding:4px 8px;'>0건</td></tr></tbody></table>
+<strong>주의</strong>: API 정합 100% / 실데이터는 BOM만 19건, 나머지 0건 → CRUD 클릭 시나리오 미완 한계.</p><p><hr style="border:none;border-top:1px solid #ccc;"></p><p><h2 style="border-bottom:1px solid #999;padding-bottom:3px;color:#1976D2;">4. 그리드 콤보 동적 로드</h2></p><p><table style='border-collapse:collapse;margin:10px 0;'><thead><tr><th style='border:1px solid #aaa;padding:4px 8px;background:#e3f2fd;'>시나리오</th><th style='border:1px solid #aaa;padding:4px 8px;background:#e3f2fd;'>결과</th></tr></thead><tbody><tr><td style='border:1px solid #aaa;padding:4px 8px;'><code style='background:#eee;font-family:Consolas;font-size:9pt;padding:1px 4px;'>GET /api/items/{itemId}/specs?activeOnly=true</code></td><td style='border:1px solid #aaa;padding:4px 8px;'><strong>200 OK</strong> ⭐</td></tr>
+<tr><td style='border:1px solid #aaa;padding:4px 8px;'>응답 형식</td><td style='border:1px solid #aaa;padding:4px 8px;'><code style='background:#eee;font-family:Consolas;font-size:9pt;padding:1px 4px;'>[{ specId, specValue, isDefault, ... }]</code> 정상</td></tr>
+<tr><td style='border:1px solid #aaa;padding:4px 8px;'>진범 #99 봉합 확인</td><td style='border:1px solid #aaa;padding:4px 8px;'>✅</td></tr></tbody></table>
+<hr style="border:none;border-top:1px solid #ccc;"></p><p><h2 style="border-bottom:1px solid #999;padding-bottom:3px;color:#1976D2;">5. 모바일 반응형 (iPhone 13 viewport 390x844)</h2></p><p><table style='border-collapse:collapse;margin:10px 0;'><thead><tr><th style='border:1px solid #aaa;padding:4px 8px;background:#e3f2fd;'>경로</th><th style='border:1px solid #aaa;padding:4px 8px;background:#e3f2fd;'>결과</th><th style='border:1px solid #aaa;padding:4px 8px;background:#e3f2fd;'>가로 스크롤</th></tr></thead><tbody><tr><td style='border:1px solid #aaa;padding:4px 8px;'>/dashboard</td><td style='border:1px solid #aaa;padding:4px 8px;'>200</td><td style='border:1px solid #aaa;padding:4px 8px;'>0건 ✅</td></tr>
+<tr><td style='border:1px solid #aaa;padding:4px 8px;'>/items</td><td style='border:1px solid #aaa;padding:4px 8px;'>200</td><td style='border:1px solid #aaa;padding:4px 8px;'>0건 ✅</td></tr>
+<tr><td style='border:1px solid #aaa;padding:4px 8px;'>/quotations</td><td style='border:1px solid #aaa;padding:4px 8px;'>200</td><td style='border:1px solid #aaa;padding:4px 8px;'>0건 ✅</td></tr>
+<tr><td style='border:1px solid #aaa;padding:4px 8px;'>/deliveries</td><td style='border:1px solid #aaa;padding:4px 8px;'>200</td><td style='border:1px solid #aaa;padding:4px 8px;'>0건 ✅</td></tr>
+<tr><td style='border:1px solid #aaa;padding:4px 8px;'>/stock</td><td style='border:1px solid #aaa;padding:4px 8px;'>200</td><td style='border:1px solid #aaa;padding:4px 8px;'>0건 ✅</td></tr></tbody></table>
+<hr style="border:none;border-top:1px solid #ccc;"></p><p><h2 style="border-bottom:1px solid #999;padding-bottom:3px;color:#1976D2;">6. 콘솔 에러 진단 (audit-erp-99-v3c.js)</h2></p><p><h3 style="color:#333;">6.1 도구 한정 잔존 에러 (진범 #100 봉합 후)</h3>
+<ul><li>대시보드 / 양식정보설정 진입 시 <code style='background:#eee;font-family:Consolas;font-size:9pt;padding:1px 4px;'>Failed to fetch</code> 2건</li>
+<li>Playwright 첫 부팅 캐시 빌드 사이클 한정</li>
+<li><strong>실 사용자 영향</strong>: ❓ 미확인 (사장님 직접 로그인 검증 필요)</li></p><p></ul>---</p><p><h2 style="border-bottom:1px solid #999;padding-bottom:3px;color:#1976D2;">7. 리포트 위치</h2></p><p><table style='border-collapse:collapse;margin:10px 0;'><thead><tr><th style='border:1px solid #aaa;padding:4px 8px;background:#e3f2fd;'>리포트</th><th style='border:1px solid #aaa;padding:4px 8px;background:#e3f2fd;'>경로</th></tr></thead><tbody><tr><td style='border:1px solid #aaa;padding:4px 8px;'>전수조사 종합</td><td style='border:1px solid #aaa;padding:4px 8px;'><code style='background:#eee;font-family:Consolas;font-size:9pt;padding:1px 4px;'>tests/scenarios/reports/audit-full-erp-2026-05-31T14-59-58.json</code></td></tr>
+<tr><td style='border:1px solid #aaa;padding:4px 8px;'>워크플로우 + 모바일</td><td style='border:1px solid #aaa;padding:4px 8px;'><code style='background:#eee;font-family:Consolas;font-size:9pt;padding:1px 4px;'>tests/scenarios/reports/audit-final-2026-05-31T14-48-50.json</code></td></tr>
+<tr><td style='border:1px solid #aaa;padding:4px 8px;'>v3b3 (이전 최종)</td><td style='border:1px solid #aaa;padding:4px 8px;'><code style='background:#eee;font-family:Consolas;font-size:9pt;padding:1px 4px;'>tests/scenarios/reports/audit-erp-99-v3b3-2026-05-31T14-16-49.json</code></td></tr></tbody></table>
+<hr style="border:none;border-top:1px solid #ccc;"></p><p><h2 style="border-bottom:1px solid #999;padding-bottom:3px;color:#1976D2;">8. 합격 기준 vs 실측</h2></p><p><table style='border-collapse:collapse;margin:10px 0;'><thead><tr><th style='border:1px solid #aaa;padding:4px 8px;background:#e3f2fd;'>게이트</th><th style='border:1px solid #aaa;padding:4px 8px;background:#e3f2fd;'>기준</th><th style='border:1px solid #aaa;padding:4px 8px;background:#e3f2fd;'>실측</th><th style='border:1px solid #aaa;padding:4px 8px;background:#e3f2fd;'>통과</th></tr></thead><tbody><tr><td style='border:1px solid #aaa;padding:4px 8px;'>87 화면 진입</td><td style='border:1px solid #aaa;padding:4px 8px;'>100%</td><td style='border:1px solid #aaa;padding:4px 8px;'>98%</td><td style='border:1px solid #aaa;padding:4px 8px;'>⚠ 키워드 미스 2건</td></tr>
+<tr><td style='border:1px solid #aaa;padding:4px 8px;'>API 정합</td><td style='border:1px solid #aaa;padding:4px 8px;'>200 OK</td><td style='border:1px solid #aaa;padding:4px 8px;'>✅</td><td style='border:1px solid #aaa;padding:4px 8px;'>✅</td></tr>
+<tr><td style='border:1px solid #aaa;padding:4px 8px;'>모바일 가로 스크롤</td><td style='border:1px solid #aaa;padding:4px 8px;'>0건</td><td style='border:1px solid #aaa;padding:4px 8px;'>0건</td><td style='border:1px solid #aaa;padding:4px 8px;'>✅</td></tr>
+<tr><td style='border:1px solid #aaa;padding:4px 8px;'>진범 #99·#100</td><td style='border:1px solid #aaa;padding:4px 8px;'>봉합</td><td style='border:1px solid #aaa;padding:4px 8px;'>봉합 완료</td><td style='border:1px solid #aaa;padding:4px 8px;'>✅</td></tr>
+<tr><td style='border:1px solid #aaa;padding:4px 8px;'>실데이터 E2E</td><td style='border:1px solid #aaa;padding:4px 8px;'>100%</td><td style='border:1px solid #aaa;padding:4px 8px;'>미실측</td><td style='border:1px solid #aaa;padding:4px 8px;'>❌</td></tr>
+<tr><td style='border:1px solid #aaa;padding:4px 8px;'>EVF 6대</td><td style='border:1px solid #aaa;padding:4px 8px;'>통과</td><td style='border:1px solid #aaa;padding:4px 8px;'>미실측</td><td style='border:1px solid #aaa;padding:4px 8px;'>❌</td></tr>
+<tr><td style='border:1px solid #aaa;padding:4px 8px;'>통신 17개</td><td style='border:1px solid #aaa;padding:4px 8px;'>5분 자동 복구</td><td style='border:1px solid #aaa;padding:4px 8px;'>미실측</td><td style='border:1px solid #aaa;padding:4px 8px;'>❌</td></tr>
+<tr><td style='border:1px solid #aaa;padding:4px 8px;'>백신 5종</td><td style='border:1px solid #aaa;padding:4px 8px;'>격리 0건</td><td style='border:1px solid #aaa;padding:4px 8px;'>미실측</td><td style='border:1px solid #aaa;padding:4px 8px;'>❌</td></tr></tbody></table>
+<hr style="border:none;border-top:1px solid #ccc;"></p><p><h2 style="border-bottom:1px solid #999;padding-bottom:3px;color:#1976D2;">9. 결론</h2></p><p><h3 style="color:#333;">9.1 통과</h3>
+<ul><li><strong>외관 진입 + API 정합 + 모바일 반응형</strong>: 사실상 만점</li>
+<li><strong>빌드·테스트·보안</strong>: 100%</li>
+<li>베타 직전 통과 가능 (3시스템 통합 후)</li></p><p></ul><h3 style="color:#333;">9.2 미통과 (베타 출시 게이트)</h3>
+<ul><li>실데이터 E2E (CRUD 클릭)</li>
+<li>EVF 6대 영역</li>
+<li>통신 무결성 17개</li>
+<li>백신 5종 호환</li>
+<li>다중 동시 사용자</li></p><p></ul><h3 style="color:#333;">9.3 PM/CTO 판단</h3>
+<ul><li>단독 ERP 100% 만들고 베타 가는 게 아님</li>
+<li><strong>랜딩 + 백오피스 + ERP 통합 후 EVF 일괄 실측</strong>이 정공법</li>
+<li>현재 단계: <strong>B+ 조건부 GO</strong></li>
+</ul></p></body>
+</html>

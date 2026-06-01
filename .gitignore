@@ -61,3 +61,6 @@ installer/cloudflared.exe
 hitpan_erp_backup_*.sql
 artifacts/doc-build/
 backups/
+
+tmp-build/
+logs/docx-convert*.log

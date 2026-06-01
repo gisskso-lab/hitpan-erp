@@ -1,0 +1,116 @@
+﻿<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:w="urn:schemas-microsoft-com:office:word" xmlns="http://www.w3.org/TR/REC-html40">
+<head>
+<meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
+<meta name="ProgId" content="Word.Document">
+<meta name="Generator" content="Microsoft Word">
+<title>20_운영자매뉴얼</title>
+<!--[if gte mso 9]>
+<xml>
+<w:WordDocument>
+<w:View>Print</w:View>
+<w:Zoom>100</w:Zoom>
+</w:WordDocument>
+</xml>
+<![endif]-->
+<style>
+body { font-family: 'Malgun Gothic', sans-serif; font-size: 11pt; line-height: 1.6; }
+table { border-collapse: collapse; }
+</style>
+</head>
+<body><p><h1 style="border-bottom:2px solid #333;padding-bottom:5px;color:#1976D2;">20. 운영자 매뉴얼 — tenant_admin / system_admin / 본사 운영</h1></p><p><blockquote style="border-left:4px solid #1976D2;padding-left:10px;color:#555;margin:10px 0;"><strong>작성일</strong>: 2026-06-01 / PM 브라운킴</blockquote>
+<blockquote style="border-left:4px solid #1976D2;padding-left:10px;color:#555;margin:10px 0;"><strong>대상</strong>: 사장님(테넌트 어드민), 본사 백오피스 운영자</blockquote></p><p><hr style="border:none;border-top:1px solid #ccc;"></p><p><h2 style="border-bottom:1px solid #999;padding-bottom:3px;color:#1976D2;">1. 초기 설치</h2></p><p><h3 style="color:#333;">1.1 EXE 다운로드 → 실행</h3>
+<ul><li>라이선스 키 입력 (랜딩페이지 가입 시 발급)</li>
+<li>자동 설치 (10분 이내 목표)</li></p><p></ul><h3 style="color:#333;">1.2 자동 설치 항목 (관리자 권한)</h3>
+<ul><li>MariaDB 11.4.10</li>
+<li>HitPan.API (Windows 서비스)</li>
+<li>HitPan.Web (Windows 서비스)</li>
+<li>HitPan.Watchdog (Windows 서비스, Phase F)</li>
+<li>cloudflared (Windows 서비스)</li>
+<li>Defender 예외 3개</li>
+<li>방화벽 규칙 3개</li></p><p></ul><h3 style="color:#333;">1.3 첫 로그인</h3>
+<ul><li>사장님 계정 (대표) 로그인</li>
+<li>약관 4 필수 + 1 선택 동의</li>
+<li>회사 정보 입력</li></p><p></ul>---</p><p><h2 style="border-bottom:1px solid #999;padding-bottom:3px;color:#1976D2;">2. 사용자·권한 관리</h2></p><p><h3 style="color:#333;">2.1 사원 등록</h3>
+1. [설정] → [사원관리]
+2. 신규 → 이름·이메일·부서·직책·역할
+3. 초기 비밀번호 메일 발송</p><p><h3 style="color:#333;">2.2 권한 설정 (헌법 #11)</h3>
+1. [설정] → [권한설정]
+2. 사용자 → 메뉴별 CRUD 권한
+3. <strong>직접 설정</strong> (업종·규모별 템플릿 제공 금지)</p><p><h3 style="color:#333;">2.3 직책·결재 라인</h3>
+1. [설정] → [직책관리]
+2. [설정] → [결재라인]
+3. 문서 유형별 결재 단계 정의</p><p><hr style="border:none;border-top:1px solid #ccc;"></p><p><h2 style="border-bottom:1px solid #999;padding-bottom:3px;color:#1976D2;">3. 기기 관리</h2></p><p><h3 style="color:#333;">3.1 등록</h3>
+<ul><li>[설정] → [기기관리]</li>
+<li>신규 PC 등록 시 본사 인증</li>
+<li>티어 한도 (Light 1 / Standard 3 / Pro ∞)</li></p><p></ul><h3 style="color:#333;">3.2 분실·교체</h3>
+<ul><li>기존 기기 해제 → 신규 등록</li>
+<li>라이선스 키 재발급 시 본사 결제</li></p><p></ul>---</p><p><h2 style="border-bottom:1px solid #999;padding-bottom:3px;color:#1976D2;">4. 백업·복원</h2></p><p><h3 style="color:#333;">4.1 자동 백업</h3>
+<ul><li>매일 02:00 (기본)</li>
+<li>E2E 암호화 (헌법 #22)</li>
+<li>보관 위치: 고객 선택</li></p><p></ul><h3 style="color:#333;">4.2 수동 백업</h3>
+1. [데이터] → [백업]
+2. "지금 백업 실행"
+3. 다운로드</p><p><h3 style="color:#333;">4.3 복원</h3>
+1. [데이터] → [백업] → 이력
+2. 복원할 백업 선택
+3. RestoreConfirmDialog → 비밀번호 확인
+4. 실행</p><p><hr style="border:none;border-top:1px solid #ccc;"></p><p><h2 style="border-bottom:1px solid #999;padding-bottom:3px;color:#1976D2;">5. 로그 모니터링</h2></p><p><h3 style="color:#333;">5.1 감사 로그</h3>
+<ul><li>[데이터] → [로그]</li>
+<li>audit_trail: 누가·언제·무엇을</li>
+<li>API 요청 로그</li>
+<li>로그인 시도</li></p><p></ul><h3 style="color:#333;">5.2 사고 발생 시</h3>
+1. 로그 검색 (시간·사용자·작업)
+2. 본사 CS에 로그 첨부
+3. 애니소프트 원격 지원 요청</p><p><hr style="border:none;border-top:1px solid #ccc;"></p><p><h2 style="border-bottom:1px solid #999;padding-bottom:3px;color:#1976D2;">6. 마이그레이션 (레거시 → 신규)</h2></p><p><h3 style="color:#333;">6.1 사전 점검</h3>
+<ul><li>레거시 히트판 (Access MDB) 파일 위치 확인</li>
+<li>MDB 백업 사본 별도 보관</li></p><p></ul><h3 style="color:#333;">6.2 실행</h3>
+1. [설정] → [MDB 마이그]
+2. MDB 파일 선택 → 옵션 (95% 개시잔액 권장)
+3. "시작" → SignalR 진행률 실시간
+4. 목표 10분 (대형은 더 걸림, 헌법 #26)</p><p><h3 style="color:#333;">6.3 검증</h3>
+<ul><li>마이그 후 잔액 확인</li>
+<li>거래명세서·세금계산서 표본 검증</li></p><p></ul>---</p><p><h2 style="border-bottom:1px solid #999;padding-bottom:3px;color:#1976D2;">7. 보안 운영</h2></p><p><h3 style="color:#333;">7.1 비밀번호 정책</h3>
+<ul><li>최소 8자 + 영문·숫자·특수문자</li>
+<li>90일 강제 변경 (옵션)</li></p><p></ul><h3 style="color:#333;">7.2 약관 버전 변경</h3>
+<ul><li>본사가 새 버전 push</li>
+<li>모든 사용자 재동의 (미동의 시 차단)</li></p><p></ul><h3 style="color:#333;">7.3 인증서 관리</h3>
+<ul><li>[설정] → [세금계산서 인증서]</li>
+<li>범용 (법인) + 간편 (개인) 2트랙</li>
+<li>만료 30일 전 알림</li></p><p></ul>---</p><p><h2 style="border-bottom:1px solid #999;padding-bottom:3px;color:#1976D2;">8. 통신 장애 대응</h2></p><p><h3 style="color:#333;">8.1 cloudflared 다운</h3>
+<ul><li>워치독이 자동 봉합 (5분 이내)</li>
+<li>봉합 안 되면 EXE 재실행</li></p><p></ul><h3 style="color:#333;">8.2 Windows Update 후</h3>
+<ul><li>TunnelSecret 자동 재생성 (헌법 #28)</li>
+<li>5분 후에도 안 되면 본사 CS</li></p><p></ul><h3 style="color:#333;">8.3 백신 격리</h3>
+<ul><li>알림 → 1클릭 봉합 매뉴얼 실행</li>
+<li>영구 안 되면 본사 CS</li></p><p></ul>---</p><p><h2 style="border-bottom:1px solid #999;padding-bottom:3px;color:#1976D2;">9. 결제·구독</h2></p><p><h3 style="color:#333;">9.1 구독 변경</h3>
+<ul><li>[설정] → [구독결제]</li>
+<li>티어 변경 (Light/Standard/Pro)</li>
+<li>즉시 적용</li></p><p></ul><h3 style="color:#333;">9.2 결제 수단</h3>
+<ul><li>토스페이먼츠</li>
+<li>카드 변경 가능</li></p><p></ul><h3 style="color:#333;">9.3 청구서</h3>
+<ul><li>월별 PDF 다운로드</li>
+<li>사업자 등록증 등록 시 세금계산서 자동 발행</li></p><p></ul>---</p><p><h2 style="border-bottom:1px solid #999;padding-bottom:3px;color:#1976D2;">10. 비상 대응</h2></p><p><h3 style="color:#333;">10.1 데이터 손실</h3>
+1. 즉시 백업 복원
+2. 본사 CS 통지
+3. 손실 범위 산정</p><p><h3 style="color:#333;">10.2 무단 접근 의심</h3>
+1. 비밀번호 즉시 변경
+2. [데이터] → [로그] 점검
+3. 본사 CS + 경찰 신고</p><p><h3 style="color:#333;">10.3 시스템 다운</h3>
+1. EXE 재실행
+2. 로그 확인
+3. 워치독 재시작
+4. 본사 CS</p><p><hr style="border:none;border-top:1px solid #ccc;"></p><p><h2 style="border-bottom:1px solid #999;padding-bottom:3px;color:#1976D2;">11. 본사 운영자용 (백오피스)</h2></p><p><h3 style="color:#333;">11.1 고객 관리</h3>
+<ul><li>가입·결제·라이선스 (메타정보만, 헌법 #22)</li>
+<li>업무 데이터 절대 접근 불가</li></p><p></ul><h3 style="color:#333;">11.2 대리점 관리</h3>
+<ul><li>채널·수수료·KPI</li>
+<li>reseller_* 테이블</li></p><p></ul><h3 style="color:#333;">11.3 워치독 모니터링</h3>
+<ul><li>/admin/watchdog-monitor</li>
+<li>17개 시나리오 상태</li>
+<li>자동 복구 통계</li></p><p></ul><h3 style="color:#333;">11.4 CS 토큰 (JIT)</h3>
+<ul><li>단방향 발급</li>
+<li>만료 시 자동 폐기 (헌법 #18 v3)</li></p><p></ul>---</p><p><h2 style="border-bottom:1px solid #999;padding-bottom:3px;color:#1976D2;">12. 헌법 준수 의무</h2></p><p><table style='border-collapse:collapse;margin:10px 0;'><thead><tr><th style='border:1px solid #aaa;padding:4px 8px;background:#e3f2fd;'>헌법</th><th style='border:1px solid #aaa;padding:4px 8px;background:#e3f2fd;'>운영자 책임</th></tr></thead><tbody><tr><td style='border:1px solid #aaa;padding:4px 8px;'>#11</td><td style='border:1px solid #aaa;padding:4px 8px;'>권한 직접 설정 (템플릿 금지)</td></tr>
+<tr><td style='border:1px solid #aaa;padding:4px 8px;'>#18</td><td style='border:1px solid #aaa;padding:4px 8px;'>본사로 업무데이터 전송 절대 금지</td></tr>
+<tr><td style='border:1px solid #aaa;padding:4px 8px;'>#22</td><td style='border:1px solid #aaa;padding:4px 8px;'>데이터 최소주의 — 백업 E2E 암호화</td></tr>
+<tr><td style='border:1px solid #aaa;padding:4px 8px;'>#29</td><td style='border:1px solid #aaa;padding:4px 8px;'>인프라 조작 사전 승인</td></tr>
+<tr><td style='border:1px solid #aaa;padding:4px 8px;'>#31</td><td style='border:1px solid #aaa;padding:4px 8px;'>백신 5종 격리 0건 유지</td></tr></tbody></table></p></body>
+</html>

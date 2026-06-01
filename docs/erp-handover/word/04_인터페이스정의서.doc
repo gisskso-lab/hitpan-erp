@@ -1,0 +1,182 @@
+﻿<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:w="urn:schemas-microsoft-com:office:word" xmlns="http://www.w3.org/TR/REC-html40">
+<head>
+<meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
+<meta name="ProgId" content="Word.Document">
+<meta name="Generator" content="Microsoft Word">
+<title>04_인터페이스정의서</title>
+<!--[if gte mso 9]>
+<xml>
+<w:WordDocument>
+<w:View>Print</w:View>
+<w:Zoom>100</w:Zoom>
+</w:WordDocument>
+</xml>
+<![endif]-->
+<style>
+body { font-family: 'Malgun Gothic', sans-serif; font-size: 11pt; line-height: 1.6; }
+table { border-collapse: collapse; }
+</style>
+</head>
+<body><p><h1 style="border-bottom:2px solid #333;padding-bottom:5px;color:#1976D2;">04. 인터페이스정의서 — REST API 명세</h1></p><p><blockquote style="border-left:4px solid #1976D2;padding-left:10px;color:#555;margin:10px 0;"><strong>작성일</strong>: 2026-06-01 / PM 브라운킴</blockquote>
+<blockquote style="border-left:4px solid #1976D2;padding-left:10px;color:#555;margin:10px 0;"><strong>API</strong>: ASP.NET Core 8 + Dapper / JWT Bearer</blockquote>
+<blockquote style="border-left:4px solid #1976D2;padding-left:10px;color:#555;margin:10px 0;"><strong>Base URL</strong>: <code style='background:#eee;font-family:Consolas;font-size:9pt;padding:1px 4px;'>https://api-demo.hitpan.kr</code> (베타) / <code style='background:#eee;font-family:Consolas;font-size:9pt;padding:1px 4px;'>http://localhost:5257</code> (개발)</blockquote></p><p><hr style="border:none;border-top:1px solid #ccc;"></p><p><h2 style="border-bottom:1px solid #999;padding-bottom:3px;color:#1976D2;">1. 공통 규약</h2></p><p><h3 style="color:#333;">1.1 인증</h3>
+<ul><li><strong>JWT Bearer 토큰</strong> (Authorization 헤더)</li>
+<li>Access Token 만료: 15분</li>
+<li>Refresh Token: 7일 (회전)</li>
+<li>토큰 클레임: <code style='background:#eee;font-family:Consolas;font-size:9pt;padding:1px 4px;'>tenant_id</code>, <code style='background:#eee;font-family:Consolas;font-size:9pt;padding:1px 4px;'>user_id</code>, <code style='background:#eee;font-family:Consolas;font-size:9pt;padding:1px 4px;'>role</code>, <code style='background:#eee;font-family:Consolas;font-size:9pt;padding:1px 4px;'>email</code></li></p><p></ul><h3 style="color:#333;">1.2 role 매핑 (헌법 #7)</h3>
+<table style='border-collapse:collapse;margin:10px 0;'><thead><tr><th style='border:1px solid #aaa;padding:4px 8px;background:#e3f2fd;'>DB Role</th><th style='border:1px solid #aaa;padding:4px 8px;background:#e3f2fd;'>JWT claim role</th><th style='border:1px solid #aaa;padding:4px 8px;background:#e3f2fd;'>의미</th></tr></thead><tbody><tr><td style='border:1px solid #aaa;padding:4px 8px;'><code style='background:#eee;font-family:Consolas;font-size:9pt;padding:1px 4px;'>TenantAdmin</code></td><td style='border:1px solid #aaa;padding:4px 8px;'><code style='background:#eee;font-family:Consolas;font-size:9pt;padding:1px 4px;'>system_admin</code></td><td style='border:1px solid #aaa;padding:4px 8px;'>테넌트 어드민 (사장)</td></tr>
+<tr><td style='border:1px solid #aaa;padding:4px 8px;'><code style='background:#eee;font-family:Consolas;font-size:9pt;padding:1px 4px;'>tenant_admin</code></td><td style='border:1px solid #aaa;padding:4px 8px;'><code style='background:#eee;font-family:Consolas;font-size:9pt;padding:1px 4px;'>system_admin</code></td><td style='border:1px solid #aaa;padding:4px 8px;'>동일</td></tr>
+<tr><td style='border:1px solid #aaa;padding:4px 8px;'><code style='background:#eee;font-family:Consolas;font-size:9pt;padding:1px 4px;'>Employee</code></td><td style='border:1px solid #aaa;padding:4px 8px;'><code style='background:#eee;font-family:Consolas;font-size:9pt;padding:1px 4px;'>employee</code></td><td style='border:1px solid #aaa;padding:4px 8px;'>일반 사원</td></tr></tbody></table>
+<h3 style="color:#333;">1.3 응답 형식</h3>
+<pre style='background:#f4f4f4;padding:8px;font-family:Consolas;font-size:9pt;border:1px solid #ddd;'>// 성공
+{ "items": [...], "totalCount": 137 }   // 페이징
+[...]                                    // 단순 리스트
+{ ... }                                  // 단일 객체
+
+// 실패
+{ "error": "...", "details": "..." }</pre></p><p><h3 style="color:#333;">1.4 상태 코드</h3>
+<ul><li>200 OK</li>
+<li>201 Created</li>
+<li>204 No Content</li>
+<li>400 Bad Request (validation)</li>
+<li>401 Unauthorized (토큰 없음/만료)</li>
+<li>403 Forbidden (역할 부족)</li>
+<li>404 Not Found</li>
+<li>409 Conflict (멱등성 충돌)</li>
+<li>500 Internal Server Error</li></p><p></ul><h3 style="color:#333;">1.5 Idempotency</h3>
+<ul><li>POST 요청: <code style='background:#eee;font-family:Consolas;font-size:9pt;padding:1px 4px;'>Idempotency-Key</code> 헤더 권장</li>
+<li><code style='background:#eee;font-family:Consolas;font-size:9pt;padding:1px 4px;'>IdempotencyMiddleware</code>가 중복 차단</li></p><p></ul><h3 style="color:#333;">1.6 약관 동의 차단</h3>
+<ul><li><code style='background:#eee;font-family:Consolas;font-size:9pt;padding:1px 4px;'>TermsConsentMiddleware</code>가 미동의 사용자 <code style='background:#eee;font-family:Consolas;font-size:9pt;padding:1px 4px;'>/terms</code> 강제</li></p><p></ul>---</p><p><h2 style="border-bottom:1px solid #999;padding-bottom:3px;color:#1976D2;">2. API Controller 목록 (56개)</h2></p><p><h3 style="color:#333;">2.1 인증·테넌트</h3>
+<table style='border-collapse:collapse;margin:10px 0;'><thead><tr><th style='border:1px solid #aaa;padding:4px 8px;background:#e3f2fd;'>Controller</th><th style='border:1px solid #aaa;padding:4px 8px;background:#e3f2fd;'>Route</th><th style='border:1px solid #aaa;padding:4px 8px;background:#e3f2fd;'>주요 endpoint</th></tr></thead><tbody><tr><td style='border:1px solid #aaa;padding:4px 8px;'>AuthController</td><td style='border:1px solid #aaa;padding:4px 8px;'><code style='background:#eee;font-family:Consolas;font-size:9pt;padding:1px 4px;'>/api/auth</code></td><td style='border:1px solid #aaa;padding:4px 8px;'>POST /login, /refresh, /logout</td></tr>
+<tr><td style='border:1px solid #aaa;padding:4px 8px;'>TermsConsentController</td><td style='border:1px solid #aaa;padding:4px 8px;'><code style='background:#eee;font-family:Consolas;font-size:9pt;padding:1px 4px;'>/api/auth/terms</code></td><td style='border:1px solid #aaa;padding:4px 8px;'>GET /required, POST /consent</td></tr>
+<tr><td style='border:1px solid #aaa;padding:4px 8px;'>UsersController</td><td style='border:1px solid #aaa;padding:4px 8px;'><code style='background:#eee;font-family:Consolas;font-size:9pt;padding:1px 4px;'>/api/users</code></td><td style='border:1px solid #aaa;padding:4px 8px;'>GET, POST, PUT, DELETE</td></tr>
+<tr><td style='border:1px solid #aaa;padding:4px 8px;'>TenantsController</td><td style='border:1px solid #aaa;padding:4px 8px;'><code style='background:#eee;font-family:Consolas;font-size:9pt;padding:1px 4px;'>/api/tenants</code></td><td style='border:1px solid #aaa;padding:4px 8px;'>GET /current, PUT /update</td></tr>
+<tr><td style='border:1px solid #aaa;padding:4px 8px;'>EmployeesController</td><td style='border:1px solid #aaa;padding:4px 8px;'><code style='background:#eee;font-family:Consolas;font-size:9pt;padding:1px 4px;'>/api/employees</code></td><td style='border:1px solid #aaa;padding:4px 8px;'>CRUD</td></tr>
+<tr><td style='border:1px solid #aaa;padding:4px 8px;'>PermissionController</td><td style='border:1px solid #aaa;padding:4px 8px;'><code style='background:#eee;font-family:Consolas;font-size:9pt;padding:1px 4px;'>/api/permissions</code></td><td style='border:1px solid #aaa;padding:4px 8px;'>GET, PUT</td></tr>
+<tr><td style='border:1px solid #aaa;padding:4px 8px;'>PositionsController</td><td style='border:1px solid #aaa;padding:4px 8px;'><code style='background:#eee;font-family:Consolas;font-size:9pt;padding:1px 4px;'>/api/positions</code></td><td style='border:1px solid #aaa;padding:4px 8px;'>CRUD</td></tr>
+<tr><td style='border:1px solid #aaa;padding:4px 8px;'>DevicesController</td><td style='border:1px solid #aaa;padding:4px 8px;'><code style='background:#eee;font-family:Consolas;font-size:9pt;padding:1px 4px;'>/api/devices</code></td><td style='border:1px solid #aaa;padding:4px 8px;'>GET, POST register, DELETE</td></tr>
+<tr><td style='border:1px solid #aaa;padding:4px 8px;'>CompanyController</td><td style='border:1px solid #aaa;padding:4px 8px;'><code style='background:#eee;font-family:Consolas;font-size:9pt;padding:1px 4px;'>/api/company</code></td><td style='border:1px solid #aaa;padding:4px 8px;'>GET, PUT</td></tr></tbody></table>
+<h3 style="color:#333;">2.2 마스터</h3>
+<table style='border-collapse:collapse;margin:10px 0;'><thead><tr><th style='border:1px solid #aaa;padding:4px 8px;background:#e3f2fd;'>Controller</th><th style='border:1px solid #aaa;padding:4px 8px;background:#e3f2fd;'>Route</th><th style='border:1px solid #aaa;padding:4px 8px;background:#e3f2fd;'>핵심 endpoint</th></tr></thead><tbody><tr><td style='border:1px solid #aaa;padding:4px 8px;'>PartnersController</td><td style='border:1px solid #aaa;padding:4px 8px;'><code style='background:#eee;font-family:Consolas;font-size:9pt;padding:1px 4px;'>/api/partners</code></td><td style='border:1px solid #aaa;padding:4px 8px;'>CRUD, GET ledger, special-prices</td></tr>
+<tr><td style='border:1px solid #aaa;padding:4px 8px;'>ItemsController</td><td style='border:1px solid #aaa;padding:4px 8px;'><code style='background:#eee;font-family:Consolas;font-size:9pt;padding:1px 4px;'>/api/items</code></td><td style='border:1px solid #aaa;padding:4px 8px;'>CRUD, GET ledger, special-prices</td></tr>
+<tr><td style='border:1px solid #aaa;padding:4px 8px;'>ItemSpecController</td><td style='border:1px solid #aaa;padding:4px 8px;'><code style='background:#eee;font-family:Consolas;font-size:9pt;padding:1px 4px;'>/api/items/{itemId}/specs</code></td><td style='border:1px solid #aaa;padding:4px 8px;'>CRUD, activeOnly filter</td></tr>
+<tr><td style='border:1px solid #aaa;padding:4px 8px;'>BomController</td><td style='border:1px solid #aaa;padding:4px 8px;'><code style='background:#eee;font-family:Consolas;font-size:9pt;padding:1px 4px;'>/api/bom</code></td><td style='border:1px solid #aaa;padding:4px 8px;'>GET, POST, GET /{Id}</td></tr>
+<tr><td style='border:1px solid #aaa;padding:4px 8px;'>WarehousesController</td><td style='border:1px solid #aaa;padding:4px 8px;'><code style='background:#eee;font-family:Consolas;font-size:9pt;padding:1px 4px;'>/api/warehouses</code></td><td style='border:1px solid #aaa;padding:4px 8px;'>CRUD, split</td></tr></tbody></table>
+<h3 style="color:#333;">2.3 매입</h3>
+<table style='border-collapse:collapse;margin:10px 0;'><thead><tr><th style='border:1px solid #aaa;padding:4px 8px;background:#e3f2fd;'>Controller</th><th style='border:1px solid #aaa;padding:4px 8px;background:#e3f2fd;'>Route</th><th style='border:1px solid #aaa;padding:4px 8px;background:#e3f2fd;'>endpoint</th></tr></thead><tbody><tr><td style='border:1px solid #aaa;padding:4px 8px;'>PurchaseController</td><td style='border:1px solid #aaa;padding:4px 8px;'><code style='background:#eee;font-family:Consolas;font-size:9pt;padding:1px 4px;'>/api/purchase</code></td><td style='border:1px solid #aaa;padding:4px 8px;'>orders, receipts, returns, status</td></tr></tbody></table>
+<h3 style="color:#333;">2.4 판매</h3>
+<table style='border-collapse:collapse;margin:10px 0;'><thead><tr><th style='border:1px solid #aaa;padding:4px 8px;background:#e3f2fd;'>Controller</th><th style='border:1px solid #aaa;padding:4px 8px;background:#e3f2fd;'>Route</th><th style='border:1px solid #aaa;padding:4px 8px;background:#e3f2fd;'>endpoint</th></tr></thead><tbody><tr><td style='border:1px solid #aaa;padding:4px 8px;'>SalesController</td><td style='border:1px solid #aaa;padding:4px 8px;'><code style='background:#eee;font-family:Consolas;font-size:9pt;padding:1px 4px;'>/api/sales</code></td><td style='border:1px solid #aaa;padding:4px 8px;'>orders, summary, statistics, ranking</td></tr>
+<tr><td style='border:1px solid #aaa;padding:4px 8px;'>QuotationsController</td><td style='border:1px solid #aaa;padding:4px 8px;'><code style='background:#eee;font-family:Consolas;font-size:9pt;padding:1px 4px;'>/api/quotations</code></td><td style='border:1px solid #aaa;padding:4px 8px;'>CRUD, PDF</td></tr>
+<tr><td style='border:1px solid #aaa;padding:4px 8px;'>DeliveryController</td><td style='border:1px solid #aaa;padding:4px 8px;'><code style='background:#eee;font-family:Consolas;font-size:9pt;padding:1px 4px;'>/api/delivery</code></td><td style='border:1px solid #aaa;padding:4px 8px;'>CRUD, confirm</td></tr>
+<tr><td style='border:1px solid #aaa;padding:4px 8px;'>TaxInvoiceController</td><td style='border:1px solid #aaa;padding:4px 8px;'><code style='background:#eee;font-family:Consolas;font-size:9pt;padding:1px 4px;'>/api/sales/tax-invoices</code></td><td style='border:1px solid #aaa;padding:4px 8px;'>CRUD, send, history</td></tr></tbody></table>
+<h3 style="color:#333;">2.5 재고</h3>
+<table style='border-collapse:collapse;margin:10px 0;'><thead><tr><th style='border:1px solid #aaa;padding:4px 8px;background:#e3f2fd;'>Controller</th><th style='border:1px solid #aaa;padding:4px 8px;background:#e3f2fd;'>Route</th><th style='border:1px solid #aaa;padding:4px 8px;background:#e3f2fd;'>endpoint</th></tr></thead><tbody><tr><td style='border:1px solid #aaa;padding:4px 8px;'>StockController</td><td style='border:1px solid #aaa;padding:4px 8px;'><code style='background:#eee;font-family:Consolas;font-size:9pt;padding:1px 4px;'>/api/stock</code></td><td style='border:1px solid #aaa;padding:4px 8px;'>GET, ledger, adjust, transfer</td></tr></tbody></table>
+<h3 style="color:#333;">2.6 재무</h3>
+<table style='border-collapse:collapse;margin:10px 0;'><thead><tr><th style='border:1px solid #aaa;padding:4px 8px;background:#e3f2fd;'>Controller</th><th style='border:1px solid #aaa;padding:4px 8px;background:#e3f2fd;'>Route</th><th style='border:1px solid #aaa;padding:4px 8px;background:#e3f2fd;'>endpoint</th></tr></thead><tbody><tr><td style='border:1px solid #aaa;padding:4px 8px;'>FinanceController</td><td style='border:1px solid #aaa;padding:4px 8px;'><code style='background:#eee;font-family:Consolas;font-size:9pt;padding:1px 4px;'>/api/finance</code></td><td style='border:1px solid #aaa;padding:4px 8px;'>journal, accounts, monthly-closing</td></tr>
+<tr><td style='border:1px solid #aaa;padding:4px 8px;'>MonthlyClosingController</td><td style='border:1px solid #aaa;padding:4px 8px;'><code style='background:#eee;font-family:Consolas;font-size:9pt;padding:1px 4px;'>/api/monthly-closing</code></td><td style='border:1px solid #aaa;padding:4px 8px;'>POST close, GET status</td></tr>
+<tr><td style='border:1px solid #aaa;padding:4px 8px;'>CollectionsController</td><td style='border:1px solid #aaa;padding:4px 8px;'><code style='background:#eee;font-family:Consolas;font-size:9pt;padding:1px 4px;'>/api/collections</code></td><td style='border:1px solid #aaa;padding:4px 8px;'>CRUD</td></tr>
+<tr><td style='border:1px solid #aaa;padding:4px 8px;'>PaymentsController</td><td style='border:1px solid #aaa;padding:4px 8px;'><code style='background:#eee;font-family:Consolas;font-size:9pt;padding:1px 4px;'>/api/[controller]</code></td><td style='border:1px solid #aaa;padding:4px 8px;'>CRUD</td></tr></tbody></table>
+<h3 style="color:#333;">2.7 결재·인사</h3>
+<table style='border-collapse:collapse;margin:10px 0;'><thead><tr><th style='border:1px solid #aaa;padding:4px 8px;background:#e3f2fd;'>Controller</th><th style='border:1px solid #aaa;padding:4px 8px;background:#e3f2fd;'>Route</th><th style='border:1px solid #aaa;padding:4px 8px;background:#e3f2fd;'>endpoint</th></tr></thead><tbody><tr><td style='border:1px solid #aaa;padding:4px 8px;'>ApprovalController</td><td style='border:1px solid #aaa;padding:4px 8px;'><code style='background:#eee;font-family:Consolas;font-size:9pt;padding:1px 4px;'>/api/approval</code></td><td style='border:1px solid #aaa;padding:4px 8px;'>pending, completed, sent, approve, reject</td></tr>
+<tr><td style='border:1px solid #aaa;padding:4px 8px;'>ApprovalLinesController</td><td style='border:1px solid #aaa;padding:4px 8px;'><code style='background:#eee;font-family:Consolas;font-size:9pt;padding:1px 4px;'>/api/approval-lines</code></td><td style='border:1px solid #aaa;padding:4px 8px;'>CRUD</td></tr>
+<tr><td style='border:1px solid #aaa;padding:4px 8px;'>HrController</td><td style='border:1px solid #aaa;padding:4px 8px;'><code style='background:#eee;font-family:Consolas;font-size:9pt;padding:1px 4px;'>/api/hr</code></td><td style='border:1px solid #aaa;padding:4px 8px;'>attendance, leave, overtime</td></tr>
+<tr><td style='border:1px solid #aaa;padding:4px 8px;'>LeaveRequestsController</td><td style='border:1px solid #aaa;padding:4px 8px;'><code style='background:#eee;font-family:Consolas;font-size:9pt;padding:1px 4px;'>/api/leave-requests</code></td><td style='border:1px solid #aaa;padding:4px 8px;'>CRUD</td></tr>
+<tr><td style='border:1px solid #aaa;padding:4px 8px;'>LaborContractController</td><td style='border:1px solid #aaa;padding:4px 8px;'><code style='background:#eee;font-family:Consolas;font-size:9pt;padding:1px 4px;'>/api/labor-contracts</code></td><td style='border:1px solid #aaa;padding:4px 8px;'>CRUD, sign</td></tr>
+<tr><td style='border:1px solid #aaa;padding:4px 8px;'>ESignController</td><td style='border:1px solid #aaa;padding:4px 8px;'><code style='background:#eee;font-family:Consolas;font-size:9pt;padding:1px 4px;'>/api/esign</code></td><td style='border:1px solid #aaa;padding:4px 8px;'>request, callback, history</td></tr></tbody></table>
+<h3 style="color:#333;">2.8 보조</h3>
+<table style='border-collapse:collapse;margin:10px 0;'><thead><tr><th style='border:1px solid #aaa;padding:4px 8px;background:#e3f2fd;'>Controller</th><th style='border:1px solid #aaa;padding:4px 8px;background:#e3f2fd;'>Route</th><th style='border:1px solid #aaa;padding:4px 8px;background:#e3f2fd;'>endpoint</th></tr></thead><tbody><tr><td style='border:1px solid #aaa;padding:4px 8px;'>BillingController</td><td style='border:1px solid #aaa;padding:4px 8px;'><code style='background:#eee;font-family:Consolas;font-size:9pt;padding:1px 4px;'>/api/billing</code></td><td style='border:1px solid #aaa;padding:4px 8px;'>subscription, payments, methods</td></tr>
+<tr><td style='border:1px solid #aaa;padding:4px 8px;'>BackupController</td><td style='border:1px solid #aaa;padding:4px 8px;'><code style='background:#eee;font-family:Consolas;font-size:9pt;padding:1px 4px;'>/api/backup</code></td><td style='border:1px solid #aaa;padding:4px 8px;'>settings, history, run, restore</td></tr>
+<tr><td style='border:1px solid #aaa;padding:4px 8px;'>EmailController</td><td style='border:1px solid #aaa;padding:4px 8px;'><code style='background:#eee;font-family:Consolas;font-size:9pt;padding:1px 4px;'>/api/email</code></td><td style='border:1px solid #aaa;padding:4px 8px;'>settings, send, history</td></tr>
+<tr><td style='border:1px solid #aaa;padding:4px 8px;'>CertificatesController</td><td style='border:1px solid #aaa;padding:4px 8px;'><code style='background:#eee;font-family:Consolas;font-size:9pt;padding:1px 4px;'>/api/certificates</code></td><td style='border:1px solid #aaa;padding:4px 8px;'>upload, list, delete</td></tr>
+<tr><td style='border:1px solid #aaa;padding:4px 8px;'>ChatbotController</td><td style='border:1px solid #aaa;padding:4px 8px;'><code style='background:#eee;font-family:Consolas;font-size:9pt;padding:1px 4px;'>/api/chatbot</code></td><td style='border:1px solid #aaa;padding:4px 8px;'>ask, history</td></tr>
+<tr><td style='border:1px solid #aaa;padding:4px 8px;'>DocumentsController</td><td style='border:1px solid #aaa;padding:4px 8px;'><code style='background:#eee;font-family:Consolas;font-size:9pt;padding:1px 4px;'>/api/documents</code></td><td style='border:1px solid #aaa;padding:4px 8px;'>upload, download</td></tr>
+<tr><td style='border:1px solid #aaa;padding:4px 8px;'>LogsController</td><td style='border:1px solid #aaa;padding:4px 8px;'><code style='background:#eee;font-family:Consolas;font-size:9pt;padding:1px 4px;'>/api/logs</code></td><td style='border:1px solid #aaa;padding:4px 8px;'>tail, audit, api-requests</td></tr>
+<tr><td style='border:1px solid #aaa;padding:4px 8px;'>MigrationController</td><td style='border:1px solid #aaa;padding:4px 8px;'><code style='background:#eee;font-family:Consolas;font-size:9pt;padding:1px 4px;'>/api/migration</code></td><td style='border:1px solid #aaa;padding:4px 8px;'>start, status, progress (SignalR)</td></tr>
+<tr><td style='border:1px solid #aaa;padding:4px 8px;'>ReportsController</td><td style='border:1px solid #aaa;padding:4px 8px;'><code style='background:#eee;font-family:Consolas;font-size:9pt;padding:1px 4px;'>/api/reports</code></td><td style='border:1px solid #aaa;padding:4px 8px;'>sales, purchase, stock</td></tr>
+<tr><td style='border:1px solid #aaa;padding:4px 8px;'>SettingsController</td><td style='border:1px solid #aaa;padding:4px 8px;'><code style='background:#eee;font-family:Consolas;font-size:9pt;padding:1px 4px;'>/api/settings</code></td><td style='border:1px solid #aaa;padding:4px 8px;'>get, update</td></tr>
+<tr><td style='border:1px solid #aaa;padding:4px 8px;'>FormTemplateController</td><td style='border:1px solid #aaa;padding:4px 8px;'><code style='background:#eee;font-family:Consolas;font-size:9pt;padding:1px 4px;'>/api/settings/form-templates</code></td><td style='border:1px solid #aaa;padding:4px 8px;'>CRUD, seed</td></tr>
+<tr><td style='border:1px solid #aaa;padding:4px 8px;'>TaxInvoiceCertController</td><td style='border:1px solid #aaa;padding:4px 8px;'><code style='background:#eee;font-family:Consolas;font-size:9pt;padding:1px 4px;'>/api/settings/tax-invoice-cert</code></td><td style='border:1px solid #aaa;padding:4px 8px;'>CRUD</td></tr>
+<tr><td style='border:1px solid #aaa;padding:4px 8px;'>DashboardController</td><td style='border:1px solid #aaa;padding:4px 8px;'><code style='background:#eee;font-family:Consolas;font-size:9pt;padding:1px 4px;'>/api/dashboard</code></td><td style='border:1px solid #aaa;padding:4px 8px;'>KPI, charts</td></tr></tbody></table>
+<hr style="border:none;border-top:1px solid #ccc;"></p><p><h2 style="border-bottom:1px solid #999;padding-bottom:3px;color:#1976D2;">3. 주요 endpoint 상세</h2></p><p><h3 style="color:#333;">3.1 인증</h3>
+<pre style='background:#f4f4f4;padding:8px;font-family:Consolas;font-size:9pt;border:1px solid #ddd;'>POST /api/auth/login
+Body: { email, password }
+Response: { accessToken, refreshToken, userName, requiresTermsConsent }
+
+POST /api/auth/refresh
+Body: { refreshToken }
+Response: { accessToken, refreshToken }
+
+POST /api/auth/logout
+Header: Authorization: Bearer ...
+Response: 204</pre></p><p><h3 style="color:#333;">3.2 약관 동의</h3>
+<pre style='background:#f4f4f4;padding:8px;font-family:Consolas;font-size:9pt;border:1px solid #ddd;'>GET /api/auth/terms/required
+Response: { items: [{ type, version, mandatory }] }
+
+POST /api/auth/terms/consent
+Body: { consents: [{ type, version, agreed }] }
+Response: 201</pre></p><p><h3 style="color:#333;">3.3 상품 + 규격</h3>
+<pre style='background:#f4f4f4;padding:8px;font-family:Consolas;font-size:9pt;border:1px solid #ddd;'>GET /api/items?pageSize=20&amp;page=1
+Response: [...] (배열 직접 반환)
+
+GET /api/items/{itemId}/specs?activeOnly=true
+Response: [{ specId, itemId, specValue, isDefault, sortOrder }]
+
+POST /api/items/{itemId}/specs
+Body: { specValue, isDefault, sortOrder }
+Response: 201</pre></p><p><h3 style="color:#333;">3.4 견적·수주·매입 (워크플로우)</h3>
+<pre style='background:#f4f4f4;padding:8px;font-family:Consolas;font-size:9pt;border:1px solid #ddd;'>POST /api/quotations
+Body: { partnerId, items: [{ itemId, specValue, quantity, unitPrice }], memo }
+Response: 201 { quotationId }
+
+POST /api/sales/orders/from-quotation/{quotationId}
+Response: 201 { salesOrderId }
+
+POST /api/delivery
+Body: { salesOrderId, items: [...] }
+Response: 201 { deliveryId } + stock_ledger -N + journal_lines INSERT</pre></p><p><h3 style="color:#333;">3.5 BOM 생산</h3>
+<pre style='background:#f4f4f4;padding:8px;font-family:Consolas;font-size:9pt;border:1px solid #ddd;'>POST /api/bom/{bomId}/produce
+Body: { quantity }
+Response: 201
+  → 동일 트랜잭션:
+  → stock_ledger +N (완제품)
+  → stock_ledger -각각 (자재)</pre></p><p><h3 style="color:#333;">3.6 결재</h3>
+<pre style='background:#f4f4f4;padding:8px;font-family:Consolas;font-size:9pt;border:1px solid #ddd;'>POST /api/approval/request
+Body: { documentType, documentId, lineId, comment }
+Response: 201
+
+POST /api/approval/{approvalId}/approve
+Body: { comment }
+Response: 200
+
+POST /api/approval/{approvalId}/reject
+Body: { reason }
+Response: 200</pre></p><p><h3 style="color:#333;">3.7 마이그 (SignalR)</h3>
+<pre style='background:#f4f4f4;padding:8px;font-family:Consolas;font-size:9pt;border:1px solid #ddd;'>POST /api/migration/start
+Body: { mdbPath, options }
+Response: 202 { jobId }
+
+SignalR Hub: /hubs/migration
+Event: ProgressUpdated { jobId, percent, currentTable, processed, total }
+Event: Completed { jobId, summary }
+Event: Failed { jobId, error }</pre></p><p><hr style="border:none;border-top:1px solid #ccc;"></p><p><h2 style="border-bottom:1px solid #999;padding-bottom:3px;color:#1976D2;">4. 외부 시스템 인터페이스</h2></p><p><h3 style="color:#333;">4.1 Cloudflare 터널</h3>
+<ul><li>프로토콜: cloudflared (UDP 7844)</li>
+<li>도메인: <code style='background:#eee;font-family:Consolas;font-size:9pt;padding:1px 4px;'>https://{tenant}.hitpan.kr</code> (베타: <code style='background:#eee;font-family:Consolas;font-size:9pt;padding:1px 4px;'>hitpan-{tenant}.workers.dev</code>)</li>
+<li>인증: TunnelSecret (DPAPI 보호, 헌법 #28 자동 복구)</li></p><p></ul><h3 style="color:#333;">4.2 토스페이먼츠 (SaaS 결제)</h3>
+<ul><li>BillingController가 호출</li>
+<li>본사 서버 측 결제만 (고객 PC에서 호출 금지, 헌법 #18)</li></p><p></ul><h3 style="color:#333;">4.3 카카오/토스/금융/PASS (간편인증)</h3>
+<ul><li>ESignController가 통합</li>
+<li>헌법: 공인인증서 미사용</li></p><p></ul><h3 style="color:#333;">4.4 메이크빌 ASP (전자세금계산서)</h3>
+<ul><li>TaxInvoiceController L2 계층</li>
+<li>3차 외부 베타 자문 협력사</li></p><p></ul><h3 style="color:#333;">4.5 홈택스 API (선택, 외주 검토)</h3>
+<ul><li>L3 계층, 미구현</li></p><p></ul>---</p><p><h2 style="border-bottom:1px solid #999;padding-bottom:3px;color:#1976D2;">5. WebSocket (SignalR)</h2></p><p><table style='border-collapse:collapse;margin:10px 0;'><thead><tr><th style='border:1px solid #aaa;padding:4px 8px;background:#e3f2fd;'>Hub</th><th style='border:1px solid #aaa;padding:4px 8px;background:#e3f2fd;'>용도</th></tr></thead><tbody><tr><td style='border:1px solid #aaa;padding:4px 8px;'><code style='background:#eee;font-family:Consolas;font-size:9pt;padding:1px 4px;'>/hubs/migration</code></td><td style='border:1px solid #aaa;padding:4px 8px;'>마이그 진행률 실시간</td></tr>
+<tr><td style='border:1px solid #aaa;padding:4px 8px;'><code style='background:#eee;font-family:Consolas;font-size:9pt;padding:1px 4px;'>/hubs/chatbot</code></td><td style='border:1px solid #aaa;padding:4px 8px;'>AI CS 스트리밍 (옵션)</td></tr>
+<tr><td style='border:1px solid #aaa;padding:4px 8px;'><code style='background:#eee;font-family:Consolas;font-size:9pt;padding:1px 4px;'>/hubs/watchdog</code></td><td style='border:1px solid #aaa;padding:4px 8px;'>워치독 핑 (Phase 6)</td></tr></tbody></table>
+<hr style="border:none;border-top:1px solid #ccc;"></p><p><h2 style="border-bottom:1px solid #999;padding-bottom:3px;color:#1976D2;">6. 보안 헤더</h2></p><p><table style='border-collapse:collapse;margin:10px 0;'><thead><tr><th style='border:1px solid #aaa;padding:4px 8px;background:#e3f2fd;'>헤더</th><th style='border:1px solid #aaa;padding:4px 8px;background:#e3f2fd;'>값</th></tr></thead><tbody><tr><td style='border:1px solid #aaa;padding:4px 8px;'>Strict-Transport-Security</td><td style='border:1px solid #aaa;padding:4px 8px;'>max-age=31536000</td></tr>
+<tr><td style='border:1px solid #aaa;padding:4px 8px;'>X-Content-Type-Options</td><td style='border:1px solid #aaa;padding:4px 8px;'>nosniff</td></tr>
+<tr><td style='border:1px solid #aaa;padding:4px 8px;'>X-Frame-Options</td><td style='border:1px solid #aaa;padding:4px 8px;'>DENY</td></tr>
+<tr><td style='border:1px solid #aaa;padding:4px 8px;'>Content-Security-Policy</td><td style='border:1px solid #aaa;padding:4px 8px;'>default-src 'self' (베타 출시 전 강화)</td></tr></tbody></table>
+<hr style="border:none;border-top:1px solid #ccc;"></p><p><h2 style="border-bottom:1px solid #999;padding-bottom:3px;color:#1976D2;">7. Rate Limit</h2></p><p><ul><li>로그인: 5회/분 (Brute Force 차단)</li>
+<li>일반 API: 100회/분</li>
+<li>마이그: 1회/시간 (헌법 #26 호환)</li>
+</ul></p></body>
+</html>
