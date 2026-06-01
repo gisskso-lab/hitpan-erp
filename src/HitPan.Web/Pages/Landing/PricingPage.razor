@@ -1,0 +1,92 @@
+@page "/pricing"
+@layout LandingLayout
+
+<PageTitle>요금제 — 히트판 ERP</PageTitle>
+
+<section class="pricing-hero">
+    <div class="landing-container">
+        <h1>요금제</h1>
+        <p>회사 규모에 맞춰 선택하세요. 베타 기간 평생 50% 할인.</p>
+    </div>
+</section>
+
+<section class="pricing-grid">
+    <div class="landing-container grid-3">
+        <div class="plan">
+            <h3>베이직</h3>
+            <div class="price"><span class="num">29,000</span>원/월</div>
+            <ul>
+                <li>✓ 기기 1대</li>
+                <li>✓ 사용자 3명</li>
+                <li>✓ AI 토큰 100K</li>
+                <li>✓ 1:1 메일 지원</li>
+            </ul>
+            <a href="/signup?plan=basic" class="btn btn-outline btn-block">선택</a>
+        </div>
+
+        <div class="plan plan-featured">
+            <div class="ribbon">추천</div>
+            <h3>스탠다드</h3>
+            <div class="price"><span class="num">59,000</span>원/월</div>
+            <ul>
+                <li>✓ 기기 3대</li>
+                <li>✓ 사용자 10명</li>
+                <li>✓ AI 토큰 500K</li>
+                <li>✓ AI 챗봇 우선 응답</li>
+                <li>✓ 원격 지원</li>
+            </ul>
+            <a href="/signup?plan=standard" class="btn btn-primary btn-block">선택</a>
+        </div>
+
+        <div class="plan">
+            <h3>프리미엄</h3>
+            <div class="price"><span class="num">100,000</span>원/월</div>
+            <ul>
+                <li>✓ 기기 무제한</li>
+                <li>✓ 사용자 무제한</li>
+                <li>✓ AI 토큰 3M</li>
+                <li>✓ 24/7 우선 CS</li>
+                <li>✓ 전담 매니저</li>
+            </ul>
+            <a href="/signup?plan=premium" class="btn btn-outline btn-block">선택</a>
+        </div>
+    </div>
+</section>
+
+<section class="pricing-note">
+    <div class="landing-container">
+        <h2>모든 요금제 공통</h2>
+        <div class="note-grid">
+            <div>✓ 데이터 주권 본인 PC</div>
+            <div>✓ 원클릭 설치 10분</div>
+            <div>✓ 모바일 지원</div>
+            <div>✓ 자동 백업 (E2E 암호화)</div>
+            <div>✓ Windows Defender + 백신 5종 호환</div>
+            <div>✓ AI CS 챗봇</div>
+        </div>
+    </div>
+</section>
+
+<style>
+.pricing-hero { padding: 60px 0 32px; text-align: center; background: #F0F9F5; }
+.pricing-hero h1 { font-size: 40px; margin-bottom: 8px; }
+.pricing-hero p { color: #4B5563; font-size: 16px; }
+.pricing-grid { padding: 48px 0; }
+.grid-3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px; }
+.plan { background: #fff; border: 2px solid #E5E7EB; border-radius: 16px; padding: 32px; position: relative; }
+.plan-featured { border-color: #0F6E56; transform: scale(1.04); box-shadow: 0 20px 40px rgba(15, 110, 86, 0.15); }
+.ribbon { position: absolute; top: -12px; right: 24px; background: #FF6B35; color: #fff; padding: 4px 12px; border-radius: 12px; font-size: 12px; font-weight: 700; }
+.plan h3 { font-size: 22px; margin-bottom: 8px; color: #0F6E56; }
+.price { font-size: 14px; color: #6B7280; margin-bottom: 20px; }
+.price .num { font-size: 36px; font-weight: 800; color: #0F1419; }
+.plan ul { list-style: none; padding: 0; margin-bottom: 24px; }
+.plan ul li { padding: 8px 0; font-size: 15px; color: #4B5563; }
+.btn { display: inline-block; padding: 12px 24px; border-radius: 8px; text-decoration: none; font-weight: 600; text-align: center; }
+.btn-block { width: 100%; box-sizing: border-box; }
+.btn-primary { background: #0F6E56; color: #fff; }
+.btn-outline { background: #fff; color: #0F6E56; border: 2px solid #0F6E56; }
+.pricing-note { padding: 48px 0; background: #F9FAFB; }
+.pricing-note h2 { text-align: center; font-size: 24px; margin-bottom: 24px; }
+.note-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 12px; max-width: 800px; margin: 0 auto; color: #4B5563; }
+@@media (max-width: 768px) { .grid-3 { grid-template-columns: 1fr; } .plan-featured { transform: none; } }
+</style>

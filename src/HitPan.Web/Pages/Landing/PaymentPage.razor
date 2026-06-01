@@ -1,0 +1,99 @@
+@page "/payment"
+@layout LandingLayout
+@inject NavigationManager Nav
+
+<PageTitle>결제 — 히트판 ERP</PageTitle>
+
+<section class="payment-section">
+    <div class="payment-card">
+        <h1>결제</h1>
+        <p class="lead">선택한 요금제로 첫 달 결제를 진행합니다.</p>
+
+        <div class="summary">
+            <div class="summary-row">
+                <span>요금제</span>
+                <strong>@_planLabel</strong>
+            </div>
+            <div class="summary-row">
+                <span>첫 달</span>
+                <strong>@_priceText</strong>
+            </div>
+            <div class="summary-row total">
+                <span>총 결제 금액</span>
+                <strong>@_priceText</strong>
+            </div>
+        </div>
+
+        <div class="methods">
+            <h3>결제 수단</h3>
+            <div class="method-grid">
+                <button class="method @(_method == "card" ? "active" : "")" @onclick='() => _method = "card"'>
+                    💳 카드결제
+                </button>
+                <button class="method @(_method == "transfer" ? "active" : "")" @onclick='() => _method = "transfer"'>
+                    🏦 계좌이체
+                </button>
+                <button class="method @(_method == "phone" ? "active" : "")" @onclick='() => _method = "phone"'>
+                    📱 휴대폰
+                </button>
+            </div>
+        </div>
+
+        <button class="btn-pay" @onclick="HandlePay" disabled="@_processing">
+            @(_processing ? "결제 진행 중..." : $"{_priceText} 결제하기")
+        </button>
+
+        <p class="security">
+            🔒 토스페이먼츠 통한 안전 결제. 카드 정보는 본사 서버에 저장되지 않습니다.
+        </p>
+    </div>
+</section>
+
+@code {
+    [SupplyParameterFromQuery]
+    public string? Plan { get; set; }
+
+    private string _planLabel = "스탠다드";
+    private string _priceText = "59,000원";
+    private string _method = "card";
+    private bool _processing;
+
+    protected override void OnParametersSet()
+    {
+        (_planLabel, _priceText) = Plan switch
+        {
+            "basic" => ("베이직", "29,000원"),
+            "premium" => ("프리미엄", "100,000원"),
+            _ => ("스탠다드", "59,000원")
+        };
+    }
+
+    private async Task HandlePay()
+    {
+        _processing = true;
+        // 스켈레톤: 실제 토스페이먼츠 SDK 호출은 작지#5(Webhook 박제) 후 작지#?에서 박제
+        await Task.Delay(1500);
+        Nav.NavigateTo($"/welcome?plan={Plan}");
+    }
+}
+
+<style>
+.payment-section { padding: 48px 0; background: #F9FAFB; min-height: calc(100vh - 200px); }
+.payment-card { max-width: 480px; margin: 0 auto; background: #fff; padding: 40px; border-radius: 16px; box-shadow: 0 4px 16px rgba(0,0,0,0.06); }
+.payment-card h1 { font-size: 28px; margin-bottom: 8px; }
+.lead { color: #6B7280; margin-bottom: 24px; font-size: 14px; }
+.summary { background: #F9FAFB; border-radius: 8px; padding: 20px; margin-bottom: 24px; }
+.summary-row { display: flex; justify-content: space-between; padding: 8px 0; font-size: 14px; }
+.summary-row.total { border-top: 1px solid #E5E7EB; margin-top: 8px; padding-top: 16px; font-size: 16px; }
+.summary-row.total strong { color: #0F6E56; font-size: 20px; }
+.methods { margin-bottom: 24px; }
+.methods h3 { font-size: 14px; font-weight: 600; margin-bottom: 12px; }
+.method-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+.method { padding: 16px 8px; background: #fff; border: 2px solid #E5E7EB; border-radius: 8px; font-size: 13px; cursor: pointer; }
+.method:hover { border-color: #0F6E56; }
+.method.active { border-color: #0F6E56; background: #F0F9F5; color: #0F6E56; font-weight: 600; }
+.btn-pay { width: 100%; padding: 16px; background: #0F6E56; color: #fff; border: none; border-radius: 8px; font-size: 16px; font-weight: 700; cursor: pointer; }
+.btn-pay:hover:not(:disabled) { background: #0A5240; }
+.btn-pay:disabled { opacity: 0.6; cursor: not-allowed; }
+.security { text-align: center; margin-top: 16px; font-size: 12px; color: #6B7280; }
+</style>

@@ -1,0 +1,97 @@
+@page "/landing"
+@layout LandingLayout
+@using Microsoft.AspNetCore.Components
+
+<PageTitle>히트판 ERP — 처음 쓰는 사람도 그냥 되는 ERP</PageTitle>
+
+<section class="hero">
+    <div class="landing-container hero-inner">
+        <div class="hero-text">
+            <span class="badge">베타 신청 진행 중</span>
+            <h1>처음 쓰는 사람도<br />3분 안에 쓸 수 있는 ERP</h1>
+            <p class="lead">설치 5분, 교육 0분. 공유기 설정 없습니다.<br />더존·이카운트보다 쉽습니다.</p>
+            <div class="hero-cta">
+                <a href="/pricing" class="btn btn-primary">요금제 보기</a>
+                <a href="/signup" class="btn btn-outline">무료 체험 시작</a>
+            </div>
+            <div class="hero-points">
+                <span>✓ 데이터 주권 본인 PC</span>
+                <span>✓ 모바일 동등 시민</span>
+                <span>✓ AI 챗봇 24/7</span>
+            </div>
+        </div>
+        <div class="hero-visual">
+            <div class="visual-card">
+                <div class="visual-row" style="background:#E6F4F0; color:#0A5240;">매출 ₩12,450,000</div>
+                <div class="visual-row" style="background:#FFF0EB; color:#B7390B;">매입 ₩7,820,000</div>
+                <div class="visual-row" style="background:#F3F4F6; color:#0F1419;">재고 1,247건</div>
+            </div>
+        </div>
+    </div>
+</section>
+
+<section class="features">
+    <div class="landing-container">
+        <h2>왜 히트판인가</h2>
+        <div class="feature-grid">
+            <div class="feature">
+                <div class="ic">🔒</div>
+                <h3>데이터 주권 본인 PC</h3>
+                <p>모든 업무 데이터는 사장님 PC에. 본사는 메타정보만 봅니다.<br />쿠팡·SKT 사고 시대의 진짜 안전.</p>
+            </div>
+            <div class="feature">
+                <div class="ic">⚡</div>
+                <h3>설치 10분 완성</h3>
+                <p>EXE 더블 클릭 → 라이선스 키 입력 한 번. 공유기 설정 0건.</p>
+            </div>
+            <div class="feature">
+                <div class="ic">📱</div>
+                <h3>모바일 동등 시민</h3>
+                <p>현장에서 즉시 견적·발주·매입. PC와 같은 데이터.</p>
+            </div>
+            <div class="feature">
+                <div class="ic">🤖</div>
+                <h3>AI CS 24/7</h3>
+                <p>"히트판에게 물어보세요" — 매뉴얼 없이도 막힘 없이.</p>
+            </div>
+        </div>
+    </div>
+</section>
+
+<section class="cta-section">
+    <div class="landing-container">
+        <h2>지금 베타 신청하세요</h2>
+        <p>먼저 사용한 분들께 평생 50% 할인.</p>
+        <a href="/signup" class="btn btn-primary btn-lg">무료 체험 시작</a>
+    </div>
+</section>
+
+<style>
+.hero { padding: 80px 0; background: linear-gradient(135deg, #F0F9F5 0%, #FFFFFF 100%); }
+.hero-inner { display: grid; grid-template-columns: 1.2fr 1fr; gap: 48px; align-items: center; }
+.badge { display: inline-block; background: #FFF0EB; color: #B7390B; padding: 4px 12px; border-radius: 16px; font-size: 13px; font-weight: 600; margin-bottom: 16px; }
+.hero h1 { font-size: 48px; line-height: 1.2; margin-bottom: 16px; color: #0F1419; }
+.lead { font-size: 18px; color: #4B5563; margin-bottom: 24px; }
+.hero-cta { display: flex; gap: 12px; margin-bottom: 24px; }
+.btn { display: inline-block; padding: 12px 24px; border-radius: 8px; text-decoration: none; font-weight: 600; }
+.btn-primary { background: #0F6E56; color: #fff; }
+.btn-primary:hover { background: #0A5240; }
+.btn-outline { background: #fff; color: #0F6E56; border: 2px solid #0F6E56; }
+.btn-lg { padding: 16px 32px; font-size: 16px; }
+.hero-points { display: flex; gap: 16px; color: #6B7280; font-size: 14px; flex-wrap: wrap; }
+.visual-card { background: #fff; border-radius: 16px; padding: 24px; box-shadow: 0 20px 50px rgba(15, 110, 86, 0.15); }
+.visual-row { padding: 16px; border-radius: 12px; margin-bottom: 12px; font-weight: 700; font-size: 18px; }
+.features { padding: 80px 0; }
+.features h2 { text-align: center; font-size: 32px; margin-bottom: 48px; }
+.feature-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 24px; }
+.feature { background: #fff; border: 1px solid #E5E7EB; border-radius: 16px; padding: 24px; }
+.feature .ic { font-size: 32px; margin-bottom: 12px; }
+.feature h3 { font-size: 18px; margin-bottom: 8px; }
+.feature p { color: #6B7280; font-size: 14px; line-height: 1.6; }
+.cta-section { padding: 80px 0; background: #0F6E56; color: #fff; text-align: center; }
+.cta-section h2 { font-size: 32px; margin-bottom: 12px; }
+.cta-section p { font-size: 18px; margin-bottom: 24px; opacity: 0.9; }
+.cta-section .btn-primary { background: #FF6B35; }
+.cta-section .btn-primary:hover { background: #E55A2A; }
+@@media (max-width: 768px) { .hero-inner { grid-template-columns: 1fr; } .hero h1 { font-size: 32px; } }
+</style>

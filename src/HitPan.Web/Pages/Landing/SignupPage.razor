@@ -1,0 +1,129 @@
+@page "/signup"
+@layout LandingLayout
+@inject NavigationManager Nav
+
+<PageTitle>회원가입 — 히트판 ERP</PageTitle>
+
+<section class="signup-section">
+    <div class="signup-card">
+        <h1>회원가입</h1>
+        <p class="lead">3분이면 가입 완료. 이메일 인증 후 결제 화면으로 이동합니다.</p>
+
+        <EditForm Model="_form" OnValidSubmit="HandleSubmit">
+            <div class="field">
+                <label>이메일 *</label>
+                <input type="email" @bind="_form.Email" required placeholder="example@company.com" />
+            </div>
+
+            <div class="field">
+                <label>비밀번호 *</label>
+                <input type="password" @bind="_form.Password" required placeholder="8자 이상, 영문+숫자+특수문자" />
+            </div>
+
+            <div class="field">
+                <label>회사명 *</label>
+                <input type="text" @bind="_form.CompanyName" required placeholder="(주)히트판" />
+            </div>
+
+            <div class="field">
+                <label>대표자명 *</label>
+                <input type="text" @bind="_form.RepresentativeName" required />
+            </div>
+
+            <div class="field">
+                <label>연락처 *</label>
+                <input type="tel" @bind="_form.Phone" required placeholder="010-0000-0000" />
+            </div>
+
+            <div class="field">
+                <label>선택한 요금제</label>
+                <input type="text" value="@_planLabel" readonly />
+            </div>
+
+            <div class="terms">
+                <label><input type="checkbox" @bind="_form.AgreeService" /> [필수] 서비스 이용약관 동의 <a href="/legal/service.html" target="_blank">전문</a></label>
+                <label><input type="checkbox" @bind="_form.AgreePrivacy" /> [필수] 개인정보 처리방침 동의 <a href="/legal/privacy.html" target="_blank">전문</a></label>
+                <label><input type="checkbox" @bind="_form.AgreeOutsourcing" /> [필수] 개인정보 처리 위탁 동의 <a href="/legal/data-ownership.html" target="_blank">전문</a></label>
+                <label><input type="checkbox" @bind="_form.AgreeMarketing" /> [선택] 마케팅 정보 수신 동의</label>
+            </div>
+
+            @if (!string.IsNullOrEmpty(_error))
+            {
+                <div class="error">@_error</div>
+            }
+
+            <button type="submit" class="btn-submit" disabled="@_submitting">
+                @(_submitting ? "처리 중..." : "다음 단계 (이메일 인증)")
+            </button>
+        </EditForm>
+
+        <p class="login-link">이미 가입하셨나요? <a href="/login">로그인</a></p>
+    </div>
+</section>
+
+@code {
+    private SignupForm _form = new();
+    private bool _submitting;
+    private string? _error;
+    private string _planLabel = "스탠다드 (59,000원/월)";
+
+    [SupplyParameterFromQuery]
+    public string? Plan { get; set; }
+
+    protected override void OnParametersSet()
+    {
+        _planLabel = Plan switch
+        {
+            "basic" => "베이직 (29,000원/월)",
+            "premium" => "프리미엄 (100,000원/월)",
+            _ => "스탠다드 (59,000원/월)"
+        };
+    }
+
+    private async Task HandleSubmit()
+    {
+        _error = null;
+        if (!_form.AgreeService || !_form.AgreePrivacy || !_form.AgreeOutsourcing)
+        {
+            _error = "필수 약관 3건에 모두 동의해주세요.";
+            return;
+        }
+
+        _submitting = true;
+        await Task.Delay(800); // 스켈레톤: 실제 API 호출은 P1 작지#7 박제 예정
+        Nav.NavigateTo($"/signup/verify?email={Uri.EscapeDataString(_form.Email)}");
+    }
+
+    private class SignupForm
+    {
+        public string Email { get; set; } = "";
+        public string Password { get; set; } = "";
+        public string CompanyName { get; set; } = "";
+        public string RepresentativeName { get; set; } = "";
+        public string Phone { get; set; } = "";
+        public bool AgreeService { get; set; }
+        public bool AgreePrivacy { get; set; }
+        public bool AgreeOutsourcing { get; set; }
+        public bool AgreeMarketing { get; set; }
+    }
+}
+
+<style>
+.signup-section { padding: 48px 0; background: #F9FAFB; min-height: calc(100vh - 200px); }
+.signup-card { max-width: 480px; margin: 0 auto; background: #fff; padding: 40px; border-radius: 16px; box-shadow: 0 4px 16px rgba(0,0,0,0.06); }
+.signup-card h1 { font-size: 28px; margin-bottom: 8px; color: #0F1419; }
+.lead { color: #6B7280; margin-bottom: 24px; font-size: 14px; }
+.field { margin-bottom: 16px; }
+.field label { display: block; font-weight: 600; margin-bottom: 6px; font-size: 14px; }
+.field input { width: 100%; padding: 12px; border: 1px solid #D1D5DB; border-radius: 8px; font-size: 14px; box-sizing: border-box; }
+.field input:focus { outline: none; border-color: #0F6E56; }
+.terms { margin: 20px 0; padding: 16px; background: #F9FAFB; border-radius: 8px; }
+.terms label { display: block; margin-bottom: 8px; font-size: 13px; cursor: pointer; }
+.terms label a { color: #0F6E56; }
+.error { background: #FEE2E2; color: #B91C1C; padding: 12px; border-radius: 8px; margin-bottom: 12px; font-size: 14px; }
+.btn-submit { width: 100%; padding: 14px; background: #0F6E56; color: #fff; border: none; border-radius: 8px; font-size: 16px; font-weight: 600; cursor: pointer; }
+.btn-submit:hover:not(:disabled) { background: #0A5240; }
+.btn-submit:disabled { opacity: 0.6; cursor: not-allowed; }
+.login-link { text-align: center; margin-top: 16px; font-size: 14px; color: #6B7280; }
+.login-link a { color: #0F6E56; font-weight: 600; }
+</style>
