@@ -107,6 +107,12 @@ builder.Services.AddScoped<ITossWebhookService, TossWebhookService>();  // 토�
 builder.Services.AddScoped<ITenantSnapshotService, TenantSnapshotService>();  // 백오피스 Pull 복사본 조회 (사장님 결재 2026-06-01)
 builder.Services.AddScoped<IRefundService, RefundService>();  // 백오피스 환불 처리 (사장님 결재 2026-06-01)
 builder.Services.AddScoped<IResellerApplicationService, ResellerApplicationService>();  // 대리점 신청 (사장님 결재 2026-06-01)
+// WS-20260601-13 본사 시리얼 발급 (HP-/HR- 4-eyes, 8명제 #2·#4, 백엔드 매니저)
+builder.Services.AddSingleton<HitPan.API.Services.ISerialIssueService, HitPan.API.Services.SerialIssueService>();
+// WS-20260601-14 이메일·SMS 2채널 인프라 (헌법 #16 정합, 백엔드 매니저 + 보안 매니저 2)
+builder.Services.AddScoped<HitPan.API.Services.Notifications.IEmailSender, HitPan.API.Services.Notifications.EmailSenderService>();
+builder.Services.AddScoped<HitPan.API.Services.Notifications.ISmsSender, HitPan.API.Services.Notifications.SmsSenderService>();
+builder.Services.AddScoped<HitPan.API.Services.Notifications.INotificationDispatcher, HitPan.API.Services.Notifications.NotificationDispatcher>();
 builder.Services.AddScoped<IPasswordEncryptor, PasswordEncryptorAdapter>();
 builder.Services.AddScoped<IPdfRenderService, PdfRenderService>();
 builder.Services.AddScoped<IEmailService, EmailService>();
@@ -166,6 +172,12 @@ builder.Services.AddHostedService<IdempotencyCleanupService>();
 builder.Services.AddHostedService<IntegrityCheckService>();
 // 워치독 emergency → CS 자동 발신 (헌법 #28-F, appsettings.CsAutoDispatch.Enabled=true 시만)
 builder.Services.AddHostedService<HitPan.API.Services.CsAutoDispatchService>();
+// 본사 ERP ↔ 백오피스 단방향 Outbox (WS-20260601-20, 8명제 #3 + 헌법 #18·#22)
+//   - 단방향 절대: 백오피스(클라우드) → 본사 ERP(로컬) Push 만. 역방향 절대 금지.
+//   - 폴러는 appsettings Outbox:Enabled=true + BackofficeConnectionString 설정 시만 가동.
+builder.Services.AddScoped<HitPan.API.Services.Messaging.IOutboxPublisher,
+                          HitPan.API.Services.Messaging.OutboxPublisherService>();
+builder.Services.AddHostedService<HitPan.API.BackgroundServices.OutboxPollerWorker>();
 // 전자서명 (간편인증 Mock 4종 + 수동 3종) + 전자근로계약서
 builder.Services.AddScoped<IESignatureService, ESignatureService>();
 builder.Services.AddScoped<ILaborContractService, LaborContractService>();

@@ -201,6 +201,32 @@ CREATE TABLE IF NOT EXISTS recovery_log (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
   COMMENT='분실 복구 이력 (INSERT ONLY 권고, 8명제 #5)';
 
+-- ============================================================================
+-- 6. messaging_outbox — 본사 ERP ↔ 백오피스 단방향 Outbox 메시지 큐
+--    WS-20260601-20 / 8명제 #3 (백오피스 평문 0) + 헌법 #18·#22 (본사 업무데이터 0)
+--    설계 원칙
+--      - 백오피스(클라우드) → 본사 ERP(로컬) 단방향 Push만. 역방향 절대 금지.
+--      - payload(JSON) 에 평문 사업자번호·상호·대표자·주소·이메일·휴대폰 박제 절대 금지.
+--      - 메시지 = 시리얼 + 이벤트 종류 + 결제/구독 메타만.
+--      - 헌법 #3 INSERT ONLY: 메시지 행 DELETE 금지. processed_at 갱신만 허용 (메타 영역).
+--      - 헌법 #16 정합: 본사 ERP 폴러는 단일 MySqlConnection (Task.WhenAll 금지).
+-- ============================================================================
+CREATE TABLE IF NOT EXISTS messaging_outbox (
+    outbox_id              BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+    event_type             VARCHAR(64)    NOT NULL                  COMMENT '예: TENANT_ISSUED / PAYMENT_ACTIVATED / SUBSCRIPTION_TIER_CHANGED / RECOVERY_COMPLETED',
+    target_serial          VARCHAR(24)    NOT NULL                  COMMENT '대상 시리얼 (HP-/HR-YYMM-XXXXXXXX-CRC) — 평문 식별자 0',
+    payload                JSON           NOT NULL                  COMMENT '메타만 (시리얼·발급일·결제상태·구독등급). 평문 사업자 정보 박제 절대 금지',
+    occurred_at            DATETIME(6)    NOT NULL                  COMMENT '이벤트 발생 시각 (백오피스 트랜잭션 내 INSERT)',
+    processed_at           DATETIME(6)    NULL                      COMMENT '본사 ERP 폴러 처리 완료 시각 (NULL=미처리). INSERT ONLY 원장 외 메타 영역 갱신 허용',
+    retry_count            INT UNSIGNED   NOT NULL DEFAULT 0        COMMENT '폴러 재시도 횟수',
+    last_error             VARCHAR(500)   NULL                      COMMENT '마지막 처리 실패 메시지 (헌법 #15 silent swallow 금지)',
+    PRIMARY KEY (outbox_id),
+    KEY idx_outbox_unprocessed (processed_at, occurred_at)          COMMENT '폴러 SELECT WHERE processed_at IS NULL ORDER BY occurred_at',
+    KEY idx_outbox_event_type (event_type, occurred_at),
+    KEY idx_outbox_serial (target_serial, occurred_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+  COMMENT='본사 ERP ↔ 백오피스 단방향 Outbox 메시지 큐 (8명제 #3 + WS-20260601-20)';
+
 SET FOREIGN_KEY_CHECKS = 1;
 
 -- ============================================================================
@@ -218,4 +244,18 @@ SET FOREIGN_KEY_CHECKS = 1;
 --    WHERE TABLE_SCHEMA = 'hitpan_backoffice'
 --      AND TABLE_NAME IN ('tenants','resellers','platform_users','platform_audit_log','recovery_log');
 --    -- 기대: 모두 InnoDB / utf8mb4_unicode_ci
+--
+-- 3. messaging_outbox payload 평문 0 (WS-20260601-20)
+--    SELECT outbox_id, event_type, target_serial
+--    FROM messaging_outbox
+--    WHERE JSON_SEARCH(payload, 'one', '%사업자%') IS NOT NULL
+--       OR JSON_EXTRACT(payload, '$.business_number') IS NOT NULL
+--       OR JSON_EXTRACT(payload, '$.company_name') IS NOT NULL
+--       OR JSON_EXTRACT(payload, '$.representative_name') IS NOT NULL;
+--    -- 기대: 0 rows (헌법 #18·#22 + 8명제 #3)
+--
+-- 4. 단방향 검증: 백오피스 → 본사 ERP 만. 본사 ERP DB에 messaging_outbox 테이블 존재 0건.
+--    SELECT COUNT(*) FROM information_schema.TABLES
+--    WHERE TABLE_SCHEMA = 'hitpan_erp' AND TABLE_NAME = 'messaging_outbox';
+--    -- 기대: 0 (본사 ERP 측은 폴러만, outbox 테이블 보유 금지)
 -- ============================================================================
