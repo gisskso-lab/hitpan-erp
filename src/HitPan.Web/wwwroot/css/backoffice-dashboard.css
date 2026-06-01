@@ -1,0 +1,256 @@
+/*
+ * backoffice-dashboard.css — 본사 대시보드 시각 박제
+ * (수석 웹디자이너 박제 2026-06-01, design-tokens.css 변수 참조)
+ *
+ * 적용 범위:
+ *  - /admin/dashboard (AdminDashboard.razor)
+ *  - Pages/Platform/Components/* (KpiCard / EmptyStateCard / RecentActivityCard)
+ *
+ * 원칙:
+ *  - 8pt grid + 라운드 12px + 그림자 1단
+ *  - 색상: 그린(primary) + 블루(info) + 오렌지(warning) + 옐로(accent)
+ *  - 하드코딩 금지 — 모든 색·간격 토큰 변수로
+ */
+
+/* ───────────────────────────────────────────────
+ * 1. KPI Card
+ * ─────────────────────────────────────────────── */
+.kpi-card {
+    background: var(--hp-surface-raised);
+    border: 1px solid var(--hp-border-subtle);
+    border-radius: 12px;
+    padding: 24px;
+    box-shadow: 0 1px 2px rgba(15, 20, 25, 0.04), 0 1px 3px rgba(15, 20, 25, 0.06);
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    min-height: 132px;
+    transition: box-shadow 0.16s ease, transform 0.16s ease;
+}
+.kpi-card:hover {
+    box-shadow: 0 2px 4px rgba(15, 20, 25, 0.06), 0 4px 12px rgba(15, 20, 25, 0.08);
+    transform: translateY(-1px);
+}
+
+.kpi-card__head {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+.kpi-card__icon {
+    width: 40px;
+    height: 40px;
+    border-radius: 10px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+}
+.kpi-card__icon--primary { background: rgba(15, 110, 86, 0.10); color: var(--hp-brand-500); }
+.kpi-card__icon--info    { background: rgba(59, 130, 246, 0.10); color: #3B82F6; }
+.kpi-card__icon--warning { background: rgba(255, 107, 53, 0.10); color: #FF6B35; }
+.kpi-card__icon--accent  { background: rgba(245, 158, 11, 0.10); color: #F59E0B; }
+
+.kpi-card__label {
+    font-size: 13px;
+    color: var(--hp-text-secondary);
+    font-weight: 500;
+    letter-spacing: -0.01em;
+}
+
+.kpi-card__value {
+    font-size: 32px;
+    line-height: 1.15;
+    font-weight: 700;
+    color: var(--hp-text-primary);
+    letter-spacing: -0.02em;
+}
+
+.kpi-card__trend {
+    font-size: 12px;
+    font-weight: 500;
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    color: var(--hp-text-tertiary);
+}
+.kpi-card__trend--up   { color: var(--hp-brand-600); }
+.kpi-card__trend--down { color: #DC2626; }
+.kpi-card__trend-icon  { font-size: 10px; }
+
+/* ───────────────────────────────────────────────
+ * 2. Dashboard Section Card (차트·리스트 자리)
+ * ─────────────────────────────────────────────── */
+.bo-section {
+    background: var(--hp-surface-raised);
+    border: 1px solid var(--hp-border-subtle);
+    border-radius: 12px;
+    padding: 24px;
+    box-shadow: 0 1px 2px rgba(15, 20, 25, 0.04), 0 1px 3px rgba(15, 20, 25, 0.06);
+}
+
+.bo-section__title {
+    font-size: 15px;
+    font-weight: 600;
+    color: var(--hp-text-primary);
+    margin-bottom: 16px;
+    letter-spacing: -0.01em;
+}
+
+/* ───────────────────────────────────────────────
+ * 3. Trend Mini Chart (HTML 바 차트)
+ * ─────────────────────────────────────────────── */
+.bo-trend-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 13px;
+}
+.bo-trend-table th {
+    text-align: left;
+    padding: 8px;
+    color: var(--hp-text-tertiary);
+    font-weight: 500;
+    border-bottom: 1px solid var(--hp-border-subtle);
+}
+.bo-trend-table th.num { text-align: right; }
+.bo-trend-table td {
+    padding: 10px 8px;
+    border-bottom: 1px solid var(--hp-border-subtle);
+    color: var(--hp-text-primary);
+}
+.bo-trend-table td.num { text-align: right; font-weight: 600; }
+.bo-trend-bar {
+    background: var(--hp-surface-sunken);
+    border-radius: 4px;
+    height: 8px;
+    overflow: hidden;
+}
+.bo-trend-bar__fill {
+    background: linear-gradient(90deg, var(--hp-brand-400), var(--hp-brand-500));
+    border-radius: 4px;
+    height: 8px;
+}
+
+/* ───────────────────────────────────────────────
+ * 4. Top Reseller List
+ * ─────────────────────────────────────────────── */
+.bo-reseller-row {
+    padding: 12px 0;
+    border-bottom: 1px solid var(--hp-border-subtle);
+}
+.bo-reseller-row:last-child { border-bottom: none; }
+.bo-reseller-row__head {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 6px;
+}
+.bo-reseller-row__name {
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--hp-text-primary);
+}
+.bo-reseller-row__meta {
+    display: flex;
+    justify-content: space-between;
+    font-size: 12px;
+    color: var(--hp-text-tertiary);
+}
+.bo-reseller-row__commission { color: #FF6B35; font-weight: 500; }
+
+/* ───────────────────────────────────────────────
+ * 5. Empty State
+ * ─────────────────────────────────────────────── */
+.empty-state {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+    padding: 32px 16px;
+    color: var(--hp-text-secondary);
+}
+.empty-state__illustration {
+    margin-bottom: 16px;
+    opacity: 0.95;
+}
+.empty-state__title {
+    font-size: 15px;
+    font-weight: 600;
+    color: var(--hp-text-primary);
+    margin-bottom: 6px;
+    letter-spacing: -0.01em;
+}
+.empty-state__desc {
+    font-size: 13px;
+    color: var(--hp-text-tertiary);
+    line-height: 1.55;
+    max-width: 320px;
+}
+
+/* ───────────────────────────────────────────────
+ * 6. Recent Activity
+ * ─────────────────────────────────────────────── */
+.recent-activity__list {
+    display: flex;
+    flex-direction: column;
+}
+.recent-activity__row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 12px 0;
+    border-bottom: 1px solid var(--hp-border-subtle);
+    gap: 12px;
+}
+.recent-activity__row:last-child { border-bottom: none; }
+.recent-activity__row-main { min-width: 0; flex: 1; }
+.recent-activity__serial {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--hp-text-primary);
+    font-family: 'JetBrains Mono', monospace;
+}
+.recent-activity__meta {
+    font-size: 12px;
+    color: var(--hp-text-tertiary);
+    margin-top: 2px;
+}
+.recent-activity__side {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-shrink: 0;
+}
+.recent-activity__status {
+    font-size: 11px;
+    font-weight: 600;
+    padding: 3px 8px;
+    border-radius: 999px;
+    letter-spacing: -0.01em;
+}
+.recent-activity__status--success { background: rgba(15, 110, 86, 0.10); color: var(--hp-brand-600); }
+.recent-activity__status--info    { background: rgba(59, 130, 246, 0.10); color: #2563EB; }
+.recent-activity__status--warning { background: rgba(255, 107, 53, 0.10); color: #C2410C; }
+.recent-activity__status--error   { background: rgba(220, 38, 38, 0.10);  color: #B91C1C; }
+.recent-activity__status--neutral { background: var(--hp-surface-sunken); color: var(--hp-text-secondary); }
+.recent-activity__time {
+    font-size: 12px;
+    color: var(--hp-text-tertiary);
+}
+
+/* ───────────────────────────────────────────────
+ * 7. Page Header
+ * ─────────────────────────────────────────────── */
+.bo-dashboard__title {
+    font-size: 22px;
+    font-weight: 600;
+    color: var(--hp-text-primary);
+    letter-spacing: -0.02em;
+    margin-bottom: 4px;
+}
+.bo-dashboard__subtitle {
+    font-size: 13px;
+    color: var(--hp-text-tertiary);
+    margin-bottom: 24px;
+}

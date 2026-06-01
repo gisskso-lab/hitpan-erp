@@ -1,0 +1,24 @@
+@*
+    FeatureCard — 단일 셀링 카드 (수석 웹디자이너 박제 2026-06-01)
+    Accent: green / orange / navy
+*@
+
+<article class="lv2-feature-card @Accent">
+    <div class="lv2-feature-icon" aria-hidden="true">@Icon</div>
+    <h3 class="lv2-feature-title">@Title</h3>
+    <p class="lv2-feature-body">@Body</p>
+</article>
+
+@code {
+    /// <summary>카드 강조 색상 — green / orange / navy.</summary>
+    [Parameter] public string Accent { get; set; } = "green";
+
+    /// <summary>이모지·아이콘 (MudIcon 대신 가벼운 텍스트 아이콘).</summary>
+    [Parameter] public string Icon { get; set; } = "✨";
+
+    /// <summary>카드 제목 (마케팅팀장 교체 대상).</summary>
+    [Parameter] public string Title { get; set; } = "";
+
+    /// <summary>카드 본문 1~2줄.</summary>
+    [Parameter] public string Body { get; set; } = "";
+}

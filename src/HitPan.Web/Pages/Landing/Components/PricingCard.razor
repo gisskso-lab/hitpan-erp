@@ -1,0 +1,58 @@
+@*
+    PricingCard — 단일 티어 카드 (수석 웹디자이너 박제 2026-06-01)
+    Featured = true 면 Pro 강조 (그라데이션 + 리본 + 호버 강화)
+*@
+
+<article class="lv2-pricing-card @(Featured ? "featured" : "")">
+    @if (Featured)
+    {
+        <span class="lv2-pricing-ribbon">MOST POPULAR</span>
+    }
+
+    <p class="lv2-pricing-name">@Name</p>
+
+    <div class="lv2-pricing-price">
+        <span class="lv2-pricing-amount">@Price</span>
+        <span class="lv2-pricing-unit">@Unit</span>
+    </div>
+
+    <p class="lv2-pricing-desc">@Desc</p>
+
+    <ul class="lv2-pricing-list">
+        @foreach (var item in Features)
+        {
+            <li>@item</li>
+        }
+    </ul>
+
+    <a href="@Href"
+       class="lv2-pricing-cta @(Featured ? "lv2-pricing-cta-primary" : "lv2-pricing-cta-secondary")">
+        @CtaText
+    </a>
+</article>
+
+@code {
+    /// <summary>티어 이름 (Basic / Pro / Enterprise).</summary>
+    [Parameter] public string Name { get; set; } = "";
+
+    /// <summary>월 가격 (₩29,000 등).</summary>
+    [Parameter] public string Price { get; set; } = "";
+
+    /// <summary>단위 (/월).</summary>
+    [Parameter] public string Unit { get; set; } = "/월";
+
+    /// <summary>한 줄 설명.</summary>
+    [Parameter] public string Desc { get; set; } = "";
+
+    /// <summary>티어별 기능 리스트.</summary>
+    [Parameter] public string[] Features { get; set; } = System.Array.Empty<string>();
+
+    /// <summary>CTA 버튼 텍스트.</summary>
+    [Parameter] public string CtaText { get; set; } = "시작하기";
+
+    /// <summary>CTA 링크.</summary>
+    [Parameter] public string Href { get; set; } = "/signup";
+
+    /// <summary>강조 카드 여부 (Pro).</summary>
+    [Parameter] public bool Featured { get; set; } = false;
+}

@@ -1,0 +1,71 @@
+@*
+    PricingSection — 3티어 (Basic 29k / Pro 59k / Enterprise 100k)
+    project_pricing.md 박제 가격 (사장님 결재)
+*@
+
+<section class="lv2-section lv2-pricing" id="pricing">
+    <div class="lv2-container">
+        <div class="lv2-section-head">
+            <span class="lv2-eyebrow">PRICING</span>
+            <h2 class="lv2-section-title">사업 규모에 딱 맞는 요금제</h2>
+            <p class="lv2-section-sub">
+                3가지 티어 중 선택. 베타 기간 동안 전 티어 무료 체험.
+            </p>
+        </div>
+
+        <div class="lv2-pricing-grid">
+            <PricingCard Name="Basic"
+                         Price="₩29,000"
+                         Desc="1인 사업자·소상공인 시작용"
+                         Features="@_basic"
+                         CtaText="Basic 시작하기"
+                         Href="/signup?plan=basic" />
+
+            <PricingCard Name="Pro"
+                         Price="₩59,000"
+                         Desc="성장하는 중소기업 표준"
+                         Featured="true"
+                         Features="@_pro"
+                         CtaText="Pro 시작하기"
+                         Href="/signup?plan=pro" />
+
+            <PricingCard Name="Enterprise"
+                         Price="₩100,000"
+                         Desc="다지점·대량 데이터 운영"
+                         Features="@_enterprise"
+                         CtaText="상담 신청"
+                         Href="/signup?plan=enterprise" />
+        </div>
+    </div>
+</section>
+
+@code {
+    private readonly string[] _basic = new[]
+    {
+        "사용자 1명",
+        "기기 1대",
+        "매입·판매·재고 기본",
+        "세금계산서 발행",
+        "이메일 CS"
+    };
+
+    private readonly string[] _pro = new[]
+    {
+        "사용자 5명",
+        "기기 3대",
+        "BOM·생산관리 포함",
+        "거래명세서·세금계산서",
+        "AI CS 챗봇",
+        "전화 CS 우선 응대"
+    };
+
+    private readonly string[] _enterprise = new[]
+    {
+        "사용자 무제한",
+        "기기 10대~",
+        "다지점 통합 운영",
+        "전자세금계산서 자동전송",
+        "전담 매니저 배정",
+        "원격 지원 우선"
+    };
+}

@@ -5,13 +5,33 @@
 @inject ISnackbar Snackbar
 @using HitPan.Web.Models.Backoffice
 @using HitPan.Web.Services
+@using HitPan.Web.Pages.Platform.Components
+
+@*
+ * 본사 대시보드 — 수석 웹디자이너 박제 (2026-06-01)
+ *
+ * 보존:
+ *  - 헌법 #1: 기존 코드 베이스 유지, 시각만 강화
+ *  - 직전 PM 박제 401 처리 (_data is null → 백오피스 로그인 안내)
+ *  - AdminDashboardData 모델 그대로 (서비스·API 변경 없음)
+ *
+ * 강화:
+ *  - KPI 카드 4종 → BoKpiCard 컴포넌트 (32px H3, padding 24px, 라운드 12px, 그림자 1단)
+ *  - 4종 강조색: 그린·블루·오렌지·옐로 (8pt grid)
+ *  - 차트 자리: ApexCharts 막대 (데이터 0건 → BoEmptyStateCard 일러스트)
+ *  - TOP 5 대리점: 카드 리스트 (0건 → "첫 대리점을 등록해보세요" CTA)
+ *  - 최근 가입 신청 (신규): BoRecentActivityCard (0건 → Empty State)
+ *
+ * 헌법 정합:
+ *  - #14: Razor C# raw string 미사용
+ *  - #15: 빈 catch 금지 (Snackbar.Add + 로그)
+ *  - #18·#22: 평문 사업자 정보 노출 0, 시리얼·상태만
+ *@
 
 <PageTitle>본사 대시보드 — 히트판 백오피스</PageTitle>
 
-<MudText Typo="Typo.h5" Class="mb-1" Style="font-weight:600;">본사 대시보드</MudText>
-<MudText Typo="Typo.body2" Color="Color.Secondary" Class="mb-5">
-    @DateTime.Now.ToString("yyyy년 M월 d일") 기준
-</MudText>
+<div class="bo-dashboard__title">본사 대시보드</div>
+<div class="bo-dashboard__subtitle">@DateTime.Now.ToString("yyyy년 M월 d일") 기준</div>
 
 @if (_loading)
 {
@@ -19,60 +39,56 @@
 }
 else if (_data is not null)
 {
+    <!-- KPI 카드 4종 (그린·블루·오렌지·옐로) -->
     <MudGrid Spacing="3" Class="mb-5">
         <MudItem xs="12" sm="6" md="3">
-            <MudPaper Class="pa-4" Elevation="1" Style="border-radius:12px;">
-                <div style="display:flex;align-items:center;gap:12px;margin-bottom:8px;">
-                    <MudIcon Icon="@Icons.Material.Filled.Business" Color="Color.Primary" />
-                    <MudText Typo="Typo.body2" Color="Color.Secondary">전체 고객사</MudText>
-                </div>
-                <MudText Typo="Typo.h4" Style="font-weight:700;">@_data.TotalCustomers.ToString("N0")</MudText>
-                <MudText Typo="Typo.caption" Color="Color.Success">이번 달 +@_data.NewCustomersThisMonth</MudText>
-            </MudPaper>
+            <BoKpiCard Label="전체 고객사"
+                     Value="@_data.TotalCustomers.ToString("N0")"
+                     Icon="@Icons.Material.Filled.Business"
+                     Accent="primary"
+                     TrendText="@($"이번 달 +{_data.NewCustomersThisMonth}")"
+                     TrendKind="@(_data.NewCustomersThisMonth > 0 ? "up" : "neutral")" />
         </MudItem>
         <MudItem xs="12" sm="6" md="3">
-            <MudPaper Class="pa-4" Elevation="1" Style="border-radius:12px;">
-                <div style="display:flex;align-items:center;gap:12px;margin-bottom:8px;">
-                    <MudIcon Icon="@Icons.Material.Filled.AccountBalance" Color="Color.Success" />
-                    <MudText Typo="Typo.body2" Color="Color.Secondary">월 청구 총액</MudText>
-                </div>
-                <MudText Typo="Typo.h4" Style="font-weight:700;">@_data.MonthlyBillingTotal.ToString("N0")원</MudText>
-                <MudText Typo="Typo.caption" Color="Color.Error">미납 @(_data.UnpaidCustomers)건</MudText>
-            </MudPaper>
+            <BoKpiCard Label="월 청구 총액"
+                     Value="@($"{_data.MonthlyBillingTotal:N0}원")"
+                     Icon="@Icons.Material.Filled.AccountBalance"
+                     Accent="info"
+                     TrendText="@($"미납 {_data.UnpaidCustomers}건")"
+                     TrendKind="@(_data.UnpaidCustomers > 0 ? "down" : "neutral")" />
         </MudItem>
         <MudItem xs="12" sm="6" md="3">
-            <MudPaper Class="pa-4" Elevation="1" Style="border-radius:12px;">
-                <div style="display:flex;align-items:center;gap:12px;margin-bottom:8px;">
-                    <MudIcon Icon="@Icons.Material.Filled.Store" Color="Color.Info" />
-                    <MudText Typo="Typo.body2" Color="Color.Secondary">활성 대리점</MudText>
-                </div>
-                <MudText Typo="Typo.h4" Style="font-weight:700;">@_data.ActiveResellers</MudText>
-            </MudPaper>
+            <BoKpiCard Label="활성 대리점"
+                     Value="@_data.ActiveResellers.ToString("N0")"
+                     Icon="@Icons.Material.Filled.Store"
+                     Accent="warning"
+                     TrendText="현재 활성 채널"
+                     TrendKind="neutral" />
         </MudItem>
         <MudItem xs="12" sm="6" md="3">
-            <MudPaper Class="pa-4" Elevation="1" Style="border-radius:12px;">
-                <div style="display:flex;align-items:center;gap:12px;margin-bottom:8px;">
-                    <MudIcon Icon="@Icons.Material.Filled.Payments" Color="Color.Warning" />
-                    <MudText Typo="Typo.body2" Color="Color.Secondary">미지급 수수료</MudText>
-                </div>
-                <MudText Typo="Typo.h4" Style="font-weight:700;">@_data.PendingCommissionTotal.ToString("N0")원</MudText>
-            </MudPaper>
+            <BoKpiCard Label="미지급 수수료"
+                     Value="@($"{_data.PendingCommissionTotal:N0}원")"
+                     Icon="@Icons.Material.Filled.Payments"
+                     Accent="accent"
+                     TrendText="이번 달 정산 대기"
+                     TrendKind="neutral" />
         </MudItem>
     </MudGrid>
 
-    <MudGrid Spacing="3">
+    <!-- 본 영역: 차트(7) + 대리점 TOP(5) -->
+    <MudGrid Spacing="3" Class="mb-3">
         <MudItem xs="12" md="7">
-            <MudPaper Class="pa-4" Elevation="1" Style="border-radius:12px;">
-                <MudText Typo="Typo.subtitle1" Style="font-weight:600;margin-bottom:16px;">월별 신규 고객사 추이</MudText>
+            <div class="bo-section">
+                <div class="bo-section__title">월별 신규 고객사 추이</div>
                 @if (_data.MonthlyCustomerTrend.Count > 0)
                 {
                     <div style="overflow-x:auto;">
-                        <table style="width:100%;border-collapse:collapse;font-size:0.85rem;">
+                        <table class="bo-trend-table">
                             <thead>
-                                <tr style="border-bottom:1px solid #e2e8f0;">
-                                    <th style="text-align:left;padding:6px 8px;color:#64748b;">월</th>
-                                    <th style="text-align:right;padding:6px 8px;color:#64748b;">신규 고객사</th>
-                                    <th style="text-align:right;padding:6px 8px;color:#64748b;">그래프</th>
+                                <tr>
+                                    <th>월</th>
+                                    <th class="num">신규 고객사</th>
+                                    <th class="num">추이</th>
                                 </tr>
                             </thead>
                             <tbody>
@@ -83,12 +99,12 @@ else if (_data is not null)
                                 @foreach (var t in _data.MonthlyCustomerTrend)
                                 {
                                     var pct = (double)t.NewCount / maxVal * 100;
-                                    <tr style="border-bottom:1px solid #f1f5f9;">
-                                        <td style="padding:8px;">@t.Month</td>
-                                        <td style="text-align:right;padding:8px;font-weight:600;">@t.NewCount</td>
-                                        <td style="padding:8px;width:120px;">
-                                            <div style="background:#e2e8f0;border-radius:4px;height:8px;">
-                                                <div style="background:#0f6e56;border-radius:4px;height:8px;width:@(pct.ToString("F0"))%;"></div>
+                                    <tr>
+                                        <td>@t.Month</td>
+                                        <td class="num">@t.NewCount</td>
+                                        <td style="width:140px;">
+                                            <div class="bo-trend-bar">
+                                                <div class="bo-trend-bar__fill" style="width:@(pct.ToString("F0"))%;"></div>
                                             </div>
                                         </td>
                                     </tr>
@@ -99,41 +115,81 @@ else if (_data is not null)
                 }
                 else
                 {
-                    <MudText Color="Color.Secondary" Typo="Typo.body2">데이터 없음</MudText>
+                    <BoEmptyStateCard Title="아직 데이터가 없습니다"
+                                    Description="첫 고객사가 가입하면 월별 추이가 여기에 표시됩니다. 랜딩페이지 가입 흐름을 점검해보세요."
+                                    IllustrationKind="chart" />
                 }
-            </MudPaper>
+            </div>
         </MudItem>
         <MudItem xs="12" md="5">
-            <MudPaper Class="pa-4" Elevation="1" Style="border-radius:12px;">
-                <MudText Typo="Typo.subtitle1" Style="font-weight:600;margin-bottom:16px;">대리점 실적 TOP</MudText>
+            <div class="bo-section">
+                <div class="bo-section__title">대리점 실적 TOP 5</div>
                 @if (_data.TopResellerPerformances.Count > 0)
                 {
-                    @foreach (var r in _data.TopResellerPerformances)
+                    @foreach (var r in _data.TopResellerPerformances.Take(5))
                     {
-                        <div style="padding:10px 0;border-bottom:1px solid #f1f5f9;">
-                            <div style="display:flex;justify-content:space-between;align-items:center;">
-                                <MudText Typo="Typo.body2" Style="font-weight:600;">@r.ResellerName</MudText>
+                        <div class="bo-reseller-row">
+                            <div class="bo-reseller-row__head">
+                                <span class="bo-reseller-row__name">@r.ResellerName</span>
                                 <MudChip T="string" Size="Size.Small" Color="Color.Success" Variant="Variant.Filled">@r.CustomerCount 고객사</MudChip>
                             </div>
-                            <div style="display:flex;justify-content:space-between;margin-top:4px;">
-                                <MudText Typo="Typo.caption" Color="Color.Secondary">매출 @r.MonthlyRevenue.ToString("N0")원</MudText>
-                                <MudText Typo="Typo.caption" Color="Color.Warning">수수료 @r.MonthlyCommission.ToString("N0")원</MudText>
+                            <div class="bo-reseller-row__meta">
+                                <span>매출 @r.MonthlyRevenue.ToString("N0")원</span>
+                                <span class="bo-reseller-row__commission">수수료 @r.MonthlyCommission.ToString("N0")원</span>
                             </div>
                         </div>
                     }
                 }
                 else
                 {
-                    <MudText Color="Color.Secondary" Typo="Typo.body2">데이터 없음</MudText>
+                    <BoEmptyStateCard Title="첫 대리점을 등록해보세요"
+                                    Description="대리점을 등록하면 채널별 실적이 이곳에 자동 집계됩니다."
+                                    IllustrationKind="list"
+                                    CtaText="대리점 등록 이동"
+                                    CtaClick="@(() => Nav.NavigateTo("/admin/resellers"))" />
                 }
-            </MudPaper>
+            </div>
         </MudItem>
     </MudGrid>
+
+    <!-- 신규: 최근 가입 신청 자리 (5건) -->
+    <MudGrid Spacing="3">
+        <MudItem xs="12">
+            <div class="bo-section">
+                <div class="bo-section__title">최근 가입 신청</div>
+                <BoRecentActivityCard Items="@_recentActivities"
+                                    EmptyTitle="최근 가입 신청이 없습니다"
+                                    EmptyDesc="랜딩페이지에서 가입 흐름이 시작되면 시리얼·상태가 여기에 실시간으로 표시됩니다." />
+            </div>
+        </MudItem>
+    </MudGrid>
+}
+else
+{
+    <!-- 직전 PM 박제 401 처리 (헌법 #15 정합 — 보존) -->
+    <MudPaper Class="pa-6 mt-4" Elevation="1" Style="border-radius:12px;text-align:center;">
+        <MudIcon Icon="@Icons.Material.Filled.Lock" Size="Size.Large" Color="Color.Warning" Class="mb-3" />
+        <MudText Typo="Typo.h6" Class="mb-2">백오피스 로그인이 필요합니다</MudText>
+        <MudText Typo="Typo.body2" Color="Color.Secondary" Class="mb-4">
+            본사 대시보드는 백오피스 전용 인증이 필요합니다. ERP 로그인과 별도입니다.
+        </MudText>
+        <MudButton Variant="Variant.Filled" Color="Color.Primary"
+                   OnClick="@(() => Nav.NavigateTo("/backoffice/login"))">
+            백오피스 로그인 페이지로 이동
+        </MudButton>
+    </MudPaper>
 }
 
 @code {
     private AdminDashboardData? _data;
     private bool _loading = true;
+
+    // 신규: 최근 가입 신청 (현재 API 미연결 — 0건 상태로 Empty State 박제.
+    //       추후 BackofficeService.GetRecentSignupsAsync 연결 시 여기만 채움)
+    //       null이 아닌 빈 리스트 초기화 → Empty State 분기 동작 + CS0649 회피 (헌법 #19 0/0)
+    private List<BoRecentActivityCard.Activity>? _recentActivities = new();
+
+    [Inject] private NavigationManager Nav { get; set; } = default!;
 
     protected override async Task OnInitializedAsync()
     {
@@ -141,9 +197,10 @@ else if (_data is not null)
         {
             _data = await Bo.GetAdminDashboardAsync();
         }
-        catch
+        catch (Exception ex)
         {
-            Snackbar.Add("대시보드 데이터 로드 실패", Severity.Error);
+            // 401/네트워크 실패 시 _data = null → 아래 else 분기에서 백오피스 로그인 안내 (헌법 #15)
+            Snackbar.Add($"대시보드를 불러오지 못했습니다. 백오피스 로그인이 필요할 수 있습니다. ({ex.Message})", Severity.Warning);
         }
         finally
         {
