@@ -21,27 +21,27 @@
 }
 .lv2-eyebrow {
     display: inline-block;
-    font-size: 13px;
+    font-size: 15px;
     font-weight: 700;
     letter-spacing: 0.04em;
     color: var(--hp-brand-600);
     text-transform: uppercase;
-    margin-bottom: 12px;
+    margin-bottom: 14px;
 }
 .lv2-section-title {
     font-family: var(--hp-font-sans);
-    font-size: 36px;
+    font-size: 44px;
     line-height: 1.25;
     color: var(--hp-text-primary);
     font-weight: 800;
-    margin: 0 0 16px;
+    margin: 0 0 18px;
     letter-spacing: -0.02em;
 }
 .lv2-section-sub {
-    font-size: 16px;
+    font-size: 19px;
     line-height: 1.6;
     color: var(--hp-text-secondary);
-    max-width: 640px;
+    max-width: 720px;
     margin: 0 auto;
 }
 
@@ -66,11 +66,11 @@
     gap: 8px;
     background: rgba(15, 110, 86, 0.08);
     color: var(--hp-brand-700);
-    padding: 8px 16px;
+    padding: 9px 18px;
     border-radius: 999px;
-    font-size: 13px;
+    font-size: 15px;
     font-weight: 700;
-    margin-bottom: 24px;
+    margin-bottom: 26px;
     border: 1px solid rgba(15, 110, 86, 0.16);
 }
 .lv2-hero-badge::before {
@@ -83,21 +83,21 @@
 }
 .lv2-hero-h1 {
     font-family: var(--hp-font-sans);
-    font-size: 48px;
-    line-height: 1.18;
+    font-size: 60px;
+    line-height: 1.16;
     font-weight: 800;
     color: var(--hp-text-primary);
     letter-spacing: -0.025em;
-    margin: 0 0 20px;
+    margin: 0 0 22px;
 }
 .lv2-hero-h1 .hl-green { color: #0F6E56; }
 .lv2-hero-h1 .hl-orange { color: #FF6B35; }
 .lv2-hero-sub {
-    font-size: 18px;
+    font-size: 22px;
     line-height: 1.6;
     color: var(--hp-text-secondary);
-    max-width: 720px;
-    margin: 0 auto 40px;
+    max-width: 760px;
+    margin: 0 auto 44px;
 }
 .lv2-hero-cta {
     display: flex;
@@ -111,10 +111,10 @@
     align-items: center;
     justify-content: center;
     gap: 8px;
-    height: 56px;
-    padding: 0 28px;
+    height: 60px;
+    padding: 0 32px;
     border-radius: 12px;
-    font-size: 16px;
+    font-size: 18px;
     font-weight: 700;
     text-decoration: none;
     border: 0;
@@ -154,9 +154,9 @@
     background: #FFFFFF;
     border: 1px solid #E5E7EB;
     border-radius: 999px;
-    padding: 8px 14px;
+    padding: 10px 16px;
     color: var(--hp-text-secondary);
-    font-size: 13px;
+    font-size: 15px;
     font-weight: 600;
 }
 .lv2-trust-dot {
@@ -211,14 +211,14 @@
     margin-bottom: 20px;
 }
 .lv2-feature-title {
-    font-size: 20px;
+    font-size: 24px;
     font-weight: 800;
     color: var(--hp-text-primary);
-    margin: 0 0 10px;
+    margin: 0 0 12px;
     letter-spacing: -0.01em;
 }
 .lv2-feature-body {
-    font-size: 15px;
+    font-size: 18px;
     line-height: 1.65;
     color: var(--hp-text-secondary);
     margin: 0;
@@ -285,36 +285,43 @@
     box-shadow: 0 8px 20px rgba(15, 110, 86, 0.32);
 }
 .lv2-pricing-name {
-    font-size: 15px;
+    font-size: 18px;
     font-weight: 700;
     color: var(--hp-text-secondary);
     text-transform: uppercase;
     letter-spacing: 0.06em;
-    margin: 0 0 8px;
+    margin: 0 0 10px;
 }
 .lv2-pricing-price {
     display: flex;
     align-items: baseline;
     gap: 6px;
-    margin-bottom: 8px;
+    margin-bottom: 6px;
 }
 .lv2-pricing-amount {
-    font-size: 40px;
+    font-size: 48px;
     font-weight: 800;
     color: var(--hp-text-primary);
     letter-spacing: -0.025em;
     line-height: 1.1;
 }
 .lv2-pricing-unit {
-    font-size: 15px;
+    font-size: 17px;
     font-weight: 600;
     color: var(--hp-text-tertiary);
 }
-.lv2-pricing-desc {
+.lv2-pricing-note {
     font-size: 14px;
+    font-weight: 600;
+    color: var(--hp-brand-600);
+    margin: 0 0 10px;
+}
+.lv2-pricing-desc {
+    font-size: 17px;
     color: var(--hp-text-secondary);
-    margin: 0 0 24px;
-    min-height: 42px;
+    margin: 0 0 26px;
+    min-height: 48px;
+    line-height: 1.5;
 }
 .lv2-pricing-list {
     list-style: none;
@@ -326,10 +333,10 @@
     display: flex;
     gap: 10px;
     align-items: flex-start;
-    font-size: 14px;
+    font-size: 17px;
     line-height: 1.6;
     color: var(--hp-text-primary);
-    padding: 6px 0;
+    padding: 7px 0;
 }
 .lv2-pricing-list li::before {
     content: "✓";
@@ -341,13 +348,41 @@
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    height: 48px;
+    height: 52px;
     border-radius: 12px;
-    font-size: 15px;
+    font-size: 17px;
     font-weight: 700;
     text-decoration: none;
     transition: transform 0.15s ease, background 0.15s ease;
 }
+/* 옵션 박스 — 3티어 공통 (PC+모바일 1+1 1만원) */
+.lv2-pricing-addon {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 12px;
+    flex-wrap: wrap;
+    max-width: 720px;
+    margin: 0 auto 32px;
+    padding: 16px 24px;
+    background: #F0FAF6;
+    border: 1px solid #C7E8DB;
+    border-radius: 12px;
+    font-size: 16px;
+    color: var(--hp-text-primary);
+}
+.lv2-pricing-addon-label {
+    display: inline-block;
+    padding: 4px 12px;
+    background: #0F6E56;
+    color: #FFFFFF;
+    border-radius: 999px;
+    font-size: 13px;
+    font-weight: 800;
+    letter-spacing: 0.04em;
+}
+.lv2-pricing-addon-text { font-size: 16px; }
+.lv2-pricing-addon-text b { color: #0F6E56; font-weight: 800; }
 .lv2-pricing-cta-primary {
     background: #0F6E56;
     color: #FFFFFF;
@@ -490,9 +525,15 @@
 @media (max-width: 640px) {
     .lv2-section { padding: 64px 20px; }
     .lv2-hero { padding: 72px 20px 56px; }
-    .lv2-hero-h1 { font-size: 34px; }
-    .lv2-hero-sub { font-size: 16px; }
-    .lv2-section-title { font-size: 28px; }
+    .lv2-hero-h1 { font-size: 40px; }
+    .lv2-hero-sub { font-size: 18px; }
+    .lv2-section-title { font-size: 32px; }
+    .lv2-section-sub { font-size: 17px; }
+    .lv2-feature-title { font-size: 21px; }
+    .lv2-feature-body { font-size: 16px; }
+    .lv2-pricing-amount { font-size: 40px; }
+    .lv2-pricing-list li { font-size: 16px; }
+    .lv2-pricing-desc { font-size: 16px; }
     .lv2-cta-title { font-size: 30px; }
     .lv2-btn { width: 100%; }
     .lv2-hero-cta { flex-direction: column; align-items: stretch; }

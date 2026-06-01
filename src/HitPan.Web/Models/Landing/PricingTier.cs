@@ -8,6 +8,7 @@ public class PricingTier
     public decimal MonthlyPrice { get; set; }
     public string PriceUnit { get; set; } = "원/월";
     public string[] Features { get; set; } = Array.Empty<string>();
+    public string? PriceNote { get; set; }
     public bool IsRecommended { get; set; }
     public string CtaText { get; set; } = "시작하기";
     public string CtaHref { get; set; } = "/landing/signup";

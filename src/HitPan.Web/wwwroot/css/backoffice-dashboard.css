@@ -254,3 +254,118 @@
     color: var(--hp-text-tertiary);
     margin-bottom: 24px;
 }
+
+/* ───────────────────────────────────────────────
+ * 8. Page Header v2 (목록·관리 화면 공통)
+ * ─────────────────────────────────────────────── */
+.bo-page-header {
+    display: flex;
+    align-items: flex-end;
+    justify-content: space-between;
+    gap: 16px;
+    flex-wrap: wrap;
+    margin-bottom: 24px;
+    padding-bottom: 16px;
+    border-bottom: 1px solid var(--hp-border-subtle);
+}
+.bo-page-header__main {
+    flex: 1;
+    min-width: 0;
+}
+.bo-page-header__title {
+    font-size: 28px;
+    font-weight: 700;
+    color: var(--hp-text-primary);
+    letter-spacing: -0.02em;
+    margin: 0 0 6px;
+    line-height: 1.2;
+}
+.bo-page-header__subtitle {
+    font-size: 14px;
+    color: var(--hp-text-tertiary);
+    margin: 0;
+    line-height: 1.5;
+}
+.bo-page-header__actions {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    flex-shrink: 0;
+}
+
+/* ───────────────────────────────────────────────
+ * 9. Filter Bar v2
+ * ─────────────────────────────────────────────── */
+.bo-filter-bar {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px;
+    align-items: flex-end;
+    background: var(--hp-surface-raised);
+    border: 1px solid var(--hp-border-subtle);
+    border-radius: 12px;
+    padding: 16px;
+    margin-bottom: 16px;
+    box-shadow: 0 1px 2px rgba(15, 20, 25, 0.04);
+}
+.bo-filter-bar > * { flex: 1 1 180px; min-width: 0; }
+.bo-filter-bar > .bo-filter-bar__action { flex: 0 0 auto; }
+
+/* ───────────────────────────────────────────────
+ * 10. List Section (테이블 컨테이너)
+ * ─────────────────────────────────────────────── */
+.bo-list-section {
+    background: var(--hp-surface-raised);
+    border: 1px solid var(--hp-border-subtle);
+    border-radius: 12px;
+    overflow: hidden;
+    box-shadow: 0 1px 2px rgba(15, 20, 25, 0.04), 0 1px 3px rgba(15, 20, 25, 0.06);
+}
+.bo-list-section__head {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 14px 18px;
+    border-bottom: 1px solid var(--hp-border-subtle);
+    background: var(--hp-surface-subtle, #FAFBFC);
+}
+.bo-list-section__title {
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--hp-text-secondary);
+}
+.bo-list-section__count {
+    font-size: 13px;
+    color: var(--hp-text-tertiary);
+}
+.bo-list-section__count strong {
+    color: var(--hp-brand-600);
+    font-weight: 700;
+}
+
+/* ───────────────────────────────────────────────
+ * 11. Status Chip (시각 표준화)
+ * ─────────────────────────────────────────────── */
+.bo-status-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 3px 10px;
+    border-radius: 999px;
+    font-size: 12px;
+    font-weight: 600;
+    line-height: 1.4;
+}
+.bo-status-chip::before {
+    content: "";
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: currentColor;
+}
+.bo-status-chip--active { background: #DCFCE7; color: #15803D; }
+.bo-status-chip--trial { background: #DBEAFE; color: #1D4ED8; }
+.bo-status-chip--suspended { background: #FEF3C7; color: #B45309; }
+.bo-status-chip--expired { background: #FEE2E2; color: #B91C1C; }
+.bo-status-chip--terminated { background: #F3F4F6; color: #4B5563; }
+.bo-status-chip--neutral { background: #F3F4F6; color: #4B5563; }

@@ -13,25 +13,31 @@
             </p>
         </div>
 
+        <div class="lv2-pricing-addon">
+            <span class="lv2-pricing-addon-label">옵션</span>
+            <span class="lv2-pricing-addon-text">기기 추가 — <b>PC + 모바일 1+1 세트 월 10,000원</b> (전 티어 공통)</span>
+        </div>
+
         <div class="lv2-pricing-grid">
-            <PricingCard Name="Basic"
+            <PricingCard Name="BASIC"
                          Price="₩29,000"
-                         Desc="1인 사업자·소상공인 시작용"
+                         Desc="5인 이하 중소기업 사업장의 시작용"
                          Features="@_basic"
                          CtaText="Basic 시작하기"
                          Href="/signup?plan=basic" />
 
-            <PricingCard Name="Pro"
-                         Price="₩59,000"
-                         Desc="성장하는 중소기업 표준"
+            <PricingCard Name="PRO"
+                         Price="₩49,000"
+                         Desc="성장하는 중소기업의 표준"
                          Featured="true"
                          Features="@_pro"
                          CtaText="Pro 시작하기"
                          Href="/signup?plan=pro" />
 
-            <PricingCard Name="Enterprise"
+            <PricingCard Name="ENTERPRISE"
                          Price="₩100,000"
-                         Desc="다지점·대량 데이터 운영"
+                         PriceNote="+ 서버 구축비용 (상담)"
+                         Desc="다지점 통합운영·대량 데이터"
                          Features="@_enterprise"
                          CtaText="상담 신청"
                          Href="/signup?plan=enterprise" />
@@ -42,30 +48,37 @@
 @code {
     private readonly string[] _basic = new[]
     {
-        "사용자 1명",
-        "기기 1대",
+        "사용자 5명",
+        "기기 5대 (모바일 포함)",
         "매입·판매·재고 기본",
-        "세금계산서 발행",
-        "이메일 CS"
+        "전자세금계산서 발행 월 50건",
+        "BOM 생산관리",
+        "전자세금계산서 연동",
+        "AI CS 챗봇"
     };
 
     private readonly string[] _pro = new[]
     {
-        "사용자 5명",
-        "기기 3대",
-        "BOM·생산관리 포함",
-        "거래명세서·세금계산서",
+        "사용자 10명",
+        "기기 15대 (모바일 포함)",
+        "매입·판매·재고 기본",
+        "전자세금계산서 발행 월 50건",
+        "BOM 생산관리",
+        "전자세금계산서 연동",
         "AI CS 챗봇",
-        "전화 CS 우선 응대"
+        "전화 CS·원격지원 응대"
     };
 
     private readonly string[] _enterprise = new[]
     {
         "사용자 무제한",
-        "기기 10대~",
-        "다지점 통합 운영",
-        "전자세금계산서 자동전송",
-        "전담 매니저 배정",
-        "원격 지원 우선"
+        "기기 무제한",
+        "매입·판매·재고 기본",
+        "전자세금계산서 발행 월 50건",
+        "BOM 생산관리",
+        "전자세금계산서 연동",
+        "AI CS 챗봇",
+        "다지점 통합운영",
+        "전담 매니저 배정"
     };
 }

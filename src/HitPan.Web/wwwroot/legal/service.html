@@ -95,5 +95,41 @@
     부칙: 본 약관은 2026년 6월 4일부터 시행합니다. (v2.0.0)
 </p>
 
+<!-- 약관 동의 푸터 (사장님 결재 2026-06-01 — "동의 버튼 누르면 다음 약관 자동 이동") -->
+<div id="agree-footer" style="display:none; position:sticky; bottom:0; margin-top:40px; padding:20px 24px; background:#fff; border-top:2px solid #0F6E56; box-shadow:0 -4px 16px rgba(0,0,0,0.08); text-align:center;">
+    <p style="margin:0 0 12px; font-size:14px; color:#1A2B4A;">위 약관 전문을 확인하셨습니다.</p>
+    <button id="btn-agree" style="background:#0F6E56;color:#fff;border:none;border-radius:8px;padding:12px 36px;font-size:15px;font-weight:700;cursor:pointer;">
+        <span id="btn-agree-label">동의하고 다음 약관 보기 →</span>
+    </button>
+    <p style="margin:10px 0 0; font-size:12px; color:#6B7280;">동의를 누르시면 가입 페이지에 자동 체크됩니다.</p>
+</div>
+
+<script>
+(function() {
+    var params = new URLSearchParams(window.location.search);
+    if (params.get('return') !== 'signup') return;
+    var key = 'service';
+    var next = params.get('next');
+    var nextLabel = { privacy:'개인정보 처리방침', outsourcing:'개인정보 처리 위탁', marketing:'마케팅 정보 수신', '':'가입 페이지로 돌아가기' };
+    var btn = document.getElementById('btn-agree');
+    var lbl = document.getElementById('btn-agree-label');
+    var footer = document.getElementById('agree-footer');
+    if (!btn || !footer) return;
+    footer.style.display = 'block';
+    lbl.textContent = next ? ('동의하고 다음 약관 보기 — ' + (nextLabel[next] || '') + ' →') : '동의하고 닫기 ✓';
+    btn.addEventListener('click', function() {
+        try { if (window.opener && !window.opener.closed) { window.opener.postMessage({ type:'hitpan-agree', key:key }, '*'); } } catch (e) {}
+        if (next) {
+            var nextMap = { privacy:'/legal/privacy.html', outsourcing:'/legal/data-ownership.html', marketing:'/legal/marketing.html' };
+            var nextNextMap = { privacy:'outsourcing', outsourcing:'marketing', marketing:'' };
+            var url = nextMap[next] + '?return=signup&next=' + nextNextMap[next];
+            window.location.href = url;
+        } else {
+            window.close();
+        }
+    });
+})();
+</script>
+
 </body>
 </html>

@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>마케팅 정보 수신 동의 — 히트판 ERP</title>
+<style>
+body { font-family: 'Pretendard', 'Malgun Gothic', sans-serif; max-width: 760px; margin: 40px auto; padding: 0 20px; color: #1A2B4A; line-height: 1.7; }
+h1 { font-size: 28px; border-bottom: 2px solid #0F6E56; padding-bottom: 12px; }
+h2 { font-size: 18px; color: #0F6E56; margin-top: 28px; }
+p, li { font-size: 15px; }
+.notice { background: #F0FAF6; border-left: 4px solid #0F6E56; padding: 14px 18px; border-radius: 6px; margin: 16px 0; font-size: 14px; }
+.meta { color: #6B7280; font-size: 13px; margin-top: 32px; }
+</style>
+</head>
+<body>
+<h1>마케팅 정보 수신 동의 (선택)</h1>
+
+<div class="notice">
+본 동의는 <b>선택 사항</b>이며, 동의하지 않으셔도 히트판 ERP 서비스 이용에는 제한이 없습니다.
+다만 동의해주시면 신규 기능·할인 이벤트·업종별 활용 팁 등을 가장 먼저 받아보실 수 있습니다.
+</div>
+
+<h2>1. 수집·이용 목적</h2>
+<ul>
+  <li>신규 기능·업데이트 안내</li>
+  <li>요금제 할인·프로모션 안내</li>
+  <li>업종별 ERP 활용 팁·사례 공유</li>
+  <li>고객 만족도 조사</li>
+</ul>
+
+<h2>2. 발송 채널</h2>
+<ul>
+  <li>이메일</li>
+  <li>SMS / 알림톡</li>
+  <li>앱 푸시 (모바일 앱 설치 시)</li>
+</ul>
+
+<h2>3. 보유·이용 기간</h2>
+<p>회원 탈퇴 시 또는 수신 동의 철회 시까지.</p>
+
+<h2>4. 동의 철회 방법</h2>
+<ul>
+  <li>설정 → 알림 → 마케팅 수신 동의 해제</li>
+  <li>이메일 하단 [수신 거부] 링크 클릭</li>
+  <li>고객센터 (1588-XXXX) 요청</li>
+</ul>
+
+<h2>5. 거부 시 불이익</h2>
+<p>없습니다. 동의 여부와 관계없이 모든 핵심 서비스를 동일하게 이용하실 수 있습니다.</p>
+
+<p class="meta">
+시행일자: 2026년 6월 1일<br />
+법무팀 검수: 정식본 박제 대기 중 (임시 안내본)
+</p>
+
+<!-- 약관 동의 푸터 (사장님 결재 2026-06-01) -->
+<div id="agree-footer" style="display:none; position:sticky; bottom:0; margin-top:40px; padding:20px 24px; background:#fff; border-top:2px solid #0F6E56; box-shadow:0 -4px 16px rgba(0,0,0,0.08); text-align:center;">
+    <p style="margin:0 0 12px; font-size:14px; color:#1A2B4A;">위 마케팅 수신 안내 전문을 확인하셨습니다.</p>
+    <div style="display:flex;gap:8px;justify-content:center;flex-wrap:wrap;">
+        <button id="btn-agree" style="background:#0F6E56;color:#fff;border:none;border-radius:8px;padding:12px 28px;font-size:15px;font-weight:700;cursor:pointer;">
+            동의하고 닫기 ✓
+        </button>
+        <button id="btn-skip" style="background:#fff;color:#6B7280;border:1px solid #D1D5DB;border-radius:8px;padding:12px 28px;font-size:15px;font-weight:600;cursor:pointer;">
+            동의 안 함 (닫기)
+        </button>
+    </div>
+    <p style="margin:10px 0 0; font-size:12px; color:#6B7280;">선택 약관입니다. 동의 여부와 관계없이 모든 서비스를 동일하게 이용하실 수 있습니다.</p>
+</div>
+
+<script>
+(function() {
+    var params = new URLSearchParams(window.location.search);
+    if (params.get('return') !== 'signup') return;
+    var footer = document.getElementById('agree-footer');
+    var btn = document.getElementById('btn-agree');
+    var skip = document.getElementById('btn-skip');
+    if (!footer || !btn || !skip) return;
+    footer.style.display = 'block';
+    btn.addEventListener('click', function() {
+        try { if (window.opener && !window.opener.closed) { window.opener.postMessage({ type:'hitpan-agree', key:'marketing' }, '*'); } } catch (e) {}
+        window.close();
+    });
+    skip.addEventListener('click', function() { window.close(); });
+})();
+</script>
+
+</body>
+</html>

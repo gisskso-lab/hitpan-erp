@@ -16,6 +16,11 @@
         <span class="lv2-pricing-unit">@Unit</span>
     </div>
 
+    @if (!string.IsNullOrEmpty(PriceNote))
+    {
+        <p class="lv2-pricing-note">@PriceNote</p>
+    }
+
     <p class="lv2-pricing-desc">@Desc</p>
 
     <ul class="lv2-pricing-list">
@@ -55,4 +60,7 @@
 
     /// <summary>강조 카드 여부 (Pro).</summary>
     [Parameter] public bool Featured { get; set; } = false;
+
+    /// <summary>가격 보조 문구 (예: + 서버 구축비용 상담).</summary>
+    [Parameter] public string? PriceNote { get; set; }
 }

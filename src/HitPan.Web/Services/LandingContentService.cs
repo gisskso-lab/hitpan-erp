@@ -66,50 +66,61 @@ public class LandingContentService
     {
         new PricingTier
         {
-            Name = "스타터",
-            Tagline = "1인 사장님·개인사업자",
+            Name = "BASIC",
+            Tagline = "5인 이하 중소기업 사업장의 시작용",
             MonthlyPrice = 29_000m,
             Features = new[]
             {
-                "기기 1대",
+                "사용자 5명",
+                "기기 5대 (모바일 포함)",
                 "매입·판매·재고 기본",
-                "전자세금계산서 월 50건",
-                "이메일 지원",
+                "전자세금계산서 발행 월 50건",
+                "BOM 생산관리",
+                "전자세금계산서 연동",
+                "AI CS 챗봇",
             },
             IsRecommended = false,
-            CtaText = "스타터 시작",
+            CtaText = "Basic 시작하기",
         },
         new PricingTier
         {
-            Name = "비즈니스",
-            Tagline = "직원 2~10명 소상공인",
-            MonthlyPrice = 59_000m,
+            Name = "PRO",
+            Tagline = "성장하는 중소기업의 표준",
+            MonthlyPrice = 49_000m,
             Features = new[]
             {
-                "기기 3대",
-                "BOM·생산 포함",
-                "전자세금계산서 월 300건",
+                "사용자 10명",
+                "기기 15대 (모바일 포함)",
+                "매입·판매·재고 기본",
+                "전자세금계산서 발행 월 50건",
+                "BOM 생산관리",
+                "전자세금계산서 연동",
                 "AI CS 챗봇",
-                "전화·원격 지원",
+                "전화 CS·원격지원 응대",
             },
             IsRecommended = true,
-            CtaText = "비즈니스 시작",
+            CtaText = "Pro 시작하기",
         },
         new PricingTier
         {
-            Name = "프로",
-            Tagline = "직원 11~30명 중소기업",
+            Name = "ENTERPRISE",
+            Tagline = "다지점 통합운영·대량 데이터",
             MonthlyPrice = 100_000m,
+            PriceNote = "+ 서버 구축비용 (상담)",
             Features = new[]
             {
+                "사용자 무제한",
                 "기기 무제한",
-                "회계·경리 풀세트",
-                "전자세금계산서 무제한",
-                "전담 매니저",
-                "백업·DR 우선 지원",
+                "매입·판매·재고 기본",
+                "전자세금계산서 발행 월 50건",
+                "BOM 생산관리",
+                "전자세금계산서 연동",
+                "AI CS 챗봇",
+                "다지점 통합운영",
+                "전담 매니저 배정",
             },
             IsRecommended = false,
-            CtaText = "프로 시작",
+            CtaText = "상담 신청",
         },
     };
 

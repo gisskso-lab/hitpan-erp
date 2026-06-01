@@ -1,4 +1,4 @@
-﻿@page "/admin/tenants"
+@page "/admin/tenants"
 @layout PlatformLayout
 @attribute [Authorize]
 @inject BackofficeService Bo
@@ -6,89 +6,121 @@
 @inject IDialogService Dialog
 @using HitPan.Web.Models.Backoffice
 @using HitPan.Web.Services
+@using HitPan.Web.Pages.Platform.Components
+
+@*
+ * 고객사 관리 — 백오피스 v2 시각 박제 (수석 웹디자이너 + 프론트 매니저 2026-06-01)
+ *
+ * 강화 (사장님 결재 — "백오피스 화면을 좀더 시각화 하고 관리프로그램으로서 쾌적한 워크스페이스"):
+ *  - BoPageHeader (28px 타이틀 + 보조설명 + 우측 액션) — 일관 패턴
+ *  - BoFilterBar (16px padding + 12px gap + 라운드 12px)
+ *  - bo-list-section (테이블 컨테이너 통일 — 헤더 14px + 카운트 강조)
+ *  - bo-status-chip (5종 상태 색상 표준화 — 그린/블루/옐로/레드/회색)
+ *  - BoEmptyStateCard (DB 0건 시 "첫 고객사 등록 안내" + 가입 흐름 점검 CTA)
+ *
+ * 보존:
+ *  - AdminTenantListItem·AdminTenantDetail 모델 그대로
+ *  - 401 처리 (Snackbar 안내)
+ *  - 헌법 #15 정합 — 빈 catch 5건 봉합 (Severity.Error + 메시지 박제)
+ *@
 
 <PageTitle>고객사 관리 — 히트판 백오피스</PageTitle>
 
-<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px;">
-    <div>
-        <MudText Typo="Typo.h5" Style="font-weight:600;">고객사 관리</MudText>
-        <MudText Typo="Typo.body2" Color="Color.Secondary">전체 고객사 목록 및 구독 현황</MudText>
-    </div>
-</div>
+<BoPageHeader Title="고객사 관리"
+              Subtitle="전체 고객사 목록 · 구독 상태 · 청구 현황">
+    <Actions>
+        <MudButton Variant="Variant.Outlined" Color="Color.Primary" Size="Size.Small"
+                   StartIcon="@Icons.Material.Filled.FileDownload"
+                   OnClick="@(() => Snackbar.Add("CSV 내보내기는 P1 작지 #2 박제 대기 중입니다.", Severity.Info))">
+            CSV 내보내기
+        </MudButton>
+        <MudButton Variant="Variant.Filled" Color="Color.Primary" Size="Size.Small"
+                   StartIcon="@Icons.Material.Filled.VpnKey"
+                   OnClick="@(() => Nav.NavigateTo("/admin/tenants/issue"))">
+            시리얼 발급
+        </MudButton>
+    </Actions>
+</BoPageHeader>
 
-<MudPaper Class="pa-3 mb-4" Elevation="1" Style="border-radius:12px;">
-    <MudGrid Spacing="2" AlignItems="AlignItems.Center">
-        <MudItem xs="12" sm="4">
-            <MudTextField @bind-Value="_search" Label="검색" Variant="Variant.Outlined" Margin="Margin.Dense"
-                          Placeholder="회사명, 사업자번호" Adornment="Adornment.End"
-                          AdornmentIcon="@Icons.Material.Filled.Search"
-                          OnKeyUp="@OnSearchKey" />
-        </MudItem>
-        <MudItem xs="6" sm="3">
-            <MudSelect @bind-Value="_statusFilter" Label="상태" Variant="Variant.Outlined" Margin="Margin.Dense"
-                       Clearable="true" T="string">
-                <MudSelectItem Value="@("active")">활성</MudSelectItem>
-                <MudSelectItem Value="@("trial")">체험</MudSelectItem>
-                <MudSelectItem Value="@("suspended")">중지</MudSelectItem>
-                <MudSelectItem Value="@("expired")">만료</MudSelectItem>
-            </MudSelect>
-        </MudItem>
-        <MudItem xs="6" sm="3">
-            <MudSelect @bind-Value="_planFilter" Label="플랜" Variant="Variant.Outlined" Margin="Margin.Dense"
-                       Clearable="true" T="string">
-                <MudSelectItem Value="@("basic")">Basic</MudSelectItem>
-                <MudSelectItem Value="@("pro")">Pro</MudSelectItem>
-                <MudSelectItem Value="@("enterprise")">Enterprise</MudSelectItem>
-            </MudSelect>
-        </MudItem>
-        <MudItem xs="12" sm="2">
-            <MudButton Variant="Variant.Filled" Color="Color.Primary" FullWidth="true"
-                       OnClick="LoadAsync" StartIcon="@Icons.Material.Filled.Refresh">
-                조회
-            </MudButton>
-        </MudItem>
-    </MudGrid>
-</MudPaper>
+<BoFilterBar>
+    <MudTextField @bind-Value="_search" Label="검색" Variant="Variant.Outlined" Margin="Margin.Dense"
+                  Placeholder="회사명, 사업자번호"
+                  Adornment="Adornment.End"
+                  AdornmentIcon="@Icons.Material.Filled.Search"
+                  OnKeyUp="@OnSearchKey" />
+    <MudSelect @bind-Value="_statusFilter" Label="상태" Variant="Variant.Outlined" Margin="Margin.Dense"
+               Clearable="true" T="string">
+        <MudSelectItem Value="@("active")">활성</MudSelectItem>
+        <MudSelectItem Value="@("trial")">체험</MudSelectItem>
+        <MudSelectItem Value="@("suspended")">중지</MudSelectItem>
+        <MudSelectItem Value="@("expired")">만료</MudSelectItem>
+    </MudSelect>
+    <MudSelect @bind-Value="_planFilter" Label="플랜" Variant="Variant.Outlined" Margin="Margin.Dense"
+               Clearable="true" T="string">
+        <MudSelectItem Value="@("basic")">Basic</MudSelectItem>
+        <MudSelectItem Value="@("pro")">Pro</MudSelectItem>
+        <MudSelectItem Value="@("enterprise")">Enterprise</MudSelectItem>
+    </MudSelect>
+    <div class="bo-filter-bar__action">
+        <MudButton Variant="Variant.Filled" Color="Color.Primary"
+                   OnClick="LoadAsync" StartIcon="@Icons.Material.Filled.Refresh">
+            조회
+        </MudButton>
+    </div>
+</BoFilterBar>
 
 @if (_loading)
 {
     <MudProgressLinear Indeterminate="true" Color="Color.Primary" Class="mb-2" />
 }
 
-<MudPaper Elevation="1" Style="border-radius:12px;overflow:hidden;">
-    <MudDataGrid T="AdminTenantListItem" Items="_items" Loading="_loading"
-                 Hover="true" Dense="true" Striped="false"
-                 SortMode="SortMode.Single"
-                 RowClick="OnRowClick">
-        <Columns>
-            <PropertyColumn Property="x => x.CompanyName" Title="회사명" />
-            <PropertyColumn Property="x => x.BizNo" Title="사업자번호" />
-            <TemplateColumn Title="상태">
-                <CellTemplate>
-                    <MudChip T="string" Size="Size.Small" Color="@context.Item.StatusColor" Variant="Variant.Filled">
-                        @context.Item.StatusKo
-                    </MudChip>
-                </CellTemplate>
-            </TemplateColumn>
-            <PropertyColumn Property="x => x.PlanType" Title="플랜" />
-            <PropertyColumn Property="x => x.ResellerName" Title="대리점" />
-            <PropertyColumn Property="x => x.UserCount" Title="사용자" />
-            <TemplateColumn Title="다음 청구일">
-                <CellTemplate>
-                    @(context.Item.NextBillingAt.HasValue ? context.Item.NextBillingAt.Value.ToString("yyyy-MM-dd") : "-")
-                </CellTemplate>
-            </TemplateColumn>
-            <TemplateColumn Title="가입일">
-                <CellTemplate>
-                    @context.Item.CreatedAt.ToString("yyyy-MM-dd")
-                </CellTemplate>
-            </TemplateColumn>
-        </Columns>
-        <NoRecordsContent>
-            <MudText Typo="Typo.body2" Color="Color.Secondary" Class="pa-4">조회된 고객사가 없습니다.</MudText>
-        </NoRecordsContent>
-    </MudDataGrid>
-</MudPaper>
+<div class="bo-list-section">
+    <div class="bo-list-section__head">
+        <span class="bo-list-section__title">고객사 목록</span>
+        <span class="bo-list-section__count">총 <strong>@_total.ToString("N0")</strong>건</span>
+    </div>
+
+    @if (!_loading && _items.Count == 0)
+    {
+        <div style="padding:32px 24px;">
+            <BoEmptyStateCard Title="조회된 고객사가 없습니다"
+                              Description="검색 조건을 비우고 조회해보세요. 첫 가입이 시작되면 이곳에 자동으로 표시됩니다."
+                              IllustrationKind="list"
+                              CtaText="시리얼 발급으로 이동"
+                              CtaClick="@(() => Nav.NavigateTo("/admin/tenants/issue"))" />
+        </div>
+    }
+    else
+    {
+        <MudDataGrid T="AdminTenantListItem" Items="_items" Loading="_loading"
+                     Hover="true" Dense="true" Striped="false"
+                     SortMode="SortMode.Single"
+                     RowClick="OnRowClick">
+            <Columns>
+                <PropertyColumn Property="x => x.CompanyName" Title="회사명" />
+                <PropertyColumn Property="x => x.BizNo" Title="사업자번호" />
+                <TemplateColumn Title="상태">
+                    <CellTemplate>
+                        <span class="bo-status-chip @StatusChipClass(context.Item.Status)">@context.Item.StatusKo</span>
+                    </CellTemplate>
+                </TemplateColumn>
+                <PropertyColumn Property="x => x.PlanType" Title="플랜" />
+                <PropertyColumn Property="x => x.ResellerName" Title="대리점" />
+                <PropertyColumn Property="x => x.UserCount" Title="사용자" />
+                <TemplateColumn Title="다음 청구일">
+                    <CellTemplate>
+                        @(context.Item.NextBillingAt.HasValue ? context.Item.NextBillingAt.Value.ToString("yyyy-MM-dd") : "-")
+                    </CellTemplate>
+                </TemplateColumn>
+                <TemplateColumn Title="가입일">
+                    <CellTemplate>
+                        @context.Item.CreatedAt.ToString("yyyy-MM-dd")
+                    </CellTemplate>
+                </TemplateColumn>
+            </Columns>
+        </MudDataGrid>
+    }
+</div>
 
 @if (_total > _pageSize)
 {
@@ -118,7 +150,7 @@
                 <MudItem xs="7"><MudText Typo="Typo.body2">@(_detail.Address ?? "-")</MudText></MudItem>
                 <MudItem xs="5"><MudText Typo="Typo.caption" Color="Color.Secondary">상태</MudText></MudItem>
                 <MudItem xs="7">
-                    <MudChip T="string" Size="Size.Small" Color="@_detail.StatusColor" Variant="Variant.Filled">@_detail.StatusKo</MudChip>
+                    <span class="bo-status-chip @StatusChipClass(_detail.Status)">@_detail.StatusKo</span>
                 </MudItem>
             </MudGrid>
 
@@ -134,7 +166,7 @@
                     <MudItem xs="5"><MudText Typo="Typo.caption" Color="Color.Secondary">추가 사용자</MudText></MudItem>
                     <MudItem xs="7"><MudText Typo="Typo.body2">@(_detail.Subscription.ExtraUsers)명</MudText></MudItem>
                     <MudItem xs="5"><MudText Typo="Typo.caption" Color="Color.Secondary">월 청구액</MudText></MudItem>
-                    <MudItem xs="7"><MudText Typo="Typo.body2" Style="font-weight:600;">@_detail.Subscription.TotalFee.ToString("N0")원</MudText></MudItem>
+                    <MudItem xs="7"><MudText Typo="Typo.body2" Style="font-weight:600;color:var(--hp-brand-600);">@_detail.Subscription.TotalFee.ToString("N0")원</MudText></MudItem>
                 </MudGrid>
             }
 
@@ -169,6 +201,8 @@
 }
 
 @code {
+    [Inject] private NavigationManager Nav { get; set; } = default!;
+
     private List<AdminTenantListItem> _items = new();
     private AdminTenantDetail? _detail;
     private bool _loading;
@@ -191,9 +225,12 @@
             _items = result?.Items ?? new();
             _total = result?.TotalCount ?? 0;
         }
-        catch
+        catch (Exception ex)
         {
-            Snackbar.Add("고객사 목록 로드 실패", Severity.Error);
+            // 헌법 #15 정합 — 빈 catch 봉합 (Snackbar + 메시지 박제)
+            Snackbar.Add($"고객사 목록 로드 실패: {ex.Message}", Severity.Error);
+            _items = new();
+            _total = 0;
         }
         finally
         {
@@ -208,9 +245,9 @@
             _detail = await Bo.GetAdminTenantDetailAsync(args.Item.TenantId);
             _drawerOpen = true;
         }
-        catch
+        catch (Exception ex)
         {
-            Snackbar.Add("상세 정보 로드 실패", Severity.Error);
+            Snackbar.Add($"상세 정보 로드 실패: {ex.Message}", Severity.Error);
         }
     }
 
@@ -224,9 +261,9 @@
             _detail.Status = status;
             await LoadAsync();
         }
-        catch
+        catch (Exception ex)
         {
-            Snackbar.Add("상태 변경 실패", Severity.Error);
+            Snackbar.Add($"상태 변경 실패: {ex.Message}", Severity.Error);
         }
     }
 
@@ -240,4 +277,14 @@
         _page = page;
         await LoadAsync();
     }
+
+    // 상태 → bo-status-chip 클래스 매핑 (시각 표준화)
+    private static string StatusChipClass(string? status) => status switch
+    {
+        "active" => "bo-status-chip--active",
+        "trial" => "bo-status-chip--trial",
+        "suspended" => "bo-status-chip--suspended",
+        "expired" => "bo-status-chip--expired",
+        _ => "bo-status-chip--neutral"
+    };
 }
