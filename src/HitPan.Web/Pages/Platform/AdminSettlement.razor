@@ -5,44 +5,38 @@
 @inject ISnackbar Snackbar
 @using HitPan.Web.Models.Backoffice
 @using HitPan.Web.Services
+@using HitPan.Web.Pages.Platform.Components
 
 <PageTitle>수수료 정산 — 히트판 백오피스</PageTitle>
 
-<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px;">
-    <div>
-        <MudText Typo="Typo.h5" Style="font-weight:600;">수수료 정산</MudText>
-        <MudText Typo="Typo.body2" Color="Color.Secondary">대리점 수수료 정산 관리</MudText>
-    </div>
-    <MudButton Variant="Variant.Filled" Color="Color.Primary"
-               StartIcon="@Icons.Material.Filled.AutoAwesome"
-               OnClick="OpenGenerateDialog" Disabled="_busy">
-        정산 생성
-    </MudButton>
-</div>
+<BoPageHeader Title="수수료 정산"
+              Subtitle="대리점 수수료 정산 관리 · 승인 → 지급 흐름">
+    <Actions>
+        <MudButton Variant="Variant.Filled" Color="Color.Primary" Size="Size.Small"
+                   StartIcon="@Icons.Material.Filled.AutoAwesome"
+                   OnClick="OpenGenerateDialog" Disabled="_busy">
+            정산 생성
+        </MudButton>
+    </Actions>
+</BoPageHeader>
 
-<MudPaper Class="pa-3 mb-4" Elevation="1" Style="border-radius:12px;">
-    <MudGrid Spacing="2" AlignItems="AlignItems.Center">
-        <MudItem xs="12" sm="3">
-            <MudTextField @bind-Value="_monthFilter" Label="정산월 (YYYY-MM)" Variant="Variant.Outlined"
-                          Margin="Margin.Dense" Placeholder="2026-04" />
-        </MudItem>
-        <MudItem xs="6" sm="3">
-            <MudSelect @bind-Value="_statusFilter" Label="상태" Variant="Variant.Outlined" Margin="Margin.Dense"
-                       Clearable="true" T="string">
-                <MudSelectItem Value="@("draft")">검토중</MudSelectItem>
-                <MudSelectItem Value="@("approved")">승인됨</MudSelectItem>
-                <MudSelectItem Value="@("paid")">지급완료</MudSelectItem>
-                <MudSelectItem Value="@("cancelled")">취소</MudSelectItem>
-            </MudSelect>
-        </MudItem>
-        <MudItem xs="6" sm="2">
-            <MudButton Variant="Variant.Filled" Color="Color.Primary" FullWidth="true"
-                       OnClick="LoadAsync" StartIcon="@Icons.Material.Filled.Refresh">
-                조회
-            </MudButton>
-        </MudItem>
-    </MudGrid>
-</MudPaper>
+<BoFilterBar>
+    <MudTextField @bind-Value="_monthFilter" Label="정산월 (YYYY-MM)" Variant="Variant.Outlined"
+                  Margin="Margin.Dense" Placeholder="2026-04" />
+    <MudSelect @bind-Value="_statusFilter" Label="상태" Variant="Variant.Outlined" Margin="Margin.Dense"
+               Clearable="true" T="string">
+        <MudSelectItem Value="@("draft")">검토중</MudSelectItem>
+        <MudSelectItem Value="@("approved")">승인됨</MudSelectItem>
+        <MudSelectItem Value="@("paid")">지급완료</MudSelectItem>
+        <MudSelectItem Value="@("cancelled")">취소</MudSelectItem>
+    </MudSelect>
+    <div class="bo-filter-bar__action">
+        <MudButton Variant="Variant.Filled" Color="Color.Primary"
+                   OnClick="LoadAsync" StartIcon="@Icons.Material.Filled.Refresh">
+            조회
+        </MudButton>
+    </div>
+</BoFilterBar>
 
 @if (_loading)
 {
@@ -53,53 +47,66 @@
 {
     <MudGrid Spacing="2" Class="mb-4">
         <MudItem xs="6" sm="3">
-            <MudPaper Class="pa-3" Elevation="1" Style="border-radius:10px;text-align:center;">
+            <MudPaper Class="pa-3" Elevation="1" Style="border-radius:12px;text-align:center;">
                 <MudText Typo="Typo.caption" Color="Color.Secondary">조회 기간 총 매출</MudText>
-                <MudText Typo="Typo.h6" Style="font-weight:700;">@_result.MonthlyTotalRevenue.ToString("N0")원</MudText>
+                <MudText Typo="Typo.h6" Style="font-weight:700;color:var(--hp-brand-600);">@_result.MonthlyTotalRevenue.ToString("N0")원</MudText>
             </MudPaper>
         </MudItem>
         <MudItem xs="6" sm="3">
-            <MudPaper Class="pa-3" Elevation="1" Style="border-radius:10px;text-align:center;">
+            <MudPaper Class="pa-3" Elevation="1" Style="border-radius:12px;text-align:center;">
                 <MudText Typo="Typo.caption" Color="Color.Secondary">조회 기간 총 수수료</MudText>
-                <MudText Typo="Typo.h6" Style="font-weight:700;">@_result.MonthlyTotalCommission.ToString("N0")원</MudText>
+                <MudText Typo="Typo.h6" Style="font-weight:700;color:var(--hp-brand-600);">@_result.MonthlyTotalCommission.ToString("N0")원</MudText>
             </MudPaper>
         </MudItem>
     </MudGrid>
 }
 
-<MudPaper Elevation="1" Style="border-radius:12px;overflow:hidden;">
-    <MudDataGrid T="SettlementListItem" Items="_items" Loading="_loading"
-                 Hover="true" Dense="true" SortMode="SortMode.Single"
-                 RowClick="OnRowClick">
-        <Columns>
-            <PropertyColumn Property="x => x.SettlementMonth" Title="정산월" />
-            <PropertyColumn Property="x => x.ResellerName" Title="대리점" />
-            <PropertyColumn Property="x => x.ActiveCustomerCount" Title="활성 고객사" />
-            <TemplateColumn Title="총 매출">
-                <CellTemplate>@context.Item.TotalRevenue.ToString("N0")원</CellTemplate>
-            </TemplateColumn>
-            <TemplateColumn Title="수수료">
-                <CellTemplate>@context.Item.TotalCommission.ToString("N0")원</CellTemplate>
-            </TemplateColumn>
-            <TemplateColumn Title="지급액">
-                <CellTemplate><strong>@context.Item.PaymentAmount.ToString("N0")원</strong></CellTemplate>
-            </TemplateColumn>
-            <TemplateColumn Title="상태">
-                <CellTemplate>
-                    <MudChip T="string" Size="Size.Small" Color="@context.Item.StatusColor" Variant="Variant.Filled">
-                        @context.Item.StatusKo
-                    </MudChip>
-                </CellTemplate>
-            </TemplateColumn>
-            <TemplateColumn Title="지급일">
-                <CellTemplate>@(context.Item.PaymentDate.HasValue ? context.Item.PaymentDate.Value.ToString("yyyy-MM-dd") : "-")</CellTemplate>
-            </TemplateColumn>
-        </Columns>
-        <NoRecordsContent>
-            <MudText Typo="Typo.body2" Color="Color.Secondary" Class="pa-4">조회된 정산 내역이 없습니다.</MudText>
-        </NoRecordsContent>
-    </MudDataGrid>
-</MudPaper>
+<div class="bo-list-section">
+    <div class="bo-list-section__head">
+        <span class="bo-list-section__title">정산 내역</span>
+        <span class="bo-list-section__count">총 <strong>@_total.ToString("N0")</strong>건</span>
+    </div>
+
+    @if (!_loading && _items.Count == 0)
+    {
+        <div style="padding:32px 24px;">
+            <BoEmptyStateCard Title="조회된 정산 내역이 없습니다"
+                              Description="우측 상단 '정산 생성' 버튼으로 월별 정산을 생성하세요. 대리점이 영업한 고객사 매출이 자동 집계됩니다."
+                              IllustrationKind="list"
+                              CtaText="정산 생성"
+                              CtaClick="OpenGenerateDialog" />
+        </div>
+    }
+    else
+    {
+        <MudDataGrid T="SettlementListItem" Items="_items" Loading="_loading"
+                     Hover="true" Dense="true" SortMode="SortMode.Single"
+                     RowClick="OnRowClick">
+            <Columns>
+                <PropertyColumn Property="x => x.SettlementMonth" Title="정산월" />
+                <PropertyColumn Property="x => x.ResellerName" Title="대리점" />
+                <PropertyColumn Property="x => x.ActiveCustomerCount" Title="활성 고객사" />
+                <TemplateColumn Title="총 매출">
+                    <CellTemplate>@context.Item.TotalRevenue.ToString("N0")원</CellTemplate>
+                </TemplateColumn>
+                <TemplateColumn Title="수수료">
+                    <CellTemplate>@context.Item.TotalCommission.ToString("N0")원</CellTemplate>
+                </TemplateColumn>
+                <TemplateColumn Title="지급액">
+                    <CellTemplate><strong style="color:var(--hp-brand-600);">@context.Item.PaymentAmount.ToString("N0")원</strong></CellTemplate>
+                </TemplateColumn>
+                <TemplateColumn Title="상태">
+                    <CellTemplate>
+                        <span class="bo-status-chip @SettleChipClass(context.Item.Status)">@context.Item.StatusKo</span>
+                    </CellTemplate>
+                </TemplateColumn>
+                <TemplateColumn Title="지급일">
+                    <CellTemplate>@(context.Item.PaymentDate.HasValue ? context.Item.PaymentDate.Value.ToString("yyyy-MM-dd") : "-")</CellTemplate>
+                </TemplateColumn>
+            </Columns>
+        </MudDataGrid>
+    }
+</div>
 
 @if (_total > _pageSize)
 {
@@ -200,15 +207,26 @@
             _items = _result?.Items ?? new();
             _total = _result?.TotalCount ?? 0;
         }
-        catch
+        catch (Exception ex)
         {
-            Snackbar.Add("정산 목록 로드 실패", Severity.Error);
+            Snackbar.Add($"정산 목록 로드 실패: {ex.Message}", Severity.Error);
+            _items = new();
+            _total = 0;
         }
         finally
         {
             _loading = false;
         }
     }
+
+    private static string SettleChipClass(string? status) => status switch
+    {
+        "draft" => "bo-status-chip--trial",
+        "approved" => "bo-status-chip--suspended",
+        "paid" => "bo-status-chip--active",
+        "cancelled" => "bo-status-chip--terminated",
+        _ => "bo-status-chip--neutral"
+    };
 
     private void OnRowClick(DataGridRowClickEventArgs<SettlementListItem> args)
     {
@@ -233,9 +251,9 @@
             _generateOpen = false;
             await LoadAsync();
         }
-        catch
+        catch (Exception ex)
         {
-            Snackbar.Add("정산 생성 실패", Severity.Error);
+            Snackbar.Add($"정산 생성 실패: {ex.Message}", Severity.Error);
         }
         finally
         {
@@ -254,9 +272,9 @@
             _drawerOpen = false;
             await LoadAsync();
         }
-        catch
+        catch (Exception ex)
         {
-            Snackbar.Add("승인 실패", Severity.Error);
+            Snackbar.Add($"승인 실패: {ex.Message}", Severity.Error);
         }
         finally
         {
@@ -275,9 +293,9 @@
             _drawerOpen = false;
             await LoadAsync();
         }
-        catch
+        catch (Exception ex)
         {
-            Snackbar.Add("지급 처리 실패", Severity.Error);
+            Snackbar.Add($"지급 처리 실패: {ex.Message}", Severity.Error);
         }
         finally
         {
@@ -296,9 +314,9 @@
             _drawerOpen = false;
             await LoadAsync();
         }
-        catch
+        catch (Exception ex)
         {
-            Snackbar.Add("취소 실패", Severity.Error);
+            Snackbar.Add($"취소 실패: {ex.Message}", Severity.Error);
         }
         finally
         {

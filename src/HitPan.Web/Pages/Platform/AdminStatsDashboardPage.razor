@@ -13,19 +13,18 @@
 @attribute [Authorize(Policy = "PlatformOnlyV2")]
 @inject HttpClient Http
 @inject ISnackbar Snackbar
+@using HitPan.Web.Pages.Platform.Components
 
 <PageTitle>전체 통계 — 히트판 백오피스</PageTitle>
 
-<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px;">
-    <div>
-        <MudText Typo="Typo.h5" Style="font-weight:600;">전체 통계 대시보드</MudText>
-        <MudText Typo="Typo.body2" Color="Color.Secondary">
-            시리얼 수·구독 등급별 분포·결제 상태 (평문 사업자정보 0)
-        </MudText>
-    </div>
-    <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Refresh"
-               OnClick="LoadAsync">새로고침</MudButton>
-</div>
+<BoPageHeader Title="전체 통계 대시보드"
+              Subtitle="시리얼 수 · 구독 등급별 분포 · 결제 상태 · 워치독 헬스 (평문 사업자정보 0건)">
+    <Actions>
+        <MudButton Variant="Variant.Outlined" Color="Color.Primary" Size="Size.Small"
+                   StartIcon="@Icons.Material.Filled.Refresh"
+                   OnClick="LoadAsync">새로고침</MudButton>
+    </Actions>
+</BoPageHeader>
 
 @if (_loading)
 {
@@ -35,73 +34,83 @@ else
 {
     <MudGrid Spacing="3" Class="mb-5">
         <MudItem xs="12" sm="6" md="3">
-            <MudPaper Class="pa-4" Elevation="1" Style="border-radius:12px;">
-                <div style="display:flex;align-items:center;gap:12px;margin-bottom:8px;">
-                    <MudIcon Icon="@Icons.Material.Filled.Key" Color="Color.Primary" />
-                    <MudText Typo="Typo.body2" Color="Color.Secondary">총 시리얼</MudText>
-                </div>
-                <MudText Typo="Typo.h4" Style="font-weight:700;">@_stats.TotalSerials.ToString("N0")</MudText>
-                <MudText Typo="Typo.caption" Color="Color.Success">활성 @_stats.ActiveSerials</MudText>
-            </MudPaper>
+            <BoKpiCard Label="총 시리얼"
+                     Value="@_stats.TotalSerials.ToString("N0")"
+                     Icon="@Icons.Material.Filled.Key"
+                     Accent="primary"
+                     TrendText="@($"활성 {_stats.ActiveSerials}")"
+                     TrendKind="@(_stats.ActiveSerials > 0 ? "up" : "neutral")" />
         </MudItem>
         <MudItem xs="12" sm="6" md="3">
-            <MudPaper Class="pa-4" Elevation="1" Style="border-radius:12px;">
-                <div style="display:flex;align-items:center;gap:12px;margin-bottom:8px;">
-                    <MudIcon Icon="@Icons.Material.Filled.Payments" Color="Color.Success" />
-                    <MudText Typo="Typo.body2" Color="Color.Secondary">결제 정상</MudText>
-                </div>
-                <MudText Typo="Typo.h4" Style="font-weight:700;">@_stats.PaidActive.ToString("N0")</MudText>
-                <MudText Typo="Typo.caption" Color="Color.Warning">연체 @_stats.Overdue</MudText>
-            </MudPaper>
+            <BoKpiCard Label="결제 정상"
+                     Value="@_stats.PaidActive.ToString("N0")"
+                     Icon="@Icons.Material.Filled.Payments"
+                     Accent="info"
+                     TrendText="@($"연체 {_stats.Overdue}")"
+                     TrendKind="@(_stats.Overdue > 0 ? "down" : "neutral")" />
         </MudItem>
         <MudItem xs="12" sm="6" md="3">
-            <MudPaper Class="pa-4" Elevation="1" Style="border-radius:12px;">
-                <div style="display:flex;align-items:center;gap:12px;margin-bottom:8px;">
-                    <MudIcon Icon="@Icons.Material.Filled.SupportAgent" Color="Color.Warning" />
-                    <MudText Typo="Typo.body2" Color="Color.Secondary">CS 처리중</MudText>
-                </div>
-                <MudText Typo="Typo.h4" Style="font-weight:700;">@_stats.OpenTickets.ToString("N0")</MudText>
-                <MudText Typo="Typo.caption" Color="Color.Error">P0 @_stats.P0Tickets</MudText>
-            </MudPaper>
+            <BoKpiCard Label="CS 처리중"
+                     Value="@_stats.OpenTickets.ToString("N0")"
+                     Icon="@Icons.Material.Filled.SupportAgent"
+                     Accent="warning"
+                     TrendText="@($"P0 {_stats.P0Tickets}")"
+                     TrendKind="@(_stats.P0Tickets > 0 ? "down" : "neutral")" />
         </MudItem>
         <MudItem xs="12" sm="6" md="3">
-            <MudPaper Class="pa-4" Elevation="1" Style="border-radius:12px;">
-                <div style="display:flex;align-items:center;gap:12px;margin-bottom:8px;">
-                    <MudIcon Icon="@Icons.Material.Filled.MonitorHeart" Color="Color.Info" />
-                    <MudText Typo="Typo.body2" Color="Color.Secondary">워치독 정상</MudText>
-                </div>
-                <MudText Typo="Typo.h4" Style="font-weight:700;">@_stats.HealthyTunnels.ToString("N0")</MudText>
-                <MudText Typo="Typo.caption" Color="Color.Error">이상 @_stats.UnhealthyTunnels</MudText>
-            </MudPaper>
+            <BoKpiCard Label="워치독 정상"
+                     Value="@_stats.HealthyTunnels.ToString("N0")"
+                     Icon="@Icons.Material.Filled.MonitorHeart"
+                     Accent="accent"
+                     TrendText="@($"이상 {_stats.UnhealthyTunnels}")"
+                     TrendKind="@(_stats.UnhealthyTunnels > 0 ? "down" : "neutral")" />
         </MudItem>
     </MudGrid>
 
     <MudGrid Spacing="3">
         <MudItem xs="12" md="6">
-            <MudPaper Class="pa-4" Elevation="1" Style="border-radius:12px;">
-                <MudText Typo="Typo.h6" Class="mb-3">플랜별 시리얼 분포</MudText>
-                @foreach (var p in _stats.PlanDistribution)
+            <div class="bo-section">
+                <div class="bo-section__title">플랜별 시리얼 분포</div>
+                @if (_stats.PlanDistribution.Count > 0)
                 {
-                    <div style="display:flex;align-items:center;gap:12px;margin-bottom:8px;">
-                        <MudText Typo="Typo.body2" Style="min-width:80px;">@p.Plan</MudText>
-                        <MudProgressLinear Value="@p.Percent" Color="Color.Primary" Style="flex:1;" />
-                        <MudText Typo="Typo.body2" Style="min-width:60px;text-align:right;">@p.Count 건</MudText>
-                    </div>
+                    @foreach (var p in _stats.PlanDistribution)
+                    {
+                        <div style="display:flex;align-items:center;gap:12px;margin-bottom:10px;">
+                            <span style="min-width:80px;font-size:13px;font-weight:600;color:var(--hp-text-secondary);">@p.Plan</span>
+                            <MudProgressLinear Value="@p.Percent" Color="Color.Primary" Style="flex:1;height:8px;" />
+                            <span style="min-width:60px;text-align:right;font-size:13px;font-weight:600;">@p.Count 건</span>
+                        </div>
+                    }
                 }
-            </MudPaper>
+                else
+                {
+                    <BoEmptyStateCard Title="아직 시리얼이 없습니다"
+                                      Description="첫 시리얼이 발급되면 플랜별 분포가 여기에 표시됩니다."
+                                      IllustrationKind="chart" />
+                }
+            </div>
         </MudItem>
         <MudItem xs="12" md="6">
-            <MudPaper Class="pa-4" Elevation="1" Style="border-radius:12px;">
-                <MudText Typo="Typo.h6" Class="mb-3">결제 상태 분포</MudText>
-                @foreach (var s in _stats.PaymentStatusDistribution)
+            <div class="bo-section">
+                <div class="bo-section__title">결제 상태 분포</div>
+                @if (_stats.PaymentStatusDistribution.Count > 0)
                 {
-                    <div style="display:flex;align-items:center;gap:12px;margin-bottom:8px;">
-                        <MudText Typo="Typo.body2" Style="min-width:80px;">@s.Status</MudText>
-                        <MudProgressLinear Value="@s.Percent" Color="@StatusBarColor(s.Status)" Style="flex:1;" />
-                        <MudText Typo="Typo.body2" Style="min-width:60px;text-align:right;">@s.Count 건</MudText>
-                    </div>
+                    @foreach (var s in _stats.PaymentStatusDistribution)
+                    {
+                        <div style="display:flex;align-items:center;gap:12px;margin-bottom:10px;">
+                            <span style="min-width:80px;font-size:13px;font-weight:600;color:var(--hp-text-secondary);">@s.Status</span>
+                            <MudProgressLinear Value="@s.Percent" Color="@StatusBarColor(s.Status)" Style="flex:1;height:8px;" />
+                            <span style="min-width:60px;text-align:right;font-size:13px;font-weight:600;">@s.Count 건</span>
+                        </div>
+                    }
                 }
-            </MudPaper>
+                else
+                {
+                    <BoEmptyStateCard Title="결제 데이터가 없습니다"
+                                      Description="고객사 결제가 시작되면 상태 분포가 여기에 표시됩니다."
+                                      IllustrationKind="chart" />
+                }
+            </div>
         </MudItem>
     </MudGrid>
 }

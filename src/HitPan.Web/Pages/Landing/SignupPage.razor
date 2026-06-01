@@ -3,6 +3,7 @@
 @implements IAsyncDisposable
 @inject NavigationManager Nav
 @inject IJSRuntime JS
+@inject HttpClient Http
 
 <PageTitle>회원가입 — 히트판 ERP</PageTitle>
 
@@ -302,8 +303,47 @@
         }
 
         _submitting = true;
-        await Task.Delay(800); // 스켈레톤: 실제 API 호출은 P1 작지#7 박제 예정
-        Nav.NavigateTo($"/signup/verify?email={Uri.EscapeDataString(_form.Email)}");
+        try
+        {
+            if (_demoMode)
+            {
+                // DEMO 모드 — 백엔드 호출 없이 진행 (사장님 결재)
+                await Task.Delay(300);
+                Nav.NavigateTo($"/signup/verify?email={Uri.EscapeDataString(_form.Email)}&demo=1");
+                return;
+            }
+
+            // 실제 가입 — POST /api/landing/signup (사장님 모두결재 2026-06-01 잔여 #2)
+            var payload = new
+            {
+                CompanyName = _form.CompanyName,
+                BizNo = "0000000000", // BizLicenseUploader OCR 결합 박제 대기 — 현재는 더미 (검증 결재 후)
+                CeoName = _form.RepresentativeName,
+                Email = _form.Email,
+                Phone = _form.Phone,
+                PlanType = (Plan ?? "basic"),
+                ResellerCode = (string?)null,
+                AgreeTerms = _form.AgreeService,
+                AgreePrivacy = _form.AgreePrivacy
+            };
+            var res = await Http.PostAsJsonAsync("api/landing/signup", payload);
+            if (!res.IsSuccessStatusCode)
+            {
+                var body = await res.Content.ReadAsStringAsync();
+                _error = $"가입 처리 실패 ({(int)res.StatusCode}). {body}";
+                return;
+            }
+            Nav.NavigateTo($"/signup/verify?email={Uri.EscapeDataString(_form.Email)}");
+        }
+        catch (Exception ex)
+        {
+            // 헌법 #15 정합 — 빈 catch 금지
+            _error = $"가입 요청 중 오류가 발생했습니다: {ex.Message}";
+        }
+        finally
+        {
+            _submitting = false;
+        }
     }
 
     private class SignupForm

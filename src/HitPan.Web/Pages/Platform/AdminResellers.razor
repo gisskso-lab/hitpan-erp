@@ -5,77 +5,94 @@
 @inject ISnackbar Snackbar
 @using HitPan.Web.Models.Backoffice
 @using HitPan.Web.Services
+@using HitPan.Web.Pages.Platform.Components
+
+@*
+ * 대리점 관리 — 백오피스 v2 시각 박제 (수석 웹디자이너 + 프론트 매니저 2026-06-01)
+ * 정합: AdminTenants v2와 동일 패턴 — BoPageHeader + BoFilterBar + bo-list-section + bo-status-chip + Empty State
+ *@
 
 <PageTitle>대리점 관리 — 히트판 백오피스</PageTitle>
 
-<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px;">
-    <div>
-        <MudText Typo="Typo.h5" Style="font-weight:600;">대리점 관리</MudText>
-        <MudText Typo="Typo.body2" Color="Color.Secondary">대리점 목록 및 수수료 정책 관리</MudText>
-    </div>
-</div>
+<BoPageHeader Title="대리점 관리"
+              Subtitle="대리점 목록 · 수수료 정책 · 영업 실적">
+    <Actions>
+        <MudButton Variant="Variant.Filled" Color="Color.Primary" Size="Size.Small"
+                   StartIcon="@Icons.Material.Filled.CardMembership"
+                   OnClick="@(() => Nav.NavigateTo("/admin/resellers/issue"))">
+            대리점 시리얼 발급
+        </MudButton>
+    </Actions>
+</BoPageHeader>
 
-<MudPaper Class="pa-3 mb-4" Elevation="1" Style="border-radius:12px;">
-    <MudGrid Spacing="2" AlignItems="AlignItems.Center">
-        <MudItem xs="12" sm="5">
-            <MudTextField @bind-Value="_search" Label="검색" Variant="Variant.Outlined" Margin="Margin.Dense"
-                          Placeholder="대리점명, 사업자번호"
-                          Adornment="Adornment.End" AdornmentIcon="@Icons.Material.Filled.Search"
-                          OnKeyUp="@OnSearchKey" />
-        </MudItem>
-        <MudItem xs="6" sm="3">
-            <MudSelect @bind-Value="_statusFilter" Label="상태" Variant="Variant.Outlined" Margin="Margin.Dense"
-                       Clearable="true" T="string">
-                <MudSelectItem Value="@("active")">활성</MudSelectItem>
-                <MudSelectItem Value="@("suspended")">중지</MudSelectItem>
-                <MudSelectItem Value="@("terminated")">종료</MudSelectItem>
-            </MudSelect>
-        </MudItem>
-        <MudItem xs="6" sm="2">
-            <MudButton Variant="Variant.Filled" Color="Color.Primary" FullWidth="true"
-                       OnClick="LoadAsync" StartIcon="@Icons.Material.Filled.Refresh">
-                조회
-            </MudButton>
-        </MudItem>
-    </MudGrid>
-</MudPaper>
+<BoFilterBar>
+    <MudTextField @bind-Value="_search" Label="검색" Variant="Variant.Outlined" Margin="Margin.Dense"
+                  Placeholder="대리점명, 사업자번호"
+                  Adornment="Adornment.End" AdornmentIcon="@Icons.Material.Filled.Search"
+                  OnKeyUp="@OnSearchKey" />
+    <MudSelect @bind-Value="_statusFilter" Label="상태" Variant="Variant.Outlined" Margin="Margin.Dense"
+               Clearable="true" T="string">
+        <MudSelectItem Value="@("active")">활성</MudSelectItem>
+        <MudSelectItem Value="@("suspended")">중지</MudSelectItem>
+        <MudSelectItem Value="@("terminated")">종료</MudSelectItem>
+    </MudSelect>
+    <div class="bo-filter-bar__action">
+        <MudButton Variant="Variant.Filled" Color="Color.Primary"
+                   OnClick="LoadAsync" StartIcon="@Icons.Material.Filled.Refresh">
+            조회
+        </MudButton>
+    </div>
+</BoFilterBar>
 
 @if (_loading)
 {
     <MudProgressLinear Indeterminate="true" Color="Color.Primary" Class="mb-2" />
 }
 
-<MudPaper Elevation="1" Style="border-radius:12px;overflow:hidden;">
-    <MudDataGrid T="ResellerListItem" Items="_items" Loading="_loading"
-                 Hover="true" Dense="true"
-                 SortMode="SortMode.Single"
-                 RowClick="OnRowClick">
-        <Columns>
-            <PropertyColumn Property="x => x.ResellerCode" Title="코드" />
-            <PropertyColumn Property="x => x.ResellerName" Title="대리점명" />
-            <TemplateColumn Title="상태">
-                <CellTemplate>
-                    <MudChip T="string" Size="Size.Small" Color="@context.Item.StatusColor" Variant="Variant.Filled">
-                        @context.Item.StatusKo
-                    </MudChip>
-                </CellTemplate>
-            </TemplateColumn>
-            <PropertyColumn Property="x => x.CustomerCount" Title="고객사 수" />
-            <TemplateColumn Title="이번달 매출">
-                <CellTemplate>@context.Item.MonthlyRevenue.ToString("N0")원</CellTemplate>
-            </TemplateColumn>
-            <TemplateColumn Title="이번달 수수료">
-                <CellTemplate>@context.Item.MonthlyCommission.ToString("N0")원</CellTemplate>
-            </TemplateColumn>
-            <TemplateColumn Title="가입일">
-                <CellTemplate>@context.Item.JoinDate.ToString("yyyy-MM-dd")</CellTemplate>
-            </TemplateColumn>
-        </Columns>
-        <NoRecordsContent>
-            <MudText Typo="Typo.body2" Color="Color.Secondary" Class="pa-4">조회된 대리점이 없습니다.</MudText>
-        </NoRecordsContent>
-    </MudDataGrid>
-</MudPaper>
+<div class="bo-list-section">
+    <div class="bo-list-section__head">
+        <span class="bo-list-section__title">대리점 목록</span>
+        <span class="bo-list-section__count">총 <strong>@_total.ToString("N0")</strong>건</span>
+    </div>
+
+    @if (!_loading && _items.Count == 0)
+    {
+        <div style="padding:32px 24px;">
+            <BoEmptyStateCard Title="등록된 대리점이 없습니다"
+                              Description="대리점 시리얼을 발급하면 이곳에 자동으로 표시됩니다. 채널별 영업 실적도 자동 집계됩니다."
+                              IllustrationKind="list"
+                              CtaText="대리점 시리얼 발급으로 이동"
+                              CtaClick="@(() => Nav.NavigateTo("/admin/resellers/issue"))" />
+        </div>
+    }
+    else
+    {
+        <MudDataGrid T="ResellerListItem" Items="_items" Loading="_loading"
+                     Hover="true" Dense="true"
+                     SortMode="SortMode.Single"
+                     RowClick="OnRowClick">
+            <Columns>
+                <PropertyColumn Property="x => x.ResellerCode" Title="코드" />
+                <PropertyColumn Property="x => x.ResellerName" Title="대리점명" />
+                <TemplateColumn Title="상태">
+                    <CellTemplate>
+                        <span class="bo-status-chip @StatusChipClass(context.Item.Status)">@context.Item.StatusKo</span>
+                    </CellTemplate>
+                </TemplateColumn>
+                <PropertyColumn Property="x => x.CustomerCount" Title="고객사 수" />
+                <TemplateColumn Title="이번달 매출">
+                    <CellTemplate>@context.Item.MonthlyRevenue.ToString("N0")원</CellTemplate>
+                </TemplateColumn>
+                <TemplateColumn Title="이번달 수수료">
+                    <CellTemplate>@context.Item.MonthlyCommission.ToString("N0")원</CellTemplate>
+                </TemplateColumn>
+                <TemplateColumn Title="가입일">
+                    <CellTemplate>@context.Item.JoinDate.ToString("yyyy-MM-dd")</CellTemplate>
+                </TemplateColumn>
+            </Columns>
+        </MudDataGrid>
+    }
+</div>
 
 @if (_total > _pageSize)
 {
@@ -194,6 +211,8 @@
 }
 
 @code {
+    [Inject] private NavigationManager Nav { get; set; } = default!;
+
     private List<ResellerListItem> _items = new();
     private ResellerDetail? _detail;
     private List<CommissionPolicyItem>? _commissions;
@@ -217,9 +236,11 @@
             _items = result?.Items ?? new();
             _total = result?.TotalCount ?? 0;
         }
-        catch
+        catch (Exception ex)
         {
-            Snackbar.Add("대리점 목록 로드 실패", Severity.Error);
+            Snackbar.Add($"대리점 목록 로드 실패: {ex.Message}", Severity.Error);
+            _items = new();
+            _total = 0;
         }
         finally
         {
@@ -236,9 +257,9 @@
             _detail = await Bo.GetResellerDetailAsync(args.Item.ResellerId);
             _drawerOpen = true;
         }
-        catch
+        catch (Exception ex)
         {
-            Snackbar.Add("상세 정보 로드 실패", Severity.Error);
+            Snackbar.Add($"상세 정보 로드 실패: {ex.Message}", Severity.Error);
         }
     }
 
@@ -249,9 +270,9 @@
         {
             _commissions = await Bo.GetResellerCommissionsAsync(_detail.ResellerId);
         }
-        catch
+        catch (Exception ex)
         {
-            Snackbar.Add("수수료 정책 로드 실패", Severity.Error);
+            Snackbar.Add($"수수료 정책 로드 실패: {ex.Message}", Severity.Error);
         }
     }
 
@@ -262,9 +283,9 @@
         {
             _accounts = await Bo.GetResellerAccountsAsync(_detail.ResellerId);
         }
-        catch
+        catch (Exception ex)
         {
-            Snackbar.Add("계정 목록 로드 실패", Severity.Error);
+            Snackbar.Add($"계정 목록 로드 실패: {ex.Message}", Severity.Error);
         }
     }
 
@@ -277,9 +298,9 @@
             Snackbar.Add("상태가 변경되었습니다", Severity.Success);
             await LoadAsync();
         }
-        catch
+        catch (Exception ex)
         {
-            Snackbar.Add("상태 변경 실패", Severity.Error);
+            Snackbar.Add($"상태 변경 실패: {ex.Message}", Severity.Error);
         }
     }
 
@@ -293,4 +314,12 @@
         _page = page;
         await LoadAsync();
     }
+
+    private static string StatusChipClass(string? status) => status switch
+    {
+        "active" => "bo-status-chip--active",
+        "suspended" => "bo-status-chip--suspended",
+        "terminated" => "bo-status-chip--terminated",
+        _ => "bo-status-chip--neutral"
+    };
 }

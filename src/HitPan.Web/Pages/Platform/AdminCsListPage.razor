@@ -13,83 +13,81 @@
 @attribute [Authorize(Policy = "PlatformOnlyV2")]
 @inject HttpClient Http
 @inject ISnackbar Snackbar
+@using HitPan.Web.Pages.Platform.Components
 
 <PageTitle>CS 티켓 — 히트판 백오피스</PageTitle>
 
-<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px;">
-    <div>
-        <MudText Typo="Typo.h5" Style="font-weight:600;">CS 티켓 전체</MudText>
-        <MudText Typo="Typo.body2" Color="Color.Secondary">
-            본사 전권 — 시리얼 단위 추적 (평문 사업자정보 0)
-        </MudText>
+<BoPageHeader Title="CS 티켓 전체"
+              Subtitle="본사 전권 · 시리얼 단위 추적 (평문 사업자정보 0건)">
+    <Actions>
+        <MudButton Variant="Variant.Outlined" Color="Color.Primary" Size="Size.Small"
+                   StartIcon="@Icons.Material.Filled.Refresh"
+                   OnClick="LoadAsync">새로고침</MudButton>
+    </Actions>
+</BoPageHeader>
+
+<BoFilterBar>
+    <MudTextField @bind-Value="_keyword" Label="검색 (시리얼·티켓번호)" Variant="Variant.Outlined"
+                  Margin="Margin.Dense" Immediate="true" OnKeyUp="OnSearchKey" />
+    <MudSelect T="string" @bind-Value="_statusFilter" Label="상태" Variant="Variant.Outlined" Margin="Margin.Dense">
+        <MudSelectItem Value="@("all")">전체</MudSelectItem>
+        <MudSelectItem Value="@("open")">처리중</MudSelectItem>
+        <MudSelectItem Value="@("pending")">대기</MudSelectItem>
+        <MudSelectItem Value="@("closed")">완료</MudSelectItem>
+    </MudSelect>
+    <MudSelect T="string" @bind-Value="_priorityFilter" Label="우선순위" Variant="Variant.Outlined" Margin="Margin.Dense">
+        <MudSelectItem Value="@("all")">전체</MudSelectItem>
+        <MudSelectItem Value="@("p0")">P0</MudSelectItem>
+        <MudSelectItem Value="@("p1")">P1</MudSelectItem>
+        <MudSelectItem Value="@("p2")">P2</MudSelectItem>
+    </MudSelect>
+    <div class="bo-filter-bar__action">
+        <MudButton Variant="Variant.Filled" Color="Color.Primary"
+                   StartIcon="@Icons.Material.Filled.Search" OnClick="LoadAsync">조회</MudButton>
     </div>
-    <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Refresh"
-               OnClick="LoadAsync">새로고침</MudButton>
+</BoFilterBar>
+
+<div class="bo-list-section">
+    <div class="bo-list-section__head">
+        <span class="bo-list-section__title">CS 티켓 목록</span>
+        <span class="bo-list-section__count">총 <strong>@_rows.Count.ToString("N0")</strong>건</span>
+    </div>
+
+    @if (!_loading && _rows.Count == 0)
+    {
+        <div style="padding:32px 24px;">
+            <BoEmptyStateCard Title="접수된 CS 티켓이 없습니다"
+                              Description="고객사 ERP 또는 챗봇에서 CS가 접수되면 시리얼 단위로 이곳에 표시됩니다. 평문 사업자정보는 노출되지 않습니다 (헌법 #18·#22)."
+                              IllustrationKind="doc" />
+        </div>
+    }
+    else
+    {
+        <MudDataGrid T="CsTicketRow" Items="_rows" Loading="_loading"
+                     Hover="true" Dense="true" SortMode="SortMode.Single">
+            <Columns>
+                <PropertyColumn Property="x => x.TicketNo" Title="티켓번호" />
+                <PropertyColumn Property="x => x.SerialMasked" Title="시리얼 (마스킹)" />
+                <TemplateColumn Title="우선순위">
+                    <CellTemplate>
+                        <span class="bo-status-chip @PriChipClass(context.Item.Priority)">@context.Item.Priority.ToUpper()</span>
+                    </CellTemplate>
+                </TemplateColumn>
+                <PropertyColumn Property="x => x.Subject" Title="제목" />
+                <TemplateColumn Title="상태">
+                    <CellTemplate>
+                        <span class="bo-status-chip @CsStatusChipClass(context.Item.Status)">@context.Item.Status</span>
+                    </CellTemplate>
+                </TemplateColumn>
+                <PropertyColumn Property="x => x.OpenedAt" Title="접수" Format="yyyy-MM-dd HH:mm" />
+                <PropertyColumn Property="x => x.Assignee" Title="담당자" />
+            </Columns>
+            <PagerContent>
+                <MudDataGridPager T="CsTicketRow" />
+            </PagerContent>
+        </MudDataGrid>
+    }
 </div>
-
-<MudPaper Class="pa-3 mb-3" Elevation="0" Style="border-radius:12px;background:#f7f8fa;">
-    <MudGrid Spacing="2">
-        <MudItem xs="12" md="4">
-            <MudTextField @bind-Value="_keyword" Label="검색 (시리얼·티켓번호)" Variant="Variant.Outlined"
-                          Margin="Margin.Dense" Immediate="true" OnKeyUp="OnSearchKey" />
-        </MudItem>
-        <MudItem xs="6" md="3">
-            <MudSelect T="string" @bind-Value="_statusFilter" Label="상태" Variant="Variant.Outlined" Margin="Margin.Dense">
-                <MudSelectItem Value="@("all")">전체</MudSelectItem>
-                <MudSelectItem Value="@("open")">처리중</MudSelectItem>
-                <MudSelectItem Value="@("pending")">대기</MudSelectItem>
-                <MudSelectItem Value="@("closed")">완료</MudSelectItem>
-            </MudSelect>
-        </MudItem>
-        <MudItem xs="6" md="3">
-            <MudSelect T="string" @bind-Value="_priorityFilter" Label="우선순위" Variant="Variant.Outlined" Margin="Margin.Dense">
-                <MudSelectItem Value="@("all")">전체</MudSelectItem>
-                <MudSelectItem Value="@("p0")">P0</MudSelectItem>
-                <MudSelectItem Value="@("p1")">P1</MudSelectItem>
-                <MudSelectItem Value="@("p2")">P2</MudSelectItem>
-            </MudSelect>
-        </MudItem>
-        <MudItem xs="12" md="2">
-            <MudButton FullWidth="true" Variant="Variant.Filled" Color="Color.Primary"
-                       StartIcon="@Icons.Material.Filled.Search" OnClick="LoadAsync">조회</MudButton>
-        </MudItem>
-    </MudGrid>
-</MudPaper>
-
-<MudPaper Elevation="1" Style="border-radius:12px;overflow:hidden;">
-    <MudDataGrid T="CsTicketRow" Items="_rows" Loading="_loading"
-                 Hover="true" Dense="true" SortMode="SortMode.Single">
-        <Columns>
-            <PropertyColumn Property="x => x.TicketNo" Title="티켓번호" />
-            <PropertyColumn Property="x => x.SerialMasked" Title="시리얼 (마스킹)" />
-            <TemplateColumn Title="우선순위">
-                <CellTemplate>
-                    <MudChip T="string" Size="Size.Small" Color="@PriColor(context.Item.Priority)">
-                        @context.Item.Priority.ToUpper()
-                    </MudChip>
-                </CellTemplate>
-            </TemplateColumn>
-            <PropertyColumn Property="x => x.Subject" Title="제목" />
-            <TemplateColumn Title="상태">
-                <CellTemplate>
-                    <MudChip T="string" Size="Size.Small" Color="@StatusColor(context.Item.Status)">
-                        @context.Item.Status
-                    </MudChip>
-                </CellTemplate>
-            </TemplateColumn>
-            <PropertyColumn Property="x => x.OpenedAt" Title="접수" Format="yyyy-MM-dd HH:mm" />
-            <PropertyColumn Property="x => x.Assignee" Title="담당자" />
-        </Columns>
-        <PagerContent>
-            <MudDataGridPager T="CsTicketRow" />
-        </PagerContent>
-        <NoRecordsContent>
-            <MudText Align="Align.Center" Class="pa-6" Color="Color.Secondary">
-                조건에 해당하는 CS 티켓이 없습니다.
-            </MudText>
-        </NoRecordsContent>
-    </MudDataGrid>
-</MudPaper>
 
 @code {
     private List<CsTicketRow> _rows = new();
@@ -124,20 +122,20 @@
         }
     }
 
-    private Color StatusColor(string s) => s switch
+    private static string CsStatusChipClass(string s) => s switch
     {
-        "open" => Color.Warning,
-        "pending" => Color.Info,
-        "closed" => Color.Success,
-        _ => Color.Default
+        "open" => "bo-status-chip--suspended",
+        "pending" => "bo-status-chip--trial",
+        "closed" => "bo-status-chip--active",
+        _ => "bo-status-chip--neutral"
     };
 
-    private Color PriColor(string p) => p switch
+    private static string PriChipClass(string p) => p switch
     {
-        "p0" => Color.Error,
-        "p1" => Color.Warning,
-        "p2" => Color.Info,
-        _ => Color.Default
+        "p0" => "bo-status-chip--expired",
+        "p1" => "bo-status-chip--suspended",
+        "p2" => "bo-status-chip--trial",
+        _ => "bo-status-chip--neutral"
     };
 
     public class CsTicketRow
