@@ -1,0 +1,140 @@
+@page "/payment"
+@layout LandingLayout
+@inject NavigationManager Nav
+@inject HttpClient Http
+@using System.Net.Http.Json
+
+<PageTitle>결제 — 히트판 ERP</PageTitle>
+
+<section class="payment-section">
+    <div class="payment-card">
+        <h1>결제</h1>
+        <p class="lead">선택한 요금제로 첫 달 결제를 진행합니다.</p>
+
+        <div class="summary">
+            <div class="summary-row">
+                <span>요금제</span>
+                <strong>@_planLabel</strong>
+            </div>
+            <div class="summary-row">
+                <span>첫 달</span>
+                <strong>@_priceText</strong>
+            </div>
+            @if (!string.IsNullOrEmpty(_planNote))
+            {
+                <div class="summary-row" style="color:#0F6E56;font-size:13px;">
+                    <span>추가 비용</span>
+                    <strong>@_planNote</strong>
+                </div>
+            }
+            <div class="summary-row total">
+                <span>총 결제 금액</span>
+                <strong>@_priceText</strong>
+            </div>
+        </div>
+
+        <div class="methods">
+            <h3>결제 수단</h3>
+            <div class="method-grid">
+                <button class="method @(_method == "card" ? "active" : "")" @onclick='() => _method = "card"'>
+                    💳 카드결제
+                </button>
+                <button class="method @(_method == "transfer" ? "active" : "")" @onclick='() => _method = "transfer"'>
+                    🏦 계좌이체
+                </button>
+                <button class="method @(_method == "phone" ? "active" : "")" @onclick='() => _method = "phone"'>
+                    📱 휴대폰
+                </button>
+            </div>
+        </div>
+
+        <button class="btn-pay" @onclick="HandlePay" disabled="@_processing">
+            @(_processing ? "결제 진행 중..." : $"{_priceText} 결제하기")
+        </button>
+
+        <p class="security">
+            🔒 토스페이먼츠 통한 안전 결제. 카드 정보는 본사 서버에 저장되지 않습니다.
+        </p>
+    </div>
+</section>
+
+@code {
+    [SupplyParameterFromQuery]
+    public string? Plan { get; set; }
+
+    [SupplyParameterFromQuery]
+    public string? Token { get; set; }
+
+    private string _planLabel = "PRO";
+    private string _priceText = "49,000원";
+    private string _planNote = "";
+    private string _method = "card";
+    private bool _processing;
+
+    protected override void OnParametersSet()
+    {
+        // 사장님 결재 박제 2026-06-02 (의중 B 모두결재) — BASIC 29k / PRO 49k / ENTERPRISE 100k+서버구축
+        (_planLabel, _priceText, _planNote) = Plan switch
+        {
+            "basic" => ("BASIC", "29,000원", ""),
+            "enterprise" => ("ENTERPRISE", "100,000원", "+ 서버 구축비용 (상담)"),
+            "pro" => ("PRO", "49,000원", ""),
+            // 옛 키 호환 — premium·standard 들어오면 자동 매핑
+            "premium" => ("ENTERPRISE", "100,000원", "+ 서버 구축비용 (상담)"),
+            "standard" => ("PRO", "49,000원", ""),
+            _ => ("PRO", "49,000원", "")
+        };
+    }
+
+    private async Task HandlePay()
+    {
+        _processing = true;
+        try
+        {
+            // 사장님 결재 박제 2026-06-02 (의중 B 모두결재) — 베타 박제: 결제 SDK 미박제, API 직접 호출로 tenants.status='active'
+            // 정식 박제 = 토스 빌링키 박제 후 webhook 박제로 전환 (TossWebhookController 박제)
+            string? licenseKey = null;
+            if (!string.IsNullOrWhiteSpace(Token))
+            {
+                var resp = await Http.PostAsJsonAsync("api/landing/confirm-payment", new { SignupToken = Token });
+                if (!resp.IsSuccessStatusCode)
+                {
+                    _processing = false;
+                    return;
+                }
+                var data = await resp.Content.ReadFromJsonAsync<ConfirmResult>();
+                licenseKey = data?.LicenseKey;
+            }
+            var qs = $"plan={Plan}";
+            if (!string.IsNullOrWhiteSpace(licenseKey)) qs += $"&key={Uri.EscapeDataString(licenseKey)}";
+            Nav.NavigateTo($"/signup/welcome?{qs}");
+        }
+        catch (Exception)
+        {
+            _processing = false;
+        }
+    }
+
+    private record ConfirmResult(bool Success, string? Message, string? LicenseKey);
+}
+
+<style>
+.payment-section { padding: 48px 0; background: #F9FAFB; min-height: calc(100vh - 200px); }
+.payment-card { max-width: 480px; margin: 0 auto; background: #fff; padding: 40px; border-radius: 16px; box-shadow: 0 4px 16px rgba(0,0,0,0.06); }
+.payment-card h1 { font-size: 28px; margin-bottom: 8px; }
+.lead { color: #6B7280; margin-bottom: 24px; font-size: 14px; }
+.summary { background: #F9FAFB; border-radius: 8px; padding: 20px; margin-bottom: 24px; }
+.summary-row { display: flex; justify-content: space-between; padding: 8px 0; font-size: 14px; }
+.summary-row.total { border-top: 1px solid #E5E7EB; margin-top: 8px; padding-top: 16px; font-size: 16px; }
+.summary-row.total strong { color: #0F6E56; font-size: 20px; }
+.methods { margin-bottom: 24px; }
+.methods h3 { font-size: 14px; font-weight: 600; margin-bottom: 12px; }
+.method-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+.method { padding: 16px 8px; background: #fff; border: 2px solid #E5E7EB; border-radius: 8px; font-size: 13px; cursor: pointer; }
+.method:hover { border-color: #0F6E56; }
+.method.active { border-color: #0F6E56; background: #F0F9F5; color: #0F6E56; font-weight: 600; }
+.btn-pay { width: 100%; padding: 16px; background: #0F6E56; color: #fff; border: none; border-radius: 8px; font-size: 16px; font-weight: 700; cursor: pointer; }
+.btn-pay:hover:not(:disabled) { background: #0A5240; }
+.btn-pay:disabled { opacity: 0.6; cursor: not-allowed; }
+.security { text-align: center; margin-top: 16px; font-size: 12px; color: #6B7280; }
+</style>

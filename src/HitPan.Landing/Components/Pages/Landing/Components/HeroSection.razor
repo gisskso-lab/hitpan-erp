@@ -1,0 +1,51 @@
+@*
+    HeroSection — 랜딩 v2 영웅 영역 (수석 웹디자이너 박제 2026-06-01)
+    카피는 placeholder. 마케팅팀장 산출물로 교체될 때까지 박제 토큰 유지.
+*@
+
+<section class="lv2-hero">
+    <div class="lv2-hero-inner">
+        <span class="lv2-hero-badge">@BadgeText</span>
+
+        @* {{ MARKETING:HERO_H1 }} — 마케팅팀장 카피로 교체 예정 *@
+        <h1 class="lv2-hero-h1">
+            처음 쓰는 사람도 <span class="hl-green">3분 안에</span><br />
+            <span class="hl-orange">그냥 되는</span> ERP
+        </h1>
+
+        @* {{ MARKETING:HERO_SUB }} *@
+        <p class="lv2-hero-sub">
+            매뉴얼 없이 쓰는 가장 쉬운 ERP. 사장님 PC에 1클릭 설치, 데이터는 사장님 것.
+            오늘 가입하고 오늘 시작하세요.
+        </p>
+
+        <div class="lv2-hero-cta">
+            <a href="/signup" class="lv2-btn lv2-btn-primary" aria-label="무료로 시작하기">
+                무료로 시작하기
+            </a>
+            <a href="/pricing" class="lv2-btn lv2-btn-secondary" aria-label="요금제 보기">
+                요금제 보기
+            </a>
+        </div>
+
+        <div class="lv2-hero-trust" role="list" aria-label="신뢰 뱃지">
+            <span class="lv2-trust" role="listitem">
+                <span class="lv2-trust-dot green"></span>
+                메이크빌 기술협력
+            </span>
+            <span class="lv2-trust" role="listitem">
+                <span class="lv2-trust-dot navy"></span>
+                바른 법무자문
+            </span>
+            <span class="lv2-trust" role="listitem">
+                <span class="lv2-trust-dot orange"></span>
+                KISA ISMS 준비
+            </span>
+        </div>
+    </div>
+</section>
+
+@code {
+    /// <summary>상단 뱃지 카피 (마케팅팀장 교체 대상).</summary>
+    [Parameter] public string BadgeText { get; set; } = "베타 신청 진행 중";
+}

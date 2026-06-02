@@ -1,0 +1,112 @@
+@page "/download"
+@page "/landing/download"
+@layout LandingLayout
+@inject IJSRuntime JS
+
+<PageTitle>다운로드 — 히트판 ERP</PageTitle>
+
+<section class="download-section">
+    <div class="download-card">
+        <div class="icon">⬇️</div>
+        <h1>히트판 ERP 다운로드</h1>
+        <p class="lead">EXE 파일을 다운받아 더블 클릭하시면 자동 설치됩니다.<br />라이선스 키는 가입 이메일에서 확인하세요.</p>
+
+        @if (!string.IsNullOrWhiteSpace(Key))
+        {
+            @* 사장님 결재 박제 2026-06-02 — 라이선스 키 박제 화면 표시 (1회 박제, 헌법 #22 정합) *@
+            <div class="license-box">
+                <div class="license-label">📋 라이선스 키 (이메일과 동일)</div>
+                <div class="license-key">@Key</div>
+                <button class="btn-copy" @onclick="CopyKey">@(_copied ? "✓ 복사됨" : "복사")</button>
+            </div>
+        }
+
+        <div class="download-list">
+            <div class="download-item">
+                <div class="info">
+                    <strong>Windows 10/11 (x64)</strong>
+                    <span>권장 · 한국 90% 환경</span>
+                </div>
+                <a href="#" class="btn-dl">EXE 다운로드</a>
+            </div>
+            <div class="download-item">
+                <div class="info">
+                    <strong>Windows 7/8 (x64)</strong>
+                    <span>레거시 PC용</span>
+                </div>
+                <a href="#" class="btn-dl btn-secondary">EXE 다운로드</a>
+            </div>
+        </div>
+
+        <div class="install-steps">
+            <h3>설치 5단계 (10분 이내)</h3>
+            <ol>
+                <li>EXE 파일 더블 클릭 → 관리자 권한 허용</li>
+                <li>이메일로 받은 <strong>라이선스 키</strong> 입력</li>
+                <li>자동 설치 (MariaDB · 닷넷 · 터널 · 방화벽 규칙)</li>
+                <li>설치 완료 → 브라우저 자동 오픈 (hitpan-{회사명}.kr)</li>
+                <li>로그인 → 약관 동의 → 사용 시작</li>
+            </ol>
+        </div>
+
+        <div class="support">
+            <h3>설치가 안 되나요?</h3>
+            <div class="support-grid">
+                <div>
+                    <strong>📞 콜센터</strong>
+                    <p>1599-XXXX (평일 09:00~18:00)</p>
+                </div>
+                <div>
+                    <strong>💬 AI 챗봇</strong>
+                    <p>"히트판에게 물어보세요" 24/7</p>
+                </div>
+                <div>
+                    <strong>🖥️ 원격 지원</strong>
+                    <p>애니소프트 원격 (가입 메일 안내)</p>
+                </div>
+            </div>
+        </div>
+    </div>
+</section>
+
+<style>
+.download-section { padding: 48px 0; background: #F9FAFB; min-height: calc(100vh - 200px); }
+.download-card { max-width: 640px; margin: 0 auto; background: #fff; padding: 40px; border-radius: 16px; box-shadow: 0 4px 16px rgba(0,0,0,0.06); }
+.icon { font-size: 56px; text-align: center; margin-bottom: 12px; }
+.download-card h1 { font-size: 28px; text-align: center; margin-bottom: 12px; }
+.lead { text-align: center; color: #6B7280; margin-bottom: 32px; font-size: 14px; line-height: 1.6; }
+.download-list { margin-bottom: 32px; }
+.download-item { display: flex; align-items: center; justify-content: space-between; padding: 20px; border: 2px solid #E5E7EB; border-radius: 12px; margin-bottom: 12px; }
+.download-item .info strong { display: block; font-size: 16px; margin-bottom: 4px; }
+.download-item .info span { font-size: 13px; color: #6B7280; }
+.btn-dl { padding: 12px 24px; background: #0F6E56; color: #fff; border-radius: 8px; text-decoration: none; font-weight: 600; }
+.btn-dl:hover { background: #0A5240; }
+.btn-secondary { background: #6B7280; }
+.install-steps { background: #F0F9F5; padding: 24px; border-radius: 12px; margin-bottom: 24px; }
+.install-steps h3 { color: #0F6E56; font-size: 16px; margin-bottom: 12px; }
+.install-steps ol { padding-left: 20px; }
+.install-steps li { padding: 6px 0; font-size: 14px; color: #4B5563; line-height: 1.6; }
+.support { background: #FFF7ED; padding: 24px; border-radius: 12px; }
+.support h3 { color: #C2410C; font-size: 16px; margin-bottom: 16px; }
+.support-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
+.support-grid strong { display: block; margin-bottom: 4px; }
+.support-grid p { font-size: 13px; color: #6B7280; margin: 0; }
+@@media (max-width: 640px) { .support-grid { grid-template-columns: 1fr; } }
+.license-box { background:#0F1419; color:#fff; border-radius:8px; padding:16px; margin-bottom:24px; }
+.license-label { font-size:12px; color:#9CA3AF; margin-bottom:8px; }
+.license-key { font-family:'Consolas',monospace; font-size:18px; letter-spacing:1px; font-weight:700; word-break:break-all; }
+.btn-copy { margin-top:8px; padding:6px 12px; background:#0F6E56; color:#fff; border:none; border-radius:6px; font-size:12px; cursor:pointer; }
+</style>
+
+@code {
+    [SupplyParameterFromQuery] public string? Key { get; set; }
+    private bool _copied;
+
+    private async Task CopyKey()
+    {
+        if (string.IsNullOrWhiteSpace(Key)) return;
+        await JS.InvokeVoidAsync("navigator.clipboard.writeText", Key);
+        _copied = true;
+        StateHasChanged();
+    }
+}

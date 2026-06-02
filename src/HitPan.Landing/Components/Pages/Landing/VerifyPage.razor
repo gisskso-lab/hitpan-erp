@@ -1,0 +1,106 @@
+@page "/signup/verify"
+@layout LandingLayout
+
+<PageTitle>이메일 인증 — 히트판 ERP</PageTitle>
+
+<section class="verify-section">
+    <div class="verify-card">
+        <div class="icon">🛠️</div>
+        <h1>현재 데모 구간입니다</h1>
+        <p class="email-display">@Email</p>
+
+        <div class="notice-stub">
+            <strong>실 이메일 발송은 베타 출시 시점에 가동됩니다.</strong>
+            <p>
+                현재 화면은 가입 흐름·약관 동의·시리얼 발급 UX 검증용 데모입니다.<br />
+                이메일 인프라(AWS SES / SendGrid / 메일 외주)는 사장님 결재 후 결합 예정입니다.
+            </p>
+            <p style="margin-top:8px;">
+                <button class="btn btn-primary" @onclick="ContinueAsDemo">데모 계속 진행 (결제 화면으로) →</button>
+            </p>
+        </div>
+
+        <div class="actions">
+            <button class="btn btn-outline" @onclick="HandleResend" disabled="@_cooldown">
+                @if (_cooldown)
+                {
+                    <span>재발송 시뮬레이션 (@_remaining 초)</span>
+                }
+                else
+                {
+                    <span>인증 메일 재발송 (데모)</span>
+                }
+            </button>
+        </div>
+
+        <div class="hint">
+            <strong>왜 메일이 안 오나요?</strong>
+            <ul>
+                <li><b>현재 = 데모/스텁 모드</b>로 실제 메일 인프라(SES·SendGrid·외주)는 미연결</li>
+                <li>베타 출시 직전에 노레플라이 발신자 인증·SPF·DKIM·DMARC 봉합 + 실 발송 가동</li>
+                <li>가입 흐름·약관 동의·결제 UI는 위 데모 진행 버튼으로 끝까지 확인 가능</li>
+            </ul>
+        </div>
+    </div>
+</section>
+
+@code {
+    [Inject] private NavigationManager Nav { get; set; } = default!;
+
+    [SupplyParameterFromQuery]
+    public string Email { get; set; } = "your@email.com";
+
+    private bool _cooldown;
+    private int _remaining = 60;
+    private System.Threading.Timer? _timer;
+
+    private void ContinueAsDemo()
+    {
+        // 사장님 결재 2026-06-01 — 이메일 발송 스텁 구간에서 데모 진행용 우회
+        Nav.NavigateTo($"/payment?email={Uri.EscapeDataString(Email)}&demo=1");
+    }
+
+    private async Task HandleResend()
+    {
+        _cooldown = true;
+        _remaining = 60;
+        await Task.Delay(300); // 스켈레톤: 실제 발송 API는 후속 작지
+        _timer = new System.Threading.Timer(_ =>
+        {
+            InvokeAsync(() =>
+            {
+                _remaining--;
+                if (_remaining <= 0)
+                {
+                    _cooldown = false;
+                    _timer?.Dispose();
+                }
+                StateHasChanged();
+            });
+        }, null, 1000, 1000);
+    }
+
+    public void Dispose() => _timer?.Dispose();
+}
+
+<style>
+.verify-section { padding: 80px 0; background: #F9FAFB; min-height: calc(100vh - 200px); }
+.verify-card { max-width: 480px; margin: 0 auto; background: #fff; padding: 40px; border-radius: 16px; text-align: center; box-shadow: 0 4px 16px rgba(0,0,0,0.06); }
+.icon { font-size: 56px; margin-bottom: 16px; }
+.verify-card h1 { font-size: 22px; margin-bottom: 12px; color: #0F1419; }
+.email-display { font-size: 16px; font-weight: 700; color: #0F6E56; background: #F0F9F5; padding: 8px 16px; border-radius: 8px; display: inline-block; margin-bottom: 16px; }
+.verify-card p { color: #4B5563; font-size: 14px; line-height: 1.6; }
+.actions { margin: 24px 0; }
+.btn { padding: 12px 24px; border-radius: 8px; font-weight: 600; cursor: pointer; border: none; }
+.btn-outline { background: #fff; color: #0F6E56; border: 2px solid #0F6E56; }
+.btn-outline:disabled { opacity: 0.5; cursor: not-allowed; }
+.btn-primary { background: #0F6E56; color: #fff; padding: 12px 28px; font-size: 15px; }
+.btn-primary:hover { background: #0A5240; }
+.notice-stub { background: #FFF8E1; border: 1px solid #FDE68A; border-radius: 12px; padding: 16px 18px; margin: 16px 0 8px; text-align: left; }
+.notice-stub strong { color: #92400E; display: block; font-size: 14px; margin-bottom: 8px; }
+.notice-stub p { margin: 0; color: #92400E; font-size: 13px; line-height: 1.6; }
+.hint { text-align: left; background: #F9FAFB; padding: 16px; border-radius: 8px; font-size: 13px; color: #6B7280; margin-top: 24px; }
+.hint strong { color: #0F1419; display: block; margin-bottom: 8px; }
+.hint ul { padding-left: 20px; margin: 0; }
+.hint li { margin-bottom: 4px; }
+</style>
