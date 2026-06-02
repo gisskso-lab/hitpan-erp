@@ -1,4 +1,6 @@
 using HitPan.Backoffice.Components;
+using HitPan.Backoffice.Services;
+using MudBlazor.Services;
 
 namespace HitPan.Backoffice;
 
@@ -12,6 +14,21 @@ public class Program
         builder.Services.AddRazorComponents()
             .AddInteractiveServerComponents();
 
+        builder.Services.AddMudServices();
+
+        // 인증·인가 — 백오피스 전용 JWT (다음 세션에 별도 발급기 박제)
+        // 헌법 #35 정합: ERP JWT와 완전 분리 (aud=backoffice)
+        builder.Services.AddAuthentication("Backoffice").AddCookie("Backoffice", o =>
+        {
+            o.LoginPath = "/login";
+        });
+        builder.Services.AddAuthorization();
+        builder.Services.AddCascadingAuthenticationState();
+
+        // HttpClient — 백오피스 API 호출 (별도 HitPan.Backoffice.API 분리 예정)
+        var backofficeApi = builder.Configuration["BackofficeApi:BaseUrl"] ?? "http://localhost:5257/";
+        builder.Services.AddHttpClient<BackofficeService>(c => c.BaseAddress = new Uri(backofficeApi));
+
         var app = builder.Build();
 
         if (!app.Environment.IsDevelopment())
@@ -24,6 +41,8 @@ public class Program
         app.UseHttpsRedirection();
         app.UseStaticFiles();
 
+        app.UseAuthentication();
+        app.UseAuthorization();
         app.UseAntiforgery();
 
         app.MapRazorComponents<App>()

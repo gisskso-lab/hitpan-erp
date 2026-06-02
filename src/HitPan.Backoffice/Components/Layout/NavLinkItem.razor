@@ -1,0 +1,22 @@
+@*
+    백오피스 v2 사이드바 메뉴 항목 (사장님 결재 2026-06-01)
+    - 아이콘 24px / 라벨 14px / 카운트 뱃지 12px
+    - 활성 시 그린(#0F6E56) + 좌측 4px 바 (CSS에서 처리)
+*@
+
+<NavLink href="@Href" Match="@Match" class="bo2-nav-link" ActiveClass="active">
+    <span class="material-icons bo2-nav-icon">@Icon</span>
+    <span class="bo2-nav-label">@Label</span>
+    @if (Count.HasValue && Count.Value > 0)
+    {
+        <span class="bo2-nav-count">@(Count.Value > 999 ? "999+" : Count.Value.ToString())</span>
+    }
+</NavLink>
+
+@code {
+    [Parameter, EditorRequired] public string Href { get; set; } = string.Empty;
+    [Parameter, EditorRequired] public string Icon { get; set; } = string.Empty;
+    [Parameter, EditorRequired] public string Label { get; set; } = string.Empty;
+    [Parameter] public int? Count { get; set; }
+    [Parameter] public NavLinkMatch Match { get; set; } = NavLinkMatch.Prefix;
+}

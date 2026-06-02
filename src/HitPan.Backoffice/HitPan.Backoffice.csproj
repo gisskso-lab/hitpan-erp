@@ -7,4 +7,11 @@
     <BlazorDisableThrowNavigationException>true</BlazorDisableThrowNavigationException>
   </PropertyGroup>
 
+  <ItemGroup>
+    <PackageReference Include="MudBlazor" Version="9.3.0" />
+    <PackageReference Include="Blazor-ApexCharts" Version="6.1.0" />
+    <PackageReference Include="Microsoft.AspNetCore.Components.Authorization" Version="8.0.13" />
+    <PackageReference Include="Microsoft.AspNetCore.Authorization" Version="8.0.13" />
+  </ItemGroup>
+
 </Project>
