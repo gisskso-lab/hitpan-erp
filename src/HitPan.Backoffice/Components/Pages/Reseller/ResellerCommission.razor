@@ -1,0 +1,204 @@
+﻿@page "/partner/commission"
+@page "/reseller/commission"
+@layout ResellerLayout
+@attribute [Authorize]
+@inject BackofficeService Bo
+@inject ISnackbar Snackbar
+@using HitPan.Backoffice.Models.Backoffice
+@using HitPan.Backoffice.Services
+
+<PageTitle>수수료 내역 — 히트판</PageTitle>
+
+<div style="margin-bottom:20px;">
+    <MudText Typo="Typo.h5" Style="font-weight:600;">수수료 내역</MudText>
+    <MudText Typo="Typo.body2" Color="Color.Secondary">수수료 정책 및 정산 이력</MudText>
+</div>
+
+<MudTabs Elevation="0" Rounded="true" ApplyEffectsToContainer="true" Class="mb-4" @bind-ActivePanelIndex="_tabIndex">
+    <MudTabPanel Text="수수료 정책" Icon="@Icons.Material.Filled.Policy" />
+    <MudTabPanel Text="정산 내역" Icon="@Icons.Material.Filled.History" />
+</MudTabs>
+
+@if (_tabIndex == 0)
+{
+    @if (_loadingPolicy)
+    {
+        <MudProgressLinear Indeterminate="true" Color="Color.Primary" Class="mb-2" />
+    }
+    else if (_policies.Count == 0)
+    {
+        <MudPaper Class="pa-6 text-center" Elevation="1" Style="border-radius:12px;">
+            <MudIcon Icon="@Icons.Material.Filled.Policy" Size="Size.Large" Color="Color.Secondary" Class="mb-3" />
+            <MudText Typo="Typo.body1" Color="Color.Secondary">등록된 수수료 정책이 없습니다.</MudText>
+        </MudPaper>
+    }
+    else
+    {
+        <MudPaper Elevation="1" Style="border-radius:12px;overflow:hidden;">
+            <MudDataGrid T="CommissionPolicyItem" Items="_policies" Hover="true" Dense="true">
+                <Columns>
+                    <PropertyColumn Property="x => x.PlanKo" Title="플랜" />
+                    <TemplateColumn Title="수수료율">
+                        <CellTemplate>
+                            <strong>@context.Item.Rate.ToString("P1")</strong>
+                        </CellTemplate>
+                    </TemplateColumn>
+                    <TemplateColumn Title="적용 시작">
+                        <CellTemplate>@context.Item.EffectiveFrom.ToString("yyyy-MM-dd")</CellTemplate>
+                    </TemplateColumn>
+                    <TemplateColumn Title="적용 종료">
+                        <CellTemplate>@(context.Item.EffectiveTo.HasValue ? context.Item.EffectiveTo.Value.ToString("yyyy-MM-dd") : "진행중")</CellTemplate>
+                    </TemplateColumn>
+                    <TemplateColumn Title="상태">
+                        <CellTemplate>
+                            <MudChip T="string" Size="Size.Small" Color="@(context.Item.IsActive ? Color.Success : Color.Default)" Variant="Variant.Filled">
+                                @(context.Item.IsActive ? "적용 중" : "비활성")
+                            </MudChip>
+                        </CellTemplate>
+                    </TemplateColumn>
+                </Columns>
+                <NoRecordsContent>
+                    <MudText Typo="Typo.body2" Color="Color.Secondary" Class="pa-4">수수료 정책이 없습니다.</MudText>
+                </NoRecordsContent>
+            </MudDataGrid>
+        </MudPaper>
+    }
+}
+else
+{
+    <MudPaper Class="pa-3 mb-4" Elevation="1" Style="border-radius:12px;">
+        <MudGrid Spacing="2">
+            <MudItem xs="12" sm="4">
+                <MudTextField @bind-Value="_monthFilter" Label="정산월 (YYYY-MM)" Variant="Variant.Outlined"
+                              Margin="Margin.Dense" Placeholder="2026-04" />
+            </MudItem>
+            <MudItem xs="6" sm="3">
+                <MudSelect @bind-Value="_statusFilter" Label="상태" Variant="Variant.Outlined" Margin="Margin.Dense"
+                           Clearable="true" T="string">
+                    <MudSelectItem Value="@("draft")">검토중</MudSelectItem>
+                    <MudSelectItem Value="@("approved")">승인됨</MudSelectItem>
+                    <MudSelectItem Value="@("paid")">지급완료</MudSelectItem>
+                    <MudSelectItem Value="@("cancelled")">취소</MudSelectItem>
+                </MudSelect>
+            </MudItem>
+            <MudItem xs="6" sm="2">
+                <MudButton Variant="Variant.Filled" Color="Color.Primary" FullWidth="true"
+                           OnClick="LoadSettlementsAsync" StartIcon="@Icons.Material.Filled.Refresh">
+                    조회
+                </MudButton>
+            </MudItem>
+        </MudGrid>
+    </MudPaper>
+
+    @if (_loadingSettlement)
+    {
+        <MudProgressLinear Indeterminate="true" Color="Color.Primary" Class="mb-2" />
+    }
+
+    <MudPaper Elevation="1" Style="border-radius:12px;overflow:hidden;">
+        <MudDataGrid T="SettlementListItem" Items="_settlements" Loading="_loadingSettlement"
+                     Hover="true" Dense="true" SortMode="SortMode.Single">
+            <Columns>
+                <PropertyColumn Property="x => x.SettlementMonth" Title="정산월" />
+                <PropertyColumn Property="x => x.ActiveCustomerCount" Title="활성 고객사" />
+                <TemplateColumn Title="총 매출">
+                    <CellTemplate>@context.Item.TotalRevenue.ToString("N0")원</CellTemplate>
+                </TemplateColumn>
+                <TemplateColumn Title="수수료">
+                    <CellTemplate>@context.Item.TotalCommission.ToString("N0")원</CellTemplate>
+                </TemplateColumn>
+                <TemplateColumn Title="지급액">
+                    <CellTemplate><strong>@context.Item.PaymentAmount.ToString("N0")원</strong></CellTemplate>
+                </TemplateColumn>
+                <TemplateColumn Title="상태">
+                    <CellTemplate>
+                        <MudChip T="string" Size="Size.Small" Color="@context.Item.StatusColor" Variant="Variant.Filled">
+                            @context.Item.StatusKo
+                        </MudChip>
+                    </CellTemplate>
+                </TemplateColumn>
+                <TemplateColumn Title="지급일">
+                    <CellTemplate>@(context.Item.PaymentDate.HasValue ? context.Item.PaymentDate.Value.ToString("yyyy-MM-dd") : "-")</CellTemplate>
+                </TemplateColumn>
+            </Columns>
+            <NoRecordsContent>
+                <MudText Typo="Typo.body2" Color="Color.Secondary" Class="pa-4">정산 내역이 없습니다.</MudText>
+            </NoRecordsContent>
+        </MudDataGrid>
+    </MudPaper>
+
+    @if (_settlementTotal > _pageSize)
+    {
+        <div style="display:flex;justify-content:center;margin-top:16px;">
+            <MudPagination Count="@((_settlementTotal + _pageSize - 1) / _pageSize)"
+                           Selected="@_page" SelectedChanged="OnPageChanged"
+                           Color="Color.Primary" />
+        </div>
+    }
+}
+
+@code {
+    private int _tabIndex;
+    private List<CommissionPolicyItem> _policies = new();
+    private List<SettlementListItem> _settlements = new();
+    private bool _loadingPolicy;
+    private bool _loadingSettlement;
+    private string? _monthFilter;
+    private string? _statusFilter;
+    private int _page = 1;
+    private int _pageSize = 20;
+    private int _settlementTotal;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadPoliciesAsync();
+    }
+
+    private async Task LoadPoliciesAsync()
+    {
+        _loadingPolicy = true;
+        try
+        {
+            _policies = await Bo.GetMyCommissionPoliciesAsync() ?? new();
+        }
+        catch
+        {
+            Snackbar.Add("수수료 정책 로드 실패", Severity.Error);
+        }
+        finally
+        {
+            _loadingPolicy = false;
+        }
+    }
+
+    private async Task LoadSettlementsAsync()
+    {
+        _loadingSettlement = true;
+        try
+        {
+            var result = await Bo.GetMySettlementsAsync(_monthFilter, _statusFilter, _page, _pageSize);
+            _settlements = result?.Items ?? new();
+            _settlementTotal = result?.TotalCount ?? 0;
+        }
+        catch
+        {
+            Snackbar.Add("정산 내역 로드 실패", Severity.Error);
+        }
+        finally
+        {
+            _loadingSettlement = false;
+        }
+    }
+
+    private async Task OnTabChanged()
+    {
+        if (_tabIndex == 1 && _settlements.Count == 0)
+            await LoadSettlementsAsync();
+    }
+
+    private async Task OnPageChanged(int page)
+    {
+        _page = page;
+        await LoadSettlementsAsync();
+    }
+}

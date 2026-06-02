@@ -1,0 +1,160 @@
+@page "/partner/dashboard"
+@page "/reseller/dashboard"
+@layout ResellerLayout
+@attribute [Authorize]
+@inject BackofficeService Bo
+@inject ISnackbar Snackbar
+@using HitPan.Backoffice.Models.Backoffice
+@using HitPan.Backoffice.Services
+
+<PageTitle>파트너 대시보드 — 히트판</PageTitle>
+
+<MudText Typo="Typo.h5" Class="mb-1" Style="font-weight:600;">파트너 대시보드</MudText>
+<MudText Typo="Typo.body2" Color="Color.Secondary" Class="mb-5">
+    @DateTime.Now.ToString("yyyy년 M월 d일") 기준
+</MudText>
+
+@if (_loading)
+{
+    <MudProgressLinear Indeterminate="true" Color="Color.Primary" Class="mb-4" />
+}
+else if (_data is not null)
+{
+    <MudGrid Spacing="3" Class="mb-5">
+        <MudItem xs="12" sm="6" md="3">
+            <MudPaper Class="pa-4" Elevation="1" Style="border-radius:12px;">
+                <div style="display:flex;align-items:center;gap:12px;margin-bottom:8px;">
+                    <MudIcon Icon="@Icons.Material.Filled.Business" Color="Color.Primary" />
+                    <MudText Typo="Typo.body2" Color="Color.Secondary">담당 고객사</MudText>
+                </div>
+                <MudText Typo="Typo.h4" Style="font-weight:700;">@_data.CustomerCount</MudText>
+                <MudText Typo="Typo.caption" Color="Color.Success">이번 달 +@_data.NewCustomersThisMonth</MudText>
+            </MudPaper>
+        </MudItem>
+        <MudItem xs="12" sm="6" md="3">
+            <MudPaper Class="pa-4" Elevation="1" Style="border-radius:12px;">
+                <div style="display:flex;align-items:center;gap:12px;margin-bottom:8px;">
+                    <MudIcon Icon="@Icons.Material.Filled.Payments" Color="Color.Warning" />
+                    <MudText Typo="Typo.body2" Color="Color.Secondary">이번 달 예상 수수료</MudText>
+                </div>
+                <MudText Typo="Typo.h4" Style="font-weight:700;">@_data.EstimatedCommission.ToString("N0")원</MudText>
+            </MudPaper>
+        </MudItem>
+        <MudItem xs="12" sm="6" md="3">
+            <MudPaper Class="pa-4" Elevation="1" Style="border-radius:12px;">
+                <div style="display:flex;align-items:center;gap:12px;margin-bottom:8px;">
+                    <MudIcon Icon="@Icons.Material.Filled.AccountBalance" Color="Color.Success" />
+                    <MudText Typo="Typo.body2" Color="Color.Secondary">전월 수수료</MudText>
+                </div>
+                <MudText Typo="Typo.h4" Style="font-weight:700;">@_data.LastMonthCommission.ToString("N0")원</MudText>
+            </MudPaper>
+        </MudItem>
+        <MudItem xs="12" sm="6" md="3">
+            <MudPaper Class="pa-4" Elevation="1" Style="border-radius:12px;">
+                <div style="display:flex;align-items:center;gap:12px;margin-bottom:8px;">
+                    <MudIcon Icon="@Icons.Material.Filled.CheckCircle" Color="Color.Info" />
+                    <MudText Typo="Typo.body2" Color="Color.Secondary">전월 정산 상태</MudText>
+                </div>
+                <MudText Typo="Typo.h6" Style="font-weight:700;">
+                    @(_data.LastMonthSettlementStatus switch {
+                        "paid" => "지급완료",
+                        "approved" => "승인됨",
+                        "draft" => "검토중",
+                        "cancelled" => "취소",
+                        _ => "-"
+                    })
+                </MudText>
+            </MudPaper>
+        </MudItem>
+    </MudGrid>
+
+    <MudGrid Spacing="3">
+        <MudItem xs="12" md="5">
+            <MudPaper Class="pa-4" Elevation="1" Style="border-radius:12px;">
+                <MudText Typo="Typo.subtitle1" Style="font-weight:600;margin-bottom:16px;">고객사 현황</MudText>
+                <div style="display:flex;flex-direction:column;gap:12px;">
+                    <div style="display:flex;align-items:center;justify-content:space-between;">
+                        <div style="display:flex;align-items:center;gap:8px;">
+                            <div style="width:12px;height:12px;border-radius:50%;background:#22c55e;"></div>
+                            <MudText Typo="Typo.body2">활성</MudText>
+                        </div>
+                        <MudText Typo="Typo.body2" Style="font-weight:600;">@_data.CustomerStatusSummary.Active</MudText>
+                    </div>
+                    <div style="display:flex;align-items:center;justify-content:space-between;">
+                        <div style="display:flex;align-items:center;gap:8px;">
+                            <div style="width:12px;height:12px;border-radius:50%;background:#3b82f6;"></div>
+                            <MudText Typo="Typo.body2">체험</MudText>
+                        </div>
+                        <MudText Typo="Typo.body2" Style="font-weight:600;">@_data.CustomerStatusSummary.Trial</MudText>
+                    </div>
+                    <div style="display:flex;align-items:center;justify-content:space-between;">
+                        <div style="display:flex;align-items:center;gap:8px;">
+                            <div style="width:12px;height:12px;border-radius:50%;background:#f59e0b;"></div>
+                            <MudText Typo="Typo.body2">중지</MudText>
+                        </div>
+                        <MudText Typo="Typo.body2" Style="font-weight:600;">@_data.CustomerStatusSummary.Suspended</MudText>
+                    </div>
+                </div>
+            </MudPaper>
+        </MudItem>
+        <MudItem xs="12" md="7">
+            <MudPaper Class="pa-4" Elevation="1" Style="border-radius:12px;">
+                <MudText Typo="Typo.subtitle1" Style="font-weight:600;margin-bottom:16px;">월별 수수료 추이</MudText>
+                @if (_data.MonthlyCommissionTrend.Count > 0)
+                {
+                    var maxComm = _data.MonthlyCommissionTrend.Max(x => x.Commission);
+                    if (maxComm == 0) maxComm = 1;
+                    <table style="width:100%;border-collapse:collapse;font-size:0.85rem;">
+                        <thead>
+                            <tr style="border-bottom:1px solid #e2e8f0;">
+                                <th style="text-align:left;padding:6px 8px;color:#64748b;">월</th>
+                                <th style="text-align:right;padding:6px 8px;color:#64748b;">수수료</th>
+                                <th style="text-align:right;padding:6px 8px;color:#64748b;">그래프</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @foreach (var t in _data.MonthlyCommissionTrend)
+                            {
+                                var pct = (double)t.Commission / (double)maxComm * 100;
+                                <tr style="border-bottom:1px solid #f1f5f9;">
+                                    <td style="padding:8px;">@t.Month</td>
+                                    <td style="text-align:right;padding:8px;font-weight:600;">@t.Commission.ToString("N0")원</td>
+                                    <td style="padding:8px;width:100px;">
+                                        <div style="background:#e2e8f0;border-radius:4px;height:8px;">
+                                            <div style="background:#0f6e56;border-radius:4px;height:8px;width:@(pct.ToString("F0"))%;"></div>
+                                        </div>
+                                    </td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                }
+                else
+                {
+                    <MudText Color="Color.Secondary" Typo="Typo.body2">데이터 없음</MudText>
+                }
+            </MudPaper>
+        </MudItem>
+    </MudGrid>
+}
+
+@code {
+    private ResellerDashboardData? _data;
+    private bool _loading = true;
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            _data = await Bo.GetResellerDashboardAsync();
+        }
+        catch
+        {
+            Snackbar.Add("대시보드 데이터 로드 실패", Severity.Error);
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+}

@@ -1,0 +1,151 @@
+@*
+    WS-20260601-18 본사 백오피스 — CS 티켓 전체 목록 (8명제 #7 본사 전권)
+    작성일: 2026-06-01 / 작성팀: 프론트 매니저 + 백엔드 매니저
+    절대 원칙:
+      - PlatformOnlyV2 (owner/manager/staff 전원 열람)
+      - 평문 사업자번호·상호·대표자 노출 금지 → 마스킹·시리얼만
+      - Razor에 C# raw string 금지 (헌법 #14)
+      - 빈 catch 금지 (헌법 #15)
+*@
+
+@page "/admin/cs"
+@layout PlatformLayout
+@attribute [Authorize(Policy = "PlatformOnlyV2")]
+@inject HttpClient Http
+@inject ISnackbar Snackbar
+@using HitPan.Backoffice.Components.Pages.Platform.Components
+
+<PageTitle>CS 티켓 — 히트판 백오피스</PageTitle>
+
+<BoPageHeader Title="CS 티켓 전체"
+              Subtitle="본사 전권 · 시리얼 단위 추적 (평문 사업자정보 0건)">
+    <Actions>
+        <MudButton Variant="Variant.Outlined" Color="Color.Primary" Size="Size.Small"
+                   StartIcon="@Icons.Material.Filled.Refresh"
+                   OnClick="LoadAsync">새로고침</MudButton>
+    </Actions>
+</BoPageHeader>
+
+<BoFilterBar>
+    <MudTextField @bind-Value="_keyword" Label="검색 (시리얼·티켓번호)" Variant="Variant.Outlined"
+                  Margin="Margin.Dense" Immediate="true" OnKeyUp="OnSearchKey" />
+    <MudSelect T="string" @bind-Value="_statusFilter" Label="상태" Variant="Variant.Outlined" Margin="Margin.Dense">
+        <MudSelectItem Value="@("all")">전체</MudSelectItem>
+        <MudSelectItem Value="@("open")">처리중</MudSelectItem>
+        <MudSelectItem Value="@("pending")">대기</MudSelectItem>
+        <MudSelectItem Value="@("closed")">완료</MudSelectItem>
+    </MudSelect>
+    <MudSelect T="string" @bind-Value="_priorityFilter" Label="우선순위" Variant="Variant.Outlined" Margin="Margin.Dense">
+        <MudSelectItem Value="@("all")">전체</MudSelectItem>
+        <MudSelectItem Value="@("p0")">P0</MudSelectItem>
+        <MudSelectItem Value="@("p1")">P1</MudSelectItem>
+        <MudSelectItem Value="@("p2")">P2</MudSelectItem>
+    </MudSelect>
+    <div class="bo-filter-bar__action">
+        <MudButton Variant="Variant.Filled" Color="Color.Primary"
+                   StartIcon="@Icons.Material.Filled.Search" OnClick="LoadAsync">조회</MudButton>
+    </div>
+</BoFilterBar>
+
+<div class="bo-list-section">
+    <div class="bo-list-section__head">
+        <span class="bo-list-section__title">CS 티켓 목록</span>
+        <span class="bo-list-section__count">총 <strong>@_rows.Count.ToString("N0")</strong>건</span>
+    </div>
+
+    @if (!_loading && _rows.Count == 0)
+    {
+        <div style="padding:32px 24px;">
+            <BoEmptyStateCard Title="접수된 CS 티켓이 없습니다"
+                              Description="고객사 ERP 또는 챗봇에서 CS가 접수되면 시리얼 단위로 이곳에 표시됩니다. 평문 사업자정보는 노출되지 않습니다 (헌법 #18·#22)."
+                              IllustrationKind="doc" />
+        </div>
+    }
+    else
+    {
+        <MudDataGrid T="CsTicketRow" Items="_rows" Loading="_loading"
+                     Hover="true" Dense="true" SortMode="SortMode.Single">
+            <Columns>
+                <PropertyColumn Property="x => x.TicketNo" Title="티켓번호" />
+                <PropertyColumn Property="x => x.SerialMasked" Title="시리얼 (마스킹)" />
+                <TemplateColumn Title="우선순위">
+                    <CellTemplate>
+                        <span class="bo-status-chip @PriChipClass(context.Item.Priority)">@context.Item.Priority.ToUpper()</span>
+                    </CellTemplate>
+                </TemplateColumn>
+                <PropertyColumn Property="x => x.Subject" Title="제목" />
+                <TemplateColumn Title="상태">
+                    <CellTemplate>
+                        <span class="bo-status-chip @CsStatusChipClass(context.Item.Status)">@context.Item.Status</span>
+                    </CellTemplate>
+                </TemplateColumn>
+                <PropertyColumn Property="x => x.OpenedAt" Title="접수" Format="yyyy-MM-dd HH:mm" />
+                <PropertyColumn Property="x => x.Assignee" Title="담당자" />
+            </Columns>
+            <PagerContent>
+                <MudDataGridPager T="CsTicketRow" />
+            </PagerContent>
+        </MudDataGrid>
+    }
+</div>
+
+@code {
+    private List<CsTicketRow> _rows = new();
+    private bool _loading = true;
+    private string _keyword = "";
+    private string _statusFilter = "all";
+    private string _priorityFilter = "all";
+
+    protected override async Task OnInitializedAsync() => await LoadAsync();
+
+    private async Task OnSearchKey(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter") await LoadAsync();
+    }
+
+    private async Task LoadAsync()
+    {
+        _loading = true;
+        try
+        {
+            // WS-13 CS API 결합 가도. 현 시점 빈 목록 박제 (평문 0 원칙).
+            await Task.Yield();
+            _rows = new List<CsTicketRow>();
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"CS 티켓 조회 실패: {ex.Message}", Severity.Error);
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    private static string CsStatusChipClass(string s) => s switch
+    {
+        "open" => "bo-status-chip--suspended",
+        "pending" => "bo-status-chip--trial",
+        "closed" => "bo-status-chip--active",
+        _ => "bo-status-chip--neutral"
+    };
+
+    private static string PriChipClass(string p) => p switch
+    {
+        "p0" => "bo-status-chip--expired",
+        "p1" => "bo-status-chip--suspended",
+        "p2" => "bo-status-chip--trial",
+        _ => "bo-status-chip--neutral"
+    };
+
+    public class CsTicketRow
+    {
+        public string TicketNo { get; set; } = "";
+        public string SerialMasked { get; set; } = "";
+        public string Priority { get; set; } = "p2";
+        public string Subject { get; set; } = "";
+        public string Status { get; set; } = "open";
+        public DateTime OpenedAt { get; set; }
+        public string Assignee { get; set; } = "";
+    }
+}

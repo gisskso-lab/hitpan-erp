@@ -1,0 +1,143 @@
+@page "/backoffice/login"
+@attribute [Microsoft.AspNetCore.Authorization.AllowAnonymous]
+@layout EmptyLayout
+@inject BackofficeService Bo
+@inject NavigationManager Nav
+@inject ISnackbar Snackbar
+@using HitPan.Backoffice.Services
+@using Microsoft.JSInterop
+@inject IJSRuntime JS
+
+<PageTitle>백오피스 로그인 — 히트판</PageTitle>
+
+<div class="bo-login-page">
+    <MudPaper Class="bo-login-card pa-8" Elevation="4">
+        <div class="bo-login-brand mb-6">
+            <div class="bo-login-logo">HP</div>
+            <MudText Typo="Typo.h5">히트판 백오피스</MudText>
+            <MudText Typo="Typo.body2" Color="Color.Secondary">운영·파트너 포털</MudText>
+        </div>
+
+        <MudText Typo="Typo.body2" Color="Color.Secondary" Class="mb-4" Style="text-align:center;">
+            본사·대리점 통합 로그인 (계정으로 자동 분기)
+        </MudText>
+
+        <MudTextField @bind-Value="_email"
+                      Label="이메일"
+                      Variant="Variant.Outlined"
+                      InputType="InputType.Email"
+                      Disabled="_busy"
+                      Class="mb-3" />
+
+        <MudTextField @bind-Value="_password"
+                      Label="비밀번호"
+                      Variant="Variant.Outlined"
+                      InputType="InputType.Password"
+                      Disabled="_busy"
+                      Class="mb-4"
+                      OnKeyUp="@OnKeyUp" />
+
+        @if (!string.IsNullOrEmpty(_error))
+        {
+            <MudAlert Severity="Severity.Error" Dense="true" Class="mb-3">@_error</MudAlert>
+        }
+
+        <MudButton Variant="Variant.Filled"
+                   Color="Color.Primary"
+                   FullWidth="true"
+                   Disabled="_busy || string.IsNullOrWhiteSpace(_email) || string.IsNullOrWhiteSpace(_password)"
+                   OnClick="LoginAsync">
+            @if (_busy) { <MudProgressCircular Color="Color.Primary" Size="Size.Small" Indeterminate="true" Class="mr-2" /> }
+            로그인
+        </MudButton>
+    </MudPaper>
+</div>
+
+<style>
+    .bo-login-page {
+        min-height: 100vh;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%);
+    }
+    .bo-login-card {
+        width: 100%;
+        max-width: 400px;
+        border-radius: 16px !important;
+    }
+    .bo-login-brand {
+        text-align: center;
+    }
+    .bo-login-logo {
+        width: 52px; height: 52px;
+        background: #0f6e56;
+        border-radius: 12px;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        font-weight: 700;
+        font-size: 1.1rem;
+        color: #fff;
+        margin-bottom: 12px;
+    }
+</style>
+
+@code {
+    private string _email = "";
+    private string _password = "";
+    private string? _error;
+    private bool _busy;
+
+    private async Task OnKeyUp(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter") await LoginAsync();
+    }
+
+    // 백오피스 통합 로그인 박제 (사장님 결재 2026-06-02):
+    // 본사·대리점 동일 입구. 본사 먼저 시도 → 실패 시 대리점 시도 → role 클레임으로 자동 분기
+    private async Task LoginAsync()
+    {
+        if (_busy) return;
+        _busy = true;
+        _error = null;
+
+        try
+        {
+            var admin = await Bo.AdminLoginAsync(_email, _password);
+            if (admin.Success && admin.Data is not null)
+            {
+                await JS.InvokeVoidAsync("localStorage.setItem", "bo_access_token", admin.Data.AccessToken);
+                await JS.InvokeVoidAsync("localStorage.setItem", "bo_refresh_token", admin.Data.RefreshToken);
+                await JS.InvokeVoidAsync("localStorage.setItem", "bo_account_type", admin.Data.AccountType);
+                await JS.InvokeVoidAsync("localStorage.setItem", "bo_role", admin.Data.Role);
+                await JS.InvokeVoidAsync("localStorage.setItem", "bo_name", admin.Data.AdminName);
+                Nav.NavigateTo("/admin/dashboard", forceLoad: true);
+                return;
+            }
+
+            var reseller = await Bo.ResellerLoginAsync(_email, _password);
+            if (reseller.Success && reseller.ResellerData is not null)
+            {
+                await JS.InvokeVoidAsync("localStorage.setItem", "bo_access_token", reseller.ResellerData.AccessToken);
+                await JS.InvokeVoidAsync("localStorage.setItem", "bo_refresh_token", reseller.ResellerData.RefreshToken);
+                await JS.InvokeVoidAsync("localStorage.setItem", "bo_account_type", reseller.ResellerData.AccountType);
+                await JS.InvokeVoidAsync("localStorage.setItem", "bo_role", reseller.ResellerData.Role);
+                await JS.InvokeVoidAsync("localStorage.setItem", "bo_name", reseller.ResellerData.AccountName);
+                await JS.InvokeVoidAsync("localStorage.setItem", "bo_reseller_id", reseller.ResellerData.ResellerId);
+                Nav.NavigateTo("/admin/dashboard", forceLoad: true);
+                return;
+            }
+
+            _error = admin.Message ?? reseller.Message ?? "로그인 실패";
+        }
+        catch (Exception)
+        {
+            _error = "서버 오류가 발생했습니다";
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+}

@@ -22,7 +22,12 @@ public class Program
         {
             o.LoginPath = "/login";
         });
-        builder.Services.AddAuthorization();
+        builder.Services.AddAuthorization(o =>
+        {
+            // 백오피스 정책 — 다음 세션 JWT 박제 후 RequireClaim으로 강화
+            o.AddPolicy("PlatformOnlyV2", p => p.RequireAuthenticatedUser());
+            o.AddPolicy("PlatformManagerOrAbove", p => p.RequireAuthenticatedUser());
+        });
         builder.Services.AddCascadingAuthenticationState();
 
         // HttpClient — 백오피스 API 호출 (별도 HitPan.Backoffice.API 분리 예정)

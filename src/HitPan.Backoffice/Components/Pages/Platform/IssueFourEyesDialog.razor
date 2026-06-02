@@ -1,0 +1,110 @@
+@*
+    WS-20260601-13 4-eyes 발급 다이얼로그 (고객사·대리점 공용)
+    절대 원칙: 평문 비번 화면 박제 금지 / Razor C# raw string 금지 (헌법 #14)
+*@
+
+@inject HttpClient Http
+@inject ISnackbar Snackbar
+
+<MudDialog>
+    <DialogContent>
+        <MudAlert Severity="Severity.Info" Class="mb-3" Dense="true">
+            4-eyes 결재: 본인을 포함한 2인의 user_id 입력. 발급 후 임시 비번은 SMS로만 전송됩니다.
+        </MudAlert>
+        <MudTextField @bind-Value="_approver1" Label="1차 결재자 user_id"
+                      Variant="Variant.Outlined" Margin="Margin.Dense" Class="mb-2"
+                      InputType="InputType.Number" />
+        <MudTextField @bind-Value="_approver2" Label="2차 결재자 user_id (≠ 1차)"
+                      Variant="Variant.Outlined" Margin="Margin.Dense" Class="mb-2"
+                      InputType="InputType.Number" />
+        @if (!string.IsNullOrEmpty(_error))
+        {
+            <MudAlert Severity="Severity.Error" Dense="true" Class="mt-2">@_error</MudAlert>
+        }
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="Cancel">취소</MudButton>
+        <MudButton Color="Color.Primary" Variant="Variant.Filled"
+                   Disabled="_busy" OnClick="Submit">
+            @(_busy ? "발급 중..." : "발급")
+        </MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private IMudDialogInstance MudDialog { get; set; } = default!;
+    [Parameter] public object? Row { get; set; }
+    [Parameter] public string Kind { get; set; } = "tenant";
+
+    private long? _approver1;
+    private long? _approver2;
+    private string _error = "";
+    private bool _busy;
+
+    private void Cancel() => MudDialog.Cancel();
+
+    private async Task Submit()
+    {
+        _error = "";
+        if (!_approver1.HasValue || !_approver2.HasValue)
+        {
+            _error = "결재자 2인의 user_id 모두 필수";
+            return;
+        }
+        if (_approver1 == _approver2)
+        {
+            _error = "두 결재자가 동일인일 수 없음 (4-eyes 원칙)";
+            return;
+        }
+
+        _busy = true;
+        try
+        {
+            var endpoint = Kind == "reseller" ? "api/admin/issue/reseller" : "api/admin/issue/tenant";
+            object payload;
+            if (Kind == "reseller")
+            {
+                var r = Row as HitPan.Backoffice.Components.Pages.Platform.AdminResellerIssuePage.PendingResellerRow;
+                payload = new
+                {
+                    BizNoHash = r?.BizNoHash ?? "",
+                    EmailHash = r?.EmailHash ?? "",
+                    ContractId = r?.ContractId ?? "",
+                    Approver1UserId = _approver1,
+                    Approver2UserId = _approver2
+                };
+            }
+            else
+            {
+                var t = Row as HitPan.Backoffice.Components.Pages.Platform.AdminTenantIssuePage.PendingTenantRow;
+                payload = new
+                {
+                    BizNoHash = t?.BizNoHash ?? "",
+                    EmailHash = t?.EmailHash ?? "",
+                    PaymentId = t?.PaymentId ?? "",
+                    Approver1UserId = _approver1,
+                    Approver2UserId = _approver2
+                };
+            }
+
+            var res = await Http.PostAsJsonAsync(endpoint, payload);
+            if (res.IsSuccessStatusCode)
+            {
+                MudDialog.Close(DialogResult.Ok(true));
+            }
+            else
+            {
+                var body = await res.Content.ReadAsStringAsync();
+                _error = $"발급 실패 ({(int)res.StatusCode}): {body}";
+            }
+        }
+        catch (Exception ex)
+        {
+            _error = $"발급 호출 오류: {ex.Message}";
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+}

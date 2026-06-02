@@ -1,0 +1,190 @@
+@*
+    WS-20260601-18 본사 백오피스 — 전체 통계 대시보드 (8명제 #7)
+    작성일: 2026-06-01
+    절대 원칙:
+      - PlatformOnlyV2 (owner/manager/staff 전원 열람)
+      - 평문 사업자정보 0 — 시리얼 수·구독 등급별 분포·결제 상태만
+      - Razor에 C# raw string 금지 (헌법 #14)
+      - 빈 catch 금지 (헌법 #15)
+*@
+
+@page "/admin/stats"
+@layout PlatformLayout
+@attribute [Authorize(Policy = "PlatformOnlyV2")]
+@inject HttpClient Http
+@inject ISnackbar Snackbar
+@using HitPan.Backoffice.Components.Pages.Platform.Components
+
+<PageTitle>전체 통계 — 히트판 백오피스</PageTitle>
+
+<BoPageHeader Title="전체 통계 대시보드"
+              Subtitle="시리얼 수 · 구독 등급별 분포 · 결제 상태 · 워치독 헬스 (평문 사업자정보 0건)">
+    <Actions>
+        <MudButton Variant="Variant.Outlined" Color="Color.Primary" Size="Size.Small"
+                   StartIcon="@Icons.Material.Filled.Refresh"
+                   OnClick="LoadAsync">새로고침</MudButton>
+    </Actions>
+</BoPageHeader>
+
+@if (_loading)
+{
+    <MudProgressLinear Indeterminate="true" Color="Color.Primary" Class="mb-4" />
+}
+else
+{
+    <MudGrid Spacing="3" Class="mb-5">
+        <MudItem xs="12" sm="6" md="3">
+            <BoKpiCard Label="총 시리얼"
+                     Value="@_stats.TotalSerials.ToString("N0")"
+                     Icon="@Icons.Material.Filled.Key"
+                     Accent="primary"
+                     TrendText="@($"활성 {_stats.ActiveSerials}")"
+                     TrendKind="@(_stats.ActiveSerials > 0 ? "up" : "neutral")" />
+        </MudItem>
+        <MudItem xs="12" sm="6" md="3">
+            <BoKpiCard Label="결제 정상"
+                     Value="@_stats.PaidActive.ToString("N0")"
+                     Icon="@Icons.Material.Filled.Payments"
+                     Accent="info"
+                     TrendText="@($"연체 {_stats.Overdue}")"
+                     TrendKind="@(_stats.Overdue > 0 ? "down" : "neutral")" />
+        </MudItem>
+        <MudItem xs="12" sm="6" md="3">
+            <BoKpiCard Label="CS 처리중"
+                     Value="@_stats.OpenTickets.ToString("N0")"
+                     Icon="@Icons.Material.Filled.SupportAgent"
+                     Accent="warning"
+                     TrendText="@($"P0 {_stats.P0Tickets}")"
+                     TrendKind="@(_stats.P0Tickets > 0 ? "down" : "neutral")" />
+        </MudItem>
+        <MudItem xs="12" sm="6" md="3">
+            <BoKpiCard Label="워치독 정상"
+                     Value="@_stats.HealthyTunnels.ToString("N0")"
+                     Icon="@Icons.Material.Filled.MonitorHeart"
+                     Accent="accent"
+                     TrendText="@($"이상 {_stats.UnhealthyTunnels}")"
+                     TrendKind="@(_stats.UnhealthyTunnels > 0 ? "down" : "neutral")" />
+        </MudItem>
+    </MudGrid>
+
+    <MudGrid Spacing="3">
+        <MudItem xs="12" md="6">
+            <div class="bo-section">
+                <div class="bo-section__title">플랜별 시리얼 분포</div>
+                @if (_stats.PlanDistribution.Count > 0)
+                {
+                    @foreach (var p in _stats.PlanDistribution)
+                    {
+                        <div style="display:flex;align-items:center;gap:12px;margin-bottom:10px;">
+                            <span style="min-width:80px;font-size:13px;font-weight:600;color:var(--hp-text-secondary);">@p.Plan</span>
+                            <MudProgressLinear Value="@p.Percent" Color="Color.Primary" Style="flex:1;height:8px;" />
+                            <span style="min-width:60px;text-align:right;font-size:13px;font-weight:600;">@p.Count 건</span>
+                        </div>
+                    }
+                }
+                else
+                {
+                    <BoEmptyStateCard Title="아직 시리얼이 없습니다"
+                                      Description="첫 시리얼이 발급되면 플랜별 분포가 여기에 표시됩니다."
+                                      IllustrationKind="chart" />
+                }
+            </div>
+        </MudItem>
+        <MudItem xs="12" md="6">
+            <div class="bo-section">
+                <div class="bo-section__title">결제 상태 분포</div>
+                @if (_stats.PaymentStatusDistribution.Count > 0)
+                {
+                    @foreach (var s in _stats.PaymentStatusDistribution)
+                    {
+                        <div style="display:flex;align-items:center;gap:12px;margin-bottom:10px;">
+                            <span style="min-width:80px;font-size:13px;font-weight:600;color:var(--hp-text-secondary);">@s.Status</span>
+                            <MudProgressLinear Value="@s.Percent" Color="@StatusBarColor(s.Status)" Style="flex:1;height:8px;" />
+                            <span style="min-width:60px;text-align:right;font-size:13px;font-weight:600;">@s.Count 건</span>
+                        </div>
+                    }
+                }
+                else
+                {
+                    <BoEmptyStateCard Title="결제 데이터가 없습니다"
+                                      Description="고객사 결제가 시작되면 상태 분포가 여기에 표시됩니다."
+                                      IllustrationKind="chart" />
+                }
+            </div>
+        </MudItem>
+    </MudGrid>
+}
+
+@code {
+    private bool _loading = true;
+    private PlatformStats _stats = new();
+
+    protected override async Task OnInitializedAsync() => await LoadAsync();
+
+    private async Task LoadAsync()
+    {
+        _loading = true;
+        try
+        {
+            // 통계 집계 API 결합 가도. 현 시점 박제만.
+            await Task.Yield();
+            _stats = new PlatformStats
+            {
+                TotalSerials = 0,
+                ActiveSerials = 0,
+                PaidActive = 0,
+                Overdue = 0,
+                OpenTickets = 0,
+                P0Tickets = 0,
+                HealthyTunnels = 0,
+                UnhealthyTunnels = 0,
+                PlanDistribution = new List<PlanCount>(),
+                PaymentStatusDistribution = new List<StatusCount>()
+            };
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"통계 조회 실패: {ex.Message}", Severity.Error);
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    private Color StatusBarColor(string s) => s switch
+    {
+        "active" => Color.Success,
+        "overdue" => Color.Warning,
+        "suspended" => Color.Error,
+        _ => Color.Default
+    };
+
+    public class PlatformStats
+    {
+        public int TotalSerials { get; set; }
+        public int ActiveSerials { get; set; }
+        public int PaidActive { get; set; }
+        public int Overdue { get; set; }
+        public int OpenTickets { get; set; }
+        public int P0Tickets { get; set; }
+        public int HealthyTunnels { get; set; }
+        public int UnhealthyTunnels { get; set; }
+        public List<PlanCount> PlanDistribution { get; set; } = new();
+        public List<StatusCount> PaymentStatusDistribution { get; set; } = new();
+    }
+
+    public class PlanCount
+    {
+        public string Plan { get; set; } = "";
+        public int Count { get; set; }
+        public double Percent { get; set; }
+    }
+
+    public class StatusCount
+    {
+        public string Status { get; set; } = "";
+        public int Count { get; set; }
+        public double Percent { get; set; }
+    }
+}
