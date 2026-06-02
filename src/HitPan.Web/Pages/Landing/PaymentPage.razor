@@ -1,6 +1,8 @@
 @page "/payment"
 @layout LandingLayout
 @inject NavigationManager Nav
+@inject HttpClient Http
+@using System.Net.Http.Json
 
 <PageTitle>결제 — 히트판 ERP</PageTitle>
 
@@ -60,6 +62,9 @@
     [SupplyParameterFromQuery]
     public string? Plan { get; set; }
 
+    [SupplyParameterFromQuery]
+    public string? Token { get; set; }
+
     private string _planLabel = "PRO";
     private string _priceText = "49,000원";
     private string _planNote = "";
@@ -84,10 +89,33 @@
     private async Task HandlePay()
     {
         _processing = true;
-        // 스켈레톤: 실제 토스페이먼츠 SDK 호출은 작지#5(Webhook 박제) 후 작지#?에서 박제
-        await Task.Delay(1500);
-        Nav.NavigateTo($"/signup/welcome?plan={Plan}");
+        try
+        {
+            // 사장님 결재 박제 2026-06-02 (의중 B 모두결재) — 베타 박제: 결제 SDK 미박제, API 직접 호출로 tenants.status='active'
+            // 정식 박제 = 토스 빌링키 박제 후 webhook 박제로 전환 (TossWebhookController 박제)
+            string? licenseKey = null;
+            if (!string.IsNullOrWhiteSpace(Token))
+            {
+                var resp = await Http.PostAsJsonAsync("api/landing/confirm-payment", new { SignupToken = Token });
+                if (!resp.IsSuccessStatusCode)
+                {
+                    _processing = false;
+                    return;
+                }
+                var data = await resp.Content.ReadFromJsonAsync<ConfirmResult>();
+                licenseKey = data?.LicenseKey;
+            }
+            var qs = $"plan={Plan}";
+            if (!string.IsNullOrWhiteSpace(licenseKey)) qs += $"&key={Uri.EscapeDataString(licenseKey)}";
+            Nav.NavigateTo($"/signup/welcome?{qs}");
+        }
+        catch (Exception)
+        {
+            _processing = false;
+        }
     }
+
+    private record ConfirmResult(bool Success, string? Message, string? LicenseKey);
 }
 
 <style>

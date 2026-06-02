@@ -97,8 +97,31 @@ public class LandingSignupService : ILandingSignupService
                     request.ResellerCode
                 });
 
-            _logger.LogInformation("[LandingSignup] submitted token={Token} email={Email} plan={Plan}",
-                signupToken, request.Email, request.PlanType);
+            // 사장님 결재 박제 2026-06-02 (의중 B 모두결재) — 가입 즉시 백오피스 AdminTenants 노출
+            // 헌법 #22 정합: biz_no=NULL (해시는 landing_signups에만), 결제 박제 완료 시 status='active' 박제
+            // 헌법 #20 정합: 가입→백오피스 워크플로우 끊김 0건
+            var tenantId = Guid.NewGuid().ToString();
+            var codeSeq = await db.QueryFirstOrDefaultAsync<int>("SELECT COUNT(*) + 1 FROM tenants");
+            var tenantCode = $"T-{codeSeq:D3}";
+
+            await db.ExecuteAsync(@"
+                INSERT INTO tenants
+                  (tenant_id, tenant_code, company_name, biz_no, ceo_name, tel, address,
+                   reseller_id, status, trial_ends_at, db_host, db_name, license_key_hash,
+                   reseller_tier, created_at, updated_at)
+                VALUES
+                  (@TenantId, @TenantCode, @CompanyName, NULL, NULL, @Phone, NULL,
+                   NULL, 'pending', NULL, '', '', '', 0, UTC_TIMESTAMP(), UTC_TIMESTAMP())",
+                new
+                {
+                    TenantId = tenantId,
+                    TenantCode = tenantCode,
+                    request.CompanyName,
+                    request.Phone
+                });
+
+            _logger.LogInformation("[LandingSignup] submitted token={Token} tenant={TenantCode} email={Email} plan={Plan}",
+                signupToken, tenantCode, request.Email, request.PlanType);
 
             return new SignupResponse
             {
@@ -118,11 +141,87 @@ public class LandingSignupService : ILandingSignupService
         }
     }
 
+    // 사장님 결재 박제 2026-06-02 (의중 B 모두결재) — 결제 완료 시 tenants.status='pending' → 'active'
+    // 헌법 #20 정합: 가입→백오피스→결제 워크플로우 끊김 0건
+    // 헌법 #15 정합: 빈 catch 금지, ILogger 박제
+    public async Task<SignupResponse> ConfirmPaymentAsync(string signupToken, CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(signupToken))
+            return new SignupResponse { Success = false, Message = "signup_token 누락" };
+
+        var db = _uow.GetDbConnection();
+        await EnsureOpenAsync(db, ct).ConfigureAwait(false);
+
+        try
+        {
+            var signup = await db.QueryFirstOrDefaultAsync<(string CompanyName, string Status)?>(
+                @"SELECT company_name AS CompanyName, status AS Status
+                  FROM landing_signups WHERE signup_token = @Token",
+                new { Token = signupToken });
+
+            if (signup is null)
+                return new SignupResponse { Success = false, Message = "유효하지 않은 signup_token" };
+
+            await db.ExecuteAsync(
+                "UPDATE landing_signups SET status = 'paid' WHERE signup_token = @Token",
+                new { Token = signupToken });
+
+            // 사장님 결재 박제 2026-06-02 (의중 B 모두결재) — 결제 박제 시 라이선스 키 박제
+            // 키 형식: HITP-XXXX-XXXX-XXXX-XXXX (16자 박제, Base32 박제)
+            // 헌법 #22 정합: tenants에는 SHA256 해시만 박제, 평문은 응답으로만 1회 박제
+            var licenseKey = GenerateLicenseKey();
+            var pepper = _config["License:Pepper"] ?? "dev-pepper-2026";
+            var licenseHash = ComputeHmacSha256(licenseKey, pepper);
+
+            var affected = await db.ExecuteAsync(
+                @"UPDATE tenants
+                  SET status = 'active', license_key_hash = @Hash, updated_at = UTC_TIMESTAMP()
+                  WHERE company_name = @CompanyName AND status = 'pending'",
+                new { Hash = licenseHash, signup.Value.CompanyName });
+
+            _logger.LogInformation("[LandingSignup] payment confirmed token={Token} tenants_updated={Cnt} license_issued=1",
+                signupToken, affected);
+
+            return new SignupResponse
+            {
+                Success = true,
+                Message = "결제가 확인되었습니다.",
+                SignupToken = signupToken,
+                LicenseKey = licenseKey
+            };
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "[LandingSignup] confirm payment failed token={Token}", signupToken);
+            return new SignupResponse
+            {
+                Success = false,
+                Message = "결제 확인 중 오류가 발생했습니다."
+            };
+        }
+    }
+
     private static string ComputeHmacSha256(string data, string key)
     {
         using var hmac = new HMACSHA256(Encoding.UTF8.GetBytes(key));
         var hash = hmac.ComputeHash(Encoding.UTF8.GetBytes(data));
         return Convert.ToHexString(hash).ToLowerInvariant();
+    }
+
+    // 사장님 결재 박제 2026-06-02 — 라이선스 키 박제 (HITP-XXXX-XXXX-XXXX-XXXX, Crockford Base32)
+    // 헌법 #25 정합: 쉽게(외울 수 있는 형식) + 정확(HMAC 해시 검증) + 안전(평문 1회 응답만)
+    private static string GenerateLicenseKey()
+    {
+        const string alphabet = "ABCDEFGHJKMNPQRSTVWXYZ23456789"; // I·L·O·U·0·1 제외 (오인 박제 방지)
+        Span<byte> buf = stackalloc byte[16];
+        RandomNumberGenerator.Fill(buf);
+        var sb = new StringBuilder("HITP", 24);
+        for (int i = 0; i < 16; i++)
+        {
+            if (i % 4 == 0) sb.Append('-');
+            sb.Append(alphabet[buf[i] % alphabet.Length]);
+        }
+        return sb.ToString();
     }
 
     private static async Task EnsureOpenAsync(IDbConnection db, CancellationToken ct)

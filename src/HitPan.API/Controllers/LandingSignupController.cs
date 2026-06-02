@@ -41,4 +41,20 @@ public class LandingSignupController : ControllerBase
             signupToken = result.SignupToken
         });
     }
+
+    // 사장님 결재 박제 2026-06-02 (의중 B 모두결재) — 결제 박제 후 tenants.status='active'
+    // 베타: PaymentPage HandlePay 박제 후 직접 호출 / 정식: TossWebhookController에서 호출
+    [HttpPost("confirm-payment")]
+    [AllowAnonymous]
+    public async Task<IActionResult> ConfirmPayment([FromBody] ConfirmPaymentRequest request, CancellationToken ct)
+    {
+        var result = await _service.ConfirmPaymentAsync(request.SignupToken, ct);
+        if (!result.Success)
+            return BadRequest(new { success = false, message = result.Message });
+
+        // 사장님 결재 박제 2026-06-02 — 라이선스 키 평문 1회 응답 (헌법 #22 정합)
+        return Ok(new { success = true, message = result.Message, licenseKey = result.LicenseKey });
+    }
+
+    public record ConfirmPaymentRequest(string SignupToken);
 }

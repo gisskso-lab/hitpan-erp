@@ -27,7 +27,10 @@ public sealed class TenantMiddleware
             || path.StartsWithSegments("/api/tenants/setup")
             || path.StartsWithSegments("/api/auth/login")
             || path.StartsWithSegments("/api/auth/refresh")
-            || path.StartsWithSegments("/api/backoffice/auth"))
+            || path.StartsWithSegments("/api/backoffice/auth")
+            // 사장님 결재 박제 2026-06-02 모두결재 — 랜딩 가입·결제·설치 박제 = 인증 면제 (AllowAnonymous 박제 정합)
+            || path.StartsWithSegments("/api/landing")
+            || path.StartsWithSegments("/api/install"))
         {
             await _next(context);
             return;

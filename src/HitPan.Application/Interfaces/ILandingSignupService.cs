@@ -16,4 +16,8 @@ namespace HitPan.Application.Interfaces;
 public interface ILandingSignupService
 {
     Task<SignupResponse> SubmitAsync(SignupRequest request, CancellationToken ct = default);
+
+    // 사장님 결재 박제 2026-06-02 (의중 B 모두결재) — 결제 박제 완료 시 tenants.status='pending' → 'active'
+    // 베타: PaymentPage HandlePay 박제 후 호출 / 정식: 토스 webhook (TossWebhookController)에서 호출
+    Task<SignupResponse> ConfirmPaymentAsync(string signupToken, CancellationToken ct = default);
 }

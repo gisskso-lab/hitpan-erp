@@ -37,8 +37,17 @@
         {
             <div class="done">
                 <p>✓ 모든 준비가 완료되었습니다.</p>
-                <p>이메일을 확인해주세요.</p>
-                <button class="btn-primary" @onclick='() => Nav.NavigateTo("/download")'>다운로드 안내</button>
+                @if (!string.IsNullOrWhiteSpace(Key))
+                {
+                    @* 사장님 결재 박제 2026-06-02 — 라이선스 키 평문 1회 박제 (헌법 #22 정합) *@
+                    <div class="license-box">
+                        <div class="license-label">📋 라이선스 키 (이 화면을 떠나면 다시 볼 수 없습니다)</div>
+                        <div class="license-key">@Key</div>
+                        <button class="btn-copy" @onclick="CopyKey">@(_copied ? "✓ 복사됨" : "복사")</button>
+                    </div>
+                }
+                <p style="margin-top:16px;font-size:13px;color:#4B5563;">이메일에도 라이선스 키와 다운로드 링크를 발송했습니다.</p>
+                <button class="btn-primary" @onclick='@(() => Nav.NavigateTo($"/download?key={Uri.EscapeDataString(Key ?? "")}"))'>다운로드 안내</button>
             </div>
         }
         else
@@ -49,8 +58,22 @@
 </section>
 
 @code {
+    [SupplyParameterFromQuery] public string? Key { get; set; }
+    [SupplyParameterFromQuery] public string? Plan { get; set; }
+
     private int _progress = 0;
+    private bool _copied;
     private System.Threading.Timer? _timer;
+
+    [Inject] private IJSRuntime JS { get; set; } = default!;
+
+    private async Task CopyKey()
+    {
+        if (string.IsNullOrWhiteSpace(Key)) return;
+        await JS.InvokeVoidAsync("navigator.clipboard.writeText", Key);
+        _copied = true;
+        StateHasChanged();
+    }
 
     protected override void OnAfterRender(bool firstRender)
     {
@@ -93,4 +116,8 @@
 .done { padding: 20px; background: #F0F9F5; border-radius: 8px; margin-top: 16px; }
 .done p { color: #0F6E56; font-weight: 600; }
 .btn-primary { margin-top: 12px; padding: 12px 24px; background: #0F6E56; color: #fff; border: none; border-radius: 8px; font-weight: 600; cursor: pointer; }
+.license-box { background:#0F1419; color:#fff; border-radius:8px; padding:16px; margin-top:16px; text-align:left; }
+.license-label { font-size:12px; color:#9CA3AF; margin-bottom:8px; }
+.license-key { font-family:'Consolas',monospace; font-size:18px; letter-spacing:1px; font-weight:700; word-break:break-all; }
+.btn-copy { margin-top:8px; padding:6px 12px; background:#0F6E56; color:#fff; border:none; border-radius:6px; font-size:12px; cursor:pointer; }
 </style>

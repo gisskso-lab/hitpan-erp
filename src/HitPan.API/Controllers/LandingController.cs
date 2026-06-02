@@ -72,23 +72,8 @@ public class LandingController : ControllerBase
     // 사업자번호 검증 → 가입 임시 박제 → OTP 발송 → 결재 → 라이선스 자동 발급
     // 외부 의존: 사업자번호 검증 API · 토스 키 · SMTP (사장님 결재 영역)
 
-    /// <summary>정식 가입 1단계 — 회사·대표 정보 박제 (W2 매니저 가도)</summary>
-    [HttpPost("signup")]
-    public IActionResult Signup([FromBody] HitPan.Application.DTOs.Landing.SignupRequest request, CancellationToken ct)
-    {
-        if (!request.AgreeTerms || !request.AgreePrivacy)
-            return BadRequest(new HitPan.Application.DTOs.Landing.SignupResponse { Success = false, Message = "필수 약관 동의가 필요합니다." });
-
-        _logger.LogInformation("[Signup] 가입 요청 박제 — Company={C} BizNo={B} Email={E}",
-            request.CompanyName, request.BizNo, request.Email);
-
-        return Accepted(new HitPan.Application.DTOs.Landing.SignupResponse
-        {
-            Success = true,
-            Message = "가입 요청 박제 완료 — W2 매니저 가도 (사업자번호 검증 + OTP 발송 영역)",
-            SignupToken = Guid.NewGuid().ToString()
-        });
-    }
+    // 박제 통합 2026-06-02 (사장님 모두결재) — Signup 박제 실 구현 = LandingSignupController로 통합
+    // 라우트 충돌 박제 사고 봉합 (LandingSignupController.Signup이 실 박제, 본 stub 박제 폐기)
 
     /// <summary>정식 가입 2단계 — 이메일 OTP 발송 (W2 매니저 가도, SMTP 7월 박제 영역)</summary>
     [HttpPost("signup/otp/send")]

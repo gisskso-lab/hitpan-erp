@@ -68,18 +68,22 @@
         }
         else
         {
-            <!-- 대리점 사이드바 -->
+            @* 백오피스 통합 박제 (사장님 결재 2026-06-02) — 대리점도 본사와 동일 /admin/* URL, 백엔드 role 분기로 자기 데이터만 *@
             <div class="bo2-nav-section">
                 <div class="bo2-nav-section-label">대시보드</div>
-                <NavLinkItem Href="/partner/dashboard" Icon="dashboard" Label="대시보드" Match="@NavLinkMatch.All" />
+                <NavLinkItem Href="/admin/dashboard" Icon="dashboard" Label="대시보드" Match="@NavLinkMatch.All" />
             </div>
             <div class="bo2-nav-section">
                 <div class="bo2-nav-section-label">고객사</div>
-                <NavLinkItem Href="/partner/tenants" Icon="business" Label="내 고객사" />
+                <NavLinkItem Href="/admin/tenants" Icon="business" Label="내 고객사" />
             </div>
             <div class="bo2-nav-section">
                 <div class="bo2-nav-section-label">정산</div>
-                <NavLinkItem Href="/partner/commission" Icon="payments" Label="수수료 내역" />
+                <NavLinkItem Href="/admin/commission" Icon="payments" Label="수수료 내역" />
+            </div>
+            <div class="bo2-nav-section">
+                <div class="bo2-nav-section-label">운영</div>
+                <NavLinkItem Href="/admin/cs" Icon="support_agent" Label="CS 티켓" />
             </div>
         }
     </nav>

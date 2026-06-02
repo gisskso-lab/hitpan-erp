@@ -24,6 +24,8 @@ public class SignupResponse
     public bool Success { get; set; }
     public string Message { get; set; } = string.Empty;
     public string? SignupToken { get; set; } // OTP 인증 단계로 진행할 토큰
+    // 사장님 결재 박제 2026-06-02 — 결제 박제 시 1회 박제 (헌법 #22 정합: 평문 응답만, DB는 해시)
+    public string? LicenseKey { get; set; }
 }
 
 public class OtpRequestDto

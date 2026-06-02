@@ -18,10 +18,9 @@
             <MudText Typo="Typo.body2" Color="Color.Secondary">운영·파트너 포털</MudText>
         </div>
 
-        <MudTabs Elevation="0" Rounded="true" ApplyEffectsToContainer="true" Class="mb-4" @bind-ActivePanelIndex="_tabIndex">
-            <MudTabPanel Text="본사 관리자" Icon="@Icons.Material.Filled.AdminPanelSettings" />
-            <MudTabPanel Text="대리점 파트너" Icon="@Icons.Material.Filled.Store" />
-        </MudTabs>
+        <MudText Typo="Typo.body2" Color="Color.Secondary" Class="mb-4" Style="text-align:center;">
+            본사·대리점 통합 로그인 (계정으로 자동 분기)
+        </MudText>
 
         <MudTextField @bind-Value="_email"
                       Label="이메일"
@@ -89,13 +88,14 @@
     private string _password = "";
     private string? _error;
     private bool _busy;
-    private int _tabIndex;
 
     private async Task OnKeyUp(KeyboardEventArgs e)
     {
         if (e.Key == "Enter") await LoginAsync();
     }
 
+    // 백오피스 통합 로그인 박제 (사장님 결재 2026-06-02):
+    // 본사·대리점 동일 입구. 본사 먼저 시도 → 실패 시 대리점 시도 → role 클레임으로 자동 분기
     private async Task LoginAsync()
     {
         if (_busy) return;
@@ -104,37 +104,32 @@
 
         try
         {
-            if (_tabIndex == 0)
+            var admin = await Bo.AdminLoginAsync(_email, _password);
+            if (admin.Success && admin.Data is not null)
             {
-                var result = await Bo.AdminLoginAsync(_email, _password);
-                if (!result.Success || result.Data is null)
-                {
-                    _error = result.Message ?? "로그인 실패";
-                    return;
-                }
-                await JS.InvokeVoidAsync("localStorage.setItem", "bo_access_token", result.Data.AccessToken);
-                await JS.InvokeVoidAsync("localStorage.setItem", "bo_refresh_token", result.Data.RefreshToken);
-                await JS.InvokeVoidAsync("localStorage.setItem", "bo_account_type", result.Data.AccountType);
-                await JS.InvokeVoidAsync("localStorage.setItem", "bo_role", result.Data.Role);
-                await JS.InvokeVoidAsync("localStorage.setItem", "bo_name", result.Data.AdminName);
+                await JS.InvokeVoidAsync("localStorage.setItem", "bo_access_token", admin.Data.AccessToken);
+                await JS.InvokeVoidAsync("localStorage.setItem", "bo_refresh_token", admin.Data.RefreshToken);
+                await JS.InvokeVoidAsync("localStorage.setItem", "bo_account_type", admin.Data.AccountType);
+                await JS.InvokeVoidAsync("localStorage.setItem", "bo_role", admin.Data.Role);
+                await JS.InvokeVoidAsync("localStorage.setItem", "bo_name", admin.Data.AdminName);
                 Nav.NavigateTo("/admin/dashboard", forceLoad: true);
+                return;
             }
-            else
+
+            var reseller = await Bo.ResellerLoginAsync(_email, _password);
+            if (reseller.Success && reseller.ResellerData is not null)
             {
-                var result = await Bo.ResellerLoginAsync(_email, _password);
-                if (!result.Success || result.ResellerData is null)
-                {
-                    _error = result.Message ?? "로그인 실패";
-                    return;
-                }
-                await JS.InvokeVoidAsync("localStorage.setItem", "bo_access_token", result.ResellerData.AccessToken);
-                await JS.InvokeVoidAsync("localStorage.setItem", "bo_refresh_token", result.ResellerData.RefreshToken);
-                await JS.InvokeVoidAsync("localStorage.setItem", "bo_account_type", result.ResellerData.AccountType);
-                await JS.InvokeVoidAsync("localStorage.setItem", "bo_role", result.ResellerData.Role);
-                await JS.InvokeVoidAsync("localStorage.setItem", "bo_name", result.ResellerData.AccountName);
-                await JS.InvokeVoidAsync("localStorage.setItem", "bo_reseller_id", result.ResellerData.ResellerId);
-                Nav.NavigateTo("/partner/dashboard", forceLoad: true);
+                await JS.InvokeVoidAsync("localStorage.setItem", "bo_access_token", reseller.ResellerData.AccessToken);
+                await JS.InvokeVoidAsync("localStorage.setItem", "bo_refresh_token", reseller.ResellerData.RefreshToken);
+                await JS.InvokeVoidAsync("localStorage.setItem", "bo_account_type", reseller.ResellerData.AccountType);
+                await JS.InvokeVoidAsync("localStorage.setItem", "bo_role", reseller.ResellerData.Role);
+                await JS.InvokeVoidAsync("localStorage.setItem", "bo_name", reseller.ResellerData.AccountName);
+                await JS.InvokeVoidAsync("localStorage.setItem", "bo_reseller_id", reseller.ResellerData.ResellerId);
+                Nav.NavigateTo("/admin/dashboard", forceLoad: true);
+                return;
             }
+
+            _error = admin.Message ?? reseller.Message ?? "로그인 실패";
         }
         catch (Exception)
         {
