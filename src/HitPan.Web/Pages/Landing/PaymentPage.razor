@@ -18,6 +18,13 @@
                 <span>첫 달</span>
                 <strong>@_priceText</strong>
             </div>
+            @if (!string.IsNullOrEmpty(_planNote))
+            {
+                <div class="summary-row" style="color:#0F6E56;font-size:13px;">
+                    <span>추가 비용</span>
+                    <strong>@_planNote</strong>
+                </div>
+            }
             <div class="summary-row total">
                 <span>총 결제 금액</span>
                 <strong>@_priceText</strong>
@@ -53,18 +60,24 @@
     [SupplyParameterFromQuery]
     public string? Plan { get; set; }
 
-    private string _planLabel = "스탠다드";
-    private string _priceText = "59,000원";
+    private string _planLabel = "PRO";
+    private string _priceText = "49,000원";
+    private string _planNote = "";
     private string _method = "card";
     private bool _processing;
 
     protected override void OnParametersSet()
     {
-        (_planLabel, _priceText) = Plan switch
+        // 사장님 결재 박제 2026-06-02 (의중 B 모두결재) — BASIC 29k / PRO 49k / ENTERPRISE 100k+서버구축
+        (_planLabel, _priceText, _planNote) = Plan switch
         {
-            "basic" => ("베이직", "29,000원"),
-            "premium" => ("프리미엄", "100,000원"),
-            _ => ("스탠다드", "59,000원")
+            "basic" => ("BASIC", "29,000원", ""),
+            "enterprise" => ("ENTERPRISE", "100,000원", "+ 서버 구축비용 (상담)"),
+            "pro" => ("PRO", "49,000원", ""),
+            // 옛 키 호환 — premium·standard 들어오면 자동 매핑
+            "premium" => ("ENTERPRISE", "100,000원", "+ 서버 구축비용 (상담)"),
+            "standard" => ("PRO", "49,000원", ""),
+            _ => ("PRO", "49,000원", "")
         };
     }
 

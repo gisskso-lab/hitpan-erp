@@ -20,16 +20,17 @@
     </div>
 
     <MudNavMenu Class="bo-nav">
-        <MudNavLink Href="/partner/dashboard" Icon="@Icons.Material.Filled.Dashboard" Match="NavLinkMatch.All">
+        @* 사장님 결재 박제 2026-06-02 (의중 B 모두결재) — 페이지 라우트 보존, 사이드바 정정 (헌법 #1·#33 정합) *@
+        <MudNavLink Href="/reseller/v2/dashboard" Icon="@Icons.Material.Filled.Dashboard" Match="NavLinkMatch.All">
             대시보드
         </MudNavLink>
-        <MudNavLink Href="/partner/tenants" Icon="@Icons.Material.Filled.Business">
+        <MudNavLink Href="/reseller/v2/tenants" Icon="@Icons.Material.Filled.Business">
             내 고객사
         </MudNavLink>
-        <MudNavLink Href="/partner/cs" Icon="@Icons.Material.Filled.SupportAgent">
+        <MudNavLink Href="/reseller/v2/cs" Icon="@Icons.Material.Filled.SupportAgent">
             CS 티켓
         </MudNavLink>
-        <MudNavLink Href="/partner/commission" Icon="@Icons.Material.Filled.Payments">
+        <MudNavLink Href="/reseller/commission" Icon="@Icons.Material.Filled.Payments">
             수수료 내역
         </MudNavLink>
     </MudNavMenu>
