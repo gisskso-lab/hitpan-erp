@@ -86,25 +86,49 @@ public class TenantsAdminController : ControllerBase
             await using var db = await OpenAsync(ct);
             var row = await db.QueryFirstOrDefaultAsync<TenantDetailRow>(@"
                 SELECT
-                    CAST(tenant_id AS CHAR) AS TenantId,
-                    tenant_code AS TenantCode,
-                    company_name AS CompanyName,
-                    tel AS Tel,
-                    status AS Status,
-                    is_locked_from_landing AS IsLocked,
-                    trial_ends_at AS TrialEndsAt,
-                    bootstrap_at AS BootstrapAt,
-                    created_at AS CreatedAt,
-                    updated_at AS UpdatedAt,
-                    CAST(reseller_id AS CHAR) AS ResellerId,
-                    max_users AS MaxUsers,
-                    LEFT(license_key_hash, 12) AS LicenseHashPrefix
-                FROM tenants
-                WHERE tenant_id = @Id",
+                    CAST(t.tenant_id AS CHAR) AS TenantId,
+                    t.tenant_code AS TenantCode,
+                    t.company_name AS CompanyName,
+                    t.tel AS Tel,
+                    t.status AS Status,
+                    t.is_locked_from_landing AS IsLocked,
+                    t.trial_ends_at AS TrialEndsAt,
+                    t.bootstrap_at AS BootstrapAt,
+                    t.created_at AS CreatedAt,
+                    t.updated_at AS UpdatedAt,
+                    CAST(t.reseller_id AS CHAR) AS ResellerId,
+                    r.reseller_name AS ResellerName,
+                    r.reseller_code AS ResellerCode,
+                    t.max_users AS MaxUsers,
+                    LEFT(t.license_key_hash, 12) AS LicenseHashPrefix,
+                    t.subscription_tier AS SubscriptionTier,
+                    t.ai_mode AS AiMode,
+                    t.ai_token_monthly_limit AS AiTokenMonthlyLimit
+                FROM tenants t
+                LEFT JOIN resellers r ON r.reseller_id = t.reseller_id
+                WHERE t.tenant_id = @Id",
                 new { Id = id });
             if (row is null)
                 return NotFound(new { success = false, message = "고객사를 찾을 수 없습니다." });
-            return Ok(new { success = true, item = row });
+
+            // 결제 이력 최근 10건 (메타만, 카드정보 0건)
+            var payments = await db.QueryAsync<PaymentMetaRow>(@"
+                SELECT
+                    order_id AS OrderId,
+                    amount AS Amount,
+                    method AS Method,
+                    status AS Status,
+                    approved_at AS ApprovedAt,
+                    created_at AS CreatedAt
+                FROM tenant_payments
+                WHERE signup_token IN (
+                    SELECT signup_token FROM landing_signups WHERE company_name = @CompanyName
+                )
+                ORDER BY created_at DESC
+                LIMIT 10",
+                new { row.CompanyName });
+
+            return Ok(new { success = true, item = row, payments });
         }
         catch (Exception ex)
         {
@@ -195,7 +219,22 @@ public class TenantsAdminController : ControllerBase
     {
         public DateTime UpdatedAt { get; set; }
         public string? ResellerId { get; set; }
+        public string? ResellerName { get; set; }
+        public string? ResellerCode { get; set; }
         public int MaxUsers { get; set; }
         public string? LicenseHashPrefix { get; set; }
+        public string? SubscriptionTier { get; set; }
+        public string? AiMode { get; set; }
+        public int AiTokenMonthlyLimit { get; set; }
+    }
+
+    public class PaymentMetaRow
+    {
+        public string OrderId { get; set; } = "";
+        public long Amount { get; set; }
+        public string? Method { get; set; }
+        public string Status { get; set; } = "";
+        public string? ApprovedAt { get; set; }
+        public DateTime CreatedAt { get; set; }
     }
 }

@@ -55,8 +55,20 @@ else
     <MudPaper Elevation="1" Style="border-radius:12px;overflow:hidden;">
         <MudDataGrid T="TenantRow" Items="_items" Hover="true" Dense="true" SortMode="SortMode.Single">
             <Columns>
-                <PropertyColumn Property="x => x.TenantCode" Title="코드" />
-                <PropertyColumn Property="x => x.CompanyName" Title="회사명" />
+                <TemplateColumn Title="코드">
+                    <CellTemplate>
+                        <MudLink Href="@($"/admin/tenants/{context.Item.TenantId}")" Underline="Underline.Hover">
+                            @context.Item.TenantCode
+                        </MudLink>
+                    </CellTemplate>
+                </TemplateColumn>
+                <TemplateColumn Title="회사명">
+                    <CellTemplate>
+                        <MudLink Href="@($"/admin/tenants/{context.Item.TenantId}")" Underline="Underline.Hover" Color="Color.Inherit">
+                            @context.Item.CompanyName
+                        </MudLink>
+                    </CellTemplate>
+                </TemplateColumn>
                 <PropertyColumn Property="x => x.Tel" Title="연락처" />
                 <TemplateColumn Title="상태">
                     <CellTemplate>
