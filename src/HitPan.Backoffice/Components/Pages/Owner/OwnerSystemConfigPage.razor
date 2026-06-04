@@ -1,17 +1,12 @@
 @*
-    WS-20260601-18 본사 백오피스 — Owner 전용 시스템 설정 (8명제 #2·#7)
-    이식: 2026-06-04 (HitPan.Web → HitPan.Backoffice, 헌법 #35 3시스템 분리)
-    절대 원칙:
-      - OwnerOnly (사장님 본인만, role=owner 클레임 필수)
-      - MFA 의무 안내 + IP 화이트리스트 관리
-      - Razor에 C# raw string 금지 (헌법 #14)
-      - 빈 catch 금지 (헌법 #15)
+    Owner 전용 시스템 설정 (사장님 결재 2026-06-04, 헌법 #35)
+    W11 백엔드 신설 대기 — 현재는 향후 설정 항목 가도 안내 화면.
 *@
 
 @page "/owner/system-config"
 @layout PlatformLayout
 @attribute [Authorize(Policy = "OwnerOnly")]
-@inject ISnackbar Snackbar
+@inject NavigationManager Nav
 
 <PageTitle>시스템 설정 — 히트판 백오피스 (Owner)</PageTitle>
 
@@ -19,128 +14,71 @@
     <div>
         <MudText Typo="Typo.h5" Style="font-weight:600;">시스템 설정</MudText>
         <MudText Typo="Typo.body2" Color="Color.Secondary">
-            사장님 전용 (Owner) — MFA·IP 화이트리스트·보안 정책
+            사장님 전용 (Owner) — 백엔드 API 신설 대기 중
         </MudText>
     </div>
 </div>
 
-<MudAlert Severity="Severity.Warning" Class="mb-3" Dense="true" Icon="@Icons.Material.Filled.Shield">
-    🔒 이 화면은 사장님(Owner) 본인만 접근 가능합니다. 변경 사항은 모두 감사로그에 박제됩니다.
+<MudAlert Severity="Severity.Info" Class="mb-4" Dense="true" Icon="@Icons.Material.Filled.Construction">
+    이 화면은 W11 차수 백엔드 신설 후 활성화됩니다. 현재는 가도 안내만 노출됩니다.
 </MudAlert>
 
 <MudGrid Spacing="3">
     <MudItem xs="12" md="6">
-        <MudPaper Class="pa-4" Elevation="1" Style="border-radius:12px;">
+        <MudPaper Class="pa-4" Elevation="1" Style="border-radius:12px;opacity:0.75;">
             <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px;">
                 <MudIcon Icon="@Icons.Material.Filled.Lock" Color="Color.Primary" />
                 <MudText Typo="Typo.h6">MFA (다중 인증)</MudText>
+                <MudChip T="string" Size="Size.Small" Color="Color.Warning">W11 대기</MudChip>
             </div>
-            <MudText Typo="Typo.body2" Color="Color.Secondary" Class="mb-3">
-                본사 전 직원 MFA 의무화 (헌법 #25 안전하게).
-                Owner·Manager·Staff 모두 TOTP/SMS 2채널 필수.
+            <MudText Typo="Typo.body2" Color="Color.Secondary">
+                본사 전 직원 MFA 의무화 — TOTP/SMS 2채널. bo_users에 MFA 필드 추가 + 검증 로직 신설 예정.
             </MudText>
-            <MudSwitch T="bool" @bind-Value="_mfaRequired" Color="Color.Primary" Label="MFA 의무화 (전 직원)" />
-            <MudSwitch T="bool" @bind-Value="_mfaSmsBackup" Color="Color.Primary" Label="SMS 백업 채널 허용" />
-            <MudButton Class="mt-3" Variant="Variant.Filled" Color="Color.Primary"
-                       StartIcon="@Icons.Material.Filled.Save" OnClick="SaveMfaAsync">저장</MudButton>
         </MudPaper>
     </MudItem>
 
     <MudItem xs="12" md="6">
-        <MudPaper Class="pa-4" Elevation="1" Style="border-radius:12px;">
+        <MudPaper Class="pa-4" Elevation="1" Style="border-radius:12px;opacity:0.75;">
             <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px;">
                 <MudIcon Icon="@Icons.Material.Filled.VpnLock" Color="Color.Primary" />
                 <MudText Typo="Typo.h6">IP 화이트리스트</MudText>
+                <MudChip T="string" Size="Size.Small" Color="Color.Warning">W11 대기</MudChip>
             </div>
-            <MudText Typo="Typo.body2" Color="Color.Secondary" Class="mb-3">
-                본사 백오피스 접속 허용 IP 대역. 본사 사무실·VPN 전용.
+            <MudText Typo="Typo.body2" Color="Color.Secondary">
+                본사 백오피스 접속 허용 IP 대역. Cloudflare 룰 또는 미들웨어 검증. 사장님 결재 후 인프라 영역.
             </MudText>
-            <MudTextField @bind-Value="_newIp" Label="IP/CIDR (예: 203.0.113.0/24)"
-                          Variant="Variant.Outlined" Margin="Margin.Dense" />
-            <MudButton Class="mt-2" Variant="Variant.Outlined" Color="Color.Primary"
-                       StartIcon="@Icons.Material.Filled.Add" OnClick="AddIp">추가</MudButton>
-            <MudList T="string" Class="mt-3" Dense="true">
-                @foreach (var ip in _whitelist)
-                {
-                    <MudListItem T="string">
-                        <div style="display:flex;justify-content:space-between;align-items:center;">
-                            <MudText Typo="Typo.body2">@ip</MudText>
-                            <MudIconButton Icon="@Icons.Material.Filled.Delete" Size="Size.Small"
-                                           Color="Color.Error" OnClick="@(() => RemoveIp(ip))" />
-                        </div>
-                    </MudListItem>
-                }
-            </MudList>
         </MudPaper>
     </MudItem>
 
     <MudItem xs="12">
-        <MudPaper Class="pa-4" Elevation="1" Style="border-radius:12px;">
+        <MudPaper Class="pa-4" Elevation="1" Style="border-radius:12px;opacity:0.75;">
             <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px;">
                 <MudIcon Icon="@Icons.Material.Filled.Policy" Color="Color.Primary" />
                 <MudText Typo="Typo.h6">보안 정책</MudText>
+                <MudChip T="string" Size="Size.Small" Color="Color.Warning">W11 대기</MudChip>
             </div>
-            <MudGrid Spacing="3">
-                <MudItem xs="12" md="4">
-                    <MudNumericField T="int" @bind-Value="_sessionMin" Label="세션 만료 (분)"
-                                     Variant="Variant.Outlined" Margin="Margin.Dense" Min="5" Max="480" />
-                </MudItem>
-                <MudItem xs="12" md="4">
-                    <MudNumericField T="int" @bind-Value="_pwdMinLen" Label="비밀번호 최소 길이"
-                                     Variant="Variant.Outlined" Margin="Margin.Dense" Min="8" Max="64" />
-                </MudItem>
-                <MudItem xs="12" md="4">
-                    <MudNumericField T="int" @bind-Value="_failLock" Label="로그인 실패 잠금 횟수"
-                                     Variant="Variant.Outlined" Margin="Margin.Dense" Min="3" Max="10" />
-                </MudItem>
-            </MudGrid>
-            <MudButton Class="mt-3" Variant="Variant.Filled" Color="Color.Primary"
-                       StartIcon="@Icons.Material.Filled.Save" OnClick="SavePolicyAsync">정책 저장</MudButton>
+            <MudText Typo="Typo.body2" Color="Color.Secondary">
+                세션 만료·비밀번호 최소 길이·로그인 실패 잠금 — 백오피스 자체 인증 정책 (bo_users 영역).
+                현재는 코드 기본값으로 작동.
+            </MudText>
+        </MudPaper>
+    </MudItem>
+
+    <MudItem xs="12">
+        <MudPaper Class="pa-4" Elevation="0" Style="border-radius:12px;background:#F0F9F5;">
+            <MudText Typo="Typo.h6" Style="color:#0F6E56;" Class="mb-2">현재 작동 영역</MudText>
+            <div style="display:flex;gap:8px;flex-wrap:wrap;">
+                <MudButton Variant="Variant.Outlined" Color="Color.Success"
+                           StartIcon="@Icons.Material.Filled.VerifiedUser"
+                           OnClick='() => Nav.NavigateTo("/owner/credentials-status")'>
+                    자격증명 상태 (작동)
+                </MudButton>
+                <MudButton Variant="Variant.Outlined" Color="Color.Success"
+                           StartIcon="@Icons.Material.Filled.VpnKey"
+                           OnClick='() => Nav.NavigateTo("/owner/permissions")'>
+                    권한 관리 (작동)
+                </MudButton>
+            </div>
         </MudPaper>
     </MudItem>
 </MudGrid>
-
-@code {
-    private bool _mfaRequired = true;
-    private bool _mfaSmsBackup = true;
-    private string _newIp = "";
-    private List<string> _whitelist = new();
-    private int _sessionMin = 30;
-    private int _pwdMinLen = 12;
-    private int _failLock = 5;
-
-    private async Task SaveMfaAsync()
-    {
-        try
-        {
-            await Task.Yield();
-            Snackbar.Add("MFA 정책 저장 — 감사로그 박제됨", Severity.Success);
-        }
-        catch (Exception ex)
-        {
-            Snackbar.Add($"MFA 정책 저장 실패: {ex.Message}", Severity.Error);
-        }
-    }
-
-    private void AddIp()
-    {
-        if (string.IsNullOrWhiteSpace(_newIp)) return;
-        if (!_whitelist.Contains(_newIp)) _whitelist.Add(_newIp.Trim());
-        _newIp = "";
-    }
-
-    private void RemoveIp(string ip) => _whitelist.Remove(ip);
-
-    private async Task SavePolicyAsync()
-    {
-        try
-        {
-            await Task.Yield();
-            Snackbar.Add("보안 정책 저장 — 감사로그 박제됨", Severity.Success);
-        }
-        catch (Exception ex)
-        {
-            Snackbar.Add($"보안 정책 저장 실패: {ex.Message}", Severity.Error);
-        }
-    }
-}
