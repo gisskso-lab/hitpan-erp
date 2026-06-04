@@ -38,6 +38,11 @@
             <button type="submit" class="bo-login-button">로그인</button>
         </form>
 
+        <div class="bo-login-help">
+            <span>비밀번호를 잊으셨나요?</span>
+            <a href="mailto:partners@hitpan.kr?subject=백오피스 비밀번호 재설정 요청">본사에 요청</a>
+        </div>
+
         <div class="bo-login-partner">
             <div class="bo-login-divider"><span>아직 협력업체가 아니신가요?</span></div>
             <a href="/backoffice/reseller-apply" class="bo-login-partner-btn">
@@ -101,6 +106,15 @@
         padding: 12px; border-radius: 8px;
         font-size: 13px; margin-bottom: 12px;
     }
+    .bo-login-help {
+        text-align: center; margin-top: 16px;
+        font-size: 12px; color: #6B7280;
+    }
+    .bo-login-help a {
+        color: #0F6E56; text-decoration: none; font-weight: 600;
+        margin-left: 6px;
+    }
+    .bo-login-help a:hover { text-decoration: underline; }
     .bo-login-partner { margin-top: 28px; }
     .bo-login-divider {
         display: flex; align-items: center; gap: 12px;
