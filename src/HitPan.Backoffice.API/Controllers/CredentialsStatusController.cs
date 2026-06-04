@@ -117,6 +117,7 @@ public class CredentialsStatusController : ControllerBase
             Probe("HITPAN_SMTP_FROM",        "Smtp:From",                "SMTP From"),
             Probe("HITPAN_TOSS_CLIENT_KEY",  "Toss:ClientKey",           "토스 Client Key"),
             Probe("HITPAN_TOSS_SECRET_KEY",  "Toss:SecretKey",           "토스 Secret Key"),
+            Probe("HITPAN_BOOTSTRAP_TOKEN_KEY", "Bootstrap:TokenKey",    "부트스트랩 토큰 키 (백오피스↔ERP 동일)"),
         };
 
         return Ok(new

@@ -32,7 +32,8 @@ public sealed class DbFixture : IAsyncLifetime
     public static string NewTestTenantId() => Guid.NewGuid().ToString();
 
     /// <summary>
-    /// 테스트용 tenant INSERT — tenants FK 제약 해소.
+    /// 테스트용 회사정보 INSERT — local_company FK 제약 해소.
+    /// 헌법 #35 (2026-06-04): ERP 로컬은 local_company, 본사 tenants는 백오피스 DB.
     /// CleanupTenantAsync에서 삭제됨.
     /// </summary>
     public async Task InsertTestTenantAsync(string tenantId)
@@ -40,16 +41,24 @@ public sealed class DbFixture : IAsyncLifetime
         var code = tenantId[..8];
         await Connection.ExecuteAsync(
             """
-            INSERT IGNORE INTO tenants
+            INSERT IGNORE INTO local_company
               (tenant_id, tenant_code, company_name, biz_no, ceo_name,
-               db_host, db_name, license_key_hash, reseller_tier,
                created_at, updated_at)
             VALUES
-              (@TenantId, @Code, '테스트회사', '000-00-00000', '테스트대표',
-               'localhost', 'hitpan_erp', 'test-hash', 0,
+              (@TenantId, @Code, '테스트회사', '0000000000', '테스트대표',
                NOW(6), NOW(6))
             """,
             new { TenantId = tenantId, Code = code });
+        await Connection.ExecuteAsync(
+            """
+            INSERT IGNORE INTO local_subscription
+              (tenant_id, subscription_tier, status, ai_mode,
+               ai_token_monthly_limit, max_users, sync_source, created_at, updated_at)
+            VALUES
+              (@TenantId, 'basic', 'active', 'hitpan_pool',
+               100000, 3, 'bootstrap', NOW(6), NOW(6))
+            """,
+            new { TenantId = tenantId });
     }
 
     /// <summary>테스트용 상품 INSERT 후 item_id 반환</summary>
@@ -120,7 +129,8 @@ public sealed class DbFixture : IAsyncLifetime
         await Connection.ExecuteAsync("DELETE FROM monthly_summary WHERE tenant_id = @T", new { T = tenantId });
         await Connection.ExecuteAsync("DELETE FROM items WHERE tenant_id = @T", new { T = tenantId });
         await Connection.ExecuteAsync("DELETE FROM warehouses WHERE tenant_id = @T", new { T = tenantId });
-        await Connection.ExecuteAsync("DELETE FROM tenants WHERE tenant_id = @T", new { T = tenantId });
+        await Connection.ExecuteAsync("DELETE FROM local_subscription WHERE tenant_id = @T", new { T = tenantId });
+        await Connection.ExecuteAsync("DELETE FROM local_company WHERE tenant_id = @T", new { T = tenantId });
     }
 
     /// <summary>stock_ledger 직접 삽입 (실제 컬럼 기준)</summary>

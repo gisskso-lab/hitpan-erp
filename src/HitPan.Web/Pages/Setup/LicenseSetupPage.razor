@@ -199,6 +199,8 @@
     // Step 1 통과 후
     private string _companyName = "";
     private string _tenantCode = "";
+    // 헌법 #35 W2 (사장님 결재 2026-06-04) — 백오피스 발급 서명 토큰
+    private string _bootstrapToken = "";
 
     // Step 2
     private string _ceoName = "";
@@ -241,6 +243,7 @@
             {
                 _companyName = payload.CompanyName ?? "";
                 _tenantCode = payload.TenantCode ?? "";
+                _bootstrapToken = payload.BootstrapToken ?? "";
                 _step = 2;
             }
             else
@@ -272,7 +275,7 @@
         {
             var payload = new
             {
-                LicenseKey = _licenseKey,
+                BootstrapToken = _bootstrapToken,
                 BizNo = _bizNo,
                 CeoName = _ceoName,
                 Tel = _tel,
@@ -337,8 +340,7 @@
         {
             var payload = new
             {
-                LicenseKey = _licenseKey,
-                BizNo = _bizNo,
+                BootstrapToken = _bootstrapToken,
                 Email = _parentEmail,
                 Password = _parentPassword,
                 Name = _parentName
@@ -371,6 +373,8 @@
         public string? CompanyName { get; set; }
         public string? TenantCode { get; set; }
         public string? Message { get; set; }
+        // 헌법 #35 W2 — 백오피스 서명 토큰 (HMAC-SHA256, 10분 만료)
+        public string? BootstrapToken { get; set; }
     }
 
     private class BootstrapResponse

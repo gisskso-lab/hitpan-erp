@@ -387,9 +387,9 @@ public sealed class PdfRenderService : IPdfRenderService
     {
         await EnsureOpenAsync(ct).ConfigureAwait(false);
         const string sql = """
-            SELECT company_name AS CompanyName, business_no AS BusinessNo,
-                   representative_name AS RepresentativeName, address AS Address, phone AS Phone
-            FROM tenants WHERE tenant_id = @TenantId
+            SELECT company_name AS CompanyName, biz_no AS BusinessNo,
+                   ceo_name AS RepresentativeName, address AS Address, tel AS Phone
+            FROM local_company WHERE tenant_id = @TenantId
             """;
         try
         {
@@ -400,7 +400,7 @@ public sealed class PdfRenderService : IPdfRenderService
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "[PDF] tenants 조회 실패 — 회사 컬럼명 차이 가능성");
+            _logger.LogWarning(ex, "[PDF] local_company 조회 실패");
             return new CompanyInfo { CompanyName = "(회사 정보 없음)" };
         }
     }

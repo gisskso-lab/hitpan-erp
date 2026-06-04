@@ -1,3 +1,6 @@
+using System.Security.Cryptography;
+using System.Text;
+using System.Text.Json;
 using Dapper;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -5,20 +8,22 @@ using MySqlConnector;
 
 namespace HitPan.API.Controllers;
 
-// ERP 첫 설치 자동 반영 (사장님 결재 2026-06-04, 헌법 #35)
+// ERP 첫 설치 자동 반영 — 헌법 #35 객체 완전 분리 (사장님 결재 2026-06-04, W2)
 //
 // 흐름:
-//   1) ERP Web /setup/license에서 사용자 입력 받음 (라이선스 키 + 사업자번호 + 기타 회사정보)
-//   2) ERP Web → 백오피스 API /api/landing/license/claim 검증 통과 후
-//   3) ERP Web → 본 API POST /api/setup/bootstrap 호출
-//   4) 본 API: 라이선스 해시로 tenants 조회 + 회사정보 박제 + is_locked_from_landing=1 + bootstrap_at
-//   5) 이후 회사정보 수정은 CompanyService에서 잠금 검사 (별도 가드)
+//   1) ERP Web /setup/license Step 1 → 백오피스 API /api/landing/license/claim
+//      → 응답에 bootstrapToken (HMAC-SHA256 서명, 10분 만료, subscription 클레임 포함)
+//   2) ERP Web → 본 API POST /api/setup/bootstrap (bootstrapToken + 회사정보)
+//   3) 본 API: 토큰 서명 검증 (백오피스 URL 호출 0건!) → local_company + local_subscription 박제
+//   4) is_locked_from_landing=1 + bootstrap_at
+//   5) ERP Web → 본 API POST /api/setup/create-parent (bootstrapToken 재검증 + 부모계정 생성)
 //
 // 헌법 정합:
 //   #15 — 빈 catch 금지
 //   #18·#22 — 평문 사업자번호는 ERP 로컬 DB(고객사 PC)에만 박제. 본사는 해시만
 //   #20 — 가입 → 결제 → 라이선스 → 설치 → 자동 반영 끊김 0
-//   #35 — 부모계정 부여(백오피스) + 자식계정 ERP 내 관리 + 회사정보 자동 반영 + 수정 금지
+//   #29 — Bootstrap Token Key는 환경변수만, 응답·로그 0건
+//   #35 — 객체 완전 분리. ERP는 백오피스 URL·존재 0건 의존. 공유 키만 보유.
 [ApiController]
 [Route("api/setup")]
 [AllowAnonymous]
@@ -36,15 +41,20 @@ public class CompanyBootstrapController : ControllerBase
     [HttpPost("bootstrap")]
     public async Task<IActionResult> Bootstrap([FromBody] BootstrapRequest req, CancellationToken ct)
     {
-        if (req is null || string.IsNullOrWhiteSpace(req.LicenseKey) || string.IsNullOrWhiteSpace(req.BizNo))
-            return BadRequest(new { success = false, message = "라이선스 키와 사업자번호가 필요합니다." });
+        if (req is null || string.IsNullOrWhiteSpace(req.BootstrapToken) || string.IsNullOrWhiteSpace(req.BizNo))
+            return BadRequest(new { success = false, message = "부트스트랩 토큰과 사업자번호가 필요합니다." });
 
         var bizNoNormalized = req.BizNo.Replace("-", "").Replace(" ", "").Trim();
         if (bizNoNormalized.Length != 10 || !bizNoNormalized.All(char.IsDigit))
             return BadRequest(new { success = false, message = "사업자번호 형식 오류 (10자리 숫자)" });
 
-        var licensePepper = _config["License:Pepper"] ?? "dev-pepper-2026";
-        var licenseHash = ComputeHmacSha256(req.LicenseKey.Trim(), licensePepper);
+        var (ok, payload, error) = VerifyBootstrapToken(req.BootstrapToken);
+        if (!ok || payload is null)
+            return Unauthorized(new { success = false, message = error ?? "유효하지 않은 부트스트랩 토큰입니다." });
+
+        var tenantId = payload.Sub;
+        var tenantCode = payload.TenantCode;
+        var companyName = payload.CompanyName;
 
         try
         {
@@ -53,26 +63,26 @@ public class CompanyBootstrapController : ControllerBase
             await using var db = new MySqlConnection(cs);
             await db.OpenAsync(ct);
 
-            var tenant = await db.QueryFirstOrDefaultAsync<TenantRow>(@"
-                SELECT CAST(tenant_id AS CHAR) AS TenantId,
-                       tenant_code AS TenantCode,
-                       company_name AS CompanyName,
-                       status AS Status,
-                       is_locked_from_landing AS IsLocked
-                FROM tenants
-                WHERE license_key_hash = @Hash AND status = 'active'
-                LIMIT 1",
-                new { Hash = licenseHash });
-
-            if (tenant is null)
-                return BadRequest(new { success = false, message = "라이선스가 유효하지 않거나 활성 상태가 아닙니다." });
-
-            if (tenant.IsLocked == 1)
+            // 잠금 검사 — local_company.is_locked_from_landing=1 시 이미 설치 완료
+            var lockedRaw = await db.QueryFirstOrDefaultAsync<int?>(
+                "SELECT is_locked_from_landing FROM local_company WHERE tenant_id = @TenantId",
+                new { TenantId = tenantId });
+            if (lockedRaw == 1)
                 return BadRequest(new { success = false, message = "이미 설치가 완료된 라이선스입니다. 회사정보 변경은 랜딩에서 사업자등록증 재등록이 필요합니다." });
 
-            // tenants 박제 — 사업자번호 + 대표·연락처·이메일·주소·업태·종목·법인번호·우편번호
+            // local_company UPSERT — 회사정보 박제
             await db.ExecuteAsync(@"
-                UPDATE tenants SET
+                INSERT INTO local_company
+                    (tenant_id, tenant_code, company_name, biz_no, ceo_name, tel, address, email,
+                     biz_type, biz_item, zip_code, corp_no,
+                     is_locked_from_landing, bootstrap_at, created_at, updated_at)
+                VALUES
+                    (@TenantId, @TenantCode, @CompanyName, @BizNo, @CeoName, @Tel, @Address, @Email,
+                     @BizType, @BizItem, @ZipCode, @CorpNo,
+                     1, NOW(6), NOW(6), NOW(6))
+                ON DUPLICATE KEY UPDATE
+                    tenant_code = @TenantCode,
+                    company_name = @CompanyName,
                     biz_no = @BizNo,
                     ceo_name = @CeoName,
                     tel = @Tel,
@@ -83,12 +93,13 @@ public class CompanyBootstrapController : ControllerBase
                     zip_code = @ZipCode,
                     corp_no = @CorpNo,
                     is_locked_from_landing = 1,
-                    bootstrap_at = UTC_TIMESTAMP(),
-                    updated_at = UTC_TIMESTAMP()
-                WHERE tenant_id = @TenantId",
+                    bootstrap_at = NOW(6),
+                    updated_at = NOW(6)",
                 new
                 {
-                    tenant.TenantId,
+                    TenantId = tenantId,
+                    TenantCode = tenantCode,
+                    CompanyName = companyName,
                     BizNo = bizNoNormalized,
                     CeoName = req.CeoName ?? "",
                     Tel = req.Tel,
@@ -100,15 +111,68 @@ public class CompanyBootstrapController : ControllerBase
                     CorpNo = req.CorpNo
                 });
 
+            // local_subscription UPSERT — 본사 영역 캐시 박제 (토큰 클레임에서 추출)
+            var sub = payload.Subscription;
+            if (sub is not null)
+            {
+                await db.ExecuteAsync(@"
+                    INSERT INTO local_subscription
+                        (tenant_id, subscription_tier, status, trial_ends_at,
+                         ai_mode, ai_token_monthly_limit, ai_token_extra,
+                         anthropic_api_key_last4, anthropic_key_status,
+                         max_users, extra_device_slots,
+                         reseller_id, reseller_tier,
+                         last_sync_at, sync_source, created_at, updated_at)
+                    VALUES
+                        (@TenantId, @SubscriptionTier, @Status, @TrialEndsAt,
+                         @AiMode, @AiTokenMonthlyLimit, @AiTokenExtra,
+                         @AnthropicKeyLast4, @AnthropicKeyStatus,
+                         @MaxUsers, @ExtraDeviceSlots,
+                         @ResellerId, @ResellerTier,
+                         NOW(6), 'bootstrap', NOW(6), NOW(6))
+                    ON DUPLICATE KEY UPDATE
+                        subscription_tier = @SubscriptionTier,
+                        status = @Status,
+                        trial_ends_at = @TrialEndsAt,
+                        ai_mode = @AiMode,
+                        ai_token_monthly_limit = @AiTokenMonthlyLimit,
+                        ai_token_extra = @AiTokenExtra,
+                        anthropic_api_key_last4 = @AnthropicKeyLast4,
+                        anthropic_key_status = @AnthropicKeyStatus,
+                        max_users = @MaxUsers,
+                        extra_device_slots = @ExtraDeviceSlots,
+                        reseller_id = @ResellerId,
+                        reseller_tier = @ResellerTier,
+                        last_sync_at = NOW(6),
+                        sync_source = 'bootstrap',
+                        updated_at = NOW(6)",
+                    new
+                    {
+                        TenantId = tenantId,
+                        sub.SubscriptionTier,
+                        sub.Status,
+                        sub.TrialEndsAt,
+                        sub.AiMode,
+                        sub.AiTokenMonthlyLimit,
+                        sub.AiTokenExtra,
+                        sub.AnthropicKeyLast4,
+                        sub.AnthropicKeyStatus,
+                        sub.MaxUsers,
+                        sub.ExtraDeviceSlots,
+                        sub.ResellerId,
+                        sub.ResellerTier
+                    });
+            }
+
             _logger.LogInformation("[CompanyBootstrap] 자동 반영 완료 tenant={Code} biz_no={Mask}",
-                tenant.TenantCode, MaskBizNo(bizNoNormalized));
+                tenantCode, MaskBizNo(bizNoNormalized));
 
             return Ok(new
             {
                 success = true,
                 message = "회사 정보가 ERP에 자동 반영되었습니다.",
-                tenantCode = tenant.TenantCode,
-                companyName = tenant.CompanyName
+                tenantCode,
+                companyName
             });
         }
         catch (Exception ex)
@@ -118,32 +182,26 @@ public class CompanyBootstrapController : ControllerBase
         }
     }
 
-    // 부모계정 자동 생성 (헌법 #35 정합, 사장님 결재 2026-06-04)
-    //   - bootstrap 직후 호출
-    //   - 라이선스+사업자번호 해시 재검증
-    //   - users INSERT (account_type=tenant_admin, is_parent=1)
-    //   - tenant당 부모 1명만 (UNIQUE 가드)
-    //   - 비밀번호 BCrypt
+    // 부모계정 자동 생성 — W2 토큰 재검증
     [HttpPost("create-parent")]
     public async Task<IActionResult> CreateParent([FromBody] CreateParentRequest req, CancellationToken ct)
     {
         if (req is null
-            || string.IsNullOrWhiteSpace(req.LicenseKey)
-            || string.IsNullOrWhiteSpace(req.BizNo)
+            || string.IsNullOrWhiteSpace(req.BootstrapToken)
             || string.IsNullOrWhiteSpace(req.Email)
             || string.IsNullOrWhiteSpace(req.Password)
             || string.IsNullOrWhiteSpace(req.Name))
-            return BadRequest(new { success = false, message = "라이선스·사업자번호·이메일·비밀번호·이름 필수" });
+            return BadRequest(new { success = false, message = "부트스트랩 토큰·이메일·비밀번호·이름 필수" });
 
         if (req.Password.Length < 8)
             return BadRequest(new { success = false, message = "비밀번호는 8자 이상이어야 합니다." });
 
-        var bizNoNormalized = req.BizNo.Replace("-", "").Replace(" ", "").Trim();
-        if (bizNoNormalized.Length != 10 || !bizNoNormalized.All(char.IsDigit))
-            return BadRequest(new { success = false, message = "사업자번호 형식 오류" });
+        var (ok, payload, error) = VerifyBootstrapToken(req.BootstrapToken);
+        if (!ok || payload is null)
+            return Unauthorized(new { success = false, message = error ?? "유효하지 않은 부트스트랩 토큰입니다." });
 
-        var licensePepper = _config["License:Pepper"] ?? "dev-pepper-2026";
-        var licenseHash = ComputeHmacSha256(req.LicenseKey.Trim(), licensePepper);
+        var tenantId = payload.Sub;
+        var tenantCode = payload.TenantCode;
 
         try
         {
@@ -152,28 +210,18 @@ public class CompanyBootstrapController : ControllerBase
             await using var db = new MySqlConnection(cs);
             await db.OpenAsync(ct);
 
-            var tenant = await db.QueryFirstOrDefaultAsync<TenantRow>(@"
-                SELECT CAST(tenant_id AS CHAR) AS TenantId,
-                       tenant_code AS TenantCode,
-                       company_name AS CompanyName,
-                       status AS Status,
-                       is_locked_from_landing AS IsLocked
-                FROM tenants
-                WHERE license_key_hash = @Hash AND status = 'active'
-                LIMIT 1",
-                new { Hash = licenseHash });
-
-            if (tenant is null)
-                return BadRequest(new { success = false, message = "라이선스가 유효하지 않거나 활성 상태가 아닙니다." });
-
-            if (tenant.IsLocked != 1)
+            // bootstrap 선행 검증
+            var localCompany = await db.QueryFirstOrDefaultAsync<int?>(
+                "SELECT is_locked_from_landing FROM local_company WHERE tenant_id = @TenantId",
+                new { TenantId = tenantId });
+            if (localCompany != 1)
                 return BadRequest(new { success = false, message = "회사 정보 자동 반영(bootstrap)을 먼저 완료해주세요." });
 
-            // tenant당 부모계정 1명만 (헌법 #35 정합)
+            // tenant당 부모계정 1명만
             var existingParent = await db.QueryFirstOrDefaultAsync<int>(@"
                 SELECT COUNT(*) FROM users
                 WHERE tenant_id = @TenantId AND is_parent = 1 AND is_deleted = 0",
-                new { tenant.TenantId });
+                new { TenantId = tenantId });
             if (existingParent > 0)
                 return BadRequest(new { success = false, message = "이미 부모계정이 생성된 라이선스입니다." });
 
@@ -201,14 +249,14 @@ public class CompanyBootstrapController : ControllerBase
                 new
                 {
                     UserId = userId,
-                    tenant.TenantId,
+                    TenantId = tenantId,
                     req.Email,
                     Hash = passwordHash,
                     req.Name
                 });
 
             _logger.LogInformation("[CompanyBootstrap] 부모계정 생성 완료 tenant={Code} email={Email}",
-                tenant.TenantCode, req.Email);
+                tenantCode, req.Email);
 
             return Ok(new
             {
@@ -216,7 +264,7 @@ public class CompanyBootstrapController : ControllerBase
                 message = "부모 계정이 생성되었습니다. 로그인 화면으로 이동해주세요.",
                 userId,
                 email = req.Email,
-                tenantCode = tenant.TenantCode
+                tenantCode
             });
         }
         catch (Exception ex)
@@ -226,20 +274,58 @@ public class CompanyBootstrapController : ControllerBase
         }
     }
 
-    public class CreateParentRequest
+    // 헌법 #35 W2 — HMAC-SHA256 서명 검증. 백오피스 URL·존재 의존 0건.
+    //   - 동일 키(HITPAN_BOOTSTRAP_TOKEN_KEY)로 서명 검증
+    //   - exp 만료 검사, aud 일치 검사
+    //   - jti 1회용은 ERP 측 별도 캐시 필요 (현재 차수 미박제 — 재사용 가능, 짧은 만료로 위험 최소화)
+    private (bool ok, TokenPayload? payload, string? error) VerifyBootstrapToken(string token)
     {
-        public string LicenseKey { get; set; } = "";
-        public string BizNo { get; set; } = "";
-        public string Email { get; set; } = "";
-        public string Password { get; set; } = "";
-        public string Name { get; set; } = "";
+        var key = Environment.GetEnvironmentVariable("HITPAN_BOOTSTRAP_TOKEN_KEY")
+                 ?? _config["Bootstrap:TokenKey"]
+                 ?? "DEV-bootstrap-token-key-change-in-production-32+chars";
+
+        var parts = token.Split('.');
+        if (parts.Length != 2)
+            return (false, null, "토큰 형식 오류");
+
+        try
+        {
+            using var hmac = new HMACSHA256(Encoding.UTF8.GetBytes(key));
+            var expected = hmac.ComputeHash(Encoding.UTF8.GetBytes(parts[0]));
+            var actual = Base64UrlDecode(parts[1]);
+            if (!CryptographicOperations.FixedTimeEquals(expected, actual))
+                return (false, null, "서명 불일치");
+
+            var json = Encoding.UTF8.GetString(Base64UrlDecode(parts[0]));
+            var payload = JsonSerializer.Deserialize<TokenPayload>(json,
+                new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+            if (payload is null)
+                return (false, null, "페이로드 파싱 실패");
+
+            if (payload.Aud != "erp-bootstrap")
+                return (false, null, "audience 불일치");
+
+            var now = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+            if (payload.Exp < now)
+                return (false, null, "토큰 만료 (라이선스 검증을 다시 진행해주세요)");
+
+            if (string.IsNullOrEmpty(payload.Sub))
+                return (false, null, "tenant 식별 불가");
+
+            return (true, payload, null);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "[CompanyBootstrap] 토큰 검증 예외");
+            return (false, null, "토큰 검증 오류");
+        }
     }
 
-    private static string ComputeHmacSha256(string data, string key)
+    private static byte[] Base64UrlDecode(string s)
     {
-        using var hmac = new System.Security.Cryptography.HMACSHA256(System.Text.Encoding.UTF8.GetBytes(key));
-        var hash = hmac.ComputeHash(System.Text.Encoding.UTF8.GetBytes(data));
-        return Convert.ToHexString(hash).ToLowerInvariant();
+        var pad = s.Length % 4;
+        if (pad > 0) s = s.PadRight(s.Length + (4 - pad), '=');
+        return Convert.FromBase64String(s.Replace('-', '+').Replace('_', '/'));
     }
 
     private static string MaskBizNo(string bn) =>
@@ -247,7 +333,7 @@ public class CompanyBootstrapController : ControllerBase
 
     public class BootstrapRequest
     {
-        public string LicenseKey { get; set; } = "";
+        public string BootstrapToken { get; set; } = "";
         public string BizNo { get; set; } = "";
         public string? CeoName { get; set; }
         public string? Tel { get; set; }
@@ -259,12 +345,40 @@ public class CompanyBootstrapController : ControllerBase
         public string? CorpNo { get; set; }
     }
 
-    private class TenantRow
+    public class CreateParentRequest
     {
-        public string TenantId { get; set; } = "";
+        public string BootstrapToken { get; set; } = "";
+        public string Email { get; set; } = "";
+        public string Password { get; set; } = "";
+        public string Name { get; set; } = "";
+    }
+
+    public class TokenPayload
+    {
+        public string Jti { get; set; } = "";
+        public string Iss { get; set; } = "";
+        public string Aud { get; set; } = "";
+        public string Sub { get; set; } = "";
         public string TenantCode { get; set; } = "";
         public string CompanyName { get; set; } = "";
-        public string Status { get; set; } = "";
-        public int IsLocked { get; set; }
+        public long Iat { get; set; }
+        public long Exp { get; set; }
+        public SubscriptionClaim? Subscription { get; set; }
+    }
+
+    public class SubscriptionClaim
+    {
+        public string SubscriptionTier { get; set; } = "basic";
+        public string Status { get; set; } = "active";
+        public string AiMode { get; set; } = "hitpan_pool";
+        public int AiTokenMonthlyLimit { get; set; } = 100000;
+        public int AiTokenExtra { get; set; }
+        public string? AnthropicKeyLast4 { get; set; }
+        public string AnthropicKeyStatus { get; set; } = "none";
+        public int MaxUsers { get; set; } = 3;
+        public int ExtraDeviceSlots { get; set; }
+        public string? ResellerId { get; set; }
+        public int ResellerTier { get; set; }
+        public DateTime? TrialEndsAt { get; set; }
     }
 }

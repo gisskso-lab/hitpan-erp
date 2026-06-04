@@ -30,6 +30,7 @@
 | `HITPAN_SMTP_FROM` | 발신 이메일 주소 | 메일 발송 불가 |
 | `HITPAN_TOSS_CLIENT_KEY` | 토스페이먼츠 Client Key | 결제 위젯 미작동 |
 | `HITPAN_TOSS_SECRET_KEY` | 토스페이먼츠 Secret Key | 결제 승인·취소 미작동 |
+| `HITPAN_BOOTSTRAP_TOKEN_KEY` | 백오피스↔ERP 부트스트랩 서명 키 (양쪽 동일) | ERP 첫 설치 자동 반영 불가 |
 
 ---
 
@@ -97,6 +98,26 @@ Authorization: Bearer {owner-jwt}
 ```
 
 **보안**: 값 자체는 절대 응답에 포함되지 않음. `present` / `isDev` 불리언만.
+
+---
+
+## 6.1 부트스트랩 토큰 키 (W2 객체 완전 분리)
+
+헌법 #35 정합 — 백오피스가 ERP 첫 설치용 서명 토큰을 발급, ERP는 동일 키로 검증.
+
+1. 32바이트 이상 랜덤 키 생성 (PowerShell)
+   ```powershell
+   [Convert]::ToBase64String((1..32 | ForEach-Object { Get-Random -Maximum 256 } | ForEach-Object { [byte]$_ }))
+   ```
+2. **백오피스 API 서버** 환경변수 `HITPAN_BOOTSTRAP_TOKEN_KEY` 박제
+3. **ERP API 서버 (고객사 PC 또는 본사 데모)** 환경변수 `HITPAN_BOOTSTRAP_TOKEN_KEY` **동일 값** 박제
+4. 두 서버 재기동 (헌법 #28)
+5. 백오피스 헬스체크 확인 → ERP `/setup/license` 흐름 실측
+
+**보안**:
+- 양쪽 서버가 같은 비밀 보유 = 대칭 키. 한쪽 유출 시 양쪽 동시 회전 필수
+- 토큰 자체엔 만료 10분, 1회용 jti, audience 검증
+- 회전 주기 분기 1회
 
 ---
 

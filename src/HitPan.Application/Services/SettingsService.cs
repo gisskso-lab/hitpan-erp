@@ -261,7 +261,7 @@ public sealed class SettingsService : ISettingsService
     }
 
     /// <summary>
-    /// tenants 테이블에 사업장 연락처·주소 등 표시용 정보를 저장한다.
+    /// local_company 테이블에 사업장 연락처·주소 등 표시용 정보를 저장한다.
     /// </summary>
     public async Task SaveCompanyAsync(UpdateTenantCompanyDto dto, string tenantId, CancellationToken ct = default)
     {
@@ -273,7 +273,7 @@ public sealed class SettingsService : ISettingsService
               company_name AS CompanyName,
               ceo_name AS CeoName,
               biz_no AS BizNo
-            FROM tenants
+            FROM local_company
             WHERE tenant_id = @TenantId
             """;
 
@@ -294,7 +294,7 @@ public sealed class SettingsService : ISettingsService
             bizNo = bizNo[..12];
         }
 
-        // tenants.address 단일 컬럼이므로 기본주소와 상세주소를 한 줄로 합친다.
+        // local_company.address 단일 컬럼이므로 기본주소와 상세주소를 한 줄로 합친다.
         var combinedAddress = $"{dto.Address?.Trim() ?? string.Empty} {dto.AddressDetail?.Trim() ?? string.Empty}".Trim();
         if (combinedAddress.Length > 200)
         {
@@ -322,7 +322,7 @@ public sealed class SettingsService : ISettingsService
         var bizItem = TruncateNullable(dto.BizItem, 100);
 
         const string updateSql = """
-            UPDATE tenants SET
+            UPDATE local_company SET
               company_name = @CompanyName,
               ceo_name = @CeoName,
               biz_no = @BizNo,
@@ -364,7 +364,7 @@ public sealed class SettingsService : ISettingsService
     }
 
     /// <summary>
-    /// tenants 테이블에서 사업장 기본 정보를 조회한다.
+    /// local_company 테이블에서 사업장 기본 정보를 조회한다.
     /// </summary>
     public async Task<UpdateTenantCompanyDto?> GetCompanyAsync(string tenantId, CancellationToken ct = default)
     {
@@ -384,7 +384,7 @@ public sealed class SettingsService : ISettingsService
               address AS Address,
               corp_no AS CorpNo,
               subsidiary_no AS SubsidiaryNo
-            FROM tenants
+            FROM local_company
             WHERE tenant_id = @TenantId
             """;
         return await _db.QueryFirstOrDefaultAsync<UpdateTenantCompanyDto>(
@@ -393,7 +393,7 @@ public sealed class SettingsService : ISettingsService
     }
 
     /// <summary>
-    /// NULL 허용 문자열을 최대 길이로 잘라 tenants 컬럼 제약에 맞춘다.
+    /// NULL 허용 문자열을 최대 길이로 잘라 local_company 컬럼 제약에 맞춘다.
     /// </summary>
     private static string? TruncateNullable(string? value, int maxLen)
     {

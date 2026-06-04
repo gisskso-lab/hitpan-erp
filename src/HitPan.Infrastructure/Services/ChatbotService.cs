@@ -261,7 +261,7 @@ public sealed class ChatbotService : IChatbotService
               subscription_tier           AS SubscriptionTier,
               anthropic_api_key_last4     AS AnthropicKeyLast4,
               anthropic_key_status        AS AnthropicKeyStatus
-            FROM tenants
+            FROM local_subscription
             WHERE tenant_id = @TenantId
             """,
             new { TenantId = tenantId },
@@ -439,7 +439,7 @@ public sealed class ChatbotService : IChatbotService
         _db.Open();
     }
 
-    /// <summary>tenants 테이블에서 AI 관련 컬럼만 읽는 로컬 행 DTO.</summary>
+    /// <summary>local_subscription 테이블에서 AI 관련 컬럼만 읽는 로컬 행 DTO.</summary>
     private sealed class TenantAiRow
     {
         public string? AiMode { get; set; }

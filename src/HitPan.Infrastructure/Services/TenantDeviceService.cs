@@ -59,7 +59,7 @@ public sealed class TenantDeviceService : ITenantDeviceService
     {
         await EnsureOpenAsync(ct);
         var tenant = await _db.QueryFirstOrDefaultAsync<(string? tier, int extra)>(new CommandDefinition(
-            "SELECT subscription_tier AS tier, COALESCE(extra_device_slots, 0) AS extra FROM tenants WHERE tenant_id = @TenantId",
+            "SELECT subscription_tier AS tier, COALESCE(extra_device_slots, 0) AS extra FROM local_subscription WHERE tenant_id = @TenantId",
             new { TenantId = tenantId }, cancellationToken: ct));
 
         var (pcLimit, mobileLimit) = GetLimitsForTier(tenant.tier);
@@ -144,7 +144,7 @@ public sealed class TenantDeviceService : ITenantDeviceService
 
         // 2) 신규 기기 — 티어별 한도 검사
         var tenant = await _db.QueryFirstOrDefaultAsync<(string? tier, int extra)>(new CommandDefinition(
-            "SELECT subscription_tier AS tier, COALESCE(extra_device_slots, 0) AS extra FROM tenants WHERE tenant_id = @TenantId",
+            "SELECT subscription_tier AS tier, COALESCE(extra_device_slots, 0) AS extra FROM local_subscription WHERE tenant_id = @TenantId",
             new { TenantId = tenantId }, cancellationToken: ct));
 
         var (pcLimit, mobileLimit) = GetLimitsForTier(tenant.tier);

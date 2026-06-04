@@ -270,7 +270,7 @@ public sealed class BackupService : IBackupService
 
         // 2) 안전 확인 — 회사명 일치
         await EnsureOpenAsync(ct).ConfigureAwait(false);
-        const string companySql = "SELECT company_name FROM tenants WHERE tenant_id = @TenantId";
+        const string companySql = "SELECT company_name FROM local_company WHERE tenant_id = @TenantId";
         var companyName = await _db.QuerySingleOrDefaultAsync<string>(
             new CommandDefinition(companySql, new { TenantId = tenantId }, cancellationToken: ct))
             .ConfigureAwait(false);

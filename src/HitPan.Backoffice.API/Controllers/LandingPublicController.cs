@@ -153,13 +153,55 @@ public class LandingPublicController : ControllerBase
                 });
             }
 
+            // 헌법 #35 (사장님 결재 2026-06-04) W2 — 객체 완전 분리 서명 토큰
+            //   - 백오피스가 HMAC-SHA256 토큰 발급, ERP는 HTTP 호출 없이 서명 검증으로 신뢰
+            //   - 클레임: tenantId · tenantCode · companyName · subscription_tier · status · 본사 영역 캐시
+            //   - 만료: 10분, jti 1회용 (재사용은 ERP가 캐시 박제)
+            var bootstrapKey = Environment.GetEnvironmentVariable("HITPAN_BOOTSTRAP_TOKEN_KEY")
+                              ?? _config["Bootstrap:TokenKey"]
+                              ?? "DEV-bootstrap-token-key-change-in-production-32+chars";
+
+            // 본사 영역 캐시 데이터 (ERP local_subscription 박제용)
+            var sub = await db.QueryFirstOrDefaultAsync<SubscriptionRow>(@"
+                SELECT
+                    COALESCE(subscription_tier, 'basic') AS SubscriptionTier,
+                    COALESCE(status, 'active')           AS Status,
+                    COALESCE(ai_mode, 'hitpan_pool')     AS AiMode,
+                    COALESCE(ai_token_monthly_limit, 100000) AS AiTokenMonthlyLimit,
+                    COALESCE(ai_token_extra, 0)          AS AiTokenExtra,
+                    anthropic_api_key_last4              AS AnthropicKeyLast4,
+                    COALESCE(anthropic_key_status, 'none') AS AnthropicKeyStatus,
+                    COALESCE(max_users, 3)               AS MaxUsers,
+                    COALESCE(extra_device_slots, 0)      AS ExtraDeviceSlots,
+                    CAST(reseller_id AS CHAR)            AS ResellerId,
+                    COALESCE(reseller_tier, 0)           AS ResellerTier,
+                    trial_ends_at                        AS TrialEndsAt
+                FROM tenants
+                WHERE tenant_id = @TenantId",
+                new { tenant.TenantId });
+
+            var tokenPayload = new
+            {
+                jti = Guid.NewGuid().ToString("N"),
+                iss = "hitpan-backoffice",
+                aud = "erp-bootstrap",
+                sub = tenant.TenantId,
+                tenant_code = tenant.TenantCode,
+                company_name = tenant.CompanyName,
+                iat = DateTimeOffset.UtcNow.ToUnixTimeSeconds(),
+                exp = DateTimeOffset.UtcNow.AddMinutes(10).ToUnixTimeSeconds(),
+                subscription = sub
+            };
+            var bootstrapToken = SignToken(tokenPayload, bootstrapKey);
+
             _logger.LogInformation("[LicenseClaim] 검증 통과 tenant={Code}", tenant.TenantCode);
             return Ok(new LicenseClaimResponse
             {
                 Valid = true,
                 CompanyName = tenant.CompanyName,
                 Message = "라이선스 검증 완료. ERP 자동 반영을 진행합니다.",
-                TenantCode = tenant.TenantCode
+                TenantCode = tenant.TenantCode,
+                BootstrapToken = bootstrapToken
             });
         }
         catch (Exception ex)
@@ -176,12 +218,45 @@ public class LandingPublicController : ControllerBase
         return Convert.ToHexString(hash).ToLowerInvariant();
     }
 
+    // 헌법 #35 W2 부트스트랩 토큰 — JSON 페이로드 base64url + HMAC-SHA256 서명 base64url
+    //   형식: <payloadB64>.<signatureB64>
+    //   ERP는 동일 키로 서명 검증 후 페이로드 신뢰
+    private static string SignToken(object payload, string key)
+    {
+        var json = System.Text.Json.JsonSerializer.Serialize(payload);
+        var payloadBytes = Encoding.UTF8.GetBytes(json);
+        var payloadB64 = Base64UrlEncode(payloadBytes);
+        using var hmac = new HMACSHA256(Encoding.UTF8.GetBytes(key));
+        var signature = hmac.ComputeHash(Encoding.UTF8.GetBytes(payloadB64));
+        var sigB64 = Base64UrlEncode(signature);
+        return $"{payloadB64}.{sigB64}";
+    }
+
+    private static string Base64UrlEncode(byte[] bytes) =>
+        Convert.ToBase64String(bytes).TrimEnd('=').Replace('+', '-').Replace('/', '_');
+
     private class TenantRow
     {
         public string TenantId { get; set; } = "";
         public string TenantCode { get; set; } = "";
         public string CompanyName { get; set; } = "";
         public string Status { get; set; } = "";
+    }
+
+    public class SubscriptionRow
+    {
+        public string SubscriptionTier { get; set; } = "basic";
+        public string Status { get; set; } = "active";
+        public string AiMode { get; set; } = "hitpan_pool";
+        public int AiTokenMonthlyLimit { get; set; } = 100000;
+        public int AiTokenExtra { get; set; }
+        public string? AnthropicKeyLast4 { get; set; }
+        public string AnthropicKeyStatus { get; set; } = "none";
+        public int MaxUsers { get; set; } = 3;
+        public int ExtraDeviceSlots { get; set; }
+        public string? ResellerId { get; set; }
+        public int ResellerTier { get; set; }
+        public DateTime? TrialEndsAt { get; set; }
     }
 
     private async Task<MySqlConnection> OpenAsync(CancellationToken ct)
@@ -243,5 +318,8 @@ public class LandingPublicController : ControllerBase
         public string? CompanyName { get; set; }
         public string? Message { get; set; }
         public string? TenantCode { get; set; }
+        // 헌법 #35 W2 (사장님 결재 2026-06-04): 객체 완전 분리 서명 토큰
+        //   ERP가 검증 후 local_company / local_subscription 박제 시 사용
+        public string? BootstrapToken { get; set; }
     }
 }

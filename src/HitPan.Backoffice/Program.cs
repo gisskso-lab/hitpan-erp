@@ -45,8 +45,12 @@ public class Program
         });
         builder.Services.AddCascadingAuthenticationState();
 
-        // HttpClient — ERP API 호출 (헌법 #35: 백오피스가 ERP API로 인증 위임 — 다음 단계에 별도 백오피스 API로 전환)
-        var backofficeApi = builder.Configuration["BackofficeApi:BaseUrl"] ?? "http://localhost:5257/";
+        // HttpClient — 백오피스 API 호출 (헌법 #35 객체 완전 분리, 사장님 결재 2026-06-04)
+        //   기본값 http://localhost:5258/ (백오피스 API). ERP API(5257)와 완전 분리.
+        //   운영: 환경변수 HITPAN_BACKOFFICE_API_URL 우선, 그 다음 appsettings BackofficeApi:BaseUrl.
+        var backofficeApi = Environment.GetEnvironmentVariable("HITPAN_BACKOFFICE_API_URL")
+                          ?? builder.Configuration["BackofficeApi:BaseUrl"]
+                          ?? "http://localhost:5258/";
         builder.Services.AddHttpClient<BackofficeService>(c => c.BaseAddress = new Uri(backofficeApi));
         // 협력업체 가입 신청 등 비인증 공개 API용 named client (사장님 결재 2026-06-04)
         builder.Services.AddHttpClient("backoffice-public", c => c.BaseAddress = new Uri(backofficeApi));

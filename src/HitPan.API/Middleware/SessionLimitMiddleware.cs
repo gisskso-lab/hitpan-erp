@@ -62,7 +62,7 @@ public sealed class SessionLimitMiddleware
             {
                 entry.AbsoluteExpirationRelativeToNow = TierCacheTtl;
                 return await db.QueryFirstOrDefaultAsync<string>(
-                    "SELECT COALESCE(subscription_tier, '') FROM tenants WHERE tenant_id = @TenantId",
+                    "SELECT COALESCE(subscription_tier, '') FROM local_subscription WHERE tenant_id = @TenantId",
                     new { TenantId = tenantId }) ?? "";
             }) ?? "";
 

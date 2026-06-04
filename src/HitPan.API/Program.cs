@@ -183,11 +183,11 @@ builder.Services.AddHostedService<HitPan.API.BackgroundServices.OutboxPollerWork
 builder.Services.AddScoped<IESignatureService, ESignatureService>();
 builder.Services.AddScoped<ILaborContractService, LaborContractService>();
 builder.Services.AddSingleton<AccessTokenValidator>();
-// 백오피스 (본사 관리자 + 대리점 파트너)
+// 헌법 #35 객체 완전 분리 (사장님 결재 2026-06-04):
+//   - 본사 백오피스·대리점 영역 컨트롤러·서비스는 HitPan.Backoffice.API로 이전
+//   - ERP에서 IResellerService / IResellerRlsService DI 등록 제거
+//   - BackofficeAuthService 옛 ERP 잔재도 폐기 대상이나 잔여 의존성 확인 후 별도 차수
 builder.Services.AddScoped<IBackofficeAuthService, BackofficeAuthService>();
-builder.Services.AddScoped<IResellerService, ResellerService>();
-// WS-20260601-17: 대리점 RLS 셀프 서비스 (8명제 #6·#7 — JWT reseller_serial 강제, 평문 0)
-builder.Services.AddScoped<HitPan.API.Services.IResellerRlsService, HitPan.API.Services.ResellerRlsService>();
 builder.Services.AddJwtAuthentication();
 builder.Services.AddAuthorization(options =>
 {
