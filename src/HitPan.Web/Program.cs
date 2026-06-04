@@ -89,4 +89,12 @@ builder.Services.AddScoped(sp =>
     return new HttpClient(handler) { BaseAddress = apiUri, Timeout = TimeSpan.FromMinutes(10) };
 });
 
+// 헌법 #35 (사장님 결재 2026-06-04) — 백오피스 API 호출용 HttpClient (라이선스 검증 + 부트스트랩).
+// /setup/license에서 사용. 인증 불필요(AllowAnonymous), 익명 키 BackofficeApiHttpClient 명시.
+var backofficeApiBase = builder.Configuration["BackofficeApiBaseUrl"]
+    ?? Environment.GetEnvironmentVariable("BackofficeApi__BaseUrl")
+    ?? "http://localhost:5258/";
+builder.Services.AddKeyedScoped<HttpClient>("backoffice", (sp, key) =>
+    new HttpClient { BaseAddress = new Uri(backofficeApiBase.TrimEnd('/') + "/") });
+
 await builder.Build().RunAsync();

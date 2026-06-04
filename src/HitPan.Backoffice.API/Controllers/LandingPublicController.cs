@@ -1,4 +1,6 @@
 using System.ComponentModel.DataAnnotations;
+using System.Security.Cryptography;
+using System.Text;
 using Dapper;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -92,14 +94,94 @@ public class LandingPublicController : ControllerBase
     }
 
     [HttpPost("license/claim")]
-    public IActionResult ClaimLicense([FromBody] LicenseClaimRequest req, CancellationToken ct)
+    public async Task<IActionResult> ClaimLicense([FromBody] LicenseClaimRequest req, CancellationToken ct)
     {
-        _logger.LogInformation("[Signup] 라이선스 검증 요청 Key={K}", req.LicenseKey);
-        return Accepted(new LicenseClaimResponse
+        // 헌법 #35 + #18/#22 정합 옵션 C (사장님 결재 2026-06-04):
+        //   - 본사 평문 사업자정보 보관 0건
+        //   - ERP 첫 부팅 시 라이선스 키 + 사업자번호 입력 → 둘 다 해시 매칭만 검증
+        //   - 통과 시 ERP에 메타(회사명·고객사 코드)만 반환, 사업자번호는 ERP가 입력 그대로 박제
+        if (req is null || string.IsNullOrWhiteSpace(req.LicenseKey) || string.IsNullOrWhiteSpace(req.BizNo))
+            return BadRequest(new LicenseClaimResponse { Valid = false, Message = "라이선스 키와 사업자번호가 필요합니다." });
+
+        var bizNoNormalized = req.BizNo.Replace("-", "").Replace(" ", "").Trim();
+        if (bizNoNormalized.Length != 10)
+            return BadRequest(new LicenseClaimResponse { Valid = false, Message = "사업자번호 형식 오류 (10자리)" });
+
+        var licensePepper = _config["License:Pepper"] ?? "dev-pepper-2026";
+        var bizPepper = _config["Backoffice:BizNoPepper"] ?? "dev-pepper-2026";
+        var licenseHash = ComputeHmacSha256(req.LicenseKey.Trim(), licensePepper);
+        var bizHash = ComputeHmacSha256(bizNoNormalized, bizPepper);
+
+        try
         {
-            Valid = false,
-            Message = "라이선스 검증 가도 — LicenseIssueService 신규 후 동작"
-        });
+            await using var db = await OpenAsync(ct);
+            // 라이선스 해시 매칭 + status=active 검증
+            var tenant = await db.QueryFirstOrDefaultAsync<TenantRow>(@"
+                SELECT CAST(tenant_id AS CHAR) AS TenantId,
+                       tenant_code AS TenantCode,
+                       company_name AS CompanyName,
+                       status AS Status
+                FROM tenants
+                WHERE license_key_hash = @Hash AND status = 'active'
+                LIMIT 1",
+                new { Hash = licenseHash });
+
+            if (tenant is null)
+            {
+                _logger.LogInformation("[LicenseClaim] license hash 매칭 실패 또는 비활성 status");
+                return Ok(new LicenseClaimResponse
+                {
+                    Valid = false,
+                    Message = "라이선스 키가 유효하지 않거나 활성 상태가 아닙니다. 결제가 완료되었는지 확인해주세요."
+                });
+            }
+
+            // 사업자번호 해시 매칭 (landing_signups에 박제된 해시와 비교)
+            // 같은 회사명이 여러 가입에 박제될 수 있어 tenant.CompanyName과 함께 좁힘
+            var bizMatch = await db.QueryFirstOrDefaultAsync<int>(@"
+                SELECT COUNT(*) FROM landing_signups
+                WHERE biz_no_hash = @BizHash AND company_name = @CompanyName",
+                new { BizHash = bizHash, tenant.CompanyName });
+
+            if (bizMatch == 0)
+            {
+                _logger.LogInformation("[LicenseClaim] biz_no hash 매칭 실패 tenant={Code}", tenant.TenantCode);
+                return Ok(new LicenseClaimResponse
+                {
+                    Valid = false,
+                    Message = "사업자번호가 가입 시 입력한 정보와 일치하지 않습니다."
+                });
+            }
+
+            _logger.LogInformation("[LicenseClaim] 검증 통과 tenant={Code}", tenant.TenantCode);
+            return Ok(new LicenseClaimResponse
+            {
+                Valid = true,
+                CompanyName = tenant.CompanyName,
+                Message = "라이선스 검증 완료. ERP 자동 반영을 진행합니다.",
+                TenantCode = tenant.TenantCode
+            });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "[LicenseClaim] 검증 중 오류");
+            return StatusCode(500, new LicenseClaimResponse { Valid = false, Message = "검증 중 서버 오류가 발생했습니다." });
+        }
+    }
+
+    private static string ComputeHmacSha256(string data, string key)
+    {
+        using var hmac = new HMACSHA256(Encoding.UTF8.GetBytes(key));
+        var hash = hmac.ComputeHash(Encoding.UTF8.GetBytes(data));
+        return Convert.ToHexString(hash).ToLowerInvariant();
+    }
+
+    private class TenantRow
+    {
+        public string TenantId { get; set; } = "";
+        public string TenantCode { get; set; } = "";
+        public string CompanyName { get; set; } = "";
+        public string Status { get; set; } = "";
     }
 
     private async Task<MySqlConnection> OpenAsync(CancellationToken ct)
@@ -150,6 +232,8 @@ public class LandingPublicController : ControllerBase
     public class LicenseClaimRequest
     {
         [Required] public string LicenseKey { get; set; } = "";
+        // 옵션 C (사장님 결재 2026-06-04) — 본사 평문 보관 0건, ERP가 입력한 사업자번호로 해시 매칭 검증
+        [Required] public string BizNo { get; set; } = "";
     }
 
     public class LicenseClaimResponse
@@ -158,5 +242,6 @@ public class LandingPublicController : ControllerBase
         public string? DownloadUrl { get; set; }
         public string? CompanyName { get; set; }
         public string? Message { get; set; }
+        public string? TenantCode { get; set; }
     }
 }
