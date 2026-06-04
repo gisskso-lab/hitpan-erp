@@ -32,6 +32,9 @@ public class Program
         // W11 Owner 영역 (사장님 결재 2026-06-04) — bo_users + 4-eyes + 감사로그 + MFA
         builder.Services.AddScoped<HitPan.Backoffice.API.Services.IBoAuditService, HitPan.Backoffice.API.Services.BoAuditService>();
         builder.Services.AddSingleton<HitPan.Backoffice.API.Services.IMfaService, HitPan.Backoffice.API.Services.MfaService>();
+        // W9 대리점 정산·시리얼 (사장님 결재 2026-06-04)
+        builder.Services.AddScoped<HitPan.Backoffice.API.Services.IResellerSettlementCalculator,
+                                   HitPan.Backoffice.API.Services.ResellerSettlementCalculator>();
 
         // JWT 인증 (백오피스 전용 — ERP와 분리)
         var jwt = builder.Configuration.GetSection("Jwt");
