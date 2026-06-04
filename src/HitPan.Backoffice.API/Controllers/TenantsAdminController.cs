@@ -1,5 +1,6 @@
 using Dapper;
 using HitPan.Backoffice.API.Filters;
+using HitPan.Backoffice.API.Services;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using MySqlConnector;
@@ -25,11 +26,16 @@ public class TenantsAdminController : ControllerBase
 {
     private readonly IConfiguration _config;
     private readonly ILogger<TenantsAdminController> _logger;
+    private readonly IWebhookOutboundService _webhook;
 
-    public TenantsAdminController(IConfiguration config, ILogger<TenantsAdminController> logger)
+    public TenantsAdminController(
+        IConfiguration config,
+        ILogger<TenantsAdminController> logger,
+        IWebhookOutboundService webhook)
     {
         _config = config;
         _logger = logger;
+        _webhook = webhook;
     }
 
     [HttpGet]
@@ -155,6 +161,7 @@ public class TenantsAdminController : ControllerBase
             if (affected == 0)
                 return BadRequest(new { success = false, message = "활성 상태인 고객사만 정지할 수 있습니다." });
 
+            await _webhook.EmitSubscriptionChangedAsync(id, ct);
             _logger.LogInformation("[TenantsAdmin] suspended id={Id} reason={Reason}", id, req.Reason);
             return Ok(new { success = true, message = "고객사가 일시 정지되었습니다." });
         }
@@ -180,6 +187,7 @@ public class TenantsAdminController : ControllerBase
             if (affected == 0)
                 return BadRequest(new { success = false, message = "정지·대기 상태인 고객사만 복구할 수 있습니다." });
 
+            await _webhook.EmitSubscriptionChangedAsync(id, ct);
             _logger.LogInformation("[TenantsAdmin] activated id={Id}", id);
             return Ok(new { success = true, message = "고객사가 활성화 복구되었습니다." });
         }

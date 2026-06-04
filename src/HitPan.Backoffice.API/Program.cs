@@ -26,6 +26,9 @@ public class Program
         builder.Services.AddSingleton<HitPan.Backoffice.API.Services.IContractPdfGenerator, HitPan.Backoffice.API.Services.ContractPdfGenerator>();
         builder.Services.AddMemoryCache();
         builder.Services.AddSingleton<HitPan.Backoffice.API.Services.IBoPermissionService, HitPan.Backoffice.API.Services.BoPermissionService>();
+        // W10 webhook (사장님 결재 2026-06-04) — 구독·기기 변경 → ERP 동기화
+        builder.Services.AddScoped<HitPan.Backoffice.API.Services.IWebhookOutboundService, HitPan.Backoffice.API.Services.WebhookOutboundService>();
+        builder.Services.AddHostedService<HitPan.Backoffice.API.Services.WebhookDispatcher>();
 
         // JWT 인증 (백오피스 전용 — ERP와 분리)
         var jwt = builder.Configuration.GetSection("Jwt");
