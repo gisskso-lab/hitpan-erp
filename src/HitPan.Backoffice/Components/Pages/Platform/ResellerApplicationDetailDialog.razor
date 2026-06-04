@@ -1,0 +1,130 @@
+@*
+    협력업체 가입 신청 상세 다이얼로그 (사장님 결재 2026-06-04)
+    헌법 #35 정합 — 백오피스 API(5258) 직접 호출, [BoPermission] reseller-applications.detail
+*@
+
+@inject IHttpClientFactory HttpFactory
+@inject ISnackbar Snackbar
+
+<MudDialog Style="min-width:520px;">
+    <DialogContent>
+        @if (_loading)
+        {
+            <MudProgressLinear Indeterminate="true" Color="Color.Primary" />
+        }
+        else if (_item is null)
+        {
+            <MudText Color="Color.Secondary">신청 정보를 불러올 수 없습니다.</MudText>
+        }
+        else
+        {
+            <MudText Typo="Typo.h6" Class="mb-3" Style="color:#0F6E56;">
+                @_item.CompanyName
+                <MudChip T="string" Size="Size.Small" Color="@StatusColor(_item.Status)" Class="ml-2">
+                    @StatusLabel(_item.Status)
+                </MudChip>
+            </MudText>
+
+            <div class="bo-row"><div class="bo-row-label">대표자</div><div class="bo-row-value">@(_item.CeoName ?? "-")</div></div>
+            <div class="bo-row"><div class="bo-row-label">사업자번호</div><div class="bo-row-value" style="font-family:Consolas,Monaco,monospace;">@(_item.BizNo ?? "-")</div></div>
+            <div class="bo-row"><div class="bo-row-label">담당자</div><div class="bo-row-value">@(_item.ContactName ?? "-") @(string.IsNullOrEmpty(_item.ContactTitle) ? "" : $"({_item.ContactTitle})")</div></div>
+            <div class="bo-row"><div class="bo-row-label">이메일</div><div class="bo-row-value">@(_item.Email ?? "-")</div></div>
+            <div class="bo-row"><div class="bo-row-label">연락처</div><div class="bo-row-value">@(_item.Phone ?? "-")</div></div>
+            <div class="bo-row"><div class="bo-row-label">영업 지역</div><div class="bo-row-value">@(_item.SalesRegion ?? "-")</div></div>
+            <div class="bo-row"><div class="bo-row-label">예상 고객사</div><div class="bo-row-value">@(_item.SalesYears.HasValue ? $"{_item.SalesYears}곳" : "-")</div></div>
+            <div class="bo-row"><div class="bo-row-label">신청 동기</div><div class="bo-row-value" style="white-space:pre-wrap;">@(_item.Reason ?? "-")</div></div>
+            <div class="bo-row"><div class="bo-row-label">신청 일시</div><div class="bo-row-value">@_item.SubmittedAt.ToString("yyyy-MM-dd HH:mm")</div></div>
+
+            @if (_item.ReviewedAt.HasValue)
+            {
+                <MudDivider Class="my-3" />
+                <div class="bo-row"><div class="bo-row-label">검토 일시</div><div class="bo-row-value">@_item.ReviewedAt.Value.ToString("yyyy-MM-dd HH:mm")</div></div>
+                @if (!string.IsNullOrEmpty(_item.RejectionReason))
+                {
+                    <div class="bo-row"><div class="bo-row-label">반려 사유</div><div class="bo-row-value" style="white-space:pre-wrap;color:#B45309;">@_item.RejectionReason</div></div>
+                }
+            }
+        }
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="Close">닫기</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private IMudDialogInstance? MudDialog { get; set; }
+    [Parameter] public string ApplicationId { get; set; } = "";
+
+    private ApplicationDetail? _item;
+    private bool _loading = true;
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            var http = HttpFactory.CreateClient("backoffice-authed");
+            var res = await http.GetFromJsonAsync<DetailResponse>($"api/backoffice/reseller-applications/{ApplicationId}");
+            _item = res?.Item;
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"상세 조회 실패: {ex.Message}", Severity.Error);
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    private void Close() => MudDialog?.Close(DialogResult.Ok(true));
+
+    private static string StatusLabel(string s) => s switch
+    {
+        "pending" => "검토 대기",
+        "reviewing" => "검토 중",
+        "approved" => "승인",
+        "rejected" => "반려",
+        _ => s
+    };
+
+    private static Color StatusColor(string s) => s switch
+    {
+        "pending" => Color.Warning,
+        "reviewing" => Color.Info,
+        "approved" => Color.Success,
+        "rejected" => Color.Error,
+        _ => Color.Default
+    };
+
+    public class ApplicationDetail
+    {
+        public string ApplicationId { get; set; } = "";
+        public string CompanyName { get; set; } = "";
+        public string? CeoName { get; set; }
+        public string? BizNo { get; set; }
+        public string? ContactName { get; set; }
+        public string? ContactTitle { get; set; }
+        public string? Email { get; set; }
+        public string? Phone { get; set; }
+        public string? SalesRegion { get; set; }
+        public int? SalesYears { get; set; }
+        public string? Reason { get; set; }
+        public string Status { get; set; } = "";
+        public DateTime SubmittedAt { get; set; }
+        public DateTime? ReviewedAt { get; set; }
+        public string? ReviewedBy { get; set; }
+        public string? RejectionReason { get; set; }
+    }
+
+    private class DetailResponse
+    {
+        public bool Success { get; set; }
+        public ApplicationDetail? Item { get; set; }
+    }
+}
+
+<style>
+    .bo-row { display: flex; align-items: flex-start; padding: 8px 0; border-bottom: 1px solid #F3F4F6; }
+    .bo-row-label { width: 120px; font-size: 13px; color: #6B7280; flex-shrink: 0; }
+    .bo-row-value { flex: 1; font-size: 14px; }
+</style>
