@@ -1,8 +1,8 @@
 @*
     WS-20260601-18 본사 백오피스 — Owner 전용 시스템 설정 (8명제 #2·#7)
-    작성일: 2026-06-01 / 작성팀: 프론트 매니저 + 보안 매니저 1
+    이식: 2026-06-04 (HitPan.Web → HitPan.Backoffice, 헌법 #35 3시스템 분리)
     절대 원칙:
-      - OwnerOnly (사장님 본인만)
+      - OwnerOnly (사장님 본인만, role=owner 클레임 필수)
       - MFA 의무 안내 + IP 화이트리스트 관리
       - Razor에 C# raw string 금지 (헌법 #14)
       - 빈 catch 금지 (헌법 #15)
@@ -11,7 +11,6 @@
 @page "/owner/system-config"
 @layout PlatformLayout
 @attribute [Authorize(Policy = "OwnerOnly")]
-@inject HttpClient Http
 @inject ISnackbar Snackbar
 
 <PageTitle>시스템 설정 — 히트판 백오피스 (Owner)</PageTitle>

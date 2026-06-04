@@ -10,8 +10,10 @@
     히트판 ERP 사이드바 — 11그룹 + 로고 (사장님 결재 2026-04-29)
     토스 감성 디자인 (preview-design-toss.html 기반)
     SaaS 권한 (본사·대리점) 완전 배제 — 백오피스 분리
-    /admin/* /reseller/* 페이지 코드는 보존, 사이드바에서만 제거
     홈 메뉴 제거 → 로고 클릭 = 대시보드 (홈 역할)
+
+    헌법 #35 정합 (2026-06-04): /admin/*·/reseller/*·/owner/* 페이지·레이아웃 일체 HitPan.Backoffice로 분리 완료.
+    HitPan.Web은 고객사 ERP 전용. 본사·대리점 코드 0건.
 *@
 
 @* 로고 — 사이드바 상단 복귀 (사장님 결재 2026-04-29 재변경). 클릭 시 대시보드. *@
@@ -156,10 +158,8 @@
 </MudNavMenu>
 
 @code {
-    // SaaS 권한(본사·대리점) 검사 코드는 의도적으로 사이드바에서 제거됨.
-    // /admin/* /reseller/* 페이지 코드 자체는 백오피스 분리용 자산으로 보존(Pages/Admin/, Pages/Reseller/).
-    // 직접 URL 접근은 그대로 작동(사장님 지시: "지금까지 짠 코드에 영향 주면 안 돼").
-    // 자세한 내용: memory/project_backoffice_separation.md
+    // 헌법 #35 (2026-06-04) — 본사·대리점·Owner 영역 일체 HitPan.Backoffice 신규 프로젝트로 분리 완료.
+    // HitPan.Web은 고객사 ERP 전용. /admin/* /reseller/* /owner/* 페이지 0건.
     private int _approvalPendingCount;
 
     protected override async Task OnInitializedAsync()

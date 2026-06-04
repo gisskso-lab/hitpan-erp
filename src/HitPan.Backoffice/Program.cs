@@ -39,6 +39,9 @@ public class Program
                 .RequireClaim("account_type", "platform_admin", "platform_owner"));
             o.AddPolicy("PlatformManagerOrAbove", p => p.RequireAuthenticatedUser()
                 .RequireClaim("account_type", "platform_admin", "platform_owner"));
+            // Owner 전용 (사장님 본인) — 본사 직원 관리·시스템 설정
+            o.AddPolicy("OwnerOnly", p => p.RequireAuthenticatedUser()
+                .RequireClaim("role", "owner"));
         });
         builder.Services.AddCascadingAuthenticationState();
 

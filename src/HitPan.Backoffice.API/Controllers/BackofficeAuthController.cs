@@ -143,8 +143,13 @@ public class BackofficeAuthController : ControllerBase
 
     private async Task<MySqlConnection> OpenAsync(CancellationToken ct)
     {
-        var cs = _config.GetConnectionString("Default")
-                 ?? throw new InvalidOperationException("ConnectionStrings:Default 미박제");
+        // 헌법 #35 — 백오피스 DB 분리 (사장님 결재 2026-06-04):
+        //   - 로컬 개발: BackofficeDb = hitpan_erp 동일 가리킴 (편의)
+        //   - 클라우드 배포: BackofficeDb만 hitpan_backoffice 별도 DB로 교체
+        //   - 코드 변경 0, ConnectionString만 교체
+        var cs = _config.GetConnectionString("BackofficeDb")
+                 ?? _config.GetConnectionString("Default")
+                 ?? throw new InvalidOperationException("ConnectionStrings:BackofficeDb 미설정");
         var c = new MySqlConnection(cs);
         await c.OpenAsync(ct);
         return c;
