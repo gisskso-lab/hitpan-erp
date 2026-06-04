@@ -98,6 +98,61 @@ public class CredentialsStatusController : ControllerBase
         });
     }
 
+    [HttpGet("healthz")]
+    public IActionResult Healthz()
+    {
+        if (!IsOwner())
+            return StatusCode(403, new { success = false, message = "사장님(Owner)만 접근할 수 있습니다." });
+
+        var checks = new List<CredentialCheck>
+        {
+            Probe("HITPAN_JWT_SECRET",       "Jwt:Key",                  "JWT (ERP API)"),
+            Probe("HITPAN_BO_JWT_SECRET",    "Backoffice:JwtKey",        "JWT (백오피스)"),
+            Probe("HITPAN_LICENSE_PEPPER",   "License:Pepper",           "라이선스 Pepper"),
+            Probe("HITPAN_BIZNO_PEPPER",     "Backoffice:BizNoPepper",   "사업자번호 Pepper"),
+            Probe("HITPAN_NTS_API_KEY",      "BizVerify:NtsApiKey",      "국세청 API"),
+            Probe("HITPAN_SMTP_HOST",        "Smtp:Host",                "SMTP Host"),
+            Probe("HITPAN_SMTP_USER",        "Smtp:User",                "SMTP User"),
+            Probe("HITPAN_SMTP_PASS",        "Smtp:Password",            "SMTP Password"),
+            Probe("HITPAN_SMTP_FROM",        "Smtp:From",                "SMTP From"),
+            Probe("HITPAN_TOSS_CLIENT_KEY",  "Toss:ClientKey",           "토스 Client Key"),
+            Probe("HITPAN_TOSS_SECRET_KEY",  "Toss:SecretKey",           "토스 Secret Key"),
+        };
+
+        return Ok(new
+        {
+            success = true,
+            allPresent = checks.All(c => c.Present),
+            anyDev = checks.Any(c => c.IsDev),
+            checkedAt = DateTime.UtcNow,
+            items = checks
+        });
+    }
+
+    private CredentialCheck Probe(string envName, string configKey, string display)
+    {
+        var env = Environment.GetEnvironmentVariable(envName);
+        var cfg = _config[configKey];
+        var v = !string.IsNullOrWhiteSpace(env) ? env : cfg;
+        var present = !string.IsNullOrWhiteSpace(v);
+        var isDev = !present || (v != null && (v.StartsWith("DEV-", StringComparison.OrdinalIgnoreCase) || v == "dev-pepper-2026"));
+        return new CredentialCheck
+        {
+            Name = display,
+            EnvName = envName,
+            Present = present,
+            IsDev = isDev
+        };
+    }
+
+    public class CredentialCheck
+    {
+        public string Name { get; set; } = "";
+        public string EnvName { get; set; } = "";
+        public bool Present { get; set; }
+        public bool IsDev { get; set; }
+    }
+
     [HttpPost("test-mail")]
     public async Task<IActionResult> TestMail([FromBody] TestMailRequest req, CancellationToken ct)
     {

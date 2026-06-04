@@ -49,7 +49,15 @@
             </div>
         </div>
 
-        <button class="btn-pay" @onclick="HandlePay" disabled="@_processing">
+        @if (_tossConfigured == false)
+        {
+            <div class="notice-banner">
+                결제 시스템 점검 중입니다. 자격증명 박제 후 이용 가능합니다.
+                <span class="notice-detail">(본사 운영자 — /owner/credentials-status 확인)</span>
+            </div>
+        }
+
+        <button class="btn-pay" @onclick="HandlePay" disabled="@(_processing || _tossConfigured == false)">
             @(_processing ? "결제 진행 중..." : $"{_priceText} 결제하기")
         </button>
 
@@ -71,6 +79,20 @@
     private string _planNote = "";
     private string _method = "card";
     private bool _processing;
+    private bool? _tossConfigured;
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            var cfg = await Http.GetFromJsonAsync<TossConfig>("api/payments/toss/config");
+            _tossConfigured = cfg?.Configured ?? false;
+        }
+        catch (Exception)
+        {
+            _tossConfigured = false;
+        }
+    }
 
     protected override void OnParametersSet()
     {
@@ -117,6 +139,8 @@
     }
 
     private record ConfirmResult(bool Success, string? Message, string? LicenseKey);
+
+    private record TossConfig(bool Configured, string? ClientKey, string? Message);
 }
 
 <style>
@@ -138,4 +162,6 @@
 .btn-pay:hover:not(:disabled) { background: #0A5240; }
 .btn-pay:disabled { opacity: 0.6; cursor: not-allowed; }
 .security { text-align: center; margin-top: 16px; font-size: 12px; color: #6B7280; }
+.notice-banner { background: #FFF7E6; border: 1px solid #FFD591; color: #8B5A00; border-radius: 8px; padding: 12px 16px; margin-bottom: 16px; font-size: 13px; }
+.notice-detail { display: block; margin-top: 4px; font-size: 11px; color: #B07B1A; }
 </style>
