@@ -1,0 +1,69 @@
+using System.Text;
+using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.IdentityModel.Tokens;
+
+namespace HitPan.Backoffice.API;
+
+// 백오피스 API 진입점 (헌법 #35 정합 — 본사 클라우드, ERP API와 완전 분리)
+//
+// 헌법 정합:
+//   #18·#22 — 본사 DB만 박제 (고객 업무 데이터 0건)
+//   #35 — ERP JWT와 별도 키·발급자·청취자
+public class Program
+{
+    public static void Main(string[] args)
+    {
+        var builder = WebApplication.CreateBuilder(args);
+
+        builder.Services.AddControllers();
+        builder.Services.AddEndpointsApiExplorer();
+
+        // JWT 인증 (백오피스 전용 — ERP와 분리)
+        var jwt = builder.Configuration.GetSection("Jwt");
+        var secret = jwt["Secret"] ?? "DEV-backoffice-secret-key-change-in-production-32+chars";
+        var issuer = jwt["Issuer"] ?? "hitpan-backoffice";
+        var audience = jwt["Audience"] ?? "backoffice";
+
+        builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
+            .AddJwtBearer(o =>
+            {
+                o.TokenValidationParameters = new TokenValidationParameters
+                {
+                    ValidateIssuer = true,
+                    ValidateAudience = true,
+                    ValidateLifetime = true,
+                    ValidateIssuerSigningKey = true,
+                    ValidIssuer = issuer,
+                    ValidAudience = audience,
+                    IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(secret))
+                };
+            });
+        builder.Services.AddAuthorization(o =>
+        {
+            o.AddPolicy("PlatformAdmin", p => p.RequireClaim("account_type", "platform_admin", "platform_owner"));
+            o.AddPolicy("Reseller", p => p.RequireClaim("account_type", "reseller_admin"));
+            o.AddPolicy("Any", p => p.RequireAuthenticatedUser());
+        });
+
+        // CORS — HitPan.Backoffice (5291)에서만 호출 허용
+        builder.Services.AddCors(o =>
+        {
+            o.AddDefaultPolicy(p => p
+                .WithOrigins("http://localhost:5291", "https://back.hitpan.kr")
+                .AllowAnyHeader()
+                .AllowAnyMethod()
+                .AllowCredentials());
+        });
+
+        var app = builder.Build();
+
+        app.UseCors();
+        app.UseAuthentication();
+        app.UseAuthorization();
+
+        app.MapControllers();
+        app.MapGet("/healthz", () => Results.Ok(new { status = "ok", svc = "hitpan-backoffice-api" }));
+
+        app.Run();
+    }
+}

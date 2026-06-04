@@ -27,6 +27,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "HitPan.Backoffice", "HitPan
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "HitPan.Landing", "HitPan.Landing\HitPan.Landing.csproj", "{ADC5F798-4EF8-48B5-95C4-35C133268E47}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "HitPan.Backoffice.API", "HitPan.Backoffice.API\HitPan.Backoffice.API.csproj", "{D4C56748-06DA-49D6-B656-496678B0B8EC}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -181,6 +183,18 @@ Global
 		{ADC5F798-4EF8-48B5-95C4-35C133268E47}.Release|x64.Build.0 = Release|Any CPU
 		{ADC5F798-4EF8-48B5-95C4-35C133268E47}.Release|x86.ActiveCfg = Release|Any CPU
 		{ADC5F798-4EF8-48B5-95C4-35C133268E47}.Release|x86.Build.0 = Release|Any CPU
+		{D4C56748-06DA-49D6-B656-496678B0B8EC}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{D4C56748-06DA-49D6-B656-496678B0B8EC}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{D4C56748-06DA-49D6-B656-496678B0B8EC}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{D4C56748-06DA-49D6-B656-496678B0B8EC}.Debug|x64.Build.0 = Debug|Any CPU
+		{D4C56748-06DA-49D6-B656-496678B0B8EC}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{D4C56748-06DA-49D6-B656-496678B0B8EC}.Debug|x86.Build.0 = Debug|Any CPU
+		{D4C56748-06DA-49D6-B656-496678B0B8EC}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{D4C56748-06DA-49D6-B656-496678B0B8EC}.Release|Any CPU.Build.0 = Release|Any CPU
+		{D4C56748-06DA-49D6-B656-496678B0B8EC}.Release|x64.ActiveCfg = Release|Any CPU
+		{D4C56748-06DA-49D6-B656-496678B0B8EC}.Release|x64.Build.0 = Release|Any CPU
+		{D4C56748-06DA-49D6-B656-496678B0B8EC}.Release|x86.ActiveCfg = Release|Any CPU
+		{D4C56748-06DA-49D6-B656-496678B0B8EC}.Release|x86.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
