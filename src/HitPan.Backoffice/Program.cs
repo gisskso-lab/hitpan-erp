@@ -1,5 +1,6 @@
 using HitPan.Backoffice.Components;
 using HitPan.Backoffice.Services;
+using Microsoft.AspNetCore.Authentication.Cookies;
 using MudBlazor.Services;
 
 namespace HitPan.Backoffice;
@@ -14,23 +15,34 @@ public class Program
         builder.Services.AddRazorComponents()
             .AddInteractiveServerComponents();
 
+        // 폼 POST 로그인용 컨트롤러 (Views 포함 — AntiForgery 필터 등록 위해)
+        builder.Services.AddControllersWithViews();
+
         builder.Services.AddMudServices();
 
-        // 인증·인가 — 백오피스 전용 JWT (다음 세션에 별도 발급기 박제)
-        // 헌법 #35 정합: ERP JWT와 완전 분리 (aud=backoffice)
-        builder.Services.AddAuthentication("Backoffice").AddCookie("Backoffice", o =>
-        {
-            o.LoginPath = "/login";
-        });
+        // 인증·인가 — 백오피스 쿠키 (ERP JWT와 완전 분리, 헌법 #35)
+        builder.Services.AddAuthentication(CookieAuthenticationDefaults.AuthenticationScheme)
+            .AddCookie(o =>
+            {
+                o.LoginPath = "/backoffice/login";
+                o.LogoutPath = "/backoffice/auth/signout";
+                o.AccessDeniedPath = "/backoffice/login";
+                o.Cookie.Name = "hitpan_bo";
+                o.Cookie.HttpOnly = true;
+                o.Cookie.SameSite = SameSiteMode.Lax;
+                o.ExpireTimeSpan = TimeSpan.FromHours(8);
+                o.SlidingExpiration = true;
+            });
         builder.Services.AddAuthorization(o =>
         {
-            // 백오피스 정책 — 다음 세션 JWT 박제 후 RequireClaim으로 강화
-            o.AddPolicy("PlatformOnlyV2", p => p.RequireAuthenticatedUser());
-            o.AddPolicy("PlatformManagerOrAbove", p => p.RequireAuthenticatedUser());
+            o.AddPolicy("PlatformOnlyV2", p => p.RequireAuthenticatedUser()
+                .RequireClaim("account_type", "platform_admin", "platform_owner"));
+            o.AddPolicy("PlatformManagerOrAbove", p => p.RequireAuthenticatedUser()
+                .RequireClaim("account_type", "platform_admin", "platform_owner"));
         });
         builder.Services.AddCascadingAuthenticationState();
 
-        // HttpClient — 백오피스 API 호출 (별도 HitPan.Backoffice.API 분리 예정)
+        // HttpClient — ERP API 호출 (헌법 #35: 백오피스가 ERP API로 인증 위임 — 다음 단계에 별도 백오피스 API로 전환)
         var backofficeApi = builder.Configuration["BackofficeApi:BaseUrl"] ?? "http://localhost:5257/";
         builder.Services.AddHttpClient<BackofficeService>(c => c.BaseAddress = new Uri(backofficeApi));
 
@@ -46,10 +58,12 @@ public class Program
         app.UseHttpsRedirection();
         app.UseStaticFiles();
 
+        app.UseRouting();
         app.UseAuthentication();
         app.UseAuthorization();
         app.UseAntiforgery();
 
+        app.MapControllers();
         app.MapRazorComponents<App>()
             .AddInteractiveServerRenderMode();
 
