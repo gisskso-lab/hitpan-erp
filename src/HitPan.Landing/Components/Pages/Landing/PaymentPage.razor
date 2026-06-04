@@ -57,6 +57,11 @@
             </div>
         }
 
+        @if (!string.IsNullOrEmpty(_error))
+        {
+            <div class="error-banner">@_error</div>
+        }
+
         <button class="btn-pay" @onclick="HandlePay" disabled="@(_processing || _tossConfigured == false)">
             @(_processing ? "결제 진행 중..." : $"{_priceText} 결제하기")
         </button>
@@ -80,6 +85,7 @@
     private string _method = "card";
     private bool _processing;
     private bool? _tossConfigured;
+    private string? _error;
 
     protected override async Task OnInitializedAsync()
     {
@@ -111,18 +117,21 @@
 
     private async Task HandlePay()
     {
+        _error = null;
         _processing = true;
         try
         {
-            // 사장님 결재 박제 2026-06-02 (의중 B 모두결재) — 베타 박제: 결제 SDK 미박제, API 직접 호출로 tenants.status='active'
-            // 정식 박제 = 토스 빌링키 박제 후 webhook 박제로 전환 (TossWebhookController 박제)
+            // 사장님 결재 2026-06-02 (의중 B 모두결재) — 베타: 결제 SDK 미박제, API 직접 호출로 tenants.status='active'
+            // 정식 = 토스 빌링키 + webhook 전환 (W10+ TossWebhookController)
             string? licenseKey = null;
             if (!string.IsNullOrWhiteSpace(Token))
             {
                 var resp = await Http.PostAsJsonAsync("api/landing/confirm-payment", new { SignupToken = Token });
                 if (!resp.IsSuccessStatusCode)
                 {
-                    _processing = false;
+                    // 헌법 #19 silent fail 금지 — 사용자에게 명시 안내
+                    var body = await resp.Content.ReadAsStringAsync();
+                    _error = $"결제 확인 실패 ({(int)resp.StatusCode}). 잠시 후 다시 시도해주세요.";
                     return;
                 }
                 var data = await resp.Content.ReadFromJsonAsync<ConfirmResult>();
@@ -132,7 +141,12 @@
             if (!string.IsNullOrWhiteSpace(licenseKey)) qs += $"&key={Uri.EscapeDataString(licenseKey)}";
             Nav.NavigateTo($"/signup/welcome?{qs}");
         }
-        catch (Exception)
+        catch (Exception ex)
+        {
+            // 헌법 #15 정합 — 빈 catch 금지
+            _error = $"결제 처리 중 오류: {ex.Message}";
+        }
+        finally
         {
             _processing = false;
         }
@@ -164,4 +178,5 @@
 .security { text-align: center; margin-top: 16px; font-size: 12px; color: #6B7280; }
 .notice-banner { background: #FFF7E6; border: 1px solid #FFD591; color: #8B5A00; border-radius: 8px; padding: 12px 16px; margin-bottom: 16px; font-size: 13px; }
 .notice-detail { display: block; margin-top: 4px; font-size: 11px; color: #B07B1A; }
+.error-banner { background: #FEE2E2; border: 1px solid #FECACA; color: #B91C1C; border-radius: 8px; padding: 12px 16px; margin-bottom: 16px; font-size: 13px; }
 </style>
