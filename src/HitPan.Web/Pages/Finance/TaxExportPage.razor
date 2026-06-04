@@ -349,7 +349,7 @@
             {
                 _sendHistory = System.Text.Json.JsonSerializer.Deserialize<List<SendHistoryItem>>(json) ?? new();
             }
-            catch { _sendHistory = new(); }
+            catch (Exception ex) { _sendHistory = new(); Snackbar.Add($"송부 이력 파싱 실패: {ex.Message}", Severity.Warning); }
         }
     }
 

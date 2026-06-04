@@ -362,7 +362,7 @@
                 .ThenByDescending(x => x.TotalUnpaid)
                 .ToList();
         }
-        catch { _aging = new(); }
+        catch (Exception ex) { _aging = new(); Snackbar.Add($"미수금 연체 조회 실패: {ex.Message}", Severity.Warning); }
     }
 
     /// <summary>4/29 사장님 결재 (옵션 B): 권한·구독·기기 등 계정 관련 경고를 _alerts에 모아 Hero 우측에 카드로 노출.</summary>

@@ -4,6 +4,7 @@
 @using HitPan.Web.Services
 @inject ItemMasterService ItemSvc
 @inject NavigationManager Nav
+@inject ISnackbar Snackbar
 
 <PageTitle>상품마스터</PageTitle>
 
@@ -119,7 +120,7 @@
             var type = _activeChip == "all" ? null : _activeChip;
             _rows = (await ItemSvc.GetListAsync(type: type)) ?? new();
         }
-        catch { _rows = new(); }
+        catch (Exception ex) { _rows = new(); Snackbar.Add($"목록 조회 실패: {ex.Message}", Severity.Warning); }
         ApplyFilter();
         _loading = false;
     }
