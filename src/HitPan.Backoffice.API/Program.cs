@@ -17,6 +17,8 @@ public class Program
 
         builder.Services.AddControllers();
         builder.Services.AddEndpointsApiExplorer();
+        builder.Services.AddHttpClient();
+        builder.Services.AddSingleton<HitPan.Backoffice.API.Services.IEmailSender, HitPan.Backoffice.API.Services.EmailSender>();
 
         // JWT 인증 (백오피스 전용 — ERP와 분리)
         var jwt = builder.Configuration.GetSection("Jwt");

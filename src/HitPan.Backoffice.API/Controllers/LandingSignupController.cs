@@ -2,6 +2,7 @@ using System.ComponentModel.DataAnnotations;
 using System.Security.Cryptography;
 using System.Text;
 using Dapper;
+using HitPan.Backoffice.API.Services;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using MySqlConnector;
@@ -25,11 +26,13 @@ namespace HitPan.Backoffice.API.Controllers;
 public class LandingSignupController : ControllerBase
 {
     private readonly IConfiguration _config;
+    private readonly IEmailSender _email;
     private readonly ILogger<LandingSignupController> _logger;
 
-    public LandingSignupController(IConfiguration config, ILogger<LandingSignupController> logger)
+    public LandingSignupController(IConfiguration config, IEmailSender email, ILogger<LandingSignupController> logger)
     {
         _config = config;
+        _email = email;
         _logger = logger;
     }
 
@@ -114,6 +117,13 @@ public class LandingSignupController : ControllerBase
             _logger.LogInformation("[LandingSignup] submitted token={Token} tenant={TenantCode} email={Email} plan={Plan}",
                 signupToken, tenantCode, req.Email, req.PlanType);
 
+            // 신청 접수 안내 메일 (헌법 #20 정합 — 가입 → 안내 끊김 0)
+            // SMTP 미박제 시 EmailSender 내부 로그만 출력, 가입 흐름은 중단 없음
+            _ = _email.SendAsync(req.Email,
+                "[히트판] 가입 신청 접수 완료",
+                BuildSignupReceivedHtml(req.CompanyName, tenantCode),
+                ct);
+
             return Ok(new
             {
                 success = true,
@@ -144,7 +154,7 @@ public class LandingSignupController : ControllerBase
             await using var db = await OpenAsync(ct);
 
             var signup = await db.QueryFirstOrDefaultAsync<SignupRow>(
-                @"SELECT company_name AS CompanyName, status AS Status
+                @"SELECT company_name AS CompanyName, status AS Status, email AS Email
                   FROM landing_signups WHERE signup_token = @Token",
                 new { Token = req.SignupToken });
 
@@ -169,6 +179,16 @@ public class LandingSignupController : ControllerBase
 
             _logger.LogInformation("[LandingSignup] payment confirmed token={Token} tenants_updated={Cnt} license_issued=1",
                 req.SignupToken, affected);
+
+            // 라이선스 키(부모계정ID) 이메일 송부 (헌법 #35 — 본사 백오피스가 직접 부여)
+            // SMTP 미박제 시 로그만, 가입 흐름은 중단 없음
+            if (!string.IsNullOrWhiteSpace(signup.Email))
+            {
+                _ = _email.SendAsync(signup.Email,
+                    "[히트판] 가입 완료 — 부모 계정ID(라이선스 키)",
+                    BuildLicenseHtml(signup.CompanyName, licenseKey),
+                    ct);
+            }
 
             return Ok(new
             {
@@ -235,5 +255,33 @@ public class LandingSignupController : ControllerBase
     {
         public string CompanyName { get; set; } = "";
         public string Status { get; set; } = "";
+        public string Email { get; set; } = "";
     }
+
+    private static string BuildSignupReceivedHtml(string companyName, string tenantCode) => $@"
+<div style='font-family:-apple-system,BlinkMacSystemFont,Pretendard,Segoe UI,Roboto,sans-serif;max-width:560px;margin:0 auto;padding:32px;color:#1A2B4A;'>
+  <h2 style='color:#0F6E56;margin:0 0 16px;'>가입 신청이 접수되었습니다</h2>
+  <p>안녕하세요, <b>{System.Net.WebUtility.HtmlEncode(companyName)}</b> 담당자님.</p>
+  <p>히트판 ERP 가입 신청이 정상 접수되었습니다.</p>
+  <div style='background:#F0FAF6;border:1px solid #C7E9D9;border-radius:12px;padding:16px;margin:20px 0;'>
+    <div style='font-size:13px;color:#6B7280;margin-bottom:4px;'>고객사 코드</div>
+    <div style='font-size:18px;font-weight:700;color:#0F6E56;letter-spacing:0.5px;'>{tenantCode}</div>
+  </div>
+  <p>다음 단계로 이메일 인증과 결제가 진행되며, 결제 완료 시 <b>부모 계정ID(라이선스 키)</b>가 발급됩니다.</p>
+  <p style='margin-top:24px;color:#6B7280;font-size:13px;'>이 메일은 발신 전용입니다. 문의는 support@hitpan.kr 로 부탁드립니다.</p>
+</div>";
+
+    private static string BuildLicenseHtml(string companyName, string licenseKey) => $@"
+<div style='font-family:-apple-system,BlinkMacSystemFont,Pretendard,Segoe UI,Roboto,sans-serif;max-width:560px;margin:0 auto;padding:32px;color:#1A2B4A;'>
+  <h2 style='color:#0F6E56;margin:0 0 16px;'>가입이 완료되었습니다</h2>
+  <p>안녕하세요, <b>{System.Net.WebUtility.HtmlEncode(companyName)}</b> 담당자님.</p>
+  <p>결제가 확인되어 히트판 ERP 부모 계정ID(라이선스 키)가 발급되었습니다.</p>
+  <div style='background:#0F6E56;color:#fff;border-radius:12px;padding:20px;margin:20px 0;text-align:center;'>
+    <div style='font-size:13px;opacity:0.85;margin-bottom:6px;'>부모 계정ID (라이선스 키)</div>
+    <div style='font-size:22px;font-weight:700;letter-spacing:2px;font-family:Consolas,Monaco,monospace;'>{licenseKey}</div>
+  </div>
+  <p><b>중요:</b> 이 키는 <u>한 번만 발급</u>되며, 분실 시 본인확인 후 재발급됩니다. 안전한 곳에 보관해주세요.</p>
+  <p>다음 단계에서 히트판 ERP 설치 프로그램을 다운로드하시고, 설치 중 이 키를 입력하시면 자동으로 회사 정보가 반영됩니다.</p>
+  <p style='margin-top:24px;color:#6B7280;font-size:13px;'>이 메일은 발신 전용입니다. 문의는 support@hitpan.kr 로 부탁드립니다.</p>
+</div>";
 }

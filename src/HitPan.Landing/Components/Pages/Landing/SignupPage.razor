@@ -62,6 +62,20 @@
             </div>
 
             <div class="field">
+                <label>사업자등록번호 *</label>
+                <div class="bizno-row">
+                    <input type="text" @bind="_form.BizNo" placeholder="000-00-00000" maxlength="12" />
+                    <button type="button" class="btn-verify" @onclick="VerifyBizNo" disabled="@_bizVerifying">
+                        @(_bizVerifying ? "확인 중..." : "검증")
+                    </button>
+                </div>
+                @if (_bizVerifyMsg is not null)
+                {
+                    <div class="bizno-msg @(_bizVerified ? "ok" : "warn")">@_bizVerifyMsg</div>
+                }
+            </div>
+
+            <div class="field">
                 <label>연락처 *</label>
                 <input type="tel" @bind="_form.Phone" required placeholder="010-0000-0000" />
             </div>
@@ -166,6 +180,52 @@
     private bool _bizUploaded;
     private bool _demoMode = true; // 사장님 결재 2026-06-01: 기본 = DEMO (베타 출시 후 false 전환)
 
+    // 사업자번호 검증 (헌법 #35 — 백오피스 API /api/landing/biz-no/verify)
+    private bool _bizVerifying;
+    private bool _bizVerified;
+    private string? _bizVerifyMsg;
+
+    private async Task VerifyBizNo()
+    {
+        _bizVerifyMsg = null;
+        _bizVerified = false;
+        if (string.IsNullOrWhiteSpace(_form.BizNo))
+        {
+            _bizVerifyMsg = "사업자번호를 입력해주세요.";
+            return;
+        }
+        _bizVerifying = true;
+        try
+        {
+            var res = await Http.PostAsJsonAsync("api/landing/biz-no/verify", new { BizNo = _form.BizNo });
+            var payload = await res.Content.ReadFromJsonAsync<BizVerifyResponse>();
+            if (payload is not null)
+            {
+                _bizVerified = payload.Valid;
+                _bizVerifyMsg = payload.Message;
+            }
+            else
+            {
+                _bizVerifyMsg = "검증 응답을 읽을 수 없습니다.";
+            }
+        }
+        catch (Exception ex)
+        {
+            _bizVerifyMsg = $"검증 중 오류: {ex.Message}";
+        }
+        finally
+        {
+            _bizVerifying = false;
+        }
+    }
+
+    private class BizVerifyResponse
+    {
+        public bool Valid { get; set; }
+        public string Message { get; set; } = "";
+        public string? Source { get; set; }
+    }
+
     private void SetDemoMode(bool demo)
     {
         _demoMode = demo;
@@ -179,6 +239,7 @@
                 CompanyName = "(주)히트판 데모상사",
                 RepresentativeName = "데모대표",
                 Phone = "010-0000-0000",
+                BizNo = "123-45-67890",
                 AgreeService = true,
                 AgreePrivacy = true,
                 AgreeOutsourcing = true,
@@ -316,11 +377,21 @@
                 return;
             }
 
-            // 실제 가입 — POST /api/landing/signup (사장님 모두결재 2026-06-01 잔여 #2)
+            // 실제 가입 — POST /api/landing/signup (헌법 #35 — 백오피스 API 5258)
+            if (string.IsNullOrWhiteSpace(_form.BizNo))
+            {
+                _error = "사업자번호를 입력하고 검증 버튼을 눌러주세요.";
+                return;
+            }
+            if (!_bizVerified)
+            {
+                _error = "사업자번호 검증을 통과해야 합니다. '검증' 버튼을 눌러주세요.";
+                return;
+            }
             var payload = new
             {
                 CompanyName = _form.CompanyName,
-                BizNo = "0000000000", // BizLicenseUploader OCR 결합 박제 대기 — 현재는 더미 (검증 결재 후)
+                BizNo = _form.BizNo,
                 CeoName = _form.RepresentativeName,
                 Email = _form.Email,
                 Phone = _form.Phone,
@@ -356,6 +427,7 @@
         public string CompanyName { get; set; } = "";
         public string RepresentativeName { get; set; } = "";
         public string Phone { get; set; } = "";
+        public string BizNo { get; set; } = "";
         public bool AgreeService { get; set; }
         public bool AgreePrivacy { get; set; }
         public bool AgreeOutsourcing { get; set; }
@@ -403,6 +475,15 @@
 .terms-row .opened-mark--gray { color: #6B7280; background: #F3F4F6; }
 .terms-startall { display: block; width: 100%; padding: 12px 16px; margin-bottom: 12px; background: linear-gradient(135deg,#0F6E56 0%,#0A5240 100%); color: #fff; border: none; border-radius: 10px; font-size: 14px; font-weight: 700; cursor: pointer; transition: transform 0.15s ease, box-shadow 0.15s ease; }
 .terms-startall:hover { transform: translateY(-1px); box-shadow: 0 8px 20px rgba(15,110,86,0.28); }
+.bizno-row { display: flex; gap: 8px; }
+.bizno-row input { flex: 1; padding: 12px; border: 1px solid #D1D5DB; border-radius: 8px; font-size: 14px; }
+.bizno-row input:focus { outline: none; border-color: #0F6E56; }
+.btn-verify { padding: 0 16px; background: #0F6E56; color: #fff; border: none; border-radius: 8px; font-weight: 600; cursor: pointer; white-space: nowrap; }
+.btn-verify:hover:not(:disabled) { background: #0A5240; }
+.btn-verify:disabled { opacity: 0.6; cursor: not-allowed; }
+.bizno-msg { margin-top: 8px; padding: 8px 12px; border-radius: 6px; font-size: 13px; }
+.bizno-msg.ok { background: #DCFCE7; color: #166534; }
+.bizno-msg.warn { background: #FEF3C7; color: #92400E; }
 .error { background: #FEE2E2; color: #B91C1C; padding: 12px; border-radius: 8px; margin-bottom: 12px; font-size: 14px; }
 .btn-submit { width: 100%; padding: 14px; background: #0F6E56; color: #fff; border: none; border-radius: 8px; font-size: 16px; font-weight: 600; cursor: pointer; }
 .btn-submit:hover:not(:disabled) { background: #0A5240; }
