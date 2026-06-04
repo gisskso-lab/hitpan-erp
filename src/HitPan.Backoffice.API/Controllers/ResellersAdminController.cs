@@ -115,7 +115,22 @@ public class ResellersAdminController : ControllerBase
                 new { Id = id });
             row.TenantCount = tenantCount;
 
-            return Ok(new { success = true, item = row });
+            // 영업 고객사 최근 20건 (메타만)
+            var tenants = await db.QueryAsync<ResellerTenantBrief>(@"
+                SELECT
+                    CAST(tenant_id AS CHAR) AS TenantId,
+                    tenant_code AS TenantCode,
+                    company_name AS CompanyName,
+                    status AS Status,
+                    subscription_tier AS SubscriptionTier,
+                    created_at AS CreatedAt
+                FROM tenants
+                WHERE reseller_id = @Id
+                ORDER BY created_at DESC
+                LIMIT 20",
+                new { Id = id });
+
+            return Ok(new { success = true, item = row, tenants });
         }
         catch (Exception ex)
         {
@@ -157,5 +172,15 @@ public class ResellersAdminController : ControllerBase
         public string? BankName { get; set; }
         public string? AccountHolder { get; set; }
         public DateTime UpdatedAt { get; set; }
+    }
+
+    public class ResellerTenantBrief
+    {
+        public string TenantId { get; set; } = "";
+        public string TenantCode { get; set; } = "";
+        public string CompanyName { get; set; } = "";
+        public string Status { get; set; } = "";
+        public string? SubscriptionTier { get; set; }
+        public DateTime CreatedAt { get; set; }
     }
 }
