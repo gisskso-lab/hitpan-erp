@@ -45,11 +45,14 @@ public class Program
             o.AddPolicy("Any", p => p.RequireAuthenticatedUser());
         });
 
-        // CORS — HitPan.Backoffice (5291)에서만 호출 허용
+        // CORS — HitPan.Backoffice(5291) + HitPan.Landing(5082) 허용
+        //   - 랜딩은 Server-side Blazor라 서버측 HttpClient 호출이지만, 운영 환경 추가 안전망
         builder.Services.AddCors(o =>
         {
             o.AddDefaultPolicy(p => p
-                .WithOrigins("http://localhost:5291", "https://back.hitpan.kr")
+                .WithOrigins(
+                    "http://localhost:5291", "https://back.hitpan.kr",
+                    "http://localhost:5082", "https://www.hitpan.kr")
                 .AllowAnyHeader()
                 .AllowAnyMethod()
                 .AllowCredentials());

@@ -107,7 +107,7 @@ builder.Services.AddScoped<ITossWebhookService, TossWebhookService>();  // 토�
 builder.Services.AddScoped<ITenantSnapshotService, TenantSnapshotService>();  // 백오피스 Pull 복사본 조회 (사장님 결재 2026-06-01)
 builder.Services.AddScoped<IRefundService, RefundService>();  // 백오피스 환불 처리 (사장님 결재 2026-06-01)
 builder.Services.AddScoped<IResellerApplicationService, ResellerApplicationService>();  // 대리점 신청 (사장님 결재 2026-06-01)
-builder.Services.AddScoped<ILandingSignupService, LandingSignupService>();  // 랜딩 가입 (사장님 모두결재 2026-06-01, 잔여 #2)
+// 헌법 #35 (2026-06-04 사장님 결재) — 랜딩 가입은 HitPan.Backoffice.API로 이식 완료. ERP는 고객사 업무 전용.
 // WS-20260601-13 본사 시리얼 발급 (HP-/HR- 4-eyes, 8명제 #2·#4, 백엔드 매니저)
 builder.Services.AddSingleton<HitPan.API.Services.ISerialIssueService, HitPan.API.Services.SerialIssueService>();
 // WS-20260601-14 이메일·SMS 2채널 인프라 (헌법 #16 정합, 백엔드 매니저 + 보안 매니저 2)

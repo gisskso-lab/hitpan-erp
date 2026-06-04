@@ -13,8 +13,9 @@ public class Program
             .AddInteractiveServerComponents();
 
         // HttpClient — 본사 백오피스 API 호출용 (헌법 #35: 랜딩 → 백오피스 가입 흐름)
-        // BaseAddress는 환경별 appsettings에서 박제 (back.hitpan.kr API)
-        var backofficeApi = builder.Configuration["BackofficeApi:BaseUrl"] ?? "http://localhost:5257/";
+        //   - 로컬: http://localhost:5258 (HitPan.Backoffice.API)
+        //   - 운영: https://api.back.hitpan.kr (appsettings.Production.json)
+        var backofficeApi = builder.Configuration["BackofficeApi:BaseUrl"] ?? "http://localhost:5258/";
         builder.Services.AddHttpClient("backoffice", c => c.BaseAddress = new Uri(backofficeApi));
         builder.Services.AddScoped(sp => sp.GetRequiredService<IHttpClientFactory>().CreateClient("backoffice"));
 
