@@ -1,4 +1,5 @@
 @page "/backoffice/login"
+@rendermode InteractiveServer
 @attribute [Microsoft.AspNetCore.Authorization.AllowAnonymous]
 @layout EmptyLayout
 @inject BackofficeService Bo
@@ -54,32 +55,44 @@
 </div>
 
 <style>
+    /* 사장님 결재 2026-06-04: 다크 그라데이션 → 밝은 톤 (가독성) */
     .bo-login-page {
         min-height: 100vh;
         display: flex;
         align-items: center;
         justify-content: center;
-        background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%);
+        background: linear-gradient(135deg, #F0F9F5 0%, #E0F2EA 100%);
+        font-family: 'Pretendard', 'Malgun Gothic', sans-serif;
     }
     .bo-login-card {
         width: 100%;
-        max-width: 400px;
+        max-width: 420px;
         border-radius: 16px !important;
+        background: #fff !important;
+        box-shadow: 0 8px 32px rgba(15, 110, 86, 0.12) !important;
     }
     .bo-login-brand {
         text-align: center;
     }
     .bo-login-logo {
-        width: 52px; height: 52px;
-        background: #0f6e56;
-        border-radius: 12px;
+        width: 56px; height: 56px;
+        background: #0F6E56;
+        border-radius: 14px;
         display: inline-flex;
         align-items: center;
         justify-content: center;
-        font-weight: 700;
-        font-size: 1.1rem;
+        font-weight: 800;
+        font-size: 1.2rem;
         color: #fff;
-        margin-bottom: 12px;
+        margin-bottom: 16px;
+        box-shadow: 0 4px 12px rgba(15, 110, 86, 0.25);
+    }
+    .bo-login-brand h5 {
+        color: #0F1419;
+        font-weight: 700;
+    }
+    .bo-login-brand p {
+        color: #6B7280;
     }
 </style>
 
