@@ -51,6 +51,12 @@ public class Program
         // 협력업체 가입 신청 등 비인증 공개 API용 named client (사장님 결재 2026-06-04)
         builder.Services.AddHttpClient("backoffice-public", c => c.BaseAddress = new Uri(backofficeApi));
 
+        // 인증이 필요한 백오피스 API 호출용 — 쿠키 access_token → Bearer 자동 첨부
+        builder.Services.AddHttpContextAccessor();
+        builder.Services.AddTransient<JwtFromCookieHandler>();
+        builder.Services.AddHttpClient("backoffice-authed", c => c.BaseAddress = new Uri(backofficeApi))
+            .AddHttpMessageHandler<JwtFromCookieHandler>();
+
         var app = builder.Build();
 
         if (!app.Environment.IsDevelopment())

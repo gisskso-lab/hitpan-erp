@@ -1,0 +1,33 @@
+@*
+    협력업체 신청 반려 사유 입력 다이얼로그 (사장님 결재 2026-06-04)
+*@
+
+<MudDialog>
+    <DialogContent>
+        <MudText Typo="Typo.body2" Color="Color.Secondary" Class="mb-3">
+            <b>@(Row?.CompanyName ?? "")</b> 협력업체 가입 신청을 반려합니다. 사유는 신청자 이메일로 발송됩니다.
+        </MudText>
+        <MudTextField @bind-Value="_reason" Label="반려 사유 *"
+                      Lines="4" Variant="Variant.Outlined" Margin="Margin.Dense"
+                      Placeholder="예: 영업 지역 중복으로 인한 검토 결과 보류" />
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="Cancel">취소</MudButton>
+        <MudButton Color="Color.Error" Variant="Variant.Filled" OnClick="Submit">반려</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private IMudDialogInstance? MudDialog { get; set; }
+    [Parameter] public AdminResellerApplications.ApplicationRow? Row { get; set; }
+
+    private string _reason = "";
+
+    private void Submit()
+    {
+        if (string.IsNullOrWhiteSpace(_reason)) return;
+        MudDialog?.Close(DialogResult.Ok(_reason));
+    }
+
+    private void Cancel() => MudDialog?.Cancel();
+}

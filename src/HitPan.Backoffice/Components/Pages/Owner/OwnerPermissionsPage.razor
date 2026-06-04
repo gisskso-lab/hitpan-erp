@@ -1,0 +1,195 @@
+@page "/owner/permissions"
+@layout PlatformLayout
+@attribute [Authorize(Policy = "OwnerOnly")]
+@rendermode InteractiveServer
+@inject IHttpClientFactory HttpFactory
+@inject ISnackbar Snackbar
+
+@*
+    백오피스 계층 권한 관리 (사장님 결재 2026-06-04, 헌법 #11·#35)
+    사장님(Owner)만 접근. 각 권한별로 허용 역할(role)을 멀티 체크로 박제.
+*@
+
+<PageTitle>권한 관리 — 히트판 백오피스 (Owner)</PageTitle>
+
+<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px;">
+    <div>
+        <MudText Typo="Typo.h5" Style="font-weight:600;">권한 관리</MudText>
+        <MudText Typo="Typo.body2" Color="Color.Secondary">
+            사장님 전용 (Owner) — 백오피스 각 기능별로 허용 역할을 직접 박제하세요. 60초 이내 전사 반영됩니다.
+        </MudText>
+    </div>
+</div>
+
+<MudAlert Severity="Severity.Info" Class="mb-3" Dense="true" Icon="@Icons.Material.Filled.Shield">
+    🔒 owner는 항상 자동 포함되어 잠금 사고를 방지합니다.
+</MudAlert>
+
+@if (_loading)
+{
+    <MudProgressLinear Indeterminate="true" Color="Color.Primary" />
+}
+else
+{
+    @foreach (var category in _items.GroupBy(x => x.Category).OrderBy(g => g.Key))
+    {
+        <MudPaper Elevation="1" Class="pa-4 mb-3" Style="border-radius:12px;">
+            <MudText Typo="Typo.h6" Class="mb-3" Style="color:#0F6E56;">@CategoryLabel(category.Key)</MudText>
+
+            @foreach (var item in category.OrderBy(x => x.PermissionKey))
+            {
+                <MudPaper Elevation="0" Class="pa-3 mb-2" Style="border:1px solid #EAEDF0;border-radius:10px;">
+                    <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:16px;">
+                        <div style="flex:1;">
+                            <MudText Typo="Typo.subtitle2" Style="font-weight:700;">@item.DisplayName</MudText>
+                            <MudText Typo="Typo.caption" Color="Color.Secondary">@item.PermissionKey</MudText>
+                            @if (!string.IsNullOrEmpty(item.Description))
+                            {
+                                <MudText Typo="Typo.body2" Class="mt-1">@item.Description</MudText>
+                            }
+                        </div>
+                        <div style="min-width:340px;">
+                            @foreach (var role in AllRoles)
+                            {
+                                <MudCheckBox T="bool"
+                                             Value="@IsRoleAllowed(item, role)"
+                                             ValueChanged="@(v => ToggleRole(item, role, v))"
+                                             Color="Color.Primary"
+                                             Dense="true"
+                                             Disabled="@(role == "owner")">
+                                    @RoleLabel(role)
+                                </MudCheckBox>
+                            }
+                            <MudButton OnClick="@(() => SaveAsync(item))"
+                                       Variant="Variant.Filled" Color="Color.Primary"
+                                       Size="Size.Small" Class="mt-2"
+                                       StartIcon="@Icons.Material.Filled.Save"
+                                       Disabled="@_saving">
+                                저장
+                            </MudButton>
+                        </div>
+                    </div>
+                </MudPaper>
+            }
+        </MudPaper>
+    }
+}
+
+@code {
+    private List<PermissionItem> _items = new();
+    private bool _loading = true;
+    private bool _saving;
+
+    private static readonly string[] AllRoles = new[]
+    {
+        "owner", "platform_owner", "platform_admin", "platform_manager", "platform_staff"
+    };
+
+    protected override async Task OnInitializedAsync() => await LoadAsync();
+
+    private async Task LoadAsync()
+    {
+        _loading = true;
+        try
+        {
+            var http = HttpFactory.CreateClient("backoffice-authed");
+            var res = await http.GetFromJsonAsync<ListResponse>("api/backoffice/permissions");
+            _items = res?.Items ?? new();
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"권한 목록 조회 실패: {ex.Message}", Severity.Error);
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    private static bool IsRoleAllowed(PermissionItem item, string role) =>
+        item.AllowedRoles
+            .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Any(r => string.Equals(r, role, StringComparison.OrdinalIgnoreCase));
+
+    private void ToggleRole(PermissionItem item, string role, bool isChecked)
+    {
+        var set = new HashSet<string>(
+            item.AllowedRoles.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries),
+            StringComparer.OrdinalIgnoreCase);
+        if (isChecked) set.Add(role);
+        else if (role != "owner") set.Remove(role);
+        // owner는 항상 포함
+        set.Add("owner");
+        item.AllowedRoles = string.Join(",", set);
+    }
+
+    private async Task SaveAsync(PermissionItem item)
+    {
+        _saving = true;
+        try
+        {
+            var http = HttpFactory.CreateClient("backoffice-authed");
+            var roles = item.AllowedRoles
+                .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                .ToList();
+            var res = await http.PutAsJsonAsync(
+                $"api/backoffice/permissions/{item.PermissionKey}",
+                new { AllowedRoles = roles });
+            var payload = await res.Content.ReadFromJsonAsync<ActionResponse>();
+            if (res.IsSuccessStatusCode && payload?.Success == true)
+            {
+                Snackbar.Add($"{item.DisplayName} 권한이 저장되었습니다.", Severity.Success);
+            }
+            else
+            {
+                Snackbar.Add(payload?.Message ?? $"저장 실패 ({(int)res.StatusCode})", Severity.Error);
+            }
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"저장 오류: {ex.Message}", Severity.Error);
+        }
+        finally
+        {
+            _saving = false;
+        }
+    }
+
+    private static string CategoryLabel(string c) => c switch
+    {
+        "reseller-mgmt" => "협력업체 관리",
+        "tenant-mgmt" => "고객사 관리",
+        _ => c
+    };
+
+    private static string RoleLabel(string r) => r switch
+    {
+        "owner" => "Owner (사장님)",
+        "platform_owner" => "Platform Owner",
+        "platform_admin" => "본사 Admin",
+        "platform_manager" => "본사 Manager",
+        "platform_staff" => "본사 Staff",
+        _ => r
+    };
+
+    public class PermissionItem
+    {
+        public string PermissionKey { get; set; } = "";
+        public string DisplayName { get; set; } = "";
+        public string? Description { get; set; }
+        public string Category { get; set; } = "";
+        public string AllowedRoles { get; set; } = "";
+    }
+
+    private class ListResponse
+    {
+        public bool Success { get; set; }
+        public List<PermissionItem> Items { get; set; } = new();
+    }
+
+    private class ActionResponse
+    {
+        public bool Success { get; set; }
+        public string? Message { get; set; }
+    }
+}
