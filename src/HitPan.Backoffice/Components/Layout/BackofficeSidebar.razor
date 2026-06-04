@@ -18,72 +18,43 @@
     </div>
 
     <nav class="bo2-nav">
+        @* 헌법 #35 W1+W2+W5 (사장님 결재 2026-06-04): 활성 메뉴만 노출.
+            W9 대기 메뉴(시리얼 발급·결제·환불·정산·CS·워치독·통계)는 백오피스 API 신설 후 복원. *@
         @if (_isPlatformAdmin || _isPlatformOwner)
         {
-            <!-- 섹션 1: 대시보드 -->
             <div class="bo2-nav-section">
                 <div class="bo2-nav-section-label">대시보드</div>
                 <NavLinkItem Href="/admin/dashboard" Icon="dashboard" Label="대시보드" Match="@NavLinkMatch.All" />
             </div>
 
-            <!-- 섹션 2: 고객사 -->
             <div class="bo2-nav-section">
                 <div class="bo2-nav-section-label">고객사</div>
                 <NavLinkItem Href="/admin/tenants" Icon="business" Label="고객사 목록" Count="@_countTenants" />
-                <NavLinkItem Href="/admin/tenants/issue" Icon="add_business" Label="시리얼 발급" />
             </div>
 
-            <!-- 섹션 3: 대리점 -->
             <div class="bo2-nav-section">
-                <div class="bo2-nav-section-label">대리점</div>
-                <NavLinkItem Href="/admin/resellers" Icon="store" Label="대리점 목록" Count="@_countResellers" />
-                <NavLinkItem Href="/admin/resellers/issue" Icon="add_business" Label="대리점 발급" />
-            </div>
-
-            <!-- 섹션 4: 결제 -->
-            <div class="bo2-nav-section">
-                <div class="bo2-nav-section-label">결제</div>
-                <NavLinkItem Href="/admin/billing" Icon="receipt_long" Label="결제 목록" />
-                <NavLinkItem Href="/admin/billing/refunds" Icon="undo" Label="환불 관리" />
-                <NavLinkItem Href="/admin/settlements" Icon="account_balance" Label="수수료 정산" />
-            </div>
-
-            <!-- 섹션 5: 운영 -->
-            <div class="bo2-nav-section">
-                <div class="bo2-nav-section-label">운영</div>
-                <NavLinkItem Href="/admin/cs" Icon="support_agent" Label="고객 지원" Count="@_countCs" />
-                <NavLinkItem Href="/admin/watchdog" Icon="monitor_heart" Label="Watchdog" />
-                <NavLinkItem Href="/admin/stats" Icon="bar_chart" Label="통계" />
+                <div class="bo2-nav-section-label">협력업체</div>
+                <NavLinkItem Href="/admin/resellers" Icon="store" Label="협력업체 목록" Count="@_countResellers" />
+                <NavLinkItem Href="/admin/reseller-applications" Icon="how_to_reg" Label="협력업체 신청" />
             </div>
 
             @if (_isPlatformOwner)
             {
-                <!-- 섹션 6: 시스템 (Owner Only) -->
                 <div class="bo2-nav-section bo2-nav-section-owner">
                     <div class="bo2-nav-section-label">시스템 <span class="bo2-owner-tag">OWNER</span></div>
                     <NavLinkItem Href="/owner/system-config" Icon="settings" Label="System Config" />
                     <NavLinkItem Href="/owner/platform-users" Icon="admin_panel_settings" Label="Platform Users" />
+                    <NavLinkItem Href="/owner/permissions" Icon="vpn_key" Label="권한 관리" />
+                    <NavLinkItem Href="/owner/credentials-status" Icon="shield" Label="자격증명 상태" />
                 </div>
             }
         }
         else
         {
-            @* 백오피스 통합 박제 (사장님 결재 2026-06-02) — 대리점도 본사와 동일 /admin/* URL, 백엔드 role 분기로 자기 데이터만 *@
+            @* 대리점 메뉴 — W9 대기 *@
             <div class="bo2-nav-section">
                 <div class="bo2-nav-section-label">대시보드</div>
                 <NavLinkItem Href="/admin/dashboard" Icon="dashboard" Label="대시보드" Match="@NavLinkMatch.All" />
-            </div>
-            <div class="bo2-nav-section">
-                <div class="bo2-nav-section-label">고객사</div>
-                <NavLinkItem Href="/admin/tenants" Icon="business" Label="내 고객사" />
-            </div>
-            <div class="bo2-nav-section">
-                <div class="bo2-nav-section-label">정산</div>
-                <NavLinkItem Href="/admin/commission" Icon="payments" Label="수수료 내역" />
-            </div>
-            <div class="bo2-nav-section">
-                <div class="bo2-nav-section-label">운영</div>
-                <NavLinkItem Href="/admin/cs" Icon="support_agent" Label="CS 티켓" />
             </div>
         }
     </nav>
@@ -105,7 +76,6 @@
     // 카운트 뱃지 — 시드 0건 시 null로 숨김 처리
     private int? _countTenants = null;
     private int? _countResellers = null;
-    private int? _countCs = null;
 
     protected override async Task OnInitializedAsync()
     {

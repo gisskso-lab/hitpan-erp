@@ -20,6 +20,8 @@
         </div>
     </div>
 
+    @* 헌법 #35 W1+W2+W5 (사장님 결재 2026-06-04): 활성 메뉴만 노출.
+        W9 대기 메뉴(시리얼 발급·CS·결제·수수료·통계·워치독)는 백오피스 API 신설 후 복원. *@
     <MudNavMenu Class="bo-nav">
         <MudNavLink Href="/admin/dashboard" Icon="@Icons.Material.Filled.Dashboard" Match="NavLinkMatch.All">
             대시보드
@@ -27,40 +29,11 @@
         <MudNavLink Href="/admin/tenants" Icon="@Icons.Material.Filled.Business">
             고객사 관리
         </MudNavLink>
-        <MudNavLink Href="/admin/tenants/issue" Icon="@Icons.Material.Filled.VpnKey">
-            시리얼 발급 (고객사)
-        </MudNavLink>
         <MudNavLink Href="/admin/resellers" Icon="@Icons.Material.Filled.Store">
-            대리점 관리
-        </MudNavLink>
-        <MudNavLink Href="/admin/resellers/issue" Icon="@Icons.Material.Filled.CardMembership">
-            시리얼 발급 (대리점)
-        </MudNavLink>
-        <MudNavLink Href="/admin/cs" Icon="@Icons.Material.Filled.SupportAgent">
-            CS 티켓
+            협력업체 관리
         </MudNavLink>
         <MudNavLink Href="/admin/reseller-applications" Icon="@Icons.Material.Filled.HowToReg">
             협력업체 신청
-        </MudNavLink>
-
-        @if (_canBilling)
-        {
-            <MudNavLink Href="/admin/billing" Icon="@Icons.Material.Filled.Payments">
-                결제·환불
-            </MudNavLink>
-        }
-
-        <MudNavLink Href="/admin/commission" Icon="@Icons.Material.Filled.AccountBalance">
-            수수료 정책
-        </MudNavLink>
-        <MudNavLink Href="/admin/settlements" Icon="@Icons.Material.Filled.RequestQuote">
-            수수료 정산
-        </MudNavLink>
-        <MudNavLink Href="/admin/stats" Icon="@Icons.Material.Filled.QueryStats">
-            전체 통계
-        </MudNavLink>
-        <MudNavLink Href="/admin/watchdog" Icon="@Icons.Material.Filled.MonitorHeart">
-            워치독 모니터
         </MudNavLink>
 
         @if (_isOwner)
