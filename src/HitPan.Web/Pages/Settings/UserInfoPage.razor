@@ -17,13 +17,22 @@
 }
 else
 {
+    @if (_model.IsLockedFromLanding)
+    {
+        @* 헌법 #35 (사장님 결재 2026-06-04) — 랜딩 자동 반영 잠금 안내 *@
+        <MudAlert Severity="Severity.Warning" Class="mb-3" Dense="true" Icon="@Icons.Material.Filled.Lock">
+            이 회사 정보는 가입 시 사업자등록증으로 자동 반영된 정보입니다.
+            <b>회사명·사업자번호·대표자명</b>은 변경할 수 없습니다.
+            변경이 필요하면 본사 고객지원으로 사업자등록증 재등록을 요청해주세요.
+        </MudAlert>
+    }
     <MudGrid Spacing="3">
         <MudItem xs="12" md="8">
             <MudPaper Elevation="0" Class="pa-4" Style="border:0.5px solid var(--mud-palette-lines-default);border-radius:12px">
                 <MudText Typo="Typo.subtitle2" Class="mb-3">기본 사업장 정보</MudText>
                 <MudGrid Spacing="2">
                     <MudItem xs="12" md="6">
-                        <MudTextField T="string" Label="사용업체명" @bind-Value="_model.CompanyName" Variant="Variant.Outlined" Margin="Margin.Dense" />
+                        <MudTextField T="string" Label="사용업체명" @bind-Value="_model.CompanyName" Variant="Variant.Outlined" Margin="Margin.Dense" ReadOnly="@_model.IsLockedFromLanding" HelperText="@(_model.IsLockedFromLanding ? "🔒 랜딩 자동 반영 (변경 불가)" : null)" />
                     </MudItem>
                     <MudItem xs="12" md="3">
                         <MudTextField T="string" Label="우편번호" @bind-Value="_model.ZipCode" ReadOnly="true" Variant="Variant.Outlined" Margin="Margin.Dense" />
@@ -41,7 +50,7 @@ else
                         <MudTextField T="string" Label="상세주소" @bind-Value="_model.AddressDetail" Variant="Variant.Outlined" Margin="Margin.Dense" Placeholder="상세주소 직접 입력" />
                     </MudItem>
                     <MudItem xs="12" md="4">
-                        <MudTextField T="string" Label="사업자번호" @bind-Value="_model.BusinessNo" Variant="Variant.Outlined" Margin="Margin.Dense" />
+                        <MudTextField T="string" Label="사업자번호" @bind-Value="_model.BusinessNo" Variant="Variant.Outlined" Margin="Margin.Dense" ReadOnly="@_model.IsLockedFromLanding" HelperText="@(_model.IsLockedFromLanding ? "🔒 랜딩 자동 반영 (변경 불가)" : null)" />
                     </MudItem>
                     <MudItem xs="12" md="4">
                         <MudTextField T="string" Label="종사업장번호" @bind-Value="_model.BranchNo" Variant="Variant.Outlined" Margin="Margin.Dense" />
@@ -56,7 +65,7 @@ else
                         <MudTextField T="string" Label="업종" @bind-Value="_model.BusinessCategory" Variant="Variant.Outlined" Margin="Margin.Dense" />
                     </MudItem>
                     <MudItem xs="12" md="4">
-                        <MudTextField T="string" Label="대표자" @bind-Value="_model.CeoName" Variant="Variant.Outlined" Margin="Margin.Dense" />
+                        <MudTextField T="string" Label="대표자" @bind-Value="_model.CeoName" Variant="Variant.Outlined" Margin="Margin.Dense" ReadOnly="@_model.IsLockedFromLanding" HelperText="@(_model.IsLockedFromLanding ? "🔒 랜딩 자동 반영 (변경 불가)" : null)" />
                     </MudItem>
                     <MudItem xs="12" md="4">
                         <MudTextField T="string" Label="팩스" @bind-Value="_model.Fax" Variant="Variant.Outlined" Margin="Margin.Dense" />

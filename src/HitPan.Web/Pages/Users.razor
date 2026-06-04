@@ -52,12 +52,19 @@ else if (_users.Count == 0)
 }
 else
 {
+    @* 헌법 #35 (사장님 결재 2026-06-04) — 부모/자식 안내 *@
+    <MudAlert Severity="Severity.Info" Class="mb-3" Dense="true" Icon="@Icons.Material.Filled.AccountTree">
+        여기서 추가하는 계정은 <b>자식 계정</b>입니다. 부모 계정만 자식을 생성할 수 있으며, 본사 백오피스에는 노출되지 않습니다.
+        부모 계정은 가입 시점에 자동 생성되며 삭제할 수 없습니다.
+    </MudAlert>
+
     <MudPaper Elevation="0" Class="pa-2 hitpan-card">
         <MudTable Items="_users" Dense="true" Hover="true" Breakpoint="Breakpoint.Sm">
             <HeaderContent>
                 <MudTh>이메일</MudTh>
                 <MudTh>이름</MudTh>
                 <MudTh>부서·직책</MudTh>
+                <MudTh Style="text-align:center">계층</MudTh>
                 <MudTh Style="text-align:center">역할</MudTh>
                 <MudTh Style="text-align:center">사원 연결</MudTh>
                 <MudTh Style="text-align:center">상태</MudTh>
@@ -68,6 +75,17 @@ else
                 <MudTd>@context.UserName</MudTd>
                 <MudTd Style="font-size:12px;color:var(--mud-palette-text-secondary)">
                     @($"{context.Department} · {context.Position}".Trim(' ', '·'))
+                </MudTd>
+                <MudTd Style="text-align:center">
+                    @if (context.IsParent)
+                    {
+                        <MudChip T="string" Size="Size.Small" Variant="Variant.Filled" Color="Color.Primary"
+                                 Icon="@Icons.Material.Filled.Stars">부모</MudChip>
+                    }
+                    else
+                    {
+                        <MudChip T="string" Size="Size.Small" Variant="Variant.Text" Color="Color.Default">자식</MudChip>
+                    }
                 </MudTd>
                 <MudTd Style="text-align:center">
                     <MudChip T="string" Size="Size.Small" Variant="Variant.Filled"
@@ -96,10 +114,16 @@ else
                         OnClick="@(() => OpenEditDialog(context))" />
                     <MudIconButton Icon="@Icons.Material.Filled.LockReset" Size="Size.Small" Color="Color.Info"
                         OnClick="@(() => OpenResetPwDialog(context))" />
-                    @if (context.IsActive)
+                    @if (context.IsActive && !context.IsParent)
                     {
                         <MudIconButton Icon="@Icons.Material.Filled.PersonOff" Size="Size.Small" Color="Color.Warning"
                             OnClick="@(() => OpenDeactivateDialog(context))" />
+                    }
+                    else if (context.IsParent)
+                    {
+                        <MudTooltip Text="부모 계정은 삭제할 수 없습니다 (헌법 #35)">
+                            <MudIconButton Icon="@Icons.Material.Filled.Lock" Size="Size.Small" Color="Color.Default" Disabled="true" />
+                        </MudTooltip>
                     }
                 </MudTd>
             </RowTemplate>

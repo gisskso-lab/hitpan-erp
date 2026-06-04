@@ -1,0 +1,173 @@
+@page "/owner/test-flow"
+@layout PlatformLayout
+@attribute [Authorize(Policy = "OwnerOnly")]
+
+@*
+    전체 흐름 테스트 가이드 (사장님 결재 2026-06-04)
+    랜딩 가입 → 백오피스 검토 → 라이선스 발급 → ERP 설치 → 부모계정 생성
+    헌법 #35 3시스템 통합 흐름을 1페이지로 시각화.
+*@
+
+<PageTitle>전체 흐름 테스트 — 히트판 백오피스 (Owner)</PageTitle>
+
+<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px;">
+    <div>
+        <MudText Typo="Typo.h5" Style="font-weight:600;">3시스템 통합 흐름 테스트 가이드</MudText>
+        <MudText Typo="Typo.body2" Color="Color.Secondary">
+            랜딩 → 백오피스 → ERP 전체 흐름을 1페이지로 점검 (헌법 #35 정합)
+        </MudText>
+    </div>
+</div>
+
+<MudAlert Severity="Severity.Info" Class="mb-3" Dense="true" Icon="@Icons.Material.Filled.AccountTree">
+    각 단계 링크는 새 탭에서 열립니다. DEMO 모드를 사용하면 자격증명 없이 끝까지 테스트할 수 있습니다.
+</MudAlert>
+
+<MudGrid Spacing="3">
+
+    <MudItem xs="12" md="6">
+        <MudPaper Elevation="1" Class="pa-4" Style="border-radius:12px;height:100%;">
+            <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px;">
+                <div class="step-num">1</div>
+                <MudText Typo="Typo.h6">랜딩페이지 가입</MudText>
+            </div>
+            <MudText Typo="Typo.body2" Class="mb-2">
+                고객사가 사업자등록증과 사업자번호로 가입.
+                사업자번호 체크섬 검증 + 약관 4종 동의.
+            </MudText>
+            <MudList T="string" Dense="true" Class="mb-3">
+                <MudListItem T="string" Icon="@Icons.Material.Filled.CheckCircle" IconColor="Color.Success">DEMO 모드: 모든 필드 자동 채움</MudListItem>
+                <MudListItem T="string" Icon="@Icons.Material.Filled.CheckCircle" IconColor="Color.Success">사업자번호 체크섬 검증 (오프라인)</MudListItem>
+                <MudListItem T="string" Icon="@Icons.Material.Filled.Pending" IconColor="Color.Warning">국세청 진위확인 (자격증명 박제 시)</MudListItem>
+            </MudList>
+            <MudButton Href="http://localhost:5082/signup" Target="_blank"
+                       Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.OpenInNew">
+                랜딩 가입 페이지 열기
+            </MudButton>
+        </MudPaper>
+    </MudItem>
+
+    <MudItem xs="12" md="6">
+        <MudPaper Elevation="1" Class="pa-4" Style="border-radius:12px;height:100%;">
+            <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px;">
+                <div class="step-num">2</div>
+                <MudText Typo="Typo.h6">결제 → 라이선스 키 발급</MudText>
+            </div>
+            <MudText Typo="Typo.body2" Class="mb-2">
+                결제 확인 시 tenants.status='active' + 라이선스 키 자동 생성.
+                형식: HITP-XXXX-XXXX-XXXX-XXXX
+            </MudText>
+            <MudList T="string" Dense="true" Class="mb-3">
+                <MudListItem T="string" Icon="@Icons.Material.Filled.CheckCircle" IconColor="Color.Success">라이선스 키 HMAC-SHA256 해시 저장</MudListItem>
+                <MudListItem T="string" Icon="@Icons.Material.Filled.CheckCircle" IconColor="Color.Success">평문은 응답 1회만 (헌법 #22)</MudListItem>
+                <MudListItem T="string" Icon="@Icons.Material.Filled.Pending" IconColor="Color.Warning">이메일 발송 (SMTP 박제 시)</MudListItem>
+            </MudList>
+            <MudText Typo="Typo.caption" Color="Color.Secondary">테스트: 가입 완료 후 /payment 화면에서 결제 시뮬레이션</MudText>
+        </MudPaper>
+    </MudItem>
+
+    <MudItem xs="12" md="6">
+        <MudPaper Elevation="1" Class="pa-4" Style="border-radius:12px;height:100%;">
+            <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px;">
+                <div class="step-num">3</div>
+                <MudText Typo="Typo.h6">협력업체 신청 (옵션)</MudText>
+            </div>
+            <MudText Typo="Typo.body2" Class="mb-2">
+                협력업체 가입 신청 → PDF 계약서 자동 생성·이메일 송부 → 본사 어드민 승인 → R-XXXX 코드 발급.
+            </MudText>
+            <MudList T="string" Dense="true" Class="mb-3">
+                <MudListItem T="string" Icon="@Icons.Material.Filled.CheckCircle" IconColor="Color.Success">PDF 계약서 자동 생성 (QuestPDF)</MudListItem>
+                <MudListItem T="string" Icon="@Icons.Material.Filled.CheckCircle" IconColor="Color.Success">승인 시 reseller + reseller_accounts 자동 생성</MudListItem>
+                <MudListItem T="string" Icon="@Icons.Material.Filled.CheckCircle" IconColor="Color.Success">[BoPermission] DB 박제 권한 검사</MudListItem>
+            </MudList>
+            <div style="display:flex;gap:8px;flex-wrap:wrap;">
+                <MudButton Href="/backoffice/reseller-apply" Target="_blank" Variant="Variant.Outlined" Color="Color.Primary"
+                           StartIcon="@Icons.Material.Filled.OpenInNew" Size="Size.Small">신청 페이지</MudButton>
+                <MudButton Href="/admin/reseller-applications" Variant="Variant.Filled" Color="Color.Primary"
+                           StartIcon="@Icons.Material.Filled.Approval" Size="Size.Small">승인 화면</MudButton>
+            </div>
+        </MudPaper>
+    </MudItem>
+
+    <MudItem xs="12" md="6">
+        <MudPaper Elevation="1" Class="pa-4" Style="border-radius:12px;height:100%;">
+            <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px;">
+                <div class="step-num">4</div>
+                <MudText Typo="Typo.h6">ERP 설치 + 자동 반영</MudText>
+            </div>
+            <MudText Typo="Typo.body2" Class="mb-2">
+                ERP /setup/license에서 라이선스 키 + 사업자번호 재입력 → 백오피스 API 해시 검증 → ERP 로컬에 회사정보 자동 박제 (is_locked_from_landing=1).
+            </MudText>
+            <MudList T="string" Dense="true" Class="mb-3">
+                <MudListItem T="string" Icon="@Icons.Material.Filled.CheckCircle" IconColor="Color.Success">옵션 C: 본사 평문 사업자정보 0건 (헌법 #18·#22)</MudListItem>
+                <MudListItem T="string" Icon="@Icons.Material.Filled.CheckCircle" IconColor="Color.Success">자동 반영 후 회사명·사업자번호·대표자 수정 차단</MudListItem>
+            </MudList>
+            <MudButton Href="http://localhost:5234/setup/license" Target="_blank"
+                       Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.OpenInNew">
+                ERP 설치 페이지 열기
+            </MudButton>
+        </MudPaper>
+    </MudItem>
+
+    <MudItem xs="12" md="6">
+        <MudPaper Elevation="1" Class="pa-4" Style="border-radius:12px;height:100%;">
+            <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px;">
+                <div class="step-num">5</div>
+                <MudText Typo="Typo.h6">부모 계정 생성 + 로그인</MudText>
+            </div>
+            <MudText Typo="Typo.body2" Class="mb-2">
+                /setup/license Step 3에서 부모 계정 생성 (이메일·비밀번호·이름) → users.is_parent=1 → tenant당 1명만 → ERP 로그인 화면.
+            </MudText>
+            <MudList T="string" Dense="true" Class="mb-3">
+                <MudListItem T="string" Icon="@Icons.Material.Filled.CheckCircle" IconColor="Color.Success">BCrypt 비밀번호 해시</MudListItem>
+                <MudListItem T="string" Icon="@Icons.Material.Filled.CheckCircle" IconColor="Color.Success">부모 1명 UNIQUE 가드</MudListItem>
+                <MudListItem T="string" Icon="@Icons.Material.Filled.CheckCircle" IconColor="Color.Success">부모 계정 삭제 영구 차단</MudListItem>
+            </MudList>
+            <MudButton Href="http://localhost:5234/login" Target="_blank"
+                       Variant="Variant.Outlined" Color="Color.Primary" StartIcon="@Icons.Material.Filled.OpenInNew">
+                ERP 로그인 페이지 열기
+            </MudButton>
+        </MudPaper>
+    </MudItem>
+
+    <MudItem xs="12" md="6">
+        <MudPaper Elevation="1" Class="pa-4" Style="border-radius:12px;height:100%;">
+            <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px;">
+                <div class="step-num">6</div>
+                <MudText Typo="Typo.h6">자식 계정 관리</MudText>
+            </div>
+            <MudText Typo="Typo.body2" Class="mb-2">
+                부모 계정으로 로그인 후 /users에서 자식 계정 생성·삭제. 본사 백오피스 노출 0건.
+            </MudText>
+            <MudList T="string" Dense="true" Class="mb-3">
+                <MudListItem T="string" Icon="@Icons.Material.Filled.CheckCircle" IconColor="Color.Success">자식 계정은 ERP 로컬 전용 (헌법 #35)</MudListItem>
+                <MudListItem T="string" Icon="@Icons.Material.Filled.CheckCircle" IconColor="Color.Success">UI에 부모/자식 칩 + 부모 삭제 잠금 아이콘</MudListItem>
+            </MudList>
+            <MudButton Href="http://localhost:5234/users" Target="_blank"
+                       Variant="Variant.Outlined" Color="Color.Primary" StartIcon="@Icons.Material.Filled.OpenInNew">
+                ERP 직원 관리 열기
+            </MudButton>
+        </MudPaper>
+    </MudItem>
+
+</MudGrid>
+
+<MudPaper Elevation="1" Class="pa-4 mt-4" Style="border-radius:12px;background:#F0FAF6;">
+    <MudText Typo="Typo.h6" Class="mb-2" Style="color:#0F6E56;">자격증명 박제 점검</MudText>
+    <MudText Typo="Typo.body2" Color="Color.Secondary" Class="mb-3">
+        실 메일 발송·국세청 진위확인이 필요하면 자격증명을 박제하세요. /owner/credentials-status에서 박제 상태 확인.
+    </MudText>
+    <MudButton Href="/owner/credentials-status" Variant="Variant.Filled" Color="Color.Primary"
+               StartIcon="@Icons.Material.Filled.Shield">
+        자격증명 상태 점검
+    </MudButton>
+</MudPaper>
+
+<style>
+    .step-num {
+        width: 36px; height: 36px; border-radius: 50%;
+        background: #0F6E56; color: #fff;
+        display: flex; align-items: center; justify-content: center;
+        font-weight: 800; font-size: 18px;
+    }
+</style>

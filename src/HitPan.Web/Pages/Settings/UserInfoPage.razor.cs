@@ -54,6 +54,7 @@ public partial class UserInfoPage : ComponentBase, IDisposable
                 _model.AddressDetail = company.AddressDetail ?? string.Empty;
                 _model.CorporateNo = company.CorpNo ?? string.Empty;
                 _model.BranchNo = company.SubsidiaryNo ?? string.Empty;
+                _model.IsLockedFromLanding = company.IsLockedFromLanding;
             }
 
             _subscription = new SubscriptionInfoViewModel
@@ -242,6 +243,10 @@ public sealed class UserInfoViewModel
     public string? LogoPreviewUrl { get; set; }
     public string? SealPreviewUrl { get; set; }
     public string? HeaderPreviewUrl { get; set; }
+
+    // 헌법 #35 (사장님 결재 2026-06-04) — 랜딩 가입 자동 반영 잠금 플래그
+    // 1이면 회사명·사업자번호·대표자명 핵심 3필드 변경 불가
+    public bool IsLockedFromLanding { get; set; }
 }
 
 /// <summary>

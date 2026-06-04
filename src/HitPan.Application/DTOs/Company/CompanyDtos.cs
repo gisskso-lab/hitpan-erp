@@ -23,6 +23,8 @@ public class CompanyDto
     public bool EInvoiceEnabled { get; set; }
     public string TaxType { get; set; } = "taxable";
     public int FiscalMonth { get; set; } = 12;
+    // 헌법 #35 (사장님 결재 2026-06-04) — 랜딩 자동 반영 잠금 (UI에서 3필드 비활성화용)
+    public bool IsLockedFromLanding { get; set; }
 }
 
 public class UpdateCompanyDto

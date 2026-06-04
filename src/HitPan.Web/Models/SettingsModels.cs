@@ -46,6 +46,9 @@ public sealed class TenantCompanyModel
 
     /// <summary>종사업장번호.</summary>
     public string? SubsidiaryNo { get; set; }
+
+    /// <summary>헌법 #35 (사장님 결재 2026-06-04) — 랜딩 자동 반영 잠금 (회사명·사업자번호·대표자명 변경 불가).</summary>
+    public bool IsLockedFromLanding { get; set; }
 }
 
 public class TenantSettingsModel

@@ -14,6 +14,8 @@ public class UserListModel
     public bool IsActive { get; set; }
     public DateTime? HireDate { get; set; }
     public DateTime CreatedAt { get; set; }
+    // 헌법 #35 (사장님 결재 2026-06-04) — 부모/자식 2계층 구분
+    public bool IsParent { get; set; }
 }
 
 public class CreateUserModel

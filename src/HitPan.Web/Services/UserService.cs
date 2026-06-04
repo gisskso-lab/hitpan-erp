@@ -55,6 +55,19 @@ public sealed class UserService(HttpClient http)
         catch { return false; }
     }
 
+    // 헌법 #35 (사장님 결재 2026-06-04) — 부모계정 삭제 차단 메시지 받기
+    public async Task<(bool ok, string? error)> DeactivateWithMessageAsync(string userId, CancellationToken ct = default)
+    {
+        try
+        {
+            var res = await http.DeleteAsync($"api/users/{userId}", ct).ConfigureAwait(false);
+            if (res.IsSuccessStatusCode) return (true, null);
+            var body = await res.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
+            return (false, body);
+        }
+        catch (Exception ex) { return (false, ex.Message); }
+    }
+
     public async Task<ResetPasswordResponse?> ResetPasswordAsync(string userId, CancellationToken ct = default)
     {
         try

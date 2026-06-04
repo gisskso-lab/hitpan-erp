@@ -35,7 +35,8 @@ public sealed class UserService : IUserService
                 account_type AS AccountType,
                 is_active AS IsActive,
                 hire_date AS HireDate,
-                created_at AS CreatedAt
+                created_at AS CreatedAt,
+                is_parent AS IsParent
             FROM users
             WHERE tenant_id = @TenantId
               AND is_deleted = 0
@@ -72,7 +73,8 @@ public sealed class UserService : IUserService
                 account_type AS AccountType,
                 is_active AS IsActive,
                 hire_date AS HireDate,
-                created_at AS CreatedAt
+                created_at AS CreatedAt,
+                is_parent AS IsParent
             FROM users
             WHERE user_id = @UserId
               AND tenant_id = @TenantId

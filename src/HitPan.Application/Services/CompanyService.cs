@@ -44,7 +44,8 @@ public sealed class CompanyService : ICompanyService
                     e_invoice_id AS EInvoiceId,
                     e_invoice_enabled AS EInvoiceEnabled,
                     tax_type AS TaxType,
-                    fiscal_month AS FiscalMonth
+                    fiscal_month AS FiscalMonth,
+                    is_locked_from_landing AS IsLockedFromLanding
                 FROM tenants
                 WHERE tenant_id = @TenantId
                 """;
