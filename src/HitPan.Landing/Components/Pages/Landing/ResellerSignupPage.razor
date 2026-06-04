@@ -1,179 +1,55 @@
 @page "/reseller/signup"
 @rendermode InteractiveServer
 @layout LandingLayout
-@inject HttpClient Http
-@using System.Net.Http.Json
+@inject NavigationManager Nav
 
-<PageTitle>대리점 신청 — 히트판 ERP</PageTitle>
+@*
+    헌법 #35 (사장님 결재 2026-06-04) 객체 완전 분리 정합:
+      - 협력업체 가입 신청은 백오피스 영역 (back.hitpan.kr/backoffice/reseller-apply)
+      - 랜딩에 중복 박제했던 옛 페이지를 폐기, 백오피스로 영구 리다이렉트
+      - 옛 링크·검색엔진·외부 인용을 위한 안전 리다이렉트
+*@
 
-<section class="reseller-section">
-    <div class="reseller-card">
-        <div class="header">
-            <span class="badge">대리점 모집 중</span>
-            <h1>히트판 ERP 대리점 신청</h1>
-            <p class="lead">전국 영업 파트너를 모집합니다. 합리적 수수료 + 본사 영업 지원.</p>
-        </div>
+<PageTitle>협력업체 가입 신청 — 히트판</PageTitle>
 
-        @if (_submitted)
-        {
-            <div class="success">
-                <div class="icon">✅</div>
-                <h2>신청이 접수되었습니다</h2>
-                <p>신청 번호: <strong>@_applicationId</strong></p>
-                <p>본사 심사 후 <strong>2영업일 내</strong>로 연락드리겠습니다.</p>
-                <a href="/" class="btn-link">홈으로 돌아가기</a>
-            </div>
-        }
-        else
-        {
-            <EditForm Model="_form" OnValidSubmit="HandleSubmit">
-                <h3>회사 정보</h3>
-                <div class="field">
-                    <label>회사명 *</label>
-                    <input type="text" @bind="_form.CompanyName" required maxlength="120" />
-                </div>
-                <div class="field">
-                    <label>대표자명 *</label>
-                    <input type="text" @bind="_form.RepresentativeName" required maxlength="50" />
-                </div>
-                <div class="field">
-                    <label>사업자번호 (선택)</label>
-                    <input type="text" @bind="_form.BusinessNo" maxlength="20" placeholder="000-00-00000" />
-                </div>
-
-                <h3 class="mt-4">담당자 정보</h3>
-                <div class="field">
-                    <label>담당자명 *</label>
-                    <input type="text" @bind="_form.ContactName" required maxlength="50" />
-                </div>
-                <div class="field">
-                    <label>이메일 *</label>
-                    <input type="email" @bind="_form.ContactEmail" required maxlength="100" />
-                </div>
-                <div class="field">
-                    <label>연락처 *</label>
-                    <input type="tel" @bind="_form.ContactPhone" required placeholder="010-0000-0000" maxlength="30" />
-                </div>
-
-                <h3 class="mt-4">영업 정보</h3>
-                <div class="field">
-                    <label>영업 지역</label>
-                    <select @bind="_form.Region">
-                        <option value="">선택</option>
-                        <option value="서울">서울</option>
-                        <option value="경기">경기</option>
-                        <option value="인천">인천</option>
-                        <option value="부산">부산</option>
-                        <option value="대구">대구</option>
-                        <option value="광주">광주</option>
-                        <option value="대전">대전</option>
-                        <option value="전국">전국</option>
-                        <option value="기타">기타</option>
-                    </select>
-                </div>
-                <div class="field">
-                    <label>주요 영업 채널</label>
-                    <input type="text" @bind="_form.SalesChannel" placeholder="예: 회계세무사·SI업체·온라인" maxlength="100" />
-                </div>
-                <div class="field">
-                    <label>예상 1년 고객사 수</label>
-                    <input type="number" @bind="_form.ExpectedCustomers" min="0" />
-                </div>
-                <div class="field">
-                    <label>신청 사유 (선택)</label>
-                    <textarea @bind="_form.Motivation" rows="4" placeholder="히트판 ERP를 대리하고 싶은 이유, 영업 계획 등"></textarea>
-                </div>
-
-                @if (!string.IsNullOrEmpty(_error))
-                {
-                    <div class="error">@_error</div>
-                }
-
-                <button type="submit" class="btn-submit" disabled="@_submitting">
-                    @(_submitting ? "처리 중..." : "대리점 신청서 제출")
-                </button>
-            </EditForm>
-        }
+<section class="redirect-section">
+    <div class="redirect-card">
+        <div class="icon">🔄</div>
+        <h1>협력업체 가입은 백오피스에서</h1>
+        <p>협력업체 가입 신청은 본사 백오피스로 이전되었습니다.</p>
+        <p class="lead">잠시 후 백오피스 신청 페이지로 이동합니다.</p>
+        <p class="manual-link">
+            자동 이동되지 않으면
+            <a href="@_target">여기를 눌러주세요</a>.
+        </p>
     </div>
 </section>
 
 @code {
-    private FormModel _form = new();
-    private bool _submitting;
-    private bool _submitted;
-    private string? _error;
-    private string? _applicationId;
+    // 운영: https://back.hitpan.kr/backoffice/reseller-apply
+    // 로컬: http://localhost:5259/backoffice/reseller-apply (백오피스 Web 포트)
+    [Inject] private IConfiguration Cfg { get; set; } = default!;
+    private string _target = "/backoffice/reseller-apply";
 
-    private async Task HandleSubmit()
+    protected override async Task OnInitializedAsync()
     {
-        _error = null;
-        _submitting = true;
-        try
-        {
-            var res = await Http.PostAsJsonAsync("api/reseller-applications", _form);
-            var json = await res.Content.ReadFromJsonAsync<ApiResponse>();
-            if (res.IsSuccessStatusCode && json?.Success == true)
-            {
-                _applicationId = json.ApplicationId;
-                _submitted = true;
-            }
-            else
-            {
-                _error = json?.Message ?? "신청 처리 실패. 잠시 후 다시 시도해주세요.";
-            }
-        }
-        catch (Exception ex)
-        {
-            _error = $"네트워크 오류: {ex.Message}";
-        }
-        finally
-        {
-            _submitting = false;
-        }
-    }
+        var backofficeWeb = Cfg["BackofficeWeb:BaseUrl"];
+        if (!string.IsNullOrWhiteSpace(backofficeWeb))
+            _target = backofficeWeb.TrimEnd('/') + "/backoffice/reseller-apply";
 
-    private class FormModel
-    {
-        public string CompanyName { get; set; } = "";
-        public string RepresentativeName { get; set; } = "";
-        public string ContactName { get; set; } = "";
-        public string ContactEmail { get; set; } = "";
-        public string ContactPhone { get; set; } = "";
-        public string? BusinessNo { get; set; }
-        public string? Region { get; set; }
-        public string? SalesChannel { get; set; }
-        public int? ExpectedCustomers { get; set; }
-        public string? Motivation { get; set; }
-    }
-
-    private class ApiResponse
-    {
-        public bool Success { get; set; }
-        public string? ApplicationId { get; set; }
-        public string? Message { get; set; }
+        await Task.Delay(1500);
+        Nav.NavigateTo(_target, forceLoad: true);
     }
 }
 
 <style>
-.reseller-section { padding: 48px 0; background: #F9FAFB; min-height: calc(100vh - 200px); }
-.reseller-card { max-width: 640px; margin: 0 auto; background: #fff; padding: 40px; border-radius: 16px; box-shadow: 0 4px 16px rgba(0,0,0,0.06); }
-.header { text-align: center; margin-bottom: 32px; }
-.badge { display: inline-block; background: #FFF0EB; color: #B7390B; padding: 4px 12px; border-radius: 16px; font-size: 13px; font-weight: 600; margin-bottom: 12px; }
-.header h1 { font-size: 28px; margin-bottom: 8px; }
-.lead { color: #6B7280; font-size: 14px; }
-h3 { font-size: 16px; color: #0F6E56; margin-bottom: 12px; padding-bottom: 4px; border-bottom: 1px solid #E5E7EB; }
-.mt-4 { margin-top: 24px; }
-.field { margin-bottom: 16px; }
-.field label { display: block; font-weight: 600; margin-bottom: 6px; font-size: 14px; }
-.field input, .field select, .field textarea { width: 100%; padding: 12px; border: 1px solid #D1D5DB; border-radius: 8px; font-size: 14px; box-sizing: border-box; font-family: inherit; }
-.field input:focus, .field select:focus, .field textarea:focus { outline: none; border-color: #0F6E56; }
-.error { background: #FEE2E2; color: #B91C1C; padding: 12px; border-radius: 8px; margin-bottom: 12px; font-size: 14px; }
-.btn-submit { width: 100%; padding: 14px; background: #0F6E56; color: #fff; border: none; border-radius: 8px; font-size: 16px; font-weight: 600; cursor: pointer; margin-top: 12px; }
-.btn-submit:hover:not(:disabled) { background: #0A5240; }
-.btn-submit:disabled { opacity: 0.6; cursor: not-allowed; }
-.success { text-align: center; padding: 40px 0; }
-.success .icon { font-size: 56px; margin-bottom: 16px; }
-.success h2 { font-size: 22px; color: #0F6E56; margin-bottom: 16px; }
-.success p { color: #4B5563; margin-bottom: 12px; }
-.btn-link { display: inline-block; margin-top: 16px; padding: 12px 24px; background: #fff; color: #0F6E56; border: 2px solid #0F6E56; border-radius: 8px; text-decoration: none; font-weight: 600; }
+.redirect-section { padding: 80px 20px; background: #F9FAFB; min-height: calc(100vh - 200px); display: flex; align-items: center; justify-content: center; }
+.redirect-card { max-width: 480px; background: #fff; padding: 48px 40px; border-radius: 16px; box-shadow: 0 4px 16px rgba(0,0,0,0.06); text-align: center; }
+.icon { font-size: 48px; margin-bottom: 16px; }
+.redirect-card h1 { font-size: 22px; font-weight: 700; color: #0F1419; margin: 0 0 12px; }
+.redirect-card p { color: #4B5563; font-size: 14px; margin: 8px 0; line-height: 1.6; }
+.redirect-card .lead { color: #6B7280; }
+.manual-link { margin-top: 16px; font-size: 13px; color: #6B7280; }
+.manual-link a { color: #0F6E56; font-weight: 700; text-decoration: none; }
+.manual-link a:hover { text-decoration: underline; }
 </style>

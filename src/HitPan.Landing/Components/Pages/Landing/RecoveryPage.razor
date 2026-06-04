@@ -22,6 +22,18 @@
             본사는 사장님 업무 데이터를 보지 않습니다(헌법 #22).
         </p>
 
+        @if (_submitted)
+        {
+            <div class="recover-done">
+                <div class="recover-done-icon">✓</div>
+                <h2>복구 요청이 접수되었습니다</h2>
+                <p>본사가 사업자등록증을 대조하여 24시간 이내 안내드립니다.</p>
+                <p class="recover-done-hint">긴급한 경우 partners@hitpan.kr 로 문의해주세요.</p>
+                <a href="/landing" class="recover-done-back">랜딩으로 돌아가기</a>
+            </div>
+        }
+        else
+        {
         <EditForm Model="_form" OnValidSubmit="HandleSubmit">
             <div class="field-group">
                 <h2 class="group-title">1. 현재 계정 정보</h2>
@@ -67,12 +79,14 @@
         </EditForm>
 
         <p class="back-link">계정이 기억나셨나요? <a href="/login">로그인</a> · <a href="/landing">랜딩으로</a></p>
+        }
     </div>
 </section>
 
 @code {
     private RecoveryForm _form = new();
     private bool _submitting;
+    private bool _submitted;
     private string? _error;
     private bool _bizUploaded;
 
@@ -97,8 +111,11 @@
         }
 
         _submitting = true;
+        // 헌법 #20 (사장님 결재 2026-06-04) — /recover/submitted 라우트 미박제 = 404 폭발 진범
+        // 봉합: 같은 페이지 안에서 _submitted 상태 토글로 안내 화면 전환
         await Task.Delay(800); // 실제 API 호출은 후속 작지에서 박제
-        Nav.NavigateTo("/recover/submitted");
+        _submitted = true;
+        _submitting = false;
     }
 
     private class RecoveryForm
@@ -129,4 +146,10 @@
 .btn-submit:disabled { opacity: 0.6; cursor: not-allowed; }
 .back-link { text-align: center; margin-top: 16px; font-size: 14px; color: #6B7280; }
 .back-link a { color: #0F6E56; font-weight: 600; text-decoration: none; }
+.recover-done { text-align: center; padding: 24px 0; }
+.recover-done-icon { font-size: 48px; color: #0F6E56; margin-bottom: 12px; }
+.recover-done h2 { font-size: 22px; color: #0F1419; margin: 0 0 12px; }
+.recover-done p { color: #4B5563; font-size: 14px; margin: 8px 0; }
+.recover-done-hint { color: #6B7280; font-size: 13px; }
+.recover-done-back { display: inline-block; margin-top: 20px; padding: 10px 20px; background: #0F6E56; color: #fff; border-radius: 8px; text-decoration: none; font-weight: 600; font-size: 14px; }
 </style>
