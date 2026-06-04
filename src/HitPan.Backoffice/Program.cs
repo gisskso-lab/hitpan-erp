@@ -48,6 +48,8 @@ public class Program
         // HttpClient — ERP API 호출 (헌법 #35: 백오피스가 ERP API로 인증 위임 — 다음 단계에 별도 백오피스 API로 전환)
         var backofficeApi = builder.Configuration["BackofficeApi:BaseUrl"] ?? "http://localhost:5257/";
         builder.Services.AddHttpClient<BackofficeService>(c => c.BaseAddress = new Uri(backofficeApi));
+        // 협력업체 가입 신청 등 비인증 공개 API용 named client (사장님 결재 2026-06-04)
+        builder.Services.AddHttpClient("backoffice-public", c => c.BaseAddress = new Uri(backofficeApi));
 
         var app = builder.Build();
 

@@ -15,6 +15,12 @@ namespace HitPan.Backoffice.API.Services;
 public interface IEmailSender
 {
     Task<bool> SendAsync(string toEmail, string subject, string htmlBody, CancellationToken ct = default);
+
+    // 첨부 1건 (PDF 계약서 등) — 사장님 결재 2026-06-04 협력업체 가입 흐름
+    Task<bool> SendWithAttachmentAsync(
+        string toEmail, string subject, string htmlBody,
+        byte[] attachment, string attachmentFileName, string attachmentMimeType,
+        CancellationToken ct = default);
 }
 
 public class EmailSender : IEmailSender
@@ -28,7 +34,19 @@ public class EmailSender : IEmailSender
         _logger = logger;
     }
 
-    public async Task<bool> SendAsync(string toEmail, string subject, string htmlBody, CancellationToken ct = default)
+    public Task<bool> SendAsync(string toEmail, string subject, string htmlBody, CancellationToken ct = default) =>
+        SendInternalAsync(toEmail, subject, htmlBody, attachment: null, attachmentFileName: null, attachmentMimeType: null, ct);
+
+    public Task<bool> SendWithAttachmentAsync(
+        string toEmail, string subject, string htmlBody,
+        byte[] attachment, string attachmentFileName, string attachmentMimeType,
+        CancellationToken ct = default) =>
+        SendInternalAsync(toEmail, subject, htmlBody, attachment, attachmentFileName, attachmentMimeType, ct);
+
+    private async Task<bool> SendInternalAsync(
+        string toEmail, string subject, string htmlBody,
+        byte[]? attachment, string? attachmentFileName, string? attachmentMimeType,
+        CancellationToken ct)
     {
         var host = _config["Smtp:Host"];
         var user = _config["Smtp:User"];
@@ -39,8 +57,8 @@ public class EmailSender : IEmailSender
 
         if (string.IsNullOrWhiteSpace(host) || string.IsNullOrWhiteSpace(user))
         {
-            // 자격증명 결재 전 — 로그만 출력 (헌법 #29 정합)
-            _logger.LogInformation("[EmailSender] SMTP 미박제 (자격증명 결재 대기). to={To} subject={Subject}", toEmail, subject);
+            _logger.LogInformation("[EmailSender] SMTP 미박제 (자격증명 결재 대기). to={To} subject={Subject} attached={Att}",
+                toEmail, subject, attachment is not null ? attachmentFileName : "-");
             return false;
         }
 
@@ -61,8 +79,27 @@ public class EmailSender : IEmailSender
                 BodyEncoding = System.Text.Encoding.UTF8
             };
             msg.To.Add(toEmail);
-            await client.SendMailAsync(msg, ct);
-            _logger.LogInformation("[EmailSender] sent to={To} subject={Subject}", toEmail, subject);
+
+            Attachment? att = null;
+            MemoryStream? attStream = null;
+            try
+            {
+                if (attachment is not null && !string.IsNullOrWhiteSpace(attachmentFileName))
+                {
+                    attStream = new MemoryStream(attachment);
+                    att = new Attachment(attStream, attachmentFileName, attachmentMimeType ?? "application/octet-stream");
+                    msg.Attachments.Add(att);
+                }
+                await client.SendMailAsync(msg, ct);
+            }
+            finally
+            {
+                att?.Dispose();
+                attStream?.Dispose();
+            }
+
+            _logger.LogInformation("[EmailSender] sent to={To} subject={Subject} attached={Att}",
+                toEmail, subject, attachmentFileName ?? "-");
             return true;
         }
         catch (Exception ex)

@@ -1,6 +1,7 @@
 using System.Text;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.IdentityModel.Tokens;
+using QuestPDF.Infrastructure;
 
 namespace HitPan.Backoffice.API;
 
@@ -13,12 +14,16 @@ public class Program
 {
     public static void Main(string[] args)
     {
+        // QuestPDF Community 라이선스 (매출 1백만 달러 미만, 무료)
+        QuestPDF.Settings.License = LicenseType.Community;
+
         var builder = WebApplication.CreateBuilder(args);
 
         builder.Services.AddControllers();
         builder.Services.AddEndpointsApiExplorer();
         builder.Services.AddHttpClient();
         builder.Services.AddSingleton<HitPan.Backoffice.API.Services.IEmailSender, HitPan.Backoffice.API.Services.EmailSender>();
+        builder.Services.AddSingleton<HitPan.Backoffice.API.Services.IContractPdfGenerator, HitPan.Backoffice.API.Services.ContractPdfGenerator>();
 
         // JWT 인증 (백오피스 전용 — ERP와 분리)
         var jwt = builder.Configuration.GetSection("Jwt");
