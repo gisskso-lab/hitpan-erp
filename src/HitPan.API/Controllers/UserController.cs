@@ -101,8 +101,16 @@ public sealed class UserController : ControllerBase
             return Forbid();
         }
 
-        await _userService.DeactivateAsync(id, tenantId, ct).ConfigureAwait(false);
-        return Ok();
+        try
+        {
+            await _userService.DeactivateAsync(id, tenantId, ct).ConfigureAwait(false);
+            return Ok();
+        }
+        catch (InvalidOperationException ex)
+        {
+            // 헌법 #35 부모계정 삭제 차단 등
+            return BadRequest(new { success = false, message = ex.Message });
+        }
     }
 
     [HttpPost("{id}/reset-password")]

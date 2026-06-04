@@ -118,6 +118,123 @@ public class CompanyBootstrapController : ControllerBase
         }
     }
 
+    // 부모계정 자동 생성 (헌법 #35 정합, 사장님 결재 2026-06-04)
+    //   - bootstrap 직후 호출
+    //   - 라이선스+사업자번호 해시 재검증
+    //   - users INSERT (account_type=tenant_admin, is_parent=1)
+    //   - tenant당 부모 1명만 (UNIQUE 가드)
+    //   - 비밀번호 BCrypt
+    [HttpPost("create-parent")]
+    public async Task<IActionResult> CreateParent([FromBody] CreateParentRequest req, CancellationToken ct)
+    {
+        if (req is null
+            || string.IsNullOrWhiteSpace(req.LicenseKey)
+            || string.IsNullOrWhiteSpace(req.BizNo)
+            || string.IsNullOrWhiteSpace(req.Email)
+            || string.IsNullOrWhiteSpace(req.Password)
+            || string.IsNullOrWhiteSpace(req.Name))
+            return BadRequest(new { success = false, message = "라이선스·사업자번호·이메일·비밀번호·이름 필수" });
+
+        if (req.Password.Length < 8)
+            return BadRequest(new { success = false, message = "비밀번호는 8자 이상이어야 합니다." });
+
+        var bizNoNormalized = req.BizNo.Replace("-", "").Replace(" ", "").Trim();
+        if (bizNoNormalized.Length != 10 || !bizNoNormalized.All(char.IsDigit))
+            return BadRequest(new { success = false, message = "사업자번호 형식 오류" });
+
+        var licensePepper = _config["License:Pepper"] ?? "dev-pepper-2026";
+        var licenseHash = ComputeHmacSha256(req.LicenseKey.Trim(), licensePepper);
+
+        try
+        {
+            var cs = _config.GetConnectionString("DefaultConnection")
+                     ?? throw new InvalidOperationException("ConnectionStrings:DefaultConnection 미설정");
+            await using var db = new MySqlConnection(cs);
+            await db.OpenAsync(ct);
+
+            var tenant = await db.QueryFirstOrDefaultAsync<TenantRow>(@"
+                SELECT CAST(tenant_id AS CHAR) AS TenantId,
+                       tenant_code AS TenantCode,
+                       company_name AS CompanyName,
+                       status AS Status,
+                       is_locked_from_landing AS IsLocked
+                FROM tenants
+                WHERE license_key_hash = @Hash AND status = 'active'
+                LIMIT 1",
+                new { Hash = licenseHash });
+
+            if (tenant is null)
+                return BadRequest(new { success = false, message = "라이선스가 유효하지 않거나 활성 상태가 아닙니다." });
+
+            if (tenant.IsLocked != 1)
+                return BadRequest(new { success = false, message = "회사 정보 자동 반영(bootstrap)을 먼저 완료해주세요." });
+
+            // tenant당 부모계정 1명만 (헌법 #35 정합)
+            var existingParent = await db.QueryFirstOrDefaultAsync<int>(@"
+                SELECT COUNT(*) FROM users
+                WHERE tenant_id = @TenantId AND is_parent = 1 AND is_deleted = 0",
+                new { tenant.TenantId });
+            if (existingParent > 0)
+                return BadRequest(new { success = false, message = "이미 부모계정이 생성된 라이선스입니다." });
+
+            // 이메일 중복 차단
+            var dupEmail = await db.QueryFirstOrDefaultAsync<int>(@"
+                SELECT COUNT(*) FROM users WHERE email = @Email AND is_deleted = 0",
+                new { req.Email });
+            if (dupEmail > 0)
+                return BadRequest(new { success = false, message = "이미 사용 중인 이메일입니다." });
+
+            var userId = Guid.NewGuid().ToString();
+            var passwordHash = BCrypt.Net.BCrypt.HashPassword(req.Password);
+
+            await db.ExecuteAsync(@"
+                INSERT INTO users
+                  (user_id, tenant_id, email, password_hash, user_name,
+                   role, account_type, is_parent,
+                   is_active, failed_login_count,
+                   created_at, updated_at, is_deleted, emp_name)
+                VALUES
+                  (@UserId, @TenantId, @Email, @Hash, @Name,
+                   'tenant_admin', 'tenant_admin', 1,
+                   1, 0,
+                   UTC_TIMESTAMP(6), UTC_TIMESTAMP(6), 0, @Name)",
+                new
+                {
+                    UserId = userId,
+                    tenant.TenantId,
+                    req.Email,
+                    Hash = passwordHash,
+                    req.Name
+                });
+
+            _logger.LogInformation("[CompanyBootstrap] 부모계정 생성 완료 tenant={Code} email={Email}",
+                tenant.TenantCode, req.Email);
+
+            return Ok(new
+            {
+                success = true,
+                message = "부모 계정이 생성되었습니다. 로그인 화면으로 이동해주세요.",
+                userId,
+                email = req.Email,
+                tenantCode = tenant.TenantCode
+            });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "[CompanyBootstrap] 부모계정 생성 실패");
+            return StatusCode(500, new { success = false, message = "부모계정 생성 중 서버 오류가 발생했습니다." });
+        }
+    }
+
+    public class CreateParentRequest
+    {
+        public string LicenseKey { get; set; } = "";
+        public string BizNo { get; set; } = "";
+        public string Email { get; set; } = "";
+        public string Password { get; set; } = "";
+        public string Name { get; set; } = "";
+    }
+
     private static string ComputeHmacSha256(string data, string key)
     {
         using var hmac = new System.Security.Cryptography.HMACSHA256(System.Text.Encoding.UTF8.GetBytes(key));

@@ -34,11 +34,13 @@
         </div>
 
         <div class="setup-steps">
-            <div class="step @(_step >= 1 ? "active" : "")">1. 라이선스 확인</div>
+            <div class="step @(_step >= 1 ? "active" : "")">1. 라이선스</div>
             <div class="step-line"></div>
             <div class="step @(_step >= 2 ? "active" : "")">2. 회사 정보</div>
             <div class="step-line"></div>
-            <div class="step @(_step >= 3 ? "active" : "")">3. 완료</div>
+            <div class="step @(_step >= 3 ? "active" : "")">3. 부모 계정</div>
+            <div class="step-line"></div>
+            <div class="step @(_step >= 4 ? "active" : "")">4. 완료</div>
         </div>
 
         @if (!string.IsNullOrEmpty(_error))
@@ -119,7 +121,7 @@
                 </div>
 
                 <button type="button" class="setup-submit" @onclick="BootstrapAsync" disabled="@_busy">
-                    @(_busy ? "저장 중..." : "ERP에 자동 반영")
+                    @(_busy ? "저장 중..." : "다음 단계 — 부모 계정 생성")
                 </button>
                 <button type="button" class="setup-back" @onclick="@(() => _step = 1)" disabled="@_busy">
                     이전 단계로
@@ -128,15 +130,57 @@
         }
         else if (_step == 3)
         {
+            <div class="setup-section">
+                <div class="setup-readonly">
+                    <div class="setup-readonly-label">확인된 회사</div>
+                    <div class="setup-readonly-value">@_companyName <span class="setup-tenant-code">(@_tenantCode)</span></div>
+                </div>
+
+                <p class="setup-info">
+                    부모 계정은 ERP 마스터 계정입니다.<br/>
+                    이 계정으로만 자식 계정(직원)을 만들 수 있습니다.
+                </p>
+
+                <div class="setup-field">
+                    <label>대표 이름 *</label>
+                    <input type="text" @bind="_parentName" required />
+                </div>
+                <div class="setup-field">
+                    <label>로그인 이메일 *</label>
+                    <input type="email" @bind="_parentEmail" required placeholder="company@example.com" />
+                </div>
+                <div class="setup-field">
+                    <label>비밀번호 (8자 이상) *</label>
+                    <input type="password" @bind="_parentPassword" required placeholder="영문+숫자+특수문자 권장" />
+                </div>
+                <div class="setup-field">
+                    <label>비밀번호 확인 *</label>
+                    <input type="password" @bind="_parentPasswordConfirm" required />
+                </div>
+
+                <button type="button" class="setup-submit" @onclick="CreateParentAsync" disabled="@_busy">
+                    @(_busy ? "계정 생성 중..." : "부모 계정 생성")
+                </button>
+                <button type="button" class="setup-back" @onclick="@(() => _step = 2)" disabled="@_busy">
+                    이전 단계로
+                </button>
+            </div>
+        }
+        else if (_step == 4)
+        {
             <div class="setup-done">
                 <div class="setup-done-icon">✓</div>
                 <h2>설치가 완료되었습니다</h2>
-                <p><b>@_companyName</b> 회사 정보가 ERP에 박제되었습니다.</p>
-                <p>이제 부모 계정으로 로그인하여 ERP를 사용하실 수 있습니다.</p>
+                <p><b>@_companyName</b> ERP 설치와 부모 계정 생성이 모두 완료되었습니다.</p>
                 <div class="setup-id">
                     <div class="setup-id-label">고객사 코드</div>
                     <div class="setup-id-value">@_tenantCode</div>
                 </div>
+                <div class="setup-id">
+                    <div class="setup-id-label">로그인 이메일</div>
+                    <div class="setup-id-value">@_parentEmail</div>
+                </div>
+                <p>아래 버튼을 눌러 로그인하시면 ERP를 사용할 수 있습니다.</p>
                 <a href="/login" class="setup-go-login">로그인 화면으로 이동</a>
             </div>
         }
@@ -165,6 +209,12 @@
     private string _bizItem = "";
     private string _zipCode = "";
     private string _corpNo = "";
+
+    // Step 3 (부모 계정)
+    private string _parentName = "";
+    private string _parentEmail = "";
+    private string _parentPassword = "";
+    private string _parentPasswordConfirm = "";
 
     private async Task VerifyAsync()
     {
@@ -237,8 +287,11 @@
             var result = await res.Content.ReadFromJsonAsync<BootstrapResponse>();
             if (res.IsSuccessStatusCode && result?.Success == true)
             {
+                // 부모계정 이메일 기본값 박제 (사용자가 수정 가능)
+                _parentEmail = _email;
+                _parentName = _ceoName;
                 _step = 3;
-                Snackbar.Add("회사 정보가 ERP에 자동 반영되었습니다.", MudBlazor.Severity.Success);
+                Snackbar.Add("회사 정보 자동 반영 완료. 부모 계정을 생성해주세요.", MudBlazor.Severity.Success);
             }
             else
             {
@@ -248,6 +301,63 @@
         catch (Exception ex)
         {
             _error = $"저장 중 오류가 발생했습니다: {ex.Message}";
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private async Task CreateParentAsync()
+    {
+        _error = null;
+        if (string.IsNullOrWhiteSpace(_parentName))
+        {
+            _error = "대표 이름을 입력해주세요.";
+            return;
+        }
+        if (string.IsNullOrWhiteSpace(_parentEmail))
+        {
+            _error = "로그인 이메일을 입력해주세요.";
+            return;
+        }
+        if (string.IsNullOrWhiteSpace(_parentPassword) || _parentPassword.Length < 8)
+        {
+            _error = "비밀번호는 8자 이상이어야 합니다.";
+            return;
+        }
+        if (_parentPassword != _parentPasswordConfirm)
+        {
+            _error = "비밀번호가 일치하지 않습니다.";
+            return;
+        }
+
+        _busy = true;
+        try
+        {
+            var payload = new
+            {
+                LicenseKey = _licenseKey,
+                BizNo = _bizNo,
+                Email = _parentEmail,
+                Password = _parentPassword,
+                Name = _parentName
+            };
+            var res = await ErpApi.PostAsJsonAsync("api/setup/create-parent", payload);
+            var result = await res.Content.ReadFromJsonAsync<CreateParentResponse>();
+            if (res.IsSuccessStatusCode && result?.Success == true)
+            {
+                _step = 4;
+                Snackbar.Add("부모 계정이 생성되었습니다. 로그인하시면 ERP를 사용할 수 있습니다.", MudBlazor.Severity.Success);
+            }
+            else
+            {
+                _error = result?.Message ?? $"부모 계정 생성 실패 ({(int)res.StatusCode})";
+            }
+        }
+        catch (Exception ex)
+        {
+            _error = $"생성 중 오류가 발생했습니다: {ex.Message}";
         }
         finally
         {
@@ -269,6 +379,15 @@
         public string? Message { get; set; }
         public string? TenantCode { get; set; }
         public string? CompanyName { get; set; }
+    }
+
+    private class CreateParentResponse
+    {
+        public bool Success { get; set; }
+        public string? Message { get; set; }
+        public string? UserId { get; set; }
+        public string? Email { get; set; }
+        public string? TenantCode { get; set; }
     }
 }
 

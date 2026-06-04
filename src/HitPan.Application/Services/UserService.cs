@@ -244,6 +244,14 @@ public sealed class UserService : IUserService
     {
         await EnsureOpenAsync(ct).ConfigureAwait(false);
 
+        // 헌법 #35 (사장님 결재 2026-06-04) — 부모계정은 삭제 차단
+        var isParent = await _db.QueryFirstOrDefaultAsync<int?>(
+            new CommandDefinition(
+                "SELECT is_parent FROM users WHERE user_id = @UserId AND tenant_id = @TenantId",
+                new { UserId = userId, TenantId = tenantId }, cancellationToken: ct)).ConfigureAwait(false);
+        if (isParent == 1)
+            throw new InvalidOperationException("부모 계정은 삭제할 수 없습니다. 회사 정보·라이선스의 마스터 계정입니다.");
+
         await _db.ExecuteAsync(
             new CommandDefinition(
                 """
