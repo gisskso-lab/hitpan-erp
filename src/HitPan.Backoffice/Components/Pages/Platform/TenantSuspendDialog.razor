@@ -1,0 +1,33 @@
+@*
+    고객사 정지 사유 입력 다이얼로그 (사장님 결재 2026-06-04)
+*@
+
+<MudDialog>
+    <DialogContent>
+        <MudText Typo="Typo.body2" Color="Color.Secondary" Class="mb-3">
+            <b>@Row?.CompanyName (@Row?.TenantCode)</b> 고객사를 일시 정지합니다. 사유는 감사로그에 박제됩니다.
+        </MudText>
+        <MudTextField @bind-Value="_reason" Label="정지 사유 *"
+                      Lines="3" Variant="Variant.Outlined" Margin="Margin.Dense"
+                      Placeholder="예: 결제 누락, 약관 위반 등" />
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="Cancel">취소</MudButton>
+        <MudButton Color="Color.Warning" Variant="Variant.Filled" OnClick="Submit">정지</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private IMudDialogInstance? MudDialog { get; set; }
+    [Parameter] public AdminTenantsV2.TenantRow? Row { get; set; }
+
+    private string _reason = "";
+
+    private void Submit()
+    {
+        if (string.IsNullOrWhiteSpace(_reason)) return;
+        MudDialog?.Close(DialogResult.Ok(_reason));
+    }
+
+    private void Cancel() => MudDialog?.Cancel();
+}

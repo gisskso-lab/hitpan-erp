@@ -1,0 +1,243 @@
+@page "/admin/tenants"
+@layout PlatformLayout
+@attribute [Authorize]
+@rendermode InteractiveServer
+@inject IHttpClientFactory HttpFactory
+@inject ISnackbar Snackbar
+@inject IDialogService Dialog
+@inject NavigationManager Nav
+@using HitPan.Backoffice.Components.Common
+
+@*
+    고객사 관리 V2 — 헌법 #35 백오피스 API(5258) 직접 호출 (사장님 결재 2026-06-04)
+    [BoPermission] DB 박제 권한 검사 (tenants.list / .detail / .suspend / .activate)
+    기존 AdminTenants는 ERP API(5257) 호출 — 헌법 #35 정합으로 V2로 교체
+*@
+
+<PageTitle>고객사 관리 — 히트판 백오피스</PageTitle>
+
+<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px;">
+    <div>
+        <MudText Typo="Typo.h5" Style="font-weight:600;">고객사 관리</MudText>
+        <MudText Typo="Typo.body2" Color="Color.Secondary">
+            전체 고객사 목록 · 가입 상태 · 라이선스 활성/정지 (백오피스 API 직접)
+        </MudText>
+    </div>
+    <div style="display:flex;gap:8px;">
+        <MudTextField @bind-Value="_search" Placeholder="회사명·코드 검색"
+                      Variant="Variant.Outlined" Margin="Margin.Dense" Style="min-width:240px;"
+                      OnKeyUp="@(async (e) => { if (e.Key == "Enter") await LoadAsync(); })" />
+        <MudButton OnClick="LoadAsync" Variant="Variant.Filled" Color="Color.Primary"
+                   StartIcon="@Icons.Material.Filled.Search">검색</MudButton>
+    </div>
+</div>
+
+<MudButtonGroup Variant="Variant.Outlined" Class="mb-3">
+    <MudButton OnClick="@(() => SetFilter("all"))" Color="@(_filter == "all" ? Color.Primary : Color.Default)">전체</MudButton>
+    <MudButton OnClick="@(() => SetFilter("pending"))" Color="@(_filter == "pending" ? Color.Primary : Color.Default)">대기</MudButton>
+    <MudButton OnClick="@(() => SetFilter("active"))" Color="@(_filter == "active" ? Color.Primary : Color.Default)">활성</MudButton>
+    <MudButton OnClick="@(() => SetFilter("suspended"))" Color="@(_filter == "suspended" ? Color.Primary : Color.Default)">정지</MudButton>
+    <MudButton OnClick="@(() => SetFilter("trial"))" Color="@(_filter == "trial" ? Color.Primary : Color.Default)">체험</MudButton>
+</MudButtonGroup>
+
+@if (_loading)
+{
+    <MudProgressLinear Indeterminate="true" Color="Color.Primary" />
+}
+else if (_items.Count == 0)
+{
+    <MudPaper Elevation="0" Class="pa-8" Style="border-radius:12px;background:#F9FAFB;text-align:center;">
+        <MudText Color="Color.Secondary">조건에 맞는 고객사가 없습니다.</MudText>
+    </MudPaper>
+}
+else
+{
+    <MudPaper Elevation="1" Style="border-radius:12px;overflow:hidden;">
+        <MudDataGrid T="TenantRow" Items="_items" Hover="true" Dense="true" SortMode="SortMode.Single">
+            <Columns>
+                <PropertyColumn Property="x => x.TenantCode" Title="코드" />
+                <PropertyColumn Property="x => x.CompanyName" Title="회사명" />
+                <PropertyColumn Property="x => x.Tel" Title="연락처" />
+                <TemplateColumn Title="상태">
+                    <CellTemplate>
+                        <MudChip T="string" Size="Size.Small" Color="@StatusColor(context.Item.Status)">
+                            @StatusLabel(context.Item.Status)
+                        </MudChip>
+                    </CellTemplate>
+                </TemplateColumn>
+                <TemplateColumn Title="설치">
+                    <CellTemplate>
+                        @if (context.Item.IsLocked == 1)
+                        {
+                            <MudTooltip Text="@($"설치 완료: {context.Item.BootstrapAt:yyyy-MM-dd HH:mm}")">
+                                <MudIcon Icon="@Icons.Material.Filled.CheckCircle" Color="Color.Success" Size="Size.Small" />
+                            </MudTooltip>
+                        }
+                        else
+                        {
+                            <MudTooltip Text="ERP 설치 미완료">
+                                <MudIcon Icon="@Icons.Material.Filled.PendingActions" Color="Color.Warning" Size="Size.Small" />
+                            </MudTooltip>
+                        }
+                    </CellTemplate>
+                </TemplateColumn>
+                <PropertyColumn Property="x => x.CreatedAt" Title="가입일" Format="yyyy-MM-dd" />
+                <TemplateColumn Title="액션">
+                    <CellTemplate>
+                        @if (context.Item.Status == "active")
+                        {
+                            <MudButton Size="Size.Small" Variant="Variant.Outlined" Color="Color.Warning"
+                                       OnClick="@(() => SuspendAsync(context.Item))">정지</MudButton>
+                        }
+                        else if (context.Item.Status == "suspended" || context.Item.Status == "pending")
+                        {
+                            <MudButton Size="Size.Small" Variant="Variant.Filled" Color="Color.Success"
+                                       OnClick="@(() => ActivateAsync(context.Item))">복구</MudButton>
+                        }
+                    </CellTemplate>
+                </TemplateColumn>
+            </Columns>
+        </MudDataGrid>
+    </MudPaper>
+}
+
+@code {
+    private List<TenantRow> _items = new();
+    private bool _loading = true;
+    private string _filter = "all";
+    private string _search = "";
+
+    protected override async Task OnInitializedAsync() => await LoadAsync();
+
+    private void SetFilter(string f)
+    {
+        _filter = f;
+        _ = LoadAsync();
+    }
+
+    private async Task LoadAsync()
+    {
+        _loading = true;
+        try
+        {
+            var http = HttpFactory.CreateClient("backoffice-authed");
+            var qs = new List<string>();
+            if (_filter != "all") qs.Add($"status={_filter}");
+            if (!string.IsNullOrWhiteSpace(_search)) qs.Add($"search={Uri.EscapeDataString(_search)}");
+            var url = "api/backoffice/tenants" + (qs.Count > 0 ? "?" + string.Join("&", qs) : "");
+            var res = await http.GetFromJsonAsync<ListResponse>(url);
+            _items = res?.Items ?? new();
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"고객사 목록 조회 실패: {ex.Message}", Severity.Error);
+            _items = new();
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    private async Task SuspendAsync(TenantRow row)
+    {
+        var parameters = new DialogParameters { ["Row"] = row };
+        var dialog = await Dialog.ShowAsync<TenantSuspendDialog>("고객사 정지", parameters);
+        var result = await dialog.Result;
+        if (result?.Canceled != false || result.Data is not string reason || string.IsNullOrWhiteSpace(reason)) return;
+
+        try
+        {
+            var http = HttpFactory.CreateClient("backoffice-authed");
+            var res = await http.PostAsJsonAsync($"api/backoffice/tenants/{row.TenantId}/suspend", new { Reason = reason });
+            var payload = await res.Content.ReadFromJsonAsync<ActionResponse>();
+            if (res.IsSuccessStatusCode && payload?.Success == true)
+            {
+                Snackbar.Add(payload.Message ?? "정지 처리되었습니다.", Severity.Warning);
+                await LoadAsync();
+            }
+            else
+            {
+                Snackbar.Add(payload?.Message ?? $"정지 실패 ({(int)res.StatusCode})", Severity.Error);
+            }
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"정지 처리 오류: {ex.Message}", Severity.Error);
+        }
+    }
+
+    private async Task ActivateAsync(TenantRow row)
+    {
+        var ok = await ConfirmDialog.ShowAsync(Dialog,
+            "고객사 복구",
+            $"{row.CompanyName} ({row.TenantCode}) 고객사를 활성화 복구하시겠습니까?",
+            confirmText: "복구", cancelText: "취소", severity: Severity.Success);
+        if (!ok) return;
+
+        try
+        {
+            var http = HttpFactory.CreateClient("backoffice-authed");
+            var res = await http.PostAsync($"api/backoffice/tenants/{row.TenantId}/activate", null);
+            var payload = await res.Content.ReadFromJsonAsync<ActionResponse>();
+            if (res.IsSuccessStatusCode && payload?.Success == true)
+            {
+                Snackbar.Add(payload.Message ?? "활성화 복구되었습니다.", Severity.Success);
+                await LoadAsync();
+            }
+            else
+            {
+                Snackbar.Add(payload?.Message ?? $"복구 실패 ({(int)res.StatusCode})", Severity.Error);
+            }
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"복구 처리 오류: {ex.Message}", Severity.Error);
+        }
+    }
+
+    private static string StatusLabel(string s) => s switch
+    {
+        "pending" => "대기",
+        "active" => "활성",
+        "suspended" => "정지",
+        "trial" => "체험",
+        "inactive" => "비활성",
+        _ => s
+    };
+
+    private static Color StatusColor(string s) => s switch
+    {
+        "pending" => Color.Warning,
+        "active" => Color.Success,
+        "suspended" => Color.Error,
+        "trial" => Color.Info,
+        "inactive" => Color.Default,
+        _ => Color.Default
+    };
+
+    public class TenantRow
+    {
+        public string TenantId { get; set; } = "";
+        public string TenantCode { get; set; } = "";
+        public string CompanyName { get; set; } = "";
+        public string? Tel { get; set; }
+        public string Status { get; set; } = "";
+        public int IsLocked { get; set; }
+        public DateTime? TrialEndsAt { get; set; }
+        public DateTime? BootstrapAt { get; set; }
+        public DateTime CreatedAt { get; set; }
+    }
+
+    private class ListResponse
+    {
+        public bool Success { get; set; }
+        public List<TenantRow> Items { get; set; } = new();
+    }
+
+    private class ActionResponse
+    {
+        public bool Success { get; set; }
+        public string? Message { get; set; }
+    }
+}

@@ -1,0 +1,150 @@
+@page "/admin/resellers"
+@layout PlatformLayout
+@attribute [Authorize]
+@rendermode InteractiveServer
+@inject IHttpClientFactory HttpFactory
+@inject ISnackbar Snackbar
+
+@*
+    협력업체 관리 V2 — 헌법 #35 백오피스 API(5258) 직접 호출 (사장님 결재 2026-06-04)
+    [BoPermission] DB 박제 권한 검사 (resellers.list / .detail)
+    신청 검토는 /admin/reseller-applications (별도)
+*@
+
+<PageTitle>협력업체 관리 — 히트판 백오피스</PageTitle>
+
+<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px;">
+    <div>
+        <MudText Typo="Typo.h5" Style="font-weight:600;">협력업체 관리</MudText>
+        <MudText Typo="Typo.body2" Color="Color.Secondary">
+            활성·정지된 협력업체 목록 (신청 검토는 [협력업체 신청] 메뉴)
+        </MudText>
+    </div>
+    <div style="display:flex;gap:8px;">
+        <MudTextField @bind-Value="_search" Placeholder="회사명·코드 검색"
+                      Variant="Variant.Outlined" Margin="Margin.Dense" Style="min-width:240px;"
+                      OnKeyUp="@(async (e) => { if (e.Key == "Enter") await LoadAsync(); })" />
+        <MudButton OnClick="LoadAsync" Variant="Variant.Filled" Color="Color.Primary"
+                   StartIcon="@Icons.Material.Filled.Search">검색</MudButton>
+    </div>
+</div>
+
+<MudButtonGroup Variant="Variant.Outlined" Class="mb-3">
+    <MudButton OnClick="@(() => SetFilter("all"))" Color="@(_filter == "all" ? Color.Primary : Color.Default)">전체</MudButton>
+    <MudButton OnClick="@(() => SetFilter("active"))" Color="@(_filter == "active" ? Color.Primary : Color.Default)">활성</MudButton>
+    <MudButton OnClick="@(() => SetFilter("suspended"))" Color="@(_filter == "suspended" ? Color.Primary : Color.Default)">정지</MudButton>
+    <MudButton OnClick="@(() => SetFilter("inactive"))" Color="@(_filter == "inactive" ? Color.Primary : Color.Default)">비활성</MudButton>
+</MudButtonGroup>
+
+@if (_loading)
+{
+    <MudProgressLinear Indeterminate="true" Color="Color.Primary" />
+}
+else if (_items.Count == 0)
+{
+    <MudPaper Elevation="0" Class="pa-8" Style="border-radius:12px;background:#F9FAFB;text-align:center;">
+        <MudText Color="Color.Secondary">조건에 맞는 협력업체가 없습니다. 신청 검토는 [협력업체 신청] 메뉴에서 진행합니다.</MudText>
+    </MudPaper>
+}
+else
+{
+    <MudPaper Elevation="1" Style="border-radius:12px;overflow:hidden;">
+        <MudDataGrid T="ResellerRow" Items="_items" Hover="true" Dense="true" SortMode="SortMode.Single">
+            <Columns>
+                <PropertyColumn Property="x => x.ResellerCode" Title="코드" />
+                <PropertyColumn Property="x => x.ResellerName" Title="회사명" />
+                <PropertyColumn Property="x => x.CeoName" Title="대표" />
+                <PropertyColumn Property="x => x.ContactName" Title="담당자" />
+                <PropertyColumn Property="x => x.ContactEmail" Title="이메일" />
+                <PropertyColumn Property="x => x.ContactPhone" Title="연락처" />
+                <TemplateColumn Title="상태">
+                    <CellTemplate>
+                        <MudChip T="string" Size="Size.Small" Color="@StatusColor(context.Item.Status)">
+                            @StatusLabel(context.Item.Status)
+                        </MudChip>
+                    </CellTemplate>
+                </TemplateColumn>
+                <PropertyColumn Property="x => x.TenantCount" Title="고객사 수" />
+                <PropertyColumn Property="x => x.JoinDate" Title="가입일" Format="yyyy-MM-dd" />
+            </Columns>
+        </MudDataGrid>
+    </MudPaper>
+}
+
+@code {
+    private List<ResellerRow> _items = new();
+    private bool _loading = true;
+    private string _filter = "all";
+    private string _search = "";
+
+    protected override async Task OnInitializedAsync() => await LoadAsync();
+
+    private void SetFilter(string f)
+    {
+        _filter = f;
+        _ = LoadAsync();
+    }
+
+    private async Task LoadAsync()
+    {
+        _loading = true;
+        try
+        {
+            var http = HttpFactory.CreateClient("backoffice-authed");
+            var qs = new List<string>();
+            if (_filter != "all") qs.Add($"status={_filter}");
+            if (!string.IsNullOrWhiteSpace(_search)) qs.Add($"search={Uri.EscapeDataString(_search)}");
+            var url = "api/backoffice/resellers" + (qs.Count > 0 ? "?" + string.Join("&", qs) : "");
+            var res = await http.GetFromJsonAsync<ListResponse>(url);
+            _items = res?.Items ?? new();
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"협력업체 목록 조회 실패: {ex.Message}", Severity.Error);
+            _items = new();
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    private static string StatusLabel(string s) => s switch
+    {
+        "active" => "활성",
+        "suspended" => "정지",
+        "inactive" => "비활성",
+        "terminated" => "해지",
+        _ => s
+    };
+
+    private static Color StatusColor(string s) => s switch
+    {
+        "active" => Color.Success,
+        "suspended" => Color.Warning,
+        "inactive" => Color.Default,
+        "terminated" => Color.Error,
+        _ => Color.Default
+    };
+
+    public class ResellerRow
+    {
+        public string ResellerId { get; set; } = "";
+        public string ResellerCode { get; set; } = "";
+        public string ResellerName { get; set; } = "";
+        public string? BizNo { get; set; }
+        public string? CeoName { get; set; }
+        public string? ContactName { get; set; }
+        public string? ContactEmail { get; set; }
+        public string? ContactPhone { get; set; }
+        public string Status { get; set; } = "";
+        public DateTime? JoinDate { get; set; }
+        public int TenantCount { get; set; }
+    }
+
+    private class ListResponse
+    {
+        public bool Success { get; set; }
+        public List<ResellerRow> Items { get; set; } = new();
+    }
+}
