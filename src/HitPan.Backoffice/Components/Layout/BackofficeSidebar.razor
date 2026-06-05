@@ -38,14 +38,24 @@
                 <NavLinkItem Href="/admin/reseller-applications" Icon="how_to_reg" Label="협력업체 신청" />
             </div>
 
+            @* W9 대리점 영역 (사장님 결재 2026-06-05) *@
+            <div class="bo2-nav-section">
+                <div class="bo2-nav-section-label">대리점 (W9)</div>
+                <NavLinkItem Href="/admin/reseller-settlements" Icon="monetization_on" Label="대리점 정산" />
+                <NavLinkItem Href="/admin/reseller-serials" Icon="qr_code" Label="대리점 시리얼" />
+            </div>
+
             @if (_isPlatformOwner)
             {
                 <div class="bo2-nav-section bo2-nav-section-owner">
                     <div class="bo2-nav-section-label">시스템 <span class="bo2-owner-tag">OWNER</span></div>
                     <NavLinkItem Href="/owner/system-config" Icon="settings" Label="System Config" />
-                    <NavLinkItem Href="/owner/platform-users" Icon="admin_panel_settings" Label="Platform Users" />
+                    <NavLinkItem Href="/admin/bo-users" Icon="admin_panel_settings" Label="Owner 사용자 관리" />
+                    <NavLinkItem Href="/admin/approvals" Icon="how_to_reg" Label="4-eyes 결재함" />
+                    <NavLinkItem Href="/admin/mfa-setup" Icon="security" Label="MFA 등록" />
                     <NavLinkItem Href="/owner/permissions" Icon="vpn_key" Label="권한 관리" />
                     <NavLinkItem Href="/owner/credentials-status" Icon="shield" Label="자격증명 상태" />
+                    <NavLinkItem Href="/admin/tenant-domains" Icon="dns" Label="도메인 자동 발급" />
                 </div>
             }
         }

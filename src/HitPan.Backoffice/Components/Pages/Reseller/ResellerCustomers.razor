@@ -1,4 +1,20 @@
 @page "/reseller/customers"
 @attribute [Authorize]
-<MudText Typo="Typo.h5">내 고객사</MudText>
-<MudText Style="color:#6B7280">준비 중입니다.</MudText>
+
+@*
+    대리점 본인 고객사 조회 — 안내 모드 (W18 차수 대기)
+    사장님 결재 2026-06-05 정정
+*@
+
+<PageTitle>내 고객사 — 히트판 대리점</PageTitle>
+
+<MudPaper Class="pa-6" Elevation="1" Style="border-radius:12px;max-width:680px;">
+    <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px;">
+        <MudIcon Icon="@Icons.Material.Filled.Business" Color="Color.Primary" />
+        <MudText Typo="Typo.h5">내 고객사</MudText>
+        <MudChip T="string" Color="Color.Info" Size="Size.Small">W18 차수 대기</MudChip>
+    </div>
+    <MudText Typo="Typo.body2" Color="Color.Secondary">
+        대리점 본인 고객사 조회 API는 W18 차수 신설 대기 중. 본사 V2 영역(/admin/tenants)에서 reseller_id 필터로 조회 가능합니다.
+    </MudText>
+</MudPaper>

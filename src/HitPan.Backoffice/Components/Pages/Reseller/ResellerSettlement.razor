@@ -1,11 +1,23 @@
 @page "/reseller/settlement"
 @attribute [Authorize]
 
-<PageTitle>정산 내역</PageTitle>
-<MudContainer MaxWidth="MaxWidth.Small" Class="d-flex align-center justify-center" Style="height:calc(100vh - 120px)">
-    <MudPaper Class="pa-8 text-center" Elevation="0">
-        <MudIcon Icon="@Icons.Material.Filled.Construction" Size="Size.Large" Color="Color.Warning" Class="mb-4" />
-        <MudText Typo="Typo.h5" Class="mb-2">정산 내역</MudText>
-        <MudText Typo="Typo.body1" Color="Color.Secondary">준비중입니다.</MudText>
-    </MudPaper>
-</MudContainer>
+@*
+    대리점 본인 정산 내역 — 안내 모드 (W9 본사 영역 완료, 대리점 본인 조회 API W18 차수 대기)
+    사장님 결재 2026-06-05 정정
+*@
+
+<PageTitle>정산 내역 — 히트판 대리점</PageTitle>
+
+<MudPaper Class="pa-6" Elevation="1" Style="border-radius:12px;max-width:680px;">
+    <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px;">
+        <MudIcon Icon="@Icons.Material.Filled.MonetizationOn" Color="Color.Primary" />
+        <MudText Typo="Typo.h5">정산 내역</MudText>
+        <MudChip T="string" Color="Color.Info" Size="Size.Small">W18 차수 대기</MudChip>
+    </div>
+    <MudText Typo="Typo.body2" Color="Color.Secondary" Class="mb-3">
+        대리점 본인 정산 조회 API는 W18 차수 신설 대기 중. 현재는 본사 영역(/admin/reseller-settlements)에서 처리됩니다.
+    </MudText>
+    <MudAlert Severity="Severity.Info" Dense="true">
+        급한 정산 확인은 본사 CS(/owner/credentials-status 옆 채널)로 문의해주세요.
+    </MudAlert>
+</MudPaper>

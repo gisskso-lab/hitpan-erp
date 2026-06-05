@@ -1,4 +1,11 @@
 @page "/reseller/payout"
-@attribute [Authorize]
-<MudText Typo="Typo.h5">정산 내역</MudText>
-<MudText Style="color:#6B7280">준비 중입니다.</MudText>
+@inject NavigationManager Nav
+
+@*
+    레거시 경로 → 정산 내역 통합 (사장님 결재 2026-06-05)
+    ResellerSettlement과 의미 중복 → 단일 화면으로 통합
+*@
+
+@code {
+    protected override void OnInitialized() => Nav.NavigateTo("/reseller/settlement", replace: true);
+}

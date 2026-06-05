@@ -1,4 +1,11 @@
 @page "/platform/tenants"
-@* [Authorize] 다음 세션에 박제 *@
-<MudText Typo="Typo.h5">고객사 관리</MudText>
-<MudText Style="color:#6B7280">준비 중입니다.</MudText>
+@inject NavigationManager Nav
+
+@*
+    레거시 경로 → V2 리다이렉트 (사장님 결재 2026-06-05, 헌법 #35 정합)
+    실제 작동 페이지: /admin/tenants (AdminTenantsV2.razor)
+*@
+
+@code {
+    protected override void OnInitialized() => Nav.NavigateTo("/admin/tenants", replace: true);
+}
