@@ -48,6 +48,15 @@
             대리점 시리얼
         </MudNavLink>
 
+        @* W17 프로모션 (사장님 결재 2026-06-05) *@
+        <MudDivider Class="my-2" />
+        <MudText Typo="Typo.caption" Class="px-4" Style="color:var(--mud-palette-text-secondary);">
+            마케팅 (W17)
+        </MudText>
+        <MudNavLink Href="/admin/promotions" Icon="@Icons.Material.Filled.Campaign">
+            프로모션 관리
+        </MudNavLink>
+
         @if (_isOwner)
         {
             <MudDivider Class="my-2" />

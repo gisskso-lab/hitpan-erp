@@ -1,23 +1,11 @@
 @page "/platform/promotions"
-@attribute [Authorize]
+@inject NavigationManager Nav
 
 @*
-    프로모션 관리 — 안내 모드 (W17 차수 대기, 사장님 결재 2026-06-05)
-    백엔드 미신설 — 본 차수 명확 표기로 정정
+    레거시 경로 → W17 실작동 화면 리다이렉트 (사장님 결재 2026-06-05)
+    실제 작동 페이지: /admin/promotions (W17)
 *@
 
-<PageTitle>프로모션 관리 — 히트판 백오피스</PageTitle>
-
-<MudPaper Class="pa-6" Elevation="1" Style="border-radius:12px;max-width:680px;">
-    <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px;">
-        <MudIcon Icon="@Icons.Material.Filled.Campaign" Color="Color.Primary" />
-        <MudText Typo="Typo.h5">프로모션 관리</MudText>
-        <MudChip T="string" Color="Color.Warning" Size="Size.Small">W17 차수 대기</MudChip>
-    </div>
-    <MudText Typo="Typo.body2" Color="Color.Secondary" Class="mb-3">
-        쿠폰·할인 코드·기간 한정 프로모션 영역. 본 차수에서 백엔드 미신설 — 결제 영역(W14 결제) 안정화 후 진행 예정.
-    </MudText>
-    <MudAlert Severity="Severity.Info" Dense="true">
-        급한 프로모션은 결제 영역(/admin/billing) 수동 조정으로 우회 가능합니다.
-    </MudAlert>
-</MudPaper>
+@code {
+    protected override void OnInitialized() => Nav.NavigateTo("/admin/promotions", replace: true);
+}
