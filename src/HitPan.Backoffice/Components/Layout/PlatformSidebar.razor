@@ -36,6 +36,18 @@
             협력업체 신청
         </MudNavLink>
 
+        @* W9 대리점 영역 (사장님 결재 2026-06-05) *@
+        <MudDivider Class="my-2" />
+        <MudText Typo="Typo.caption" Class="px-4" Style="color:var(--mud-palette-text-secondary);">
+            대리점 (W9)
+        </MudText>
+        <MudNavLink Href="/admin/reseller-settlements" Icon="@Icons.Material.Filled.MonetizationOn">
+            대리점 정산
+        </MudNavLink>
+        <MudNavLink Href="/admin/reseller-serials" Icon="@Icons.Material.Filled.QrCode">
+            대리점 시리얼
+        </MudNavLink>
+
         @if (_isOwner)
         {
             <MudDivider Class="my-2" />
@@ -45,14 +57,23 @@
             <MudNavLink Href="/owner/system-config" Icon="@Icons.Material.Filled.Settings">
                 시스템 설정
             </MudNavLink>
-            <MudNavLink Href="/owner/users" Icon="@Icons.Material.Filled.AdminPanelSettings">
-                본사 직원 관리
+            <MudNavLink Href="/admin/bo-users" Icon="@Icons.Material.Filled.AdminPanelSettings">
+                Owner 사용자 관리
+            </MudNavLink>
+            <MudNavLink Href="/admin/approvals" Icon="@Icons.Material.Filled.HowToReg">
+                4-eyes 결재함
+            </MudNavLink>
+            <MudNavLink Href="/admin/mfa-setup" Icon="@Icons.Material.Filled.Security">
+                MFA 등록
             </MudNavLink>
             <MudNavLink Href="/owner/permissions" Icon="@Icons.Material.Filled.VpnKey">
                 권한 관리
             </MudNavLink>
             <MudNavLink Href="/owner/credentials-status" Icon="@Icons.Material.Filled.Shield">
                 자격증명 상태
+            </MudNavLink>
+            <MudNavLink Href="/admin/tenant-domains" Icon="@Icons.Material.Filled.Dns">
+                도메인 자동 발급
             </MudNavLink>
             <MudNavLink Href="/owner/test-flow" Icon="@Icons.Material.Filled.PlayCircle">
                 전체 흐름 테스트

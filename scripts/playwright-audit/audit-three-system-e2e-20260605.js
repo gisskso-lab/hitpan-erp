@@ -86,9 +86,9 @@ async function scenarioB(browser) {
     results.backoffice.home = home;
     console.log(`  /  → ${home.status}`);
 
-    const login = await safeGoto(page, `${BACKOFFICE}/login`, 'backoffice');
+    const login = await safeGoto(page, `${BACKOFFICE}/backoffice/login`, 'backoffice');
     results.backoffice.login = login;
-    console.log(`  /login → ${login.status}`);
+    console.log(`  /backoffice/login → ${login.status}`);
 
     const v2Pages = [
         { name: '고객사 관리 V2', path: '/admin/tenants' },

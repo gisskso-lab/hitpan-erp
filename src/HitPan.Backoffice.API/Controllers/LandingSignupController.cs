@@ -98,13 +98,15 @@ public class LandingSignupController : ControllerBase
             var codeSeq = await db.QueryFirstOrDefaultAsync<int>("SELECT COUNT(*) + 1 FROM tenants");
             var tenantCode = $"T-{codeSeq:D3}";
 
+            // 헌법 #18·#22 정합 — biz_no·ceo_name 평문 0 (해시는 landing_signups에 박힘)
+            // tenants 컬럼이 NOT NULL이라 빈 문자열로 채움 (license/claim 단계에서 실제 데이터 반영)
             await db.ExecuteAsync(@"
                 INSERT INTO tenants
                   (tenant_id, tenant_code, company_name, biz_no, ceo_name, tel, address,
                    reseller_id, status, trial_ends_at, db_host, db_name, license_key_hash,
                    reseller_tier, created_at, updated_at)
                 VALUES
-                  (@TenantId, @TenantCode, @CompanyName, NULL, NULL, @Phone, NULL,
+                  (@TenantId, @TenantCode, @CompanyName, '', '', @Phone, '',
                    NULL, 'pending', NULL, '', '', '', 0, UTC_TIMESTAMP(), UTC_TIMESTAMP())",
                 new
                 {
