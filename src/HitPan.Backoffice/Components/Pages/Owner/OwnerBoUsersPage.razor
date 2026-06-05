@@ -1,0 +1,198 @@
+@page "/admin/bo-users"
+@layout PlatformLayout
+@attribute [Authorize]
+@rendermode InteractiveServer
+@inject IHttpClientFactory HttpFactory
+@inject ISnackbar Snackbar
+@inject IDialogService Dialog
+
+@*
+    Owner 사용자 관리 (W11, 사장님 결재 2026-06-05)
+    백오피스 API /api/backoffice/owner/bo-users 직접 호출
+    4-eyes 흐름: Create/Delete = 결재 큐 / Activate/Deactivate = 즉시
+*@
+
+<PageTitle>Owner 사용자 관리 — 히트판 백오피스</PageTitle>
+
+<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px;">
+    <div>
+        <MudText Typo="Typo.h5" Style="font-weight:600;">Owner 사용자 관리</MudText>
+        <MudText Typo="Typo.body2" Color="Color.Secondary">
+            bo_users CRUD · 4-eyes 결재 (생성·삭제는 다른 Owner 1명 승인 필요)
+        </MudText>
+    </div>
+    <MudButton OnClick="OpenCreateDialog" Variant="Variant.Filled" Color="Color.Primary"
+               StartIcon="@Icons.Material.Filled.PersonAdd">사용자 추가 요청</MudButton>
+</div>
+
+@if (_loading)
+{
+    <MudProgressLinear Indeterminate="true" Color="Color.Primary" />
+}
+else if (_items.Count == 0)
+{
+    <MudPaper Elevation="0" Class="pa-8" Style="border-radius:12px;background:#F9FAFB;text-align:center;">
+        <MudText Color="Color.Secondary">등록된 Owner 사용자가 없습니다.</MudText>
+    </MudPaper>
+}
+else
+{
+    <MudPaper Elevation="1" Style="border-radius:12px;overflow:hidden;">
+        <MudDataGrid T="BoUserRow" Items="_items" Hover="true" Dense="true">
+            <Columns>
+                <PropertyColumn Property="x => x.Email" Title="이메일" />
+                <PropertyColumn Property="x => x.Name" Title="이름" />
+                <PropertyColumn Property="x => x.Role" Title="역할" />
+                <TemplateColumn Title="상태">
+                    <CellTemplate>
+                        @if (context.Item.IsActive == 1)
+                        {
+                            <MudChip T="string" Color="Color.Success" Size="Size.Small">활성</MudChip>
+                        }
+                        else
+                        {
+                            <MudChip T="string" Color="Color.Default" Size="Size.Small">비활성</MudChip>
+                        }
+                    </CellTemplate>
+                </TemplateColumn>
+                <PropertyColumn Property="x => x.FailedLoginCnt" Title="실패 횟수" />
+                <TemplateColumn Title="마지막 로그인">
+                    <CellTemplate>
+                        @(context.Item.LastLoginAt?.ToString("yyyy-MM-dd HH:mm") ?? "—")
+                    </CellTemplate>
+                </TemplateColumn>
+                <TemplateColumn Title="액션">
+                    <CellTemplate>
+                        @if (context.Item.IsActive == 1)
+                        {
+                            <MudButton OnClick="@(() => ToggleAsync(context.Item, false))"
+                                       Size="Size.Small" Color="Color.Warning">비활성화</MudButton>
+                        }
+                        else
+                        {
+                            <MudButton OnClick="@(() => ToggleAsync(context.Item, true))"
+                                       Size="Size.Small" Color="Color.Success">활성화</MudButton>
+                        }
+                        <MudButton OnClick="@(() => RequestDeleteAsync(context.Item))"
+                                   Size="Size.Small" Color="Color.Error">삭제 요청</MudButton>
+                    </CellTemplate>
+                </TemplateColumn>
+            </Columns>
+        </MudDataGrid>
+    </MudPaper>
+}
+
+@code {
+    private bool _loading = true;
+    private List<BoUserRow> _items = new();
+
+    protected override async Task OnInitializedAsync() => await LoadAsync();
+
+    private async Task LoadAsync()
+    {
+        _loading = true;
+        try
+        {
+            var http = HttpFactory.CreateClient("backoffice-authed");
+            var res = await http.GetFromJsonAsync<ListResponse>("api/backoffice/owner/bo-users");
+            _items = res?.Items ?? new();
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"목록 조회 실패: {ex.Message}", Severity.Error);
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    private async Task ToggleAsync(BoUserRow row, bool activate)
+    {
+        try
+        {
+            var http = HttpFactory.CreateClient("backoffice-authed");
+            var path = activate ? "activate" : "deactivate";
+            var res = await http.PutAsync($"api/backoffice/owner/bo-users/{row.UserId}/{path}", null);
+            var payload = await res.Content.ReadFromJsonAsync<ActionResponse>();
+            if (res.IsSuccessStatusCode && payload?.Success == true)
+            {
+                Snackbar.Add(payload.Message ?? "처리되었습니다.", Severity.Success);
+                await LoadAsync();
+            }
+            else
+            {
+                Snackbar.Add(payload?.Message ?? "처리 실패", Severity.Error);
+            }
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"처리 중 오류: {ex.Message}", Severity.Error);
+        }
+    }
+
+    private async Task RequestDeleteAsync(BoUserRow row)
+    {
+        var ok = await ConfirmDialog.ShowAsync(Dialog,
+            "삭제 요청",
+            $"{row.Email} 계정 삭제를 4-eyes 결재 큐에 등록합니다. 다른 Owner 1명 승인 후 실행됩니다.",
+            confirmText: "요청", severity: Severity.Warning);
+        if (!ok) return;
+
+        try
+        {
+            var http = HttpFactory.CreateClient("backoffice-authed");
+            var res = await http.PostAsync($"api/backoffice/owner/bo-users/{row.UserId}/request-delete", null);
+            var payload = await res.Content.ReadFromJsonAsync<ActionResponse>();
+            if (res.IsSuccessStatusCode && payload?.Success == true)
+            {
+                Snackbar.Add(payload.Message ?? "삭제 요청 등록됨", Severity.Info);
+            }
+            else
+            {
+                Snackbar.Add(payload?.Message ?? "요청 실패", Severity.Error);
+            }
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"요청 중 오류: {ex.Message}", Severity.Error);
+        }
+    }
+
+    private async Task OpenCreateDialog()
+    {
+        var parameters = new DialogParameters();
+        var dialog = await Dialog.ShowAsync<BoUserCreateDialog>("Owner 사용자 추가 요청", parameters,
+            new DialogOptions { MaxWidth = MaxWidth.Small, FullWidth = true });
+        var result = await dialog.Result;
+        if (result is not null && !result.Canceled)
+        {
+            await LoadAsync();
+        }
+    }
+
+    private class ListResponse
+    {
+        public bool Success { get; set; }
+        public List<BoUserRow> Items { get; set; } = new();
+    }
+
+    private class ActionResponse
+    {
+        public bool Success { get; set; }
+        public string? Message { get; set; }
+    }
+
+    public class BoUserRow
+    {
+        public string UserId { get; set; } = "";
+        public string Email { get; set; } = "";
+        public string Name { get; set; } = "";
+        public string Role { get; set; } = "";
+        public string? ResellerId { get; set; }
+        public int IsActive { get; set; }
+        public int FailedLoginCnt { get; set; }
+        public DateTime? LastLoginAt { get; set; }
+        public DateTime CreatedAt { get; set; }
+    }
+}

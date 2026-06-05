@@ -29,6 +29,8 @@ public class Program
         // W10 webhook (사장님 결재 2026-06-04) — 구독·기기 변경 → ERP 동기화
         builder.Services.AddScoped<HitPan.Backoffice.API.Services.IWebhookOutboundService, HitPan.Backoffice.API.Services.WebhookOutboundService>();
         builder.Services.AddHostedService<HitPan.Backoffice.API.Services.WebhookDispatcher>();
+        // W14 Cloudflare 도메인 자동 발급 골격 (사장님 결재 2026-06-05) — 환경변수 미설정 시 503
+        builder.Services.AddSingleton<HitPan.Backoffice.API.Services.ICloudflareDomainService, HitPan.Backoffice.API.Services.CloudflareDomainService>();
         // W11 Owner 영역 (사장님 결재 2026-06-04) — bo_users + 4-eyes + 감사로그 + MFA
         builder.Services.AddScoped<HitPan.Backoffice.API.Services.IBoAuditService, HitPan.Backoffice.API.Services.BoAuditService>();
         builder.Services.AddSingleton<HitPan.Backoffice.API.Services.IMfaService, HitPan.Backoffice.API.Services.MfaService>();

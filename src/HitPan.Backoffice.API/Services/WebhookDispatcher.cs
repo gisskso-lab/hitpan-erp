@@ -71,7 +71,7 @@ public class WebhookDispatcher : BackgroundService
         var pending = (await db.QueryAsync<OutboxRow>(@"
             SELECT
                 outbox_id AS OutboxId,
-                tenant_id AS TenantId,
+                CAST(tenant_id AS CHAR) AS TenantId,
                 event_type AS EventType,
                 target_url AS TargetUrl,
                 payload_json AS PayloadJson,

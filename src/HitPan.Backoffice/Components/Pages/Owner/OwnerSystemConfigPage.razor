@@ -1,6 +1,6 @@
 @*
-    Owner 전용 시스템 설정 (사장님 결재 2026-06-04, 헌법 #35)
-    W11 백엔드 신설 대기 — 현재는 향후 설정 항목 가도 안내 화면.
+    Owner 전용 시스템 설정 (사장님 결재 2026-06-05, 헌법 #35)
+    W11 MFA·결재함 신설 완료 / IP 화이트리스트·보안 정책은 미완 (안내 유지).
 *@
 
 @page "/owner/system-config"
@@ -19,20 +19,21 @@
     </div>
 </div>
 
-<MudAlert Severity="Severity.Info" Class="mb-4" Dense="true" Icon="@Icons.Material.Filled.Construction">
-    이 화면은 W11 차수 백엔드 신설 후 활성화됩니다. 현재는 가도 안내만 노출됩니다.
+<MudAlert Severity="Severity.Info" Class="mb-4" Dense="true" Icon="@Icons.Material.Filled.Info">
+    W11 MFA + 4-eyes 결재함 신설 완료 (2026-06-05). IP 화이트리스트·보안 정책 세부 영역은 다음 차수 대기.
 </MudAlert>
 
 <MudGrid Spacing="3">
     <MudItem xs="12" md="6">
-        <MudPaper Class="pa-4" Elevation="1" Style="border-radius:12px;opacity:0.75;">
+        <MudPaper Class="pa-4" Elevation="1" Style="border-radius:12px;cursor:pointer;"
+                  @onclick='() => Nav.NavigateTo("/admin/mfa-setup")'>
             <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px;">
-                <MudIcon Icon="@Icons.Material.Filled.Lock" Color="Color.Primary" />
-                <MudText Typo="Typo.h6">MFA (다중 인증)</MudText>
-                <MudChip T="string" Size="Size.Small" Color="Color.Warning">W11 대기</MudChip>
+                <MudIcon Icon="@Icons.Material.Filled.Lock" Color="Color.Success" />
+                <MudText Typo="Typo.h6">MFA (TOTP 2단계 인증)</MudText>
+                <MudChip T="string" Size="Size.Small" Color="Color.Success">작동</MudChip>
             </div>
             <MudText Typo="Typo.body2" Color="Color.Secondary">
-                본사 전 직원 MFA 의무화 — TOTP/SMS 2채널. bo_users에 MFA 필드 추가 + 검증 로직 신설 예정.
+                Owner 계정 TOTP 등록·백업 코드 발급 — Google Authenticator·1Password 호환. 시크릿 AES-256 저장.
             </MudText>
         </MudPaper>
     </MudItem>
@@ -77,6 +78,26 @@
                            StartIcon="@Icons.Material.Filled.VpnKey"
                            OnClick='() => Nav.NavigateTo("/owner/permissions")'>
                     권한 관리 (작동)
+                </MudButton>
+                <MudButton Variant="Variant.Outlined" Color="Color.Success"
+                           StartIcon="@Icons.Material.Filled.People"
+                           OnClick='() => Nav.NavigateTo("/admin/bo-users")'>
+                    Owner 사용자 관리 (W11)
+                </MudButton>
+                <MudButton Variant="Variant.Outlined" Color="Color.Success"
+                           StartIcon="@Icons.Material.Filled.HowToReg"
+                           OnClick='() => Nav.NavigateTo("/admin/approvals")'>
+                    4-eyes 결재함 (W11)
+                </MudButton>
+                <MudButton Variant="Variant.Outlined" Color="Color.Success"
+                           StartIcon="@Icons.Material.Filled.MonetizationOn"
+                           OnClick='() => Nav.NavigateTo("/admin/reseller-settlements")'>
+                    대리점 정산 (W9)
+                </MudButton>
+                <MudButton Variant="Variant.Outlined" Color="Color.Success"
+                           StartIcon="@Icons.Material.Filled.QrCode"
+                           OnClick='() => Nav.NavigateTo("/admin/reseller-serials")'>
+                    대리점 시리얼 (W9)
                 </MudButton>
             </div>
         </MudPaper>

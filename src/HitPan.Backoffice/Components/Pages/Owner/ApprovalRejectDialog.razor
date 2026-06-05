@@ -1,0 +1,33 @@
+@*
+    4-eyes 결재 반려 사유 입력 (W11, 사장님 결재 2026-06-05)
+    범용 — 결재 큐 / Owner 액션 공용
+*@
+
+<MudDialog>
+    <DialogContent>
+        <MudText Typo="Typo.body2" Color="Color.Secondary" Class="mb-3">
+            반려 사유는 결재 이력에 박힙니다. 요청자에게도 공유되니 명확히 작성해주세요.
+        </MudText>
+        <MudTextField @bind-Value="_reason" Label="반려 사유 *"
+                      Lines="4" Variant="Variant.Outlined" Margin="Margin.Dense"
+                      Placeholder="예: 권한 범위 검토 필요 — 요청자 재논의 후 재요청 바람" />
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="Cancel">취소</MudButton>
+        <MudButton Color="Color.Error" Variant="Variant.Filled" OnClick="Submit">반려</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private IMudDialogInstance? MudDialog { get; set; }
+
+    private string _reason = "";
+
+    private void Submit()
+    {
+        if (string.IsNullOrWhiteSpace(_reason)) return;
+        MudDialog?.Close(DialogResult.Ok(_reason));
+    }
+
+    private void Cancel() => MudDialog?.Cancel();
+}
