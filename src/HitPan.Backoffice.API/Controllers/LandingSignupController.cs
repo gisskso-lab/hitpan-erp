@@ -112,20 +112,28 @@ public class LandingSignupController : ControllerBase
         {
             await using var db = await OpenAsync(ct);
 
-            // 중복 가입 차단 (biz_no_hash UNIQUE)
+            // 중복 가입 차단 — 사장님 결재 2026-06-08:
+            //   "반려의 의미는 재가입 영구차단이 아니지. 가입조건 불충족이니 충족되면 가입이 되야지."
+            //   "반려된 사업자는 중복체크에서 제외되야지. 승인된 사업자 번호가 아닌데."
+            //   → approved·active 상태만 중복 차단. rejected·submitted는 재가입 허용.
             var existing = await db.QueryFirstOrDefaultAsync<long?>(
-                "SELECT COUNT(*) FROM landing_signups WHERE biz_no_hash = @Hash",
+                "SELECT COUNT(*) FROM landing_signups WHERE biz_no_hash = @Hash AND status IN ('approved','active')",
                 new { Hash = bizNoHash });
 
             if (existing.HasValue && existing.Value > 0)
             {
-                _logger.LogInformation("[LandingSignup] duplicate biz_no_hash email={Email}", req.Email);
+                _logger.LogInformation("[LandingSignup] duplicate active biz_no_hash email={Email}", req.Email);
                 return BadRequest(new
                 {
                     success = false,
-                    message = "이미 가입된 사업자번호입니다. 계정 분실은 '계정 분실/문의' 메뉴로 이동해주세요."
+                    message = "이미 활성 상태로 가입된 사업자번호입니다. 계정 분실은 '계정 분실/문의' 메뉴로 이동해주세요."
                 });
             }
+
+            // 같은 사업자번호로 이전 신청(반려·미처리)이 있으면 정리 박기 — UNIQUE 충돌 방지
+            await db.ExecuteAsync(
+                "DELETE FROM landing_signups WHERE biz_no_hash = @Hash AND status NOT IN ('approved','active')",
+                new { Hash = bizNoHash });
 
             var signupToken = $"sgn-{Guid.NewGuid():N}";
 
@@ -152,32 +160,37 @@ public class LandingSignupController : ControllerBase
             var codeSeq = await db.QueryFirstOrDefaultAsync<int>("SELECT COUNT(*) + 1 FROM tenants");
             var tenantCode = $"T-{codeSeq:D3}";
 
-            // 헌법 #18·#22 정합 — biz_no·ceo_name 평문 0 (해시는 landing_signups에 박힘)
-            // tenants 컬럼이 NOT NULL이라 빈 문자열로 채움 (license/claim 단계에서 실제 데이터 반영)
+            // 사장님 결재 2026-06-08 — biz_no·ceo_name 평문 박힘. 헌법 #35 정합:
+            //   "랜딩에서 인증된 사업자등록증 정보 → 계정관리·회사정보 자동 반영"
+            //   ERP 사용자정보설정에 자동 박혀야 정합. tenants는 백오피스 영역(고객사 PK)이므로 평문 박힘.
+            // 사업자번호는 정규화(숫자만) 박은 후 저장.
+            var bizNoNorm = new string((req.BizNo ?? "").Where(char.IsDigit).ToArray());
             await db.ExecuteAsync(@"
                 INSERT INTO tenants
                   (tenant_id, tenant_code, company_name, biz_no, ceo_name, tel, address,
                    reseller_id, status, trial_ends_at, db_host, db_name, license_key_hash,
                    reseller_tier, created_at, updated_at)
                 VALUES
-                  (@TenantId, @TenantCode, @CompanyName, '', '', @Phone, '',
+                  (@TenantId, @TenantCode, @CompanyName, @BizNo, @CeoName, @Phone, '',
                    NULL, 'pending', NULL, '', '', '', 0, UTC_TIMESTAMP(), UTC_TIMESTAMP())",
                 new
                 {
                     TenantId = tenantId,
                     TenantCode = tenantCode,
                     req.CompanyName,
+                    BizNo = bizNoNorm,
+                    CeoName = req.CeoName ?? "",
                     req.Phone
                 });
 
             _logger.LogInformation("[LandingSignup] submitted token={Token} tenant={TenantCode} email={Email} plan={Plan}",
                 signupToken, tenantCode, req.Email, req.PlanType);
 
-            // 신청 접수 안내 메일 (헌법 #20 정합 — 가입 → 안내 끊김 0)
-            // SMTP 미박제 시 EmailSender 내부 로그만 출력, 가입 흐름은 중단 없음
+            // 신청 접수 안내 메일 (헌법 #20·#22·#35 정합 — 고객사 코드는 백오피스 PK 영역, 고객 노출 절대 금지)
+            // 사장님 결재 2026-06-08: tenantCode 메일에 박지 않음. 시리얼 키는 백오피스 승인 후 별도 발송.
             _ = _email.SendAsync(req.Email,
                 "[히트판] 가입 신청 접수 완료",
-                BuildSignupReceivedHtml(req.CompanyName, tenantCode),
+                BuildSignupReceivedHtml(req.CompanyName),
                 ct);
 
             return Ok(new
@@ -326,16 +339,19 @@ public class LandingSignupController : ControllerBase
         public string Email { get; set; } = "";
     }
 
-    private static string BuildSignupReceivedHtml(string companyName, string tenantCode) => $@"
+    // 사장님 결재 2026-06-08 — 고객사 코드(tenantCode)는 백오피스 PK 영역, 고객 메일 노출 절대 금지.
+    // 베타1 정합 — 결제 안내 제거. 본사 검토 후 시리얼 키 이메일 자동 발송.
+    private static string BuildSignupReceivedHtml(string companyName) => $@"
 <div style='font-family:-apple-system,BlinkMacSystemFont,Pretendard,Segoe UI,Roboto,sans-serif;max-width:560px;margin:0 auto;padding:32px;color:#1A2B4A;'>
   <h2 style='color:#0F6E56;margin:0 0 16px;'>가입 신청이 접수되었습니다</h2>
   <p>안녕하세요, <b>{System.Net.WebUtility.HtmlEncode(companyName)}</b> 담당자님.</p>
   <p>히트판 ERP 가입 신청이 정상 접수되었습니다.</p>
   <div style='background:#F0FAF6;border:1px solid #C7E9D9;border-radius:12px;padding:16px;margin:20px 0;'>
-    <div style='font-size:13px;color:#6B7280;margin-bottom:4px;'>고객사 코드</div>
-    <div style='font-size:18px;font-weight:700;color:#0F6E56;letter-spacing:0.5px;'>{tenantCode}</div>
+    <p style='margin:0;color:#0F6E56;font-size:14px;line-height:1.7;'>
+      본사에서 사업자등록증과 입력 정보를 검토한 뒤, 본 이메일 주소로 <b>시리얼 키</b>를 즉시 발송해 드립니다.<br/>
+      보통 영업시간 내 1시간 이내 처리됩니다.
+    </p>
   </div>
-  <p>다음 단계로 이메일 인증과 결제가 진행되며, 결제 완료 시 <b>부모 계정ID(라이선스 키)</b>가 발급됩니다.</p>
   <p style='margin-top:24px;color:#6B7280;font-size:13px;'>이 메일은 발신 전용입니다. 문의는 support@hitpan.kr 로 부탁드립니다.</p>
 </div>";
 

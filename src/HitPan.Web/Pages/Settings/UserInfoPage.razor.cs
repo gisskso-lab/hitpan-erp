@@ -71,7 +71,25 @@ public partial class UserInfoPage : ComponentBase, IDisposable
                 _serialVerifiedAt = DateTime.Now.ToString("yyyy-MM-dd HH:mm");
                 _lastVerifiedLicenseKey = _serialKey.Trim();  // 기기 등록 시 재사용 (메모리만)
                 _serialKey = "";
-                Snackbar.Add("시리얼 인증 완료 — 히트판 ERP 활성화", Severity.Success);
+
+                // 사장님 결재 + 헌법 #35 정합 — 인증된 사업자등록증 정보 → 사용자정보설정 자동 박힘
+                if (result.CompanyInfo is not null)
+                {
+                    if (!string.IsNullOrWhiteSpace(result.CompanyInfo.CompanyName))
+                        _model.CompanyName = result.CompanyInfo.CompanyName;
+                    if (!string.IsNullOrWhiteSpace(result.CompanyInfo.BizNo))
+                        _model.BusinessNo = result.CompanyInfo.BizNo;
+                    if (!string.IsNullOrWhiteSpace(result.CompanyInfo.CeoName))
+                        _model.CeoName = result.CompanyInfo.CeoName;
+                    if (!string.IsNullOrWhiteSpace(result.CompanyInfo.Tel))
+                        _model.Phone = result.CompanyInfo.Tel;
+                    if (!string.IsNullOrWhiteSpace(result.CompanyInfo.Email))
+                        _model.Email = result.CompanyInfo.Email;
+                    if (!string.IsNullOrWhiteSpace(result.CompanyInfo.Address))
+                        _model.Address = result.CompanyInfo.Address;
+                }
+
+                Snackbar.Add("시리얼 인증 완료 — 사용자정보가 자동 입력되었습니다", Severity.Success);
             }
             else if ((int)resp.StatusCode == 423 || result?.Locked == true)
             {
@@ -106,6 +124,21 @@ public partial class UserInfoPage : ComponentBase, IDisposable
         public string? Message { get; set; }
         public string? TenantId { get; set; }
         public string? TenantCode { get; set; }
+        public CompanyInfoDto? CompanyInfo { get; set; }
+    }
+
+    private class CompanyInfoDto
+    {
+        public string? TenantCode { get; set; }
+        public string? CompanyName { get; set; }
+        public string? BizNo { get; set; }
+        public string? CeoName { get; set; }
+        public string? Tel { get; set; }
+        public string? Address { get; set; }
+        public string? Status { get; set; }
+        public string? Email { get; set; }
+        public string? Phone { get; set; }
+        public string? PlanType { get; set; }
     }
 
     // 기기 등록 (사장님 결재 2026-06-08 - 네이버·넷플릭스 방식)

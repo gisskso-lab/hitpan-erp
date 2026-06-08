@@ -56,6 +56,9 @@ public class DeviceRegistrationController : ControllerBase
             var pepper = _config["License:Pepper"] ?? "dev-pepper-2026";
             var licHash = ComputeHmacSha256(req.LicenseKey.Trim().ToUpperInvariant().Replace(" ", ""), pepper);
 
+            // fingerprint 해시 정규화 — 평문 길이 박힘 사고 차단 + 헌법 #22 정합
+            var fingerprintHash = ComputeHmacSha256(req.Fingerprint, pepper);
+
             var tenant = await db.QueryFirstOrDefaultAsync<TenantRow>(@"
                 SELECT CAST(t.tenant_id AS CHAR) AS TenantId, t.tenant_code AS TenantCode,
                        t.company_name AS CompanyName, t.status AS Status,
@@ -75,11 +78,11 @@ public class DeviceRegistrationController : ControllerBase
             if (deviceType != "pc" && deviceType != "mobile")
                 deviceType = "pc";
 
-            // 3) 이미 등록된 기기 확인 (fingerprint 일치)
+            // 3) 이미 등록된 기기 확인 (fingerprint 해시 일치)
             var existing = await db.QueryFirstOrDefaultAsync<string>(@"
                 SELECT device_id FROM tenant_devices
                 WHERE tenant_id = @TenantId AND fingerprint = @Fp AND status = 'approved' LIMIT 1",
-                new { TenantId = tenant.TenantId, Fp = req.Fingerprint });
+                new { TenantId = tenant.TenantId, Fp = fingerprintHash });
 
             if (existing is not null)
             {
@@ -133,7 +136,7 @@ public class DeviceRegistrationController : ControllerBase
                     TenantId = tenant.TenantId,
                     DeviceType = deviceType,
                     DeviceName = req.DeviceName ?? (deviceType == "pc" ? "PC" : "Mobile"),
-                    req.Fingerprint,
+                    Fingerprint = fingerprintHash,
                     TokenHash = tokenHash,
                     Ip = HttpContext.Connection.RemoteIpAddress?.ToString(),
                     Ua = req.UserAgent,
@@ -172,6 +175,7 @@ public class DeviceRegistrationController : ControllerBase
             await using var db = await OpenAsync(ct);
             var pepper = _config["License:Pepper"] ?? "dev-pepper-2026";
             var tokenHash = ComputeHmacSha256(req.DeviceToken, pepper);
+            var fingerprintHash = ComputeHmacSha256(req.Fingerprint, pepper);
 
             var device = await db.QueryFirstOrDefaultAsync<DeviceRow>(@"
                 SELECT device_id AS DeviceId, CAST(tenant_id AS CHAR) AS TenantId,
@@ -179,7 +183,7 @@ public class DeviceRegistrationController : ControllerBase
                 FROM tenant_devices
                 WHERE fingerprint = @Fp AND device_token_hash = @Hash
                 LIMIT 1",
-                new { Fp = req.Fingerprint, Hash = tokenHash });
+                new { Fp = fingerprintHash, Hash = tokenHash });
 
             if (device is null)
                 return Ok(new { success = false, registered = false, message = "등록되지 않은 기기입니다." });

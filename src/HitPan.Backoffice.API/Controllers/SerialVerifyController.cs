@@ -48,6 +48,10 @@ public class SerialVerifyController : ControllerBase
         var pepper = _config["License:Pepper"] ?? "dev-pepper-2026";
         var submittedHash = ComputeHmacSha256(normalizedKey, pepper);
 
+        // fingerprint 영역은 user-agent + 해상도 + timezone 박힌 영역 — 길이 박혀있어 저장 영역 컬럼 초과 가능.
+        // SHA-256 해시 64자 박은 영역으로 정규화. 헌법 #22 정합 (본사가 client 식별 평문 박지 않음).
+        var fingerprintHash = ComputeHmacSha256(req.ClientFingerprint, pepper);
+
         try
         {
             await using var db = await OpenAsync(ct);
@@ -57,12 +61,12 @@ public class SerialVerifyController : ControllerBase
                 SELECT lock_id AS LockId, failed_count AS FailedCount, is_locked AS IsLocked,
                        last_failed_at AS LastFailedAt
                 FROM serial_verify_locks WHERE client_fingerprint = @Fp",
-                new { Fp = req.ClientFingerprint });
+                new { Fp = fingerprintHash });
 
             if (lockState is not null && lockState.IsLocked == 1)
             {
-                await LogAttempt(db, null, submittedHash, clientIp, req.ClientFingerprint, "locked");
-                _logger.LogWarning("[SerialVerify] locked fingerprint={Fp}", req.ClientFingerprint);
+                await LogAttempt(db, null, submittedHash, clientIp, fingerprintHash, "locked");
+                _logger.LogWarning("[SerialVerify] locked fingerprint={Fp}", fingerprintHash);
                 return StatusCode(423, new
                 {
                     success = false,
@@ -83,19 +87,19 @@ public class SerialVerifyController : ControllerBase
             if (tenant is null)
             {
                 // 실패 카운트 증가
-                await IncrementFailedCount(db, req.ClientFingerprint, ct);
-                await LogAttempt(db, null, submittedHash, clientIp, req.ClientFingerprint, "mismatch");
+                await IncrementFailedCount(db, fingerprintHash, ct);
+                await LogAttempt(db, null, submittedHash, clientIp, fingerprintHash, "mismatch");
 
                 // 다시 조회해서 남은 시도 횟수 반환
                 var current = await db.QueryFirstOrDefaultAsync<LockRow>(
                     "SELECT failed_count AS FailedCount, is_locked AS IsLocked FROM serial_verify_locks WHERE client_fingerprint = @Fp",
-                    new { Fp = req.ClientFingerprint });
+                    new { Fp = fingerprintHash });
                 var failedCount = current?.FailedCount ?? 1;
                 var nowLocked = current?.IsLocked == 1;
                 var remaining = Math.Max(0, MaxFailedAttempts - failedCount);
 
                 _logger.LogInformation("[SerialVerify] mismatch fingerprint={Fp} count={Cnt} locked={L}",
-                    req.ClientFingerprint, failedCount, nowLocked);
+                    fingerprintHash, failedCount, nowLocked);
 
                 if (nowLocked)
                 {
@@ -124,15 +128,15 @@ public class SerialVerifyController : ControllerBase
                     serial_verified_fingerprint = @Fp,
                     updated_at = UTC_TIMESTAMP()
                 WHERE tenant_id = @TenantId",
-                new { TenantId = tenant.TenantId, Fp = req.ClientFingerprint });
+                new { TenantId = tenant.TenantId, Fp = fingerprintHash });
 
             await db.ExecuteAsync(@"
                 UPDATE serial_verify_locks
                 SET failed_count = 0, is_locked = 0
                 WHERE client_fingerprint = @Fp",
-                new { Fp = req.ClientFingerprint });
+                new { Fp = fingerprintHash });
 
-            await LogAttempt(db, tenant.TenantId, submittedHash, clientIp, req.ClientFingerprint, "success");
+            await LogAttempt(db, tenant.TenantId, submittedHash, clientIp, fingerprintHash, "success");
 
             _logger.LogInformation("[SerialVerify] success tenant={Tid} code={Code}",
                 tenant.TenantId, tenant.TenantCode);

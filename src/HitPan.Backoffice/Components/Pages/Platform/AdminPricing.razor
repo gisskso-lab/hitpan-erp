@@ -101,7 +101,7 @@ else
         StateHasChanged();
         try
         {
-            var http = HttpFactory.CreateClient("BackofficeApi");
+            var http = HttpFactory.CreateClient("backoffice-authed");
             var resp = await http.GetFromJsonAsync<ApiResp<List<PlanEdit>>>("api/admin/pricing/plans");
             _plans = resp?.Data ?? new();
         }
@@ -125,7 +125,7 @@ else
         }
         try
         {
-            var http = HttpFactory.CreateClient("BackofficeApi");
+            var http = HttpFactory.CreateClient("backoffice-authed");
             var body = new
             {
                 planName = plan.PlanName,
@@ -167,7 +167,7 @@ else
     {
         try
         {
-            var http = HttpFactory.CreateClient("BackofficeApi");
+            var http = HttpFactory.CreateClient("backoffice-authed");
             var body = new
             {
                 isActive = plan.IsActive == 0,

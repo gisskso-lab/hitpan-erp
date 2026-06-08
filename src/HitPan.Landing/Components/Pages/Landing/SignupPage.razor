@@ -13,32 +13,7 @@
 <section class="signup-section">
     <div class="signup-card">
         <h1>회원가입</h1>
-        <p class="lead">3분이면 가입 완료. 이메일 인증 후 결제 화면으로 이동합니다.</p>
-
-        <!-- DEMO 모드 토글 (사장님 결재 2026-06-01 — 테스트 계정 즉시 생성) -->
-        <div class="demo-toggle">
-            <label class="demo-toggle__row">
-                <input type="radio" name="modeToggle" checked="@(_demoMode)" @onchange="@(() => SetDemoMode(true))" />
-                <div>
-                    <div class="demo-toggle__title">🧪 DEMO 모드 — 테스트 계정 즉시 생성</div>
-                    <div class="demo-toggle__desc">모든 필드·약관·사등 자동 채움. 한 클릭으로 가입→결제→완료 흐름 확인.</div>
-                </div>
-            </label>
-            <label class="demo-toggle__row">
-                <input type="radio" name="modeToggle" checked="@(!_demoMode)" @onchange="@(() => SetDemoMode(false))" />
-                <div>
-                    <div class="demo-toggle__title">✍️ 실제 가입 (수동 입력)</div>
-                    <div class="demo-toggle__desc">사업자등록증 업로드 + 약관 4종 직접 동의.</div>
-                </div>
-            </label>
-            @if (_demoMode)
-            {
-                <button type="button" class="demo-quick-btn" @onclick="QuickDemoSubmit">
-                    🚀 데모 계정 즉시 생성하고 다음 단계로 이동
-                </button>
-                <p class="demo-quick-note">→ verify · payment · welcome 끝까지 데모 흐름 진행 가능 (백엔드 미연결)</p>
-            }
-        </div>
+        <p class="lead">3분이면 가입 완료. 이메일 인증 후 본사 검토를 거쳐 시리얼 키가 발급됩니다.</p>
 
         <EditForm Model="_form" OnValidSubmit="HandleSubmit">
             <div class="field">
@@ -196,7 +171,7 @@
     private string? _error;
     private string _planLabel = "스탠다드 (59,000원/월)";
     private bool _bizUploaded;
-    private bool _demoMode = true; // 사장님 결재 2026-06-01: 기본 = DEMO (베타 출시 후 false 전환)
+    // _demoMode 필드 제거 — DEMO 영역 완전 박지 않음 (사장님 결재 2026-06-08)
 
     // 사업자번호 검증 (헌법 #35 — 백오피스 API /api/landing/biz-no/verify)
     private bool _bizVerifying;
@@ -244,49 +219,13 @@
         public string? Source { get; set; }
     }
 
-    private void SetDemoMode(bool demo)
-    {
-        _demoMode = demo;
-        if (demo)
-        {
-            // 사장님 결재 — DEMO 시 모든 필드 자동 채움 (테스트 계정)
-            _form = new SignupForm
-            {
-                Email = $"demo+{DateTime.Now:HHmmss}@hitpan.kr",
-                Password = "DemoPass1234!",
-                CompanyName = "(주)히트판 데모상사",
-                RepresentativeName = "데모대표",
-                Phone = "010-0000-0000",
-                BizNo = "123-45-67890",
-                AgreeService = true,
-                AgreePrivacy = true,
-                AgreeOutsourcing = true,
-                AgreeMarketing = false
-            };
-            _opened = new OpenedState { Service = true, Privacy = true, Outsourcing = true, Marketing = false };
-            _bizUploaded = true;
-        }
-        else
-        {
-            // 실제 가입 — 초기화
-            _form = new SignupForm();
-            _opened = new OpenedState();
-            _bizUploaded = false;
-        }
-    }
-
-    private async Task QuickDemoSubmit()
-    {
-        SetDemoMode(true);
-        _submitting = true;
-        await Task.Delay(300); // DEMO 가짜 처리
-        Nav.NavigateTo($"/signup/verify?email={Uri.EscapeDataString(_form.Email)}&demo=1");
-    }
-
+    // 사장님 결재 2026-06-08 — DEMO 모드 영역 완전 제거.
+    // 고객 본인 입력 → 백오피스 승인 → 시리얼 이메일 즉시 발송 흐름만 박힘.
     protected override void OnInitialized()
     {
-        // 페이지 진입 시 DEMO 기본값 자동 적용 (사장님 결재)
-        SetDemoMode(true);
+        _form = new SignupForm();
+        _opened = new OpenedState();
+        _bizUploaded = false;
     }
 
     // 약관 전문 열람 게이트 (사장님 결재 2026-06-01) — 형식적이라도 한 번 열어야 동의 체크 가능.
@@ -338,6 +277,10 @@
         {
             // 페이지 이탈 — 정상 흐름 (헌법 #15 정합: 의도된 무시)
         }
+        catch (InvalidOperationException)
+        {
+            // 서버 측 정적 렌더링 단계의 Dispose — JS 호출 불가 (헌법 #15 정합)
+        }
         _selfRef?.Dispose();
     }
 
@@ -387,14 +330,6 @@
         _submitting = true;
         try
         {
-            if (_demoMode)
-            {
-                // DEMO 모드 — 백엔드 호출 없이 진행 (사장님 결재)
-                await Task.Delay(300);
-                Nav.NavigateTo($"/signup/verify?email={Uri.EscapeDataString(_form.Email)}&demo=1");
-                return;
-            }
-
             // 실제 가입 — POST /api/landing/signup (헌법 #35 — 백오피스 API 5258)
             if (string.IsNullOrWhiteSpace(_form.BizNo))
             {

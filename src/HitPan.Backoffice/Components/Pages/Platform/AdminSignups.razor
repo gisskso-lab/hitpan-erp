@@ -69,8 +69,9 @@ else
                 <MudTh>전화</MudTh>
                 <MudTh>플랜</MudTh>
                 <MudTh>tenant_code</MudTh>
+                <MudTh>시리얼 키 (포링키)</MudTh>
                 <MudTh>상태</MudTh>
-                <MudTh Style="width:200px;">동작</MudTh>
+                <MudTh Style="width:280px;">동작</MudTh>
             </HeaderContent>
             <RowTemplate>
                 <MudTd>@context.SubmittedAt.ToString("yyyy-MM-dd HH:mm")</MudTd>
@@ -79,6 +80,16 @@ else
                 <MudTd>@context.Phone</MudTd>
                 <MudTd>@context.PlanType</MudTd>
                 <MudTd>@(context.TenantCode ?? "-")</MudTd>
+                <MudTd>
+                    @if (!string.IsNullOrEmpty(context.LicenseKey))
+                    {
+                        <span style="font-family:Consolas,monospace;font-size:12px;font-weight:600;color:#0F6E56;">@context.LicenseKey</span>
+                    }
+                    else
+                    {
+                        <span style="color:#9CA3AF;font-size:12px;">미발급</span>
+                    }
+                </MudTd>
                 <MudTd>
                     <MudChip T="string" Size="Size.Small" Color="@StatusColor(context.Status)">@StatusLabel(context.Status)</MudChip>
                 </MudTd>
@@ -89,6 +100,11 @@ else
                                    OnClick="@(() => ApproveAsync(context))">승인</MudButton>
                         <MudButton Size="Size.Small" Variant="Variant.Text" Color="Color.Error"
                                    OnClick="@(() => RejectAsync(context))">반려</MudButton>
+                    }
+                    else if (context.Status is "approved" or "active")
+                    {
+                        <MudButton Size="Size.Small" Variant="Variant.Outlined" Color="Color.Info"
+                                   OnClick="@(() => ResendLicenseAsync(context))">시리얼 메일 재발송</MudButton>
                     }
                     else
                     {
@@ -121,7 +137,7 @@ else
         StateHasChanged();
         try
         {
-            var http = HttpFactory.CreateClient("BackofficeApi");
+            var http = HttpFactory.CreateClient("backoffice-authed");
             var url = string.IsNullOrEmpty(_filter) ? "api/admin/signups" : $"api/admin/signups?status={_filter}";
             var resp = await http.GetFromJsonAsync<ApiResp<List<SignupRow>>>(url);
             _items = resp?.Data ?? new();
@@ -141,7 +157,7 @@ else
     {
         try
         {
-            var http = HttpFactory.CreateClient("BackofficeApi");
+            var http = HttpFactory.CreateClient("backoffice-authed");
             var resp = await http.PostAsync($"api/admin/signups/{row.SignupId}/approve", null);
             if (resp.IsSuccessStatusCode)
             {
@@ -167,11 +183,34 @@ else
         }
     }
 
+    private async Task ResendLicenseAsync(SignupRow row)
+    {
+        try
+        {
+            var http = HttpFactory.CreateClient("backoffice-authed");
+            var resp = await http.PostAsync($"api/admin/signups/{row.SignupId}/resend-license", null);
+            if (resp.IsSuccessStatusCode)
+            {
+                Snackbar.Add($"시리얼 키 이메일 재발송 완료 → {row.Email}", Severity.Success);
+                await LoadAsync();
+            }
+            else
+            {
+                var err = await resp.Content.ReadAsStringAsync();
+                Snackbar.Add($"재발송 실패: {err}", Severity.Error);
+            }
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"재발송 실패: {ex.Message}", Severity.Error);
+        }
+    }
+
     private async Task RejectAsync(SignupRow row)
     {
         try
         {
-            var http = HttpFactory.CreateClient("BackofficeApi");
+            var http = HttpFactory.CreateClient("backoffice-authed");
             var resp = await http.PostAsJsonAsync($"api/admin/signups/{row.SignupId}/reject", new { reason = "관리자 반려" });
             if (resp.IsSuccessStatusCode)
             {
@@ -222,6 +261,7 @@ else
         public DateTime SubmittedAt { get; set; }
         public string? TenantCode { get; set; }
         public string? TenantStatus { get; set; }
+        public string? LicenseKey { get; set; }
     }
 
     public class ApiResp<T>
