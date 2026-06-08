@@ -27,12 +27,18 @@ public class LandingSignupController : ControllerBase
 {
     private readonly IConfiguration _config;
     private readonly IEmailSender _email;
+    private readonly IWebhookOutboundService _webhook;
     private readonly ILogger<LandingSignupController> _logger;
 
-    public LandingSignupController(IConfiguration config, IEmailSender email, ILogger<LandingSignupController> logger)
+    public LandingSignupController(
+        IConfiguration config,
+        IEmailSender email,
+        IWebhookOutboundService webhook,
+        ILogger<LandingSignupController> logger)
     {
         _config = config;
         _email = email;
+        _webhook = webhook;
         _logger = logger;
     }
 
@@ -47,9 +53,57 @@ public class LandingSignupController : ControllerBase
         if (string.IsNullOrWhiteSpace(req.CompanyName) || string.IsNullOrWhiteSpace(req.Email))
             return BadRequest(new { success = false, message = "회사명·이메일 필수" });
 
-        var bizNoNormalized = (req.BizNo ?? "").Replace("-", "").Trim();
+        // 숫자만 추출 (하이픈·공백·점 등 모두 제거)
+        var bizNoNormalized = new string((req.BizNo ?? "").Where(char.IsDigit).ToArray());
         if (bizNoNormalized.Length != 10)
-            return BadRequest(new { success = false, message = "사업자번호 형식 오류 (10자리)" });
+            return BadRequest(new { success = false, message = "사업자번호는 숫자 10자리여야 합니다." });
+
+        // 국세청 진위확인 (헌법 #25 정합 — 정확하게)
+        // 환경변수 우선 (운영), 그 다음 appsettings (개발) — appsettings 빈 문자열 차단
+        var ntsKey = Environment.GetEnvironmentVariable("NTS_API_KEY");
+        if (string.IsNullOrWhiteSpace(ntsKey))
+        {
+            var cfgKey = _config["BizVerify:NtsApiKey"];
+            if (!string.IsNullOrWhiteSpace(cfgKey)) ntsKey = cfgKey;
+        }
+        if (!string.IsNullOrWhiteSpace(ntsKey))
+        {
+            try
+            {
+                using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(10) };
+                using var msg = new HttpRequestMessage(HttpMethod.Post,
+                    $"https://api.odcloud.kr/api/nts-businessman/v1/status?serviceKey={Uri.EscapeDataString(ntsKey)}");
+                msg.Content = new StringContent($"{{\"b_no\":[\"{bizNoNormalized}\"]}}",
+                    Encoding.UTF8, "application/json");
+                using var res = await http.SendAsync(msg, ct);
+                if (!res.IsSuccessStatusCode)
+                {
+                    _logger.LogWarning("[LandingSignup] nts api fail status={Status}", (int)res.StatusCode);
+                    return BadRequest(new { success = false, message = "국세청 서비스 일시 장애입니다. 잠시 후 다시 시도해주세요." });
+                }
+                var body = await res.Content.ReadAsStringAsync(ct);
+                using var doc = System.Text.Json.JsonDocument.Parse(body);
+                if (!doc.RootElement.TryGetProperty("data", out var arr) || arr.GetArrayLength() == 0)
+                    return BadRequest(new { success = false, message = "국세청 응답 확인 실패. 잠시 후 다시 시도해주세요." });
+                var item = arr[0];
+                var bSttCd = item.TryGetProperty("b_stt_cd", out var e) ? e.GetString() ?? "" : "";
+                if (bSttCd != "01")
+                {
+                    var msg2 = bSttCd switch
+                    {
+                        "02" => "휴업 상태 사업자입니다. 정상 사업자만 가입 가능합니다.",
+                        "03" => "폐업 상태 사업자입니다. 정상 사업자만 가입 가능합니다.",
+                        _ => "국세청에 등록되지 않은 사업자번호입니다."
+                    };
+                    return BadRequest(new { success = false, message = msg2 });
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "[LandingSignup] nts api 호출 실패");
+                return BadRequest(new { success = false, message = "국세청 서비스 일시 장애입니다. 잠시 후 다시 시도해주세요." });
+            }
+        }
 
         var pepper = _config["Backoffice:BizNoPepper"] ?? "dev-pepper-2026";
         var bizNoHash = ComputeHmacSha256(bizNoNormalized, pepper);
@@ -182,6 +236,17 @@ public class LandingSignupController : ControllerBase
             _logger.LogInformation("[LandingSignup] payment confirmed token={Token} tenants_updated={Cnt} license_issued=1",
                 req.SignupToken, affected);
 
+            // 박힘 박제 2026-06-08 (브라운킴 PM) — 결제 완료 박힘 박은 영역 ERP 박힘 박을 영역 webhook 박힘.
+            // 사장님 결재 박힘 = 카운트 박힘 박은 영역 = 결제 완료 박힘 영역. 헌법 #20·#35 정합.
+            var tenantIdForWebhook = await db.QueryFirstOrDefaultAsync<string?>(
+                "SELECT CAST(tenant_id AS CHAR) FROM tenants WHERE company_name = @CompanyName AND status = 'active' ORDER BY created_at DESC LIMIT 1",
+                new { signup.CompanyName });
+            if (!string.IsNullOrEmpty(tenantIdForWebhook))
+            {
+                await _webhook.EmitSubscriptionChangedAsync(tenantIdForWebhook, ct);
+                _logger.LogInformation("[LandingSignup] webhook 박힘 tenant={Tid}", tenantIdForWebhook);
+            }
+
             // 라이선스 키(부모계정ID) 이메일 송부 (헌법 #35 — 본사 백오피스가 직접 부여)
             // SMTP 미박제 시 로그만, 가입 흐름은 중단 없음
             if (!string.IsNullOrWhiteSpace(signup.Email))
@@ -241,7 +306,8 @@ public class LandingSignupController : ControllerBase
     public class SignupRequest
     {
         [Required] public string CompanyName { get; set; } = "";
-        [Required, RegularExpression(@"^\d{3}-?\d{2}-?\d{5}$")] public string BizNo { get; set; } = "";
+        // 사용자 편의: 하이픈·공백·점 등 구분자 허용. 컨트롤러에서 숫자 10자리로 정규화 후 길이 검증.
+        [Required] public string BizNo { get; set; } = "";
         [Required] public string CeoName { get; set; } = "";
         [Required, EmailAddress] public string Email { get; set; } = "";
         [Required] public string Phone { get; set; } = "";

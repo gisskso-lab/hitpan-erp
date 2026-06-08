@@ -86,6 +86,24 @@
             </div>
 
             <div class="field">
+                <label>가입 경로 *</label>
+                <select @bind="_form.ReferralChannel" required>
+                    <option value="">선택해주세요</option>
+                    <option value="hq_sales">본사 직원 (영업)</option>
+                    <option value="hq_marketing">본사 마케팅 (검색·광고)</option>
+                    <option value="reseller">등록 대리점</option>
+                </select>
+            </div>
+
+            @if (_form.ReferralChannel == "reseller")
+            {
+                <div class="field">
+                    <label>대리점 코드</label>
+                    <input type="text" @bind="_form.ResellerCode" placeholder="대리점에서 받으신 코드를 입력하세요" />
+                </div>
+            }
+
+            <div class="field">
                 <label>사업자등록증 *</label>
                 <BizLicenseUploader OnUploaded="OnBizUploaded" />
             </div>
@@ -396,7 +414,13 @@
                 Email = _form.Email,
                 Phone = _form.Phone,
                 PlanType = (Plan ?? "basic"),
-                ResellerCode = (string?)null,
+                ResellerCode = _form.ReferralChannel switch
+                {
+                    "hq_sales" => "HQ_SALES",
+                    "hq_marketing" => "HQ_MKTG",
+                    "reseller" => string.IsNullOrWhiteSpace(_form.ResellerCode) ? null : _form.ResellerCode.Trim(),
+                    _ => null
+                },
                 AgreeTerms = _form.AgreeService,
                 AgreePrivacy = _form.AgreePrivacy
             };
@@ -428,6 +452,8 @@
         public string RepresentativeName { get; set; } = "";
         public string Phone { get; set; } = "";
         public string BizNo { get; set; } = "";
+        public string ReferralChannel { get; set; } = ""; // hq_sales, hq_marketing, reseller
+        public string ResellerCode { get; set; } = "";
         public bool AgreeService { get; set; }
         public bool AgreePrivacy { get; set; }
         public bool AgreeOutsourcing { get; set; }

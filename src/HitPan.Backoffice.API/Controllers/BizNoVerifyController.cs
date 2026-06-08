@@ -82,31 +82,92 @@ public class BizNoVerifyController : ControllerBase
             if (!res.IsSuccessStatusCode)
             {
                 _logger.LogWarning("[BizNoVerify] nts api {Status} body={Body}", (int)res.StatusCode, body);
+                // 헌법 #22 정합 — 국세청 장애 시 가입 거부 (사장님 결재 2026-06-08)
                 return Ok(new VerifyResponse
                 {
-                    Valid = true,
-                    Message = "체크섬 통과 (국세청 일시 오류, 가입은 계속 가능)",
-                    Source = "checksum-fallback"
+                    Valid = false,
+                    Message = "국세청 서비스 일시 장애입니다. 잠시 후 다시 시도해주세요.",
+                    Source = "nts-error"
                 });
             }
 
-            // 응답 파싱은 결재 후 정밀 박제. 현재는 200 OK = 진위확인 통과로 박제.
-            _logger.LogInformation("[BizNoVerify] nts ok bizNo={Masked}", Mask(normalized));
+            // 응답 본문 정밀 파싱 (b_stt_cd로 사업 상태 판단)
+            using var doc = System.Text.Json.JsonDocument.Parse(body);
+            var root = doc.RootElement;
+            if (!root.TryGetProperty("data", out var dataArr) || dataArr.GetArrayLength() == 0)
+            {
+                _logger.LogWarning("[BizNoVerify] nts 응답 형식 이상 bizNo={Masked} body={Body}", Mask(normalized), body);
+                return Ok(new VerifyResponse
+                {
+                    Valid = false,
+                    Message = "국세청 응답을 확인할 수 없습니다. 잠시 후 다시 시도해주세요.",
+                    Source = "nts-parse-error"
+                });
+            }
+
+            var item = dataArr[0];
+            var bStt = item.TryGetProperty("b_stt", out var bSttEl) ? bSttEl.GetString() ?? "" : "";
+            var bSttCd = item.TryGetProperty("b_stt_cd", out var bSttCdEl) ? bSttCdEl.GetString() ?? "" : "";
+            var taxType = item.TryGetProperty("tax_type", out var taxEl) ? taxEl.GetString() ?? "" : "";
+
+            // b_stt_cd 영역:
+            //   "01" = 계속사업자 (정상)
+            //   "02" = 휴업자
+            //   "03" = 폐업자
+            //   ""   = 등록되지 않은 사업자
+            if (bSttCd == "01")
+            {
+                _logger.LogInformation("[BizNoVerify] nts ok bizNo={Masked} bStt={BStt} taxType={Tax}",
+                    Mask(normalized), bStt, taxType);
+                return Ok(new VerifyResponse
+                {
+                    Valid = true,
+                    Message = $"국세청 등록 확인 — {bStt} ({taxType})",
+                    Source = "nts"
+                });
+            }
+
+            if (bSttCd == "02")
+            {
+                _logger.LogInformation("[BizNoVerify] nts 휴업 bizNo={Masked}", Mask(normalized));
+                return Ok(new VerifyResponse
+                {
+                    Valid = false,
+                    Message = "국세청 등록상 휴업 상태입니다. 정상 사업자만 가입 가능합니다.",
+                    Source = "nts"
+                });
+            }
+
+            if (bSttCd == "03")
+            {
+                _logger.LogInformation("[BizNoVerify] nts 폐업 bizNo={Masked}", Mask(normalized));
+                return Ok(new VerifyResponse
+                {
+                    Valid = false,
+                    Message = "국세청 등록상 폐업 상태입니다. 정상 사업자만 가입 가능합니다.",
+                    Source = "nts"
+                });
+            }
+
+            // 등록되지 않은 사업자
+            _logger.LogInformation("[BizNoVerify] nts 미등록 bizNo={Masked} taxType={Tax}",
+                Mask(normalized), taxType);
             return Ok(new VerifyResponse
             {
-                Valid = true,
-                Message = "사업자번호가 국세청에 등록된 유효 사업자입니다.",
+                Valid = false,
+                Message = "국세청에 등록되지 않은 사업자번호입니다. 정확한 번호를 다시 확인해주세요.",
                 Source = "nts"
             });
         }
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "[BizNoVerify] nts api 호출 실패 bizNo={Masked}", Mask(normalized));
+            // 헌법 #22 정합 — 장애 시 가입 거부 (보안 우선)
             return Ok(new VerifyResponse
             {
-                Valid = true,
-                Message = "체크섬 통과 (국세청 일시 오류, 가입은 계속 가능)",
-                Source = "checksum-fallback"
+                Valid = false,
+                Message = "국세청 서비스 일시 장애입니다. 잠시 후 다시 시도해주세요.",
+                Source = "nts-error"
             });
         }
     }

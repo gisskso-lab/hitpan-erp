@@ -65,14 +65,15 @@ public class Program
             o.AddPolicy("Any", p => p.RequireAuthenticatedUser());
         });
 
-        // CORS — HitPan.Backoffice(5291) + HitPan.Landing(5082) 허용
-        //   - 랜딩은 Server-side Blazor라 서버측 HttpClient 호출이지만, 운영 환경 추가 안전망
+        // CORS — HitPan.Backoffice(5291) + HitPan.Landing(5082) + ERP demo + landing.hitpan.kr 허용
+        //   - 브라운킴 PM 2026-06-08: ERP에서 시리얼 인증 API 호출용 demo.hitpan.kr 추가
         builder.Services.AddCors(o =>
         {
             o.AddDefaultPolicy(p => p
                 .WithOrigins(
-                    "http://localhost:5291", "https://back.hitpan.kr",
-                    "http://localhost:5082", "https://www.hitpan.kr")
+                    "http://localhost:5234", "http://localhost:5291", "https://back.hitpan.kr",
+                    "http://localhost:5082", "https://www.hitpan.kr", "https://landing.hitpan.kr",
+                    "https://demo.hitpan.kr", "https://api-demo.hitpan.kr")
                 .AllowAnyHeader()
                 .AllowAnyMethod()
                 .AllowCredentials());

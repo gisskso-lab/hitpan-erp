@@ -30,7 +30,9 @@ public sealed class TenantMiddleware
             || path.StartsWithSegments("/api/backoffice/auth")
             // 사장님 결재 박제 2026-06-02 모두결재 — 랜딩 가입·결제·설치 박제 = 인증 면제 (AllowAnonymous 박제 정합)
             || path.StartsWithSegments("/api/landing")
-            || path.StartsWithSegments("/api/install"))
+            || path.StartsWithSegments("/api/install")
+            // 사장님 결재 박제 2026-06-08 모두결재 — 백오피스→ERP webhook 박힘 (HMAC 서명·nonce 박힘 박을 영역 자체 검증, 헌법 #35 정합)
+            || path.StartsWithSegments("/api/internal"))
         {
             await _next(context);
             return;

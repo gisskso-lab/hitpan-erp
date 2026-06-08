@@ -125,6 +125,113 @@ else
                 <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="OpenUserListDialog">사용자추가·관리</MudButton>
             </MudPaper>
 
+            @* 시리얼 인증 (브라운킴 PM 2026-06-08, 사장님 결재) *@
+            <MudPaper Elevation="0" Class="pa-4 mb-3" Style="border:0.5px solid var(--mud-palette-lines-default);border-radius:12px">
+                <MudText Typo="Typo.subtitle2" Class="mb-2">
+                    @if (_serialVerified)
+                    {
+                        <MudIcon Icon="@Icons.Material.Filled.VerifiedUser" Color="Color.Success" Size="Size.Small" /> <span>시리얼 인증 완료</span>
+                    }
+                    else
+                    {
+                        <MudIcon Icon="@Icons.Material.Filled.VpnKey" Size="Size.Small" /> <span>시리얼 인증 (필수)</span>
+                    }
+                </MudText>
+
+                @if (_serialVerified)
+                {
+                    <MudText Style="font-size:12px;color:var(--mud-palette-text-secondary)">
+                        본사에서 발급한 시리얼로 인증된 사업장입니다.
+                    </MudText>
+                    @if (!string.IsNullOrWhiteSpace(_serialVerifiedAt))
+                    {
+                        <MudText Style="font-size:11px;color:var(--mud-palette-text-secondary)" Class="mt-1">
+                            인증일시: @_serialVerifiedAt
+                        </MudText>
+                    }
+
+                    @* 기기 등록 흐름 (사장님 결재 2026-06-08 - 네이버·넷플릭스 방식) *@
+                    @if (!_deviceRegistered && !_deviceDialogShown)
+                    {
+                        <MudPaper Elevation="0" Class="pa-3 mt-3" Style="background:#FFF7E6;border:1px solid #F59E0B;border-radius:8px;">
+                            <MudText Typo="Typo.body2" Style="font-weight:600;color:#92400E;">
+                                이 PC를 등록된 기기로 사용하시겠습니까?
+                            </MudText>
+                            <MudText Style="font-size:11px;color:#92400E;" Class="mb-2">
+                                구독플랜의 사용 기기 한도 내에서만 등록됩니다. 등록된 기기에서만 ERP 로그인이 허용됩니다.
+                            </MudText>
+                            <div style="display:flex;gap:8px;">
+                                <MudButton Variant="Variant.Filled" Color="Color.Warning" Size="Size.Small"
+                                           OnClick="RegisterDeviceAsync" Disabled="_deviceSubmitting"
+                                           StartIcon="@Icons.Material.Filled.DevicesOther">
+                                    @(_deviceSubmitting ? "등록 중..." : "Y - 등록")
+                                </MudButton>
+                                <MudButton Variant="Variant.Text" Size="Size.Small"
+                                           OnClick="@(() => _deviceDialogShown = true)">
+                                    N - 나중에
+                                </MudButton>
+                            </div>
+                        </MudPaper>
+                    }
+                    else if (_deviceRegistered)
+                    {
+                        <MudPaper Elevation="0" Class="pa-2 mt-3" Style="background:#ECFDF5;border:1px solid #10B981;border-radius:8px;">
+                            <MudText Typo="Typo.body2" Style="font-weight:600;color:#065F46;">
+                                <MudIcon Icon="@Icons.Material.Filled.Verified" Color="Color.Success" Size="Size.Small" />
+                                이 PC 등록 완료
+                            </MudText>
+                            <MudText Style="font-size:11px;color:#065F46;">
+                                기기 인증서가 발급되어 보안 저장소에 저장되었습니다.
+                            </MudText>
+                            @if (_deviceCount > 0 && _deviceLimit > 0)
+                            {
+                                <MudText Style="font-size:11px;color:#065F46;">
+                                    등록 기기: @_deviceCount / @_deviceLimit 대
+                                </MudText>
+                            }
+                        </MudPaper>
+                    }
+
+                    @if (!string.IsNullOrEmpty(_deviceMessage))
+                    {
+                        <MudAlert Severity="@(_deviceSuccess ? Severity.Success : Severity.Warning)" Dense="true" Class="mt-2">
+                            @_deviceMessage
+                        </MudAlert>
+                    }
+                }
+                else
+                {
+                    <MudText Style="font-size:12px;color:var(--mud-palette-text-secondary)" Class="mb-2">
+                        본사에서 발급받은 시리얼(HITP-XXXX-XXXX-XXXX-XXXX)을 입력해주세요.
+                    </MudText>
+                    <MudTextField T="string" @bind-Value="_serialKey"
+                                  Variant="Variant.Outlined" Margin="Margin.Dense"
+                                  Placeholder="HITP-XXXX-XXXX-XXXX-XXXX"
+                                  Disabled="_serialLocked || _serialSubmitting" />
+
+                    @if (_serialLocked)
+                    {
+                        <MudAlert Severity="Severity.Error" Dense="true" Class="my-2" Icon="@Icons.Material.Filled.Block">
+                            시리얼 5회 입력 실패로 사용이 중지되었습니다.<br/>
+                            본사 고객센터에 문의해주세요.
+                        </MudAlert>
+                    }
+                    else if (!string.IsNullOrEmpty(_serialMessage))
+                    {
+                        <MudAlert Severity="@(_serialSuccess ? Severity.Success : Severity.Warning)" Dense="true" Class="my-2">
+                            @_serialMessage
+                        </MudAlert>
+                    }
+
+                    <MudButton Variant="Variant.Filled" Color="Color.Primary" FullWidth="true"
+                               OnClick="VerifySerialAsync"
+                               Disabled="_serialLocked || _serialSubmitting || string.IsNullOrWhiteSpace(_serialKey)"
+                               StartIcon="@Icons.Material.Filled.VpnKey" Class="mt-2">
+                        @(_serialSubmitting ? "인증 중..." : "시리얼 인증")
+                    </MudButton>
+                }
+            </MudPaper>
+
             <MudPaper Elevation="0" Class="pa-4" Style="border:0.5px solid var(--mud-palette-lines-default);border-radius:12px">
                 <MudText Typo="Typo.subtitle2" Class="mb-2">구독정보 (읽기 전용)</MudText>
                 <MudGrid Spacing="1">

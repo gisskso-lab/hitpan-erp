@@ -1,0 +1,216 @@
+@page "/admin/pricing"
+@layout PlatformLayout
+@attribute [Authorize]
+@rendermode InteractiveServer
+@inject IHttpClientFactory HttpFactory
+@inject ISnackbar Snackbar
+
+@*
+    가격 관리 화면 (브라운킴 PM 박제 2026-06-08)
+    사장님 헌법: 본사 마스터가 가격·프로모션·할인·리워드 실시간 변경
+    코드 박제 절대 금지 — DB에서만 보유, 화면에서만 변경
+    청구서 자동 반영 — 다음 청구 주기부터 새 가격 적용
+*@
+
+<PageTitle>가격 관리 — 히트판 백오피스</PageTitle>
+
+<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:24px;">
+    <div>
+        <MudText Typo="Typo.h5" Style="font-weight:600;">요금제 가격 관리</MudText>
+        <MudText Typo="Typo.body2" Color="Color.Secondary">
+            가격 변경 시 <strong>다음 청구 주기부터 자동 반영</strong>됩니다. 모든 변경은 이력에 기록됩니다.
+        </MudText>
+    </div>
+    <MudButton Variant="Variant.Outlined" OnClick="LoadAsync" StartIcon="@Icons.Material.Filled.Refresh">새로고침</MudButton>
+</div>
+
+@if (_loading)
+{
+    <MudProgressLinear Indeterminate="true" Color="Color.Primary" />
+}
+else
+{
+    <MudGrid>
+        @foreach (var plan in _plans)
+        {
+            <MudItem xs="12" md="4">
+                <MudPaper Elevation="2" Class="pa-6" Style="border-radius:16px;height:100%;">
+                    <div style="display:flex;justify-content:space-between;align-items:start;margin-bottom:16px;">
+                        <div>
+                            <MudText Typo="Typo.h6" Style="font-weight:600;">@plan.PlanName</MudText>
+                            <MudText Typo="Typo.caption" Color="Color.Secondary">@plan.PlanId</MudText>
+                        </div>
+                        <MudChip T="string" Size="Size.Small"
+                                 Color="@(plan.IsActive == 1 ? Color.Success : Color.Default)">
+                            @(plan.IsActive == 1 ? "활성" : "비활성")
+                        </MudChip>
+                    </div>
+
+                    <MudTextField @bind-Value="plan.PlanName" Label="요금제명" Variant="Variant.Outlined" Margin="Margin.Dense" Class="mb-2" />
+                    <MudTextField @bind-Value="plan.Description" Label="설명" Variant="Variant.Outlined" Margin="Margin.Dense" Class="mb-2" Lines="2" />
+
+                    <MudText Typo="Typo.body2" Style="margin-top:12px;font-weight:600;">가격</MudText>
+                    <MudSelect T="string" @bind-Value="plan.PriceDisplay" Label="가격 표시 방식" Variant="Variant.Outlined" Margin="Margin.Dense" Class="mb-2">
+                        <MudSelectItem Value="@("number")">숫자 (예: 35,000원)</MudSelectItem>
+                        <MudSelectItem Value="@("contact")">상담 (랜딩에 "상담" 표시)</MudSelectItem>
+                    </MudSelect>
+                    <MudNumericField @bind-Value="plan.MonthlyPrice" Label="월 가격 (원)" Variant="Variant.Outlined" Margin="Margin.Dense" Class="mb-2" Disabled="@(plan.PriceDisplay == "contact")" />
+                    <MudNumericField @bind-Value="plan.YearlyPrice" Label="연 가격 (원)" Variant="Variant.Outlined" Margin="Margin.Dense" Class="mb-2" Disabled="@(plan.PriceDisplay == "contact")" />
+
+                    <MudText Typo="Typo.body2" Style="margin-top:12px;font-weight:600;">한도</MudText>
+                    <MudNumericField @bind-Value="plan.MaxUsers" Label="자식계정 수" Variant="Variant.Outlined" Margin="Margin.Dense" Class="mb-2" />
+                    <MudNumericField @bind-Value="plan.MaxPcDevices" Label="PC 기기 수" Variant="Variant.Outlined" Margin="Margin.Dense" Class="mb-2" />
+                    <MudNumericField @bind-Value="plan.MaxMobileDevices" Label="모바일 기기 수" Variant="Variant.Outlined" Margin="Margin.Dense" Class="mb-2" />
+                    <MudNumericField @bind-Value="plan.AiTokenMonthly" Label="월 AI 토큰" Variant="Variant.Outlined" Margin="Margin.Dense" Class="mb-2" />
+
+                    <MudTextField @bind-Value="plan.Reason" Label="변경 사유 (필수)" Variant="Variant.Outlined" Margin="Margin.Dense" Class="mb-3" Placeholder="예: 2026년 하반기 가격 조정" />
+
+                    <div style="display:flex;gap:8px;">
+                        <MudButton Variant="Variant.Filled" Color="Color.Primary" FullWidth="true" OnClick="@(() => SaveAsync(plan))">저장</MudButton>
+                        <MudButton Variant="Variant.Outlined" Color="@(plan.IsActive == 1 ? Color.Warning : Color.Success)" OnClick="@(() => ToggleAsync(plan))">
+                            @(plan.IsActive == 1 ? "비활성화" : "활성화")
+                        </MudButton>
+                    </div>
+                </MudPaper>
+            </MudItem>
+        }
+    </MudGrid>
+
+    <MudPaper Elevation="0" Class="mt-6 pa-4" Style="background:#F9FAFB;border-radius:12px;">
+        <MudText Typo="Typo.body2" Color="Color.Secondary">
+            <strong>안내</strong>
+        </MudText>
+        <MudText Typo="Typo.caption" Color="Color.Secondary">
+            • 가격 변경 즉시 랜딩페이지에 반영됩니다.<br/>
+            • 기존 발행된 청구서는 변경되지 않습니다 (헌법 정합).<br/>
+            • 다음 청구 주기부터 새 가격으로 자동 청구됩니다.<br/>
+            • 프로모션·할인은 별도 메뉴에서 관리합니다.
+        </MudText>
+    </MudPaper>
+}
+
+@code {
+    private List<PlanEdit> _plans = new();
+    private bool _loading;
+
+    protected override async Task OnInitializedAsync() => await LoadAsync();
+
+    private async Task LoadAsync()
+    {
+        _loading = true;
+        StateHasChanged();
+        try
+        {
+            var http = HttpFactory.CreateClient("BackofficeApi");
+            var resp = await http.GetFromJsonAsync<ApiResp<List<PlanEdit>>>("api/admin/pricing/plans");
+            _plans = resp?.Data ?? new();
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"조회 실패: {ex.Message}", Severity.Error);
+        }
+        finally
+        {
+            _loading = false;
+            StateHasChanged();
+        }
+    }
+
+    private async Task SaveAsync(PlanEdit plan)
+    {
+        if (string.IsNullOrWhiteSpace(plan.Reason))
+        {
+            Snackbar.Add("변경 사유를 입력해주세요. (감사 추적)", Severity.Warning);
+            return;
+        }
+        try
+        {
+            var http = HttpFactory.CreateClient("BackofficeApi");
+            var body = new
+            {
+                planName = plan.PlanName,
+                description = plan.Description,
+                monthlyPrice = plan.MonthlyPrice,
+                yearlyPrice = plan.YearlyPrice,
+                priceDisplay = string.IsNullOrWhiteSpace(plan.PriceDisplay) ? "number" : plan.PriceDisplay,
+                maxUsers = plan.MaxUsers,
+                maxDevices = plan.MaxDevices,
+                maxPcDevices = plan.MaxPcDevices,
+                maxMobileDevices = plan.MaxMobileDevices,
+                aiTokenMonthly = plan.AiTokenMonthly,
+                featuresJson = plan.FeaturesJson,
+                isVisible = plan.IsVisible == 1,
+                displayOrder = plan.DisplayOrder,
+                reason = plan.Reason,
+                changedBy = "platform_admin",
+                changedByName = "본사 마스터"
+            };
+            var resp = await http.PutAsJsonAsync($"api/admin/pricing/plans/{plan.PlanId}", body);
+            if (resp.IsSuccessStatusCode)
+            {
+                Snackbar.Add($"{plan.PlanName} 저장 완료 — 다음 청구 주기부터 자동 반영", Severity.Success);
+                plan.Reason = "";
+                await LoadAsync();
+            }
+            else
+            {
+                Snackbar.Add($"저장 실패: {resp.StatusCode}", Severity.Error);
+            }
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"저장 실패: {ex.Message}", Severity.Error);
+        }
+    }
+
+    private async Task ToggleAsync(PlanEdit plan)
+    {
+        try
+        {
+            var http = HttpFactory.CreateClient("BackofficeApi");
+            var body = new
+            {
+                isActive = plan.IsActive == 0,
+                reason = string.IsNullOrWhiteSpace(plan.Reason) ? "관리자 토글" : plan.Reason,
+                changedBy = "platform_admin",
+                changedByName = "본사 마스터"
+            };
+            var resp = await http.PostAsJsonAsync($"api/admin/pricing/plans/{plan.PlanId}/toggle-active", body);
+            if (resp.IsSuccessStatusCode)
+            {
+                Snackbar.Add($"{plan.PlanName} {(plan.IsActive == 0 ? "활성화" : "비활성화")}", Severity.Success);
+                await LoadAsync();
+            }
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"처리 실패: {ex.Message}", Severity.Error);
+        }
+    }
+
+    public class PlanEdit
+    {
+        public string PlanId { get; set; } = "";
+        public string PlanName { get; set; } = "";
+        public string? Description { get; set; }
+        public decimal MonthlyPrice { get; set; }
+        public decimal YearlyPrice { get; set; }
+        public string PriceDisplay { get; set; } = "number";
+        public int MaxUsers { get; set; }
+        public int MaxDevices { get; set; }
+        public int MaxPcDevices { get; set; }
+        public int MaxMobileDevices { get; set; }
+        public int AiTokenMonthly { get; set; }
+        public string? FeaturesJson { get; set; }
+        public int IsActive { get; set; }
+        public int IsVisible { get; set; }
+        public int DisplayOrder { get; set; }
+        public string Reason { get; set; } = "";
+    }
+
+    public class ApiResp<T>
+    {
+        public bool Success { get; set; }
+        public T? Data { get; set; }
+    }
+}

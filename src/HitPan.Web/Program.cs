@@ -97,4 +97,11 @@ var backofficeApiBase = builder.Configuration["BackofficeApiBaseUrl"]
 builder.Services.AddKeyedScoped<HttpClient>("backoffice", (sp, key) =>
     new HttpClient { BaseAddress = new Uri(backofficeApiBase.TrimEnd('/') + "/") });
 
+// IHttpClientFactory.CreateClient("BackofficeApi") 호출용 (브라운킴 PM 2026-06-08, 사장님 결재)
+// 시리얼 인증 등 백오피스 API 호출에 사용.
+builder.Services.AddHttpClient("BackofficeApi", c =>
+{
+    c.BaseAddress = new Uri(backofficeApiBase.TrimEnd('/') + "/");
+});
+
 await builder.Build().RunAsync();

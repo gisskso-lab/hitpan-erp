@@ -79,8 +79,7 @@ public class WebhookInboundController : ControllerBase
             if (Math.Abs(now - payload.Iat) > MaxClockSkewSeconds)
                 return Unauthorized(new { success = false, message = "타임스탬프 만료" });
 
-            var cs = _config.GetConnectionString("DefaultConnection")
-                     ?? throw new InvalidOperationException("ConnectionStrings:DefaultConnection 미설정");
+            var cs = BuildConnectionString();
             await using var db = new MySqlConnection(cs);
             await db.OpenAsync(ct);
 
@@ -162,6 +161,19 @@ public class WebhookInboundController : ControllerBase
         var actualBytes = Encoding.UTF8.GetBytes(sigHeader);
         if (expectedBytes.Length != actualBytes.Length) return false;
         return CryptographicOperations.FixedTimeEquals(expectedBytes, actualBytes);
+    }
+
+    // 박힘 박제 2026-06-08 (브라운킴 PM) — InfrastructureExtensions 박힌 영역 정합.
+    // ERP API 박힌 DB 박힘 영역 = 환경변수(.env) DB_HOST/DB_PORT/DB_NAME/DB_USER/DB_PASSWORD 박힘.
+    private static string BuildConnectionString()
+    {
+        var host = Environment.GetEnvironmentVariable("DB_HOST") ?? "localhost";
+        var port = Environment.GetEnvironmentVariable("DB_PORT") ?? "3306";
+        var db   = Environment.GetEnvironmentVariable("DB_NAME") ?? "hitpan_erp";
+        var user = Environment.GetEnvironmentVariable("DB_USER") ?? "hitpan";
+        var pwd  = Environment.GetEnvironmentVariable("DB_PASSWORD")
+                   ?? throw new InvalidOperationException("DB_PASSWORD 환경변수 박지 않음 (.env 박힘 확인 박을 영역)");
+        return $"Server={host};Port={port};Database={db};Uid={user};Pwd={pwd};CharSet=utf8mb4;AllowUserVariables=true";
     }
 
     private class WebhookPayload
