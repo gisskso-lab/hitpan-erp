@@ -28,17 +28,20 @@ public class LandingSignupController : ControllerBase
     private readonly IConfiguration _config;
     private readonly IEmailSender _email;
     private readonly IWebhookOutboundService _webhook;
+    private readonly IDomainAliasService _domainAlias;
     private readonly ILogger<LandingSignupController> _logger;
 
     public LandingSignupController(
         IConfiguration config,
         IEmailSender email,
         IWebhookOutboundService webhook,
+        IDomainAliasService domainAlias,
         ILogger<LandingSignupController> logger)
     {
         _config = config;
         _email = email;
         _webhook = webhook;
+        _domainAlias = domainAlias;
         _logger = logger;
     }
 
@@ -57,6 +60,20 @@ public class LandingSignupController : ControllerBase
         var bizNoNormalized = new string((req.BizNo ?? "").Where(char.IsDigit).ToArray());
         if (bizNoNormalized.Length != 10)
             return BadRequest(new { success = false, message = "사업자번호는 숫자 10자리여야 합니다." });
+
+        // 사장님 결재 2026-06-09 — 도메인 별칭 가입 시점 재검증 (race condition 차단)
+        var desiredDomain = (req.DesiredDomain ?? "").Trim().ToLowerInvariant();
+        var domainCheck = await _domainAlias.ValidateAsync(desiredDomain, ct);
+        if (!domainCheck.Available)
+        {
+            return BadRequest(new
+            {
+                success = false,
+                code = domainCheck.Code,
+                message = domainCheck.Message,
+                suggestions = domainCheck.Suggestions
+            });
+        }
 
         // 국세청 진위확인 (헌법 #25 정합 — 정확하게)
         // 환경변수 우선 (운영), 그 다음 appsettings (개발) — appsettings 빈 문자열 차단
@@ -139,10 +156,10 @@ public class LandingSignupController : ControllerBase
 
             await db.ExecuteAsync(@"
                 INSERT INTO landing_signups
-                  (signup_token, biz_no_hash, company_name, email, phone, plan_type, reseller_code,
+                  (signup_token, biz_no_hash, company_name, email, phone, plan_type, desired_domain, reseller_code,
                    agree_terms, agree_privacy, status, submitted_at)
                 VALUES
-                  (@SignupToken, @BizNoHash, @CompanyName, @Email, @Phone, @PlanType, @ResellerCode,
+                  (@SignupToken, @BizNoHash, @CompanyName, @Email, @Phone, @PlanType, @DesiredDomain, @ResellerCode,
                    1, 1, 'submitted', UTC_TIMESTAMP())",
                 new
                 {
@@ -152,6 +169,7 @@ public class LandingSignupController : ControllerBase
                     req.Email,
                     req.Phone,
                     req.PlanType,
+                    DesiredDomain = desiredDomain,
                     req.ResellerCode
                 });
 
@@ -167,16 +185,17 @@ public class LandingSignupController : ControllerBase
             var bizNoNorm = new string((req.BizNo ?? "").Where(char.IsDigit).ToArray());
             await db.ExecuteAsync(@"
                 INSERT INTO tenants
-                  (tenant_id, tenant_code, company_name, biz_no, ceo_name, tel, address,
+                  (tenant_id, tenant_code, domain_alias, company_name, biz_no, ceo_name, tel, address,
                    reseller_id, status, trial_ends_at, db_host, db_name, license_key_hash,
                    reseller_tier, created_at, updated_at)
                 VALUES
-                  (@TenantId, @TenantCode, @CompanyName, @BizNo, @CeoName, @Phone, '',
+                  (@TenantId, @TenantCode, @DomainAlias, @CompanyName, @BizNo, @CeoName, @Phone, '',
                    NULL, 'pending', NULL, '', '', '', 0, UTC_TIMESTAMP(), UTC_TIMESTAMP())",
                 new
                 {
                     TenantId = tenantId,
                     TenantCode = tenantCode,
+                    DomainAlias = desiredDomain,
                     req.CompanyName,
                     BizNo = bizNoNorm,
                     CeoName = req.CeoName ?? "",
@@ -325,6 +344,11 @@ public class LandingSignupController : ControllerBase
         [Required, EmailAddress] public string Email { get; set; } = "";
         [Required] public string Phone { get; set; } = "";
         [Required] public string PlanType { get; set; } = "basic";
+
+        // 사장님 결재 2026-06-09 — 고객 입력 ERP 주소 별칭. 헌법 #22 정합 (테넌트 코드 노출 금지).
+        // 형식·중복·예약어 검증은 DomainAliasController와 동일 로직, 가입 시 재검증.
+        [Required] public string DesiredDomain { get; set; } = "";
+
         public string? ResellerCode { get; set; }
         [Required] public bool AgreeTerms { get; set; }
         [Required] public bool AgreePrivacy { get; set; }

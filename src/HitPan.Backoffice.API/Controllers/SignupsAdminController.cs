@@ -54,10 +54,12 @@ public class SignupsAdminController : ControllerBase
                        s.email AS Email,
                        s.phone AS Phone,
                        s.plan_type AS PlanType,
+                       s.desired_domain AS DesiredDomain,
                        s.reseller_code AS ResellerCode,
                        s.status AS Status,
                        s.submitted_at AS SubmittedAt,
                        t.tenant_code AS TenantCode,
+                       t.domain_alias AS DomainAlias,
                        t.status AS TenantStatus,
                        t.license_key_plain AS LicenseKey
                 FROM landing_signups s
@@ -136,12 +138,16 @@ public class SignupsAdminController : ControllerBase
 
             // 5) 시리얼 키 이메일 발송 — 가입자가 입력한 이메일 주소로 즉시 전송 (사장님 결재 2026-06-08)
             //    헌법 #34 정합 — 발송 채널은 환경변수(Smtp:*) 토글, 실패해도 승인 흐름은 계속 진행
+            //    사장님 결재 2026-06-09 — 도메인 별칭도 메일에 박기
             string customerEmail = signup.email;
+            string? domainAlias = await db.QueryFirstOrDefaultAsync<string?>(
+                "SELECT domain_alias FROM tenants WHERE company_name = @CompanyName ORDER BY created_at DESC LIMIT 1",
+                new { CompanyName = companyName });
             bool emailSent = false;
             if (!string.IsNullOrWhiteSpace(customerEmail))
             {
-                var subject = "[히트판 ERP] 가입 승인 완료 — 시리얼 키를 안내드립니다";
-                var htmlBody = BuildLicenseKeyEmailBody(companyName, licenseKey);
+                var subject = "[히트판 ERP] 가입 승인 완료 — 시리얼 키와 ERP 주소를 안내드립니다";
+                var htmlBody = BuildLicenseKeyEmailBody(companyName, licenseKey, domainAlias);
                 emailSent = await _email.SendAsync(customerEmail, subject, htmlBody, ct);
                 if (emailSent)
                     _logger.LogInformation("[SignupsAdmin] license_email sent to={Email} signupId={Id}", customerEmail, signupId);
@@ -189,10 +195,12 @@ public class SignupsAdminController : ControllerBase
             string companyName = signup.company_name;
             string customerEmail = signup.email;
 
-            // 기존 시리얼 평문 박힌 영역에서 그대로 읽음 (포링키 그대로 유지)
-            var licenseKey = await db.QueryFirstOrDefaultAsync<string?>(
-                "SELECT license_key_plain FROM tenants WHERE company_name = @CompanyName ORDER BY created_at DESC LIMIT 1",
+            // 기존 시리얼 평문 + 도메인 별칭 박힌 영역에서 그대로 읽음 (포링키·도메인 그대로 유지)
+            var info = await db.QueryFirstOrDefaultAsync<TenantInfoRow>(
+                "SELECT license_key_plain AS LicenseKey, domain_alias AS DomainAlias FROM tenants WHERE company_name = @CompanyName ORDER BY created_at DESC LIMIT 1",
                 new { CompanyName = companyName });
+            var licenseKey = info?.LicenseKey;
+            var domainAlias = info?.DomainAlias;
 
             if (string.IsNullOrWhiteSpace(licenseKey))
                 return BadRequest(new { success = false, message = "이 고객사의 시리얼 키가 박혀있지 않습니다. 새로 발급이 필요합니다." });
@@ -202,7 +210,7 @@ public class SignupsAdminController : ControllerBase
             if (!string.IsNullOrWhiteSpace(customerEmail))
             {
                 var subject = "[히트판 ERP] 시리얼 키 재발송 안내";
-                var htmlBody = BuildLicenseKeyEmailBody(companyName, licenseKey);
+                var htmlBody = BuildLicenseKeyEmailBody(companyName, licenseKey, domainAlias);
                 emailSent = await _email.SendAsync(customerEmail, subject, htmlBody, ct);
             }
 
@@ -280,12 +288,21 @@ public class SignupsAdminController : ControllerBase
         return sb.ToString();
     }
 
-    // 시리얼 키 메일 HTML 본문 — 사장님 결재 2026-06-08
-    // 헌법 정합: #25 쉽게 / #34 정식 출시 시 발신자만 hitpan@hitpan.co.kr로 환경변수 교체
-    private static string BuildLicenseKeyEmailBody(string companyName, string licenseKey)
+    // 시리얼 키 메일 HTML 본문 — 사장님 결재 2026-06-08, 2026-06-09 도메인 박힘
+    // 헌법 정합: #22 (테넌트 코드 노출 금지, 도메인 별칭만 박힘) / #25 쉽게 / #34 정식 출시 시 발신자 환경변수 교체
+    private static string BuildLicenseKeyEmailBody(string companyName, string licenseKey, string? domainAlias)
     {
         var safeCompany = System.Net.WebUtility.HtmlEncode(companyName ?? "");
         var safeKey = System.Net.WebUtility.HtmlEncode(licenseKey ?? "");
+        var safeDomain = System.Net.WebUtility.HtmlEncode(domainAlias ?? "");
+        var domainBlock = string.IsNullOrWhiteSpace(domainAlias)
+            ? ""
+            : $@"
+    <div style=""background:#EFF6FF;border:2px solid #2563EB;border-radius:12px;padding:24px;margin:24px 0;text-align:center;"">
+      <p style=""margin:0 0 8px;color:#1E3A8A;font-size:13px;font-weight:600;"">고객사 ERP 주소</p>
+      <p style=""margin:0;font-family:'Courier New',monospace;font-size:20px;font-weight:700;color:#1E3A8A;"">{safeDomain}.hitpan.kr</p>
+      <p style=""margin:8px 0 0;color:#1E3A8A;font-size:12px;"">설치 후 위 주소로 접속하시면 됩니다.</p>
+    </div>";
         return $@"<!DOCTYPE html>
 <html lang=""ko"">
 <head><meta charset=""utf-8""></head>
@@ -304,6 +321,7 @@ public class SignupsAdminController : ControllerBase
       <p style=""margin:0 0 8px;color:#0F6E56;font-size:13px;font-weight:600;"">시리얼 키</p>
       <p style=""margin:0;font-family:'Courier New',monospace;font-size:22px;font-weight:700;letter-spacing:1.5px;color:#0F1419;"">{safeKey}</p>
     </div>
+{domainBlock}
 
     <div style=""background:#FEE2E2;border:2px solid #DC2626;border-radius:8px;padding:16px;margin:20px 0;"">
       <p style=""margin:0 0 6px;font-size:14px;font-weight:700;color:#991B1B;"">🔒 보안 안내 — 반드시 지켜주세요</p>
@@ -350,5 +368,13 @@ public class SignupsAdminController : ControllerBase
         public string? TenantCode { get; set; }
         public string? TenantStatus { get; set; }
         public string? LicenseKey { get; set; }
+        public string? DesiredDomain { get; set; }
+        public string? DomainAlias { get; set; }
+    }
+
+    private class TenantInfoRow
+    {
+        public string? LicenseKey { get; set; }
+        public string? DomainAlias { get; set; }
     }
 }

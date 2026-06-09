@@ -56,6 +56,35 @@
             </div>
 
             <div class="field">
+                <label>원하시는 ERP 주소 *</label>
+                <div class="domain-row">
+                    <input type="text" @bind="_form.DesiredDomain" @bind:event="oninput" @onblur="CheckDomainAvailability"
+                           required maxlength="30" placeholder="예: mycompany"
+                           class="domain-input @(_domainStatus)" />
+                    <span class="domain-suffix">.hitpan.kr</span>
+                </div>
+                @if (_domainChecking)
+                {
+                    <div class="domain-msg checking">확인 중...</div>
+                }
+                else if (_domainMsg is not null)
+                {
+                    <div class="domain-msg @_domainStatus">@_domainMsg</div>
+                    @if (_domainSuggestions is { Count: > 0 })
+                    {
+                        <div class="domain-suggestions">
+                            <span>추천:</span>
+                            @foreach (var s in _domainSuggestions)
+                            {
+                                <button type="button" class="domain-suggest-chip" @onclick="@(() => UseSuggestion(s))">@s</button>
+                            }
+                        </div>
+                    }
+                }
+                <small class="domain-hint">영문 소문자·숫자·하이픈, 3~30자. 가입 후 변경 불가</small>
+            </div>
+
+            <div class="field">
                 <label>선택한 요금제</label>
                 <input type="text" value="@_planLabel" readonly />
             </div>
@@ -212,6 +241,79 @@
         }
     }
 
+    // 도메인 별칭 검증 (사장님 결재 2026-06-09 — 고객 입력 ERP 주소, 실시간 중복 검사)
+    private bool _domainChecking;
+    private bool _domainOk;
+    private string? _domainMsg;
+    private string _domainStatus = ""; // "ok" / "warn" / "checking" / ""
+    private List<string>? _domainSuggestions;
+    private string _lastCheckedDomain = "";
+    private System.Threading.CancellationTokenSource? _domainCts;
+
+    private async Task CheckDomainAvailability()
+    {
+        var alias = (_form.DesiredDomain ?? "").Trim().ToLowerInvariant();
+        if (alias == _lastCheckedDomain && !string.IsNullOrEmpty(alias)) return;
+        _lastCheckedDomain = alias;
+
+        if (string.IsNullOrWhiteSpace(alias))
+        {
+            _domainOk = false;
+            _domainMsg = null;
+            _domainStatus = "";
+            _domainSuggestions = null;
+            return;
+        }
+
+        _domainCts?.Cancel();
+        _domainCts = new System.Threading.CancellationTokenSource();
+        var token = _domainCts.Token;
+
+        _domainChecking = true;
+        _domainStatus = "checking";
+        StateHasChanged();
+
+        try
+        {
+            await Task.Delay(300, token); // debounce
+            var res = await Http.GetFromJsonAsync<DomainCheckResponse>(
+                $"api/landing/domain-alias/check?alias={Uri.EscapeDataString(alias)}",
+                token);
+            if (res is null) return;
+            _domainOk = res.Available;
+            _domainMsg = res.Message;
+            _domainStatus = res.Available ? "ok" : "warn";
+            _domainSuggestions = res.Suggestions;
+        }
+        catch (TaskCanceledException) { }
+        catch (Exception ex)
+        {
+            _domainOk = false;
+            _domainMsg = $"검증 중 오류: {ex.Message}";
+            _domainStatus = "warn";
+        }
+        finally
+        {
+            _domainChecking = false;
+            StateHasChanged();
+        }
+    }
+
+    private async Task UseSuggestion(string suggested)
+    {
+        _form.DesiredDomain = suggested;
+        _lastCheckedDomain = "";
+        await CheckDomainAvailability();
+    }
+
+    private class DomainCheckResponse
+    {
+        public bool Available { get; set; }
+        public string Code { get; set; } = "";
+        public string Message { get; set; } = "";
+        public List<string>? Suggestions { get; set; }
+    }
+
     private class BizVerifyResponse
     {
         public bool Valid { get; set; }
@@ -341,6 +443,16 @@
                 _error = "사업자번호 검증을 통과해야 합니다. '검증' 버튼을 눌러주세요.";
                 return;
             }
+            if (string.IsNullOrWhiteSpace(_form.DesiredDomain))
+            {
+                _error = "원하시는 ERP 주소를 입력해주세요.";
+                return;
+            }
+            if (!_domainOk)
+            {
+                _error = "ERP 주소 검증을 통과하지 못했습니다. 다른 주소를 시도해주세요.";
+                return;
+            }
             var payload = new
             {
                 CompanyName = _form.CompanyName,
@@ -349,6 +461,7 @@
                 Email = _form.Email,
                 Phone = _form.Phone,
                 PlanType = (Plan ?? "basic"),
+                DesiredDomain = _form.DesiredDomain.Trim().ToLowerInvariant(),
                 ResellerCode = _form.ReferralChannel switch
                 {
                     "hq_sales" => "HQ_SALES",
@@ -387,6 +500,7 @@
         public string RepresentativeName { get; set; } = "";
         public string Phone { get; set; } = "";
         public string BizNo { get; set; } = "";
+        public string DesiredDomain { get; set; } = ""; // 사장님 결재 2026-06-09 — 고객 입력 ERP 주소
         public string ReferralChannel { get; set; } = ""; // hq_sales, hq_marketing, reseller
         public string ResellerCode { get; set; } = "";
         public bool AgreeService { get; set; }
@@ -445,6 +559,21 @@
 .bizno-msg { margin-top: 8px; padding: 8px 12px; border-radius: 6px; font-size: 13px; }
 .bizno-msg.ok { background: #DCFCE7; color: #166534; }
 .bizno-msg.warn { background: #FEF3C7; color: #92400E; }
+.domain-row { display: flex; align-items: center; gap: 4px; border: 1px solid #D1D5DB; border-radius: 8px; padding: 0 12px; background: #fff; }
+.domain-row:focus-within { border-color: #0F6E56; }
+.domain-input { flex: 1; padding: 12px 0; border: none !important; font-size: 14px; outline: none; }
+.domain-input.ok { color: #166534; font-weight: 600; }
+.domain-input.warn { color: #B91C1C; }
+.domain-suffix { color: #6B7280; font-size: 14px; font-weight: 500; }
+.domain-msg { margin-top: 8px; padding: 8px 12px; border-radius: 6px; font-size: 13px; }
+.domain-msg.ok { background: #DCFCE7; color: #166534; }
+.domain-msg.warn { background: #FEE2E2; color: #B91C1C; }
+.domain-msg.checking { background: #DBEAFE; color: #1E3A8A; }
+.domain-suggestions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; align-items: center; }
+.domain-suggestions span { font-size: 12px; color: #6B7280; }
+.domain-suggest-chip { padding: 4px 10px; background: #F3F4F6; border: 1px solid #D1D5DB; border-radius: 999px; font-size: 12px; cursor: pointer; }
+.domain-suggest-chip:hover { background: #0F6E56; color: #fff; border-color: #0F6E56; }
+.domain-hint { display: block; margin-top: 6px; color: #6B7280; font-size: 12px; }
 .error { background: #FEE2E2; color: #B91C1C; padding: 12px; border-radius: 8px; margin-bottom: 12px; font-size: 14px; }
 .btn-submit { width: 100%; padding: 14px; background: #0F6E56; color: #fff; border: none; border-radius: 8px; font-size: 16px; font-weight: 600; cursor: pointer; }
 .btn-submit:hover:not(:disabled) { background: #0A5240; }

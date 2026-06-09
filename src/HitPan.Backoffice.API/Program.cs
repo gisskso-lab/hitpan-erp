@@ -31,6 +31,8 @@ public class Program
         builder.Services.AddHostedService<HitPan.Backoffice.API.Services.WebhookDispatcher>();
         // W14 Cloudflare 도메인 자동 발급 골격 (사장님 결재 2026-06-05) — 환경변수 미설정 시 503
         builder.Services.AddSingleton<HitPan.Backoffice.API.Services.ICloudflareDomainService, HitPan.Backoffice.API.Services.CloudflareDomainService>();
+        // 도메인 별칭 검증 (사장님 결재 2026-06-09) — 고객 입력 ERP 주소 형식·예약어·중복 검사
+        builder.Services.AddScoped<HitPan.Backoffice.API.Services.IDomainAliasService, HitPan.Backoffice.API.Services.DomainAliasService>();
         // W11 Owner 영역 (사장님 결재 2026-06-04) — bo_users + 4-eyes + 감사로그 + MFA
         builder.Services.AddScoped<HitPan.Backoffice.API.Services.IBoAuditService, HitPan.Backoffice.API.Services.BoAuditService>();
         builder.Services.AddSingleton<HitPan.Backoffice.API.Services.IMfaService, HitPan.Backoffice.API.Services.MfaService>();
