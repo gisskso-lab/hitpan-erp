@@ -94,17 +94,28 @@ public class InstallerBootstrapController : ControllerBase
             var primaryDomain = $"{subdomain}.hitpan.kr";
             var apiDomain = $"api-{subdomain}.hitpan.kr";
 
-            // Cloudflare 환경변수 박혀있으면 자동 발급, 박지 않은 영역이면 베타 도메인 응답만
+            // Cloudflare 환경변수 설정되어 있으면 DNS + 터널 자동 발급 (사장님 결재 2026-06-09 Day 5)
             string? tunnelToken = null;
             string? tunnelDomain = null;
+            string? tunnelId = null;
             if (_cfDomain.IsConfigured)
             {
                 try
                 {
-                    var domainResult = await _cfDomain.IssueAsync(tenant.TenantId, tenant.TenantCode, ct);
+                    var domainResult = await _cfDomain.IssueAsync(tenant.TenantId, tenant.TenantCode, tenant.DomainAlias, ct);
                     tunnelDomain = domainResult.Domain;
-                    // 터널 토큰은 Day 5 cloudflared 자동 발급에서 박힐 영역
-                    // 현재는 DNS만 발급. EXE는 응답 받은 도메인으로 cloudflared 등록 박을 영역
+
+                    // cloudflared 터널 자동 발급 (실패해도 DNS만으로 동작 가능 — 부트스트랩은 성공으로 처리)
+                    try
+                    {
+                        var tunnelResult = await _cfDomain.IssueTunnelAsync(tenant.TenantId, tenant.TenantCode, ct);
+                        tunnelToken = tunnelResult.TunnelToken;
+                        tunnelId = tunnelResult.TunnelId;
+                    }
+                    catch (Exception tex)
+                    {
+                        _logger.LogWarning(tex, "[InstallerBootstrap] 터널 발급 실패 (DNS만 발급, 수동 터널 등록 폴백) tenant={Tid}", tenant.TenantId);
+                    }
                 }
                 catch (Exception ex)
                 {
@@ -152,7 +163,8 @@ public class InstallerBootstrapController : ControllerBase
                     primary = tunnelDomain ?? primaryDomain,
                     api = apiDomain,
                     tunnelTokenIssued = !string.IsNullOrEmpty(tunnelToken),
-                    tunnelToken = tunnelToken  // Day 5에서 봉합. 현재 null
+                    tunnelToken = tunnelToken,
+                    tunnelId = tunnelId
                 },
                 bootstrap = new
                 {

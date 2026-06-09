@@ -20,10 +20,15 @@ public interface ICloudflareDomainService
 {
     bool IsConfigured { get; }
     Task<DomainIssueResult> IssueAsync(string tenantId, string tenantCode, CancellationToken ct);
+    // 사장님 결재 2026-06-09 — 도메인 별칭 우선 발급 (DomainAliasService 결과 사용)
+    Task<DomainIssueResult> IssueAsync(string tenantId, string tenantCode, string? domainAlias, CancellationToken ct);
+    // 사장님 결재 Plan 2026-06-09 (Day 5) — cloudflared 터널 자동 발급 + 토큰 발급
+    Task<TunnelIssueResult> IssueTunnelAsync(string tenantId, string tenantCode, CancellationToken ct);
     Task<bool> RevokeAsync(string cfZoneId, string cfRecordId, string? cfTunnelId, CancellationToken ct);
 }
 
 public record DomainIssueResult(string Domain, string ZoneId, string RecordId, string? TunnelId);
+public record TunnelIssueResult(string TunnelId, string TunnelToken, string CnameTarget);
 
 public class CloudflareDomainService : ICloudflareDomainService
 {
@@ -49,12 +54,19 @@ public class CloudflareDomainService : ICloudflareDomainService
         && !string.IsNullOrWhiteSpace(_zoneId)
         && !string.IsNullOrWhiteSpace(_accountId);
 
-    public async Task<DomainIssueResult> IssueAsync(string tenantId, string tenantCode, CancellationToken ct)
+    public Task<DomainIssueResult> IssueAsync(string tenantId, string tenantCode, CancellationToken ct)
+        => IssueAsync(tenantId, tenantCode, null, ct);
+
+    public async Task<DomainIssueResult> IssueAsync(string tenantId, string tenantCode, string? domainAlias, CancellationToken ct)
     {
         if (!IsConfigured)
             throw new InvalidOperationException("Cloudflare 환경변수 미설정 — 사장님 결재 후 CLOUDFLARE_API_TOKEN·ZONE_ID·ACCOUNT_ID 설정 후 재시도");
 
-        var domain = $"www.{tenantCode.ToLowerInvariant()}.{_baseDomain}";
+        // 사장님 결재 2026-06-09 — 도메인 별칭 우선, 미설정 시 테넌트 코드 폴백 (헌법 #22 정합 — tenant_code 외부 노출 0)
+        var subdomain = !string.IsNullOrWhiteSpace(domainAlias)
+            ? domainAlias!.ToLowerInvariant()
+            : tenantCode.ToLowerInvariant().Replace("-", "");
+        var domain = $"{subdomain}.{_baseDomain}";
         _logger.LogInformation("[CFDomain] 발급 시작 tenant={Tid} domain={Domain}", tenantId, domain);
 
         var http = _httpFactory.CreateClient();
@@ -67,7 +79,7 @@ public class CloudflareDomainService : ICloudflareDomainService
         {
             type = "CNAME",
             name = domain,
-            content = $"{tenantCode.ToLowerInvariant()}.cfargotunnel.com",
+            content = $"{subdomain}.cfargotunnel.com",
             ttl = 1,
             proxied = true
         };
@@ -85,6 +97,63 @@ public class CloudflareDomainService : ICloudflareDomainService
 
         // 2) cloudflared 터널은 본사 사전 발급 또는 별도 결재 흐름 (헌법 #29) — 본 골격에선 null
         return new DomainIssueResult(domain, _zoneId!, recordId, null);
+    }
+
+    // 사장님 결재 Plan 2026-06-09 (Day 5) — cloudflared 터널 자동 발급
+    // 흐름:
+    //   1) POST /accounts/{account}/cfd_tunnel — 새 터널 생성 (이름 = tenantCode)
+    //   2) GET /accounts/{account}/cfd_tunnel/{id}/token — 터널 실행 토큰 발급
+    //   3) 응답: 터널 ID + 토큰 + CNAME 대상
+    // EXE는 응답 받은 토큰으로 `cloudflared service install <token>` 실행 후 자동 시작
+    public async Task<TunnelIssueResult> IssueTunnelAsync(string tenantId, string tenantCode, CancellationToken ct)
+    {
+        if (!IsConfigured)
+            throw new InvalidOperationException("Cloudflare 환경변수 미설정 — 사장님 결재 후 환경변수 설정 후 재시도");
+
+        var tunnelName = $"hitpan-{tenantCode.ToLowerInvariant().Replace("-", "")}";
+        _logger.LogInformation("[CFTunnel] 터널 발급 시작 tenant={Tid} name={Name}", tenantId, tunnelName);
+
+        var http = _httpFactory.CreateClient();
+        http.BaseAddress = new Uri("https://api.cloudflare.com/client/v4/");
+        http.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", _token);
+
+        // 1) 터널 시크릿 생성 (32 byte base64)
+        var secretBytes = new byte[32];
+        System.Security.Cryptography.RandomNumberGenerator.Fill(secretBytes);
+        var tunnelSecret = Convert.ToBase64String(secretBytes);
+
+        // 2) 터널 생성
+        var createPayload = new
+        {
+            name = tunnelName,
+            tunnel_secret = tunnelSecret,
+            config_src = "cloudflare"
+        };
+        var createRes = await http.PostAsJsonAsync($"accounts/{_accountId}/cfd_tunnel", createPayload, ct);
+        var createBody = await createRes.Content.ReadAsStringAsync(ct);
+        if (!createRes.IsSuccessStatusCode)
+        {
+            _logger.LogWarning("[CFTunnel] 터널 생성 실패 {Status} {Body}", createRes.StatusCode, createBody);
+            throw new InvalidOperationException($"터널 생성 실패 ({(int)createRes.StatusCode}): {createBody}");
+        }
+
+        using var createJson = JsonDocument.Parse(createBody);
+        var tunnelId = createJson.RootElement.GetProperty("result").GetProperty("id").GetString() ?? "";
+
+        // 3) 터널 실행 토큰 발급
+        var tokenRes = await http.GetAsync($"accounts/{_accountId}/cfd_tunnel/{tunnelId}/token", ct);
+        var tokenBody = await tokenRes.Content.ReadAsStringAsync(ct);
+        if (!tokenRes.IsSuccessStatusCode)
+        {
+            _logger.LogWarning("[CFTunnel] 토큰 발급 실패 {Status} {Body}", tokenRes.StatusCode, tokenBody);
+            throw new InvalidOperationException($"터널 토큰 발급 실패 ({(int)tokenRes.StatusCode}): {tokenBody}");
+        }
+
+        using var tokenJson = JsonDocument.Parse(tokenBody);
+        var tunnelToken = tokenJson.RootElement.GetProperty("result").GetString() ?? "";
+
+        _logger.LogInformation("[CFTunnel] 발급 완료 tenant={Tid} tunnelId={Tn}", tenantId, tunnelId);
+        return new TunnelIssueResult(tunnelId, tunnelToken, $"{tunnelId}.cfargotunnel.com");
     }
 
     public async Task<bool> RevokeAsync(string cfZoneId, string cfRecordId, string? cfTunnelId, CancellationToken ct)

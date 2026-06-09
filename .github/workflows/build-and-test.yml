@@ -1,0 +1,49 @@
+# 빌드·시험 CI (사장님 결재 Plan 2026-06-09 — cicd-velvety-reef)
+#
+# 트리거: develop/main push + PR
+# 검증: errors 0 + warnings 0 (헌법 #19 정합)
+# 실패 시 머지 금지
+name: Build & Test
+
+on:
+  push:
+    branches: [develop, main]
+  pull_request:
+    branches: [develop, main]
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build (errors 0 + warnings 0)
+    runs-on: windows-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET 8
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Restore dependencies
+        run: dotnet restore src/HitPan.sln
+
+      - name: Build (Release + warnings as errors)
+        # 헌법 #19: errors 0 + warnings 0이 정합성·무결성
+        run: dotnet build src/HitPan.sln --configuration Release --no-restore --nologo /p:TreatWarningsAsErrors=true /warnaserror
+
+      - name: Test (Unit + Integration)
+        run: dotnet test src/HitPan.sln --configuration Release --no-build --nologo --verbosity normal --logger "trx;LogFileName=test-results.trx"
+        continue-on-error: false
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results
+          path: '**/test-results.trx'
+          retention-days: 14

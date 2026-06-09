@@ -1,0 +1,125 @@
+# NCP 자동 배포 (사장님 결재 Plan 2026-06-09 — cicd-velvety-reef)
+#
+# 트리거: develop push (백오피스 API/랜딩 영역만)
+# 대상: NCP 서버 (back.hitpan.kr + landing.hitpan.kr)
+#
+# 헌법 정합:
+#   #22·#35 — 본사 클라우드 (백오피스 + 랜딩만 NCP 배포, ERP는 고객 PC 로컬 절대)
+#   #19 — errors 0 + warnings 0 게이트 통과 후에만 배포
+#
+# 사장님 결재 필요 시크릿:
+#   - NCP_SSH_PRIVATE_KEY  (NCP 인증키)
+#   - NCP_HOST             (back.hitpan.kr 서버 IP)
+#   - NCP_USER             (배포 계정)
+name: Deploy to NCP
+
+on:
+  push:
+    branches: [develop]
+    paths:
+      - 'src/HitPan.Backoffice.API/**'
+      - 'src/HitPan.Landing/**'
+      - '.github/workflows/deploy-ncp.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build (gate)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    outputs:
+      build-ok: ${{ steps.build.outcome }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET 8
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Build Backoffice API + Landing
+        id: build
+        # 헌법 #19 게이트: warnings = errors
+        run: |
+          dotnet build src/HitPan.Backoffice.API/HitPan.Backoffice.API.csproj -c Release /p:TreatWarningsAsErrors=true
+          dotnet build src/HitPan.Landing/HitPan.Landing.csproj -c Release /p:TreatWarningsAsErrors=true
+
+      - name: Publish Backoffice API
+        run: dotnet publish src/HitPan.Backoffice.API/HitPan.Backoffice.API.csproj -c Release -o publish/backoffice-api --no-build
+
+      - name: Publish Landing
+        run: dotnet publish src/HitPan.Landing/HitPan.Landing.csproj -c Release -o publish/landing --no-build
+
+      - name: Upload publish artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: ncp-publish
+          path: publish/
+          retention-days: 7
+
+  deploy:
+    name: Deploy to NCP
+    needs: build
+    if: needs.build.outputs.build-ok == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: production
+
+    steps:
+      - name: Download publish artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: ncp-publish
+          path: publish/
+
+      - name: Setup SSH key
+        env:
+          SSH_KEY: ${{ secrets.NCP_SSH_PRIVATE_KEY }}
+        run: |
+          mkdir -p ~/.ssh
+          echo "$SSH_KEY" > ~/.ssh/ncp_key
+          chmod 600 ~/.ssh/ncp_key
+          ssh-keyscan -H ${{ secrets.NCP_HOST }} >> ~/.ssh/known_hosts
+
+      - name: Rsync to NCP (backup first)
+        env:
+          NCP_USER: ${{ secrets.NCP_USER }}
+          NCP_HOST: ${{ secrets.NCP_HOST }}
+        run: |
+          TS=$(date +%Y%m%d-%H%M%S)
+          # 1) 기존 백업
+          ssh -i ~/.ssh/ncp_key $NCP_USER@$NCP_HOST "
+            sudo cp -r /var/www/backoffice-api /var/www/backoffice-api.bak-$TS || true
+            sudo cp -r /var/www/landing /var/www/landing.bak-$TS || true
+          "
+          # 2) 새 빌드 전송
+          rsync -avz --delete -e "ssh -i ~/.ssh/ncp_key" publish/backoffice-api/ $NCP_USER@$NCP_HOST:/tmp/backoffice-api/
+          rsync -avz --delete -e "ssh -i ~/.ssh/ncp_key" publish/landing/ $NCP_USER@$NCP_HOST:/tmp/landing/
+          # 3) 권한 봉합 + 위치 이동 + 재기동
+          ssh -i ~/.ssh/ncp_key $NCP_USER@$NCP_HOST "
+            sudo rsync -a --delete /tmp/backoffice-api/ /var/www/backoffice-api/
+            sudo rsync -a --delete /tmp/landing/ /var/www/landing/
+            sudo systemctl restart hitpan-backoffice-api
+            sudo systemctl restart hitpan-landing
+          "
+
+      - name: Healthcheck
+        env:
+          NCP_USER: ${{ secrets.NCP_USER }}
+          NCP_HOST: ${{ secrets.NCP_HOST }}
+        run: |
+          sleep 5
+          # back.hitpan.kr healthz
+          curl -fsS https://back.hitpan.kr/healthz || (echo "Backoffice healthz failed"; exit 1)
+          # landing.hitpan.kr root
+          curl -fsS -o /dev/null -w "%{http_code}" https://landing.hitpan.kr/ | grep -E '^(200|301|302)$' || (echo "Landing healthz failed"; exit 1)
+
+      - name: Notify on failure
+        if: failure()
+        run: |
+          echo "::error::NCP 배포 실패. SSH 진단 후 수동 롤백 검토."
