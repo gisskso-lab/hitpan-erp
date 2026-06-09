@@ -335,13 +335,28 @@ public class SignupsAdminController : ControllerBase
       </ul>
     </div>
 
-    <h2 style=""font-size:16px;margin:24px 0 12px;color:#0F1419;"">다음 단계</h2>
+    <div style=""background:#FEF3C7;border:2px solid #F59E0B;border-radius:12px;padding:24px;margin:24px 0;text-align:center;"">
+      <p style=""margin:0 0 12px;color:#92400E;font-size:14px;font-weight:700;"">📥 설치 파일 다운로드</p>
+      <a href=""https://updates.hitpan.kr/packages/HitPan-ERP-Setup-1.2.0.exe""
+         style=""display:inline-block;background:#0F6E56;color:#fff;padding:14px 32px;border-radius:8px;font-size:15px;font-weight:700;text-decoration:none;"">
+        히트판 ERP 설치 프로그램 (91 MB)
+      </a>
+      <p style=""margin:12px 0 0;color:#92400E;font-size:12px;"">버전 1.2.0 · Windows 10/11 (64bit)</p>
+    </div>
+
+    <h2 style=""font-size:16px;margin:24px 0 12px;color:#0F1419;"">설치 방법 (10분 소요)</h2>
     <ol style=""margin:0 0 16px 20px;padding:0;font-size:14px;line-height:1.8;color:#374151;"">
-      <li>히트판 ERP 설치 파일을 다운로드합니다.</li>
-      <li>설치 후 첫 화면에서 위 시리얼 키를 입력합니다.</li>
-      <li>인증이 완료되면 ‘이 PC를 등록하시겠습니까?’ 안내가 표시됩니다.</li>
-      <li>등록 후 바로 사용하실 수 있습니다.</li>
+      <li>위 [히트판 ERP 설치 프로그램] 버튼을 클릭하여 파일을 다운로드합니다.</li>
+      <li>다운로드된 <code style=""background:#F3F4F6;padding:2px 6px;border-radius:4px;font-family:monospace;"">HitPan-ERP-Setup-1.2.0.exe</code> 파일을 <strong>마우스 우클릭 → 관리자 권한으로 실행</strong>합니다.</li>
+      <li>설치 마법사 첫 화면에서 위 시리얼 키를 정확히 입력합니다.</li>
+      <li>이후 모든 과정(데이터베이스·터널·자동 시작)은 자동으로 진행됩니다.</li>
+      <li>설치 완료 후 브라우저가 자동으로 열리며, 본인 ERP 주소로 접속됩니다.</li>
     </ol>
+
+    <p style=""font-size:13px;color:#6B7280;line-height:1.7;margin:0 0 16px;"">
+      ※ Windows Defender SmartScreen 경고가 표시되면 [추가 정보] → [실행] 을 클릭하세요.
+      베타1 기간 한정이며 정식 출시 시 자동 신뢰됩니다.
+    </p>
 
     <p style=""font-size:13px;color:#6B7280;line-height:1.7;margin:24px 0 0;border-top:1px solid #E5E7EB;padding-top:16px;"">
       문의: 히트판 고객센터 / 본 메일은 발신 전용입니다.
