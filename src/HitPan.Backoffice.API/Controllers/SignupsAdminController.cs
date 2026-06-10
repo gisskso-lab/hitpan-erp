@@ -85,19 +85,33 @@ public class SignupsAdminController : ControllerBase
             await using var db = await OpenAsync(ct);
 
             var signup = await db.QueryFirstOrDefaultAsync<dynamic>(
-                "SELECT company_name, email, status FROM landing_signups WHERE signup_id = @Id",
+                "SELECT company_name, email, status, submitted_at FROM landing_signups WHERE signup_id = @Id",
                 new { Id = signupId });
 
             if (signup is null)
-                return NotFound(new { success = false, message = "신청 박힘 박지 않음" });
+                return NotFound(new { success = false, message = "신청을 찾을 수 없습니다." });
 
             string status = signup.status;
             if (status == "approved" || status == "active")
-                return BadRequest(new { success = false, message = "이미 승인 박힌 영역" });
+                return BadRequest(new { success = false, message = "이미 승인 처리되었습니다." });
 
             string companyName = signup.company_name;
+            DateTime submittedAt = signup.submitted_at;
 
-            // 1) signup 박힘 승인 박힘
+            // 사고 #5 봉합 (2026-06-10): signup ↔ tenant 1:1 매칭 — submitted_at에 가장 가까운 pending tenant 1건만
+            // 이전 버그: WHERE company_name AND status='pending' → 같은 회사명 여러 pending이면 모두 같은 키 박힘
+            var tenantId = await db.QueryFirstOrDefaultAsync<string?>(@"
+                SELECT CAST(tenant_id AS CHAR)
+                FROM tenants
+                WHERE company_name = @CompanyName AND status = 'pending'
+                ORDER BY ABS(TIMESTAMPDIFF(SECOND, created_at, @SubmittedAt))
+                LIMIT 1",
+                new { CompanyName = companyName, SubmittedAt = submittedAt });
+
+            if (string.IsNullOrEmpty(tenantId))
+                return NotFound(new { success = false, message = "신청에 대응하는 고객사를 찾을 수 없습니다." });
+
+            // 1) signup 승인 처리
             await db.ExecuteAsync(
                 "UPDATE landing_signups SET status = 'approved' WHERE signup_id = @Id",
                 new { Id = signupId });
@@ -108,21 +122,17 @@ public class SignupsAdminController : ControllerBase
             var licensePepper = _config["License:Pepper"] ?? "dev-pepper-2026";
             var licenseHash = ComputeHmacSha256(licenseKey, licensePepper);
 
-            // 3) tenant 활성화 + license_key_hash + license_key_plain 저장
+            // 3) tenant 활성화 + license_key_hash + license_key_plain 저장 — tenant_id 단건 정확 매칭
             //    사장님 결재 2026-06-08: 시리얼은 백오피스 ↔ ERP 포링키 영역.
-            //    백오피스가 평문 박혀있어야 재발송·고객 응대 가능.
+            //    사고 #5 봉합 2026-06-10: WHERE tenant_id 단건 매칭으로 변경
             await db.ExecuteAsync(@"
                 UPDATE tenants
                 SET status = 'active',
                     license_key_hash = COALESCE(NULLIF(license_key_hash, ''), @LicenseHash),
                     license_key_plain = COALESCE(NULLIF(license_key_plain, ''), @LicensePlain),
                     updated_at = UTC_TIMESTAMP()
-                WHERE company_name = @CompanyName AND status = 'pending'",
-                new { CompanyName = companyName, LicenseHash = licenseHash, LicensePlain = licenseKey });
-
-            var tenantId = await db.QueryFirstOrDefaultAsync<string?>(
-                "SELECT CAST(tenant_id AS CHAR) FROM tenants WHERE company_name = @CompanyName ORDER BY created_at DESC LIMIT 1",
-                new { CompanyName = companyName });
+                WHERE tenant_id = @TenantId AND status = 'pending'",
+                new { TenantId = tenantId, LicenseHash = licenseHash, LicensePlain = licenseKey });
 
             // 4) ERP webhook 발송 (헌법 #35 정합 - 백오피스→ERP 유기적 연결)
             if (!string.IsNullOrEmpty(tenantId))
