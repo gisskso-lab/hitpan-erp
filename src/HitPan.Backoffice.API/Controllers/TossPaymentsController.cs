@@ -188,7 +188,11 @@ public class TossPaymentsController : ControllerBase
             using var doc = JsonDocument.Parse(body);
             if (doc.RootElement.TryGetProperty("message", out var m)) return m.GetString();
         }
-        catch (JsonException) { }
+        catch (JsonException)
+        {
+            // 헌법 #15 정합 — static 메서드 영역, JSON 파싱 실패 = 메시지 추출 불가 영역만 의미.
+            // 운영 사고 추적 영역 아님 (호출자가 별도 오류 처리 영역 가도). null 반환으로 충분.
+        }
         return null;
     }
 
