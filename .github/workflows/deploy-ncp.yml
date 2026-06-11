@@ -18,6 +18,7 @@ on:
     branches: [develop]
     paths:
       - 'src/HitPan.Backoffice.API/**'
+      - 'src/HitPan.Backoffice/**'
       - 'src/HitPan.Landing/**'
       - '.github/workflows/deploy-ncp.yml'
   workflow_dispatch:
@@ -35,28 +36,32 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Setup .NET 8
-        uses: actions/setup-dotnet@v4
+        uses: actions/setup-dotnet@v5
         with:
           dotnet-version: '8.0.x'
 
-      - name: Build Backoffice API + Landing
+      - name: Build Backoffice API + Web + Landing
         id: build
         # 헌법 #19 게이트: warnings = errors
         run: |
           dotnet build src/HitPan.Backoffice.API/HitPan.Backoffice.API.csproj -c Release /p:TreatWarningsAsErrors=true
+          dotnet build src/HitPan.Backoffice/HitPan.Backoffice.csproj -c Release /p:TreatWarningsAsErrors=true
           dotnet build src/HitPan.Landing/HitPan.Landing.csproj -c Release /p:TreatWarningsAsErrors=true
 
       - name: Publish Backoffice API
         run: dotnet publish src/HitPan.Backoffice.API/HitPan.Backoffice.API.csproj -c Release -o publish/backoffice-api --no-build
 
+      - name: Publish Backoffice Web
+        run: dotnet publish src/HitPan.Backoffice/HitPan.Backoffice.csproj -c Release -o publish/backoffice-web --no-build
+
       - name: Publish Landing
         run: dotnet publish src/HitPan.Landing/HitPan.Landing.csproj -c Release -o publish/landing --no-build
 
       - name: Upload publish artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: ncp-publish
           path: publish/
@@ -72,7 +77,7 @@ jobs:
 
     steps:
       - name: Download publish artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v5
         with:
           name: ncp-publish
           path: publish/
@@ -95,22 +100,27 @@ jobs:
           # 1) 기존 백업 (service 정합 경로 /opt/hitpan/*)
           ssh -i ~/.ssh/ncp_key $NCP_USER@$NCP_HOST "
             sudo cp -r /opt/hitpan/backoffice-api /opt/hitpan/backoffice-api-bak-$TS || true
+            sudo cp -r /opt/hitpan/backoffice-web /opt/hitpan/backoffice-web-bak-$TS || true
             sudo cp -r /opt/hitpan/landing /opt/hitpan/landing-bak-$TS || true
           "
           # 2) 새 빌드 전송
           rsync -avz --delete -e "ssh -i ~/.ssh/ncp_key" publish/backoffice-api/ $NCP_USER@$NCP_HOST:/tmp/backoffice-api/
+          rsync -avz --delete -e "ssh -i ~/.ssh/ncp_key" publish/backoffice-web/ $NCP_USER@$NCP_HOST:/tmp/backoffice-web/
           rsync -avz --delete -e "ssh -i ~/.ssh/ncp_key" publish/landing/ $NCP_USER@$NCP_HOST:/tmp/landing/
           # 3) 권한 봉합 + 위치 이동 (service WorkingDirectory 정합) + 재기동
-          # appsettings.Production.json 은 NCP 운영 시크릿(DB·SMTP) 박혀있어 절대 덮어쓰기 금지
-          # (--exclude 영역 박아서 보존, NCP에 박힌 영역 그대로 유지)
+          # appsettings.Production.json 은 NCP 운영 시크릿(DB·SMTP) 담겨있어 절대 덮어쓰기 금지
+          # (--exclude 영역 추가하여 보존, NCP에 저장된 영역 그대로 유지)
           ssh -i ~/.ssh/ncp_key $NCP_USER@$NCP_HOST "
             sudo rsync -a --delete --exclude='appsettings.Production.json' --exclude='appsettings.Development.json' /tmp/backoffice-api/ /opt/hitpan/backoffice-api/
+            sudo rsync -a --delete --exclude='appsettings.Production.json' --exclude='appsettings.Development.json' /tmp/backoffice-web/ /opt/hitpan/backoffice-web/
             sudo rsync -a --delete --exclude='appsettings.Production.json' --exclude='appsettings.Development.json' /tmp/landing/ /opt/hitpan/landing/
             sudo systemctl restart hitpan-backoffice-api
+            sudo systemctl restart hitpan-backoffice-web
             sudo systemctl restart hitpan-landing
           "
 
       - name: Healthcheck
+        id: healthcheck
         env:
           NCP_USER: ${{ secrets.NCP_USER }}
           NCP_HOST: ${{ secrets.NCP_HOST }}
@@ -139,7 +149,25 @@ jobs:
           echo "back biz-no GET → $LAND_API (405/400/415 정상)"
           echo "$LAND_API" | grep -E '^(405|400|401|415)$' || (echo "biz-no 라우트 미등재"; exit 1)
 
+      - name: Rollback on failure
+        if: failure() && steps.healthcheck.outcome == 'failure'
+        env:
+          NCP_USER: ${{ secrets.NCP_USER }}
+          NCP_HOST: ${{ secrets.NCP_HOST }}
+        run: |
+          echo "::warning::Healthcheck 실패 — 자동 롤백 진행"
+          LATEST_API_BAK=$(ssh -i ~/.ssh/ncp_key $NCP_USER@$NCP_HOST "ls -td /opt/hitpan/backoffice-api-bak-* 2>/dev/null | head -1")
+          LATEST_WEB_BAK=$(ssh -i ~/.ssh/ncp_key $NCP_USER@$NCP_HOST "ls -td /opt/hitpan/backoffice-web-bak-* 2>/dev/null | head -1")
+          LATEST_LAND_BAK=$(ssh -i ~/.ssh/ncp_key $NCP_USER@$NCP_HOST "ls -td /opt/hitpan/landing-bak-* 2>/dev/null | head -1")
+          ssh -i ~/.ssh/ncp_key $NCP_USER@$NCP_HOST "
+            [ -n \"$LATEST_API_BAK\" ] && sudo rsync -a --delete --exclude='appsettings.Production.json' --exclude='appsettings.Development.json' $LATEST_API_BAK/ /opt/hitpan/backoffice-api/
+            [ -n \"$LATEST_WEB_BAK\" ] && sudo rsync -a --delete --exclude='appsettings.Production.json' --exclude='appsettings.Development.json' $LATEST_WEB_BAK/ /opt/hitpan/backoffice-web/
+            [ -n \"$LATEST_LAND_BAK\" ] && sudo rsync -a --delete --exclude='appsettings.Production.json' --exclude='appsettings.Development.json' $LATEST_LAND_BAK/ /opt/hitpan/landing/
+            sudo systemctl restart hitpan-backoffice-api hitpan-backoffice-web hitpan-landing
+          "
+          echo "::error::자동 롤백 완료. 진범 진단 후 재배포 필요."
+
       - name: Notify on failure
         if: failure()
         run: |
-          echo "::error::NCP 배포 실패. SSH 진단 후 수동 롤백 검토."
+          echo "::error::NCP 배포 실패. SSH 진단 후 수동 점검 검토."
