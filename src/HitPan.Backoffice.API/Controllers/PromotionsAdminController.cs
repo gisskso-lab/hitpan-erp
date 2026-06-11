@@ -8,7 +8,7 @@ namespace HitPan.Backoffice.API.Controllers;
 // 프로모션·할인·이벤트 관리 (브라운킴 PM 2026-06-08)
 [ApiController]
 [Route("api/admin/promotions-v2")]
-[AllowAnonymous]
+[Authorize(Policy = "PlatformAdmin")]  // 본사 마스터 계정만 (2026-06-11 P0 봉합)
 public class PromotionsAdminV2Controller : ControllerBase
 {
     private readonly IConfiguration _config;
@@ -161,7 +161,7 @@ public class PromotionsAdminV2Controller : ControllerBase
 // 리워드 지급 (개별 고객사 크레딧·기간 연장·할인)
 [ApiController]
 [Route("api/admin/rewards")]
-[AllowAnonymous]
+[Authorize(Policy = "PlatformAdmin")]  // 본사 마스터 계정만 (2026-06-11 P0 봉합)
 public class RewardsAdminController : ControllerBase
 {
     private readonly IConfiguration _config;

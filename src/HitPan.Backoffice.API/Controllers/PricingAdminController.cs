@@ -6,10 +6,10 @@ using MySqlConnector;
 
 namespace HitPan.Backoffice.API.Controllers;
 
-// 가격 관리 API (브라운킴 PM 박제 2026-06-08, 사장님 결재)
+// 가격 관리 API (브라운킴 PM 저장 2026-06-08, 사장님 결재)
 //
 // 사장님 헌법:
-//   "가격은 박제해서 못 바꾸게 하지 말고 본사 마스터 계정이 쉽게 변경 할 수 있도록"
+//   "가격은 저장해서 못 바꾸게 하지 말고 본사 마스터 계정이 쉽게 변경 할 수 있도록"
 //   "가격상승이나 프로모션, 리워드지급, 행사, 할인 등등 본사 재량으로 가격설정"
 //   "구독결재 청구서도 변경된 가격으로 자동반영"
 //
@@ -27,7 +27,7 @@ namespace HitPan.Backoffice.API.Controllers;
 //   #25 — 쉽게·정확하게·안전하게
 [ApiController]
 [Route("api/admin/pricing")]
-[AllowAnonymous]  // 추후 BoPermission("pricing.manage") 적용
+[Authorize(Policy = "PlatformAdmin")]  // 본사 마스터 계정만 (2026-06-11 P0 봉합)
 public class PricingAdminController : ControllerBase
 {
     private readonly IConfiguration _config;

@@ -8,7 +8,7 @@ namespace HitPan.Backoffice.API;
 // 백오피스 API 진입점 (헌법 #35 정합 — 본사 클라우드, ERP API와 완전 분리)
 //
 // 헌법 정합:
-//   #18·#22 — 본사 DB만 박제 (고객 업무 데이터 0건)
+//   #18·#22 — 본사 DB만 저장 (고객 업무 데이터 0건)
 //   #35 — ERP JWT와 별도 키·발급자·청취자
 public class Program
 {
@@ -90,6 +90,13 @@ public class Program
         });
 
         var app = builder.Build();
+
+        // P0 보안 봉합 (2026-06-11): HTTPS 강제 + HSTS
+        if (!app.Environment.IsDevelopment())
+        {
+            app.UseHsts();
+        }
+        app.UseHttpsRedirection();
 
         app.UseCors();
         app.UseAuthentication();
