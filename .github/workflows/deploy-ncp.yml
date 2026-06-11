@@ -133,10 +133,11 @@ jobs:
           EXT_CODE=$(curl -fsS -o /dev/null -w "%{http_code}" https://back.hitpan.kr/api/backoffice/credentials/healthz) || true
           echo "API external (healthz) → $EXT_CODE"
           echo "$EXT_CODE" | grep -E '^(200|401|403)$' || (echo "nginx 경유 라우트 실패"; exit 1)
-          # landing biz-no 라우트 등재 점검 (POST 라우트, GET은 405 정상)
-          LAND_API=$(curl -fsS -o /dev/null -w "%{http_code}" https://landing.hitpan.kr/api/landing/biz-no/verify) || true
-          echo "landing biz-no GET → $LAND_API (405 정상)"
-          echo "$LAND_API" | grep -E '^(405|400|401)$' || (echo "landing biz-no 라우트 미등재"; exit 1)
+          # biz-no 라우트 등재 점검 — BizNoVerifyController는 Backoffice.API 영역(back.hitpan.kr)에 존재
+          # POST 라우트라 GET은 405/400/415 정상
+          LAND_API=$(curl -fsS -o /dev/null -w "%{http_code}" https://back.hitpan.kr/api/landing/biz-no/verify) || true
+          echo "back biz-no GET → $LAND_API (405/400/415 정상)"
+          echo "$LAND_API" | grep -E '^(405|400|401|415)$' || (echo "biz-no 라우트 미등재"; exit 1)
 
       - name: Notify on failure
         if: failure()
