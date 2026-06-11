@@ -5,7 +5,6 @@
 @inject IHttpClientFactory HttpFactory
 @inject ISnackbar Snackbar
 @inject IDialogService Dialog
-@inject NavigationManager Nav
 @using HitPan.Backoffice.Components.Common
 
 @*
@@ -103,8 +102,9 @@ else
                         }
                         else if (context.Item.Status == "pending")
                         {
-                            @* 사고 #6 임시: 승인 다이얼로그 Provider 사고로 버튼 임시 숨김 (2026-06-10 23:30) *@
-                            <MudText Typo="Typo.caption" Color="Color.Warning">승인 대기</MudText>
+                            <MudLink Href="/admin/signups" Underline="Underline.Hover">
+                                <MudText Typo="Typo.caption" Color="Color.Warning">승인 대기 — 가입 신청 화면으로 →</MudText>
+                            </MudLink>
                         }
                         else if (context.Item.Status == "suspended")
                         {
@@ -184,50 +184,6 @@ else
         }
     }
 
-    // 사고 #4/#6 봉합 (2026-06-10): pending tenant 승인 → SignupsAdmin /approve 호출
-    //   - 같은 company_name + 가장 가까운 submitted_at의 signup 단건 매칭
-    //   - 승인 후 시리얼 발급 + 메일 발송 + 도메인 자동 발급(웹훅)
-    private async Task ApproveAsync(TenantRow row)
-    {
-        var ok = await ConfirmDialog.ShowAsync(Dialog,
-            "가입 승인",
-            $"{row.CompanyName} ({row.TenantCode}) 가입을 승인하고 시리얼 키를 발급하시겠습니까?",
-            confirmText: "승인", cancelText: "취소", severity: Severity.Info);
-        if (!ok) return;
-
-        try
-        {
-            var http = HttpFactory.CreateClient("backoffice-authed");
-
-            // 1) 매칭되는 signup_id 찾기 (가입 신청 목록에서 company_name·이메일로 단건 매칭)
-            var signups = await http.GetFromJsonAsync<SignupListResponse>("api/admin/signups?status=submitted");
-            var signup = signups?.Data?.FirstOrDefault(s => s.CompanyName == row.CompanyName);
-            if (signup is null)
-            {
-                Snackbar.Add("승인 대상 가입 신청을 찾을 수 없습니다.", Severity.Error);
-                return;
-            }
-
-            // 2) 승인 호출
-            var res = await http.PostAsync($"api/admin/signups/{signup.SignupId}/approve", null);
-            var payload = await res.Content.ReadFromJsonAsync<ApproveResponse>();
-            if (res.IsSuccessStatusCode && payload?.Success == true)
-            {
-                var msg = $"승인 완료. 시리얼: {payload.LicenseKey}";
-                Snackbar.Add(msg, Severity.Success);
-                await LoadAsync();
-            }
-            else
-            {
-                Snackbar.Add(payload?.Message ?? $"승인 실패 ({(int)res.StatusCode})", Severity.Error);
-            }
-        }
-        catch (Exception ex)
-        {
-            Snackbar.Add($"승인 처리 오류: {ex.Message}", Severity.Error);
-        }
-    }
-
     private async Task ActivateAsync(TenantRow row)
     {
         var ok = await ConfirmDialog.ShowAsync(Dialog,
@@ -302,25 +258,4 @@ else
         public string? Message { get; set; }
     }
 
-    private class SignupListResponse
-    {
-        public bool Success { get; set; }
-        public List<SignupRow>? Data { get; set; }
-    }
-
-    private class SignupRow
-    {
-        public long SignupId { get; set; }
-        public string CompanyName { get; set; } = "";
-        public string? Email { get; set; }
-        public string Status { get; set; } = "";
-    }
-
-    private class ApproveResponse
-    {
-        public bool Success { get; set; }
-        public string? Message { get; set; }
-        public string? LicenseKey { get; set; }
-        public string? TenantId { get; set; }
-    }
 }

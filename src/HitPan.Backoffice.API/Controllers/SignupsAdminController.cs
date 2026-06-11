@@ -27,17 +27,20 @@ public class SignupsAdminController : ControllerBase
     private readonly IConfiguration _config;
     private readonly IWebhookOutboundService _webhook;
     private readonly IEmailSender _email;
+    private readonly ICloudflareDomainService _cfDomain;
     private readonly ILogger<SignupsAdminController> _logger;
 
     public SignupsAdminController(
         IConfiguration config,
         IWebhookOutboundService webhook,
         IEmailSender email,
+        ICloudflareDomainService cfDomain,
         ILogger<SignupsAdminController> logger)
     {
         _config = config;
         _webhook = webhook;
         _email = email;
+        _cfDomain = cfDomain;
         _logger = logger;
     }
 
@@ -144,6 +147,28 @@ public class SignupsAdminController : ControllerBase
             else
             {
                 _logger.LogWarning("[SignupsAdmin] approved 후 tenant 미발견 signupId={Id}", signupId);
+            }
+
+            // 4-2) Cloudflare DNS 자동 발급 (사고 #4 봉합 2026-06-11 - 헌법 #35 정합)
+            //      도메인 별칭으로 {alias}.hitpan.kr CNAME 박힘. 환경변수 미설정 시 silent skip
+            if (!string.IsNullOrEmpty(tenantId) && _cfDomain.IsConfigured)
+            {
+                try
+                {
+                    var tenantCode = await db.QueryFirstOrDefaultAsync<string>(
+                        "SELECT tenant_code FROM tenants WHERE tenant_id = @Tid LIMIT 1",
+                        new { Tid = tenantId }) ?? "";
+                    var aliasForDns = await db.QueryFirstOrDefaultAsync<string?>(
+                        "SELECT domain_alias FROM tenants WHERE tenant_id = @Tid LIMIT 1",
+                        new { Tid = tenantId });
+                    var dnsResult = await _cfDomain.IssueAsync(tenantId, tenantCode, aliasForDns, ct);
+                    _logger.LogInformation("[SignupsAdmin] cf_dns_issued tenant={Tid} domain={Dom} record={Rid}",
+                        tenantId, dnsResult.Domain, dnsResult.RecordId);
+                }
+                catch (Exception cex)
+                {
+                    _logger.LogWarning(cex, "[SignupsAdmin] CF DNS 발급 실패 tenant={Tid} (수동 발급 폴백)", tenantId);
+                }
             }
 
             // 5) 시리얼 키 이메일 발송 — 가입자가 입력한 이메일 주소로 즉시 전송 (사장님 결재 2026-06-08)

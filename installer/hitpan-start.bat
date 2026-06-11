@@ -1,5 +1,6 @@
 @echo off
 title HitPan ERP
+chcp 65001 >nul
 
 echo.
 echo  HitPan ERP Starting...
@@ -19,30 +20,39 @@ set DB_USER=hitpan
 set DB_PASSWORD=Hitpan2025!
 set DB_HOST=localhost
 set DB_PORT=3306
-set DOTNET_ENVIRONMENT=Development
-set ASPNETCORE_ENVIRONMENT=Development
+set DOTNET_ENVIRONMENT=Production
+set ASPNETCORE_ENVIRONMENT=Production
 
-:: Security keys (from config file or fallback)
+:: Security keys
 if exist "%BASE%hitpan-keys.conf" (
-    for /f "tokens=1,2 delims==" %%a in (%BASE%hitpan-keys.conf) do set %%a=%%b
+    for /f "usebackq tokens=1,2 delims==" %%a in ("%BASE%hitpan-keys.conf") do set %%a=%%b
 ) else (
     set JWT_SECRET=hitpan-jwt-secret-key-32chars-min!
     set ERP_ENCRYPTION_KEY=hitpan-aes-key-32bytes-exactly!!
 )
 
+:: Bootstrap (tenant + domain)
+set PRIMARY_DOMAIN=localhost:5234
+if exist "%BASE%bootstrap.conf" (
+    for /f "usebackq tokens=1,2 delims==" %%a in ("%BASE%bootstrap.conf") do set %%a=%%b
+)
+
+:: Open URL — domain if available, else localhost
+set OPEN_URL=http://localhost:5234
+if not "%PRIMARY_DOMAIN%"=="" if not "%PRIMARY_DOMAIN%"=="localhost:5234" set OPEN_URL=https://%PRIMARY_DOMAIN%
+
 :: Start server
-echo  Starting server on port 5234...
 echo.
 echo  ============================================
 echo   HitPan ERP
-echo   http://localhost:5234
-echo   Login: tenant@hitpan.kr / Admin1234!
+echo   Local: http://localhost:5234
+if not "%OPEN_URL%"=="http://localhost:5234" echo   Open : %OPEN_URL%
 echo   Close this window to stop the server.
 echo  ============================================
 echo.
 
 :: Open browser after 5 seconds
-start "" cmd /c "timeout /t 5 /nobreak >nul && start http://localhost:5234"
+start "" cmd /c "timeout /t 5 /nobreak >nul && start %OPEN_URL%"
 
 :: Run server (foreground - keeps window open)
 cd /d "%BASE%api"
