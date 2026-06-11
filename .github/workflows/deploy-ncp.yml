@@ -101,9 +101,11 @@ jobs:
           rsync -avz --delete -e "ssh -i ~/.ssh/ncp_key" publish/backoffice-api/ $NCP_USER@$NCP_HOST:/tmp/backoffice-api/
           rsync -avz --delete -e "ssh -i ~/.ssh/ncp_key" publish/landing/ $NCP_USER@$NCP_HOST:/tmp/landing/
           # 3) 권한 봉합 + 위치 이동 (service WorkingDirectory 정합) + 재기동
+          # appsettings.Production.json 은 NCP 운영 시크릿(DB·SMTP) 박혀있어 절대 덮어쓰기 금지
+          # (--exclude 영역 박아서 보존, NCP에 박힌 영역 그대로 유지)
           ssh -i ~/.ssh/ncp_key $NCP_USER@$NCP_HOST "
-            sudo rsync -a --delete /tmp/backoffice-api/ /opt/hitpan/backoffice-api/
-            sudo rsync -a --delete /tmp/landing/ /opt/hitpan/landing/
+            sudo rsync -a --delete --exclude='appsettings.Production.json' --exclude='appsettings.Development.json' /tmp/backoffice-api/ /opt/hitpan/backoffice-api/
+            sudo rsync -a --delete --exclude='appsettings.Production.json' --exclude='appsettings.Development.json' /tmp/landing/ /opt/hitpan/landing/
             sudo systemctl restart hitpan-backoffice-api
             sudo systemctl restart hitpan-landing
           "
