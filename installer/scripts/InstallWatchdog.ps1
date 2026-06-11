@@ -38,7 +38,7 @@ Write-Output "[OK] $ServiceName installed and started"
 $GuardianTask = 'HitPanWatchdogGuardian'
 $GuardianPs1  = Join-Path $InstallPath 'scripts\Guardian.ps1'
 
-# Guardian.ps1 박제
+# Guardian.ps1 작성
 @'
 $svc = Get-Service -Name HitPanWatchdog -ErrorAction SilentlyContinue
 if ($null -eq $svc -or $svc.Status -ne 'Running') {

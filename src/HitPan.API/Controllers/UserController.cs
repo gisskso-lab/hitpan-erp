@@ -237,7 +237,7 @@ public sealed class UserController : ControllerBase
         return Accepted(new
         {
             success = true,
-            message = "자식 계정 발급 요청 박제 완료 — W2 매니저 가도 (UserPermissionService 확장 영역)",
+            message = "자식 계정 발급 요청 저장 완료 — W2 매니저 가도 (UserPermissionService 확장 영역)",
             tenantId,
             parentUserId,
             email = request.Email,
@@ -255,7 +255,7 @@ public sealed class UserController : ControllerBase
         return Accepted(new
         {
             success = true,
-            message = "자식 계정 상태 변경 요청 박제 완료 — W2 매니저 가도",
+            message = "자식 계정 상태 변경 요청 저장 완료 — W2 매니저 가도",
             userId = id,
             newStatus = request.Status
         });

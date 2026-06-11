@@ -18,9 +18,9 @@ jobs:
 
     steps:
       - name: Checkout (full history)
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
-          fetch-depth: 0  # 전체 히스토리 — 과거 커밋에 박힌 시크릿도 탐지
+          fetch-depth: 0  # 전체 히스토리 — 과거 커밋에 포함된 시크릿도 탐지
 
       - name: TruffleHog OSS scan
         uses: trufflesecurity/trufflehog@main

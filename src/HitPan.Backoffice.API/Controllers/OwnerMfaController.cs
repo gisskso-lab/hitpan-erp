@@ -10,11 +10,11 @@ namespace HitPan.Backoffice.API.Controllers;
 //
 // 흐름:
 //   1) POST /enroll-start — 시크릿 생성 + otpauth URI 반환 (QR 코드용)
-//   2) POST /enroll-confirm — 코드 6자리 검증 + AES-256 박제 + 백업 코드 10개 반환
+//   2) POST /enroll-confirm — 코드 6자리 검증 + AES-256 저장 + 백업 코드 10개 반환
 //   3) POST /verify — 로그인 후 2차 인증
 //
 // 헌법 정합:
-//   #15·#18·#22 — 시크릿·백업코드는 평문 응답 1회만(등록 시), DB는 AES·BCrypt 박제
+//   #15·#18·#22 — 시크릿·백업코드는 평문 응답 1회만(등록 시), DB는 AES·BCrypt 저장
 [ApiController]
 [Route("api/backoffice/owner/mfa")]
 [Authorize]

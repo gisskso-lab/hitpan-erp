@@ -12,7 +12,7 @@
     <MudText Typo="Typo.h5" Class="mb-1">양식정보설정</MudText>
     <MudText Typo="Typo.body2" Class="mud-text-secondary">
         견적·수주·거래명세서·발주·매입·반품 6대 양식의 인쇄·이메일·PDF·엑셀 양식을 설정합니다.
-        <strong>순백지(plain)</strong>는 일반 A4에 테두리·로고 포함 인쇄, <strong>양식용지(preprint)</strong>는 시판 양식용지에 필드값만 좌표 박제 인쇄합니다.
+        <strong>순백지(plain)</strong>는 일반 A4에 테두리·로고 포함 인쇄, <strong>양식용지(preprint)</strong>는 시판 양식용지에 필드값만 좌표대로 인쇄합니다.
     </MudText>
 </MudPaper>
 
@@ -126,7 +126,7 @@ else
             var resp = await Http.PostAsync("api/settings/form-templates/seed-defaults", null);
             if (resp.IsSuccessStatusCode)
             {
-                Snackbar.Add("6대 양식 기본 템플릿이 박제되었습니다.", Severity.Success);
+                Snackbar.Add("6대 양식 기본 템플릿이 등록되었습니다.", Severity.Success);
                 await LoadAsync();
             }
             else

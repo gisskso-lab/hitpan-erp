@@ -163,8 +163,8 @@ public class WebhookInboundController : ControllerBase
         return CryptographicOperations.FixedTimeEquals(expectedBytes, actualBytes);
     }
 
-    // 박힘 박제 2026-06-08 (브라운킴 PM) — InfrastructureExtensions 박힌 영역 정합.
-    // ERP API 박힌 DB 박힘 영역 = 환경변수(.env) DB_HOST/DB_PORT/DB_NAME/DB_USER/DB_PASSWORD 박힘.
+    // 저장 완료 2026-06-08 (브라운킴 PM) — InfrastructureExtensions 저장된 영역 정합.
+    // ERP API 저장된 DB 저장 영역 = 환경변수(.env) DB_HOST/DB_PORT/DB_NAME/DB_USER/DB_PASSWORD 저장.
     private static string BuildConnectionString()
     {
         var host = Environment.GetEnvironmentVariable("DB_HOST") ?? "localhost";
@@ -172,7 +172,7 @@ public class WebhookInboundController : ControllerBase
         var db   = Environment.GetEnvironmentVariable("DB_NAME") ?? "hitpan_erp";
         var user = Environment.GetEnvironmentVariable("DB_USER") ?? "hitpan";
         var pwd  = Environment.GetEnvironmentVariable("DB_PASSWORD")
-                   ?? throw new InvalidOperationException("DB_PASSWORD 환경변수 박지 않음 (.env 박힘 확인 박을 영역)");
+                   ?? throw new InvalidOperationException("DB_PASSWORD 환경변수 저장하지 않음 (.env 저장 확인 저장할 영역)");
         return $"Server={host};Port={port};Database={db};Uid={user};Pwd={pwd};CharSet=utf8mb4;AllowUserVariables=true";
     }
 

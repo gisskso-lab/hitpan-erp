@@ -4,7 +4,7 @@ using Microsoft.AspNetCore.Mvc.Filters;
 
 namespace HitPan.Backoffice.API.Filters;
 
-// [BoPermission("reseller-applications.approve")] — DB 박제 권한 검사 (사장님 결재 2026-06-04)
+// [BoPermission("reseller-applications.approve")] — DB 저장 권한 검사 (사장님 결재 2026-06-04)
 //
 // 동작:
 //   1) User.IsAuthenticated 확인 (JWT 통과 필수)
@@ -13,7 +13,7 @@ namespace HitPan.Backoffice.API.Filters;
 //   4) 거부 시 403
 //
 // 헌법 정합:
-//   #11 — 사장님이 /owner/permissions 에서 박제한 정책에 따라 검사
+//   #11 — 사장님이 /owner/permissions 에서 저장한 정책에 따라 검사
 //   #15 — 빈 catch 금지 (서비스 측 try/catch)
 [AttributeUsage(AttributeTargets.Method | AttributeTargets.Class, AllowMultiple = false)]
 public class BoPermissionAttribute : Attribute, IAsyncAuthorizationFilter

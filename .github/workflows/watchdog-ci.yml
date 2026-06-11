@@ -28,10 +28,10 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Setup .NET 8
-        uses: actions/setup-dotnet@v4
+        uses: actions/setup-dotnet@v5
         with:
           dotnet-version: '8.0.x'
 
@@ -67,7 +67,7 @@ jobs:
 
       - name: Upload publish artifact
         if: github.event_name == 'pull_request'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: hitpan-watchdog-${{ github.sha }}
           path: ./publish-watchdog/HitPan.Watchdog.exe
@@ -79,20 +79,20 @@ jobs:
     timeout-minutes: 5
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Validate ISS file syntax
         run: |
           if [ ! -f installer/HitPanSetup.iss ]; then
             echo "ISS file missing"; exit 1
           fi
-          # 필수 섹션 박제
+          # 필수 섹션 확인
           for section in '\[Setup\]' '\[Files\]' '\[Run\]' '\[Code\]'; do
             if ! grep -qE "$section" installer/HitPanSetup.iss; then
               echo "Missing section: $section"; exit 1
             fi
           done
-          # 필수 PowerShell 스크립트 5종 박제
+          # 필수 PowerShell 스크립트 5종 확인
           for ps in AntivirusExceptions FirewallRules InstallCloudflared InstallWatchdog SelfCheck; do
             if [ ! -f "installer/scripts/$ps.ps1" ]; then
               echo "Missing script: installer/scripts/$ps.ps1"; exit 1
@@ -106,7 +106,7 @@ jobs:
     timeout-minutes: 5
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Parse PowerShell scripts (Pester-free syntax check)
         run: |

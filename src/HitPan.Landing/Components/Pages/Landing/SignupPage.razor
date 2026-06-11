@@ -198,9 +198,9 @@
     private OpenedState _opened = new();
     private bool _submitting;
     private string? _error;
-    private string _planLabel = "스탠다드 · 베타1 기간 무료";
+    private string _planLabel = "프로 · 베타1 기간 무료";
     private bool _bizUploaded;
-    // _demoMode 필드 제거 — DEMO 영역 완전 박지 않음 (사장님 결재 2026-06-08)
+    // _demoMode 필드 제거 — DEMO 영역 완전 저장하지 않음 (사장님 결재 2026-06-08)
 
     // 사업자번호 검증 (헌법 #35 — 백오피스 API /api/landing/biz-no/verify)
     private bool _bizVerifying;
@@ -322,7 +322,7 @@
     }
 
     // 사장님 결재 2026-06-08 — DEMO 모드 영역 완전 제거.
-    // 고객 본인 입력 → 백오피스 승인 → 시리얼 이메일 즉시 발송 흐름만 박힘.
+    // 고객 본인 입력 → 백오피스 승인 → 시리얼 이메일 즉시 발송 흐름만 저장.
     protected override void OnInitialized()
     {
         _form = new SignupForm();
@@ -405,8 +405,10 @@
         _planLabel = Plan switch
         {
             "basic" => "베이직 · 베타1 기간 무료",
-            "premium" => "프리미엄 · 베타1 기간 무료",
-            _ => "스탠다드 · 베타1 기간 무료"
+            "enterprise" => "엔터프라이즈 · 베타1 기간 무료",
+            "premium" => "엔터프라이즈 · 베타1 기간 무료",
+            "standard" => "프로 · 베타1 기간 무료",
+            _ => "프로 · 베타1 기간 무료"
         };
     }
 

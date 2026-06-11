@@ -8,7 +8,7 @@ namespace HitPan.Backoffice.API.Controllers;
 
 // 협력업체(resellers) 관리 API — 본사 어드민 (사장님 결재 2026-06-04, 헌법 #35)
 //
-// 권한: [BoPermission] DB 박제
+// 권한: [BoPermission] DB 저장
 //   - resellers.list
 //   - resellers.detail
 //

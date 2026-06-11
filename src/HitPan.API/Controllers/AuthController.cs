@@ -104,7 +104,7 @@ public class AuthController : ControllerBase
                 }
             }
 
-            // 헌법 #24: 약관 v2.0.0 동의 여부 박제 (미동의 시 /terms 강제 이동)
+            // 헌법 #24: 약관 v2.0.0 동의 여부 저장 (미동의 시 /terms 강제 이동)
             if (!string.IsNullOrEmpty(response.TenantId))
             {
                 try

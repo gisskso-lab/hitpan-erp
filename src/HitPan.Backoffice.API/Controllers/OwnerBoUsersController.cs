@@ -18,7 +18,7 @@ namespace HitPan.Backoffice.API.Controllers;
 //
 // 헌법 정합:
 //   #15 — 빈 catch 0
-//   #18·#22 — 비밀번호 BCrypt 박제, 평문 0건, MFA 시크릿 0건
+//   #18·#22 — 비밀번호 BCrypt 저장, 평문 0건, MFA 시크릿 0건
 //   #25 — 안전하게 (4-eyes + 감사로그 + MFA)
 [ApiController]
 [Route("api/backoffice/owner/bo-users")]
@@ -88,7 +88,7 @@ public class OwnerBoUsersController : ControllerBase
             if (dup > 0)
                 return BadRequest(new { success = false, message = "이미 사용 중인 이메일입니다." });
 
-            // 비밀번호는 즉시 BCrypt 박제 (평문 결재 큐 박제 금지, 헌법 #18)
+            // 비밀번호는 즉시 BCrypt 저장 (평문 결재 큐 저장 금지, 헌법 #18)
             var hash = BCrypt.Net.BCrypt.HashPassword(req.Password);
             var payload = JsonSerializer.Serialize(new
             {
@@ -113,7 +113,7 @@ public class OwnerBoUsersController : ControllerBase
                 "bo_user.request_create", "bo_user", null,
                 new { req.Email, req.Role }, GetIp(), GetUa(), ct);
 
-            return Ok(new { success = true, approvalId, message = "4-eyes 승인 큐에 박았습니다. 다른 Owner 1명 결재 후 실행됩니다." });
+            return Ok(new { success = true, approvalId, message = "4-eyes 승인 큐에 추가했습니다. 다른 Owner 1명 결재 후 실행됩니다." });
         }
         catch (Exception ex)
         {
@@ -153,7 +153,7 @@ public class OwnerBoUsersController : ControllerBase
                 "bo_user.request_delete", "bo_user", id,
                 new { targetEmail = target }, GetIp(), GetUa(), ct);
 
-            return Ok(new { success = true, message = "삭제 요청을 4-eyes 큐에 박았습니다." });
+            return Ok(new { success = true, message = "삭제 요청을 4-eyes 큐에 추가했습니다." });
         }
         catch (Exception ex)
         {

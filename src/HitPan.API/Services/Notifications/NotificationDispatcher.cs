@@ -26,7 +26,7 @@ public sealed record NotificationDispatchRequest(
     string Phone,
     string SerialKey,         // 라이선스 시리얼 (이메일=전체, SMS=뒤 6자리만)
     string ActivationToken,   // DKIM 30분 만료 토큰
-    string TempPassword,      // SMS 전용 (이메일 본문 박제 금지)
+    string TempPassword,      // SMS 전용 (이메일 본문 저장 금지)
     string ActivationUrl);    // 이메일 본문에만
 
 public sealed record NotificationDispatchResult(
@@ -55,7 +55,7 @@ public sealed class NotificationDispatcher : INotificationDispatcher
 
     public async Task<NotificationDispatchResult> SendActivationAsync(NotificationDispatchRequest req, CancellationToken ct = default)
     {
-        // 1) 이메일 채널 (활성화 링크 전용, 평문 임시비번 박제 절대 금지)
+        // 1) 이메일 채널 (활성화 링크 전용, 평문 임시비번 저장 절대 금지)
         var emailSubject = "[히트판] 라이선스 활성화 안내";
         var emailBody = BuildEmailBody(req.SerialKey, req.ActivationUrl);
         var emailResult = await SendWithRetryAsync(
@@ -131,7 +131,7 @@ public sealed class NotificationDispatcher : INotificationDispatcher
 
     private static string BuildEmailBody(string serial, string activationUrl)
     {
-        // 평문 임시비번 박제 절대 금지 — 활성화 링크만
+        // 평문 임시비번 저장 절대 금지 — 활성화 링크만
         return $"<p>안녕하세요, 히트판입니다.</p>" +
                $"<p>라이선스 시리얼: <b>{serial}</b></p>" +
                $"<p>아래 링크를 30분 안에 클릭하여 활성화해 주세요.</p>" +

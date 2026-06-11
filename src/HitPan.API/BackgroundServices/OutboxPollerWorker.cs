@@ -10,7 +10,7 @@ namespace HitPan.API.BackgroundServices;
 ///   - 5분 주기 (Outbox:PollIntervalMinutes, 기본 5) 로 백오피스 messaging_outbox SELECT.
 ///   - processed_at IS NULL ORDER BY occurred_at LIMIT 100 (idx_outbox_unprocessed 활용).
 ///   - 처리 성공 시 processed_at = NOW(6) 갱신 (INSERT ONLY 원장 외 메타 영역 갱신 — 헌법 #3 정합).
-///   - 처리 실패 시 retry_count++, last_error 박제 (헌법 #15 빈 catch 금지).
+///   - 처리 실패 시 retry_count++, last_error 저장 (헌법 #15 빈 catch 금지).
 ///
 /// 절대 원칙
 ///   - 단방향: 백오피스(클라우드) → 본사 ERP(로컬) Push 만 받는다. 본사 ERP → 백오피스 INSERT 금지.
@@ -115,7 +115,7 @@ LIMIT 100;";
     {
         try
         {
-            // 본사 ERP 측 핸들러 (현재는 로그 박제만, 실제 거래처 자동 등록은 본사 회계팀 수동 — WS-20260601-20).
+            // 본사 ERP 측 핸들러 (현재는 로그 저장만, 실제 거래처 자동 등록은 본사 회계팀 수동 — WS-20260601-20).
             // 향후 핸들러 디스패처 도입 시 event_type 별 Strategy 패턴 확장.
             _logger.LogInformation(
                 "Outbox 수신: outbox_id={OutboxId} event={EventType} serial={Serial} occurred_at={OccurredAt}",
@@ -133,7 +133,7 @@ WHERE outbox_id = @OutboxId AND processed_at IS NULL;";
         }
         catch (Exception ex)
         {
-            // 헌법 #15: 빈 catch 금지. retry_count++ + last_error 박제.
+            // 헌법 #15: 빈 catch 금지. retry_count++ + last_error 저장.
             _logger.LogWarning(ex,
                 "Outbox 처리 실패: outbox_id={OutboxId} event={EventType} retry={Retry}",
                 row.outbox_id, row.event_type, row.retry_count);
@@ -154,7 +154,7 @@ WHERE outbox_id = @OutboxId AND processed_at IS NULL;";
             catch (Exception innerEx)
             {
                 _logger.LogError(innerEx,
-                    "Outbox 실패 박제도 실패: outbox_id={OutboxId}", row.outbox_id);
+                    "Outbox 실패 저장도 실패: outbox_id={OutboxId}", row.outbox_id);
             }
         }
     }

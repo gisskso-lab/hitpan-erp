@@ -5,7 +5,7 @@ using Microsoft.AspNetCore.Http;
 namespace HitPan.API.Repositories;
 
 /// <summary>
-/// WS-20260601-16 (2026-06-01): 백오피스/랜딩 Repository 베이스 (RLS 강제 박제).
+/// WS-20260601-16 (2026-06-01): 백오피스/랜딩 Repository 베이스 (RLS 강제 저장).
 ///
 /// 8대 명제 마스터 설계 §RLS 강제:
 ///   - 모든 백오피스/랜딩 SELECT는 ApplyRls()를 거쳐야 한다.
@@ -81,7 +81,7 @@ public abstract class BackofficeRepositoryBase
     }
 
     /// <summary>
-    /// Dapper용 오버로드 — DynamicParameters에 __rls_serial을 자동 박제한다.
+    /// Dapper용 오버로드 — DynamicParameters에 __rls_serial을 자동 저장한다.
     /// </summary>
     protected BackofficeAuthContext ApplyRls(Dapper.DynamicParameters parameters, out string resellerFilterSql)
     {

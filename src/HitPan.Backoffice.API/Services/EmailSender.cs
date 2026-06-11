@@ -6,8 +6,8 @@ namespace HitPan.Backoffice.API.Services;
 // SMTP 메일 송부 (헌법 #35 정합, 사장님 결재 2026-06-04)
 //
 // 자격증명 결재 전 행동:
-//   - Smtp:Host 또는 Smtp:User 미박제 시 → 로그만 출력 (전송은 NOOP)
-//   - 사장님 SMTP 결재 후 → 환경변수 박제 → 실 전송
+//   - Smtp:Host 또는 Smtp:User 미저장 시 → 로그만 출력 (전송은 NOOP)
+//   - 사장님 SMTP 결재 후 → 환경변수 저장 → 실 전송
 //
 // 헌법 정합:
 //   #15 — 빈 catch 금지
@@ -57,7 +57,7 @@ public class EmailSender : IEmailSender
 
         if (string.IsNullOrWhiteSpace(host) || string.IsNullOrWhiteSpace(user))
         {
-            _logger.LogInformation("[EmailSender] SMTP 미박제 (자격증명 결재 대기). to={To} subject={Subject} attached={Att}",
+            _logger.LogInformation("[EmailSender] SMTP 미저장 (자격증명 결재 대기). to={To} subject={Subject} attached={Att}",
                 toEmail, subject, attachment is not null ? attachmentFileName : "-");
             return false;
         }

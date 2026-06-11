@@ -72,7 +72,7 @@ public partial class UserInfoPage : ComponentBase, IDisposable
                 _lastVerifiedLicenseKey = _serialKey.Trim();  // 기기 등록 시 재사용 (메모리만)
                 _serialKey = "";
 
-                // 사장님 결재 + 헌법 #35 정합 — 인증된 사업자등록증 정보 → 사용자정보설정 자동 박힘
+                // 사장님 결재 + 헌법 #35 정합 — 인증된 사업자등록증 정보 → 사용자정보설정 자동 저장
                 if (result.CompanyInfo is not null)
                 {
                     if (!string.IsNullOrWhiteSpace(result.CompanyInfo.CompanyName))

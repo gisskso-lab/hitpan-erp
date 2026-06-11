@@ -80,7 +80,7 @@ public class TossWebhookService : ITossWebhookService
 
         try
         {
-            // order_id 기준으로 invoice 찾기 (랜딩 가입 시 order_id = invoice_id 정합 박제 예정)
+            // order_id 기준으로 invoice 찾기 (랜딩 가입 시 order_id = invoice_id 정합 저장 예정)
             var invoiceId = await db.ExecuteScalarAsync<string?>(@"
                 SELECT CAST(invoice_id AS CHAR) FROM billing_invoices
                 WHERE invoice_no = @OrderId OR invoice_id = @OrderId

@@ -14,13 +14,13 @@ namespace HitPan.Backoffice.API.Controllers;
 //   1) PaymentPage → 토스 SDK 결제창 → 성공 시 paymentKey/orderId/amount 응답
 //   2) 클라이언트 → POST /api/payments/toss/confirm (이 컨트롤러)
 //   3) 서버 → 토스 Confirm API 호출 (Secret Key, Basic Auth)
-//   4) 정상 응답 → tenant_payments 박제 + landing_signups.status=paid + tenants.status=active
+//   4) 정상 응답 → tenant_payments 저장 + landing_signups.status=paid + tenants.status=active
 //
 // 헌법 정합:
-//   #22 — 카드번호·CVC 0건 박제, paymentKey·orderId·amount·method만 박제
+//   #22 — 카드번호·CVC 0건 저장, paymentKey·orderId·amount·method만 저장
 //   #29 — Secret Key는 환경변수만, 응답·로그에 절대 노출 0건
-//   #15 — 빈 catch 금지, ILogger 박제
-//   #19 — 자격증명 미박제 시 503 명시 응답 (silent fail 금지)
+//   #15 — 빈 catch 금지, ILogger 저장
+//   #19 — 자격증명 미저장 시 503 명시 응답 (silent fail 금지)
 [ApiController]
 [Route("api/payments/toss")]
 public class TossPaymentsController : ControllerBase
@@ -54,7 +54,7 @@ public class TossPaymentsController : ControllerBase
             clientKey = configured ? clientKey : null,
             message = configured
                 ? null
-                : "결제 시스템 점검 중입니다. 자격증명 박제 후 이용 가능합니다."
+                : "결제 시스템 점검 중입니다. 자격증명 저장 후 이용 가능합니다."
         });
     }
 
@@ -73,11 +73,11 @@ public class TossPaymentsController : ControllerBase
         var secretKey = ResolveEnv("HITPAN_TOSS_SECRET_KEY", "Toss:SecretKey");
         if (string.IsNullOrWhiteSpace(secretKey))
         {
-            _logger.LogWarning("[TossPayments] HITPAN_TOSS_SECRET_KEY 미박제 — 결제 승인 불가");
+            _logger.LogWarning("[TossPayments] HITPAN_TOSS_SECRET_KEY 미저장 — 결제 승인 불가");
             return StatusCode(503, new
             {
                 success = false,
-                message = "결제 시스템 점검 중입니다. 자격증명이 박제되지 않았습니다."
+                message = "결제 시스템 점검 중입니다. 자격증명이 저장되지 않았습니다."
             });
         }
 
@@ -121,7 +121,7 @@ public class TossPaymentsController : ControllerBase
             var method = root.TryGetProperty("method", out var m) ? m.GetString() : null;
             var approvedAt = root.TryGetProperty("approvedAt", out var a) ? a.GetString() : null;
 
-            // 메타만 박제 — 카드번호·CVC 등 민감정보 0건 (헌법 #22)
+            // 메타만 저장 — 카드번호·CVC 등 민감정보 0건 (헌법 #22)
             await using var db = await OpenAsync(ct);
             await db.ExecuteAsync(@"
                 INSERT INTO tenant_payments

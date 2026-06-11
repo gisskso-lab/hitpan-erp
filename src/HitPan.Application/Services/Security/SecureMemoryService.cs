@@ -7,7 +7,7 @@ namespace HitPan.Application.Services.Security;
 /// <summary>
 /// 메모리 보호 서비스 — 작B v3.0 W2 본질 보강 (Red Team 시나리오 A 차단)
 ///
-/// Red Team 25년 박제:
+/// Red Team 25년 저장:
 /// "ERP가 발급 버튼을 누르는 그 순간을 노린다. 원본 인증서가 메모리에 올라가는 시점이 반드시 존재.
 ///  ProcDump -ma hitpan.exe 한 줄이면 평문 PFX가 dump 파일에 나뒹군다."
 ///

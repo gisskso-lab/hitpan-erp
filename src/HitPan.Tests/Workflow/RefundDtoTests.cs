@@ -5,7 +5,7 @@ namespace HitPan.Tests.Workflow;
 // 환불 DTO 검증 (사장님 결재 2026-06-01)
 public class RefundDtoTests
 {
-    [Fact(DisplayName = "RF-01: AdminRefundResult 성공 박제")]
+    [Fact(DisplayName = "RF-01: AdminRefundResult 성공 저장")]
     public void AdminRefundResult_should_carry_success()
     {
         var ok = new AdminRefundResult(true, "환불 완료", 59000m);
@@ -13,7 +13,7 @@ public class RefundDtoTests
         Assert.Equal(59000m, ok.RefundedAmount);
     }
 
-    [Fact(DisplayName = "RF-02: AdminRefundResult 실패 박제")]
+    [Fact(DisplayName = "RF-02: AdminRefundResult 실패 저장")]
     public void AdminRefundResult_should_carry_failure()
     {
         var fail = new AdminRefundResult(false, "이미 환불됨", null);

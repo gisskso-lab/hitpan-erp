@@ -108,7 +108,7 @@
         _loading = true;
         try
         {
-            // WS-13 CS API 결합 가도. 현 시점 빈 목록 박제 (평문 0 원칙).
+            // WS-13 CS API 결합 가도. 현 시점 빈 목록 저장 (평문 0 원칙).
             await Task.Yield();
             _rows = new List<CsTicketRow>();
         }

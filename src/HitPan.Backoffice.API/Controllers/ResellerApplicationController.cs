@@ -89,7 +89,7 @@ public class ResellerApplicationController : ControllerBase
                     req.Phone,
                     BizNo = bizNoNormalized,
                     Region = req.SalesRegion,
-                    SalesChannel = req.ContactTitle, // 담당자 직책을 sales_channel에 박제
+                    SalesChannel = req.ContactTitle, // 담당자 직책을 sales_channel에 저장
                     ExpectedCustomers = req.SalesYears,
                     Motivation = req.Reason
                 });

@@ -57,7 +57,7 @@ public sealed class PdfRenderService : IPdfRenderService
                 page.DefaultTextStyle(t => t.FontFamily("Malgun Gothic").FontSize(10));
                 page.PageColor(Colors.White);
 
-                // preprint(양식용지): 헤더·테두리 미렌더, 필드값만 박제
+                // preprint(양식용지): 헤더·테두리 미렌더, 필드값만 저장
                 if (!isPreprint && showHeader)
                 {
                     page.Header().Element(e => ComposeHeader(e, data, company));
@@ -120,7 +120,7 @@ public sealed class PdfRenderService : IPdfRenderService
 
     private static void ComposeBody(IContainer e, DocumentSnapshot d, bool isPreprint = false, bool showBorder = true)
     {
-        // preprint(양식용지): 거래처·합계 박스 테두리·헤더 미렌더, 필드값만 좌표 박제
+        // preprint(양식용지): 거래처·합계 박스 테두리·헤더 미렌더, 필드값만 좌표 저장
         if (isPreprint)
         {
             ComposeBodyPreprint(e, d);
@@ -448,8 +448,8 @@ public sealed class PdfRenderService : IPdfRenderService
         public string? Phone { get; set; }
     }
 
-    // 작지② paper_mode preprint 렌더링 — 시판 양식용지에 필드값만 좌표 박제
-    // 테두리·헤더·푸터·합계 박스 모두 미렌더. 라인 데이터만 표 형태로 박제.
+    // 작지② paper_mode preprint 렌더링 — 시판 양식용지에 필드값만 좌표 저장
+    // 테두리·헤더·푸터·합계 박스 모두 미렌더. 라인 데이터만 표 형태로 저장.
     private static void ComposeBodyPreprint(IContainer e, DocumentSnapshot d)
     {
         e.Column(col =>
@@ -461,7 +461,7 @@ public sealed class PdfRenderService : IPdfRenderService
                 r.RelativeItem().AlignRight().Text(d.DocDate.ToString("yyyy-MM-dd")).FontSize(10);
             });
 
-            // 라인 — 양식용지 본문 영역 (테두리 0, 좌표 박제)
+            // 라인 — 양식용지 본문 영역 (테두리 0, 좌표 저장)
             col.Item().PaddingTop(40).Table(tbl =>
             {
                 tbl.ColumnsDefinition(c =>

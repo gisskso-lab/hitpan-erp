@@ -9,7 +9,7 @@ namespace HitPan.Backoffice.API.Controllers;
 
 // 고객사 관리 API — 본사 어드민 (사장님 결재 2026-06-04, 헌법 #35)
 //
-// 권한: [BoPermission] DB 박제 정책 검사
+// 권한: [BoPermission] DB 저장 정책 검사
 //   - tenants.list
 //   - tenants.detail
 //   - tenants.suspend (owner/platform_owner 기본)
@@ -213,7 +213,7 @@ public class TenantsAdminController : ControllerBase
         {
             await using var db = await OpenAsync(ct);
 
-            // 도메인 별칭 영역 박힌 영역 먼저 확인
+            // 도메인 별칭 영역 저장된 영역 먼저 확인
             var domainAlias = await db.QueryFirstOrDefaultAsync<string?>(
                 "SELECT domain_alias FROM tenants WHERE tenant_id = @Id",
                 new { Id = id });
@@ -262,9 +262,9 @@ public class TenantsAdminController : ControllerBase
         }
     }
 
-    // 봉합 v1.2.5 — 좀비 DNS 영역 청소 (DB tenants 영역에 0건인데 Cloudflare 영역에 박힌 영역)
-    //  사장님 의중: 좀비 영역 박혀있으면 신규 가입 영역 박을 때 중복 사고
-    //  운영: 백오피스 영역에서 사장님이 박는 영역
+    // 봉합 v1.2.5 — 좀비 DNS 영역 청소 (DB tenants 영역에 0건인데 Cloudflare 영역에 저장된 영역)
+    //  사장님 의중: 좀비 영역 있으면 신규 가입 영역 저장할 때 중복 사고
+    //  운영: 백오피스 영역에서 사장님이 저장하는 영역
     [HttpPost("cleanup-orphan-dns")]
     [BoPermission("tenants.suspend")]
     public async Task<IActionResult> CleanupOrphanDns(CancellationToken ct)
@@ -285,7 +285,7 @@ public class TenantsAdminController : ControllerBase
                 "demo", "back", "landing", "updates", "www", "api-demo", "api", "api-back"
             };
 
-            // Cloudflare 영역 전체 DNS 영역 박힌 영역 가져옴
+            // Cloudflare 영역 전체 DNS 영역 저장된 영역 가져옴
             var http = HttpContext.RequestServices.GetRequiredService<IHttpClientFactory>().CreateClient();
             var token = Environment.GetEnvironmentVariable("CLOUDFLARE_API_TOKEN") ?? "";
             var zoneId = Environment.GetEnvironmentVariable("CLOUDFLARE_ZONE_ID") ?? "";
@@ -314,7 +314,7 @@ public class TenantsAdminController : ControllerBase
 
             _logger.LogInformation("[TenantsAdmin] orphan DNS cleanup orphans={Orph} deleted={Del}",
                 string.Join(",", orphans), string.Join(",", deleted));
-            return Ok(new { success = true, orphans, deleted, message = $"좀비 영역 {orphans.Count}건 박힘, {deleted.Count}건 정리 정합" });
+            return Ok(new { success = true, orphans, deleted, message = $"좀비 영역 {orphans.Count}건 저장, {deleted.Count}건 정리 정합" });
         }
         catch (Exception ex)
         {

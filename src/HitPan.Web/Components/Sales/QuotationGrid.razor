@@ -33,7 +33,7 @@
                 Margin="Margin.Dense" Dense="true" Placeholder="품명 검색" Disabled="@IsReadOnly" />
         </MudTd>
         <MudTd>
-            @* 작지① 규격 콤보박스 (사장님 작업지시 2026-05-31) — 품명 ItemId 박제 후 옵션 자동 로드 + 직접 입력 허용 *@
+            @* 작지① 규격 콤보박스 (사장님 작업지시 2026-05-31) — 품명 ItemId 저장 후 옵션 자동 로드 + 직접 입력 허용 *@
             <ItemSpecAutocomplete ItemId="@context.ItemId" Value="@context.Spec"
                                    ValueChanged="@(v => UpdateSpecAsync(context, v))"
                                    Disabled="@IsReadOnly" />

@@ -56,7 +56,7 @@ public class DeviceRegistrationController : ControllerBase
             var pepper = _config["License:Pepper"] ?? throw new InvalidOperationException("License:Pepper 미설정");
             var licHash = ComputeHmacSha256(req.LicenseKey.Trim().ToUpperInvariant().Replace(" ", ""), pepper);
 
-            // fingerprint 해시 정규화 — 평문 길이 박힘 사고 차단 + 헌법 #22 정합
+            // fingerprint 해시 정규화 — 평문 길이 저장 사고 차단 + 헌법 #22 정합
             var fingerprintHash = ComputeHmacSha256(req.Fingerprint, pepper);
 
             var tenant = await db.QueryFirstOrDefaultAsync<TenantRow>(@"

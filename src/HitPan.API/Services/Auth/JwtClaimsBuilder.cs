@@ -3,7 +3,7 @@ using System.Security.Claims;
 namespace HitPan.API.Services.Auth;
 
 /// <summary>
-/// WS-20260601-16 (2026-06-01): 백오피스/랜딩 JWT 4계층 클레임 스키마 박제.
+/// WS-20260601-16 (2026-06-01): 백오피스/랜딩 JWT 4계층 클레임 스키마 저장.
 ///
 /// 8대 명제 마스터 설계 §JWT 4계층:
 ///   role = owner | platform_manager | platform_staff | reseller
@@ -28,7 +28,7 @@ public static class JwtClaimsBuilder
     public const string RoleReseller = "reseller";
 
     /// <summary>
-    /// 본사(owner / platform_manager / platform_staff) 토큰 클레임 박제.
+    /// 본사(owner / platform_manager / platform_staff) 토큰 클레임 저장.
     /// hq_scope = true → 본사 직원은 RLS 시리얼 필터 우회 (단, RepositoryBase가 별도 검증).
     /// </summary>
     public static IEnumerable<Claim> BuildPlatformClaims(string role, string userId, string email)
@@ -51,8 +51,8 @@ public static class JwtClaimsBuilder
     }
 
     /// <summary>
-    /// 대리점(role=reseller) 토큰 클레임 박제.
-    /// reseller_serial은 본사 DB에서 조회한 값을 그대로 박제 (클라이언트 입력 금지).
+    /// 대리점(role=reseller) 토큰 클레임 저장.
+    /// reseller_serial은 본사 DB에서 조회한 값을 그대로 저장 (클라이언트 입력 금지).
     /// hq_scope = false → 본사 RLS 우회 불가.
     /// </summary>
     public static IEnumerable<Claim> BuildResellerClaims(string resellerSerial, string userId, string email)

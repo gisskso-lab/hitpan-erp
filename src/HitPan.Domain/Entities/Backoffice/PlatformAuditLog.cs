@@ -3,7 +3,7 @@
 // ----------------------------------------------------------------------------
 // 정합 산출물 : database/migrations/20260601_eight_propositions.sql §4
 // 절대 원칙   : INSERT ONLY (헌법 #3 원장 정합) — UPDATE / DELETE 금지
-//              details JSON 에 평문 사업자 정보 박제 금지
+//              details JSON 에 평문 사업자 정보 저장 금지
 // ============================================================================
 
 namespace HitPan.Domain.Entities.Backoffice;
@@ -25,7 +25,7 @@ public class PlatformAuditLog
     /// <summary>대상 시리얼 (tenants/resellers, 없으면 null).</summary>
     public string? TargetSerial { get; set; }
 
-    /// <summary>감사 메타 JSON. 평문 사업자 정보 박제 금지.</summary>
+    /// <summary>감사 메타 JSON. 평문 사업자 정보 저장 금지.</summary>
     public string? Details { get; set; }
 
     public string? Ip { get; set; }

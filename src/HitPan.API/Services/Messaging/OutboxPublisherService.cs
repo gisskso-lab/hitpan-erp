@@ -11,7 +11,7 @@ namespace HitPan.API.Services.Messaging;
 ///   - #3 INSERT ONLY: messaging_outbox 는 INSERT 만. UPDATE 는 폴러의 processed_at 갱신(메타)만 허용.
 ///   - #15 빈 catch 금지: 평문 검출 시 InvalidOperationException 강제 발생 (silent swallow 금지).
 ///   - #16 MySqlConnection thread-safe 위반 금지: 호출자 트랜잭션 그대로 사용.
-///   - #18·#22 본사 업무데이터 0 + 데이터 최소주의: payload 평문 사업자 정보 박제 시 즉시 차단.
+///   - #18·#22 본사 업무데이터 0 + 데이터 최소주의: payload 평문 사업자 정보 저장 시 즉시 차단.
 ///   - 8명제 #3 백오피스 평문 0.
 /// </summary>
 public sealed class OutboxPublisherService : IOutboxPublisher
@@ -65,7 +65,7 @@ public sealed class OutboxPublisherService : IOutboxPublisher
         }
 
         // 평문 가드 — 8명제 #3 + 헌법 #18·#22.
-        // payload 에 평문 사업자 정보가 박제되면 머지 전 즉시 차단.
+        // payload 에 평문 사업자 정보가 저장되면 머지 전 즉시 차단.
         GuardAgainstPlaintext(payloadJson, eventType, targetSerial);
 
         const string sql = @"
@@ -103,7 +103,7 @@ SELECT LAST_INSERT_ID();";
                     "Outbox 평문 키 검출 BLOCK: event={EventType} serial={Serial} key={Key}",
                     eventType, targetSerial, key);
                 throw new InvalidOperationException(
-                    $"Outbox payload 평문 키 박제 금지 (8명제 #3·헌법 #18·#22): {key}");
+                    $"Outbox payload 평문 키 저장 금지 (8명제 #3·헌법 #18·#22): {key}");
             }
         }
 
@@ -113,7 +113,7 @@ SELECT LAST_INSERT_ID();";
                 "Outbox 평문 사업자번호 검출 BLOCK: event={EventType} serial={Serial}",
                 eventType, targetSerial);
             throw new InvalidOperationException(
-                "Outbox payload 평문 사업자번호 박제 금지 (8명제 #3·헌법 #18·#22)");
+                "Outbox payload 평문 사업자번호 저장 금지 (8명제 #3·헌법 #18·#22)");
         }
     }
 }

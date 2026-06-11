@@ -92,7 +92,7 @@
         _loading = true;
         try
         {
-            // 가입 대기 목록 — WS-15 가도 시 GET /api/admin/issue/pending 결합. 현 시점 더미 박제.
+            // 가입 대기 목록 — WS-15 가도 시 GET /api/admin/issue/pending 결합. 현 시점 더미 저장.
             await Task.Yield();
             _pending = new List<PendingTenantRow>();
         }

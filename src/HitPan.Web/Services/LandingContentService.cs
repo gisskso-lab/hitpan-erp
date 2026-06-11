@@ -3,8 +3,8 @@ using MudBlazor;
 
 namespace HitPan.Web.Services;
 
-// 랜딩 v2 정적 콘텐츠 박제 서비스 (사장님 결재 2026-06-01).
-// 카피는 placeholder — 마케팅팀장 docs/marketing/LANDING_COPY_V2.md 박제 후 교체.
+// 랜딩 v2 정적 콘텐츠 저장 서비스 (사장님 결재 2026-06-01).
+// 카피는 placeholder — 마케팅팀장 docs/marketing/LANDING_COPY_V2.md 저장 후 교체.
 // DB 미사용. 디자인은 수석 웹디자이너 책임, 본 서비스는 컨텐츠 모델만 제공.
 public class LandingContentService
 {

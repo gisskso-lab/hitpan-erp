@@ -2,7 +2,7 @@
 const { chromium } = require('playwright');
 const http = require('http');
 
-const WEB = process.env.HITPAN_WEB || 'http://localhost:5235';
+const WEB = process.env.HITPAN_WEB || 'http://localhost:5234';
 const API = process.env.HITPAN_API || 'http://localhost:5257';
 const EMAIL = 'admin@hitpan.kr';
 const PASS = 'Admin1234!';

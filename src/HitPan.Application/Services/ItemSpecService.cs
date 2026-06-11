@@ -27,7 +27,7 @@ public class ItemSpecService : IItemSpecService
 
         var db = _unitOfWork.GetDbConnection();
         await EnsureOpenAsync(db, ct).ConfigureAwait(false);
-        // 진범 #99 봉합 (2026-05-31): DB-76 시드의 UUID() 함수가 MySqlConnector 메타에 Guid 힌트 박제
+        // 진범 #99 봉합 (2026-05-31): DB-76 시드의 UUID() 함수가 MySqlConnector 메타에 Guid 힌트 저장
         // → SELECT 시 Guid 반환 → string DTO 충돌 → CAST AS CHAR 명시로 string 강제 정합
         var sql = activeOnly
             ? @"SELECT CAST(spec_id AS CHAR) AS SpecId, CAST(item_id AS CHAR) AS ItemId, spec_value AS SpecValue,
@@ -81,7 +81,7 @@ public class ItemSpecService : IItemSpecService
             cancellationToken: ct));
 
         // 작지 #4 동기화 정책 (사장님 작업지시 2026-05-31)
-        // is_default=1로 신규 박제 시 items.spec도 동일값으로 sync
+        // is_default=1로 신규 저장 시 items.spec도 동일값으로 sync
         if (request.IsDefault)
         {
             await SyncItemsSpecColumnAsync(db, tenantId, itemId, request.SpecValue, ct);

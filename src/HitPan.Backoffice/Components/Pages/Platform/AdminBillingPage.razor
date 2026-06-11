@@ -62,7 +62,7 @@
     {
         <div style="padding:32px 24px;">
             <BoEmptyStateCard Title="결제 내역이 없습니다"
-                              Description="고객사가 구독 결제를 완료하면 거래 내역이 이곳에 자동 표시됩니다. 토스페이먼츠 Webhook 연결은 WS-18 박제 대기 중입니다."
+                              Description="고객사가 구독 결제를 완료하면 거래 내역이 이곳에 자동 표시됩니다. 토스페이먼츠 Webhook 연결은 WS-18 작업 대기 중입니다."
                               IllustrationKind="doc" />
         </div>
     }
@@ -113,7 +113,7 @@
         _loading = true;
         try
         {
-            // PG 거래 API 결합 가도. 현 시점 박제만.
+            // PG 거래 API 결합 가도. 현 시점 저장만.
             await Task.Yield();
             _rows = new List<BillingRow>();
         }

@@ -20,7 +20,7 @@ public class LoginResponse
 
     /// <summary>
     /// 헌법 #24 약관 v2.0.0 미동의 시 true → 클라이언트가 /terms 강제 이동.
-    /// AuthController에서 ITermsConsentService.HasAgreedAsync 결과로 박제.
+    /// AuthController에서 ITermsConsentService.HasAgreedAsync 결과로 저장.
     /// </summary>
     public bool RequiresTermsConsent { get; set; }
 }

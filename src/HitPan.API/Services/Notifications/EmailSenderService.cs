@@ -4,7 +4,7 @@ namespace HitPan.API.Services.Notifications;
 // EmailSenderService — AWS SES / SendGrid 스텁 (WS-20260601-14)
 // 백엔드 매니저 + 보안 매니저 2 합의 스텁.
 //   - 정식 키는 환경변수 (Notifications:Email:Provider / ApiKey) + 사장님 결재 후
-//   - 현재는 스텁: 로그만 박제, 실제 전송 없음
+//   - 현재는 스텁: 로그만 저장, 실제 전송 없음
 //   - DKIM·SPF·DMARC 정합 헤더: From=noreply@hitpan.kr 고정
 //   - 본문 = 시리얼 + 활성화 링크 (평문 임시비번 절대 금지, SMS 채널 분리)
 //   - DKIM 본문 토큰 = 30분 만료 (호출 측에서 생성·검증)
@@ -36,7 +36,7 @@ public sealed class EmailSenderService : IEmailSender
                 return Task.FromResult(new NotificationResult(false, null, "invalid_recipient", 1));
             }
 
-            // 평문 임시비번 박제 차단 (사장님 헌법 #18·#22 정합 + 2채널 분리 원칙)
+            // 평문 임시비번 저장 차단 (사장님 헌법 #18·#22 정합 + 2채널 분리 원칙)
             if (LooksLikeTempPassword(bodyHtml))
             {
                 _logger.LogError("[EmailSender] BLOCKED — body contains temp password pattern. 2-channel separation violated.");

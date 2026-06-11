@@ -9,8 +9,8 @@ namespace HitPan.Backoffice.API.Services;
 // 임시 표준 템플릿 — 사장님 결재로 정식 본문은 추후 교체
 //
 // 헌법 정합:
-//   #15 — 빈 catch 금지 (호출 측에서 ILogger 박제)
-//   #25 — 쉽게(원클릭 자동 생성)·정확하게(신청 정보 자동 박제)·안전하게(서명 회수 절차 명시)
+//   #15 — 빈 catch 금지 (호출 측에서 ILogger 저장)
+//   #25 — 쉽게(원클릭 자동 생성)·정확하게(신청 정보 자동 저장)·안전하게(서명 회수 절차 명시)
 public interface IContractPdfGenerator
 {
     byte[] CreateResellerContract(ResellerContractInput input);

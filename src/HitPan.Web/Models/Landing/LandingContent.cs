@@ -1,8 +1,8 @@
 namespace HitPan.Web.Models.Landing;
 
 // 랜딩 v2 통합 콘텐츠 모델 (사장님 결재 2026-06-01: 좀 더 이쁘게)
-// 데이터 소스: 정적 박제 (LandingContentService). 카피는 마케팅팀장
-// docs/marketing/LANDING_COPY_V2.md 박제 후 차후 교체 표시.
+// 데이터 소스: 정적 저장 (LandingContentService). 카피는 마케팅팀장
+// docs/marketing/LANDING_COPY_V2.md 저장 후 차후 교체 표시.
 public class LandingContent
 {
     public HeroContent Hero { get; set; } = new();

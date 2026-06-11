@@ -52,7 +52,7 @@
         @if (_tossConfigured == false)
         {
             <div class="notice-banner">
-                결제 시스템 점검 중입니다. 자격증명 박제 후 이용 가능합니다.
+                결제 시스템 점검 중입니다. 자격증명 설정 후 이용 가능합니다.
                 <span class="notice-detail">(본사 운영자 — /owner/credentials-status 확인)</span>
             </div>
         }
@@ -102,7 +102,7 @@
 
     protected override void OnParametersSet()
     {
-        // 사장님 결재 박제 2026-06-02 (의중 B 모두결재) — BASIC 29k / PRO 49k / ENTERPRISE 100k+서버구축
+        // 사장님 결재 저장 2026-06-02 (의중 B 모두결재) — BASIC 29k / PRO 49k / ENTERPRISE 100k+서버구축
         (_planLabel, _priceText, _planNote) = Plan switch
         {
             "basic" => ("BASIC", "29,000원", ""),
@@ -121,7 +121,7 @@
         _processing = true;
         try
         {
-            // 사장님 결재 2026-06-02 (의중 B 모두결재) — 베타: 결제 SDK 미박제, API 직접 호출로 tenants.status='active'
+            // 사장님 결재 2026-06-02 (의중 B 모두결재) — 베타: 결제 SDK 미저장, API 직접 호출로 tenants.status='active'
             // 정식 = 토스 빌링키 + webhook 전환 (W10+ TossWebhookController)
             string? licenseKey = null;
             if (!string.IsNullOrWhiteSpace(Token))

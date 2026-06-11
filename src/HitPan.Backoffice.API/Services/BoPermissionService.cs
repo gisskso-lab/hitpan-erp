@@ -7,7 +7,7 @@ namespace HitPan.Backoffice.API.Services;
 
 // 백오피스 계층 권한 서비스 (사장님 결재 2026-06-04, 헌법 #11·#35)
 //
-// 사장님이 /owner/permissions 에서 박제한 권한을 DB에서 읽어 검사.
+// 사장님이 /owner/permissions 에서 저장한 권한을 DB에서 읽어 검사.
 // 60초 메모리 캐시 (변경 시 InvalidateAll로 즉시 무효화).
 //
 // 헌법 정합:
@@ -56,7 +56,7 @@ public class BoPermissionService : IBoPermissionService
         var all = await GetAllCachedAsync(ct);
         if (!all.TryGetValue(permissionKey, out var row))
         {
-            _logger.LogWarning("[BoPermission] 미박제 권한 key={Key}", permissionKey);
+            _logger.LogWarning("[BoPermission] 미저장 권한 key={Key}", permissionKey);
             return false;
         }
 

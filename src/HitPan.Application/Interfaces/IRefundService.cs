@@ -7,7 +7,7 @@ namespace HitPan.Application.Interfaces;
 public interface IRefundService
 {
     /// <summary>
-    /// 환불 요청 — billing_invoices.status = 'refunded' + 환불 attempt 박제
+    /// 환불 요청 — billing_invoices.status = 'refunded' + 환불 attempt 저장
     /// 멱등: 동일 invoice_id 중복 환불 차단
     /// </summary>
     Task<AdminRefundResult> RefundAsync(string invoiceId, string adminId, string reason, CancellationToken ct = default);

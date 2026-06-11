@@ -2,7 +2,7 @@
 const { chromium } = require('playwright');
 const http = require('http');
 
-const WEB = process.env.HITPAN_WEB || 'http://localhost:5235';
+const WEB = process.env.HITPAN_WEB || 'http://localhost:5234';
 const API = process.env.HITPAN_API || 'http://localhost:5257';
 const EMAIL = 'admin@hitpan.kr';
 const PASS = 'Admin1234!';
@@ -40,8 +40,10 @@ const encode = v => Buffer.from(JSON.stringify(v), 'utf-8').toString('base64');
     console.log(`로그인 ✓ userName=${login.json.userName}`);
     console.log('');
 
-    const browser = await chromium.launch({ headless: true });
-    const ctx = await browser.newContext({ ignoreHTTPSErrors: true });
+    const browser = await chromium.launch({ headless: true, args: ['--disable-application-cache', '--disk-cache-size=0'] });
+    const ctx = await browser.newContext({ ignoreHTTPSErrors: true, bypassCSP: true });
+    await ctx.route('**/*', route => route.continue());
+    await ctx.clearCookies();
     await ctx.addInitScript(({ a, r, u }) => {
         localStorage.setItem('hitpan_access_token', a);
         localStorage.setItem('hitpan_refresh_token', r);

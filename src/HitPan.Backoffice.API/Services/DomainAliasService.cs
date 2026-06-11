@@ -47,7 +47,7 @@ public class DomainAliasService : IDomainAliasService
 
         if (!Regex.IsMatch(normalized, @"^[a-z0-9]([a-z0-9-]{1,28}[a-z0-9])?$"))
             return new(false, "format",
-                "영문 소문자·숫자·하이픈만 사용 가능합니다. 하이픈은 가운데에만 박을 수 있습니다.", null);
+                "영문 소문자·숫자·하이픈만 사용 가능합니다. 하이픈은 가운데에만 저장할 수 있습니다.", null);
 
         if (normalized.Contains("--"))
             return new(false, "format", "하이픈을 연속으로 사용할 수 없습니다.", null);

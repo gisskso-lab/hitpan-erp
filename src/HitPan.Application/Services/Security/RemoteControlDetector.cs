@@ -5,9 +5,9 @@ using Microsoft.Extensions.Logging;
 namespace HitPan.Application.Services.Security;
 
 /// <summary>
-/// 원격제어 감지 — 작B v3.0 W2 본질 보강 (Red Team 1순위 박제)
+/// 원격제어 감지 — 작B v3.0 W2 본질 보강 (Red Team 1순위 저장)
 ///
-/// Red Team 25년 박제:
+/// Red Team 25년 저장:
 /// "영세 사업장 사장님이 'ERP 좀 봐달라'며 자식·세무사·외주 개발자에게 원격 허용
 /// → PIN 입력 화면 그대로 노출 → 동시 발급. 이게 한국 중소기업 진짜 공격 벡터다."
 ///
@@ -34,7 +34,7 @@ public interface IRemoteControlDetector
 
 public sealed class RemoteControlDetector : IRemoteControlDetector
 {
-    // 감지 대상 프로세스 (실측 박제 — 한국 시장 기준)
+    // 감지 대상 프로세스 (실측 저장 — 한국 시장 기준)
     private static readonly Dictionary<string, string> BLOCKED_TOOLS = new(StringComparer.OrdinalIgnoreCase)
     {
         // 한국 시장 점유율 순

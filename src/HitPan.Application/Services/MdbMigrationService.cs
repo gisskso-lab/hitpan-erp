@@ -4137,7 +4137,7 @@ public sealed class MdbMigrationService
         if (dt.Rows.Count == 0) return (0, 0);
 
         // C-2 봉합 (2026-05-21, 사장님 결재): 본 테이블에서 source_id → PK 사전 로딩.
-        // C안 UPSERT FK 사고 박제: Guid.NewGuid()로 새 PK 만들면 자식 FK 깨짐.
+        // C안 UPSERT FK 사고 저장: Guid.NewGuid()로 새 PK 만들면 자식 FK 깨짐.
         // 해결: 기존 source_id가 본 테이블에 있으면 그 PK 재사용 → UPSERT 시 같은 PK로 매칭 → 자식 FK 보존.
         var existingDeliveryMap = (await Db.QueryAsync<(string SourceId, string DeliveryId)>(
             new CommandDefinition(
@@ -4848,7 +4848,7 @@ public sealed class MdbMigrationService
         // 진범 #40 봉합 (2026-05-20, ERP매니저 자문 #7 Q7-4 옵션 A):
         // SC_SUN(라인 순번) → SC_JEN(분개번호) 그룹화 재설계.
         // 30년 회계 표준 패턴 — 한 거래 entry 안에 차변+대변 양쪽 라인 = 균형 회복.
-        // 9차 박제: 23,147/23,152 entry 불균형 (99.98%) → 예상 0~5% 회복.
+        // 9차 저장: 23,147/23,152 entry 불균형 (99.98%) → 예상 0~5% 회복.
         var groups = dt.AsEnumerable().GroupBy(r => new
         {
             Dt = GetStr(r, "SC_DT"),
@@ -4967,7 +4967,7 @@ public sealed class MdbMigrationService
     /// <summary>
     /// WS-D-2 후속 (2026-05-18): PYOJUN.COSTNO 마스터 → accounts 시드.
     /// 99건 SC_KCODE에 대응되는 한글 계정명(CT_DESC) 자동 시드.
-    /// 사장님 사후승인 박제 (전결재 OK, 2026-05-18 점심시간).
+    /// 사장님 사후승인 저장 (전결재 OK, 2026-05-18 점심시간).
     /// COSTNO 컬럼: CT_CODE / CT_DESC / CT_REM (기본 마진율 또는 분류 추정)
     /// </summary>
     private async Task MigrateAccountsFromCOSTNOAsync(

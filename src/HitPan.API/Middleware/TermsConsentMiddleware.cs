@@ -5,7 +5,7 @@ using Microsoft.AspNetCore.Http;
 namespace HitPan.API.Middleware;
 
 // 첫 로그인 약관 4건 강제 동의 검증 미들웨어 (헌법 #24)
-// TenantMiddleware 이후 가동 — JWT 인증 + tenant_id 박제 완료 가정.
+// TenantMiddleware 이후 가동 — JWT 인증 + tenant_id 저장 완료 가정.
 // 미동의 시 /api/* 차단 (403 forbidden_terms_consent).
 // bypass: /api/auth/terms/* + /api/auth/login + /api/auth/refresh + /api/auth/logout + Swagger·health·terms 자체.
 public sealed class TermsConsentMiddleware

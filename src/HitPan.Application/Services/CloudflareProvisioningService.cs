@@ -8,19 +8,19 @@ using Microsoft.Extensions.Logging;
 namespace HitPan.Application.Services;
 
 /// <summary>
-/// Cloudflare 프로비저닝 박제 (사장님 결재 2026-06-02 모두결재)
+/// Cloudflare 프로비저닝 저장 (사장님 결재 2026-06-02 모두결재)
 ///
 /// 헌법 정합:
-///  #18·#22 — 본사 서버에서만 호출. ERP 고객 PC 절대 금지. 토큰은 본사 환경변수만 박제
-///  #29 — 인프라 조작 사전 승인. 토큰 발급·회전 = 사장님 직접 박제 (Secrets Manager)
-///  #34 — 베타·정식 박제 분리. 인프라 = 베타부터 정식 완성도 박제
+///  #18·#22 — 본사 서버에서만 호출. ERP 고객 PC 절대 금지. 토큰은 본사 환경변수만 저장
+///  #29 — 인프라 조작 사전 승인. 토큰 발급·회전 = 사장님 직접 저장 (Secrets Manager)
+///  #34 — 베타·정식 저장 분리. 인프라 = 베타부터 정식 완성도 저장
 ///
-/// 박제 흐름 (3단계):
-///  1) Cloudflare DNS API → CNAME 박제 (www.{id}.hitpan.kr → tunnel.cfargotunnel.com)
-///  2) Cloudflare Tunnel API → 터널 박제 + credentials 박제
-///  3) DNS 라우팅 박제 → 터널 ↔ 도메인 박제
+/// 저장 흐름 (3단계):
+///  1) Cloudflare DNS API → CNAME 저장 (www.{id}.hitpan.kr → tunnel.cfargotunnel.com)
+///  2) Cloudflare Tunnel API → 터널 저장 + credentials 저장
+///  3) DNS 라우팅 저장 → 터널 ↔ 도메인 저장
 ///
-/// 토큰 미박제 시: 정직 에러 응답 박제 (헌법 #15 빈 catch 금지, #32 받아쓰기 금지)
+/// 토큰 미저장 시: 정직 에러 응답 저장 (헌법 #15 빈 catch 금지, #32 받아쓰기 금지)
 /// </summary>
 public class CloudflareProvisioningService : ICloudflareProvisioningService
 {
@@ -45,9 +45,9 @@ public class CloudflareProvisioningService : ICloudflareProvisioningService
 
         if (string.IsNullOrWhiteSpace(token) || string.IsNullOrWhiteSpace(accountId) || string.IsNullOrWhiteSpace(zoneId))
         {
-            _logger.LogError("[Cloudflare] 토큰·AccountId·ZoneId 미박제 — tenant={TenantId}", tenantId);
+            _logger.LogError("[Cloudflare] 토큰·AccountId·ZoneId 미저장 — tenant={TenantId}", tenantId);
             return new ProvisioningResult(tenantId, false, null, null,
-                "본사 Cloudflare 자격 미박제. 사장님 Secrets Manager 박제 필요 (헌법 #29).");
+                "본사 Cloudflare 자격 미저장. 사장님 Secrets Manager 저장 필요 (헌법 #29).");
         }
 
         if (string.IsNullOrWhiteSpace(subdomain))
@@ -58,7 +58,7 @@ public class CloudflareProvisioningService : ICloudflareProvisioningService
 
         try
         {
-            // 1단계 — Cloudflare Tunnel 박제
+            // 1단계 — Cloudflare Tunnel 저장
             var tunnelSecret = Convert.ToBase64String(System.Security.Cryptography.RandomNumberGenerator.GetBytes(32));
             var tunnelReq = new HttpRequestMessage(HttpMethod.Post, $"client/v4/accounts/{accountId}/cfd_tunnel");
             tunnelReq.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", token);
@@ -68,14 +68,14 @@ public class CloudflareProvisioningService : ICloudflareProvisioningService
             if (!tunnelResp.IsSuccessStatusCode)
             {
                 var body = await tunnelResp.Content.ReadAsStringAsync(ct);
-                _logger.LogError("[Cloudflare] tunnel 박제 실패 status={Status} body={Body}", tunnelResp.StatusCode, body);
-                return new ProvisioningResult(tenantId, false, fullDomain, null, $"터널 박제 실패 ({tunnelResp.StatusCode})");
+                _logger.LogError("[Cloudflare] tunnel 저장 실패 status={Status} body={Body}", tunnelResp.StatusCode, body);
+                return new ProvisioningResult(tenantId, false, fullDomain, null, $"터널 저장 실패 ({tunnelResp.StatusCode})");
             }
 
             var tunnelJson = await tunnelResp.Content.ReadFromJsonAsync<JsonElement>(cancellationToken: ct);
             var tunnelId = tunnelJson.GetProperty("result").GetProperty("id").GetString() ?? "";
 
-            // 2단계 — DNS CNAME 박제 (www.{id}.hitpan.kr → {tunnelId}.cfargotunnel.com)
+            // 2단계 — DNS CNAME 저장 (www.{id}.hitpan.kr → {tunnelId}.cfargotunnel.com)
             var dnsReq = new HttpRequestMessage(HttpMethod.Post, $"client/v4/zones/{zoneId}/dns_records");
             dnsReq.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", token);
             dnsReq.Content = JsonContent.Create(new
@@ -91,15 +91,15 @@ public class CloudflareProvisioningService : ICloudflareProvisioningService
             if (!dnsResp.IsSuccessStatusCode)
             {
                 var body = await dnsResp.Content.ReadAsStringAsync(ct);
-                _logger.LogError("[Cloudflare] DNS 박제 실패 status={Status} body={Body}", dnsResp.StatusCode, body);
-                return new ProvisioningResult(tenantId, false, fullDomain, tunnelId, $"DNS 박제 실패 ({dnsResp.StatusCode})");
+                _logger.LogError("[Cloudflare] DNS 저장 실패 status={Status} body={Body}", dnsResp.StatusCode, body);
+                return new ProvisioningResult(tenantId, false, fullDomain, tunnelId, $"DNS 저장 실패 ({dnsResp.StatusCode})");
             }
 
-            _logger.LogInformation("[Cloudflare] 박제 완료 tenant={TenantId} domain={Domain} tunnel={Tunnel}",
+            _logger.LogInformation("[Cloudflare] 저장 완료 tenant={TenantId} domain={Domain} tunnel={Tunnel}",
                 tenantId, fullDomain, tunnelId);
 
             return new ProvisioningResult(tenantId, true, fullDomain, tunnelId,
-                $"박제 완료: {fullDomain} ↔ tunnel {tunnelId}");
+                $"저장 완료: {fullDomain} ↔ tunnel {tunnelId}");
         }
         catch (HttpRequestException ex)
         {
@@ -110,13 +110,13 @@ public class CloudflareProvisioningService : ICloudflareProvisioningService
 
     public Task<ProvisioningStatus> GetStatusAsync(string tenantId, CancellationToken ct = default)
     {
-        // TODO: tenants.provisioning_status 컬럼 박제 후 조회 박제
+        // TODO: tenants.provisioning_status 컬럼 저장 후 조회 저장
         return Task.FromResult(ProvisioningStatus.Pending);
     }
 
     public Task<ProvisioningResult> RetryAsync(string tenantId, CancellationToken ct = default)
     {
-        _logger.LogInformation("[Cloudflare] retry 박제 tenant={TenantId}", tenantId);
+        _logger.LogInformation("[Cloudflare] retry 저장 tenant={TenantId}", tenantId);
         return ProvisionAsync(tenantId, "", ct);
     }
 }

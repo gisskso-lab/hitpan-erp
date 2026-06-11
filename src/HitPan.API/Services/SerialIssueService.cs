@@ -13,7 +13,7 @@
 //   - MySqlConnection thread-safe (헌법 #16) — 본 Service는 단일 흐름이므로 Task.WhenAll 미사용
 //   - 빈 catch 금지 (헌법 #15)
 // 실 DB 쓰기·이메일·SMS 전송은 WS-14(NotificationService) + WS-15(DDL) 가도 후 결합.
-//   현재는 시리얼 생성·CRC·해시·멱등성 검증까지 자족 동작 + 결합 포인트 박제.
+//   현재는 시리얼 생성·CRC·해시·멱등성 검증까지 자족 동작 + 결합 포인트 저장.
 // ============================================================================
 
 using System.Collections.Concurrent;
@@ -100,7 +100,7 @@ public sealed class SerialIssueService : ISerialIssueService
             var tempPwd = EncodeBase32(pwdBuffer).Substring(0, 12);
             try
             {
-                // Argon2id 해시 — Konscious 패키지가 아직 미도입이므로 PBKDF2-HMACSHA512(420k)로 잠정 박제.
+                // Argon2id 해시 — Konscious 패키지가 아직 미도입이므로 PBKDF2-HMACSHA512(420k)로 잠정 저장.
                 // WS-14·WS-15 가도 시 Argon2id로 교체 (작업지시서 §Argon2id 명시).
                 var pwdHash = ComputePbkdf2Hash(tempPwd);
 

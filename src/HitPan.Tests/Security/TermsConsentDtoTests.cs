@@ -6,7 +6,7 @@ namespace HitPan.Tests.Security;
 // W2 약관 4건 강제 동의 단위 테스트 (헌법 #24 책임 분산)
 // 검증 범위:
 // - DTO 필수 4건 검증 로직 정합
-// - TermsConsentStatus 기본 필수 4건 박제
+// - TermsConsentStatus 기본 필수 4건 저장
 // - TermsConsentRequest 기본 버전 v2.0.0
 public class TermsConsentDtoTests
 {
@@ -17,7 +17,7 @@ public class TermsConsentDtoTests
         Assert.Equal("v2.0.0", req.TermsVersion);
     }
 
-    [Fact(DisplayName = "TC-02: TermsConsentStatus 기본 Required 4건 박제")]
+    [Fact(DisplayName = "TC-02: TermsConsentStatus 기본 Required 4건 저장")]
     public void TermsConsentStatus_RequiredList_HasFourItems()
     {
         var status = new TermsConsentStatus();
@@ -80,7 +80,7 @@ public class TermsConsentDtoTests
         Assert.Null(req.AgreeMarketing);
     }
 
-    [Fact(DisplayName = "TC-06: TermsConsentResponse 박제 정합")]
+    [Fact(DisplayName = "TC-06: TermsConsentResponse 저장 정합")]
     public void TermsConsentResponse_Properties_AreSet()
     {
         var now = DateTime.UtcNow;
@@ -98,7 +98,7 @@ public class TermsConsentDtoTests
         Assert.Equal("v2.0.0", resp.TermsVersion);
     }
 
-    [Fact(DisplayName = "TC-07: TermsConsentRequest 필수 속성에 [Required] 박제")]
+    [Fact(DisplayName = "TC-07: TermsConsentRequest 필수 속성에 [Required] 저장")]
     public void TermsConsentRequest_RequiredAttributes_Present()
     {
         var type = typeof(TermsConsentRequest);

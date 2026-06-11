@@ -315,7 +315,7 @@ public class SalesService : ISalesService
                 // 사장님 헌법 (2026-04-26): "재고로 판매 흐름이 막히면 안 된다"
                 //   - 히트판 타겟 소기업 95%는 창고 1개. 창고 단위 필터로 막으면 판매 못 침.
                 //   - 회사 합산(전 창고)으로 가용재고 판단. ledger 'out' 기표는 거래명세서 라인의
-                //     warehouse_id 그대로 박혀 DB 추적 유지(창고담당자·이송 데이터는 베타 이후 정리).
+                //     warehouse_id 그대로 저장되어 DB 추적 유지(창고담당자·이송 데이터는 베타 이후 정리).
                 //   - 다창고 고객용 Picking Strategy / 재고관리 모듈은 정식 버전 작지서로.
                 var balances = await ledgerRepo.FindAsync(x => x.ItemId == line.ItemId);
                 var currentBalance = balances.Sum(x => x.QtyIn - x.QtyOut);

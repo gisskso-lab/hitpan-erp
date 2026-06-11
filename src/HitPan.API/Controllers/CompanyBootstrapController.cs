@@ -14,13 +14,13 @@ namespace HitPan.API.Controllers;
 //   1) ERP Web /setup/license Step 1 → 백오피스 API /api/landing/license/claim
 //      → 응답에 bootstrapToken (HMAC-SHA256 서명, 10분 만료, subscription 클레임 포함)
 //   2) ERP Web → 본 API POST /api/setup/bootstrap (bootstrapToken + 회사정보)
-//   3) 본 API: 토큰 서명 검증 (백오피스 URL 호출 0건!) → local_company + local_subscription 박제
+//   3) 본 API: 토큰 서명 검증 (백오피스 URL 호출 0건!) → local_company + local_subscription 저장
 //   4) is_locked_from_landing=1 + bootstrap_at
 //   5) ERP Web → 본 API POST /api/setup/create-parent (bootstrapToken 재검증 + 부모계정 생성)
 //
 // 헌법 정합:
 //   #15 — 빈 catch 금지
-//   #18·#22 — 평문 사업자번호는 ERP 로컬 DB(고객사 PC)에만 박제. 본사는 해시만
+//   #18·#22 — 평문 사업자번호는 ERP 로컬 DB(고객사 PC)에만 저장. 본사는 해시만
 //   #20 — 가입 → 결제 → 라이선스 → 설치 → 자동 반영 끊김 0
 //   #29 — Bootstrap Token Key는 환경변수만, 응답·로그 0건
 //   #35 — 객체 완전 분리. ERP는 백오피스 URL·존재 0건 의존. 공유 키만 보유.
@@ -70,7 +70,7 @@ public class CompanyBootstrapController : ControllerBase
             if (lockedRaw == 1)
                 return BadRequest(new { success = false, message = "이미 설치가 완료된 라이선스입니다. 회사정보 변경은 랜딩에서 사업자등록증 재등록이 필요합니다." });
 
-            // local_company UPSERT — 회사정보 박제
+            // local_company UPSERT — 회사정보 저장
             await db.ExecuteAsync(@"
                 INSERT INTO local_company
                     (tenant_id, tenant_code, company_name, biz_no, ceo_name, tel, address, email,
@@ -111,7 +111,7 @@ public class CompanyBootstrapController : ControllerBase
                     CorpNo = req.CorpNo
                 });
 
-            // local_subscription UPSERT — 본사 영역 캐시 박제 (토큰 클레임에서 추출)
+            // local_subscription UPSERT — 본사 영역 캐시 저장 (토큰 클레임에서 추출)
             var sub = payload.Subscription;
             if (sub is not null)
             {
@@ -277,7 +277,7 @@ public class CompanyBootstrapController : ControllerBase
     // 헌법 #35 W2 — HMAC-SHA256 서명 검증. 백오피스 URL·존재 의존 0건.
     //   - 동일 키(HITPAN_BOOTSTRAP_TOKEN_KEY)로 서명 검증
     //   - exp 만료 검사, aud 일치 검사
-    //   - jti 1회용은 ERP 측 별도 캐시 필요 (현재 차수 미박제 — 재사용 가능, 짧은 만료로 위험 최소화)
+    //   - jti 1회용은 ERP 측 별도 캐시 필요 (현재 차수 미저장 — 재사용 가능, 짧은 만료로 위험 최소화)
     private (bool ok, TokenPayload? payload, string? error) VerifyBootstrapToken(string token)
     {
         var key = Environment.GetEnvironmentVariable("HITPAN_BOOTSTRAP_TOKEN_KEY")

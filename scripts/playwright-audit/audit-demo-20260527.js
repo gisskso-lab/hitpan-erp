@@ -90,17 +90,35 @@ const MENUS = [
   // 로그인
   console.log('[1] 로그인 → ' + WEB_URL);
   await page.goto(WEB_URL, { waitUntil: 'networkidle', timeout: 60000 });
+  // Blazor WASM 부트 완료 대기
+  await page.locator('input[type="email"]').first().waitFor({ state: 'visible', timeout: 60000 });
+  await page.waitForTimeout(2000);
   await page.screenshot({ path: path.join(OUT_DIR, '00_landing.png'), fullPage: true });
 
   try {
+    // 입력 봉합 — focus + keyboard.type (MudBlazor @bind-Value 정합)
     const emailInput = page.locator('input[type="email"]').first();
-    await emailInput.click();
-    await emailInput.pressSequentially(EMAIL, { delay: 20 });
+    await emailInput.waitFor({ state: 'visible', timeout: 30000 });
+    await page.waitForTimeout(2000);
+    await emailInput.focus();
+    await page.keyboard.type(EMAIL, { delay: 50 });
+    await page.waitForTimeout(500);
+    await page.keyboard.press('Tab');
+    await page.waitForTimeout(500);
     const pwInput = page.locator('input[type="password"]').first();
-    await pwInput.click();
-    await pwInput.pressSequentially(PASSWORD, { delay: 20 });
-    await page.waitForTimeout(800);
-    await page.locator('button:has-text("로그인")').click();
+    await pwInput.focus();
+    await page.keyboard.type(PASSWORD, { delay: 50 });
+    await page.waitForTimeout(500);
+    await page.keyboard.press('Tab');
+    await page.waitForTimeout(1500);
+    const loginBtn = page.locator('button:has-text("로그인")');
+    await loginBtn.waitFor({ state: 'visible', timeout: 10000 });
+    for (let i = 0; i < 50; i++) {
+      const disabled = await loginBtn.getAttribute('disabled');
+      if (disabled === null) break;
+      await page.waitForTimeout(200);
+    }
+    await loginBtn.click();
     await page.waitForURL(url => !url.toString().includes('/login'), { timeout: 20000 }).catch(() => {});
     await page.waitForLoadState('networkidle', { timeout: 30000 }).catch(() => {});
     await page.screenshot({ path: path.join(OUT_DIR, '00b_after_login.png'), fullPage: true });

@@ -6,7 +6,7 @@ namespace HitPan.Tests.Workflow;
 // 양식정보설정 DTO 검증 (사장님 작업지시 2026-05-31 작지②·③)
 public class FormTemplateDtoTests
 {
-    [Fact(DisplayName = "FT-01: FormTemplateDto 기본값 박제")]
+    [Fact(DisplayName = "FT-01: FormTemplateDto 기본값 저장")]
     public void Default_Values_Safe()
     {
         var dto = new FormTemplateDto();
@@ -24,7 +24,7 @@ public class FormTemplateDtoTests
         Assert.False(dto.IsDefault);
     }
 
-    [Fact(DisplayName = "FT-02: CreateRequest 필수 박제 (FormType, TemplateName, PaperMode)")]
+    [Fact(DisplayName = "FT-02: CreateRequest 필수 저장 (FormType, TemplateName, PaperMode)")]
     public void Create_Required_Attributes()
     {
         var type = typeof(CreateFormTemplateRequest);
@@ -99,7 +99,7 @@ public class FormTemplateDtoTests
         Assert.True(Validator.TryValidateObject(req, ctx, results, true));
     }
 
-    [Theory(DisplayName = "FT-07: paper_mode plain·preprint 박제")]
+    [Theory(DisplayName = "FT-07: paper_mode plain·preprint 저장")]
     [InlineData("plain")]
     [InlineData("preprint")]
     public void PaperMode_TwoModes_Accepted(string mode)
@@ -136,7 +136,7 @@ public class FormTemplateDtoTests
         Assert.False(Validator.TryValidateObject(req, ctx, results, true));
     }
 
-    [Fact(DisplayName = "FT-10: UpdateRequest는 CreateRequest 상속 + IsActive 박제")]
+    [Fact(DisplayName = "FT-10: UpdateRequest는 CreateRequest 상속 + IsActive 저장")]
     public void Update_Inherits_Create()
     {
         Assert.True(typeof(UpdateFormTemplateRequest).IsSubclassOf(typeof(CreateFormTemplateRequest)));

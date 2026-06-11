@@ -20,7 +20,7 @@ namespace HitPan.Backoffice.API.Controllers;
 // 헌법 정합:
 //   #18·#22 — 시리얼 = 백오피스↔ERP 포링키. 평문 IO 1회만 (응답 직후 EXE 파기 의무)
 //   #28·#30 — 고객 손 0번. 시리얼 1개만 입력하면 끝
-//   #29 — 인프라 토큰은 백오피스가 발급 (EXE에 사전 박지 않음)
+//   #29 — 인프라 토큰은 백오피스가 발급 (EXE에 사전 저장하지 않음)
 //   #33 — 모든 응답에 source 명시 ("installer-bootstrap")
 //   #35 — 시리얼 = 포링키. 백오피스가 평문 관리, EXE는 평문 받아 사용 후 폐기
 [ApiController]
@@ -86,8 +86,8 @@ public class InstallerBootstrapController : ControllerBase
                 });
             }
 
-            // 사장님 결재 2026-06-09 — 도메인 별칭(domain_alias) 박힌 영역 우선 박기.
-            // 박지 못한 영역(레거시 가입자)이면 텐넌트 코드 폴백, 단 외부 메일/UI 표시는 절대 박지 않음 (헌법 #22 정합).
+            // 사장님 결재 2026-06-09 — 도메인 별칭(domain_alias) 저장된 영역 우선 저장하기.
+            // 저장하지 못한 영역(레거시 가입자)이면 텐넌트 코드 폴백, 단 외부 메일/UI 표시는 절대 저장하지 않음 (헌법 #22 정합).
             var subdomain = !string.IsNullOrWhiteSpace(tenant.DomainAlias)
                 ? tenant.DomainAlias!
                 : tenant.TenantCode.ToLowerInvariant().Replace("-", "");

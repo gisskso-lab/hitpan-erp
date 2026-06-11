@@ -179,8 +179,8 @@ public class CloudflareDomainService : ICloudflareDomainService
 
     // 사장님 결재 2026-06-11 — 도메인 별칭으로 영역 검색 + 삭제
     //  중복 발급 사고 봉합 (81053 'CNAME already exists' 영역 차단)
-    //  백오피스 가입 영역 박을 때 옛 DNS 영역 박혀있으면 자동 정리
-    //  보존 영역: demo·back·landing·updates·api-* 영역은 박지 않음 (운영 영역 보호)
+    //  백오피스 가입 영역 저장할 때 옛 DNS 영역 있으면 자동 정리
+    //  보존 영역: demo·back·landing·updates·api-* 영역은 저장하지 않음 (운영 영역 보호)
     public async Task<bool> RevokeByDomainAsync(string subdomain, CancellationToken ct)
     {
         if (!IsConfigured) return false;

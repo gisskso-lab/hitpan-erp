@@ -12,13 +12,13 @@ namespace HitPan.Backoffice.API.Controllers;
 // 랜딩 가입 API — 헌법 #35 정합 이식 (사장님 결재 2026-06-04)
 //
 // 이식 배경:
-//   - 기존 HitPan.API(ERP)에 박제돼 있던 /api/landing/* 일체를 백오피스 API로 이식
+//   - 기존 HitPan.API(ERP)에 저장돼 있던 /api/landing/* 일체를 백오피스 API로 이식
 //   - 헌법 #35: 랜딩(가입) → 백오피스(워크스페이스) 흐름. ERP는 고객사 업무 전용
 //   - 옵션 B(Dapper 직접) — Application/Infrastructure 의존성 0
 //
 // 헌법 정합:
-//   #18·#22 — 평문 사업자번호 0건 DB 박제, HMAC-SHA256 해시만
-//   #15 — 빈 catch 금지, ILogger 박제
+//   #18·#22 — 평문 사업자번호 0건 DB 저장, HMAC-SHA256 해시만
+//   #15 — 빈 catch 금지, ILogger 저장
 //   #20 — 가입 → 백오피스 워크플로우 끊김 0건 (tenants 즉시 INSERT)
 //   #25 — 쉽게·정확하게·안전하게
 [ApiController]
@@ -150,10 +150,10 @@ public class LandingSignupController : ControllerBase
                 });
             }
 
-            // 봉합 v1.2.4 (2026-06-11): 5분 안 중복 박힘 차단
+            // 봉합 v1.2.4 (2026-06-11): 5분 안 중복 저장 차단
             //   사장님 의중: "백오피스에 시리얼 요청 1건인데 왜 여러 건?"
             //   진범: 가입 폼 영역 중복 클릭 또는 race condition 영역
-            //   봉합: 같은 사업자번호 + 5분 안 submitted 영역 박혀있으면 차단
+            //   봉합: 같은 사업자번호 + 5분 안 submitted 영역 있으면 차단
             var recentSubmitted = await db.QueryFirstOrDefaultAsync<long?>(@"
                 SELECT COUNT(*) FROM landing_signups
                 WHERE biz_no_hash = @Hash
@@ -170,7 +170,7 @@ public class LandingSignupController : ControllerBase
                 });
             }
 
-            // 같은 사업자번호로 이전 신청(반려·미처리)이 있으면 정리 박기 — UNIQUE 충돌 방지
+            // 같은 사업자번호로 이전 신청(반려·미처리)이 있으면 정리 저장하기 — UNIQUE 충돌 방지
             await db.ExecuteAsync(
                 "DELETE FROM landing_signups WHERE biz_no_hash = @Hash AND status NOT IN ('approved','active')",
                 new { Hash = bizNoHash });
@@ -178,8 +178,8 @@ public class LandingSignupController : ControllerBase
             // 봉합 v1.2.5 (2026-06-11): 옛 영역 도메인 별칭 영역 Cloudflare DNS 정리
             //  사장님 의중: "삭제된 테넌트 코드에 서브도매인 주소와 DNS가 정리되지 않으면 안되.
             //               추후 중복되서 오류날수 있으니"
-            //  진범: 옛 가입 영역에 박힌 DNS 영역 박혀있으면 신규 가입 영역 박을 때 81053 사고
-            //  봉합: 가입 영역 박힌 도메인 별칭 영역 + DB tenants 영역 0건이면 옛 DNS 영역 자동 정리
+            //  진범: 옛 가입 영역에 저장된 DNS 영역 있으면 신규 가입 영역 저장할 때 81053 사고
+            //  봉합: 가입 영역 저장된 도메인 별칭 영역 + DB tenants 영역 0건이면 옛 DNS 영역 자동 정리
             if (!string.IsNullOrWhiteSpace(desiredDomain) && _cfDomain.IsConfigured)
             {
                 var existingTenant = await db.QueryFirstOrDefaultAsync<long?>(
@@ -221,15 +221,15 @@ public class LandingSignupController : ControllerBase
                     req.ResellerCode
                 });
 
-            // 헌법 #20·#22 정합 — 가입 즉시 tenants에 메타 박제 (업무 데이터 0, status=pending)
+            // 헌법 #20·#22 정합 — 가입 즉시 tenants에 메타 저장 (업무 데이터 0, status=pending)
             var tenantId = Guid.NewGuid().ToString();
             var codeSeq = await db.QueryFirstOrDefaultAsync<int>("SELECT COUNT(*) + 1 FROM tenants");
             var tenantCode = $"T-{codeSeq:D3}";
 
-            // 사장님 결재 2026-06-08 — biz_no·ceo_name 평문 박힘. 헌법 #35 정합:
+            // 사장님 결재 2026-06-08 — biz_no·ceo_name 평문 저장. 헌법 #35 정합:
             //   "랜딩에서 인증된 사업자등록증 정보 → 계정관리·회사정보 자동 반영"
-            //   ERP 사용자정보설정에 자동 박혀야 정합. tenants는 백오피스 영역(고객사 PK)이므로 평문 박힘.
-            // 사업자번호는 정규화(숫자만) 박은 후 저장.
+            //   ERP 사용자정보설정에 자동 저장되어야 정합. tenants는 백오피스 영역(고객사 PK)이므로 평문 저장.
+            // 사업자번호는 정규화(숫자만) 저장한 후 저장.
             var bizNoNorm = new string((req.BizNo ?? "").Where(char.IsDigit).ToArray());
             await db.ExecuteAsync(@"
                 INSERT INTO tenants
@@ -254,7 +254,7 @@ public class LandingSignupController : ControllerBase
                 signupToken, tenantCode, req.Email, req.PlanType);
 
             // 신청 접수 안내 메일 (헌법 #20·#22·#35 정합 — 고객사 코드는 백오피스 PK 영역, 고객 노출 절대 금지)
-            // 사장님 결재 2026-06-08: tenantCode 메일에 박지 않음. 시리얼 키는 백오피스 승인 후 별도 발송.
+            // 사장님 결재 2026-06-08: tenantCode 메일에 저장하지 않음. 시리얼 키는 백오피스 승인 후 별도 발송.
             _ = _email.SendAsync(req.Email,
                 "[히트판] 가입 신청 접수 완료",
                 BuildSignupReceivedHtml(req.CompanyName),
@@ -301,7 +301,7 @@ public class LandingSignupController : ControllerBase
                 "UPDATE landing_signups SET status = 'paid' WHERE signup_token = @Token",
                 new { Token = req.SignupToken });
 
-            // 라이선스 키 박제 (HITP-XXXX-XXXX-XXXX-XXXX, Crockford Base32)
+            // 라이선스 키 저장 (HITP-XXXX-XXXX-XXXX-XXXX, Crockford Base32)
             // 헌법 #22 — tenants에는 HMAC 해시만, 평문은 응답 1회 (헌법 정합)
             var licenseKey = GenerateLicenseKey();
             var licensePepper = _config["License:Pepper"] ?? throw new InvalidOperationException("License:Pepper 미설정");
@@ -316,19 +316,19 @@ public class LandingSignupController : ControllerBase
             _logger.LogInformation("[LandingSignup] payment confirmed token={Token} tenants_updated={Cnt} license_issued=1",
                 req.SignupToken, affected);
 
-            // 박힘 박제 2026-06-08 (브라운킴 PM) — 결제 완료 박힘 박은 영역 ERP 박힘 박을 영역 webhook 박힘.
-            // 사장님 결재 박힘 = 카운트 박힘 박은 영역 = 결제 완료 박힘 영역. 헌법 #20·#35 정합.
+            // 저장 완료 2026-06-08 (브라운킴 PM) — 결제 완료 저장 저장한 영역 ERP 저장할 영역 webhook 저장.
+            // 사장님 결재 저장 = 카운트 저장 저장한 영역 = 결제 완료 저장 영역. 헌법 #20·#35 정합.
             var tenantIdForWebhook = await db.QueryFirstOrDefaultAsync<string?>(
                 "SELECT CAST(tenant_id AS CHAR) FROM tenants WHERE company_name = @CompanyName AND status = 'active' ORDER BY created_at DESC LIMIT 1",
                 new { signup.CompanyName });
             if (!string.IsNullOrEmpty(tenantIdForWebhook))
             {
                 await _webhook.EmitSubscriptionChangedAsync(tenantIdForWebhook, ct);
-                _logger.LogInformation("[LandingSignup] webhook 박힘 tenant={Tid}", tenantIdForWebhook);
+                _logger.LogInformation("[LandingSignup] webhook 저장 tenant={Tid}", tenantIdForWebhook);
             }
 
             // 라이선스 키(부모계정ID) 이메일 송부 (헌법 #35 — 본사 백오피스가 직접 부여)
-            // SMTP 미박제 시 로그만, 가입 흐름은 중단 없음
+            // SMTP 미저장 시 로그만, 가입 흐름은 중단 없음
             if (!string.IsNullOrWhiteSpace(signup.Email))
             {
                 _ = _email.SendAsync(signup.Email,

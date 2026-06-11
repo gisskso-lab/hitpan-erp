@@ -1,5 +1,5 @@
 @* 작지① 그리드 규격 콤보박스 (사장님 작업지시 2026-05-31)
-   - 품명 선택 시 ItemId 박제 → 해당 상품의 등록된 규격 옵션 표시
+   - 품명 선택 시 ItemId 저장 → 해당 상품의 등록된 규격 옵션 표시
    - 옵션 없을 시 공란 OR 텍스트박스처럼 직접 입력 가능
    - 직접 입력값도 그대로 전송 (DB 미저장 임시값 OK)
 *@
@@ -81,7 +81,7 @@
             .Where(o => o.Contains(query, StringComparison.OrdinalIgnoreCase))
             .ToList();
 
-        // 직접 입력값이 옵션에 없으면 첫 번째로 박제 (사용자 자유 입력 보장)
+        // 직접 입력값이 옵션에 없으면 첫 번째로 저장 (사용자 자유 입력 보장)
         if (!filtered.Any(o => string.Equals(o, query, StringComparison.OrdinalIgnoreCase)))
         {
             filtered.Insert(0, query);

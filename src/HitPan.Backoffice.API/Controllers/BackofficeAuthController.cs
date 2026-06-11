@@ -11,7 +11,7 @@ namespace HitPan.Backoffice.API.Controllers;
 
 // 백오피스 인증 API (헌법 #35 정합 — ERP API와 완전 분리)
 //
-// 가벼운 박제 (B안 — 사장님 결재 2026-06-04):
+// 가벼운 저장 (B안 — 사장님 결재 2026-06-04):
 //   - Dapper로 platform_admins·resellers 테이블 직접 쿼리
 //   - BCrypt 비밀번호 검증
 //   - JWT 발급 (백오피스 전용 키 · aud=backoffice)
@@ -181,7 +181,7 @@ public class BackofficeAuthController : ControllerBase
         var token = new JwtSecurityToken(issuer, audience, claims, expires: expiresAt, signingCredentials: creds);
         var access = new JwtSecurityTokenHandler().WriteToken(token);
 
-        // refresh: 단순 GUID (다음 단계 — DB 박제 + 만료·재발급)
+        // refresh: 단순 GUID (다음 단계 — DB 저장 + 만료·재발급)
         var refresh = Guid.NewGuid().ToString("N");
         return (access, refresh, expiresAt);
     }

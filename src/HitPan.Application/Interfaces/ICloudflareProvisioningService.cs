@@ -5,7 +5,7 @@ namespace HitPan.Application.Interfaces;
 /// 사장님 결재 2026-06-01 / 헌법 #18·#29 정합
 ///
 /// 본 인터페이스는 본사 서버에서만 호출. 고객 PC 절대 호출 금지 (헌법 #18).
-/// 실제 Cloudflare API 호출은 후속 작지에서 구현 박제.
+/// 실제 Cloudflare API 호출은 후속 작지에서 구현 저장.
 /// 현재는 스켈레톤 + 정책 명세.
 /// </summary>
 public interface ICloudflareProvisioningService

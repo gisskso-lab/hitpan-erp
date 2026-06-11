@@ -4,7 +4,7 @@ namespace HitPan.API.Services.Notifications;
 // SmsSenderService — 알리고 / NHN Cloud 스텁 (WS-20260601-14)
 // 백엔드 매니저 + 보안 매니저 2 합의 스텁.
 //   - 정식 키는 환경변수 (Notifications:Sms:Provider / ApiKey / Sender) + 사장님 결재 후
-//   - 현재는 스텁: 로그만 박제, 실제 전송 없음
+//   - 현재는 스텁: 로그만 저장, 실제 전송 없음
 //   - SMS 본문 60자 이내: 시리얼 일부 + 임시비번 + 만료 안내 (2채널 분리: 이메일에는 임시비번 금지)
 //   - 헌법 #15: 빈 catch 금지 → _logger.LogWarning(ex, ...)
 // ─────────────────────────────────────────────────────────────────────────────

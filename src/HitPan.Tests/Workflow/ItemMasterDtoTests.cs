@@ -2,10 +2,10 @@ using HitPan.Application.DTOs.Item;
 
 namespace HitPan.Tests.Workflow;
 
-// 상품마스터 DTO 검증 (헌법 #4 decimal + 규격 콤보박스 박제 정합)
+// 상품마스터 DTO 검증 (헌법 #4 decimal + 규격 콤보박스 저장 정합)
 public class ItemMasterDtoTests
 {
-    [Fact(DisplayName = "IM-01: ItemListDto 기본 박제")]
+    [Fact(DisplayName = "IM-01: ItemListDto 기본 저장")]
     public void ItemList_Default_ValuesAreSafe()
     {
         var item = new ItemListDto();

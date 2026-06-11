@@ -13,7 +13,7 @@
 
     옵션 C (사장님 결재):
       - 본사 평문 사업자정보 보관 0건
-      - 라이선스 키 + 사업자번호 + 회사정보(평문) ERP 로컬에만 박제
+      - 라이선스 키 + 사업자번호 + 회사정보(평문) ERP 로컬에만 저장
       - 백오피스 API는 해시 매칭 검증만
 
     흐름:
@@ -290,7 +290,7 @@
             var result = await res.Content.ReadFromJsonAsync<BootstrapResponse>();
             if (res.IsSuccessStatusCode && result?.Success == true)
             {
-                // 부모계정 이메일 기본값 박제 (사용자가 수정 가능)
+                // 부모계정 이메일 기본값 저장 (사용자가 수정 가능)
                 _parentEmail = _email;
                 _parentName = _ceoName;
                 _step = 3;

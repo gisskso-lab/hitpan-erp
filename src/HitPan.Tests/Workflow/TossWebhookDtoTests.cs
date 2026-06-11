@@ -32,7 +32,7 @@ public class TossWebhookDtoTests
         Assert.Equal("processed", ok.Reason);
     }
 
-    [Fact(DisplayName = "TW-03: TossWebhookResult 거부 사유 박제")]
+    [Fact(DisplayName = "TW-03: TossWebhookResult 거부 사유 저장")]
     public void TossWebhookResult_should_reject_with_reason()
     {
         var fail = new TossWebhookResult(false, "invalid signature");

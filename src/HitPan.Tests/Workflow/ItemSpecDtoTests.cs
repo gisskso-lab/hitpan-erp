@@ -6,7 +6,7 @@ namespace HitPan.Tests.Workflow;
 // 작지① 상품 규격 1:N DTO 검증 (사장님 작업지시 2026-05-31)
 public class ItemSpecDtoTests
 {
-    [Fact(DisplayName = "IS-01: ItemSpecDto 기본값 박제")]
+    [Fact(DisplayName = "IS-01: ItemSpecDto 기본값 저장")]
     public void Default_IsActive_True_OthersEmpty()
     {
         var dto = new ItemSpecDto();

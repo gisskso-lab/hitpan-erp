@@ -2,7 +2,7 @@ namespace HitPan.Watchdog.AutoUpdate;
 
 /// <summary>
 /// Phase 2 검토: Velopack 자동 업데이트 통합 PoC stub.
-/// 실제 통합 시 NuGet `Velopack` 패키지 추가 + 본사 업데이트 서버(`https://updates.hitpan.kr`) 박제.
+/// 실제 통합 시 NuGet `Velopack` 패키지 추가 + 본사 업데이트 서버(`https://updates.hitpan.kr`) 저장.
 ///
 /// 통합 시퀀스:
 /// 1. csproj에 PackageReference Include="Velopack" Version="0.0.x"

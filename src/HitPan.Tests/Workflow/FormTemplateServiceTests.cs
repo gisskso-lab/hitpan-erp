@@ -15,21 +15,21 @@ public class FormTemplateServiceTests
         return new FormTemplateService(uow.Object, NullLogger<FormTemplateService>.Instance);
     }
 
-    [Fact(DisplayName = "FTS-01: ListAsync — tenantId null 박제 시 ArgumentException")]
+    [Fact(DisplayName = "FTS-01: ListAsync — tenantId null 저장 시 ArgumentException")]
     public async Task List_NullTenantId_Throws()
     {
         var svc = CreateService();
         await Assert.ThrowsAsync<ArgumentException>(() => svc.ListAsync(null!));
     }
 
-    [Fact(DisplayName = "FTS-02: ListAsync — tenantId 공백 박제 시 ArgumentException")]
+    [Fact(DisplayName = "FTS-02: ListAsync — tenantId 공백 저장 시 ArgumentException")]
     public async Task List_EmptyTenantId_Throws()
     {
         var svc = CreateService();
         await Assert.ThrowsAsync<ArgumentException>(() => svc.ListAsync("   "));
     }
 
-    [Theory(DisplayName = "FTS-03: CreateAsync — paper_mode 비정상 박제 시 InvalidOperationException")]
+    [Theory(DisplayName = "FTS-03: CreateAsync — paper_mode 비정상 저장 시 InvalidOperationException")]
     [InlineData("preprent")]   // 오타
     [InlineData("PLAIN")]      // 대문자
     [InlineData("")]
@@ -46,7 +46,7 @@ public class FormTemplateServiceTests
         await Assert.ThrowsAsync<InvalidOperationException>(() => svc.CreateAsync("tenant-1", req));
     }
 
-    [Theory(DisplayName = "FTS-04: UpdateAsync — paper_mode 비정상 박제 시 InvalidOperationException")]
+    [Theory(DisplayName = "FTS-04: UpdateAsync — paper_mode 비정상 저장 시 InvalidOperationException")]
     [InlineData("preprent")]
     [InlineData("CUSTOM")]
     public async Task Update_InvalidPaperMode_Throws(string paperMode)

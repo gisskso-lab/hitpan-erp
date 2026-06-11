@@ -12,7 +12,7 @@ namespace HitPan.Application.Services;
 /// 정책:
 ///  - 본사 백오피스 platform_admin만 호출 가능 (Controller [Authorize(Policy="PlatformOnly")])
 ///  - 멱등 — 동일 invoice 환불 시도 차단
-///  - 토스 API 실호출은 후속 작지 박제 (스켈레톤)
+///  - 토스 API 실호출은 후속 작지 저장 (스켈레톤)
 ///
 /// 헌법 #5·#23 정합 — 감사 로그 + 5중 검증 통과 필요
 /// </summary>
@@ -53,7 +53,7 @@ public class RefundService : IRefundService
         if (invoice.Status != "paid")
             return new AdminRefundResult(false, $"환불 불가 상태: {invoice.Status}", null);
 
-        // 2. 트랜잭션 박제
+        // 2. 트랜잭션 저장
         using var tx = await _uow.BeginTransactionAsync(ct);
         try
         {

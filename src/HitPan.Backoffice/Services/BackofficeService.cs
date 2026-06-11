@@ -5,7 +5,7 @@ using HitPan.Backoffice.Models.Backoffice;
 namespace HitPan.Backoffice.Services;
 
 // 헌법 #35 객체 완전 분리 (사장님 결재 2026-06-04 W1+W2+W5):
-//   - 인증 2개 (AdminLogin·ResellerLogin) — 백오피스 API에 박제됨, 작동
+//   - 인증 2개 (AdminLogin·ResellerLogin) — 백오피스 API에 저장됨, 작동
 //   - 나머지 14개 — 옛 ERP api/admin/* · api/reseller/* 좀비 흐름
 //     → ERP에서 컨트롤러 16개 삭제 후 폐기됨 (W9 백오피스 신설 대기)
 //     → 사장님 클릭 시 폭발 방지로 안전 stub (NotSupported + Obsolete)

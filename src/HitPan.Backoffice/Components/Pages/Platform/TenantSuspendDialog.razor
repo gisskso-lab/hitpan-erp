@@ -5,7 +5,7 @@
 <MudDialog>
     <DialogContent>
         <MudText Typo="Typo.body2" Color="Color.Secondary" Class="mb-3">
-            <b>@Row?.CompanyName (@Row?.TenantCode)</b> 고객사를 일시 정지합니다. 사유는 감사로그에 박제됩니다.
+            <b>@Row?.CompanyName (@Row?.TenantCode)</b> 고객사를 일시 정지합니다. 사유는 감사로그에 기록됩니다.
         </MudText>
         <MudTextField @bind-Value="_reason" Label="정지 사유 *"
                       Lines="3" Variant="Variant.Outlined" Margin="Margin.Dense"

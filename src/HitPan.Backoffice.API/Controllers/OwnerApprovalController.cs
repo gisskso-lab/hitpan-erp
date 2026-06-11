@@ -96,7 +96,7 @@ public class OwnerApprovalController : ControllerBase
             if (item.RequesterId == actorId)
                 return BadRequest(new { success = false, message = "요청자 본인은 승인할 수 없습니다 (4-eyes)." });
 
-            // 트랜잭션: 결재 상태 + 실제 액션 동시 박제
+            // 트랜잭션: 결재 상태 + 실제 액션 동시 저장
             using var tx = await db.BeginTransactionAsync(ct);
             try
             {

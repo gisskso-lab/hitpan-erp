@@ -9,7 +9,7 @@ namespace HitPan.Application.Services;
 // 헌법 #35 객체 완전 분리 (사장님 결재 2026-06-04):
 //   - 회사정보 마스터 = ERP 로컬 DB의 local_company (고객사 PC)
 //   - 백오피스 DB의 tenants는 본사 영역(라이선스·구독·AI·기기·대리점)만, ERP가 직접 참조 0건
-//   - tenant_id는 양쪽 동일값 박제 (FK 정합 보존)
+//   - tenant_id는 양쪽 동일값 저장 (FK 정합 보존)
 public sealed class CompanyService : ICompanyService
 {
     private readonly IDbConnection _db;

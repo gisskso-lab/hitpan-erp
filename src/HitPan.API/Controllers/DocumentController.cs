@@ -187,9 +187,9 @@ public class DocumentController : ControllerBase
         var tenantId = HttpContext.Items["TenantId"]?.ToString();
         if (string.IsNullOrEmpty(tenantId)) return Forbid();
 
-        // import 메타 1건 박제 (audit). 실제 라인별 INSERT는 마스터 영역 CRUD API
+        // import 메타 1건 저장 (audit). 실제 라인별 INSERT는 마스터 영역 CRUD API
         // (Items·Partners·Companies)를 통해 별도 처리 — 이 endpoint는 일괄 import의
-        // 메타 audit + 미리보기 확정 신호를 박제하는 영역.
+        // 메타 audit + 미리보기 확정 신호를 저장하는 영역.
         try
         {
             if (_db.State != ConnectionState.Open) _db.Open();

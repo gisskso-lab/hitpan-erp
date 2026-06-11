@@ -228,7 +228,7 @@ builder.Services.AddAuthorization(options =>
 
     // ─────────────────────────────────────────────────────────────
     // WS-20260601-16: 백오피스/랜딩 4계층 권한 정책 (2026-06-01).
-    // 8대 명제 백오피스/랜딩 마스터 설계 §JWT 4계층 박제.
+    // 8대 명제 백오피스/랜딩 마스터 설계 §JWT 4계층 저장.
     // 기존 PlatformOnly(account_type=platform_admin)와 정합 유지:
     //   - role 클레임이 있으면 role 우선, 없으면 account_type fallback.
     // 헌법 #1 (덮어쓰기 금지) 준수: 기존 정책 손대지 않고 추가만.

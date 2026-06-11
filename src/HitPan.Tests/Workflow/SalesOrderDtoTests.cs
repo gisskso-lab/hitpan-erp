@@ -6,7 +6,7 @@ namespace HitPan.Tests.Workflow;
 // 판매 흐름 정합 — 수주 DTO 검증 (헌법 #4·#20 정합)
 public class SalesOrderDtoTests
 {
-    [Fact(DisplayName = "SO-01: CreateSalesOrderRequest 기본 박제")]
+    [Fact(DisplayName = "SO-01: CreateSalesOrderRequest 기본 저장")]
     public void Create_Default_ValuesAreSafe()
     {
         var req = new CreateSalesOrderRequest();

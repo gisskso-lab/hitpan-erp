@@ -17,7 +17,7 @@ namespace HitPan.Backoffice.API.Controllers;
 //   GET    /api/backoffice/reseller-applications          (목록, 상태 필터)
 //   GET    /api/backoffice/reseller-applications/{id}     (상세)
 //   POST   /api/backoffice/reseller-applications/{id}/approve  (승인 → reseller + reseller_accounts 생성 + 메일)
-//   POST   /api/backoffice/reseller-applications/{id}/reject   (반려 → 사유 박제 + 메일)
+//   POST   /api/backoffice/reseller-applications/{id}/reject   (반려 → 사유 저장 + 메일)
 //
 // 헌법 정합:
 //   #15 — 빈 catch 금지
@@ -216,7 +216,7 @@ public class ResellerApplicationsAdminController : ControllerBase
             _logger.LogInformation("[ResellerAppsAdmin] approved id={Id} reseller={Code} email={Email}",
                 id, resellerCode, app.Email);
 
-            // 4) 메일 송부 (트랜잭션 밖, 실패해도 승인은 박제됨)
+            // 4) 메일 송부 (트랜잭션 밖, 실패해도 승인은 저장됨)
             _ = _email.SendAsync(app.Email,
                 "[히트판] 협력업체 가입 승인 — 계정 발급 완료",
                 BuildApproveHtml(app.CompanyName, resellerCode, app.Email, tempPassword),

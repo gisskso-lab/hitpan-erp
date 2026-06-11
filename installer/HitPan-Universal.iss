@@ -5,7 +5,7 @@
 ;
 ; 기존 HitPan.iss와의 차이:
 ;   - HitPan.iss      : 고객별 빌드 (TenantId/Token 빌드 시점 주입)
-;   - HitPan-Universal: 모든 고객 동일 EXE, 시리얼 입력으로 자동 박힘 ⭐ Plan 정합
+;   - HitPan-Universal: 모든 고객 동일 EXE, 시리얼 입력으로 자동 설정 ⭐ Plan 정합
 ;
 ; 빌드 방법:
 ;   build-installer-universal.ps1
@@ -14,7 +14,7 @@
 ;   ISCC.exe HitPan-Universal.iss /DAppVersion=1.1.0
 ;
 ; 사장님 헌법 정합:
-;   #18·#22 — 본사 인프라 토큰 EXE에 박지 않음, 시리얼만 입력
+;   #18·#22 — 본사 인프라 토큰 EXE에 포함하지 않음, 시리얼만 입력
 ;   #25 — 쉽게: 시리얼 1개만 입력
 ;   #28·#30 — 고객 손 0번 자동 봉합
 ;   #34 — 정식 완성도 (베타부터 정식 인프라)
@@ -22,7 +22,7 @@
 ; ============================================================
 
 #ifndef AppVersion
-  #define AppVersion "1.1.0"
+  #define AppVersion "1.2.5"
 #endif
 
 #ifndef BackofficeApi
@@ -78,7 +78,7 @@ korean.WelcomeLabel2=히트판 ERP를 이 PC에 설치합니다.%n%n설치되는
 korean.FinishedLabel=히트판 ERP가 설치되었습니다.%n%n바탕화면의 [HitPan ERP] 아이콘을 더블클릭하여 시작하세요.%n%n시리얼 키와 회사 정보는 자동으로 박혔습니다.
 
 [Files]
-; 의존성 (BundleDir에 미리 박혀있어야 박힘)
+; 의존성 (BundleDir에 미리 포함되어 있어야 함)
 Source: "{#BundleDir}\dotnet-hosting.exe"; DestDir: "{tmp}"; Flags: deleteafterinstall ignoreversion; Check: NeedsDotNet
 Source: "{#BundleDir}\mariadb.msi"; DestDir: "{tmp}"; Flags: deleteafterinstall ignoreversion; Check: NeedsMariaDB
 Source: "{#BundleDir}\vc_redist.x64.exe"; DestDir: "{tmp}"; Flags: deleteafterinstall ignoreversion; Check: NeedsVCRedist
@@ -107,8 +107,7 @@ Name: "{commondesktop}\HitPan ERP"; Filename: "{app}\hitpan-start.bat"; WorkingD
 [Run]
 Filename: "{tmp}\dotnet-hosting.exe"; Parameters: "/quiet /norestart"; StatusMsg: ".NET 8 런타임 설치 중..."; Check: NeedsDotNet; Flags: waituntilterminated
 Filename: "{tmp}\vc_redist.x64.exe"; Parameters: "/quiet /norestart"; StatusMsg: "Visual C++ 런타임 설치 중..."; Check: NeedsVCRedist; Flags: waituntilterminated
-; MariaDB·DB 셋업·cloudflared 등록은 Code 섹션에서 시리얼 정보 받은 후 박힘
-Filename: "{app}\hitpan-start.bat"; Description: "히트판 ERP 지금 시작"; Flags: postinstall nowait skipifsilent unchecked
+; MariaDB·DB 셋업·cloudflared 등록·ERP 자동 시작·브라우저 열기는 Code 섹션 CurStepChanged에서 처리 (사장님 헌법 #30 정합 2026-06-11)
 
 [UninstallRun]
 Filename: "{app}\cloudflared.exe"; Parameters: "service uninstall"; Flags: runhidden; RunOnceId: "RemoveTunnelService"
@@ -232,10 +231,12 @@ end;
 function CallBootstrapApi(Serial: String): Boolean;
 var
   PsScript: String;
+  PsScriptFile: String;
   ResultCode: Integer;
-  ResponseFile, RequestFile: String;
+  ResponseFile, RequestFile, ErrorFile: String;
   Lines: TArrayOfString;
   RawResponse: String;
+  ErrorMsg: String;
   I: Integer;
 begin
   Result := False;
@@ -243,6 +244,8 @@ begin
 
   ResponseFile := ExpandConstant('{tmp}\bootstrap-response.json');
   RequestFile := ExpandConstant('{tmp}\bootstrap-request.json');
+  ErrorFile := ExpandConstant('{tmp}\bootstrap-error.txt');
+  PsScriptFile := ExpandConstant('{tmp}\bootstrap-call.ps1');
 
   // 요청 본문 박기 (JSON)
   SaveStringToFile(RequestFile,
@@ -251,26 +254,53 @@ begin
     '"hostname":"' + ExpandConstant('{computername}') + '",' +
     '"installerVersion":"{#AppVersion}"}', False);
 
+  // 봉합 v1.2.4 (2026-06-11): PowerShell 영역 사고 5축 봉합
+  //  1) 인라인 -Command 영역 escape 영역 사고 -> 외부 .ps1 영역 파일로 박음
+  //  2) TLS 1.2 영역 명시 (PowerShell 5.1 기본 TLS 1.0 영역 사고 방지)
+  //  3) catch 영역 사고로 ResponseFile 작성 실패 시 ErrorFile 영역 기록 (진단 영역)
+  //  4) UTF-8 영역 응답 영역 (ASCII 영역에서 한글 사고)
+  //  5) -UseBasicParsing 영역 (IE 영역 의존 0건)
   PsScript :=
-    '$ErrorActionPreference = ''Stop''; ' +
-    'try { ' +
-    '  $body = Get-Content -Raw -Path ''' + RequestFile + '''; ' +
-    '  $r = Invoke-RestMethod -Uri ''{#BackofficeApi}/api/installer/bootstrap'' ' +
-    '       -Method POST -Body $body -ContentType ''application/json'' -TimeoutSec 30; ' +
-    '  $r | ConvertTo-Json -Depth 10 -Compress | Out-File -Encoding ASCII -NoNewline ''' + ResponseFile + '''; ' +
-    '  exit 0; ' +
-    '} catch { ' +
-    '  $msg = $_.Exception.Message; ' +
-    '  if ($_.ErrorDetails -and $_.ErrorDetails.Message) { $msg = $_.ErrorDetails.Message; } ' +
-    '  "{\"success\":false,\"message\":\"$msg\"}" | Out-File -Encoding ASCII -NoNewline ''' + ResponseFile + '''; ' +
-    '  exit 1; ' +
+    '$ErrorActionPreference = ''Stop'';' + #13#10 +
+    '$ProgressPreference = ''SilentlyContinue'';' + #13#10 +
+    'try {' + #13#10 +
+    '  [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12 -bor [Net.SecurityProtocolType]::Tls13;' + #13#10 +
+    '} catch { [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12; }' + #13#10 +
+    'try {' + #13#10 +
+    '  $body = Get-Content -Raw -Path "' + RequestFile + '";' + #13#10 +
+    '  $r = Invoke-RestMethod -Uri "{#BackofficeApi}/api/installer/bootstrap" -Method POST -Body $body -ContentType "application/json" -TimeoutSec 30 -UseBasicParsing;' + #13#10 +
+    '  $json = $r | ConvertTo-Json -Depth 10 -Compress;' + #13#10 +
+    '  [System.IO.File]::WriteAllText("' + ResponseFile + '", $json, [System.Text.Encoding]::UTF8);' + #13#10 +
+    '  exit 0;' + #13#10 +
+    '} catch {' + #13#10 +
+    '  $msg = $_.Exception.Message;' + #13#10 +
+    '  if ($_.ErrorDetails -and $_.ErrorDetails.Message) { $msg = $_.ErrorDetails.Message; }' + #13#10 +
+    '  try {' + #13#10 +
+    '    [System.IO.File]::WriteAllText("' + ResponseFile + '", ''{"success":false,"message":"'' + ($msg -replace ''"'', ''\"'') + ''"}'', [System.Text.Encoding]::UTF8);' + #13#10 +
+    '  } catch { }' + #13#10 +
+    '  try { [System.IO.File]::WriteAllText("' + ErrorFile + '", $msg, [System.Text.Encoding]::UTF8); } catch { }' + #13#10 +
+    '  exit 1;' + #13#10 +
     '}';
 
-  Exec('powershell.exe', '-NoProfile -ExecutionPolicy Bypass -Command "' + PsScript + '"',
+  // PowerShell 스크립트 영역 파일 박음 (Inno Setup Exec 영역 escape 사고 회피)
+  SaveStringToFile(PsScriptFile, PsScript, False);
+
+  Exec('powershell.exe',
+       '-NoProfile -ExecutionPolicy Bypass -File "' + PsScriptFile + '"',
        '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
 
   if not FileExists(ResponseFile) then begin
-    MsgBox('백오피스 응답을 받지 못했습니다.' + #13#10 + '인터넷 연결을 확인해주세요.', mbError, MB_OK);
+    // ResponseFile 작성 실패 영역 = PowerShell 자체 사고 또는 ExecutionPolicy 영역 차단
+    ErrorMsg := '백오피스 응답을 받지 못했습니다.' + #13#10 + #13#10;
+    if FileExists(ErrorFile) and LoadStringsFromFile(ErrorFile, Lines) and (GetArrayLength(Lines) > 0) then begin
+      ErrorMsg := ErrorMsg + '오류: ' + Lines[0] + #13#10 + #13#10;
+    end else begin
+      ErrorMsg := ErrorMsg + 'PowerShell 실행 자체가 실패했습니다.' + #13#10;
+      ErrorMsg := ErrorMsg + 'ExecutionPolicy 영역 차단 또는 PowerShell 영역 0건 사고 가능' + #13#10 + #13#10;
+    end;
+    ErrorMsg := ErrorMsg + '인터넷 연결 + 백신·방화벽 영역 확인 후 재시도.' + #13#10;
+    ErrorMsg := ErrorMsg + 'PowerShell 종료 코드: ' + IntToStr(ResultCode);
+    MsgBox(ErrorMsg, mbError, MB_OK);
     Exit;
   end;
 
@@ -449,8 +479,8 @@ var
   KeysContent, BatchContent, BootstrapContent: TStringList;
 begin
   if CurStep <> ssPostInstall then Exit;
-  // 사장님 헌법 #20·#25 정합 (2026-06-11): 시리얼 무관 ERP 본체·DB·바로가기는 박힘
-  // G_BootstrapOk = false 일 때도 MariaDB·DB·hitpan-keys.conf·bootstrap.conf 박힘
+  // 사장님 헌법 #20·#25 정합 (2026-06-11): 시리얼 무관 ERP 본체·DB·바로가기는 설치 진행
+  // G_BootstrapOk = false 일 때도 MariaDB·DB·hitpan-keys.conf·bootstrap.conf 생성
   // cloudflared 터널만 G_TunnelToken 영역 조건부
 
   // 1. 보안 키 생성
@@ -502,7 +532,7 @@ begin
     Sleep(10000);
   end;
 
-  // 5. DB 셋업 (시드 박는 영역 사용자 데이터 보호)
+  // 5. DB 셋업 (시드 적재 영역, 사용자 데이터 보호)
   BatchFile := ExpandConstant('{tmp}\db-setup.bat');
   BatchContent := TStringList.Create;
   try
@@ -522,11 +552,15 @@ begin
   Exec(ExpandConstant('{cmd}'), '/C "' + BatchFile + '"', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
   DeleteFile(BatchFile);
 
-  // 6. cloudflared 터널 등록 (Day 5에 봉합 박을 영역 — 현재 G_TunnelToken null이면 건너뜀)
+  // 6. cloudflared 터널 등록 + 시작 (사장님 헌법 #28·#30 정합 2026-06-11)
+  //    봉합 v1.2.3: service install 직후 sc start 박음 — 등록만 박히고 시작 0건 영역 봉합
   if G_TunnelToken <> '' then begin
     Exec(ExpandConstant('{app}\cloudflared.exe'),
          'service install ' + G_TunnelToken,
          ExpandConstant('{app}'), SW_HIDE, ewWaitUntilTerminated, ResultCode);
+    Sleep(3000);
+    Exec(ExpandConstant('{cmd}'), '/C sc start cloudflared',
+         '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
   end;
 
   // 7. 백신 예외 + 방화벽 (헌법 #31 정합)
@@ -545,6 +579,24 @@ begin
     Exec(ExpandConstant('{app}\watchdog\HitPan.Watchdog.exe'),
          'install',
          ExpandConstant('{app}\watchdog'), SW_HIDE, ewWaitUntilTerminated, ResultCode);
+
+  // 9. ERP API 자동 시작 (사장님 헌법 #30 정합 2026-06-11)
+  //    봉합 v1.2.3: 작업 스케줄러로 SYSTEM·ONSTART 영역 등록 + 즉시 시작
+  //    사용자 손 0건 — 사용자가 바로가기 클릭 안 해도 ERP 자동 시작
+  Exec(ExpandConstant('{cmd}'),
+       '/C schtasks /Create /F /TN "HitPan-ERP-API" /TR "\"' + ExpandConstant('{app}\api\HitPan.API.exe') + '\" --urls http://0.0.0.0:5234" /SC ONSTART /RU SYSTEM /RL HIGHEST',
+       '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+  Exec(ExpandConstant('{cmd}'), '/C schtasks /Run /TN "HitPan-ERP-API"',
+       '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+
+  // 10. 브라우저 자동 열기 (사장님 헌법 #30 정합 2026-06-11)
+  //     봉합 v1.2.3: ERP API·cloudflared 영역 박힐 시간 대기 후 브라우저 영역 박음
+  //     도메인 정합 영역 → https://{domain} / 폴백 → http://localhost:5234
+  Sleep(10000);
+  if (G_PrimaryDomain <> '') and (G_PrimaryDomain <> 'localhost:5234') then
+    ShellExec('open', 'https://' + G_PrimaryDomain, '', '', SW_SHOW, ewNoWait, ResultCode)
+  else
+    ShellExec('open', 'http://localhost:5234', '', '', SW_SHOW, ewNoWait, ResultCode);
 end;
 
 function InitializeSetup(): Boolean;

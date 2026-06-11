@@ -9,7 +9,7 @@ namespace HitPan.Backoffice.API.Services;
 //   1) 해당 월 reseller_id별 tenants에서 발생한 결제 합산 (tenant_payments.status='approved')
 //   2) commission_amount = gross × (resellers.commission_rate ?? 기본 0.15)
 //   3) incentive_amount = 본 차수 0 (추후 룰 추가 — 분기·연간 보너스)
-//   4) draft 상태로 INSERT, settlement_lines에 산출 근거 박제
+//   4) draft 상태로 INSERT, settlement_lines에 산출 근거 저장
 //   5) 동일 reseller_id + month 중복 시 BadRequest (UNIQUE 키)
 //
 // 헌법 정합:

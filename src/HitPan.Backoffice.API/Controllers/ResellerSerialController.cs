@@ -16,7 +16,7 @@ namespace HitPan.Backoffice.API.Controllers;
 //   3) POST /{id}/revoke — 회수 (available 한정)
 //
 // 헌법 정합:
-//   #18·#22 — 평문 시리얼은 발급 응답 1회만, DB는 BCrypt 박제
+//   #18·#22 — 평문 시리얼은 발급 응답 1회만, DB는 BCrypt 저장
 //   #25 — 안전 (감사로그 + 회수 가능)
 [ApiController]
 [Route("api/backoffice/reseller-serials")]

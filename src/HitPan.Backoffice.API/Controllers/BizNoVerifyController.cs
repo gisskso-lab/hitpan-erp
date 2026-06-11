@@ -7,14 +7,14 @@ namespace HitPan.Backoffice.API.Controllers;
 //
 // 2단계 검증:
 //   1) 체크섬 검증 (오프라인, 즉시) — 형식·산식 오류 차단
-//   2) 국세청 진위확인 (옵션, 환경변수 토큰 박제 시 가동)
+//   2) 국세청 진위확인 (옵션, 환경변수 토큰 저장 시 가동)
 //      - 토큰: BizVerify:NtsApiKey  (사장님 결재 영역)
 //      - 토큰 없으면 체크섬만으로 응답 (verified=true, source=checksum)
 //
 // 헌법 정합:
 //   #15 — 빈 catch 금지
 //   #18·#22 — 평문 사업자번호 DB 저장 0건 (이 컨트롤러는 검증만, 저장은 LandingSignupController에서 해시)
-//   #29 — 외부 API 토큰은 환경변수에서만 (코드 박제 0)
+//   #29 — 외부 API 토큰은 환경변수에서만 (코드 저장 0)
 [ApiController]
 [Route("api/landing/biz-no")]
 [AllowAnonymous]
@@ -51,7 +51,7 @@ public class BizNoVerifyController : ControllerBase
             return Ok(new VerifyResponse { Valid = false, Message = "올바르지 않은 사업자번호입니다.", Source = "checksum" });
         }
 
-        // 2) 국세청 진위확인 (토큰 박제된 경우만)
+        // 2) 국세청 진위확인 (토큰 저장된 경우만)
         var ntsKey = _config["BizVerify:NtsApiKey"];
         if (string.IsNullOrWhiteSpace(ntsKey))
         {
@@ -67,8 +67,8 @@ public class BizNoVerifyController : ControllerBase
 
         try
         {
-            // 국세청 진위확인 API 형식 박제 (https://api.odcloud.kr/api/nts-businessman/v1/status)
-            // 토큰 박제 시 실 호출, 응답 형식 파싱은 사장님 결재 후 박제
+            // 국세청 진위확인 API 형식 저장 (https://api.odcloud.kr/api/nts-businessman/v1/status)
+            // 토큰 저장 시 실 호출, 응답 형식 파싱은 사장님 결재 후 저장
             var http = _httpFactory.CreateClient();
             using var msg = new HttpRequestMessage(HttpMethod.Post,
                 $"https://api.odcloud.kr/api/nts-businessman/v1/status?serviceKey={Uri.EscapeDataString(ntsKey)}");

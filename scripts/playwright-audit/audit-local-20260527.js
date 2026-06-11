@@ -90,17 +90,34 @@ const MENUS = [
   // 로그인
   console.log('[1] 로그인 → ' + WEB_URL);
   await page.goto(WEB_URL, { waitUntil: 'networkidle', timeout: 60000 });
+  // Blazor WASM 부트 완료 대기 — input[type=email] 가 나타날 때까지 (최대 60초)
+  await page.locator('input[type="email"]').first().waitFor({ state: 'visible', timeout: 60000 });
+  await page.waitForTimeout(2000);
   await page.screenshot({ path: path.join(OUT_DIR, '00_landing.png'), fullPage: true });
 
   try {
+    // 입력 대기 봉합 — Web 재기동 직후 첫 진입 시 input enable 지연 대응
     const emailInput = page.locator('input[type="email"]').first();
+    await emailInput.waitFor({ state: 'visible', timeout: 30000 });
+    await page.waitForTimeout(1500);
     await emailInput.click();
-    await emailInput.pressSequentially(EMAIL, { delay: 20 });
+    await emailInput.fill('');
+    await emailInput.pressSequentially(EMAIL, { delay: 30 });
     const pwInput = page.locator('input[type="password"]').first();
     await pwInput.click();
-    await pwInput.pressSequentially(PASSWORD, { delay: 20 });
-    await page.waitForTimeout(800);
-    await page.locator('button:has-text("로그인")').click();
+    await pwInput.fill('');
+    await pwInput.pressSequentially(PASSWORD, { delay: 30 });
+    await page.waitForTimeout(1500);
+    // 로그인 버튼 활성 대기
+    const loginBtn = page.locator('button:has-text("로그인")');
+    await loginBtn.waitFor({ state: 'visible', timeout: 10000 });
+    // disabled 풀릴 때까지 5초 폴링
+    for (let i = 0; i < 25; i++) {
+      const disabled = await loginBtn.getAttribute('disabled');
+      if (disabled === null) break;
+      await page.waitForTimeout(200);
+    }
+    await loginBtn.click();
     await page.waitForURL(url => !url.toString().includes('/login'), { timeout: 20000 }).catch(() => {});
     await page.waitForLoadState('networkidle', { timeout: 30000 }).catch(() => {});
     await page.screenshot({ path: path.join(OUT_DIR, '00b_after_login.png'), fullPage: true });

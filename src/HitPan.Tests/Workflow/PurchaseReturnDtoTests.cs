@@ -6,7 +6,7 @@ namespace HitPan.Tests.Workflow;
 // P0 #1 매입반품 DTO 검증 (헌법 #20 흐름 끊김 봉합 정합)
 public class PurchaseReturnDtoTests
 {
-    [Fact(DisplayName = "PR-01: CreatePurchaseReturnRequest 기본 박제")]
+    [Fact(DisplayName = "PR-01: CreatePurchaseReturnRequest 기본 저장")]
     public void Create_Default_PartnerIdEmpty_ItemsEmpty()
     {
         var req = new CreatePurchaseReturnRequest();
@@ -23,7 +23,7 @@ public class PurchaseReturnDtoTests
         Assert.NotNull(prop.GetCustomAttributes(typeof(RequiredAttribute), false).FirstOrDefault());
     }
 
-    [Fact(DisplayName = "PR-03: Items [MinLength(1)] 박제")]
+    [Fact(DisplayName = "PR-03: Items [MinLength(1)] 저장")]
     public void Create_Items_HasMinLength1()
     {
         var prop = typeof(CreatePurchaseReturnRequest).GetProperty(nameof(CreatePurchaseReturnRequest.Items))!;

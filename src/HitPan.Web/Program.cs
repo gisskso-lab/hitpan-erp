@@ -71,7 +71,7 @@ builder.Services.AddScoped<ESignService>();
 builder.Services.AddScoped<LaborContractService>();
 builder.Services.AddScoped<ChatbotService>();
 builder.Services.AddScoped<BackofficeService>();
-// 작20260601 (사장님 결재): 랜딩 v2 정적 콘텐츠 박제 서비스.
+// 작20260601 (사장님 결재): 랜딩 v2 정적 콘텐츠 저장 서비스.
 builder.Services.AddScoped<LandingContentService>();
 builder.Services.AddTransient<HitPanApiAuthHandler>();
 builder.Services.AddScoped<TenantProfileService>();

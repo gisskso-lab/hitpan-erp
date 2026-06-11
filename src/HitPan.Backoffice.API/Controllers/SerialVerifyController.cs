@@ -48,8 +48,8 @@ public class SerialVerifyController : ControllerBase
         var pepper = _config["License:Pepper"] ?? throw new InvalidOperationException("License:Pepper 미설정");
         var submittedHash = ComputeHmacSha256(normalizedKey, pepper);
 
-        // fingerprint 영역은 user-agent + 해상도 + timezone 박힌 영역 — 길이 박혀있어 저장 영역 컬럼 초과 가능.
-        // SHA-256 해시 64자 박은 영역으로 정규화. 헌법 #22 정합 (본사가 client 식별 평문 박지 않음).
+        // fingerprint 영역은 user-agent + 해상도 + timezone 저장된 영역 — 길이 있어 저장 영역 컬럼 초과 가능.
+        // SHA-256 해시 64자 저장한 영역으로 정규화. 헌법 #22 정합 (본사가 client 식별 평문 저장하지 않음).
         var fingerprintHash = ComputeHmacSha256(req.ClientFingerprint, pepper);
 
         try

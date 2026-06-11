@@ -78,7 +78,7 @@ public class WebhookAdminController : ControllerBase
                 return BadRequest(new { success = false, message = "실패·dead 상태인 항목만 재발송할 수 있습니다." });
 
             _logger.LogInformation("[WebhookAdmin] 재발송 큐 복귀 outbox_id={Id}", id);
-            return Ok(new { success = true, message = "재발송 큐에 다시 박았습니다." });
+            return Ok(new { success = true, message = "재발송 큐에 다시 추가했습니다." });
         }
         catch (Exception ex)
         {

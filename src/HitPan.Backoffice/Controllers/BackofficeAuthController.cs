@@ -15,8 +15,8 @@ namespace HitPan.Backoffice.Controllers;
 //      → returnUrl 또는 /admin/dashboard 리다이렉트
 //
 // 헌법 정합:
-//   #15 빈 catch 금지, ILogger 박제
-//   #18·#22 평문 사업자정보 0건, 토큰만 박제
+//   #15 빈 catch 금지, ILogger 저장
+//   #18·#22 평문 사업자정보 0건, 토큰만 저장
 //   #35 백오피스 자체 인증, ERP와 완전 분리
 [Route("backoffice/auth")]
 public class BackofficeAuthController : Controller

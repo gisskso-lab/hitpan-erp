@@ -36,7 +36,7 @@ public class SyncTokenDtoTests
         }
     }
 
-    [Fact(DisplayName = "ST-04: SyncTokenResult 토큰·만료 박제")]
+    [Fact(DisplayName = "ST-04: SyncTokenResult 토큰·만료 저장")]
     public void SyncTokenResult_should_carry_token_and_expiry()
     {
         var expires = DateTime.UtcNow.AddHours(24);

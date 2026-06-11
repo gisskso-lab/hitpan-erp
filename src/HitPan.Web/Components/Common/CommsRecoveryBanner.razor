@@ -1,5 +1,5 @@
 @*
-    CommsRecoveryBanner — WS-12 1클릭 통신 봉합 UI (P1 박제)
+    CommsRecoveryBanner — WS-12 1클릭 통신 봉합 UI (P1 저장)
     1분 주기 /health 폴링 → 끊김 감지 → 상단 배너 + 1클릭 봉합
     헌법 #27 (통신 무결성) + #28 (자동 봉합)
 *@
@@ -69,7 +69,7 @@ else if (_state == CommsState.Recovering)
     private Timer? _timer;
     private int _consecutiveFailures;
 
-    // 폴링 주기 (헌법 #27 정합: 통신 무결성 = 1분 박제)
+    // 폴링 주기 (헌법 #27 정합: 통신 무결성 = 1분 저장)
     private const int PollIntervalMs = 60_000;
 
     // 끊김 판정 임계치 (3회 연속 실패 = Down)

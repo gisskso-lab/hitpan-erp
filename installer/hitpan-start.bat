@@ -23,18 +23,18 @@ set DB_PORT=3306
 set DOTNET_ENVIRONMENT=Production
 set ASPNETCORE_ENVIRONMENT=Production
 
-:: Security keys
+:: Security keys — Base64 padding(=) 영역 보존 위해 첫 = 영역만 split
 if exist "%BASE%hitpan-keys.conf" (
-    for /f "usebackq tokens=1,2 delims==" %%a in ("%BASE%hitpan-keys.conf") do set %%a=%%b
+    for /f "usebackq tokens=1* delims==" %%a in ("%BASE%hitpan-keys.conf") do set %%a=%%b
 ) else (
     set JWT_SECRET=hitpan-jwt-secret-key-32chars-min!
     set ERP_ENCRYPTION_KEY=hitpan-aes-key-32bytes-exactly!!
 )
 
-:: Bootstrap (tenant + domain)
+:: Bootstrap (tenant + domain) — 첫 = 영역만 split (도메인·회사명 영역 보존)
 set PRIMARY_DOMAIN=localhost:5234
 if exist "%BASE%bootstrap.conf" (
-    for /f "usebackq tokens=1,2 delims==" %%a in ("%BASE%bootstrap.conf") do set %%a=%%b
+    for /f "usebackq tokens=1* delims==" %%a in ("%BASE%bootstrap.conf") do set %%a=%%b
 )
 
 :: Open URL — domain if available, else localhost
