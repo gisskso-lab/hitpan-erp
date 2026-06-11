@@ -39,6 +39,12 @@ Thumbs.db
 publish/
 dist/
 artifacts/sec01-build/
+
+# wwwroot/lib 영역 (Bootstrap 등 프론트 라이브러리) — 사고 #20260611 봉합
+# .gitignore의 dist/ 패턴이 wwwroot/lib/bootstrap/dist까지 박혀서 publish 영역 누락 사고
+# 봉합: lib 영역 명시적 추적 가도
+!**/wwwroot/lib/
+!**/wwwroot/lib/**
 artifacts/**/*.dll
 artifacts/**/*.exe
 artifacts/**/*.pdb
