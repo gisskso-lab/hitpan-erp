@@ -6,7 +6,7 @@ namespace HitPan.Backoffice.API.Services;
 // MFA TOTP (RFC 6238) — Google Authenticator 호환 (사장님 결재 2026-06-04, W11)
 //
 // 헌법 정합:
-//   #18·#22 — 시크릿은 AES-256 박제, 평문 0건
+//   #18·#22 — 시크릿은 AES-256 저장, 평문 0건
 //   #29 — HITPAN_BO_MFA_KEY 환경변수 (별도 키)
 //   #25 — Owner 강제, 일반 admin 선택
 public interface IMfaService

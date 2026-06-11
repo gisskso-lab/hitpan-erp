@@ -72,8 +72,8 @@ public class WebhookOutboundService : IWebhookOutboundService
             }
 
             // 2) 헌법 #35 §35: ERP 도메인 = {tenant_code}.hitpan.kr
-            // 박힘 박제 2026-06-08 (브라운킴 PM) — 베타 시연 박힘 박을 영역 모든 박힘 박힘 api-demo.hitpan.kr 박힘
-            // (베타 영역 박힘 박을 영역 = 단일 시연 영역, 고객사별 도메인 박힘 박을 영역 = 정식 영역 박힘)
+            // 저장 완료 2026-06-08 (브라운킴 PM) — 베타 시연 저장할 영역 모든 저장 저장 api-demo.hitpan.kr 저장
+            // (베타 영역 저장할 영역 = 단일 시연 영역, 고객사별 도메인 저장할 영역 = 정식 영역 저장)
             var webhookHost = Environment.GetEnvironmentVariable("WEBHOOK_TARGET_HOST")
                               ?? $"{tenant.TenantCode}.hitpan.kr";
             var targetUrl = $"https://{webhookHost}/api/internal/webhook/{(eventType == "subscription_changed" ? "subscription" : "device-slot")}";

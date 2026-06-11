@@ -16,11 +16,11 @@ namespace HitPan.Backoffice.API.Controllers;
 //   - POST /api/landing/signup/otp/verify   (OTP 검증 stub — W2 매니저 가도)
 //   - POST /api/landing/license/claim       (라이선스 검증 stub — W2 매니저 가도)
 //
-// 가입 본 흐름(POST /api/landing/signup + /confirm-payment)은 LandingSignupController 박제.
+// 가입 본 흐름(POST /api/landing/signup + /confirm-payment)은 LandingSignupController 저장.
 //
 // 헌법 정합:
-//   #18·#22 — 본사 DB만 박제, 평문 사업자정보 0건
-//   #15 — 빈 catch 금지, ILogger 박제
+//   #18·#22 — 본사 DB만 저장, 평문 사업자정보 0건
+//   #15 — 빈 catch 금지, ILogger 저장
 [ApiController]
 [Route("api/landing")]
 [AllowAnonymous]
@@ -99,7 +99,7 @@ public class LandingPublicController : ControllerBase
         // 헌법 #35 + #18/#22 정합 옵션 C (사장님 결재 2026-06-04):
         //   - 본사 평문 사업자정보 보관 0건
         //   - ERP 첫 부팅 시 라이선스 키 + 사업자번호 입력 → 둘 다 해시 매칭만 검증
-        //   - 통과 시 ERP에 메타(회사명·고객사 코드)만 반환, 사업자번호는 ERP가 입력 그대로 박제
+        //   - 통과 시 ERP에 메타(회사명·고객사 코드)만 반환, 사업자번호는 ERP가 입력 그대로 저장
         if (req is null || string.IsNullOrWhiteSpace(req.LicenseKey) || string.IsNullOrWhiteSpace(req.BizNo))
             return BadRequest(new LicenseClaimResponse { Valid = false, Message = "라이선스 키와 사업자번호가 필요합니다." });
 
@@ -136,8 +136,8 @@ public class LandingPublicController : ControllerBase
                 });
             }
 
-            // 사업자번호 해시 매칭 (landing_signups에 박제된 해시와 비교)
-            // 같은 회사명이 여러 가입에 박제될 수 있어 tenant.CompanyName과 함께 좁힘
+            // 사업자번호 해시 매칭 (landing_signups에 저장된 해시와 비교)
+            // 같은 회사명이 여러 가입에 저장될 수 있어 tenant.CompanyName과 함께 좁힘
             var bizMatch = await db.QueryFirstOrDefaultAsync<int>(@"
                 SELECT COUNT(*) FROM landing_signups
                 WHERE biz_no_hash = @BizHash AND company_name = @CompanyName",
@@ -156,12 +156,12 @@ public class LandingPublicController : ControllerBase
             // 헌법 #35 (사장님 결재 2026-06-04) W2 — 객체 완전 분리 서명 토큰
             //   - 백오피스가 HMAC-SHA256 토큰 발급, ERP는 HTTP 호출 없이 서명 검증으로 신뢰
             //   - 클레임: tenantId · tenantCode · companyName · subscription_tier · status · 본사 영역 캐시
-            //   - 만료: 10분, jti 1회용 (재사용은 ERP가 캐시 박제)
+            //   - 만료: 10분, jti 1회용 (재사용은 ERP가 캐시 저장)
             var bootstrapKey = Environment.GetEnvironmentVariable("HITPAN_BOOTSTRAP_TOKEN_KEY")
                               ?? _config["Bootstrap:TokenKey"]
                               ?? throw new InvalidOperationException("Bootstrap:TokenKey 또는 HITPAN_BOOTSTRAP_TOKEN_KEY 환경변수 미설정");
 
-            // 본사 영역 캐시 데이터 (ERP local_subscription 박제용)
+            // 본사 영역 캐시 데이터 (ERP local_subscription 저장용)
             var sub = await db.QueryFirstOrDefaultAsync<SubscriptionRow>(@"
                 SELECT
                     COALESCE(subscription_tier, 'basic') AS SubscriptionTier,
@@ -319,7 +319,7 @@ public class LandingPublicController : ControllerBase
         public string? Message { get; set; }
         public string? TenantCode { get; set; }
         // 헌법 #35 W2 (사장님 결재 2026-06-04): 객체 완전 분리 서명 토큰
-        //   ERP가 검증 후 local_company / local_subscription 박제 시 사용
+        //   ERP가 검증 후 local_company / local_subscription 저장 시 사용
         public string? BootstrapToken { get; set; }
     }
 }

@@ -8,17 +8,17 @@ using MySqlConnector;
 
 namespace HitPan.Backoffice.API.Controllers;
 
-// 가입 신청 박힘 관리 API (브라운킴 PM 박제 2026-06-08, 사장님 결재 박힘)
+// 가입 신청 저장 관리 API (브라운킴 PM 저장 2026-06-08, 사장님 결재 저장)
 //
-// 흐름 박힘:
-//   1) GET  /api/admin/signups        — 신청 목록 (status 필터 박힘)
-//   2) POST /api/admin/signups/{id}/approve — 승인 박힘 (status=paid → tenant=active → webhook 박힘)
-//   3) POST /api/admin/signups/{id}/reject  — 반려 박힘 (status=rejected)
+// 흐름 저장:
+//   1) GET  /api/admin/signups        — 신청 목록 (status 필터 저장)
+//   2) POST /api/admin/signups/{id}/approve — 승인 저장 (status=paid → tenant=active → webhook 저장)
+//   3) POST /api/admin/signups/{id}/reject  — 반려 저장 (status=rejected)
 //
 // 헌법 정합:
-//   #18·#22 — 메타·해시만 박힘, 평문 0건
-//   #20 — 가입 → 승인 → ERP 박힘 끊김 0
-//   #35 — 랜딩 가입 → 백오피스 승인 → ERP 박힘 유기적 연결
+//   #18·#22 — 메타·해시만 저장, 평문 0건
+//   #20 — 가입 → 승인 → ERP 저장 끊김 0
+//   #35 — 랜딩 가입 → 백오피스 승인 → ERP 저장 유기적 연결
 [ApiController]
 [Route("api/admin/signups")]
 [Authorize]
@@ -75,8 +75,8 @@ public class SignupsAdminController : ControllerBase
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "[SignupsAdmin] list 박힘 실패");
-            return StatusCode(500, new { success = false, message = "목록 조회 박힘 실패" });
+            _logger.LogError(ex, "[SignupsAdmin] list 조회 실패");
+            return StatusCode(500, new { success = false, message = "목록 조회 실패" });
         }
     }
 
@@ -102,7 +102,7 @@ public class SignupsAdminController : ControllerBase
             DateTime submittedAt = signup.submitted_at;
 
             // 사고 #5 봉합 (2026-06-10): signup ↔ tenant 1:1 매칭 — submitted_at에 가장 가까운 pending tenant 1건만
-            // 이전 버그: WHERE company_name AND status='pending' → 같은 회사명 여러 pending이면 모두 같은 키 박힘
+            // 이전 버그: WHERE company_name AND status='pending' → 같은 회사명 여러 pending이면 모두 같은 키 저장
             var tenantId = await db.QueryFirstOrDefaultAsync<string?>(@"
                 SELECT CAST(tenant_id AS CHAR)
                 FROM tenants
@@ -150,8 +150,8 @@ public class SignupsAdminController : ControllerBase
             }
 
             // 4-2) Cloudflare DNS 자동 발급 (사고 #4 봉합 2026-06-11 - 헌법 #35 정합)
-            //      도메인 별칭으로 {alias}.hitpan.kr CNAME 박힘. 환경변수 미설정 시 silent skip
-            //      터널 영역은 EXE 부트스트랩 시점(InstallerBootstrapController)에서 박힘 (헌법 #30 정합)
+            //      도메인 별칭으로 {alias}.hitpan.kr CNAME 저장. 환경변수 미설정 시 silent skip
+            //      터널 영역은 EXE 부트스트랩 시점(InstallerBootstrapController)에서 저장 (헌법 #30 정합)
             if (!string.IsNullOrEmpty(tenantId) && _cfDomain.IsConfigured)
             {
                 try
@@ -174,7 +174,7 @@ public class SignupsAdminController : ControllerBase
 
             // 5) 시리얼 키 이메일 발송 — 가입자가 입력한 이메일 주소로 즉시 전송 (사장님 결재 2026-06-08)
             //    헌법 #34 정합 — 발송 채널은 환경변수(Smtp:*) 토글, 실패해도 승인 흐름은 계속 진행
-            //    사장님 결재 2026-06-09 — 도메인 별칭도 메일에 박기
+            //    사장님 결재 2026-06-09 — 도메인 별칭도 메일에 저장하기
             string customerEmail = signup.email;
             string? domainAlias = await db.QueryFirstOrDefaultAsync<string?>(
                 "SELECT domain_alias FROM tenants WHERE company_name = @CompanyName ORDER BY created_at DESC LIMIT 1",
@@ -202,14 +202,14 @@ public class SignupsAdminController : ControllerBase
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "[SignupsAdmin] approve 박힘 실패 id={Id}", signupId);
-            return StatusCode(500, new { success = false, message = "승인 박힘 실패" });
+            _logger.LogError(ex, "[SignupsAdmin] approve 처리 실패 id={Id}", signupId);
+            return StatusCode(500, new { success = false, message = "승인 처리 실패" });
         }
     }
 
     // 시리얼 키 이메일 재발송 (사장님 결재 2026-06-08)
     // 사장님 명시: "백오피스에선 실제 평문으로 관리 → 시리얼넘버 형태로 복호화 시켜서 고객사메일로 시리얼넘버 전송"
-    // → 기존 평문 시리얼 그대로 재발송. 새 시리얼 발급 박지 않음 (ERP 포링키 무효화 박지 않음).
+    // → 기존 평문 시리얼 그대로 재발송. 새 시리얼 발급 저장하지 않음 (ERP 포링키 무효화 저장하지 않음).
     [HttpPost("{signupId:long}/resend-license")]
     public async Task<IActionResult> ResendLicense(long signupId, CancellationToken ct)
     {
@@ -231,7 +231,7 @@ public class SignupsAdminController : ControllerBase
             string companyName = signup.company_name;
             string customerEmail = signup.email;
 
-            // 기존 시리얼 평문 + 도메인 별칭 박힌 영역에서 그대로 읽음 (포링키·도메인 그대로 유지)
+            // 기존 시리얼 평문 + 도메인 별칭 저장된 영역에서 그대로 읽음 (포링키·도메인 그대로 유지)
             var info = await db.QueryFirstOrDefaultAsync<TenantInfoRow>(
                 "SELECT license_key_plain AS LicenseKey, domain_alias AS DomainAlias FROM tenants WHERE company_name = @CompanyName ORDER BY created_at DESC LIMIT 1",
                 new { CompanyName = companyName });
@@ -239,7 +239,7 @@ public class SignupsAdminController : ControllerBase
             var domainAlias = info?.DomainAlias;
 
             if (string.IsNullOrWhiteSpace(licenseKey))
-                return BadRequest(new { success = false, message = "이 고객사의 시리얼 키가 박혀있지 않습니다. 새로 발급이 필요합니다." });
+                return BadRequest(new { success = false, message = "이 고객사의 시리얼 키가 발급되지 않았습니다. 새로 발급이 필요합니다." });
 
             // 이메일 재발송
             bool emailSent = false;
@@ -279,15 +279,15 @@ public class SignupsAdminController : ControllerBase
                 WHERE signup_id = @Id AND status IN ('submitted', 'paid')",
                 new { Id = signupId });
             if (affected == 0)
-                return BadRequest(new { success = false, message = "반려 박힐 박을 영역 박지 않음" });
+                return BadRequest(new { success = false, message = "반려 처리할 대상이 없습니다" });
 
             _logger.LogInformation("[SignupsAdmin] rejected id={Id} reason={Reason}", signupId, req?.Reason);
-            return Ok(new { success = true, message = "반려 박힘" });
+            return Ok(new { success = true, message = "반려 완료" });
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "[SignupsAdmin] reject 박힘 실패 id={Id}", signupId);
-            return StatusCode(500, new { success = false, message = "반려 박힘 실패" });
+            _logger.LogError(ex, "[SignupsAdmin] reject 처리 실패 id={Id}", signupId);
+            return StatusCode(500, new { success = false, message = "반려 처리 실패" });
         }
     }
 
@@ -324,8 +324,8 @@ public class SignupsAdminController : ControllerBase
         return sb.ToString();
     }
 
-    // 시리얼 키 메일 HTML 본문 — 사장님 결재 2026-06-08, 2026-06-09 도메인 박힘
-    // 헌법 정합: #22 (테넌트 코드 노출 금지, 도메인 별칭만 박힘) / #25 쉽게 / #34 정식 출시 시 발신자 환경변수 교체
+    // 시리얼 키 메일 HTML 본문 — 사장님 결재 2026-06-08, 2026-06-09 도메인 저장
+    // 헌법 정합: #22 (테넌트 코드 노출 금지, 도메인 별칭만 저장) / #25 쉽게 / #34 정식 출시 시 발신자 환경변수 교체
     private static string BuildLicenseKeyEmailBody(string companyName, string licenseKey, string? domainAlias)
     {
         var safeCompany = System.Net.WebUtility.HtmlEncode(companyName ?? "");
