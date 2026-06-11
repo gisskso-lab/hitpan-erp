@@ -13,8 +13,8 @@ public class WatchdogOptionsTests
         Assert.Equal(3, o.HealthCheckFailThreshold);
         Assert.Equal(5, o.MetaPingIntervalMinutes);
         Assert.Equal(5, o.CoolDownMaxPerHour);  // 헌법 #28-F
-        Assert.Equal("https://api.hitpan.kr/watchdog/ping", o.MetaPingEndpoint);
-        Assert.Equal("https://api.hitpan.kr/watchdog/emergency", o.MetaPingEmergencyEndpoint);
+        Assert.Equal("https://back.hitpan.kr/watchdog/ping", o.MetaPingEndpoint);
+        Assert.Equal("https://back.hitpan.kr/watchdog/emergency", o.MetaPingEmergencyEndpoint);
     }
 
     [Fact]

@@ -1,7 +1,7 @@
 # =================================================================
 # InstallCloudflared.ps1 — cloudflared 자동 프로비저닝
 # 본사 API에 LicenseKey 제출 → tunnel_id + credentials_json 수령
-# 환경변수 박제 → 워치독이 이용
+# 환경변수 저장 → 워치독이 이용
 # =================================================================
 param(
     [Parameter(Mandatory=$true)]
@@ -9,7 +9,7 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
-$ProvisioningEndpoint = 'https://api.hitpan.kr/provisioning/tunnel'
+$ProvisioningEndpoint = 'https://back.hitpan.kr/provisioning/tunnel'
 
 function Log-Info($m) { Write-Output "[INFO] $m" }
 function Log-Err($m)  { Write-Output "[ERR ] $m" }
@@ -28,7 +28,7 @@ try {
 
     if (-not $tunnelId) { throw "tunnel_id missing from response" }
 
-    # 2. cred 파일 박제
+    # 2. cred 파일 저장
     $credDir = "$env:USERPROFILE\.cloudflared"
     New-Item -ItemType Directory -Path $credDir -Force | Out-Null
     $credPath = Join-Path $credDir "$tunnelId.json"
@@ -43,7 +43,7 @@ ingress:
   - hostname: $subdomain.hitpan.kr
     service: http://localhost:5234
   - hostname: api-$subdomain.hitpan.kr
-    service: http://localhost:5257
+    service: http://localhost:5234
   - service: http_status:404
 "@ | Out-File $configPath -Encoding utf8
 
@@ -67,7 +67,7 @@ ingress:
 
     Start-Service cloudflared -ErrorAction SilentlyContinue
 
-    # 5. 환경변수 박제 (Machine scope, 워치독이 읽음)
+    # 5. 환경변수 저장 (Machine scope, 워치독이 읽음)
     [Environment]::SetEnvironmentVariable('HITPAN_TUNNEL_ID',   $tunnelId,   'Machine')
     [Environment]::SetEnvironmentVariable('HITPAN_TENANT_ID',   $tenantId,   'Machine')
     [Environment]::SetEnvironmentVariable('HITPAN_LICENSE_KEY', $LicenseKey, 'Machine')
@@ -79,7 +79,7 @@ ingress:
     Log-Err "Provisioning failure: $($_.Exception.Message)"
     # 본사 실패 알림 (best-effort)
     try {
-        Invoke-RestMethod -Uri 'https://api.hitpan.kr/install/failure' -Method Post `
+        Invoke-RestMethod -Uri 'https://back.hitpan.kr/install/failure' -Method Post `
             -Body (@{ reason = 'cloudflared_provisioning'; error = $_.Exception.Message } | ConvertTo-Json) `
             -ContentType 'application/json' -TimeoutSec 10 -ErrorAction SilentlyContinue
     } catch { }

@@ -1,7 +1,7 @@
 # =================================================================
 # SelfCheck.ps1 — 설치 직후 통신 무결성 자가 점검
 # 5분 안 https://{subdomain}.hitpan.kr/health 200 → PASS
-# 실패 → 본사 자동 알림 + EventLog 박제
+# 실패 → 본사 자동 알림 + EventLog 기록
 # =================================================================
 $ErrorActionPreference = 'Continue'
 
@@ -41,7 +41,7 @@ if ($pass) {
         -EntryType Error -EventId 31011 `
         -Message "Self-check FAILED after 5min ($healthUrl)" -ErrorAction SilentlyContinue
     try {
-        Invoke-RestMethod -Uri 'https://api.hitpan.kr/install/failure' -Method Post `
+        Invoke-RestMethod -Uri 'https://back.hitpan.kr/install/failure' -Method Post `
             -Body (@{ reason = 'self_check_timeout'; url = $healthUrl } | ConvertTo-Json) `
             -ContentType 'application/json' -TimeoutSec 10 -ErrorAction SilentlyContinue
     } catch { }
