@@ -158,7 +158,14 @@ public class BackofficeAuthController : ControllerBase
     private (string accessToken, string refreshToken, DateTime expiresAt) IssueTokens(Dictionary<string, string?> claimsMap)
     {
         var jwt = _config.GetSection("Jwt");
-        var secret = jwt["Secret"] ?? "DEV-backoffice-secret-key-change-in-production-32+chars";
+        // 보안 헌법 #23·#25: JWT Secret 환경변수/설정 누락 시 즉시 예외 (fallback 시크릿 금지)
+        var secret = Environment.GetEnvironmentVariable("HITPAN_BO_JWT_SECRET")
+                    ?? jwt["Secret"]
+                    ?? throw new InvalidOperationException("Jwt:Secret 미설정");
+        if (secret.StartsWith("DEV-", StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidOperationException("Jwt:Secret 개발 기본값 사용 금지");
+        }
         var issuer = jwt["Issuer"] ?? "hitpan-backoffice";
         var audience = jwt["Audience"] ?? "backoffice";
         var expHours = int.TryParse(jwt["ExpiresHours"], out var h) ? h : 8;

@@ -107,8 +107,8 @@ public class LandingPublicController : ControllerBase
         if (bizNoNormalized.Length != 10)
             return BadRequest(new LicenseClaimResponse { Valid = false, Message = "사업자번호 형식 오류 (10자리)" });
 
-        var licensePepper = _config["License:Pepper"] ?? "dev-pepper-2026";
-        var bizPepper = _config["Backoffice:BizNoPepper"] ?? "dev-pepper-2026";
+        var licensePepper = _config["License:Pepper"] ?? throw new InvalidOperationException("License:Pepper 미설정");
+        var bizPepper = _config["Backoffice:BizNoPepper"] ?? throw new InvalidOperationException("Backoffice:BizNoPepper 미설정");
         var licenseHash = ComputeHmacSha256(req.LicenseKey.Trim(), licensePepper);
         var bizHash = ComputeHmacSha256(bizNoNormalized, bizPepper);
 

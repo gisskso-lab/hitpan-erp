@@ -45,7 +45,7 @@ public class SerialVerifyController : ControllerBase
 
         var clientIp = HttpContext.Connection.RemoteIpAddress?.ToString();
         var normalizedKey = req.LicenseKey.Trim().ToUpperInvariant().Replace(" ", "");
-        var pepper = _config["License:Pepper"] ?? "dev-pepper-2026";
+        var pepper = _config["License:Pepper"] ?? throw new InvalidOperationException("License:Pepper 미설정");
         var submittedHash = ComputeHmacSha256(normalizedKey, pepper);
 
         // fingerprint 영역은 user-agent + 해상도 + timezone 박힌 영역 — 길이 박혀있어 저장 영역 컬럼 초과 가능.

@@ -29,6 +29,7 @@ public class LandingSignupController : ControllerBase
     private readonly IEmailSender _email;
     private readonly IWebhookOutboundService _webhook;
     private readonly IDomainAliasService _domainAlias;
+    private readonly ICloudflareDomainService _cfDomain;
     private readonly ILogger<LandingSignupController> _logger;
 
     public LandingSignupController(
@@ -36,12 +37,14 @@ public class LandingSignupController : ControllerBase
         IEmailSender email,
         IWebhookOutboundService webhook,
         IDomainAliasService domainAlias,
+        ICloudflareDomainService cfDomain,
         ILogger<LandingSignupController> logger)
     {
         _config = config;
         _email = email;
         _webhook = webhook;
         _domainAlias = domainAlias;
+        _cfDomain = cfDomain;
         _logger = logger;
     }
 
@@ -122,7 +125,7 @@ public class LandingSignupController : ControllerBase
             }
         }
 
-        var pepper = _config["Backoffice:BizNoPepper"] ?? "dev-pepper-2026";
+        var pepper = _config["Backoffice:BizNoPepper"] ?? throw new InvalidOperationException("Backoffice:BizNoPepper 미설정");
         var bizNoHash = ComputeHmacSha256(bizNoNormalized, pepper);
 
         try
@@ -132,7 +135,7 @@ public class LandingSignupController : ControllerBase
             // 중복 가입 차단 — 사장님 결재 2026-06-08:
             //   "반려의 의미는 재가입 영구차단이 아니지. 가입조건 불충족이니 충족되면 가입이 되야지."
             //   "반려된 사업자는 중복체크에서 제외되야지. 승인된 사업자 번호가 아닌데."
-            //   → approved·active 상태만 중복 차단. rejected·submitted는 재가입 허용.
+            //   → approved·active 상태만 중복 차단. rejected는 재가입 허용.
             var existing = await db.QueryFirstOrDefaultAsync<long?>(
                 "SELECT COUNT(*) FROM landing_signups WHERE biz_no_hash = @Hash AND status IN ('approved','active')",
                 new { Hash = bizNoHash });
@@ -147,10 +150,55 @@ public class LandingSignupController : ControllerBase
                 });
             }
 
+            // 봉합 v1.2.4 (2026-06-11): 5분 안 중복 박힘 차단
+            //   사장님 의중: "백오피스에 시리얼 요청 1건인데 왜 여러 건?"
+            //   진범: 가입 폼 영역 중복 클릭 또는 race condition 영역
+            //   봉합: 같은 사업자번호 + 5분 안 submitted 영역 박혀있으면 차단
+            var recentSubmitted = await db.QueryFirstOrDefaultAsync<long?>(@"
+                SELECT COUNT(*) FROM landing_signups
+                WHERE biz_no_hash = @Hash
+                  AND status = 'submitted'
+                  AND submitted_at > DATE_SUB(UTC_TIMESTAMP(), INTERVAL 5 MINUTE)",
+                new { Hash = bizNoHash });
+            if (recentSubmitted.HasValue && recentSubmitted.Value > 0)
+            {
+                _logger.LogWarning("[LandingSignup] duplicate within 5min biz_no_hash email={Email}", req.Email);
+                return BadRequest(new
+                {
+                    success = false,
+                    message = "이미 가입 신청이 진행 중입니다. 잠시 후 다시 시도해주세요."
+                });
+            }
+
             // 같은 사업자번호로 이전 신청(반려·미처리)이 있으면 정리 박기 — UNIQUE 충돌 방지
             await db.ExecuteAsync(
                 "DELETE FROM landing_signups WHERE biz_no_hash = @Hash AND status NOT IN ('approved','active')",
                 new { Hash = bizNoHash });
+
+            // 봉합 v1.2.5 (2026-06-11): 옛 영역 도메인 별칭 영역 Cloudflare DNS 정리
+            //  사장님 의중: "삭제된 테넌트 코드에 서브도매인 주소와 DNS가 정리되지 않으면 안되.
+            //               추후 중복되서 오류날수 있으니"
+            //  진범: 옛 가입 영역에 박힌 DNS 영역 박혀있으면 신규 가입 영역 박을 때 81053 사고
+            //  봉합: 가입 영역 박힌 도메인 별칭 영역 + DB tenants 영역 0건이면 옛 DNS 영역 자동 정리
+            if (!string.IsNullOrWhiteSpace(desiredDomain) && _cfDomain.IsConfigured)
+            {
+                var existingTenant = await db.QueryFirstOrDefaultAsync<long?>(
+                    "SELECT COUNT(*) FROM tenants WHERE domain_alias = @Alias",
+                    new { Alias = desiredDomain });
+                if (!existingTenant.HasValue || existingTenant.Value == 0)
+                {
+                    try
+                    {
+                        var revoked = await _cfDomain.RevokeByDomainAsync(desiredDomain, ct);
+                        if (revoked)
+                            _logger.LogInformation("[LandingSignup] orphan DNS 정리 sub={Sub}", desiredDomain);
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogWarning(ex, "[LandingSignup] orphan DNS 정리 사고 sub={Sub}", desiredDomain);
+                    }
+                }
+            }
 
             var signupToken = $"sgn-{Guid.NewGuid():N}";
 
@@ -256,7 +304,7 @@ public class LandingSignupController : ControllerBase
             // 라이선스 키 박제 (HITP-XXXX-XXXX-XXXX-XXXX, Crockford Base32)
             // 헌법 #22 — tenants에는 HMAC 해시만, 평문은 응답 1회 (헌법 정합)
             var licenseKey = GenerateLicenseKey();
-            var licensePepper = _config["License:Pepper"] ?? "dev-pepper-2026";
+            var licensePepper = _config["License:Pepper"] ?? throw new InvalidOperationException("License:Pepper 미설정");
             var licenseHash = ComputeHmacSha256(licenseKey, licensePepper);
 
             var affected = await db.ExecuteAsync(

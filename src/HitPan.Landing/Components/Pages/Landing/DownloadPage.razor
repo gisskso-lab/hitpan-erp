@@ -10,13 +10,13 @@
     <div class="download-card">
         <div class="icon">⬇️</div>
         <h1>히트판 ERP 다운로드</h1>
-        <p class="lead">EXE 파일을 다운받아 더블 클릭하시면 자동 설치됩니다.<br />라이선스 키는 가입 이메일에서 확인하세요.</p>
+        <p class="lead">설치 파일을 받아 두 번 누르시면 자동으로 설치됩니다.<br />시리얼 키는 가입 안내 메일에서 확인하세요.</p>
 
         @if (!string.IsNullOrWhiteSpace(Key))
         {
-            @* 사장님 결재 박제 2026-06-02 — 라이선스 키 박제 화면 표시 (1회 박제, 헌법 #22 정합) *@
+            @* 사장님 결재 2026-06-02 — 시리얼 키 화면 표시 (1회, 헌법 #22 정합) *@
             <div class="license-box">
-                <div class="license-label">📋 라이선스 키 (이메일과 동일)</div>
+                <div class="license-label">📋 시리얼 키 (가입 안내 메일과 동일)</div>
                 <div class="license-key">@Key</div>
                 <button class="btn-copy" @onclick="CopyKey">@(_copied ? "✓ 복사됨" : "복사")</button>
             </div>
@@ -26,21 +26,21 @@
             <div class="download-item">
                 <div class="info">
                     <strong>Windows 10/11 (x64)</strong>
-                    <span>권장 · 91 MB · 버전 1.2.0</span>
+                    <span>권장 · 279 MB · 버전 1.2.4</span>
                 </div>
-                <a href="https://updates.hitpan.kr/packages/HitPan-ERP-Setup-1.2.0.exe"
+                <a href="https://updates.hitpan.kr/packages/HitPan-ERP-Setup-1.2.4.exe"
                    class="btn-dl"
-                   download>EXE 다운로드</a>
+                   download>설치 파일 받기</a>
             </div>
         </div>
 
         <div class="install-steps">
             <h3>설치 5단계 (10분 이내)</h3>
             <ol>
-                <li>EXE 파일 더블 클릭 → 관리자 권한 허용</li>
-                <li>이메일로 받은 <strong>라이선스 키</strong> 입력</li>
-                <li>자동 설치 (MariaDB · 닷넷 · 터널 · 방화벽 규칙)</li>
-                <li>설치 완료 → 브라우저 자동 오픈 (hitpan-{회사명}.kr)</li>
+                <li>설치 파일 두 번 누르기 → 관리자 권한 허용</li>
+                <li>가입 안내 메일에서 받은 <strong>시리얼 키</strong> 입력</li>
+                <li>자동 설치 (데이터베이스 · 실행환경 · 통신연결 · 보안설정)</li>
+                <li>설치 완료 → 브라우저 자동 열림 ({고객사ID}.hitpan.kr)</li>
                 <li>로그인 → 약관 동의 → 사용 시작</li>
             </ol>
         </div>
@@ -50,7 +50,7 @@
             <div class="support-grid">
                 <div>
                     <strong>📞 콜센터</strong>
-                    <p>1599-XXXX (평일 09:00~18:00)</p>
+                    <p>준비 중 (베타1 기간) · 1:1 문의 cs@hitpan.kr</p>
                 </div>
                 <div>
                     <strong>💬 AI 챗봇</strong>

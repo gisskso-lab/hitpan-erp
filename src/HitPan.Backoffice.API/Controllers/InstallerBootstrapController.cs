@@ -54,7 +54,7 @@ public class InstallerBootstrapController : ControllerBase
         {
             await using var db = await OpenAsync(ct);
 
-            var pepper = _config["License:Pepper"] ?? "dev-pepper-2026";
+            var pepper = _config["License:Pepper"] ?? throw new InvalidOperationException("License:Pepper 미설정");
             var normalizedKey = req.LicenseKey.Trim().ToUpperInvariant().Replace(" ", "");
             var licHash = ComputeHmacSha256(normalizedKey, pepper);
 
@@ -128,9 +128,10 @@ public class InstallerBootstrapController : ControllerBase
             var bootstrapTokenHash = ComputeHmacSha256(bootstrapToken, pepper);
 
             // 기기 부트스트랩 로그 (감사 추적)
+            // 봉합 v1.2.5 (2026-06-11): 컬럼 영역 정정 license_key_hash -> submitted_hash
             await db.ExecuteAsync(@"
                 INSERT INTO serial_verify_attempts
-                    (tenant_id, license_key_hash, client_fingerprint, client_ip, result, attempted_at)
+                    (tenant_id, submitted_hash, client_fingerprint, client_ip, result, attempted_at)
                 VALUES
                     (@TenantId, @LicHash, @Fp, @Ip, 'installer-bootstrap', UTC_TIMESTAMP(6))",
                 new

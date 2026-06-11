@@ -25,6 +25,8 @@ public interface ICloudflareDomainService
     // 사장님 결재 Plan 2026-06-09 (Day 5) — cloudflared 터널 자동 발급 + 토큰 발급
     Task<TunnelIssueResult> IssueTunnelAsync(string tenantId, string tenantCode, CancellationToken ct);
     Task<bool> RevokeAsync(string cfZoneId, string cfRecordId, string? cfTunnelId, CancellationToken ct);
+    // 사장님 결재 2026-06-11 — 도메인 별칭으로 영역 검색 + 삭제 (중복 발급 차단 영역)
+    Task<bool> RevokeByDomainAsync(string subdomain, CancellationToken ct);
 }
 
 public record DomainIssueResult(string Domain, string ZoneId, string RecordId, string? TunnelId);
@@ -173,5 +175,56 @@ public class CloudflareDomainService : ICloudflareDomainService
             return false;
         }
         return true;
+    }
+
+    // 사장님 결재 2026-06-11 — 도메인 별칭으로 영역 검색 + 삭제
+    //  중복 발급 사고 봉합 (81053 'CNAME already exists' 영역 차단)
+    //  백오피스 가입 영역 박을 때 옛 DNS 영역 박혀있으면 자동 정리
+    //  보존 영역: demo·back·landing·updates·api-* 영역은 박지 않음 (운영 영역 보호)
+    public async Task<bool> RevokeByDomainAsync(string subdomain, CancellationToken ct)
+    {
+        if (!IsConfigured) return false;
+        if (string.IsNullOrWhiteSpace(subdomain)) return false;
+
+        // 운영 영역 영구 보호
+        var reserved = new[] { "demo", "back", "landing", "updates", "www", "api-demo", "api", "api-back" };
+        var sub = subdomain.ToLowerInvariant();
+        if (Array.Exists(reserved, r => r == sub))
+        {
+            _logger.LogWarning("[CFDomain] 운영 영역 삭제 시도 차단 sub={Sub}", sub);
+            return false;
+        }
+
+        var fqdn = $"{sub}.{_baseDomain}";
+        var http = _httpFactory.CreateClient();
+        http.BaseAddress = new Uri("https://api.cloudflare.com/client/v4/");
+        http.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", _token);
+
+        try
+        {
+            var listRes = await http.GetAsync($"zones/{_zoneId}/dns_records?name={fqdn}", ct);
+            if (!listRes.IsSuccessStatusCode) return false;
+            var listBody = await listRes.Content.ReadAsStringAsync(ct);
+            using var doc = JsonDocument.Parse(listBody);
+            var results = doc.RootElement.GetProperty("result");
+            bool anyDeleted = false;
+            foreach (var r in results.EnumerateArray())
+            {
+                var id = r.GetProperty("id").GetString();
+                if (string.IsNullOrEmpty(id)) continue;
+                var delRes = await http.DeleteAsync($"zones/{_zoneId}/dns_records/{id}", ct);
+                if (delRes.IsSuccessStatusCode)
+                {
+                    _logger.LogInformation("[CFDomain] revoke by domain sub={Sub} id={Id}", sub, id);
+                    anyDeleted = true;
+                }
+            }
+            return anyDeleted;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "[CFDomain] revoke by domain 영역 사고 sub={Sub}", sub);
+            return false;
+        }
     }
 }

@@ -42,7 +42,14 @@ public class Program
 
         // JWT 인증 (백오피스 전용 — ERP와 분리)
         var jwt = builder.Configuration.GetSection("Jwt");
-        var secret = jwt["Secret"] ?? "DEV-backoffice-secret-key-change-in-production-32+chars";
+        // 보안 헌법 #23·#25: JWT Secret 환경변수/설정 누락 시 즉시 기동 중단 (fallback 시크릿 금지)
+        var secret = Environment.GetEnvironmentVariable("HITPAN_BO_JWT_SECRET")
+                    ?? jwt["Secret"]
+                    ?? throw new InvalidOperationException("Jwt:Secret 미설정 — 환경변수 HITPAN_BO_JWT_SECRET 또는 appsettings Jwt:Secret 필수");
+        if (secret.StartsWith("DEV-", StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidOperationException("Jwt:Secret 개발 기본값 사용 금지 — 운영 시크릿으로 교체 필수");
+        }
         var issuer = jwt["Issuer"] ?? "hitpan-backoffice";
         var audience = jwt["Audience"] ?? "backoffice";
 

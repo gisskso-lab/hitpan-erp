@@ -21,7 +21,7 @@ namespace HitPan.Backoffice.API.Controllers;
 //   #35 — 랜딩 가입 → 백오피스 승인 → ERP 박힘 유기적 연결
 [ApiController]
 [Route("api/admin/signups")]
-[AllowAnonymous]
+[Authorize]
 public class SignupsAdminController : ControllerBase
 {
     private readonly IConfiguration _config;
@@ -122,7 +122,7 @@ public class SignupsAdminController : ControllerBase
             // 2) 시리얼(라이선스 키) 발급 — HITP-XXXX-XXXX-XXXX-XXXX, Crockford Base32 (어벤져스 A안)
             //    헌법 #18·#22 정합 — DB에는 HMAC 해시만 저장, 평문은 응답 1회만 노출
             var licenseKey = GenerateLicenseKey();
-            var licensePepper = _config["License:Pepper"] ?? "dev-pepper-2026";
+            var licensePepper = _config["License:Pepper"] ?? throw new InvalidOperationException("License:Pepper 미설정");
             var licenseHash = ComputeHmacSha256(licenseKey, licensePepper);
 
             // 3) tenant 활성화 + license_key_hash + license_key_plain 저장 — tenant_id 단건 정확 매칭
@@ -151,6 +151,7 @@ public class SignupsAdminController : ControllerBase
 
             // 4-2) Cloudflare DNS 자동 발급 (사고 #4 봉합 2026-06-11 - 헌법 #35 정합)
             //      도메인 별칭으로 {alias}.hitpan.kr CNAME 박힘. 환경변수 미설정 시 silent skip
+            //      터널 영역은 EXE 부트스트랩 시점(InstallerBootstrapController)에서 박힘 (헌법 #30 정합)
             if (!string.IsNullOrEmpty(tenantId) && _cfDomain.IsConfigured)
             {
                 try
@@ -372,17 +373,17 @@ public class SignupsAdminController : ControllerBase
 
     <div style=""background:#FEF3C7;border:2px solid #F59E0B;border-radius:12px;padding:24px;margin:24px 0;text-align:center;"">
       <p style=""margin:0 0 12px;color:#92400E;font-size:14px;font-weight:700;"">📥 설치 파일 다운로드</p>
-      <a href=""https://updates.hitpan.kr/packages/HitPan-ERP-Setup-1.2.0.exe""
+      <a href=""https://updates.hitpan.kr/packages/HitPan-ERP-Setup-1.2.4.exe""
          style=""display:inline-block;background:#0F6E56;color:#fff;padding:14px 32px;border-radius:8px;font-size:15px;font-weight:700;text-decoration:none;"">
-        히트판 ERP 설치 프로그램 (91 MB)
+        히트판 ERP 설치 프로그램 (279 MB)
       </a>
-      <p style=""margin:12px 0 0;color:#92400E;font-size:12px;"">버전 1.2.0 · Windows 10/11 (64bit)</p>
+      <p style=""margin:12px 0 0;color:#92400E;font-size:12px;"">버전 1.2.4 · Windows 10/11 (64bit)</p>
     </div>
 
     <h2 style=""font-size:16px;margin:24px 0 12px;color:#0F1419;"">설치 방법 (10분 소요)</h2>
     <ol style=""margin:0 0 16px 20px;padding:0;font-size:14px;line-height:1.8;color:#374151;"">
       <li>위 [히트판 ERP 설치 프로그램] 버튼을 클릭하여 파일을 다운로드합니다.</li>
-      <li>다운로드된 <code style=""background:#F3F4F6;padding:2px 6px;border-radius:4px;font-family:monospace;"">HitPan-ERP-Setup-1.2.0.exe</code> 파일을 <strong>마우스 우클릭 → 관리자 권한으로 실행</strong>합니다.</li>
+      <li>다운로드된 <code style=""background:#F3F4F6;padding:2px 6px;border-radius:4px;font-family:monospace;"">HitPan-ERP-Setup-1.2.4.exe</code> 파일을 <strong>마우스 우클릭 → 관리자 권한으로 실행</strong>합니다.</li>
       <li>설치 마법사 첫 화면에서 위 시리얼 키를 정확히 입력합니다.</li>
       <li>이후 모든 과정(데이터베이스·터널·자동 시작)은 자동으로 진행됩니다.</li>
       <li>설치 완료 후 브라우저가 자동으로 열리며, 본인 ERP 주소로 접속됩니다.</li>

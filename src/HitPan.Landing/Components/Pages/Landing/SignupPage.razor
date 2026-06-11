@@ -198,7 +198,7 @@
     private OpenedState _opened = new();
     private bool _submitting;
     private string? _error;
-    private string _planLabel = "스탠다드 (59,000원/월)";
+    private string _planLabel = "스탠다드 · 베타1 기간 무료";
     private bool _bizUploaded;
     // _demoMode 필드 제거 — DEMO 영역 완전 박지 않음 (사장님 결재 2026-06-08)
 
@@ -404,9 +404,9 @@
     {
         _planLabel = Plan switch
         {
-            "basic" => "베이직 (29,000원/월)",
-            "premium" => "프리미엄 (100,000원/월)",
-            _ => "스탠다드 (59,000원/월)"
+            "basic" => "베이직 · 베타1 기간 무료",
+            "premium" => "프리미엄 · 베타1 기간 무료",
+            _ => "스탠다드 · 베타1 기간 무료"
         };
     }
 

@@ -53,7 +53,7 @@ public class DeviceRegistrationController : ControllerBase
             await using var db = await OpenAsync(ct);
 
             // 1) 시리얼로 tenant 조회 + 플랜의 PC/모바일 기기 한도 조회 (사장님 결재 2026-06-08)
-            var pepper = _config["License:Pepper"] ?? "dev-pepper-2026";
+            var pepper = _config["License:Pepper"] ?? throw new InvalidOperationException("License:Pepper 미설정");
             var licHash = ComputeHmacSha256(req.LicenseKey.Trim().ToUpperInvariant().Replace(" ", ""), pepper);
 
             // fingerprint 해시 정규화 — 평문 길이 박힘 사고 차단 + 헌법 #22 정합
@@ -173,7 +173,7 @@ public class DeviceRegistrationController : ControllerBase
         try
         {
             await using var db = await OpenAsync(ct);
-            var pepper = _config["License:Pepper"] ?? "dev-pepper-2026";
+            var pepper = _config["License:Pepper"] ?? throw new InvalidOperationException("License:Pepper 미설정");
             var tokenHash = ComputeHmacSha256(req.DeviceToken, pepper);
             var fingerprintHash = ComputeHmacSha256(req.Fingerprint, pepper);
 

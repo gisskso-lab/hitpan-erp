@@ -18,19 +18,19 @@
             </div>
             <div class="step @StepClass(1)">
                 <span class="dot">@(IsDone(1) ? "✓" : "2")</span>
-                <span>도메인 발급 (hitpan-{회사명}.kr)</span>
+                <span>도메인 발급 ({고객사ID}.hitpan.kr)</span>
             </div>
             <div class="step @StepClass(2)">
                 <span class="dot">@(IsDone(2) ? "✓" : "3")</span>
-                <span>터널 생성 (Cloudflare)</span>
+                <span>통신연결 준비</span>
             </div>
             <div class="step @StepClass(3)">
                 <span class="dot">@(IsDone(3) ? "✓" : "4")</span>
-                <span>라이선스 키 생성</span>
+                <span>시리얼 키 생성</span>
             </div>
             <div class="step @StepClass(4)">
                 <span class="dot">@(IsDone(4) ? "✓" : "5")</span>
-                <span>이메일 발송 (라이선스 + 다운로드 링크)</span>
+                <span>안내 메일 발송 (시리얼 키 + 다운로드 안내)</span>
             </div>
         </div>
 
@@ -40,14 +40,14 @@
                 <p>✓ 모든 준비가 완료되었습니다.</p>
                 @if (!string.IsNullOrWhiteSpace(Key))
                 {
-                    @* 사장님 결재 박제 2026-06-02 — 라이선스 키 평문 1회 박제 (헌법 #22 정합) *@
+                    @* 사장님 결재 2026-06-02 — 시리얼 키 평문 1회 노출 (헌법 #22 정합) *@
                     <div class="license-box">
-                        <div class="license-label">📋 라이선스 키 (이 화면을 떠나면 다시 볼 수 없습니다)</div>
+                        <div class="license-label">📋 시리얼 키 (이 화면을 떠나면 다시 볼 수 없습니다)</div>
                         <div class="license-key">@Key</div>
                         <button class="btn-copy" @onclick="CopyKey">@(_copied ? "✓ 복사됨" : "복사")</button>
                     </div>
                 }
-                <p style="margin-top:16px;font-size:13px;color:#4B5563;">이메일에도 라이선스 키와 다운로드 링크를 발송했습니다.</p>
+                <p style="margin-top:16px;font-size:13px;color:#4B5563;">가입 안내 메일에도 시리얼 키와 다운로드 안내를 발송했습니다.</p>
                 <button class="btn-primary" @onclick='@(() => Nav.NavigateTo($"/download?key={Uri.EscapeDataString(Key ?? "")}"))'>다운로드 안내</button>
             </div>
         }
