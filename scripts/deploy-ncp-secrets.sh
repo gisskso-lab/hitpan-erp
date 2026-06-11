@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+﻿#!/usr/bin/env bash
 # 히트판 ERP — NCP 서버 환경변수 일괄 등록 스크립트
 #
 # 사용:

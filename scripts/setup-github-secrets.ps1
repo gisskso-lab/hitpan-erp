@@ -1,4 +1,4 @@
-# 히트판 ERP — GitHub Actions Secrets 일괄 등록 스크립트
+﻿# 히트판 ERP — GitHub Actions Secrets 일괄 등록 스크립트
 # 사용: 사장님이 PowerShell에서 1회 실행
 #   1) gh CLI 설치: winget install GitHub.cli
 #   2) gh auth login (브라우저 인증 1회)
