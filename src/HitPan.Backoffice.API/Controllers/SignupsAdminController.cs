@@ -373,19 +373,19 @@ public class SignupsAdminController : ControllerBase
 
     <div style=""background:#FEF3C7;border:2px solid #F59E0B;border-radius:12px;padding:24px;margin:24px 0;text-align:center;"">
       <p style=""margin:0 0 12px;color:#92400E;font-size:14px;font-weight:700;"">📥 설치 파일 다운로드</p>
-      <a href=""https://updates.hitpan.kr/packages/HitPan-ERP-Setup-1.2.4.exe""
+      <a href=""https://updates.hitpan.kr/packages/HitPan-ERP-Setup-1.2.5.exe""
          style=""display:inline-block;background:#0F6E56;color:#fff;padding:14px 32px;border-radius:8px;font-size:15px;font-weight:700;text-decoration:none;"">
         히트판 ERP 설치 프로그램 (279 MB)
       </a>
-      <p style=""margin:12px 0 0;color:#92400E;font-size:12px;"">버전 1.2.4 · Windows 10/11 (64bit)</p>
+      <p style=""margin:12px 0 0;color:#92400E;font-size:12px;"">버전 1.2.5 · Windows 10/11 (64bit)</p>
     </div>
 
     <h2 style=""font-size:16px;margin:24px 0 12px;color:#0F1419;"">설치 방법 (10분 소요)</h2>
     <ol style=""margin:0 0 16px 20px;padding:0;font-size:14px;line-height:1.8;color:#374151;"">
       <li>위 [히트판 ERP 설치 프로그램] 버튼을 클릭하여 파일을 다운로드합니다.</li>
-      <li>다운로드된 <code style=""background:#F3F4F6;padding:2px 6px;border-radius:4px;font-family:monospace;"">HitPan-ERP-Setup-1.2.4.exe</code> 파일을 <strong>마우스 우클릭 → 관리자 권한으로 실행</strong>합니다.</li>
+      <li>다운로드된 <code style=""background:#F3F4F6;padding:2px 6px;border-radius:4px;font-family:monospace;"">HitPan-ERP-Setup-1.2.5.exe</code> 파일을 <strong>마우스 우클릭 → 관리자 권한으로 실행</strong>합니다.</li>
       <li>설치 마법사 첫 화면에서 위 시리얼 키를 정확히 입력합니다.</li>
-      <li>이후 모든 과정(데이터베이스·터널·자동 시작)은 자동으로 진행됩니다.</li>
+      <li>이후 모든 과정(데이터베이스·통신연결·자동 시작)은 자동으로 진행됩니다.</li>
       <li>설치 완료 후 브라우저가 자동으로 열리며, 본인 ERP 주소로 접속됩니다.</li>
     </ol>
 

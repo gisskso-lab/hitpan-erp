@@ -131,7 +131,7 @@ public class WebhookOutboundService : IWebhookOutboundService
     {
         var key = Environment.GetEnvironmentVariable("HITPAN_BOOTSTRAP_TOKEN_KEY")
                  ?? _config["Bootstrap:TokenKey"]
-                 ?? "DEV-bootstrap-token-key-change-in-production-32+chars";
+                 ?? throw new InvalidOperationException("Bootstrap:TokenKey 또는 HITPAN_BOOTSTRAP_TOKEN_KEY 환경변수 미설정");
         using var hmac = new HMACSHA256(Encoding.UTF8.GetBytes(key));
         var hash = hmac.ComputeHash(Encoding.UTF8.GetBytes(payloadJson));
         return Convert.ToBase64String(hash).TrimEnd('=').Replace('+', '-').Replace('/', '_');

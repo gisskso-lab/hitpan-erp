@@ -101,7 +101,7 @@ public class MfaService : IMfaService
     {
         var raw = Environment.GetEnvironmentVariable("HITPAN_BO_MFA_KEY")
                  ?? _config["Bo:MfaKey"]
-                 ?? "DEV-bo-mfa-key-change-in-production-32+chars-aaaa";
+                 ?? throw new InvalidOperationException("Bo:MfaKey 또는 HITPAN_BO_MFA_KEY 환경변수 미설정");
         using var sha = SHA256.Create();
         return sha.ComputeHash(Encoding.UTF8.GetBytes(raw));
     }

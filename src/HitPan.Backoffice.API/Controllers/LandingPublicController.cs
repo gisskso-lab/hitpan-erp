@@ -159,7 +159,7 @@ public class LandingPublicController : ControllerBase
             //   - 만료: 10분, jti 1회용 (재사용은 ERP가 캐시 박제)
             var bootstrapKey = Environment.GetEnvironmentVariable("HITPAN_BOOTSTRAP_TOKEN_KEY")
                               ?? _config["Bootstrap:TokenKey"]
-                              ?? "DEV-bootstrap-token-key-change-in-production-32+chars";
+                              ?? throw new InvalidOperationException("Bootstrap:TokenKey 또는 HITPAN_BOOTSTRAP_TOKEN_KEY 환경변수 미설정");
 
             // 본사 영역 캐시 데이터 (ERP local_subscription 박제용)
             var sub = await db.QueryFirstOrDefaultAsync<SubscriptionRow>(@"
