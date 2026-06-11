@@ -64,3 +64,5 @@ backups/
 
 tmp-build/
 logs/docx-convert*.log
+.ncp-secrets.txt
+secrets/
