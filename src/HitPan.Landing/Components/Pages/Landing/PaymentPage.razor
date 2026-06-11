@@ -98,21 +98,71 @@
         {
             _tossConfigured = false;
         }
+
+        // 사장님 결재 2026-06-11 B안: 가격 동적 로드 — 백오피스 마스터 영역 변경 반영
+        try
+        {
+            var resp = await Http.GetFromJsonAsync<PublicPricingResponse>("api/landing/pricing/public");
+            if (resp?.Success == true && resp.Data is { Count: > 0 } rows)
+            {
+                ApplyDynamicPricing(rows);
+                StateHasChanged();
+            }
+        }
+        catch (Exception)
+        {
+            // 폴백 유지 — OnParametersSet 정적 영역 (29k/49k/100k)
+        }
     }
 
     protected override void OnParametersSet()
     {
-        // 사장님 결재 저장 2026-06-02 (의중 B 모두결재) — BASIC 29k / PRO 49k / ENTERPRISE 100k+서버구축
-        (_planLabel, _priceText, _planNote) = Plan switch
+        // 폴백 영역 (API 실패 시) — BASIC 29k / PRO 49k / ENTERPRISE 100k+서버구축
+        // 옛 키 호환: premium → enterprise, standard → pro
+        var planKey = Plan switch
+        {
+            "premium" => "enterprise",
+            "standard" => "pro",
+            null or "" => "pro",
+            _ => Plan
+        };
+        (_planLabel, _priceText, _planNote) = planKey switch
         {
             "basic" => ("BASIC", "29,000원", ""),
             "enterprise" => ("ENTERPRISE", "100,000원", "+ 서버 구축비용 (상담)"),
-            "pro" => ("PRO", "49,000원", ""),
-            // 옛 키 호환 — premium·standard 들어오면 자동 매핑
-            "premium" => ("ENTERPRISE", "100,000원", "+ 서버 구축비용 (상담)"),
-            "standard" => ("PRO", "49,000원", ""),
             _ => ("PRO", "49,000원", "")
         };
+    }
+
+    private void ApplyDynamicPricing(List<PublicPlanRow> rows)
+    {
+        var planKey = Plan switch
+        {
+            "premium" => "enterprise",
+            "standard" => "pro",
+            null or "" => "pro",
+            _ => Plan
+        };
+        var match = rows.FirstOrDefault(r => r.PlanId == planKey) ?? rows.FirstOrDefault(r => r.PlanId == "pro");
+        if (match is null) return;
+
+        _planLabel = match.PlanName.ToUpper();
+        _priceText = $"{match.MonthlyPrice:N0}원";
+        _planNote = match.PlanId == "enterprise" ? "+ 서버 구축비용 (상담)" : "";
+    }
+
+    private class PublicPricingResponse
+    {
+        public bool Success { get; set; }
+        public List<PublicPlanRow>? Data { get; set; }
+    }
+
+    private class PublicPlanRow
+    {
+        public string PlanId { get; set; } = "";
+        public string PlanName { get; set; } = "";
+        public decimal MonthlyPrice { get; set; }
+        public string PriceDisplay { get; set; } = "number";
     }
 
     private async Task HandlePay()

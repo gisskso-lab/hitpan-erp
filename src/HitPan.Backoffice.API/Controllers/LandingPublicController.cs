@@ -35,6 +35,53 @@ public class LandingPublicController : ControllerBase
         _logger = logger;
     }
 
+    // 가격 공개 조회 — 랜딩 페이지 동적 로드용 (사장님 결재 2026-06-11, B안)
+    //   - 인증 불요 (랜딩 공개 영역)
+    //   - is_active=1 + is_visible=1만 노출
+    //   - display_order, plan_id 순
+    [HttpGet("pricing/public")]
+    public async Task<IActionResult> GetPublicPricing(CancellationToken ct)
+    {
+        try
+        {
+            await using var db = await OpenAsync(ct);
+            var plans = await db.QueryAsync<PublicPlanRow>(@"
+                SELECT plan_id AS PlanId,
+                       plan_name AS PlanName,
+                       description AS Description,
+                       monthly_price AS MonthlyPrice,
+                       yearly_price AS YearlyPrice,
+                       price_display AS PriceDisplay,
+                       max_users AS MaxUsers,
+                       max_devices AS MaxDevices,
+                       features_json AS FeaturesJson,
+                       display_order AS DisplayOrder
+                FROM pricing_plans
+                WHERE is_active = 1 AND is_visible = 1
+                ORDER BY display_order, plan_id");
+            return Ok(new { success = true, data = plans });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "[PublicPricing] 조회 실패 — 랜딩 폴백 사용 예정");
+            return StatusCode(500, new { success = false, message = "가격 조회 실패" });
+        }
+    }
+
+    public class PublicPlanRow
+    {
+        public string PlanId { get; set; } = "";
+        public string PlanName { get; set; } = "";
+        public string? Description { get; set; }
+        public decimal MonthlyPrice { get; set; }
+        public decimal YearlyPrice { get; set; }
+        public string PriceDisplay { get; set; } = "number";
+        public int MaxUsers { get; set; }
+        public int MaxDevices { get; set; }
+        public string? FeaturesJson { get; set; }
+        public int DisplayOrder { get; set; }
+    }
+
     [HttpPost("beta-signup")]
     public async Task<IActionResult> BetaSignup([FromBody] BetaSignupRequest req, CancellationToken ct)
     {

@@ -1,7 +1,11 @@
 @*
-    PricingSection — 3티어 (Basic 29k / Pro 49k / Enterprise 100k)
-    project_pricing.md 저장 가격 (사장님 결재)
+    PricingSection — 3티어 동적 로드 (사장님 결재 2026-06-11 B안)
+    백오피스 마스터 가격 변경 → 랜딩 즉시 반영. API 실패 시 폴백 (29k/49k/100k).
 *@
+@rendermode InteractiveServer
+@inject HttpClient Http
+@using System.Net.Http.Json
+@using System.Text.Json
 
 <section class="lv2-section lv2-pricing" id="pricing">
     <div class="lv2-container">
@@ -19,66 +23,115 @@
         </div>
 
         <div class="lv2-pricing-grid">
-            <PricingCard Name="BASIC"
-                         Price="₩29,000"
-                         Desc="5인 이하 중소기업 사업장의 시작용"
-                         Features="@_basic"
-                         CtaText="Basic 시작하기"
-                         Href="/signup?plan=basic" />
-
-            <PricingCard Name="PRO"
-                         Price="₩49,000"
-                         Desc="성장하는 중소기업의 표준"
-                         Featured="true"
-                         Features="@_pro"
-                         CtaText="Pro 시작하기"
-                         Href="/signup?plan=pro" />
-
-            <PricingCard Name="ENTERPRISE"
-                         Price="₩100,000"
-                         PriceNote="+ 서버 구축비용 (상담)"
-                         Desc="다지점 통합운영·대량 데이터"
-                         Features="@_enterprise"
-                         CtaText="상담 신청"
-                         Href="/signup?plan=enterprise" />
+            @foreach (var p in _plans)
+            {
+                <PricingCard Name="@p.PlanName.ToUpper()"
+                             Price="@($"₩{p.MonthlyPrice:N0}")"
+                             Desc="@p.Tagline"
+                             Featured="@(p.PlanId == "pro")"
+                             PriceNote="@(p.PlanId == "enterprise" ? "+ 서버 구축비용 (상담)" : null)"
+                             Features="@p.Features.ToArray()"
+                             CtaText="@(p.PlanId == "enterprise" ? "상담 신청" : $"{p.PlanName} 시작하기")"
+                             Href="@($"/signup?plan={p.PlanId}")" />
+            }
         </div>
     </div>
 </section>
 
 @code {
-    private readonly string[] _basic = new[]
+    private List<PlanView> _plans = GetFallback();
+
+    protected override async Task OnInitializedAsync()
     {
-        "사용자 5명",
-        "기기 5대 (모바일 포함)",
-        "매입·판매·재고 기본",
-        "전자세금계산서 발행 월 50건",
-        "BOM 생산관리",
-        "전자세금계산서 연동",
-        "AI CS 챗봇"
+        try
+        {
+            var resp = await Http.GetFromJsonAsync<PublicPricingResponse>("api/landing/pricing/public");
+            if (resp?.Success == true && resp.Data is { Count: > 0 } rows)
+            {
+                _plans = rows.Select(MapRow).OrderBy(p => p.DisplayOrder).ToList();
+            }
+        }
+        catch (Exception)
+        {
+            _plans = GetFallback();
+        }
+    }
+
+    private static PlanView MapRow(PublicPlanRow r)
+    {
+        var features = new List<string>();
+        if (!string.IsNullOrWhiteSpace(r.FeaturesJson))
+        {
+            try
+            {
+                var parsed = JsonSerializer.Deserialize<List<string>>(r.FeaturesJson);
+                if (parsed is not null) features = parsed;
+            }
+            catch (Exception) { }
+        }
+        if (features.Count == 0) features = GetDefaultFeatures(r.PlanId);
+
+        return new PlanView
+        {
+            PlanId = r.PlanId,
+            PlanName = r.PlanName,
+            MonthlyPrice = r.MonthlyPrice,
+            Tagline = r.Description ?? GetDefaultTagline(r.PlanId),
+            Features = features,
+            DisplayOrder = r.DisplayOrder
+        };
+    }
+
+    private static string GetDefaultTagline(string planId) => planId switch
+    {
+        "basic" => "5인 이하 중소기업 사업장의 시작용",
+        "pro" => "성장하는 중소기업의 표준",
+        "enterprise" => "다지점 통합운영·대량 데이터",
+        _ => ""
     };
 
-    private readonly string[] _pro = new[]
+    private static List<string> GetDefaultFeatures(string planId) => planId switch
     {
-        "사용자 10명",
-        "기기 15대 (모바일 포함)",
-        "매입·판매·재고 기본",
-        "전자세금계산서 발행 월 50건",
-        "BOM 생산관리",
-        "전자세금계산서 연동",
-        "AI CS 챗봇",
-        "전화 CS·원격지원 응대"
+        "basic" => new() { "사용자 5명", "기기 5대 (모바일 포함)", "매입·판매·재고 기본", "전자세금계산서 발행 월 50건", "BOM 생산관리", "전자세금계산서 연동", "AI CS 챗봇" },
+        "pro" => new() { "사용자 10명", "기기 15대 (모바일 포함)", "매입·판매·재고 기본", "전자세금계산서 발행 월 50건", "BOM 생산관리", "전자세금계산서 연동", "AI CS 챗봇", "전화 CS·원격지원 응대" },
+        "enterprise" => new() { "사용자 무제한", "기기 무제한", "매입·판매·재고 기본", "전자세금계산서 발행 월 50건", "BOM 생산관리", "전자세금계산서 연동", "AI CS 챗봇", "다지점 통합운영", "전담 매니저 배정" },
+        _ => new()
     };
 
-    private readonly string[] _enterprise = new[]
+    private static List<PlanView> GetFallback() => new()
     {
-        "사용자 무제한",
-        "기기 무제한",
-        "매입·판매·재고 기본",
-        "전자세금계산서 발행 월 50건",
-        "BOM 생산관리",
-        "전자세금계산서 연동",
-        "AI CS 챗봇",
-        "다지점 통합운영",
-        "전담 매니저 배정"
+        new PlanView { PlanId = "basic", PlanName = "베이직", MonthlyPrice = 29000, Tagline = GetDefaultTagline("basic"), Features = GetDefaultFeatures("basic"), DisplayOrder = 1 },
+        new PlanView { PlanId = "pro", PlanName = "프로", MonthlyPrice = 49000, Tagline = GetDefaultTagline("pro"), Features = GetDefaultFeatures("pro"), DisplayOrder = 2 },
+        new PlanView { PlanId = "enterprise", PlanName = "엔터프라이즈", MonthlyPrice = 100000, Tagline = GetDefaultTagline("enterprise"), Features = GetDefaultFeatures("enterprise"), DisplayOrder = 3 },
     };
+
+    private class PlanView
+    {
+        public string PlanId { get; set; } = "";
+        public string PlanName { get; set; } = "";
+        public decimal MonthlyPrice { get; set; }
+        public string Tagline { get; set; } = "";
+        public List<string> Features { get; set; } = new();
+        public int DisplayOrder { get; set; }
+    }
+
+    private class PublicPricingResponse
+    {
+        public bool Success { get; set; }
+        public List<PublicPlanRow>? Data { get; set; }
+    }
+
+    private class PublicPlanRow
+    {
+        public string PlanId { get; set; } = "";
+        public string PlanName { get; set; } = "";
+        public string? Description { get; set; }
+        public decimal MonthlyPrice { get; set; }
+        public decimal YearlyPrice { get; set; }
+        public string PriceDisplay { get; set; } = "number";
+        public int MaxUsers { get; set; }
+        public int MaxDevices { get; set; }
+        public string? FeaturesJson { get; set; }
+        public int DisplayOrder { get; set; }
+    }
 }
