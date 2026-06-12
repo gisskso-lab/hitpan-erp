@@ -31,10 +31,14 @@ function Log-Warn($msg) {
 }
 
 # --- 1. Windows Defender ---
+# 사고 #5 봉합 (WS-20260612-01 2026-06-12): cloudflared·워치독 경로 영역 정정
+#   기존: $InstallPath\payload\cloudflared.exe (옛 빌드 구조)
+#   정정: $InstallPath\cloudflared.exe + $InstallPath\watchdog\HitPan.Watchdog.exe (현재 빌드 정합)
 try {
     Add-MpPreference -ExclusionPath $InstallPath -ErrorAction Stop
-    Add-MpPreference -ExclusionProcess "$InstallPath\payload\cloudflared.exe" -ErrorAction Stop
-    Add-MpPreference -ExclusionProcess "$InstallPath\payload\HitPan.Watchdog\HitPan.Watchdog.exe" -ErrorAction Stop
+    Add-MpPreference -ExclusionProcess "$InstallPath\cloudflared.exe" -ErrorAction Stop
+    Add-MpPreference -ExclusionProcess "$InstallPath\watchdog\HitPan.Watchdog.exe" -ErrorAction Stop
+    Add-MpPreference -ExclusionProcess "$InstallPath\api\HitPan.API.exe" -ErrorAction Stop
     Add-MpPreference -ExclusionProcess "C:\Program Files\MariaDB 11.4\bin\mysqld.exe" -ErrorAction SilentlyContinue
     Log-Info "Defender exceptions registered"
 } catch {

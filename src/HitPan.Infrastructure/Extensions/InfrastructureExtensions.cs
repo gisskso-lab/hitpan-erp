@@ -1,4 +1,5 @@
 using HitPan.Application.Interfaces;
+using HitPan.Infrastructure.Configuration;
 using HitPan.Infrastructure.Persistence;
 using HitPan.Infrastructure.Persistence.Seed;
 using Microsoft.EntityFrameworkCore;
@@ -12,14 +13,15 @@ public static class InfrastructureExtensions
 {
     public static IServiceCollection AddInfrastructure(this IServiceCollection services)
     {
-        var host = Environment.GetEnvironmentVariable("DB_HOST") ?? "localhost";
-        var port = Environment.GetEnvironmentVariable("DB_PORT") ?? "3306";
-        var db = Environment.GetEnvironmentVariable("DB_NAME")
-            ?? throw new InvalidOperationException("DB_NAME 환경변수 없음");
-        var user = Environment.GetEnvironmentVariable("DB_USER")
-            ?? throw new InvalidOperationException("DB_USER 환경변수 없음");
-        var pwd = Environment.GetEnvironmentVariable("DB_PASSWORD")
-            ?? throw new InvalidOperationException("DB_PASSWORD 환경변수 없음");
+        // 사고 #46 봉합 (WS-20260612-01 2026-06-12): 환경변수 영역 폐기 + db.conf 직접 영역
+        //   사장님 결재 — 싱글 각각 설치 영역 정합 (멀티테넌트 = Phase 3 영역 클라우드 영역)
+        //   사고 #41·#42·#39 영역 자동 해결 — 회사별 EXE 영역 자기 폴더 db.conf 영역만 박힘
+        //   TenantConfigReader = db.conf → 환경변수 폴백 영역 안전망 박힘
+        var host = TenantConfigReader.Get("DB_HOST") ?? "localhost";
+        var port = TenantConfigReader.Get("DB_PORT") ?? "3306";
+        var db = TenantConfigReader.GetRequired("DB_NAME");
+        var user = TenantConfigReader.GetRequired("DB_USER");
+        var pwd = TenantConfigReader.GetRequired("DB_PASSWORD");
 
         // DefaultCommandTimeout=90: 저장 후 partner_balance 집계 뷰가 대량 집계를 할 때
         // 기본 30초로는 부족해 Command Timeout → 롤백 → 유실이 발생. 90초 안전마진.

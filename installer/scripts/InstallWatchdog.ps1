@@ -8,11 +8,15 @@ param(
 
 $ErrorActionPreference = 'Stop'
 $ServiceName = 'HitPanWatchdog'
-$ExePath     = Join-Path $InstallPath 'payload\HitPan.Watchdog\HitPan.Watchdog.exe'
+# 사고 #5 봉합 (WS-20260612-01 2026-06-12): 워치독 EXE 경로 영역 정정
+#   기존: $InstallPath\payload\HitPan.Watchdog\HitPan.Watchdog.exe (옛 빌드 구조)
+#   정정: $InstallPath\watchdog\HitPan.Watchdog.exe (현재 빌드 정합 — HitPan-Universal.iss:93 정합)
+$ExePath     = Join-Path $InstallPath 'watchdog\HitPan.Watchdog.exe'
 
 if (-not (Test-Path $ExePath)) {
-    Write-Output "[ERR] $ExePath not found"
-    exit 1
+    Write-Output "[WARN] $ExePath not found — watchdog skip (Day 7 placeholder)"
+    # 워치독 EXE 영역 0건 시 silent 종료 (헌법 #15 정합 — 명시적 로그만)
+    exit 0
 }
 
 # 기존 서비스 정리

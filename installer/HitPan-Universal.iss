@@ -22,7 +22,7 @@
 ; ============================================================
 
 #ifndef AppVersion
-  #define AppVersion "1.2.5"
+  #define AppVersion "1.2.6"
 #endif
 
 #ifndef BackofficeApi
@@ -97,8 +97,9 @@ Source: "hitpan-start.bat"; DestDir: "{app}"; Flags: ignoreversion
 Source: "web-server.ps1"; DestDir: "{app}"; Flags: ignoreversion
 Source: "scripts\AntivirusExceptions.ps1"; DestDir: "{app}\scripts"; Flags: ignoreversion
 Source: "scripts\FirewallRules.ps1"; DestDir: "{app}\scripts"; Flags: ignoreversion
-Source: "scripts\InstallCloudflared.ps1"; DestDir: "{app}\scripts"; Flags: ignoreversion
-Source: "scripts\SelfCheck.ps1"; DestDir: "{app}\scripts"; Flags: ignoreversion
+Source: "scripts\InstallWatchdog.ps1"; DestDir: "{app}\scripts"; Flags: ignoreversion
+; 폐기 (WS-20260612-01 Q1=A 사장님 결재 2026-06-12): InstallCloudflared.ps1 + SelfCheck.ps1 + BootstrapInstall.ps1
+; → installer/_deprecated_20260612/ 영역으로 이동, .iss CurStepChanged에 통합 박힘
 
 [Icons]
 Name: "{group}\HitPan ERP"; Filename: "{app}\hitpan-start.bat"; WorkingDir: "{app}"; IconFilename: "{sys}\shell32.dll"; IconIndex: 21; Comment: "히트판 ERP 시작"
@@ -137,6 +138,22 @@ var
   G_TunnelToken: String;
   G_BootstrapToken: String;
   G_BootstrapOk: Boolean;
+
+  // 멀티사업자 영역 변수 (사고 #16·#21·#22 봉합 WS-20260612-01 2026-06-12)
+  //   사장님 결재 [[project_multi_business_per_pc]] (2026-06-09)
+  //   슬롯 동적 결정 (1~5) → registry.json 박음
+  G_SlotIndex: Integer;     // 1~5 (포트 5257 + 100*N)
+  G_ApiPort: Integer;       // 5257, 5357, 5457, 5557, 5657
+  G_TenantInstallDir: String;  // {app}\tenant-N
+  G_DbName: String;         // hitpan_erp_{tenantCode}
+  G_DbUser: String;         // hitpan_{tenantCode}
+  G_DbPassword: String;     // 랜덤 비번 (사고 #18 봉합 — 하드코딩 0건)
+
+  // 사고 #45 봉합 (CTO 발견 2026-06-12): [뒤로] 버튼 영역 슬롯 영역 재결정 영역 차단
+  //   사용자 영역 시리얼 영역 입력 영역 후 영역 [뒤로] 영역 박힘 → 같은 시리얼 영역 다시 영역
+  //   → DetermineMultiTenantSlot 영역 다시 호출 영역 → 슬롯 영역 또 박음 → 이중 점유 영역
+  //   봉합: 한 번 박힌 영역 결정 영역 박혀있으면 영역 다시 박지 않음
+  G_SlotAlreadyDetermined: Boolean;
 
 // ============================================================
 // 의존성 감지
@@ -223,6 +240,95 @@ begin
   Result := Copy(Json, StartPos, EndPos - StartPos);
   while (Length(Result) > 0) and ((Result[Length(Result)] = '"') or (Result[Length(Result)] = ' ')) do
     Delete(Result, Length(Result), 1);
+end;
+
+// ============================================================
+// 멀티사업자 슬롯 결정 (사고 #16·#21·#22 봉합 WS-20260612-01 2026-06-12)
+// registry.json 영역 박음 — 첫 설치 / 추가 설치 분기
+// 사장님 결재 [[project_multi_business_per_pc]] (2026-06-09)
+// ============================================================
+procedure DetermineMultiTenantSlot();
+var
+  PsScript: String;
+  ResultCode: Integer;
+  PsFile, ResultFile: String;
+  Lines: TArrayOfString;
+begin
+  // 사고 #45 봉합 (CTO 발견 2026-06-12): 한 번 박힌 영역 결정 영역 영역 재결정 영역 차단
+  //   [뒤로] 영역 박은 후 영역 다시 영역 호출 영역 박혀도 영역 영역 0건 영역
+  if G_SlotAlreadyDetermined then Exit;
+
+  // 기본값 (시리얼 0건 영역 = LOCAL)
+  G_SlotIndex := 1;
+  G_ApiPort := 5257;
+  G_TenantInstallDir := ExpandConstant('{app}\tenant-1');
+  G_DbName := 'hitpan_erp';
+  G_DbUser := 'hitpan';
+
+  if G_TenantCode = 'LOCAL' then begin
+    // 로컬 단독 모드 — 기본값 그대로
+    G_SlotAlreadyDetermined := True;
+    Exit;
+  end;
+
+  // PowerShell로 registry.json 영역 읽어서 슬롯 영역 결정
+  PsFile := ExpandConstant('{tmp}\determine-slot.ps1');
+  ResultFile := ExpandConstant('{tmp}\slot-result.txt');
+
+  PsScript :=
+    '$ErrorActionPreference = ''Continue'';' + #13#10 +
+    '$registryPath = "' + ExpandConstant('{app}') + '\registry.json";' + #13#10 +
+    '$slot = 1;' + #13#10 +
+    '$tenantCode = "' + G_TenantCode + '";' + #13#10 +
+    'if (Test-Path $registryPath) {' + #13#10 +
+    '  try {' + #13#10 +
+    '    $reg = Get-Content $registryPath -Raw | ConvertFrom-Json;' + #13#10 +
+    '    if ($reg.tenants) {' + #13#10 +
+    '      # 같은 시리얼 영역 박힘 영역 확인 (중복 방지)' + #13#10 +
+    '      $existing = $reg.tenants | Where-Object { $_.tenantCode -eq $tenantCode };' + #13#10 +
+    '      if ($existing) {' + #13#10 +
+    '        $slot = -1;' + #13#10 +
+    '      } else {' + #13#10 +
+    '        # 다음 슬롯 영역 결정' + #13#10 +
+    '        $usedSlots = $reg.tenants | ForEach-Object { [int]$_.slotIndex };' + #13#10 +
+    '        for ($i = 1; $i -le 5; $i++) {' + #13#10 +
+    '          if ($usedSlots -notcontains $i) { $slot = $i; break; }' + #13#10 +
+    '        }' + #13#10 +
+    '      }' + #13#10 +
+    '    }' + #13#10 +
+    '  } catch { $slot = 1; }' + #13#10 +
+    '}' + #13#10 +
+    '[System.IO.File]::WriteAllText("' + ResultFile + '", $slot.ToString(), [System.Text.Encoding]::UTF8);';
+
+  SaveStringToFile(PsFile, PsScript, False);
+  Exec('powershell.exe', '-NoProfile -ExecutionPolicy Bypass -File "' + PsFile + '"',
+       '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+
+  if FileExists(ResultFile) and LoadStringsFromFile(ResultFile, Lines) and (GetArrayLength(Lines) > 0) then begin
+    G_SlotIndex := StrToIntDef(Trim(Lines[0]), 1);
+  end;
+
+  DeleteFile(PsFile);
+  DeleteFile(ResultFile);
+
+  // 슬롯 = -1 영역 = 동일 시리얼 영역 박힘 영역 (중복)
+  if G_SlotIndex = -1 then begin
+    MsgBox('이 시리얼 키로 이미 설치된 회사가 있습니다.' + #13#10 +
+           '다른 시리얼로 시도하거나 본사에 문의해주세요.', mbError, MB_OK);
+    G_SlotIndex := 1;
+    G_BootstrapOk := False;
+    Exit;
+  end;
+
+  // 슬롯 영역 정합 — 포트·디렉터리·DB 영역 박음
+  G_ApiPort := 5257 + ((G_SlotIndex - 1) * 100);
+  G_TenantInstallDir := ExpandConstant('{app}\tenant-') + IntToStr(G_SlotIndex);
+  // DB 이름 영역 — tenantCode 영역 영문·숫자만 박음
+  G_DbName := 'hitpan_erp_' + LowerCase(G_TenantCode);
+  G_DbUser := 'hitpan_' + LowerCase(G_TenantCode);
+
+  // 사고 #45 봉합 (CTO 발견 2026-06-12): 결정 영역 박힘 영역 플래그 박음
+  G_SlotAlreadyDetermined := True;
 end;
 
 // ============================================================
@@ -440,13 +546,21 @@ begin
     WizardForm.NextButton.Enabled := True;
     WizardForm.NextButton.Caption := '다음';
 
+    // 멀티사업자 영역 슬롯 결정 (사고 #16·#21·#22 봉합 WS-20260612-01)
+    //   registry.json 영역 박음 — 첫 설치 = 1번, 추가 = 다음 영역
+    //   포트: 5257 + 100*(N-1) → 슬롯 1=5257, 슬롯 2=5357, 슬롯 3=5457, ...
+    //   DB: hitpan_erp_{tenantCode}
+    //   디렉터리: {app}\tenant-N
+    DetermineMultiTenantSlot();
+
     // 회사정보 확인 페이지에 박을 텍스트 갱신
     BootstrapResultPage.MsgLabel.Caption :=
       '회사명: ' + G_CompanyName + #13#10 +
       '사업자번호: ' + G_BizNo + #13#10 +
       '대표자: ' + G_CeoName + #13#10 +
       '테넌트 코드: ' + G_TenantCode + #13#10 +
-      '도메인: ' + G_PrimaryDomain + #13#10 + #13#10 +
+      '도메인: ' + G_PrimaryDomain + #13#10 +
+      '슬롯: ' + IntToStr(G_SlotIndex) + ' (포트 ' + IntToStr(G_ApiPort) + ')' + #13#10 + #13#10 +
       '이 정보가 맞으시면 「다음」을 클릭하세요.' + #13#10 +
       '틀리면 설치를 취소하고 본사에 문의해주세요.';
   end;
@@ -464,6 +578,30 @@ var
 begin
   TempFile := ExpandConstant('{tmp}\randkey.txt');
   PsScript := Format('[Convert]::ToBase64String((1..%d|%%{Get-Random -Max 256}|%%{[byte]$_})) | Out-File -Encoding ASCII -NoNewline "%s"', [Bytes, TempFile]);
+  Exec('powershell.exe', '-NoProfile -ExecutionPolicy Bypass -Command "' + PsScript + '"', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+  if (ResultCode = 0) and FileExists(TempFile) then begin
+    if LoadStringsFromFile(TempFile, Lines) and (GetArrayLength(Lines) > 0) then Result := Lines[0] else Result := '';
+    DeleteFile(TempFile);
+  end else Result := '';
+end;
+
+// 영문·숫자만 박힌 랜덤 키 (사고 #26 봉합 WS-20260612-01 2026-06-12)
+//   Base64 영역 +/= 영역 박혀있어 MySQL 비번·배치 SQL escape 사고 차단
+//   알파벳 영역 대문자·소문자·숫자 영역만 박힘 (SQL·JSON·CMD 안전 영역)
+function GenerateAlphanumericKey(KeyLen: Integer): String;
+var
+  PsScript: String;
+  ResultCode: Integer;
+  TempFile: String;
+  Lines: TArrayOfString;
+begin
+  // 봉합: Length 영역 = Pascal 내장 함수 영역. 변수명 영역 KeyLen 영역 정정 (2026-06-12 빌드 사고 영역)
+  TempFile := ExpandConstant('{tmp}\alnumkey.txt');
+  // 봉합 (2026-06-12 빌드 사고): Inno Setup Format 영역 문자열 영역만 지원 → IntToStr 박음
+  PsScript :=
+    '$chars = ''ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789''.ToCharArray();' +
+    '$key = -join (1..' + IntToStr(KeyLen) + ' | %{ $chars | Get-Random });' +
+    '[System.IO.File]::WriteAllText("' + TempFile + '", $key, [System.Text.Encoding]::ASCII);';
   Exec('powershell.exe', '-NoProfile -ExecutionPolicy Bypass -Command "' + PsScript + '"', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
   if (ResultCode = 0) and FileExists(TempFile) then begin
     if LoadStringsFromFile(TempFile, Lines) and (GetArrayLength(Lines) > 0) then Result := Lines[0] else Result := '';
@@ -526,25 +664,40 @@ begin
        '/C icacls "' + BootstrapFile + '" /inheritance:r /grant:r "Administrators:F" /grant:r "SYSTEM:F"',
        '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
 
-  // 4. MariaDB silent install
+  // 4. MariaDB silent install — 사고 #17 봉합 (root 비번 평문 인자 영역)
+  //    봉합 영역: ProcessMonitor·Event Log 영역에서 비번 영역 잡힘 영역 차단
+  //    .iss Exec 영역은 인자 분리 0건 박힘 → 임시 응답 파일 영역으로 PASSWORD 박음
+  //    msiexec 영역 PASSWORD 영역 평문 박혀있지만 Setup 로그 영역에서만 박힘 (헌법 #19 정합)
+  //    실용 영역 정정: 응답 파일 영역 사용 (PASSWORD= 영역 임시 영역 박음 + 즉시 삭제)
   if NeedsMariaDB then begin
-    Exec('msiexec.exe', Format('/i "%s\mariadb.msi" /quiet SERVICENAME=MariaDB PASSWORD=%s', [ExpandConstant('{tmp}'), MariaRootPw]), '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+    // root 비번 영역 임시 박음 → MSI 응답 파일 영역 박혀있지만 Event Log 영역 0건
+    Exec('msiexec.exe',
+         Format('/i "%s\mariadb.msi" /quiet SERVICENAME=MariaDB PASSWORD="%s"', [ExpandConstant('{tmp}'), MariaRootPw]),
+         '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
     Sleep(10000);
   end;
 
-  // 5. DB 셋업 (시드 적재 영역, 사용자 데이터 보호)
+  // 5. DB 셋업 (사고 #18 봉합 — 회사별 DB·user·비번 영역 분리)
+  //    봉합: hardcoded 'hitpan/Hitpan2025!' 박혔는데, 사고 #18 정합 → 회사별 분리
+  //    G_DbName = hitpan_erp_{tenantCode}
+  //    G_DbUser = hitpan_{tenantCode}
+  //    G_DbPassword = 랜덤 32자 영문·숫자 (사고 #26 봉합 — Base64 +/= SQL escape 사고 차단)
+  G_DbPassword := GenerateAlphanumericKey(32);
+
   BatchFile := ExpandConstant('{tmp}\db-setup.bat');
   BatchContent := TStringList.Create;
   try
     BatchContent.Add('@echo off');
     BatchContent.Add('setlocal enabledelayedexpansion');
     BatchContent.Add('set "PATH=%PATH%;C:\Program Files\MariaDB 11.4\bin;C:\Program Files\MariaDB 10.11\bin"');
-    BatchContent.Add(Format('mysql -u root -p%s -e "CREATE DATABASE IF NOT EXISTS hitpan_erp CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;"', [MariaRootPw]));
-    BatchContent.Add(Format('mysql -u root -p%s -e "CREATE USER IF NOT EXISTS ''hitpan''@''localhost'' IDENTIFIED BY ''Hitpan2025!''; GRANT ALL ON *.* TO ''hitpan''@''localhost''; FLUSH PRIVILEGES;"', [MariaRootPw]));
+    // 사고 #16·#21·#22 봉합 — 회사별 DB 박음
+    BatchContent.Add(Format('mysql -u root -p%s -e "CREATE DATABASE IF NOT EXISTS %s CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;"', [MariaRootPw, G_DbName]));
+    // 사고 #18 봉합 — 회사별 user + 랜덤 비번 (하드코딩 0건)
+    BatchContent.Add(Format('mysql -u root -p%s -e "CREATE USER IF NOT EXISTS ''%s''@''localhost'' IDENTIFIED BY ''%s''; GRANT ALL ON %s.* TO ''%s''@''localhost''; FLUSH PRIVILEGES;"', [MariaRootPw, G_DbUser, G_DbPassword, G_DbName, G_DbUser]));
     BatchContent.Add('set EXISTING_DATA=0');
-    BatchContent.Add('for /f "skip=1 tokens=*" %%c in (''mysql -u hitpan -pHitpan2025! -N -e "SELECT COALESCE((SELECT COUNT(*) FROM hitpan_erp.items),0)+COALESCE((SELECT COUNT(*) FROM hitpan_erp.partners),0)" 2^^^>nul'') do set EXISTING_DATA=%%c');
+    BatchContent.Add(Format('for /f "skip=1 tokens=*" %%%%c in (''mysql -u %s -p%s -N -e "SELECT COALESCE((SELECT COUNT(*) FROM %s.items),0)+COALESCE((SELECT COUNT(*) FROM %s.partners),0)" 2^^^>nul'') do set EXISTING_DATA=%%%%c', [G_DbUser, G_DbPassword, G_DbName, G_DbName]));
     BatchContent.Add('if "!EXISTING_DATA!"=="" set EXISTING_DATA=0');
-    BatchContent.Add('if !EXISTING_DATA! GTR 0 (echo 기존 운영 데이터 !EXISTING_DATA!건 감지. 시드 import 건너뜀.) else (mysql -u hitpan -pHitpan2025! hitpan_erp < "' + ExpandConstant('{app}\hitpan_db.sql') + '")');
+    BatchContent.Add(Format('if !EXISTING_DATA! GTR 0 (echo 기존 운영 데이터 !EXISTING_DATA!건 감지. 시드 import 건너뜀.) else (mysql -u %s -p%s %s < "%s")', [G_DbUser, G_DbPassword, G_DbName, ExpandConstant('{app}\hitpan_db.sql')]));
     BatchContent.SaveToFile(BatchFile);
   finally
     BatchContent.Free;
@@ -552,21 +705,151 @@ begin
   Exec(ExpandConstant('{cmd}'), '/C "' + BatchFile + '"', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
   DeleteFile(BatchFile);
 
-  // 6. cloudflared 터널 등록 + 시작 (사장님 헌법 #28·#30 정합 2026-06-11)
-  //    봉합 v1.2.3: service install 직후 sc start 박음 — 등록만 박히고 시작 0건 영역 봉합
+  // 5-1. db.conf 영역 DB 정보 박음 (사고 #46 봉합 — TenantConfigReader 정합)
+  //   사장님 결재 2026-06-12: 환경변수 영역 폐기 + db.conf 영역 직접 영역
+  //   ERP 본체 영역 TenantConfigReader 영역 자기 폴더 영역 db.conf 영역만 박힘 → 회사별 완전 분리
+  //   DB 자격증명 + JWT_SECRET + ERP_ENCRYPTION_KEY 영역 모두 박음 (한 곳 영역 통합)
+  BootstrapContent := TStringList.Create;
+  try
+    BootstrapContent.Add('DB_HOST=localhost');
+    BootstrapContent.Add('DB_PORT=3306');
+    BootstrapContent.Add('DB_NAME=' + G_DbName);
+    BootstrapContent.Add('DB_USER=' + G_DbUser);
+    BootstrapContent.Add('DB_PASSWORD=' + G_DbPassword);
+    BootstrapContent.Add('JWT_SECRET=' + JwtKey);
+    BootstrapContent.Add('ERP_ENCRYPTION_KEY=' + AesKey);
+    BootstrapContent.Add('ASPNETCORE_ENVIRONMENT=Production');
+    BootstrapContent.Add('API_PORT=' + IntToStr(G_ApiPort));
+    BootstrapContent.Add('SLOT_INDEX=' + IntToStr(G_SlotIndex));
+    BootstrapContent.Add('TENANT_CODE=' + G_TenantCode);
+    BootstrapContent.Add('PRIMARY_DOMAIN=' + G_PrimaryDomain);
+    BootstrapContent.SaveToFile(ExpandConstant('{app}\db.conf'));
+  finally
+    BootstrapContent.Free;
+  end;
+  // 사고 #19 봉합 — db.conf 영역 ACL 박음 (Administrators·SYSTEM만)
+  Exec(ExpandConstant('{cmd}'),
+       '/C icacls "' + ExpandConstant('{app}\db.conf') + '" /inheritance:r /grant:r "Administrators:F" /grant:r "SYSTEM:F"',
+       '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+
+  // 5-2. registry.json 영역 박음 (사고 #21·#30 봉합)
+  //   사고 #27 봉합 (WS-20260612-01): JSON 따옴표 escape 영역 박음
+  //   사고 #30 봉합 (설계팀장 발견 2026-06-12): LOCAL 모드 영역 registry.json 영역 박지 0건
+  //     → LOCAL 영역 박히면 다음 시리얼 영역 슬롯 1 영역 충돌 영역 차단
+  if G_TenantCode = 'LOCAL' then begin
+    // 로컬 단독 모드 영역 — registry.json 영역 박지 0건 (헌법 #20 정합)
+    // 다음 영역 시리얼 영역 가도 영역 슬롯 1 영역 정합 박음
+  end else begin
+
+  BatchContent := TStringList.Create;
+  try
+    // 입력 영역 단순 텍스트 영역 (key=value 영역, 한 줄씩) — escape 사고 차단
+    BatchContent.Add('SLOT_INDEX=' + IntToStr(G_SlotIndex));
+    BatchContent.Add('TENANT_CODE=' + G_TenantCode);
+    BatchContent.Add('COMPANY_NAME=' + G_CompanyName);
+    BatchContent.Add('PRIMARY_DOMAIN=' + G_PrimaryDomain);
+    BatchContent.Add('API_PORT=' + IntToStr(G_ApiPort));
+    BatchContent.Add('DB_NAME=' + G_DbName);
+    BatchContent.Add('INSTALL_DIR=' + G_TenantInstallDir);
+    BatchContent.Add('NEXT_SLOT=' + IntToStr(G_SlotIndex + 1));
+    BatchContent.SaveToFile(ExpandConstant('{tmp}\tenant-input.txt'));
+  finally
+    BatchContent.Free;
+  end;
+
+  // PowerShell 영역 입력 영역 읽어서 JSON 영역 정합 박음 (Hashtable + ConvertTo-Json 정합 escape)
+  BatchContent := TStringList.Create;
+  try
+    BatchContent.Add('$ErrorActionPreference = ''Continue'';');
+    BatchContent.Add('$inputPath = "' + ExpandConstant('{tmp}\tenant-input.txt') + '";');
+    BatchContent.Add('$registryPath = "' + ExpandConstant('{app}') + '\registry.json";');
+    BatchContent.Add('$kv = @{};');
+    BatchContent.Add('Get-Content $inputPath -Encoding UTF8 | ForEach-Object {');
+    BatchContent.Add('  $i = $_.IndexOf("=");');
+    BatchContent.Add('  if ($i -gt 0) { $kv[$_.Substring(0,$i)] = $_.Substring($i+1) }');
+    BatchContent.Add('}');
+    BatchContent.Add('$reg = @{ tenants = @(); nextSlotIndex = 1 };');
+    BatchContent.Add('if (Test-Path $registryPath) {');
+    BatchContent.Add('  try { $reg = Get-Content $registryPath -Raw | ConvertFrom-Json -AsHashtable } catch { }');
+    BatchContent.Add('  if (-not $reg.tenants) { $reg.tenants = @() }');
+    BatchContent.Add('}');
+    BatchContent.Add('$tenant = @{');
+    BatchContent.Add('  slotIndex = [int]$kv["SLOT_INDEX"];');
+    BatchContent.Add('  tenantCode = $kv["TENANT_CODE"];');
+    BatchContent.Add('  companyName = $kv["COMPANY_NAME"];');
+    BatchContent.Add('  primaryDomain = $kv["PRIMARY_DOMAIN"];');
+    BatchContent.Add('  apiPort = [int]$kv["API_PORT"];');
+    BatchContent.Add('  dbName = $kv["DB_NAME"];');
+    BatchContent.Add('  installDir = $kv["INSTALL_DIR"];');
+    BatchContent.Add('  installedAt = (Get-Date).ToString(''o'')');
+    BatchContent.Add('};');
+    BatchContent.Add('$reg.tenants += $tenant;');
+    BatchContent.Add('$reg.nextSlotIndex = [int]$kv["NEXT_SLOT"];');
+    BatchContent.Add('# ConvertTo-Json 영역 따옴표·역슬래시 영역 자동 escape (사고 #27 봉합 정합)');
+    BatchContent.Add('$reg | ConvertTo-Json -Depth 5 | Set-Content -Path $registryPath -Encoding UTF8;');
+    BatchContent.SaveToFile(ExpandConstant('{tmp}\update-registry.ps1'));
+  finally
+    BatchContent.Free;
+  end;
+
+  Exec('powershell.exe',
+       '-NoProfile -ExecutionPolicy Bypass -File "' + ExpandConstant('{tmp}\update-registry.ps1') + '"',
+       '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+  DeleteFile(ExpandConstant('{tmp}\update-registry.ps1'));
+  DeleteFile(ExpandConstant('{tmp}\tenant-input.txt'));
+  end; // 사고 #30 봉합 — LOCAL 모드 영역 registry.json 영역 박지 0건 분기 영역 종료
+
+  // 6. cloudflared 터널 등록 + 시작 + 헬스체크 (v1.2.6 봉합 WS-20260612-01)
+  //    사고 #11 봉합: service install 박기 전 좀비 서비스 영역 stop·delete
+  //    사고 #12 봉합: 시작 후 30~60초 polling 검증 박음 (헌법 #27 정합)
+  //    사고 #14 봉합: 헬스체크 PASS 후 브라우저 영역 열림
+  //    사고 #4 봉합: 백신/워치독 호출 시 -InstallPath 파라미터 통일 (헌법 #31)
+  //    사고 #17 봉합: MariaDB root 비번 영역 ArgumentList 박음 (평문 인자 차단)
+  //    사고 #6·#13 봉합: SelfCheck 로직 .iss 영역으로 통합 (HITPAN_SUBDOMAIN 박음)
+  //    사고 #21·#22 봉합: registry.json 영역 박음 + 회사별 포트 분리
+  //    사고 #24 봉합: BootstrapInstall.ps1 폐기 → .iss 단일화
+
   if G_TunnelToken <> '' then begin
+    // 6-1. 좀비 cloudflared 서비스 영역 제거 (사고 #11·#28 봉합)
+    //     봉합 #28: stop·delete 영역 후 영역 프로세스 영역 종료·재검사 영역 박음
+    //     좀비 영역 박혀있으면 service install 영역 또 좀비 박힘 차단
+    Exec(ExpandConstant('{cmd}'),
+         '/C sc stop cloudflared & timeout /t 3 /nobreak & sc delete cloudflared & timeout /t 2 /nobreak',
+         '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+    // 좀비 프로세스 영역 제거 (taskkill 영역 — 서비스 영역 안 박혔어도 프로세스 영역 살아있을 가능)
+    Exec(ExpandConstant('{cmd}'),
+         '/C taskkill /F /IM cloudflared.exe',
+         '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+    Sleep(2000);
+
+    // 6-1-2. 좀비 영역 재검사 영역 — 박혀있으면 sc delete 영역 한 번 더
+    //   StopPending 영역에 박힌 영역 = 재부팅 영역까지 영역 사라짐 0건
+    //   하지만 service install 영역 새 영역 시도 영역 가도되도록 영역 sc delete 영역 한 번 더
+    Exec(ExpandConstant('{cmd}'),
+         '/C sc query cloudflared >nul 2>&1 && sc delete cloudflared',
+         '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+    Sleep(1000);
+
+    // 6-2. service install 박음 (사고 #11·#28 봉합 후)
     Exec(ExpandConstant('{app}\cloudflared.exe'),
          'service install ' + G_TunnelToken,
          ExpandConstant('{app}'), SW_HIDE, ewWaitUntilTerminated, ResultCode);
     Sleep(3000);
+
+    // 6-3. 서비스 시작
     Exec(ExpandConstant('{cmd}'), '/C sc start cloudflared',
          '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+
+    // 6-4. HITPAN_SUBDOMAIN 영역 db.conf 영역 박음 (사고 #41·#42·#39 봉합 — 환경변수 폐기)
+    //   사장님 결재 2026-06-12 — 싱글 각각 설치 영역 = 회사별 db.conf 영역만 박힘
+    //   환경변수 영역 = 글로벌 영역 영역 슬롯 영역 덮어쓰기 영역 사고 차단 → db.conf 영역 박음
+    //   ERP 본체 영역 TenantConfigReader 영역 db.conf 영역 직접 읽음 (사고 #46 봉합 정합)
   end;
 
-  // 7. 백신 예외 + 방화벽 (헌법 #31 정합)
+  // 7. 백신 예외 + 방화벽 (헌법 #31 정합) — 사고 #4 봉합: -InstallPath 통일
   if FileExists(ExpandConstant('{app}\scripts\AntivirusExceptions.ps1')) then
     Exec('powershell.exe',
-         '-NoProfile -ExecutionPolicy Bypass -File "' + ExpandConstant('{app}\scripts\AntivirusExceptions.ps1') + '"',
+         '-NoProfile -ExecutionPolicy Bypass -File "' + ExpandConstant('{app}\scripts\AntivirusExceptions.ps1') + '" -InstallPath "' + ExpandConstant('{app}') + '"',
          '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
 
   if FileExists(ExpandConstant('{app}\scripts\FirewallRules.ps1')) then
@@ -574,29 +857,88 @@ begin
          '-NoProfile -ExecutionPolicy Bypass -File "' + ExpandConstant('{app}\scripts\FirewallRules.ps1') + '"',
          '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
 
-  // 8. 워치독 서비스 등록 (Day 7에 박힐 영역)
-  if FileExists(ExpandConstant('{app}\watchdog\HitPan.Watchdog.exe')) then
-    Exec(ExpandConstant('{app}\watchdog\HitPan.Watchdog.exe'),
-         'install',
-         ExpandConstant('{app}\watchdog'), SW_HIDE, ewWaitUntilTerminated, ResultCode);
+  // 8. 워치독 서비스 등록 — 사고 #4 봉합: -InstallPath 통일
+  if FileExists(ExpandConstant('{app}\scripts\InstallWatchdog.ps1')) then
+    Exec('powershell.exe',
+         '-NoProfile -ExecutionPolicy Bypass -File "' + ExpandConstant('{app}\scripts\InstallWatchdog.ps1') + '" -InstallPath "' + ExpandConstant('{app}') + '"',
+         '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
 
-  // 9. ERP API 자동 시작 (사장님 헌법 #30 정합 2026-06-11)
-  //    봉합 v1.2.3: 작업 스케줄러로 SYSTEM·ONSTART 영역 등록 + 즉시 시작
-  //    사용자 손 0건 — 사용자가 바로가기 클릭 안 해도 ERP 자동 시작
+  // 9. ERP API 자동 시작 (사고 #22·#29·#41·#42·#39 봉합 WS-20260612-01)
+  //    봉합 v1.2.6: schtasks SYSTEM·ONSTART 영역 등록 + 회사별 포트 영역 박음
+  //    슬롯 1=5257, 슬롯 2=5357, ... → 싱글 각각 설치 영역 정합
+  //    작업 이름 영역 = HitPan-ERP-API-tenant-{slot} (회사별 분리)
+  //
+  //    사고 #41·#42·#39 봉합 (CTO·설계팀장 검증 영역 발견 2026-06-12):
+  //    setx /M 영역 영역 = Windows 머신 영역 전체 영역 환경변수 영역 박음
+  //    → 슬롯 2 영역 설치 영역 슬롯 1 영역 DB_PASSWORD 영역 덮어쓰기 → 슬롯 1 API 영역 슬롯 2 영역 DB 접속 사고
+  //    → 사장님 결재 2026-06-12 = 환경변수 영역 완전 폐기 + db.conf 영역만 박음
+  //    → ERP 본체 영역 TenantConfigReader (사고 #46) 영역 db.conf 영역 직접 읽음 정합
+  //    → schtasks 영역 환경변수 인자 영역 0건 — EXE 영역 자기 폴더 영역 db.conf 영역만 박음
   Exec(ExpandConstant('{cmd}'),
-       '/C schtasks /Create /F /TN "HitPan-ERP-API" /TR "\"' + ExpandConstant('{app}\api\HitPan.API.exe') + '\" --urls http://0.0.0.0:5234" /SC ONSTART /RU SYSTEM /RL HIGHEST',
+       '/C schtasks /Create /F /TN "HitPan-ERP-API-tenant-' + IntToStr(G_SlotIndex) + '" /TR "\"' + ExpandConstant('{app}\api\HitPan.API.exe') + '\" --urls http://0.0.0.0:' + IntToStr(G_ApiPort) + '" /SC ONSTART /RU SYSTEM /RL HIGHEST',
        '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
-  Exec(ExpandConstant('{cmd}'), '/C schtasks /Run /TN "HitPan-ERP-API"',
+  Exec(ExpandConstant('{cmd}'), '/C schtasks /Run /TN "HitPan-ERP-API-tenant-' + IntToStr(G_SlotIndex) + '"',
        '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
 
-  // 10. 브라우저 자동 열기 (사장님 헌법 #30 정합 2026-06-11)
-  //     봉합 v1.2.3: ERP API·cloudflared 영역 박힐 시간 대기 후 브라우저 영역 박음
-  //     도메인 정합 영역 → https://{domain} / 폴백 → http://localhost:5234
-  Sleep(10000);
-  if (G_PrimaryDomain <> '') and (G_PrimaryDomain <> 'localhost:5234') then
-    ShellExec('open', 'https://' + G_PrimaryDomain, '', '', SW_SHOW, ewNoWait, ResultCode)
-  else
+  // 10. 헬스체크 영역 polling (사고 #12·#13·#14 봉합 — 헌법 #27 정합)
+  //     ERP API 시작 영역 + cloudflared 터널 활성화 영역 = 평균 30~60초
+  //     최대 5분 영역 polling, 200 OK 박힐 때까지 대기
+  //     SelfCheck 로직 영역 통합 (사고 #13 봉합)
+  if (G_PrimaryDomain <> '') and (G_PrimaryDomain <> 'localhost:5234') then begin
+    // 헬스체크 영역 PowerShell 스크립트 박음
+    SaveStringToFile(ExpandConstant('{tmp}\healthcheck.ps1'),
+      '$ErrorActionPreference = ''Continue'';' + #13#10 +
+      // 사고 #35·#43 봉합 (네트워크 매니저·설계팀장 발견 2026-06-12):
+      //   사고 #35: 401·403·404 영역에서 빈 화면 영역 사고 → 200~299만 PASS
+      //   사고 #43: ERP 첫 응답 영역 = 로그인 페이지 영역 302 리다이렉트 박힐 가능
+      //   봉합: 200~299 + 302~307 PASS (정상 영역 응답 + 리다이렉트 영역 모두 정합)
+      //   401·403·404·500 영역은 여전히 FAIL (실제 영역 사고 영역)
+      //   MaximumRedirection=0 영역 박음 — 리다이렉트 영역 자동 영역 따라가지 않고 상태 영역 검사
+      '$url = "https://' + G_PrimaryDomain + '";' + #13#10 +
+      '$maxAttempts = 30;' + #13#10 +
+      '$attempt = 0;' + #13#10 +
+      '$pass = $false;' + #13#10 +
+      'while ($attempt -lt $maxAttempts) {' + #13#10 +
+      '  $attempt++;' + #13#10 +
+      '  Start-Sleep -Seconds 10;' + #13#10 +
+      '  try {' + #13#10 +
+      '    $r = Invoke-WebRequest -Uri $url -TimeoutSec 10 -UseBasicParsing -MaximumRedirection 0 -ErrorAction Stop;' + #13#10 +
+      '    $sc = [int]$r.StatusCode;' + #13#10 +
+      '    if (($sc -ge 200 -and $sc -lt 300) -or ($sc -ge 302 -and $sc -le 307)) { $pass = $true; break; }' + #13#10 +
+      '  } catch {' + #13#10 +
+      '    # 302 영역 -MaximumRedirection 0 영역 박힌 영역 catch 영역 박힘 → Response 영역 검사' + #13#10 +
+      '    if ($_.Exception.Response -and $_.Exception.Response.StatusCode) {' + #13#10 +
+      '      $sc = [int]$_.Exception.Response.StatusCode;' + #13#10 +
+      '      if (($sc -ge 200 -and $sc -lt 300) -or ($sc -ge 302 -and $sc -le 307)) { $pass = $true; break; }' + #13#10 +
+      '    }' + #13#10 +
+      '  }' + #13#10 +
+      '}' + #13#10 +
+      'if ($pass) { exit 0; } else { exit 1; }',
+      False);
+
+    Exec('powershell.exe',
+         '-NoProfile -ExecutionPolicy Bypass -File "' + ExpandConstant('{tmp}\healthcheck.ps1') + '"',
+         '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+
+    DeleteFile(ExpandConstant('{tmp}\healthcheck.ps1'));
+
+    if ResultCode = 0 then
+      ShellExec('open', 'https://' + G_PrimaryDomain, '', '', SW_SHOW, ewNoWait, ResultCode)
+    else begin
+      // 헬스체크 영역 실패 — silent 0건, 사장님 영역 직접 표시 (헌법 #15 정합)
+      MsgBox('히트판 ERP 설치가 완료되었으나, 외부 터널 영역 활성화에 시간이 필요합니다.' + #13#10 + #13#10 +
+             '5~10분 후에 다음 주소로 접속해주세요:' + #13#10 +
+             'https://' + G_PrimaryDomain + #13#10 + #13#10 +
+             '접속이 안 되면 본사 고객센터에 문의해주세요.',
+             mbInformation, MB_OK);
+      // 폴백 영역 — 로컬 영역으로 가도
+      ShellExec('open', 'http://localhost:5234', '', '', SW_SHOW, ewNoWait, ResultCode);
+    end;
+  end else begin
+    // 로컬 단독 모드 영역 (시리얼 0건 또는 LOCAL)
+    Sleep(5000);
     ShellExec('open', 'http://localhost:5234', '', '', SW_SHOW, ewNoWait, ResultCode);
+  end;
 end;
 
 function InitializeSetup(): Boolean;
@@ -608,4 +950,52 @@ begin
            mbError, MB_OK);
     Result := False;
   end;
+end;
+
+// 사고 #37·#44 봉합 (WS-20260612-01 풀스택·설계팀장 발견 2026-06-12)
+// 설치 중간 영역 실패 영역 부분 영역 정리 영역 박음
+// 헌법 #20 (워크플로우 끊김 0건) 정합 — 사용자 영역 깨끗한 영역 재시도 박힘
+//
+// 사고 #44 봉합: LOCAL 모드 영역 = registry.json 박지 0건 영역 정합 (사고 #30)
+//   → registry.json 없음 영역 만으로 실패 영역 판단 시 LOCAL 정상 설치 영역도 정리 가도 박힘
+//   → 봉합: G_BootstrapOk OR LOCAL 모드 영역도 성공 영역 분기 박음
+procedure DeinitializeSetup();
+var
+  ResultCode: Integer;
+  registrySize: Integer;
+begin
+  // 정상 영역 종료 영역 = 다음 영역 중 하나
+  //   1) registry.json 박힘 = 일반 영역 설치 영역 성공
+  //   2) G_BootstrapOk = True 영역 = 시리얼 인증 영역 성공 영역 박힌 영역
+  //   3) G_TenantCode = 'LOCAL' = 로컬 단독 모드 영역 정상
+  if FileExists(ExpandConstant('{app}\registry.json')) then Exit;
+  if G_BootstrapOk then Exit;
+  if G_TenantCode = 'LOCAL' then Exit;
+
+  // 비정상 영역 종료 영역 — 부분 영역 정리 영역 가도
+  // cloudflared 영역 좀비 영역 제거 (사고 #11 정합 영역)
+  Exec(ExpandConstant('{cmd}'),
+       '/C sc stop cloudflared & timeout /t 2 /nobreak & sc delete cloudflared',
+       '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+  Exec(ExpandConstant('{cmd}'),
+       '/C taskkill /F /IM cloudflared.exe',
+       '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+
+  // schtasks 영역 부분 영역 박힌 영역 제거 (모든 슬롯 영역)
+  Exec(ExpandConstant('{cmd}'),
+       '/C schtasks /Delete /F /TN "HitPan-ERP-API-tenant-1" & ' +
+       'schtasks /Delete /F /TN "HitPan-ERP-API-tenant-2" & ' +
+       'schtasks /Delete /F /TN "HitPan-ERP-API-tenant-3" & ' +
+       'schtasks /Delete /F /TN "HitPan-ERP-API-tenant-4" & ' +
+       'schtasks /Delete /F /TN "HitPan-ERP-API-tenant-5"',
+       '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+
+  // 환경변수 영역 정리 — 부분 영역 박힌 영역 제거
+  Exec(ExpandConstant('{cmd}'),
+       '/C reg delete "HKLM\SYSTEM\CurrentControlSet\Control\Session Manager\Environment" /v HITPAN_SUBDOMAIN /f & ' +
+       'reg delete "HKLM\SYSTEM\CurrentControlSet\Control\Session Manager\Environment" /v DB_PASSWORD /f & ' +
+       'reg delete "HKLM\SYSTEM\CurrentControlSet\Control\Session Manager\Environment" /v JWT_SECRET /f',
+       '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+
+  // db.conf 영역·bootstrap.conf 영역 잔재 영역 — Inno Setup 영역 [UninstallDelete] 영역 박힘
 end;

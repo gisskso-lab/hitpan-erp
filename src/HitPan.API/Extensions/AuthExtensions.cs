@@ -1,4 +1,5 @@
 using System.Text;
+using HitPan.Infrastructure.Configuration;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.IdentityModel.Tokens;
 
@@ -11,14 +12,16 @@ public static class AuthExtensions
 
     public static IServiceCollection AddJwtAuthentication(this IServiceCollection services)
     {
-        var jwtSecret = Environment.GetEnvironmentVariable("JWT_SECRET");
+        // 사고 #46 봉합 (WS-20260612-01 2026-06-12): TenantConfigReader 영역 db.conf 영역
+        //   회사별 hitpan-keys.conf 영역 JWT_SECRET 박힘 → 회사별 영역 완전 분리
+        var jwtSecret = TenantConfigReader.Get("JWT_SECRET");
         if (string.IsNullOrWhiteSpace(jwtSecret))
         {
-            throw new InvalidOperationException("JWT_SECRET environment variable is required.");
+            throw new InvalidOperationException("JWT_SECRET 영역 0건 — hitpan-keys.conf 또는 환경변수 영역 박혀야 함");
         }
 
         // Production 강제 검증: JWT_SECRET 최소 32바이트(256비트) + 약한 기본값 차단
-        var envName = Environment.GetEnvironmentVariable("ASPNETCORE_ENVIRONMENT") ?? "Production";
+        var envName = TenantConfigReader.Get("ASPNETCORE_ENVIRONMENT") ?? "Production";
         if (string.Equals(envName, "Production", StringComparison.OrdinalIgnoreCase))
         {
             if (jwtSecret.Length < 32)
@@ -38,9 +41,9 @@ public static class AuthExtensions
             }
         }
 
-        // Issuer/Audience — .env 또는 기본값 (토큰 스푸핑 방지)
-        var jwtIssuer = Environment.GetEnvironmentVariable("JWT_ISSUER") ?? "hitpan-erp";
-        var jwtAudience = Environment.GetEnvironmentVariable("JWT_AUDIENCE") ?? "hitpan-client";
+        // Issuer/Audience — db.conf·hitpan-keys.conf·환경변수 영역 폴백 (토큰 스푸핑 방지)
+        var jwtIssuer = TenantConfigReader.Get("JWT_ISSUER") ?? "hitpan-erp";
+        var jwtAudience = TenantConfigReader.Get("JWT_AUDIENCE") ?? "hitpan-client";
 
         var key = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwtSecret));
 

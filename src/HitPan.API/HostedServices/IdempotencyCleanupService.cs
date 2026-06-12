@@ -1,6 +1,7 @@
 using System.Data;
 using Dapper;
 using HitPan.Contracts.Idempotency;
+using HitPan.Infrastructure.Configuration;
 using MySqlConnector;
 
 namespace HitPan.API.HostedServices;
@@ -59,11 +60,12 @@ public sealed class IdempotencyCleanupService : BackgroundService
 
     private static string BuildConnectionString()
     {
-        var host = Environment.GetEnvironmentVariable("DB_HOST") ?? "localhost";
-        var port = Environment.GetEnvironmentVariable("DB_PORT") ?? "3306";
-        var db = Environment.GetEnvironmentVariable("DB_NAME");
-        var user = Environment.GetEnvironmentVariable("DB_USER");
-        var pwd = Environment.GetEnvironmentVariable("DB_PASSWORD");
+        // 사고 #46 봉합 (WS-20260612-01 2026-06-12): TenantConfigReader 영역 db.conf 영역
+        var host = TenantConfigReader.Get("DB_HOST") ?? "localhost";
+        var port = TenantConfigReader.Get("DB_PORT") ?? "3306";
+        var db = TenantConfigReader.Get("DB_NAME");
+        var user = TenantConfigReader.Get("DB_USER");
+        var pwd = TenantConfigReader.Get("DB_PASSWORD");
         if (string.IsNullOrEmpty(db) || string.IsNullOrEmpty(user) || string.IsNullOrEmpty(pwd))
         {
             return string.Empty;
