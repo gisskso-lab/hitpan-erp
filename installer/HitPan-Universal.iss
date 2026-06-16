@@ -22,7 +22,7 @@
 ; ============================================================
 
 #ifndef AppVersion
-  #define AppVersion "1.2.7"
+  #define AppVersion "1.2.8"
 #endif
 
 #ifndef BackofficeApi
@@ -106,8 +106,11 @@ Name: "{group}\HitPan ERP"; Filename: "{app}\hitpan-start.bat"; WorkingDir: "{ap
 Name: "{commondesktop}\HitPan ERP"; Filename: "{app}\hitpan-start.bat"; WorkingDir: "{app}"; IconFilename: "{sys}\shell32.dll"; IconIndex: 21
 
 [Run]
-Filename: "{tmp}\dotnet-hosting.exe"; Parameters: "/quiet /norestart"; StatusMsg: ".NET 8 런타임 설치 중..."; Check: NeedsDotNet; Flags: waituntilterminated
-Filename: "{tmp}\vc_redist.x64.exe"; Parameters: "/quiet /norestart"; StatusMsg: "Visual C++ 런타임 설치 중..."; Check: NeedsVCRedist; Flags: waituntilterminated
+; 봉합 2026-06-16: log 영역 박음 — Sandbox 영역 멈춤 사고 영역 진단 가능 박음
+;   /log 옵션 영역 박힘 → 사고 시 %TEMP%\dotnet-install.log 영역 박힘
+;   /passive 영역 박음 → /quiet 영역 다이얼로그 사고 영역 진행 바 박힘 영역 정합 (사용자 응답 0건)
+Filename: "{tmp}\dotnet-hosting.exe"; Parameters: "/install /passive /norestart /log ""{tmp}\dotnet-install.log"""; StatusMsg: ".NET 8 런타임 설치 중 (최대 5분 영역)..."; Check: NeedsDotNet; Flags: waituntilterminated
+Filename: "{tmp}\vc_redist.x64.exe"; Parameters: "/install /passive /norestart /log ""{tmp}\vcredist-install.log"""; StatusMsg: "Visual C++ 런타임 설치 중..."; Check: NeedsVCRedist; Flags: waituntilterminated
 ; MariaDB·DB 셋업·cloudflared 등록·ERP 자동 시작·브라우저 열기는 Code 섹션 CurStepChanged에서 처리 (사장님 헌법 #30 정합 2026-06-11)
 
 [UninstallRun]
