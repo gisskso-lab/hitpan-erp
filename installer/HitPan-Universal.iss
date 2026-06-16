@@ -22,7 +22,7 @@
 ; ============================================================
 
 #ifndef AppVersion
-  #define AppVersion "1.2.6"
+  #define AppVersion "1.2.7"
 #endif
 
 #ifndef BackofficeApi
@@ -261,7 +261,10 @@ begin
   // 기본값 (시리얼 0건 영역 = LOCAL)
   G_SlotIndex := 1;
   G_ApiPort := 5257;
-  G_TenantInstallDir := ExpandConstant('{app}\tenant-1');
+  // 봉합 2026-06-16: {app} 영역 = wpSelectDir 통과 후 초기화. SerialKeyPage 단계에서는 미초기화.
+  //   사고: "An attempt was made to expand the 'app' constant before it was initialized."
+  //   G_TenantInstallDir 영역 박음 = CurStepChanged(ssInstall) 시점으로 지연.
+  G_TenantInstallDir := '';
   G_DbName := 'hitpan_erp';
   G_DbUser := 'hitpan';
 
@@ -272,12 +275,15 @@ begin
   end;
 
   // PowerShell로 registry.json 영역 읽어서 슬롯 영역 결정
+  // 봉합 2026-06-16 (B안): registry.json 영역 ProgramData 영역 이전.
+  //   원안: {app}\registry.json → {app} 미초기화 영역 사고
+  //   B안: {commonappdata}\HitPan\registry.json → 사용자 영역 무관·{app} 의존 0건
   PsFile := ExpandConstant('{tmp}\determine-slot.ps1');
   ResultFile := ExpandConstant('{tmp}\slot-result.txt');
 
   PsScript :=
     '$ErrorActionPreference = ''Continue'';' + #13#10 +
-    '$registryPath = "' + ExpandConstant('{app}') + '\registry.json";' + #13#10 +
+    '$registryPath = "' + ExpandConstant('{commonappdata}') + '\HitPan\registry.json";' + #13#10 +
     '$slot = 1;' + #13#10 +
     '$tenantCode = "' + G_TenantCode + '";' + #13#10 +
     'if (Test-Path $registryPath) {' + #13#10 +
@@ -320,9 +326,11 @@ begin
     Exit;
   end;
 
-  // 슬롯 영역 정합 — 포트·디렉터리·DB 영역 박음
+  // 슬롯 영역 정합 — 포트·DB 영역 박음
   G_ApiPort := 5257 + ((G_SlotIndex - 1) * 100);
-  G_TenantInstallDir := ExpandConstant('{app}\tenant-') + IntToStr(G_SlotIndex);
+  // 봉합 2026-06-16 (B안): G_TenantInstallDir 영역 박음 = CurStepChanged(ssInstall) 시점.
+  //   SerialKeyPage 단계에서는 {app} 미초기화 영역 사고.
+  G_TenantInstallDir := '';
   // DB 이름 영역 — tenantCode 영역 영문·숫자만 박음
   G_DbName := 'hitpan_erp_' + LowerCase(G_TenantCode);
   G_DbUser := 'hitpan_' + LowerCase(G_TenantCode);
@@ -621,6 +629,11 @@ begin
   // G_BootstrapOk = false 일 때도 MariaDB·DB·hitpan-keys.conf·bootstrap.conf 생성
   // cloudflared 터널만 G_TunnelToken 영역 조건부
 
+  // 봉합 2026-06-16 (B안): G_TenantInstallDir 영역 박음 = ssPostInstall 시점.
+  //   SerialKeyPage 단계 (DetermineMultiTenantSlot) 영역에서 {app} 미초기화 영역 사고 차단.
+  //   ssPostInstall 시점 = {app} 영역 초기화 완료 영역 (wpSelectDir·wpReady 통과 후).
+  G_TenantInstallDir := ExpandConstant('{app}\tenant-') + IntToStr(G_SlotIndex);
+
   // 1. 보안 키 생성
   JwtKey := GenerateRandomKey(32);
   AesKey := GenerateRandomKey(32);
@@ -762,7 +775,10 @@ begin
   try
     BatchContent.Add('$ErrorActionPreference = ''Continue'';');
     BatchContent.Add('$inputPath = "' + ExpandConstant('{tmp}\tenant-input.txt') + '";');
-    BatchContent.Add('$registryPath = "' + ExpandConstant('{app}') + '\registry.json";');
+    // 봉합 2026-06-16 (B안): registry.json 영역 ProgramData 영역 이전 (사용자 영역 무관 일관성)
+    BatchContent.Add('$registryDir = "' + ExpandConstant('{commonappdata}') + '\HitPan";');
+    BatchContent.Add('if (-not (Test-Path $registryDir)) { New-Item -ItemType Directory -Path $registryDir -Force | Out-Null }');
+    BatchContent.Add('$registryPath = "$registryDir\registry.json";');
     BatchContent.Add('$kv = @{};');
     BatchContent.Add('Get-Content $inputPath -Encoding UTF8 | ForEach-Object {');
     BatchContent.Add('  $i = $_.IndexOf("=");');
@@ -968,7 +984,8 @@ begin
   //   1) registry.json 박힘 = 일반 영역 설치 영역 성공
   //   2) G_BootstrapOk = True 영역 = 시리얼 인증 영역 성공 영역 박힌 영역
   //   3) G_TenantCode = 'LOCAL' = 로컬 단독 모드 영역 정상
-  if FileExists(ExpandConstant('{app}\registry.json')) then Exit;
+  // 봉합 2026-06-16 (B안): registry.json 영역 ProgramData 영역 이전. {app} 미초기화 영역 사고 차단.
+  if FileExists(ExpandConstant('{commonappdata}\HitPan\registry.json')) then Exit;
   if G_BootstrapOk then Exit;
   if G_TenantCode = 'LOCAL' then Exit;
 
