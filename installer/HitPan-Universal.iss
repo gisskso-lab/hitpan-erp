@@ -22,7 +22,7 @@
 ; ============================================================
 
 #ifndef AppVersion
-  #define AppVersion "1.2.8"
+  #define AppVersion "1.2.9"
 #endif
 
 #ifndef BackofficeApi
@@ -256,6 +256,8 @@ var
   ResultCode: Integer;
   PsFile, ResultFile: String;
   Lines: TArrayOfString;
+  SanitizedCode: String;
+  PosDash: Integer;
 begin
   // 사고 #45 봉합 (CTO 발견 2026-06-12): 한 번 박힌 영역 결정 영역 영역 재결정 영역 차단
   //   [뒤로] 영역 박은 후 영역 다시 영역 호출 영역 박혀도 영역 영역 0건 영역
@@ -335,8 +337,17 @@ begin
   //   SerialKeyPage 단계에서는 {app} 미초기화 영역 사고.
   G_TenantInstallDir := '';
   // DB 이름 영역 — tenantCode 영역 영문·숫자만 박음
-  G_DbName := 'hitpan_erp_' + LowerCase(G_TenantCode);
-  G_DbUser := 'hitpan_' + LowerCase(G_TenantCode);
+  // 봉합 2026-06-16 (1.2.9): TenantCode 영역 하이픈 사고 — SQL identifier 영역 사고 차단
+  //   기존: T-003 → hitpan_erp_t-003 → SQL 영역 백틱 0건 시점 사고
+  //   봉합: 하이픈 제거 → T-003 → t003 → hitpan_erp_t003 (정상 SQL identifier)
+  SanitizedCode := LowerCase(G_TenantCode);
+  PosDash := Pos('-', SanitizedCode);
+  while PosDash > 0 do begin
+    Delete(SanitizedCode, PosDash, 1);
+    PosDash := Pos('-', SanitizedCode);
+  end;
+  G_DbName := 'hitpan_erp_' + SanitizedCode;
+  G_DbUser := 'hitpan_' + SanitizedCode;
 
   // 사고 #45 봉합 (CTO 발견 2026-06-12): 결정 영역 박힘 영역 플래그 박음
   G_SlotAlreadyDetermined := True;
