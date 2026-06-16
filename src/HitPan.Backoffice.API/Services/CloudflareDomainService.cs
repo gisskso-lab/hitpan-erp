@@ -88,14 +88,42 @@ public class CloudflareDomainService : ICloudflareDomainService
 
         var dnsRes = await http.PostAsJsonAsync($"zones/{_zoneId}/dns_records", dnsPayload, ct);
         var dnsBody = await dnsRes.Content.ReadAsStringAsync(ct);
+        string recordId;
         if (!dnsRes.IsSuccessStatusCode)
         {
-            _logger.LogWarning("[CFDomain] DNS 생성 실패 {Status} {Body}", dnsRes.StatusCode, dnsBody);
-            throw new InvalidOperationException($"DNS 레코드 생성 실패 ({(int)dnsRes.StatusCode}): {dnsBody}");
+            // 봉합 2026-06-16 (사고: test000 1033): 이미 박혀있는 DNS 영역 (code 81053) = 정합 처리
+            //   기존 영역: 승인 시 DNS 박힘 → 설치 시 다시 호출 → 81053 사고 → 터널 토큰 0건 → 1033 사고
+            //   봉합: 81053 사고 영역 = 기존 record ID 영역 조회·반환 (Idempotent)
+            if (dnsBody.Contains("81053") || dnsBody.Contains("already exists"))
+            {
+                _logger.LogInformation("[CFDomain] DNS 영역 박힘 영역 — 기존 영역 조회 가도 domain={Domain}", domain);
+                var lookupRes = await http.GetAsync($"zones/{_zoneId}/dns_records?type=CNAME&name={domain}", ct);
+                var lookupBody = await lookupRes.Content.ReadAsStringAsync(ct);
+                if (!lookupRes.IsSuccessStatusCode)
+                {
+                    _logger.LogWarning("[CFDomain] 기존 영역 조회 실패 {Status} {Body}", lookupRes.StatusCode, lookupBody);
+                    throw new InvalidOperationException($"DNS 기존 영역 조회 실패 ({(int)lookupRes.StatusCode}): {lookupBody}");
+                }
+                using var lookupJson = JsonDocument.Parse(lookupBody);
+                var resultArr = lookupJson.RootElement.GetProperty("result");
+                if (resultArr.GetArrayLength() == 0)
+                {
+                    throw new InvalidOperationException($"DNS 81053 영역 박혔는데 조회 영역 0건: {dnsBody}");
+                }
+                recordId = resultArr[0].GetProperty("id").GetString() ?? "";
+                _logger.LogInformation("[CFDomain] 기존 영역 정합 가도 record={Rid}", recordId);
+            }
+            else
+            {
+                _logger.LogWarning("[CFDomain] DNS 생성 실패 {Status} {Body}", dnsRes.StatusCode, dnsBody);
+                throw new InvalidOperationException($"DNS 레코드 생성 실패 ({(int)dnsRes.StatusCode}): {dnsBody}");
+            }
         }
-
-        using var dnsJson = JsonDocument.Parse(dnsBody);
-        var recordId = dnsJson.RootElement.GetProperty("result").GetProperty("id").GetString() ?? "";
+        else
+        {
+            using var dnsJson = JsonDocument.Parse(dnsBody);
+            recordId = dnsJson.RootElement.GetProperty("result").GetProperty("id").GetString() ?? "";
+        }
 
         // 2) cloudflared 터널은 본사 사전 발급 또는 별도 결재 흐름 (헌법 #29) — 본 골격에선 null
         return new DomainIssueResult(domain, _zoneId!, recordId, null);
@@ -133,14 +161,35 @@ public class CloudflareDomainService : ICloudflareDomainService
         };
         var createRes = await http.PostAsJsonAsync($"accounts/{_accountId}/cfd_tunnel", createPayload, ct);
         var createBody = await createRes.Content.ReadAsStringAsync(ct);
+        string tunnelId;
         if (!createRes.IsSuccessStatusCode)
         {
-            _logger.LogWarning("[CFTunnel] 터널 생성 실패 {Status} {Body}", createRes.StatusCode, createBody);
-            throw new InvalidOperationException($"터널 생성 실패 ({(int)createRes.StatusCode}): {createBody}");
+            // 봉합 2026-06-16: 터널 영역 이미 박혀있는 경우 (이름 중복 사고) = 기존 영역 조회·재토큰 발급
+            if (createBody.Contains("already exists") || createBody.Contains("duplicate") || createBody.Contains("1006"))
+            {
+                _logger.LogInformation("[CFTunnel] 터널 영역 박힘 영역 — 기존 영역 조회 가도 name={Name}", tunnelName);
+                var listRes = await http.GetAsync($"accounts/{_accountId}/cfd_tunnel?name={tunnelName}&is_deleted=false", ct);
+                var listBody = await listRes.Content.ReadAsStringAsync(ct);
+                if (!listRes.IsSuccessStatusCode)
+                    throw new InvalidOperationException($"터널 기존 영역 조회 실패 ({(int)listRes.StatusCode}): {listBody}");
+                using var listJson = JsonDocument.Parse(listBody);
+                var arr = listJson.RootElement.GetProperty("result");
+                if (arr.GetArrayLength() == 0)
+                    throw new InvalidOperationException($"터널 중복 영역 박혔는데 조회 0건: {createBody}");
+                tunnelId = arr[0].GetProperty("id").GetString() ?? "";
+                _logger.LogInformation("[CFTunnel] 기존 터널 정합 가도 id={Tid}", tunnelId);
+            }
+            else
+            {
+                _logger.LogWarning("[CFTunnel] 터널 생성 실패 {Status} {Body}", createRes.StatusCode, createBody);
+                throw new InvalidOperationException($"터널 생성 실패 ({(int)createRes.StatusCode}): {createBody}");
+            }
         }
-
-        using var createJson = JsonDocument.Parse(createBody);
-        var tunnelId = createJson.RootElement.GetProperty("result").GetProperty("id").GetString() ?? "";
+        else
+        {
+            using var createJson = JsonDocument.Parse(createBody);
+            tunnelId = createJson.RootElement.GetProperty("result").GetProperty("id").GetString() ?? "";
+        }
 
         // 3) 터널 실행 토큰 발급
         var tokenRes = await http.GetAsync($"accounts/{_accountId}/cfd_tunnel/{tunnelId}/token", ct);
