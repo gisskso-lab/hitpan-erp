@@ -111,6 +111,18 @@ public class InstallerBootstrapController : ControllerBase
                         var tunnelResult = await _cfDomain.IssueTunnelAsync(tenant.TenantId, tenant.TenantCode, ct);
                         tunnelToken = tunnelResult.TunnelToken;
                         tunnelId = tunnelResult.TunnelId;
+
+                        // 봉합 2026-06-16 (사고: test000 1033 재발):
+                        //   DNS Idempotent 봉합 후 기존 DNS record가 잘못된 터널 가리키는 사고.
+                        //   터널 새로 발급 → DNS CNAME content를 새 tunnelId.cfargotunnel.com 로 PATCH.
+                        try
+                        {
+                            await _cfDomain.UpdateDnsTunnelTargetAsync(domainResult.RecordId, domainResult.Domain, tunnelId, ct);
+                        }
+                        catch (Exception pex)
+                        {
+                            _logger.LogWarning(pex, "[InstallerBootstrap] DNS PATCH 실패 tenant={Tid} (1033 사고 가능성)", tenant.TenantId);
+                        }
                     }
                     catch (Exception tex)
                     {

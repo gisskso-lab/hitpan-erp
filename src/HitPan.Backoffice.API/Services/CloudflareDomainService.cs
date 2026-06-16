@@ -24,6 +24,9 @@ public interface ICloudflareDomainService
     Task<DomainIssueResult> IssueAsync(string tenantId, string tenantCode, string? domainAlias, CancellationToken ct);
     // 사장님 결재 Plan 2026-06-09 (Day 5) — cloudflared 터널 자동 발급 + 토큰 발급
     Task<TunnelIssueResult> IssueTunnelAsync(string tenantId, string tenantCode, CancellationToken ct);
+
+    // 봉합 2026-06-16: DNS CNAME content를 새 터널 ID로 업데이트 (1033 사고 봉합)
+    Task UpdateDnsTunnelTargetAsync(string recordId, string domain, string tunnelId, CancellationToken ct);
     Task<bool> RevokeAsync(string cfZoneId, string cfRecordId, string? cfTunnelId, CancellationToken ct);
     // 사장님 결재 2026-06-11 — 도메인 별칭으로 영역 검색 + 삭제 (중복 발급 차단 영역)
     Task<bool> RevokeByDomainAsync(string subdomain, CancellationToken ct);
@@ -127,6 +130,39 @@ public class CloudflareDomainService : ICloudflareDomainService
 
         // 2) cloudflared 터널은 본사 사전 발급 또는 별도 결재 흐름 (헌법 #29) — 본 골격에선 null
         return new DomainIssueResult(domain, _zoneId!, recordId, null);
+    }
+
+    // 봉합 2026-06-16 (사고: test000 1033 재발):
+    //   DNS Idempotent 봉합 후 기존 DNS record가 잘못된 터널을 가리키는 사고.
+    //   터널 새로 발급되면 DNS CNAME content도 새 tunnelId.cfargotunnel.com 로 업데이트 필요.
+    //   본 메서드 영역 = InstallerBootstrap에서 터널 발급 후 호출.
+    public async Task UpdateDnsTunnelTargetAsync(string recordId, string domain, string tunnelId, CancellationToken ct)
+    {
+        if (!IsConfigured)
+            throw new InvalidOperationException("Cloudflare 환경변수 미설정");
+
+        var http = _httpFactory.CreateClient();
+        http.BaseAddress = new Uri("https://api.cloudflare.com/client/v4/");
+        http.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", _token);
+
+        var patchPayload = new
+        {
+            type = "CNAME",
+            name = domain,
+            content = $"{tunnelId}.cfargotunnel.com",
+            ttl = 1,
+            proxied = true
+        };
+
+        var patchRes = await http.PutAsJsonAsync($"zones/{_zoneId}/dns_records/{recordId}", patchPayload, ct);
+        var patchBody = await patchRes.Content.ReadAsStringAsync(ct);
+        if (!patchRes.IsSuccessStatusCode)
+        {
+            _logger.LogWarning("[CFDomain] DNS PATCH 실패 {Status} {Body}", patchRes.StatusCode, patchBody);
+            throw new InvalidOperationException($"DNS PATCH 실패 ({(int)patchRes.StatusCode}): {patchBody}");
+        }
+        _logger.LogInformation("[CFDomain] DNS PATCH 완료 domain={Domain} target={TunnelId}.cfargotunnel.com",
+            domain, tunnelId);
     }
 
     // 사장님 결재 Plan 2026-06-09 (Day 5) — cloudflared 터널 자동 발급
