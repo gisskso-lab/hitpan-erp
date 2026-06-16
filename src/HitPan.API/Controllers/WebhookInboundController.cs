@@ -2,6 +2,7 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using Dapper;
+using HitPan.Infrastructure.Configuration;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using MySqlConnector;
@@ -163,16 +164,15 @@ public class WebhookInboundController : ControllerBase
         return CryptographicOperations.FixedTimeEquals(expectedBytes, actualBytes);
     }
 
-    // 저장 완료 2026-06-08 (브라운킴 PM) — InfrastructureExtensions 저장된 영역 정합.
-    // ERP API 저장된 DB 저장 영역 = 환경변수(.env) DB_HOST/DB_PORT/DB_NAME/DB_USER/DB_PASSWORD 저장.
+    // 봉합 2026-06-16: TenantConfigReader 영역 통일 (db.conf 직접 읽음)
+    //   1.2.6 환경변수 폐기 사장님 결재 정합. AuditLogMiddleware와 함께 누락된 영역.
     private static string BuildConnectionString()
     {
-        var host = Environment.GetEnvironmentVariable("DB_HOST") ?? "localhost";
-        var port = Environment.GetEnvironmentVariable("DB_PORT") ?? "3306";
-        var db   = Environment.GetEnvironmentVariable("DB_NAME") ?? "hitpan_erp";
-        var user = Environment.GetEnvironmentVariable("DB_USER") ?? "hitpan";
-        var pwd  = Environment.GetEnvironmentVariable("DB_PASSWORD")
-                   ?? throw new InvalidOperationException("DB_PASSWORD 환경변수 저장하지 않음 (.env 저장 확인 저장할 영역)");
+        var host = TenantConfigReader.Get("DB_HOST") ?? "localhost";
+        var port = TenantConfigReader.Get("DB_PORT") ?? "3306";
+        var db   = TenantConfigReader.Get("DB_NAME") ?? "hitpan_erp";
+        var user = TenantConfigReader.Get("DB_USER") ?? "hitpan";
+        var pwd  = TenantConfigReader.GetRequired("DB_PASSWORD");
         return $"Server={host};Port={port};Database={db};Uid={user};Pwd={pwd};CharSet=utf8mb4;AllowUserVariables=true";
     }
 

@@ -373,11 +373,11 @@ public class SignupsAdminController : ControllerBase
 
     <div style=""background:#FEF3C7;border:2px solid #F59E0B;border-radius:12px;padding:24px;margin:24px 0;text-align:center;"">
       <p style=""margin:0 0 12px;color:#92400E;font-size:14px;font-weight:700;"">📥 설치 파일 다운로드</p>
-      <a href=""https://updates.hitpan.kr/packages/HitPan-ERP-Setup-1.2.10.exe""
+      <a href=""https://updates.hitpan.kr/packages/HitPan-ERP-Setup-1.2.11.exe""
          style=""display:inline-block;background:#0F6E56;color:#fff;padding:14px 32px;border-radius:8px;font-size:15px;font-weight:700;text-decoration:none;"">
         히트판 ERP 설치 프로그램 (279 MB)
       </a>
-      <p style=""margin:12px 0 0;color:#92400E;font-size:12px;"">버전 1.2.10 · Windows 10/11 (64bit)</p>
+      <p style=""margin:12px 0 0;color:#92400E;font-size:12px;"">버전 1.2.11 · Windows 10/11 (64bit)</p>
     </div>
 
     <h2 style=""font-size:16px;margin:24px 0 12px;color:#0F1419;"">설치 방법 (10분 소요)</h2>

@@ -1,6 +1,7 @@
 using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
 using System.Text;
+using HitPan.Infrastructure.Configuration;
 using Microsoft.IdentityModel.Tokens;
 
 namespace HitPan.API.Security;
@@ -14,15 +15,12 @@ public sealed class AccessTokenValidator
 
     public AccessTokenValidator()
     {
-        var jwtSecret = Environment.GetEnvironmentVariable("JWT_SECRET");
-        if (string.IsNullOrWhiteSpace(jwtSecret))
-        {
-            throw new InvalidOperationException("JWT_SECRET environment variable is required.");
-        }
+        // 봉합 2026-06-16: TenantConfigReader 영역 통일 (1.2.6 환경변수 폐기 사장님 결재 정합)
+        var jwtSecret = TenantConfigReader.GetRequired("JWT_SECRET");
 
         // 보안 강화: issuer/audience 검증 활성화
-        var jwtIssuer = Environment.GetEnvironmentVariable("JWT_ISSUER") ?? "hitpan-erp";
-        var jwtAudience = Environment.GetEnvironmentVariable("JWT_AUDIENCE") ?? "hitpan-client";
+        var jwtIssuer = TenantConfigReader.Get("JWT_ISSUER") ?? "hitpan-erp";
+        var jwtAudience = TenantConfigReader.Get("JWT_AUDIENCE") ?? "hitpan-client";
 
         var key = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwtSecret));
         _parameters = new TokenValidationParameters

@@ -5,6 +5,7 @@ using HitPan.API.Security;
 using HitPan.Application.DTOs.Document;
 using HitPan.Application.Interfaces;
 using HitPan.Application.Services;
+using HitPan.Infrastructure.Configuration;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
@@ -53,9 +54,10 @@ public class DocumentController : ControllerBase
             return Forbid();
         }
 
-        var jwtSecret = Environment.GetEnvironmentVariable("JWT_SECRET")!;
-        var issuer = Environment.GetEnvironmentVariable("JWT_ISSUER") ?? "hitpan-erp";
-        var audience = Environment.GetEnvironmentVariable("JWT_AUDIENCE") ?? "hitpan-client";
+        // 봉합 2026-06-16: TenantConfigReader 영역 통일
+        var jwtSecret = TenantConfigReader.GetRequired("JWT_SECRET");
+        var issuer = TenantConfigReader.Get("JWT_ISSUER") ?? "hitpan-erp";
+        var audience = TenantConfigReader.Get("JWT_AUDIENCE") ?? "hitpan-client";
         var key = new Microsoft.IdentityModel.Tokens.SymmetricSecurityKey(
             System.Text.Encoding.UTF8.GetBytes(jwtSecret));
         var creds = new Microsoft.IdentityModel.Tokens.SigningCredentials(

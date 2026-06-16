@@ -1,5 +1,6 @@
 using Dapper;
 using MySqlConnector;
+using HitPan.Infrastructure.Configuration;
 
 namespace HitPan.API.Middleware;
 
@@ -77,16 +78,17 @@ public sealed class AuditLogMiddleware
         }
     }
 
+    // 봉합 2026-06-16 (사고: Sandbox 1.2.10 API 가도 실패):
+    //   AuditLogMiddleware 영역이 환경변수 직접 읽음 → 1.2.6 봉합 (TenantConfigReader 도입) 누락.
+    //   다른 4개 (Integrity·Idempotency·Auth·Infrastructure) 영역만 봉합 박혔는데 본 영역 누락 = PM 사고.
+    //   봉합: db.conf 영역 직접 읽음 (TenantConfigReader 영역).
     private static string BuildConnectionStringFromEnv()
     {
-        var host = Environment.GetEnvironmentVariable("DB_HOST") ?? "localhost";
-        var port = Environment.GetEnvironmentVariable("DB_PORT") ?? "3306";
-        var db = Environment.GetEnvironmentVariable("DB_NAME")
-            ?? throw new InvalidOperationException("DB_NAME 환경변수 없음");
-        var user = Environment.GetEnvironmentVariable("DB_USER")
-            ?? throw new InvalidOperationException("DB_USER 환경변수 없음");
-        var pwd = Environment.GetEnvironmentVariable("DB_PASSWORD")
-            ?? throw new InvalidOperationException("DB_PASSWORD 환경변수 없음");
+        var host = TenantConfigReader.Get("DB_HOST") ?? "localhost";
+        var port = TenantConfigReader.Get("DB_PORT") ?? "3306";
+        var db = TenantConfigReader.GetRequired("DB_NAME");
+        var user = TenantConfigReader.GetRequired("DB_USER");
+        var pwd = TenantConfigReader.GetRequired("DB_PASSWORD");
         return $"Server={host};Port={port};Database={db};User={user};Password={pwd};";
     }
 }
