@@ -138,12 +138,31 @@ public sealed class EncryptionService : IEncryptionService
             // Fall back to UTF8 path below.
         }
 
+        // 봉합 2026-06-17 1.2.12 — installer GenerateRandomKey(32) = hex 64자 출력 정합
+        //   (적대적 검증 P0 #1: hex 64자 → ParseKey 첫 분기 throw 사고 차단)
+        if (rawKey.Length == AesKeySizeInBytes * 2 && IsHexString(rawKey))
+        {
+            try { return Convert.FromHexString(rawKey); }
+            catch (FormatException) { /* fall through */ }
+        }
+
         var utf8Key = Encoding.UTF8.GetBytes(rawKey);
         if (utf8Key.Length == AesKeySizeInBytes)
         {
             return utf8Key;
         }
 
-        throw new InvalidOperationException("ERP_ENCRYPTION_KEY must be a Base64 or UTF8 value with exactly 32 bytes.");
+        throw new InvalidOperationException("ERP_ENCRYPTION_KEY must be a Base64, hex, or UTF8 value with exactly 32 bytes.");
+    }
+
+    private static bool IsHexString(string s)
+    {
+        for (int i = 0; i < s.Length; i++)
+        {
+            var c = s[i];
+            if (!((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F')))
+                return false;
+        }
+        return true;
     }
 }
