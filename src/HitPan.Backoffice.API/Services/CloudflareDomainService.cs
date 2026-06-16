@@ -198,7 +198,8 @@ public class CloudflareDomainService : ICloudflareDomainService
         if (!createRes.IsSuccessStatusCode)
         {
             // 봉합 2026-06-16: 터널 영역 이미 박혀있는 경우 (이름 중복 사고) = 기존 영역 조회·재토큰 발급
-            if (createBody.Contains("already exists") || createBody.Contains("duplicate") || createBody.Contains("1006"))
+            // 봉합 2026-06-16 2차: Cloudflare 실제 영역 code 1013 (1006 아님). 실측 로그 확인 후 정정.
+            if (createBody.Contains("already exists") || createBody.Contains("duplicate") || createBody.Contains("1013") || createBody.Contains("1006"))
             {
                 _logger.LogInformation("[CFTunnel] 터널 영역 박힘 영역 — 기존 영역 조회 가도 name={Name}", tunnelName);
                 var listRes = await http.GetAsync($"accounts/{_accountId}/cfd_tunnel?name={tunnelName}&is_deleted=false", ct);
