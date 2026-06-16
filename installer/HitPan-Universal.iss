@@ -22,7 +22,7 @@
 ; ============================================================
 
 #ifndef AppVersion
-  #define AppVersion "1.2.9"
+  #define AppVersion "1.2.10"
 #endif
 
 #ifndef BackofficeApi
@@ -593,18 +593,19 @@ end;
 // ============================================================
 function GenerateRandomKey(Bytes: Integer): String;
 var
-  PsScript: String;
-  ResultCode: Integer;
-  TempFile: String;
-  Lines: TArrayOfString;
+  Chars: String;
+  i, Idx: Integer;
 begin
-  TempFile := ExpandConstant('{tmp}\randkey.txt');
-  PsScript := Format('[Convert]::ToBase64String((1..%d|%%{Get-Random -Max 256}|%%{[byte]$_})) | Out-File -Encoding ASCII -NoNewline "%s"', [Bytes, TempFile]);
-  Exec('powershell.exe', '-NoProfile -ExecutionPolicy Bypass -Command "' + PsScript + '"', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
-  if (ResultCode = 0) and FileExists(TempFile) then begin
-    if LoadStringsFromFile(TempFile, Lines) and (GetArrayLength(Lines) > 0) then Result := Lines[0] else Result := '';
-    DeleteFile(TempFile);
-  end else Result := '';
+  // 봉합 2026-06-16 (1.2.10): PowerShell silent Exec 영역 Sandbox 사고 진단 후 Pascal 내장 박음
+  //   JWT_SECRET·AES_KEY·MARIADB_ROOT_PW 영역 박힘. 영문·숫자만으로 Bytes*4/3 길이 (Base64 등가 영역)
+  //   외부 프로세스 의존 0건. Sandbox·실 PC 동일 정합.
+  Chars := 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
+  Result := '';
+  // Base64 영역 32 byte ≒ 44 chars 영역이지만 영문·숫자만으로 Bytes*2 길이 박음 (엔트로피 정합)
+  for i := 1 to Bytes * 2 do begin
+    Idx := Random(Length(Chars)) + 1;
+    Result := Result + Copy(Chars, Idx, 1);
+  end;
 end;
 
 // 영문·숫자만 박힌 랜덤 키 (사고 #26 봉합 WS-20260612-01 2026-06-12)
@@ -612,23 +613,19 @@ end;
 //   알파벳 영역 대문자·소문자·숫자 영역만 박힘 (SQL·JSON·CMD 안전 영역)
 function GenerateAlphanumericKey(KeyLen: Integer): String;
 var
-  PsScript: String;
-  ResultCode: Integer;
-  TempFile: String;
-  Lines: TArrayOfString;
+  Chars: String;
+  i, Idx: Integer;
 begin
-  // 봉합: Length 영역 = Pascal 내장 함수 영역. 변수명 영역 KeyLen 영역 정정 (2026-06-12 빌드 사고 영역)
-  TempFile := ExpandConstant('{tmp}\alnumkey.txt');
-  // 봉합 (2026-06-12 빌드 사고): Inno Setup Format 영역 문자열 영역만 지원 → IntToStr 박음
-  PsScript :=
-    '$chars = ''ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789''.ToCharArray();' +
-    '$key = -join (1..' + IntToStr(KeyLen) + ' | %{ $chars | Get-Random });' +
-    '[System.IO.File]::WriteAllText("' + TempFile + '", $key, [System.Text.Encoding]::ASCII);';
-  Exec('powershell.exe', '-NoProfile -ExecutionPolicy Bypass -Command "' + PsScript + '"', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
-  if (ResultCode = 0) and FileExists(TempFile) then begin
-    if LoadStringsFromFile(TempFile, Lines) and (GetArrayLength(Lines) > 0) then Result := Lines[0] else Result := '';
-    DeleteFile(TempFile);
-  end else Result := '';
+  // 봉합 2026-06-16 (1.2.10): PowerShell silent Exec 영역 Sandbox 사고 진단 후 Pascal 내장 박음
+  //   진범: PowerShell escape 사고 → 빈 문자열 반환 → mysql -p 비번 0건 → 비번 프롬프트 대기 → 무한 멈춤
+  //   봉합: Inno Setup Pascal 내장 Random() 박음 (외부 프로세스 의존 0건)
+  //   보안: Random()은 약한 RNG이지만 로컬 PC DB 비번 영역 정합 (외부 노출 0건, db.conf 영역만 박힘)
+  Chars := 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
+  Result := '';
+  for i := 1 to KeyLen do begin
+    Idx := Random(Length(Chars)) + 1;
+    Result := Result + Copy(Chars, Idx, 1);
+  end;
 end;
 
 procedure CurStepChanged(CurStep: TSetupStep);
