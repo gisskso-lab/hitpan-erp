@@ -123,6 +123,18 @@ public class InstallerBootstrapController : ControllerBase
                         {
                             _logger.LogWarning(pex, "[InstallerBootstrap] DNS PATCH 실패 tenant={Tid} (1033 사고 가능성)", tenant.TenantId);
                         }
+
+                        // 봉합 2026-06-17 (v1.2.12 P0-B):
+                        //   터널 ingress 라우팅 PUT — hostname → http://localhost:5257 (HitPan.API)
+                        //   본 PUT이 없으면 cloudflared가 트래픽 어디로 보낼지 모름 → 1033 100% 재발
+                        try
+                        {
+                            await _cfDomain.UpdateTunnelIngressAsync(tunnelId, primaryDomain, "http://localhost:5257", ct);
+                        }
+                        catch (Exception iex)
+                        {
+                            _logger.LogWarning(iex, "[InstallerBootstrap] 터널 ingress PUT 실패 tenant={Tid} (1033 사고 재발 가능성)", tenant.TenantId);
+                        }
                     }
                     catch (Exception tex)
                     {

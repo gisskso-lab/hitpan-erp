@@ -3,6 +3,7 @@ using System.Security.Claims;
 using System.Security.Cryptography;
 using System.Text;
 using Dapper;
+using HitPan.Application.Common;
 using HitPan.Application.DTOs.Auth;
 using HitPan.Application.Interfaces;
 using HitPan.Domain.Entities;
@@ -74,11 +75,8 @@ public class AuthService : IAuthService
         user.LastLoginAt = DateTime.UtcNow;
         await _unitOfWork.SaveChangesAsync(ct);
 
-        var secret = Environment.GetEnvironmentVariable("JWT_SECRET");
-        if (string.IsNullOrWhiteSpace(secret))
-        {
-            throw new InvalidOperationException("JWT_SECRET environment variable is required.");
-        }
+        // 봉합 2026-06-17 1.2.12 — TenantConfigReader 정합 (1.2.6 환경변수 폐기 결재)
+        var secret = TenantConfigReader.GetRequired("JWT_SECRET");
 
         var response = CreateLoginResponse(user, employee, secret, redirectToWelcome);
 
@@ -104,11 +102,8 @@ public class AuthService : IAuthService
 
     public async Task<LoginResponse> RefreshAsync(RefreshTokenRequest request, CancellationToken ct = default)
     {
-        var secret = Environment.GetEnvironmentVariable("JWT_SECRET");
-        if (string.IsNullOrWhiteSpace(secret))
-        {
-            throw new InvalidOperationException("JWT_SECRET environment variable is required.");
-        }
+        // 봉합 2026-06-17 1.2.12 — TenantConfigReader 정합
+        var secret = TenantConfigReader.GetRequired("JWT_SECRET");
 
         var tokenHandler = new JwtSecurityTokenHandler();
         var key = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(secret));
@@ -117,8 +112,8 @@ public class AuthService : IAuthService
         try
         {
             // 보안 강화: refresh 토큰도 issuer/audience 검증
-            var refreshIssuer = Environment.GetEnvironmentVariable("JWT_ISSUER") ?? "hitpan-erp";
-            var refreshAudience = Environment.GetEnvironmentVariable("JWT_AUDIENCE") ?? "hitpan-client";
+            var refreshIssuer = TenantConfigReader.Get("JWT_ISSUER") ?? "hitpan-erp";
+            var refreshAudience = TenantConfigReader.Get("JWT_AUDIENCE") ?? "hitpan-client";
 
             principal = tokenHandler.ValidateToken(
                 request.RefreshToken,
@@ -201,8 +196,8 @@ public class AuthService : IAuthService
         };
 
         // Issuer/Audience — 토큰 스푸핑 방지 (ValidIssuer/ValidAudience와 일치해야 검증 통과)
-        var issuer = Environment.GetEnvironmentVariable("JWT_ISSUER") ?? "hitpan-erp";
-        var audience = Environment.GetEnvironmentVariable("JWT_AUDIENCE") ?? "hitpan-client";
+        var issuer = TenantConfigReader.Get("JWT_ISSUER") ?? "hitpan-erp";
+        var audience = TenantConfigReader.Get("JWT_AUDIENCE") ?? "hitpan-client";
 
         var accessTokenDescriptor = new JwtSecurityToken(
             issuer: issuer,

@@ -1,4 +1,5 @@
 using HitPan.Application.Interfaces;
+using HitPan.Infrastructure.Configuration;
 using HitPan.Infrastructure.Security;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Design;
@@ -9,14 +10,12 @@ public sealed class AppDbContextFactory : IDesignTimeDbContextFactory<AppDbConte
 {
     public AppDbContext CreateDbContext(string[] args)
     {
-        var host = Environment.GetEnvironmentVariable("DB_HOST") ?? "localhost";
-        var port = Environment.GetEnvironmentVariable("DB_PORT") ?? "3306";
-        var db = Environment.GetEnvironmentVariable("DB_NAME")
-            ?? throw new InvalidOperationException("DB_NAME 환경변수 없음");
-        var user = Environment.GetEnvironmentVariable("DB_USER")
-            ?? throw new InvalidOperationException("DB_USER 환경변수 없음");
-        var pwd = Environment.GetEnvironmentVariable("DB_PASSWORD")
-            ?? throw new InvalidOperationException("DB_PASSWORD 환경변수 없음");
+        // 봉합 2026-06-17 1.2.12 — TenantConfigReader 정합
+        var host = TenantConfigReader.Get("DB_HOST") ?? "localhost";
+        var port = TenantConfigReader.Get("DB_PORT") ?? "3306";
+        var db = TenantConfigReader.GetRequired("DB_NAME");
+        var user = TenantConfigReader.GetRequired("DB_USER");
+        var pwd = TenantConfigReader.GetRequired("DB_PASSWORD");
 
         var connStr = $"Server={host};Port={port};Database={db};User={user};Password={pwd};";
         var builder = new DbContextOptionsBuilder<AppDbContext>();

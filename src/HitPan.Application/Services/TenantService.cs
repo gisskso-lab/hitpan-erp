@@ -1,3 +1,4 @@
+using HitPan.Application.Common;
 using HitPan.Application.DTOs.Tenant;
 using HitPan.Application.Interfaces;
 using HitPan.Domain.Entities;
@@ -44,8 +45,9 @@ public class TenantService : ITenantService
             Address = request.Address,
             Status = TenantStatus.Trial,
             TrialEndsAt = now.AddDays(30),
-            DbHost = Environment.GetEnvironmentVariable("DB_HOST") ?? "localhost",
-            DbName = Environment.GetEnvironmentVariable("DB_NAME") ?? string.Empty,
+            // 봉합 2026-06-17 1.2.12 — TenantConfigReader 정합
+            DbHost = TenantConfigReader.Get("DB_HOST") ?? "localhost",
+            DbName = TenantConfigReader.Get("DB_NAME") ?? string.Empty,
             LicenseKeyHash = Guid.NewGuid().ToString("N"),
             ResellerTier = 0
         };

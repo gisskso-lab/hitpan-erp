@@ -2,6 +2,7 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using Dapper;
+using HitPan.Infrastructure.Configuration;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using MySqlConnector;
@@ -280,7 +281,8 @@ public class CompanyBootstrapController : ControllerBase
     //   - jti 1회용은 ERP 측 별도 캐시 필요 (현재 차수 미저장 — 재사용 가능, 짧은 만료로 위험 최소화)
     private (bool ok, TokenPayload? payload, string? error) VerifyBootstrapToken(string token)
     {
-        var key = Environment.GetEnvironmentVariable("HITPAN_BOOTSTRAP_TOKEN_KEY")
+        // 봉합 2026-06-17 1.2.12 — TenantConfigReader 정합
+        var key = TenantConfigReader.Get("HITPAN_BOOTSTRAP_TOKEN_KEY")
                  ?? _config["Bootstrap:TokenKey"]
                  ?? "DEV-bootstrap-token-key-change-in-production-32+chars";
 

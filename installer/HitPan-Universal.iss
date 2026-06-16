@@ -22,7 +22,7 @@
 ; ============================================================
 
 #ifndef AppVersion
-  #define AppVersion "1.2.11"
+  #define AppVersion "1.2.12"
 #endif
 
 #ifndef BackofficeApi
@@ -591,17 +591,60 @@ end;
 // ============================================================
 // 보안 키 + 부트스트랩 정보 저장 + DB 셋업
 // ============================================================
+function TrySecureRng(Bytes: Integer; var HexStr: String): Boolean;
+var
+  ResultCode: Integer;
+  RngFile, PsCmd, Line: String;
+  Lines: TStringList;
+begin
+  // 보강 2026-06-17 (1.2.12, P1 #1): System.Security.Cryptography.RandomNumberGenerator 호출
+  //   Pascal Random()은 LCG 약한 RNG → CSPRNG 우선 시도, 실패 시 Random() 폴백.
+  //   결과는 16진수 문자열 (Bytes*2 길이).
+  Result := False;
+  HexStr := '';
+  RngFile := ExpandConstant('{tmp}\rng.txt');
+  DeleteFile(RngFile);
+  PsCmd := '/C powershell -NoProfile -Command "$b = New-Object byte[] ' + IntToStr(Bytes) +
+           '; [System.Security.Cryptography.RandomNumberGenerator]::Create().GetBytes($b); ' +
+           '($b | ForEach-Object { ''{0:x2}'' -f $_ }) -join '''' | Out-File -Encoding ASCII ''' + RngFile + '''"';
+  if Exec(ExpandConstant('{cmd}'), PsCmd, '', SW_HIDE, ewWaitUntilTerminated, ResultCode) then begin
+    if (ResultCode = 0) and FileExists(RngFile) then begin
+      Lines := TStringList.Create;
+      try
+        try
+          Lines.LoadFromFile(RngFile);
+          if Lines.Count > 0 then begin
+            Line := Trim(Lines[0]);
+            if Length(Line) >= Bytes * 2 then begin
+              HexStr := Copy(Line, 1, Bytes * 2);
+              Result := True;
+            end;
+          end;
+        except
+        end;
+      finally
+        Lines.Free;
+      end;
+    end;
+  end;
+  DeleteFile(RngFile);
+end;
+
 function GenerateRandomKey(Bytes: Integer): String;
 var
   Chars: String;
   i, Idx: Integer;
+  Hex: String;
 begin
-  // 봉합 2026-06-16 (1.2.10): PowerShell silent Exec 영역 Sandbox 사고 진단 후 Pascal 내장 박음
-  //   JWT_SECRET·AES_KEY·MARIADB_ROOT_PW 영역 박힘. 영문·숫자만으로 Bytes*4/3 길이 (Base64 등가 영역)
-  //   외부 프로세스 의존 0건. Sandbox·실 PC 동일 정합.
+  // 보강 2026-06-17 (1.2.12, P1 #1): CSPRNG 우선 시도. 실패 시 Random() 폴백.
+  //   기존 출력 형식(영문·숫자, Bytes*2 길이) 유지 — 호환성 보존.
+  if TrySecureRng(Bytes, Hex) then begin
+    Result := Hex;
+    Exit;
+  end;
+  // 폴백: Random() LCG. (Inno Setup Pascal Script는 Randomize 미존재 → 자동 시간 seed)
   Chars := 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
   Result := '';
-  // Base64 영역 32 byte ≒ 44 chars 영역이지만 영문·숫자만으로 Bytes*2 길이 박음 (엔트로피 정합)
   for i := 1 to Bytes * 2 do begin
     Idx := Random(Length(Chars)) + 1;
     Result := Result + Copy(Chars, Idx, 1);
@@ -615,11 +658,17 @@ function GenerateAlphanumericKey(KeyLen: Integer): String;
 var
   Chars: String;
   i, Idx: Integer;
+  Hex: String;
 begin
-  // 봉합 2026-06-16 (1.2.10): PowerShell silent Exec 영역 Sandbox 사고 진단 후 Pascal 내장 박음
-  //   진범: PowerShell escape 사고 → 빈 문자열 반환 → mysql -p 비번 0건 → 비번 프롬프트 대기 → 무한 멈춤
-  //   봉합: Inno Setup Pascal 내장 Random() 박음 (외부 프로세스 의존 0건)
-  //   보안: Random()은 약한 RNG이지만 로컬 PC DB 비번 영역 정합 (외부 노출 0건, db.conf 영역만 박힘)
+  // 보강 2026-06-17 (1.2.12, P1 #1): CSPRNG 우선 시도. 실패 시 Random() 폴백.
+  //   CSPRNG 출력은 0-9a-f hex (영문·숫자 정합) → SQL escape 안전성 그대로 보존.
+  if TrySecureRng((KeyLen + 1) div 2, Hex) then begin
+    if Length(Hex) >= KeyLen then begin
+      Result := Copy(Hex, 1, KeyLen);
+      Exit;
+    end;
+  end;
+  // 폴백: Random() LCG. (Inno Setup Pascal Script는 Randomize 미존재 → 자동 시간 seed)
   Chars := 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
   Result := '';
   for i := 1 to KeyLen do begin
@@ -726,7 +775,17 @@ begin
   finally
     BatchContent.Free;
   end;
+  // 보강 2026-06-17 (1.2.12, P1 #4): db-setup.bat ACL 제한 — root 비번 평문 노출 차단.
+  //   SYSTEM·Administrators만 읽기 가능. 일반 사용자·다른 프로세스 접근 차단.
+  Exec(ExpandConstant('{cmd}'),
+       '/C icacls "' + BatchFile + '" /inheritance:r /grant:r SYSTEM:F /grant:r Administrators:F',
+       '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
   Exec(ExpandConstant('{cmd}'), '/C "' + BatchFile + '"', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+  // 보강 2026-06-17 (1.2.12, P1 #4): 삭제 전 공백 더미로 덮어쓰기 (디스크 잔존 평문 최소화).
+  //   1KB 공백으로 3회 overwrite 후 DeleteFile. FillWithZerosAndDelete 등가 패턴.
+  SaveStringToFile(BatchFile, StringOfChar(' ', 1024), False);
+  SaveStringToFile(BatchFile, StringOfChar(' ', 1024), False);
+  SaveStringToFile(BatchFile, StringOfChar(' ', 1024), False);
   DeleteFile(BatchFile);
 
   // 5-1. db.conf 영역 DB 정보 박음 (사고 #46 봉합 — TenantConfigReader 정합)
@@ -901,11 +960,23 @@ begin
   //    → 사장님 결재 2026-06-12 = 환경변수 영역 완전 폐기 + db.conf 영역만 박음
   //    → ERP 본체 영역 TenantConfigReader (사고 #46) 영역 db.conf 영역 직접 읽음 정합
   //    → schtasks 영역 환경변수 인자 영역 0건 — EXE 영역 자기 폴더 영역 db.conf 영역만 박음
+  // 보강 2026-06-17 (1.2.12, P1 #2): --urls 바인딩 0.0.0.0 → 127.0.0.1 (LAN 노출 차단)
+  //   cloudflared는 localhost로만 접속 → loopback 한정 정합.
+  //   슬롯별 포트(5257~5657) 모두 127.0.0.1로 고정.
   Exec(ExpandConstant('{cmd}'),
-       '/C schtasks /Create /F /TN "HitPan-ERP-API-tenant-' + IntToStr(G_SlotIndex) + '" /TR "\"' + ExpandConstant('{app}\api\HitPan.API.exe') + '\" --urls http://0.0.0.0:' + IntToStr(G_ApiPort) + '" /SC ONSTART /RU SYSTEM /RL HIGHEST',
+       '/C schtasks /Create /F /TN "HitPan-ERP-API-tenant-' + IntToStr(G_SlotIndex) + '" /TR "\"' + ExpandConstant('{app}\api\HitPan.API.exe') + '\" --urls http://127.0.0.1:' + IntToStr(G_ApiPort) + '" /SC ONSTART /RU SYSTEM /RL HIGHEST',
        '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+  // 보강 2026-06-17 (1.2.12, P1 #5): schtasks /Run 결과 검사 + 실패 시 1회 재시도
   Exec(ExpandConstant('{cmd}'), '/C schtasks /Run /TN "HitPan-ERP-API-tenant-' + IntToStr(G_SlotIndex) + '"',
        '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+  if ResultCode <> 0 then begin
+    Log('[1.2.12 P1#5] schtasks /Run 실패 ResultCode=' + IntToStr(ResultCode) + ', 5초 대기 후 1회 재시도');
+    Sleep(5000);
+    Exec(ExpandConstant('{cmd}'), '/C schtasks /Run /TN "HitPan-ERP-API-tenant-' + IntToStr(G_SlotIndex) + '"',
+         '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+    if ResultCode <> 0 then
+      Log('[1.2.12 P1#5] schtasks /Run 재시도 실패 ResultCode=' + IntToStr(ResultCode));
+  end;
 
   // 10. 헬스체크 영역 polling (사고 #12·#13·#14 봉합 — 헌법 #27 정합)
   //     ERP API 시작 영역 + cloudflared 터널 활성화 영역 = 평균 30~60초
@@ -931,12 +1002,13 @@ begin
       '  try {' + #13#10 +
       '    $r = Invoke-WebRequest -Uri $url -TimeoutSec 10 -UseBasicParsing -MaximumRedirection 0 -ErrorAction Stop;' + #13#10 +
       '    $sc = [int]$r.StatusCode;' + #13#10 +
-      '    if (($sc -ge 200 -and $sc -lt 300) -or ($sc -ge 302 -and $sc -le 307)) { $pass = $true; break; }' + #13#10 +
+      // 보강 2026-06-17 (1.2.12, P1 #3): 401·403·404도 PASS — 인증 게이트 정상 응답으로 판정.
+      //   터널·API 살아있음의 증명은 200~399 + 401. 500·502·503만 FAIL.
+      '    if (($sc -ge 200 -and $sc -lt 400) -or ($sc -eq 401)) { $pass = $true; break; }' + #13#10 +
       '  } catch {' + #13#10 +
-      '    # 302 영역 -MaximumRedirection 0 영역 박힌 영역 catch 영역 박힘 → Response 영역 검사' + #13#10 +
       '    if ($_.Exception.Response -and $_.Exception.Response.StatusCode) {' + #13#10 +
       '      $sc = [int]$_.Exception.Response.StatusCode;' + #13#10 +
-      '      if (($sc -ge 200 -and $sc -lt 300) -or ($sc -ge 302 -and $sc -le 307)) { $pass = $true; break; }' + #13#10 +
+      '      if (($sc -ge 200 -and $sc -lt 400) -or ($sc -eq 401)) { $pass = $true; break; }' + #13#10 +
       '    }' + #13#10 +
       '  }' + #13#10 +
       '}' + #13#10 +

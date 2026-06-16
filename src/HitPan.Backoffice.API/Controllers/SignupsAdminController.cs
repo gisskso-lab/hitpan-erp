@@ -66,7 +66,15 @@ public class SignupsAdminController : ControllerBase
                        t.status AS TenantStatus,
                        t.license_key_plain AS LicenseKey
                 FROM landing_signups s
-                LEFT JOIN tenants t ON t.company_name = s.company_name
+                -- 봉합 2026-06-17 (v1.2.12 P0-D): 동명 회사 중복 가입 시 다른 고객 시리얼 평문 노출 사고 차단
+                --   tenants 영역에 signup_id 컬럼 없음 → 시간 근접 1건만 매칭 (submitted_at 이후 가장 가까운 created_at)
+                LEFT JOIN tenants t ON t.tenant_id = (
+                    SELECT t2.tenant_id FROM tenants t2
+                    WHERE t2.company_name = s.company_name
+                      AND t2.created_at >= s.submitted_at
+                    ORDER BY t2.created_at ASC
+                    LIMIT 1
+                )
                 WHERE (@Status IS NULL OR @Status = '' OR s.status = @Status)
                 ORDER BY s.submitted_at DESC
                 LIMIT 200",
@@ -176,9 +184,10 @@ public class SignupsAdminController : ControllerBase
             //    헌법 #34 정합 — 발송 채널은 환경변수(Smtp:*) 토글, 실패해도 승인 흐름은 계속 진행
             //    사장님 결재 2026-06-09 — 도메인 별칭도 메일에 저장하기
             string customerEmail = signup.email;
+            // 봉합 2026-06-17 (v1.2.12 P0-D): 방금 승인한 tenant_id 단건으로 조회 (동명 회사 사고 차단)
             string? domainAlias = await db.QueryFirstOrDefaultAsync<string?>(
-                "SELECT domain_alias FROM tenants WHERE company_name = @CompanyName ORDER BY created_at DESC LIMIT 1",
-                new { CompanyName = companyName });
+                "SELECT domain_alias FROM tenants WHERE tenant_id = @Tid LIMIT 1",
+                new { Tid = tenantId });
             bool emailSent = false;
             if (!string.IsNullOrWhiteSpace(customerEmail))
             {
@@ -218,7 +227,7 @@ public class SignupsAdminController : ControllerBase
             await using var db = await OpenAsync(ct);
 
             var signup = await db.QueryFirstOrDefaultAsync<dynamic>(
-                "SELECT company_name, email, status FROM landing_signups WHERE signup_id = @Id",
+                "SELECT company_name, email, status, submitted_at FROM landing_signups WHERE signup_id = @Id",
                 new { Id = signupId });
 
             if (signup is null)
@@ -230,11 +239,17 @@ public class SignupsAdminController : ControllerBase
 
             string companyName = signup.company_name;
             string customerEmail = signup.email;
+            DateTime submittedAt = signup.submitted_at;
 
-            // 기존 시리얼 평문 + 도메인 별칭 저장된 영역에서 그대로 읽음 (포링키·도메인 그대로 유지)
-            var info = await db.QueryFirstOrDefaultAsync<TenantInfoRow>(
-                "SELECT license_key_plain AS LicenseKey, domain_alias AS DomainAlias FROM tenants WHERE company_name = @CompanyName ORDER BY created_at DESC LIMIT 1",
-                new { CompanyName = companyName });
+            // 봉합 2026-06-17 (v1.2.12 P0-D): 동명 회사 사고 차단 — submitted_at에 가장 가까운 tenant 1건만
+            //   이전 사고: ORDER BY created_at DESC = 같은 회사명 신규 가입자의 시리얼 평문 발송 사고
+            var info = await db.QueryFirstOrDefaultAsync<TenantInfoRow>(@"
+                SELECT license_key_plain AS LicenseKey, domain_alias AS DomainAlias
+                FROM tenants
+                WHERE company_name = @CompanyName
+                ORDER BY ABS(TIMESTAMPDIFF(SECOND, created_at, @SubmittedAt))
+                LIMIT 1",
+                new { CompanyName = companyName, SubmittedAt = submittedAt });
             var licenseKey = info?.LicenseKey;
             var domainAlias = info?.DomainAlias;
 
@@ -373,17 +388,17 @@ public class SignupsAdminController : ControllerBase
 
     <div style=""background:#FEF3C7;border:2px solid #F59E0B;border-radius:12px;padding:24px;margin:24px 0;text-align:center;"">
       <p style=""margin:0 0 12px;color:#92400E;font-size:14px;font-weight:700;"">📥 설치 파일 다운로드</p>
-      <a href=""https://updates.hitpan.kr/packages/HitPan-ERP-Setup-1.2.11.exe""
+      <a href=""https://updates.hitpan.kr/packages/HitPan-ERP-Setup-1.2.12.exe""
          style=""display:inline-block;background:#0F6E56;color:#fff;padding:14px 32px;border-radius:8px;font-size:15px;font-weight:700;text-decoration:none;"">
         히트판 ERP 설치 프로그램 (279 MB)
       </a>
-      <p style=""margin:12px 0 0;color:#92400E;font-size:12px;"">버전 1.2.11 · Windows 10/11 (64bit)</p>
+      <p style=""margin:12px 0 0;color:#92400E;font-size:12px;"">버전 1.2.12 · Windows 10/11 (64bit)</p>
     </div>
 
     <h2 style=""font-size:16px;margin:24px 0 12px;color:#0F1419;"">설치 방법 (10분 소요)</h2>
     <ol style=""margin:0 0 16px 20px;padding:0;font-size:14px;line-height:1.8;color:#374151;"">
       <li>위 [히트판 ERP 설치 프로그램] 버튼을 클릭하여 파일을 다운로드합니다.</li>
-      <li>다운로드된 <code style=""background:#F3F4F6;padding:2px 6px;border-radius:4px;font-family:monospace;"">HitPan-ERP-Setup-1.2.5.exe</code> 파일을 <strong>마우스 우클릭 → 관리자 권한으로 실행</strong>합니다.</li>
+      <li>다운로드된 <code style=""background:#F3F4F6;padding:2px 6px;border-radius:4px;font-family:monospace;"">HitPan-ERP-Setup-1.2.12.exe</code> 파일을 <strong>마우스 우클릭 → 관리자 권한으로 실행</strong>합니다.</li>
       <li>설치 마법사 첫 화면에서 위 시리얼 키를 정확히 입력합니다.</li>
       <li>이후 모든 과정(데이터베이스·통신연결·자동 시작)은 자동으로 진행됩니다.</li>
       <li>설치 완료 후 브라우저가 자동으로 열리며, 본인 ERP 주소로 접속됩니다.</li>

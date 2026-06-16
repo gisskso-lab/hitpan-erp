@@ -27,6 +27,9 @@ public interface ICloudflareDomainService
 
     // 봉합 2026-06-16: DNS CNAME content를 새 터널 ID로 업데이트 (1033 사고 봉합)
     Task UpdateDnsTunnelTargetAsync(string recordId, string domain, string tunnelId, CancellationToken ct);
+    // 봉합 2026-06-17 (v1.2.12 P0-B): config_src=cloudflare 관리형 터널의 ingress 라우팅 PUT
+    //  hostname → originUrl 매핑이 없으면 cloudflared가 어디로 보낼지 모름 → 1033 100% 재발
+    Task UpdateTunnelIngressAsync(string tunnelId, string hostname, string originUrl, CancellationToken ct);
     Task<bool> RevokeAsync(string cfZoneId, string cfRecordId, string? cfTunnelId, CancellationToken ct);
     // 사장님 결재 2026-06-11 — 도메인 별칭으로 영역 검색 + 삭제 (중복 발급 차단 영역)
     Task<bool> RevokeByDomainAsync(string subdomain, CancellationToken ct);
@@ -239,6 +242,48 @@ public class CloudflareDomainService : ICloudflareDomainService
 
         _logger.LogInformation("[CFTunnel] 발급 완료 tenant={Tid} tunnelId={Tn}", tenantId, tunnelId);
         return new TunnelIssueResult(tunnelId, tunnelToken, $"{tunnelId}.cfargotunnel.com");
+    }
+
+    // 봉합 2026-06-17 (v1.2.12 P0-B):
+    //   터널 자체는 발급되지만 hostname → 로컬 origin(http://localhost:5257) 라우팅 매핑이 0건이라
+    //   cloudflared가 트래픽을 어디로 보낼지 모름 → 1033 100% 재발.
+    //   config_src=cloudflare 관리형 영역은 본사가 ingress를 PUT 해야 함.
+    //   호출 시점: InstallerBootstrap에서 터널 발급 직후
+    public async Task UpdateTunnelIngressAsync(string tunnelId, string hostname, string originUrl, CancellationToken ct)
+    {
+        if (!IsConfigured)
+            throw new InvalidOperationException("Cloudflare 환경변수 미설정");
+        if (string.IsNullOrWhiteSpace(tunnelId) || string.IsNullOrWhiteSpace(hostname))
+            throw new ArgumentException("tunnelId·hostname 필수");
+
+        var origin = string.IsNullOrWhiteSpace(originUrl) ? "http://localhost:5257" : originUrl;
+
+        var http = _httpFactory.CreateClient();
+        http.BaseAddress = new Uri("https://api.cloudflare.com/client/v4/");
+        http.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", _token);
+
+        var payload = new
+        {
+            config = new
+            {
+                ingress = new object[]
+                {
+                    new { hostname, service = origin },
+                    new { service = "http_status:404" }
+                }
+            }
+        };
+
+        var res = await http.PutAsJsonAsync(
+            $"accounts/{_accountId}/cfd_tunnel/{tunnelId}/configurations", payload, ct);
+        var body = await res.Content.ReadAsStringAsync(ct);
+        if (!res.IsSuccessStatusCode)
+        {
+            _logger.LogWarning("[CFTunnel] ingress PUT 실패 {Status} {Body}", res.StatusCode, body);
+            throw new InvalidOperationException($"터널 ingress PUT 실패 ({(int)res.StatusCode}): {body}");
+        }
+        _logger.LogInformation("[CFTunnel] ingress PUT 완료 tunnel={Tid} host={Host} origin={Origin}",
+            tunnelId, hostname, origin);
     }
 
     public async Task<bool> RevokeAsync(string cfZoneId, string cfRecordId, string? cfTunnelId, CancellationToken ct)

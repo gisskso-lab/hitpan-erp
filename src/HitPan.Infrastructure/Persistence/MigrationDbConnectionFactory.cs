@@ -1,5 +1,6 @@
 using System.Data.Common;
 using HitPan.Application.Interfaces;
+using HitPan.Infrastructure.Configuration;
 using Microsoft.Extensions.Logging;
 using MySqlConnector;
 
@@ -27,14 +28,12 @@ public sealed class MigrationDbConnectionFactory : IMigrationDbConnectionFactory
     {
         _logger = logger;
 
-        var host = Environment.GetEnvironmentVariable("DB_HOST") ?? "localhost";
-        var port = Environment.GetEnvironmentVariable("DB_PORT") ?? "3306";
-        var db = Environment.GetEnvironmentVariable("DB_NAME")
-            ?? throw new InvalidOperationException("DB_NAME 환경변수 없음");
-        var user = Environment.GetEnvironmentVariable("DB_USER")
-            ?? throw new InvalidOperationException("DB_USER 환경변수 없음");
-        var pwd = Environment.GetEnvironmentVariable("DB_PASSWORD")
-            ?? throw new InvalidOperationException("DB_PASSWORD 환경변수 없음");
+        // 봉합 2026-06-17 1.2.12 — TenantConfigReader 정합
+        var host = TenantConfigReader.Get("DB_HOST") ?? "localhost";
+        var port = TenantConfigReader.Get("DB_PORT") ?? "3306";
+        var db = TenantConfigReader.GetRequired("DB_NAME");
+        var user = TenantConfigReader.GetRequired("DB_USER");
+        var pwd = TenantConfigReader.GetRequired("DB_PASSWORD");
 
         // ApplicationName이 일반 풀과 다르므로 MySqlConnector가 별도 pool 인스턴스 유지.
         // MaximumPoolSize=20 : 11개 PANDATA 병렬 + 여유 9개 (헌법 #16 안전 마진).

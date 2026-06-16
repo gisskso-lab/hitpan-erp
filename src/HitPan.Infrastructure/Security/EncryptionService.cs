@@ -1,5 +1,6 @@
 using System.Security.Cryptography;
 using System.Text;
+using HitPan.Infrastructure.Configuration;
 
 namespace HitPan.Infrastructure.Security;
 
@@ -19,12 +20,8 @@ public sealed class EncryptionService : IEncryptionService
 
     public EncryptionService()
     {
-        var rawKey = Environment.GetEnvironmentVariable("ERP_ENCRYPTION_KEY");
-        if (string.IsNullOrWhiteSpace(rawKey))
-        {
-            throw new InvalidOperationException("ERP_ENCRYPTION_KEY environment variable is required.");
-        }
-
+        // 봉합 2026-06-17 1.2.12
+        var rawKey = TenantConfigReader.GetRequired("ERP_ENCRYPTION_KEY");
         _key = ParseKey(rawKey);
     }
 

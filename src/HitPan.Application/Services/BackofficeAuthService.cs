@@ -2,6 +2,7 @@ using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
 using System.Text;
 using Dapper;
+using HitPan.Application.Common;
 using HitPan.Application.DTOs.Backoffice;
 using HitPan.Application.Interfaces;
 using Microsoft.Extensions.Logging;
@@ -147,8 +148,9 @@ public class BackofficeAuthService : IBackofficeAuthService
         ClaimsPrincipal principal;
         try
         {
-            var issuer = Environment.GetEnvironmentVariable("JWT_ISSUER") ?? "hitpan-erp";
-            var audience = Environment.GetEnvironmentVariable("JWT_AUDIENCE") ?? "hitpan-client";
+            // 봉합 2026-06-17 1.2.12 — TenantConfigReader 정합 (설계팀장 P0)
+            var issuer = TenantConfigReader.Get("JWT_ISSUER") ?? "hitpan-erp";
+            var audience = TenantConfigReader.Get("JWT_AUDIENCE") ?? "hitpan-client";
 
             principal = new JwtSecurityTokenHandler().ValidateToken(
                 request.RefreshToken,
@@ -217,8 +219,9 @@ public class BackofficeAuthService : IBackofficeAuthService
         var secret = GetJwtSecret();
         var key = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(secret));
         var credentials = new SigningCredentials(key, SecurityAlgorithms.HmacSha256);
-        var issuer = Environment.GetEnvironmentVariable("JWT_ISSUER") ?? "hitpan-erp";
-        var audience = Environment.GetEnvironmentVariable("JWT_AUDIENCE") ?? "hitpan-client";
+        // 봉합 2026-06-17 1.2.12 — TenantConfigReader 정합
+        var issuer = TenantConfigReader.Get("JWT_ISSUER") ?? "hitpan-erp";
+        var audience = TenantConfigReader.Get("JWT_AUDIENCE") ?? "hitpan-client";
         var now = DateTime.UtcNow;
         var expiresAt = now.Add(AccessTokenLifetime);
 
@@ -275,11 +278,7 @@ public class BackofficeAuthService : IBackofficeAuthService
             });
     }
 
+    // 봉합 2026-06-17 1.2.12 — TenantConfigReader 정합 (설계팀장 P0)
     private static string GetJwtSecret()
-    {
-        var secret = Environment.GetEnvironmentVariable("JWT_SECRET");
-        if (string.IsNullOrWhiteSpace(secret))
-            throw new InvalidOperationException("JWT_SECRET environment variable is required.");
-        return secret;
-    }
+        => TenantConfigReader.GetRequired("JWT_SECRET");
 }

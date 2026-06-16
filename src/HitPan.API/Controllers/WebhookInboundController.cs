@@ -152,7 +152,8 @@ public class WebhookInboundController : ControllerBase
 
     private bool VerifySignature(string body, string sigHeader)
     {
-        var key = Environment.GetEnvironmentVariable("HITPAN_BOOTSTRAP_TOKEN_KEY")
+        // 봉합 2026-06-17 1.2.12 — TenantConfigReader 정합
+        var key = TenantConfigReader.Get("HITPAN_BOOTSTRAP_TOKEN_KEY")
                  ?? _config["Bootstrap:TokenKey"]
                  ?? "DEV-bootstrap-token-key-change-in-production-32+chars";
         using var hmac = new HMACSHA256(Encoding.UTF8.GetBytes(key));
