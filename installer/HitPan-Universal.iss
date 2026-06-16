@@ -22,7 +22,7 @@
 ; ============================================================
 
 #ifndef AppVersion
-  #define AppVersion "1.2.12"
+  #define AppVersion "1.2.13"
 #endif
 
 #ifndef BackofficeApi
@@ -677,6 +677,44 @@ begin
   end;
 end;
 
+// 봉합 2026-06-17 1.2.13 — Blazor WASM CORS 사고 차단 (P0)
+//   appsettings.json ApiBaseUrl을 고객사 실제 도메인으로 정정.
+//   1.2.12까지 api-demo.hitpan.kr 박힌 채 가도 → CORS preflight 차단 사고.
+//   사장님 헌법 #21 정합 (삭제·수정 금지 = 부트 가능 상태 유지하며 정정 OK)
+procedure FixupBlazorAppSettings();
+var
+  AppSettingsPath: String;
+  NewContent: AnsiString;
+  TargetUrl: String;
+begin
+  AppSettingsPath := ExpandConstant('{app}') + '\api\wwwroot\appsettings.json';
+  if not FileExists(AppSettingsPath) then begin
+    Log('[FixupBlazor] appsettings.json 0건: ' + AppSettingsPath);
+    Exit;
+  end;
+
+  // 고객사 도메인 정정 (G_PrimaryDomain = "test000.hitpan.kr" 등)
+  if (G_PrimaryDomain = '') or (Pos('localhost', G_PrimaryDomain) > 0) then begin
+    Log('[FixupBlazor] LOCAL 모드 정정 0건 (PrimaryDomain=' + G_PrimaryDomain + ')');
+    Exit;
+  end;
+
+  TargetUrl := 'https://' + G_PrimaryDomain;
+
+  // 표준 JSON 단일행 정정 박음 (Blazor WASM 표준 부트 정합 유지)
+  NewContent := '{' + #13#10 +
+                '  "ApiBaseUrl": "' + TargetUrl + '",' + #13#10 +
+                '  "BackofficeApiBaseUrl": "https://back.hitpan.kr"' + #13#10 +
+                '}' + #13#10;
+
+  if not SaveStringToFile(AppSettingsPath, NewContent, False) then begin
+    Log('[FixupBlazor] SaveStringToFile 실패');
+    Exit;
+  end;
+
+  Log('[FixupBlazor] ApiBaseUrl 정합 가도 → ' + TargetUrl);
+end;
+
 procedure CurStepChanged(CurStep: TSetupStep);
 var
   ResultCode: Integer;
@@ -814,6 +852,11 @@ begin
   Exec(ExpandConstant('{cmd}'),
        '/C icacls "' + ExpandConstant('{app}\db.conf') + '" /inheritance:r /grant:r "Administrators:F" /grant:r "SYSTEM:F"',
        '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+
+  // 5-1-A. 봉합 2026-06-17 (1.2.13, P0): Blazor WASM appsettings.json ApiBaseUrl 정정
+  //   1.2.12까지 api-demo.hitpan.kr 가도 → CORS preflight 차단 사고.
+  //   LOCAL 모드(G_PrimaryDomain = 'localhost:5234')에서도 정정 가도.
+  FixupBlazorAppSettings();
 
   // 5-2. registry.json 영역 박음 (사고 #21·#30 봉합)
   //   사고 #27 봉합 (WS-20260612-01): JSON 따옴표 escape 영역 박음
