@@ -13,7 +13,11 @@ public class Program
         var builder = WebApplication.CreateBuilder(args);
 
         builder.Services.AddRazorComponents()
-            .AddInteractiveServerComponents();
+            .AddInteractiveServerComponents(o =>
+            {
+                // 사고 진단용 — 회선 종료 시 정확한 예외 메시지 노출 (사장님 진단 요청 2026-06-16)
+                o.DetailedErrors = true;
+            });
 
         // 폼 POST 로그인용 컨트롤러 (Views 포함 — AntiForgery 필터 등록 위해)
         builder.Services.AddControllersWithViews();
