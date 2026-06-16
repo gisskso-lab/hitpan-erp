@@ -147,16 +147,13 @@ public class CloudflareDomainService : ICloudflareDomainService
         http.BaseAddress = new Uri("https://api.cloudflare.com/client/v4/");
         http.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", _token);
 
-        // 1) 터널 시크릿 생성 (32 byte base64)
-        var secretBytes = new byte[32];
-        System.Security.Cryptography.RandomNumberGenerator.Fill(secretBytes);
-        var tunnelSecret = Convert.ToBase64String(secretBytes);
-
-        // 2) 터널 생성
+        // 봉합 2026-06-16 (사고: code 1030 JSON deserialize 사고):
+        //   Cloudflare API 영역 tunnel_secret 영역 string 영역 deprecated. config_src=cloudflare 영역 박혔으면
+        //   tunnel_secret 영역 자체가 불필요 (CF가 자동 생성·관리).
+        //   → payload 영역 tunnel_secret 영역 제거. CF Dashboard 관리형 터널 영역 정합.
         var createPayload = new
         {
             name = tunnelName,
-            tunnel_secret = tunnelSecret,
             config_src = "cloudflare"
         };
         var createRes = await http.PostAsJsonAsync($"accounts/{_accountId}/cfd_tunnel", createPayload, ct);
