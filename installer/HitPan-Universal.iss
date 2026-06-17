@@ -813,20 +813,31 @@ begin
     //         테이블 없으면 신규 → 무조건 import / 있으면 운영데이터(items+partners) 보호 분기.
     //   goto/괄호 혼용은 .bat 파서 사고 위험 → goto 없이 평면 if 구조로 작성.
     //   1차: users 테이블 존재 여부 + 2차: 운영 데이터 보호. 두 변수를 먼저 구한 뒤 한 줄 분기.
-    BatchContent.Add('set TABLE_EXISTS=0');
-    BatchContent.Add(Format('for /f "tokens=*" %%%%c in (''mysql -u %s -p%s -N -B -e "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema=''''%s'''' AND table_name=''''users''''"'') do set TABLE_EXISTS=%%%%c', [G_DbUser, G_DbPassword, G_DbName]));
-    BatchContent.Add('if "!TABLE_EXISTS!"=="" set TABLE_EXISTS=0');
+    // 1차: 테이블 수(BASE TABLE) + 운영 데이터(items+partners) 파악
+    BatchContent.Add('set TBL_COUNT=0');
+    BatchContent.Add(Format('for /f "tokens=*" %%%%c in (''mysql -u %s -p%s -N -B -e "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema=''''%s'''' AND table_type=''''BASE TABLE''''"'') do set TBL_COUNT=%%%%c', [G_DbUser, G_DbPassword, G_DbName]));
+    BatchContent.Add('if "!TBL_COUNT!"=="" set TBL_COUNT=0');
     BatchContent.Add('set EXISTING_DATA=0');
-    // 운영 데이터 카운트는 테이블이 있을 때만 의미 — 없으면 쿼리가 에러내므로 TABLE_EXISTS=1일 때만 조회
-    BatchContent.Add(Format('if !TABLE_EXISTS! GTR 0 (for /f "tokens=*" %%%%c in (''mysql -u %s -p%s -N -B -e "SELECT COALESCE((SELECT COUNT(*) FROM %s.items),0)+COALESCE((SELECT COUNT(*) FROM %s.partners),0)"'') do set EXISTING_DATA=%%%%c)', [G_DbUser, G_DbPassword, G_DbName, G_DbName]));
+    // 운영 데이터 카운트는 테이블이 있을 때만 의미 — 없으면 쿼리가 에러내므로 TBL_COUNT>0일 때만 조회
+    BatchContent.Add(Format('if !TBL_COUNT! GTR 0 (for /f "tokens=*" %%%%c in (''mysql -u %s -p%s -N -B -e "SELECT COALESCE((SELECT COUNT(*) FROM %s.items),0)+COALESCE((SELECT COUNT(*) FROM %s.partners),0)"'') do set EXISTING_DATA=%%%%c)', [G_DbUser, G_DbPassword, G_DbName, G_DbName]));
     BatchContent.Add('if "!EXISTING_DATA!"=="" set EXISTING_DATA=0');
-    // 분기: 테이블 없음(신규) OR 데이터 0(시드만) → import / 데이터 있음 → 보호(건너뜀, 헌법 #1)
-    BatchContent.Add(Format('if !EXISTING_DATA! GTR 0 (echo 기존 운영 데이터 !EXISTING_DATA!건 감지. 시드 import 건너뜀.) else (echo 스키마 import 실행. & mysql -u %s -p%s %s < "%s")', [G_DbUser, G_DbPassword, G_DbName, ExpandConstant('{app}\hitpan_db.sql')]));
-    // 봉합 검증 가드(1.2.14): import 후 users 테이블 실존 재확인. 0이면 명확한 실패 메시지(헌법 #15 silent swallow 금지).
+    // 봉합 2026-06-17 (1.2.15, P1): 재설치 멱등성 — 운영 데이터 0건인데 스키마 불완전(91개 미만)이면
+    //   손상된 부분 import로 간주하고 DROP 후 재생성. 운영 데이터 있으면 절대 DROP 금지(헌법 #1·#22).
+    BatchContent.Add(Format('if !EXISTING_DATA! EQU 0 if !TBL_COUNT! GTR 0 if !TBL_COUNT! LSS 91 (echo 불완전 스키마 !TBL_COUNT!/91 감지 - 재생성. & mysql -u root -p%s -e "DROP DATABASE IF EXISTS %s; CREATE DATABASE %s CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci; GRANT ALL ON %s.* TO ''%s''@''localhost''; FLUSH PRIVILEGES;" & set TBL_COUNT=0)', [MariaRootPw, G_DbName, G_DbName, G_DbName, G_DbUser]));
+    // 분기: 운영 데이터 있으면 보호(건너뜀, 헌법 #1) / 없으면 import
+    //   봉합 2026-06-17 (1.2.15, P1): import stderr를 로그로 남기고 errorlevel 즉시 검사(--force 금지, 헌법 #15)
+    BatchContent.Add(Format('if !EXISTING_DATA! GTR 0 (echo 기존 운영 데이터 !EXISTING_DATA!건 감지. 시드 import 건너뜀.) else (echo 스키마 import 실행. & mysql -u %s -p%s --show-warnings %s < "%s" 2> "%%TEMP%%\hitpan_import_err.log" & if errorlevel 1 (echo [오류] 스키마 import 실패. 로그: %%TEMP%%\hitpan_import_err.log & exit /b 1))', [G_DbUser, G_DbPassword, G_DbName, ExpandConstant('{app}\hitpan_db.sql')]));
+    // 봉합 검증 가드(1.2.15): import 후 테이블 91개 + users 실존 재확인. 미달이면 명확한 실패(헌법 #15·#19).
+    BatchContent.Add('set FINAL_COUNT=0');
+    BatchContent.Add(Format('for /f "tokens=*" %%%%c in (''mysql -u %s -p%s -N -B -e "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema=''''%s'''' AND table_type=''''BASE TABLE''''"'') do set FINAL_COUNT=%%%%c', [G_DbUser, G_DbPassword, G_DbName]));
+    BatchContent.Add('if "!FINAL_COUNT!"=="" set FINAL_COUNT=0');
     BatchContent.Add('set USERS_OK=0');
     BatchContent.Add(Format('for /f "tokens=*" %%%%c in (''mysql -u %s -p%s -N -B -e "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema=''''%s'''' AND table_name=''''users''''"'') do set USERS_OK=%%%%c', [G_DbUser, G_DbPassword, G_DbName]));
     BatchContent.Add('if "!USERS_OK!"=="" set USERS_OK=0');
-    BatchContent.Add(Format('if !USERS_OK! EQU 0 (echo [오류] 데이터베이스 초기 설정 실패 - users 테이블이 생성되지 않았습니다. 설치를 다시 실행해 주세요. & exit /b 1) else (echo DB 스키마 검증 완료 - users 테이블 정상.)', []));
+    // 운영 데이터 보호로 import 건너뛴 경우(EXISTING_DATA>0)는 이미 정상 DB이므로 검증 통과로 간주
+    BatchContent.Add('if !EXISTING_DATA! GTR 0 (echo 기존 운영 DB 유지 - 검증 생략. & exit /b 0)');
+    BatchContent.Add(Format('if !USERS_OK! EQU 0 (echo [오류] DB 초기 설정 실패 - users 테이블 없음. & exit /b 1)', []));
+    BatchContent.Add(Format('if !FINAL_COUNT! LSS 91 (echo [오류] DB 초기 설정 실패 - 테이블 !FINAL_COUNT!/91개만 생성됨. & exit /b 1) else (echo DB 스키마 검증 완료 - 테이블 !FINAL_COUNT!개 + users 정상.)', []));
     BatchContent.SaveToFile(BatchFile);
   finally
     BatchContent.Free;
@@ -837,6 +848,17 @@ begin
        '/C icacls "' + BatchFile + '" /inheritance:r /grant:r SYSTEM:F /grant:r Administrators:F',
        '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
   Exec(ExpandConstant('{cmd}'), '/C "' + BatchFile + '"', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+  // 봉합 2026-06-17 (1.2.15, P0): db-setup.bat의 exit /b 1을 설치 본체로 전파.
+  //   이전엔 bat이 실패해도 ResultCode를 검사하지 않아 설치가 "완료"로 끝남(로그인 500을 설치 단계에서 못 잡은 직접 원인).
+  //   DB 초기화 실패(스키마 미완성·users 없음) 시 설치를 명확히 중단(헌법 #15·#19·#20).
+  if ResultCode <> 0 then
+  begin
+    // 실패한 bat은 평문 비번 포함 → 즉시 덮어쓰고 삭제 후 중단
+    SaveStringToFile(BatchFile, StringOfChar(' ', 1024), False);
+    DeleteFile(BatchFile);
+    RaiseException('데이터베이스 초기화에 실패했습니다 (코드 ' + IntToStr(ResultCode) +
+      '). 스키마가 완전히 설치되지 않았습니다. 설치를 다시 실행하시거나 고객센터에 문의해 주세요.');
+  end;
   // 보강 2026-06-17 (1.2.12, P1 #4): 삭제 전 공백 더미로 덮어쓰기 (디스크 잔존 평문 최소화).
   //   1KB 공백으로 3회 overwrite 후 DeleteFile. FillWithZerosAndDelete 등가 패턴.
   SaveStringToFile(BatchFile, StringOfChar(' ', 1024), False);

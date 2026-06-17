@@ -133,11 +133,13 @@ if (Test-Path $dbDumpSrc) {
     #   모든 테이블이 hitpan_erp_t003가 아닌 hitpan_erp로 들어가 빈 껍데기 → users 없음 → 500.
     #   DEFINER=hitpan@localhost는 회사별 유저(hitpan_t003)와 불일치 → 트리거/뷰 생성 ERROR 1227.
     #   덤프는 'DB명·DEFINER 등 환경 식별자 0건'이어야 N개 테넌트에 단일 시드로 주입 가능 (헌법 #35 분리).
-    $forbidden = Select-String -Path $dbDumpSrc -Pattern '(?m)^\s*USE\s+`?hitpan', 'CREATE DATABASE', 'DROP DATABASE', 'DEFINER\s*='
+    #   1.2.15 보강: ALTER DATABASE 추가 — 1.2.14에서 ALTER DATABASE hitpan_erp 16줄을 놓쳐
+    #   50번째 테이블 직후 ERROR 1049로 import 중단, users 미생성 → 로그인 500 재발한 진범.
+    $forbidden = Select-String -Path $dbDumpSrc -Pattern '(?m)^\s*USE\s+`?hitpan', 'CREATE DATABASE', 'DROP DATABASE', 'ALTER DATABASE', 'DEFINER\s*='
     if ($forbidden) {
         Write-Host ""
         Write-Host "  ❌ 빌드 중단: hitpan_db.sql에 금지 구문이 남아 있습니다 (로그인 500 진범)." -ForegroundColor Red
-        Write-Host "     아래 구문을 제거 후 다시 빌드하세요 (USE/CREATE DATABASE/DROP DATABASE/DEFINER):" -ForegroundColor Red
+        Write-Host "     아래 구문을 제거 후 다시 빌드하세요 (USE/CREATE/DROP/ALTER DATABASE/DEFINER):" -ForegroundColor Red
         $forbidden | Select-Object -First 5 | ForEach-Object { Write-Host "       L$($_.LineNumber): $($_.Line.Trim())" -ForegroundColor DarkYellow }
         throw "DB 덤프 정합성 게이트 실패 — 환경 식별자(DB명/DEFINER)가 덤프에 박혀 있음. 헌법 #19/#35 위반."
     }
