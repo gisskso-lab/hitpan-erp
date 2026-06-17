@@ -805,10 +805,28 @@ begin
     BatchContent.Add(Format('mysql -u root -p%s -e "CREATE DATABASE IF NOT EXISTS %s CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;"', [MariaRootPw, G_DbName]));
     // 사고 #18 봉합 — 회사별 user + 랜덤 비번 (하드코딩 0건)
     BatchContent.Add(Format('mysql -u root -p%s -e "CREATE USER IF NOT EXISTS ''%s''@''localhost'' IDENTIFIED BY ''%s''; GRANT ALL ON %s.* TO ''%s''@''localhost''; FLUSH PRIVILEGES;"', [MariaRootPw, G_DbUser, G_DbPassword, G_DbName, G_DbUser]));
+    // 봉합 2026-06-17 (1.2.14): 로그인 500 진범 봉합 — 스키마 import 판정 정정.
+    //   진범1: hitpan_db.sql 안 'USE hitpan_erp'로 회사별 DB 지정이 무력화 → 별도 봉합(덤프 스트립).
+    //   진범2: 기존 'items/partners COUNT' 판정은 신규 빈 DB에서 테이블 자체가 없어 오작동.
+    //          + 'skip=1'(-N이라 결과 1줄인데 그 줄을 버림) + '2^^^>nul'(caret 3겹으로 redirect 사망) 2중 버그.
+    //   봉합: information_schema로 users 테이블 '존재 여부' 1차 판정(빈 DB에서도 에러 0).
+    //         테이블 없으면 신규 → 무조건 import / 있으면 운영데이터(items+partners) 보호 분기.
+    //   goto/괄호 혼용은 .bat 파서 사고 위험 → goto 없이 평면 if 구조로 작성.
+    //   1차: users 테이블 존재 여부 + 2차: 운영 데이터 보호. 두 변수를 먼저 구한 뒤 한 줄 분기.
+    BatchContent.Add('set TABLE_EXISTS=0');
+    BatchContent.Add(Format('for /f "tokens=*" %%%%c in (''mysql -u %s -p%s -N -B -e "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema=''''%s'''' AND table_name=''''users''''"'') do set TABLE_EXISTS=%%%%c', [G_DbUser, G_DbPassword, G_DbName]));
+    BatchContent.Add('if "!TABLE_EXISTS!"=="" set TABLE_EXISTS=0');
     BatchContent.Add('set EXISTING_DATA=0');
-    BatchContent.Add(Format('for /f "skip=1 tokens=*" %%%%c in (''mysql -u %s -p%s -N -e "SELECT COALESCE((SELECT COUNT(*) FROM %s.items),0)+COALESCE((SELECT COUNT(*) FROM %s.partners),0)" 2^^^>nul'') do set EXISTING_DATA=%%%%c', [G_DbUser, G_DbPassword, G_DbName, G_DbName]));
+    // 운영 데이터 카운트는 테이블이 있을 때만 의미 — 없으면 쿼리가 에러내므로 TABLE_EXISTS=1일 때만 조회
+    BatchContent.Add(Format('if !TABLE_EXISTS! GTR 0 (for /f "tokens=*" %%%%c in (''mysql -u %s -p%s -N -B -e "SELECT COALESCE((SELECT COUNT(*) FROM %s.items),0)+COALESCE((SELECT COUNT(*) FROM %s.partners),0)"'') do set EXISTING_DATA=%%%%c)', [G_DbUser, G_DbPassword, G_DbName, G_DbName]));
     BatchContent.Add('if "!EXISTING_DATA!"=="" set EXISTING_DATA=0');
-    BatchContent.Add(Format('if !EXISTING_DATA! GTR 0 (echo 기존 운영 데이터 !EXISTING_DATA!건 감지. 시드 import 건너뜀.) else (mysql -u %s -p%s %s < "%s")', [G_DbUser, G_DbPassword, G_DbName, ExpandConstant('{app}\hitpan_db.sql')]));
+    // 분기: 테이블 없음(신규) OR 데이터 0(시드만) → import / 데이터 있음 → 보호(건너뜀, 헌법 #1)
+    BatchContent.Add(Format('if !EXISTING_DATA! GTR 0 (echo 기존 운영 데이터 !EXISTING_DATA!건 감지. 시드 import 건너뜀.) else (echo 스키마 import 실행. & mysql -u %s -p%s %s < "%s")', [G_DbUser, G_DbPassword, G_DbName, ExpandConstant('{app}\hitpan_db.sql')]));
+    // 봉합 검증 가드(1.2.14): import 후 users 테이블 실존 재확인. 0이면 명확한 실패 메시지(헌법 #15 silent swallow 금지).
+    BatchContent.Add('set USERS_OK=0');
+    BatchContent.Add(Format('for /f "tokens=*" %%%%c in (''mysql -u %s -p%s -N -B -e "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema=''''%s'''' AND table_name=''''users''''"'') do set USERS_OK=%%%%c', [G_DbUser, G_DbPassword, G_DbName]));
+    BatchContent.Add('if "!USERS_OK!"=="" set USERS_OK=0');
+    BatchContent.Add(Format('if !USERS_OK! EQU 0 (echo [오류] 데이터베이스 초기 설정 실패 - users 테이블이 생성되지 않았습니다. 설치를 다시 실행해 주세요. & exit /b 1) else (echo DB 스키마 검증 완료 - users 테이블 정상.)', []));
     BatchContent.SaveToFile(BatchFile);
   finally
     BatchContent.Free;
