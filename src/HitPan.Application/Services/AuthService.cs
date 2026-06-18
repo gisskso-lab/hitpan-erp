@@ -188,8 +188,9 @@ public class AuthService : IAuthService
             new("user_id", user.Id),
             new("name", user.UserName),
             new("account_type", user.AccountType ?? "tenant_user"),
-            new("platform_id", user.PlatformId ?? string.Empty),
-            new("reseller_id", user.ResellerId ?? string.Empty),
+            // 보안 격벽 (사장님 결재 2026-06-18): platform_id·reseller_id 클레임 제거.
+            //   본사·대리점 계층은 백오피스 전용 — ERP 토큰에 본사 식별자를 굽지 않아
+            //   고객사 PC가 뚫려도 본사·타 고객사 정보가 노출되지 않게 함(헌법 #7·#22·#35).
             new("employee_id", employeeId),
             new(ClaimTypes.Role, employeeRole),
             new("role", employeeRole)

@@ -21,8 +21,8 @@ public sealed class UserConfiguration : IEntityTypeConfiguration<User>
         builder.Property(e => e.UserName).HasColumnName("user_name").HasMaxLength(50).IsRequired();
         builder.Property(e => e.Role).HasColumnName("role").HasConversion<string>().IsRequired();
         builder.Property(e => e.AccountType).HasColumnName("account_type").HasMaxLength(20).IsRequired();
-        builder.Property(e => e.ResellerId).HasColumnName("reseller_id").HasMaxLength(36);
-        builder.Property(e => e.PlatformId).HasColumnName("platform_id").HasMaxLength(36);
+        // reseller_id·platform_id 매핑 제거 (보안 격벽 2026-06-18): 본사·대리점 계층은 백오피스 전용.
+        //   DB 컬럼은 흔적으로 남아도 ERP 엔티티(User)는 더 이상 매핑하지 않음(부모/자식만).
         builder.Property(e => e.DeptId).HasColumnName("dept_id").HasMaxLength(36);
         builder.Property(e => e.Phone).HasColumnName("phone").HasMaxLength(100);
         builder.Property(e => e.IsActive).HasColumnName("is_active").IsRequired();

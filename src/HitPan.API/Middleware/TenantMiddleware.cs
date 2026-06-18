@@ -51,36 +51,21 @@ public sealed class TenantMiddleware
             return;
         }
 
+        // 보안 격벽 (사장님 결재 2026-06-18): ERP 계정 계층은 부모/자식 둘뿐.
+        //   본사(platform)·대리점(reseller) 계층은 백오피스 전용 → ERP에서 제거.
+        //   고객사 PC가 뚫려도 본사·타 고객사 계층 식별자가 노출되지 않게 platform_id/reseller_id 클레임 미수신.
         var accountType = context.User.FindFirstValue("account_type");
         var tenantId = context.User.FindFirstValue("tenant_id");
-        var resellerId = context.User.FindFirstValue("reseller_id");
-        var platformId = context.User.FindFirstValue("platform_id");
         var userId = context.User.FindFirstValue("user_id");
         var role = context.User.FindFirstValue("role");
 
         context.Items["AccountType"] = accountType;
         context.Items["TenantId"] = tenantId;
-        context.Items["ResellerId"] = resellerId;
-        context.Items["PlatformId"] = platformId;
         context.Items["UserId"] = userId;
         context.Items["UserName"] = context.User.FindFirstValue("name");
 
-        // reseller_id 없어도 tenant_id로 ERP 컨텍스트가 있으면 통과(JWT에 reseller_id 미포함 계정 대비)
-        if (accountType == "reseller_admin" && string.IsNullOrEmpty(resellerId) && string.IsNullOrEmpty(tenantId))
-        {
-            context.Response.StatusCode = StatusCodes.Status403Forbidden;
-            await context.Response.WriteAsync("Forbidden");
-            return;
-        }
-
-        if ((accountType == "tenant_user" || accountType == "tenant_admin") && string.IsNullOrEmpty(tenantId))
-        {
-            context.Response.StatusCode = StatusCodes.Status403Forbidden;
-            await context.Response.WriteAsync("Forbidden");
-            return;
-        }
-
-        if (string.IsNullOrWhiteSpace(tenantId) && accountType != "platform_admin")
+        // ERP는 단일 회사 — 부모/자식 모두 tenant_id(회사 식별자) 필수.
+        if (string.IsNullOrWhiteSpace(tenantId))
         {
             context.Response.StatusCode = StatusCodes.Status403Forbidden;
             await context.Response.WriteAsync("Forbidden");

@@ -30,7 +30,8 @@ public abstract class HitPanControllerBase : ControllerBase
     /// <summary>현재 로그인 사용자 ID (JWT user_id 클레임)</summary>
     protected string? UserId => HttpContext.Items["UserId"]?.ToString();
 
-    /// <summary>계정 유형 (tenant_admin / tenant_user / platform_admin / reseller_admin)</summary>
+    /// <summary>계정 유형 — ERP는 부모/자식 둘뿐: tenant_admin(부모) / tenant_user(자식).
+    /// 본사(platform)·대리점(reseller) 계층은 백오피스 전용 (보안 격벽 2026-06-18).</summary>
     protected string? AccountType => HttpContext.Items["AccountType"]?.ToString();
 
     /// <summary>테넌트 ID가 없으면 401 Unauthorized 반환하는 보조 헬퍼.</summary>
@@ -41,9 +42,8 @@ public abstract class HitPanControllerBase : ControllerBase
         return null;
     }
 
-    /// <summary>플랫폼 관리자 여부 (본사 관리 메뉴)</summary>
-    protected bool IsPlatformAdmin => AccountType == "platform_admin";
+    // IsPlatformAdmin 제거 (보안 격벽 2026-06-18): 본사 계층은 백오피스 전용 — ERP에 본사 관리자 개념 없음.
 
-    /// <summary>테넌트 관리자 여부 (고객사 어드민)</summary>
+    /// <summary>부모계정 여부 (고객사 어드민 = 부모). 자식계정은 tenant_user.</summary>
     protected bool IsTenantAdmin => AccountType == "tenant_admin";
 }

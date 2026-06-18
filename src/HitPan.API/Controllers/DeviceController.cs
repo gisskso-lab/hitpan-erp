@@ -30,9 +30,10 @@ public sealed class DeviceController : ControllerBase
 
         var all = await _svc.GetAllAsync(tid, ct);
 
-        // TenantAdmin 이외는 자기 기기만 필터
+        // 부모계정(tenant_admin) 이외는 자기 기기만 필터
+        //   platform_admin 절 제거 (보안 격벽 2026-06-18): 본사 계층은 백오피스 전용 — ERP가 발급 안 함.
         var accountType = User.FindFirst("account_type")?.Value;
-        if (accountType != "tenant_admin" && accountType != "platform_admin")
+        if (accountType != "tenant_admin")
         {
             all = all.Where(d => d.UserId == uid).ToList();
         }
@@ -56,8 +57,9 @@ public sealed class DeviceController : ControllerBase
         var uid = HttpContext.Items["UserId"]?.ToString();
         if (string.IsNullOrEmpty(tid) || string.IsNullOrEmpty(uid)) return Forbid();
 
+        // platform_admin 절 제거 (보안 격벽 2026-06-18): 본사 계층은 백오피스 전용. 부모계정(tenant_admin)만 폐기 가능.
         var accountType = User.FindFirst("account_type")?.Value;
-        if (accountType != "tenant_admin" && accountType != "platform_admin")
+        if (accountType != "tenant_admin")
             return Forbid();
 
         await _svc.RevokeAsync(id, tid, uid, body?.Reason, ct);

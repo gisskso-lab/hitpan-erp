@@ -70,7 +70,8 @@ builder.Services.AddScoped<HrClientService>();
 builder.Services.AddScoped<ESignService>();
 builder.Services.AddScoped<LaborContractService>();
 builder.Services.AddScoped<ChatbotService>();
-builder.Services.AddScoped<BackofficeService>();
+// BackofficeService DI 제거 (보안 격벽 2026-06-18): 백오피스 인증·관리는 HitPan.Backoffice.API 전담.
+//   ERP 프론트에 본사/대리점 호출 코드가 남지 않게 함(헌법 #35).
 // 작20260601 (사장님 결재): 랜딩 v2 정적 콘텐츠 저장 서비스.
 builder.Services.AddScoped<LandingContentService>();
 builder.Services.AddTransient<HitPanApiAuthHandler>();

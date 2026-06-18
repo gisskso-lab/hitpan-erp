@@ -222,9 +222,10 @@ public class PermissionService : IPermissionService
 
     public async Task<bool> HasPermissionAsync(string userId, string tenantId, string menuCode, string action, CancellationToken ct = default)
     {
-        // Layer 0 — tenant_admin / platform_admin은 항상 전권 (락아웃 방지)
+        // Layer 0 — 부모계정(tenant_admin)은 항상 전권 (락아웃 방지)
+        //   platform_admin 절 제거 (보안 격벽 2026-06-18): 본사 계층은 백오피스 전용 — ERP가 발급 안 함.
         if (userId == _currentTenant.UserId &&
-            (_currentTenant.AccountType == "tenant_admin" || _currentTenant.AccountType == "platform_admin"))
+            _currentTenant.AccountType == "tenant_admin")
         {
             return true;
         }
