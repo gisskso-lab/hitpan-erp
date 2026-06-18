@@ -226,18 +226,21 @@ public class LandingSignupController : ControllerBase
             var codeSeq = await db.QueryFirstOrDefaultAsync<int>("SELECT COUNT(*) + 1 FROM tenants");
             var tenantCode = $"T-{codeSeq:D3}";
 
-            // 사장님 결재 2026-06-08 — biz_no·ceo_name 평문 저장. 헌법 #35 정합:
-            //   "랜딩에서 인증된 사업자등록증 정보 → 계정관리·회사정보 자동 반영"
-            //   ERP 사용자정보설정에 자동 저장되어야 정합. tenants는 백오피스 영역(고객사 PK)이므로 평문 저장.
-            // 사업자번호는 정규화(숫자만) 저장한 후 저장.
-            var bizNoNorm = new string((req.BizNo ?? "").Where(char.IsDigit).ToArray());
+            // 데이터 흐름도 정정 (사장님 결재 2026-06-18 "길 B — 백오피스 평문 0건"):
+            //   [이전] biz_no·ceo_name 평문을 tenants에 저장(2026-06-08 결재) → 헌법 #22 위반으로 회수.
+            //   [현재] 백오피스는 사업자번호 평문을 1바이트도 보유·전달하지 않는다.
+            //     - 사업자번호 검증은 landing_signups.biz_no_hash(HMAC) 매칭으로만 수행 (위 INSERT).
+            //     - 사업자등록증 정보(사업자번호·대표자명)는 ERP 설치 시 고객사 로컬 local_company에만 저장.
+            //       (ERP /setup/license Step1에서 사용자가 입력한 biz_no를 그대로 ERP가 보관 → 길 B)
+            //   백오피스 tenants 보유 = 계정·연락처·구독 메타만 (헌법 #22 본사 데이터 최소주의 정합).
+            //   개인정보보호법 리스크 차단: 본사가 사업자번호·대표자명을 안 가지면 본사가 털릴 일 없다.
             await db.ExecuteAsync(@"
                 INSERT INTO tenants
-                  (tenant_id, tenant_code, domain_alias, company_name, biz_no, ceo_name, tel, address,
+                  (tenant_id, tenant_code, domain_alias, company_name, tel,
                    reseller_id, status, trial_ends_at, db_host, db_name, license_key_hash,
                    reseller_tier, created_at, updated_at)
                 VALUES
-                  (@TenantId, @TenantCode, @DomainAlias, @CompanyName, @BizNo, @CeoName, @Phone, '',
+                  (@TenantId, @TenantCode, @DomainAlias, @CompanyName, @Phone,
                    NULL, 'pending', NULL, '', '', '', 0, UTC_TIMESTAMP(), UTC_TIMESTAMP())",
                 new
                 {
@@ -245,8 +248,6 @@ public class LandingSignupController : ControllerBase
                     TenantCode = tenantCode,
                     DomainAlias = desiredDomain,
                     req.CompanyName,
-                    BizNo = bizNoNorm,
-                    CeoName = req.CeoName ?? "",
                     req.Phone
                 });
 

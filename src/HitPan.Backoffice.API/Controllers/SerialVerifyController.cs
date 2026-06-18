@@ -142,10 +142,13 @@ public class SerialVerifyController : ControllerBase
                 tenant.TenantId, tenant.TenantCode);
 
             // 회사정보 응답 (ERP 화면 자동 입력용)
+            // 데이터 흐름도 정정 (사장님 결재 2026-06-18 "길 B"): biz_no·ceo_name·address 응답 제거.
+            //   백오피스는 사업자번호·대표자명·주소 평문을 보유하지 않는다(헌법 #22).
+            //   이 민감정보는 ERP 설치화면(/setup/license)에서 사용자가 입력 → ERP 로컬 local_company에만 저장.
+            //   백오피스가 공급하는 건 회사명·연락처·구독 메타뿐.
             var companyInfo = await db.QueryFirstOrDefaultAsync<CompanyInfo>(@"
                 SELECT t.tenant_code AS TenantCode, t.company_name AS CompanyName,
-                       t.biz_no AS BizNo, t.ceo_name AS CeoName,
-                       t.tel AS Tel, t.address AS Address,
+                       t.tel AS Tel,
                        t.status AS Status,
                        ls.email AS Email, ls.phone AS Phone, ls.plan_type AS PlanType
                 FROM tenants t
@@ -250,12 +253,10 @@ public class SerialVerifyController : ControllerBase
 
     public class CompanyInfo
     {
+        // 길 B (사장님 결재 2026-06-18): BizNo·CeoName·Address 제거 — 백오피스 평문 미보유(헌법 #22).
         public string TenantCode { get; set; } = "";
         public string CompanyName { get; set; } = "";
-        public string? BizNo { get; set; }
-        public string? CeoName { get; set; }
         public string? Tel { get; set; }
-        public string? Address { get; set; }
         public string Status { get; set; } = "";
         public string? Email { get; set; }
         public string? Phone { get; set; }

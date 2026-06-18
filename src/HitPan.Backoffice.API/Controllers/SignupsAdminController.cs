@@ -63,11 +63,10 @@ public class SignupsAdminController : ControllerBase
                        s.submitted_at AS SubmittedAt,
                        t.tenant_code AS TenantCode,
                        t.domain_alias AS DomainAlias,
-                       t.status AS TenantStatus,
-                       t.license_key_plain AS LicenseKey
+                       t.status AS TenantStatus
+                -- license_key_plain 폐기 (사장님 결재 2026-06-18, 보안 P0): 평문 시리얼키 영구저장 금지.
+                --   목록에서 시리얼 평문 노출 제거. 분실 시 재발송 API가 신규 시리얼을 재발급(해시만 저장).
                 FROM landing_signups s
-                -- 봉합 2026-06-17 (v1.2.13 P0-D): 동명 회사 중복 가입 시 다른 고객 시리얼 평문 노출 사고 차단
-                --   tenants 영역에 signup_id 컬럼 없음 → 시간 근접 1건만 매칭 (submitted_at 이후 가장 가까운 created_at)
                 LEFT JOIN tenants t ON t.tenant_id = (
                     SELECT t2.tenant_id FROM tenants t2
                     WHERE t2.company_name = s.company_name
@@ -133,17 +132,18 @@ public class SignupsAdminController : ControllerBase
             var licensePepper = _config["License:Pepper"] ?? throw new InvalidOperationException("License:Pepper 미설정");
             var licenseHash = ComputeHmacSha256(licenseKey, licensePepper);
 
-            // 3) tenant 활성화 + license_key_hash + license_key_plain 저장 — tenant_id 단건 정확 매칭
-            //    사장님 결재 2026-06-08: 시리얼은 백오피스 ↔ ERP 포링키 영역.
+            // 3) tenant 활성화 + license_key_hash 저장 — tenant_id 단건 정확 매칭
+            //    license_key_plain 폐기 (사장님 결재 2026-06-18, 보안 P0): 평문 시리얼키 영구저장 금지.
+            //      해시만 저장. 평문은 아래 응답으로 1회만 노출(관리자 전달용), DB 복원 불가.
+            //      분실 시 ResendLicense가 신규 시리얼 재발급(기존 무효화). 6-08 평문 재발송 결재는 본 결재로 갱신.
             //    사고 #5 봉합 2026-06-10: WHERE tenant_id 단건 매칭으로 변경
             await db.ExecuteAsync(@"
                 UPDATE tenants
                 SET status = 'active',
                     license_key_hash = COALESCE(NULLIF(license_key_hash, ''), @LicenseHash),
-                    license_key_plain = COALESCE(NULLIF(license_key_plain, ''), @LicensePlain),
                     updated_at = UTC_TIMESTAMP()
                 WHERE tenant_id = @TenantId AND status = 'pending'",
-                new { TenantId = tenantId, LicenseHash = licenseHash, LicensePlain = licenseKey });
+                new { TenantId = tenantId, LicenseHash = licenseHash });
 
             // 4) ERP webhook 발송 (헌법 #35 정합 - 백오피스→ERP 유기적 연결)
             if (!string.IsNullOrEmpty(tenantId))
@@ -216,9 +216,10 @@ public class SignupsAdminController : ControllerBase
         }
     }
 
-    // 시리얼 키 이메일 재발송 (사장님 결재 2026-06-08)
-    // 사장님 명시: "백오피스에선 실제 평문으로 관리 → 시리얼넘버 형태로 복호화 시켜서 고객사메일로 시리얼넘버 전송"
-    // → 기존 평문 시리얼 그대로 재발송. 새 시리얼 발급 저장하지 않음 (ERP 포링키 무효화 저장하지 않음).
+    // 시리얼 키 재발급 (사장님 결재 2026-06-18, 보안 P0 — 6-08 평문 재발송 결재를 갱신)
+    //   license_key_plain 폐기로 평문 복원 불가 → "기존 평문 재발송"을 "신규 시리얼 재발급"으로 전환.
+    //   분실 시: 새 시리얼 발급 → license_key_hash 갱신(기존 시리얼 자동 무효화) → 새 평문 1회 전달.
+    //   고객이 받았던 옛 시리얼은 무효화됨(사장님 결재 — 평문 보관 안 하는 대가). 헌법 #22 정합.
     [HttpPost("{signupId:long}/resend-license")]
     public async Task<IActionResult> ResendLicense(long signupId, CancellationToken ct)
     {
@@ -235,50 +236,62 @@ public class SignupsAdminController : ControllerBase
 
             string status = signup.status;
             if (status != "approved" && status != "active")
-                return BadRequest(new { success = false, message = "승인 완료된 신청만 재발송할 수 있습니다." });
+                return BadRequest(new { success = false, message = "승인 완료된 신청만 재발급할 수 있습니다." });
 
             string companyName = signup.company_name;
             string customerEmail = signup.email;
             DateTime submittedAt = signup.submitted_at;
 
             // 봉합 2026-06-17 (v1.2.13 P0-D): 동명 회사 사고 차단 — submitted_at에 가장 가까운 tenant 1건만
-            //   이전 사고: ORDER BY created_at DESC = 같은 회사명 신규 가입자의 시리얼 평문 발송 사고
+            //   이전 사고: ORDER BY created_at DESC = 같은 회사명 신규 가입자에게 발송 사고
             var info = await db.QueryFirstOrDefaultAsync<TenantInfoRow>(@"
-                SELECT license_key_plain AS LicenseKey, domain_alias AS DomainAlias
+                SELECT CAST(tenant_id AS CHAR) AS TenantId, domain_alias AS DomainAlias
                 FROM tenants
                 WHERE company_name = @CompanyName
                 ORDER BY ABS(TIMESTAMPDIFF(SECOND, created_at, @SubmittedAt))
                 LIMIT 1",
                 new { CompanyName = companyName, SubmittedAt = submittedAt });
-            var licenseKey = info?.LicenseKey;
-            var domainAlias = info?.DomainAlias;
 
-            if (string.IsNullOrWhiteSpace(licenseKey))
-                return BadRequest(new { success = false, message = "이 고객사의 시리얼 키가 발급되지 않았습니다. 새로 발급이 필요합니다." });
+            if (info is null || string.IsNullOrWhiteSpace(info.TenantId))
+                return BadRequest(new { success = false, message = "이 고객사의 고객사 정보를 찾을 수 없습니다." });
 
-            // 이메일 재발송
+            var domainAlias = info.DomainAlias;
+
+            // 신규 시리얼 재발급 — 새 키 생성 → 해시 갱신(기존 시리얼 무효화). 평문은 저장하지 않음.
+            var licenseKey = GenerateLicenseKey();
+            var licensePepper = _config["License:Pepper"] ?? throw new InvalidOperationException("License:Pepper 미설정");
+            var licenseHash = ComputeHmacSha256(licenseKey, licensePepper);
+            await db.ExecuteAsync(@"
+                UPDATE tenants
+                SET license_key_hash = @LicenseHash,
+                    updated_at = UTC_TIMESTAMP()
+                WHERE tenant_id = @TenantId",
+                new { TenantId = info.TenantId, LicenseHash = licenseHash });
+
+            // 새 시리얼 이메일 발송
             bool emailSent = false;
             if (!string.IsNullOrWhiteSpace(customerEmail))
             {
-                var subject = "[히트판 ERP] 시리얼 키 재발송 안내";
+                var subject = "[히트판 ERP] 시리얼 키 재발급 안내 (이전 시리얼은 무효화됩니다)";
                 var htmlBody = BuildLicenseKeyEmailBody(companyName, licenseKey, domainAlias);
                 emailSent = await _email.SendAsync(customerEmail, subject, htmlBody, ct);
             }
 
-            _logger.LogInformation("[SignupsAdmin] license_resent signupId={Id} email={Email} sent={Sent}",
-                signupId, customerEmail, emailSent);
+            _logger.LogInformation("[SignupsAdmin] license_reissued signupId={Id} tenant={Tid} email={Email} sent={Sent}",
+                signupId, info.TenantId, customerEmail, emailSent);
 
             return Ok(new
             {
                 success = true,
-                message = emailSent ? "시리얼 키 이메일 재발송 완료" : "재발송 실패 — 화면에서 직접 전달 필요",
+                message = emailSent ? "시리얼 키 재발급·이메일 발송 완료 (이전 시리얼 무효화)" : "재발급 완료 — 이메일 발송 실패, 화면에서 직접 전달 필요",
+                licenseKey,  // 응답 1회만 평문 노출 (관리자 전달용, 이후 DB 복원 불가)
                 emailSent
             });
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "[SignupsAdmin] resend-license 실패 id={Id}", signupId);
-            return StatusCode(500, new { success = false, message = "재발송 처리 실패" });
+            return StatusCode(500, new { success = false, message = "재발급 처리 실패" });
         }
     }
 
@@ -440,7 +453,9 @@ public class SignupsAdminController : ControllerBase
 
     private class TenantInfoRow
     {
-        public string? LicenseKey { get; set; }
+        // license_key_plain 폐기 (사장님 결재 2026-06-18): LicenseKey 평문 속성 제거.
+        //   재발급은 신규 키를 생성하므로 평문 조회 불필요. tenant_id로 해시만 갱신.
+        public string? TenantId { get; set; }
         public string? DomainAlias { get; set; }
     }
 }

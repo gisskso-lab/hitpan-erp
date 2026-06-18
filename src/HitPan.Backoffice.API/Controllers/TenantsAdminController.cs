@@ -221,13 +221,14 @@ public class TenantsAdminController : ControllerBase
             if (string.IsNullOrEmpty(domainAlias))
                 return NotFound(new { success = false, message = "고객사를 찾을 수 없습니다." });
 
-            // 1) 백오피스 DB 영역 정리 (tenants + landing_signups + tenant_*)
-            await db.ExecuteAsync("DELETE FROM tenant_certificates WHERE tenant_id = @Id", new { Id = id });
+            // 1) 백오피스 DB 영역 정리 (tenants + landing_signups + 백오피스 소속 tenant_*)
+            //    데이터 흐름도 정정 (사장님 결재 2026-06-18, 헌법 #22):
+            //      tenant_certificates(인증서 PFX 민감)·tenant_settings(ERP 업무설정)는 ERP 로컬 전용 →
+            //      백오피스 DB에 존재하지 않으므로 정리 대상 아님. 해당 DELETE 제거.
             await db.ExecuteAsync("DELETE FROM tenant_devices WHERE tenant_id = @Id", new { Id = id });
             await db.ExecuteAsync("DELETE FROM tenant_etax_settings WHERE tenant_id = @Id", new { Id = id });
             await db.ExecuteAsync("DELETE FROM tenant_payments WHERE tenant_id = @Id", new { Id = id });
             await db.ExecuteAsync("DELETE FROM tenant_rewards WHERE tenant_id = @Id", new { Id = id });
-            await db.ExecuteAsync("DELETE FROM tenant_settings WHERE tenant_id = @Id", new { Id = id });
             await db.ExecuteAsync("DELETE FROM serial_verify_attempts WHERE tenant_id = @Id", new { Id = id });
 
             var companyName = await db.QueryFirstOrDefaultAsync<string>(

@@ -134,8 +134,7 @@ var
   G_LicenseKey: String;
   G_TenantCode: String;
   G_CompanyName: String;
-  G_BizNo: String;
-  G_CeoName: String;
+  // 길 B (사장님 결재 2026-06-18): G_BizNo·G_CeoName 제거 — 백오피스 평문 미보유, 설치 EXE도 미취급.
   G_PrimaryDomain: String;
   G_ApiDomain: String;
   G_TunnelToken: String;
@@ -447,10 +446,9 @@ begin
   end;
 
   // 응답에서 필드 추출
+  //   길 B (사장님 결재 2026-06-18): bizNo·ceoName 추출 제거 — 백오피스 응답에 없음(평문 미보유).
   G_TenantCode := ExtractJsonValue(RawResponse, 'tenantCode');
   G_CompanyName := ExtractJsonValue(RawResponse, 'companyName');
-  G_BizNo := ExtractJsonValue(RawResponse, 'bizNo');
-  G_CeoName := ExtractJsonValue(RawResponse, 'ceoName');
   G_PrimaryDomain := ExtractJsonValue(RawResponse, 'primary');
   G_ApiDomain := ExtractJsonValue(RawResponse, 'api');
   G_TunnelToken := ExtractJsonValue(RawResponse, 'tunnelToken');
@@ -575,11 +573,11 @@ begin
     //   디렉터리: {app}\tenant-N
     DetermineMultiTenantSlot();
 
-    // 회사정보 확인 페이지에 박을 텍스트 갱신
+    // 회사정보 확인 페이지에 표시할 텍스트 갱신
+    //   길 B (사장님 결재 2026-06-18): 사업자번호·대표자 표시 제거 — 백오피스가 평문을 안 주므로
+    //   여기서도 표시 안 함. 사업자번호·대표자는 ERP 첫 화면(/setup/license)에서 입력·확인.
     BootstrapResultPage.MsgLabel.Caption :=
       '회사명: ' + G_CompanyName + #13#10 +
-      '사업자번호: ' + G_BizNo + #13#10 +
-      '대표자: ' + G_CeoName + #13#10 +
       '테넌트 코드: ' + G_TenantCode + #13#10 +
       '도메인: ' + G_PrimaryDomain + #13#10 +
       '슬롯: ' + IntToStr(G_SlotIndex) + ' (포트 ' + IntToStr(G_ApiPort) + ')' + #13#10 + #13#10 +
@@ -681,18 +679,31 @@ end;
 //   appsettings.json ApiBaseUrl을 고객사 실제 도메인으로 정정.
 //   1.2.12까지 api-demo.hitpan.kr 박힌 채 가도 → CORS preflight 차단 사고.
 //   사장님 헌법 #21 정합 (삭제·수정 금지 = 부트 가능 상태 유지하며 정정 OK)
-procedure FixupBlazorAppSettings();
+// 단일 appsettings.json 파일의 ApiBaseUrl 을 회사 도메인으로 정정.
+procedure FixupOneAppSettings(AppSettingsPath: String; TargetUrl: String);
 var
-  AppSettingsPath: String;
   NewContent: AnsiString;
-  TargetUrl: String;
 begin
-  AppSettingsPath := ExpandConstant('{app}') + '\api\wwwroot\appsettings.json';
   if not FileExists(AppSettingsPath) then begin
-    Log('[FixupBlazor] appsettings.json 0건: ' + AppSettingsPath);
+    Log('[FixupBlazor] 0건(파일없음): ' + AppSettingsPath);
     Exit;
   end;
+  // 표준 JSON 단일행 정정 (Blazor WASM 표준 부트 정합 유지)
+  NewContent := '{' + #13#10 +
+                '  "ApiBaseUrl": "' + TargetUrl + '",' + #13#10 +
+                '  "BackofficeApiBaseUrl": "https://back.hitpan.kr"' + #13#10 +
+                '}' + #13#10;
+  if not SaveStringToFile(AppSettingsPath, NewContent, False) then begin
+    Log('[FixupBlazor] SaveStringToFile 실패: ' + AppSettingsPath);
+    Exit;
+  end;
+  Log('[FixupBlazor] 정정 완료 → ' + AppSettingsPath + ' = ' + TargetUrl);
+end;
 
+procedure FixupBlazorAppSettings();
+var
+  TargetUrl: String;
+begin
   // 고객사 도메인 정정 (G_PrimaryDomain = "test000.hitpan.kr" 등)
   if (G_PrimaryDomain = '') or (Pos('localhost', G_PrimaryDomain) > 0) then begin
     Log('[FixupBlazor] LOCAL 모드 정정 0건 (PrimaryDomain=' + G_PrimaryDomain + ')');
@@ -701,18 +712,13 @@ begin
 
   TargetUrl := 'https://' + G_PrimaryDomain;
 
-  // 표준 JSON 단일행 정정 박음 (Blazor WASM 표준 부트 정합 유지)
-  NewContent := '{' + #13#10 +
-                '  "ApiBaseUrl": "' + TargetUrl + '",' + #13#10 +
-                '  "BackofficeApiBaseUrl": "https://back.hitpan.kr"' + #13#10 +
-                '}' + #13#10;
-
-  if not SaveStringToFile(AppSettingsPath, NewContent, False) then begin
-    Log('[FixupBlazor] SaveStringToFile 실패');
-    Exit;
-  end;
-
-  Log('[FixupBlazor] ApiBaseUrl 정합 가도 → ' + TargetUrl);
+  // ★ 진범 봉합 2026-06-18: Blazor WASM 은 web\wwwroot 에서 서빙됨(web-server.ps1:3).
+  //   기존엔 api\wwwroot 만 고쳐서 로그인이 읽는 web\wwwroot 는 api-demo 데모주소 그대로 →
+  //   터널 연결돼도 로그인이 데모서버로 가서 실패. web·api 양쪽 + 변형 파일 전부 정정.
+  FixupOneAppSettings(ExpandConstant('{app}') + '\web\wwwroot\appsettings.json', TargetUrl);
+  FixupOneAppSettings(ExpandConstant('{app}') + '\web\wwwroot\appsettings.Local.json', TargetUrl);
+  FixupOneAppSettings(ExpandConstant('{app}') + '\web\wwwroot\appsettings.Development.json', TargetUrl);
+  FixupOneAppSettings(ExpandConstant('{app}') + '\api\wwwroot\appsettings.json', TargetUrl);
 end;
 
 procedure CurStepChanged(CurStep: TSetupStep);
@@ -757,10 +763,10 @@ begin
   BootstrapFile := ExpandConstant('{app}\bootstrap.conf');
   BootstrapContent := TStringList.Create;
   try
+    // 길 B (사장님 결재 2026-06-18): BIZ_NO·CEO_NAME 기록 제거 — 백오피스 평문 미보유(헌법 #22).
+    //   사업자번호·대표자는 ERP /setup/license에서 사용자 입력 → ERP 로컬 local_company에만 저장.
     BootstrapContent.Add('TENANT_CODE=' + G_TenantCode);
     BootstrapContent.Add('COMPANY_NAME=' + G_CompanyName);
-    BootstrapContent.Add('BIZ_NO=' + G_BizNo);
-    BootstrapContent.Add('CEO_NAME=' + G_CeoName);
     BootstrapContent.Add('PRIMARY_DOMAIN=' + G_PrimaryDomain);
     BootstrapContent.Add('API_DOMAIN=' + G_ApiDomain);
     BootstrapContent.Add('BACKOFFICE_URL={#BackofficeApi}');
@@ -805,6 +811,10 @@ begin
     BatchContent.Add(Format('mysql -u root -p%s -e "CREATE DATABASE IF NOT EXISTS %s CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;"', [MariaRootPw, G_DbName]));
     // 사고 #18 봉합 — 회사별 user + 랜덤 비번 (하드코딩 0건)
     BatchContent.Add(Format('mysql -u root -p%s -e "CREATE USER IF NOT EXISTS ''%s''@''localhost'' IDENTIFIED BY ''%s''; GRANT ALL ON %s.* TO ''%s''@''localhost''; FLUSH PRIVILEGES;"', [MariaRootPw, G_DbUser, G_DbPassword, G_DbName, G_DbUser]));
+    // ★ 봉합 2026-06-18 (트리거 import 안전화): 새 MariaDB는 log_bin=ON + trust=0 기본일 수 있어
+    //   UUID() 등 비결정 함수를 쓰는 트리거 8개 생성이 ERROR 1419로 실패 → 스키마 부분 import → 설치 실패.
+    //   import 전 GLOBAL log_bin_trust_function_creators=1 로 트리거 생성을 허용(헌법 #20 끊김 방지).
+    BatchContent.Add(Format('mysql -u root -p%s -e "SET GLOBAL log_bin_trust_function_creators=1;"', [MariaRootPw]));
     // 봉합 2026-06-17 (1.2.14): 로그인 500 진범 봉합 — 스키마 import 판정 정정.
     //   진범1: hitpan_db.sql 안 'USE hitpan_erp'로 회사별 DB 지정이 무력화 → 별도 봉합(덤프 스트립).
     //   진범2: 기존 'items/partners COUNT' 판정은 신규 빈 DB에서 테이블 자체가 없어 오작동.
@@ -815,7 +825,7 @@ begin
     //   1차: users 테이블 존재 여부 + 2차: 운영 데이터 보호. 두 변수를 먼저 구한 뒤 한 줄 분기.
     // 1차: 테이블 수(BASE TABLE) + 운영 데이터(items+partners) 파악
     BatchContent.Add('set TBL_COUNT=0');
-    BatchContent.Add(Format('for /f "tokens=*" %%%%c in (''mysql -u %s -p%s -N -B -e "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema=''''%s'''' AND table_type=''''BASE TABLE''''"'') do set TBL_COUNT=%%%%c', [G_DbUser, G_DbPassword, G_DbName]));
+    BatchContent.Add(Format('for /f "tokens=*" %%%%c in (''mysql -u %s -p%s %s -N -B -e "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema=DATABASE() AND table_type=''''BASE TABLE''''"'') do set TBL_COUNT=%%%%c', [G_DbUser, G_DbPassword, G_DbName]));
     BatchContent.Add('if "!TBL_COUNT!"=="" set TBL_COUNT=0');
     BatchContent.Add('set EXISTING_DATA=0');
     // 운영 데이터 카운트는 테이블이 있을 때만 의미 — 없으면 쿼리가 에러내므로 TBL_COUNT>0일 때만 조회
@@ -829,10 +839,10 @@ begin
     BatchContent.Add(Format('if !EXISTING_DATA! GTR 0 (echo 기존 운영 데이터 !EXISTING_DATA!건 감지. 시드 import 건너뜀.) else (echo 스키마 import 실행. & mysql -u %s -p%s --show-warnings %s < "%s" 2> "%%TEMP%%\hitpan_import_err.log" & if errorlevel 1 (echo [오류] 스키마 import 실패. 로그: %%TEMP%%\hitpan_import_err.log & exit /b 1))', [G_DbUser, G_DbPassword, G_DbName, ExpandConstant('{app}\hitpan_db.sql')]));
     // 봉합 검증 가드(1.2.15): import 후 테이블 91개 + users 실존 재확인. 미달이면 명확한 실패(헌법 #15·#19).
     BatchContent.Add('set FINAL_COUNT=0');
-    BatchContent.Add(Format('for /f "tokens=*" %%%%c in (''mysql -u %s -p%s -N -B -e "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema=''''%s'''' AND table_type=''''BASE TABLE''''"'') do set FINAL_COUNT=%%%%c', [G_DbUser, G_DbPassword, G_DbName]));
+    BatchContent.Add(Format('for /f "tokens=*" %%%%c in (''mysql -u %s -p%s %s -N -B -e "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema=DATABASE() AND table_type=''''BASE TABLE''''"'') do set FINAL_COUNT=%%%%c', [G_DbUser, G_DbPassword, G_DbName]));
     BatchContent.Add('if "!FINAL_COUNT!"=="" set FINAL_COUNT=0');
     BatchContent.Add('set USERS_OK=0');
-    BatchContent.Add(Format('for /f "tokens=*" %%%%c in (''mysql -u %s -p%s -N -B -e "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema=''''%s'''' AND table_name=''''users''''"'') do set USERS_OK=%%%%c', [G_DbUser, G_DbPassword, G_DbName]));
+    BatchContent.Add(Format('for /f "tokens=*" %%%%c in (''mysql -u %s -p%s %s -N -B -e "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema=DATABASE() AND table_name=''''users''''"'') do set USERS_OK=%%%%c', [G_DbUser, G_DbPassword, G_DbName]));
     BatchContent.Add('if "!USERS_OK!"=="" set USERS_OK=0');
     // 운영 데이터 보호로 import 건너뛴 경우(EXISTING_DATA>0)는 이미 정상 DB이므로 검증 통과로 간주
     BatchContent.Add('if !EXISTING_DATA! GTR 0 (echo 기존 운영 DB 유지 - 검증 생략. & exit /b 0)');

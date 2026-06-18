@@ -59,13 +59,14 @@ public class InstallerBootstrapController : ControllerBase
             var licHash = ComputeHmacSha256(normalizedKey, pepper);
 
             // 시리얼 = 포링키. tenants에서 평문 비교 가능하지만 HMAC 비교가 보안 정합.
+            // 데이터 흐름도 정정 (사장님 결재 2026-06-18 "길 B"): 백오피스는 사업자번호·대표자명 평문을
+            //   보유하지 않으므로 부트스트랩 응답에서도 biz_no·ceo_name 제거. 회사명·도메인·연락처만 공급.
+            //   사업자번호·대표자명은 ERP 설치화면(/setup/license)에서 사용자 입력 → ERP 로컬에만 저장.
             var tenant = await db.QueryFirstOrDefaultAsync<TenantRow>(@"
                 SELECT CAST(t.tenant_id AS CHAR) AS TenantId,
                        t.tenant_code AS TenantCode,
                        t.domain_alias AS DomainAlias,
                        t.company_name AS CompanyName,
-                       t.biz_no AS BizNo,
-                       t.ceo_name AS CeoName,
                        t.tel AS Tel,
                        t.status AS Status,
                        ls.email AS Email,
@@ -175,10 +176,10 @@ public class InstallerBootstrapController : ControllerBase
                 source = "installer-bootstrap",
                 tenant = new
                 {
+                    // 길 B (사장님 결재 2026-06-18): bizNo·ceoName 응답 제거 — 백오피스 평문 미보유.
+                    //   ERP는 설치화면 입력으로 사업자번호·대표자명을 로컬에만 저장.
                     tenantCode = tenant.TenantCode,
                     companyName = tenant.CompanyName,
-                    bizNo = tenant.BizNo,
-                    ceoName = tenant.CeoName,
                     tel = tenant.Tel,
                     email = tenant.Email,
                     planType = tenant.PlanType
@@ -241,12 +242,11 @@ public class InstallerBootstrapController : ControllerBase
 
     private class TenantRow
     {
+        // 길 B (사장님 결재 2026-06-18): BizNo·CeoName 속성 제거 — 백오피스는 사업자번호·대표자명 미보유.
         public string TenantId { get; set; } = "";
         public string TenantCode { get; set; } = "";
         public string? DomainAlias { get; set; }
         public string CompanyName { get; set; } = "";
-        public string BizNo { get; set; } = "";
-        public string CeoName { get; set; } = "";
         public string Tel { get; set; } = "";
         public string Status { get; set; } = "";
         public string? Email { get; set; }

@@ -12,7 +12,7 @@ namespace HitPan.Backoffice.API;
 //   #35 — ERP JWT와 별도 키·발급자·청취자
 public class Program
 {
-    public static void Main(string[] args)
+    public static async Task Main(string[] args)
     {
         // QuestPDF Community 라이선스 (매출 1백만 달러 미만, 무료)
         QuestPDF.Settings.License = LicenseType.Community;
@@ -104,6 +104,23 @@ public class Program
 
         app.MapControllers();
         app.MapGet("/healthz", () => Results.Ok(new { status = "ok", svc = "hitpan-backoffice-api" }));
+
+        // 백오피스 자립형 스키마 자동 적용 (사장님 결재 2026-06-18 A안, 헌법 #29 정합)
+        //   - 환경변수 HITPAN_BO_AUTO_MIGRATE=1 일 때만 동작(기본 off) — 사장님이 명시적으로 켜야 적용.
+        //   - installer/backoffice/*.sql 을 번호순·멱등 적용. CREATE DATABASE·DB 인스턴스는 사장님 영역.
+        //   - 실패 시 SchemaMigrator가 예외를 던져 기동 중단(스키마 불일치 런타임 500 잠복 방지, #15·#19).
+        if (Environment.GetEnvironmentVariable("HITPAN_BO_AUTO_MIGRATE") == "1")
+        {
+            var migrateCs = app.Configuration.GetConnectionString("BackofficeDb")
+                ?? throw new InvalidOperationException("ConnectionStrings:BackofficeDb 미설정 — 스키마 적용 불가");
+            // installer/backoffice 는 레포 기준 경로. 배포 환경에서는 HITPAN_BO_SCHEMA_DIR 로 재지정 가능.
+            var scriptsDir = Environment.GetEnvironmentVariable("HITPAN_BO_SCHEMA_DIR")
+                ?? Path.Combine(AppContext.BaseDirectory, "installer", "backoffice");
+            var migLogger = app.Services.GetRequiredService<ILoggerFactory>()
+                .CreateLogger<HitPan.Backoffice.API.Services.SchemaMigrator>();
+            var migrator = new HitPan.Backoffice.API.Services.SchemaMigrator(migrateCs, scriptsDir, migLogger);
+            await migrator.ApplyAsync();
+        }
 
         app.Run();
     }
