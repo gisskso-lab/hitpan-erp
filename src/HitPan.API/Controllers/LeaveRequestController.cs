@@ -76,9 +76,11 @@ public sealed class LeaveRequestController : ControllerBase
             return Forbid();
         }
 
+        // P1-3 봉합: 실제 승인자 = JWT 의 UserId. 누가 승인했는지 추적 가능하게 기록한다.
+        var approverId = HttpContext.Items["UserId"]?.ToString() ?? string.Empty;
         request.RequestId = id;
         request.Approved = true;
-        await _leaveRequestService.ApproveAsync(tenantId, request, ct).ConfigureAwait(false);
+        await _leaveRequestService.ApproveAsync(tenantId, approverId, request, ct).ConfigureAwait(false);
         return Ok();
     }
 
@@ -92,9 +94,11 @@ public sealed class LeaveRequestController : ControllerBase
             return Forbid();
         }
 
+        // P1-3 봉합: 실제 반려자 = JWT 의 UserId.
+        var approverId = HttpContext.Items["UserId"]?.ToString() ?? string.Empty;
         request.RequestId = id;
         request.Approved = false;
-        await _leaveRequestService.RejectAsync(tenantId, request, ct).ConfigureAwait(false);
+        await _leaveRequestService.RejectAsync(tenantId, approverId, request, ct).ConfigureAwait(false);
         return Ok();
     }
 }

@@ -107,5 +107,5 @@ public interface IReportService
     /// 재고현황을 조회한다. (전체 현재고 / 안전재고 미달)
     /// </summary>
     Task<List<ReportRow>> GetStockStatusAsync(
-        string viewType, string tenantId, CancellationToken ct);
+        string viewType, string tenantId, string? keyword, CancellationToken ct);
 }

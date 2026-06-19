@@ -31,7 +31,8 @@ public sealed class LeaveRequestService : ILeaveRequestService
               lr.start_date AS StartDate,
               lr.end_date AS EndDate,
               lr.status AS Status,
-              lr.created_at AS CreatedAt
+              lr.created_at AS CreatedAt,
+              lr.reject_reason AS RejectReason
             FROM leave_requests lr
             INNER JOIN employees e
               ON e.employee_id = lr.employee_id
@@ -102,22 +103,16 @@ public sealed class LeaveRequestService : ILeaveRequestService
         return requestId;
     }
 
-    public async Task ApproveAsync(string tenantId, ApproveLeaveRequest request, CancellationToken ct = default)
+    public async Task ApproveAsync(string tenantId, string approverId, ApproveLeaveRequest request, CancellationToken ct = default)
     {
         await EnsureOpenAsync(ct).ConfigureAwait(false);
 
+        // P1-3 봉합(2026-06-20): 실제 처리한 결재자(@ApproverId)를 기록한다.
+        // 종전 "첫 TenantAdmin 서브쿼리"는 관리자 여럿일 때 실제 승인자 추적이 불가했다.
         const string sql = """
             UPDATE leave_requests
             SET status = 'approved',
-                approved_by = (
-                  SELECT e.employee_id
-                  FROM employees e
-                  WHERE e.tenant_id = @TenantId
-                    AND e.role = 'TenantAdmin'
-                    AND e.is_active = 1
-                  ORDER BY e.created_at
-                  LIMIT 1
-                ),
+                approved_by = @ApproverId,
                 approved_at = NOW(6),
                 reject_reason = NULL,
                 updated_at = NOW(6)
@@ -127,26 +122,19 @@ public sealed class LeaveRequestService : ILeaveRequestService
 
         await _db.ExecuteAsync(new CommandDefinition(
             sql,
-            new { TenantId = tenantId, RequestId = request.RequestId },
+            new { TenantId = tenantId, ApproverId = approverId, RequestId = request.RequestId },
             cancellationToken: ct)).ConfigureAwait(false);
     }
 
-    public async Task RejectAsync(string tenantId, ApproveLeaveRequest request, CancellationToken ct = default)
+    public async Task RejectAsync(string tenantId, string approverId, ApproveLeaveRequest request, CancellationToken ct = default)
     {
         await EnsureOpenAsync(ct).ConfigureAwait(false);
 
+        // P1-3 봉합(2026-06-20): 실제 처리한 결재자(@ApproverId)를 기록한다.
         const string sql = """
             UPDATE leave_requests
             SET status = 'rejected',
-                approved_by = (
-                  SELECT e.employee_id
-                  FROM employees e
-                  WHERE e.tenant_id = @TenantId
-                    AND e.role = 'TenantAdmin'
-                    AND e.is_active = 1
-                  ORDER BY e.created_at
-                  LIMIT 1
-                ),
+                approved_by = @ApproverId,
                 approved_at = NOW(6),
                 reject_reason = @RejectReason,
                 updated_at = NOW(6)
@@ -159,6 +147,7 @@ public sealed class LeaveRequestService : ILeaveRequestService
             new
             {
                 TenantId = tenantId,
+                ApproverId = approverId,
                 RequestId = request.RequestId,
                 RejectReason = request.RejectReason
             },

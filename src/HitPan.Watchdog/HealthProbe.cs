@@ -88,7 +88,12 @@ public static class HealthProbe
     private static string SafeSha256(string s)
     {
         try { return MetaPingClient.Sha256(s); }
-        catch { return "sha256:unknown"; }
+        catch (Exception ex)
+        {
+            // §절대원칙 #15: 빈 catch 금지. 자가진단 해싱 실패는 CS 추적용으로 표준오류에 남긴다.
+            Console.Error.WriteLine($"[HealthProbe] SafeSha256 failed: {ex.Message}");
+            return "sha256:unknown";
+        }
     }
 
     private static bool IsElevated()
@@ -100,8 +105,10 @@ public static class HealthProbe
             var principal = new System.Security.Principal.WindowsPrincipal(identity);
             return principal.IsInRole(System.Security.Principal.WindowsBuiltInRole.Administrator);
         }
-        catch (Exception)
+        catch (Exception ex)
         {
+            // §절대원칙 #15: 권한 조회 실패는 "비관리자"가 아니라 "오류"다. 침묵하지 않고 남긴다.
+            Console.Error.WriteLine($"[HealthProbe] IsElevated check failed: {ex.Message}");
             return false;
         }
     }

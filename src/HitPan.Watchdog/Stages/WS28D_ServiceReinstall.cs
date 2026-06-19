@@ -66,8 +66,15 @@ public class WS28D_ServiceReinstall
 
     private static string ResolveCloudflaredPath()
     {
+        // P2 봉합(2026-06-20): 정식 인스톨러(HitPan-Universal.iss:85)는 cloudflared.exe 를
+        // {app}=C:\Program Files\HitPan\ 에 직접 설치한다. 종전 후보엔 옛 payload\ 구조만 있어
+        // 현재 설치 구조에서 재설치 자동복구가 exe 를 못 찾았다. 현재 경로를 1순위로 추가한다.
+        var appDir = Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles);
         var candidates = new[]
         {
+            Path.Combine(appDir, "HitPan", "cloudflared.exe"),         // 현재 정식 인스톨러 구조 ({app})
+            Path.Combine(appDir, "HitPan", "payload", "cloudflared.exe"), // 옛 빌드 구조(하위호환)
+            @"C:\Program Files\HitPan\cloudflared.exe",
             @"C:\Program Files\HitPan\payload\cloudflared.exe",
             @"C:\Program Files (x86)\cloudflared\cloudflared.exe",
             @"C:\Program Files\cloudflared\cloudflared.exe"

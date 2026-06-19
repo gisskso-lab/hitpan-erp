@@ -9,8 +9,10 @@ public interface ILeaveRequestService
 {
     Task<List<LeaveRequestListDto>> GetListAsync(string tenantId, string? employeeId = null, CancellationToken ct = default);
     Task<string> CreateAsync(string tenantId, CreateLeaveRequest request, CancellationToken ct = default);
-    Task ApproveAsync(string tenantId, ApproveLeaveRequest request, CancellationToken ct = default);
-    Task RejectAsync(string tenantId, ApproveLeaveRequest request, CancellationToken ct = default);
+    // P1-3 봉합(2026-06-20): 실제 처리한 결재자(approverId)를 받아 기록한다.
+    // 종전엔 "첫 TenantAdmin"을 서브쿼리로 자동 선택해, 관리자 여럿일 때 실제 승인자 추적이 불가했다.
+    Task ApproveAsync(string tenantId, string approverId, ApproveLeaveRequest request, CancellationToken ct = default);
+    Task RejectAsync(string tenantId, string approverId, ApproveLeaveRequest request, CancellationToken ct = default);
 
     /// 작20260429 (사장님 결재): 대시보드 월간 연차 캘린더용 조회.
     /// 활성 사원 + 해당 월에 걸치는 모든 휴가(승인/대기) 반환.

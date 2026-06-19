@@ -49,6 +49,33 @@ public sealed class ChatbotController : ControllerBase
     }
 
     // ─────────────────────────────────────────────────────────────
+    // AI 직원 초안 승인 — Lv.3 워크플로우 연쇄 (거래명세서 확정 + 수주 자동생성)
+    //   사람이 승인 버튼을 눌렀을 때만 호출(확정은 사람 — 헌법 #6).
+    // ─────────────────────────────────────────────────────────────
+    [HttpPost("approve-action")]
+    public async Task<IActionResult> ApproveAction([FromBody] ApproveActionRequest req, CancellationToken ct)
+    {
+        var tenantId = HttpContext.Items["TenantId"]?.ToString();
+        if (string.IsNullOrEmpty(tenantId))
+        {
+            return Forbid();
+        }
+
+        var userId = HttpContext.Items["UserId"]?.ToString()
+                     ?? User.FindFirst("sub")?.Value
+                     ?? User.FindFirst("user_id")?.Value
+                     ?? "unknown";
+
+        if (req is null || string.IsNullOrWhiteSpace(req.DraftId))
+        {
+            return BadRequest(new { error = "승인할 초안 정보가 없습니다." });
+        }
+
+        var result = await _chatbot.ApproveActionAsync(req, tenantId, userId, ct).ConfigureAwait(false);
+        return Ok(result);
+    }
+
+    // ─────────────────────────────────────────────────────────────
     // 답변 피드백 (도움됨/도움안됨)
     // ─────────────────────────────────────────────────────────────
     [HttpPost("feedback")]
@@ -82,6 +109,22 @@ public sealed class ChatbotController : ControllerBase
         }
 
         var dto = await _chatbot.GetQuotaAsync(tenantId, ct).ConfigureAwait(false);
+        return Ok(dto);
+    }
+
+    // ─────────────────────────────────────────────────────────────
+    // 이번 달 토큰 사용량 집계 (ai_usage_logs / ym 기준)
+    // ─────────────────────────────────────────────────────────────
+    [HttpGet("usage")]
+    public async Task<IActionResult> Usage(CancellationToken ct)
+    {
+        var tenantId = HttpContext.Items["TenantId"]?.ToString();
+        if (string.IsNullOrEmpty(tenantId))
+        {
+            return Forbid();
+        }
+
+        var dto = await _chatbot.GetUsageAsync(tenantId, ct).ConfigureAwait(false);
         return Ok(dto);
     }
 

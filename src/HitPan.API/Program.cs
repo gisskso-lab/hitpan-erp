@@ -152,6 +152,49 @@ builder.Services.AddScoped<IMonthlyClosingService, MonthlyClosingService>();
 builder.Services.AddScoped<IFinanceService, FinanceService>();
 builder.Services.AddScoped<IHrService, HrService>();
 // AI 챗봇 (Phase A: FAQ/KB 매칭 + 대화 이력 축적)
+//   신규(2026-06-19): KB 매칭 실패 시 외부 도우미 직통 호출 + 정체성 System Prompt.
+//   - 정체성 .md 는 앱 시작 1회 로드 캐싱 (Singleton). IChatbotSystemPrompt 경계로 ChatbotService 에 주입.
+//   - 외부 모델 호출은 IHttpClientFactory 기반(고객 PC → Anthropic 직통, 본사 프록시 0 / 헌법 #18·#22).
+//   - 모델·max_tokens 는 설정 가능(기본 claude-sonnet-4-6 / 1024). appsettings "Chatbot:Model","Chatbot:MaxTokens".
+builder.Services.AddHttpClient();
+builder.Services.AddSingleton<HitPan.API.AI.ChatbotIdentityProvider>();
+builder.Services.AddSingleton<HitPan.API.AI.IChatbotIdentityProvider>(
+    sp => sp.GetRequiredService<HitPan.API.AI.ChatbotIdentityProvider>());
+builder.Services.AddSingleton<HitPan.Application.Services.IChatbotSystemPrompt>(
+    sp => sp.GetRequiredService<HitPan.API.AI.ChatbotIdentityProvider>());
+builder.Services.AddSingleton<HitPan.Application.Services.IChatCompletionProvider>(sp =>
+{
+    var cfg = sp.GetRequiredService<IConfiguration>();
+    var model = cfg["Chatbot:Model"];
+    var maxTokensRaw = cfg["Chatbot:MaxTokens"];
+    int? maxTokens = int.TryParse(maxTokensRaw, out var mt) ? mt : null;
+    return new HitPan.Application.Services.AnthropicChatProvider(
+        sp.GetRequiredService<IHttpClientFactory>(),
+        sp.GetRequiredService<ILogger<HitPan.Application.Services.AnthropicChatProvider>>(),
+        model,
+        maxTokens);
+});
+// AI 직원 — 자연어 분석 명령을 실데이터 표+차트로 처리(읽기 전용, IReportService 재사용).
+builder.Services.AddScoped<HitPan.Application.Services.IAiEmployeeAnalysisService,
+    HitPan.Application.Services.AiEmployeeAnalysisService>();
+
+// ── AI 직원 엔진 (Tool Use) — 사장님 "히트판의 FSD" 비전 (2026-06-20) ──
+//   클로드가 명령 보고 히트판 도구를 스스로 골라 호출. Tool 클래스 1개 추가 → 여기 등록 → 끝.
+builder.Services.AddSingleton<HitPan.API.AI.AiAgentSystemPromptProvider>();
+builder.Services.AddSingleton<HitPan.Application.Services.Ai.IAiAgentSystemPrompt>(
+    sp => sp.GetRequiredService<HitPan.API.AI.AiAgentSystemPromptProvider>());
+builder.Services.AddScoped<HitPan.Application.Services.Ai.IHitpanToolRegistry,
+    HitPan.Application.Services.Ai.HitpanToolRegistry>();
+builder.Services.AddScoped<HitPan.Application.Services.Ai.IAiAgentService,
+    HitPan.Application.Services.Ai.AiAgentService>();
+//   Tool 카탈로그 — 새 도구는 이 줄들 아래에 AddScoped<IHitpanTool, XxxTool>() 한 줄씩 추가.
+builder.Services.AddScoped<HitPan.Application.Services.Ai.IHitpanTool,
+    HitPan.Application.Services.Ai.Tools.SalesProfitabilityTool>();
+builder.Services.AddScoped<HitPan.Application.Services.Ai.IHitpanTool,
+    HitPan.Application.Services.Ai.Tools.PartnerSearchTool>();
+builder.Services.AddScoped<HitPan.Application.Services.Ai.IHitpanTool,
+    HitPan.Application.Services.Ai.Tools.CreateDeliveryDraftTool>();
+
 builder.Services.AddScoped<IChatbotService, ChatbotService>();
 builder.Services.AddScoped<ExcelExportService>();
 builder.Services.AddScoped<PdfExportService>();

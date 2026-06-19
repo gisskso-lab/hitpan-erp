@@ -40,4 +40,9 @@
                       ReferenceOutputAssembly="false" />
   </ItemGroup>
 
+  <ItemGroup>
+    <!-- 히트판 도우미 정체성 프롬프트(System Prompt): 실행/배포 출력으로 복사 (앱 시작 1회 로드용). -->
+    <None Update="AI\HITPAN_CHATBOT_IDENTITY.md" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
 </Project>

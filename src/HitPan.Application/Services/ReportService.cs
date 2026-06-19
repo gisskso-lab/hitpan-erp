@@ -446,29 +446,36 @@ public class ReportService : IReportService
         """;
 
     // 견적제출대비 판매현황 — 견적은 quotations 테이블, 매출은 sales_deliveries. 업체별 비교.
+    // P2 속도 봉합(2026-06-20): 종전엔 partner 행마다 4개 상관 서브쿼리(quotations·sales_deliveries
+    // 각 2회)를 재실행해 거래처 500곳이면 2,000회 스캔이 났다. 거래처별로 1회만 사전집계한 두
+    // 파생테이블을 LEFT JOIN 해 스캔을 집계 2회로 줄인다. 결과 컬럼·필터·HAVING 의미는 동일.
     private const string SALES_QUOTE_VS_SALES = """
         SELECT
             p.partner_name AS Label,
-            (SELECT COUNT(*) FROM quotations q
-              WHERE q.tenant_id = p.tenant_id AND q.partner_id = p.partner_id AND q.is_deleted = 0
-                AND (@From IS NULL OR q.quote_date >= @From)
-                AND (@To IS NULL OR q.quote_date <= @To)) AS Count,
-            (SELECT COUNT(*) FROM sales_deliveries sd2
-              WHERE sd2.tenant_id = p.tenant_id AND sd2.partner_id = p.partner_id
-                AND sd2.is_deleted = 0 AND sd2.status <> 'cancelled'
-                AND (@From IS NULL OR sd2.delivery_date >= @From)
-                AND (@To IS NULL OR sd2.delivery_date <= @To)) AS Qty,
-            COALESCE((SELECT SUM(q.total_amount) FROM quotations q
-              WHERE q.tenant_id = p.tenant_id AND q.partner_id = p.partner_id AND q.is_deleted = 0
-                AND (@From IS NULL OR q.quote_date >= @From)
-                AND (@To IS NULL OR q.quote_date <= @To)), 0) AS SupplyAmount,
-            COALESCE((SELECT SUM(sd2.total_amount) FROM sales_deliveries sd2
-              WHERE sd2.tenant_id = p.tenant_id AND sd2.partner_id = p.partner_id
-                AND sd2.is_deleted = 0 AND sd2.status <> 'cancelled'
-                AND (@From IS NULL OR sd2.delivery_date >= @From)
-                AND (@To IS NULL OR sd2.delivery_date <= @To)), 0) AS VatAmount,
+            COALESCE(qa.cnt, 0)       AS Count,
+            COALESCE(sa.cnt, 0)       AS Qty,
+            COALESCE(qa.amt, 0)       AS SupplyAmount,
+            COALESCE(sa.amt, 0)       AS VatAmount,
             0 AS TotalAmount
         FROM partners p
+        LEFT JOIN (
+            SELECT q.tenant_id, q.partner_id,
+                   COUNT(*) AS cnt, SUM(q.total_amount) AS amt
+            FROM quotations q
+            WHERE q.tenant_id = @TenantId AND q.is_deleted = 0
+              AND (@From IS NULL OR q.quote_date >= @From)
+              AND (@To   IS NULL OR q.quote_date <= @To)
+            GROUP BY q.tenant_id, q.partner_id
+        ) qa ON qa.tenant_id = p.tenant_id AND qa.partner_id = p.partner_id
+        LEFT JOIN (
+            SELECT sd2.tenant_id, sd2.partner_id,
+                   COUNT(*) AS cnt, SUM(sd2.total_amount) AS amt
+            FROM sales_deliveries sd2
+            WHERE sd2.tenant_id = @TenantId AND sd2.is_deleted = 0 AND sd2.status <> 'cancelled'
+              AND (@From IS NULL OR sd2.delivery_date >= @From)
+              AND (@To   IS NULL OR sd2.delivery_date <= @To)
+            GROUP BY sd2.tenant_id, sd2.partner_id
+        ) sa ON sa.tenant_id = p.tenant_id AND sa.partner_id = p.partner_id
         WHERE p.tenant_id = @TenantId AND p.is_deleted = 0
           AND (@Partner IS NULL OR p.partner_name LIKE CONCAT('%', @Partner, '%'))
         HAVING Count > 0 OR Qty > 0
@@ -1915,7 +1922,7 @@ public class ReportService : IReportService
 
     /// <inheritdoc />
     public async Task<List<ReportRow>> GetStockStatusAsync(
-        string viewType, string tenantId, CancellationToken ct)
+        string viewType, string tenantId, string? keyword, CancellationToken ct)
     {
         // 사장님 결재 2026-04-29: 재고현황 7종 풀스택.
         // 기존 컬럼 오타 수정 (safety_stock → safe_stock).
@@ -1931,8 +1938,21 @@ public class ReportService : IReportService
             _ => STOCK_CURRENT
         };
 
-        var rows = await _db.QueryAsync<ReportRow>(
-            new CommandDefinition(sql, new { TenantId = tenantId }, cancellationToken: ct));
+        // P1-8 봉합(2026-06-20): 품목 키워드 필터. 7종 SQL 모두 'items i' 별칭과
+        // 'AND i.is_active = 1' 토큰을 공유하므로, 그 직후에 키워드 조건을 일괄 삽입한다.
+        // 파라미터 바인딩(LIKE @KeywordLike) 사용 — SQL 인젝션 없음.
+        var hasKeyword = !string.IsNullOrWhiteSpace(keyword);
+        if (hasKeyword)
+        {
+            sql = sql.Replace(
+                "AND i.is_active = 1",
+                "AND i.is_active = 1\n          AND i.item_name LIKE @KeywordLike");
+        }
+
+        var rows = await _db.QueryAsync<ReportRow>(new CommandDefinition(
+            sql,
+            new { TenantId = tenantId, KeywordLike = hasKeyword ? $"%{keyword!.Trim()}%" : null },
+            cancellationToken: ct));
 
         return rows.ToList();
     }

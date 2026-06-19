@@ -13,6 +13,10 @@ public sealed class LeaveRequestListDto
     public DateTime EndDate { get; set; }
     public string Status { get; set; } = "pending";
     public DateTime CreatedAt { get; set; }
+
+    /// P1-2 봉합(2026-06-20): 반려 사유. DB엔 저장되는데 목록 조회에서 누락돼,
+    /// 직원이 "왜 반려됐는지" 못 봤다. 목록에 내려보내 재신청 피드백을 준다.
+    public string? RejectReason { get; set; }
 }
 
 /// <summary>

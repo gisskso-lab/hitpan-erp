@@ -299,6 +299,7 @@ public class ReportController : ControllerBase
     [Authorize(Policy = "TenantOnly")]
     public async Task<IActionResult> GetStockStatus(
         [FromQuery] string view = "current",
+        [FromQuery] string? keyword = null,
         CancellationToken ct = default)
     {
         var tenantId = HttpContext.Items["TenantId"]?.ToString();
@@ -307,7 +308,10 @@ public class ReportController : ControllerBase
             return Forbid();
         }
 
-        var rows = await _reportService.GetStockStatusAsync(view, tenantId, ct)
+        // P1-8 봉합(2026-06-20): 재고현황은 '현재 시점 스냅샷'이라 기간/거래처 필터는 개념상
+        // 성립하지 않는다(현재고에 과거 기간을 거는 건 무의미). 대신 다른 현황과 일관되게
+        // 품목 키워드 필터를 더해 실제 사용성을 높인다.
+        var rows = await _reportService.GetStockStatusAsync(view, tenantId, keyword, ct)
             .ConfigureAwait(false);
         return Ok(rows);
     }

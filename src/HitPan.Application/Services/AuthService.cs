@@ -14,7 +14,11 @@ namespace HitPan.Application.Services;
 public class AuthService : IAuthService
 {
     private const string InvalidCredentialMessage = "이메일 또는 비밀번호가 틀립니다";
-    private static readonly TimeSpan AccessTokenLifetime = TimeSpan.FromMinutes(15);
+    // 사장님 결재 (2026-06-19): ERP는 고객사 직원이 하루 종일 쓰는 업무 도구.
+    //   AccessToken 15분은 너무 짧아 근무 중 잦은 만료로 끊김(헌법 #19·#27 위반) → 근무 하루 8시간으로 상향.
+    //   추가 안전망: 만료돼도 HitPanApiAuthHandler 가 401 시 RefreshToken 으로 자동 재발급+재시도(사용자 무자각).
+    //   RefreshToken 7일 유지 → 다음 날 출근 시 재로그인. 보안·편의 균형(ERP 표준).
+    private static readonly TimeSpan AccessTokenLifetime = TimeSpan.FromHours(8);
     private static readonly TimeSpan RefreshTokenLifetime = TimeSpan.FromDays(7);
 
     private readonly IUnitOfWork _unitOfWork;

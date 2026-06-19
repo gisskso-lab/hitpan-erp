@@ -44,7 +44,12 @@ public class Worker : BackgroundService
 
         if (OperatingSystem.IsWindows() && _b.ShouldRunPostRebootCheck())
         {
-            _logger.LogWarning("WS-28-B: post-reboot check active");
+            // P0-1 봉합(2026-06-20): 종전엔 플래그만 확인하고 ClearFlag 후 끝나, Windows Update
+            // 강제 재부팅으로 터널이 깨져도 워치독이 "점검"만 하고 봉합을 안 했다(5/15 demo 6시간
+            // 다운 = 이 시나리오). 재부팅 직후엔 첫 정기 루프를 기다리지 않고 즉시 터널/서비스
+            // 무결성을 강제 점검·복구한다(헌법 #28 5단계, #30 자가회복).
+            _logger.LogWarning("WS-28-B: post-reboot check active — 통신 무결성 즉시 점검·복구 시작");
+            await RunPostRebootRecoveryAsync(stoppingToken);
             _b.ClearFlag();
         }
 
@@ -134,6 +139,55 @@ public class Worker : BackgroundService
         {
             _b.MarkPostRebootCheck();
             _logger.LogWarning("WS-28-A: reboot imminent, post-check flagged");
+        }
+    }
+
+    /// <summary>
+    /// WS-28-B: 재부팅 직후 통신 무결성 즉시 점검·복구(헌법 #28). 정기 루프를 기다리지 않고
+    /// ① TunnelSecret 무효화 ② cloudflared 서비스 부재 ③ 외부 헬스체크를 강제 1회 점검,
+    /// 깨진 항목은 CoolDown 게이트를 존중하며 즉시 봉합한다. 5분 내 자가회복 보장(헌법 #27·#30).
+    /// </summary>
+    private async Task RunPostRebootRecoveryAsync(CancellationToken ct)
+    {
+        try
+        {
+            // ① TunnelSecret 무효화 감지·재생성
+            if (_c.DetectInvalidSecret() && _f.AllowRecovery("PostReboot:TunnelSecret"))
+            {
+                if (await _c.RegenerateAsync(ct))
+                {
+                    MarkRecovery("WS-28-B→C");
+                    _logger.LogWarning("WS-28-B: 재부팅 후 TunnelSecret 재생성 완료");
+                }
+            }
+
+            // ② cloudflared 서비스 부재 감지·재설치
+            if (!_d.ServiceExists("cloudflared") && _f.AllowRecovery("PostReboot:ServiceReinstall"))
+            {
+                if (await _d.ReinstallAsync(ct))
+                {
+                    MarkRecovery("WS-28-B→D");
+                    _logger.LogWarning("WS-28-B: 재부팅 후 cloudflared 서비스 재설치 완료");
+                }
+            }
+
+            // ③ 외부 헬스체크 — 여전히 다운이면 본사에 비상 통지(헌법 #30: 본사는 통지만 수신)
+            var healthy = await _e.PingAsync(ct);
+            if (!healthy)
+            {
+                _logger.LogWarning("WS-28-B: 재부팅 후에도 외부 헬스체크 실패 — 비상 통지");
+                await _meta.NotifyEmergencyAsync("post_reboot_health_fail", "WS-28-B", ct);
+            }
+            else
+            {
+                _logger.LogInformation("WS-28-B: 재부팅 후 통신 무결성 정상 확인");
+            }
+        }
+        catch (OperationCanceledException) { throw; }
+        catch (Exception ex)
+        {
+            // 헌법 #15: 재부팅 복구 실패도 침묵 금지. 정기 루프가 이어서 재시도한다.
+            _logger.LogError(ex, "WS-28-B: 재부팅 후 복구 중 예외 — 정기 루프에서 재시도");
         }
     }
 

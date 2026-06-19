@@ -151,35 +151,69 @@ public class ApprovalService : IApprovalService
     public async Task SaveLinesAsync(SaveApprovalLinesRequest request, string tenantId, CancellationToken ct = default)
     {
         await EnsureOpenAsync(ct);
-        // 기존 라인 비활성화 후 새로 추가
-        await _db.ExecuteAsync(new CommandDefinition(
-            "UPDATE approval_doc_lines SET is_active = 0 WHERE tenant_id = @TenantId AND doc_type = @DocType",
-            new { TenantId = tenantId, DocType = request.DocType }, cancellationToken: ct));
 
-        foreach (var line in request.Lines)
+        // P1-7 봉합(2026-06-20): 결재자 유효성 검증. 종전엔 존재하지 않거나 퇴직한 사원도
+        // 결재자/위임자로 설정 가능해, 결재 진행 시 "현재 결재자 없음"으로 막혔다. 저장 전에
+        // 모든 결재자·위임자 ID 가 활성 사원인지 확인한다.
+        var ids = request.Lines
+            .SelectMany(l => new[] { l.ApproverId, l.DelegateId })
+            .Where(id => !string.IsNullOrWhiteSpace(id))
+            .Select(id => id!)
+            .Distinct()
+            .ToList();
+
+        if (ids.Count > 0)
+        {
+            var validIds = (await _db.QueryAsync<string>(new CommandDefinition(
+                "SELECT employee_id FROM employees WHERE tenant_id = @TenantId AND is_active = 1 AND employee_id IN @Ids",
+                new { TenantId = tenantId, Ids = ids }, cancellationToken: ct))).ToHashSet();
+
+            var invalid = ids.Where(id => !validIds.Contains(id)).ToList();
+            if (invalid.Count > 0)
+                throw new InvalidOperationException(
+                    $"결재자/위임자로 지정할 수 없는 사원이 있습니다(미존재 또는 퇴직): {string.Join(", ", invalid)}");
+        }
+
+        // 라인 비활성화 + 신규 추가를 한 트랜잭션으로 묶어, 중간 실패 시 기존 라인이 사라지지 않게 한다.
+        using var tx = _db.BeginTransaction();
+        try
         {
             await _db.ExecuteAsync(new CommandDefinition(
-                """
-                INSERT INTO approval_doc_lines
-                  (line_id, tenant_id, doc_type, seq_no, approver_id, approver_name,
-                   role_label, delegate_id, delegate_name, delegate_start, delegate_end, is_active)
-                VALUES
-                  (UUID(), @TenantId, @DocType, @SeqNo, @ApproverId, @ApproverName,
-                   @RoleLabel, @DelegateId, @DelegateName, @DelegateStart, @DelegateEnd, 1)
-                """,
-                new
-                {
-                    TenantId = tenantId,
-                    DocType = request.DocType,
-                    line.SeqNo,
-                    line.ApproverId,
-                    line.ApproverName,
-                    line.RoleLabel,
-                    line.DelegateId,
-                    line.DelegateName,
-                    line.DelegateStart,
-                    line.DelegateEnd
-                }, cancellationToken: ct));
+                "UPDATE approval_doc_lines SET is_active = 0 WHERE tenant_id = @TenantId AND doc_type = @DocType",
+                new { TenantId = tenantId, DocType = request.DocType }, transaction: tx, cancellationToken: ct));
+
+            foreach (var line in request.Lines)
+            {
+                await _db.ExecuteAsync(new CommandDefinition(
+                    """
+                    INSERT INTO approval_doc_lines
+                      (line_id, tenant_id, doc_type, seq_no, approver_id, approver_name,
+                       role_label, delegate_id, delegate_name, delegate_start, delegate_end, is_active)
+                    VALUES
+                      (UUID(), @TenantId, @DocType, @SeqNo, @ApproverId, @ApproverName,
+                       @RoleLabel, @DelegateId, @DelegateName, @DelegateStart, @DelegateEnd, 1)
+                    """,
+                    new
+                    {
+                        TenantId = tenantId,
+                        DocType = request.DocType,
+                        line.SeqNo,
+                        line.ApproverId,
+                        line.ApproverName,
+                        line.RoleLabel,
+                        line.DelegateId,
+                        line.DelegateName,
+                        line.DelegateStart,
+                        line.DelegateEnd
+                    }, transaction: tx, cancellationToken: ct));
+            }
+
+            tx.Commit();
+        }
+        catch
+        {
+            tx.Rollback();
+            throw;
         }
     }
 
@@ -354,7 +388,9 @@ public class ApprovalService : IApprovalService
                    action AS Action, comment AS Comment, acted_at AS ActedAt
             FROM approval_history
             WHERE approval_id = @ApprovalId AND tenant_id = @TenantId
-            ORDER BY seq_no, acted_at
+            -- P1-6 봉합(2026-06-20): 종전 'ORDER BY seq_no'는 기준금액 자동승인 이력(seq_no=0)을
+            -- 맨 앞으로 올려 실제 처리 순서와 어긋났다. 이력은 시간순이 정본이므로 acted_at 우선.
+            ORDER BY acted_at, seq_no
             """,
             new { ApprovalId = approvalId, TenantId = tenantId }, cancellationToken: ct))).ToList();
 
@@ -440,26 +476,41 @@ public class ApprovalService : IApprovalService
                 }, transaction: tx, cancellationToken: ct));
 
             // 상태 업데이트
+            // P1-4 봉합(2026-06-20): 동시 중복 승인 방지. 모든 상태 전이 UPDATE 에 'AND status=pending'
+            // 과 'AND current_seq=@SeqNo' 를 걸고 affected rows 를 확인한다. 두 결재자가 동시에
+            // 같은 건을 처리해도, 먼저 커밋한 쪽만 1행을 갱신하고 늦은 쪽은 0행 → 예외로 차단된다.
+            int affected;
             if (request.Action == "rejected")
             {
-                await _db.ExecuteAsync(new CommandDefinition(
-                    "UPDATE approval_documents SET status = 'rejected', completed_at = NOW(6), updated_at = NOW(6) WHERE approval_id = @ApprovalId AND tenant_id = @TenantId",
-                    new { ApprovalId = approvalId, TenantId = tenantId }, transaction: tx, cancellationToken: ct));
+                affected = await _db.ExecuteAsync(new CommandDefinition(
+                    "UPDATE approval_documents SET status = 'rejected', completed_at = NOW(6), updated_at = NOW(6) WHERE approval_id = @ApprovalId AND tenant_id = @TenantId AND status = 'pending' AND current_seq = @SeqNo",
+                    new { ApprovalId = approvalId, TenantId = tenantId, SeqNo = doc.CurrentSeq }, transaction: tx, cancellationToken: ct));
             }
             else if (request.Action == "approved")
             {
                 if (doc.CurrentSeq >= doc.TotalLines)
                 {
-                    await _db.ExecuteAsync(new CommandDefinition(
-                        "UPDATE approval_documents SET status = 'approved', completed_at = NOW(6), updated_at = NOW(6) WHERE approval_id = @ApprovalId AND tenant_id = @TenantId",
-                        new { ApprovalId = approvalId, TenantId = tenantId }, transaction: tx, cancellationToken: ct));
+                    affected = await _db.ExecuteAsync(new CommandDefinition(
+                        "UPDATE approval_documents SET status = 'approved', completed_at = NOW(6), updated_at = NOW(6) WHERE approval_id = @ApprovalId AND tenant_id = @TenantId AND status = 'pending' AND current_seq = @SeqNo",
+                        new { ApprovalId = approvalId, TenantId = tenantId, SeqNo = doc.CurrentSeq }, transaction: tx, cancellationToken: ct));
                 }
                 else
                 {
-                    await _db.ExecuteAsync(new CommandDefinition(
-                        "UPDATE approval_documents SET current_seq = current_seq + 1, updated_at = NOW(6) WHERE approval_id = @ApprovalId AND tenant_id = @TenantId",
-                        new { ApprovalId = approvalId, TenantId = tenantId }, transaction: tx, cancellationToken: ct));
+                    affected = await _db.ExecuteAsync(new CommandDefinition(
+                        "UPDATE approval_documents SET current_seq = current_seq + 1, updated_at = NOW(6) WHERE approval_id = @ApprovalId AND tenant_id = @TenantId AND status = 'pending' AND current_seq = @SeqNo",
+                        new { ApprovalId = approvalId, TenantId = tenantId, SeqNo = doc.CurrentSeq }, transaction: tx, cancellationToken: ct));
                 }
+            }
+            else
+            {
+                throw new InvalidOperationException($"알 수 없는 결재 동작입니다: {request.Action}");
+            }
+
+            if (affected == 0)
+            {
+                // 다른 결재자가 먼저 처리해 상태/순서가 이미 바뀐 경우. 이력 INSERT 까지 롤백한다.
+                tx.Rollback();
+                throw new InvalidOperationException("이미 처리된 결재입니다. (동시 처리 감지)");
             }
 
             tx.Commit();

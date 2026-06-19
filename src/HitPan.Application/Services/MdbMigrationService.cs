@@ -1628,9 +1628,12 @@ public sealed class MdbMigrationService
             new { TenantId = tenantId, Code = partnerCode }, transaction: tx, cancellationToken: ct)).ConfigureAwait(false);
         if (!string.IsNullOrEmpty(existing)) return existing;
 
+        // 진범 봉합 (2026-06-19, 빈 DB 극한 검증): EnsureLegacyFallbackItem 과 동일 잠복 버그.
+        //   한 잡에서 여러 단계가 호출 → 빈 DB 첫 마이그 시 SELECT 미스 후 중복 INSERT → uq_tenant_code 충돌.
+        //   INSERT IGNORE(멱등) + 재조회로 절대 throw 안 함. 헌법 #26 멱등 정신 정합.
         var id = Guid.NewGuid().ToString();
         await Db.ExecuteAsync(new CommandDefinition("""
-            INSERT INTO partners
+            INSERT IGNORE INTO partners
               (partner_id, tenant_id, partner_code, partner_name, partner_type,
                is_active, is_deleted, created_at, updated_at, memo)
             VALUES
@@ -1639,8 +1642,13 @@ public sealed class MdbMigrationService
             """,
             new { Id = id, TenantId = tenantId, Code = partnerCode, Now = now },
             transaction: tx, cancellationToken: ct)).ConfigureAwait(false);
-        _logger.LogInformation("[MDB마이그레이션] LEGACY_UNKNOWN_PARTNER fallback 거래처 생성: {Id}", id);
-        return id;
+
+        var resolved = await Db.ExecuteScalarAsync<string?>(new CommandDefinition(
+            "SELECT partner_id FROM partners WHERE tenant_id = @TenantId AND partner_code = @Code LIMIT 1",
+            new { TenantId = tenantId, Code = partnerCode }, transaction: tx, cancellationToken: ct)).ConfigureAwait(false);
+        var finalId = string.IsNullOrEmpty(resolved) ? id : resolved!;
+        _logger.LogInformation("[MDB마이그레이션] LEGACY_UNKNOWN_PARTNER fallback 거래처 확보(멱등): {Id}", finalId);
+        return finalId;
     }
 
     /// <summary>
@@ -1658,9 +1666,15 @@ public sealed class MdbMigrationService
             new { TenantId = tenantId, Code = itemCode }, transaction: tx, cancellationToken: ct)).ConfigureAwait(false);
         if (!string.IsNullOrEmpty(existing)) return existing;
 
+        // 진범 봉합 (2026-06-19, 빈 DB 극한 검증 — 사장님 품질 헌법):
+        //   이 메서드는 한 마이그 잡 안에서 4곳(매입발주·입출고 등)이 호출한다(line 2905·3020·4262·4321).
+        //   빈 DB(신규 고객사)에서 첫 단계가 폴백 품목을 넣고, 다음 단계의 SELECT가 그것을 못 보면(트랜잭션 격리·
+        //   직전 단계 롤백 등) 다시 INSERT → uq_tenant_code 유니크 충돌로 purchase_orders 전체 롤백됐다.
+        //   해법: INSERT IGNORE(멱등) 후 재조회. 충돌해도 절대 throw 안 하고 항상 유효한 item_id 반환.
+        //   헌법 #26 "재개 가능 마이그 = 멱등" 정신 정합. (전엔 기존 DB에 폴백 품목이 이미 있어 충돌이 잠복)
         var id = Guid.NewGuid().ToString();
         await Db.ExecuteAsync(new CommandDefinition("""
-            INSERT INTO items
+            INSERT IGNORE INTO items
               (item_id, tenant_id, item_code, item_name, item_type, unit,
                tax_type, is_active, is_deleted, memo,
                purchase_price, sale_price, standard_price, safety_stock,
@@ -1673,8 +1687,14 @@ public sealed class MdbMigrationService
             """,
             new { Id = id, TenantId = tenantId, Code = itemCode, Now = now },
             transaction: tx, cancellationToken: ct)).ConfigureAwait(false);
-        _logger.LogInformation("[MDB마이그레이션] LEGACY_UNKNOWN_ITEM fallback 품목 생성: {Id}", id);
-        return id;
+
+        // INSERT IGNORE 가 충돌로 무시됐을 수 있으니 실제 item_id 를 재조회(내가 넣은 id 또는 기존 id).
+        var resolved = await Db.ExecuteScalarAsync<string?>(new CommandDefinition(
+            "SELECT item_id FROM items WHERE tenant_id = @TenantId AND item_code = @Code LIMIT 1",
+            new { TenantId = tenantId, Code = itemCode }, transaction: tx, cancellationToken: ct)).ConfigureAwait(false);
+        var finalId = string.IsNullOrEmpty(resolved) ? id : resolved!;
+        _logger.LogInformation("[MDB마이그레이션] LEGACY_UNKNOWN_ITEM fallback 품목 확보(멱등): {Id}", finalId);
+        return finalId;
     }
 
     /// <summary>
