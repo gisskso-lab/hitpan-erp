@@ -171,7 +171,30 @@ public class AuthService : IAuthService
         var employees = await employeeRepo.FindAsync(x => x.UserId == user.Id && x.IsActive);
         var employee = employees.FirstOrDefault();
 
-        return CreateLoginResponse(user, employee, secret, redirectToWelcome: false);
+        var response = CreateLoginResponse(user, employee, secret, redirectToWelcome: false);
+
+        // 진범 봉합 (2026-06-20, 2차 전수조사 AUTH-01 P0):
+        //   종전엔 새 RefreshToken 을 발급해 클라이언트에만 내려주고 refresh_tokens 테이블을 갱신하지 않아,
+        //   클라이언트가 보관한 회전 토큰의 token_hash 가 DB 에 없어 다음 401 사이클에서 위 검증(160-168)이
+        //   tokenRecord=null → "로그아웃된 토큰" 으로 차단 → 자동 재발급이 1회 후 영구 실패했다.
+        //   (AccessToken 8시간/Refresh 7일 무자각 연장 정책의 핵심 의도가 깨짐.)
+        //   해법 = 토큰 회전(rotation): 방금 사용한 구 RefreshToken hash 를 폐기하고 새 토큰 hash 를 INSERT.
+        //   user_id 전체 DELETE 가 아니라 사용한 토큰만 지워 멀티기기 로그인 세션을 보존(LoginAsync 와 정합).
+        await conn.ExecuteAsync(
+            "DELETE FROM refresh_tokens WHERE user_id = @UserId AND token_hash = @OldHash",
+            new { UserId = userId, OldHash = HashToken(request.RefreshToken) });
+        await conn.ExecuteAsync(
+            @"INSERT INTO refresh_tokens (token_id, user_id, token_hash, expires_at, is_revoked)
+              VALUES (@TokenId, @UserId, @TokenHash, @ExpiresAt, 0)",
+            new
+            {
+                TokenId = Guid.NewGuid().ToString(),
+                UserId = userId,
+                TokenHash = HashToken(response.RefreshToken),
+                ExpiresAt = DateTime.UtcNow.Add(RefreshTokenLifetime)
+            });
+
+        return response;
     }
 
     private static LoginResponse CreateLoginResponse(User user, Employee? employee, string secret, bool redirectToWelcome)

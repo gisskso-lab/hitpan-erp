@@ -40,7 +40,12 @@ public sealed class HitPanApiAuthHandler(
             logger.LogWarning("401 Unauthorized on {Method} {Path} — 토큰 자동 재발급을 시도합니다.",
                 request.Method, path);
 
-            var refreshed = await TryRefreshAsync(cancellationToken).ConfigureAwait(false);
+            // 진범 봉합 (2026-06-20, 2차 전수조사 AUTH-02): 이 요청이 들고 있던 AccessToken 을 기억해
+            //   TryRefreshAsync 에 넘긴다. 락 진입 직후 토큰이 그새 바뀌어 있으면(=동시 401 중 다른 요청이
+            //   이미 회전 완료) refresh 를 건너뛰고 즉시 재시도 → 불필요한 이중 회전·토큰 churn 방지.
+            var tokenAt401 = await storage.GetAsync<string>(AuthStorageKeys.AccessToken).ConfigureAwait(false);
+            var refreshed = await TryRefreshAsync(tokenAt401.Success ? tokenAt401.Value : null, cancellationToken)
+                .ConfigureAwait(false);
             if (refreshed)
             {
                 // HttpRequestMessage 는 1회용 — 동일 요청을 복제해 새 토큰으로 재시도.
@@ -76,11 +81,24 @@ public sealed class HitPanApiAuthHandler(
     /// RefreshToken 으로 새 AccessToken/RefreshToken 을 발급받아 저장한다.
     /// 동시 401 이 몰려도 RefreshLock 으로 1회만 회전. 실패 시 false(호출부는 원래 401 유지).
     /// </summary>
-    private async Task<bool> TryRefreshAsync(CancellationToken ct)
+    private async Task<bool> TryRefreshAsync(string? tokenAt401, CancellationToken ct)
     {
         await RefreshLock.WaitAsync(ct).ConfigureAwait(false);
         try
         {
+            // 더블체크(double-checked): 락 대기 중 다른 401 요청이 이미 토큰을 회전했으면
+            //   저장된 AccessToken 이 401 시점과 달라진다 → 재발급 생략하고 새 토큰으로 즉시 재시도.
+            if (!string.IsNullOrEmpty(tokenAt401))
+            {
+                var current = await storage.GetAsync<string>(AuthStorageKeys.AccessToken);
+                if (current.Success && !string.IsNullOrEmpty(current.Value)
+                    && !string.Equals(current.Value, tokenAt401, StringComparison.Ordinal))
+                {
+                    logger.LogInformation("토큰이 이미 다른 요청에 의해 갱신됨 — 재발급 생략하고 재시도.");
+                    return true;
+                }
+            }
+
             var refreshToken = await storage.GetAsync<string>(AuthStorageKeys.RefreshToken);
             if (!refreshToken.Success || string.IsNullOrEmpty(refreshToken.Value))
             {

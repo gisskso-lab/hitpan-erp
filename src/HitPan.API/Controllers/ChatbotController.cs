@@ -51,8 +51,15 @@ public sealed class ChatbotController : ControllerBase
     // ─────────────────────────────────────────────────────────────
     // AI 직원 초안 승인 — Lv.3 워크플로우 연쇄 (거래명세서 확정 + 수주 자동생성)
     //   사람이 승인 버튼을 눌렀을 때만 호출(확정은 사람 — 헌법 #6).
+    //   진범 봉합 (2026-06-20, 2차 전수조사 AICHAT-SEC-01 P1):
+    //     이 경로는 거래명세서 확정(원장·재고 반영)+수주 자동생성을 실행한다 = 실제 판매 업무.
+    //     컨트롤러 기본 정책 TenantOnly 는 평직원(tenant_user)도 통과시켜, 판매 직무권한이 없는
+    //     직원이 챗봇으로 SalesController(SalesOnly) 게이트를 우회해 판매를 확정할 수 있었다(헌법 #7 위반).
+    //     정식 판매 엔드포인트와 동일하게 SalesOnly 직무권한 게이트를 메서드 레벨로 적용해 우회를 차단.
+    //     (조회·질문(ask)은 TenantOnly 유지 — 평직원도 챗봇 질문은 가능해야 함.)
     // ─────────────────────────────────────────────────────────────
     [HttpPost("approve-action")]
+    [Authorize(Policy = "SalesOnly")]
     public async Task<IActionResult> ApproveAction([FromBody] ApproveActionRequest req, CancellationToken ct)
     {
         var tenantId = HttpContext.Items["TenantId"]?.ToString();

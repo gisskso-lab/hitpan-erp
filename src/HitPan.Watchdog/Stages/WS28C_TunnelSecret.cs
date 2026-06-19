@@ -98,10 +98,36 @@ public class WS28C_TunnelSecret
         var credDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".cloudflared");
         var credFile = Path.Combine(credDir, $"{tunnelId}.json");
         var backup = $"{credFile}.bak_{DateTime.Now:yyyyMMddHHmmss}";
+        var movedToBackup = false;
+
+        // 진범 봉합 (2026-06-20, 2차 전수조사 WD-02 P1):
+        //   종전엔 원본 cred 를 backup 으로 이동(복사 아님)한 뒤 토큰 재생성이 실패하면 false 만 반환하고
+        //   원본을 복원하지 않아, 멀쩡하던 자격증명까지 사라져 터널이 더 확실히 죽었다(자가복구→자해).
+        //   재생성에 실패하면(새 credFile 미생성) backup 을 원위치로 되돌려 0-touch 자가회복(헌법 #30)을 지킨다.
+        void RestoreBackupOnFailure()
+        {
+            try
+            {
+                // 새 cred 가 생성되지 않았고 backup 이 살아있을 때만 원위치 복원.
+                if (movedToBackup && File.Exists(backup) && !File.Exists(credFile))
+                {
+                    File.Move(backup, credFile, overwrite: true);
+                    _logger.LogWarning("WS-28-C: regeneration failed — original credential restored from backup");
+                }
+            }
+            catch (Exception rex)
+            {
+                _logger.LogError(rex, "WS-28-C: backup restore failed");
+            }
+        }
 
         try
         {
-            if (File.Exists(credFile)) File.Move(credFile, backup, overwrite: true);
+            if (File.Exists(credFile))
+            {
+                File.Move(credFile, backup, overwrite: true);
+                movedToBackup = true;
+            }
 
             var psi = new ProcessStartInfo("cloudflared", $"tunnel token --cred-file \"{credFile}\" {tunnelId}")
             {
@@ -111,12 +137,18 @@ public class WS28C_TunnelSecret
                 CreateNoWindow = true
             };
             using var p = Process.Start(psi);
-            if (p == null) return false;
+            if (p == null)
+            {
+                _logger.LogError("WS-28-C: cloudflared process start returned null");
+                RestoreBackupOnFailure();
+                return false;
+            }
             await p.WaitForExitAsync(ct);
             if (p.ExitCode != 0)
             {
                 var err = await p.StandardError.ReadToEndAsync(ct);
                 _logger.LogError("WS-28-C: cloudflared exit {Code}: {Err}", p.ExitCode, err);
+                RestoreBackupOnFailure();
                 return false;
             }
 
@@ -135,6 +167,7 @@ public class WS28C_TunnelSecret
         catch (Exception ex)
         {
             _logger.LogError(ex, "WS-28-C: regeneration failure");
+            RestoreBackupOnFailure();
             return false;
         }
     }
