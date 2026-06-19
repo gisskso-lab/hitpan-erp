@@ -103,12 +103,13 @@ public sealed class LeaveRequestService : ILeaveRequestService
         return requestId;
     }
 
-    public async Task ApproveAsync(string tenantId, string approverId, ApproveLeaveRequest request, CancellationToken ct = default)
+    public async Task<bool> ApproveAsync(string tenantId, string approverId, ApproveLeaveRequest request, CancellationToken ct = default)
     {
         await EnsureOpenAsync(ct).ConfigureAwait(false);
 
         // P1-3 봉합(2026-06-20): 실제 처리한 결재자(@ApproverId)를 기록한다.
-        // 종전 "첫 TenantAdmin 서브쿼리"는 관리자 여럿일 때 실제 승인자 추적이 불가했다.
+        // LV-01 봉합(2026-06-20): WHERE 에 status='pending' 가드 추가 — 이미 처리된 건 재처리(상태 역전) 차단.
+        //   ExecuteAsync 의 affected rows 로 실제 처리 여부 반환(0이면 미존재/이미 처리 → 컨트롤러가 정직하게 응답).
         const string sql = """
             UPDATE leave_requests
             SET status = 'approved',
@@ -118,19 +119,22 @@ public sealed class LeaveRequestService : ILeaveRequestService
                 updated_at = NOW(6)
             WHERE tenant_id = @TenantId
               AND request_id = @RequestId
+              AND status = 'pending'
             """;
 
-        await _db.ExecuteAsync(new CommandDefinition(
+        var affected = await _db.ExecuteAsync(new CommandDefinition(
             sql,
             new { TenantId = tenantId, ApproverId = approverId, RequestId = request.RequestId },
             cancellationToken: ct)).ConfigureAwait(false);
+        return affected > 0;
     }
 
-    public async Task RejectAsync(string tenantId, string approverId, ApproveLeaveRequest request, CancellationToken ct = default)
+    public async Task<bool> RejectAsync(string tenantId, string approverId, ApproveLeaveRequest request, CancellationToken ct = default)
     {
         await EnsureOpenAsync(ct).ConfigureAwait(false);
 
         // P1-3 봉합(2026-06-20): 실제 처리한 결재자(@ApproverId)를 기록한다.
+        // LV-01 봉합(2026-06-20): status='pending' 가드 + affected rows 반환(상태 역전·무음 통과 차단).
         const string sql = """
             UPDATE leave_requests
             SET status = 'rejected',
@@ -140,9 +144,10 @@ public sealed class LeaveRequestService : ILeaveRequestService
                 updated_at = NOW(6)
             WHERE tenant_id = @TenantId
               AND request_id = @RequestId
+              AND status = 'pending'
             """;
 
-        await _db.ExecuteAsync(new CommandDefinition(
+        var affected = await _db.ExecuteAsync(new CommandDefinition(
             sql,
             new
             {
@@ -152,6 +157,7 @@ public sealed class LeaveRequestService : ILeaveRequestService
                 RejectReason = request.RejectReason
             },
             cancellationToken: ct)).ConfigureAwait(false);
+        return affected > 0;
     }
 
     /// <summary>

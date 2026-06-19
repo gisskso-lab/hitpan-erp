@@ -80,7 +80,12 @@ public sealed class LeaveRequestController : ControllerBase
         var approverId = HttpContext.Items["UserId"]?.ToString() ?? string.Empty;
         request.RequestId = id;
         request.Approved = true;
-        await _leaveRequestService.ApproveAsync(tenantId, approverId, request, ct).ConfigureAwait(false);
+        // LV-01 봉합(2026-06-20): 처리 대상이 없으면(미존재/이미 처리) 무음 Ok 대신 409로 정직하게 알린다.
+        var done = await _leaveRequestService.ApproveAsync(tenantId, approverId, request, ct).ConfigureAwait(false);
+        if (!done)
+        {
+            return Conflict(new { error = "이미 처리되었거나 존재하지 않는 연차 신청입니다." });
+        }
         return Ok();
     }
 
@@ -98,7 +103,12 @@ public sealed class LeaveRequestController : ControllerBase
         var approverId = HttpContext.Items["UserId"]?.ToString() ?? string.Empty;
         request.RequestId = id;
         request.Approved = false;
-        await _leaveRequestService.RejectAsync(tenantId, approverId, request, ct).ConfigureAwait(false);
+        // LV-01 봉합(2026-06-20): 처리 대상이 없으면 409로 정직하게 알린다.
+        var done = await _leaveRequestService.RejectAsync(tenantId, approverId, request, ct).ConfigureAwait(false);
+        if (!done)
+        {
+            return Conflict(new { error = "이미 처리되었거나 존재하지 않는 연차 신청입니다." });
+        }
         return Ok();
     }
 }

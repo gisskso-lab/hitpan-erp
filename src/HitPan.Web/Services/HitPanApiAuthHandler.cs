@@ -55,6 +55,17 @@ public sealed class HitPanApiAuthHandler(
                 response.Dispose();
                 response = await base.SendAsync(retry, cancellationToken).ConfigureAwait(false);
             }
+            else if (tokenAt401.Success && !string.IsNullOrEmpty(tokenAt401.Value))
+            {
+                // 봉합 (2026-06-20, AUTH-03): 토큰을 들고 있었는데 자동 재발급이 최종 실패(RefreshToken
+                //   만료/무효) → 세션이 끝난 것. 종전엔 원래 401 을 조용히 돌려줘 화면이 '이유 없이' 죽었다.
+                //   403 처리와 대칭으로, 저장 토큰을 정리하고 사용자에게 재로그인을 정직하게 안내한다.
+                //   (AuthStateProvider 가 다음 네비게이션에서 Anonymous→/login 으로 보낸다.)
+                await storage.DeleteAsync(AuthStorageKeys.AccessToken).ConfigureAwait(false);
+                await storage.DeleteAsync(AuthStorageKeys.RefreshToken).ConfigureAwait(false);
+                await storage.DeleteAsync(AuthStorageKeys.UserDisplayName).ConfigureAwait(false);
+                snackbar.Add("로그인이 만료되었습니다. 다시 로그인해주세요.", Severity.Warning);
+            }
         }
 
         // §절대원칙 #19 — 403은 "서버 오류"가 아닌 "권한 없음"으로 사용자에게 정직하게 알린다.

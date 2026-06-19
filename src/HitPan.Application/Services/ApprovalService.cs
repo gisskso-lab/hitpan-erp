@@ -414,6 +414,10 @@ public class ApprovalService : IApprovalService
                 "SELECT status AS Status, current_seq AS CurrentSeq, total_lines AS TotalLines, doc_type AS DocType FROM approval_documents WHERE approval_id = @ApprovalId AND tenant_id = @TenantId",
                 new { ApprovalId = approvalId, TenantId = tenantId }, cancellationToken: ct));
 
+        // 봉합 (2026-06-20, APPR-02): 문서 미존재(QueryFirstOrDefault → default 튜플, Status=null)를
+        //   "이미 처리됨"으로 뭉뚱그리지 않고 분리 안내(CS 추적성). 그 다음에 상태 가드.
+        if (doc.Status is null)
+            throw new InvalidOperationException("결재 문서를 찾을 수 없습니다.");
         if (doc.Status != "pending")
             throw new InvalidOperationException("이미 처리된 결재입니다.");
 
@@ -508,8 +512,10 @@ public class ApprovalService : IApprovalService
 
             if (affected == 0)
             {
-                // 다른 결재자가 먼저 처리해 상태/순서가 이미 바뀐 경우. 이력 INSERT 까지 롤백한다.
-                tx.Rollback();
+                // 다른 결재자가 먼저 처리해 상태/순서가 이미 바뀐 경우. 이력 INSERT 까지 롤백해야 한다.
+                // 봉합 (2026-06-20, APPR-01): 여기서 명시 Rollback 하지 않는다 — throw 만 하면 아래 catch 가
+                //   단일 롤백을 수행한다. 종전엔 여기서 롤백 후 throw → catch 가 완료된 tx 에 재롤백 시도 →
+                //   매 동시충돌마다 무의미한 "rollback failed" 에러 로그로 운영 로그를 오염시켰다.
                 throw new InvalidOperationException("이미 처리된 결재입니다. (동시 처리 감지)");
             }
 

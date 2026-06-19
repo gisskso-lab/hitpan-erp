@@ -23,8 +23,13 @@ public class WS28D_ServiceReinstall
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "WS-28-D: service enumeration failure");
-            return true;
+            // 봉합 (2026-06-20, WD-03): 종전 fail-open(return true)은 열거 실패 시 서비스가 실제로
+            //   사라졌어도 '존재함'으로 오판해 재설치를 영원히 막았다(헌법 #28 자가복구 침묵 차단).
+            //   존재여부 점검은 fail-closed 가 정석 — 부재로 가정해 재설치를 시도하게 한다.
+            //   재설치는 CoolDown 게이트 + 멱등(service install)로 보호되므로 false 가 안전.
+            //   (동일 cloudflared 를 fail-closed 로 보는 WS-28-I 와도 정합.)
+            _logger.LogWarning(ex, "WS-28-D: service enumeration failure — 부재로 가정(fail-closed)");
+            return false;
         }
     }
 

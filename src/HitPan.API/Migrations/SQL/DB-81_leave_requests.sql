@@ -19,7 +19,7 @@ CREATE TABLE IF NOT EXISTS `leave_requests` (
   `end_date`     date         NOT NULL,
   `reason`       varchar(200) DEFAULT NULL,
   `status`       varchar(20)  NOT NULL DEFAULT 'pending' COMMENT 'pending/approved/rejected',
-  `approved_by`  varchar(36)  DEFAULT NULL COMMENT '실제 처리한 결재자 employee_id (P1-3)',
+  `approved_by`  varchar(36)  DEFAULT NULL COMMENT '실제 처리한 결재자 user_id(계정 id, JWT user_id). LV-02 정정: employee_id 아님',
   `approved_at`  datetime(6)  DEFAULT NULL,
   `reject_reason` varchar(200) DEFAULT NULL,
   `created_at`   datetime(6)  NOT NULL DEFAULT current_timestamp(6),

@@ -54,7 +54,7 @@ public class WS28C_TunnelSecret
     {
         try
         {
-            var tunnelId = Environment.GetEnvironmentVariable("HITPAN_TUNNEL_ID");
+            var tunnelId = ReadTunnelId();
             if (string.IsNullOrEmpty(tunnelId)) return false;
 
             var credFile = Path.Combine(
@@ -86,9 +86,16 @@ public class WS28C_TunnelSecret
         }
     }
 
+    // 봉합 (2026-06-20, WD-01): HITPAN_TUNNEL_ID 는 인스톨러가 Machine 범위로 저장한다(HealthProbe·
+    //   MetaPingClient 와 동일). Process 기본값만 읽으면 서비스가 env 설정보다 먼저 떠 있을 때 null →
+    //   자가복구 무력화. Machine 우선 + Process 폴백으로 통일.
+    private static string? ReadTunnelId() =>
+        Environment.GetEnvironmentVariable("HITPAN_TUNNEL_ID", EnvironmentVariableTarget.Machine)
+        ?? Environment.GetEnvironmentVariable("HITPAN_TUNNEL_ID");
+
     public async Task<bool> RegenerateAsync(CancellationToken ct = default)
     {
-        var tunnelId = Environment.GetEnvironmentVariable("HITPAN_TUNNEL_ID");
+        var tunnelId = ReadTunnelId();
         if (string.IsNullOrEmpty(tunnelId))
         {
             _logger.LogError("WS-28-C: HITPAN_TUNNEL_ID env var missing");
