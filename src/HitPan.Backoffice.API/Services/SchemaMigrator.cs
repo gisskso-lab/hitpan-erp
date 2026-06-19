@@ -72,14 +72,24 @@ public sealed class SchemaMigrator
         foreach (var path in files)
         {
             var fileName = Path.GetFileName(path);
-            var sql = await File.ReadAllTextAsync(path, Encoding.UTF8, ct);
-            var hash = ComputeSha256(sql);
+            var rawSql = await File.ReadAllTextAsync(path, Encoding.UTF8, ct);
+            // 멱등 해시는 "원본"(치환 전) 기준 — env값이 바뀌어도 같은 파일은 재실행 안 함.
+            // (env로 주입하는 값은 비밀번호 해시 등 민감값이라 _schema_migrations에 흔적을 남기지 않는 목적도 겸함)
+            var hash = ComputeSha256(rawSql);
 
             // 이미 같은 내용으로 적용됐으면 건너뜀(멱등)
             var appliedHash = await QueryHashAsync(db, fileName, ct);
             if (appliedHash == hash)
             {
                 _logger.LogInformation("[SchemaMigrator] skip (적용됨) {File}", fileName);
+                continue;
+            }
+
+            // 환경변수 치환: SQL 안 ${VAR} 를 실행 직전에만 환경변수 값으로 치환.
+            //   - 의도: 비밀번호 해시 등 민감값을 Git/SQL 파일에 평문으로 두지 않고 NCP env로 주입(#22·#23).
+            //   - 미설정(${VAR}가 그대로 남음) → 이 파일은 건너뜀. 빈 값으로 깨진 INSERT 실행 방지(#15·#19).
+            if (!TrySubstituteEnv(rawSql, fileName, out var sql))
+            {
                 continue;
             }
 
@@ -128,6 +138,42 @@ public sealed class SchemaMigrator
         cmd.Parameters.AddWithValue("@F", fileName);
         var result = await cmd.ExecuteScalarAsync(ct);
         return result as string;
+    }
+
+    // ${VAR} 패턴을 환경변수로 치환. 미설정 변수가 하나라도 있으면 false(파일 건너뜀).
+    //   - 예: 91_seed_admin.sql 의 '${HITPAN_BO_SEED_ADMIN_HASH}' → NCP env 주입값.
+    //   - env 미설정 시 master 계정 시드를 건너뜀(빈 해시로 깨진 계정 INSERT 방지). 사고 아님 — 로그로 명시.
+    private bool TrySubstituteEnv(string sql, string fileName, out string substituted)
+    {
+        substituted = sql;
+        var pattern = new System.Text.RegularExpressions.Regex(@"\$\{([A-Z0-9_]+)\}");
+        var matches = pattern.Matches(sql);
+        if (matches.Count == 0)
+        {
+            return true; // 치환할 게 없으면 원본 그대로 실행
+        }
+
+        var missing = new List<string>();
+        substituted = pattern.Replace(sql, m =>
+        {
+            var name = m.Groups[1].Value;
+            var val = Environment.GetEnvironmentVariable(name);
+            if (string.IsNullOrEmpty(val))
+            {
+                missing.Add(name);
+                return m.Value; // 그대로 둠(아래에서 건너뜀 처리)
+            }
+            return val;
+        });
+
+        if (missing.Count > 0)
+        {
+            _logger.LogWarning(
+                "[SchemaMigrator] {File} 건너뜀 — 환경변수 미설정: {Vars}. (값 주입 후 다음 기동 때 자동 적용)",
+                fileName, string.Join(", ", missing.Distinct()));
+            return false;
+        }
+        return true;
     }
 
     private static string ComputeSha256(string text)
