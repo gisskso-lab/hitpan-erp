@@ -173,26 +173,73 @@ public class AuthService : IAuthService
 
         var response = CreateLoginResponse(user, employee, secret, redirectToWelcome: false);
 
-        // 진범 봉합 (2026-06-20, 2차 전수조사 AUTH-01 P0):
-        //   종전엔 새 RefreshToken 을 발급해 클라이언트에만 내려주고 refresh_tokens 테이블을 갱신하지 않아,
-        //   클라이언트가 보관한 회전 토큰의 token_hash 가 DB 에 없어 다음 401 사이클에서 위 검증(160-168)이
-        //   tokenRecord=null → "로그아웃된 토큰" 으로 차단 → 자동 재발급이 1회 후 영구 실패했다.
-        //   (AccessToken 8시간/Refresh 7일 무자각 연장 정책의 핵심 의도가 깨짐.)
-        //   해법 = 토큰 회전(rotation): 방금 사용한 구 RefreshToken hash 를 폐기하고 새 토큰 hash 를 INSERT.
-        //   user_id 전체 DELETE 가 아니라 사용한 토큰만 지워 멀티기기 로그인 세션을 보존(LoginAsync 와 정합).
-        await conn.ExecuteAsync(
-            "DELETE FROM refresh_tokens WHERE user_id = @UserId AND token_hash = @OldHash",
-            new { UserId = userId, OldHash = HashToken(request.RefreshToken) });
-        await conn.ExecuteAsync(
-            @"INSERT INTO refresh_tokens (token_id, user_id, token_hash, expires_at, is_revoked)
-              VALUES (@TokenId, @UserId, @TokenHash, @ExpiresAt, 0)",
-            new
+        // 진범 봉합 (2026-06-20, 2차 전수조사 AUTH-01 P0 → 3차 전수조사 F1/F2 강화):
+        //   ① [2차 P0] 종전엔 새 RefreshToken 을 발급해 클라이언트에만 주고 테이블을 갱신하지 않아, 회전 토큰의
+        //      hash 가 DB 에 없어 다음 401 검증(160-168)에서 차단 → 자동 재발급이 1회 후 영구 실패했다.
+        //   ② [3차 F2 보안] 동시 refresh 단일사용 미강제: 같은 토큰으로 R1·R2 가 동시 도착하면 둘 다 통과해
+        //      구 토큰이 살아있는 자식 2개로 회전(탈취 토큰 replay 공존). → DELETE 의 affected rows 로 단일사용
+        //      강제: 토큰을 실제로 지운(=소비 권리를 획득한) 요청만 새 토큰을 발급하고, 0행이면 거부.
+        //   ③ [3차 F1 무결성] DELETE→INSERT 비원자: 중간 예외 시 토큰 둘 다 소실 → 강제 재로그인.
+        //      → 단일 트랜잭션으로 묶어 원자화. 실패 시 롤백되어 구 토큰이 보존된다.
+        //   ④ [3차 F4 위생] 만료된 잔여 행을 같은 트랜잭션에서 정리(방치 세션 누적 방지).
+        //   user_id 전체가 아니라 사용한 token_hash 만 회전한다(F5 정정: LoginAsync 가 새 로그인 시 user_id 의
+        //   모든 토큰을 일괄 삭제하므로 현 정책은 사실상 '단일 활성 세션'이다 — 회전이 토큰별인 것은 동시
+        //   401 경쟁에서 사용한 토큰만 정확히 소비하기 위함이지 멀티기기 동시 세션을 의도한 것은 아니다).
+        //   봉합 (2026-06-20, 3차 전수조사 후속): EF/Dapper 가 커넥션을 암묵적으로 닫아둔 상태면
+        //   BeginTransaction 이 "open and available Connection" 예외로 터진다. 명시적으로 먼저 연다.
+        if (conn.State != System.Data.ConnectionState.Open)
+        {
+            if (conn is System.Data.Common.DbConnection dbConn)
             {
-                TokenId = Guid.NewGuid().ToString(),
-                UserId = userId,
-                TokenHash = HashToken(response.RefreshToken),
-                ExpiresAt = DateTime.UtcNow.Add(RefreshTokenLifetime)
-            });
+                await dbConn.OpenAsync(ct).ConfigureAwait(false);
+            }
+            else
+            {
+                conn.Open();
+            }
+        }
+        using (var tx = conn.BeginTransaction())
+        {
+            try
+            {
+                var deleted = await conn.ExecuteAsync(
+                    "DELETE FROM refresh_tokens WHERE user_id = @UserId AND token_hash = @OldHash",
+                    new { UserId = userId, OldHash = HashToken(request.RefreshToken) }, tx);
+                if (deleted == 0)
+                {
+                    // 다른 동시 요청이 이미 이 토큰을 소비함(또는 폐기됨) → 단일사용 강제로 거부.
+                    tx.Rollback();
+                    throw new UnauthorizedAccessException("이미 사용된 토큰입니다. 다시 로그인해주세요.");
+                }
+
+                // 만료 잔여 행 정리(F4) — 같은 user 의 기한 지난 토큰만.
+                await conn.ExecuteAsync(
+                    "DELETE FROM refresh_tokens WHERE user_id = @UserId AND expires_at < @Now",
+                    new { UserId = userId, Now = DateTime.UtcNow }, tx);
+
+                await conn.ExecuteAsync(
+                    @"INSERT INTO refresh_tokens (token_id, user_id, token_hash, expires_at, is_revoked)
+                      VALUES (@TokenId, @UserId, @TokenHash, @ExpiresAt, 0)",
+                    new
+                    {
+                        TokenId = Guid.NewGuid().ToString(),
+                        UserId = userId,
+                        TokenHash = HashToken(response.RefreshToken),
+                        ExpiresAt = DateTime.UtcNow.Add(RefreshTokenLifetime)
+                    }, tx);
+
+                tx.Commit();
+            }
+            catch (UnauthorizedAccessException)
+            {
+                throw; // 단일사용 거부는 이미 롤백됨 — 그대로 전파.
+            }
+            catch (Exception)
+            {
+                try { tx.Rollback(); } catch (Exception rbex) { Console.Error.WriteLine($"[AuthService] refresh 회전 롤백 실패: {rbex.Message}"); }
+                throw;
+            }
+        }
 
         return response;
     }

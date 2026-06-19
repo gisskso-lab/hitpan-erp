@@ -44,8 +44,25 @@ public sealed class ChatbotController : ControllerBase
             return BadRequest(new { error = "질문 내용을 입력해주세요." });
         }
 
-        var result = await _chatbot.AskAsync(req, tenantId, userId, ct).ConfigureAwait(false);
+        // 봉합 (2026-06-20, 3차 전수조사 AICHAT-SEC-01-F1): 로그인 사용자의 직무권한을 정책 집합으로 만들어
+        //   넘긴다. AI 직원 쓰기 Tool(거래명세서 등)은 정식 판매 경로(SalesOnly)와 동일 권한이 있어야 실행됨.
+        //   조회 Tool 은 RequiredPolicy 가 없어 영향 없음(평직원도 챗봇 질문·조회 가능).
+        var policies = BuildPolicySet();
+        var result = await _chatbot.AskAsync(req, tenantId, userId, policies, ct).ConfigureAwait(false);
         return Ok(result);
+    }
+
+    /// <summary>JWT role 클레임을 챗봇 Tool 게이트용 정책 집합으로 변환(정식 정책 정의와 동일 role 매핑).</summary>
+    private IReadOnlySet<string> BuildPolicySet()
+    {
+        var set = new HashSet<string>(StringComparer.Ordinal);
+        // SalesOnly = system_admin·sales_manager·sales_user·TenantAdmin·tenant_admin (Program.cs 정책과 일치)
+        string[] salesRoles = { "system_admin", "sales_manager", "sales_user", "TenantAdmin", "tenant_admin" };
+        if (salesRoles.Any(User.IsInRole))
+        {
+            set.Add("SalesOnly");
+        }
+        return set;
     }
 
     // ─────────────────────────────────────────────────────────────

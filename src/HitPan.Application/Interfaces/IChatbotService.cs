@@ -9,8 +9,13 @@ namespace HitPan.Application.Interfaces;
 /// </summary>
 public interface IChatbotService
 {
-    /// <summary>질문을 받아 답변을 구성하고 대화 이력에 저장한다.</summary>
-    Task<ChatAnswerDto> AskAsync(ChatAskRequest req, string tenantId, string userId, CancellationToken ct = default);
+    /// <summary>
+    /// 질문을 받아 답변을 구성하고 대화 이력에 저장한다.
+    /// policies: 로그인 사용자의 권한 정책 집합(JWT role 유래). AI 직원 쓰기 Tool 권한 게이트에 사용
+    ///   (봉합 2026-06-20 AICHAT-SEC-01-F1). null이면 빈 집합 — 쓰기 Tool 차단(조회만 허용).
+    /// </summary>
+    Task<ChatAnswerDto> AskAsync(ChatAskRequest req, string tenantId, string userId,
+        IReadOnlySet<string>? policies = null, CancellationToken ct = default);
 
     /// <summary>
     /// AI 직원이 만든 초안을 승인 처리한다 (Lv.3 워크플로우 연쇄, 사장님 결재 2026-06-20).

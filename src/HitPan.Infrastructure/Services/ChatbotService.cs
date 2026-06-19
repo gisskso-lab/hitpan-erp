@@ -60,6 +60,7 @@ public sealed class ChatbotService : IChatbotService
         ChatAskRequest req,
         string tenantId,
         string userId,
+        IReadOnlySet<string>? policies = null,
         CancellationToken ct = default)
     {
         await EnsureOpenAsync(ct).ConfigureAwait(false);
@@ -87,7 +88,7 @@ public sealed class ChatbotService : IChatbotService
         //   클로드가 명령을 보고 히트판 도구를 스스로 골라 호출(조회/생성). 키 valid + 호출 성공 시 처리.
         //   키 없음·실패 시 Handled=false → 아래 기존 흐름(하드코딩 분석 → KB → 도우미)으로 폴백.
         //   = FSD 옵션: 켜면(키) 자동, 안 켜도 기존 동작 그대로.
-        var agentResult = await TryRunAgentAsync(req.Message, tenantId, userId, history, ct).ConfigureAwait(false);
+        var agentResult = await TryRunAgentAsync(req.Message, tenantId, userId, history, policies, ct).ConfigureAwait(false);
         if (agentResult is { Handled: true })
         {
             return await BuildAgentAnswerAsync(req, tenantId, userId, quota, agentResult, ct).ConfigureAwait(false);
@@ -368,6 +369,7 @@ public sealed class ChatbotService : IChatbotService
         string tenantId,
         string userId,
         IReadOnlyList<ChatHistoryTurn> history,
+        IReadOnlySet<string>? policies,
         CancellationToken ct)
     {
         // 키 행 조회(암호문 + 상태). valid 가 아니면 엔진 미동작(FSD 옵션 OFF).
@@ -401,8 +403,10 @@ public sealed class ChatbotService : IChatbotService
         var ctx = new HitPan.Application.Services.Ai.ToolContext
         {
             TenantId = tenantId,
-            UserId = userId
-            // 권한(Policies) 게이트는 다음 단계 — 1단계 Tool 은 tenant 격리만으로 안전(읽기/초안).
+            UserId = userId,
+            // 봉합 (2026-06-20, 3차 전수조사 AICHAT-SEC-01-F1): 호출자 권한 정책을 주입.
+            //   엔진이 쓰기 Tool 의 RequiredPolicy 와 대조해 무권한 실행을 차단(헌법 #7).
+            Policies = policies ?? new HashSet<string>()
         };
 
         var result = await _agent.RunAsync(decryptedKey, userMessage, history, ctx, ct).ConfigureAwait(false);

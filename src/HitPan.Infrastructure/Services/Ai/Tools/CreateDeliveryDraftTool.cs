@@ -36,6 +36,10 @@ public sealed class CreateDeliveryDraftTool : IHitpanTool
 
     public bool IsWrite => true;
 
+    // 봉합 (2026-06-20, 3차 전수조사 AICHAT-SEC-01-F1): 거래명세서 작성은 판매 직무 기능 →
+    //   정식 SalesController(SalesOnly) 와 동일 권한 요구. 엔진이 ctx.Policies 로 게이트.
+    public string? RequiredPolicy => "SalesOnly";
+
     public JsonElement InputSchema => JsonSerializer.SerializeToElement(new
     {
         type = "object",

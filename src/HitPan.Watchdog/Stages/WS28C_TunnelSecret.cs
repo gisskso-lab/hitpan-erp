@@ -108,16 +108,54 @@ public class WS28C_TunnelSecret
         {
             try
             {
-                // 새 cred 가 생성되지 않았고 backup 이 살아있을 때만 원위치 복원.
-                if (movedToBackup && File.Exists(backup) && !File.Exists(credFile))
+                // 2차 봉합 (2026-06-20, 3차 전수조사 WD-02-01 P1):
+                //   이 함수는 실패 3경로(프로세스 null·ExitCode!=0·예외)에서만 호출된다. 따라서 호출 시점에
+                //   credFile 이 존재한다면 그건 cloudflared 가 실패하며 남긴 0바이트/부분기록된 '손상' 파일이다.
+                //   종전 가드 `!File.Exists(credFile)` 는 이 손상 파일을 현역으로 고착시키고 backup 복원을 막아,
+                //   봉합이 없애려던 자해 패턴을 재현했다. 실패 = 무조건 원본(backup) 우선:
+                //   ① 부분 생성된 손상 credFile 을 먼저 삭제 → ② backup 을 원위치로 되돌린다.
+                if (!movedToBackup || !File.Exists(backup)) return;
+
+                if (File.Exists(credFile))
                 {
-                    File.Move(backup, credFile, overwrite: true);
-                    _logger.LogWarning("WS-28-C: regeneration failed — original credential restored from backup");
+                    File.Delete(credFile); // 실패가 남긴 손상 출력물 제거
                 }
+                File.Move(backup, credFile, overwrite: true);
+                _logger.LogWarning("WS-28-C: regeneration failed — original credential restored from backup");
             }
             catch (Exception rex)
             {
                 _logger.LogError(rex, "WS-28-C: backup restore failed");
+            }
+        }
+
+        // 봉합 (2026-06-20, 3차 전수조사 WD-02-02 P3): 재생성 성공 시 오래된 .bak_* 자격증명 사본을
+        //   최신 2개만 남기고 정리. 미정리 시 1분 주기·반복 재생성으로 ~/.cloudflared 에 평문 사본이
+        //   단조 누적(디스크 위생 + 자격증명 노출면). 정리 실패는 비치명적 — 로깅 후 무시.
+        void PruneOldBackups(string credPath)
+        {
+            try
+            {
+                var dir = Path.GetDirectoryName(credPath);
+                var prefix = Path.GetFileName(credPath) + ".bak_";
+                if (string.IsNullOrEmpty(dir) || !Directory.Exists(dir)) return;
+
+                var stale = Directory.EnumerateFiles(dir, prefix + "*")
+                    .OrderByDescending(f => f)   // 파일명 끝 타임스탬프(yyyyMMddHHmmss) 사전순 = 시간순
+                    .Skip(2)
+                    .ToList();
+                foreach (var f in stale)
+                {
+                    File.Delete(f);
+                }
+                if (stale.Count > 0)
+                {
+                    _logger.LogInformation("WS-28-C: pruned {Count} old credential backup(s)", stale.Count);
+                }
+            }
+            catch (Exception pex)
+            {
+                _logger.LogWarning(pex, "WS-28-C: backup prune failed");
             }
         }
 
@@ -162,6 +200,7 @@ public class WS28C_TunnelSecret
             sc.WaitForStatus(ServiceControllerStatus.Running, TimeSpan.FromSeconds(30));
 
             _logger.LogWarning("WS-28-C: TunnelSecret regenerated, cloudflared restarted");
+            PruneOldBackups(credFile);
             return true;
         }
         catch (Exception ex)

@@ -138,6 +138,18 @@ public sealed class AiAgentService : IAiAgentService
                     continue;
                 }
 
+                // 권한 게이트 봉합 (2026-06-20, 3차 전수조사 AICHAT-SEC-01-F1):
+                //   Tool 이 요구하는 권한(RequiredPolicy)을 호출자(ctx.Policies)가 갖고 있지 않으면 실행 차단.
+                //   정식 판매 경로 SalesController(SalesOnly) 와 동일 게이트를 챗봇 경로에도 적용 — 판매 직무권한
+                //   없는 평직원이 챗봇으로 거래명세서 초안을 무권한 작성하던 비대칭을 닫는다(헌법 #7).
+                if (!string.IsNullOrEmpty(tool.RequiredPolicy) && !ctx.Policies.Contains(tool.RequiredPolicy))
+                {
+                    _logger.LogWarning("AI 직원 도구 권한 거부: {Tool} (필요 권한 {Policy})", call.Name, tool.RequiredPolicy);
+                    toolResultBlocks.Add(ToolResultBlock(call.Id,
+                        "이 작업을 수행할 권한이 없습니다. 담당 권한이 있는 직원에게 요청하세요.", isError: true));
+                    continue;
+                }
+
                 ToolResult result;
                 try
                 {

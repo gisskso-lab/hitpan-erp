@@ -66,6 +66,14 @@ public interface IHitpanTool
     /// <summary>쓰기 Tool 여부. true면 초안→승인 게이트 대상(헌법 #6).</summary>
     bool IsWrite { get; }
 
+    /// <summary>
+    /// 이 Tool 실행에 필요한 권한 정책명(예: "SalesOnly"·"PurchaseOnly"). null/빈이면 권한 제약 없음(조회).
+    /// 봉합 (2026-06-20, 3차 전수조사 AICHAT-SEC-01-F1): 챗봇 ask 경로(TenantOnly)로 쓰기 Tool 이
+    ///   무권한 실행되던 비대칭을 닫는다. 엔진(AiAgentService)이 실행 전 ctx.Policies 에 이 권한이 있는지 검사.
+    ///   정식 SalesController(SalesOnly) 와 동일 게이트를 챗봇 경로에도 적용(헌법 #7 직무권한 일관).
+    /// </summary>
+    string? RequiredPolicy => null;
+
     /// <summary>클로드가 채워 보낸 인자(input)로 실제 히트판 기능 실행.</summary>
     Task<ToolResult> ExecuteAsync(JsonElement input, ToolContext ctx, CancellationToken ct = default);
 }
