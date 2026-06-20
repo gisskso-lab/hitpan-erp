@@ -302,9 +302,26 @@ public class FinanceService : IFinanceService
         var fromDate = new DateTime(year, 1, 1);
         var toDate = new DateTime(year, 12, 31);
 
+        // 봉합 (2026-06-23, 6차 전수조사 C3, 사장님 결재 "vat포함·별도·면세 설정 가능"):
+        //   종전엔 매출·매입은 부가세 포함(total+vat)인데 경비만 부가세 제외(amount)로 기준이 비대칭이었고,
+        //   미승인(pending)·반려 경비까지 손익에 포함됐다. 사장님 의중대로 손익 부가세 기준을 고객사가 3가지 중 고른다.
+        //   - finance.profit_basis 설정(workflow_settings, DDL 무변경):
+        //       'vat_included' = 부가세 포함 총액(매출·매입·경비 모두 +vat)
+        //       'supply'       = 부가세 별도(공급가 기준, 부가세 제외) — 기본·회계 정석(과세사업자)
+        //       'tax_free'     = 면세사업자(부가세 개념 없음 → 금액 그대로, supply 와 식은 같으나 의미가 면세)
+        //   - 경비는 기준 무관 approval_status='approved' 만 집계(미승인·반려 제외) — 명백한 버그라 공통 적용.
+        var profitBasis = await _db.ExecuteScalarAsync<string>(new CommandDefinition(
+            "SELECT setting_value FROM workflow_settings WHERE tenant_id=@TenantId AND setting_key='finance.profit_basis' AND is_active=1",
+            new { TenantId = tenantId }, cancellationToken: ct));
+
+        // 부가세 포함만 +vat, '별도'·'면세'는 공급가(부가세 미가산). 미설정/알수없음 → 기본 공급가(supply).
+        var vatIncluded = string.Equals(profitBasis, "vat_included", StringComparison.OrdinalIgnoreCase);
+        var salesAmt = vatIncluded ? "total_amount + vat_amount" : "total_amount";
+        var purchaseAmt = vatIncluded ? "total_amount + vat_amount" : "total_amount";
+        var expenseAmt = vatIncluded ? "amount + vat_amount" : "amount";
+
         // 1회 쿼리로 12개월 매출·매입·경비 집계
-        var rows = await _db.QueryAsync<ProfitSummaryDto>(new CommandDefinition(
-            """
+        var sql = $$"""
             SELECT
               m.mon AS YearMonth,
               CONCAT(CAST(m.mon % 100 AS CHAR), '월') AS YearMonthLabel,
@@ -322,22 +339,25 @@ public class FinanceService : IFinanceService
               UNION SELECT @y*100+9 UNION SELECT @y*100+10 UNION SELECT @y*100+11 UNION SELECT @y*100+12
             ) m
             LEFT JOIN (
-              SELECT YEAR(delivery_date)*100+MONTH(delivery_date) AS ym, SUM(total_amount+vat_amount) AS amt
+              SELECT YEAR(delivery_date)*100+MONTH(delivery_date) AS ym, SUM({{salesAmt}}) AS amt
               FROM sales_deliveries WHERE tenant_id=@TenantId AND status IN ('confirmed','invoiced') AND is_deleted=0
                 AND delivery_date BETWEEN @From AND @To GROUP BY ym
             ) s ON s.ym = m.mon
             LEFT JOIN (
-              SELECT YEAR(receipt_date)*100+MONTH(receipt_date) AS ym, SUM(total_amount+vat_amount) AS amt
+              SELECT YEAR(receipt_date)*100+MONTH(receipt_date) AS ym, SUM({{purchaseAmt}}) AS amt
               FROM purchase_receipts WHERE tenant_id=@TenantId AND status='confirmed'
                 AND receipt_date BETWEEN @From AND @To GROUP BY ym
             ) p ON p.ym = m.mon
             LEFT JOIN (
-              SELECT YEAR(expense_date)*100+MONTH(expense_date) AS ym, SUM(amount) AS amt
-              FROM expenses WHERE tenant_id=@TenantId AND is_active=1
+              SELECT YEAR(expense_date)*100+MONTH(expense_date) AS ym, SUM({{expenseAmt}}) AS amt
+              FROM expenses WHERE tenant_id=@TenantId AND is_active=1 AND approval_status='approved'
                 AND expense_date BETWEEN @From AND @To GROUP BY ym
             ) e ON e.ym = m.mon
             ORDER BY m.mon
-            """,
+            """;
+
+        var rows = await _db.QueryAsync<ProfitSummaryDto>(new CommandDefinition(
+            sql,
             new { TenantId = tenantId, From = fromDate, To = toDate, y = year },
             cancellationToken: ct));
 
@@ -458,13 +478,20 @@ public class FinanceService : IFinanceService
               FROM purchase_receipts WHERE tenant_id=@TenantId AND status='confirmed'
                 AND receipt_date>=@MonthStart AND receipt_date<=@Today
             UNION ALL
+            -- 봉합 (2026-06-23, 6차 전수조사 C2): 미수금 수금 차감을 'sales_delivery' 단일로 좁힘.
+            --   종전 IN('sales_delivery','sales_order')은 다른 집계(CollectionService:382·SALES-01)와 불일치이고,
+            --   collections 에 sales_order 는 들어가지 않아(UI·마이그 전수 0건) 미래 잠복 결함이었다.
             SELECT 'receivable',
               COALESCE((SELECT SUM(total_amount + vat_amount) FROM sales_deliveries WHERE tenant_id=@TenantId AND status IN ('confirmed','invoiced') AND is_deleted=0), 0)
-              - COALESCE((SELECT SUM(amount) FROM collections WHERE tenant_id=@TenantId AND ref_doc_type IN ('sales_delivery','sales_order')), 0)
+              - COALESCE((SELECT SUM(amount) FROM collections WHERE tenant_id=@TenantId AND ref_doc_type = 'sales_delivery'), 0)
             UNION ALL
+            -- 봉합 (2026-06-23, 6차 전수조사 C2 P1): 미지급 지급 차감을 collections → payments 로 정정.
+            --   매입 지급은 collections 가 아니라 payments(payment_type='purchase')에 기록된다(GetPayablesAsync:439 정식 기준).
+            --   종전엔 collections 의 'purchase_receipt'/'purchase_order' 를 봤는데 거기엔 0건이라 차감이 항상 0 →
+            --   미지급이 지급해도 안 줄어 영구 과대 계상됐다(헌법 #20). payments 기준으로 GetPayablesAsync 와 일관화.
             SELECT 'payable',
               COALESCE((SELECT SUM(total_amount + vat_amount) FROM purchase_receipts WHERE tenant_id=@TenantId AND status='confirmed'), 0)
-              - COALESCE((SELECT SUM(amount) FROM collections WHERE tenant_id=@TenantId AND ref_doc_type IN ('purchase_receipt','purchase_order')), 0)
+              - COALESCE((SELECT SUM(amount) FROM payments WHERE tenant_id=@TenantId AND is_active=1 AND payment_type='purchase'), 0)
             UNION ALL
             SELECT 'low_stock',
               (SELECT COUNT(*) FROM item_stock s INNER JOIN items i ON i.item_id=s.item_id AND i.tenant_id=s.tenant_id
