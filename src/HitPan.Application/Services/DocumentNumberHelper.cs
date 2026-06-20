@@ -11,13 +11,17 @@ namespace HitPan.Application.Services;
 internal static class DocumentNumberHelper
 {
     // table/numberColumn 은 호출부 상수만 받으므로 SQL 인젝션 위험 없음.
+    // 봉합 (2026-06-23, 5차 전수조사 SALES-02): 옵셔널 transaction 추가. 자동발주처럼 채번 SELECT 가
+    //   이미 열린 트랜잭션 안에서 실행돼야 하는 호출(직전 그룹 INSERT 가 같은 tx 가시성으로 보여야 정확)을
+    //   지원한다. 기본값 null → 기존 6개 호출처는 인자 생략으로 동작 불변.
     public static async Task<string> NextNumberAsync(
         IDbConnection db,
         string tenantId,
         string table,
         string numberColumn,
         string prefix,
-        CancellationToken ct = default)
+        CancellationToken ct = default,
+        IDbTransaction? transaction = null)
     {
         var sql = $"""
             SELECT COALESCE(
@@ -32,6 +36,7 @@ internal static class DocumentNumberHelper
         var next = await db.QueryFirstOrDefaultAsync<long>(new CommandDefinition(
             sql,
             new { TenantId = tenantId, Pattern = prefix + "%" },
+            transaction: transaction,
             cancellationToken: ct));
 
         return $"{prefix}{next:000}";

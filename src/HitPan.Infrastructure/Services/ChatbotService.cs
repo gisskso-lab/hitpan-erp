@@ -317,6 +317,11 @@ public sealed class ChatbotService : IChatbotService
             var msg = $"거래명세서({detail.DeliveryNo}) 확정 완료";
 
             // ③ 워크플로우 연쇄 — 대응 수주 자동생성(사장님 예시: "거래명세서 쓰고 수주도").
+            // 봉합 (2026-06-23, 5차 전수조사 AICHAT-P2-03 P2): 확정(②)과 수주생성(③)은 서로 다른
+            //   UnitOfWork 라 단일 트랜잭션으로 못 묶는다. 종전엔 ③ 실패 시 바깥 catch 가 전체를
+            //   Succeeded=false 로 반환해, 사용자는 "오류"만 보고 거래명세서가 이미 확정된 사실을 몰랐다
+            //   (재시도 시 이미 confirmed → "draft 만 확정 가능" 혼란). 확정은 이미 성공(원장 반영 완료)이므로,
+            //   ③ 만 별도 try 로 분리해 실패해도 "확정 성공 + 수주는 수동 생성 필요"로 정직하게 분리 안내한다.
             if (req.Chain && detail.Items.Count > 0)
             {
                 var orderReq = new CreateSalesOrderRequest
@@ -334,8 +339,22 @@ public sealed class ChatbotService : IChatbotService
                         VatAmount = i.VatAmount
                     }).ToList()
                 };
-                chainedId = await _sales.CreateOrderAsync(orderReq, ct).ConfigureAwait(false);
-                msg += " + 대응 수주 자동생성 완료";
+                try
+                {
+                    chainedId = await _sales.CreateOrderAsync(orderReq, ct).ConfigureAwait(false);
+                    msg += " + 대응 수주 자동생성 완료";
+                }
+                catch (OperationCanceledException)
+                {
+                    // 취소는 실패가 아니므로 "수주 실패" 안내로 둔갑시키지 않고 그대로 전파.
+                    throw;
+                }
+                catch (Exception chainEx)
+                {
+                    // 확정은 이미 반영됨 — 연쇄만 실패. 사용자에게 확정 사실과 후속 수동 조치를 분리 안내.
+                    _logger.LogWarning(chainEx, "AI 직원 수주 연쇄 실패(확정은 완료): draft={Draft}", req.DraftId);
+                    msg += " (대응 수주 자동생성은 실패했습니다 — 수주는 수동으로 생성해 주세요)";
+                }
             }
 
             await _audit.LogAsync(
@@ -352,6 +371,11 @@ public sealed class ChatbotService : IChatbotService
                 ChainedId = chainedId,
                 ChainedNo = chainedNo
             };
+        }
+        catch (OperationCanceledException)
+        {
+            // 취소는 오류 메시지로 둔갑시키지 않고 그대로 전파(요청 취소 의미 보존).
+            throw;
         }
         catch (Exception ex)
         {

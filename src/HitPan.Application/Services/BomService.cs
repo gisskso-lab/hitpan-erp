@@ -855,16 +855,18 @@ public class BomService : IBomService
         // 2) 발주서 번호 채번(해당일자 순번) — WO-11 한글 prefix
         var today = DateTime.Today;
         var prefix = $"발-{today:yyyyMMdd}-";
-        var cnt = await _db.QueryFirstOrDefaultAsync<int>(new CommandDefinition(
-            "SELECT COUNT(*) FROM purchase_orders WHERE tenant_id=@TenantId AND po_no LIKE CONCAT(@Prefix, '%')",
-            new { TenantId = tenantId, Prefix = prefix }, cancellationToken: ct)).ConfigureAwait(false);
-        var poNo = $"{prefix}{cnt + 1:000}";
         var poId = Guid.NewGuid().ToString();
 
         // 3) purchase_orders + purchase_order_items INSERT (단일 tx)
         using var tx = _db.BeginTransaction();
         try
         {
+            // 봉합 (2026-06-23, 5차 전수조사 SALES-02): 종전 COUNT(*)+1 채번은 트랜잭션 밖에서 실행되고
+            //   소프트삭제 행을 세서 갭 충돌 위험이 있었다. DocumentNumberHelper(MAX+1)로 일원화하고,
+            //   채번을 트랜잭션 안으로 이동해 INSERT 와 같은 가시성 컨텍스트에서 채번한다. (설계팀장 승인)
+            var poNo = await DocumentNumberHelper.NextNumberAsync(
+                _db, tenantId, "purchase_orders", "po_no", prefix, ct, transaction: tx).ConfigureAwait(false);
+
             await _db.ExecuteAsync(new CommandDefinition(
                 """
                 INSERT INTO purchase_orders

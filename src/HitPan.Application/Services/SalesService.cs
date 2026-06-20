@@ -1473,10 +1473,11 @@ public class SalesService : ISalesService
             using var tx = _db.BeginTransaction();
             try
             {
-                var cnt = await _db.QueryFirstOrDefaultAsync<int>(new CommandDefinition(
-                    "SELECT COUNT(*) FROM purchase_orders WHERE tenant_id=@Tid AND po_no LIKE CONCAT(@Prefix, '%')",
-                    new { Tid = tenantId, Prefix = prefix }, transaction: tx, cancellationToken: ct));
-                var poNo = $"{prefix}{cnt + 1:000}";
+                // 봉합 (2026-06-23, 5차 전수조사 SALES-02): COUNT(*)+1 채번은 소프트삭제(is_deleted) 행을
+                //   세서 갭 충돌이 나고, 코드 표준 채번 헬퍼(MAX+1)와 이탈해 있었다. DocumentNumberHelper 로
+                //   일원화한다(tx 안에서 채번해 직전 그룹 INSERT 가시성 보장). 동시 HTTP 충돌은 UNIQUE 가 차단.
+                var poNo = await DocumentNumberHelper.NextNumberAsync(
+                    _db, tenantId, "purchase_orders", "po_no", prefix, ct, transaction: tx);
                 var poId = Guid.NewGuid().ToString();
 
                 await _db.ExecuteAsync(new CommandDefinition(
