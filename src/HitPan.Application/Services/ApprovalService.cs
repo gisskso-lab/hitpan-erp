@@ -244,43 +244,61 @@ public class ApprovalService : IApprovalService
             status = "approved";
         }
 
-        await _db.ExecuteAsync(new CommandDefinition(
-            """
-            INSERT INTO approval_documents
-              (approval_id, tenant_id, doc_type, ref_id, ref_no, title, amount,
-               status, current_seq, total_lines, requester_id, requester_name, memo, created_by)
-            VALUES
-              (@ApprovalId, @TenantId, @DocType, @RefId, @RefNo, @Title, @Amount,
-               @Status, 1, @TotalLines, @RequesterId, @RequesterName, @Memo, @UserId)
-            """,
-            new
-            {
-                ApprovalId = approvalId,
-                TenantId = tenantId,
-                request.DocType,
-                request.RefId,
-                request.RefNo,
-                request.Title,
-                request.Amount,
-                Status = status,
-                TotalLines = lines.Count,
-                RequesterId = userId,
-                RequesterName = userName,
-                request.Memo,
-                UserId = userId
-            }, cancellationToken: ct));
-
-        // 자동승인인 경우 이력 기록
-        if (status == "approved")
+        // 봉합 (2026-06-23, 5차 전수조사 APPR-F1 P1):
+        //   종전엔 approval_documents INSERT 와 자동승인 approval_history INSERT 가 트랜잭션 없이 분리돼,
+        //   문서가 status='approved' 로 커밋된 뒤 이력 INSERT 가 실패하면(연결 끊김·순간 장애) "승인됐다는
+        //   이력이 없는 승인 문서"가 남아 감사 추적·결재 무결성이 깨졌다(헌법 #24 책임 추적). 같은 클래스
+        //   SaveLinesAsync(178)·ProcessAsync(456)는 이미 트랜잭션으로 묶여 있는데 자동승인 경로만 누락.
+        //   두 INSERT 를 한 트랜잭션으로 묶어 원자화한다(SaveLinesAsync 의 검증된 패턴 복제).
+        //   pending 경로는 INSERT 1건만 커밋되어 동작 동일 — 회귀 없음. (검증팀장 PASS·설계팀장 승인)
+        using var tx = _db.BeginTransaction();
+        try
         {
             await _db.ExecuteAsync(new CommandDefinition(
                 """
-                INSERT INTO approval_history
-                  (history_id, tenant_id, approval_id, seq_no, approver_id, approver_name, action, comment, acted_at)
+                INSERT INTO approval_documents
+                  (approval_id, tenant_id, doc_type, ref_id, ref_no, title, amount,
+                   status, current_seq, total_lines, requester_id, requester_name, memo, created_by)
                 VALUES
-                  (UUID(), @TenantId, @ApprovalId, 0, 'system', '시스템', 'approved', '기준금액 미만 자동승인', NOW(6))
+                  (@ApprovalId, @TenantId, @DocType, @RefId, @RefNo, @Title, @Amount,
+                   @Status, 1, @TotalLines, @RequesterId, @RequesterName, @Memo, @UserId)
                 """,
-                new { TenantId = tenantId, ApprovalId = approvalId }, cancellationToken: ct));
+                new
+                {
+                    ApprovalId = approvalId,
+                    TenantId = tenantId,
+                    request.DocType,
+                    request.RefId,
+                    request.RefNo,
+                    request.Title,
+                    request.Amount,
+                    Status = status,
+                    TotalLines = lines.Count,
+                    RequesterId = userId,
+                    RequesterName = userName,
+                    request.Memo,
+                    UserId = userId
+                }, transaction: tx, cancellationToken: ct));
+
+            // 자동승인인 경우 이력 기록 (동일 트랜잭션 — 문서·이력 원자화)
+            if (status == "approved")
+            {
+                await _db.ExecuteAsync(new CommandDefinition(
+                    """
+                    INSERT INTO approval_history
+                      (history_id, tenant_id, approval_id, seq_no, approver_id, approver_name, action, comment, acted_at)
+                    VALUES
+                      (UUID(), @TenantId, @ApprovalId, 0, 'system', '시스템', 'approved', '기준금액 미만 자동승인', NOW(6))
+                    """,
+                    new { TenantId = tenantId, ApprovalId = approvalId }, transaction: tx, cancellationToken: ct));
+            }
+
+            tx.Commit();
+        }
+        catch
+        {
+            tx.Rollback();
+            throw;
         }
 
         return approvalId;
