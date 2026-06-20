@@ -21,7 +21,9 @@ public static class HealthProbe
         var builder = Host.CreateApplicationBuilder(args);
         builder.Logging.ClearProviders();
         builder.Services.AddOptions<WatchdogOptions>()
-            .Bind(builder.Configuration.GetSection("Watchdog"));
+            .Bind(builder.Configuration.GetSection("Watchdog"))
+            // 봉합 (2026-06-23, 6차 D-P0-01): 진단 모드도 db.conf 단일출처로 정정해 실제 고객 도메인을 검사.
+            .PostConfigure(opts => DbConfReader.ApplyToOptions(opts));
         builder.Services.AddHttpClient();
 
         var host = builder.Build();

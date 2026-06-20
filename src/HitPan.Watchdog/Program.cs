@@ -21,7 +21,10 @@ EnsureEventSource("HitPanWatchdog");
 builder.Logging.AddEventLog(opts => { opts.SourceName = "HitPanWatchdog"; });
 
 builder.Services.AddOptions<WatchdogOptions>()
-    .Bind(builder.Configuration.GetSection("Watchdog"));
+    .Bind(builder.Configuration.GetSection("Watchdog"))
+    // 봉합 (2026-06-23, 6차 전수조사 D-P0-01·D-P1-02): bind 후 {app}\db.conf 단일출처로 HealthCheckUrl·
+    //   로컬 API 포트를 고객 환경에 맞게 덮어쓴다. demo 고정·5234 포트 오류 제거(자가복구 오판·집단 자해 차단).
+    .PostConfigure(opts => DbConfReader.ApplyToOptions(opts, msg => Console.Error.WriteLine(msg)));
 
 builder.Services.AddHttpClient();
 
@@ -48,8 +51,9 @@ static void EnsureEventSource(string sourceName)
         if (!EventLog.SourceExists(sourceName))
             EventLog.CreateEventSource(sourceName, "Application");
     }
-    catch (Exception)
+    catch (Exception ex)
     {
-        // 관리자 권한 부재 시 무시 — appsettings 기반 콘솔 로그로 fallback
+        // 헌법 #15: 빈 catch 금지. 관리자 권한 부재 시 EventLog 소스 생성 실패는 정상 폴백이나 흔적은 남긴다.
+        Console.Error.WriteLine($"[Watchdog] EventSource 생성 실패(관리자 권한 부재 가능) — 콘솔 로그로 폴백: {ex.Message}");
     }
 }

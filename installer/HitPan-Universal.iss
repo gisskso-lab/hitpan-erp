@@ -721,6 +721,50 @@ begin
   FixupOneAppSettings(ExpandConstant('{app}') + '\api\wwwroot\appsettings.json', TargetUrl);
 end;
 
+// 봉합 2026-06-23 (6차 전수조사 D-P0-01·D-P1-02): 워치독 appsettings.json 의 HealthCheckUrl(demo 고정)·
+//   로컬 API 포트(5234 오류)를 고객 도메인·슬롯 포트로 정정. 코드측 DbConfReader 가 런타임에 db.conf 로
+//   동적 구성하지만, 파일에 demo 값이 남지 않도록 설치 시점에도 정정(이중 안전). LOCAL 모드면 HealthCheckUrl 공백.
+procedure FixupWatchdogAppSettings();
+var
+  Path: String;
+  HealthUrl: String;
+  Content: AnsiString;
+begin
+  Path := ExpandConstant('{app}') + '\watchdog\appsettings.json';
+  if not FileExists(Path) then begin
+    Log('[FixupWatchdog] 0건(파일없음): ' + Path);
+    Exit;
+  end;
+  if (G_PrimaryDomain = '') or (Pos('localhost', G_PrimaryDomain) > 0) then
+    HealthUrl := ''   // LOCAL 모드 — 외부 헬스체크 비활성(DbConfReader 와 동일 정책)
+  else
+    HealthUrl := 'https://' + G_PrimaryDomain + '/health';
+
+  Content := '{' + #13#10 +
+    '  "Logging": { "LogLevel": { "Default": "Information", "Microsoft.Hosting.Lifetime": "Information" },' + #13#10 +
+    '    "EventLog": { "LogLevel": { "Default": "Information" }, "SourceName": "HitPanWatchdog" } },' + #13#10 +
+    '  "Watchdog": {' + #13#10 +
+    '    "LoopIntervalSeconds": 60,' + #13#10 +
+    '    "HealthCheckUrl": "' + HealthUrl + '",' + #13#10 +
+    '    "HealthCheckTimeoutSeconds": 10,' + #13#10 +
+    '    "HealthCheckFailThreshold": 3,' + #13#10 +
+    '    "MetaPingEndpoint": "https://back.hitpan.kr/watchdog/ping",' + #13#10 +
+    '    "MetaPingEmergencyEndpoint": "https://back.hitpan.kr/watchdog/emergency",' + #13#10 +
+    '    "MetaPingIntervalMinutes": 5,' + #13#10 +
+    '    "CoolDownMaxPerHour": 5,' + #13#10 +
+    '    "Processes": {' + #13#10 +
+    '      "Services": [ "MariaDB", "cloudflared" ],' + #13#10 +
+    '      "HttpEndpoints": [ { "Name": "HitPan.API", "Url": "http://127.0.0.1:' + IntToStr(G_ApiPort) + '/health" } ]' + #13#10 +
+    '    }' + #13#10 +
+    '  }' + #13#10 +
+    '}' + #13#10;
+  if not SaveStringToFile(Path, Content, False) then begin
+    Log('[FixupWatchdog] SaveStringToFile 실패: ' + Path);
+    Exit;
+  end;
+  Log('[FixupWatchdog] 정정 완료 → HealthCheckUrl=' + HealthUrl + ', API포트=' + IntToStr(G_ApiPort));
+end;
+
 procedure CurStepChanged(CurStep: TSetupStep);
 var
   ResultCode: Integer;
@@ -908,6 +952,10 @@ begin
   //   1.2.12까지 api-demo.hitpan.kr 가도 → CORS preflight 차단 사고.
   //   LOCAL 모드(G_PrimaryDomain = 'localhost:5234')에서도 정정 가도.
   FixupBlazorAppSettings();
+
+  // 5-1-B. 봉합 2026-06-23 (6차, D-P0-01·D-P1-02): 워치독 appsettings 도 고객 도메인·슬롯 포트로 정정.
+  //   런타임 DbConfReader 가 db.conf 로 동적 구성하나, 파일에 demo 값이 남지 않게 설치 시점에도 정정(이중 안전).
+  FixupWatchdogAppSettings();
 
   // 5-2. registry.json 영역 박음 (사고 #21·#30 봉합)
   //   사고 #27 봉합 (WS-20260612-01): JSON 따옴표 escape 영역 박음
