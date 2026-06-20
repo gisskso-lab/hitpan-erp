@@ -441,10 +441,10 @@ public class ApprovalService : IApprovalService
     {
         await EnsureOpenAsync(ct);
 
-        // 현재 문서 조회
-        var doc = await _db.QueryFirstOrDefaultAsync<(string Status, int CurrentSeq, int TotalLines, string DocType)>(
+        // 현재 문서 조회 (RefId 추가 — NEW-A1: doc_type='leave' 최종처리 시 원본 leave_requests 동기화용)
+        var doc = await _db.QueryFirstOrDefaultAsync<(string Status, int CurrentSeq, int TotalLines, string DocType, string RefId)>(
             new CommandDefinition(
-                "SELECT status AS Status, current_seq AS CurrentSeq, total_lines AS TotalLines, doc_type AS DocType FROM approval_documents WHERE approval_id = @ApprovalId AND tenant_id = @TenantId",
+                "SELECT status AS Status, current_seq AS CurrentSeq, total_lines AS TotalLines, doc_type AS DocType, ref_id AS RefId FROM approval_documents WHERE approval_id = @ApprovalId AND tenant_id = @TenantId",
                 new { ApprovalId = approvalId, TenantId = tenantId }, cancellationToken: ct));
 
         // 봉합 (2026-06-20, APPR-02): 문서 미존재(QueryFirstOrDefault → default 튜플, Status=null)를
@@ -550,6 +550,34 @@ public class ApprovalService : IApprovalService
                 //   단일 롤백을 수행한다. 종전엔 여기서 롤백 후 throw → catch 가 완료된 tx 에 재롤백 시도 →
                 //   매 동시충돌마다 무의미한 "rollback failed" 에러 로그로 운영 로그를 오염시켰다.
                 throw new InvalidOperationException("이미 처리된 결재입니다. (동시 처리 감지)");
+            }
+
+            // 봉합 (2026-06-23, 6차 전수조사 NEW-A1, 사장님 결재 "연차도 결재선 + A·B 둘다"):
+            //   연차(doc_type='leave')는 결재선을 타고 결재함에서 처리된다. 결재함 최종 처리 시 원본
+            //   leave_requests 와 잔여연차를 ★같은 트랜잭션(tx)★에서 동기화해, "결재함서 승인했는데 연차 미반영"
+            //   끊김(헌법 #20)을 제거한다. ApprovalService→LeaveRequestService 의존을 만들지 않고 공통 헬퍼로 처리.
+            //   - 최종 단계 승인(approved && current_seq>=total_lines): leave_requests='approved' + 잔여차감.
+            //     중간 단계 승인(current_seq++)은 아직 미확정이라 건드리지 않음(헌법 #6 confirmed 시점).
+            //   - 반려: leave_requests='rejected'. (status='pending' 가드로 멱등 — HR 화면이 먼저 처리했으면 0행.)
+            if (doc.DocType == "leave" && !string.IsNullOrEmpty(doc.RefId))
+            {
+                if (request.Action == "rejected")
+                {
+                    await _db.ExecuteAsync(new CommandDefinition(
+                        "UPDATE leave_requests SET status='rejected', approved_by=@Who, approved_at=NOW(6), reject_reason=@Reason, updated_at=NOW(6) WHERE tenant_id=@TenantId AND request_id=@RefId AND status='pending'",
+                        new { Who = employeeId, Reason = request.Comment, TenantId = tenantId, RefId = doc.RefId },
+                        transaction: tx, cancellationToken: ct));
+                }
+                else if (request.Action == "approved" && doc.CurrentSeq >= doc.TotalLines)
+                {
+                    var leaveAffected = await _db.ExecuteAsync(new CommandDefinition(
+                        "UPDATE leave_requests SET status='approved', approved_by=@Who, approved_at=NOW(6), reject_reason=NULL, updated_at=NOW(6) WHERE tenant_id=@TenantId AND request_id=@RefId AND status='pending'",
+                        new { Who = employeeId, TenantId = tenantId, RefId = doc.RefId },
+                        transaction: tx, cancellationToken: ct));
+                    // 실제로 pending→approved 전이된 경우만 차감(HR 화면이 먼저 승인했으면 0행 → 이중차감 방지).
+                    if (leaveAffected > 0)
+                        await LeaveBalanceHelper.DeductAsync(_db, tx, tenantId, doc.RefId, ct);
+                }
             }
 
             tx.Commit();

@@ -165,28 +165,12 @@ public sealed class LeaveRequestService : ILeaveRequestService
                 return false; // 미존재 또는 이미 처리 — 차감하지 않음
             }
 
-            // 승인된 신청의 사원·일수·유형 조회 후 'annual' 연차만 잔여 차감.
-            var info = await _db.QueryFirstOrDefaultAsync<(string EmployeeId, decimal LeaveDays, string LeaveType)>(
-                new CommandDefinition(
-                    "SELECT employee_id AS EmployeeId, leave_days AS LeaveDays, leave_type AS LeaveType FROM leave_requests WHERE tenant_id=@TenantId AND request_id=@RequestId",
-                    new { TenantId = tenantId, RequestId = request.RequestId },
-                    transaction: tx, cancellationToken: ct)).ConfigureAwait(false);
+            // 'annual' 연차 잔여 차감 (LV-W-01) — 결재함 경로(ProcessAsync)와 단일 헬퍼 공유(NEW-A1).
+            await LeaveBalanceHelper.DeductAsync(_db, tx, tenantId, request.RequestId, ct).ConfigureAwait(false);
 
-            if (info.LeaveType == "annual" && info.LeaveDays > 0m && !string.IsNullOrEmpty(info.EmployeeId))
-            {
-                await _db.ExecuteAsync(new CommandDefinition(
-                    "UPDATE employees SET annual_leave_used = annual_leave_used + @Days, updated_at = NOW(6) WHERE tenant_id=@TenantId AND employee_id=@EmpId",
-                    new { Days = info.LeaveDays, TenantId = tenantId, EmpId = info.EmployeeId },
-                    transaction: tx, cancellationToken: ct)).ConfigureAwait(false);
-
-                // 한도 초과는 차단하지 않고 경고만 — 현장 연차 선사용·이월 관행 수용(헌법 #20·#15).
-                var over = await _db.ExecuteScalarAsync<int>(new CommandDefinition(
-                    "SELECT CASE WHEN annual_leave_used > annual_leave_total THEN 1 ELSE 0 END FROM employees WHERE tenant_id=@TenantId AND employee_id=@EmpId",
-                    new { TenantId = tenantId, EmpId = info.EmployeeId },
-                    transaction: tx, cancellationToken: ct)).ConfigureAwait(false);
-                if (over == 1)
-                    System.Diagnostics.Trace.TraceWarning($"[Leave] 사원 {info.EmployeeId} 연차 한도 초과 사용(선사용/이월 가능) — request {request.RequestId}");
-            }
+            // 봉합 (2026-06-23, NEW-A1 양방향): HR 화면에서 승인하면 대응 결재문서도 닫아 결재함 유령 pending 제거.
+            //   결재선 미설정(문서 없음)·결재함이 먼저 닫은 경우는 status='pending' 가드로 0행(무해).
+            await LeaveBalanceHelper.CloseLinkedApprovalAsync(_db, tx, tenantId, request.RequestId, "approved", ct).ConfigureAwait(false);
 
             tx.Commit();
             return true;
@@ -216,17 +200,39 @@ public sealed class LeaveRequestService : ILeaveRequestService
               AND status = 'pending'
             """;
 
-        var affected = await _db.ExecuteAsync(new CommandDefinition(
-            sql,
-            new
+        // 봉합 (2026-06-23, NEW-A1 양방향): 반려도 대응 결재문서를 닫아야 하므로 두 UPDATE 를 트랜잭션으로 원자화.
+        using var tx = (_db as DbConnection)?.BeginTransaction()
+                       ?? throw new InvalidOperationException("DbConnection 트랜잭션 사용 불가");
+        try
+        {
+            var affected = await _db.ExecuteAsync(new CommandDefinition(
+                sql,
+                new
+                {
+                    TenantId = tenantId,
+                    ApproverId = approverId,
+                    RequestId = request.RequestId,
+                    RejectReason = request.RejectReason
+                },
+                transaction: tx, cancellationToken: ct)).ConfigureAwait(false);
+
+            if (affected == 0)
             {
-                TenantId = tenantId,
-                ApproverId = approverId,
-                RequestId = request.RequestId,
-                RejectReason = request.RejectReason
-            },
-            cancellationToken: ct)).ConfigureAwait(false);
-        return affected > 0;
+                tx.Rollback();
+                return false; // 미존재 또는 이미 처리
+            }
+
+            // HR 화면에서 반려하면 대응 결재문서도 rejected 로 닫아 결재함 유령 pending 제거(NEW-A1 양방향).
+            await LeaveBalanceHelper.CloseLinkedApprovalAsync(_db, tx, tenantId, request.RequestId, "rejected", ct).ConfigureAwait(false);
+
+            tx.Commit();
+            return true;
+        }
+        catch
+        {
+            tx.Rollback();
+            throw;
+        }
     }
 
     /// <summary>
