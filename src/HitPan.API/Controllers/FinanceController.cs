@@ -89,9 +89,12 @@ public class FinanceController : ControllerBase
     public async Task<IActionResult> CreateExpense([FromBody] CreateExpenseRequest req, CancellationToken ct)
     {
         var tid = HttpContext.Items["TenantId"]?.ToString();
-        var uid = HttpContext.Items["UserId"]?.ToString();
-        if (string.IsNullOrEmpty(tid) || string.IsNullOrEmpty(uid)) return Forbid();
-        var id = await _svc.CreateExpenseAsync(req, tid, uid, ct);
+        // 봉합 (2026-06-21, A-P0-1 연장): expenses.employee_id 는 employees FK(목록 LEFT JOIN 으로 직원명 표시),
+        //   결재 트리거 requester_id 도 employee_id 체계여야 기안 목록(GetSent)에 뜬다. 종전 user_id 를 넘겨
+        //   경비 직원명이 비고 자동 결재가 "내가 보낸 결재"에서 누락됐다. employee_id 클레임으로 교체.
+        var eid = HttpContext.Items["EmployeeId"]?.ToString();
+        if (string.IsNullOrEmpty(tid) || string.IsNullOrEmpty(eid)) return Forbid();
+        var id = await _svc.CreateExpenseAsync(req, tid, eid, ct);
         return Created($"/api/finance/expenses/{id}", new { id });
     }
 

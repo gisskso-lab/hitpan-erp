@@ -333,13 +333,23 @@ public class SalesService : ISalesService
             }
         }
 
-        foreach (var line in lines)
+        // 봉합 (2026-06-21, 7차 전수조사 B-1 P0): stock_ledger UNIQUE 키 = (tenant_id, source_type, source_id,
+        //   item_id, move_type) — warehouse·라인식별자 없음(품목단위 유일). 종전엔 라인별로 그대로 AddAsync 해,
+        //   한 거래명세서에 같은 품목이 2라인(다른 창고·다른 단가) 들어가면 같은 키가 2번 INSERT → SaveChangesAsync
+        //   UNIQUE 위반 → 거래 전체 롤백("재고 안 빠짐", 헌법 #20). 표준 데모는 통과하나 실사용 첫날 터지는 잠복형.
+        //   봉합: INSERT 전 item_id 로 합산해 키당 1행만 기록(수량·금액 합산). warehouse 는 회사 합산 가용재고
+        //   정책(위 317행 주석 — 다창고는 정식 버전)상 원장 키가 아니므로 대표 1개로 기록해도 무결성 손실 없음.
+        //   단가는 라인별로 다를 수 있어 금액(SupplyAmount) 합을 그대로 보존하고, UnitCost 는 합산 단가(금액/수량)로 보정.
+        foreach (var grp in lines.GroupBy(x => x.ItemId))
         {
+            var first = grp.First();
+            var qtySum = grp.Sum(x => x.Qty);
+            var supplySum = grp.Sum(x => x.SupplyAmount);
             await ledgerRepo.AddAsync(new StockLedger
             {
                 TenantId = delivery.TenantId,
-                ItemId = line.ItemId,
-                WarehouseId = line.WarehouseId,
+                ItemId = grp.Key,
+                WarehouseId = first.WarehouseId,
                 PartnerId = delivery.PartnerId,
                 EmployeeId = delivery.EmployeeId,
                 LedgerDate = delivery.DeliveryDate,
@@ -349,9 +359,9 @@ public class SalesService : ISalesService
                 SourceId = delivery.DeliveryId,
                 DocNo = delivery.DeliveryNo,
                 QtyIn = 0m,
-                QtyOut = line.Qty,
-                UnitCost = line.UnitPrice,
-                SupplyAmount = line.SupplyAmount
+                QtyOut = qtySum,
+                UnitCost = qtySum != 0m ? supplySum / qtySum : first.UnitPrice,
+                SupplyAmount = supplySum
             });
         }
 
@@ -937,7 +947,21 @@ public class SalesService : ISalesService
             string ym = dd.ToString("yyyy-MM");
 
             // 1) 원본 완제품 OUT의 역행 IN 원장
-            foreach (var it in items)
+            // 봉합 (2026-06-21, 7차 전수조사 B-1 P0): 역행 원장도 stock_ledger UNIQUE 키
+            //   (tenant, source_type=sales_cancel, source_id=deliveryId, item_id, move_type=in) 단위 유일.
+            //   확정과 동일하게 같은 품목 2라인이면 라인별 INSERT 가 키를 2번 찍어 취소 자체가 차단됐다(헌법 #20).
+            //   item_id 로 합산해 역행도 키당 1행만 기록(확정 OUT 합산과 대칭).
+            var reverseGroups = items
+                .GroupBy(it => (string)it.item_id)
+                .Select(g => new
+                {
+                    ItemId = g.Key,
+                    Wh = (string)g.First().warehouse_id,
+                    Qty = g.Sum(x => (decimal)x.qty),
+                    Supply = g.Sum(x => (decimal)x.supply_amount),
+                    UnitPrice = (decimal)g.First().unit_price
+                });
+            foreach (var it in reverseGroups)
             {
                 await _db.ExecuteAsync(new CommandDefinition(
                     """
@@ -951,16 +975,16 @@ public class SalesService : ISalesService
                     new
                     {
                         Tid = tenantId,
-                        ItemId = (string)it.item_id,
-                        Wh = (string)it.warehouse_id,
+                        ItemId = it.ItemId,
+                        Wh = it.Wh,
                         PartnerId = (string)header.partner_id,
                         EmpId = employeeId,
                         Date = dd, Ym = ym,
                         Did = deliveryId,
                         DocNo = (string)header.delivery_no,
-                        Qty = (decimal)it.qty,
-                        UnitPrice = (decimal)it.unit_price,
-                        Supply = (decimal)it.supply_amount
+                        Qty = it.Qty,
+                        UnitPrice = it.UnitPrice,
+                        Supply = it.Supply
                     },
                     transaction: tx, cancellationToken: ct));
             }
@@ -1280,7 +1304,15 @@ public class SalesService : ISalesService
               AND bh.is_active=1
             """;
 
-        foreach (var line in lines.Where(l => assemblyIds.Contains(l.ItemId)))
+        // 봉합 (2026-06-21, 7차 전수조사 B-1 P0): bom_explosion OUT 원장도 stock_ledger UNIQUE 키
+        //   (tenant, source_type=bom_explosion, source_id=deliveryId, item_id, move_type=out) 단위 유일이다.
+        //   종전엔 (조립라인 × 자재) 이중 루프로 자재별 OUT 을 라인마다 AddAsync 해, 공통 자재를 쓰는 조립품이
+        //   2라인이거나 한 BOM 에 같은 자재가 2줄이면 같은 키가 2번 INSERT → SaveChangesAsync UNIQUE 위반 →
+        //   거래 전체 롤백(헌법 #20). 봉합: 자재 소비량을 material_item_id 로 누적 합산한 뒤 자재당 1행만 기록.
+        //   음수재고 검사도 합산 총소비량으로 1회 — 라인별 개별 검사가 잔량을 중복 소진 없이 각각 통과시키던 허점도 닫힘.
+        var materialConsumption = new Dictionary<string, decimal>();
+        var assemblyLines = lines.Where(l => assemblyIds.Contains(l.ItemId)).ToList();
+        foreach (var line in assemblyLines)
         {
             var materials = await _db.QueryAsync<(string MaterialItemId, decimal BomQty)>(
                 new CommandDefinition(bomSql,
@@ -1289,40 +1321,49 @@ public class SalesService : ISalesService
 
             foreach (var m in materials)
             {
-                var consumeQty = line.Qty * m.BomQty;
-                // SALES-03 봉합: negative_stock_allow=false 면 자재도 회사 합산 잔량으로 음수재고 검사
-                //   (완제품 검사 311~ 와 동일 정책·동일 SQL 집계). 부족하면 확정 차단.
-                if (!negativeStockAllow)
-                {
-                    var matBalance = await _db.ExecuteScalarAsync<decimal>(new CommandDefinition(
-                        "SELECT COALESCE(SUM(qty_in) - SUM(qty_out), 0) FROM stock_ledger WHERE tenant_id = @TenantId AND item_id = @ItemId",
-                        new { TenantId = delivery.TenantId, ItemId = m.MaterialItemId }, cancellationToken: ct));
-                    if (matBalance - consumeQty < 0m)
-                    {
-                        throw new InvalidOperationException("조립 자재 재고가 부족합니다.");
-                    }
-                }
-
-                await ledgerRepo.AddAsync(new StockLedger
-                {
-                    TenantId = delivery.TenantId,
-                    ItemId = m.MaterialItemId,
-                    WarehouseId = line.WarehouseId,
-                    PartnerId = delivery.PartnerId,
-                    EmployeeId = delivery.EmployeeId,
-                    LedgerDate = delivery.DeliveryDate,
-                    Ym = delivery.DeliveryDate.ToString("yyyy-MM"),
-                    MoveType = StockMoveType.Out,
-                    SourceType = "bom_explosion",
-                    SourceId = delivery.DeliveryId,
-                    DocNo = delivery.DeliveryNo,
-                    QtyIn = 0m,
-                    QtyOut = consumeQty,
-                    UnitCost = 0m,
-                    SupplyAmount = 0m,
-                    Memo = $"조립 자재소비 (완제품: {line.ItemId})"
-                });
+                materialConsumption.TryGetValue(m.MaterialItemId, out var acc);
+                materialConsumption[m.MaterialItemId] = acc + line.Qty * m.BomQty;
             }
+        }
+        if (materialConsumption.Count == 0) return;
+
+        // 대표 창고: 조립 라인 중 첫 라인의 창고(완제품 OUT 합산과 동일 — 회사 합산 가용재고 정책, 317행 주석).
+        //   materialConsumption.Count>0 이면 자재를 만든 조립 라인이 반드시 존재하므로 assemblyLines 는 비어있지 않다.
+        var bomWarehouseId = assemblyLines[0].WarehouseId;
+        foreach (var (materialItemId, consumeQty) in materialConsumption)
+        {
+            // SALES-03 봉합: negative_stock_allow=false 면 자재도 회사 합산 잔량으로 음수재고 검사
+            //   (완제품 검사 311~ 와 동일 정책·동일 SQL 집계). 합산 총소비량으로 검사 — 부족하면 확정 차단.
+            if (!negativeStockAllow)
+            {
+                var matBalance = await _db.ExecuteScalarAsync<decimal>(new CommandDefinition(
+                    "SELECT COALESCE(SUM(qty_in) - SUM(qty_out), 0) FROM stock_ledger WHERE tenant_id = @TenantId AND item_id = @ItemId",
+                    new { TenantId = delivery.TenantId, ItemId = materialItemId }, cancellationToken: ct));
+                if (matBalance - consumeQty < 0m)
+                {
+                    throw new InvalidOperationException("조립 자재 재고가 부족합니다.");
+                }
+            }
+
+            await ledgerRepo.AddAsync(new StockLedger
+            {
+                TenantId = delivery.TenantId,
+                ItemId = materialItemId,
+                WarehouseId = bomWarehouseId,
+                PartnerId = delivery.PartnerId,
+                EmployeeId = delivery.EmployeeId,
+                LedgerDate = delivery.DeliveryDate,
+                Ym = delivery.DeliveryDate.ToString("yyyy-MM"),
+                MoveType = StockMoveType.Out,
+                SourceType = "bom_explosion",
+                SourceId = delivery.DeliveryId,
+                DocNo = delivery.DeliveryNo,
+                QtyIn = 0m,
+                QtyOut = consumeQty,
+                UnitCost = 0m,
+                SupplyAmount = 0m,
+                Memo = "조립 자재소비"
+            });
         }
     }
 

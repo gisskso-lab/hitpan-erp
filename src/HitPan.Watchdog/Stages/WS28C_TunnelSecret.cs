@@ -86,11 +86,14 @@ public class WS28C_TunnelSecret
         }
     }
 
-    // 봉합 (2026-06-20, WD-01): HITPAN_TUNNEL_ID 는 인스톨러가 Machine 범위로 저장한다(HealthProbe·
-    //   MetaPingClient 와 동일). Process 기본값만 읽으면 서비스가 env 설정보다 먼저 떠 있을 때 null →
-    //   자가복구 무력화. Machine 우선 + Process 폴백으로 통일.
+    // 봉합 (2026-06-21, 7차 전수조사 D6-P0-01, 사장님 결재 "db.conf 단일출처로 통합"):
+    //   종전엔 Machine 환경변수 HITPAN_TUNNEL_ID 를 읽었으나, 인스톨러가 이 env var 를 더 이상 만들지 않아
+    //   (2026-06-12 폐기) 신규설치 PC 에서 항상 null → 터널 자가복구가 영구 무력(헌법 #28·#30).
+    //   인스톨러가 {app}\db.conf 에 쓰는 TUNNEL_ID(=백오피스 응답 domain.tunnelId, CF 터널 UUID)를 읽는다.
+    //   env var 폴백을 남겨 구버전 설치(환경변수 잔존 PC)와도 하위호환.
     private static string? ReadTunnelId() =>
-        Environment.GetEnvironmentVariable("HITPAN_TUNNEL_ID", EnvironmentVariableTarget.Machine)
+        DbConfReader.GetValue("TUNNEL_ID")
+        ?? Environment.GetEnvironmentVariable("HITPAN_TUNNEL_ID", EnvironmentVariableTarget.Machine)
         ?? Environment.GetEnvironmentVariable("HITPAN_TUNNEL_ID");
 
     public async Task<bool> RegenerateAsync(CancellationToken ct = default)

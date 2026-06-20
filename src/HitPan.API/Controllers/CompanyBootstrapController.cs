@@ -236,27 +236,64 @@ public class CompanyBootstrapController : ControllerBase
             var userId = Guid.NewGuid().ToString();
             var passwordHash = BCrypt.Net.BCrypt.HashPassword(req.Password);
 
-            await db.ExecuteAsync(@"
-                INSERT INTO users
-                  (user_id, tenant_id, email, password_hash, user_name,
-                   role, account_type, is_parent,
-                   is_active, failed_login_count,
-                   created_at, updated_at, is_deleted, emp_name)
-                VALUES
-                  (@UserId, @TenantId, @Email, @Hash, @Name,
-                   'tenant_admin', 'tenant_admin', 1,
-                   1, 0,
-                   UTC_TIMESTAMP(6), UTC_TIMESTAMP(6), 0, @Name)",
-                new
-                {
-                    UserId = userId,
-                    TenantId = tenantId,
-                    req.Email,
-                    Hash = passwordHash,
-                    req.Name
-                });
+            // 봉합 (2026-06-21, 7차 전수조사 A-P0-1-REGRESSION P0, 검증팀장·설계팀장 교차검증):
+            //   결재·경비는 employee_id 체계(approval_doc_lines.approver_id·approval_documents.requester_id·
+            //   expenses.employee_id)로 동작하는데, 종전엔 부모계정을 users 에만 만들고 employees 행을 안 만들어
+            //   로그인 토큰의 employee_id 클레임이 빈 문자열이 됐다(AuthService 가 employees WHERE user_id 로 조회).
+            //   → 모든 고객사의 첫 사용자인 부모계정이 결재·경비 6개 API 에서 403(헌법 #20·#35 부모계정=ERP 진입점).
+            //   부모계정 생성과 동일 흐름에서 user_id 로 연결된 employees 행을 함께 만든다(UserService.CreateAsync 패턴).
+            //   emp_no='0001'(첫 사원), role='tenant_admin'(부모 권한). 단일 회사라 tenant 내 emp_no 충돌 없음.
+            var employeeId = Guid.NewGuid().ToString();
+            // 원자성: user 만 생기고 employee 가 누락되면 다시 A-P0-1-REGRESSION(빈 employee_id) 상태가 되고,
+            //   재실행 가드(existingParent>0)에 막혀 영영 사원을 못 만든다. 두 INSERT 를 한 트랜잭션으로 원자화한다.
+            await using var tx = await db.BeginTransactionAsync(ct);
+            try
+            {
+                await db.ExecuteAsync(new CommandDefinition(@"
+                    INSERT INTO users
+                      (user_id, tenant_id, email, password_hash, user_name,
+                       role, account_type, is_parent,
+                       is_active, failed_login_count,
+                       created_at, updated_at, is_deleted, emp_name)
+                    VALUES
+                      (@UserId, @TenantId, @Email, @Hash, @Name,
+                       'tenant_admin', 'tenant_admin', 1,
+                       1, 0,
+                       UTC_TIMESTAMP(6), UTC_TIMESTAMP(6), 0, @Name)",
+                    new
+                    {
+                        UserId = userId,
+                        TenantId = tenantId,
+                        req.Email,
+                        Hash = passwordHash,
+                        req.Name
+                    }, transaction: tx, cancellationToken: ct));
 
-            _logger.LogInformation("[CompanyBootstrap] 부모계정 생성 완료 tenant={Code} email={Email}",
+                await db.ExecuteAsync(new CommandDefinition(@"
+                    INSERT INTO employees
+                      (employee_id, tenant_id, user_id, emp_no, emp_name,
+                       emp_type, join_date, is_active, created_at, updated_at, role, email)
+                    VALUES
+                      (@EmployeeId, @TenantId, @UserId, '0001', @Name,
+                       'fulltime', UTC_TIMESTAMP(6), 1, UTC_TIMESTAMP(6), UTC_TIMESTAMP(6), 'tenant_admin', @Email)",
+                    new
+                    {
+                        EmployeeId = employeeId,
+                        TenantId = tenantId,
+                        UserId = userId,
+                        req.Name,
+                        req.Email
+                    }, transaction: tx, cancellationToken: ct));
+
+                await tx.CommitAsync(ct);
+            }
+            catch
+            {
+                await tx.RollbackAsync(ct);
+                throw;
+            }
+
+            _logger.LogInformation("[CompanyBootstrap] 부모계정+사원 생성 완료 tenant={Code} email={Email}",
                 tenantCode, req.Email);
 
             return Ok(new

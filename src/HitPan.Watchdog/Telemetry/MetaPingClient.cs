@@ -129,14 +129,22 @@ public class MetaPingClient
         return "sha256:" + Convert.ToHexString(hash).ToLowerInvariant();
     }
 
+    // 봉합 (2026-06-21, 7차 전수조사 D6-P0-01, 사장님 결재 "db.conf 단일출처로 통합"):
+    //   종전엔 Machine 환경변수 HITPAN_TENANT_ID·HITPAN_LICENSE_KEY 를 읽었으나, 인스톨러가 이 env var 를
+    //   더 이상 만들지 않아(2026-06-12 폐기) 신규설치 PC 에서 tenant_id='unknown'·license_key='' →
+    //   본사 메타 ping 식별·Bearer 인증이 무력화됐다. 인스톨러가 {app}\db.conf 에 쓰는 TENANT_CODE(T-XXX,
+    //   해시 식별용이라 GUID 대신 코드여도 PC 전체 일관성만 있으면 본사 식별 성립)·LICENSE_KEY(설치 시리얼)를
+    //   읽는다. 식별자는 모두 SHA256 해시 후 전송(헌법 #22 평문 미전송). env var 폴백으로 구버전 하위호환.
     public static string GetTenantId() =>
-        Environment.GetEnvironmentVariable("HITPAN_TENANT_ID", EnvironmentVariableTarget.Machine)
+        DbConfReader.GetValue("TENANT_CODE")
+        ?? Environment.GetEnvironmentVariable("HITPAN_TENANT_ID", EnvironmentVariableTarget.Machine)
         ?? Environment.GetEnvironmentVariable("HITPAN_TENANT_ID")
         ?? "unknown";
 
     private static string GetBearerToken(string tenantIdHash)
     {
-        var licenseKey = Environment.GetEnvironmentVariable("HITPAN_LICENSE_KEY", EnvironmentVariableTarget.Machine)
+        var licenseKey = DbConfReader.GetValue("LICENSE_KEY")
+                         ?? Environment.GetEnvironmentVariable("HITPAN_LICENSE_KEY", EnvironmentVariableTarget.Machine)
                          ?? Environment.GetEnvironmentVariable("HITPAN_LICENSE_KEY")
                          ?? "";
         var machineGuid = Environment.MachineName;

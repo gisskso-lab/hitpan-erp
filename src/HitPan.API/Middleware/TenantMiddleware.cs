@@ -63,6 +63,11 @@ public sealed class TenantMiddleware
         context.Items["TenantId"] = tenantId;
         context.Items["UserId"] = userId;
         context.Items["UserName"] = context.User.FindFirstValue("name");
+        // 봉합 (2026-06-21, A-P0-1): employee_id 는 user_id 와 별개 GUID 다(AuthService 가 두 클레임을 따로 발급,
+        //   UserService.CreateAsync 가 각각 Guid.NewGuid()). 결재(approval_doc_lines.approver_id·approval_documents.
+        //   requester_id·approval_history.approver_id)는 전부 employee_id 체계인데 종전 컨트롤러가 user_id 를 넘겨
+        //   대기함이 빈 목록이 되고 "결재 권한이 없습니다"로 영구 차단됐다(헌법 #20). 결재용 식별자를 별도로 노출한다.
+        context.Items["EmployeeId"] = context.User.FindFirstValue("employee_id");
 
         // ERP는 단일 회사 — 부모/자식 모두 tenant_id(회사 식별자) 필수.
         if (string.IsNullOrWhiteSpace(tenantId))

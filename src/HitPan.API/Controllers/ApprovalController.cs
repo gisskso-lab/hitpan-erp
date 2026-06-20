@@ -77,10 +77,12 @@ public class ApprovalController : ControllerBase
     public async Task<IActionResult> CreateApproval([FromBody] CreateApprovalRequest request, CancellationToken ct)
     {
         var tenantId = HttpContext.Items["TenantId"]?.ToString();
-        var userId = HttpContext.Items["UserId"]?.ToString();
+        // 봉합 (2026-06-21, A-P0-1): requester_id 는 employee_id 체계여야 결재선(approver_id=employee_id)·
+        //   대기/완료 매칭과 정합한다. 종전엔 user_id 를 저장해 결재선 결재자와 영영 불일치했다(헌법 #20).
+        var employeeId = HttpContext.Items["EmployeeId"]?.ToString();
         var userName = HttpContext.Items["UserName"]?.ToString() ?? "Unknown";
-        if (string.IsNullOrEmpty(tenantId) || string.IsNullOrEmpty(userId)) return Forbid();
-        var id = await _approvalService.CreateApprovalAsync(request, tenantId, userId, userName, ct);
+        if (string.IsNullOrEmpty(tenantId) || string.IsNullOrEmpty(employeeId)) return Forbid();
+        var id = await _approvalService.CreateApprovalAsync(request, tenantId, employeeId, userName, ct);
         return Created($"/api/approval/documents/{id}", new { id });
     }
 
@@ -91,7 +93,8 @@ public class ApprovalController : ControllerBase
     public async Task<IActionResult> GetPending(CancellationToken ct)
     {
         var tenantId = HttpContext.Items["TenantId"]?.ToString();
-        var employeeId = HttpContext.Items["UserId"]?.ToString();
+        // 봉합 (2026-06-21, A-P0-1): 결재 매칭은 employee_id 체계. user_id 를 넘기면 대기함이 빈 목록이 된다.
+        var employeeId = HttpContext.Items["EmployeeId"]?.ToString();
         if (string.IsNullOrEmpty(tenantId) || string.IsNullOrEmpty(employeeId)) return Forbid();
         return Ok(await _approvalService.GetPendingAsync(tenantId, employeeId, ct));
     }
@@ -103,7 +106,8 @@ public class ApprovalController : ControllerBase
     public async Task<IActionResult> GetSent(CancellationToken ct)
     {
         var tenantId = HttpContext.Items["TenantId"]?.ToString();
-        var employeeId = HttpContext.Items["UserId"]?.ToString();
+        // 봉합 (2026-06-21, A-P0-1): 기안 목록은 requester_id(=employee_id) 매칭.
+        var employeeId = HttpContext.Items["EmployeeId"]?.ToString();
         if (string.IsNullOrEmpty(tenantId) || string.IsNullOrEmpty(employeeId)) return Forbid();
         return Ok(await _approvalService.GetSentAsync(tenantId, employeeId, ct));
     }
@@ -115,7 +119,8 @@ public class ApprovalController : ControllerBase
     public async Task<IActionResult> GetCompleted(CancellationToken ct)
     {
         var tenantId = HttpContext.Items["TenantId"]?.ToString();
-        var employeeId = HttpContext.Items["UserId"]?.ToString();
+        // 봉합 (2026-06-21, A-P0-1): 완료 목록은 approval_history.approver_id(=employee_id) 매칭.
+        var employeeId = HttpContext.Items["EmployeeId"]?.ToString();
         if (string.IsNullOrEmpty(tenantId) || string.IsNullOrEmpty(employeeId)) return Forbid();
         return Ok(await _approvalService.GetCompletedAsync(tenantId, employeeId, ct));
     }
@@ -140,7 +145,8 @@ public class ApprovalController : ControllerBase
     public async Task<IActionResult> Process(string approvalId, [FromBody] ProcessApprovalRequest request, CancellationToken ct)
     {
         var tenantId = HttpContext.Items["TenantId"]?.ToString();
-        var employeeId = HttpContext.Items["UserId"]?.ToString();
+        // 봉합 (2026-06-21, A-P0-1): 결재 권한 체크(approver_id=employee_id)·이력 기록 모두 employee_id 체계.
+        var employeeId = HttpContext.Items["EmployeeId"]?.ToString();
         var employeeName = HttpContext.Items["UserName"]?.ToString() ?? "Unknown";
         if (string.IsNullOrEmpty(tenantId) || string.IsNullOrEmpty(employeeId)) return Forbid();
         await _approvalService.ProcessAsync(approvalId, request, tenantId, employeeId, employeeName, ct);

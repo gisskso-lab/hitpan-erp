@@ -196,25 +196,33 @@ public class PurchaseService : IPurchaseService
             }
         }
 
-        foreach (var line in receiptItems)
+        // 봉합 (2026-06-21, 7차 전수조사 B-1 P0): stock_ledger UNIQUE 키 (tenant, source_type, source_id,
+        //   item_id, move_type) 단위 유일. 종전엔 입고 라인별로 그대로 AddAsync 해, 한 입고에 같은 품목이
+        //   2라인(다른 창고·단가) 들어가면 같은 키가 2번 INSERT → SaveChangesAsync UNIQUE 위반 → 매입 전체
+        //   롤백("매입했는데 재고 안 늘어남", 헌법 #20). 판매와 동일하게 item_id 로 합산해 키당 1행만 기록.
+        var receiptSourceType = string.IsNullOrWhiteSpace(receipt.PoId) ? "direct_purchase" : "purchase_receipt";
+        foreach (var grp in receiptItems.GroupBy(x => x.ItemId))
         {
+            var first = grp.First();
+            var qtySum = grp.Sum(x => x.Qty);
+            var supplySum = grp.Sum(x => x.SupplyAmount);
             var ledger = new StockLedger
             {
                 LedgerId = 0,
                 TenantId = receipt.TenantId,
-                ItemId = line.ItemId,
-                WarehouseId = line.WarehouseId,
+                ItemId = grp.Key,
+                WarehouseId = first.WarehouseId,
                 PartnerId = receipt.PartnerId,
                 LedgerDate = receipt.ReceiptDate,
                 Ym = receipt.ReceiptDate.ToString("yyyy-MM"),
                 MoveType = StockMoveType.In,
-                SourceType = string.IsNullOrWhiteSpace(receipt.PoId) ? "direct_purchase" : "purchase_receipt",
+                SourceType = receiptSourceType,
                 SourceId = receipt.ReceiptId,
                 DocNo = receipt.ReceiptNo,
-                QtyIn = line.Qty,
+                QtyIn = qtySum,
                 QtyOut = 0m,
-                UnitCost = line.UnitPrice,
-                SupplyAmount = line.SupplyAmount
+                UnitCost = qtySum != 0m ? supplySum / qtySum : first.UnitPrice,
+                SupplyAmount = supplySum
             };
 
             await ledgerRepo.AddAsync(ledger);
@@ -909,14 +917,31 @@ public class PurchaseService : IPurchaseService
                 "SELECT setting_value FROM workflow_settings WHERE tenant_id=@Tid AND setting_key='stock.negative_stock_allow' AND is_active=1",
                 new { Tid = tenantId }, transaction: dbTx, cancellationToken: ct));
             var negativeStockAllow = string.Equals(negSetting, "true", StringComparison.OrdinalIgnoreCase);
+
+            // 봉합 (2026-06-21, 7차 전수조사 B-1 P0): 반품 OUT 원장도 stock_ledger UNIQUE 키
+            //   (tenant, source_type=purchase_return, source_id=returnId, item_id, move_type=out) 단위 유일.
+            //   종전엔 반품 라인별로 그대로 INSERT 해 같은 품목 2라인이면 키가 2번 찍혀 반품 확정이 차단됐다(헌법 #20).
+            //   item_id 로 합산해 키당 1행만 기록·차감. 음수검사도 합산 총량으로 1회 — 더 정확(라인 분할 우회 차단).
+            var returnGroups = items
+                .GroupBy(it => (string)it.item_id)
+                .Select(g => new
+                {
+                    ItemId = g.Key,
+                    Wh = (string?)g.First().warehouse_id ?? "wh-main",
+                    Qty = g.Sum(x => (decimal)x.qty),
+                    Supply = g.Sum(x => (decimal)x.supply_amount),
+                    UnitPrice = (decimal)g.First().unit_price
+                })
+                .ToList();
+
             if (!negativeStockAllow)
             {
-                foreach (var it in items)
+                foreach (var g in returnGroups)
                 {
                     var bal = await conn.ExecuteScalarAsync<decimal>(new CommandDefinition(
                         "SELECT COALESCE(SUM(qty_in) - SUM(qty_out), 0) FROM stock_ledger WHERE tenant_id=@Tid AND item_id=@ItemId",
-                        new { Tid = tenantId, ItemId = (string)it.item_id }, transaction: dbTx, cancellationToken: ct));
-                    if (bal - (decimal)it.qty < 0m)
+                        new { Tid = tenantId, ItemId = g.ItemId }, transaction: dbTx, cancellationToken: ct));
+                    if (bal - g.Qty < 0m)
                     {
                         throw new InvalidOperationException("반품 수량이 현재 재고를 초과합니다. 재고를 확인해주세요.");
                     }
@@ -924,7 +949,7 @@ public class PurchaseService : IPurchaseService
             }
 
             // 1) 재고원장 Reverse OUT INSERT
-            foreach (var it in items)
+            foreach (var g in returnGroups)
             {
                 await conn.ExecuteAsync(new CommandDefinition(
                     """
@@ -938,17 +963,17 @@ public class PurchaseService : IPurchaseService
                     new
                     {
                         Tid = tenantId,
-                        ItemId = (string)it.item_id,
-                        Wh = (string?)it.warehouse_id ?? "wh-main",
+                        ItemId = g.ItemId,
+                        Wh = g.Wh,
                         PartnerId = partnerId,
                         EmpId = employeeId,
                         Date = rd,
                         Ym = rd.ToString("yyyy-MM"),
                         Rid = returnId,
                         DocNo = returnNo,
-                        Qty = (decimal)it.qty,
-                        UnitPrice = (decimal)it.unit_price,
-                        Supply = (decimal)it.supply_amount
+                        Qty = g.Qty,
+                        UnitPrice = g.UnitPrice,
+                        Supply = g.Supply
                     },
                     transaction: dbTx,
                     cancellationToken: ct));
@@ -965,10 +990,10 @@ public class PurchaseService : IPurchaseService
                     new
                     {
                         TenantId = tenantId,
-                        ItemId = (string)it.item_id,
-                        WarehouseId = (string?)it.warehouse_id ?? "wh-main",
-                        Qty = (decimal)it.qty,
-                        UnitCost = (decimal)it.unit_price
+                        ItemId = g.ItemId,
+                        WarehouseId = g.Wh,
+                        Qty = g.Qty,
+                        UnitCost = g.UnitPrice
                     },
                     transaction: dbTx,
                     cancellationToken: ct));

@@ -138,6 +138,10 @@ var
   G_PrimaryDomain: String;
   G_ApiDomain: String;
   G_TunnelToken: String;
+  // 봉합 (2026-06-21, 7차 전수조사 D6-P0-01): 워치독 터널 자가복구(WS-28-C)가 cloudflared 터널 UUID 를
+  //   필요로 하는데 종전엔 db.conf 에 없어 신규설치 PC 에서 자가복구가 무력했다(헌법 #28). 백오피스 응답의
+  //   domain.tunnelId(CF 터널 UUID)를 추출해 db.conf TUNNEL_ID 로 저장한다.
+  G_TunnelId: String;
   G_BootstrapToken: String;
   G_BootstrapOk: Boolean;
 
@@ -452,6 +456,9 @@ begin
   G_PrimaryDomain := ExtractJsonValue(RawResponse, 'primary');
   G_ApiDomain := ExtractJsonValue(RawResponse, 'api');
   G_TunnelToken := ExtractJsonValue(RawResponse, 'tunnelToken');
+  // 봉합 (2026-06-21, 7차 전수조사 D6-P0-01): 워치독 WS-28-C 자가복구용 터널 UUID. 응답 domain.tunnelId.
+  //   LOCAL 모드·터널 미발급이면 빈 문자열(db.conf 에 빈 값 → 워치독이 보수적으로 자가복구 스킵).
+  G_TunnelId := ExtractJsonValue(RawResponse, 'tunnelId');
   G_BootstrapToken := ExtractJsonValue(RawResponse, 'token');
 
   // 정리
@@ -939,6 +946,11 @@ begin
     BootstrapContent.Add('SLOT_INDEX=' + IntToStr(G_SlotIndex));
     BootstrapContent.Add('TENANT_CODE=' + G_TenantCode);
     BootstrapContent.Add('PRIMARY_DOMAIN=' + G_PrimaryDomain);
+    // 봉합 (2026-06-21, 7차 전수조사 D6-P0-01, 사장님 결재 "db.conf 단일출처로 통합"): 워치독 3소비자
+    //   (HealthProbe·MetaPingClient·WS-28-C)가 읽는 식별자. 폐기된 환경변수를 대체하는 단일출처.
+    //   TUNNEL_ID=CF 터널 UUID(자가복구) / LICENSE_KEY=설치 시리얼(본사 메타 ping Bearer). LOCAL 모드면 빈 값.
+    BootstrapContent.Add('TUNNEL_ID=' + G_TunnelId);
+    BootstrapContent.Add('LICENSE_KEY=' + G_LicenseKey);
     BootstrapContent.SaveToFile(ExpandConstant('{app}\db.conf'));
   finally
     BootstrapContent.Free;

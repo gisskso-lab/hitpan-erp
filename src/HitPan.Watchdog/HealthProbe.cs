@@ -35,12 +35,20 @@ public static class HealthProbe
             Timestamp = DateTime.UtcNow,
             WatchdogVersion = "1.0.0",
             TenantIdHash = SafeSha256(MetaPingClient.GetTenantId()),
+            // 봉합 (2026-06-21, 7차 전수조사 D6-P0-01, 사장님 결재 "db.conf 단일출처로 통합"):
+            //   인스톨러가 환경변수를 더 이상 만들지 않아(2026-06-12 폐기) 진단 스냅샷이 신규설치 PC 에서 항상
+            //   "미설정"으로 보고돼 CS 가 정상 PC 를 장애로 오판했다. db.conf 단일출처 헬퍼로 식별자 보유 여부를
+            //   판정하되, 구버전(환경변수 잔존) PC 도 정확히 보고하도록 env var 도 OR 로 함께 본다.
             Environment = new EnvSnapshot
             {
-                HasTunnelId = !string.IsNullOrEmpty(Environment.GetEnvironmentVariable("HITPAN_TUNNEL_ID", EnvironmentVariableTarget.Machine)),
-                HasLicenseKey = !string.IsNullOrEmpty(Environment.GetEnvironmentVariable("HITPAN_LICENSE_KEY", EnvironmentVariableTarget.Machine)),
-                HasTenantId = !string.IsNullOrEmpty(Environment.GetEnvironmentVariable("HITPAN_TENANT_ID", EnvironmentVariableTarget.Machine)),
-                Subdomain = Environment.GetEnvironmentVariable("HITPAN_SUBDOMAIN", EnvironmentVariableTarget.Machine) ?? "(미설정)",
+                HasTunnelId = !string.IsNullOrEmpty(DbConfReader.GetValue("TUNNEL_ID"))
+                              || !string.IsNullOrEmpty(Environment.GetEnvironmentVariable("HITPAN_TUNNEL_ID", EnvironmentVariableTarget.Machine)),
+                HasLicenseKey = !string.IsNullOrEmpty(DbConfReader.GetValue("LICENSE_KEY"))
+                              || !string.IsNullOrEmpty(Environment.GetEnvironmentVariable("HITPAN_LICENSE_KEY", EnvironmentVariableTarget.Machine)),
+                HasTenantId = !string.IsNullOrEmpty(DbConfReader.GetValue("TENANT_CODE"))
+                              || !string.IsNullOrEmpty(Environment.GetEnvironmentVariable("HITPAN_TENANT_ID", EnvironmentVariableTarget.Machine)),
+                Subdomain = DbConfReader.GetValue("PRIMARY_DOMAIN")
+                              ?? Environment.GetEnvironmentVariable("HITPAN_SUBDOMAIN", EnvironmentVariableTarget.Machine) ?? "(미설정)",
                 MachineName = System.Environment.MachineName,
                 OsVersion = System.Environment.OSVersion.VersionString,
                 Is64BitOs = System.Environment.Is64BitOperatingSystem,

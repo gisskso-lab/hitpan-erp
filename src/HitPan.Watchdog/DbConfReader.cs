@@ -62,6 +62,25 @@ public static class DbConfReader
     }
 
     /// <summary>
+    /// 봉합 (2026-06-21, 7차 전수조사 D6-P0-01, 사장님 결재 "db.conf 단일출처로 통합"):
+    ///   HealthProbe·MetaPingClient·WS28C 가 종전엔 Machine 환경변수(HITPAN_TUNNEL_ID·HITPAN_LICENSE_KEY·
+    ///   HITPAN_TENANT_ID)를 읽었으나, 인스톨러는 이 env var 를 더 이상 만들지 않는다(2026-06-12 폐기,
+    ///   멀티슬롯 덮어쓰기 사고 #39·#41·#42). 신규설치 PC 에서 식별자가 전부 null → 본사 메타 ping 인증
+    ///   약화 + 터널 자가복구 무력(헌법 #28·#30). 모든 소비자가 이 단일출처 헬퍼로 db.conf 값을 읽도록 통일한다.
+    ///   db.conf 미발견·키 부재면 null 반환(소비자가 보수적으로 폴백).
+    ///
+    ///   db.conf 키 매핑: TUNNEL_ID(=백오피스 응답 domain.tunnelId, CF UUID) / LICENSE_KEY(=설치 시리얼) /
+    ///   TENANT_CODE(=T-XXX, 본사 식별 해시용 — HITPAN_TENANT_ID 의미로 재사용) / PRIMARY_DOMAIN.
+    /// </summary>
+    public static string? GetValue(string key)
+    {
+        var confPath = ResolveDbConfPath();
+        if (confPath is null) return null;
+        var conf = Parse(confPath);
+        return conf.TryGetValue(key, out var v) && !string.IsNullOrWhiteSpace(v) ? v.Trim() : null;
+    }
+
+    /// <summary>
     /// 워치독 EXE는 {app}\watchdog\ 에 설치되고 db.conf 는 {app}\db.conf 에 있다(InstallWatchdog.ps1·.iss 정합).
     /// 실행 폴더 기준 상위(..\db.conf)를 1순위, 실행 폴더 자체를 2순위로 탐색한다.
     /// </summary>

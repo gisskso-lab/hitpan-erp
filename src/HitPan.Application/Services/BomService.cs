@@ -509,17 +509,24 @@ public class BomService : IBomService
                 transaction: tx, cancellationToken: ct)).ConfigureAwait(false);
 
             // stock_ledger에 BOM 생산 기록 (수불부 정합성)
-            foreach (var mat in materials)
+            // 봉합 (2026-06-21, 7차 전수조사 B-1 P0): stock_ledger UNIQUE 키 (tenant, source_type=bom_production,
+            //   source_id=BomId, item_id, move_type=out) 단위 유일. 한 BOM 에 같은 자재가 2줄(bom_items 중복 자재)이면
+            //   자재 OUT 이 같은 키로 2번 INSERT → UNIQUE 위반 → 생산 전체 롤백(헌법 #20 BOM 흐름 끊김). 자재를
+            //   item_id 로 합산해 키당 1행만 기록(수량 합산, 단가는 합산금액/합산수량). 판매·매입 합산 봉합과 동일 패턴.
+            foreach (var matGrp in materials.GroupBy(m => m.ItemId))
             {
+                var qtySum = matGrp.Sum(m => m.UsedQty);
+                var costSum = matGrp.Sum(m => m.UsedQty * m.UnitCost);
+                var avgCost = qtySum != 0m ? costSum / qtySum : matGrp.First().UnitCost;
                 await _db.ExecuteAsync(new CommandDefinition(
                     """
                     INSERT INTO stock_ledger (tenant_id, item_id, warehouse_id, ledger_date, ym,
                       move_type, source_type, source_id, doc_no, qty_in, qty_out, unit_cost, supply_amount)
                     VALUES (@TenantId, @ItemId, @WarehouseId, CURDATE(), DATE_FORMAT(CURDATE(),'%Y-%m'),
-                      'out', 'bom_production', @BomId, @DocNo, 0, @Qty, @Cost, @Qty * @Cost)
+                      'out', 'bom_production', @BomId, @DocNo, 0, @Qty, @Cost, @Supply)
                     """,
-                    new { TenantId = tenantId, ItemId = mat.ItemId, WarehouseId = defaultWarehouseId,
-                          BomId = dto.BomId, DocNo = bom.BomName, Qty = mat.UsedQty, Cost = mat.UnitCost },
+                    new { TenantId = tenantId, ItemId = matGrp.Key, WarehouseId = defaultWarehouseId,
+                          BomId = dto.BomId, DocNo = bom.BomName, Qty = qtySum, Cost = avgCost, Supply = costSum },
                     transaction: tx, cancellationToken: ct)).ConfigureAwait(false);
             }
             // 완성품 입고
@@ -665,9 +672,21 @@ public class BomService : IBomService
                 transaction: tx, cancellationToken: ct)).ConfigureAwait(false);
 
             // 2) 각 자재 재고 복귀 (IN)
-            foreach (var item in bom.Items)
+            // 봉합 (2026-06-21, 7차 전수조사 B-1 P0): 해체 자재 IN 원장도 stock_ledger UNIQUE 키
+            //   (tenant, source_type=bom_disassemble, source_id=BomId, item_id, move_type=in) 단위 유일.
+            //   한 BOM 에 같은 자재가 2줄이면 자재 IN 이 같은 키로 2번 INSERT → UNIQUE 위반 → 해체 전체 롤백
+            //   (헌법 #20). bom.Items 를 material_item_id 로 합산(복귀수량 합)한 뒤 자재당 1회만 로그·재고·원장 기록.
+            var disassembleGroups = bom.Items
+                .GroupBy(i => i.MaterialItemId)
+                .Select(g => new
+                {
+                    MaterialItemId = g.Key,
+                    RequiredQty = g.Sum(i => Math.Ceiling(i.Qty * (1 + i.LossRate / 100m) * dto.ProduceQty))
+                })
+                .ToList();
+            foreach (var item in disassembleGroups)
             {
-                var requiredQty = Math.Ceiling(item.Qty * (1 + item.LossRate / 100m) * dto.ProduceQty);
+                var requiredQty = item.RequiredQty;
                 var matUnitCost = await _db.QueryFirstOrDefaultAsync<decimal>(new CommandDefinition(
                     "SELECT COALESCE(purchase_price, cost_price, 0) FROM items WHERE item_id=@ItemId",
                     new { ItemId = item.MaterialItemId }, transaction: tx, cancellationToken: ct)).ConfigureAwait(false);
