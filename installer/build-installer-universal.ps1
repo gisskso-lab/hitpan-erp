@@ -124,32 +124,43 @@ if (-not $SkipWatchdog -and (Test-Path "src/HitPan.Watchdog/HitPan.Watchdog.cspr
 Write-Host ""
 Write-Host "[4/5] DB 덤프..." -ForegroundColor Yellow
 
-$dbDumpSrc = "installer/hitpan_db.sql"
+# 봉합 (2026-06-23, 5차 전수조사 SHIP-DDL-01 P1→P0급): 종전엔 universal 본류 빌드가 소스로
+#   installer/hitpan_db.sql(38MB 실데이터 덤프 — 재고원장·users·본사 bo_permissions·거래명세서 등
+#   헌법 #18/#22 출하 금지 데이터)을 쓰고 게이트는 금지구문(DB명/DEFINER) 1개뿐이라, 본사·실데이터가
+#   고객 PC로 출하될 수 있었다. build-installer.ps1(구세대)에만 있던 무결성 게이트 4단을 본류로 이식하고,
+#   소스를 검증된 빈 스키마 정본(hitpan_db_clean.sql)으로 통일한다(단일 진실원, 헌법 #19/#35).
+$dbDumpSrc = "installer/hitpan_db_clean.sql"   # 121 구조 + 데이터0 + common_codes 시드 (git 추적 정본)
 $dbDumpDst = "$BundleDir/hitpan_db.sql"
 
-if (Test-Path $dbDumpSrc) {
-    # 재발 방지 게이트 (1.2.14): 덤프에 절대 DB명/DEFINER가 박히면 안 됨.
-    #   진범(1.2.14 로그인 500): mysqldump --databases 산물의 'USE hitpan_erp'가 회사별 DB 지정을 무력화 →
-    #   모든 테이블이 hitpan_erp_t003가 아닌 hitpan_erp로 들어가 빈 껍데기 → users 없음 → 500.
-    #   DEFINER=hitpan@localhost는 회사별 유저(hitpan_t003)와 불일치 → 트리거/뷰 생성 ERROR 1227.
-    #   덤프는 'DB명·DEFINER 등 환경 식별자 0건'이어야 N개 테넌트에 단일 시드로 주입 가능 (헌법 #35 분리).
-    #   1.2.15 보강: ALTER DATABASE 추가 — 1.2.14에서 ALTER DATABASE hitpan_erp 16줄을 놓쳐
-    #   50번째 테이블 직후 ERROR 1049로 import 중단, users 미생성 → 로그인 500 재발한 진범.
-    $forbidden = Select-String -Path $dbDumpSrc -Pattern '(?m)^\s*USE\s+`?hitpan', 'CREATE DATABASE', 'DROP DATABASE', 'ALTER DATABASE', 'DEFINER\s*='
-    if ($forbidden) {
-        Write-Host ""
-        Write-Host "  ❌ 빌드 중단: hitpan_db.sql에 금지 구문이 남아 있습니다 (로그인 500 진범)." -ForegroundColor Red
-        Write-Host "     아래 구문을 제거 후 다시 빌드하세요 (USE/CREATE/DROP/ALTER DATABASE/DEFINER):" -ForegroundColor Red
-        $forbidden | Select-Object -First 5 | ForEach-Object { Write-Host "       L$($_.LineNumber): $($_.Line.Trim())" -ForegroundColor DarkYellow }
-        throw "DB 덤프 정합성 게이트 실패 — 환경 식별자(DB명/DEFINER)가 덤프에 박혀 있음. 헌법 #19/#35 위반."
-    }
-    Copy-Item $dbDumpSrc $dbDumpDst -Force
-    $size = (Get-Item $dbDumpDst).Length
-    Write-Host "  ✅ DB 덤프 복사 ($([Math]::Round($size/1MB, 2)) MB) — 정합성 게이트 통과 (DB명/DEFINER 0건)" -ForegroundColor Green
-} else {
-    Write-Warning "  hitpan_db.sql 존재하지 않음. 빈 DB로 설치됨."
-    Set-Content -Path $dbDumpDst -Value "-- empty db dump" -Encoding UTF8
+if (-not (Test-Path $dbDumpSrc)) {
+    throw "  ❌ installer/hitpan_db_clean.sql 없음. 빈 스키마 정본부터 준비하라 (mariadb-dump --no-data --triggers)."
 }
+
+$sql = Get-Content $dbDumpSrc -Raw -Encoding UTF8
+
+# ── 게이트 1: 백도어 테스트계정 0건 ──
+$backdoorHits = ([regex]::Matches($sql, 'admin@hitpan\.kr|reseller@hitpan\.kr|tenant@hitpan\.kr|Admin1234')).Count
+if ($backdoorHits -gt 0) { throw "  ❌ 게이트1 실패: 백도어 테스트계정 $backdoorHits 건. 출시 차단." }
+
+# ── 게이트 2: 금지 구문(USE/CREATE DATABASE/DEFINER) 0건 (회사별 DB import 깨짐 방지, 로그인 500 진범) ──
+$sqlNoComments = ($sql -split "`n" | Where-Object { $_ -notmatch '^\s*--' }) -join "`n"
+$banHits = ([regex]::Matches($sqlNoComments, '(?im)^\s*USE\s|CREATE\s+DATABASE|DROP\s+DATABASE|ALTER\s+DATABASE|DEFINER\s*=')).Count
+if ($banHits -gt 0) { throw "  ❌ 게이트2 실패: 금지 구문(USE/CREATE DATABASE/DEFINER) $banHits 건. 출시 차단." }
+
+# ── 게이트 3: 구조 보존 — 테이블 수(121) + 트리거(3) ──
+$tableCount   = ([regex]::Matches($sql, 'CREATE TABLE')).Count
+$triggerCount = ([regex]::Matches($sql, '(?im)CREATE.*TRIGGER|50003 .*TRIGGER')).Count
+if ($tableCount -ne 121) { throw "  ❌ 게이트3 실패: 구조 불일치 — 기대 121 테이블 ≠ $tableCount. 출시 차단." }
+if ($triggerCount -lt 3) { throw "  ❌ 게이트3 실패: 트리거 누락 — 기대 3 ≠ $triggerCount. 출시 차단." }
+
+# ── 게이트 4: 데이터 0 — 개발/실데이터 미혼입 (common_codes 코드성 시드만 허용) ──
+$insertCount = ([regex]::Matches($sql, '(?im)^\s*INSERT\s+INTO')).Count
+$ccInsert    = ([regex]::Matches($sql, '(?im)INSERT\s+INTO\s+`?common_codes')).Count
+if (($insertCount - $ccInsert) -gt 0) { throw "  ❌ 게이트4 실패: common_codes 외 데이터 INSERT $($insertCount - $ccInsert) 건 혼입(실데이터 의심). 출시 차단." }
+
+Copy-Item $dbDumpSrc $dbDumpDst -Force
+$size = (Get-Item $dbDumpDst).Length
+Write-Host "  ✅ DB 빈 스키마 게이트 4/4 통과 — 구조보존(테이블 $tableCount·트리거 $triggerCount), 데이터0, 백도어0 ($([Math]::Round($size/1KB, 0)) KB)" -ForegroundColor Green
 
 # ─── 5. Inno Setup 컴파일 ────────────────────────
 Write-Host ""

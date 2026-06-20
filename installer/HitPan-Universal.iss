@@ -833,11 +833,12 @@ begin
     BatchContent.Add('if "!EXISTING_DATA!"=="" set EXISTING_DATA=0');
     // 봉합 2026-06-17 (1.2.15, P1): 재설치 멱등성 — 운영 데이터 0건인데 스키마 불완전(91개 미만)이면
     //   손상된 부분 import로 간주하고 DROP 후 재생성. 운영 데이터 있으면 절대 DROP 금지(헌법 #1·#22).
-    BatchContent.Add(Format('if !EXISTING_DATA! EQU 0 if !TBL_COUNT! GTR 0 if !TBL_COUNT! LSS 91 (echo 불완전 스키마 !TBL_COUNT!/91 감지 - 재생성. & mysql -u root -p%s -e "DROP DATABASE IF EXISTS %s; CREATE DATABASE %s CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci; GRANT ALL ON %s.* TO ''%s''@''localhost''; FLUSH PRIVILEGES;" & set TBL_COUNT=0)', [MariaRootPw, G_DbName, G_DbName, G_DbName, G_DbUser]));
+    // 봉합 (2026-06-23, SHIP-DDL-01): 정본 구조가 121테이블이므로 불완전 스키마 임계값 91→121 정정(구조 드리프트).
+    BatchContent.Add(Format('if !EXISTING_DATA! EQU 0 if !TBL_COUNT! GTR 0 if !TBL_COUNT! LSS 121 (echo 불완전 스키마 !TBL_COUNT!/121 감지 - 재생성. & mysql -u root -p%s -e "DROP DATABASE IF EXISTS %s; CREATE DATABASE %s CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci; GRANT ALL ON %s.* TO ''%s''@''localhost''; FLUSH PRIVILEGES;" & set TBL_COUNT=0)', [MariaRootPw, G_DbName, G_DbName, G_DbName, G_DbUser]));
     // 분기: 운영 데이터 있으면 보호(건너뜀, 헌법 #1) / 없으면 import
     //   봉합 2026-06-17 (1.2.15, P1): import stderr를 로그로 남기고 errorlevel 즉시 검사(--force 금지, 헌법 #15)
     BatchContent.Add(Format('if !EXISTING_DATA! GTR 0 (echo 기존 운영 데이터 !EXISTING_DATA!건 감지. 시드 import 건너뜀.) else (echo 스키마 import 실행. & mysql -u %s -p%s --show-warnings %s < "%s" 2> "%%TEMP%%\hitpan_import_err.log" & if errorlevel 1 (echo [오류] 스키마 import 실패. 로그: %%TEMP%%\hitpan_import_err.log & exit /b 1))', [G_DbUser, G_DbPassword, G_DbName, ExpandConstant('{app}\hitpan_db.sql')]));
-    // 봉합 검증 가드(1.2.15): import 후 테이블 91개 + users 실존 재확인. 미달이면 명확한 실패(헌법 #15·#19).
+    // 봉합 검증 가드(1.2.15, SHIP-DDL-01 정정 2026-06-23): import 후 테이블 121개 + users 실존 재확인. 미달이면 명확한 실패(헌법 #15·#19).
     BatchContent.Add('set FINAL_COUNT=0');
     BatchContent.Add(Format('for /f "tokens=*" %%%%c in (''mysql -u %s -p%s %s -N -B -e "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema=DATABASE() AND table_type=''''BASE TABLE''''"'') do set FINAL_COUNT=%%%%c', [G_DbUser, G_DbPassword, G_DbName]));
     BatchContent.Add('if "!FINAL_COUNT!"=="" set FINAL_COUNT=0');
@@ -847,7 +848,7 @@ begin
     // 운영 데이터 보호로 import 건너뛴 경우(EXISTING_DATA>0)는 이미 정상 DB이므로 검증 통과로 간주
     BatchContent.Add('if !EXISTING_DATA! GTR 0 (echo 기존 운영 DB 유지 - 검증 생략. & exit /b 0)');
     BatchContent.Add(Format('if !USERS_OK! EQU 0 (echo [오류] DB 초기 설정 실패 - users 테이블 없음. & exit /b 1)', []));
-    BatchContent.Add(Format('if !FINAL_COUNT! LSS 91 (echo [오류] DB 초기 설정 실패 - 테이블 !FINAL_COUNT!/91개만 생성됨. & exit /b 1) else (echo DB 스키마 검증 완료 - 테이블 !FINAL_COUNT!개 + users 정상.)', []));
+    BatchContent.Add(Format('if !FINAL_COUNT! LSS 121 (echo [오류] DB 초기 설정 실패 - 테이블 !FINAL_COUNT!/121개만 생성됨. & exit /b 1) else (echo DB 스키마 검증 완료 - 테이블 !FINAL_COUNT!개 + users 정상.)', []));
     BatchContent.SaveToFile(BatchFile);
   finally
     BatchContent.Free;
