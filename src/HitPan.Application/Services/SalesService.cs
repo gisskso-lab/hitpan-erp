@@ -428,6 +428,28 @@ public class SalesService : ISalesService
                     cancellationToken: ct));
             }
 
+            // 2-BOM) 조립 자재 item_stock 차감 — 봉합 (2026-06-23, 6차 전수조사 BOM-STOCK-ASYM P1):
+            //   종전엔 ExplodeAssemblyBomAsync 가 자재 OUT 을 stock_ledger 에만 기록하고 item_stock 은
+            //   차감하지 않아, 조립상품 판매 시 재고현황(item_stock 읽음)에 자재가 안 빠진 채 영구 부풀려졌다
+            //   (헌법 #20). 방금 SaveChangesAsync(line 401)로 커밋된 이 delivery 의 bom_explosion OUT 원장을
+            //   ★같은 EF 연결·같은 트랜잭션(conn=GetDbConnection, dbTx)으로★ 읽어 자재 item_stock 을 동일
+            //   UPSERT 패턴으로 차감한다. _db(별개 연결)로 읽으면 미커밋 EF 원장이 안 보여 차감 0건(거짓 봉합)이
+            //   되므로 반드시 conn+dbTx 로 읽는다(설계팀장 P0 지적). 비조립 상품은 원장 0건 → 차감 0회(회귀 없음).
+            await conn.ExecuteAsync(new CommandDefinition(
+                """
+                INSERT INTO item_stock (stock_id, tenant_id, item_id, warehouse_id, current_qty, avg_cost, last_updated_at)
+                SELECT UUID(), tenant_id, item_id, warehouse_id, -SUM(qty_out), 0, NOW(6)
+                FROM stock_ledger
+                WHERE tenant_id = @TenantId AND source_id = @DeliveryId AND source_type = 'bom_explosion'
+                GROUP BY tenant_id, item_id, warehouse_id
+                ON DUPLICATE KEY UPDATE
+                  current_qty = current_qty + VALUES(current_qty),
+                  last_updated_at = NOW(6)
+                """,
+                new { TenantId = delivery.TenantId, DeliveryId = delivery.DeliveryId },
+                transaction: dbTx,
+                cancellationToken: ct));
+
             // 2-A) 수주서 헤더 status 동기화 — delivery.OrderId 가 있을 때만.
             // §절대원칙 #20 (워크플로우 끊김 금지): item_status 만 갱신하고 헤더가 'draft' 로 남으면
             // 수주 목록에 "임시저장"으로 보임 → 사용자 혼란 + 거래명세서 변환 재시도 시 잔량 0 차단.
@@ -964,12 +986,28 @@ public class SalesService : ISalesService
                 },
                 transaction: tx, cancellationToken: ct));
 
-            // 3) item_stock 복귀 (완제품 + 자재)
+            // 3) item_stock 복귀 — 완제품
             await _db.ExecuteAsync(new CommandDefinition(
                 """
                 INSERT INTO item_stock (stock_id, tenant_id, item_id, warehouse_id, current_qty, avg_cost, last_updated_at)
                 SELECT UUID(), @Tid, item_id, warehouse_id, qty, unit_price, NOW(6)
                 FROM sales_delivery_items WHERE delivery_id=@Did AND tenant_id=@Tid
+                ON DUPLICATE KEY UPDATE current_qty = current_qty + VALUES(current_qty), last_updated_at=NOW(6)
+                """,
+                new { Tid = tenantId, Did = deliveryId },
+                transaction: tx, cancellationToken: ct));
+
+            // 3-BOM) item_stock 복귀 — 조립 자재 (봉합 2026-06-23, 6차 BOM-STOCK-ASYM P1 대칭):
+            //   확정 시 자재 item_stock 을 차감(2-BOM)하므로, 취소 시에도 반드시 자재 item_stock 을 복귀해야
+            //   짝이 맞는다. 누락하면 취소할 때마다 자재가 영구 손실된다(헌법 #20 재위반). 원본 bom_explosion
+            //   OUT 원장 기준으로 +SUM(qty_out) 복귀. 이 원장은 확정 시 이미 커밋된 과거 데이터라 _db+tx 로 조회 가능.
+            await _db.ExecuteAsync(new CommandDefinition(
+                """
+                INSERT INTO item_stock (stock_id, tenant_id, item_id, warehouse_id, current_qty, avg_cost, last_updated_at)
+                SELECT UUID(), tenant_id, item_id, warehouse_id, SUM(qty_out), 0, NOW(6)
+                FROM stock_ledger
+                WHERE tenant_id=@Tid AND source_id=@Did AND source_type='bom_explosion'
+                GROUP BY tenant_id, item_id, warehouse_id
                 ON DUPLICATE KEY UPDATE current_qty = current_qty + VALUES(current_qty), last_updated_at=NOW(6)
                 """,
                 new { Tid = tenantId, Did = deliveryId },
