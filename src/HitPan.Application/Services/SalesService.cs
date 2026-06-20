@@ -1007,12 +1007,23 @@ public class SalesService : ISalesService
             }
 
             // 7) monthly_summary 매출 역산 — ConfirmDeliveryAsync TryApplyAsync 대칭 차감
+            // 봉합 (2026-06-23, 5차 전수조사 SALES-01 P1):
+            //   종전엔 sourceId 를 확정과 동일한 deliveryId 로 호출했다. MonthlySummaryGuard 의 멱등 키는
+            //   (tenant_id, source_type, source_id, field_name) UNIQUE 이므로, 확정 때 이미 그 키로
+            //   monthly_summary_sources 행이 들어가 있어 취소 호출은 INSERT IGNORE 충돌(inserted==0) →
+            //   return false 로 차감 SQL 자체가 실행되지 않았다. 결과: 확정 매출을 취소해도
+            //   monthly_summary.total_sales 가 영영 안 줄어 월매출이 부풀려진 채 고정(헌법 #20 무결성 위반).
+            //   해법: 취소 역산은 확정과 다른 sourceId("{deliveryId}:cancel")를 써 키를 분리한다.
+            //   → -total 차감이 1회 정상 적용되고, 멱등도 유지(이중 취소 시 두번째는 같은 :cancel 키로 충돌·스킵).
+            //   확정 측(457행)은 순수 deliveryId 유지 — 양측 키 분리가 봉합의 핵심이므로 동시 변경 금지.
+            //   금액 출처: 확정=delivery.TotalAmount, 취소=header.total_amount. confirmed 상태에서
+            //   total_amount 를 갱신하는 코드는 없어 두 값은 항상 일치(절대값 대칭 보장).
             await MonthlySummaryGuard.TryApplyAsync(
                 _db, tx,
                 tenantId: tenantId,
                 date: dd,
                 sourceType: "delivery_confirmed",
-                sourceId: deliveryId,
+                sourceId: $"{deliveryId}:cancel",
                 field: MonthlySummaryGuard.SummaryField.TotalSales,
                 amount: -(decimal)header.total_amount,
                 ct: ct);
