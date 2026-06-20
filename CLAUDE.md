@@ -410,6 +410,8 @@ SI 현장 20년 현업 출신.
 
     (헌법 #18·#20·#22·#25·#34 정합 / 신규 [[project_three_system_separation_v2]])
 
+36. **출하 DDL = 신규설치 단일 진실원** — 6차 전수조사 (2026-06-23 확정): 코드가 SELECT/INSERT/UPDATE 하는 **새 테이블·컬럼은 반드시 `installer/hitpan_db_clean.sql` 에 먼저 편입**한다(헌법 #13 DESCRIBE 후). 신규 고객 PC 설치는 이 clean DDL 단일 import 로 완결되며(`.iss` 121테이블 게이트), `src/HitPan.API/Migrations/SQL/DB-*.sql`(ALTER 이력)·`installer/migrations/` 는 신규설치 진실원이 **아니다**. 마이그에만 추가하고 clean DDL 갱신을 잊으면 신규설치 고객 PC 런타임 500(기능 DOA) — AICHAT-P0-01(BYOK 컬럼 누락) 사고가 그 증상. install.bat/.iss 에 migrations 적용 루프를 다는 것은 멱등·순서·운영데이터 보호 게이트와 충돌하므로 **금지**. 재발 차단 정공법 = 실측 import 스모크 CI(clean DDL→빈 DB import→API 기동→핵심 쿼리 스모크, 500이면 빌드 실패). CI 구축 전엔 본 규약이 1차 방어선. 상세: `docs/design/20260623_출하DDL_동기화_검증_CI설계.md`.
+
 ---
 
 ## 3개 시스템 개발 헌법 (2026-05-06 확정)
