@@ -58,9 +58,17 @@ public static class ApprovalTriggerHelper
         if (setting.AutoBelow && setting.Threshold > 0 && amount < setting.Threshold) return;
 
         // 결재 라인 수 확인
+        // 봉합 (2026-06-23, 5차 후속 APPR-TRIGGER P0급): 종전엔 FROM approval_lines 에서 doc_type 으로
+        //   COUNT 했다. 그러나 approval_lines 는 named-template 마스터(approval_line_id/name/sort_order
+        //   구조)로 재설계되며 doc_type 컬럼이 사라졌고(DB-29), 결재자 행과 doc_type/seq_no 는 별개 테이블
+        //   approval_doc_lines 로 분리됐다(DB-30). 따라서 이 쿼리는 결재 설정 ON 고객이 거래명세서·매입·
+        //   반품·연차·경비를 확정할 때 "Unknown column 'doc_type'" 런타임 500 을 일으켰다(워크플로우 끊김,
+        //   헌법 #20). ProcessAsync·CreateApprovalAsync 가 권한·총라인을 산정하는 정본 테이블인
+        //   approval_doc_lines 에서 세도록 교체한다 — total_lines 가 실제 결재 단계 수와 일치해
+        //   ProcessAsync 의 current_seq>=total_lines 완료 판정도 정확해진다. (설계팀장 승인·검증팀장 확정)
         var lineCount = await db.QueryFirstOrDefaultAsync<int>(
             new CommandDefinition(
-                "SELECT COUNT(*) FROM approval_lines WHERE tenant_id = @TenantId AND doc_type = @DocType AND is_active = 1",
+                "SELECT COUNT(*) FROM approval_doc_lines WHERE tenant_id = @TenantId AND doc_type = @DocType AND is_active = 1",
                 new { TenantId = tenantId, DocType = docType }, cancellationToken: ct));
         if (lineCount == 0) return;
 

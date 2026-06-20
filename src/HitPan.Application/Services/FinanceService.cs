@@ -253,10 +253,20 @@ public class FinanceService : IFinanceService
         // (현장영업·외근 경비 → 대표 결재 라인 자동 연결)
         var docNo = $"EXP-{req.ExpenseDate:yyyyMMdd}-{id.Substring(0, 6)}";
         var title = $"경비 승인 요청: {req.Category} / {req.Amount:N0}원";
-        await ApprovalTriggerHelper.TryCreateApprovalAsync(_db,
-            "expense", id, docNo, title,
-            req.Amount + req.VatAmount,
-            tenantId, userId, "경비등록자", ct);
+        // 봉합 (2026-06-23, 5차 후속 APPR-TRIGGER P2): 트리거 실패가 호출자로 전파되면 이미 커밋된
+        //   경비 레코드는 남는데 화면은 500 으로 보이는 불일치가 났다. 판매·매입과 동일하게 "경비 레코드는
+        //   이미 커밋, 결재는 부가" 원칙을 적용해 삼키되, 헌법 #15 에 따라 예외 전체를 로그로 남긴다.
+        try
+        {
+            await ApprovalTriggerHelper.TryCreateApprovalAsync(_db,
+                "expense", id, docNo, title,
+                req.Amount + req.VatAmount,
+                tenantId, userId, "경비등록자", ct);
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Trace.TraceWarning($"[ApprovalTrigger] 경비 {docNo} 결재 트리거 실패: {ex}");
+        }
 
         return id;
     }

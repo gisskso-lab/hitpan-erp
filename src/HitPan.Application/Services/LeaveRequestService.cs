@@ -94,11 +94,22 @@ public sealed class LeaveRequestService : ILeaveRequestService
             cancellationToken: ct)).ConfigureAwait(false) ?? "직원";
 
         var title = $"연차 신청: {empName} {request.StartDate:yyyy-MM-dd}~{request.EndDate:yyyy-MM-dd} ({request.LeaveDays}일)";
-        await ApprovalTriggerHelper.TryCreateApprovalAsync(
-            _db, docType: "leave", refId: requestId, refNo: requestId[..8],
-            title: title, amount: request.LeaveDays,
-            tenantId: tenantId, requesterId: request.EmployeeId, requesterName: empName,
-            ct: ct).ConfigureAwait(false);
+        // 봉합 (2026-06-23, 5차 후속 APPR-TRIGGER P2): 결재 트리거 실패가 호출자로 전파되면 이미 커밋된
+        //   연차 신청은 남는데 화면은 500 으로 보이는 불일치(고객 재시도→중복 신청)가 났다. 판매·매입과 동일하게
+        //   "신청 레코드는 이미 커밋, 결재는 부가"라는 원칙을 적용해 트리거 실패를 삼키되, 헌법 #15 에 따라
+        //   예외 전체를 로그로 남긴다(silent swallow 아님).
+        try
+        {
+            await ApprovalTriggerHelper.TryCreateApprovalAsync(
+                _db, docType: "leave", refId: requestId, refNo: requestId[..8],
+                title: title, amount: request.LeaveDays,
+                tenantId: tenantId, requesterId: request.EmployeeId, requesterName: empName,
+                ct: ct).ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Trace.TraceWarning($"[ApprovalTrigger] 연차 {requestId[..8]} 결재 트리거 실패: {ex}");
+        }
 
         return requestId;
     }
