@@ -62,6 +62,9 @@ installer/*.exe
 installer/*.dll
 installer/*.msi
 installer/*.sql
+# 출하 DDL 정본은 버전관리 필수 (2026-06-23 사장님 결재) — 고객 DB 생성 정본, 유실 방지.
+#   단 hitpan_db.sql(실데이터 포함 가능)·백업은 계속 제외 유지(헌법 #18/#22).
+!installer/hitpan_db_clean.sql
 installer/cloudflared.exe
 *.zip
 hitpan_erp_backup_*.sql
