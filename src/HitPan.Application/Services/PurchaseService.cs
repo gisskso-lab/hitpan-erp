@@ -901,6 +901,28 @@ public class PurchaseService : IPurchaseService
             var conn = _unitOfWork.GetDbConnection();
             var dbTx = tx.DbTransaction;
 
+            // 봉합 (2026-06-23, 6차 전수조사 PUR-RETURN-OVER P2): 종전엔 매입반품 확정 시 수량·음수재고 검사가
+            //   전혀 없어, 입고 10개에 반품 100개도 통과해 item_stock 이 음수가 됐다(매출 확정은 SALES-04 음수검사가
+            //   있는데 매입반품만 무방비, 헌법 #20 무결성). negative_stock_allow=false 면 반품 전 회사 합산 잔량(서버측
+            //   SQL 집계)으로 음수 검사. 반품 OUT 기록 전 시점이라 커밋된 잔량만 봐도 정합(SALES-04 동일 논리).
+            var negSetting = await conn.ExecuteScalarAsync<string>(new CommandDefinition(
+                "SELECT setting_value FROM workflow_settings WHERE tenant_id=@Tid AND setting_key='stock.negative_stock_allow' AND is_active=1",
+                new { Tid = tenantId }, transaction: dbTx, cancellationToken: ct));
+            var negativeStockAllow = string.Equals(negSetting, "true", StringComparison.OrdinalIgnoreCase);
+            if (!negativeStockAllow)
+            {
+                foreach (var it in items)
+                {
+                    var bal = await conn.ExecuteScalarAsync<decimal>(new CommandDefinition(
+                        "SELECT COALESCE(SUM(qty_in) - SUM(qty_out), 0) FROM stock_ledger WHERE tenant_id=@Tid AND item_id=@ItemId",
+                        new { Tid = tenantId, ItemId = (string)it.item_id }, transaction: dbTx, cancellationToken: ct));
+                    if (bal - (decimal)it.qty < 0m)
+                    {
+                        throw new InvalidOperationException("반품 수량이 현재 재고를 초과합니다. 재고를 확인해주세요.");
+                    }
+                }
+            }
+
             // 1) 재고원장 Reverse OUT INSERT
             foreach (var it in items)
             {
