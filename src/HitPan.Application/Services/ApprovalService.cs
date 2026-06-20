@@ -174,6 +174,21 @@ public class ApprovalService : IApprovalService
                     $"결재자/위임자로 지정할 수 없는 사원이 있습니다(미존재 또는 퇴직): {string.Join(", ", invalid)}");
         }
 
+        // 봉합 (2026-06-23, 5차 전수조사 APPR-F2 P1, 사장님 결재 B안):
+        //   결재라인(approval_doc_lines)은 doc_type 단위 전역 설정인데, ProcessAsync 는 결재 권한을
+        //   이 전역 테이블에서 doc_type+seq_no 로 실시간 조회한다. 따라서 진행 중(pending) 결재가 있는
+        //   상태에서 라인을 다시 저장하면 ① 진행 중 문서의 결재자가 소급 변경(원 결재자 결재 불가)되거나
+        //   ② 라인 개수를 줄이면 current_seq 가 새 라인 범위를 벗어나 영구 결재 불가(헌법 #20 워크플로우 끊김)가 된다.
+        //   B안(즉시 안전 가드): 해당 doc_type 에 진행 중 결재가 1건이라도 있으면 라인 변경을 차단한다.
+        //   DDL 무변경. 근본 해결(문서 생성 시 결재라인 스냅샷 동결 = A안)은 출하 DDL 변경·ALTER 마이그 동반이라
+        //   헌법 #34에 따라 정식 로드맵으로 분리. (설계팀장 승인·검증팀장 PASS)
+        var pendingCount = await _db.ExecuteScalarAsync<int>(new CommandDefinition(
+            "SELECT COUNT(*) FROM approval_documents WHERE tenant_id = @TenantId AND doc_type = @DocType AND status = 'pending'",
+            new { TenantId = tenantId, DocType = request.DocType }, cancellationToken: ct));
+        if (pendingCount > 0)
+            throw new InvalidOperationException(
+                $"진행 중인 결재가 {pendingCount}건 있어 결재선을 변경할 수 없습니다. 모든 결재가 완료·반려된 뒤 변경하세요.");
+
         // 라인 비활성화 + 신규 추가를 한 트랜잭션으로 묶어, 중간 실패 시 기존 라인이 사라지지 않게 한다.
         using var tx = _db.BeginTransaction();
         try
