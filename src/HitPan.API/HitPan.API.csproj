@@ -41,8 +41,12 @@
   </ItemGroup>
 
   <ItemGroup>
-    <!-- 히트판 도우미 정체성 프롬프트(System Prompt): 실행/배포 출력으로 복사 (앱 시작 1회 로드용). -->
-    <None Update="AI\HITPAN_CHATBOT_IDENTITY.md" CopyToOutputDirectory="PreserveNewest" />
+    <!-- 히트판 도우미·AI 직원 정체성/엔진 프롬프트(System Prompt): 실행/배포 출력으로 복사 (앱 시작 1회 로드용). -->
+    <!-- 봉합 (2026-06-23, 5차 전수조사 PERM-01 P2): 종전엔 HITPAN_CHATBOT_IDENTITY.md 한 개만 복사 항목에
+         등록돼, AI 직원 엔진 프롬프트 HITPAN_AI_AGENT.md(AiAgentSystemPromptProvider 가 로드)가 고객 PC
+         출력 폴더에 누락 → 폴백 1줄 지침으로 동작(AI 직원 페르소나·셀링포인트 저하). AI 폴더의 모든 .md 를
+         와일드카드로 복사해 향후 프롬프트 추가 시 누락도 원천 차단(헌법 #34 출하 정합). -->
+    <None Update="AI\*.md" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
 </Project>

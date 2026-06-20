@@ -55,12 +55,27 @@ public sealed class ChatbotController : ControllerBase
     /// <summary>JWT role 클레임을 챗봇 Tool 게이트용 정책 집합으로 변환(정식 정책 정의와 동일 role 매핑).</summary>
     private IReadOnlySet<string> BuildPolicySet()
     {
+        // 봉합 (2026-06-23, 5차 전수조사 PERM-02): 종전엔 SalesOnly 한 정책만 매핑해, 향후 PurchaseOnly·
+        //   AccountOnly·HROnly 등을 RequiredPolicy 로 요구하는 AI Tool 이 추가되면 권한 있는 매니저조차
+        //   ctx.Policies 에 정책이 안 담겨 fail-closed 로 차단됐다(정당 사용자 차단). Program.cs 의 role 기반
+        //   정책 정의(237~248)와 단일 출처로 동기화한다 — 새 RequiredPolicy Tool 추가 시 누락 위험 제거(헌법 #12).
         var set = new HashSet<string>(StringComparer.Ordinal);
-        // SalesOnly = system_admin·sales_manager·sales_user·TenantAdmin·tenant_admin (Program.cs 정책과 일치)
-        string[] salesRoles = { "system_admin", "sales_manager", "sales_user", "TenantAdmin", "tenant_admin" };
-        if (salesRoles.Any(User.IsInRole))
+
+        // Program.cs RequireRole 정책과 1:1 일치하는 매핑 테이블.
+        var policyRoles = new (string Policy, string[] Roles)[]
         {
-            set.Add("SalesOnly");
+            ("SalesOnly",    new[] { "system_admin", "sales_manager", "sales_user", "TenantAdmin", "tenant_admin" }),
+            ("SalesManager", new[] { "system_admin", "sales_manager" }),
+            ("PurchaseOnly", new[] { "system_admin", "purchase_manager", "TenantAdmin", "tenant_admin" }),
+            ("AccountOnly",  new[] { "system_admin", "account_manager", "TenantAdmin", "tenant_admin" }),
+            ("HROnly",       new[] { "system_admin", "hr_manager", "TenantAdmin", "tenant_admin" }),
+            ("AdminOnly",    new[] { "system_admin" }),
+        };
+
+        foreach (var (policy, roles) in policyRoles)
+        {
+            if (roles.Any(User.IsInRole))
+                set.Add(policy);
         }
         return set;
     }
