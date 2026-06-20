@@ -54,6 +54,17 @@ public sealed class LeaveRequestService : ILeaveRequestService
     {
         await EnsureOpenAsync(ct).ConfigureAwait(false);
 
+        // 봉합 (2026-06-23, 5차 전수조사 LV-W-03 P2): 종전엔 request.EmployeeId 를 활성사원 검증 없이
+        //   INSERT 해, 존재하지 않거나 퇴직한 사번으로도 연차 신청 레코드(고아 행)가 생성됐다. 신청 전에
+        //   활성 사원인지 확인한다(컨트롤러의 본인성/권한 검증과 2중). leave_requests 에 FK 가 없어 DB 차단도
+        //   없으므로 애플리케이션에서 막는다. (설계팀장 승인)
+        var empExists = await _db.ExecuteScalarAsync<int>(new CommandDefinition(
+            "SELECT COUNT(*) FROM employees WHERE tenant_id=@TenantId AND employee_id=@EmpId AND is_active=1",
+            new { TenantId = tenantId, EmpId = request.EmployeeId },
+            cancellationToken: ct)).ConfigureAwait(false);
+        if (empExists == 0)
+            throw new InvalidOperationException("연차를 신청할 수 없는 사원입니다(미존재 또는 퇴직).");
+
         var requestId = Guid.NewGuid().ToString();
 
         const string sql = """
@@ -121,6 +132,12 @@ public sealed class LeaveRequestService : ILeaveRequestService
         // P1-3 봉합(2026-06-20): 실제 처리한 결재자(@ApproverId)를 기록한다.
         // LV-01 봉합(2026-06-20): WHERE 에 status='pending' 가드 추가 — 이미 처리된 건 재처리(상태 역전) 차단.
         //   ExecuteAsync 의 affected rows 로 실제 처리 여부 반환(0이면 미존재/이미 처리 → 컨트롤러가 정직하게 응답).
+        // 봉합 (2026-06-23, 5차 전수조사 LV-W-01 P2): 종전엔 status 만 바꾸고 employees.annual_leave_used
+        //   가산을 안 해, 캘린더가 사용연차를 표시하는데 승인해도 잔여가 안 줄었다(헌법 #20 워크플로우 끊김).
+        //   승인(헌법 #6 confirmed 시점)에 잔여를 차감하되, ① 'annual' 연차만(병가·경조사는 연차잔여와 무관)
+        //   ② status 전이와 차감을 단일 트랜잭션으로 원자화 ③ 한도 초과는 현장 운영을 막지 않도록 차단하지 않고
+        //   경고만 남긴다(재고 음수허용 정신·헌법 #20). 승인취소 경로가 코드에 없어 복원 로직은 불필요(반려는
+        //   pending 에서만 → 차감된 적 없음). (설계팀장 승인)
         const string sql = """
             UPDATE leave_requests
             SET status = 'approved',
@@ -133,11 +150,52 @@ public sealed class LeaveRequestService : ILeaveRequestService
               AND status = 'pending'
             """;
 
-        var affected = await _db.ExecuteAsync(new CommandDefinition(
-            sql,
-            new { TenantId = tenantId, ApproverId = approverId, RequestId = request.RequestId },
-            cancellationToken: ct)).ConfigureAwait(false);
-        return affected > 0;
+        using var tx = (_db as DbConnection)?.BeginTransaction()
+                       ?? throw new InvalidOperationException("DbConnection 트랜잭션 사용 불가");
+        try
+        {
+            var affected = await _db.ExecuteAsync(new CommandDefinition(
+                sql,
+                new { TenantId = tenantId, ApproverId = approverId, RequestId = request.RequestId },
+                transaction: tx, cancellationToken: ct)).ConfigureAwait(false);
+
+            if (affected == 0)
+            {
+                tx.Rollback();
+                return false; // 미존재 또는 이미 처리 — 차감하지 않음
+            }
+
+            // 승인된 신청의 사원·일수·유형 조회 후 'annual' 연차만 잔여 차감.
+            var info = await _db.QueryFirstOrDefaultAsync<(string EmployeeId, decimal LeaveDays, string LeaveType)>(
+                new CommandDefinition(
+                    "SELECT employee_id AS EmployeeId, leave_days AS LeaveDays, leave_type AS LeaveType FROM leave_requests WHERE tenant_id=@TenantId AND request_id=@RequestId",
+                    new { TenantId = tenantId, RequestId = request.RequestId },
+                    transaction: tx, cancellationToken: ct)).ConfigureAwait(false);
+
+            if (info.LeaveType == "annual" && info.LeaveDays > 0m && !string.IsNullOrEmpty(info.EmployeeId))
+            {
+                await _db.ExecuteAsync(new CommandDefinition(
+                    "UPDATE employees SET annual_leave_used = annual_leave_used + @Days, updated_at = NOW(6) WHERE tenant_id=@TenantId AND employee_id=@EmpId",
+                    new { Days = info.LeaveDays, TenantId = tenantId, EmpId = info.EmployeeId },
+                    transaction: tx, cancellationToken: ct)).ConfigureAwait(false);
+
+                // 한도 초과는 차단하지 않고 경고만 — 현장 연차 선사용·이월 관행 수용(헌법 #20·#15).
+                var over = await _db.ExecuteScalarAsync<int>(new CommandDefinition(
+                    "SELECT CASE WHEN annual_leave_used > annual_leave_total THEN 1 ELSE 0 END FROM employees WHERE tenant_id=@TenantId AND employee_id=@EmpId",
+                    new { TenantId = tenantId, EmpId = info.EmployeeId },
+                    transaction: tx, cancellationToken: ct)).ConfigureAwait(false);
+                if (over == 1)
+                    System.Diagnostics.Trace.TraceWarning($"[Leave] 사원 {info.EmployeeId} 연차 한도 초과 사용(선사용/이월 가능) — request {request.RequestId}");
+            }
+
+            tx.Commit();
+            return true;
+        }
+        catch
+        {
+            tx.Rollback();
+            throw;
+        }
     }
 
     public async Task<bool> RejectAsync(string tenantId, string approverId, ApproveLeaveRequest request, CancellationToken ct = default)

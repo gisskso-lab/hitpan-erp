@@ -62,6 +62,22 @@ public sealed class LeaveRequestController : ControllerBase
             return Forbid();
         }
 
+        // 봉합 (2026-06-23, 5차 전수조사 LV-W-03 P2): 종전엔 request.EmployeeId 를 그대로 신뢰해
+        //   타인 명의 연차 신청이 가능했다. 본인 확인은 user_id 가 아니라 employee_id 클레임으로 해야 한다
+        //   (user_id≠employee_id 별개 체계). 관리자(tenant_admin/platform_admin)는 대리신청을 허용하고,
+        //   일반 사용자는 자기 employee_id 로 강제 치환해 위조를 차단한다.
+        var myEmployeeId = User.FindFirst("employee_id")?.Value;
+        var accountType = User.FindFirst("account_type")?.Value;
+        var isAdmin = accountType is "tenant_admin" or "platform_admin";
+        if (!isAdmin)
+        {
+            if (string.IsNullOrEmpty(myEmployeeId))
+            {
+                return Forbid();
+            }
+            request.EmployeeId = myEmployeeId; // 일반 사용자는 본인 신청만 — 서버가 강제
+        }
+
         var requestId = await _leaveRequestService.CreateAsync(tenantId, request, ct).ConfigureAwait(false);
         return Ok(new { requestId });
     }
