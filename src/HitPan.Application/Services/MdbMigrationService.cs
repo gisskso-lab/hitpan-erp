@@ -3786,7 +3786,12 @@ public sealed class MdbMigrationService
         IDbTransaction tx, CancellationToken ct)
     {
         // P0 #4 (2026-05-14): ORDER BY 추가 — 헌법 #13 멱등 순서 보장 (카드결제 번호).
-        var dt = ReadMdbTable(oleConn, "SELECT * FROM DOCCD ORDER BY CD_CDNO");
+        // 봉합 (2026-06-23, 5차 전수조사 MIG-03 P2, 사장님 결재 A안): 종전 ORDER BY CD_CDNO 는
+        //   CD_CDNO 자기중복 21종 그룹 내부 순서를 보장하지 않아, 재마이그 시 OLEDB 가 같은 묶음을 다른
+        //   순서로 반환하면 SourceId 의 rowIdx(headCount+1)가 어긋나 ON DUPLICATE 매칭 실패 → 중복 INSERT.
+        //   tie-break 컬럼(CD_DT·CD_MAMT·CD_SNO)을 추가해 그룹 내 순서를 결정적으로 고정 → rowIdx 재현성
+        //   확보. #91 결재의 SourceId 포맷은 한 글자도 바꾸지 않는 멱등 보강(재결재 불필요, 사장님 사전 확인).
+        var dt = ReadMdbTable(oleConn, "SELECT * FROM DOCCD ORDER BY CD_CDNO, CD_DT, CD_MAMT, CD_SNO");
         if (dt.Rows.Count == 0) return 0;
 
         // 진범 #82 봉합 (2026-05-21): source_id 멱등 키 + C안 UPSERT (사장님 결재)
