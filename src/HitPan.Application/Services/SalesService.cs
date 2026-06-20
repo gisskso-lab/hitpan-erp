@@ -317,8 +317,15 @@ public class SalesService : ISalesService
                 //   - 회사 합산(전 창고)으로 가용재고 판단. ledger 'out' 기표는 거래명세서 라인의
                 //     warehouse_id 그대로 저장되어 DB 추적 유지(창고담당자·이송 데이터는 베타 이후 정리).
                 //   - 다창고 고객용 Picking Strategy / 재고관리 모듈은 정식 버전 작지서로.
-                var balances = await ledgerRepo.FindAsync(x => x.ItemId == line.ItemId);
-                var currentBalance = balances.Sum(x => x.QtyIn - x.QtyOut);
+                // 봉합 (2026-06-23, 5차 전수조사 SALES-04 P1급): 종전엔 ledgerRepo.FindAsync 로 해당 품목의
+                //   stock_ledger 전 행을 메모리로 로드한 뒤 C# Sum 했다. stock_ledger 는 INSERT ONLY(절대원칙 #3)
+                //   라 행이 영구 누적되어, 회전 빠른 품목은 수만~수십만 행 → 거래명세서 확정(hot path)마다
+                //   전량 로드 = 대형 고객사(헌법 #26 2GB·30년)에서 메모리·지연 폭발. 코드베이스 표준(StockService
+                //   :113)대로 서버측 SQL 집계로 교체한다. tenant_id 도 명시(EF 글로벌 필터 의존 제거).
+                //   재고 검사는 이 확정의 OUT 원장 추가(아래 foreach) 전 시점이라 커밋된 잔량만 봐도 정합.
+                var currentBalance = await _db.ExecuteScalarAsync<decimal>(new CommandDefinition(
+                    "SELECT COALESCE(SUM(qty_in) - SUM(qty_out), 0) FROM stock_ledger WHERE tenant_id = @TenantId AND item_id = @ItemId",
+                    new { TenantId = delivery.TenantId, ItemId = line.ItemId }, cancellationToken: ct));
                 if (currentBalance - line.Qty < 0m)
                 {
                     throw new InvalidOperationException("재고가 부족합니다.");
@@ -349,7 +356,10 @@ public class SalesService : ISalesService
         }
 
         // 조립상품(assembly) BOM 폭파 — 자재별 추가 OUT 원장 생성
-        await ExplodeAssemblyBomAsync(delivery, lines, ledgerRepo, ct);
+        // 봉합 (2026-06-23, 5차 전수조사 SALES-03 P2): 완제품 재고 검사(311~)와 달리 조립 자재 소비에는
+        //   음수재고 검사가 없어, negative_stock_allow=false 로 설정한 고객의 약속이 자재 경로에서 깨졌다.
+        //   negativeStockAllow 를 넘겨 동일하게 검사하도록 한다(헌법 #20 무결성·#25 정확성).
+        await ExplodeAssemblyBomAsync(delivery, lines, ledgerRepo, negativeStockAllow, ct);
 
         if (!string.IsNullOrWhiteSpace(delivery.OrderId))
         {
@@ -1209,6 +1219,7 @@ public class SalesService : ISalesService
         SalesDelivery delivery,
         IReadOnlyList<SalesDeliveryItem> lines,
         IRepository<StockLedger> ledgerRepo,
+        bool negativeStockAllow,
         CancellationToken ct)
     {
         var itemIds = lines.Select(x => x.ItemId).Distinct().ToList();
@@ -1240,6 +1251,20 @@ public class SalesService : ISalesService
 
             foreach (var m in materials)
             {
+                var consumeQty = line.Qty * m.BomQty;
+                // SALES-03 봉합: negative_stock_allow=false 면 자재도 회사 합산 잔량으로 음수재고 검사
+                //   (완제품 검사 311~ 와 동일 정책·동일 SQL 집계). 부족하면 확정 차단.
+                if (!negativeStockAllow)
+                {
+                    var matBalance = await _db.ExecuteScalarAsync<decimal>(new CommandDefinition(
+                        "SELECT COALESCE(SUM(qty_in) - SUM(qty_out), 0) FROM stock_ledger WHERE tenant_id = @TenantId AND item_id = @ItemId",
+                        new { TenantId = delivery.TenantId, ItemId = m.MaterialItemId }, cancellationToken: ct));
+                    if (matBalance - consumeQty < 0m)
+                    {
+                        throw new InvalidOperationException("조립 자재 재고가 부족합니다.");
+                    }
+                }
+
                 await ledgerRepo.AddAsync(new StockLedger
                 {
                     TenantId = delivery.TenantId,
@@ -1254,7 +1279,7 @@ public class SalesService : ISalesService
                     SourceId = delivery.DeliveryId,
                     DocNo = delivery.DeliveryNo,
                     QtyIn = 0m,
-                    QtyOut = line.Qty * m.BomQty,
+                    QtyOut = consumeQty,
                     UnitCost = 0m,
                     SupplyAmount = 0m,
                     Memo = $"조립 자재소비 (완제품: {line.ItemId})"
