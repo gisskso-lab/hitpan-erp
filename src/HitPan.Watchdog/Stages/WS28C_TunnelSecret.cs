@@ -197,17 +197,36 @@ public class WS28C_TunnelSecret
                 return false;
             }
 
-            using var sc = new ServiceController("cloudflared");
-            if (sc.Status == ServiceControllerStatus.Running)
-            {
-                sc.Stop();
-                sc.WaitForStatus(ServiceControllerStatus.Stopped, TimeSpan.FromSeconds(30));
-            }
-            sc.Start();
-            sc.WaitForStatus(ServiceControllerStatus.Running, TimeSpan.FromSeconds(30));
-
-            _logger.LogWarning("WS-28-C: TunnelSecret regenerated, cloudflared restarted");
+            // 봉합 (2026-06-23, 5차 전수조사 WD5-01 P1):
+            //   여기 도달 = cloudflared 가 ExitCode 0 으로 새 자격증명(credFile)을 정상 생성한 상태.
+            //   종전엔 이 아래 서비스 재시작이 30초 내 안 되면 WaitForStatus 가 TimeoutException →
+            //   바깥 catch 의 RestoreBackupOnFailure() 가 '방금 만든 정상 자격증명'을 지우고 깨진 백업을
+            //   복원하는 자해가 났다(3차에 봉합한 자해 패턴이 다른 경로로 재현).
+            //   해법: 자격증명 생성이 성공한 시점에 복원 트리거(movedToBackup)를 끈다 — 이후 무슨 일이
+            //   있어도 새 자격증명은 보존. 서비스 재시작 실패는 별도 처리하고 다음 워치독 사이클(WS-28-D/I)이
+            //   서비스만 다시 살리면 된다. 자격증명은 이미 정상이므로 백업 복원은 틀린 행동.
+            movedToBackup = false;
             PruneOldBackups(credFile);
+
+            try
+            {
+                using var sc = new ServiceController("cloudflared");
+                if (sc.Status == ServiceControllerStatus.Running)
+                {
+                    sc.Stop();
+                    sc.WaitForStatus(ServiceControllerStatus.Stopped, TimeSpan.FromSeconds(30));
+                }
+                sc.Start();
+                sc.WaitForStatus(ServiceControllerStatus.Running, TimeSpan.FromSeconds(30));
+                _logger.LogWarning("WS-28-C: TunnelSecret regenerated, cloudflared restarted");
+            }
+            catch (Exception svcEx)
+            {
+                // 자격증명은 정상 생성됨 — 서비스 재시작만 실패. 자격증명은 건드리지 않고,
+                // 서비스 복구는 다음 사이클/WS-28-D 에 위임. 재생성 자체는 성공으로 본다.
+                _logger.LogError(svcEx, "WS-28-C: 자격증명 재생성 성공, 그러나 서비스 재시작 실패 — 다음 사이클이 서비스 복구. 자격증명 보존.");
+            }
+
             return true;
         }
         catch (Exception ex)
