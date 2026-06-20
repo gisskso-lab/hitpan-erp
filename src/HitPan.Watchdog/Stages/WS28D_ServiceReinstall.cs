@@ -54,7 +54,24 @@ public class WS28D_ServiceReinstall
             };
             using var p = Process.Start(psi);
             if (p == null) return false;
+
+            // 봉합 (2026-06-23, 5차 전수조사 WD5-05 P2):
+            //   ① 종전엔 RedirectStandardOutput/Error=true 인데 출력을 읽지 않아, 출력이 파이프 버퍼(약 4KB)를
+            //      채우면 cloudflared 가 쓰기 블록 → WaitForExitAsync 영구 대기(데드락). 출력을 비동기로 동시에
+            //      읽어 파이프를 비운다(ReadToEndAsync 를 WaitForExit 전에 시작).
+            //   ② 종전엔 ExitCode 미검사로 service install 실패해도 sc.Start() 진행. ExitCode 검사 추가.
+            var stdoutTask = p.StandardOutput.ReadToEndAsync(ct);
+            var stderrTask = p.StandardError.ReadToEndAsync(ct);
             await p.WaitForExitAsync(ct);
+            var stdout = await stdoutTask;
+            var stderr = await stderrTask;
+
+            if (p.ExitCode != 0)
+            {
+                _logger.LogError("WS-28-D: 'service install' 실패 ExitCode {Code}: {Err}", p.ExitCode,
+                    string.IsNullOrWhiteSpace(stderr) ? stdout : stderr);
+                return false;
+            }
 
             using var sc = new ServiceController("cloudflared");
             sc.Start();

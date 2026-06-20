@@ -125,8 +125,23 @@ public class Worker : BackgroundService
             _logger.LogWarning("WS-28-E: health check fail streak {Streak}", streak);
             if (_e.ShouldTriggerRecovery() && _f.AllowRecovery("FullRecovery"))
             {
-                await _meta.NotifyEmergencyAsync("external_health_fail", "WS-28-E", ct);
-                MarkRecovery("WS-28-E");
+                // 봉합 (2026-06-23, 5차 전수조사 WD5-02 P2): 종전엔 'FullRecovery'가 본사 통지 +
+                //   streak 리셋만 하고 실제 복구를 안 해, 외부 통신이 영원히 안 고쳐졌다(이름만 복구).
+                //   헬스체크 실패 누적 = TunnelSecret/서비스가 로컬상 정상으로 보여도 외부에서 안 닿는 상태.
+                //   실제 복구 시퀀스(자격증명 재생성 + 서비스 재설치)를 강제 1회 수행하고, 그래도 안 되면
+                //   본사에 통지(헌법 #30: 본사는 통지만). streak 리셋은 복구를 시도한 뒤에만.
+                _logger.LogWarning("WS-28-E: FullRecovery 발동 — 실제 복구 시퀀스 수행");
+                var recovered = false;
+                if (await _c.RegenerateAsync(ct)) { MarkRecovery("WS-28-E→C"); recovered = true; }
+                if (!_d.ServiceExists("cloudflared") && await _d.ReinstallAsync(ct)) { MarkRecovery("WS-28-E→D"); recovered = true; }
+
+                // 복구 후 재확인 — 여전히 다운이면 본사 통지(운영자 개입 경로).
+                if (!await _e.PingAsync(ct))
+                {
+                    await _meta.NotifyEmergencyAsync("external_health_fail", "WS-28-E", ct);
+                    _logger.LogError("WS-28-E: FullRecovery 후에도 외부 헬스체크 실패 — 본사 비상 통지");
+                }
+                if (recovered) MarkRecovery("WS-28-E");
                 _e.ResetFailure();
             }
         }
