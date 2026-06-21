@@ -32,7 +32,14 @@ else
                         <MudTextField T="string" Label="이름" @bind-Value="_edit.EmpName" Variant="Variant.Outlined" Margin="Margin.Dense" />
                     </MudItem>
                     <MudItem xs="12" md="3">
-                        <MudTextField T="string" Label="부서" @bind-Value="_edit.DeptName" Variant="Variant.Outlined" Margin="Margin.Dense" />
+                        @* 봉합 (2026-06-22, 10차 P1-1): 부서를 자유 텍스트가 아니라 부서 마스터(dept_id) 드롭다운으로 선택한다.
+                           백엔드는 dept_id 만 저장하므로 DeptName 자유 입력은 저장되지 않아 부서가 유실되던 결함을 정합. *@
+                        <MudSelect T="string" Label="부서" @bind-Value="_edit.DeptId" Variant="Variant.Outlined" Margin="Margin.Dense" Clearable="true">
+                            @foreach (var dept in _departments)
+                            {
+                                <MudSelectItem T="string" Value="@dept.DeptId">@dept.DeptName</MudSelectItem>
+                            }
+                        </MudSelect>
                     </MudItem>
                     <MudItem xs="12" md="3">
                         <MudDatePicker Label="입사일" Date="_edit.JoinDate" DateChanged="OnJoinDateChanged" Variant="Variant.Outlined" Margin="Margin.Dense" />

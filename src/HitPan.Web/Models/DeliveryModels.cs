@@ -235,6 +235,28 @@ public sealed class CreateDeliveryItemPayload
 }
 
 /// <summary>
+/// 봉합 (2026-06-22, 10차 P0-1): 서버 CreateSalesOrderRequest와 동일 스키마(web 명시 매핑용).
+/// 수주서 신규 저장이 거래명세서(CreateDeliveryPayload)가 아니라 수주로 저장되도록 별도 페이로드를 둔다.
+/// </summary>
+public sealed class CreateSalesOrderPayload
+{
+    public string PartnerId { get; set; } = string.Empty;
+    public string? EmployeeId { get; set; }
+    public DateTime OrderDate { get; set; }
+    public string? Memo { get; set; }
+    public List<CreateSalesOrderItemPayload> Items { get; set; } = new();
+}
+
+public sealed class CreateSalesOrderItemPayload
+{
+    public string ItemId { get; set; } = string.Empty;
+    public decimal OrderedQty { get; set; }
+    public decimal UnitPrice { get; set; }
+    public decimal SupplyAmount { get; set; }
+    public decimal VatAmount { get; set; }
+}
+
+/// <summary>
 /// 서버 SalesOrderListDto (api/sales/orders 응답)과 1:1 매핑되는 웹 전용 모델.
 /// DeliveryListDto와 필드명이 달라(OrderId vs DeliveryId) 별도 타입으로 분리한다.
 /// </summary>

@@ -161,6 +161,9 @@
     {
         _selectedEmployee = emp;
         _edit.EmployeeId = emp?.EmployeeId ?? string.Empty;
+        // 봉합 (2026-06-22, 10차 P0-2): EmployeeName을 함께 채운다.
+        // 미전송 시 백엔드 LaborContractService가 공백 검증으로 400을 던진다.
+        _edit.EmployeeName = emp?.EmpName ?? string.Empty;
     }
 
     /// <summary>
@@ -221,7 +224,9 @@
         if (string.IsNullOrWhiteSpace(contractId))
         {
             _saving = false;
-            Snackbar.Add("저장에 실패했습니다.", Severity.Error);
+            // 봉합 (2026-06-22, 10차 P0-2): 백엔드 실패 사유를 그대로 노출(헌법 #15). 없으면 일반 메시지.
+            var reason = ContractSvc.LastCreateError;
+            Snackbar.Add(string.IsNullOrWhiteSpace(reason) ? "저장에 실패했습니다." : $"저장에 실패했습니다: {reason}", Severity.Error);
             return;
         }
 

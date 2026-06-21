@@ -110,7 +110,9 @@
         }
         catch (Exception _hp15Ex)
         {
+            // 봉합 (2026-06-22, 10차 P1-3): 로드 실패를 사용자에게 알림. 빈 결과(200 [])는 정상이라 여기 catch에서만 알림한다.
             Console.Error.WriteLine($"[HP15] " + _hp15Ex.GetType().Name + ": " + _hp15Ex.Message);
+            Snackbar.Add("재고현황 조회에 실패했습니다. 잠시 후 다시 시도해주세요.", Severity.Error);
             _reportData = new();
         }
         StateHasChanged();

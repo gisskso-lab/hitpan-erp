@@ -17,6 +17,8 @@ public partial class EmployeePage : ComponentBase
 
     private bool _loading = true;
     private List<EmployeeListItemModel> _employees = new();
+    // 봉합 (2026-06-22, 10차 P1-1): 부서 드롭다운 데이터. 사원 부서는 dept_id 로 저장되므로 선택지를 채운다.
+    private List<DepartmentModel> _departments = new();
     private List<LeaveRequestModel> _leaveRequests = new();
     private List<UserPermissionModel> _permissionUsers = new();
     private UserPermissionModel? _selectedPermUser;
@@ -56,6 +58,8 @@ public partial class EmployeePage : ComponentBase
     private async Task ReloadAllAsync()
     {
         _employees = await EmployeeSvc.GetListAsync().ConfigureAwait(false);
+        // 봉합 (2026-06-22, 10차 P1-1): 부서 선택지 로드 (읽기 전용 마스터).
+        _departments = await EmployeeSvc.GetDepartmentsAsync().ConfigureAwait(false);
         _permissionUsers = await PermSvc.GetAllAsync().ConfigureAwait(false) ?? new List<UserPermissionModel>();
 
         if (_employees.Count > 0)

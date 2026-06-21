@@ -8,6 +8,7 @@
 @inject ItemMasterService ItemSvc
 @inject PartnerMasterService PartnerSvc
 @inject IJSRuntime Js
+@inject ISnackbar Snackbar
 
 <PageTitle>각종 수불부</PageTitle>
 <PageHeader Title="각종 수불부" Subtitle="상품별 · 업체별 입출고 이력 조회" />
@@ -129,7 +130,9 @@
         }
         catch (Exception _hp15Ex)
         {
+            // 봉합 (2026-06-22, 10차 P1-3): 로드 실패를 사용자에게 알림. 빈 결과(200 [])는 정상이라 여기 catch에서만 알림한다.
             Console.Error.WriteLine($"[HP15] " + _hp15Ex.GetType().Name + ": " + _hp15Ex.Message);
+            Snackbar.Add("수불부 조회에 실패했습니다. 잠시 후 다시 시도해주세요.", Severity.Error);
             _data = new();
         }
         StateHasChanged();

@@ -456,13 +456,18 @@ public class BomService : IBomService
                     }, transaction: tx, cancellationToken: ct)).ConfigureAwait(false);
 
                 // 자재 재고 차감 — 재고 부족 시 음수 방지를 위해 조건부 UPDATE 후 0행이면 예외
+                // 봉합 (2026-06-22, 10차 BOM-WH-01 P1): warehouse_id 필터 없으면 자재가 2창고 분산 시
+                //   두 행 모두 차감(과차감)되고, stock_adjust_logs·ledger는 defaultWarehouseId 단일창고라
+                //   불일치. 차감 창고를 ledger 기록 창고(defaultWarehouseId)와 일치시켜 정합 확보.
+                //   단일창고 고객은 동작 불변, 다창고만 정상화.
                 var matUpdated = await _db.ExecuteAsync(new CommandDefinition(
                     """
                     UPDATE item_stock
                     SET current_qty = current_qty - @Qty, last_updated_at = NOW(6)
-                    WHERE tenant_id = @TenantId AND item_id = @ItemId AND current_qty >= @Qty
+                    WHERE tenant_id = @TenantId AND item_id = @ItemId
+                      AND warehouse_id = @WarehouseId AND current_qty >= @Qty
                     """,
-                    new { TenantId = tenantId, ItemId = mat.ItemId, Qty = mat.RequiredQty },
+                    new { TenantId = tenantId, ItemId = mat.ItemId, WarehouseId = defaultWarehouseId, Qty = mat.RequiredQty },
                     transaction: tx, cancellationToken: ct)).ConfigureAwait(false);
                 if (matUpdated == 0)
                     throw new InvalidOperationException(

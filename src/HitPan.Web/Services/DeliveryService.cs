@@ -85,6 +85,51 @@ public sealed class DeliveryService(HttpClient http)
         return new DeliverySaveResult(false, null, string.IsNullOrWhiteSpace(errBody) ? $"HTTP {(int)resp.StatusCode}" : errBody);
     }
 
+    // 봉합 (2026-06-22, 10차 전수조사 P0-1): 종전 SalesOrderPage 신규저장이 SaveAsync→api/sales/deliveries
+    //   를 호출해 수주서가 거래명세서로 둔갑 저장됐다(헌법 #20 견적→수주→거래명세서 흐름이 수주 단계에서 끊김,
+    //   OrderedQty 영구 유실). 백엔드 수주 전용 엔드포인트(SalesController CreateOrder + CreateSalesOrderRequest)
+    //   는 이미 존재했으므로 그것을 호출하는 신규 생성 메서드를 추가한다. 거래명세서가 아니라 수주(sales_orders)로 저장된다.
+    public async Task<DeliverySaveResult> CreateOrderAsync(DeliveryDraftModel draft, CancellationToken ct = default)
+    {
+        var payload = new CreateSalesOrderPayload
+        {
+            PartnerId = draft.PartnerId ?? string.Empty,
+            OrderDate = draft.SalesDate,
+            Memo = draft.Memo,
+            Items = draft.Lines
+                .Where(x => !x.IsPlaceholder)
+                .Select(x => new CreateSalesOrderItemPayload
+                {
+                    ItemId = x.ItemId,
+                    OrderedQty = x.Qty,
+                    UnitPrice = x.UnitPrice,
+                    SupplyAmount = x.Amount,
+                    VatAmount = x.VatAmount
+                }).ToList()
+        };
+
+        using var resp = await http.PostAsJsonAsync("api/sales/orders", payload, PostJsonOptions, ct);
+        if (resp.IsSuccessStatusCode)
+        {
+            var body = await resp.Content.ReadFromJsonAsync<DeliverySaveApiResponse>(JsonOptions, ct);
+            if (!string.IsNullOrWhiteSpace(body?.DocumentNumber))
+            {
+                draft.DocumentNumber = body.DocumentNumber;
+                if (!string.IsNullOrWhiteSpace(body.Id)) draft.Id = body.Id;
+                return new DeliverySaveResult(true, body.DocumentNumber, null);
+            }
+            // 문서번호 미반환이어도 Id 라도 있으면 성공으로 본다(서버 응답 변형 방어).
+            if (!string.IsNullOrWhiteSpace(body?.Id))
+            {
+                draft.Id = body.Id;
+                return new DeliverySaveResult(true, body.Id, null);
+            }
+        }
+
+        var errBody = await resp.Content.ReadAsStringAsync(ct);
+        return new DeliverySaveResult(false, null, string.IsNullOrWhiteSpace(errBody) ? $"HTTP {(int)resp.StatusCode}" : errBody);
+    }
+
     public async Task ConfirmAsync(DeliveryDraftModel draft, CancellationToken ct = default)
     {
         if (string.IsNullOrWhiteSpace(draft.Id))

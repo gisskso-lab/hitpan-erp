@@ -285,6 +285,28 @@ public class CompanyBootstrapController : ControllerBase
                         req.Email
                     }, transaction: tx, cancellationToken: ct));
 
+                // 봉합 (2026-06-22, 10차 P0-4):
+                //   신규 가입 고객은 clean DDL 에 warehouses 시드가 0건이라 창고가 하나도 없다.
+                //   → 첫 판매(SalesService '등록된 창고가 없습니다')·BOM 저장/생산(BomService '활성 창고가 없습니다')이
+                //     하드 throw 로 차단되고, 매입은 실재하지 않는 'MAIN' 유령 warehouse_id 로 재고를 기록해 정합이 깨졌다.
+                //   부모계정 생성과 동일 트랜잭션에서 기본 창고 1행(wh_code='MAIN')을 함께 만들어
+                //   가입 직후부터 매입·판매·BOM 3흐름(헌법 #20)이 끊김 없이 돌게 한다.
+                //   재실행 가드(existingParent>0)에 막혀 이 흐름은 tenant 당 1회만 실행되므로 중복 위험 없으나,
+                //   기존 창고가 이미 있는 고객(마이그 등) 보호를 위해 NOT EXISTS 로 한 번 더 방어한다.
+                //   wh_type 은 NOT NULL — 판매·BOM 의 기본창고 선택이 wh_code 기준이므로 'normal' 로 표준화.
+                await db.ExecuteAsync(new CommandDefinition(@"
+                    INSERT INTO warehouses
+                      (warehouse_id, tenant_id, wh_code, wh_name, wh_type, is_active, created_at, updated_at)
+                    SELECT @WarehouseId, @TenantId, 'MAIN', '기본창고', 'normal', 1, NOW(6), NOW(6)
+                    WHERE NOT EXISTS (
+                        SELECT 1 FROM warehouses WHERE tenant_id = @TenantId
+                    )",
+                    new
+                    {
+                        WarehouseId = Guid.NewGuid().ToString(),
+                        TenantId = tenantId
+                    }, transaction: tx, cancellationToken: ct));
+
                 await tx.CommitAsync(ct);
             }
             catch
@@ -293,7 +315,7 @@ public class CompanyBootstrapController : ControllerBase
                 throw;
             }
 
-            _logger.LogInformation("[CompanyBootstrap] 부모계정+사원 생성 완료 tenant={Code} email={Email}",
+            _logger.LogInformation("[CompanyBootstrap] 부모계정+사원+기본창고 생성 완료 tenant={Code} email={Email}",
                 tenantCode, req.Email);
 
             return Ok(new

@@ -53,6 +53,33 @@ public sealed class EmployeeService : IEmployeeService
         return rows.ToList();
     }
 
+    /// <summary>
+    /// 봉합 (2026-06-22, 10차 P1-1): 부서 드롭다운용 목록 (departments 마스터, 읽기 전용).
+    /// 사원의 부서는 dept_id 로 저장하므로 화면 선택지를 (dept_id, dept_name)로 내려준다.
+    /// 활성 부서만, sort_order → dept_name 순으로 정렬한다.
+    /// </summary>
+    public async Task<List<DepartmentDto>> GetDepartmentsAsync(string tenantId, CancellationToken ct = default)
+    {
+        await EnsureOpenAsync(ct).ConfigureAwait(false);
+
+        const string sql = """
+            SELECT
+              dept_id   AS DeptId,
+              dept_name AS DeptName
+            FROM departments
+            WHERE tenant_id = @TenantId
+              AND is_active = 1
+            ORDER BY sort_order, dept_name
+            """;
+
+        var rows = await _db.QueryAsync<DepartmentDto>(new CommandDefinition(
+            sql,
+            new { TenantId = tenantId },
+            cancellationToken: ct)).ConfigureAwait(false);
+
+        return rows.ToList();
+    }
+
     public async Task<EmployeeDetailDto?> GetAsync(string tenantId, string employeeId, CancellationToken ct = default)
     {
         await EnsureOpenAsync(ct).ConfigureAwait(false);

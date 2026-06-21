@@ -227,10 +227,16 @@ public class StockService : IStockService
                 }, transaction: tx, cancellationToken: ct)).ConfigureAwait(false);
 
                 // 4. item_stock 갱신 — 실 스키마는 current_qty / last_updated_at (available_qty, updated_at 없음).
+                // 봉합 (2026-06-22, 10차 ADJ-01 P2): 종전 plain UPDATE 는 (item,warehouse) 행이 없으면 0행 →
+                //   신규품 첫 실사조정 시 재고현황 미반영. TransferStock 도착측·매입·BOM 과 동일하게
+                //   INSERT ... ON DUPLICATE KEY UPDATE UPSERT 로 변경(UNIQUE: tenant_id,item_id,warehouse_id).
+                //   신규행이면 INSERT, 있으면 current_qty 를 실사수량으로 갱신.
                 const string updateStock = """
-                    UPDATE item_stock
-                    SET current_qty = @ActualQty, last_updated_at = @Now
-                    WHERE tenant_id = @TenantId AND item_id = @ItemId AND warehouse_id = @WarehouseId
+                    INSERT INTO item_stock (stock_id, tenant_id, item_id, warehouse_id, current_qty, avg_cost, last_updated_at)
+                    VALUES (UUID(), @TenantId, @ItemId, @WarehouseId, @ActualQty, 0, @Now)
+                    ON DUPLICATE KEY UPDATE
+                        current_qty = @ActualQty,
+                        last_updated_at = @Now
                     """;
                 await _dbConnection.ExecuteAsync(new CommandDefinition(updateStock, new
                 {

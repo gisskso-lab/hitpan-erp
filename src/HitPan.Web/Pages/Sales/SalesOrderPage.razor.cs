@@ -239,7 +239,10 @@ public partial class SalesOrderPage : ComponentBase
         {
             if (_isNew)
             {
-                var result = await DeliveryService.SaveAsync(_draft);
+                // 봉합 (2026-06-22, 10차 P0-1): 종전 DeliveryService.SaveAsync 는 api/sales/deliveries 로 보내
+                //   수주서가 거래명세서로 둔갑 저장됐다(헌법 #20 흐름 끊김). 수주 전용 CreateOrderAsync(api/sales/orders)
+                //   로 교체해 sales_orders 로 정확히 저장한다.
+                var result = await DeliveryService.CreateOrderAsync(_draft);
                 if (!result.Success || string.IsNullOrWhiteSpace(result.DocumentNumber))
                 {
                     Snackbar.Add($"수주서 생성 실패: {result.Error ?? "알 수 없는 오류"}", Severity.Error);

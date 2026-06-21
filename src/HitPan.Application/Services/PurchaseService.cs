@@ -116,6 +116,33 @@ public class PurchaseService : IPurchaseService
         };
         await receiptRepo.AddAsync(receipt);
 
+        // 봉합 (2026-06-22, 10차 P0-4-REGRESS, 교차검증 발견): P0-4 의 빈 창고 폴백이 PO전환 경로
+        //   (ConvertOrderToReceiptAsync)에만 있어, 직접매입(무PO) 경로는 빈 WarehouseId 가 그대로 영속되어
+        //   ConfirmReceipt 의 item_stock UPSERT 가 빈 warehouse_id 로 기록 → 유령 창고 재고(P0-4 가 막으려던
+        //   증상)가 직접매입에 잔존했다. 동일 폴백을 직접매입 경로에도 적용한다(판매·BOM·PO전환과 동일 전략).
+        var emptyWhLines = request.Items.Where(x => string.IsNullOrWhiteSpace(x.WarehouseId)).ToList();
+        if (emptyWhLines.Count > 0)
+        {
+            var defaultWh = await _db.QueryFirstOrDefaultAsync<string>(
+                new CommandDefinition(
+                    """
+                    SELECT warehouse_id FROM warehouses
+                     WHERE tenant_id = @TenantId AND is_active = 1
+                     ORDER BY (CASE WHEN wh_code IN ('MAIN','WH-MAIN') THEN 0 ELSE 1 END), wh_code
+                     LIMIT 1
+                    """,
+                    new { TenantId = _currentTenant.TenantId },
+                    cancellationToken: ct));
+            if (string.IsNullOrEmpty(defaultWh))
+            {
+                throw new InvalidOperationException("등록된 창고가 없습니다.");
+            }
+            foreach (var line in emptyWhLines)
+            {
+                line.WarehouseId = defaultWh;
+            }
+        }
+
         foreach (var item in request.Items)
         {
             var receiptItem = new PurchaseReceiptItem
@@ -270,8 +297,17 @@ public class PurchaseService : IPurchaseService
             var dbTx = tx.DbTransaction;
 
             // 2) item_stock 증가 (Dapper · 동일 tx)
-            foreach (var line in receiptItems)
+            // 봉합 (2026-06-22, 10차 avg_cost P2-A): 종전엔 라인별로 avg_cost = @UnitCost(=line.UnitPrice)로
+            //   덮어써, 같은 품목 다단가 입고 시 마지막 라인 단가가 평균원가를 덮어씀(가중평균 아님). ledger(위)는
+            //   item_id 그룹 가중평균(supplySum/qtySum)이라 불일치. 정확한 이동평균(기존재고 가중)은 과도한
+            //   재설계라 범위 밖 — ledger 와 동일한 "그룹 가중평균 단가"를 써 둘의 일관성만 확보(근사).
+            //   item_stock 은 (item,warehouse) 단위 행이므로 창고까지 묶어 그룹화.
+            foreach (var grp in receiptItems.GroupBy(x => new { x.ItemId, x.WarehouseId }))
             {
+                var qtySum = grp.Sum(x => x.Qty);
+                var supplySum = grp.Sum(x => x.SupplyAmount);
+                var groupUnitCost = qtySum != 0m ? supplySum / qtySum : grp.First().UnitPrice;
+
                 const string upsertStockSql = """
                     INSERT INTO item_stock (stock_id, tenant_id, item_id, warehouse_id, current_qty, avg_cost, last_updated_at)
                     VALUES (UUID(), @TenantId, @ItemId, @WarehouseId, @Qty, @UnitCost, NOW(6))
@@ -286,10 +322,10 @@ public class PurchaseService : IPurchaseService
                     new
                     {
                         TenantId = receipt.TenantId,
-                        ItemId = line.ItemId,
-                        WarehouseId = line.WarehouseId,
-                        Qty = line.Qty,
-                        UnitCost = line.UnitPrice
+                        ItemId = grp.Key.ItemId,
+                        WarehouseId = grp.Key.WarehouseId,
+                        Qty = qtySum,
+                        UnitCost = groupUnitCost
                     },
                     transaction: dbTx,
                     cancellationToken: ct));
@@ -601,16 +637,36 @@ public class PurchaseService : IPurchaseService
         }
 
         // 창고 Id가 비어 있는 라인은 기본 창고로 채운다.
-        foreach (var item in receiptItems.Where(x => string.IsNullOrWhiteSpace(x.WarehouseId)))
+        var emptyWhItems = receiptItems.Where(x => string.IsNullOrWhiteSpace(x.WarehouseId)).ToList();
+        if (emptyWhItems.Count > 0)
         {
-            // 기본 창고 조회: warehouses 테이블의 첫 번째 활성 창고를 사용한다.
+            // 봉합 (2026-06-22, 10차 P0-4):
+            //   종전 폴백 `defaultWh ?? "MAIN"` 은 실재하지 않는 문자열 "MAIN" 을 warehouse_id 로 기록해
+            //   재고(item_stock)·원장(stock_ledger)이 유령 창고에 쌓이며 정합이 깨졌다.
+            //   판매(SalesService)·BOM(BomService) 의 기본창고 선택 전략과 통일한다:
+            //   wh_code='MAIN'(또는 'WH-MAIN') 을 우선, 그 다음 wh_code 순으로 실제 활성 창고 1행을 고른다.
+            //   프로비저닝(CompanyBootstrapController)이 가입 시 'MAIN' 창고를 항상 1개 만들므로 정상 경로에선 반드시 잡힌다.
+            //   그래도 정말 없으면 판매처럼 명확한 에러를 던져 유령 id 기록을 원천 차단한다(헌법 #20 정합 차단이 유령 기록보다 안전).
             var defaultWh = await _db.QueryFirstOrDefaultAsync<string>(
                 new CommandDefinition(
-                    "SELECT warehouse_id FROM warehouses WHERE tenant_id = @TenantId AND is_active = 1 LIMIT 1",
+                    """
+                    SELECT warehouse_id FROM warehouses
+                     WHERE tenant_id = @TenantId AND is_active = 1
+                     ORDER BY (CASE WHEN wh_code IN ('MAIN','WH-MAIN') THEN 0 ELSE 1 END), wh_code
+                     LIMIT 1
+                    """,
                     new { TenantId = tenantId },
                     cancellationToken: ct));
 
-            item.WarehouseId = defaultWh ?? "MAIN";
+            if (string.IsNullOrEmpty(defaultWh))
+            {
+                throw new InvalidOperationException("등록된 창고가 없습니다.");
+            }
+
+            foreach (var item in emptyWhItems)
+            {
+                item.WarehouseId = defaultWh;
+            }
         }
 
         var request = new CreateReceiptRequest

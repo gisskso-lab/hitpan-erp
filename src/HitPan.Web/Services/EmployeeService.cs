@@ -21,6 +21,25 @@ public sealed class EmployeeService(HttpClient http)
         }
     }
 
+    /// <summary>
+    /// 봉합 (2026-06-22, 10차 P1-1): 부서 드롭다운 목록 조회 (읽기 전용).
+    /// 사원 부서는 백엔드가 dept_id 로 저장하므로, 화면 선택지를 채우기 위해 부서 목록을 받는다.
+    /// </summary>
+    public async Task<List<DepartmentModel>> GetDepartmentsAsync(CancellationToken ct = default)
+    {
+        try
+        {
+            return await http.GetFromJsonAsync<List<DepartmentModel>>("api/employees/departments", ct).ConfigureAwait(false)
+                   ?? new List<DepartmentModel>();
+        }
+        catch (Exception ex)
+        {
+            // §원칙 #15 빈 catch 금지 — 진단 메시지 출력 후 빈 목록 반환(화면은 부서 미선택으로 동작).
+            Console.Error.WriteLine($"[EmployeeService.GetDepartmentsAsync] EXCEPTION: {ex.GetType().Name} {ex.Message}");
+            return new List<DepartmentModel>();
+        }
+    }
+
     public async Task<EmployeeDetailModel?> GetAsync(string id, CancellationToken ct = default)
     {
         try

@@ -33,6 +33,23 @@ public sealed class EmployeeController : ControllerBase
         return Ok(list);
     }
 
+    /// <summary>
+    /// 봉합 (2026-06-22, 10차 P1-1): 부서 드롭다운 목록 (읽기 전용).
+    /// 사원 부서는 dept_id 로 저장되므로 화면이 부서를 선택할 수 있게 (dept_id, dept_name) 목록을 제공한다.
+    /// </summary>
+    [HttpGet("departments")]
+    public async Task<IActionResult> GetDepartments(CancellationToken ct)
+    {
+        var tenantId = HttpContext.Items["TenantId"]?.ToString();
+        if (string.IsNullOrEmpty(tenantId))
+        {
+            return Forbid();
+        }
+
+        var list = await _employeeService.GetDepartmentsAsync(tenantId, ct).ConfigureAwait(false);
+        return Ok(list);
+    }
+
     [HttpGet("{id}")]
     public async Task<IActionResult> Get(string id, CancellationToken ct)
     {

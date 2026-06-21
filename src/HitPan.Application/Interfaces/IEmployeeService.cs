@@ -8,6 +8,10 @@ namespace HitPan.Application.Interfaces;
 public interface IEmployeeService
 {
     Task<List<EmployeeListDto>> GetListAsync(string tenantId, CancellationToken ct = default);
+
+    // 봉합 (2026-06-22, 10차 P1-1): 부서 드롭다운용 목록 조회 (departments 마스터, 읽기 전용).
+    Task<List<DepartmentDto>> GetDepartmentsAsync(string tenantId, CancellationToken ct = default);
+
     Task<EmployeeDetailDto?> GetAsync(string tenantId, string employeeId, CancellationToken ct = default);
     Task<string> CreateAsync(string tenantId, CreateEmployeeRequest request, CancellationToken ct = default);
     Task UpdateAsync(string tenantId, string employeeId, UpdateEmployeeRequest request, CancellationToken ct = default);

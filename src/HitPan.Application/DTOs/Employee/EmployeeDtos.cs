@@ -65,6 +65,17 @@ public sealed class UpdateAnnualLeaveRequest
 }
 
 /// <summary>
+/// 봉합 (2026-06-22, 10차 P1-1): 부서 드롭다운 응답 DTO이다.
+/// 사원 부서는 departments 마스터의 dept_id 로 저장되므로,
+/// 화면 부서 선택은 (DeptId, DeptName) 목록으로 채운다.
+/// </summary>
+public sealed class DepartmentDto
+{
+    public string DeptId { get; set; } = string.Empty;
+    public string DeptName { get; set; } = string.Empty;
+}
+
+/// <summary>
 /// 사원 생성 요청 DTO이다.
 /// </summary>
 public sealed class CreateEmployeeRequest
