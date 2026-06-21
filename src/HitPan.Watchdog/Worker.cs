@@ -96,7 +96,8 @@ public class Worker : BackgroundService
             }
         }
 
-        if (_c.DetectInvalidSecret())
+        var secretInvalid = _c.DetectInvalidSecret();
+        if (secretInvalid)
         {
             if (_f.AllowRecovery("TunnelSecret"))
             {
@@ -109,7 +110,15 @@ public class Worker : BackgroundService
             }
         }
 
-        if (!_d.ServiceExists("cloudflared"))
+        // 봉합 (2026-06-21, 7차 전수조사 D6-P0-02-FIX, 교차검증 설계팀장 P1):
+        //   종전 D 게이트는 !ServiceExists 단독이라, 관리형 터널이 '서비스는 살아있고 secret 만 무효화'된
+        //   대표 다운 모드(헌법 #28 5/15 demo 사고)에서 D 가 호출되지 않아 토큰 재설치가 발화하지 않았다.
+        //   관리형 터널이면서 secret 무효화를 감지(secretInvalid)했을 때는 서비스 생존 여부와 무관하게 D 를
+        //   강제한다 — C 는 관리형이라 스킵하므로 토큰 재설치(service install {token})만이 유일 복구 경로다.
+        //   service install 은 멱등 + AllowRecovery(CoolDown) 게이트로 보호되어, 정상 터널에서 secretInvalid 가
+        //   false 면 이 분기로 안 들어오고, 무효화 상태에서도 시간당 반복은 CoolDown 이 제한한다(자해 차단).
+        var needsManagedReinstall = secretInvalid && _c.IsManagedTunnel();
+        if (!_d.ServiceExists("cloudflared") || needsManagedReinstall)
         {
             if (_f.AllowRecovery("ServiceReinstall"))
             {
@@ -133,7 +142,12 @@ public class Worker : BackgroundService
                 _logger.LogWarning("WS-28-E: FullRecovery 발동 — 실제 복구 시퀀스 수행");
                 var recovered = false;
                 if (await _c.RegenerateAsync(ct)) { MarkRecovery("WS-28-E→C"); recovered = true; }
-                if (!_d.ServiceExists("cloudflared") && await _d.ReinstallAsync(ct)) { MarkRecovery("WS-28-E→D"); recovered = true; }
+                // 봉합 (2026-06-21, D6-P0-02-FIX, 설계팀장 P1): 헬스 실패 누적 = 외부 미도달. 관리형 터널이면
+                //   C 가 스킵하므로 토큰 재설치가 유일 복구다. 종전 !ServiceExists 단독 게이트는 서비스 생존 +
+                //   터널 무효화 상태에서 D 를 건너뛰어 FullRecovery 가 이름만 복구였다(5차 WD5-02 자해 패턴 재현).
+                //   관리형이면 서비스 생존 여부와 무관하게 D 강제(멱등 + CoolDown 보호).
+                if ((!_d.ServiceExists("cloudflared") || _c.IsManagedTunnel()) && await _d.ReinstallAsync(ct))
+                { MarkRecovery("WS-28-E→D"); recovered = true; }
 
                 // 복구 후 재확인 — 여전히 다운이면 본사 통지(운영자 개입 경로).
                 if (!await _e.PingAsync(ct))
@@ -167,7 +181,8 @@ public class Worker : BackgroundService
         try
         {
             // ① TunnelSecret 무효화 감지·재생성
-            if (_c.DetectInvalidSecret() && _f.AllowRecovery("PostReboot:TunnelSecret"))
+            var secretInvalid = _c.DetectInvalidSecret();
+            if (secretInvalid && _f.AllowRecovery("PostReboot:TunnelSecret"))
             {
                 if (await _c.RegenerateAsync(ct))
                 {
@@ -177,7 +192,11 @@ public class Worker : BackgroundService
             }
 
             // ② cloudflared 서비스 부재 감지·재설치
-            if (!_d.ServiceExists("cloudflared") && _f.AllowRecovery("PostReboot:ServiceReinstall"))
+            //   봉합 (2026-06-21, D6-P0-02-FIX, 설계팀장 P1): 정기 루프와 동일 — 관리형 터널이면서 secret
+            //   무효화 감지 시 서비스 생존 여부와 무관하게 D(토큰 재설치) 강제. 종전 !ServiceExists 단독 게이트는
+            //   재부팅 후 secret 만 무효화되고 서비스는 살아난 관리형 케이스에서 토큰 재설치를 건너뛰었다.
+            var needsManagedReinstall = secretInvalid && _c.IsManagedTunnel();
+            if ((!_d.ServiceExists("cloudflared") || needsManagedReinstall) && _f.AllowRecovery("PostReboot:ServiceReinstall"))
             {
                 if (await _d.ReinstallAsync(ct))
                 {

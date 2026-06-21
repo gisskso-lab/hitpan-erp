@@ -96,6 +96,27 @@ public class WS28C_TunnelSecret
         ?? Environment.GetEnvironmentVariable("HITPAN_TUNNEL_ID", EnvironmentVariableTarget.Machine)
         ?? Environment.GetEnvironmentVariable("HITPAN_TUNNEL_ID");
 
+    /// <summary>
+    /// 봉합 (2026-06-21, 7차 전수조사 D6-P0-02-FIX, 교차검증 설계팀장 P1 발견):
+    ///   현재 터널이 관리형(토큰 기반)인지 판정한다 — TUNNEL_TOKEN(db.conf) 존재 + 자가관리 자격증명
+    ///   파일({tunnelId}.json) 부재. 관리형 터널의 자가복구는 WS-28-C(자가관리 재생성)가 아니라
+    ///   WS-28-D(service install {token})가 담당하므로, Worker 가 이 신호를 보고 D 호출 게이트(!ServiceExists)를
+    ///   우회해 D 를 강제해야 한다. 그러지 않으면 '서비스는 살아있고 터널 secret 만 무효화'된 관리형 다운 모드
+    ///   (= 헌법 #28 이 정의한 5/15 demo 사고)에서 C 는 스킵·D 는 !ServiceExists 미충족으로 어느 경로로도
+    ///   토큰 재설치가 발화하지 않아 자가복구 사각지대가 남는다.
+    /// </summary>
+    public bool IsManagedTunnel()
+    {
+        var tunnelId = ReadTunnelId();
+        if (string.IsNullOrEmpty(tunnelId)) return false;
+        var managedToken = DbConfReader.GetValue("TUNNEL_TOKEN");
+        if (string.IsNullOrWhiteSpace(managedToken)) return false;
+        var selfManagedCredFile = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
+            ".cloudflared", $"{tunnelId}.json");
+        return !File.Exists(selfManagedCredFile);
+    }
+
     public async Task<bool> RegenerateAsync(CancellationToken ct = default)
     {
         var tunnelId = ReadTunnelId();
@@ -103,6 +124,22 @@ public class WS28C_TunnelSecret
         {
             _logger.LogError("WS-28-C: HITPAN_TUNNEL_ID env var missing");
             return false;
+        }
+
+        // 봉합 (2026-06-21, 7차 전수조사 D6-P0-02, 사장님 결재 A안 "토큰 기반 통일"):
+        //   현재 터널은 관리형(토큰 기반)이라 자격증명 파일({tunnelId}.json)이 디스크에 생기지 않는다.
+        //   아래 'cloudflared tunnel token --cred-file' 는 자가관리 터널 전용 — 관리형에선 credFile 이
+        //   없어 무의미하거나 자해(없는 파일 백업/복원 시도)다. 따라서 관리형이면 자가관리 재생성을 건너뛴다.
+        //
+        //   교차검증 정정 (D6-P0-02-FIX, 설계팀장 P1): 종전 주석은 "C 직후 D 를 호출하므로 여기서 true 면
+        //   D 가 복구를 이어받는다(흐름 끊김 0)"고 했으나 거짓이었다 — Worker 의 D 호출 게이트가
+        //   !ServiceExists 라, 서비스가 살아있고 터널만 무효화된 관리형 대표 다운 모드에서 D 가 호출되지
+        //   않았다. 이 true 의 실제 의미는 "C 는 관리형이라 할 일이 없다"일 뿐이며, D 강제 호출은 Worker 가
+        //   IsManagedTunnel() 신호로 별도 보장한다(Worker.cs 정기 루프·FullRecovery).
+        if (IsManagedTunnel())
+        {
+            _logger.LogWarning("WS-28-C: 관리형 터널(토큰 기반) 감지 — 자가관리 자격증명 재생성 스킵(토큰 재설치는 WS-28-D 소관)");
+            return true;
         }
 
         var credDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".cloudflared");

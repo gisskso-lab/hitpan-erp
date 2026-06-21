@@ -951,6 +951,14 @@ begin
     //   TUNNEL_ID=CF 터널 UUID(자가복구) / LICENSE_KEY=설치 시리얼(본사 메타 ping Bearer). LOCAL 모드면 빈 값.
     BootstrapContent.Add('TUNNEL_ID=' + G_TunnelId);
     BootstrapContent.Add('LICENSE_KEY=' + G_LicenseKey);
+    // 봉합 (2026-06-21, 7차 전수조사 D6-P0-02, 사장님 결재 A안 "토큰 기반 통일"): 관리형 터널 토큰.
+    //   종전엔 G_TunnelToken 을 service install 인자(아래 6-2)로만 쓰고 버려, 워치독이 터널을 재설치하려
+    //   해도 토큰이 없어 관리형 터널이 안 붙었다(WS-28-C 는 자가관리 tunnel token --cred-file 호출 → 관리형엔
+    //   credFile 자체가 없어 자가복구 영구 무력, 5/15 demo 6시간 다운 재발 위험·헌법 #27·#28).
+    //   여기에 저장한 TUNNEL_TOKEN 을 WS-28-D 가 읽어 'service install {token}' 으로 재설치한다(인스톨러 6-2 동일 모델).
+    //   토큰은 시크릿이나 db.conf 는 아래 icacls(Administrators·SYSTEM 만 읽기) ACL 로 보호 + 본사 미전송(헌법 #22).
+    //   LOCAL 모드·터널 미발급이면 빈 값(워치독이 보수적으로 토큰 기반 재설치 스킵).
+    BootstrapContent.Add('TUNNEL_TOKEN=' + G_TunnelToken);
     BootstrapContent.SaveToFile(ExpandConstant('{app}\db.conf'));
   finally
     BootstrapContent.Free;
