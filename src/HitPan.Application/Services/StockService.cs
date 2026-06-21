@@ -92,15 +92,8 @@ public class StockService : IStockService
             AND (@employeeId IS NULL OR l.employee_id = @employeeId)
             """;
 
-        var snapshotFilter = """
-            s.tenant_id = @tenantId
-            AND s.ym BETWEEN @fromYm AND @toYm
-            AND (@itemId IS NULL OR s.item_id = @itemId)
-            AND (@partnerId IS NULL OR s.partner_id = @partnerId)
-            AND (@warehouseId IS NULL OR s.warehouse_id = @warehouseId)
-            """;
-
-        var dataSourceSql = BuildDataSourceSql(ledgerType, fromYm, toYm, currentYm, ledgerFilter, snapshotFilter);
+        // 봉합 (2026-06-22, DB-P0-01 A안): stock_monthly_snapshot 단일원천 제거 → ledger 단일 집계.
+        var dataSourceSql = BuildDataSourceSql(ledgerType, ledgerFilter);
         var groupByColumns = GetGroupByColumns(ledgerType);
         var selectKeys = string.Join(", ", groupByColumns.Select(x => $"x.{x}"));
         var selectKeysWithAlias = string.Join(", ", groupByColumns.Select(x => $"x.{x} AS {x}"));
@@ -122,37 +115,19 @@ public class StockService : IStockService
         return result.ToList();
     }
 
+    // 봉합 (2026-06-22, 8차 전수조사 DB-P0-01, 사장님 결재 A안 "스냅샷 제거·ledger 단일원천"):
+    //   종전엔 과거월(pastOnly)·과거+당월 혼합 조회 시 stock_monthly_snapshot 테이블을 읽었으나, 이 테이블은
+    //   출하 DDL(hitpan_db_clean.sql)·활성 마이그 어디에도 없고(헌법 #36 위반) 채우는 로직조차 전무했다
+    //   → 신규 고객 PC에서 재고원장 '지난달 포함' 조회 시 100% 런타임 500(5차 BYOK P0와 동일 패턴) +
+    //   설령 테이블을 만들어도 과거월 잔액이 항상 빈 결과(무결성 2차 결함).
+    //   stock_ledger 는 INSERT ONLY 원장(헌법 #3)이라 과거 데이터가 그대로 누적돼 단일원천으로 충분하고,
+    //   ledger_date BETWEEN @fromDate AND @toDate 필터가 과거월·당월을 동일하게 정확히 집계한다.
+    //   따라서 기간·유형 무관하게 stock_ledger 단일 집계로 통일한다(스냅샷 분기·UNION ALL 제거).
     private static string BuildDataSourceSql(
         string ledgerType,
-        string fromYm,
-        string toYm,
-        string currentYm,
-        string ledgerFilter,
-        string snapshotFilter)
+        string ledgerFilter)
     {
-        if (ledgerType is "employee" or "adjust")
-        {
-            return BuildLedgerSql(ledgerType, ledgerFilter);
-        }
-
-        var pastOnly = string.CompareOrdinal(toYm, currentYm) < 0;
-        var currentOnly = string.CompareOrdinal(fromYm, currentYm) >= 0;
-
-        if (pastOnly)
-        {
-            return BuildSnapshotSql(ledgerType, snapshotFilter);
-        }
-
-        if (currentOnly)
-        {
-            return BuildLedgerSql(ledgerType, ledgerFilter);
-        }
-
-        return $"""
-            {BuildSnapshotSql(ledgerType, snapshotFilter + " AND s.ym < @currentYm")}
-            UNION ALL
-            {BuildLedgerSql(ledgerType, ledgerFilter + " AND l.ym >= @currentYm")}
-            """;
+        return BuildLedgerSql(ledgerType, ledgerFilter);
     }
 
     private static string BuildLedgerSql(string ledgerType, string whereClause)
@@ -177,42 +152,8 @@ public class StockService : IStockService
             """;
     }
 
-    private static string BuildSnapshotSql(string ledgerType, string whereClause)
-    {
-        if (ledgerType == "adjust")
-        {
-            return """
-                SELECT
-                    NULL AS ItemId,
-                    NULL AS PartnerId,
-                    NULL AS WarehouseId,
-                    NULL AS EmployeeId,
-                    NULL AS LedgerDate,
-                    NULL AS Ym,
-                    NULL AS SourceType,
-                    NULL AS CreatedBy,
-                    0 AS QtyIn,
-                    0 AS QtyOut
-                WHERE 1 = 0
-                """;
-        }
-
-        return $"""
-            SELECT
-                s.item_id AS ItemId,
-                s.partner_id AS PartnerId,
-                s.warehouse_id AS WarehouseId,
-                NULL AS EmployeeId,
-                NULL AS LedgerDate,
-                s.ym AS Ym,
-                NULL AS SourceType,
-                NULL AS CreatedBy,
-                s.in_qty AS QtyIn,
-                s.out_qty AS QtyOut
-            FROM stock_monthly_snapshot s
-            WHERE {whereClause}
-            """;
-    }
+    // (제거 2026-06-22, DB-P0-01 A안) BuildSnapshotSql — stock_monthly_snapshot 단일원천 폐지로 호출 0건.
+    //   과거월·당월 모두 BuildLedgerSql(stock_ledger) 로 집계한다.
 
     private static string[] GetGroupByColumns(string ledgerType)
     {
@@ -486,7 +427,9 @@ public class StockService : IStockService
     {
         await EnsureOpenAsync(ct).ConfigureAwait(false);
 
-        // stock_ledger는 created_at/created_by 컬럼 없음 → source_id 기반 매칭
+        // 이송 IN/OUT 짝은 source_id 로 매칭(이송 1건 = 같은 source_id 의 out+in 2행).
+        //   (주석 정정 2026-06-22 8차 DB-P0-01-REGRESS: stock_ledger 에 created_by/created_at 컬럼이
+        //    출하DDL에 추가됨. 이 쿼리는 이력 표시에 작성자를 안 쓰므로 '' AS CreatedBy 유지 — 동작 불변.)
         const string sql = """
             SELECT l.ledger_id AS LedgerId, l.ledger_date AS TransferDate,
                    i.item_name AS ItemName, COALESCE(i.spec, '') AS Spec,

@@ -3081,6 +3081,8 @@ CREATE TABLE `stock_ledger` (
   `supply_amount` decimal(15,2) DEFAULT NULL,
   `memo` varchar(200) DEFAULT NULL,
   `migrated_source_hash` char(64) DEFAULT NULL COMMENT 'WS-11 축 2: SHA256 멱등 키',
+  `created_by` varchar(36) DEFAULT NULL COMMENT '봉합 2026-06-22 8차 DB-P0-01-REGRESS: 실사조정·이송 추적자(StockService AdjustStock/Transfer INSERT). 헌법 #36 코드↔출하DDL 정합',
+  `created_at` datetime(6) NOT NULL DEFAULT current_timestamp(6) COMMENT '봉합 2026-06-22 8차 DB-P0-01-REGRESS: 원장 기록 시각. 재고원장 조회 SELECT(StockService:146)·조정·이송 INSERT 정합',
   PRIMARY KEY (`ledger_id`),
   UNIQUE KEY `uq_stock_ledger_source` (`tenant_id`,`source_type`,`source_id`,`item_id`,`move_type`),
   UNIQUE KEY `uq_stock_ledger_source_hash` (`tenant_id`,`migrated_source_hash`),
