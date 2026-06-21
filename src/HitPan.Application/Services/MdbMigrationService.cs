@@ -468,6 +468,40 @@ public sealed class MdbMigrationService
                 _logger.LogInformation("[MDB마이그레이션] POTHER.mdb 없음 — POTHER 4 테이블 skip");
             }
 
+            // ──────────────────────────────────────
+            // 봉합 (2026-06-22, 9차 전수조사 ③워크플로우 P0): item_stock 개시잔액 리빌드.
+            //   종전 마이그는 stock_ledger 만 채우고 item_stock(재고현황의 원천)을 단 한 번도 INSERT 안 했다.
+            //   → 마이그 직후 재고현황(item_stock 기반 GetBalanceAsync)은 전 품목 0, 재고원장(stock_ledger
+            //     집계 GetLedgerAsync)은 정상 → "재고현황과 원장 숫자가 다르다"(헌법 #20·#26 무결성 위반).
+            //   8차 DB-P0-01 봉합으로 ledger 측이 정상화되며 이 item_stock 미생성 갭이 비로소 가시화됐다.
+            //   모든 stock_ledger 적재가 끝난 이 시점에 ledger 를 (tenant,item,warehouse) 합산해 item_stock
+            //   개시잔액을 리빌드한다. 멱등(ON DUPLICATE KEY UPDATE)이라 재마이그·부분재개에도 안전.
+            //   avg_cost 는 입고분 가중평균 근사(정확한 이동평균은 운영 누적으로 보정, 정식 과제).
+            await RunTableStepAsync("item_stock_rebuild", async tx =>
+            {
+                const string rebuildSql = """
+                    INSERT INTO item_stock (stock_id, tenant_id, item_id, warehouse_id, current_qty, avg_cost, last_updated_at)
+                    SELECT UUID(), l.tenant_id, l.item_id, l.warehouse_id,
+                           SUM(l.qty_in) - SUM(l.qty_out) AS current_qty,
+                           COALESCE(SUM(l.unit_cost * l.qty_in) / NULLIF(SUM(l.qty_in), 0), 0) AS avg_cost,
+                           NOW(6)
+                    FROM stock_ledger l
+                    WHERE l.tenant_id = @TenantId
+                    GROUP BY l.tenant_id, l.item_id, l.warehouse_id
+                    ON DUPLICATE KEY UPDATE
+                        current_qty = VALUES(current_qty),
+                        avg_cost = VALUES(avg_cost),
+                        last_updated_at = NOW(6)
+                    """;
+                // tx 는 RunTableStepAsync 의 BeginTransaction() 직후라 Connection 이 항상 유효하나,
+                // 정적 분석(CS8604) 만족 + 방어적으로 명시 가드한다.
+                var conn = tx.Connection ?? throw new InvalidOperationException(
+                    "item_stock 리빌드: 트랜잭션 연결이 유효하지 않습니다.");
+                var rows = await conn.ExecuteAsync(new CommandDefinition(
+                    rebuildSql, new { TenantId = tenantId }, transaction: tx, cancellationToken: ct)).ConfigureAwait(false);
+                return rows;
+            }, ct, continueOnFail: false, mdbFile: "REBUILD").ConfigureAwait(false);
+
             _logger.LogInformation("[MDB마이그레이션] 완료. 결과: {@Result}", result);
         }
         finally

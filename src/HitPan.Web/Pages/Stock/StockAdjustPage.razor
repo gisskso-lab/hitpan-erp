@@ -156,13 +156,28 @@
             return;
         }
 
+        // 봉합 (2026-06-22, 9차 전수조사 프론트 P1): 종전엔 payload 키가 ItemName·WarehouseCode 였으나
+        //   백엔드 StockAdjustRequest 는 ItemId·WarehouseId 를 기대해(별칭 없음) 둘 다 빈 문자열로 바인딩 →
+        //   AdjustStock 이 item_id='' AND warehouse_id='' 로 현재고 0 산출 → 빈 item_id 로 stock_ledger 오염
+        //   + item_stock 0행 UPDATE("조정했는데 재고 그대로", 헌법 #20). 자매 화면 StockTransferPage(커밋
+        //   4c4f8fc) 정정 패턴 그대로: autocomplete 품목명을 ItemId 로 해석하고, 창고는 _selectedWarehouse 가
+        //   이미 warehouseId(WarehouseOption.Code = JSON warehouseId) 이므로 WarehouseId 로 직접 전송한다.
+        _itemCache ??= await ItemsApi.GetListAsync() ?? new();
+        var matchedItem = _itemCache.FirstOrDefault(i =>
+            string.Equals(i.ItemName, _selectedItem, StringComparison.OrdinalIgnoreCase));
+        if (matchedItem is null || string.IsNullOrEmpty(matchedItem.ItemId))
+        {
+            Snackbar.Add("품목을 다시 선택해주세요.", Severity.Warning);
+            return;
+        }
+
         _isProcessing = true;
         try
         {
             var payload = new
             {
-                ItemName = _selectedItem,
-                WarehouseCode = _selectedWarehouse,
+                ItemId = matchedItem.ItemId,
+                WarehouseId = _selectedWarehouse,
                 ActualQty = _actualQty,
                 Reason = _reason
             };
