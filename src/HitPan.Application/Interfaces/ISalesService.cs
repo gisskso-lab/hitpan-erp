@@ -48,6 +48,13 @@ public interface ISalesService
         string tenantId,
         CancellationToken ct = default);
 
+    // 봉합 (2026-06-22, 11차전 수주재편집): 수주(draft) 헤더/라인 재편집.
+    Task UpdateOrderAsync(
+        string orderId,
+        UpdateSalesOrderRequest request,
+        string tenantId,
+        CancellationToken ct = default);
+
     Task DeleteSalesOrderAsync(
         string orderId,
         string tenantId,

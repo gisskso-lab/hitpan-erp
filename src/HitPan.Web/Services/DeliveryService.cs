@@ -130,6 +130,43 @@ public sealed class DeliveryService(HttpClient http)
         return new DeliverySaveResult(false, null, string.IsNullOrWhiteSpace(errBody) ? $"HTTP {(int)resp.StatusCode}" : errBody);
     }
 
+    // 봉합 (2026-06-22, 11차전 수주재편집): 종전 수주 수정이 UpdateAsync→PUT api/sales/deliveries 로 가서
+    //   sales_order_id 로 거래명세서를 조회해 실패했다(저장 불가). 백엔드 신설 PUT api/sales/orders/{id}
+    //   (UpdateOrderAsync, draft 만 수정)를 호출하는 수주 전용 수정 메서드를 추가한다. 성공 시 204 NoContent.
+    public async Task<DeliverySaveResult> UpdateOrderAsync(string orderId, DeliveryDraftModel draft, CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(orderId))
+        {
+            return new DeliverySaveResult(false, null, "문서 ID가 없습니다.");
+        }
+
+        var payload = new CreateSalesOrderPayload
+        {
+            PartnerId = draft.PartnerId ?? string.Empty,
+            OrderDate = draft.SalesDate,
+            Memo = draft.Memo,
+            Items = draft.Lines
+                .Where(x => !x.IsPlaceholder)
+                .Select(x => new CreateSalesOrderItemPayload
+                {
+                    ItemId = x.ItemId,
+                    OrderedQty = x.Qty,
+                    UnitPrice = x.UnitPrice,
+                    SupplyAmount = x.Amount,
+                    VatAmount = x.VatAmount
+                }).ToList()
+        };
+
+        using var resp = await http.PutAsJsonAsync($"api/sales/orders/{Uri.EscapeDataString(orderId)}", payload, PostJsonOptions, ct);
+        if (resp.IsSuccessStatusCode)
+        {
+            return new DeliverySaveResult(true, draft.DocumentNumber ?? orderId, null);
+        }
+
+        var errBody = await resp.Content.ReadAsStringAsync(ct);
+        return new DeliverySaveResult(false, null, string.IsNullOrWhiteSpace(errBody) ? $"HTTP {(int)resp.StatusCode}" : errBody);
+    }
+
     public async Task ConfirmAsync(DeliveryDraftModel draft, CancellationToken ct = default)
     {
         if (string.IsNullOrWhiteSpace(draft.Id))

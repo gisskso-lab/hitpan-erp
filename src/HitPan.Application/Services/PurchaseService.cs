@@ -825,18 +825,25 @@ public class PurchaseService : IPurchaseService
             totalVat += it.VatAmount;
         }
 
+        // 봉합 (2026-06-22, 11차전 반품사유 거짓봉합 교차검증): 종전 INSERT 가 memo 만 저장하고
+        //   return_reason·return_reason_memo 컬럼을 빠뜨려, 프론트가 사유를 보내도 DB 에 영구 유실됐다
+        //   (clean DDL 2566-2567 에 컬럼·인덱스 존재하나 SQL 미반영). 화면 입력 사유를 정확히 저장한다.
         await _db.ExecuteAsync(new CommandDefinition(
             @"INSERT INTO purchase_returns (return_id, tenant_id, return_no, receipt_id, partner_id,
-                return_date, return_type, status, total_amount, vat_amount, memo, created_at, updated_at)
+                return_date, return_type, status, total_amount, vat_amount, memo,
+                return_reason, return_reason_memo, created_at, updated_at)
               VALUES (@ReturnId, @Tid, @ReturnNo, @ReceiptId, @PartnerId,
-                @ReturnDate, 'purchase_return', 'draft', @Total, @Vat, @Memo, NOW(6), NOW(6))",
+                @ReturnDate, 'purchase_return', 'draft', @Total, @Vat, @Memo,
+                @ReturnReason, @ReturnReasonMemo, NOW(6), NOW(6))",
             new
             {
                 ReturnId = returnId, Tid = tenantId, ReturnNo = returnNo,
                 ReceiptId = request.ReceiptId,
                 PartnerId = request.PartnerId,
                 ReturnDate = returnDate, Total = totalAmount, Vat = totalVat,
-                Memo = request.Memo
+                Memo = request.Memo,
+                ReturnReason = request.ReturnReason,
+                ReturnReasonMemo = request.ReturnReasonMemo
             }, cancellationToken: ct));
 
         foreach (var it in request.Items)
@@ -892,16 +899,21 @@ public class PurchaseService : IPurchaseService
             totalVat += it.VatAmount;
         }
 
+        // 봉합 (2026-06-22, 11차전 반품사유 거짓봉합 교차검증): INSERT 와 동일하게 UPDATE 도 사유 컬럼이
+        //   빠져 있어 draft 반품 수정 시 사유가 유실됐다. return_reason·return_reason_memo 를 함께 갱신한다.
         await _db.ExecuteAsync(new CommandDefinition(
             @"UPDATE purchase_returns
               SET partner_id=@PartnerId, return_date=@ReturnDate,
-                  total_amount=@Total, vat_amount=@Vat, memo=@Memo, updated_at=NOW(6)
+                  total_amount=@Total, vat_amount=@Vat, memo=@Memo,
+                  return_reason=@ReturnReason, return_reason_memo=@ReturnReasonMemo, updated_at=NOW(6)
               WHERE return_id=@Id AND tenant_id=@Tid AND status='draft'",
             new
             {
                 Id = returnId, Tid = tenantId,
                 PartnerId = request.PartnerId, ReturnDate = returnDate,
-                Total = totalAmount, Vat = totalVat, Memo = request.Memo
+                Total = totalAmount, Vat = totalVat, Memo = request.Memo,
+                ReturnReason = request.ReturnReason,
+                ReturnReasonMemo = request.ReturnReasonMemo
             }, cancellationToken: ct));
 
         // 기존 라인 삭제 후 신규 라인 INSERT (헌법 #3 INSERT ONLY 원장과는 별개 — purchase_return_items는 헤더 종속 테이블).

@@ -259,32 +259,13 @@ public partial class SalesOrderPage : ComponentBase
                     return;
                 }
 
-                var req = new UpdateDeliveryRequest
+                // 봉합 (2026-06-22, 11차전 수주재편집): 종전 DeliveryService.UpdateAsync(PUT api/sales/deliveries)
+                //   는 sales_order_id 로 거래명세서를 조회해 항상 실패했다. 백엔드 신설 PUT api/sales/orders/{id}
+                //   를 호출하는 수주 전용 UpdateOrderAsync 로 교체한다(draft 수주만 수정).
+                var result = await DeliveryService.UpdateOrderAsync(_draft.Id, _draft);
+                if (!result.Success)
                 {
-                    OrderDate = _draft.SalesDate,
-                    PartnerId = _draft.PartnerId ?? "",
-                    Memo = _draft.Memo,
-                    Items = _draft.Lines
-                        .Where(x => !x.IsPlaceholder)
-                        .Select(x => new DeliveryItemDto
-                        {
-                            ItemId = x.ItemId,
-                            ItemName = x.ItemName,
-                            Spec = x.Spec,
-                            Unit = x.Unit,
-                            Qty = x.Qty,
-                            UnitPrice = x.UnitPrice,
-                            Amount = x.Amount,
-                            VatAmount = x.VatAmount,
-                            Memo = x.Note,
-                            RowNo = x.RowNo
-                        }).ToList()
-                };
-
-                var ok = await DeliveryService.UpdateAsync(_draft.Id, req);
-                if (!ok)
-                {
-                    Snackbar.Add("수주서 저장에 실패했습니다.", Severity.Error);
+                    Snackbar.Add($"수주서 저장에 실패했습니다: {result.Error ?? "알 수 없는 오류"}", Severity.Error);
                     return;
                 }
             }

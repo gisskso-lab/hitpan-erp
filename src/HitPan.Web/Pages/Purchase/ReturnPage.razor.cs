@@ -168,11 +168,17 @@ public partial class ReturnPage : ComponentBase
             return;
         }
 
+        // 봉합 (2026-06-22, 10차 재조사 NEW-1 P2): 종전엔 화면에서 입력받은 반품사유(_returnReason)·
+        //   사유메모(_returnReasonMemo)·헤더메모가 payload 에서 누락(memo=null 하드코딩)돼 silent 유실됐다.
+        //   백엔드 DTO(CreatePurchaseReturnRequest)는 ReturnReason·ReturnReasonMemo·Memo 를 모두 수용하므로
+        //   화면 입력값을 그대로 전송한다(워크플로우는 정상이었고 사유 주석만 유실되던 결함).
         var payload = new
         {
             partnerId = partner.PartnerId,
             returnDate = _draft.SalesDate,
-            memo = (string?)null,
+            memo = _draft.Memo,
+            returnReason = _returnReason,
+            returnReasonMemo = _returnReasonMemo,
             items
         };
 

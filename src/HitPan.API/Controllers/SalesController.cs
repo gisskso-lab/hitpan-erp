@@ -76,6 +76,30 @@ public class SalesController : ControllerBase
         return Ok(detail);
     }
 
+    // 봉합 (2026-06-22, 11차전 수주재편집): 수주(draft) 재편집 엔드포인트.
+    //   부재 시 프론트가 PUT api/sales/deliveries로 잘못 흘러 거래명세서 조회 실패
+    //   → "거래명세서를 찾을 수 없습니다" 발생. CreateOrder/GetOrder 패턴 동일.
+    [HttpPut("orders/{id}")]
+    public async Task<IActionResult> UpdateOrder(string id, [FromBody] UpdateSalesOrderRequest request, CancellationToken ct)
+    {
+        var tenantId = HttpContext.Items["TenantId"]?.ToString();
+        if (string.IsNullOrEmpty(tenantId)) return Forbid();
+        try
+        {
+            await _salesService.UpdateOrderAsync(id, request, tenantId, ct);
+            return NoContent();
+        }
+        catch (InvalidOperationException ex)
+        {
+            // "찾을 수 없습니다"는 404, 그 외(draft 아님·품목 0)는 400.
+            if (ex.Message.Contains("찾을 수 없습니다"))
+            {
+                return NotFound(new { message = ex.Message });
+            }
+            return BadRequest(new { message = ex.Message });
+        }
+    }
+
     [HttpDelete("orders/{id}")]
     public async Task<IActionResult> DeleteOrder(string id, CancellationToken ct)
     {

@@ -1423,6 +1423,132 @@ public class SalesService : ISalesService
     }
 
     // ─────────────────────────────────────────────────────────────────────
+    // 봉합 (2026-06-22, 11차전 수주재편집): 수주(draft) 헤더/라인 재편집.
+    //   10차 P0-1은 신규저장만 api/sales/orders로 봉합했고 수정 경로(PUT)가 부재했다.
+    //   그래서 프론트가 PUT api/sales/deliveries로 잘못 흘러 거래명세서 조회 실패
+    //   → "거래명세서를 찾을 수 없습니다" 발생. 본 메서드로 수주 수정 경로를 신설.
+    //   §절대원칙 #6: draft 상태만 수정 허용. confirmed/partial/closed/cancelled 차단.
+    //   UpdateDeliveryAsync와 동일한 트랜잭션·검증 구조(헤더 UPDATE + 라인 DELETE/INSERT).
+    // ─────────────────────────────────────────────────────────────────────
+    public async Task UpdateOrderAsync(
+        string orderId,
+        UpdateSalesOrderRequest request,
+        string tenantId,
+        CancellationToken ct = default)
+    {
+        // 1) 존재 + draft 검증 (tenant 격리). soft delete된 것도 제외.
+        const string assertSql = """
+                                 SELECT status
+                                 FROM sales_orders
+                                 WHERE order_id = @OrderId
+                                   AND tenant_id = @TenantId
+                                   AND is_deleted = 0
+                                 """;
+
+        var status = await _db.QueryFirstOrDefaultAsync<string>(
+            new CommandDefinition(assertSql, new { OrderId = orderId, TenantId = tenantId }, cancellationToken: ct));
+
+        if (status is null)
+        {
+            throw new InvalidOperationException("수주서를 찾을 수 없습니다.");
+        }
+
+        // §절대원칙 #6: 확정·전환된 수주는 수정 차단.
+        if (!string.Equals(status, "draft", StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidOperationException("임시저장(draft) 상태 수주서만 수정할 수 있습니다.");
+        }
+
+        if (request.Items.Count == 0)
+        {
+            throw new InvalidOperationException("품목이 한 줄 이상 필요합니다.");
+        }
+
+        var supplyAmount = request.Items.Sum(x => x.SupplyAmount);
+        var vatAmount = request.Items.Sum(x => x.VatAmount);
+        var orderDate = request.OrderDate == default ? DateTime.UtcNow.Date : request.OrderDate.Date;
+
+        const string updateSql = """
+                                 UPDATE sales_orders SET
+                                     partner_id   = @PartnerId,
+                                     order_date   = @OrderDate,
+                                     memo         = @Memo,
+                                     total_amount = @SupplyAmount,
+                                     vat_amount   = @VatAmount,
+                                     updated_at   = NOW(6)
+                                 WHERE order_id  = @OrderId
+                                   AND tenant_id = @TenantId
+                                   AND status    = 'draft'
+                                 """;
+
+        // 트랜잭션으로 헤더 UPDATE + 품목 DELETE/INSERT를 원자적으로 묶는다
+        // (UpdateDeliveryAsync 패턴 동일).
+        if (_db.State != ConnectionState.Open)
+        {
+            if (_db is System.Data.Common.DbConnection dbConn) await dbConn.OpenAsync(ct);
+            else _db.Open();
+        }
+        using var tx = _db.BeginTransaction();
+        try
+        {
+            await _db.ExecuteAsync(new CommandDefinition(updateSql,
+                new
+                {
+                    OrderId = orderId,
+                    TenantId = tenantId,
+                    PartnerId = request.PartnerId,
+                    OrderDate = orderDate,
+                    Memo = request.Memo,
+                    SupplyAmount = supplyAmount,
+                    VatAmount = vatAmount
+                },
+                transaction: tx, cancellationToken: ct));
+
+            // 기존 라인 전체 삭제 후 재INSERT (UpdateDeliveryAsync 라인 처리 패턴).
+            await _db.ExecuteAsync(new CommandDefinition(
+                "DELETE FROM sales_order_items WHERE order_id = @OrderId AND tenant_id = @TenantId",
+                new { OrderId = orderId, TenantId = tenantId },
+                transaction: tx, cancellationToken: ct));
+
+            foreach (var item in request.Items)
+            {
+                await _db.ExecuteAsync(new CommandDefinition(
+                    """
+                    INSERT INTO sales_order_items
+                        (order_item_id, order_id, tenant_id, item_id,
+                         ordered_qty, delivered_qty, unit_price, supply_amount, vat_amount, item_status)
+                    VALUES
+                        (@OrderItemId, @OrderId, @TenantId, @ItemId,
+                         @OrderedQty, 0, @UnitPrice, @SupplyAmount, @VatAmount, 'pending')
+                    """,
+                    new
+                    {
+                        OrderItemId = Guid.NewGuid().ToString(),
+                        OrderId = orderId,
+                        TenantId = tenantId,
+                        ItemId = item.ItemId,
+                        item.OrderedQty,
+                        item.UnitPrice,
+                        item.SupplyAmount,
+                        item.VatAmount
+                    },
+                    transaction: tx, cancellationToken: ct));
+            }
+
+            tx.Commit();
+        }
+        catch (Exception)
+        {
+            try { tx.Rollback(); } catch (Exception rbex) { Console.Error.WriteLine($"[SalesService] order update rollback failed: {rbex.Message}"); }
+            throw;
+        }
+
+        // 감사로그 — 수주서 수정
+        var soAfterJson = $"{{\"partner_id\":\"{request.PartnerId}\",\"item_count\":{request.Items.Count}}}";
+        await _audit.LogAsync("update", "sales_order", orderId, afterJson: soAfterJson, ct: ct);
+    }
+
+    // ─────────────────────────────────────────────────────────────────────
     // 수주서 draft 삭제 — soft delete. 판매전환된 라인 있으면 차단.
     // ─────────────────────────────────────────────────────────────────────
     public async Task DeleteSalesOrderAsync(string orderId, string tenantId, CancellationToken ct = default)
