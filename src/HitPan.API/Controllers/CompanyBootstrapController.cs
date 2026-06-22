@@ -307,6 +307,43 @@ public class CompanyBootstrapController : ControllerBase
                         TenantId = tenantId
                     }, transaction: tx, cancellationToken: ct));
 
+                // 봉합 (2026-06-22, 12차 2단 교차검증 ACCOUNTS-SEED P0):
+                //   journal_lines.fk_jl_account (tenant_id, account_code) → accounts FK 가 있는데,
+                //   clean DDL 에 accounts 표준계정 시드가 0건이라 신규 가입 고객 PC 의 accounts 가 빈 테이블이다.
+                //   → 매출·매입 거래명세서 확정 기표(AutoJournalHelper)와 BOM 생산/해체 기표가 참조하는
+                //     표준계정(40100/25500/10800/50100/17600/23200/14600/16900)이 없어 FK 1452 → 확정 전체 롤백.
+                //   "확정했는데 회계 안 잡힘/생산 안 됨"= 헌법 #20 흐름 끊김. 창고 시드(10차 P0-4)와 동일하게
+                //   부모계정 생성 트랜잭션에서 AutoJournalHelper 가 쓰는 표준계정을 함께 시드해 가입 직후부터
+                //   매출·매입·BOM 회계 3흐름이 끊김 없이 돈다. NOT EXISTS 로 재실행·마이그 고객 보호
+                //   (마이그 SeedAccountsForMigration 은 레거시 KCODE 만 시드하므로 표준 8계정은 본 시드가 채운다.
+                //    마이그 화면은 로그인 후=부모계정 생성 후라 본 시드가 항상 선행). 정의는 AutoJournalHelper 상수와 1:1.
+                //   헌법 #36 주: accounts 는 tenant_id 가 PK 라 가입(부모계정 생성) 전엔 행이 존재할 수 없어
+                //   clean DDL 정적 시드가 불가능하다(warehouses·employees 와 동일 — clean DDL 시드 0건).
+                //   따라서 본 런타임 부트스트랩 시드가 신규설치 단일 진실원이며 별도 DDL 편입 대상이 아니다.
+                var stdAccounts = new (string Code, string Name, string Type)[]
+                {
+                    ("10800", "외상매출금", "asset"),
+                    ("17600", "부가세대급금", "asset"),
+                    ("14600", "원재료", "asset"),
+                    ("16900", "재공품", "asset"),
+                    ("23200", "외상매입금", "liability"),
+                    ("25500", "부가세예수금", "liability"),
+                    ("40100", "상품매출", "revenue"),
+                    ("50100", "상품매입", "expense"),
+                };
+                foreach (var (code, name, type) in stdAccounts)
+                {
+                    await db.ExecuteAsync(new CommandDefinition(@"
+                        INSERT INTO accounts
+                          (account_code, tenant_id, account_name, account_type, is_active, sort_order, created_at)
+                        SELECT @Code, @TenantId, @Name, @Type, 1, 0, NOW(6)
+                        WHERE NOT EXISTS (
+                            SELECT 1 FROM accounts WHERE tenant_id = @TenantId AND account_code = @Code
+                        )",
+                        new { Code = code, TenantId = tenantId, Name = name, Type = type },
+                        transaction: tx, cancellationToken: ct));
+                }
+
                 await tx.CommitAsync(ct);
             }
             catch

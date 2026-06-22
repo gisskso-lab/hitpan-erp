@@ -627,6 +627,15 @@ public class FinanceService : IFinanceService
             new { TenantId = tenantId }, cancellationToken: ct))).ToList();
     }
 
+    // 봉합 (2026-06-22, 12차 2단 교차검증 ACCOUNTS-SEED 동반 P1): AutoJournalHelper 가 매출·매입·BOM
+    //   회계기표에 직접 참조하는 표준계정. journal_lines.fk_jl_account FK 때문에 이 코드가 삭제/비활성되면
+    //   다음 확정이 FK 1452 → 확정 전체 롤백("확정했는데 회계 안 잡힘"=헌법 #20 흐름 끊김). 가입시점 시드
+    //   (CompanyBootstrapController)만으론 사후 삭제를 못 막으므로 삭제·비활성 경로에서 차단한다.
+    private static readonly HashSet<string> SystemRequiredAccountCodes = new()
+    {
+        "10800", "17600", "14600", "16900", "23200", "25500", "40100", "50100",
+    };
+
     public async Task<string> CreateAccountAsync(string tenantId, CreateAccountRequest req, CancellationToken ct = default)
     {
         await EnsureOpenAsync(ct);
@@ -642,6 +651,11 @@ public class FinanceService : IFinanceService
 
     public async Task UpdateAccountAsync(string tenantId, string accountCode, UpdateAccountRequest req, CancellationToken ct = default)
     {
+        // 시스템 필수계정 비활성 차단 (12차 봉합) — 비활성 시 회계 화면에서 사라져 운영 혼란(이름·정렬 변경은 허용).
+        if (!req.IsActive && SystemRequiredAccountCodes.Contains(accountCode))
+            throw new InvalidOperationException(
+                $"표준 계정({accountCode})은 매출·매입·생산 회계 처리에 사용되어 비활성화할 수 없습니다.");
+
         await EnsureOpenAsync(ct);
         await _db.ExecuteAsync(new CommandDefinition(
             """
@@ -654,6 +668,11 @@ public class FinanceService : IFinanceService
 
     public async Task DeleteAccountAsync(string tenantId, string accountCode, CancellationToken ct = default)
     {
+        // 시스템 필수계정 삭제 차단 (12차 봉합) — 삭제 시 매출·매입·BOM 확정이 FK 1452 로 끊김(헌법 #20).
+        if (SystemRequiredAccountCodes.Contains(accountCode))
+            throw new InvalidOperationException(
+                $"표준 계정({accountCode})은 매출·매입·생산 회계 처리에 사용되어 삭제할 수 없습니다.");
+
         await EnsureOpenAsync(ct);
         await _db.ExecuteAsync(new CommandDefinition(
             "DELETE FROM accounts WHERE tenant_id = @TenantId AND account_code = @AccountCode",

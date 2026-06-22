@@ -430,7 +430,18 @@ public class BomService : IBomService
             //   source_id 를 부여해 N 회 생산해도 키가 매번 달라 충돌하지 않게 한다. 한 생산 호출의 자재 OUT·
             //   완제품 IN 은 같은 회차 ID 를 공유(한 트랜잭션 = 한 회차). 회계 기표(journal)는 entryId 가 매번
             //   새 GUID 라 멱등 충돌 없음 → BomId 참조 유지(생산 BOM 추적). 감사로그·이벤트도 BomId 유지.
-            var productionRunId = $"{dto.BomId}:{Guid.NewGuid()}";
+            // 재봉합 (2026-06-22, 12차 전수조사 BOM-RUN-REGRESS P0): 11차 봉합이 source_id 를
+            //   "{BomId}:{GUID}" (73자)로 만들었으나 stock_ledger.source_id 는 varchar(36)이라 strict 모드
+            //   ERROR 1406(Data too long)→첫 생산부터 전체 롤백(원 버그보다 악화). 회차 고유성은 GUID
+            //   단독(36자)으로도 충분히 달성(UNIQUE 키 회피 목적 동일). BomId 역추적은 doc_no(=bom.BomName)
+            //   원장 기록 + 회계 기표·감사로그의 dto.BomId 직접 참조로 보존되므로 source_id 에 BomId 불필요.
+            //   DDL 무변경(헌법 #36 단일진실원 동기화 불필요), strict 안전.
+            var productionRunId = Guid.NewGuid().ToString();
+
+            // 봉합 (2026-06-22, 12차 1단 교차검증 BOM-DOCNO P1, 선재결함): stock_ledger.doc_no 는 varchar(20)
+            //   인데 bom_name 은 varchar(100) → 한글 21자+ BOM명이면 strict ERROR 1406 으로 생산 롤백.
+            //   doc_no 는 표시용 보조필드이고 BOM 전체명·BomId 는 회계 description 에 보존되므로 20자로 안전 절단.
+            var ledgerDocNo = bom.BomName.Length > 20 ? bom.BomName[..20] : bom.BomName;
 
             decimal productionCost = 0;
             var materials = new List<BomMaterialUsedEvent>();
@@ -541,7 +552,7 @@ public class BomService : IBomService
                       'out', 'bom_production', @BomId, @DocNo, 0, @Qty, @Cost, @Supply)
                     """,
                     new { TenantId = tenantId, ItemId = matGrp.Key, WarehouseId = defaultWarehouseId,
-                          BomId = productionRunId, DocNo = bom.BomName, Qty = qtySum, Cost = avgCost, Supply = costSum },
+                          BomId = productionRunId, DocNo = ledgerDocNo, Qty = qtySum, Cost = avgCost, Supply = costSum },
                     transaction: tx, cancellationToken: ct)).ConfigureAwait(false);
             }
             // 완성품 입고
@@ -553,7 +564,7 @@ public class BomService : IBomService
                   'in', 'bom_production', @BomId, @DocNo, @Qty, 0, @Cost, @Qty * @Cost)
                 """,
                 new { TenantId = tenantId, ItemId = bom.ProductItemId, WarehouseId = defaultWarehouseId,
-                      BomId = productionRunId, DocNo = bom.BomName, Qty = dto.ProduceQty, Cost = unitProductionCost },
+                      BomId = productionRunId, DocNo = ledgerDocNo, Qty = dto.ProduceQty, Cost = unitProductionCost },
                 transaction: tx, cancellationToken: ct)).ConfigureAwait(false);
 
             // 회계 기표 — BOM 생산 원가 반영 (INSERT ONLY)
@@ -562,11 +573,17 @@ public class BomService : IBomService
             var totalMaterialCost = productionCost;
             if (totalMaterialCost != 0m)
             {
+                // 재봉합 (2026-06-22, 12차 2단 교차검증 BOM-RUN-JOURNAL P0): journal_entries 도
+                //   uq_je_source (tenant, source_type='bom_production', source_id) UNIQUE 라, source_id 로
+                //   dto.BomId(회차 불변)를 쓰면 같은 BOM 두 번째 생산부터 ERROR 1062 → 전체 롤백(헌법 #20).
+                //   11차/12차 stock_ledger 봉합이 1406/1062의 1406만 풀어 이 회계 충돌이 그 뒤에서 드러났다.
+                //   stock_ledger 와 대칭으로 회계도 회차 GUID(productionRunId, 36자=source_id varchar(36) 정합)를
+                //   source_id 로 쓰고, BomId 역추적은 description(documentNo)에 BomId 를 실어 보존한다.
                 await AutoJournalHelper.RecordBomProductionAsync(
                     _db, tx,
                     tenantId,
-                    dto.BomId,
-                    bom.BomName,
+                    productionRunId,
+                    $"{bom.BomName}(BOM:{dto.BomId})",
                     DateTime.UtcNow,
                     totalMaterialCost,
                     userId,
@@ -639,7 +656,14 @@ public class BomService : IBomService
             // 봉합 (2026-06-22, 11차 전수조사 BOM-RUN P0): AssembleAsync 와 동일 — 종전 source_id=dto.BomId
             //   (회차 불변)라 같은 BOM 두 번째 해체부터 stock_ledger UNIQUE 위반→전체 롤백. 해체 회차마다
             //   고유 source_id 부여(완제품 OUT·자재 IN 공유). bom_disassemble 타입도 같은 회차 ID 로 묶인다.
-            var disassembleRunId = $"{dto.BomId}:{Guid.NewGuid()}";
+            // 재봉합 (2026-06-22, 12차 전수조사 BOM-RUN-REGRESS P0): AssembleAsync 와 동일 — 11차의
+            //   "{BomId}:{GUID}"(73자)가 source_id varchar(36) 초과로 ERROR 1406. GUID 단독(36자)으로 회차
+            //   고유성 확보, BomId 역추적은 doc_no + 회계 역분개·감사로그의 dto.BomId 로 보존. DDL 무변경.
+            var disassembleRunId = Guid.NewGuid().ToString();
+
+            // 봉합 (2026-06-22, 12차 1단 교차검증 BOM-DOCNO P1): AssembleAsync 와 동일 — doc_no varchar(20)
+            //   초과(한글 21자+ BOM명) ERROR 1406 방지. 표시용 20자 절단, 전체명·BomId 는 회계 description 보존.
+            var ledgerDocNo = bom.BomName.Length > 20 ? bom.BomName[..20] : bom.BomName;
 
             // 완제품의 현재 매입단가 = unit cost (Reverse 시 자재 단가 복원에 사용)
             var unitProductionCost = await _db.QueryFirstOrDefaultAsync<decimal>(new CommandDefinition(
@@ -688,7 +712,7 @@ public class BomService : IBomService
                   'out', 'bom_disassemble', @BomId, @DocNo, 0, @Qty, @Cost, @Qty * @Cost, 'BOM 해체 (Reverse IN)')
                 """,
                 new { TenantId = tenantId, ItemId = bom.ProductItemId, WarehouseId = defaultWarehouseId,
-                      BomId = disassembleRunId, DocNo = bom.BomName, Qty = dto.ProduceQty, Cost = unitProductionCost },
+                      BomId = disassembleRunId, DocNo = ledgerDocNo, Qty = dto.ProduceQty, Cost = unitProductionCost },
                 transaction: tx, cancellationToken: ct)).ConfigureAwait(false);
 
             // 2) 각 자재 재고 복귀 (IN)
@@ -753,7 +777,7 @@ public class BomService : IBomService
                       'in', 'bom_disassemble', @BomId, @DocNo, @Qty, 0, @Cost, @Qty * @Cost, 'BOM 해체 자재복귀 (Reverse OUT)')
                     """,
                     new { TenantId = tenantId, ItemId = item.MaterialItemId, WarehouseId = defaultWarehouseId,
-                          BomId = disassembleRunId, DocNo = bom.BomName, Qty = requiredQty, Cost = matUnitCost },
+                          BomId = disassembleRunId, DocNo = ledgerDocNo, Qty = requiredQty, Cost = matUnitCost },
                     transaction: tx, cancellationToken: ct)).ConfigureAwait(false);
             }
 
@@ -762,11 +786,14 @@ public class BomService : IBomService
             // 대변: 재공품(제품) — 완성품 원가 역산
             if (unitProductionCost != 0m)
             {
+                // 재봉합 (2026-06-22, 12차 2단 교차검증 BOM-RUN-JOURNAL P0): AssembleAsync 와 동일 —
+                //   journal uq_je_source 회차 충돌 방지. source_id 를 회차 GUID(disassembleRunId)로,
+                //   BomId 역추적은 description 에 보존. stock_ledger 봉합과 대칭.
                 await AutoJournalHelper.RecordBomDisassembleAsync(
                     _db, tx,
                     tenantId,
-                    dto.BomId,
-                    bom.BomName,
+                    disassembleRunId,
+                    $"{bom.BomName}(BOM:{dto.BomId})",
                     DateTime.UtcNow,
                     unitProductionCost * dto.ProduceQty,
                     userId,
