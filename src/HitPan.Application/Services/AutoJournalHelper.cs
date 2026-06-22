@@ -273,6 +273,104 @@ internal static class AutoJournalHelper
         }
     }
 
+    /// <summary>
+    /// 매출반품 취소(확정 되돌리기) 기표 — 봉합 (2026-06-23, 15차 적대검증 15-P1).
+    /// 매출반품 확정은 RecordSalesDeliveryCancelAsync(역분개: 차변 매출+부가세예수금 / 대변 외상매출금)로
+    /// 기표된다. 그 반품을 취소하면 역분개를 되돌려 원래 매출 상태로 복원해야 하므로, 정상 매출확정 분개
+    /// (차변 외상매출금 / 대변 매출+부가세예수금)를 다시 기록한다.
+    /// source_type='sales_return_cancel'(19자≤30) — 확정 분개('sales_delivery_cancel')와 다른 키라
+    /// journal UNIQUE (tenant, source_type, source_id) 충돌 없음(12차 회귀 차단). 멱등은 호출측 status 가드.
+    /// </summary>
+    public static async Task RecordSalesReturnCancelAsync(
+        IDbConnection conn,
+        IDbTransaction tx,
+        string tenantId,
+        string sourceId,
+        string documentNo,
+        DateTime entryDate,
+        string? partnerId,
+        decimal supplyAmount,
+        decimal vatAmount,
+        string? employeeId,
+        CancellationToken ct)
+    {
+        var entryId = Guid.NewGuid().ToString();
+        var entryNo = $"JE-{entryDate:yyyyMMdd}-{Guid.NewGuid().ToString()[..8].ToUpperInvariant()}";
+        var total = supplyAmount + vatAmount;
+
+        await InsertEntryAsync(conn, tx, entryId, tenantId, entryNo, entryDate,
+            "sales_return_cancel", sourceId, employeeId, $"매출반품취소 기표: {documentNo}", ct);
+
+        // 차변 외상매출금 (매출채권 복원)
+        if (total != 0m)
+        {
+            await InsertLineAsync(conn, tx, entryId, tenantId, AccountsReceivable, "debit",
+                total, partnerId, $"매출채권복원 {documentNo}", ct);
+        }
+
+        // 대변 매출 (매출 복원)
+        if (supplyAmount != 0m)
+        {
+            await InsertLineAsync(conn, tx, entryId, tenantId, SalesRevenue, "credit",
+                supplyAmount, partnerId, $"매출복원 {documentNo}", ct);
+        }
+
+        // 대변 부가세예수금 복원
+        if (vatAmount != 0m)
+        {
+            await InsertLineAsync(conn, tx, entryId, tenantId, VatPayable, "credit",
+                vatAmount, partnerId, $"부가세예수금복원 {documentNo}", ct);
+        }
+    }
+
+    /// <summary>
+    /// 매입반품 취소(확정 되돌리기) 기표 — 봉합 (2026-06-23, 15차 적대검증 15-P1).
+    /// 매입반품 확정은 RecordPurchaseReturnAsync(역분개: 차변 외상매입금 / 대변 매입+부가세대급금)로 기표된다.
+    /// 그 반품을 취소하면 정상 매입확정 분개(차변 매입+부가세대급금 / 대변 외상매입금)를 다시 기록해 복원한다.
+    /// source_type='purchase_return_cancel'(22자≤30) — 확정 분개('purchase_return')와 다른 키.
+    /// </summary>
+    public static async Task RecordPurchaseReturnCancelAsync(
+        IDbConnection conn,
+        IDbTransaction tx,
+        string tenantId,
+        string sourceId,
+        string documentNo,
+        DateTime entryDate,
+        string? partnerId,
+        decimal supplyAmount,
+        decimal vatAmount,
+        string? employeeId,
+        CancellationToken ct)
+    {
+        var entryId = Guid.NewGuid().ToString();
+        var entryNo = $"JE-{entryDate:yyyyMMdd}-{Guid.NewGuid().ToString()[..8].ToUpperInvariant()}";
+        var total = supplyAmount + vatAmount;
+
+        await InsertEntryAsync(conn, tx, entryId, tenantId, entryNo, entryDate,
+            "purchase_return_cancel", sourceId, employeeId, $"매입반품취소 기표: {documentNo}", ct);
+
+        // 차변 매입 (매입 복원)
+        if (supplyAmount != 0m)
+        {
+            await InsertLineAsync(conn, tx, entryId, tenantId, PurchaseCost, "debit",
+                supplyAmount, partnerId, $"매입복원 {documentNo}", ct);
+        }
+
+        // 차변 부가세대급금 복원
+        if (vatAmount != 0m)
+        {
+            await InsertLineAsync(conn, tx, entryId, tenantId, VatReceivable, "debit",
+                vatAmount, partnerId, $"부가세대급금복원 {documentNo}", ct);
+        }
+
+        // 대변 외상매입금 (매입채무 복원)
+        if (total != 0m)
+        {
+            await InsertLineAsync(conn, tx, entryId, tenantId, AccountsPayable, "credit",
+                total, partnerId, $"매입채무복원 {documentNo}", ct);
+        }
+    }
+
     public const string RawMaterials = "14600";          // 원재료 (차변/대변)
     public const string WorkInProcess = "16900";          // 재공품 (차변/대변)
 

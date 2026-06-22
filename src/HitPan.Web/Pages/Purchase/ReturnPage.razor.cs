@@ -488,6 +488,62 @@ public partial class ReturnPage : ComponentBase
         }
     }
 
+    // 반품 취소 — 확정(confirmed)된 반품을 되돌린다(15차 적대검증 15-P1 봉합).
+    //   확정의 정확한 역행: 매출반품 취소=재고 다시 차감(Reverse OUT), 매입반품 취소=재고 다시 증가(Reverse IN).
+    //   잘못 확정한 반품을 원장 무결성 유지하며 되돌리는 유일한 경로 — 삭제(draft 전용)와 구분된다.
+    private async Task CancelReturnAsync()
+    {
+        if (_draft is null || string.IsNullOrEmpty(_draft.Id))
+        {
+            Snackbar.Add("저장된 반품 문서를 먼저 선택해주세요.", Severity.Warning);
+            return;
+        }
+        if (_status != "Confirmed")
+        {
+            Snackbar.Add("확정된 반품만 취소할 수 있습니다.", Severity.Warning);
+            return;
+        }
+
+        var isSalesReturn = _returnType == "sales_return";
+        var totalQty = _draft.Lines.Where(l => !l.IsPlaceholder).Sum(l => l.Quantity);
+        var cancelTitle = isSalesReturn ? "⚠ 매출반품 취소 (확정 되돌림)" : "⚠ 매입반품 취소 (확정 되돌림)";
+        var stockLine = isSalesReturn
+            ? $"→ 재고 {totalQty:N1}개 차감 (반품 입고를 되돌림)\n→ 재고원장에 Reverse OUT 기록\n"
+            : $"→ 재고 {totalQty:N1}개 증가 (반환을 되돌림)\n→ 재고원장에 Reverse IN 기록\n";
+
+        var ok = await DialogService.ShowMessageBoxAsync(
+            cancelTitle,
+            $"거래처: {_draft.SalesCompany}\n" +
+            $"문서번호: {_draft.DocumentNumber}\n" +
+            $"반품 금액: {_summary.TotalAmount:N0}원\n\n" +
+            stockLine + "\n" +
+            $"확정을 취소하시겠습니까? 재고·잔액·회계가 확정 전으로 복원됩니다.",
+            yesText: "반품취소", cancelText: "닫기");
+        if (ok != true) return;
+
+        _isConfirming = true;
+        try
+        {
+            var (success, err) = isSalesReturn
+                ? await DeliveryService.CancelSalesReturnAsync(_draft.Id)
+                : await DeliveryService.CancelPurchaseReturnAsync(_draft.Id);
+            if (success)
+            {
+                Snackbar.Add("반품 취소 완료 — 확정 원장이 복원(역행)되었습니다.", Severity.Success);
+                _status = "Canceled";
+                await InvokeAsync(StateHasChanged);
+            }
+            else
+            {
+                Snackbar.Add($"반품 취소 실패: {err}", Severity.Error);
+            }
+        }
+        finally
+        {
+            _isConfirming = false;
+        }
+    }
+
     private void RefreshWorkflow()
     {
         if (_draft is null) return;

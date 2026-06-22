@@ -341,6 +341,25 @@ public class SalesController : ControllerBase
         }
     }
 
+    // 매출반품 취소 — confirmed → canceled (15차 적대검증 15-P1 봉합). confirm 대칭.
+    [HttpPost("returns/{id}/cancel")]
+    [Authorize(Policy = "SalesManager")]
+    public async Task<IActionResult> CancelSalesReturn(string id, CancellationToken ct)
+    {
+        var tenantId = HttpContext.Items["TenantId"]?.ToString();
+        if (string.IsNullOrEmpty(tenantId)) return Forbid();
+        var employeeId = HttpContext.Items["EmployeeId"]?.ToString();
+        try
+        {
+            await _salesService.CancelSalesReturnAsync(id, tenantId, employeeId, ct);
+            return Ok();
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(new { message = ex.Message });
+        }
+    }
+
     [HttpDelete("returns/{id}")]
     [Authorize(Policy = "SalesManager")]
     public async Task<IActionResult> DeleteSalesReturn(string id, CancellationToken ct)

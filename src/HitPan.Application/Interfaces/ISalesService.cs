@@ -118,6 +118,14 @@ public interface ISalesService
         string? employeeId,
         CancellationToken ct = default);
 
+    // 매출반품 취소 — confirmed → canceled + 재고 OUT(확정 IN 되돌림) + 매출 복원기표(단일 트랜잭션).
+    //   15차 적대검증 15-P1 봉합: 잘못 확정한 반품을 원장 무결성 유지하며 되돌리는 경로.
+    Task CancelSalesReturnAsync(
+        string returnId,
+        string tenantId,
+        string? employeeId,
+        CancellationToken ct = default);
+
     Task DeleteSalesReturnAsync(
         string returnId,
         string tenantId,

@@ -719,6 +719,25 @@ public sealed class DeliveryService(HttpClient http)
         }
     }
 
+    /// <summary>매입반품 취소 — status 'confirmed' → 'canceled' + 재고원장 Reverse IN(확정 OUT 되돌림). 15차 15-P1 봉합.</summary>
+    public async Task<(bool Success, string? ErrorMessage)> CancelPurchaseReturnAsync(string returnId, CancellationToken ct = default)
+    {
+        try
+        {
+            using var content = new StringContent("{}", Encoding.UTF8, "application/json");
+            using var resp = await http.PostAsync(
+                $"api/purchase/returns/{Uri.EscapeDataString(returnId)}/cancel", content, ct);
+            if (resp.IsSuccessStatusCode) return (true, null);
+
+            var body = await resp.Content.ReadAsStringAsync(ct);
+            return (false, body);
+        }
+        catch (Exception ex)
+        {
+            return (false, ex.Message);
+        }
+    }
+
     // ─────────────────────────────────────────────────────────────────────
     // 매출반품 — 14차 P0 봉합(2026-06-22, B안 풀 배선). 13차에 백엔드(api/sales/returns)는
     //   만들었으나 프론트 호출이 0건(DOA)이었고, ReturnPage "판매반품" 선택지가 매입반품으로
@@ -784,6 +803,25 @@ public sealed class DeliveryService(HttpClient http)
             using var content = new StringContent("{}", Encoding.UTF8, "application/json");
             using var resp = await http.PostAsync(
                 $"api/sales/returns/{Uri.EscapeDataString(returnId)}/confirm", content, ct);
+            if (resp.IsSuccessStatusCode) return (true, null);
+
+            var body = await resp.Content.ReadAsStringAsync(ct);
+            return (false, body);
+        }
+        catch (Exception ex)
+        {
+            return (false, ex.Message);
+        }
+    }
+
+    /// <summary>매출반품 취소 — status 'confirmed' → 'canceled' + 재고원장 Reverse OUT(확정 IN 되돌림). 15차 15-P1 봉합.</summary>
+    public async Task<(bool Success, string? ErrorMessage)> CancelSalesReturnAsync(string returnId, CancellationToken ct = default)
+    {
+        try
+        {
+            using var content = new StringContent("{}", Encoding.UTF8, "application/json");
+            using var resp = await http.PostAsync(
+                $"api/sales/returns/{Uri.EscapeDataString(returnId)}/cancel", content, ct);
             if (resp.IsSuccessStatusCode) return (true, null);
 
             var body = await resp.Content.ReadAsStringAsync(ct);

@@ -2109,6 +2109,144 @@ public class SalesService : ISalesService
         }
     }
 
+    // ─────────────────────────────────────────────────────────────────────
+    // 매출반품 취소 — confirmed → canceled. 확정(ConfirmSalesReturnAsync)의 정확한 역행.
+    //   봉합 (2026-06-23, 15차 적대검증 15-P1): 종전엔 확정 반품을 되돌릴 경로가 없어, 잘못 확정 시
+    //   운영자가 원장을 직접 손대야 했다(헌법 #3 INSERT ONLY 위반 유발). 확정 6단계를 단일 트랜잭션으로 역행:
+    //   ① stock_ledger Reverse OUT(확정 IN 되돌림) ② item_stock 차감 ③ monthly_summary +복원
+    //   ④ partner_balance total_sales +복원 ⑤ 회계 매출복원 기표 ⑥ status=canceled.
+    //   멱등: confirmed 상태만 취소 가능 → 취소 후 canceled 라 두 번 눌러도 차단(stock_ledger/journal UNIQUE 보호).
+    // ─────────────────────────────────────────────────────────────────────
+    public async Task CancelSalesReturnAsync(string returnId, string tenantId, string? employeeId, CancellationToken ct = default)
+    {
+        var header = await _db.QueryFirstOrDefaultAsync<dynamic>(new CommandDefinition(
+            "SELECT return_no, partner_id, return_date, status, total_amount, vat_amount FROM sales_returns WHERE return_id=@Id AND tenant_id=@Tid AND is_deleted=0",
+            new { Id = returnId, Tid = tenantId }, cancellationToken: ct))
+            ?? throw new InvalidOperationException("반품 문서를 찾을 수 없습니다.");
+
+        if ((string)header.status != "confirmed")
+            throw new InvalidOperationException("확정된(confirmed) 반품만 취소할 수 있습니다.");
+
+        DateTime rd = (DateTime)header.return_date;
+        // 마감월 보호 — 확정과 동일(닫힌 월의 원장은 건드리지 않는다).
+        await ApprovalTriggerHelper.EnsureNotClosedAsync(_db, tenantId, rd, ct);
+
+        var items = (await _db.QueryAsync<dynamic>(new CommandDefinition(
+            "SELECT item_id, qty, unit_price, supply_amount, warehouse_id FROM sales_return_items WHERE return_id=@Id AND tenant_id=@Tid",
+            new { Id = returnId, Tid = tenantId }, cancellationToken: ct))).ToList();
+
+        var returnNo = (string)header.return_no;
+        var partnerId = (string)header.partner_id;
+        var totalAmount = (decimal)header.total_amount;
+        var vatAmount = (decimal)header.vat_amount;
+
+        using var tx = await _unitOfWork.BeginTransactionAsync(ct);
+        try
+        {
+            var conn = _unitOfWork.GetDbConnection();
+            var dbTx = tx.DbTransaction;
+
+            // 기본창고 폴백 — 확정과 동일(wh_code MAIN 우선, 헌법 #12 대칭).
+            var returnDefaultWh = await conn.ExecuteScalarAsync<string?>(new CommandDefinition(
+                """
+                SELECT warehouse_id FROM warehouses
+                 WHERE tenant_id = @TenantId AND is_active = 1
+                 ORDER BY (CASE WHEN wh_code IN ('MAIN','WH-MAIN') THEN 0 ELSE 1 END), wh_code
+                 LIMIT 1
+                """,
+                new { TenantId = tenantId }, transaction: dbTx, cancellationToken: ct));
+            if (string.IsNullOrEmpty(returnDefaultWh))
+                throw new InvalidOperationException("활성 창고가 없습니다. 창고를 먼저 등록해주세요.");
+
+            // 확정 시 item_id 합산 1행 기록과 대칭으로, 취소도 item_id 합산해 키당 1행만 역행 기록.
+            //   stock_ledger UNIQUE 키(tenant, source_type=sales_return_cancel, source_id=returnId, item_id, move_type=out).
+            var returnGroups = items
+                .GroupBy(it => (string)it.item_id)
+                .Select(g => new
+                {
+                    ItemId = g.Key,
+                    Wh = string.IsNullOrEmpty((string?)g.First().warehouse_id) ? returnDefaultWh : (string)g.First().warehouse_id,
+                    Qty = g.Sum(x => (decimal)x.qty),
+                    Supply = g.Sum(x => (decimal)x.supply_amount),
+                    UnitPrice = (decimal)g.First().unit_price
+                })
+                .ToList();
+
+            // 1) 재고원장 Reverse OUT INSERT (확정 IN 되돌림 — 반품 취소로 재고 다시 감소)
+            foreach (var g in returnGroups)
+            {
+                await conn.ExecuteAsync(new CommandDefinition(
+                    """
+                    INSERT INTO stock_ledger
+                      (tenant_id, item_id, warehouse_id, partner_id, employee_id, ledger_date, ym,
+                       move_type, source_type, source_id, doc_no, qty_in, qty_out, unit_cost, supply_amount, memo)
+                    VALUES
+                      (@Tid, @ItemId, @Wh, @PartnerId, @EmpId, @Date, @Ym,
+                       'out', 'sales_return_cancel', @Rid, @DocNo, 0, @Qty, @UnitPrice, @Supply, '매출반품 취소 (Reverse OUT)')
+                    """,
+                    new
+                    {
+                        Tid = tenantId, ItemId = g.ItemId, Wh = g.Wh, PartnerId = partnerId, EmpId = employeeId,
+                        Date = rd, Ym = rd.ToString("yyyy-MM"), Rid = returnId, DocNo = returnNo,
+                        Qty = g.Qty, UnitPrice = g.UnitPrice, Supply = g.Supply
+                    },
+                    transaction: dbTx, cancellationToken: ct));
+
+                // 2) item_stock 차감 — 확정 시 +Qty 의 역
+                await conn.ExecuteAsync(new CommandDefinition(
+                    """
+                    INSERT INTO item_stock (stock_id, tenant_id, item_id, warehouse_id, current_qty, avg_cost, last_updated_at)
+                    VALUES (UUID(), @TenantId, @ItemId, @WarehouseId, -@Qty, @UnitCost, NOW(6))
+                    ON DUPLICATE KEY UPDATE
+                      current_qty = current_qty - @Qty,
+                      last_updated_at = NOW(6)
+                    """,
+                    new { TenantId = tenantId, ItemId = g.ItemId, WarehouseId = g.Wh, Qty = g.Qty, UnitCost = g.UnitPrice },
+                    transaction: dbTx, cancellationToken: ct));
+            }
+
+            // 3) monthly_summary 매출 복원 — 확정 시 -totalAmount 의 역(+totalAmount). 전용 source_type 으로 멱등.
+            await MonthlySummaryGuard.TryApplyAsync(
+                conn, dbTx, tenantId: tenantId, date: rd,
+                sourceType: "sales_return_cancel", sourceId: returnId,
+                field: MonthlySummaryGuard.SummaryField.TotalSales, amount: totalAmount, ct: ct);
+
+            // 4) partner_balance 매출 복원 (확정 시 차감한 total_sales 를 다시 가산)
+            await conn.ExecuteAsync(new CommandDefinition(
+                """
+                INSERT INTO partner_balance
+                  (balance_id, tenant_id, partner_id, total_sales, total_receipt, total_purchase, total_payment, last_updated_at)
+                VALUES
+                  (UUID(), @TenantId, @PartnerId, @Amount, 0, 0, 0, NOW(6))
+                ON DUPLICATE KEY UPDATE
+                  total_sales     = total_sales + @Amount,
+                  last_updated_at = NOW(6)
+                """,
+                new { TenantId = tenantId, PartnerId = partnerId, Amount = totalAmount },
+                transaction: dbTx, cancellationToken: ct));
+
+            // 5) 회계 매출복원 기표 — 확정 역분개의 역(정상 매출분개 방향), 전용 source_type
+            if (totalAmount != 0m || vatAmount != 0m)
+            {
+                await AutoJournalHelper.RecordSalesReturnCancelAsync(
+                    conn, dbTx!, tenantId, returnId, returnNo, rd, partnerId, totalAmount, vatAmount, employeeId, ct);
+            }
+
+            // 6) 상태 전환
+            await conn.ExecuteAsync(new CommandDefinition(
+                "UPDATE sales_returns SET status='canceled', updated_at=NOW(6) WHERE return_id=@Id AND tenant_id=@Tid",
+                new { Id = returnId, Tid = tenantId }, transaction: dbTx, cancellationToken: ct));
+
+            await tx.CommitAsync(ct);
+            await _audit.LogAsync("cancel", "sales_return", returnId, ct: ct);
+        }
+        catch (Exception)
+        {
+            try { await tx.RollbackAsync(ct); } catch (Exception rbex) { Console.Error.WriteLine($"[SalesService] rollback failed: {rbex.Message}"); }
+            throw;
+        }
+    }
+
     // 매출반품 draft 삭제 — confirmed 상태는 별도 취소 경로 필요(매입반품 대칭).
     public async Task DeleteSalesReturnAsync(string returnId, string tenantId, CancellationToken ct = default)
     {

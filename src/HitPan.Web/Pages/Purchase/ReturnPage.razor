@@ -68,6 +68,17 @@
                     </Authorized>
                 </AuthorizeView>
             }
+            @* 확정된 반품 되돌리기 — 15차 적대검증 15-P1 봉합. 잘못 확정 시 원장 무결성 유지하며 복원. *@
+            @if (_status == "Confirmed" && !string.IsNullOrWhiteSpace(_draft.Id))
+            {
+                <AuthorizeView Roles="tenant_admin,purchase_manager">
+                    <Authorized>
+                        <MudButton Variant="Variant.Outlined" Color="Color.Warning"
+                                   StartIcon="@Icons.Material.Filled.Undo"
+                                   OnClick="CancelReturnAsync">반품취소</MudButton>
+                    </Authorized>
+                </AuthorizeView>
+            }
             <MudDivider Vertical="true" FlexItem="true" />
             <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Print" OnClick="PrintAsync">인쇄</MudButton>
             <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.TableChart" OnClick="DownloadExcelAsync">엑셀</MudButton>

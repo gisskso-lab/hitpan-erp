@@ -255,7 +255,7 @@ DROP TABLE IF EXISTS `approval_settings`;
 CREATE TABLE `approval_settings` (
   `setting_id` varchar(36) NOT NULL COMMENT '설정 PK',
   `tenant_id` varchar(36) NOT NULL COMMENT '테넌트 ID',
-  `doc_type` varchar(30) NOT NULL COMMENT '문서유형 (quotation, sales_order, delivery, purchase_order, receipt, return, expense, leave, overtime)',
+  `doc_type` varchar(30) NOT NULL COMMENT '문서유형 (quotation, sales_order, delivery, purchase_order, receipt, sales_return, purchase_return, expense, leave, overtime)',
   `is_enabled` tinyint(1) NOT NULL DEFAULT 0 COMMENT '결재 사용 여부 (0=OFF, 1=ON)',
   `threshold_amount` decimal(15,2) NOT NULL DEFAULT 0.00 COMMENT '기준금액 (이 금액 이상이면 결재 필요, 0=항상)',
   `auto_approve_below` tinyint(1) NOT NULL DEFAULT 0 COMMENT '기준금액 미만 자동승인 여부',

@@ -44,6 +44,14 @@ public interface IPurchaseService
         string? employeeId,
         CancellationToken ct = default);
 
+    // 매입반품 취소 — confirmed → canceled + 재고 IN(확정 OUT 되돌림) + 매입 복원기표(단일 트랜잭션).
+    //   15차 적대검증 15-P1 봉합 (매출반품 취소 대칭).
+    Task CancelPurchaseReturnAsync(
+        string returnId,
+        string tenantId,
+        string? employeeId,
+        CancellationToken ct = default);
+
     Task DeletePurchaseReturnAsync(
         string returnId,
         string tenantId,
