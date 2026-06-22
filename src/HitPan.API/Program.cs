@@ -248,22 +248,25 @@ builder.Services.AddAuthorization(options =>
         policy.RequireRole("system_admin"));
     // PlatformOnly·ResellerOnly 정책 제거 (보안 격벽 2026-06-18): 본사·대리점 계층은 백오피스 전용.
     //   ERP API 컨트롤러 중 이 정책을 [Authorize(Policy)]로 소비하는 곳 0건 — 죽은 등록 제거.
+    // 죽은 분기 청소 (2026-06-22, 헌법 #38 계정 계층 격벽 명문화): platform_admin/reseller_admin 은
+    //   본사·대리점 계층으로 백오피스 전용 — 2026-06-18 격벽으로 ERP 토큰에 이 account_type 클레임이
+    //   발급되지 않으므로(AuthService 는 tenant_admin/tenant_user 만 발급) 아래 OR 절은 도달 불가능한
+    //   죽은 분기였다. 제거해도 부모(tenant_admin)/자식(tenant_user) 동작 무손상. (reseller_id 수신 캐시
+    //   = 덩어리2/헌법 #37 과 무관 — 그건 영업 메타데이터로 보존, 여기는 계정 계층 잔재라 청소.)
     options.AddPolicy("TenantOnly", policy =>
         policy.RequireAssertion(ctx =>
             ctx.User.HasClaim("account_type", "tenant_admin") ||
-            ctx.User.HasClaim("account_type", "tenant_user") ||
-            ctx.User.HasClaim("account_type", "platform_admin")));
-    // GET /api/tenants/me — Blazor TenantProfile (플랫폼·대리점·고객사)
+            ctx.User.HasClaim("account_type", "tenant_user")));
+    // GET /api/tenants/me — Blazor TenantProfile (부모/자식 고객사 계정)
     options.AddPolicy("TenantProfile", policy =>
         policy.RequireAssertion(ctx =>
         {
             var at = ctx.User.FindFirst("account_type")?.Value;
-            return at is "platform_admin" or "reseller_admin" or "tenant_admin" or "tenant_user";
+            return at is "tenant_admin" or "tenant_user";
         }));
     options.AddPolicy("TenantAdminOnly", policy =>
         policy.RequireAssertion(ctx =>
-            ctx.User.HasClaim("account_type", "tenant_admin") ||
-            ctx.User.HasClaim("account_type", "platform_admin")));
+            ctx.User.HasClaim("account_type", "tenant_admin")));
 
     // 백오피스/랜딩 4계층 권한 정책(OwnerOnly·PlatformManagerOrAbove·PlatformOnlyV2·ResellerSelfOnly) 제거
     //   (보안 격벽 2026-06-18): 본사·대리점 계층 인가는 HitPan.Backoffice.API 전담(자체 동명 정책 보유).

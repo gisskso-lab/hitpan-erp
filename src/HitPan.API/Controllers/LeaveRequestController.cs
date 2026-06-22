@@ -64,11 +64,13 @@ public sealed class LeaveRequestController : ControllerBase
 
         // 봉합 (2026-06-23, 5차 전수조사 LV-W-03 P2): 종전엔 request.EmployeeId 를 그대로 신뢰해
         //   타인 명의 연차 신청이 가능했다. 본인 확인은 user_id 가 아니라 employee_id 클레임으로 해야 한다
-        //   (user_id≠employee_id 별개 체계). 관리자(tenant_admin/platform_admin)는 대리신청을 허용하고,
-        //   일반 사용자는 자기 employee_id 로 강제 치환해 위조를 차단한다.
+        //   (user_id≠employee_id 별개 체계). 부모계정(tenant_admin)은 대리신청을 허용하고,
+        //   일반 사용자(tenant_user)는 자기 employee_id 로 강제 치환해 위조를 차단한다.
+        // 죽은 분기 청소 (2026-06-22, 헌법 #38): platform_admin 은 ERP 토큰에 발급 안 되는 본사 계층이라
+        //   제거(격벽 2026-06-18). ERP 관리자 = 부모계정(tenant_admin) 뿐.
         var myEmployeeId = User.FindFirst("employee_id")?.Value;
         var accountType = User.FindFirst("account_type")?.Value;
-        var isAdmin = accountType is "tenant_admin" or "platform_admin";
+        var isAdmin = accountType is "tenant_admin";
         if (!isAdmin)
         {
             if (string.IsNullOrEmpty(myEmployeeId))

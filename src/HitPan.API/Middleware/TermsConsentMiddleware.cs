@@ -70,14 +70,15 @@ public sealed class TermsConsentMiddleware
             return;
         }
 
-        // 백오피스·플랫폼 계정은 약관 동의 면제 (본사 직원 = 별도 가도)
-        var accountType = context.Items["AccountType"]?.ToString();
-        if (!string.Equals(accountType, "tenant", StringComparison.OrdinalIgnoreCase)
-            && !string.IsNullOrEmpty(accountType))
-        {
-            await _next(context);
-            return;
-        }
+        // 봉합 (2026-06-22, 통합 9축+임원패널 P1): 종전 분기는 accountType="tenant"(유령값)가 아니면
+        //   전부 면제였는데, ERP 발급값은 'tenant_admin'/'tenant_user' 둘뿐이라(보안 격벽 2026-06-18:
+        //   본사 platform/대리점 reseller 계층은 백오피스 전용 → ERP 토큰에서 제거, platform_id/reseller_id
+        //   클레임 미발급. TenantMiddleware:54-56·AuthService:265) 모든 고객사 사용자가 무조건 통과 →
+        //   헌법 "미동의 시 API 미들웨어 차단" 100% 무력화였다.
+        //   ERP에는 부모(tenant_admin)/자식(tenant_user)만 존재하며 둘 다 약관 동의 대상이다. 본사계정은
+        //   ERP에 도달하지 않으므로(격벽) 면제 분기 자체가 불필요 — 유령값 "tenant" 의존을 제거하고
+        //   인증된 고객사 사용자는 전부 약관 검사로 직행한다. (ERP에 없는 본사 계층을 면제 화이트리스트로
+        //   되살리지 않는다 = 격벽 정합.)
 
         try
         {
