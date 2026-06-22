@@ -80,4 +80,46 @@ public interface ISalesService
         string tenantId,
         bool autoReceive = false,
         CancellationToken ct = default);
+
+    // ─────────────────────────────────────────────────────────────────────
+    // 매출반품 — 13차 후순위 봉합(2026-06-22, A 매입반품 대칭 풀스택).
+    // 고객이 판매분을 돌려보냄 → 확정 시 재고 IN(증가) + 매출 역분개.
+    // 매입반품(IPurchaseService) 5메서드의 정확한 거울.
+    // ─────────────────────────────────────────────────────────────────────
+
+    // 매출반품 목록 (status 필터 포함 — 13차 메모리 "매출반품 status 필터" 핵심).
+    Task<List<SalesReturnListDto>> GetSalesReturnsAsync(
+        string tenantId,
+        DateTime? from = null,
+        DateTime? to = null,
+        string? status = null,
+        CancellationToken ct = default);
+
+    Task<SalesReturnDetailDto?> GetSalesReturnDetailAsync(
+        string returnId,
+        string tenantId,
+        CancellationToken ct = default);
+
+    Task<(string ReturnId, string ReturnNo)> CreateSalesReturnAsync(
+        CreateSalesReturnRequest request,
+        string tenantId,
+        CancellationToken ct = default);
+
+    Task UpdateSalesReturnAsync(
+        string returnId,
+        UpdateSalesReturnRequest request,
+        string tenantId,
+        CancellationToken ct = default);
+
+    // 매출반품 확정 — draft → confirmed + 재고 IN + 매출 역분개(단일 트랜잭션).
+    Task ConfirmSalesReturnAsync(
+        string returnId,
+        string tenantId,
+        string? employeeId,
+        CancellationToken ct = default);
+
+    Task DeleteSalesReturnAsync(
+        string returnId,
+        string tenantId,
+        CancellationToken ct = default);
 }

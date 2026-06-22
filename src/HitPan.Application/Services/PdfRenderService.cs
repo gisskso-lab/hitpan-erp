@@ -228,74 +228,99 @@ public sealed class PdfRenderService : IPdfRenderService
 
     private async Task<DocumentSnapshot> LoadQuotationAsync(string tenantId, string id, CancellationToken ct)
     {
+        // drift 봉합(13차 후순위→봉합): quotations 컬럼 DDL 정합(헌법 #13·#36).
+        // quotation_no→quote_no, quotation_date→quote_date, quotation_id→quote_id,
+        // total_supply→total_amount(공급가), total_vat→vat_amount, total_amount=공급가+부가세, remark→memo.
+        // quotation_items: item_name 없음→items JOIN, seq 없음→sort_order, supply는 amount, total=amount+vat.
         const string head = """
-            SELECT q.quotation_no AS DocNo, q.quotation_date AS DocDate,
-                   p.partner_name AS PartnerName, p.business_no AS PartnerBusinessNo,
-                   p.address AS PartnerAddress, p.contact_name AS PartnerContact,
-                   COALESCE(q.total_supply,0) AS TotalSupply, COALESCE(q.total_vat,0) AS TotalVat, COALESCE(q.total_amount,0) AS TotalAmount,
-                   q.remark AS Remark
+            SELECT q.quote_no AS DocNo, q.quote_date AS DocDate,
+                   p.partner_name AS PartnerName, p.biz_no AS PartnerBusinessNo,
+                   p.address AS PartnerAddress, p.manager_name AS PartnerContact,
+                   COALESCE(q.total_amount,0) AS TotalSupply, COALESCE(q.vat_amount,0) AS TotalVat,
+                   COALESCE(q.total_amount,0) + COALESCE(q.vat_amount,0) AS TotalAmount,
+                   q.memo AS Remark
             FROM quotations q LEFT JOIN partners p ON p.partner_id = q.partner_id AND p.tenant_id = q.tenant_id
-            WHERE q.tenant_id = @TenantId AND q.quotation_id = @Id
+            WHERE q.tenant_id = @TenantId AND q.quote_id = @Id
             """;
         const string lines = """
-            SELECT item_name AS ItemName, spec AS Spec,
-                   COALESCE(qty,0) AS Qty, COALESCE(unit_price,0) AS UnitPrice,
-                   COALESCE(supply_amount,0) AS Supply, COALESCE(vat_amount,0) AS Vat, COALESCE(total_amount,0) AS Total
-            FROM quotation_items WHERE tenant_id = @TenantId AND quotation_id = @Id ORDER BY seq
+            SELECT i.item_name AS ItemName, i.spec AS Spec,
+                   COALESCE(qi.qty,0) AS Qty, COALESCE(qi.unit_price,0) AS UnitPrice,
+                   COALESCE(qi.amount,0) AS Supply, COALESCE(qi.vat_amount,0) AS Vat,
+                   COALESCE(qi.amount,0) + COALESCE(qi.vat_amount,0) AS Total
+            FROM quotation_items qi LEFT JOIN items i ON i.item_id = qi.item_id
+            WHERE qi.quote_id = @Id ORDER BY qi.sort_order
             """;
         return await LoadByQueriesAsync(tenantId, id, "quotation", head, lines, ct).ConfigureAwait(false);
     }
 
     private async Task<DocumentSnapshot> LoadSalesOrderAsync(string tenantId, string id, CancellationToken ct)
     {
+        // drift 봉합: sales_orders 컬럼 DDL 정합. so_no→order_no, so_date→order_date, so_id→order_id,
+        // total_supply→total_amount(공급가), total_vat→vat_amount, remark→memo.
+        // sales_order_items: item_name 없음→items JOIN, qty→ordered_qty, supply_amount 존재, seq 없음→정렬 PK.
         const string head = """
-            SELECT s.so_no AS DocNo, s.so_date AS DocDate,
-                   p.partner_name AS PartnerName, p.business_no AS PartnerBusinessNo,
-                   p.address AS PartnerAddress, p.contact_name AS PartnerContact,
-                   COALESCE(s.total_supply,0) AS TotalSupply, COALESCE(s.total_vat,0) AS TotalVat, COALESCE(s.total_amount,0) AS TotalAmount,
-                   s.remark AS Remark
+            SELECT s.order_no AS DocNo, s.order_date AS DocDate,
+                   p.partner_name AS PartnerName, p.biz_no AS PartnerBusinessNo,
+                   p.address AS PartnerAddress, p.manager_name AS PartnerContact,
+                   COALESCE(s.total_amount,0) AS TotalSupply, COALESCE(s.vat_amount,0) AS TotalVat,
+                   COALESCE(s.total_amount,0) + COALESCE(s.vat_amount,0) AS TotalAmount,
+                   s.memo AS Remark
             FROM sales_orders s LEFT JOIN partners p ON p.partner_id = s.partner_id AND p.tenant_id = s.tenant_id
-            WHERE s.tenant_id = @TenantId AND s.so_id = @Id
+            WHERE s.tenant_id = @TenantId AND s.order_id = @Id
             """;
         const string lines = """
-            SELECT item_name AS ItemName, spec AS Spec,
-                   COALESCE(qty,0) AS Qty, COALESCE(unit_price,0) AS UnitPrice,
-                   COALESCE(supply_amount,0) AS Supply, COALESCE(vat_amount,0) AS Vat, COALESCE(total_amount,0) AS Total
-            FROM sales_order_items WHERE tenant_id = @TenantId AND so_id = @Id ORDER BY seq
+            SELECT i.item_name AS ItemName, i.spec AS Spec,
+                   COALESCE(soi.ordered_qty,0) AS Qty, COALESCE(soi.unit_price,0) AS UnitPrice,
+                   COALESCE(soi.supply_amount,0) AS Supply, COALESCE(soi.vat_amount,0) AS Vat,
+                   COALESCE(soi.supply_amount,0) + COALESCE(soi.vat_amount,0) AS Total
+            FROM sales_order_items soi LEFT JOIN items i ON i.item_id = soi.item_id
+            WHERE soi.tenant_id = @TenantId AND soi.order_id = @Id ORDER BY soi.order_item_id
             """;
         return await LoadByQueriesAsync(tenantId, id, "sales_order", head, lines, ct).ConfigureAwait(false);
     }
 
     private async Task<DocumentSnapshot> LoadDeliveryAsync(string tenantId, string id, CancellationToken ct)
     {
+        // drift 봉합: sales_deliveries total_supply→total_amount(공급가), total_vat→vat_amount, remark→memo.
+        // sales_delivery_items: item_name 없음→items JOIN, qty 존재, supply_amount 존재, seq 없음→정렬 PK.
         const string head = """
             SELECT d.delivery_no AS DocNo, d.delivery_date AS DocDate,
-                   p.partner_name AS PartnerName, p.business_no AS PartnerBusinessNo,
-                   p.address AS PartnerAddress, p.contact_name AS PartnerContact,
-                   COALESCE(d.total_supply,0) AS TotalSupply, COALESCE(d.total_vat,0) AS TotalVat, COALESCE(d.total_amount,0) AS TotalAmount,
-                   d.remark AS Remark
+                   p.partner_name AS PartnerName, p.biz_no AS PartnerBusinessNo,
+                   p.address AS PartnerAddress, p.manager_name AS PartnerContact,
+                   COALESCE(d.total_amount,0) AS TotalSupply, COALESCE(d.vat_amount,0) AS TotalVat,
+                   COALESCE(d.total_amount,0) + COALESCE(d.vat_amount,0) AS TotalAmount,
+                   d.memo AS Remark
             FROM sales_deliveries d LEFT JOIN partners p ON p.partner_id = d.partner_id AND p.tenant_id = d.tenant_id
             WHERE d.tenant_id = @TenantId AND d.delivery_id = @Id
             """;
         const string lines = """
-            SELECT item_name AS ItemName, spec AS Spec,
-                   COALESCE(qty,0) AS Qty, COALESCE(unit_price,0) AS UnitPrice,
-                   COALESCE(supply_amount,0) AS Supply, COALESCE(vat_amount,0) AS Vat, COALESCE(total_amount,0) AS Total
-            FROM sales_delivery_items WHERE tenant_id = @TenantId AND delivery_id = @Id ORDER BY seq
+            SELECT i.item_name AS ItemName, i.spec AS Spec,
+                   COALESCE(di.qty,0) AS Qty, COALESCE(di.unit_price,0) AS UnitPrice,
+                   COALESCE(di.supply_amount,0) AS Supply, COALESCE(di.vat_amount,0) AS Vat,
+                   COALESCE(di.supply_amount,0) + COALESCE(di.vat_amount,0) AS Total
+            FROM sales_delivery_items di LEFT JOIN items i ON i.item_id = di.item_id
+            WHERE di.tenant_id = @TenantId AND di.delivery_id = @Id ORDER BY di.delivery_item_id
             """;
         return await LoadByQueriesAsync(tenantId, id, "delivery", head, lines, ct).ConfigureAwait(false);
     }
 
     private async Task<DocumentSnapshot> LoadTaxInvoiceAsync(string tenantId, string id, CancellationToken ct)
     {
+        // tax_invoices drift 봉합(13차 후순위→봉합): 컬럼명 DDL 정합(헌법 #13·#36).
+        // invoice_date→issued_at, supply_amount→amount_total, vat_amount→vat_total,
+        // total_amount=amount_total+vat_total 계산, remark→remark1, tax_invoice_id→invoice_id.
+        // tax_invoices에 partner_id 없음 → delivery_id 경유 sales_deliveries.partner_id로 거래처 조회.
         const string head = """
-            SELECT t.invoice_no AS DocNo, t.invoice_date AS DocDate,
-                   p.partner_name AS PartnerName, p.business_no AS PartnerBusinessNo,
-                   p.address AS PartnerAddress, p.contact_name AS PartnerContact,
-                   COALESCE(t.supply_amount,0) AS TotalSupply, COALESCE(t.vat_amount,0) AS TotalVat, COALESCE(t.total_amount,0) AS TotalAmount,
-                   t.remark AS Remark
-            FROM tax_invoices t LEFT JOIN partners p ON p.partner_id = t.partner_id AND p.tenant_id = t.tenant_id
-            WHERE t.tenant_id = @TenantId AND t.tax_invoice_id = @Id
+            SELECT t.invoice_no AS DocNo, t.issued_at AS DocDate,
+                   p.partner_name AS PartnerName, p.biz_no AS PartnerBusinessNo,
+                   p.address AS PartnerAddress, p.manager_name AS PartnerContact,
+                   COALESCE(t.amount_total,0) AS TotalSupply, COALESCE(t.vat_total,0) AS TotalVat,
+                   COALESCE(t.amount_total,0) + COALESCE(t.vat_total,0) AS TotalAmount,
+                   t.remark1 AS Remark
+            FROM tax_invoices t
+            LEFT JOIN sales_deliveries sd ON sd.delivery_id = t.delivery_id AND sd.tenant_id = t.tenant_id
+            LEFT JOIN partners p ON p.partner_id = sd.partner_id AND p.tenant_id = t.tenant_id
+            WHERE t.tenant_id = @TenantId AND t.invoice_id = @Id
             """;
         // tax_invoices는 라인 별도 미사용 — 합계만 표시
         var d = new DocumentSnapshot { DocType = "tax_invoice" };
@@ -310,40 +335,50 @@ public sealed class PdfRenderService : IPdfRenderService
 
     private async Task<DocumentSnapshot> LoadPurchaseOrderAsync(string tenantId, string id, CancellationToken ct)
     {
+        // drift 봉합: purchase_orders total_supply→total_amount(공급가), total_vat→vat_amount, remark→memo.
+        // purchase_order_items: item_name 없음→items JOIN, qty→ordered_qty, supply_amount 존재, seq 없음→정렬 PK.
         const string head = """
             SELECT po.po_no AS DocNo, po.po_date AS DocDate,
-                   p.partner_name AS PartnerName, p.business_no AS PartnerBusinessNo,
-                   p.address AS PartnerAddress, p.contact_name AS PartnerContact,
-                   COALESCE(po.total_supply,0) AS TotalSupply, COALESCE(po.total_vat,0) AS TotalVat, COALESCE(po.total_amount,0) AS TotalAmount,
-                   po.remark AS Remark
+                   p.partner_name AS PartnerName, p.biz_no AS PartnerBusinessNo,
+                   p.address AS PartnerAddress, p.manager_name AS PartnerContact,
+                   COALESCE(po.total_amount,0) AS TotalSupply, COALESCE(po.vat_amount,0) AS TotalVat,
+                   COALESCE(po.total_amount,0) + COALESCE(po.vat_amount,0) AS TotalAmount,
+                   po.memo AS Remark
             FROM purchase_orders po LEFT JOIN partners p ON p.partner_id = po.partner_id AND p.tenant_id = po.tenant_id
             WHERE po.tenant_id = @TenantId AND po.po_id = @Id
             """;
         const string lines = """
-            SELECT item_name AS ItemName, spec AS Spec,
-                   COALESCE(qty,0) AS Qty, COALESCE(unit_price,0) AS UnitPrice,
-                   COALESCE(supply_amount,0) AS Supply, COALESCE(vat_amount,0) AS Vat, COALESCE(total_amount,0) AS Total
-            FROM purchase_order_items WHERE tenant_id = @TenantId AND po_id = @Id ORDER BY seq
+            SELECT i.item_name AS ItemName, i.spec AS Spec,
+                   COALESCE(poi.ordered_qty,0) AS Qty, COALESCE(poi.unit_price,0) AS UnitPrice,
+                   COALESCE(poi.supply_amount,0) AS Supply, COALESCE(poi.vat_amount,0) AS Vat,
+                   COALESCE(poi.supply_amount,0) + COALESCE(poi.vat_amount,0) AS Total
+            FROM purchase_order_items poi LEFT JOIN items i ON i.item_id = poi.item_id
+            WHERE poi.tenant_id = @TenantId AND poi.po_id = @Id ORDER BY poi.po_item_id
             """;
         return await LoadByQueriesAsync(tenantId, id, "purchase_order", head, lines, ct).ConfigureAwait(false);
     }
 
     private async Task<DocumentSnapshot> LoadPurchaseReceiptAsync(string tenantId, string id, CancellationToken ct)
     {
+        // drift 봉합: purchase_receipts total_supply→total_amount(공급가), total_vat→vat_amount, remark→memo.
+        // purchase_receipt_items: item_name 없음→items JOIN, qty 존재, supply_amount 존재, seq 없음→정렬 PK.
         const string head = """
             SELECT pr.receipt_no AS DocNo, pr.receipt_date AS DocDate,
-                   p.partner_name AS PartnerName, p.business_no AS PartnerBusinessNo,
-                   p.address AS PartnerAddress, p.contact_name AS PartnerContact,
-                   COALESCE(pr.total_supply,0) AS TotalSupply, COALESCE(pr.total_vat,0) AS TotalVat, COALESCE(pr.total_amount,0) AS TotalAmount,
-                   pr.remark AS Remark
+                   p.partner_name AS PartnerName, p.biz_no AS PartnerBusinessNo,
+                   p.address AS PartnerAddress, p.manager_name AS PartnerContact,
+                   COALESCE(pr.total_amount,0) AS TotalSupply, COALESCE(pr.vat_amount,0) AS TotalVat,
+                   COALESCE(pr.total_amount,0) + COALESCE(pr.vat_amount,0) AS TotalAmount,
+                   pr.memo AS Remark
             FROM purchase_receipts pr LEFT JOIN partners p ON p.partner_id = pr.partner_id AND p.tenant_id = pr.tenant_id
             WHERE pr.tenant_id = @TenantId AND pr.receipt_id = @Id
             """;
         const string lines = """
-            SELECT item_name AS ItemName, spec AS Spec,
-                   COALESCE(qty,0) AS Qty, COALESCE(unit_price,0) AS UnitPrice,
-                   COALESCE(supply_amount,0) AS Supply, COALESCE(vat_amount,0) AS Vat, COALESCE(total_amount,0) AS Total
-            FROM purchase_receipt_items WHERE tenant_id = @TenantId AND receipt_id = @Id ORDER BY seq
+            SELECT i.item_name AS ItemName, i.spec AS Spec,
+                   COALESCE(pri.qty,0) AS Qty, COALESCE(pri.unit_price,0) AS UnitPrice,
+                   COALESCE(pri.supply_amount,0) AS Supply, COALESCE(pri.vat_amount,0) AS Vat,
+                   COALESCE(pri.supply_amount,0) + COALESCE(pri.vat_amount,0) AS Total
+            FROM purchase_receipt_items pri LEFT JOIN items i ON i.item_id = pri.item_id
+            WHERE pri.tenant_id = @TenantId AND pri.receipt_id = @Id ORDER BY pri.receipt_item_id
             """;
         return await LoadByQueriesAsync(tenantId, id, "purchase_receipt", head, lines, ct).ConfigureAwait(false);
     }

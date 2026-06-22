@@ -81,7 +81,10 @@ public class AuthService : IAuthService
         //   연결 employees 행이 없으면 로그인 시 멱등 생성해 보장한다(라이브 DB 직접 변경 0, 런타임 자가치유).
         if (employee is null && user.AccountType == "tenant_admin")
         {
-            employee = await BackfillParentEmployeeAsync(user, ct);
+            // 백필은 보조 자가치유 — 실패(비-1062 예외: 연결 끊김 등)해도 로그인 자체는 막지 않는다.
+            // employee=null 이면 이번 세션은 employee_id 없이 진행하고, 다음 로그인에 재시도된다(13차 거짓봉합 재봉합).
+            try { employee = await BackfillParentEmployeeAsync(user, ct); }
+            catch (Exception ex) { System.Diagnostics.Trace.TraceWarning($"[Backfill] 부모계정 employees 백필 실패(로그인은 진행): {ex.Message}"); }
         }
 
         var redirectToWelcome = user.LastLoginAt is null;
@@ -181,9 +184,11 @@ public class AuthService : IAuthService
         var employee = employees.FirstOrDefault();
 
         // 백필 (2026-06-22, 13차 A안): refresh 경로도 동일 — 부모계정 employees 행 멱등 보장.
+        // 실패해도 refresh(=세션 유지)는 막지 않는다(13차 거짓봉합 재봉합, 백필은 보조 자가치유).
         if (employee is null && user.AccountType == "tenant_admin")
         {
-            employee = await BackfillParentEmployeeAsync(user, ct);
+            try { employee = await BackfillParentEmployeeAsync(user, ct); }
+            catch (Exception ex) { System.Diagnostics.Trace.TraceWarning($"[Backfill] 부모계정 employees 백필 실패(refresh는 진행): {ex.Message}"); }
         }
 
         var response = CreateLoginResponse(user, employee, secret, redirectToWelcome: false);
@@ -268,9 +273,29 @@ public class AuthService : IAuthService
     {
         var employeeRepo = _unitOfWork.Repository<Employee>();
 
-        // emp_no 충돌 방지: 같은 tenant 의 기존 사원 수 +1 (없으면 0001). 단일 회사라 충돌 가능성 희박.
-        var existing = await employeeRepo.FindAsync(x => x.TenantId == user.TenantId);
-        var empNo = (existing.Count() + 1).ToString("D4");
+        // 봉합 (2026-06-22, 13차 후순위 emp_no 비연속 엣지 → 2단 교차검증 거짓봉합 재봉합):
+        //   1차 봉합은 emp_no 를 Count()+1 에서 MAX(파싱)+1 로 바꾼 것까진 맞았으나, 충돌 catch 에서
+        //   employeeRepo.Remove(실패엔티티) 를 호출해 "추적 해제"를 의도했다. 그런데 Repository.Remove 는
+        //   Detach 가 아니라 소프트삭제(IsActive=false + DbSet.Update)라, 실패 Added 엔티티가 Modified 로
+        //   트래커에 남아 다음 SaveChanges 가 커밋된 적 없는 행 UPDATE → DbUpdateConcurrencyException →
+        //   1062 아님 → 로그인 하드 차단(원버그보다 악화). 재봉합 = 재시도 루프 자체를 제거한다.
+        //
+        //   근거: emp_no = 같은 tenant 의 가장 큰 emp_no(숫자 파싱) +1. 가장 큰 값 +1 은 정의상 기존에
+        //   존재할 수 없으므로 비연속(0001·0003·0005 → 0006)에도 단일 시도로 충돌하지 않는다. 남는 위험은
+        //   동시 로그인 경합(같은 user 가 두 세션에서 동시 백필)뿐인데, 그땐 catch 에서 SaveChanges·Update·
+        //   Remove 를 일절 호출하지 않고 재조회만 한다 — 실패 Added 엔티티를 flush 하지 않으므로 트래커
+        //   오염이 무해하고, 먼저 커밋한 세션이 만든 행을 그대로 사용한다(헌법 #12 동시성·#15 silent 금지).
+        var existing = (await employeeRepo.FindAsync(x => x.TenantId == user.TenantId)).ToList();
+
+        // 이미 이 user 의 employees 행이 있으면(중복 백필 방지) 그걸 그대로 사용.
+        var already = existing.FirstOrDefault(e => e.UserId == user.Id && e.IsActive);
+        if (already is not null) return already;
+
+        var maxNo = existing
+            .Select(e => int.TryParse(e.EmpNo, out var n) ? n : 0)
+            .DefaultIfEmpty(0)
+            .Max();
+        var empNo = (maxNo + 1).ToString("D4");
 
         // EmployeeId 는 EF 매핑상 Ignore(실 PK 는 BaseEntity.Id) — 설정 안 함. employee_id 클레임은 .Id 사용.
         var newEmployee = new Employee
@@ -292,13 +317,42 @@ public class AuthService : IAuthService
             await _unitOfWork.SaveChangesAsync(ct);
             return newEmployee;
         }
-        catch
+        catch (Exception ex)
         {
-            // 동시 로그인 경합(또는 UNIQUE 충돌)으로 이미 생성됐을 수 있다 — 재조회해서 있으면 그걸 쓴다.
-            // (AuthService 는 ILogger 미주입 — 생성자 변경 회피. 경합은 재조회로 정상 흡수되므로 silent 아님.)
-            var retry = await employeeRepo.FindAsync(x => x.UserId == user.Id && x.IsActive);
-            return retry.FirstOrDefault();
+            // ★13차 2단 교차검증 거짓봉합 2회 재봉합의 핵심:
+            //   SaveChanges 실패 시 newEmployee 는 Added 상태로 공유 DbContext 트래커에 남는다(EF 는 실패해도
+            //   detach 하지 않음). 그대로 두면 이후 호출부의 SaveChanges(예: LastLoginAt 저장)가 이 좀비를
+            //   재INSERT 시도 → 두 번째 실패가 try/catch 없는 곳에서 터져 로그인 500(원버그보다 악화).
+            //   1차 재봉합의 "재조회만 하면 무해" 전제가 바로 이 지점에서 거짓이었다. 반드시 Detach 한다.
+            employeeRepo.Detach(newEmployee);
+
+            if (IsUniqueViolation(ex))
+            {
+                // 동시 로그인 경합으로 다른 세션이 먼저 백필했다 — 재조회로 그 행을 사용한다.
+                var retry = await employeeRepo.FindAsync(x => x.UserId == user.Id && x.IsActive);
+                return retry.FirstOrDefault();
+            }
+
+            // 비-1062 예외(연결 끊김 등)는 전파한다(silent swallow 금지, 헌법 #15). 좀비는 위에서 Detach 했으니
+            // 호출부 SaveChanges 는 안전하다. 백필 실패가 로그인을 막지 않도록 호출부를 try/catch 로 감싼다.
+            throw;
         }
+    }
+
+    /// <summary>
+    /// MariaDB UNIQUE 제약(uq_tenant_empno 등) 위반 여부 판정 — 에러코드 1062(ER_DUP_ENTRY).
+    /// 다른 예외(연결·타임아웃·검증)는 false 를 반환해 호출부에서 전파되도록 한다(헌법 #15 silent swallow 금지).
+    /// </summary>
+    private static bool IsUniqueViolation(Exception ex)
+    {
+        for (Exception? e = ex; e is not null; e = e.InnerException)
+        {
+            if (e is MySqlConnector.MySqlException my && my.Number == 1062) return true;
+            var msg = e.Message;
+            if (msg.Contains("Duplicate entry", StringComparison.OrdinalIgnoreCase)
+                || msg.Contains("uq_tenant_empno", StringComparison.OrdinalIgnoreCase)) return true;
+        }
+        return false;
     }
 
     private static LoginResponse CreateLoginResponse(User user, Employee? employee, string secret, bool redirectToWelcome)

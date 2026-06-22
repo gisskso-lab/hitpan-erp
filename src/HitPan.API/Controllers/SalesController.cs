@@ -264,6 +264,99 @@ public class SalesController : ControllerBase
             return BadRequest(new { message = ex.Message });
         }
     }
+
+    // ─────────────────────────────────────────────────────────────────────
+    // 매출반품 — 13차 후순위 봉합(2026-06-22, A 매입반품 대칭 풀스택).
+    // 매입반품(PurchaseController returns/*) 엔드포인트의 거울. status 필터 GET 포함.
+    // ─────────────────────────────────────────────────────────────────────
+
+    [HttpGet("returns")]
+    public async Task<IActionResult> GetSalesReturns(
+        [FromQuery] DateTime? from, [FromQuery] DateTime? to, [FromQuery] string? status, CancellationToken ct)
+    {
+        var tenantId = HttpContext.Items["TenantId"]?.ToString();
+        if (string.IsNullOrEmpty(tenantId)) return Forbid();
+        var list = await _salesService.GetSalesReturnsAsync(tenantId, from, to, status, ct);
+        return Ok(list);
+    }
+
+    [HttpGet("returns/{id}")]
+    public async Task<IActionResult> GetSalesReturnDetail(string id, CancellationToken ct)
+    {
+        var tenantId = HttpContext.Items["TenantId"]?.ToString();
+        if (string.IsNullOrEmpty(tenantId)) return Forbid();
+        var detail = await _salesService.GetSalesReturnDetailAsync(id, tenantId, ct);
+        return detail is null ? NotFound() : Ok(detail);
+    }
+
+    [HttpPost("returns")]
+    [Authorize(Policy = "SalesManager")]
+    public async Task<IActionResult> CreateSalesReturn([FromBody] CreateSalesReturnRequest request, CancellationToken ct)
+    {
+        var tenantId = HttpContext.Items["TenantId"]?.ToString();
+        if (string.IsNullOrEmpty(tenantId)) return Forbid();
+        try
+        {
+            var (returnId, returnNo) = await _salesService.CreateSalesReturnAsync(request, tenantId, ct);
+            return Ok(new { returnId, returnNo });
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(new { message = ex.Message });
+        }
+    }
+
+    [HttpPut("returns/{id}")]
+    [Authorize(Policy = "SalesManager")]
+    public async Task<IActionResult> UpdateSalesReturn(string id, [FromBody] UpdateSalesReturnRequest request, CancellationToken ct)
+    {
+        var tenantId = HttpContext.Items["TenantId"]?.ToString();
+        if (string.IsNullOrEmpty(tenantId)) return Forbid();
+        try
+        {
+            await _salesService.UpdateSalesReturnAsync(id, request, tenantId, ct);
+            return Ok();
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(new { message = ex.Message });
+        }
+    }
+
+    [HttpPost("returns/{id}/confirm")]
+    [Authorize(Policy = "SalesManager")]
+    public async Task<IActionResult> ConfirmSalesReturn(string id, CancellationToken ct)
+    {
+        var tenantId = HttpContext.Items["TenantId"]?.ToString();
+        if (string.IsNullOrEmpty(tenantId)) return Forbid();
+        var employeeId = HttpContext.Items["EmployeeId"]?.ToString();
+        try
+        {
+            await _salesService.ConfirmSalesReturnAsync(id, tenantId, employeeId, ct);
+            return Ok();
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(new { message = ex.Message });
+        }
+    }
+
+    [HttpDelete("returns/{id}")]
+    [Authorize(Policy = "SalesManager")]
+    public async Task<IActionResult> DeleteSalesReturn(string id, CancellationToken ct)
+    {
+        var tenantId = HttpContext.Items["TenantId"]?.ToString();
+        if (string.IsNullOrEmpty(tenantId)) return Forbid();
+        try
+        {
+            await _salesService.DeleteSalesReturnAsync(id, tenantId, ct);
+            return Ok();
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(new { message = ex.Message });
+        }
+    }
 }
 
 public sealed class BulkConfirmDeliveriesRequest

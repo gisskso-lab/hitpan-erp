@@ -54,4 +54,11 @@ public class Repository<T> : IRepository<T> where T : BaseEntity
 
         throw new InvalidOperationException($"{typeof(T).Name} does not support soft delete via IsActive.");
     }
+
+    public void Detach(T entity)
+    {
+        // SaveChanges 실패로 Added 상태가 남은 엔티티를 ChangeTracker 에서 떼어낸다.
+        // 이후 같은 DbContext 의 SaveChanges 가 이 엔티티를 다시 flush 하지 않도록 한다.
+        Context.Entry(entity).State = EntityState.Detached;
+    }
 }
