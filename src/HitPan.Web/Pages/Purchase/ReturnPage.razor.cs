@@ -182,15 +182,22 @@ public partial class ReturnPage : ComponentBase
             items
         };
 
+        // 14차 P0 봉합(B안): 반품유형에 따라 매출반품(api/sales/returns)·매입반품(api/purchase/returns)
+        //   경로로 분기한다. 종전엔 _returnType 무시하고 항상 매입반품으로 저장해, 판매반품 선택 시
+        //   재고·잔액·회계가 3중 역방향으로 오염됐다(헌법 #20). 백엔드는 13차에 양쪽 다 완비됨.
+        var isSalesReturn = _returnType == "sales_return";
+        var basePath = isSalesReturn ? "api/sales/returns" : "api/purchase/returns";
+        var docLabel = isSalesReturn ? "매출반품" : "매입반품";
+
         try
         {
             if (_isNew)
             {
-                // P0 #1 — 신규 반품 작성
-                var resp = await Http.PostAsJsonAsync("api/purchase/returns", payload);
+                // 신규 반품 작성
+                var resp = await Http.PostAsJsonAsync(basePath, payload);
                 if (!resp.IsSuccessStatusCode)
                 {
-                    Snackbar.Add($"반품 저장 실패: {resp.StatusCode}", Severity.Error);
+                    Snackbar.Add($"{docLabel} 저장 실패: {resp.StatusCode}", Severity.Error);
                     return;
                 }
                 var created = await resp.Content.ReadFromJsonAsync<ReturnCreatedResponse>();
@@ -200,18 +207,18 @@ public partial class ReturnPage : ComponentBase
                     _draft.DocumentNumber = created.ReturnNo;
                     _isNew = false;
                 }
-                Snackbar.Add("반품을 저장했습니다.", Severity.Success);
+                Snackbar.Add($"{docLabel}을 저장했습니다.", Severity.Success);
             }
             else
             {
-                // P0 #1 — draft 반품 수정
-                var resp = await Http.PutAsJsonAsync($"api/purchase/returns/{_draft.Id}", payload);
+                // draft 반품 수정
+                var resp = await Http.PutAsJsonAsync($"{basePath}/{_draft.Id}", payload);
                 if (!resp.IsSuccessStatusCode)
                 {
-                    Snackbar.Add($"반품 수정 실패: {resp.StatusCode}", Severity.Error);
+                    Snackbar.Add($"{docLabel} 수정 실패: {resp.StatusCode}", Severity.Error);
                     return;
                 }
-                Snackbar.Add("반품을 수정했습니다.", Severity.Success);
+                Snackbar.Add($"{docLabel}을 수정했습니다.", Severity.Success);
             }
 
             _hasUnsavedChanges = false;
@@ -272,7 +279,9 @@ public partial class ReturnPage : ComponentBase
         {
             try
             {
-                using var resp = await Http.DeleteAsync($"api/purchase/returns/{Uri.EscapeDataString(_draft.Id)}");
+                // 14차 P0 봉합(B안): 반품유형에 따라 삭제 경로 분기.
+                var deletePath = _returnType == "sales_return" ? "api/sales/returns" : "api/purchase/returns";
+                using var resp = await Http.DeleteAsync($"{deletePath}/{Uri.EscapeDataString(_draft.Id)}");
                 if (!resp.IsSuccessStatusCode)
                 {
                     var body = await resp.Content.ReadAsStringAsync();
@@ -336,26 +345,34 @@ public partial class ReturnPage : ComponentBase
 
     private async Task OpenListAsync()
     {
+        // 14차 P0 봉합(B안): 반품유형에 따라 매출반품·매입반품 목록을 분기해 연다.
+        var isSalesReturn = _returnType == "sales_return";
         var options = new DialogOptions { MaxWidth = MaxWidth.ExtraLarge, FullWidth = true, CloseButton = true };
-        var dlg = await DialogService.ShowAsync<PurchaseReturnList>("매입반품 목록", options);
+        var parameters = new DialogParameters { ["IsSalesReturn"] = isSalesReturn };
+        var title = isSalesReturn ? "매출반품 목록" : "매입반품 목록";
+        var dlg = await DialogService.ShowAsync<PurchaseReturnList>(title, parameters, options);
         var result = await dlg.Result;
         if (result is null || result.Canceled) return;
 
         var returnId = result.Data as string;
         if (string.IsNullOrWhiteSpace(returnId)) return;
 
-        await LoadReturnAsync(returnId);
+        await LoadReturnAsync(returnId, isSalesReturn);
     }
 
-    /// <summary>서버에서 매입반품 단건을 읽어 편집 화면에 주입한다.</summary>
-    private async Task LoadReturnAsync(string returnId)
+    /// <summary>서버에서 반품 단건을 읽어 편집 화면에 주입한다. 14차 P0 봉합(B안): 매출/매입 분기.</summary>
+    private async Task LoadReturnAsync(string returnId, bool isSalesReturn = false)
     {
-        var detail = await DeliveryService.GetPurchaseReturnDetailAsync(returnId);
+        var detail = isSalesReturn
+            ? await DeliveryService.GetSalesReturnDetailAsync(returnId)
+            : await DeliveryService.GetPurchaseReturnDetailAsync(returnId);
         if (detail is null)
         {
             Snackbar.Add("반품 문서를 불러오지 못했습니다.", Severity.Error);
             return;
         }
+        // 로드한 문서 종류에 맞춰 반품유형을 설정(저장·확정·삭제가 올바른 경로로 가도록).
+        _returnType = isSalesReturn ? "sales_return" : "purchase_return";
 
         _itemCache ??= await ItemsApi.GetListAsync() ?? new();
 
@@ -429,14 +446,21 @@ public partial class ReturnPage : ComponentBase
         var itemCount = _draft.Lines.Count(l => !l.IsPlaceholder);
         var totalQty = _draft.Lines.Where(l => !l.IsPlaceholder).Sum(l => l.Quantity);
 
+        // 14차 P0 봉합(B안): 매출반품은 재고가 증가(Reverse IN), 매입반품은 차감(Reverse OUT).
+        //   확정 다이얼로그 문구·확정 API를 반품유형에 맞게 분기한다.
+        var isSalesReturn = _returnType == "sales_return";
+        var confirmTitle = isSalesReturn ? "⚠ 매출반품 확정 (Reverse IN)" : "⚠ 매입반품 확정 (Reverse OUT)";
+        var stockLine = isSalesReturn
+            ? $"→ 재고 {totalQty:N1}개 증가 (고객 반품 입고)\n→ 재고원장에 Reverse IN 기록\n"
+            : $"→ 재고 {totalQty:N1}개 차감 (공급처로 반환)\n→ 재고원장에 Reverse OUT 기록\n";
+
         var ok = await DialogService.ShowMessageBoxAsync(
-            "⚠ 매입반품 확정 (Reverse OUT)",
+            confirmTitle,
             $"거래처: {_draft.SalesCompany}\n" +
             $"문서번호: {_draft.DocumentNumber}\n" +
             $"품목 수: {itemCount}개 · 총 수량: {totalQty:N1}\n" +
             $"반품 금액: {_summary.TotalAmount:N0}원\n\n" +
-            $"→ 재고 {totalQty:N1}개 차감 (공급처로 반환)\n" +
-            $"→ 재고원장에 Reverse OUT 기록\n\n" +
+            stockLine + "\n" +
             $"확정하시겠습니까?",
             yesText: "반품확정", cancelText: "닫기");
         if (ok != true) return;
@@ -444,7 +468,9 @@ public partial class ReturnPage : ComponentBase
         _isConfirming = true;
         try
         {
-            var (success, err) = await DeliveryService.ConfirmPurchaseReturnAsync(_draft.Id);
+            var (success, err) = isSalesReturn
+                ? await DeliveryService.ConfirmSalesReturnAsync(_draft.Id)
+                : await DeliveryService.ConfirmPurchaseReturnAsync(_draft.Id);
             if (success)
             {
                 Snackbar.Add("반품 확정 완료 — Reverse 원장이 발행되었습니다.", Severity.Success);

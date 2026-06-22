@@ -1202,7 +1202,12 @@ public sealed class MdbMigrationService
             }
 
             // BOM 중복 봉합: source_id 멱등 + 기존 PK 재사용 (UPSERT 정합).
-            var sourceId = $"DOCRT-{productKey}";
+            // 14차 P1 봉합: 종전 `DOCRT-{productKey}` 는 productKey(=pumName|spec, 무제한)가 길면
+            //   bom_headers.source_id varchar(80) 를 초과해 ERROR1406 → BOM 이 마스터 단계(continueOnFail:false)에
+            //   묶여 partners·items·accounts 마스터 전체 롤백 → 긴 품명+사양 제조 고객 마이그 전량 실패.
+            //   productKey 를 SHA256 고정폭 해시화해 길이 무관 안전화(멱등성 유지 — 같은 키→같은 해시).
+            //   "DOCRT-" 6자 + 해시 64자(SHA256 hex) = 70자 ≤ 80. MIG-AUTO-ITEM 의 ComputeSourceHash 패턴과 동일.
+            var sourceId = $"DOCRT-{ComputeSourceHash($"bom:{productKey}")}";
             var existingBomId = await Db.ExecuteScalarAsync<string?>(new CommandDefinition(
                 "SELECT bom_id FROM bom_headers WHERE tenant_id = @TenantId AND source_id = @SourceId LIMIT 1",
                 new { TenantId = tenantId, SourceId = sourceId },

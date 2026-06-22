@@ -51,7 +51,7 @@
             </MudTd>
         </RowTemplate>
         <NoRecordsContent>
-            <MudText Typo="Typo.body2" Class="pa-4">조회된 매입반품이 없습니다.</MudText>
+            <MudText Typo="Typo.body2" Class="pa-4">조회된 @(IsSalesReturn ? "매출반품" : "매입반품")이 없습니다.</MudText>
         </NoRecordsContent>
     </MudTable>
 </div>

@@ -14,15 +14,19 @@ public class ApprovalService : IApprovalService
     // 문서유형 라벨 매핑
     private static readonly Dictionary<string, string> DocTypeLabels = new()
     {
-        ["quotation"]      = "견적서",
-        ["sales_order"]    = "수주서",
-        ["delivery"]       = "거래명세서",
-        ["purchase_order"] = "발주서",
-        ["receipt"]        = "매입명세서",
-        ["return"]         = "반품",
-        ["expense"]        = "경비",
-        ["leave"]          = "휴가",
-        ["overtime"]       = "초과근무"
+        ["quotation"]        = "견적서",
+        ["sales_order"]      = "수주서",
+        ["delivery"]         = "거래명세서",
+        ["purchase_order"]   = "발주서",
+        ["receipt"]          = "매입명세서",
+        // 14차 P2 봉합: 종전 "return" 단일 라벨은 결재 트리거가 쓰는 docType(sales_return·purchase_return)과
+        //   불일치해, 결재선 설정 화면에서 켜도 트리거 조회(doc_type=@DocType)가 lineCount=0 → 반품 결재가
+        //   영영 미생성됐다. 트리거 docType 과 1:1 정합하도록 매출·매입반품으로 분리한다.
+        ["sales_return"]     = "매출반품",
+        ["purchase_return"]  = "매입반품",
+        ["expense"]          = "경비",
+        ["leave"]            = "휴가",
+        ["overtime"]         = "초과근무"
     };
 
     // 상태 라벨 매핑

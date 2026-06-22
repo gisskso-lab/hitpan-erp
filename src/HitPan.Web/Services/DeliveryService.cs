@@ -718,4 +718,80 @@ public sealed class DeliveryService(HttpClient http)
             return (false, ex.Message);
         }
     }
+
+    // ─────────────────────────────────────────────────────────────────────
+    // 매출반품 — 14차 P0 봉합(2026-06-22, B안 풀 배선). 13차에 백엔드(api/sales/returns)는
+    //   만들었으나 프론트 호출이 0건(DOA)이었고, ReturnPage "판매반품" 선택지가 매입반품으로
+    //   둔갑 저장돼 재고·잔액·회계 3중 역방향 오염을 일으켰다. 매입반품 3메서드의 거울로 배선한다.
+    //   상세 모델은 PurchaseReturnDetailModel 재사용(DeliveryId 자리만 JSON 미매핑, 무해).
+    // ─────────────────────────────────────────────────────────────────────
+
+    /// <summary>매출반품 목록 — 기간 조회(PurchaseReturnListItem 모델 재사용).</summary>
+    public async Task<List<PurchaseReturnListItem>> GetSalesReturnListAsync(
+        DateTime? from = null, DateTime? to = null, CancellationToken ct = default)
+    {
+        try
+        {
+            var qs = new List<string>();
+            if (from.HasValue) qs.Add($"from={from:yyyy-MM-dd}");
+            if (to.HasValue) qs.Add($"to={to:yyyy-MM-dd}");
+            var path = "api/sales/returns" + (qs.Count > 0 ? "?" + string.Join("&", qs) : "");
+            var list = await http.GetFromJsonAsync<List<PurchaseReturnListItem>>(path, JsonOptions, ct);
+            return list ?? new();
+        }
+        catch { return new(); }
+    }
+
+    /// <summary>매출반품 단건 상세 — 편집 화면 로드용.</summary>
+    public async Task<PurchaseReturnDetailModel?> GetSalesReturnDetailAsync(string returnId, CancellationToken ct = default)
+    {
+        try
+        {
+            return await http.GetFromJsonAsync<PurchaseReturnDetailModel>(
+                $"api/sales/returns/{Uri.EscapeDataString(returnId)}", JsonOptions, ct);
+        }
+        catch (Exception)
+        {
+            return null;
+        }
+    }
+
+    /// <summary>매출반품 삭제 (draft만). 성공 시 (true, null).</summary>
+    public async Task<(bool Success, string? Error)> DeleteSalesReturnAsync(string returnId, CancellationToken ct = default)
+    {
+        try
+        {
+            using var resp = await http.DeleteAsync(
+                $"api/sales/returns/{Uri.EscapeDataString(returnId)}", ct);
+            if (resp.IsSuccessStatusCode) return (true, null);
+            var body = await resp.Content.ReadAsStringAsync(ct);
+            return (false, string.IsNullOrWhiteSpace(body) ? $"HTTP {(int)resp.StatusCode}" : body);
+        }
+        catch (Exception ex)
+        {
+            return (false, ex.Message);
+        }
+    }
+
+    /// <summary>
+    /// 매출반품 확정 — status 'draft' → 'confirmed' + 재고원장 Reverse IN 발행(재고 증가).
+    /// 매입반품(Reverse OUT)의 정확한 거울 — 고객이 판매분을 돌려보낸 것이므로 재고가 증가한다.
+    /// </summary>
+    public async Task<(bool Success, string? ErrorMessage)> ConfirmSalesReturnAsync(string returnId, CancellationToken ct = default)
+    {
+        try
+        {
+            using var content = new StringContent("{}", Encoding.UTF8, "application/json");
+            using var resp = await http.PostAsync(
+                $"api/sales/returns/{Uri.EscapeDataString(returnId)}/confirm", content, ct);
+            if (resp.IsSuccessStatusCode) return (true, null);
+
+            var body = await resp.Content.ReadAsStringAsync(ct);
+            return (false, body);
+        }
+        catch (Exception ex)
+        {
+            return (false, ex.Message);
+        }
+    }
 }

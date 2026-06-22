@@ -1881,7 +1881,9 @@ public class SalesService : ISalesService
                 ReturnId = returnId, Tid = tenantId, ReturnNo = returnNo,
                 DeliveryId = request.DeliveryId, PartnerId = request.PartnerId,
                 ReturnDate = returnDate, Total = totalAmount, Vat = totalVat, Memo = request.Memo,
-                ReturnReason = request.ReturnReason, ReturnReasonMemo = request.ReturnReasonMemo
+                // sales_returns.return_reason 는 NOT NULL DEFAULT 'customer_return'(매입반품과 달리 NOT NULL).
+                // 화면이 사유를 안 보내면 NULL→1048(500)이 나므로 DDL DEFAULT 와 동일 값으로 폴백(14차 P1 봉합).
+                ReturnReason = request.ReturnReason ?? "customer_return", ReturnReasonMemo = request.ReturnReasonMemo
             }, cancellationToken: ct));
 
         foreach (var it in request.Items)
@@ -1938,7 +1940,9 @@ public class SalesService : ISalesService
             {
                 Id = returnId, Tid = tenantId, PartnerId = request.PartnerId, ReturnDate = returnDate,
                 Total = totalAmount, Vat = totalVat, Memo = request.Memo,
-                ReturnReason = request.ReturnReason, ReturnReasonMemo = request.ReturnReasonMemo
+                // sales_returns.return_reason 는 NOT NULL DEFAULT 'customer_return'(매입반품과 달리 NOT NULL).
+                // 화면이 사유를 안 보내면 NULL→1048(500)이 나므로 DDL DEFAULT 와 동일 값으로 폴백(14차 P1 봉합).
+                ReturnReason = request.ReturnReason ?? "customer_return", ReturnReasonMemo = request.ReturnReasonMemo
             }, cancellationToken: ct));
 
         await _db.ExecuteAsync(new CommandDefinition(
@@ -2027,7 +2031,7 @@ public class SalesService : ISalesService
                        move_type, source_type, source_id, doc_no, qty_in, qty_out, unit_cost, supply_amount, memo)
                     VALUES
                       (@Tid, @ItemId, @Wh, @PartnerId, @EmpId, @Date, @Ym,
-                       'in', 'sales_return', @Rid, @DocNo, @Qty, 0, @UnitPrice, @Supply, '매출반품 (Reverse OUT)')
+                       'in', 'sales_return', @Rid, @DocNo, @Qty, 0, @UnitPrice, @Supply, '매출반품 (Reverse IN)')
                     """,
                     new
                     {

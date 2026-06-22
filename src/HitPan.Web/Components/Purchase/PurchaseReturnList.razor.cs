@@ -28,6 +28,10 @@ public partial class PurchaseReturnList : ComponentBase
     [Parameter]
     public EventCallback<string> OnReturnSelected { get; set; }
 
+    /// <summary>14차 P0 봉합(B안): true 면 매출반품(api/sales/returns) 목록·삭제를 사용한다.</summary>
+    [Parameter]
+    public bool IsSalesReturn { get; set; }
+
     protected override async Task OnInitializedAsync()
     {
         await LoadAsync();
@@ -47,7 +51,9 @@ public partial class PurchaseReturnList : ComponentBase
 
     private async Task LoadAsync()
     {
-        _rows = await DeliveryService.GetPurchaseReturnListAsync(_startDate, _endDate);
+        _rows = IsSalesReturn
+            ? await DeliveryService.GetSalesReturnListAsync(_startDate, _endDate)
+            : await DeliveryService.GetPurchaseReturnListAsync(_startDate, _endDate);
         foreach (var row in _rows)
         {
             row.IsChecked = false;
@@ -96,7 +102,9 @@ public partial class PurchaseReturnList : ComponentBase
             yesText: "삭제", cancelText: "취소");
         if (confirm != true) return;
 
-        var (ok, error) = await DeliveryService.DeletePurchaseReturnAsync(row.ReturnId);
+        var (ok, error) = IsSalesReturn
+            ? await DeliveryService.DeleteSalesReturnAsync(row.ReturnId)
+            : await DeliveryService.DeletePurchaseReturnAsync(row.ReturnId);
         if (ok)
         {
             Snackbar.Add($"[{row.ReturnNo}] 삭제되었습니다.", Severity.Success);
@@ -131,7 +139,9 @@ public partial class PurchaseReturnList : ComponentBase
         var failed = new List<(string No, string Reason)>();
         foreach (var row in targets)
         {
-            var (ok, error) = await DeliveryService.DeletePurchaseReturnAsync(row.ReturnId);
+            var (ok, error) = IsSalesReturn
+                ? await DeliveryService.DeleteSalesReturnAsync(row.ReturnId)
+                : await DeliveryService.DeletePurchaseReturnAsync(row.ReturnId);
             if (ok) success++;
             else failed.Add((row.ReturnNo, error ?? "unknown"));
         }
