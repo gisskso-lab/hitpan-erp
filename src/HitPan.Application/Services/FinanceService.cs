@@ -425,8 +425,13 @@ public class FinanceService : IFinanceService
         items.Add(new IntegrityItem { Category = "BOM", CheckName = "고아 자재 참조", Status = orphanBom == 0 ? "OK" : "WARN", Detail = orphanBom > 0 ? $"{orphanBom}건" : null });
 
         // 8. 결재 라인 — 사원 참조 무결성
+        // 봉합 (2026-06-22, 13차 축7 P2): 종전엔 approval_lines.approver_id 를 조회했으나, DB-29 재설계로
+        //   approval_lines 는 이름만 가진 결재선 템플릿 마스터(approver_id·doc_type 컬럼 없음)가 됐다.
+        //   실제 결재자 행은 approval_doc_lines 로 분리됐고 거기에 approver_id·is_active 가 있다. 종전 쿼리는
+        //   'Unknown column al.approver_id' 런타임 500 → CheckIntegrity 8항목 전체 실패였다(헌법 #13·#36).
+        //   결재자 사원 참조 무결성은 실 결재선(approval_doc_lines)을 봐야 의미가 맞다.
         var orphanApprover = await _db.QueryFirstOrDefaultAsync<int>(new CommandDefinition(
-            "SELECT COUNT(*) FROM approval_lines al LEFT JOIN employees e ON e.employee_id=al.approver_id WHERE al.tenant_id=@T AND al.is_active=1 AND e.employee_id IS NULL",
+            "SELECT COUNT(*) FROM approval_doc_lines al LEFT JOIN employees e ON e.employee_id=al.approver_id WHERE al.tenant_id=@T AND al.is_active=1 AND e.employee_id IS NULL",
             new { T = tenantId }, cancellationToken: ct));
         items.Add(new IntegrityItem { Category = "결재", CheckName = "결재자 사원 참조", Status = orphanApprover == 0 ? "OK" : "WARN", Detail = orphanApprover > 0 ? $"{orphanApprover}건" : null });
 

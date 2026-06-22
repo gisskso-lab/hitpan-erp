@@ -75,6 +75,15 @@ public class AuthService : IAuthService
         var employees = await employeeRepo.FindAsync(x => x.UserId == user.Id && x.IsActive);
         var employee = employees.FirstOrDefault();
 
+        // 봉합 (2026-06-22, 13차 2단 교차검증 A안 — 기존 부모계정 employees 백필): 7차 A-P0-1 은
+        //   신규 가입(CompanyBootstrap)만 부모 employees 행을 만들었고, 그 전에 생성된 부모계정은 백필이
+        //   없어 employee=null → 토큰 employee_id 빈 문자열 → 결재·경비·HR(13차) 전부 403. 부모계정인데
+        //   연결 employees 행이 없으면 로그인 시 멱등 생성해 보장한다(라이브 DB 직접 변경 0, 런타임 자가치유).
+        if (employee is null && user.AccountType == "tenant_admin")
+        {
+            employee = await BackfillParentEmployeeAsync(user, ct);
+        }
+
         var redirectToWelcome = user.LastLoginAt is null;
         user.LastLoginAt = DateTime.UtcNow;
         await _unitOfWork.SaveChangesAsync(ct);
@@ -171,6 +180,12 @@ public class AuthService : IAuthService
         var employees = await employeeRepo.FindAsync(x => x.UserId == user.Id && x.IsActive);
         var employee = employees.FirstOrDefault();
 
+        // 백필 (2026-06-22, 13차 A안): refresh 경로도 동일 — 부모계정 employees 행 멱등 보장.
+        if (employee is null && user.AccountType == "tenant_admin")
+        {
+            employee = await BackfillParentEmployeeAsync(user, ct);
+        }
+
         var response = CreateLoginResponse(user, employee, secret, redirectToWelcome: false);
 
         // 진범 봉합 (2026-06-20, 2차 전수조사 AUTH-01 P0 → 3차 전수조사 F1/F2 강화):
@@ -242,6 +257,48 @@ public class AuthService : IAuthService
         }
 
         return response;
+    }
+
+    /// <summary>
+    /// 부모계정(tenant_admin)인데 연결된 employees 행이 없으면 멱등 생성한다(13차 A안 백필).
+    /// 7차 A-P0-1(CompanyBootstrap)의 부모 employees 행 생성 패턴을 기존 계정에도 적용 — 결재·경비·HR
+    /// 의 employee_id 체계가 빈 문자열로 깨지는 것을 런타임에 자가치유한다. 동시 로그인 경합 시 재조회로 안전.
+    /// </summary>
+    private async Task<Employee?> BackfillParentEmployeeAsync(User user, CancellationToken ct)
+    {
+        var employeeRepo = _unitOfWork.Repository<Employee>();
+
+        // emp_no 충돌 방지: 같은 tenant 의 기존 사원 수 +1 (없으면 0001). 단일 회사라 충돌 가능성 희박.
+        var existing = await employeeRepo.FindAsync(x => x.TenantId == user.TenantId);
+        var empNo = (existing.Count() + 1).ToString("D4");
+
+        // EmployeeId 는 EF 매핑상 Ignore(실 PK 는 BaseEntity.Id) — 설정 안 함. employee_id 클레임은 .Id 사용.
+        var newEmployee = new Employee
+        {
+            TenantId = user.TenantId,
+            UserId = user.Id,
+            EmpNo = empNo,
+            EmpName = user.UserName,
+            EmpType = HitPan.Domain.Enums.EmployeeType.Regular,
+            JoinDate = DateTime.UtcNow,
+            IsActive = true,
+            Role = "tenant_admin",
+            Email = user.Email,
+        };
+
+        try
+        {
+            await employeeRepo.AddAsync(newEmployee);
+            await _unitOfWork.SaveChangesAsync(ct);
+            return newEmployee;
+        }
+        catch
+        {
+            // 동시 로그인 경합(또는 UNIQUE 충돌)으로 이미 생성됐을 수 있다 — 재조회해서 있으면 그걸 쓴다.
+            // (AuthService 는 ILogger 미주입 — 생성자 변경 회피. 경합은 재조회로 정상 흡수되므로 silent 아님.)
+            var retry = await employeeRepo.FindAsync(x => x.UserId == user.Id && x.IsActive);
+            return retry.FirstOrDefault();
+        }
     }
 
     private static LoginResponse CreateLoginResponse(User user, Employee? employee, string secret, bool redirectToWelcome)

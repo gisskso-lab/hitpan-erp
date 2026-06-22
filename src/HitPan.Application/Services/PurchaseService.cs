@@ -990,12 +990,27 @@ public class PurchaseService : IPurchaseService
             //   (tenant, source_type=purchase_return, source_id=returnId, item_id, move_type=out) 단위 유일.
             //   종전엔 반품 라인별로 그대로 INSERT 해 같은 품목 2라인이면 키가 2번 찍혀 반품 확정이 차단됐다(헌법 #20).
             //   item_id 로 합산해 키당 1행만 기록·차감. 음수검사도 합산 총량으로 1회 — 더 정확(라인 분할 우회 차단).
+            // 봉합 (2026-06-22, 13차 축4 P2 유령창고): 종전 폴백 `?? "wh-main"` 은 실재하지 않는 문자열을
+            //   warehouse_id 로 기록해(stock_ledger NOT NULL이라 INSERT는 성공) 반품 OUT·item_stock 차감이
+            //   유령 창고로 빠지고 실제 창고 재고가 안 줄었다(헌법 #20). 매입 입고(ConfirmReceipt:650)·판매·BOM
+            //   과 동일하게 실제 기본창고(wh_code MAIN 우선)를 조회해 폴백으로 쓴다. 라인 창고가 있으면 그대로.
+            var returnDefaultWh = await conn.ExecuteScalarAsync<string?>(new CommandDefinition(
+                """
+                SELECT warehouse_id FROM warehouses
+                 WHERE tenant_id = @TenantId AND is_active = 1
+                 ORDER BY (CASE WHEN wh_code IN ('MAIN','WH-MAIN') THEN 0 ELSE 1 END), wh_code
+                 LIMIT 1
+                """,
+                new { TenantId = tenantId }, transaction: dbTx, cancellationToken: ct));
+            if (string.IsNullOrEmpty(returnDefaultWh))
+                throw new InvalidOperationException("활성 창고가 없습니다. 창고를 먼저 등록해주세요.");
+
             var returnGroups = items
                 .GroupBy(it => (string)it.item_id)
                 .Select(g => new
                 {
                     ItemId = g.Key,
-                    Wh = (string?)g.First().warehouse_id ?? "wh-main",
+                    Wh = string.IsNullOrEmpty((string?)g.First().warehouse_id) ? returnDefaultWh : (string)g.First().warehouse_id,
                     Qty = g.Sum(x => (decimal)x.qty),
                     Supply = g.Sum(x => (decimal)x.supply_amount),
                     UnitPrice = (decimal)g.First().unit_price

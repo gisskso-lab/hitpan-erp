@@ -87,13 +87,16 @@ public class AuthController : ControllerBase
             {
                 try
                 {
-                    // JWT에서 user_id 추출
+                    // 봉합 (2026-06-22, 13차 2단 교차검증 — HR employee_id 부분봉합 회귀): HrController 4곳을
+                    //   employee_id 로 바꿨으나 같은 HrService 를 호출하는 자동출/퇴근(AuthController)을 누락하면
+                    //   자동출근은 user_id 키, 수동출근은 employee_id 키로 attendance 이중행·CheckOut 미스가 난다
+                    //   (헌법 #12 구현체 전수 누락, 11차 반품사유와 동형). JWT employee_id 클레임으로 통일.
                     var handler = new System.IdentityModel.Tokens.Jwt.JwtSecurityTokenHandler();
                     var jwt = handler.ReadJwtToken(response.AccessToken);
-                    var userId = jwt.Claims.FirstOrDefault(c => c.Type == "user_id")?.Value;
-                    if (!string.IsNullOrEmpty(userId))
+                    var employeeId = jwt.Claims.FirstOrDefault(c => c.Type == "employee_id")?.Value;
+                    if (!string.IsNullOrEmpty(employeeId))
                     {
-                        await _hrService.CheckInAsync(response.TenantId, userId,
+                        await _hrService.CheckInAsync(response.TenantId, employeeId,
                             new HitPan.Application.DTOs.Employee.CheckInOutRequest { Memo = "자동출근" }, ct);
                     }
                 }
@@ -142,12 +145,17 @@ public class AuthController : ControllerBase
     {
         var tenantId = HttpContext.Items["TenantId"]?.ToString();
         var userId = HttpContext.Items["UserId"]?.ToString();
+        // 봉합 (2026-06-22, 13차 2단 교차검증): 자동퇴근도 employee_id 로 통일(자동출근·HrController 정합).
+        var employeeId = HttpContext.Items["EmployeeId"]?.ToString();
 
         if (!string.IsNullOrEmpty(tenantId) && !string.IsNullOrEmpty(userId))
         {
-            // 자동 퇴근 기록
-            try { await _hrService.CheckOutAsync(tenantId, userId, ct); }
-            catch (Exception ex) { _logger.LogWarning(ex, "자동 퇴근 기록 실패 — UserId: {UserId}", userId); }
+            // 자동 퇴근 기록 — employee_id 키로 자동출근행과 매칭(없으면 무시, 로그인/로그아웃 자체는 불방해)
+            if (!string.IsNullOrEmpty(employeeId))
+            {
+                try { await _hrService.CheckOutAsync(tenantId, employeeId, ct); }
+                catch (Exception ex) { _logger.LogWarning(ex, "자동 퇴근 기록 실패 — EmployeeId: {EmployeeId}", employeeId); }
+            }
 
             // 세션 + refresh_token 정리
             try

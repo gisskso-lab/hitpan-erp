@@ -74,17 +74,22 @@ public sealed class IntegrityCheckService : BackgroundService
             var mismatches = await conn.QueryAsync<(string TenantId, decimal SummaryAmt, decimal JournalAmt)>(
                 new CommandDefinition(
                     """
+                    -- 봉합 (2026-06-22, 13차 축3 P2 거짓경보): 두 버그로 이 점검이 매월 거짓 불일치 알림을
+                    --   영구 발생시켰다. ① account_code='4010'(4자리) → 실제 매출 계정은 '40100'(5자리,
+                    --   AutoJournalHelper.SalesRevenue) 이라 0건 매칭 → JournalAmt 항상 0. ② je.ym 은
+                    --   'YYYY-MM'(AutoJournalHelper), ms.year_month 는 char(6) 'YYYYMM' → 포맷 불일치로 조인
+                    --   영구 실패. 계정코드를 '40100'으로, ym 비교는 ms.year_month 를 'YYYY-MM'로 변환해 정합화.
                     SELECT ms.tenant_id AS TenantId,
                            ms.total_sales AS SummaryAmt,
                            COALESCE(SUM(jl.credit_amount), 0) AS JournalAmt
                     FROM monthly_summary ms
                     LEFT JOIN journal_lines jl
                         ON jl.tenant_id = ms.tenant_id
-                        AND jl.account_code = '4010'
+                        AND jl.account_code = '40100'
                     LEFT JOIN journal_entries je
                         ON je.entry_id = jl.entry_id
                         AND je.tenant_id = jl.tenant_id
-                        AND je.ym = ms.year_month
+                        AND je.ym = CONCAT(LEFT(ms.year_month, 4), '-', RIGHT(ms.year_month, 2))
                     WHERE ms.year_month = @Ym
                     GROUP BY ms.tenant_id, ms.total_sales
                     HAVING ABS(ms.total_sales - COALESCE(SUM(jl.credit_amount), 0)) > 1

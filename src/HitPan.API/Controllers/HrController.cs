@@ -26,14 +26,18 @@ public class HrController : ControllerBase
         return Ok(await _svc.GetAttendanceAsync(tid, from, to, employeeId, ct));
     }
 
+    // 봉합 (2026-06-22, 13차 축7 P1 — 7차 A-P0-1 HR 모듈 누락분): HR 근태/초과근무/경비는 employee_id
+    //   체계(attendance·overtime·hr_expense_requests.employee_id → employees.employee_id JOIN)인데 종전엔
+    //   Items["UserId"](user_id, employee_id 와 별개 GUID)를 넘겨, 목록 조회 JOIN 영구 미매치 → 사원명 NULL,
+    //   CheckOut 본인조회 "출근 기록 없음" 오류였다. 결재 모듈(7차 봉합)과 동일하게 Items["EmployeeId"] 사용.
     [HttpPost("check-in")]
     [RequirePermission("HR", "create")]
     public async Task<IActionResult> CheckIn([FromBody] CheckInOutRequest req, CancellationToken ct)
     {
         var tid = HttpContext.Items["TenantId"]?.ToString();
-        var uid = HttpContext.Items["UserId"]?.ToString();
-        if (string.IsNullOrEmpty(tid) || string.IsNullOrEmpty(uid)) return Forbid();
-        var id = await _svc.CheckInAsync(tid, uid, req, ct);
+        var eid = HttpContext.Items["EmployeeId"]?.ToString();
+        if (string.IsNullOrEmpty(tid) || string.IsNullOrEmpty(eid)) return Forbid();
+        var id = await _svc.CheckInAsync(tid, eid, req, ct);
         return Ok(new { id, message = "출근 완료" });
     }
 
@@ -42,9 +46,9 @@ public class HrController : ControllerBase
     public async Task<IActionResult> CheckOut(CancellationToken ct)
     {
         var tid = HttpContext.Items["TenantId"]?.ToString();
-        var uid = HttpContext.Items["UserId"]?.ToString();
-        if (string.IsNullOrEmpty(tid) || string.IsNullOrEmpty(uid)) return Forbid();
-        await _svc.CheckOutAsync(tid, uid, ct);
+        var eid = HttpContext.Items["EmployeeId"]?.ToString();
+        if (string.IsNullOrEmpty(tid) || string.IsNullOrEmpty(eid)) return Forbid();
+        await _svc.CheckOutAsync(tid, eid, ct);
         return Ok(new { message = "퇴근 완료" });
     }
 
@@ -64,9 +68,9 @@ public class HrController : ControllerBase
     public async Task<IActionResult> CreateOvertime([FromBody] CreateOvertimeRequest req, CancellationToken ct)
     {
         var tid = HttpContext.Items["TenantId"]?.ToString();
-        var uid = HttpContext.Items["UserId"]?.ToString();
-        if (string.IsNullOrEmpty(tid) || string.IsNullOrEmpty(uid)) return Forbid();
-        var id = await _svc.CreateOvertimeAsync(req, tid, uid, ct);
+        var eid = HttpContext.Items["EmployeeId"]?.ToString();
+        if (string.IsNullOrEmpty(tid) || string.IsNullOrEmpty(eid)) return Forbid();
+        var id = await _svc.CreateOvertimeAsync(req, tid, eid, ct);
         return Created($"/api/hr/overtime/{id}", new { id });
     }
 
@@ -86,9 +90,9 @@ public class HrController : ControllerBase
     public async Task<IActionResult> CreateHrExpense([FromBody] CreateHrExpenseRequest req, CancellationToken ct)
     {
         var tid = HttpContext.Items["TenantId"]?.ToString();
-        var uid = HttpContext.Items["UserId"]?.ToString();
-        if (string.IsNullOrEmpty(tid) || string.IsNullOrEmpty(uid)) return Forbid();
-        var id = await _svc.CreateHrExpenseAsync(req, tid, uid, ct);
+        var eid = HttpContext.Items["EmployeeId"]?.ToString();
+        if (string.IsNullOrEmpty(tid) || string.IsNullOrEmpty(eid)) return Forbid();
+        var id = await _svc.CreateHrExpenseAsync(req, tid, eid, ct);
         return Created($"/api/hr/expense-requests/{id}", new { id });
     }
 }

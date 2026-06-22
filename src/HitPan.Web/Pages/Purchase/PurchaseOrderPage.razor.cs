@@ -268,15 +268,9 @@ public partial class PurchaseOrderPage : ComponentBase
         // PartnerId 없이는 서버 검증에 걸릴 수 있으므로 먼저 차단한다.
         if (string.IsNullOrWhiteSpace(_draft.PartnerId))
         {
-            // 추후 API 연동 필요: 공급처 자동완성으로 PartnerId 를 채우는 UX를 추가하면 본 검증을 완화할 수 있다.
-            Snackbar.Add("공급처 PartnerId 가 없습니다. 거래처 마스터 연동·자동완성 추가 후 저장하세요.", Severity.Warning);
-            _draft.DocumentNumber ??= $"발-{DateTime.Now:yyyyMMdd}-LOCAL"; // WO-11 한글 prefix
-            _hasUnsavedChanges = false;
-            if (TabService.ActiveTabId is { } tabIdLocal)
-            {
-                TabService.SetTabDirty(tabIdLocal, false);
-            }
-
+            // 봉합 (2026-06-22, 13차 축5 P1): 종전엔 PartnerId 미입력 시 가짜 채번·dirty 해제로 저장 위장.
+            //   미저장이므로 dirty 유지(SetTabDirty 안 함)·Error 표시. 사용자가 공급처를 채워 재저장하게 한다.
+            Snackbar.Add("공급처를 선택해야 저장할 수 있습니다. 저장되지 않았습니다.", Severity.Error);
             return;
         }
 
@@ -324,26 +318,19 @@ public partial class PurchaseOrderPage : ComponentBase
                 return;
             }
 
-            // 403 등은 권한 정책(PurchaseOnly) 문제일 수 있다.
-            Snackbar.Add($"발주 API 응답: {(int)resp.StatusCode}. 로컬 채번으로 표시합니다.", Severity.Warning);
+            // 봉합 (2026-06-22, 13차 축5 P1 저장실패 위장): 종전엔 비-2xx 응답에도 fall-through 하여
+            //   가짜 채번('발-...-001') + dirty 해제 + "로컬 채번으로 저장 상태를 표시" 안내로 서버 미저장을
+            //   저장 성공처럼 위장했다(헌법 #15 silent·#20 매입흐름·#33 가짜성공 3중 저촉). 탭을 닫으면
+            //   입력이 영구 유실됐다. 실패는 정직하게 — dirty 유지(SetTabDirty 안 함)·_status 미변경·Error
+            //   표시·return 으로 사용자가 재시도하게 한다. 가짜 채번 제거.
+            Snackbar.Add($"발주서 저장 실패 (응답 {(int)resp.StatusCode}). 저장되지 않았습니다. 다시 시도해주세요.", Severity.Error);
+            return;
         }
         catch (Exception ex)
         {
-            // 네트워크·직렬화 오류 시에도 사용자 입력은 잃지 않도록 스텁만 적용한다.
-            Snackbar.Add($"발주 API 호출 실패: {ex.Message}", Severity.Warning);
+            // 네트워크·직렬화 오류도 동일 — 저장 실패를 위장하지 않는다. dirty 유지로 입력 보존.
+            Snackbar.Add($"발주서 저장 실패: {ex.Message}. 저장되지 않았습니다. 다시 시도해주세요.", Severity.Error);
         }
-
-        // 추후 API 연동 필요: 재시도·상세 오류 메시지 표시.
-        _draft.DocumentNumber ??= $"발-{DateTime.Now:yyyyMMdd}-001"; // WO-11 한글 prefix
-        _hasUnsavedChanges = false;
-        _status = "Draft";
-        if (TabService.ActiveTabId is { } tabIdFallback)
-        {
-            TabService.SetTabDirty(tabIdFallback, false);
-            TabService.UpdateSubTitle(tabIdFallback, _draft.SalesCompany);
-        }
-
-        Snackbar.Add("로컬 채번으로 저장 상태를 표시했습니다.", Severity.Info);
     }
 
     /// <summary>
