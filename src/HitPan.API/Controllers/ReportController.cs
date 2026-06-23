@@ -279,6 +279,7 @@ public class ReportController : ControllerBase
         [FromQuery] DateTime? from = null,
         [FromQuery] DateTime? to = null,
         [FromQuery] string? partner = null,
+        [FromQuery] string? item = null,
         CancellationToken ct = default)
     {
         var tenantId = HttpContext.Items["TenantId"]?.ToString();
@@ -287,7 +288,8 @@ public class ReportController : ControllerBase
             return Forbid();
         }
 
-        var rows = await _reportService.GetStockLedgerAsync(view, tenantId, from, to, partner, ct)
+        // 봉합 (2026-06-23, 19차): 상품별 수불부는 item= 로 분리 — 종전엔 품목명을 partner= 로 보내 0건이었다.
+        var rows = await _reportService.GetStockLedgerAsync(view, tenantId, from, to, partner, ct, item)
             .ConfigureAwait(false);
         return Ok(rows);
     }

@@ -139,6 +139,11 @@ public class PartnerSpecialPriceDto
 
     public decimal UnitPrice { get; set; }
 
+    // 봉합 (2026-06-23, 19차 업체특별단가 할인율): 상품 특별단가(ItemSpecialPriceDto.DiscountRate)와 대칭.
+    //   price_type='discount' 일 때 할인율(%), 고정모드는 null. 종전엔 이 필드가 없어 업체 특별단가의
+    //   할인율 모드가 화면·DTO·서비스 전 계층에서 통째 유실됐다(상품은 되는데 업체는 안 되는 비대칭).
+    public decimal? DiscountRate { get; set; }
+
     public DateTime? StartDate { get; set; }
 
     public DateTime? EndDate { get; set; }

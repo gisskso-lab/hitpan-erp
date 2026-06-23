@@ -53,6 +53,7 @@ CHECKS=(
   "item_stock current_qty"                  # 8/9차 재고
   "collections source_id"                   # 16차 수금
   "approval_settings doc_type"              # 15차
+  "partner_special_prices discount_rate"    # 19차 업체특별단가 할인율
 )
 MISSING=0
 for chk in "${CHECKS[@]}"; do

@@ -120,8 +120,10 @@
         var qs = new List<string> { $"view={_viewType}" };
         if (_from.HasValue) qs.Add($"from={_from:yyyy-MM-dd}");
         if (_to.HasValue) qs.Add($"to={_to:yyyy-MM-dd}");
+        // 봉합 (2026-06-23, 19차): 상품별 수불부는 item= 로 보낸다. 종전엔 품목명을 partner= 로 보내
+        //   백엔드가 업체명으로 매칭 → 상품 골라 조회하면 항상 0건이었다(동작 안 함).
         if (_viewType == "item" && _selectedItem is not null)
-            qs.Add($"partner={Uri.EscapeDataString(_selectedItem.ItemName)}");
+            qs.Add($"item={Uri.EscapeDataString(_selectedItem.ItemName)}");
         if (_viewType == "partner" && _selectedPartner is not null)
             qs.Add($"partner={Uri.EscapeDataString(_selectedPartner.PartnerName)}");
         try

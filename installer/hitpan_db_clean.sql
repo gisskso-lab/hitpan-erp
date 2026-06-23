@@ -2227,6 +2227,7 @@ CREATE TABLE `partner_special_prices` (
   `updated_by` varchar(36) DEFAULT NULL,
   `price_type` varchar(20) NOT NULL DEFAULT 'fixed',
   `unit_price` decimal(15,2) DEFAULT NULL,
+  `discount_rate` decimal(5,2) DEFAULT NULL COMMENT '할인율(%) — price_type=discount 일 때만, 고정모드는 NULL (19차 업체특별단가 할인율 봉합)',
   `start_date` date DEFAULT NULL,
   `end_date` date DEFAULT NULL,
   PRIMARY KEY (`id`),

@@ -5,6 +5,7 @@
 @using System.Text.Json.Serialization
 @inject ISnackbar Snackbar
 @inject HttpClient Http
+@inject IDialogService DialogService
 
 <PageTitle>전자세금계산서 발행 이력</PageTitle>
 
@@ -116,7 +117,8 @@
                 string.Empty,
                 r.PartnerName ?? string.Empty,
                 r.AmountTotal + r.VatTotal,
-                r.Status ?? "pending"
+                r.Status ?? "pending",
+                r.InvoiceId
             )).ToList();
 
             // 서버 status 값은 소문자(issued / canceled). etax_status 는 pending/issued/failed.
@@ -156,9 +158,52 @@
         [JsonPropertyName("etaxStatus")] public string? EtaxStatus { get; set; }
     }
 
-    private void OnCancelClick(HistoryItemDto item)
+    // 봉합 (2026-06-23, 19차): 종전엔 Snackbar 안내만(백엔드 미연결)이라 취소 버튼이 동작 안 했다.
+    //   백엔드 Cancel(POST api/sales/tax-invoices/{id}/cancel) 이 완비돼 있어 실제 호출로 연결한다.
+    private async Task OnCancelClick(HistoryItemDto item)
     {
-        Snackbar.Add($"취소 요청: {item.ApprovalNumber} (W3 가도 시 백엔드 연결)", Severity.Info);
+        if (string.IsNullOrEmpty(item.InvoiceId))
+        {
+            Snackbar.Add("취소할 세금계산서를 찾을 수 없습니다.", Severity.Warning);
+            return;
+        }
+
+        var confirm = await DialogService.ShowMessageBoxAsync(
+            "세금계산서 취소",
+            $"{item.ApprovalNumber} 계산서를 취소하시겠습니까? 취소 후에는 되돌릴 수 없습니다.",
+            yesText: "취소 처리", cancelText: "닫기");
+        if (confirm != true) return;
+
+        _busy = true;
+        try
+        {
+            using var req = new HttpRequestMessage(HttpMethod.Post, $"api/sales/tax-invoices/{item.InvoiceId}/cancel")
+            {
+                Content = JsonContent.Create(new { Reason = "사용자 취소" })
+            };
+            // 발행/취소는 멱등 키 필수 (IdempotencyMiddleware) — 중복 클릭 방지.
+            req.Headers.Add("Idempotency-Key", Guid.NewGuid().ToString("N"));
+
+            using var resp = await Http.SendAsync(req);
+            if (resp.IsSuccessStatusCode)
+            {
+                Snackbar.Add($"{item.ApprovalNumber} 계산서가 취소되었습니다.", Severity.Success);
+                await RefreshAsync();
+            }
+            else
+            {
+                var msg = await resp.Content.ReadAsStringAsync();
+                Snackbar.Add($"취소 실패: {msg}", Severity.Error);
+            }
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"취소 중 오류: {ex.Message}", Severity.Error);
+        }
+        finally
+        {
+            _busy = false;
+        }
     }
 
     private void OnResendClick(HistoryItemDto item)
@@ -200,7 +245,8 @@
         string SupplierName,
         string ReceiverName,
         decimal TotalAmount,
-        string Status);
+        string Status,
+        string InvoiceId);  // 봉합 (2026-06-23, 19차): 취소 API 호출용 — 종전엔 매핑 시 버려 취소 불가였다.
 
     public record HistoryStatsDto
     {

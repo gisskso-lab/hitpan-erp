@@ -44,6 +44,8 @@ public sealed class PartnerService : IPartnerService
                                   p.unit,
                                   p.special_price AS SpecialPrice,
                                   p.std_price AS StdPrice,
+                                  IFNULL(p.price_type, 'fixed') AS PriceType,
+                                  p.discount_rate AS DiscountRate,
                                   p.vs_ratio AS VsRatio,
                                   p.last_supply_date AS LastSupplyDate,
                                   p.is_active AS IsActive
@@ -69,22 +71,36 @@ public sealed class PartnerService : IPartnerService
         await EnsureOpenAsync(ct).ConfigureAwait(false);
 
         var rowId = Guid.NewGuid().ToString();
+
+        // 봉합 (2026-06-23, 19차 업체특별단가 할인율): 종전엔 price_type='fixed' 하드코딩 + discount_rate 미저장이라
+        //   화면에서 '할인' 모드를 골라도 할인율이 통째 유실됐다(상품 특별단가는 되는데 업체만 안 되는 비대칭).
+        //   상품 패턴과 동일하게 — 할인 모드는 unit_price=0·discount_rate=값, 고정 모드는 discount_rate=null.
+        var priceType = string.IsNullOrWhiteSpace(dto.PriceType) ? "fixed" : dto.PriceType.Trim();
+        var unitPrice = priceType == "discount" ? 0m : dto.SpecialPrice;
+        decimal? discountRate = priceType == "discount" ? (dto.DiscountRate ?? 0m) : (decimal?)null;
+        if (priceType == "discount" && (discountRate < 0m || discountRate > 100m))
+        {
+            throw new InvalidOperationException("할인율은 0~100% 범위여야 합니다.");
+        }
+
         const string sql = """
                            INSERT INTO partner_special_prices
                              (id, tenant_id, partner_id, item_id,
                               spec, unit, special_price,
                               std_price, last_supply_date,
-                              price_type, unit_price, start_date, end_date,
+                              price_type, unit_price, discount_rate, start_date, end_date,
                               is_active, created_by, updated_by, created_at, updated_at)
                            VALUES
                              (@Id, @TenantId, @PartnerId, @ItemId,
                               @Spec, @Unit, @SpecialPrice,
                               @StdPrice, @LastSupplyDate,
-                              'fixed', @SpecialPrice, NULL, NULL,
+                              @PriceType, @UnitPrice, @DiscountRate, NULL, NULL,
                               1, @UserId, @UserId, NOW(6), NOW(6))
                            ON DUPLICATE KEY UPDATE
                              special_price    = @SpecialPrice,
-                             unit_price       = @SpecialPrice,
+                             price_type       = @PriceType,
+                             unit_price       = @UnitPrice,
+                             discount_rate    = @DiscountRate,
                              std_price        = @StdPrice,
                              spec             = @Spec,
                              unit             = @Unit,
@@ -106,6 +122,9 @@ public sealed class PartnerService : IPartnerService
                 SpecialPrice = dto.SpecialPrice,
                 StdPrice = dto.StdPrice,
                 LastSupplyDate = dto.LastSupplyDate,
+                PriceType = priceType,
+                UnitPrice = unitPrice,
+                DiscountRate = discountRate,
                 UserId = userId
             },
             cancellationToken: ct)).ConfigureAwait(false);
@@ -534,6 +553,7 @@ public sealed class PartnerService : IPartnerService
                              i.item_name AS ItemName,
                              IFNULL(sp.price_type, 'fixed') AS PriceType,
                              COALESCE(sp.unit_price, sp.special_price, 0) AS UnitPrice,
+                             sp.discount_rate AS DiscountRate,
                              sp.start_date AS StartDate,
                              sp.end_date AS EndDate,
                              sp.is_active AS IsActive
@@ -558,7 +578,16 @@ public sealed class PartnerService : IPartnerService
 
         var id = string.IsNullOrWhiteSpace(dto.PriceId) ? Guid.NewGuid().ToString() : dto.PriceId.Trim();
         var priceType = string.IsNullOrWhiteSpace(dto.PriceType) ? "fixed" : dto.PriceType.Trim();
-        var unit = dto.UnitPrice;
+
+        // 봉합 (2026-06-23, 19차 업체특별단가 할인율): 상품 특별단가(ItemService.UpsertSpecialPriceAsync)와
+        //   동일 의미 분기 — 할인 모드는 unit_price=0·discount_rate=값, 고정 모드는 discount_rate=null.
+        //   종전엔 discount_rate 를 INSERT/UPDATE 하지 않아 할인율 모드가 통째 유실됐다.
+        var unit = priceType == "discount" ? 0m : dto.UnitPrice;
+        decimal? discountRate = priceType == "discount" ? (dto.DiscountRate ?? 0m) : (decimal?)null;
+        if (priceType == "discount" && (discountRate < 0m || discountRate > 100m))
+        {
+            throw new InvalidOperationException("할인율은 0~100% 범위여야 합니다.");
+        }
 
         if (string.IsNullOrWhiteSpace(dto.PriceId))
         {
@@ -567,16 +596,17 @@ public sealed class PartnerService : IPartnerService
                 INSERT INTO partner_special_prices
                   (id, tenant_id, partner_id, item_id,
                    spec, unit, special_price, std_price, vs_ratio, last_supply_date,
-                   price_type, unit_price, start_date, end_date, is_active,
+                   price_type, unit_price, discount_rate, start_date, end_date, is_active,
                    created_at, updated_at)
                 VALUES
                   (@Id, @TenantId, @PartnerId, @ItemId,
                    '', '', @UnitPrice, 0, 0, NULL,
-                   @PriceType, @UnitPrice, @StartDate, @EndDate, @IsActive,
+                   @PriceType, @UnitPrice, @DiscountRate, @StartDate, @EndDate, @IsActive,
                    NOW(6), NOW(6))
                 ON DUPLICATE KEY UPDATE
                    price_type = @PriceType,
                    unit_price = @UnitPrice,
+                   discount_rate = @DiscountRate,
                    special_price = @UnitPrice,
                    start_date = @StartDate,
                    end_date = @EndDate,
@@ -591,6 +621,7 @@ public sealed class PartnerService : IPartnerService
                     ItemId = dto.ItemId,
                     PriceType = priceType,
                     UnitPrice = unit,
+                    DiscountRate = discountRate,
                     StartDate = dto.StartDate,
                     EndDate = dto.EndDate,
                     IsActive = dto.IsActive ? 1 : 0
@@ -604,6 +635,7 @@ public sealed class PartnerService : IPartnerService
                 UPDATE partner_special_prices SET
                     price_type = @PriceType,
                     unit_price = @UnitPrice,
+                    discount_rate = @DiscountRate,
                     special_price = @UnitPrice,
                     start_date = @StartDate,
                     end_date = @EndDate,
@@ -620,6 +652,7 @@ public sealed class PartnerService : IPartnerService
                     PartnerId = partnerId,
                     PriceType = priceType,
                     UnitPrice = unit,
+                    DiscountRate = discountRate,
                     StartDate = dto.StartDate,
                     EndDate = dto.EndDate,
                     IsActive = dto.IsActive ? 1 : 0

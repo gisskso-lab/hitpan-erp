@@ -1,0 +1,100 @@
+@page "/data/reset"
+@namespace HitPan.Web.Pages.SettingsUi
+@attribute [Authorize]
+@using HitPan.Web.Services
+@inject DataResetService ResetService
+@inject ISnackbar Snackbar
+@inject IDialogService DialogService
+
+<PageTitle>모든데이터 초기화</PageTitle>
+<PageHeader Title="모든데이터 초기화" Subtitle="히트판 자료 포맷 — 부모계정·회사정보·로그만 남기고 모든 업무 데이터를 비웁니다" />
+
+<MudPaper Elevation="0" Class="pa-6" Style="border:1px solid var(--mud-palette-error);border-radius:12px;max-width:720px">
+
+    <MudAlert Severity="Severity.Error" Variant="Variant.Filled" Class="mb-4">
+        <b>되돌릴 수 없는 작업입니다.</b> 실행하면 아래 데이터가 <b>영구 삭제</b>됩니다.
+    </MudAlert>
+
+    <MudText Typo="Typo.subtitle2" Class="mb-1" Style="color:var(--mud-palette-error)">삭제되는 데이터</MudText>
+    <MudText Typo="Typo.body2" Class="mb-3" Style="color:#4B5563">
+        상품·업체·BOM·직원·부서·직급·창고·결재선, 발주·매입·반품·견적·수주·거래명세서·세금계산서,
+        재고원장·회계장부·전표·수금·지급·경비 등 <b>모든 업무 데이터</b>가 비워집니다.
+    </MudText>
+
+    <MudText Typo="Typo.subtitle2" Class="mb-1" Style="color:var(--mud-palette-success)">보존되는 데이터</MudText>
+    <MudText Typo="Typo.body2" Class="mb-4" Style="color:#4B5563">
+        부모계정(로그인)·회사정보·이용 로그·시스템 설정은 그대로 유지됩니다.
+        실행 직전 <b>자동으로 전체 백업</b>이 먼저 만들어진 뒤 초기화가 진행됩니다.
+    </MudText>
+
+    <MudDivider Class="my-4" />
+
+    <MudTextField @bind-Value="_password" Label="부모계정 비밀번호 재입력"
+                  InputType="InputType.Password" Variant="Variant.Outlined" Margin="Margin.Dense"
+                  Class="mb-3" Immediate="true" />
+
+    <MudTextField @bind-Value="_confirmText" Label="확인을 위해 '초기화' 라고 입력하세요"
+                  Variant="Variant.Outlined" Margin="Margin.Dense" Class="mb-4" Immediate="true"
+                  Placeholder="초기화" />
+
+    <MudButton Variant="Variant.Filled" Color="Color.Error"
+               StartIcon="@Icons.Material.Filled.DeleteForever"
+               Disabled="@(_busy || !CanRun)"
+               OnClick="ConfirmAndRun">
+        @if (_busy) { <MudProgressCircular Size="Size.Small" Indeterminate="true" Class="mr-2" /> }
+        강제 백업 후 모든데이터 초기화
+    </MudButton>
+
+    @if (_result is not null && _result.Success)
+    {
+        <MudAlert Severity="Severity.Success" Class="mt-4">
+            초기화가 완료되었습니다. (백업 @_result.BackupId · 비운 항목 @(_result.ClearedTableCount)개)
+        </MudAlert>
+    }
+</MudPaper>
+
+@code {
+    private string _password = "";
+    private string _confirmText = "";
+    private bool _busy;
+    private DataResetService.DataResetResultModel? _result;
+
+    private bool CanRun =>
+        !string.IsNullOrWhiteSpace(_password) && _confirmText.Trim() == "초기화";
+
+    private async Task ConfirmAndRun()
+    {
+        // 1차 — 마지막 경고 다이얼로그 (오조작 방지)
+        var confirm = await DialogService.ShowMessageBoxAsync(
+            "정말 모든데이터를 초기화할까요?",
+            "이 작업은 되돌릴 수 없습니다. 실행 직전 자동 백업이 만들어지지만, 모든 업무 데이터가 비워집니다.",
+            yesText: "초기화 실행", cancelText: "취소");
+        if (confirm != true) return;
+
+        _busy = true;
+        _result = null;
+        try
+        {
+            _result = await ResetService.ResetAllAsync(new DataResetService.DataResetRequestModel
+            {
+                Password = _password,
+                ConfirmText = _confirmText.Trim()
+            });
+
+            if (_result.Success)
+            {
+                Snackbar.Add($"모든데이터 초기화 완료 (백업 {_result.BackupId})", Severity.Success);
+                _password = "";
+                _confirmText = "";
+            }
+            else
+            {
+                Snackbar.Add(_result.Error ?? "초기화에 실패했습니다.", Severity.Error);
+            }
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+}

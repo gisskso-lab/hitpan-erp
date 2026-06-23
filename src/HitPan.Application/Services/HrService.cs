@@ -105,6 +105,23 @@ public class HrService : IHrService
         return id;
     }
 
+    /// <summary>
+    /// 초과근무 승인/반려 (사장님 결재 2026-06-23 — 신청만 되고 승인 경로가 없던 워크플로우 끊김 봉합).
+    /// status='pending' 일 때만 변경(멱등) — 이미 처리된 건은 무손상.
+    /// </summary>
+    public async Task<bool> ApproveOvertimeAsync(string overtimeId, string tenantId, string action, CancellationToken ct = default)
+    {
+        await EnsureOpenAsync(ct);
+        var status = action == "approved" ? "approved" : "rejected";
+        var affected = await _db.ExecuteAsync(new CommandDefinition(
+            """
+            UPDATE overtime SET status = @Status
+            WHERE overtime_id = @Id AND tenant_id = @TenantId AND status = 'pending'
+            """,
+            new { Id = overtimeId, TenantId = tenantId, Status = status }, cancellationToken: ct));
+        return affected > 0;
+    }
+
     // ═══ HR 경비신청 ═══
 
     public async Task<List<HrExpenseRequestDto>> GetHrExpensesAsync(string tenantId, string? employeeId, CancellationToken ct = default)

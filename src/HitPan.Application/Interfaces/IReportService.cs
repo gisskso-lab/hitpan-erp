@@ -101,7 +101,7 @@ public interface IReportService
     Task<List<StockLedgerRow>> GetStockLedgerAsync(
         string viewType, string tenantId,
         DateTime? from, DateTime? to,
-        string? partner, CancellationToken ct);
+        string? partner, CancellationToken ct, string? item = null);
 
     /// <summary>
     /// 재고현황을 조회한다. (전체 현재고 / 안전재고 미달)

@@ -1862,7 +1862,7 @@ public class ReportService : IReportService
     public async Task<List<StockLedgerRow>> GetStockLedgerAsync(
         string viewType, string tenantId,
         DateTime? from, DateTime? to,
-        string? partner, CancellationToken ct)
+        string? partner, CancellationToken ct, string? item = null)
     {
         // 수불부: 상품별 또는 업체별로 입출고·잔량을 집계한다.
         var sql = viewType switch
@@ -1897,24 +1897,23 @@ public class ReportService : IReportService
                 WHERE sl.tenant_id = @TenantId
                   AND (@From IS NULL OR sl.ledger_date >= @From)
                   AND (@To   IS NULL OR sl.ledger_date <= @To)
-                  AND (@Partner IS NULL OR EXISTS (
-                      SELECT 1 FROM partners pp
-                      WHERE pp.partner_id = sl.partner_id
-                        AND pp.tenant_id  = sl.tenant_id
-                        AND pp.partner_name LIKE CONCAT('%', @Partner, '%')
-                  ))
+                  AND (@Item IS NULL OR i.item_name LIKE CONCAT('%', @Item, '%'))
                 GROUP BY sl.item_id, i.item_name
                 ORDER BY i.item_name
                 """
         };
 
+        // 봉합 (2026-06-23, 19차 상품별 수불부 필터 값유실): 종전엔 item 뷰에서도 @Partner(품목명)를
+        //   partner_name 으로 매칭해 "상품 골라 조회하면 항상 0건"이었다(동작 안 함). item 뷰는 @Item(item_name),
+        //   partner 뷰는 @Partner(partner_name)로 시간원을 분리한다.
         var rows = await _db.QueryAsync<StockLedgerRow>(
             new CommandDefinition(sql, new
             {
                 TenantId = tenantId,
                 From = from?.Date,
                 To = to?.Date,
-                Partner = partner
+                Partner = partner,
+                Item = item
             }, cancellationToken: ct));
 
         return rows.ToList();

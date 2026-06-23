@@ -80,10 +80,44 @@
                             Title="표준단가"
                             Format="N0"
                             CellStyle="width:110px;text-align:right;color:#6B7280" />
-            <PropertyColumn Property="x => x.SpecialPrice"
-                            Title="특별단가"
-                            Format="N0"
-                            CellStyle="width:110px;text-align:right;font-weight:500" />
+            @* 봉합 (2026-06-23, 19차): 상품 특별단가와 대칭 — 단가유형(고정/할인) + 할인율 컬럼.
+               종전엔 특별단가(고정) 한 가지만 입력 가능해 할인율 모드가 화면에서 통째 빠져 있었다. *@
+            <TemplateColumn Title="단가유형" CellStyle="width:100px">
+                <CellTemplate>
+                    <MudSelect T="string" @bind-Value="context.Item.PriceType" Variant="Variant.Text"
+                               Margin="Margin.Dense" Dense="true" Style="font-size:13px">
+                        <MudSelectItem Value="@("fixed")">고정</MudSelectItem>
+                        <MudSelectItem Value="@("discount")">할인</MudSelectItem>
+                    </MudSelect>
+                </CellTemplate>
+            </TemplateColumn>
+            <TemplateColumn Title="특별단가" CellStyle="width:120px;text-align:right">
+                <CellTemplate>
+                    @if (context.Item.PriceType == "discount")
+                    {
+                        <MudText Typo="Typo.body2" Style="color:#9CA3AF">@CalcDiscountedPrice(context.Item).ToString("N0")</MudText>
+                    }
+                    else
+                    {
+                        <MudNumericField T="decimal" @bind-Value="context.Item.SpecialPrice" Variant="Variant.Text"
+                                         Margin="Margin.Dense" Style="font-size:13px;text-align:right" />
+                    }
+                </CellTemplate>
+            </TemplateColumn>
+            <TemplateColumn Title="할인율(%)" CellStyle="width:100px;text-align:right">
+                <CellTemplate>
+                    @if (context.Item.PriceType == "discount")
+                    {
+                        <MudNumericField T="decimal?" @bind-Value="context.Item.DiscountRate" Variant="Variant.Text"
+                                         Margin="Margin.Dense" Min="0" Max="100" Format="N1"
+                                         Style="font-size:13px;text-align:right" />
+                    }
+                    else
+                    {
+                        <MudText Typo="Typo.body2" Style="color:#9CA3AF">—</MudText>
+                    }
+                </CellTemplate>
+            </TemplateColumn>
             <TemplateColumn Title="대비%"
                             CellStyle="width:80px;text-align:center">
                 <CellTemplate>
@@ -166,6 +200,9 @@
                 Unit = item.Unit,
                 SpecialPrice = item.SpecialPrice,
                 StdPrice = item.StdPrice,
+                // 봉합 (2026-06-23, 19차): 단가유형·할인율 함께 전송 — 종전엔 빠져 할인율 모드가 유실됐다.
+                PriceType = item.PriceType,
+                DiscountRate = item.DiscountRate,
                 LastSupplyDate = item.LastSupplyDate
             });
         }
@@ -196,6 +233,14 @@
             PartnerId = SelectedPartnerId,
             IsEditing = true
         });
+    }
+
+    /// <summary>할인율 모드 미리보기 — 표준단가 × (1 - 할인율%). (19차 봉합)</summary>
+    private decimal CalcDiscountedPrice(SpecialPriceItem row)
+    {
+        if (row.DiscountRate is null || row.StdPrice <= 0m) return 0m;
+        var rate = Math.Clamp(row.DiscountRate.Value, 0m, 100m);
+        return Math.Round(row.StdPrice * (100m - rate) / 100m, 0, MidpointRounding.AwayFromZero);
     }
 
     private Color GetRatioColor(decimal ratio)

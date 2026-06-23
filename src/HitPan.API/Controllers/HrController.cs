@@ -74,6 +74,23 @@ public class HrController : ControllerBase
         return Created($"/api/hr/overtime/{id}", new { id });
     }
 
+    // 봉합 (2026-06-23, 19차): 초과근무 승인/반려 — 신청만 되고 승인 경로가 없던 워크플로우 끊김 봉합.
+    [HttpPost("overtime/{id}/approve")]
+    [RequirePermission("HR", "update")]
+    public async Task<IActionResult> ApproveOvertime(string id, [FromBody] OvertimeApproveRequest req, CancellationToken ct)
+    {
+        var tid = HttpContext.Items["TenantId"]?.ToString();
+        if (string.IsNullOrEmpty(tid)) return Forbid();
+        var ok = await _svc.ApproveOvertimeAsync(id, tid, req.Action, ct);
+        return ok ? Ok() : BadRequest(new { error = "이미 처리되었거나 대상을 찾을 수 없습니다." });
+    }
+
+    /// <summary>초과근무 승인/반려 요청 — action: approved | rejected.</summary>
+    public sealed class OvertimeApproveRequest
+    {
+        public string Action { get; set; } = "approved";
+    }
+
     // ── HR 경비신청 ──
 
     [HttpGet("expense-requests")]

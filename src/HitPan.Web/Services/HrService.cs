@@ -44,6 +44,21 @@ public sealed class HrClientService(HttpClient http)
         catch { return false; }
     }
 
+    // 봉합 (2026-06-23, 19차): 초과근무 승인/반려 — action: approved | rejected.
+    public async Task<bool> ApproveOvertimeAsync(string overtimeId, string action, CancellationToken ct = default)
+    {
+        try
+        {
+            using var r = await http.PostAsJsonAsync($"api/hr/overtime/{overtimeId}/approve", new { action }, ct);
+            return r.IsSuccessStatusCode;
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine($"[HrService.ApproveOvertimeAsync] {ex.GetType().Name}: {ex.Message}");
+            return false;
+        }
+    }
+
     // HR 경비
     public async Task<List<HrExpenseModel>> GetHrExpensesAsync(CancellationToken ct = default)
     {

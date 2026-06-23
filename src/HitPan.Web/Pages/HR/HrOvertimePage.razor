@@ -33,7 +33,7 @@
     <MudTable Items="_items" Dense="true" Hover="true" Striped="true">
         <HeaderContent>
             <MudTh>날짜</MudTh><MudTh>사원</MudTh><MudTh>시작</MudTh><MudTh>종료</MudTh>
-            <MudTh Style="text-align:right">시간</MudTh><MudTh>유형</MudTh><MudTh>사유</MudTh><MudTh>상태</MudTh>
+            <MudTh Style="text-align:right">시간</MudTh><MudTh>유형</MudTh><MudTh>사유</MudTh><MudTh>상태</MudTh><MudTh Style="text-align:center">처리</MudTh>
         </HeaderContent>
         <RowTemplate>
             <MudTd>@context.WorkDate.ToString("yyyy-MM-dd")</MudTd>
@@ -44,6 +44,14 @@
             <MudTd>@(context.OvertimeType switch { "weekday" => "평일", "weekend" => "주말", "holiday" => "공휴일", _ => context.OvertimeType })</MudTd>
             <MudTd>@context.Reason</MudTd>
             <MudTd><MudChip T="string" Size="Size.Small" Variant="Variant.Filled" Color="@(context.Status == "approved" ? Color.Success : context.Status == "rejected" ? Color.Error : Color.Warning)">@(context.Status switch { "approved" => "승인", "rejected" => "반려", _ => "대기" })</MudChip></MudTd>
+            @* 봉합 (2026-06-23, 19차): 대기 상태일 때만 승인/반려 버튼 — 종전엔 신청만 되고 승인 경로가 없었다. *@
+            <MudTd Style="text-align:center">
+                @if (context.Status == "pending")
+                {
+                    <MudButton Size="Size.Small" Variant="Variant.Text" Color="Color.Success" OnClick="@(() => ProcessAsync(context, "approved"))">승인</MudButton>
+                    <MudButton Size="Size.Small" Variant="Variant.Text" Color="Color.Error" OnClick="@(() => ProcessAsync(context, "rejected"))">반려</MudButton>
+                }
+            </MudTd>
         </RowTemplate>
     </MudTable>
 </MudPaper>
@@ -65,5 +73,20 @@
         var ok = await HrSvc.CreateOvertimeAsync(_edit);
         if (ok) { Snackbar.Add("신청 완료", Severity.Success); _edit = new(); _items = await HrSvc.GetOvertimeAsync(); }
         else Snackbar.Add("신청 실패", Severity.Error);
+    }
+
+    // 봉합 (2026-06-23, 19차): 초과근무 승인/반려 처리 — 워크플로우 끊김 해소.
+    private async Task ProcessAsync(OvertimeModel item, string action)
+    {
+        var ok = await HrSvc.ApproveOvertimeAsync(item.OvertimeId, action);
+        if (ok)
+        {
+            Snackbar.Add(action == "approved" ? "승인되었습니다." : "반려되었습니다.", Severity.Success);
+            _items = await HrSvc.GetOvertimeAsync();
+        }
+        else
+        {
+            Snackbar.Add("처리에 실패했습니다.", Severity.Error);
+        }
     }
 }
