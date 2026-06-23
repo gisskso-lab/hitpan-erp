@@ -459,11 +459,18 @@ public class ApprovalService : IApprovalService
             throw new InvalidOperationException("이미 처리된 결재입니다.");
 
         // 결재 권한 확인 (현재 순서의 결재자 또는 위임자인지)
-        var line = await _db.QueryFirstOrDefaultAsync<(string ApproverId, string? DelegateId, DateTime? DelegateStart, DateTime? DelegateEnd)>(
+        // 봉합 (2026-06-23, 19차 P2 위임날짜 시간원 불일치): 종전엔 위임 유효기간을 C# DateTime.Today
+        //   로 판정했는데, 목록 조회(GetPendingAsync)는 SQL CURDATE() 로 판정해 두 시간원이 갈렸다.
+        //   자정 경계 + 위임 시작/종료 당일에 DB와 .NET 호스트 날짜가 어긋나면 "목록엔 위임 결재가
+        //   떴는데 누르면 결재 권한이 없습니다"(또는 그 반대)로 워크플로우가 끊긴다(헌법 #20). 위임
+        //   유효 판정을 SQL CURDATE() BETWEEN 으로 옮겨 GetPendingAsync 와 단일 시간원(DB)으로 통일한다.
+        var line = await _db.QueryFirstOrDefaultAsync<(string ApproverId, string? DelegateId, bool DelegateActive)>(
             new CommandDefinition(
                 """
                 SELECT approver_id AS ApproverId, delegate_id AS DelegateId,
-                       delegate_start AS DelegateStart, delegate_end AS DelegateEnd
+                       (delegate_id IS NOT NULL
+                        AND delegate_start IS NOT NULL AND delegate_end IS NOT NULL
+                        AND CURDATE() BETWEEN delegate_start AND delegate_end) AS DelegateActive
                 FROM approval_doc_lines
                 WHERE tenant_id = @TenantId AND doc_type = @DocType AND seq_no = @SeqNo AND is_active = 1
                 """,
@@ -476,11 +483,9 @@ public class ApprovalService : IApprovalService
         {
             // 정상 결재자
         }
-        else if (line.DelegateId == employeeId
-                 && line.DelegateStart.HasValue && line.DelegateEnd.HasValue
-                 && DateTime.Today >= line.DelegateStart.Value && DateTime.Today <= line.DelegateEnd.Value)
+        else if (line.DelegateId == employeeId && line.DelegateActive)
         {
-            // 위임결재자
+            // 위임결재자 (위임 유효기간을 SQL CURDATE() 로 판정 — 목록 조회와 동일 시간원)
             isDelegated = true;
             originalApproverId = line.ApproverId;
         }
