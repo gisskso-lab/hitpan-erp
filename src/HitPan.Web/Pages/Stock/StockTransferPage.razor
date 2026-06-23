@@ -121,6 +121,9 @@
         {
             Console.Error.WriteLine($"[HP15] " + _hp15Ex.GetType().Name + ": " + _hp15Ex.Message);
             _warehouses = new();
+            // 봉합 (2026-06-23, 18차 P2): 종전엔 창고 로드 실패 시 빈 드롭다운만 남아 사용자가 원인을
+            //   알 수 없었다(처음 쓰는 사람이 혼자 못 푼다 — 히트판 정신 위배). 통신 장애를 명시 안내한다.
+            Snackbar.Add("창고 정보를 불러오지 못했습니다. 네트워크를 확인하고 새로고침 해주세요.", Severity.Error);
         }
     }
 

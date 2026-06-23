@@ -132,7 +132,11 @@ public class StockService : IStockService
 
     private static string BuildLedgerSql(string ledgerType, string whereClause)
     {
-        var sourceWhere = ledgerType == "adjust" ? "AND l.source_type = 'adjust'" : string.Empty;
+        // 봉합 (2026-06-23, 18차 P1): 재고조정은 AdjustStockAsync 가 source_type='adjustment' 로 기록(:211)
+        //   하는데 종전 원장조회 필터는 'adjust' 로 비교해, 조정 이력이 원장 화면에서 0건으로 누락됐다
+        //   (조정이력 조회 GetAdjustHistory:303 은 'adjustment' 라 정상 — 같은 데이터가 경로별로 보이고 안 보임).
+        //   필터를 INSERT 값과 동일한 'adjustment' 로 통일(ledgerType 파라미터 키 'adjust' 는 UI 필터명이라 유지).
+        var sourceWhere = ledgerType == "adjust" ? "AND l.source_type = 'adjustment'" : string.Empty;
 
         return $"""
             SELECT
