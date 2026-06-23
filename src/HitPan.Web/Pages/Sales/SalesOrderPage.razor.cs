@@ -373,10 +373,14 @@ public partial class SalesOrderPage : ComponentBase
     {
         if (_draft is not null && !string.IsNullOrWhiteSpace(_draft.Id) && !_isNew)
         {
-            var ok = await DeliveryService.DeleteAsync(_draft.Id);
+            // 봉합 (2026-06-23, 17차 P0-2): 종전엔 DeliveryService.DeleteAsync(거래명세서 API
+            //   DELETE api/sales/deliveries/{id})를 수주 ID로 호출해, 수주가 삭제되지 않고(다른 PK 공간)
+            //   엉뚱한 거래명세서가 우연히 삭제될 위험까지 있었다. 수주 전용 DeleteSalesOrderAsync
+            //   (DELETE api/sales/orders/{id}, 활성 거래명세서 있으면 백엔드가 차단)로 교체한다.
+            var (ok, error) = await DeliveryService.DeleteSalesOrderAsync(_draft.Id);
             if (!ok)
             {
-                Snackbar.Add("삭제에 실패했습니다.", Severity.Error);
+                Snackbar.Add(string.IsNullOrWhiteSpace(error) ? "삭제에 실패했습니다." : error, Severity.Error);
                 return;
             }
         }

@@ -1492,6 +1492,10 @@ CREATE TABLE `item_special_prices` (
   `partner_id` varchar(36) NOT NULL,
   `price_type` varchar(20) NOT NULL DEFAULT 'fixed',
   `unit_price` decimal(15,2) NOT NULL,
+  -- 봉합 (2026-06-23, 17차 P0-1): 코드(ItemService.UpsertSpecialPrice)가 SELECT/INSERT/UPDATE 하는
+  --   discount_rate 컬럼이 clean DDL에 누락돼 신규설치 DB에서 상품 특별단가 '할인율' 모드 저장 시
+  --   "Unknown column 'discount_rate'" 500 (기능 DOA, 헌법 #36). 할인모드만 값, 고정모드는 NULL(코드 decimal?).
+  `discount_rate` decimal(5,2) DEFAULT NULL COMMENT '할인율(%) — price_type=discount 일 때만, 고정모드는 NULL (17차 P0-1)',
   `start_date` date DEFAULT NULL,
   `end_date` date DEFAULT NULL,
   `is_active` tinyint(1) NOT NULL DEFAULT 1,
