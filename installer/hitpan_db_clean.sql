@@ -1620,7 +1620,7 @@ CREATE TABLE `journal_entries` (
   `entry_date` date NOT NULL,
   `ym` varchar(7) NOT NULL,
   `description` varchar(200) NOT NULL,
-  `source_type` varchar(30) NOT NULL DEFAULT 'manual' COMMENT 'sales_delivery/purchase_receipt/collection/payment/manual/adjustment',
+  `source_type` varchar(30) NOT NULL DEFAULT 'manual' COMMENT 'sales/sales_cancel/sales_delivery_cancel/sales_return_cancel/purchase/purchase_return/purchase_return_cancel/bom_production/bom_disassemble/collection/payment/manual/adjustment/migration (16차 P3 정합)',
   `source_id` varchar(36) DEFAULT NULL,
   `is_confirmed` tinyint(1) NOT NULL DEFAULT 0,
   `confirmed_at` datetime(6) DEFAULT NULL,
@@ -3072,7 +3072,7 @@ CREATE TABLE `stock_ledger` (
   `ledger_date` date NOT NULL,
   `ym` varchar(7) NOT NULL,
   `move_type` varchar(10) NOT NULL,
-  `source_type` varchar(30) NOT NULL,
+  `source_type` varchar(30) NOT NULL COMMENT 'sales_delivery/sales_cancel/sales_return/sales_return_cancel/purchase_receipt/direct_purchase/purchase_return/purchase_return_cancel/bom_explosion/bom_explosion_cancel/bom_production/bom_disassemble/adjust/transfer/migration (16차 P3 정합)',
   `source_id` varchar(36) NOT NULL,
   `doc_no` varchar(20) DEFAULT NULL,
   `qty_in` decimal(15,3) NOT NULL,
@@ -3210,7 +3210,12 @@ CREATE TABLE `tax_invoices` (
   `remark2` varchar(100) DEFAULT NULL COMMENT 'TX_REM1 ????2',
   `source_type` varchar(30) DEFAULT NULL COMMENT '???? ????',
   `source_id` varchar(80) DEFAULT NULL COMMENT '???Ž? PK (TX_IO+TX_NO)',
+  -- 봉합 (2026-06-23, 16차 P1): 한 거래명세서당 issued 계산서 1건만 — 동시 중복발행 차단.
+  --   status='issued' 일 때만 delivery_id, 그 외(canceled 등)는 NULL 인 생성컬럼에 UNIQUE.
+  --   NULL 은 UNIQUE 에서 중복 허용 → 취소 후 재발행(canceled 다수 + issued 1) 정상. IssueAsync SELECT 체크의 DB 백스톱.
+  `active_delivery_id` varchar(36) GENERATED ALWAYS AS (if(`status` = 'issued',`delivery_id`,NULL)) STORED,
   PRIMARY KEY (`invoice_id`),
+  UNIQUE KEY `uk_tax_invoices_active_delivery` (`tenant_id`,`active_delivery_id`),
   UNIQUE KEY `uk_tax_invoices_invoice_no` (`tenant_id`,`invoice_no`),
   UNIQUE KEY `uq_tax_invoices_source_hash` (`tenant_id`,`migrated_source_hash`),
   UNIQUE KEY `uq_tax_invoices_io_no` (`tenant_id`,`direction`,`tax_no`),

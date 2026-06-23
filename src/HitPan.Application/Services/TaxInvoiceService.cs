@@ -237,13 +237,20 @@ public sealed class TaxInvoiceService : ITaxInvoiceService
         string userId,
         CancellationToken ct = default)
     {
+        // 봉합 (2026-06-23, 16차 P0-1): 종전엔 tax_invoices.partner_id 를 SELECT 했으나 그 컬럼이
+        //   존재하지 않아(DDL은 partner_code(int)만 보유) 신규설치 DB에서 계산서 취소 시 "Unknown column
+        //   'partner_id'" 500 으로 취소 기능 전체가 마비됐다(헌법 #20·#36). partner_id 는 발행(IssueAsync:50)이
+        //   sales_deliveries 에서 읽어 기표하던 것과 동일하게, tax_invoices.delivery_id → sales_deliveries JOIN
+        //   으로 얻는다(DDL 무변경, FK fk_tax_invoices_delivery 이미 존재). 역분개의 partner 라인 정합 유지.
         var invoiceRow = await _db.QueryFirstOrDefaultAsync<(string? Status, string? InvoiceNo, string? PartnerId, DateTime IssuedAt, decimal AmountTotal, decimal VatTotal)>(
             new CommandDefinition(
                 """
-                SELECT status AS Status, invoice_no AS InvoiceNo, partner_id AS PartnerId,
-                       issued_at AS IssuedAt, amount_total AS AmountTotal, vat_total AS VatTotal
-                  FROM tax_invoices
-                 WHERE invoice_id = @InvoiceId AND tenant_id = @TenantId
+                SELECT ti.status AS Status, ti.invoice_no AS InvoiceNo, sd.partner_id AS PartnerId,
+                       ti.issued_at AS IssuedAt, ti.amount_total AS AmountTotal, ti.vat_total AS VatTotal
+                  FROM tax_invoices ti
+                  LEFT JOIN sales_deliveries sd
+                    ON sd.delivery_id = ti.delivery_id AND sd.tenant_id = ti.tenant_id
+                 WHERE ti.invoice_id = @InvoiceId AND ti.tenant_id = @TenantId
                 """,
                 new { InvoiceId = invoiceId, TenantId = tenantId },
                 cancellationToken: ct));
