@@ -3189,6 +3189,12 @@ CREATE TABLE `tax_invoices` (
   `amount_total` decimal(15,2) NOT NULL COMMENT '공급가액',
   `vat_total` decimal(15,2) NOT NULL COMMENT '부가세',
   `status` varchar(16) NOT NULL DEFAULT 'issued' COMMENT 'issued | canceled',
+  -- 회수 (2026-06-23, 메타감사): 16차에 한 거래명세서당 issued 1건 차단용 active_delivery_id 생성컬럼+UNIQUE를
+  --   넣었으나, 참조 컬럼 delivery_id 가 FK(fk_tax_invoices_delivery) 대상이라 MariaDB가 STORED generated
+  --   표현식에서 FK 컬럼 참조를 금지 → 신규설치 clean DDL import 자체가 ERROR 1901 로 실패(세금계산서 테이블
+  --   미생성 = ERP 설치 전체 차단). 16차 단독테이블 스모크는 FK가 없어 통과해 이를 못 봤다(반쪽 검증).
+  --   사장님 결재(2026-06-23): 생성컬럼·UNIQUE 제거, 중복발행 차단은 IssueAsync 의 'issued 기발행 있으면 차단'
+  --   SELECT 체크로 환원(16차 이전 상태). 동시성(초당 2클릭) 차단은 FK 무손상 방식으로 후순위 재설계.
   `etax_status` varchar(16) NOT NULL DEFAULT 'pending' COMMENT 'pending | issued | failed',
   `etax_issued_at` datetime(6) DEFAULT NULL,
   `idempotency_key` varchar(64) DEFAULT NULL COMMENT '발행 요청 시 사용된 Idempotency-Key 헤더 값',
@@ -3214,12 +3220,7 @@ CREATE TABLE `tax_invoices` (
   `remark2` varchar(100) DEFAULT NULL COMMENT 'TX_REM1 ????2',
   `source_type` varchar(30) DEFAULT NULL COMMENT '???? ????',
   `source_id` varchar(80) DEFAULT NULL COMMENT '???Ž? PK (TX_IO+TX_NO)',
-  -- 봉합 (2026-06-23, 16차 P1): 한 거래명세서당 issued 계산서 1건만 — 동시 중복발행 차단.
-  --   status='issued' 일 때만 delivery_id, 그 외(canceled 등)는 NULL 인 생성컬럼에 UNIQUE.
-  --   NULL 은 UNIQUE 에서 중복 허용 → 취소 후 재발행(canceled 다수 + issued 1) 정상. IssueAsync SELECT 체크의 DB 백스톱.
-  `active_delivery_id` varchar(36) GENERATED ALWAYS AS (if(`status` = 'issued',`delivery_id`,NULL)) STORED,
   PRIMARY KEY (`invoice_id`),
-  UNIQUE KEY `uk_tax_invoices_active_delivery` (`tenant_id`,`active_delivery_id`),
   UNIQUE KEY `uk_tax_invoices_invoice_no` (`tenant_id`,`invoice_no`),
   UNIQUE KEY `uq_tax_invoices_source_hash` (`tenant_id`,`migrated_source_hash`),
   UNIQUE KEY `uq_tax_invoices_io_no` (`tenant_id`,`direction`,`tax_no`),
