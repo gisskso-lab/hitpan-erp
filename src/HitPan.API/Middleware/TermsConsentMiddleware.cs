@@ -20,7 +20,7 @@ public sealed class TermsConsentMiddleware
         "/api/auth/refresh",
         "/api/auth/me",
         "/api/backoffice/auth",
-        "/api/tenants/setup",
+        // "/api/tenants/setup" 제거 (2026-06-25): 익명 백도어 제거에 동반.
         "/health",
         "/swagger"
     };

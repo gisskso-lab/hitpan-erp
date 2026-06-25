@@ -24,7 +24,7 @@ public sealed class TenantMiddleware
 
         if (path.StartsWithSegments("/health")
             || path.StartsWithSegments("/swagger")
-            || path.StartsWithSegments("/api/tenants/setup")
+            // /api/tenants/setup 제거 (2026-06-25): 익명 백도어 제거에 동반(부모계정은 create-parent 단일).
             || path.StartsWithSegments("/api/auth/login")
             || path.StartsWithSegments("/api/auth/refresh")
             || path.StartsWithSegments("/api/backoffice/auth")

@@ -17,81 +17,12 @@ public class TenantService : ITenantService
         _currentTenant = currentTenant;
     }
 
-    public async Task<CreateTenantResponse> CreateAsync(CreateTenantRequest request, CancellationToken ct = default)
-    {
-        var tenants = _unitOfWork.Repository<Tenant>();
-        var users = _unitOfWork.Repository<User>();
-        var subscriptions = _unitOfWork.Repository<Subscription>();
-
-        var existing = await tenants.GetAllAsync();
-        if (existing.Count > 0)
-        {
-            throw new InvalidOperationException("이미 등록된 회사가 있습니다");
-        }
-
-        var now = DateTime.UtcNow;
-        var tenantId = Guid.NewGuid().ToString();
-        var tenantCode = $"HP-{1:000000}";
-
-        var tenant = new Tenant
-        {
-            Id = tenantId,
-            TenantId = tenantId,
-            TenantCode = tenantCode,
-            CompanyName = request.CompanyName,
-            BizNo = request.BizNo,
-            CeoName = request.CeoName,
-            Tel = request.Tel,
-            Address = request.Address,
-            Status = TenantStatus.Trial,
-            TrialEndsAt = now.AddDays(30),
-            // 봉합 2026-06-17 1.2.12 — TenantConfigReader 정합
-            DbHost = TenantConfigReader.Get("DB_HOST") ?? "localhost",
-            DbName = TenantConfigReader.Get("DB_NAME") ?? string.Empty,
-            LicenseKeyHash = Guid.NewGuid().ToString("N"),
-            ResellerTier = 0
-        };
-
-        var admin = new User
-        {
-            Id = Guid.NewGuid().ToString(),
-            UserId = Guid.NewGuid().ToString(),
-            TenantId = tenantId,
-            Email = request.AdminEmail,
-            PasswordHash = BCrypt.Net.BCrypt.HashPassword(request.AdminPassword, workFactor: 12),
-            UserName = "관리자",
-            Role = UserRole.TenantAdmin,
-            IsActive = true
-        };
-
-        var subscription = new Subscription
-        {
-            Id = Guid.NewGuid().ToString(),
-            SubscriptionId = Guid.NewGuid().ToString(),
-            TenantId = tenantId,
-            PlanType = PlanType.Basic,
-            BaseUsers = 5,
-            ExtraUsers = 0,
-            BaseFee = 0,
-            ExtraFeePerUser = 10000,
-            BillingCycle = "monthly",
-            StartedAt = now,
-            NextBillingAt = now.AddMonths(1),
-            Status = SubscriptionStatus.Active
-        };
-
-        await tenants.AddAsync(tenant);
-        await users.AddAsync(admin);
-        await subscriptions.AddAsync(subscription);
-        await _unitOfWork.SaveChangesAsync(ct);
-
-        return new CreateTenantResponse
-        {
-            TenantId = tenantId,
-            TenantCode = tenantCode,
-            Message = "등록 완료. 30일 무료 체험이 시작됩니다."
-        };
-    }
+    // CreateAsync 제거 (2026-06-25, 9축 실측 — 사장님 결재): /api/tenants/setup 익명 백도어의 본체.
+    //   이 메서드는 admin User 에 AccountType 을 설정하지 않아 DB 기본값 'tenant_user'(자식)로 부모를
+    //   만들었다(Role=TenantAdmin 이어도 account_type 불일치 → tenant_admin 권한 바이패스 안 됨 → 권한
+    //   메뉴 전부 403 락아웃). 또 익명으로 회사+관리자를 찍어낼 수 있어 보안 격벽(헌법 #38) 위반.
+    //   부모계정 정식 생성은 CompanyBootstrapController.create-parent(부트스트랩 토큰 검증)가 단일 경로다.
+    //   GetCurrentAsync(아래)는 /api/tenants/me 에서 쓰이므로 보존.
 
     public async Task<TenantMeResponse?> GetCurrentAsync(CancellationToken ct = default)
     {
