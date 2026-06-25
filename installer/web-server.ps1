@@ -2,7 +2,23 @@
 # WS-20260428-03 작3: /api/* 요청을 localhost:5257로 프록시 (외부 터널링 단일 도메인 라우팅)
 $webRoot = Join-Path $PSScriptRoot "web\wwwroot"
 $port = 5234
-$apiBase = "http://localhost:5257"
+
+# 봉합 (2026-06-25, 배포 전수조사 P0-8): API 프록시 포트를 db.conf API_PORT 에서 읽는다.
+#   종전엔 5257 하드코딩이라 멀티슬롯(슬롯2=5357 …)에서 Web 프록시가 엉뚱한 포트로 가 503.
+#   db.conf 미발견·키 부재면 5257 폴백(슬롯1·LOCAL 안전). ERP 본체·워치독과 동일한 단일출처.
+$apiPort = 5257
+$confPath = Join-Path $PSScriptRoot "db.conf"
+if (Test-Path $confPath) {
+    foreach ($line in Get-Content $confPath) {
+        $t = $line.Trim()
+        if ($t -like "API_PORT=*") {
+            $v = $t.Substring(9).Trim()
+            $parsed = 0
+            if ([int]::TryParse($v, [ref]$parsed) -and $parsed -gt 0) { $apiPort = $parsed }
+        }
+    }
+}
+$apiBase = "http://localhost:$apiPort"
 
 $mimeTypes = @{
     ".html" = "text/html; charset=utf-8"

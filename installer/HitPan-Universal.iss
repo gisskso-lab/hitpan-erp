@@ -1153,9 +1153,39 @@ begin
        ' /SC MINUTE /MO 1 /RU SYSTEM /RL HIGHEST',
        '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
   if ResultCode <> 0 then
-    Log('[2026-06-25 C] ERP keepalive 작업 생성 실패 ResultCode=' + IntToStr(ResultCode))
+    Log('[2026-06-25 C] ERP API keepalive 작업 생성 실패 ResultCode=' + IntToStr(ResultCode))
   else
-    Log('[2026-06-25 C] ERP keepalive 작업 생성(1분 주기, OS 레벨 2중 안전망)');
+    Log('[2026-06-25 C] ERP API keepalive 작업 생성(1분 주기, OS 레벨 2중 안전망)');
+
+  // 9-C. ERP Web 정적서버(5234) 자동 시작 (봉합 2026-06-25, 배포 전수조사 P0-1):
+  //   진범: 종전엔 web-server.ps1 을 [Files]로 복사만 하고(자동시작·감시 0), ERP API(5257)만 schtasks
+  //   자동시작했다. demo.hitpan.kr 은 5234(Web)를 보므로 Web 이 안 뜨면 502 — 2026-06-25 사고의 절반이
+  //   이것이다(워치독도 API 만 감시해 Web 죽으면 부활 0). API 와 동일하게 ONSTART SYSTEM 작업으로 등록한다.
+  //   Web 은 정적 서빙 + /api 프록시(web-server.ps1 이 db.conf API_PORT 로 프록시 포트 자동 결정).
+  Exec(ExpandConstant('{cmd}'),
+       '/C schtasks /Create /F /TN "HitPan-ERP-WEB-tenant-' + IntToStr(G_SlotIndex) + '"' +
+       ' /TR "powershell -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File \"' + ExpandConstant('{app}\web-server.ps1') + '\""' +
+       ' /SC ONSTART /RU SYSTEM /RL HIGHEST',
+       '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+  if ResultCode <> 0 then
+    Log('[2026-06-25 P0-1] ERP Web 작업 생성 실패 ResultCode=' + IntToStr(ResultCode))
+  else
+    Log('[2026-06-25 P0-1] ERP Web(5234) 작업 생성(ONSTART)');
+  // 즉시 1회 실행 — 설치 직후 5234 가 떠야 헬스체크·브라우저 열기가 성공한다.
+  Exec(ExpandConstant('{cmd}'), '/C schtasks /Run /TN "HitPan-ERP-WEB-tenant-' + IntToStr(G_SlotIndex) + '"',
+       '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+
+  // 9-D. ERP Web keepalive (봉합 2026-06-25, C — OS 레벨 2중 안전망, API 와 대칭):
+  //   1분마다 Web ONSTART 작업을 schtasks /Run. 살아있으면 단일 인스턴스라 무해, 죽었으면 부활.
+  Exec(ExpandConstant('{cmd}'),
+       '/C schtasks /Create /F /TN "HitPan-ERP-WEB-keepalive-' + IntToStr(G_SlotIndex) + '"' +
+       ' /TR "schtasks /Run /TN \"HitPan-ERP-WEB-tenant-' + IntToStr(G_SlotIndex) + '\""' +
+       ' /SC MINUTE /MO 1 /RU SYSTEM /RL HIGHEST',
+       '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+  if ResultCode <> 0 then
+    Log('[2026-06-25 C] ERP Web keepalive 작업 생성 실패 ResultCode=' + IntToStr(ResultCode))
+  else
+    Log('[2026-06-25 C] ERP Web keepalive 작업 생성(1분 주기)');
 
   // 10. 헬스체크 영역 polling (사고 #12·#13·#14 봉합 — 헌법 #27 정합)
   //     ERP API 시작 영역 + cloudflared 터널 활성화 영역 = 평균 30~60초
@@ -1273,7 +1303,17 @@ begin
        'schtasks /Delete /F /TN "HitPan-ERP-API-keepalive-2" & ' +
        'schtasks /Delete /F /TN "HitPan-ERP-API-keepalive-3" & ' +
        'schtasks /Delete /F /TN "HitPan-ERP-API-keepalive-4" & ' +
-       'schtasks /Delete /F /TN "HitPan-ERP-API-keepalive-5"',
+       'schtasks /Delete /F /TN "HitPan-ERP-API-keepalive-5" & ' +
+       'schtasks /Delete /F /TN "HitPan-ERP-WEB-tenant-1" & ' +
+       'schtasks /Delete /F /TN "HitPan-ERP-WEB-tenant-2" & ' +
+       'schtasks /Delete /F /TN "HitPan-ERP-WEB-tenant-3" & ' +
+       'schtasks /Delete /F /TN "HitPan-ERP-WEB-tenant-4" & ' +
+       'schtasks /Delete /F /TN "HitPan-ERP-WEB-tenant-5" & ' +
+       'schtasks /Delete /F /TN "HitPan-ERP-WEB-keepalive-1" & ' +
+       'schtasks /Delete /F /TN "HitPan-ERP-WEB-keepalive-2" & ' +
+       'schtasks /Delete /F /TN "HitPan-ERP-WEB-keepalive-3" & ' +
+       'schtasks /Delete /F /TN "HitPan-ERP-WEB-keepalive-4" & ' +
+       'schtasks /Delete /F /TN "HitPan-ERP-WEB-keepalive-5"',
        '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
 
   // 환경변수 영역 정리 — 부분 영역 박힌 영역 제거

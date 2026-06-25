@@ -18,6 +18,7 @@ public class DbConfReaderTests : IDisposable
     {
         var o = new WatchdogOptions();
         o.Processes.HttpEndpoints.Add(new HttpEndpointConfig { Name = "HitPan.API", Url = "http://127.0.0.1:5257/health" });
+        o.Processes.HttpEndpoints.Add(new HttpEndpointConfig { Name = "HitPan.Web", Url = "http://127.0.0.1:5234/" });
         return o;
     }
 
@@ -53,6 +54,33 @@ public class DbConfReaderTests : IDisposable
         var ep = o.Processes.HttpEndpoints.Single(e => e.Name == "HitPan.API");
         Assert.Equal("HitPan-ERP-API-tenant-3", ep.RestartTask);
         Assert.Equal("http://127.0.0.1:5457/health", ep.Url);
+    }
+
+    [Fact]
+    public void SlotIndex_SetsWebRestartTask()
+    {
+        // 봉합 (2026-06-25, 배포 전수조사 P0-1): Web(5234)도 RestartTask 배선 — 종전엔 API 만 배선해
+        //   Web 죽으면 demo.hitpan.kr(5234) 502 자가복구 0이었다. API·Web 둘 다 같은 슬롯으로 일관.
+        WriteConf("SLOT_INDEX=1", "API_PORT=5257");
+        var o = NewOptionsWithApiEndpoint();
+
+        DbConfReader.ApplyToOptions(o);
+
+        var web = o.Processes.HttpEndpoints.Single(e => e.Name == "HitPan.Web");
+        Assert.Equal("HitPan-ERP-WEB-tenant-1", web.RestartTask);
+    }
+
+    [Fact]
+    public void NoSlotIndex_LeavesWebRestartTaskEmpty()
+    {
+        // SLOT_INDEX 부재면 Web 도 RestartTask 빈 값 = 감지만(헛 재기동 차단). API 와 대칭.
+        WriteConf("API_PORT=5257", "PRIMARY_DOMAIN=localhost:5234");
+        var o = NewOptionsWithApiEndpoint();
+
+        DbConfReader.ApplyToOptions(o);
+
+        var web = o.Processes.HttpEndpoints.Single(e => e.Name == "HitPan.Web");
+        Assert.Equal(string.Empty, web.RestartTask);
     }
 
     [Fact]
