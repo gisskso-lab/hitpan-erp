@@ -59,6 +59,23 @@ public static class DbConfReader
                 log?.Invoke($"[DbConf] 로컬 API 헬스 = {ep.Url}");
             }
         }
+
+        // 봉합 (2026-06-25, ERP 자가복구 B): ERP API 가 죽었을 때 워치독이 다시 살릴 작업 스케줄러 작업명.
+        //   인스톨러(.iss 9번)는 ERP API 를 'HitPan-ERP-API-tenant-{슬롯}' 작업으로 ONSTART 자동시작한다
+        //   (db.conf SLOT_INDEX 와 동일 슬롯). 워치독이 그 작업명을 RestartTask 로 알아야 schtasks /Run
+        //   으로 부활시킬 수 있다. SLOT_INDEX 부재(구버전 db.conf·LOCAL)면 RestartTask 를 비워 종전대로
+        //   감지만 한다 — 잘못된 작업명으로 헛 재기동하는 자해를 피한다.
+        if (conf.TryGetValue("SLOT_INDEX", out var slotStr) &&
+            int.TryParse(slotStr.Trim(), out var slot) && slot >= 1)
+        {
+            var ep = options.Processes.HttpEndpoints.FirstOrDefault(e =>
+                string.Equals(e.Name, "HitPan.API", StringComparison.OrdinalIgnoreCase));
+            if (ep is not null)
+            {
+                ep.RestartTask = $"HitPan-ERP-API-tenant-{slot}";
+                log?.Invoke($"[DbConf] ERP 재기동 작업 = {ep.RestartTask}");
+            }
+        }
     }
 
     /// <summary>

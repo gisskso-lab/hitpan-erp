@@ -96,6 +96,24 @@ public class Worker : BackgroundService
             }
         }
 
+        // 봉합 (2026-06-25, ERP 자가복구 A): HTTP 엔드포인트(ERP API)가 응답 없으면 재기동.
+        //   종전엔 procStatus 에 HitPan.API=false 가 기록돼도 위 루프가 Services 목록만 보고 ERP 를
+        //   재기동하지 않아, ERP 가 떠 있다 죽으면 영영 안 살아났다(2026-06-25 demo 502 사고 = 이 구멍).
+        //   각 엔드포인트의 RestartTask(작업 스케줄러 작업명)를 schtasks /Run 으로 재실행한다.
+        //   RestartTask 가 비면(LOCAL·미설정) 감지만 하던 종전 동작 유지.
+        foreach (var ep in _options.Processes.HttpEndpoints)
+        {
+            if (procStatus.TryGetValue(ep.Name, out var epOk) && !epOk
+                && !string.IsNullOrWhiteSpace(ep.RestartTask))
+            {
+                if (_f.AllowRecovery($"http:{ep.Name}"))
+                {
+                    if (_i.TryRestartTask(ep.RestartTask))
+                        MarkRecovery($"WS-28-I/{ep.Name}");
+                }
+            }
+        }
+
         var secretInvalid = _c.DetectInvalidSecret();
         if (secretInvalid)
         {

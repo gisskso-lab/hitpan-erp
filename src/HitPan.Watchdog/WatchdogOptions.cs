@@ -26,4 +26,12 @@ public class HttpEndpointConfig
 {
     public string Name { get; set; } = "";
     public string Url { get; set; } = "";
+
+    // 봉합 (2026-06-25, ERP 자가복구 A/B): 이 엔드포인트(예: HitPan.API)가 응답 없을 때 워치독이
+    //   다시 살릴 방법. 종전엔 HTTP 엔드포인트는 "감지만" 하고 재기동 경로가 없어, ERP API 가 떠 있다
+    //   죽으면(예외·메모리·업데이트) 워치독이 못 살렸다(2026-06-25 demo 502 사고 = 이 구멍).
+    //   ERP API 는 인스톨러가 schtasks(작업 스케줄러) 'HitPan-ERP-API-tenant-{슬롯}' 으로 ONSTART
+    //   자동시작하므로, 재기동 = 그 작업을 'schtasks /Run' 으로 다시 실행하면 된다(서비스 아님).
+    //   RestartTask 가 비면 종전대로 감지만 한다(하위호환·LOCAL 안전).
+    public string RestartTask { get; set; } = "";
 }

@@ -1140,6 +1140,23 @@ begin
       Log('[1.2.12 P1#5] schtasks /Run 재시도 실패 ResultCode=' + IntToStr(ResultCode));
   end;
 
+  // 9-B. ERP API keepalive (봉합 2026-06-25, C — OS 레벨 2중 안전망):
+  //   종전엔 ONSTART(부팅 시 1회) 작업뿐이라, ERP 가 떠 있다 죽으면(예외·메모리·업데이트) OS 가
+  //   자동 재실행하지 않았다(2026-06-25 demo 502 사고). 워치독(A)이 1분 주기로 살리지만, 워치독
+  //   자체가 죽은 경우를 대비해 OS 작업 스케줄러에도 독립 keepalive 를 둔다.
+  //   동작: 1분마다 같은 ONSTART 작업을 'schtasks /Run' 한다. schtasks 는 작업당 단일 인스턴스가
+  //   기본이라 ERP 가 살아있으면 새 인스턴스를 띄우지 않아 무해하고, 죽었으면 다시 띄운다(부활).
+  //   → 워치독 ON: A 가 먼저(최대 1분) 살림 / 워치독 OFF: keepalive 가 (최대 1분) 살림 = 단일점 고장 0.
+  Exec(ExpandConstant('{cmd}'),
+       '/C schtasks /Create /F /TN "HitPan-ERP-API-keepalive-' + IntToStr(G_SlotIndex) + '"' +
+       ' /TR "schtasks /Run /TN \"HitPan-ERP-API-tenant-' + IntToStr(G_SlotIndex) + '\""' +
+       ' /SC MINUTE /MO 1 /RU SYSTEM /RL HIGHEST',
+       '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+  if ResultCode <> 0 then
+    Log('[2026-06-25 C] ERP keepalive 작업 생성 실패 ResultCode=' + IntToStr(ResultCode))
+  else
+    Log('[2026-06-25 C] ERP keepalive 작업 생성(1분 주기, OS 레벨 2중 안전망)');
+
   // 10. 헬스체크 영역 polling (사고 #12·#13·#14 봉합 — 헌법 #27 정합)
   //     ERP API 시작 영역 + cloudflared 터널 활성화 영역 = 평균 30~60초
   //     최대 5분 영역 polling, 200 OK 박힐 때까지 대기
@@ -1244,12 +1261,19 @@ begin
        '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
 
   // schtasks 영역 부분 영역 박힌 영역 제거 (모든 슬롯 영역)
+  //   봉합 2026-06-25 (C): keepalive 작업(1~5)도 함께 제거 — 잔존 시 삭제된 ONSTART 작업을
+  //   1분마다 /Run 시도하는 고아 작업이 남는다(로그 노이즈).
   Exec(ExpandConstant('{cmd}'),
        '/C schtasks /Delete /F /TN "HitPan-ERP-API-tenant-1" & ' +
        'schtasks /Delete /F /TN "HitPan-ERP-API-tenant-2" & ' +
        'schtasks /Delete /F /TN "HitPan-ERP-API-tenant-3" & ' +
        'schtasks /Delete /F /TN "HitPan-ERP-API-tenant-4" & ' +
-       'schtasks /Delete /F /TN "HitPan-ERP-API-tenant-5"',
+       'schtasks /Delete /F /TN "HitPan-ERP-API-tenant-5" & ' +
+       'schtasks /Delete /F /TN "HitPan-ERP-API-keepalive-1" & ' +
+       'schtasks /Delete /F /TN "HitPan-ERP-API-keepalive-2" & ' +
+       'schtasks /Delete /F /TN "HitPan-ERP-API-keepalive-3" & ' +
+       'schtasks /Delete /F /TN "HitPan-ERP-API-keepalive-4" & ' +
+       'schtasks /Delete /F /TN "HitPan-ERP-API-keepalive-5"',
        '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
 
   // 환경변수 영역 정리 — 부분 영역 박힌 영역 제거
