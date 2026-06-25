@@ -24,7 +24,15 @@ if (string.IsNullOrWhiteSpace(apiBase))
 
 if (string.IsNullOrWhiteSpace(apiBase))
 {
-    apiBase = "http://localhost:5257";
+    // 봉합 (2026-06-25, 근본 — Playwright 실측이 잡은 외부 로그인 CORS P0):
+    //   종전 폴백은 "http://localhost:5257" 절대경로였다. 그러면 외부 고객 브라우저가 자기 PC 의
+    //   localhost:5257 을 부르다 CORS(loopback 차단)로 로그인 불가 — appsettings.json 의 ApiBaseUrl 이
+    //   비거나 잘못 출하되면(17·18차 반복 계통) 매번 재발하는 단일 실패점이었다.
+    //   근본 해결: 폴백을 "현재 페이지 출처"(HostEnvironment.BaseAddress)로 둔다. 그러면 브라우저는
+    //   같은 출처(예: https://{회사}.hitpan.kr/api/...)로 요청 → web-server.ps1 이 /api/* 를 슬롯
+    //   API 포트로 프록시(같은 출처라 CORS 자체가 없음). appsettings 값·환경 무관하게 항상 동작한다.
+    //   명시값(api-demo 등)이 있으면 위에서 채택되므로 기존 정상 배포는 무영향.
+    apiBase = builder.HostEnvironment.BaseAddress;
 }
 
 var apiUri = new Uri($"{apiBase.TrimEnd('/')}/");
