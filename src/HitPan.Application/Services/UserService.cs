@@ -168,7 +168,7 @@ public sealed class UserService : IUserService
             VALUES (
                 @EmpId, @TenantId, @UserId,
                 @EmpNo, @EmpName,
-                @Position, 'full_time',
+                @Position, 'regular',
                 @JoinDate, 1, @Role,
                 15.0, 0.0,
                 NOW(6), @UserId, NOW(6), @UserId)

@@ -1,4 +1,5 @@
 using HitPan.Domain.Entities;
+using HitPan.Domain.Enums;
 using HitPan.Infrastructure.Security.Converters;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata.Builders;
@@ -33,7 +34,17 @@ public sealed class EmployeeConfiguration : IEntityTypeConfiguration<Employee>
         builder.Property(e => e.DeptId).HasColumnName("dept_id").HasMaxLength(36);
         builder.Property(e => e.Position).HasColumnName("position").HasMaxLength(30);
         builder.Property(e => e.JobTitle).HasColumnName("job_title").HasMaxLength(30);
-        builder.Property(e => e.EmpType).HasColumnName("emp_type").HasConversion<string>().IsRequired();
+        // 작3v3(2026-06-26): emp_type 소문자 정규화 + ignoreCase + 유령값 폴백 = 근본 면역.
+        // 저장은 항상 소문자로 통일, 조회는 대/소문자 무관 Parse + Parse 실패(과거 박힌
+        // 'fulltime'/'full_time' 등 enum 미정합 유령값) 시 Regular로 폴백 → 어떤 경로가
+        // 무슨 값을 넣었어도/넣어도 employee materialize(=로그인 employee_id 클레임)가 안 깨짐.
+        // (이전 HasConversion<string>()은 멤버명 'Regular'만 인식 → 유령값 로그인 Parse 폭발이 P0였음)
+        // 검증팀장 반증4: 운영DB에 잔존할 수 있는 유령값 행은 코드만으로 못 치유 → 이 폴백이 그 갭까지 봉합.
+        builder.Property(e => e.EmpType).HasColumnName("emp_type")
+            .HasConversion(
+                v => v.ToString().ToLowerInvariant(),
+                v => ParseEmpType(v))
+            .IsRequired();
         builder.Property(e => e.JoinDate).HasColumnName("join_date").IsRequired();
         builder.Property(e => e.ResignDate).HasColumnName("resign_date");
         builder.Property(e => e.BirthDate).HasColumnName("birth_date").HasMaxLength(200).HasConversion(_nullableEncryptedConverter);
@@ -56,4 +67,16 @@ public sealed class EmployeeConfiguration : IEntityTypeConfiguration<Employee>
 
         builder.HasIndex(e => new { e.TenantId, e.EmpNo }).IsUnique().HasDatabaseName("uq_tenant_empno");
     }
+
+    /// <summary>
+    /// 작3v3(2026-06-26): emp_type DB값 → EmployeeType 안전 변환.
+    /// 대/소문자 무관(ignoreCase)으로 Parse하고, enum 미정합 유령값('fulltime'/'full_time'/빈값 등,
+    /// 봉합 이전 잘못 박힌 행)이 오면 예외 대신 Regular로 폴백한다.
+    /// 이유: Enum.Parse 예외는 employee materialize를 막아 로그인 employee_id 클레임을 비우는 P0였다.
+    /// 폴백으로 과거 오염 행도 로그인은 살리되, 화면은 정규직(Regular)으로 보정 표시.
+    /// </summary>
+    private static EmployeeType ParseEmpType(string value)
+        => Enum.TryParse<EmployeeType>(value, ignoreCase: true, out var t)
+            ? t
+            : EmployeeType.Regular;
 }

@@ -286,7 +286,7 @@ public class CompanyBootstrapController : ControllerBase
                        emp_type, join_date, is_active, created_at, updated_at, role, email)
                     VALUES
                       (@EmployeeId, @TenantId, @UserId, '0001', @Name,
-                       'fulltime', UTC_TIMESTAMP(6), 1, UTC_TIMESTAMP(6), UTC_TIMESTAMP(6), 'tenant_admin', @Email)",
+                       'regular', UTC_TIMESTAMP(6), 1, UTC_TIMESTAMP(6), UTC_TIMESTAMP(6), 'tenant_admin', @Email)",
                     new
                     {
                         EmployeeId = employeeId,
