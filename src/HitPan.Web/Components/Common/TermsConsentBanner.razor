@@ -3,8 +3,10 @@
 @using HitPan.Web.Models
 @using Microsoft.JSInterop
 @using System.Net.Http.Json
+@using Microsoft.AspNetCore.Components.Authorization
 @inject NavigationManager Nav
 @inject HttpClient Http
+@inject AuthenticationStateProvider AuthProvider
 @implements IDisposable
 
 @if (_requiresConsent && !_onTermsPage)
@@ -48,6 +50,17 @@
     {
         try
         {
+            // 빈 데이터 신규 고객 첫 화면(로그인 전) 오류 봉합 (사장님 결재 2026-06-26):
+            //   UnifiedCalendar·DailyBriefingModal 과 동일 — 미인증이면 호출 자체를 건너뛴다.
+            //   토큰 없이 호출하면 401 → GetFromJsonAsync 가 빈/HTML 본문 파싱 실패(JsonException '<')
+            //   → 콘솔 [HP15] 빨간 로그 + 하단 '오류 발생' 띠. 신규 고객 첫인상 훼손(헌법 #19).
+            var auth = await AuthProvider.GetAuthenticationStateAsync();
+            if (auth.User?.Identity?.IsAuthenticated != true)
+            {
+                _requiresConsent = false;
+                return;
+            }
+
             var status = await Http.GetFromJsonAsync<TermsConsentStatusDto>("api/auth/terms/status");
             _requiresConsent = status?.HasAgreed != true;
         }
