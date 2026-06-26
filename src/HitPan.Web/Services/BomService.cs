@@ -1,4 +1,5 @@
 using System.Net.Http.Json;
+using HitPan.Contracts.Idempotency;
 using HitPan.Web.Models;
 
 namespace HitPan.Web.Services;
@@ -215,7 +216,15 @@ public sealed class BomService(HttpClient http)
     {
         try
         {
-            using var res = await http.PostAsJsonAsync("api/bom/assemble", new { bomId, produceQty, memo }, ct).ConfigureAwait(false);
+            // 멱등 헤더 필수 (작6, 2026-06-26): assemble 엔드포인트가 [IdempotencyKey] 라 헤더 없으면 400.
+            //   메서드 1회 호출 = 키 1개 → 같은 요청 재전송(타임아웃 재시도)은 같은 키 유지 → 중복 차단.
+            //   새 생산 클릭 = 새 호출 = 새 키 → 정상 반복생산 보존(헌법 #20). TaxInvoiceApiService 패턴.
+            using var req = new HttpRequestMessage(HttpMethod.Post, "api/bom/assemble")
+            {
+                Content = JsonContent.Create(new { bomId, produceQty, memo })
+            };
+            req.Headers.Add(IdempotencyConstants.HeaderName, Guid.NewGuid().ToString("N"));
+            using var res = await http.SendAsync(req, ct).ConfigureAwait(false);
             if (!res.IsSuccessStatusCode)
             {
                 var body = await res.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
@@ -236,7 +245,13 @@ public sealed class BomService(HttpClient http)
     {
         try
         {
-            using var res = await http.PostAsJsonAsync("api/bom/disassemble", new { bomId, produceQty, memo }, ct).ConfigureAwait(false);
+            // 멱등 헤더 필수 (작6, 2026-06-26): disassemble 도 [IdempotencyKey]. 생산과 동일 패턴.
+            using var req = new HttpRequestMessage(HttpMethod.Post, "api/bom/disassemble")
+            {
+                Content = JsonContent.Create(new { bomId, produceQty, memo })
+            };
+            req.Headers.Add(IdempotencyConstants.HeaderName, Guid.NewGuid().ToString("N"));
+            using var res = await http.SendAsync(req, ct).ConfigureAwait(false);
             if (!res.IsSuccessStatusCode)
             {
                 var body = await res.Content.ReadAsStringAsync(ct).ConfigureAwait(false);

@@ -28,7 +28,8 @@
             <span class="hp-hero-dot">·</span>
             <span class="hp-hero-date">@(DateTime.Now.ToString("M월 d일 dddd", new System.Globalization.CultureInfo("ko-KR")))</span>
         </p>
-        <h1 class="hp-hero-title">
+        @* 작7 (2026-06-26) D-2: 오늘매출 클릭 → 오늘 날짜 판매현황 목록 직행 *@
+        <h1 class="hp-hero-title" @onclick="GoTodaySales" role="button" tabindex="0" style="cursor:pointer">
             오늘 매출
             <span class="hp-hero-amount">@FormatAmount(_data.TodaySales)</span>
         </h1>
@@ -90,7 +91,8 @@
 
 @* ─── KPI Hero (그린 그라디언트 큰 카드 + 보조 2장) ─── *@
 <div class="hp-kpi-hero-row">
-    <div class="hp-kpi-hero" @onclick="@(() => Nav.NavigateTo("/sales/summary"))">
+    @* 작7 (2026-06-26) D-3: 이번달매출 클릭 → 당월 판매현황 목록(기간 프리필터) *@
+    <div class="hp-kpi-hero" @onclick="GoMonthSales">
         <div class="hp-kpi-hero-bg-1"></div>
         <div class="hp-kpi-hero-bg-2"></div>
         <div class="hp-kpi-hero-label">이번달 누적 매출</div>
@@ -106,6 +108,14 @@
         <span class="hp-kpi-delta hp-up">▲ 안전재고 위</span>
     </div>
 
+    @* 작7 (2026-06-26) D-4: 이번달매입 카드 신설 → 당월 매입현황 목록(기간 프리필터). KPI 3→4장 *@
+    <div class="hp-kpi-card" @onclick="GoMonthPurchase">
+        <div class="hp-kpi-label">이번달 매입</div>
+        <div class="hp-kpi-value">@FormatAmount(_data.MonthPurchase)</div>
+        <span class="hp-kpi-delta hp-up">▲ 당월 누적</span>
+    </div>
+
+    @* D-5: 미수금 → 미수금 목록(/collections, 이미 정합 — 유지) *@
     <div class="hp-kpi-card" @onclick="@(() => Nav.NavigateTo("/collections"))">
         <div class="hp-kpi-label">미수금</div>
         <div class="hp-kpi-value">@FormatAmount(_data.UnpaidReceivable)</div>
@@ -119,10 +129,77 @@
 
 @* 4/29 사장님 결재: AI 도우미 카드 제거 — 상단 ChatbotBar(TopHeader)와 통합·중복 제거. *@
 
-@* ─── 5/26 사장님 결재: 통합 캘린더 (4축 수금/입금/연차/이슈) + 카드 모달 ───
-   기존 LeaveCalendar는 롤백 영역으로 주석 보존. *@
+@* ─── 작7 (2026-06-26) D-1: 멀티캘린더 시각화 선택 라디오 (4뷰 전환) ───
+   사장님 요구 복원: 멀티캘린더 / 매출·매입추이 / 거래처순위 / 외상연체순위.
+   데이터·차트옵션 토대(_chartOptions·_partnerChartOptions·MonthlyTrend·TopPartners·_aging)는 기존 보존분 재사용. *@
+<div class="hp-viz-switch mb-2">
+    <MudRadioGroup T="string" @bind-Value="_vizMode">
+        <MudRadio T="string" Value="@("calendar")" Color="Color.Primary" Dense="true">멀티캘린더</MudRadio>
+        <MudRadio T="string" Value="@("trend")" Color="Color.Primary" Dense="true">매출·매입 추이</MudRadio>
+        <MudRadio T="string" Value="@("partners")" Color="Color.Primary" Dense="true">거래처 순위</MudRadio>
+        <MudRadio T="string" Value="@("aging")" Color="Color.Primary" Dense="true">외상 연체 순위</MudRadio>
+    </MudRadioGroup>
+</div>
+
+@* 5/26 사장님 결재: 통합 캘린더 (4축 수금/입금/연차/이슈) + 카드 모달. 기존 LeaveCalendar는 주석 보존. *@
 @*<LeaveCalendar />*@
-<UnifiedCalendar OnDayClicked="OnCalendarDayClicked" />
+@if (_vizMode == "calendar")
+{
+    <UnifiedCalendar OnDayClicked="OnCalendarDayClicked" />
+}
+else if (_vizMode == "trend")
+{
+    <MudPaper Elevation="0" Class="pa-4 hitpan-card">
+        <MudText Typo="Typo.subtitle2" Class="mb-2" Style="font-weight:600">월별 매출·매입 추이</MudText>
+        @if (_data.MonthlyTrend.Count > 0)
+        {
+            <ApexChart TItem="MonthlyTrend" Options="@_chartOptions" Height="320">
+                <ApexPointSeries TItem="MonthlyTrend" Items="_data.MonthlyTrend" Name="매출"
+                                 SeriesType="SeriesType.Bar" XValue="@(e => e.Label)" YValue="@(e => e.SalesAmount)" />
+                <ApexPointSeries TItem="MonthlyTrend" Items="_data.MonthlyTrend" Name="매입"
+                                 SeriesType="SeriesType.Bar" XValue="@(e => e.Label)" YValue="@(e => e.PurchaseAmount)" />
+            </ApexChart>
+        }
+        else
+        {
+            <MudText Typo="Typo.body2" Class="hp-viz-empty">표시할 추이 데이터가 없습니다.</MudText>
+        }
+    </MudPaper>
+}
+else if (_vizMode == "partners")
+{
+    <MudPaper Elevation="0" Class="pa-4 hitpan-card">
+        <MudText Typo="Typo.subtitle2" Class="mb-2" Style="font-weight:600">거래처 매출 순위 TOP</MudText>
+        @if (_data.TopPartners.Count > 0)
+        {
+            <ApexChart TItem="PartnerRank" Options="@_partnerChartOptions" Height="320">
+                <ApexPointSeries TItem="PartnerRank" Items="_data.TopPartners" Name="매출"
+                                 SeriesType="SeriesType.Bar" XValue="@(e => e.PartnerName)" YValue="@(e => e.TotalAmount)" />
+            </ApexChart>
+        }
+        else
+        {
+            <MudText Typo="Typo.body2" Class="hp-viz-empty">표시할 거래처 순위가 없습니다.</MudText>
+        }
+    </MudPaper>
+}
+else if (_vizMode == "aging")
+{
+    <MudPaper Elevation="0" Class="pa-4 hitpan-card">
+        <MudText Typo="Typo.subtitle2" Class="mb-2" Style="font-weight:600">외상 연체 순위 (미수금 잔액)</MudText>
+        @if (_aging.Count > 0)
+        {
+            <ApexChart TItem="PartnerAgingRow" Options="@_agingChartOptions" Height="320">
+                <ApexPointSeries TItem="PartnerAgingRow" Items="_aging" Name="미수금"
+                                 SeriesType="SeriesType.Bar" XValue="@(e => e.PartnerName)" YValue="@(e => e.TotalUnpaid)" />
+            </ApexChart>
+        }
+        else
+        {
+            <MudText Typo="Typo.body2" Class="hp-viz-empty">연체된 미수금이 없습니다.</MudText>
+        }
+    </MudPaper>
+}
 <UnifiedDayDetailModal @ref="_dayDetailRef"
                        IsOpen="_modalOpen"
                        SelectedDate="_modalDate"
@@ -303,6 +380,31 @@
         Legend = new Legend { Show = false }
     };
 
+    // ─── 작7 (2026-06-26) D-1: 시각화 선택 라디오 상태 + 연체 차트 옵션 ───
+    private string _vizMode = "calendar";   // calendar / trend / partners / aging
+
+    // ─── 차트 옵션: 외상 연체 순위 (가로 막대, 빨강 계열) ───
+    private ApexChartOptions<PartnerAgingRow> _agingChartOptions = new()
+    {
+        Chart = new Chart { Toolbar = new Toolbar { Show = false } },
+        PlotOptions = new PlotOptions
+        {
+            Bar = new PlotOptionsBar { Horizontal = true, BarHeight = "60%" }
+        },
+        Yaxis = new List<YAxis>
+        {
+            new()
+            {
+                Labels = new YAxisLabels
+                {
+                    Formatter = @"function(val) { return val >= 10000 ? (val/10000).toFixed(0) + '만' : val.toLocaleString() }"
+                }
+            }
+        },
+        Colors = new List<string> { "#D32F2F" },
+        Legend = new Legend { Show = false }
+    };
+
     // 토스 Hero — 인삿말에 표시할 사용자 이름. JWT claim 에서 추출.
     private string _userName = "사장님";
 
@@ -335,6 +437,28 @@
 
     // 사장님 헌법 (2026-04-27): 시각화 클릭 → 데이터/전표 연동.
     private static DateTime MonthStart() => new DateTime(DateTime.Today.Year, DateTime.Today.Month, 1);
+
+    // 작7 (2026-06-26) D-2·3·4: 대시보드 카드 → 목록 페이지 + 기간 프리필터 직행.
+    //   목적지 페이지(SalesSummaryPage·PurchaseStatusPage)가 ?from=&to= 를 [SupplyParameterFromQuery]로 수신해 초기 조회.
+    private void GoTodaySales()
+    {
+        var d = DateTime.Today.ToString("yyyy-MM-dd");
+        Nav.NavigateTo($"/sales/summary?from={d}&to={d}");
+    }
+
+    private void GoMonthSales()
+    {
+        var from = MonthStart().ToString("yyyy-MM-dd");
+        var to = DateTime.Today.ToString("yyyy-MM-dd");
+        Nav.NavigateTo($"/sales/summary?from={from}&to={to}");
+    }
+
+    private void GoMonthPurchase()
+    {
+        var from = MonthStart().ToString("yyyy-MM-dd");
+        var to = DateTime.Today.ToString("yyyy-MM-dd");
+        Nav.NavigateTo($"/purchase-status?from={from}&to={to}");
+    }
 
     private void GoToTransaction(RecentTx tx)
     {

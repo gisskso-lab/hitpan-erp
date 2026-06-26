@@ -92,7 +92,16 @@
     private string _viewType = "period";
     private List<ReportRow> _reportData = new();
 
-    protected override async Task OnInitializedAsync() => await SearchAsync();
+    // 작7 (2026-06-26): 대시보드 '이번달매입' 카드 클릭 → 당월 기간 프리필터 수신. 없으면 기본(최근 30일).
+    [Parameter, SupplyParameterFromQuery(Name = "from")] public string? FromQuery { get; set; }
+    [Parameter, SupplyParameterFromQuery(Name = "to")] public string? ToQuery { get; set; }
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (DateTime.TryParse(FromQuery, out var f)) _from = f.Date;
+        if (DateTime.TryParse(ToQuery, out var t)) _to = t.Date;
+        await SearchAsync();
+    }
 
     private async Task SearchAsync()
     {

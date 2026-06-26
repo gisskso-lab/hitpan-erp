@@ -1,5 +1,6 @@
 using HitPan.Application.DTOs.Bom;
 using HitPan.Application.Interfaces;
+using HitPan.Contracts.Idempotency;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
@@ -132,7 +133,10 @@ public class BomController : ControllerBase
         return Ok(result);
     }
 
+    // 멱등 보호 (작6, 2026-06-26): 더블클릭·재시도로 같은 생산 1회가 2번 전송돼도 재고 2배 차단.
+    //   같은 Idempotency-Key+같은 본문 = 캐시 재응답(재고 무변경). 다른 키 = 정상 반복생산 통과(헌법 #20 보존).
     [HttpPost("assemble")]
+    [IdempotencyKey]
     public async Task<IActionResult> Assemble([FromBody] BomAssembleDto dto, CancellationToken ct)
     {
         var tid = HttpContext.Items["TenantId"]?.ToString();
@@ -149,7 +153,9 @@ public class BomController : ControllerBase
         }
     }
 
+    // 멱등 보호 (작6, 2026-06-26): 생산과 동일 — 중복 해체 차단, 정상 반복해체 보존.
     [HttpPost("disassemble")]
+    [IdempotencyKey]
     public async Task<IActionResult> Disassemble([FromBody] BomAssembleDto dto, CancellationToken ct)
     {
         var tid = HttpContext.Items["TenantId"]?.ToString();

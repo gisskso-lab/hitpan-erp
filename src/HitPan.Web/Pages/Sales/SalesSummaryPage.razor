@@ -96,7 +96,17 @@
     private string _searchText = "";
     private List<ReportRow> _reportData = new();
 
-    protected override async Task OnInitializedAsync() => await SearchAsync();
+    // 작7 (2026-06-26): 대시보드 카드 클릭 → 기간 프리필터 수신. 값 있으면 그 기간으로 초기 조회.
+    //   오늘매출(from=to=오늘)·이번달매출(from=월초,to=오늘). 없으면 기존 기본(최근 30일) 유지.
+    [Parameter, SupplyParameterFromQuery(Name = "from")] public string? FromQuery { get; set; }
+    [Parameter, SupplyParameterFromQuery(Name = "to")] public string? ToQuery { get; set; }
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (DateTime.TryParse(FromQuery, out var f)) _from = f.Date;
+        if (DateTime.TryParse(ToQuery, out var t)) _to = t.Date;
+        await SearchAsync();
+    }
 
     private async Task SearchAsync()
     {
