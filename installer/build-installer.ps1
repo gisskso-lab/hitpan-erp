@@ -178,7 +178,7 @@ Write-Host "  ✅ DLL 버전 게이트 통과 — 번들 DLL = 현재 코드(HEA
 Write-Host ""
 Write-Host "[3/4] DB 빈 스키마 준비 + 무결성 게이트..." -ForegroundColor Yellow
 
-$dbDumpSrc = "installer/hitpan_db_clean.sql"   # 137 구조 그대로 + 데이터0 + common_codes 시드
+$dbDumpSrc = "installer/hitpan_db_clean.sql"   # 121테이블 구조 그대로 + 데이터0 + common_codes 시드 (게이트 변수 ExpectedTables=121 정합, 2026-06-28 옛숫자137 주석정정)
 $dbDumpDst = "$BundleDir/hitpan_db.sql"
 
 if (-not (Test-Path $dbDumpSrc)) {
