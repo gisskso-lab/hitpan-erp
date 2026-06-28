@@ -14,19 +14,49 @@
 | 포트 | 5234/5257 | **15234/15257** (충돌 회피) |
 | db.conf | PRIMARY_DOMAIN=demo… | PRIMARY_DOMAIN=test… (스크립트 안전가드가 demo면 차단) |
 
-## 자동화 4건 (Run-CommsScenarios.ps1, 작성 완료)
-- **S-A** cloudflared 서비스 kill → 워치독 sc.Start() 재기동 (PASS=5분내 Running)
-- **S-B** MariaDB stop → 워치독 재기동
-- **S-C** HitPan.API kill → 워치독 schtasks /Run 재기동 (PASS=5분내 /health 200)
-- **S-D** TunnelSecret 무효화 → WS28C 재생성 (반자동: EventLog 병행)
+## 자동화 (Run-CommsScenarios.ps1, 봉합 완료 — 작2 2026-06-28)
+- **S-A** cloudflared-test 서비스 kill → 워치독 sc.Start() 재기동 (PASS=5분내 Running)
+- **S-B** MariaDB-test stop → 워치독 재기동
+- **S-C** HitPan.API(test 슬롯) kill → 워치독 schtasks /Run 재기동 (PASS=5분내 /health 200)
+- **S-D** TunnelSecret 무효화 → WS28C 재생성 (**반자동**: EventLog 병행. 실측 자동은 S-A·B·C 3건)
 
 실행:
 ```
 powershell -ExecutionPolicy Bypass -File Run-CommsScenarios.ps1 -Confirm
 ```
-- `-Confirm` 없으면 거부(오발사 방지)
-- PRIMARY_DOMAIN=demo 감지 시 자동 중단(헌법 #39)
-- 결과 → `reports/comms-scenarios-{타임스탬프}.md`
+
+### 🔒 안전망 (작2 봉합 — fail-safe, 헌법 #39)
+1. **`-Confirm` 없으면 거부**(오발사 방지)
+2. **화이트리스트 fail-safe**: `C:\HitPanTest\HITPAN_TEST_ENV.marker` 가 없으면 **무조건 차단**.
+   - 기존 "PRIMARY_DOMAIN=demo면 차단"은 db.conf 없으면 무력화(fail-open)됐다 → "test 마커 있을 때만 실행"(fail-closed)으로 전환.
+   - demo PC엔 이 마커가 절대 없으므로 demo에서 실행 시 100% 차단.
+3. **마커 잔존 방어**: 마커가 있어도 demo 서비스(`cloudflared`, 접미사 없음)가 Running이면 차단(위험상태).
+4. **서비스명 가드**: `-test` 접미사 없는 서비스명은 죽이지 않고 SKIP(demo 서비스 보호).
+5. **API 경로 가드(MUST)**: `HitPan.API` 는 ProcessPath 가 `C:\HitPanTest\` 하위일 때만 kill. demo API(같은 exe명)는 절대 안 죽임.
+6. **2차 방어 유지**: db.conf 있고 PRIMARY_DOMAIN=demo면 추가 차단.
+7. 결과 → `reports/comms-scenarios-{타임스탬프}.md`
+
+### 📄 test 마커 파일 스펙 (`C:\HitPanTest\HITPAN_TEST_ENV.marker`)
+test 슬롯 구축(작1 5-4) 시에만 생성. **운영 배포본·demo엔 절대 미포함.**
+```
+ENV=TEST
+SLOT=e2e-comms
+CLOUDFLARED_SVC=cloudflared-test
+MARIADB_SVC=MariaDB-test
+```
+- `ENV=TEST` 줄 필수(없으면 마커 무효 차단).
+- `CLOUDFLARED_SVC`·`MARIADB_SVC` = 이 슬롯의 실제 서비스명(마커=서비스명 단일 진실원). 스크립트가 이 값만 죽인다.
+
+### ✅ 반증 테스트 (데이비드 박, 완료 게이트 — 만든 사람 ≠ 검증)
+실측 전 반드시 통과:
+1. **마커 없는 상태**(=demo 모사)에서 `-Confirm` 실행 → **반드시 exit 1 차단**되는지 실증.
+2. **마커 + demo 서비스 Running** → 차단되는지.
+3. **`-test` 없는 서비스명** 줘도 죽이지 않고 SKIP 하는지.
+4. demo `cloudflared`·`HitPan.API`(`C:\Program Files\HitPan\`)를 죽이는 경로가 **도달 불가**임을 코드로 반증.
+→ 4개 통과 전 실측(`-Confirm` on test) 금지.
+
+### ⚠️ 인코딩 (작2): 스크립트는 UTF-8 BOM 으로 저장됨
+Windows PowerShell 5.1 이 BOM 없는 UTF-8 한글을 CP949로 오독해 가짜 구문오류를 낸다. BOM 유지 필수(편집 시 인코딩 깨지면 재저장).
 
 ## 수동 시나리오 (자동화 불가 — 별도 세션, 물리·환경)
 | # | 시나리오 | 방법 | PASS 기준 |
