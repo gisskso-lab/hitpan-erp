@@ -1,0 +1,11 @@
+{
+  "version": "9.9.2-test-major",
+  "channel": 2,
+  "downloadUrl": "http://127.0.0.1:8099/packages/hitpan-9.9.2-test-major.zip",
+  "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+  "sizeBytes": 0,
+  "releasedAt": "2026-06-29T20:00:00Z",
+  "releaseNotes": "테스트 전용 가짜 새버전 — Major 채널(고객 Y/N 동의 필요, 영업시간 외 예약). DB 스키마 변경 포함 → 마이그 롤백 검증용. 운영 무관.",
+  "requiresMigration": true,
+  "consentMessage": "새 기능이 포함된 큰 업데이트가 준비되었습니다. 데이터베이스 구조가 변경되므로 업데이트 전 자동 백업이 진행됩니다. 영업시간 외에 적용하시겠습니까? (예 / 아니오)"
+}
