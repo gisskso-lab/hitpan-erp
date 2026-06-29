@@ -1,6 +1,7 @@
 using System.Net.Http.Json;
 using System.Security.Cryptography;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 
 namespace HitPan.Watchdog.AutoUpdate;
 
@@ -31,6 +32,18 @@ public sealed class UpdateClient : IUpdateClient
     private readonly ILogger<UpdateClient> _logger;
     private readonly string _feedUrl;
 
+    // 봉합 (2026-06-29, 작1 고리1 — 마이클 채널 직렬화 발견):
+    //   종전 GetFromJsonAsync 는 옵션 없이(JsonSerializerDefaults.Web) 호출돼 manifest 의 channel 이
+    //   enum 인덱스 '정수'(0=Emergency/1=Normal/2=Major)로만 역직렬화됐다. 그래서 사람이 읽기 쉬운
+    //   문자열("channel":"Normal")로 쓴 installer/updates/manifest-sample.json 은 JsonException 으로 실패했다.
+    //   JsonStringEnumConverter 를 등록하면 '문자열'과 '정수'를 둘 다 받는다(numeric value 도 허용 — 실측 호환).
+    //   → 운영 manifest-sample.json(문자열)·테스트 update-feed 샘플(정수) 모두 안전하게 동작. 일관성을 위해
+    //   샘플은 문자열로 통일 권장하되, 둘 다 받으므로 기존 정수 샘플도 무손상(헌법 #1 추가만).
+    private static readonly JsonSerializerOptions ManifestJsonOptions = new(JsonSerializerDefaults.Web)
+    {
+        Converters = { new JsonStringEnumConverter() }
+    };
+
     public UpdateClient(IHttpClientFactory httpFactory, ILogger<UpdateClient> logger)
     {
         _httpFactory = httpFactory;
@@ -46,7 +59,7 @@ public sealed class UpdateClient : IUpdateClient
             var http = _httpFactory.CreateClient();
             http.Timeout = TimeSpan.FromSeconds(30);
             var manifest = await http.GetFromJsonAsync<UpdateManifest>(
-                $"{_feedUrl}/manifest.json", ct);
+                $"{_feedUrl}/manifest.json", ManifestJsonOptions, ct);
 
             if (manifest is null)
             {

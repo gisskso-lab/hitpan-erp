@@ -1,3 +1,5 @@
+using System.Reflection;
+using HitPan.Watchdog.AutoUpdate;
 using HitPan.Watchdog.Stages;
 using HitPan.Watchdog.Telemetry;
 using Microsoft.Extensions.Options;
@@ -16,9 +18,18 @@ public class Worker : BackgroundService
     private readonly WS28F_CoolDown _f;
     private readonly WS28I_FourProcess _i;
     private readonly MetaPingClient _meta;
+    private readonly UpdateOrchestrator _update;
 
     private string? _lastRecoveryStage;
     private DateTime? _lastRecoveryAt;
+
+    // 봉합 (2026-06-29, 작1 고리1): 업데이트 확인은 하루 1회로 게이트한다(매 루프 60초마다 manifest 조회 방지).
+    //   마지막 확인 날짜(로컬 날짜)를 기억해, 날짜가 바뀐 첫 루프에서만 manifest 를 조회한다.
+    private DateOnly? _lastUpdateCheckDate;
+
+    // Normal 채널 새 버전을 낮에 발견하면, 야간 창(새벽 3시대)이 올 때까지 manifest 재조회 없이 들고 있다가 적용한다
+    //   (feed 를 매 루프 두드리지 않으려는 보호 — 하루 1회 게이트 정신 유지).
+    private UpdateManifest? _pendingNightUpdate;
 
     public Worker(
         ILogger<Worker> logger,
@@ -30,12 +41,14 @@ public class Worker : BackgroundService
         WS28E_ExternalHealthCheck e,
         WS28F_CoolDown f,
         WS28I_FourProcess i,
-        MetaPingClient meta)
+        MetaPingClient meta,
+        UpdateOrchestrator update)
     {
         _logger = logger;
         _options = options.Value;
         _a = a; _b = b; _c = c; _d = d; _e = e; _f = f; _i = i;
         _meta = meta;
+        _update = update;
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -187,6 +200,99 @@ public class Worker : BackgroundService
             _b.MarkPostRebootCheck();
             _logger.LogWarning("WS-28-A: reboot imminent, post-check flagged");
         }
+
+        // 봉합 (2026-06-29, 작1 고리1): 버전 업데이트 평가(하루 1회 게이트). 통신 무결성 단계 뒤에 둔다
+        //   — 통신이 안 되면 manifest 조회 자체가 무의미하기 때문(헌법 #27 통신 무결성 우선).
+        await EvaluateUpdateOncePerDayAsync(ct);
+    }
+
+    /// <summary>
+    /// 작1 고리1 — 하루 1회 게이트로 버전 업데이트를 평가하고 채널별로 분기한다.
+    ///   Normal    = 야간 자동(새벽 3시대, IsNightWindow)에만 적용 진입(고리3 백업→차단까지).
+    ///   Emergency = 안내 후 적용(시간 무관, 적용 진입).
+    ///   Major     = ERP 로그인 시 동의 대기(고리2 담당) — 워치독은 적용을 시작하지 않고 로그만 남긴다.
+    /// 실제 EXE 교체·재시작·마이그(고리4)는 미구현 — ApplyUpdateAsync 가 백업까지만 수행한다.
+    /// </summary>
+    private async Task EvaluateUpdateOncePerDayAsync(CancellationToken ct)
+    {
+        // 낮에 보류해 둔 Normal 업데이트가 있으면, 야간 창에 진입했을 때 feed 재조회 없이 적용한다.
+        if (_pendingNightUpdate is { } pending && _update.IsNightWindow(DateTime.Now))
+        {
+            var toApply = _pendingNightUpdate;
+            _pendingNightUpdate = null;
+            _logger.LogInformation("[Update] Normal 채널 — 야간 창 진입, 보류분 자동 적용: {V}", toApply.Version);
+            try { await _update.ApplyUpdateAsync(toApply, ct); }
+            catch (OperationCanceledException) { throw; }
+            catch (Exception ex) { _logger.LogWarning(ex, "[Update] Normal 보류분 적용 중 예외"); }
+            return;
+        }
+
+        var today = DateOnly.FromDateTime(DateTime.Now);
+        if (_lastUpdateCheckDate == today)
+            return;
+
+        try
+        {
+            var currentVersion = GetCurrentVersion();
+            var decision = await _update.EvaluateAsync(currentVersion, ct);
+
+            // 평가 자체는 하루 1회만(성공·새버전없음 모두). manifest 조회 실패는 다음날 재시도.
+            _lastUpdateCheckDate = today;
+
+            if (decision.Action == UpdateAction.None || decision.Manifest is null)
+            {
+                _logger.LogDebug("[Update] 새 버전 없음 또는 적용 대상 아님(current={V})", currentVersion);
+                return;
+            }
+
+            var m = decision.Manifest;
+            switch (decision.Action)
+            {
+                case UpdateAction.ApplyAtNight: // Normal
+                    if (_update.IsNightWindow(DateTime.Now))
+                    {
+                        _logger.LogInformation("[Update] Normal 채널 — 야간 자동 적용 진입: {V}", m.Version);
+                        await _update.ApplyUpdateAsync(m, ct);
+                    }
+                    else
+                    {
+                        // 야간 창이 아니면 manifest 를 들고만 있다가(_pendingNightUpdate) 야간 창에 적용한다.
+                        //   날짜 게이트는 그대로 둬서 feed 를 매 루프 재조회하지 않는다(하루 1회 정신 유지).
+                        _pendingNightUpdate = m;
+                        _logger.LogDebug("[Update] Normal 채널 새 버전({V}) — 야간(새벽 3시대) 자동 적용 대기(보류)", m.Version);
+                    }
+                    break;
+
+                case UpdateAction.AnnounceThenApply: // Emergency
+                    _logger.LogWarning("[Update] Emergency 채널 — 안내 후 적용 진입: {V} (안내 지연 {Delay})",
+                        m.Version, decision.AnnounceDelay);
+                    await _update.ApplyUpdateAsync(m, ct);
+                    break;
+
+                case UpdateAction.RequireConsent: // Major
+                    // 고리2(ERP 로그인 Y/N 동의)가 동의 전달 다리를 통해 트리거한다. 워치독은 적용을 시작하지 않는다.
+                    _logger.LogInformation("[Update] Major 채널 새 버전({V}) — ERP 로그인 동의 대기(고리2 처리). 워치독 자동 적용 안 함.", m.Version);
+                    break;
+            }
+        }
+        catch (OperationCanceledException) { throw; }
+        catch (Exception ex)
+        {
+            // 헌법 #15: 업데이트 평가 실패도 침묵 금지. 다음날 재평가하도록 게이트를 풀어둔다.
+            _lastUpdateCheckDate = null;
+            _logger.LogWarning(ex, "[Update] 업데이트 평가 중 예외 — 다음 주기 재시도");
+        }
+    }
+
+    /// <summary>
+    /// 현재 설치 버전 문자열. 워치독 어셈블리 버전을 단일출처로 쓴다(별도 버전 파일·db.conf 키 없음 확인 완료).
+    /// Major.Minor.Build 3자리로 manifest version 과 동일 형식(예: "1.0.0")을 맞춘다.
+    /// </summary>
+    private static string GetCurrentVersion()
+    {
+        var asm = Assembly.GetEntryAssembly() ?? Assembly.GetExecutingAssembly();
+        var v = asm.GetName().Version;
+        return v is null ? "0.0.0" : $"{v.Major}.{v.Minor}.{v.Build}";
     }
 
     /// <summary>

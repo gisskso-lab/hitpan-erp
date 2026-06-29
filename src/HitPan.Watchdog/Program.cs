@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Runtime.Versioning;
 using HitPan.Watchdog;
+using HitPan.Watchdog.AutoUpdate;
 using HitPan.Watchdog.Stages;
 using HitPan.Watchdog.Telemetry;
 
@@ -36,6 +37,14 @@ builder.Services.AddSingleton<WS28E_ExternalHealthCheck>();
 builder.Services.AddSingleton<WS28F_CoolDown>();
 builder.Services.AddSingleton<WS28I_FourProcess>();
 builder.Services.AddSingleton<MetaPingClient>();
+
+// 봉합 (2026-06-29, 작1 고리1 — UpdateOrchestrator 를 워치독 Worker 에 연결):
+//   기존 WS28A~I 등록 패턴 그대로 따라 버전 업데이트 연결축을 DI 에 추가한다(헌법 #1 추가만, #34 정식 완성도).
+//   IUpdateClient → manifest 조회/다운로드/sha256 검증, WatchdogBackupRunner → 적용 전 안전 백업(고리3),
+//   UpdateOrchestrator → 채널 분기 평가 + 백업 실패 물리적 차단(고리3).
+builder.Services.AddSingleton<IUpdateClient, UpdateClient>();
+builder.Services.AddSingleton<WatchdogBackupRunner>();
+builder.Services.AddSingleton<UpdateOrchestrator>();
 
 builder.Services.AddHostedService<Worker>();
 
