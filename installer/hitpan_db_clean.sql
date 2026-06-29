@@ -2996,6 +2996,28 @@ CREATE TABLE `security_alerts` (
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
+-- Table structure for table `schema_migrations`
+--   스키마 마이그(DB-*.sql) 적용 이력(고리4 ①) — 멱등·재적용·롤백 기준점. 헌법 #36. 출처: DB-84.
+--   __efmigrationshistory(EF, 비활성 잔재)와 역할이 다르다(EF용 vs Dapper DB-*.sql용).
+--
+
+DROP TABLE IF EXISTS `schema_migrations`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!40101 SET character_set_client = utf8mb4 */;
+CREATE TABLE `schema_migrations` (
+  `id` bigint(20) NOT NULL AUTO_INCREMENT,
+  `migration_id` varchar(100) NOT NULL COMMENT '적용된 마이그 식별자(예: "DB-84"). MigrationRunner 가 파일명에서 추출',
+  `app_version` varchar(20) DEFAULT NULL COMMENT '이 마이그를 적용한 앱 버전(SemVer). 수동 적용 시 NULL',
+  `checksum` varchar(64) DEFAULT NULL COMMENT '마이그 .sql 내용의 SHA-256(무결성). 미산출 시 NULL',
+  `success` tinyint(1) NOT NULL DEFAULT 1 COMMENT '적용 성공 여부. 1=성공(skip 대상), 0=실패(재적용 대상)',
+  `applied_at` datetime(3) NOT NULL DEFAULT current_timestamp(3) COMMENT '적용 시각',
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uq_schema_migrations_migration_id` (`migration_id`),
+  KEY `idx_schema_migrations_applied` (`applied_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
+
+--
 -- Table structure for table `service_tickets`
 --
 

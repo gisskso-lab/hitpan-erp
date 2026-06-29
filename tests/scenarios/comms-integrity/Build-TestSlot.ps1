@@ -301,10 +301,10 @@ try {
     $raw = & $mysqlExe "--user=$DbUser" @pwArg --batch --skip-column-names "--execute=$cntSql"
     $tableCount = 0
     [int]::TryParse(("$raw").Trim(), [ref]$tableCount) | Out-Null
-    if ($tableCount -lt 123) {   # 2026-06-29 local_update_status 편입 122→123
-        Abort "테이블 수 검증 실패: 기대 123, 실제 $tableCount → import 불완전(헌법 #36)."
+    if ($tableCount -lt 124) {   # 2026-06-29 schema_migrations 편입 123→124 (고리4 ①)
+        Abort "테이블 수 검증 실패: 기대 124, 실제 $tableCount → import 불완전(헌법 #36)."
     }
-    Ok "테이블 수 검증 통과: $tableCount (>= 123)"
+    Ok "테이블 수 검증 통과: $tableCount (>= 124)"
 } catch {
     Abort "테이블 수 검증 실패: $($_.Exception.Message)"
 }
