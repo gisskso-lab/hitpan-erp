@@ -129,7 +129,7 @@ Write-Host "[4/5] DB 덤프..." -ForegroundColor Yellow
 #   헌법 #18/#22 출하 금지 데이터)을 쓰고 게이트는 금지구문(DB명/DEFINER) 1개뿐이라, 본사·실데이터가
 #   고객 PC로 출하될 수 있었다. build-installer.ps1(구세대)에만 있던 무결성 게이트 4단을 본류로 이식하고,
 #   소스를 검증된 빈 스키마 정본(hitpan_db_clean.sql)으로 통일한다(단일 진실원, 헌법 #19/#35).
-$dbDumpSrc = "installer/hitpan_db_clean.sql"   # 121 구조 + 데이터0 + common_codes 시드 (git 추적 정본)
+$dbDumpSrc = "installer/hitpan_db_clean.sql"   # 123 구조 + 데이터0 + common_codes 시드 (git 추적 정본, 2026-06-29 local_update_status 편입 122→123)
 $dbDumpDst = "$BundleDir/hitpan_db.sql"
 
 if (-not (Test-Path $dbDumpSrc)) {
@@ -147,10 +147,10 @@ $sqlNoComments = ($sql -split "`n" | Where-Object { $_ -notmatch '^\s*--' }) -jo
 $banHits = ([regex]::Matches($sqlNoComments, '(?im)^\s*USE\s|CREATE\s+DATABASE|DROP\s+DATABASE|ALTER\s+DATABASE|DEFINER\s*=')).Count
 if ($banHits -gt 0) { throw "  ❌ 게이트2 실패: 금지 구문(USE/CREATE DATABASE/DEFINER) $banHits 건. 출시 차단." }
 
-# ── 게이트 3: 구조 보존 — 테이블 수(121) + 트리거(3) ──
+# ── 게이트 3: 구조 보존 — 테이블 수(123) + 트리거(3) ── (2026-06-29 local_update_status 편입 122→123)
 $tableCount   = ([regex]::Matches($sql, 'CREATE TABLE')).Count
 $triggerCount = ([regex]::Matches($sql, '(?im)CREATE.*TRIGGER|50003 .*TRIGGER')).Count
-if ($tableCount -ne 121) { throw "  ❌ 게이트3 실패: 구조 불일치 — 기대 121 테이블 ≠ $tableCount. 출시 차단." }
+if ($tableCount -ne 123) { throw "  ❌ 게이트3 실패: 구조 불일치 — 기대 123 테이블 ≠ $tableCount. 출시 차단." }
 if ($triggerCount -lt 3) { throw "  ❌ 게이트3 실패: 트리거 누락 — 기대 3 ≠ $triggerCount. 출시 차단." }
 
 # ── 게이트 4: 데이터 0 — 개발/실데이터 미혼입 (common_codes 코드성 시드만 허용) ──

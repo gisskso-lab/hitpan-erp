@@ -4,6 +4,8 @@
 @inject IAuthService AuthService
 @inject NavigationManager Navigation
 @inject AuthenticationStateProvider AuthenticationStateProvider
+@inject IDialogService DialogService
+@using HitPan.Web.Components.Common
 
 <PageTitle>로그인 — 히트판 ERP</PageTitle>
 
@@ -102,8 +104,17 @@
             if (result.Data?.RequiresTermsConsent == true)
             {
                 Navigation.NavigateTo("/terms", forceLoad: true);
+                return;
             }
-            else if (result.Data?.RedirectToWelcome == true)
+
+            // 고리2(A안): 새 버전이 있으면 업데이트 동의 Y/N 팝업 (헌법 #30 로컬 자가완결)
+            //   - 약관 동의가 끝난 뒤에만 노출(약관이 우선). 팝업이 실패해도 로그인 흐름은 막지 않는다.
+            if (result.Data?.UpdateAvailable == true && !string.IsNullOrWhiteSpace(result.Data?.LatestVersion))
+            {
+                await PromptUpdateConsentAsync(result.Data);
+            }
+
+            if (result.Data?.RedirectToWelcome == true)
             {
                 Navigation.NavigateTo("/welcome", forceLoad: true);
             }
@@ -115,6 +126,39 @@
         finally
         {
             _busy = false;
+        }
+    }
+
+    /// <summary>
+    /// 고리2(A안) — 새 버전 동의 Y/N 팝업. [예]=approve, [나중에]=reject 를 로컬 ERP DB에 기록한다.
+    ///   본사를 거치지 않는다(헌법 #30). 팝업/기록이 실패해도 로그인 진행은 막지 않는다(다음 로그인 재안내).
+    ///   ⚠️ 헌법 #14: Razor 에 raw string("""...""") 금지 — $"...\n..." 로 메시지를 만든다.
+    /// </summary>
+    private async Task PromptUpdateConsentAsync(LoginApiResponse data)
+    {
+        try
+        {
+            var version = data.LatestVersion ?? "";
+            var notice = string.IsNullOrWhiteSpace(data.ConsentMessage)
+                ? "지금 동의하시면 다음 재시작 때 자동으로 적용됩니다."
+                : data.ConsentMessage!;
+            var message = $"새 버전 {version} 이(가) 나왔습니다. 업데이트하시겠습니까?\n\n{notice}";
+
+            var agree = await ConfirmDialog.ShowAsync(
+                DialogService,
+                title: "업데이트 안내",
+                message: message,
+                confirmText: "예",
+                cancelText: "나중에",
+                severity: Severity.Info);
+
+            // 예=approve / 나중에=reject — 양쪽 모두 기록(거부 이력도 남겨 재안내 정책에 활용).
+            var action = agree ? "approve" : "reject";
+            await AuthService.SubmitUpdateConsentAsync(version, action);
+        }
+        catch
+        {
+            // 동의 팝업/기록 실패는 로그인 흐름을 막지 않는다(다음 로그인에 재안내).
         }
     }
 }

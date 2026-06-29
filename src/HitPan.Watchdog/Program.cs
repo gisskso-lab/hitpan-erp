@@ -46,6 +46,17 @@ builder.Services.AddSingleton<IUpdateClient, UpdateClient>();
 builder.Services.AddSingleton<WatchdogBackupRunner>();
 builder.Services.AddSingleton<UpdateOrchestrator>();
 
+// 봉합 (2026-06-29, 작1 고리2 워치독 측 — 로컬 동의 리더):
+//   A안(헌법 #30): ERP 가 local_update_consents(DB-82)에 INSERT 한 Major 업데이트 동의를 워치독이
+//   로컬에서 SELECT 해 적용 가부를 판단한다. WatchdogBackupRunner 와 동일하게 db.conf 자격증명 +
+//   MariaDB 클라이언트 CLI 자족 실행(드라이버 패키지·API 의존 0). 헌법 #1 추가만.
+builder.Services.AddSingleton<WatchdogConsentReader>();
+
+// 봉합 (2026-06-29, 작1 고리2 마지막 빈 칸 — 로컬 새버전 상태 라이터):
+//   A안(헌법 #30): 워치독이 발견한 Major 새버전을 local_update_status(DB-83)에 적재한다.
+//   ERP 가 로그인 시 그 행을 읽어 UpdateAvailable 을 채워 Y/N 동의 팝업을 노출한다(본사 의존 0). 헌법 #1 추가만.
+builder.Services.AddSingleton<WatchdogStatusWriter>();
+
 builder.Services.AddHostedService<Worker>();
 
 var host = builder.Build();

@@ -172,13 +172,13 @@ Write-Host "  ✅ DLL 버전 게이트 통과 — 번들 DLL = 현재 코드(HEA
 
 # ─── 3. DB 빈 스키마 준비 + 무결성 게이트 ────────
 # 사장님 원칙(2026-06-18): 코드·데이터 구조 100% 그대로. 빼고 넣고 없음.
-#   · ERP 로컬 배포본 구조(121 테이블 + 3 트리거)를 그대로 가져간다 (본사 16테이블·5트리거 제거 후, 구조 보존).
+#   · ERP 로컬 배포본 구조(123 테이블 + 3 트리거)를 그대로 가져간다 (본사 16테이블·5트리거 제거 후, 구조 보존 / 2026-06-29 121→122→123).
 #   · 데이터만 0 (고객은 빈 DB로 시작) / 백도어 테스트계정만 차단.
 #   · common_codes 코드성 시드만 유지 / DEFINER만 제거(회사별DB 이식용).
 Write-Host ""
 Write-Host "[3/4] DB 빈 스키마 준비 + 무결성 게이트..." -ForegroundColor Yellow
 
-$dbDumpSrc = "installer/hitpan_db_clean.sql"   # 121테이블 구조 그대로 + 데이터0 + common_codes 시드 (게이트 변수 ExpectedTables=121 정합, 2026-06-28 옛숫자137 주석정정)
+$dbDumpSrc = "installer/hitpan_db_clean.sql"   # 123테이블 구조 그대로 + 데이터0 + common_codes 시드 (게이트 변수 ExpectedTables=123 정합, 2026-06-29 local_update_status 편입 122→123)
 $dbDumpDst = "$BundleDir/hitpan_db.sql"
 
 if (-not (Test-Path $dbDumpSrc)) {
@@ -205,11 +205,11 @@ if ($banHits -gt 0) {
 }
 
 # ── 게이트 3: 구조 보존 — 테이블 수 + 트리거 존재 (구조 100% 그대로) ──
-# ERP 로컬 배포본 구조(121 테이블 + 3 트리거)를 그대로 가져왔는지 확인. 빼거나 더하면 차단.
+# ERP 로컬 배포본 구조(123 테이블 + 3 트리거)를 그대로 가져왔는지 확인. 빼거나 더하면 차단.
 # 빌드 PC에 개발 hitpan_erp가 있으면 실측 교차검증, 없으면 고정 기대값으로 검사.
 $tableCount   = ([regex]::Matches($sql, 'CREATE TABLE')).Count
 $triggerCount = ([regex]::Matches($sql, '(?im)CREATE.*TRIGGER|50003 .*TRIGGER')).Count
-$ExpectedTables   = 121   # ERP 로컬 배포본 BASE TABLE 수 (본사 16테이블 제거 후, 2026-06-19 실측)
+$ExpectedTables   = 123   # ERP 로컬 배포본 BASE TABLE 수 (본사 16테이블 제거 후, 2026-06-19 실측 / 2026-06-29 local_update_status 편입 122→123)
 $ExpectedTriggers = 3     # ERP 필수 트리거 수 (본사 5트리거 동반 제거 후: psp비율2 + 세금계산서잠금1)
 if ($tableCount -ne $ExpectedTables) {
     Write-Error "  ❌ 게이트 실패: 구조 불일치 — 기대 $ExpectedTables 테이블 ≠ 빈 스키마 $tableCount. '구조 100% 그대로' 위반. 출시 차단."

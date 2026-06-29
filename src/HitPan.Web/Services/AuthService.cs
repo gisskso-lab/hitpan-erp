@@ -101,6 +101,25 @@ public sealed class AuthService : IAuthService
         }
     }
 
+    public async Task<bool> SubmitUpdateConsentAsync(string updateVersion, string action, CancellationToken ct = default)
+    {
+        // 고리2(A안): 로그인 직후라 인증 토큰이 보관돼 있으므로 인증 핸들러가 헤더를 붙인다.
+        //   실패해도 로그인 자체는 이미 끝난 상태 — 동의 기록만 실패로 처리(false)한다.
+        try
+        {
+            using var response = await _http.PostAsJsonAsync(
+                "api/auth/update-consent",
+                new UpdateConsentRequestDto { UpdateVersion = updateVersion, Action = action },
+                cancellationToken: ct);
+            return response.IsSuccessStatusCode;
+        }
+        catch (HttpRequestException)
+        {
+            // 서버 연결 실패 등 — 동의 기록 실패. 다음 로그인에 재안내된다.
+            return false;
+        }
+    }
+
     public async Task<bool> RefreshAsync(CancellationToken ct = default)
     {
         var ok = await _tokenRefresher.TryRefreshAsync(ct);

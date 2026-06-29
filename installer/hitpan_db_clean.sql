@@ -1832,6 +1832,50 @@ CREATE TABLE `local_subscription` (
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
+-- Table structure for table `local_update_consents`
+--   업데이트 동의(고리2) 고객 PC 로컬 자가완결 — 헌법 #30·#36. 출처: DB-82.
+--
+
+DROP TABLE IF EXISTS `local_update_consents`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!40101 SET character_set_client = utf8mb4 */;
+CREATE TABLE `local_update_consents` (
+  `id` bigint(20) NOT NULL AUTO_INCREMENT,
+  `tenant_id` varchar(36) NOT NULL COMMENT '로컬 테넌트 식별자(local_company.tenant_id 와 동일값)',
+  `user_id` varchar(64) NOT NULL COMMENT '동의한 ERP 로컬 사용자 식별자',
+  `update_version` varchar(20) NOT NULL COMMENT '동의 대상 업데이트 버전',
+  `action` enum('approve','reject') NOT NULL COMMENT '고리2 Y/N 동의 결과',
+  `consented_at` datetime(3) NOT NULL COMMENT '고객이 ERP에서 동의/거부한 시각',
+  `created_at` datetime(3) NOT NULL DEFAULT current_timestamp(3) COMMENT '로컬 적재 시각',
+  PRIMARY KEY (`id`),
+  KEY `idx_local_update_consents_version` (`update_version`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
+
+--
+-- Table structure for table `local_update_status`
+--   로컬 새버전 상태(고리2) — 워치독 발견→ERP 로그인 팝업, 고객 PC 로컬 자가완결. 헌법 #30·#36. 출처: DB-83.
+--
+
+DROP TABLE IF EXISTS `local_update_status`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!40101 SET character_set_client = utf8mb4 */;
+CREATE TABLE `local_update_status` (
+  `id` bigint(20) NOT NULL AUTO_INCREMENT,
+  `tenant_id` varchar(36) DEFAULT NULL COMMENT '로컬 테넌트 식별자(local_company.tenant_id). 워치독 단일 테넌트라 NULL 허용',
+  `latest_version` varchar(20) NOT NULL COMMENT '워치독이 발견한 새버전(SemVer Major.Minor.Build)',
+  `update_channel` varchar(20) NOT NULL DEFAULT 'Major' COMMENT '업데이트 채널(Major/Normal/Emergency). 로그인 팝업은 Major 위주',
+  `consent_message` text DEFAULT NULL COMMENT 'Major 동의 팝업 안내 문구(manifest.ConsentMessage)',
+  `download_url` varchar(500) DEFAULT NULL COMMENT 'manifest.DownloadUrl(참고용 — 적용은 워치독)',
+  `requires_migration` tinyint(1) NOT NULL DEFAULT 0 COMMENT 'DB 스키마 마이그 동반 여부(manifest.RequiresMigration)',
+  `discovered_at` datetime(3) NOT NULL COMMENT '워치독이 새버전을 발견·적재한 시각',
+  `created_at` datetime(3) NOT NULL DEFAULT current_timestamp(3) COMMENT '로컬 적재 시각',
+  PRIMARY KEY (`id`),
+  KEY `idx_local_update_status_discovered` (`discovered_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
+
+--
 -- Table structure for table `login_attempts`
 --
 

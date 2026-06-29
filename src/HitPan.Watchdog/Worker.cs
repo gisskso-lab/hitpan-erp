@@ -31,6 +31,26 @@ public class Worker : BackgroundService
     //   (feed 를 매 루프 두드리지 않으려는 보호 — 하루 1회 게이트 정신 유지).
     private UpdateManifest? _pendingNightUpdate;
 
+    // 봉합 (2026-06-29, 작1 고리2): Major(동의 필요) 새 버전을 발견하면 manifest 를 들고 있다가,
+    //   다음 메타 ping 에 latest_version·update_channel·consent_message 를 실어 본사에 알린다.
+    //   A안(2026-06-29 결재): ERP 로그인 동의(고리2 UI)는 본사를 거치지 않고 고객 PC 로컬에서 완결된다 —
+    //   동의 결과를 고객 PC 로컬 ERP DB local_update_consents(DB-82)에 INSERT 하고 워치독이 로컬에서 SELECT 한다(헌법 #30).
+    //   본사에는 latest_version·update_channel·consent_message 메타만 ping 으로 알린다(MetaPingPayload 확장, A안과 무관·유지).
+    //   _pendingNightUpdate 와 동일한 공유 상태 패턴(과설계 방지) — 펜딩 없으면 null 이라 payload 필드도 null(역호환).
+    private UpdateManifest? _pendingConsentUpdate;
+
+    // 봉합 (2026-06-29, 작1 고리2 워치독 측): 이미 적용을 시도(ApplyUpdateAsync 호출)한 버전을 기억해
+    //   같은 버전을 중복 적용하지 않는다(멱등). 적용 진입 시 _pendingConsentUpdate 를 비우는 것에 더해,
+    //   거부 후 거부분이 다시 펜딩으로 돌아오는 케이스까지 막기 위해 적용 시도 버전 집합을 별도로 둔다.
+    //   고리4(실 적용)가 붙으면 이 집합이 "이미 처리한 버전" 기준이 된다(재처리 차단).
+    private readonly HashSet<string> _consentAppliedVersions = new(StringComparer.OrdinalIgnoreCase);
+
+    private readonly WatchdogConsentReader _consent;
+
+    // 봉합 (2026-06-29, 작1 고리2 마지막 빈 칸): 발견한 Major 새버전을 로컬 DB(local_update_status, DB-83)에
+    //   적재하는 라이터. ERP 가 로그인 시 그 행을 읽어 Y/N 동의 팝업을 노출한다(A안, 헌법 #30 본사 의존 0).
+    private readonly WatchdogStatusWriter _statusWriter;
+
     public Worker(
         ILogger<Worker> logger,
         IOptions<WatchdogOptions> options,
@@ -42,13 +62,17 @@ public class Worker : BackgroundService
         WS28F_CoolDown f,
         WS28I_FourProcess i,
         MetaPingClient meta,
-        UpdateOrchestrator update)
+        UpdateOrchestrator update,
+        WatchdogConsentReader consent,
+        WatchdogStatusWriter statusWriter)
     {
         _logger = logger;
         _options = options.Value;
         _a = a; _b = b; _c = c; _d = d; _e = e; _f = f; _i = i;
         _meta = meta;
         _update = update;
+        _consent = consent;
+        _statusWriter = statusWriter;
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -215,6 +239,16 @@ public class Worker : BackgroundService
     /// </summary>
     private async Task EvaluateUpdateOncePerDayAsync(CancellationToken ct)
     {
+        // 봉합 (2026-06-29, 작1 고리2 워치독 측): Major(동의 필요) 펜딩이 있으면 매 루프 로컬 동의를 읽어
+        //   적용 가부를 판단한다. 동의는 ERP 에서 아무 때나 들어올 수 있으므로 하루 1회 게이트와 분리해
+        //   _pendingNightUpdate 와 동일한 매 루프 폴링 패턴으로 처리한다(feed 재조회 없음 — 로컬 DB 만 읽음).
+        if (_pendingConsentUpdate is { } consentPending)
+        {
+            await ConsumeConsentForMajorAsync(consentPending, ct);
+            // 동의 처리(승인 적용 진입/거부 폐기) 후엔 펜딩이 비워졌을 수 있다. 다른 채널 평가와 섞지 않고 반환.
+            return;
+        }
+
         // 낮에 보류해 둔 Normal 업데이트가 있으면, 야간 창에 진입했을 때 feed 재조회 없이 적용한다.
         if (_pendingNightUpdate is { } pending && _update.IsNightWindow(DateTime.Now))
         {
@@ -271,7 +305,16 @@ public class Worker : BackgroundService
 
                 case UpdateAction.RequireConsent: // Major
                     // 고리2(ERP 로그인 Y/N 동의)가 동의 전달 다리를 통해 트리거한다. 워치독은 적용을 시작하지 않는다.
-                    _logger.LogInformation("[Update] Major 채널 새 버전({V}) — ERP 로그인 동의 대기(고리2 처리). 워치독 자동 적용 안 함.", m.Version);
+                    //   manifest 를 들고 있다가(_pendingConsentUpdate) 다음 메타 ping 에 버전·채널·안내 문구를 실어 본사에 알린다.
+                    _pendingConsentUpdate = m;
+
+                    // 봉합 (2026-06-29, 작1 고리2 마지막 빈 칸, A안 헌법 #30): 발견한 Major 새버전을 로컬 DB
+                    //   (local_update_status, DB-83)에 적재한다. ERP 가 로그인 시 그 행을 읽어 UpdateAvailable=true
+                    //   로 Y/N 동의 팝업을 노출한다(본사 의존 0). 로그인 팝업 동의 대상은 Major 위주이므로 Major 만 적재.
+                    //   적재 실패(false)는 워치독 루프를 멈추지 않는다(라이터가 로그만 남기고 false 반환, 헌법 #15).
+                    await _statusWriter.UpsertLatestAsync(m, ct);
+
+                    _logger.LogInformation("[Update] Major 채널 새 버전({V}) — ERP 로그인 동의 대기(고리2 처리). 로컬 적재 완료. 워치독 자동 적용 안 함. 메타 ping 으로 본사 통지 예약.", m.Version);
                     break;
             }
         }
@@ -281,6 +324,59 @@ public class Worker : BackgroundService
             // 헌법 #15: 업데이트 평가 실패도 침묵 금지. 다음날 재평가하도록 게이트를 풀어둔다.
             _lastUpdateCheckDate = null;
             _logger.LogWarning(ex, "[Update] 업데이트 평가 중 예외 — 다음 주기 재시도");
+        }
+    }
+
+    /// <summary>
+    /// 작1 고리2 워치독 측 — 펜딩 Major 업데이트의 로컬 동의를 읽어 적용 가부를 판단한다(A안, 헌법 #30).
+    ///   approve  → 영업시간 외에 ApplyUpdateAsync 진입(백업→차단→고리4 자리). 영업시간이면 미루기(다음 루프 재판단).
+    ///   reject   → 적용 안 함. 펜딩 폐기(다음 로그인 재제시는 ERP 몫 — 새 동의가 들어오면 manifest 재발견 시 재펜딩).
+    ///   None     → 미응답. 펜딩 유지(다음 루프 재조회).
+    ///   Error    → 조회 실패. 펜딩 유지(보수적, 다음 루프 재시도).
+    /// 멱등: 이미 적용을 시도한 버전(_consentAppliedVersions)은 다시 적용하지 않는다.
+    /// </summary>
+    private async Task ConsumeConsentForMajorAsync(UpdateManifest m, CancellationToken ct)
+    {
+        // 멱등 — 이미 이 버전 적용을 시도했으면 펜딩만 비우고 끝(중복 백업·적용 차단).
+        if (_consentAppliedVersions.Contains(m.Version))
+        {
+            _logger.LogDebug("[Update] Major 버전 {V} 은 이미 적용 시도됨 — 펜딩 해제(멱등)", m.Version);
+            _pendingConsentUpdate = null;
+            return;
+        }
+
+        var decision = await _consent.ReadLatestAsync(m.Version, ct);
+        switch (decision)
+        {
+            case ConsentDecision.Approve:
+                // Major 는 동의했어도 영업시간엔 미룬다(기존 IsBusinessHour 게이트 활용 — 업무 방해 0).
+                if (_update.IsBusinessHour(DateTime.Now))
+                {
+                    _logger.LogInformation("[Update] Major 버전 {V} 동의 확인 — 영업시간이라 적용 보류(영업시간 외 자동 적용)", m.Version);
+                    return; // 펜딩 유지, 다음 루프 영업시간 외에 재판단
+                }
+
+                // 멱등 기록을 먼저 남긴 뒤 적용 — 적용 중 예외가 나도 같은 버전을 무한 재시도하지 않게 한다.
+                _consentAppliedVersions.Add(m.Version);
+                _pendingConsentUpdate = null;
+                _logger.LogInformation("[Update] Major 버전 {V} 동의 확인(영업시간 외) — 적용 진입(백업→...)", m.Version);
+                try { await _update.ApplyUpdateAsync(m, ct); }
+                catch (OperationCanceledException) { throw; }
+                catch (Exception ex) { _logger.LogWarning(ex, "[Update] Major 동의 적용 중 예외 — 버전 {V}", m.Version); }
+                break;
+
+            case ConsentDecision.Reject:
+                _logger.LogInformation("[Update] Major 버전 {V} 거부 — 적용 안 함, 펜딩 해제(재제시는 ERP 몫)", m.Version);
+                _pendingConsentUpdate = null;
+                break;
+
+            case ConsentDecision.None:
+                _logger.LogDebug("[Update] Major 버전 {V} 동의 미응답 — 펜딩 유지(다음 루프 재조회)", m.Version);
+                break;
+
+            case ConsentDecision.Error:
+                _logger.LogDebug("[Update] Major 버전 {V} 동의 조회 실패 — 펜딩 유지(다음 루프 재시도)", m.Version);
+                break;
         }
     }
 
@@ -371,6 +467,16 @@ public class Worker : BackgroundService
                 Timestamp = _lastRecoveryAt
             }
         };
+
+        // 봉합 (2026-06-29, 작1 고리2): 동의 필요(Major) 펜딩 업데이트가 있으면 본사에 함께 알린다.
+        //   펜딩 없으면 세 필드 모두 null 로 남아 역호환(구버전 본사 API 는 무시).
+        if (_pendingConsentUpdate is { } consent)
+        {
+            payload.LatestVersion = consent.Version;
+            payload.UpdateChannel = consent.Channel.ToString();
+            payload.ConsentMessage = consent.ConsentMessage;
+        }
+
         await _meta.SendAsync(payload, ct);
     }
 

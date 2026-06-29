@@ -33,6 +33,23 @@ public sealed class LoginApiResponse
 
     // 헌법 #24: 약관 v2.0.0 미동의 시 true (Login.razor에서 /terms 강제 이동)
     public bool RequiresTermsConsent { get; set; }
+
+    // ── 고리2(A안): 업데이트 동의 Y/N 팝업 (Login.razor에서 UpdateAvailable=true면 팝업) ──
+    public string? CurrentVersion { get; set; }
+    public bool UpdateAvailable { get; set; }
+    public string? LatestVersion { get; set; }
+    public string? UpdateChannel { get; set; }
+    public string? ConsentMessage { get; set; }
+}
+
+/// <summary>고리2 업데이트 동의 요청 바디 (POST api/auth/update-consent).</summary>
+public sealed class UpdateConsentRequestDto
+{
+    [JsonPropertyName("updateVersion")]
+    public string UpdateVersion { get; set; } = string.Empty;
+
+    [JsonPropertyName("action")]
+    public string Action { get; set; } = string.Empty;
 }
 
 public sealed class RefreshTokenRequestDto

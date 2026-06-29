@@ -130,6 +130,12 @@ public class AuthController : ControllerBase
                 }
             }
 
+            // ── 고리2(A안): 업데이트 동의 Y/N 팝업 정보 (헌법 #30 로컬 자가완결, 본사 의존 0) ──
+            //   CurrentVersion 은 ERP 어셈블리 버전으로 항상 채운다. 새 버전 존재 여부(UpdateAvailable)는
+            //   로컬에서 워치독이 평가한 결과를 읽어 채운다 — 정보가 아직 없으면 false 안전 폴백.
+            //   ⚠️ 로그인 흐름은 절대 막지 않는다(어떤 예외도 로그만, false 폴백). 로그인 깨짐 = P0.
+            await EnrichUpdateConsentInfoAsync(response, ct);
+
             return Ok(response);
         }
         catch (UnauthorizedAccessException ex)
@@ -213,6 +219,196 @@ public class AuthController : ControllerBase
         return ok ? Ok(new { verified = true })
                   : Unauthorized(new { message = "비밀번호가 일치하지 않습니다." });
     }
+
+    /// <summary>
+    /// 고리2(A안) — 업데이트 동의(Y/N)를 고객 PC 로컬 ERP DB(local_update_consents)에 기록한다.
+    ///   · 본사를 거치지 않는다(헌법 #30 본사 의존 0). 워치독이 로컬에서 본 테이블을 SELECT 해 적용 가부 판단.
+    ///   · tenant_id·user_id 는 JWT 클레임에서만 받는다(헌법 #2). 파라미터로 받지 않는다.
+    ///   · INSERT ONLY — 동의 이력은 갱신/삭제하지 않는다(매 동의/거부를 한 행으로 남긴다).
+    /// </summary>
+    [HttpPost("update-consent")]
+    [Authorize(Policy = "TenantOnly")]
+    public async Task<IActionResult> UpdateConsent([FromBody] UpdateConsentRequest request, CancellationToken ct)
+    {
+        var tenantId = HttpContext.Items["TenantId"]?.ToString();
+        var userId = HttpContext.Items["UserId"]?.ToString();
+        if (string.IsNullOrEmpty(tenantId) || string.IsNullOrEmpty(userId))
+            return Forbid();
+
+        if (request is null
+            || string.IsNullOrWhiteSpace(request.UpdateVersion)
+            || string.IsNullOrWhiteSpace(request.Action))
+        {
+            return BadRequest(new { message = "동의 버전과 동작(approve/reject)이 필요합니다." });
+        }
+
+        var action = request.Action.Trim().ToLowerInvariant();
+        if (action != "approve" && action != "reject")
+            return BadRequest(new { message = "동작은 approve 또는 reject 여야 합니다." });
+
+        try
+        {
+            var db = HttpContext.RequestServices.GetRequiredService<System.Data.IDbConnection>();
+            if (db.State != System.Data.ConnectionState.Open)
+            {
+                if (db is System.Data.Common.DbConnection c) await c.OpenAsync(ct);
+                else db.Open();
+            }
+
+            await Dapper.SqlMapper.ExecuteAsync(db, new Dapper.CommandDefinition(
+                """
+                INSERT INTO local_update_consents
+                    (tenant_id, user_id, update_version, action, consented_at)
+                VALUES
+                    (@TenantId, @UserId, @UpdateVersion, @Action, @ConsentedAt)
+                """,
+                new
+                {
+                    TenantId = tenantId,
+                    UserId = userId,
+                    UpdateVersion = request.UpdateVersion.Trim(),
+                    Action = action,
+                    ConsentedAt = DateTime.Now
+                },
+                cancellationToken: ct));
+
+            return Ok(new
+            {
+                message = action == "approve"
+                    ? "업데이트 동의가 저장되었습니다. 다음 재시작 때 적용됩니다."
+                    : "나중에 안내해 드리겠습니다."
+            });
+        }
+        catch (Exception ex)
+        {
+            // 헌법 #15: 동의 기록 실패는 침묵하지 않는다. 단, 사용자에겐 명확한 한국어 메시지로 반환.
+            _logger.LogWarning(ex, "업데이트 동의 기록 실패 — TenantId: {TenantId}", tenantId);
+            return StatusCode(500, new { message = "동의 기록에 실패했습니다. 잠시 후 다시 시도해주세요." });
+        }
+    }
+
+    /// <summary>
+    /// 고리2(A안) — 로그인 응답에 업데이트 동의 팝업 정보를 채운다.
+    ///   CurrentVersion 은 ERP 어셈블리 버전으로 항상 채운다.
+    ///   UpdateAvailable 은 로컬에 워치독이 적재한 "새 버전" 정보가 있고 그게 설치버전보다 높을 때만 true.
+    ///   경로(2026-06-29 봉합, 고리2 마지막 빈 칸): 워치독이 Major 새버전 발견 시 local_update_status(DB-83)에
+    ///     적재 → 여기서 그 행(최신 1건)을 읽어 SemVer 비교 후 채운다. 본사를 거치지 않는다(A안, 헌법 #30).
+    ///   ⚠️ 로그인은 절대 안 깨진다: 테이블 부재·조회 실패·버전 파싱 실패 등 어떤 예외도 로그만 남기고
+    ///      UpdateAvailable=false 안전 폴백한다(헌법 #15 침묵 금지 + 로그인 깨짐 = P0).
+    ///   tenant_id 는 JWT 클레임 영역에서만 다룬다(헌법 #2). 로컬 단일 테넌트 DB라 본 조회는 tenant 필터 불요.
+    /// </summary>
+    private async Task EnrichUpdateConsentInfoAsync(LoginResponse response, CancellationToken ct)
+    {
+        try
+        {
+            response.CurrentVersion = GetCurrentErpVersion();
+
+            // 안전 기본값 — 어떤 분기에서도 로그인은 막지 않는다.
+            response.UpdateAvailable = false;
+            response.LatestVersion = null;
+            response.UpdateChannel = null;
+            response.ConsentMessage = null;
+
+            var db = HttpContext.RequestServices.GetRequiredService<System.Data.IDbConnection>();
+            if (db.State != System.Data.ConnectionState.Open)
+            {
+                if (db is System.Data.Common.DbConnection c) await c.OpenAsync(ct);
+                else db.Open();
+            }
+
+            // 워치독이 적재한 최신 새버전 1건. 테이블이 없거나 비어 있으면 null → 안전 폴백.
+            var row = await Dapper.SqlMapper.QueryFirstOrDefaultAsync<LocalUpdateStatusRow>(db,
+                new Dapper.CommandDefinition(
+                    """
+                    SELECT latest_version AS LatestVersion,
+                           update_channel AS UpdateChannel,
+                           consent_message AS ConsentMessage
+                    FROM local_update_status
+                    ORDER BY discovered_at DESC, id DESC
+                    LIMIT 1
+                    """,
+                    cancellationToken: ct));
+
+            if (row is null || string.IsNullOrWhiteSpace(row.LatestVersion))
+                return; // 적재된 새버전 없음 → 폴백 유지
+
+            // 설치버전보다 높은 새버전일 때만 팝업 노출(SemVer Major.Minor.Build 비교).
+            if (IsNewerVersion(response.CurrentVersion, row.LatestVersion))
+            {
+                response.UpdateAvailable = true;
+                response.LatestVersion = row.LatestVersion;
+                response.UpdateChannel = row.UpdateChannel;
+                response.ConsentMessage = row.ConsentMessage;
+            }
+        }
+        catch (Exception ex)
+        {
+            // 헌법 #15: 침묵 금지 + 로그인은 절대 안 깨지게(false 폴백).
+            _logger.LogWarning(ex, "업데이트 동의 정보 조회 실패 — UpdateAvailable false 폴백");
+            response.UpdateAvailable = false;
+        }
+    }
+
+    /// <summary>local_update_status 1행 매핑(고리2 새버전 상태).</summary>
+    private sealed class LocalUpdateStatusRow
+    {
+        public string? LatestVersion { get; set; }
+        public string? UpdateChannel { get; set; }
+        public string? ConsentMessage { get; set; }
+    }
+
+    /// <summary>
+    /// SemVer(Major.Minor.Build) 비교 — latest 가 current 보다 높으면 true. 파싱 실패 시 false(안전 폴백).
+    /// "2.0.0" > "1.0.0", "1.2.0" > "1.1.9" 식. 누락 자리는 0 으로 본다("2.0" → 2.0.0).
+    /// </summary>
+    private static bool IsNewerVersion(string? current, string? latest)
+    {
+        var c = ParseSemVer(current);
+        var l = ParseSemVer(latest);
+        if (c is null || l is null) return false; // 파싱 실패 = 팝업 안 띄움(보수적)
+
+        for (var i = 0; i < 3; i++)
+        {
+            if (l[i] > c[i]) return true;
+            if (l[i] < c[i]) return false;
+        }
+        return false; // 동일 버전
+    }
+
+    /// <summary>"Major.Minor.Build" → int[3]. 형식 위반·음수·비숫자면 null.</summary>
+    private static int[]? ParseSemVer(string? v)
+    {
+        if (string.IsNullOrWhiteSpace(v)) return null;
+        var parts = v.Trim().Split('.');
+        if (parts.Length == 0 || parts.Length > 3) return null;
+
+        var result = new int[3];
+        for (var i = 0; i < parts.Length; i++)
+        {
+            if (!int.TryParse(parts[i], out var n) || n < 0) return null;
+            result[i] = n;
+        }
+        return result;
+    }
+
+    /// <summary>현재 ERP 어셈블리 버전 "Major.Minor.Build"(예: "1.0.0"). 워치독 GetCurrentVersion 과 동일 형식.</summary>
+    private static string GetCurrentErpVersion()
+    {
+        var asm = System.Reflection.Assembly.GetEntryAssembly()
+                  ?? System.Reflection.Assembly.GetExecutingAssembly();
+        var v = asm.GetName().Version;
+        return v is null ? "0.0.0" : $"{v.Major}.{v.Minor}.{v.Build}";
+    }
 }
 
 public sealed record VerifyPasswordRequest(string Password);
+
+/// <summary>고리2 업데이트 동의 요청 — tenant_id·user_id 는 JWT 클레임에서만(헌법 #2), 바디에 두지 않는다.</summary>
+public sealed class UpdateConsentRequest
+{
+    /// <summary>동의 대상 새 버전(예: "2.0.0").</summary>
+    public string UpdateVersion { get; set; } = string.Empty;
+
+    /// <summary>"approve"(예) 또는 "reject"(나중에).</summary>
+    public string Action { get; set; } = string.Empty;
+}
