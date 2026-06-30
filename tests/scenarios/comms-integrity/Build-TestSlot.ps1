@@ -54,8 +54,11 @@ param(
     # 출하 DDL 단일 진실원(헌법 #36) — 레포 루트 기준 상대경로
     [string]$CleanDdlRelPath = 'installer\hitpan_db_clean.sql',
 
-    # db.conf 가 놓일 위치(Run-CommsScenarios.ps1 의 2차 방어가 읽는 경로와 동일)
-    [string]$DbConfPath = 'C:\Program Files\HitPan\db.conf',
+    # db.conf 가 놓일 위치 — 격리 경로(C:\HitPanTest)에 둔다.
+    # ## M2 봉합(2026-06-30, 작3): 과거 기본값이 운영 공유경로('C:\Program Files\HitPan\db.conf')라
+    #    이 스크립트가 demo 운영 db.conf 를 테스트값으로 덮어 demo 재시작 시 인증깨짐 잠복 사고 발생.
+    #    → 격리 루트 하위로 변경. 운영 경로 지정 시 [4]단계에서 abort(아래 봉합 가드).
+    [string]$DbConfPath = 'C:\HitPanTest\db.conf',
 
     # 실제 변경 없이 가드/경로/파일 존재만 점검
     [switch]$WhatIfOnly
@@ -190,6 +193,40 @@ function Test-DemoServiceRunning {
     }
 }
 Test-DemoServiceRunning
+
+# ---------------------------------------------------------------------
+#  안전가드 (3-M3) : 운영 DB(hitpan_erp) 존재 시 ABORT  ## M3 봉합(2026-06-30, 작3)
+#   - 사고 원인: 가드(3)이 '서비스명'만 봤다. demo 는 MariaDB(3306) 인스턴스의 hitpan_erp DB 로
+#     살아있는데(129만행), 서비스명 가드는 "테스트 PC면 정상"으로 통과시켜 운영 인스턴스 안에
+#     hitpan_e2e 를 만들었다(2026-06-30 실측 사고).
+#   - 봉합: 슬롯을 만들 대상 인스턴스에 운영 DB(hitpan_erp)가 존재하면 = 운영과 공유 인스턴스 =
+#     테스트 슬롯 생성 ABORT. WARN 이 아니라 물리 차단(헌법 #39).
+#   - 별도 인스턴스/포트(M4)로 분리되면 hitpan_erp 가 없어 통과한다.
+function Assert-NoLiveOperationalDb {
+    # mysql 클라이언트로 대상 인스턴스에 hitpan_erp(운영 DB) 존재 여부만 조회(읽기, 데이터 미접근).
+    $mysqlProbe = (Get-Command mysql -ErrorAction SilentlyContinue)
+    if (-not $mysqlProbe) {
+        Write-Log 'INFO' "mysql 클라이언트 없음 — 운영DB 존재 가드 SKIP(이후 [2]단계에서 어차피 abort)."
+        return
+    }
+    $pwArg2 = @()
+    $dbPw2 = $env:HITPAN_TEST_DB_PW
+    if (-not [string]::IsNullOrWhiteSpace($dbPw2)) { $pwArg2 = @("--password=$dbPw2") }
+    try {
+        $probeSql = "SELECT COUNT(*) FROM information_schema.SCHEMATA WHERE SCHEMA_NAME='hitpan_erp';"
+        $raw = & $mysqlProbe.Source "--user=$DbUser" @pwArg2 --batch --skip-column-names "--execute=$probeSql" 2>$null
+        $exists = 0
+        [int]::TryParse(("$raw").Trim(), [ref]$exists) | Out-Null
+        if ($exists -gt 0) {
+            Abort "이 DB 인스턴스에 운영 DB 'hitpan_erp' 가 존재합니다 → 운영과 공유 인스턴스(M3 봉합, 헌법 #39). 테스트 슬롯은 별도 인스턴스/포트(운영 DB 없는 곳)에서만 생성하십시오. 같은 인스턴스에 hitpan_e2e 를 만들면 운영 129만행 옆에 두는 사고가 됩니다."
+        }
+        Ok "운영 DB(hitpan_erp) 미존재 확인 — 이 인스턴스는 테스트 전용(M3 가드 통과)."
+    } catch {
+        # 헌법 #15: 조회 실패는 침묵 금지. 단 조회 실패로 막지는 않음([2]에서 재확인).
+        Write-Log 'INFO' "운영DB 존재 가드 조회 실패(이후 단계 재확인): $($_.Exception.Message)"
+    }
+}
+Assert-NoLiveOperationalDb
 
 if ($WhatIfOnly) {
     Ok '--WhatIfOnly: 가드 점검만 수행하고 변경 없이 종료.'
@@ -343,6 +380,12 @@ Ok "기동 산출물 배치는 별도 deploy 단계/사장님 결재 후 진행(
 Step 4 "db.conf 생성: $DbConfPath"
 if ($PrimaryDomain -match '(?i)demo') {
     Abort "db.conf 생성 직전 demo 도메인 재감지: '$PrimaryDomain' → 차단(헌법 #39)."
+}
+# ## M2 봉합(2026-06-30, 작3): db.conf 를 운영 공유경로에 쓰지 않는다(덮어쓰기 물리 차단).
+#    운영 ERP/워치독이 'C:\Program Files\HitPan\db.conf' 를 읽으므로(TenantConfigReader),
+#    테스트 슬롯이 이 경로를 덮으면 demo 재시작 시 인증깨짐. 격리 경로(C:\HitPanTest)만 허용.
+if ($DbConfPath -match '(?i)Program Files\\HitPan') {
+    Abort "db.conf 경로가 운영 공유경로입니다: '$DbConfPath' → 운영 db.conf 덮어쓰기 차단(M2 봉합, 헌법 #39). 격리 경로(C:\HitPanTest\db.conf)를 사용하십시오."
 }
 try {
     $dbConfDir = Split-Path $DbConfPath -Parent
