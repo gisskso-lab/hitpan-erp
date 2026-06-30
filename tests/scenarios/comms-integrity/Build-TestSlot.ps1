@@ -203,27 +203,39 @@ Test-DemoServiceRunning
 #     테스트 슬롯 생성 ABORT. WARN 이 아니라 물리 차단(헌법 #39).
 #   - 별도 인스턴스/포트(M4)로 분리되면 hitpan_erp 가 없어 통과한다.
 function Assert-NoLiveOperationalDb {
-    # mysql 클라이언트로 대상 인스턴스에 hitpan_erp(운영 DB) 존재 여부만 조회(읽기, 데이터 미접근).
+    # mysql 클라이언트로 대상 인스턴스의 사용자 DB 존재 여부만 조회(읽기, 데이터 미접근).
+    # [작3v2 R2 fail-closed] mysql 부재면 확인 불가 → 안전하게 abort(과거: SKIP=fail-open).
     $mysqlProbe = (Get-Command mysql -ErrorAction SilentlyContinue)
     if (-not $mysqlProbe) {
-        Write-Log 'INFO' "mysql 클라이언트 없음 — 운영DB 존재 가드 SKIP(이후 [2]단계에서 어차피 abort)."
-        return
+        Abort "mysql 클라이언트가 없어 대상 인스턴스의 운영 DB 존재 여부를 확인할 수 없습니다 → 안전하게 중단(R2 fail-closed, 헌법 #39). mysql 클라이언트를 PATH 에 두고 재시도하십시오."
     }
-    $pwArg2 = @()
+    # [작3v2 보정] 비번은 MYSQL_PWD 환경변수로 전달한다(--password= 명령행은 stderr 경고를
+    #   내뿜어 아래 실패판정을 오발시킴 — 2026-06-30 WhatIfOnly 실측에서 R2 과민발동 확인).
+    $prevPwd = $env:MYSQL_PWD
     $dbPw2 = $env:HITPAN_TEST_DB_PW
-    if (-not [string]::IsNullOrWhiteSpace($dbPw2)) { $pwArg2 = @("--password=$dbPw2") }
+    if (-not [string]::IsNullOrWhiteSpace($dbPw2)) { $env:MYSQL_PWD = $dbPw2 }
     try {
-        $probeSql = "SELECT COUNT(*) FROM information_schema.SCHEMATA WHERE SCHEMA_NAME='hitpan_erp';"
-        $raw = & $mysqlProbe.Source "--user=$DbUser" @pwArg2 --batch --skip-column-names "--execute=$probeSql" 2>$null
-        $exists = 0
-        [int]::TryParse(("$raw").Trim(), [ref]$exists) | Out-Null
-        if ($exists -gt 0) {
-            Abort "이 DB 인스턴스에 운영 DB 'hitpan_erp' 가 존재합니다 → 운영과 공유 인스턴스(M3 봉합, 헌법 #39). 테스트 슬롯은 별도 인스턴스/포트(운영 DB 없는 곳)에서만 생성하십시오. 같은 인스턴스에 hitpan_e2e 를 만들면 운영 129만행 옆에 두는 사고가 됩니다."
+        # [작3v2 R3 화이트리스트] hitpan_erp 단일 리터럴이 아니라, 시스템 DB·슬롯 자신(hitpan_e2e)을
+        #   제외한 '사용자 DB'가 하나라도 있으면 = 운영/타 사용자와 공유 인스턴스 = abort.
+        #   demo 가 hitpan_erp·demo·hitpan_t001(멀티사업자 #35) 무엇이든 이름 무관 차단.
+        $probeSql = "SELECT IFNULL(GROUP_CONCAT(SCHEMA_NAME),'') FROM information_schema.SCHEMATA " +
+                    "WHERE SCHEMA_NAME NOT IN ('hitpan_e2e','information_schema','mysql','performance_schema','sys','test');"
+        $userDbs = (& $mysqlProbe.Source "--user=$DbUser" --batch --skip-column-names "--execute=$probeSql" 2>$null | Out-String).Trim()
+        # [작3v2 R2 fail-closed] 종료코드로 실패 판정(경고는 exit 0, 진짜 실패만 exit≠0).
+        if ($LASTEXITCODE -ne 0) {
+            Abort "운영 DB 존재 여부를 확인하지 못했습니다(mysql 종료코드 $LASTEXITCODE) → 안전하게 중단(R2 fail-closed, 헌법 #39). 운영 인스턴스 여부가 불확실하면 슬롯을 생성하지 않습니다."
         }
-        Ok "운영 DB(hitpan_erp) 미존재 확인 — 이 인스턴스는 테스트 전용(M3 가드 통과)."
+        if (-not [string]::IsNullOrWhiteSpace($userDbs)) {
+            Abort "이 DB 인스턴스에 사용자 DB가 존재합니다: '$userDbs' → 운영/타 사용자와 공유 인스턴스(R3 화이트리스트, 헌법 #39). 테스트 슬롯은 별도 인스턴스/포트(시스템 DB만 있는 곳)에서만 생성하십시오. 운영 인스턴스 옆에 hitpan_e2e 를 만들면 운영 데이터 옆에 두는 사고가 됩니다."
+        }
+        Ok "사용자 DB 미존재 확인 — 이 인스턴스는 테스트 전용(R3 가드 통과)."
     } catch {
-        # 헌법 #15: 조회 실패는 침묵 금지. 단 조회 실패로 막지는 않음([2]에서 재확인).
-        Write-Log 'INFO' "운영DB 존재 가드 조회 실패(이후 단계 재확인): $($_.Exception.Message)"
+        # [작3v2 R2 fail-closed] 예외 시에도 침묵 통과 금지. 운영 여부 불확실 = 안전하게 중단.
+        Abort "운영 DB 존재 여부 조회 중 예외: $($_.Exception.Message) → 안전하게 중단(R2 fail-closed, 헌법 #39). 운영 인스턴스 여부가 불확실하면 슬롯을 생성하지 않습니다."
+    } finally {
+        # MYSQL_PWD 원복(누수 방지)
+        if ($null -eq $prevPwd) { Remove-Item Env:\MYSQL_PWD -ErrorAction SilentlyContinue }
+        else { $env:MYSQL_PWD = $prevPwd }
     }
 }
 Assert-NoLiveOperationalDb
@@ -381,11 +393,17 @@ Step 4 "db.conf 생성: $DbConfPath"
 if ($PrimaryDomain -match '(?i)demo') {
     Abort "db.conf 생성 직전 demo 도메인 재감지: '$PrimaryDomain' → 차단(헌법 #39)."
 }
-# ## M2 봉합(2026-06-30, 작3): db.conf 를 운영 공유경로에 쓰지 않는다(덮어쓰기 물리 차단).
-#    운영 ERP/워치독이 'C:\Program Files\HitPan\db.conf' 를 읽으므로(TenantConfigReader),
-#    테스트 슬롯이 이 경로를 덮으면 demo 재시작 시 인증깨짐. 격리 경로(C:\HitPanTest)만 허용.
-if ($DbConfPath -match '(?i)Program Files\\HitPan') {
-    Abort "db.conf 경로가 운영 공유경로입니다: '$DbConfPath' → 운영 db.conf 덮어쓰기 차단(M2 봉합, 헌법 #39). 격리 경로(C:\HitPanTest\db.conf)를 사용하십시오."
+# ## M2 봉합(2026-06-30, 작3) + R1 재봉합(작3v2, 하브루타 합의):
+#    db.conf 를 격리 루트($TestRoot) 하위에만 쓴다(덮어쓰기 물리 차단).
+#    [작3v2 R1] 과거 블랙리스트 정규식('Program Files\HitPan')은 8.3단축(PROGRA~1)·다른드라이브(D:\HitPan)·
+#    심볼릭링크로 우회됐다(고객 설치경로 가변: iss DisableDirPage 미설정). → 화이트리스트로 역전:
+#    GetFullPath 로 정규화한 db.conf 경로가 격리 루트 하위가 아니면 abort. 우회 경로 전부 차단.
+$fullConf = [System.IO.Path]::GetFullPath($DbConfPath)
+# [작3v2 R1 경계버그 보정] 루트 끝에 구분자를 붙여 형제경로 오통과 차단.
+#   (보정 전: StartsWith('C:\HitPanTest') 가 'C:\HitPanTest2\db.conf' 도 통과시킴 — 데이비드박 재검증 P1)
+$fullRoot = [System.IO.Path]::GetFullPath($TestRoot).TrimEnd('\') + '\'
+if (-not $fullConf.StartsWith($fullRoot, [System.StringComparison]::OrdinalIgnoreCase)) {
+    Abort "db.conf 경로가 격리 루트($fullRoot) 하위가 아닙니다: '$fullConf' → 운영 db.conf 덮어쓰기 차단(R1 화이트리스트, 헌법 #39). 격리 경로(C:\HitPanTest\db.conf)만 허용."
 }
 try {
     $dbConfDir = Split-Path $DbConfPath -Parent
