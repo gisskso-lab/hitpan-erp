@@ -850,6 +850,14 @@ begin
   //    G_DbName = hitpan_erp_{tenantCode}
   //    G_DbUser = hitpan_{tenantCode}
   //    G_DbPassword = 랜덤 32자 영문·숫자 (사고 #26 봉합 — Base64 +/= SQL escape 사고 차단)
+  // ★ P0 봉합 (작6, 사장님 결재 2026-06-30, 안A 단일 가드): 시리얼 없이 설치(LOCAL)·시리얼
+  //   인증 실패 폴백 분기는 DetermineMultiTenantSlot()을 호출하지 않고 Exit 하므로(L521·L559),
+  //   G_DbUser/G_DbName 기본값(그 함수 L276-277에만 존재)이 비어 mysql 인자가
+  //   'mysql -u  -p<비번> ...' 로 깨지고 ERROR 1045 → DB 초기화 실패 → 설치 DOA(헌법 #20 끊김).
+  //   DB 셋업 진입 직전, 빈 값이면 단독 모드 기본값으로 보장한다(DB셋업 들어오는 모든 경로 차단).
+  //   M4 Windows Sandbox 종단 빌드테스트 실측으로 발견(에러로그 + 코드 확정).
+  if G_DbName = '' then G_DbName := 'hitpan_erp';
+  if G_DbUser = '' then G_DbUser := 'hitpan';
   G_DbPassword := GenerateAlphanumericKey(32);
 
   BatchFile := ExpandConstant('{tmp}\db-setup.bat');
