@@ -51,6 +51,13 @@ param(
     [string]$DbName = 'hitpan_e2e',
     [string]$DbUser = 'hitpan',
 
+    # ## 항목3 봉합(2026-06-30, M4 백로그): DB 인스턴스 접속을 host/port 로 명시 고정한다.
+    #    전원 하브루타 결론 — probe(운영DB 가드)와 CREATE 가 같은 인스턴스를 본다는 보장을 코드에 박는다.
+    #    M4 가 별도 포트 인스턴스(예: 3307/3308)일 때, 이 값을 호출 시 주지 않으면 가드는 테스트 인스턴스,
+    #    CREATE 는 기본 포트(운영 3306)를 가리키는 실버그가 된다. 기본값은 로컬 단일 인스턴스 환경용.
+    [string]$DbHost = '127.0.0.1',
+    [int]$DbPort    = 3306,
+
     # 출하 DDL 단일 진실원(헌법 #36) — 레포 루트 기준 상대경로
     [string]$CleanDdlRelPath = 'installer\hitpan_db_clean.sql',
 
@@ -220,7 +227,7 @@ function Assert-NoLiveOperationalDb {
         #   demo 가 hitpan_erp·demo·hitpan_t001(멀티사업자 #35) 무엇이든 이름 무관 차단.
         $probeSql = "SELECT IFNULL(GROUP_CONCAT(SCHEMA_NAME),'') FROM information_schema.SCHEMATA " +
                     "WHERE SCHEMA_NAME NOT IN ('hitpan_e2e','information_schema','mysql','performance_schema','sys','test');"
-        $userDbs = (& $mysqlProbe.Source "--user=$DbUser" --batch --skip-column-names "--execute=$probeSql" 2>$null | Out-String).Trim()
+        $userDbs = (& $mysqlProbe.Source "--host=$DbHost" "--port=$DbPort" "--user=$DbUser" --batch --skip-column-names "--execute=$probeSql" 2>$null | Out-String).Trim()
         # [작3v2 R2 fail-closed] 종료코드로 실패 판정(경고는 exit 0, 진짜 실패만 exit≠0).
         if ($LASTEXITCODE -ne 0) {
             Abort "운영 DB 존재 여부를 확인하지 못했습니다(mysql 종료코드 $LASTEXITCODE) → 안전하게 중단(R2 fail-closed, 헌법 #39). 운영 인스턴스 여부가 불확실하면 슬롯을 생성하지 않습니다."
@@ -324,8 +331,9 @@ $pwArg = @()
 if (-not [string]::IsNullOrWhiteSpace($dbPw)) { $pwArg = @("--password=$dbPw") }
 $createSql = "CREATE DATABASE IF NOT EXISTS ``$DbName`` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;"
 try {
-    Write-Log 'INFO' "DB 생성 실행(IF NOT EXISTS, DROP 없음): $DbName"
-    & $mysqlExe "--user=$DbUser" @pwArg "--execute=$createSql"
+    Write-Log 'INFO' "DB 생성 실행(IF NOT EXISTS, DROP 없음): $DbName @ $DbHost`:$DbPort"
+    # ## 항목3 봉합: probe(가드)와 동일한 host/port 로 생성 → 같은 인스턴스 보장.
+    & $mysqlExe "--host=$DbHost" "--port=$DbPort" "--user=$DbUser" @pwArg "--execute=$createSql"
     if ($LASTEXITCODE -ne 0) { throw "mysql CREATE DATABASE 종료코드 $LASTEXITCODE" }
     Ok "DB 생성/확인 완료: $DbName"
 } catch {
@@ -336,8 +344,9 @@ try {
 try {
     Write-Log 'INFO' "clean DDL import 시작 → $DbName"
     # cmd 리다이렉션으로 SQL 파일 주입(mysql 표준 패턴). 운영 DB명 아님은 가드 (2)에서 보장.
+    # ## 항목3 봉합: host/port 명시 — 생성과 동일 인스턴스에 import.
     $pwInline = ($pwArg -join ' ')
-    & cmd /c "`"$mysqlExe`" --user=$DbUser $pwInline $DbName < `"$cleanDdl`""
+    & cmd /c "`"$mysqlExe`" --host=$DbHost --port=$DbPort --user=$DbUser $pwInline $DbName < `"$cleanDdl`""
     if ($LASTEXITCODE -ne 0) { throw "mysql import 종료코드 $LASTEXITCODE" }
     Ok "clean DDL import 완료"
 } catch {
@@ -347,7 +356,8 @@ try {
 # ── 121테이블 검증(ddl-smoke 1차) ──
 try {
     $cntSql = "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema='$DbName' AND table_type='BASE TABLE';"
-    $raw = & $mysqlExe "--user=$DbUser" @pwArg --batch --skip-column-names "--execute=$cntSql"
+    # ## 항목3 봉합: host/port 명시 — 생성과 동일 인스턴스에서 검증.
+    $raw = & $mysqlExe "--host=$DbHost" "--port=$DbPort" "--user=$DbUser" @pwArg --batch --skip-column-names "--execute=$cntSql"
     $tableCount = 0
     [int]::TryParse(("$raw").Trim(), [ref]$tableCount) | Out-Null
     if ($tableCount -lt 124) {   # 2026-06-29 schema_migrations 편입 123→124 (고리4 ①)
