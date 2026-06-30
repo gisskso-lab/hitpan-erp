@@ -69,6 +69,10 @@ builder.Services.AddSingleton<IEncryptionService, EncryptionService>();
 builder.Services.AddSingleton<HitPan.Application.Interfaces.IBinaryCryptoService, BinaryCryptoServiceAdapter>();
 builder.Services.AddSingleton<IHashService, HashService>();
 builder.Services.AddInfrastructure();
+// 고리4 P1 (사장님 결재 2026-06-30, 작4): DB 스키마 마이그(DB-*.sql) 적용 주체 등록.
+//   ★ 수동 호출만 — 앱시작 자동 실행 배선 0건(IMigrationRunner.cs ① 범위, 헌법 #39 운영 보호).
+//   의존(IMigrationDbConnectionFactory=InfrastructureExtensions.cs:46 Singleton · ILogger)은 이미 등록됨.
+builder.Services.AddScoped<IMigrationRunner, MigrationRunner>();
 builder.Services.AddScoped<IUnitOfWork, UnitOfWork>();
 builder.Services.AddScoped<IAuthUserLookup, AuthUserLookup>();
 builder.Services.AddScoped<ITenantService, TenantService>();
