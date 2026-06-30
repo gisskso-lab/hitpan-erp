@@ -75,3 +75,7 @@ tmp-build/
 logs/docx-convert*.log
 .ncp-secrets.txt
 secrets/
+
+# M4 샌드박스 검증 산출물(거대 self-contained EXE·clean DDL 사본 — 재생성 가능)
+tests/sandbox-m4/payload/app/
+tests/sandbox-m4/payload/hitpan_db_clean.sql

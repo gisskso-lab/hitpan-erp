@@ -1,0 +1,39 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    고리4 P1 멱등 검증 도구 (작5, 사장님 결재 2026-06-30) — Windows Sandbox M4 전용.
+    방금 배선한 MigrationRunner(IMigrationRunner, Program.cs:75)를 빈 DB에서 직접 호출해
+    "2회 실행 = 동일(멱등)" 을 실측한다. 운영(demo 3306) 무접촉 — 샌드박스 안 빈 DB만 본다.
+
+    ★ 솔루션 빌드 제외(IsPackable=false, tools/ 일회용 검증). 헌법 #39 검증=테스트환경.
+  -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\HitPan.Application\HitPan.Application.csproj" />
+    <ProjectReference Include="..\..\src\HitPan.Infrastructure\HitPan.Infrastructure.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="MySqlConnector" Version="2.5.0" />
+    <PackageReference Include="Microsoft.Extensions.Logging.Console" Version="8.0.0" />
+  </ItemGroup>
+
+  <!--
+    DB-*.sql 을 출력 폴더의 Migrations/SQL 로 복사한다.
+    MigrationRunner.ResolveMigrationsDirectory() 의 1순위 후보(baseDir/Migrations/SQL)와 정합 —
+    MigrationRunner 무수정(헌법 #1)으로 도구 bin 옆에서 마이그 폴더를 찾게 한다.
+  -->
+  <ItemGroup>
+    <None Include="..\..\src\HitPan.API\Migrations\SQL\DB-*.sql"
+          Link="Migrations\SQL\%(Filename)%(Extension)"
+          CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+</Project>
