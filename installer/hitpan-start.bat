@@ -51,8 +51,11 @@ if exist "%BASE%bootstrap.conf" (
     for /f "usebackq tokens=1* delims==" %%a in ("%BASE%bootstrap.conf") do set %%a=%%b
 )
 
-:: 회사별 포트 영역 (사고 #34 봉합 — db.conf 영역 API_PORT 영역 박힘)
+:: 회사별 포트 (사고 #34 봉합 — db.conf 의 API_PORT 사용)
+:: ★ P0 봉합 (작7, 2026-07-01): 빈값 폴백은 "0"을 못 잡아 LOCAL 모드 API_PORT=0 → 랜덤포트 → 502.
+::   빈값과 "0" 둘 다 5257로 폴백(소스 .iss 가드와 이중 안전).
 if "%API_PORT%"=="" set API_PORT=5257
+if "%API_PORT%"=="0" set API_PORT=5257
 
 :: Open URL — domain if available, else localhost (회사별 포트 영역 박음)
 set OPEN_URL=http://localhost:%API_PORT%

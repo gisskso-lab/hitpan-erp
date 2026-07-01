@@ -712,8 +712,19 @@ var
   TargetUrl: String;
 begin
   // 고객사 도메인 정정 (G_PrimaryDomain = "test000.hitpan.kr" 등)
+  // ★ P0 봉합 (작7, 사장님 지시 2026-07-01): LOCAL(시리얼 없이) 모드는 종전 Exit 로 정정을 건너뛰어
+  //   appsettings.json 이 레포 원본 'api-demo.hitpan.kr' 그대로 남았다 → 로그인이 외부 demo 서버로 가
+  //   401(설치된 로컬 히트판이 아니라 데모를 봄). 진범(샌드박스 실측: 콘솔 api-demo.hitpan.kr/api/auth/login 401).
+  //   봉합: LOCAL 모드는 ApiBaseUrl 을 '빈 값'으로 정정한다. 그러면 Program.cs 의 폴백
+  //   (string.IsNullOrWhiteSpace → HostEnvironment.BaseAddress = 현재 페이지 출처 localhost:5234)이 발동해
+  //   로그인이 '자기 자신'(설치된 로컬 히트판)으로 간다. web-server.ps1 이 /api/* 를 로컬 API 포트로 프록시.
+  //   파일은 유지·ApiBaseUrl 값만 비움 → 헌법 #21(appsettings 삭제·구조 파괴 금지) 정합.
   if (G_PrimaryDomain = '') or (Pos('localhost', G_PrimaryDomain) > 0) then begin
-    Log('[FixupBlazor] LOCAL 모드 정정 0건 (PrimaryDomain=' + G_PrimaryDomain + ')');
+    Log('[FixupBlazor] LOCAL 모드 → ApiBaseUrl 빈 값 정정(현재 출처 폴백 발동)');
+    FixupOneAppSettings(ExpandConstant('{app}') + '\web\wwwroot\appsettings.json', '');
+    FixupOneAppSettings(ExpandConstant('{app}') + '\web\wwwroot\appsettings.Local.json', '');
+    FixupOneAppSettings(ExpandConstant('{app}') + '\web\wwwroot\appsettings.Development.json', '');
+    FixupOneAppSettings(ExpandConstant('{app}') + '\api\wwwroot\appsettings.json', '');
     Exit;
   end;
 
@@ -858,6 +869,14 @@ begin
   //   M4 Windows Sandbox 종단 빌드테스트 실측으로 발견(에러로그 + 코드 확정).
   if G_DbName = '' then G_DbName := 'hitpan_erp';
   if G_DbUser = '' then G_DbUser := 'hitpan';
+  // ★ P0 봉합 (작7, 사장님 결재 2026-07-01): LOCAL(시리얼 없이) 모드는 DetermineMultiTenantSlot()을
+  //   안 타서 G_ApiPort가 전역 초기값 0으로 남고 → db.conf에 API_PORT=0 기록(L1005·L1056) →
+  //   hitpan-start.bat이 '--urls http://0.0.0.0:0'로 API를 띄워 5257이 아닌 랜덤포트로 뜸 →
+  //   web-server.ps1(5257 프록시)과 불일치 → 로그인 502 Bad Gateway. (샌드박스 실측: API_PORT=0 확정.)
+  //   bat 폴백 'if "%API_PORT%"==""'는 빈값만 잡고 "0"은 못 잡으므로 여기서 소스에서 5257 보장.
+  //   G_DbName/User 빈값 가드와 동일 진범(LOCAL이 슬롯 로직 우회, 작6 정합).
+  if G_ApiPort = 0 then G_ApiPort := 5257;
+  if G_SlotIndex = 0 then G_SlotIndex := 1;
   G_DbPassword := GenerateAlphanumericKey(32);
 
   BatchFile := ExpandConstant('{tmp}\db-setup.bat');
@@ -866,14 +885,30 @@ begin
     BatchContent.Add('@echo off');
     BatchContent.Add('setlocal enabledelayedexpansion');
     BatchContent.Add('set "PATH=%PATH%;C:\Program Files\MariaDB 11.4\bin;C:\Program Files\MariaDB 10.11\bin"');
+    // ★ P0 근본 재봉합 (작7 안C, 사장님 결재 2026-07-01): mysql 절대경로 변수 + for/f 제거.
+    //   진범(1.2.18 진단 로그 + 재현 실측 확정): 카운트 검증이 for/f (''mysql ...'') 구조인데,
+    //   for/f 안에서 cmd가 명령을 재파싱할 때 PATH의 'C:\Program Files'(공백)에서 잘려 mysql이
+    //   실행 안 됨 → TBL_COUNT/FINAL_COUNT 빈값 → 'if LSS 124' → exit 1 → 설치 DOA.
+    //   root로 바꿔도 안 고쳐진 이유 = 유저가 아니라 for/f 안 mysql 실행 자체가 진범이었기 때문.
+    //   봉합: ① mysql을 절대경로+따옴표(!MYSQL!)로 호출해 PATH·공백 의존 제거,
+    //         ② 카운트는 for/f 대신 '-e "SELECT" > 파일' 후 'set /p VAR=<파일'로 읽어 파싱 제거.
+    BatchContent.Add('set "MYSQL=C:\Program Files\MariaDB 11.4\bin\mysql.exe"');
+    BatchContent.Add('if not exist "!MYSQL!" set "MYSQL=C:\Program Files\MariaDB 10.11\bin\mysql.exe"');
+    BatchContent.Add('set "CNTF=%LOCALAPPDATA%\Temp\hitpan_cnt.txt"');
+    // ★ 진단 로그 (작7): 배치 각 단계 성패를 파일로 남긴다(봉합 검증용, 비번 미기록).
+    BatchContent.Add('set "DIAGLOG=%LOCALAPPDATA%\Temp\hitpan_dbsetup_diag.log"');
+    BatchContent.Add('echo ===== db-setup 진단 시작 %DATE% %TIME% ===== > "!DIAGLOG!"');
+    BatchContent.Add('echo [chk] MYSQL=!MYSQL! >> "!DIAGLOG!"');
     // 사고 #16·#21·#22 봉합 — 회사별 DB 박음
-    BatchContent.Add(Format('mysql -u root -p%s -e "CREATE DATABASE IF NOT EXISTS %s CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;"', [MariaRootPw, G_DbName]));
+    BatchContent.Add(Format('"!MYSQL!" -u root -p%s -e "CREATE DATABASE IF NOT EXISTS %s CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;"', [MariaRootPw, G_DbName]));
     // 사고 #18 봉합 — 회사별 user + 랜덤 비번 (하드코딩 0건)
-    BatchContent.Add(Format('mysql -u root -p%s -e "CREATE USER IF NOT EXISTS ''%s''@''localhost'' IDENTIFIED BY ''%s''; GRANT ALL ON %s.* TO ''%s''@''localhost''; FLUSH PRIVILEGES;"', [MariaRootPw, G_DbUser, G_DbPassword, G_DbName, G_DbUser]));
+    BatchContent.Add(Format('"!MYSQL!" -u root -p%s -e "CREATE USER IF NOT EXISTS ''%s''@''localhost'' IDENTIFIED BY ''%s''; GRANT ALL ON %s.* TO ''%s''@''localhost''; FLUSH PRIVILEGES;"', [MariaRootPw, G_DbUser, G_DbPassword, G_DbName, G_DbUser]));
+    BatchContent.Add('echo [chk] CREATE DB/USER errorlevel=!errorlevel! >> "!DIAGLOG!"');
     // ★ 봉합 2026-06-18 (트리거 import 안전화): 새 MariaDB는 log_bin=ON + trust=0 기본일 수 있어
     //   UUID() 등 비결정 함수를 쓰는 트리거 8개 생성이 ERROR 1419로 실패 → 스키마 부분 import → 설치 실패.
     //   import 전 GLOBAL log_bin_trust_function_creators=1 로 트리거 생성을 허용(헌법 #20 끊김 방지).
-    BatchContent.Add(Format('mysql -u root -p%s -e "SET GLOBAL log_bin_trust_function_creators=1;"', [MariaRootPw]));
+    BatchContent.Add(Format('"!MYSQL!" -u root -p%s -e "SET GLOBAL log_bin_trust_function_creators=1;"', [MariaRootPw]));
+    BatchContent.Add('echo [chk] SET GLOBAL errorlevel=!errorlevel! >> "!DIAGLOG!"');
     // 봉합 2026-06-17 (1.2.14): 로그인 500 진범 봉합 — 스키마 import 판정 정정.
     //   진범1: hitpan_db.sql 안 'USE hitpan_erp'로 회사별 DB 지정이 무력화 → 별도 봉합(덤프 스트립).
     //   진범2: 기존 'items/partners COUNT' 판정은 신규 빈 DB에서 테이블 자체가 없어 오작동.
@@ -883,12 +918,16 @@ begin
     //   goto/괄호 혼용은 .bat 파서 사고 위험 → goto 없이 평면 if 구조로 작성.
     //   1차: users 테이블 존재 여부 + 2차: 운영 데이터 보호. 두 변수를 먼저 구한 뒤 한 줄 분기.
     // 1차: 테이블 수(BASE TABLE) + 운영 데이터(items+partners) 파악
+    // ★ P0 근본 재봉합 (작7 안C): 카운트를 for/f 대신 '파일 출력 → set /p 읽기'로 (위 §안C 주석 참조).
+    //   for/f (''mysql...'')가 PATH 공백에서 mysql을 못 실행하는 진범을 통째 제거.
     BatchContent.Add('set TBL_COUNT=0');
-    BatchContent.Add(Format('for /f "tokens=*" %%%%c in (''mysql -u %s -p%s %s -N -B -e "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema=DATABASE() AND table_type=''''BASE TABLE''''"'') do set TBL_COUNT=%%%%c', [G_DbUser, G_DbPassword, G_DbName]));
+    BatchContent.Add(Format('"!MYSQL!" -u root -p%s %s -N -B -e "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema=DATABASE() AND table_type=''BASE TABLE''" > "!CNTF!" 2> nul', [MariaRootPw, G_DbName]));
+    BatchContent.Add('set /p TBL_COUNT=<"!CNTF!"');
     BatchContent.Add('if "!TBL_COUNT!"=="" set TBL_COUNT=0');
+    BatchContent.Add('echo [chk] 1차 TBL_COUNT=[!TBL_COUNT!] >> "!DIAGLOG!"');
     BatchContent.Add('set EXISTING_DATA=0');
     // 운영 데이터 카운트는 테이블이 있을 때만 의미 — 없으면 쿼리가 에러내므로 TBL_COUNT>0일 때만 조회
-    BatchContent.Add(Format('if !TBL_COUNT! GTR 0 (for /f "tokens=*" %%%%c in (''mysql -u %s -p%s -N -B -e "SELECT COALESCE((SELECT COUNT(*) FROM %s.items),0)+COALESCE((SELECT COUNT(*) FROM %s.partners),0)"'') do set EXISTING_DATA=%%%%c)', [G_DbUser, G_DbPassword, G_DbName, G_DbName]));
+    BatchContent.Add(Format('if !TBL_COUNT! GTR 0 ("!MYSQL!" -u root -p%s -N -B -e "SELECT COALESCE((SELECT COUNT(*) FROM %s.items),0)+COALESCE((SELECT COUNT(*) FROM %s.partners),0)" > "!CNTF!" 2> nul & set /p EXISTING_DATA=<"!CNTF!")', [MariaRootPw, G_DbName, G_DbName]));
     BatchContent.Add('if "!EXISTING_DATA!"=="" set EXISTING_DATA=0');
     // 봉합 2026-06-17 (1.2.15, P1): 재설치 멱등성 — 운영 데이터 0건인데 스키마 불완전(91개 미만)이면
     //   손상된 부분 import로 간주하고 DROP 후 재생성. 운영 데이터 있으면 절대 DROP 금지(헌법 #1·#22).
@@ -896,21 +935,39 @@ begin
     // 봉합 (2026-06-29, A안 고리2): local_update_consents(헌법 #30) 편입으로 정본 121→122 정정.
     // 봉합 (2026-06-29, A안 고리2 마지막 빈 칸): local_update_status(헌법 #30) 편입으로 정본 122→123 정정.
     // 봉합 (2026-06-29, 고리4 ①단계): schema_migrations(헌법 #36) 편입으로 정본 123→124 정정.
-    BatchContent.Add(Format('if !EXISTING_DATA! EQU 0 if !TBL_COUNT! GTR 0 if !TBL_COUNT! LSS 124 (echo 불완전 스키마 !TBL_COUNT!/124 감지 - 재생성. & mysql -u root -p%s -e "DROP DATABASE IF EXISTS %s; CREATE DATABASE %s CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci; GRANT ALL ON %s.* TO ''%s''@''localhost''; FLUSH PRIVILEGES;" & set TBL_COUNT=0)', [MariaRootPw, G_DbName, G_DbName, G_DbName, G_DbUser]));
+    BatchContent.Add(Format('if !EXISTING_DATA! EQU 0 if !TBL_COUNT! GTR 0 if !TBL_COUNT! LSS 124 (echo 불완전 스키마 !TBL_COUNT!/124 감지 - 재생성. & "!MYSQL!" -u root -p%s -e "DROP DATABASE IF EXISTS %s; CREATE DATABASE %s CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci; GRANT ALL ON %s.* TO ''%s''@''localhost''; FLUSH PRIVILEGES;" & set TBL_COUNT=0)', [MariaRootPw, G_DbName, G_DbName, G_DbName, G_DbUser]));
     // 분기: 운영 데이터 있으면 보호(건너뜀, 헌법 #1) / 없으면 import
     //   봉합 2026-06-17 (1.2.15, P1): import stderr를 로그로 남기고 errorlevel 즉시 검사(--force 금지, 헌법 #15)
-    BatchContent.Add(Format('if !EXISTING_DATA! GTR 0 (echo 기존 운영 데이터 !EXISTING_DATA!건 감지. 시드 import 건너뜀.) else (echo 스키마 import 실행. & mysql -u %s -p%s --show-warnings %s < "%s" 2> "%%TEMP%%\hitpan_import_err.log" & if errorlevel 1 (echo [오류] 스키마 import 실패. 로그: %%TEMP%%\hitpan_import_err.log & exit /b 1))', [G_DbUser, G_DbPassword, G_DbName, ExpandConstant('{app}\hitpan_db.sql')]));
+    //   ★ 안C: import mysql도 절대경로(!MYSQL!)로. import는 '< file' stdin이라 for/f는 아니었으나 PATH 의존 제거로 통일.
+    BatchContent.Add(Format('if !EXISTING_DATA! GTR 0 (echo 기존 운영 데이터 !EXISTING_DATA!건 감지. 시드 import 건너뜀.) else (echo 스키마 import 실행. & "!MYSQL!" -u root -p%s --show-warnings %s < "%s" 2> "%%TEMP%%\hitpan_import_err.log" & if errorlevel 1 (echo [오류] 스키마 import 실패. 로그: %%TEMP%%\hitpan_import_err.log & exit /b 1))', [MariaRootPw, G_DbName, ExpandConstant('{app}\hitpan_db.sql')]));
     // 봉합 검증 가드(1.2.15, SHIP-DDL-01 정정 2026-06-23 / A안 고리2 2026-06-29 local_update_status 122→123 / 고리4 ① schema_migrations 123→124): import 후 테이블 124개 + users 실존 재확인. 미달이면 명확한 실패(헌법 #15·#19).
+    // ★ P0 재봉합 (작7, 안A): 최종 검증 카운트도 root 통일 (위 §진범 주석 참조).
+    BatchContent.Add('echo [chk] import 이후 TBL_COUNT=[!TBL_COUNT!] EXISTING_DATA=[!EXISTING_DATA!] >> "!DIAGLOG!"');
+    // ★ P0 근본 재봉합 (작7 안C): 최종 검증 카운트도 for/f 제거 → 파일출력.
     BatchContent.Add('set FINAL_COUNT=0');
-    BatchContent.Add(Format('for /f "tokens=*" %%%%c in (''mysql -u %s -p%s %s -N -B -e "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema=DATABASE() AND table_type=''''BASE TABLE''''"'') do set FINAL_COUNT=%%%%c', [G_DbUser, G_DbPassword, G_DbName]));
+    BatchContent.Add(Format('"!MYSQL!" -u root -p%s %s -N -B -e "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema=DATABASE() AND table_type=''BASE TABLE''" > "!CNTF!" 2> nul', [MariaRootPw, G_DbName]));
+    BatchContent.Add('set /p FINAL_COUNT=<"!CNTF!"');
     BatchContent.Add('if "!FINAL_COUNT!"=="" set FINAL_COUNT=0');
     BatchContent.Add('set USERS_OK=0');
-    BatchContent.Add(Format('for /f "tokens=*" %%%%c in (''mysql -u %s -p%s %s -N -B -e "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema=DATABASE() AND table_name=''''users''''"'') do set USERS_OK=%%%%c', [G_DbUser, G_DbPassword, G_DbName]));
+    BatchContent.Add(Format('"!MYSQL!" -u root -p%s %s -N -B -e "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema=DATABASE() AND table_name=''users''" > "!CNTF!" 2> nul', [MariaRootPw, G_DbName]));
+    BatchContent.Add('set /p USERS_OK=<"!CNTF!"');
     BatchContent.Add('if "!USERS_OK!"=="" set USERS_OK=0');
+    BatchContent.Add('echo [chk] 최종검증 FINAL_COUNT=[!FINAL_COUNT!] USERS_OK=[!USERS_OK!] >> "!DIAGLOG!"');
     // 운영 데이터 보호로 import 건너뛴 경우(EXISTING_DATA>0)는 이미 정상 DB이므로 검증 통과로 간주
     BatchContent.Add('if !EXISTING_DATA! GTR 0 (echo 기존 운영 DB 유지 - 검증 생략. & exit /b 0)');
     BatchContent.Add(Format('if !USERS_OK! EQU 0 (echo [오류] DB 초기 설정 실패 - users 테이블 없음. & exit /b 1)', []));
     BatchContent.Add(Format('if !FINAL_COUNT! LSS 124 (echo [오류] DB 초기 설정 실패 - 테이블 !FINAL_COUNT!/124개만 생성됨. & exit /b 1) else (echo DB 스키마 검증 완료 - 테이블 !FINAL_COUNT!개 + users 정상.)', []));
+    // ★ P0 재봉합 (작7, 사장님 결재 2026-07-01, hitpan 가드 제거): 어제 안A에서 넣은 hitpan 접속 가드를
+    //   설치 차단(exit 1)에서 제외한다. 진범 확정(1.2.19 진단 로그): 카운트 검증(124/124/users)은 안C로
+    //   전부 통과하는데, 이 가드의 'mysql -u hitpan -p<G_DbPassword> -e "SELECT 1"'만 errorlevel=1로 실패해
+    //   유일하게 설치를 막고 있었다. hitpan 유저는 CREATE USER로 정상 생성되며(로그 확인), DB_PASSWORD는
+    //   db.conf에 CREATE USER와 동일한 G_DbPassword가 기록되어 ERP 첫 기동이 실제 접속을 검증한다.
+    //   따라서 설치 시점 hitpan 접속 가드는 과잉이며 정상 설치를 막았다 → 차단 제거.
+    //   단 접속 성패는 진단 로그에만 남겨 원인(명령줄 -p 비번 해석 차이) 추적은 계속 가능하게 둔다(차단 X).
+    BatchContent.Add(Format('"!MYSQL!" -u %s -p%s %s -e "SELECT 1" > nul 2> nul', [G_DbUser, G_DbPassword, G_DbName]));
+    BatchContent.Add('echo [chk] (참고) hitpan SELECT 1 errorlevel=!errorlevel! (설치 차단 안 함) >> "!DIAGLOG!"');
+    BatchContent.Add('echo [chk] 배치 정상 종료 도달 (exit 0 예정) >> "!DIAGLOG!"');
+    BatchContent.Add('del "!CNTF!" > nul 2> nul');
     BatchContent.SaveToFile(BatchFile);
   finally
     BatchContent.Free;
