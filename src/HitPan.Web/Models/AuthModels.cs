@@ -31,6 +31,12 @@ public sealed class LoginApiResponse
     public bool RedirectToWelcome { get; set; }
     public string? DeviceId { get; set; }
 
+    // ── 접속 기기 슬롯 F3 안내 (작3 I3, 사장님 결재 2026-07-02) ──
+    //   서버(LoginResponse)가 채워 보내는 값을 프론트가 소비(종전엔 필드가 없어 그냥 버려졌음).
+    //   방식 = (a) 자동 등록 후 통지: 처음 등록된 신규 기기면 로그인 후 사용자에게 알린다.
+    public bool DeviceNewlyRegistered { get; set; }
+    public string? DeviceNotice { get; set; }
+
     // 헌법 #24: 약관 v2.0.0 미동의 시 true (Login.razor에서 /terms 강제 이동)
     public bool RequiresTermsConsent { get; set; }
 

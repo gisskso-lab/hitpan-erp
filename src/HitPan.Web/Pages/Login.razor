@@ -114,6 +114,29 @@
                 await PromptUpdateConsentAsync(result.Data);
             }
 
+            // 작3 I3 (사장님 결재 2026-07-02, (a) 자동 등록 후 통지): 이번 로그인에서 이 기기가
+            //   처음 등록된 신규 기기면 사용자에게 알린다(자동 등록은 이미 서버에서 됨). 기기 슬롯 관리는
+            //   관리자(부모계정) 영역이라 여기선 통지만 — 통지 실패해도 로그인 흐름은 막지 않는다.
+            if (result.Data?.DeviceNewlyRegistered == true)
+            {
+                try
+                {
+                    var notice = string.IsNullOrWhiteSpace(result.Data?.DeviceNotice)
+                        ? "이 기기가 새 기기로 등록되었습니다."
+                        : result.Data!.DeviceNotice!;
+                    // 통지 성격(자동 등록 후 알림)이라 확인/닫기 둘 다 "인지" 의미. 공용 ConfirmDialog는
+                    //   취소 버튼을 항상 렌더링하므로 빈 문자열 대신 "닫기"로 둔다(빈 버튼 UX 방지).
+                    await ConfirmDialog.ShowAsync(
+                        DialogService,
+                        title: "기기 등록 안내",
+                        message: notice,
+                        confirmText: "확인",
+                        cancelText: "닫기",
+                        severity: Severity.Info);
+                }
+                catch { /* 통지 실패해도 로그인 진행 */ }
+            }
+
             if (result.Data?.RedirectToWelcome == true)
             {
                 Navigation.NavigateTo("/welcome", forceLoad: true);
