@@ -18,9 +18,10 @@ public interface ITenantDeviceService
     /// <summary>
     /// 로그인 시 호출. 지문(fingerprint)이 있으면 last_seen_at 갱신,
     /// 없으면 신규 등록하며 티어별 한도 검사를 수행한다.
-    /// - 허용되면 (true, "", deviceId), 거부되면 (false, 사유, null) 반환.
+    /// - 허용되면 (true, "", deviceId, newlyRegistered), 거부되면 (false, 사유, null, false) 반환.
+    /// - newlyRegistered: 이번 호출에서 처음 등록된 신규 기기면 true (작1 F3 첫 접속 안내용).
     /// </summary>
-    Task<(bool allowed, string reason, string? deviceId)> RegisterOrRefreshAsync(
+    Task<(bool allowed, string reason, string? deviceId, bool newlyRegistered)> RegisterOrRefreshAsync(
         string tenantId,
         string userId,
         RegisterDeviceRequest req,

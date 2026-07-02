@@ -40,10 +40,20 @@ public class AuthController : ControllerBase
         {
             var response = await _authService.LoginAsync(request, ct);
 
+            // ── 메인PC 면제 (작1 결재 2026-07-02, 헌법 사장님 정의) ──
+            //   메인PC = 데이터+ERP 설치마법사가 깔린 PC(1도메인 1대). 설치 시점에 이미 등록된 존재라
+            //   접속 기기인증/슬롯에서 제외한다. 클라이언트PC(브라우저 접속)만 기기 슬롯 대상.
+            //   판별 = loopback 접속 여부. 메인PC 본인은 localhost/127.0.0.1(loopback)로 접속하고
+            //   (installer HitPan-Universal.iss 바로가기), 클라이언트는 터널 도메인으로만 온다.
+            //   IP 기반이 아니라 loopback 여부라 cloudflared 터널 프록시가 위조할 수 없다(신뢰 가능).
+            var isMainPcLoopback = HttpContext.Connection.RemoteIpAddress?.Equals(System.Net.IPAddress.Loopback) == true
+                || HttpContext.Connection.RemoteIpAddress?.Equals(System.Net.IPAddress.IPv6Loopback) == true;
+
             // ── 기기 기반 라이선싱: 로그인 성공 후 기기 등록/갱신 ──
             // - fingerprint 없으면 스킵 (기존 클라이언트 호환)
+            // - 메인PC(loopback)면 스킵 (슬롯 미소모)
             // - 한도 초과면 로그인 거부 (Unauthorized)
-            if (!string.IsNullOrEmpty(response.TenantId) && !string.IsNullOrEmpty(request.DeviceFingerprint))
+            if (!string.IsNullOrEmpty(response.TenantId) && !string.IsNullOrEmpty(request.DeviceFingerprint) && !isMainPcLoopback)
             {
                 try
                 {
@@ -63,16 +73,20 @@ public class AuthController : ControllerBase
                             UserAgent = Request.Headers["User-Agent"].ToString()
                         };
 
-                        var (allowed, reason, deviceId) = await _deviceService.RegisterOrRefreshAsync(
+                        var (allowed, reason, deviceId, newlyRegistered) = await _deviceService.RegisterOrRefreshAsync(
                             response.TenantId, userId, deviceReq, ipAddress, ct);
 
                         if (!allowed)
                         {
-                            // 기기 한도 초과 등 → 로그인 거부 (명확한 한국어 메시지)
+                            // 기기 한도 초과·폐기 등 → 로그인 거부 (작1 F3: "등록된 기기가 아닙니다" 명확한 사유)
                             return Unauthorized(new { message = reason });
                         }
 
                         response.DeviceId = deviceId;
+                        // 작1 F3 — 처음 등록된 신규 기기면 클라이언트가 안내 노출(첫 접속 인지)
+                        response.DeviceNewlyRegistered = newlyRegistered;
+                        if (newlyRegistered)
+                            response.DeviceNotice = "이 기기가 새 기기로 등록되었습니다.";
                     }
                 }
                 catch (Exception ex)

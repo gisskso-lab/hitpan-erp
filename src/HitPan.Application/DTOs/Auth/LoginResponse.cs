@@ -18,6 +18,18 @@ public class LoginResponse
     /// </summary>
     public string? DeviceId { get; set; }
 
+    // ── 접속 기기 슬롯 안내 (작1 F3, 사장님 정의 정상 흐름 2026-07-02) ──
+    //   사장님 정의: 접속 시 등록기기면 통과 / 처음 기기면 "등록하시겠습니까?"(슬롯 여유) 또는
+    //   "등록된 기기가 아닙니다"(슬롯 초과) 안내가 떠야 정상. 현재는 조용히 자동 등록만.
+    //   1차(작1)에서 상태를 응답에 실어 클라이언트가 안내를 띄울 기반을 놓는다.
+    //   실제 "등록하시겠습니까?" 사용자 확인 다이얼로그(2단계 상호작용)는 2차 프론트 봉합.
+
+    /// <summary>이번 로그인에서 이 기기가 처음 등록된 신규 기기면 true (첫 접속 안내용).</summary>
+    public bool DeviceNewlyRegistered { get; set; }
+
+    /// <summary>기기 슬롯 관련 안내 문구(있으면 클라이언트가 노출). 정상 등록/재접속이면 null.</summary>
+    public string? DeviceNotice { get; set; }
+
     /// <summary>
     /// 헌법 #24 약관 v2.0.0 미동의 시 true → 클라이언트가 /terms 강제 이동.
     /// AuthController에서 ITermsConsentService.HasAgreedAsync 결과로 저장.

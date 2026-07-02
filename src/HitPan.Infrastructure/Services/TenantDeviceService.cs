@@ -92,7 +92,7 @@ public sealed class TenantDeviceService : ITenantDeviceService
     }
 
     // ── 로그인 시 호출: 기존 기기면 last_seen 갱신, 신규면 한도 검사 후 등록 ──
-    public async Task<(bool allowed, string reason, string? deviceId)> RegisterOrRefreshAsync(
+    public async Task<(bool allowed, string reason, string? deviceId, bool newlyRegistered)> RegisterOrRefreshAsync(
         string tenantId,
         string userId,
         RegisterDeviceRequest req,
@@ -102,7 +102,11 @@ public sealed class TenantDeviceService : ITenantDeviceService
         if (string.IsNullOrWhiteSpace(req.Fingerprint))
         {
             // 지문 미지원 클라이언트 → 등록 스킵 (로그인은 허용)
-            return (true, "", null);
+            // ⚠️ 가드 절대 제거 금지 (작1 검증팀 발굴 2026-07-02): tenant_devices.fingerprint 는
+            //   NOT NULL(hitpan_db_clean.sql). 지문 보강(2차)에서 "환경해시라 항상 값 있다" 가정하고
+            //   이 스킵을 지우면, 해시 실패 시 빈 문자열이 아래 INSERT 로 흘러 NOT NULL 위반 500.
+            //   빈값은 반드시 여기서 걸러 등록을 건너뛴다.
+            return (true, "", null, false);
         }
 
         await EnsureOpenAsync(ct);
@@ -124,7 +128,7 @@ public sealed class TenantDeviceService : ITenantDeviceService
             if (status == "revoked")
             {
                 await LogDeniedAsync(tenantId, userId, ipAddress, id, "denied_revoked", ct);
-                return (false, "폐기된 기기입니다. 관리자에게 문의하세요.", null);
+                return (false, "폐기된 기기입니다. 관리자에게 문의하세요.", null, false);
             }
 
             // approved / pending → last_seen / ip / ua 갱신
@@ -139,7 +143,8 @@ public sealed class TenantDeviceService : ITenantDeviceService
                 new { Id = id, Ip = ipAddress, Ua = req.UserAgent }, cancellationToken: ct));
 
             await LogLoginAsync(tenantId, userId, ipAddress, id, "success", ct);
-            return (status == "approved", status == "approved" ? "" : "기기 승인 대기 중입니다.", id);
+            // 기존 기기 재접속 — 신규 아님(newlyRegistered=false)
+            return (status == "approved", status == "approved" ? "" : "기기 승인 대기 중입니다.", id, false);
         }
 
         // 2) 신규 기기 — 티어별 한도 검사
@@ -170,12 +175,12 @@ public sealed class TenantDeviceService : ITenantDeviceService
         if (type == "pc" && pcUsed >= pcLimit)
         {
             await LogDeniedAsync(tenantId, userId, ipAddress, null, "denied_limit", ct);
-            return (false, $"PC 기기 한도 초과 ({pcUsed}/{pcLimit}대)", null);
+            return (false, $"등록된 기기가 아닙니다. PC 기기 한도({pcLimit}대)를 초과했습니다. 기존 기기를 해제하거나 관리자에게 문의하세요.", null, false);
         }
         if ((type == "mobile" || type == "tablet") && mobileUsed >= mobileLimit)
         {
             await LogDeniedAsync(tenantId, userId, ipAddress, null, "denied_limit", ct);
-            return (false, $"모바일 기기 한도 초과 ({mobileUsed}/{mobileLimit}대)", null);
+            return (false, $"등록된 기기가 아닙니다. 모바일 기기 한도({mobileLimit}대)를 초과했습니다. 기존 기기를 해제하거나 관리자에게 문의하세요.", null, false);
         }
 
         // 3) INSERT (MVP: 자동 승인)
@@ -209,7 +214,8 @@ public sealed class TenantDeviceService : ITenantDeviceService
         var afterJson = $"{{\"type\":\"{type}\",\"name\":\"{req.DeviceName ?? ""}\"}}";
         await _audit.LogAsync("register", "device", deviceId, afterJson: afterJson, ct: ct);
 
-        return (true, "", deviceId);
+        // 신규 기기 등록 성공 — newlyRegistered=true (작1 F3: 클라이언트가 첫 접속 안내 노출)
+        return (true, "", deviceId, true);
     }
 
     // ── 기기 폐기 ──

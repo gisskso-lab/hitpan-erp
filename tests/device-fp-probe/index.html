@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>기기 지문 origin 격리 실측 — 히트판</title>
+  <style>
+    body { font-family: system-ui, sans-serif; max-width: 720px; margin: 40px auto; padding: 0 16px; line-height: 1.6; }
+    h1 { font-size: 20px; }
+    .box { border: 2px solid #333; border-radius: 8px; padding: 16px; margin: 16px 0; }
+    .origin { font-size: 15px; color: #555; }
+    .fp { font-size: 22px; font-weight: 700; color: #0b5; word-break: break-all; margin: 8px 0; }
+    .label { font-size: 13px; color: #888; }
+    .warn { background: #fff8e1; border-color: #f90; }
+    code { background: #f2f2f2; padding: 2px 6px; border-radius: 4px; }
+    .note { font-size: 14px; color: #666; }
+  </style>
+
+  <!-- ⭐ 실제 앱과 100% 동일한 지문 로직을 그대로 불러온다 (복사본 아님, 진짜 그 파일) -->
+  <script src="../../src/HitPan.Web/wwwroot/js/device-fingerprint.js"></script>
+</head>
+<body>
+  <h1>🔬 기기 지문 origin 격리 실측</h1>
+  <p class="note">
+    이 페이지는 히트판 실제 앱의 <code>device-fingerprint.js</code>를 그대로 불러와 지문을 계산합니다.
+    <b>같은 PC·같은 브라우저</b>에서 아래 두 주소로 각각 열어, 지문 값이 같은지 다른지만 봅니다.
+  </p>
+
+  <div class="box" id="result">
+    <div class="label">현재 접속 주소 (origin)</div>
+    <div class="origin" id="origin">…</div>
+    <div class="label" style="margin-top:12px;">이 origin의 기기 지문 (hitpan_fp_id)</div>
+    <div class="fp" id="fp">…</div>
+    <div class="label">기기 타입</div>
+    <div class="origin" id="dtype">…</div>
+  </div>
+
+  <div class="box warn">
+    <b>실측 순서</b>
+    <ol>
+      <li><code>http://localhost:5599</code> 로 이 페이지를 연다 → 지문 <b>A</b> 기록</li>
+      <li>새로고침(F5) 한 번 더 → 값이 <b>A 그대로면</b> = 같은 주소면 재사용(정상)</li>
+      <li>주소만 <code>http://127.0.0.1:5599</code> 로 바꿔 연다 → 지문 <b>B</b> 기록</li>
+    </ol>
+    <b>판정:</b> B ≠ A → origin 격리 진범 확정 / B = A → 다른 원인
+  </div>
+
+  <script>
+    // 실제 앱 로직 그대로 호출
+    var fp = '';
+    var dtype = '';
+    try { fp = window.hitpanDevice.getFingerprint(); } catch (e) { fp = '(예외: ' + e + ')'; }
+    try { dtype = window.hitpanDevice.getDeviceType(); } catch (e) { dtype = '(예외)'; }
+
+    document.getElementById('origin').textContent = window.location.origin;
+    document.getElementById('fp').textContent = fp === '' ? '(빈 문자열 — 저장소 접근 실패)' : fp;
+    document.getElementById('dtype').textContent = dtype;
+  </script>
+</body>
+</html>
