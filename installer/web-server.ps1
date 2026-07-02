@@ -7,6 +7,13 @@ $port = 5234
 #   종전엔 5257 하드코딩이라 멀티슬롯(슬롯2=5357 …)에서 Web 프록시가 엉뚱한 포트로 가 503.
 #   db.conf 미발견·키 부재면 5257 폴백(슬롯1·LOCAL 안전). ERP 본체·워치독과 동일한 단일출처.
 $apiPort = 5257
+# 도메인 일원화 (작1 2차봉합 2026-07-02, 사장님 결재): canonical 리다이렉트 대상.
+#   [진범] 클라이언트가 localhost/127.0.0.1/{id}.hitpan.kr 서로 다른 origin 으로 접속하면
+#   기기 지문(localStorage, origin별 격리)이 갈려 같은 PC도 매번 새 기기로 잡힌다(실측 확정).
+#   [봉합] 정식 도메인이 있으면, 엉뚱한 host 로 들어온 접속을 정식 도메인으로 1회 301 → origin 단일화.
+#   ⚠️ 접속 차단·무한 리다이렉트 방지: PRIMARY_DOMAIN 이 있고 유효할 때만, 그리고 loopback(메인PC 본인)
+#   ·LOCAL(도메인 없음)·이미 정식 도메인인 접속은 절대 리다이렉트하지 않는다(아래 겹겹 가드).
+$primaryDomain = ""
 $confPath = Join-Path $PSScriptRoot "db.conf"
 if (Test-Path $confPath) {
     foreach ($line in Get-Content $confPath) {
@@ -16,8 +23,13 @@ if (Test-Path $confPath) {
             $parsed = 0
             if ([int]::TryParse($v, [ref]$parsed) -and $parsed -gt 0) { $apiPort = $parsed }
         }
+        elseif ($t -like "PRIMARY_DOMAIN=*") {
+            $primaryDomain = $t.Substring(15).Trim()
+        }
     }
 }
+# LOCAL 모드 표식(localhost:5234) 또는 빈 값이면 리다이렉트 비활성 — 정식 도메인만 대상.
+$canonicalEnabled = ($primaryDomain -ne "") -and ($primaryDomain -notlike "localhost*") -and ($primaryDomain -notlike "127.0.0.1*")
 $apiBase = "http://localhost:$apiPort"
 
 $mimeTypes = @{
@@ -51,6 +63,27 @@ Write-Host "Web server running on http://localhost:$port (API proxy → $apiBase
 while ($listener.IsListening) {
     $ctx = $listener.GetContext()
     $localPath = $ctx.Request.Url.LocalPath
+
+    # ─── 도메인 일원화 canonical 리다이렉트 (작1 2차봉합 2026-07-02) ────────────
+    #   목적: 클라이언트가 정식 도메인이 아닌 host(예: IP 직접·다른 별칭)로 들어오면 정식
+    #   도메인으로 1회 301 → origin 단일화(기기 지문 origin 격리 진범 봉합).
+    #   ⚠️ 접속 차단·무한 리다이렉트 방지 겹겹 가드 (하나라도 걸리면 리다이렉트 안 함):
+    #     ① canonicalEnabled(정식 도메인 존재·LOCAL 아님)일 때만
+    #     ② 들어온 host 가 loopback(메인PC 본인 localhost/127.0.0.1)이면 스킵
+    #     ③ 들어온 host 가 이미 정식 도메인이면 스킵(무한 루프 차단)
+    #     ④ host 가 비어있거나 파싱 실패면 스킵(안전)
+    if ($canonicalEnabled) {
+        $reqHost = $ctx.Request.Url.Host
+        $isLoopback = ($reqHost -eq "localhost") -or ($reqHost -eq "127.0.0.1") -or ($reqHost -eq "::1")
+        $isAlreadyCanonical = ($reqHost -eq $primaryDomain)
+        if (($reqHost -ne "") -and (-not $isLoopback) -and (-not $isAlreadyCanonical)) {
+            $target = "https://$primaryDomain$($ctx.Request.Url.PathAndQuery)"
+            $ctx.Response.StatusCode = 301
+            $ctx.Response.RedirectLocation = $target
+            $ctx.Response.Close()
+            continue
+        }
+    }
 
     # ─── API 프록시 — /api/* → localhost:5257/api/* ─────────────
     if ($localPath -like "/api/*" -or $localPath -eq "/api") {
