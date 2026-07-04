@@ -42,6 +42,11 @@
                            StartIcon="@Icons.Material.Filled.PlayCircle"
                            OnClick="ActivateAsync">복구</MudButton>
             }
+            @* 고객사 삭제 (사장님 결재 2026-07-04) — tenants+landing_signups+DNS 일괄 정리.
+               되돌릴 수 없는 작업이라 위험 경고 2중 확인 후에만 실행. API: DELETE api/backoffice/tenants/{id} *@
+            <MudButton Variant="Variant.Outlined" Color="Color.Error"
+                       StartIcon="@Icons.Material.Filled.DeleteForever"
+                       OnClick="DeleteAsync">삭제</MudButton>
         </div>
     }
 </div>
@@ -253,6 +258,41 @@ else
         catch (Exception ex)
         {
             Snackbar.Add($"복구 처리 오류: {ex.Message}", Severity.Error);
+        }
+    }
+
+    // 고객사 삭제 (사장님 결재 2026-07-04) — 되돌릴 수 없음. 위험 경고 2중 확인 후 DELETE 호출.
+    //   서버(TenantsAdminController.Delete)가 tenants + landing_signups + tenant_devices
+    //   + serial_verify_attempts + Cloudflare DNS(도메인 CNAME)까지 일괄 정리한다(좀비 DNS 방지).
+    private async Task DeleteAsync()
+    {
+        if (_item is null) return;
+        var ok = await ConfirmDialog.ShowAsync(Dialog,
+            "고객사 완전 삭제",
+            $"'{_item.CompanyName}' ({_item.TenantCode}) 고객사를 완전히 삭제합니다.\n\n" +
+            "· 가입 정보, 라이선스, 기기 등록, 도메인(DNS)이 모두 삭제됩니다.\n" +
+            "· 이 작업은 되돌릴 수 없습니다.\n\n정말 삭제하시겠습니까?",
+            confirmText: "완전 삭제", cancelText: "취소", severity: Severity.Error);
+        if (!ok) return;
+
+        try
+        {
+            var http = HttpFactory.CreateClient("backoffice-authed");
+            var res = await http.DeleteAsync($"api/backoffice/tenants/{TenantId}");
+            var payload = await res.Content.ReadFromJsonAsync<ActionResponse>();
+            if (res.IsSuccessStatusCode && payload?.Success == true)
+            {
+                Snackbar.Add(payload.Message ?? "고객사가 삭제되었습니다.", Severity.Success);
+                Nav.NavigateTo("/admin/tenants");
+            }
+            else
+            {
+                Snackbar.Add(payload?.Message ?? $"삭제 실패 ({(int)res.StatusCode})", Severity.Error);
+            }
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"삭제 처리 오류: {ex.Message}", Severity.Error);
         }
     }
 

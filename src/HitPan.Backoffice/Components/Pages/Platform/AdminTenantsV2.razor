@@ -95,22 +95,29 @@ else
                 <PropertyColumn Property="x => x.CreatedAt" Title="가입일" Format="yyyy-MM-dd" />
                 <TemplateColumn Title="액션">
                     <CellTemplate>
-                        @if (context.Item.Status == "active")
-                        {
-                            <MudButton Size="Size.Small" Variant="Variant.Outlined" Color="Color.Warning"
-                                       OnClick="@(() => SuspendAsync(context.Item))">정지</MudButton>
-                        }
-                        else if (context.Item.Status == "pending")
-                        {
-                            <MudLink Href="/admin/signups" Underline="Underline.Hover">
-                                <MudText Typo="Typo.caption" Color="Color.Warning">승인 대기 — 가입 신청 화면으로 →</MudText>
-                            </MudLink>
-                        }
-                        else if (context.Item.Status == "suspended")
-                        {
-                            <MudButton Size="Size.Small" Variant="Variant.Filled" Color="Color.Success"
-                                       OnClick="@(() => ActivateAsync(context.Item))">복구</MudButton>
-                        }
+                        <div style="display:flex;align-items:center;gap:6px;">
+                            @if (context.Item.Status == "active")
+                            {
+                                <MudButton Size="Size.Small" Variant="Variant.Outlined" Color="Color.Warning"
+                                           OnClick="@(() => SuspendAsync(context.Item))">정지</MudButton>
+                            }
+                            else if (context.Item.Status == "pending")
+                            {
+                                <MudLink Href="/admin/signups" Underline="Underline.Hover">
+                                    <MudText Typo="Typo.caption" Color="Color.Warning">승인 대기 — 가입 신청 화면으로 →</MudText>
+                                </MudLink>
+                            }
+                            else if (context.Item.Status == "suspended")
+                            {
+                                <MudButton Size="Size.Small" Variant="Variant.Filled" Color="Color.Success"
+                                           OnClick="@(() => ActivateAsync(context.Item))">복구</MudButton>
+                            }
+                            @* 삭제 (사장님 결재 2026-07-04) — 상태 무관 각 행에서 완전 삭제. 위험 경고 2중 확인 후 실행. *@
+                            <MudTooltip Text="고객사 완전 삭제 (되돌릴 수 없음)">
+                                <MudIconButton Icon="@Icons.Material.Filled.DeleteForever" Size="Size.Small" Color="Color.Error"
+                                               OnClick="@(() => DeleteAsync(context.Item))" />
+                            </MudTooltip>
+                        </div>
                     </CellTemplate>
                 </TemplateColumn>
             </Columns>
@@ -210,6 +217,40 @@ else
         catch (Exception ex)
         {
             Snackbar.Add($"복구 처리 오류: {ex.Message}", Severity.Error);
+        }
+    }
+
+    // 고객사 삭제 (사장님 결재 2026-07-04) — 목록 그리드 각 행에서 직접 삭제. 되돌릴 수 없어 위험 경고 2중 확인.
+    //   서버(TenantsAdminController.Delete)가 tenants + landing_signups + tenant_devices
+    //   + serial_verify_attempts + Cloudflare DNS(도메인 CNAME)까지 일괄 정리(좀비 DNS 방지).
+    private async Task DeleteAsync(TenantRow row)
+    {
+        var ok = await ConfirmDialog.ShowAsync(Dialog,
+            "고객사 완전 삭제",
+            $"'{row.CompanyName}' ({row.TenantCode}) 고객사를 완전히 삭제합니다.\n\n" +
+            "· 가입 정보, 라이선스, 기기 등록, 도메인(DNS)이 모두 삭제됩니다.\n" +
+            "· 이 작업은 되돌릴 수 없습니다.\n\n정말 삭제하시겠습니까?",
+            confirmText: "완전 삭제", cancelText: "취소", severity: Severity.Error);
+        if (!ok) return;
+
+        try
+        {
+            var http = HttpFactory.CreateClient("backoffice-authed");
+            var res = await http.DeleteAsync($"api/backoffice/tenants/{row.TenantId}");
+            var payload = await res.Content.ReadFromJsonAsync<ActionResponse>();
+            if (res.IsSuccessStatusCode && payload?.Success == true)
+            {
+                Snackbar.Add(payload.Message ?? "고객사가 삭제되었습니다.", Severity.Success);
+                await LoadAsync();
+            }
+            else
+            {
+                Snackbar.Add(payload?.Message ?? $"삭제 실패 ({(int)res.StatusCode})", Severity.Error);
+            }
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"삭제 처리 오류: {ex.Message}", Severity.Error);
         }
     }
 
