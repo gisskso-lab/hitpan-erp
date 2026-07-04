@@ -17,7 +17,10 @@
 </head>
 
 <body>
-    <Routes />
+    @* @rendermode InteractiveServer — MudBlazor Provider(Popover·Dialog·Snackbar)를
+       인터랙티브 회로로 렌더해야 다이얼로그·버튼이 동작. 미지정 시 정적 SSR로만 렌더되어
+       'Missing MudPopoverProvider' 예외 → 회로 사망 → 버튼 무반응·전반 지연. (사장님 결재 2026-07-04) *@
+    <Routes @rendermode="InteractiveServer" />
     <script src="_framework/blazor.web.js"></script>
     <script src="_content/MudBlazor/MudBlazor.min.js"></script>
 </body>
