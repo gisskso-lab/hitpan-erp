@@ -225,15 +225,31 @@ public class TenantsAdminController : ControllerBase
             //    데이터 흐름도 정정 (사장님 결재 2026-06-18, 헌법 #22):
             //      tenant_certificates(인증서 PFX 민감)·tenant_settings(ERP 업무설정)는 ERP 로컬 전용 →
             //      백오피스 DB에 존재하지 않으므로 정리 대상 아님. 해당 DELETE 제거.
+            // tenant_id 컬럼 보유 자식 테이블 정리 (서버 DB 실측 확인 2026-07-04, 헌법 #13)
             await db.ExecuteAsync("DELETE FROM tenant_devices WHERE tenant_id = @Id", new { Id = id });
             await db.ExecuteAsync("DELETE FROM tenant_etax_settings WHERE tenant_id = @Id", new { Id = id });
-            await db.ExecuteAsync("DELETE FROM tenant_payments WHERE tenant_id = @Id", new { Id = id });
             await db.ExecuteAsync("DELETE FROM tenant_rewards WHERE tenant_id = @Id", new { Id = id });
             await db.ExecuteAsync("DELETE FROM serial_verify_attempts WHERE tenant_id = @Id", new { Id = id });
 
             var companyName = await db.QueryFirstOrDefaultAsync<string>(
                 "SELECT company_name FROM tenants WHERE tenant_id = @Id",
                 new { Id = id });
+
+            // tenant_payments 봉합 (사장님 결재 2026-07-04, 헌법 #13):
+            //   tenant_payments 에는 tenant_id 컬럼이 없다(서버 DB 실측 확인). 결제는 signup_token 으로
+            //   landing_signups 와 연결된다. 회사명 → landing_signups.signup_token → tenant_payments 삭제.
+            //   기존 'DELETE ... WHERE tenant_id' 는 Unknown column 500(삭제 전면 실패)의 진범이었음.
+            if (!string.IsNullOrEmpty(companyName))
+            {
+                var signupTokens = (await db.QueryAsync<string>(
+                    "SELECT signup_token FROM landing_signups WHERE company_name = @Name",
+                    new { Name = companyName })).AsList();
+
+                if (signupTokens.Count > 0)
+                    await db.ExecuteAsync(
+                        "DELETE FROM tenant_payments WHERE signup_token IN @Tokens",
+                        new { Tokens = signupTokens });
+            }
 
             await db.ExecuteAsync("DELETE FROM tenants WHERE tenant_id = @Id", new { Id = id });
             if (!string.IsNullOrEmpty(companyName))
