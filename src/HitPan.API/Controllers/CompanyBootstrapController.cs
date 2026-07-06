@@ -389,9 +389,26 @@ public class CompanyBootstrapController : ControllerBase
     private (bool ok, TokenPayload? payload, string? error) VerifyBootstrapToken(string token)
     {
         // 봉합 2026-06-17 1.2.12 — TenantConfigReader 정합
+        // 봉합 (재설치 P0 2차 벽, 사장님 결재 2026-07-06, 작지서 20260706작2, 보안상무 결재 조건1):
+        //   종전 폴백 "DEV-...change-in-production" 이 프로덕션에서 조용히 쓰이면, 백오피스 실키로 서명한 토큰과
+        //   서명 불일치 401 을 내면서도 "왜 401 인지" 진단이 안 됐다(오늘 재설치 P0 진단 지연의 근본). 또한 DEV 값이
+        //   운영에 새면 소스코드 공개값이 전 고객 서명키가 되어 즉시 P0. → Production 에서 키 부재 시 명확히 거부한다.
+        //   설치 EXE 가 db.conf 에 HITPAN_BOOTSTRAP_TOKEN_KEY 를 기록하므로(작지서 20260706작2 봉합) 정상 설치 PC 는
+        //   TenantConfigReader.Get 첫 폴백에서 잡힌다. DEV 기본값은 오직 비-Production 개발 환경에서만 허용.
         var key = TenantConfigReader.Get("HITPAN_BOOTSTRAP_TOKEN_KEY")
-                 ?? _config["Bootstrap:TokenKey"]
-                 ?? "DEV-bootstrap-token-key-change-in-production-32+chars";
+                 ?? _config["Bootstrap:TokenKey"];
+        if (string.IsNullOrWhiteSpace(key))
+        {
+            var env = TenantConfigReader.Get("ASPNETCORE_ENVIRONMENT")
+                     ?? _config["ASPNETCORE_ENVIRONMENT"]
+                     ?? Environment.GetEnvironmentVariable("ASPNETCORE_ENVIRONMENT");
+            if (string.Equals(env, "Production", StringComparison.OrdinalIgnoreCase))
+            {
+                _logger.LogError("[CompanyBootstrap] HITPAN_BOOTSTRAP_TOKEN_KEY 부재(Production) — 부트스트랩 검증 거부. db.conf 키 기록 확인 필요(작지서 20260706작2).");
+                return (false, null, "설치 구성 오류: 서명키 부재 (관리자 문의)");
+            }
+            key = "DEV-bootstrap-token-key-change-in-production-32+chars";
+        }
 
         var parts = token.Split('.');
         if (parts.Length != 2)

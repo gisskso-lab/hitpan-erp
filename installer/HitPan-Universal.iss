@@ -143,6 +143,9 @@ var
   //   domain.tunnelId(CF 터널 UUID)를 추출해 db.conf TUNNEL_ID 로 저장한다.
   G_TunnelId: String;
   G_BootstrapToken: String;
+  // 봉합 (재설치 P0 2차 벽, 사장님 결재 2026-07-06, 작지서 20260706작2): 부모계정 서명검증용 키.
+  //   백오피스 응답 bootstrap.tokenKey → db.conf HITPAN_BOOTSTRAP_TOKEN_KEY 기록 → ERP 로컬 검증 정합.
+  G_BootstrapTokenKey: String;
   G_BootstrapOk: Boolean;
 
   // 멀티사업자 영역 변수 (사고 #16·#21·#22 봉합 WS-20260612-01 2026-06-12)
@@ -460,6 +463,8 @@ begin
   //   LOCAL 모드·터널 미발급이면 빈 문자열(db.conf 에 빈 값 → 워치독이 보수적으로 자가복구 스킵).
   G_TunnelId := ExtractJsonValue(RawResponse, 'tunnelId');
   G_BootstrapToken := ExtractJsonValue(RawResponse, 'token');
+  // 재설치 P0 2차 벽 봉합 (2026-07-06): 부모계정 서명검증 키 추출 (응답 bootstrap.tokenKey).
+  G_BootstrapTokenKey := ExtractJsonValue(RawResponse, 'tokenKey');
 
   // 정리
   DeleteFile(ResponseFile);
@@ -1027,6 +1032,13 @@ begin
     //   토큰은 시크릿이나 db.conf 는 아래 icacls(Administrators·SYSTEM 만 읽기) ACL 로 보호 + 본사 미전송(헌법 #22).
     //   LOCAL 모드·터널 미발급이면 빈 값(워치독이 보수적으로 토큰 기반 재설치 스킵).
     BootstrapContent.Add('TUNNEL_TOKEN=' + G_TunnelToken);
+    // 재설치 P0 2차 벽 봉합 (사장님 결재 2026-07-06, 작지서 20260706작2, 4인회의+보안상무 결재):
+    //   부모계정 생성용 부트스트랩 토큰 서명검증 키. 백오피스(LandingPublicController)가 이 키로 서명한 토큰을
+    //   ERP(CompanyBootstrapController.VerifyBootstrapToken)가 db.conf 의 이 값으로 로컬 검증(본사 통신 0, 헌법 #30).
+    //   미기록 시 ERP 가 DEV 폴백값으로 검증 → 서명 불일치 401 → 부모계정 생성 전면 차단(헌법 #20). TUNNEL_TOKEN 과
+    //   동일하게 아래 icacls(Administrators·SYSTEM 만) 보호 + 본사 미전송(헌법 #22, 보안상무 결재 조건2 충족).
+    //   [베타=전 고객 공용키 / 정식 전=HMAC(마스터키,tenant_id) 파생키 전환 필수 — 보안상무 결재.]
+    BootstrapContent.Add('HITPAN_BOOTSTRAP_TOKEN_KEY=' + G_BootstrapTokenKey);
     BootstrapContent.SaveToFile(ExpandConstant('{app}\db.conf'));
   finally
     BootstrapContent.Free;

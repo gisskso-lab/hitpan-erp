@@ -152,6 +152,19 @@ public class InstallerBootstrapController : ControllerBase
             var bootstrapToken = GenerateBootstrapToken();
             var bootstrapTokenHash = ComputeHmacSha256(bootstrapToken, pepper);
 
+            // 봉합 (재설치 P0 2차 벽, 사장님 결재 2026-07-06, 작지서 20260706작2, 4인회의+보안상무 결재):
+            //   부모계정 생성용 서명 토큰은 백오피스(LandingPublicController.ClaimLicense)가
+            //   HITPAN_BOOTSTRAP_TOKEN_KEY 로 HMAC 서명하고, ERP(CompanyBootstrapController.VerifyBootstrapToken)가
+            //   같은 키로 검증한다. 설치 EXE 가 이 키를 db.conf 에 기록하지 않아 ERP 가 DEV 폴백값으로 검증 →
+            //   서명 불일치 401 → 모든 신규/재설치 부모계정 생성 차단(헌법 #20). 여기서 키를 내려 EXE 가 db.conf 에
+            //   기록하면 로컬 검증 정합(헌법 #30 본사 의존 0 유지). LandingPublicController.ClaimLicense 와 동일 취득.
+            //   [베타=전 고객 공용키(보안상무 결재: create-parent 앞단 게이트가 타 고객사 실피해 차단, 라이선스 우회 등급).
+            //    정식 출시 전 = HMAC(마스터키, tenant_id) 테넌트별 파생키로 전환 필수 + jti 재사용방지·만료단축 동시.]
+            var bootstrapTokenKey = Environment.GetEnvironmentVariable("HITPAN_BOOTSTRAP_TOKEN_KEY")
+                                    ?? _config["Bootstrap:TokenKey"]
+                                    ?? throw new InvalidOperationException(
+                                        "HITPAN_BOOTSTRAP_TOKEN_KEY 미설정 — 부트스트랩 서명키 없이 설치 응답 불가(DEV 폴백 금지, 보안상무 결재 조건1)");
+
             // 기기 부트스트랩 로그 (감사 추적)
             // 봉합 v1.2.5 (2026-06-11): 컬럼 영역 정정 license_key_hash -> submitted_hash
             await db.ExecuteAsync(@"
@@ -196,7 +209,10 @@ public class InstallerBootstrapController : ControllerBase
                 {
                     token = bootstrapToken,
                     expiresInSec = 86400,
-                    backofficeUrl = "https://back.hitpan.kr"
+                    backofficeUrl = "https://back.hitpan.kr",
+                    // 재설치 P0 2차 벽 봉합 (2026-07-06): EXE 가 db.conf 에 HITPAN_BOOTSTRAP_TOKEN_KEY 로 기록.
+                    //   ERP VerifyBootstrapToken 이 로컬에서 이 키로 서명 검증(본사 통신 0). 응답은 HTTPS(back.hitpan.kr) 전제.
+                    tokenKey = bootstrapTokenKey
                 }
             });
         }
