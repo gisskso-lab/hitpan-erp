@@ -79,3 +79,12 @@ secrets/
 # M4 샌드박스 검증 산출물(거대 self-contained EXE·clean DDL 사본 — 재생성 가능)
 tests/sandbox-m4/payload/app/
 tests/sandbox-m4/payload/hitpan_db_clean.sql
+
+# API wwwroot 재오염원 차단 (2026-07-07, 종단 P0 진범 봉합 — 작업지시서 20260706작-v2)
+#   API 는 Blazor 를 ProjectReference 하지 않으므로 소스트리에 정적 wwwroot 가 있으면 안 된다.
+#   과거 옛 WASM 잔재(5/18~20)가 여기 남아 빌드에 실려 터널 setup NotFound 를 유발했다.
+#   최신 WASM 은 빌드 시 web publish 결과를 bundle/api/wwwroot 로 복사한다(build-installer-universal.ps1 W1).
+src/HitPan.API/wwwroot/
+installer/api-backup-*/
+installer/api-wwwroot-backup-*/
+hitpan-apiwwwroot/

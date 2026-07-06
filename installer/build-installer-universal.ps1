@@ -88,13 +88,66 @@ Write-Host ""
 Write-Host "[2/5] ERP 산출물 빌드..." -ForegroundColor Yellow
 
 if (-not $SkipErpBuild) {
+    # 봉합 (2026-07-06, 종단설치 P0 — setup 화면 실종 진범): 종전엔 publish 출력을 `| Out-Null`
+    #   로 버려 $LASTEXITCODE 가 파이프 마지막(Out-Null=항상0)을 봤다. Web publish 가 중간에
+    #   깨져도(오늘 아침 PC 크래시) 게이트를 통과해 LicenseSetupPage 빠진 불완전 WASM 이 출하됐고,
+    #   /setup/license 가 NotFound → 부모계정 생성 불가 → 로그인 401(헌법 #20 워크플로우 차단).
+    #   → Out-Null 제거(출력 보존)하고 publish 직후 exit code 를 명시 변수로 잡는다.
+    # ── W2 (2026-07-07): publish 전 bundle/api 청소 (작업지시서 20260706작-v2, CTO 승인) ──
+    #   `dotnet publish -o` 는 출력 폴더를 완전 청소하지 않아, 과거 산출물(옛 wwwroot 5/18~20 잔재)이
+    #   새 dll 과 섞여 그대로 출하됐다(진범). publish 전 폴더를 비워 잔재 재유입을 원천 차단한다.
+    #   (소스트리 src/HitPan.API/wwwroot 옛 잔재도 별도 삭제+.gitignore 등재 — 재오염원 제거, CTO 지목.)
+    if (Test-Path "$BundleDir/api") { Remove-Item -Recurse -Force "$BundleDir/api" }
     Write-Host "  → HitPan.API publish..."
-    dotnet publish src/HitPan.API/HitPan.API.csproj -c Release -o "$BundleDir/api" --nologo 2>&1 | Out-Null
-    if ($LASTEXITCODE -ne 0) { Write-Error "HitPan.API publish 실패."; exit 1 }
+    dotnet publish src/HitPan.API/HitPan.API.csproj -c Release -o "$BundleDir/api" --nologo
+    if ($LASTEXITCODE -ne 0) { Write-Error "HitPan.API publish 실패 (exit $LASTEXITCODE)."; exit 1 }
 
     Write-Host "  → HitPan.Web publish..."
-    dotnet publish src/HitPan.Web/HitPan.Web.csproj -c Release -o "$BundleDir/web" --nologo 2>&1 | Out-Null
-    if ($LASTEXITCODE -ne 0) { Write-Error "HitPan.Web publish 실패."; exit 1 }
+    dotnet publish src/HitPan.Web/HitPan.Web.csproj -c Release -o "$BundleDir/web" --nologo
+    if ($LASTEXITCODE -ne 0) { Write-Error "HitPan.Web publish 실패 (exit $LASTEXITCODE)."; exit 1 }
+
+    # ── Web 산출물 완전성 게이트 (2026-07-06 신설, 헌법 #36 실측 스모크의 Web판) ──
+    #   빌드 성공(exit 0)이어도 산출물이 완전하다는 보장이 아니다. setup 화면(부모계정 생성 =
+    #   신규/재설치 필수 관문)이 WASM 에 실제 담겼는지 라우트 문자열로 실측한다. 없으면 출하 차단.
+    $webWasm = "$BundleDir/web/wwwroot/_framework/HitPan.Web.wasm"
+    if (-not (Test-Path $webWasm)) {
+        Write-Error "  ❌ Web게이트 실패: HitPan.Web.wasm 미생성 ($webWasm). 출시 차단."; exit 1
+    }
+    $wasmText = [System.Text.Encoding]::UTF8.GetString([System.IO.File]::ReadAllBytes($webWasm))
+    foreach ($needle in @('setup/license', 'LicenseSetup')) {
+        if ($wasmText -notmatch [regex]::Escape($needle)) {
+            Write-Error "  ❌ Web게이트 실패: WASM 에 '$needle' 라우트/컴포넌트 실종 — setup 화면 빠진 불완전 빌드. 출시 차단 (종단 P0 재발)."; exit 1
+        }
+    }
+    Write-Host "  ✅ Web 완전성 게이트 통과 — setup/license 라우트 담김" -ForegroundColor Green
+
+    # ── W1 (2026-07-07, 종단 P0 진범 봉합 — 작업지시서 20260706작-v2, 4인 만장일치+CTO 조건부승인) ──
+    #   진범: 터널(test1.hitpan.kr)은 ingress origin=http://localhost:5257(API) 직결이라(3중 실측:
+    #   /health 200=API전용·ingress 코드값 5257·WASM바이트=API옛것 일치), 터널로 오는 실고객은
+    #   오직 api\wwwroot 의 WASM 으로 화면을 받는다. 그런데 빌드는 web\wwwroot 만 최신 publish 하고
+    #   api\wwwroot 는 소스트리 옛 잔재(5/18~20, setup 라우트 없음)를 그대로 실어 → 터널 setup NotFound
+    #   → 부모계정 생성 불가 → 로그인 401(헌법 #20 차단). web-server.ps1(5234)은 로컬 전용이라 로컬만 정상.
+    #   봉합: API 서빙 제거(v1)는 터널 화면 백지 크래시 P0 오답 — 제거가 아니라 web publish 최신 WASM 을
+    #   api\wwwroot 에 복사(갱신)한다. 터널·ingress·포트는 손대지 않는다(헌법 #29 통신 무결성 무손상).
+    Write-Host "  → API wwwroot 최신화 (web publish → api\wwwroot 복사)..."
+    $apiWwwroot = "$BundleDir/api/wwwroot"
+    if (Test-Path $apiWwwroot) { Remove-Item -Recurse -Force $apiWwwroot }
+    Copy-Item -Recurse -Force "$BundleDir/web/wwwroot" $apiWwwroot
+
+    # ── W3: api\wwwroot == web\wwwroot 정합 강제 게이트 (CTO 조건, 2벌 드리프트 차단) ──
+    #   설치본은 api\wwwroot(5257 서빙)+web\wwwroot(5234 서빙) 2벌 WASM 을 함께 출하(.iss L88·89).
+    #   한쪽만 갱신되면 오늘 사고 재발. 두 WASM 의 SHA256 이 다르면 빌드 실패시켜 드리프트를 원천 차단.
+    #   (근본 제거=web-server 5234 폐기+5257 단일서빙 one-served-copy 는 P1 백로그 별건.)
+    $apiWasm = "$apiWwwroot/_framework/HitPan.Web.wasm"
+    if (-not (Test-Path $apiWasm)) {
+        Write-Error "  ❌ api정합게이트 실패: api\wwwroot 복사 후 HitPan.Web.wasm 없음. 출시 차단."; exit 1
+    }
+    $hashWeb = (Get-FileHash $webWasm -Algorithm SHA256).Hash
+    $hashApi = (Get-FileHash $apiWasm -Algorithm SHA256).Hash
+    if ($hashWeb -ne $hashApi) {
+        Write-Error "  ❌ api정합게이트 실패: web\wwwroot($hashWeb) ≠ api\wwwroot($hashApi) — 2벌 드리프트. 출시 차단 (종단 P0 재발)."; exit 1
+    }
+    Write-Host "  ✅ api\wwwroot 정합 게이트 통과 — web=api WASM 동일($($hashApi.Substring(0,12)))" -ForegroundColor Green
 
     Write-Host "  ✅ ERP 산출물 빌드 완료" -ForegroundColor Green
 } else {
@@ -107,10 +160,11 @@ Write-Host "[3/5] 워치독 빌드..." -ForegroundColor Yellow
 
 if (-not $SkipWatchdog -and (Test-Path "src/HitPan.Watchdog/HitPan.Watchdog.csproj")) {
     Write-Host "  → HitPan.Watchdog publish..."
+    # 봉합 (2026-07-06): Out-Null 제거 — $LASTEXITCODE 가 publish 실제 결과를 보게 한다(위 API/Web 동일 사유).
     dotnet publish src/HitPan.Watchdog/HitPan.Watchdog.csproj `
         -c Release -o "$BundleDir/watchdog" -r win-x64 --self-contained true `
-        --nologo 2>&1 | Out-Null
-    if ($LASTEXITCODE -ne 0) { Write-Error "HitPan.Watchdog publish 실패."; exit 1 }
+        --nologo
+    if ($LASTEXITCODE -ne 0) { Write-Error "HitPan.Watchdog publish 실패 (exit $LASTEXITCODE)."; exit 1 }
     Write-Host "  ✅ 워치독 빌드 완료" -ForegroundColor Green
 } else {
     Write-Host "  ⏭ 워치독 프로젝트 없음 (Day 7에 추가될 영역)"
