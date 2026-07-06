@@ -32,7 +32,13 @@ public sealed class TenantMiddleware
             || path.StartsWithSegments("/api/landing")
             || path.StartsWithSegments("/api/install")
             // 사장님 결재 저장 2026-06-08 모두결재 — 백오피스→ERP webhook 저장 (HMAC 서명·nonce 저장할 영역 자체 검증, 헌법 #35 정합)
-            || path.StartsWithSegments("/api/internal"))
+            || path.StartsWithSegments("/api/internal")
+            // 부모계정 생성 정식 경로 (사장님 결재 2026-07-06, 작지서 20260706작1):
+            //   /api/setup = CompanyBootstrapController(bootstrap·create-parent) 단독. 진입 즉시
+            //   VerifyBootstrapToken(HMAC-SHA256 서명+audience+만료 4중검증)이 자체 인증하므로 익명 면제해도
+            //   백도어 아님(서명 없는 익명 요청은 401). 커밋 ed46b1f(2026-06-25)가 구 /api/tenants/setup 익명
+            //   백도어 제거 시 신 경로 화이트리스트 등재를 누락 → 모든 신규/재설치 부모계정 생성 401 차단(헌법 #20 위반)을 봉합.
+            || path.StartsWithSegments("/api/setup"))
         {
             await _next(context);
             return;
