@@ -42,10 +42,13 @@ public sealed class SerialProofVerifier
     private static readonly IReadOnlyDictionary<string, string> EmbeddedPublicKeys =
         new Dictionary<string, string>(StringComparer.Ordinal)
         {
+            // kid=v1 공개키 — NCP /var/hitpan/serial-keys 에서 생성된 개인키의 짝 공개키(SPKI).
+            //   개인키는 NCP 디스크(chmod 600, root)에만 존재. 공개키는 노출 무해라 EXE 내장.
+            //   ⚠️ 이 키쌍은 베타 검증용. 정식 배포 전 사장님이 새 키쌍 발급·교체(#23·#29).
             ["v1"] =
                 "-----BEGIN PUBLIC KEY-----\n" +
-                "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAE3XQQScAV4b1YJI9sT4mhycS8Ohch\n" +
-                "cSy201Z5u4lxyHKxN4vLCu+QHME+wac+EtTF+HHOLHr0Qty8qdXYbG+sYQ==\n" +
+                "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEbBArsSmwG5JApTfss6hATy/N1tSQ\n" +
+                "yaeooX0Y/WoJ1obMkh5kRuH0L9yE8UO3nioCFJVGWVTyMvTSMsKhqiJPnw==\n" +
                 "-----END PUBLIC KEY-----\n",
         };
 

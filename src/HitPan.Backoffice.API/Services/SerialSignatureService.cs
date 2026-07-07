@@ -47,6 +47,10 @@ public class SerialSignatureService : ISerialSignatureService
 {
     // 개인키 PEM 환경변수 (베타 = 서버 격리 주입). 소스·응답·로그 노출 금지.
     private const string PrivateKeyEnv = "HITPAN_SERIAL_SIGN_PRIVATE_KEY";
+    // 개인키 PEM 파일 경로 환경변수. 이게 우선한다 — systemd Environment 는 여러 줄 PEM 개행을
+    //   보존하지 못해(한 줄로 뭉개짐) ImportFromPem 이 실패한다. 파일 경로 방식이면 개인키가
+    //   디스크(chmod 600, root 전용)에만 존재하고 systemd/프로세스 환경에 값이 안 실린다(#22·#23 정합).
+    private const string PrivateKeyFileEnv = "HITPAN_SERIAL_SIGN_PRIVATE_KEY_FILE";
     // key-id 환경변수 (미설정 시 기본 "v1"). 개인키 롤오버 시 증분.
     private const string KeyIdEnv = "HITPAN_SERIAL_SIGN_KID";
 
@@ -57,7 +61,18 @@ public class SerialSignatureService : ISerialSignatureService
     public SerialSignatureService(ILogger<SerialSignatureService> logger)
     {
         _logger = logger;
-        _privateKeyPem = Environment.GetEnvironmentVariable(PrivateKeyEnv);
+        // 파일 경로 우선(개행 보존). 없으면 env 값 직접(개행 이스케이프 \n 복원 지원).
+        var keyFile = Environment.GetEnvironmentVariable(PrivateKeyFileEnv);
+        if (!string.IsNullOrWhiteSpace(keyFile) && File.Exists(keyFile))
+        {
+            _privateKeyPem = File.ReadAllText(keyFile);
+        }
+        else
+        {
+            var raw = Environment.GetEnvironmentVariable(PrivateKeyEnv);
+            // systemd Environment 에 한 줄로 넣을 때 \n 이스케이프를 실제 개행으로 복원.
+            _privateKeyPem = raw?.Contains("\\n") == true ? raw.Replace("\\n", "\n") : raw;
+        }
         _kid = Environment.GetEnvironmentVariable(KeyIdEnv) is { Length: > 0 } k ? k : "v1";
     }
 
