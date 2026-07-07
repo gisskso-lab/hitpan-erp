@@ -46,6 +46,15 @@ var builder = WebApplication.CreateBuilder(args);
 builder.Host.UseSerilog();
 builder.Host.UseWindowsService();
 
+// seed-parent 오프라인 서브커맨드 (작업지시서 20260707작1 ②단계 P0-3, A안 — 사장님 결재 2026-07-07):
+//   웹 호스트를 띄우지 않고 부모계정을 로컬 DB 에 생성하고 종료한다(브라우저·CORS·터널 우회).
+//   설치마법사(.iss)가 HitPan.API.exe seed-parent <inputJsonPath> 로 호출. 종료 코드로 판정.
+if (args.Length > 0 && string.Equals(args[0], HitPan.API.Services.SeedParentCommand.CommandName, StringComparison.OrdinalIgnoreCase))
+{
+    var seedExit = await HitPan.API.Services.SeedParentCommand.RunAsync(builder, args);
+    return seedExit;
+}
+
 // EXE 옆 wwwroot가 있으면 WebRoot로 설정 (installer 모드)
 var exeDir = Path.GetDirectoryName(Environment.ProcessPath) ?? AppContext.BaseDirectory;
 var exeWebRoot = Path.Combine(exeDir, "wwwroot");
@@ -231,6 +240,11 @@ builder.Services.AddHostedService<HitPan.API.BackgroundServices.OutboxPollerWork
 builder.Services.AddScoped<IESignatureService, ESignatureService>();
 builder.Services.AddScoped<ILaborContractService, LaborContractService>();
 builder.Services.AddSingleton<AccessTokenValidator>();
+// 부모계정 온보딩 증표 병행 검증기 + 공유 프로비저너 (작업지시서 20260707작1 ②단계, 사장님 승인 2026-07-07)
+//   - SerialProofVerifier: 2-part HMAC(이행기) / 3-part 공개키(ECDSA) 병행 검증. 공개키 EXE 내장.
+//   - CompanyBootstrapProvisioner: create-parent 웹 API 와 seed-parent 오프라인 서브커맨드가 공유하는 DB 트랜잭션.
+builder.Services.AddSingleton<HitPan.API.Services.SerialProofVerifier>();
+builder.Services.AddScoped<HitPan.API.Services.CompanyBootstrapProvisioner>();
 // 헌법 #35 객체 완전 분리 (사장님 결재 2026-06-04, 보안 격벽 완료 2026-06-18):
 //   - 본사 백오피스·대리점 영역 컨트롤러·서비스는 HitPan.Backoffice.API로 이전
 //   - ERP에서 IResellerService / IResellerRlsService DI 등록 제거
@@ -399,6 +413,10 @@ else if (!app.Environment.IsProduction())
 }
 
 app.Run();
+
+// seed-parent 서브커맨드가 있어 진입점이 int 를 반환하므로, 정상 웹 실행 경로도 명시적으로 0 을 반환한다.
+//   (app.Run() 은 블로킹이라 여기 도달 시 정상 종료.)
+return 0;
 
 // ── .env 파일 로드 헬퍼 ──
 // 실행 디렉토리부터 상위로 올라가며 .env 파일을 찾아 로드한다.

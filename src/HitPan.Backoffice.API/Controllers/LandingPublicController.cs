@@ -28,11 +28,17 @@ public class LandingPublicController : ControllerBase
 {
     private readonly IConfiguration _config;
     private readonly ILogger<LandingPublicController> _logger;
+    // 작업지시서 20260707작1 ①단계 — 시리얼 공개키 서명 발급기(ECDSA P-256, HMAC 병행)
+    private readonly Services.ISerialSignatureService _serialSign;
 
-    public LandingPublicController(IConfiguration config, ILogger<LandingPublicController> logger)
+    public LandingPublicController(
+        IConfiguration config,
+        ILogger<LandingPublicController> logger,
+        Services.ISerialSignatureService serialSign)
     {
         _config = config;
         _logger = logger;
+        _serialSign = serialSign;
     }
 
     // 가격 공개 조회 — 랜딩 페이지 동적 로드용 (사장님 결재 2026-06-11, B안)
@@ -241,6 +247,24 @@ public class LandingPublicController : ControllerBase
             };
             var bootstrapToken = SignToken(tokenPayload, bootstrapKey);
 
+            // 작업지시서 20260707작1 ①단계 (사장님 승인 2026-07-07) — 공개키 서명 증표 병행 발급.
+            //   - HMAC(BootstrapToken)은 이행기 하위호환용으로 유지, 여기에 ECDSA P-256 서명 증표를 추가 발급.
+            //   - payload 는 HMAC 과 동일 소스(sub=tenant_id 단일 진실원, 파생 금지 — 원칙 B).
+            //   - ②단계(ERP EXE)가 내장 공개키로 오프라인 검증(통신 0). 개인키는 서버 격리, 응답·로그 미노출.
+            //   - 개인키 미구성(_serialSign.IsConfigured=false) 시 SignedProof=null 로 두어 HMAC 단독 하위호환 유지.
+            //     (Production 부재 시 명확 거부는 아래 GET /license/public-key 헬퍼·배포 게이트에서 관리.)
+            string? signedProof = null;
+            if (_serialSign.IsConfigured)
+            {
+                signedProof = _serialSign.Sign(tokenPayload);
+            }
+            else
+            {
+                _logger.LogWarning(
+                    "[LicenseClaim] 시리얼 공개키 개인키 미구성 — 공개키 서명 증표 생략(HMAC 단독, 이행기). tenant={Code}",
+                    tenant.TenantCode);
+            }
+
             _logger.LogInformation("[LicenseClaim] 검증 통과 tenant={Code}", tenant.TenantCode);
             return Ok(new LicenseClaimResponse
             {
@@ -248,7 +272,9 @@ public class LandingPublicController : ControllerBase
                 CompanyName = tenant.CompanyName,
                 Message = "라이선스 검증 완료. ERP 자동 반영을 진행합니다.",
                 TenantCode = tenant.TenantCode,
-                BootstrapToken = bootstrapToken
+                BootstrapToken = bootstrapToken,
+                SignedProof = signedProof,
+                SignedProofKid = signedProof is null ? null : _serialSign.ActiveKeyId
             });
         }
         catch (Exception ex)
@@ -256,6 +282,35 @@ public class LandingPublicController : ControllerBase
             _logger.LogError(ex, "[LicenseClaim] 검증 중 오류");
             return StatusCode(500, new LicenseClaimResponse { Valid = false, Message = "검증 중 서버 오류가 발생했습니다." });
         }
+    }
+
+    // 작업지시서 20260707작1 ①단계 (사장님 승인 2026-07-07) — 공개키 추출 헬퍼(②단계 EXE 내장용).
+    //   - 공개키는 노출돼도 위조 불가라 배포 무해(#23). 개인키는 절대 반환 안 함.
+    //   - ②단계 개발자가 이 응답의 PEM 을 EXE 검증측에 내장. kid 도 함께 반환해 롤오버 정합.
+    //   - 개인키(HITPAN_SERIAL_SIGN_PRIVATE_KEY) 미구성 시 503 — 서명 발급 자체가 불가한 배포 상태임을 명확 거부.
+    [HttpGet("license/public-key")]
+    public IActionResult GetSerialPublicKey()
+    {
+        if (!_serialSign.IsConfigured)
+        {
+            _logger.LogWarning("[SerialPublicKey] 개인키 미구성 — 공개키 추출 불가(HITPAN_SERIAL_SIGN_PRIVATE_KEY 필요)");
+            return StatusCode(503, new
+            {
+                configured = false,
+                message = "시리얼 서명 개인키가 구성되지 않아 공개키를 추출할 수 없습니다. HITPAN_SERIAL_SIGN_PRIVATE_KEY 설정 필요."
+            });
+        }
+
+        var pem = _serialSign.ExportPublicKeyPem();
+        // 공개키 PEM 을 Information 로 1회 출력 — ②단계 개발자가 로그에서 뽑아 EXE 에 내장 가능(공개키=노출 무해).
+        _logger.LogInformation("[SerialPublicKey] kid={Kid} 공개키 PEM(EXE 내장용):\n{Pem}", _serialSign.ActiveKeyId, pem);
+        return Ok(new
+        {
+            configured = true,
+            algorithm = "ECDSA-P256-SHA256",
+            kid = _serialSign.ActiveKeyId,
+            publicKeyPem = pem
+        });
     }
 
     private static string ComputeHmacSha256(string data, string key)
@@ -368,5 +423,12 @@ public class LandingPublicController : ControllerBase
         // 헌법 #35 W2 (사장님 결재 2026-06-04): 객체 완전 분리 서명 토큰
         //   ERP가 검증 후 local_company / local_subscription 저장 시 사용
         public string? BootstrapToken { get; set; }
+
+        // 작업지시서 20260707작1 ①단계 (사장님 승인 2026-07-07) — 공개키 서명 증표(ECDSA P-256, HMAC 병행).
+        //   형식 <payloadB64>.<sigB64>.<kid>. ②단계 ERP EXE 가 내장 공개키로 오프라인 검증(통신 0).
+        //   개인키 미구성 시 null(이행기 HMAC 단독 하위호환).
+        public string? SignedProof { get; set; }
+        // 증표에 사용된 공개키 버전(kid). 공개키 롤오버·다중 병행검증용. SignedProof 존재 시에만 채워짐.
+        public string? SignedProofKid { get; set; }
     }
 }

@@ -39,6 +39,11 @@ public class Program
         // W9 대리점 정산·시리얼 (사장님 결재 2026-06-04)
         builder.Services.AddScoped<HitPan.Backoffice.API.Services.IResellerSettlementCalculator,
                                    HitPan.Backoffice.API.Services.ResellerSettlementCalculator>();
+        // 시리얼 공개키 서명 발급기 (작업지시서 20260707작1 ①단계, 사장님 승인 2026-07-07)
+        //   - 부모계정 온보딩 증표를 HMAC(현행)에 더해 ECDSA P-256 공개키 서명으로 병행 발급.
+        //   - 개인키 = HITPAN_SERIAL_SIGN_PRIVATE_KEY 환경변수(베타 서버격리). Singleton(개인키 PEM import 1회 재사용).
+        builder.Services.AddSingleton<HitPan.Backoffice.API.Services.ISerialSignatureService,
+                                      HitPan.Backoffice.API.Services.SerialSignatureService>();
 
         // JWT 인증 (백오피스 전용 — ERP와 분리)
         var jwt = builder.Configuration.GetSection("Jwt");

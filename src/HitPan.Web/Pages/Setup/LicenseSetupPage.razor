@@ -4,7 +4,6 @@
 @inject HttpClient ErpApi
 @inject NavigationManager Nav
 @inject MudBlazor.ISnackbar Snackbar
-@inject IServiceProvider Sp
 @using Microsoft.AspNetCore.Authorization
 @using System.Net.Http.Json
 
@@ -220,47 +219,31 @@
     private string _parentPassword = "";
     private string _parentPasswordConfirm = "";
 
-    private async Task VerifyAsync()
+    // ★ CORS 진범 절단 (작업지시서 20260707작1 ③단계 P0-4, 사장님 결재 2026-07-07):
+    //   종전엔 이 메서드에서 브라우저가 back.hitpan.kr(백오피스)를 직접 호출했다 → 고객사 터널 도메인이
+    //   백오피스 CORS 목록에 없어 Failed to fetch → 부모계정 생성 전면 차단(오늘 Sandbox 실측 진범).
+    //   봉합: 온보딩(시리얼·사업자번호 검증 → 부모계정 생성)은 설치마법사가 전담한다
+    //         (설치마법사가 PowerShell 서버간으로 license/claim 검증 → seed-parent 오프라인 생성).
+    //         따라서 이 화면의 브라우저→백오피스 직접 호출은 제거한다(CORS 원천 무관).
+    //   이 화면 자체는 재설치·계정분실 재생성 경로(P0-4 로그인 화면 최초등록)로 은퇴 예정이라 파일은 보존한다.
+    //   ※ 서버 통신이 사라져 await 가 없으므로 동기 메서드로 둔다(async 없는 Task 반환 — CS1998 경고 0, 헌법 #19).
+    private Task VerifyAsync()
     {
         _error = null;
         if (string.IsNullOrWhiteSpace(_licenseKey))
         {
             _error = "라이선스 키를 입력해주세요.";
-            return;
+            return Task.CompletedTask;
         }
         if (string.IsNullOrWhiteSpace(_bizNo))
         {
             _error = "사업자번호를 입력해주세요.";
-            return;
+            return Task.CompletedTask;
         }
 
-        _busy = true;
-        try
-        {
-            var http = Sp.GetRequiredKeyedService<HttpClient>("backoffice");
-            var res = await http.PostAsJsonAsync("api/landing/license/claim",
-                new { LicenseKey = _licenseKey, BizNo = _bizNo });
-            var payload = await res.Content.ReadFromJsonAsync<ClaimResponse>();
-            if (payload?.Valid == true)
-            {
-                _companyName = payload.CompanyName ?? "";
-                _tenantCode = payload.TenantCode ?? "";
-                _bootstrapToken = payload.BootstrapToken ?? "";
-                _step = 2;
-            }
-            else
-            {
-                _error = payload?.Message ?? "라이선스 검증에 실패했습니다.";
-            }
-        }
-        catch (Exception ex)
-        {
-            _error = $"검증 중 오류가 발생했습니다: {ex.Message}";
-        }
-        finally
-        {
-            _busy = false;
-        }
+        _error = "설치는 설치마법사에서 완료됩니다. 로그인 화면에서 부모 계정으로 접속해 주세요.";
+        _busy = false;
+        return Task.CompletedTask;
     }
 
     private async Task BootstrapAsync()

@@ -130,6 +130,10 @@ Type: filesandordirs; Name: "{app}\bootstrap.conf"
 var
   SerialKeyPage: TInputQueryWizardPage;
   BootstrapResultPage: TOutputMsgWizardPage;
+  // 부모계정 입력 페이지 (작업지시서 20260707작1 ③단계 P0-3, 사장님 결재 2026-07-07):
+  //   아이디+비번+비번확인. ssPostInstall 앞(설치 전)에서 입력받아 seed-parent 오프라인 서브커맨드로
+  //   로컬 DB 에 부모계정을 심는다. 비번 평문은 임시파일(ACL)로만 전달 — SetupLog·PowerShell 인자 미노출(#40·#22).
+  ParentAccountPage: TInputQueryWizardPage;
 
   G_LicenseKey: String;
   G_TenantCode: String;
@@ -145,8 +149,20 @@ var
   G_BootstrapToken: String;
   // 봉합 (재설치 P0 2차 벽, 사장님 결재 2026-07-06, 작지서 20260706작2): 부모계정 서명검증용 키.
   //   백오피스 응답 bootstrap.tokenKey → db.conf HITPAN_BOOTSTRAP_TOKEN_KEY 기록 → ERP 로컬 검증 정합.
+  //   ※ 이행기(④단계 전) 유지. ④단계에서 제거.
   G_BootstrapTokenKey: String;
   G_BootstrapOk: Boolean;
+
+  // 부모계정 온보딩 로컬 완결 (작업지시서 20260707작1 ③단계, 사장님 결재 2026-07-07):
+  //   G_BizNo       : 사업자번호(10자리). license/claim 서버간 검증 + local_company 저장에 사용.
+  //   G_SignedProof : 백오피스 발급 증표(3-part ECDSA 공개키 / 2-part HMAC 이행기). seed-parent 가
+  //                   EXE 내장 공개키로 오프라인 검증한다(브라우저·CORS·터널 우회 = 오늘 CORS 진범 원천 차단).
+  //     ※ 진범(오늘 Sandbox 실측): 웹 setup(브라우저)이 back.hitpan.kr 를 직접 호출 → CORS 차단 → 증표 못 받음.
+  //       봉합: 증표 취득은 설치마법사가 PowerShell 서버간 호출(license/claim)로만 수행 = CORS 무관.
+  //   G_SignedProofKid : 증표 공개키 버전(kid). 진단·롤오버 추적용(검증 자체는 증표 3번째 분절로 함).
+  G_BizNo: String;
+  G_SignedProof: String;
+  G_SignedProofKid: String;
 
   // 멀티사업자 영역 변수 (사고 #16·#21·#22 봉합 WS-20260612-01 2026-06-12)
   //   사장님 결재 [[project_multi_business_per_pc]] (2026-06-09)
@@ -475,6 +491,88 @@ begin
 end;
 
 // ============================================================
+// 부모계정 증표(SignedProof) 서버간 취득 — license/claim (작업지시서 20260707작1 ③단계)
+// ============================================================
+//   왜 별도 호출인가: installer/bootstrap 응답의 token 은 무작위 부트스트랩 토큰(bst_...)이라 오프라인
+//     서명검증 대상이 아니다. 오프라인으로 검증 가능한 증표(SignedProof: 3-part ECDSA / 2-part HMAC)는
+//     오직 POST /api/landing/license/claim 이 발급한다(사업자번호 해시 매칭 후). 그래서 시리얼+사업자번호로
+//     이 엔드포인트를 PowerShell 서버간(브라우저 아님)으로 1회 호출해 증표를 받아 온다.
+//   ★ 오늘 CORS 진범 봉합: 종전엔 이 호출을 ERP 첫 화면(브라우저)이 back.hitpan.kr 로 직접 쏴서 CORS 차단.
+//     여기(설치마법사 PowerShell)는 브라우저가 아니므로 CORS 자체가 무관 = 전 고객 구조적 차단 원천 제거.
+//   반환: True 면 G_SignedProof·G_SignedProofKid 세팅. False 면 증표 미취득(설치는 계속하되 부모계정은 못 심음).
+function CallLicenseClaimApi(Serial: String; BizNo: String): Boolean;
+var
+  PsScript, PsScriptFile: String;
+  ResultCode: Integer;
+  ResponseFile, RequestFile: String;
+  Lines: TArrayOfString;
+  RawResponse: String;
+  I: Integer;
+begin
+  Result := False;
+  G_SignedProof := '';
+  G_SignedProofKid := '';
+
+  ResponseFile := ExpandConstant('{tmp}\claim-response.json');
+  RequestFile := ExpandConstant('{tmp}\claim-request.json');
+  PsScriptFile := ExpandConstant('{tmp}\claim-call.ps1');
+
+  // 요청 본문 — LicenseKey + BizNo (LandingPublicController.ClaimLicense 계약).
+  SaveStringToFile(RequestFile,
+    '{"licenseKey":"' + Serial + '","bizNo":"' + BizNo + '"}', False);
+
+  // CallBootstrapApi 와 동일한 5축 봉합(외부 .ps1·TLS1.2·UTF-8·UseBasicParsing·catch 기록).
+  PsScript :=
+    '$ErrorActionPreference = ''Stop'';' + #13#10 +
+    '$ProgressPreference = ''SilentlyContinue'';' + #13#10 +
+    'try {' + #13#10 +
+    '  [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12 -bor [Net.SecurityProtocolType]::Tls13;' + #13#10 +
+    '} catch { [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12; }' + #13#10 +
+    'try {' + #13#10 +
+    '  $body = Get-Content -Raw -Path "' + RequestFile + '";' + #13#10 +
+    '  $r = Invoke-RestMethod -Uri "{#BackofficeApi}/api/landing/license/claim" -Method POST -Body $body -ContentType "application/json" -TimeoutSec 30 -UseBasicParsing;' + #13#10 +
+    '  $json = $r | ConvertTo-Json -Depth 10 -Compress;' + #13#10 +
+    '  [System.IO.File]::WriteAllText("' + ResponseFile + '", $json, [System.Text.Encoding]::UTF8);' + #13#10 +
+    '  exit 0;' + #13#10 +
+    '} catch {' + #13#10 +
+    '  $msg = $_.Exception.Message;' + #13#10 +
+    '  if ($_.ErrorDetails -and $_.ErrorDetails.Message) { $msg = $_.ErrorDetails.Message; }' + #13#10 +
+    '  try {' + #13#10 +
+    '    [System.IO.File]::WriteAllText("' + ResponseFile + '", ''{"valid":false,"message":"'' + ($msg -replace ''"'', ''\"'') + ''"}'', [System.Text.Encoding]::UTF8);' + #13#10 +
+    '  } catch { }' + #13#10 +
+    '  exit 1;' + #13#10 +
+    '}';
+
+  SaveStringToFile(PsScriptFile, PsScript, False);
+  Exec('powershell.exe',
+       '-NoProfile -ExecutionPolicy Bypass -File "' + PsScriptFile + '"',
+       '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+  DeleteFile(PsScriptFile);
+
+  if not FileExists(ResponseFile) then Exit;
+  if not LoadStringsFromFile(ResponseFile, Lines) then Exit;
+  RawResponse := '';
+  for I := 0 to GetArrayLength(Lines) - 1 do RawResponse := RawResponse + Lines[I];
+
+  // 백오피스 API 는 camelCase 직렬화 → "valid"/"signedProof"/"signedProofKid".
+  if Pos('"valid":true', RawResponse) = 0 then begin
+    // 증표 미발급(사업자번호 불일치·비활성 등). 설치 자체는 폴백으로 계속(부모계정은 못 심음).
+    DeleteFile(ResponseFile);
+    DeleteFile(RequestFile);
+    Exit;
+  end;
+
+  G_SignedProof := ExtractJsonValue(RawResponse, 'signedProof');
+  G_SignedProofKid := ExtractJsonValue(RawResponse, 'signedProofKid');
+
+  DeleteFile(ResponseFile);
+  DeleteFile(RequestFile);
+
+  // 증표가 실제로 있어야 성공. 개인키 미구성(백오피스) 등으로 signedProof=null 이면 빈 문자열 → False.
+  Result := (G_SignedProof <> '');
+end;
+
+// ============================================================
 // 마법사 페이지 박기
 // ============================================================
 procedure InitializeWizard;
@@ -490,11 +588,31 @@ begin
   SerialKeyPage.Add('시리얼 키:', False);
   SerialKeyPage.Values[0] := 'HITP-';
 
+  // 부모계정 온보딩 로컬 완결 (작업지시서 20260707작1 ③단계, 사장님 결재 2026-07-07):
+  //   사업자번호 입력칸 신설. 증표 취득(license/claim 서버간 검증)과 local_company 저장에 필요.
+  //   종전엔 ERP 첫 화면(/setup/license)에서 브라우저가 back.hitpan.kr 를 직접 호출해 CORS 차단(오늘 진범).
+  //   봉합: 설치마법사가 여기서 사업자번호를 받아 PowerShell 서버간으로 검증 → 증표를 로컬에서 오프라인 검증.
+  SerialKeyPage.Add('사업자등록번호 (숫자 10자리):', False);
+  SerialKeyPage.Values[1] := '';
+
   // 부트스트랩 결과 확인 페이지
   BootstrapResultPage := CreateOutputMsgPage(SerialKeyPage.ID,
     '회사 정보 확인',
     '시리얼 키로 회사 정보를 확인했습니다',
     '아래 정보가 맞는지 확인해주세요. 틀리면 설치를 취소하고 본사에 문의해주세요.');
+
+  // 부모계정 입력 페이지 (아이디 + 비번 + 비번확인) — 설치(ssPostInstall) 앞.
+  //   헌법 #40: 아이디 방식(이메일 형식 강제 금지) + 비번은 로컬 BCrypt 만(본사 0).
+  //   Add(prompt, Password) 의 두번째 인자 True = 비번 마스킹(화면·SetupLog 노출 차단).
+  ParentAccountPage := CreateInputQueryPage(BootstrapResultPage.ID,
+    '부모 계정 만들기',
+    'ERP 최상위(부모) 계정을 이 PC 에 만듭니다',
+    '부모 계정은 ERP 마스터 계정입니다. 이 계정으로만 자식 계정(직원)을 만들 수 있습니다.' + #13#10 +
+    '아이디와 비밀번호는 이 PC 에만 저장되며, 본사로 전송되지 않습니다.');
+  ParentAccountPage.Add('대표 이름:', False);
+  ParentAccountPage.Add('로그인 아이디 (4자 이상, 공백 없이):', False);
+  ParentAccountPage.Add('비밀번호 (8자 이상):', True);
+  ParentAccountPage.Add('비밀번호 확인:', True);
 end;
 
 // ============================================================
@@ -502,8 +620,9 @@ end;
 // ============================================================
 function NextButtonClick(CurPageID: Integer): Boolean;
 var
-  TrimmedKey: String;
-  SkipResponse: Integer;
+  TrimmedKey, TrimmedBiz, BizDigits: String;
+  SkipResponse, I: Integer;
+  ParentName, ParentId, ParentPw, ParentPwc: String;
 begin
   Result := True;
 
@@ -511,6 +630,13 @@ begin
   begin
     TrimmedKey := Trim(SerialKeyPage.Values[0]);
     G_LicenseKey := TrimmedKey;
+    // 사업자번호 — 하이픈·공백 제거 후 숫자 10자리만 남긴다(license/claim 계약: 정규화 10자리).
+    TrimmedBiz := Trim(SerialKeyPage.Values[1]);
+    BizDigits := '';
+    for I := 1 to Length(TrimmedBiz) do
+      if (TrimmedBiz[I] >= '0') and (TrimmedBiz[I] <= '9') then
+        BizDigits := BizDigits + TrimmedBiz[I];
+    G_BizNo := BizDigits;
 
     // 시리얼 비어있거나 디폴트(HITP- 그대로)인 경우 — 로컬 단독 모드 안내
     if (TrimmedKey = '') or (TrimmedKey = 'HITP-') then begin
@@ -545,6 +671,15 @@ begin
       Exit;
     end;
 
+    // 사업자번호 10자리 검증 — 증표(license/claim) 취득·부모계정 로컬 완결에 필수(#40).
+    if Length(G_BizNo) <> 10 then begin
+      MsgBox('사업자등록번호를 숫자 10자리로 입력해주세요.' + #13#10 +
+             '예: 123-45-67890 (하이픈은 자동으로 제거됩니다).' + #13#10 + #13#10 +
+             '가입 시 입력한 사업자번호와 동일해야 합니다.', mbError, MB_OK);
+      Result := False;
+      Exit;
+    end;
+
     // 백오피스 API 호출
     WizardForm.NextButton.Enabled := False;
     WizardForm.NextButton.Caption := '확인 중...';
@@ -575,6 +710,30 @@ begin
       end;
     end;
 
+    // 부모계정 증표(SignedProof) 서버간 취득 — license/claim (작업지시서 20260707작1 ③단계).
+    //   installer/bootstrap 는 회사정보·도메인·터널만 주고, 오프라인 검증 가능한 증표는 안 준다.
+    //   여기서 시리얼+사업자번호로 증표를 받아 두면, ssPostInstall 에서 seed-parent 가 그 증표를
+    //   EXE 내장 공개키로 오프라인 검증해 부모계정을 로컬에 심는다(브라우저·CORS·터널 우회).
+    if not CallLicenseClaimApi(TrimmedKey, G_BizNo) then begin
+      WizardForm.NextButton.Enabled := True;
+      WizardForm.NextButton.Caption := '다음';
+      // 증표 미취득 — 사업자번호 불일치가 가장 흔한 원인. 부모계정 자동 생성은 못 하지만,
+      //   ERP 본체·DB·로그인 화면 설치는 계속 진행(헌법 #20·#25). 부모계정은 로그인 화면 최초등록(P0-4)으로 폴백.
+      SkipResponse := MsgBox(
+        '사업자번호 확인에 실패하여 부모 계정을 자동으로 만들 수 없습니다.' + #13#10 + #13#10 +
+        '가입 시 입력한 사업자번호와 동일한지 확인해주세요.' + #13#10 + #13#10 +
+        '「예」 부모 계정 없이 설치 계속 (설치 후 로그인 화면에서 최초 등록)' + #13#10 +
+        '「아니오」 시리얼·사업자번호 다시 입력',
+        mbConfirmation, MB_YESNO);
+      if SkipResponse = IDYES then begin
+        G_SignedProof := '';
+        // 회사정보(installer/bootstrap)는 이미 확인됨 → 설치 자체는 정상 진행.
+      end else begin
+        Result := False;
+        Exit;
+      end;
+    end;
+
     WizardForm.NextButton.Enabled := True;
     WizardForm.NextButton.Caption := '다음';
 
@@ -595,7 +754,50 @@ begin
       '슬롯: ' + IntToStr(G_SlotIndex) + ' (포트 ' + IntToStr(G_ApiPort) + ')' + #13#10 + #13#10 +
       '이 정보가 맞으시면 「다음」을 클릭하세요.' + #13#10 +
       '틀리면 설치를 취소하고 본사에 문의해주세요.';
+  end
+  else if CurPageID = ParentAccountPage.ID then
+  begin
+    // 부모계정 입력 검증 (작업지시서 20260707작1 ③단계, 헌법 #40 아이디 방식).
+    ParentName := Trim(ParentAccountPage.Values[0]);
+    ParentId   := Trim(ParentAccountPage.Values[1]);
+    ParentPw   := ParentAccountPage.Values[2];   // 비번은 Trim 안 함(의도된 공백 보존)
+    ParentPwc  := ParentAccountPage.Values[3];
+
+    if ParentName = '' then begin
+      MsgBox('대표 이름을 입력해주세요.', mbError, MB_OK);
+      Result := False; Exit;
+    end;
+    // 아이디: 형식(이메일 등) 강제 금지 — 4자 이상 + 공백 없음만(헌법 #40, Login.razor·create-parent 정합).
+    if Length(ParentId) < 4 then begin
+      MsgBox('로그인 아이디는 4자 이상이어야 합니다.', mbError, MB_OK);
+      Result := False; Exit;
+    end;
+    for I := 1 to Length(ParentId) do
+      if (ParentId[I] = ' ') or (ParentId[I] = #9) then begin
+        MsgBox('로그인 아이디에는 공백을 사용할 수 없습니다.', mbError, MB_OK);
+        Result := False; Exit;
+      end;
+    if Length(ParentPw) < 8 then begin
+      MsgBox('비밀번호는 8자 이상이어야 합니다.', mbError, MB_OK);
+      Result := False; Exit;
+    end;
+    if ParentPw <> ParentPwc then begin
+      MsgBox('비밀번호가 일치하지 않습니다.', mbError, MB_OK);
+      Result := False; Exit;
+    end;
+    // 값은 페이지 컨트롤에 그대로 남아있고(ParentAccountPage.Values[*]), ssPostInstall 에서 임시 JSON 으로만 전달.
+    //   전역변수에 비번을 복사해 두지 않는다(메모리·로그 노출면 최소화). CurStepChanged 에서 페이지 값을 직접 읽는다.
   end;
+end;
+
+// 부모계정 입력 페이지는 인증(G_SignedProof) 취득에 성공했을 때만 노출한다.
+//   증표 미취득(LOCAL·사업자번호 불일치 폴백)이면 부모계정 자동 생성 경로가 없으므로 페이지를 건너뛴다
+//   (설치 후 로그인 화면 최초 등록으로 폴백 — P0-4). 시리얼 미입력 LOCAL 모드도 동일.
+function ShouldSkipPage(PageID: Integer): Boolean;
+begin
+  Result := False;
+  if PageID = ParentAccountPage.ID then
+    Result := (G_SignedProof = '');
 end;
 
 // ============================================================
@@ -788,12 +990,100 @@ begin
   Log('[FixupWatchdog] 정정 완료 → HealthCheckUrl=' + HealthUrl + ', API포트=' + IntToStr(G_ApiPort));
 end;
 
+// ============================================================
+// 부모계정 오프라인 생성 — seed-parent 서브커맨드 배선 (작업지시서 20260707작1 ③단계 P0-3)
+// ============================================================
+// JSON 문자열 이스케이프 — 사용자 입력(이름·아이디·비번)에 " \ 제어문자가 있어도 JSON 파손·주입 방지.
+function JsonEscape(S: String): String;
+var
+  I: Integer;
+  C: Char;
+  R: String;
+begin
+  R := '';
+  for I := 1 to Length(S) do begin
+    C := S[I];
+    if C = '"' then R := R + '\"'
+    else if C = '\' then R := R + '\\'
+    else if C = #8 then R := R + '\b'
+    else if C = #9 then R := R + '\t'
+    else if C = #10 then R := R + '\n'
+    else if C = #12 then R := R + '\f'
+    else if C = #13 then R := R + '\r'
+    else if C < ' ' then R := R + Format('\u%.4x', [Ord(C)])
+    else R := R + C;
+  end;
+  Result := R;
+end;
+
+// seed-parent 실행. 증표(G_SignedProof)가 있을 때만 호출된다(없으면 로그인 화면 최초등록 폴백).
+//   비번 평문은 임시 JSON 파일(ACL 잠금)로만 전달 — SetupLog·Exec 인자에 노출하지 않는다(#40·#22).
+//   반환 True = 부모계정 생성/멱등 성공. False = 실패(설치 실패로 처리).
+function RunSeedParent(ParentName, ParentId, ParentPw: String): Boolean;
+var
+  InputFile, ExePath, Json: String;
+  ResultCode: Integer;
+  Launched: Boolean;
+begin
+  Result := False;
+
+  ExePath := ExpandConstant('{app}\api\HitPan.API.exe');
+  if not FileExists(ExePath) then begin
+    Log('[SeedParent] HitPan.API.exe 없음: ' + ExePath);
+    Exit;
+  end;
+
+  InputFile := ExpandConstant('{tmp}\seed-parent-input.json');
+
+  // 입력 JSON — seed-parent 계약(SeedParentInput): signedProof·loginId·password·name·bizNo(+회사정보 선택).
+  //   비번은 여기 파일에만 존재하고, Exec 인자에는 '경로'만 넘어간다(평문 인자 노출 0).
+  Json :=
+    '{' +
+    '"signedProof":"' + JsonEscape(G_SignedProof) + '",' +
+    '"loginId":"' + JsonEscape(ParentId) + '",' +
+    '"password":"' + JsonEscape(ParentPw) + '",' +
+    '"name":"' + JsonEscape(ParentName) + '",' +
+    '"bizNo":"' + JsonEscape(G_BizNo) + '"' +
+    '}';
+
+  if not SaveStringToFile(InputFile, Json, False) then begin
+    Log('[SeedParent] 입력 파일 작성 실패: ' + InputFile);
+    Exit;
+  end;
+
+  // ACL 잠금 — Administrators·SYSTEM 만 읽기(다른 프로세스·일반 사용자 접근 차단).
+  Exec(ExpandConstant('{cmd}'),
+       '/C icacls "' + InputFile + '" /inheritance:r /grant:r "Administrators:F" /grant:r "SYSTEM:F"',
+       '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+
+  // 오프라인 서브커맨드 실행 — 웹 호스트·터널·API 포트 불필요(DI 만 빌드 후 종료). db.conf 는 이미 기록됨.
+  //   서브커맨드가 입력 파일을 읽는 즉시 스스로 소각한다(SeedParentCommand.TryDeleteFile). 아래에서 2차 소각.
+  ResultCode := -1;
+  Launched := Exec(ExePath, 'seed-parent "' + InputFile + '"',
+       ExpandConstant('{app}\api'), SW_HIDE, ewWaitUntilTerminated, ResultCode);
+
+  if Launched then
+    Log('[SeedParent] exit code = ' + IntToStr(ResultCode))
+  else
+    Log('[SeedParent] 프로세스 실행 자체 실패(Exec=False).');
+
+  // 2차 소각 — 서브커맨드가 못 지웠을 경우 대비(비번 평문 잔존 차단). 공백 덮어쓰기 후 삭제.
+  if FileExists(InputFile) then begin
+    SaveStringToFile(InputFile, StringOfChar(' ', 512), False);
+    DeleteFile(InputFile);
+  end;
+
+  // 종료 코드 판정 — 실행 성공 + exit 0(성공/멱등)만 성공. 그 외(launch 실패·2/3/4/5)는 실패.
+  Result := Launched and (ResultCode = 0);
+end;
+
 procedure CurStepChanged(CurStep: TSetupStep);
 var
   ResultCode: Integer;
   JwtKey, AesKey, MariaRootPw: String;
   ConfFile, BatchFile, BootstrapFile: String;
   KeysContent, BatchContent, BootstrapContent: TStringList;
+  SeedOk: Boolean;
 begin
   if CurStep <> ssPostInstall then Exit;
   // 사장님 헌법 #20·#25 정합 (2026-06-11): 시리얼 무관 ERP 본체·DB·바로가기는 설치 진행
@@ -1047,6 +1337,27 @@ begin
   Exec(ExpandConstant('{cmd}'),
        '/C icacls "' + ExpandConstant('{app}\db.conf') + '" /inheritance:r /grant:r "Administrators:F" /grant:r "SYSTEM:F"',
        '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+
+  // 5-0. 부모계정 오프라인 생성 — seed-parent (작업지시서 20260707작1 ③단계 P0-3, 사장님 결재 2026-07-07).
+  //   ★ 순서: DB 초기화(위 db-setup.bat, users 테이블 실존 검증 통과) + db.conf(DB 자격증명·
+  //     HITPAN_BOOTSTRAP_TOKEN_KEY) 기록·ACL 완료 직후 = seed-parent 가 필요로 하는 전제(MariaDB·db.conf)가
+  //     모두 준비된 최초 시점. seed-parent 는 웹 호스트를 안 띄우므로(DI 만 빌드) API 포트·터널·/health 폴링이
+  //     불필요하다 → 여기서 실행이 가장 이르고 안전(오늘 CORS 진범 원천 우회, 헌법 #30 본사 통신 0).
+  //   증표(G_SignedProof)가 있을 때만 실행(ShouldSkipPage 가 입력 페이지도 그 조건으로 노출).
+  if G_SignedProof <> '' then begin
+    SeedOk := RunSeedParent(
+      Trim(ParentAccountPage.Values[0]),   // 대표 이름
+      Trim(ParentAccountPage.Values[1]),   // 로그인 아이디
+      ParentAccountPage.Values[2]);        // 비밀번호(원문 그대로)
+    if not SeedOk then begin
+      // 실패 = 설치를 명확히 중단(헌법 #15·#19·#20 — "완료처럼 보이는 실패" 차단).
+      //   임시 입력파일은 RunSeedParent 내부에서 이미 소각됨(비번 잔존 0).
+      RaiseException('부모 계정 생성에 실패했습니다. 시리얼·사업자번호·서명 증표를 확인 후 다시 설치해 주세요. '
+        + '문제가 지속되면 고객센터에 문의해 주세요.');
+    end;
+    Log('[SeedParent] 부모계정 생성 성공(또는 멱등).');
+  end else
+    Log('[SeedParent] 증표 미취득 — 부모계정 자동 생성 건너뜀(로그인 화면 최초등록 폴백).');
 
   // 5-1-A. 봉합 2026-06-17 (1.2.13, P0): Blazor WASM appsettings.json ApiBaseUrl 정정
   //   1.2.12까지 api-demo.hitpan.kr 가도 → CORS preflight 차단 사고.
