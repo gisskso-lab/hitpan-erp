@@ -79,11 +79,15 @@ Download-IfMissing `
     -ExpectedMinMB 20
 
 # 3. MariaDB 11.4 MSI (장기 안정 미러)
+#   봉합 (2026-07-06): ExpectedMinMB 150 → 60. archive.mariadb.org 의 11.4.4 winx64 MSI 실측 정품이
+#   74.5MB(매직바이트 D0CF11E0 검증·Sandbox 설치 실증)인데 기대값 150 이 이를 "크기 이상"으로 오판해
+#   무한 재다운로드→"번들 다운로드 실패" exit1(v1.2.25 빌드 차단). 정품보다 낮고 반쪽 손상파일은
+#   거르는 60 으로 조정.
 Download-IfMissing `
     -Url "https://archive.mariadb.org/mariadb-11.4.4/winx64-packages/mariadb-11.4.4-winx64.msi" `
     -Path "$BundleDir/mariadb.msi" `
     -Label "MariaDB 11.4.4 MSI" `
-    -ExpectedMinMB 150
+    -ExpectedMinMB 60
 
 # 4. cloudflared.exe (latest from GitHub)
 Download-IfMissing `

@@ -22,11 +22,6 @@
             </div>
 
             <div class="field">
-                <label>비밀번호 *</label>
-                <input type="password" @bind="_form.Password" required placeholder="8자 이상, 영문+숫자+특수문자" />
-            </div>
-
-            <div class="field">
                 <label>회사명 *</label>
                 <input type="text" @bind="_form.CompanyName" required placeholder="(주)히트판" />
             </div>
@@ -497,7 +492,6 @@
     private class SignupForm
     {
         public string Email { get; set; } = "";
-        public string Password { get; set; } = "";
         public string CompanyName { get; set; } = "";
         public string RepresentativeName { get; set; } = "";
         public string Phone { get; set; } = "";

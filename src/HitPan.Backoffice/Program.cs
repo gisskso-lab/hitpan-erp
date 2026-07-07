@@ -1,6 +1,7 @@
 using HitPan.Backoffice.Components;
 using HitPan.Backoffice.Services;
 using Microsoft.AspNetCore.Authentication.Cookies;
+using Microsoft.AspNetCore.DataProtection;
 using MudBlazor.Services;
 
 namespace HitPan.Backoffice;
@@ -21,6 +22,19 @@ public class Program
 
         // 폼 POST 로그인용 컨트롤러 (Views 포함 — AntiForgery 필터 등록 위해)
         builder.Services.AddControllersWithViews();
+
+        // DataProtection 키 영구 고정 (봉합 2026-07-07, 사장님 결재):
+        //   antiforgery 토큰·인증쿠키(hitpan_bo) 서명키를 재배포/재시작에도 유지.
+        //   진범: 키 미고정 → 서비스 재시작마다 키 컨텍스트 변화 → 기존 브라우저 토큰 무효 → 로그인 400.
+        //   ⚠️ 경로는 반드시 rsync --delete 배포 대상(/opt/hitpan/backoffice-web) '밖'이어야 함.
+        //      배포폴더 안에 두면 매 배포마다 키가 삭제되어 400 재발. (deploy-ncp.yml rsync --delete 실측)
+        //   SetApplicationName = 키 격리 discriminator. 재시작 간 같은 키 컨텍스트 보장 위해 고정 필수.
+        var dpKeyPath = Environment.GetEnvironmentVariable("HITPAN_BO_DP_KEYS")
+                      ?? "/var/hitpan/backoffice-dp-keys";
+        try { Directory.CreateDirectory(dpKeyPath); } catch { /* 권한/존재는 배포 mkdir로 보장, 실패해도 기본경로 폴백 */ }
+        builder.Services.AddDataProtection()
+            .PersistKeysToFileSystem(new DirectoryInfo(dpKeyPath))
+            .SetApplicationName("HitPanBackoffice");
 
         builder.Services.AddMudServices();
 

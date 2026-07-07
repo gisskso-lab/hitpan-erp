@@ -19,11 +19,11 @@
 
         <MudForm @ref="_form" ValidationDelay="0">
             <MudTextField @bind-Value="_email"
-                          Label="이메일"
+                          Label="아이디"
                           Variant="Variant.Outlined"
-                          InputType="InputType.Email"
+                          InputType="InputType.Text"
                           Required="true"
-                          RequiredError="이메일을 입력하세요"
+                          RequiredError="아이디를 입력하세요"
                           Disabled="_busy"
                           Class="mb-4"
                           Style="font-family: 'Noto Sans KR', sans-serif;" />

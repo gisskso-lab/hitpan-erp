@@ -146,8 +146,10 @@
                     <input type="text" @bind="_parentName" required />
                 </div>
                 <div class="setup-field">
-                    <label>로그인 이메일 *</label>
-                    <input type="email" @bind="_parentEmail" required placeholder="company@example.com" />
+                    <label>로그인 아이디 *</label>
+                    @* 사장님 결재 2026-07-06: 이메일 방식 → 아이디 방식. 내부 email 컬럼(uq_tenant_email)을
+                       DDL 수술 없이 그대로 재사용하되, 화면·의미는 "아이디". type=text 로 이메일 형식 강제 제거. *@
+                    <input type="text" @bind="_parentEmail" required placeholder="아이디 (예: hitpan_admin)" maxlength="100" />
                 </div>
                 <div class="setup-field">
                     <label>비밀번호 (8자 이상) *</label>
@@ -177,7 +179,7 @@
                     <div class="setup-id-value">@_tenantCode</div>
                 </div>
                 <div class="setup-id">
-                    <div class="setup-id-label">로그인 이메일</div>
+                    <div class="setup-id-label">로그인 아이디</div>
                     <div class="setup-id-value">@_parentEmail</div>
                 </div>
                 <p>아래 버튼을 눌러 로그인하시면 ERP를 사용할 수 있습니다.</p>
@@ -319,11 +321,25 @@
             _error = "대표 이름을 입력해주세요.";
             return;
         }
-        if (string.IsNullOrWhiteSpace(_parentEmail))
+        // 사장님 결재 2026-07-06: 아이디 방식 — 이메일 형식 강제 제거, 아이디 최소 규칙만.
+        //   내부 email 컬럼(uq_tenant_email)을 재사용하므로 값은 _parentEmail 그대로 전송.
+        var parentId = _parentEmail?.Trim() ?? "";
+        if (string.IsNullOrWhiteSpace(parentId))
         {
-            _error = "로그인 이메일을 입력해주세요.";
+            _error = "로그인 아이디를 입력해주세요.";
             return;
         }
+        if (parentId.Length < 4)
+        {
+            _error = "로그인 아이디는 4자 이상이어야 합니다.";
+            return;
+        }
+        if (parentId.Any(char.IsWhiteSpace))
+        {
+            _error = "로그인 아이디에는 공백을 사용할 수 없습니다.";
+            return;
+        }
+        _parentEmail = parentId;
         if (string.IsNullOrWhiteSpace(_parentPassword) || _parentPassword.Length < 8)
         {
             _error = "비밀번호는 8자 이상이어야 합니다.";

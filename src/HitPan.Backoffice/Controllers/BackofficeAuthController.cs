@@ -1,5 +1,6 @@
 using System.Security.Claims;
 using HitPan.Backoffice.Services;
+using Microsoft.AspNetCore.Antiforgery;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.Mvc;
@@ -23,21 +24,34 @@ public class BackofficeAuthController : Controller
 {
     private readonly BackofficeService _bo;
     private readonly ILogger<BackofficeAuthController> _logger;
+    private readonly IAntiforgery _antiforgery;
 
-    public BackofficeAuthController(BackofficeService bo, ILogger<BackofficeAuthController> logger)
+    public BackofficeAuthController(BackofficeService bo, ILogger<BackofficeAuthController> logger, IAntiforgery antiforgery)
     {
         _bo = bo;
         _logger = logger;
+        _antiforgery = antiforgery;
     }
 
+    // 봉합 2026-07-07 (사장님 결재): antiforgery 토큰 만료/무효 시 400 dead-end 대신 로그인 재진입.
+    //   [ValidateAntiForgeryToken] 속성 자동검증(→400)을 제거하고 수동 ValidateRequestAsync 로 대체.
+    //   만료(AntiforgeryValidationException)만 부드럽게 로그인으로 리다이렉트 → 새 토큰 발급받아 재시도.
+    //   CSRF 방어는 유지: 위조·누락 토큰도 동일 예외로 잡혀 처리 안 되고 로그인으로 반려(무한 우회 없음).
     [HttpPost("signin")]
-    [ValidateAntiForgeryToken]
     public async Task<IActionResult> SignIn(
         [FromForm] string email,
         [FromForm] string password,
         [FromForm] string? returnUrl,
         CancellationToken ct)
     {
+        try { await _antiforgery.ValidateRequestAsync(HttpContext); }
+        catch (AntiforgeryValidationException)
+        {
+            _logger.LogInformation("[BackofficeAuth] antiforgery 만료/무효 → 로그인 재진입");
+            return Redirect("/backoffice/login?error=" +
+                Uri.EscapeDataString("보안 세션이 만료되었습니다. 다시 로그인해 주세요."));
+        }
+
         if (string.IsNullOrWhiteSpace(email) || string.IsNullOrWhiteSpace(password))
             return Redirect($"/backoffice/login?error={Uri.EscapeDataString("이메일·비밀번호를 입력하세요")}");
 
@@ -85,9 +99,14 @@ public class BackofficeAuthController : Controller
     }
 
     [HttpPost("signout")]
-    [ValidateAntiForgeryToken]
     public async Task<IActionResult> SignOutAsync()
     {
+        // 봉합 2026-07-07: signin 과 동일 — 만료 토큰 400 대신 우아하게 로그인으로.
+        try { await _antiforgery.ValidateRequestAsync(HttpContext); }
+        catch (AntiforgeryValidationException)
+        {
+            return LocalRedirect("/backoffice/login");
+        }
         await HttpContext.SignOutAsync(CookieAuthenticationDefaults.AuthenticationScheme);
         return LocalRedirect("/backoffice/login");
     }

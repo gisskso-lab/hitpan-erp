@@ -4,8 +4,11 @@ namespace HitPan.Application.DTOs.Auth;
 
 public class LoginRequest
 {
+    // [EmailAddress] 제거 (봉합 2026-07-07): 부모계정을 아이디 방식(예: hitpan_admin)으로
+    //   등록하도록 바뀜(설치마법사). email 컬럼을 아이디로 재사용하므로 로그인 식별자가
+    //   이메일 형식이 아닐 수 있다. [EmailAddress]가 남아있으면 [ApiController] 자동 모델검증이
+    //   아이디 로그인을 AuthService 도달 전 400으로 차단(헌법 #20 워크플로우 끊김) → 제거.
     [Required]
-    [EmailAddress]
     public string Email { get; set; } = string.Empty;
 
     [Required]

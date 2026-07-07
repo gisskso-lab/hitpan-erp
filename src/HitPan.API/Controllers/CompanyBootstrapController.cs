@@ -208,7 +208,22 @@ public class CompanyBootstrapController : ControllerBase
         if (req.Password.Length < 8)
             return BadRequest(new { success = false, message = "비밀번호는 8자 이상이어야 합니다." });
 
-        var (ok, payload, error) = VerifyBootstrapToken(req.BootstrapToken);
+        // 아이디 서버측 최소검증 (봉합 2026-07-07): 부모계정을 아이디 방식으로 등록.
+        //   email 컬럼을 아이디로 재사용하므로 이메일 형식은 강제하지 않되, 클라이언트 우회
+        //   방어를 위해 서버에서도 공백 불가 + 4자 이상 규칙을 최종 검증한다(검증팀 3c 지적).
+        var loginId = req.Email.Trim();
+        if (loginId.Length < 4 || loginId.Contains(' '))
+            return BadRequest(new { success = false, message = "아이디는 공백 없이 4자 이상이어야 합니다." });
+
+        // 저장 참사 봉합 (사장님 결재 2026-07-06, 설계팀장 경고):
+        //   종전엔 create-parent 가 bootstrap 과 동일하게 토큰 만료(exp<now)까지 재검증했다. bootstrapToken 은
+        //   10분 만료라, Step2(bootstrap) 완료 후 Step3(부모계정)에서 사용자가 비밀번호를 고르며 10분을 넘기면
+        //   "화면에서 비번 설정했는데 저장 안 됨"(401 만료) 참사가 발생했다.
+        //   → 부모계정 생성은 순수 로컬 작업이다. bootstrap 이 이미 local_company.is_locked_from_landing=1 로
+        //     이 PC 의 tenant 정체를 durable 하게 확정했고(아래 선행 검증), tenant_id 도 토큰 페이로드에서 얻는다.
+        //     따라서 create-parent 는 토큰 "만료"와 무관해야 한다. 단 서명·audience 검증(위·변조·익명 차단)은
+        //     그대로 유지한다(allowExpired: true 는 exp 검사만 완화, HMAC 서명/aud 는 여전히 강제 → 백도어 아님).
+        var (ok, payload, error) = VerifyBootstrapToken(req.BootstrapToken, allowExpired: true);
         if (!ok || payload is null)
             return Unauthorized(new { success = false, message = error ?? "유효하지 않은 부트스트랩 토큰입니다." });
 
@@ -242,7 +257,7 @@ public class CompanyBootstrapController : ControllerBase
                 SELECT COUNT(*) FROM users WHERE email = @Email AND is_deleted = 0",
                 new { req.Email });
             if (dupEmail > 0)
-                return BadRequest(new { success = false, message = "이미 사용 중인 이메일입니다." });
+                return BadRequest(new { success = false, message = "이미 사용 중인 아이디입니다." });
 
             var userId = Guid.NewGuid().ToString();
             var passwordHash = BCrypt.Net.BCrypt.HashPassword(req.Password);
@@ -384,9 +399,13 @@ public class CompanyBootstrapController : ControllerBase
 
     // 헌법 #35 W2 — HMAC-SHA256 서명 검증. 백오피스 URL·존재 의존 0건.
     //   - 동일 키(HITPAN_BOOTSTRAP_TOKEN_KEY)로 서명 검증
-    //   - exp 만료 검사, aud 일치 검사
+    //   - aud 일치 검사, (allowExpired=false 시) exp 만료 검사
     //   - jti 1회용은 ERP 측 별도 캐시 필요 (현재 차수 미저장 — 재사용 가능, 짧은 만료로 위험 최소화)
-    private (bool ok, TokenPayload? payload, string? error) VerifyBootstrapToken(string token)
+    //
+    //   allowExpired (사장님 결재 2026-07-06): create-parent 전용. bootstrap 이 local_company 를 이미
+    //     is_locked_from_landing=1 로 잠근 뒤의 로컬 부모계정 생성은 토큰 만료와 무관해야 한다(저장 참사 봉합).
+    //     서명·audience 검증은 그대로 강제되므로 위·변조/익명 요청은 여전히 차단된다(exp 검사만 완화).
+    private (bool ok, TokenPayload? payload, string? error) VerifyBootstrapToken(string token, bool allowExpired = false)
     {
         // 봉합 2026-06-17 1.2.12 — TenantConfigReader 정합
         // 봉합 (재설치 P0 2차 벽, 사장님 결재 2026-07-06, 작지서 20260706작2, 보안상무 결재 조건1):
@@ -431,9 +450,14 @@ public class CompanyBootstrapController : ControllerBase
             if (payload.Aud != "erp-bootstrap")
                 return (false, null, "audience 불일치");
 
-            var now = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
-            if (payload.Exp < now)
-                return (false, null, "토큰 만료 (라이선스 검증을 다시 진행해주세요)");
+            // exp 만료 검사 — allowExpired(create-parent)면 건너뛴다(위 시그니처 주석·저장 참사 봉합 참조).
+            //   bootstrap 은 여전히 만료를 강제하므로 최초 회사정보 반영은 신선한 토큰을 요구한다.
+            if (!allowExpired)
+            {
+                var now = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+                if (payload.Exp < now)
+                    return (false, null, "토큰 만료 (라이선스 검증을 다시 진행해주세요)");
+            }
 
             if (string.IsNullOrEmpty(payload.Sub))
                 return (false, null, "tenant 식별 불가");
