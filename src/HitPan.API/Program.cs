@@ -255,8 +255,11 @@ builder.Services.AddAuthorization(options =>
 {
     options.AddPolicy("SalesOnly", policy =>
         policy.RequireRole("system_admin", "sales_manager", "sales_user", "TenantAdmin", "tenant_admin"));
+    // W1-4 (작업지시서 20260707작2): 부모계정(employees.role='tenant_admin') 추가 — W1-3 로 로그인 시
+    //   employee_id·role claim 이 실제로 실리기 시작하면, 이 정책만 tenant_admin 이 빠져 있어 부모계정이
+    //   거래명세서 수정·취소·반품에서 403 즉발(헌법 #20 판매흐름 끊김). 다른 정책들과 동일 어휘로 정합.
     options.AddPolicy("SalesManager", policy =>
-        policy.RequireRole("system_admin", "sales_manager"));
+        policy.RequireRole("system_admin", "sales_manager", "TenantAdmin", "tenant_admin"));
     options.AddPolicy("PurchaseOnly", policy =>
         policy.RequireRole("system_admin", "purchase_manager", "TenantAdmin", "tenant_admin"));
     options.AddPolicy("AccountOnly", policy =>

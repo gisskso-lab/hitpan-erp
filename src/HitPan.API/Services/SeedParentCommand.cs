@@ -1,5 +1,9 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using HitPan.Application.Interfaces;
+using HitPan.Infrastructure.Extensions;
+using HitPan.Infrastructure.Persistence;
+using HitPan.Infrastructure.Security;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace HitPan.API.Services;
@@ -23,11 +27,14 @@ namespace HitPan.API.Services;
 //     ceoName·tel·address·email·bizType·bizItem·zipCode·corpNo : 회사정보(선택)
 //
 // 종료 코드 (.iss 가 판정):
-//   0  = 성공(부모계정 생성 완료. 이미 존재 시에도 0 = 멱등 성공으로 처리)
+//   0  = 성공(부모계정 신규 생성 + 로그인 스모크 통과)
 //   2  = 입력 오류(파일 없음·JSON 파싱 실패·필수 누락)
 //   3  = 증표 검증 실패(위·변조·만료·알 수 없는 kid)
 //   4  = bootstrap/부모계정 생성 실패(DB·비즈니스 규칙)
 //   5  = 예기치 못한 서버 오류
+//   6  = 로그인 스모크 검증 실패 (W1-5, 20260707작2 — 계정은 만들어졌는데 실제 로그인 경로가 안 도는 설치 환경 문제)
+//   10 = 기존 부모계정 유지 (W1-6, 20260707작2 — ParentExists 멱등 성공. 방금 입력한 비밀번호는 미적용,
+//        .iss 가 "기존 비밀번호로 로그인" 고지. 종전 0 과 분리해 재설치 시 새 비번이 조용히 버려지는 함정 제거)
 //
 // tenant_id 는 증표 payload 의 sub 단일 사용(파생 금지 — 원칙 B). local_company·users 동일값.
 public static class SeedParentCommand
@@ -40,6 +47,28 @@ public static class SeedParentCommand
         //   (create-parent 와 동일한 SerialProofVerifier·CompanyBootstrapProvisioner — 복붙 금지.)
         builder.Services.AddSingleton<SerialProofVerifier>();
         builder.Services.AddScoped<CompanyBootstrapProvisioner>();
+
+        // W1-5 (작업지시서 20260707작2): 로그인 스모크용 최소 EF 스택 등록.
+        //   Program.cs 본 등록(74~86행)은 seed-parent 분기(52행) **뒤**라 이 경로엔 존재하지 않는다.
+        //   AddInfrastructure 가 연결문자열을 TenantConfigReader(db.conf → 환경변수 폴백)로 해석하므로
+        //   웹 실행과 동일한 DB 를 본다 — .iss 는 db.conf(DB 자격증명+ERP_ENCRYPTION_KEY, :1341) 기록(:1367)
+        //   **후** RunSeedParent(:1383) 를 호출하므로 스모크 오탐 없음(CTO 결재의견 2 해석 실측 완료).
+        //   AppDbContext 의존 = ICurrentTenant + IEncryptionService — Program.cs 와 동일 구현으로 등록.
+        try
+        {
+            builder.Services.AddScoped<CurrentTenant>();
+            builder.Services.AddScoped<ICurrentTenant>(s => s.GetRequiredService<CurrentTenant>());
+            builder.Services.AddSingleton<IEncryptionService, EncryptionService>();
+            builder.Services.AddInfrastructure();
+            builder.Services.AddScoped<IAuthUserLookup, AuthUserLookup>();
+        }
+        catch (Exception ex)
+        {
+            // AddInfrastructure 는 등록 시점에 db.conf(DB_NAME 등)를 읽는다 — 해석 실패는 예기치 못한
+            //   설치 환경 문제로 수렴(어차피 이후 provisioner 도 같은 이유로 실패한다).
+            Console.Error.WriteLine($"seed-parent: DB 설정(db.conf) 해석 실패 — {ex.Message}");
+            return 5;
+        }
 
         await using var app = builder.Build();
         using var scope = app.Services.CreateScope();
@@ -137,12 +166,22 @@ public static class SeedParentCommand
             switch (cOutcome)
             {
                 case CompanyBootstrapProvisioner.CreateParentOutcome.Ok:
+                    // W1-5 (작업지시서 20260707작2, 정공법): "설치 성공 화면"과 "그 계정으로 로그인 가능" 사이
+                    //   검증 0개가 구조 결함(안철수 상무 감수) — 생성 직후 실제 로그인과 동일 경로인
+                    //   EF materialize(FindUserByEmailAsync = users.role enum 컨버터 실제 관통) + BCrypt 검증을
+                    //   여기서 관통시켜 W1-1 부류(저장은 되는데 읽는 순간 폭발)·W1-7 부류(인코딩 분열)를
+                    //   설치 시점에 적발한다. 실패 = exit 6 → .iss 가 설치 실패 처리("거짓 성공" 원천 차단).
+                    //   조회 아이디는 Trim — CreateParentAsync 가 Trim 해 저장하므로 저장값과 동일 키로 검증.
+                    if (!await VerifyLoginSmokeAsync(sp, input.LoginId.Trim(), input.Password, ct))
+                        return 6;
                     Console.WriteLine($"seed-parent: OK tenant={payload.TenantCode} userId={userId}");
                     return 0;
                 case CompanyBootstrapProvisioner.CreateParentOutcome.ParentExists:
-                    // 멱등: 부모계정이 이미 있으면 재설치·재실행으로 보고 성공 처리(설치 실패로 오판 방지).
-                    Console.WriteLine($"seed-parent: 이미 부모계정 존재(멱등 성공) tenant={payload.TenantCode}");
-                    return 0;
+                    // W1-6 (작업지시서 20260707작2): 멱등 성공이되 exit 0 과 분리 — 방금 입력한 새 비밀번호는
+                    //   적용되지 않았으므로 .iss(CurStepChanged)가 "기존 비밀번호로 로그인" 을 고지한다.
+                    //   (스모크는 생략 — 기존 계정 비번을 모르므로 input.Password 검증은 정의상 오탐.)
+                    Console.WriteLine($"seed-parent: 이미 부모계정 존재(멱등 성공, 기존 비밀번호 유지) tenant={payload.TenantCode}");
+                    return 10;
                 case CompanyBootstrapProvisioner.CreateParentOutcome.BootstrapMissing:
                     Console.Error.WriteLine($"seed-parent: 부모계정 생성 실패 — {cMsg}");
                     return 4;
@@ -158,6 +197,40 @@ public static class SeedParentCommand
         {
             Console.Error.WriteLine($"seed-parent: 예기치 못한 오류 — {ex.Message}");
             return 5;
+        }
+    }
+
+    /// <summary>
+    /// W1-5 (작업지시서 20260707작2): 부모계정 생성 직후 로그인 스모크 — 실제 로그인(AuthService)과
+    /// 동일 경로(EF materialize + BCrypt.Verify)만 관통하고 토큰 발급은 하지 않는다.
+    /// 비밀번호·해시는 콘솔·로그에 절대 출력하지 않는다(헌법 #22·#40). 예외도 실패(exit 6)로 수렴.
+    /// </summary>
+    private static async Task<bool> VerifyLoginSmokeAsync(IServiceProvider sp, string loginId, string password, CancellationToken ct)
+    {
+        try
+        {
+            var lookup = sp.GetRequiredService<IAuthUserLookup>();
+            var user = await lookup.FindUserByEmailAsync(loginId, ct);
+            if (user is null)
+            {
+                Console.Error.WriteLine("seed-parent: 로그인 스모크 실패 — 방금 생성한 계정이 로그인 경로에서 조회되지 않습니다(저장·조회 어휘 불일치 의심).");
+                return false;
+            }
+
+            if (!BCrypt.Net.BCrypt.Verify(password, user.PasswordHash))
+            {
+                Console.Error.WriteLine("seed-parent: 로그인 스모크 실패 — 비밀번호 검증 불일치(입력파일 인코딩·해시 손상 의심).");
+                return false;
+            }
+
+            Console.WriteLine("seed-parent: 로그인 스모크 통과(계정 조회 + 비밀번호 검증).");
+            return true;
+        }
+        catch (Exception ex)
+        {
+            // enum 컨버터 materialize 폭발·DB 설정 문제 등 — 어떤 예외든 "로그인 안 되는 설치"이므로 실패.
+            Console.Error.WriteLine($"seed-parent: 로그인 스모크 실패 — 예외: {ex.Message}");
+            return false;
         }
     }
 

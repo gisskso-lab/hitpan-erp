@@ -32,7 +32,11 @@ public class AuthService : IAuthService
 
     public async Task<LoginResponse> LoginAsync(LoginRequest request, CancellationToken ct = default)
     {
-        var user = await _authUserLookup.FindUserByEmailAsync(request.Email, ct);
+        // W2-4 (작업지시서 20260707작2, 헌법 #40 백로그): 아이디 앞뒤 공백 서버측 방어깊이.
+        //   설치마법사 create-parent 는 Trim 검증하는데 로그인은 raw 비교라, 복사·붙여넣기로 공백이
+        //   딸려오면 "계정은 있는데 로그인 실패"가 난다. 비밀번호는 공백도 유효 문자므로 손대지 않는다.
+        var loginId = request.Email.Trim();
+        var user = await _authUserLookup.FindUserByEmailAsync(loginId, ct);
 
         if (user is null)
         {
@@ -71,9 +75,11 @@ public class AuthService : IAuthService
         user.FailedLoginCount = 0;
         user.LockoutEnd = null;
 
-        var employeeRepo = _unitOfWork.Repository<Employee>();
-        var employees = await employeeRepo.FindAsync(x => x.UserId == user.Id && x.IsActive);
-        var employee = employees.FirstOrDefault();
+        // W1-3 (작업지시서 20260707작2): 로그인은 익명 경로라 TenantMiddleware 스킵 → CurrentTenant=''
+        //   → Repository 전역 테넌트필터가 tenant_id='' 로 걸려 이 조회가 항상 0건이었다(계정 정상인데
+        //   매 로그인 백필 헛INSERT 1062 + employee_id claim 공백 = 결재·경비·HR 침묵 고장의 진범).
+        //   IgnoreQueryFilters + user 행에서 얻은 TenantId 명시 한정으로 교체(헌법 #2 테넌트 격리 유지).
+        var employee = await _authUserLookup.FindActiveEmployeeByUserAsync(user.Id, user.TenantId, ct);
 
         // 봉합 (2026-06-22, 13차 2단 교차검증 A안 — 기존 부모계정 employees 백필): 7차 A-P0-1 은
         //   신규 가입(CompanyBootstrap)만 부모 employees 행을 만들었고, 그 전에 생성된 부모계정은 백필이
@@ -179,9 +185,9 @@ public class AuthService : IAuthService
             throw new UnauthorizedAccessException("로그아웃된 토큰입니다. 다시 로그인해주세요.");
         }
 
-        var employeeRepo = _unitOfWork.Repository<Employee>();
-        var employees = await employeeRepo.FindAsync(x => x.UserId == user.Id && x.IsActive);
-        var employee = employees.FirstOrDefault();
+        // W1-3 (작업지시서 20260707작2): refresh 도 익명 경로 — LoginAsync 와 동일 사유로
+        //   테넌트필터 우회 + user.TenantId 명시 한정 조회로 교체(헌법 #2 테넌트 격리 유지).
+        var employee = await _authUserLookup.FindActiveEmployeeByUserAsync(user.Id, user.TenantId, ct);
 
         // 백필 (2026-06-22, 13차 A안): refresh 경로도 동일 — 부모계정 employees 행 멱등 보장.
         // 실패해도 refresh(=세션 유지)는 막지 않는다(13차 거짓봉합 재봉합, 백필은 보조 자가치유).
@@ -285,7 +291,10 @@ public class AuthService : IAuthService
         //   동시 로그인 경합(같은 user 가 두 세션에서 동시 백필)뿐인데, 그땐 catch 에서 SaveChanges·Update·
         //   Remove 를 일절 호출하지 않고 재조회만 한다 — 실패 Added 엔티티를 flush 하지 않으므로 트래커
         //   오염이 무해하고, 먼저 커밋한 세션이 만든 행을 그대로 사용한다(헌법 #12 동시성·#15 silent 금지).
-        var existing = (await employeeRepo.FindAsync(x => x.TenantId == user.TenantId)).ToList();
+        // W1-3 (작업지시서 20260707작2): 백필도 로그인·refresh 에서 불리는 익명 경로 — 종전 조회는
+        //   테넌트필터(CurrentTenant='')에 걸려 항상 0건 → emp_no 가 매번 0001 로 계산돼 기존 행과
+        //   1062 충돌(헛INSERT)이 반복됐다. 필터 우회 + user.TenantId 명시 한정으로 교체.
+        var existing = await _authUserLookup.FindEmployeesByTenantAsync(user.TenantId, ct);
 
         // 이미 이 user 의 employees 행이 있으면(중복 백필 방지) 그걸 그대로 사용.
         var already = existing.FirstOrDefault(e => e.UserId == user.Id && e.IsActive);
@@ -329,8 +338,8 @@ public class AuthService : IAuthService
             if (IsUniqueViolation(ex))
             {
                 // 동시 로그인 경합으로 다른 세션이 먼저 백필했다 — 재조회로 그 행을 사용한다.
-                var retry = await employeeRepo.FindAsync(x => x.UserId == user.Id && x.IsActive);
-                return retry.FirstOrDefault();
+                //   W1-3 (작업지시서 20260707작2): 재조회도 익명 경로이므로 필터 우회 + tenant 한정으로 교체.
+                return await _authUserLookup.FindActiveEmployeeByUserAsync(user.Id, user.TenantId, ct);
             }
 
             // 비-1062 예외(연결 끊김 등)는 전파한다(silent swallow 금지, 헌법 #15). 좀비는 위에서 Detach 했으니

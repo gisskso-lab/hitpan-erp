@@ -65,7 +65,9 @@ public sealed class ChatbotController : ControllerBase
         var policyRoles = new (string Policy, string[] Roles)[]
         {
             ("SalesOnly",    new[] { "system_admin", "sales_manager", "sales_user", "TenantAdmin", "tenant_admin" }),
-            ("SalesManager", new[] { "system_admin", "sales_manager" }),
+            // W1-4 동기화 (작업지시서 20260707작2, 검증팀 SoD 적발): Program.cs SalesManager 정책에
+            //   tenant_admin 이 추가됨 — 이 미러 테이블은 "정책 정의와 1:1 일치" 계약이므로 함께 갱신.
+            ("SalesManager", new[] { "system_admin", "sales_manager", "TenantAdmin", "tenant_admin" }),
             ("PurchaseOnly", new[] { "system_admin", "purchase_manager", "TenantAdmin", "tenant_admin" }),
             ("AccountOnly",  new[] { "system_admin", "account_manager", "TenantAdmin", "tenant_admin" }),
             ("HROnly",       new[] { "system_admin", "hr_manager", "TenantAdmin", "tenant_admin" }),

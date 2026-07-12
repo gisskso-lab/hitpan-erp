@@ -163,6 +163,12 @@ var
   G_BizNo: String;
   G_SignedProof: String;
   G_SignedProofKid: String;
+  // ★ 봉합 20260707작2 (W1-6): seed-parent 종료코드를 호출부(CurStepChanged)에서 판정하기 위한 전역.
+  //   0=성공 / 10=기존 부모계정 유지(멱등 성공 — 방금 입력한 비번 미적용, 호출부에서 고지) /
+  //   6=로그인 스모크 검증 실패(신설) / -1=실행 자체 실패(Exec=False 또는 사전 단계 실패).
+  G_SeedParentExitCode: Integer;
+  // ★ 봉합 20260707작2 (W2-2): 기동(schtasks) 등록 실패 경고 MsgBox 1회만 표시(중복 팝업 차단).
+  G_StartupWarnShown: Boolean;
 
   // 멀티사업자 영역 변수 (사고 #16·#21·#22 봉합 WS-20260612-01 2026-06-12)
   //   사장님 결재 [[project_multi_business_per_pc]] (2026-06-09)
@@ -717,14 +723,15 @@ begin
     if not CallLicenseClaimApi(TrimmedKey, G_BizNo) then begin
       WizardForm.NextButton.Enabled := True;
       WizardForm.NextButton.Caption := '다음';
-      // 증표 미취득 — 사업자번호 불일치가 가장 흔한 원인. 부모계정 자동 생성은 못 하지만,
-      //   ERP 본체·DB·로그인 화면 설치는 계속 진행(헌법 #20·#25). 부모계정은 로그인 화면 최초등록(P0-4)으로 폴백.
+      // 증표 미취득 — 사업자번호 불일치가 가장 흔한 원인. ERP 본체·DB 설치 자체는 계속 진행 가능하나,
+      //   부모계정 없이는 로그인이 불가능해 재설치가 필요하다 (폴백 기능 미구현 — 로그인 불가 상태로
+      //   설치됨, 20260707작2 정정). 종전 "로그인 화면 최초등록(P0-4)" 안내는 실존하지 않는 기능을
+      //   약속한 거짓 안내였음 → 문구 정정 + 기본 버튼을 「아니오」(재입력 권장)로 (MB_DEFBUTTON2).
       SkipResponse := MsgBox(
-        '사업자번호 확인에 실패하여 부모 계정을 자동으로 만들 수 없습니다.' + #13#10 + #13#10 +
-        '가입 시 입력한 사업자번호와 동일한지 확인해주세요.' + #13#10 + #13#10 +
-        '「예」 부모 계정 없이 설치 계속 (설치 후 로그인 화면에서 최초 등록)' + #13#10 +
-        '「아니오」 시리얼·사업자번호 다시 입력',
-        mbConfirmation, MB_YESNO);
+        '부모계정 인증 증표를 받지 못했습니다.' + #13#10 + #13#10 +
+        '「예」를 누르면 부모계정 없이 설치되며, 이 상태에서는 로그인이 불가능해 재설치가 필요합니다.' + #13#10 + #13#10 +
+        '「아니오」를 눌러 시리얼 번호와 사업자등록번호를 다시 확인해 주세요. (권장)',
+        mbConfirmation, MB_YESNO or MB_DEFBUTTON2);
       if SkipResponse = IDYES then begin
         G_SignedProof := '';
         // 회사정보(installer/bootstrap)는 이미 확인됨 → 설치 자체는 정상 진행.
@@ -792,7 +799,7 @@ end;
 
 // 부모계정 입력 페이지는 인증(G_SignedProof) 취득에 성공했을 때만 노출한다.
 //   증표 미취득(LOCAL·사업자번호 불일치 폴백)이면 부모계정 자동 생성 경로가 없으므로 페이지를 건너뛴다
-//   (설치 후 로그인 화면 최초 등록으로 폴백 — P0-4). 시리얼 미입력 LOCAL 모드도 동일.
+//   (폴백 기능 미구현 — 로그인 불가 상태로 설치됨, 20260707작2 정정). 시리얼 미입력 LOCAL 모드도 동일.
 function ShouldSkipPage(PageID: Integer): Boolean;
 begin
   Result := False;
@@ -908,8 +915,10 @@ begin
                 '  "BackofficeApiBaseUrl": "https://back.hitpan.kr"' + #13#10 +
                 '}' + #13#10;
   if not SaveStringToFile(AppSettingsPath, NewContent, False) then begin
+    // ★ 봉합 20260707작2 (W2-1): 실패를 Log 만 남기고 통과하면 appsettings 에 api-demo 원본이 잔존해
+    //   로그인이 demo 서버로 새는 진범 — 실패를 설치 실패로 승격한다(헌법 #15·#19, "완료처럼 보이는 실패" 차단).
     Log('[FixupBlazor] SaveStringToFile 실패: ' + AppSettingsPath);
-    Exit;
+    RaiseException('설정 파일(appsettings.json) 갱신에 실패했습니다. 설치를 다시 실행해 주세요: ' + AppSettingsPath);
   end;
   Log('[FixupBlazor] 정정 완료 → ' + AppSettingsPath + ' = ' + TargetUrl);
 end;
@@ -994,6 +1003,12 @@ end;
 // 부모계정 오프라인 생성 — seed-parent 서브커맨드 배선 (작업지시서 20260707작1 ③단계 P0-3)
 // ============================================================
 // JSON 문자열 이스케이프 — 사용자 입력(이름·아이디·비번)에 " \ 제어문자가 있어도 JSON 파손·주입 방지.
+//   ★ 봉합 20260707작2 (W1-7, 인코딩 분열 원천 차단): 비ASCII 문자(Ord > 126)도 전부 \uXXXX 로 이스케이프.
+//   진범: 이 산출 JSON 을 SaveStringToFile(..., False) = ANSI(CP949) 로 쓰는데, seed-parent 쪽은
+//   File.ReadAllTextAsync = UTF-8 로 읽는다 → 한글 아이디·비번·대표이름이 U+FFFD 로 깨진 채 저장
+//   (한글 아이디면 로그인 영구 불가). 비ASCII 를 \u 이스케이프하면 산출 JSON 이 순수 ASCII 가 되어
+//   파일 인코딩(CP949/UTF-8) 비대칭과 무관해진다. Unicode Inno 의 Ord() = UTF-16 코드유닛이므로
+//   서로게이트 쌍도 \u 2개로 나가며 이는 유효 JSON — System.Text.Json 이 원문으로 정상 복원한다.
 function JsonEscape(S: String): String;
 var
   I: Integer;
@@ -1005,20 +1020,17 @@ begin
     C := S[I];
     if C = '"' then R := R + '\"'
     else if C = '\' then R := R + '\\'
-    else if C = #8 then R := R + '\b'
-    else if C = #9 then R := R + '\t'
-    else if C = #10 then R := R + '\n'
-    else if C = #12 then R := R + '\f'
-    else if C = #13 then R := R + '\r'
-    else if C < ' ' then R := R + Format('\u%.4x', [Ord(C)])
+    else if (Ord(C) < 32) or (Ord(C) > 126) then R := R + Format('\u%.4x', [Ord(C)])
     else R := R + C;
   end;
   Result := R;
 end;
 
-// seed-parent 실행. 증표(G_SignedProof)가 있을 때만 호출된다(없으면 로그인 화면 최초등록 폴백).
+// seed-parent 실행. 증표(G_SignedProof)가 있을 때만 호출된다(없으면 부모계정 없이 설치 —
+//   폴백 기능 미구현, 로그인 불가 상태로 설치됨, 20260707작2 정정).
 //   비번 평문은 임시 JSON 파일(ACL 잠금)로만 전달 — SetupLog·Exec 인자에 노출하지 않는다(#40·#22).
-//   반환 True = 부모계정 생성/멱등 성공. False = 실패(설치 실패로 처리).
+//   반환 True = 부모계정 생성 성공(exit 0) 또는 기존 부모계정 유지 멱등 성공(exit 10, 20260707작2 W1-6).
+//   False = 실패(설치 실패로 처리). 종료코드 상세 판정은 전역 G_SeedParentExitCode 로 호출부에서 수행.
 function RunSeedParent(ParentName, ParentId, ParentPw: String): Boolean;
 var
   InputFile, ExePath, Json: String;
@@ -1026,6 +1038,8 @@ var
   Launched: Boolean;
 begin
   Result := False;
+  // ★ 봉합 20260707작2 (W1-6): 종료코드 전역 초기화 — 사전 단계 실패·Exec 실패 시 -1 유지.
+  G_SeedParentExitCode := -1;
 
   ExePath := ExpandConstant('{app}\api\HitPan.API.exe');
   if not FileExists(ExePath) then begin
@@ -1062,9 +1076,12 @@ begin
   Launched := Exec(ExePath, 'seed-parent "' + InputFile + '"',
        ExpandConstant('{app}\api'), SW_HIDE, ewWaitUntilTerminated, ResultCode);
 
-  if Launched then
-    Log('[SeedParent] exit code = ' + IntToStr(ResultCode))
-  else
+  if Launched then begin
+    // ★ 봉합 20260707작2 (W1-6): 종료코드를 전역에 보존 — 호출부(CurStepChanged)가 10(멱등 고지)·
+    //   6(로그인 스모크 실패) 을 구분 판정한다. Exec=False 면 ResultCode 가 OS 오류코드라 보존하지 않는다(-1 유지).
+    G_SeedParentExitCode := ResultCode;
+    Log('[SeedParent] exit code = ' + IntToStr(ResultCode));
+  end else
     Log('[SeedParent] 프로세스 실행 자체 실패(Exec=False).');
 
   // 2차 소각 — 서브커맨드가 못 지웠을 경우 대비(비번 평문 잔존 차단). 공백 덮어쓰기 후 삭제.
@@ -1073,8 +1090,26 @@ begin
     DeleteFile(InputFile);
   end;
 
-  // 종료 코드 판정 — 실행 성공 + exit 0(성공/멱등)만 성공. 그 외(launch 실패·2/3/4/5)는 실패.
-  Result := Launched and (ResultCode = 0);
+  // 종료 코드 판정 — 실행 성공 + exit 0(성공) 또는 exit 10(기존 부모계정 유지 멱등 성공)만 성공.
+  //   ★ 봉합 20260707작2 (W1-6): ParentExists 가 exit 0 → exit 10 으로 분리됨(C# SeedParentCommand 정합).
+  //     10 = 설치는 계속하되 "방금 입력한 비번 미적용" 을 호출부에서 고지(재설치 시 새 비번이 조용히
+  //     버려지는 함정 제거). 6 = 로그인 스모크 검증 실패(신설). 그 외(launch 실패·2/3/4/5/6)는 실패.
+  Result := Launched and ((ResultCode = 0) or (ResultCode = 10));
+end;
+
+// ★ 봉합 20260707작2 (W2-2, 기동 실패 가시화): schtasks /Create·/Run 실패를 Log 만 남기고 지나가면
+//   "설치 완료 화면인데 서비스가 안 떠 있는" 침묵 고장이 된다. 실패 시 경고 MsgBox 로 가시화하되
+//   설치는 중단하지 않는다(ONSTART 작업이라 PC 재부팅 시 자가복구 가능 = 비차단, 헌법 #15).
+//   여러 지점에서 연속 실패해도 팝업은 1회만(G_StartupWarnShown) — Log 는 지점별 전부 남긴다.
+procedure WarnStartupRegistrationFailure(Context: String; Code: Integer);
+begin
+  Log('[20260707작2 W2-2] ' + Context + ' 실패 ResultCode=' + IntToStr(Code));
+  if not G_StartupWarnShown then begin
+    G_StartupWarnShown := True;
+    MsgBox('HitPan 서비스 자동 시작 등록에 실패했습니다.' + #13#10 +
+           'PC를 재부팅하면 자동으로 시작됩니다. 즉시 사용하려면 고객센터에 문의해 주세요.',
+           mbError, MB_OK);
+  end;
 end;
 
 procedure CurStepChanged(CurStep: TSetupStep);
@@ -1352,12 +1387,25 @@ begin
     if not SeedOk then begin
       // 실패 = 설치를 명확히 중단(헌법 #15·#19·#20 — "완료처럼 보이는 실패" 차단).
       //   임시 입력파일은 RunSeedParent 내부에서 이미 소각됨(비번 잔존 0).
-      RaiseException('부모 계정 생성에 실패했습니다. 시리얼·사업자번호·서명 증표를 확인 후 다시 설치해 주세요. '
-        + '문제가 지속되면 고객센터에 문의해 주세요.');
+      //   ★ 봉합 20260707작2 (W1-6): exit 6 = 계정 생성 후 로그인 스모크 검증 실패(설치 환경 문제) —
+      //     시리얼·증표 문제가 아니므로 별도 안내(고객이 헛되이 시리얼 재입력을 반복하는 함정 차단).
+      if G_SeedParentExitCode = 6 then
+        RaiseException('생성된 계정의 로그인 검증에 실패했습니다(설치 환경 문제). 고객센터에 문의해 주세요.')
+      else
+        RaiseException('부모 계정 생성에 실패했습니다. 시리얼·사업자번호·서명 증표를 확인 후 다시 설치해 주세요. '
+          + '문제가 지속되면 고객센터에 문의해 주세요.');
+    end;
+    // ★ 봉합 20260707작2 (W1-6): exit 10 = 기존 부모계정 유지(ParentExists 멱등 성공) — 재설치 시
+    //   방금 입력한 새 비번이 조용히 버려지는 함정 제거: 설치는 계속하되 기존 비번 사용을 명시 고지.
+    if G_SeedParentExitCode = 10 then begin
+      Log('[SeedParent] exit 10 — 기존 부모계정 유지(방금 입력한 비밀번호 미적용) 고지 표시.');
+      MsgBox('기존 부모계정이 유지되었습니다.' + #13#10 +
+             '방금 입력하신 비밀번호는 적용되지 않았습니다. 기존 비밀번호로 로그인해 주세요.' + #13#10 +
+             '비밀번호를 잊으셨다면 고객센터에 문의해 주세요.', mbInformation, MB_OK);
     end;
     Log('[SeedParent] 부모계정 생성 성공(또는 멱등).');
   end else
-    Log('[SeedParent] 증표 미취득 — 부모계정 자동 생성 건너뜀(로그인 화면 최초등록 폴백).');
+    Log('[SeedParent] 증표 미취득 — 부모계정 자동 생성 건너뜀(폴백 기능 미구현 — 로그인 불가 상태로 설치됨, 20260707작2 정정).');
 
   // 5-1-A. 봉합 2026-06-17 (1.2.13, P0): Blazor WASM appsettings.json ApiBaseUrl 정정
   //   1.2.12까지 api-demo.hitpan.kr 가도 → CORS preflight 차단 사고.
@@ -1519,6 +1567,9 @@ begin
   Exec(ExpandConstant('{cmd}'),
        '/C schtasks /Create /F /TN "HitPan-ERP-API-tenant-' + IntToStr(G_SlotIndex) + '" /TR "\"' + ExpandConstant('{app}\api\HitPan.API.exe') + '\" --urls http://127.0.0.1:' + IntToStr(G_ApiPort) + '" /SC ONSTART /RU SYSTEM /RL HIGHEST',
        '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+  // ★ 봉합 20260707작2 (W2-2): /Create 결과 검사 — 실패 시 Log + 경고 MsgBox 가시화(비차단).
+  if ResultCode <> 0 then
+    WarnStartupRegistrationFailure('API schtasks /Create', ResultCode);
   // 보강 2026-06-17 (1.2.12, P1 #5): schtasks /Run 결과 검사 + 실패 시 1회 재시도
   Exec(ExpandConstant('{cmd}'), '/C schtasks /Run /TN "HitPan-ERP-API-tenant-' + IntToStr(G_SlotIndex) + '"',
        '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
@@ -1528,7 +1579,9 @@ begin
     Exec(ExpandConstant('{cmd}'), '/C schtasks /Run /TN "HitPan-ERP-API-tenant-' + IntToStr(G_SlotIndex) + '"',
          '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
     if ResultCode <> 0 then
-      Log('[1.2.12 P1#5] schtasks /Run 재시도 실패 ResultCode=' + IntToStr(ResultCode));
+      // ★ 봉합 20260707작2 (W2-2): 재시도 최종 실패를 Log 만 남기지 않고 경고 MsgBox 가시화(비차단).
+      //   (WarnStartupRegistrationFailure 가 Log 도 함께 남긴다.)
+      WarnStartupRegistrationFailure('API schtasks /Run(재시도)', ResultCode);
   end;
 
   // 9-B. ERP API keepalive (봉합 2026-06-25, C — OS 레벨 2중 안전망):
@@ -1625,10 +1678,14 @@ begin
       ShellExec('open', 'https://' + G_PrimaryDomain, '', '', SW_SHOW, ewNoWait, ResultCode)
     else begin
       // 헬스체크 영역 실패 — silent 0건, 사장님 영역 직접 표시 (헌법 #15 정합)
-      MsgBox('히트판 ERP 설치가 완료되었으나, 외부 터널 영역 활성화에 시간이 필요합니다.' + #13#10 + #13#10 +
-             '5~10분 후에 다음 주소로 접속해주세요:' + #13#10 +
+      // ★ 봉합 20260707작2 (W2-3): 폴백으로 여는 localhost 화면에서 로그인이 안 될 수 있음을 명시.
+      //   종전 문구는 터널 지연만 안내해, 고객이 열린 localhost 화면에서 로그인 실패를 반복하며
+      //   "설치가 잘못됐다"고 오판하는 함정이 있었다(워치독 자동 복구 = 헌법 #28·#30 정합 안내).
+      MsgBox('히트판 ERP 설치가 완료되었으나, 외부 터널 활성화에 시간이 필요합니다.' + #13#10 + #13#10 +
+             '잠시 후 열리는 임시 화면(localhost)에서는 로그인이 안 될 수 있습니다.' + #13#10 +
+             '워치독이 자동 복구를 마치면(보통 5~10분) 아래 정식 주소로 접속해 주세요:' + #13#10 +
              'https://' + G_PrimaryDomain + #13#10 + #13#10 +
-             '접속이 안 되면 본사 고객센터에 문의해주세요.',
+             '10분 후에도 접속이 안 되면 본사 고객센터에 문의해주세요.',
              mbInformation, MB_OK);
       // 폴백 영역 — 로컬 영역으로 가도
       ShellExec('open', 'http://localhost:5234', '', '', SW_SHOW, ewNoWait, ResultCode);

@@ -214,6 +214,12 @@ public sealed class CompanyBootstrapProvisioner
         await using var tx = await db.BeginTransactionAsync(ct);
         try
         {
+            // W1-2 (작업지시서 20260707작2) — 저장 어휘 단일화:
+            //   users.role = 'TenantAdmin' (UserRole enum 멤버명, UserService.cs:112 role.ToString()과 동일 사전).
+            //     종전 'tenant_admin'(언더스코어)은 UserConfiguration HasConversion<string>() 역변환 폭발
+            //     = 로그인 500 진범. (읽기측 관용 컨버터 W1-1과 한 세트 — 쓰기도 정본 어휘로 통일.)
+            //   users.account_type = 'tenant_admin' 그대로 유지 — JWT claim·Authorization 정책(TenantOnly 등)이
+            //     snake_case를 사용하므로 여기는 손대면 안 된다(다른 사전).
             await db.ExecuteAsync(new CommandDefinition(@"
                 INSERT INTO users
                   (user_id, tenant_id, email, password_hash, user_name,
@@ -222,12 +228,15 @@ public sealed class CompanyBootstrapProvisioner
                    created_at, updated_at, is_deleted, emp_name)
                 VALUES
                   (@UserId, @TenantId, @Email, @Hash, @Name,
-                   'tenant_admin', 'tenant_admin', 1,
+                   'TenantAdmin', 'tenant_admin', 1,
                    1, 0,
                    UTC_TIMESTAMP(6), UTC_TIMESTAMP(6), 0, @Name)",
                 new { UserId = userId, TenantId = tenantId, Email = loginId, Hash = passwordHash, input.Name },
                 transaction: tx, cancellationToken: ct));
 
+            // employees.role = 'tenant_admin' 유지 (W1-2 구분 사유): employees.role은 EF enum 매핑이 아니라
+            //   문자열 컬럼이며, 로그인 시 employeeRole claim(ClaimTypes.Role)으로 그대로 실려 Authorization
+            //   정책(snake_case 어휘)과 짝을 이룬다 — users.role(enum 사전)과 다른 사전이므로 바꾸면 안 된다.
             await db.ExecuteAsync(new CommandDefinition(@"
                 INSERT INTO employees
                   (employee_id, tenant_id, user_id, emp_no, emp_name,
