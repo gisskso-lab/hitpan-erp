@@ -1,3 +1,4 @@
+using Dapper;
 using HitPan.Application.Common;
 using HitPan.Application.DTOs.Tenant;
 using HitPan.Application.Interfaces;
@@ -29,6 +30,26 @@ public class TenantService : ITenantService
         var tenantId = _currentTenant.TenantId;
         if (string.IsNullOrWhiteSpace(tenantId))
             return null;
+
+        // 봉합 (2026-07-14, 사장님 결재 — Sandbox 종단 실측 404 적발): 공개키서명 온보딩(2026-07-07)부터
+        //   신규 설치의 회사정보 진실원은 local_company(랜딩 인증 자동반영·수정금지, 헌법 #35)인데,
+        //   이 조회만 옛 tenants 를 읽어 신규 고객 전원 /api/tenants/me 404(상단 회사명 공백)였다.
+        //   local_company 우선 → 없으면 tenants 폴백(demo·구버전 설치 호환, 헌법 #1 기존 경로 보존).
+        var db = _unitOfWork.GetDbConnection();
+        var localCompanyName = await db.QueryFirstOrDefaultAsync<string?>(
+            "SELECT company_name FROM local_company WHERE tenant_id = @TenantId LIMIT 1",
+            new { TenantId = tenantId });
+        if (!string.IsNullOrWhiteSpace(localCompanyName))
+        {
+            return new TenantMeResponse
+            {
+                TenantId = tenantId,
+                CompanyName = localCompanyName,
+                // local_company 행 존재 = 부트스트랩 완료(is_locked_from_landing) 상태 — 로컬 설치본에 구독
+                // 상태 개념이 없어 active 고정(구독·CS 상태는 백오피스 전담, 헌법 #35).
+                Status = "active"
+            };
+        }
 
         var tenants = _unitOfWork.Repository<Tenant>();
         var tenant = await tenants.GetByIdAsync(tenantId);
