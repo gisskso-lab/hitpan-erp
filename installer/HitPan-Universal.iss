@@ -174,6 +174,8 @@ var
   G_SeedParentExitCode: Integer;
   // ★ 봉합 20260707작2 (W2-2): 기동(schtasks) 등록 실패 경고 MsgBox 1회만 표시(중복 팝업 차단).
   G_StartupWarnShown: Boolean;
+  // ★ 봉합 20260714작1 (W1-1): 터널 구성 실패 경고 MsgBox 1회만 표시(W2-2 동일 패턴).
+  G_TunnelWarnShown: Boolean;
 
   // 멀티사업자 영역 변수 (사고 #16·#21·#22 봉합 WS-20260612-01 2026-06-12)
   //   사장님 결재 [[project_multi_business_per_pc]] (2026-06-09)
@@ -1115,6 +1117,46 @@ begin
   end;
 end;
 
+// ★ 봉합 20260714작1 (W1-1, 재설치 터널 소멸 P0 — Sandbox 실측 적발): 터널(외부 접속) 구성 실패를
+//   Log 만 남기고 지나가면 "설치 완료인데 외부 접속 1033" 침묵 고장이 된다(7/14 실측 그대로).
+//   실패 시 경고 MsgBox 로 가시화하되 설치는 중단하지 않는다(워치독 WS-28-D 가 db.conf 토큰으로 재시도).
+procedure WarnTunnelFailure(Context: String; Code: Integer);
+begin
+  Log('[20260714작1 W1] 터널 구성 실패: ' + Context + ' ResultCode=' + IntToStr(Code));
+  if not G_TunnelWarnShown then begin
+    G_TunnelWarnShown := True;
+    MsgBox('외부 접속 연결 구성에 실패했습니다.' + #13#10 +
+           '설치는 계속되지만 외부(다른 기기)에서 접속이 안 될 수 있습니다.' + #13#10 +
+           '프로그램이 자동 복구를 시도하며, 계속 안 되면 고객센터에 문의해 주세요.',
+           mbError, MB_OK);
+  end;
+end;
+
+// ★ 봉합 20260714작1 (W1-2): 기존 db.conf 에서 키 값을 읽는다(재설치 보존용).
+//   db.conf 는 [UninstallDelete] 대상이 아니라 덮어 재설치·제거 후 재설치 모두에서 살아남는다.
+function ReadDbConfValue(const Key: String): String;
+var
+  Lines: TStringList;
+  i: Integer;
+  Line: String;
+begin
+  Result := '';
+  if not FileExists(ExpandConstant('{app}\db.conf')) then Exit;
+  Lines := TStringList.Create;
+  try
+    Lines.LoadFromFile(ExpandConstant('{app}\db.conf'));
+    for i := 0 to Lines.Count - 1 do begin
+      Line := Trim(Lines[i]);
+      if Pos(Key + '=', Line) = 1 then begin
+        Result := Copy(Line, Length(Key) + 2, Length(Line));
+        Exit;
+      end;
+    end;
+  finally
+    Lines.Free;
+  end;
+end;
+
 procedure CurStepChanged(CurStep: TSetupStep);
 var
   ResultCode: Integer;
@@ -1333,6 +1375,17 @@ begin
   //   사장님 결재 2026-06-12: 환경변수 영역 폐기 + db.conf 영역 직접 영역
   //   ERP 본체 영역 TenantConfigReader 영역 자기 폴더 영역 db.conf 영역만 박힘 → 회사별 완전 분리
   //   DB 자격증명 + JWT_SECRET + ERP_ENCRYPTION_KEY 영역 모두 박음 (한 곳 영역 통합)
+  // ★ 봉합 20260714작1 (W1-2, 재설치 터널 소멸 P0 — Sandbox 실측 적발): 이번 설치에서 터널 토큰을
+  //   못 받았으면(재설치 분기·백오피스 발급 실패 등) 직전 설치의 TUNNEL_ID·TUNNEL_TOKEN 을 보존한다.
+  //   빈값 덮어쓰기 = 워치독 자가복구(WS-28-D) 영구 무력 + 아래 6단계 터널 재설치 스킵 = 1033 침묵 고장.
+  //   보존된 토큰으로 6단계 service install 도 다시 돌므로 재설치에서 터널이 그대로 살아난다.
+  if G_TunnelToken = '' then begin
+    G_TunnelToken := ReadDbConfValue('TUNNEL_TOKEN');
+    if G_TunnelId = '' then G_TunnelId := ReadDbConfValue('TUNNEL_ID');
+    if G_TunnelToken <> '' then
+      Log('[20260714작1 W1-2] 터널 토큰 미수령 — 기존 db.conf 값 보존(재설치 정합)');
+  end;
+
   BootstrapContent := TStringList.Create;
   try
     BootstrapContent.Add('DB_HOST=localhost');
@@ -1530,10 +1583,39 @@ begin
     Exec(ExpandConstant('{cmd}'), '/C sc start cloudflared',
          '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
 
+    // ★ 봉합 20260714작1 (W1-3, 원자성): 6-1 이 기존 서비스를 지운 뒤 6-2 설치가 실패하면 터널이
+    //   통째로 소멸하는데 종전엔 어떤 검사도 없었다(7/14 Sandbox 재설치 1033 유력 진범). 설치 후
+    //   서비스 존재를 검증하고, 없으면 1회 재시도, 그래도 없으면 경고 가시화(비차단).
+    //   ※ 서비스명: cloudflared 2026.3.0 의 `service install` 등록명은 'Cloudflared' — sc 는 대소문자
+    //     무시라 'cloudflared' 로 조회 가능(2026-07-15 바이너리 실측). demo PC 의 'CloudflaredAgent' 는
+    //     폐기된 옛 수동 스크립트 잔재로 본 경로와 무관.
+    Exec(ExpandConstant('{cmd}'), '/C sc query cloudflared',
+         '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+    if ResultCode <> 0 then begin
+      Log('[20260714작1 W1-3] cloudflared 서비스 미존재 — service install 1회 재시도');
+      Sleep(3000);
+      Exec(ExpandConstant('{app}\cloudflared.exe'),
+           'service install ' + G_TunnelToken,
+           ExpandConstant('{app}'), SW_HIDE, ewWaitUntilTerminated, ResultCode);
+      Sleep(3000);
+      Exec(ExpandConstant('{cmd}'), '/C sc start cloudflared',
+           '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+      Exec(ExpandConstant('{cmd}'), '/C sc query cloudflared',
+           '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+      if ResultCode <> 0 then
+        WarnTunnelFailure('터널 서비스 설치(service install) 재시도 실패', ResultCode);
+    end;
+
     // 6-4. HITPAN_SUBDOMAIN 영역 db.conf 영역 박음 (사고 #41·#42·#39 봉합 — 환경변수 폐기)
     //   사장님 결재 2026-06-12 — 싱글 각각 설치 영역 = 회사별 db.conf 영역만 박힘
     //   환경변수 영역 = 글로벌 영역 영역 슬롯 영역 덮어쓰기 영역 사고 차단 → db.conf 영역 박음
     //   ERP 본체 영역 TenantConfigReader 영역 db.conf 영역 직접 읽음 (사고 #46 봉합 정합)
+  end
+  else begin
+    // ★ 봉합 20260714작1 (W1-1): 터널 토큰이 없으면(이번 발급도, 기존 db.conf 보존값도 없음) 종전엔
+    //   아무 표시 없이 건너뛰어 "설치 성공인데 외부 접속 1033" 침묵 고장이 됐다. 가시화(비차단).
+    if G_TenantCode <> 'LOCAL' then
+      WarnTunnelFailure('터널 토큰 미수령 — 외부 접속 미구성', -1);
   end;
 
   // 7. 백신 예외 + 방화벽 (헌법 #31 정합) — 사고 #4 봉합: -InstallPath 통일
