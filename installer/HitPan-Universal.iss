@@ -89,8 +89,13 @@ Source: "{#BundleDir}\api\*"; DestDir: "{app}\api"; Flags: ignoreversion recurse
 Source: "{#BundleDir}\web\*"; DestDir: "{app}\web"; Flags: ignoreversion recursesubdirs createallsubdirs
 Source: "{#BundleDir}\hitpan_db.sql"; DestDir: "{app}"; Flags: ignoreversion
 
-; 워치독 (Day 7에 박힐 영역, 지금은 placeholder)
-Source: "{#BundleDir}\watchdog\HitPan.Watchdog.exe"; DestDir: "{app}\watchdog"; Flags: ignoreversion; Check: WatchdogExists
+; 워치독 — 자가회복 서비스 (헌법 #28·#30)
+; ★ 봉합 (2026-07-14, Sandbox 실측 적발 — 사장님 결재): 종전 `Check: WatchdogExists`는 설치 시점(고객 PC)에서
+;   빌드PC 상대경로({#BundleDir})를 검사해 항상 False → 워치독이 설치EXE에 담겨 있어도 추출 0건
+;   (전 고객 서비스 미등록 침묵 실패 = 헌법 #28·#30·자동업데이트 전체 무력화). 워치독은 빌드 [3/5]가
+;   항상 포함(publish 실패 시 출시 차단)하므로 조건 없이 복사한다. 또한 단일 EXE 복사도 오답 —
+;   self-contained 222파일 구성이라 의존 파일 전체(recursesubdirs)를 복사해야 기동 가능.
+Source: "{#BundleDir}\watchdog\*"; DestDir: "{app}\watchdog"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 ; 헬퍼 스크립트
 Source: "hitpan-start.bat"; DestDir: "{app}"; Flags: ignoreversion
@@ -214,10 +219,8 @@ begin
   if FileExists('C:\Program Files\MySQL\MySQL Server 8.4\bin\mysql.exe') then Result := False;
 end;
 
-function WatchdogExists: Boolean;
-begin
-  Result := FileExists(ExpandConstant('{#BundleDir}\watchdog\HitPan.Watchdog.exe'));
-end;
+// WatchdogExists 제거 (2026-07-14 봉합): 설치 시점에 빌드PC 경로를 검사하는 논리 오류로
+//   워치독 추출을 전 고객에서 차단하던 함수 — [Files] 무조건 복사로 대체(위 봉합 주석 참조).
 
 // ============================================================
 // 시리얼 형식 검증 — HITP-XXXX-XXXX-XXXX-XXXX
@@ -1545,10 +1548,16 @@ begin
          '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
 
   // 8. 워치독 서비스 등록 — 사고 #4 봉합: -InstallPath 통일
-  if FileExists(ExpandConstant('{app}\scripts\InstallWatchdog.ps1')) then
+  // ★ 봉합 (2026-07-14, Sandbox 실측 적발): 결과코드 미검사로 서비스 미등록이 침묵 통과되던 것을
+  //   W2-2 패턴(Log + 경고 MsgBox 1회, 비차단)으로 가시화. InstallWatchdog.ps1 도 EXE 부재 시
+  //   exit 1 로 승격(종전 exit 0 = 침묵 성공).
+  if FileExists(ExpandConstant('{app}\scripts\InstallWatchdog.ps1')) then begin
     Exec('powershell.exe',
          '-NoProfile -ExecutionPolicy Bypass -File "' + ExpandConstant('{app}\scripts\InstallWatchdog.ps1') + '" -InstallPath "' + ExpandConstant('{app}') + '"',
          '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+    if ResultCode <> 0 then
+      WarnStartupRegistrationFailure('워치독 서비스 등록(InstallWatchdog.ps1)', ResultCode);
+  end;
 
   // 9. ERP API 자동 시작 (사고 #22·#29·#41·#42·#39 봉합 WS-20260612-01)
   //    봉합 v1.2.6: schtasks SYSTEM·ONSTART 영역 등록 + 회사별 포트 영역 박음

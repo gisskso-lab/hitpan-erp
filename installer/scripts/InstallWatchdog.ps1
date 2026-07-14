@@ -14,9 +14,10 @@ $ServiceName = 'HitPanWatchdog'
 $ExePath     = Join-Path $InstallPath 'watchdog\HitPan.Watchdog.exe'
 
 if (-not (Test-Path $ExePath)) {
-    Write-Output "[WARN] $ExePath not found — watchdog skip (Day 7 placeholder)"
-    # 워치독 EXE 영역 0건 시 silent 종료 (헌법 #15 정합 — 명시적 로그만)
-    exit 0
+    # 봉합 (2026-07-14, Sandbox 실측 적발): 종전 exit 0 = "설치 성공인데 워치독 없음" 침묵 실패.
+    #   워치독은 필수 인프라(헌법 #28·#30·자동업데이트)라 부재는 실패로 승격 — .iss 가 경고 가시화.
+    Write-Output "[FAIL] $ExePath not found — watchdog service NOT installed"
+    exit 1
 }
 
 # 기존 서비스 정리
