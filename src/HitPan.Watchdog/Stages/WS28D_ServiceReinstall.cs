@@ -57,38 +57,37 @@ public class WS28D_ServiceReinstall
             if (string.IsNullOrWhiteSpace(tunnelToken))
                 _logger.LogWarning("WS-28-D: db.conf 에 TUNNEL_TOKEN 부재 — 토큰 없이 재설치 시도(관리형 터널이면 미복구, 다음 사이클 재시도)");
 
-            var psi = new ProcessStartInfo(exePath, installArgs)
-            {
-                RedirectStandardOutput = true,
-                RedirectStandardError = true,
-                UseShellExecute = false,
-                CreateNoWindow = true,
-                Verb = "runas"
-            };
-            using var p = Process.Start(psi);
-            if (p == null) return false;
+            // ★ 봉합 (2026-07-15, 작지서 20260714작1 W2 — Sandbox 실측: 토큰 180자 존재+서비스 부재인데
+            //   7분+ 무복구): 종전엔 'service install' 1회 실패(ExitCode!=0)면 그대로 false 반환 → 다음
+            //   사이클도 같은 사유로 실패를 반복해 사실상 영구 무복구였다(헌법 #27 5분 게이트 실측 실패).
+            //   3단 방어로 승격: ① service install → ② 실패 시 SCM 잔재 정리(sc delete) 후 1회 재시도
+            //   (설치기 W1-3 삭제-등록 경합과 동일 패턴) → ③ 그래도 실패면 sc create 직접 등록 폴백
+            //   (cloudflared 자체 인스톨러 우회 — binPath 'tunnel run --token'은 관리형 터널 표준 실행형).
+            var installOk = await RunProcessAsync(exePath, installArgs, tunnelToken, ct) == 0;
 
-            // 봉합 (2026-06-23, 5차 전수조사 WD5-05 P2):
-            //   ① 종전엔 RedirectStandardOutput/Error=true 인데 출력을 읽지 않아, 출력이 파이프 버퍼(약 4KB)를
-            //      채우면 cloudflared 가 쓰기 블록 → WaitForExitAsync 영구 대기(데드락). 출력을 비동기로 동시에
-            //      읽어 파이프를 비운다(ReadToEndAsync 를 WaitForExit 전에 시작).
-            //   ② 종전엔 ExitCode 미검사로 service install 실패해도 sc.Start() 진행. ExitCode 검사 추가.
-            var stdoutTask = p.StandardOutput.ReadToEndAsync(ct);
-            var stderrTask = p.StandardError.ReadToEndAsync(ct);
-            await p.WaitForExitAsync(ct);
-            var stdout = await stdoutTask;
-            var stderr = await stderrTask;
-
-            if (p.ExitCode != 0)
+            if (!installOk || !ServiceExists())
             {
-                // 봉합 (2026-06-21, D6-P0-02-FIX, 검증팀장 P2): 토큰을 service install 인자로 넘기기 시작했으므로
-                //   cloudflared 가 자기 출력에 토큰을 echo 할 이론적 노출면이 생긴다(헌법 #22·#23). 로그로 내보내기
-                //   전에 토큰 문자열을 마스킹한다(통상 echo 안 하나 보수적 차단).
-                var rawErr = string.IsNullOrWhiteSpace(stderr) ? stdout : stderr;
-                var safeErr = string.IsNullOrWhiteSpace(tunnelToken)
-                    ? rawErr
-                    : rawErr.Replace(tunnelToken, "***REDACTED***");
-                _logger.LogError("WS-28-D: 'service install' 실패 ExitCode {Code}: {Err}", p.ExitCode, safeErr);
+                _logger.LogWarning("WS-28-D: 'service install' 1차 실패 — SCM 잔재 정리 후 재시도");
+                await RunProcessAsync("sc.exe", "delete cloudflared", tunnelToken, ct); // 부재·삭제지연이면 무해
+                await Task.Delay(2000, ct);
+                installOk = await RunProcessAsync(exePath, installArgs, tunnelToken, ct) == 0;
+            }
+
+            if ((!installOk || !ServiceExists()) && !string.IsNullOrWhiteSpace(tunnelToken))
+            {
+                _logger.LogWarning("WS-28-D: 'service install' 2차 실패 — sc create 직접 등록 폴백");
+                var binPath = "\\\"" + exePath + "\\\" tunnel run --token " + tunnelToken;
+                await RunProcessAsync("sc.exe",
+                    "create cloudflared binPath= \"" + binPath + "\" start= auto DisplayName= \"Cloudflared agent\"",
+                    tunnelToken, ct);
+                await RunProcessAsync("sc.exe",
+                    "failure cloudflared reset= 60 actions= restart/5000/restart/5000/restart/60000",
+                    tunnelToken, ct);
+            }
+
+            if (!ServiceExists())
+            {
+                _logger.LogError("WS-28-D: 서비스 등록 실패(install·재시도·sc create 3경로 전부) — 다음 사이클 재시도");
                 return false;
             }
 
@@ -113,6 +112,56 @@ public class WS28D_ServiceReinstall
         {
             _logger.LogError(ex, "WS-28-D: reinstall failure");
             return false;
+        }
+    }
+
+    /// <summary>
+    /// ★ 봉합 (2026-07-15, 작지서 20260714작1 W2): 외부 프로세스 실행 공통 헬퍼.
+    ///   - 파이프 데드락 차단(WD5-05 P2 패턴: 출력 비동기 소진 후 WaitForExit)
+    ///   - ExitCode!=0 이면 stderr/stdout 을 토큰 마스킹(헌법 #22·#23) 후 로그 — 침묵 금지(헌법 #15)
+    ///   - 반환 = ExitCode (프로세스 시작 실패는 -1)
+    /// </summary>
+    private async Task<int> RunProcessAsync(string fileName, string arguments, string? secretToMask, CancellationToken ct)
+    {
+        try
+        {
+            var psi = new ProcessStartInfo(fileName, arguments)
+            {
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                UseShellExecute = false,
+                CreateNoWindow = true
+            };
+            using var p = Process.Start(psi);
+            if (p == null)
+            {
+                _logger.LogError("WS-28-D: 프로세스 시작 실패: {File}", fileName);
+                return -1;
+            }
+            var stdoutTask = p.StandardOutput.ReadToEndAsync(ct);
+            var stderrTask = p.StandardError.ReadToEndAsync(ct);
+            await p.WaitForExitAsync(ct);
+            var stdout = await stdoutTask;
+            var stderr = await stderrTask;
+            if (p.ExitCode != 0)
+            {
+                var rawErr = string.IsNullOrWhiteSpace(stderr) ? stdout : stderr;
+                var safeErr = string.IsNullOrWhiteSpace(secretToMask)
+                    ? rawErr
+                    : rawErr.Replace(secretToMask, "***REDACTED***");
+                var safeArgs = string.IsNullOrWhiteSpace(secretToMask)
+                    ? arguments
+                    : arguments.Replace(secretToMask, "***REDACTED***");
+                _logger.LogError("WS-28-D: '{File} {Args}' 실패 ExitCode {Code}: {Err}",
+                    Path.GetFileName(fileName), safeArgs, p.ExitCode, safeErr);
+            }
+            return p.ExitCode;
+        }
+        catch (OperationCanceledException) { throw; }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "WS-28-D: 프로세스 실행 예외: {File}", fileName);
+            return -1;
         }
     }
 
