@@ -1157,6 +1157,37 @@ begin
   end;
 end;
 
+// ★ 봉합 20260714작1 (W5, 재설치 P0 — 2026-07-15 Sandbox 실측 로그 확정): 덮어 재설치는 [UninstallRun]
+//   을 거치지 않아 기존에 실행 중인 API(schtasks HitPan-ERP-API-*)·워치독·cloudflared 가 DLL 을 붙잡은 채로
+//   남는다. 그 위에 파일을 덮으면 수백 건 'DeleteFile 실패; 코드 5(ACCESS_DENIED=파일 사용중)' → 신·구 DLL
+//   혼재 → 직후 seed-parent(HitPan.API.exe)가 혼재 DLL 로 뜨다 예외 크래시(exit 5) → 설치 전체 중단.
+//   백지 신규설치가 멀쩡했던 건 붙잡을 프로세스가 없어서였다. 파일 복사(ssInstall) 전에 기존 실행 요소를
+//   전부 정지시켜 파일 잠금을 해소한다(제거가 아니라 '정지'라 데이터·설정 무손상, 헌법 #20 재설치 안전).
+procedure StopRunningComponentsForReinstall();
+var
+  ResultCode, i: Integer;
+begin
+  Log('[재설치안전] 파일 복사 전 기존 실행 프로세스 정지 시작');
+  // ① ERP API — schtasks ONSTART/keepalive 작업 종료 + 프로세스 강제 종료 (슬롯 1~5 전부)
+  for i := 1 to 5 do begin
+    Exec(ExpandConstant('{cmd}'), '/C schtasks /End /TN "HitPan-ERP-API-tenant-' + IntToStr(i) + '"',
+         '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+    Exec(ExpandConstant('{cmd}'), '/C schtasks /End /TN "HitPan-ERP-API-keepalive-' + IntToStr(i) + '"',
+         '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+  end;
+  // ② 워치독 서비스 정지 (재설치 후 InstallWatchdog.ps1 이 다시 등록·기동한다)
+  Exec(ExpandConstant('{cmd}'), '/C sc stop HitPanWatchdog', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+  // ③ cloudflared 서비스 정지 (6단계에서 좀비정리·재설치가 이어받는다)
+  Exec(ExpandConstant('{cmd}'), '/C sc stop cloudflared', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+  // ④ 잔여 프로세스 강제 종료 — 서비스로 안 잡히는 자식/고아 프로세스까지 (파일 잠금 완전 해소)
+  Exec(ExpandConstant('{cmd}'), '/C taskkill /F /IM HitPan.API.exe', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+  Exec(ExpandConstant('{cmd}'), '/C taskkill /F /IM HitPan.Watchdog.exe', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+  Exec(ExpandConstant('{cmd}'), '/C taskkill /F /IM cloudflared.exe', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+  // ⑤ 파일 핸들 해제 대기 (Windows SCM 정지 완료 + 핸들 반납 여유)
+  Sleep(4000);
+  Log('[재설치안전] 기존 실행 프로세스 정지 완료 — 파일 복사 진행 가능');
+end;
+
 procedure CurStepChanged(CurStep: TSetupStep);
 var
   ResultCode: Integer;
@@ -1165,6 +1196,12 @@ var
   KeysContent, BatchContent, BootstrapContent: TStringList;
   SeedOk: Boolean;
 begin
+  // ★ 봉합 20260714작1 (W5): 파일 복사(ssInstall) 직전 = 기존 실행 프로세스 정지의 유일한 안전 시점.
+  //   ssPostInstall(복사 후)에 하면 이미 잠금 사고가 끝난 뒤라 늦다.
+  if CurStep = ssInstall then begin
+    StopRunningComponentsForReinstall();
+    Exit;
+  end;
   if CurStep <> ssPostInstall then Exit;
   // 사장님 헌법 #20·#25 정합 (2026-06-11): 시리얼 무관 ERP 본체·DB·바로가기는 설치 진행
   // G_BootstrapOk = false 일 때도 MariaDB·DB·hitpan-keys.conf·bootstrap.conf 생성
