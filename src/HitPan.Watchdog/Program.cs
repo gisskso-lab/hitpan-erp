@@ -52,6 +52,12 @@ builder.Services.AddSingleton<MetaPingClient>();
 //   기존 WS28A~I 등록 패턴 그대로 따라 버전 업데이트 연결축을 DI 에 추가한다(헌법 #1 추가만, #34 정식 완성도).
 //   IUpdateClient → manifest 조회/다운로드/sha256 검증, WatchdogBackupRunner → 적용 전 안전 백업(고리3),
 //   UpdateOrchestrator → 채널 분기 평가 + 백업 실패 물리적 차단(고리3).
+// 봉합 (2026-07-16, 작1 서명 — 사장님 결재): manifest 위조 차단.
+//   feed 주소는 환경변수로 바뀔 수 있고 sha256 은 manifest 안에 있어 자기참조라, 서명이 없으면
+//   실제 파일 교체(W4-2)가 붙는 순간 "환경변수 하나 → SYSTEM 권한 임의 코드 실행"이 성립한다.
+//   개인키는 NCP(600 root)에만 있고 EXE 는 공개키만 갖는다.
+builder.Services.AddSingleton<UpdateSignatureVerifier>();
+
 builder.Services.AddSingleton<IUpdateClient, UpdateClient>();
 builder.Services.AddSingleton<WatchdogBackupRunner>();
 

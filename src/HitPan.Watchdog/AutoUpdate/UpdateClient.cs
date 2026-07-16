@@ -30,6 +30,7 @@ public sealed class UpdateClient : IUpdateClient
 {
     private readonly IHttpClientFactory _httpFactory;
     private readonly ILogger<UpdateClient> _logger;
+    private readonly UpdateSignatureVerifier _signature;
     private readonly string _feedUrl;
 
     // 봉합 (2026-06-29, 작1 고리1 — 마이클 채널 직렬화 발견):
@@ -44,10 +45,12 @@ public sealed class UpdateClient : IUpdateClient
         Converters = { new JsonStringEnumConverter() }
     };
 
-    public UpdateClient(IHttpClientFactory httpFactory, ILogger<UpdateClient> logger)
+    // 봉합 (2026-07-16, 작1 서명 — 사장님 결재): 서명 검증기를 주입받는다(추가만, 헌법 #1).
+    public UpdateClient(IHttpClientFactory httpFactory, ILogger<UpdateClient> logger, UpdateSignatureVerifier signature)
     {
         _httpFactory = httpFactory;
         _logger = logger;
+        _signature = signature;
         _feedUrl = Environment.GetEnvironmentVariable("HITPAN_UPDATE_FEED")
                    ?? "https://updates.hitpan.kr";
     }
@@ -66,6 +69,14 @@ public sealed class UpdateClient : IUpdateClient
                 _logger.LogWarning("[Update] manifest 응답이 비어있음");
                 return null;
             }
+
+            // 봉합 (2026-07-16, 작1 서명 — 사장님 결재): 서명을 '가장 먼저' 확인한다.
+            //   순서가 중요하다 — 위조된 manifest 의 버전·채널을 믿고 뭔가 판단하면 안 된다.
+            //   서명이 맞아야 그 안의 값들이 본사가 발급한 것임이 보장된다.
+            //   실패 시 null 반환 = 다운로드 진입 자체를 막는다(CTO 처방: fail-closed).
+            //   ※ 사유는 Verify 가 이미 기록했다(헌법 #15).
+            if (!_signature.Verify(manifest))
+                return null;
 
             // 봉합 (2026-07-16, 작1 W4-0 — 사장님 결재, CTO 적발): 종전엔 string.Equals 로 "다르면 새 버전"이었다.
             //   그래서 구버전 manifest 를 물리면 다운그레이드가 "새 버전"으로 통과했다(롤백 공격).

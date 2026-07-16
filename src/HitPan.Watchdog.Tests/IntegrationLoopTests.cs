@@ -52,6 +52,7 @@ public class IntegrationLoopTests
         // 정합 (2026-07-16, 작1 W4-0): Program.cs:45-58 의 자동 업데이트 연결축 등록을 반영한다.
         //   2026-06-29 고리1~2 에서 Worker 가 이들을 생성자로 받기 시작했는데 여기 목록이 안 따라와
         //   이 테스트가 47일간 실패 상태였다(Worker 조립 불가 → DI 검증이라는 이 테스트의 목적 자체가 무력화).
+        builder.Services.AddSingleton<UpdateSignatureVerifier>();
         builder.Services.AddSingleton<IUpdateClient, UpdateClient>();
         builder.Services.AddSingleton<WatchdogBackupRunner>();
         builder.Services.AddSingleton<UpdateLockFile>();
