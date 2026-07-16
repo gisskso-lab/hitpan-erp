@@ -98,12 +98,17 @@ if (-not $SkipErpBuild) {
     #   새 dll 과 섞여 그대로 출하됐다(진범). publish 전 폴더를 비워 잔재 재유입을 원천 차단한다.
     #   (소스트리 src/HitPan.API/wwwroot 옛 잔재도 별도 삭제+.gitignore 등재 — 재오염원 제거, CTO 지목.)
     if (Test-Path "$BundleDir/api") { Remove-Item -Recurse -Force "$BundleDir/api" }
-    Write-Host "  → HitPan.API publish..."
-    dotnet publish src/HitPan.API/HitPan.API.csproj -c Release -o "$BundleDir/api" --nologo
+    # ── W4-0 (2026-07-16, 검증팀 F-1 적발): publish 에 -p:HitPanVersion 주입 ──
+    #   종전엔 -Version 이 /DAppVersion(인스톨러)에만 갔고 어셈블리엔 안 갔다. 그래서 EXE 이름은
+    #   1.2.33 인데 그 안의 dll 은 Directory.Build.props 폴백(그 이전엔 아예 없어서 1.0.0)이었다.
+    #   업데이트 판정·/health·본사 메타핑이 전부 어셈블리 버전을 읽으므로, 이 주입이 빠지면
+    #   "인스톨러는 새 버전 / 프로그램은 옛 버전" 으로 갈라져 자동 업데이트가 무한 재적용에 빠진다.
+    Write-Host "  → HitPan.API publish (v$Version)..."
+    dotnet publish src/HitPan.API/HitPan.API.csproj -c Release -o "$BundleDir/api" -p:HitPanVersion=$Version --nologo
     if ($LASTEXITCODE -ne 0) { Write-Error "HitPan.API publish 실패 (exit $LASTEXITCODE)."; exit 1 }
 
-    Write-Host "  → HitPan.Web publish..."
-    dotnet publish src/HitPan.Web/HitPan.Web.csproj -c Release -o "$BundleDir/web" --nologo
+    Write-Host "  → HitPan.Web publish (v$Version)..."
+    dotnet publish src/HitPan.Web/HitPan.Web.csproj -c Release -o "$BundleDir/web" -p:HitPanVersion=$Version --nologo
     if ($LASTEXITCODE -ne 0) { Write-Error "HitPan.Web publish 실패 (exit $LASTEXITCODE)."; exit 1 }
 
     # ── Web 산출물 완전성 게이트 (2026-07-06 신설, 헌법 #36 실측 스모크의 Web판) ──
@@ -159,10 +164,14 @@ Write-Host ""
 Write-Host "[3/5] 워치독 빌드..." -ForegroundColor Yellow
 
 if (-not $SkipWatchdog -and (Test-Path "src/HitPan.Watchdog/HitPan.Watchdog.csproj")) {
-    Write-Host "  → HitPan.Watchdog publish..."
+    Write-Host "  → HitPan.Watchdog publish (v$Version)..."
     # 봉합 (2026-07-06): Out-Null 제거 — $LASTEXITCODE 가 publish 실제 결과를 보게 한다(위 API/Web 동일 사유).
+    # 봉합 (2026-07-16, W4-0 검증팀 F-1): -p:HitPanVersion 주입. 워치독 버전은 본사 메타핑이 보는 값이자
+    #   업데이트 판정의 "현재 버전"이라, 여기가 빠지면 워치독이 자기를 1.0.0 으로 알고
+    #   모든 manifest 를 "새 버전"으로 받아들인다(다운그레이드 방어까지 통째로 무력화).
     dotnet publish src/HitPan.Watchdog/HitPan.Watchdog.csproj `
         -c Release -o "$BundleDir/watchdog" -r win-x64 --self-contained true `
+        -p:HitPanVersion=$Version `
         --nologo
     if ($LASTEXITCODE -ne 0) { Write-Error "HitPan.Watchdog publish 실패 (exit $LASTEXITCODE)."; exit 1 }
     Write-Host "  ✅ 워치독 빌드 완료" -ForegroundColor Green
@@ -222,6 +231,41 @@ Write-Host "[5/5] Inno Setup 컴파일..." -ForegroundColor Yellow
 
 if (-not (Test-Path $OutputDir)) {
     New-Item -ItemType Directory -Path $OutputDir -Force | Out-Null
+}
+
+# ── 버전 정합 게이트 (2026-07-16, 작1 W4-0 — 검증팀 F-1·F-2 적발) ────────────────
+#   왜 필요한가: 종전엔 "인스톨러 버전(EXE 이름·AppVersion)"과 "어셈블리 버전(프로그램이 실제로
+#   자기를 뭐라고 말하는지)"이 각각 따로 정해졌다. 그래서 EXE 이름은 1.2.33 인데 그 안의 dll 은
+#   1.0.0 인 채로 출하됐고, 본사 메타핑·/health·업데이트 판정이 전부 거짓을 말했다.
+#   주석으로 "같아야 한다"고 적는 건 사람의 약속이라 언젠가 갈라진다 — 코드가 막는다.
+#   구워진 산출물을 실제로 열어보고 다르면 여기서 세운다(헌법 #19 "그냥 되어야 한다").
+Write-Host ""
+Write-Host "  → 버전 정합 게이트 (산출물 실측)..." -ForegroundColor Yellow
+$expectedVer = "$Version.0"   # AssemblyVersion 은 Directory.Build.props 에서 x.y.z.0 으로 스탬핑된다
+$versionTargets = @(
+    @{ Name = "API";      Path = "$BundleDir/api/HitPan.API.dll" },
+    @{ Name = "Watchdog"; Path = "$BundleDir/watchdog/HitPan.Watchdog.dll" }
+)
+foreach ($t in $versionTargets) {
+    if (-not (Test-Path $t.Path)) {
+        Write-Host "    ⏭ $($t.Name): 산출물 없음(스킵) — $($t.Path)" -ForegroundColor DarkGray
+        continue
+    }
+    $actual = (Get-Item $t.Path).VersionInfo.FileVersion
+    if ($actual -ne $expectedVer) {
+        Write-Error @"
+버전 정합 게이트 실패 — $($t.Name) 어셈블리가 요청한 버전과 다릅니다.
+  요청(-Version):  $Version  (기대 FileVersion: $expectedVer)
+  실제 산출물:     $actual
+  파일:            $($t.Path)
+
+원인 후보: publish 단계에 -p:HitPanVersion=`$Version 주입이 빠졌거나, 옛 산출물이 남아 있습니다.
+이대로 출하하면 EXE 이름은 $Version 인데 프로그램은 자기를 $actual 이라 말해,
+본사 모니터링·자동 업데이트 판정이 전부 어긋납니다(무한 재적용 위험). 출하를 차단합니다.
+"@
+        exit 1
+    }
+    Write-Host "    ✅ $($t.Name): $actual" -ForegroundColor Green
 }
 
 $outputName = "HitPan-ERP-Setup-$Version"

@@ -55,9 +55,41 @@ public class UpdateVersionCompareTests
     }
 
     /// <summary>
+    /// 표기 자릿수가 달라도 같은 버전은 같게 본다 — 무한 재적용 차단 (검증팀 F-4 적발).
+    ///
+    /// Version.TryParse 는 "1.2.34" 의 Revision 을 -1, "1.2.34.0" 을 0 으로 둔다. 정규화가 없으면
+    /// 0 > -1 이라 같은 버전이 "상위"로 판정돼, 이미 최신인 PC 가 같은 버전을 영원히 재적용한다.
+    /// Directory.Build.props 가 AssemblyVersion 을 x.y.z.0 으로 굽기 때문에 실수로 밟기 쉬운 함정이다.
+    /// </summary>
+    [Theory]
+    [InlineData("1.2.34.0", "1.2.34")]   // manifest 에 어셈블리 표기(4자리)를 복사한 경우
+    [InlineData("1.2.34", "1.2.34.0")]   // 반대 방향
+    [InlineData("1.2.0", "1.2")]         // 2자리 표기 = Build 미지정
+    public void 표기만_다른_같은_버전은_진행하지_않는다(string feed, string current)
+    {
+        Assert.False(UpdateClient.IsNewerVersion(feed, current, out var reason));
+        Assert.Contains("최신 버전 유지", reason);
+    }
+
+    [Theory]
+    [InlineData("1.2.35.0", "1.2.34")]   // 4자리 표기라도 진짜 상위면 진행
+    [InlineData("1.3", "1.2.34")]        // 2자리 표기 상위 (1.3.0 > 1.2.34)
+    public void 표기가_달라도_진짜_상위면_진행한다(string feed, string current)
+    {
+        Assert.True(UpdateClient.IsNewerVersion(feed, current, out _));
+    }
+
+    /// <summary>
     /// 어셈블리 버전 스탬핑(Directory.Build.props)이 실제로 걸렸는지 — 1.0.0 고정 회귀 차단.
     /// 이게 깨지면 워치독이 자기 버전을 1.0.0 으로 착각해 모든 manifest 를 "새 버전"으로 받아들인다
     /// (= 위 다운그레이드 방어가 통째로 무력화된다. W4-0 과 서명은 곱해진다).
+    ///
+    /// ⚠️ 이 테스트의 역사 (검증팀 F-3 적발, 2026-07-16)
+    ///   초판은 VersionInfo 가 GetEntryAssembly() 를 쓰던 탓에 테스트에서 testhost(15.0.0)를 읽었다.
+    ///   그래서 "!=0.0.0, !=1.0.0" 단언이 testhost 버전으로 전부 통과했고, 스탬핑을 통째로 지워도
+    ///   초록이었다 — 회귀 차단이라 이름 붙인 보호막이 아무것도 막지 않았다.
+    ///   VersionInfo 가 typeof(VersionInfo).Assembly 를 보도록 고친 뒤에야 이 테스트가 실제로 워치독
+    ///   어셈블리를 검증한다. 아래 단언이 그 사실 자체를 고정한다(호스트 버전을 읽으면 실패한다).
     /// </summary>
     [Fact]
     public void 워치독_버전이_어셈블리에서_스탬핑된다()
@@ -67,5 +99,10 @@ public class UpdateVersionCompareTests
         Assert.NotEqual("0.0.0", v);   // 어셈블리를 못 읽은 상태
         Assert.NotEqual("1.0.0", v);   // 스탬핑 누락 시 .NET 기본값
         Assert.True(Version.TryParse(v, out _), $"버전 형식이 Major.Minor.Build 가 아님: '{v}'");
+
+        // VersionInfo 가 호스트(testhost 등)가 아니라 '워치독 어셈블리'를 읽는지 고정.
+        // 이 단언이 없으면 F-3(호스트 버전을 읽어 무의미하게 통과)이 조용히 재발한다.
+        var watchdogAsmVer = typeof(VersionInfo).Assembly.GetName().Version!;
+        Assert.Equal($"{watchdogAsmVer.Major}.{watchdogAsmVer.Minor}.{watchdogAsmVer.Build}", v);
     }
 }

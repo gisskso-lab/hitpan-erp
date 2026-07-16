@@ -192,7 +192,8 @@ public class SignupsAdminController : ControllerBase
             if (!string.IsNullOrWhiteSpace(customerEmail))
             {
                 var subject = "[히트판 ERP] 가입 승인 완료 — 시리얼 키와 ERP 주소를 안내드립니다";
-                var htmlBody = BuildLicenseKeyEmailBody(companyName, licenseKey, domainAlias);
+                var (installerVersion, downloadUrl) = ResolveReleaseInfo();
+                var htmlBody = BuildLicenseKeyEmailBody(companyName, licenseKey, domainAlias, installerVersion, downloadUrl);
                 emailSent = await _email.SendAsync(customerEmail, subject, htmlBody, ct);
                 if (emailSent)
                     _logger.LogInformation("[SignupsAdmin] license_email sent to={Email} signupId={Id}", customerEmail, signupId);
@@ -273,7 +274,8 @@ public class SignupsAdminController : ControllerBase
             if (!string.IsNullOrWhiteSpace(customerEmail))
             {
                 var subject = "[히트판 ERP] 시리얼 키 재발급 안내 (이전 시리얼은 무효화됩니다)";
-                var htmlBody = BuildLicenseKeyEmailBody(companyName, licenseKey, domainAlias);
+                var (installerVersion, downloadUrl) = ResolveReleaseInfo();
+                var htmlBody = BuildLicenseKeyEmailBody(companyName, licenseKey, domainAlias, installerVersion, downloadUrl);
                 emailSent = await _email.SendAsync(customerEmail, subject, htmlBody, ct);
             }
 
@@ -354,11 +356,40 @@ public class SignupsAdminController : ControllerBase
 
     // 시리얼 키 메일 HTML 본문 — 사장님 결재 2026-06-08, 2026-06-09 도메인 저장
     // 헌법 정합: #22 (테넌트 코드 노출 금지, 도메인 별칭만 저장) / #25 쉽게 / #34 정식 출시 시 발신자 환경변수 교체
-    private static string BuildLicenseKeyEmailBody(string companyName, string licenseKey, string? domainAlias)
+    /// <summary>
+    /// 고객에게 안내할 출하 버전·다운로드 주소를 설정에서 읽는다 (2026-07-16, 작1 W4-0 — 검증팀 F-5 적발).
+    ///
+    /// 왜 설정인가: 종전엔 이 메일 본문에 "1.2.28" 이 세 곳(링크·표기·설치 안내)에 손으로 적혀 있었다.
+    ///   실배포가 1.2.33 으로 올라가는 동안 이 값은 그대로 남아, 가입 승인 메일을 받은 고객이
+    ///   1.2.28 을 설치했다 — 로그인 500(users.role enum) 진범이 살아있는 버전이라 로그인 자체가 불가능했다.
+    ///   랜딩 다운로드 페이지(1.2.33)와 메일(1.2.28)이 각각 손으로 적혀 갈라진 게 원인이다.
+    ///   버전을 코드에 적는 한 같은 사고가 반복되므로, 배포 때 바뀌는 값은 설정에서 읽는다.
+    ///
+    /// 값이 없으면 예외를 던진다(침묵 금지, 헌법 #15) — 잘못된 버전을 조용히 안내하느니
+    ///   메일 발송이 실패해 운영자가 즉시 알아차리는 편이 안전하다.
+    /// </summary>
+    private (string version, string downloadUrl) ResolveReleaseInfo()
+    {
+        var version = _config["Release:InstallerVersion"];
+        if (string.IsNullOrWhiteSpace(version))
+            throw new InvalidOperationException(
+                "Release:InstallerVersion 미설정 — 고객에게 안내할 설치 파일 버전을 알 수 없어 메일을 보내지 않습니다. " +
+                "appsettings 또는 환경변수 BACKOFFICE_Release__InstallerVersion 을 설정하세요.");
+
+        var baseUrl = (_config["Release:DownloadBaseUrl"] ?? "https://updates.hitpan.kr/packages").TrimEnd('/');
+        return (version, $"{baseUrl}/HitPan-ERP-Setup-{version}.exe");
+    }
+
+    private static string BuildLicenseKeyEmailBody(
+        string companyName, string licenseKey, string? domainAlias,
+        string installerVersion, string downloadUrl)
     {
         var safeCompany = System.Net.WebUtility.HtmlEncode(companyName ?? "");
         var safeKey = System.Net.WebUtility.HtmlEncode(licenseKey ?? "");
         var safeDomain = System.Net.WebUtility.HtmlEncode(domainAlias ?? "");
+        // 설정에서 온 값도 그대로 HTML 에 넣지 않는다 — 출처가 우리 설정이어도 인코딩은 습관으로 지킨다.
+        var safeVersion = System.Net.WebUtility.HtmlEncode(installerVersion);
+        var safeDownloadUrl = System.Net.WebUtility.HtmlEncode(downloadUrl);
         var domainBlock = string.IsNullOrWhiteSpace(domainAlias)
             ? ""
             : $@"
@@ -401,17 +432,17 @@ public class SignupsAdminController : ControllerBase
 
     <div style=""background:#FEF3C7;border:2px solid #F59E0B;border-radius:12px;padding:24px;margin:24px 0;text-align:center;"">
       <p style=""margin:0 0 12px;color:#92400E;font-size:14px;font-weight:700;"">📥 설치 파일 다운로드</p>
-      <a href=""https://updates.hitpan.kr/packages/HitPan-ERP-Setup-1.2.28.exe""
+      <a href=""{safeDownloadUrl}""
          style=""display:inline-block;background:#0F6E56;color:#fff;padding:14px 32px;border-radius:8px;font-size:15px;font-weight:700;text-decoration:none;"">
         히트판 ERP 설치 프로그램 (280 MB)
       </a>
-      <p style=""margin:12px 0 0;color:#92400E;font-size:12px;"">버전 1.2.28 · Windows 10/11 (64bit)</p>
+      <p style=""margin:12px 0 0;color:#92400E;font-size:12px;"">버전 {safeVersion} · Windows 10/11 (64bit)</p>
     </div>
 
     <h2 style=""font-size:16px;margin:24px 0 12px;color:#0F1419;"">설치 방법 (10분 소요)</h2>
     <ol style=""margin:0 0 16px 20px;padding:0;font-size:14px;line-height:1.8;color:#374151;"">
       <li>위 [히트판 ERP 설치 프로그램] 버튼을 클릭하여 파일을 다운로드합니다.</li>
-      <li>다운로드된 <code style=""background:#F3F4F6;padding:2px 6px;border-radius:4px;font-family:monospace;"">HitPan-ERP-Setup-1.2.28.exe</code> 파일을 <strong>마우스 우클릭 → 관리자 권한으로 실행</strong>합니다.</li>
+      <li>다운로드된 <code style=""background:#F3F4F6;padding:2px 6px;border-radius:4px;font-family:monospace;"">HitPan-ERP-Setup-{safeVersion}.exe</code> 파일을 <strong>마우스 우클릭 → 관리자 권한으로 실행</strong>합니다.</li>
       <li>설치 마법사 첫 화면에서 위 시리얼 키를 정확히 입력합니다.</li>
       <li>이후 모든 과정(데이터베이스·통신연결·자동 시작)은 자동으로 진행됩니다.</li>
       <li>설치 완료 후 브라우저가 자동으로 열리며, 본인 ERP 주소로 접속됩니다.</li>

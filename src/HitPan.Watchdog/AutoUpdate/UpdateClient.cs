@@ -111,12 +111,12 @@ public sealed class UpdateClient : IUpdateClient
     /// <param name="reason">판정 사유(로그·테스트용). 통과 시 null.</param>
     public static bool IsNewerVersion(string feedVersion, string currentVersion, out string? reason)
     {
-        if (!Version.TryParse(feedVersion, out var feed))
+        if (!TryParseThreePart(feedVersion, out var feed))
         {
             reason = $"manifest 버전 형식을 해석할 수 없습니다: '{feedVersion}'";
             return false;
         }
-        if (!Version.TryParse(currentVersion, out var current))
+        if (!TryParseThreePart(currentVersion, out var current))
         {
             reason = $"현재 설치 버전 형식을 해석할 수 없습니다: '{currentVersion}'";
             return false;
@@ -134,6 +134,30 @@ public sealed class UpdateClient : IUpdateClient
         }
 
         reason = null;
+        return true;
+    }
+
+    /// <summary>
+    /// 버전 문자열을 Major.Minor.Build 3자리로 정규화해 파싱한다 (2026-07-16, 작1 W4-0 — 검증팀 F-4 적발).
+    ///
+    /// 왜 정규화가 필요한가:
+    ///   Version.TryParse 는 자릿수를 그대로 보존해 "1.2.34" 는 Revision=-1, "1.2.34.0" 은 Revision=0 이 된다.
+    ///   그래서 0 > -1 이 되어 같은 버전인 "1.2.34.0"(어셈블리 표기) 이 "1.2.34"(설치 버전)보다
+    ///   높다고 판정됐다 — manifest 에 어셈블리 버전을 그대로 복사해 넣으면 이미 최신인 PC 가
+    ///   같은 버전을 무한 재적용한다. Directory.Build.props 가 AssemblyVersion 을 x.y.z.0 으로 굽기 때문에
+    ///   현실적으로 밟기 쉬운 함정이다.
+    ///   우리 버전 체계는 Major.Minor.Build 3자리이므로(VersionInfo.Current), Revision 은 의미 없는 자리다.
+    ///   비교 전에 3자리로 잘라 "표기 차이"가 "버전 차이"로 둔갑하지 않게 한다.
+    ///
+    /// 2자리("1.2")도 Version 은 파싱하지만 Build=-1 이 되므로 0 으로 보정한다("1.2" == "1.2.0").
+    /// </summary>
+    private static bool TryParseThreePart(string? text, out Version normalized)
+    {
+        normalized = new Version(0, 0, 0);
+        if (!Version.TryParse(text, out var v)) return false;
+
+        // Build 가 미지정(-1)이면 0 으로. Revision 은 버린다.
+        normalized = new Version(v.Major, v.Minor, Math.Max(v.Build, 0));
         return true;
     }
 

@@ -26,16 +26,22 @@ public static class VersionInfo
 {
     /// <summary>
     /// 현재 워치독 설치 버전 ("Major.Minor.Build").
-    /// 어셈블리에서 버전을 못 읽는 비정상 상황에서는 "0.0.0" 을 반환한다
-    /// — 0.0.0 은 어떤 manifest 버전보다도 낮아, SemVer 비교에서 "새 버전 있음"으로 판정된다.
-    ///   즉 판정 불능 시 업데이트를 막지 않는 쪽(fail-open)이 아니라, 사람이 이상을 알아채는 값이다.
+    ///
+    /// ■ 왜 GetEntryAssembly() 가 아니라 typeof(VersionInfo).Assembly 인가 (2026-07-16, 검증팀 F-3 적발)
+    ///   GetEntryAssembly() 는 "지금 프로세스를 시작시킨 어셈블리"라, 워치독 코드가 다른 호스트 위에서
+    ///   돌면 그 호스트의 버전을 반환한다. 실제로 테스트 실행 중에는 testhost(15.0.0)를 반환했고,
+    ///   그 탓에 "스탬핑 회귀 차단" 테스트가 스탬핑을 통째로 지워도 초록으로 통과했다(보호막이 허상이었다).
+    ///   우리가 알고 싶은 건 "이 워치독 코드가 담긴 어셈블리의 버전"이므로, 그 어셈블리를 직접 지목한다.
+    ///   호스트가 무엇이든 답이 흔들리지 않는다.
+    ///
+    /// ■ 못 읽으면 "0.0.0"
+    ///   어떤 manifest 버전보다도 낮은 값이라 사람이 이상을 즉시 알아챈다.
     /// </summary>
     public static string Current
     {
         get
         {
-            var asm = Assembly.GetEntryAssembly() ?? Assembly.GetExecutingAssembly();
-            var v = asm.GetName().Version;
+            var v = typeof(VersionInfo).Assembly.GetName().Version;
             return v is null ? "0.0.0" : $"{v.Major}.{v.Minor}.{v.Build}";
         }
     }

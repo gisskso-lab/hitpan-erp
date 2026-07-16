@@ -53,6 +53,11 @@ jobs:
           "version=$v" >> $env:GITHUB_OUTPUT
           Write-Host "Version resolved: $v"
 
+      # 봉합 (2026-07-16, 작1 W4-0 — 검증팀 F-1 적발): 종전엔 -p:HitPanVersion 주입이 없어
+      #   인스톨러만 /DAppVersion 으로 새 버전을 받고 어셈블리는 Directory.Build.props 폴백에 머물렀다.
+      #   그 결과 "인스톨러 1.2.35 / 어셈블리·health·메타핑 1.2.34" 로 갈라져,
+      #   이미 1.2.35 가 깔린 PC 가 1.2.35 를 새 버전으로 착각해 무한 재적용한다.
+      #   릴리스 경로에서 버전 출처를 하나로 묶으려면 publish 에도 반드시 같은 값을 주입해야 한다.
       - name: Publish ERP API (single-file)
         run: |
           dotnet publish src/HitPan.API/HitPan.API.csproj `
@@ -60,6 +65,7 @@ jobs:
             -r win-x64 `
             --self-contained false `
             -p:PublishSingleFile=true `
+            -p:HitPanVersion=${{ steps.ver.outputs.version }} `
             -o installer/payload/api
         shell: pwsh
 
@@ -67,6 +73,7 @@ jobs:
         run: |
           dotnet publish src/HitPan.Web/HitPan.Web.csproj `
             -c Release `
+            -p:HitPanVersion=${{ steps.ver.outputs.version }} `
             -o installer/payload/web
         shell: pwsh
 

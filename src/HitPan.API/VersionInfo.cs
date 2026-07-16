@@ -23,14 +23,21 @@ public static class VersionInfo
 {
     /// <summary>
     /// 현재 ERP 설치 버전 ("Major.Minor.Build", 예: "1.2.34").
-    /// 어셈블리에서 못 읽는 비정상 상황은 "0.0.0" — 사람이 이상을 즉시 알아채는 값이다.
+    ///
+    /// ■ 왜 GetEntryAssembly() 가 아니라 typeof(VersionInfo).Assembly 인가 (2026-07-16, 검증팀 F-3 적발)
+    ///   GetEntryAssembly() 는 "지금 프로세스를 시작시킨 어셈블리"를 반환한다. 워치독 쪽에서 이 방식이
+    ///   테스트 호스트(testhost 15.0.0)를 읽어 검증을 무력화한 사례가 실측으로 확인됐다.
+    ///   API 는 schtasks 가 HitPan.API.exe 를 직접 실행하므로 현재는 문제가 없으나, 단일파일 publish·
+    ///   호스트 변경 같은 환경 변화에 답이 흔들리면 안 되는 값이다(이 값으로 업데이트 성공을 판정한다).
+    ///   "이 코드가 담긴 어셈블리"를 직접 지목해 환경과 무관하게 같은 답을 준다.
+    ///
+    /// ■ 못 읽으면 "0.0.0" — 사람이 이상을 즉시 알아채는 값이다.
     /// </summary>
     public static string Current
     {
         get
         {
-            var asm = Assembly.GetEntryAssembly() ?? Assembly.GetExecutingAssembly();
-            var v = asm.GetName().Version;
+            var v = typeof(VersionInfo).Assembly.GetName().Version;
             return v is null ? "0.0.0" : $"{v.Major}.{v.Minor}.{v.Build}";
         }
     }
