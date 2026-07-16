@@ -50,4 +50,48 @@ public class UpdateProcessGateTests
     [Fact]
     public void 부팅_복원_안전망_작업명이_고정돼_있다()
         => Assert.Equal("HitPan-ERP-keepalive-restore", UpdateProcessGate.RestoreTaskName);
+
+    // ─── schtasks 출력 파싱 (③ 자가점검의 판정 근거) ────────────────────────────
+    //
+    // 왜 이 테스트가 필요한가 (검증팀 R-3 적발):
+    //   schtasks 출력은 OS 표시 언어를 따르는데, 개발 PC 와 CI 는 영어라 한국어 분기를 아무도 밟지 않는다.
+    //   문자열이 틀려도 테스트가 통과해 회귀를 못 잡는다 — 고객 PC 는 대부분 한국어 Windows 다.
+    //   틀리면 ③ 자가점검이 "꺼진 keepalive"를 영원히 못 알아보고, ERP 가 안 뜬 채 방치된다.
+    //   ※ 아래 한국어 출력은 검증팀이 ko-KR 실제 렌더링으로 확인한 문자열이다(띄어쓰기 포함).
+
+    [Fact]
+    public void 영어_Windows에서_사용안함을_알아본다()
+    {
+        var output = @"
+폴더: \
+TaskName:                             \HitPan-ERP-API-keepalive-1
+Next Run Time:                        N/A
+Status:                               Disabled
+";
+        Assert.True(UpdateProcessGate.ParseIsDisabled(output));
+    }
+
+    [Fact]
+    public void 한국어_Windows에서_사용안함을_알아본다()
+    {
+        var output = @"
+폴더: \
+TaskName:                             \HitPan-ERP-API-keepalive-1
+다음 실행 시간:                       N/A
+상태:                                 사용 안 함
+";
+        Assert.True(UpdateProcessGate.ParseIsDisabled(output));
+    }
+
+    [Theory]
+    [InlineData("Status:  Ready")]           // 영어 — 정상 가동
+    [InlineData("상태:    준비")]             // 한국어 — 정상 가동
+    [InlineData("Status:  Running")]
+    [InlineData("")]
+    public void 정상_가동_상태를_사용안함으로_오판하지_않는다(string output)
+    {
+        // 오판하면 자가점검이 멀쩡한 keepalive 를 건드린다(무해하나 로그 소음).
+        // 진짜 위험은 반대 방향이라 이쪽은 오탐만 막으면 된다.
+        Assert.False(UpdateProcessGate.ParseIsDisabled(output));
+    }
 }

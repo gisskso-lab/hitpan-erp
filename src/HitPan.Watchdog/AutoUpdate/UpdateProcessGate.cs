@@ -112,8 +112,12 @@ public sealed class UpdateProcessGate
     /// <summary>
     /// keepalive 를 되살린다. try/finally 에서 무조건 호출한다(① 보장).
     /// 성공·실패·롤백 어느 경로든 ERP 는 살아나야 한다 — 이 메서드는 예외를 던지지 않는다.
+    ///
+    /// 반환값이 중요하다(검증팀 R-3 적발): 호출부는 이 값이 true 일 때만 ② 안전망을 제거해야 한다.
+    ///   복원에 실패했는데 안전망까지 지우면 ①·② 가 동시에 사라져 3중이 1중으로 무너진다.
     /// </summary>
-    public void RestoreKeepalive(int slot)
+    /// <returns>API·Web keepalive 를 모두 되살렸으면 true.</returns>
+    public bool RestoreKeepalive(int slot)
     {
         // /ENABLE 은 멱등이다 — 이미 켜져 있어도 성공이며 부작용이 없다.
         //   따라서 중복 호출(② 안전망과 겹치는 경우 등)은 무해하다. 반대(안 켜짐)만이 사고다.
@@ -121,12 +125,16 @@ public sealed class UpdateProcessGate
         var w = RunSchtasks($"/Change /TN \"{WebKeepalive(slot)}\" /ENABLE", "keepalive(Web) 복원");
 
         if (a && w)
+        {
             _logger.LogInformation("[Update/Gate] keepalive 복원 완료(슬롯 {Slot}) — ERP 자동 유지가 다시 작동합니다.", slot);
-        else
-            // 헌법 #15: 여기가 조용히 실패하면 ERP 가 영영 안 뜬다. 반드시 흔적을 남긴다.
-            _logger.LogError("[Update/Gate] ⚠️ keepalive 복원 실패(API={A}, Web={W}, 슬롯 {Slot}) — " +
-                             "재부팅 시 '{Task}' 작업이 자동 복원합니다. 워치독 재기동 시에도 자가 점검이 재시도합니다.",
-                             a, w, slot, RestoreTaskName);
+            return true;
+        }
+
+        // 헌법 #15: 여기가 조용히 실패하면 ERP 가 영영 안 뜬다. 반드시 흔적을 남긴다.
+        _logger.LogError("[Update/Gate] ⚠️ keepalive 복원 실패(API={A}, Web={W}, 슬롯 {Slot}) — " +
+                         "'{Task}' 안전망을 남겨둡니다. 재부팅 1회로 자동 복원되며, 워치독 재기동 시 자가 점검도 재시도합니다.",
+                         a, w, slot, RestoreTaskName);
+        return false;
     }
 
     /// <summary>정상 완료 후 ② 안전망을 정리한다. 남아 있어도 무해하지만(멱등 /ENABLE), 흔적을 남기지 않는다.</summary>
@@ -168,14 +176,29 @@ public sealed class UpdateProcessGate
 
             _logger.LogWarning("[Update/Gate] 🔧 keepalive 가 꺼진 채 방치돼 있습니다(업데이트 흔적 없음) — " +
                                "중단된 업데이트의 잔재로 보고 즉시 복원합니다. 복원하지 않으면 ERP 가 다시 뜨지 않습니다.");
-            RestoreKeepalive(slot.Value);
-            RemoveRestoreSafetyNet();
+            // 복원에 성공했을 때만 안전망을 치운다(검증팀 R-3 정합) — 실패했으면 재부팅 복원망을 남겨야 한다.
+            if (RestoreKeepalive(slot.Value)) RemoveRestoreSafetyNet();
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "[Update/Gate] keepalive 자가 점검 중 예외 — 워치독 기동은 계속합니다.");
         }
     }
+
+    /// <summary>
+    /// schtasks /Query /FO LIST 출력이 '사용 안 함(Disabled)' 상태를 가리키는지 판정한다.
+    ///
+    /// 왜 순수 함수로 분리했나 (검증팀 R-3 적발): schtasks 출력은 OS 표시 언어를 따른다.
+    ///   개발 PC 와 CI 는 영어라 한국어 분기('사용 안 함')를 **아무도 밟지 않는다** — 문자열이 틀려도
+    ///   테스트가 통과해 회귀를 못 잡는다(W4-0 에서 겪은 "보호막이 허상" 사고와 같은 병).
+    ///   실제 프로세스 실행에서 떼어내 두 로케일 출력을 모두 테스트로 고정한다.
+    ///   ※ 한국어 표기 '사용 안 함'(띄어쓰기 포함)은 ko-KR 실제 출력으로 검증팀이 확인했다.
+    /// </summary>
+    public static bool ParseIsDisabled(string queryOutput)
+        => queryOutput.Contains("Disabled", StringComparison.OrdinalIgnoreCase)
+           || queryOutput.Contains("사용 안 함", StringComparison.Ordinal)
+           // 표기 흔들림 대비(띄어쓰기 없는 변형). 오탐 위험은 없다 — Enabled 는 'Ready/준비'로 나온다.
+           || queryOutput.Contains("사용 안함", StringComparison.Ordinal);
 
     /// <summary>예약작업이 '사용 안 함' 상태인지 확인한다. 조회 실패 시 false(모르면 건드리지 않는다).</summary>
     private bool IsTaskDisabled(string taskName)
@@ -198,9 +221,7 @@ public sealed class UpdateProcessGate
             p.WaitForExit(10000);
             if (p.ExitCode != 0) return false;   // 작업 자체가 없음 — 이 메서드가 다룰 상황이 아니다.
 
-            // schtasks 는 OS 언어에 따라 'Disabled' 또는 '사용 안 함'을 출력한다. 둘 다 본다.
-            return outText.Contains("Disabled", StringComparison.OrdinalIgnoreCase)
-                   || outText.Contains("사용 안 함", StringComparison.Ordinal);
+            return ParseIsDisabled(outText);
         }
         catch (Exception ex)
         {

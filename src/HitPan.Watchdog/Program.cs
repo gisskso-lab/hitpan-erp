@@ -17,6 +17,16 @@ builder.Services.AddWindowsService(opts =>
     opts.ServiceName = "HitPanWatchdog";
 });
 
+// 고정 (2026-07-16, 작1 W4-1 — 검증팀 R-1 적발): Worker(ExecuteAsync)가 예외로 죽으면 호스트를 내린다.
+//   왜 명시하나: 이 값은 .NET 8 기본값이지만, W4-1 의 ③ 자가 점검(기동 시 keepalive 복원)이
+//   이 동작에 통째로 기대고 있다. 만약 Ignore 로 바뀌면 —
+//     ExecuteAsync 만 죽고 프로세스는 살아남는다 → sc failure(5초)가 안 뛴다(프로세스가 살아있으니까)
+//     → 워치독이 재기동되지 않는다 → ③ 이 영원히 안 돈다
+//     → 업데이트 중 죽어 keepalive 가 꺼진 상태면 ERP 가 영영 안 뜬다.
+//   즉 "기본값에 우연히 기댄 안전망"이라 명시로 고정한다. 이 줄을 지우지 말 것.
+builder.Services.Configure<HostOptions>(o =>
+    o.BackgroundServiceExceptionBehavior = BackgroundServiceExceptionBehavior.StopHost);
+
 EnsureEventSource("HitPanWatchdog");
 
 builder.Logging.AddEventLog(opts => { opts.SourceName = "HitPanWatchdog"; });

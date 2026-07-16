@@ -141,8 +141,13 @@ public sealed class UpdateOrchestrator
         {
             // ① 무조건 복원 — 정상·예외·중단 어느 경로든 ERP 는 살아나야 한다.
             //   ② 부팅 안전망과 ③ 자가 점검이 이 뒤를 받치지만, 정상 경로는 여기서 끝내는 게 맞다.
-            _gate.RestoreKeepalive(slot.Value);
-            _gate.RemoveRestoreSafetyNet();
+            //
+            //   봉합 (2026-07-16, 검증팀 R-3 적발): 종전엔 복원 성공 여부와 무관하게 안전망을 지웠다.
+            //     복원이 실패했는데 부팅 복원망까지 지우면 ①·② 가 동시에 사라져 3중이 1중이 된다.
+            //     복원에 성공했을 때만 치운다 — 실패 시엔 남겨야 재부팅 1회로 ERP 가 살아난다
+            //     (남아도 /ENABLE 은 멱등이라 무해하다).
+            var restored = _gate.RestoreKeepalive(slot.Value);
+            if (restored) _gate.RemoveRestoreSafetyNet();
             _lock.Release();
 
             // 교체 후 ERP 를 다시 띄우는 건 W4-4 다. 그때까지는 keepalive 가 1분 내에 되살린다
