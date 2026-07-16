@@ -54,6 +54,8 @@ public class IntegrationLoopTests
         //   이 테스트가 47일간 실패 상태였다(Worker 조립 불가 → DI 검증이라는 이 테스트의 목적 자체가 무력화).
         builder.Services.AddSingleton<IUpdateClient, UpdateClient>();
         builder.Services.AddSingleton<WatchdogBackupRunner>();
+        builder.Services.AddSingleton<UpdateLockFile>();
+        builder.Services.AddSingleton<UpdateProcessGate>();
         builder.Services.AddSingleton<UpdateOrchestrator>();
         builder.Services.AddSingleton<WatchdogConsentReader>();
         builder.Services.AddSingleton<WatchdogStatusWriter>();

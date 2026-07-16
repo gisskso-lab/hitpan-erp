@@ -17,14 +17,24 @@ public sealed class UpdateOrchestrator
     private readonly IUpdateClient _client;
     private readonly ILogger<UpdateOrchestrator> _logger;
     private readonly WatchdogBackupRunner _backup;
+    private readonly UpdateProcessGate _gate;
+    private readonly UpdateLockFile _lock;
     private readonly string _stagingDir;
 
     // 봉합 (2026-06-29, 작1 고리3): 백업 실행기를 주입받는다(없으면 컴파일 깨지지 않게 신규 인자 추가만 — 헌법 #1).
-    public UpdateOrchestrator(IUpdateClient client, ILogger<UpdateOrchestrator> logger, WatchdogBackupRunner backup)
+    // 봉합 (2026-07-16, 작1 W4-1): 교체 구간 정지·복원 게이트와 진행 표식을 주입받는다(추가만).
+    public UpdateOrchestrator(
+        IUpdateClient client,
+        ILogger<UpdateOrchestrator> logger,
+        WatchdogBackupRunner backup,
+        UpdateProcessGate gate,
+        UpdateLockFile lockFile)
     {
         _client = client;
         _logger = logger;
         _backup = backup;
+        _gate = gate;
+        _lock = lockFile;
         _stagingDir = Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
             "HitPan", "Updates", "staging");
@@ -99,14 +109,45 @@ public sealed class UpdateOrchestrator
 
         _logger.LogInformation("[Update] 백업 성공 확인({Backup}) — 적용 단계 진입 가능: {V}", backupFile, manifest.Version);
 
-        // 4) ===== 고리4 자리표시 (본 작업 범위 밖) =====
-        //   여기서 Velopack 실제 적용(원자적 EXE 교체 → 재시작) + DB ALTER 마이그 실행.
-        //   마이그 실패 시 위 backupFile 로 DB+EXE 자동 복원(롤백) → 구버전 무손상 복구.
-        //   현재는 VelopackUpdaterStub(no-op) 유지 — 실제 ApplyUpdatesAndRestart 호출 안 함.
-        //   고리4 설계 완료 후 이 자리에 실 적용 코드를 추가한다(헌법 #1 추가만, #34 정식 완성도).
-        _logger.LogWarning("[Update] 고리4(Velopack 실 적용·마이그 롤백) 미구현 — 백업까지만 수행하고 적용 보류({V})", manifest.Version);
+        // 4) ===== W4-1 (2026-07-16, 사장님 결재): 교체 구간 정지·복원 =====
+        //   여기부터 ERP 를 멈추고 파일을 바꾼다. 이 구간의 최대 위험은 "keepalive 가 꺼진 채 남아
+        //   ERP 가 영영 안 뜨는 것"이라, 어떤 경로로 끝나든 반드시 복원되게 감싼다(① 보장).
+        var slot = _gate.ResolveSlot();
+        if (slot is null)
+        {
+            _logger.LogError("[Update] 🛑 슬롯을 판정하지 못해 적용을 중단합니다 — 구버전 그대로 유지({V})", manifest.Version);
+            return false;
+        }
 
-        return true;
+        _lock.Acquire(manifest.Version);
+        try
+        {
+            if (!await _gate.StopForSwapAsync(slot.Value, ct))
+            {
+                // 사유는 StopForSwapAsync 가 이미 기록했다. 아직 아무것도 안 바꿨으므로 구버전 무손상.
+                _logger.LogError("[Update] 🛑 교체 준비 실패 — 적용을 중단합니다. 구버전 그대로 유지({V})", manifest.Version);
+                return false;
+            }
+
+            // ===== W4-2~W4-5 자리 (다음 작업 범위) =====
+            //   여기서 파일 교체(web→api 순) → 재기동 → 헬스폴링 2중 판정 → 실패 시 롤백.
+            //   지금은 정지·복원 골격만 세운 상태다. 교체 코드가 붙기 전까지는 아무것도 바꾸지 않고
+            //   그대로 되돌린다 — 반쯤 적용된 상태를 만들지 않는다(헌법 #20).
+            _logger.LogWarning("[Update] W4-2(파일 교체)~W4-5(롤백) 미구현 — 정지까지만 수행하고 원상 복구합니다({V})", manifest.Version);
+
+            return true;
+        }
+        finally
+        {
+            // ① 무조건 복원 — 정상·예외·중단 어느 경로든 ERP 는 살아나야 한다.
+            //   ② 부팅 안전망과 ③ 자가 점검이 이 뒤를 받치지만, 정상 경로는 여기서 끝내는 게 맞다.
+            _gate.RestoreKeepalive(slot.Value);
+            _gate.RemoveRestoreSafetyNet();
+            _lock.Release();
+
+            // 교체 후 ERP 를 다시 띄우는 건 W4-4 다. 그때까지는 keepalive 가 1분 내에 되살린다
+            //   (교체를 안 했으므로 구버전이 그대로 뜬다).
+        }
     }
 
     public bool IsNightWindow(DateTime now)

@@ -44,6 +44,13 @@ builder.Services.AddSingleton<MetaPingClient>();
 //   UpdateOrchestrator → 채널 분기 평가 + 백업 실패 물리적 차단(고리3).
 builder.Services.AddSingleton<IUpdateClient, UpdateClient>();
 builder.Services.AddSingleton<WatchdogBackupRunner>();
+
+// 봉합 (2026-07-16, 작1 W4-1 — 사장님 결재): 교체 구간 정지·복원 게이트 + 진행 표식.
+//   keepalive(1분 주기)가 교체 중 ERP 를 되살려 파일을 잠그는 것을 막고, 워치독이 도중에 죽어도
+//   ERP 가 영영 안 뜨는 사고를 3중으로 방어한다(finally 복원 / 부팅 안전망 / 기동 시 자가 점검).
+builder.Services.AddSingleton<UpdateLockFile>();
+builder.Services.AddSingleton<UpdateProcessGate>();
+
 builder.Services.AddSingleton<UpdateOrchestrator>();
 
 // 봉합 (2026-06-29, 작1 고리2 워치독 측 — 로컬 동의 리더):

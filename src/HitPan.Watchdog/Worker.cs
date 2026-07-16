@@ -50,6 +50,9 @@ public class Worker : BackgroundService
     // 봉합 (2026-06-29, 작1 고리2 마지막 빈 칸): 발견한 Major 새버전을 로컬 DB(local_update_status, DB-83)에
     //   적재하는 라이터. ERP 가 로그인 시 그 행을 읽어 Y/N 동의 팝업을 노출한다(A안, 헌법 #30 본사 의존 0).
     private readonly WatchdogStatusWriter _statusWriter;
+    // W4-1 (2026-07-16): 교체 구간 정지·복원 게이트 + 진행 표식. 기동 시 자가 점검(③ 보장)에 쓴다.
+    private readonly UpdateProcessGate _updateGate;
+    private readonly UpdateLockFile _updateLock;
 
     public Worker(
         ILogger<Worker> logger,
@@ -64,7 +67,9 @@ public class Worker : BackgroundService
         MetaPingClient meta,
         UpdateOrchestrator update,
         WatchdogConsentReader consent,
-        WatchdogStatusWriter statusWriter)
+        WatchdogStatusWriter statusWriter,
+        UpdateProcessGate updateGate,
+        UpdateLockFile updateLock)
     {
         _logger = logger;
         _options = options.Value;
@@ -73,11 +78,21 @@ public class Worker : BackgroundService
         _update = update;
         _consent = consent;
         _statusWriter = statusWriter;
+        _updateGate = updateGate;
+        _updateLock = updateLock;
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        _logger.LogInformation("HitPan Watchdog started v1.0.0");
+        // 봉합 (2026-07-16, 작1 W4-0): 종전 "v1.0.0" 하드코딩 — 로그가 늘 1.0.0 이라 CS 가 버전을 오판했다.
+        _logger.LogInformation("HitPan Watchdog started v{Version}", VersionInfo.Current);
+
+        // W4-1 ③ 자가 점검 (2026-07-16, 사장님 결재) — 재부팅 점검보다 먼저 한다.
+        //   업데이트가 keepalive 를 끈 뒤 워치독이 죽으면 keepalive 가 꺼진 채 남아 ERP 가 영영 안 뜬다.
+        //   워치독은 sc failure(5초)·Guardian(5분)이 되살리므로, 기동 즉시 이걸 풀면 재부팅을 기다리지
+        //   않고 최대 5분 안에 ERP 가 복구된다. 다른 무엇보다 "ERP 가 안 떠 있는 상태"를 먼저 푼다.
+        if (OperatingSystem.IsWindows())
+            _updateGate.SelfHealKeepaliveIfAbandoned(_updateLock);
 
         if (OperatingSystem.IsWindows() && _b.ShouldRunPostRebootCheck())
         {
