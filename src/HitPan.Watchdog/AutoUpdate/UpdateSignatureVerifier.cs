@@ -104,62 +104,104 @@ public sealed class UpdateSignatureVerifier
             return false;
         }
 
-        try
+        var result = VerifyWithPem(manifest, pem);
+        switch (result)
         {
-            byte[] sig;
-            try
-            {
-                sig = Base64UrlDecode(manifest.Signature);
-            }
-            catch (FormatException)
-            {
+            case VerifyResult.BadEncoding:
                 _logger.LogError("[Update/Sign] 서명 인코딩 오류({V}) — 설치하지 않습니다.", manifest.Version);
                 return false;
-            }
-
-            var payload = UpdateManifestSigning.BuildSigningPayload(manifest);
-
-            using var ecdsa = ECDsa.Create();
-            ecdsa.ImportFromPem(pem);
-            var ok = ecdsa.VerifyData(
-                Encoding.UTF8.GetBytes(payload),
-                sig,
-                HashAlgorithmName.SHA256,
-                DSASignatureFormat.IeeeP1363FixedFieldConcatenation);
-
-            if (!ok)
-            {
+            case VerifyResult.SignatureMismatch:
                 // 서명 불일치 = 누군가 manifest 를 바꿨거나(위·변조), feed 가 바뀌었거나, 서명 규격이 어긋났다.
                 // 어느 쪽이든 코드를 교체하면 안 된다.
                 _logger.LogError("[Update/Sign] 🛑 서명이 맞지 않습니다({V}, kid={Kid}) — 위·변조된 manifest 로 보고 설치를 차단합니다.",
                     manifest.Version, manifest.Kid);
                 return false;
-            }
-
-            _logger.LogInformation("[Update/Sign] 서명 확인 완료({V}, kid={Kid})", manifest.Version, manifest.Kid);
-            return true;
+            case VerifyResult.Error:
+                // 헌법 #15: 침묵 금지. 검증 중 예외 = 판정 불능 = 설치 금지.
+                _logger.LogError("[Update/Sign] 서명 검증 중 오류({V}, kid={Kid}) — 설치하지 않습니다(공개키·서명 형식 확인).",
+                    manifest.Version, manifest.Kid);
+                return false;
+            default:
+                _logger.LogInformation("[Update/Sign] 서명 확인 완료({V}, kid={Kid})", manifest.Version, manifest.Kid);
+                return true;
         }
-        catch (Exception ex)
+    }
+
+    internal enum VerifyResult { Ok, BadEncoding, SignatureMismatch, Error }
+
+    /// <summary>
+    /// 순수 암호 검증 코어 — kid→공개키 해석(내장/db.conf)을 뺀 "서명·규격 확인"만 담당한다.
+    ///
+    /// internal 인 이유: 검증팀 SoD 반증 F-3 — 종전 테스트는 bare ECDsa 자기 왕복만 해서 정작 이 검증기가
+    ///   유효한 서명을 통과시키는지 한 번도 확인하지 않았다(검증기를 지워도 테스트가 초록이었다).
+    ///   실제 openssl 서명(DER + 표준 Base64)과 .NET 서명(P1363 + Base64Url)이 이 코어를 그대로 통과하는지
+    ///   테스트가 직접 밟게 하려고 PEM 을 인자로 받는 형태로 노출한다(kid 맵·db.conf 는 파일 의존이라 분리).
+    /// </summary>
+    internal static VerifyResult VerifyWithPem(UpdateManifest manifest, string pem)
+    {
+        byte[] sig;
+        try
         {
-            // 헌법 #15: 침묵 금지. 검증 중 예외 = 판정 불능 = 설치 금지.
-            _logger.LogError(ex, "[Update/Sign] 서명 검증 중 오류({V}, kid={Kid}) — 설치하지 않습니다.",
-                manifest.Version, manifest.Kid);
-            return false;
+            sig = Base64UrlDecode(manifest.Signature ?? string.Empty);
+        }
+        catch (FormatException)
+        {
+            return VerifyResult.BadEncoding;
+        }
+
+        try
+        {
+            var payloadBytes = Encoding.UTF8.GetBytes(UpdateManifestSigning.BuildSigningPayload(manifest));
+
+            using var ecdsa = ECDsa.Create();
+            ecdsa.ImportFromPem(pem);
+
+            // 봉합 (2026-07-16, 검증팀 SoD 반증 P0): 서명 '형식'을 두 가지 다 받는다.
+            //   왜 — 서명을 만드는 주체가 다르다:
+            //     · 시리얼 증표는 백오피스(.NET)가 서명한다 → IEEE-P1363(raw r‖s, 64B).
+            //     · 업데이트 manifest 는 NCP 에서 사람이 openssl 로 서명한다(헌법 #29 사람 결재).
+            //       openssl `dgst -sign` 은 DER(0x30… SEQUENCE, 가변 71B 안팎)을 낸다.
+            //   검증기가 P1363 만 받으면, 사장님이 절차서대로 openssl 로 서명한 정상 manifest 가
+            //   전부 거부돼 **전 고객 업데이트가 전면 중단**된다(검증팀이 실측으로 적발).
+            //   그래서 여기서 두 형식을 순서대로 시도한다 — 발급자는 openssl 한 줄이면 끝나고,
+            //   .NET 이 서명하는 미래 경로(자동화)도 P1363 로 그대로 통과한다.
+            var ok = ecdsa.VerifyData(payloadBytes, sig, HashAlgorithmName.SHA256,
+                         DSASignatureFormat.IeeeP1363FixedFieldConcatenation)
+                     || ecdsa.VerifyData(payloadBytes, sig, HashAlgorithmName.SHA256,
+                         DSASignatureFormat.Rfc3279DerSequence);
+
+            return ok ? VerifyResult.Ok : VerifyResult.SignatureMismatch;
+        }
+        catch (Exception)
+        {
+            // 공개키 PEM 형식 오류·서명 바이트 손상 등 — 판정 불능. 호출부가 로그를 남긴다.
+            return VerifyResult.Error;
         }
     }
 
     /// <summary>
-    /// Base64Url(RFC 4648 §5) 디코드. SerialProofVerifier 와 동일 규격 — 백오피스 발급기가 그 형식을 쓴다.
-    /// URL·JSON 에 안전하도록 '+/' 대신 '-_' 를 쓰고 패딩('=')을 생략한 형식이다.
+    /// 서명 문자열을 바이트로 되돌린다. 두 인코딩을 모두 받는다:
+    ///   · Base64Url(RFC 4648 §5, '-_' + 패딩 생략) — 백오피스(.NET) 발급기가 쓰는 형식.
+    ///   · 표준 Base64('+/' + '=' 패딩) — NCP 에서 openssl `base64` 로 만든 서명이 이 형식이다.
+    /// 봉합 (2026-07-16, 검증팀 SoD 반증 P0): openssl 서명(표준 Base64, 줄바꿈 포함 가능)도 통과해야
+    ///   전 고객 업데이트 중단을 피한다. '-_'→'+/' 치환은 표준 Base64 에는 무해하고, 공백·개행은
+    ///   openssl `base64` 가 76자마다 넣을 수 있어 미리 제거한다.
     /// </summary>
     private static byte[] Base64UrlDecode(string input)
     {
-        var s = input.Replace('-', '+').Replace('_', '/');
-        switch (s.Length % 4)
+        var s = input
+            .Replace("\r", string.Empty, StringComparison.Ordinal)
+            .Replace("\n", string.Empty, StringComparison.Ordinal)
+            .Replace(" ", string.Empty, StringComparison.Ordinal)
+            .Replace('-', '+').Replace('_', '/');
+
+        // 이미 패딩이 있으면(표준 Base64) 그대로, 없으면(Base64Url) 길이에 맞춰 채운다.
+        var rem = s.Length % 4;
+        switch (rem)
         {
             case 2: s += "=="; break;
             case 3: s += "="; break;
-            case 1: throw new FormatException("Base64Url 길이 오류");
+            case 1: throw new FormatException("서명 길이 오류");
         }
         return Convert.FromBase64String(s);
     }

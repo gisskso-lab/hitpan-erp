@@ -186,4 +186,129 @@ public class UpdateSignatureTests
         Assert.Equal("upd-v1", UpdateManifestSigning.DefaultKid);
         Assert.NotEqual("v1", UpdateManifestSigning.DefaultKid);
     }
+
+    // ─── 실제 검증기(VerifyWithPem) 왕복 — F-3 봉합 (2026-07-16, 검증팀 SoD 반증) ────────────
+    //
+    //   ⚠️ 검증팀 적발: 위 '왕복' 테스트들은 bare ECDsa 로 자기 서명·자기 검증만 해서 정작
+    //      UpdateSignatureVerifier 를 한 번도 호출하지 않았다(검증기를 지워도 초록이었다).
+    //      게다가 발급(NCP openssl)과 검증(.NET) 규격이 실측으로 어긋나(DER≠P1363, 표준Base64≠Base64Url)
+    //      사장님이 절차서대로 서명하면 전 고객 업데이트가 전면 중단되는 P0 가 잠복해 있었다.
+    //      아래 테스트는 검증기 코어를 '직접' 태워, openssl 형식(DER + 표준 Base64)과
+    //      .NET 형식(P1363 + Base64Url) 두 가지가 다 통과함을 실증한다.
+
+    private static string NewPublicKeyPem(out ECDsa key)
+    {
+        key = ECDsa.Create(ECCurve.NamedCurves.nistP256);
+        return key.ExportSubjectPublicKeyInfoPem();
+    }
+
+    private static string ToStandardBase64(byte[] b) => Convert.ToBase64String(b);              // openssl base64 형식
+    private static string ToBase64Url(byte[] b) =>                                               // 백오피스(.NET) 형식
+        Convert.ToBase64String(b).TrimEnd('=').Replace('+', '-').Replace('/', '_');
+
+    [Fact]
+    public void openssl형식_DER_표준Base64_서명이_검증기를_통과한다()
+    {
+        // openssl `dgst -sha256 -sign` 이 내는 것과 동일: DER(Rfc3279DerSequence) + 표준 Base64.
+        var pem = NewPublicKeyPem(out var key);
+        using (key)
+        {
+            var manifest = Sample();
+            var payload = Encoding.UTF8.GetBytes(UpdateManifestSigning.BuildSigningPayload(manifest));
+            var derSig = key.SignData(payload, HashAlgorithmName.SHA256, DSASignatureFormat.Rfc3279DerSequence);
+            var signed = manifest with { Signature = ToStandardBase64(derSig), Kid = UpdateManifestSigning.DefaultKid };
+
+            Assert.Equal(UpdateSignatureVerifier.VerifyResult.Ok,
+                UpdateSignatureVerifier.VerifyWithPem(signed, pem));
+        }
+    }
+
+    [Fact]
+    public void dotnet형식_P1363_Base64Url_서명이_검증기를_통과한다()
+    {
+        // 백오피스 SerialSignatureService 와 동일: IEEE-P1363 + Base64Url. 미래 자동화 경로.
+        var pem = NewPublicKeyPem(out var key);
+        using (key)
+        {
+            var manifest = Sample();
+            var payload = Encoding.UTF8.GetBytes(UpdateManifestSigning.BuildSigningPayload(manifest));
+            var p1363 = key.SignData(payload, HashAlgorithmName.SHA256, DSASignatureFormat.IeeeP1363FixedFieldConcatenation);
+            var signed = manifest with { Signature = ToBase64Url(p1363), Kid = UpdateManifestSigning.DefaultKid };
+
+            Assert.Equal(UpdateSignatureVerifier.VerifyResult.Ok,
+                UpdateSignatureVerifier.VerifyWithPem(signed, pem));
+        }
+    }
+
+    [Fact]
+    public void 검증기가_서명후_변조를_잡는다_DownloadUrl()
+    {
+        // 정상 서명 후 다운로드 주소만 바꿔치기 — 검증기가 SignatureMismatch 로 거부해야 한다.
+        var pem = NewPublicKeyPem(out var key);
+        using (key)
+        {
+            var original = Sample();
+            var derSig = key.SignData(
+                Encoding.UTF8.GetBytes(UpdateManifestSigning.BuildSigningPayload(original)),
+                HashAlgorithmName.SHA256, DSASignatureFormat.Rfc3279DerSequence);
+            var tampered = original with
+            {
+                DownloadUrl = "https://evil.example/payload.zip",
+                Signature = ToStandardBase64(derSig),
+                Kid = UpdateManifestSigning.DefaultKid
+            };
+
+            Assert.Equal(UpdateSignatureVerifier.VerifyResult.SignatureMismatch,
+                UpdateSignatureVerifier.VerifyWithPem(tampered, pem));
+        }
+    }
+
+    [Fact]
+    public void 검증기가_다른_키로_만든_서명을_거부한다()
+    {
+        // 공격자의 개인키로 서명 → 우리 공개키로 검증 = 불일치. "환경변수 하나로 남의 코드 실행" 차단의 핵심.
+        var ourPem = NewPublicKeyPem(out var ourKey);
+        using (ourKey)
+        using (var attackerKey = ECDsa.Create(ECCurve.NamedCurves.nistP256))
+        {
+            var manifest = Sample();
+            var attackerSig = attackerKey.SignData(
+                Encoding.UTF8.GetBytes(UpdateManifestSigning.BuildSigningPayload(manifest)),
+                HashAlgorithmName.SHA256, DSASignatureFormat.Rfc3279DerSequence);
+            var signed = manifest with { Signature = ToStandardBase64(attackerSig), Kid = UpdateManifestSigning.DefaultKid };
+
+            Assert.Equal(UpdateSignatureVerifier.VerifyResult.SignatureMismatch,
+                UpdateSignatureVerifier.VerifyWithPem(signed, ourPem));
+        }
+    }
+
+    [Fact]
+    public void 검증기가_망가진_공개키_PEM에_예외없이_거부한다()
+    {
+        // 공개키 PEM 이 손상돼도 크래시하지 않고 Error 로 안전 거부(fail-closed, 헌법 #15).
+        var manifest = Sample() with { Signature = "AAAA", Kid = UpdateManifestSigning.DefaultKid };
+        Assert.Equal(UpdateSignatureVerifier.VerifyResult.Error,
+            UpdateSignatureVerifier.VerifyWithPem(manifest, "-----BEGIN PUBLIC KEY-----\nnot-a-key\n-----END PUBLIC KEY-----"));
+    }
+
+    [Fact]
+    public void 검증기가_규격_한글자_어긋남을_잡는다()
+    {
+        // 발급자가 payload 규격을 어기면(예: channel 대문자) 정상 키로 서명해도 거부돼야 한다.
+        // = "발급·검증 규격이 어긋나면 조용히 통과하지 않는다"의 실증(전 고객 중단은 오히려 이걸로 조기 발각).
+        var pem = NewPublicKeyPem(out var key);
+        using (key)
+        {
+            var manifest = Sample();
+            // 규격을 벗어난 payload("channel=Normal" 대문자)에 서명한다.
+            var wrongPayload = UpdateManifestSigning.BuildSigningPayload(manifest)
+                .Replace("channel=normal", "channel=Normal", StringComparison.Ordinal);
+            var sig = key.SignData(Encoding.UTF8.GetBytes(wrongPayload),
+                HashAlgorithmName.SHA256, DSASignatureFormat.Rfc3279DerSequence);
+            var signed = manifest with { Signature = ToStandardBase64(sig), Kid = UpdateManifestSigning.DefaultKid };
+
+            Assert.Equal(UpdateSignatureVerifier.VerifyResult.SignatureMismatch,
+                UpdateSignatureVerifier.VerifyWithPem(signed, pem));
+        }
+    }
 }
