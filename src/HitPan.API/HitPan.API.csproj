@@ -49,4 +49,17 @@
     <None Update="AI\*.md" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
+  <ItemGroup>
+    <!-- 봉합 (2026-07-16, 작1 W-0 P0 — 설계팀·검증팀 SoD 독립 확증): 업데이트 마이그 SQL 을 출력에 복사한다.
+         왜 P0 였나: .sql 은 .NET SDK 기본 Content 가 아니라, 이 지시가 없으면 publish 산출물에 단 한 개도
+           안 실린다(소스 55개 → publish 0개, 실측 확인). 그러면 고객 PC 자동 업데이트 zip 에 마이그가 빠져,
+           스키마 변경 릴리스가 MigrationRunner.ResolveMigrationsDirectory 에서 폴더를 못 찾아 "0건 no-op" →
+           신버전 api 가 구스키마에서 500 → 롤백 → DB 오염 → 복구 불가(헌법 #19·#20 위반).
+           최근 배포 EXE 1.2.29~1.2.33 전부 마이그 SQL 미포함이 이 누락의 증상이었다.
+         MigrationRunner 는 배포 시 {baseDir}/Migrations/SQL 을 1순위 후보로 찾으므로(상대경로 유지), Link 없이
+           Update 로 원래 폴더 구조 그대로 복사한다. 헌법 #36: 신규설치 진실원은 clean DDL, 본 SQL 은 '업데이트 시
+           ALTER 적용' 경로 — 둘은 별개. 재발 차단은 CI 스모크(산출물 DB-*.sql 집합 == 소스 집합 + 비어있지 않음). -->
+    <None Update="Migrations\SQL\DB-*.sql" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
 </Project>
