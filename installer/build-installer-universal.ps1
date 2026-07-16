@@ -248,7 +248,11 @@ $versionTargets = @(
 )
 foreach ($t in $versionTargets) {
     if (-not (Test-Path $t.Path)) {
-        Write-Host "    ⏭ $($t.Name): 산출물 없음(스킵) — $($t.Path)" -ForegroundColor DarkGray
+        # 봉합 (2026-07-16, 검증팀 재검증 Q2 적발): 종전엔 조용히 continue 했다.
+        #   그런데 -SkipErpBuild 로 돌리면 옛 산출물이 그대로 재사용되는데, 그게 바로 이 게이트가
+        #   잡아야 할 상황이다. 산출물이 없으면 "검사했다"가 아니라 "검사 못 했다"이므로 경고로 올린다.
+        Write-Warning "$($t.Name): 산출물이 없어 버전 정합을 검사하지 못했습니다 — $($t.Path)`n" +
+                      "  (-SkipErpBuild/-SkipWatchdog 로 돌렸다면, 담기는 파일이 v$Version 이 맞는지 직접 확인하세요.)"
         continue
     }
     $actual = (Get-Item $t.Path).VersionInfo.FileVersion

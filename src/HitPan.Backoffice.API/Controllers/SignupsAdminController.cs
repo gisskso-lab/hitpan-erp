@@ -192,9 +192,17 @@ public class SignupsAdminController : ControllerBase
             if (!string.IsNullOrWhiteSpace(customerEmail))
             {
                 var subject = "[히트판 ERP] 가입 승인 완료 — 시리얼 키와 ERP 주소를 안내드립니다";
-                var (installerVersion, downloadUrl) = ResolveReleaseInfo();
-                var htmlBody = BuildLicenseKeyEmailBody(companyName, licenseKey, domainAlias, installerVersion, downloadUrl);
-                emailSent = await _email.SendAsync(customerEmail, subject, htmlBody, ct);
+                // 설정 누락으로 메일을 못 만들어도 승인 자체는 이미 끝났다(시리얼 발급·DB 반영 완료).
+                //   예외를 그대로 올리면 운영자 화면엔 "승인 실패"(500)로 보여 재시도 → 중복 승인 위험이 생긴다.
+                //   기존 SendAsync 실패 경로와 동일하게 emailSent=false 로 떨어뜨려 "화면에서 직접 전달"로 안내한다.
+                //   (2026-07-16, 작1 W4-0 — 검증팀 재검증 Q7 적발)
+                var release = TryResolveReleaseInfo(signupId);
+                if (release is not null)
+                {
+                    var htmlBody = BuildLicenseKeyEmailBody(
+                        companyName, licenseKey, domainAlias, release.Version, release.DownloadUrl);
+                    emailSent = await _email.SendAsync(customerEmail, subject, htmlBody, ct);
+                }
                 if (emailSent)
                     _logger.LogInformation("[SignupsAdmin] license_email sent to={Email} signupId={Id}", customerEmail, signupId);
                 else
@@ -274,9 +282,17 @@ public class SignupsAdminController : ControllerBase
             if (!string.IsNullOrWhiteSpace(customerEmail))
             {
                 var subject = "[히트판 ERP] 시리얼 키 재발급 안내 (이전 시리얼은 무효화됩니다)";
-                var (installerVersion, downloadUrl) = ResolveReleaseInfo();
-                var htmlBody = BuildLicenseKeyEmailBody(companyName, licenseKey, domainAlias, installerVersion, downloadUrl);
-                emailSent = await _email.SendAsync(customerEmail, subject, htmlBody, ct);
+                // 설정 누락으로 메일을 못 만들어도 승인 자체는 이미 끝났다(시리얼 발급·DB 반영 완료).
+                //   예외를 그대로 올리면 운영자 화면엔 "승인 실패"(500)로 보여 재시도 → 중복 승인 위험이 생긴다.
+                //   기존 SendAsync 실패 경로와 동일하게 emailSent=false 로 떨어뜨려 "화면에서 직접 전달"로 안내한다.
+                //   (2026-07-16, 작1 W4-0 — 검증팀 재검증 Q7 적발)
+                var release = TryResolveReleaseInfo(signupId);
+                if (release is not null)
+                {
+                    var htmlBody = BuildLicenseKeyEmailBody(
+                        companyName, licenseKey, domainAlias, release.Version, release.DownloadUrl);
+                    emailSent = await _email.SendAsync(customerEmail, subject, htmlBody, ct);
+                }
             }
 
             _logger.LogInformation("[SignupsAdmin] license_reissued signupId={Id} tenant={Tid} email={Email} sent={Sent}",
@@ -365,20 +381,30 @@ public class SignupsAdminController : ControllerBase
     ///   랜딩 다운로드 페이지(1.2.33)와 메일(1.2.28)이 각각 손으로 적혀 갈라진 게 원인이다.
     ///   버전을 코드에 적는 한 같은 사고가 반복되므로, 배포 때 바뀌는 값은 설정에서 읽는다.
     ///
-    /// 값이 없으면 예외를 던진다(침묵 금지, 헌법 #15) — 잘못된 버전을 조용히 안내하느니
-    ///   메일 발송이 실패해 운영자가 즉시 알아차리는 편이 안전하다.
+    /// 값이 없으면 null 을 반환한다 — 틀린 버전을 조용히 안내하느니 메일을 보내지 않는다.
+    ///   예외를 던지지 않는 이유(검증팀 재검증 Q7 적발): 이 시점엔 승인·시리얼 발급·DB 반영이 이미 끝났다.
+    ///   예외가 올라가면 운영자 화면에 "승인 실패"(500)로 보여 재시도 → 중복 승인 위험이 생긴다.
+    ///   기존 SendAsync 실패 경로와 동일하게 emailSent=false 로 떨어져 "화면에서 직접 전달" 안내가 나간다.
+    ///   대신 LogError 로 흔적을 남긴다(침묵 금지, 헌법 #15).
     /// </summary>
-    private (string version, string downloadUrl) ResolveReleaseInfo()
+    private ReleaseInfo? TryResolveReleaseInfo(long signupId)
     {
         var version = _config["Release:InstallerVersion"];
         if (string.IsNullOrWhiteSpace(version))
-            throw new InvalidOperationException(
-                "Release:InstallerVersion 미설정 — 고객에게 안내할 설치 파일 버전을 알 수 없어 메일을 보내지 않습니다. " +
-                "appsettings 또는 환경변수 BACKOFFICE_Release__InstallerVersion 을 설정하세요.");
+        {
+            _logger.LogError(
+                "[SignupsAdmin] Release:InstallerVersion 미설정 — 안내 메일을 만들지 못했습니다(승인 자체는 완료). " +
+                "signupId={Id}. 환경변수 BACKOFFICE_Release__InstallerVersion 또는 appsettings 를 확인하세요. " +
+                "그동안 고객에게는 화면에서 직접 시리얼과 설치 파일을 전달해야 합니다.", signupId);
+            return null;
+        }
 
         var baseUrl = (_config["Release:DownloadBaseUrl"] ?? "https://updates.hitpan.kr/packages").TrimEnd('/');
-        return (version, $"{baseUrl}/HitPan-ERP-Setup-{version}.exe");
+        return new ReleaseInfo(version, $"{baseUrl}/HitPan-ERP-Setup-{version}.exe");
     }
+
+    /// <summary>고객에게 안내할 출하 버전과 다운로드 주소.</summary>
+    private sealed record ReleaseInfo(string Version, string DownloadUrl);
 
     private static string BuildLicenseKeyEmailBody(
         string companyName, string licenseKey, string? domainAlias,

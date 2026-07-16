@@ -4,6 +4,7 @@
 @layout LandingLayout
 @inject IJSRuntime JS
 @inject IConfiguration Config
+@inject ILogger<DownloadPage> Logger
 
 <PageTitle>다운로드 — 히트판 ERP</PageTitle>
 
@@ -25,13 +26,25 @@
 
         <div class="download-list">
             <div class="download-item">
-                <div class="info">
-                    <strong>Windows 10/11 (x64)</strong>
-                    <span>권장 · 280 MB · 버전 @InstallerVersion</span>
-                </div>
-                <a href="@DownloadUrl"
-                   class="btn-dl"
-                   download>설치 파일 받기</a>
+                @if (ReleaseConfigured)
+                {
+                    <div class="info">
+                        <strong>Windows 10/11 (x64)</strong>
+                        <span>권장 · 280 MB · 버전 @InstallerVersion</span>
+                    </div>
+                    <a href="@DownloadUrl"
+                       class="btn-dl"
+                       download>설치 파일 받기</a>
+                }
+                else
+                {
+                    @* 설치 파일 정보를 못 읽은 경우 — 틀린 버전을 안내하느니 안내하지 않는다(위 @code 주석 참조).
+                       고객에게는 원인이 아니라 다음 행동을 알려준다(고객 노출 문구에 개발 용어 금지). *@
+                    <div class="info">
+                        <strong>설치 파일을 준비 중입니다</strong>
+                        <span>잠시 후 다시 확인해 주세요. 급하시면 고객센터로 연락 주시면 바로 보내드립니다.</span>
+                    </div>
+                }
             </div>
         </div>
 
@@ -99,13 +112,30 @@
     [SupplyParameterFromQuery] public string? Key { get; set; }
     private bool _copied;
 
-    // 출하 버전 단일출처 (2026-07-16, 작1 W4-0 — 검증팀 F-5 적발)
+    // 출하 버전 단일출처 (2026-07-16, 작1 W4-0 — 검증팀 F-5 적발 / 재검증 Q6 재적발)
     //   종전엔 이 페이지에 "1.2.33" 이, 가입 승인 메일 코드에는 "1.2.28" 이 각각 손으로 적혀 있었다.
     //   두 곳을 사람이 따로 고치다 갈라졌고, 메일로 받은 고객은 로그인이 안 되는 옛 EXE 를 설치했다.
     //   배포 때 바뀌는 값은 코드가 아니라 설정에서 읽는다(백오피스 appsettings 의 Release 섹션과 같은 키).
-    private string InstallerVersion => Config["Release:InstallerVersion"] ?? "1.2.33";
+    //
+    //   ⚠️ 폴백을 두지 않는 이유 (초판의 `?? "1.2.33"` 을 제거함 — 검증팀 재적발)
+    //     초판은 미설정 시 조용히 "1.2.33" 으로 폴백했다. 그런데 백오피스 메일은 미설정 시 예외를 던진다.
+    //     이 비대칭이 F-5 재발 경로다 — NCP 랜딩에 환경변수 주입이 빠지면 랜딩은 조용히 옛 버전을,
+    //     메일은 새 버전을 안내해 "같은 회사가 두 경로에서 다른 EXE 를 주는" 사고가 그대로 되살아난다.
+    //     게다가 조용한 폴백이라 아무도 모른다(헌법 #15). 값이 없으면 안내하지 않는 편이 안전하다.
+    private string? InstallerVersion => Config["Release:InstallerVersion"];
+    private bool ReleaseConfigured => !string.IsNullOrWhiteSpace(InstallerVersion);
     private string DownloadUrl =>
         $"{(Config["Release:DownloadBaseUrl"] ?? "https://updates.hitpan.kr/packages").TrimEnd('/')}/HitPan-ERP-Setup-{InstallerVersion}.exe";
+
+    protected override void OnInitialized()
+    {
+        // 헌법 #15: 침묵 금지. 설치 파일 안내가 빠진 채 페이지가 뜨는 건 운영 사고이므로 흔적을 남긴다.
+        //   조용히 폴백하던 초판에서는 이 상황이 아무 흔적 없이 지나갔다(검증팀 재적발).
+        if (!ReleaseConfigured)
+            Logger.LogError(
+                "[DownloadPage] Release:InstallerVersion 미설정 — 다운로드 안내를 표시하지 못했습니다. " +
+                "환경변수 Release__InstallerVersion 또는 appsettings 를 확인하세요.");
+    }
 
     private async Task CopyKey()
     {

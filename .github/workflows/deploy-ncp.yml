@@ -119,6 +119,51 @@ jobs:
             sudo systemctl restart hitpan-landing
           "
 
+      # ── 출하 버전 정합 (2026-07-16, 작1 W4-0 — 사장님 결재 "배포가 둘을 같이 넣게") ──
+      #   왜 필요한가: 고객에게 설치 파일을 안내하는 경로가 둘이다(랜딩 다운로드 페이지 / 가입 승인 메일).
+      #   각자 appsettings 를 읽는데, 사람이 두 파일을 따로 고치다 갈라지면
+      #   "같은 회사가 두 경로에서 다른 EXE 를 주는" 사고가 난다 — 실제로 랜딩 1.2.33 / 메일 1.2.28 로
+      #   갈라져 메일 고객이 로그인 안 되는 옛 EXE 를 받았다(검증팀 F-5 적발).
+      #   그래서 배포가 두 곳에 같은 값을 한 번에 넣고, 다르면 배포를 세운다.
+      #
+      #   값의 출처 = Repository variable RELEASE_INSTALLER_VERSION (Settings > Variables).
+      #   미설정 시 배포를 진행하되 경고 — 기존 서버 값이 남아 있어 즉시 사고는 아니나, 갱신이 안 된 상태다.
+      #
+      #   방식 = systemd drop-in 환경변수. appsettings.Production.json(운영 시크릿) 을 편집하지 않는다:
+      #     · JSON 편집은 서버에 jq 가 있어야 하고(설치 여부 미확인 — 확인 자체가 헌법 #29 결재 대상),
+      #       파싱 실패 시 운영 시크릿 파일이 깨질 위험이 있다.
+      #     · .NET 은 환경변수가 appsettings 보다 우선하므로(Release__InstallerVersion), 시크릿 파일을
+      #       건드리지 않고 값만 덮어쓸 수 있다. 되돌리기도 drop-in 파일 삭제 한 번이다.
+      - name: Sync release installer version (landing + backoffice)
+        env:
+          NCP_USER: ${{ secrets.NCP_USER }}
+          NCP_HOST: ${{ secrets.NCP_HOST }}
+          RELEASE_VERSION: ${{ vars.RELEASE_INSTALLER_VERSION }}
+        run: |
+          if [ -z "$RELEASE_VERSION" ]; then
+            echo "::warning::RELEASE_INSTALLER_VERSION 미설정 — 고객 안내 버전을 갱신하지 않았습니다. 새 EXE 를 올렸다면 Settings > Variables 에서 설정하세요."
+            exit 0
+          fi
+          echo "고객 안내 설치 파일 버전 → $RELEASE_VERSION (랜딩·백오피스 동시 적용)"
+          ssh -i ~/.ssh/ncp_key $NCP_USER@$NCP_HOST "
+            set -e
+            for SVC in hitpan-landing hitpan-backoffice-api; do
+              sudo mkdir -p /etc/systemd/system/\$SVC.service.d
+              printf '[Service]\nEnvironment=\"Release__InstallerVersion=$RELEASE_VERSION\"\n' | sudo tee /etc/systemd/system/\$SVC.service.d/release-version.conf > /dev/null
+            done
+            sudo systemctl daemon-reload
+            sudo systemctl restart hitpan-landing
+            sudo systemctl restart hitpan-backoffice-api
+          "
+          # 정합 게이트 — 두 서비스가 같은 값을 들고 떴는지 확인. 다르면 배포 실패(주석 아닌 코드가 막는다).
+          LAND_V=$(ssh -i ~/.ssh/ncp_key $NCP_USER@$NCP_HOST "systemctl show hitpan-landing -p Environment --value | tr ' ' '\n' | sed -n 's/^Release__InstallerVersion=//p'") || true
+          BACK_V=$(ssh -i ~/.ssh/ncp_key $NCP_USER@$NCP_HOST "systemctl show hitpan-backoffice-api -p Environment --value | tr ' ' '\n' | sed -n 's/^Release__InstallerVersion=//p'") || true
+          echo "랜딩=$LAND_V / 백오피스=$BACK_V"
+          if [ "$LAND_V" != "$RELEASE_VERSION" ] || [ "$BACK_V" != "$RELEASE_VERSION" ]; then
+            echo "::error::출하 버전 불일치 — 랜딩=$LAND_V, 백오피스=$BACK_V, 기대=$RELEASE_VERSION. 두 경로가 다른 EXE 를 안내하게 됩니다."
+            exit 1
+          fi
+
       - name: Healthcheck
         id: healthcheck
         env:

@@ -1,8 +1,21 @@
 ﻿# ============================================================
+# ⛔ 사용 금지 — 구세대 스크립트 (2026-07-16 표시, 작1 W4-0 검증팀 재검증 Q3 적발)
+#
+#   출하 EXE 는 반드시 build-installer-universal.ps1 로 굽는다.
+#   이 스크립트는 아래 이유로 지금 아키텍처와 맞지 않으며, 실행하면 잘못된 EXE 가 나온다:
+#     · -Version 기본값이 "1.0.7" 로 살아 있어, -Version 없이 돌리면 1.0.7 EXE 를 굽는다.
+#     · publish 에 -p:HitPanVersion 주입이 없어 EXE 이름과 어셈블리 버전이 갈라진다
+#       (그 결과가 "본사가 보는 고객사 버전이 전부 가짜" 사고였다).
+#     · -TenantId/-Token 필수 = 토큰 사전 주입 방식. 현재는 시리얼 기반 온보딩(헌법 #40)이라 폐기된 전제다.
+#     · universal 에만 있는 무결성 게이트(출하 DDL·Web 산출물·버전 정합)를 통과하지 않는다.
+#
+#   남겨둔 이유: 삭제는 사장님 결재 사항(헌법 #1). 그때까지 이 헤더가 오용을 막는다.
+#   (참고: universal 이 이 파일을 호출하지는 않는다 — 주석 참조뿐)
+# ============================================================
 # HitPan ERP 인스톨러 빌드 자동화 스크립트
 # WS-20260428-02 (Gard 3) — 옵션 X2 + X1 갈아타기 디딤돌
 #
-# 사용법:
+# 사용법(구세대 — 위 경고 참조):
 #   .\build-installer.ps1 -TenantId tenant-001 -Token "eyJh..."
 #
 # 동작:
@@ -24,11 +37,38 @@ param(
     [string]$OutputDir = "dist",
     [string]$BundleDir = "installer-build/bundle",
     [switch]$SkipBundleDownload,
-    [switch]$SkipErpBuild
+    [switch]$SkipErpBuild,
+
+    # 이 구세대 스크립트를 굳이 돌려야 할 때만 명시적으로 붙인다(위 헤더의 경고를 읽었다는 뜻).
+    [switch]$IUnderstandThisIsDeprecated
 )
 
 $ErrorActionPreference = "Stop"
 $startTime = Get-Date
+
+# ─── 오용 차단 (2026-07-16, 작1 W4-0 — 검증팀 재검증 Q3) ────────────────
+#   헤더 주석만으로는 막을 수 없다(사람은 주석을 안 읽고 실행한다). 코드가 막는다.
+#   이 스크립트로 구운 EXE 는 어셈블리 버전이 갈라져(본사 보고·자동 업데이트 판정 오작동)
+#   출하하면 안 된다. 출하는 build-installer-universal.ps1 단일 경로다.
+if (-not $IUnderstandThisIsDeprecated) {
+    Write-Host ""
+    Write-Error @"
+이 스크립트는 사용 금지된 구세대 빌드 경로입니다. 출하 EXE 는 아래로 구우세요.
+
+  .\installer\build-installer-universal.ps1 -Version 1.2.34 -BackofficeApi https://back.hitpan.kr
+
+이유:
+  · -Version 기본값이 1.0.7 로 살아 있어 실수로 옛 버전 EXE 가 나옵니다.
+  · publish 에 -p:HitPanVersion 주입이 없어 EXE 이름과 프로그램 내부 버전이 갈라집니다
+    (본사 모니터링·자동 업데이트 판정이 전부 어긋납니다).
+  · -TenantId/-Token 사전 주입 방식은 시리얼 기반 온보딩(헌법 #40)으로 대체돼 폐기됐습니다.
+  · universal 의 무결성 게이트(출하 DDL·Web 산출물·버전 정합)를 통과하지 않습니다.
+
+그래도 실행해야 한다면 -IUnderstandThisIsDeprecated 를 붙이세요(출하용 아님).
+"@
+    exit 1
+}
+Write-Warning "구세대 빌드 경로로 실행 중입니다 — 이 산출물은 출하 금지입니다(build-installer-universal.ps1 사용)."
 
 # ─── 사전 검증 ────────────────────────────────────
 Write-Host ""
