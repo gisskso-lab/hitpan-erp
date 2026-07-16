@@ -405,14 +405,13 @@ public class AuthController : ControllerBase
         return result;
     }
 
-    /// <summary>현재 ERP 어셈블리 버전 "Major.Minor.Build"(예: "1.0.0"). 워치독 GetCurrentVersion 과 동일 형식.</summary>
-    private static string GetCurrentErpVersion()
-    {
-        var asm = System.Reflection.Assembly.GetEntryAssembly()
-                  ?? System.Reflection.Assembly.GetExecutingAssembly();
-        var v = asm.GetName().Version;
-        return v is null ? "0.0.0" : $"{v.Major}.{v.Minor}.{v.Build}";
-    }
+    /// <summary>
+    /// 현재 ERP 어셈블리 버전 "Major.Minor.Build"(예: "1.2.34"). 워치독 VersionInfo.Current 와 동일 형식.
+    ///
+    /// 정리 (2026-07-16, 작1 W4-0): 동일 로직이 VersionInfo 로 승격됐다(HealthController 도 같은 출처를 보게 하려고).
+    ///   사본을 남기면 언젠가 두 값이 갈라져 "로그인 응답 버전 ≠ /health 버전"이 된다 — 위임한다.
+    /// </summary>
+    private static string GetCurrentErpVersion() => VersionInfo.Current;
 }
 
 public sealed record VerifyPasswordRequest(string Password);

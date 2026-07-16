@@ -382,14 +382,12 @@ public class Worker : BackgroundService
 
     /// <summary>
     /// 현재 설치 버전 문자열. 워치독 어셈블리 버전을 단일출처로 쓴다(별도 버전 파일·db.conf 키 없음 확인 완료).
-    /// Major.Minor.Build 3자리로 manifest version 과 동일 형식(예: "1.0.0")을 맞춘다.
+    /// Major.Minor.Build 3자리로 manifest version 과 동일 형식(예: "1.2.34")을 맞춘다.
+    ///
+    /// 정리 (2026-07-16, 작1 W4-0): 동일 로직이 VersionInfo 로 승격됐다(진단·메타핑이 같은 출처를 보게 하려고).
+    ///   여기 사본을 남겨두면 언젠가 두 값이 갈라져 "업데이트 판정 버전 ≠ 본사 보고 버전"이 된다 — 위임한다.
     /// </summary>
-    private static string GetCurrentVersion()
-    {
-        var asm = Assembly.GetEntryAssembly() ?? Assembly.GetExecutingAssembly();
-        var v = asm.GetName().Version;
-        return v is null ? "0.0.0" : $"{v.Major}.{v.Minor}.{v.Build}";
-    }
+    private static string GetCurrentVersion() => VersionInfo.Current;
 
     /// <summary>
     /// WS-28-B: 재부팅 직후 통신 무결성 즉시 점검·복구(헌법 #28). 정기 루프를 기다리지 않고
@@ -459,7 +457,10 @@ public class Worker : BackgroundService
             Timestamp = DateTime.UtcNow,
             Status = status,
             RecentRecoveryCount = recoveryCount,
-            WatchdogVersion = "1.0.0",
+            // 봉합 (2026-07-16, 작1 W4-0 — 사장님 결재): 종전 "1.0.0" 하드코딩.
+            //   본사가 보는 고객사 버전이 이 값인데, 설치본(1.2.xx)과 무관하게 늘 1.0.0 이라
+            //   본사는 어느 고객사가 어느 버전인지 알 수 없었고 업데이트 성공률 집계가 불가능했다.
+            WatchdogVersion = VersionInfo.Current,
             ProcessStatus = procStatus,
             LastRecovery = new LastRecoveryInfo
             {

@@ -67,9 +67,16 @@ public sealed class UpdateClient : IUpdateClient
                 return null;
             }
 
-            if (string.Equals(manifest.Version, currentVersion, StringComparison.OrdinalIgnoreCase))
+            // 봉합 (2026-07-16, 작1 W4-0 — 사장님 결재, CTO 적발): 종전엔 string.Equals 로 "다르면 새 버전"이었다.
+            //   그래서 구버전 manifest 를 물리면 다운그레이드가 "새 버전"으로 통과했다(롤백 공격).
+            //   서명(고리4)이 붙어도 이 구멍은 남는다 — 과거에 정식 서명된 옛 manifest 를 통째로 재생(replay)하면
+            //   서명·sha256 이 전부 유효하기 때문이다. 그 경우 SemVer 비교가 유일한 방어선이다.
+            if (!IsNewerVersion(manifest.Version, currentVersion, out var skipReason))
             {
-                _logger.LogDebug("[Update] 최신 버전 유지 ({V})", currentVersion);
+                // 헌법 #15: 침묵 금지. "최신 유지"는 정상이라 Debug, 다운그레이드·형식오류는 Warning 으로 흔적을 남긴다.
+                var isRoutine = skipReason?.StartsWith("최신 버전 유지") == true;
+                if (isRoutine) _logger.LogDebug("[Update] {Reason}", skipReason);
+                else _logger.LogWarning("[Update] 업데이트를 진행하지 않습니다 — {Reason}", skipReason);
                 return null;
             }
 
@@ -82,6 +89,52 @@ public sealed class UpdateClient : IUpdateClient
             _logger.LogWarning(ex, "[Update] manifest 조회 실패 (feed={Feed})", _feedUrl);
             return null;
         }
+    }
+
+    /// <summary>
+    /// feed 버전이 현재 설치 버전보다 진짜 "더 높은지" 판정한다 (작1 W4-0, 2026-07-16).
+    ///
+    /// ■ 왜 문자열 비교가 아니라 SemVer 인가
+    ///   "다르면 새 버전" 규칙은 다운그레이드를 막지 못한다. 공격자가 feed 를 장악하거나
+    ///   (HITPAN_UPDATE_FEED 환경변수로 재지정 가능) 과거에 정식 서명된 옛 manifest 를 통째로
+    ///   재생(replay)하면 서명·sha256 이 전부 유효해 서명 검증을 통과한다.
+    ///   그때 "옛 버전으로 되돌리는 것"을 막는 유일한 방어선이 이 비교다
+    ///   (취약한 구버전으로 내린 뒤 그 취약점을 치는 공격을 차단).
+    ///
+    /// ■ 판정 불능 시 = false (fail-closed, 업데이트 진입 금지)
+    ///   버전 문자열이 파싱 불가면 "새 버전인지 알 수 없다"는 뜻이고, 알 수 없을 때
+    ///   코드를 교체하는 쪽으로 기울면 안 된다. 침묵하지 않고 경고를 남긴다(헌법 #15).
+    ///
+    /// public static 인 이유: 이 판정이 다운그레이드·replay 의 유일한 방어선이라 단위 테스트로 고정해야 한다
+    ///   (HTTP 를 태우면 느리고 불안정해 정작 이 규칙이 검증되지 않는다). 순수 함수 — 상태·부수효과 없음.
+    /// </summary>
+    /// <param name="reason">판정 사유(로그·테스트용). 통과 시 null.</param>
+    public static bool IsNewerVersion(string feedVersion, string currentVersion, out string? reason)
+    {
+        if (!Version.TryParse(feedVersion, out var feed))
+        {
+            reason = $"manifest 버전 형식을 해석할 수 없습니다: '{feedVersion}'";
+            return false;
+        }
+        if (!Version.TryParse(currentVersion, out var current))
+        {
+            reason = $"현재 설치 버전 형식을 해석할 수 없습니다: '{currentVersion}'";
+            return false;
+        }
+
+        if (feed < current)
+        {
+            reason = $"feed 가 더 낮은 버전을 가리킵니다 (현재 {currentVersion} > feed {feedVersion}) — 다운그레이드 차단";
+            return false;
+        }
+        if (feed == current)
+        {
+            reason = $"최신 버전 유지 ({currentVersion})";
+            return false;
+        }
+
+        reason = null;
+        return true;
     }
 
     public async Task<string> DownloadAsync(UpdateManifest manifest, string targetDir, CancellationToken ct)

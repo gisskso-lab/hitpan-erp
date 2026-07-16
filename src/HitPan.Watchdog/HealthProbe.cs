@@ -33,7 +33,10 @@ public static class HealthProbe
         var report = new HealthReport
         {
             Timestamp = DateTime.UtcNow,
-            WatchdogVersion = "1.0.0",
+            // 봉합 (2026-07-16, 작1 W4-0 — 사장님 결재): 종전 "1.0.0" 하드코딩.
+            //   진단 JSON 은 CS 가 "업데이트가 됐나"를 판단하는 근거인데, 설치본이 1.2.xx 여도
+            //   영원히 1.0.0 을 보고해 정상 PC 를 미갱신으로 오판하게 했다(헌법 #15 — 흔적이 거짓말하면 추적 불가).
+            WatchdogVersion = VersionInfo.Current,
             TenantIdHash = SafeSha256(MetaPingClient.GetTenantId()),
             // 봉합 (2026-06-21, 7차 전수조사 D6-P0-01, 사장님 결재 "db.conf 단일출처로 통합"):
             //   인스톨러가 환경변수를 더 이상 만들지 않아(2026-06-12 폐기) 진단 스냅샷이 신규설치 PC 에서 항상

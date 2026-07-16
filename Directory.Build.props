@@ -1,0 +1,50 @@
+<Project>
+
+  <!--
+    히트판 ERP 버전 단일출처 (SSOT) — 작업지시서 20260715작1 W4-0, 사장님 결재 2026-07-16.
+
+    ■ 왜 이 파일이 생겼나
+      종전엔 19개 csproj 어디에도 <Version> 이 없어 모든 어셈블리가 .NET 기본값 1.0.0 으로 고정됐다.
+      그런데 워치독의 자동 업데이트는 "현재 설치 버전 vs manifest 버전"을 비교해 동작한다
+      (Worker.cs GetCurrentVersion → UpdateClient.GetLatestManifestAsync).
+      버전이 영원히 1.0.0 이면 그 비교가 무의미해져 고리4(자동 업데이트 실적용)를 검증할 수 없다.
+      더 나쁜 건 인스톨러는 1.2.xx 를 굽는데 본사 메타핑은 1.0.0 을 보고해,
+      본사가 보는 고객사 버전 정보가 전부 사실과 달랐다는 점이다(업데이트 성공률 집계 불가).
+
+    ■ 왜 csproj 를 안 고치고 여기에 두나
+      MSBuild 는 이 파일을 하위 모든 프로젝트에 자동 상속시킨다. csproj 19개를 개별 수정하면
+      서로 어긋날 표면이 19개 생기지만, 여기 한 곳이면 어긋날 수가 없다(헌법 #1 "추가만" 정합).
+
+    ■ 버전을 올리는 법 (릴리스 담당자)
+      아래 <HitPanVersion> 한 줄만 고친다. 그러면 API·Web·워치독 어셈블리, /health 응답,
+      워치독 진단 JSON, 본사 메타핑이 전부 같은 값을 말한다.
+      CI 오버라이드: dotnet build -p:HitPanVersion=1.2.34
+      인스톨러도 같은 값을 써야 한다: ISCC /DAppVersion=1.2.34 (installer/HitPan-Universal.iss:25)
+
+    ■ 절대 금지
+      코드에 버전 문자열을 직접 쓰지 말 것("1.0.0", "1.2.13" 등).
+      버전이 필요하면 어셈블리에서 읽는다 — 워치독은 HitPan.Watchdog.VersionInfo.Current,
+      API 는 AuthController.GetCurrentErpVersion() 패턴.
+      하드코딩이 다시 생기면 본사가 보는 버전이 또 거짓말을 시작한다.
+  -->
+
+  <PropertyGroup>
+    <!-- ★ 릴리스 시 이 한 줄만 변경 (Major.Minor.Patch) -->
+    <HitPanVersion Condition="'$(HitPanVersion)' == ''">1.2.34</HitPanVersion>
+  </PropertyGroup>
+
+  <PropertyGroup>
+    <!--
+      Version            = NuGet/패키지 버전 (SemVer)
+      AssemblyVersion    = 강한 이름 바인딩용. 3자리 + .0
+                           (Worker.GetCurrentVersion 이 Major.Minor.Build 를 읽어 manifest 와 대조)
+      FileVersion        = 파일 속성 버전. W4-5 검증이 교체된 EXE 를 직접 확인할 때 읽는 값
+      InformationalVersion = 사람이 읽는 표시용
+    -->
+    <Version>$(HitPanVersion)</Version>
+    <AssemblyVersion>$(HitPanVersion).0</AssemblyVersion>
+    <FileVersion>$(HitPanVersion).0</FileVersion>
+    <InformationalVersion>$(HitPanVersion)</InformationalVersion>
+  </PropertyGroup>
+
+</Project>

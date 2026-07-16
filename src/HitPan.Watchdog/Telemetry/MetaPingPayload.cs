@@ -16,8 +16,11 @@ public class MetaPingPayload
     [JsonPropertyName("recent_recovery_count")]
     public int RecentRecoveryCount { get; set; }
 
+    // 봉합 (2026-07-16, 작1 W4-0 — 사장님 결재): 종전 기본값이 "1.0.0" 하드코딩이었다.
+    //   호출부(Worker)가 값을 넣지 않으면 본사에 1.0.0 이 그대로 전송돼 거짓 보고가 된다.
+    //   기본값을 VersionInfo.Current 로 두어, 누가 대입을 빠뜨려도 진짜 설치 버전이 나가게 한다.
     [JsonPropertyName("watchdog_version")]
-    public string WatchdogVersion { get; set; } = "1.0.0";
+    public string WatchdogVersion { get; set; } = VersionInfo.Current;
 
     [JsonPropertyName("process_status")]
     public Dictionary<string, bool> ProcessStatus { get; set; } = new();

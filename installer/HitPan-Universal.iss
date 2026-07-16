@@ -21,8 +21,15 @@
 ;   #35 — 시리얼 = 백오피스↔ERP 포링키
 ; ============================================================
 
+; 버전 (작1 W4-0, 2026-07-16 — 사장님 결재)
+;   단일출처 = 레포 루트 Directory.Build.props 의 <HitPanVersion>.
+;   CI 는 ISCC /DAppVersion=1.2.34 로 주입하며, 그 값은 Directory.Build.props 와 반드시 같아야 한다
+;   (다르면 인스톨러가 굽는 버전 ≠ 어셈블리 버전 → 워치독 업데이트 판정이 어긋난다).
+;   아래 폴백은 /DAppVersion 없이 로컬에서 구울 때만 쓰이는 값 — 릴리스 경로가 아니다.
+;   ⚠️ 종전 폴백은 "1.2.13" 이었다. 실제 배포본이 1.2.33 이던 시점에도 이 값이 남아 있어
+;      "인스톨러는 1.2.13, 본사 메타핑은 1.0.0, /health 는 1.0.0-beta" 로 전부 제각각이었다.
 #ifndef AppVersion
-  #define AppVersion "1.2.13"
+  #define AppVersion "1.2.34"
 #endif
 
 #ifndef BackofficeApi
