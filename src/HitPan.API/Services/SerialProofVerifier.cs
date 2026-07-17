@@ -192,6 +192,9 @@ public sealed class SerialProofVerifier
         if (string.IsNullOrEmpty(payload.Sub))
             return (false, null, "tenant 식별 불가");
 
+        // ⚠️ 가드 (2026-07-17, 작지서 20260716작2 W-1 파기): 여기에 biz_no(사업자번호) 검증을 추가하지 말 것.
+        //   증표 발급 자체가 백오피스 온라인 사업자번호 매칭을 통과한 결과이므로 오프라인 재대조는 동어반복이며,
+        //   본사 페퍼 EXE 내장(#22·#23) 또는 사업자번호 증표 탑재(저엔트로피 노출면)를 부른다. 상세는 SeedParentCommand 가드.
         return (true, payload, null);
     }
 

@@ -140,6 +140,10 @@ Type: filesandordirs; Name: "{app}\bootstrap.conf"
 // 전역 변수
 // ============================================================
 var
+  // W-2 (작업지시서 20260716작2, 사장님 승인 2026-07-16): 설치 방식 선택 — 처음 설치 / 다시 설치.
+  //   무단사용 방지: 신규설치는 같은 PC 에 이미 있는 사업자번호를 실제 차단(경고만 아님).
+  //   재설치는 그 사업자번호 슬롯을 재사용(멀티슬롯 무손상 — 다른 사업자번호는 계속 추가 허용).
+  InstallModePage: TInputOptionWizardPage;
   SerialKeyPage: TInputQueryWizardPage;
   BootstrapResultPage: TOutputMsgWizardPage;
   // 부모계정 입력 페이지 (작업지시서 20260707작1 ③단계 P0-3, 사장님 결재 2026-07-07):
@@ -175,6 +179,15 @@ var
   G_BizNo: String;
   G_SignedProof: String;
   G_SignedProofKid: String;
+  // W-2/3/4 (작업지시서 20260716작2, 사장님 승인 2026-07-16): 재설치/신규설치 무단사용 방지.
+  //   G_IsReinstall : 설치 방식 선택(True=다시 설치 / False=처음 설치). 신규/재설치 검증 분기.
+  //   G_BizNoHash   : 사업자번호 SHA-256(로컬 자기중복 탐지 편의용, 본사 페퍼 아님 — #22·#23 로컬 전용).
+  //                   ⚠️ 증표 대조용 biz_no_hash(본사 HMAC)와 다른 값이다. 혼용 금지(작지서 W-3 페퍼 정합).
+  //   G_SlotBlocked : DetermineMultiTenantSlot 이 신규설치 동일 사업자번호를 만나 실제 차단해야 함을 알림.
+  //                   procedure 라 반환값이 없어, 이 전역으로 NextButtonClick 이 Result:=False 를 낸다.
+  G_IsReinstall: Boolean;
+  G_BizNoHash: String;
+  G_SlotBlocked: Boolean;
   // ★ 봉합 20260707작2 (W1-6): seed-parent 종료코드를 호출부(CurStepChanged)에서 판정하기 위한 전역.
   //   0=성공 / 10=기존 부모계정 유지(멱등 성공 — 방금 입력한 비번 미적용, 호출부에서 고지) /
   //   6=로그인 스모크 검증 실패(신설) / -1=실행 자체 실패(Exec=False 또는 사전 단계 실패).
@@ -285,9 +298,15 @@ begin
     Delete(Result, Length(Result), 1);
 end;
 
+// W-3 (작업지시서 20260716작2): Pascal Boolean 을 PowerShell 리터럴($true/$false)로 변환.
+function BoolToPsLiteral(B: Boolean): String;
+begin
+  if B then Result := '$true' else Result := '$false';
+end;
+
 // ============================================================
 // 멀티사업자 슬롯 결정 (사고 #16·#21·#22 봉합 WS-20260612-01 2026-06-12)
-// registry.json 영역 박음 — 첫 설치 / 추가 설치 분기
+// registry.json 단일출처 — 첫 설치 / 추가 설치 분기
 // 사장님 결재 [[project_multi_business_per_pc]] (2026-06-09)
 // ============================================================
 procedure DetermineMultiTenantSlot();
@@ -326,29 +345,47 @@ begin
   PsFile := ExpandConstant('{tmp}\determine-slot.ps1');
   ResultFile := ExpandConstant('{tmp}\slot-result.txt');
 
+  // W-3/W-4 (작업지시서 20260716작2, 검증팀 P0-1 봉합 + 사장님 결재 2026-07-17 "재설치=새 시리얼 인증으로만"):
+  //   ■ 재설치 판정 = 로컬 registry 유무가 아니라 백오피스 새 시리얼 인증(license/claim)이 진짜 관문.
+  //     사장님 정의상 정당한 재설치 = 포맷·PC교체(백지 PC)이므로, 백지 PC엔 registry 가 없는 게 정상이다.
+  //     따라서 재설치인데 로컬에 그 사업자번호가 없어도 차단하지 않고 새 슬롯으로 통과시킨다(옛 시리얼이면
+  //     이미 CallLicenseClaimApi 에서 거부됨 — 여기 슬롯 판정은 무단사용 게이트가 아니다).
+  //   ■ 신규설치만 같은 PC 동일 사업자번호를 실제 차단(-2). 시리얼 중복(-1)은 종전 유지. 멀티슬롯 무손상.
   PsScript :=
     '$ErrorActionPreference = ''Continue'';' + #13#10 +
     '$registryPath = "' + ExpandConstant('{commonappdata}') + '\HitPan\registry.json";' + #13#10 +
     '$slot = 1;' + #13#10 +
     '$tenantCode = "' + G_TenantCode + '";' + #13#10 +
+    '$bizNoHash = "' + G_BizNoHash + '";' + #13#10 +
+    '$isReinstall = ' + BoolToPsLiteral(G_IsReinstall) + ';' + #13#10 +
+    'function Get-NextFreeSlot($tenants) {' + #13#10 +
+    '  $used = @($tenants | ForEach-Object { [int]$_.slotIndex });' + #13#10 +
+    '  for ($i = 1; $i -le 5; $i++) { if ($used -notcontains $i) { return $i } }' + #13#10 +
+    '  return 1;' + #13#10 +
+    '}' + #13#10 +
     'if (Test-Path $registryPath) {' + #13#10 +
     '  try {' + #13#10 +
     '    $reg = Get-Content $registryPath -Raw | ConvertFrom-Json;' + #13#10 +
     '    if ($reg.tenants) {' + #13#10 +
-    '      # 같은 시리얼 영역 박힘 영역 확인 (중복 방지)' + #13#10 +
-    '      $existing = $reg.tenants | Where-Object { $_.tenantCode -eq $tenantCode };' + #13#10 +
-    '      if ($existing) {' + #13#10 +
+    '      $sameBiz = $reg.tenants | Where-Object { $_.bizNoHash -eq $bizNoHash };' + #13#10 +
+    '      $sameSerial = $reg.tenants | Where-Object { $_.tenantCode -eq $tenantCode };' + #13#10 +
+    '      if ($isReinstall) {' + #13#10 +
+    '        # 재설치: 같은 사업자번호 슬롯이 있으면 재사용, 없으면(백지·레거시) 새 슬롯으로 통과.' + #13#10 +
+    '        if ($sameBiz) { $slot = [int]($sameBiz | Select-Object -First 1).slotIndex; }' + #13#10 +
+    '        else { $slot = Get-NextFreeSlot $reg.tenants; }' + #13#10 +
+    '      } elseif ($sameBiz) {' + #13#10 +
+    '        # 신규설치인데 같은 사업자번호가 이미 이 PC 에 있음 → 실제 차단(-2).' + #13#10 +
+    '        $slot = -2;' + #13#10 +
+    '      } elseif ($sameSerial) {' + #13#10 +
+    '        # 신규설치, 사업자번호는 새것이나 같은 시리얼이 이미 있음(종전 -1 유지).' + #13#10 +
     '        $slot = -1;' + #13#10 +
     '      } else {' + #13#10 +
-    '        # 다음 슬롯 영역 결정' + #13#10 +
-    '        $usedSlots = $reg.tenants | ForEach-Object { [int]$_.slotIndex };' + #13#10 +
-    '        for ($i = 1; $i -le 5; $i++) {' + #13#10 +
-    '          if ($usedSlots -notcontains $i) { $slot = $i; break; }' + #13#10 +
-    '        }' + #13#10 +
+    '        $slot = Get-NextFreeSlot $reg.tenants;' + #13#10 +
     '      }' + #13#10 +
     '    }' + #13#10 +
     '  } catch { $slot = 1; }' + #13#10 +
     '}' + #13#10 +
+    '# registry 자체가 없음(백지 PC) = 재설치·신규 모두 슬롯 1 로 정상 시작.' + #13#10 +
     '[System.IO.File]::WriteAllText("' + ResultFile + '", $slot.ToString(), [System.Text.Encoding]::UTF8);';
 
   SaveStringToFile(PsFile, PsScript, False);
@@ -362,16 +399,35 @@ begin
   DeleteFile(PsFile);
   DeleteFile(ResultFile);
 
-  // 슬롯 = -1 영역 = 동일 시리얼 영역 박힘 영역 (중복)
-  if G_SlotIndex = -1 then begin
-    MsgBox('이 시리얼 키로 이미 설치된 회사가 있습니다.' + #13#10 +
-           '다른 시리얼로 시도하거나 본사에 문의해주세요.', mbError, MB_OK);
+  // W-3 (작업지시서 20260716작2): 신규설치인데 같은 PC 에 동일 사업자번호가 이미 있음 → 실제 차단.
+  //   종전엔 시리얼 중복(-1)에도 경고만 하고 G_SlotIndex:=1 로 통과했다(사장님 관찰 "경고만 뜨고 설치됨").
+  //   이제 -2(동일 사업자번호)·-1(동일 시리얼)은 G_SlotBlocked 로 NextButtonClick 이 실제 차단한다.
+  //   (재설치 대상 없음은 -3 차단이 아니라 새 슬롯 통과로 바뀌었다 — W-4 봉합, 사장님 결재 2026-07-17.)
+  if G_SlotIndex = -2 then begin
+    MsgBox('이 PC 에 이미 같은 사업자등록번호로 설치된 회사가 있습니다.' + #13#10 + #13#10 +
+           '같은 회사를 다시 설치하시려면 [뒤로] 눌러 「다시 설치」를 선택하세요.' + #13#10 +
+           '다른 회사(다른 사업자번호)라면 사업자번호를 확인해 주세요.', mbError, MB_OK);
+    G_SlotBlocked := True;
     G_SlotIndex := 1;
     G_BootstrapOk := False;
     Exit;
   end;
 
-  // 슬롯 영역 정합 — 포트·DB 영역 박음
+  // W-4 (검증팀 P0-1 봉합, 사장님 결재 2026-07-17): 재설치는 로컬 registry 유무로 차단하지 않는다.
+  //   백지 PC(포맷·PC교체)엔 registry 가 없는 게 정상 — 새 시리얼 인증(CallLicenseClaimApi)이 진짜 관문이다.
+  //   따라서 -3(재설치 대상 없음) 차단은 제거했다. PS 판정이 새 슬롯을 반환하므로 여기서 별도 처리 불필요.
+
+  // 슬롯 = -1 = 동일 시리얼 중복 (사업자번호는 다르나 같은 시리얼) — 종전 경고 유지.
+  if G_SlotIndex = -1 then begin
+    MsgBox('이 시리얼 키로 이미 설치된 회사가 있습니다.' + #13#10 +
+           '다른 시리얼로 시도하거나 본사에 문의해주세요.', mbError, MB_OK);
+    G_SlotBlocked := True;
+    G_SlotIndex := 1;
+    G_BootstrapOk := False;
+    Exit;
+  end;
+
+  // 슬롯 정합 — 포트·DB 결정
   G_ApiPort := 5257 + ((G_SlotIndex - 1) * 100);
   // 봉합 2026-06-16 (B안): G_TenantInstallDir 영역 박음 = CurStepChanged(ssInstall) 시점.
   //   SerialKeyPage 단계에서는 {app} 미초기화 영역 사고.
@@ -595,8 +651,20 @@ end;
 // ============================================================
 procedure InitializeWizard;
 begin
-  // 시리얼 입력 페이지
-  SerialKeyPage := CreateInputQueryPage(wpWelcome,
+  // W-2 (작업지시서 20260716작2): 설치 방식 선택 페이지 — 시리얼 입력보다 앞.
+  //   두 방식 모두 같은 시리얼+사업자번호 입력을 쓰고, 검증만 분기한다(마법사 단순 유지 = 히트판 정신).
+  InstallModePage := CreateInputOptionPage(wpWelcome,
+    '설치 방식 선택',
+    '이 PC 에 히트판 ERP 를 어떻게 설치할지 선택하세요',
+    '처음 설치와 다시 설치는 시리얼 확인 방식이 다릅니다.' + #13#10 +
+    '한 PC 에 여러 회사를 설치하실 수 있습니다(회사마다 사업자번호가 달라야 합니다).',
+    True, False);
+  InstallModePage.Add('처음 설치 — 이 PC 에 새 회사를 설치합니다');
+  InstallModePage.Add('다시 설치 — 이미 쓰던 회사를 재설치합니다 (본사에서 새로 발급받은 시리얼 필요)');
+  InstallModePage.SelectedValueIndex := 0;
+
+  // 시리얼 입력 페이지 (부모 = 설치 방식 선택 페이지)
+  SerialKeyPage := CreateInputQueryPage(InstallModePage.ID,
     '시리얼 키 입력',
     '이메일로 받으신 시리얼 키를 입력해주세요',
     '본사에서 발급된 시리얼 키는 다음 형식입니다:' + #13#10 +
@@ -643,6 +711,13 @@ var
   ParentName, ParentId, ParentPw, ParentPwc: String;
 begin
   Result := True;
+
+  // W-2 (작업지시서 20260716작2): 설치 방식 선택 확정. 이후 시리얼 페이지 검증이 이 값으로 분기한다.
+  if CurPageID = InstallModePage.ID then
+  begin
+    G_IsReinstall := (InstallModePage.SelectedValueIndex = 1);
+    Exit;
+  end;
 
   if CurPageID = SerialKeyPage.ID then
   begin
@@ -697,6 +772,12 @@ begin
       Result := False;
       Exit;
     end;
+
+    // W-3 (작업지시서 20260716작2): 로컬 자기중복 탐지용 사업자번호 해시.
+    //   본사 페퍼 없는 SHA-256 — 이 값은 같은 PC 안에서 "이 사업자번호가 이미 설치됐나"만 판정한다.
+    //   본사 대조용이 아니므로 페퍼가 필요 없고, 페퍼를 EXE 에 넣으면 오히려 #22·#23 위반이다.
+    //   증표 대조용 biz_no_hash(본사 HMAC)와는 다른 값 — 혼용 금지. GetSHA256OfUnicodeString 은 Inno 내장.
+    G_BizNoHash := GetSHA256OfUnicodeString(G_BizNo);
 
     // 백오피스 API 호출
     WizardForm.NextButton.Enabled := False;
@@ -756,12 +837,25 @@ begin
     WizardForm.NextButton.Enabled := True;
     WizardForm.NextButton.Caption := '다음';
 
-    // 멀티사업자 영역 슬롯 결정 (사고 #16·#21·#22 봉합 WS-20260612-01)
-    //   registry.json 영역 박음 — 첫 설치 = 1번, 추가 = 다음 영역
+    // 멀티사업자 슬롯 결정 (사고 #16·#21·#22 봉합 WS-20260612-01)
+    //   registry.json 단일출처 — 첫 설치 = 1번, 추가 = 다음 빈 슬롯
     //   포트: 5257 + 100*(N-1) → 슬롯 1=5257, 슬롯 2=5357, 슬롯 3=5457, ...
     //   DB: hitpan_erp_{tenantCode}
     //   디렉터리: {app}\tenant-N
+    // W-3 (작업지시서 20260716작2): 신규설치 동일 사업자번호는 실제 차단.
+    //   procedure 라 반환값이 없어 G_SlotBlocked 전역으로 판정을 받는다. 재시도 위해 매번 초기화.
+    // 검증팀 P1 봉합: [뒤로] 눌러 사업자번호를 바꿔 다시 넘어오면 슬롯·중복판정을 다시 해야 한다.
+    //   G_SlotAlreadyDetermined(사고#45 슬롯 이중점유 방지)가 재판정을 막아, 종전 슬롯값으로 통과하며
+    //   바뀐 사업자번호의 중복 차단(-2)이 스킵되는 구멍이 있었다. SerialKeyPage 를 다시 넘어올 때마다
+    //   리셋해 재판정을 강제한다(슬롯 확정은 여전히 이 판정 1회로 끝나므로 이중점유는 안 생긴다).
+    G_SlotAlreadyDetermined := False;
+    G_SlotBlocked := False;
     DetermineMultiTenantSlot();
+    if G_SlotBlocked then begin
+      // 차단 사유 MsgBox 는 DetermineMultiTenantSlot 내부에서 이미 표시함. 여기서는 진행만 막는다.
+      Result := False;
+      Exit;
+    end;
 
     // 회사정보 확인 페이지에 표시할 텍스트 갱신
     //   길 B (사장님 결재 2026-06-18): 사업자번호·대표자 표시 제거 — 백오피스가 평문을 안 주므로
@@ -1536,6 +1630,8 @@ begin
     BatchContent.Add('DB_NAME=' + G_DbName);
     BatchContent.Add('INSTALL_DIR=' + G_TenantInstallDir);
     BatchContent.Add('NEXT_SLOT=' + IntToStr(G_SlotIndex + 1));
+    // W-3 (작업지시서 20260716작2): 로컬 자기중복 판정용 사업자번호 해시(다음 설치가 이 값으로 중복 차단).
+    BatchContent.Add('BIZ_NO_HASH=' + G_BizNoHash);
     BatchContent.SaveToFile(ExpandConstant('{tmp}\tenant-input.txt'));
   finally
     BatchContent.Free;
@@ -1568,6 +1664,7 @@ begin
     BatchContent.Add('  apiPort = [int]$kv["API_PORT"];');
     BatchContent.Add('  dbName = $kv["DB_NAME"];');
     BatchContent.Add('  installDir = $kv["INSTALL_DIR"];');
+    BatchContent.Add('  bizNoHash = $kv["BIZ_NO_HASH"];');
     BatchContent.Add('  installedAt = (Get-Date).ToString(''o'')');
     BatchContent.Add('};');
     BatchContent.Add('$reg.tenants += $tenant;');

@@ -123,6 +123,16 @@ public static class SeedParentCommand
             var ct = CancellationToken.None;
 
             // 증표 오프라인 검증 — create-parent 와 동일 규칙(allowExpired: true, 서명·aud 강제).
+            //
+            // ⚠️ 가드 (2026-07-17, 작지서 20260716작2 W-1 파기 — 보안 매니저 반증 + CTO 재심 자기파기 + 사장님 재확인):
+            //   여기서 input.BizNo 를 증표와 다시 대조하지 말 것. 그건 구멍이 아니라 정상이다.
+            //   이유: seed-parent 에 도달했다는 것 자체가 이미 온라인 검증을 통과했다는 뜻이다 —
+            //     증표(SignedProof)는 백오피스 license/claim(LandingPublicController)에서 사업자번호 해시
+            //     매칭을 통과해야만 발급된다. 증표를 손에 쥔 시점에서 사업자번호는 이미 맞았다.
+            //   오프라인 재대조를 구현하면 (a)본사 페퍼를 EXE 에 내장(#22·#23 위반) 또는
+            //     (b)사업자번호(공개정보·10자리 저엔트로피)를 증표에 실어 전 고객 PC 에 배포(노출면 신설) 중
+            //     하나가 강제된다. 막는 것 0, 신설하는 약점 1. 헌법 #22 정면 위반.
+            //   전수조사(사람·AI)가 "사업자번호 대조가 빠졌다 = 누락"으로 오판해 추가하지 말 것(헌법 #37 정신).
             var (ok, payload, error) = verifier.Verify(input.SignedProof, allowExpired: true);
             if (!ok || payload is null)
             {
