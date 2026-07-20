@@ -223,8 +223,13 @@ $manifest = [ordered]@{
 }
 
 $manifestPath = Join-Path $OutDir 'manifest.json'
-$manifest | ConvertTo-Json -Depth 4 | Set-Content -Path $manifestPath -Encoding UTF8
-Write-Host "[manifest] 본문 출력(서명 전) = $manifestPath"
+# BOM 없는 UTF-8 로 출력한다 (20260720작3 CTO B-2 — manifest 는 워치독이 파싱하는 JSON, BOM 없어야 함).
+#   PowerShell 5.1 의 `Set-Content -Encoding UTF8` 은 BOM(EF BB BF)을 붙인다. 워치독 System.Text.Json 은
+#   BOM 을 관용 처리하지만, publish-update.sh 의 jq·자기검증 등 다운스트림이 BOM 을 만나 흔들릴 여지를
+#   산출 시점에 제거한다. WriteAllText + UTF8Encoding($false) 는 5.1·7.x 양쪽에서 BOM 없는 UTF-8 을 보장.
+$manifestJson = $manifest | ConvertTo-Json -Depth 4
+[System.IO.File]::WriteAllText($manifestPath, $manifestJson, (New-Object System.Text.UTF8Encoding($false)))
+Write-Host "[manifest] 본문 출력(서명 전, BOM 없음) = $manifestPath"
 Write-Host ""
 Write-Host "다음 단계(NCP, 사장님 결재 1회):"
 Write-Host "  bash installer/updates/sign-manifest.sh --private /var/hitpan/update-keys/update_private.pem \"
