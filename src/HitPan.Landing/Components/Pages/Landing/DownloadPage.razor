@@ -5,6 +5,7 @@
 @inject IJSRuntime JS
 @inject IConfiguration Config
 @inject ILogger<DownloadPage> Logger
+@inject IHttpClientFactory HttpFactory
 
 <PageTitle>다운로드 — 히트판 ERP</PageTitle>
 
@@ -122,19 +123,56 @@
     //     이 비대칭이 F-5 재발 경로다 — NCP 랜딩에 환경변수 주입이 빠지면 랜딩은 조용히 옛 버전을,
     //     메일은 새 버전을 안내해 "같은 회사가 두 경로에서 다른 EXE 를 주는" 사고가 그대로 되살아난다.
     //     게다가 조용한 폴백이라 아무도 모른다(헌법 #15). 값이 없으면 안내하지 않는 편이 안전하다.
-    private string? InstallerVersion => Config["Release:InstallerVersion"];
+    // ★ 사장님 결재 2026-07-21 — "랜딩은 무조건 최신 설치파일". 종전엔 Release:InstallerVersion 설정값을
+    //   사람이 손으로 맞춰야 해(오늘 사고: NCP 랜딩은 7/4 옛 배포본이라 설정조차 없어 옛 EXE 안내), 새 버전마다
+    //   까먹으면 옛 EXE 가 나갔다. 이제 자동 업데이트의 단일 진실원인 manifest(updates.hitpan.kr/manifest.json,
+    //   항상 최신)를 읽어 다운로드 버전을 자동 결정한다. 새 버전은 manifest 만 갱신하면 랜딩·자동업데이트가
+    //   동시에 최신 = 랜딩만 옛 버전 나가는 사고 구조적 불가(헌법 #20·#35 유기적 연결 정합).
+    //   폴백: manifest 조회 실패 시에만 설정값(Release:InstallerVersion) → 그것도 없으면 미표시(헌법 #15 로그).
+    private string ManifestUrl =>
+        Config["Release:ManifestUrl"] ?? "https://updates.hitpan.kr/manifest.json";
+    private string DownloadBaseUrl =>
+        (Config["Release:DownloadBaseUrl"] ?? "https://updates.hitpan.kr/packages").TrimEnd('/');
+
+    private string? _installerVersion;
+    private string? InstallerVersion => _installerVersion;
     private bool ReleaseConfigured => !string.IsNullOrWhiteSpace(InstallerVersion);
     private string DownloadUrl =>
-        $"{(Config["Release:DownloadBaseUrl"] ?? "https://updates.hitpan.kr/packages").TrimEnd('/')}/HitPan-ERP-Setup-{InstallerVersion}.exe";
+        $"{DownloadBaseUrl}/HitPan-ERP-Setup-{InstallerVersion}.exe";
 
-    protected override void OnInitialized()
+    protected override async Task OnInitializedAsync()
     {
-        // 헌법 #15: 침묵 금지. 설치 파일 안내가 빠진 채 페이지가 뜨는 건 운영 사고이므로 흔적을 남긴다.
-        //   조용히 폴백하던 초판에서는 이 상황이 아무 흔적 없이 지나갔다(검증팀 재적발).
+        // 1) manifest 에서 최신 버전 조회 (단일 진실원)
+        try
+        {
+            var http = HttpFactory.CreateClient();
+            http.Timeout = TimeSpan.FromSeconds(5);
+            using var doc = System.Text.Json.JsonDocument.Parse(
+                await http.GetStringAsync(ManifestUrl));
+            if (doc.RootElement.TryGetProperty("version", out var v))
+            {
+                var ver = v.GetString();
+                if (!string.IsNullOrWhiteSpace(ver))
+                    _installerVersion = ver.Trim();
+            }
+        }
+        catch (Exception ex)
+        {
+            // 헌법 #15: 침묵 금지. manifest 조회 실패는 흔적을 남기고 설정값으로 폴백한다.
+            Logger.LogWarning(ex,
+                "[DownloadPage] manifest({Url}) 조회 실패 — 설정값(Release:InstallerVersion)으로 폴백.",
+                ManifestUrl);
+        }
+
+        // 2) 폴백 — manifest 실패 시에만 설정값 사용
+        if (string.IsNullOrWhiteSpace(_installerVersion))
+            _installerVersion = Config["Release:InstallerVersion"];
+
+        // 3) 그래도 없으면 운영 사고 — 침묵 금지(헌법 #15)
         if (!ReleaseConfigured)
             Logger.LogError(
-                "[DownloadPage] Release:InstallerVersion 미설정 — 다운로드 안내를 표시하지 못했습니다. " +
-                "환경변수 Release__InstallerVersion 또는 appsettings 를 확인하세요.");
+                "[DownloadPage] 다운로드 버전을 결정하지 못했습니다 — manifest 조회 실패 + Release:InstallerVersion 미설정. " +
+                "manifest 서빙 상태를 확인하세요.");
     }
 
     private async Task CopyKey()
