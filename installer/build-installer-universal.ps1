@@ -210,10 +210,10 @@ $sqlNoComments = ($sql -split "`n" | Where-Object { $_ -notmatch '^\s*--' }) -jo
 $banHits = ([regex]::Matches($sqlNoComments, '(?im)^\s*USE\s|CREATE\s+DATABASE|DROP\s+DATABASE|ALTER\s+DATABASE|DEFINER\s*=')).Count
 if ($banHits -gt 0) { throw "  ❌ 게이트2 실패: 금지 구문(USE/CREATE DATABASE/DEFINER) $banHits 건. 출시 차단." }
 
-# ── 게이트 3: 구조 보존 — 테이블 수(124) + 트리거(3) ── (2026-06-29 schema_migrations 편입 123→124 고리4 ①)
+# ── 게이트 3: 구조 보존 — 테이블 수(125) + 트리거(3) ── (2026-06-29 schema_migrations 편입 123→124 고리4 ① / 2026-07-20 local_update_apply_status 편입 124→125 고리4 §W4-6)
 $tableCount   = ([regex]::Matches($sql, 'CREATE TABLE')).Count
 $triggerCount = ([regex]::Matches($sql, '(?im)CREATE.*TRIGGER|50003 .*TRIGGER')).Count
-if ($tableCount -ne 124) { throw "  ❌ 게이트3 실패: 구조 불일치 — 기대 124 테이블 ≠ $tableCount. 출시 차단." }
+if ($tableCount -ne 125) { throw "  ❌ 게이트3 실패: 구조 불일치 — 기대 125 테이블 ≠ $tableCount. 출시 차단." }
 if ($triggerCount -lt 3) { throw "  ❌ 게이트3 실패: 트리거 누락 — 기대 3 ≠ $triggerCount. 출시 차단." }
 
 # ── 게이트 4: 데이터 0 — 개발/실데이터 미혼입 (common_codes 코드성 시드만 허용) ──

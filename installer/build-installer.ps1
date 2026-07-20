@@ -249,7 +249,7 @@ if ($banHits -gt 0) {
 # 빌드 PC에 개발 hitpan_erp가 있으면 실측 교차검증, 없으면 고정 기대값으로 검사.
 $tableCount   = ([regex]::Matches($sql, 'CREATE TABLE')).Count
 $triggerCount = ([regex]::Matches($sql, '(?im)CREATE.*TRIGGER|50003 .*TRIGGER')).Count
-$ExpectedTables   = 124   # ERP 로컬 배포본 BASE TABLE 수 (본사 16테이블 제거 후, 2026-06-19 실측 / 2026-06-29 schema_migrations 편입 123→124 고리4 ①)
+$ExpectedTables   = 125   # ERP 로컬 배포본 BASE TABLE 수 (본사 16테이블 제거 후, 2026-06-19 실측 / 2026-06-29 schema_migrations 편입 123→124 고리4 ① / 2026-07-20 local_update_apply_status 편입 124→125 고리4 §W4-6)
 $ExpectedTriggers = 3     # ERP 필수 트리거 수 (본사 5트리거 동반 제거 후: psp비율2 + 세금계산서잠금1)
 if ($tableCount -ne $ExpectedTables) {
     Write-Error "  ❌ 게이트 실패: 구조 불일치 — 기대 $ExpectedTables 테이블 ≠ 빈 스키마 $tableCount. '구조 100% 그대로' 위반. 출시 차단."
