@@ -277,7 +277,7 @@ public class Worker : BackgroundService
     ///   Normal    = 야간 자동(새벽 3시대, IsNightWindow)에만 적용 진입(고리3 백업→차단까지).
     ///   Emergency = 안내 후 적용(시간 무관, 적용 진입).
     ///   Major     = ERP 로그인 시 동의 대기(고리2 담당) — 워치독은 적용을 시작하지 않고 로그만 남긴다.
-    /// 실제 EXE 교체·재시작·마이그(고리4)는 미구현 — ApplyUpdateAsync 가 백업까지만 수행한다.
+    /// 실제 EXE 교체·재시작·검증·롤백(고리4 W4-2~6)은 ApplyUpdateAsync 가 수행한다(커밋 a2c249f). DB 마이그 자동적용은 고리5 범위.
     /// </summary>
     private async Task EvaluateUpdateOncePerDayAsync(CancellationToken ct)
     {
@@ -374,7 +374,7 @@ public class Worker : BackgroundService
 
     /// <summary>
     /// 작1 고리2 워치독 측 — 펜딩 Major 업데이트의 로컬 동의를 읽어 적용 가부를 판단한다(A안, 헌법 #30).
-    ///   approve  → 영업시간 외에 ApplyUpdateAsync 진입(백업→차단→고리4 자리). 영업시간이면 미루기(다음 루프 재판단).
+    ///   approve  → 영업시간 외에 ApplyUpdateAsync 진입(백업→차단→고리4 교체·재시작·검증·롤백). 영업시간이면 미루기(다음 루프 재판단).
     ///   reject   → 적용 안 함. 펜딩 폐기(다음 로그인 재제시는 ERP 몫 — 새 동의가 들어오면 manifest 재발견 시 재펜딩).
     ///   None     → 미응답. 펜딩 유지(다음 루프 재조회).
     ///   Error    → 조회 실패. 펜딩 유지(보수적, 다음 루프 재시도).

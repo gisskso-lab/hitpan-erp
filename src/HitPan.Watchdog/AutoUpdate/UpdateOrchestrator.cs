@@ -119,12 +119,15 @@ public sealed class UpdateOrchestrator
     }
 
     /// <summary>
-    /// 작1 고리3 — 안전 적용 흐름. 다운로드+검증 성공 후 "반드시 백업 먼저 → 백업 실패 시 물리적 차단 →
-    /// 백업 성공(파일 존재·크기>0) 검증 후에만 적용 단계 진입" 을 강제한다(헌법 #20 데이터 무결성).
+    /// 작1 고리3+고리4 — 자동 업데이트 안전 적용 흐름 전체.
+    /// 다운로드+검증 → "반드시 백업 먼저 → 백업 실패 시 물리적 차단"(고리3, 헌법 #20) →
+    /// W4-1 정지 → W4-2 파일 교체(web→api 스왑) → W4-4 재시작(api→web) →
+    /// W4-5 검증(‑/health 200+버전 AND 교체 EXE FileVersion 2중 판정) → 실패 시 롤백(.old 복원) →
+    /// W4-6 상태 기록(local_update_apply_status)·롤백 실패 시 본사 메타핑 통지.
     ///
-    /// 반환 = 적용 단계까지 안전하게 도달했는지(true)/차단됐는지(false).
-    /// ⚠️ 고리4(Velopack 실제 EXE 교체·재시작 + DB 마이그·실패 롤백)는 본 작업 범위 밖이다.
-    ///    백업 성공 직후 실제 ApplyUpdatesAndRestart 는 호출하지 않는다(VelopackUpdaterStub 그대로).
+    /// 반환 = 신버전이 실제로 200+정확한 버전으로 살아났는지(true)/차단·롤백됐는지(false).
+    ///   ※ 종전 이 자리에는 "고리4는 범위 밖, 백업까지만 수행한다"는 주석이 있었으나(20260720작1 W4-2~6로 구현됨),
+    ///     실제 교체·재시작·검증·롤백을 수행하도록 커밋 a2c249f 에서 완결됐다 — 낡은 주석 정정(CTO B-1).
     /// </summary>
     public async Task<bool> ApplyUpdateAsync(UpdateManifest manifest, CancellationToken ct)
     {
