@@ -15,8 +15,65 @@
 #   두 규격이 일치하는지는 UpdateSignatureTests(왕복 테스트)로 자동 고정돼 있다.
 #
 # 헌법 정합: #22(개인키 NCP 격리) · #29(서명=사람 결재 1회) · #23(5중 검증)
+#
+# ■ publish-update.sh 가 이 파일을 source 한다 (20260720작3 B-1 — 서명 규격 단일 출처)
+#   서명 대상 문자열(payload)이 세 군데(BuildSigningPayload.cs / 여기 / publish)로 갈라지면
+#   정상 릴리스가 전 고객 PC 에서 거부된다. 그래서 payload 조립·정규화·서명·검증을 아래
+#   '재사용 함수'로 못박고, publish-update.sh 는 이 함수만 호출한다(자기 손으로 payload 를 다시 짜지 않음).
+#   HITPAN_SIGN_MANIFEST_SOURCED=1 로 source 하면 아래 main 실행부는 건너뛴다(함수만 로드).
 # =============================================================================
 set -euo pipefail
+
+# ── 재사용 함수 (publish-update.sh 가 source 로 가져다 쓴다 — B-1 단일 출처) ───────
+# 서명 대상 문자열을 만든다. BuildSigningPayload(UpdateManifestSigning.cs)와 바이트 동일해야 한다.
+#   개행은 LF('\n') 하나. 마지막 줄(migration) 뒤 개행 없음. BOM 없음.
+#   인자: version channel url sha256 size migration  (channel·sha256 은 이 함수가 소문자화, migration 은 true|false 검증)
+hitpan_build_signing_payload() {
+  local _ver="$1" _ch="$2" _url="$3" _sha="$4" _size="$5" _mig="$6"
+  local _ch_lc _sha_lc
+  _ch_lc="$(printf '%s' "$_ch"  | tr '[:upper:]' '[:lower:]')"
+  _sha_lc="$(printf '%s' "$_sha" | tr '[:upper:]' '[:lower:]')"
+  case "$_mig" in
+    true|false) : ;;
+    *) echo "[sign] --migration 은 true 또는 false 여야 합니다 (받은 값: $_mig)" >&2; return 3 ;;
+  esac
+  printf 'hitpan-update-v1\nversion=%s\nchannel=%s\nurl=%s\nsha256=%s\nsize=%s\nmigration=%s' \
+    "$_ver" "$_ch_lc" "$_url" "$_sha_lc" "$_size" "$_mig"
+}
+
+# payload 를 개인키로 서명해 한 줄 Base64(표준 '+/=')로 낸다. ECDSA P-256 / SHA-256 / DER.
+#   인자: private_pem  version channel url sha256 size migration
+hitpan_sign_payload() {
+  local _priv="$1"; shift
+  local _payload
+  _payload="$(hitpan_build_signing_payload "$@")" || return $?
+  printf '%s' "$_payload" | openssl dgst -sha256 -sign "$_priv" | openssl base64 -A
+}
+
+# 서빙되는 서명이 공개키로 검증되는지 확인한다(20260720작3 B-2 — 대상은 '규격 문자열'이지 파일 전체가 아님).
+#   인자: public_pem signature_base64  version channel url sha256 size migration
+#   반환: 0=검증통과 / 1=불일치·형식오류
+hitpan_verify_payload() {
+  local _pub="$1" _sig_b64="$2"; shift 2
+  local _payload _tmpdir _rc
+  _payload="$(hitpan_build_signing_payload "$@")" || return $?
+  _tmpdir="$(mktemp -d)"
+  # openssl base64 는 표준 Base64('+/=')만 받는다. sign-manifest 서명은 표준 Base64라 그대로 디코드된다.
+  printf '%s' "$_sig_b64" | openssl base64 -d -A > "$_tmpdir/sig.bin" 2>/dev/null || { rm -rf "$_tmpdir"; return 1; }
+  if printf '%s' "$_payload" | openssl dgst -sha256 -verify "$_pub" -signature "$_tmpdir/sig.bin" >/dev/null 2>&1; then
+    _rc=0
+  else
+    _rc=1
+  fi
+  rm -rf "$_tmpdir"
+  return $_rc
+}
+
+# source 로 로드만 하는 경우(publish-update.sh) 여기서 멈춘다 — 아래 CLI main 은 실행하지 않는다.
+if [[ "${HITPAN_SIGN_MANIFEST_SOURCED:-0}" == "1" ]]; then
+  return 0
+fi
+# ── 여기부터는 직접 실행(CLI) 시에만 도는 main ────────────────────────────────
 
 PRIVATE=""
 VERSION=""
@@ -61,26 +118,13 @@ done
 [[ -z "$PRIVATE" || -z "$VERSION" || -z "$CHANNEL" || -z "$URL" || -z "$SHA256" || -z "$SIZE" || -z "$MIGRATION" ]] && usage
 [[ -f "$PRIVATE" ]] || { echo "개인키 파일이 없습니다: $PRIVATE" >&2; exit 2; }
 
-# --- 규격 정규화 (검증기와 동일해야 함) -------------------------------------
-#   channel: 소문자 / sha256: 소문자 / migration: true|false 만 허용
-CHANNEL_LC="$(printf '%s' "$CHANNEL" | tr '[:upper:]' '[:lower:]')"
-SHA256_LC="$(printf '%s' "$SHA256"  | tr '[:upper:]' '[:lower:]')"
-case "$MIGRATION" in
-  true|false) : ;;
-  *) echo "--migration 은 true 또는 false 여야 합니다 (받은 값: $MIGRATION)" >&2; exit 3 ;;
-esac
-
-# --- 서명 대상 문자열 (BuildSigningPayload 와 바이트 동일) ---------------------
-#   개행은 반드시 LF('\n') 하나. 마지막 줄(migration) 뒤에는 개행 없음. BOM 없음.
-#   printf 는 셸·로케일에 무관하게 정확한 바이트를 낸다(echo 와 달리 이스케이프가 예측 가능).
-PAYLOAD="$(printf 'hitpan-update-v1\nversion=%s\nchannel=%s\nurl=%s\nsha256=%s\nsize=%s\nmigration=%s' \
-  "$VERSION" "$CHANNEL_LC" "$URL" "$SHA256_LC" "$SIZE" "$MIGRATION")"
-
-# --- 서명 (ECDSA P-256 / SHA-256) --------------------------------------------
-#   openssl dgst -sign 은 DER(Rfc3279DerSequence) 서명을 낸다.
-#   검증기(UpdateSignatureVerifier)가 DER·P1363 둘 다 받도록 봉합돼 있어 이대로 통과한다.
-#   -A: 한 줄 Base64(줄바꿈 없음). 표준 Base64('+/=')이며 검증기가 이 형식을 받는다.
-SIGNATURE="$(printf '%s' "$PAYLOAD" | openssl dgst -sha256 -sign "$PRIVATE" | openssl base64 -A)"
+# --- 서명 대상 문자열 + 서명 (재사용 함수 = 단일 출처, B-1) --------------------
+#   payload 조립·정규화(channel/sha256 소문자, migration 검증)는 위 hitpan_build_signing_payload 가 담당.
+#   확인용으로 payload 도 함께 만들어 화면에 보여준다(서명한 문자열을 사장님이 눈으로 확인).
+PAYLOAD="$(hitpan_build_signing_payload "$VERSION" "$CHANNEL" "$URL" "$SHA256" "$SIZE" "$MIGRATION")" \
+  || { echo "payload 조립 실패" >&2; exit 3; }
+SIGNATURE="$(hitpan_sign_payload "$PRIVATE" "$VERSION" "$CHANNEL" "$URL" "$SHA256" "$SIZE" "$MIGRATION")" \
+  || { echo "서명 실패" >&2; exit 3; }
 
 # --- 출력 --------------------------------------------------------------------
 echo "──────────────────────────────────────────────────────────"
