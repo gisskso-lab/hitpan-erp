@@ -54,7 +54,14 @@ public sealed class UpdateSignatureVerifier
     private static readonly IReadOnlyDictionary<string, string> EmbeddedPublicKeys =
         new Dictionary<string, string>(StringComparer.Ordinal)
         {
-            // ["upd-v1"] = "-----BEGIN PUBLIC KEY-----\n...\n-----END PUBLIC KEY-----\n",
+            // upd-v1 (베타) — NCP /var/hitpan/update-keys/update_private.pem 로 서명한다(개인키는 NCP 에만).
+            //   생성: 2026-07-20, 사장님 NCP 실행(헌법 #29). 이 공개키는 노출돼도 위조 불가.
+            //   정식 전 테넌트별/HSM 키로 롤오버 시 kid 를 upd-v2 로 올리고 db.conf override 로 무중단 교체.
+            ["upd-v1"] =
+                "-----BEGIN PUBLIC KEY-----\n" +
+                "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEKG/T7LlzfeNIOiL8CtCV2eHPVH4k\n" +
+                "Xp8MqEZEwVst1xjnJcRSN9QRC/TIaQXBem6t5X/37NldMyZzQKRTa1O23Q==\n" +
+                "-----END PUBLIC KEY-----\n",
         };
 
     /// <summary>
