@@ -82,6 +82,80 @@ public sealed class WatchdogStatusWriter
         }
     }
 
+    /// <summary>
+    /// W4-6 — 업데이트 "적용 결과"를 local_update_apply_status 에 UPSERT 한다(멱등키 = applied_version).
+    ///   local_update_status(새버전 "발견" 적재)와 역할이 다르다 — 이건 실제 적용(교체·재시작·롤백) 뒤 "결과".
+    ///
+    ///   result = success | rolled_back | rollback_failed | blocked (작지서·clean DDL 코멘트와 동일 어휘).
+    ///   버전당 1행: UNIQUE(applied_version) + INSERT ... ON DUPLICATE KEY UPDATE 로 재시도 시 덮어쓴다(멱등).
+    ///
+    /// ★ 자가생성(중요): 기존 1.2.33 PC 가 자동업데이트로 넘어오면 이 테이블이 없다(clean DDL 은 신규설치만).
+    ///   그래서 쓰기 직전 CREATE TABLE IF NOT EXISTS(clean DDL 과 문자 일치)를 먼저 실행해 자가생성한다.
+    ///   이 테이블은 업데이트 zip 의 Migrations/SQL 에 절대 넣지 않는다(W4-2 호환게이트가 local_update_ 접두사
+    ///   차단 = 빌드실패). clean DDL + 이 자가생성 두 경로뿐이다(헌법 #36).
+    ///
+    /// 실패는 침묵하지 않고 로그만 남긴다(헌법 #15). 반환 false = 기록 실패(업데이트 흐름은 멈추지 않는다).
+    /// </summary>
+    public async Task<bool> WriteApplyStatusAsync(string version, string result, string? detail, CancellationToken ct)
+    {
+        try
+        {
+            var (host, port, dbName, user, pass) = ResolveDbCredentials();
+            if (string.IsNullOrWhiteSpace(dbName) || string.IsNullOrWhiteSpace(user))
+            {
+                _logger.LogError("[Update/Apply] db.conf 에서 DB 자격증명을 읽지 못했습니다(DB_NAME/DB_USER 부재) — 적용결과 기록 불가");
+                return false;
+            }
+            if (!IsSafeVersionLiteral(version))
+            {
+                _logger.LogError("[Update/Apply] 안전하지 않은 버전 문자열 — 적용결과 기록 거부: '{V}'", version);
+                return false;
+            }
+
+            var resultLit = EscapeSqlLiteral(result);      // enum 성격 문자열이나 보수적으로 이스케이프
+            var detailLit = EscapeSqlLiteral(detail);       // NULL 또는 '이스케이프'
+
+            // 자가생성 DDL — clean DDL(installer/hitpan_db_clean.sql:1887~1898)과 컬럼·키·엔진 100% 일치.
+            //   차이는 CREATE TABLE IF NOT EXISTS(기존 데이터·행 보존, DROP 금지)뿐 — 자가생성은 파괴하지 않는다.
+            const string createSql =
+                "CREATE TABLE IF NOT EXISTS `local_update_apply_status` (" +
+                "`id` bigint(20) NOT NULL AUTO_INCREMENT, " +
+                "`tenant_id` varchar(36) DEFAULT NULL, " +
+                "`applied_version` varchar(20) NOT NULL, " +
+                "`result` varchar(20) NOT NULL, " +
+                "`detail` text DEFAULT NULL, " +
+                "`applied_at` datetime(3) NOT NULL, " +
+                "`created_at` datetime(3) NOT NULL DEFAULT current_timestamp(3), " +
+                "PRIMARY KEY (`id`), " +
+                "UNIQUE KEY `uk_local_update_apply_version` (`applied_version`), " +
+                "KEY `idx_local_update_apply_at` (`applied_at`)" +
+                ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;";
+
+            // UPSERT — 버전당 1행. 재시도 시 result·detail·applied_at 을 덮어쓴다(멱등).
+            //   tenant_id 는 워치독 단일 테넌트라 NULL(스키마 코멘트대로). applied_at = NOW(3).
+            var upsertSql =
+                "INSERT INTO `local_update_apply_status` (tenant_id, applied_version, result, detail, applied_at) " +
+                $"VALUES (NULL, '{version}', {resultLit}, {detailLit}, NOW(3)) " +
+                "ON DUPLICATE KEY UPDATE result=VALUES(result), detail=VALUES(detail), applied_at=VALUES(applied_at);";
+
+            // 자가생성 + UPSERT 를 단일 -e 배치로 한 번에(헌법 #16 — 드라이버 미사용·단일 실행).
+            var sql = createSql + " " + upsertSql;
+
+            var clientExe = ResolveMariadbBinary("mariadb.exe", "mysql.exe");
+            var args = $"-h {host} -P {port} -u {user} \"-p{pass}\" -N -B --default-character-set=utf8mb4 -e \"{sql.Replace("\"", "\\\"")}\" {dbName}";
+
+            await RunWriteAsync(clientExe, args, ct).ConfigureAwait(false);
+            _logger.LogInformation("[Update/Apply] 적용결과 기록 완료 — 버전 {V}, 결과 {R}", version, result);
+            return true;
+        }
+        catch (OperationCanceledException) { throw; }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "[Update/Apply] 적용결과 기록 실패 — 버전 {V}, 결과 {R}", version, result);
+            return false;
+        }
+    }
+
     /// <summary>SemVer 류 안전 리터럴만 허용(숫자·점만). SQL 리터럴 삽입 안전성 보강.</summary>
     private static bool IsSafeVersionLiteral(string v)
     {
@@ -137,11 +211,22 @@ public sealed class WatchdogStatusWriter
     }
 
     /// <summary>
-    /// MariaDB 클라이언트 실행파일 탐색(WatchdogConsentReader.ResolveMariadbBinary 와 동일 정신):
-    /// PATH(where) 우선, 실패 시 MariaDB 11.4 기본 설치 경로 폴백.
+    /// MariaDB 클라이언트 실행파일 탐색 — 고정 설치경로 우선, 실패 시 PATH(where) 폴백.
+    ///
+    /// ★ 봉합 (2026-07-16, 작1 W4-6): 종전엔 PATH(where)를 '먼저' 뒤졌다. 워치독은 SYSTEM 권한으로 도는데,
+    ///   공격자가 PATH 앞쪽에 악성 'mariadb.exe' 를 심으면 그게 먼저 잡혀 SYSTEM 으로 실행된다(권한상승 표면).
+    ///   그래서 순서를 뒤집어, 신뢰된 고정 설치경로(C:\Program Files\MariaDB 11.4\bin)를 먼저 확인하고
+    ///   거기 없을 때만 PATH 로 폴백한다. WatchdogConsentReader 도 동일하게 뒤집었다.
     /// </summary>
     private string ResolveMariadbBinary(params string[] candidates)
     {
+        // ① 신뢰된 고정 설치경로 우선(PATH 심기 무력화).
+        var fixedPath = candidates
+            .Select(n => Path.Combine(@"C:\Program Files\MariaDB 11.4\bin", n))
+            .FirstOrDefault(File.Exists);
+        if (fixedPath is not null) return fixedPath;
+
+        // ② 고정경로에 없을 때만 PATH(where) 폴백.
         foreach (var name in candidates)
         {
             try
@@ -168,15 +253,10 @@ public sealed class WatchdogStatusWriter
             }
             catch (Exception pathEx)
             {
-                // 헌법 #15: PATH 검색 실패도 흔적을 남기고 폴백으로 진행.
-                _logger.LogWarning(pathEx, "[Update/Status] PATH 검색 실패({Name}) — 기본 경로 폴백", name);
+                // 헌법 #15: PATH 검색 실패도 흔적을 남긴다.
+                _logger.LogWarning(pathEx, "[Update/Status] PATH 폴백 검색 실패({Name})", name);
             }
         }
-
-        var fallback = candidates
-            .Select(n => Path.Combine(@"C:\Program Files\MariaDB 11.4\bin", n))
-            .FirstOrDefault(File.Exists);
-        if (fallback is not null) return fallback;
 
         throw new InvalidOperationException(
             $"MariaDB 클라이언트 실행파일을 찾을 수 없습니다 ({string.Join("/", candidates)}). MariaDB 설치·PATH 등록을 확인하세요.");

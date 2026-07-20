@@ -122,11 +122,21 @@ public sealed class WatchdogBackupRunner
     }
 
     /// <summary>
-    /// MariaDB 클라이언트 실행파일 탐색(BackupService.ResolveMariadbBinary 와 동일 정신):
-    /// PATH(where) 우선, 실패 시 MariaDB 11.4 기본 설치 경로 폴백.
+    /// MariaDB 클라이언트 실행파일 탐색 — 고정 설치경로 우선, 실패 시 PATH(where) 폴백.
+    ///
+    /// ★ 봉합 (2026-07-16, 작1 W4-6): 종전 PATH 우선을 뒤집었다. 백업도 SYSTEM 권한으로 매 업데이트 직전
+    ///   돌기 때문에, PATH 앞쪽에 심긴 악성 mariadb.exe 가 먼저 잡히면 권한상승이 된다. 신뢰된 고정경로를
+    ///   먼저 확인한다(WatchdogStatusWriter·WatchdogConsentReader 와 동일 봉합 — 세 곳 순서 통일).
     /// </summary>
     private string ResolveMariadbBinary(params string[] candidates)
     {
+        // ① 신뢰된 고정 설치경로 우선(PATH 심기 무력화).
+        var fixedPath = candidates
+            .Select(n => Path.Combine(@"C:\Program Files\MariaDB 11.4\bin", n))
+            .FirstOrDefault(File.Exists);
+        if (fixedPath is not null) return fixedPath;
+
+        // ② 고정경로에 없을 때만 PATH(where) 폴백.
         foreach (var name in candidates)
         {
             try
@@ -153,15 +163,10 @@ public sealed class WatchdogBackupRunner
             }
             catch (Exception pathEx)
             {
-                // 헌법 #15: PATH 검색 실패도 흔적을 남기고 폴백으로 진행.
-                _logger.LogWarning(pathEx, "[Update/Backup] PATH 검색 실패({Name}) — 기본 경로 폴백", name);
+                // 헌법 #15: PATH 검색 실패도 흔적을 남긴다.
+                _logger.LogWarning(pathEx, "[Update/Backup] PATH 폴백 검색 실패({Name})", name);
             }
         }
-
-        var fallback = candidates
-            .Select(n => Path.Combine(@"C:\Program Files\MariaDB 11.4\bin", n))
-            .FirstOrDefault(File.Exists);
-        if (fallback is not null) return fallback;
 
         throw new InvalidOperationException(
             $"MariaDB 클라이언트 실행파일을 찾을 수 없습니다 ({string.Join("/", candidates)}). MariaDB 설치·PATH 등록을 확인하세요.");

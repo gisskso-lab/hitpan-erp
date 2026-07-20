@@ -1876,6 +1876,29 @@ CREATE TABLE `local_update_status` (
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
+-- Table structure for table `local_update_apply_status`
+--   로컬 업데이트 "적용 결과"(고리4 §W4-6) — 워치독이 새버전을 실제 적용(교체·재시작·롤백)한 뒤 결과 기록.
+--   local_update_status(새버전 "발견" 적재)와 역할 분리. 버전당 1행 UPSERT(멱등키=applied_version). 헌법 #30·#36.
+--
+
+DROP TABLE IF EXISTS `local_update_apply_status`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!40101 SET character_set_client = utf8mb4 */;
+CREATE TABLE `local_update_apply_status` (
+  `id` bigint(20) NOT NULL AUTO_INCREMENT,
+  `tenant_id` varchar(36) DEFAULT NULL COMMENT '로컬 테넌트 식별자(local_company.tenant_id). 워치독 단일 테넌트라 NULL 허용',
+  `applied_version` varchar(20) NOT NULL COMMENT '적용 시도한 버전(SemVer Major.Minor.Build). 멱등키 — 버전당 1행 UPSERT',
+  `result` varchar(20) NOT NULL COMMENT '적용 결과: success|rolled_back|rollback_failed|blocked(마이그게이트 차단 등)',
+  `detail` text DEFAULT NULL COMMENT '실패 사유·CS 안내 등 상세(선택)',
+  `applied_at` datetime(3) NOT NULL COMMENT '적용 완료/실패 확정 시각',
+  `created_at` datetime(3) NOT NULL DEFAULT current_timestamp(3) COMMENT '로컬 적재 시각',
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_local_update_apply_version` (`applied_version`),
+  KEY `idx_local_update_apply_at` (`applied_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
+
+--
 -- Table structure for table `login_attempts`
 --
 

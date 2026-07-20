@@ -47,6 +47,13 @@ public class Worker : BackgroundService
 
     private readonly WatchdogConsentReader _consent;
 
+    // W4-6 정지공격 감지: manifest '조회'가 며칠(날짜) 연속 실패하면 feed 가 끊긴 것(장애·정지공격)이라
+    //   고객이 영영 옛 버전에 고정된다. 조회 실패한 날짜를 세어 임계(7일) 연속이면 본사에 통지한다.
+    //   같은 날 여러 번 세지 않도록 '마지막으로 실패를 집계한 날짜'를 기억한다.
+    private int _updateFetchFailStreakDays;
+    private DateOnly? _lastFetchFailCountedDate;
+    private const int UpdateStallNotifyDays = 7;
+
     // 봉합 (2026-06-29, 작1 고리2 마지막 빈 칸): 발견한 Major 새버전을 로컬 DB(local_update_status, DB-83)에
     //   적재하는 라이터. ERP 가 로그인 시 그 행을 읽어 Y/N 동의 팝업을 노출한다(A안, 헌법 #30 본사 의존 0).
     private readonly WatchdogStatusWriter _statusWriter;
@@ -93,6 +100,26 @@ public class Worker : BackgroundService
         //   않고 최대 5분 안에 ERP 가 복구된다. 다른 무엇보다 "ERP 가 안 떠 있는 상태"를 먼저 푼다.
         if (OperatingSystem.IsWindows())
             _updateGate.SelfHealKeepaliveIfAbandoned(_updateLock);
+
+        // W4-6 펜딩 소실 복원: _pendingConsentUpdate 는 인메모리라 워치독 재시작 시 Major 펜딩이 날아간다.
+        //   하루 1회 게이트 때문에 그날 이미 평가했으면 다음날까지 동의 폴링이 죽는다. 로컬에 '발견해 둔'
+        //   Major(local_update_status)가 있으면 하루 게이트를 즉시 풀어(재조회) manifest 를 다시 받아
+        //   펜딩을 '정상'(서명·Sha256 포함 full manifest)으로 복원한다 — 여기서 부분 manifest 를 만들지 않는다.
+        try
+        {
+            var pendingMajor = await _consent.TryGetPendingMajorVersionAsync(stoppingToken);
+            if (!string.IsNullOrEmpty(pendingMajor))
+            {
+                _lastUpdateCheckDate = null;   // 하루 게이트 개방 → 다음 루프가 즉시 재조회·재펜딩.
+                _logger.LogInformation("[Update] 기동 시 로컬 Major 펜딩({V}) 발견 — 하루 게이트를 풀어 동의 폴링을 즉시 재개합니다.", pendingMajor);
+            }
+        }
+        catch (OperationCanceledException) { throw; }
+        catch (Exception ex)
+        {
+            // 헌법 #15: 복원 조회 실패도 침묵 금지. 실패해도 정기 루프가 다음날 재평가하므로 치명 아님.
+            _logger.LogWarning(ex, "[Update] 기동 시 Major 펜딩 복원 조회 실패 — 정기 루프에서 재평가");
+        }
 
         if (OperatingSystem.IsWindows() && _b.ShouldRunPostRebootCheck())
         {
@@ -288,6 +315,9 @@ public class Worker : BackgroundService
             // 평가 자체는 하루 1회만(성공·새버전없음 모두). manifest 조회 실패는 다음날 재시도.
             _lastUpdateCheckDate = today;
 
+            // W4-6 정지공격 감지 — 조회 '실패'만 날짜 단위로 센다(새 버전 없음은 정상이라 제외).
+            await TrackUpdateStallAsync(today, ct);
+
             if (decision.Action == UpdateAction.None || decision.Manifest is null)
             {
                 _logger.LogDebug("[Update] 새 버전 없음 또는 적용 대상 아님(current={V})", currentVersion);
@@ -403,6 +433,38 @@ public class Worker : BackgroundService
     ///   여기 사본을 남겨두면 언젠가 두 값이 갈라져 "업데이트 판정 버전 ≠ 본사 보고 버전"이 된다 — 위임한다.
     /// </summary>
     private static string GetCurrentVersion() => VersionInfo.Current;
+
+    /// <summary>
+    /// W4-6 정지공격 감지 — manifest '조회'가 며칠 연속 실패하면(feed 끊김·정지공격) 본사에 통지한다.
+    ///   feed 가 끊기면 고객이 영영 옛 버전에 고정되는데, 그건 조용히 진행돼 아무도 모른다(그래서 통지).
+    ///   같은 날 중복 집계를 막고(하루 1건), 조회가 한 번이라도 성공하면 카운터를 즉시 0으로 리셋한다.
+    /// </summary>
+    private async Task TrackUpdateStallAsync(DateOnly today, CancellationToken ct)
+    {
+        if (!_update.LastFetchFailed)
+        {
+            // 조회 성공 = feed 정상. 그동안의 연속 실패를 푼다.
+            if (_updateFetchFailStreakDays > 0)
+                _logger.LogInformation("[Update] feed 조회 정상 복구 — 정지 감지 카운터 리셋(직전 연속 {N}일).", _updateFetchFailStreakDays);
+            _updateFetchFailStreakDays = 0;
+            _lastFetchFailCountedDate = null;
+            return;
+        }
+
+        // 조회 실패. 같은 날 이미 셌으면 중복 집계 안 함(하루 1 게이트와 정합).
+        if (_lastFetchFailCountedDate == today) return;
+        _lastFetchFailCountedDate = today;
+        _updateFetchFailStreakDays++;
+
+        _logger.LogWarning("[Update] manifest 조회 실패 연속 {N}일 — feed 도달 불가(장애·정지공격 의심).", _updateFetchFailStreakDays);
+
+        if (_updateFetchFailStreakDays >= UpdateStallNotifyDays)
+        {
+            // 헌법 #30: 본사는 통지만 수신. 업무데이터 0(reason·stage 문자열뿐).
+            await _meta.NotifyEmergencyAsync("update_feed_stalled", $"days={_updateFetchFailStreakDays}", ct);
+            _logger.LogError("[Update] 🛑 manifest 조회 {N}일 연속 실패 — 본사 긴급 통지(고객이 옛 버전 고정 위험).", _updateFetchFailStreakDays);
+        }
+    }
 
     /// <summary>
     /// WS-28-B: 재부팅 직후 통신 무결성 즉시 점검·복구(헌법 #28). 정기 루프를 기다리지 않고

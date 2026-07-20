@@ -35,10 +35,10 @@ if [ -n "$IMPORT_ERR" ]; then
   fail "clean DDL import 중 에러(위 출력) — 신규설치 시 동일 실패"
 fi
 
-echo "── 3) 테이블 수 게이트(124) ──"   # 2026-06-29 schema_migrations 편입 123→124 (고리4 ①)
+echo "── 3) 테이블 수 게이트(125) ──"   # 2026-06-29 schema_migrations 편입 123→124 (고리4 ①) / 2026-07-20 local_update_apply_status 편입 124→125 (고리4 §W4-6)
 TBL_CNT=$("$MYSQL" -u "$DBUSER" -N -B "$SMOKE_DB" -e "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema='$SMOKE_DB' AND table_type='BASE TABLE';" 2>/dev/null)
 echo "   생성된 테이블: $TBL_CNT"
-[ "$TBL_CNT" -ge 124 ] || fail "테이블 수 부족($TBL_CNT < 124) — DDL 일부 미생성"
+[ "$TBL_CNT" -ge 125 ] || fail "테이블 수 부족($TBL_CNT < 125) — DDL 일부 미생성"
 
 echo "── 4) 핵심 컬럼 스모크(전수조사 DOA 좌표) ──"
 # 형식: "테이블 컬럼"  — 코드가 SELECT/INSERT 하는데 누락되면 신규설치 500 났던 자리들

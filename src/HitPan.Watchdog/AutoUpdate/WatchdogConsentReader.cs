@@ -94,6 +94,50 @@ public sealed class WatchdogConsentReader
         }
     }
 
+    /// <summary>
+    /// W4-6 — 로컬에 "발견해 적재해 둔" Major 새버전(local_update_status)이 있으면 그 버전 문자열을 돌려준다.
+    ///
+    /// 왜 필요한가(펜딩 소실 버그): Worker._pendingConsentUpdate 는 인메모리라, 워치독이 재시작되면 Major
+    ///   펜딩이 날아간다. 그런데 업데이트 평가는 하루 1회 게이트(_lastUpdateCheckDate)라, 그날 이미 평가했으면
+    ///   다음날까지 재발견이 막혀 동의 폴링이 하루 죽는다. 그래서 기동 시 이 테이블을 보고 '발견해 둔 Major 가
+    ///   있으면' 하루 게이트를 즉시 풀어(재조회) manifest 를 다시 받아 펜딩을 정상 복원한다.
+    ///
+    /// ★ 여기서 부분 manifest 를 만들지 않는다 — local_update_status 에는 Sha256·Signature 가 없어(적용에 필수)
+    ///   여기서 만든 manifest 로는 안전하게 적용할 수 없다. '재조회 트리거' 역할만 한다(호출부가 게이트를 연다).
+    ///   조회 실패·행 없음이면 null(재조회를 강제하지 않음).
+    /// </summary>
+    public async Task<string?> TryGetPendingMajorVersionAsync(CancellationToken ct)
+    {
+        try
+        {
+            var (host, port, dbName, user, pass) = ResolveDbCredentials();
+            if (string.IsNullOrWhiteSpace(dbName) || string.IsNullOrWhiteSpace(user))
+            {
+                _logger.LogWarning("[Update/Consent] db.conf 자격증명 부재 — 펜딩 Major 복원 조회 생략");
+                return null;
+            }
+
+            // 최신 발견 1건 중 Major 채널만. UpsertLatestAsync 가 "최신 1건"만 유지하므로 사실상 0/1행.
+            var sql = "SELECT latest_version FROM local_update_status " +
+                      "WHERE update_channel = 'Major' ORDER BY discovered_at DESC, id DESC LIMIT 1;";
+
+            var clientExe = ResolveMariadbBinary("mariadb.exe", "mysql.exe");
+            var args = $"-h {host} -P {port} -u {user} \"-p{pass}\" -N -B --default-character-set=utf8mb4 -e \"{sql}\" {dbName}";
+
+            var output = (await RunQueryAsync(clientExe, args, ct).ConfigureAwait(false)).Trim();
+            if (string.IsNullOrEmpty(output)) return null;
+
+            // 안전 리터럴 검증(방어). 형식이 이상하면 복원 트리거하지 않는다.
+            return IsSafeVersionLiteral(output) ? output : null;
+        }
+        catch (OperationCanceledException) { throw; }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "[Update/Consent] 펜딩 Major 복원 조회 실패 — 재조회 강제하지 않음");
+            return null;
+        }
+    }
+
     /// <summary>SemVer 류 안전 리터럴만 허용(숫자·점만). SQL 리터럴 삽입 안전성 보강.</summary>
     private static bool IsSafeVersionLiteral(string v)
     {
@@ -143,11 +187,21 @@ public sealed class WatchdogConsentReader
     }
 
     /// <summary>
-    /// MariaDB 클라이언트 실행파일 탐색(WatchdogBackupRunner.ResolveMariadbBinary 와 동일 정신):
-    /// PATH(where) 우선, 실패 시 MariaDB 11.4 기본 설치 경로 폴백.
+    /// MariaDB 클라이언트 실행파일 탐색 — 고정 설치경로 우선, 실패 시 PATH(where) 폴백.
+    ///
+    /// ★ 봉합 (2026-07-16, 작1 W4-6): 종전 PATH 우선을 뒤집었다. 워치독은 SYSTEM 권한이라 PATH 앞쪽에
+    ///   심긴 악성 mariadb.exe 가 먼저 잡히면 권한상승이 된다. 신뢰된 고정경로를 먼저 확인한다
+    ///   (WatchdogStatusWriter 와 동일 봉합).
     /// </summary>
     private string ResolveMariadbBinary(params string[] candidates)
     {
+        // ① 신뢰된 고정 설치경로 우선(PATH 심기 무력화).
+        var fixedPath = candidates
+            .Select(n => Path.Combine(@"C:\Program Files\MariaDB 11.4\bin", n))
+            .FirstOrDefault(File.Exists);
+        if (fixedPath is not null) return fixedPath;
+
+        // ② 고정경로에 없을 때만 PATH(where) 폴백.
         foreach (var name in candidates)
         {
             try
@@ -174,15 +228,10 @@ public sealed class WatchdogConsentReader
             }
             catch (Exception pathEx)
             {
-                // 헌법 #15: PATH 검색 실패도 흔적을 남기고 폴백으로 진행.
-                _logger.LogWarning(pathEx, "[Update/Consent] PATH 검색 실패({Name}) — 기본 경로 폴백", name);
+                // 헌법 #15: PATH 검색 실패도 흔적을 남긴다.
+                _logger.LogWarning(pathEx, "[Update/Consent] PATH 폴백 검색 실패({Name})", name);
             }
         }
-
-        var fallback = candidates
-            .Select(n => Path.Combine(@"C:\Program Files\MariaDB 11.4\bin", n))
-            .FirstOrDefault(File.Exists);
-        if (fallback is not null) return fallback;
 
         throw new InvalidOperationException(
             $"MariaDB 클라이언트 실행파일을 찾을 수 없습니다 ({string.Join("/", candidates)}). MariaDB 설치·PATH 등록을 확인하세요.");

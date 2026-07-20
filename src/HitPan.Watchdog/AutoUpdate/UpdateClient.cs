@@ -24,6 +24,11 @@ public interface IUpdateClient
     Task<UpdateManifest?> GetLatestManifestAsync(string currentVersion, CancellationToken ct);
     Task<string> DownloadAsync(UpdateManifest manifest, string targetDir, CancellationToken ct);
     Task<bool> VerifySha256Async(string filePath, string expectedHash, CancellationToken ct);
+
+    // W4-6 정지공격 감지용: 마지막 GetLatestManifestAsync 가 'feed 조회 자체'에 실패(네트워크·HTTP 예외)했는지.
+    //   null 반환은 '조회 실패'와 '새 버전 없음' 둘 다라 구분이 안 된다. 이 플래그로 '조회 실패'만 집어낸다.
+    //   feed 가 N일 연속 끊기면 고객이 영영 옛 버전에 고정되므로(정지공격·장애), Worker 가 이걸 세어 통지한다.
+    bool LastFetchFailed { get; }
 }
 
 public sealed class UpdateClient : IUpdateClient
@@ -32,6 +37,9 @@ public sealed class UpdateClient : IUpdateClient
     private readonly ILogger<UpdateClient> _logger;
     private readonly UpdateSignatureVerifier _signature;
     private readonly string _feedUrl;
+
+    // W4-6: 마지막 manifest '조회'가 feed 예외로 실패했는지(정지공격·장애 감지용). 조회 성공 시 false 로 리셋.
+    public bool LastFetchFailed { get; private set; }
 
     // 봉합 (2026-06-29, 작1 고리1 — 마이클 채널 직렬화 발견):
     //   종전 GetFromJsonAsync 는 옵션 없이(JsonSerializerDefaults.Web) 호출돼 manifest 의 channel 이
@@ -63,6 +71,10 @@ public sealed class UpdateClient : IUpdateClient
             http.Timeout = TimeSpan.FromSeconds(30);
             var manifest = await http.GetFromJsonAsync<UpdateManifest>(
                 $"{_feedUrl}/manifest.json", ManifestJsonOptions, ct);
+
+            // 여기 도달 = feed 조회 자체는 성공(HTTP·역직렬화 통과). 정지공격 카운터를 푼다(W4-6).
+            //   이후 서명·버전 판정에서 null 을 반환해도 그건 '조회 실패'가 아니라 '적용 대상 아님'이다.
+            LastFetchFailed = false;
 
             if (manifest is null)
             {
@@ -97,6 +109,8 @@ public sealed class UpdateClient : IUpdateClient
         }
         catch (Exception ex)
         {
+            // feed 조회 자체 실패(네트워크·타임아웃·HTTP·역직렬화). 정지공격 카운터를 세우게 표식(W4-6).
+            LastFetchFailed = true;
             _logger.LogWarning(ex, "[Update] manifest 조회 실패 (feed={Feed})", _feedUrl);
             return null;
         }
@@ -146,6 +160,22 @@ public sealed class UpdateClient : IUpdateClient
 
         reason = null;
         return true;
+    }
+
+    /// <summary>
+    /// 두 버전이 "같은 버전"인지 3자리 정규화 후 판정한다 (2026-07-16, 작1 W4-5).
+    ///
+    /// 왜 별도 헬퍼인가: W4-5 검증 게이트는 "교체된 게 정확히 신버전인가"를 물어야 하는데,
+    ///   IsNewerVersion 은 동일 버전에 false 를 준다("최신 유지"). 그래서 == 판정이 따로 필요하다.
+    ///   같은 3자리 정규화(TryParseThreePart)를 재사용해, "1.2.34" 와 어셈블리 표기 "1.2.34.0" 이
+    ///   서로 다르다고 오판(F-4 함정)하지 않게 한다 — 정규화 규칙의 단일 출처를 유지한다.
+    /// 어느 한쪽이라도 형식 해석 불가면 false(모르면 "같다"고 하지 않는다 = 거짓성공 차단).
+    /// </summary>
+    public static bool IsSameVersion(string? a, string? b)
+    {
+        if (!TryParseThreePart(a, out var va)) return false;
+        if (!TryParseThreePart(b, out var vb)) return false;
+        return va == vb;
     }
 
     /// <summary>
