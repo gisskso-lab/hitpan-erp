@@ -402,10 +402,36 @@ public sealed class UpdateOrchestrator
         }
     }
 
+    /// <summary>워치독이 직접 SQL 로 읽고 쓰는 상태 테이블 — 이 스키마 변경은 구버전 워치독을 깬다(B-2 게이트 대상).
+    /// apply_status 는 워치독 상태기록기(WatchdogStatusWriter)가 직접 CREATE·INSERT 한다(W4-6) — F-1 반영으로 포함.</summary>
+    private static readonly string[] GuardedUpdateTables =
+        { "local_update_status", "local_update_consents", "local_update_apply_status" };
+
+    /// <summary>
+    /// SQL 텍스트에 '<verb> TABLE [IF ...] <table>' 문이 있는지(대소문자·백틱·연속공백 무관). 정밀 파서가 아니라
+    /// ALTER/DROP 대상 테이블만 잡는 실용 판정이다. verb=ALTER|DROP. table 은 리터럴로만 쓴다(정규식 이스케이프 불요).
+    /// </summary>
+    private static bool MatchesTableStatement(string sql, string verb, string table)
+    {
+        // 예: ALTER  TABLE `local_update_status`  /  DROP TABLE IF EXISTS local_update_consents
+        var pattern = $@"\b{verb}\s+TABLE\s+(?:IF\s+(?:NOT\s+)?EXISTS\s+)?`?{table}`?\b";
+        return System.Text.RegularExpressions.Regex.IsMatch(
+            sql, pattern, System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+    }
+
     /// <summary>
     /// B안 교차검증 — 해제된 api 폴더의 Migrations\SQL 에 .sql 이 있는데 manifest.RequiresMigration==false 면
-    /// 사람 오타로 보고 강제 중단한다. 추가로 그 .sql 내용에 'local_update_' 문자열이 있으면(구버전 워치독의
-    /// 상태 테이블 스키마를 건드림 → 업데이트 주체가 깨짐) 역시 중단한다(호환성 코드 게이트).
+    /// 사람 오타로 보고 강제 중단한다(①, 유지). 추가로 그 .sql 이 local_update_status/consents 의 스키마를
+    /// '변경'하면(구버전 워치독의 상태 테이블을 깸 → 업데이트 주체가 죽음) 역시 중단한다(②, 호환성 게이트).
+    ///
+    /// ── 두 게이트 통일 판정 정의 (빌드타임=build-manifest.ps1 §3 / 런타임=여기 ②) ──
+    ///   막을 것은 'local_update_' 문자열의 **존재**가 아니라 워치독 상태 테이블의 스키마 **변경**이다.
+    ///   (존재만으로 막으면 그 테이블을 처음 만든 DB-82/83 이 모든 릴리스에 항상 실려 전 릴리스 불통과 = 오탐.)
+    ///   워치독은 clean DDL 대조가 무거우므로(CTO 지침) "이번 zip 이 실어온 local_update_ SQL 이 신규/변경인가"
+    ///   기준으로 좁힌다: 가드 3테이블(status·consents=SELECT, apply_status=CREATE·INSERT/W4-6)에 대한
+    ///   ALTER/DROP 이 있으면 변경 = 중단(apply_status 포함은 F-1 반영).
+    ///   CREATE TABLE IF NOT EXISTS(이미 있는 테이블 재현 = no-op)는 변경이 아니므로 통과 — 이게 DB-82/83 이다.
+    ///   clean DDL 과 다른 CREATE 까지 잡는 정밀 대조는 빌드타임 게이트가 담당한다(2중 방어의 역할 분담).
     /// </summary>
     /// <returns>통과하면 true. 하나라도 걸리면 false(사유 기록 후).</returns>
     private bool PassesMigrationCrossCheck(string extractApiDir, UpdateManifest manifest)
@@ -437,9 +463,10 @@ public sealed class UpdateOrchestrator
             return false;
         }
 
-        // ② .sql 내용에 'local_update_' 가 있으면 구버전 워치독의 상태 테이블을 건드리는 릴리스다.
+        // ② local_update_status/consents 의 스키마를 '변경'(ALTER/DROP)하는 릴리스면 구버전 워치독이 깨진다.
         //    구버전 워치독(자기교체 W4-3 제외로 정상 상태)이 깨지면 그 PC 는 영구 고립 = 재설치 외 복구 불가.
-        //    build 쪽에도 게이트가 있으나(작지서 C-2), 워치독도 교차한다(2중).
+        //    build 쪽에 정밀 게이트가 있고(clean DDL 대조, 작지서 B-1), 워치독은 ALTER/DROP 만 교차한다(2중).
+        //    존재만으로 막지 않는다 — CREATE TABLE IF NOT EXISTS(DB-82/83 재현=no-op)는 통과다(오탐 봉합, B-2).
         foreach (var file in sqlFiles)
         {
             string content;
@@ -453,13 +480,21 @@ public sealed class UpdateOrchestrator
                 return false;
             }
 
-            if (content.Contains("local_update_", StringComparison.OrdinalIgnoreCase))
+            if (!content.Contains("local_update_", StringComparison.OrdinalIgnoreCase))
+                continue;   // 이 테이블을 언급조차 안 하면 검사 대상 아님.
+
+            foreach (var table in GuardedUpdateTables)
             {
-                _logger.LogError("[Update] 🛑 교차검증 실패 — 마이그 '{File}' 이 'local_update_' 스키마를 건드립니다. " +
-                                 "구버전 워치독이 깨져 업데이트 주체가 죽습니다(영구 고립 위험) — 교체를 중단합니다({V}).",
-                                 Path.GetFileName(file), manifest.Version);
-                _lastSwapBlockedByMigrationGate = true;   // W4-6: apply_status 에 'blocked' 로 기록되게 표식.
-                return false;
+                // ALTER TABLE <t> 또는 DROP TABLE <t> = 스키마 변경. (CREATE IF NOT EXISTS 재현은 변경 아님 → 통과.)
+                if (MatchesTableStatement(content, "ALTER", table) ||
+                    MatchesTableStatement(content, "DROP", table))
+                {
+                    _logger.LogError("[Update] 🛑 교차검증 실패 — 마이그 '{File}' 이 '{Table}' 스키마를 변경(ALTER/DROP)합니다. " +
+                                     "구버전 워치독이 깨져 업데이트 주체가 죽습니다(영구 고립 위험) — 교체를 중단합니다({V}).",
+                                     Path.GetFileName(file), table, manifest.Version);
+                    _lastSwapBlockedByMigrationGate = true;   // W4-6: apply_status 에 'blocked' 로 기록되게 표식.
+                    return false;
+                }
             }
         }
 
