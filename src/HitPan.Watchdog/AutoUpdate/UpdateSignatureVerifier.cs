@@ -44,12 +44,12 @@ public sealed class UpdateSignatureVerifier
     /// <summary>
     /// EXE 내장 공개키 맵 (kid → SPKI PEM).
     ///
-    /// ⚠️ 아직 비어 있다 — 열쇠 생성은 NCP 작업이라 사장님 결재·실행이 필요하다(헌법 #29).
-    ///    키가 없으면 아래 Verify 는 모든 manifest 를 거부한다(fail-closed).
-    ///    그게 맞는 동작이다: 서명을 확인할 수 없는데 코드를 교체하느니, 업데이트를 안 하는 편이 안전하다.
+    /// upd-v1 공개키가 들어 있다(2026-07-20 사장님 NCP 실행으로 생성, 아래 딕셔너리 참조).
+    ///    키가 없으면 Verify 는 모든 manifest 를 거부한다(fail-closed) — 서명을 확인할 수 없는데
+    ///    코드를 교체하느니 업데이트를 안 하는 편이 안전하다. 지금은 키가 있어 정상 검증한다.
     ///
-    /// 키가 준비되면 여기 PEM 을 넣거나(EXE 내장), db.conf 로 주입한다(재빌드 없이 롤오버).
-    /// 개인키는 절대 여기 두지 않는다 — 이 파일은 고객 PC 로 배포된다.
+    /// 키 롤오버: 여기 PEM 을 새 kid 로 추가하거나(EXE 내장), db.conf 로 주입한다(재빌드 없이).
+    /// 개인키는 절대 여기 두지 않는다 — 이 파일은 고객 PC 로 배포된다. NCP(600 root)에만 있다.
     /// </summary>
     private static readonly IReadOnlyDictionary<string, string> EmbeddedPublicKeys =
         new Dictionary<string, string>(StringComparer.Ordinal)
