@@ -1264,10 +1264,41 @@ end;
 //   혼재 → 직후 seed-parent(HitPan.API.exe)가 혼재 DLL 로 뜨다 예외 크래시(exit 5) → 설치 전체 중단.
 //   백지 신규설치가 멀쩡했던 건 붙잡을 프로세스가 없어서였다. 파일 복사(ssInstall) 전에 기존 실행 요소를
 //   전부 정지시켜 파일 잠금을 해소한다(제거가 아니라 '정지'라 데이터·설정 무손상, 헌법 #20 재설치 안전).
+// ★ 봉합 20260721작1 (P0, 2026-07-21 백지 Sandbox 실측 확정 — 사장님 결재): 이 정지 로직은
+//   '재설치'(이미 설치된 위에 다시) 전용이다. 그런데 CurStepChanged 가 ssInstall 마다 최초/재설치
+//   구분 없이 무조건 호출해, 백지 최초 설치에서도 taskkill /F /IM 이 돌았다. Windows Sandbox 는
+//   taskkill /IM 의 프로세스 이미지 열거가 제약 계층에 걸려 '대상 없음' 반환 없이 무한 hang →
+//   설치 전체 정지(로그 '[재설치안전] ... 정지 시작'에서 멈춤, taskkill 죽이면 다음 taskkill 재 hang).
+//   = 전 신규 고객 설치 차단. 사장님 헌법 #40 '덮어 재설치는 존재하지 않는 경로'와도 정면 충돌
+//   (재설치용 코드가 최초 설치를 죽임). → 최초 설치면 이 함수를 통째로 건너뛴다(정지시킬 것이 원천적
+//   으로 없으므로 스킵이 정확·안전). 재설치 판정 = Inno 가 이전 설치 때 남긴 언인스톨 레지스트리 키
+//   (AppId F4E2A1D0..., 64-bit HKLM `..\Uninstall\{AppId}_is1`) 존재 여부. 이 코드베이스가 이미
+//   FileExists(ExpandConstant('{app}\...')) 관용구를 쓰고 있어(예: L1245 db.conf) 안전한 판정이다.
+//   축 B(재설치 경로에서 taskkill /IM 자체의 hang 방어)는 다음 작지서 P1 로 분리(CTO 결재).
+//
+//   판정 방식 (CTO B-1 재검토): 애초 레지스트리 언인스톨 키를 보려 했으나, 이 [Code] 섹션은 리터럴
+//   중괄호를 문자열에 쓴 사례가 0건이고(Inno Pascal 에서 '{' 는 주석 시작 문자라 전처리기 오해 위험),
+//   대신 {app} 파일 존재 판정이 이 파일의 검증된 관용구다. db.conf 는 [UninstallDelete] 대상이 아니라
+//   '덮어 재설치·제거 후 재설치 모두에서 살아남는' 파일(L1237 주석)이라, 재설치 판정에 가장 정확하다.
+//   {app} 은 ssInstall 시점이면 이미 확정(wpReady 통과 후) — CTO 가 우려한 미초기화는 그보다 훨씬 이른
+//   SerialKeyPage 시점 얘기였다.
+function IsPreviouslyInstalled(): Boolean;
+begin
+  // db.conf 가 있으면 이전 설치가 있었다는 뜻(제거 후 재설치에도 살아남음). 없으면 백지 최초 설치.
+  Result := FileExists(ExpandConstant('{app}\db.conf'))
+         or FileExists(ExpandConstant('{app}\hitpan-keys.conf'));
+end;
+
 procedure StopRunningComponentsForReinstall();
 var
   ResultCode, i: Integer;
 begin
+  // ★ 최초 설치 스킵 가드 (봉합 20260721작1). 로그도 남기지 않고 통째 반환 —
+  //   백지엔 정지시킬 프로세스가 없어 스킵이 정확하고, taskkill hang 을 원천 차단한다.
+  if not IsPreviouslyInstalled() then begin
+    Log('[재설치안전] 최초 설치 감지(이전 설치 흔적 없음) — 프로세스 정지 로직 건너뜀(hang 원천 차단)');
+    Exit;
+  end;
   Log('[재설치안전] 파일 복사 전 기존 실행 프로세스 정지 시작');
   // ① ERP API — schtasks ONSTART/keepalive 작업 종료 + 프로세스 강제 종료 (슬롯 1~5 전부)
   for i := 1 to 5 do begin
