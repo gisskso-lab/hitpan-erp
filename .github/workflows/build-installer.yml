@@ -189,12 +189,20 @@ jobs:
         run: |
           $channel = if ([string]::IsNullOrWhiteSpace($env:UPDATE_CHANNEL)) { 'Major' } else { $env:UPDATE_CHANNEL }
           Write-Host "[update] channel = $channel"
+          # ★ 봉합 (2026-07-21, CI 실측 적발): 경로는 반드시 절대경로로 넘긴다.
+          #   build-manifest.ps1 은 zip 을 만들 때 Push-Location $PayloadDir 로 작업 디렉터리를 옮긴다.
+          #   그 상태에서 -OutDir 이 상대경로면 payload 기준으로 해석돼
+          #   'installer\payload\dist\updates' 를 찾다가 실패한다(실측 로그 그대로).
+          $payload = (Resolve-Path installer/payload).Path
+          $outDir  = Join-Path (Get-Location).Path 'dist/updates'
+          New-Item -ItemType Directory -Path $outDir -Force | Out-Null
           & pwsh -File installer/updates/build-manifest.ps1 `
-            -PayloadDir installer/payload `
-            -OutDir dist/updates `
+            -PayloadDir $payload `
+            -OutDir $outDir `
             -Channel $channel `
             -DownloadUrlBase 'https://updates.hitpan.kr/packages'
           if ($LASTEXITCODE -ne 0) { throw "build-manifest 실패 (exit $LASTEXITCODE)" }
+          Get-ChildItem $outDir | ForEach-Object { Write-Host "[update] 산출: $($_.Name)" }
 
       - name: Upload update package artifact
         uses: actions/upload-artifact@v5
