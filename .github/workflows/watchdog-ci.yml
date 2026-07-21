@@ -98,19 +98,35 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v5
 
+      # ★ 봉합 (2026-07-21, CI 2주 마비 진범 ② — 사장님 지시로 실측 확인):
+      #   이 단계가 2026-06-12 부터 계속 실패하며 Watchdog CI 를 빨간불로 고정시켰다.
+      #   실패 로그: "Missing script: installer/scripts/InstallCloudflared.ps1"
+      #
+      #   ■ 무엇이 어긋났나 (둘 다 '코드는 앞서갔는데 CI 는 과거에 멈춤')
+      #     ① 검사 대상 .iss 가 옛 파일이었다.
+      #        HitPanSetup.iss 는 현재 릴리스 경로가 아니다 — 실제 출하는 HitPan-Universal.iss 다
+      #        (CI build-installer.yml·build-installer-universal.ps1 모두 Universal 을 컴파일한다).
+      #     ② 폐기된 스크립트 3종을 계속 필수로 요구했다.
+      #        InstallCloudflared.ps1 · SelfCheck.ps1 · BootstrapInstall.ps1 은 사장님 결재
+      #        (WS-20260612-01 Q1=A, 2026-06-12)로 폐기되어 installer/_deprecated_20260612/ 로 옮겼고,
+      #        그 기능은 .iss CurStepChanged 에 통합됐다. 파일은 옮겼는데 이 목록만 안 고쳤다.
+      #
+      #   ■ 왜 위험했나 — 빨간불이 일상이 되면 아무도 안 본다.
+      #     이 잡음 때문에 같은 워크플로의 진짜 실패(Worker DI 누락)도 2주간 묻혔다.
+      #     파일을 폐기할 때 CI 검사 목록을 함께 고치는 것이 체크리스트에 없었다는 신호다.
       - name: Validate ISS file syntax
         run: |
-          if [ ! -f installer/HitPanSetup.iss ]; then
-            echo "ISS file missing"; exit 1
+          if [ ! -f installer/HitPan-Universal.iss ]; then
+            echo "ISS file missing: installer/HitPan-Universal.iss"; exit 1
           fi
           # 필수 섹션 확인
           for section in '\[Setup\]' '\[Files\]' '\[Run\]' '\[Code\]'; do
-            if ! grep -qE "$section" installer/HitPanSetup.iss; then
+            if ! grep -qE "$section" installer/HitPan-Universal.iss; then
               echo "Missing section: $section"; exit 1
             fi
           done
-          # 필수 PowerShell 스크립트 5종 확인
-          for ps in AntivirusExceptions FirewallRules InstallCloudflared InstallWatchdog SelfCheck; do
+          # 필수 PowerShell 스크립트 확인 (폐기 3종 제외 — 2026-06-12 사장님 결재)
+          for ps in AntivirusExceptions FirewallRules InstallWatchdog; do
             if [ ! -f "installer/scripts/$ps.ps1" ]; then
               echo "Missing script: installer/scripts/$ps.ps1"; exit 1
             fi

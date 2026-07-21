@@ -22,6 +22,21 @@ on:
         description: 'Manual version (e.g. 1.0.0)'
         required: true
         default: '1.0.0'
+      # 배선 (2026-07-21): 업데이트 채널 — 워치독의 적용 시점을 가른다(UpdateOrchestrator).
+      #   Emergency = 안내 후 즉시 적용(시간 무관)  ← 실측·긴급 봉합용
+      #   Normal    = 야간(새벽 3시대) 자동 적용
+      #   Major     = ERP 로그인 Y/N 동의 + 영업시간 외에만 적용
+      #   ※ 낮에 Major/Normal 로 올리면 워치독 로그에 "보류"가 뜨는 게 정상이다.
+      #     그것을 "업데이트 실패"로 오판하지 말 것(2026-07-20 진범 오판 재발 방지).
+      channel:
+        description: 'Update channel (Emergency=즉시 / Normal=야간 / Major=동의+영업시간외)'
+        required: false
+        type: choice
+        default: 'Major'
+        options:
+          - Major
+          - Normal
+          - Emergency
 
 permissions:
   contents: write
@@ -77,6 +92,26 @@ jobs:
             -o installer/payload/web
         shell: pwsh
 
+      # 배선 (2026-07-21, 사장님 지시): 워치독 publish — 자동업데이트 zip 의 필수 구성요소.
+      #   종전 이 워크플로는 api/web 만 publish 하고 워치독을 굽지 않았다. 그래서
+      #   ① 인스톨러 [Source] 의 {#BundleDir}\watchdog\* 가 CI 산출물이 아닌 로컬 잔재를 담고
+      #   ② 업데이트 zip(api+web+watchdog)을 만들 재료 자체가 CI 에 없었다(= 자동업데이트 패키지
+      #      생성 경로가 릴리스 파이프라인에 부재. 1.2.34 zip 도 사람이 로컬에서 손으로 만든 것).
+      #   -p:HitPanVersion 주입은 필수 — 빠지면 워치독이 자기를 1.0.0 으로 알고 모든 manifest 를
+      #   "새 버전"으로 받아 다운그레이드 방어까지 무력화된다(7/16 W4-0 F-1 봉합 정합).
+      #   self-contained(단일파일 아님) — build-manifest.ps1 이 HitPan.Watchdog.dll 의 FileVersion 을
+      #   읽어 api 와 갈라짐을 차단하므로 dll 이 산출물에 있어야 한다.
+      - name: Publish Watchdog (self-contained)
+        run: |
+          dotnet publish src/HitPan.Watchdog/HitPan.Watchdog.csproj `
+            -c Release `
+            -r win-x64 `
+            --self-contained true `
+            -p:HitPanVersion=${{ steps.ver.outputs.version }} `
+            -o installer/payload/watchdog `
+            --nologo
+        shell: pwsh
+
       - name: Install Inno Setup 6
         shell: pwsh
         run: |
@@ -108,6 +143,43 @@ jobs:
       #     SIGN_CERT_PASSWORD: ${{ secrets.SIGN_CERT_PASSWORD }}
       #   run: |
       #     signtool sign /f cert/hitpan.pfx /p $env:SIGN_CERT_PASSWORD /tr http://timestamp.sectigo.com /td sha256 /fd sha256 installer/output/*.exe
+
+      # 배선 (2026-07-21, 사장님 지시 A안): 자동업데이트 패키지(zip + unsigned manifest) 산출.
+      #   왜 필요한가 — 워치독은 manifest.json 한 파일만 '최신'으로 보고, 그 manifest 가 가리키는
+      #   zip 을 받아 교체한다(UpdateClient). 그런데 이 파이프라인에 zip 생성 단계가 아예 없어
+      #   릴리스마다 사람이 로컬에서 손으로 만들어야 했다(= 빠뜨리면 전 고객 업데이트 정지).
+      #
+      #   ★ 서명은 여기서 하지 않는다 (CTO C-1, 헌법 #22·#29)
+      #     개인키는 NCP /var/hitpan/update-keys/ (600 root) 에만 있다. CI 가 서명하려면 개인키를
+      #     GitHub Secrets 에 둬야 하고, 그건 "전 고객 PC SYSTEM 코드 실행 권한"을 제3자에 두는 것이다.
+      #     CI 는 본문까지 → NCP 에서 publish-update.sh 가 서명·배포한다(사장님 sudo 1회).
+      #
+      #   버전은 build-manifest.ps1 이 api EXE 의 FileVersion 에서 단방향으로 읽는다(W4-0).
+      #   사람이 버전을 두 번 입력하지 않으므로 manifest ≠ 어셈블리 갈라짐이 구조적으로 불가능하다.
+      #   워치독/api 버전 불일치도 그 스크립트가 즉시 실패시킨다.
+      - name: Build update package (zip + unsigned manifest)
+        shell: pwsh
+        env:
+          UPDATE_CHANNEL: ${{ inputs.channel }}
+        run: |
+          $channel = if ([string]::IsNullOrWhiteSpace($env:UPDATE_CHANNEL)) { 'Major' } else { $env:UPDATE_CHANNEL }
+          Write-Host "[update] channel = $channel"
+          & pwsh -File installer/updates/build-manifest.ps1 `
+            -PayloadDir installer/payload `
+            -OutDir dist/updates `
+            -Channel $channel `
+            -DownloadUrlBase 'https://updates.hitpan.kr/packages'
+          if ($LASTEXITCODE -ne 0) { throw "build-manifest 실패 (exit $LASTEXITCODE)" }
+
+      - name: Upload update package artifact
+        uses: actions/upload-artifact@v5
+        with:
+          name: HitPanUpdate-${{ steps.ver.outputs.version }}
+          path: |
+            dist/updates/*.zip
+            dist/updates/*.json
+            dist/updates/*.txt
+          retention-days: 30
 
       - name: Upload installer artifact
         uses: actions/upload-artifact@v5
