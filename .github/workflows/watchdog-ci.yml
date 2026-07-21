@@ -72,14 +72,33 @@ jobs:
           $size = (Get-Item ./publish-watchdog/HitPan.Watchdog.exe).Length / 1MB
           Write-Output "Publish size: $([int]$size) MB"
 
+      # ★ 봉합 (2026-07-21, CI 2주 마비 2단계 — 실측 확인):
+      #   이 스텝은 구조적으로 CI 에서 통과할 수 없었다.
+      #   HealthProbe.cs:89 는 `OverallStatus == "healthy" ? 0 : 1` 로 종료코드를 낸다.
+      #   그런데 L97 이 "cloudflared 서비스가 없으면 recovering" 으로 판정하고,
+      #   GitHub Actions 러너에는 당연히 cloudflared 가 없다(고객 PC 가 아니다).
+      #   → 항상 recovering → exit 1 → PowerShell 이 네이티브 실패를 스텝 실패로 전파.
+      #   출력에는 "OverallStatus" 가 정상적으로 찍히는데도 throw 에 도달하기 전에 죽었다.
+      #
+      #   이 스모크의 목적은 "진단 JSON 을 뱉는가"(= 기동·직렬화·버전 스탬핑 확인)이지
+      #   "이 러너가 건강한가"가 아니다. 러너 환경 건강은 검사 대상이 아니므로
+      #   종료코드를 의도적으로 흡수하고, 출력 내용으로만 판정한다.
+      #   (헌법 #15 정합: 침묵시키지 않고 실제 종료코드를 로그에 남긴다.)
       - name: Health probe smoke (--health)
         run: |
           $env:HITPAN_TENANT_ID = "ci-runner"
           $out = & ./publish-watchdog/HitPan.Watchdog.exe --health 2>&1 | Out-String
+          $code = $LASTEXITCODE
           Write-Output $out
+          Write-Output "[smoke] health probe exit code = $code (러너에 cloudflared 부재 → recovering=1 이 정상)"
           if ($out -notmatch '"OverallStatus"') {
             throw "Health probe did not emit OverallStatus"
           }
+          # 버전 스탬핑이 진단 출력까지 전달되는지 확인(W4-0 단일출처 정합).
+          if ($out -notmatch [regex]::Escape($env:CI_TEST_VERSION)) {
+            throw "진단 JSON 에 버전 $env:CI_TEST_VERSION 이 없습니다 — VersionInfo 단일출처가 깨졌습니다."
+          }
+          exit 0
         shell: pwsh
 
       - name: Upload publish artifact
