@@ -1,0 +1,234 @@
+# 설치마법사 EXE 빌드 (사장님 결재 Plan 2026-06-09 — cicd-velvety-reef)
+#
+# 트리거: 태그 push (v1.x.x 형식)
+# 산출물: HitPanInstaller-{version}.exe
+# 헌법 정합:
+#   #28·#30 — 고객 손 0번 (사일런트 설치 + 자동 시작)
+#   #31 — 백신 5종 호환 (코드 서명 필수, 사장님 결재 2번 후 활성화)
+#   #34 — 설치마법사는 베타부터 정식 완성도
+#
+# 사장님 결재 필요:
+#   - [[project_exe_build_hold]] ERP 보충 1회 + GO 결재 후에만 실제 배포
+#   - 결재 2 (코드 서명) OK 후 SIGN_CERT_PASSWORD secret 등록
+name: Build Installer EXE
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Manual version (e.g. 1.0.0)'
+        required: true
+        default: '1.0.0'
+      # 배선 (2026-07-21): 업데이트 채널 — 워치독의 적용 시점을 가른다(UpdateOrchestrator).
+      #   Emergency = 안내 후 즉시 적용(시간 무관)  ← 실측·긴급 봉합용
+      #   Normal    = 야간(새벽 3시대) 자동 적용
+      #   Major     = ERP 로그인 Y/N 동의 + 영업시간 외에만 적용
+      #   ※ 낮에 Major/Normal 로 올리면 워치독 로그에 "보류"가 뜨는 게 정상이다.
+      #     그것을 "업데이트 실패"로 오판하지 말 것(2026-07-20 진범 오판 재발 방지).
+      channel:
+        description: 'Update channel (Emergency=즉시 / Normal=야간 / Major=동의+영업시간외)'
+        required: false
+        type: choice
+        default: 'Major'
+        options:
+          - Major
+          - Normal
+          - Emergency
+
+permissions:
+  contents: write
+
+jobs:
+  build-installer:
+    name: Build HitPan Installer EXE
+    runs-on: windows-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Setup .NET 8
+        uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Resolve version
+        id: ver
+        shell: pwsh
+        run: |
+          if ($env:GITHUB_REF -like 'refs/tags/v*') {
+            $v = $env:GITHUB_REF -replace 'refs/tags/v',''
+          } else {
+            $v = '${{ inputs.version }}'
+          }
+          "version=$v" >> $env:GITHUB_OUTPUT
+          Write-Host "Version resolved: $v"
+
+      # 봉합 (2026-07-16, 작1 W4-0 — 검증팀 F-1 적발): 종전엔 -p:HitPanVersion 주입이 없어
+      #   인스톨러만 /DAppVersion 으로 새 버전을 받고 어셈블리는 Directory.Build.props 폴백에 머물렀다.
+      #   그 결과 "인스톨러 1.2.35 / 어셈블리·health·메타핑 1.2.34" 로 갈라져,
+      #   이미 1.2.35 가 깔린 PC 가 1.2.35 를 새 버전으로 착각해 무한 재적용한다.
+      #   릴리스 경로에서 버전 출처를 하나로 묶으려면 publish 에도 반드시 같은 값을 주입해야 한다.
+      - name: Publish ERP API (single-file)
+        run: |
+          dotnet publish src/HitPan.API/HitPan.API.csproj `
+            -c Release `
+            -r win-x64 `
+            --self-contained false `
+            -p:PublishSingleFile=true `
+            -p:HitPanVersion=${{ steps.ver.outputs.version }} `
+            -o installer/payload/api
+        shell: pwsh
+
+      - name: Publish ERP Web (Blazor WASM)
+        run: |
+          dotnet publish src/HitPan.Web/HitPan.Web.csproj `
+            -c Release `
+            -p:HitPanVersion=${{ steps.ver.outputs.version }} `
+            -o installer/payload/web
+        shell: pwsh
+
+      # 배선 (2026-07-21, 사장님 지시): 워치독 publish — 자동업데이트 zip 의 필수 구성요소.
+      #   종전 이 워크플로는 api/web 만 publish 하고 워치독을 굽지 않았다. 그래서
+      #   ① 인스톨러 [Source] 의 {#BundleDir}\watchdog\* 가 CI 산출물이 아닌 로컬 잔재를 담고
+      #   ② 업데이트 zip(api+web+watchdog)을 만들 재료 자체가 CI 에 없었다(= 자동업데이트 패키지
+      #      생성 경로가 릴리스 파이프라인에 부재. 1.2.34 zip 도 사람이 로컬에서 손으로 만든 것).
+      #   -p:HitPanVersion 주입은 필수 — 빠지면 워치독이 자기를 1.0.0 으로 알고 모든 manifest 를
+      #   "새 버전"으로 받아 다운그레이드 방어까지 무력화된다(7/16 W4-0 F-1 봉합 정합).
+      #   self-contained(단일파일 아님) — build-manifest.ps1 이 HitPan.Watchdog.dll 의 FileVersion 을
+      #   읽어 api 와 갈라짐을 차단하므로 dll 이 산출물에 있어야 한다.
+      - name: Publish Watchdog (self-contained)
+        run: |
+          dotnet publish src/HitPan.Watchdog/HitPan.Watchdog.csproj `
+            -c Release `
+            -r win-x64 `
+            --self-contained true `
+            -p:HitPanVersion=${{ steps.ver.outputs.version }} `
+            -o installer/payload/watchdog `
+            --nologo
+        shell: pwsh
+
+      # ★ 배선 (2026-07-21): 의존성 번들 + clean DDL — .iss [Files] 가 요구하는 나머지 5개.
+      #   .iss 는 {#BundleDir} 아래에 8개를 요구한다:
+      #     api/ web/ watchdog/ (위 publish 3단계) + dotnet-hosting.exe · mariadb.msi ·
+      #     vc_redist.x64.exe · cloudflared.exe · hitpan_db.sql
+      #   종전 이 워크플로에는 뒤 5개를 놓는 단계가 없어 ISCC 가 "파일 없음"으로 실패했다
+      #   (= 이 CI 로 EXE 가 만들어진 적이 없다. 실제 출하본은 전부 로컬 수작업).
+      #   hitpan_db.sql 은 신규설치 단일 진실원인 clean DDL 을 쓴다(헌법 #36).
+      - name: Download dependency bundle
+        shell: pwsh
+        run: |
+          & pwsh -File installer/download-bundle.ps1 -BundleDir installer/payload
+          if ($LASTEXITCODE -ne 0) { throw "번들 다운로드 실패 (exit $LASTEXITCODE)" }
+          Copy-Item installer/hitpan_db_clean.sql installer/payload/hitpan_db.sql -Force
+          # .iss 가 요구하는 8개가 모두 있는지 컴파일 전에 확인 — 없으면 여기서 명확히 실패한다.
+          $required = @('dotnet-hosting.exe','mariadb.msi','vc_redist.x64.exe','cloudflared.exe','hitpan_db.sql','api','web','watchdog')
+          $missing = $required | Where-Object { -not (Test-Path "installer/payload/$_") }
+          if ($missing) { throw "번들 누락: $($missing -join ', ')" }
+          Write-Host "번들 8종 확인 완료"
+
+      - name: Install Inno Setup 6
+        shell: pwsh
+        run: |
+          choco install innosetup -y --no-progress
+          Write-Host "Inno Setup installed"
+
+      - name: Compile installer
+        shell: pwsh
+        env:
+          INSTALLER_VERSION: ${{ steps.ver.outputs.version }}
+        run: |
+          $iss = 'installer/HitPan-Universal.iss'
+          if (-not (Test-Path $iss)) {
+            Write-Error "Installer script not found: $iss"
+            exit 1
+          }
+          # ★ 봉합 (2026-07-21): /DBundleDir 주입 누락 — CI 는 installer/payload 에 산출물을 놓는데
+          #   .iss 기본값은 ..\installer-build\bundle 이라 서로 다른 곳을 보고 있었다(경로 불일치).
+          #   .iss 의 상대경로 기준은 .iss 파일 위치(installer/)이므로 payload 로 준다.
+          #   /DOutputDir 도 명시 — 아래 업로드 단계가 installer/output 을 집는다.
+          & 'C:\Program Files (x86)\Inno Setup 6\ISCC.exe' `
+            "/DAppVersion=$env:INSTALLER_VERSION" `
+            "/DBundleDir=payload" `
+            "/DOutputDir=output" `
+            $iss
+          if ($LASTEXITCODE -ne 0) {
+            Write-Error "Inno Setup compile failed"
+            exit 1
+          }
+
+      # 결재 2 (코드 서명) OK 후 활성화:
+      # - name: Sign EXE
+      #   shell: pwsh
+      #   env:
+      #     SIGN_CERT_PASSWORD: ${{ secrets.SIGN_CERT_PASSWORD }}
+      #   run: |
+      #     signtool sign /f cert/hitpan.pfx /p $env:SIGN_CERT_PASSWORD /tr http://timestamp.sectigo.com /td sha256 /fd sha256 installer/output/*.exe
+
+      # 배선 (2026-07-21, 사장님 지시 A안): 자동업데이트 패키지(zip + unsigned manifest) 산출.
+      #   왜 필요한가 — 워치독은 manifest.json 한 파일만 '최신'으로 보고, 그 manifest 가 가리키는
+      #   zip 을 받아 교체한다(UpdateClient). 그런데 이 파이프라인에 zip 생성 단계가 아예 없어
+      #   릴리스마다 사람이 로컬에서 손으로 만들어야 했다(= 빠뜨리면 전 고객 업데이트 정지).
+      #
+      #   ★ 서명은 여기서 하지 않는다 (CTO C-1, 헌법 #22·#29)
+      #     개인키는 NCP /var/hitpan/update-keys/ (600 root) 에만 있다. CI 가 서명하려면 개인키를
+      #     GitHub Secrets 에 둬야 하고, 그건 "전 고객 PC SYSTEM 코드 실행 권한"을 제3자에 두는 것이다.
+      #     CI 는 본문까지 → NCP 에서 publish-update.sh 가 서명·배포한다(사장님 sudo 1회).
+      #
+      #   버전은 build-manifest.ps1 이 api EXE 의 FileVersion 에서 단방향으로 읽는다(W4-0).
+      #   사람이 버전을 두 번 입력하지 않으므로 manifest ≠ 어셈블리 갈라짐이 구조적으로 불가능하다.
+      #   워치독/api 버전 불일치도 그 스크립트가 즉시 실패시킨다.
+      - name: Build update package (zip + unsigned manifest)
+        shell: pwsh
+        env:
+          UPDATE_CHANNEL: ${{ inputs.channel }}
+        run: |
+          $channel = if ([string]::IsNullOrWhiteSpace($env:UPDATE_CHANNEL)) { 'Major' } else { $env:UPDATE_CHANNEL }
+          Write-Host "[update] channel = $channel"
+          & pwsh -File installer/updates/build-manifest.ps1 `
+            -PayloadDir installer/payload `
+            -OutDir dist/updates `
+            -Channel $channel `
+            -DownloadUrlBase 'https://updates.hitpan.kr/packages'
+          if ($LASTEXITCODE -ne 0) { throw "build-manifest 실패 (exit $LASTEXITCODE)" }
+
+      - name: Upload update package artifact
+        uses: actions/upload-artifact@v5
+        with:
+          name: HitPanUpdate-${{ steps.ver.outputs.version }}
+          path: |
+            dist/updates/*.zip
+            dist/updates/*.json
+            dist/updates/*.txt
+          retention-days: 30
+
+      - name: Upload installer artifact
+        uses: actions/upload-artifact@v5
+        with:
+          name: HitPanInstaller-${{ steps.ver.outputs.version }}
+          path: installer/output/*.exe
+          retention-days: 30
+
+      - name: Create GitHub Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: installer/output/*.exe
+          name: HitPan Installer ${{ steps.ver.outputs.version }}
+          body: |
+            # 히트판 ERP 설치마법사 ${{ steps.ver.outputs.version }}
+
+            ## 사용 방법
+            1. EXE 다운로드 → 더블클릭 실행
+            2. 시리얼 키 입력 (가입 시 이메일로 받은 시리얼)
+            3. 자동 설치 진행 (MariaDB + .NET + cloudflared)
+            4. 설치 완료 후 ERP 자동 시작
+
+            ## 헌법 정합
+            - #28·#30 — 고객 손 0번
+            - #31 — 백신 5종 호환
+            - #34 — 베타부터 정식 완성도

@@ -1,0 +1,53 @@
+# P0 #2 (2026-05-14): CodeQL 정적 분석 (헌법 #23 5중 검증 ③ SAST)
+# 사장님 헌법 #23: AI 협업 코드 5중 검증 의무
+# 트리거: develop/main push + PR + 주 1회 정기 스캔
+name: CodeQL SAST
+
+on:
+  push:
+    branches: [develop, main]
+  pull_request:
+    branches: [develop, main]
+  schedule:
+    # 매주 월요일 09:00 UTC (한국 18:00) 정기 스캔
+    - cron: '0 9 * * 1'
+
+permissions:
+  actions: read
+  contents: read
+  security-events: write
+
+jobs:
+  analyze:
+    name: CodeQL Analyze (C#)
+    runs-on: windows-latest
+    timeout-minutes: 60
+
+    strategy:
+      fail-fast: false
+      matrix:
+        language: ['csharp']
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Setup .NET 8
+        uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v3
+        with:
+          languages: ${{ matrix.language }}
+          # 축 6-3 (2026-05-14): security-extended 추가 — 추가 보안 패턴 (헌법 #23 ③ 보강).
+          queries: security-extended,security-and-quality
+
+      - name: Build solution
+        run: dotnet build src/HitPan.sln --configuration Release --nologo /p:TreatWarningsAsErrors=false
+
+      - name: Perform CodeQL Analysis
+        uses: github/codeql-action/analyze@v3
+        with:
+          category: '/language:${{ matrix.language }}'

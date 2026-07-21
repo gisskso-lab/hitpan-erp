@@ -1,0 +1,23 @@
+# 축 6-2 (2026-05-14): TruffleHog 자체 시크릿 룰셋
+# 사장님 헌법 #23 5중 검증 ③ SAST — OSS detectors가 못 잡는 히트판 내부 시크릿 패턴 보강.
+# TruffleHog --config 옵션으로 로드. 정규식 매칭 시 verified=false라도 alert.
+detectors:
+  - name: hitpan-db-password
+    keywords:
+      - Hitpan2025
+    regex:
+      password: 'Hitpan2025!'
+
+  - name: hitpan-aes-key
+    keywords:
+      - ERP_ENCRYPTION_KEY
+      - HITPAN_KEK
+    regex:
+      key: '[A-Za-z0-9+/]{43}='
+
+  - name: hitpan-jwt-secret
+    keywords:
+      - JwtSettings
+      - JWT_SECRET
+    regex:
+      secret: '(?i)(jwt[_-]?secret|jwtkey)["'']?\s*[:=]\s*["''][A-Za-z0-9+/=]{32,}["'']'
