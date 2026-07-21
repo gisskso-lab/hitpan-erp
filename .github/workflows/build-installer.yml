@@ -196,11 +196,20 @@ jobs:
           $payload = (Resolve-Path installer/payload).Path
           $outDir  = Join-Path (Get-Location).Path 'dist/updates'
           New-Item -ItemType Directory -Path $outDir -Force | Out-Null
+          # ★ 봉합 (2026-07-21, CI 실측 적발): HITPAN_RELEASED_AT 주입 누락.
+          #   build-manifest.ps1:231 은 이 값이 없으면 명시 실패한다 — 스크립트가 Date.Now 를
+          #   숨겨 쓰면 같은 커밋을 다시 빌드해도 manifest 가 달라져 서명 payload 가 흔들리기 때문이다
+          #   (재현 가능한 빌드 보장). 주석에 "CI 는 이 값을 주입한다"고 적혀 있는데 배선에서 빠졌다.
+          $env:HITPAN_RELEASED_AT = (Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ')
+          Write-Host "[update] releasedAt = $env:HITPAN_RELEASED_AT"
+          $ver = '${{ steps.ver.outputs.version }}'
           & pwsh -File installer/updates/build-manifest.ps1 `
             -PayloadDir $payload `
             -OutDir $outDir `
             -Channel $channel `
-            -DownloadUrlBase 'https://updates.hitpan.kr/packages'
+            -DownloadUrlBase 'https://updates.hitpan.kr/packages' `
+            -ReleaseNotes "히트판 ERP $ver 업데이트" `
+            -ConsentMessage "새 버전($ver)이 준비되었습니다. 자료를 자동으로 백업한 뒤 업데이트가 진행됩니다. 지금 진행하시겠습니까?"
           if ($LASTEXITCODE -ne 0) { throw "build-manifest 실패 (exit $LASTEXITCODE)" }
           Get-ChildItem $outDir | ForEach-Object { Write-Host "[update] 산출: $($_.Name)" }
 
