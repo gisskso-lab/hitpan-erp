@@ -1,0 +1,81 @@
+# 빌드·시험 CI (사장님 결재 Plan 2026-06-09 — cicd-velvety-reef)
+#
+# 트리거: develop/main push + PR
+# 검증: errors 0 + warnings 0 (헌법 #19 정합)
+# 실패 시 머지 금지
+name: Build & Test
+
+on:
+  push:
+    branches: [develop, main]
+  pull_request:
+    branches: [develop, main]
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build (errors 0 + warnings 0)
+    runs-on: windows-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Setup .NET 8
+        uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Restore dependencies
+        run: dotnet restore src/HitPan.sln
+
+      - name: Build (Release + warnings as errors)
+        # 헌법 #19: errors 0 + warnings 0이 정합성·무결성
+        run: dotnet build src/HitPan.sln --configuration Release --no-restore --nologo /p:TreatWarningsAsErrors=true /warnaserror
+
+      - name: Test (Unit + Integration)
+        run: dotnet test src/HitPan.sln --configuration Release --no-build --nologo --verbosity normal --logger "trx;LogFileName=test-results.trx"
+        continue-on-error: false
+
+      # 게이트 (2026-07-16, 작1 W-0 — 설계팀·검증팀 SoD 확증한 P0 재발 차단):
+      #   마이그 SQL(DB-*.sql)이 publish 산출물에서 통째로 누락되는 사고를 원천 차단한다.
+      #   .sql 은 .NET SDK 기본 Content 가 아니라, csproj 복사 지시가 빠지면 publish 에 0개가 실린다.
+      #   개수만 비교하면 못 잡는다(0바이트 복사, 소스 추가 시 하드코딩 개수 통과) → 파일명 '집합' 동일성 +
+      #   각 파일 비어있지 않음을 검사한다(CTO 부분수정 4). 다르면 빌드 실패.
+      - name: Publish ERP API (마이그 SQL 편입 확인용)
+        run: dotnet publish src/HitPan.API/HitPan.API.csproj -c Release -r win-x64 --self-contained false -o publish-migsmoke --nologo
+
+      - name: Gate — 마이그 SQL 집합 동일 + 비어있지 않음
+        shell: pwsh
+        run: |
+          $srcDir = 'src/HitPan.API/Migrations/SQL'
+          $outDir = 'publish-migsmoke/Migrations/SQL'
+          $src = @(Get-ChildItem -Path $srcDir -Filter 'DB-*.sql' -File | ForEach-Object { $_.Name } | Sort-Object)
+          if (-not (Test-Path $outDir)) {
+            Write-Error "::error::publish 산출물에 Migrations/SQL 폴더가 없습니다 — 마이그 SQL 이 배포에서 통째로 누락됩니다(csproj 복사 지시 확인). P0."
+            exit 1
+          }
+          $out = @(Get-ChildItem -Path $outDir -Filter 'DB-*.sql' -File | ForEach-Object { $_.Name } | Sort-Object)
+          $missing = $src | Where-Object { $_ -notin $out }
+          $extra   = $out | Where-Object { $_ -notin $src }
+          if ($missing.Count -gt 0 -or $extra.Count -gt 0) {
+            Write-Error "::error::마이그 SQL 집합 불일치 — 산출물 누락:[$($missing -join ', ')] 초과:[$($extra -join ', ')]. 소스 $($src.Count)개 vs 산출물 $($out.Count)개."
+            exit 1
+          }
+          $empty = @(Get-ChildItem -Path $outDir -Filter 'DB-*.sql' -File | Where-Object { $_.Length -eq 0 } | ForEach-Object { $_.Name })
+          if ($empty.Count -gt 0) {
+            Write-Error "::error::마이그 SQL 0바이트 복사 — [$($empty -join ', ')]. 내용이 실리지 않았습니다."
+            exit 1
+          }
+          Write-Host "[MigSmoke] 마이그 SQL $($out.Count)개 집합 동일 + 전부 비어있지 않음. OK."
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v5
+        with:
+          name: test-results
+          path: '**/test-results.trx'
+          retention-days: 14
