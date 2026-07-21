@@ -160,15 +160,32 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v5
 
+      # ★ 봉합 (2026-07-21, CI 점검 중 선제 적발 — 아직 터지지 않았으나 오탐·미탐 둘 다 낸다):
+      #   ① $errs 를 루프 밖에서 한 번만 초기화해 Tokenize 결과가 파일 간 누적됐다.
+      #      첫 파일에 에러가 하나라도 나오면 이후 멀쩡한 파일이 전부 범인으로 지목된다(오탐).
+      #   ② ForEach-Object 블록 안의 `exit 1` 은 파이프라인 스크립트블록만 끝낼 뿐
+      #      스텝을 실패시키지 못한다 — 파싱 에러가 있어도 CI 가 초록이 될 수 있었다(미탐).
+      #   ③ 대상 폴더(tests/scenarios)가 없거나 .ps1 이 0건이어도 조용히 통과했다.
+      #   → 파일마다 $errs 를 새로 만들고, 결과를 모아 마지막에 한 번 판정한다.
       - name: Parse PowerShell scripts (Pester-free syntax check)
         run: |
-          $errs = @()
-          Get-ChildItem tests/scenarios -Filter *.ps1 -Recurse | ForEach-Object {
-            $null = [System.Management.Automation.PSParser]::Tokenize((Get-Content -Raw $_.FullName), [ref]$errs)
+          if (-not (Test-Path tests/scenarios)) {
+            Write-Output "tests/scenarios 없음 — 검사 대상 0건 (스킵)"
+            exit 0
+          }
+          $files = @(Get-ChildItem tests/scenarios -Filter *.ps1 -Recurse)
+          Write-Output "검사 대상 .ps1 = $($files.Count)건"
+          $bad = @()
+          foreach ($f in $files) {
+            $errs = @()   # 파일마다 새로 — 누적 금지(오탐 차단)
+            $null = [System.Management.Automation.PSParser]::Tokenize((Get-Content -Raw $f.FullName), [ref]$errs)
             if ($errs.Count -gt 0) {
-              Write-Host "::error file=$($_.FullName)::Parse errors: $($errs.Count)"
-              exit 1
+              Write-Host "::error file=$($f.FullName)::Parse errors: $($errs.Count) — $($errs[0].Message)"
+              $bad += $f.FullName
             }
           }
-          Write-Output "All scenario scripts parsed OK"
+          if ($bad.Count -gt 0) {
+            throw "PowerShell 구문 오류 $($bad.Count)건: $($bad -join ', ')"
+          }
+          Write-Output "All scenario scripts parsed OK ($($files.Count)건)"
         shell: pwsh
