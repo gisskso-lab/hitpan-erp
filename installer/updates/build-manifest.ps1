@@ -59,9 +59,23 @@ foreach ($d in @($apiDir, $webDir, $wdDir)) {
     if (-not (Test-Path $d)) { Fail "산출물 폴더가 없습니다: $d (api/web/watchdog 3개 모두 필요)" }
 }
 
-# ── 2) 버전 단방향 — api EXE 의 FileVersion 이 진실원 (W4-0) ──────────────────
+# ── 2) 버전 단방향 — api 산출물의 FileVersion 이 진실원 (W4-0) ────────────────
+# ★ 봉합 (2026-07-21, CI 첫 완주 시도에서 적발):
+#   종전엔 HitPan.API.dll 만 봤는데, 릴리스 publish 는 -p:PublishSingleFile=true 라
+#   모든 관리 DLL 이 EXE 하나로 합쳐져 HitPan.API.dll 이 개별 파일로 존재하지 않는다.
+#   → CI 에서 "api 산출물에 HitPan.API.dll 이 없습니다" 로 항상 실패했다.
+#   (로컬 빌드는 단일파일이 아니라 dll 이 남아 통과 — 그래서 여태 안 드러났다.
+#    개발PC 통과는 검증이 아니다: feedback_dev_pc_proves_nothing.)
+#   dll 우선(비단일파일 빌드 호환), 없으면 exe 폴백. 둘 다 없으면 실패.
 $apiExe = Join-Path $apiDir 'HitPan.API.dll'
-if (-not (Test-Path $apiExe)) { Fail "api 산출물에 HitPan.API.dll 이 없습니다: $apiExe" }
+if (-not (Test-Path $apiExe)) {
+    $apiExeAlt = Join-Path $apiDir 'HitPan.API.exe'
+    if (Test-Path $apiExeAlt) {
+        $apiExe = $apiExeAlt
+        Write-Host "[manifest] 단일파일 publish 감지 — HitPan.API.exe 에서 버전을 읽습니다."
+    }
+}
+if (-not (Test-Path $apiExe)) { Fail "api 산출물에 HitPan.API.dll/.exe 가 없습니다: $apiDir" }
 $fileVer = (Get-Item $apiExe).VersionInfo.FileVersion
 if ([string]::IsNullOrWhiteSpace($fileVer)) { Fail "HitPan.API.dll 의 FileVersion 을 읽지 못했습니다(버전 스탬핑 확인 — W4-0)." }
 # FileVersion 은 x.y.z.0 형태 → Major.Minor.Build 3자리로 정규화(검증기 TryParseThreePart 와 정합).
@@ -71,7 +85,17 @@ $version = "$($parts[0]).$($parts[1]).$($parts[2])"
 Write-Host "[manifest] 버전(api EXE FileVersion 기준) = $version"
 
 # watchdog·web 버전이 api 와 어긋나면 갈라진 산출물 — 즉시 실패(W4-0 정합 게이트).
+# ★ 봉합 (2026-07-21): api 와 동일 사유로 exe 폴백을 둔다. 종전엔 dll 이 없으면
+#   if(Test-Path) 가 통째로 스킵돼 "갈라짐 검사를 안 하고 통과"했다(침묵 미검증).
+#   단일파일 publish 로 바뀌는 순간 이 게이트가 조용히 무력화된다 — 헌법 #15 정신에 어긋난다.
 $wdDll = Join-Path $wdDir 'HitPan.Watchdog.dll'
+if (-not (Test-Path $wdDll)) {
+    $wdExe = Join-Path $wdDir 'HitPan.Watchdog.exe'
+    if (Test-Path $wdExe) { $wdDll = $wdExe }
+}
+if (-not (Test-Path $wdDll)) {
+    Fail "워치독 산출물에 HitPan.Watchdog.dll/.exe 가 없습니다: $wdDir (버전 갈라짐 검사를 건너뛸 수 없다)"
+}
 if (Test-Path $wdDll) {
     $wdVer = (Get-Item $wdDll).VersionInfo.FileVersion
     $wdParts = $wdVer.Split('.')
