@@ -112,6 +112,25 @@ jobs:
             --nologo
         shell: pwsh
 
+      # ★ 배선 (2026-07-21): 의존성 번들 + clean DDL — .iss [Files] 가 요구하는 나머지 5개.
+      #   .iss 는 {#BundleDir} 아래에 8개를 요구한다:
+      #     api/ web/ watchdog/ (위 publish 3단계) + dotnet-hosting.exe · mariadb.msi ·
+      #     vc_redist.x64.exe · cloudflared.exe · hitpan_db.sql
+      #   종전 이 워크플로에는 뒤 5개를 놓는 단계가 없어 ISCC 가 "파일 없음"으로 실패했다
+      #   (= 이 CI 로 EXE 가 만들어진 적이 없다. 실제 출하본은 전부 로컬 수작업).
+      #   hitpan_db.sql 은 신규설치 단일 진실원인 clean DDL 을 쓴다(헌법 #36).
+      - name: Download dependency bundle
+        shell: pwsh
+        run: |
+          & pwsh -File installer/download-bundle.ps1 -BundleDir installer/payload
+          if ($LASTEXITCODE -ne 0) { throw "번들 다운로드 실패 (exit $LASTEXITCODE)" }
+          Copy-Item installer/hitpan_db_clean.sql installer/payload/hitpan_db.sql -Force
+          # .iss 가 요구하는 8개가 모두 있는지 컴파일 전에 확인 — 없으면 여기서 명확히 실패한다.
+          $required = @('dotnet-hosting.exe','mariadb.msi','vc_redist.x64.exe','cloudflared.exe','hitpan_db.sql','api','web','watchdog')
+          $missing = $required | Where-Object { -not (Test-Path "installer/payload/$_") }
+          if ($missing) { throw "번들 누락: $($missing -join ', ')" }
+          Write-Host "번들 8종 확인 완료"
+
       - name: Install Inno Setup 6
         shell: pwsh
         run: |
@@ -128,8 +147,14 @@ jobs:
             Write-Error "Installer script not found: $iss"
             exit 1
           }
+          # ★ 봉합 (2026-07-21): /DBundleDir 주입 누락 — CI 는 installer/payload 에 산출물을 놓는데
+          #   .iss 기본값은 ..\installer-build\bundle 이라 서로 다른 곳을 보고 있었다(경로 불일치).
+          #   .iss 의 상대경로 기준은 .iss 파일 위치(installer/)이므로 payload 로 준다.
+          #   /DOutputDir 도 명시 — 아래 업로드 단계가 installer/output 을 집는다.
           & 'C:\Program Files (x86)\Inno Setup 6\ISCC.exe' `
             "/DAppVersion=$env:INSTALLER_VERSION" `
+            "/DBundleDir=payload" `
+            "/DOutputDir=output" `
             $iss
           if ($LASTEXITCODE -ne 0) {
             Write-Error "Inno Setup compile failed"
