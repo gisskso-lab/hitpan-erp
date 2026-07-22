@@ -1,0 +1,173 @@
+# 자동업데이트 영구 CD — deploy-update.yml (20260723작1)
+# ══════════════════════════════════════════════════════════════════════════
+# ⚠️ 이 파일은 `.disabled` 확장자로 비활성 상태다. 아래 착수 게이트 전부 통과 전
+#    활성화(파일명에서 .disabled 제거) 절대 금지 — PRD §2, 작4 B-4 정신.
+#
+#   [G-A] publish-update.sh + sign-manifest.sh 를 NCP /opt/hitpan/installer/updates/ 에
+#         동일 디렉토리 상주 배치 (사장님 sudo 1회). publish 가 sign 을 source 하므로 함께.
+#   [G-B] sudoers 화이트리스트 — 이 스크립트·--zip/--manifest 2인자만 NOPASSWD.
+#         오버라이드(--webroot/--private/--feed-url/--allow-republish) 차단. (사장님 sudo 1회)
+#   [G-C] publish-update.sh:41 webroot 기본값 /var/www/updates.hitpan.kr → /var/www/updates 정정.
+#   [G-D] manifest.json no-cache 헤더 확인 — Cloudflare 엣지 경유 `curl -I`. (CTO 권고1)
+#   [G-E] environment: production required reviewer + .github/CODEOWNERS 신설.
+#
+#   G-A·B·C 는 사장님 NCP sudo 1회 세션으로 묶는다. 이후 CD 사람 손 0.
+# ══════════════════════════════════════════════════════════════════════════
+#
+# 헌법 정합: #22(개인키 NCP)·#29(인프라 사전승인=게이트)·#34(영구 CD 정식완성도).
+#
+# 보안 불변식 (PRD §5 — 구현/수정 시 절대 위반 금지):
+#   1. 개인키 GHA 반입 0 (서명은 NCP publish-update.sh 안에서만)
+#   2. 실행 스크립트(.sh) rsync 0 — 데이터(zip·unsigned manifest)만 /tmp
+#   3. sudo 대상 = publish-update.sh 1개, 인자 = --zip/--manifest 만
+#   4. CI 는 /tmp 스테이징만, update-keys(700 root) 읽기조차 불가
+#   5. 서명 규격 3벌 무변경
+#   6. 버전 SSOT 단조증가 (다운그레이드 방어가 여기 의존)
+#   7. cloudflared·DNS·방화벽·systemctl 미접촉 (CD 런타임)
+#   ★ SSH 페이로드 = publish-update.sh 단일 호출. 임의 셸 블록 0 (CTO 권고3)
+
+name: Deploy Auto-Update (자동업데이트 영구 CD)
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: '릴리스 버전 (3자, 예: 1.2.40). 직전 게시본보다 높아야 함(다운그레이드 게이트).'
+        required: true
+        type: string
+      channel:
+        description: '적용 시점 채널. 팝업은 Major 만 뜸(게시함정3-③은 여기서 주입, 게시 시 jq 금지).'
+        required: true
+        default: Major
+        type: choice
+        options: [Major, Normal, Emergency]
+      environment:
+        description: '배포 대상 피드. production 만 실동작(beta 는 피드 물리생성 별건 전엔 nginx 403).'
+        required: true
+        default: production
+        type: choice
+        options: [production, beta]
+
+permissions:
+  contents: read
+
+jobs:
+  # ── build 잡: 재빌드 방식 (아티팩트 승계 아님) ──
+  #   근거 = "게시할 커밋 = 빌드한 커밋" SSOT 불변식. build-manifest.ps1 이 api EXE
+  #   FileVersion 을 단방향으로 읽어 manifest 를 만든다. 다른 커밋 아티팩트 승계 = 불변식 파괴.
+  #   ⚠️ build-installer.yml 의 EXE 컴파일(ISCC)·Create Release 스텝은 가져오지 말 것(G2 별건).
+  build:
+    name: Build update package (재빌드 · SSOT)
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Setup .NET 8
+        uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: '8.0.x'
+
+      # N-1 fail-closed: version input == 산출 FileVersion == zip/manifest 파일명 3자 정합.
+      # 불일치 시 build 진입 즉시 중단 (오타를 게시 전에 세운다).
+      - name: Verify version input (fail-closed)
+        shell: pwsh
+        run: |
+          $v = '${{ inputs.version }}'
+          if ($v -notmatch '^\d+\.\d+\.\d+$') {
+            Write-Error "::error::version input '$v' 이 3자 SemVer 아님. 게시 전 중단."
+            exit 1
+          }
+          Write-Host "[VersionGate] version=$v"
+
+      - name: Restore
+        run: dotnet restore src/HitPan.sln
+
+      # publish api / web / watchdog — build-installer.yml:76-135 동일 구성.
+      #   -p:HitPanVersion 단일 주입으로 SSOT 정합. (실제 인자·경로는 build-installer.yml 참조)
+      # TODO(구현): build-installer.yml 의 publish 3종 + wwwroot 복사(104-115) + build-manifest 호출을
+      #   여기로 이식. EXE·Release 스텝은 제외. 골격 단계라 상세 스텝은 게이트 통과 후 배선.
+
+      # build-manifest.ps1 → hitpan-<ver>.zip + manifest(unsigned):
+      #   -Channel <channel input>            (게시함정3-③: 상류 주입)
+      #   -DownloadUrlBase <environment 분기>  (production=updates.hitpan.kr/packages,
+      #                                         beta=updates.hitpan.kr/beta/packages)
+      #   HITPAN_RELEASED_AT 주입 (재현가능빌드)
+
+      - name: Upload update artifact
+        uses: actions/upload-artifact@v5
+        with:
+          name: update-pkg-${{ inputs.version }}
+          path: dist/updates/
+          retention-days: 7
+
+  # ── deploy 잡: 데이터만 /tmp → NCP 상주본 sudo 2인자 호출 ──
+  #   ★ 웹 CD(deploy-ncp.yml)에서 복붙 금지 3구간:
+  #     - rsync 위치이동(→/opt)  : 여기선 데이터만 /tmp (B-1)
+  #     - 광역 sudo(임의 셸)     : 여기선 publish-update.sh 단일 호출만
+  #     - GHA 롤백 스텝          : 롤백 주체는 publish-update.sh 자기검증. 이중경합 금지.
+  deploy:
+    name: Sign & publish on NCP (상주본 호출)
+    needs: build
+    runs-on: ubuntu-latest
+    environment: production   # G-E: required reviewer 등록 대상(사장님). 방아쇠 1회만 사람.
+    timeout-minutes: 15
+    steps:
+      - name: Download update artifact
+        uses: actions/download-artifact@v5
+        with:
+          name: update-pkg-${{ inputs.version }}
+          path: dist/updates/
+
+      # SSH 키 셋업 — deploy-ncp.yml:85-92 복붙 (동일 Secrets 3종, 재사용 OK)
+      - name: Setup SSH key
+        env:
+          SSH_KEY: ${{ secrets.NCP_SSH_PRIVATE_KEY }}
+        run: |
+          mkdir -p ~/.ssh
+          echo "$SSH_KEY" > ~/.ssh/ncp_key
+          chmod 600 ~/.ssh/ncp_key
+          ssh-keyscan -H ${{ secrets.NCP_HOST }} >> ~/.ssh/known_hosts
+
+      # 【데이터만 전송】 zip·unsigned manifest → NCP /tmp. 실행 스크립트(.sh) 절대 금지(B-1).
+      #   게시함정3-①: manifest 목적지 파일명을 publish 가 받는 이름으로 rename.
+      - name: Rsync data only (zip + unsigned manifest)
+        env:
+          NCP_USER: ${{ secrets.NCP_USER }}
+          NCP_HOST: ${{ secrets.NCP_HOST }}
+          VER: ${{ inputs.version }}
+        run: |
+          rsync -avz -e "ssh -i ~/.ssh/ncp_key" \
+            dist/updates/hitpan-$VER.zip \
+            $NCP_USER@$NCP_HOST:/tmp/hitpan-$VER.zip
+          rsync -avz -e "ssh -i ~/.ssh/ncp_key" \
+            dist/updates/manifest.json \
+            $NCP_USER@$NCP_HOST:/tmp/manifest-$VER-unsigned.json
+
+      # 【상주본 호출】 SSH 페이로드 = publish-update.sh 단일 호출, 2인자만 (CTO 권고3).
+      #   서명·원자교체·자기검증·롤백은 전부 NCP 안에서. 개인키 GHA 로 안 나옴.
+      #   production 은 --webroot/--feed-url 안 넘김 = sudoers 2인자 화이트리스트 정합(G-B).
+      #   beta 는 별건 후 sudoers 에 beta 화이트리스트 라인 추가 시에만.
+      - name: Invoke resident publish-update.sh (2 args only)
+        env:
+          NCP_USER: ${{ secrets.NCP_USER }}
+          NCP_HOST: ${{ secrets.NCP_HOST }}
+          VER: ${{ inputs.version }}
+        run: |
+          ssh -i ~/.ssh/ncp_key $NCP_USER@$NCP_HOST \
+            "sudo bash /opt/hitpan/installer/updates/publish-update.sh --zip /tmp/hitpan-$VER.zip --manifest /tmp/manifest-$VER-unsigned.json"
+
+      # 【이중 확인】 서빙본 최신 확인 (N-3 이중 안전망일 뿐).
+      #   실패해도 publish-update.sh 자기검증이 이미 롤백함 — GHA 롤백 스텝 신설 금지(§4).
+      - name: Verify served manifest (double-check, no rollback here)
+        env:
+          VER: ${{ inputs.version }}
+        run: |
+          SERVED=$(curl -fsS "https://updates.hitpan.kr/manifest.json?_=$RANDOM" | python3 -c "import sys,json; print(json.load(sys.stdin).get('version',''))" 2>/dev/null || echo "")
+          echo "served version: '$SERVED' / expected: '$VER'"
+          if [ "$SERVED" != "$VER" ]; then
+            echo "::error::서빙 버전 불일치. publish-update.sh 자기검증이 이미 롤백했을 수 있음(정상 안전망 동작). NCP 로그 확인. GHA 에서 롤백하지 않음(이중경합 금지)."
+            exit 1
+          fi
+          echo "[VerifyGate] production 피드 최신화 확인 — $VER"

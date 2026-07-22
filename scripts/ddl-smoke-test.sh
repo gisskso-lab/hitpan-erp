@@ -15,28 +15,39 @@
 # ──────────────────────────────────────────────────────────────────────────
 set -uo pipefail
 
-MYSQL="/c/Program Files/MariaDB 11.4/bin/mysql.exe"
+# 20260723작1 G3 — CI(ubuntu MariaDB 서비스 컨테이너) env 파라미터화.
+#   하위호환 절대: env 미주입 시 로컬(윈도 MariaDB 경로·root 무비번) 그대로 동작.
+#   개발자 `bash scripts/ddl-smoke-test.sh` 손실행 = 종전과 100% 동일.
+#   CI 는 HITPAN_MYSQL=mysql / HITPAN_DB_USER=root / HITPAN_DB_PASS=<service 비번> 주입.
+MYSQL="${HITPAN_MYSQL:-/c/Program Files/MariaDB 11.4/bin/mysql.exe}"
 DDL="installer/hitpan_db_clean.sql"
 SMOKE_DB="hitpan_ddl_smoke"
-DBUSER="root"   # 로컬 개발 환경 root(무비번). 임시 DB 생성권한 필요.
+DBUSER="${HITPAN_DB_USER:-root}"   # 로컬 기본 root(무비번). CI 는 서비스 컨테이너 root.
+# 접속 옵션(host/port/pw)은 env 로만 주입(선택). 미주입 시 옵션 자체를 안 붙여
+#   로컬(소켓 접속·무비번)과 100% 정합. CI(TCP·비번)는 아래 3개를 주입한다.
+#   ⚠️ MYSQL 은 실행파일 경로 하나만 — host/port 를 여기 섞으면 "$MYSQL" 호출이 깨진다.
+MYSQL_CONN_OPT=()
+[ -n "${HITPAN_DB_HOST:-}" ] && MYSQL_CONN_OPT+=("--host=$HITPAN_DB_HOST")
+[ -n "${HITPAN_DB_PORT:-}" ] && MYSQL_CONN_OPT+=("--port=$HITPAN_DB_PORT")
+[ -n "${HITPAN_DB_PASS:-}" ] && MYSQL_CONN_OPT+=("-p$HITPAN_DB_PASS")
 
-fail() { echo "❌ FAIL: $1"; "$MYSQL" -u "$DBUSER" -e "DROP DATABASE IF EXISTS $SMOKE_DB;" 2>/dev/null; exit 1; }
+fail() { echo "❌ FAIL: $1"; "$MYSQL" -u "$DBUSER" "${MYSQL_CONN_OPT[@]}" -e "DROP DATABASE IF EXISTS $SMOKE_DB;" 2>/dev/null; exit 1; }
 
 [ -f "$DDL" ] || fail "출하 DDL 파일 없음: $DDL"
 
 echo "── 1) 빈 DB 생성 ──"
-"$MYSQL" -u "$DBUSER" -e "DROP DATABASE IF EXISTS $SMOKE_DB; CREATE DATABASE $SMOKE_DB CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;" 2>/dev/null \
+"$MYSQL" -u "$DBUSER" "${MYSQL_CONN_OPT[@]}" -e "DROP DATABASE IF EXISTS $SMOKE_DB; CREATE DATABASE $SMOKE_DB CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;" 2>/dev/null \
   || fail "임시 DB 생성 실패(권한 확인: $DBUSER)"
 
 echo "── 2) clean DDL 전체 import ──"
-IMPORT_ERR=$("$MYSQL" -u "$DBUSER" "$SMOKE_DB" < "$DDL" 2>&1)
+IMPORT_ERR=$("$MYSQL" -u "$DBUSER" "${MYSQL_CONN_OPT[@]}" "$SMOKE_DB" < "$DDL" 2>&1)
 if [ -n "$IMPORT_ERR" ]; then
   echo "$IMPORT_ERR" | head -20
   fail "clean DDL import 중 에러(위 출력) — 신규설치 시 동일 실패"
 fi
 
 echo "── 3) 테이블 수 게이트(125) ──"   # 2026-06-29 schema_migrations 편입 123→124 (고리4 ①) / 2026-07-20 local_update_apply_status 편입 124→125 (고리4 §W4-6)
-TBL_CNT=$("$MYSQL" -u "$DBUSER" -N -B "$SMOKE_DB" -e "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema='$SMOKE_DB' AND table_type='BASE TABLE';" 2>/dev/null)
+TBL_CNT=$("$MYSQL" -u "$DBUSER" "${MYSQL_CONN_OPT[@]}" -N -B "$SMOKE_DB" -e "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema='$SMOKE_DB' AND table_type='BASE TABLE';" 2>/dev/null)
 echo "   생성된 테이블: $TBL_CNT"
 [ "$TBL_CNT" -ge 125 ] || fail "테이블 수 부족($TBL_CNT < 125) — DDL 일부 미생성"
 
@@ -58,7 +69,7 @@ CHECKS=(
 MISSING=0
 for chk in "${CHECKS[@]}"; do
   T=$(echo "$chk" | awk '{print $1}'); C=$(echo "$chk" | awk '{print $2}')
-  EXISTS=$("$MYSQL" -u "$DBUSER" -N -B "$SMOKE_DB" -e "SELECT COUNT(*) FROM information_schema.columns WHERE table_schema='$SMOKE_DB' AND table_name='$T' AND column_name='$C';" 2>/dev/null)
+  EXISTS=$("$MYSQL" -u "$DBUSER" "${MYSQL_CONN_OPT[@]}" -N -B "$SMOKE_DB" -e "SELECT COUNT(*) FROM information_schema.columns WHERE table_schema='$SMOKE_DB' AND table_name='$T' AND column_name='$C';" 2>/dev/null)
   if [ "$EXISTS" != "1" ]; then echo "   ❌ 누락: $T.$C"; MISSING=$((MISSING+1)); else echo "   ✅ $T.$C"; fi
 done
 [ "$MISSING" -eq 0 ] || fail "핵심 컬럼 $MISSING 개 누락 — 코드가 쓰는데 DDL에 없음(신규설치 DOA)"
@@ -77,11 +88,11 @@ FILE_IDS=$(ls "$MIG_DIR"/DB-*.sql 2>/dev/null \
   | awk '{ printf "DB-%02d%s\n", $1, $2 }' \
   | sort -u)
 FILE_CNT=$(echo "$FILE_IDS" | grep -c . )
-SEED_CNT=$("$MYSQL" -u "$DBUSER" -N -B "$SMOKE_DB" -e "SELECT COUNT(*) FROM schema_migrations WHERE success=1;" 2>/dev/null)
+SEED_CNT=$("$MYSQL" -u "$DBUSER" "${MYSQL_CONN_OPT[@]}" -N -B "$SMOKE_DB" -e "SELECT COUNT(*) FROM schema_migrations WHERE success=1;" 2>/dev/null)
 echo "   소스 마이그 파일(고유 DB-NN): $FILE_CNT / clean DDL 시드(success=1): $SEED_CNT"
 if [ "$FILE_CNT" != "$SEED_CNT" ]; then
   # 어느 쪽이 빠졌는지 좌표로 찍는다(손으로 헤매지 않게).
-  SEED_IDS=$("$MYSQL" -u "$DBUSER" -N -B "$SMOKE_DB" -e "SELECT migration_id FROM schema_migrations WHERE success=1 ORDER BY migration_id;" 2>/dev/null)
+  SEED_IDS=$("$MYSQL" -u "$DBUSER" "${MYSQL_CONN_OPT[@]}" -N -B "$SMOKE_DB" -e "SELECT migration_id FROM schema_migrations WHERE success=1 ORDER BY migration_id;" 2>/dev/null)
   echo "   ▸ 파일엔 있는데 시드에 없음:"; comm -23 <(echo "$FILE_IDS") <(echo "$SEED_IDS" | sort -u) | sed 's/^/       /'
   echo "   ▸ 시드엔 있는데 파일에 없음:"; comm -13 <(echo "$FILE_IDS") <(echo "$SEED_IDS" | sort -u) | sed 's/^/       /'
   fail "schema_migrations 시드($SEED_CNT) != 소스 마이그 파일($FILE_CNT) — clean DDL 시드 갱신 필요(작4 #1). 어긋나면 신규 고객 자동업데이트 전량 차단."
@@ -89,7 +100,7 @@ fi
 echo "   ✅ 시드 == 파일 ($SEED_CNT) — 신규설치 자동업데이트 게이트 통과 보장"
 
 echo "── 6) 정리 ──"
-"$MYSQL" -u "$DBUSER" -e "DROP DATABASE IF EXISTS $SMOKE_DB;" 2>/dev/null
+"$MYSQL" -u "$DBUSER" "${MYSQL_CONN_OPT[@]}" -e "DROP DATABASE IF EXISTS $SMOKE_DB;" 2>/dev/null
 
 echo ""
 echo "✅ PASS — clean DDL 단일 import 신규설치 무결(테이블 $TBL_CNT, 핵심 컬럼 ${#CHECKS[@]}개 전수 존재)"

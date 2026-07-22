@@ -21,3 +21,13 @@ detectors:
       - JWT_SECRET
     regex:
       secret: '(?i)(jwt[_-]?secret|jwtkey)["'']?\s*[:=]\s*["''][A-Za-z0-9+/=]{32,}["'']'
+
+  # 20260723작1 보강5 — 자동업데이트 서명 개인키 오커밋 최종 안전망.
+  # NCP 전용 EC 개인키(update_private.pem)가 실수로 레포에 커밋되는 걸 CI 가 잡는다.
+  # 헌법 #22·#29: 개인키는 NCP `/var/hitpan/update-keys/` 밖으로 절대 나오면 안 됨.
+  - name: hitpan-ec-private-key
+    keywords:
+      - BEGIN EC PRIVATE KEY
+      - BEGIN PRIVATE KEY
+    regex:
+      key: '-----BEGIN (EC )?PRIVATE KEY-----'
