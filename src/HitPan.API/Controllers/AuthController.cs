@@ -313,16 +313,52 @@ public class AuthController : ControllerBase
     /// </summary>
     private async Task EnrichUpdateConsentInfoAsync(LoginResponse response, CancellationToken ct)
     {
+        // 조회 로직은 ComputeUpdateStatusAsync 로 추출해 로그인·GET(update-status) 두 경로가 공용한다
+        //   (2026-07-22 작1 W-1, CTO A-2: 추출 후 로그인 동작 1비트도 안 변해야 함 — 동일 로직·동일 폴백).
+        var status = await ComputeUpdateStatusAsync(ct);
+        response.CurrentVersion = status.CurrentVersion;
+        response.UpdateAvailable = status.UpdateAvailable;
+        response.LatestVersion = status.LatestVersion;
+        response.UpdateChannel = status.UpdateChannel;
+        response.ConsentMessage = status.ConsentMessage;
+    }
+
+    /// <summary>
+    /// 고리2(A안) — 업데이트 상태 조회 GET. 팝업을 로그인 페이지가 아닌 ERP 메인(MainLayout)에서
+    ///   띄우기 위해(2026-07-22 작1: 로그인 성공 시 /login 폐기로 팝업이 0.5초 만에 사라지던 진범 봉합)
+    ///   상태를 독립적으로 조회하는 전용 엔드포인트다. UpdateConsentGate 컴포넌트가 이걸 호출한다.
+    ///   · 조회 로직은 로그인과 완전히 동일(ComputeUpdateStatusAsync 공용) — 두 경로가 절대 갈라지지 않게.
+    ///   · [Authorize] 필수(CTO B-2). 미인증 401 시 게이트는 조용히 스킵한다.
+    ///   · 어떤 예외도 로그인처럼 안전 폴백(UpdateAvailable=false) — ERP 사용을 막지 않는다(헌법 #15·#20).
+    /// </summary>
+    [HttpGet("update-status")]
+    [Authorize(Policy = "TenantOnly")]
+    public async Task<IActionResult> GetUpdateStatus(CancellationToken ct)
+    {
+        var status = await ComputeUpdateStatusAsync(ct);
+        return Ok(status);
+    }
+
+    /// <summary>
+    /// 워치독이 local_update_status(DB-83)에 적재한 최신 새버전을 읽어 설치버전과 SemVer 비교한다.
+    ///   로그인 응답 보강(EnrichUpdateConsentInfoAsync)과 GET(update-status)의 단일 진실원.
+    ///   테이블 부재·조회 실패·파싱 실패 등 어떤 예외도 UpdateAvailable=false 안전 폴백(헌법 #15 침묵 금지).
+    ///   tenant_id 는 JWT 클레임에서만 다룬다(헌법 #2). 로컬 단일 테넌트 DB라 tenant 필터 불요.
+    /// </summary>
+    private async Task<UpdateStatusDto> ComputeUpdateStatusAsync(CancellationToken ct)
+    {
+        // 안전 기본값 — 어떤 분기에서도 호출자(로그인·게이트)를 막지 않는다.
+        var status = new UpdateStatusDto
+        {
+            CurrentVersion = GetCurrentErpVersion(),
+            UpdateAvailable = false,
+            LatestVersion = null,
+            UpdateChannel = null,
+            ConsentMessage = null
+        };
+
         try
         {
-            response.CurrentVersion = GetCurrentErpVersion();
-
-            // 안전 기본값 — 어떤 분기에서도 로그인은 막지 않는다.
-            response.UpdateAvailable = false;
-            response.LatestVersion = null;
-            response.UpdateChannel = null;
-            response.ConsentMessage = null;
-
             var db = HttpContext.RequestServices.GetRequiredService<System.Data.IDbConnection>();
             if (db.State != System.Data.ConnectionState.Open)
             {
@@ -344,23 +380,25 @@ public class AuthController : ControllerBase
                     cancellationToken: ct));
 
             if (row is null || string.IsNullOrWhiteSpace(row.LatestVersion))
-                return; // 적재된 새버전 없음 → 폴백 유지
+                return status; // 적재된 새버전 없음 → 폴백 유지
 
             // 설치버전보다 높은 새버전일 때만 팝업 노출(SemVer Major.Minor.Build 비교).
-            if (IsNewerVersion(response.CurrentVersion, row.LatestVersion))
+            if (IsNewerVersion(status.CurrentVersion, row.LatestVersion))
             {
-                response.UpdateAvailable = true;
-                response.LatestVersion = row.LatestVersion;
-                response.UpdateChannel = row.UpdateChannel;
-                response.ConsentMessage = row.ConsentMessage;
+                status.UpdateAvailable = true;
+                status.LatestVersion = row.LatestVersion;
+                status.UpdateChannel = row.UpdateChannel;
+                status.ConsentMessage = row.ConsentMessage;
             }
         }
         catch (Exception ex)
         {
-            // 헌법 #15: 침묵 금지 + 로그인은 절대 안 깨지게(false 폴백).
-            _logger.LogWarning(ex, "업데이트 동의 정보 조회 실패 — UpdateAvailable false 폴백");
-            response.UpdateAvailable = false;
+            // 헌법 #15: 침묵 금지 + 호출자는 절대 안 깨지게(false 폴백).
+            _logger.LogWarning(ex, "업데이트 상태 조회 실패 — UpdateAvailable false 폴백");
+            status.UpdateAvailable = false;
         }
+
+        return status;
     }
 
     /// <summary>local_update_status 1행 매핑(고리2 새버전 상태).</summary>
@@ -415,6 +453,28 @@ public class AuthController : ControllerBase
 }
 
 public sealed record VerifyPasswordRequest(string Password);
+
+/// <summary>
+/// 고리2(A안) 업데이트 상태 응답 — GET api/auth/update-status 및 로그인 응답 보강의 공용 형태.
+///   UpdateConsentGate 컴포넌트가 이 형태로 받아 팝업 노출을 판단한다(2026-07-22 작1).
+/// </summary>
+public sealed class UpdateStatusDto
+{
+    /// <summary>현재 설치된 ERP 버전(예: "1.2.34").</summary>
+    public string? CurrentVersion { get; set; }
+
+    /// <summary>설치버전보다 높은 새버전이 로컬에 적재돼 있으면 true.</summary>
+    public bool UpdateAvailable { get; set; }
+
+    /// <summary>적재된 새버전(예: "1.2.36"). UpdateAvailable=false 면 null.</summary>
+    public string? LatestVersion { get; set; }
+
+    /// <summary>업데이트 채널(Major/Normal/Emergency).</summary>
+    public string? UpdateChannel { get; set; }
+
+    /// <summary>팝업에 보여줄 안내 문구(manifest 발행값).</summary>
+    public string? ConsentMessage { get; set; }
+}
 
 /// <summary>고리2 업데이트 동의 요청 — tenant_id·user_id 는 JWT 클레임에서만(헌법 #2), 바디에 두지 않는다.</summary>
 public sealed class UpdateConsentRequest

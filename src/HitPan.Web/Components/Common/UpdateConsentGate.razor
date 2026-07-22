@@ -1,0 +1,83 @@
+@* 고리2(A안) 업데이트 동의 팝업 게이트 — MainLayout(ERP 메인)에서 1회 노출.
+   ─ 왜 로그인 페이지가 아니라 여기인가 (2026-07-22 작1 진범 봉합):
+     로그인 성공 시 AuthService 가 인증 상태를 방송 → 라우터가 /login 컴포넌트를 즉시 폐기 →
+     그 위에 뜬 팝업이 딸려 사라졌다(0.5초, "누를 경황도 없이"). ERP 메인은 안 사라지므로 팝업이 유지된다.
+   ─ 모듈화(사장님 원칙 2026-07-21): 업데이트 팝업 책임을 이 독립 컴포넌트로 분리.
+     조회·팝업 실패해도 ERP 사용은 절대 막지 않는다(TermsConsentBanner 와 동일 방어).
+   ─ CTO B-1: MainLayout 은 모든 화면 껍데기라 페이지 이동마다 재조회될 수 있다 → 세션 1회 가드. *@
+@using System.Net.Http.Json
+@using Microsoft.AspNetCore.Components.Authorization
+@using Microsoft.JSInterop
+@using MudBlazor
+@using HitPan.Web.Services
+@using HitPan.Web.Components.Common
+@inject IAuthService AuthService
+@inject HttpClient Http
+@inject AuthenticationStateProvider AuthProvider
+@inject IDialogService DialogService
+@inject IJSRuntime JS
+
+@* 렌더 출력 없음 — 순수 게이트(팝업은 DialogService 로 띄운다). *@
+
+@code {
+    // CTO B-1: 한 브라우저 세션에 1회만. 페이지 이동마다 MainLayout 이 재생성돼도 이 키가 있으면 즉시 종료.
+    //   [나중에] 거부/[예] 동의/노출 완료 어느 경우든 세팅 → 이 세션 재노출 없음. 다음 로그인은 새 세션 → 재안내 OK.
+    private const string SessionKey = "hitpan_update_prompt_shown";
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        // 레이아웃 생명주기 1회만 시도. JS(sessionStorage)는 렌더 후에만 안전하므로 OnAfterRender 사용.
+        //   Nav.LocationChanged 를 구독하지 않는다(CTO B-1: 팝업 재노출 방지) — 페이지 이동으로는 재트리거 안 됨.
+        if (!firstRender) return;
+
+        try
+        {
+            // 미인증이면 조용히 스킵(로그인 전 첫 화면 등). TermsConsentBanner 와 동일 가드.
+            var auth = await AuthProvider.GetAuthenticationStateAsync();
+            if (auth.User?.Identity?.IsAuthenticated != true) return;
+
+            // 세션 1회 가드 — 이미 노출했으면 종료(CTO B-1).
+            var shown = await JS.InvokeAsync<string?>("sessionStorage.getItem", SessionKey);
+            if (!string.IsNullOrEmpty(shown)) return;
+
+            // 업데이트 상태 조회(로그인과 동일 로직의 전용 GET). 실패·미인증 401 → 조용히 스킵.
+            var status = await Http.GetFromJsonAsync<UpdateStatusResponse>("api/auth/update-status");
+            if (status?.UpdateAvailable != true || string.IsNullOrWhiteSpace(status.LatestVersion))
+                return;
+
+            // 여기까지 왔으면 팝업을 띄운다. 이후 결과와 무관하게 세션 1회 가드를 세운다.
+            await JS.InvokeVoidAsync("sessionStorage.setItem", SessionKey, "1");
+
+            var notice = string.IsNullOrWhiteSpace(status.ConsentMessage)
+                ? "지금 동의하시면 다음 재시작 때 자동으로 적용됩니다."
+                : status.ConsentMessage!;
+            // 헌법 #14: Razor 에 raw string 금지 — $"...\n..." 로 조립.
+            var message = $"새 버전 {status.LatestVersion} 이(가) 나왔습니다. 업데이트하시겠습니까?\n\n{notice}";
+
+            var agree = await ConfirmDialog.ShowAsync(
+                DialogService,
+                title: "업데이트 안내",
+                message: message,
+                confirmText: "예",
+                cancelText: "나중에",
+                severity: Severity.Info);
+
+            // 예=approve / 나중에=reject — 양쪽 모두 기록(거부 이력도 재안내 정책에 활용).
+            var action = agree ? "approve" : "reject";
+            await AuthService.SubmitUpdateConsentAsync(status.LatestVersion!, action);
+        }
+        catch
+        {
+            // 조회·팝업·기록 실패는 ERP 사용을 막지 않는다(헌법 #15·#20). 다음 세션에 재안내.
+        }
+    }
+
+    private sealed class UpdateStatusResponse
+    {
+        public string? CurrentVersion { get; set; }
+        public bool UpdateAvailable { get; set; }
+        public string? LatestVersion { get; set; }
+        public string? UpdateChannel { get; set; }
+        public string? ConsentMessage { get; set; }
+    }
+}

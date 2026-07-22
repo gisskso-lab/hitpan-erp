@@ -107,12 +107,10 @@
                 return;
             }
 
-            // 고리2(A안): 새 버전이 있으면 업데이트 동의 Y/N 팝업 (헌법 #30 로컬 자가완결)
-            //   - 약관 동의가 끝난 뒤에만 노출(약관이 우선). 팝업이 실패해도 로그인 흐름은 막지 않는다.
-            if (result.Data?.UpdateAvailable == true && !string.IsNullOrWhiteSpace(result.Data?.LatestVersion))
-            {
-                await PromptUpdateConsentAsync(result.Data);
-            }
+            // 고리2(A안) 업데이트 동의 팝업은 여기서 띄우지 않는다 (2026-07-22 작1 진범 봉합):
+            //   로그인 성공 시 인증 상태 방송 → 라우터가 /login 컴포넌트를 즉시 폐기 → 그 위 팝업이 딸려
+            //   0.5초 만에 사라졌다("누를 경황도 없이"). 팝업 책임을 ERP 메인(MainLayout <UpdateConsentGate/>)
+            //   으로 이관했다. 이 페이지는 로그인·약관·기기통지·이동만 담당한다(모듈화, 사장님 원칙 2026-07-21).
 
             // 작3 I3 (사장님 결재 2026-07-02, (a) 자동 등록 후 통지): 이번 로그인에서 이 기기가
             //   처음 등록된 신규 기기면 사용자에게 알린다(자동 등록은 이미 서버에서 됨). 기기 슬롯 관리는
@@ -152,36 +150,6 @@
         }
     }
 
-    /// <summary>
-    /// 고리2(A안) — 새 버전 동의 Y/N 팝업. [예]=approve, [나중에]=reject 를 로컬 ERP DB에 기록한다.
-    ///   본사를 거치지 않는다(헌법 #30). 팝업/기록이 실패해도 로그인 진행은 막지 않는다(다음 로그인 재안내).
-    ///   ⚠️ 헌법 #14: Razor 에 raw string("""...""") 금지 — $"...\n..." 로 메시지를 만든다.
-    /// </summary>
-    private async Task PromptUpdateConsentAsync(LoginApiResponse data)
-    {
-        try
-        {
-            var version = data.LatestVersion ?? "";
-            var notice = string.IsNullOrWhiteSpace(data.ConsentMessage)
-                ? "지금 동의하시면 다음 재시작 때 자동으로 적용됩니다."
-                : data.ConsentMessage!;
-            var message = $"새 버전 {version} 이(가) 나왔습니다. 업데이트하시겠습니까?\n\n{notice}";
-
-            var agree = await ConfirmDialog.ShowAsync(
-                DialogService,
-                title: "업데이트 안내",
-                message: message,
-                confirmText: "예",
-                cancelText: "나중에",
-                severity: Severity.Info);
-
-            // 예=approve / 나중에=reject — 양쪽 모두 기록(거부 이력도 남겨 재안내 정책에 활용).
-            var action = agree ? "approve" : "reject";
-            await AuthService.SubmitUpdateConsentAsync(version, action);
-        }
-        catch
-        {
-            // 동의 팝업/기록 실패는 로그인 흐름을 막지 않는다(다음 로그인에 재안내).
-        }
-    }
+    // PromptUpdateConsentAsync 제거 (2026-07-22 작1): 업데이트 팝업 책임을 MainLayout <UpdateConsentGate/>
+    //   으로 이관. 이 페이지에서 팝업을 띄우면 로그인 성공 직후 /login 폐기로 팝업이 사라지기 때문(진범).
 }

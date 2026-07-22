@@ -42,6 +42,10 @@
                     @* 헌법 #24 약관 v2.0.0 미동의 안내 배너 *@
                     <TermsConsentBanner />
 
+                    @* 고리2(A안) 업데이트 동의 팝업 게이트 — 로그인 페이지가 아닌 여기서 1회 노출
+                       (2026-07-22 작1: /login 폐기로 팝업이 사라지던 진범 봉합). 약관 미동의 시엔 게이트가 스킵. *@
+                    <UpdateConsentGate />
+
                     <main class="hitpan-content mud-px-4 mud-py-4">
                         <ErrorBoundary>
                             <ChildContent>@Body</ChildContent>
