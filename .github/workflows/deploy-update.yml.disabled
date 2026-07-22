@@ -84,16 +84,90 @@ jobs:
       - name: Restore
         run: dotnet restore src/HitPan.sln
 
-      # publish api / web / watchdog — build-installer.yml:76-135 동일 구성.
-      #   -p:HitPanVersion 단일 주입으로 SSOT 정합. (실제 인자·경로는 build-installer.yml 참조)
-      # TODO(구현): build-installer.yml 의 publish 3종 + wwwroot 복사(104-115) + build-manifest 호출을
-      #   여기로 이식. EXE·Release 스텝은 제외. 골격 단계라 상세 스텝은 게이트 통과 후 배선.
+      # ── publish 3종 — build-installer.yml:76-135 와 동일 구성(자동업데이트 zip 재료만) ──
+      #   ⚠️ EXE(ISCC)·번들 다운로드·Create Release 는 자동업데이트와 무관 → 가져오지 않음(G2 별건).
+      #   -p:HitPanVersion 단일 주입 = SSOT 정합(W4-0). 빠지면 워치독이 자기를 1.0.0 으로 알고
+      #   모든 manifest 를 "새 버전"으로 받아 다운그레이드 방어까지 무력화된다.
+      - name: Publish ERP API (single-file)
+        shell: pwsh
+        run: |
+          dotnet publish src/HitPan.API/HitPan.API.csproj `
+            -c Release -r win-x64 --self-contained false `
+            -p:PublishSingleFile=true `
+            -p:HitPanVersion=${{ inputs.version }} `
+            -o installer/payload/api
 
-      # build-manifest.ps1 → hitpan-<ver>.zip + manifest(unsigned):
-      #   -Channel <channel input>            (게시함정3-③: 상류 주입)
-      #   -DownloadUrlBase <environment 분기>  (production=updates.hitpan.kr/packages,
-      #                                         beta=updates.hitpan.kr/beta/packages)
-      #   HITPAN_RELEASED_AT 주입 (재현가능빌드)
+      - name: Publish ERP Web (Blazor WASM)
+        shell: pwsh
+        run: |
+          dotnet publish src/HitPan.Web/HitPan.Web.csproj `
+            -c Release `
+            -p:HitPanVersion=${{ inputs.version }} `
+            -o installer/payload/web
+
+      # ★ 7/22 작3 봉합 필수(터널 404 진범): Blazor 정적자산을 api/wwwroot 로 복사해야
+      #   API 가 터널(test1.hitpan.kr→5257)에서 Blazor 를 서빙한다. 이게 자동업데이트 zip 에도 실려야 함.
+      - name: Copy Blazor static assets into api/wwwroot (tunnel serving)
+        shell: pwsh
+        run: |
+          $src = 'installer/payload/web/wwwroot'
+          $dst = 'installer/payload/api/wwwroot'
+          if (-not (Test-Path $src)) { throw "web/wwwroot 없음 — Web publish 실패" }
+          if (Test-Path $dst) { Remove-Item $dst -Recurse -Force }
+          Copy-Item $src $dst -Recurse -Force
+          $n = (Get-ChildItem $dst -Recurse -File).Count
+          Write-Host "api/wwwroot 복사 완료: $n files"
+          if (-not (Test-Path "$dst/index.html")) { throw "api/wwwroot/index.html 없음 — 복사 실패" }
+          if ($n -lt 100) { throw "api/wwwroot 파일 수 비정상($n) — Blazor 산출물 확인" }
+
+      # self-contained(단일파일 아님) — build-manifest.ps1 이 HitPan.Watchdog.dll 의 FileVersion 을
+      #   읽어 api 와 갈라짐을 차단하므로 dll 이 산출물에 있어야 한다.
+      - name: Publish Watchdog (self-contained)
+        shell: pwsh
+        run: |
+          dotnet publish src/HitPan.Watchdog/HitPan.Watchdog.csproj `
+            -c Release -r win-x64 --self-contained true `
+            -p:HitPanVersion=${{ inputs.version }} `
+            -o installer/payload/watchdog --nologo
+
+      # ── environment 분기(보강3/G7): download-url-base 를 production/beta 로 가른다. PRD §3.3 인자표 ──
+      #   production = updates.hitpan.kr/packages / beta = updates.hitpan.kr/beta/packages
+      #   ⚠️ beta 는 배선만 — nginx /beta/ location 물리생성 별건 전엔 실동작 불가(403).
+      - name: Resolve download-url-base by environment
+        id: urlbase
+        shell: pwsh
+        run: |
+          $envName = '${{ inputs.environment }}'
+          if ($envName -eq 'beta') {
+            $base = 'https://updates.hitpan.kr/beta/packages'
+          } else {
+            $base = 'https://updates.hitpan.kr/packages'
+          }
+          "base=$base" >> $env:GITHUB_OUTPUT
+          Write-Host "[urlbase] environment=$envName -> $base"
+
+      # ── build-manifest.ps1 → hitpan-<ver>.zip + manifest(unsigned) — build-installer.yml:207-236 ──
+      #   -Channel = channel input(게시함정3-③ 상류 주입) / -DownloadUrlBase = environment 분기.
+      #   ★ 서명은 여기서 안 함 — 개인키 NCP 전용(C-1). CI 는 unsigned 까지만.
+      #   ★ HITPAN_RELEASED_AT 주입 필수(재현가능빌드, build-manifest.ps1:231 없으면 실패).
+      - name: Build update package (zip + unsigned manifest)
+        shell: pwsh
+        run: |
+          $payload = (Resolve-Path installer/payload).Path
+          $outDir  = Join-Path (Get-Location).Path 'dist/updates'
+          New-Item -ItemType Directory -Path $outDir -Force | Out-Null
+          $env:HITPAN_RELEASED_AT = (Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ')
+          Write-Host "[update] releasedAt = $env:HITPAN_RELEASED_AT"
+          $ver = '${{ inputs.version }}'
+          & pwsh -File installer/updates/build-manifest.ps1 `
+            -PayloadDir $payload `
+            -OutDir $outDir `
+            -Channel '${{ inputs.channel }}' `
+            -DownloadUrlBase '${{ steps.urlbase.outputs.base }}' `
+            -ReleaseNotes "히트판 ERP $ver 업데이트" `
+            -ConsentMessage "새 버전($ver)이 준비되었습니다. 자료를 자동으로 백업한 뒤 업데이트가 진행됩니다. 지금 진행하시겠습니까?"
+          if ($LASTEXITCODE -ne 0) { throw "build-manifest 실패 (exit $LASTEXITCODE)" }
+          Get-ChildItem $outDir | ForEach-Object { Write-Host "[update] 산출: $($_.Name)" }
 
       - name: Upload update artifact
         uses: actions/upload-artifact@v5
@@ -111,7 +185,10 @@ jobs:
     name: Sign & publish on NCP (상주본 호출)
     needs: build
     runs-on: ubuntu-latest
-    environment: production   # G-E: required reviewer 등록 대상(사장님). 방아쇠 1회만 사람.
+    # G-E: required reviewer 등록 대상(사장님). 방아쇠 1회만 사람.
+    #   inputs.environment(production/beta) 를 GitHub environment 에 그대로 매핑 → PRD §3.3.
+    #   두 environment 모두 required reviewer 를 걸어야 전 고객 코드교체 방아쇠에 승인 게이트가 선다.
+    environment: ${{ inputs.environment }}
     timeout-minutes: 15
     steps:
       - name: Download update artifact
@@ -160,14 +237,22 @@ jobs:
 
       # 【이중 확인】 서빙본 최신 확인 (N-3 이중 안전망일 뿐).
       #   실패해도 publish-update.sh 자기검증이 이미 롤백함 — GHA 롤백 스텝 신설 금지(§4).
+      #   ★ jq 로 파싱(ubuntu-latest 기본 제공). python3 인라인은 실패를 삼켜 오탐 위험(검증팀장 권고).
+      #   ★ Cloudflare 엣지 캐시 우회: 캐시버스터 쿼리 + no-cache 헤더로 옛 manifest 오판 방지.
       - name: Verify served manifest (double-check, no rollback here)
         env:
           VER: ${{ inputs.version }}
+          FEED_ENV: ${{ inputs.environment }}
         run: |
-          SERVED=$(curl -fsS "https://updates.hitpan.kr/manifest.json?_=$RANDOM" | python3 -c "import sys,json; print(json.load(sys.stdin).get('version',''))" 2>/dev/null || echo "")
-          echo "served version: '$SERVED' / expected: '$VER'"
+          if [ "$FEED_ENV" = "beta" ]; then
+            FEED="https://updates.hitpan.kr/beta/manifest.json"
+          else
+            FEED="https://updates.hitpan.kr/manifest.json"
+          fi
+          SERVED=$(curl -fsS -H "Cache-Control: no-cache" -H "Pragma: no-cache" "$FEED?_=$RANDOM$$" | jq -r '.version // ""')
+          echo "feed: $FEED / served version: '$SERVED' / expected: '$VER'"
           if [ "$SERVED" != "$VER" ]; then
             echo "::error::서빙 버전 불일치. publish-update.sh 자기검증이 이미 롤백했을 수 있음(정상 안전망 동작). NCP 로그 확인. GHA 에서 롤백하지 않음(이중경합 금지)."
             exit 1
           fi
-          echo "[VerifyGate] production 피드 최신화 확인 — $VER"
+          echo "[VerifyGate] $FEED_ENV 피드 최신화 확인 — $VER"
