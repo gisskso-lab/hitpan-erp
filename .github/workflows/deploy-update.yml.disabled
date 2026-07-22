@@ -28,11 +28,17 @@
 
 name: Deploy Auto-Update (자동업데이트 영구 CD)
 
+# ── 20260723작2 I-3 (검사2 구멍③): 품질게이트 규율 ──
+#   ⚠️ 이 워크플로는 workflow_dispatch 라 임의 커밋/브랜치에서 게시할 수 있다.
+#   그런데 build 잡에 test·warnaserror 품질게이트가 없다(자동업데이트 zip 산출만).
+#   → dispatch 하기 전, 게시할 그 커밋이 build-and-test.yml 초록(빌드 0/0 + ddl-smoke +
+#     migsmoke)을 통과했는지 운영자가 반드시 확인한다(헌법 #19 우회 방지).
+#   자동 강제(needs로 build-and-test 승계)는 별건. 지금은 이 규율을 명문화한다.
 on:
   workflow_dispatch:
     inputs:
       version:
-        description: '릴리스 버전 (3자, 예: 1.2.40). 직전 게시본보다 높아야 함(다운그레이드 게이트).'
+        description: '릴리스 버전 (3자, 예: 1.2.40). 직전 게시본보다 높아야 함(다운그레이드 게이트). dispatch 전 이 커밋이 build-and-test 초록인지 확인(I-3).'
         required: true
         type: string
       channel:
@@ -61,6 +67,19 @@ jobs:
     runs-on: windows-latest
     timeout-minutes: 30
     steps:
+      # ── 20260723작2 I-2 (검사2 구멍②): beta 실행 차단 가드 (fail-fast) ──
+      #   beta 는 §3.3 인자분기가 배선돼 있으나, deploy 잡의 sudoers 화이트리스트는
+      #   `--zip`/`--manifest` 2인자만 허용(G-B)이라 beta 의 --webroot/--feed-url 을 못 넘긴다.
+      #   또 nginx `/beta/` location 은 현재 403(별건 결재 전 물리 미생성).
+      #   → beta 로 dispatch 하면 build 성공 후 deploy 에서 실패하는 혼란 경로가 생긴다.
+      #   배선(§3.3)은 미래 위해 보존하되, 실행만 여기서 fail-fast 로 막는다(choice 제거 아님).
+      #   beta 실동작은 별건 결재(nginx /beta/ + sudoers beta 라인) 후 이 가드를 해제한다.
+      - name: Guard — beta not yet operational (별건 결재 전 차단)
+        if: ${{ inputs.environment == 'beta' }}
+        run: |
+          echo "::error::environment=beta 는 아직 실동작 불가. nginx /beta/ location + sudoers beta 라인 별건 결재 전엔 production 만 게시 가능(PRD §3.3). 배선은 보존됨."
+          exit 1
+
       - name: Checkout
         uses: actions/checkout@v5
 
