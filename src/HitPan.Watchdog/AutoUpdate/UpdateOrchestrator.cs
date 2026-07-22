@@ -311,8 +311,8 @@ public sealed class UpdateOrchestrator
         }
 
         // ── 1) B안 교차검증 게이트 (스왑 前) ── 사람 오타를 코드가 잡는다.
-        if (!PassesMigrationCrossCheck(extractApi, manifest))
-            return false;   // 사유는 PassesMigrationCrossCheck 가 이미 기록했다.
+        if (!await PassesMigrationCrossCheckAsync(extractApi, manifest, ct).ConfigureAwait(false))
+            return false;   // 사유는 PassesMigrationCrossCheckAsync 가 이미 기록했다.
 
         // ── 2) best-effort 스왑 (web 먼저 → api 나중) ──
         var appWeb = Path.Combine(appRoot, "web");
@@ -408,6 +408,25 @@ public sealed class UpdateOrchestrator
         { "local_update_status", "local_update_consents", "local_update_apply_status" };
 
     /// <summary>
+    /// 20260722작2(A'안) — 마이그 파일명에서 migration_id 를 추출한다. API MigrationRunner 의 규칙과 반드시
+    ///   동일해야 schema_migrations 대조가 성립한다(MigrationRunner.cs:39-71):
+    ///     정규식 ^DB-(num)(suffix)_ , id = "DB-" + num.PadLeft(2,'0') + suffix.
+    ///   예: "DB-84_schema_migrations.sql" → "DB-84" / "DB-08b_x.sql" → "DB-08b" / "DB-2_x.sql" → "DB-02".
+    ///   DB-NN 형식이 아니면 마이그 추적 대상이 아니므로 빈 문자열을 돌려준다(호출부에서 스킵).
+    /// </summary>
+    private static string NormalizeMigrationId(string fileName)
+    {
+        var m = MigrationFilePattern.Match(fileName);
+        if (!m.Success) return string.Empty;
+        return $"DB-{m.Groups["num"].Value.PadLeft(2, '0')}{m.Groups["suffix"].Value}";
+    }
+
+    // API MigrationRunner.cs:39-40 과 동일한 파일명 규칙(단일 진실원이 두 곳에 필요 — 워치독은 API 를 참조 못 함).
+    private static readonly System.Text.RegularExpressions.Regex MigrationFilePattern =
+        new(@"^DB-(?<num>\d+)(?<suffix>[a-zA-Z]*)_",
+            System.Text.RegularExpressions.RegexOptions.Compiled);
+
+    /// <summary>
     /// SQL 텍스트에 '<verb> TABLE [IF ...] <table>' 문이 있는지(대소문자·백틱·연속공백 무관). 정밀 파서가 아니라
     /// ALTER/DROP 대상 테이블만 잡는 실용 판정이다. verb=ALTER|DROP. table 은 리터럴로만 쓴다(정규식 이스케이프 불요).
     /// </summary>
@@ -434,7 +453,7 @@ public sealed class UpdateOrchestrator
     ///   clean DDL 과 다른 CREATE 까지 잡는 정밀 대조는 빌드타임 게이트가 담당한다(2중 방어의 역할 분담).
     /// </summary>
     /// <returns>통과하면 true. 하나라도 걸리면 false(사유 기록 후).</returns>
-    private bool PassesMigrationCrossCheck(string extractApiDir, UpdateManifest manifest)
+    private async Task<bool> PassesMigrationCrossCheckAsync(string extractApiDir, UpdateManifest manifest, CancellationToken ct)
     {
         var sqlDir = Path.Combine(extractApiDir, "Migrations", "SQL");
         if (!Directory.Exists(sqlDir))
@@ -452,16 +471,44 @@ public sealed class UpdateOrchestrator
             return false;
         }
 
-        // ① manifest.RequiresMigration==false 인데 .sql 이 존재 → 손입력 오타. 강제 중단.
-        if (sqlFiles.Length > 0 && !manifest.RequiresMigration)
+        // ① (20260722작2 A'안, CTO B-1 반영) — "SQL 파일 존재"가 아니라 "로컬 미적용 신규 마이그 유무"로 판정.
+        //    종전엔 sqlFiles.Length>0 만으로 차단했는데, Migrations\SQL 은 누적 이력(DB-02~DB-84)이라 항상
+        //    존재한다 → 모든 릴리스 영구 차단(2026-07-22 실측 확정, 게이트 ②·빌드타임 §3 는 이미 정밀한데 ①만 거침).
+        //
+        //    A'안 판정:
+        //      · zip 의 DB-*.sql 중 로컬 schema_migrations(success=1)에 없는 '신규'가 있는가?
+        //      · 신규 없음(누적 이력만) → 통과. 순수 코드배포 릴리스가 자동교체된다(오탐 제거).
+        //      · 신규 있음 → RequiresMigration 값과 무관하게 차단. 워치독은 DB 마이그를 적용하지 않으므로
+        //        (고리5 미구현, Worker.cs 참조) 마이그 필요 릴리스를 통과시키면 적용 주체가 없어 500 P0.
+        //        마이그 필요 릴리스는 고리5 완성 전까지 수동 경로(재설치)로 간다 — 이건 정직이다(사장님 승인 2026-07-22).
+        //      · schema_migrations 조회 불가(구 DB·조회 실패) → null → 안전측(차단). 검증 없이 교체 안 함(헌법 #20).
+        var applied = await _statusWriter.GetAppliedMigrationIdsAsync(ct).ConfigureAwait(false);
+        if (applied is null)
         {
-            _logger.LogError("[Update] 🛑 교차검증 실패 — Migrations\\SQL 에 .sql {N}개가 있는데 " +
-                             "manifest.RequiresMigration=false 입니다(릴리스 손입력 오타 의심). " +
-                             "구 스키마 위에서 신버전이 500 나면 되돌려도 안 살아납니다 — 교체를 중단합니다({V}).",
-                             sqlFiles.Length, manifest.Version);
+            _logger.LogError("[Update] 🛑 교차검증 — schema_migrations 를 읽지 못해 신규 마이그 유무를 판정할 수 없습니다. " +
+                             "안전측(중단): 검증 없이 교체하지 않습니다({V}).", manifest.Version);
+            _lastSwapBlockedByMigrationGate = true;
+            return false;
+        }
+
+        var newMigrations = new List<string>();
+        foreach (var file in sqlFiles)
+        {
+            var migId = NormalizeMigrationId(Path.GetFileName(file));   // "DB-84_x.sql" → "DB-84"
+            if (migId.Length == 0) continue;                            // DB-NN 형식이 아니면 마이그 추적 대상 아님(스킵)
+            if (!applied.Contains(migId)) newMigrations.Add(migId);
+        }
+
+        if (newMigrations.Count > 0)
+        {
+            _logger.LogError("[Update] 🛑 교차검증 차단 — 로컬 미적용 신규 마이그 {N}개({List}). " +
+                             "워치독은 DB 마이그를 적용하지 않습니다(고리5 미구현) — 통과 시 신 스키마 부재로 500. " +
+                             "이 릴리스는 수동 경로(재설치)로 적용해야 합니다 — 자동교체를 중단합니다({V}).",
+                             newMigrations.Count, string.Join(", ", newMigrations.Take(10)), manifest.Version);
             _lastSwapBlockedByMigrationGate = true;   // W4-6: apply_status 에 'blocked' 로 기록되게 표식.
             return false;
         }
+        // 신규 마이그 0건 = 누적 이력만 있는 정상 릴리스 → ① 통과. (스키마 변경 검사는 아래 ②가 계속 수행.)
 
         // ② local_update_status/consents 의 스키마를 '변경'(ALTER/DROP)하는 릴리스면 구버전 워치독이 깨진다.
         //    구버전 워치독(자기교체 W4-3 제외로 정상 상태)이 깨지면 그 PC 는 영구 고립 = 재설치 외 복구 불가.

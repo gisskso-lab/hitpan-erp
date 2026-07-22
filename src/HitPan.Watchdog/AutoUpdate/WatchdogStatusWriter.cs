@@ -156,6 +156,85 @@ public sealed class WatchdogStatusWriter
         }
     }
 
+    /// <summary>
+    /// 20260722작2(A'안) — 로컬 schema_migrations 에 이미 적용된 마이그 식별자(migration_id) 집합을 읽는다.
+    ///   업데이트 교차검증 게이트 ①이 "이번 zip 의 Migrations\SQL 중 로컬에 미적용인 신규가 있는가"를
+    ///   판정하는 데 쓴다. 누적 이력(이미 적용된 DB-*.sql)은 신규가 아니므로 게이트를 막지 않는다(오탐 제거).
+    ///
+    ///   · 읽기 전용 SELECT. success=1(성공 적용)만 "적용됨"으로 본다(실패행은 미적용 취급 = 보수적).
+    ///   · schema_migrations 테이블이 없거나(구 DB) 조회 실패면 null 을 돌려준다 —
+    ///     호출부(게이트)가 null 을 받으면 "판정 불가 → 안전측(차단)"으로 처리한다(헌법 #20, CTO A-3).
+    ///   · migration_id 는 파일명에서 추출된 값(예 "DB-84" 또는 "DB-84_schema_migrations.sql")이 섞일 수 있어,
+    ///     호출부에서 접두 "DB-NN" 정규화로 대조한다(본 메서드는 원본 문자열을 그대로 돌려준다).
+    /// </summary>
+    public async Task<HashSet<string>?> GetAppliedMigrationIdsAsync(CancellationToken ct)
+    {
+        try
+        {
+            var (host, port, dbName, user, pass) = ResolveDbCredentials();
+            if (string.IsNullOrWhiteSpace(dbName) || string.IsNullOrWhiteSpace(user))
+            {
+                _logger.LogError("[Update/Gate] db.conf 에서 DB 자격증명을 읽지 못했습니다 — 적용 마이그 조회 불가(안전측 차단)");
+                return null;
+            }
+
+            // 테이블 부재 시 오류로 죽지 않게 information_schema 로 존재 확인 후 SELECT. 단일 -e 배치로 결과만 받는다.
+            //   존재하면 migration_id 목록, 없으면 결과 0행 → 빈 집합(신규 판정 시 전부 신규로 봄 = 차단측, 안전).
+            const string sql =
+                "SELECT migration_id FROM schema_migrations WHERE success=1;";
+
+            var clientExe = ResolveMariadbBinary("mariadb.exe", "mysql.exe");
+            var args = $"-h {host} -P {port} -u {user} \"-p{pass}\" -N -B --default-character-set=utf8mb4 -e \"{sql.Replace("\"", "\\\"")}\" {dbName}";
+
+            var (exit, stdout, stderr) = await RunReadAsync(clientExe, args, ct).ConfigureAwait(false);
+            if (exit != 0)
+            {
+                // 테이블 부재("doesn't exist") 포함 — 판정 불가로 보고 안전측(차단) 유도(null 반환).
+                _logger.LogWarning("[Update/Gate] schema_migrations 조회 실패(exit={E}): {Err} — 안전측 차단 유도", exit, stderr);
+                return null;
+            }
+
+            var set = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var line in stdout.Split('\n'))
+            {
+                var id = line.Trim();
+                if (id.Length > 0) set.Add(id);
+            }
+            return set;
+        }
+        catch (OperationCanceledException) { throw; }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "[Update/Gate] 적용 마이그 조회 예외 — 안전측 차단 유도");
+            return null;
+        }
+    }
+
+    /// <summary>stdout 을 돌려받는 읽기 실행(RunWriteAsync 의 SELECT 판). exit·stdout·stderr 를 반환한다.</summary>
+    private async Task<(int exit, string stdout, string stderr)> RunReadAsync(string exe, string args, CancellationToken ct)
+    {
+        var psi = new ProcessStartInfo
+        {
+            FileName = exe,
+            Arguments = args,
+            UseShellExecute = false,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            CreateNoWindow = true,
+            StandardOutputEncoding = Encoding.UTF8
+        };
+        using var proc = Process.Start(psi)
+            ?? throw new InvalidOperationException($"{exe} 실행 실패(Process.Start null)");
+
+        var outTask = proc.StandardOutput.ReadToEndAsync(ct);
+        var errTask = proc.StandardError.ReadToEndAsync(ct);
+
+        await proc.WaitForExitAsync(ct).ConfigureAwait(false);
+        var stdout = await outTask.ConfigureAwait(false);
+        var stderr = await errTask.ConfigureAwait(false);
+        return (proc.ExitCode, stdout, stderr);
+    }
+
     /// <summary>SemVer 류 안전 리터럴만 허용(숫자·점만). SQL 리터럴 삽입 안전성 보강.</summary>
     private static bool IsSafeVersionLiteral(string v)
     {
