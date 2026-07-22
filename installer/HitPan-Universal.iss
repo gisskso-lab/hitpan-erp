@@ -29,7 +29,7 @@
 ;   ⚠️ 종전 폴백은 "1.2.13" 이었다. 실제 배포본이 1.2.33 이던 시점에도 이 값이 남아 있어
 ;      "인스톨러는 1.2.13, 본사 메타핑은 1.0.0, /health 는 1.0.0-beta" 로 전부 제각각이었다.
 #ifndef AppVersion
-  #define AppVersion "1.2.38"
+  #define AppVersion "1.2.39"
 #endif
 
 #ifndef BackofficeApi

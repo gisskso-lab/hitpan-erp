@@ -30,7 +30,7 @@
 
   <PropertyGroup>
     <!-- ★ 릴리스 시 이 한 줄만 변경 (Major.Minor.Patch) -->
-    <HitPanVersion Condition="'$(HitPanVersion)' == ''">1.2.38</HitPanVersion>
+    <HitPanVersion Condition="'$(HitPanVersion)' == ''">1.2.39</HitPanVersion>
   </PropertyGroup>
 
   <PropertyGroup>

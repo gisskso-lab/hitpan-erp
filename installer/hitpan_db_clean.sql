@@ -3041,6 +3041,35 @@ CREATE TABLE `schema_migrations` (
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
+-- 신규설치 시드 (20260722작4 봉합 #1 — 사장님 결재 2026-07-23):
+--   이 clean DDL 은 아래 55개 마이그(DB-02~DB-84)가 '이미 반영된' 최종 스키마다.
+--   그런데 신규설치 DB 는 이 이력이 비어(0행) 있어, 자동업데이트의 마이그 교차검증 게이트
+--   (UpdateOrchestrator.PassesMigrationCrossCheckAsync)가 zip 의 DB-*.sql 을 전부 '미적용 신규'로
+--   오판·차단했다 → 신규 고객의 첫 자동업데이트가 영구 차단됐다(2026-07-22 Sandbox 실측 확정).
+--   → clean DDL 이 담은 마이그를 success=1 로 시드해 "이미 적용됨"을 명시한다(게이트 통과, 헌법 #36).
+--
+--   ★ 동기화 강제(CTO B-1/B-2): 이 목록은 src/HitPan.API/Migrations/SQL/DB-*.sql 파일 집합과
+--     '정확히 같아야' 한다. 다음 릴리스에 DB-85 추가 시 여기 INSERT 도 갱신해야 하며,
+--     scripts/ddl-smoke-test.sh 가 "소스 DB-*.sql 파일 수 == 이 시드 success=1 행 수"를 자동 대조해
+--     한쪽만 갱신하면 CI 빨간불이 된다(손 매직넘버 금지). id 형식은 MigrationRunner.cs:71 정규화형과 일치.
+--   app_version 은 이 시드가 clean DDL 유래임을 표시(수동/러너 적용과 구분). 추적용.
+INSERT INTO `schema_migrations` (`migration_id`, `app_version`, `success`) VALUES
+('DB-02','clean-ddl',1),('DB-03','clean-ddl',1),('DB-04','clean-ddl',1),('DB-05','clean-ddl',1),
+('DB-06','clean-ddl',1),('DB-07','clean-ddl',1),('DB-08','clean-ddl',1),('DB-08b','clean-ddl',1),
+('DB-09','clean-ddl',1),('DB-10','clean-ddl',1),('DB-11','clean-ddl',1),('DB-12','clean-ddl',1),
+('DB-13','clean-ddl',1),('DB-14','clean-ddl',1),('DB-15','clean-ddl',1),('DB-16','clean-ddl',1),
+('DB-18','clean-ddl',1),('DB-19','clean-ddl',1),('DB-20','clean-ddl',1),('DB-21','clean-ddl',1),
+('DB-22','clean-ddl',1),('DB-23','clean-ddl',1),('DB-24','clean-ddl',1),('DB-25','clean-ddl',1),
+('DB-26','clean-ddl',1),('DB-27','clean-ddl',1),('DB-28','clean-ddl',1),('DB-29','clean-ddl',1),
+('DB-30','clean-ddl',1),('DB-31','clean-ddl',1),('DB-32','clean-ddl',1),('DB-33','clean-ddl',1),
+('DB-34','clean-ddl',1),('DB-35','clean-ddl',1),('DB-36','clean-ddl',1),('DB-37','clean-ddl',1),
+('DB-38','clean-ddl',1),('DB-39','clean-ddl',1),('DB-50','clean-ddl',1),('DB-60','clean-ddl',1),
+('DB-70','clean-ddl',1),('DB-71','clean-ddl',1),('DB-72','clean-ddl',1),('DB-73','clean-ddl',1),
+('DB-74','clean-ddl',1),('DB-75','clean-ddl',1),('DB-76','clean-ddl',1),('DB-77','clean-ddl',1),
+('DB-78','clean-ddl',1),('DB-79','clean-ddl',1),('DB-80','clean-ddl',1),('DB-81','clean-ddl',1),
+('DB-82','clean-ddl',1),('DB-83','clean-ddl',1),('DB-84','clean-ddl',1);
+
+--
 -- Table structure for table `service_tickets`
 --
 

@@ -63,7 +63,32 @@ for chk in "${CHECKS[@]}"; do
 done
 [ "$MISSING" -eq 0 ] || fail "핵심 컬럼 $MISSING 개 누락 — 코드가 쓰는데 DDL에 없음(신규설치 DOA)"
 
-echo "── 5) 정리 ──"
+echo "── 5) schema_migrations 시드 자기참조 게이트 (20260722작4 CTO B-1/B-2) ──"
+# 왜: clean DDL 의 schema_migrations 시드가 신규설치 DB 에 마이그 이력을 채운다(작4 봉합 #1).
+#   이게 비거나 소스 마이그 파일과 어긋나면, 자동업데이트 교차검증 게이트가 신규 고객을
+#   전량 차단한다(2026-07-22 실측 사고). 손 매직넘버(55) 금지 — 소스 파일 집합과 자동 대조한다.
+#   다음 릴리스에 DB-85 를 추가하고 시드 INSERT 를 안 늘리면 여기서 CI 가 빨간불이 된다.
+MIG_DIR="src/HitPan.API/Migrations/SQL"
+[ -d "$MIG_DIR" ] || fail "마이그 폴더 없음: $MIG_DIR"
+# 게이트(UpdateOrchestrator.NormalizeMigrationId)와 동일 규칙으로 고유 DB-NN(접미사 포함) 집합 카운트.
+#   파일명 DB-<num><suffix>_... → DB-<num 2자리 패딩><suffix>. 예: DB-8b_x.sql → DB-08b.
+FILE_IDS=$(ls "$MIG_DIR"/DB-*.sql 2>/dev/null \
+  | sed -E 's|.*/||; s/^DB-([0-9]+)([a-zA-Z]*)_.*/\1 \2/' \
+  | awk '{ printf "DB-%02d%s\n", $1, $2 }' \
+  | sort -u)
+FILE_CNT=$(echo "$FILE_IDS" | grep -c . )
+SEED_CNT=$("$MYSQL" -u "$DBUSER" -N -B "$SMOKE_DB" -e "SELECT COUNT(*) FROM schema_migrations WHERE success=1;" 2>/dev/null)
+echo "   소스 마이그 파일(고유 DB-NN): $FILE_CNT / clean DDL 시드(success=1): $SEED_CNT"
+if [ "$FILE_CNT" != "$SEED_CNT" ]; then
+  # 어느 쪽이 빠졌는지 좌표로 찍는다(손으로 헤매지 않게).
+  SEED_IDS=$("$MYSQL" -u "$DBUSER" -N -B "$SMOKE_DB" -e "SELECT migration_id FROM schema_migrations WHERE success=1 ORDER BY migration_id;" 2>/dev/null)
+  echo "   ▸ 파일엔 있는데 시드에 없음:"; comm -23 <(echo "$FILE_IDS") <(echo "$SEED_IDS" | sort -u) | sed 's/^/       /'
+  echo "   ▸ 시드엔 있는데 파일에 없음:"; comm -13 <(echo "$FILE_IDS") <(echo "$SEED_IDS" | sort -u) | sed 's/^/       /'
+  fail "schema_migrations 시드($SEED_CNT) != 소스 마이그 파일($FILE_CNT) — clean DDL 시드 갱신 필요(작4 #1). 어긋나면 신규 고객 자동업데이트 전량 차단."
+fi
+echo "   ✅ 시드 == 파일 ($SEED_CNT) — 신규설치 자동업데이트 게이트 통과 보장"
+
+echo "── 6) 정리 ──"
 "$MYSQL" -u "$DBUSER" -e "DROP DATABASE IF EXISTS $SMOKE_DB;" 2>/dev/null
 
 echo ""

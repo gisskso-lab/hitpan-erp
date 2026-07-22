@@ -215,7 +215,7 @@ public sealed class UpdateOrchestrator
             //   재시작 종료코드만으로는 "신버전이 정말 살아서 도는가"를 알 수 없다(구버전도 종료코드 0 으로 뜬다).
             //   ① API /health 2초 간격 × 최대 60초 폴링: HTTP 200 AND 본문 checks.version == 신버전.
             //      200 만으론 불통과(구버전도 200) — 반드시 버전까지 같아야 한다.
-            //   ② 교차 판정: 교체된 {app}\api\HitPan.API.dll FileVersion == 신버전.
+            //   ② 교차 판정: 교체된 {app}\api\HitPan.API.exe FileVersion == 신버전(단일파일 publish, 작4 #3).
             //      /health 는 미들웨어 설정 하나에 묶인 단일 실패점이라, 실제 파일 버전으로 교차한다.
             //   둘 다 통과해야만 성공. 하나라도 어긋나면 = 거짓성공(신버전 죽었는데 true) 위험 → 롤백.
             if (!await VerifyNewVersionAsync(slot.Value, manifest, ct))
@@ -602,7 +602,7 @@ public sealed class UpdateOrchestrator
     ///
     ///   ① API /health 폴링(2초 간격 × 최대 60초): HTTP 200 AND 본문 checks.version == 신버전.
     ///      200 만으론 불통과다 — 구버전도 200 을 준다. 반드시 버전 문자열까지 같아야 통과.
-    ///   ② 교차 판정: {app}\api\HitPan.API.dll 의 FileVersion == 신버전.
+    ///   ② 교차 판정: {app}\api\HitPan.API.exe 의 FileVersion == 신버전(단일파일 publish, 작4 #3).
     ///      /health 응답은 미들웨어·라우팅 설정 하나에 묶인 단일 실패점이라, 실제 교체된 파일 버전으로 교차한다.
     ///
     /// 둘 다 통과해야만 true. 하나라도 어긋나면 false(호출부가 롤백). "모르면 통과" 는 절대 없다 — 거짓성공 차단.
@@ -611,9 +611,14 @@ public sealed class UpdateOrchestrator
     /// </summary>
     private async Task<bool> VerifyNewVersionAsync(int slot, UpdateManifest manifest, CancellationToken ct)
     {
-        // ── ② 먼저: 교체된 EXE(dll) FileVersion 교차 ── 파일은 이미 자리에 있으니 즉시 판정 가능(빠른 실패).
-        var appApiDll = Path.Combine(AppRoot(), "api", "HitPan.API.dll");
-        var fileVersion = ReadApiFileVersion(appApiDll);
+        // ── ② 먼저: 교체된 API EXE FileVersion 교차 ── 파일은 이미 자리에 있으니 즉시 판정 가능(빠른 실패).
+        //   ★ 봉합 (2026-07-22, 작4 #3 — 1.2.38 실측 진범): API 는 PublishSingleFile=true 라 산출물이
+        //     HitPan.API.exe 단일파일뿐이고 HitPan.API.dll 이 없다. 종전엔 .dll 을 읽어 File.Exists=false →
+        //     ReadApiFileVersion null → 이 검증이 무조건 실패 → 방금 성공한 교체가 롤백됐다(모든 자동업데이트
+        //     교체 후 롤백). exe 단일파일도 FileVersionInfo 가 앱버전(1.2.xx)을 정확히 반환함을 실측 확인
+        //     (교체 직후 exe FileVersion=1.2.38.0). apphost 가 SDK 버전을 반환하는 함정 없음.
+        var appApiExe = Path.Combine(AppRoot(), "api", "HitPan.API.exe");
+        var fileVersion = ReadApiFileVersion(appApiExe);
         if (fileVersion is null || !UpdateClient.IsSameVersion(fileVersion, manifest.Version))
         {
             _logger.LogError("[Update] 🛑 검증 실패(FileVersion 교차) — 교체된 파일 버전='{File}', 기대='{V}'. " +
@@ -710,22 +715,23 @@ public sealed class UpdateOrchestrator
     }
 
     /// <summary>
-    /// 교체된 {app}\api\HitPan.API.dll 의 FileVersion 을 읽는다. 없거나 읽기 실패면 null(호출부가 실패 처리).
+    /// 교체된 {app}\api\HitPan.API.exe 의 FileVersion 을 읽는다. 없거나 읽기 실패면 null(호출부가 실패 처리).
+    ///   (작4 #3) API 는 단일파일 publish 라 .dll 이 없고 .exe 만 있다 — apiPath 는 exe 를 가리킨다.
     /// </summary>
-    private string? ReadApiFileVersion(string dllPath)
+    private string? ReadApiFileVersion(string apiPath)
     {
         try
         {
-            if (!File.Exists(dllPath))
+            if (!File.Exists(apiPath))
             {
-                _logger.LogError("[Update] 🛑 교체된 API 파일을 찾지 못했습니다: {Path}", dllPath);
+                _logger.LogError("[Update] 🛑 교체된 API 파일을 찾지 못했습니다: {Path}", apiPath);
                 return null;
             }
-            return FileVersionInfo.GetVersionInfo(dllPath).FileVersion;
+            return FileVersionInfo.GetVersionInfo(apiPath).FileVersion;
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "[Update] 🛑 FileVersion 읽기 실패: {Path}", dllPath);
+            _logger.LogError(ex, "[Update] 🛑 FileVersion 읽기 실패: {Path}", apiPath);
             return null;
         }
     }
