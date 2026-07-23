@@ -38,7 +38,7 @@ MANIFEST=""
 PRIVATE="/var/hitpan/update-keys/update_private.pem"
 PUBLIC="/var/hitpan/update-keys/update_public.pem"   # 자기검증용 공개키(개인키 아님 = 유출돼도 무해, #22 무관)
 KID="upd-v1"
-WEBROOT="/var/www/updates.hitpan.kr"                  # manifest.json 이 서빙되는 웹루트
+WEBROOT="/var/www/updates"                            # manifest.json 이 서빙되는 웹루트 (실서빙 경로 = www-data 소유, 2026-07-24 A-3 NCP 실측 정정 / SSOT 상주본 일치)
 PACKAGES_SUBDIR="packages"
 FEED_URL="https://updates.hitpan.kr/manifest.json"    # 자기검증이 실제로 받아볼 서빙 주소
 ALLOW_REPUBLISH=0                                      # 동일 버전 재배포(서명 갱신 등) 명시 허용
