@@ -19,6 +19,13 @@
 /installer/updates/sign-manifest.sh             @gisskso-lab
 /installer/updates/build-manifest.ps1           @gisskso-lab
 
+# ── NCP 배포 래퍼 (광역 sudo 흡수·B-4 독립재조회 — 20260724작3) ──
+#   이 두 래퍼가 sudoers 화이트리스트의 유일한 sudo 대상이다. 변조 = 전 고객·본사 서버 장악.
+/installer/deploy/publish-run.sh                @gisskso-lab
+/installer/deploy/deploy-web.sh                 @gisskso-lab
+
 # ── 서명 검증·시크릿 스캔 설정 ──
 /.github/trufflehog-config.yaml                 @gisskso-lab
+/.github/dependabot.yml                         @gisskso-lab
+/.github/CODEOWNERS                             @gisskso-lab
 /src/HitPan.Watchdog/AutoUpdate/                 @gisskso-lab

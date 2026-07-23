@@ -31,3 +31,13 @@ detectors:
       - BEGIN PRIVATE KEY
     regex:
       key: '-----BEGIN (EC )?PRIVATE KEY-----'
+
+  # 20260724작3 B-17 — NCP 배포용 SSH 개인키(NCP_SSH_PRIVATE_KEY) 오커밋 안전망.
+  # 이 키가 레포에 새면 NCP root 접근이 노출된다(B-1 배포계정·개인키 통로).
+  # OpenSSH 포맷(-----BEGIN OPENSSH PRIVATE KEY-----)과 RSA 포맷 모두 잡는다.
+  - name: hitpan-ssh-private-key
+    keywords:
+      - BEGIN OPENSSH PRIVATE KEY
+      - BEGIN RSA PRIVATE KEY
+    regex:
+      key: '-----BEGIN (OPENSSH|RSA) PRIVATE KEY-----'

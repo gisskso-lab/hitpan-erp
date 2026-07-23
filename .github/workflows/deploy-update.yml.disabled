@@ -5,11 +5,21 @@
 #
 #   [G-A] publish-update.sh + sign-manifest.sh 를 NCP /opt/hitpan/installer/updates/ 에
 #         동일 디렉토리 상주 배치 (사장님 sudo 1회). publish 가 sign 을 source 하므로 함께.
-#   [G-B] sudoers 화이트리스트 — 이 스크립트·--zip/--manifest 2인자만 NOPASSWD.
-#         오버라이드(--webroot/--private/--feed-url/--allow-republish) 차단. (사장님 sudo 1회)
-#   [G-C] publish-update.sh:41 webroot 기본값 /var/www/updates.hitpan.kr → /var/www/updates 정정.
-#   [G-D] manifest.json no-cache 헤더 확인 — Cloudflare 엣지 경유 `curl -I`. (CTO 권고1)
-#   [G-E] environment: production required reviewer + .github/CODEOWNERS 신설.
+#         + publish-run.sh(B-4 래퍼)·deploy-web.sh 를 /opt/hitpan/deploy/ 에 상주 배치.
+#   [G-B] sudoers 화이트리스트 — publish-run.sh·deploy-web.sh 두 래퍼만 NOPASSWD.
+#         ★ publish-update.sh·sign-manifest.sh 는 sudoers 에서 제외(래퍼 경유로만 호출).
+#         래퍼가 오버라이드(--webroot/--private/--feed-url/--allow-republish)를 절대 전달 안 함(B-2). (사장님 sudo 1회)
+#         ★ 검증팀 M-2 필수(안 하면 B-4 무음 스킵): sudo 는 env_reset 이라 HITPAN_* 를 스트립한다.
+#           publish-run.sh 는 명령줄 인라인 할당(sudo HITPAN_...=... /경로/publish-run.sh)으로 받는데,
+#           이게 자식에 도달하려면 sudoers 에 `SETENV:` 태그가 있어야 한다. 없으면 HITPAN_GH_* 가 사라져
+#           래퍼의 B-4 가 "메타 없음 → 거부"로 fail-closed 된다(무음 통과가 아니라 거부라 안전측이나,
+#           정상 게시도 막히므로 SETENV 필수). 단 HITPAN_B4_ALLOW_UNVERIFIED 는 SETENV 목록에서 '제외'해
+#           러너가 명령줄로 우회 스위치를 못 켜게 한다. deploy-web.sh 도 RELEASE_VERSION 위해 SETENV 필요.
+#   [G-C] publish-update.sh:41 webroot 기본값 → /var/www/updates 정정. ✅ 완료(197c534).
+#   [G-D] manifest.json no-cache 헤더 확인 — Cloudflare 엣지 경유. ✅ 이미 no-cache 걸림(소멸).
+#   [G-E] environment: production/beta required reviewer(사장님 폰 1탭) + .github/CODEOWNERS.
+#   [G-F] (B-4 트랙2) NCP 에 git 미러(/opt/hitpan/repo) + GitHub 토큰(HITPAN_GH_TOKEN) 배치 →
+#         래퍼 독립재조회 fail-closed 활성. 미배치 시 HITPAN_B4_ALLOW_UNVERIFIED 없어 게시 거부.
 #
 #   G-A·B·C 는 사장님 NCP sudo 1회 세션으로 묶는다. 이후 CD 사람 손 0.
 # ══════════════════════════════════════════════════════════════════════════
@@ -19,12 +29,13 @@
 # 보안 불변식 (PRD §5 — 구현/수정 시 절대 위반 금지):
 #   1. 개인키 GHA 반입 0 (서명은 NCP publish-update.sh 안에서만)
 #   2. 실행 스크립트(.sh) rsync 0 — 데이터(zip·unsigned manifest)만 /tmp
-#   3. sudo 대상 = publish-update.sh 1개, 인자 = --zip/--manifest 만
+#   3. sudo 대상 = publish-run.sh 래퍼 1개, 인자 = --zip/--manifest 만 (래퍼가 B-4 재조회 후 publish 호출)
 #   4. CI 는 /tmp 스테이징만, update-keys(700 root) 읽기조차 불가
 #   5. 서명 규격 3벌 무변경
 #   6. 버전 SSOT 단조증가 (다운그레이드 방어가 여기 의존)
 #   7. cloudflared·DNS·방화벽·systemctl 미접촉 (CD 런타임)
-#   ★ SSH 페이로드 = publish-update.sh 단일 호출. 임의 셸 블록 0 (CTO 권고3)
+#   ★ SSH 페이로드 = publish-run.sh 단일 호출. 임의 셸 블록 0 (CTO 권고3)
+#   ★ B-4: NCP 가 러너발 commit·run_id·sha 를 GitHub API/git 으로 독립 재조회 후에만 서명(관통결함 급소)
 
 name: Deploy Auto-Update (자동업데이트 영구 CD)
 
@@ -56,6 +67,13 @@ on:
 
 permissions:
   contents: read
+
+# ── B-11: 동시 게시 직렬화 (Secret 전환 TOCTOU·mv 경합 차단) ──
+#   같은 그룹의 이전 게시를 취소하지 않고(cancel-in-progress:false) 순서대로 흘린다.
+#   두 dispatch 가 겹쳐 NCP publish 의 mv·백업이 경합하는 창을 없앤다.
+concurrency:
+  group: deploy-update
+  cancel-in-progress: false
 
 jobs:
   # ── build 잡: 재빌드 방식 (아티팩트 승계 아님) ──
@@ -216,6 +234,62 @@ jobs:
           name: update-pkg-${{ inputs.version }}
           path: dist/updates/
 
+      # ── B-8: deploy 잡 진입 시 version 재검증 (fail-closed) ──
+      #   build 잡에서 검증했더라도 deploy 잡은 별도 실행 컨텍스트다. 여기서 다시 못박아
+      #   아래 모든 스텝이 신뢰하는 $VER 이 3자 SemVer 임을 보장한다(오염된 input 차단).
+      - name: Re-verify version (fail-closed)
+        env:
+          VER: ${{ inputs.version }}
+        run: |
+          case "$VER" in
+            *[!0-9.]*) echo "::error::version '$VER' 에 허용 안 된 문자 — 3자 SemVer 만."; exit 1 ;;
+          esac
+          echo "$VER" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+$' || { echo "::error::version '$VER' 3자 SemVer 아님."; exit 1; }
+          echo "[VersionGate/deploy] $VER"
+
+      # ── B-12: 운영 시크릿이 update zip 에 섞였는지 게이트 (다운로드 후, 전송 전) ──
+      #   update zip 에 appsettings.Production/Development·.pem·.pfx·db.conf·keys.conf 가 실리면
+      #   전 고객 PC 로 시크릿이 퍼진다. 발견 시 전송 전에 배포를 세운다.
+      - name: Scan update package for leaked secrets
+        env:
+          VER: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          # F-2(검증팀): unzip 존재 강제 — 없으면 게이트가 조용히 통과(거짓봉합). 헌법 #15.
+          command -v unzip >/dev/null 2>&1 || { echo "::error::unzip 미설치 — 시크릿 게이트 실행 불가. 배포 중단."; exit 1; }
+          ZIP="dist/updates/hitpan-$VER.zip"
+          [ -f "$ZIP" ] || { echo "::error::update zip 없음: $ZIP"; exit 1; }
+          LIST="$(unzip -Z1 "$ZIP")"
+          # F-3(검증팀): 패턴 확장 — .key/.p12/.crt/.env, Staging 등 환경접미사, .bak/.old 백업접미사까지.
+          #   $ 앵커 대신 백업접미사 허용(\.(bak|old|orig|save))? 로 db.conf.bak 등도 잡는다.
+          BAD="$(printf '%s\n' "$LIST" | grep -iE 'appsettings\.[A-Za-z]+\.json(\.(bak|old|orig|save))?$|\.(pem|pfx|p12|key|crt)$|(^|/)db\.conf(\.(bak|old|orig|save))?$|hitpan-keys\.conf(\.(bak|old|orig|save))?$|(^|/)\.env$|(^|/)secrets\.json$' || true)"
+          # appsettings.json(환경접미사 없는 일반)은 코드 동봉이 정상이라 위 패턴서 제외했고, 아래서 내용 스캔.
+          if [ -n "$BAD" ]; then
+            echo "::error::update zip 에 운영 시크릿으로 의심되는 파일 포함 — 배포 중단:"
+            printf '%s\n' "$BAD"
+            exit 1
+          fi
+          # appsettings.json(일반) 안에 실 커넥션스트링/비번이 박혔는지 얕은 스캔
+          if printf '%s\n' "$LIST" | grep -qi 'appsettings\.json$'; then
+            TMPD="$(mktemp -d)"
+            unzip -qq "$ZIP" '*appsettings.json' -d "$TMPD" || { echo "::error::appsettings.json 추출 실패 — 스캔 불가로 배포 중단."; rm -rf "$TMPD"; exit 1; }
+            if grep -rqiE '"(Password|Pwd)"[[:space:]]*[:=]|Server=.*;.*Password=' "$TMPD"; then
+              echo "::error::appsettings.json 에 실 비밀번호/커넥션스트링 흔적 — 배포 중단."; rm -rf "$TMPD"; exit 1
+            fi
+            rm -rf "$TMPD"
+          fi
+          echo "[SecretGate] update zip 시크릿 미포함 확인"
+
+      # ── 러너 실측 sha 계산 (B-4 대조용 — NCP 가 독립 재검증할 기준값) ──
+      - name: Compute package sha (for NCP independent recheck)
+        id: pkgsha
+        env:
+          VER: ${{ inputs.version }}
+        run: |
+          SHA="$(sha256sum dist/updates/hitpan-$VER.zip | awk '{print $1}')"
+          echo "sha=$SHA" >> "$GITHUB_OUTPUT"
+          echo "[pkgsha] $SHA"
+
       # SSH 키 셋업 — deploy-ncp.yml:85-92 복붙 (동일 Secrets 3종, 재사용 OK)
       - name: Setup SSH key
         env:
@@ -228,6 +302,7 @@ jobs:
 
       # 【데이터만 전송】 zip·unsigned manifest → NCP /tmp. 실행 스크립트(.sh) 절대 금지(B-1).
       #   게시함정3-①: manifest 목적지 파일명을 publish 가 받는 이름으로 rename.
+      #   B-8: $VER 은 위에서 3자 SemVer 로 재검증됐으므로 파일명 보간이 안전하다.
       - name: Rsync data only (zip + unsigned manifest)
         env:
           NCP_USER: ${{ secrets.NCP_USER }}
@@ -235,24 +310,35 @@ jobs:
           VER: ${{ inputs.version }}
         run: |
           rsync -avz -e "ssh -i ~/.ssh/ncp_key" \
-            dist/updates/hitpan-$VER.zip \
-            $NCP_USER@$NCP_HOST:/tmp/hitpan-$VER.zip
+            "dist/updates/hitpan-$VER.zip" \
+            "$NCP_USER@$NCP_HOST:/tmp/hitpan-$VER.zip"
           rsync -avz -e "ssh -i ~/.ssh/ncp_key" \
             dist/updates/manifest.json \
-            $NCP_USER@$NCP_HOST:/tmp/manifest-$VER-unsigned.json
+            "$NCP_USER@$NCP_HOST:/tmp/manifest-$VER-unsigned.json"
 
-      # 【상주본 호출】 SSH 페이로드 = publish-update.sh 단일 호출, 2인자만 (CTO 권고3).
-      #   서명·원자교체·자기검증·롤백은 전부 NCP 안에서. 개인키 GHA 로 안 나옴.
-      #   production 은 --webroot/--feed-url 안 넘김 = sudoers 2인자 화이트리스트 정합(G-B).
-      #   beta 는 별건 후 sudoers 에 beta 화이트리스트 라인 추가 시에만.
-      - name: Invoke resident publish-update.sh (2 args only)
+      # 【래퍼 호출 — B-1·B-2·B-4】 SSH 페이로드 = publish-run.sh 단일 호출, 2인자만.
+      #   ★ 기존: publish-update.sh 직접 호출 → NCP 가 러너발 값 그대로 신뢰(B-4 관통결함).
+      #   ★ 변경: publish-run.sh(래퍼)가 서명 전 NCP 안에서 commit·run_id·sha 를 독립 재조회 후 통과 시에만 publish.
+      #   B-4 대조용 메타를 env 로 넘긴다(러너 '주장'일 뿐 — NCP 가 GitHub API/git 으로 직접 재확인).
+      #   HITPAN_B4_ALLOW_UNVERIFIED 는 넘기지 않는다(git 미러·GitHub 토큰 트랙2 배치 후 fail-closed 로 동작).
+      #   production 은 오버라이드 인자 0 = sudoers 2인자 화이트리스트 정합(G-B).
+      - name: Invoke resident publish-run.sh wrapper (B-4 independent recheck)
         env:
           NCP_USER: ${{ secrets.NCP_USER }}
           NCP_HOST: ${{ secrets.NCP_HOST }}
           VER: ${{ inputs.version }}
+          PKG_SHA: ${{ steps.pkgsha.outputs.sha }}
+          GH_SHA: ${{ github.sha }}
+          GH_RUN_ID: ${{ github.run_id }}
+          GH_REPO: ${{ github.repository }}
         run: |
-          ssh -i ~/.ssh/ncp_key $NCP_USER@$NCP_HOST \
-            "sudo bash /opt/hitpan/installer/updates/publish-update.sh --zip /tmp/hitpan-$VER.zip --manifest /tmp/manifest-$VER-unsigned.json"
+          # ★ 검증팀 2차 BLOCKER: `sudo ... bash <스크립트>` 는 sudo 대상이 /usr/bin/bash 라
+          #   sudoers(NOPASSWD: /opt/hitpan/deploy/publish-run.sh) 정확매칭 실패 → 게시 100% 실패.
+          #   → bash 제거, 직접 실행(shebang·+x). deploy-ncp.yml 봉합과 대칭.
+          #   HITPAN_* 는 sudo 명령줄 인라인 할당(sudoers SETENV 필수, G-B). ALLOW_UNVERIFIED 는 안 넘김.
+          ssh -i ~/.ssh/ncp_key "$NCP_USER@$NCP_HOST" \
+            "sudo HITPAN_EXPECT_SHA=$PKG_SHA HITPAN_GH_SHA=$GH_SHA HITPAN_GH_RUN_ID=$GH_RUN_ID HITPAN_GH_REPO=$GH_REPO \
+             /opt/hitpan/deploy/publish-run.sh --zip /tmp/hitpan-$VER.zip --manifest /tmp/manifest-$VER-unsigned.json"
 
       # 【이중 확인】 서빙본 최신 확인 (N-3 이중 안전망일 뿐).
       #   실패해도 publish-update.sh 자기검증이 이미 롤백함 — GHA 롤백 스텝 신설 금지(§4).

@@ -55,27 +55,38 @@ usage() {
   --private  개인키 경로     (기본 /var/hitpan/update-keys/update_private.pem)
   --public   공개키 경로     (기본 /var/hitpan/update-keys/update_public.pem)
   --kid      서명 키 id      (기본 upd-v1)
-  --webroot  manifest 웹루트 (기본 /var/www/updates.hitpan.kr)
+  --webroot  manifest 웹루트 (기본 /var/www/updates — 실서빙 경로, 2026-07-24 SSOT 정정)
   --feed-url 자기검증 주소   (기본 https://updates.hitpan.kr/manifest.json)
   --allow-republish  동일 버전 재배포 허용(다운그레이드 게이트 우회 — 서명 갱신 시에만)
 EOF
   exit 1
 }
 
+OVERRIDE_SEEN=""    # B-2: sudo 컨텍스트에서 넘어오면 안 되는 오버라이드 인자 추적
+
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --zip)             ZIP="$2"; shift 2 ;;
     --manifest)        MANIFEST="$2"; shift 2 ;;
-    --private)         PRIVATE="$2"; shift 2 ;;
-    --public)          PUBLIC="$2"; shift 2 ;;
-    --kid)             KID="$2"; shift 2 ;;
-    --webroot)         WEBROOT="$2"; shift 2 ;;
-    --feed-url)        FEED_URL="$2"; shift 2 ;;
-    --allow-republish) ALLOW_REPUBLISH=1; shift ;;
+    --private)         PRIVATE="$2"; shift 2 ; OVERRIDE_SEEN="$OVERRIDE_SEEN --private" ;;
+    --public)          PUBLIC="$2"; shift 2 ; OVERRIDE_SEEN="$OVERRIDE_SEEN --public" ;;
+    --kid)             KID="$2"; shift 2 ; OVERRIDE_SEEN="$OVERRIDE_SEEN --kid" ;;
+    --webroot)         WEBROOT="$2"; shift 2 ; OVERRIDE_SEEN="$OVERRIDE_SEEN --webroot" ;;
+    --feed-url)        FEED_URL="$2"; shift 2 ; OVERRIDE_SEEN="$OVERRIDE_SEEN --feed-url" ;;
+    --allow-republish) ALLOW_REPUBLISH=1; shift ; OVERRIDE_SEEN="$OVERRIDE_SEEN --allow-republish" ;;
     -h|--help)         usage ;;
     *) echo "알 수 없는 인자: $1" >&2; usage ;;
   esac
 done
+
+# ── B-2 다층방어: sudo 컨텍스트 오버라이드 차단 (in-script 가드) ─────────────────
+#   근본: sudoers 화이트리스트가 --private /tmp/공격자키.pem 을 추가인자로 흘려도(와일드카드
+#   탐욕매칭), 이 스크립트가 sudo 로 실행될 때는 개인키·웹루트·재배포 오버라이드를 절대 수용하지
+#   않는다. sudoers(외부) + 이 가드(내부) = 서명오라클(V-1) 다층 봉인. (근본틀 설계 B-2)
+#   SUDO_UID/SUDO_USER 존재 = sudo 로 승격 실행된 상태.
+if [[ -n "${SUDO_UID:-}${SUDO_USER:-}" && -n "$OVERRIDE_SEEN" ]]; then
+  die "sudo 실행 시 오버라이드 인자 금지(개인키·웹루트·재배포 대체 차단, 서명오라클 방어 B-2): 넘어온 인자 =$OVERRIDE_SEEN. --zip/--manifest 2인자만 허용."
+fi
 
 [[ -z "$ZIP" || -z "$MANIFEST" ]] && usage
 
@@ -231,7 +242,12 @@ if [[ -f "$LIVE_MANIFEST" ]]; then
   cp -f "$LIVE_MANIFEST" "$BAK"
   log "옛 manifest 백업: $BAK (버전 $OLD_VER)"
 fi
-mv -f "$TMP_MANIFEST" "$LIVE_MANIFEST"   # 원자 교체(같은 파일시스템) — 반쪽 서빙 0
+# ── B-15 불변식 (2파일 경계 — 수정 시 절대 위반 금지) ─────────────────────────
+#   zip(packages/{zip})은 위 §3 에서 manifest 교체보다 '먼저' 배치된다. manifest 는 항상 '마지막'에
+#   rename 한다. 이 순서라 워치독이 manifest 를 본 순간 zip 은 이미 자리에 있다(반쪽 게시 0).
+#   워치독은 manifest.sha256 으로 zip 을 다시 해시검증하므로, 설령 zip 이 늦더라도 서명불일치가 아니라
+#   '해시 대기'로 안전하게 떨어진다. → manifest rename 을 zip 배치보다 앞당기지 말 것.
+mv -f "$TMP_MANIFEST" "$LIVE_MANIFEST"   # 원자 교체(같은 파일시스템) — 반쪽 서빙 0. 반드시 zip 배치 뒤.
 trap - EXIT
 ok "manifest.json 원자 교체 완료 → 버전 $VERSION"
 
@@ -246,8 +262,26 @@ fi
 rollback() {
   warn "자기검증 실패 → 롤백 시작"
   if [[ -n "${BAK:-}" && -f "$BAK" ]]; then
-    cp -f "$BAK" "$LIVE_MANIFEST"
-    warn "롤백 완료 — manifest.json 을 옛 버전($OLD_VER)으로 되돌렸습니다(정지 아님)."
+    # B-13: 되돌릴 옛 manifest 의 kid 가 현 공개키(자기검증용)로 검증 가능한 서명인지 확인.
+    #   옛 kid 가 이미 폐기(도달불가)됐다면, 되돌려도 워치독이 그 서명을 거부해 '깨진 채 방치'가 된다.
+    #   그 경우 옛 버전으로 되돌리지 말고 manifest 를 제거(최신 없음 + 수동개입 신호)해 fail-closed.
+    local _bak_sig _bak_ver _bak_ch _bak_url _bak_sha _bak_size _bak_mig
+    _bak_sig="$(jq -r '.signature // empty' "$BAK" 2>/dev/null || true)"
+    _bak_ver="$(jq -r '.version // empty'   "$BAK" 2>/dev/null || true)"
+    _bak_ch="$(jq -r '.channel // empty'    "$BAK" 2>/dev/null || true)"
+    _bak_url="$(jq -r '.downloadUrl // empty' "$BAK" 2>/dev/null || true)"
+    _bak_sha="$(jq -r '.sha256 // empty'    "$BAK" 2>/dev/null || true)"
+    _bak_size="$(jq -r '.sizeBytes | tostring' "$BAK" 2>/dev/null || true)"
+    _bak_mig="$(jq -r 'if .requiresMigration then "true" else "false" end' "$BAK" 2>/dev/null || echo false)"
+    if [[ -n "$_bak_sig" ]] && hitpan_verify_payload "$PUBLIC" "$_bak_sig" \
+         "$_bak_ver" "$_bak_ch" "$_bak_url" "$_bak_sha" "$_bak_size" "$_bak_mig"; then
+      cp -f "$BAK" "$LIVE_MANIFEST"
+      warn "롤백 완료 — manifest.json 을 옛 버전($OLD_VER)으로 되돌렸습니다(서명 검증 통과, 정지 아님)."
+    else
+      warn "옛 manifest($OLD_VER) 서명이 현 공개키로 검증 안 됨(kid 도달불가·B-13) — 되돌려도 워치독 거부."
+      rm -f "$LIVE_MANIFEST"
+      die "롤백 대상 서명 도달불가(B-13). manifest 제거 = '최신 없음' + 수동개입 필요. 개인/공개키·kid 정합 확인 후 재게시."
+    fi
   else
     warn "백업본이 없어 롤백 불가(최초 배포) — manifest.json 을 제거해 '최신 없음' 상태로 둡니다."
     rm -f "$LIVE_MANIFEST"
@@ -281,12 +315,22 @@ if ! hitpan_verify_payload "$PUBLIC" "$SELF_SIG" "$SELF_VER" "$SELF_CH" "$SELF_U
   rm -f "$SELF"; rollback
 fi
 
-# zip 이 실제 200 으로 받아지는가(접근성) — 헤더만 확인.
-if ! curl -fsS -I "$SELF_URL" >/dev/null 2>&1; then
+# zip 이 실제 200 으로 받아지는가 + 내용까지 sha 재확인(B-6 반쪽 게시 검출).
+#   헤더만(-I) 확인하면 CF 엣지가 옛 zip 을 200 으로 돌려줘 위양성 성공이 날 수 있다.
+#   캐시버스터+no-cache 로 실제 바이트를 받아 sha256 이 manifest 값과 같은지 재확인한다.
+SELF_ZIP="/tmp/hitpan-selfcheck-zip.$$.bin"
+if ! curl -fsS -H 'Cache-Control: no-cache' -H 'Pragma: no-cache' \
+       "${SELF_URL}?_=${RELEASED_AT_SAFE}${RANDOM}" -o "$SELF_ZIP" 2>/dev/null; then
   warn "downloadUrl($SELF_URL) 이 200 으로 응답하지 않습니다(zip 접근 불가)."
-  rm -f "$SELF"; rollback
+  rm -f "$SELF" "$SELF_ZIP"; rollback
 fi
-rm -f "$SELF"
+SELF_ZIP_SHA="$(sha256sum "$SELF_ZIP" | awk '{print tolower($1)}')"
+SELF_SHA_LC="$(printf '%s' "$SELF_SHA" | tr '[:upper:]' '[:lower:]')"
+if [[ "$SELF_ZIP_SHA" != "$SELF_SHA_LC" ]]; then
+  warn "서빙 zip 실측 sha($SELF_ZIP_SHA) ≠ manifest.sha256($SELF_SHA_LC) — 반쪽 게시·옛 zip 캐시 의심."
+  rm -f "$SELF" "$SELF_ZIP"; rollback
+fi
+rm -f "$SELF" "$SELF_ZIP"
 
 # ── 성공 ─────────────────────────────────────────────────────────────────────
 ok  "배포 완료 — updates.hitpan.kr 이 이제 $VERSION 을 가리킵니다."

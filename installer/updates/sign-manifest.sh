@@ -116,6 +116,19 @@ while [[ $# -gt 0 ]]; do
 done
 
 [[ -z "$PRIVATE" || -z "$VERSION" || -z "$CHANNEL" || -z "$URL" || -z "$SHA256" || -z "$SIZE" || -z "$MIGRATION" ]] && usage
+
+# ── B-2 다층방어 (CTO 지적 봉합 2026-07-24): sudo 컨텍스트 개인키 경로 고정 ─────────
+#   publish-update.sh 는 이 파일을 source(함수만)라 위 CLI 를 안 밟지만, 공격자가
+#   `sudo bash sign-manifest.sh --private /tmp/공격키.pem ...` 로 이 CLI 를 직접 부르면
+#   임의 개인키로 서명(서명 오라클)이 가능하다. 실봉인 1차 = sudoers 가 이 파일을 화이트리스트에서
+#   제외(publish-update.sh 만 허용)하는 것이고, 이 가드는 그 위의 2차 방어다.
+#   sudo 로 승격 실행(SUDO_UID/SUDO_USER 존재)될 때는 개인키가 반드시 NCP 표준 경로여야 한다.
+STD_PRIVATE="/var/hitpan/update-keys/update_private.pem"
+if [[ -n "${SUDO_UID:-}${SUDO_USER:-}" && "$PRIVATE" != "$STD_PRIVATE" ]]; then
+  echo "[sign] 🔴 sudo 실행 시 개인키는 표준 경로($STD_PRIVATE)여야 합니다. 받은 값: $PRIVATE (서명 오라클 방어 B-2). 임의 개인키 서명 차단." >&2
+  exit 4
+fi
+
 [[ -f "$PRIVATE" ]] || { echo "개인키 파일이 없습니다: $PRIVATE" >&2; exit 2; }
 
 # --- 서명 대상 문자열 + 서명 (재사용 함수 = 단일 출처, B-1) --------------------
