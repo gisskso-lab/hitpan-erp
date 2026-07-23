@@ -40,6 +40,7 @@ die()  { printf '[publish-run] 🔴 %s\n' "$*" >&2; exit 1; }
 PUBLISH="/opt/hitpan/installer/updates/publish-update.sh"   # 절대경로(PATH 미의존)
 REPO_DIR="/opt/hitpan/repo"                                 # main 조상 확인용 로컬 미러(git)
 MAIN_REF="origin/main"                                      # commit 조상 판정 기준
+GH_TOKEN_FILE="/var/hitpan/update-keys/github-b4-token"     # B-4 GitHub API 토큰(600 root, 러너 미경유)
 ALLOWED_ZIP_PREFIX="/tmp/hitpan-"                           # 러너 전송본 접두 고정
 ALLOWED_MAN_PREFIX="/tmp/manifest-"
 
@@ -116,8 +117,14 @@ fi
 if (( ! B4_BYPASS )); then
   [[ -n "${HITPAN_GH_RUN_ID:-}" && -n "${HITPAN_GH_REPO:-}" ]] \
     || die "B-4: HITPAN_GH_RUN_ID/REPO 미제공 — run·approval 독립조회 불가. 서명 거부(fail-closed)."
+  # ★ B-4 독립성 핵심: 토큰은 러너가 넘기지 않는다(env_keep 화이트리스트에도 없음).
+  #   NCP 로컬 파일(600 root)에서만 읽는다 — 러너가 침해돼도 토큰을 못 위조·못 탈취한다.
+  #   러너가 HITPAN_GH_TOKEN 을 억지로 넣어도, 여기서 로컬 파일 값으로 덮어써(신뢰경계 A) 무력화한다.
+  if [[ -r "$GH_TOKEN_FILE" ]]; then
+    HITPAN_GH_TOKEN="$(tr -d '\r\n' < "$GH_TOKEN_FILE")"
+  fi
   [[ -n "${HITPAN_GH_TOKEN:-}" ]] \
-    || die "B-4: GitHub 토큰(HITPAN_GH_TOKEN) 미배치 — run·approval 독립조회 불가. 서명 거부(트랙2 G-F 배치 후)."
+    || die "B-4: GitHub 토큰($GH_TOKEN_FILE) 미배치·비어있음 — run·approval 독립조회 불가. 서명 거부(트랙2 G-F 배치 후)."
   API="https://api.github.com/repos/$HITPAN_GH_REPO/actions/runs/$HITPAN_GH_RUN_ID"
   RUN_JSON="$(curl -fsS -H "Authorization: Bearer $HITPAN_GH_TOKEN" \
                -H "Accept: application/vnd.github+json" "$API" 2>/dev/null)" \
