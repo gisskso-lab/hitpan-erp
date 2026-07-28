@@ -189,7 +189,7 @@
 - 사장님 격언: [[owner-quote-vibecoding-limit-20260515]]
 - EVF 6대: [[project_evf]]
 - 헌법 31개: `CLAUDE.md` §절대원칙
-- 3시스템 헌법: `docs/design/THREE_SYSTEM_ARCHITECTURE.md`
+- 3시스템 헌법: `docs/설계/erp/THREE_SYSTEM_ARCHITECTURE.md`
 - 본사 16영역: [[project_backoffice_db_scope]]
 - 랜딩 2종: [[project_landing_pages]]
 

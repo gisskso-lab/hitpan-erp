@@ -25,7 +25,7 @@
 
 ## 2. 산출물
 
-**파일**: `docs/design/DESIGN_PRINCIPLES.md`
+**파일**: `docs/헌법/DESIGN_PRINCIPLES.md`
 
 ## 3. 목차 (초안)
 
@@ -60,7 +60,7 @@
 
 ## 6. 완료 기준
 
-- [ ] `docs/design/DESIGN_PRINCIPLES.md` 생성
+- [ ] `docs/헌법/DESIGN_PRINCIPLES.md` 생성
 - [ ] 9개 섹션 모두 작성
 - [ ] CLAUDE.md 절대 원칙과 모순 없음
 - [ ] 어벤져스 8명 리뷰 반영

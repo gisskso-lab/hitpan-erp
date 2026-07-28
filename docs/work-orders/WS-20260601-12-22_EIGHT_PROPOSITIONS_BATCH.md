@@ -1,7 +1,7 @@
 # 작업지시서 묶음 — WS-20260601-12 ~ 22 (8명제 트랙 C)
 
 > 발행: 2026-06-01 야간 / 결재: 사장님 모두결재 / 마감: Week 4 (4주)
-> 모 문서: `docs/design/EIGHT_PROPOSITIONS_BACKOFFICE_LANDING.md`
+> 모 문서: `docs/설계/랜딩/EIGHT_PROPOSITIONS_BACKOFFICE_LANDING.md`
 
 ---
 
