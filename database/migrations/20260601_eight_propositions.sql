@@ -3,7 +3,7 @@
 -- ============================================================================
 -- 작성일       : 2026-06-01
 -- 작성팀       : DB 매니저(Harvard·Oracle 30년) + DB 개발자 3명
--- 설계 근거    : docs/design/EIGHT_PROPOSITIONS_BACKOFFICE_LANDING.md §4
+-- 설계 근거    : docs/설계/랜딩/EIGHT_PROPOSITIONS_BACKOFFICE_LANDING.md §4
 -- 작지서       : docs/work-orders/WS-20260601-12-22_EIGHT_PROPOSITIONS_BATCH.md
 -- 대상 DB     : hitpan_backoffice (본사 클라우드 1대, MariaDB 11.4.10)
 --

@@ -1,0 +1,22 @@
+# INDEX — docs/CS
+
+> AI 챗봇·고객지원 설계·구현
+> 문서 25개 | 자동생성 2026-07-28 | 헌법 #41
+> **담당**: CS팀장 강지원 · 기술영업팀장 · ERP매니저 · 마케팅팀장 (현장이 답이다)  ([폴더담당 표](../POLICY_폴더담당.md))
+
+> 최근 12건만 표시. 전체 25건 = [INDEX_ALL.md](INDEX_ALL.md)
+
+| 문서 | 제목 | 최종수정 |
+|---|---|---|
+| [영업셀링_시나리오_v1.0.md](영업셀링_시나리오_v1.0.md) | 히트판 영업 셀링 시나리오 v1.0 | 2026-07-23 |
+| [셀링카피_6종_v1.0.md](셀링카피_6종_v1.0.md) | 히트판 셀링 카피 6종 v1.0 | 2026-07-23 |
+| [PRD_AI_CS_SYSTEM.md](PRD_AI_CS_SYSTEM.md) | 히트판 AI CS 시스템 PRD | 2026-07-23 |
+| [LANDING_SALES_STRATEGY_V2.md](LANDING_SALES_STRATEGY_V2.md) | 히트판 랜딩페이지 영업 전략 V2 | 2026-07-23 |
+| [LANDING_COPY_V2.md](LANDING_COPY_V2.md) | 히트판 랜딩페이지 카피 V2 — 사장님 결재용 박제 | 2026-07-23 |
+| [INSTALLER_USER_MANUAL.md](INSTALLER_USER_MANUAL.md) | 히트판 ERP 설치 매뉴얼 | 2026-07-23 |
+| [HITPAN_USER_MANUAL.md](HITPAN_USER_MANUAL.md) | 히트판 ERP 사용설명서 | 2026-07-23 |
+| [E_랜딩페이지_헤드라인_적용안.md](E_랜딩페이지_헤드라인_적용안.md) | E — 랜딩 페이지 헤드라인 적용 안 (마케팅 카피 6종 정합) | 2026-07-23 |
+| [AUTO_UPDATE_CUSTOMER_NOTICE.md](AUTO_UPDATE_CUSTOMER_NOTICE.md) | 히트판 ERP 자동 업데이트 안내 | 2026-07-23 |
+| [AI_CHATBOT_DESIGN.md](AI_CHATBOT_DESIGN.md) | 히트판 AI 챗봇 통합 설계서 | 2026-07-28 |
+| [20260721작1_장애격리_설치완주_선제CS_작업지시서.md](20260721작1_장애격리_설치완주_선제CS_작업지시서.md) | 20260721작1 — 장애 격리 · 설치 완주 · 본사 선제 CS 작업지시서 | 2026-07-28 |
+| [20260715_로그인전업데이트버튼_하브루타_진영구성.md](20260715_로그인전업데이트버튼_하브루타_진영구성.md) | 로그인 전 "최신으로 업데이트" 버튼 — 하브루타 진영 구성 (사장님 지시 박제) | 2026-07-23 |
