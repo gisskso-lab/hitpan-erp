@@ -183,11 +183,17 @@ jobs:
       - name: Strip env-specific appsettings from payload (secret-gate 정합)
         shell: pwsh
         run: |
-          # 게이트 regex 와 동형: appsettings.<영문접미사>.json 전부 (Production/Development/Local/Staging/…)
+          # 게이트 regex 와 동형: appsettings.<영문접미사>.json + 백업접미사(.bak/.old/.orig/.save)
           #   접미사 없는 일반 appsettings.json 은 제외(코드 동봉 정상).
-          $rx = '^appsettings\.[A-Za-z]+\.json$'
+          # ── 20260729작3 봉합 (병렬이슈 01 · 사장님 직권 결재) ──────────────────────────
+          #   종전 $rx 에 백업접미사 절이 없어 게이트와 비대칭이었다.
+          #   appsettings.Production.json.bak → strip 미제거 / 게이트 차단 = 배포 fail.
+          #   ★ 게이트를 느슨하게 하지 않고 strip 을 게이트 수준으로 올린다(헌법 #22).
+          #   ★ -Filter 도 함께 고친다: 'appsettings.*.json' 은 .bak 을 열거조차 못 해
+          #     regex 만 고치면 봉합이 성립하지 않는다(실측 확인). → 'appsettings.*'
+          $rx = '^appsettings\.[A-Za-z]+\.json(\.(bak|old|orig|save))?$'
           $removed = 0
-          Get-ChildItem -Path installer/payload -Recurse -File -Filter 'appsettings.*.json' -ErrorAction SilentlyContinue |
+          Get-ChildItem -Path installer/payload -Recurse -File -Filter 'appsettings.*' -ErrorAction SilentlyContinue |
             Where-Object { $_.Name -match $rx } |
             ForEach-Object {
               Write-Host "[strip] 제거: $($_.FullName)"
