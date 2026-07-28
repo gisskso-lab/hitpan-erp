@@ -167,6 +167,35 @@ jobs:
             -p:HitPanVersion=${{ inputs.version }} `
             -o installer/payload/watchdog --nologo
 
+      # ── 시크릿 파일 산출물 제거 (첫 실측 P0 봉합 2026-07-28 · 검증팀 SoD 과제2 확장) ──────
+      #   dotnet publish 는 리포에 커밋된 환경별 appsettings(appsettings.<환경>.json)를 산출물에
+      #   그대로 복사한다. 이게 update zip 에 실리면 NCP "Scan secrets" 게이트가 파일명 규칙
+      #   (환경별 설정=위험)으로 배포를 정상 차단한다(첫 실측 1.2.40 실패 진범 = Production·Local 2종).
+      #   ★ 게이트는 그대로 유지(느슨하게 안 함). 미래에 진짜 시크릿이 든 환경파일이 섞여도
+      #     게이트가 막아야 하므로 "산출물에서 뺀다"로 근본 봉합(헌법 #22 정합, 우회 아님).
+      #   ★ 검증팀 SoD CONFIRMED(과제2): strip 3개 하드코딩 < 게이트 regex(모든 환경접미사)라
+      #     향후 appsettings.Staging.json 등 추가 시 재발. → 게이트와 동형으로 "환경접미사 전부"
+      #     제거하도록 확장(appsettings.<임의영문접미사>.json). 접미사 없는 일반 appsettings.json 은
+      #     코드 동봉 정상이라 보존(게이트도 파일명만으론 안 막고 내용 스캔).
+      #   ⚠️ 순서 의존: 이 스텝은 반드시 "Copy Blazor static assets" 뒤에 있어야 한다 —
+      #     Copy 가 web/wwwroot 를 api/wwwroot 로 통째 복사하므로, 그 복사본까지 여기서 제거해야 한다.
+      #     이 스텝을 Copy 앞으로 옮기면 api/wwwroot 복사본이 안 잡혀 게이트가 재차단(첫 실측 재발).
+      - name: Strip env-specific appsettings from payload (secret-gate 정합)
+        shell: pwsh
+        run: |
+          # 게이트 regex 와 동형: appsettings.<영문접미사>.json 전부 (Production/Development/Local/Staging/…)
+          #   접미사 없는 일반 appsettings.json 은 제외(코드 동봉 정상).
+          $rx = '^appsettings\.[A-Za-z]+\.json$'
+          $removed = 0
+          Get-ChildItem -Path installer/payload -Recurse -File -Filter 'appsettings.*.json' -ErrorAction SilentlyContinue |
+            Where-Object { $_.Name -match $rx } |
+            ForEach-Object {
+              Write-Host "[strip] 제거: $($_.FullName)"
+              Remove-Item $_.FullName -Force
+              $removed++
+            }
+          Write-Host "[strip] 환경별 appsettings $removed 개 제거 완료 (게이트 regex 동형 · 접미사 없는 일반 appsettings.json 보존)"
+
       # ── environment 분기(보강3/G7): download-url-base 를 production/beta 로 가른다. PRD §3.3 인자표 ──
       #   production = updates.hitpan.kr/packages / beta = updates.hitpan.kr/beta/packages
       #   ⚠️ beta 는 배선만 — nginx /beta/ location 물리생성 별건 전엔 실동작 불가(403).
