@@ -1,9 +1,26 @@
 # INDEX — docs/검증/erp (전체)
 
-> 전체 36건 목록. 야은 문서를 찾을 때만 열고, 평소엔 [INDEX.md](INDEX.md) 를 본다.
+> 전체 76건 목록. 야은 문서를 찾을 때만 열고, 평소엔 [INDEX.md](INDEX.md) 를 본다.
 
 | 문서 | 제목 | 최종수정 |
 |---|---|---|
+| [W3_SAST_COMPARISON.md](W3_SAST_COMPARISON.md) | W3 SAST 도구 비교 — 히트판 ERP 헌법 #23 정적 분석 단계 | 2026-07-23 |
+| [W3_IDEMPOTENCY_SCENARIOS.md](W3_IDEMPOTENCY_SCENARIOS.md) | W3 마이그레이션 멱등성 검증 시나리오 | 2026-07-23 |
+| [W3_D1_GAP_ANALYSIS.md](W3_D1_GAP_ANALYSIS.md) | W3 D1 사전 분석 — 기존 MigrationController vs 작13 명세 Gap | 2026-07-23 |
+| [W1_GATE_RESULT.md](W1_GATE_RESULT.md) | Week 1 게이트 점검 결과 보고서 | 2026-07-23 |
+| [UNIT_TEST_SCENARIOS.md](UNIT_TEST_SCENARIOS.md) | 단위 테스트 시나리오 명세서 — W2 D2~D4 마이그 인프라 | 2026-07-23 |
+| [TEST_FIXME.md](TEST_FIXME.md) | 테스트 수정 필요 메모 (2026-05-06) | 2026-07-23 |
+| [INDEX_ALL.md](INDEX_ALL.md) | INDEX — docs/검증/erp (전체) | 2026-07-28 |
+| [E2E_FINDINGS_TEMPLATE.md](E2E_FINDINGS_TEMPLATE.md) | E2E 발견 사항 — 템플릿 | 2026-07-23 |
+| [DAST_FINDINGS_TEMPLATE.md](DAST_FINDINGS_TEMPLATE.md) | DAST Finding 템플릿 (OWASP ZAP 1차) | 2026-07-23 |
+| [CRITICAL_COLUMNS_AUDIT.md](CRITICAL_COLUMNS_AUDIT.md) | 핵심 컬럼 감사 — DOCF4·DOCFS·DOCSW 정독 | 2026-07-23 |
+| [27_사장님_보고용_최종.md](27_사장님_보고용_최종.md) | 27. 사장님 보고용 최종 종합서 | 2026-07-23 |
+| [26_봉합_액션플랜_P0_6건.md](26_봉합_액션플랜_P0_6건.md) | 26. 헌법 위반 P0 6건 봉합 액션 플랜 (line:번호) | 2026-07-23 |
+| [25_인덱스_670개_정공.md](25_인덱스_670개_정공.md) | 25. 인덱스 670개 정공 정독 (핵심 16 테이블) | 2026-07-23 |
+| [24_컬럼_348개_정공.md](24_컬럼_348개_정공.md) | 24. 핵심 16 테이블 컬럼 348개 정공 정독 | 2026-07-23 |
+| [23_MdbMigration_Razor_전수정독.md](23_MdbMigration_Razor_전수정독.md) | 23. MdbMigration.razor 전수 정독서 (344줄, 세미콜론·괄호까지) | 2026-07-23 |
+| [22_MdbMigrationService_전수정독.md](22_MdbMigrationService_전수정독.md) | 22. MdbMigrationService.cs 전수 정독서 (1,541줄, 세미콜론·괄호까지) | 2026-07-23 |
+| [21_MigrationController_전수정독.md](21_MigrationController_전수정독.md) | 21. MigrationController + MigrationJobStore 전수 정독서 (세미콜론·괄호까지) | 2026-07-23 |
 | [20260724작2_2대시나리오_검증게이트_작업지시서.md](20260724작2_2대시나리오_검증게이트_작업지시서.md) | 작업지시서 20260724작2 — 베타 전 2대 시나리오 검증게이트 | 2026-07-23 |
 | [20260722작2_마이그교차검증게이트_오탐봉합_작업지시서.md](20260722작2_마이그교차검증게이트_오탐봉합_작업지시서.md) | 20260722작2 — 마이그 교차검증 게이트 ① 오탐 봉합 작업지시서 | 2026-07-23 |
 | [20260720작5_실측실행대본_사장님검증팀용.md](20260720작5_실측실행대본_사장님검증팀용.md) | 실측 실행 대본 — 고리4 자동업데이트 정공법 실측 (사장님·검증팀용) | 2026-07-23 |
@@ -39,4 +56,27 @@
 | [20260518_전수조사_영역1_마이그코드_초안.md](20260518_전수조사_영역1_마이그코드_초안.md) | 🔍 영역 1 — 마이그 코드 전수조사 (초안) | 2026-07-23 |
 | [20260516_P0-3_청문결과_6명만점.md](20260516_P0-3_청문결과_6명만점.md) | P0-3 H' 청문 결과 — 신규 6명 만점 (10/10) 박제 | 2026-07-23 |
 | [20260516_H프라임_헌법29_객관식5문항_구술2문항.md](20260516_H프라임_헌법29_객관식5문항_구술2문항.md) | 옵션 H' — 헌법 #29 청문 시험지 (객관식 5 + 구술 2) | 2026-07-23 |
+| [20260513_chunsik_pm_audit.md](20260513_chunsik_pm_audit.md) | 본부장 춘식 PM 전수조사 보고서 (2026-05-13) | 2026-07-23 |
+| [20260424_12menu_button_catalog.md](20260424_12menu_button_catalog.md) | 히트판 ERP — 12 대메뉴 버튼 카탈로그 (2026-04-24) | 2026-07-23 |
+| [20260423_이슈트래커.md](20260423_이슈트래커.md) | 📋 20260423 가혹 테스트 이슈 트래커 | 2026-07-23 |
 | [1900_5건봉합_검증SQL_2026-05-14.md](1900_5건봉합_검증SQL_2026-05-14.md) | 19:00 5건 봉합 dry-run 검증 SQL — 사장님 참관 시나리오 | 2026-07-23 |
+| [19_DB_실측_검증.md](19_DB_실측_검증.md) | 19. 5/14 새벽 DB 실측 + 무결성 검증 | 2026-07-23 |
+| [18_헌법_적용_매트릭스.md](18_헌법_적용_매트릭스.md) | 18. 헌법 #1~#25 전수 적용 매트릭스 | 2026-07-23 |
+| [17_Infrastructure_전수.md](17_Infrastructure_전수.md) | 17. Infrastructure + DI + 미들웨어 전수 학습서 | 2026-07-23 |
+| [16_Web_Services_전수.md](16_Web_Services_전수.md) | 16. HitPan.Web 클라이언트 전수 학습서 (39개 Services) | 2026-07-23 |
+| [15_Pages_전수.md](15_Pages_전수.md) | 15. Blazor Pages 전수 학습서 (107개 .razor) | 2026-07-23 |
+| [14_서비스_전수.md](14_서비스_전수.md) | 14. Application Services 전수 학습서 | 2026-07-23 |
+| [13_API_컨트롤러_전수.md](13_API_컨트롤러_전수.md) | 13. API 컨트롤러 전수 학습서 (47개) | 2026-07-23 |
+| [12_DB_전체스키마_전수.md](12_DB_전체스키마_전수.md) | 12. DB 전체 스키마 전수 학습서 (5/14 04:30 실측) | 2026-07-23 |
+| [11_PM_최종_종합.md](11_PM_최종_종합.md) | 11. PM 최종 종합서 | 2026-07-23 |
+| [10_서브에이전트_역할재정의.md](10_서브에이전트_역할재정의.md) | 10. 서브에이전트 역할 재정의 페이퍼 ★ 핵심 산출물 | 2026-07-23 |
+| [09_헌법위반_전수표.md](09_헌법위반_전수표.md) | 09. 헌법 위반 전수표 (8개 보고서 통합) | 2026-07-23 |
+| [08_legal_erp.md](08_legal_erp.md) | 08. 법무팀장 + ERP매니저 데이터 흐름 보고서 | 2026-07-23 |
+| [07_qa_lead.md](07_qa_lead.md) | 07. 검증팀장 V1~V7 시나리오 + EVF 매핑 | 2026-07-23 |
+| [06_arch_brownkim_chunsik.md](06_arch_brownkim_chunsik.md) | 06. 설계팀장 브라운킴 + 본부장 춘식 정합성 보고서 | 2026-07-23 |
+| [05_frontend_webdesign.md](05_frontend_webdesign.md) | 05. 프론트 매니저 + 수석 웹디자이너 정독 보고서 | 2026-07-23 |
+| [04_backend_manager.md](04_backend_manager.md) | 04. 백엔드 매니저 정독 보고서 | 2026-07-23 |
+| [03_security_lead.md](03_security_lead.md) | 03. 보안팀장 정독 보고서 | 2026-07-23 |
+| [02_DB_manager.md](02_DB_manager.md) | 02. DB 매니저 정독 보고서 | 2026-07-23 |
+| [01_CTO_fullstack.md](01_CTO_fullstack.md) | 01. CTO 풀스택 코드 정독 보고서 | 2026-07-23 |
+| [00_INDEX.md](00_INDEX.md) | 00. 코드 분석 인덱스 (2026-05-14 새벽) | 2026-07-23 |

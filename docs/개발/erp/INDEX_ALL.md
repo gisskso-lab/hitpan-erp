@@ -1,11 +1,16 @@
 # INDEX — docs/개발/erp (전체)
 
-> 전체 123건 목록. 야은 문서를 찾을 때만 열고, 평소엔 [INDEX.md](INDEX.md) 를 본다.
+> 전체 138건 목록. 야은 문서를 찾을 때만 열고, 평소엔 [INDEX.md](INDEX.md) 를 본다.
 
 | 문서 | 제목 | 최종수정 |
 |---|---|---|
+| [W3_CHUNK_ALGORITHM.md](W3_CHUNK_ALGORITHM.md) | W3 청크 알고리즘 설계서 — 대량 마이그레이션 (100만 건 / 1시간) | 2026-07-23 |
 | [W2_작5_6_7_작지서_사전박제.md](W2_작5_6_7_작지서_사전박제.md) | W2 작5·6·7 작지서 사전 박제 (W1 통과 6/3 후 발진 대기) | 2026-07-28 |
+| [W2_RETURNS_DESIGN.md](W2_RETURNS_DESIGN.md) | W2 D1 — 반품 마이그 설계서 (DOCFB 복합 PK 5컬럼) | 2026-07-23 |
+| [W2_DELIVERIES_MAPPING.md](W2_DELIVERIES_MAPPING.md) | W2 D1 — deliveries 변환 매핑 표 (POTHER.mdb DELIVERY) | 2026-07-23 |
+| [VALUE_CONVERTER_SPEC.md](VALUE_CONVERTER_SPEC.md) | Value Converter 인터페이스 명세서 — AES-256 형사영역 + raw 데이터 | 2026-07-23 |
 | [validation_20260430_owner.md](validation_20260430_owner.md) | 사장님 직접 검증 결과 — 2026-04-30 | 2026-07-23 |
+| [SENSITIVE_ACCESS_LOG_DDL.md](SENSITIVE_ACCESS_LOG_DDL.md) | SENSITIVE_ACCESS_LOG — 형사영역 접근 감사 로그 설계서 | 2026-07-23 |
 | [next_session_prompt_20260515_PM.md](next_session_prompt_20260515_PM.md) | 5/15 PM 세션 종합 인수인계서 | 2026-07-28 |
 | [next_session_prompt_20260515_dawn.md](next_session_prompt_20260515_dawn.md) | 5/15 새벽~09:00 가동 인수인계 — 온전한 정공법 6축 | 2026-07-23 |
 | [next_session_prompt_20260515.md](next_session_prompt_20260515.md) | 5/15 인수인계서 — 마이그 봉합 진척 + 학습과제 | 2026-07-28 |
@@ -21,18 +26,28 @@
 | [next_session_prompt_20260429_uxui.md](next_session_prompt_20260429_uxui.md) | 4/29 세션 인수인계서 — UX/UI 토스 B 컨셉 + 사원 연차 풀스택 | 2026-07-28 |
 | [next_session_prompt_20260429_domain.md](next_session_prompt_20260429_domain.md) | 다음 세션 핸드오프 — 도메인 전환 마무리 (2026-04-29 마감) | 2026-07-28 |
 | [next_session_prompt_20260428_night.md](next_session_prompt_20260428_night.md) | 4/28 야간 세션 인수인계서 (CTO → 다음 세션 CTO) | 2026-07-28 |
-| [next_session_prompt_20260428.md](next_session_prompt_20260428.md) | 4/28 세션 인수인계 — 새 창에서 이어가기 | 2026-07-23 |
-| [next_session_prompt_20260427.md](next_session_prompt_20260427.md) | 4/27 세션 인수인계 — 새 창에서 이어가기 | 2026-07-23 |
+| [next_session_prompt_20260428.md](next_session_prompt_20260428.md) | 4/28 세션 인수인계 — 새 창에서 이어가기 | 2026-07-28 |
+| [next_session_prompt_20260427.md](next_session_prompt_20260427.md) | 4/27 세션 인수인계 — 새 창에서 이어가기 | 2026-07-28 |
 | [next_session_prompt_20260426.md](next_session_prompt_20260426.md) | 4/26 세션 인수인계 — 새 창 프롬프트 (v1) | 2026-07-23 |
 | [next_session_prompt_20260425_evening.md](next_session_prompt_20260425_evening.md) | 🌙 다음 세션 시작 프롬프트 (4/25 저녁 / 4/26 토) | 2026-07-23 |
 | [next_session_prompt_20260425_am.md](next_session_prompt_20260425_am.md) | 🎬 다음 세션 시작 프롬프트 (4/25 오전) | 2026-07-28 |
 | [next_session_prompt_20260425.md](next_session_prompt_20260425.md) | 🎬 다음 세션 시작 프롬프트 (4/25~) | 2026-07-23 |
 | [next_session_prompt_20260424_v2.md](next_session_prompt_20260424_v2.md) | 🌙 다음 세션 시작 프롬프트 (4/24 심야 v2 — 매입 확정 & BOM 흐름 재설계 이후) | 2026-07-23 |
 | [next_session_prompt_20260424_late_night.md](next_session_prompt_20260424_late_night.md) | 🌙 다음 세션 시작 프롬프트 (4/24 심야 / 4/25 새벽) | 2026-07-23 |
+| [MIGRATION_MASTER_PLAN.md](MIGRATION_MASTER_PLAN.md) | 히트판 ERP 마이그레이션 마스터플랜 — 하브루타판 | 2026-07-23 |
 | [messages_from_team_20260512_night.md](messages_from_team_20260512_night.md) | 어벤져스 임원진 → 사장님께 드리는 메시지 | 2026-07-23 |
+| [MDB_FULL_MAPPING.md](MDB_FULL_MAPPING.md) | 레거시 히트판 MDB ↔ 신 히트판 ERP 전체 매핑 표 | 2026-07-23 |
 | [marcus_lee_20260429_domain_tunnel.md](marcus_lee_20260429_domain_tunnel.md) | 마커스 리 인계 문서 — 4/29 도메인+터널 작업 | 2026-07-28 |
+| [INFRA_DDL_SPEC.md](INFRA_DDL_SPEC.md) | 마이그레이션 인프라 3개 테이블 DDL 설계서 | 2026-07-23 |
+| [INFRA_API_SPEC.md](INFRA_API_SPEC.md) | 마이그레이션 인프라 API 4개 스펙 설계서 | 2026-07-23 |
+| [INDEX_ALL.md](INDEX_ALL.md) | INDEX — docs/개발/erp (전체) | 2026-07-28 |
 | [G_5_29_종합점검_7건외.md](G_5_29_종합점검_7건외.md) | G — 5/29 종합 점검 (7건 외 추가) | 2026-07-23 |
+| [ETAX_SEND_HISTORY_DDL.md](ETAX_SEND_HISTORY_DDL.md) | 결재 #2 — etax_send_history 신설 DDL 설계서 | 2026-07-23 |
 | [DAILY_사장님_워치독모니터_사용법.md](DAILY_사장님_워치독모니터_사용법.md) | 사장님 백오피스 워치독 모니터 사용법 (매일 30초) | 2026-07-28 |
+| [CRIMINAL_DOMAIN_POLICY.md](CRIMINAL_DOMAIN_POLICY.md) | 형사영역 6개 컬럼 — 처리 정책 (사장님 결재 완료) | 2026-07-23 |
+| [CLASS_SEPARATION_SPEC.md](CLASS_SEPARATION_SPEC.md) | 마이그레이션 5개 클래스 분리 설계서 | 2026-07-23 |
+| [blazor-external-access-error.md](blazor-external-access-error.md) | 히트판 ERP — 외부 접속 장애 대응 매뉴얼 | 2026-07-23 |
+| [ALTER_52_COLUMNS.md](ALTER_52_COLUMNS.md) | 결재 #3 — partners·items·employees ALTER 52개 컬럼 통합 설계서 | 2026-07-23 |
 | [22_검사리스트.md](22_검사리스트.md) | 22. 산출물별 검사 리스트 — 5중 검증 체크리스트 | 2026-07-23 |
 | [21_교육명세서.md](21_교육명세서.md) | 21. 교육(인수) 명세서 — 어벤져스 팀별 학습 커리큘럼 | 2026-07-23 |
 | [20260722작3_CI_api_wwwroot_누락봉합_작업지시서.md](20260722작3_CI_api_wwwroot_누락봉합_작업지시서.md) | 작업지시서 20260722작3 — CI api\wwwroot 누락 봉합 (터널 404 진범) | 2026-07-23 |

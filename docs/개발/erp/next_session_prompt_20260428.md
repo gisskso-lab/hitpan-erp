@@ -129,7 +129,7 @@ SELECT (SELECT COUNT(*) FROM collections WHERE is_active=1 AND (ref_doc_id IS NU
 | ⑤ | 전자세금계산서관리 | **외주 검토 중** |
 | ⑥ | 인사근태 | ERP 본 흐름과 별개 도메인 |
 
-→ 자세한 내용: `docs/work-orders/WS-20260427-06_MVP_범위_봉인_보류영역_정리.md`
+→ 자세한 내용: `docs/운영기록/WS-20260427-06_MVP_범위_봉인_보류영역_정리.md`
 
 ---
 
@@ -219,7 +219,7 @@ e40fabf 시점 SoT는 인수인계서 §4축 SoT 그대로 박혀있습니다.
 - BOM 서비스: `src/HitPan.Application/Services/BomService.cs`
 - 한글 라벨: `src/HitPan.Web/Helpers/StatusLabel.cs`
 - 작지서: `docs/work-orders/`
-- 작지서 06 (MVP 봉인): `docs/work-orders/WS-20260427-06_MVP_범위_봉인_보류영역_정리.md`
+- 작지서 06 (MVP 봉인): `docs/운영기록/WS-20260427-06_MVP_범위_봉인_보류영역_정리.md`
 
 ---
 

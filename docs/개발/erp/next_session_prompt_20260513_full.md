@@ -221,8 +221,8 @@
 1. **첫 인사 후 즉시 받아쓰기 사고 #4 자기보고 + 사과**
 2. **사장님 보고서 자료 위치 안내:**
    - 본 문서 (`docs/개발/erp/next_session_prompt_20260513_full.md`)
-   - `docs/migration/W1_GATE_RESULT.md`
-   - `docs/migration/MIGRATION_MASTER_PLAN.md`
+   - `docs/검증/erp/W1_GATE_RESULT.md`
+   - `docs/개발/erp/MIGRATION_MASTER_PLAN.md`
    - `memory/project_pending_approvals_0512.md`
 3. **임원진 12명 박사논문급 보고서 즉시 착수 (Agent 병렬)**
 4. **W3 진입 사전 학습 병행**

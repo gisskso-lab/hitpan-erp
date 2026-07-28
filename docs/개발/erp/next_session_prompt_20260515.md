@@ -453,7 +453,7 @@ RDB!IJ_TAXNO = "00000000"
 | 문서 | 내용 |
 |---|---|
 | `CLAUDE.md` | 절대원칙 26개 + 헌법 |
-| `docs/work-orders/WS-20260514-11_온전한_정공법_6축.md` | WS-11 |
+| `docs/운영기록/WS-20260514-11_온전한_정공법_6축.md` | WS-11 |
 | `docs/설계/erp/PRD_THREE_SYSTEMS.md` | 3개 시스템 통합 |
 | `docs/개발/erp/next_session_prompt_20260514_dawn.md` | 5/14 새벽 인수인계 |
 | `docs/handoff/next_session_prompt_20260514_night.md` | 5/14 밤 인수인계 |
