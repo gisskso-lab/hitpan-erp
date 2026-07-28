@@ -8,7 +8,7 @@
 
 | 문서 | 제목 | 최종수정 |
 |---|---|---|
-| [헌법원문_1-41.md](헌법원문_1-41.md) | 히트판 헌법 원문 (#1~#41) — 무손상 보존본 | 2026-07-28 |
+| [헌법원문_1-42.md](헌법원문_1-42.md) | 히트판 헌법 원문 (#1~#41) — 무손상 보존본 | 2026-07-28 |
 | [MANAGER_5VERIFY_CHECKLIST_20260531.md](MANAGER_5VERIFY_CHECKLIST_20260531.md) | 매니저 5중 검증 체크리스트 (헌법 #23) | 2026-07-23 |
 | [HITPAN_CONSTITUTION.md](HITPAN_CONSTITUTION.md) | 히트판 헌법 통합본 (계열별) | 2026-07-28 |
 | [GITHUB_ACTIONS_5중검증.md](GITHUB_ACTIONS_5중검증.md) | GitHub Actions YAML 6건 박제 (5중 검증 자동화) | 2026-07-28 |
