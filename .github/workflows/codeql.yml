@@ -38,7 +38,7 @@ jobs:
           dotnet-version: '8.0.x'
 
       - name: Initialize CodeQL
-        uses: github/codeql-action/init@v3
+        uses: github/codeql-action/init@v4
         with:
           languages: ${{ matrix.language }}
           # 축 6-3 (2026-05-14): security-extended 추가 — 추가 보안 패턴 (헌법 #23 ③ 보강).
@@ -48,6 +48,6 @@ jobs:
         run: dotnet build src/HitPan.sln --configuration Release --nologo /p:TreatWarningsAsErrors=false
 
       - name: Perform CodeQL Analysis
-        uses: github/codeql-action/analyze@v3
+        uses: github/codeql-action/analyze@v4
         with:
           category: '/language:${{ matrix.language }}'
