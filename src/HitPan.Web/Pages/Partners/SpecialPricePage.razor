@@ -1,0 +1,273 @@
+@page "/partners/special-prices"
+@attribute [Authorize]
+@using HitPan.Web.Models
+@using HitPan.Web.Services
+@inject SpecialPriceService SpService
+@inject IDialogService DialogService
+@inject PartnerMasterService PartnersApi
+
+<div class="sp-page">
+    <MudPaper Elevation="0" Class="pa-3 mb-2" Style="border-bottom:1px solid #E5E7EB">
+        <MudGrid Spacing="2">
+            <MudItem xs="12" sm="4">
+                @* 봉합 (2026-06-22, 10차 P0-3): 자동완성을 PartnerListRow 객체에 바인딩한다.
+                   기존에는 T="string"으로 거래처명을 받아 SelectedPartnerId에 거래처명을 대입 → 조회·저장 무동작.
+                   품목측 ItemSpecialPricePage(객체 바인딩) 패턴과 동일하게 실제 PartnerId를 사용한다. *@
+                <MudAutocomplete T="HitPan.Web.Models.PartnerListRow"
+                                 Value="_selectedPartner"
+                                 Label="거래처 선택"
+                                 Variant="Variant.Outlined"
+                                 Margin="Margin.Dense"
+                                 Style="font-size:13px"
+                                 SearchFunc="SearchPartner"
+                                 ToStringFunc="@(p => p?.PartnerName ?? "")"
+                                 ValueChanged="OnPartnerChanged"
+                                 AdornmentIcon="@Icons.Material.Filled.Business" />
+            </MudItem>
+            <MudItem xs="12" sm="3">
+                <MudTextField @bind-Value="FilterItem"
+                              Label="품목 검색"
+                              Variant="Variant.Outlined"
+                              Margin="Margin.Dense"
+                              Style="font-size:13px"
+                              Adornment="Adornment.End"
+                              AdornmentIcon="@Icons.Material.Filled.Search"
+                              OnKeyUp="FilterGrid" />
+            </MudItem>
+            <MudItem xs="6" sm="2">
+                <MudCheckBox @bind-Value="ShowActiveOnly"
+                             Label="거래품목만"
+                             Style="font-size:13px"
+                             Color="Color.Primary" />
+            </MudItem>
+            <MudItem xs="6" sm="3" Class="d-flex justify-end gap-2">
+                <MudButton Variant="Variant.Outlined"
+                           Size="Size.Small"
+                           Style="font-size:12px"
+                           StartIcon="@Icons.Material.Filled.Add"
+                           OnClick="AddRow">추가</MudButton>
+                <MudButton Variant="Variant.Filled"
+                           Color="Color.Primary"
+                           Size="Size.Small"
+                           Style="font-size:12px"
+                           StartIcon="@Icons.Material.Filled.Save"
+                           OnClick="SaveConfirm">저장</MudButton>
+            </MudItem>
+        </MudGrid>
+    </MudPaper>
+
+    <MudDataGrid T="SpecialPriceItem"
+                 Items="FilteredItems"
+                 Dense="true"
+                 Hover="true"
+                 Striped="true"
+                 FixedHeader="true"
+                 Height="calc(100vh - 220px)"
+                 Style="font-size:13px"
+                 EditMode="DataGridEditMode.Cell"
+                 RowStyleFunc="RowStyle">
+        <Columns>
+            <PropertyColumn Property="x => x.ItemName"
+                            Title="품목명"
+                            CellStyle="font-size:13px" />
+            <PropertyColumn Property="x => x.Spec"
+                            Title="규격"
+                            CellStyle="font-size:13px" />
+            <PropertyColumn Property="x => x.Unit"
+                            Title="단위"
+                            CellStyle="width:60px;text-align:center" />
+            <PropertyColumn Property="x => x.StdPrice"
+                            Title="표준단가"
+                            Format="N0"
+                            CellStyle="width:110px;text-align:right;color:#6B7280" />
+            @* 봉합 (2026-06-23, 19차): 상품 특별단가와 대칭 — 단가유형(고정/할인) + 할인율 컬럼.
+               종전엔 특별단가(고정) 한 가지만 입력 가능해 할인율 모드가 화면에서 통째 빠져 있었다. *@
+            <TemplateColumn Title="단가유형" CellStyle="width:100px">
+                <CellTemplate>
+                    <MudSelect T="string" @bind-Value="context.Item.PriceType" Variant="Variant.Text"
+                               Margin="Margin.Dense" Dense="true" Style="font-size:13px">
+                        <MudSelectItem Value="@("fixed")">고정</MudSelectItem>
+                        <MudSelectItem Value="@("discount")">할인</MudSelectItem>
+                    </MudSelect>
+                </CellTemplate>
+            </TemplateColumn>
+            <TemplateColumn Title="특별단가" CellStyle="width:120px;text-align:right">
+                <CellTemplate>
+                    @if (context.Item.PriceType == "discount")
+                    {
+                        <MudText Typo="Typo.body2" Style="color:#9CA3AF">@CalcDiscountedPrice(context.Item).ToString("N0")</MudText>
+                    }
+                    else
+                    {
+                        <MudNumericField T="decimal" @bind-Value="context.Item.SpecialPrice" Variant="Variant.Text"
+                                         Margin="Margin.Dense" Style="font-size:13px;text-align:right" />
+                    }
+                </CellTemplate>
+            </TemplateColumn>
+            <TemplateColumn Title="할인율(%)" CellStyle="width:100px;text-align:right">
+                <CellTemplate>
+                    @if (context.Item.PriceType == "discount")
+                    {
+                        <MudNumericField T="decimal?" @bind-Value="context.Item.DiscountRate" Variant="Variant.Text"
+                                         Margin="Margin.Dense" Min="0" Max="100" Format="N1"
+                                         Style="font-size:13px;text-align:right" />
+                    }
+                    else
+                    {
+                        <MudText Typo="Typo.body2" Style="color:#9CA3AF">—</MudText>
+                    }
+                </CellTemplate>
+            </TemplateColumn>
+            <TemplateColumn Title="대비%"
+                            CellStyle="width:80px;text-align:center">
+                <CellTemplate>
+                    <MudChip T="string"
+                             Size="Size.Small"
+                             Color="@GetRatioColor(context.Item.VsRatio)"
+                             Style="font-size:11px">
+                        @context.Item.VsRatioLabel
+                    </MudChip>
+                </CellTemplate>
+            </TemplateColumn>
+            <PropertyColumn Property="x => x.LastSupplyDate"
+                            Title="최종납품"
+                            Format="yyyy-MM-dd"
+                            CellStyle="width:100px" />
+            <TemplateColumn CellStyle="width:50px;text-align:center">
+                <CellTemplate>
+                    <MudIconButton Icon="@Icons.Material.Filled.Delete"
+                                   Size="Size.Small"
+                                   Color="Color.Error"
+                                   OnClick="@(() => DeleteConfirm(context.Item))" />
+                </CellTemplate>
+            </TemplateColumn>
+        </Columns>
+    </MudDataGrid>
+</div>
+
+@code {
+    private string SelectedPartnerId = string.Empty;
+    private string SelectedPartnerName = string.Empty;
+    // 봉합 (2026-06-22, 10차 P0-3): 선택된 거래처 객체. 실제 PartnerId를 보관한다.
+    private HitPan.Web.Models.PartnerListRow? _selectedPartner;
+    private string FilterItem = string.Empty;
+    private bool ShowActiveOnly = true;
+    private List<SpecialPriceItem> Items = new();
+
+    private List<SpecialPriceItem> FilteredItems =>
+        Items.Where(x =>
+            (!ShowActiveOnly || x.IsActive) &&
+            (string.IsNullOrEmpty(FilterItem) ||
+             x.ItemName.Contains(FilterItem, StringComparison.OrdinalIgnoreCase) ||
+             (x.Spec ?? string.Empty).Contains(FilterItem, StringComparison.OrdinalIgnoreCase)))
+            .ToList();
+
+    // 봉합 (2026-06-22, 10차 P0-3): 거래처명이 아닌 실제 PartnerId를 SelectedPartnerId에 넣는다.
+    // 기존에는 SelectedPartnerId = name(거래처명)이라 조회·저장 API가 무동작했다.
+    private async Task OnPartnerChanged(HitPan.Web.Models.PartnerListRow? partner)
+    {
+        _selectedPartner = partner;
+        SelectedPartnerName = partner?.PartnerName ?? string.Empty;
+        SelectedPartnerId = partner?.PartnerId ?? string.Empty;
+        if (!string.IsNullOrEmpty(SelectedPartnerId))
+        {
+            Items = await SpService.GetAsync(SelectedPartnerId);
+        }
+        else
+        {
+            Items = new();
+        }
+    }
+
+    private async Task SaveConfirm()
+    {
+        var result = await DialogService.ShowMessageBoxAsync(
+            "저장 확인",
+            "변경된 특별단가를 저장하시겠습니까?",
+            yesText: "저장",
+            cancelText: "취소");
+        if (result != true)
+        {
+            return;
+        }
+
+        foreach (var item in Items)
+        {
+            await SpService.SaveAsync(SelectedPartnerId, new SpecialPriceUpsertDto
+            {
+                ItemId = item.ItemId,
+                Spec = item.Spec,
+                Unit = item.Unit,
+                SpecialPrice = item.SpecialPrice,
+                StdPrice = item.StdPrice,
+                // 봉합 (2026-06-23, 19차): 단가유형·할인율 함께 전송 — 종전엔 빠져 할인율 모드가 유실됐다.
+                PriceType = item.PriceType,
+                DiscountRate = item.DiscountRate,
+                LastSupplyDate = item.LastSupplyDate
+            });
+        }
+
+        Items = await SpService.GetAsync(SelectedPartnerId);
+    }
+
+    private async Task DeleteConfirm(SpecialPriceItem item)
+    {
+        var result = await DialogService.ShowMessageBoxAsync(
+            "삭제 확인",
+            $"{item.ItemName}의 특별단가를 삭제하시겠습니까?",
+            yesText: "삭제",
+            cancelText: "취소");
+        if (result != true)
+        {
+            return;
+        }
+
+        await SpService.DeleteAsync(SelectedPartnerId, item.ItemId);
+        Items = await SpService.GetAsync(SelectedPartnerId);
+    }
+
+    private void AddRow()
+    {
+        Items.Add(new SpecialPriceItem
+        {
+            PartnerId = SelectedPartnerId,
+            IsEditing = true
+        });
+    }
+
+    /// <summary>할인율 모드 미리보기 — 표준단가 × (1 - 할인율%). (19차 봉합)</summary>
+    private decimal CalcDiscountedPrice(SpecialPriceItem row)
+    {
+        if (row.DiscountRate is null || row.StdPrice <= 0m) return 0m;
+        var rate = Math.Clamp(row.DiscountRate.Value, 0m, 100m);
+        return Math.Round(row.StdPrice * (100m - rate) / 100m, 0, MidpointRounding.AwayFromZero);
+    }
+
+    private Color GetRatioColor(decimal ratio)
+    {
+        if (ratio < 100m) return Color.Success;
+        if (ratio > 100m) return Color.Error;
+        return Color.Default;
+    }
+
+    private string RowStyle(SpecialPriceItem item, int index)
+        => "height:36px;font-size:13px;";
+
+    // P0 #4 — 거래처 자동완성 (PartnerMasterService 캐시 활용)
+    // 봉합 (2026-06-22, 10차 P0-3): PartnerListRow 객체를 반환한다(기존 string 반환 → PartnerId 유실 원인).
+    private List<HitPan.Web.Models.PartnerListRow>? _partnerCache;
+    private async Task<IEnumerable<HitPan.Web.Models.PartnerListRow>> SearchPartner(string value, CancellationToken ct)
+    {
+        _partnerCache ??= await PartnersApi.GetListAsync(ct: ct) ?? new();
+        if (string.IsNullOrWhiteSpace(value))
+            return _partnerCache.Take(20);
+        return _partnerCache
+            .Where(p => p.PartnerName.Contains(value, StringComparison.OrdinalIgnoreCase))
+            .Take(20);
+    }
+
+    private void FilterGrid(KeyboardEventArgs e)
+    {
+        StateHasChanged();
+    }
+}

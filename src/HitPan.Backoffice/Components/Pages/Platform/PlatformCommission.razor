@@ -1,0 +1,11 @@
+@page "/platform/commission"
+@inject NavigationManager Nav
+
+@*
+    레거시 경로 → W9 정산 리다이렉트 (사장님 결재 2026-06-05)
+    실제 작동 페이지: /admin/reseller-settlements (W9)
+*@
+
+@code {
+    protected override void OnInitialized() => Nav.NavigateTo("/admin/reseller-settlements", replace: true);
+}

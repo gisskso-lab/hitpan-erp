@@ -1,0 +1,159 @@
+@page "/accounting/bank-transactions"
+@namespace HitPan.Web.Pages.FinanceUi
+@attribute [Authorize]
+@using HitPan.Web.Models
+@using HitPan.Web.Services
+@inject BillsCardsBankService FinSvc
+@inject ISnackbar Snackbar
+
+<PageTitle>은행 거래내역</PageTitle>
+
+<PageHeader Title="은행 거래내역" Subtitle="법인계좌 입출금 INSERT ONLY 원장">
+    <Actions>
+        <MudButton Variant="Variant.Filled" Color="Color.Primary"
+                   StartIcon="@Icons.Material.Filled.Add"
+                   OnClick="OpenCreateAsync">거래 등록</MudButton>
+    </Actions>
+</PageHeader>
+
+<MudGrid Spacing="2" Class="mb-3">
+    <MudItem xs="12" sm="3">
+        <KpiCard Color="KpiCard.KpiColor.Info" Icon="@Icons.Material.Filled.AccountBalance"
+                 Label="거래 건수" Value="@_items.Count.ToString("N0")" />
+    </MudItem>
+    <MudItem xs="12" sm="3">
+        <KpiCard Color="KpiCard.KpiColor.Success" Icon="@Icons.Material.Filled.ArrowDownward"
+                 Label="입금 합계" Value="@_items.Where(t => t.TxType == "1").Sum(t => t.Amount).ToString("N0")" />
+    </MudItem>
+    <MudItem xs="12" sm="3">
+        <KpiCard Color="KpiCard.KpiColor.Error" Icon="@Icons.Material.Filled.ArrowUpward"
+                 Label="출금 합계" Value="@_items.Where(t => t.TxType == "2").Sum(t => t.Amount).ToString("N0")" />
+    </MudItem>
+    <MudItem xs="12" sm="3">
+        <KpiCard Color="KpiCard.KpiColor.Primary" Icon="@Icons.Material.Filled.Functions"
+                 Label="순증감" Value="@_netChangeText" />
+    </MudItem>
+</MudGrid>
+
+<SectionCard Title="조회 조건">
+    <MudGrid Spacing="2">
+        <MudItem xs="12" md="3"><MudTextField T="string" Label="계좌번호" @bind-Value="_accountNo" Variant="Variant.Outlined" Margin="Margin.Dense" /></MudItem>
+        <MudItem xs="6" md="3"><MudDatePicker Label="시작일" @bind-Date="_from" Variant="Variant.Outlined" Margin="Margin.Dense" /></MudItem>
+        <MudItem xs="6" md="3"><MudDatePicker Label="종료일" @bind-Date="_to" Variant="Variant.Outlined" Margin="Margin.Dense" /></MudItem>
+        <MudItem xs="12" md="3" Class="d-flex align-end">
+            <MudButton Variant="Variant.Outlined" Color="Color.Primary" OnClick="LoadAsync" FullWidth="true">조회</MudButton>
+        </MudItem>
+    </MudGrid>
+</SectionCard>
+
+<SectionCard Variant="SectionCard.SectionVariant.Flat" Class="mt-3">
+    <MudTable T="BankTxModel" Items="_items" Dense="true" Hover="true" Striped="true" FixedHeader="true" Height="calc(100vh - 360px)">
+        <HeaderContent>
+            <MudTh>거래일</MudTh>
+            <MudTh>구분</MudTh>
+            <MudTh>은행</MudTh>
+            <MudTh>계좌</MudTh>
+            <MudTh>거래처</MudTh>
+            <MudTh>적요</MudTh>
+            <MudTh Style="text-align:right">입금</MudTh>
+            <MudTh Style="text-align:right">출금</MudTh>
+            <MudTh Style="text-align:right">잔액</MudTh>
+            <MudTh>출처</MudTh>
+        </HeaderContent>
+        <RowTemplate>
+            <MudTd>@context.TxDate.ToString("yyyy-MM-dd")</MudTd>
+            <MudTd>
+                <MudChip T="string" Size="Size.Small" Color="@(context.TxType == "1" ? Color.Success : Color.Error)" Variant="Variant.Text">
+                    @(context.TxType == "1" ? "입금" : "출금")
+                </MudChip>
+            </MudTd>
+            <MudTd>@(context.BankName ?? "-")</MudTd>
+            <MudTd Style="font-family:monospace;font-size:11px">@context.AccountNo</MudTd>
+            <MudTd>@(context.PartnerName ?? "-")</MudTd>
+            <MudTd>@(context.Description ?? "-")</MudTd>
+            <MudTd Style="text-align:right;color:var(--hitpan-income)">@(context.TxType == "1" ? context.Amount.ToString("N0") : "")</MudTd>
+            <MudTd Style="text-align:right;color:var(--hitpan-expense)">@(context.TxType == "2" ? context.Amount.ToString("N0") : "")</MudTd>
+            <MudTd Style="text-align:right">@(context.BalanceAfter?.ToString("N0") ?? "-")</MudTd>
+            <MudTd Style="font-size:11px;color:var(--mud-palette-text-secondary)">@ImportLabel(context.ImportedFrom)</MudTd>
+        </RowTemplate>
+        <NoRecordsContent>
+            <EmptyState Icon="@Icons.Material.Filled.AccountBalance"
+                        Title="거래 내역이 없습니다"
+                        Subtitle="우상단 [거래 등록] 또는 자료이관으로 가져오세요." />
+        </NoRecordsContent>
+    </MudTable>
+</SectionCard>
+
+<MudDialog @bind-Visible="_dlg" Options="@(new DialogOptions { MaxWidth = MaxWidth.Small, FullWidth = true })">
+    <TitleContent>은행 거래 등록</TitleContent>
+    <DialogContent>
+        <MudGrid Spacing="2">
+            <MudItem xs="6"><MudTextField T="string" Label="계좌번호" @bind-Value="_edit.AccountNo" Variant="Variant.Outlined" Margin="Margin.Dense" /></MudItem>
+            <MudItem xs="6"><MudTextField T="string" Label="은행" @bind-Value="_edit.BankName" Variant="Variant.Outlined" Margin="Margin.Dense" /></MudItem>
+            <MudItem xs="6"><MudDatePicker Label="거래일" @bind-Date="_editTxDate" Variant="Variant.Outlined" Margin="Margin.Dense" /></MudItem>
+            <MudItem xs="6">
+                <MudSelect T="string" Label="구분" @bind-Value="_edit.TxType" Variant="Variant.Outlined" Margin="Margin.Dense">
+                    <MudSelectItem Value="@("1")">입금</MudSelectItem>
+                    <MudSelectItem Value="@("2")">출금</MudSelectItem>
+                </MudSelect>
+            </MudItem>
+            <MudItem xs="6"><MudNumericField T="decimal" Label="금액" @bind-Value="_edit.Amount" Variant="Variant.Outlined" Margin="Margin.Dense" Format="N0" /></MudItem>
+            <MudItem xs="6"><MudNumericField T="decimal?" Label="거래후 잔액 (선택)" @bind-Value="_edit.BalanceAfter" Variant="Variant.Outlined" Margin="Margin.Dense" Format="N0" /></MudItem>
+            <MudItem xs="12"><MudTextField T="string" Label="적요" @bind-Value="_edit.Description" Variant="Variant.Outlined" Margin="Margin.Dense" /></MudItem>
+            <MudItem xs="12"><MudTextField T="string" Label="비고" @bind-Value="_edit.Remark" Variant="Variant.Outlined" Margin="Margin.Dense" /></MudItem>
+        </MudGrid>
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="@(() => _dlg = false)">취소</MudButton>
+        <MudButton Color="Color.Primary" Variant="Variant.Filled" OnClick="SaveAsync">등록</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    private List<BankTxModel> _items = new();
+    private string _netChangeText =>
+        (_items.Where(t => t.TxType == "1").Sum(t => t.Amount)
+         - _items.Where(t => t.TxType == "2").Sum(t => t.Amount)).ToString("N0");
+
+    private string _accountNo = "";
+    private DateTime? _from = DateTime.Today.AddMonths(-3);
+    private DateTime? _to = DateTime.Today;
+    private bool _dlg;
+    private CreateBankTxModel _edit = new();
+    private DateTime? _editTxDate = DateTime.Today;
+
+    protected override async Task OnInitializedAsync() => await LoadAsync();
+
+    private async Task LoadAsync()
+    {
+        var ac = string.IsNullOrWhiteSpace(_accountNo) ? null : _accountNo;
+        _items = await FinSvc.ListBankTxAsync(ac, _from, _to);
+        StateHasChanged();
+    }
+
+    private Task OpenCreateAsync()
+    {
+        _edit = new CreateBankTxModel { TxType = "1" };
+        _editTxDate = DateTime.Today;
+        _dlg = true;
+        return Task.CompletedTask;
+    }
+
+    private async Task SaveAsync()
+    {
+        if (string.IsNullOrWhiteSpace(_edit.AccountNo)) { Snackbar.Add("계좌번호를 입력하세요.", Severity.Warning); return; }
+        if (_edit.Amount <= 0) { Snackbar.Add("금액을 입력하세요.", Severity.Warning); return; }
+        _edit.TxDate = _editTxDate ?? DateTime.Today;
+        var ok = await FinSvc.CreateBankTxAsync(_edit);
+        Snackbar.Add(ok ? "등록됨" : "등록 실패", ok ? Severity.Success : Severity.Error);
+        if (ok) { _dlg = false; await LoadAsync(); }
+    }
+
+    private static string ImportLabel(string s) => s switch
+    {
+        "manual" => "수기",
+        "mdb_legacy" => "구히트판이관",
+        "bank_api" => "은행연동",
+        _ => s
+    };
+}

@@ -1,0 +1,134 @@
+@page "/stock/transfer-status"
+@namespace HitPan.Web.Pages.StockUi
+@attribute [Authorize]
+@using System.Net.Http.Json
+@inject HttpClient Http
+@inject IJSRuntime Js
+@inject ISnackbar Snackbar
+
+<PageTitle>재고이송 현황</PageTitle>
+<PageHeader Title="재고이송 현황" Subtitle="창고 간 이동 내역 조회" />
+
+@* 필터 영역 *@
+<MudPaper Class="pa-3 mb-3" Elevation="0" Style="border:0.5px solid var(--mud-palette-lines-default);border-radius:12px">
+    <div class="hitpan-filter-bar">
+        <div class="hitpan-filter-field hitpan-filter-field--sm">
+            <MudDatePicker @bind-Date="_from" Label="시작일" Variant="Variant.Outlined" Margin="Margin.Dense" DateFormat="yyyy-MM-dd" />
+        </div>
+        <div class="hitpan-filter-field hitpan-filter-field--sm">
+            <MudDatePicker @bind-Date="_to" Label="종료일" Variant="Variant.Outlined" Margin="Margin.Dense" DateFormat="yyyy-MM-dd" />
+        </div>
+        <div class="hitpan-filter-field hitpan-filter-field--md">
+            <MudTextField @bind-Value="_searchText" Label="검색 (품목·창고)" Variant="Variant.Outlined" Margin="Margin.Dense"
+                          Adornment="Adornment.End" AdornmentIcon="@Icons.Material.Filled.Search" />
+        </div>
+        <div class="hitpan-filter-actions">
+            <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="SearchAsync">조회</MudButton>
+            <MudButton Variant="Variant.Outlined" Size="Size.Small" StartIcon="@Icons.Material.Filled.TableChart" OnClick="ExportExcelAsync">엑셀</MudButton>
+            <MudButton Variant="Variant.Outlined" Size="Size.Small" StartIcon="@Icons.Material.Filled.Print" OnClick="PrintAsync">인쇄</MudButton>
+        </div>
+    </div>
+</MudPaper>
+
+@* 로딩 바 *@
+@if (_isLoading)
+{
+    <MudProgressLinear Color="Color.Primary" Indeterminate="true" Class="mb-2" />
+}
+
+@* 이송 현황 테이블 *@
+<MudPaper Elevation="0" Style="border:0.5px solid var(--mud-palette-lines-default);border-radius:12px;overflow:hidden">
+    <MudTable T="TransferStatusRow" Items="_filteredData" Dense="true" Hover="true" Striped="true" FixedHeader="true" Height="calc(100vh - 280px)">
+        <HeaderContent>
+            <MudTh>일자</MudTh>
+            <MudTh>품목</MudTh>
+            <MudTh>규격</MudTh>
+            <MudTh>출고창고</MudTh>
+            <MudTh>입고창고</MudTh>
+            <MudTh Style="text-align:right">수량</MudTh>
+            <MudTh>메모</MudTh>
+            <MudTh>담당자</MudTh>
+        </HeaderContent>
+        <RowTemplate>
+            <MudTd>@context.TransferDate</MudTd>
+            <MudTd>@context.ItemName</MudTd>
+            <MudTd>@context.Spec</MudTd>
+            <MudTd>@context.FromWarehouse</MudTd>
+            <MudTd>@context.ToWarehouse</MudTd>
+            <MudTd Style="text-align:right">@context.Qty.ToString("N1")</MudTd>
+            <MudTd>@context.Memo</MudTd>
+            <MudTd>@context.Handler</MudTd>
+        </RowTemplate>
+        <NoRecordsContent><MudText Class="pa-4" Style="color:#9CA3AF">조회된 이송 이력이 없습니다.</MudText></NoRecordsContent>
+    </MudTable>
+</MudPaper>
+
+@code {
+    // --- 필터 ---
+    private DateTime? _from = DateTime.Today.AddDays(-30);
+    private DateTime? _to = DateTime.Today;
+    private string _searchText = "";
+    private bool _isLoading;
+
+    // --- 데이터 ---
+    private List<TransferStatusRow> _data = new();
+
+    /// <summary>검색어로 필터링된 데이터를 반환한다.</summary>
+    private IEnumerable<TransferStatusRow> _filteredData =>
+        string.IsNullOrWhiteSpace(_searchText)
+            ? _data
+            : _data.Where(r =>
+                r.ItemName.Contains(_searchText, StringComparison.OrdinalIgnoreCase) ||
+                r.FromWarehouse.Contains(_searchText, StringComparison.OrdinalIgnoreCase) ||
+                r.ToWarehouse.Contains(_searchText, StringComparison.OrdinalIgnoreCase));
+
+    protected override async Task OnInitializedAsync() => await SearchAsync();
+
+    /// <summary>이송 현황을 조회한다.</summary>
+    private async Task SearchAsync()
+    {
+        _isLoading = true;
+        StateHasChanged();
+        try
+        {
+            var qs = new List<string>();
+            if (_from.HasValue) qs.Add($"from={_from:yyyy-MM-dd}");
+            if (_to.HasValue) qs.Add($"to={_to:yyyy-MM-dd}");
+            var path = "api/stock/transfer/history" + (qs.Any() ? "?" + string.Join("&", qs) : "");
+            _data = await Http.GetFromJsonAsync<List<TransferStatusRow>>(path) ?? new();
+        }
+        catch (Exception _hp15Ex)
+        {
+            Console.Error.WriteLine($"[HP15] " + _hp15Ex.GetType().Name + ": " + _hp15Ex.Message);
+            _data = new();
+        }
+        finally
+        {
+            _isLoading = false;
+            StateHasChanged();
+        }
+    }
+
+    /// <summary>엑셀 내보내기를 실행한다.</summary>
+    private Task ExportExcelAsync()
+    {
+        Snackbar.Add("엑셀 내보내기는 준비중입니다.", Severity.Info);
+        return Task.CompletedTask;
+    }
+
+    /// <summary>화면을 인쇄한다.</summary>
+    private async Task PrintAsync() => await Js.InvokeVoidAsync("print");
+
+    // --- 내부 모델 ---
+    private class TransferStatusRow
+    {
+        public string TransferDate { get; set; } = "";
+        public string ItemName { get; set; } = "";
+        public string Spec { get; set; } = "";
+        public string FromWarehouse { get; set; } = "";
+        public string ToWarehouse { get; set; } = "";
+        public decimal Qty { get; set; }
+        public string Memo { get; set; } = "";
+        public string Handler { get; set; } = "";
+    }
+}

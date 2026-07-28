@@ -1,0 +1,67 @@
+@page "/hr/expense-request"
+@namespace HitPan.Web.Pages.HrUi
+@attribute [Authorize]
+@using HitPan.Web.Models
+@using HitPan.Web.Services
+@inject HrClientService HrSvc
+@inject ISnackbar Snackbar
+
+<PageTitle>경비 신청</PageTitle>
+<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
+    <MudText Typo="Typo.h6">경비 신청 (지출결의서)</MudText>
+</div>
+
+<MudPaper Elevation="0" Class="pa-4 mb-3 hitpan-card">
+    <MudGrid Spacing="2">
+        <MudItem xs="12" md="2"><MudDatePicker Label="지출일" @bind-Date="_editDate" Variant="Variant.Outlined" Margin="Margin.Dense" Style="min-width:160px" /></MudItem>
+        <MudItem xs="12" md="2">
+            <MudSelect T="string" Label="분류" @bind-Value="_edit.Category" Variant="Variant.Outlined" Margin="Margin.Dense">
+                <MudSelectItem Value="@("교통비")">교통비</MudSelectItem>
+                <MudSelectItem Value="@("식대")">식대</MudSelectItem>
+                <MudSelectItem Value="@("소모품비")">소모품비</MudSelectItem>
+                <MudSelectItem Value="@("접대비")">접대비</MudSelectItem>
+                <MudSelectItem Value="@("출장비")">출장비</MudSelectItem>
+                <MudSelectItem Value="@("기타")">기타</MudSelectItem>
+            </MudSelect>
+        </MudItem>
+        <MudItem xs="12" md="3"><MudTextField T="string" Label="내용" @bind-Value="_edit.Description" Variant="Variant.Outlined" Margin="Margin.Dense" /></MudItem>
+        <MudItem xs="12" md="2"><MudNumericField T="decimal" Label="금액" @bind-Value="_edit.Amount" Variant="Variant.Outlined" Margin="Margin.Dense" Format="N0" /></MudItem>
+        <MudItem xs="12" md="1"><MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="SaveAsync" Class="mt-1" FullWidth="true">신청</MudButton></MudItem>
+    </MudGrid>
+</MudPaper>
+
+<MudPaper Elevation="0" Class="pa-2 hitpan-card">
+    <MudTable Items="_items" Dense="true" Hover="true" Striped="true">
+        <HeaderContent>
+            <MudTh>지출일</MudTh><MudTh>신청자</MudTh><MudTh>분류</MudTh><MudTh>내용</MudTh>
+            <MudTh Style="text-align:right">금액</MudTh><MudTh>상태</MudTh>
+        </HeaderContent>
+        <RowTemplate>
+            <MudTd>@context.RequestDate.ToString("yyyy-MM-dd")</MudTd>
+            <MudTd>@context.EmployeeName</MudTd>
+            <MudTd>@context.Category</MudTd>
+            <MudTd>@context.Description</MudTd>
+            <MudTd Style="text-align:right">@context.Amount.ToString("N0")원</MudTd>
+            <MudTd><MudChip T="string" Size="Size.Small" Variant="Variant.Filled" Color="@(context.Status == "approved" ? Color.Success : context.Status == "rejected" ? Color.Error : Color.Warning)">@(context.Status switch { "approved" => "승인", "rejected" => "반려", _ => "대기" })</MudChip></MudTd>
+        </RowTemplate>
+        <NoRecordsContent><MudText Class="pa-4" Style="color:var(--hitpan-text-faint)">신청된 경비가 없습니다.</MudText></NoRecordsContent>
+    </MudTable>
+</MudPaper>
+
+@code {
+    private List<HrExpenseModel> _items = new();
+    private CreateHrExpenseModel _edit = new();
+    private DateTime? _editDate = DateTime.Today;
+
+    protected override async Task OnInitializedAsync() { _items = await HrSvc.GetHrExpensesAsync(); }
+
+    private async Task SaveAsync()
+    {
+        if (string.IsNullOrWhiteSpace(_edit.Description)) { Snackbar.Add("내용을 입력해주세요.", Severity.Warning); return; }
+        if (_edit.Amount <= 0) { Snackbar.Add("금액을 입력해주세요.", Severity.Warning); return; }
+        _edit.RequestDate = _editDate ?? DateTime.Today;
+        var ok = await HrSvc.CreateHrExpenseAsync(_edit);
+        if (ok) { Snackbar.Add("신청 완료", Severity.Success); _edit = new(); _editDate = DateTime.Today; _items = await HrSvc.GetHrExpensesAsync(); }
+        else Snackbar.Add("신청 실패", Severity.Error);
+    }
+}

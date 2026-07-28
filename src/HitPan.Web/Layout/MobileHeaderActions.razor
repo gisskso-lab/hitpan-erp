@@ -1,0 +1,28 @@
+@inject NavigationManager Nav
+@inject AuthenticationStateProvider AuthStateProvider
+@using System.Security.Claims
+
+<div class="hp-mha">
+    @* 결재 대기 알림 벨 *@
+    <button type="button" class="hp-mha-btn" @onclick="@(() => Nav.NavigateTo("/approval/pending"))">
+        <MudIcon Icon="@Icons.Material.Outlined.Notifications" Style="font-size:22px;" />
+    </button>
+
+    @* 계정 아바타 *@
+    <button type="button" class="hp-mha-btn" @onclick="@(() => Nav.NavigateTo("/settings"))">
+        <div class="hp-mha-avatar">@_initial</div>
+    </button>
+</div>
+
+@code {
+    private string _initial = "U";
+
+    protected override async Task OnInitializedAsync()
+    {
+        var state = await AuthStateProvider.GetAuthenticationStateAsync();
+        var name = state.User.FindFirst("name")?.Value
+                   ?? state.User.Identity?.Name
+                   ?? "U";
+        _initial = name.Length > 0 ? name[0].ToString() : "U";
+    }
+}

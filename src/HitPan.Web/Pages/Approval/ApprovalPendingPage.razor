@@ -1,0 +1,168 @@
+@page "/approval/pending"
+@namespace HitPan.Web.Pages.ApprovalUi
+@attribute [Authorize]
+@using HitPan.Web.Models
+@using HitPan.Web.Services
+@inject ApprovalService ApprovalSvc
+@inject ISnackbar Snackbar
+
+<PageTitle>결재 대기</PageTitle>
+
+<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
+    <MudText Typo="Typo.h6">결재 대기</MudText>
+    <MudText Style="font-size:12px;color:var(--mud-palette-text-secondary)">
+        내가 처리해야 할 결재 문서
+    </MudText>
+</div>
+
+@if (_loading)
+{
+    <MudProgressLinear Indeterminate="true" Color="Color.Primary" />
+}
+else if (_items.Count == 0)
+{
+    <MudPaper Elevation="0" Class="pa-8 text-center hitpan-card">
+        <MudIcon Icon="@Icons.Material.Filled.CheckCircle" Size="Size.Large" Color="Color.Success" Class="mb-2" />
+        <MudText Typo="Typo.body1">대기중인 결재가 없습니다.</MudText>
+    </MudPaper>
+}
+else
+{
+    <MudPaper Elevation="0" Class="pa-2 hitpan-card">
+        <MudTable Items="_items" Dense="true" Hover="true" OnRowClick="OnRowClick" T="ApprovalDocumentModel">
+            <HeaderContent>
+                <MudTh>문서유형</MudTh>
+                <MudTh>제목</MudTh>
+                <MudTh Style="text-align:right">금액</MudTh>
+                <MudTh>기안자</MudTh>
+                <MudTh>기안일</MudTh>
+                <MudTh Style="width:80px">진행</MudTh>
+                <MudTh Style="width:160px">처리</MudTh>
+            </HeaderContent>
+            <RowTemplate>
+                <MudTd>
+                    <MudChip T="string" Size="Size.Small" Color="Color.Info" Variant="Variant.Outlined">@context.DocTypeLabel</MudChip>
+                </MudTd>
+                <MudTd>@context.Title</MudTd>
+                <MudTd Style="text-align:right">@context.Amount.ToString("N0")원</MudTd>
+                <MudTd>@context.RequesterName</MudTd>
+                <MudTd>@context.RequestedAt.ToString("yyyy-MM-dd")</MudTd>
+                <MudTd>@context.CurrentSeq / @context.TotalLines</MudTd>
+                <MudTd>
+                    <MudButtonGroup Variant="Variant.Outlined" Size="Size.Small">
+                        <MudButton Color="Color.Primary" OnClick="@(() => ProcessAsync(context.ApprovalId, "approved"))">승인</MudButton>
+                        <MudButton Color="Color.Error" OnClick="@(() => OpenRejectDialog(context.ApprovalId))">반려</MudButton>
+                    </MudButtonGroup>
+                </MudTd>
+            </RowTemplate>
+        </MudTable>
+    </MudPaper>
+}
+
+@* ── 결재 상세 다이얼로그 ── *@
+@if (_detail is not null)
+{
+    <MudDialog @bind-Visible="_showDetail" Options="@(new DialogOptions { MaxWidth = MaxWidth.Medium, FullWidth = true })">
+        <TitleContent>
+            <MudText Typo="Typo.h6">@_detail.Document.Title</MudText>
+        </TitleContent>
+        <DialogContent>
+            <MudGrid Spacing="2" Class="mb-3">
+                <MudItem xs="6" md="3"><MudText Typo="Typo.caption">문서유형</MudText><MudText>@_detail.Document.DocTypeLabel</MudText></MudItem>
+                <MudItem xs="6" md="3"><MudText Typo="Typo.caption">문서번호</MudText><MudText>@(_detail.Document.RefNo ?? "-")</MudText></MudItem>
+                <MudItem xs="6" md="3"><MudText Typo="Typo.caption">금액</MudText><MudText>@_detail.Document.Amount.ToString("N0")원</MudText></MudItem>
+                <MudItem xs="6" md="3"><MudText Typo="Typo.caption">기안자</MudText><MudText>@_detail.Document.RequesterName</MudText></MudItem>
+            </MudGrid>
+
+            @if (_detail.Document.Memo is not null)
+            {
+                <MudText Typo="Typo.caption">기안 메모</MudText>
+                <MudText Class="mb-3">@_detail.Document.Memo</MudText>
+            }
+
+            <MudText Typo="Typo.subtitle2" Class="mb-2">결재 이력</MudText>
+            <MudTimeline TimelinePosition="TimelinePosition.Start">
+                @foreach (var h in _detail.History)
+                {
+                    <MudTimelineItem Color="@(h.Action == "approved" ? Color.Success : Color.Error)" Size="Size.Small">
+                        <ItemContent>
+                            <MudText Typo="Typo.body2"><b>@h.ApproverName</b> — @h.ActionLabel @(h.IsDelegated ? "(위임)" : "")</MudText>
+                            @if (!string.IsNullOrWhiteSpace(h.Comment)) { <MudText Typo="Typo.caption">@h.Comment</MudText> }
+                            <MudText Typo="Typo.caption" Color="Color.Secondary">@h.ActedAt.ToString("yyyy-MM-dd HH:mm")</MudText>
+                        </ItemContent>
+                    </MudTimelineItem>
+                }
+            </MudTimeline>
+        </DialogContent>
+        <DialogActions>
+            <MudButton OnClick="@(() => _showDetail = false)">닫기</MudButton>
+        </DialogActions>
+    </MudDialog>
+}
+
+@* ── 반려 사유 입력 다이얼로그 ── *@
+<MudDialog @bind-Visible="_showReject" Options="@(new DialogOptions { MaxWidth = MaxWidth.Small, FullWidth = true })">
+    <TitleContent><MudText Typo="Typo.h6">반려 사유</MudText></TitleContent>
+    <DialogContent>
+        <MudTextField T="string" @bind-Value="_rejectComment" Label="반려 사유" Variant="Variant.Outlined"
+            Lines="3" Placeholder="반려 사유를 입력해주세요." />
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="@(() => _showReject = false)">취소</MudButton>
+        <MudButton Variant="Variant.Filled" Color="Color.Error" OnClick="ConfirmReject">반려</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    private List<ApprovalDocumentModel> _items = new();
+    private ApprovalDetailModel? _detail;
+    private bool _loading = true;
+    private bool _showDetail;
+    private bool _showReject;
+    private string _rejectApprovalId = "";
+    private string _rejectComment = "";
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadAsync();
+    }
+
+    private async Task LoadAsync()
+    {
+        _loading = true;
+        _items = await ApprovalSvc.GetPendingAsync();
+        _loading = false;
+    }
+
+    private async Task OnRowClick(TableRowClickEventArgs<ApprovalDocumentModel> args)
+    {
+        if (args.Item is null) return;
+        _detail = await ApprovalSvc.GetDetailAsync(args.Item.ApprovalId);
+        _showDetail = true;
+    }
+
+    private async Task ProcessAsync(string approvalId, string action, string? comment = null)
+    {
+        var ok = await ApprovalSvc.ProcessAsync(approvalId, action, comment);
+        if (ok)
+        {
+            Snackbar.Add(action == "approved" ? "승인 완료" : "반려 완료", Severity.Success);
+            await LoadAsync();
+        }
+        else Snackbar.Add("처리 실패", Severity.Error);
+    }
+
+    private void OpenRejectDialog(string approvalId)
+    {
+        _rejectApprovalId = approvalId;
+        _rejectComment = "";
+        _showReject = true;
+    }
+
+    private async Task ConfirmReject()
+    {
+        if (string.IsNullOrWhiteSpace(_rejectComment)) { Snackbar.Add("반려 사유를 입력해주세요.", Severity.Warning); return; }
+        _showReject = false;
+        await ProcessAsync(_rejectApprovalId, "rejected", _rejectComment);
+    }
+}

@@ -1,0 +1,56 @@
+.workflow-bc {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.35rem 0.5rem;
+    padding: 0.5rem 0.75rem;
+    border-radius: 8px;
+    border: 1px solid var(--mud-palette-lines-default);
+    background: var(--mud-palette-surface);
+}
+
+.workflow-bc-step {
+    display: inline-flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 2px;
+    border: none;
+    background: transparent;
+    cursor: pointer;
+    padding: 4px 10px;
+    border-radius: 6px;
+    color: var(--mud-palette-text-secondary);
+    font-family: "Noto Sans KR", sans-serif;
+    font-size: 0.8125rem;
+}
+
+.workflow-bc-step:hover {
+    background: rgba(15, 110, 86, 0.08);
+    color: #0f6e56;
+}
+
+.workflow-bc-step--current {
+    background: #0f6e56;
+    color: #fff;
+    font-weight: 600;
+}
+
+.workflow-bc-step--current:hover {
+    background: #0c5a47;
+    color: #fff;
+}
+
+.workflow-bc-step--current .workflow-bc-doc {
+    color: rgba(255, 255, 255, 0.9);
+}
+
+.workflow-bc-doc {
+    font-size: 0.7rem;
+    opacity: 0.9;
+}
+
+.workflow-bc-arrow {
+    color: var(--mud-palette-text-disabled);
+    font-size: 0.75rem;
+    user-select: none;
+}

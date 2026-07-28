@@ -1,0 +1,11 @@
+{
+  "version": "9.9.0-test-emergency",
+  "channel": 0,
+  "downloadUrl": "http://127.0.0.1:8099/packages/hitpan-9.9.0-test-emergency.zip",
+  "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+  "sizeBytes": 0,
+  "releasedAt": "2026-06-29T12:00:00Z",
+  "releaseNotes": "테스트 전용 가짜 새버전 — Emergency 채널(본사 강제 일괄, 5분 안내 후 즉시 적용). 보안 긴급 패치 가정. 운영 무관.",
+  "requiresMigration": false,
+  "consentMessage": null
+}

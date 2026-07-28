@@ -1,0 +1,34 @@
+@namespace HitPan.Web.Components.Common
+
+@* 연체 일수에 따라 4단계 색상 배지 표시 *@
+<span class="@($"hitpan-aging-badge hitpan-aging-badge--{_cls}")" title="@_tooltip">
+    @_label
+</span>
+
+@code {
+    [Parameter] public int DaysOverdue { get; set; }
+
+    private string _cls = "normal";
+    private string _label = "정상";
+    private string _tooltip = "";
+
+    protected override void OnParametersSet()
+    {
+        if (DaysOverdue <= 30)
+        {
+            _cls = "normal"; _label = "정상"; _tooltip = $"{DaysOverdue}일 — 정상 거래";
+        }
+        else if (DaysOverdue <= 60)
+        {
+            _cls = "30"; _label = $"{DaysOverdue}일"; _tooltip = "31-60일 연체";
+        }
+        else if (DaysOverdue <= 90)
+        {
+            _cls = "60"; _label = $"{DaysOverdue}일"; _tooltip = "61-90일 연체 (요주의)";
+        }
+        else
+        {
+            _cls = "90"; _label = $"{DaysOverdue}일+"; _tooltip = "90일+ 장기연체 (독촉 필요)";
+        }
+    }
+}

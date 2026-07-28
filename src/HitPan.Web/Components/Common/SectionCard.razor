@@ -1,0 +1,60 @@
+@namespace HitPan.Web.Components.Common
+
+@* ══════════════════════════════════════════════════════════════
+   SectionCard — 페이지 내 영역 구분용 카드 래퍼
+   사용 예:
+     <SectionCard Title="매출 추이">
+       <ApexChart ... />
+     </SectionCard>
+
+     <SectionCard Variant="SectionCard.SectionVariant.Flat">
+       <MudTable ... />
+     </SectionCard>
+   ══════════════════════════════════════════════════════════════ *@
+
+<div class="@ContainerClass">
+    @if (!string.IsNullOrWhiteSpace(Title))
+    {
+        <div class="hitpan-section-title">
+            @if (!string.IsNullOrWhiteSpace(Icon))
+            {
+                <MudIcon Icon="@Icon" Size="Size.Small" Style="color:var(--hitpan-text-muted)" />
+            }
+            @Title
+            @if (TitleExtra is not null)
+            {
+                <span style="margin-left:auto">@TitleExtra</span>
+            }
+        </div>
+    }
+    @ChildContent
+</div>
+
+@code {
+    public enum SectionVariant { Default, Tight, Flat }
+
+    [Parameter] public string? Title { get; set; }
+    [Parameter] public string? Icon { get; set; }
+    [Parameter] public RenderFragment? TitleExtra { get; set; }
+    [Parameter] public RenderFragment? ChildContent { get; set; }
+
+    /// <summary>Default=패딩 16 / Tight=8 / Flat=0 (테이블 꽉 채울 때)</summary>
+    [Parameter] public SectionVariant Variant { get; set; } = SectionVariant.Default;
+
+    /// <summary>외부에서 전달하는 추가 클래스 (예: 여백 mt-3)</summary>
+    [Parameter] public string? Class { get; set; }
+
+    private string ContainerClass
+    {
+        get
+        {
+            var baseClass = Variant switch
+            {
+                SectionVariant.Tight => "hitpan-section hitpan-section--tight",
+                SectionVariant.Flat => "hitpan-section hitpan-section--flat",
+                _ => "hitpan-section"
+            };
+            return string.IsNullOrWhiteSpace(Class) ? baseClass : $"{baseClass} {Class}";
+        }
+    }
+}

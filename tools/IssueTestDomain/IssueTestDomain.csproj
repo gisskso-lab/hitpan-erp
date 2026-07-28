@@ -1,0 +1,12 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+  </PropertyGroup>
+  <ItemGroup>
+    <!-- 정식 자동화 코드(CloudflareDomainService)를 그대로 재사용 — test 발급도 같은 코드 경로로 검증 -->
+    <ProjectReference Include="..\..\src\HitPan.Backoffice.API\HitPan.Backoffice.API.csproj" />
+  </ItemGroup>
+</Project>

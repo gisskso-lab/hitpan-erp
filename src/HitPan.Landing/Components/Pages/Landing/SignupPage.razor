@@ -1,0 +1,579 @@
+@page "/signup"
+@page "/landing/signup"
+@rendermode InteractiveServer
+@layout LandingLayout
+@implements IAsyncDisposable
+@inject NavigationManager Nav
+@inject IJSRuntime JS
+@inject HttpClient Http
+@using HitPan.Landing.Components.Pages.Landing.Components
+
+<PageTitle>회원가입 — 히트판 ERP</PageTitle>
+
+<section class="signup-section">
+    <div class="signup-card">
+        <h1>회원가입</h1>
+        <p class="lead">3분이면 가입 완료. 이메일 인증 후 본사 검토를 거쳐 시리얼 키가 발급됩니다.</p>
+
+        <EditForm Model="_form" OnValidSubmit="HandleSubmit">
+            <div class="field">
+                <label>이메일 *</label>
+                <input type="email" @bind="_form.Email" required placeholder="example@company.com" />
+            </div>
+
+            <div class="field">
+                <label>회사명 *</label>
+                <input type="text" @bind="_form.CompanyName" required placeholder="(주)히트판" />
+            </div>
+
+            <div class="field">
+                <label>대표자명 *</label>
+                <input type="text" @bind="_form.RepresentativeName" required />
+            </div>
+
+            <div class="field">
+                <label>사업자등록번호 *</label>
+                <div class="bizno-row">
+                    <input type="text" @bind="_form.BizNo" placeholder="000-00-00000" maxlength="12" />
+                    <button type="button" class="btn-verify" @onclick="VerifyBizNo" disabled="@_bizVerifying">
+                        @(_bizVerifying ? "확인 중..." : "검증")
+                    </button>
+                </div>
+                @if (_bizVerifyMsg is not null)
+                {
+                    <div class="bizno-msg @(_bizVerified ? "ok" : "warn")">@_bizVerifyMsg</div>
+                }
+            </div>
+
+            <div class="field">
+                <label>연락처 *</label>
+                <input type="tel" @bind="_form.Phone" required placeholder="010-0000-0000" />
+            </div>
+
+            <div class="field">
+                <label>원하시는 ERP 주소 *</label>
+                <div class="domain-row">
+                    <input type="text" @bind="_form.DesiredDomain" @bind:event="oninput" @onblur="CheckDomainAvailability"
+                           required maxlength="30" placeholder="예: mycompany"
+                           class="domain-input @(_domainStatus)" />
+                    <span class="domain-suffix">.hitpan.kr</span>
+                </div>
+                @if (_domainChecking)
+                {
+                    <div class="domain-msg checking">확인 중...</div>
+                }
+                else if (_domainMsg is not null)
+                {
+                    <div class="domain-msg @_domainStatus">@_domainMsg</div>
+                    @if (_domainSuggestions is { Count: > 0 })
+                    {
+                        <div class="domain-suggestions">
+                            <span>추천:</span>
+                            @foreach (var s in _domainSuggestions)
+                            {
+                                <button type="button" class="domain-suggest-chip" @onclick="@(() => UseSuggestion(s))">@s</button>
+                            }
+                        </div>
+                    }
+                }
+                <small class="domain-hint">영문 소문자·숫자·하이픈, 3~30자. 가입 후 변경 불가</small>
+            </div>
+
+            <div class="field">
+                <label>선택한 요금제</label>
+                <input type="text" value="@_planLabel" readonly />
+            </div>
+
+            <div class="field">
+                <label>가입 경로 *</label>
+                <select @bind="_form.ReferralChannel" required>
+                    <option value="">선택해주세요</option>
+                    <option value="hq_sales">본사 직원 (영업)</option>
+                    <option value="hq_marketing">본사 마케팅 (검색·광고)</option>
+                    <option value="reseller">등록 대리점</option>
+                </select>
+            </div>
+
+            @if (_form.ReferralChannel == "reseller")
+            {
+                <div class="field">
+                    <label>대리점 코드</label>
+                    <input type="text" @bind="_form.ResellerCode" placeholder="대리점에서 받으신 코드를 입력하세요" />
+                </div>
+            }
+
+            <div class="field">
+                <label>사업자등록증 *</label>
+                <BizLicenseUploader OnUploaded="OnBizUploaded" />
+            </div>
+
+            <div class="terms">
+                <div class="terms-guide">
+                    <span class="terms-guide-icon">ⓘ</span>
+                    <span>각 약관은 <b>전문(全文)을 한 번 열어보신 후</b>에 동의할 수 있습니다.</span>
+                </div>
+
+                <button type="button" class="terms-startall" @onclick="OpenTermsFlow">
+                    📑 약관 전문 4종 차례로 보기 시작 (약 2분)
+                </button>
+
+                <div class="terms-row">
+                    <input type="checkbox" id="agreeService" @bind="_form.AgreeService" disabled="@(!_opened.Service)" />
+                    <label for="agreeService" class="@(!_opened.Service ? "locked" : "")">[필수] 서비스 이용약관 동의</label>
+                    <a href="/legal/service.html?return=signup&next=privacy" target="_blank" rel="noopener" @onclick="@(() => MarkOpened("service"))">전문 열기</a>
+                    @if (_form.AgreeService)
+                    {
+                        <span class="opened-mark">✓ 동의 완료</span>
+                    }
+                    else if (_opened.Service)
+                    {
+                        <span class="opened-mark opened-mark--gray">✓ 전문 확인</span>
+                    }
+                </div>
+
+                <div class="terms-row">
+                    <input type="checkbox" id="agreePrivacy" @bind="_form.AgreePrivacy" disabled="@(!_opened.Privacy)" />
+                    <label for="agreePrivacy" class="@(!_opened.Privacy ? "locked" : "")">[필수] 개인정보 처리방침 동의</label>
+                    <a href="/legal/privacy.html?return=signup&next=outsourcing" target="_blank" rel="noopener" @onclick="@(() => MarkOpened("privacy"))">전문 열기</a>
+                    @if (_form.AgreePrivacy)
+                    {
+                        <span class="opened-mark">✓ 동의 완료</span>
+                    }
+                    else if (_opened.Privacy)
+                    {
+                        <span class="opened-mark opened-mark--gray">✓ 전문 확인</span>
+                    }
+                </div>
+
+                <div class="terms-row">
+                    <input type="checkbox" id="agreeOutsourcing" @bind="_form.AgreeOutsourcing" disabled="@(!_opened.Outsourcing)" />
+                    <label for="agreeOutsourcing" class="@(!_opened.Outsourcing ? "locked" : "")">[필수] 개인정보 처리 위탁 동의</label>
+                    <a href="/legal/data-ownership.html?return=signup&next=marketing" target="_blank" rel="noopener" @onclick="@(() => MarkOpened("outsourcing"))">전문 열기</a>
+                    @if (_form.AgreeOutsourcing)
+                    {
+                        <span class="opened-mark">✓ 동의 완료</span>
+                    }
+                    else if (_opened.Outsourcing)
+                    {
+                        <span class="opened-mark opened-mark--gray">✓ 전문 확인</span>
+                    }
+                </div>
+
+                <div class="terms-row">
+                    <input type="checkbox" id="agreeMarketing" @bind="_form.AgreeMarketing" disabled="@(!_opened.Marketing)" />
+                    <label for="agreeMarketing" class="@(!_opened.Marketing ? "locked" : "")">[선택] 마케팅 정보 수신 동의</label>
+                    <a href="/legal/marketing.html?return=signup" target="_blank" rel="noopener" @onclick="@(() => MarkOpened("marketing"))">전문 열기</a>
+                    @if (_form.AgreeMarketing)
+                    {
+                        <span class="opened-mark">✓ 동의 완료</span>
+                    }
+                    else if (_opened.Marketing)
+                    {
+                        <span class="opened-mark opened-mark--gray">✓ 전문 확인</span>
+                    }
+                </div>
+            </div>
+
+            @if (!string.IsNullOrEmpty(_error))
+            {
+                <div class="error">@_error</div>
+            }
+
+            <button type="submit" class="btn-submit" disabled="@_submitting">
+                @(_submitting ? "처리 중..." : "다음 단계 (이메일 인증)")
+            </button>
+        </EditForm>
+
+        <p class="login-link">이미 가입하셨나요? <a href="/login">로그인</a></p>
+    </div>
+</section>
+
+@code {
+    private SignupForm _form = new();
+    private OpenedState _opened = new();
+    private bool _submitting;
+    private string? _error;
+    private string _planLabel = "프로 · 베타1 기간 무료";
+    private bool _bizUploaded;
+    // _demoMode 필드 제거 — DEMO 영역 완전 저장하지 않음 (사장님 결재 2026-06-08)
+
+    // 사업자번호 검증 (헌법 #35 — 백오피스 API /api/landing/biz-no/verify)
+    private bool _bizVerifying;
+    private bool _bizVerified;
+    private string? _bizVerifyMsg;
+
+    private async Task VerifyBizNo()
+    {
+        _bizVerifyMsg = null;
+        _bizVerified = false;
+        if (string.IsNullOrWhiteSpace(_form.BizNo))
+        {
+            _bizVerifyMsg = "사업자번호를 입력해주세요.";
+            return;
+        }
+        _bizVerifying = true;
+        try
+        {
+            var res = await Http.PostAsJsonAsync("api/landing/biz-no/verify", new { BizNo = _form.BizNo });
+            var payload = await res.Content.ReadFromJsonAsync<BizVerifyResponse>();
+            if (payload is not null)
+            {
+                _bizVerified = payload.Valid;
+                _bizVerifyMsg = payload.Message;
+            }
+            else
+            {
+                _bizVerifyMsg = "검증 응답을 읽을 수 없습니다.";
+            }
+        }
+        catch (Exception ex)
+        {
+            _bizVerifyMsg = $"검증 중 오류: {ex.Message}";
+        }
+        finally
+        {
+            _bizVerifying = false;
+        }
+    }
+
+    // 도메인 별칭 검증 (사장님 결재 2026-06-09 — 고객 입력 ERP 주소, 실시간 중복 검사)
+    private bool _domainChecking;
+    private bool _domainOk;
+    private string? _domainMsg;
+    private string _domainStatus = ""; // "ok" / "warn" / "checking" / ""
+    private List<string>? _domainSuggestions;
+    private string _lastCheckedDomain = "";
+    private System.Threading.CancellationTokenSource? _domainCts;
+
+    private async Task CheckDomainAvailability()
+    {
+        var alias = (_form.DesiredDomain ?? "").Trim().ToLowerInvariant();
+        if (alias == _lastCheckedDomain && !string.IsNullOrEmpty(alias)) return;
+        _lastCheckedDomain = alias;
+
+        if (string.IsNullOrWhiteSpace(alias))
+        {
+            _domainOk = false;
+            _domainMsg = null;
+            _domainStatus = "";
+            _domainSuggestions = null;
+            return;
+        }
+
+        _domainCts?.Cancel();
+        _domainCts = new System.Threading.CancellationTokenSource();
+        var token = _domainCts.Token;
+
+        _domainChecking = true;
+        _domainStatus = "checking";
+        StateHasChanged();
+
+        try
+        {
+            await Task.Delay(300, token); // debounce
+            var res = await Http.GetFromJsonAsync<DomainCheckResponse>(
+                $"api/landing/domain-alias/check?alias={Uri.EscapeDataString(alias)}",
+                token);
+            if (res is null) return;
+            _domainOk = res.Available;
+            _domainMsg = res.Message;
+            _domainStatus = res.Available ? "ok" : "warn";
+            _domainSuggestions = res.Suggestions;
+        }
+        catch (TaskCanceledException) { }
+        catch (Exception ex)
+        {
+            _domainOk = false;
+            _domainMsg = $"검증 중 오류: {ex.Message}";
+            _domainStatus = "warn";
+        }
+        finally
+        {
+            _domainChecking = false;
+            StateHasChanged();
+        }
+    }
+
+    private async Task UseSuggestion(string suggested)
+    {
+        _form.DesiredDomain = suggested;
+        _lastCheckedDomain = "";
+        await CheckDomainAvailability();
+    }
+
+    private class DomainCheckResponse
+    {
+        public bool Available { get; set; }
+        public string Code { get; set; } = "";
+        public string Message { get; set; } = "";
+        public List<string>? Suggestions { get; set; }
+    }
+
+    private class BizVerifyResponse
+    {
+        public bool Valid { get; set; }
+        public string Message { get; set; } = "";
+        public string? Source { get; set; }
+    }
+
+    // 사장님 결재 2026-06-08 — DEMO 모드 영역 완전 제거.
+    // 고객 본인 입력 → 백오피스 승인 → 시리얼 이메일 즉시 발송 흐름만 저장.
+    protected override void OnInitialized()
+    {
+        _form = new SignupForm();
+        _opened = new OpenedState();
+        _bizUploaded = false;
+    }
+
+    // 약관 전문 열람 게이트 (사장님 결재 2026-06-01) — 형식적이라도 한 번 열어야 동의 체크 가능.
+    // 새 탭이 열리는 시점에 onclick으로 표기. 정보주체 권리 보호 + 약관규제법 정합.
+    private void MarkOpened(string key)
+    {
+        switch (key)
+        {
+            case "service": _opened.Service = true; break;
+            case "privacy": _opened.Privacy = true; break;
+            case "outsourcing": _opened.Outsourcing = true; break;
+            case "marketing": _opened.Marketing = true; break;
+        }
+    }
+
+    // 사장님 결재 2026-06-01 — "동의 버튼 누르면 다음 약관으로 자동 이동"
+    // legal HTML 푸터 동의 버튼 → window.opener.postMessage → 이 콜백 → 자동 체크
+    private DotNetObjectReference<SignupPage>? _selfRef;
+
+    [JSInvokable]
+    public void OnLegalAgree(string key)
+    {
+        switch (key)
+        {
+            case "service": _opened.Service = true; _form.AgreeService = true; break;
+            case "privacy": _opened.Privacy = true; _form.AgreePrivacy = true; break;
+            case "outsourcing": _opened.Outsourcing = true; _form.AgreeOutsourcing = true; break;
+            case "marketing": _opened.Marketing = true; _form.AgreeMarketing = true; break;
+        }
+        StateHasChanged();
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            _selfRef = DotNetObjectReference.Create(this);
+            await JS.InvokeVoidAsync("hitpanSignup.bindAgree", _selfRef);
+        }
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        try
+        {
+            await JS.InvokeVoidAsync("hitpanSignup.unbindAgree");
+        }
+        catch (JSDisconnectedException)
+        {
+            // 페이지 이탈 — 정상 흐름 (헌법 #15 정합: 의도된 무시)
+        }
+        catch (InvalidOperationException)
+        {
+            // 서버 측 정적 렌더링 단계의 Dispose — JS 호출 불가 (헌법 #15 정합)
+        }
+        _selfRef?.Dispose();
+    }
+
+    private async Task OpenTermsFlow()
+    {
+        // 첫 약관(service)부터 사슬로 열기 — service → privacy → outsourcing → marketing
+        await JS.InvokeVoidAsync("open", "/legal/service.html?return=signup&next=privacy", "_blank");
+    }
+
+    private void OnBizUploaded(BizLicenseUploader.UploadResult result)
+    {
+        _bizUploaded = true;
+    }
+
+    [SupplyParameterFromQuery]
+    public string? Plan { get; set; }
+
+    protected override void OnParametersSet()
+    {
+        _planLabel = Plan switch
+        {
+            "basic" => "베이직 · 베타1 기간 무료",
+            "enterprise" => "엔터프라이즈 · 베타1 기간 무료",
+            "premium" => "엔터프라이즈 · 베타1 기간 무료",
+            "standard" => "프로 · 베타1 기간 무료",
+            _ => "프로 · 베타1 기간 무료"
+        };
+    }
+
+    private async Task HandleSubmit()
+    {
+        _error = null;
+        if (!_opened.Service || !_opened.Privacy || !_opened.Outsourcing)
+        {
+            _error = "필수 약관 3건의 전문(全文)을 모두 열어보신 후 동의해주세요.";
+            return;
+        }
+        if (!_form.AgreeService || !_form.AgreePrivacy || !_form.AgreeOutsourcing)
+        {
+            _error = "필수 약관 3건에 모두 동의해주세요.";
+            return;
+        }
+        if (!_bizUploaded)
+        {
+            _error = "사업자등록증을 업로드해주세요.";
+            return;
+        }
+
+        _submitting = true;
+        try
+        {
+            // 실제 가입 — POST /api/landing/signup (헌법 #35 — 백오피스 API 5258)
+            if (string.IsNullOrWhiteSpace(_form.BizNo))
+            {
+                _error = "사업자번호를 입력하고 검증 버튼을 눌러주세요.";
+                return;
+            }
+            if (!_bizVerified)
+            {
+                _error = "사업자번호 검증을 통과해야 합니다. '검증' 버튼을 눌러주세요.";
+                return;
+            }
+            if (string.IsNullOrWhiteSpace(_form.DesiredDomain))
+            {
+                _error = "원하시는 ERP 주소를 입력해주세요.";
+                return;
+            }
+            if (!_domainOk)
+            {
+                _error = "ERP 주소 검증을 통과하지 못했습니다. 다른 주소를 시도해주세요.";
+                return;
+            }
+            var payload = new
+            {
+                CompanyName = _form.CompanyName,
+                BizNo = _form.BizNo,
+                CeoName = _form.RepresentativeName,
+                Email = _form.Email,
+                Phone = _form.Phone,
+                PlanType = (Plan ?? "basic"),
+                DesiredDomain = _form.DesiredDomain.Trim().ToLowerInvariant(),
+                ResellerCode = _form.ReferralChannel switch
+                {
+                    "hq_sales" => "HQ_SALES",
+                    "hq_marketing" => "HQ_MKTG",
+                    "reseller" => string.IsNullOrWhiteSpace(_form.ResellerCode) ? null : _form.ResellerCode.Trim(),
+                    _ => null
+                },
+                AgreeTerms = _form.AgreeService,
+                AgreePrivacy = _form.AgreePrivacy
+            };
+            var res = await Http.PostAsJsonAsync("api/landing/signup", payload);
+            if (!res.IsSuccessStatusCode)
+            {
+                var body = await res.Content.ReadAsStringAsync();
+                _error = $"가입 처리 실패 ({(int)res.StatusCode}). {body}";
+                return;
+            }
+            Nav.NavigateTo($"/signup/verify?email={Uri.EscapeDataString(_form.Email)}");
+        }
+        catch (Exception ex)
+        {
+            // 헌법 #15 정합 — 빈 catch 금지
+            _error = $"가입 요청 중 오류가 발생했습니다: {ex.Message}";
+        }
+        finally
+        {
+            _submitting = false;
+        }
+    }
+
+    private class SignupForm
+    {
+        public string Email { get; set; } = "";
+        public string CompanyName { get; set; } = "";
+        public string RepresentativeName { get; set; } = "";
+        public string Phone { get; set; } = "";
+        public string BizNo { get; set; } = "";
+        public string DesiredDomain { get; set; } = ""; // 사장님 결재 2026-06-09 — 고객 입력 ERP 주소
+        public string ReferralChannel { get; set; } = ""; // hq_sales, hq_marketing, reseller
+        public string ResellerCode { get; set; } = "";
+        public bool AgreeService { get; set; }
+        public bool AgreePrivacy { get; set; }
+        public bool AgreeOutsourcing { get; set; }
+        public bool AgreeMarketing { get; set; }
+    }
+
+    private class OpenedState
+    {
+        public bool Service { get; set; }
+        public bool Privacy { get; set; }
+        public bool Outsourcing { get; set; }
+        public bool Marketing { get; set; }
+    }
+}
+
+<style>
+.signup-section { padding: 48px 0; background: #F9FAFB; min-height: calc(100vh - 200px); }
+.signup-card { max-width: 480px; margin: 0 auto; background: #fff; padding: 40px; border-radius: 16px; box-shadow: 0 4px 16px rgba(0,0,0,0.06); }
+.signup-card h1 { font-size: 28px; margin-bottom: 8px; color: #0F1419; }
+.lead { color: #6B7280; margin-bottom: 24px; font-size: 14px; }
+.field { margin-bottom: 16px; }
+.field label { display: block; font-weight: 600; margin-bottom: 6px; font-size: 14px; }
+.field input { width: 100%; padding: 12px; border: 1px solid #D1D5DB; border-radius: 8px; font-size: 14px; box-sizing: border-box; }
+.field input:focus { outline: none; border-color: #0F6E56; }
+.demo-toggle { margin: 16px 0 20px; padding: 14px; background: #F0FAF6; border: 2px dashed #0F6E56; border-radius: 12px; }
+.demo-toggle__row { display: flex; align-items: flex-start; gap: 12px; padding: 8px 6px; cursor: pointer; }
+.demo-toggle__row input[type="radio"] { margin-top: 4px; width: 18px; height: 18px; cursor: pointer; flex-shrink: 0; accent-color: #0F6E56; }
+.demo-toggle__title { font-weight: 700; color: #0F1419; font-size: 14px; margin-bottom: 2px; }
+.demo-toggle__desc { font-size: 12px; color: #6B7280; line-height: 1.5; }
+.demo-quick-btn { display: block; width: 100%; margin: 10px 0 4px; padding: 13px 16px; background: linear-gradient(135deg,#0F6E56 0%,#0A5240 100%); color: #fff; border: none; border-radius: 10px; font-size: 14px; font-weight: 700; cursor: pointer; box-shadow: 0 6px 16px rgba(15,110,86,0.24); transition: transform 0.15s ease, box-shadow 0.15s ease; }
+.demo-quick-btn:hover { transform: translateY(-1px); box-shadow: 0 10px 22px rgba(15,110,86,0.32); }
+.demo-quick-note { margin: 6px 0 0; font-size: 12px; color: #0F6E56; text-align: center; font-weight: 600; }
+.terms { margin: 20px 0; padding: 18px; background: #F9FAFB; border-radius: 10px; border: 1px solid #EAEDF0; }
+.terms-guide { display: flex; align-items: flex-start; gap: 8px; background: #FFF8E1; border: 1px solid #FDE68A; color: #92400E; padding: 10px 12px; border-radius: 8px; font-size: 13px; line-height: 1.55; margin-bottom: 14px; }
+.terms-guide-icon { font-weight: 800; flex-shrink: 0; }
+.terms-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding: 8px 0; font-size: 14px; border-bottom: 1px dashed #E5E7EB; }
+.terms-row:last-child { border-bottom: none; }
+.terms-row input[type="checkbox"] { width: 18px; height: 18px; cursor: pointer; }
+.terms-row input[type="checkbox"]:disabled { cursor: not-allowed; opacity: 0.5; }
+.terms-row label { flex: 1; cursor: pointer; color: #1A2B4A; font-weight: 500; margin: 0; }
+.terms-row label.locked { color: #9CA3AF; cursor: not-allowed; }
+.terms-row label.locked::after { content: " 🔒 전문 열람 후 선택 가능"; font-size: 12px; color: #B45309; font-weight: 600; margin-left: 4px; }
+.terms-row a { color: #0F6E56; font-weight: 700; font-size: 13px; text-decoration: underline; }
+.terms-row .opened-mark { color: #0F6E56; font-weight: 700; font-size: 12px; background: #DCFCE7; padding: 2px 8px; border-radius: 999px; }
+.terms-row .opened-mark--gray { color: #6B7280; background: #F3F4F6; }
+.terms-startall { display: block; width: 100%; padding: 12px 16px; margin-bottom: 12px; background: linear-gradient(135deg,#0F6E56 0%,#0A5240 100%); color: #fff; border: none; border-radius: 10px; font-size: 14px; font-weight: 700; cursor: pointer; transition: transform 0.15s ease, box-shadow 0.15s ease; }
+.terms-startall:hover { transform: translateY(-1px); box-shadow: 0 8px 20px rgba(15,110,86,0.28); }
+.bizno-row { display: flex; gap: 8px; }
+.bizno-row input { flex: 1; padding: 12px; border: 1px solid #D1D5DB; border-radius: 8px; font-size: 14px; }
+.bizno-row input:focus { outline: none; border-color: #0F6E56; }
+.btn-verify { padding: 0 16px; background: #0F6E56; color: #fff; border: none; border-radius: 8px; font-weight: 600; cursor: pointer; white-space: nowrap; }
+.btn-verify:hover:not(:disabled) { background: #0A5240; }
+.btn-verify:disabled { opacity: 0.6; cursor: not-allowed; }
+.bizno-msg { margin-top: 8px; padding: 8px 12px; border-radius: 6px; font-size: 13px; }
+.bizno-msg.ok { background: #DCFCE7; color: #166534; }
+.bizno-msg.warn { background: #FEF3C7; color: #92400E; }
+.domain-row { display: flex; align-items: center; gap: 4px; border: 1px solid #D1D5DB; border-radius: 8px; padding: 0 12px; background: #fff; }
+.domain-row:focus-within { border-color: #0F6E56; }
+.domain-input { flex: 1; padding: 12px 0; border: none !important; font-size: 14px; outline: none; }
+.domain-input.ok { color: #166534; font-weight: 600; }
+.domain-input.warn { color: #B91C1C; }
+.domain-suffix { color: #6B7280; font-size: 14px; font-weight: 500; }
+.domain-msg { margin-top: 8px; padding: 8px 12px; border-radius: 6px; font-size: 13px; }
+.domain-msg.ok { background: #DCFCE7; color: #166534; }
+.domain-msg.warn { background: #FEE2E2; color: #B91C1C; }
+.domain-msg.checking { background: #DBEAFE; color: #1E3A8A; }
+.domain-suggestions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; align-items: center; }
+.domain-suggestions span { font-size: 12px; color: #6B7280; }
+.domain-suggest-chip { padding: 4px 10px; background: #F3F4F6; border: 1px solid #D1D5DB; border-radius: 999px; font-size: 12px; cursor: pointer; }
+.domain-suggest-chip:hover { background: #0F6E56; color: #fff; border-color: #0F6E56; }
+.domain-hint { display: block; margin-top: 6px; color: #6B7280; font-size: 12px; }
+.error { background: #FEE2E2; color: #B91C1C; padding: 12px; border-radius: 8px; margin-bottom: 12px; font-size: 14px; }
+.btn-submit { width: 100%; padding: 14px; background: #0F6E56; color: #fff; border: none; border-radius: 8px; font-size: 16px; font-weight: 600; cursor: pointer; }
+.btn-submit:hover:not(:disabled) { background: #0A5240; }
+.btn-submit:disabled { opacity: 0.6; cursor: not-allowed; }
+.login-link { text-align: center; margin-top: 16px; font-size: 14px; color: #6B7280; }
+.login-link a { color: #0F6E56; font-weight: 600; }
+</style>

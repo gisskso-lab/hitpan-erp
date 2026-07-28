@@ -1,0 +1,395 @@
+@*
+    UnifiedDayDetailModal — 날짜 클릭 시 4축 카드 모달 (사장님 결재 2026-05-26)
+
+    4개 카드(수금/입금/연차/이슈) — 좌측 보더 4px 색깔, hover spring,
+    우측 액션 버튼, 하단 [+ 일정 추가], 배경 클릭 / ESC 닫기, scale fade-in.
+*@
+@using HitPan.Web.Models
+@using HitPan.Web.Services
+@using Microsoft.AspNetCore.Components.Authorization
+@inject UnifiedCalendarService UnifiedSvc
+@inject NavigationManager Nav
+@inject IJSRuntime JS
+@inject AuthenticationStateProvider AuthProvider
+
+@if (IsOpen)
+{
+    <div class="hp-udm-backdrop" @onclick="Close" @onkeydown="OnKeyDown" tabindex="-1" @ref="_rootRef">
+        <div class="hp-udm-modal" @onclick:stopPropagation="true">
+            <div class="hp-udm-header">
+                <div>
+                    <h2 class="hp-udm-title">@SelectedDate.ToString("yyyy년 M월 d일 (ddd)")</h2>
+                    <p class="hp-udm-sub">통합 일정 상세</p>
+                </div>
+                <button class="hp-udm-close" @onclick="Close" aria-label="닫기">
+                    <MudIcon Icon="@Icons.Material.Filled.Close" Size="Size.Small" />
+                </button>
+            </div>
+
+            @if (_loading)
+            {
+                <div class="hp-udm-loading">
+                    <MudProgressCircular Color="Color.Primary" Indeterminate="true" Size="Size.Small" />
+                    <span style="margin-left:8px">불러오는 중...</span>
+                </div>
+            }
+            else
+            {
+                <div class="hp-udm-body">
+
+                    @* 수금 카드 *@
+                    <div class="hp-udm-card" style="--accent:#10B981">
+                        <div class="hp-udm-card-head">
+                            <span class="hp-udm-card-title">수금</span>
+                            <span class="hp-udm-card-count">@(_data?.Collections.Count ?? 0)건</span>
+                        </div>
+                        @if (_data?.Collections.Count > 0)
+                        {
+                            <ul class="hp-udm-list">
+                                @foreach (var c in _data.Collections)
+                                {
+                                    <li class="hp-udm-row">
+                                        <div class="hp-udm-row-main">
+                                            <div class="hp-udm-row-title">@(c.PartnerName ?? "(거래처 미상)")</div>
+                                            <div class="hp-udm-row-sub">
+                                                @c.Amount.ToString("N0")원
+                                                @if (!string.IsNullOrEmpty(c.Method)) { <span> · @c.Method</span> }
+                                            </div>
+                                        </div>
+                                        <div class="hp-udm-row-action">
+                                            @* refDocId 있으면 query string으로 단건 진입, 없으면 목록 *@
+                                            <button class="hp-udm-btn" @onclick="() => GoDelivery(c.RefDocId)">거래명세서</button>
+                                        </div>
+                                    </li>
+                                }
+                            </ul>
+                        }
+                        else
+                        {
+                            <div class="hp-udm-empty">수금 내역 없음</div>
+                        }
+                    </div>
+
+                    @* 입금 카드 *@
+                    <div class="hp-udm-card" style="--accent:#F59E0B">
+                        <div class="hp-udm-card-head">
+                            <span class="hp-udm-card-title">입금</span>
+                            <span class="hp-udm-card-count">@(_data?.Payments.Count ?? 0)건</span>
+                        </div>
+                        @if (_data?.Payments.Count > 0)
+                        {
+                            <ul class="hp-udm-list">
+                                @foreach (var p in _data.Payments)
+                                {
+                                    <li class="hp-udm-row">
+                                        <div class="hp-udm-row-main">
+                                            <div class="hp-udm-row-title">@(p.PartnerName ?? p.Description ?? "(거래처 미상)")</div>
+                                            <div class="hp-udm-row-sub">
+                                                @p.Amount.ToString("N0")원
+                                                @if (!string.IsNullOrEmpty(p.BankName)) { <span> · @p.BankName</span> }
+                                            </div>
+                                        </div>
+                                        <div class="hp-udm-row-action">
+                                            <button class="hp-udm-btn" @onclick="() => GoPurchase()">매입 원장</button>
+                                        </div>
+                                    </li>
+                                }
+                            </ul>
+                        }
+                        else
+                        {
+                            <div class="hp-udm-empty">입금 내역 없음</div>
+                        }
+                    </div>
+
+                    @* 연차 카드 *@
+                    <div class="hp-udm-card" style="--accent:#3B82F6">
+                        <div class="hp-udm-card-head">
+                            <span class="hp-udm-card-title">연차</span>
+                            <span class="hp-udm-card-count">@(_data?.Leaves.Count ?? 0)건</span>
+                        </div>
+                        @if (_data?.Leaves.Count > 0)
+                        {
+                            <ul class="hp-udm-list">
+                                @foreach (var l in _data.Leaves)
+                                {
+                                    <li class="hp-udm-row">
+                                        <div class="hp-udm-row-main">
+                                            <div class="hp-udm-row-title">@(l.EmpName ?? "(직원 미상)")</div>
+                                            <div class="hp-udm-row-sub">
+                                                @LeaveTypeLabel(l.LeaveType) · @(l.LeaveDays)일
+                                                <span class="hp-udm-badge @(l.Status == "approved" ? "ok" : "warn")">
+                                                    @(l.Status == "approved" ? "승인" : "대기")
+                                                </span>
+                                            </div>
+                                        </div>
+                                        <div class="hp-udm-row-action">
+                                            <button class="hp-udm-btn" @onclick="GoLeaveRequest">신청서</button>
+                                        </div>
+                                    </li>
+                                }
+                            </ul>
+                        }
+                        else
+                        {
+                            <div class="hp-udm-empty">연차 없음</div>
+                        }
+                    </div>
+
+                    @* 이슈 카드 *@
+                    <div class="hp-udm-card" style="--accent:#A855F7">
+                        <div class="hp-udm-card-head">
+                            <span class="hp-udm-card-title">이슈/일정</span>
+                            <span class="hp-udm-card-count">@(_data?.Issues.Count ?? 0)건</span>
+                        </div>
+                        @if (_data?.Issues.Count > 0)
+                        {
+                            <ul class="hp-udm-list">
+                                @foreach (var i in _data.Issues)
+                                {
+                                    <li class="hp-udm-row">
+                                        <div class="hp-udm-row-main">
+                                            <label class="hp-udm-issue-title">
+                                                <input type="checkbox" checked="@i.IsCompleted"
+                                                       @onchange="() => ToggleIssueComplete(i)" />
+                                                <span class="@(i.IsCompleted ? "hp-udm-done" : "")">@i.Title</span>
+                                            </label>
+                                            <div class="hp-udm-row-sub">
+                                                @i.StartAt.ToString("HH:mm")
+                                                @if (!string.IsNullOrEmpty(i.PartnerName)) { <span> · @i.PartnerName</span> }
+                                                @if (!string.IsNullOrEmpty(i.ParticipantName)) { <span> · @i.ParticipantName</span> }
+                                            </div>
+                                        </div>
+                                        <div class="hp-udm-row-action">
+                                            <button class="hp-udm-btn" @onclick="() => EditIssue(i)">수정</button>
+                                            <button class="hp-udm-btn hp-udm-btn-danger" @onclick="() => DeleteIssue(i)">삭제</button>
+                                        </div>
+                                    </li>
+                                }
+                            </ul>
+                        }
+                        else
+                        {
+                            <div class="hp-udm-empty">등록된 일정 없음</div>
+                        }
+                    </div>
+
+                </div>
+
+                <div class="hp-udm-footer">
+                    <button class="hp-udm-add" @onclick="AddSchedule">
+                        <MudIcon Icon="@Icons.Material.Filled.Add" Size="Size.Small" />
+                        <span>일정 추가</span>
+                    </button>
+                </div>
+            }
+        </div>
+    </div>
+}
+
+<style>
+    .hp-udm-backdrop {
+        position:fixed; inset:0; background:rgba(15,23,42,0.45);
+        backdrop-filter:blur(6px); -webkit-backdrop-filter:blur(6px);
+        display:flex; align-items:center; justify-content:center; z-index:9000;
+        animation:hp-udm-fade .18s ease-out;
+    }
+    @@keyframes hp-udm-fade { from{opacity:0} to{opacity:1} }
+    .hp-udm-modal {
+        background:rgba(255,255,255,0.95); backdrop-filter:blur(24px);
+        border-radius:24px; padding:28px; width:min(720px, 92vw);
+        max-height:88vh; overflow-y:auto;
+        box-shadow:0 24px 64px rgba(15,23,42,0.25);
+        animation:hp-udm-scale .22s cubic-bezier(.34,1.56,.64,1);
+    }
+    @@keyframes hp-udm-scale { from{transform:scale(.95);opacity:0} to{transform:scale(1);opacity:1} }
+    .hp-udm-header { display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:20px; }
+    .hp-udm-title { font-size:20px; font-weight:700; margin:0 0 4px 0; color:#1F2937; }
+    .hp-udm-sub { font-size:13px; color:#6B7280; margin:0; }
+    .hp-udm-close {
+        background:rgba(0,0,0,0.04); border:none; border-radius:50%;
+        width:34px; height:34px; cursor:pointer; display:flex;
+        align-items:center; justify-content:center; transition:all .15s;
+    }
+    .hp-udm-close:hover { background:rgba(0,0,0,0.08); }
+    .hp-udm-loading { text-align:center; padding:48px 0; }
+    .hp-udm-body { display:flex; flex-direction:column; gap:14px; }
+    .hp-udm-card {
+        background:rgba(248,250,252,0.7); border-radius:14px; padding:14px 16px;
+        border-left:4px solid var(--accent);
+        transition:transform .2s cubic-bezier(.34,1.56,.64,1), box-shadow .2s;
+    }
+    .hp-udm-card:hover { transform:translateY(-2px); box-shadow:0 8px 20px rgba(0,0,0,0.06); }
+    .hp-udm-card-head { display:flex; justify-content:space-between; align-items:center; margin-bottom:8px; }
+    .hp-udm-card-title { font-size:14px; font-weight:700; color:var(--accent); }
+    .hp-udm-card-count { font-size:12px; color:#6B7280; background:rgba(0,0,0,0.04); padding:2px 8px; border-radius:999px; }
+    .hp-udm-list { list-style:none; margin:0; padding:0; display:flex; flex-direction:column; gap:6px; }
+    .hp-udm-row {
+        display:flex; align-items:center; justify-content:space-between; gap:8px;
+        padding:8px 10px; border-radius:10px; background:rgba(255,255,255,0.7);
+    }
+    .hp-udm-row-main { flex:1; min-width:0; }
+    .hp-udm-row-title { font-size:14px; font-weight:600; color:#1F2937; }
+    .hp-udm-row-sub { font-size:12px; color:#6B7280; margin-top:2px; }
+    .hp-udm-row-action { flex-shrink:0; }
+    .hp-udm-btn {
+        background:white; border:1px solid rgba(0,0,0,0.08); border-radius:8px;
+        padding:4px 10px; font-size:12px; cursor:pointer; color:#374151;
+        transition:all .15s;
+    }
+    .hp-udm-btn:hover { background:#F3F4F6; border-color:rgba(0,0,0,0.16); }
+    .hp-udm-btn-danger { color:#B91C1C; }
+    .hp-udm-btn-danger:hover { background:rgba(239,68,68,0.08); border-color:rgba(239,68,68,0.24); }
+    .hp-udm-issue-title { display:flex; align-items:center; gap:6px; font-size:14px; font-weight:600; color:#1F2937; cursor:pointer; }
+    .hp-udm-done { text-decoration:line-through; color:#9CA3AF; }
+    .hp-udm-badge {
+        display:inline-block; margin-left:6px; font-size:10px; padding:2px 6px;
+        border-radius:6px; font-weight:600;
+    }
+    .hp-udm-badge.ok { background:rgba(16,185,129,0.12); color:#059669; }
+    .hp-udm-badge.warn { background:rgba(245,158,11,0.12); color:#D97706; }
+    .hp-udm-empty { font-size:13px; color:#9CA3AF; text-align:center; padding:8px 0; }
+    .hp-udm-footer { margin-top:20px; display:flex; justify-content:flex-end; }
+    .hp-udm-add {
+        display:inline-flex; align-items:center; gap:6px;
+        background:linear-gradient(135deg,#3B82F6,#6366F1); color:white; border:none;
+        border-radius:12px; padding:10px 18px; font-size:13px; font-weight:600;
+        cursor:pointer; transition:all .15s;
+        box-shadow:0 4px 12px rgba(59,130,246,0.3);
+    }
+    .hp-udm-add:hover { transform:translateY(-1px); box-shadow:0 6px 16px rgba(59,130,246,0.4); }
+</style>
+
+@code {
+    [Parameter] public bool IsOpen { get; set; }
+    [Parameter] public DateTime SelectedDate { get; set; }
+    [Parameter] public EventCallback OnClosed { get; set; }
+    [Parameter] public EventCallback<DateTime> OnAddRequested { get; set; }
+    // 사장님 결재 2026-05-26 가도: 이슈 수정 콜백 (수정 모달 부모 제어).
+    [Parameter] public EventCallback<UnifiedDayDetailModel.IssueItem> OnEditRequested { get; set; }
+
+    private UnifiedDayDetailModel? _data;
+    private bool _loading;
+    private DateTime _lastLoadedDate = DateTime.MinValue;
+    private ElementReference _rootRef;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (IsOpen && SelectedDate != _lastLoadedDate)
+        {
+            _lastLoadedDate = SelectedDate;
+            await LoadAsync();
+        }
+    }
+
+    private async Task LoadAsync()
+    {
+        _loading = true;
+        StateHasChanged();
+        // 진범 #100 봉합 (2026-05-31): 인증 상태 완료 대기 후 호출
+        var auth = await AuthProvider.GetAuthenticationStateAsync();
+        if (auth.User?.Identity?.IsAuthenticated != true)
+        {
+            _loading = false;
+            StateHasChanged();
+            return;
+        }
+        _data = await UnifiedSvc.GetDayDetailAsync(SelectedDate);
+        _loading = false;
+        StateHasChanged();
+    }
+
+    /// <summary>외부(부모) 에서 저장/삭제 후 재조회 트리거.</summary>
+    public Task ReloadAsync() => LoadAsync();
+
+    private async Task ToggleIssueComplete(UnifiedDayDetailModel.IssueItem item)
+    {
+        if (string.IsNullOrEmpty(item.Id)) return;
+        // optimistic
+        item.IsCompleted = !item.IsCompleted;
+        StateHasChanged();
+        var ok = await UnifiedSvc.ToggleCompleteAsync(item.Id, item.IsCompleted);
+        if (!ok)
+        {
+            // rollback
+            item.IsCompleted = !item.IsCompleted;
+            StateHasChanged();
+        }
+    }
+
+    private async Task EditIssue(UnifiedDayDetailModel.IssueItem item)
+    {
+        if (OnEditRequested.HasDelegate) await OnEditRequested.InvokeAsync(item);
+    }
+
+    private async Task DeleteIssue(UnifiedDayDetailModel.IssueItem item)
+    {
+        if (string.IsNullOrEmpty(item.Id)) return;
+        try
+        {
+            var confirmed = await JS.InvokeAsync<bool>("confirm", "이 일정을 삭제하시겠습니까?");
+            if (!confirmed) return;
+        }
+        catch (Exception ex)
+        {
+            // §원칙 #15 — silent swallow 금지.
+            Console.Error.WriteLine($"[UnifiedDayDetailModal.DeleteIssue.confirm] {ex.GetType().Name}: {ex.Message}");
+            return;
+        }
+
+        var ok = await UnifiedSvc.DeleteScheduleAsync(item.Id);
+        if (ok)
+        {
+            _data?.Issues.Remove(item);
+            StateHasChanged();
+        }
+    }
+
+    private async Task Close()
+    {
+        if (OnClosed.HasDelegate) await OnClosed.InvokeAsync();
+    }
+
+    private async Task OnKeyDown(KeyboardEventArgs e)
+    {
+        if (e.Key == "Escape")
+        {
+            await Close();
+        }
+    }
+
+    private async Task AddSchedule()
+    {
+        if (OnAddRequested.HasDelegate) await OnAddRequested.InvokeAsync(SelectedDate);
+    }
+
+    private void GoDelivery(string? refDocId)
+    {
+        // 거래명세서 단건 = query string id 전달 (DeliveryPage 진입 후 자동 로드).
+        var target = string.IsNullOrWhiteSpace(refDocId)
+            ? "/deliveries"
+            : $"/deliveries?id={Uri.EscapeDataString(refDocId)}";
+        Nav.NavigateTo(target);
+    }
+    private void GoPurchase(string? refDocId = null)
+    {
+        var target = string.IsNullOrWhiteSpace(refDocId)
+            ? "/purchase"
+            : $"/purchase?id={Uri.EscapeDataString(refDocId)}";
+        Nav.NavigateTo(target);
+    }
+    private void GoLeaveRequest()
+    {
+        // 연차 신청서 — 실제 라우트 /hr/leave-request (단수형).
+        Nav.NavigateTo("/hr/leave-request");
+    }
+
+    private static string LeaveTypeLabel(string? type) => type switch
+    {
+        "annual" => "연차",
+        "half" => "반차",
+        "sick" => "병가",
+        "official" => "공가",
+        _ => type ?? ""
+    };
+}

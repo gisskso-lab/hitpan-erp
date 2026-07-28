@@ -1,0 +1,86 @@
+@page "/quotations"
+@attribute [Authorize]
+@using HitPan.Web.Components.Sales
+@using HitPan.Web.Models
+@using HitPan.Web.Services
+@namespace HitPan.Web.Pages.QuotationUi
+@inject WorkTabService TabService
+@inject DocumentService DocService
+@inject IDialogService DialogService
+@inject ISnackbar Snackbar
+@inject IJSRuntime Js
+@inject PartnerMasterService PartnersApi
+@inject ItemMasterService ItemsApi
+
+<NavigationLock ConfirmExternalNavigation="@_hasUnsavedChanges" OnBeforeInternalNavigation="OnBeforeInternalNavigationAsync" />
+
+<section class="quotation-page">
+    @if (_draft is null)
+    {
+        <MudProgressCircular Color="Color.Primary" Indeterminate="true" />
+    }
+    else
+    {
+        <WorkflowBreadcrumb Steps="_workflowSteps" />
+
+        <MudPaper Class="pa-3 mb-2 quotation-form">
+            <MudGrid>
+                <MudItem xs="12" md="3">
+                    <MudDatePicker Label="견적일자" Date="_draft.QuoteDate" DateChanged="OnQuoteDateChangedAsync" />
+                </MudItem>
+                <MudItem xs="12" md="3">
+                    <MudDatePicker Label="유효기한" Date="_draft.ValidUntil" DateChanged="OnValidUntilChangedAsync" />
+                </MudItem>
+                <MudItem xs="12" md="3">
+                    <MudAutocomplete T="string" Label="거래처" Value="_draft.SalesCompany"
+                        ValueChanged="OnPartnerNameChangedAsync" SearchFunc="SearchPartnerAsync"
+                        Margin="Margin.Dense" Placeholder="거래처 검색" />
+                </MudItem>
+                <MudItem xs="12" md="3">
+                    <MudTextField T="string"
+                                  Label="메모"
+                                  Value="_draft.Memo"
+                                  ValueChanged="OnMemoChangedAsync"
+                                  Margin="Margin.Dense" />
+                </MudItem>
+            </MudGrid>
+        </MudPaper>
+
+        <MudToolBar Dense="true" Style="overflow-x:auto;flex-wrap:nowrap" Class="pa-1 gap-1 quotation-toolbar">
+            <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Add" OnClick="AddNewAsync" Disabled="@_isConverted">추가</MudButton>
+            <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Save" OnClick="SaveAsync" Disabled="@_isConverted">저장</MudButton>
+            <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Undo" OnClick="CancelAsync">취소</MudButton>
+            <MudButton Variant="Variant.Outlined" Color="Color.Error" StartIcon="@Icons.Material.Filled.Delete" OnClick="DeleteConfirmAsync" Disabled="@_isConverted">삭제</MudButton>
+            <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.ContentCopy" OnClick="CopyAsync" Disabled="@_isNew">복사</MudButton>
+            <MudDivider Vertical="true" FlexItem="true" />
+            <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Print" OnClick="PrintAsync">인쇄</MudButton>
+            <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.TableChart" OnClick="DownloadExcelAsync">엑셀</MudButton>
+            <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.PictureAsPdf" OnClick="DownloadPdfAsync">PDF</MudButton>
+            <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Email" OnClick="EmailAsync">이메일</MudButton>
+            <MudButton Variant="Variant.Outlined" Color="Color.Success" StartIcon="@Icons.Material.Filled.SwapHoriz"
+                       Disabled="@(_draft?.Status == "converted" || _isNew)"
+                       OnClick="ConvertToSalesOrderAsync">수주전환</MudButton>
+            <MudSpacer />
+            <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.FormatListBulleted" OnClick="OpenListPopupAsync">목록</MudButton>
+        </MudToolBar>
+
+        <div class="quotation-grid-wrap">
+            <QuotationGrid Lines="_draft.Lines"
+                           Density="_draft.Density"
+                           Summary="_summary"
+                           Status="_draft.Status"
+                           ItemCache="_itemCache"
+                           OnChanged="OnGridChangedAsync"
+                           SelectedLineChanged="OnSelectedLineChangedAsync"
+                           OnSelectionChanged="OnSelectionChangedAsync" />
+        </div>
+
+        <MudPaper Class="pa-3 mt-2 quotation-footer">
+            <MudStack Row="true" Spacing="3">
+                <MudText Typo="Typo.body2">공급가액: @_summary.SupplyAmount.ToString("N0")</MudText>
+                <MudText Typo="Typo.body2">부가세: @_summary.VatAmount.ToString("N0")</MudText>
+                <MudText Typo="Typo.body2">합계: @_summary.TotalAmount.ToString("N0")</MudText>
+            </MudStack>
+        </MudPaper>
+    }
+</section>

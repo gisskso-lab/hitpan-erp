@@ -1,0 +1,448 @@
+@page "/settings"
+@attribute [Authorize]
+@using HitPan.Web.Components.Common
+@inject SettingsService SettingsSvc
+@inject ISnackbar Snackbar
+@inject IDialogService DialogService
+
+<PageTitle>사용환경 설정</PageTitle>
+
+<MudText Typo="Typo.h6"
+    Class="mb-4">사용환경 설정</MudText>
+
+@if (_loading)
+{
+    <MudProgressLinear Indeterminate="true"
+        Color="Color.Primary" />
+}
+else
+{
+<MudGrid Spacing="3">
+
+  @* 재고 설정 카드 *@
+  <MudItem xs="12" md="4">
+  <MudPaper Elevation="0" Class="pa-4"
+    Style="border:0.5px solid var(
+      --mud-palette-lines-default);
+      border-radius:12px">
+    <div style="display:flex;
+      align-items:center;gap:8px;
+      margin-bottom:16px">
+      <div style="width:8px;height:8px;
+        border-radius:50%;
+        background:var(--hitpan-dot-green)"></div>
+      <MudText Typo="Typo.subtitle2">
+        재고 설정</MudText>
+      <MudChip T="string" Size="Size.Small"
+        Color="Color.Success"
+        Variant="Variant.Text">핵심</MudChip>
+    </div>
+
+    <MudText Typo="Typo.caption"
+      Style="color:var(--mud-palette-text-secondary)"
+      Class="mb-2">재고 평가방법</MudText>
+    <MudRadioGroup T="string"
+      Value="@_s.StockEvalMethod"
+      ValueChanged="OnStockEvalMethodChanged"
+      Class="mb-3">
+      <MudRadio Value="@("moving_avg")"
+        Color="Color.Primary"
+        Dense="true">이동평균법</MudRadio>
+      <MudRadio Value="@("standard")"
+        Color="Color.Primary"
+        Dense="true">표준단가</MudRadio>
+      <MudRadio Value="@("last_purchase")"
+        Color="Color.Primary"
+        Dense="true">최종매입가</MudRadio>
+    </MudRadioGroup>
+
+    @if (_stockMethodChanged)
+    {
+      <MudAlert Severity="Severity.Warning"
+        Dense="true" Class="mb-3"
+        Style="font-size:12px">
+        변경시 전체 재고가 재계산됩니다
+      </MudAlert>
+    }
+
+    <MudDivider Class="mb-3" />
+
+    <SettingToggleRow
+      Label="다중창고 사용"
+      Sub="창고별 재고 분리 관리"
+      @bind-Value="_s.UseMultiWarehouse" />
+    <SettingToggleRow
+      Label="재고부족 경고"
+      Sub="출고시 재고 부족 알림"
+      @bind-Value="_s.StockShortageAlert" />
+    <SettingToggleRow
+      Label="마이너스 재고 허용"
+      Sub="재고 없어도 출고 가능"
+      @bind-Value="_s.AllowMinusStock" />
+  </MudPaper>
+  </MudItem>
+
+  @* 단가·부가세 카드 *@
+  <MudItem xs="12" md="4">
+  <MudPaper Elevation="0" Class="pa-4"
+    Style="border:0.5px solid var(
+      --mud-palette-lines-default);
+      border-radius:12px">
+    <div style="display:flex;
+      align-items:center;gap:8px;
+      margin-bottom:16px">
+      <div style="width:8px;height:8px;
+        border-radius:50%;
+        background:var(--hitpan-dot-blue)"></div>
+      <MudText Typo="Typo.subtitle2">
+        단가·부가세 설정</MudText>
+      <MudChip T="string" Size="Size.Small"
+        Color="Color.Info"
+        Variant="Variant.Text">핵심</MudChip>
+    </div>
+
+    <MudText Typo="Typo.caption"
+      Style="color:var(--mud-palette-text-secondary)"
+      Class="mb-2">부가세 처리방식</MudText>
+    <MudRadioGroup T="string"
+      @bind-Value="_s.PriceInputType"
+      Class="mb-3">
+      <MudRadio Value="@("net")"
+        Color="Color.Primary"
+        Dense="true">순단가 입력</MudRadio>
+      <MudRadio Value="@("inclusive")"
+        Color="Color.Primary"
+        Dense="true">포함단가 입력</MudRadio>
+    </MudRadioGroup>
+
+    <MudDivider Class="mb-3" />
+
+    <SettingToggleRow
+      Label="부가세 자동조정 안함"
+      Sub="수동으로 부가세 입력"
+      @bind-Value="_autoVatOff" />
+    <SettingToggleRow
+      Label="끝전 반올림"
+      Sub="부가세 원단위 반올림"
+      @bind-Value="_vatRound" />
+
+    <MudDivider Class="mb-3" />
+
+    <MudText Typo="Typo.caption"
+      Style="color:var(--mud-palette-text-secondary)"
+      Class="mb-2">단가 등급 배율</MudText>
+    @foreach (var grade in _priceGrades)
+    {
+      <div style="display:flex;
+        align-items:center;gap:8px;
+        margin-bottom:6px">
+        <MudText Style="font-size:12px;
+          width:40px;color:var(
+          --mud-palette-text-secondary)">
+          @grade.Label</MudText>
+        <MudTextField
+          T="decimal"
+          @bind-Value="grade.Rate"
+          Variant="Variant.Outlined"
+          Margin="Margin.Dense"
+          Style="font-size:12px"
+          AdornmentText="배"
+          Adornment="Adornment.End" />
+      </div>
+    }
+  </MudPaper>
+  </MudItem>
+
+  @* 판매·미수금 카드 *@
+  <MudItem xs="12" md="4">
+  <MudPaper Elevation="0" Class="pa-4"
+    Style="border:0.5px solid var(
+      --mud-palette-lines-default);
+      border-radius:12px">
+    <div style="display:flex;
+      align-items:center;gap:8px;
+      margin-bottom:16px">
+      <div style="width:8px;height:8px;
+        border-radius:50%;
+        background:var(--hitpan-dot-amber)"></div>
+      <MudText Typo="Typo.subtitle2">
+        판매·미수금 설정</MudText>
+    </div>
+
+    <SettingToggleRow
+      Label="미수금 출고정지"
+      Sub="미수금 초과시 출고 차단"
+      @bind-Value="_s.UseCreditLimit" />
+
+    @if (_s.UseCreditLimit)
+    {
+      <MudNumericField
+        T="decimal"
+        @bind-Value="_s.CreditLimitAmount"
+        Label="기준 금액 (원)"
+        Variant="Variant.Outlined"
+        Margin="Margin.Dense"
+        Class="mb-3"
+        Format="N0" />
+    }
+
+    <MudDivider Class="mb-3" />
+
+    <SettingToggleRow
+      Label="매입가 표시"
+      Sub="상품조회창에 매입가 노출"
+      @bind-Value="_s.ShowPurchasePrice" />
+    <SettingToggleRow
+      Label="담당자별 매출관리"
+      Sub="사원별 실적 집계"
+      @bind-Value="_s.UseSalesByEmployee" />
+  </MudPaper>
+  </MudItem>
+
+  @* 강제 수동 설정 카드 *@
+  <MudItem xs="12" md="6">
+  <MudPaper Elevation="0" Class="pa-4"
+    Style="border:0.5px solid var(
+      --mud-palette-lines-default);
+      border-radius:12px">
+    <div style="display:flex;
+      align-items:center;gap:8px;
+      margin-bottom:4px">
+      <div style="width:8px;height:8px;
+        border-radius:50%;
+        background:var(--hitpan-dot-red)"></div>
+      <MudText Typo="Typo.subtitle2">
+        강제 수동 설정</MudText>
+      <MudChip T="string" Size="Size.Small"
+        Color="Color.Error"
+        Variant="Variant.Text">관리자 전용</MudChip>
+    </div>
+    <MudText Style="font-size:11px;
+      color:var(--mud-palette-text-secondary);
+      margin-bottom:12px">
+      모든 강제 수정은 이력이 기록됩니다
+    </MudText>
+
+    <SettingToggleRow
+      Label="단가 직접 입력 허용"
+      Sub="자동계산 무시하고 직접 입력"
+      @bind-Value="_s.AllowForcePriceInput" />
+    <SettingToggleRow
+      Label="부가세 직접 입력 허용"
+      Sub="부가세 강제 수동 입력"
+      @bind-Value="_s.AllowForceVatInput" />
+    <SettingToggleRow
+      Label="0원 단가 허용"
+      Sub="무상제공·샘플 출고시"
+      @bind-Value="_s.AllowZeroPrice" />
+    <SettingToggleRow
+      Label="이전자료 수정 허용"
+      Sub="마감 이후 자료 수정 가능"
+      @bind-Value="_s.AllowPastEdit" />
+    <SettingToggleRow
+      Label="재고 강제 조정 허용"
+      Sub="재고실사 후 수량 강제 변경"
+      @bind-Value="_s.AllowForceStockAdjust" />
+    <SettingToggleRow
+      Label="미수금 출고정지 임시해제"
+      Sub="관리자가 건별 임시 해제"
+      @bind-Value="_s.AllowCreditOverride" />
+
+    <MudDivider Class="mb-3 mt-2" />
+
+    <SettingToggleRow
+      Label="강제수정 시 암호 확인"
+      Sub="강제 수정 전 관리자 암호 재확인"
+      @bind-Value="_s.ForceEditRequirePassword" />
+
+    <div style="display:flex;
+      align-items:center;gap:8px;
+      margin-top:8px">
+      <MudText Style="font-size:12px;
+        color:var(--mud-palette-text-secondary)">
+        단가 허용 편차</MudText>
+      <MudNumericField
+        T="int"
+        @bind-Value="_s.PriceDeviationLimit"
+        Variant="Variant.Outlined"
+        Margin="Margin.Dense"
+        Style="width:80px;font-size:12px"
+        AdornmentText="%"
+        Adornment="Adornment.End" />
+      <MudText Style="font-size:11px;
+        color:var(--mud-palette-text-secondary)">
+        초과시 경고</MudText>
+    </div>
+  </MudPaper>
+  </MudItem>
+
+  @* 보안 설정 카드 *@
+  <MudItem xs="12" md="6">
+  <MudPaper Elevation="0" Class="pa-4"
+    Style="border:0.5px solid var(
+      --mud-palette-lines-default);
+      border-radius:12px">
+    <div style="display:flex;
+      align-items:center;gap:8px;
+      margin-bottom:16px">
+      <div style="width:8px;height:8px;
+        border-radius:50%;
+        background:var(--hitpan-dot-purple)"></div>
+      <MudText Typo="Typo.subtitle2">
+        보안 설정</MudText>
+    </div>
+
+    <SettingToggleRow
+      Label="개인정보 보호"
+      Sub="민감정보 마스킹 처리"
+      @bind-Value="_s.UsePersonalInfoProtect" />
+
+  </MudPaper>
+  </MudItem>
+
+</MudGrid>
+
+@* 저장 버튼 *@
+<div style="display:flex;
+  justify-content:flex-end;
+  gap:8px;margin-top:20px">
+  <MudButton Variant="Variant.Outlined"
+    OnClick="Reset">초기화</MudButton>
+  <MudButton Variant="Variant.Filled"
+    Color="Color.Primary"
+    OnClick="Save"
+    Disabled="_saving">
+    @(_saving ? "저장 중..." : "저장")
+  </MudButton>
+</div>
+}
+
+@code {
+    private TenantSettingsModel _s = new();
+    private bool _loading = true;
+    private bool _saving = false;
+    private bool _stockMethodChanged = false;
+    private string _originalStockMethod = "";
+    private bool _autoVatOff = false;
+    private bool _vatRound = true;
+
+    private List<PriceGradeModel> _priceGrades = new();
+
+    protected override async Task OnInitializedAsync()
+    {
+        var result = await SettingsSvc.GetAsync().ConfigureAwait(false);
+        if (result != null)
+        {
+            _s = result;
+            _originalStockMethod = _s.StockEvalMethod;
+            _autoVatOff = !_s.AutoVatAdjust;
+            _vatRound = _s.VatRoundType == "round";
+        }
+
+        _priceGrades = new List<PriceGradeModel>
+        {
+            new("A단가", _s.PriceARate),
+            new("B단가", _s.PriceBRate),
+            new("C단가", _s.PriceCRate),
+            new("D단가", _s.PriceDRate),
+            new("E단가", _s.PriceERate),
+        };
+
+        _loading = false;
+    }
+
+    private Task OnStockEvalMethodChanged(string v)
+    {
+        _s.StockEvalMethod = v;
+        _stockMethodChanged = _s.StockEvalMethod != _originalStockMethod;
+        return Task.CompletedTask;
+    }
+
+    private async Task Save()
+    {
+        if (_stockMethodChanged)
+        {
+            var confirm = await DialogService
+                .ShowMessageBoxAsync(
+                    "재고 평가방법 변경",
+                    "변경시 전체 재고가 재계산됩니다. " +
+                    "계속하시겠습니까?",
+                    yesText: "확인",
+                    cancelText: "취소");
+            if (confirm != true)
+            {
+                return;
+            }
+        }
+
+        _s.AutoVatAdjust = !_autoVatOff;
+        _s.VatRoundType = _vatRound ? "round" : "truncate";
+        _s.PriceARate = _priceGrades[0].Rate;
+        _s.PriceBRate = _priceGrades[1].Rate;
+        _s.PriceCRate = _priceGrades[2].Rate;
+        _s.PriceDRate = _priceGrades[3].Rate;
+        _s.PriceERate = _priceGrades[4].Rate;
+
+        _saving = true;
+        var ok = await SettingsSvc.SaveAsync(_s).ConfigureAwait(false);
+        _saving = false;
+
+        if (ok)
+        {
+            _originalStockMethod = _s.StockEvalMethod;
+            _stockMethodChanged = false;
+            Snackbar.Add(
+                "설정이 저장됐습니다.",
+                Severity.Success);
+        }
+        else
+        {
+            Snackbar.Add(
+                "저장 실패. 다시 시도해주세요.",
+                Severity.Error);
+        }
+    }
+
+    private async Task Reset()
+    {
+        var confirm = await DialogService
+            .ShowMessageBoxAsync(
+                "초기화",
+                "모든 설정을 기본값으로 되돌립니까?",
+                yesText: "초기화",
+                cancelText: "취소");
+        if (confirm != true)
+        {
+            return;
+        }
+
+        _s = new TenantSettingsModel();
+        _originalStockMethod = _s.StockEvalMethod;
+        _stockMethodChanged = false;
+        _autoVatOff = !_s.AutoVatAdjust;
+        _vatRound = _s.VatRoundType == "round";
+        _priceGrades = new List<PriceGradeModel>
+        {
+            new("A단가", 1.00m),
+            new("B단가", 1.10m),
+            new("C단가", 1.20m),
+            new("D단가", 1.30m),
+            new("E단가", 1.50m),
+        };
+        Snackbar.Add(
+            "기본값으로 초기화됐습니다.",
+            Severity.Info);
+    }
+
+    private sealed class PriceGradeModel
+    {
+        public string Label { get; }
+        public decimal Rate { get; set; }
+
+        public PriceGradeModel(string label, decimal rate)
+        {
+            Label = label;
+            Rate = rate;
+        }
+    }
+}

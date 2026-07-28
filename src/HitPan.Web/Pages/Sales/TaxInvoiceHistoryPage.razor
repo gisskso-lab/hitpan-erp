@@ -1,0 +1,258 @@
+@page "/sales/tax-invoice-history"
+@namespace HitPan.Web.Pages.SalesUi
+@attribute [Authorize]
+@using System.Net.Http.Json
+@using System.Text.Json.Serialization
+@inject ISnackbar Snackbar
+@inject HttpClient Http
+@inject IDialogService DialogService
+
+<PageTitle>전자세금계산서 발행 이력</PageTitle>
+
+<PageHeader Title="전자세금계산서 발행 이력" Subtitle="다이렉트 발행·반송·취소·수정 통합 이력 (방식 A 정합)">
+    <Actions>
+        <MudButton Variant="Variant.Outlined" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Refresh"
+                   OnClick="RefreshAsync" Disabled="@_busy">새로고침</MudButton>
+    </Actions>
+</PageHeader>
+
+<MudGrid Spacing="2" Class="mb-3">
+    <MudItem xs="6" md="3">
+        <MudPaper Class="pa-3" Elevation="1">
+            <MudText Typo="Typo.caption">정상 발행</MudText>
+            <MudText Typo="Typo.h5" Color="Color.Success">@_stats.Issued</MudText>
+        </MudPaper>
+    </MudItem>
+    <MudItem xs="6" md="3">
+        <MudPaper Class="pa-3" Elevation="1">
+            <MudText Typo="Typo.caption">반송</MudText>
+            <MudText Typo="Typo.h5" Color="Color.Warning">@_stats.Bounced</MudText>
+        </MudPaper>
+    </MudItem>
+    <MudItem xs="6" md="3">
+        <MudPaper Class="pa-3" Elevation="1">
+            <MudText Typo="Typo.caption">취소</MudText>
+            <MudText Typo="Typo.h5" Color="Color.Error">@_stats.Cancelled</MudText>
+        </MudPaper>
+    </MudItem>
+    <MudItem xs="6" md="3">
+        <MudPaper Class="pa-3" Elevation="1">
+            <MudText Typo="Typo.caption">대기·점검</MudText>
+            <MudText Typo="Typo.h5" Color="Color.Info">@_stats.Pending</MudText>
+        </MudPaper>
+    </MudItem>
+</MudGrid>
+
+<SectionCard Title="발행 이력">
+    <MudTable Items="@_items" Hover="true" Dense="true" Loading="@_busy" Striped="true">
+        <HeaderContent>
+            <MudTh>발행일</MudTh>
+            <MudTh>승인번호</MudTh>
+            <MudTh>공급자</MudTh>
+            <MudTh>공급받는자</MudTh>
+            <MudTh Style="text-align:right">금액</MudTh>
+            <MudTh>상태</MudTh>
+            <MudTh>관리</MudTh>
+        </HeaderContent>
+        <RowTemplate>
+            <MudTd>@context.IssuedAt.ToString("yyyy-MM-dd HH:mm")</MudTd>
+            <MudTd Style="font-family: monospace; font-size: 12px;">@context.ApprovalNumber</MudTd>
+            <MudTd>@context.SupplierName</MudTd>
+            <MudTd>@context.ReceiverName</MudTd>
+            <MudTd Style="text-align:right">@context.TotalAmount.ToString("N0")원</MudTd>
+            <MudTd>
+                <MudChip T="string" Size="Size.Small" Color="@GetStatusColor(context.Status)">
+                    @GetStatusName(context.Status)
+                </MudChip>
+            </MudTd>
+            <MudTd>
+                @* 봉합 (2026-06-22, 10차 P1-2): 서버 status(소문자) 정합 — 발행됨(issued)일 때만 취소 버튼 노출 *@
+                @if (string.Equals(context.Status, "issued", StringComparison.OrdinalIgnoreCase)
+                  || string.Equals(context.Status, "approved", StringComparison.OrdinalIgnoreCase))
+                {
+                    <MudButton Size="Size.Small" Variant="Variant.Text" Color="Color.Error"
+                               OnClick="@(() => OnCancelClick(context))">취소</MudButton>
+                }
+                @if (string.Equals(context.Status, "bounced", StringComparison.OrdinalIgnoreCase))
+                {
+                    <MudButton Size="Size.Small" Variant="Variant.Text" Color="Color.Warning"
+                               OnClick="@(() => OnResendClick(context))">재발행</MudButton>
+                }
+                <MudButton Size="Size.Small" Variant="Variant.Text"
+                           OnClick="@(() => OnViewDetail(context))">상세</MudButton>
+            </MudTd>
+        </RowTemplate>
+        <NoRecordsContent>
+            <MudText Typo="Typo.body2" Class="pa-4 text-center">발행 이력이 없습니다.</MudText>
+        </NoRecordsContent>
+    </MudTable>
+</SectionCard>
+
+@code {
+    private List<HistoryItemDto> _items = new();
+    private HistoryStatsDto _stats = new();
+    private bool _busy;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await RefreshAsync();
+    }
+
+    private async Task RefreshAsync()
+    {
+        _busy = true;
+        try
+        {
+            // 기존 List API (`GET /api/sales/tax-invoices`) 활용 — 별도 history 엔드포인트 불필요.
+            var list = await Http.GetFromJsonAsync<List<TaxInvoiceListRow>>("api/sales/tax-invoices") ?? new();
+
+            // 봉합 (2026-06-22, 10차 P1-2): 서버 응답 키(TaxInvoiceListItem)에 맞춰 매핑 정합.
+            //   서버 키 = invoiceNo / issuedAt / partnerName / amountTotal / vatTotal / status.
+            //   계산서에는 공급자(우리 회사)·공급받는자(거래처)가 있으나 목록 API는 거래처(partnerName)만 내려준다.
+            //   따라서 공급받는자 = partnerName, 공급자는 자사이므로 목록에서는 표기 생략.
+            //   금액은 공급가액(amountTotal) + 부가세(vatTotal) = 합계로 표시한다.
+            _items = list.Select(r => new HistoryItemDto(
+                r.IssuedAt ?? DateTime.MinValue,
+                r.InvoiceNo ?? string.Empty,
+                string.Empty,
+                r.PartnerName ?? string.Empty,
+                r.AmountTotal + r.VatTotal,
+                r.Status ?? "pending",
+                r.InvoiceId
+            )).ToList();
+
+            // 서버 status 값은 소문자(issued / canceled). etax_status 는 pending/issued/failed.
+            _stats = new HistoryStatsDto
+            {
+                Issued = _items.Count(i => string.Equals(i.Status, "issued", StringComparison.OrdinalIgnoreCase)),
+                Bounced = _items.Count(i => string.Equals(i.Status, "bounced", StringComparison.OrdinalIgnoreCase)),
+                Cancelled = _items.Count(i => string.Equals(i.Status, "canceled", StringComparison.OrdinalIgnoreCase)
+                                           || string.Equals(i.Status, "cancelled", StringComparison.OrdinalIgnoreCase)),
+                Pending = _items.Count(i => string.Equals(i.Status, "pending", StringComparison.OrdinalIgnoreCase))
+            };
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"이력 조회 실패: {ex.Message}", Severity.Warning);
+            _items = new();
+            _stats = new();
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    // 봉합 (2026-06-22, 10차 P1-2): 서버 응답 DTO(HitPan.Contracts.Sales.TaxInvoiceListItem)를 진실원으로 키 정합.
+    //   기존 모델은 approvalNumber/issueDate/supplierName/receiverName/totalAmount 로 역직렬화하여
+    //   실제 서버 키(invoiceNo/issuedAt/partnerName/amountTotal/vatTotal)와 어긋나 전 항목이 비어 보였음.
+    private class TaxInvoiceListRow
+    {
+        [JsonPropertyName("invoiceId")] public string InvoiceId { get; set; } = string.Empty;
+        [JsonPropertyName("invoiceNo")] public string? InvoiceNo { get; set; }
+        [JsonPropertyName("issuedAt")] public DateTime? IssuedAt { get; set; }
+        [JsonPropertyName("partnerName")] public string? PartnerName { get; set; }
+        [JsonPropertyName("amountTotal")] public decimal AmountTotal { get; set; }
+        [JsonPropertyName("vatTotal")] public decimal VatTotal { get; set; }
+        [JsonPropertyName("status")] public string? Status { get; set; }
+        [JsonPropertyName("etaxStatus")] public string? EtaxStatus { get; set; }
+    }
+
+    // 봉합 (2026-06-23, 19차): 종전엔 Snackbar 안내만(백엔드 미연결)이라 취소 버튼이 동작 안 했다.
+    //   백엔드 Cancel(POST api/sales/tax-invoices/{id}/cancel) 이 완비돼 있어 실제 호출로 연결한다.
+    private async Task OnCancelClick(HistoryItemDto item)
+    {
+        if (string.IsNullOrEmpty(item.InvoiceId))
+        {
+            Snackbar.Add("취소할 세금계산서를 찾을 수 없습니다.", Severity.Warning);
+            return;
+        }
+
+        var confirm = await DialogService.ShowMessageBoxAsync(
+            "세금계산서 취소",
+            $"{item.ApprovalNumber} 계산서를 취소하시겠습니까? 취소 후에는 되돌릴 수 없습니다.",
+            yesText: "취소 처리", cancelText: "닫기");
+        if (confirm != true) return;
+
+        _busy = true;
+        try
+        {
+            using var req = new HttpRequestMessage(HttpMethod.Post, $"api/sales/tax-invoices/{item.InvoiceId}/cancel")
+            {
+                Content = JsonContent.Create(new { Reason = "사용자 취소" })
+            };
+            // 발행/취소는 멱등 키 필수 (IdempotencyMiddleware) — 중복 클릭 방지.
+            req.Headers.Add("Idempotency-Key", Guid.NewGuid().ToString("N"));
+
+            using var resp = await Http.SendAsync(req);
+            if (resp.IsSuccessStatusCode)
+            {
+                Snackbar.Add($"{item.ApprovalNumber} 계산서가 취소되었습니다.", Severity.Success);
+                await RefreshAsync();
+            }
+            else
+            {
+                var msg = await resp.Content.ReadAsStringAsync();
+                Snackbar.Add($"취소 실패: {msg}", Severity.Error);
+            }
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"취소 중 오류: {ex.Message}", Severity.Error);
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private void OnResendClick(HistoryItemDto item)
+    {
+        Snackbar.Add($"재발행 요청: {item.ApprovalNumber} (W3 가도 시 백엔드 연결)", Severity.Info);
+    }
+
+    private void OnViewDetail(HistoryItemDto item)
+    {
+        Snackbar.Add($"상세: {item.ApprovalNumber} (W3 가도 시 다이얼로그 연결)", Severity.Info);
+    }
+
+    // 봉합 (2026-06-22, 10차 P1-2): 서버 status 값(소문자 issued/canceled)에 맞춰 대소문자 무시 매핑.
+    private Color GetStatusColor(string status) => status?.ToLowerInvariant() switch
+    {
+        "issued" => Color.Success,
+        "approved" => Color.Success,
+        "bounced" => Color.Warning,
+        "canceled" => Color.Error,
+        "cancelled" => Color.Error,
+        "pending" => Color.Info,
+        _ => Color.Default
+    };
+
+    private string GetStatusName(string status) => status?.ToLowerInvariant() switch
+    {
+        "issued" => "발행됨",
+        "approved" => "승인됨",
+        "bounced" => "반송",
+        "canceled" => "취소",
+        "cancelled" => "취소",
+        "pending" => "대기",
+        _ => status ?? string.Empty
+    };
+
+    public record HistoryItemDto(
+        DateTime IssuedAt,
+        string ApprovalNumber,
+        string SupplierName,
+        string ReceiverName,
+        decimal TotalAmount,
+        string Status,
+        string InvoiceId);  // 봉합 (2026-06-23, 19차): 취소 API 호출용 — 종전엔 매핑 시 버려 취소 불가였다.
+
+    public record HistoryStatsDto
+    {
+        public int Issued { get; init; }
+        public int Bounced { get; init; }
+        public int Cancelled { get; init; }
+        public int Pending { get; init; }
+    }
+}

@@ -1,0 +1,521 @@
+@page "/users"
+@namespace HitPan.Web.Pages.UsersUi
+@attribute [Authorize]
+@using HitPan.Web.Models
+@using HitPan.Web.Services
+@using HitPan.Web.Components.Common
+@inject UserService UserSvc
+@inject ISnackbar Snackbar
+@inject NavigationManager Nav
+@inject IJSRuntime JS
+@inject IDialogService DialogService
+
+<PageTitle>사용자 추가·관리</PageTitle>
+
+<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
+    <div>
+        <MudText Typo="Typo.h6">사용자 추가·관리</MudText>
+        <MudText Typo="Typo.caption" Style="color:var(--mud-palette-text-secondary)">
+            로그인 계정 관리 · 사원 정보는 [사원관리] 메뉴
+        </MudText>
+    </div>
+    <div class="d-flex gap-2">
+        <MudButton Variant="Variant.Outlined" Size="Size.Small"
+            StartIcon="@Icons.Material.Filled.Lock"
+            OnClick="@(() => Nav.NavigateTo("/users/permissions"))">권한 설정</MudButton>
+        <MudButton Variant="Variant.Outlined" Size="Size.Small" Color="Color.Success"
+            StartIcon="@Icons.Material.Filled.UploadFile"
+            OnClick="@(() => _showBulk = true)">엑셀 일괄등록</MudButton>
+        <MudButton Variant="Variant.Filled" Size="Size.Small" Color="Color.Primary"
+            StartIcon="@Icons.Material.Filled.PersonAdd"
+            OnClick="OpenCreateDialog">사용자 추가</MudButton>
+    </div>
+</div>
+
+@if (_loading)
+{
+    <MudProgressLinear Indeterminate="true" Color="Color.Primary" />
+}
+else if (_users.Count == 0)
+{
+    @* 빈 상태 *@
+    <MudPaper Elevation="0" Class="pa-8 text-center" Style="border:0.5px dashed var(--mud-palette-lines-default);border-radius:12px">
+        <MudIcon Icon="@Icons.Material.Outlined.PeopleAlt" Size="Size.Large" Style="color:var(--mud-palette-text-secondary);font-size:64px" />
+        <MudText Typo="Typo.h6" Class="mt-3">아직 등록된 사용자가 없습니다</MudText>
+        <MudText Typo="Typo.body2" Class="mb-3" Style="color:var(--mud-palette-text-secondary)">
+            첫 사용자를 추가해보세요. 이메일·임시비밀번호만 있으면 1분이면 됩니다.
+        </MudText>
+        <MudButton Variant="Variant.Filled" Color="Color.Primary"
+            StartIcon="@Icons.Material.Filled.PersonAdd"
+            OnClick="OpenCreateDialog">첫 사용자 추가</MudButton>
+    </MudPaper>
+}
+else
+{
+    @* 헌법 #35 (사장님 결재 2026-06-04) — 부모/자식 안내 *@
+    <MudAlert Severity="Severity.Info" Class="mb-3" Dense="true" Icon="@Icons.Material.Filled.AccountTree">
+        여기서 추가하는 계정은 <b>자식 계정</b>입니다. 부모 계정만 자식을 생성할 수 있으며, 본사 백오피스에는 노출되지 않습니다.
+        부모 계정은 가입 시점에 자동 생성되며 삭제할 수 없습니다.
+    </MudAlert>
+
+    <MudPaper Elevation="0" Class="pa-2 hitpan-card">
+        <MudTable Items="_users" Dense="true" Hover="true" Breakpoint="Breakpoint.Sm">
+            <HeaderContent>
+                <MudTh>이메일</MudTh>
+                <MudTh>이름</MudTh>
+                <MudTh>부서·직책</MudTh>
+                <MudTh Style="text-align:center">계층</MudTh>
+                <MudTh Style="text-align:center">역할</MudTh>
+                <MudTh Style="text-align:center">사원 연결</MudTh>
+                <MudTh Style="text-align:center">상태</MudTh>
+                <MudTh Style="width:220px;text-align:center">처리</MudTh>
+            </HeaderContent>
+            <RowTemplate>
+                <MudTd Style="font-weight:500">@context.Email</MudTd>
+                <MudTd>@context.UserName</MudTd>
+                <MudTd Style="font-size:12px;color:var(--mud-palette-text-secondary)">
+                    @($"{context.Department} · {context.Position}".Trim(' ', '·'))
+                </MudTd>
+                <MudTd Style="text-align:center">
+                    @if (context.IsParent)
+                    {
+                        <MudChip T="string" Size="Size.Small" Variant="Variant.Filled" Color="Color.Primary"
+                                 Icon="@Icons.Material.Filled.Stars">부모</MudChip>
+                    }
+                    else
+                    {
+                        <MudChip T="string" Size="Size.Small" Variant="Variant.Text" Color="Color.Default">자식</MudChip>
+                    }
+                </MudTd>
+                <MudTd Style="text-align:center">
+                    <MudChip T="string" Size="Size.Small" Variant="Variant.Filled"
+                        Color="@(context.AccountType == "tenant_admin" ? Color.Primary : Color.Default)">
+                        @(context.AccountType == "tenant_admin" ? "관리자" : "일반")
+                    </MudChip>
+                </MudTd>
+                <MudTd Style="text-align:center">
+                    @if (!string.IsNullOrEmpty(context.EmpName))
+                    {
+                        <MudChip T="string" Size="Size.Small" Variant="Variant.Text" Color="Color.Success">@context.EmpName</MudChip>
+                    }
+                    else
+                    {
+                        <MudChip T="string" Size="Size.Small" Variant="Variant.Text" Color="Color.Warning">⚠ 미연결</MudChip>
+                    }
+                </MudTd>
+                <MudTd Style="text-align:center">
+                    <MudChip T="string" Size="Size.Small" Variant="Variant.Filled"
+                        Color="@(context.IsActive ? Color.Success : Color.Default)">
+                        @(context.IsActive ? "활성" : "비활성")
+                    </MudChip>
+                </MudTd>
+                <MudTd Style="text-align:center">
+                    <MudIconButton Icon="@Icons.Material.Filled.Edit" Size="Size.Small" Color="Color.Default"
+                        OnClick="@(() => OpenEditDialog(context))" />
+                    <MudIconButton Icon="@Icons.Material.Filled.LockReset" Size="Size.Small" Color="Color.Info"
+                        OnClick="@(() => OpenResetPwDialog(context))" />
+                    @if (context.IsActive && !context.IsParent)
+                    {
+                        <MudIconButton Icon="@Icons.Material.Filled.PersonOff" Size="Size.Small" Color="Color.Warning"
+                            OnClick="@(() => OpenDeactivateDialog(context))" />
+                    }
+                    else if (context.IsParent)
+                    {
+                        <MudTooltip Text="부모 계정은 삭제할 수 없습니다 (헌법 #35)">
+                            <MudIconButton Icon="@Icons.Material.Filled.Lock" Size="Size.Small" Color="Color.Default" Disabled="true" />
+                        </MudTooltip>
+                    }
+                </MudTd>
+            </RowTemplate>
+        </MudTable>
+    </MudPaper>
+}
+
+@* 사용자 추가 다이얼로그 *@
+<MudDialog @bind-Visible="_showCreate" Options="@(new DialogOptions { MaxWidth = MaxWidth.Small, FullWidth = true })">
+    <TitleContent><MudText Typo="Typo.h6">사용자 추가</MudText></TitleContent>
+    <DialogContent>
+        <MudTextField T="string" @bind-Value="_createModel.Email" Label="이메일 *" Variant="Variant.Outlined" Class="mb-2" />
+        <MudTextField T="string" @bind-Value="_createModel.UserName" Label="이름 *" Variant="Variant.Outlined" Class="mb-2" />
+        <div class="d-flex gap-2 mb-2 align-center">
+            <MudTextField T="string" @bind-Value="_createModel.Password" Label="임시 비밀번호 *" Variant="Variant.Outlined"
+                InputType="@(_showCreatePassword ? InputType.Text : InputType.Password)"
+                Adornment="Adornment.End"
+                AdornmentIcon="@(_showCreatePassword ? Icons.Material.Filled.VisibilityOff : Icons.Material.Filled.Visibility)"
+                OnAdornmentClick="@(() => _showCreatePassword = !_showCreatePassword)"
+                AdornmentAriaLabel="비밀번호 표시 전환"
+                HelperText="@PasswordHint(_createModel.Password)" Class="flex-grow-1" />
+            <MudButton Variant="Variant.Outlined" Size="Size.Small" OnClick="GenerateTempPassword">랜덤생성</MudButton>
+        </div>
+        <MudTextField T="string" @bind-Value="_createModel.Department" Label="부서" Variant="Variant.Outlined" Class="mb-2" />
+        <MudTextField T="string" @bind-Value="_createModel.Position" Label="직책" Variant="Variant.Outlined" Class="mb-2" />
+        <MudTextField T="string" @bind-Value="_createModel.Phone" Label="전화번호" Variant="Variant.Outlined" Class="mb-2" />
+        <MudDatePicker @bind-Date="_createModel.HireDate" Label="입사일" Variant="Variant.Outlined" Class="mb-2" Editable="true" DateFormat="yyyy-MM-dd" />
+        @* role 드롭다운 — tenant_user만 (관리자 증식 방지) *@
+        <MudSelect T="string" @bind-Value="_createModel.Role" Label="역할" Variant="Variant.Outlined" Class="mb-2">
+            <MudSelectItem Value="@("User")">일반 사용자</MudSelectItem>
+            <MudSelectItem Value="@("Manager")">매니저</MudSelectItem>
+        </MudSelect>
+        <MudAlert Severity="Severity.Success" Class="mt-2" Dense="true">
+            추가 시 사원 정보도 자동 등록됩니다. (사원관리에서 추가 정보 입력 가능)
+        </MudAlert>
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="@(() => _showCreate = false)" Disabled="_busy">취소</MudButton>
+        <MudButton Variant="Variant.Filled" Color="Color.Primary" Disabled="_busy || !CanSubmitCreate" OnClick="SubmitCreate">
+            @(_busy ? "저장 중..." : "추가")
+        </MudButton>
+    </DialogActions>
+</MudDialog>
+
+@* 사용자 수정 다이얼로그 *@
+<MudDialog @bind-Visible="_showEdit" Options="@(new DialogOptions { MaxWidth = MaxWidth.Small, FullWidth = true })">
+    <TitleContent><MudText Typo="Typo.h6">사용자 수정 — @_editTarget?.Email</MudText></TitleContent>
+    <DialogContent>
+        <MudTextField T="string" @bind-Value="_editModel.UserName" Label="이름 *" Variant="Variant.Outlined" Class="mb-2" />
+        <MudTextField T="string" @bind-Value="_editModel.Department" Label="부서" Variant="Variant.Outlined" Class="mb-2" />
+        <MudTextField T="string" @bind-Value="_editModel.Position" Label="직책" Variant="Variant.Outlined" Class="mb-2" />
+        <MudTextField T="string" @bind-Value="_editModel.Phone" Label="전화번호" Variant="Variant.Outlined" Class="mb-2" />
+        <MudSelect T="string" @bind-Value="_editModel.Role" Label="역할" Variant="Variant.Outlined" Class="mb-2">
+            <MudSelectItem Value="@("User")">일반 사용자</MudSelectItem>
+            <MudSelectItem Value="@("Manager")">매니저</MudSelectItem>
+        </MudSelect>
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="@(() => _showEdit = false)" Disabled="_busy">취소</MudButton>
+        <MudButton Variant="Variant.Filled" Color="Color.Primary" Disabled="_busy" OnClick="SubmitEdit">
+            @(_busy ? "저장 중..." : "저장")
+        </MudButton>
+    </DialogActions>
+</MudDialog>
+
+@* 비활성화 확인 다이얼로그 *@
+<MudDialog @bind-Visible="_showDeactivate" Options="@(new DialogOptions { MaxWidth = MaxWidth.Small, FullWidth = true })">
+    <TitleContent>
+        <MudText Typo="Typo.h6" Style="color:var(--mud-palette-warning)">
+            <MudIcon Icon="@Icons.Material.Filled.Warning" /> 사용자 비활성화
+        </MudText>
+    </TitleContent>
+    <DialogContent>
+        <MudAlert Severity="Severity.Warning" Class="mb-3">
+            <strong>@_deactivateTarget?.Email</strong> 계정을 비활성화합니다.<br />
+            해당 사용자는 더 이상 로그인할 수 없습니다.
+        </MudAlert>
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="@(() => _showDeactivate = false)" Disabled="_busy">취소</MudButton>
+        <MudButton Variant="Variant.Filled" Color="Color.Warning" Disabled="_busy" OnClick="SubmitDeactivate">
+            @(_busy ? "처리 중..." : "비활성화")
+        </MudButton>
+    </DialogActions>
+</MudDialog>
+
+@* 엑셀 일괄 업로드 다이얼로그 *@
+<MudDialog @bind-Visible="_showBulk" Options="@(new DialogOptions { MaxWidth = MaxWidth.Medium, FullWidth = true })">
+    <TitleContent><MudText Typo="Typo.h6">엑셀 일괄 사용자 등록</MudText></TitleContent>
+    <DialogContent>
+        <MudAlert Severity="Severity.Info" Class="mb-3">
+            ① 템플릿 다운로드 → ② 엑셀 작성 → ③ 업로드<br />
+            첫 행은 헤더이며 변경하지 마세요. 한 행이 실패해도 나머지 행은 계속 처리됩니다.
+        </MudAlert>
+
+        <div class="d-flex gap-2 mb-3">
+            <MudButton Variant="Variant.Outlined" Color="Color.Primary"
+                StartIcon="@Icons.Material.Filled.Download"
+                OnClick="DownloadTemplate" Disabled="_busy">
+                템플릿 다운로드
+            </MudButton>
+            <MudFileUpload T="IBrowserFile" FilesChanged="OnFileSelected" Accept=".xlsx">
+                <ActivatorContent>
+                    <MudButton Variant="Variant.Filled" Color="Color.Success"
+                        StartIcon="@Icons.Material.Filled.UploadFile"
+                        Disabled="_busy">
+                        @(_busy ? "업로드 중..." : "엑셀 선택 + 업로드")
+                    </MudButton>
+                </ActivatorContent>
+            </MudFileUpload>
+        </div>
+
+        @if (_bulkResult != null)
+        {
+            <MudPaper Elevation="0" Class="pa-3" Style="border:1px solid var(--mud-palette-lines-default);border-radius:8px">
+                <MudText Typo="Typo.subtitle1" Style="font-weight:600">업로드 결과</MudText>
+                <div class="d-flex gap-3 mt-2">
+                    <MudChip T="string" Color="Color.Info" Variant="Variant.Filled">총 @(_bulkResult.TotalRows)행</MudChip>
+                    <MudChip T="string" Color="Color.Success" Variant="Variant.Filled">성공 @(_bulkResult.SuccessCount)건</MudChip>
+                    <MudChip T="string" Color="Color.Error" Variant="Variant.Filled">실패 @(_bulkResult.FailedCount)건</MudChip>
+                </div>
+                @if (_bulkResult.Errors.Any())
+                {
+                    <MudText Typo="Typo.body2" Class="mt-3" Style="font-weight:600">실패한 행:</MudText>
+                    <MudSimpleTable Dense="true" Class="mt-1" Style="font-size:12px">
+                        <thead>
+                            <tr><th>행</th><th>이메일</th><th>실패 사유</th></tr>
+                        </thead>
+                        <tbody>
+                            @foreach (var e in _bulkResult.Errors)
+                            {
+                                <tr><td>@e.Row</td><td>@e.Email</td><td style="color:var(--mud-palette-error)">@e.Reason</td></tr>
+                            }
+                        </tbody>
+                    </MudSimpleTable>
+                }
+            </MudPaper>
+        }
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="CloseBulkDialog">닫기</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@* 임시 비밀번호 발급 결과 다이얼로그 *@
+<MudDialog @bind-Visible="_showResetResult" Options="@(new DialogOptions { MaxWidth = MaxWidth.Small, FullWidth = true })">
+    <TitleContent><MudText Typo="Typo.h6">임시 비밀번호 발급됨</MudText></TitleContent>
+    <DialogContent>
+        <MudAlert Severity="Severity.Info" Class="mb-3">
+            <strong>@_resetTarget?.Email</strong> 계정의 임시 비밀번호를 아래에서 복사해 사용자에게 전달하세요.
+        </MudAlert>
+        <MudPaper Elevation="0" Class="pa-3 d-flex align-center gap-2" Style="background:var(--mud-palette-background-grey);border-radius:8px">
+            <MudText Typo="Typo.h6" Style="font-family:monospace;word-break:break-all;flex:1">
+                @(_showResetPassword ? _tempPassword : new string('●', _tempPassword?.Length ?? 0))
+            </MudText>
+            <MudIconButton Size="Size.Small"
+                Icon="@(_showResetPassword ? Icons.Material.Filled.VisibilityOff : Icons.Material.Filled.Visibility)"
+                OnClick="@(() => _showResetPassword = !_showResetPassword)"
+                aria-label="비밀번호 표시 전환" />
+            <MudIconButton Size="Size.Small"
+                Icon="@Icons.Material.Filled.ContentCopy"
+                OnClick="CopyTempPasswordAsync"
+                aria-label="비밀번호 복사" />
+        </MudPaper>
+        <MudText Typo="Typo.caption" Class="mt-3" Style="color:var(--mud-palette-text-secondary)">
+            이 비밀번호는 다시 볼 수 없습니다. 사용자에게 전달 후 본인 비밀번호로 변경하도록 안내해주세요.
+        </MudText>
+    </DialogContent>
+    <DialogActions>
+        <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="@(() => _showResetResult = false)">확인</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    private List<UserListModel> _users = new();
+    private bool _loading = true;
+    private bool _busy = false;
+
+    // 다이얼로그 상태
+    private bool _showCreate, _showEdit, _showDeactivate, _showResetResult, _showBulk;
+    private CreateUserModel _createModel = new();
+    private UpdateUserModel _editModel = new();
+    private UserListModel? _editTarget, _deactivateTarget, _resetTarget;
+    private string _tempPassword = "";
+    // WO-4 보안: 비밀번호 마스킹 토글 (사장님 검증 발견 #1, 안랩·법무팀장 권고)
+    private bool _showCreatePassword = false;
+    private bool _showResetPassword = false;
+    private BulkCreateResult? _bulkResult;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadAsync();
+    }
+
+    private async Task LoadAsync()
+    {
+        _loading = true;
+        var list = await UserSvc.GetAllAsync();
+        _users = list ?? new();
+        _loading = false;
+    }
+
+    // ── 추가 ──
+    private void OpenCreateDialog()
+    {
+        _createModel = new() { Role = "User" };
+        _showCreatePassword = false; // 항상 마스킹 상태로 시작
+        _showCreate = true;
+    }
+
+    private bool CanSubmitCreate =>
+        !string.IsNullOrWhiteSpace(_createModel.Email)
+        && !string.IsNullOrWhiteSpace(_createModel.UserName)
+        && _createModel.Password.Length >= 8;
+
+    private async Task SubmitCreate()
+    {
+        _busy = true;
+        var (ok, error) = await UserSvc.CreateAsync(_createModel);
+        _busy = false;
+        if (ok)
+        {
+            Snackbar.Add("사용자가 추가되었습니다.", Severity.Success);
+            _showCreate = false;
+            await LoadAsync();
+        }
+        else
+        {
+            Snackbar.Add($"추가 실패: {error}", Severity.Error);
+        }
+    }
+
+    // ── 수정 ──
+    private async Task OpenEditDialog(UserListModel user)
+    {
+        // WO-20260430-9 Step-up: 사용자 정보 수정 = 민감 작업
+        var stepUp = await StepUpDialog.RequestAsync(DialogService,
+            $"{user.Email} 정보 수정");
+        if (!stepUp) return;
+
+        _editTarget = user;
+        _editModel = new()
+        {
+            UserName = user.UserName,
+            EmpName = user.EmpName,
+            Department = user.Department,
+            Position = user.Position,
+            Phone = user.Phone,
+            Role = user.Role,
+            IsActive = user.IsActive,
+            HireDate = user.HireDate
+        };
+        _showEdit = true;
+    }
+
+    private async Task SubmitEdit()
+    {
+        if (_editTarget == null) return;
+        _busy = true;
+        var ok = await UserSvc.UpdateAsync(_editTarget.UserId, _editModel);
+        _busy = false;
+        if (ok)
+        {
+            Snackbar.Add("수정되었습니다.", Severity.Success);
+            _showEdit = false;
+            await LoadAsync();
+        }
+        else Snackbar.Add("수정 실패", Severity.Error);
+    }
+
+    // ── 비활성화 ──
+    private async Task OpenDeactivateDialog(UserListModel user)
+    {
+        // WO-20260430-9 Step-up: 비활성화 = 민감 작업
+        var stepUp = await StepUpDialog.RequestAsync(DialogService,
+            $"{user.Email} 계정 비활성화");
+        if (!stepUp) return;
+
+        _deactivateTarget = user;
+        _showDeactivate = true;
+    }
+
+    private async Task SubmitDeactivate()
+    {
+        if (_deactivateTarget == null) return;
+        _busy = true;
+        var ok = await UserSvc.DeactivateAsync(_deactivateTarget.UserId);
+        _busy = false;
+        if (ok)
+        {
+            Snackbar.Add($"{_deactivateTarget.Email} 비활성화 완료", Severity.Success);
+            _showDeactivate = false;
+            await LoadAsync();
+        }
+        else Snackbar.Add("비활성화 실패", Severity.Error);
+    }
+
+    // ── 임시 비밀번호 ──
+    private async Task OpenResetPwDialog(UserListModel user)
+    {
+        // WO-20260430-9 Step-up: 비밀번호 초기화 = 민감 작업
+        var stepUp = await StepUpDialog.RequestAsync(DialogService,
+            $"{user.Email} 비밀번호 초기화");
+        if (!stepUp) return;
+
+        _resetTarget = user;
+        var res = await UserSvc.ResetPasswordAsync(user.UserId);
+        if (res != null)
+        {
+            _tempPassword = res.TempPassword;
+            _showResetPassword = false; // 항상 마스킹 상태로 시작
+            _showResetResult = true;
+        }
+        else Snackbar.Add("비밀번호 초기화 실패", Severity.Error);
+    }
+
+    // 임시 비밀번호 클립보드 복사
+    private async Task CopyTempPasswordAsync()
+    {
+        if (string.IsNullOrEmpty(_tempPassword)) return;
+        try
+        {
+            await JS.InvokeVoidAsync("navigator.clipboard.writeText", _tempPassword);
+            Snackbar.Add("비밀번호가 클립보드에 복사되었습니다", Severity.Success);
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"복사 실패: {ex.Message}", Severity.Error);
+        }
+    }
+
+    // ── 엑셀 일괄 ──
+    private async Task DownloadTemplate()
+    {
+        _busy = true;
+        var bytes = await UserSvc.GetBulkTemplateAsync();
+        _busy = false;
+        if (bytes == null) { Snackbar.Add("템플릿 다운로드 실패", Severity.Error); return; }
+
+        // JS interop으로 브라우저 다운로드 트리거
+        await JS.InvokeVoidAsync("downloadFileFromBytes",
+            "히트판_사용자_일괄등록_템플릿.xlsx",
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            Convert.ToBase64String(bytes));
+    }
+
+    private async Task OnFileSelected(IBrowserFile file)
+    {
+        if (file == null) return;
+        _busy = true;
+        _bulkResult = null;
+        using var stream = file.OpenReadStream(maxAllowedSize: 10 * 1024 * 1024); // 10MB
+        _bulkResult = await UserSvc.BulkUploadAsync(stream, file.Name);
+        _busy = false;
+        if (_bulkResult != null && _bulkResult.SuccessCount > 0)
+        {
+            Snackbar.Add($"{_bulkResult.SuccessCount}건 등록 성공", Severity.Success);
+            await LoadAsync();
+        }
+        if (_bulkResult?.FailedCount > 0)
+            Snackbar.Add($"{_bulkResult.FailedCount}건 실패 — 다이얼로그에서 확인", Severity.Warning);
+    }
+
+    private void CloseBulkDialog()
+    {
+        _showBulk = false;
+        _bulkResult = null;
+    }
+
+    // ── 유틸 ──
+    private void GenerateTempPassword()
+    {
+        const string chars = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789!@#$";
+        var rand = new Random();
+        _createModel.Password = new string(Enumerable.Range(0, 12).Select(_ => chars[rand.Next(chars.Length)]).ToArray());
+    }
+
+    private static string PasswordHint(string pw)
+    {
+        if (string.IsNullOrEmpty(pw)) return "8자 이상, 숫자·대소문자·특수기호 포함 권장";
+        if (pw.Length < 8) return "❌ 8자 이상 필요";
+        var hasDigit = pw.Any(char.IsDigit);
+        var hasUpper = pw.Any(char.IsUpper);
+        var hasLower = pw.Any(char.IsLower);
+        var hasSpec = pw.Any(c => "!@#$%^&*()_+".Contains(c));
+        var score = (hasDigit ? 1 : 0) + (hasUpper ? 1 : 0) + (hasLower ? 1 : 0) + (hasSpec ? 1 : 0);
+        return score switch
+        {
+            4 => "🟢 매우 강함",
+            3 => "🟡 강함",
+            2 => "🟠 보통",
+            _ => "🔴 약함 — 숫자·대소문자·특수기호 섞으세요"
+        };
+    }
+}

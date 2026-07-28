@@ -1,0 +1,200 @@
+@page "/settings/form-templates"
+@namespace HitPan.Web.Pages.SettingsUi
+@attribute [Authorize(Roles = "system_admin,tenant_admin")]
+@using System.Net.Http.Json
+@inject HttpClient Http
+@inject ISnackbar Snackbar
+@inject IDialogService DialogService
+
+<PageTitle>양식정보설정 — 히트판 ERP</PageTitle>
+
+<MudPaper Class="pa-4 mb-3" Elevation="0">
+    <MudText Typo="Typo.h5" Class="mb-1">양식정보설정</MudText>
+    <MudText Typo="Typo.body2" Class="mud-text-secondary">
+        견적·수주·거래명세서·발주·매입·반품 6대 양식의 인쇄·이메일·PDF·엑셀 양식을 설정합니다.
+        <strong>순백지(plain)</strong>는 일반 A4에 테두리·로고 포함 인쇄, <strong>양식용지(preprint)</strong>는 시판 양식용지에 필드값만 좌표대로 인쇄합니다.
+    </MudText>
+</MudPaper>
+
+<MudToolBar Dense="true" Class="mb-2">
+    <MudSelect T="string" @bind-Value="_filterFormType" Label="양식 유형" Margin="Margin.Dense" Style="max-width:200px;">
+        <MudSelectItem T="string" Value="@(null)">전체</MudSelectItem>
+        @foreach (var ft in FormTypes)
+        {
+            <MudSelectItem T="string" Value="@ft.Key">@ft.Value</MudSelectItem>
+        }
+    </MudSelect>
+    <MudButton Variant="Variant.Outlined" Class="ml-2" StartIcon="@Icons.Material.Filled.Refresh" OnClick="LoadAsync">새로고침</MudButton>
+    <MudSpacer />
+    <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.AutoFixHigh" OnClick="SeedDefaultsAsync">기본 양식 시드(6건)</MudButton>
+    <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Add" Class="ml-2" OnClick="OpenCreateDialog">신규 양식</MudButton>
+</MudToolBar>
+
+@if (_loading)
+{
+    <MudProgressLinear Indeterminate="true" Color="Color.Primary" />
+}
+else
+{
+    <MudTable Items="_filtered" Dense="true" Hover="true" Bordered="true">
+        <HeaderContent>
+            <MudTh>양식 유형</MudTh>
+            <MudTh>이름</MudTh>
+            <MudTh>용지 모드</MudTh>
+            <MudTh>용지·방향</MudTh>
+            <MudTh>여백(상·좌·우·하 mm)</MudTh>
+            <MudTh>기본</MudTh>
+            <MudTh>활성</MudTh>
+            <MudTh></MudTh>
+        </HeaderContent>
+        <RowTemplate>
+            <MudTd>@FormTypes.GetValueOrDefault(context.FormType, context.FormType)</MudTd>
+            <MudTd>@context.TemplateName</MudTd>
+            <MudTd>
+                @if (context.PaperMode == "preprint")
+                {
+                    <MudChip T="string" Color="Color.Warning" Size="Size.Small">양식용지(preprint)</MudChip>
+                }
+                else
+                {
+                    <MudChip T="string" Color="Color.Default" Size="Size.Small">순백지(plain)</MudChip>
+                }
+            </MudTd>
+            <MudTd>@context.PaperSize · @(context.Orientation == "landscape" ? "가로" : "세로")</MudTd>
+            <MudTd>@($"{context.MarginTopMm} · {context.MarginLeftMm} · {context.MarginRightMm} · {context.MarginBottomMm}")</MudTd>
+            <MudTd>@(context.IsDefault ? "★" : "")</MudTd>
+            <MudTd>@(context.IsActive ? "✓" : "")</MudTd>
+            <MudTd>
+                <MudButton Size="Size.Small" Variant="Variant.Text" OnClick="@(() => OpenEditDialog(context))">수정</MudButton>
+                <MudButton Size="Size.Small" Variant="Variant.Text" Color="Color.Error" OnClick="@(() => DeactivateAsync(context))">비활성</MudButton>
+            </MudTd>
+        </RowTemplate>
+        <NoRecordsContent>
+            <MudText Typo="Typo.body2" Class="pa-4 mud-text-secondary">등록된 양식이 없습니다. 우측 상단 "기본 양식 시드(6건)" 버튼으로 시작하세요.</MudText>
+        </NoRecordsContent>
+    </MudTable>
+}
+
+@code {
+    private static readonly Dictionary<string, string> FormTypes = new()
+    {
+        ["estimate"] = "견적서",
+        ["sales_order"] = "수주서",
+        ["delivery"] = "거래명세서",
+        ["purchase_order"] = "발주서",
+        ["receipt"] = "매입명세서",
+        ["purchase_return"] = "매입반품",
+        ["sales_return"] = "판매반품",
+        ["tax_invoice"] = "세금계산서"
+    };
+
+    private List<FormTemplateDto> _all = new();
+    private string? _filterFormType;
+    private bool _loading = true;
+
+    private IEnumerable<FormTemplateDto> _filtered =>
+        string.IsNullOrEmpty(_filterFormType) ? _all : _all.Where(t => t.FormType == _filterFormType);
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadAsync();
+    }
+
+    private async Task LoadAsync()
+    {
+        _loading = true;
+        try
+        {
+            var list = await Http.GetFromJsonAsync<List<FormTemplateDto>>("api/settings/form-templates?activeOnly=false");
+            _all = list ?? new();
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"양식 목록 조회 실패: {ex.Message}", Severity.Error);
+            _all = new();
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    private async Task SeedDefaultsAsync()
+    {
+        try
+        {
+            var resp = await Http.PostAsync("api/settings/form-templates/seed-defaults", null);
+            if (resp.IsSuccessStatusCode)
+            {
+                Snackbar.Add("6대 양식 기본 템플릿이 등록되었습니다.", Severity.Success);
+                await LoadAsync();
+            }
+            else
+            {
+                Snackbar.Add($"시드 실패 ({(int)resp.StatusCode})", Severity.Error);
+            }
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"시드 실패: {ex.Message}", Severity.Error);
+        }
+    }
+
+    private async Task OpenCreateDialog()
+    {
+        var dialog = await DialogService.ShowAsync<FormTemplateEditorDialog>("신규 양식");
+        var result = await dialog.Result;
+        if (result is { Canceled: false }) await LoadAsync();
+    }
+
+    private async Task OpenEditDialog(FormTemplateDto dto)
+    {
+        var parameters = new DialogParameters { ["Template"] = dto };
+        var dialog = await DialogService.ShowAsync<FormTemplateEditorDialog>("양식 수정", parameters);
+        var result = await dialog.Result;
+        if (result is { Canceled: false }) await LoadAsync();
+    }
+
+    private async Task DeactivateAsync(FormTemplateDto dto)
+    {
+        // MudBlazor ShowMessageBox는 일부 버전에서 시그니처 다름 — Snackbar 가이드 + 즉시 실행 가도
+        try
+        {
+            var resp = await Http.DeleteAsync($"api/settings/form-templates/{dto.TemplateId}");
+            if (resp.IsSuccessStatusCode)
+            {
+                Snackbar.Add("비활성화 완료", Severity.Success);
+                await LoadAsync();
+            }
+            else
+            {
+                Snackbar.Add($"비활성화 실패 ({(int)resp.StatusCode})", Severity.Error);
+            }
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"비활성화 실패: {ex.Message}", Severity.Error);
+        }
+    }
+
+    public sealed class FormTemplateDto
+    {
+        public string TemplateId { get; set; } = string.Empty;
+        public string FormType { get; set; } = string.Empty;
+        public string TemplateName { get; set; } = string.Empty;
+        public string PaperMode { get; set; } = "plain";
+        public string PaperSize { get; set; } = "A4";
+        public string Orientation { get; set; } = "portrait";
+        public decimal MarginTopMm { get; set; } = 15m;
+        public decimal MarginLeftMm { get; set; } = 15m;
+        public decimal MarginRightMm { get; set; } = 15m;
+        public decimal MarginBottomMm { get; set; } = 15m;
+        public string? FieldCoordsJson { get; set; }
+        public string? BackgroundImageUrl { get; set; }
+        public bool ShowCompanyLogo { get; set; } = true;
+        public bool ShowCompanySeal { get; set; } = true;
+        public bool ShowBorder { get; set; } = true;
+        public bool IsDefault { get; set; }
+        public bool IsActive { get; set; } = true;
+    }
+}

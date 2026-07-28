@@ -1,0 +1,491 @@
+@page "/setup/license"
+@layout EmptyLayout
+@attribute [AllowAnonymous]
+@inject HttpClient ErpApi
+@inject NavigationManager Nav
+@inject MudBlazor.ISnackbar Snackbar
+@using Microsoft.AspNetCore.Authorization
+@using System.Net.Http.Json
+
+@*
+    히트판 ERP 첫 설치 — 라이선스 검증 + 회사정보 자동 반영 (사장님 결재 2026-06-04, 헌법 #35)
+
+    옵션 C (사장님 결재):
+      - 본사 평문 사업자정보 보관 0건
+      - 라이선스 키 + 사업자번호 + 회사정보(평문) ERP 로컬에만 저장
+      - 백오피스 API는 해시 매칭 검증만
+
+    흐름:
+      Step 1: 라이선스 키 + 사업자번호 입력 → 백오피스 API 검증
+      Step 2: 검증 통과 → 회사 추가정보 입력 (대표·연락처·이메일·주소·업태·종목)
+      Step 3: ERP API /api/setup/bootstrap 호출 → tenants UPDATE + is_locked_from_landing=1
+      Step 4: 부모계정 로그인 안내
+*@
+
+<PageTitle>히트판 ERP 첫 설치 — 라이선스 등록</PageTitle>
+
+<div class="setup-page">
+    <div class="setup-card">
+        <div class="setup-brand">
+            <div class="setup-logo">HP</div>
+            <h1>히트판 ERP 설치</h1>
+            <p>가입 시 받으신 부모 계정ID(라이선스 키)로 회사 정보를 자동 반영합니다.</p>
+        </div>
+
+        <div class="setup-steps">
+            <div class="step @(_step >= 1 ? "active" : "")">1. 라이선스</div>
+            <div class="step-line"></div>
+            <div class="step @(_step >= 2 ? "active" : "")">2. 회사 정보</div>
+            <div class="step-line"></div>
+            <div class="step @(_step >= 3 ? "active" : "")">3. 부모 계정</div>
+            <div class="step-line"></div>
+            <div class="step @(_step >= 4 ? "active" : "")">4. 완료</div>
+        </div>
+
+        @if (!string.IsNullOrEmpty(_error))
+        {
+            <div class="setup-error">@_error</div>
+        }
+
+        @if (_step == 1)
+        {
+            <div class="setup-section">
+                <div class="setup-field">
+                    <label>부모 계정ID (라이선스 키) *</label>
+                    <input type="text" @bind="_licenseKey"
+                           placeholder="HITP-XXXX-XXXX-XXXX-XXXX" maxlength="24"
+                           style="font-family:Consolas,Monaco,monospace;letter-spacing:1px;" />
+                </div>
+                <div class="setup-field">
+                    <label>사업자등록번호 *</label>
+                    <input type="text" @bind="_bizNo"
+                           placeholder="000-00-00000" maxlength="12" />
+                </div>
+                <button type="button" class="setup-submit" @onclick="VerifyAsync" disabled="@_busy">
+                    @(_busy ? "검증 중..." : "라이선스 검증")
+                </button>
+                <p class="setup-note">
+                    가입 시 받으신 이메일에 라이선스 키가 포함되어 있습니다.
+                    분실 시 support@hitpan.kr 로 문의해주세요.
+                </p>
+            </div>
+        }
+        else if (_step == 2)
+        {
+            <div class="setup-section">
+                <div class="setup-readonly">
+                    <div class="setup-readonly-label">확인된 회사</div>
+                    <div class="setup-readonly-value">@_companyName <span class="setup-tenant-code">(@_tenantCode)</span></div>
+                </div>
+
+                <p class="setup-info">
+                    아래 회사 정보는 ERP에 저장되어 본 PC에만 보관됩니다. 본사로 전송되지 않습니다.
+                </p>
+
+                <div class="setup-field">
+                    <label>대표자명 *</label>
+                    <input type="text" @bind="_ceoName" required />
+                </div>
+                <div class="setup-field">
+                    <label>대표 연락처</label>
+                    <input type="tel" @bind="_tel" placeholder="02-000-0000 또는 010-0000-0000" />
+                </div>
+                <div class="setup-field">
+                    <label>이메일</label>
+                    <input type="email" @bind="_email" placeholder="company@example.com" />
+                </div>
+                <div class="setup-field">
+                    <label>회사 주소</label>
+                    <input type="text" @bind="_address" />
+                </div>
+                <div class="setup-row">
+                    <div class="setup-field" style="flex:1;">
+                        <label>업태</label>
+                        <input type="text" @bind="_bizType" placeholder="예: 도소매업" />
+                    </div>
+                    <div class="setup-field" style="flex:1;">
+                        <label>종목</label>
+                        <input type="text" @bind="_bizItem" placeholder="예: 전자제품" />
+                    </div>
+                </div>
+                <div class="setup-row">
+                    <div class="setup-field" style="flex:1;">
+                        <label>우편번호</label>
+                        <input type="text" @bind="_zipCode" maxlength="7" />
+                    </div>
+                    <div class="setup-field" style="flex:1;">
+                        <label>법인등록번호</label>
+                        <input type="text" @bind="_corpNo" placeholder="개인사업자는 비워두세요" maxlength="14" />
+                    </div>
+                </div>
+
+                <button type="button" class="setup-submit" @onclick="BootstrapAsync" disabled="@_busy">
+                    @(_busy ? "저장 중..." : "다음 단계 — 부모 계정 생성")
+                </button>
+                <button type="button" class="setup-back" @onclick="@(() => _step = 1)" disabled="@_busy">
+                    이전 단계로
+                </button>
+            </div>
+        }
+        else if (_step == 3)
+        {
+            <div class="setup-section">
+                <div class="setup-readonly">
+                    <div class="setup-readonly-label">확인된 회사</div>
+                    <div class="setup-readonly-value">@_companyName <span class="setup-tenant-code">(@_tenantCode)</span></div>
+                </div>
+
+                <p class="setup-info">
+                    부모 계정은 ERP 마스터 계정입니다.<br/>
+                    이 계정으로만 자식 계정(직원)을 만들 수 있습니다.
+                </p>
+
+                <div class="setup-field">
+                    <label>대표 이름 *</label>
+                    <input type="text" @bind="_parentName" required />
+                </div>
+                <div class="setup-field">
+                    <label>로그인 아이디 *</label>
+                    @* 사장님 결재 2026-07-06: 이메일 방식 → 아이디 방식. 내부 email 컬럼(uq_tenant_email)을
+                       DDL 수술 없이 그대로 재사용하되, 화면·의미는 "아이디". type=text 로 이메일 형식 강제 제거. *@
+                    <input type="text" @bind="_parentEmail" required placeholder="아이디 (예: hitpan_admin)" maxlength="100" />
+                </div>
+                <div class="setup-field">
+                    <label>비밀번호 (8자 이상) *</label>
+                    <input type="password" @bind="_parentPassword" required placeholder="영문+숫자+특수문자 권장" />
+                </div>
+                <div class="setup-field">
+                    <label>비밀번호 확인 *</label>
+                    <input type="password" @bind="_parentPasswordConfirm" required />
+                </div>
+
+                <button type="button" class="setup-submit" @onclick="CreateParentAsync" disabled="@_busy">
+                    @(_busy ? "계정 생성 중..." : "부모 계정 생성")
+                </button>
+                <button type="button" class="setup-back" @onclick="@(() => _step = 2)" disabled="@_busy">
+                    이전 단계로
+                </button>
+            </div>
+        }
+        else if (_step == 4)
+        {
+            <div class="setup-done">
+                <div class="setup-done-icon">✓</div>
+                <h2>설치가 완료되었습니다</h2>
+                <p><b>@_companyName</b> ERP 설치와 부모 계정 생성이 모두 완료되었습니다.</p>
+                <div class="setup-id">
+                    <div class="setup-id-label">고객사 코드</div>
+                    <div class="setup-id-value">@_tenantCode</div>
+                </div>
+                <div class="setup-id">
+                    <div class="setup-id-label">로그인 아이디</div>
+                    <div class="setup-id-value">@_parentEmail</div>
+                </div>
+                <p>아래 버튼을 눌러 로그인하시면 ERP를 사용할 수 있습니다.</p>
+                <a href="/login" class="setup-go-login">로그인 화면으로 이동</a>
+            </div>
+        }
+    </div>
+</div>
+
+@code {
+    private int _step = 1;
+    private bool _busy;
+    private string? _error;
+
+    // Step 1
+    private string _licenseKey = "";
+    private string _bizNo = "";
+
+    // Step 1 통과 후
+    private string _companyName = "";
+    private string _tenantCode = "";
+    // 헌법 #35 W2 (사장님 결재 2026-06-04) — 백오피스 발급 서명 토큰
+    private string _bootstrapToken = "";
+
+    // Step 2
+    private string _ceoName = "";
+    private string _tel = "";
+    private string _email = "";
+    private string _address = "";
+    private string _bizType = "";
+    private string _bizItem = "";
+    private string _zipCode = "";
+    private string _corpNo = "";
+
+    // Step 3 (부모 계정)
+    private string _parentName = "";
+    private string _parentEmail = "";
+    private string _parentPassword = "";
+    private string _parentPasswordConfirm = "";
+
+    // ★ CORS 진범 절단 (작업지시서 20260707작1 ③단계 P0-4, 사장님 결재 2026-07-07):
+    //   종전엔 이 메서드에서 브라우저가 back.hitpan.kr(백오피스)를 직접 호출했다 → 고객사 터널 도메인이
+    //   백오피스 CORS 목록에 없어 Failed to fetch → 부모계정 생성 전면 차단(오늘 Sandbox 실측 진범).
+    //   봉합: 온보딩(시리얼·사업자번호 검증 → 부모계정 생성)은 설치마법사가 전담한다
+    //         (설치마법사가 PowerShell 서버간으로 license/claim 검증 → seed-parent 오프라인 생성).
+    //         따라서 이 화면의 브라우저→백오피스 직접 호출은 제거한다(CORS 원천 무관).
+    //   이 화면 자체는 재설치·계정분실 재생성 경로(P0-4 로그인 화면 최초등록)로 은퇴 예정이라 파일은 보존한다.
+    //   ※ 서버 통신이 사라져 await 가 없으므로 동기 메서드로 둔다(async 없는 Task 반환 — CS1998 경고 0, 헌법 #19).
+    private Task VerifyAsync()
+    {
+        _error = null;
+        if (string.IsNullOrWhiteSpace(_licenseKey))
+        {
+            _error = "라이선스 키를 입력해주세요.";
+            return Task.CompletedTask;
+        }
+        if (string.IsNullOrWhiteSpace(_bizNo))
+        {
+            _error = "사업자번호를 입력해주세요.";
+            return Task.CompletedTask;
+        }
+
+        _error = "설치는 설치마법사에서 완료됩니다. 로그인 화면에서 부모 계정으로 접속해 주세요.";
+        _busy = false;
+        return Task.CompletedTask;
+    }
+
+    private async Task BootstrapAsync()
+    {
+        _error = null;
+        if (string.IsNullOrWhiteSpace(_ceoName))
+        {
+            _error = "대표자명은 필수입니다.";
+            return;
+        }
+
+        _busy = true;
+        try
+        {
+            var payload = new
+            {
+                BootstrapToken = _bootstrapToken,
+                BizNo = _bizNo,
+                CeoName = _ceoName,
+                Tel = _tel,
+                Email = _email,
+                Address = _address,
+                BizType = _bizType,
+                BizItem = _bizItem,
+                ZipCode = _zipCode,
+                CorpNo = _corpNo
+            };
+            var res = await ErpApi.PostAsJsonAsync("api/setup/bootstrap", payload);
+            var result = await res.Content.ReadFromJsonAsync<BootstrapResponse>();
+            if (res.IsSuccessStatusCode && result?.Success == true)
+            {
+                // 부모계정 이메일 기본값 저장 (사용자가 수정 가능)
+                _parentEmail = _email;
+                _parentName = _ceoName;
+                _step = 3;
+                Snackbar.Add("회사 정보 자동 반영 완료. 부모 계정을 생성해주세요.", MudBlazor.Severity.Success);
+            }
+            else
+            {
+                _error = result?.Message ?? $"자동 반영 실패 ({(int)res.StatusCode})";
+            }
+        }
+        catch (Exception ex)
+        {
+            _error = $"저장 중 오류가 발생했습니다: {ex.Message}";
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private async Task CreateParentAsync()
+    {
+        _error = null;
+        if (string.IsNullOrWhiteSpace(_parentName))
+        {
+            _error = "대표 이름을 입력해주세요.";
+            return;
+        }
+        // 사장님 결재 2026-07-06: 아이디 방식 — 이메일 형식 강제 제거, 아이디 최소 규칙만.
+        //   내부 email 컬럼(uq_tenant_email)을 재사용하므로 값은 _parentEmail 그대로 전송.
+        var parentId = _parentEmail?.Trim() ?? "";
+        if (string.IsNullOrWhiteSpace(parentId))
+        {
+            _error = "로그인 아이디를 입력해주세요.";
+            return;
+        }
+        if (parentId.Length < 4)
+        {
+            _error = "로그인 아이디는 4자 이상이어야 합니다.";
+            return;
+        }
+        if (parentId.Any(char.IsWhiteSpace))
+        {
+            _error = "로그인 아이디에는 공백을 사용할 수 없습니다.";
+            return;
+        }
+        _parentEmail = parentId;
+        if (string.IsNullOrWhiteSpace(_parentPassword) || _parentPassword.Length < 8)
+        {
+            _error = "비밀번호는 8자 이상이어야 합니다.";
+            return;
+        }
+        if (_parentPassword != _parentPasswordConfirm)
+        {
+            _error = "비밀번호가 일치하지 않습니다.";
+            return;
+        }
+
+        _busy = true;
+        try
+        {
+            var payload = new
+            {
+                BootstrapToken = _bootstrapToken,
+                Email = _parentEmail,
+                Password = _parentPassword,
+                Name = _parentName
+            };
+            var res = await ErpApi.PostAsJsonAsync("api/setup/create-parent", payload);
+            var result = await res.Content.ReadFromJsonAsync<CreateParentResponse>();
+            if (res.IsSuccessStatusCode && result?.Success == true)
+            {
+                _step = 4;
+                Snackbar.Add("부모 계정이 생성되었습니다. 로그인하시면 ERP를 사용할 수 있습니다.", MudBlazor.Severity.Success);
+            }
+            else
+            {
+                _error = result?.Message ?? $"부모 계정 생성 실패 ({(int)res.StatusCode})";
+            }
+        }
+        catch (Exception ex)
+        {
+            _error = $"생성 중 오류가 발생했습니다: {ex.Message}";
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private class ClaimResponse
+    {
+        public bool Valid { get; set; }
+        public string? CompanyName { get; set; }
+        public string? TenantCode { get; set; }
+        public string? Message { get; set; }
+        // 헌법 #35 W2 — 백오피스 서명 토큰 (HMAC-SHA256, 10분 만료)
+        public string? BootstrapToken { get; set; }
+    }
+
+    private class BootstrapResponse
+    {
+        public bool Success { get; set; }
+        public string? Message { get; set; }
+        public string? TenantCode { get; set; }
+        public string? CompanyName { get; set; }
+    }
+
+    private class CreateParentResponse
+    {
+        public bool Success { get; set; }
+        public string? Message { get; set; }
+        public string? UserId { get; set; }
+        public string? Email { get; set; }
+        public string? TenantCode { get; set; }
+    }
+}
+
+<style>
+    .setup-page {
+        min-height: 100vh;
+        display: flex; align-items: center; justify-content: center;
+        background: linear-gradient(135deg, #F0F9F5 0%, #E0F2EA 100%);
+        font-family: 'Pretendard', 'Malgun Gothic', sans-serif;
+        padding: 40px 20px;
+    }
+    .setup-card {
+        width: 100%; max-width: 560px;
+        background: #fff; border-radius: 16px;
+        padding: 40px 36px;
+        box-shadow: 0 8px 32px rgba(15, 110, 86, 0.12);
+    }
+    .setup-brand { text-align: center; margin-bottom: 24px; }
+    .setup-logo {
+        width: 56px; height: 56px;
+        background: #0F6E56; border-radius: 14px;
+        display: inline-flex; align-items: center; justify-content: center;
+        font-weight: 800; color: #fff; margin-bottom: 16px;
+    }
+    .setup-brand h1 { font-size: 22px; font-weight: 700; color: #0F1419; margin: 0 0 6px; }
+    .setup-brand p { font-size: 13px; color: #6B7280; margin: 0; }
+    .setup-steps {
+        display: flex; align-items: center; justify-content: center;
+        gap: 8px; margin-bottom: 24px;
+    }
+    .step {
+        padding: 6px 14px; border-radius: 999px;
+        background: #F3F4F6; color: #6B7280;
+        font-size: 13px; font-weight: 600;
+    }
+    .step.active { background: #0F6E56; color: #fff; }
+    .step-line { width: 24px; height: 2px; background: #E5E7EB; }
+    .setup-section { display: flex; flex-direction: column; gap: 14px; }
+    .setup-field label { display: block; font-size: 13px; font-weight: 600; color: #4B5563; margin-bottom: 6px; }
+    .setup-field input {
+        width: 100%; padding: 11px 13px;
+        border: 1px solid #D1D5DB; border-radius: 8px;
+        font-size: 14px; box-sizing: border-box;
+    }
+    .setup-field input:focus { outline: none; border-color: #0F6E56; box-shadow: 0 0 0 3px rgba(15, 110, 86, 0.1); }
+    .setup-row { display: flex; gap: 12px; }
+    .setup-readonly {
+        background: #F0FAF6; border: 1px solid #C7E9D9;
+        border-radius: 10px; padding: 14px;
+    }
+    .setup-readonly-label { font-size: 12px; color: #6B7280; margin-bottom: 4px; }
+    .setup-readonly-value { font-size: 16px; font-weight: 700; color: #0F6E56; }
+    .setup-tenant-code { font-size: 13px; color: #6B7280; font-weight: 500; margin-left: 6px; }
+    .setup-info {
+        background: #FEF3C7; border: 1px solid #FDE68A;
+        border-radius: 8px; padding: 10px 12px;
+        font-size: 13px; color: #92400E; line-height: 1.5;
+    }
+    .setup-submit {
+        width: 100%; padding: 14px;
+        background: #0F6E56; color: #fff;
+        border: none; border-radius: 8px;
+        font-size: 15px; font-weight: 700; cursor: pointer;
+        margin-top: 8px;
+    }
+    .setup-submit:hover:not(:disabled) { background: #0A5240; }
+    .setup-submit:disabled { opacity: 0.6; cursor: not-allowed; }
+    .setup-back {
+        width: 100%; padding: 12px; background: #fff; color: #4B5563;
+        border: 1px solid #D1D5DB; border-radius: 8px; cursor: pointer;
+        font-size: 14px; margin-top: 8px;
+    }
+    .setup-note { font-size: 12px; color: #6B7280; line-height: 1.5; margin-top: 8px; text-align: center; }
+    .setup-error {
+        background: #FEE2E2; color: #B91C1C;
+        padding: 12px; border-radius: 8px;
+        font-size: 13px; margin-bottom: 14px;
+    }
+    .setup-done { text-align: center; padding: 20px 0; }
+    .setup-done-icon {
+        width: 64px; height: 64px; margin: 0 auto 16px;
+        background: #0F6E56; color: #fff;
+        border-radius: 50%;
+        display: flex; align-items: center; justify-content: center;
+        font-size: 32px; font-weight: 700;
+    }
+    .setup-done h2 { font-size: 20px; color: #0F1419; margin: 0 0 16px; }
+    .setup-done p { font-size: 14px; color: #4B5563; margin: 8px 0; line-height: 1.5; }
+    .setup-id { background: #F0FAF6; border: 1px solid #C7E9D9; border-radius: 10px; padding: 14px; margin: 20px 0; }
+    .setup-id-label { font-size: 12px; color: #6B7280; margin-bottom: 4px; }
+    .setup-id-value { font-size: 18px; font-weight: 700; color: #0F6E56; font-family: Consolas, Monaco, monospace; }
+    .setup-go-login {
+        display: inline-block; margin-top: 16px;
+        padding: 12px 24px; background: #0F6E56; color: #fff;
+        border-radius: 8px; text-decoration: none;
+        font-weight: 700; font-size: 14px;
+    }
+</style>

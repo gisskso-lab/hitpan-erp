@@ -1,0 +1,181 @@
+@page "/admin/tenant-domains"
+@layout PlatformLayout
+@attribute [Authorize]
+@rendermode InteractiveServer
+@inject IHttpClientFactory HttpFactory
+@inject ISnackbar Snackbar
+@inject IDialogService Dialog
+
+@*
+    Cloudflare 도메인 자동 발급 (W14 골격, 사장님 결재 2026-06-05)
+    백오피스 API /api/backoffice/tenant-domains
+    환경변수 (CLOUDFLARE_API_TOKEN·ZONE_ID·ACCOUNT_ID) 설정 후에만 작동 — 헌법 #29
+*@
+
+<PageTitle>도메인 발급 — 히트판 백오피스</PageTitle>
+
+<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px;">
+    <div>
+        <MudText Typo="Typo.h5" Style="font-weight:600;">도메인 자동 발급 (Cloudflare)</MudText>
+        <MudText Typo="Typo.body2" Color="Color.Secondary">
+            www.{tenant_code}.hitpan.kr · DNS CNAME 자동 생성 (헌법 #34 정식 완성도)
+        </MudText>
+    </div>
+    <MudButton OnClick="LoadAsync" StartIcon="@Icons.Material.Filled.Refresh">새로고침</MudButton>
+</div>
+
+@if (_configured == false)
+{
+    <MudAlert Severity="Severity.Warning" Class="mb-3" Dense="true" Icon="@Icons.Material.Filled.Warning">
+        Cloudflare 환경변수 미설정 (CLOUDFLARE_API_TOKEN · ZONE_ID · ACCOUNT_ID). 사장님 결재 후 설정해야 발급 가능합니다 (헌법 #29).
+    </MudAlert>
+}
+else if (_configured == true)
+{
+    <MudAlert Severity="Severity.Success" Class="mb-3" Dense="true" Icon="@Icons.Material.Filled.CheckCircle">
+        Cloudflare 자격증명 정상 — 발급 가능 상태
+    </MudAlert>
+}
+
+@if (_loading)
+{
+    <MudProgressLinear Indeterminate="true" Color="Color.Primary" />
+}
+else if (_items.Count == 0)
+{
+    <MudPaper Elevation="0" Class="pa-8" Style="border-radius:12px;background:#F9FAFB;text-align:center;">
+        <MudText Color="Color.Secondary">발급 이력이 없습니다. 고객사 관리 화면에서 발급 요청을 등록해주세요.</MudText>
+    </MudPaper>
+}
+else
+{
+    <MudPaper Elevation="1" Style="border-radius:12px;overflow:hidden;">
+        <MudDataGrid T="DomainRow" Items="_items" Hover="true" Dense="true">
+            <Columns>
+                <PropertyColumn Property="x => x.DomainId" Title="ID" />
+                <PropertyColumn Property="x => x.Domain" Title="도메인" />
+                <PropertyColumn Property="x => x.TenantId" Title="고객사 ID" />
+                <TemplateColumn Title="상태">
+                    <CellTemplate>
+                        @{
+                            var color = context.Item.Status switch
+                            {
+                                "pending" => Color.Default,
+                                "issued" => Color.Success,
+                                "revoked" => Color.Error,
+                                "failed" => Color.Warning,
+                                _ => Color.Default
+                            };
+                        }
+                        <MudChip T="string" Color="color" Size="Size.Small">@context.Item.Status</MudChip>
+                    </CellTemplate>
+                </TemplateColumn>
+                <TemplateColumn Title="발급일">
+                    <CellTemplate>
+                        @(context.Item.IssuedAt?.ToString("yyyy-MM-dd HH:mm") ?? "—")
+                    </CellTemplate>
+                </TemplateColumn>
+                <PropertyColumn Property="x => x.CfRecordId" Title="CF Record" />
+                <TemplateColumn Title="액션">
+                    <CellTemplate>
+                        @if (context.Item.Status == "issued")
+                        {
+                            <MudButton OnClick="@(() => RevokeAsync(context.Item))"
+                                       Size="Size.Small" Color="Color.Error">회수</MudButton>
+                        }
+                        else if (!string.IsNullOrEmpty(context.Item.LastError))
+                        {
+                            <MudTooltip Text="@context.Item.LastError">
+                                <MudIcon Icon="@Icons.Material.Filled.Error" Color="Color.Warning" />
+                            </MudTooltip>
+                        }
+                    </CellTemplate>
+                </TemplateColumn>
+            </Columns>
+        </MudDataGrid>
+    </MudPaper>
+}
+
+@code {
+    private bool _loading = true;
+    private bool? _configured;
+    private List<DomainRow> _items = new();
+
+    protected override async Task OnInitializedAsync() => await LoadAsync();
+
+    private async Task LoadAsync()
+    {
+        _loading = true;
+        try
+        {
+            var http = HttpFactory.CreateClient("backoffice-authed");
+            var res = await http.GetFromJsonAsync<ListResponse>("api/backoffice/tenant-domains");
+            _items = res?.Items ?? new();
+            _configured = res?.Configured;
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"목록 조회 실패: {ex.Message}", Severity.Error);
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    private async Task RevokeAsync(DomainRow row)
+    {
+        var ok = await ConfirmDialog.ShowAsync(Dialog,
+            "도메인 회수",
+            $"{row.Domain} 회수하시겠습니까? Cloudflare DNS 레코드가 삭제됩니다.",
+            confirmText: "회수", severity: Severity.Error);
+        if (!ok) return;
+
+        try
+        {
+            var http = HttpFactory.CreateClient("backoffice-authed");
+            var res = await http.PostAsync($"api/backoffice/tenant-domains/{row.DomainId}/revoke", null);
+            var payload = await res.Content.ReadFromJsonAsync<ActionResponse>();
+            if (res.IsSuccessStatusCode && payload?.Success == true)
+            {
+                Snackbar.Add(payload.Message ?? "회수되었습니다.", Severity.Warning);
+                await LoadAsync();
+            }
+            else
+            {
+                Snackbar.Add(payload?.Message ?? "회수 실패", Severity.Error);
+            }
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"회수 중 오류: {ex.Message}", Severity.Error);
+        }
+    }
+
+    private class ListResponse
+    {
+        public bool Success { get; set; }
+        public bool Configured { get; set; }
+        public List<DomainRow> Items { get; set; } = new();
+    }
+
+    private class ActionResponse
+    {
+        public bool Success { get; set; }
+        public string? Message { get; set; }
+    }
+
+    public class DomainRow
+    {
+        public long DomainId { get; set; }
+        public string TenantId { get; set; } = "";
+        public string Domain { get; set; } = "";
+        public string? CfZoneId { get; set; }
+        public string? CfRecordId { get; set; }
+        public string? CfTunnelId { get; set; }
+        public string Status { get; set; } = "";
+        public DateTime? IssuedAt { get; set; }
+        public string? LastError { get; set; }
+        public DateTime CreatedAt { get; set; }
+    }
+}

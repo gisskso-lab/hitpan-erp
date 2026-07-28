@@ -1,0 +1,92 @@
+@page "/purchase-orders"
+@attribute [Authorize]
+@using HitPan.Web.Components.Purchase
+@using HitPan.Web.Components.Sales
+@using HitPan.Web.Models
+@using HitPan.Web.Services
+@* Pages/Purchase.razor 가 HitPan.Web.Pages 에 클래스 Purchase 를 두면 하위 네임스페이스 HitPan.Web.Pages.Purchase 와 충돌할 수 있어 SalesOrderUi 와 동일하게 PurchaseOrderUi 로 분리한다. *@
+@namespace HitPan.Web.Pages.PurchaseOrderUi
+@inject WorkTabService TabService
+@inject DocumentService DocService
+@inject IDialogService DialogService
+@inject ISnackbar Snackbar
+@inject IJSRuntime Js
+@inject HttpClient Http
+@inject PartnerMasterService PartnersApi
+@inject ItemMasterService ItemsApi
+@inject DeliveryService DeliveryService
+
+<PageTitle>발주서</PageTitle>
+
+<!-- 미저장 시 브라우저 이탈·SPA 내부 이동 전 확인 다이얼로그를 띄운다. -->
+<NavigationLock ConfirmExternalNavigation="@_hasUnsavedChanges" OnBeforeInternalNavigation="OnBeforeInternalNavigationAsync" />
+
+<section class="purchase-order-page">
+    @if (_draft is null)
+    {
+        <MudProgressCircular Color="Color.Primary" Indeterminate="true" />
+    }
+    else
+    {
+        <WorkflowBreadcrumb Steps="_workflowSteps" />
+
+        <!-- 발주 헤더: 발주일·납기일·공급처·메모 (납기일은 발주서 전용으로 페이지 상태에 보관한다). -->
+        <MudPaper Class="pa-3 mb-2 purchase-order-form">
+            <MudGrid>
+                <MudItem xs="12" md="3">
+                    <MudDatePicker Label="발주일자" Date="_draft.SalesDate" DateChanged="OnOrderDateChangedAsync" />
+                </MudItem>
+                <MudItem xs="12" md="3">
+                    <MudDatePicker Label="납기일" Date="_deliveryDueDate" DateChanged="OnDeliveryDueDateChangedAsync" />
+                </MudItem>
+                <MudItem xs="12" md="3">
+                    <MudAutocomplete T="string" Label="공급처" Value="_draft.SalesCompany"
+                        ValueChanged="OnPartnerNameChangedAsync" SearchFunc="SearchPartnerAsync"
+                        Margin="Margin.Dense" Placeholder="공급처 검색" />
+                </MudItem>
+                <MudItem xs="12" md="3">
+                    <MudTextField T="string"
+                                  Label="메모"
+                                  Value="_draft.Memo"
+                                  ValueChanged="OnMemoChangedAsync"
+                                  Margin="Margin.Dense" />
+                </MudItem>
+            </MudGrid>
+        </MudPaper>
+
+        <MudToolBar Dense="true" Style="overflow-x:auto;flex-wrap:nowrap" Class="pa-1 gap-1 purchase-order-toolbar">
+            <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Add" OnClick="AddNewAsync">추가</MudButton>
+            <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Save" OnClick="SaveAsync">저장</MudButton>
+            <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Undo" OnClick="CancelAsync">취소</MudButton>
+            <MudButton Variant="Variant.Outlined" Color="Color.Error" StartIcon="@Icons.Material.Filled.Delete" OnClick="DeleteConfirmAsync">삭제</MudButton>
+            <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.ContentCopy" OnClick="CopyAsync" Disabled="@_isNew">복사</MudButton>
+            <MudDivider Vertical="true" FlexItem="true" />
+            <MudButton Variant="Variant.Outlined" Color="Color.Success" StartIcon="@Icons.Material.Filled.SwapHoriz" OnClick="ConvertToReceiptAsync" Disabled="@(_isNew || _draft?.Id is null || _status == "Closed")">매입전환</MudButton>
+            <MudDivider Vertical="true" FlexItem="true" />
+            <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Print" OnClick="PrintAsync">인쇄</MudButton>
+            <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.TableChart" OnClick="DownloadExcelAsync">엑셀</MudButton>
+            <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.PictureAsPdf" OnClick="DownloadPdfAsync">PDF</MudButton>
+            <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Email" OnClick="EmailAsync">이메일</MudButton>
+            <MudSpacer />
+            <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.FormatListBulleted" OnClick="OpenListAsync">목록</MudButton>
+        </MudToolBar>
+
+        <div class="purchase-order-grid-wrap">
+            <PurchaseOrderGrid Lines="_draft.Lines"
+                               Density="_draft.Density"
+                               Summary="_summary"
+                               Status="@_status"
+                               ItemCache="_itemCache"
+                               OnChanged="OnGridChangedAsync"
+                               SelectedLineChanged="OnSelectedLineChangedAsync" />
+        </div>
+
+        <MudPaper Class="pa-3 mt-2 purchase-order-footer">
+            <MudStack Row="true" Spacing="3">
+                <MudText Typo="Typo.body2">공급가액: @_summary.SupplyAmount.ToString("N0")</MudText>
+                <MudText Typo="Typo.body2">부가세: @_summary.VatAmount.ToString("N0")</MudText>
+                <MudText Typo="Typo.body2">합계: @_summary.TotalAmount.ToString("N0")</MudText>
+            </MudStack>
+        </MudPaper>
+    }
+</section>

@@ -1,0 +1,206 @@
+@page "/pricing"
+@page "/landing/pricing"
+@rendermode InteractiveServer
+@layout LandingLayout
+@inject HttpClient Http
+@using System.Net.Http.Json
+@using System.Text.Json
+
+<PageTitle>요금제 — 히트판 ERP</PageTitle>
+
+<section class="pricing-hero">
+    <div class="landing-container">
+        <h1>요금제</h1>
+        <p>사업 규모에 딱 맞는 3가지 티어. 베타 기간 무료 체험.</p>
+    </div>
+</section>
+
+<section class="pricing-addon-section">
+    <div class="landing-container">
+        <div class="addon-box">
+            <span class="addon-label">옵션</span>
+            <span class="addon-text">기기 추가 — <b>PC + 모바일 1+1 세트 월 10,000원</b> (전 티어 공통)</span>
+        </div>
+    </div>
+</section>
+
+<section class="pricing-grid">
+    <div class="landing-container grid-3">
+        @foreach (var plan in _plans)
+        {
+            <div class="plan @(plan.PlanId == "pro" ? "plan-featured" : "")">
+                @if (plan.PlanId == "pro")
+                {
+                    <div class="ribbon">MOST POPULAR</div>
+                }
+                <h3>@plan.PlanName.ToUpper()</h3>
+                <div class="price">
+                    <span class="num">@plan.MonthlyPrice.ToString("N0")</span>원/월
+                </div>
+                @if (plan.PlanId == "enterprise")
+                {
+                    <p class="price-note">+ 서버 구축비용 (상담)</p>
+                }
+                <p class="tagline">@plan.Tagline</p>
+                <ul>
+                    @foreach (var f in plan.Features)
+                    {
+                        <li>✓ @f</li>
+                    }
+                </ul>
+                <a href="@($"/signup?plan={plan.PlanId}")" class="btn @(plan.PlanId == "pro" ? "btn-primary" : "btn-outline") btn-block">
+                    @(plan.PlanId == "enterprise" ? "상담 신청" : $"{plan.PlanName} 시작하기")
+                </a>
+            </div>
+        }
+    </div>
+</section>
+
+<section class="pricing-note">
+    <div class="landing-container">
+        <h2>모든 요금제 공통</h2>
+        <div class="note-grid">
+            <div>✓ 데이터 주권 본인 PC</div>
+            <div>✓ 원클릭 설치 10분</div>
+            <div>✓ 모바일 지원</div>
+            <div>✓ 자동 백업 (E2E 암호화)</div>
+            <div>✓ Windows Defender + 백신 5종 호환</div>
+            <div>✓ AI CS 챗봇</div>
+        </div>
+    </div>
+</section>
+
+@code {
+    // 사장님 결재 2026-06-11 B안: 가격은 백오피스 마스터 화면에서 변경, 랜딩은 동적 로드.
+    // API 실패 시 폴백 (사고 영역 차단 — 외부 노출 영역 정합).
+    private List<PlanView> _plans = GetFallback();
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            var resp = await Http.GetFromJsonAsync<PublicPricingResponse>("api/landing/pricing/public");
+            if (resp?.Success == true && resp.Data is { Count: > 0 } rows)
+            {
+                _plans = rows.Select(MapRow).OrderBy(p => p.DisplayOrder).ToList();
+            }
+        }
+        catch (Exception)
+        {
+            // 폴백 유지 — 헌법 #21 정합 (외부 노출 영역 크래시 절대 금지)
+            _plans = GetFallback();
+        }
+    }
+
+    private static PlanView MapRow(PublicPlanRow r)
+    {
+        var features = new List<string>();
+        if (!string.IsNullOrWhiteSpace(r.FeaturesJson))
+        {
+            try
+            {
+                var parsed = JsonSerializer.Deserialize<List<string>>(r.FeaturesJson);
+                if (parsed is not null) features = parsed;
+            }
+            catch (Exception)
+            {
+                // JSON 형식이 아니면 폴백 features 사용
+            }
+        }
+        if (features.Count == 0) features = GetDefaultFeatures(r.PlanId);
+
+        return new PlanView
+        {
+            PlanId = r.PlanId,
+            PlanName = r.PlanName,
+            MonthlyPrice = r.MonthlyPrice,
+            Tagline = r.Description ?? GetDefaultTagline(r.PlanId),
+            Features = features,
+            DisplayOrder = r.DisplayOrder
+        };
+    }
+
+    private static string GetDefaultTagline(string planId) => planId switch
+    {
+        "basic" => "5인 이하 중소기업 사업장의 시작용",
+        "pro" => "성장하는 중소기업의 표준",
+        "enterprise" => "다지점 통합운영·대량 데이터",
+        _ => ""
+    };
+
+    private static List<string> GetDefaultFeatures(string planId) => planId switch
+    {
+        "basic" => new() { "사용자 5명", "기기 5대 (모바일 포함)", "매입·판매·재고 기본", "전자세금계산서 발행 월 50건", "BOM 생산관리", "전자세금계산서 연동", "AI CS 챗봇" },
+        "pro" => new() { "사용자 10명", "기기 15대 (모바일 포함)", "매입·판매·재고 기본", "전자세금계산서 발행 월 50건", "BOM 생산관리", "전자세금계산서 연동", "AI CS 챗봇", "전화 CS·원격지원 응대" },
+        "enterprise" => new() { "사용자 무제한", "기기 무제한", "매입·판매·재고 기본", "전자세금계산서 발행 월 50건", "BOM 생산관리", "전자세금계산서 연동", "AI CS 챗봇", "다지점 통합운영", "전담 매니저 배정" },
+        _ => new()
+    };
+
+    private static List<PlanView> GetFallback() => new()
+    {
+        new PlanView { PlanId = "basic", PlanName = "베이직", MonthlyPrice = 29000, Tagline = GetDefaultTagline("basic"), Features = GetDefaultFeatures("basic"), DisplayOrder = 1 },
+        new PlanView { PlanId = "pro", PlanName = "프로", MonthlyPrice = 49000, Tagline = GetDefaultTagline("pro"), Features = GetDefaultFeatures("pro"), DisplayOrder = 2 },
+        new PlanView { PlanId = "enterprise", PlanName = "엔터프라이즈", MonthlyPrice = 100000, Tagline = GetDefaultTagline("enterprise"), Features = GetDefaultFeatures("enterprise"), DisplayOrder = 3 },
+    };
+
+    private class PlanView
+    {
+        public string PlanId { get; set; } = "";
+        public string PlanName { get; set; } = "";
+        public decimal MonthlyPrice { get; set; }
+        public string Tagline { get; set; } = "";
+        public List<string> Features { get; set; } = new();
+        public int DisplayOrder { get; set; }
+    }
+
+    private class PublicPricingResponse
+    {
+        public bool Success { get; set; }
+        public List<PublicPlanRow>? Data { get; set; }
+    }
+
+    private class PublicPlanRow
+    {
+        public string PlanId { get; set; } = "";
+        public string PlanName { get; set; } = "";
+        public string? Description { get; set; }
+        public decimal MonthlyPrice { get; set; }
+        public decimal YearlyPrice { get; set; }
+        public string PriceDisplay { get; set; } = "number";
+        public int MaxUsers { get; set; }
+        public int MaxDevices { get; set; }
+        public string? FeaturesJson { get; set; }
+        public int DisplayOrder { get; set; }
+    }
+}
+
+<style>
+.pricing-hero { padding: 60px 0 24px; text-align: center; background: #F0F9F5; }
+.pricing-hero h1 { font-size: 40px; margin-bottom: 8px; }
+.pricing-hero p { color: #4B5563; font-size: 16px; }
+.pricing-addon-section { padding: 16px 0 8px; background: #F0F9F5; }
+.addon-box { display: flex; align-items: center; justify-content: center; gap: 12px; flex-wrap: wrap; max-width: 720px; margin: 0 auto; padding: 16px 24px; background: #FFFFFF; border: 1px solid #C7E8DB; border-radius: 12px; font-size: 16px; color: #1A2B4A; }
+.addon-label { display: inline-block; padding: 4px 12px; background: #0F6E56; color: #FFFFFF; border-radius: 999px; font-size: 13px; font-weight: 800; letter-spacing: 0.04em; }
+.addon-text { font-size: 16px; }
+.addon-text b { color: #0F6E56; font-weight: 800; }
+.pricing-grid { padding: 48px 0; }
+.tagline { color: #6B7280; font-size: 14px; margin: 0 0 16px; min-height: 36px; }
+.price-note { color: #0F6E56; font-size: 14px; font-weight: 600; margin: -8px 0 8px; }
+.grid-3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px; }
+.plan { background: #fff; border: 2px solid #E5E7EB; border-radius: 16px; padding: 32px; position: relative; }
+.plan-featured { border-color: #0F6E56; transform: scale(1.04); box-shadow: 0 20px 40px rgba(15, 110, 86, 0.15); }
+.ribbon { position: absolute; top: -12px; right: 24px; background: #FF6B35; color: #fff; padding: 4px 12px; border-radius: 12px; font-size: 12px; font-weight: 700; }
+.plan h3 { font-size: 22px; margin-bottom: 8px; color: #0F6E56; }
+.price { font-size: 14px; color: #6B7280; margin-bottom: 20px; }
+.price .num { font-size: 36px; font-weight: 800; color: #0F1419; }
+.plan ul { list-style: none; padding: 0; margin-bottom: 24px; }
+.plan ul li { padding: 8px 0; font-size: 15px; color: #4B5563; }
+.btn { display: inline-block; padding: 12px 24px; border-radius: 8px; text-decoration: none; font-weight: 600; text-align: center; }
+.btn-block { width: 100%; box-sizing: border-box; }
+.btn-primary { background: #0F6E56; color: #fff; }
+.btn-outline { background: #fff; color: #0F6E56; border: 2px solid #0F6E56; }
+.pricing-note { padding: 48px 0; background: #F9FAFB; }
+.pricing-note h2 { text-align: center; font-size: 24px; margin-bottom: 24px; }
+.note-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 12px; max-width: 800px; margin: 0 auto; color: #4B5563; }
+@@media (max-width: 768px) { .grid-3 { grid-template-columns: 1fr; } .plan-featured { transform: none; } }
+</style>

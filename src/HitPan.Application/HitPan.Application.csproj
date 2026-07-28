@@ -1,0 +1,39 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <ItemGroup>
+    <ProjectReference Include="..\HitPan.Domain\HitPan.Domain.csproj" />
+    <ProjectReference Include="..\HitPan.Contracts\HitPan.Contracts.csproj" />
+    <!-- 축 6-4 (2026-05-14): 헌법 #15·#16 자동 검출 Roslyn Analyzer. -->
+    <ProjectReference Include="..\HitPan.Analyzers\HitPan.Analyzers.csproj" OutputItemType="Analyzer" ReferenceOutputAssembly="false" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="BCrypt.Net-Next" Version="4.1.0" />
+    <PackageReference Include="ClosedXML" Version="0.105.0" />
+    <PackageReference Include="Dapper" Version="2.1.72" />
+    <PackageReference Include="MySqlConnector" Version="2.5.0" />
+    <PackageReference Include="MailKit" Version="4.16.0" />
+    <PackageReference Include="System.Data.OleDb" Version="8.0.1" />
+    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="8.0.2" />
+    <PackageReference Include="Microsoft.Extensions.Configuration.Abstractions" Version="8.0.0" />
+    <PackageReference Include="QuestPDF" Version="2026.2.4" />
+    <PackageReference Include="System.IdentityModel.Tokens.Jwt" Version="[8.0.0,9.0.0)" />
+    <PackageReference Include="Microsoft.IdentityModel.Tokens" Version="[8.0.0,9.0.0)" />
+    <PackageReference Include="System.Security.Cryptography.ProtectedData" Version="8.0.0" />
+    <PackageReference Include="System.Security.Cryptography.Xml" Version="10.0.10" />
+  </ItemGroup>
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <!--
+      §#19 errors 0 + warnings 0 준수.
+      MailKit 4.14.0 / MimeKit 4.14.0 의 NU1902 advisories (GHSA-9j88-vvj5-vhgr / GHSA-g7hc-96xr-gvvx)
+      는 DKIM canonicalization (수신 검증) 관련. 우리는 SMTP 발송만 사용 → 실질적 영향 없음.
+      신규 패치 버전이 publish 되면 즉시 업그레이드.
+    -->
+    <NoWarn>$(NoWarn);NU1902</NoWarn>
+  </PropertyGroup>
+
+</Project>

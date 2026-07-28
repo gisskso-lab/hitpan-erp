@@ -1,0 +1,158 @@
+# OWASP ZAP Context 설정 스켈레톤
+# 작업지시서: WS-20260601-09_OWASP_ZAP_DAST_1차
+# 헌법 정합: #22 데이터 최소주의 / #25 안전하게 / #29 인프라 무허가 조작 금지
+# 실제 시크릿·토큰은 환경변수(${ENV_*})로만 주입. 파일에 평문 저장 금지.
+
+env:
+  contexts:
+    # ─────────────────────────────────────────
+    # 1. 랜딩페이지 — anonymous
+    # ─────────────────────────────────────────
+    - name: landing
+      urls:
+        - http://localhost:5234/
+      includePaths:
+        - http://localhost:5234/.*
+      excludePaths:
+        - http://localhost:5234/admin/.*
+        - http://localhost:5234/api/.*
+        - .*/logout.*
+      authentication:
+        method: manual
+      users:
+        - name: anonymous
+          credentials: {}
+
+    # ─────────────────────────────────────────
+    # 2. ERP Web (Blazor) — JWT tenant_admin
+    # ─────────────────────────────────────────
+    - name: erp
+      urls:
+        - http://localhost:5234/erp
+      includePaths:
+        - http://localhost:5234/erp/.*
+      excludePaths:
+        - .*/logout.*
+        - .*/api/auth/refresh.*
+      authentication:
+        method: json
+        parameters:
+          loginUrl: http://localhost:5257/api/auth/login
+          loginRequestBody: '{"email":"${ENV_ERP_USER}","password":"${ENV_ERP_PASS}"}'
+        verification:
+          method: response
+          loggedInRegex: '.*"accessToken".*'
+          loggedOutRegex: '.*"error".*'
+      sessionManagement:
+        method: headers
+        parameters:
+          Authorization: "Bearer {%json:accessToken%}"
+      users:
+        - name: tenant_admin
+          credentials:
+            username: ${ENV_ERP_USER}
+            password: ${ENV_ERP_PASS}
+
+    # ─────────────────────────────────────────
+    # 3. API — JWT Bearer
+    # ─────────────────────────────────────────
+    - name: api
+      urls:
+        - http://localhost:5257/
+      includePaths:
+        - http://localhost:5257/api/.*
+      excludePaths:
+        - http://localhost:5257/api/auth/logout.*
+        - http://localhost:5257/api/telemetry/.*  # 본사 데이터 최소주의(#22) 외부 노출 금지
+      authentication:
+        method: json
+        parameters:
+          loginUrl: http://localhost:5257/api/auth/login
+          loginRequestBody: '{"email":"${ENV_API_USER}","password":"${ENV_API_PASS}"}'
+      sessionManagement:
+        method: headers
+        parameters:
+          Authorization: "Bearer {%json:accessToken%}"
+      users:
+        - name: api_tenant
+          credentials:
+            username: ${ENV_API_USER}
+            password: ${ENV_API_PASS}
+
+    # ─────────────────────────────────────────
+    # 4. 백오피스 — PlatformOnly Policy
+    # ─────────────────────────────────────────
+    - name: backoffice
+      urls:
+        - http://localhost:5300/admin
+      includePaths:
+        - http://localhost:5300/admin/.*
+      excludePaths:
+        - .*/logout.*
+      authentication:
+        method: json
+        parameters:
+          loginUrl: http://localhost:5300/api/admin/auth/login
+          loginRequestBody: '{"email":"${ENV_BO_USER}","password":"${ENV_BO_PASS}","mfaCode":"${ENV_BO_MFA}"}'
+      sessionManagement:
+        method: headers
+        parameters:
+          Authorization: "Bearer {%json:accessToken%}"
+      users:
+        - name: platform_admin
+          credentials:
+            username: ${ENV_BO_USER}
+            password: ${ENV_BO_PASS}
+
+# ─────────────────────────────────────────
+# Scan Policy
+# ─────────────────────────────────────────
+policies:
+  baseline:
+    rules:
+      # Passive only — active 미발사
+      - id: 10015  # Incomplete or no cache-control
+      - id: 10020  # Anti-clickjacking header
+      - id: 10021  # X-Content-Type-Options
+      - id: 10035  # Strict-Transport-Security
+      - id: 10036  # Server leaks via X-Powered-By
+      - id: 10038  # CSP header
+      - id: 10063  # Permissions-Policy
+      - id: 10202  # Absence of Anti-CSRF tokens
+      - id: 90003  # Sub Resource Integrity
+  full:
+    rules:
+      # Active 포함 — OWASP Top 10 매핑
+      - id: 6       # Path Traversal
+      - id: 40012   # XSS (Reflected)
+      - id: 40014   # XSS (Persistent)
+      - id: 40018   # SQL Injection
+      - id: 40019   # SQL Injection - MySQL
+      - id: 40020   # SQL Injection - Hypersonic
+      - id: 40046   # Server Side Request Forgery
+      - id: 10105   # Weak Authentication Method
+      - id: 10202   # CSRF Token Absence
+
+# ─────────────────────────────────────────
+# Report
+# ─────────────────────────────────────────
+reports:
+  outputDir: tests/security/reports/
+  formats:
+    - html
+    - json
+    - sarif-json
+  sensitiveDataMask: true  # 헌법 #22 — report에 평문 데이터 노출 금지
+
+# ─────────────────────────────────────────
+# 금지 영역 (헌법 #29)
+# ─────────────────────────────────────────
+forbidden:
+  - hosts:
+      - "*.hitpan.kr"      # prod — 사장님 사전 결재 필수
+      - "*.cloudflare.com" # 인프라 — 무허가 조작 금지
+      - "1.1.1.1"          # DNS
+  - actions:
+      - dns-rebinding
+      - waf-bypass
+      - rate-limit-bypass

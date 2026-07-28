@@ -1,0 +1,202 @@
+@* 이메일 발송 다이얼로그 — 재사용 가능한 공통 컴포넌트 *@
+@* 사장님 결재 2026-04-29: SMTP 실제 발송 + PDF 첨부 + 거래처 이메일 자동셋팅 *@
+@namespace HitPan.Web.Components.Common
+@using HitPan.Web.Models
+@using HitPan.Web.Services
+@inject EmailClientService EmailApi
+
+<MudDialog>
+    <TitleContent>
+        <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="2">
+            <MudIcon Icon="@Icons.Material.Filled.Email" Color="Color.Primary" />
+            <MudText Typo="Typo.h6">이메일 발송</MudText>
+        </MudStack>
+    </TitleContent>
+    <DialogContent>
+        <MudStack Spacing="3">
+            @* 받는 사람 이메일 입력 *@
+            <MudTextField T="string"
+                          Label="받는 사람"
+                          @bind-Value="_recipientEmail"
+                          Placeholder="이메일 주소를 입력하세요"
+                          InputType="InputType.Email"
+                          Adornment="Adornment.Start"
+                          AdornmentIcon="@Icons.Material.Filled.Person"
+                          Variant="Variant.Outlined"
+                          Margin="Margin.Dense" />
+
+            @* 제목 — 문서종류 + 문서번호로 자동 생성 *@
+            <MudTextField T="string"
+                          Label="제목"
+                          @bind-Value="_subject"
+                          Variant="Variant.Outlined"
+                          Margin="Margin.Dense"
+                          Adornment="Adornment.Start"
+                          AdornmentIcon="@Icons.Material.Filled.Subject" />
+
+            @* 본문 내용 — 기본 문구 제공, 사용자 편집 가능 *@
+            <MudTextField T="string"
+                          Label="내용"
+                          @bind-Value="_body"
+                          Variant="Variant.Outlined"
+                          Lines="5"
+                          Margin="Margin.Dense" />
+
+            @* 첨부 파일 표시 (PDF 자동 첨부) *@
+            <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="1">
+                <MudIcon Icon="@Icons.Material.Filled.AttachFile" Size="Size.Small" Color="Color.Secondary" />
+                <MudCheckBox T="bool" @bind-Value="_attachPdf" Label="@_attachmentName" Dense="true" Color="Color.Primary" />
+            </MudStack>
+        </MudStack>
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="Cancel" Variant="Variant.Text">취소</MudButton>
+        <MudButton OnClick="Send" Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Send" Disabled="@_busy">@(_busy ? "발송중…" : "발송")</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    // MudDialog 인스턴스 — 닫기 처리에 사용한다.
+    [CascadingParameter]
+    private IMudDialogInstance MudDialog { get; set; } = default!;
+
+    // 스낵바 서비스 — 안내 메시지 표시용.
+    [Inject]
+    private ISnackbar Snackbar { get; set; } = default!;
+
+    /// <summary>
+    /// 문서 종류 라벨 (견적서/수주서/거래명세서/세금계산서/발주서/매입명세서).
+    /// </summary>
+    [Parameter]
+    public string DocumentType { get; set; } = string.Empty;
+
+    /// <summary>
+    /// 문서 번호 (예: QT-20260418-001).
+    /// </summary>
+    [Parameter]
+    public string DocumentNo { get; set; } = string.Empty;
+
+    /// <summary>
+    /// 거래처 이메일 — 값이 있으면 받는 사람에 자동 채움한다.
+    /// </summary>
+    [Parameter]
+    public string? PartnerEmail { get; set; }
+
+    /// <summary>
+    /// 백엔드 API 키 (PDF 렌더링·이력 기록용). quotation/sales_order/delivery/tax_invoice/purchase_order/purchase_receipt
+    /// </summary>
+    [Parameter]
+    public string DocumentTypeKey { get; set; } = string.Empty;
+
+    /// <summary>
+    /// 문서 PK (UUID 등) — PDF 렌더링용.
+    /// </summary>
+    [Parameter]
+    public string DocumentId { get; set; } = string.Empty;
+
+    /// <summary>거래처 ID (이력 기록용 — 옵션).</summary>
+    [Parameter]
+    public string? PartnerId { get; set; }
+
+    // 받는 사람 이메일
+    private string _recipientEmail = string.Empty;
+
+    // 이메일 제목
+    private string _subject = string.Empty;
+
+    // 이메일 본문
+    private string _body = string.Empty;
+
+    // PDF 첨부 여부
+    private bool _attachPdf = true;
+
+    // 첨부 파일명 표시
+    private string _attachmentName = string.Empty;
+
+    /// <summary>
+    /// 다이얼로그 열릴 때 기본값을 채운다 — 거래처 이메일 자동 셋팅.
+    /// 우선순위: PartnerEmail 파라미터 → PartnerId로 백엔드 lookup → 빈값.
+    /// </summary>
+    protected override async Task OnParametersSetAsync()
+    {
+        // 받는 사람 — PartnerEmail 직접 전달이 우선
+        if (!string.IsNullOrWhiteSpace(PartnerEmail))
+        {
+            _recipientEmail = PartnerEmail;
+        }
+        else if (!string.IsNullOrWhiteSpace(PartnerId) && string.IsNullOrEmpty(_recipientEmail))
+        {
+            // 백엔드에서 거래처 이메일 자동 lookup
+            _recipientEmail = await EmailApi.GetPartnerEmailAsync(PartnerId);
+        }
+
+        // 제목 — "[문서종류] 문서번호 송부의 건"
+        _subject = $"[{DocumentType}] {DocumentNo} 송부의 건";
+
+        // 본문 — 기본 안내 문구
+        _body = $"안녕하세요.\n\n{DocumentType} {DocumentNo}을(를) 송부드립니다.\n확인 부탁드립니다.\n\n감사합니다.";
+
+        // 첨부 파일명
+        _attachmentName = $"{DocumentType}_{DocumentNo}.pdf";
+    }
+
+    private bool _busy;
+
+    /// <summary>발송 버튼 — EmailService API 호출.</summary>
+    private async Task Send()
+    {
+        if (string.IsNullOrWhiteSpace(_recipientEmail))
+        {
+            Snackbar.Add("받는 사람 이메일을 입력하세요.", Severity.Warning);
+            return;
+        }
+        _busy = true;
+        Snackbar.Add("이메일 발송 중…", Severity.Info);
+        try
+        {
+            // DocumentTypeKey가 비어있으면 한글 라벨에서 추정
+            var typeKey = string.IsNullOrEmpty(DocumentTypeKey) ? GuessTypeKey(DocumentType) : DocumentTypeKey;
+
+            var result = await EmailApi.SendDocumentAsync(new SendDocumentEmailModel
+            {
+                DocumentType = typeKey,
+                DocumentId = DocumentId,
+                DocumentNo = DocumentNo,
+                PartnerId = PartnerId,
+                RecipientEmail = _recipientEmail,
+                Subject = _subject,
+                Body = _body,
+                AttachPdf = _attachPdf
+            });
+            if (result.Success)
+            {
+                Snackbar.Add("이메일 발송 완료", Severity.Success);
+                MudDialog.Close(DialogResult.Ok(true));
+            }
+            else
+            {
+                Snackbar.Add($"발송 실패: {result.Error}", Severity.Error);
+            }
+        }
+        finally { _busy = false; }
+    }
+
+    private static string GuessTypeKey(string label) => label switch
+    {
+        "견적서" => "quotation",
+        "수주서" => "sales_order",
+        "거래명세서" => "delivery",
+        "세금계산서" => "tax_invoice",
+        "발주서" => "purchase_order",
+        "매입명세서" => "purchase_receipt",
+        _ => "quotation"
+    };
+
+    /// <summary>
+    /// 취소 버튼 클릭.
+    /// </summary>
+    private void Cancel()
+    {
+        MudDialog.Cancel();
+    }
+}

@@ -1,0 +1,132 @@
+﻿<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:w="urn:schemas-microsoft-com:office:word" xmlns="http://www.w3.org/TR/REC-html40">
+<head>
+<meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
+<meta name="ProgId" content="Word.Document">
+<meta name="Generator" content="Microsoft Word">
+<title>13_소스코드_가이드</title>
+<!--[if gte mso 9]>
+<xml>
+<w:WordDocument>
+<w:View>Print</w:View>
+<w:Zoom>100</w:Zoom>
+</w:WordDocument>
+</xml>
+<![endif]-->
+<style>
+body { font-family: 'Malgun Gothic', sans-serif; font-size: 11pt; line-height: 1.6; }
+table { border-collapse: collapse; }
+</style>
+</head>
+<body><p><h1 style="border-bottom:2px solid #333;padding-bottom:5px;color:#1976D2;">13. 소스코드 가이드 + 아카이브</h1></p><p><blockquote style="border-left:4px solid #1976D2;padding-left:10px;color:#555;margin:10px 0;"><strong>작성일</strong>: 2026-06-01 / PM 브라운킴</blockquote></p><p><hr style="border:none;border-top:1px solid #ccc;"></p><p><h2 style="border-bottom:1px solid #999;padding-bottom:3px;color:#1976D2;">1. 아카이브</h2></p><p><h3 style="color:#333;">1.1 위치</h3>
+<ul><li><strong>zip</strong>: <code style='background:#eee;font-family:Consolas;font-size:9pt;padding:1px 4px;'>docs/erp-handover/source/hitpan-erp-source-v1.0-handover.zip</code> (14MB)</li>
+<li><strong>Git 태그</strong>: <code style='background:#eee;font-family:Consolas;font-size:9pt;padding:1px 4px;'>erp-v1.0-handover</code> (예정)</li>
+<li><strong>현재 브랜치</strong>: <code style='background:#eee;font-family:Consolas;font-size:9pt;padding:1px 4px;'>develop</code></li>
+<li><strong>최신 커밋</strong>: <code style='background:#eee;font-family:Consolas;font-size:9pt;padding:1px 4px;'>53c2b0f</code> (헌법 #32 신설)</li></p><p></ul><h3 style="color:#333;">1.2 포함 프로젝트</h3>
+<table style='border-collapse:collapse;margin:10px 0;'><thead><tr><th style='border:1px solid #aaa;padding:4px 8px;background:#e3f2fd;'>프로젝트</th><th style='border:1px solid #aaa;padding:4px 8px;background:#e3f2fd;'>역할</th><th style='border:1px solid #aaa;padding:4px 8px;background:#e3f2fd;'>파일 수 (대략)</th></tr></thead><tbody><tr><td style='border:1px solid #aaa;padding:4px 8px;'>HitPan.API</td><td style='border:1px solid #aaa;padding:4px 8px;'>Web API + Middleware</td><td style='border:1px solid #aaa;padding:4px 8px;'>Controllers 56, Middleware 8, Migrations 76 SQL</td></tr>
+<tr><td style='border:1px solid #aaa;padding:4px 8px;'>HitPan.Application</td><td style='border:1px solid #aaa;padding:4px 8px;'>비즈니스 로직</td><td style='border:1px solid #aaa;padding:4px 8px;'>Services 55, DTOs 100+, Interfaces 30+</td></tr>
+<tr><td style='border:1px solid #aaa;padding:4px 8px;'>HitPan.Domain</td><td style='border:1px solid #aaa;padding:4px 8px;'>도메인 엔티티</td><td style='border:1px solid #aaa;padding:4px 8px;'>(필요 시)</td></tr>
+<tr><td style='border:1px solid #aaa;padding:4px 8px;'>HitPan.Infrastructure</td><td style='border:1px solid #aaa;padding:4px 8px;'>외부 통합</td><td style='border:1px solid #aaa;padding:4px 8px;'>Email, OleDb, Crypto</td></tr>
+<tr><td style='border:1px solid #aaa;padding:4px 8px;'>HitPan.Contracts</td><td style='border:1px solid #aaa;padding:4px 8px;'>공유 계약</td><td style='border:1px solid #aaa;padding:4px 8px;'>DTO 공유</td></tr>
+<tr><td style='border:1px solid #aaa;padding:4px 8px;'>HitPan.Analyzers</td><td style='border:1px solid #aaa;padding:4px 8px;'>Roslyn 분석기</td><td style='border:1px solid #aaa;padding:4px 8px;'>헌법 #15·#16 자동 검출</td></tr>
+<tr><td style='border:1px solid #aaa;padding:4px 8px;'>HitPan.Web</td><td style='border:1px solid #aaa;padding:4px 8px;'>Blazor WASM</td><td style='border:1px solid #aaa;padding:4px 8px;'>Pages 136, Components 80+, Services 50+</td></tr>
+<tr><td style='border:1px solid #aaa;padding:4px 8px;'>HitPan.Watchdog</td><td style='border:1px solid #aaa;padding:4px 8px;'>Windows 서비스</td><td style='border:1px solid #aaa;padding:4px 8px;'>통신 무결성 17개 워치독 (Phase 6)</td></tr>
+<tr><td style='border:1px solid #aaa;padding:4px 8px;'>HitPan.Tests</td><td style='border:1px solid #aaa;padding:4px 8px;'>xUnit</td><td style='border:1px solid #aaa;padding:4px 8px;'>165 테스트</td></tr></tbody></table>
+<hr style="border:none;border-top:1px solid #ccc;"></p><p><h2 style="border-bottom:1px solid #999;padding-bottom:3px;color:#1976D2;">2. 코드 탐색 가이드</h2></p><p><h3 style="color:#333;">2.1 화면 → 코드 추적</h3>
+1. URL (예: <code style='background:#eee;font-family:Consolas;font-size:9pt;padding:1px 4px;'>/quotations</code>)
+2. → <code style='background:#eee;font-family:Consolas;font-size:9pt;padding:1px 4px;'>src/HitPan.Web/Pages/Sales/QuotationPage.razor</code>
+3. → 인젝션된 <code style='background:#eee;font-family:Consolas;font-size:9pt;padding:1px 4px;'>QuotationService</code> (Web/Services)
+4. → API 호출 <code style='background:#eee;font-family:Consolas;font-size:9pt;padding:1px 4px;'>POST /api/quotations</code>
+5. → <code style='background:#eee;font-family:Consolas;font-size:9pt;padding:1px 4px;'>src/HitPan.API/Controllers/QuotationsController.cs</code>
+6. → <code style='background:#eee;font-family:Consolas;font-size:9pt;padding:1px 4px;'>src/HitPan.Application/Services/QuotationService.cs</code>
+7. → Dapper SQL → DB</p><p><h3 style="color:#333;">2.2 헌법 위반 확인</h3>
+<ul><li>헌법 #15 (빈 catch): <code style='background:#eee;font-family:Consolas;font-size:9pt;padding:1px 4px;'>Roslyn Analyzer</code> (HitPan.Analyzers)</li>
+<li>헌법 #16 (MySqlConnection + Task.WhenAll): <code style='background:#eee;font-family:Consolas;font-size:9pt;padding:1px 4px;'>Roslyn Analyzer</code></li>
+<li>헌법 #19 (warnings 0): <code style='background:#eee;font-family:Consolas;font-size:9pt;padding:1px 4px;'>dotnet build</code></li>
+<li>헌법 #5 (암호화 컬럼): EF Value Converter grep</li></p><p></ul><h3 style="color:#333;">2.3 진범 봉합 위치</h3>
+<table style='border-collapse:collapse;margin:10px 0;'><thead><tr><th style='border:1px solid #aaa;padding:4px 8px;background:#e3f2fd;'>진범</th><th style='border:1px solid #aaa;padding:4px 8px;background:#e3f2fd;'>위치</th><th style='border:1px solid #aaa;padding:4px 8px;background:#e3f2fd;'>봉합 패턴</th></tr></thead><tbody><tr><td style='border:1px solid #aaa;padding:4px 8px;'>#99 (UUID→Guid)</td><td style='border:1px solid #aaa;padding:4px 8px;'><code style='background:#eee;font-family:Consolas;font-size:9pt;padding:1px 4px;'>ItemSpecService.cs:21-42</code></td><td style='border:1px solid #aaa;padding:4px 8px;'><code style='background:#eee;font-family:Consolas;font-size:9pt;padding:1px 4px;'>CAST(... AS CHAR)</code> + EnsureOpen</td></tr>
+<tr><td style='border:1px solid #aaa;padding:4px 8px;'>#100 (WASM fetch)</td><td style='border:1px solid #aaa;padding:4px 8px;'><code style='background:#eee;font-family:Consolas;font-size:9pt;padding:1px 4px;'>UnifiedCalendar.razor</code></td><td style='border:1px solid #aaa;padding:4px 8px;'>OnAfterRenderAsync + AuthState 대기</td></tr></tbody></table>
+<hr style="border:none;border-top:1px solid #ccc;"></p><p><h2 style="border-bottom:1px solid #999;padding-bottom:3px;color:#1976D2;">3. 빌드·실행 가이드</h2></p><p><h3 style="color:#333;">3.1 사전 준비</h3>
+<pre style='background:#f4f4f4;padding:8px;font-family:Consolas;font-size:9pt;border:1px solid #ddd;'># .NET 8 SDK
+dotnet --version  # 8.0+ 또는 10.x
+
+# MariaDB 11.4.10
+mysql --version
+
+# DB 생성
+mysql -uroot -p -e "CREATE DATABASE hitpan_erp CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci"
+mysql -uroot -p -e "CREATE USER 'hitpan'@'localhost' IDENTIFIED BY 'Hitpan2025!'; GRANT ALL ON hitpan_erp.* TO 'hitpan'@'localhost'"
+
+# 마이그레이션 적용 (76개 SQL 순서대로)
+for f in src/HitPan.API/Migrations/SQL/*.sql; do mysql -uhitpan -pHitpan2025! hitpan_erp &lt; $f; done</pre></p><p><h3 style="color:#333;">3.2 빌드</h3>
+<pre style='background:#f4f4f4;padding:8px;font-family:Consolas;font-size:9pt;border:1px solid #ddd;'>dotnet build src/HitPan.sln
+# 기대: 0 errors / 0 warnings</pre></p><p><h3 style="color:#333;">3.3 테스트</h3>
+<pre style='background:#f4f4f4;padding:8px;font-family:Consolas;font-size:9pt;border:1px solid #ddd;'>dotnet test src/HitPan.Tests/HitPan.Tests.csproj
+# 기대: 165/165 PASS</pre></p><p><h3 style="color:#333;">3.4 실행</h3>
+<pre style='background:#f4f4f4;padding:8px;font-family:Consolas;font-size:9pt;border:1px solid #ddd;'># API
+cd src/HitPan.API
+dotnet run --launch-profile http     # port 5257
+
+# Web
+cd src/HitPan.Web
+dotnet run --launch-profile local     # port 5234</pre></p><p><h3 style="color:#333;">3.5 로그인 (테스트 계정)</h3>
+<ul><li>이메일: <code style='background:#eee;font-family:Consolas;font-size:9pt;padding:1px 4px;'>admin@hitpan.kr</code></li>
+<li>비밀번호: <code style='background:#eee;font-family:Consolas;font-size:9pt;padding:1px 4px;'>Admin1234!</code></li>
+<li>DB Role: <code style='background:#eee;font-family:Consolas;font-size:9pt;padding:1px 4px;'>TenantAdmin</code> → JWT: <code style='background:#eee;font-family:Consolas;font-size:9pt;padding:1px 4px;'>system_admin</code></li></p><p></ul>---</p><p><h2 style="border-bottom:1px solid #999;padding-bottom:3px;color:#1976D2;">4. 핵심 패턴 코드 발췌</h2></p><p><h3 style="color:#333;">4.1 Dapper EnsureOpen</h3>
+<ul><li>파일: <code style='background:#eee;font-family:Consolas;font-size:9pt;padding:1px 4px;'>src/HitPan.Application/Services/BomService.cs</code></li>
+<li>패턴: <code style='background:#eee;font-family:Consolas;font-size:9pt;padding:1px 4px;'>await _uow.EnsureOpenAsync()</code> 후 쿼리</li></p><p></ul><h3 style="color:#333;">4.2 멀티테넌트 (JWT 클레임)</h3>
+<ul><li>파일: <code style='background:#eee;font-family:Consolas;font-size:9pt;padding:1px 4px;'>src/HitPan.API/Security/AccessTokenValidator.cs</code></li>
+<li>패턴: <code style='background:#eee;font-family:Consolas;font-size:9pt;padding:1px 4px;'>User.FindFirstValue("tenant_id")</code> (헌법 #2)</li></p><p></ul><h3 style="color:#333;">4.3 INSERT ONLY 원장</h3>
+<ul><li>파일: <code style='background:#eee;font-family:Consolas;font-size:9pt;padding:1px 4px;'>src/HitPan.Application/Services/StockService.cs</code></li>
+<li>파일: <code style='background:#eee;font-family:Consolas;font-size:9pt;padding:1px 4px;'>src/HitPan.Application/Services/FinanceService.cs</code></li>
+<li>패턴: SQL은 <code style='background:#eee;font-family:Consolas;font-size:9pt;padding:1px 4px;'>INSERT INTO stock_ledger</code> / <code style='background:#eee;font-family:Consolas;font-size:9pt;padding:1px 4px;'>INSERT INTO journal_lines</code>만</li></p><p></ul><h3 style="color:#333;">4.4 약관 미들웨어</h3>
+<ul><li>파일: <code style='background:#eee;font-family:Consolas;font-size:9pt;padding:1px 4px;'>src/HitPan.API/Middleware/TermsConsentMiddleware.cs</code></li>
+<li>패턴: 미동의 시 401 + <code style='background:#eee;font-family:Consolas;font-size:9pt;padding:1px 4px;'>requires_terms_consent: true</code></li></p><p></ul><h3 style="color:#333;">4.5 Idempotency</h3>
+<ul><li>파일: <code style='background:#eee;font-family:Consolas;font-size:9pt;padding:1px 4px;'>src/HitPan.API/Middleware/IdempotencyMiddleware.cs</code></li>
+<li>패턴: <code style='background:#eee;font-family:Consolas;font-size:9pt;padding:1px 4px;'>Idempotency-Key</code> 헤더 캐시</li></p><p></ul><h3 style="color:#333;">4.6 WASM 첫 fetch (진범 #100)</h3>
+<ul><li>파일: <code style='background:#eee;font-family:Consolas;font-size:9pt;padding:1px 4px;'>src/HitPan.Web/Components/Common/UnifiedCalendar.razor</code></li>
+<li>패턴: <code style='background:#eee;font-family:Consolas;font-size:9pt;padding:1px 4px;'>OnAfterRenderAsync(firstRender)</code> + AuthState 대기</li></p><p></ul>---</p><p><h2 style="border-bottom:1px solid #999;padding-bottom:3px;color:#1976D2;">5. NuGet 의존성 (주요)</h2></p><p><h3 style="color:#333;">API</h3>
+<ul><li>ASP.NET Core 8.0</li>
+<li>Dapper 2.1.72</li>
+<li>MySqlConnector 2.5.0</li>
+<li>QuestPDF 2026.2.4</li>
+<li>ClosedXML 0.105.0</li>
+<li>System.Security.Cryptography.Xml 10.0.8 (보안 패치)</li></p><p></ul><h3 style="color:#333;">Web</h3>
+<ul><li>Blazor WebAssembly 8.0</li>
+<li>MudBlazor 9.3.0</li>
+<li>Blazor-ApexCharts 6.1.0</li>
+<li>SignalR Client 8.0.11</li>
+<li>System.Text.Json 8.0.5 (보안 패치)</li></p><p></ul><h3 style="color:#333;">보안 상태</h3>
+<ul><li>NuGet 취약 패키지: <strong>0건</strong> (2026-06-01 봉합 완료)</li></p><p></ul>---</p><p><h2 style="border-bottom:1px solid #999;padding-bottom:3px;color:#1976D2;">6. 환경 설정 파일</h2></p><p><table style='border-collapse:collapse;margin:10px 0;'><thead><tr><th style='border:1px solid #aaa;padding:4px 8px;background:#e3f2fd;'>파일</th><th style='border:1px solid #aaa;padding:4px 8px;background:#e3f2fd;'>역할</th><th style='border:1px solid #aaa;padding:4px 8px;background:#e3f2fd;'>헌법</th></tr></thead><tbody><tr><td style='border:1px solid #aaa;padding:4px 8px;'><code style='background:#eee;font-family:Consolas;font-size:9pt;padding:1px 4px;'>appsettings.json</code></td><td style='border:1px solid #aaa;padding:4px 8px;'>기본 설정</td><td style='border:1px solid #aaa;padding:4px 8px;'>#21 (절대 보호)</td></tr>
+<tr><td style='border:1px solid #aaa;padding:4px 8px;'><code style='background:#eee;font-family:Consolas;font-size:9pt;padding:1px 4px;'>appsettings.Development.json</code></td><td style='border:1px solid #aaa;padding:4px 8px;'>개발 환경</td><td style='border:1px solid #aaa;padding:4px 8px;'>#21 (절대 보호)</td></tr>
+<tr><td style='border:1px solid #aaa;padding:4px 8px;'><code style='background:#eee;font-family:Consolas;font-size:9pt;padding:1px 4px;'>appsettings.Local.json</code></td><td style='border:1px solid #aaa;padding:4px 8px;'>로컬 개발</td><td style='border:1px solid #aaa;padding:4px 8px;'>-</td></tr>
+<tr><td style='border:1px solid #aaa;padding:4px 8px;'><code style='background:#eee;font-family:Consolas;font-size:9pt;padding:1px 4px;'>Properties/launchSettings.json</code></td><td style='border:1px solid #aaa;padding:4px 8px;'>실행 프로필</td><td style='border:1px solid #aaa;padding:4px 8px;'>-</td></tr>
+<tr><td style='border:1px solid #aaa;padding:4px 8px;'><code style='background:#eee;font-family:Consolas;font-size:9pt;padding:1px 4px;'>CLAUDE.md</code></td><td style='border:1px solid #aaa;padding:4px 8px;'>프로젝트 헌법</td><td style='border:1px solid #aaa;padding:4px 8px;'>-</td></tr>
+<tr><td style='border:1px solid #aaa;padding:4px 8px;'><code style='background:#eee;font-family:Consolas;font-size:9pt;padding:1px 4px;'>MEMORY.md</code></td><td style='border:1px solid #aaa;padding:4px 8px;'>PM 메모리 인덱스</td><td style='border:1px solid #aaa;padding:4px 8px;'>-</td></tr></tbody></table>
+<hr style="border:none;border-top:1px solid #ccc;"></p><p><h2 style="border-bottom:1px solid #999;padding-bottom:3px;color:#1976D2;">7. Git 커밋 통계 (대략)</h2></p><p><ul><li>총 커밋: 200+</li>
+<li>진범 봉합: #1~#100</li>
+<li>헌법 박제: 32개</li></p><p></ul><h3 style="color:#333;">최근 5건 (2026-05-31 ~ 06-01)</h3>
+<pre style='background:#f4f4f4;padding:8px;font-family:Consolas;font-size:9pt;border:1px solid #ddd;'>53c2b0f docs(constitution): 헌법 #32 신설 — 점수·평가 받아쓰기 절대 금지
+3076be4 feat(final): 퇴근 전 6대 작업 일괄 봉합
+6129ec0 fix(unified-calendar): 진범 #100 봉합
+05f45d6 fix(item-specs): 진범 #99 봉합
+064e85e fix(role): system_admin role 박제 정합</pre></p><p><hr style="border:none;border-top:1px solid #ccc;"></p><p><h2 style="border-bottom:1px solid #999;padding-bottom:3px;color:#1976D2;">8. 디렉터리 트리 (1단)</h2></p><p><pre style='background:#f4f4f4;padding:8px;font-family:Consolas;font-size:9pt;border:1px solid #ddd;'>src/
+├─ HitPan.API/
+├─ HitPan.Application/
+├─ HitPan.Domain/
+├─ HitPan.Infrastructure/
+├─ HitPan.Contracts/
+├─ HitPan.Analyzers/
+├─ HitPan.Web/
+├─ HitPan.Watchdog/
+└─ HitPan.Tests/
+
+docs/
+├─ design/             ← PRD, ERD, THREE_SYSTEM
+├─ governance/         ← 헌법·체크리스트
+├─ handoff/            ← 세션 인수인계
+└─ erp-handover/       ← 어벤져스 학습 인계 (현재)
+    ├─ 00~23_*.md
+    ├─ word/           ← 워드 변환본
+    └─ source/         ← 소스 zip</pre>
+</p></body>
+</html>

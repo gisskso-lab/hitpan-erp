@@ -1,0 +1,111 @@
+@page "/items/ledger"
+@namespace HitPan.Web.Pages.Items
+@attribute [Authorize]
+@using HitPan.Web.Models
+@using HitPan.Web.Services
+@using System.Net.Http.Json
+@inject HttpClient Http
+@inject ItemMasterService ItemSvc
+@inject IJSRuntime Js
+@inject ISnackbar Snackbar
+
+<PageTitle>상품별 원장</PageTitle>
+<PageHeader Title="상품별 원장 (수불부)" Subtitle="기간별 입출고 이력 조회" />
+
+@* 필터 영역 *@
+<MudPaper Class="pa-3 mb-3" Elevation="0" Style="border:1px solid var(--mud-palette-lines-default);border-radius:12px">
+    <div class="hitpan-filter-bar">
+        <div class="hitpan-filter-field hitpan-filter-field--sm">
+            <MudDatePicker @bind-Date="_from" Label="시작일" Variant="Variant.Outlined" Margin="Margin.Dense" DateFormat="yyyy-MM-dd" />
+        </div>
+        <div class="hitpan-filter-field hitpan-filter-field--sm">
+            <MudDatePicker @bind-Date="_to" Label="종료일" Variant="Variant.Outlined" Margin="Margin.Dense" DateFormat="yyyy-MM-dd" />
+        </div>
+        <div class="hitpan-filter-field hitpan-filter-field--md">
+            <MudAutocomplete T="ItemListModel" Label="상품명 검색"
+                Value="_selectedItem" ValueChanged="OnItemSelected"
+                SearchFunc="SearchItem" ToStringFunc="@(i => i?.ItemName ?? "")"
+                Variant="Variant.Outlined" Margin="Margin.Dense" Dense="true"
+                ResetValueOnEmptyText="true" CoerceText="false" />
+        </div>
+        <div class="hitpan-filter-actions">
+            <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="SearchAsync">조회</MudButton>
+            <MudButton Variant="Variant.Outlined" Size="Size.Small" StartIcon="@Icons.Material.Filled.Print" OnClick="PrintAsync">인쇄</MudButton>
+        </div>
+    </div>
+</MudPaper>
+
+@* 데이터 테이블 *@
+<MudPaper Elevation="0" Class="hitpan-card" Style="overflow:hidden">
+    <MudTable T="StockLedgerRow" Items="_data" Dense="true" Hover="true" Striped="true" FixedHeader="true" Height="calc(100vh - 280px)">
+        <HeaderContent>
+            <MudTh>품목명</MudTh>
+            <MudTh Style="text-align:right">입고수량</MudTh>
+            <MudTh Style="text-align:right">출고수량</MudTh>
+            <MudTh Style="text-align:right">잔량</MudTh>
+            <MudTh Style="text-align:right">입고금액</MudTh>
+            <MudTh Style="text-align:right">출고금액</MudTh>
+        </HeaderContent>
+        <RowTemplate>
+            <MudTd>@context.Label</MudTd>
+            <MudTd Style="text-align:right">@context.QtyIn.ToString("N1")</MudTd>
+            <MudTd Style="text-align:right">@context.QtyOut.ToString("N1")</MudTd>
+            <MudTd Style="text-align:right;font-weight:600">@context.Balance.ToString("N1")</MudTd>
+            <MudTd Style="text-align:right">@context.AmountIn.ToString("N0")</MudTd>
+            <MudTd Style="text-align:right">@context.AmountOut.ToString("N0")</MudTd>
+        </RowTemplate>
+        <NoRecordsContent><MudText Class="pa-4" Style="color:var(--hitpan-text-faint)">조회된 원장 데이터가 없습니다.</MudText></NoRecordsContent>
+    </MudTable>
+</MudPaper>
+
+@code {
+    private DateTime? _from = DateTime.Today.AddDays(-30);
+    private DateTime? _to = DateTime.Today;
+    private string _partner = "";
+    private ItemListModel? _selectedItem;
+    private List<ItemListModel> _items = new();
+    private List<StockLedgerRow> _data = new();
+
+    protected override async Task OnInitializedAsync()
+    {
+        _items = await ItemSvc.GetListAsync() ?? new();
+        await SearchAsync();
+    }
+
+    private void OnItemSelected(ItemListModel? item)
+    {
+        _selectedItem = item;
+        _partner = item?.ItemName ?? "";
+    }
+
+    private Task<IEnumerable<ItemListModel>> SearchItem(string? value, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(value)) return Task.FromResult(_items.AsEnumerable());
+        return Task.FromResult(_items.Where(i =>
+            i.ItemName.Contains(value, StringComparison.OrdinalIgnoreCase) ||
+            i.ItemCode.Contains(value, StringComparison.OrdinalIgnoreCase)));
+    }
+
+    /// <summary>상품별 수불부를 조회한다.</summary>
+    private async Task SearchAsync()
+    {
+        var qs = new List<string> { "view=item" };
+        if (_from.HasValue) qs.Add($"from={_from:yyyy-MM-dd}");
+        if (_to.HasValue) qs.Add($"to={_to:yyyy-MM-dd}");
+        if (!string.IsNullOrWhiteSpace(_partner)) qs.Add($"partner={Uri.EscapeDataString(_partner)}");
+        var path = "api/reports/stock-ledger?" + string.Join("&", qs);
+        try
+        {
+            _data = await Http.GetFromJsonAsync<List<StockLedgerRow>>(path) ?? new();
+        }
+        catch (Exception _hp15Ex)
+        {
+            Console.Error.WriteLine($"[HP15] " + _hp15Ex.GetType().Name + ": " + _hp15Ex.Message);
+            _data = new();
+        }
+        StateHasChanged();
+    }
+
+    /// <summary>화면을 인쇄한다.</summary>
+    private async Task PrintAsync() { await Js.InvokeVoidAsync("print"); }
+}

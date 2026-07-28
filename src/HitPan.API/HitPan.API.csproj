@@ -1,0 +1,65 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Dapper" Version="2.1.72" />
+    <PackageReference Include="DotNetEnv" Version="3.1.1" />
+    <PackageReference Include="Microsoft.AspNetCore.Components.WebAssembly.Server" Version="8.0.11" />
+    <PackageReference Include="Microsoft.Extensions.Hosting.WindowsServices" Version="10.0.7" />
+    <PackageReference Include="MySqlConnector" Version="2.5.0" />
+    <PackageReference Include="ClosedXML" Version="0.105.0" />
+    <PackageReference Include="Microsoft.AspNetCore.Authentication.JwtBearer" Version="[8.0.0,9.0.0)" />
+    <PackageReference Include="Microsoft.AspNetCore.OpenApi" Version="[8.0.0,9.0.0)" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Design" Version="[8.0.0,9.0.0)">
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+      <PrivateAssets>all</PrivateAssets>
+    </PackageReference>
+    <PackageReference Include="QuestPDF" Version="2026.2.4" />
+    <PackageReference Include="Serilog.AspNetCore" Version="8.0.3" />
+    <PackageReference Include="Swashbuckle.AspNetCore" Version="6.5.0" />
+    <PackageReference Include="System.Text.Encoding.CodePages" Version="10.0.5" />
+    <PackageReference Include="System.Security.Cryptography.Xml" Version="10.0.10" />
+    <PackageReference Include="Microsoft.Extensions.Caching.Memory" Version="[8.0.1,9.0.0)" />
+    <PackageReference Include="Newtonsoft.Json" Version="13.0.3" />
+    <PackageReference Include="MailKit" Version="4.16.0" />
+    <PackageReference Include="MimeKit" Version="4.16.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\HitPan.Application\HitPan.Application.csproj" />
+    <ProjectReference Include="..\HitPan.Infrastructure\HitPan.Infrastructure.csproj" />
+    <ProjectReference Include="..\HitPan.Contracts\HitPan.Contracts.csproj" />
+    <!-- 축 6-4 (2026-05-14): 헌법 #15·#16 자동 검출 Roslyn Analyzer. -->
+    <ProjectReference Include="..\HitPan.Analyzers\HitPan.Analyzers.csproj"
+                      OutputItemType="Analyzer"
+                      ReferenceOutputAssembly="false" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- 히트판 도우미·AI 직원 정체성/엔진 프롬프트(System Prompt): 실행/배포 출력으로 복사 (앱 시작 1회 로드용). -->
+    <!-- 봉합 (2026-06-23, 5차 전수조사 PERM-01 P2): 종전엔 HITPAN_CHATBOT_IDENTITY.md 한 개만 복사 항목에
+         등록돼, AI 직원 엔진 프롬프트 HITPAN_AI_AGENT.md(AiAgentSystemPromptProvider 가 로드)가 고객 PC
+         출력 폴더에 누락 → 폴백 1줄 지침으로 동작(AI 직원 페르소나·셀링포인트 저하). AI 폴더의 모든 .md 를
+         와일드카드로 복사해 향후 프롬프트 추가 시 누락도 원천 차단(헌법 #34 출하 정합). -->
+    <None Update="AI\*.md" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- 봉합 (2026-07-16, 작1 W-0 P0 — 설계팀·검증팀 SoD 독립 확증): 업데이트 마이그 SQL 을 출력에 복사한다.
+         왜 P0 였나: .sql 은 .NET SDK 기본 Content 가 아니라, 이 지시가 없으면 publish 산출물에 단 한 개도
+           안 실린다(소스 55개 → publish 0개, 실측 확인). 그러면 고객 PC 자동 업데이트 zip 에 마이그가 빠져,
+           스키마 변경 릴리스가 MigrationRunner.ResolveMigrationsDirectory 에서 폴더를 못 찾아 "0건 no-op" →
+           신버전 api 가 구스키마에서 500 → 롤백 → DB 오염 → 복구 불가(헌법 #19·#20 위반).
+           최근 배포 EXE 1.2.29~1.2.33 전부 마이그 SQL 미포함이 이 누락의 증상이었다.
+         MigrationRunner 는 배포 시 {baseDir}/Migrations/SQL 을 1순위 후보로 찾으므로(상대경로 유지), Link 없이
+           Update 로 원래 폴더 구조 그대로 복사한다. 헌법 #36: 신규설치 진실원은 clean DDL, 본 SQL 은 '업데이트 시
+           ALTER 적용' 경로 — 둘은 별개. 재발 차단은 CI 스모크(산출물 DB-*.sql 집합 == 소스 집합 + 비어있지 않음). -->
+    <None Update="Migrations\SQL\DB-*.sql" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+</Project>

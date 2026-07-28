@@ -1,0 +1,34 @@
+<Configuration>
+  <!--
+    M4 검증용 Windows Sandbox (작5, 사장님 결재 2026-06-30)
+    ============================================================================
+    목적: demo 운영(호스트 3306)과 물리 완전격리된 휘발성 환경에서
+          ① 고리4 P1 멱등 검증  ② 종단 빌드테스트(설치→가입→시리얼→로그인) 를 한 번에.
+    끄면 흔적 0 — 매번 깨끗한 새 환경(사장님: "휘발성 때문에 테스트용으로 쓰는 거야").
+
+    매핑 폴더(전부 ReadOnly — 샌드박스가 호스트를 못 더럽힘):
+      - M4 산출물 폴더  → C:\m4   (멱등도구 self-contained EXE·DDL·셋업 스크립트)
+      - dist EXE 폴더   → C:\dist (종단 빌드테스트용 설치 EXE: HitPan-ERP-Setup-1.2.15.exe)
+
+    ⚠️ 호스트 레포·운영 DB는 매핑하지 않는다 — 샌드박스는 호스트 3306·소스에 못 닿는다(헌법 #39).
+  -->
+  <VGpu>Disable</VGpu>
+  <Networking>Default</Networking>
+  <MappedFolders>
+    <MappedFolder>
+      <HostFolder>C:\Users\소순근\Desktop\hitpan-erp\tests\sandbox-m4\payload</HostFolder>
+      <SandboxFolder>C:\m4</SandboxFolder>
+      <ReadOnly>true</ReadOnly>
+    </MappedFolder>
+    <MappedFolder>
+      <HostFolder>C:\Users\소순근\Desktop\hitpan-erp\dist</HostFolder>
+      <SandboxFolder>C:\dist</SandboxFolder>
+      <ReadOnly>true</ReadOnly>
+    </MappedFolder>
+  </MappedFolders>
+  <LogonCommand>
+    <!-- 샌드박스 로그인 직후 안내문을 띄운다(사장님이 순서대로 따라가게). -->
+    <Command>cmd.exe /c start "" notepad.exe "C:\m4\읽어주세요_M4검증순서.txt"</Command>
+  </LogonCommand>
+  <MemoryInMB>8192</MemoryInMB>
+</Configuration>

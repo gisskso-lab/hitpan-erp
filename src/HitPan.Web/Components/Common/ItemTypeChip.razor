@@ -1,0 +1,25 @@
+@namespace HitPan.Web.Components.Common
+
+@if (!string.IsNullOrEmpty(ItemType) && _label != null)
+{
+    <span class="@($"hitpan-item-chip hitpan-item-chip--{ItemType}")" title="@_tooltip">
+        @_label
+    </span>
+}
+
+@code {
+    [Parameter] public string? ItemType { get; set; }
+
+    private string? _label;
+    private string? _tooltip;
+
+    protected override void OnParametersSet()
+    {
+        (_label, _tooltip) = ItemType switch
+        {
+            "promo"    => ("🎁 1+1", "1+1 기획상품 — 1건 입력 시 자동으로 수량 2배 적용"),
+            "assembly" => ("🔩 조립", "조립상품 — 판매 시 BOM 자재가 자동 차감됨"),
+            _ => (null, null)
+        };
+    }
+}

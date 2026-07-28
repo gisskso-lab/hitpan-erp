@@ -2,7 +2,23 @@
 .env
 *.env.local
 
+# Cloudflare Tunnel 토큰 — 절대 커밋 금지 (WS-20260428-01)
+installer/tunnels.csv
+installer/hitpan-tunnel.conf
+installer/hitpan-keys.conf
+installer/cloudflared.exe
+**/tunnels-*.csv
+**/*tunnel-token*
+
+# 로컬 개발 설정(민감정보 가능)
+src/HitPan.API/appsettings.Development.json
+src/HitPan.Web/appsettings.Development.json
+src/HitPan.Web/wwwroot/appsettings.Development.json
+artifacts/**/appsettings.Development.json
+src/**/artifacts/**/appsettings.Development.json
+
 # .NET
+appsettings.Development.json
 bin/
 obj/
 *.user
@@ -22,7 +38,53 @@ Thumbs.db
 # 빌드 산출물
 publish/
 dist/
+artifacts/sec01-build/
+
+# wwwroot/lib 영역 (Bootstrap 등 프론트 라이브러리) — 사고 #20260611 봉합
+# .gitignore의 dist/ 패턴이 wwwroot/lib/bootstrap/dist까지 박혀서 publish 영역 누락 사고
+# 봉합: lib 영역 명시적 추적 가도
+!**/wwwroot/lib/
+!**/wwwroot/lib/**
+artifacts/**/*.dll
+artifacts/**/*.exe
+artifacts/**/*.pdb
 
 # 테스트 결과
 TestResults/
 coverage/
+
+# 설치 파일 빌드 산출물 (바이너리만 제외, 소스 스크립트는 추적)
+installer-build/
+installer/api/
+installer/web/
+installer/wwwroot/
+installer/*.exe
+installer/*.dll
+installer/*.msi
+installer/*.sql
+# 출하 DDL 정본은 버전관리 필수 (2026-06-23 사장님 결재) — 고객 DB 생성 정본, 유실 방지.
+#   단 hitpan_db.sql(실데이터 포함 가능)·백업은 계속 제외 유지(헌법 #18/#22).
+!installer/hitpan_db_clean.sql
+installer/cloudflared.exe
+*.zip
+hitpan_erp_backup_*.sql
+artifacts/doc-build/
+backups/
+
+tmp-build/
+logs/docx-convert*.log
+.ncp-secrets.txt
+secrets/
+
+# M4 샌드박스 검증 산출물(거대 self-contained EXE·clean DDL 사본 — 재생성 가능)
+tests/sandbox-m4/payload/app/
+tests/sandbox-m4/payload/hitpan_db_clean.sql
+
+# API wwwroot 재오염원 차단 (2026-07-07, 종단 P0 진범 봉합 — 작업지시서 20260706작-v2)
+#   API 는 Blazor 를 ProjectReference 하지 않으므로 소스트리에 정적 wwwroot 가 있으면 안 된다.
+#   과거 옛 WASM 잔재(5/18~20)가 여기 남아 빌드에 실려 터널 setup NotFound 를 유발했다.
+#   최신 WASM 은 빌드 시 web publish 결과를 bundle/api/wwwroot 로 복사한다(build-installer-universal.ps1 W1).
+src/HitPan.API/wwwroot/
+installer/api-backup-*/
+installer/api-wwwroot-backup-*/
+hitpan-apiwwwroot/

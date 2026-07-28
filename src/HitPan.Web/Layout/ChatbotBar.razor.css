@@ -1,0 +1,145 @@
+/* 히트판 AI 챗봇 바 — Apple Spotlight 스타일 */
+
+.hitpan-chatbot-bar {
+    position: relative;
+    min-width: 320px;
+    display: flex;
+    align-items: center;
+    height: 100%;
+}
+
+/* 상시 노출 슬림 검색창 */
+.hitpan-chatbot-input {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 4px 12px;
+    background: #fff;
+    border: 1px solid #e5e7eb;
+    border-radius: 20px;
+    cursor: pointer;
+    height: 30px;
+    max-width: 360px;
+    width: 100%;
+    transition: border-color .15s ease, box-shadow .15s ease;
+}
+
+    .hitpan-chatbot-input:hover {
+        border-color: #0F6E56;
+        box-shadow: 0 0 0 3px rgba(15,110,86,0.08);
+    }
+
+.hitpan-chatbot-placeholder {
+    color: #9CA3AF;
+    font-size: 13px;
+    flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.hitpan-chatbot-kbd {
+    font-size: 11px;
+    color: #9CA3AF;
+    border: 1px solid #eee;
+    padding: 1px 6px;
+    border-radius: 4px;
+    font-family: JetBrains Mono, monospace;
+}
+
+/* 패널 오버레이 — 바깥 클릭 시 닫힘 */
+.hitpan-chatbot-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 1199;
+    background: transparent;
+}
+
+/* 드롭다운 패널 */
+.hitpan-chatbot-panel {
+    position: fixed;
+    top: 48px;
+    left: 130px;           /* 사이드바(112px) + 여백 */
+    z-index: 1200;
+    width: 520px;
+    max-width: calc(100vw - 24px);
+    max-height: 80vh;
+    background: #fff;
+    border: 1px solid #ddd;
+    border-radius: 12px;
+    box-shadow: 0 8px 32px rgba(0,0,0,0.15);
+    display: flex;
+    flex-direction: column;
+}
+
+.hitpan-chatbot-panel-header {
+    padding: 10px 16px;
+    border-bottom: 1px solid #eee;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.hitpan-chatbot-panel-input {
+    padding: 10px 16px;
+    border-bottom: 1px solid #eee;
+}
+
+.hitpan-chatbot-panel-body {
+    flex: 1;
+    overflow-y: auto;
+    padding: 16px;
+    min-height: 160px;
+}
+
+.hitpan-chatbot-related-menus {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-top: 6px;
+}
+
+.hitpan-chatbot-feedback {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.hitpan-chatbot-quota {
+    padding: 8px 16px;
+    background: #f9f9f9;
+    border-top: 1px solid #eee;
+    font-size: 11px;
+    color: #666;
+    border-radius: 0 0 12px 12px;
+}
+
+.hitpan-chatbot-quota-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+/* ── 반응형: 모바일에서는 아이콘만 (placeholder·kbd 숨김) ── */
+@media (max-width: 768px) {
+    .hitpan-chatbot-bar {
+        min-width: 0;
+    }
+
+    .hitpan-chatbot-input {
+        max-width: 40px;
+        padding: 4px 8px;
+        justify-content: center;
+    }
+
+    .hitpan-chatbot-placeholder,
+    .hitpan-chatbot-kbd {
+        display: none;
+    }
+
+    .hitpan-chatbot-panel {
+        left: 8px;
+        right: 8px;
+        width: auto;
+    }
+}

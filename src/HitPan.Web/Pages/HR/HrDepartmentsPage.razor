@@ -1,0 +1,50 @@
+@page "/hr/departments"
+@namespace HitPan.Web.Pages.HrUi
+@attribute [Authorize]
+@using HitPan.Web.Models
+@using HitPan.Web.Services
+@inject EmployeeService EmployeeSvc
+
+<PageTitle>부서 관리</PageTitle>
+<PageHeader Title="부서 관리" Subtitle="회사 부서 목록 조회" />
+
+<MudPaper Elevation="0" Class="pa-2 hitpan-card">
+    @if (_loading)
+    {
+        <MudProgressLinear Indeterminate="true" Color="Color.Primary" />
+    }
+    else
+    {
+        <MudTable Items="_items" Dense="true" Hover="true" Striped="true">
+            <HeaderContent>
+                <MudTh Style="width:200px">부서 코드</MudTh>
+                <MudTh>부서명</MudTh>
+            </HeaderContent>
+            <RowTemplate>
+                <MudTd DataLabel="부서 코드">@context.DeptId</MudTd>
+                <MudTd DataLabel="부서명">@context.DeptName</MudTd>
+            </RowTemplate>
+            <NoRecordsContent>
+                <MudText Typo="Typo.body2" Color="Color.Secondary" Class="pa-4">등록된 부서가 없습니다.</MudText>
+            </NoRecordsContent>
+        </MudTable>
+    }
+</MudPaper>
+
+@code {
+    private List<DepartmentModel> _items = new();
+    private bool _loading = true;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadAsync();
+    }
+
+    private async Task LoadAsync()
+    {
+        _loading = true;
+        // 부서 목록 조회. 실패 시 EmployeeService 가 빈 목록을 반환하므로 화면은 "부서 없음"으로 동작.
+        _items = await EmployeeSvc.GetDepartmentsAsync();
+        _loading = false;
+    }
+}

@@ -1,0 +1,75 @@
+@inherits LayoutComponentBase
+@attribute [Authorize]
+@using HitPan.Web.Components
+@using HitPan.Web.Components.Common
+@using Microsoft.AspNetCore.Components.Authorization
+@using MudBlazor
+@inject NavigationManager Nav
+
+<CascadingAuthenticationState>
+    <AuthorizeView>
+        <Authorized>
+            <div class="hitpan-shell">
+
+                @* PC 전용 사이드바 — 모바일에서 CSS로 숨김 *@
+                <aside class="hitpan-sidebar-aside" aria-label="메인 메뉴">
+                    <Sidebar />
+                </aside>
+
+                <div class="hitpan-main">
+
+                    @* PC 전용 상단 헤더 — 모바일에서 CSS로 숨김 *@
+                    <div class="hp-pc-header">
+                        <TopHeader />
+                    </div>
+
+                    @* 모바일 전용 iOS 스타일 상단바 *@
+                    <div class="hp-mobile-header">
+                        <div class="hp-mobile-header-inner">
+                            <div class="hp-mobile-brand" @onclick="@(() => Nav.NavigateTo("/dashboard"))">
+                                <div class="hp-mobile-brand-mark">H</div>
+                                <span class="hp-mobile-brand-text">히트판 ERP</span>
+                            </div>
+                            <div class="hp-mobile-header-actions">
+                                <MobileHeaderActions />
+                            </div>
+                        </div>
+                    </div>
+
+                    @* WS-12 1클릭 통신 봉합 배너 (헌법 #27 정합) *@
+                    <CommsRecoveryBanner />
+
+                    @* 헌법 #24 약관 v2.0.0 미동의 안내 배너 *@
+                    <TermsConsentBanner />
+
+                    @* 고리2(A안) 업데이트 동의 팝업 게이트 — 로그인 페이지가 아닌 여기서 1회 노출
+                       (2026-07-22 작1: /login 폐기로 팝업이 사라지던 진범 봉합). 약관 미동의 시엔 게이트가 스킵. *@
+                    <UpdateConsentGate />
+
+                    <main class="hitpan-content mud-px-4 mud-py-4">
+                        <ErrorBoundary>
+                            <ChildContent>@Body</ChildContent>
+                            <ErrorContent Context="ex">
+                                <div class="hp-error-boundary">
+                                    <MudIcon Icon="@Icons.Material.Filled.ErrorOutline" Style="font-size:40px;color:#e53935;" />
+                                    <p class="hp-error-msg">페이지 로드 중 오류가 발생했습니다.</p>
+                                    <MudButton Variant="Variant.Outlined" OnClick="@(() => Nav.NavigateTo("/dashboard"))">홈으로</MudButton>
+                                </div>
+                            </ErrorContent>
+                        </ErrorBoundary>
+                    </main>
+
+                    <MobileBottomNav />
+                </div>
+            </div>
+        </Authorized>
+        <Authorizing>
+            <div style="display:flex;justify-content:center;align-items:center;height:100vh">
+                <MudProgressCircular Color="Color.Primary" Indeterminate="true" />
+            </div>
+        </Authorizing>
+        <NotAuthorized>
+            <RedirectToLogin />
+        </NotAuthorized>
+    </AuthorizeView>
+</CascadingAuthenticationState>

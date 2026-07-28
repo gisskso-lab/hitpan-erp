@@ -1,0 +1,121 @@
+@inject IHttpClientFactory HttpFactory
+@inject ISnackbar Snackbar
+
+@*
+    W17 프로모션 생성 다이얼로그 (사장님 결재 2026-06-05)
+*@
+
+<MudDialog>
+    <DialogContent>
+        <MudGrid>
+            <MudItem xs="6">
+                <MudTextField @bind-Value="_promoCode" Label="프로모션 코드" Required="true" />
+            </MudItem>
+            <MudItem xs="6">
+                <MudTextField @bind-Value="_title" Label="제목" Required="true" />
+            </MudItem>
+            <MudItem xs="4">
+                <MudSelect T="string" @bind-Value="_discountType" Label="할인 유형">
+                    <MudSelectItem Value="@("percent")">% 할인</MudSelectItem>
+                    <MudSelectItem Value="@("fixed")">정액 할인</MudSelectItem>
+                </MudSelect>
+            </MudItem>
+            <MudItem xs="4">
+                <MudNumericField @bind-Value="_discountValue" Label="할인 값" Min="0.01M" />
+            </MudItem>
+            <MudItem xs="4">
+                <MudNumericField @bind-Value="_maxUses" Label="사용 한도 (0=무제한)" Min="0" />
+            </MudItem>
+            <MudItem xs="6">
+                <MudDatePicker @bind-Date="_startsAt" Label="시작일" />
+            </MudItem>
+            <MudItem xs="6">
+                <MudDatePicker @bind-Date="_endsAt" Label="종료일" />
+            </MudItem>
+            <MudItem xs="12">
+                <MudSelect T="string" @bind-Value="_targetPlan" Label="대상 플랜 (선택)">
+                    <MudSelectItem Value="@((string?)null)">전체</MudSelectItem>
+                    <MudSelectItem Value="@("basic")">basic</MudSelectItem>
+                    <MudSelectItem Value="@("pro")">pro</MudSelectItem>
+                    <MudSelectItem Value="@("enterprise")">enterprise</MudSelectItem>
+                </MudSelect>
+            </MudItem>
+        </MudGrid>
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="Cancel">취소</MudButton>
+        <MudButton OnClick="Submit" Color="Color.Primary" Variant="Variant.Filled"
+                   Disabled="@_submitting">@(_submitting ? "생성 중..." : "생성")</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private IMudDialogInstance MudDialog { get; set; } = null!;
+
+    private string _promoCode = "";
+    private string _title = "";
+    private string _discountType = "percent";
+    private decimal _discountValue = 10;
+    private int _maxUses = 0;
+    private DateTime? _startsAt = DateTime.Today;
+    private DateTime? _endsAt = DateTime.Today.AddDays(30);
+    private string? _targetPlan;
+    private bool _submitting = false;
+
+    private void Cancel() => MudDialog.Cancel();
+
+    private async Task Submit()
+    {
+        if (string.IsNullOrWhiteSpace(_promoCode) || string.IsNullOrWhiteSpace(_title))
+        {
+            Snackbar.Add("코드·제목을 입력해주세요.", Severity.Warning);
+            return;
+        }
+        if (_startsAt is null || _endsAt is null || _endsAt <= _startsAt)
+        {
+            Snackbar.Add("종료일은 시작일 이후여야 합니다.", Severity.Warning);
+            return;
+        }
+
+        _submitting = true;
+        try
+        {
+            var http = HttpFactory.CreateClient("backoffice-authed");
+            var res = await http.PostAsJsonAsync("api/backoffice/promotions", new
+            {
+                PromoCode = _promoCode,
+                Title = _title,
+                DiscountType = _discountType,
+                DiscountValue = _discountValue,
+                StartsAt = _startsAt.Value,
+                EndsAt = _endsAt.Value,
+                MaxUses = _maxUses,
+                TargetPlan = _targetPlan
+            });
+            var payload = await res.Content.ReadFromJsonAsync<ActionResponse>();
+            if (res.IsSuccessStatusCode && payload?.Success == true)
+            {
+                Snackbar.Add(payload.Message ?? "생성 완료", Severity.Success);
+                MudDialog.Close(DialogResult.Ok(true));
+            }
+            else
+            {
+                Snackbar.Add(payload?.Message ?? "생성 실패", Severity.Error);
+            }
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"생성 중 오류: {ex.Message}", Severity.Error);
+        }
+        finally
+        {
+            _submitting = false;
+        }
+    }
+
+    private class ActionResponse
+    {
+        public bool Success { get; set; }
+        public string? Message { get; set; }
+    }
+}

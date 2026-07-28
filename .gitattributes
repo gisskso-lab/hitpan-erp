@@ -1,0 +1,12 @@
+# 히트판 변경 금지 파일 목록
+# 이 파일들은 직접 수정 절대 금지 — 사장님 승인 후만 가능
+# (헌법 §21, 2026-05-06)
+
+# Blazor WASM 부트 필수 파일 — 삭제/수정 시 외부 접속 전체 차단
+src/HitPan.Web/wwwroot/appsettings.json        linguist-generated
+src/HitPan.Web/wwwroot/appsettings.Development.json linguist-generated
+
+# 셸 스크립트는 반드시 LF (2026-07-20)
+# NCP(리눅스)에서 실행되는 bash — CRLF 로 커밋되면 '\r' 때문에 실행 실패한다.
+# publish-update.sh / sign-manifest.sh 등 배포 스크립트 보호.
+*.sh text eol=lf

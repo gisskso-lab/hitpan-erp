@@ -1,0 +1,296 @@
+@page "/hr/labor-contracts"
+@namespace HitPan.Web.Pages.HrUi
+@attribute [Authorize]
+@using HitPan.Web.Components.Common
+@using HitPan.Web.Helpers
+@using HitPan.Web.Models
+@using HitPan.Web.Services
+@inject LaborContractService ContractSvc
+@inject NavigationManager Nav
+@inject IDialogService DialogService
+@inject ISnackbar Snackbar
+@inject AuthenticationStateProvider AuthState
+@inject IJSRuntime JS
+
+<PageTitle>전자근로계약서 — 히트판 ERP</PageTitle>
+
+<PageHeader Title="전자근로계약서"
+            Subtitle="근로계약서를 작성·발송하고 직원의 전자서명으로 체결합니다.">
+    <Actions>
+        @if (_isTenantAdmin)
+        {
+            <MudButton Variant="Variant.Filled" Color="Color.Primary"
+                       StartIcon="@Icons.Material.Filled.Add"
+                       OnClick="GoCreate">
+                신규 계약서 작성
+            </MudButton>
+        }
+    </Actions>
+</PageHeader>
+
+@* === 필터 === *@
+<MudPaper Elevation="0" Class="pa-3 mb-3 hitpan-card">
+    <MudGrid Spacing="2" Class="align-center">
+        <MudItem xs="12" sm="3">
+            <MudSelect T="string" @bind-Value="_filterStatus" Label="상태" Variant="Variant.Outlined" Margin="Margin.Dense">
+                <MudSelectItem Value="@("")">전체</MudSelectItem>
+                <MudSelectItem Value="@("draft")">초안</MudSelectItem>
+                <MudSelectItem Value="@("sent")">발송</MudSelectItem>
+                <MudSelectItem Value="@("signed")">서명완료</MudSelectItem>
+                <MudSelectItem Value="@("voided")">무효</MudSelectItem>
+            </MudSelect>
+        </MudItem>
+        <MudItem xs="12" sm="5">
+            <MudTextField T="string" @bind-Value="_filterName" Label="사원 검색" Variant="Variant.Outlined" Margin="Margin.Dense"
+                          Adornment="Adornment.Start" AdornmentIcon="@Icons.Material.Filled.Search" Clearable="true" />
+        </MudItem>
+        <MudItem xs="12" sm="4" Class="d-flex justify-end gap-2">
+            <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Refresh"
+                       OnClick="LoadAsync" Size="Size.Small">새로고침</MudButton>
+        </MudItem>
+    </MudGrid>
+</MudPaper>
+
+@* === 테이블 === *@
+<MudPaper Elevation="0" Class="hitpan-card">
+    @if (_loading)
+    {
+        <MudProgressLinear Indeterminate="true" Color="Color.Primary" />
+    }
+    else if (_filteredList.Count() == 0)
+    {
+        <EmptyState Icon="@Icons.Material.Outlined.Description"
+                    Title="작성된 근로계약서가 없습니다"
+                    Subtitle="신규 버튼으로 첫 계약서를 작성하세요"
+                    ActionText="@(_isTenantAdmin ? "신규 계약서 작성" : null)"
+                    ActionIcon="@Icons.Material.Filled.Add"
+                    OnAction="GoCreate" />
+    }
+    else
+    {
+        <MudTable Items="_filteredList" Dense="true" Hover="true" Striped="true">
+            <HeaderContent>
+                <MudTh>사원명</MudTh>
+                <MudTh>계약형태</MudTh>
+                <MudTh>시작일 ~ 종료일</MudTh>
+                <MudTh Style="text-align:right">급여</MudTh>
+                <MudTh Style="text-align:center">상태</MudTh>
+                <MudTh Style="text-align:center;width:260px">작업</MudTh>
+            </HeaderContent>
+            <RowTemplate>
+                <MudTd>@context.EmployeeName</MudTd>
+                <MudTd>@GetContractTypeLabel(context.ContractType)</MudTd>
+                <MudTd>
+                    @context.StartDate.ToString("yyyy-MM-dd")
+                    @(context.EndDate is null ? " ~ (무기한)" : $" ~ {context.EndDate.Value:yyyy-MM-dd}")
+                </MudTd>
+                <MudTd Style="text-align:right">
+                    @context.Salary.ToString("N0")원
+                    <MudText Typo="Typo.caption" Style="color:var(--hitpan-text-faint)">@GetSalaryTypeLabel(context.SalaryType)</MudText>
+                </MudTd>
+                <MudTd Style="text-align:center">
+                    <MudChip T="string" Size="Size.Small" Variant="Variant.Filled"
+                             Color="@GetStatusColor(context.Status)">
+                        @GetStatusLabel(context.Status)
+                    </MudChip>
+                </MudTd>
+                <MudTd Style="text-align:center">
+                    @switch (context.Status)
+                    {
+                        case "draft":
+                            @if (_isTenantAdmin)
+                            {
+                                <MudButton Size="Size.Small" Variant="Variant.Outlined" Color="Color.Primary"
+                                           StartIcon="@Icons.Material.Filled.Send"
+                                           OnClick="@(() => SendAsync(context))">발송</MudButton>
+                            }
+                            <MudButton Size="Size.Small" Variant="Variant.Text"
+                                       StartIcon="@Icons.Material.Filled.Edit"
+                                       OnClick="@(() => GoDetail(context.ContractId))" Class="ml-1">편집</MudButton>
+                            break;
+                        case "sent":
+                            <MudButton Size="Size.Small" Variant="Variant.Outlined" Color="Color.Secondary"
+                                       StartIcon="@Icons.Material.Filled.Link"
+                                       OnClick="@(() => CopySignUrlAsync(context))">서명 요청 URL 복사</MudButton>
+                            <MudButton Size="Size.Small" Variant="Variant.Text"
+                                       StartIcon="@Icons.Material.Filled.Visibility"
+                                       OnClick="@(() => GoDetail(context.ContractId))" Class="ml-1">상세</MudButton>
+                            break;
+                        case "signed":
+                            <MudButton Size="Size.Small" Variant="Variant.Outlined" Color="Color.Success"
+                                       StartIcon="@Icons.Material.Filled.PictureAsPdf"
+                                       OnClick="@(() => DownloadPdfAsync(context))">계약서 보기</MudButton>
+                            @if (_isTenantAdmin)
+                            {
+                                <MudTooltip Text="무효화">
+                                    <MudIconButton Icon="@Icons.Material.Filled.Block" Size="Size.Small"
+                                                   Color="Color.Error"
+                                                   OnClick="@(() => VoidAsync(context))" />
+                                </MudTooltip>
+                            }
+                            break;
+                        case "voided":
+                            <MudChip T="string" Size="Size.Small" Variant="Variant.Text" Color="Color.Error">무효 처리됨</MudChip>
+                            break;
+                    }
+                </MudTd>
+            </RowTemplate>
+        </MudTable>
+    }
+</MudPaper>
+
+@code {
+    // ── 상태 ──
+    private bool _loading;
+    private bool _isTenantAdmin;
+    private List<LaborContractListModel> _all = new();
+
+    // ── 필터 ──
+    private string _filterStatus = "";
+    private string _filterName = "";
+
+    private IEnumerable<LaborContractListModel> _filteredList => _all
+        .Where(x => string.IsNullOrEmpty(_filterStatus) || x.Status == _filterStatus)
+        .Where(x => string.IsNullOrEmpty(_filterName)
+                    || (x.EmployeeName ?? "").Contains(_filterName, StringComparison.OrdinalIgnoreCase))
+        .OrderByDescending(x => x.CreatedAt);
+
+    protected override async Task OnInitializedAsync()
+    {
+        var state = await AuthState.GetAuthenticationStateAsync();
+        _isTenantAdmin = AccountTypeHelper.GetAccountType(state.User) == AccountTypeHelper.TenantAdmin;
+        await LoadAsync();
+    }
+
+    /// <summary>
+    /// 근로계약서 목록을 조회한다.
+    /// </summary>
+    private async Task LoadAsync()
+    {
+        _loading = true;
+        StateHasChanged();
+        _all = await ContractSvc.GetListAsync();
+        _loading = false;
+    }
+
+    private void GoCreate() => Nav.NavigateTo("/hr/labor-contracts/create");
+    private void GoDetail(string id) => Nav.NavigateTo($"/hr/labor-contracts/{id}/sign");
+
+    // ── 액션 ──
+
+    /// <summary>
+    /// 계약서를 직원에게 발송한다.
+    /// </summary>
+    private async Task SendAsync(LaborContractListModel item)
+    {
+        var ok = await ConfirmDialog.ShowAsync(
+            DialogService,
+            title: "근로계약서 발송",
+            message: $"{item.EmployeeName}님에게 근로계약서를 발송하시겠습니까?\n발송 후에는 편집이 제한됩니다.",
+            confirmText: "발송",
+            cancelText: "취소",
+            severity: Severity.Info);
+        if (!ok) return;
+
+        var success = await ContractSvc.SendAsync(item.ContractId);
+        if (success)
+        {
+            Snackbar.Add("근로계약서가 발송되었습니다.", Severity.Success);
+            await LoadAsync();
+        }
+        else
+        {
+            Snackbar.Add("발송에 실패했습니다.", Severity.Error);
+        }
+    }
+
+    /// <summary>
+    /// 서명 요청 URL을 클립보드에 복사한다.
+    /// </summary>
+    private async Task CopySignUrlAsync(LaborContractListModel item)
+    {
+        var url = $"{Nav.BaseUri}hr/labor-contracts/{item.ContractId}/sign";
+        try
+        {
+            await JS.InvokeVoidAsync("navigator.clipboard.writeText", url);
+            Snackbar.Add("서명 요청 URL이 복사되었습니다.", Severity.Success);
+        }
+        catch (Exception _hp15Ex)
+        {
+            Console.Error.WriteLine($"[HP15] " + _hp15Ex.GetType().Name + ": " + _hp15Ex.Message);
+            Snackbar.Add($"복사 실패: {url}", Severity.Warning);
+        }
+    }
+
+    /// <summary>
+    /// 서명된 계약서 PDF를 다운로드한다. (API가 준비되면 실제 다운로드, 없으면 상세 이동)
+    /// </summary>
+    private async Task DownloadPdfAsync(LaborContractListModel item)
+    {
+        // PDF 다운로드 엔드포인트가 없을 수 있으니 상세 페이지로 이동
+        await Task.CompletedTask;
+        Nav.NavigateTo($"/hr/labor-contracts/{item.ContractId}/sign");
+    }
+
+    /// <summary>
+    /// 서명된 계약을 무효화한다. (TenantAdmin)
+    /// </summary>
+    private async Task VoidAsync(LaborContractListModel item)
+    {
+        if (string.IsNullOrWhiteSpace(item.EsignId))
+        {
+            Snackbar.Add("서명 정보가 없어 무효화할 수 없습니다.", Severity.Warning);
+            return;
+        }
+
+        var ok = await ConfirmDialog.ShowAsync(
+            DialogService,
+            title: "서명 무효화",
+            message: $"{item.EmployeeName}님의 근로계약서 서명을 무효화하시겠습니까?\n무효화 후에는 되돌릴 수 없습니다.",
+            confirmText: "무효화",
+            cancelText: "취소",
+            severity: Severity.Error);
+        if (!ok) return;
+
+        // ESignService는 직접 주입하지 않고, 계약서 API로 위임 (없으면 ESignService 별도 주입 필요)
+        Snackbar.Add("무효화는 '전자서명 이력' 페이지에서 처리해주세요.", Severity.Info);
+    }
+
+    // ── 라벨 ──
+
+    private static string GetContractTypeLabel(string t) => t switch
+    {
+        "regular" => "정규직",
+        "contract" => "계약직",
+        "part_time" => "파트타임",
+        "daily" => "일용직",
+        _ => t
+    };
+
+    private static string GetSalaryTypeLabel(string t) => t switch
+    {
+        "monthly" => "월급",
+        "hourly" => "시급",
+        "daily" => "일급",
+        "annual" => "연봉",
+        _ => t
+    };
+
+    private static string GetStatusLabel(string s) => s switch
+    {
+        "draft" => "초안",
+        "sent" => "발송",
+        "signed" => "서명완료",
+        "voided" => "무효",
+        _ => s
+    };
+
+    private static Color GetStatusColor(string s) => s switch
+    {
+        "draft" => Color.Default,
+        "sent" => Color.Primary,
+        "signed" => Color.Success,
+        "voided" => Color.Error,
+        _ => Color.Default
+    };
+}

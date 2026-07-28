@@ -1,0 +1,225 @@
+@page "/stock/warehouse-manage"
+@namespace HitPan.Web.Pages.StockUi
+@attribute [Authorize]
+@inject HttpClient Http
+@inject ISnackbar Snackbar
+@inject IDialogService DialogService
+
+<PageTitle>창고 관리</PageTitle>
+
+<PageHeader Title="창고 관리" Subtitle="본점·지점 창고 등록 및 관리">
+    <Actions>
+        <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Add" OnClick="OpenAddDialog">
+            창고 추가
+        </MudButton>
+    </Actions>
+</PageHeader>
+
+@if (_loading)
+{
+    <MudProgressLinear Indeterminate="true" Color="Color.Primary" />
+}
+else
+{
+    <MudTable Items="_warehouses" Hover="true" Striped="true" Dense="true" Elevation="0"
+              Style="border:1px solid var(--mud-palette-lines-default);border-radius:12px">
+        <HeaderContent>
+            <MudTh>코드</MudTh>
+            <MudTh>창고명</MudTh>
+            <MudTh>유형</MudTh>
+            <MudTh>위치</MudTh>
+            <MudTh>상태</MudTh>
+            <MudTh Style="width:140px;text-align:center">관리</MudTh>
+        </HeaderContent>
+        <RowTemplate>
+            <MudTd>@context.WhCode</MudTd>
+            <MudTd>@context.WhName</MudTd>
+            <MudTd>@context.WhType</MudTd>
+            <MudTd>@context.Location</MudTd>
+            <MudTd>
+                <MudChip T="string" Color="@(context.IsActive ? Color.Success : Color.Default)" Size="Size.Small">
+                    @(context.IsActive ? "활성" : "비활성")
+                </MudChip>
+            </MudTd>
+            <MudTd Style="text-align:center">
+                <MudIconButton Icon="@Icons.Material.Filled.Edit" Size="Size.Small" Color="Color.Primary"
+                               OnClick="@(() => OpenEditDialog(context))" />
+                <MudIconButton Icon="@Icons.Material.Filled.Delete" Size="Size.Small" Color="Color.Error"
+                               OnClick="@(() => DeleteWarehouse(context))" />
+            </MudTd>
+        </RowTemplate>
+        <NoRecordsContent>
+            <MudText Typo="Typo.body1" Color="Color.Secondary" Class="pa-4">등록된 창고가 없습니다.</MudText>
+        </NoRecordsContent>
+    </MudTable>
+}
+
+@* 추가/수정 다이얼로그 *@
+<MudDialog @bind-Visible="_dialogVisible" Options="@(new DialogOptions { MaxWidth = MaxWidth.Small, FullWidth = true })">
+    <TitleContent>
+        <MudText Typo="Typo.h6">@(_editMode ? "창고 수정" : "창고 추가")</MudText>
+    </TitleContent>
+    <DialogContent>
+        <MudTextField @bind-Value="_form.WhCode" Label="창고코드" Required="true" Variant="Variant.Outlined" Margin="Margin.Dense" Class="mb-2" />
+        <MudTextField @bind-Value="_form.WhName" Label="창고명" Required="true" Variant="Variant.Outlined" Margin="Margin.Dense" Class="mb-2" />
+        <MudSelect T="string" @bind-Value="_form.WhType" Label="유형" Variant="Variant.Outlined" Margin="Margin.Dense" Class="mb-2">
+            <MudSelectItem Value="@("자사창고")">자사창고</MudSelectItem>
+            <MudSelectItem Value="@("3PL")">3PL</MudSelectItem>
+            <MudSelectItem Value="@("기타")">기타</MudSelectItem>
+        </MudSelect>
+        <MudTextField @bind-Value="_form.Location" Label="위치" Variant="Variant.Outlined" Margin="Margin.Dense" />
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="CloseDialog">취소</MudButton>
+        <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="SaveWarehouse" Disabled="_saving">저장</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    // 창고 목록
+    private List<WarehouseViewModel> _warehouses = new();
+    private bool _loading = true;
+
+    // 다이얼로그 상태
+    private bool _dialogVisible;
+    private bool _editMode;
+    private bool _saving;
+    private string? _editId;
+    private WarehouseFormModel _form = new();
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadWarehousesAsync();
+    }
+
+    /// <summary>창고 목록 로드</summary>
+    private async Task LoadWarehousesAsync()
+    {
+        _loading = true;
+        try
+        {
+            _warehouses = await Http.GetFromJsonAsync<List<WarehouseViewModel>>("api/warehouses") ?? new();
+        }
+        catch (Exception _hp15Ex)
+        {
+            Console.Error.WriteLine($"[HP15] " + _hp15Ex.GetType().Name + ": " + _hp15Ex.Message);
+            Snackbar.Add("창고 목록을 불러오지 못했습니다.", Severity.Error);
+        }
+        _loading = false;
+    }
+
+    /// <summary>추가 다이얼로그 열기</summary>
+    private void OpenAddDialog()
+    {
+        _editMode = false;
+        _editId = null;
+        _form = new WarehouseFormModel { WhType = "자사창고" };
+        _dialogVisible = true;
+    }
+
+    /// <summary>수정 다이얼로그 열기</summary>
+    private void OpenEditDialog(WarehouseViewModel wh)
+    {
+        _editMode = true;
+        _editId = wh.WarehouseId;
+        _form = new WarehouseFormModel
+        {
+            WhCode = wh.WhCode,
+            WhName = wh.WhName,
+            WhType = wh.WhType,
+            Location = wh.Location
+        };
+        _dialogVisible = true;
+    }
+
+    private void CloseDialog() => _dialogVisible = false;
+
+    /// <summary>창고 저장 (추가/수정)</summary>
+    private async Task SaveWarehouse()
+    {
+        if (string.IsNullOrWhiteSpace(_form.WhCode) || string.IsNullOrWhiteSpace(_form.WhName))
+        {
+            Snackbar.Add("창고코드와 창고명은 필수입니다.", Severity.Warning);
+            return;
+        }
+
+        _saving = true;
+        try
+        {
+            HttpResponseMessage resp;
+            if (_editMode && _editId is not null)
+            {
+                resp = await Http.PutAsJsonAsync($"api/warehouses/{_editId}", _form);
+            }
+            else
+            {
+                resp = await Http.PostAsJsonAsync("api/warehouses", _form);
+            }
+
+            if (resp.IsSuccessStatusCode)
+            {
+                Snackbar.Add(_editMode ? "수정되었습니다." : "추가되었습니다.", Severity.Success);
+                _dialogVisible = false;
+                await LoadWarehousesAsync();
+            }
+            else
+            {
+                Snackbar.Add("저장에 실패했습니다.", Severity.Error);
+            }
+        }
+        catch (Exception _hp15Ex)
+        {
+            Console.Error.WriteLine($"[HP15] " + _hp15Ex.GetType().Name + ": " + _hp15Ex.Message);
+            Snackbar.Add("서버 오류가 발생했습니다.", Severity.Error);
+        }
+        _saving = false;
+    }
+
+    /// <summary>창고 삭제 (소프트 삭제)</summary>
+    private async Task DeleteWarehouse(WarehouseViewModel wh)
+    {
+        var confirm = await DialogService.ShowMessageBoxAsync(
+            "창고 삭제",
+            $"'{wh.WhName}' 창고를 삭제하시겠습니까?",
+            yesText: "삭제", cancelText: "취소");
+        if (confirm != true) return;
+
+        try
+        {
+            var resp = await Http.DeleteAsync($"api/warehouses/{wh.WarehouseId}");
+            if (resp.IsSuccessStatusCode)
+            {
+                Snackbar.Add("삭제되었습니다.", Severity.Success);
+                await LoadWarehousesAsync();
+            }
+            else
+            {
+                Snackbar.Add("삭제에 실패했습니다.", Severity.Error);
+            }
+        }
+        catch (Exception _hp15Ex)
+        {
+            Console.Error.WriteLine($"[HP15] " + _hp15Ex.GetType().Name + ": " + _hp15Ex.Message);
+            Snackbar.Add("서버 오류가 발생했습니다.", Severity.Error);
+        }
+    }
+
+    // --- 뷰 모델 ---
+    private class WarehouseViewModel
+    {
+        public string WarehouseId { get; set; } = "";
+        public string WhCode { get; set; } = "";
+        public string WhName { get; set; } = "";
+        public string WhType { get; set; } = "";
+        public string? Location { get; set; }
+        public bool IsActive { get; set; }
+    }
+
+    private class WarehouseFormModel
+    {
+        public string WhCode { get; set; } = "";
+        public string WhName { get; set; } = "";
+        public string WhType { get; set; } = "자사창고";
+        public string? Location { get; set; }
+    }
+}

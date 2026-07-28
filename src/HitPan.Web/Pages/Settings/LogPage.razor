@@ -1,0 +1,158 @@
+@page "/data/logs"
+@namespace HitPan.Web.Pages.SettingsUi
+@attribute [Authorize]
+@using HitPan.Web.Services
+
+@inject LogService LogApi
+@inject ISnackbar Snackbar
+
+<PageTitle>ERP 로그 기록</PageTitle>
+
+<PageHeader Title="ERP 로그 기록" Subtitle="업무 동작·API 요청을 기록합니다. 오류·데이터 누락 발생 시 원인 추적에 활용하세요." />
+
+@* 공통 필터 *@
+<MudPaper Class="pa-3 mb-3">
+    <MudStack Row="true" Spacing="2" AlignItems="AlignItems.Center" Wrap="Wrap.Wrap">
+        <MudDatePicker Label="시작일" Date="_from" DateChanged="OnFromChanged" />
+        <MudDatePicker Label="종료일" Date="_to"   DateChanged="OnToChanged" />
+        <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="@(() => LoadAsync())">조회</MudButton>
+        <MudChip T="string" Color="Color.Error" Variant="Variant.Outlined" OnClick="FilterErrorsAsync">오류만 보기</MudChip>
+    </MudStack>
+</MudPaper>
+
+<MudTabs Elevation="1" Rounded="true" ApplyEffectsToContainer="true" PanelClass="pa-2">
+
+    @* 탭1: 업무 동작 로그 *@
+    <MudTabPanel Text="업무 동작 로그" Icon="@Icons.Material.Filled.Assignment">
+        <MudText Typo="Typo.caption" Class="mb-2" Style="color:#888">
+            수주·판매·매입·재고 확정 등 도메인 이벤트 기록 (@_trail.Count 건)
+        </MudText>
+
+        <MudTable T="AuditTrailRow" Items="_trail" Dense="true" Hover="true" Striped="true"
+                  FixedHeader="true" Height="calc(100vh - 360px)">
+            <HeaderContent>
+                <MudTh>일시</MudTh>
+                <MudTh>동작</MudTh>
+                <MudTh>대상</MudTh>
+                <MudTh>대상 ID</MudTh>
+                <MudTh>메모</MudTh>
+                <MudTh>변경 전</MudTh>
+                <MudTh>변경 후</MudTh>
+            </HeaderContent>
+            <RowTemplate>
+                <MudTd>@context.CreatedAt.ToLocalTime().ToString("MM-dd HH:mm:ss")</MudTd>
+                <MudTd>
+                    <MudChip T="string" Size="Size.Small"
+                             Color="@ActionColor(context.ActionType)"
+                             Variant="Variant.Filled">
+                        @context.ActionType
+                    </MudChip>
+                </MudTd>
+                <MudTd>@context.EntityType</MudTd>
+                <MudTd><MudText Typo="Typo.caption">@(context.EntityId?[..Math.Min(8, context.EntityId?.Length ?? 0)])</MudText></MudTd>
+                <MudTd>@context.Reason</MudTd>
+                <MudTd><MudText Typo="Typo.caption" Style="max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">@context.BeforeValue</MudText></MudTd>
+                <MudTd><MudText Typo="Typo.caption" Style="max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">@context.AfterValue</MudText></MudTd>
+            </RowTemplate>
+            <NoRecordsContent>
+                <MudText Typo="Typo.body2" Class="pa-4">조회된 로그가 없습니다.</MudText>
+            </NoRecordsContent>
+        </MudTable>
+    </MudTabPanel>
+
+    @* 탭2: API 요청 로그 *@
+    <MudTabPanel Text="API 요청 로그" Icon="@Icons.Material.Filled.Http"
+                 BadgeData="@(_apiErrors > 0 ? _apiErrors.ToString() : null)"
+                 BadgeColor="Color.Error">
+        <MudText Typo="Typo.caption" Class="mb-2" Style="color:#888">
+            모든 API 호출 기록 — 오류(4xx/5xx) 빨간색 강조 (@_api.Count 건, 오류 @_apiErrors 건)
+        </MudText>
+
+        <MudTable T="ApiRequestRow" Items="_api" Dense="true" Hover="true" Striped="true"
+                  FixedHeader="true" Height="calc(100vh - 360px)">
+            <HeaderContent>
+                <MudTh>일시</MudTh>
+                <MudTh>메서드</MudTh>
+                <MudTh>엔드포인트</MudTh>
+                <MudTh>상태</MudTh>
+                <MudTh>IP</MudTh>
+            </HeaderContent>
+            <RowTemplate>
+                <MudTd Style="@RowStyle(context.StatusCode)">@context.CreatedAt.ToLocalTime().ToString("MM-dd HH:mm:ss")</MudTd>
+                <MudTd Style="@RowStyle(context.StatusCode)">
+                    <MudChip T="string" Size="Size.Small"
+                             Color="@MethodColor(context.Method)"
+                             Variant="Variant.Outlined">
+                        @context.Method
+                    </MudChip>
+                </MudTd>
+                <MudTd Style="@RowStyle(context.StatusCode)">@context.Endpoint</MudTd>
+                <MudTd>
+                    <MudChip T="string" Size="Size.Small"
+                             Color="@StatusColor(context.StatusCode)"
+                             Variant="Variant.Filled">
+                        @context.StatusCode
+                    </MudChip>
+                </MudTd>
+                <MudTd Style="@RowStyle(context.StatusCode)">@context.IpAddress</MudTd>
+            </RowTemplate>
+            <NoRecordsContent>
+                <MudText Typo="Typo.body2" Class="pa-4">조회된 로그가 없습니다.</MudText>
+            </NoRecordsContent>
+        </MudTable>
+    </MudTabPanel>
+
+</MudTabs>
+
+@code {
+    private DateTime? _from = DateTime.Today.AddDays(-1);
+    private DateTime? _to   = DateTime.Today;
+
+    private List<AuditTrailRow> _trail = new();
+    private List<ApiRequestRow> _api   = new();
+    private int _apiErrors;
+
+    protected override async Task OnInitializedAsync() => await LoadAsync();
+
+    private async Task OnFromChanged(DateTime? v) { _from = v; await LoadAsync(); }
+    private async Task OnToChanged(DateTime? v)   { _to   = v; await LoadAsync(); }
+
+    private async Task LoadAsync()
+    {
+        _trail = await LogApi.GetAuditTrailAsync(from: _from, to: _to, limit: 300);
+        _api   = await LogApi.GetApiRequestsAsync(from: _from, to: _to, limit: 300);
+        _apiErrors = _api.Count(x => x.StatusCode >= 400);
+    }
+
+    private async Task FilterErrorsAsync()
+    {
+        _api = await LogApi.GetApiRequestsAsync(from: _from, to: _to, statusCode: null, limit: 500);
+        _api = _api.Where(x => x.StatusCode >= 400).ToList();
+        _apiErrors = _api.Count;
+    }
+
+    private static Color ActionColor(string action) => action switch
+    {
+        "create"  => Color.Success,
+        "confirm" => Color.Primary,
+        "cancel"  => Color.Warning,
+        "delete"  => Color.Error,
+        _         => Color.Default
+    };
+
+    private static Color MethodColor(string? method) => method switch
+    {
+        "POST"   => Color.Success,
+        "PUT"    => Color.Warning,
+        "DELETE" => Color.Error,
+        _        => Color.Default
+    };
+
+    private static Color StatusColor(int code) =>
+        code >= 500 ? Color.Error :
+        code >= 400 ? Color.Warning :
+        Color.Success;
+
+    private static string RowStyle(int code) =>
+        code >= 400 ? "color:#d32f2f;font-weight:500" : string.Empty;
+}

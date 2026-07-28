@@ -1,0 +1,256 @@
+@page "/employees"
+@namespace HitPan.Web.Pages.SettingsUi
+@* 사원 관리 = 대표·HR 관리자만 (헌법 #7 정합) *@
+@attribute [Authorize(Roles = "system_admin,tenant_admin,TenantAdmin,hr_manager")]
+@using HitPan.Web.Models
+@using HitPan.Web.Services
+
+<PageTitle>사원관리</PageTitle>
+
+<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
+    <MudText Typo="Typo.h6">사원관리</MudText>
+    <MudText Style="font-size:12px;color:var(--mud-palette-text-secondary)">
+        사원 기본정보 · 권한 · 연차 신청/결재
+    </MudText>
+</div>
+
+@if (_loading)
+{
+    <MudProgressLinear Indeterminate="true" Color="Color.Primary" />
+}
+else
+{
+    <MudGrid Spacing="3">
+        <MudItem xs="12" md="8">
+            <MudPaper Elevation="0" Class="pa-4 mb-3" Style="border:0.5px solid var(--mud-palette-lines-default);border-radius:12px">
+                <MudText Typo="Typo.subtitle2" Class="mb-3">사원 입력</MudText>
+                <MudGrid Spacing="2">
+                    <MudItem xs="12" md="3">
+                        <MudTextField T="string" Label="사번" Value="_selectedEmpNoPreview" ReadOnly="true" Variant="Variant.Outlined" Margin="Margin.Dense" />
+                    </MudItem>
+                    <MudItem xs="12" md="3">
+                        <MudTextField T="string" Label="이름" @bind-Value="_edit.EmpName" Variant="Variant.Outlined" Margin="Margin.Dense" />
+                    </MudItem>
+                    <MudItem xs="12" md="3">
+                        @* 봉합 (2026-06-22, 10차 P1-1): 부서를 자유 텍스트가 아니라 부서 마스터(dept_id) 드롭다운으로 선택한다.
+                           백엔드는 dept_id 만 저장하므로 DeptName 자유 입력은 저장되지 않아 부서가 유실되던 결함을 정합. *@
+                        <MudSelect T="string" Label="부서" @bind-Value="_edit.DeptId" Variant="Variant.Outlined" Margin="Margin.Dense" Clearable="true">
+                            @foreach (var dept in _departments)
+                            {
+                                <MudSelectItem T="string" Value="@dept.DeptId">@dept.DeptName</MudSelectItem>
+                            }
+                        </MudSelect>
+                    </MudItem>
+                    <MudItem xs="12" md="3">
+                        <MudDatePicker Label="입사일" Date="_edit.JoinDate" DateChanged="OnJoinDateChanged" Variant="Variant.Outlined" Margin="Margin.Dense" />
+                    </MudItem>
+
+                    <MudItem xs="12" md="3">
+                        <MudTextField T="string" Label="직급" @bind-Value="_edit.Position" Variant="Variant.Outlined" Margin="Margin.Dense" />
+                    </MudItem>
+                    <MudItem xs="12" md="3">
+                        <MudTextField T="string" Label="직책" @bind-Value="_edit.JobTitle" Variant="Variant.Outlined" Margin="Margin.Dense" />
+                    </MudItem>
+                    <MudItem xs="12" md="3">
+                        <MudSelect T="string" Label="고용형태" @bind-Value="_edit.EmpType" Variant="Variant.Outlined" Margin="Margin.Dense">
+                                <MudSelectItem Value="@("regular")">정규직</MudSelectItem>
+                                <MudSelectItem Value="@("contract")">계약직</MudSelectItem>
+                                <MudSelectItem Value="@("part")">파트타임</MudSelectItem>
+                                <MudSelectItem Value="@("dispatch")">파견</MudSelectItem>
+                        </MudSelect>
+                    </MudItem>
+                    <MudItem xs="12" md="3">
+                        <MudSelect T="string" Label="역할" @bind-Value="_edit.Role" Variant="Variant.Outlined" Margin="Margin.Dense">
+                            <MudSelectItem Value="@("TenantAdmin")">관리자</MudSelectItem>
+                            <MudSelectItem Value="@("sales_user")">일반사용자</MudSelectItem>
+                        </MudSelect>
+                    </MudItem>
+
+                    <MudItem xs="12" md="6">
+                        <MudTextField T="string" Label="연락처" @bind-Value="_edit.Phone" Variant="Variant.Outlined" Margin="Margin.Dense" />
+                    </MudItem>
+                    <MudItem xs="12" md="6">
+                        <MudTextField T="string" Label="이메일" @bind-Value="_edit.Email" Variant="Variant.Outlined" Margin="Margin.Dense" />
+                    </MudItem>
+                </MudGrid>
+            </MudPaper>
+
+            <MudToolBar Dense="true" Class="pa-1 gap-1 mb-2">
+                <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Add" OnClick="StartCreateMode">추가</MudButton>
+                <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Save" OnClick="SaveAsync">저장</MudButton>
+                <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Undo" OnClick="CancelEdit">취소</MudButton>
+                <MudButton Variant="Variant.Outlined" Color="Color.Error" StartIcon="@Icons.Material.Filled.Delete" OnClick="DeleteAsync" Disabled="@string.IsNullOrWhiteSpace(_selectedEmployeeId)">삭제</MudButton>
+            </MudToolBar>
+
+            <MudPaper Elevation="0" Class="pa-2" Style="border:0.5px solid var(--mud-palette-lines-default);border-radius:12px">
+                @* 작20260429 연차 관리 (사장님 결재): 그리드에 부여·사용·잔여 + 인라인 편집·저장 *@
+                <MudTable Items="_employees" Dense="true" Hover="true">
+                    <HeaderContent>
+                        <MudTh Style="width:40px"><MudCheckBox T="bool" /></MudTh>
+                        <MudTh>No</MudTh>
+                        <MudTh>사번</MudTh>
+                        <MudTh>이름</MudTh>
+                        <MudTh>부서</MudTh>
+                        <MudTh>직급</MudTh>
+                        <MudTh Style="text-align:right;min-width:90px">연차 부여</MudTh>
+                        <MudTh Style="text-align:right;min-width:90px">연차 사용</MudTh>
+                        <MudTh Style="text-align:right;min-width:80px">잔여</MudTh>
+                        <MudTh Style="width:80px;text-align:center">저장</MudTh>
+                        <MudTh>상태</MudTh>
+                    </HeaderContent>
+                    <RowTemplate>
+                        <MudTd><MudCheckBox T="bool" /></MudTd>
+                        <MudTd DataLabel="No">@(context.EmpNo)</MudTd>
+                        <MudTd DataLabel="사번">
+                            <MudLink OnClick="@(() => SelectEmployeeAsync(context.EmployeeId))">@context.EmpNo</MudLink>
+                        </MudTd>
+                        <MudTd DataLabel="이름">@context.EmpName</MudTd>
+                        <MudTd DataLabel="부서">@context.DeptName</MudTd>
+                        <MudTd DataLabel="직급">@context.Position</MudTd>
+                        <MudTd DataLabel="연차 부여" Style="text-align:right">
+                            <MudNumericField T="decimal" @bind-Value="context.AnnualLeaveTotal"
+                                             Min="0" Max="365" Step="0.5m" Variant="Variant.Outlined"
+                                             Margin="Margin.Dense" Style="width:90px" HideSpinButtons="true" />
+                        </MudTd>
+                        <MudTd DataLabel="연차 사용" Style="text-align:right">
+                            <MudNumericField T="decimal" @bind-Value="context.AnnualLeaveUsed"
+                                             Min="0" Max="365" Step="0.5m" Variant="Variant.Outlined"
+                                             Margin="Margin.Dense" Style="width:90px" HideSpinButtons="true" />
+                        </MudTd>
+                        <MudTd DataLabel="잔여" Style="text-align:right">
+                            @{
+                                var remain = context.AnnualLeaveRemaining;
+                                var color = remain < 0 ? "var(--hp-status-error-fg)"
+                                          : remain == 0 ? "var(--hp-text-tertiary)"
+                                          : "var(--hp-status-success-fg)";
+                            }
+                            <span style="font-weight:600;font-variant-numeric:tabular-nums;color:@color">
+                                @remain.ToString("0.#")일
+                            </span>
+                        </MudTd>
+                        <MudTd DataLabel="저장" Style="text-align:center">
+                            <MudIconButton Icon="@Icons.Material.Filled.Save" Size="Size.Small" Color="Color.Primary"
+                                           OnClick="@(() => SaveAnnualLeaveAsync(context))" />
+                        </MudTd>
+                        <MudTd DataLabel="상태">
+                            <MudChip T="string" Size="Size.Small" Color="@(context.IsActive ? Color.Success : Color.Default)">
+                                @(context.IsActive ? "재직" : "비활성")
+                            </MudChip>
+                        </MudTd>
+                    </RowTemplate>
+                </MudTable>
+            </MudPaper>
+        </MudItem>
+
+        <MudItem xs="12" md="4">
+            <MudPaper Elevation="0" Class="pa-4 mb-3" Style="border:0.5px solid var(--mud-palette-lines-default);border-radius:12px">
+                <MudText Typo="Typo.subtitle2" Class="mb-2">상세 정보</MudText>
+                @if (_selectedDetail is null)
+                {
+                    <MudText Style="font-size:12px;color:var(--mud-palette-text-secondary)">좌측 목록에서 사원을 선택하세요.</MudText>
+                }
+                else
+                {
+                    <MudGrid Spacing="1">
+                        <MudItem xs="5"><MudText Style="font-size:12px;color:var(--mud-palette-text-secondary)">입사일</MudText></MudItem>
+                        <MudItem xs="7"><MudText Style="font-size:12px">@_selectedDetail.JoinDate.ToString("yyyy-MM-dd")</MudText></MudItem>
+                        <MudItem xs="5"><MudText Style="font-size:12px;color:var(--mud-palette-text-secondary)">연락처</MudText></MudItem>
+                        <MudItem xs="7"><MudText Style="font-size:12px">@(_selectedDetail.Phone ?? "-")</MudText></MudItem>
+                        <MudItem xs="5"><MudText Style="font-size:12px;color:var(--mud-palette-text-secondary)">이메일</MudText></MudItem>
+                        <MudItem xs="7"><MudText Style="font-size:12px">@(_selectedDetail.Email ?? "-")</MudText></MudItem>
+                        <MudItem xs="5"><MudText Style="font-size:12px;color:var(--mud-palette-text-secondary)">계정 연결</MudText></MudItem>
+                        <MudItem xs="7"><MudText Style="font-size:12px">@(!string.IsNullOrWhiteSpace(_selectedDetail.UserId) ? "연결됨" : "미연결")</MudText></MudItem>
+                        <MudItem xs="5"><MudText Style="font-size:12px;color:var(--mud-palette-text-secondary)">역할</MudText></MudItem>
+                        <MudItem xs="7"><MudText Style="font-size:12px">@_selectedDetail.Role</MudText></MudItem>
+                    </MudGrid>
+                }
+            </MudPaper>
+
+            <MudPaper Elevation="0" Class="pa-4 mb-3" Style="border:0.5px solid var(--mud-palette-lines-default);border-radius:12px">
+                <MudText Typo="Typo.subtitle2" Class="mb-2">ERP 메뉴 권한</MudText>
+                @if (_selectedPermUser is null)
+                {
+                    <MudText Style="font-size:12px;color:var(--mud-palette-text-secondary)">연결된 사용자 계정이 없어 권한 편집이 불가합니다.</MudText>
+                }
+                else
+                {
+                    @foreach (var perm in _selectedPermUser.Permissions)
+                    {
+                        <div style="display:flex;align-items:center;justify-content:space-between;border-bottom:0.5px solid var(--mud-palette-lines-default);padding:4px 0">
+                            <MudText Style="font-size:12px">@perm.MenuName</MudText>
+                            <div style="display:flex;gap:2px">
+                                <MudCheckBox T="bool" @bind-Value="perm.CanView" Dense="true" Color="Color.Primary" />
+                                <MudCheckBox T="bool" @bind-Value="perm.CanCreate" Dense="true" Color="Color.Primary" />
+                                <MudCheckBox T="bool" @bind-Value="perm.CanUpdate" Dense="true" Color="Color.Primary" />
+                                <MudCheckBox T="bool" @bind-Value="perm.CanDelete" Dense="true" Color="Color.Primary" />
+                                <MudCheckBox T="bool" @bind-Value="perm.CanExport" Dense="true" Color="Color.Primary" />
+                            </div>
+                        </div>
+                    }
+                    <MudButton Size="Size.Small" Variant="Variant.Outlined" OnClick="SavePermissionsAsync" Class="mt-2">권한 저장</MudButton>
+                }
+            </MudPaper>
+
+            <MudPaper Elevation="0" Class="pa-4 mb-3" Style="border:0.5px solid var(--mud-palette-lines-default);border-radius:12px">
+                <MudText Typo="Typo.subtitle2" Class="mb-2">휴가 현황</MudText>
+                <MudGrid Spacing="1" Class="mb-2">
+                    <MudItem xs="4"><MudPaper Elevation="0" Class="pa-2" Style="background:#F2F8FF;text-align:center"><MudText Typo="Typo.caption">연차</MudText><MudText Typo="Typo.subtitle2">@_annualTotal</MudText></MudPaper></MudItem>
+                    <MudItem xs="4"><MudPaper Elevation="0" Class="pa-2" Style="background:#FFF8E1;text-align:center"><MudText Typo="Typo.caption">사용</MudText><MudText Typo="Typo.subtitle2">@_annualUsed</MudText></MudPaper></MudItem>
+                    <MudItem xs="4"><MudPaper Elevation="0" Class="pa-2" Style="background:#E8F5E9;text-align:center"><MudText Typo="Typo.caption">잔여</MudText><MudText Typo="Typo.subtitle2">@_annualRemain</MudText></MudPaper></MudItem>
+                </MudGrid>
+
+                <MudButton Size="Size.Small" Variant="Variant.Filled" Color="Color.Primary" OnClick="ToggleLeaveForm">연차신청서 작성</MudButton>
+
+                @if (_showLeaveForm && _selectedEmployeeId is not null)
+                {
+                    <MudPaper Elevation="0" Class="pa-2 mt-2" Style="border:0.5px dashed var(--mud-palette-lines-default)">
+                        <MudGrid Spacing="1">
+                            <MudItem xs="6">
+                                <MudSelect T="string" Label="유형" @bind-Value="_leaveForm.LeaveType" Margin="Margin.Dense">
+                                    <MudSelectItem Value="@("annual")">연차</MudSelectItem>
+                                    <MudSelectItem Value="@("half")">반차</MudSelectItem>
+                                    <MudSelectItem Value="@("sick")">병가</MudSelectItem>
+                                </MudSelect>
+                            </MudItem>
+                            <MudItem xs="6"><MudNumericField T="decimal" Label="일수" @bind-Value="_leaveForm.LeaveDays" Margin="Margin.Dense" /></MudItem>
+                            <MudItem xs="6"><MudDatePicker Label="시작일" Date="_leaveForm.StartDate" DateChanged="OnLeaveStartChanged" Margin="Margin.Dense" /></MudItem>
+                            <MudItem xs="6"><MudDatePicker Label="종료일" Date="_leaveForm.EndDate" DateChanged="OnLeaveEndChanged" Margin="Margin.Dense" /></MudItem>
+                            <MudItem xs="12"><MudTextField T="string" Label="사유" @bind-Value="_leaveForm.Reason" Margin="Margin.Dense" /></MudItem>
+                        </MudGrid>
+                        <MudButton Size="Size.Small" Variant="Variant.Outlined" OnClick="CreateLeaveAsync">신청</MudButton>
+                    </MudPaper>
+                }
+
+                <MudTable Items="_leaveRequests" Dense="true" Hover="true" Class="mt-2">
+                    <HeaderContent>
+                        <MudTh>기간</MudTh>
+                        <MudTh>유형</MudTh>
+                        <MudTh>상태</MudTh>
+                    </HeaderContent>
+                    <RowTemplate>
+                        <MudTd>@context.StartDate.ToString("MM/dd") ~ @context.EndDate.ToString("MM/dd")</MudTd>
+                        <MudTd>@context.LeaveType</MudTd>
+                        <MudTd>
+                            <MudChip T="string" Size="Size.Small" Color="@GetLeaveColor(context.Status)">@GetLeaveLabel(context.Status)</MudChip>
+                        </MudTd>
+                    </RowTemplate>
+                </MudTable>
+
+                <div class="mt-2" style="display:flex;gap:6px">
+                    <MudButton Size="Size.Small" Variant="Variant.Outlined" Disabled="@(_selectedPendingLeaveId is null)" OnClick="ApproveLeaveAsync">승인</MudButton>
+                    <MudButton Size="Size.Small" Variant="Variant.Outlined" Color="Color.Error" Disabled="@(_selectedPendingLeaveId is null)" OnClick="RejectLeaveAsync">반려</MudButton>
+                </div>
+            </MudPaper>
+
+            <MudPaper Elevation="0" Class="pa-4 mb-3" Style="border:0.5px solid var(--mud-palette-lines-default);border-radius:12px">
+                <MudText Typo="Typo.subtitle2">근태 기록</MudText>
+                <MudText Style="font-size:12px;color:var(--mud-palette-text-secondary)">준비중</MudText>
+            </MudPaper>
+
+            <MudPaper Elevation="0" Class="pa-4" Style="border:0.5px solid var(--mud-palette-lines-default);border-radius:12px">
+                <MudText Typo="Typo.subtitle2">업무 평가</MudText>
+                <MudText Style="font-size:12px;color:var(--mud-palette-text-secondary)">준비중</MudText>
+            </MudPaper>
+        </MudItem>
+    </MudGrid>
+}

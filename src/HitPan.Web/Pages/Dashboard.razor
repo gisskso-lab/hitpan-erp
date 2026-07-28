@@ -1,0 +1,637 @@
+@page "/"
+@page "/dashboard"
+@namespace HitPan.Web.Pages
+@attribute [Authorize]
+@using System.Net.Http.Json
+@using HitPan.Web.Helpers
+@using HitPan.Web.Services
+@inject HttpClient Http
+@inject ISnackbar Snackbar
+@inject NavigationManager Nav
+@inject PermissionService PermSvc
+@inject PartnerMasterService PartnerSvc
+@inject AuthenticationStateProvider AuthState
+@inject BomService BomApi
+@inject IDialogService DialogService
+@inject IJSRuntime JS
+
+<PageTitle>대시보드 — 히트판 ERP</PageTitle>
+
+@* ─── 토스 감성 Hero + 우측 경고 알림 카드 (사장님 결재 2026-04-29 — 옵션 B) ───
+   좌측: 인사말 + 오늘 매출 + 부제
+   우측: 권한·구독·기기 등 계정 관련 경고 카드 스택 (없으면 좌측이 전체 폭 차지)
+*@
+<div class="hp-hero-row">
+    <div class="hp-hero">
+        <p class="hp-hero-greeting">
+            <strong>안녕하세요, @(_userName)</strong>
+            <span class="hp-hero-dot">·</span>
+            <span class="hp-hero-date">@(DateTime.Now.ToString("M월 d일 dddd", new System.Globalization.CultureInfo("ko-KR")))</span>
+        </p>
+        @* 작7 (2026-06-26) D-2: 오늘매출 클릭 → 오늘 날짜 판매현황 목록 직행 *@
+        <h1 class="hp-hero-title" @onclick="GoTodaySales" role="button" tabindex="0" style="cursor:pointer">
+            오늘 매출
+            <span class="hp-hero-amount">@FormatAmount(_data.TodaySales)</span>
+        </h1>
+        <p class="hp-hero-subtitle">
+            @if (_data.MonthSales > 0)
+            {
+                <text>이번달 누적 <strong>@FormatAmount(_data.MonthSales)</strong> · 좋은 하루의 시작입니다 👏</text>
+            }
+            else
+            {
+                <text>오늘도 좋은 하루 보내세요 👏</text>
+            }
+        </p>
+    </div>
+
+    @* 우측 경고 알림 스택 — 권한 미설정·구독 갱신·기기 등록 등 계정/구독 영역 알림.
+       알림이 0건이면 카드 통째로 숨겨 Hero가 전체 폭 차지 (반응형 유지). *@
+    @if (_alerts.Count > 0)
+    {
+        <div class="hp-alert-stack">
+            @foreach (var alert in _alerts)
+            {
+                <div class="hp-alert-card hp-alert-@alert.Severity"
+                     @onclick="@(() => Nav.NavigateTo(alert.Href))" role="button" tabindex="0">
+                    <div class="hp-alert-icon">
+                        <MudIcon Icon="@alert.Icon" Size="Size.Small" />
+                    </div>
+                    <div class="hp-alert-body">
+                        <div class="hp-alert-title">@alert.Title</div>
+                        <div class="hp-alert-desc">@alert.Description</div>
+                    </div>
+                    <MudIcon Icon="@Icons.Material.Filled.ArrowForward" Class="hp-alert-arrow" Size="Size.Small" />
+                </div>
+            }
+        </div>
+    }
+</div>
+
+@* ─── Quick Action 2카드 (조회성 메뉴 제거 — 세금계산서·미수금만 유지) ─── *@
+<div class="hp-quick-grid hp-quick-grid--2col">
+    <div class="hp-quick-card" @onclick="@(() => Nav.NavigateTo("/tax-invoice"))">
+        <div class="hp-quick-icon hp-q-pink">
+            <MudIcon Icon="@Icons.Material.Filled.Receipt" Size="Size.Medium" />
+        </div>
+        <div class="hp-quick-title">세금계산서</div>
+        <div class="hp-quick-desc">전자세금계산서 발행</div>
+        <MudIcon Icon="@Icons.Material.Filled.ArrowForward" Class="hp-quick-arrow" />
+    </div>
+
+    <div class="hp-quick-card" @onclick="@(() => Nav.NavigateTo("/collections"))">
+        <div class="hp-quick-icon hp-q-orange">
+            <MudIcon Icon="@Icons.Material.Filled.NotificationsActive" Size="Size.Medium" />
+        </div>
+        <div class="hp-quick-title">미수금 알림</div>
+        <div class="hp-quick-desc">@(_aging.Any() ? $"{_aging.Count}건이 30일 경과했어요" : "30일 경과 거래처를 확인해요")</div>
+        <MudIcon Icon="@Icons.Material.Filled.ArrowForward" Class="hp-quick-arrow" />
+    </div>
+</div>
+
+@* ─── KPI Hero (그린 그라디언트 큰 카드 + 보조 2장) ─── *@
+<div class="hp-kpi-hero-row">
+    @* 작7 (2026-06-26) D-3: 이번달매출 클릭 → 당월 판매현황 목록(기간 프리필터) *@
+    <div class="hp-kpi-hero" @onclick="GoMonthSales">
+        <div class="hp-kpi-hero-bg-1"></div>
+        <div class="hp-kpi-hero-bg-2"></div>
+        <div class="hp-kpi-hero-label">이번달 누적 매출</div>
+        <div class="hp-kpi-hero-value">
+            @FormatAmount(_data.MonthSales)
+        </div>
+        <span class="hp-kpi-hero-delta">▲ 지난달 대비 추이</span>
+    </div>
+
+    <div class="hp-kpi-card" @onclick="@(() => Nav.NavigateTo("/stock"))">
+        <div class="hp-kpi-label">재고 자산</div>
+        <div class="hp-kpi-value">@(_data.LowStockCount > 0 ? $"⚠️ {_data.LowStockCount}건 부족" : "정상")</div>
+        <span class="hp-kpi-delta hp-up">▲ 안전재고 위</span>
+    </div>
+
+    @* 작7 (2026-06-26) D-4: 이번달매입 카드 신설 → 당월 매입현황 목록(기간 프리필터). KPI 3→4장 *@
+    <div class="hp-kpi-card" @onclick="GoMonthPurchase">
+        <div class="hp-kpi-label">이번달 매입</div>
+        <div class="hp-kpi-value">@FormatAmount(_data.MonthPurchase)</div>
+        <span class="hp-kpi-delta hp-up">▲ 당월 누적</span>
+    </div>
+
+    @* D-5: 미수금 → 미수금 목록(/collections, 이미 정합 — 유지) *@
+    <div class="hp-kpi-card" @onclick="@(() => Nav.NavigateTo("/collections"))">
+        <div class="hp-kpi-label">미수금</div>
+        <div class="hp-kpi-value">@FormatAmount(_data.UnpaidReceivable)</div>
+        <span class="hp-kpi-delta hp-down">▲ @(_aging.Count)건 30일 경과</span>
+    </div>
+</div>
+
+@* 4/29 사장님 결재: 정밀 KPI 5장 제거 — Hero/KPI Hero가 이미 핵심 정보 표시.
+   대시보드는 깔끔하게 (Hero + Quick + KPI Hero + 챗봇 + 연차 캘린더)까지만.
+   기존 KPI 5장 컴포넌트(KpiCard)는 다른 페이지에서 그대로 활용 가능 — 코드 보존. *@
+
+@* 4/29 사장님 결재: AI 도우미 카드 제거 — 상단 ChatbotBar(TopHeader)와 통합·중복 제거. *@
+
+@* ─── 작7 (2026-06-26) D-1: 멀티캘린더 시각화 선택 라디오 (4뷰 전환) ───
+   사장님 요구 복원: 멀티캘린더 / 매출·매입추이 / 거래처순위 / 외상연체순위.
+   데이터·차트옵션 토대(_chartOptions·_partnerChartOptions·MonthlyTrend·TopPartners·_aging)는 기존 보존분 재사용. *@
+<div class="hp-viz-switch mb-2">
+    <MudRadioGroup T="string" @bind-Value="_vizMode">
+        <MudRadio T="string" Value="@("calendar")" Color="Color.Primary" Dense="true">멀티캘린더</MudRadio>
+        <MudRadio T="string" Value="@("trend")" Color="Color.Primary" Dense="true">매출·매입 추이</MudRadio>
+        <MudRadio T="string" Value="@("partners")" Color="Color.Primary" Dense="true">거래처 순위</MudRadio>
+        <MudRadio T="string" Value="@("aging")" Color="Color.Primary" Dense="true">외상 연체 순위</MudRadio>
+    </MudRadioGroup>
+</div>
+
+@* 5/26 사장님 결재: 통합 캘린더 (4축 수금/입금/연차/이슈) + 카드 모달. 기존 LeaveCalendar는 주석 보존. *@
+@*<LeaveCalendar />*@
+@if (_vizMode == "calendar")
+{
+    <UnifiedCalendar OnDayClicked="OnCalendarDayClicked" />
+}
+else if (_vizMode == "trend")
+{
+    <MudPaper Elevation="0" Class="pa-4 hitpan-card">
+        <MudText Typo="Typo.subtitle2" Class="mb-2" Style="font-weight:600">월별 매출·매입 추이</MudText>
+        @if (_data.MonthlyTrend.Count > 0)
+        {
+            <ApexChart TItem="MonthlyTrend" Options="@_chartOptions" Height="320">
+                <ApexPointSeries TItem="MonthlyTrend" Items="_data.MonthlyTrend" Name="매출"
+                                 SeriesType="SeriesType.Bar" XValue="@(e => e.Label)" YValue="@(e => e.SalesAmount)" />
+                <ApexPointSeries TItem="MonthlyTrend" Items="_data.MonthlyTrend" Name="매입"
+                                 SeriesType="SeriesType.Bar" XValue="@(e => e.Label)" YValue="@(e => e.PurchaseAmount)" />
+            </ApexChart>
+        }
+        else
+        {
+            <MudText Typo="Typo.body2" Class="hp-viz-empty">표시할 추이 데이터가 없습니다.</MudText>
+        }
+    </MudPaper>
+}
+else if (_vizMode == "partners")
+{
+    <MudPaper Elevation="0" Class="pa-4 hitpan-card">
+        <MudText Typo="Typo.subtitle2" Class="mb-2" Style="font-weight:600">거래처 매출 순위 TOP</MudText>
+        @if (_data.TopPartners.Count > 0)
+        {
+            <ApexChart TItem="PartnerRank" Options="@_partnerChartOptions" Height="320">
+                <ApexPointSeries TItem="PartnerRank" Items="_data.TopPartners" Name="매출"
+                                 SeriesType="SeriesType.Bar" XValue="@(e => e.PartnerName)" YValue="@(e => e.TotalAmount)" />
+            </ApexChart>
+        }
+        else
+        {
+            <MudText Typo="Typo.body2" Class="hp-viz-empty">표시할 거래처 순위가 없습니다.</MudText>
+        }
+    </MudPaper>
+}
+else if (_vizMode == "aging")
+{
+    <MudPaper Elevation="0" Class="pa-4 hitpan-card">
+        <MudText Typo="Typo.subtitle2" Class="mb-2" Style="font-weight:600">외상 연체 순위 (미수금 잔액)</MudText>
+        @if (_aging.Count > 0)
+        {
+            <ApexChart TItem="PartnerAgingRow" Options="@_agingChartOptions" Height="320">
+                <ApexPointSeries TItem="PartnerAgingRow" Items="_aging" Name="미수금"
+                                 SeriesType="SeriesType.Bar" XValue="@(e => e.PartnerName)" YValue="@(e => e.TotalUnpaid)" />
+            </ApexChart>
+        }
+        else
+        {
+            <MudText Typo="Typo.body2" Class="hp-viz-empty">연체된 미수금이 없습니다.</MudText>
+        }
+    </MudPaper>
+}
+<UnifiedDayDetailModal @ref="_dayDetailRef"
+                       IsOpen="_modalOpen"
+                       SelectedDate="_modalDate"
+                       OnClosed="OnModalClosed"
+                       OnAddRequested="OnAddSchedule"
+                       OnEditRequested="OnEditSchedule" />
+@* 5/26 가도: 일정 추가/수정 모달 (CRUD) *@
+<ScheduleEditModal IsOpen="_editOpen"
+                   SelectedDate="_editDate"
+                   EditTarget="_editTarget"
+                   OnClosed="OnEditClosed"
+                   OnSaved="OnEditSaved" />
+
+@* 사장님 결재 2026-05-26 ("모두갤재!!! 즉시 가도"): 9시 출근 첫 로그인 시 일일 브리핑 자동 팝업.
+   하루 1번 (localStorage 날짜 키 hitpan_briefing_dismissed_YYYYMMDD).
+   "오늘 그만 보기" 클릭 시 그날 끝까지 안 보임. *@
+<DailyBriefingModal IsOpen="_briefingOpen"
+                    OnClosed="OnBriefingClosed"
+                    OnDetailRequested="OnBriefingDetail" />
+
+@code {
+    // ─── 데이터 모델 ───
+    private DashboardData _data = new();
+    private List<PartnerAgingRow> _aging = new();
+
+    // 5/26 사장님 결재: 통합 캘린더 카드 모달 상태.
+    private bool _modalOpen;
+    private DateTime _modalDate;
+    private UnifiedDayDetailModal? _dayDetailRef;
+
+    // 5/26 가도: 일정 추가/수정 모달 상태.
+    private bool _editOpen;
+    private DateTime _editDate;
+    private UnifiedDayDetailModel.IssueItem? _editTarget;
+
+    // 5/26 사장님 결재: 일일 브리핑 팝업 (9시 출근 첫 로그인 1회).
+    private bool _briefingOpen;
+    private bool _briefingChecked;
+
+    private void OnCalendarDayClicked(DateTime date)
+    {
+        _modalDate = date;
+        _modalOpen = true;
+    }
+    private void OnModalClosed()
+    {
+        _modalOpen = false;
+    }
+
+    private void OnAddSchedule(DateTime date)
+    {
+        _editDate = date;
+        _editTarget = null;
+        _editOpen = true;
+    }
+
+    private void OnEditSchedule(UnifiedDayDetailModel.IssueItem item)
+    {
+        _editDate = _modalDate;
+        _editTarget = item;
+        _editOpen = true;
+    }
+
+    private void OnEditClosed()
+    {
+        _editOpen = false;
+        _editTarget = null;
+    }
+
+    private async Task OnEditSaved()
+    {
+        // 카드 모달이 열려 있으면 데이터 재조회.
+        if (_dayDetailRef != null)
+        {
+            await _dayDetailRef.ReloadAsync();
+        }
+    }
+
+    private void OnBriefingClosed()
+    {
+        _briefingOpen = false;
+    }
+
+    private void OnBriefingDetail(DateTime date)
+    {
+        // [자세히 보기] → 오늘 날짜 카드 모달 자동 오픈.
+        _briefingOpen = false;
+        _modalDate = date;
+        _modalOpen = true;
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender && !_briefingChecked)
+        {
+            _briefingChecked = true;
+            try
+            {
+                var key = $"hitpan_briefing_dismissed_{DateTime.Today:yyyyMMdd}";
+                // §원칙 #22 — 본사 전송 0. localStorage(고객 PC)만 사용.
+                var dismissed = await JS.InvokeAsync<string?>("hitpanStorage_get", key);
+                if (string.IsNullOrEmpty(dismissed))
+                {
+                    _briefingOpen = true;
+                    StateHasChanged();
+                }
+            }
+            catch (Exception ex)
+            {
+                // §원칙 #15 — silent swallow 금지. 실패해도 대시보드는 정상 표시.
+                Console.Error.WriteLine($"[Dashboard.OnAfterRenderAsync.briefing] {ex.GetType().Name}: {ex.Message}");
+            }
+        }
+    }
+
+    // 4/29 사장님 결재 (옵션 B): Hero 우측 경고 알림 카드 스택.
+    // 권한 미설정 / 구독 갱신 / 기기 등록 등 계정·구독 관련 알림만 모음 (워크플로우 알림 X).
+    private List<DashboardAlert> _alerts = new();
+
+    private sealed class DashboardAlert
+    {
+        public string Title { get; init; } = "";
+        public string Description { get; init; } = "";
+        public string Icon { get; init; } = "";
+        public string Href { get; init; } = "";
+        public string Severity { get; init; } = "warn"; // warn / info / danger
+    }
+
+    private static int MaxOverdueDays(PartnerAgingRow a)
+    {
+        if (a.Bucket90Plus > 0) return 120;
+        if (a.Bucket61_90 > 0)  return 75;
+        if (a.Bucket31_60 > 0)  return 45;
+        return 15;
+    }
+
+    // ─── 차트 옵션: 월별 추이 ───
+    private ApexChartOptions<MonthlyTrend> _chartOptions = new()
+    {
+        Chart = new Chart { Toolbar = new Toolbar { Show = false } },
+        PlotOptions = new PlotOptions
+        {
+            Bar = new PlotOptionsBar { ColumnWidth = "60%" }
+        },
+        Yaxis = new List<YAxis>
+        {
+            new()
+            {
+                Labels = new YAxisLabels
+                {
+                    Formatter = @"function(val) { return val >= 10000 ? (val/10000).toFixed(0) + '만' : val.toLocaleString() }"
+                }
+            }
+        },
+        Colors = new List<string> { "#0F6E56", "#F57C00" },
+        Legend = new Legend { Position = LegendPosition.Top }
+    };
+
+    // ─── 차트 옵션: 거래처 TOP5 (가로 막대) ───
+    private ApexChartOptions<PartnerRank> _partnerChartOptions = new()
+    {
+        Chart = new Chart { Toolbar = new Toolbar { Show = false } },
+        PlotOptions = new PlotOptions
+        {
+            Bar = new PlotOptionsBar { Horizontal = true, BarHeight = "60%" }
+        },
+        Yaxis = new List<YAxis>
+        {
+            new()
+            {
+                Labels = new YAxisLabels
+                {
+                    Formatter = @"function(val) { return val >= 10000 ? (val/10000).toFixed(0) + '만' : val.toLocaleString() }"
+                }
+            }
+        },
+        Colors = new List<string> { "#0F6E56" },
+        Legend = new Legend { Show = false }
+    };
+
+    // ─── 작7 (2026-06-26) D-1: 시각화 선택 라디오 상태 + 연체 차트 옵션 ───
+    private string _vizMode = "calendar";   // calendar / trend / partners / aging
+
+    // ─── 차트 옵션: 외상 연체 순위 (가로 막대, 빨강 계열) ───
+    private ApexChartOptions<PartnerAgingRow> _agingChartOptions = new()
+    {
+        Chart = new Chart { Toolbar = new Toolbar { Show = false } },
+        PlotOptions = new PlotOptions
+        {
+            Bar = new PlotOptionsBar { Horizontal = true, BarHeight = "60%" }
+        },
+        Yaxis = new List<YAxis>
+        {
+            new()
+            {
+                Labels = new YAxisLabels
+                {
+                    Formatter = @"function(val) { return val >= 10000 ? (val/10000).toFixed(0) + '만' : val.toLocaleString() }"
+                }
+            }
+        },
+        Colors = new List<string> { "#D32F2F" },
+        Legend = new Legend { Show = false }
+    };
+
+    // 토스 Hero — 인삿말에 표시할 사용자 이름. JWT claim 에서 추출.
+    private string _userName = "사장님";
+
+    // ─── 초기 로드 ───
+    protected override async Task OnInitializedAsync()
+    {
+        await CheckPermissionBannerAsync();
+        await LoadUserNameAsync();
+        await Task.WhenAll(LoadDashboardAsync(), LoadAgingAsync());
+    }
+
+    private async Task LoadUserNameAsync()
+    {
+        try
+        {
+            var state = await AuthState.GetAuthenticationStateAsync();
+            var name = state.User?.FindFirst("name")?.Value
+                       ?? state.User?.FindFirst(System.Security.Claims.ClaimTypes.Name)?.Value;
+            if (!string.IsNullOrWhiteSpace(name)) _userName = $"{name}님";
+        }
+        catch (Exception ex)
+        {
+            // §원칙 #15 — silent swallow 금지. 진단 로그만 남기고 기본값 유지.
+            Console.Error.WriteLine($"[Dashboard.LoadUserNameAsync] {ex.GetType().Name}: {ex.Message}");
+        }
+    }
+
+    // 4/29 사장님 결재로 대시보드 청소: 재고 부족 알림 + 자동발주 트리거 코드 제거.
+    // 재고 알림은 향후 재고관리 화면에서 별도 구현 예정 (BomApi.OrderAlertAsync는 보존 — 다른 페이지에서 활용 가능).
+
+    // 사장님 헌법 (2026-04-27): 시각화 클릭 → 데이터/전표 연동.
+    private static DateTime MonthStart() => new DateTime(DateTime.Today.Year, DateTime.Today.Month, 1);
+
+    // 작7 (2026-06-26) D-2·3·4: 대시보드 카드 → 목록 페이지 + 기간 프리필터 직행.
+    //   목적지 페이지(SalesSummaryPage·PurchaseStatusPage)가 ?from=&to= 를 [SupplyParameterFromQuery]로 수신해 초기 조회.
+    private void GoTodaySales()
+    {
+        var d = DateTime.Today.ToString("yyyy-MM-dd");
+        Nav.NavigateTo($"/sales/summary?from={d}&to={d}");
+    }
+
+    private void GoMonthSales()
+    {
+        var from = MonthStart().ToString("yyyy-MM-dd");
+        var to = DateTime.Today.ToString("yyyy-MM-dd");
+        Nav.NavigateTo($"/sales/summary?from={from}&to={to}");
+    }
+
+    private void GoMonthPurchase()
+    {
+        var from = MonthStart().ToString("yyyy-MM-dd");
+        var to = DateTime.Today.ToString("yyyy-MM-dd");
+        Nav.NavigateTo($"/purchase-status?from={from}&to={to}");
+    }
+
+    private void GoToTransaction(RecentTx tx)
+    {
+        // RecentTx.DocType: "매입" / "판매" / "매입반품" / "판매반품" / 그 외 (한글 라벨).
+        // 라우팅 — 해당 목록 페이지에 거래일자 필터로 이동, 사용자가 그 행을 보고 더블클릭하면 상세.
+        var dateStr = tx.TxDate.ToString("yyyy-MM-dd");
+        if (tx.DocType.Contains("매입"))
+        {
+            Nav.NavigateTo($"/purchases?from={dateStr}&to={dateStr}");
+        }
+        else
+        {
+            Nav.NavigateTo($"/deliveries?from={dateStr}&to={dateStr}");
+        }
+    }
+
+    private async Task LoadAgingAsync()
+    {
+        try
+        {
+            var rows = await PartnerSvc.GetAgingAsync();
+            _aging = rows
+                .Where(x => x.TotalUnpaid > 0)
+                .OrderByDescending(x => x.Bucket90Plus)
+                .ThenByDescending(x => x.TotalUnpaid)
+                .ToList();
+        }
+        catch (Exception ex) { _aging = new(); Snackbar.Add($"미수금 연체 조회 실패: {ex.Message}", Severity.Warning); }
+    }
+
+    /// <summary>4/29 사장님 결재 (옵션 B): 권한·구독·기기 등 계정 관련 경고를 _alerts에 모아 Hero 우측에 카드로 노출.</summary>
+    private async Task CheckPermissionBannerAsync()
+    {
+        try
+        {
+            var state = await AuthState.GetAuthenticationStateAsync();
+            if (AccountTypeHelper.GetAccountType(state.User) != AccountTypeHelper.TenantAdmin)
+                return;
+
+            var perms = await PermSvc.GetAllAsync();
+            var needsPermissionSetup = false;
+            if (perms == null || perms.Count == 0)
+            {
+                needsPermissionSetup = true;
+            }
+            else
+            {
+                var anyConfigured = perms.Any(u => u.Permissions
+                    .Any(p => p.CanView || p.CanCreate || p.CanUpdate || p.CanDelete || p.CanExport));
+                needsPermissionSetup = !anyConfigured;
+            }
+
+            if (needsPermissionSetup)
+            {
+                _alerts.Add(new DashboardAlert
+                {
+                    Title = "권한 설정이 필요합니다",
+                    Description = "직원별 메뉴 접근 권한을 지정해주세요",
+                    Icon = Icons.Material.Filled.Lock,
+                    Href = "/users/permissions",
+                    Severity = "warn"
+                });
+            }
+        }
+        catch (Exception ex)
+        {
+            // §원칙 #15 — silent swallow 금지. 로그만 남기고 알림 미노출 (보수적).
+            Console.Error.WriteLine($"[Dashboard.CheckPermissionBannerAsync] {ex.GetType().Name}: {ex.Message}");
+        }
+    }
+
+    /// <summary>대시보드 데이터 로드</summary>
+    private async Task LoadDashboardAsync()
+    {
+        try
+        {
+            var result = await Http.GetFromJsonAsync<DashboardData>("/api/finance/dashboard");
+            if (result != null)
+            {
+                _data = result;
+            }
+        }
+        catch (HttpRequestException ex)
+        {
+            // 봉합 (2026-07-14, 사장님 결재 — Sandbox 종단 실측 적발): 종전엔 API 실패 시 GetSampleData()
+            //   견본 매출(₩123만 등)로 화면을 채워, 신규 고객 첫 화면에 입력한 적 없는 매출·거래처가 보였다
+            //   ("남의 데이터" 오인 = 신뢰 붕괴 + 장애를 가짜 숫자로 은폐, 헌법 #15 정신 위반).
+            //   실패는 0원·빈 목록으로 정직하게 표시하고 안내만 띄운다. 견본 폴백 전면 제거.
+            Snackbar.Add("대시보드 정보를 불러오지 못했습니다. 잠시 후 다시 시도해 주세요.", Severity.Warning);
+            Console.Error.WriteLine($"[Dashboard.LoadDashboardAsync] {ex.GetType().Name}: {ex.Message}");
+            _data = new DashboardData();
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"대시보드 로드 실패: {ex.Message}", Severity.Error);
+            _data = new DashboardData();
+        }
+    }
+
+    /// <summary>금액 포맷: ₩ + 만원 단위 변환</summary>
+    private string FormatAmount(decimal amount)
+    {
+        if (Math.Abs(amount) >= 100_000_000m) // 1억 이상
+            return $"₩{(amount / 100_000_000m):N1}억";
+        if (Math.Abs(amount) >= 10_000m) // 1만 이상
+            return $"₩{(amount / 10_000m):N0}만";
+        return $"₩{amount:N0}";
+    }
+
+    /// <summary>문서유형별 색상</summary>
+    private Color GetDocTypeColor(string docType) => docType switch
+    {
+        "매출" or "판매" => Color.Success,
+        "매입" => Color.Warning,
+        "견적" => Color.Info,
+        "발주" => Color.Secondary,
+        _ => Color.Default
+    };
+
+    /// <summary>상태별 색상</summary>
+    private Color GetStatusColor(string status) => status switch
+    {
+        "완료" or "확정" => Color.Success,
+        "대기" or "진행" => Color.Info,
+        "취소" => Color.Error,
+        _ => Color.Default
+    };
+
+    // ─── DTO 클래스 ───
+    private class DashboardData
+    {
+        public decimal TodaySales { get; set; }
+        public decimal MonthSales { get; set; }
+        public decimal MonthPurchase { get; set; }
+        public decimal UnpaidReceivable { get; set; }
+        public decimal UnpaidPayable { get; set; }
+        public int LowStockCount { get; set; }
+        public int PendingApprovalCount { get; set; }
+        public List<MonthlyTrend> MonthlyTrend { get; set; } = new();
+        public List<PartnerRank> TopPartners { get; set; } = new();
+        public List<RecentTx> RecentTransactions { get; set; } = new();
+        public List<LowStock> LowStockItems { get; set; } = new();
+    }
+
+    private class MonthlyTrend
+    {
+        public string Label { get; set; } = "";
+        public decimal SalesAmount { get; set; }
+        public decimal PurchaseAmount { get; set; }
+    }
+
+    private class PartnerRank
+    {
+        public string PartnerName { get; set; } = "";
+        public decimal TotalAmount { get; set; }
+        public int OrderCount { get; set; }
+    }
+
+    private class RecentTx
+    {
+        public DateTime TxDate { get; set; }
+        public string DocType { get; set; } = "";
+        public string DocNo { get; set; } = "";
+        public string PartnerName { get; set; } = "";
+        public decimal Amount { get; set; }
+        public string Status { get; set; } = "";
+    }
+
+    private class LowStock
+    {
+        public string ItemName { get; set; } = "";
+        public string Spec { get; set; } = "";
+        public decimal CurrentQty { get; set; }
+        public decimal SafetyStock { get; set; }
+    }
+}

@@ -1,0 +1,157 @@
+@page "/purchase/ranking"
+@namespace HitPan.Web.Pages.PurchaseUi
+@attribute [Authorize]
+@using HitPan.Web.Models
+@using System.Net.Http.Json
+@inject HttpClient Http
+@inject IJSRuntime Js
+@inject ISnackbar Snackbar
+@inject IJSRuntime Js
+@inject PartnerMasterService PartnersApi
+@inject ItemMasterService ItemsApi
+
+<PageTitle>매입순위표</PageTitle>
+<MudText Typo="Typo.h6" Class="mb-3">매입순위표</MudText>
+
+<MudPaper Class="pa-3 mb-3" Elevation="0" Style="border:1px solid var(--mud-palette-lines-default);border-radius:12px">
+    <div class="hitpan-filter-bar">
+        <div class="hitpan-filter-field hitpan-filter-field--md">
+            <MudSelect T="string" @bind-Value="_viewType" Label="조회유형" Variant="Variant.Outlined" Margin="Margin.Dense">
+                <MudSelectItem Value="@("partner")">업체별</MudSelectItem>
+                <MudSelectItem Value="@("item")">품목별</MudSelectItem>
+                <MudSelectItem Value="@("period")">기간별</MudSelectItem>
+                <MudSelectItem Value="@("region")">지역별</MudSelectItem>
+                <MudSelectItem Value="@("employee")">사원별</MudSelectItem>
+            </MudSelect>
+        </div>
+        <div class="hitpan-filter-field hitpan-filter-field--sm">
+            <MudDatePicker @bind-Date="_from" Label="시작일" Variant="Variant.Outlined" Margin="Margin.Dense" DateFormat="yyyy-MM-dd" />
+        </div>
+        <div class="hitpan-filter-field hitpan-filter-field--sm">
+            <MudDatePicker @bind-Date="_to" Label="종료일" Variant="Variant.Outlined" Margin="Margin.Dense" DateFormat="yyyy-MM-dd" />
+        </div>
+        @if (ShowSearchBox())
+        {
+            <div class="hitpan-filter-field hitpan-filter-field--md">
+                @if (_viewType is "item")
+                {
+                    <MudAutocomplete T="string" Value="_searchText" ValueChanged="@(v => _searchText = v)"
+                        SearchFunc="SearchItemAsync" Margin="Margin.Dense" Label="품명" Placeholder="검색"
+                        Variant="Variant.Outlined" />
+                }
+                else if (_viewType is "partner")
+                {
+                    <MudAutocomplete T="string" Value="_searchText" ValueChanged="@(v => _searchText = v)"
+                        SearchFunc="SearchPartnerAsync" Margin="Margin.Dense" Label="업체" Placeholder="검색"
+                        Variant="Variant.Outlined" />
+                }
+                else
+                {
+                    <MudTextField @bind-Value="_searchText" Label="@GetFilterLabel()" Variant="Variant.Outlined"
+                        Margin="Margin.Dense" Adornment="Adornment.End" AdornmentIcon="@Icons.Material.Filled.Search" />
+                }
+            </div>
+        }
+        <div class="hitpan-filter-actions">
+            <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="SearchAsync">조회</MudButton>
+            <MudButton Variant="Variant.Outlined" Size="Size.Small" StartIcon="@Icons.Material.Filled.TableChart" OnClick="ExportExcelAsync">엑셀</MudButton>
+            <MudButton Variant="Variant.Outlined" Size="Size.Small" StartIcon="@Icons.Material.Filled.Print" OnClick="PrintAsync">인쇄</MudButton>
+        </div>
+    </div>
+</MudPaper>
+
+<MudPaper Elevation="0" Class="hitpan-card" Style="overflow:hidden">
+    <MudTable T="ReportRow" Items="_reportData" Dense="true" Hover="true" Striped="true" FixedHeader="true" Height="calc(100vh - 280px)">
+        <HeaderContent>
+            <MudTh>순위</MudTh>
+            <MudTh>@GetLabelHeader()</MudTh>
+            <MudTh Style="text-align:right">건수</MudTh>
+            @if (_viewType == "item") { <MudTh Style="text-align:right">수량</MudTh> }
+            <MudTh Style="text-align:right">공급가액</MudTh>
+            <MudTh Style="text-align:right">부가세</MudTh>
+            <MudTh Style="text-align:right">합계</MudTh>
+        </HeaderContent>
+        <RowTemplate>
+            <MudTd>@(_reportData.IndexOf(context) + 1)</MudTd>
+            <MudTd>@context.Label</MudTd>
+            <MudTd Style="text-align:right">@context.Count.ToString("N0")</MudTd>
+            @if (_viewType == "item") { <MudTd Style="text-align:right">@context.Qty.ToString("N1")</MudTd> }
+            <MudTd Style="text-align:right">@context.SupplyAmount.ToString("N0")</MudTd>
+            <MudTd Style="text-align:right">@context.VatAmount.ToString("N0")</MudTd>
+            <MudTd Style="text-align:right;font-weight:500">@context.TotalAmount.ToString("N0")</MudTd>
+        </RowTemplate>
+        <NoRecordsContent><MudText Class="pa-4" Style="color:var(--hitpan-text-faint)">조회된 데이터가 없습니다.</MudText></NoRecordsContent>
+    </MudTable>
+</MudPaper>
+
+@code {
+    private DateTime? _from = DateTime.Today.AddDays(-30);
+    private DateTime? _to = DateTime.Today;
+    private string _searchText = "";
+    private string _viewType = "item";
+    private List<ReportRow> _reportData = new();
+
+    protected override async Task OnInitializedAsync() => await SearchAsync();
+
+    private async Task SearchAsync()
+    {
+        var qs = new List<string>();
+        qs.Add($"view={_viewType}");
+        if (_from.HasValue) qs.Add($"from={_from:yyyy-MM-dd}");
+        if (_to.HasValue) qs.Add($"to={_to:yyyy-MM-dd}");
+        if (!string.IsNullOrWhiteSpace(_searchText)) qs.Add($"partner={Uri.EscapeDataString(_searchText)}");
+        var path = "api/reports/purchase-ranking?" + string.Join("&", qs);
+        try
+        {
+            _reportData = await Http.GetFromJsonAsync<List<ReportRow>>(path) ?? new();
+        }
+        catch (Exception _hp15Ex)
+        {
+            Console.Error.WriteLine($"[HP15] " + _hp15Ex.GetType().Name + ": " + _hp15Ex.Message);
+            _reportData = new();
+        }
+        StateHasChanged();
+    }
+
+    /// <summary>화면 데이터를 엑셀로 내보낸다.</summary>
+    private Task ExportExcelAsync() { Snackbar.Add("엑셀 내보내기는 준비중입니다.", Severity.Info); return Task.CompletedTask; }
+    /// <summary>화면을 인쇄한다.</summary>
+    private async Task PrintAsync() { await Js.InvokeVoidAsync("print"); }
+
+    private string GetLabelHeader() => _viewType switch
+    {
+        "partner" => "업체명",
+        "item" => "품명",
+        "region" => "지역",
+        "employee" => "사원명",
+        _ => "기간"
+    };
+
+    private string GetFilterLabel() => _viewType switch
+    {
+        "partner" => "업체명",
+        "item" => "품명",
+        "region" => "지역",
+        "employee" => "사원명",
+        _ => "검색어"
+    };
+
+    private bool ShowSearchBox() => _viewType is not "period";
+
+    private List<PartnerListRow>? _partnerCache;
+    private List<ItemListModel>? _itemCache;
+
+    private async Task<IEnumerable<string>> SearchPartnerAsync(string value, CancellationToken ct)
+    {
+        _partnerCache ??= await PartnersApi.GetListAsync() ?? new();
+        if (string.IsNullOrWhiteSpace(value)) return _partnerCache.Select(p => p.PartnerName).Distinct();
+        return _partnerCache.Where(p => p.PartnerName.Contains(value, StringComparison.OrdinalIgnoreCase)).Select(p => p.PartnerName).Distinct();
+    }
+
+    private async Task<IEnumerable<string>> SearchItemAsync(string value, CancellationToken ct)
+    {
+        _itemCache ??= await ItemsApi.GetListAsync() ?? new();
+        if (string.IsNullOrWhiteSpace(value)) return _itemCache.Select(i => i.ItemName).Distinct();
+        return _itemCache.Where(i => i.ItemName.Contains(value, StringComparison.OrdinalIgnoreCase)).Select(i => i.ItemName).Distinct();
+    }
+}

@@ -1,0 +1,11 @@
+@page "/admin/commission"
+@inject NavigationManager Nav
+
+@*
+    레거시 경로 → W9 정산 리다이렉트 (사장님 결재 2026-06-05)
+    수수료 정책은 W9 reseller_settlements.commission_rate에 저장 → 정산 화면에서 확인
+*@
+
+@code {
+    protected override void OnInitialized() => Nav.NavigateTo("/admin/reseller-settlements", replace: true);
+}

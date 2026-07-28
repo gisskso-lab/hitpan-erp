@@ -79,3 +79,53 @@ jobs:
           name: test-results
           path: '**/test-results.trx'
           retention-days: 14
+
+  # 20260723작1 G3 — 출하 DDL 스모크 CI화 (헌법 #36).
+  #   clean DDL 이 빈 DB 단일 import 로 신규설치 완결되는지 실측한다(신규설치 DOA 차단).
+  #   그동안 scripts/ddl-smoke-test.sh 는 로컬 수동 전용이라 CI 게이트가 아니었다.
+  #   MariaDB 11.4 서비스 컨테이너에서 scripts/ddl-smoke-test.sh 를 env 주입해 돌린다.
+  #   build 잡과 독립 병렬(needs 없음) — DDL 무결은 빌드와 별개 축이다.
+  ddl-smoke:
+    name: DDL Smoke (clean DDL 신규설치 무결)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    services:
+      mariadb:
+        image: mariadb:11.4
+        env:
+          MARIADB_ROOT_PASSWORD: ddlsmoke_ci
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="healthcheck.sh --connect --innodb_initialized"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=10
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Install MariaDB client
+        run: sudo apt-get update && sudo apt-get install -y mariadb-client
+
+      - name: Wait for MariaDB
+        run: |
+          for i in $(seq 1 30); do
+            if mysql -h 127.0.0.1 -P 3306 -u root -pddlsmoke_ci -e "SELECT 1" >/dev/null 2>&1; then
+              echo "MariaDB ready"; exit 0
+            fi
+            echo "waiting for mariadb ($i)"; sleep 2
+          done
+          echo "::error::MariaDB 서비스 컨테이너 기동 실패"; exit 1
+
+      - name: Run DDL smoke (clean DDL 단일 import)
+        # 하위호환: 스크립트는 env 미주입 시 로컬 윈도 경로·소켓·무비번으로 폴백.
+        #   CI 는 아래 5개 주입. HITPAN_MYSQL 은 실행파일 경로 하나만(host/port 는 분리 주입).
+        env:
+          HITPAN_MYSQL: 'mysql'
+          HITPAN_DB_USER: 'root'
+          HITPAN_DB_PASS: 'ddlsmoke_ci'
+          HITPAN_DB_HOST: '127.0.0.1'
+          HITPAN_DB_PORT: '3306'
+        run: bash scripts/ddl-smoke-test.sh

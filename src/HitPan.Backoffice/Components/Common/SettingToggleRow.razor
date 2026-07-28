@@ -1,0 +1,37 @@
+@* 설정 토글 행 공통 컴포넌트 *@
+
+<div style="display:flex;
+  align-items:center;
+  justify-content:space-between;
+  padding:8px 0;
+  border-bottom:0.5px solid
+    var(--mud-palette-lines-default)">
+  <div>
+    <MudText Style="font-size:13px">
+      @Label</MudText>
+    @if (!string.IsNullOrEmpty(Sub))
+    {
+      <MudText Style="font-size:11px;
+        color:var(--mud-palette-text-secondary);
+        margin-top:2px">@Sub</MudText>
+    }
+  </div>
+  <MudSwitch T="bool"
+    Value="@Value"
+    ValueChanged="@ValueChanged"
+    Color="Color.Primary" />
+</div>
+
+@code {
+    [Parameter]
+    public string Label { get; set; } = "";
+
+    [Parameter]
+    public string Sub { get; set; } = "";
+
+    [Parameter]
+    public bool Value { get; set; }
+
+    [Parameter]
+    public EventCallback<bool> ValueChanged { get; set; }
+}

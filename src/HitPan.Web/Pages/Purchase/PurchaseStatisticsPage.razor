@@ -1,0 +1,198 @@
+@page "/purchase/statistics"
+@namespace HitPan.Web.Pages.PurchaseUi
+@attribute [Authorize]
+@using HitPan.Web.Models
+@using System.Net.Http.Json
+@inject HttpClient Http
+@inject IJSRuntime Js
+@inject ISnackbar Snackbar
+@inject IJSRuntime Js
+@inject PartnerMasterService PartnersApi
+@inject ItemMasterService ItemsApi
+
+<PageTitle>매입통계</PageTitle>
+<MudText Typo="Typo.h6" Class="mb-3">매입통계</MudText>
+
+<MudPaper Class="pa-3 mb-3" Elevation="0" Style="border:1px solid var(--mud-palette-lines-default);border-radius:12px">
+    <div class="hitpan-filter-bar">
+        <div class="hitpan-filter-field hitpan-filter-field--md">
+            <MudSelect T="string" @bind-Value="_viewType" Label="조회유형" Variant="Variant.Outlined" Margin="Margin.Dense">
+                <MudSelectItem Value="@("item-monthly")">연간 월별(품목)</MudSelectItem>
+                <MudSelectItem Value="@("partner-monthly")">연간 월별(업체)</MudSelectItem>
+                <MudSelectItem Value="@("employee-monthly")">연간 월별(사원)</MudSelectItem>
+                <MudSelectItem Value="@("region-monthly")">연간 월별(지역)</MudSelectItem>
+                <MudSelectItem Value="@("item-yoy")">전년동기대비(품목)</MudSelectItem>
+                <MudSelectItem Value="@("partner-yoy")">전년동기대비(업체)</MudSelectItem>
+                <MudSelectItem Value="@("employee-yoy")">전년동기대비(사원)</MudSelectItem>
+                <MudSelectItem Value="@("region-yoy")">전년동기대비(지역)</MudSelectItem>
+            </MudSelect>
+        </div>
+        <div class="hitpan-filter-field hitpan-filter-field--sm">
+            <MudDatePicker @bind-Date="_from" Label="시작일" Variant="Variant.Outlined" Margin="Margin.Dense" DateFormat="yyyy-MM-dd" />
+        </div>
+        <div class="hitpan-filter-field hitpan-filter-field--sm">
+            <MudDatePicker @bind-Date="_to" Label="종료일" Variant="Variant.Outlined" Margin="Margin.Dense" DateFormat="yyyy-MM-dd" />
+        </div>
+        @if (ShowSearchBox())
+        {
+            <div class="hitpan-filter-field hitpan-filter-field--md">
+                @if (_viewType is "item-monthly" or "item-yoy")
+                {
+                    <MudAutocomplete T="string" Value="_searchText" ValueChanged="@(v => _searchText = v)"
+                        SearchFunc="SearchItemAsync" Margin="Margin.Dense" Label="품명" Placeholder="검색"
+                        Variant="Variant.Outlined" />
+                }
+                else if (_viewType is "partner-monthly" or "partner-yoy")
+                {
+                    <MudAutocomplete T="string" Value="_searchText" ValueChanged="@(v => _searchText = v)"
+                        SearchFunc="SearchPartnerAsync" Margin="Margin.Dense" Label="업체" Placeholder="검색"
+                        Variant="Variant.Outlined" />
+                }
+                else
+                {
+                    <MudTextField @bind-Value="_searchText" Label="@GetFilterLabel()" Variant="Variant.Outlined"
+                        Margin="Margin.Dense" Adornment="Adornment.End" AdornmentIcon="@Icons.Material.Filled.Search" />
+                }
+            </div>
+        }
+        <div class="hitpan-filter-actions">
+            <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="SearchAsync">조회</MudButton>
+            <MudButton Variant="Variant.Outlined" Size="Size.Small" StartIcon="@Icons.Material.Filled.TableChart" OnClick="ExportExcelAsync">엑셀</MudButton>
+            <MudButton Variant="Variant.Outlined" Size="Size.Small" StartIcon="@Icons.Material.Filled.Print" OnClick="PrintAsync">인쇄</MudButton>
+        </div>
+    </div>
+</MudPaper>
+
+@* 사장님 결재 2026-04-29: 8종 풀스택 → 가드 제거. YoY 전용 그리드. *@
+<MudPaper Elevation="0" Class="hitpan-card" Style="overflow:hidden">
+    @if (IsYoy())
+    {
+        <MudTable T="ReportRow" Items="_reportData" Dense="true" Hover="true" Striped="true" FixedHeader="true" Height="calc(100vh - 280px)">
+            <HeaderContent>
+                <MudTh>@GetLabelHeader()</MudTh>
+                <MudTh Style="text-align:right">당기 건수</MudTh>
+                <MudTh Style="text-align:right">전년 건수</MudTh>
+                <MudTh Style="text-align:right">당기 매입</MudTh>
+                <MudTh Style="text-align:right">전년 매입</MudTh>
+                <MudTh Style="text-align:right">증감액</MudTh>
+            </HeaderContent>
+            <RowTemplate>
+                <MudTd>@context.Label</MudTd>
+                <MudTd Style="text-align:right">@context.Count.ToString("N0")</MudTd>
+                <MudTd Style="text-align:right">@context.Qty.ToString("N0")</MudTd>
+                <MudTd Style="text-align:right">@context.SupplyAmount.ToString("N0")</MudTd>
+                <MudTd Style="text-align:right">@context.VatAmount.ToString("N0")</MudTd>
+                <MudTd Style="@($"text-align:right;font-weight:500;color:{(context.TotalAmount >= 0 ? "var(--hitpan-profit-dark)" : "var(--hitpan-loss-dark)")}")">
+                    @(context.TotalAmount >= 0 ? "+" : "")@context.TotalAmount.ToString("N0")
+                </MudTd>
+            </RowTemplate>
+            <NoRecordsContent><MudText Class="pa-4" Style="color:var(--hitpan-text-faint)">조회된 데이터가 없습니다.</MudText></NoRecordsContent>
+        </MudTable>
+    }
+    else
+    {
+        <MudTable T="ReportRow" Items="_reportData" Dense="true" Hover="true" Striped="true" FixedHeader="true" Height="calc(100vh - 280px)">
+            <HeaderContent>
+                <MudTh>@GetLabelHeader()</MudTh>
+                <MudTh Style="text-align:right">건수</MudTh>
+                <MudTh Style="text-align:right">수량</MudTh>
+                <MudTh Style="text-align:right">공급가액</MudTh>
+                <MudTh Style="text-align:right">부가세</MudTh>
+                <MudTh Style="text-align:right">합계</MudTh>
+            </HeaderContent>
+            <RowTemplate>
+                <MudTd>@context.Label</MudTd>
+                <MudTd Style="text-align:right">@context.Count.ToString("N0")</MudTd>
+                <MudTd Style="text-align:right">@context.Qty.ToString("N1")</MudTd>
+                <MudTd Style="text-align:right">@context.SupplyAmount.ToString("N0")</MudTd>
+                <MudTd Style="text-align:right">@context.VatAmount.ToString("N0")</MudTd>
+                <MudTd Style="text-align:right;font-weight:500">@context.TotalAmount.ToString("N0")</MudTd>
+            </RowTemplate>
+            <NoRecordsContent><MudText Class="pa-4" Style="color:var(--hitpan-text-faint)">조회된 데이터가 없습니다.</MudText></NoRecordsContent>
+        </MudTable>
+    }
+</MudPaper>
+
+@code {
+    private DateTime? _from = new DateTime(DateTime.Today.Year, 1, 1);
+    private DateTime? _to = DateTime.Today;
+    private string _searchText = "";
+    private string _viewType = "item-monthly";
+    private List<ReportRow> _reportData = new();
+
+    protected override async Task OnInitializedAsync() => await SearchAsync();
+
+    private async Task SearchAsync()
+    {
+        var qs = new List<string>();
+        qs.Add($"view={_viewType}");
+        if (_from.HasValue) qs.Add($"from={_from:yyyy-MM-dd}");
+        if (_to.HasValue) qs.Add($"to={_to:yyyy-MM-dd}");
+        if (!string.IsNullOrWhiteSpace(_searchText)) qs.Add($"partner={Uri.EscapeDataString(_searchText)}");
+        var path = "api/reports/purchase-statistics?" + string.Join("&", qs);
+        try
+        {
+            _reportData = await Http.GetFromJsonAsync<List<ReportRow>>(path) ?? new();
+        }
+        catch (Exception _hp15Ex)
+        {
+            Console.Error.WriteLine($"[HP15] " + _hp15Ex.GetType().Name + ": " + _hp15Ex.Message);
+            _reportData = new();
+        }
+        StateHasChanged();
+    }
+
+    /// <summary>화면 데이터를 엑셀로 내보낸다.</summary>
+    private Task ExportExcelAsync() { Snackbar.Add("엑셀 내보내기는 준비중입니다.", Severity.Info); return Task.CompletedTask; }
+    /// <summary>화면을 인쇄한다.</summary>
+    private async Task PrintAsync() { await Js.InvokeVoidAsync("print"); }
+
+    private string GetLabelHeader() => _viewType switch
+    {
+        "partner-monthly" => "업체 (월)",
+        "employee-monthly" => "사원 (월)",
+        "region-monthly" => "지역 (월)",
+        "item-yoy" => "품목",
+        "partner-yoy" => "업체",
+        "employee-yoy" => "사원",
+        "region-yoy" => "지역",
+        _ => "품목 (월)"
+    };
+
+    private bool IsYoy() => _viewType is "item-yoy" or "partner-yoy" or "employee-yoy" or "region-yoy";
+
+    private string GetViewLabel() => _viewType switch
+    {
+        "item-monthly" => "연간 월별(품목)",
+        "partner-monthly" => "연간 월별(업체)",
+        "item-yoy" => "전년동기대비(품목)",
+        "partner-yoy" => "전년동기대비(업체)",
+        _ => "매입통계"
+    };
+
+    private string GetFilterLabel() => _viewType switch
+    {
+        "partner-monthly" or "partner-yoy" => "업체명",
+        "item-monthly" or "item-yoy" => "품명",
+        _ => "검색어"
+    };
+
+    private bool ShowSearchBox() => true;
+
+    private List<PartnerListRow>? _partnerCache;
+    private List<ItemListModel>? _itemCache;
+
+    private async Task<IEnumerable<string>> SearchPartnerAsync(string value, CancellationToken ct)
+    {
+        _partnerCache ??= await PartnersApi.GetListAsync() ?? new();
+        if (string.IsNullOrWhiteSpace(value)) return _partnerCache.Select(p => p.PartnerName).Distinct();
+        return _partnerCache.Where(p => p.PartnerName.Contains(value, StringComparison.OrdinalIgnoreCase)).Select(p => p.PartnerName).Distinct();
+    }
+
+    private async Task<IEnumerable<string>> SearchItemAsync(string value, CancellationToken ct)
+    {
+        _itemCache ??= await ItemsApi.GetListAsync() ?? new();
+        if (string.IsNullOrWhiteSpace(value)) return _itemCache.Select(i => i.ItemName).Distinct();
+        return _itemCache.Where(i => i.ItemName.Contains(value, StringComparison.OrdinalIgnoreCase)).Select(i => i.ItemName).Distinct();
+    }
+}

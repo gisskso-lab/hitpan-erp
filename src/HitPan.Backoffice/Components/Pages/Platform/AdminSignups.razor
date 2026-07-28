@@ -1,0 +1,280 @@
+@page "/admin/signups"
+@layout PlatformLayout
+@attribute [Authorize]
+@rendermode InteractiveServer
+@inject IHttpClientFactory HttpFactory
+@inject ISnackbar Snackbar
+@inject IDialogService Dialog
+
+@*
+    가입 신청 저장 관리 (브라운킴 PM 저장 2026-06-08)
+    헌법 #35 정합 — 랜딩 가입 → 백오피스 승인 → ERP 저장 저장
+    흐름:
+      1) 랜딩 가입 저장 = landing_signups 저장 + tenants(status=pending) 저장
+      2) 백오피스 승인 저장 = signups=approved + tenants=active + ERP webhook 저장
+      3) ERP local_subscription 저장 (사장님 PC 로컬)
+*@
+
+<PageTitle>가입 신청 — 히트판 백오피스</PageTitle>
+
+<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px;">
+    <div>
+        <MudText Typo="Typo.h5" Style="font-weight:600;">가입 신청 관리</MudText>
+        <MudText Typo="Typo.body2" Color="Color.Secondary">
+            랜딩페이지 가입 신청 검토 · 승인 · 반려 (헌법 #35 — ERP 자동 동기화)
+        </MudText>
+    </div>
+    <div style="display:flex;gap:8px;">
+        <MudButtonGroup Variant="Variant.Outlined">
+            <MudButton OnClick="@(() => SetFilter(""))" Color="@(_filter == "" ? Color.Primary : Color.Default)">전체</MudButton>
+            <MudButton OnClick="@(() => SetFilter("submitted"))" Color="@(_filter == "submitted" ? Color.Primary : Color.Default)">신청</MudButton>
+            <MudButton OnClick="@(() => SetFilter("paid"))" Color="@(_filter == "paid" ? Color.Primary : Color.Default)">결제완료</MudButton>
+            <MudButton OnClick="@(() => SetFilter("approved"))" Color="@(_filter == "approved" ? Color.Primary : Color.Default)">승인</MudButton>
+            <MudButton OnClick="@(() => SetFilter("rejected"))" Color="@(_filter == "rejected" ? Color.Primary : Color.Default)">반려</MudButton>
+        </MudButtonGroup>
+        <MudButton Variant="Variant.Outlined" OnClick="LoadAsync" StartIcon="@Icons.Material.Filled.Refresh">새로고침</MudButton>
+    </div>
+</div>
+
+@if (!string.IsNullOrEmpty(_issuedLicenseKey))
+{
+    <MudAlert Severity="Severity.Success" Class="mb-4" ShowCloseIcon="true" CloseIconClicked="@(() => { _issuedLicenseKey = null; _issuedCompanyName = null; })">
+        <MudText Typo="Typo.h6">시리얼(라이선스 키) 발급 완료</MudText>
+        <MudText Typo="Typo.body2">고객사: <strong>@_issuedCompanyName</strong></MudText>
+        <MudText Typo="Typo.h5" Style="font-family:monospace;font-weight:600;letter-spacing:1px;margin-top:8px;">@_issuedLicenseKey</MudText>
+        <MudText Typo="Typo.caption" Color="Color.Warning" Style="margin-top:8px;display:block;">
+            ※ 이 키는 다시 표시되지 않습니다. 즉시 복사하여 고객사에 전달하세요. (DB에는 해시만 저장)
+        </MudText>
+    </MudAlert>
+}
+
+@if (_loading)
+{
+    <MudProgressLinear Indeterminate="true" Color="Color.Primary" />
+}
+else if (_items.Count == 0)
+{
+    <MudPaper Elevation="0" Class="pa-8" Style="border-radius:12px;background:#F9FAFB;text-align:center;">
+        <MudText Color="Color.Secondary">가입 신청 내역이 없습니다.</MudText>
+    </MudPaper>
+}
+else
+{
+    <MudPaper Elevation="1" Style="border-radius:12px;overflow:hidden;">
+        <MudTable T="SignupRow" Items="_items" Hover="true" Dense="true">
+            <HeaderContent>
+                <MudTh>신청일시</MudTh>
+                <MudTh>회사명</MudTh>
+                <MudTh>이메일</MudTh>
+                <MudTh>전화</MudTh>
+                <MudTh>플랜</MudTh>
+                <MudTh>tenant_code</MudTh>
+                <MudTh>시리얼 키 (포링키)</MudTh>
+                <MudTh>상태</MudTh>
+                <MudTh Style="width:280px;">동작</MudTh>
+            </HeaderContent>
+            <RowTemplate>
+                <MudTd>@context.SubmittedAt.ToString("yyyy-MM-dd HH:mm")</MudTd>
+                <MudTd><strong>@context.CompanyName</strong></MudTd>
+                <MudTd>@context.Email</MudTd>
+                <MudTd>@context.Phone</MudTd>
+                <MudTd>@context.PlanType</MudTd>
+                <MudTd>@(context.TenantCode ?? "-")</MudTd>
+                <MudTd>
+                    @if (!string.IsNullOrEmpty(context.LicenseKey))
+                    {
+                        <span style="font-family:Consolas,monospace;font-size:12px;font-weight:600;color:#0F6E56;">@context.LicenseKey</span>
+                    }
+                    else
+                    {
+                        <span style="color:#9CA3AF;font-size:12px;">미발급</span>
+                    }
+                </MudTd>
+                <MudTd>
+                    <MudChip T="string" Size="Size.Small" Color="@StatusColor(context.Status)">@StatusLabel(context.Status)</MudChip>
+                </MudTd>
+                <MudTd>
+                    @if (context.Status is "submitted" or "paid")
+                    {
+                        <MudButton Size="Size.Small" Variant="Variant.Filled" Color="Color.Primary"
+                                   OnClick="@(() => ApproveAsync(context))">승인</MudButton>
+                        <MudButton Size="Size.Small" Variant="Variant.Text" Color="Color.Error"
+                                   OnClick="@(() => RejectAsync(context))">반려</MudButton>
+                    }
+                    else if (context.Status is "approved" or "active")
+                    {
+                        <MudButton Size="Size.Small" Variant="Variant.Outlined" Color="Color.Info"
+                                   OnClick="@(() => ResendLicenseAsync(context))">시리얼 메일 재발송</MudButton>
+                    }
+                    else
+                    {
+                        <MudText Typo="Typo.caption" Color="Color.Secondary">처리 완료</MudText>
+                    }
+                </MudTd>
+            </RowTemplate>
+        </MudTable>
+    </MudPaper>
+}
+
+@code {
+    private List<SignupRow> _items = new();
+    private string _filter = "";
+    private bool _loading;
+    private string? _issuedLicenseKey;
+    private string? _issuedCompanyName;
+
+    protected override async Task OnInitializedAsync() => await LoadAsync();
+
+    private void SetFilter(string f)
+    {
+        _filter = f;
+        _ = LoadAsync();
+    }
+
+    private async Task LoadAsync()
+    {
+        _loading = true;
+        StateHasChanged();
+        try
+        {
+            var http = HttpFactory.CreateClient("backoffice-authed");
+            var url = string.IsNullOrEmpty(_filter) ? "api/admin/signups" : $"api/admin/signups?status={_filter}";
+            var resp = await http.GetFromJsonAsync<ApiResp<List<SignupRow>>>(url);
+            _items = resp?.Data ?? new();
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"목록 조회 실패: {ex.Message}", Severity.Error);
+        }
+        finally
+        {
+            _loading = false;
+            StateHasChanged();
+        }
+    }
+
+    private async Task ApproveAsync(SignupRow row)
+    {
+        try
+        {
+            var http = HttpFactory.CreateClient("backoffice-authed");
+            var resp = await http.PostAsync($"api/admin/signups/{row.SignupId}/approve", null);
+            if (resp.IsSuccessStatusCode)
+            {
+                var result = await resp.Content.ReadFromJsonAsync<ApproveResp>();
+                if (!string.IsNullOrEmpty(result?.LicenseKey))
+                {
+                    // 시리얼은 응답 1회만 평문 노출 (헌법 #18·#22 정합)
+                    _issuedLicenseKey = result.LicenseKey;
+                    _issuedCompanyName = row.CompanyName;
+                }
+                Snackbar.Add("승인 완료 — ERP 동기화 webhook 발송", Severity.Success);
+                await LoadAsync();
+            }
+            else
+            {
+                var err = await resp.Content.ReadAsStringAsync();
+                Snackbar.Add($"승인 실패: {err}", Severity.Error);
+            }
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"승인 실패: {ex.Message}", Severity.Error);
+        }
+    }
+
+    private async Task ResendLicenseAsync(SignupRow row)
+    {
+        try
+        {
+            var http = HttpFactory.CreateClient("backoffice-authed");
+            var resp = await http.PostAsync($"api/admin/signups/{row.SignupId}/resend-license", null);
+            if (resp.IsSuccessStatusCode)
+            {
+                Snackbar.Add($"시리얼 키 이메일 재발송 완료 → {row.Email}", Severity.Success);
+                await LoadAsync();
+            }
+            else
+            {
+                var err = await resp.Content.ReadAsStringAsync();
+                Snackbar.Add($"재발송 실패: {err}", Severity.Error);
+            }
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"재발송 실패: {ex.Message}", Severity.Error);
+        }
+    }
+
+    private async Task RejectAsync(SignupRow row)
+    {
+        try
+        {
+            var http = HttpFactory.CreateClient("backoffice-authed");
+            var resp = await http.PostAsJsonAsync($"api/admin/signups/{row.SignupId}/reject", new { reason = "관리자 반려" });
+            if (resp.IsSuccessStatusCode)
+            {
+                Snackbar.Add("반려 완료", Severity.Success);
+                await LoadAsync();
+            }
+            else
+            {
+                Snackbar.Add($"반려 실패: {resp.StatusCode}", Severity.Error);
+            }
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"반려 실패: {ex.Message}", Severity.Error);
+        }
+    }
+
+    private static Color StatusColor(string s) => s switch
+    {
+        "submitted" => Color.Info,
+        "paid" => Color.Warning,
+        "approved" => Color.Success,
+        "active" => Color.Success,
+        "rejected" => Color.Error,
+        _ => Color.Default
+    };
+
+    private static string StatusLabel(string s) => s switch
+    {
+        "submitted" => "신청",
+        "paid" => "결제완료",
+        "approved" => "승인",
+        "active" => "활성",
+        "rejected" => "반려",
+        _ => s
+    };
+
+    public class SignupRow
+    {
+        public long SignupId { get; set; }
+        public string SignupToken { get; set; } = "";
+        public string CompanyName { get; set; } = "";
+        public string Email { get; set; } = "";
+        public string Phone { get; set; } = "";
+        public string PlanType { get; set; } = "";
+        public string? ResellerCode { get; set; }
+        public string Status { get; set; } = "";
+        public DateTime SubmittedAt { get; set; }
+        public string? TenantCode { get; set; }
+        public string? TenantStatus { get; set; }
+        public string? LicenseKey { get; set; }
+    }
+
+    public class ApiResp<T>
+    {
+        public bool Success { get; set; }
+        public T? Data { get; set; }
+    }
+
+    public class ApproveResp
+    {
+        public bool Success { get; set; }
+        public string? Message { get; set; }
+        public string? TenantId { get; set; }
+        public string? LicenseKey { get; set; }
+    }
+}

@@ -1,0 +1,102 @@
+@using HitPan.Web.Models
+@using HitPan.Web.Services
+@inject DeliveryService DeliveryService
+
+<div class="delivery-form">
+    <MudGrid Spacing="2" Class="pa-2">
+        <MudItem xs="12" sm="4" md="3">
+            <MudDatePicker Label="판매일자"
+                           Date="Draft.SalesDate"
+                           DateChanged="OnSalesDateChanged"
+                           Variant="Variant.Outlined"
+                           Margin="Margin.Dense"
+                           Style="font-size:13px;" />
+        </MudItem>
+        <MudItem xs="12" sm="2" md="2">
+            <MudNumericField T="int"
+                             Label="순위"
+                             Value="Draft.DailySequence"
+                             ValueChanged="OnDailySequenceChanged"
+                             Min="1"
+                             Variant="Variant.Outlined"
+                             Margin="Margin.Dense"
+                             Style="font-size:13px;" />
+        </MudItem>
+        <MudItem xs="12" sm="6" md="5">
+            <MudAutocomplete T="string"
+                             @ref="_companyRef"
+                             Label="판매업체"
+                             Value="Draft.SalesCompany"
+                             ValueChanged="OnSalesCompanyChanged"
+                             SearchFunc="SearchPartners"
+                             Variant="Variant.Outlined"
+                             Margin="Margin.Dense"
+                             Dense="true"
+                             Adornment="Adornment.End"
+                             AdornmentIcon="@Icons.Material.Filled.List"
+                             OnAdornmentClick="OpenPartnerList"
+                             Style="font-size:13px;" />
+        </MudItem>
+    </MudGrid>
+</div>
+
+@code {
+    private MudAutocomplete<string>? _companyRef;
+    private bool _focused;
+    private Dictionary<string, string> _partnerMap = new();
+
+    [Parameter, EditorRequired] public DeliveryDraftModel Draft { get; set; } = default!;
+    [Parameter] public EventCallback OnChanged { get; set; }
+    [Parameter] public EventCallback OnOpenPartnerList { get; set; }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender && !_focused && _companyRef is not null)
+        {
+            _focused = true;
+            await _companyRef.FocusAsync();
+        }
+    }
+
+    private async Task OnSalesDateChanged(DateTime? date)
+    {
+        if (date is null) return;
+        Draft.SalesDate = date.Value;
+        await OnChanged.InvokeAsync();
+    }
+
+    private async Task OnDailySequenceChanged(int value)
+    {
+        Draft.DailySequence = value < 1 ? 1 : value;
+        await OnChanged.InvokeAsync();
+    }
+
+    private async Task OnSalesCompanyChanged(string value)
+    {
+        Draft.SalesCompany = value;
+        if (_partnerMap.TryGetValue(value, out var id))
+            Draft.PartnerId = id;
+        else if (string.IsNullOrWhiteSpace(value))
+            Draft.PartnerId = null;
+
+        await OnChanged.InvokeAsync();
+    }
+
+    private async Task<IEnumerable<string>> SearchPartners(string value, CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+            return Array.Empty<string>();
+
+        var results = await DeliveryService.SearchPartnersAsync(value, cancellationToken);
+        _partnerMap = results
+            .GroupBy(x => x.PartnerName)
+            .ToDictionary(g => g.Key, g => g.First().PartnerId);
+
+        return results.Select(x => x.PartnerName).Distinct();
+    }
+
+    private async Task OpenPartnerList()
+    {
+        await OnOpenPartnerList.InvokeAsync();
+    }
+}

@@ -1,0 +1,124 @@
+@page "/signup/welcome"
+@rendermode InteractiveServer
+@layout LandingLayout
+@inject NavigationManager Nav
+
+<PageTitle>설치 준비 중 — 히트판 ERP</PageTitle>
+
+<section class="welcome-section">
+    <div class="welcome-card">
+        <div class="icon">🎉</div>
+        <h1>가입 완료!</h1>
+        <p class="lead">결제가 완료되었습니다.<br />지금 백그라운드에서 시스템을 준비하고 있습니다.</p>
+
+        <div class="progress-list">
+            <div class="step @StepClass(0)">
+                <span class="dot">@(IsDone(0) ? "✓" : "1")</span>
+                <span>회원 정보 등록</span>
+            </div>
+            <div class="step @StepClass(1)">
+                <span class="dot">@(IsDone(1) ? "✓" : "2")</span>
+                <span>도메인 발급 ({고객사ID}.hitpan.kr)</span>
+            </div>
+            <div class="step @StepClass(2)">
+                <span class="dot">@(IsDone(2) ? "✓" : "3")</span>
+                <span>통신연결 준비</span>
+            </div>
+            <div class="step @StepClass(3)">
+                <span class="dot">@(IsDone(3) ? "✓" : "4")</span>
+                <span>시리얼 키 생성</span>
+            </div>
+            <div class="step @StepClass(4)">
+                <span class="dot">@(IsDone(4) ? "✓" : "5")</span>
+                <span>안내 메일 발송 (시리얼 키 + 다운로드 안내)</span>
+            </div>
+        </div>
+
+        @if (_progress >= 5)
+        {
+            <div class="done">
+                <p>✓ 모든 준비가 완료되었습니다.</p>
+                @if (!string.IsNullOrWhiteSpace(Key))
+                {
+                    @* 사장님 결재 2026-06-02 — 시리얼 키 평문 1회 노출 (헌법 #22 정합) *@
+                    <div class="license-box">
+                        <div class="license-label">📋 시리얼 키 (이 화면을 떠나면 다시 볼 수 없습니다)</div>
+                        <div class="license-key">@Key</div>
+                        <button class="btn-copy" @onclick="CopyKey">@(_copied ? "✓ 복사됨" : "복사")</button>
+                    </div>
+                }
+                <p style="margin-top:16px;font-size:13px;color:#4B5563;">가입 안내 메일에도 시리얼 키와 다운로드 안내를 발송했습니다.</p>
+                <button class="btn-primary" @onclick='@(() => Nav.NavigateTo($"/download?key={Uri.EscapeDataString(Key ?? "")}"))'>다운로드 안내</button>
+            </div>
+        }
+        else
+        {
+            <p class="info">평균 2분 이내 완료됩니다. 이 화면을 떠나셔도 이메일로 안내드립니다.</p>
+        }
+    </div>
+</section>
+
+@code {
+    [SupplyParameterFromQuery] public string? Key { get; set; }
+    [SupplyParameterFromQuery] public string? Plan { get; set; }
+
+    private int _progress = 0;
+    private bool _copied;
+    private System.Threading.Timer? _timer;
+
+    [Inject] private IJSRuntime JS { get; set; } = default!;
+
+    private async Task CopyKey()
+    {
+        if (string.IsNullOrWhiteSpace(Key)) return;
+        await JS.InvokeVoidAsync("navigator.clipboard.writeText", Key);
+        _copied = true;
+        StateHasChanged();
+    }
+
+    protected override void OnAfterRender(bool firstRender)
+    {
+        if (firstRender)
+        {
+            // 스켈레톤: 실제 프로비저닝 진행률은 SignalR 또는 polling으로 백오피스에서 가져옴
+            _timer = new System.Threading.Timer(_ =>
+            {
+                InvokeAsync(() =>
+                {
+                    if (_progress < 5) _progress++;
+                    StateHasChanged();
+                    if (_progress >= 5) _timer?.Dispose();
+                });
+            }, null, 1000, 1500);
+        }
+    }
+
+    private bool IsDone(int idx) => _progress > idx;
+    private string StepClass(int idx) => IsDone(idx) ? "done" : (_progress == idx ? "active" : "pending");
+
+    public void Dispose() => _timer?.Dispose();
+}
+
+<style>
+.welcome-section { padding: 60px 0; background: #F9FAFB; min-height: calc(100vh - 200px); }
+.welcome-card { max-width: 520px; margin: 0 auto; background: #fff; padding: 40px; border-radius: 16px; text-align: center; box-shadow: 0 4px 16px rgba(0,0,0,0.06); }
+.icon { font-size: 56px; margin-bottom: 12px; }
+.welcome-card h1 { font-size: 28px; color: #0F1419; margin-bottom: 12px; }
+.lead { color: #4B5563; margin-bottom: 32px; font-size: 14px; line-height: 1.6; }
+.progress-list { text-align: left; margin-bottom: 24px; }
+.step { display: flex; align-items: center; gap: 12px; padding: 12px; border-radius: 8px; margin-bottom: 6px; font-size: 14px; }
+.step.done { background: #F0F9F5; color: #0F6E56; }
+.step.active { background: #FFF7ED; color: #C2410C; font-weight: 600; }
+.step.pending { color: #9CA3AF; }
+.dot { width: 28px; height: 28px; border-radius: 50%; background: #fff; border: 2px solid currentColor; display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: 12px; }
+.step.done .dot { background: #0F6E56; color: #fff; border-color: #0F6E56; }
+.step.active .dot { background: #FB923C; color: #fff; border-color: #FB923C; }
+.info { font-size: 13px; color: #6B7280; margin-top: 16px; }
+.done { padding: 20px; background: #F0F9F5; border-radius: 8px; margin-top: 16px; }
+.done p { color: #0F6E56; font-weight: 600; }
+.btn-primary { margin-top: 12px; padding: 12px 24px; background: #0F6E56; color: #fff; border: none; border-radius: 8px; font-weight: 600; cursor: pointer; }
+.license-box { background:#0F1419; color:#fff; border-radius:8px; padding:16px; margin-top:16px; text-align:left; }
+.license-label { font-size:12px; color:#9CA3AF; margin-bottom:8px; }
+.license-key { font-family:'Consolas',monospace; font-size:18px; letter-spacing:1px; font-weight:700; word-break:break-all; }
+.btn-copy { margin-top:8px; padding:6px 12px; background:#0F6E56; color:#fff; border:none; border-radius:6px; font-size:12px; cursor:pointer; }
+</style>

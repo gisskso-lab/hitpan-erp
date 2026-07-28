@@ -1,0 +1,979 @@
+@page "/deliveries"
+@attribute [Authorize]
+@using System.Security.Claims
+@using HitPan.Web.Components.Common
+@using HitPan.Web.Components.Sales
+@using HitPan.Web.Models
+@using HitPan.Web.Services
+@namespace HitPan.Web.Pages.Delivery
+@inject DeliveryService DeliveryService
+@inject TaxInvoiceApiService TaxInvoiceApi
+@inject DocumentService DocService
+@inject WorkTabService TabService
+@inject AuthenticationStateProvider AuthStateProvider
+@inject IDialogService DialogService
+@inject ISnackbar Snackbar
+@inject IJSRuntime Js
+@inject PartnerMasterService PartnersApi
+@inject ItemMasterService ItemsApi
+@inject NavigationManager Nav
+
+<NavigationLock ConfirmExternalNavigation="@_hasUnsavedChanges" OnBeforeInternalNavigation="OnBeforeInternalNavigation" />
+
+<section class="delivery-page">
+    @if (_draft is null)
+    {
+        <MudProgressCircular Color="Color.Primary" Indeterminate="true" />
+    }
+    else
+    {
+        <WorkflowBreadcrumb Steps="_workflowSteps" />
+
+        <MudPaper Class="pa-3 mb-2">
+            <MudGrid>
+                <MudItem xs="12" md="3">
+                    <MudDatePicker Label="판매일자" Date="_draft.SalesDate" DateChanged="OnSalesDateChanged" />
+                </MudItem>
+                <MudItem xs="12" md="4">
+                    <MudAutocomplete T="string" Label="거래처" Value="_draft.SalesCompany"
+                        ValueChanged="OnPartnerNameChanged" SearchFunc="SearchPartnerAsync"
+                        Margin="Margin.Dense" Placeholder="거래처 검색" />
+                </MudItem>
+                <MudItem xs="12" md="5">
+                    <MudTextField T="string" Label="메모" Value="_draft.Memo"
+                        ValueChanged="OnMemoChanged" Margin="Margin.Dense" />
+                </MudItem>
+            </MudGrid>
+        </MudPaper>
+
+        <MudToolBar Dense="true" Style="overflow-x:auto;flex-wrap:nowrap" Class="pa-1 gap-1">
+            <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Add" OnClick="AddNew">추가</MudButton>
+            <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Save" OnClick="Save">저장</MudButton>
+            <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Undo" OnClick="Cancel">취소</MudButton>
+            <MudButton Variant="Variant.Outlined" Color="Color.Error" StartIcon="@Icons.Material.Filled.Delete" OnClick="DeleteConfirm">삭제</MudButton>
+            @if (_draft?.Status == "confirmed")
+            {
+                <AuthorizeView Roles="tenant_admin,sales_manager">
+                    <Authorized>
+                        <MudButton Variant="Variant.Outlined" Color="Color.Warning"
+                                   StartIcon="@Icons.Material.Filled.ReplayCircleFilled"
+                                   OnClick="CancelConfirmedAsync">매출취소</MudButton>
+                    </Authorized>
+                </AuthorizeView>
+            }
+            <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.ContentCopy" OnClick="CopyAsync" Disabled="@_isNew">복사</MudButton>
+            <MudDivider Vertical="true" FlexItem="true" />
+            <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Print" OnClick="Print">인쇄</MudButton>
+            <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.TableChart" OnClick="DownloadExcel">엑셀</MudButton>
+            <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.PictureAsPdf" OnClick="DownloadPdf">PDF</MudButton>
+            <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Email" OnClick="EmailAsync">이메일</MudButton>
+            <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Receipt" OnClick="OpenTaxInvoice">세금</MudButton>
+            <MudSpacer />
+            <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.FormatListBulleted" OnClick="OpenListPopup">목록</MudButton>
+        </MudToolBar>
+
+        <div class="delivery-grid-wrap">
+            <DeliveryGrid Lines="_draft.Lines"
+                          Density="_draft.Density"
+                          SelectedLine="_selectedLine"
+                          SelectedLineChanged="OnSelectedLineChanged"
+                          OnChanged="OnLinesChanged"
+                          OnSelectionChanged="OnSelectionChanged"
+                          OnContextSecondary="OnContextSecondaryAsync"
+                          ItemCache="_itemCache"
+                          Summary="_summary" />
+        </div>
+
+        <MudPaper Class="pa-3 mt-2">
+            <MudStack Row="true" Spacing="3">
+                <MudText Typo="Typo.body2">공급가액: @_summary.SupplyAmount.ToString("N0")</MudText>
+                <MudText Typo="Typo.body2">부가세: @_summary.VatAmount.ToString("N0")</MudText>
+                <MudText Typo="Typo.body2">합계: @_summary.TotalAmount.ToString("N0")</MudText>
+            </MudStack>
+        </MudPaper>
+    }
+</section>
+
+@code {
+    private DeliveryDraftModel? _draft;
+    private DeliverySummaryModel _summary = new();
+    private DeliveryLineModel? _selectedLine;
+    private bool _hasUnsavedChanges;
+    private IReadOnlyList<DeliveryWorkflowStepModel> _workflowSteps = Array.Empty<DeliveryWorkflowStepModel>();
+    private int _selectedCount;
+    private bool _canBulkDelete;
+    private ClaimsPrincipal? _user;
+    private bool _isNew = true;
+    private List<PartnerListRow>? _partnerCache;
+    private List<ItemListModel>? _itemCache;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var state = await AuthStateProvider.GetAuthenticationStateAsync();
+        _user = state.User;
+        _canBulkDelete = HitPanRoleHelper.IsInHitPanRole(_user, "TenantAdmin")
+                         || HitPanRoleHelper.IsInHitPanRole(_user, "Manager");
+
+        var manager = _user.FindFirst("name")?.Value
+                      ?? _user.FindFirst(ClaimTypes.Name)?.Value
+                      ?? "담당자";
+        _draft = await DeliveryService.CreateDraftAsync(manager);
+        // WO-11 한글 prefix (견적·수주 폴백 placeholder)
+        _draft.LinkedQuoteDocumentNo = $"견-{_draft.SalesDate:yyyyMMdd}-001";
+        _draft.LinkedSalesOrderDocumentNo = $"수-{_draft.SalesDate:yyyyMMdd}-001";
+        _itemCache = await ItemsApi.GetListAsync() ?? new();
+        RefreshWorkflow();
+        RecalculateSummary();
+    }
+
+    private async Task<IEnumerable<string>> SearchPartnerAsync(string value, CancellationToken ct)
+    {
+        _partnerCache ??= await PartnersApi.GetListAsync() ?? new();
+        if (string.IsNullOrWhiteSpace(value)) return _partnerCache.Select(p => p.PartnerName).Distinct();
+        return _partnerCache.Where(p => p.PartnerName.Contains(value, StringComparison.OrdinalIgnoreCase)).Select(p => p.PartnerName).Distinct();
+    }
+
+    private void RefreshWorkflow()
+    {
+        if (_draft is null) return;
+        _workflowSteps = DeliveryWorkflowFactory.Build(_draft.DocumentType, _draft);
+    }
+
+    private async Task OnSalesDateChanged(DateTime? value)
+    {
+        if (_draft is null) return;
+        _draft.SalesDate = value ?? DateTime.Today;
+        await OnHeaderChanged();
+    }
+
+    private async Task OnPartnerNameChanged(string value)
+    {
+        if (_draft is null) return;
+        _draft.SalesCompany = value;
+        await OnHeaderChanged();
+    }
+
+    private async Task OnMemoChanged(string value)
+    {
+        if (_draft is null) return;
+        _draft.Memo = value;
+        MarkDirty();
+        await InvokeAsync(StateHasChanged);
+    }
+
+    private async Task OnHeaderChanged()
+    {
+        // 거래처명으로 PartnerId 매핑
+        if (_draft is not null && !string.IsNullOrWhiteSpace(_draft.SalesCompany))
+        {
+            _partnerCache ??= await PartnersApi.GetListAsync() ?? new();
+            var matched = _partnerCache.FirstOrDefault(p => p.PartnerName == _draft.SalesCompany);
+            if (matched is not null)
+            {
+                _draft.PartnerId = matched.PartnerId;
+            }
+        }
+
+        RefreshWorkflow();
+        MarkDirty();
+        if (TabService.ActiveTabId is { } tabId)
+        {
+            TabService.UpdateSubTitle(tabId, _draft?.SalesCompany);
+        }
+        await InvokeAsync(StateHasChanged);
+    }
+
+    private async Task OnBeforeInternalNavigation(LocationChangingContext context)
+    {
+        if (!_hasUnsavedChanges) return;
+        var leave = await DialogService.ShowMessageBoxAsync(
+            "확인",
+            "저장하지 않은 내용이 있습니다. 이동하시겠습니까?",
+            yesText: "이동",
+            noText: "취소");
+        if (leave != true)
+        {
+            context.PreventNavigation();
+        }
+    }
+
+    private async Task OnLinesChanged()
+    {
+        MarkDirty();
+        RecalculateSummary();
+        await InvokeAsync(StateHasChanged);
+    }
+
+    private Task OnSelectedLineChanged(DeliveryLineModel? line)
+    {
+        _selectedLine = line;
+        return Task.CompletedTask;
+    }
+
+    private Task OnSelectionChanged()
+    {
+        UpdateSelectionCount();
+        StateHasChanged();
+        return Task.CompletedTask;
+    }
+
+    private void UpdateSelectionCount()
+    {
+        if (_draft is null)
+        {
+            _selectedCount = 0;
+            return;
+        }
+
+        _selectedCount = _draft.Lines.Count(x => !x.IsPlaceholder && x.IsSelected);
+    }
+
+    private void ClearSelection()
+    {
+        if (_draft is null) return;
+        foreach (var line in _draft.Lines)
+        {
+            line.IsSelected = false;
+        }
+
+        UpdateSelectionCount();
+        StateHasChanged();
+    }
+
+    private async Task OnContextSecondaryAsync((DeliveryLineModel Line, DeliveryContextAction Action) arg)
+    {
+        switch (arg.Action)
+        {
+            case DeliveryContextAction.LinkSalesOrder:
+                Snackbar.Add("수주 연결은 추후 API와 연동됩니다.", Severity.Info);
+                break;
+            case DeliveryContextAction.IssueTaxInvoice:
+                await IssueTaxInvoiceForCurrentAsync();
+                break;
+            case DeliveryContextAction.PartnerHistory:
+                Snackbar.Add("거래처 거래내역 조회는 추후 연동됩니다.", Severity.Info);
+                break;
+        }
+
+        await Task.CompletedTask;
+    }
+
+    private void AddLine()
+    {
+        if (_draft is null) return;
+        _draft.Lines.Add(new DeliveryLineModel { No = _draft.Lines.Count + 1 });
+        MarkDirty();
+        RecalculateSummary();
+    }
+
+    private void DeleteLine()
+    {
+        if (_draft is null || _selectedLine is null) return;
+        _draft.Lines.Remove(_selectedLine);
+        for (var i = 0; i < _draft.Lines.Count; i++)
+        {
+            _draft.Lines[i].No = i + 1;
+        }
+
+        if (_draft.Lines.Count == 0)
+        {
+            _draft.Lines.Add(new DeliveryLineModel { No = 1, IsPlaceholder = true });
+        }
+
+        _selectedLine = null;
+        MarkDirty();
+        RecalculateSummary();
+    }
+
+    private async Task SaveAsync()
+    {
+        if (_draft is null) return;
+
+        // 저장 전 사전 검증 — 서버까지 갔다가 400으로 돌아오는 왕복을 차단.
+        if (string.IsNullOrWhiteSpace(_draft.PartnerId))
+        {
+            Snackbar.Add("거래처를 선택해주세요.", Severity.Warning);
+            return;
+        }
+
+        var realLines = _draft.Lines.Where(x => !x.IsPlaceholder).ToList();
+        if (realLines.Count == 0)
+        {
+            Snackbar.Add("품목을 한 줄 이상 추가해주세요.", Severity.Warning);
+            return;
+        }
+
+        var unresolved = realLines
+            .Where(l => string.IsNullOrWhiteSpace(l.ItemId))
+            .Select(l => string.IsNullOrWhiteSpace(l.ItemName) ? "(빈 행)" : l.ItemName)
+            .ToList();
+        if (unresolved.Count > 0)
+        {
+            Snackbar.Add($"등록되지 않은 품목입니다: {string.Join(", ", unresolved)} — 품목 마스터에서 먼저 등록하거나 자동완성 목록에서 선택해주세요.", Severity.Warning);
+            return;
+        }
+
+        try
+        {
+            if (_isNew)
+            {
+                var result = await DeliveryService.SaveAsync(_draft);
+                if (!result.Success || string.IsNullOrWhiteSpace(result.DocumentNumber))
+                {
+                    Snackbar.Add($"거래명세서 저장 실패: {result.Error ?? "알 수 없는 오류"}", Severity.Error);
+                    return;
+                }
+
+                _isNew = false;
+                Snackbar.Add($"저장 완료: {result.DocumentNumber}", Severity.Success);
+            }
+            else
+            {
+                if (string.IsNullOrWhiteSpace(_draft.Id))
+                {
+                    Snackbar.Add("저장 실패: 문서 ID가 없습니다.", Severity.Error);
+                    return;
+                }
+
+                var req = new UpdateDeliveryRequest
+                {
+                    OrderDate = _draft.SalesDate,
+                    PartnerId = _draft.PartnerId ?? "",
+                    CashAmount = _summary.CashAmount,
+                    CardAmount = _summary.CardAmount,
+                    DiscountAmount = _summary.DiscountAmount,
+                    Memo = _draft.Memo,
+                    Items = _draft.Lines
+                        .Where(x => !x.IsPlaceholder)
+                        .Select(x => new DeliveryItemDto
+                        {
+                            ItemId = x.ItemId,
+                            ItemName = x.ItemName,
+                            Spec = x.Spec,
+                            Unit = x.Unit,
+                            Qty = x.Qty,
+                            UnitPrice = x.UnitPrice,
+                            Amount = x.Amount,
+                            VatAmount = x.VatAmount,
+                            Memo = x.Note,
+                            RowNo = x.RowNo
+                        }).ToList()
+                };
+
+                var ok = await DeliveryService.UpdateAsync(_draft.Id, req);
+                if (!ok)
+                {
+                    Snackbar.Add("저장에 실패했습니다.", Severity.Error);
+                    return;
+                }
+
+                Snackbar.Add("저장되었습니다.", Severity.Success);
+            }
+
+            if (TabService.ActiveTabId is { } tabId)
+            {
+                TabService.UpdateSubTitle(tabId, _draft.SalesCompany);
+                TabService.SetTabDirty(tabId, false);
+            }
+
+            _hasUnsavedChanges = false;
+            RefreshWorkflow();
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"저장 중 오류: {ex.Message}", Severity.Error);
+        }
+    }
+
+    private bool _isConfirming;
+    private async Task ConfirmAsync()
+    {
+        if (_isConfirming) return;
+        if (_draft is null) return;
+        if (string.IsNullOrWhiteSpace(_draft.DocumentNumber))
+        {
+            await SaveAsync();
+        }
+
+        _isConfirming = true;
+        try
+        {
+            await DeliveryService.ConfirmAsync(_draft);
+            Snackbar.Add("전송(확정)을 완료했습니다.", Severity.Success);
+
+            // 정상 확정 후에도 안전재고 이하/0 자동발주 후보 있으면 다이얼로그.
+            if (!string.IsNullOrWhiteSpace(_draft.Id))
+            {
+                await CheckAutoOrderAsync(_draft.Id);
+            }
+        }
+        catch (Exception ex)
+        {
+            // 사장님 지시 (2026-04-26): 재고 부족으로 확정 실패해도 자동발주 다이얼로그가
+            // 떠야 함. 서버는 재고 차감 무결성 위해 확정을 거부하지만, 사용자 흐름은
+            // "재고 부족 → 자동발주? → 발주서 생성" 으로 끊기지 않게 한다(§20).
+            var msg = ex.Message ?? string.Empty;
+            var isStockShortage =
+                msg.Contains("재고", StringComparison.OrdinalIgnoreCase)
+                && msg.Contains("부족", StringComparison.OrdinalIgnoreCase);
+
+            if (isStockShortage && !string.IsNullOrWhiteSpace(_draft.Id))
+            {
+                Snackbar.Add("재고가 부족합니다. 자동발주 후보를 확인합니다…", Severity.Warning);
+                await CheckAutoOrderAsync(_draft.Id);
+            }
+            else
+            {
+                Snackbar.Add(msg, Severity.Error);
+            }
+        }
+        finally
+        {
+            _isConfirming = false;
+        }
+    }
+
+    /// <summary>
+    /// 거래명세서 확정 직후 안전재고 위반 품목 후보를 받아 다이얼로그로 자동발주 진행.
+    /// 후보가 없으면 무동작.
+    /// </summary>
+    private async Task CheckAutoOrderAsync(string deliveryId)
+    {
+        var candidates = await DeliveryService.GetAutoOrderCandidatesAsync(deliveryId);
+        if (candidates.Count == 0) return;
+
+        var outOfStock = candidates.Count(c => c.Reason == "out_of_stock");
+        var belowSafety = candidates.Count - outOfStock;
+
+        var msg = new System.Text.StringBuilder();
+        if (outOfStock > 0) msg.AppendLine($"재고가 없는 품목: {outOfStock}건");
+        if (belowSafety > 0) msg.AppendLine($"안전재고 이하 품목: {belowSafety}건");
+        msg.AppendLine();
+        foreach (var c in candidates.Take(5))
+        {
+            msg.AppendLine($"• {c.ItemName}: 현재고 {c.CurrentQty:N0} / 안전재고 {c.SafetyQty:N0}"
+                + (string.IsNullOrWhiteSpace(c.PartnerName) ? " (공급처 미설정)" : $" → {c.PartnerName}"));
+        }
+        if (candidates.Count > 5) msg.AppendLine($"... 외 {candidates.Count - 5}건");
+        msg.AppendLine();
+        msg.AppendLine("[자동발주+매입처리] 발주서 생성 후 매입확정까지 진행 (재고 즉시 +반영)");
+        msg.AppendLine("[발주서만] 발주서만 생성, 매입은 수동");
+
+        var choice = await DialogService.ShowMessageBoxAsync(
+            "⚠ 안전재고 자동발주",
+            msg.ToString(),
+            yesText: "자동발주+매입처리",
+            noText: "발주서만",
+            cancelText: "취소");
+        if (choice is null) return;
+
+        var autoReceive = choice == true;
+        var results = await DeliveryService.CreateAutoOrdersAsync(candidates, autoReceive);
+        var success = results.Where(r => r.Success).ToList();
+        var failed = results.Where(r => !r.Success).ToList();
+
+        if (success.Count > 0)
+        {
+            var noList = string.Join(", ", success.Select(r => r.PoNo));
+            Snackbar.Add($"자동발주서 {success.Count}건 생성 완료: {noList}", Severity.Success);
+        }
+        if (failed.Count > 0)
+        {
+            var firstReason = failed[0].Reason ?? "사유 미상";
+            Snackbar.Add($"{failed.Count}건 자동발주 실패: {firstReason[..Math.Min(150, firstReason.Length)]}", Severity.Warning);
+        }
+    }
+
+    private async Task IssueTaxInvoiceForCurrentAsync()
+    {
+        if (_draft is null || string.IsNullOrWhiteSpace(_draft.Id))
+        {
+            Snackbar.Add("저장된 거래명세서에서만 계산서를 발행할 수 있습니다.", Severity.Warning);
+            return;
+        }
+
+        var confirm = await DialogService.ShowMessageBoxAsync(
+            "계산서 발행",
+            $"거래명세서 {_draft.DocumentNumber}에 대해 계산서를 발행하시겠습니까?",
+            yesText: "발행", cancelText: "취소");
+        if (confirm != true) return;
+
+        try
+        {
+            var r = await TaxInvoiceApi.IssueAsync(_draft.Id, null);
+            if (r.Success)
+                Snackbar.Add($"계산서 발행 완료 — 계산서번호 {r.InvoiceNo}", Severity.Success);
+            else
+                Snackbar.Add($"계산서 발행 실패: {r.ErrorMessage}", Severity.Error);
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"계산서 발행 오류: {ex.Message}", Severity.Error);
+        }
+    }
+
+    private async Task BulkConfirmAsync()
+    {
+        if (_draft is null || string.IsNullOrWhiteSpace(_draft.Id))
+        {
+            Snackbar.Add("저장 후 일괄확정을 사용할 수 있습니다.", Severity.Warning);
+            return;
+        }
+
+        var result = await DeliveryService.BulkConfirmAsync(new[] { _draft.Id });
+        if (result.Failed.Count > 0)
+        {
+            Snackbar.Add($"일부 실패: {result.Failed.Count}건", Severity.Warning);
+        }
+        else
+        {
+            Snackbar.Add("일괄확정이 완료되었습니다.", Severity.Success);
+        }
+
+        ClearSelection();
+    }
+
+    private async Task BulkDeleteAsync()
+    {
+        if (!_canBulkDelete || _draft is null || _selectedCount == 0) return;
+        var ok = await DialogService.ShowMessageBoxAsync(
+            "일괄삭제",
+            "선택한 행을 삭제하시겠습니까?",
+            yesText: "삭제",
+            cancelText: "취소");
+        if (ok != true) return;
+
+        _draft.Lines.RemoveAll(l => l.IsSelected && !l.IsPlaceholder);
+        for (var i = 0; i < _draft.Lines.Count; i++)
+        {
+            _draft.Lines[i].No = i + 1;
+        }
+
+        if (_draft.Lines.Count == 0)
+        {
+            _draft.Lines.Add(new DeliveryLineModel { No = 1, IsPlaceholder = true });
+        }
+
+        ClearSelection();
+        MarkDirty();
+        RecalculateSummary();
+    }
+
+    private async Task BulkChangeUnitPriceAsync()
+    {
+        if (_draft is null || _selectedCount == 0) return;
+        var parameters = new DialogParameters<DeliveryBulkEditDialog>
+        {
+            { x => x.Kind, DeliveryBulkEditDialog.BulkEditKind.UnitPrice }
+        };
+        var dialog = await DialogService.ShowAsync<DeliveryBulkEditDialog>("단가 일괄변경", parameters);
+        var res = await dialog.Result;
+        if (res is null || res.Canceled || res.Data is not decimal price) return;
+
+        foreach (var line in _draft.Lines.Where(l => !l.IsPlaceholder && l.IsSelected))
+        {
+            line.UnitPrice = price;
+            line.RecalculateAmount();
+        }
+
+        MarkDirty();
+        RecalculateSummary();
+    }
+
+    private async Task BulkChangeAssigneeAsync()
+    {
+        if (_draft is null || _selectedCount == 0) return;
+        var parameters = new DialogParameters<DeliveryBulkEditDialog>
+        {
+            { x => x.Kind, DeliveryBulkEditDialog.BulkEditKind.Assignee }
+        };
+        var dialog = await DialogService.ShowAsync<DeliveryBulkEditDialog>("담당자 일괄변경", parameters);
+        var res = await dialog.Result;
+        if (res is null || res.Canceled || res.Data is not string name) return;
+
+        foreach (var line in _draft.Lines.Where(l => !l.IsPlaceholder && l.IsSelected))
+        {
+            line.LineAssignee = name;
+        }
+
+        MarkDirty();
+    }
+
+    private async Task BulkChangeWarehouseAsync()
+    {
+        if (_draft is null || _selectedCount == 0) return;
+        var parameters = new DialogParameters<DeliveryBulkEditDialog>
+        {
+            { x => x.Kind, DeliveryBulkEditDialog.BulkEditKind.Warehouse }
+        };
+        var dialog = await DialogService.ShowAsync<DeliveryBulkEditDialog>("창고 일괄변경", parameters);
+        var res = await dialog.Result;
+        if (res is null || res.Canceled || res.Data is not string wh) return;
+
+        foreach (var line in _draft.Lines.Where(l => !l.IsPlaceholder && l.IsSelected))
+        {
+            line.Warehouse = wh;
+        }
+
+        MarkDirty();
+    }
+
+    private void RecalculateSummary()
+    {
+        if (_draft is null) return;
+        var lines = _draft.Lines.Where(x => !x.IsPlaceholder).ToList();
+        var supply = lines.Sum(x => x.Amount);
+        var vat = lines.Sum(x => x.VatAmount);
+        _summary.SupplyAmount = supply;
+        _summary.VatAmount = vat;
+        _summary.TotalAmount = supply + vat;
+        _summary.TodaySales = _summary.TotalAmount;
+        _summary.TodayReceipt = _summary.CashAmount + _summary.CardAmount;
+        _summary.ClaimAmount = _summary.TotalAmount;
+        _summary.PrevReceivable = 0;
+        _summary.CashAmount = decimal.Round(_summary.TotalAmount * 0.5m, 2, MidpointRounding.AwayFromZero);
+        _summary.CardAmount = decimal.Round(_summary.TotalAmount - _summary.CashAmount, 2, MidpointRounding.AwayFromZero);
+    }
+
+    private void MarkDirty()
+    {
+        _hasUnsavedChanges = true;
+        if (TabService.ActiveTabId is { } tabId)
+        {
+            TabService.SetTabDirty(tabId, true);
+        }
+    }
+
+    private async Task DeleteConfirm()
+    {
+        var result = await DialogService.ShowMessageBoxAsync(
+            "삭제 확인",
+            "선택한 거래명세서를 삭제하시겠습니까?",
+            yesText: "삭제",
+            cancelText: "취소");
+        if (result == true)
+        {
+            await DeleteOrder();
+        }
+    }
+
+    private async Task DeleteOrder()
+    {
+        if (_draft is null) return;
+
+        var persisted = !string.IsNullOrWhiteSpace(_draft.DocumentNumber);
+        if (persisted)
+        {
+            var ok = await DeliveryService.DeleteAsync(_draft.Id!);
+            if (ok)
+            {
+                Snackbar.Add("삭제되었습니다.", Severity.Success);
+            }
+            else
+            {
+                Snackbar.Add("삭제 실패.", Severity.Error);
+                return;
+            }
+        }
+
+        await ResetToNewDeliveryAsync();
+        _isNew = true;
+    }
+
+    private Task GoPrev() => Task.CompletedTask;
+    private Task GoNext() => Task.CompletedTask;
+
+    private async Task CancelConfirmedAsync()
+    {
+        if (_draft is null || string.IsNullOrWhiteSpace(_draft.Id)) return;
+        if (_draft.Status != "confirmed")
+        {
+            Snackbar.Add("확정된 전표만 매출취소할 수 있습니다.", Severity.Warning);
+            return;
+        }
+
+        // 구체적 영향 범위 요약 — UX/UI 개발팀 제안
+        var itemCount = _draft.Lines.Count(l => !l.IsPlaceholder);
+        var totalQty = _draft.Lines.Where(l => !l.IsPlaceholder).Sum(l => l.Quantity);
+        var totalAmount = _summary.TotalAmount;
+
+        var confirm = await DialogService.ShowMessageBoxAsync(
+            "⚠ 확정 매출 취소 (Reverse 원장 발행)",
+            $"거래처: {_draft.SalesCompany}\n" +
+            $"문서번호: {_draft.DocumentNumber}\n" +
+            $"품목 수: {itemCount}개 · 총 수량: {totalQty:N1}\n" +
+            $"취소 금액: {totalAmount:N0}원\n\n" +
+            $"→ 재고 {totalQty:N1}개 복귀\n" +
+            $"→ 수금 {totalAmount:N0}원 자동 무효화\n" +
+            $"→ 거래처 잔액 재계산\n\n" +
+            $"이 작업은 되돌릴 수 없습니다. 진행하시겠습니까?",
+            yesText: "매출취소 진행", cancelText: "닫기");
+        if (confirm != true) return;
+
+        var (ok, err) = await DeliveryService.CancelConfirmedAsync(_draft.Id);
+        if (ok)
+        {
+            Snackbar.Add("매출 취소 완료 — Reverse 원장이 발행되었습니다.", Severity.Success);
+            // 서버 재조회 — stale 제거 (프론트 매니저 지적)
+            await LoadOrderToGrid(_draft.Id!);
+        }
+        else
+        {
+            Snackbar.Add($"매출취소 실패: {err}", Severity.Error);
+        }
+    }
+
+    /// <summary>
+    /// 현재 문서를 복사해서 새 문서를 만든다.
+    /// </summary>
+    private async Task CopyAsync()
+    {
+        if (_draft is null) return;
+        _draft.Id = Guid.NewGuid().ToString();
+        _draft.DocumentNumber = null;
+        _draft.SalesDate = DateTime.Today;
+        _isNew = true;
+        _hasUnsavedChanges = true;
+        RefreshWorkflow();
+        Snackbar.Add("문서가 복사되었습니다. 수정 후 저장해주세요.", Severity.Success);
+        await InvokeAsync(StateHasChanged);
+    }
+
+    private Task AddNew()
+    {
+        AddLine();
+        return Task.CompletedTask;
+    }
+
+    private async Task Save()
+    {
+        await SaveAsync();
+    }
+
+    private async Task Cancel()
+    {
+        if (!_isNew && _draft is not null && !string.IsNullOrWhiteSpace(_draft.Id))
+        {
+            await LoadOrderToGrid(_draft.Id);
+        }
+        else
+        {
+            await ResetToNewDeliveryAsync();
+            _isNew = true;
+        }
+
+        _hasUnsavedChanges = false;
+        if (TabService.ActiveTabId is { } tabId)
+        {
+            TabService.SetTabDirty(tabId, false);
+        }
+
+        Snackbar.Add("변경사항을 취소했습니다.", Severity.Info);
+    }
+    private async Task Print() => await Js.InvokeVoidAsync("print");
+
+    /// <summary>
+    /// 이메일 발송 다이얼로그를 연다.
+    /// </summary>
+    private async Task EmailAsync()
+    {
+        var parameters = new DialogParameters
+        {
+            ["DocumentType"] = "거래명세서",
+            ["DocumentTypeKey"] = "delivery",
+            ["DocumentNo"] = _draft?.DocumentNumber ?? "신규",
+            ["DocumentId"] = _draft?.Id ?? "",
+            ["PartnerId"] = _draft?.PartnerId ?? ""
+        };
+        var options = new DialogOptions { MaxWidth = MaxWidth.Small, FullWidth = true, CloseButton = true };
+        await DialogService.ShowAsync<EmailSendDialog>("이메일 발송", parameters, options);
+    }
+
+    private async Task DownloadExcel()
+    {
+        if (_draft is null || string.IsNullOrEmpty(_draft.Id))
+        {
+            await DialogService.ShowMessageBoxAsync(
+                "알림", "먼저 거래명세서를 선택해주세요.");
+            return;
+        }
+
+        await DocService.DownloadExcelAsync(
+            "delivery", _draft.Id);
+    }
+
+    private async Task DownloadPdf()
+    {
+        if (_draft is null || string.IsNullOrEmpty(_draft.Id))
+        {
+            await DialogService.ShowMessageBoxAsync(
+                "알림", "먼저 거래명세서를 선택해주세요.");
+            return;
+        }
+
+        await DocService.DownloadPdfAsync(
+            "delivery", _draft.Id);
+    }
+    private async Task OpenTaxInvoice()
+    {
+        // 확정된 거래명세서에 대해서만 세금계산서 발행 대상으로 이동.
+        if (_draft is null || string.IsNullOrWhiteSpace(_draft.DocumentNumber))
+        {
+            Snackbar.Add("먼저 거래명세서를 저장해주세요.", Severity.Warning);
+            return;
+        }
+
+        if (_draft.Status != "confirmed")
+        {
+            var proceed = await DialogService.ShowMessageBoxAsync(
+                "확정 필요",
+                "세금계산서는 확정된 거래명세서에 대해 발행됩니다. 먼저 확정하시겠습니까?",
+                yesText: "확정하고 이동",
+                cancelText: "취소");
+            if (proceed != true) return;
+
+            try
+            {
+                await DeliveryService.ConfirmAsync(_draft);
+                _draft.Status = "confirmed";
+                RefreshWorkflow();
+            }
+            catch (Exception ex)
+            {
+                Snackbar.Add($"확정 실패: {ex.Message}", Severity.Error);
+                return;
+            }
+        }
+
+        // 세금계산서 화면으로 이동 + 거래처·기간 필터 프리셋.
+        var partner = Uri.EscapeDataString(_draft.SalesCompany ?? string.Empty);
+        var from = _draft.SalesDate.ToString("yyyy-MM-dd");
+        var to = _draft.SalesDate.ToString("yyyy-MM-dd");
+        Nav.NavigateTo($"/tax-invoice?partner={partner}&from={from}&to={to}");
+    }
+
+    private Task OpenPartnerList() => Task.CompletedTask;
+
+    private async Task OpenListPopup()
+    {
+        var parameters = new DialogParameters
+        {
+            ["ListType"] = "sales"
+        };
+        var options = new DialogOptions
+        {
+            MaxWidth = MaxWidth.Large,
+            FullWidth = true,
+            CloseButton = true
+        };
+        var dialog = await DialogService.ShowAsync<SalesListDialog>(
+            "판매 목록 조회", parameters, options);
+        var result = await dialog.Result;
+
+        if (result is not null && !result.Canceled && result.Data is SalesListItem item)
+        {
+            await LoadOrderToGrid(item.OrderId);
+        }
+    }
+
+    private async Task LoadOrderToGrid(string orderId)
+    {
+        var detail = await DeliveryService.GetAsync(orderId);
+        if (detail is null)
+        {
+            Snackbar.Add("문서를 불러올 수 없습니다.", Severity.Warning);
+            return;
+        }
+
+        var lines = detail.Items.Count > 0
+            ? detail.Items
+                .OrderBy(x => x.RowNo)
+                .Select((x, i) => new DeliveryLineModel
+                {
+                    ItemId = x.ItemId,
+                    No = x.RowNo > 0 ? x.RowNo : i + 1,
+                    IsPlaceholder = false,
+                    ItemName = x.ItemName,
+                    Spec = x.Spec ?? "",
+                    Unit = string.IsNullOrEmpty(x.Unit) ? "EA" : x.Unit!,
+                    Quantity = x.Qty,
+                    UnitPrice = x.UnitPrice,
+                    Note = x.Memo ?? "",
+                    Warehouse = "",
+                    LineAssignee = ""
+                }).ToList()
+            : new List<DeliveryLineModel> { new() { No = 1, IsPlaceholder = true } };
+
+        for (var i = 0; i < lines.Count; i++)
+        {
+            lines[i].No = i + 1;
+        }
+
+        _draft = new DeliveryDraftModel
+        {
+            Id = detail.DeliveryId,
+            DocumentNumber = detail.DeliveryNo,
+            SalesDate = detail.OrderDate,
+            PartnerId = detail.PartnerId,
+            SalesCompany = detail.PartnerName,
+            Memo = detail.Memo,
+            ManagerName = detail.EmployeeName ?? "",
+            DocumentType = "거래명세서",
+            Lines = lines,
+            Density = DeliveryGridDensity.Normal,
+            DailySequence = 1,
+            // WO-11 한글 prefix
+            LinkedQuoteDocumentNo = $"견-{detail.OrderDate:yyyyMMdd}-001",
+            LinkedSalesOrderDocumentNo = $"수-{detail.OrderDate:yyyyMMdd}-001",
+            Status = detail.Status  // 확정/취소 버튼 분기용
+        };
+
+        var supply = lines.Where(x => !x.IsPlaceholder).Sum(x => x.Amount);
+        var vat = lines.Where(x => !x.IsPlaceholder).Sum(x => x.VatAmount);
+        _summary.PrevReceivable = detail.PrevReceivable;
+        _summary.TodaySales = detail.TodaySales;
+        _summary.TodayReceipt = detail.TodayReceipt;
+        _summary.CashAmount = detail.CashAmount;
+        _summary.CardAmount = detail.CardAmount;
+        _summary.DiscountAmount = detail.DiscountAmount;
+        _summary.SupplyAmount = supply;
+        _summary.VatAmount = vat;
+        _summary.TotalAmount = supply + vat;
+        _summary.ClaimAmount = _summary.TotalAmount;
+
+        _isNew = false;
+        _hasUnsavedChanges = false;
+        _selectedLine = null;
+        UpdateSelectionCount();
+        RefreshWorkflow();
+
+        if (TabService.ActiveTabId is { } currentTabId)
+        {
+            await TabService.UpdateSubTitleAsync(currentTabId, detail.PartnerName);
+        }
+
+        await InvokeAsync(StateHasChanged);
+    }
+
+    private async Task ResetToNewDeliveryAsync()
+    {
+        var state = await AuthStateProvider.GetAuthenticationStateAsync();
+        var manager = state.User.FindFirst("name")?.Value
+                      ?? state.User.FindFirst(ClaimTypes.Name)?.Value
+                      ?? "담당자";
+        _draft = await DeliveryService.CreateDraftAsync(manager);
+        // WO-11 한글 prefix
+        _draft.LinkedQuoteDocumentNo = $"견-{_draft.SalesDate:yyyyMMdd}-001";
+        _draft.LinkedSalesOrderDocumentNo = $"수-{_draft.SalesDate:yyyyMMdd}-001";
+        _selectedLine = null;
+        _hasUnsavedChanges = false;
+        if (TabService.ActiveTabId is { } tabId)
+        {
+            TabService.SetTabDirty(tabId, false);
+        }
+
+        RefreshWorkflow();
+        RecalculateSummary();
+        await InvokeAsync(StateHasChanged);
+    }
+}

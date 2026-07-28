@@ -1,0 +1,6 @@
+@HitPan.API_HostAddress = http://localhost:5257
+
+GET {{HitPan.API_HostAddress}}/weatherforecast/
+Accept: application/json
+
+###

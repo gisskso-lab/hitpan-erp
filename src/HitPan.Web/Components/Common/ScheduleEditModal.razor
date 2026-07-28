@@ -1,0 +1,406 @@
+@*
+    ScheduleEditModal — 일정 추가/수정 모달 (사장님 결재 2026-05-26 가도)
+    글래스모피즘 + scale fade-in + ESC/배경 클릭 닫기.
+    UnifiedDayDetailModal과 일관성 유지.
+*@
+@using HitPan.Web.Models
+@using HitPan.Web.Services
+@inject UnifiedCalendarService UnifiedSvc
+@inject IJSRuntime JS
+@inject PartnerMasterService PartnersApi
+
+@if (IsOpen)
+{
+    <div class="hp-sem-backdrop" @onclick="Close" @onkeydown="OnKeyDown" tabindex="-1">
+        <div class="hp-sem-modal" @onclick:stopPropagation="true">
+            <div class="hp-sem-header">
+                <div>
+                    <h2 class="hp-sem-title">@(IsEditMode ? "일정 수정" : "일정 추가")</h2>
+                    <p class="hp-sem-sub">@SelectedDate.ToString("yyyy년 M월 d일 (ddd)")</p>
+                </div>
+                <button class="hp-sem-close" @onclick="Close" aria-label="닫기">
+                    <MudIcon Icon="@Icons.Material.Filled.Close" Size="Size.Small" />
+                </button>
+            </div>
+
+            <div class="hp-sem-body">
+
+                @* 제목 *@
+                <div class="hp-sem-row">
+                    <label class="hp-sem-label">제목 <span class="hp-sem-req">*</span></label>
+                    <input class="hp-sem-input" @bind="_title" placeholder="예: 거래처 미팅" />
+                </div>
+
+                @* 종류 *@
+                <div class="hp-sem-row">
+                    <label class="hp-sem-label">종류</label>
+                    <div class="hp-sem-types">
+                        @foreach (var t in _typeOptions)
+                        {
+                            <button type="button"
+                                    class="hp-sem-type @(_scheduleType == t.Value ? "active" : "")"
+                                    style="--type-color:@t.Color"
+                                    @onclick="() => _scheduleType = t.Value">
+                                @t.Label
+                            </button>
+                        }
+                    </div>
+                </div>
+
+                @* 시작/종료 시각 *@
+                <div class="hp-sem-row hp-sem-row-two">
+                    <div>
+                        <label class="hp-sem-label">시작 시각 <span class="hp-sem-req">*</span></label>
+                        <input type="datetime-local" class="hp-sem-input" @bind="_startAt" />
+                    </div>
+                    <div>
+                        <label class="hp-sem-label">종료 시각</label>
+                        <input type="datetime-local" class="hp-sem-input" @bind="_endAt" />
+                    </div>
+                </div>
+
+                @* 거래처 — P0 #4 datalist 자동완성 *@
+                <div class="hp-sem-row">
+                    <label class="hp-sem-label">거래처 (선택)</label>
+                    <input class="hp-sem-input" list="hp-sem-partner-list" @bind="_partnerName" @oninput="OnPartnerInput" placeholder="거래처명 입력" />
+                    <datalist id="hp-sem-partner-list">
+                        @foreach (var name in _partnerSuggestions)
+                        {
+                            <option value="@name"></option>
+                        }
+                    </datalist>
+                </div>
+
+                @* 관련 직원 — 직원 자동완성은 별도 작지서 (employee 검색 API 부재) *@
+                <div class="hp-sem-row">
+                    <label class="hp-sem-label">관련 직원 (선택)</label>
+                    <input class="hp-sem-input" @bind="_participantName" placeholder="직원명 입력" />
+                </div>
+
+                @* 메모 *@
+                <div class="hp-sem-row">
+                    <label class="hp-sem-label">메모</label>
+                    <textarea class="hp-sem-textarea" rows="3" @bind="_memo" placeholder="메모"></textarea>
+                </div>
+
+                @if (!string.IsNullOrEmpty(_error))
+                {
+                    <div class="hp-sem-error">@_error</div>
+                }
+            </div>
+
+            <div class="hp-sem-footer">
+                @if (IsEditMode)
+                {
+                    <button class="hp-sem-btn hp-sem-btn-danger" disabled="@_busy" @onclick="OnDelete">
+                        삭제
+                    </button>
+                }
+                <div class="hp-sem-spacer"></div>
+                <button class="hp-sem-btn hp-sem-btn-ghost" disabled="@_busy" @onclick="Close">취소</button>
+                <button class="hp-sem-btn hp-sem-btn-primary" disabled="@_busy" @onclick="OnSave">
+                    @(_busy ? "저장 중..." : "저장")
+                </button>
+            </div>
+        </div>
+    </div>
+}
+
+<style>
+    .hp-sem-backdrop {
+        position:fixed; inset:0; background:rgba(15,23,42,0.45);
+        backdrop-filter:blur(6px); -webkit-backdrop-filter:blur(6px);
+        display:flex; align-items:center; justify-content:center; z-index:9100;
+        animation:hp-sem-fade .18s ease-out;
+    }
+    @@keyframes hp-sem-fade { from{opacity:0} to{opacity:1} }
+    .hp-sem-modal {
+        background:rgba(255,255,255,0.96); backdrop-filter:blur(24px);
+        border-radius:24px; padding:28px; width:min(560px, 92vw);
+        max-height:88vh; overflow-y:auto;
+        box-shadow:0 24px 64px rgba(15,23,42,0.25);
+        animation:hp-sem-scale .22s cubic-bezier(.34,1.56,.64,1);
+    }
+    @@keyframes hp-sem-scale { from{transform:scale(.92);opacity:0} to{transform:scale(1);opacity:1} }
+    .hp-sem-header { display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:18px; }
+    .hp-sem-title { font-size:20px; font-weight:700; margin:0 0 4px 0; color:#1F2937; }
+    .hp-sem-sub { font-size:13px; color:#6B7280; margin:0; }
+    .hp-sem-close {
+        background:rgba(0,0,0,0.04); border:none; border-radius:50%;
+        width:34px; height:34px; cursor:pointer; display:flex;
+        align-items:center; justify-content:center; transition:all .15s;
+    }
+    .hp-sem-close:hover { background:rgba(0,0,0,0.08); }
+    .hp-sem-body { display:flex; flex-direction:column; gap:14px; }
+    .hp-sem-row { display:flex; flex-direction:column; gap:6px; }
+    .hp-sem-row-two { display:grid; grid-template-columns:1fr 1fr; gap:12px; }
+    .hp-sem-label { font-size:12px; font-weight:600; color:#374151; }
+    .hp-sem-req { color:#EF4444; }
+    .hp-sem-input, .hp-sem-textarea {
+        width:100%; box-sizing:border-box;
+        background:rgba(248,250,252,0.9); border:1px solid rgba(0,0,0,0.08);
+        border-radius:10px; padding:9px 12px; font-size:14px; color:#111827;
+        transition:border-color .15s, box-shadow .15s;
+    }
+    .hp-sem-input:focus, .hp-sem-textarea:focus {
+        outline:none; border-color:#3B82F6; box-shadow:0 0 0 3px rgba(59,130,246,0.18);
+    }
+    .hp-sem-textarea { resize:vertical; font-family:inherit; }
+    .hp-sem-types { display:flex; gap:6px; flex-wrap:wrap; }
+    .hp-sem-type {
+        background:rgba(248,250,252,0.9); border:1px solid rgba(0,0,0,0.08);
+        border-radius:999px; padding:6px 14px; font-size:13px; cursor:pointer;
+        color:#374151; transition:all .15s;
+    }
+    .hp-sem-type:hover { background:#F3F4F6; }
+    .hp-sem-type.active {
+        background:var(--type-color); color:white; border-color:transparent;
+        box-shadow:0 2px 8px rgba(0,0,0,0.12);
+    }
+    .hp-sem-error {
+        background:rgba(239,68,68,0.08); color:#B91C1C;
+        border-radius:10px; padding:8px 12px; font-size:13px;
+    }
+    .hp-sem-footer {
+        margin-top:20px; display:flex; gap:8px; align-items:center;
+    }
+    .hp-sem-spacer { flex:1; }
+    .hp-sem-btn {
+        border:none; border-radius:10px; padding:9px 18px; font-size:13px;
+        font-weight:600; cursor:pointer; transition:all .15s;
+    }
+    .hp-sem-btn:disabled { opacity:0.6; cursor:not-allowed; }
+    .hp-sem-btn-primary {
+        background:linear-gradient(135deg,#3B82F6,#6366F1); color:white;
+        box-shadow:0 4px 12px rgba(59,130,246,0.3);
+    }
+    .hp-sem-btn-primary:hover:not(:disabled) { transform:translateY(-1px); box-shadow:0 6px 16px rgba(59,130,246,0.4); }
+    .hp-sem-btn-ghost { background:rgba(0,0,0,0.04); color:#374151; }
+    .hp-sem-btn-ghost:hover:not(:disabled) { background:rgba(0,0,0,0.08); }
+    .hp-sem-btn-danger { background:rgba(239,68,68,0.1); color:#B91C1C; }
+    .hp-sem-btn-danger:hover:not(:disabled) { background:rgba(239,68,68,0.18); }
+</style>
+
+@code {
+    [Parameter] public bool IsOpen { get; set; }
+    [Parameter] public DateTime SelectedDate { get; set; }
+    [Parameter] public UnifiedDayDetailModel.IssueItem? EditTarget { get; set; }
+    [Parameter] public EventCallback OnClosed { get; set; }
+    [Parameter] public EventCallback OnSaved { get; set; }
+
+    private bool IsEditMode => EditTarget != null && !string.IsNullOrEmpty(EditTarget.Id);
+
+    private string _title = "";
+    private string _scheduleType = "issue";
+    private DateTime _startAt;
+    private DateTime? _endAt;
+    private string _partnerName = "";
+    private string _participantName = "";
+    private string _memo = "";
+    private string? _error;
+    private bool _busy;
+    private DateTime _lastBoundDate = DateTime.MinValue;
+    private string? _lastBoundId;
+
+    // 거래처/직원 id는 자동완성 연동 시 채워짐.
+    private string? _partnerId;
+    private string? _participantId;
+
+    // P0 #4 — 거래처 자동완성 캐시 + 제안 목록
+    private List<PartnerListRow>? _partnerCache;
+    private IReadOnlyList<string> _partnerSuggestions = Array.Empty<string>();
+
+    private async Task OnPartnerInput(ChangeEventArgs e)
+    {
+        var value = e.Value?.ToString() ?? string.Empty;
+        _partnerName = value;
+        _partnerCache ??= await PartnersApi.GetListAsync() ?? new();
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            _partnerSuggestions = _partnerCache.Select(p => p.PartnerName).Distinct().Take(10).ToList();
+        }
+        else
+        {
+            _partnerSuggestions = _partnerCache
+                .Where(p => p.PartnerName.Contains(value, StringComparison.OrdinalIgnoreCase))
+                .Select(p => p.PartnerName)
+                .Distinct()
+                .Take(10)
+                .ToList();
+        }
+        var match = _partnerCache.FirstOrDefault(p => string.Equals(p.PartnerName, value, StringComparison.Ordinal));
+        _partnerId = match?.PartnerId;
+    }
+
+    private readonly List<TypeOption> _typeOptions = new()
+    {
+        new("meeting", "미팅", "#3B82F6"),
+        new("todo", "할일", "#10B981"),
+        new("reminder", "리마인더", "#F59E0B"),
+        new("issue", "이슈", "#A855F7"),
+    };
+
+    protected override void OnParametersSet()
+    {
+        if (IsOpen)
+        {
+            var newKey = EditTarget?.Id;
+            // 새 모달 열림 또는 대상 변경 시에만 초기화.
+            if (_lastBoundDate != SelectedDate || _lastBoundId != newKey)
+            {
+                _lastBoundDate = SelectedDate;
+                _lastBoundId = newKey;
+                ResetForm();
+            }
+        }
+    }
+
+    private void ResetForm()
+    {
+        _error = null;
+        if (EditTarget != null)
+        {
+            _title = EditTarget.Title ?? "";
+            _scheduleType = string.IsNullOrWhiteSpace(EditTarget.Type) ? "issue" : EditTarget.Type!;
+            _startAt = EditTarget.StartAt;
+            _endAt = EditTarget.EndAt;
+            _partnerId = EditTarget.PartnerId;
+            _partnerName = EditTarget.PartnerName ?? "";
+            _participantId = EditTarget.ParticipantId;
+            _participantName = EditTarget.ParticipantName ?? "";
+            _memo = EditTarget.Memo ?? "";
+        }
+        else
+        {
+            _title = "";
+            _scheduleType = "issue";
+            // 기본 시작 = 선택 날짜의 09:00.
+            _startAt = SelectedDate.Date.AddHours(9);
+            _endAt = null;
+            _partnerId = null;
+            _partnerName = "";
+            _participantId = null;
+            _participantName = "";
+            _memo = "";
+        }
+    }
+
+    private async Task OnSave()
+    {
+        _error = null;
+        if (string.IsNullOrWhiteSpace(_title))
+        {
+            _error = "제목을 입력하세요.";
+            return;
+        }
+        if (_startAt == default)
+        {
+            _error = "시작 시각을 입력하세요.";
+            return;
+        }
+        if (_endAt.HasValue && _endAt.Value < _startAt)
+        {
+            _error = "종료 시각은 시작 시각 이후여야 합니다.";
+            return;
+        }
+
+        _busy = true;
+        try
+        {
+            if (IsEditMode)
+            {
+                var model = new UpdateScheduleModel
+                {
+                    Title = _title.Trim(),
+                    ScheduleType = _scheduleType,
+                    StartAt = _startAt,
+                    EndAt = _endAt,
+                    PartnerId = _partnerId,
+                    PartnerName = string.IsNullOrWhiteSpace(_partnerName) ? null : _partnerName.Trim(),
+                    ParticipantId = _participantId,
+                    ParticipantName = string.IsNullOrWhiteSpace(_participantName) ? null : _participantName.Trim(),
+                    Memo = string.IsNullOrWhiteSpace(_memo) ? null : _memo.Trim()
+                };
+                var ok = await UnifiedSvc.UpdateScheduleAsync(EditTarget!.Id!, model);
+                if (!ok) { _error = "일정 수정에 실패했습니다."; return; }
+            }
+            else
+            {
+                var model = new CreateScheduleModel
+                {
+                    Title = _title.Trim(),
+                    ScheduleType = _scheduleType,
+                    StartAt = _startAt,
+                    EndAt = _endAt,
+                    PartnerId = _partnerId,
+                    PartnerName = string.IsNullOrWhiteSpace(_partnerName) ? null : _partnerName.Trim(),
+                    ParticipantId = _participantId,
+                    ParticipantName = string.IsNullOrWhiteSpace(_participantName) ? null : _participantName.Trim(),
+                    Memo = string.IsNullOrWhiteSpace(_memo) ? null : _memo.Trim()
+                };
+                var id = await UnifiedSvc.CreateScheduleAsync(model);
+                if (string.IsNullOrEmpty(id)) { _error = "일정 생성에 실패했습니다."; return; }
+            }
+
+            if (OnSaved.HasDelegate) await OnSaved.InvokeAsync();
+            if (OnClosed.HasDelegate) await OnClosed.InvokeAsync();
+        }
+        catch (Exception ex)
+        {
+            // §원칙 #15 — silent swallow 금지.
+            Console.Error.WriteLine($"[ScheduleEditModal.OnSave] {ex.GetType().Name}: {ex.Message}");
+            _error = "저장 중 오류가 발생했습니다.";
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private async Task OnDelete()
+    {
+        if (!IsEditMode || string.IsNullOrEmpty(EditTarget!.Id)) return;
+
+        try
+        {
+            var confirmed = await JS.InvokeAsync<bool>("confirm", "이 일정을 삭제하시겠습니까?");
+            if (!confirmed) return;
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine($"[ScheduleEditModal.OnDelete.confirm] {ex.GetType().Name}: {ex.Message}");
+            return;
+        }
+
+        _busy = true;
+        try
+        {
+            var ok = await UnifiedSvc.DeleteScheduleAsync(EditTarget.Id!);
+            if (!ok) { _error = "삭제에 실패했습니다."; return; }
+            if (OnSaved.HasDelegate) await OnSaved.InvokeAsync();
+            if (OnClosed.HasDelegate) await OnClosed.InvokeAsync();
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine($"[ScheduleEditModal.OnDelete] {ex.GetType().Name}: {ex.Message}");
+            _error = "삭제 중 오류가 발생했습니다.";
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private async Task Close()
+    {
+        if (_busy) return;
+        if (OnClosed.HasDelegate) await OnClosed.InvokeAsync();
+    }
+
+    private async Task OnKeyDown(KeyboardEventArgs e)
+    {
+        if (e.Key == "Escape") await Close();
+    }
+
+    private sealed record TypeOption(string Value, string Label, string Color);
+}

@@ -1,0 +1,138 @@
+using HitPan.API.Authorization;
+using HitPan.Application.Common;
+using HitPan.Application.DTOs.Approval;
+using HitPan.Application.Interfaces;
+using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Mvc;
+
+namespace HitPan.API.Controllers;
+
+/// <summary>수금·지급 API</summary>
+[ApiController]
+[Route("api")]
+[Authorize(Policy = "SalesOnly")]
+public class CollectionController : ControllerBase
+{
+    private readonly ICollectionService _collectionService;
+
+    public CollectionController(ICollectionService collectionService)
+    {
+        _collectionService = collectionService;
+    }
+
+    // ── 수금 ──
+
+    /// <summary>수금 목록 조회</summary>
+    [HttpGet("collections")]
+    [RequirePermission("COLLECTION", "view")]
+    public async Task<IActionResult> GetCollections(
+        [FromQuery] DateTime? from, [FromQuery] DateTime? to, [FromQuery] string? partnerId, CancellationToken ct)
+    {
+        var tenantId = HttpContext.Items["TenantId"]?.ToString();
+        if (string.IsNullOrEmpty(tenantId)) return Forbid();
+        return Ok(await _collectionService.GetCollectionsAsync(tenantId, from, to, partnerId, ct));
+    }
+
+    /// <summary>
+    /// 수금 목록 — 서버 페이지네이션 (2026-05-13 야간 신규, 헌법 #25 정공법).
+    /// 기존 GetCollections(/collections) 유지 — Razor ServerData 전환 시 이 엔드포인트 사용.
+    /// </summary>
+    [HttpGet("collections/paged")]
+    [RequirePermission("COLLECTION", "view")]
+    public async Task<IActionResult> GetCollectionsPaged(
+        [FromQuery] int page = 1,
+        [FromQuery] int pageSize = 50,
+        [FromQuery] DateTime? from = null,
+        [FromQuery] DateTime? to = null,
+        [FromQuery] string? partnerId = null,
+        CancellationToken ct = default)
+    {
+        var tenantId = HttpContext.Items["TenantId"]?.ToString();
+        if (string.IsNullOrEmpty(tenantId)) return Forbid();
+
+        var req = new PagedRequest { Page = page, PageSize = pageSize };
+        var result = await _collectionService.GetCollectionsPagedAsync(tenantId, req, from, to, partnerId, ct);
+        return Ok(result);
+    }
+
+    /// <summary>수금 등록</summary>
+    [HttpPost("collections")]
+    [RequirePermission("COLLECTION", "create")]
+    public async Task<IActionResult> CreateCollection([FromBody] CreateCollectionRequest request, CancellationToken ct)
+    {
+        var tenantId = HttpContext.Items["TenantId"]?.ToString();
+        var userId = HttpContext.Items["UserId"]?.ToString();
+        if (string.IsNullOrEmpty(tenantId) || string.IsNullOrEmpty(userId)) return Forbid();
+        var id = await _collectionService.CreateCollectionAsync(request, tenantId, userId, ct);
+        return Created($"/api/collections/{id}", new { id });
+    }
+
+    /// <summary>수금 삭제 (비활성화)</summary>
+    [HttpDelete("collections/{id}")]
+    [RequirePermission("COLLECTION", "delete")]
+    public async Task<IActionResult> DeleteCollection(string id, CancellationToken ct)
+    {
+        var tenantId = HttpContext.Items["TenantId"]?.ToString();
+        if (string.IsNullOrEmpty(tenantId)) return Forbid();
+        await _collectionService.DeleteCollectionAsync(id, tenantId, ct);
+        return Ok(new { message = "삭제되었습니다." });
+    }
+
+    // ── 지급 ──
+
+    /// <summary>지급 목록 조회</summary>
+    [HttpGet("payments")]
+    [RequirePermission("PAYMENT", "view")]
+    public async Task<IActionResult> GetPayments(
+        [FromQuery] DateTime? from, [FromQuery] DateTime? to, [FromQuery] string? partnerId, CancellationToken ct)
+    {
+        var tenantId = HttpContext.Items["TenantId"]?.ToString();
+        if (string.IsNullOrEmpty(tenantId)) return Forbid();
+        return Ok(await _collectionService.GetPaymentsAsync(tenantId, from, to, partnerId, ct));
+    }
+
+    /// <summary>지급 등록</summary>
+    [HttpPost("payments")]
+    [RequirePermission("PAYMENT", "create")]
+    public async Task<IActionResult> CreatePayment([FromBody] CreatePaymentRequest request, CancellationToken ct)
+    {
+        var tenantId = HttpContext.Items["TenantId"]?.ToString();
+        var userId = HttpContext.Items["UserId"]?.ToString();
+        if (string.IsNullOrEmpty(tenantId) || string.IsNullOrEmpty(userId)) return Forbid();
+        var id = await _collectionService.CreatePaymentAsync(request, tenantId, userId, ct);
+        return Created($"/api/payments/{id}", new { id });
+    }
+
+    /// <summary>지급 삭제 (비활성화)</summary>
+    [HttpDelete("payments/{id}")]
+    [RequirePermission("PAYMENT", "delete")]
+    public async Task<IActionResult> DeletePayment(string id, CancellationToken ct)
+    {
+        var tenantId = HttpContext.Items["TenantId"]?.ToString();
+        if (string.IsNullOrEmpty(tenantId)) return Forbid();
+        await _collectionService.DeletePaymentAsync(id, tenantId, ct);
+        return Ok(new { message = "삭제되었습니다." });
+    }
+
+    // ── 미수/미지급 정공법 (WS-20260427-04, 사장님 헌법 §20) ──
+
+    /// <summary>미수금 목록 (거래처 요약 + 전표 펼침)</summary>
+    [HttpGet("finance/receivables")]
+    [RequirePermission("COLLECTION", "view")]
+    public async Task<IActionResult> GetReceivables(CancellationToken ct)
+    {
+        var tenantId = HttpContext.Items["TenantId"]?.ToString();
+        if (string.IsNullOrEmpty(tenantId)) return Forbid();
+        return Ok(await _collectionService.GetReceivablesAsync(tenantId, ct));
+    }
+
+    /// <summary>미지급금 목록 (거래처 요약 + 전표 펼침)</summary>
+    [HttpGet("finance/payables")]
+    [RequirePermission("PAYMENT", "view")]
+    public async Task<IActionResult> GetPayables(CancellationToken ct)
+    {
+        var tenantId = HttpContext.Items["TenantId"]?.ToString();
+        if (string.IsNullOrEmpty(tenantId)) return Forbid();
+        return Ok(await _collectionService.GetPayablesAsync(tenantId, ct));
+    }
+}

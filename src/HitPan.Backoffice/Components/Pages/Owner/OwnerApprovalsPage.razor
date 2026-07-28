@@ -1,0 +1,213 @@
+@page "/admin/approvals"
+@layout PlatformLayout
+@attribute [Authorize]
+@rendermode InteractiveServer
+@inject IHttpClientFactory HttpFactory
+@inject ISnackbar Snackbar
+@inject IDialogService Dialog
+
+@*
+    4-eyes 결재함 (W11, 사장님 결재 2026-06-05)
+    bo_approval_queue 조회·승인·반려
+*@
+
+<PageTitle>4-eyes 결재함 — 히트판 백오피스</PageTitle>
+
+<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px;">
+    <div>
+        <MudText Typo="Typo.h5" Style="font-weight:600;">4-eyes 결재함</MudText>
+        <MudText Typo="Typo.body2" Color="Color.Secondary">
+            대기·승인·반려 결재 — 요청자 본인은 승인 불가 (4-eyes 원칙)
+        </MudText>
+    </div>
+    <MudButton OnClick="LoadAsync" StartIcon="@Icons.Material.Filled.Refresh">새로고침</MudButton>
+</div>
+
+<MudButtonGroup Variant="Variant.Outlined" Class="mb-3">
+    <MudButton OnClick="@(() => SetFilter("pending"))" Color="@(_filter == "pending" ? Color.Primary : Color.Default)">대기</MudButton>
+    <MudButton OnClick="@(() => SetFilter("approved"))" Color="@(_filter == "approved" ? Color.Primary : Color.Default)">승인</MudButton>
+    <MudButton OnClick="@(() => SetFilter("executed"))" Color="@(_filter == "executed" ? Color.Primary : Color.Default)">실행됨</MudButton>
+    <MudButton OnClick="@(() => SetFilter("rejected"))" Color="@(_filter == "rejected" ? Color.Primary : Color.Default)">반려</MudButton>
+    <MudButton OnClick="@(() => SetFilter("all"))" Color="@(_filter == "all" ? Color.Primary : Color.Default)">전체</MudButton>
+</MudButtonGroup>
+
+@if (_loading)
+{
+    <MudProgressLinear Indeterminate="true" Color="Color.Primary" />
+}
+else if (_items.Count == 0)
+{
+    <MudPaper Elevation="0" Class="pa-8" Style="border-radius:12px;background:#F9FAFB;text-align:center;">
+        <MudText Color="Color.Secondary">해당 상태의 결재가 없습니다.</MudText>
+    </MudPaper>
+}
+else
+{
+    <MudPaper Elevation="1" Style="border-radius:12px;overflow:hidden;">
+        <MudDataGrid T="ApprovalRow" Items="_items" Hover="true" Dense="true">
+            <Columns>
+                <PropertyColumn Property="x => x.ApprovalId" Title="ID" />
+                <PropertyColumn Property="x => x.Action" Title="액션" />
+                <PropertyColumn Property="x => x.RequesterEmail" Title="요청자" />
+                <PropertyColumn Property="x => x.TargetType" Title="대상 유형" />
+                <PropertyColumn Property="x => x.TargetId" Title="대상 ID" />
+                <TemplateColumn Title="상태">
+                    <CellTemplate>
+                        @{
+                            var color = context.Item.Status switch
+                            {
+                                "pending" => Color.Warning,
+                                "approved" => Color.Info,
+                                "executed" => Color.Success,
+                                "rejected" => Color.Error,
+                                _ => Color.Default
+                            };
+                        }
+                        <MudChip T="string" Color="color" Size="Size.Small">@context.Item.Status</MudChip>
+                    </CellTemplate>
+                </TemplateColumn>
+                <TemplateColumn Title="요청 일시">
+                    <CellTemplate>@context.Item.RequestedAt.ToString("yyyy-MM-dd HH:mm")</CellTemplate>
+                </TemplateColumn>
+                <TemplateColumn Title="만료">
+                    <CellTemplate>@context.Item.ExpiresAt.ToString("MM-dd HH:mm")</CellTemplate>
+                </TemplateColumn>
+                <TemplateColumn Title="액션">
+                    <CellTemplate>
+                        @if (context.Item.Status == "pending")
+                        {
+                            <MudButton OnClick="@(() => ApproveAsync(context.Item))"
+                                       Size="Size.Small" Color="Color.Success">승인</MudButton>
+                            <MudButton OnClick="@(() => RejectAsync(context.Item))"
+                                       Size="Size.Small" Color="Color.Error">반려</MudButton>
+                        }
+                        else
+                        {
+                            <MudText Typo="Typo.body2" Color="Color.Secondary">—</MudText>
+                        }
+                    </CellTemplate>
+                </TemplateColumn>
+            </Columns>
+        </MudDataGrid>
+    </MudPaper>
+}
+
+@code {
+    private bool _loading = true;
+    private string _filter = "pending";
+    private List<ApprovalRow> _items = new();
+
+    protected override async Task OnInitializedAsync() => await LoadAsync();
+
+    private async Task SetFilter(string f)
+    {
+        _filter = f;
+        await LoadAsync();
+    }
+
+    private async Task LoadAsync()
+    {
+        _loading = true;
+        try
+        {
+            var http = HttpFactory.CreateClient("backoffice-authed");
+            var url = "api/backoffice/owner/approvals" + (_filter != "all" ? $"?status={_filter}" : "");
+            var res = await http.GetFromJsonAsync<ListResponse>(url);
+            _items = res?.Items ?? new();
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"목록 조회 실패: {ex.Message}", Severity.Error);
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    private async Task ApproveAsync(ApprovalRow row)
+    {
+        var ok = await ConfirmDialog.ShowAsync(Dialog,
+            "승인",
+            $"#{row.ApprovalId} {row.Action} 결재를 승인하시겠습니까? 즉시 실제 액션이 실행됩니다.",
+            confirmText: "승인", severity: Severity.Info);
+        if (!ok) return;
+
+        try
+        {
+            var http = HttpFactory.CreateClient("backoffice-authed");
+            var res = await http.PostAsync($"api/backoffice/owner/approvals/{row.ApprovalId}/approve", null);
+            var payload = await res.Content.ReadFromJsonAsync<ActionResponse>();
+            if (res.IsSuccessStatusCode && payload?.Success == true)
+            {
+                Snackbar.Add(payload.Message ?? "승인되었습니다.", Severity.Success);
+                await LoadAsync();
+            }
+            else
+            {
+                Snackbar.Add(payload?.Message ?? "승인 실패", Severity.Error);
+            }
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"승인 중 오류: {ex.Message}", Severity.Error);
+        }
+    }
+
+    private async Task RejectAsync(ApprovalRow row)
+    {
+        var reason = await Dialog.ShowAsync<ApprovalRejectDialog>("반려 사유 입력",
+            new DialogParameters(), new DialogOptions { MaxWidth = MaxWidth.Small, FullWidth = true });
+        var result = await reason.Result;
+        if (result is null || result.Canceled || result.Data is not string reasonText || string.IsNullOrWhiteSpace(reasonText))
+            return;
+
+        try
+        {
+            var http = HttpFactory.CreateClient("backoffice-authed");
+            var res = await http.PostAsJsonAsync($"api/backoffice/owner/approvals/{row.ApprovalId}/reject", new { Reason = reasonText });
+            var payload = await res.Content.ReadFromJsonAsync<ActionResponse>();
+            if (res.IsSuccessStatusCode && payload?.Success == true)
+            {
+                Snackbar.Add(payload.Message ?? "반려되었습니다.", Severity.Warning);
+                await LoadAsync();
+            }
+            else
+            {
+                Snackbar.Add(payload?.Message ?? "반려 실패", Severity.Error);
+            }
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"반려 중 오류: {ex.Message}", Severity.Error);
+        }
+    }
+
+    private class ListResponse
+    {
+        public bool Success { get; set; }
+        public List<ApprovalRow> Items { get; set; } = new();
+    }
+
+    private class ActionResponse
+    {
+        public bool Success { get; set; }
+        public string? Message { get; set; }
+    }
+
+    public class ApprovalRow
+    {
+        public long ApprovalId { get; set; }
+        public string RequesterId { get; set; } = "";
+        public string RequesterEmail { get; set; } = "";
+        public string Action { get; set; } = "";
+        public string? TargetType { get; set; }
+        public string? TargetId { get; set; }
+        public string Status { get; set; } = "";
+        public string? ApproverEmail { get; set; }
+        public string? RejectionReason { get; set; }
+        public DateTime RequestedAt { get; set; }
+        public DateTime? DecidedAt { get; set; }
+        public DateTime ExpiresAt { get; set; }
+    }
+}

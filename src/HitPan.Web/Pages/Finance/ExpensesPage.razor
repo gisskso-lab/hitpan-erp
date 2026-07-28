@@ -1,0 +1,139 @@
+@page "/accounting/expenses"
+@namespace HitPan.Web.Pages.FinanceUi
+@attribute [Authorize]
+@using HitPan.Web.Models
+@using HitPan.Web.Services
+@inject FinanceClientService FinSvc
+@inject ISnackbar Snackbar
+
+<PageTitle>경비 처리</PageTitle>
+<PageHeader Title="경비 처리" Subtitle="현장영업·외근 경비 등록 · 결재 연동" />
+
+@* 입력 폼 *@
+<MudPaper Elevation="0" Class="pa-4 mb-3 hitpan-card">
+    <MudGrid Spacing="2">
+        <MudItem xs="12" md="2">
+            <MudDatePicker Label="경비일" @bind-Date="_editDate" Variant="Variant.Outlined" Margin="Margin.Dense" Style="min-width:160px" />
+        </MudItem>
+        <MudItem xs="12" md="2">
+            <MudSelect T="string" Label="분류" @bind-Value="_edit.Category" Variant="Variant.Outlined" Margin="Margin.Dense">
+                <MudSelectItem Value="@("교통비")">교통비</MudSelectItem>
+                <MudSelectItem Value="@("식대")">식대</MudSelectItem>
+                <MudSelectItem Value="@("소모품비")">소모품비</MudSelectItem>
+                <MudSelectItem Value="@("접대비")">접대비</MudSelectItem>
+                <MudSelectItem Value="@("통신비")">통신비</MudSelectItem>
+                <MudSelectItem Value="@("기타")">기타</MudSelectItem>
+            </MudSelect>
+        </MudItem>
+        <MudItem xs="12" md="2">
+            <MudTextField T="string" Label="내용" @bind-Value="_edit.Description" Variant="Variant.Outlined" Margin="Margin.Dense" />
+        </MudItem>
+        <MudItem xs="12" md="1">
+            <MudNumericField T="decimal" Label="금액" @bind-Value="_edit.Amount" Variant="Variant.Outlined" Margin="Margin.Dense" Format="N0" />
+        </MudItem>
+        <MudItem xs="12" md="1">
+            <MudNumericField T="decimal" Label="부가세" @bind-Value="_edit.VatAmount" Variant="Variant.Outlined" Margin="Margin.Dense" Format="N0" />
+        </MudItem>
+        <MudItem xs="12" md="2">
+            <MudSelect T="string" Label="결제수단" @bind-Value="_edit.PaymentMethod" Variant="Variant.Outlined" Margin="Margin.Dense">
+                <MudSelectItem Value="@("card")">법인카드</MudSelectItem>
+                <MudSelectItem Value="@("cash")">현금</MudSelectItem>
+                <MudSelectItem Value="@("personal")">개인카드</MudSelectItem>
+            </MudSelect>
+        </MudItem>
+        <MudItem xs="12" md="2">
+            <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="SaveAsync" Class="mt-1" FullWidth="true">등록</MudButton>
+        </MudItem>
+    </MudGrid>
+</MudPaper>
+
+@* 목록 — 필터 영역 (헌법 #19·#25 정합, 4MB→8KB DOM 축소) *@
+<MudPaper Elevation="0" Class="pa-2 mb-2 hitpan-card">
+    <MudGrid Spacing="2">
+        <MudItem xs="12" md="3">
+            <MudSelect T="string" Label="결재 상태 필터" @bind-Value="_filterStatus" Variant="Variant.Outlined" Margin="Margin.Dense">
+                <MudSelectItem Value="@("pending")">미결재만</MudSelectItem>
+                <MudSelectItem Value="@("approved")">승인만</MudSelectItem>
+                <MudSelectItem Value="@("rejected")">반려만</MudSelectItem>
+                <MudSelectItem Value="@("all")">전체</MudSelectItem>
+            </MudSelect>
+        </MudItem>
+        <MudItem xs="12" md="2">
+            <MudText Typo="Typo.body2" Class="mt-2" Style="color:var(--hitpan-text-faint)">
+                표시: @FilteredItems.Count / 전체: @_items.Count
+            </MudText>
+        </MudItem>
+    </MudGrid>
+</MudPaper>
+
+@* 목록 — 페이지네이션 정합 (헌법 #19 정합, 기본 50행) *@
+<MudPaper Elevation="0" Class="pa-2 hitpan-card">
+    <MudTable Items="FilteredItems" Dense="true" Hover="true" Striped="true"
+              RowsPerPage="50" Breakpoint="Breakpoint.Sm">
+        <HeaderContent>
+            <MudTh>일자</MudTh><MudTh>분류</MudTh><MudTh>내용</MudTh><MudTh>신청자</MudTh>
+            <MudTh Style="text-align:right">금액</MudTh><MudTh Style="text-align:right">부가세</MudTh>
+            <MudTh>결제</MudTh><MudTh>영수증</MudTh><MudTh>결재</MudTh>
+        </HeaderContent>
+        <RowTemplate>
+            <MudTd>@context.ExpenseDate.ToString("yyyy-MM-dd")</MudTd>
+            <MudTd>@context.Category</MudTd>
+            <MudTd>@context.Description</MudTd>
+            <MudTd>@context.EmployeeName</MudTd>
+            <MudTd Style="text-align:right">@context.Amount.ToString("N0")</MudTd>
+            <MudTd Style="text-align:right">@context.VatAmount.ToString("N0")</MudTd>
+            <MudTd>@context.PaymentMethod</MudTd>
+            <MudTd>@(context.ReceiptYn ? "O" : "X")</MudTd>
+            <MudTd>
+                @if (context.ApprovalStatus == "pending")
+                {
+                    <MudButtonGroup Variant="Variant.Outlined" Size="Size.Small">
+                        <MudButton Color="Color.Success" OnClick="@(() => ProcessAsync(context.ExpenseId, "approved"))">승인</MudButton>
+                        <MudButton Color="Color.Error" OnClick="@(() => ProcessAsync(context.ExpenseId, "rejected"))">반려</MudButton>
+                    </MudButtonGroup>
+                }
+                else
+                {
+                    <MudChip T="string" Size="Size.Small" Variant="Variant.Filled"
+                        Color="@(context.ApprovalStatus == "approved" ? Color.Success : Color.Error)">
+                        @(context.ApprovalStatus == "approved" ? "승인" : "반려")
+                    </MudChip>
+                }
+            </MudTd>
+        </RowTemplate>
+        <NoRecordsContent><MudText Class="pa-4" Style="color:var(--hitpan-text-faint)">등록된 경비가 없습니다.</MudText></NoRecordsContent>
+        <PagerContent>
+            <MudTablePager PageSizeOptions="new int[] { 25, 50, 100, 200 }" />
+        </PagerContent>
+    </MudTable>
+</MudPaper>
+
+@code {
+    private List<ExpenseModel> _items = new();
+    private CreateExpenseModel _edit = new();
+    private DateTime? _editDate = DateTime.Today;
+    private string _filterStatus = "pending"; // 헌법 #19·#25 정합 — 기본 미결재만 표시
+
+    // 결재 상태 필터 (DOM 4MB → 50행 영역, 27,640행 폭탄 봉합)
+    private List<ExpenseModel> FilteredItems
+        => _filterStatus == "all" ? _items : _items.Where(i => i.ApprovalStatus == _filterStatus).ToList();
+
+    protected override async Task OnInitializedAsync() { _items = await FinSvc.GetExpensesAsync(); }
+
+    private async Task ProcessAsync(string id, string action)
+    {
+        var ok = await FinSvc.ProcessExpenseAsync(id, action);
+        if (ok) { Snackbar.Add(action == "approved" ? "승인됨" : "반려됨", Severity.Success); _items = await FinSvc.GetExpensesAsync(); StateHasChanged(); }
+        else Snackbar.Add("처리 실패", Severity.Error);
+    }
+
+    private async Task SaveAsync()
+    {
+        if (string.IsNullOrWhiteSpace(_edit.Description)) { Snackbar.Add("내용을 입력해주세요.", Severity.Warning); return; }
+        if (_edit.Amount <= 0) { Snackbar.Add("금액을 입력해주세요.", Severity.Warning); return; }
+        _edit.ExpenseDate = _editDate ?? DateTime.Today;
+        var ok = await FinSvc.CreateExpenseAsync(_edit);
+        if (ok) { Snackbar.Add("등록됨", Severity.Success); _edit = new(); _editDate = DateTime.Today; _items = await FinSvc.GetExpensesAsync(); }
+        else Snackbar.Add("등록 실패", Severity.Error);
+    }
+}

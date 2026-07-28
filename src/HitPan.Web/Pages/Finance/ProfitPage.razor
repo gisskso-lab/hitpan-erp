@@ -1,0 +1,86 @@
+@page "/accounting/profit"
+@namespace HitPan.Web.Pages.FinanceUi
+@attribute [Authorize]
+@using HitPan.Web.Models
+@using HitPan.Web.Services
+@inject FinanceClientService FinSvc
+
+<PageTitle>손익 현황</PageTitle>
+
+<PageHeader Title="손익 현황" Subtitle="월별 매출·매입·경비·순이익 집계">
+    <Actions>
+        <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="LoadAsync">조회</MudButton>
+    </Actions>
+</PageHeader>
+
+@* KPI 요약 *@
+<MudGrid Spacing="2" Class="mb-3">
+    <MudItem xs="12" sm="3">
+        <KpiCard Color="KpiCard.KpiColor.Primary"
+                 Icon="@Icons.Material.Filled.TrendingUp"
+                 Label="연간 매출"
+                 Value="@_items.Sum(x => x.SalesAmount).ToString("N0")" />
+    </MudItem>
+    <MudItem xs="12" sm="3">
+        <KpiCard Color="KpiCard.KpiColor.Warning"
+                 Icon="@Icons.Material.Filled.ShoppingCart"
+                 Label="연간 매입"
+                 Value="@_items.Sum(x => x.PurchaseAmount).ToString("N0")" />
+    </MudItem>
+    <MudItem xs="12" sm="3">
+        <KpiCard Color="KpiCard.KpiColor.Purple"
+                 Icon="@Icons.Material.Filled.Paid"
+                 Label="경비 합계"
+                 Value="@_items.Sum(x => x.ExpenseAmount).ToString("N0")" />
+    </MudItem>
+    <MudItem xs="12" sm="3">
+        <KpiCard Color="@(_items.Sum(x => x.NetProfit) >= 0 ? KpiCard.KpiColor.Success : KpiCard.KpiColor.Error)"
+                 Icon="@Icons.Material.Filled.Savings"
+                 Label="순이익"
+                 EmphasizeValue="true"
+                 Value="@_items.Sum(x => x.NetProfit).ToString("N0")" />
+    </MudItem>
+</MudGrid>
+
+<SectionCard Title="조회 조건">
+    <MudGrid Spacing="2">
+        <MudItem xs="6" md="2">
+            <MudNumericField T="int" Label="년도" @bind-Value="_year" Variant="Variant.Outlined" Margin="Margin.Dense" />
+        </MudItem>
+    </MudGrid>
+</SectionCard>
+
+<SectionCard Variant="SectionCard.SectionVariant.Flat">
+    <MudTable Items="_items" Dense="true" Hover="true" Striped="true">
+        <HeaderContent>
+            <MudTh>월</MudTh>
+            <MudTh Style="text-align:right">매출</MudTh>
+            <MudTh Style="text-align:right">매입</MudTh>
+            <MudTh Style="text-align:right">매출총이익</MudTh>
+            <MudTh Style="text-align:right">경비</MudTh>
+            <MudTh Style="text-align:right;font-weight:600">순이익</MudTh>
+            <MudTh Style="text-align:right">이익률</MudTh>
+        </HeaderContent>
+        <RowTemplate>
+            <MudTd Style="font-weight:500">@context.YearMonthLabel</MudTd>
+            <MudTd Style="text-align:right">@context.SalesAmount.ToString("N0")</MudTd>
+            <MudTd Style="text-align:right">@context.PurchaseAmount.ToString("N0")</MudTd>
+            <MudTd Style="text-align:right">@context.GrossProfit.ToString("N0")</MudTd>
+            <MudTd Style="text-align:right">@context.ExpenseAmount.ToString("N0")</MudTd>
+            <MudTd Style="@($"text-align:right;font-weight:600;color:{(context.NetProfit >= 0 ? "var(--hitpan-income)" : "var(--hitpan-expense)")}")">@context.NetProfit.ToString("N0")</MudTd>
+            <MudTd Style="text-align:right">@context.ProfitRate.ToString("N1")%</MudTd>
+        </RowTemplate>
+        <NoRecordsContent>
+            <EmptyState Icon="@Icons.Material.Filled.BarChart"
+                        Title="손익 데이터가 없습니다"
+                        Subtitle="해당 연도의 매입·매출 전표를 확인해 주세요." />
+        </NoRecordsContent>
+    </MudTable>
+</SectionCard>
+
+@code {
+    private List<ProfitSummaryModel> _items = new();
+    private int _year = DateTime.Today.Year;
+    protected override async Task OnInitializedAsync() => await LoadAsync();
+    private async Task LoadAsync() { _items = await FinSvc.GetProfitAsync(_year); StateHasChanged(); }
+}

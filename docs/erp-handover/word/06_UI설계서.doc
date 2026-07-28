@@ -1,0 +1,142 @@
+﻿<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:w="urn:schemas-microsoft-com:office:word" xmlns="http://www.w3.org/TR/REC-html40">
+<head>
+<meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
+<meta name="ProgId" content="Word.Document">
+<meta name="Generator" content="Microsoft Word">
+<title>06_UI설계서</title>
+<!--[if gte mso 9]>
+<xml>
+<w:WordDocument>
+<w:View>Print</w:View>
+<w:Zoom>100</w:Zoom>
+</w:WordDocument>
+</xml>
+<![endif]-->
+<style>
+body { font-family: 'Malgun Gothic', sans-serif; font-size: 11pt; line-height: 1.6; }
+table { border-collapse: collapse; }
+</style>
+</head>
+<body><p><h1 style="border-bottom:2px solid #333;padding-bottom:5px;color:#1976D2;">06. UI 설계서 — 87개 화면 레이아웃 + MudBlazor 패턴</h1></p><p><blockquote style="border-left:4px solid #1976D2;padding-left:10px;color:#555;margin:10px 0;"><strong>작성일</strong>: 2026-06-01 / PM 브라운킴 + 수석 웹디자이너</blockquote></p><p><hr style="border:none;border-top:1px solid #ccc;"></p><p><h2 style="border-bottom:1px solid #999;padding-bottom:3px;color:#1976D2;">1. 디자인 헌법</h2></p><p><h3 style="color:#333;">1.1 한 화면 완결 원칙</h3>
+<blockquote style="border-left:4px solid #1976D2;padding-left:10px;color:#555;margin:10px 0;">"스크롤 없이 한 화면에서 핵심 정보가 보이는 가독성 높은 UI"</blockquote></p><p><h3 style="color:#333;">1.2 3분 원칙 (사장님)</h3>
+<blockquote style="border-left:4px solid #1976D2;padding-left:10px;color:#555;margin:10px 0;">"이 화면, 처음 보는 사람이 혼자 쓸 수 있냐?"</blockquote></p><p><h3 style="color:#333;">1.3 헌법 #25 — 쉽게</h3>
+<ul><li>매뉴얼 없이 직관적</li>
+<li>더존·이카운트 벤치마크 + 차별화</li></p><p></ul>---</p><p><h2 style="border-bottom:1px solid #999;padding-bottom:3px;color:#1976D2;">2. 레이아웃 구조</h2></p><p><h3 style="color:#333;">2.1 MainLayout</h3>
+<pre style='background:#f4f4f4;padding:8px;font-family:Consolas;font-size:9pt;border:1px solid #ddd;'>┌──────────────────────────────────────────────┐
+│ [AppBar]  로고 | MultiTabBar | AccountBadge   │  ← 상단 고정
+├──────┬───────────────────────────────────────┤
+│      │                                       │
+│ [S]  │  [Main Content]                       │
+│ [i]  │                                       │
+│ [d]  │  ─ WorkflowBreadcrumb (워크플로우 단계)│
+│ [e]  │                                       │
+│ [b]  │  ─ Page Title + Actions               │
+│ [a]  │                                       │
+│ [r]  │  ─ Filter Toolbar                     │
+│      │                                       │
+│      │  ─ MudDataGrid / Form                 │
+│      │                                       │
+│      │  ─ Pagination / Bulk Actions          │
+│      │                                       │
+├──────┴───────────────────────────────────────┤
+│ [TermsConsentBanner] (미동의 시)              │
+└──────────────────────────────────────────────┘</pre></p><p><h3 style="color:#333;">2.2 EmptyLayout (로그인·약관)</h3>
+<ul><li>AppBar/Sidebar 없음</li>
+<li>중앙 정렬 카드</li></p><p></ul><h3 style="color:#333;">2.3 Mobile Layout (Phase 5)</h3>
+<ul><li>아이폰 홈 화면 스타일 그리드</li>
+<li>하단 4탭 (홈·매입·판매·More)</li>
+<li>꾹 누름 재정렬</li></p><p></ul>---</p><p><h2 style="border-bottom:1px solid #999;padding-bottom:3px;color:#1976D2;">3. 색상·타이포 시스템</h2></p><p><h3 style="color:#333;">3.1 컬러 (MudBlazor 테마)</h3>
+<table style='border-collapse:collapse;margin:10px 0;'><thead><tr><th style='border:1px solid #aaa;padding:4px 8px;background:#e3f2fd;'>토큰</th><th style='border:1px solid #aaa;padding:4px 8px;background:#e3f2fd;'>헥스</th><th style='border:1px solid #aaa;padding:4px 8px;background:#e3f2fd;'>용도</th></tr></thead><tbody><tr><td style='border:1px solid #aaa;padding:4px 8px;'>Primary</td><td style='border:1px solid #aaa;padding:4px 8px;'>#1976D2</td><td style='border:1px solid #aaa;padding:4px 8px;'>메인 액션</td></tr>
+<tr><td style='border:1px solid #aaa;padding:4px 8px;'>Secondary</td><td style='border:1px solid #aaa;padding:4px 8px;'>#FF6B35</td><td style='border:1px solid #aaa;padding:4px 8px;'>강조 (히트판 오렌지)</td></tr>
+<tr><td style='border:1px solid #aaa;padding:4px 8px;'>Success</td><td style='border:1px solid #aaa;padding:4px 8px;'>#4CAF50</td><td style='border:1px solid #aaa;padding:4px 8px;'>확정·완료</td></tr>
+<tr><td style='border:1px solid #aaa;padding:4px 8px;'>Warning</td><td style='border:1px solid #aaa;padding:4px 8px;'>#FFC107</td><td style='border:1px solid #aaa;padding:4px 8px;'>주의</td></tr>
+<tr><td style='border:1px solid #aaa;padding:4px 8px;'>Error</td><td style='border:1px solid #aaa;padding:4px 8px;'>#F44336</td><td style='border:1px solid #aaa;padding:4px 8px;'>오류·반려</td></tr>
+<tr><td style='border:1px solid #aaa;padding:4px 8px;'>Info</td><td style='border:1px solid #aaa;padding:4px 8px;'>#03A9F4</td><td style='border:1px solid #aaa;padding:4px 8px;'>안내</td></tr></tbody></table>
+<h3 style="color:#333;">3.2 타이포</h3>
+<ul><li>본문: Pretendard (한글) / Roboto (영문)</li>
+<li>코드: JetBrains Mono</li>
+<li>금액·숫자: tabular-nums</li></p><p></ul>---</p><p><h2 style="border-bottom:1px solid #999;padding-bottom:3px;color:#1976D2;">4. 공통 컴포넌트</h2></p><p><h3 style="color:#333;">4.1 WorkflowBreadcrumb</h3>
+<ul><li>워크플로우 단계 표시 (매입: 발주→매입→반품 / 판매: 견적→수주→거래명세→세금계산서)</li>
+<li>현재 단계 강조</li></p><p></ul><h3 style="color:#333;">4.2 ItemSpecAutocomplete ⭐ (2026-05-31)</h3>
+<ul><li>품명 선택 → 규격 콤보 동적 로드</li>
+<li>CoerceValue=true (직접 입력 허용)</li>
+<li>6개 그리드 적용 (QuotationGrid, SalesOrderGrid, DeliveryGrid, PurchaseOrderGrid, PurchaseReceiptGrid, PurchaseReturnGrid)</li></p><p></ul><h3 style="color:#333;">4.3 UnifiedCalendar ⭐</h3>
+<ul><li>통합 일정 표시</li>
+<li>견적·수주·발주·연차·근태 색상별</li>
+<li>OnAfterRenderAsync 패턴 (진범 #100 봉합)</li></p><p></ul><h3 style="color:#333;">4.4 DailyBriefingModal</h3>
+<ul><li>오늘 일정 요약 다이얼로그</li></p><p></ul><h3 style="color:#333;">4.5 TermsConsentBanner</h3>
+<ul><li>미동의 사용자 상단 배너 → /terms 유도</li></p><p></ul><h3 style="color:#333;">4.6 FormTemplateEditorDialog ⭐</h3>
+<ul><li>양식 설정 (preprint/blank 분기)</li></p><p></ul><h3 style="color:#333;">4.7 ItemSpecManager</h3>
+<ul><li>상품마스터에서 규격 다건 관리</li></p><p></ul><h3 style="color:#333;">4.8 그리드 패턴 (MudDataGrid)</h3>
+<ul><li>정렬·필터·페이징 표준</li>
+<li>라인 추가/삭제 인라인</li>
+<li>셀 인라인 편집 (Ctrl+Enter 저장)</li></p><p></ul>---</p><p><h2 style="border-bottom:1px solid #999;padding-bottom:3px;color:#1976D2;">5. 카테고리별 화면 패턴</h2></p><p><h3 style="color:#333;">5.1 리스트 화면 (대부분)</h3>
+<pre style='background:#f4f4f4;padding:8px;font-family:Consolas;font-size:9pt;border:1px solid #ddd;'>┌──────────────────────────────────────────────┐
+│ [페이지 제목]   [신규] [엑셀] [필터 ▼]         │
+├──────────────────────────────────────────────┤
+│ [검색] [기간] [상태] [거래처]                  │
+├──────────────────────────────────────────────┤
+│ ┌────────┬────────┬────────┬────────┐        │
+│ │ 컬럼1   │ 컬럼2   │ 컬럼3   │ 액션    │       │
+│ ├────────┼────────┼────────┼────────┤        │
+│ │ ...    │ ...    │ ...    │ [편집] │        │
+│ └────────┴────────┴────────┴────────┘        │
+│  ⏮ &lt; 1 2 3 &gt; ⏭   1-20 / 137                │
+└──────────────────────────────────────────────┘</pre></p><p><h3 style="color:#333;">5.2 작성 화면 (견적·수주·매입 등)</h3>
+<pre style='background:#f4f4f4;padding:8px;font-family:Consolas;font-size:9pt;border:1px solid #ddd;'>┌──────────────────────────────────────────────┐
+│ ──── 견적 → 수주 → 거래명세서 ────             │  ← Breadcrumb
+├──────────────────────────────────────────────┤
+│ [거래처 ▼] [유효기간 📅] [담당자 ▼]            │
+├──────────────────────────────────────────────┤
+│ 품목 라인                                     │
+│ ┌────┬────┬──────┬──────┬──────┬──────┐     │
+│ │ NO │ 품명 │ 규격  │ 수량  │ 단가  │ 금액  │     │
+│ ├────┼────┼──────┼──────┼──────┼──────┤     │
+│ │ 1  │[검색]│[콤보▼]│      │      │      │     │
+│ └────┴────┴──────┴──────┴──────┴──────┘     │
+│ [+ 라인 추가]                                 │
+├──────────────────────────────────────────────┤
+│ 메모  [텍스트 입력]                            │
+│       공급가액: 1,000,000 / 부가세: 100,000   │
+│       합계:    1,100,000                     │
+├──────────────────────────────────────────────┤
+│           [임시저장] [확정] [PDF] [메일]        │
+└──────────────────────────────────────────────┘</pre></p><p><h3 style="color:#333;">5.3 대시보드</h3>
+<pre style='background:#f4f4f4;padding:8px;font-family:Consolas;font-size:9pt;border:1px solid #ddd;'>┌──────────────────────────────────────────────┐
+│ ┌──────┬──────┬──────┬──────┐                │
+│ │오늘  │ 매입  │ 재고  │ 결재  │   KPI 카드   │
+│ │ 매출 │      │ 경고  │ 대기  │              │
+│ └──────┴──────┴──────┴──────┘                │
+├──────────────────────────────────────────────┤
+│ ┌─────────────┐ ┌──────────────┐             │
+│ │  매출 차트   │ │ 통합 캘린더    │             │
+│ │  (ApexCharts)│ │ (UnifiedCal..)│             │
+│ └─────────────┘ └──────────────┘             │
+└──────────────────────────────────────────────┘</pre></p><p><hr style="border:none;border-top:1px solid #ccc;"></p><p><h2 style="border-bottom:1px solid #999;padding-bottom:3px;color:#1976D2;">6. 입력 검증 표준</h2></p><p><table style='border-collapse:collapse;margin:10px 0;'><thead><tr><th style='border:1px solid #aaa;padding:4px 8px;background:#e3f2fd;'>항목</th><th style='border:1px solid #aaa;padding:4px 8px;background:#e3f2fd;'>검증</th></tr></thead><tbody><tr><td style='border:1px solid #aaa;padding:4px 8px;'>사업자번호</td><td style='border:1px solid #aaa;padding:4px 8px;'>10자리 + 체크섬</td></tr>
+<tr><td style='border:1px solid #aaa;padding:4px 8px;'>이메일</td><td style='border:1px solid #aaa;padding:4px 8px;'>RFC 5322</td></tr>
+<tr><td style='border:1px solid #aaa;padding:4px 8px;'>전화번호</td><td style='border:1px solid #aaa;padding:4px 8px;'>정규식 (<code style='background:#eee;font-family:Consolas;font-size:9pt;padding:1px 4px;'>01[016789]-?\d{3,4}-?\d{4}</code>)</td></tr>
+<tr><td style='border:1px solid #aaa;padding:4px 8px;'>금액</td><td style='border:1px solid #aaa;padding:4px 8px;'>decimal, 음수 금지 (조정 제외)</td></tr>
+<tr><td style='border:1px solid #aaa;padding:4px 8px;'>수량</td><td style='border:1px solid #aaa;padding:4px 8px;'>양수, 소수점 3자리</td></tr>
+<tr><td style='border:1px solid #aaa;padding:4px 8px;'>날짜</td><td style='border:1px solid #aaa;padding:4px 8px;'>YYYY-MM-DD, 미래일 제한 (필요 시)</td></tr></tbody></table>
+<hr style="border:none;border-top:1px solid #ccc;"></p><p><h2 style="border-bottom:1px solid #999;padding-bottom:3px;color:#1976D2;">7. 에러 표현</h2></p><p><ul><li>인라인: 필드 하단 빨강 메시지</li>
+<li>Snackbar: 상단 우측 토스트</li>
+<li>Dialog: 치명적 오류 (자세히 보기 포함)</li></p><p></ul>---</p><p><h2 style="border-bottom:1px solid #999;padding-bottom:3px;color:#1976D2;">8. 접근성</h2></p><p><ul><li>WCAG 2.1 AA 목표</li>
+<li>키보드 탐색 (Tab, Esc, Enter)</li>
+<li>색 대비 4.5:1 이상</li>
+<li>ARIA 레이블</li></p><p></ul>---</p><p><h2 style="border-bottom:1px solid #999;padding-bottom:3px;color:#1976D2;">9. 모바일 반응형 (실측 통과)</h2></p><p><ul><li>가로 스크롤 0건 (iPhone 13 390x844 PASS)</li>
+<li>터치 영역 최소 44px</li>
+<li>핀치 줌 허용</li></p><p></ul>---</p><p><h2 style="border-bottom:1px solid #999;padding-bottom:3px;color:#1976D2;">10. PDF 출력 (QuestPDF)</h2></p><p><h3 style="color:#333;">10.1 paper_mode 분기</h3>
+<table style='border-collapse:collapse;margin:10px 0;'><thead><tr><th style='border:1px solid #aaa;padding:4px 8px;background:#e3f2fd;'>모드</th><th style='border:1px solid #aaa;padding:4px 8px;background:#e3f2fd;'>용도</th><th style='border:1px solid #aaa;padding:4px 8px;background:#e3f2fd;'>컴포넌트</th></tr></thead><tbody><tr><td style='border:1px solid #aaa;padding:4px 8px;'><code style='background:#eee;font-family:Consolas;font-size:9pt;padding:1px 4px;'>preprint</code></td><td style='border:1px solid #aaa;padding:4px 8px;'>양식용지</td><td style='border:1px solid #aaa;padding:4px 8px;'>ComposeBodyPreprint (좌표 박제)</td></tr>
+<tr><td style='border:1px solid #aaa;padding:4px 8px;'><code style='background:#eee;font-family:Consolas;font-size:9pt;padding:1px 4px;'>blank</code></td><td style='border:1px solid #aaa;padding:4px 8px;'>순백지</td><td style='border:1px solid #aaa;padding:4px 8px;'>ComposeBodyBlank</td></tr></tbody></table>
+<h3 style="color:#333;">10.2 출력 대상</h3>
+<ul><li>견적서, 수주서, 거래명세서, 세금계산서</li>
+<li>발주서, 매입명세서, 반품명세서</li>
+<li>근로계약서</li></p><p></ul>---</p><p><h2 style="border-bottom:1px solid #999;padding-bottom:3px;color:#1976D2;">11. 디자인 자산</h2></p><p><ul><li>랜딩 프리뷰: <code style='background:#eee;font-family:Consolas;font-size:9pt;padding:1px 4px;'>/preview-design.html</code>, <code style='background:#eee;font-family:Consolas;font-size:9pt;padding:1px 4px;'>/preview-design-toss.html</code></li>
+<li>랜딩 웹: <code style='background:#eee;font-family:Consolas;font-size:9pt;padding:1px 4px;'>/landing-web.html</code></li>
+<li>랜딩 SNS: <code style='background:#eee;font-family:Consolas;font-size:9pt;padding:1px 4px;'>/landing-sns.html</code></li>
+<li>약관: <code style='background:#eee;font-family:Consolas;font-size:9pt;padding:1px 4px;'>/legal/*.html</code> (4개 v2.0.0)</li></p><p></ul>---</p><p><h2 style="border-bottom:1px solid #999;padding-bottom:3px;color:#1976D2;">12. 차별화 (vs 더존/이카운트)</h2></p><p><table style='border-collapse:collapse;margin:10px 0;'><thead><tr><th style='border:1px solid #aaa;padding:4px 8px;background:#e3f2fd;'>항목</th><th style='border:1px solid #aaa;padding:4px 8px;background:#e3f2fd;'>더존/이카운트</th><th style='border:1px solid #aaa;padding:4px 8px;background:#e3f2fd;'>히트판</th></tr></thead><tbody><tr><td style='border:1px solid #aaa;padding:4px 8px;'>첫 학습 시간</td><td style='border:1px solid #aaa;padding:4px 8px;'>2주~1개월</td><td style='border:1px solid #aaa;padding:4px 8px;'>3분 (사장님 헌법)</td></tr>
+<tr><td style='border:1px solid #aaa;padding:4px 8px;'>사이드바 깊이</td><td style='border:1px solid #aaa;padding:4px 8px;'>4~5단계</td><td style='border:1px solid #aaa;padding:4px 8px;'>2단계</td></tr>
+<tr><td style='border:1px solid #aaa;padding:4px 8px;'>모바일</td><td style='border:1px solid #aaa;padding:4px 8px;'>부속 앱</td><td style='border:1px solid #aaa;padding:4px 8px;'>동등 시민 (Phase 5)</td></tr>
+<tr><td style='border:1px solid #aaa;padding:4px 8px;'>한 화면 완결</td><td style='border:1px solid #aaa;padding:4px 8px;'>분산</td><td style='border:1px solid #aaa;padding:4px 8px;'>통합</td></tr>
+<tr><td style='border:1px solid #aaa;padding:4px 8px;'>AI 챗봇</td><td style='border:1px solid #aaa;padding:4px 8px;'>없음</td><td style='border:1px solid #aaa;padding:4px 8px;'>24/7 (히트판에게 물어보세요)</td></tr></tbody></table></p></body>
+</html>

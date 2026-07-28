@@ -1,0 +1,11 @@
+{
+  "version": "1.0.0",
+  "channel": "Normal",
+  "downloadUrl": "https://updates.hitpan.kr/packages/hitpan-1.0.0.zip",
+  "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+  "sizeBytes": 0,
+  "releasedAt": "2026-06-09T00:00:00Z",
+  "releaseNotes": "베타1 초기 버전 — 사장님 결재 2026-06-09 박힘 후 정식 발급",
+  "requiresMigration": false,
+  "consentMessage": null
+}

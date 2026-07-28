@@ -1,0 +1,11 @@
+@page "/platform/promotions"
+@inject NavigationManager Nav
+
+@*
+    레거시 경로 → W17 실작동 화면 리다이렉트 (사장님 결재 2026-06-05)
+    실제 작동 페이지: /admin/promotions (W17)
+*@
+
+@code {
+    protected override void OnInitialized() => Nav.NavigateTo("/admin/promotions", replace: true);
+}

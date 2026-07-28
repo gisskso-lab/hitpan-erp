@@ -1,0 +1,84 @@
+@using HitPan.Web.Models
+
+<div class="delivery-footer">
+    <div class="delivery-footer-block">
+        <div>
+            <span class="footer-label">전미수금</span>
+            <span class="footer-value hitpan-mono">@Summary.PrevReceivable.ToString("N0")</span>
+        </div>
+        <div>
+            <span class="footer-label">당일판매</span>
+            <span class="footer-value hitpan-mono">@Summary.TodaySales.ToString("N0")</span>
+        </div>
+        <div>
+            <span class="footer-label">당일수금</span>
+            <span class="footer-value hitpan-mono">@Summary.TodayReceipt.ToString("N0")</span>
+        </div>
+        <div>
+            <span class="footer-label">청구금액</span>
+            <span class="footer-value red bold hitpan-mono">@Summary.ClaimAmount.ToString("N0")</span>
+        </div>
+    </div>
+    <div class="delivery-footer-block">
+        <div>
+            <span class="footer-label">공급가액</span>
+            <span class="footer-value hitpan-mono">@Summary.SupplyAmount.ToString("N0")</span>
+        </div>
+        <div>
+            <span class="footer-label">부가세액</span>
+            <span class="footer-value hitpan-mono">@Summary.VatAmount.ToString("N0")</span>
+        </div>
+        <div class="footer-field highlight">
+            <span class="footer-label">합계금액</span>
+            <span class="footer-value red bold hitpan-mono">@Summary.TotalAmount.ToString("N0")</span>
+        </div>
+        <div>
+            <span class="footer-label">현금입금</span>
+            <MudNumericField T="decimal" Value="Summary.CashAmount" ValueChanged="OnCashChanged" Variant="Variant.Outlined" Margin="Margin.Dense" />
+        </div>
+        <div>
+            <span class="footer-label">카드입금</span>
+            <MudNumericField T="decimal" Value="Summary.CardAmount" ValueChanged="OnCardChanged" Variant="Variant.Outlined" Margin="Margin.Dense" />
+        </div>
+        <div>
+            <span class="footer-label">전체할인</span>
+            <MudNumericField T="decimal" Value="Summary.DiscountAmount" ValueChanged="OnDiscountChanged" Variant="Variant.Outlined" Margin="Margin.Dense" />
+        </div>
+    </div>
+</div>
+
+@code {
+    [Parameter] public DeliverySummaryModel Summary { get; set; } = new();
+    // 봉합 (2026-06-23, 19차): 입금액 변경을 부모에 통지한다. 종전엔 Summary 만 바꾸고 부모 통지·재계산이
+    //   없어 현금/카드/할인 입력이 합계·당일수금에 즉시 반영되지 않았다(무반응).
+    [Parameter] public EventCallback<DeliverySummaryModel> SummaryChanged { get; set; }
+
+    private async Task OnCashChanged(decimal value)
+    {
+        Summary.CashAmount = value;
+        await NotifyChangedAsync();
+    }
+
+    private async Task OnCardChanged(decimal value)
+    {
+        Summary.CardAmount = value;
+        await NotifyChangedAsync();
+    }
+
+    private async Task OnDiscountChanged(decimal value)
+    {
+        Summary.DiscountAmount = value;
+        await NotifyChangedAsync();
+    }
+
+    /// <summary>입금액 합계(당일수금)를 재계산하고 부모에 통지한다.</summary>
+    private async Task NotifyChangedAsync()
+    {
+        Summary.TodayReceipt = Summary.CashAmount + Summary.CardAmount;
+        if (SummaryChanged.HasDelegate)
+        {
+            await SummaryChanged.InvokeAsync(Summary);
+        }
+        StateHasChanged();
+    }
+}

@@ -1,0 +1,162 @@
+﻿<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:w="urn:schemas-microsoft-com:office:word" xmlns="http://www.w3.org/TR/REC-html40">
+<head>
+<meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
+<meta name="ProgId" content="Word.Document">
+<meta name="Generator" content="Microsoft Word">
+<title>01_요구사항정의서</title>
+<!--[if gte mso 9]>
+<xml>
+<w:WordDocument>
+<w:View>Print</w:View>
+<w:Zoom>100</w:Zoom>
+</w:WordDocument>
+</xml>
+<![endif]-->
+<style>
+body { font-family: 'Malgun Gothic', sans-serif; font-size: 11pt; line-height: 1.6; }
+table { border-collapse: collapse; }
+</style>
+</head>
+<body><p><h1 style="border-bottom:2px solid #333;padding-bottom:5px;color:#1976D2;">01. 히트판 ERP 요구사항정의서</h1></p><p><blockquote style="border-left:4px solid #1976D2;padding-left:10px;color:#555;margin:10px 0;"><strong>작성일</strong>: 2026-06-01</blockquote>
+<blockquote style="border-left:4px solid #1976D2;padding-left:10px;color:#555;margin:10px 0;"><strong>PM</strong>: 브라운킴</blockquote>
+<blockquote style="border-left:4px solid #1976D2;padding-left:10px;color:#555;margin:10px 0;"><strong>버전</strong>: v1.0 (베타 진입 직전)</blockquote></p><p><hr style="border:none;border-top:1px solid #ccc;"></p><p><h2 style="border-bottom:1px solid #999;padding-bottom:3px;color:#1976D2;">1. 개요</h2></p><p><h3 style="color:#333;">1.1 프로젝트명</h3>
+<strong>히트판 ERP — SaaS형 중소기업 통합 업무 시스템</strong></p><p><h3 style="color:#333;">1.2 비전 (사장님 헌법)</h3>
+<blockquote style="border-left:4px solid #1976D2;padding-left:10px;color:#555;margin:10px 0;">"레거시 히트판이 VB + Access + 낡은 UI로도 살아남은 이유는 딱 하나. <strong>쓰기가 겁나 쉬웠기 때문이다.</strong>"</blockquote></p><p><strong>히트판은 기술로 이긴 게 아니다. 쉬움으로 이겼다.</strong></p><p><h3 style="color:#333;">1.3 3대 개발 원칙 (헌법 #25)</h3>
+<table style='border-collapse:collapse;margin:10px 0;'><thead><tr><th style='border:1px solid #aaa;padding:4px 8px;background:#e3f2fd;'>원칙</th><th style='border:1px solid #aaa;padding:4px 8px;background:#e3f2fd;'>의미</th><th style='border:1px solid #aaa;padding:4px 8px;background:#e3f2fd;'>대상</th></tr></thead><tbody><tr><td style='border:1px solid #aaa;padding:4px 8px;'><strong>쉽게</strong></td><td style='border:1px solid #aaa;padding:4px 8px;'>매뉴얼·마케팅·UX·AI 챗봇</td><td style='border:1px solid #aaa;padding:4px 8px;'>사용자 인식</td></tr>
+<tr><td style='border:1px solid #aaa;padding:4px 8px;'><strong>정확하게</strong></td><td style='border:1px solid #aaa;padding:4px 8px;'>풀스택 보안 + 헌법 32개 + 5중 검증</td><td style='border:1px solid #aaa;padding:4px 8px;'>개발 구현</td></tr>
+<tr><td style='border:1px solid #aaa;padding:4px 8px;'><strong>안전하게</strong></td><td style='border:1px solid #aaa;padding:4px 8px;'>물리적 격리 + 자연스러운 데이터 흐름 + 본사 데이터 최소주의</td><td style='border:1px solid #aaa;padding:4px 8px;'>아키텍처 설계</td></tr></tbody></table>
+셋 중 하나라도 빠지면 출시 금지.</p><p><hr style="border:none;border-top:1px solid #ccc;"></p><p><h2 style="border-bottom:1px solid #999;padding-bottom:3px;color:#1976D2;">2. 비즈니스 요구사항</h2></p><p><h3 style="color:#333;">2.1 타겟 고객</h3>
+<ul><li><strong>1차</strong>: 도소매 (가전·인테리어·식자재)</li>
+<li><strong>2차</strong>: 제조 (소형 가공·BOM 단순)</li>
+<li><strong>3차</strong>: 서비스 (유지보수·교육·컨설팅)</li></p><p></ul><h3 style="color:#333;">2.2 핵심 셀링 포인트</h3>
+1. <strong>로컬 PC DB + Cloudflare 터널</strong> — 데이터 주권 사장님이, 본사는 메타정보만 (헌법 #22)
+2. <strong>원클릭 설치</strong> — 라이선스 키 한 번이면 끝 (10분 이내)
+3. <strong>3분 안에 쓸 수 있는 UI</strong> — 처음 보는 직원도 매뉴얼 없이 (사장님 헌법)
+4. <strong>모바일 + 데스크톱 통합</strong> — 아이폰 홈 스타일 메뉴 (Phase 5)
+5. <strong>AI CS 챗봇</strong> — "히트판에게 물어보세요" 24/7</p><p><h3 style="color:#333;">2.3 가격 정책</h3>
+<table style='border-collapse:collapse;margin:10px 0;'><thead><tr><th style='border:1px solid #aaa;padding:4px 8px;background:#e3f2fd;'>티어</th><th style='border:1px solid #aaa;padding:4px 8px;background:#e3f2fd;'>가격</th><th style='border:1px solid #aaa;padding:4px 8px;background:#e3f2fd;'>기기 한도</th><th style='border:1px solid #aaa;padding:4px 8px;background:#e3f2fd;'>AI 토큰</th></tr></thead><tbody><tr><td style='border:1px solid #aaa;padding:4px 8px;'>Light</td><td style='border:1px solid #aaa;padding:4px 8px;'>29,000원/월</td><td style='border:1px solid #aaa;padding:4px 8px;'>1대</td><td style='border:1px solid #aaa;padding:4px 8px;'>100K</td></tr>
+<tr><td style='border:1px solid #aaa;padding:4px 8px;'>Standard</td><td style='border:1px solid #aaa;padding:4px 8px;'>59,000원/월</td><td style='border:1px solid #aaa;padding:4px 8px;'>3대</td><td style='border:1px solid #aaa;padding:4px 8px;'>500K</td></tr>
+<tr><td style='border:1px solid #aaa;padding:4px 8px;'>Pro</td><td style='border:1px solid #aaa;padding:4px 8px;'>100,000원/월</td><td style='border:1px solid #aaa;padding:4px 8px;'>무제한</td><td style='border:1px solid #aaa;padding:4px 8px;'>3M</td></tr></tbody></table>
+기기 기반 과금 (계정 아님).</p><p><hr style="border:none;border-top:1px solid #ccc;"></p><p><h2 style="border-bottom:1px solid #999;padding-bottom:3px;color:#1976D2;">3. 기능 요구사항 (6단계 워크플로우)</h2></p><p><h3 style="color:#333;">Stage 1. 설정</h3>
+<ul><li>회사정보 / 사용자정보 / 사원관리</li>
+<li>권한설정 (어드민 직접, 헌법 #11)</li>
+<li>직책 / 결재라인 / 결재설정</li>
+<li>기기관리 / 이메일설정 / 인쇄설정</li>
+<li>양식정보설정 (양식용지/순백지 분기, 헌법 #) — paper_mode</li>
+<li>구독결제 / 데이터백업 / 로그 / MDB마이그</li>
+<li>약관동의 (필수 4 + 선택 1)</li></p><p></ul><h3 style="color:#333;">Stage 2. 마스터</h3>
+<ul><li>업체관리 / 업체원장 / 업체특별단가</li>
+<li>상품관리 / 상품원장 / 상품특별단가</li>
+<li><strong>BOM 관리</strong> (자재 → 완제품 동일 트랜잭션, 헌법 #20)</li></p><p></ul><h3 style="color:#333;">Stage 3. 매입 흐름 (헌법 #20)</h3>
+<pre style='background:#f4f4f4;padding:8px;font-family:Consolas;font-size:9pt;border:1px solid #ddd;'>발주 → 매입 → 재고 반영 → 원장 INSERT
+       ↓
+       반품 (역재고)</pre></p><p><h3 style="color:#333;">Stage 4. 판매 흐름 (헌법 #20)</h3>
+<pre style='background:#f4f4f4;padding:8px;font-family:Consolas;font-size:9pt;border:1px solid #ddd;'>견적 → 수주 → 거래명세서 → 재고 차감 → 세금계산서
+                                       ↓
+                                       매출·경리·세무</pre></p><p><h3 style="color:#333;">Stage 5. 재고</h3>
+<ul><li>재고현황 / 재고원장 / 재고조정</li>
+<li>재고이동 / 창고관리 / 창고분할</li></p><p></ul><h3 style="color:#333;">Stage 6. 재무</h3>
+<ul><li>회계 (분개·계정과목·월마감·손익·매입매출장·부가세·세무신고)</li>
+<li>자금 (은행거래·카드결제·어음수표·출납장)</li>
+<li>수금·지급</li>
+<li>경비처리</li></p><p></ul><h3 style="color:#333;">부가</h3>
+<ul><li>인사 (HR 사원·부서·근태·연차·초과근무·근로계약·서명이력)</li>
+<li>결재 (대기·완료·발신)</li>
+<li>대시보드 / 통합 캘린더</li></p><p></ul>---</p><p><h2 style="border-bottom:1px solid #999;padding-bottom:3px;color:#1976D2;">4. 비기능 요구사항</h2></p><p><h3 style="color:#333;">4.1 성능</h3>
+<ul><li>단일 사용자 응답 < 2초</li>
+<li>마이그 목표 시간: 10분 러프 (소형 표준, 헌법 #26)</li>
+<li>Timeout: 24시간 (대형 고객 가능성 보장)</li></p><p></ul><h3 style="color:#333;">4.2 보안 (5중 검증, 헌법 #23)</h3>
+1. 작업지시서 보안 요구사항 명시
+2. 어벤져스 매니저 리뷰 (절대원칙 25개)
+3. SAST (CodeQL·Snyk·Roslyn·TruffleHog)
+4. DAST (OWASP ZAP, 베타 출시 전 1회+)
+5. 데이터 최소주의(#22) 검증</p><p><h3 style="color:#333;">4.3 가용성 (헌법 #27)</h3>
+<ul><li>SLA 99.99% (연 다운타임 52분 이내)</li>
+<li>통신 무결성 17개 워치독 시나리오 5분 자동 복구</li>
+<li>Windows Update 후 cloudflared 자동 복구 (헌법 #28)</li></p><p></ul><h3 style="color:#333;">4.4 호환성 (헌법 #31)</h3>
+<ul><li>Windows 10/11</li>
+<li>Defender + 백신 5종 (V3 Lite, 알약, 네이버, Norton, McAfee)</li>
+<li>EDR 3종 (안랩 EPP, 한컴, Trend Micro)</li>
+<li>격리 0건 보장 (1클릭 봉합 매뉴얼 강제 제공)</li></p><p></ul><h3 style="color:#333;">4.5 코드 품질 (헌법 #19)</h3>
+<ul><li>빌드 0 errors / 0 warnings</li>
+<li>단위 테스트 100% PASS</li>
+<li>NuGet 보안 취약 패키지 0건</li></p><p></ul>---</p><p><h2 style="border-bottom:1px solid #999;padding-bottom:3px;color:#1976D2;">5. 데이터 요구사항</h2></p><p><h3 style="color:#333;">5.1 데이터 주권 (헌법 #22)</h3>
+<ul><li><strong>고객 PC</strong>: 모든 업무 데이터 (매입/매출/원장/거래처/직원/세금계산서)</li>
+<li><strong>본사</strong>: SaaS 결제·운영 메타정보만 (가입·결제·라이선스·텔레메트리·CS)</li>
+<li>백업조차 E2E 암호화로 본사가 내용 모름</li></p><p></ul><h3 style="color:#333;">5.2 멀티테넌트 (헌법 #2)</h3>
+<ul><li>tenant_id는 JWT 클레임에서만</li>
+<li>파라미터로 받는 코드 즉시 반려</li></p><p></ul><h3 style="color:#333;">5.3 원장 무결성 (헌법 #3)</h3>
+<ul><li>stock_ledger, journal_lines INSERT ONLY</li>
+<li>UPDATE/DELETE 금지</li>
+<li>원장 반영은 confirmed 시점에만 (헌법 #6)</li></p><p></ul><h3 style="color:#333;">5.4 금액 정밀도 (헌법 #4)</h3>
+<ul><li>decimal 필수</li>
+<li>float/double 금지</li></p><p></ul><h3 style="color:#333;">5.5 암호화 (헌법 #5)</h3>
+<ul><li>민감 컬럼 Value Converter (AES-256) 필수</li>
+<li>미적용 PR 즉시 반려</li></p><p></ul>---</p><p><h2 style="border-bottom:1px solid #999;padding-bottom:3px;color:#1976D2;">6. 인터페이스 요구사항</h2></p><p><h3 style="color:#333;">6.1 외부 시스템</h3>
+<table style='border-collapse:collapse;margin:10px 0;'><thead><tr><th style='border:1px solid #aaa;padding:4px 8px;background:#e3f2fd;'>시스템</th><th style='border:1px solid #aaa;padding:4px 8px;background:#e3f2fd;'>용도</th><th style='border:1px solid #aaa;padding:4px 8px;background:#e3f2fd;'>책임</th></tr></thead><tbody><tr><td style='border:1px solid #aaa;padding:4px 8px;'>Cloudflare</td><td style='border:1px solid #aaa;padding:4px 8px;'>터널·DNS</td><td style='border:1px solid #aaa;padding:4px 8px;'>본사 인프라</td></tr>
+<tr><td style='border:1px solid #aaa;padding:4px 8px;'>MariaDB</td><td style='border:1px solid #aaa;padding:4px 8px;'>로컬 DB</td><td style='border:1px solid #aaa;padding:4px 8px;'>고객 PC</td></tr>
+<tr><td style='border:1px solid #aaa;padding:4px 8px;'>토스페이먼츠</td><td style='border:1px solid #aaa;padding:4px 8px;'>SaaS 결제</td><td style='border:1px solid #aaa;padding:4px 8px;'>본사</td></tr>
+<tr><td style='border:1px solid #aaa;padding:4px 8px;'>카카오/토스/금융인증/PASS</td><td style='border:1px solid #aaa;padding:4px 8px;'>전자서명 (간편인증 4종)</td><td style='border:1px solid #aaa;padding:4px 8px;'>제3자</td></tr>
+<tr><td style='border:1px solid #aaa;padding:4px 8px;'>메이크빌</td><td style='border:1px solid #aaa;padding:4px 8px;'>전자세금계산서 ASP</td><td style='border:1px solid #aaa;padding:4px 8px;'>제3자</td></tr>
+<tr><td style='border:1px solid #aaa;padding:4px 8px;'>홈택스 API</td><td style='border:1px solid #aaa;padding:4px 8px;'>전자세금계산서 (외주 검토)</td><td style='border:1px solid #aaa;padding:4px 8px;'>제3자</td></tr></tbody></table>
+<h3 style="color:#333;">6.2 API 패턴</h3>
+<ul><li>REST + JWT Bearer 토큰</li>
+<li>Refresh Token 회전</li>
+<li>Idempotency Key (POST 멱등성)</li>
+<li>약관 미동의 시 미들웨어 차단</li></p><p></ul><h3 style="color:#333;">6.3 UI 패턴</h3>
+<ul><li>Blazor WebAssembly + MudBlazor</li>
+<li>한 화면 완결 (스크롤 없이 핵심 정보)</li>
+<li>모바일 우선 (아이폰 홈 스타일)</li>
+<li>WASM 첫 fetch는 OnAfterRenderAsync (진범 #100 봉합)</li></p><p></ul>---</p><p><h2 style="border-bottom:1px solid #999;padding-bottom:3px;color:#1976D2;">7. 제약 사항</h2></p><p><h3 style="color:#333;">7.1 절대 원칙 25개 (헌법)</h3>
+1. 수정 OK, 덮어쓰기 금지
+2. tenant_id는 JWT 클레임만
+3. INSERT ONLY 원장
+4. 금액은 decimal
+5. 암호화 필수 컬럼
+6. 원장 반영은 confirmed
+7. SaaS↔ERP 권한 혼용 금지
+8. 6단계 워크플로우 순서
+9. DB 미리 다, 코드 필요할 때
+10. 한 화면씩 완성
+11. 권한 어드민 직접
+12. 인터페이스 grep 필수
+13. 새 SQL 전 DESCRIBE
+14. Razor raw string 금지
+15. 빈 catch 금지
+16. MySqlConnection Task.WhenAll 금지
+17. 신규 테이블 InnoDB
+18. 본사로 업무데이터 전송 금지
+19. errors 0 + warnings 0
+20. 워크플로우 끊김 금지
+21. appsettings.json 보호
+22. 본사 데이터 최소주의
+23. AI 협업 5중 검증
+24. 책임 분산 + 가르침
+25. 쉽게·정확하게·안전하게</p><p><h3 style="color:#333;">7.2 추가 헌법 7개 (#26~#32)</h3>
+26. 마이그 목표-Timeout 분리
+27. 통신 무결성 절대 우선
+28. Windows Update 후 cloudflared 자동 복구
+29. 인프라 조작 사전 승인제
+30. 고객 PC 자가 회복
+31. OS 보안 도구 호환성
+32. 점수·평가 받아쓰기 금지 (2026-06-01 신설)</p><p><hr style="border:none;border-top:1px solid #ccc;"></p><p><h2 style="border-bottom:1px solid #999;padding-bottom:3px;color:#1976D2;">8. 검증 기준 — EVF 6대 영역 (베타 출시 절대 게이트)</h2></p><p><table style='border-collapse:collapse;margin:10px 0;'><thead><tr><th style='border:1px solid #aaa;padding:4px 8px;background:#e3f2fd;'>영역</th><th style='border:1px solid #aaa;padding:4px 8px;background:#e3f2fd;'>내용</th></tr></thead><tbody><tr><td style='border:1px solid #aaa;padding:4px 8px;'>부하</td><td style='border:1px solid #aaa;padding:4px 8px;'>동시 사용자 / 대용량 데이터 / 장기 가동</td></tr>
+<tr><td style='border:1px solid #aaa;padding:4px 8px;'>장애</td><td style='border:1px solid #aaa;padding:4px 8px;'>통신 끊김 / DB 다운 / Windows Update</td></tr>
+<tr><td style='border:1px solid #aaa;padding:4px 8px;'>악의</td><td style='border:1px solid #aaa;padding:4px 8px;'>SQL 인젝션 / XSS / 토큰 탈취 / 사회공학</td></tr>
+<tr><td style='border:1px solid #aaa;padding:4px 8px;'>혼돈</td><td style='border:1px solid #aaa;padding:4px 8px;'>랜덤 입력 / 동시 클릭 / 비정상 순서</td></tr>
+<tr><td style='border:1px solid #aaa;padding:4px 8px;'>무지</td><td style='border:1px solid #aaa;padding:4px 8px;'>처음 사용자 / 매뉴얼 없이 / 3분 안에</td></tr>
+<tr><td style='border:1px solid #aaa;padding:4px 8px;'>노후</td><td style='border:1px solid #aaa;padding:4px 8px;'>3년 누적 데이터 / 30년 누적 도소매 / 마이그</td></tr></tbody></table>
+전 영역 통과 못하면 고객 첫 등장 금지.</p><p><hr style="border:none;border-top:1px solid #ccc;"></p><p><h2 style="border-bottom:1px solid #999;padding-bottom:3px;color:#1976D2;">9. 인수 기준</h2></p><p><h3 style="color:#333;">9.1 베타 출시 (1차)</h3>
+<ul><li>87개 라우트 진입 100% (현재 98%, 잔여 2건 봉합 중)</li>
+<li>워크플로우 3흐름 실데이터 E2E 100%</li>
+<li>빌드 0/0, xUnit 100% PASS</li>
+<li>EVF 6대 영역 통과</li>
+<li>통신 무결성 17개 워치독 통과</li>
+<li>백신 5종 호환 격리 0건</li></p><p></ul><h3 style="color:#333;">9.2 정식 출시 (2차)</h3>
+<ul><li>베타 20곳 4주 무사고</li>
+<li>AI CS 챗봇 정확도 90%+</li>
+<li>SLA 99.99% 1개월 입증</li></p><p></ul>---</p><p><h2 style="border-bottom:1px solid #999;padding-bottom:3px;color:#1976D2;">10. 변경 이력</h2></p><p><table style='border-collapse:collapse;margin:10px 0;'><thead><tr><th style='border:1px solid #aaa;padding:4px 8px;background:#e3f2fd;'>일자</th><th style='border:1px solid #aaa;padding:4px 8px;background:#e3f2fd;'>버전</th><th style='border:1px solid #aaa;padding:4px 8px;background:#e3f2fd;'>내용</th></tr></thead><tbody><tr><td style='border:1px solid #aaa;padding:4px 8px;'>2026-04-25</td><td style='border:1px solid #aaa;padding:4px 8px;'>v0.5</td><td style='border:1px solid #aaa;padding:4px 8px;'>EVF 헌법 + 거버넌스 7단계 결재</td></tr>
+<tr><td style='border:1px solid #aaa;padding:4px 8px;'>2026-05-12</td><td style='border:1px solid #aaa;padding:4px 8px;'>v0.7</td><td style='border:1px solid #aaa;padding:4px 8px;'>헌법 #22~#25 신설 (데이터 최소주의·5중 검증·책임 분산·3대 원칙)</td></tr>
+<tr><td style='border:1px solid #aaa;padding:4px 8px;'>2026-05-15</td><td style='border:1px solid #aaa;padding:4px 8px;'>v0.8</td><td style='border:1px solid #aaa;padding:4px 8px;'>헌법 #27~#31 신설 (통신 무결성·Windows Update·인프라 승인제·자가 회복·백신 5종)</td></tr>
+<tr><td style='border:1px solid #aaa;padding:4px 8px;'>2026-05-31</td><td style='border:1px solid #aaa;padding:4px 8px;'>v0.95</td><td style='border:1px solid #aaa;padding:4px 8px;'>ERP 외관 98% 달성, 진범 #99·#100 봉합</td></tr>
+<tr><td style='border:1px solid #aaa;padding:4px 8px;'><strong>2026-06-01</strong></td><td style='border:1px solid #aaa;padding:4px 8px;'><strong>v1.0</strong></td><td style='border:1px solid #aaa;padding:4px 8px;'><strong>헌법 #32 신설, ERP 단계 종료 85% B+ GO, 백오피스·랜딩 진입</strong></td></tr></tbody></table></p></body>
+</html>

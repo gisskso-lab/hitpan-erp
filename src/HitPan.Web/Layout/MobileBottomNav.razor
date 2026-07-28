@@ -1,0 +1,103 @@
+@implements IDisposable
+@using System.Security.Claims
+@using HitPan.Web.Models
+@using HitPan.Web.Services
+@inject NavigationManager Navigation
+@inject WorkTabService TabService
+@inject AuthenticationStateProvider AuthStateProvider
+
+<nav class="hitpan-bottom-nav" aria-label="하단 메뉴">
+    @foreach (var item in _visibleItems)
+    {
+        var active = IsActive(item.Href);
+        <button type="button"
+                class="hitpan-bottom-nav-item @(active ? "hitpan-bottom-nav-item--active" : null)"
+                title="@item.Title"
+                @onclick="@(() => OnTap(item))">
+            <MudIcon Icon="@item.Icon" Class="hitpan-bottom-nav-icon" />
+            <span class="hitpan-bottom-nav-label">@item.Title</span>
+        </button>
+    }
+</nav>
+
+@code {
+    private List<BottomNavEntry> _visibleItems = new();
+
+    protected override async Task OnInitializedAsync()
+    {
+        Navigation.LocationChanged += OnLocationChanged;
+        await RefreshMenuAsync();
+    }
+
+    private void OnLocationChanged(object? sender, LocationChangedEventArgs e) =>
+        _ = InvokeAsync(StateHasChanged);
+
+    private async Task RefreshMenuAsync()
+    {
+        var state = await AuthStateProvider.GetAuthenticationStateAsync();
+        _visibleItems = BottomNavMenu.All.Where(i => i.IsVisibleTo(state.User)).ToList();
+    }
+
+    private void OnTap(BottomNavEntry item)
+    {
+        if (item.OpenTabKind is { } kind)
+        {
+            TabService.TryAddTab(kind);
+        }
+
+        Navigation.NavigateTo(item.Href);
+    }
+
+    private bool IsActive(string href)
+    {
+        var path = new Uri(Navigation.Uri).AbsolutePath.TrimEnd('/');
+        var h = href.TrimEnd('/');
+        if (h == "/more")
+        {
+            return path.Equals("/more", StringComparison.OrdinalIgnoreCase);
+        }
+
+        return string.Equals(path, h, StringComparison.OrdinalIgnoreCase)
+               || (path == "/" && h == "/");
+    }
+
+    public void Dispose()
+    {
+        Navigation.LocationChanged -= OnLocationChanged;
+    }
+
+    private sealed record BottomNavEntry(
+        string Title,
+        string Icon,
+        string Href,
+        string[]? AllowedRoles,
+        WorkDocumentKind? OpenTabKind)
+    {
+        public bool IsVisibleTo(ClaimsPrincipal user)
+        {
+            if (user.Identity?.IsAuthenticated != true)
+            {
+                return false;
+            }
+
+            if (AllowedRoles is null || AllowedRoles.Length == 0)
+            {
+                return true;
+            }
+
+            return AllowedRoles.Any(r => HitPanRoleHelper.IsInHitPanRole(user, r));
+        }
+    }
+
+    private static class BottomNavMenu
+    {
+        public static readonly BottomNavEntry[] All =
+        {
+            new("홈",     Icons.Material.Filled.Home,        "/dashboard",  null, null),
+            new("판매",   Icons.Material.Filled.Receipt,     "/m/sales",    new[] { "TenantAdmin", "Manager", "User" }, null),
+            new("수금",   Icons.Material.Filled.AttachMoney, "/collections", new[] { "TenantAdmin", "Manager" }, null),
+            new("재고",   Icons.Material.Filled.Inventory,   "/stock",      null, null),
+            new("전체메뉴", Icons.Material.Filled.GridView,  "/more",       null, null)
+        };
+    }
+}

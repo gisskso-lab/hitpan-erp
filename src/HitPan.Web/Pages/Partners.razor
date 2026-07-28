@@ -1,0 +1,214 @@
+@page "/partners"
+@namespace HitPan.Web.Pages.PartnerMasterUi
+@attribute [Authorize]
+@inject PartnerMasterService PartnersApi
+@inject NavigationManager Nav
+@inject ISnackbar Snackbar
+@inject IJSRuntime Js
+@inject IDialogService DialogService
+
+<PageTitle>업체 마스터</PageTitle>
+
+<PageHeader Title="업체 마스터" Subtitle="매입·매출 거래처 등록 · 연체 현황">
+    <Actions>
+        <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="@(() => Nav.NavigateTo("/partners/new"))">
+            + 업체 등록
+        </MudButton>
+    </Actions>
+</PageHeader>
+
+<MudPaper Elevation="0" Class="pa-3 mb-3" Style="border:1px solid var(--mud-palette-lines-default);border-radius:12px">
+    <MudGrid Spacing="2" Class="align-center">
+        <MudItem xs="12" sm="6" md="4">
+            <MudTextField @bind-Value="_search"
+                          Label="업체명·코드 검색"
+                          Variant="Variant.Outlined"
+                          Margin="Margin.Dense"
+                          OnBlur="ReloadAsync" />
+        </MudItem>
+        <MudItem xs="12" sm="4" md="3">
+            <MudSelect T="string"
+                       @bind-Value="_type"
+                       Label="유형"
+                       Variant="Variant.Outlined"
+                       Margin="Margin.Dense"
+                       Dense="true">
+                <MudSelectItem Value="@("")">전체</MudSelectItem>
+                <MudSelectItem Value="@("customer")">매출처</MudSelectItem>
+                <MudSelectItem Value="@("supplier")">매입처</MudSelectItem>
+                <MudSelectItem Value="@("both")">겸용</MudSelectItem>
+            </MudSelect>
+        </MudItem>
+        <MudItem xs="12" sm="2" md="2" Class="d-flex align-end gap-1">
+            <MudButton Variant="Variant.Filled"
+                       Color="Color.Primary"
+                       Size="Size.Small"
+                       OnClick="ReloadAsync"
+                       Disabled="_loading">
+                조회
+            </MudButton>
+            <MudButton Variant="Variant.Outlined" Size="Size.Small" StartIcon="@Icons.Material.Filled.TableChart" OnClick="ExportExcelAsync">엑셀</MudButton>
+            <MudButton Variant="Variant.Outlined" Size="Size.Small" StartIcon="@Icons.Material.Filled.Print" OnClick="PrintAsync">인쇄</MudButton>
+        </MudItem>
+    </MudGrid>
+</MudPaper>
+
+<MudTable T="PartnerListRow"
+          ServerData="LoadServerDataAsync"
+          @ref="_table"
+          Dense="true" Hover="true" Striped="true"
+          FixedHeader="true" Height="calc(100vh - 240px)"
+          Loading="@_loading" LoadingProgressColor="Color.Primary"
+          RowsPerPage="50">
+    <ToolBarContent>
+        <MudText Typo="Typo.subtitle2">전체 @_totalCount.ToString("N0") 건</MudText>
+    </ToolBarContent>
+        <HeaderContent>
+            <MudTh>코드</MudTh>
+            <MudTh>업체명</MudTh>
+            <MudTh>유형</MudTh>
+            <MudTh>등급</MudTh>
+            <MudTh Style="text-align:right">여신한도</MudTh>
+            <MudTh Style="text-align:right">잔액</MudTh>
+            <MudTh Style="text-align:right">미수금</MudTh>
+            <MudTh>연체</MudTh>
+            <MudTh>사용</MudTh>
+            <MudTh></MudTh>
+        </HeaderContent>
+        <RowTemplate>
+            <MudTd DataLabel="코드">
+                <MudButton Variant="Variant.Text" Class="pa-0 text-none" OnClick="@(() => OpenDetail(context.PartnerId))">@context.PartnerCode</MudButton>
+            </MudTd>
+            <MudTd DataLabel="업체명">
+                <MudButton Variant="Variant.Text" Class="pa-0 text-none" OnClick="@(() => OpenDetail(context.PartnerId))">@context.PartnerName</MudButton>
+            </MudTd>
+            <MudTd DataLabel="유형">@context.PartnerType</MudTd>
+            <MudTd DataLabel="등급">@context.PriceGrade</MudTd>
+            <MudTd DataLabel="여신한도" Style="text-align:right">@context.CreditLimit.ToString("N0")</MudTd>
+            <MudTd DataLabel="잔액" Style="text-align:right">@context.Balance.ToString("N0")</MudTd>
+            <MudTd DataLabel="미수금" Style="text-align:right">
+                @(GetAging(context.PartnerId) is { } ua ? ua.TotalUnpaid.ToString("N0") : "-")
+            </MudTd>
+            <MudTd DataLabel="연체">
+                @{
+                    var ag = GetAging(context.PartnerId);
+                }
+                @if (ag is not null && ag.TotalUnpaid > 0)
+                {
+                    <PartnerAgingBadge DaysOverdue="@AgingDays(ag)" />
+                }
+            </MudTd>
+            <MudTd DataLabel="사용">@(context.IsActive ? "Y" : "N")</MudTd>
+            <MudTd>
+                <MudIconButton Icon="@Icons.Material.Filled.Edit"
+                               Size="Size.Small"
+                               OnClick="@(() => Nav.NavigateTo($"/partners/{context.PartnerId}"))" />
+                <MudIconButton Icon="@Icons.Material.Filled.Delete"
+                               Size="Size.Small"
+                               Color="Color.Error"
+                               OnClick="@(() => DeleteAsync(context))" />
+            </MudTd>
+        </RowTemplate>
+    <PagerContent>
+        <MudTablePager PageSizeOptions="new[]{25,50,100,200}" />
+    </PagerContent>
+    <NoRecordsContent>
+        <MudText Align="Align.Center" Class="pa-4">조회된 업체가 없습니다.</MudText>
+    </NoRecordsContent>
+</MudTable>
+
+@code {
+    private MudTable<PartnerListRow>? _table;
+    private List<PartnerAgingRow> _aging = new();
+    private string _search = "";
+    private string _type = "";
+    private bool _loading = false;
+    private int _totalCount;
+
+    protected override async Task OnInitializedAsync()
+    {
+        // aging 데이터만 별도 로드 (페이지네이션 무관, 작은 데이터)
+        _aging = await PartnersApi.GetAgingAsync();
+    }
+
+    /// <summary>
+    /// MudTable ServerData 콜백 — 페이지 전환·정렬·필터 시 호출됨.
+    /// 2026-05-13 야간: 100만건 대비 서버 페이지네이션 패턴.
+    /// </summary>
+    private async Task<TableData<PartnerListRow>> LoadServerDataAsync(TableState state, CancellationToken ct)
+    {
+        _loading = true;
+        try
+        {
+            var page = state.Page + 1; // MudBlazor는 0-based
+            var paged = await PartnersApi.GetListPagedAsync(
+                page, state.PageSize,
+                string.IsNullOrWhiteSpace(_search) ? null : _search,
+                string.IsNullOrWhiteSpace(_type) ? null : _type,
+                ct);
+            _totalCount = paged.TotalCount;
+            return new TableData<PartnerListRow> { Items = paged.Items, TotalItems = paged.TotalCount };
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    private async Task ReloadAsync()
+    {
+        if (_table is not null)
+            await _table.ReloadServerData();
+    }
+
+    // 거래처 id로 연체 행 lookup (미사용 시 null)
+    private PartnerAgingRow? GetAging(string? partnerId)
+        => string.IsNullOrEmpty(partnerId) ? null
+            : _aging.FirstOrDefault(x => x.PartnerId == partnerId);
+
+    // AR Aging 행에서 가장 심한 연체 버킷을 days로 환산 (뱃지 색 결정용)
+    private static int AgingDays(PartnerAgingRow a)
+    {
+        if (a.Bucket90Plus > 0) return 120;
+        if (a.Bucket61_90 > 0)  return 75;
+        if (a.Bucket31_60 > 0)  return 45;
+        return 15;
+    }
+
+    /// <summary>화면 데이터를 엑셀로 내보낸다.</summary>
+    private Task ExportExcelAsync() { Snackbar.Add("엑셀 내보내기는 준비중입니다.", Severity.Info); return Task.CompletedTask; }
+    /// <summary>화면을 인쇄한다.</summary>
+    private async Task PrintAsync() { await Js.InvokeVoidAsync("print"); }
+
+    private void OpenDetail(string? partnerId)
+    {
+        if (string.IsNullOrWhiteSpace(partnerId))
+        {
+            return;
+        }
+
+        Nav.NavigateTo($"/partners/{partnerId}");
+    }
+
+    private async Task DeleteAsync(PartnerListRow row)
+    {
+        if (string.IsNullOrWhiteSpace(row.PartnerId)) return;
+
+        var confirm = await DialogService.ShowMessageBoxAsync(
+            "업체 삭제",
+            $"'{row.PartnerName}' 업체를 삭제하시겠습니까?",
+            yesText: "삭제", cancelText: "취소");
+        if (confirm != true) return;
+
+        var ok = await PartnersApi.DeleteAsync(row.PartnerId);
+        if (ok)
+        {
+            Snackbar.Add("삭제되었습니다.", Severity.Success);
+            await ReloadAsync();
+        }
+        else
+        {
+            Snackbar.Add("삭제에 실패했습니다.", Severity.Error);
+        }
+    }
+}

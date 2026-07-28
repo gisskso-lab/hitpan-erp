@@ -1,0 +1,156 @@
+﻿<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:w="urn:schemas-microsoft-com:office:word" xmlns="http://www.w3.org/TR/REC-html40">
+<head>
+<meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
+<meta name="ProgId" content="Word.Document">
+<meta name="Generator" content="Microsoft Word">
+<title>05_기능정의서</title>
+<!--[if gte mso 9]>
+<xml>
+<w:WordDocument>
+<w:View>Print</w:View>
+<w:Zoom>100</w:Zoom>
+</w:WordDocument>
+</xml>
+<![endif]-->
+<style>
+body { font-family: 'Malgun Gothic', sans-serif; font-size: 11pt; line-height: 1.6; }
+table { border-collapse: collapse; }
+</style>
+</head>
+<body><p><h1 style="border-bottom:2px solid #333;padding-bottom:5px;color:#1976D2;">05. 기능정의서 — 화면별 기능 명세</h1></p><p><blockquote style="border-left:4px solid #1976D2;padding-left:10px;color:#555;margin:10px 0;"><strong>작성일</strong>: 2026-06-01 / PM 브라운킴</blockquote>
+<blockquote style="border-left:4px solid #1976D2;padding-left:10px;color:#555;margin:10px 0;"><strong>87개 화면 + 모바일 10개 + 백오피스 12개 + 대리점 7개 (보존)</strong></blockquote></p><p><hr style="border:none;border-top:1px solid #ccc;"></p><p><h2 style="border-bottom:1px solid #999;padding-bottom:3px;color:#1976D2;">1. 설정 (Stage 1, 16건)</h2></p><p><h3 style="color:#333;">1.1 회사정보 <code style='background:#eee;font-family:Consolas;font-size:9pt;padding:1px 4px;'>/company</code></h3>
+<table style='border-collapse:collapse;margin:10px 0;'><thead><tr><th style='border:1px solid #aaa;padding:4px 8px;background:#e3f2fd;'>항목</th><th style='border:1px solid #aaa;padding:4px 8px;background:#e3f2fd;'>내용</th></tr></thead><tbody><tr><td style='border:1px solid #aaa;padding:4px 8px;'>입력</td><td style='border:1px solid #aaa;padding:4px 8px;'>사업자번호·상호·대표·업종·주소·전화·이메일·로고</td></tr>
+<tr><td style='border:1px solid #aaa;padding:4px 8px;'>검증</td><td style='border:1px solid #aaa;padding:4px 8px;'>사업자번호 체크섬, 이메일 형식</td></tr>
+<tr><td style='border:1px solid #aaa;padding:4px 8px;'>권한</td><td style='border:1px solid #aaa;padding:4px 8px;'>system_admin</td></tr>
+<tr><td style='border:1px solid #aaa;padding:4px 8px;'>연결</td><td style='border:1px solid #aaa;padding:4px 8px;'>tenants 테이블</td></tr></tbody></table>
+<h3 style="color:#333;">1.2 사용자정보 <code style='background:#eee;font-family:Consolas;font-size:9pt;padding:1px 4px;'>/settings/user-info</code></h3>
+<table style='border-collapse:collapse;margin:10px 0;'><thead><tr><th style='border:1px solid #aaa;padding:4px 8px;background:#e3f2fd;'>항목</th><th style='border:1px solid #aaa;padding:4px 8px;background:#e3f2fd;'>내용</th></tr></thead><tbody><tr><td style='border:1px solid #aaa;padding:4px 8px;'>입력</td><td style='border:1px solid #aaa;padding:4px 8px;'>이름·이메일·전화·비밀번호 변경</td></tr>
+<tr><td style='border:1px solid #aaa;padding:4px 8px;'>권한</td><td style='border:1px solid #aaa;padding:4px 8px;'>본인 + system_admin</td></tr></tbody></table>
+<h3 style="color:#333;">1.3 사원관리 <code style='background:#eee;font-family:Consolas;font-size:9pt;padding:1px 4px;'>/employees</code></h3>
+<table style='border-collapse:collapse;margin:10px 0;'><thead><tr><th style='border:1px solid #aaa;padding:4px 8px;background:#e3f2fd;'>항목</th><th style='border:1px solid #aaa;padding:4px 8px;background:#e3f2fd;'>내용</th></tr></thead><tbody><tr><td style='border:1px solid #aaa;padding:4px 8px;'>입력</td><td style='border:1px solid #aaa;padding:4px 8px;'>사원번호·이름·이메일·부서·직책·입사일·역할</td></tr>
+<tr><td style='border:1px solid #aaa;padding:4px 8px;'>권한</td><td style='border:1px solid #aaa;padding:4px 8px;'>system_admin</td></tr>
+<tr><td style='border:1px solid #aaa;padding:4px 8px;'>연결</td><td style='border:1px solid #aaa;padding:4px 8px;'>employees + users (2계층 헌법 #24)</td></tr></tbody></table>
+<h3 style="color:#333;">1.4 권한설정 <code style='background:#eee;font-family:Consolas;font-size:9pt;padding:1px 4px;'>/users/permissions</code></h3>
+<table style='border-collapse:collapse;margin:10px 0;'><thead><tr><th style='border:1px solid #aaa;padding:4px 8px;background:#e3f2fd;'>항목</th><th style='border:1px solid #aaa;padding:4px 8px;background:#e3f2fd;'>내용</th></tr></thead><tbody><tr><td style='border:1px solid #aaa;padding:4px 8px;'>입력</td><td style='border:1px solid #aaa;padding:4px 8px;'>사용자별 메뉴 권한 (CRUD) — 어드민 직접 설정 (헌법 #11)</td></tr>
+<tr><td style='border:1px solid #aaa;padding:4px 8px;'>금지</td><td style='border:1px solid #aaa;padding:4px 8px;'>업종·규모별 템플릿 제공 금지</td></tr></tbody></table>
+<h3 style="color:#333;">1.5 직책관리 <code style='background:#eee;font-family:Consolas;font-size:9pt;padding:1px 4px;'>/settings/positions</code></h3>
+<ul><li>직책 마스터 (대표·부장·과장·대리·사원 등)</li></p><p></ul><h3 style="color:#333;">1.6 결재라인 <code style='background:#eee;font-family:Consolas;font-size:9pt;padding:1px 4px;'>/settings/approval-lines</code></h3>
+<ul><li>문서 유형별 결재 라인 (1~N단계)</li>
+<li>approval_lines + approval_line_steps</li></p><p></ul><h3 style="color:#333;">1.7 결재설정 <code style='background:#eee;font-family:Consolas;font-size:9pt;padding:1px 4px;'>/settings/approval</code></h3>
+<ul><li>결재 정책 (자동 통과 / 부재 시 대결 등)</li></p><p></ul><h3 style="color:#333;">1.8 기기관리 <code style='background:#eee;font-family:Consolas;font-size:9pt;padding:1px 4px;'>/settings/devices</code></h3>
+<ul><li>기기 등록 (헌법: 기기 기반 과금)</li>
+<li>티어별 한도 (Light 1, Standard 3, Pro ∞)</li></p><p></ul><h3 style="color:#333;">1.9 이메일설정 <code style='background:#eee;font-family:Consolas;font-size:9pt;padding:1px 4px;'>/settings/email</code></h3>
+<ul><li>SMTP 설정 (서버·포트·계정·비밀번호 AES-256)</li>
+<li>발송 이력 (email_send_history)</li></p><p></ul><h3 style="color:#333;">1.10 인쇄설정 <code style='background:#eee;font-family:Consolas;font-size:9pt;padding:1px 4px;'>/print-settings</code></h3>
+<ul><li>프린터 선택, 용지 종류</li>
+<li>paper_mode: preprint(양식용지) / blank(순백지)</li></p><p></ul><h3 style="color:#333;">1.11 양식정보설정 <code style='background:#eee;font-family:Consolas;font-size:9pt;padding:1px 4px;'>/settings/form-templates</code> ⭐ 신규 (2026-05-31)</h3>
+<ul><li>8개 form_type: 견적·수주·거래명세·발주·매입·반품매입·반품매출·세금계산서</li>
+<li>preprint / blank 분기</li>
+<li>QuestPDF 좌표 박제</li></p><p></ul><h3 style="color:#333;">1.12 구독결제 <code style='background:#eee;font-family:Consolas;font-size:9pt;padding:1px 4px;'>/settings/subscription-billing</code></h3>
+<ul><li>현재 티어, 다음 결제일</li>
+<li>결제 수단 (토스페이먼츠)</li>
+<li>청구서 이력 (billing_invoices)</li></p><p></ul><h3 style="color:#333;">1.13 데이터백업 <code style='background:#eee;font-family:Consolas;font-size:9pt;padding:1px 4px;'>/data/backup</code></h3>
+<ul><li>E2E 암호화 백업 (헌법 #22)</li>
+<li>자동 스케줄 + 수동 실행</li>
+<li>복원 (RestoreConfirmDialog)</li></p><p></ul><h3 style="color:#333;">1.14 로그 <code style='background:#eee;font-family:Consolas;font-size:9pt;padding:1px 4px;'>/data/logs</code></h3>
+<ul><li>감사 로그 (audit_trail)</li>
+<li>API 요청 로그</li>
+<li>로그인 시도</li></p><p></ul><h3 style="color:#333;">1.15 MDB마이그 <code style='background:#eee;font-family:Consolas;font-size:9pt;padding:1px 4px;'>/settings/mdb-migration</code></h3>
+<ul><li>레거시 히트판 (Access MDB) 데이터 이관</li>
+<li>SignalR 진행률</li>
+<li>헌법 #26 목표 10분 / Timeout 24시간</li></p><p></ul><h3 style="color:#333;">1.16 약관동의 <code style='background:#eee;font-family:Consolas;font-size:9pt;padding:1px 4px;'>/terms</code> ⭐ 신규 (2026-05-31)</h3>
+<ul><li>필수 4 (서비스·개인정보·구독·데이터소유권)</li>
+<li>선택 1 (마케팅 수신)</li>
+<li>v2.0.0 버전 박제</li></p><p></ul>---</p><p><h2 style="border-bottom:1px solid #999;padding-bottom:3px;color:#1976D2;">2. 마스터 (Stage 2, 8건)</h2></p><p><h3 style="color:#333;">2.1 업체관리 <code style='background:#eee;font-family:Consolas;font-size:9pt;padding:1px 4px;'>/partners</code></h3>
+<ul><li>CRUD + 사업자번호 검증</li>
+<li>매입처/매출처 구분 (partner_type)</li>
+<li>연락처 (partner_contacts)</li></p><p></ul><h3 style="color:#333;">2.2 업체원장 <code style='background:#eee;font-family:Consolas;font-size:9pt;padding:1px 4px;'>/partners/ledger</code></h3>
+<ul><li>거래처별 거래 내역 (매입·매출·수금·지급)</li>
+<li>잔액 (partner_balance)</li></p><p></ul><h3 style="color:#333;">2.3 업체특별단가 <code style='background:#eee;font-family:Consolas;font-size:9pt;padding:1px 4px;'>/partners/special-prices</code></h3>
+<ul><li>거래처-상품별 특별 단가</li>
+<li>우선순위: 특별단가 > 상품 기본단가</li></p><p></ul><h3 style="color:#333;">2.4 상품관리 <code style='background:#eee;font-family:Consolas;font-size:9pt;padding:1px 4px;'>/items</code></h3>
+<ul><li>CRUD + 카테고리 (item_groups)</li>
+<li>단위, 판매단가, 매입단가, 표준단가</li>
+<li>안전재고, 자동발주</li></p><p></ul><h3 style="color:#333;">2.5 상품원장 <code style='background:#eee;font-family:Consolas;font-size:9pt;padding:1px 4px;'>/items/ledger</code></h3>
+<ul><li>상품별 입출고 내역 (stock_ledger)</li></p><p></ul><h3 style="color:#333;">2.6 상품특별단가 <code style='background:#eee;font-family:Consolas;font-size:9pt;padding:1px 4px;'>/items/special-prices</code></h3>
+<ul><li>상품-거래처별</li></p><p></ul><h3 style="color:#333;">2.7 BOM관리 <code style='background:#eee;font-family:Consolas;font-size:9pt;padding:1px 4px;'>/bom</code></h3>
+<ul><li>헤더 (완제품) + 자재 (bom_items)</li>
+<li>단가 캐시 (bom_cost_cache)</li></p><p></ul><h3 style="color:#333;">2.8 BOM신규 <code style='background:#eee;font-family:Consolas;font-size:9pt;padding:1px 4px;'>/bom/new</code></h3>
+<ul><li>완제품 선택 + 자재 N건 + 수량 + 단가</li></p><p></ul>---</p><p><h2 style="border-bottom:1px solid #999;padding-bottom:3px;color:#1976D2;">3. 매입 (Stage 3, 9건)</h2></p><p><h3 style="color:#333;">3.1 발주서 <code style='background:#eee;font-family:Consolas;font-size:9pt;padding:1px 4px;'>/purchase-orders</code></h3>
+<ul><li>거래처·납기·품목 라인 (규격 콤보 동적)</li>
+<li>자동 발주 옵션 (is_auto)</li>
+<li>결재 라인 통합</li></p><p></ul><h3 style="color:#333;">3.2 발주현황 <code style='background:#eee;font-family:Consolas;font-size:9pt;padding:1px 4px;'>/purchase-order-status</code></h3>
+<ul><li>상태별 필터 (draft·confirmed·partial·completed·cancelled)</li>
+<li>입고율 표시</li></p><p></ul><h3 style="color:#333;">3.3 매입명세서 <code style='background:#eee;font-family:Consolas;font-size:9pt;padding:1px 4px;'>/purchases</code></h3>
+<ul><li>발주에서 가져오기 OR 신규</li>
+<li>입고 처리 → stock_ledger +N</li></p><p></ul><h3 style="color:#333;">3.4 매입현황 / 요약 / 통계 / 순위</h3>
+<ul><li><code style='background:#eee;font-family:Consolas;font-size:9pt;padding:1px 4px;'>/purchase-status</code>, <code style='background:#eee;font-family:Consolas;font-size:9pt;padding:1px 4px;'>/purchases/summary</code>, <code style='background:#eee;font-family:Consolas;font-size:9pt;padding:1px 4px;'>/purchase/statistics</code>, <code style='background:#eee;font-family:Consolas;font-size:9pt;padding:1px 4px;'>/purchase/ranking</code></li>
+<li>기간별 / 거래처별 / 상품별 집계</li></p><p></ul><h3 style="color:#333;">3.5 반품처리 <code style='background:#eee;font-family:Consolas;font-size:9pt;padding:1px 4px;'>/returns</code></h3>
+<ul><li>매입에서 가져오기 → 반품 사유 (DB-75)</li>
+<li>6종 사유 + 메모</li>
+<li>재고 차감 (stock_ledger -N)</li></p><p></ul><h3 style="color:#333;">3.6 반품현황 <code style='background:#eee;font-family:Consolas;font-size:9pt;padding:1px 4px;'>/return-status</code></h3></p><p><hr style="border:none;border-top:1px solid #ccc;"></p><p><h2 style="border-bottom:1px solid #999;padding-bottom:3px;color:#1976D2;">4. 판매 (Stage 4, 12건)</h2></p><p><h3 style="color:#333;">4.1 견적서 <code style='background:#eee;font-family:Consolas;font-size:9pt;padding:1px 4px;'>/quotations</code></h3>
+<ul><li>거래처·유효기간·품목 라인</li>
+<li>규격 콤보 동적 (ItemSpecAutocomplete)</li>
+<li>PDF 생성 (QuestPDF, paper_mode 분기)</li>
+<li>메일 발송</li></p><p></ul><h3 style="color:#333;">4.2 견적현황 <code style='background:#eee;font-family:Consolas;font-size:9pt;padding:1px 4px;'>/quotation-status</code></h3></p><p><h3 style="color:#333;">4.3 수주서 <code style='background:#eee;font-family:Consolas;font-size:9pt;padding:1px 4px;'>/sales-orders</code></h3>
+<ul><li>견적 → 수주 변환</li>
+<li>수주신규 <code style='background:#eee;font-family:Consolas;font-size:9pt;padding:1px 4px;'>/sales-orders/new</code> (직접 작성)</li></p><p></ul><h3 style="color:#333;">4.4 수주현황 <code style='background:#eee;font-family:Consolas;font-size:9pt;padding:1px 4px;'>/sales-order-status</code></h3></p><p><h3 style="color:#333;">4.5 거래명세서 <code style='background:#eee;font-family:Consolas;font-size:9pt;padding:1px 4px;'>/deliveries</code></h3>
+<ul><li>수주에서 가져오기 → 출고</li>
+<li>stock_ledger -N + journal_lines INSERT (확정 시)</li>
+<li>WorkflowBreadcrumb 표시 (견적→수주→거래명세→세금계산서)</li></p><p></ul><h3 style="color:#333;">4.6 판매현황 / 요약 / 통계 / 순위 / 수익성</h3>
+<ul><li><code style='background:#eee;font-family:Consolas;font-size:9pt;padding:1px 4px;'>/sales</code>, <code style='background:#eee;font-family:Consolas;font-size:9pt;padding:1px 4px;'>/sales/summary</code>, <code style='background:#eee;font-family:Consolas;font-size:9pt;padding:1px 4px;'>/sales/statistics</code>, <code style='background:#eee;font-family:Consolas;font-size:9pt;padding:1px 4px;'>/sales/ranking</code>, <code style='background:#eee;font-family:Consolas;font-size:9pt;padding:1px 4px;'>/sales/profitability</code></li></p><p></ul><h3 style="color:#333;">4.7 엑셀임포트 <code style='background:#eee;font-family:Consolas;font-size:9pt;padding:1px 4px;'>/sales/import</code></h3>
+<ul><li>견적·수주·거래명세 일괄 등록</li></p><p></ul>---</p><p><h2 style="border-bottom:1px solid #999;padding-bottom:3px;color:#1976D2;">5. 재고 (Stage 5, 7건)</h2></p><p><h3 style="color:#333;">5.1 재고현황 <code style='background:#eee;font-family:Consolas;font-size:9pt;padding:1px 4px;'>/stock</code></h3>
+<ul><li>창고별 / 상품별 / 카테고리별</li>
+<li>안전재고 미달 경고</li></p><p></ul><h3 style="color:#333;">5.2 재고원장 <code style='background:#eee;font-family:Consolas;font-size:9pt;padding:1px 4px;'>/stock/ledger</code></h3>
+<ul><li>stock_ledger 전체 (INSERT ONLY, 헌법 #3)</li>
+<li>입출고 유형: purchase, sale, adjust, transfer, bom_in, bom_out</li></p><p></ul><h3 style="color:#333;">5.3 재고조정 <code style='background:#eee;font-family:Consolas;font-size:9pt;padding:1px 4px;'>/stock/adjust</code></h3>
+<ul><li>실사 후 +/- 조정 (사유 필수)</li>
+<li>adjust_history 별도 추적</li></p><p></ul><h3 style="color:#333;">5.4 재고이동 <code style='background:#eee;font-family:Consolas;font-size:9pt;padding:1px 4px;'>/stock/transfer</code></h3>
+<ul><li>창고 간 이동 (출/입 동시)</li></p><p></ul><h3 style="color:#333;">5.5 이동현황 <code style='background:#eee;font-family:Consolas;font-size:9pt;padding:1px 4px;'>/stock/transfer-status</code></h3></p><p><h3 style="color:#333;">5.6 창고관리 <code style='background:#eee;font-family:Consolas;font-size:9pt;padding:1px 4px;'>/stock/warehouse-manage</code></h3>
+<ul><li>창고 CRUD</li></p><p></ul><h3 style="color:#333;">5.7 창고분할 <code style='background:#eee;font-family:Consolas;font-size:9pt;padding:1px 4px;'>/stock/warehouse-split</code></h3>
+<ul><li>창고 → 위치(랙·층) 세분화</li></p><p></ul>---</p><p><h2 style="border-bottom:1px solid #999;padding-bottom:3px;color:#1976D2;">6. 재무 (Stage 6, 14건)</h2></p><p><h3 style="color:#333;">6.1 회계 <code style='background:#eee;font-family:Consolas;font-size:9pt;padding:1px 4px;'>/accounting</code></h3>
+<ul><li>분개 일람 + 계정 잔액</li></p><p></ul><h3 style="color:#333;">6.2 계정과목 <code style='background:#eee;font-family:Consolas;font-size:9pt;padding:1px 4px;'>/accounting/accounts</code></h3>
+<ul><li>accounts 마스터 (DB-32 시드)</li></p><p></ul><h3 style="color:#333;">6.3 경비처리 <code style='background:#eee;font-family:Consolas;font-size:9pt;padding:1px 4px;'>/accounting/expenses</code></h3>
+<ul><li>경비 등록 → 분개 자동 생성</li></p><p></ul><h3 style="color:#333;">6.4 월마감 <code style='background:#eee;font-family:Consolas;font-size:9pt;padding:1px 4px;'>/accounting/monthly-closing</code></h3>
+<ul><li>월별 마감 처리 → monthly_summary INSERT</li>
+<li>마감 후 수정 차단</li></p><p></ul><h3 style="color:#333;">6.5 손익 <code style='background:#eee;font-family:Consolas;font-size:9pt;padding:1px 4px;'>/accounting/profit</code></h3>
+<ul><li>매출 - 매입 - 경비</li></p><p></ul><h3 style="color:#333;">6.6 매입매출장 <code style='background:#eee;font-family:Consolas;font-size:9pt;padding:1px 4px;'>/accounting/purchase-sales</code></h3>
+<ul><li>부가세 신고용 원장</li></p><p></ul><h3 style="color:#333;">6.7 부가세 <code style='background:#eee;font-family:Consolas;font-size:9pt;padding:1px 4px;'>/accounting/vat</code></h3>
+<ul><li>VAT 신고 자료</li></p><p></ul><h3 style="color:#333;">6.8 세무신고 <code style='background:#eee;font-family:Consolas;font-size:9pt;padding:1px 4px;'>/accounting/export</code></h3>
+<ul><li>세무사 자동 전송 (수동/자동/반자동 3모드)</li></p><p></ul><h3 style="color:#333;">6.9 은행거래 <code style='background:#eee;font-family:Consolas;font-size:9pt;padding:1px 4px;'>/accounting/bank-transactions</code></h3>
+<ul><li>입출금 기록 (bank_transactions)</li></p><p></ul><h3 style="color:#333;">6.10 카드결제 <code style='background:#eee;font-family:Consolas;font-size:9pt;padding:1px 4px;'>/accounting/card-payments</code></h3>
+<ul><li>카드 사용 내역</li></p><p></ul><h3 style="color:#333;">6.11 어음수표 <code style='background:#eee;font-family:Consolas;font-size:9pt;padding:1px 4px;'>/accounting/bills</code></h3>
+<ul><li>bills_cards_bank 통합</li></p><p></ul><h3 style="color:#333;">6.12 출납장 <code style='background:#eee;font-family:Consolas;font-size:9pt;padding:1px 4px;'>/accounting/cashbook</code></h3>
+<ul><li>현금 출납 일지</li></p><p></ul><h3 style="color:#333;">6.13 수금 <code style='background:#eee;font-family:Consolas;font-size:9pt;padding:1px 4px;'>/collections</code></h3>
+<ul><li>매출채권 회수</li></p><p></ul><h3 style="color:#333;">6.14 지급 <code style='background:#eee;font-family:Consolas;font-size:9pt;padding:1px 4px;'>/payments</code></h3>
+<ul><li>매입채무 지급</li></p><p></ul>---</p><p><h2 style="border-bottom:1px solid #999;padding-bottom:3px;color:#1976D2;">7. 인사 (15건)</h2></p><p><h3 style="color:#333;">7.1 HR사원 <code style='background:#eee;font-family:Consolas;font-size:9pt;padding:1px 4px;'>/hr/employees</code></h3>
+<ul><li>인사 카드, 급여, 4대보험</li></p><p></ul><h3 style="color:#333;">7.2 부서 <code style='background:#eee;font-family:Consolas;font-size:9pt;padding:1px 4px;'>/hr/departments</code></h3>
+<ul><li>조직도</li></p><p></ul><h3 style="color:#333;">7.3 직위 <code style='background:#eee;font-family:Consolas;font-size:9pt;padding:1px 4px;'>/hr/positions</code></h3>
+<ul><li>직위 마스터</li></p><p></ul><h3 style="color:#333;">7.4 근태 <code style='background:#eee;font-family:Consolas;font-size:9pt;padding:1px 4px;'>/hr/attendance</code></h3>
+<ul><li>출근·퇴근·외근·재택</li></p><p></ul><h3 style="color:#333;">7.5 근태달력 <code style='background:#eee;font-family:Consolas;font-size:9pt;padding:1px 4px;'>/hr/attendance-calendar</code></h3></p><p><h3 style="color:#333;">7.6 연차·신청·현황·달력</h3>
+<ul><li><code style='background:#eee;font-family:Consolas;font-size:9pt;padding:1px 4px;'>/hr/leave</code>, <code style='background:#eee;font-family:Consolas;font-size:9pt;padding:1px 4px;'>/leave-request</code>, <code style='background:#eee;font-family:Consolas;font-size:9pt;padding:1px 4px;'>/leave-status</code>, <code style='background:#eee;font-family:Consolas;font-size:9pt;padding:1px 4px;'>/leave-calendar</code></li></p><p></ul><h3 style="color:#333;">7.7 초과근무 <code style='background:#eee;font-family:Consolas;font-size:9pt;padding:1px 4px;'>/hr/overtime</code></h3></p><p><h3 style="color:#333;">7.8 경비신청·현황</h3>
+<ul><li><code style='background:#eee;font-family:Consolas;font-size:9pt;padding:1px 4px;'>/hr/expense-request</code>, <code style='background:#eee;font-family:Consolas;font-size:9pt;padding:1px 4px;'>/expense-status</code></li></p><p></ul><h3 style="color:#333;">7.9 근로계약·작성·서명</h3>
+<ul><li><code style='background:#eee;font-family:Consolas;font-size:9pt;padding:1px 4px;'>/hr/labor-contracts</code>, <code style='background:#eee;font-family:Consolas;font-size:9pt;padding:1px 4px;'>/create</code>, <code style='background:#eee;font-family:Consolas;font-size:9pt;padding:1px 4px;'>/{Id}/sign</code></li>
+<li>간편인증 4종 (카카오/토스/금융/PASS)</li></p><p></ul><h3 style="color:#333;">7.10 서명이력 <code style='background:#eee;font-family:Consolas;font-size:9pt;padding:1px 4px;'>/hr/esign-history</code></h3>
+<ul><li>esign_records 전수</li></p><p></ul>---</p><p><h2 style="border-bottom:1px solid #999;padding-bottom:3px;color:#1976D2;">8. 결재 (3건)</h2></p><p><h3 style="color:#333;">8.1 결재대기 <code style='background:#eee;font-family:Consolas;font-size:9pt;padding:1px 4px;'>/approval/pending</code></h3>
+<ul><li>본인 결재 차례 문서</li></p><p></ul><h3 style="color:#333;">8.2 결재완료 <code style='background:#eee;font-family:Consolas;font-size:9pt;padding:1px 4px;'>/approval/completed</code></h3>
+<ul><li>처리 완료</li></p><p></ul><h3 style="color:#333;">8.3 결재발신 <code style='background:#eee;font-family:Consolas;font-size:9pt;padding:1px 4px;'>/approval/sent</code></h3>
+<ul><li>본인 요청 문서 진행 상태</li></p><p></ul>---</p><p><h2 style="border-bottom:1px solid #999;padding-bottom:3px;color:#1976D2;">9. 공통</h2></p><p><h3 style="color:#333;">9.1 대시보드 <code style='background:#eee;font-family:Consolas;font-size:9pt;padding:1px 4px;'>/dashboard</code></h3>
+<ul><li>KPI (오늘 매출·매입·재고·결재대기)</li>
+<li>UnifiedCalendar (통합 일정)</li>
+<li>DailyBriefing 모달</li></p><p></ul><h3 style="color:#333;">9.2 환영 <code style='background:#eee;font-family:Consolas;font-size:9pt;padding:1px 4px;'>/welcome</code></h3>
+<ul><li>첫 로그인 가이드</li></p><p></ul><h3 style="color:#333;">9.3 More <code style='background:#eee;font-family:Consolas;font-size:9pt;padding:1px 4px;'>/more</code> (모바일 메뉴)</h3></p><p><h3 style="color:#333;">9.4 통합 캘린더</h3>
+<ul><li>견적·수주·발주·연차·근태 통합 표시</li>
+<li>DB-50 unified_calendar</li></p><p></ul>---</p><p><h2 style="border-bottom:1px solid #999;padding-bottom:3px;color:#1976D2;">10. 모바일 (10건, Phase 5 UX 비전)</h2></p><p><table style='border-collapse:collapse;margin:10px 0;'><thead><tr><th style='border:1px solid #aaa;padding:4px 8px;background:#e3f2fd;'>화면</th><th style='border:1px solid #aaa;padding:4px 8px;background:#e3f2fd;'>경로</th><th style='border:1px solid #aaa;padding:4px 8px;background:#e3f2fd;'>특징</th></tr></thead><tbody><tr><td style='border:1px solid #aaa;padding:4px 8px;'>Items</td><td style='border:1px solid #aaa;padding:4px 8px;'>/mobile/items</td><td style='border:1px solid #aaa;padding:4px 8px;'>아이폰 홈 스타일</td></tr>
+<tr><td style='border:1px solid #aaa;padding:4px 8px;'>Partners</td><td style='border:1px solid #aaa;padding:4px 8px;'>/mobile/partners</td><td style='border:1px solid #aaa;padding:4px 8px;'>빠른 검색</td></tr>
+<tr><td style='border:1px solid #aaa;padding:4px 8px;'>PurchaseOrder</td><td style='border:1px solid #aaa;padding:4px 8px;'>/mobile/purchase-order</td><td style='border:1px solid #aaa;padding:4px 8px;'>음성 입력 가능</td></tr>
+<tr><td style='border:1px solid #aaa;padding:4px 8px;'>Quotation</td><td style='border:1px solid #aaa;padding:4px 8px;'>/mobile/quotation</td><td style='border:1px solid #aaa;padding:4px 8px;'>현장 즉시 발행</td></tr>
+<tr><td style='border:1px solid #aaa;padding:4px 8px;'>Sales</td><td style='border:1px solid #aaa;padding:4px 8px;'>/mobile/sales</td><td style='border:1px solid #aaa;padding:4px 8px;'>일일 요약</td></tr>
+<tr><td style='border:1px solid #aaa;padding:4px 8px;'>...</td><td style='border:1px solid #aaa;padding:4px 8px;'>...</td><td style='border:1px solid #aaa;padding:4px 8px;'>꾹 눌러 재정렬</td></tr></tbody></table>
+<hr style="border:none;border-top:1px solid #ccc;"></p><p><h2 style="border-bottom:1px solid #999;padding-bottom:3px;color:#1976D2;">11. AI CS 챗봇</h2></p><p><h3 style="color:#333;">"히트판에게 물어보세요"</h3>
+<ul><li>BYOK + RAG + Tool Use</li>
+<li>hitpan_knowledge 테이블 (벡터 검색)</li>
+<li>11일 구현 PRD (<code style='background:#eee;font-family:Consolas;font-size:9pt;padding:1px 4px;'>docs/design/PRD_AI_CS_SYSTEM.md</code>)</li>
+<li>토큰 한도: 100K/500K/3M (티어별)</li>
+</ul></p></body>
+</html>

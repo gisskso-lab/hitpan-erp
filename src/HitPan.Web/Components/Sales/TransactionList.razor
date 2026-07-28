@@ -1,0 +1,79 @@
+@using HitPan.Web.Models
+@namespace HitPan.Web.Components.Sales
+
+<div class="transaction-list">
+    <MudPaper Class="pa-3 mb-2">
+        <MudStack Row="true" Spacing="2" AlignItems="AlignItems.Center" Wrap="Wrap.Wrap">
+            <MudDatePicker Label="시작일" Date="_startDate" DateChanged="OnStartDateChanged" />
+            <MudDatePicker Label="종료일" Date="_endDate" DateChanged="OnEndDateChanged" />
+            <MudAutocomplete T="PartnerSearchResult"
+                             Label="업체"
+                             Value="_partner"
+                             ValueChanged="OnPartnerChanged"
+                             SearchFunc="SearchPartnersAsync"
+                             ToStringFunc="@(x => x is null ? string.Empty : x.PartnerName)"
+                             Clearable="true"
+                             Dense="true" />
+            @* MudSelectItem 의 Value 는 문자열 리터럴로 명시해야 한다(식별자 오인식 CS0103 방지). *@
+            <MudSelect T="string" Label="상태" Value="_status" ValueChanged="OnStatusChanged" Dense="true" Style="min-width:180px">
+                <MudSelectItem T="string" Value="@("draft")">Draft</MudSelectItem>
+                <MudSelectItem T="string" Value="@("confirmed")">Confirmed</MudSelectItem>
+                <MudSelectItem T="string" Value="@("cancelled")">Cancelled</MudSelectItem>
+            </MudSelect>
+            <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="LoadAsync">조회</MudButton>
+            <MudButton Variant="Variant.Outlined" Color="Color.Success" OnClick="BulkConfirmSelectedAsync" Disabled="@(!_selectedRows.Any())">
+                선택 일괄 Confirmed
+            </MudButton>
+        </MudStack>
+    </MudPaper>
+
+    <MudPaper Class="pa-2 mb-2">
+        <MudStack Row="true" Spacing="3">
+            <MudText Typo="Typo.body2">선택 공급가액: @_selectedSupplyAmount.ToString("N0")</MudText>
+            <MudText Typo="Typo.body2">선택 부가세: @_selectedVatAmount.ToString("N0")</MudText>
+            <MudText Typo="Typo.body2">선택 합계: @_selectedTotalAmount.ToString("N0")</MudText>
+        </MudStack>
+    </MudPaper>
+
+    <MudTable T="DeliveryListDto"
+              Items="_rows"
+              Dense="true"
+              Hover="true"
+              Striped="true"
+              Height="calc(100vh - 420px)"
+              FixedHeader="true">
+        <HeaderContent>
+            <MudTh Style="width:48px">
+                <MudCheckBox T="bool" Value="_allSelected" ValueChanged="ToggleSelectAllAsync" />
+            </MudTh>
+            <MudTh>일자</MudTh>
+            <MudTh>전표번호</MudTh>
+            <MudTh>업체</MudTh>
+            <MudTh>상태</MudTh>
+            <MudTh Class="text-right">공급가액</MudTh>
+            <MudTh Class="text-right">부가세</MudTh>
+            <MudTh Class="text-right">합계</MudTh>
+        </HeaderContent>
+        <RowTemplate>
+            <MudTd>
+                <div @onclick:stopPropagation="true">
+                    <MudCheckBox T="bool"
+                                 Value="context.IsChecked"
+                                 ValueChanged="@(v => ToggleOneAsync(context, v))" />
+                </div>
+            </MudTd>
+            <MudTd @onclick="@(() => SelectRowAsync(context))">@context.OrderDate.ToString("yyyy-MM-dd")</MudTd>
+            <MudTd @onclick="@(() => SelectRowAsync(context))">
+                <MudText Class="@GetOrderNoClass(context)">@context.DeliveryNo</MudText>
+            </MudTd>
+            <MudTd @onclick="@(() => SelectRowAsync(context))">@context.PartnerName</MudTd>
+            <MudTd @onclick="@(() => SelectRowAsync(context))">@context.Status</MudTd>
+            <MudTd Class="text-right" @onclick="@(() => SelectRowAsync(context))">@context.SupplyAmount.ToString("N0")</MudTd>
+            <MudTd Class="text-right" @onclick="@(() => SelectRowAsync(context))">@context.VatAmount.ToString("N0")</MudTd>
+            <MudTd Class="text-right" @onclick="@(() => SelectRowAsync(context))">@context.TotalAmount.ToString("N0")</MudTd>
+        </RowTemplate>
+        <NoRecordsContent>
+            <MudText Typo="Typo.body2" Class="pa-4">조회된 거래명세서가 없습니다.</MudText>
+        </NoRecordsContent>
+    </MudTable>
+</div>

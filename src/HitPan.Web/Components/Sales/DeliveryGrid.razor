@@ -1,0 +1,96 @@
+@using HitPan.Web.Models
+
+<MudTable T="DeliveryLineModel" Items="Lines" Dense="true" Hover="true" Striped="true" FixedHeader="true" Height="calc(100vh - 340px)">
+    <HeaderContent>
+        <MudTh Style="width:48px"><MudCheckBox T="bool" Value="AllSelected" ValueChanged="ToggleSelectAll" /></MudTh>
+        <MudTh Style="width:60px">No</MudTh>
+        <MudTh>품명</MudTh>
+        <MudTh>규격</MudTh>
+        <MudTh Style="width:90px">단위</MudTh>
+        <MudTh Class="text-right">수량</MudTh>
+        <MudTh Class="text-right">단가</MudTh>
+        <MudTh Class="text-right">금액</MudTh>
+        <MudTh Class="text-right">부가세액</MudTh>
+        <MudTh>비고</MudTh>
+    </HeaderContent>
+    <RowTemplate>
+        <MudTd><MudCheckBox T="bool" Value="context.IsSelected" ValueChanged="@(v => ToggleOne(context, v))" /></MudTd>
+        <MudTd>@context.No</MudTd>
+        <MudTd>
+            <div style="display:flex;align-items:center;gap:4px">
+                <MudAutocomplete T="string" Value="context.ItemName" SearchFunc="SearchItemAsync"
+                    ValueChanged="@(v => { context.ItemName = v; context.IsPlaceholder = false; AutoFillItem(context, v); NotifyChanged(); })"
+                    Margin="Margin.Dense" Dense="true" Placeholder="품명 검색" />
+                <ItemTypeChip ItemType="@context.ItemType" />
+            </div>
+        </MudTd>
+        <MudTd>
+            @* 작지① 규격 콤보박스 (사장님 작업지시 2026-05-31) *@
+            <ItemSpecAutocomplete ItemId="@context.ItemId" Value="@context.Spec"
+                                   ValueChanged="@(v => { context.Spec = v; NotifyChanged(); })" />
+        </MudTd>
+        <MudTd><MudTextField T="string" Value="context.Unit" ValueChanged="@(v => { context.Unit = v; NotifyChanged(); })" Margin="Margin.Dense" /></MudTd>
+        <MudTd><MudNumericField T="decimal" Value="context.Qty" ValueChanged="@(v => { context.Qty = v; RecalcLine(context); })" Margin="Margin.Dense" /></MudTd>
+        <MudTd><MudNumericField T="decimal" Value="context.UnitPrice" ValueChanged="@(v => { context.UnitPrice = v; RecalcLine(context); })" Margin="Margin.Dense" /></MudTd>
+        <MudTd Class="text-right">@context.Amount.ToString("N0")</MudTd>
+        <MudTd Class="text-right">@context.VatAmount.ToString("N0")</MudTd>
+        <MudTd><MudTextField T="string" Value="context.Note" ValueChanged="@(v => { context.Note = v; NotifyChanged(); })" Margin="Margin.Dense" /></MudTd>
+    </RowTemplate>
+    <NoRecordsContent><MudText Typo="Typo.body2" Class="pa-4">품목이 없습니다. 추가 버튼을 눌러주세요.</MudText></NoRecordsContent>
+</MudTable>
+
+@code {
+    [Parameter, EditorRequired] public List<DeliveryLineModel> Lines { get; set; } = default!;
+    [Parameter] public DeliveryLineModel? SelectedLine { get; set; }
+    [Parameter] public EventCallback<DeliveryLineModel?> SelectedLineChanged { get; set; }
+    [Parameter] public DeliveryGridDensity Density { get; set; }
+    [Parameter] public EventCallback OnChanged { get; set; }
+    [Parameter] public EventCallback OnSelectionChanged { get; set; }
+    [Parameter] public EventCallback<(DeliveryLineModel Line, DeliveryContextAction Action)> OnContextSecondary { get; set; }
+    [Parameter] public DeliverySummaryModel Summary { get; set; } = new();
+    [Parameter] public List<ItemListModel>? ItemCache { get; set; }
+
+    private Task<IEnumerable<string>> SearchItemAsync(string value, CancellationToken ct)
+    {
+        if (ItemCache is null) return Task.FromResult(Enumerable.Empty<string>());
+        if (string.IsNullOrWhiteSpace(value)) return Task.FromResult(ItemCache.Select(i => i.ItemName).Distinct());
+        return Task.FromResult(ItemCache.Where(i => i.ItemName.Contains(value, StringComparison.OrdinalIgnoreCase)).Select(i => i.ItemName).Distinct());
+    }
+
+    private void AutoFillItem(DeliveryLineModel line, string itemName)
+    {
+        if (ItemCache is null) return;
+        var item = ItemCache.FirstOrDefault(i => i.ItemName == itemName);
+        if (item is null) return;
+        line.ItemId = item.ItemId;
+        line.Spec = item.Spec ?? "";
+        line.Unit = item.Unit;
+        line.UnitPrice = item.SalePrice;
+        line.ItemType = item.ItemType;  // promo/assembly 칩 자동 반영
+    }
+
+    private bool AllSelected => Lines.Any(l => !l.IsPlaceholder) && Lines.Where(l => !l.IsPlaceholder).All(l => l.IsSelected);
+
+    private async Task ToggleSelectAll(bool value)
+    {
+        foreach (var l in Lines.Where(x => !x.IsPlaceholder)) l.IsSelected = value;
+        await OnSelectionChanged.InvokeAsync();
+    }
+
+    private async Task ToggleOne(DeliveryLineModel line, bool value)
+    {
+        line.IsSelected = value;
+        await OnSelectionChanged.InvokeAsync();
+    }
+
+    private void RecalcLine(DeliveryLineModel line)
+    {
+        Summary.SupplyAmount = Lines.Where(x => !x.IsPlaceholder).Sum(x => x.Amount);
+        Summary.VatAmount = Lines.Where(x => !x.IsPlaceholder).Sum(x => x.VatAmount);
+        Summary.TotalAmount = Summary.SupplyAmount + Summary.VatAmount;
+        OnChanged.InvokeAsync();
+        StateHasChanged();
+    }
+
+    private void NotifyChanged() => OnChanged.InvokeAsync();
+}

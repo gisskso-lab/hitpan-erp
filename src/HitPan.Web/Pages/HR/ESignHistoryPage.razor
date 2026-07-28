@@ -1,0 +1,203 @@
+@page "/hr/esign-history"
+@namespace HitPan.Web.Pages.HrUi
+@attribute [Authorize]
+@using HitPan.Web.Components.Common
+@using HitPan.Web.Helpers
+@using HitPan.Web.Models
+@using HitPan.Web.Services
+@inject ESignService ESignSvc
+@inject IDialogService DialogService
+@inject ISnackbar Snackbar
+@inject AuthenticationStateProvider AuthState
+
+<PageTitle>전자서명 이력 — 히트판 ERP</PageTitle>
+
+<PageHeader Title="전자서명 이력"
+            Subtitle="근로계약서, 보안서약서 등 모든 전자서명 기록을 조회합니다." />
+
+@* === 필터 === *@
+<MudPaper Elevation="0" Class="pa-3 mb-3 hitpan-card">
+    <MudGrid Spacing="2" Class="align-center">
+        <MudItem xs="12" sm="3">
+            <MudSelect T="string" @bind-Value="_filterDocType" Label="문서유형"
+                       Variant="Variant.Outlined" Margin="Margin.Dense">
+                <MudSelectItem Value="@("")">전체</MudSelectItem>
+                <MudSelectItem Value="@("labor_contract")">근로계약서</MudSelectItem>
+                <MudSelectItem Value="@("nda")">비밀유지서약</MudSelectItem>
+                <MudSelectItem Value="@("security_agreement")">보안서약서</MudSelectItem>
+                <MudSelectItem Value="@("other")">기타</MudSelectItem>
+            </MudSelect>
+        </MudItem>
+        <MudItem xs="12" sm="3">
+            <MudDatePicker @bind-Date="_filterStart" Label="시작일"
+                           Variant="Variant.Outlined" Margin="Margin.Dense"
+                           Style="min-width:160px" DateFormat="yyyy-MM-dd" Clearable="true" />
+        </MudItem>
+        <MudItem xs="12" sm="3">
+            <MudDatePicker @bind-Date="_filterEnd" Label="종료일"
+                           Variant="Variant.Outlined" Margin="Margin.Dense"
+                           Style="min-width:160px" DateFormat="yyyy-MM-dd" Clearable="true" />
+        </MudItem>
+        <MudItem xs="12" sm="3" Class="d-flex justify-end gap-2">
+            <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Search"
+                       OnClick="LoadAsync" Size="Size.Small">조회</MudButton>
+        </MudItem>
+    </MudGrid>
+</MudPaper>
+
+@* === 테이블 === *@
+<MudPaper Elevation="0" Class="hitpan-card">
+    @if (_loading)
+    {
+        <MudProgressLinear Indeterminate="true" Color="Color.Primary" />
+    }
+    else if (_filteredList.Count() == 0)
+    {
+        <EmptyState Icon="@Icons.Material.Outlined.History"
+                    Title="전자서명 이력이 없습니다"
+                    Subtitle="근로계약서 등 전자서명이 발생하면 이곳에 기록됩니다." />
+    }
+    else
+    {
+        <MudTable Items="_filteredList" Dense="true" Hover="true" Striped="true">
+            <HeaderContent>
+                <MudTh>서명일</MudTh>
+                <MudTh>문서유형</MudTh>
+                <MudTh>문서제목</MudTh>
+                <MudTh>서명자</MudTh>
+                <MudTh>인증방법</MudTh>
+                <MudTh Style="text-align:center">상태</MudTh>
+                @if (_isTenantAdmin)
+                {
+                    <MudTh Style="text-align:center;width:100px">관리</MudTh>
+                }
+            </HeaderContent>
+            <RowTemplate>
+                <MudTd>@context.SignedAt.ToLocalTime().ToString("yyyy-MM-dd HH:mm")</MudTd>
+                <MudTd>@GetDocTypeLabel(context.DocumentType)</MudTd>
+                <MudTd>@(context.DocumentTitle ?? "-")</MudTd>
+                <MudTd>@(context.SignerName ?? "-")</MudTd>
+                <MudTd>
+                    <MudChip T="string" Size="Size.Small" Variant="Variant.Text"
+                             Color="@GetProviderColor(context.Provider)">
+                        @GetProviderLabel(context.Provider)
+                    </MudChip>
+                </MudTd>
+                <MudTd Style="text-align:center">
+                    <MudChip T="string" Size="Size.Small" Variant="Variant.Filled"
+                             Color="@(context.Status == "signed" ? Color.Success : Color.Error)">
+                        @(context.Status == "signed" ? "유효" : "무효")
+                    </MudChip>
+                </MudTd>
+                @if (_isTenantAdmin)
+                {
+                    <MudTd Style="text-align:center">
+                        @if (context.Status == "signed")
+                        {
+                            <MudTooltip Text="서명 무효화">
+                                <MudIconButton Icon="@Icons.Material.Filled.Block"
+                                               Color="Color.Error" Size="Size.Small"
+                                               OnClick="@(() => VoidAsync(context))" />
+                            </MudTooltip>
+                        }
+                    </MudTd>
+                }
+            </RowTemplate>
+        </MudTable>
+    }
+</MudPaper>
+
+@code {
+    private bool _loading;
+    private bool _isTenantAdmin;
+    private List<ESignHistoryModel> _all = new();
+
+    private string _filterDocType = "";
+    private DateTime? _filterStart;
+    private DateTime? _filterEnd;
+
+    private IEnumerable<ESignHistoryModel> _filteredList => _all
+        .Where(x => _filterStart == null || x.SignedAt.Date >= _filterStart.Value.Date)
+        .Where(x => _filterEnd == null || x.SignedAt.Date <= _filterEnd.Value.Date)
+        .OrderByDescending(x => x.SignedAt);
+
+    protected override async Task OnInitializedAsync()
+    {
+        var state = await AuthState.GetAuthenticationStateAsync();
+        _isTenantAdmin = AccountTypeHelper.GetAccountType(state.User) == AccountTypeHelper.TenantAdmin;
+        await LoadAsync();
+    }
+
+    /// <summary>
+    /// 전자서명 이력을 조회한다. (서버측 필터: documentType)
+    /// </summary>
+    private async Task LoadAsync()
+    {
+        _loading = true;
+        StateHasChanged();
+        _all = await ESignSvc.GetHistoryAsync(
+            documentType: string.IsNullOrWhiteSpace(_filterDocType) ? null : _filterDocType);
+        _loading = false;
+    }
+
+    /// <summary>
+    /// 서명을 무효화한다. (TenantAdmin)
+    /// </summary>
+    private async Task VoidAsync(ESignHistoryModel item)
+    {
+        var ok = await ConfirmDialog.ShowAsync(
+            DialogService,
+            title: "전자서명 무효화",
+            message: $"'{item.DocumentTitle ?? item.DocumentType}' 서명을 무효화하시겠습니까?\n무효화 후에는 되돌릴 수 없습니다.",
+            confirmText: "무효화",
+            cancelText: "취소",
+            severity: Severity.Error);
+        if (!ok) return;
+
+        var success = await ESignSvc.VoidAsync(item.EsignId, "관리자 무효화");
+        if (success)
+        {
+            Snackbar.Add("서명이 무효화되었습니다.", Severity.Success);
+            await LoadAsync();
+        }
+        else
+        {
+            Snackbar.Add("무효화에 실패했습니다.", Severity.Error);
+        }
+    }
+
+    // ── 라벨 ──
+
+    private static string GetDocTypeLabel(string t) => t switch
+    {
+        "labor_contract" => "근로계약서",
+        "nda" => "비밀유지서약",
+        "security_agreement" => "보안서약서",
+        "other" => "기타",
+        _ => t
+    };
+
+    private static string GetProviderLabel(string p) => p switch
+    {
+        "kakao" => "카카오",
+        "toss" => "토스",
+        "finance" => "금융인증",
+        "pass" => "PASS",
+        "manual_upload" => "서면 스캔",
+        "handwritten" => "직접 서명",
+        "admin_verified" => "관리자 대리확인",
+        _ => p
+    };
+
+    private static Color GetProviderColor(string p) => p switch
+    {
+        "kakao" => Color.Warning,
+        "toss" => Color.Primary,
+        "finance" => Color.Info,
+        "pass" => Color.Dark,
+        "manual_upload" => Color.Secondary,
+        "handwritten" => Color.Secondary,
+        "admin_verified" => Color.Tertiary,
+        _ => Color.Default
+    };
+}

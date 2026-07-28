@@ -1,0 +1,39 @@
+@page "/admin/dashboard"
+@layout PlatformLayout
+@attribute [Authorize]
+@inject NavigationManager Nav
+
+@*
+    본사 대시보드 — W9 백오피스 신설 대기 안내 (사장님 결재 2026-06-04, 헌법 #35)
+
+    원본 저장는 ERP api/admin/dashboard 호출이었음 → ERP에서 어드민 컨트롤러 삭제됨 (W1+W2+W5).
+    W9 차수에 백오피스 API에 어드민 대시보드 신설 후 본 화면 복원.
+*@
+
+<PageTitle>본사 대시보드 — 히트판 백오피스</PageTitle>
+
+<div style="max-width:720px;margin:80px auto;text-align:center;">
+    <div style="font-size:64px;margin-bottom:24px;">📊</div>
+    <MudText Typo="Typo.h4" Style="font-weight:700;margin-bottom:12px;">본사 대시보드 준비 중</MudText>
+    <MudText Typo="Typo.body1" Color="Color.Secondary" Style="margin-bottom:32px;line-height:1.6;">
+        헌법 #35 객체 완전 분리 작업 중입니다. 백오피스 API에 대시보드 신설 후 자동 활성화됩니다.<br/>
+        지금은 아래 메뉴를 이용해주세요.
+    </MudText>
+    <div style="display:flex;gap:12px;justify-content:center;flex-wrap:wrap;">
+        <MudButton Variant="Variant.Filled" Color="Color.Primary"
+                   StartIcon="@Icons.Material.Filled.Business"
+                   OnClick='() => Nav.NavigateTo("/admin/tenants")'>
+            고객사 관리 (V2)
+        </MudButton>
+        <MudButton Variant="Variant.Filled" Color="Color.Secondary"
+                   StartIcon="@Icons.Material.Filled.Store"
+                   OnClick='() => Nav.NavigateTo("/admin/resellers")'>
+            협력업체 관리 (V2)
+        </MudButton>
+        <MudButton Variant="Variant.Outlined"
+                   StartIcon="@Icons.Material.Filled.VerifiedUser"
+                   OnClick='() => Nav.NavigateTo("/owner/credentials-status")'>
+            자격증명 상태
+        </MudButton>
+    </div>
+</div>

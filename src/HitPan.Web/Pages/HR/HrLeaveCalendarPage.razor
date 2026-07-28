@@ -1,0 +1,49 @@
+@page "/hr/leave-calendar"
+@namespace HitPan.Web.Pages.HrUi
+@attribute [Authorize]
+@using HitPan.Web.Models
+@using HitPan.Web.Services
+@inject LeaveRequestService LeaveSvc
+
+<PageTitle>휴가 일정</PageTitle>
+<PageHeader Title="휴가 일정" Subtitle="승인된 연차 기간 목록" />
+
+<MudPaper Elevation="0" Class="pa-2 hitpan-card">
+    <MudTable Items="_items" Dense="true" Hover="true" Striped="true">
+        <HeaderContent>
+            <MudTh>사원</MudTh><MudTh>유형</MudTh><MudTh>시작일</MudTh><MudTh>종료일</MudTh>
+            <MudTh Style="text-align:right">일수</MudTh>
+        </HeaderContent>
+        <RowTemplate>
+            <MudTd DataLabel="사원">@context.EmployeeName</MudTd>
+            <MudTd DataLabel="유형">@LeaveTypeLabel(context.LeaveType)</MudTd>
+            <MudTd DataLabel="시작일">@context.StartDate.ToString("yyyy-MM-dd")</MudTd>
+            <MudTd DataLabel="종료일">@context.EndDate.ToString("yyyy-MM-dd")</MudTd>
+            <MudTd DataLabel="일수" Style="text-align:right">@context.LeaveDays.ToString("0.#")일</MudTd>
+        </RowTemplate>
+        <NoRecordsContent><MudText Class="pa-4" Style="color:var(--hitpan-text-faint)">예정된 휴가가 없습니다.</MudText></NoRecordsContent>
+    </MudTable>
+</MudPaper>
+
+@code {
+    private List<LeaveRequestModel> _items = new();
+
+    protected override async Task OnInitializedAsync()
+    {
+        // GetListAsync 내부 catch가 실패 시 빈 목록 반환 → 크래시 없음
+        var all = await LeaveSvc.GetListAsync();
+        // 승인된 휴가만 = 일정. 시작일 순 정렬
+        _items = all
+            .Where(x => x.Status == "approved")
+            .OrderBy(x => x.StartDate)
+            .ToList();
+    }
+
+    private static string LeaveTypeLabel(string type) => type switch
+    {
+        "annual" => "연차",
+        "half" => "반차",
+        "sick" => "병가",
+        _ => type
+    };
+}

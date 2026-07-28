@@ -1,0 +1,29 @@
+@page "/"
+@page "/landing"
+@layout LandingLayout
+@using Microsoft.AspNetCore.Components
+@using HitPan.Landing.Components.Pages.Landing.Components
+
+@*
+  HomePage v2 — 랜딩 홈 대문 (수석 웹디자이너 저장 2026-06-01)
+  사장님 결재: "히트판의 시작점이자 대문 — 좀 더 이쁘게"
+
+  섹션 구성:
+    1) HeroSection — H1 48px(60px데스크) + 슬로건 + 2버튼 + 신뢰뱃지
+    2) FeatureSection — 3대 셀링 (그린·오렌지·네이비)
+    3) PricingSection — 3티어 (Basic 29k / Pro 49k / Enterprise 100k, Pro 강조)
+    4) CtaSection — "오늘 시작하세요"
+    5) LandingFooter — 약관·개인정보·CS·법무
+
+  디자인 토큰: design-tokens.css + landing-v2.css
+  카피: placeholder ({{ MARKETING:* }}) — 마케팅팀장 산출물로 차후 교체
+  레이아웃: LandingLayout 보존 (헌법 #1)
+*@
+
+<PageTitle>히트판 ERP — 처음 쓰는 사람도 그냥 되는 ERP</PageTitle>
+
+<HeroSection />
+<FeatureSection />
+<PricingSection />
+<CtaSection />
+<LandingFooter />

@@ -1,0 +1,132 @@
+@page "/accounting/card-payments"
+@namespace HitPan.Web.Pages.FinanceUi
+@attribute [Authorize]
+@using HitPan.Web.Models
+@using HitPan.Web.Services
+@inject BillsCardsBankService FinSvc
+@inject ISnackbar Snackbar
+
+<PageTitle>카드 결제</PageTitle>
+
+<PageHeader Title="카드 결제" Subtitle="법인카드 결제 청구 내역">
+    <Actions>
+        <MudButton Variant="Variant.Filled" Color="Color.Primary"
+                   StartIcon="@Icons.Material.Filled.Add"
+                   OnClick="OpenCreateAsync">새 결제</MudButton>
+    </Actions>
+</PageHeader>
+
+<MudGrid Spacing="2" Class="mb-3">
+    <MudItem xs="12" sm="4">
+        <KpiCard Color="KpiCard.KpiColor.Primary" Icon="@Icons.Material.Filled.CreditCard"
+                 Label="결제 건수" Value="@_items.Count.ToString("N0")" />
+    </MudItem>
+    <MudItem xs="12" sm="4">
+        <KpiCard Color="KpiCard.KpiColor.Warning" Icon="@Icons.Material.Filled.Functions"
+                 Label="청구 합계" Value="@_items.Sum(c => c.TotalAmount).ToString("N0")" />
+    </MudItem>
+    <MudItem xs="12" sm="4">
+        <KpiCard Color="KpiCard.KpiColor.Success" Icon="@Icons.Material.Filled.CheckCircle"
+                 Label="인출 합계" Value="@_items.Sum(c => c.SettledAmount).ToString("N0")" />
+    </MudItem>
+</MudGrid>
+
+<SectionCard Title="조회 조건">
+    <MudGrid Spacing="2">
+        <MudItem xs="6" md="3"><MudDatePicker Label="결제일 시작" @bind-Date="_from" Variant="Variant.Outlined" Margin="Margin.Dense" /></MudItem>
+        <MudItem xs="6" md="3"><MudDatePicker Label="결제일 종료" @bind-Date="_to" Variant="Variant.Outlined" Margin="Margin.Dense" /></MudItem>
+        <MudItem xs="12" md="2" Class="d-flex align-end">
+            <MudButton Variant="Variant.Outlined" Color="Color.Primary" OnClick="LoadAsync" FullWidth="true">조회</MudButton>
+        </MudItem>
+    </MudGrid>
+</SectionCard>
+
+<SectionCard Variant="SectionCard.SectionVariant.Flat" Class="mt-3">
+    <MudTable T="CardPaymentModel" Items="_items" Dense="true" Hover="true" Striped="true" FixedHeader="true" Height="calc(100vh - 360px)">
+        <HeaderContent>
+            <MudTh>결제일</MudTh>
+            <MudTh>카드사</MudTh>
+            <MudTh>카드번호</MudTh>
+            <MudTh>소유자</MudTh>
+            <MudTh Style="text-align:right">총액</MudTh>
+            <MudTh Style="text-align:right">할부</MudTh>
+            <MudTh Style="text-align:right">인출액</MudTh>
+            <MudTh>상태</MudTh>
+        </HeaderContent>
+        <RowTemplate>
+            <MudTd>@context.PaymentDate.ToString("yyyy-MM-dd")</MudTd>
+            <MudTd>@(context.CardCompany ?? "-")</MudTd>
+            <MudTd Style="font-family:monospace">@context.CardNo</MudTd>
+            <MudTd>@(context.HolderName ?? "-")</MudTd>
+            <MudTd Style="text-align:right;font-weight:500">@context.TotalAmount.ToString("N0")</MudTd>
+            <MudTd Style="text-align:right">@(context.InstallmentMonths > 0 ? $"{context.InstallmentMonths}개월" : "일시불")</MudTd>
+            <MudTd Style="text-align:right">@context.SettledAmount.ToString("N0")</MudTd>
+            <MudTd>
+                <MudChip T="string" Size="Size.Small"
+                         Color="@(context.Status == "settled" ? Color.Success : Color.Default)"
+                         Variant="Variant.Text">@(context.Status == "settled" ? "인출완료" : "대기")</MudChip>
+            </MudTd>
+        </RowTemplate>
+        <NoRecordsContent>
+            <EmptyState Icon="@Icons.Material.Filled.CreditCard"
+                        Title="카드 결제 내역이 없습니다"
+                        Subtitle="우상단 [새 결제] 버튼으로 등록하세요." />
+        </NoRecordsContent>
+    </MudTable>
+</SectionCard>
+
+<MudDialog @bind-Visible="_dlg" Options="@(new DialogOptions { MaxWidth = MaxWidth.Small, FullWidth = true })">
+    <TitleContent>새 카드 결제</TitleContent>
+    <DialogContent>
+        <MudGrid Spacing="2">
+            <MudItem xs="6"><MudTextField T="string" Label="카드번호" @bind-Value="_edit.CardNo" Variant="Variant.Outlined" Margin="Margin.Dense" Placeholder="끝 4자리" /></MudItem>
+            <MudItem xs="6"><MudTextField T="string" Label="카드사" @bind-Value="_edit.CardCompany" Variant="Variant.Outlined" Margin="Margin.Dense" /></MudItem>
+            <MudItem xs="6"><MudTextField T="string" Label="소유자" @bind-Value="_edit.HolderName" Variant="Variant.Outlined" Margin="Margin.Dense" /></MudItem>
+            <MudItem xs="6"><MudDatePicker Label="결제일" @bind-Date="_editPaymentDate" Variant="Variant.Outlined" Margin="Margin.Dense" /></MudItem>
+            <MudItem xs="6"><MudNumericField T="decimal" Label="총액" @bind-Value="_edit.TotalAmount" Variant="Variant.Outlined" Margin="Margin.Dense" Format="N0" /></MudItem>
+            <MudItem xs="6"><MudNumericField T="int" Label="할부 개월" @bind-Value="_edit.InstallmentMonths" Variant="Variant.Outlined" Margin="Margin.Dense" Min="0" Max="36" /></MudItem>
+            <MudItem xs="12"><MudTextField T="string" Label="비고" @bind-Value="_edit.Remark" Variant="Variant.Outlined" Margin="Margin.Dense" /></MudItem>
+        </MudGrid>
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="@(() => _dlg = false)">취소</MudButton>
+        <MudButton Color="Color.Primary" Variant="Variant.Filled" OnClick="SaveAsync">등록</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    private List<CardPaymentModel> _items = new();
+    private DateTime? _from = DateTime.Today.AddMonths(-3);
+    private DateTime? _to = DateTime.Today;
+    private bool _dlg;
+    private CreateCardPaymentModel _edit = new();
+    private DateTime? _editPaymentDate = DateTime.Today;
+
+    protected override async Task OnInitializedAsync() => await LoadAsync();
+
+    private async Task LoadAsync()
+    {
+        _items = await FinSvc.ListCardPaymentsAsync(_from, _to);
+        StateHasChanged();
+    }
+
+    private Task OpenCreateAsync()
+    {
+        _edit = new CreateCardPaymentModel();
+        _editPaymentDate = DateTime.Today;
+        _dlg = true;
+        return Task.CompletedTask;
+    }
+
+    private async Task SaveAsync()
+    {
+        if (string.IsNullOrWhiteSpace(_edit.CardNo)) { Snackbar.Add("카드번호를 입력하세요.", Severity.Warning); return; }
+        if (_edit.TotalAmount <= 0) { Snackbar.Add("총액을 입력하세요.", Severity.Warning); return; }
+        _edit.PaymentDate = _editPaymentDate ?? DateTime.Today;
+        if (_edit.InstallmentMonths > 0)
+            _edit.InstallmentAmount = Math.Round(_edit.TotalAmount / _edit.InstallmentMonths, 0);
+        var ok = await FinSvc.CreateCardPaymentAsync(_edit);
+        Snackbar.Add(ok ? "등록됨" : "등록 실패", ok ? Severity.Success : Severity.Error);
+        if (ok) { _dlg = false; await LoadAsync(); }
+    }
+}

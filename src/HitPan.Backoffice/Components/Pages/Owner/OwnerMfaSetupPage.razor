@@ -1,0 +1,207 @@
+@page "/admin/mfa-setup"
+@layout PlatformLayout
+@attribute [Authorize]
+@rendermode InteractiveServer
+@inject IHttpClientFactory HttpFactory
+@inject ISnackbar Snackbar
+
+@*
+    Owner MFA 등록 (W11, 사장님 결재 2026-06-05)
+    백오피스 API /api/backoffice/owner/mfa
+    1) 상태 조회 → 2) enroll-start (otpauth URI 반환) → 3) enroll-confirm (코드 검증 + 백업코드 반환)
+*@
+
+<PageTitle>MFA 등록 — 히트판 백오피스</PageTitle>
+
+<MudText Typo="Typo.h5" Style="font-weight:600;margin-bottom:20px;">MFA 등록</MudText>
+
+@if (_loading)
+{
+    <MudProgressLinear Indeterminate="true" Color="Color.Primary" />
+}
+else
+{
+    <MudPaper Elevation="1" Class="pa-6" Style="border-radius:12px;max-width:640px;">
+        @if (_status?.IsEnrolled == true && _status?.IsEnabled == true)
+        {
+            <MudAlert Severity="Severity.Success" Class="mb-4">
+                MFA가 활성화되어 있습니다 (등록: @(_status.EnrolledAt?.ToString("yyyy-MM-dd HH:mm")))
+            </MudAlert>
+            <MudText Typo="Typo.body2" Color="Color.Secondary" Class="mb-3">
+                마지막 사용: @(_status.LastUsedAt?.ToString("yyyy-MM-dd HH:mm") ?? "—")
+            </MudText>
+            <MudButton OnClick="StartEnrollAsync" Variant="Variant.Outlined" Color="Color.Warning">
+                재등록 (기존 시크릿 폐기)
+            </MudButton>
+        }
+        else if (_enrollState == EnrollState.Initial)
+        {
+            <MudText Class="mb-4">
+                Owner 계정은 MFA(2단계 인증)가 필수입니다. Google Authenticator·Microsoft Authenticator·1Password 등
+                TOTP 앱으로 등록하세요.
+            </MudText>
+            <MudButton OnClick="StartEnrollAsync" Variant="Variant.Filled" Color="Color.Primary"
+                       StartIcon="@Icons.Material.Filled.Security">
+                MFA 등록 시작
+            </MudButton>
+        }
+        else if (_enrollState == EnrollState.Started)
+        {
+            <MudText Class="mb-4">
+                1) 인증 앱으로 아래 QR 또는 시크릿을 등록 → 2) 앱에 표시된 6자리 코드를 입력
+            </MudText>
+            <MudPaper Elevation="0" Class="pa-4 mb-4" Style="background:#F9FAFB;border-radius:8px;">
+                <MudText Typo="Typo.body2" Color="Color.Secondary">시크릿 (수동 입력용)</MudText>
+                <MudText Typo="Typo.h6" Style="font-family:monospace;letter-spacing:2px;">@_secret</MudText>
+                <MudText Typo="Typo.caption" Color="Color.Secondary" Class="mt-2">
+                    otpauth URI: @_otpauthUri
+                </MudText>
+            </MudPaper>
+            <MudTextField @bind-Value="_code" Label="6자리 코드" MaxLength="6"
+                          Variant="Variant.Outlined" Class="mb-3" />
+            <MudButton OnClick="ConfirmEnrollAsync" Variant="Variant.Filled" Color="Color.Primary"
+                       Disabled="@(_code.Length != 6 || _submitting)">
+                @(_submitting ? "확인 중..." : "코드 확인 + 등록")
+            </MudButton>
+        }
+        else if (_enrollState == EnrollState.Done)
+        {
+            <MudAlert Severity="Severity.Success" Class="mb-4">
+                MFA 등록 완료! 아래 백업 코드 10개를 안전한 곳에 보관하세요. <b>본 화면을 나가면 다시 볼 수 없습니다.</b>
+            </MudAlert>
+            <MudPaper Elevation="0" Class="pa-4" Style="background:#FFFBEB;border:1px solid #FCD34D;border-radius:8px;">
+                <MudGrid>
+                    @foreach (var bc in _backupCodes)
+                    {
+                        <MudItem xs="6" sm="4">
+                            <MudText Typo="Typo.h6" Style="font-family:monospace;letter-spacing:1.5px;">@bc</MudText>
+                        </MudItem>
+                    }
+                </MudGrid>
+            </MudPaper>
+            <MudButton OnClick="ResetAsync" Class="mt-4" Variant="Variant.Outlined">상태 새로고침</MudButton>
+        }
+    </MudPaper>
+}
+
+@code {
+    private bool _loading = true;
+    private bool _submitting = false;
+    private MfaStatus? _status;
+    private string _secret = "";
+    private string _otpauthUri = "";
+    private string _code = "";
+    private List<string> _backupCodes = new();
+    private EnrollState _enrollState = EnrollState.Initial;
+
+    private enum EnrollState { Initial, Started, Done }
+
+    protected override async Task OnInitializedAsync() => await LoadStatusAsync();
+
+    private async Task LoadStatusAsync()
+    {
+        _loading = true;
+        try
+        {
+            var http = HttpFactory.CreateClient("backoffice-authed");
+            _status = await http.GetFromJsonAsync<MfaStatus>("api/backoffice/owner/mfa/status");
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"상태 조회 실패: {ex.Message}", Severity.Error);
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    private async Task StartEnrollAsync()
+    {
+        try
+        {
+            var http = HttpFactory.CreateClient("backoffice-authed");
+            var res = await http.PostAsync("api/backoffice/owner/mfa/enroll-start", null);
+            var payload = await res.Content.ReadFromJsonAsync<EnrollStartResponse>();
+            if (res.IsSuccessStatusCode && payload?.Success == true)
+            {
+                _secret = payload.Secret ?? "";
+                _otpauthUri = payload.OtpauthUri ?? "";
+                _enrollState = EnrollState.Started;
+            }
+            else
+            {
+                Snackbar.Add(payload?.Message ?? "MFA 시작 실패", Severity.Error);
+            }
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"MFA 시작 중 오류: {ex.Message}", Severity.Error);
+        }
+    }
+
+    private async Task ConfirmEnrollAsync()
+    {
+        if (_code.Length != 6) return;
+        _submitting = true;
+        try
+        {
+            var http = HttpFactory.CreateClient("backoffice-authed");
+            var res = await http.PostAsJsonAsync("api/backoffice/owner/mfa/enroll-confirm",
+                new { Secret = _secret, Code = _code });
+            var payload = await res.Content.ReadFromJsonAsync<EnrollConfirmResponse>();
+            if (res.IsSuccessStatusCode && payload?.Success == true)
+            {
+                _backupCodes = payload.BackupCodes ?? new();
+                _enrollState = EnrollState.Done;
+                Snackbar.Add(payload.Message ?? "MFA 활성화", Severity.Success);
+            }
+            else
+            {
+                Snackbar.Add(payload?.Message ?? "코드 확인 실패", Severity.Error);
+            }
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"확인 중 오류: {ex.Message}", Severity.Error);
+        }
+        finally
+        {
+            _submitting = false;
+        }
+    }
+
+    private async Task ResetAsync()
+    {
+        _enrollState = EnrollState.Initial;
+        _secret = "";
+        _otpauthUri = "";
+        _code = "";
+        _backupCodes = new();
+        await LoadStatusAsync();
+    }
+
+    private class MfaStatus
+    {
+        public bool Success { get; set; }
+        public bool IsEnrolled { get; set; }
+        public bool IsEnabled { get; set; }
+        public DateTime? EnrolledAt { get; set; }
+        public DateTime? LastUsedAt { get; set; }
+    }
+
+    private class EnrollStartResponse
+    {
+        public bool Success { get; set; }
+        public string? Secret { get; set; }
+        public string? OtpauthUri { get; set; }
+        public string? Message { get; set; }
+    }
+
+    private class EnrollConfirmResponse
+    {
+        public bool Success { get; set; }
+        public string? Message { get; set; }
+        public List<string>? BackupCodes { get; set; }
+    }
+}

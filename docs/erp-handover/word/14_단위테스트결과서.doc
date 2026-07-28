@@ -1,0 +1,73 @@
+﻿<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:w="urn:schemas-microsoft-com:office:word" xmlns="http://www.w3.org/TR/REC-html40">
+<head>
+<meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
+<meta name="ProgId" content="Word.Document">
+<meta name="Generator" content="Microsoft Word">
+<title>14_단위테스트결과서</title>
+<!--[if gte mso 9]>
+<xml>
+<w:WordDocument>
+<w:View>Print</w:View>
+<w:Zoom>100</w:Zoom>
+</w:WordDocument>
+</xml>
+<![endif]-->
+<style>
+body { font-family: 'Malgun Gothic', sans-serif; font-size: 11pt; line-height: 1.6; }
+table { border-collapse: collapse; }
+</style>
+</head>
+<body><p><h1 style="border-bottom:2px solid #333;padding-bottom:5px;color:#1976D2;">14. 단위 테스트 결과서</h1></p><p><blockquote style="border-left:4px solid #1976D2;padding-left:10px;color:#555;margin:10px 0;"><strong>작성일</strong>: 2026-06-01 / PM 브라운킴</blockquote>
+<blockquote style="border-left:4px solid #1976D2;padding-left:10px;color:#555;margin:10px 0;"><strong>실측 시각</strong>: 2026-06-01 (최종)</blockquote></p><p><hr style="border:none;border-top:1px solid #ccc;"></p><p><h2 style="border-bottom:1px solid #999;padding-bottom:3px;color:#1976D2;">1. 최종 결과 — <strong>165/165 PASS (100%)</strong></h2></p><p><pre style='background:#f4f4f4;padding:8px;font-family:Consolas;font-size:9pt;border:1px solid #ddd;'>지정된 패턴과 일치한 총 테스트 파일 수는 1개입니다.
+
+통과!  - 실패:     0, 통과:   165, 건너뜀:     0, 전체:   165, 기간: 830 ms - HitPan.Tests.dll (net8.0)</pre></p><p><h3 style="color:#333;">1.1 요약</h3>
+<table style='border-collapse:collapse;margin:10px 0;'><thead><tr><th style='border:1px solid #aaa;padding:4px 8px;background:#e3f2fd;'>항목</th><th style='border:1px solid #aaa;padding:4px 8px;background:#e3f2fd;'>값</th></tr></thead><tbody><tr><td style='border:1px solid #aaa;padding:4px 8px;'>전체 테스트</td><td style='border:1px solid #aaa;padding:4px 8px;'>165</td></tr>
+<tr><td style='border:1px solid #aaa;padding:4px 8px;'><strong>통과</strong></td><td style='border:1px solid #aaa;padding:4px 8px;'><strong>165</strong></td></tr>
+<tr><td style='border:1px solid #aaa;padding:4px 8px;'>실패</td><td style='border:1px solid #aaa;padding:4px 8px;'>0</td></tr>
+<tr><td style='border:1px solid #aaa;padding:4px 8px;'>건너뜀</td><td style='border:1px solid #aaa;padding:4px 8px;'>0</td></tr>
+<tr><td style='border:1px solid #aaa;padding:4px 8px;'>실행 시간</td><td style='border:1px solid #aaa;padding:4px 8px;'>830ms</td></tr>
+<tr><td style='border:1px solid #aaa;padding:4px 8px;'><strong>합격률</strong></td><td style='border:1px solid #aaa;padding:4px 8px;'><strong>100%</strong></td></tr>
+<tr><td style='border:1px solid #aaa;padding:4px 8px;'>빌드 경고</td><td style='border:1px solid #aaa;padding:4px 8px;'>0</td></tr>
+<tr><td style='border:1px solid #aaa;padding:4px 8px;'>빌드 오류</td><td style='border:1px solid #aaa;padding:4px 8px;'>0</td></tr></tbody></table>
+<hr style="border:none;border-top:1px solid #ccc;"></p><p><h2 style="border-bottom:1px solid #999;padding-bottom:3px;color:#1976D2;">2. 테스트 파일별 결과</h2></p><p><table style='border-collapse:collapse;margin:10px 0;'><thead><tr><th style='border:1px solid #aaa;padding:4px 8px;background:#e3f2fd;'>#</th><th style='border:1px solid #aaa;padding:4px 8px;background:#e3f2fd;'>테스트 클래스</th><th style='border:1px solid #aaa;padding:4px 8px;background:#e3f2fd;'>테스트 수 (대략)</th><th style='border:1px solid #aaa;padding:4px 8px;background:#e3f2fd;'>결과</th></tr></thead><tbody><tr><td style='border:1px solid #aaa;padding:4px 8px;'>1</td><td style='border:1px solid #aaa;padding:4px 8px;'>BomWorkflowTests</td><td style='border:1px solid #aaa;padding:4px 8px;'>~10</td><td style='border:1px solid #aaa;padding:4px 8px;'>✅ ALL PASS</td></tr>
+<tr><td style='border:1px solid #aaa;padding:4px 8px;'>2</td><td style='border:1px solid #aaa;padding:4px 8px;'>PurchaseWorkflowTests</td><td style='border:1px solid #aaa;padding:4px 8px;'>~12</td><td style='border:1px solid #aaa;padding:4px 8px;'>✅ ALL PASS</td></tr>
+<tr><td style='border:1px solid #aaa;padding:4px 8px;'>3</td><td style='border:1px solid #aaa;padding:4px 8px;'>SalesWorkflowTests</td><td style='border:1px solid #aaa;padding:4px 8px;'>~12</td><td style='border:1px solid #aaa;padding:4px 8px;'>✅ ALL PASS</td></tr>
+<tr><td style='border:1px solid #aaa;padding:4px 8px;'>4</td><td style='border:1px solid #aaa;padding:4px 8px;'>TaxInvoiceWorkflowTests</td><td style='border:1px solid #aaa;padding:4px 8px;'>~8</td><td style='border:1px solid #aaa;padding:4px 8px;'>✅ ALL PASS</td></tr>
+<tr><td style='border:1px solid #aaa;padding:4px 8px;'>5</td><td style='border:1px solid #aaa;padding:4px 8px;'>PurchaseReturnTests</td><td style='border:1px solid #aaa;padding:4px 8px;'>~6</td><td style='border:1px solid #aaa;padding:4px 8px;'>✅ ALL PASS</td></tr>
+<tr><td style='border:1px solid #aaa;padding:4px 8px;'>6</td><td style='border:1px solid #aaa;padding:4px 8px;'>PurchaseReturnDtoTests</td><td style='border:1px solid #aaa;padding:4px 8px;'>~6</td><td style='border:1px solid #aaa;padding:4px 8px;'>✅ ALL PASS</td></tr>
+<tr><td style='border:1px solid #aaa;padding:4px 8px;'>7</td><td style='border:1px solid #aaa;padding:4px 8px;'>PurchaseReturnReasonTests</td><td style='border:1px solid #aaa;padding:4px 8px;'>~7</td><td style='border:1px solid #aaa;padding:4px 8px;'>✅ ALL PASS</td></tr>
+<tr><td style='border:1px solid #aaa;padding:4px 8px;'>8</td><td style='border:1px solid #aaa;padding:4px 8px;'>MonthlySummaryGuardTests</td><td style='border:1px solid #aaa;padding:4px 8px;'>~5</td><td style='border:1px solid #aaa;padding:4px 8px;'>✅ ALL PASS</td></tr>
+<tr><td style='border:1px solid #aaa;padding:4px 8px;'>9</td><td style='border:1px solid #aaa;padding:4px 8px;'>StockIntegrityTests</td><td style='border:1px solid #aaa;padding:4px 8px;'>~8</td><td style='border:1px solid #aaa;padding:4px 8px;'>✅ ALL PASS</td></tr>
+<tr><td style='border:1px solid #aaa;padding:4px 8px;'>10</td><td style='border:1px solid #aaa;padding:4px 8px;'>MultiTenantIsolationTests</td><td style='border:1px solid #aaa;padding:4px 8px;'>~10</td><td style='border:1px solid #aaa;padding:4px 8px;'>✅ ALL PASS</td></tr>
+<tr><td style='border:1px solid #aaa;padding:4px 8px;'>11</td><td style='border:1px solid #aaa;padding:4px 8px;'>SensitiveFieldMaskingTests</td><td style='border:1px solid #aaa;padding:4px 8px;'>~6</td><td style='border:1px solid #aaa;padding:4px 8px;'>✅ ALL PASS</td></tr>
+<tr><td style='border:1px solid #aaa;padding:4px 8px;'>12</td><td style='border:1px solid #aaa;padding:4px 8px;'>BinaryCryptoServiceAdapterTests</td><td style='border:1px solid #aaa;padding:4px 8px;'>~5</td><td style='border:1px solid #aaa;padding:4px 8px;'>✅ ALL PASS</td></tr>
+<tr><td style='border:1px solid #aaa;padding:4px 8px;'>13</td><td style='border:1px solid #aaa;padding:4px 8px;'>EncryptedBinaryValueConverterTests</td><td style='border:1px solid #aaa;padding:4px 8px;'>~6</td><td style='border:1px solid #aaa;padding:4px 8px;'>✅ ALL PASS</td></tr>
+<tr><td style='border:1px solid #aaa;padding:4px 8px;'>14</td><td style='border:1px solid #aaa;padding:4px 8px;'>FormTemplateDtoTests</td><td style='border:1px solid #aaa;padding:4px 8px;'>~10</td><td style='border:1px solid #aaa;padding:4px 8px;'>✅ ALL PASS</td></tr>
+<tr><td style='border:1px solid #aaa;padding:4px 8px;'>15</td><td style='border:1px solid #aaa;padding:4px 8px;'>FormTemplateServiceTests</td><td style='border:1px solid #aaa;padding:4px 8px;'>~8</td><td style='border:1px solid #aaa;padding:4px 8px;'>✅ ALL PASS</td></tr>
+<tr><td style='border:1px solid #aaa;padding:4px 8px;'>16</td><td style='border:1px solid #aaa;padding:4px 8px;'>ItemMasterDtoTests</td><td style='border:1px solid #aaa;padding:4px 8px;'>~7</td><td style='border:1px solid #aaa;padding:4px 8px;'>✅ ALL PASS</td></tr>
+<tr><td style='border:1px solid #aaa;padding:4px 8px;'>17</td><td style='border:1px solid #aaa;padding:4px 8px;'>ItemSpecDtoTests</td><td style='border:1px solid #aaa;padding:4px 8px;'>~6</td><td style='border:1px solid #aaa;padding:4px 8px;'>✅ ALL PASS</td></tr>
+<tr><td style='border:1px solid #aaa;padding:4px 8px;'>18</td><td style='border:1px solid #aaa;padding:4px 8px;'>ItemSpecServiceTests</td><td style='border:1px solid #aaa;padding:4px 8px;'>~6</td><td style='border:1px solid #aaa;padding:4px 8px;'>✅ ALL PASS</td></tr>
+<tr><td style='border:1px solid #aaa;padding:4px 8px;'>19</td><td style='border:1px solid #aaa;padding:4px 8px;'>SalesOrderDtoTests</td><td style='border:1px solid #aaa;padding:4px 8px;'>~6</td><td style='border:1px solid #aaa;padding:4px 8px;'>✅ ALL PASS</td></tr>
+<tr><td style='border:1px solid #aaa;padding:4px 8px;'>20</td><td style='border:1px solid #aaa;padding:4px 8px;'>TermsConsentDtoTests</td><td style='border:1px solid #aaa;padding:4px 8px;'>~10</td><td style='border:1px solid #aaa;padding:4px 8px;'>✅ ALL PASS</td></tr>
+<tr><td style='border:1px solid #aaa;padding:4px 8px;'><strong>합계</strong></td><td style='border:1px solid #aaa;padding:4px 8px;'><strong>20 파일</strong></td><td style='border:1px solid #aaa;padding:4px 8px;'><strong>165</strong></td><td style='border:1px solid #aaa;padding:4px 8px;'><strong>✅ 100%</strong></td></tr></tbody></table>
+<hr style="border:none;border-top:1px solid #ccc;"></p><p><h2 style="border-bottom:1px solid #999;padding-bottom:3px;color:#1976D2;">3. 시간대별 추이</h2></p><p><table style='border-collapse:collapse;margin:10px 0;'><thead><tr><th style='border:1px solid #aaa;padding:4px 8px;background:#e3f2fd;'>일자</th><th style='border:1px solid #aaa;padding:4px 8px;background:#e3f2fd;'>테스트 수</th><th style='border:1px solid #aaa;padding:4px 8px;background:#e3f2fd;'>결과</th></tr></thead><tbody><tr><td style='border:1px solid #aaa;padding:4px 8px;'>2026-05-31 09:00</td><td style='border:1px solid #aaa;padding:4px 8px;'>42</td><td style='border:1px solid #aaa;padding:4px 8px;'>PASS</td></tr>
+<tr><td style='border:1px solid #aaa;padding:4px 8px;'>2026-05-31 12:00</td><td style='border:1px solid #aaa;padding:4px 8px;'>74</td><td style='border:1px solid #aaa;padding:4px 8px;'>PASS (e9414af, +32)</td></tr>
+<tr><td style='border:1px solid #aaa;padding:4px 8px;'>2026-05-31 22:30</td><td style='border:1px solid #aaa;padding:4px 8px;'>165</td><td style='border:1px solid #aaa;padding:4px 8px;'>PASS (+91 추가, 인계서 박제 후)</td></tr>
+<tr><td style='border:1px solid #aaa;padding:4px 8px;'>2026-06-01 00:30</td><td style='border:1px solid #aaa;padding:4px 8px;'><strong>165</strong></td><td style='border:1px solid #aaa;padding:4px 8px;'><strong>PASS</strong></td></tr></tbody></table>
+<hr style="border:none;border-top:1px solid #ccc;"></p><p><h2 style="border-bottom:1px solid #999;padding-bottom:3px;color:#1976D2;">4. 빌드 결과</h2></p><p><pre style='background:#f4f4f4;padding:8px;font-family:Consolas;font-size:9pt;border:1px solid #ddd;'>Application:  0 errors / 0 warnings
+API:          0 errors / 0 warnings
+Web:          0 errors / 0 warnings
+Watchdog:     0 errors / 0 warnings
+Tests:        0 errors / 0 warnings</pre></p><p><strong>헌법 #19 정합 100%</strong>.</p><p><hr style="border:none;border-top:1px solid #ccc;"></p><p><h2 style="border-bottom:1px solid #999;padding-bottom:3px;color:#1976D2;">5. NuGet 보안</h2></p><p><pre style='background:#f4f4f4;padding:8px;font-family:Consolas;font-size:9pt;border:1px solid #ddd;'>&gt; dotnet list &lt;project&gt; package --vulnerable --include-transitive
+
+현재 소스를 고려해 볼 때 지정된 프로젝트 `HitPan.API`에 취약한 패키지가 없습니다.
+현재 소스를 고려해 볼 때 지정된 프로젝트 `HitPan.Web`에 취약한 패키지가 없습니다.</pre></p><p><strong>보안 취약 패키지 0건</strong> (2026-06-01 봉합 완료):
+<ul><li>System.Security.Cryptography.Xml: 9.0.8 → 10.0.8</li>
+<li>MailKit: 4.14.0 → 4.16.0</li>
+<li>System.Text.Json: 8.0.5 명시 추가</li>
+<li>Newtonsoft.Json: 13.0.3 명시 추가</li>
+<li>Microsoft.Extensions.Caching.Memory: 8.0.1 명시 추가</li></p><p></ul>---</p><p><h2 style="border-bottom:1px solid #999;padding-bottom:3px;color:#1976D2;">6. 결론</h2></p><p><ul><li><strong>빌드·테스트·보안 영역 만점</strong></li>
+<li>헌법 #19 (errors 0 + warnings 0) 정합</li>
+<li>베타 출시 게이트 3/3 통과 (단위 테스트 / 빌드 / 보안)</li>
+</ul></p></body>
+</html>

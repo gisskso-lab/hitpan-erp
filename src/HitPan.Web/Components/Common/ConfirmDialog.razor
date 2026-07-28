@@ -1,0 +1,118 @@
+@namespace HitPan.Web.Components.Common
+
+@* ══════════════════════════════════════════════════════════════
+   ConfirmDialog — 공용 확인 다이얼로그 (MudBlazor 기반)
+   호출 예:
+     var ok = await ConfirmDialog.ShowAsync(DialogService, "삭제", "정말 삭제하시겠습니까?");
+     var ok = await ConfirmDialog.ShowAsync(DialogService,
+         title: "거래명세서 확정",
+         message: "확정 후 수정이 제한됩니다. 계속하시겠습니까?",
+         confirmText: "확정", cancelText: "취소",
+         severity: Severity.Warning);
+   ══════════════════════════════════════════════════════════════ *@
+
+<MudDialog>
+    <TitleContent>
+        <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="2">
+            <MudIcon Icon="@GetIcon()" Color="@GetIconColor()" />
+            <MudText Typo="Typo.h6">@Title</MudText>
+        </MudStack>
+    </TitleContent>
+    <DialogContent>
+        <MudText Typo="Typo.body2" Style="white-space:pre-line;line-height:1.6">
+            @Message
+        </MudText>
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="Cancel" Variant="Variant.Text">@CancelText</MudButton>
+        <MudButton OnClick="Confirm"
+                   Variant="Variant.Filled"
+                   Color="@GetConfirmColor()"
+                   StartIcon="@ConfirmIcon">
+            @ConfirmText
+        </MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private IMudDialogInstance MudDialog { get; set; } = default!;
+
+    /// <summary>다이얼로그 제목</summary>
+    [Parameter] public string Title { get; set; } = "확인";
+
+    /// <summary>본문 메시지 (여러 줄 가능)</summary>
+    [Parameter] public string Message { get; set; } = "계속하시겠습니까?";
+
+    /// <summary>확인 버튼 텍스트</summary>
+    [Parameter] public string ConfirmText { get; set; } = "확인";
+
+    /// <summary>취소 버튼 텍스트</summary>
+    [Parameter] public string CancelText { get; set; } = "취소";
+
+    /// <summary>확인 버튼 아이콘 (선택)</summary>
+    [Parameter] public string? ConfirmIcon { get; set; }
+
+    /// <summary>다이얼로그 심각도 (Info/Warning/Error/Success) — 아이콘·색상 결정</summary>
+    [Parameter] public Severity Severity { get; set; } = Severity.Info;
+
+    private void Confirm() => MudDialog.Close(DialogResult.Ok(true));
+    private void Cancel() => MudDialog.Cancel();
+
+    private string GetIcon() => Severity switch
+    {
+        Severity.Warning => Icons.Material.Filled.Warning,
+        Severity.Error => Icons.Material.Filled.Error,
+        Severity.Success => Icons.Material.Filled.CheckCircle,
+        _ => Icons.Material.Filled.HelpOutline
+    };
+
+    private Color GetIconColor() => Severity switch
+    {
+        Severity.Warning => Color.Warning,
+        Severity.Error => Color.Error,
+        Severity.Success => Color.Success,
+        _ => Color.Primary
+    };
+
+    private Color GetConfirmColor() => Severity switch
+    {
+        Severity.Error => Color.Error,
+        Severity.Warning => Color.Warning,
+        _ => Color.Primary
+    };
+
+    // ══════════════════════════════════════════════════════════
+    // 정적 헬퍼 — 페이지에서 한 줄로 호출
+    // ══════════════════════════════════════════════════════════
+
+    /// <summary>확인 다이얼로그 표시. true=확인, false=취소/닫기</summary>
+    public static async Task<bool> ShowAsync(
+        IDialogService dialogService,
+        string title,
+        string message,
+        string confirmText = "확인",
+        string cancelText = "취소",
+        Severity severity = Severity.Info,
+        string? confirmIcon = null)
+    {
+        var parameters = new DialogParameters
+        {
+            [nameof(Title)] = title,
+            [nameof(Message)] = message,
+            [nameof(ConfirmText)] = confirmText,
+            [nameof(CancelText)] = cancelText,
+            [nameof(Severity)] = severity,
+            [nameof(ConfirmIcon)] = confirmIcon
+        };
+        var options = new DialogOptions
+        {
+            MaxWidth = MaxWidth.ExtraSmall,
+            FullWidth = true,
+            CloseOnEscapeKey = true,
+            BackdropClick = false
+        };
+        var dlg = await dialogService.ShowAsync<ConfirmDialog>(title, parameters, options);
+        var result = await dlg.Result;
+        return result is not null && !result.Canceled && result.Data is bool b && b;
+    }
+}

@@ -1,0 +1,197 @@
+@page "/m/sales"
+@attribute [Authorize]
+@using HitPan.Web.Models
+@using HitPan.Web.Services
+@inject DeliveryService DeliverySvc
+@inject DocumentService DocSvc
+@inject NavigationManager Nav
+@inject ISnackbar Snackbar
+
+<PageTitle>판매 현황</PageTitle>
+
+<div class="hpm-sales">
+
+    @* ── 검색 + 필터 칩 ── *@
+    <div class="hpm-search-bar">
+        <div class="hpm-search-input-wrap">
+            <MudIcon Icon="@Icons.Material.Filled.Search" Class="hpm-search-icon" />
+            <input class="hpm-search-input" placeholder="업체명 · 문서번호 검색"
+                   @bind="_search" @bind:event="oninput" @onkeyup="OnSearchKey" />
+            @if (!string.IsNullOrEmpty(_search))
+            {
+                <button class="hpm-search-clear" @onclick="ClearSearch">
+                    <MudIcon Icon="@Icons.Material.Filled.Close" Style="font-size:16px" />
+                </button>
+            }
+        </div>
+    </div>
+
+    <div class="hpm-filter-chips">
+        @foreach (var chip in _chips)
+        {
+            <button class="hpm-chip @(_activeChip == chip.Key ? "hpm-chip--active" : "")"
+                    @onclick="@(() => SetChip(chip.Key))">@chip.Label</button>
+        }
+    </div>
+
+    @* ── 카드 목록 ── *@
+    @if (_loading)
+    {
+        <div class="hpm-loading">
+            <MudProgressCircular Color="Color.Primary" Indeterminate="true" Size="Size.Small" />
+        </div>
+    }
+    else if (_rows.Count == 0)
+    {
+        <div class="hpm-empty">
+            <MudIcon Icon="@Icons.Material.Outlined.Receipt" Style="font-size:48px;color:#ccc;" />
+            <p>조회된 거래명세서가 없습니다</p>
+        </div>
+    }
+    else
+    {
+        <div class="hpm-card-list">
+            @foreach (var row in _filtered)
+            {
+                <div class="hpm-doc-card" @onclick="@(() => OpenDetail(row))">
+                    <div class="hpm-doc-card-top">
+                        <div class="hpm-doc-partner">@row.PartnerName</div>
+                        <div class="hpm-doc-amount">@row.TotalAmount.ToString("N0")원</div>
+                    </div>
+                    <div class="hpm-doc-card-mid">
+                        <span class="hpm-doc-no">@row.DeliveryNo</span>
+                        <span class="hpm-doc-date">@row.OrderDate.ToString("M월 d일")</span>
+                    </div>
+                    <div class="hpm-doc-card-bot">
+                        <span class="hpm-status-badge hpm-status-@row.Status">@StatusLabel(row.Status)</span>
+                        <div class="hpm-doc-actions">
+                            <button class="hpm-action-btn" @onclick:stopPropagation="true"
+                                    @onclick="@(() => ViewPdfAsync(row))">
+                                <MudIcon Icon="@Icons.Material.Filled.PictureAsPdf" Style="font-size:16px" />
+                                PDF
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            }
+        </div>
+
+        <div class="hpm-list-footer">
+            총 @(_filtered.Count)건 · @(_filtered.Sum(r => r.TotalAmount).ToString("N0"))원
+        </div>
+    }
+
+    @* ── FAB: 새 거래명세서 ── *@
+    <button class="hpm-fab" @onclick="NewDelivery" title="새 거래명세서">
+        <MudIcon Icon="@Icons.Material.Filled.Add" Style="font-size:26px;color:#fff" />
+    </button>
+</div>
+
+@code {
+    private List<DeliveryListDto> _rows = new();
+    private bool _loading = true;
+    private string _search = "";
+    private string _activeChip = "all";
+
+    private readonly (string Key, string Label)[] _chips =
+    {
+        ("all",   "전체"),
+        ("today", "오늘"),
+        ("week",  "이번 주"),
+        ("month", "이번 달"),
+        ("draft", "초안"),
+        ("confirmed", "확정"),
+    };
+
+    private List<DeliveryListDto> _filtered = new();
+
+    protected override async Task OnInitializedAsync() => await LoadAsync();
+
+    private async Task LoadAsync()
+    {
+        _loading = true;
+        StateHasChanged();
+
+        var (from, to) = ChipRange(_activeChip);
+        _rows = await DeliverySvc.GetListAsync(from, to);
+        ApplyFilter();
+
+        _loading = false;
+    }
+
+    private void ApplyFilter()
+    {
+        var q = _search.Trim();
+        _filtered = string.IsNullOrEmpty(q)
+            ? _rows.ToList()
+            : _rows.Where(r =>
+                r.PartnerName.Contains(q, StringComparison.OrdinalIgnoreCase) ||
+                r.DeliveryNo.Contains(q, StringComparison.OrdinalIgnoreCase)).ToList();
+
+        if (_activeChip is "draft" or "confirmed")
+            _filtered = _filtered.Where(r => r.Status == _activeChip).ToList();
+    }
+
+    private async Task SetChip(string key)
+    {
+        _activeChip = key;
+        await LoadAsync();
+    }
+
+    private async Task OnSearchKey(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter") await LoadAsync();
+        else ApplyFilter();
+        StateHasChanged();
+    }
+
+    private void ClearSearch()
+    {
+        _search = "";
+        ApplyFilter();
+        StateHasChanged();
+    }
+
+    private void OpenDetail(DeliveryListDto row)
+    {
+        Nav.NavigateTo($"/m/sales/{row.DeliveryId}");
+    }
+
+    private async Task ViewPdfAsync(DeliveryListDto row)
+    {
+        try
+        {
+            await DocSvc.DownloadPdfAsync("delivery", row.DeliveryId);
+        }
+        catch (Exception _hp15Ex)
+        {
+            Console.Error.WriteLine($"[HP15] " + _hp15Ex.GetType().Name + ": " + _hp15Ex.Message);
+            Snackbar.Add("PDF 준비 중입니다.", Severity.Info);
+        }
+    }
+
+    private void NewDelivery()
+    {
+        Nav.NavigateTo("/deliveries");
+    }
+
+    private static string StatusLabel(string s) => s switch
+    {
+        "confirmed" => "확정",
+        "draft"     => "초안",
+        "cancelled" => "취소",
+        _           => s
+    };
+
+    private static (string from, string to) ChipRange(string chip)
+    {
+        var today = DateTime.Today;
+        return chip switch
+        {
+            "today" => (today.ToString("yyyy-MM-dd"), today.ToString("yyyy-MM-dd")),
+            "week"  => (today.AddDays(-(int)today.DayOfWeek + 1).ToString("yyyy-MM-dd"), today.ToString("yyyy-MM-dd")),
+            "month" => (new DateTime(today.Year, today.Month, 1).ToString("yyyy-MM-dd"), today.ToString("yyyy-MM-dd")),
+            _       => (today.AddMonths(-3).ToString("yyyy-MM-dd"), today.ToString("yyyy-MM-dd"))
+        };
+    }
+}

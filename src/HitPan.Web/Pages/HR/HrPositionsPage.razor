@@ -1,0 +1,156 @@
+@page "/hr/positions"
+@namespace HitPan.Web.Pages.HrUi
+@attribute [Authorize]
+@using HitPan.Web.Models
+@using HitPan.Web.Services
+@inject PositionService PositionSvc
+@inject ISnackbar Snackbar
+
+<PageTitle>직급 관리</PageTitle>
+
+<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
+    <MudText Typo="Typo.h6">직급 관리</MudText>
+    <MudText Style="font-size:12px;color:var(--mud-palette-text-secondary)">
+        회사별 직급 추가·수정·삭제 (결재라인 단계 직급으로 사용)
+    </MudText>
+</div>
+
+<MudPaper Elevation="0" Class="pa-4 mb-3" Style="border:0.5px solid var(--mud-palette-lines-default);border-radius:12px">
+    <MudText Typo="Typo.subtitle2" Class="mb-3">직급 입력</MudText>
+    <MudGrid Spacing="2">
+        <MudItem xs="12" md="3">
+            <MudTextField T="string" Label="코드(영문)" @bind-Value="_edit.Code" Variant="Variant.Outlined" Margin="Margin.Dense" Placeholder="MANAGER" />
+        </MudItem>
+        <MudItem xs="12" md="3">
+            <MudTextField T="string" Label="직급명" @bind-Value="_edit.Name" Variant="Variant.Outlined" Margin="Margin.Dense" Placeholder="팀장" />
+        </MudItem>
+        <MudItem xs="12" md="2">
+            <MudNumericField T="int" Label="정렬(클수록 상위)" @bind-Value="_edit.SortOrder" Variant="Variant.Outlined" Margin="Margin.Dense" />
+        </MudItem>
+        <MudItem xs="12" md="2">
+            <MudSwitch T="bool" @bind-Value="_edit.IsActive" Label="사용" Color="Color.Primary" />
+        </MudItem>
+        <MudItem xs="12" md="2" Style="display:flex;gap:8px;align-items:center">
+            <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="OnSave" Disabled="_saving">
+                @(_editingId is null ? "추가" : "수정 저장")
+            </MudButton>
+            @if (_editingId is not null)
+            {
+                <MudButton Variant="Variant.Outlined" OnClick="ClearEdit">취소</MudButton>
+            }
+        </MudItem>
+    </MudGrid>
+</MudPaper>
+
+<MudPaper Elevation="0" Class="pa-4" Style="border:0.5px solid var(--mud-palette-lines-default);border-radius:12px">
+    @if (_loading)
+    {
+        <MudProgressLinear Indeterminate="true" Color="Color.Primary" />
+    }
+    else
+    {
+        <MudTable Items="_list" Dense="true" Hover="true" Bordered="false">
+            <HeaderContent>
+                <MudTh>코드</MudTh>
+                <MudTh>직급명</MudTh>
+                <MudTh Style="width:120px">정렬</MudTh>
+                <MudTh Style="width:80px">사용</MudTh>
+                <MudTh Style="width:160px">동작</MudTh>
+            </HeaderContent>
+            <RowTemplate>
+                <MudTd>@context.Code</MudTd>
+                <MudTd>@context.Name</MudTd>
+                <MudTd>@context.SortOrder</MudTd>
+                <MudTd>@(context.IsActive ? "Y" : "N")</MudTd>
+                <MudTd>
+                    <MudButton Size="Size.Small" Variant="Variant.Text" OnClick="@(() => OnEditRow(context))">수정</MudButton>
+                    <MudButton Size="Size.Small" Variant="Variant.Text" Color="Color.Error" OnClick="@(() => OnDeleteRow(context))">삭제</MudButton>
+                </MudTd>
+            </RowTemplate>
+        </MudTable>
+    }
+</MudPaper>
+
+@code {
+    private List<PositionListItemModel> _list = new();
+    private PositionEditModel _edit = new() { IsActive = true, SortOrder = 50 };
+    private string? _editingId;
+    private bool _loading = true;
+    private bool _saving;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await ReloadAsync();
+    }
+
+    private async Task ReloadAsync()
+    {
+        _loading = true;
+        _list = await PositionSvc.GetListAsync();
+        _loading = false;
+    }
+
+    private async Task OnSave()
+    {
+        if (string.IsNullOrWhiteSpace(_edit.Code) || string.IsNullOrWhiteSpace(_edit.Name))
+        {
+            Snackbar.Add("코드와 직급명을 입력하세요.", Severity.Warning);
+            return;
+        }
+
+        _saving = true;
+        bool ok;
+        if (_editingId is null)
+        {
+            ok = await PositionSvc.CreateAsync(_edit);
+        }
+        else
+        {
+            ok = await PositionSvc.UpdateAsync(_editingId, _edit);
+        }
+        _saving = false;
+
+        if (ok)
+        {
+            Snackbar.Add(_editingId is null ? "직급이 추가되었습니다." : "직급이 수정되었습니다.", Severity.Success);
+            ClearEdit();
+            await ReloadAsync();
+        }
+        else
+        {
+            Snackbar.Add("저장 실패. 코드 중복이나 권한을 확인하세요.", Severity.Error);
+        }
+    }
+
+    private void OnEditRow(PositionListItemModel row)
+    {
+        _editingId = row.PositionId;
+        _edit = new PositionEditModel
+        {
+            Code = row.Code,
+            Name = row.Name,
+            SortOrder = row.SortOrder,
+            IsActive = row.IsActive
+        };
+    }
+
+    private async Task OnDeleteRow(PositionListItemModel row)
+    {
+        var ok = await PositionSvc.DeleteAsync(row.PositionId);
+        if (ok)
+        {
+            Snackbar.Add("삭제되었습니다. (사용 중이면 비활성화 처리됨)", Severity.Success);
+            await ReloadAsync();
+        }
+        else
+        {
+            Snackbar.Add("삭제 실패.", Severity.Error);
+        }
+    }
+
+    private void ClearEdit()
+    {
+        _editingId = null;
+        _edit = new PositionEditModel { IsActive = true, SortOrder = 50 };
+    }
+}

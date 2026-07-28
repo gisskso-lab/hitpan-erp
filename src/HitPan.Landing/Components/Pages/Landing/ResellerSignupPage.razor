@@ -1,0 +1,55 @@
+@page "/reseller/signup"
+@rendermode InteractiveServer
+@layout LandingLayout
+@inject NavigationManager Nav
+
+@*
+    헌법 #35 (사장님 결재 2026-06-04) 객체 완전 분리 정합:
+      - 협력업체 가입 신청은 백오피스 영역 (back.hitpan.kr/backoffice/reseller-apply)
+      - 랜딩에 중복 저장했던 옛 페이지를 폐기, 백오피스로 영구 리다이렉트
+      - 옛 링크·검색엔진·외부 인용을 위한 안전 리다이렉트
+*@
+
+<PageTitle>협력업체 가입 신청 — 히트판</PageTitle>
+
+<section class="redirect-section">
+    <div class="redirect-card">
+        <div class="icon">🔄</div>
+        <h1>협력업체 가입은 백오피스에서</h1>
+        <p>협력업체 가입 신청은 본사 백오피스로 이전되었습니다.</p>
+        <p class="lead">잠시 후 백오피스 신청 페이지로 이동합니다.</p>
+        <p class="manual-link">
+            자동 이동되지 않으면
+            <a href="@_target">여기를 눌러주세요</a>.
+        </p>
+    </div>
+</section>
+
+@code {
+    // 운영: https://back.hitpan.kr/backoffice/reseller-apply
+    // 로컬: http://localhost:5259/backoffice/reseller-apply (백오피스 Web 포트)
+    [Inject] private IConfiguration Cfg { get; set; } = default!;
+    private string _target = "/backoffice/reseller-apply";
+
+    protected override async Task OnInitializedAsync()
+    {
+        var backofficeWeb = Cfg["BackofficeWeb:BaseUrl"];
+        if (!string.IsNullOrWhiteSpace(backofficeWeb))
+            _target = backofficeWeb.TrimEnd('/') + "/backoffice/reseller-apply";
+
+        await Task.Delay(1500);
+        Nav.NavigateTo(_target, forceLoad: true);
+    }
+}
+
+<style>
+.redirect-section { padding: 80px 20px; background: #F9FAFB; min-height: calc(100vh - 200px); display: flex; align-items: center; justify-content: center; }
+.redirect-card { max-width: 480px; background: #fff; padding: 48px 40px; border-radius: 16px; box-shadow: 0 4px 16px rgba(0,0,0,0.06); text-align: center; }
+.icon { font-size: 48px; margin-bottom: 16px; }
+.redirect-card h1 { font-size: 22px; font-weight: 700; color: #0F1419; margin: 0 0 12px; }
+.redirect-card p { color: #4B5563; font-size: 14px; margin: 8px 0; line-height: 1.6; }
+.redirect-card .lead { color: #6B7280; }
+.manual-link { margin-top: 16px; font-size: 13px; color: #6B7280; }
+.manual-link a { color: #0F6E56; font-weight: 700; text-decoration: none; }
+.manual-link a:hover { text-decoration: underline; }
+</style>

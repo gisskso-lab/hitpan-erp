@@ -1,0 +1,177 @@
+@page "/accounting/monthly-closing"
+@namespace HitPan.Web.Pages.FinanceUi
+@attribute [Authorize]
+@using HitPan.Web.Models
+@using HitPan.Web.Services
+@inject MonthlyClosingService ClosingSvc
+@inject ISnackbar Snackbar
+
+<PageTitle>월마감</PageTitle>
+
+<PageHeader Title="월마감" Subtitle="마감된 월의 전표는 수정·생성이 차단됩니다" />
+
+@if (_loading)
+{
+    <MudProgressLinear Indeterminate="true" Color="Color.Primary" />
+}
+else
+{
+    <MudPaper Elevation="0" Class="pa-2 hitpan-card">
+        <MudTable Items="_months" Dense="true" Hover="true">
+            <HeaderContent>
+                <MudTh>월</MudTh>
+                <MudTh Style="text-align:center">상태</MudTh>
+                <MudTh Style="text-align:right">매출</MudTh>
+                <MudTh Style="text-align:right">매입</MudTh>
+                <MudTh Style="text-align:right">수금</MudTh>
+                <MudTh Style="text-align:right">지급</MudTh>
+                <MudTh Style="text-align:center">마감일</MudTh>
+                <MudTh Style="width:200px;text-align:center">처리</MudTh>
+            </HeaderContent>
+            <RowTemplate>
+                <MudTd Style="font-weight:600">@context.YearMonthLabel</MudTd>
+                <MudTd Style="text-align:center">
+                    <MudChip T="string" Size="Size.Small" Variant="Variant.Filled"
+                        Color="@(context.Status switch { "closed" => Color.Success, "reopened" => Color.Warning, _ => Color.Default })">
+                        @context.StatusLabel
+                    </MudChip>
+                </MudTd>
+                <MudTd Style="text-align:right">@context.SalesAmount.ToString("N0")</MudTd>
+                <MudTd Style="text-align:right">@context.PurchaseAmount.ToString("N0")</MudTd>
+                <MudTd Style="text-align:right">@context.ReceiptAmount.ToString("N0")</MudTd>
+                <MudTd Style="text-align:right">@context.PaymentAmount.ToString("N0")</MudTd>
+                <MudTd Style="text-align:center;font-size:12px">
+                    @(context.ClosedAt?.ToString("yyyy-MM-dd HH:mm") ?? "-")
+                </MudTd>
+                <MudTd Style="text-align:center">
+                    @if (context.Status == "closed")
+                    {
+                        <MudButton Variant="Variant.Outlined" Size="Size.Small" Color="Color.Warning"
+                            StartIcon="@Icons.Material.Filled.LockOpen"
+                            OnClick="@(() => OpenReopenDialog(context.YearMonth))">재오픈</MudButton>
+                    }
+                    else
+                    {
+                        <MudButton Variant="Variant.Filled" Size="Size.Small" Color="Color.Error"
+                            StartIcon="@Icons.Material.Filled.Lock"
+                            OnClick="@(() => OpenCloseDialog(context))">마감</MudButton>
+                    }
+                </MudTd>
+            </RowTemplate>
+        </MudTable>
+    </MudPaper>
+}
+
+@* 재오픈 사유 다이얼로그 *@
+<MudDialog @bind-Visible="_showReopen" Options="@(new DialogOptions { MaxWidth = MaxWidth.Small, FullWidth = true })">
+    <TitleContent><MudText Typo="Typo.h6">월마감 재오픈</MudText></TitleContent>
+    <DialogContent>
+        <MudAlert Severity="Severity.Warning" Class="mb-3">재오픈 시 해당 월의 전표 수정이 다시 허용됩니다.</MudAlert>
+        <MudTextField T="string" @bind-Value="_reopenReason" Label="재오픈 사유" Variant="Variant.Outlined"
+            Lines="3" Placeholder="재오픈 사유를 입력해주세요." />
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="@(() => _showReopen = false)">취소</MudButton>
+        <MudButton Variant="Variant.Filled" Color="Color.Warning" OnClick="ConfirmReopen">재오픈</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@* 마감 확정 2단계 다이얼로그 — 실수 클릭 방지 *@
+<MudDialog @bind-Visible="_showClose" Options="@(new DialogOptions { MaxWidth = MaxWidth.Small, FullWidth = true })">
+    <TitleContent>
+        <MudText Typo="Typo.h6" Style="color:var(--mud-palette-error)">
+            <MudIcon Icon="@Icons.Material.Filled.Warning" /> 월마감 확정
+        </MudText>
+    </TitleContent>
+    <DialogContent>
+        <MudAlert Severity="Severity.Error" Class="mb-3">
+            마감 후 해당 월의 전표는 <strong>수정·생성·삭제가 모두 차단</strong>됩니다.<br />
+            되돌리려면 재오픈 사유를 남겨야 합니다.
+        </MudAlert>
+        @if (_closeTarget != null)
+        {
+            <MudText Typo="Typo.subtitle1" Class="mb-2" Style="font-weight:600">
+                @_closeTarget.YearMonthLabel 금액 확인
+            </MudText>
+            <MudSimpleTable Dense="true" Hover="false" Class="mb-3" Style="border:1px solid var(--mud-palette-lines-default)">
+                <tbody>
+                    <tr><td style="width:50%">매출</td><td style="text-align:right;font-weight:600">@_closeTarget.SalesAmount.ToString("N0")</td></tr>
+                    <tr><td>매입</td><td style="text-align:right;font-weight:600">@_closeTarget.PurchaseAmount.ToString("N0")</td></tr>
+                    <tr><td>수금</td><td style="text-align:right;font-weight:600">@_closeTarget.ReceiptAmount.ToString("N0")</td></tr>
+                    <tr><td>지급</td><td style="text-align:right;font-weight:600">@_closeTarget.PaymentAmount.ToString("N0")</td></tr>
+                </tbody>
+            </MudSimpleTable>
+        }
+        <MudCheckBox T="bool" @bind-Value="_closeConfirmed"
+            Label="위 금액을 확인했으며 마감을 진행합니다." Color="Color.Error" />
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="@(() => _showClose = false)">취소</MudButton>
+        <MudButton Variant="Variant.Filled" Color="Color.Error"
+            Disabled="@(!_closeConfirmed)" OnClick="ConfirmClose">마감 확정</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    private List<MonthlyClosingModel> _months = new();
+    private bool _loading = true;
+    private bool _showReopen;
+    private string _reopenYm = "";
+    private string _reopenReason = "";
+
+    // 마감 2단계 확인용
+    private bool _showClose;
+    private MonthlyClosingModel? _closeTarget;
+    private bool _closeConfirmed;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadAsync();
+    }
+
+    private async Task LoadAsync()
+    {
+        _loading = true;
+        _months = await ClosingSvc.GetStatusAsync();
+        _loading = false;
+    }
+
+    // 마감 2단계 — ① 다이얼로그 오픈
+    private void OpenCloseDialog(MonthlyClosingModel target)
+    {
+        _closeTarget = target;
+        _closeConfirmed = false;
+        _showClose = true;
+    }
+
+    // 마감 2단계 — ② 체크박스 확인 후 확정 실행
+    private async Task ConfirmClose()
+    {
+        if (_closeTarget == null) return;
+        _showClose = false;
+        var ym = _closeTarget.YearMonth;
+        var ok = await ClosingSvc.CloseAsync(ym);
+        if (ok) { Snackbar.Add($"{FormatYm(ym)} 마감 완료", Severity.Success); await LoadAsync(); }
+        else Snackbar.Add("마감 실패 — 이전 월 마감을 먼저 확인해주세요.", Severity.Error);
+    }
+
+    // 재오픈 다이얼로그
+    private void OpenReopenDialog(string ym)
+    {
+        _reopenYm = ym;
+        _reopenReason = "";
+        _showReopen = true;
+    }
+
+    private async Task ConfirmReopen()
+    {
+        if (string.IsNullOrWhiteSpace(_reopenReason)) { Snackbar.Add("재오픈 사유를 입력해주세요.", Severity.Warning); return; }
+        _showReopen = false;
+        var ok = await ClosingSvc.ReopenAsync(_reopenYm, _reopenReason);
+        if (ok) { Snackbar.Add($"{FormatYm(_reopenYm)} 재오픈 완료", Severity.Success); await LoadAsync(); }
+        else Snackbar.Add("재오픈 실패 — 이후 월이 마감 상태인지 확인해주세요.", Severity.Error);
+    }
+
+    private static string FormatYm(string ym) =>
+        ym.Length == 6 ? $"{ym[..4]}년 {ym[4..]}월" : ym;
+}

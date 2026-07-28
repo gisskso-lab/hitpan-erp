@@ -1,0 +1,166 @@
+@page "/m/sales/{Id}"
+@attribute [Authorize]
+@using HitPan.Web.Models
+@using HitPan.Web.Services
+@inject DeliveryService DeliverySvc
+@inject DocumentService DocSvc
+@inject NavigationManager Nav
+@inject ISnackbar Snackbar
+@inject IJSRuntime Js
+
+<PageTitle>거래명세서</PageTitle>
+
+<div class="hpm-detail">
+
+    @* ── 상단바 ── *@
+    <div class="hpm-detail-bar">
+        <button class="hpm-back-btn" @onclick="Back">
+            <MudIcon Icon="@Icons.Material.Filled.ArrowBack" Style="font-size:20px" />
+        </button>
+        <span class="hpm-detail-title">거래명세서</span>
+        <div class="hpm-detail-bar-actions">
+            <button class="hpm-bar-btn" @onclick="DownloadPdf" title="PDF">
+                <MudIcon Icon="@Icons.Material.Filled.PictureAsPdf" Style="font-size:20px" />
+            </button>
+            <button class="hpm-bar-btn" @onclick="Share" title="공유">
+                <MudIcon Icon="@Icons.Material.Filled.Share" Style="font-size:20px" />
+            </button>
+        </div>
+    </div>
+
+    @if (_loading)
+    {
+        <div class="hpm-loading"><MudProgressCircular Color="Color.Primary" Indeterminate="true" /></div>
+    }
+    else if (_doc is null)
+    {
+        <div class="hpm-empty">
+            <p>문서를 찾을 수 없습니다.</p>
+            <MudButton OnClick="Back">돌아가기</MudButton>
+        </div>
+    }
+    else
+    {
+        @* ── 요약 카드 ── *@
+        <div class="hpm-summary-card">
+            <div class="hpm-summary-partner">@_doc.PartnerName</div>
+            <div class="hpm-summary-amount">@_doc.TotalAmount.ToString("N0")원</div>
+            <div class="hpm-summary-meta">
+                <span>@_doc.DeliveryNo</span>
+                <span>·</span>
+                <span>@_doc.OrderDate.ToString("yyyy년 M월 d일")</span>
+                <span class="hpm-status-badge hpm-status-@_doc.Status" style="margin-left:6px">@StatusLabel(_doc.Status)</span>
+            </div>
+            <div class="hpm-summary-amounts">
+                <div class="hpm-summary-row">
+                    <span>공급가액</span>
+                    <span>@_doc.SupplyAmount.ToString("N0")원</span>
+                </div>
+                <div class="hpm-summary-row">
+                    <span>부가세</span>
+                    <span>@_doc.VatAmount.ToString("N0")원</span>
+                </div>
+                <div class="hpm-summary-row hpm-summary-total">
+                    <span>합계</span>
+                    <span>@_doc.TotalAmount.ToString("N0")원</span>
+                </div>
+            </div>
+        </div>
+
+        @* ── 품목 카드 리스트 ── *@
+        <div class="hpm-section-header">품목 (@(_doc.Items.Count)건)</div>
+        <div class="hpm-items">
+            @foreach (var item in _doc.Items)
+            {
+                <div class="hpm-item-card">
+                    <div class="hpm-item-top">
+                        <span class="hpm-item-name">@item.ItemName</span>
+                        <span class="hpm-item-amount">@item.Amount.ToString("N0")원</span>
+                    </div>
+                    <div class="hpm-item-bot">
+                        <span class="hpm-item-spec">@item.Spec</span>
+                        <span class="hpm-item-qty">@item.Qty.ToString("N1") @item.Unit × @item.UnitPrice.ToString("N0")원</span>
+                    </div>
+                </div>
+            }
+        </div>
+
+        @* ── 액션 버튼 하단 고정 ── *@
+        <div class="hpm-action-bar">
+            <button class="hpm-action-bar-btn hpm-action-bar-btn--secondary" @onclick="DownloadPdf">
+                <MudIcon Icon="@Icons.Material.Filled.PictureAsPdf" Style="font-size:18px" />
+                PDF 저장
+            </button>
+            @if (_doc.Status == "draft")
+            {
+                <button class="hpm-action-bar-btn hpm-action-bar-btn--primary" @onclick="EditFull">
+                    <MudIcon Icon="@Icons.Material.Filled.Edit" Style="font-size:18px" />
+                    편집하기
+                </button>
+            }
+            else
+            {
+                <button class="hpm-action-bar-btn hpm-action-bar-btn--primary" @onclick="DownloadPdf">
+                    <MudIcon Icon="@Icons.Material.Filled.Download" Style="font-size:18px" />
+                    다운로드
+                </button>
+            }
+        </div>
+    }
+</div>
+
+@code {
+    [Parameter] public string Id { get; set; } = "";
+
+    private DeliveryDetailDto? _doc;
+    private bool _loading = true;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        _loading = true;
+        _doc = await DeliverySvc.GetAsync(Id);
+        _loading = false;
+    }
+
+    private void Back() => Nav.NavigateTo("/m/sales");
+
+    private async Task DownloadPdf()
+    {
+        if (string.IsNullOrEmpty(Id)) return;
+        try
+        {
+            await DocSvc.DownloadPdfAsync("delivery", Id);
+        }
+        catch (Exception _hp15Ex)
+        {
+            Console.Error.WriteLine($"[HP15] " + _hp15Ex.GetType().Name + ": " + _hp15Ex.Message);
+            Snackbar.Add("PDF 생성 중입니다. 잠시 후 다시 시도해주세요.", Severity.Info);
+        }
+    }
+
+    private async Task Share()
+    {
+        if (_doc is null) return;
+        var text = $"{_doc.PartnerName} 거래명세서 {_doc.DeliveryNo} — {_doc.TotalAmount:N0}원";
+        try
+        {
+            await Js.InvokeVoidAsync("navigator.share", new { title = "거래명세서", text });
+        }
+        catch (Exception _hp15Ex)
+        {
+            Console.Error.WriteLine($"[HP15] " + _hp15Ex.GetType().Name + ": " + _hp15Ex.Message);
+            await Js.InvokeVoidAsync("navigator.clipboard.writeText", text);
+            Snackbar.Add("클립보드에 복사되었습니다.", Severity.Success);
+        }
+    }
+
+    private void EditFull() => Nav.NavigateTo("/deliveries");
+
+    private static string StatusLabel(string s) => s switch
+    {
+        "confirmed" => "확정",
+        "draft"     => "초안",
+        "cancelled" => "취소",
+        _           => s
+    };
+}

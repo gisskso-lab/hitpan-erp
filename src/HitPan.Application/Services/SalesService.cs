@@ -1,0 +1,2284 @@
+using System.Data;
+using Dapper;
+using HitPan.Application.DTOs.Sales;
+using HitPan.Application.DTOs.Purchase;
+using HitPan.Application.Events;
+using HitPan.Application.Interfaces;
+using HitPan.Domain.Entities;
+using HitPan.Domain.Enums;
+using Microsoft.Extensions.DependencyInjection;
+
+namespace HitPan.Application.Services;
+
+public class SalesService : ISalesService
+{
+    private readonly IUnitOfWork _unitOfWork;
+    private readonly ICurrentTenant _currentTenant;
+    private readonly IDbConnection _db;
+    private readonly IPartnerService _partnerService;
+    private readonly IAuditService _audit;
+    private readonly IServiceProvider _services;
+
+    public SalesService(
+        IUnitOfWork unitOfWork,
+        ICurrentTenant currentTenant,
+        IDbConnection db,
+        IPartnerService partnerService,
+        IAuditService audit,
+        IServiceProvider services)
+    {
+        _unitOfWork = unitOfWork;
+        _currentTenant = currentTenant;
+        _db = db;
+        _partnerService = partnerService;
+        _audit = audit;
+        _services = services;
+    }
+
+    public async Task<string> CreateOrderAsync(CreateSalesOrderRequest request, CancellationToken ct = default)
+    {
+        var orderRepo = _unitOfWork.Repository<SalesOrder>();
+        var itemRepo = _unitOfWork.Repository<SalesOrderItem>();
+
+        var date = request.OrderDate == default ? DateTime.UtcNow.Date : request.OrderDate.Date;
+        // WO-11: 한글 prefix 통일 (수주서 = 수-)
+        var prefix = $"수-{date:yyyyMMdd}-";
+        // 작20260428이7 P0-A: EF 캐시 우회 + UNIQUE 충돌 방지 (DB MAX 직조회).
+        var orderNo = await DocumentNumberHelper.NextNumberAsync(
+            _db, _currentTenant.TenantId, "sales_orders", "order_no", prefix, ct);
+
+        var orderId = Guid.NewGuid().ToString();
+        var order = new SalesOrder
+        {
+            Id = orderId,
+            OrderId = orderId,
+            TenantId = _currentTenant.TenantId,
+            OrderNo = orderNo,
+            PartnerId = request.PartnerId,
+            EmployeeId = request.EmployeeId,
+            OrderDate = date,
+            DeliveryDate = request.DeliveryDate,
+            Status = SalesOrderStatus.Draft,
+            TotalAmount = request.Items.Sum(x => x.SupplyAmount),
+            VatAmount = request.Items.Sum(x => x.VatAmount),
+            Memo = request.Memo
+        };
+        await orderRepo.AddAsync(order);
+
+        foreach (var line in request.Items)
+        {
+            await itemRepo.AddAsync(new SalesOrderItem
+            {
+                Id = Guid.NewGuid().ToString(),
+                OrderItemId = Guid.NewGuid().ToString(),
+                OrderId = orderId,
+                TenantId = _currentTenant.TenantId,
+                ItemId = line.ItemId,
+                OrderedQty = line.OrderedQty,
+                DeliveredQty = 0m,
+                UnitPrice = line.UnitPrice,
+                SupplyAmount = line.SupplyAmount,
+                VatAmount = line.VatAmount,
+                ItemStatus = "pending"
+            });
+        }
+
+        await _unitOfWork.SaveChangesAsync(ct);
+
+        // 감사로그 — 수주서 생성
+        var soAfterJson = $"{{\"order_no\":\"{orderNo}\",\"partner_id\":\"{request.PartnerId}\",\"item_count\":{request.Items.Count}}}";
+        await _audit.LogAsync("create", "sales_order", orderId, afterJson: soAfterJson, ct: ct);
+
+        return orderId;
+    }
+
+    public async Task<(string Id, string DocumentNumber)> CreateDeliveryAsync(CreateDeliveryRequest request, CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(request.PartnerId))
+        {
+            throw new InvalidOperationException("거래처를 선택해주세요.");
+        }
+
+        if (request.Items.Count == 0)
+        {
+            throw new InvalidOperationException("품목이 한 줄 이상 필요합니다.");
+        }
+
+        // 1+1 기획상품(promo) 자동 2배 처리 — 영업이 1개 입력해도 시스템이 2개로 기록
+        await ApplyPromoDoubleAsync(request.Items, ct);
+
+        var deliveryRepo = _unitOfWork.Repository<SalesDelivery>();
+        var itemRepo = _unitOfWork.Repository<SalesDeliveryItem>();
+
+        // 다창고 정합 봉합(13차 후순위→봉합): 매입·BOM·매입반품과 동일하게 기본창고(MAIN) 우선 선택.
+        // 기존 ORDER BY warehouse_id 는 알파벳순이라 다창고 환경에서 MAIN 아닌 창고가 선택되어
+        // 판매 재고가 엉뚱한 창고에서 차감되는 비대칭(헌법 #20 워크플로우 정합). 단창고 환경은 동작 불변.
+        const string whSql = """
+                             SELECT warehouse_id
+                             FROM warehouses
+                             WHERE tenant_id = @TenantId
+                               AND is_active = 1
+                             ORDER BY (CASE WHEN wh_code IN ('MAIN','WH-MAIN') THEN 0 ELSE 1 END), wh_code
+                             LIMIT 1
+                             """;
+
+        var defaultWarehouseId = await _db.QueryFirstOrDefaultAsync<string>(
+            new CommandDefinition(whSql, new { TenantId = _currentTenant.TenantId }, cancellationToken: ct));
+
+        if (string.IsNullOrEmpty(defaultWarehouseId))
+        {
+            throw new InvalidOperationException("등록된 창고가 없습니다.");
+        }
+
+        var date = request.DeliveryDate == default ? DateTime.UtcNow.Date : request.DeliveryDate.Date;
+        // WO-11: 한글 prefix 통일 (거래명세서 = 명-)
+        var prefix = $"명-{date:yyyyMMdd}-";
+        // 작20260428이7 P0-A: EF 캐시 우회 + UNIQUE 충돌 방지 (DB MAX 직조회).
+        var deliveryNo = await DocumentNumberHelper.NextNumberAsync(
+            _db, _currentTenant.TenantId, "sales_deliveries", "delivery_no", prefix, ct);
+
+        // 다이렉트 판매(수주 없이 바로 거래명세서) → 정합성을 위해 수주 자동생성(closed 상태)
+        var linkedOrderId = request.OrderId;
+        if (string.IsNullOrWhiteSpace(linkedOrderId))
+        {
+            var orderRepo2 = _unitOfWork.Repository<SalesOrder>();
+            var orderItemRepo2 = _unitOfWork.Repository<SalesOrderItem>();
+
+            var orderPrefix = $"수-{date:yyyyMMdd}-";
+            var autoOrderNo = await DocumentNumberHelper.NextNumberAsync(
+                _db, _currentTenant.TenantId, "sales_orders", "order_no", orderPrefix, ct);
+
+            linkedOrderId = Guid.NewGuid().ToString();
+            await orderRepo2.AddAsync(new SalesOrder
+            {
+                Id = linkedOrderId,
+                OrderId = linkedOrderId,
+                TenantId = _currentTenant.TenantId,
+                OrderNo = autoOrderNo,
+                PartnerId = request.PartnerId,
+                EmployeeId = request.EmployeeId,
+                OrderDate = date,
+                DeliveryDate = date,
+                Status = SalesOrderStatus.Closed,
+                TotalAmount = request.Items.Sum(x => x.SupplyAmount),
+                VatAmount = request.Items.Sum(x => x.VatAmount),
+                Memo = request.Memo,
+                IsAuto = true
+            });
+
+            foreach (var line in request.Items)
+            {
+                await orderItemRepo2.AddAsync(new SalesOrderItem
+                {
+                    Id = Guid.NewGuid().ToString(),
+                    OrderItemId = Guid.NewGuid().ToString(),
+                    OrderId = linkedOrderId,
+                    TenantId = _currentTenant.TenantId,
+                    ItemId = line.ItemId?.Trim() ?? string.Empty,
+                    OrderedQty = line.Qty,
+                    DeliveredQty = line.Qty,
+                    UnitPrice = line.UnitPrice,
+                    SupplyAmount = line.SupplyAmount,
+                    VatAmount = line.VatAmount,
+                    ItemStatus = "closed"
+                });
+            }
+        }
+
+        var deliveryId = Guid.NewGuid().ToString();
+        var delivery = new SalesDelivery
+        {
+            Id = deliveryId,
+            DeliveryId = deliveryId,
+            TenantId = _currentTenant.TenantId,
+            DeliveryNo = deliveryNo,
+            OrderId = linkedOrderId,
+            PartnerId = request.PartnerId,
+            EmployeeId = request.EmployeeId,
+            DeliveryDate = date,
+            SourceType = string.IsNullOrWhiteSpace(request.OrderId) ? "direct" : "from_order",
+            Status = SalesDeliveryStatus.Draft,
+            TotalAmount = request.Items.Sum(x => x.SupplyAmount),
+            VatAmount = request.Items.Sum(x => x.VatAmount),
+            Memo = request.Memo
+        };
+        await deliveryRepo.AddAsync(delivery);
+
+        foreach (var line in request.Items)
+        {
+            var warehouseId = string.IsNullOrWhiteSpace(line.WarehouseId) ? defaultWarehouseId : line.WarehouseId;
+
+            var itemId = line.ItemId?.Trim() ?? string.Empty;
+            if (string.IsNullOrEmpty(itemId))
+            {
+                var name = line.ItemName?.Trim();
+                if (string.IsNullOrEmpty(name))
+                {
+                    throw new InvalidOperationException("품목 ID 또는 품명이 필요합니다.");
+                }
+
+                const string itemResolveSql = """
+                                              SELECT item_id
+                                              FROM items
+                                              WHERE tenant_id = @TenantId
+                                                AND item_name = @ItemName
+                                                AND is_active = 1
+                                              ORDER BY item_id
+                                              LIMIT 1
+                                              """;
+
+                itemId = await _db.QueryFirstOrDefaultAsync<string>(
+                             new CommandDefinition(
+                                 itemResolveSql,
+                                 new { TenantId = _currentTenant.TenantId, ItemName = name },
+                                 cancellationToken: ct))
+                         ?? throw new InvalidOperationException($"등록된 품목을 찾을 수 없습니다: {name}");
+            }
+
+            await itemRepo.AddAsync(new SalesDeliveryItem
+            {
+                Id = Guid.NewGuid().ToString(),
+                DeliveryItemId = Guid.NewGuid().ToString(),
+                DeliveryId = deliveryId,
+                TenantId = _currentTenant.TenantId,
+                OrderItemId = line.OrderItemId,
+                ItemId = itemId,
+                WarehouseId = warehouseId,
+                Qty = line.Qty,
+                UnitPrice = line.UnitPrice,
+                SupplyAmount = line.SupplyAmount,
+                VatAmount = line.VatAmount
+            });
+        }
+
+        await _unitOfWork.SaveChangesAsync(ct);
+
+        // 감사로그 — 거래명세서 생성 (초안)
+        var delAfterJson = $"{{\"delivery_no\":\"{deliveryNo}\",\"partner_id\":\"{request.PartnerId}\",\"item_count\":{request.Items.Count}}}";
+        await _audit.LogAsync("create", "sales_delivery", deliveryId, afterJson: delAfterJson, ct: ct);
+
+        return (deliveryId, deliveryNo);
+    }
+
+    public async Task ConfirmDeliveryAsync(string deliveryId, ConfirmDeliveryRequest request, CancellationToken ct = default)
+    {
+        var deliveryRepo = _unitOfWork.Repository<SalesDelivery>();
+        var deliveryItemRepo = _unitOfWork.Repository<SalesDeliveryItem>();
+        var orderItemRepo = _unitOfWork.Repository<SalesOrderItem>();
+        var workflowRepo = _unitOfWork.Repository<WorkflowSetting>();
+        var ledgerRepo = _unitOfWork.Repository<StockLedger>();
+
+        var delivery = await deliveryRepo.GetByIdAsync(deliveryId)
+            ?? throw new InvalidOperationException("거래명세서를 찾을 수 없습니다.");
+        if (delivery.Status != SalesDeliveryStatus.Draft)
+        {
+            throw new InvalidOperationException("draft 상태 전표만 확정할 수 있습니다.");
+        }
+
+        // 합계 0원 판매는 확정 금지 — journal_lines CHECK 제약 위반 방지(§20 워크플로우 오염 차단).
+        if (delivery.TotalAmount + delivery.VatAmount <= 0m)
+        {
+            throw new InvalidOperationException("합계가 0원인 거래명세서는 확정할 수 없습니다. 품목·수량·단가를 확인해주세요.");
+        }
+
+        // 월마감 체크 — 마감된 월의 전표 확정 차단
+        await ApprovalTriggerHelper.EnsureNotClosedAsync(_db, delivery.TenantId, delivery.DeliveryDate, ct);
+
+        var lines = await deliveryItemRepo.FindAsync(x => x.DeliveryId == deliveryId);
+
+        if (!string.IsNullOrWhiteSpace(delivery.OrderId))
+        {
+            var allowSetting = await workflowRepo.FindAsync(x => x.SettingKey == "sales.over_delivery_allow" && x.IsActive);
+            var overDeliveryAllow = allowSetting.FirstOrDefault()?.SettingValue == "true";
+            if (!overDeliveryAllow)
+            {
+                foreach (var line in lines.Where(x => !string.IsNullOrWhiteSpace(x.OrderItemId)))
+                {
+                    var orderItem = await orderItemRepo.GetByIdAsync(line.OrderItemId!);
+                    if (orderItem is null)
+                    {
+                        throw new InvalidOperationException("매칭된 수주 라인을 찾을 수 없습니다.");
+                    }
+
+                    if (orderItem.DeliveredQty + line.Qty > orderItem.OrderedQty)
+                    {
+                        throw new InvalidOperationException("수주 잔량을 초과하여 출고할 수 없습니다.");
+                    }
+                }
+            }
+        }
+
+        var negativeStockSetting = await workflowRepo.FindAsync(x => x.SettingKey == "stock.negative_stock_allow" && x.IsActive);
+        var negativeStockAllow = negativeStockSetting.FirstOrDefault()?.SettingValue == "true";
+
+        if (!negativeStockAllow)
+        {
+            foreach (var line in lines)
+            {
+                // 사장님 헌법 (2026-04-26): "재고로 판매 흐름이 막히면 안 된다"
+                //   - 히트판 타겟 소기업 95%는 창고 1개. 창고 단위 필터로 막으면 판매 못 침.
+                //   - 회사 합산(전 창고)으로 가용재고 판단. ledger 'out' 기표는 거래명세서 라인의
+                //     warehouse_id 그대로 저장되어 DB 추적 유지(창고담당자·이송 데이터는 베타 이후 정리).
+                //   - 다창고 고객용 Picking Strategy / 재고관리 모듈은 정식 버전 작지서로.
+                // 봉합 (2026-06-23, 5차 전수조사 SALES-04 P1급): 종전엔 ledgerRepo.FindAsync 로 해당 품목의
+                //   stock_ledger 전 행을 메모리로 로드한 뒤 C# Sum 했다. stock_ledger 는 INSERT ONLY(절대원칙 #3)
+                //   라 행이 영구 누적되어, 회전 빠른 품목은 수만~수십만 행 → 거래명세서 확정(hot path)마다
+                //   전량 로드 = 대형 고객사(헌법 #26 2GB·30년)에서 메모리·지연 폭발. 코드베이스 표준(StockService
+                //   :113)대로 서버측 SQL 집계로 교체한다. tenant_id 도 명시(EF 글로벌 필터 의존 제거).
+                //   재고 검사는 이 확정의 OUT 원장 추가(아래 foreach) 전 시점이라 커밋된 잔량만 봐도 정합.
+                var currentBalance = await _db.ExecuteScalarAsync<decimal>(new CommandDefinition(
+                    "SELECT COALESCE(SUM(qty_in) - SUM(qty_out), 0) FROM stock_ledger WHERE tenant_id = @TenantId AND item_id = @ItemId",
+                    new { TenantId = delivery.TenantId, ItemId = line.ItemId }, cancellationToken: ct));
+                if (currentBalance - line.Qty < 0m)
+                {
+                    throw new InvalidOperationException("재고가 부족합니다.");
+                }
+            }
+        }
+
+        // 봉합 (2026-06-21, 7차 전수조사 B-1 P0): stock_ledger UNIQUE 키 = (tenant_id, source_type, source_id,
+        //   item_id, move_type) — warehouse·라인식별자 없음(품목단위 유일). 종전엔 라인별로 그대로 AddAsync 해,
+        //   한 거래명세서에 같은 품목이 2라인(다른 창고·다른 단가) 들어가면 같은 키가 2번 INSERT → SaveChangesAsync
+        //   UNIQUE 위반 → 거래 전체 롤백("재고 안 빠짐", 헌법 #20). 표준 데모는 통과하나 실사용 첫날 터지는 잠복형.
+        //   봉합: INSERT 전 item_id 로 합산해 키당 1행만 기록(수량·금액 합산). warehouse 는 회사 합산 가용재고
+        //   정책(위 317행 주석 — 다창고는 정식 버전)상 원장 키가 아니므로 대표 1개로 기록해도 무결성 손실 없음.
+        //   단가는 라인별로 다를 수 있어 금액(SupplyAmount) 합을 그대로 보존하고, UnitCost 는 합산 단가(금액/수량)로 보정.
+        foreach (var grp in lines.GroupBy(x => x.ItemId))
+        {
+            var first = grp.First();
+            var qtySum = grp.Sum(x => x.Qty);
+            var supplySum = grp.Sum(x => x.SupplyAmount);
+            await ledgerRepo.AddAsync(new StockLedger
+            {
+                TenantId = delivery.TenantId,
+                ItemId = grp.Key,
+                WarehouseId = first.WarehouseId,
+                PartnerId = delivery.PartnerId,
+                EmployeeId = delivery.EmployeeId,
+                LedgerDate = delivery.DeliveryDate,
+                Ym = delivery.DeliveryDate.ToString("yyyy-MM"),
+                MoveType = StockMoveType.Out,
+                SourceType = "sales_delivery",
+                SourceId = delivery.DeliveryId,
+                DocNo = delivery.DeliveryNo,
+                QtyIn = 0m,
+                QtyOut = qtySum,
+                UnitCost = qtySum != 0m ? supplySum / qtySum : first.UnitPrice,
+                SupplyAmount = supplySum
+            });
+        }
+
+        // 조립상품(assembly) BOM 폭파 — 자재별 추가 OUT 원장 생성
+        // 봉합 (2026-06-23, 5차 전수조사 SALES-03 P2): 완제품 재고 검사(311~)와 달리 조립 자재 소비에는
+        //   음수재고 검사가 없어, negative_stock_allow=false 로 설정한 고객의 약속이 자재 경로에서 깨졌다.
+        //   negativeStockAllow 를 넘겨 동일하게 검사하도록 한다(헌법 #20 무결성·#25 정확성).
+        await ExplodeAssemblyBomAsync(delivery, lines, ledgerRepo, negativeStockAllow, ct);
+
+        if (!string.IsNullOrWhiteSpace(delivery.OrderId))
+        {
+            foreach (var line in lines.Where(x => !string.IsNullOrWhiteSpace(x.OrderItemId)))
+            {
+                var orderItem = await orderItemRepo.GetByIdAsync(line.OrderItemId!);
+                if (orderItem is null)
+                {
+                    continue;
+                }
+
+                orderItem.DeliveredQty += line.Qty;
+                if (orderItem.DeliveredQty <= 0m)
+                {
+                    orderItem.ItemStatus = "pending";
+                }
+                else if (orderItem.DeliveredQty < orderItem.OrderedQty)
+                {
+                    orderItem.ItemStatus = "partial";
+                }
+                else
+                {
+                    orderItem.ItemStatus = "closed";
+                }
+                orderItemRepo.Update(orderItem);
+            }
+        }
+
+        delivery.Status = SalesDeliveryStatus.Confirmed;
+        deliveryRepo.Update(delivery);
+
+        // ── 단일 트랜잭션 (EF + Dapper 공유) ──
+        // 브라운킴 지적 듀얼 트랜잭션 해소: EF의 DbContext 트랜잭션을 시작하고
+        // Dapper는 DbContext의 실연결·트랜잭션으로 실행 → 중간 실패 시 전체 롤백.
+        using var tx = await _unitOfWork.BeginTransactionAsync(ct);
+        try
+        {
+            // 1) EF 변경 저장 (stock_ledger INSERT + status='confirmed' + order_items UPDATE)
+            await _unitOfWork.SaveChangesAsync(ct);
+
+            var conn = _unitOfWork.GetDbConnection();
+            var dbTx = tx.DbTransaction;
+
+            // 2) item_stock 차감 (Dapper · 동일 tx)
+            foreach (var line in lines)
+            {
+                const string updateStockSql = """
+                    INSERT INTO item_stock (stock_id, tenant_id, item_id, warehouse_id, current_qty, avg_cost, last_updated_at)
+                    VALUES (UUID(), @TenantId, @ItemId, @WarehouseId, -@Qty, @UnitCost, NOW(6))
+                    ON DUPLICATE KEY UPDATE
+                      current_qty = current_qty - @Qty,
+                      last_updated_at = NOW(6)
+                    """;
+
+                await conn.ExecuteAsync(new CommandDefinition(
+                    updateStockSql,
+                    new
+                    {
+                        TenantId = delivery.TenantId,
+                        ItemId = line.ItemId,
+                        WarehouseId = line.WarehouseId,
+                        Qty = line.Qty,
+                        UnitCost = line.UnitPrice
+                    },
+                    transaction: dbTx,
+                    cancellationToken: ct));
+            }
+
+            // 2-BOM) 조립 자재 item_stock 차감 — 봉합 (2026-06-23, 6차 전수조사 BOM-STOCK-ASYM P1):
+            //   종전엔 ExplodeAssemblyBomAsync 가 자재 OUT 을 stock_ledger 에만 기록하고 item_stock 은
+            //   차감하지 않아, 조립상품 판매 시 재고현황(item_stock 읽음)에 자재가 안 빠진 채 영구 부풀려졌다
+            //   (헌법 #20). 방금 SaveChangesAsync(line 401)로 커밋된 이 delivery 의 bom_explosion OUT 원장을
+            //   ★같은 EF 연결·같은 트랜잭션(conn=GetDbConnection, dbTx)으로★ 읽어 자재 item_stock 을 동일
+            //   UPSERT 패턴으로 차감한다. _db(별개 연결)로 읽으면 미커밋 EF 원장이 안 보여 차감 0건(거짓 봉합)이
+            //   되므로 반드시 conn+dbTx 로 읽는다(설계팀장 P0 지적). 비조립 상품은 원장 0건 → 차감 0회(회귀 없음).
+            await conn.ExecuteAsync(new CommandDefinition(
+                """
+                INSERT INTO item_stock (stock_id, tenant_id, item_id, warehouse_id, current_qty, avg_cost, last_updated_at)
+                SELECT UUID(), tenant_id, item_id, warehouse_id, -SUM(qty_out), 0, NOW(6)
+                FROM stock_ledger
+                WHERE tenant_id = @TenantId AND source_id = @DeliveryId AND source_type = 'bom_explosion'
+                GROUP BY tenant_id, item_id, warehouse_id
+                ON DUPLICATE KEY UPDATE
+                  current_qty = current_qty + VALUES(current_qty),
+                  last_updated_at = NOW(6)
+                """,
+                new { TenantId = delivery.TenantId, DeliveryId = delivery.DeliveryId },
+                transaction: dbTx,
+                cancellationToken: ct));
+
+            // 2-A) 수주서 헤더 status 동기화 — delivery.OrderId 가 있을 때만.
+            // §절대원칙 #20 (워크플로우 끊김 금지): item_status 만 갱신하고 헤더가 'draft' 로 남으면
+            // 수주 목록에 "임시저장"으로 보임 → 사용자 혼란 + 거래명세서 변환 재시도 시 잔량 0 차단.
+            // 4/29 SO-20260428-001 사고 진범. PurchaseService PO 헤더 동기화와 동일 패턴.
+            if (!string.IsNullOrWhiteSpace(delivery.OrderId))
+            {
+                await conn.ExecuteAsync(new CommandDefinition(
+                    """
+                    UPDATE sales_orders so
+                    LEFT JOIN (
+                        SELECT order_id,
+                               SUM(CASE WHEN item_status='closed'  THEN 1 ELSE 0 END) AS closed_cnt,
+                               SUM(CASE WHEN item_status='partial' THEN 1 ELSE 0 END) AS partial_cnt,
+                               COUNT(*) AS total_cnt
+                        FROM sales_order_items
+                        WHERE order_id = @OrderId
+                        GROUP BY order_id
+                    ) s ON s.order_id = so.order_id
+                    SET so.status = CASE
+                                       WHEN s.closed_cnt = s.total_cnt THEN 'closed'
+                                       WHEN s.closed_cnt > 0 OR s.partial_cnt > 0 THEN 'partial'
+                                       ELSE 'confirmed'
+                                    END,
+                        so.updated_at = NOW(6)
+                    WHERE so.order_id = @OrderId AND so.tenant_id = @TenantId
+                    """,
+                    new { OrderId = delivery.OrderId, TenantId = delivery.TenantId },
+                    transaction: dbTx,
+                    cancellationToken: ct));
+            }
+
+            // 3) monthly_summary 매출 갱신 — 멱등 가드 (작4 P0-4, 동일 tx)
+            await MonthlySummaryGuard.TryApplyAsync(
+                conn, dbTx,
+                tenantId: delivery.TenantId,
+                date: delivery.DeliveryDate,
+                sourceType: "delivery_confirmed",
+                sourceId: delivery.DeliveryId,
+                field: MonthlySummaryGuard.SummaryField.TotalSales,
+                amount: delivery.TotalAmount,
+                ct: ct);
+
+            // 4) 회계 자동 기표 (차변 외상매출금 / 대변 매출+부가세예수금)
+            await AutoJournalHelper.RecordSalesConfirmAsync(
+                conn, dbTx,
+                delivery.TenantId,
+                delivery.DeliveryId,
+                delivery.DeliveryNo,
+                delivery.DeliveryDate,
+                delivery.PartnerId,
+                delivery.TotalAmount,
+                delivery.VatAmount,
+                delivery.EmployeeId,
+                ct);
+
+            // 5) partner_balance 매출 가산 — 트랜잭션 내부에서 처리 (RED-1 보강)
+            //    이벤트 외부 발행 실패 시에도 partner_balance 정합성 보장.
+            await conn.ExecuteAsync(new CommandDefinition(
+                """
+                INSERT INTO partner_balance
+                  (balance_id, tenant_id, partner_id,
+                   total_sales, total_receipt, total_purchase, total_payment,
+                   last_updated_at)
+                VALUES
+                  (UUID(), @TenantId, @PartnerId, @Amount, 0, 0, 0, NOW(6))
+                ON DUPLICATE KEY UPDATE
+                  total_sales     = total_sales + @Amount,
+                  last_updated_at = NOW(6)
+                """,
+                new { TenantId = delivery.TenantId, PartnerId = delivery.PartnerId,
+                      Amount = delivery.TotalAmount },
+                transaction: dbTx, cancellationToken: ct));
+
+            // 6) 전체 커밋 — EF + Dapper 쓰기가 원자적으로 확정
+            await tx.CommitAsync(ct);
+
+            // 감사로그 (트랜잭션 밖)
+            await _audit.LogAsync("confirm", "sales_delivery", deliveryId, ct: ct);
+
+            // 7) 이벤트 발행 (트랜잭션 밖) — 안전재고 알림 전용
+            //    partner_balance는 위 트랜잭션에서 이미 처리. 이벤트 실패해도 정합성 영향 없음.
+            try
+            {
+                var events = _services.GetService<IEventPublisher>();
+                if (events is not null)
+                {
+                    var evt = new DeliveryConfirmedEvent(
+                        TenantId: delivery.TenantId,
+                        DeliveryId: delivery.DeliveryId,
+                        PartnerId: delivery.PartnerId,
+                        SupplyAmount: delivery.TotalAmount,
+                        VatAmount: delivery.VatAmount,
+                        TotalAmount: delivery.TotalAmount + delivery.VatAmount,
+                        Items: lines.Select(l => new DeliveryItemEvent(
+                            ItemId: l.ItemId,
+                            Qty: l.Qty,
+                            UnitPrice: l.UnitPrice,
+                            Amount: l.Qty * l.UnitPrice)).ToList());
+                    await events.PublishAsync("delivery.confirmed", evt, ct);
+                }
+            }
+            catch (Exception evtEx)
+            {
+                await _audit.LogAsync("event_failed", "sales_delivery", deliveryId,
+                    reason: $"delivery.confirmed: {evtEx.Message}", ct: ct);
+            }
+        }
+        catch (Exception)
+        {
+            try { await tx.RollbackAsync(ct); } catch (Exception rbex) { Console.Error.WriteLine($"[SalesService] rollback failed: {rbex.Message}"); }
+            throw;
+        }
+
+        // 결재 트리거: 결재 설정이 ON이면 결재 문서 자동 생성 (커밋 이후 실행)
+        // 결재 트리거 실패는 거래 확정에 영향 없음 — 이미 커밋된 원장은 유효
+        try
+        {
+            await ApprovalTriggerHelper.TryCreateApprovalAsync(_db,
+                "delivery", delivery.DeliveryId, delivery.DeliveryNo,
+                $"거래명세서 확정: {delivery.DeliveryNo}",
+                delivery.TotalAmount + delivery.VatAmount,
+                delivery.TenantId, delivery.EmployeeId ?? "system", "확정자", ct);
+        }
+        catch (Exception ex)
+        {
+            // 결재 트리거 실패는 원장 무결성과 무관 — 로그만 남기고 무시
+            System.Diagnostics.Trace.TraceWarning($"[ApprovalTrigger] 거래명세서 {delivery.DeliveryNo} 결재 트리거 실패: {ex.Message}");
+        }
+    }
+
+    public async Task<DeliveryDetailDto?> GetDeliveryAsync(string deliveryId, string tenantId, CancellationToken ct = default)
+    {
+        const string sql = """
+                           SELECT
+                               d.delivery_id AS DeliveryId,
+                               d.delivery_no AS DeliveryNo,
+                               d.delivery_date AS OrderDate,
+                               d.partner_id AS PartnerId,
+                               p.partner_name AS PartnerName,
+                               (d.total_amount + d.vat_amount) AS TotalAmount,
+                               d.vat_amount AS VatAmount,
+                               d.total_amount AS SupplyAmount,
+                               d.status AS Status,
+                               d.memo AS Memo,
+                               CAST(0 AS DECIMAL(15,2)) AS CashAmount,
+                               CAST(0 AS DECIMAL(15,2)) AS CardAmount,
+                               CAST(0 AS DECIMAL(15,2)) AS DiscountAmount,
+                               d.employee_id AS EmployeeId,
+                               e.emp_name AS EmployeeName
+                           FROM sales_deliveries d
+                           LEFT JOIN partners p
+                               ON p.partner_id = d.partner_id
+                                  AND p.tenant_id = d.tenant_id
+                           LEFT JOIN employees e
+                               ON e.employee_id = d.employee_id
+                                  AND e.tenant_id = d.tenant_id
+                           WHERE d.delivery_id = @DeliveryId
+                             AND d.tenant_id = @TenantId
+                           """;
+
+        var delivery = await _db.QueryFirstOrDefaultAsync<DeliveryDetailDto>(
+            new CommandDefinition(sql, new { DeliveryId = deliveryId, TenantId = tenantId }, cancellationToken: ct));
+
+        if (delivery is null)
+        {
+            return null;
+        }
+
+        const string itemSql = """
+                               SELECT
+                                   di.item_id AS ItemId,
+                                   it.item_name AS ItemName,
+                                   CAST(NULL AS CHAR(100)) AS Spec,
+                                   it.unit AS Unit,
+                                   di.qty AS Qty,
+                                   di.unit_price AS UnitPrice,
+                                   di.supply_amount AS Amount,
+                                   di.vat_amount AS VatAmount,
+                                   CAST(NULL AS CHAR(500)) AS Memo,
+                                   0 AS RowNo
+                               FROM sales_delivery_items di
+                               LEFT JOIN items it
+                                   ON it.item_id = di.item_id
+                                      AND it.tenant_id = di.tenant_id
+                               WHERE di.delivery_id = @DeliveryId
+                                 AND di.tenant_id = @TenantId
+                               ORDER BY di.delivery_item_id
+                               """;
+
+        var items = (await _db.QueryAsync<DeliveryItemDto>(
+                new CommandDefinition(itemSql, new { DeliveryId = deliveryId, TenantId = tenantId }, cancellationToken: ct)))
+            .ToList();
+        for (var i = 0; i < items.Count; i++)
+        {
+            items[i].RowNo = i + 1;
+        }
+
+        delivery.Items = items;
+
+        const string balanceSql = """
+                                  SELECT COALESCE(receivable_balance, 0)
+                                  FROM v_partner_balance
+                                  WHERE partner_id = @PartnerId
+                                    AND tenant_id = @TenantId
+                                  """;
+
+        delivery.PrevReceivable = await _db.QueryFirstOrDefaultAsync<decimal>(
+            new CommandDefinition(balanceSql, new { delivery.PartnerId, TenantId = tenantId }, cancellationToken: ct));
+
+        const string todaySql = """
+                                SELECT COALESCE(SUM(d.total_amount + d.vat_amount), 0)
+                                FROM sales_deliveries d
+                                WHERE d.tenant_id = @TenantId
+                                  AND d.partner_id = @PartnerId
+                                  AND d.delivery_date = CURDATE()
+                                  AND d.status <> 'cancelled'
+                                """;
+
+        delivery.TodaySales = await _db.QueryFirstOrDefaultAsync<decimal>(
+            new CommandDefinition(todaySql, new { TenantId = tenantId, delivery.PartnerId }, cancellationToken: ct));
+
+        delivery.TodayReceipt = 0m;
+        return delivery;
+    }
+
+    public async Task<List<DeliveryListDto>> GetDeliveriesAsync(
+        string tenantId,
+        DateTime? from = null,
+        DateTime? to = null,
+        string? partnerName = null,
+        string? status = null,
+        CancellationToken ct = default)
+    {
+        const string sql = """
+                           SELECT
+                               d.delivery_id AS DeliveryId,
+                               d.delivery_no AS DeliveryNo,
+                               d.delivery_date AS OrderDate,
+                               d.partner_id AS PartnerId,
+                               p.partner_name AS PartnerName,
+                               (d.total_amount + d.vat_amount) AS TotalAmount,
+                               d.vat_amount AS VatAmount,
+                               d.total_amount AS SupplyAmount,
+                               d.status AS Status,
+                               d.memo AS Memo
+                           FROM sales_deliveries d
+                           LEFT JOIN partners p
+                               ON p.partner_id = d.partner_id
+                                  AND p.tenant_id = d.tenant_id
+                           WHERE d.tenant_id = @TenantId
+                             AND (d.is_deleted = 0 OR d.is_deleted IS NULL)
+                             AND d.status <> 'cancelled'
+                             AND (@From IS NULL OR d.delivery_date >= @From)
+                             AND (@To IS NULL OR d.delivery_date <= @To)
+                             AND (@PartnerName IS NULL OR p.partner_name LIKE CONCAT('%', @PartnerName, '%'))
+                             AND (@Status IS NULL OR d.status = @Status)
+                           ORDER BY d.delivery_date DESC,
+                                    d.delivery_no DESC
+                           LIMIT 200
+                           """;
+
+        var rows = await _db.QueryAsync<DeliveryListDto>(
+            new CommandDefinition(
+                sql,
+                new
+                {
+                    TenantId = tenantId,
+                    From = from?.Date,
+                    To = to?.Date,
+                    PartnerName = partnerName,
+                    Status = status
+                },
+                cancellationToken: ct));
+
+        return rows.ToList();
+    }
+
+    public async Task UpdateDeliveryAsync(
+        string deliveryId,
+        UpdateDeliveryDto dto,
+        string tenantId,
+        string userId,
+        CancellationToken ct = default)
+    {
+        const string assertSql = """
+                                 SELECT status
+                                 FROM sales_deliveries
+                                 WHERE delivery_id = @DeliveryId
+                                   AND tenant_id = @TenantId
+                                 """;
+
+        var status = await _db.QueryFirstOrDefaultAsync<string>(
+            new CommandDefinition(assertSql, new { DeliveryId = deliveryId, TenantId = tenantId }, cancellationToken: ct));
+
+        if (status is null)
+        {
+            throw new InvalidOperationException("거래명세서를 찾을 수 없습니다.");
+        }
+
+        if (!string.Equals(status, "draft", StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidOperationException("draft 상태 전표만 수정할 수 있습니다.");
+        }
+
+        if (dto.Items.Count == 0)
+        {
+            throw new InvalidOperationException("품목이 한 줄 이상 필요합니다.");
+        }
+
+        // 1+1 기획상품 자동 2배 (UpdateDelivery 경로에도 적용)
+        await ApplyPromoDoubleToUpdateAsync(dto.Items, tenantId, ct);
+
+        // 다창고 정합 봉합(13차 후순위→봉합): 매입·BOM·매입반품과 동일하게 기본창고(MAIN) 우선 선택.
+        // 기존 ORDER BY warehouse_id 는 알파벳순이라 다창고 환경에서 MAIN 아닌 창고가 선택되어
+        // 판매 재고가 엉뚱한 창고에서 차감되는 비대칭(헌법 #20 워크플로우 정합). 단창고 환경은 동작 불변.
+        const string whSql = """
+                             SELECT warehouse_id
+                             FROM warehouses
+                             WHERE tenant_id = @TenantId
+                               AND is_active = 1
+                             ORDER BY (CASE WHEN wh_code IN ('MAIN','WH-MAIN') THEN 0 ELSE 1 END), wh_code
+                             LIMIT 1
+                             """;
+
+        var defaultWarehouseId = await _db.QueryFirstOrDefaultAsync<string>(
+            new CommandDefinition(whSql, new { TenantId = tenantId }, cancellationToken: ct));
+
+        if (string.IsNullOrEmpty(defaultWarehouseId))
+        {
+            throw new InvalidOperationException("등록된 창고가 없습니다.");
+        }
+
+        var supplyAmount = dto.Items.Sum(x => x.Amount);
+        var vatAmount = dto.Items.Sum(x => x.VatAmount);
+
+        const string updateSql = """
+                                 UPDATE sales_deliveries SET
+                                     delivery_date = @OrderDate,
+                                     partner_id = @PartnerId,
+                                     memo = @Memo,
+                                     total_amount = @SupplyAmount,
+                                     vat_amount = @VatAmount,
+                                     updated_at = NOW(6),
+                                     updated_by = @UserId
+                                 WHERE delivery_id = @DeliveryId
+                                   AND tenant_id = @TenantId
+                                   AND status = 'draft'
+                                 """;
+
+        // 트랜잭션으로 헤더 UPDATE + 품목 DELETE/INSERT를 원자적으로 묶는다.
+        if (_db.State != ConnectionState.Open)
+        {
+            if (_db is System.Data.Common.DbConnection dbConn) await dbConn.OpenAsync(ct);
+            else _db.Open();
+        }
+        using var tx = _db.BeginTransaction();
+        try
+        {
+            await _db.ExecuteAsync(new CommandDefinition(updateSql,
+                new
+                {
+                    DeliveryId = deliveryId,
+                    TenantId = tenantId,
+                    OrderDate = dto.OrderDate.Date,
+                    PartnerId = dto.PartnerId,
+                    Memo = dto.Memo,
+                    SupplyAmount = supplyAmount,
+                    VatAmount = vatAmount,
+                    UserId = string.IsNullOrEmpty(userId) ? null : userId
+                },
+                transaction: tx, cancellationToken: ct));
+
+            await _db.ExecuteAsync(new CommandDefinition(
+                "DELETE FROM sales_delivery_items WHERE delivery_id = @DeliveryId AND tenant_id = @TenantId",
+                new { DeliveryId = deliveryId, TenantId = tenantId },
+                transaction: tx, cancellationToken: ct));
+
+            foreach (var item in dto.Items)
+            {
+                await _db.ExecuteAsync(new CommandDefinition(
+                    """
+                    INSERT INTO sales_delivery_items
+                        (delivery_item_id, delivery_id, tenant_id, order_item_id, item_id, warehouse_id,
+                         qty, unit_price, supply_amount, vat_amount)
+                    VALUES
+                        (@DeliveryItemId, @DeliveryId, @TenantId, NULL, @ItemId, @WarehouseId,
+                         @Qty, @UnitPrice, @SupplyAmount, @VatAmount)
+                    """,
+                    new
+                    {
+                        DeliveryItemId = Guid.NewGuid().ToString(),
+                        DeliveryId = deliveryId,
+                        TenantId = tenantId,
+                        item.ItemId,
+                        WarehouseId = defaultWarehouseId,
+                        item.Qty,
+                        item.UnitPrice,
+                        SupplyAmount = item.Amount,
+                        item.VatAmount
+                    },
+                    transaction: tx, cancellationToken: ct));
+            }
+
+            tx.Commit();
+        }
+        catch (Exception)
+        {
+            try { tx.Rollback(); } catch (Exception rbex) { Console.Error.WriteLine($"[SalesService] rollback failed: {rbex.Message}"); }
+            throw;
+        }
+    }
+
+    public async Task DeleteDeliveryAsync(string deliveryId, string tenantId, CancellationToken ct = default)
+    {
+        // 사장님 지시 (2026-04-26): 거래명세서는 전자계산서 발행 전이면 삭제 가능.
+        //   - 권한은 컨트롤러에서 SalesManager 정책으로 이미 강제됨.
+        //   - tax_invoices 에 delivery_id 발행 레코드 있으면 거부 (감사·세무 무결성).
+        //   - status='draft'    → cancelled 표시
+        //   - status='confirmed' → CancelConfirmedDeliveryAsync 로 Reverse 원장 발행
+        //     (재고·원장·회계 모두 복귀, INSERT ONLY 원칙 유지).
+
+        var invoiced = await _db.QueryFirstOrDefaultAsync<int>(new CommandDefinition(
+            "SELECT COUNT(*) FROM tax_invoices WHERE delivery_id=@Id AND tenant_id=@Tid",
+            new { Id = deliveryId, Tid = tenantId }, cancellationToken: ct));
+        if (invoiced > 0)
+        {
+            throw new InvalidOperationException("전자계산서가 발행된 거래명세서는 삭제할 수 없습니다. 계산서를 먼저 취소해주세요.");
+        }
+
+        var status = await _db.QueryFirstOrDefaultAsync<string?>(new CommandDefinition(
+            "SELECT status FROM sales_deliveries WHERE delivery_id=@Id AND tenant_id=@Tid",
+            new { Id = deliveryId, Tid = tenantId }, cancellationToken: ct));
+        if (string.IsNullOrEmpty(status)) return; // 이미 없음
+
+        if (string.Equals(status, "confirmed", StringComparison.OrdinalIgnoreCase))
+        {
+            // 확정된 거래는 Reverse 경로 — 재고·잔액·회계 무결성 유지.
+            await CancelConfirmedDeliveryAsync(deliveryId, tenantId, employeeId: null, ct);
+            return;
+        }
+
+        await _db.ExecuteAsync(
+            new CommandDefinition(
+                """
+                UPDATE sales_deliveries
+                SET status = 'cancelled',
+                    updated_at = NOW(6)
+                WHERE delivery_id = @DeliveryId
+                  AND tenant_id = @TenantId
+                  AND status = 'draft'
+                """,
+                new { DeliveryId = deliveryId, TenantId = tenantId },
+                cancellationToken: ct));
+
+        await _audit.LogAsync("delete", "sales_delivery", deliveryId, ct: ct);
+    }
+
+    /// <summary>
+    /// 확정된 거래명세서 취소 — Reverse 원장 발행으로 재고·잔액 복귀.
+    /// 원장은 INSERT ONLY 원칙을 유지하고 move_type='in'의 역행 원장을 새로 기록한다.
+    /// 조립상품(BOM 폭파)도 자재 역행 IN으로 복귀시킨다.
+    /// </summary>
+    public async Task CancelConfirmedDeliveryAsync(string deliveryId, string tenantId, string? employeeId, CancellationToken ct = default)
+    {
+        var header = await _db.QueryFirstOrDefaultAsync<dynamic>(new CommandDefinition(
+            "SELECT delivery_id, delivery_no, partner_id, delivery_date, status, total_amount, vat_amount FROM sales_deliveries WHERE delivery_id=@Id AND tenant_id=@Tid",
+            new { Id = deliveryId, Tid = tenantId }, cancellationToken: ct))
+            ?? throw new InvalidOperationException("거래명세서를 찾을 수 없습니다.");
+
+        if ((string)header.status != "confirmed")
+        {
+            throw new InvalidOperationException("confirmed 상태만 취소할 수 있습니다. (draft은 삭제 사용)");
+        }
+
+        if (_db.State != ConnectionState.Open)
+        {
+            if (_db is System.Data.Common.DbConnection dbConn) await dbConn.OpenAsync(ct);
+            else _db.Open();
+        }
+        using var tx = _db.BeginTransaction();
+        try
+        {
+            var items = (await _db.QueryAsync<dynamic>(new CommandDefinition(
+                "SELECT item_id, warehouse_id, qty, unit_price, supply_amount FROM sales_delivery_items WHERE delivery_id=@Id AND tenant_id=@Tid",
+                new { Id = deliveryId, Tid = tenantId }, transaction: tx, cancellationToken: ct))).ToList();
+
+            DateTime dd = (DateTime)header.delivery_date;
+            string ym = dd.ToString("yyyy-MM");
+
+            // 1) 원본 완제품 OUT의 역행 IN 원장
+            // 봉합 (2026-06-21, 7차 전수조사 B-1 P0): 역행 원장도 stock_ledger UNIQUE 키
+            //   (tenant, source_type=sales_cancel, source_id=deliveryId, item_id, move_type=in) 단위 유일.
+            //   확정과 동일하게 같은 품목 2라인이면 라인별 INSERT 가 키를 2번 찍어 취소 자체가 차단됐다(헌법 #20).
+            //   item_id 로 합산해 역행도 키당 1행만 기록(확정 OUT 합산과 대칭).
+            var reverseGroups = items
+                .GroupBy(it => (string)it.item_id)
+                .Select(g => new
+                {
+                    ItemId = g.Key,
+                    Wh = (string)g.First().warehouse_id,
+                    Qty = g.Sum(x => (decimal)x.qty),
+                    Supply = g.Sum(x => (decimal)x.supply_amount),
+                    UnitPrice = (decimal)g.First().unit_price
+                });
+            foreach (var it in reverseGroups)
+            {
+                await _db.ExecuteAsync(new CommandDefinition(
+                    """
+                    INSERT INTO stock_ledger
+                      (tenant_id, item_id, warehouse_id, partner_id, employee_id, ledger_date, ym,
+                       move_type, source_type, source_id, doc_no, qty_in, qty_out, unit_cost, supply_amount, memo)
+                    VALUES
+                      (@Tid, @ItemId, @Wh, @PartnerId, @EmpId, @Date, @Ym,
+                       'in', 'sales_cancel', @Did, @DocNo, @Qty, 0, @UnitPrice, @Supply, '매출취소 Reverse')
+                    """,
+                    new
+                    {
+                        Tid = tenantId,
+                        ItemId = it.ItemId,
+                        Wh = it.Wh,
+                        PartnerId = (string)header.partner_id,
+                        EmpId = employeeId,
+                        Date = dd, Ym = ym,
+                        Did = deliveryId,
+                        DocNo = (string)header.delivery_no,
+                        Qty = it.Qty,
+                        UnitPrice = it.UnitPrice,
+                        Supply = it.Supply
+                    },
+                    transaction: tx, cancellationToken: ct));
+            }
+
+            // 2) BOM 폭파 자재의 역행 IN 원장 (조립상품 판매였다면)
+            const string bomReverseSql = """
+                INSERT INTO stock_ledger (tenant_id, item_id, warehouse_id, partner_id, employee_id,
+                  ledger_date, ym, move_type, source_type, source_id, doc_no, qty_in, qty_out, unit_cost, supply_amount, memo)
+                SELECT @Tid, l.item_id, l.warehouse_id, l.partner_id, @EmpId,
+                  @Date, @Ym, 'in', 'bom_explosion_cancel', @Did, @DocNo,
+                  l.qty_out, 0, 0, 0, '조립취소 자재복귀'
+                FROM stock_ledger l
+                WHERE l.source_id=@Did AND l.source_type='bom_explosion' AND l.tenant_id=@Tid
+                """;
+            await _db.ExecuteAsync(new CommandDefinition(bomReverseSql,
+                new
+                {
+                    Tid = tenantId,
+                    EmpId = employeeId,
+                    Date = dd, Ym = ym,
+                    Did = deliveryId,
+                    DocNo = (string)header.delivery_no
+                },
+                transaction: tx, cancellationToken: ct));
+
+            // 3) item_stock 복귀 — 완제품
+            await _db.ExecuteAsync(new CommandDefinition(
+                """
+                INSERT INTO item_stock (stock_id, tenant_id, item_id, warehouse_id, current_qty, avg_cost, last_updated_at)
+                SELECT UUID(), @Tid, item_id, warehouse_id, qty, unit_price, NOW(6)
+                FROM sales_delivery_items WHERE delivery_id=@Did AND tenant_id=@Tid
+                ON DUPLICATE KEY UPDATE current_qty = current_qty + VALUES(current_qty), last_updated_at=NOW(6)
+                """,
+                new { Tid = tenantId, Did = deliveryId },
+                transaction: tx, cancellationToken: ct));
+
+            // 3-BOM) item_stock 복귀 — 조립 자재 (봉합 2026-06-23, 6차 BOM-STOCK-ASYM P1 대칭):
+            //   확정 시 자재 item_stock 을 차감(2-BOM)하므로, 취소 시에도 반드시 자재 item_stock 을 복귀해야
+            //   짝이 맞는다. 누락하면 취소할 때마다 자재가 영구 손실된다(헌법 #20 재위반). 원본 bom_explosion
+            //   OUT 원장 기준으로 +SUM(qty_out) 복귀. 이 원장은 확정 시 이미 커밋된 과거 데이터라 _db+tx 로 조회 가능.
+            await _db.ExecuteAsync(new CommandDefinition(
+                """
+                INSERT INTO item_stock (stock_id, tenant_id, item_id, warehouse_id, current_qty, avg_cost, last_updated_at)
+                SELECT UUID(), tenant_id, item_id, warehouse_id, SUM(qty_out), 0, NOW(6)
+                FROM stock_ledger
+                WHERE tenant_id=@Tid AND source_id=@Did AND source_type='bom_explosion'
+                GROUP BY tenant_id, item_id, warehouse_id
+                ON DUPLICATE KEY UPDATE current_qty = current_qty + VALUES(current_qty), last_updated_at=NOW(6)
+                """,
+                new { Tid = tenantId, Did = deliveryId },
+                transaction: tx, cancellationToken: ct));
+
+            // 4) 연결된 수금(collections) 무효화 — ref_doc이 이 명세서인 수금 전부
+            var voidedCollections = await _db.ExecuteAsync(new CommandDefinition(
+                """
+                UPDATE collections
+                SET is_active=0, updated_at=NOW(6)
+                WHERE tenant_id=@Tid AND ref_doc_type='sales_delivery' AND ref_doc_id=@Did AND is_active=1
+                """,
+                new { Tid = tenantId, Did = deliveryId },
+                transaction: tx, cancellationToken: ct));
+
+            // 5) partner_balance 재계산 (매출 차감 + 수금 역산)
+            await _db.ExecuteAsync(new CommandDefinition(
+                """
+                UPDATE partner_balance pb
+                SET total_sales = COALESCE((SELECT SUM(total_amount) FROM sales_deliveries
+                                            WHERE tenant_id=@Tid AND partner_id=@Pid AND status='confirmed'), 0),
+                    total_receipt = COALESCE((SELECT SUM(amount) FROM collections
+                                              WHERE tenant_id=@Tid AND partner_id=@Pid AND is_active=1
+                                                AND ref_doc_type='sales_delivery'), 0),
+                    last_updated_at = NOW(6)
+                WHERE tenant_id=@Tid AND partner_id=@Pid
+                """,
+                new { Tid = tenantId, Pid = (string)header.partner_id },
+                transaction: tx, cancellationToken: ct));
+
+            // 6) 회계 역분개 — RecordSalesConfirmAsync 대칭 (차변 매출+부가세예수금 / 대변 외상매출금)
+            if ((decimal)header.total_amount != 0m || (decimal)header.vat_amount != 0m)
+            {
+                await AutoJournalHelper.RecordSalesDeliveryCancelAsync(
+                    _db, tx,
+                    tenantId,
+                    deliveryId,
+                    (string)header.delivery_no,
+                    dd,
+                    (string)header.partner_id,
+                    (decimal)header.total_amount,
+                    (decimal)header.vat_amount,
+                    employeeId,
+                    ct);
+            }
+
+            // 7) monthly_summary 매출 역산 — ConfirmDeliveryAsync TryApplyAsync 대칭 차감
+            // 봉합 (2026-06-23, 5차 전수조사 SALES-01 P1):
+            //   종전엔 sourceId 를 확정과 동일한 deliveryId 로 호출했다. MonthlySummaryGuard 의 멱등 키는
+            //   (tenant_id, source_type, source_id, field_name) UNIQUE 이므로, 확정 때 이미 그 키로
+            //   monthly_summary_sources 행이 들어가 있어 취소 호출은 INSERT IGNORE 충돌(inserted==0) →
+            //   return false 로 차감 SQL 자체가 실행되지 않았다. 결과: 확정 매출을 취소해도
+            //   monthly_summary.total_sales 가 영영 안 줄어 월매출이 부풀려진 채 고정(헌법 #20 무결성 위반).
+            //   해법: 취소 역산은 확정과 다른 sourceId("{deliveryId}:cancel")를 써 키를 분리한다.
+            //   → -total 차감이 1회 정상 적용되고, 멱등도 유지(이중 취소 시 두번째는 같은 :cancel 키로 충돌·스킵).
+            //   확정 측(457행)은 순수 deliveryId 유지 — 양측 키 분리가 봉합의 핵심이므로 동시 변경 금지.
+            //   금액 출처: 확정=delivery.TotalAmount, 취소=header.total_amount. confirmed 상태에서
+            //   total_amount 를 갱신하는 코드는 없어 두 값은 항상 일치(절대값 대칭 보장).
+            await MonthlySummaryGuard.TryApplyAsync(
+                _db, tx,
+                tenantId: tenantId,
+                date: dd,
+                sourceType: "delivery_confirmed",
+                sourceId: $"{deliveryId}:cancel",
+                field: MonthlySummaryGuard.SummaryField.TotalSales,
+                amount: -(decimal)header.total_amount,
+                ct: ct);
+
+            // 8) 상태 변경
+            await _db.ExecuteAsync(new CommandDefinition(
+                "UPDATE sales_deliveries SET status='cancelled', updated_at=NOW(6) WHERE delivery_id=@Id AND tenant_id=@Tid",
+                new { Id = deliveryId, Tid = tenantId },
+                transaction: tx, cancellationToken: ct));
+
+            tx.Commit();
+
+            await _audit.LogAsync("cancel", "sales_delivery", deliveryId,
+                beforeJson: $"{{\"status\":\"confirmed\"}}",
+                afterJson: $"{{\"status\":\"cancelled\",\"reverse_ledger\":true}}", ct: ct);
+        }
+        catch (Exception)
+        {
+            try { tx.Rollback(); } catch (Exception rbex) { Console.Error.WriteLine($"[SalesService] rollback failed: {rbex.Message}"); }
+            throw;
+        }
+    }
+
+    public async Task<List<SalesOrderListDto>> GetOrdersAsync(
+        string tenantId,
+        DateTime? from = null,
+        DateTime? to = null,
+        string? status = null,
+        CancellationToken ct = default)
+    {
+        const string sql = """
+                           SELECT
+                               o.order_id AS OrderId,
+                               o.order_no AS OrderNo,
+                               o.order_date AS OrderDate,
+                               o.partner_id AS PartnerId,
+                               p.partner_name AS PartnerName,
+                               (o.total_amount + o.vat_amount) AS TotalAmount,
+                               o.vat_amount AS VatAmount,
+                               o.total_amount AS SupplyAmount,
+                               o.status AS Status,
+                               o.memo AS Memo
+                           FROM sales_orders o
+                           LEFT JOIN partners p
+                               ON p.partner_id = o.partner_id
+                                  AND p.tenant_id = o.tenant_id
+                           WHERE o.tenant_id = @TenantId
+                             AND o.is_auto = 0
+                             AND (@From IS NULL OR o.order_date >= @From)
+                             AND (@To IS NULL OR o.order_date <= @To)
+                             AND (@Status IS NULL OR o.status = @Status)
+                           ORDER BY o.order_date DESC,
+                                    o.order_no DESC
+                           LIMIT 200
+                           """;
+
+        var rows = await _db.QueryAsync<SalesOrderListDto>(
+            new CommandDefinition(
+                sql,
+                new
+                {
+                    TenantId = tenantId,
+                    From = from?.Date,
+                    To = to?.Date,
+                    Status = string.IsNullOrWhiteSpace(status) ? null : status
+                },
+                cancellationToken: ct));
+
+        return rows.ToList();
+    }
+
+    /// <summary>
+    /// 수주서를 거래명세서로 전환한다. 미출고 품목이 없으면 차단한다.
+    /// </summary>
+    public async Task<(string DeliveryId, string DocumentNumber)> ConvertOrderToDeliveryAsync(
+        string orderId,
+        string tenantId,
+        CancellationToken ct = default)
+    {
+        var orderRepo = _unitOfWork.Repository<SalesOrder>();
+        var orderItemRepo = _unitOfWork.Repository<SalesOrderItem>();
+
+        var order = await orderRepo.GetByIdAsync(orderId)
+            ?? throw new InvalidOperationException("수주서를 찾을 수 없습니다.");
+
+        if (order.TenantId != tenantId)
+        {
+            throw new InvalidOperationException("수주서를 찾을 수 없습니다.");
+        }
+
+        var items = await orderItemRepo.FindAsync(x => x.OrderId == orderId);
+        var deliveryItems = items
+            .Where(x => x.OrderedQty - x.DeliveredQty > 0)
+            .Select(x => new CreateDeliveryItemRequest
+            {
+                OrderItemId = x.OrderItemId,
+                ItemId = x.ItemId,
+                Qty = x.OrderedQty - x.DeliveredQty,
+                UnitPrice = x.UnitPrice,
+                SupplyAmount = (x.OrderedQty - x.DeliveredQty) * x.UnitPrice,
+                VatAmount = Math.Round((x.OrderedQty - x.DeliveredQty) * x.UnitPrice * 0.1m, 0)
+            }).ToList();
+
+        if (deliveryItems.Count == 0)
+        {
+            throw new InvalidOperationException("전환 가능한 미출고 품목이 없습니다.");
+        }
+
+        var request = new CreateDeliveryRequest
+        {
+            OrderId = orderId,
+            PartnerId = order.PartnerId,
+            EmployeeId = order.EmployeeId,
+            DeliveryDate = DateTime.UtcNow.Date,
+            Memo = $"수주 {order.OrderNo} 에서 전환",
+            Items = deliveryItems
+        };
+
+        return await CreateDeliveryAsync(request, ct);
+    }
+
+    public Task<List<PartnerSearchDto>> SearchPartnersAsync(string tenantId, string keyword, CancellationToken ct = default)
+    {
+        return _partnerService.SearchPartnersAsync(tenantId, keyword, ct);
+    }
+
+    // 결재 트리거는 ApprovalTriggerHelper.TryCreateApprovalAsync로 통합됨
+
+    // ─────────────────────────────────────────────────────────────────────
+    // 1+1 기획상품 런타임: promo 타입 품목의 qty·금액을 자동 2배 처리
+    // 영업이 "1개" 입력해도 실제 2개가 기록되어 증정분 누락 방지.
+    // ─────────────────────────────────────────────────────────────────────
+    // UpdateDelivery 경로 전용 — DTO 타입 분기
+    private async Task ApplyPromoDoubleToUpdateAsync(List<DeliveryItemDto> lines, string tenantId, CancellationToken ct)
+    {
+        var itemIds = lines.Where(x => !string.IsNullOrWhiteSpace(x.ItemId))
+                           .Select(x => x.ItemId).Distinct().ToList();
+        if (itemIds.Count == 0) return;
+
+        const string sql = "SELECT item_id FROM items WHERE tenant_id=@TenantId AND item_type='promo' AND item_id IN @Ids";
+        var promoIds = (await _db.QueryAsync<string>(
+                           new CommandDefinition(sql, new { TenantId = tenantId, Ids = itemIds },
+                                                 cancellationToken: ct))).ToHashSet();
+        if (promoIds.Count == 0) return;
+
+        foreach (var line in lines.Where(l => promoIds.Contains(l.ItemId)))
+        {
+            line.Qty *= 2m;
+            line.Amount *= 2m;
+            line.VatAmount *= 2m;
+        }
+    }
+
+    private async Task ApplyPromoDoubleAsync(List<CreateDeliveryItemRequest> lines, CancellationToken ct)
+    {
+        var itemIds = lines.Where(x => !string.IsNullOrWhiteSpace(x.ItemId))
+                           .Select(x => x.ItemId!).Distinct().ToList();
+        if (itemIds.Count == 0) return;
+
+        const string sql = "SELECT item_id, item_type FROM items WHERE tenant_id=@TenantId AND item_id IN @Ids";
+        var rows = (await _db.QueryAsync<(string item_id, string item_type)>(
+                        new CommandDefinition(sql, new { TenantId = _currentTenant.TenantId, Ids = itemIds },
+                                              cancellationToken: ct))).ToList();
+        var promoIds = rows.Where(r => r.item_type == "promo").Select(r => r.item_id).ToHashSet();
+        if (promoIds.Count == 0) return;
+
+        foreach (var line in lines)
+        {
+            if (line.ItemId != null && promoIds.Contains(line.ItemId))
+            {
+                line.Qty *= 2m;
+                line.SupplyAmount *= 2m;
+                line.VatAmount *= 2m;
+            }
+        }
+    }
+
+    // ─────────────────────────────────────────────────────────────────────
+    // 조립상품 BOM 폭파: assembly 품목 출고 시 BOM 자재별 추가 OUT 원장 생성
+    // 완제품 OUT 원장은 유지(추적용), 자재 OUT은 이곳에서 추가 기록.
+    // ─────────────────────────────────────────────────────────────────────
+    private async Task ExplodeAssemblyBomAsync(
+        SalesDelivery delivery,
+        IReadOnlyList<SalesDeliveryItem> lines,
+        IRepository<StockLedger> ledgerRepo,
+        bool negativeStockAllow,
+        CancellationToken ct)
+    {
+        var itemIds = lines.Select(x => x.ItemId).Distinct().ToList();
+        if (itemIds.Count == 0) return;
+
+        const string assemblySql = "SELECT item_id FROM items WHERE tenant_id=@TenantId AND item_type='assembly' AND item_id IN @Ids";
+        var assemblyIds = (await _db.QueryAsync<string>(
+                              new CommandDefinition(assemblySql,
+                                  new { TenantId = delivery.TenantId, Ids = itemIds },
+                                  cancellationToken: ct))).ToHashSet();
+        if (assemblyIds.Count == 0) return;
+
+        const string bomSql = """
+            SELECT bi.material_item_id AS MaterialItemId, bi.qty AS BomQty
+            FROM bom_headers bh
+            JOIN bom_items bi ON bi.bom_id = bh.bom_id
+            WHERE bh.tenant_id=@TenantId
+              AND bh.product_item_id=@ProductId
+              AND bh.is_default=1
+              AND bh.is_active=1
+            """;
+
+        // 봉합 (2026-06-21, 7차 전수조사 B-1 P0): bom_explosion OUT 원장도 stock_ledger UNIQUE 키
+        //   (tenant, source_type=bom_explosion, source_id=deliveryId, item_id, move_type=out) 단위 유일이다.
+        //   종전엔 (조립라인 × 자재) 이중 루프로 자재별 OUT 을 라인마다 AddAsync 해, 공통 자재를 쓰는 조립품이
+        //   2라인이거나 한 BOM 에 같은 자재가 2줄이면 같은 키가 2번 INSERT → SaveChangesAsync UNIQUE 위반 →
+        //   거래 전체 롤백(헌법 #20). 봉합: 자재 소비량을 material_item_id 로 누적 합산한 뒤 자재당 1행만 기록.
+        //   음수재고 검사도 합산 총소비량으로 1회 — 라인별 개별 검사가 잔량을 중복 소진 없이 각각 통과시키던 허점도 닫힘.
+        var materialConsumption = new Dictionary<string, decimal>();
+        var assemblyLines = lines.Where(l => assemblyIds.Contains(l.ItemId)).ToList();
+        foreach (var line in assemblyLines)
+        {
+            var materials = await _db.QueryAsync<(string MaterialItemId, decimal BomQty)>(
+                new CommandDefinition(bomSql,
+                    new { TenantId = delivery.TenantId, ProductId = line.ItemId },
+                    cancellationToken: ct));
+
+            foreach (var m in materials)
+            {
+                materialConsumption.TryGetValue(m.MaterialItemId, out var acc);
+                materialConsumption[m.MaterialItemId] = acc + line.Qty * m.BomQty;
+            }
+        }
+        if (materialConsumption.Count == 0) return;
+
+        // 대표 창고: 조립 라인 중 첫 라인의 창고(완제품 OUT 합산과 동일 — 회사 합산 가용재고 정책, 317행 주석).
+        //   materialConsumption.Count>0 이면 자재를 만든 조립 라인이 반드시 존재하므로 assemblyLines 는 비어있지 않다.
+        var bomWarehouseId = assemblyLines[0].WarehouseId;
+        foreach (var (materialItemId, consumeQty) in materialConsumption)
+        {
+            // SALES-03 봉합: negative_stock_allow=false 면 자재도 회사 합산 잔량으로 음수재고 검사
+            //   (완제품 검사 311~ 와 동일 정책·동일 SQL 집계). 합산 총소비량으로 검사 — 부족하면 확정 차단.
+            if (!negativeStockAllow)
+            {
+                var matBalance = await _db.ExecuteScalarAsync<decimal>(new CommandDefinition(
+                    "SELECT COALESCE(SUM(qty_in) - SUM(qty_out), 0) FROM stock_ledger WHERE tenant_id = @TenantId AND item_id = @ItemId",
+                    new { TenantId = delivery.TenantId, ItemId = materialItemId }, cancellationToken: ct));
+                if (matBalance - consumeQty < 0m)
+                {
+                    throw new InvalidOperationException("조립 자재 재고가 부족합니다.");
+                }
+            }
+
+            await ledgerRepo.AddAsync(new StockLedger
+            {
+                TenantId = delivery.TenantId,
+                ItemId = materialItemId,
+                WarehouseId = bomWarehouseId,
+                PartnerId = delivery.PartnerId,
+                EmployeeId = delivery.EmployeeId,
+                LedgerDate = delivery.DeliveryDate,
+                Ym = delivery.DeliveryDate.ToString("yyyy-MM"),
+                MoveType = StockMoveType.Out,
+                SourceType = "bom_explosion",
+                SourceId = delivery.DeliveryId,
+                DocNo = delivery.DeliveryNo,
+                QtyIn = 0m,
+                QtyOut = consumeQty,
+                UnitCost = 0m,
+                SupplyAmount = 0m,
+                Memo = "조립 자재소비"
+            });
+        }
+    }
+
+    // ─────────────────────────────────────────────────────────────────────
+    // 수주서 단건 조회 — 목록 클릭 → 편집 화면 로드용.
+    // ─────────────────────────────────────────────────────────────────────
+    public async Task<SalesOrderDetailDto?> GetOrderDetailAsync(
+        string orderId, string tenantId, CancellationToken ct = default)
+    {
+        const string headerSql = """
+            SELECT o.order_id     AS OrderId,
+                   o.order_no     AS OrderNo,
+                   o.order_date   AS OrderDate,
+                   o.delivery_date AS DeliveryDate,
+                   o.partner_id   AS PartnerId,
+                   COALESCE(p.partner_name, '') AS PartnerName,
+                   o.total_amount AS TotalAmount,
+                   o.vat_amount   AS VatAmount,
+                   o.status       AS Status,
+                   o.memo         AS Memo
+              FROM sales_orders o
+              LEFT JOIN partners p
+                ON p.partner_id = o.partner_id
+               AND p.tenant_id  = o.tenant_id
+             WHERE o.order_id  = @Id
+               AND o.tenant_id = @Tid
+               AND o.is_deleted = 0
+            """;
+
+        var header = await _db.QueryFirstOrDefaultAsync<SalesOrderDetailDto>(
+            new CommandDefinition(headerSql, new { Id = orderId, Tid = tenantId }, cancellationToken: ct));
+        if (header is null) return null;
+
+        const string linesSql = """
+            SELECT soi.order_item_id AS OrderItemId,
+                   soi.item_id       AS ItemId,
+                   COALESCE(i.item_name, '') AS ItemName,
+                   COALESCE(i.spec, '')      AS Spec,
+                   IFNULL(i.unit, 'EA')      AS Unit,
+                   soi.ordered_qty   AS Qty,
+                   soi.unit_price    AS UnitPrice,
+                   soi.supply_amount AS SupplyAmount,
+                   soi.vat_amount    AS VatAmount
+              FROM sales_order_items soi
+              LEFT JOIN items i
+                ON i.item_id   = soi.item_id
+               AND i.tenant_id = soi.tenant_id
+             WHERE soi.order_id  = @Id
+               AND soi.tenant_id = @Tid
+             ORDER BY soi.order_item_id
+            """;
+
+        var lines = await _db.QueryAsync<SalesOrderDetailItemDto>(
+            new CommandDefinition(linesSql, new { Id = orderId, Tid = tenantId }, cancellationToken: ct));
+        header.Items = lines.ToList();
+        return header;
+    }
+
+    // ─────────────────────────────────────────────────────────────────────
+    // 봉합 (2026-06-22, 11차전 수주재편집): 수주(draft) 헤더/라인 재편집.
+    //   10차 P0-1은 신규저장만 api/sales/orders로 봉합했고 수정 경로(PUT)가 부재했다.
+    //   그래서 프론트가 PUT api/sales/deliveries로 잘못 흘러 거래명세서 조회 실패
+    //   → "거래명세서를 찾을 수 없습니다" 발생. 본 메서드로 수주 수정 경로를 신설.
+    //   §절대원칙 #6: draft 상태만 수정 허용. confirmed/partial/closed/cancelled 차단.
+    //   UpdateDeliveryAsync와 동일한 트랜잭션·검증 구조(헤더 UPDATE + 라인 DELETE/INSERT).
+    // ─────────────────────────────────────────────────────────────────────
+    public async Task UpdateOrderAsync(
+        string orderId,
+        UpdateSalesOrderRequest request,
+        string tenantId,
+        CancellationToken ct = default)
+    {
+        // 1) 존재 + draft 검증 (tenant 격리). soft delete된 것도 제외.
+        const string assertSql = """
+                                 SELECT status
+                                 FROM sales_orders
+                                 WHERE order_id = @OrderId
+                                   AND tenant_id = @TenantId
+                                   AND is_deleted = 0
+                                 """;
+
+        var status = await _db.QueryFirstOrDefaultAsync<string>(
+            new CommandDefinition(assertSql, new { OrderId = orderId, TenantId = tenantId }, cancellationToken: ct));
+
+        if (status is null)
+        {
+            throw new InvalidOperationException("수주서를 찾을 수 없습니다.");
+        }
+
+        // §절대원칙 #6: 확정·전환된 수주는 수정 차단.
+        if (!string.Equals(status, "draft", StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidOperationException("임시저장(draft) 상태 수주서만 수정할 수 있습니다.");
+        }
+
+        if (request.Items.Count == 0)
+        {
+            throw new InvalidOperationException("품목이 한 줄 이상 필요합니다.");
+        }
+
+        var supplyAmount = request.Items.Sum(x => x.SupplyAmount);
+        var vatAmount = request.Items.Sum(x => x.VatAmount);
+        var orderDate = request.OrderDate == default ? DateTime.UtcNow.Date : request.OrderDate.Date;
+
+        const string updateSql = """
+                                 UPDATE sales_orders SET
+                                     partner_id   = @PartnerId,
+                                     order_date   = @OrderDate,
+                                     memo         = @Memo,
+                                     total_amount = @SupplyAmount,
+                                     vat_amount   = @VatAmount,
+                                     updated_at   = NOW(6)
+                                 WHERE order_id  = @OrderId
+                                   AND tenant_id = @TenantId
+                                   AND status    = 'draft'
+                                 """;
+
+        // 트랜잭션으로 헤더 UPDATE + 품목 DELETE/INSERT를 원자적으로 묶는다
+        // (UpdateDeliveryAsync 패턴 동일).
+        if (_db.State != ConnectionState.Open)
+        {
+            if (_db is System.Data.Common.DbConnection dbConn) await dbConn.OpenAsync(ct);
+            else _db.Open();
+        }
+        using var tx = _db.BeginTransaction();
+        try
+        {
+            await _db.ExecuteAsync(new CommandDefinition(updateSql,
+                new
+                {
+                    OrderId = orderId,
+                    TenantId = tenantId,
+                    PartnerId = request.PartnerId,
+                    OrderDate = orderDate,
+                    Memo = request.Memo,
+                    SupplyAmount = supplyAmount,
+                    VatAmount = vatAmount
+                },
+                transaction: tx, cancellationToken: ct));
+
+            // 기존 라인 전체 삭제 후 재INSERT (UpdateDeliveryAsync 라인 처리 패턴).
+            await _db.ExecuteAsync(new CommandDefinition(
+                "DELETE FROM sales_order_items WHERE order_id = @OrderId AND tenant_id = @TenantId",
+                new { OrderId = orderId, TenantId = tenantId },
+                transaction: tx, cancellationToken: ct));
+
+            foreach (var item in request.Items)
+            {
+                await _db.ExecuteAsync(new CommandDefinition(
+                    """
+                    INSERT INTO sales_order_items
+                        (order_item_id, order_id, tenant_id, item_id,
+                         ordered_qty, delivered_qty, unit_price, supply_amount, vat_amount, item_status)
+                    VALUES
+                        (@OrderItemId, @OrderId, @TenantId, @ItemId,
+                         @OrderedQty, 0, @UnitPrice, @SupplyAmount, @VatAmount, 'pending')
+                    """,
+                    new
+                    {
+                        OrderItemId = Guid.NewGuid().ToString(),
+                        OrderId = orderId,
+                        TenantId = tenantId,
+                        ItemId = item.ItemId,
+                        item.OrderedQty,
+                        item.UnitPrice,
+                        item.SupplyAmount,
+                        item.VatAmount
+                    },
+                    transaction: tx, cancellationToken: ct));
+            }
+
+            tx.Commit();
+        }
+        catch (Exception)
+        {
+            try { tx.Rollback(); } catch (Exception rbex) { Console.Error.WriteLine($"[SalesService] order update rollback failed: {rbex.Message}"); }
+            throw;
+        }
+
+        // 감사로그 — 수주서 수정
+        var soAfterJson = $"{{\"partner_id\":\"{request.PartnerId}\",\"item_count\":{request.Items.Count}}}";
+        await _audit.LogAsync("update", "sales_order", orderId, afterJson: soAfterJson, ct: ct);
+    }
+
+    // ─────────────────────────────────────────────────────────────────────
+    // 수주서 draft 삭제 — soft delete. 판매전환된 라인 있으면 차단.
+    // ─────────────────────────────────────────────────────────────────────
+    public async Task DeleteSalesOrderAsync(string orderId, string tenantId, CancellationToken ct = default)
+    {
+        var row = await _db.QueryFirstOrDefaultAsync<(string Status, byte IsDeleted)?>(new CommandDefinition(
+            "SELECT status AS Status, is_deleted AS IsDeleted FROM sales_orders WHERE order_id=@Id AND tenant_id=@Tid",
+            new { Id = orderId, Tid = tenantId }, cancellationToken: ct))
+            ?? throw new InvalidOperationException("수주서를 찾을 수 없습니다.");
+
+        if (row.IsDeleted == 1)
+        {
+            throw new InvalidOperationException("이미 삭제된 수주서입니다.");
+        }
+
+        // 판매전환된 라인 차단 — 단, 거래명세서가 cancelled 면 무시(사장님 정책: 삭제=취소).
+        var activeDelivered = await _db.QueryFirstOrDefaultAsync<long>(new CommandDefinition(
+            """
+            SELECT COUNT(*)
+              FROM sales_delivery_items di
+              JOIN sales_deliveries sd ON sd.delivery_id = di.delivery_id AND sd.tenant_id = di.tenant_id
+             WHERE di.order_item_id IN (
+                     SELECT order_item_id FROM sales_order_items
+                      WHERE order_id=@Id AND tenant_id=@Tid
+                   )
+               AND di.tenant_id = @Tid
+               AND sd.status <> 'cancelled'
+            """,
+            new { Id = orderId, Tid = tenantId }, cancellationToken: ct));
+        if (activeDelivered > 0)
+        {
+            throw new InvalidOperationException("이미 판매전환(출고)된 라인이 있어 삭제할 수 없습니다. 거래명세서를 먼저 취소해주세요.");
+        }
+
+        await _db.ExecuteAsync(new CommandDefinition(
+            "UPDATE sales_orders SET is_deleted=1, updated_at=NOW(6) WHERE order_id=@Id AND tenant_id=@Tid",
+            new { Id = orderId, Tid = tenantId }, cancellationToken: ct));
+
+        await _audit.LogAsync("delete", "sales_order", orderId, ct: ct);
+    }
+
+    // ─────────────────────────────────────────────────────────────────────
+    // 자동발주 후보 조회 — 거래명세서 확정 직후 안전재고 위반 품목 추출.
+    // 사장님 지시 (2026-04-26): 판매 반영 시 재고가 안전재고 이하/0 이면
+    //   "자동발주 하시겠습니까?" 다이얼로그를 띄울 후보를 내려준다.
+    // 조건: 라인 품목 중 auto_order_enabled=1 AND
+    //       (item_stock 합계 <= items.safety_stock OR <= 0)
+    // ─────────────────────────────────────────────────────────────────────
+    public async Task<List<AutoOrderCandidateDto>> GetAutoOrderCandidatesAsync(
+        string deliveryId, string tenantId, CancellationToken ct = default)
+    {
+        const string sql = """
+            SELECT DISTINCT
+                   i.item_id        AS ItemId,
+                   IFNULL(i.item_code,'') AS ItemCode,
+                   i.item_name      AS ItemName,
+                   COALESCE(s.qty, 0) AS CurrentQty,
+                   COALESCE(i.safety_stock, i.safe_stock, 0) AS SafetyQty,
+                   COALESCE(i.auto_order_qty, 0) AS SuggestedOrderQty,
+                   i.auto_order_partner_id AS PartnerId,
+                   p.partner_name   AS PartnerName,
+                   COALESCE(i.purchase_price, i.cost_price, 0) AS UnitPrice,
+                   CASE
+                     WHEN COALESCE(s.qty, 0) <= 0 THEN 'out_of_stock'
+                     ELSE 'below_safety'
+                   END AS Reason
+              FROM sales_delivery_items di
+              JOIN items i
+                ON i.item_id = di.item_id AND i.tenant_id = di.tenant_id
+              LEFT JOIN (
+                   SELECT tenant_id, item_id, SUM(current_qty) AS qty
+                     FROM item_stock GROUP BY tenant_id, item_id
+              ) s ON s.tenant_id = i.tenant_id AND s.item_id = i.item_id
+              LEFT JOIN partners p
+                ON p.partner_id = i.auto_order_partner_id AND p.tenant_id = i.tenant_id
+             WHERE di.delivery_id = @DeliveryId
+               AND di.tenant_id   = @Tid
+               AND IFNULL(i.auto_order_enabled, 0) = 1
+               AND (
+                     COALESCE(s.qty, 0) <= COALESCE(i.safety_stock, i.safe_stock, 0)
+                  OR COALESCE(s.qty, 0) <= 0
+                   )
+            """;
+
+        var rows = await _db.QueryAsync<AutoOrderCandidateDto>(new CommandDefinition(
+            sql, new { DeliveryId = deliveryId, Tid = tenantId }, cancellationToken: ct));
+        return rows.ToList();
+    }
+
+    // ─────────────────────────────────────────────────────────────────────
+    // 자동발주 즉시 생성 — 사장님 지시 (2026-04-26): 다이얼로그 OK 시
+    //   "바로 자동발주가 되어야 정상이지". 공급처별로 묶어 발주서(draft) 1건씩 생성.
+    // 공급처 미설정 품목은 스킵 + 사유 반환(워크플로우 §20 끊김 금지).
+    // ─────────────────────────────────────────────────────────────────────
+    public async Task<List<AutoOrderResultDto>> CreateAutoOrdersAsync(
+        IReadOnlyList<AutoOrderCandidateDto> candidates, string tenantId, bool autoReceive = false, CancellationToken ct = default)
+    {
+        var results = new List<AutoOrderResultDto>();
+        if (candidates.Count == 0) return results;
+
+        // 공급처별 그룹핑. 미지정 품목은 별도 실패 결과.
+        var noPartner = candidates.Where(c => string.IsNullOrWhiteSpace(c.PartnerId)).ToList();
+        if (noPartner.Count > 0)
+        {
+            results.Add(new AutoOrderResultDto
+            {
+                Success = false,
+                Reason = $"{noPartner.Count}개 품목에 자동발주 공급처 미설정 — 상품마스터에서 지정 필요.",
+                ItemIds = noPartner.Select(x => x.ItemId).ToList()
+            });
+        }
+
+        var groups = candidates
+            .Where(c => !string.IsNullOrWhiteSpace(c.PartnerId))
+            .GroupBy(c => c.PartnerId!);
+
+        var today = DateTime.Today;
+        // WO-11: 한글 prefix 통일 (자동발주 = 발-)
+        var prefix = $"발-{today:yyyyMMdd}-";
+
+        foreach (var grp in groups)
+        {
+            var partnerId = grp.Key;
+            var lines = grp.ToList();
+            var supply = lines.Sum(x => Math.Max(x.SuggestedOrderQty, 1m) * x.UnitPrice);
+            var vat = Math.Round(supply * 0.1m, 0, MidpointRounding.AwayFromZero);
+
+            using var tx = _db.BeginTransaction();
+            try
+            {
+                // 봉합 (2026-06-23, 5차 전수조사 SALES-02): COUNT(*)+1 채번은 소프트삭제(is_deleted) 행을
+                //   세서 갭 충돌이 나고, 코드 표준 채번 헬퍼(MAX+1)와 이탈해 있었다. DocumentNumberHelper 로
+                //   일원화한다(tx 안에서 채번해 직전 그룹 INSERT 가시성 보장). 동시 HTTP 충돌은 UNIQUE 가 차단.
+                var poNo = await DocumentNumberHelper.NextNumberAsync(
+                    _db, tenantId, "purchase_orders", "po_no", prefix, ct, transaction: tx);
+                var poId = Guid.NewGuid().ToString();
+
+                await _db.ExecuteAsync(new CommandDefinition(
+                    """
+                    INSERT INTO purchase_orders
+                      (po_id, tenant_id, po_no, partner_id, po_date, status, total_amount, vat_amount, memo, is_auto, created_at, updated_at)
+                    VALUES
+                      (@PoId, @Tid, @PoNo, @PartnerId, @PoDate, 'draft', @Supply, @Vat, @Memo, 1, NOW(6), NOW(6))
+                    """,
+                    new
+                    {
+                        PoId = poId, Tid = tenantId, PoNo = poNo,
+                        PartnerId = partnerId, PoDate = today,
+                        Supply = supply, Vat = vat,
+                        Memo = "안전재고 자동발주 (판매확정 트리거)"
+                    }, transaction: tx, cancellationToken: ct));
+
+                foreach (var line in lines)
+                {
+                    var qty = line.SuggestedOrderQty > 0 ? line.SuggestedOrderQty : Math.Max(line.SafetyQty - line.CurrentQty, 1m);
+                    var lineSupply = qty * line.UnitPrice;
+                    var lineVat = Math.Round(lineSupply * 0.1m, 0, MidpointRounding.AwayFromZero);
+
+                    await _db.ExecuteAsync(new CommandDefinition(
+                        """
+                        INSERT INTO purchase_order_items
+                          (po_item_id, po_id, tenant_id, item_id, ordered_qty, received_qty, unit_price, supply_amount, vat_amount, item_status)
+                        VALUES
+                          (UUID(), @PoId, @Tid, @ItemId, @Qty, 0, @UnitPrice, @Supply, @Vat, 'pending')
+                        """,
+                        new
+                        {
+                            PoId = poId, Tid = tenantId, ItemId = line.ItemId,
+                            Qty = qty, UnitPrice = line.UnitPrice,
+                            Supply = lineSupply, Vat = lineVat
+                        }, transaction: tx, cancellationToken: ct));
+                }
+
+                tx.Commit();
+                await _audit.LogAsync("create", "purchase_order", poId,
+                    afterJson: $"{{\"source\":\"auto_order\",\"po_no\":\"{poNo}\",\"item_count\":{lines.Count}}}",
+                    ct: ct);
+
+                var resultRow = new AutoOrderResultDto
+                {
+                    Success = true,
+                    PoId = poId,
+                    PoNo = poNo,
+                    PartnerId = partnerId,
+                    PartnerName = lines[0].PartnerName,
+                    ItemIds = lines.Select(x => x.ItemId).ToList()
+                };
+
+                // 사장님 지시 (2026-04-26): 자동발주 → 매입처리까지 원클릭.
+                // autoReceive=true 면 발주 직후 매입전환 + 매입 확정까지 진행 → 자재 재고 즉시 +반영.
+                if (autoReceive)
+                {
+                    try
+                    {
+                        var purSvc = _services.GetService<IPurchaseService>()
+                            ?? throw new InvalidOperationException("매입 서비스를 찾을 수 없습니다.");
+                        var (receiptId, receiptNo) = await purSvc.ConvertOrderToReceiptAsync(poId, tenantId, ct);
+                        await purSvc.ConfirmReceiptAsync(receiptId, new ConfirmReceiptRequest(), ct);
+                        resultRow.Reason = $"매입 자동확정: {receiptNo}";
+                    }
+                    catch (Exception ex)
+                    {
+                        // 작20260428이7 (P0-A): §절대원칙 #15 "빈 catch 금지" + §#20 "워크플로우 끊김 금지".
+                        // 자동 사슬에서 매입확정 실패하면 Success=false로 명확히 알리고 로그 남김.
+                        // 이전 버그: Success=true 유지 → 사용자는 성공이라 알지만 stock_ledger INSERT 안 됨 → "재고부족 안 사라짐".
+                        Console.Error.WriteLine($"[WARN] 자동 사슬 매입확정 실패 — PoNo={poNo} TenantId={tenantId} ex={ex.GetType().Name} msg={ex.Message}");
+                        resultRow.Success = false;
+                        resultRow.Reason = $"발주 OK / 매입 자동확정 실패: {ex.Message}";
+                    }
+                }
+
+                results.Add(resultRow);
+            }
+            catch (Exception ex)
+            {
+                try { tx.Rollback(); } catch (Exception rbex) { Console.Error.WriteLine($"[SalesService] rollback failed: {rbex.Message}"); }
+                results.Add(new AutoOrderResultDto
+                {
+                    Success = false,
+                    PartnerId = partnerId,
+                    PartnerName = lines[0].PartnerName,
+                    ItemIds = lines.Select(x => x.ItemId).ToList(),
+                    Reason = ex.Message
+                });
+            }
+        }
+
+        return results;
+    }
+
+    // ═════════════════════════════════════════════════════════════════════
+    // 매출반품 — 13차 후순위 봉합(2026-06-22, A 매입반품 대칭 풀스택).
+    // 고객이 판매분을 돌려보냄. 확정 시 재고 IN(증가, 매출 OUT의 역) + 매출 역분개.
+    // 매입반품(PurchaseService 5메서드)의 거울: OUT→IN, total_purchase→total_sales,
+    // RecordPurchaseReturn→RecordSalesDeliveryCancel, receipt_id→delivery_id.
+    // BOM 폭파 역행은 불필요(반품은 완제품 그대로 입고).
+    // ═════════════════════════════════════════════════════════════════════
+
+    public async Task<List<SalesReturnListDto>> GetSalesReturnsAsync(
+        string tenantId, DateTime? from = null, DateTime? to = null, string? status = null, CancellationToken ct = default)
+    {
+        var sql = """
+            SELECT sr.return_id AS ReturnId, sr.return_no AS ReturnNo, sr.return_date AS ReturnDate,
+                   sr.partner_id AS PartnerId, COALESCE(p.partner_name,'') AS PartnerName,
+                   COALESCE(sr.total_amount,0) AS TotalAmount, COALESCE(sr.vat_amount,0) AS VatAmount,
+                   sr.status AS Status, sr.memo AS Memo
+            FROM sales_returns sr
+            LEFT JOIN partners p ON p.partner_id = sr.partner_id AND p.tenant_id = sr.tenant_id
+            WHERE sr.tenant_id = @Tid AND sr.is_deleted = 0
+              AND (@From IS NULL OR sr.return_date >= @From)
+              AND (@To IS NULL OR sr.return_date <= @To)
+              AND (@Status IS NULL OR sr.status = @Status)
+            ORDER BY sr.return_date DESC, sr.return_no DESC
+            """;
+        var rows = await _db.QueryAsync<SalesReturnListDto>(new CommandDefinition(
+            sql, new { Tid = tenantId, From = from, To = to, Status = status }, cancellationToken: ct));
+        return rows.ToList();
+    }
+
+    public async Task<SalesReturnDetailDto?> GetSalesReturnDetailAsync(
+        string returnId, string tenantId, CancellationToken ct = default)
+    {
+        var head = await _db.QueryFirstOrDefaultAsync<SalesReturnDetailDto>(new CommandDefinition(
+            """
+            SELECT sr.return_id AS ReturnId, sr.return_no AS ReturnNo, sr.return_date AS ReturnDate,
+                   sr.delivery_id AS DeliveryId, sr.partner_id AS PartnerId, COALESCE(p.partner_name,'') AS PartnerName,
+                   COALESCE(sr.total_amount,0) AS TotalAmount, COALESCE(sr.vat_amount,0) AS VatAmount,
+                   sr.status AS Status, sr.memo AS Memo, sr.return_reason AS ReturnReason, sr.return_reason_memo AS ReturnReasonMemo
+            FROM sales_returns sr
+            LEFT JOIN partners p ON p.partner_id = sr.partner_id AND p.tenant_id = sr.tenant_id
+            WHERE sr.return_id = @Id AND sr.tenant_id = @Tid AND sr.is_deleted = 0
+            """,
+            new { Id = returnId, Tid = tenantId }, cancellationToken: ct));
+        if (head is null) return null;
+
+        var items = await _db.QueryAsync<SalesReturnDetailItemDto>(new CommandDefinition(
+            """
+            SELECT sri.return_item_id AS ReturnItemId, sri.item_id AS ItemId,
+                   COALESCE(i.item_name,'') AS ItemName, i.spec AS Spec, i.unit AS Unit,
+                   sri.warehouse_id AS WarehouseId, sri.qty AS Qty, sri.unit_price AS UnitPrice,
+                   sri.supply_amount AS SupplyAmount, sri.vat_amount AS VatAmount
+            FROM sales_return_items sri
+            LEFT JOIN items i ON i.item_id = sri.item_id
+            WHERE sri.return_id = @Id AND sri.tenant_id = @Tid
+            ORDER BY sri.return_item_id
+            """,
+            new { Id = returnId, Tid = tenantId }, cancellationToken: ct));
+        head.Items = items.ToList();
+        return head;
+    }
+
+    public async Task<(string ReturnId, string ReturnNo)> CreateSalesReturnAsync(
+        CreateSalesReturnRequest request, string tenantId, CancellationToken ct = default)
+    {
+        if (request is null) throw new ArgumentNullException(nameof(request));
+        if (string.IsNullOrEmpty(request.PartnerId)) throw new InvalidOperationException("거래처는 필수입니다.");
+        if (request.Items is null || request.Items.Count == 0) throw new InvalidOperationException("반품 품목은 1건 이상이어야 합니다.");
+
+        if (_db.State != ConnectionState.Open)
+        {
+            if (_db is System.Data.Common.DbConnection dbConn) await dbConn.OpenAsync(ct);
+            else _db.Open();
+        }
+
+        var returnDate = request.ReturnDate == default ? DateTime.UtcNow.Date : request.ReturnDate.Date;
+        var prefix = $"매출반품-{returnDate:yyyyMMdd}-";
+        var cnt = await _db.QueryFirstOrDefaultAsync<int>(new CommandDefinition(
+            "SELECT COUNT(*) FROM sales_returns WHERE tenant_id=@Tid AND return_no LIKE CONCAT(@Pfx,'%')",
+            new { Tid = tenantId, Pfx = prefix }, cancellationToken: ct));
+        var returnNo = $"{prefix}{cnt + 1:000}";
+        var returnId = Guid.NewGuid().ToString();
+
+        decimal totalAmount = 0, totalVat = 0;
+        foreach (var it in request.Items) { totalAmount += it.SupplyAmount; totalVat += it.VatAmount; }
+
+        await _db.ExecuteAsync(new CommandDefinition(
+            @"INSERT INTO sales_returns (return_id, tenant_id, return_no, delivery_id, partner_id,
+                return_date, status, total_amount, vat_amount, memo,
+                return_reason, return_reason_memo, created_at, updated_at, is_deleted)
+              VALUES (@ReturnId, @Tid, @ReturnNo, @DeliveryId, @PartnerId,
+                @ReturnDate, 'draft', @Total, @Vat, @Memo,
+                @ReturnReason, @ReturnReasonMemo, NOW(6), NOW(6), 0)",
+            new
+            {
+                ReturnId = returnId, Tid = tenantId, ReturnNo = returnNo,
+                DeliveryId = request.DeliveryId, PartnerId = request.PartnerId,
+                ReturnDate = returnDate, Total = totalAmount, Vat = totalVat, Memo = request.Memo,
+                // sales_returns.return_reason 는 NOT NULL DEFAULT 'customer_return'(매입반품과 달리 NOT NULL).
+                // 화면이 사유를 안 보내면 NULL→1048(500)이 나므로 DDL DEFAULT 와 동일 값으로 폴백(14차 P1 봉합).
+                ReturnReason = request.ReturnReason ?? "customer_return", ReturnReasonMemo = request.ReturnReasonMemo
+            }, cancellationToken: ct));
+
+        foreach (var it in request.Items)
+        {
+            await _db.ExecuteAsync(new CommandDefinition(
+                @"INSERT INTO sales_return_items (return_item_id, return_id, tenant_id, delivery_item_id,
+                    item_id, qty, unit_price, original_unit_price, supply_amount, vat_amount, warehouse_id)
+                  VALUES (UUID(), @ReturnId, @Tid, @DeliveryItemId, @ItemId, @Qty, @Price, @OrigPrice, @Supply, @Vat, @Wh)",
+                new
+                {
+                    ReturnId = returnId, Tid = tenantId, DeliveryItemId = it.DeliveryItemId,
+                    ItemId = it.ItemId, Qty = it.Qty, Price = it.UnitPrice,
+                    OrigPrice = it.OriginalUnitPrice ?? it.UnitPrice,
+                    Supply = it.SupplyAmount, Vat = it.VatAmount, Wh = it.WarehouseId
+                }, cancellationToken: ct));
+        }
+
+        return (returnId, returnNo);
+    }
+
+    public async Task UpdateSalesReturnAsync(
+        string returnId, UpdateSalesReturnRequest request, string tenantId, CancellationToken ct = default)
+    {
+        if (request is null) throw new ArgumentNullException(nameof(request));
+        if (string.IsNullOrEmpty(request.PartnerId)) throw new InvalidOperationException("거래처는 필수입니다.");
+        if (request.Items is null || request.Items.Count == 0) throw new InvalidOperationException("반품 품목은 1건 이상이어야 합니다.");
+
+        if (_db.State != ConnectionState.Open)
+        {
+            if (_db is System.Data.Common.DbConnection dbConn) await dbConn.OpenAsync(ct);
+            else _db.Open();
+        }
+
+        var current = await _db.QueryFirstOrDefaultAsync<dynamic>(new CommandDefinition(
+            "SELECT return_id, status FROM sales_returns WHERE return_id=@Id AND tenant_id=@Tid AND is_deleted=0",
+            new { Id = returnId, Tid = tenantId }, cancellationToken: ct))
+            ?? throw new InvalidOperationException("반품 문서를 찾을 수 없습니다.");
+
+        var status = (string)current.status;
+        if (!string.Equals(status, "draft", StringComparison.OrdinalIgnoreCase))
+            throw new InvalidOperationException($"draft 상태만 수정 가능합니다. (현재: {status})");
+
+        var returnDate = request.ReturnDate == default ? DateTime.UtcNow.Date : request.ReturnDate.Date;
+        decimal totalAmount = 0, totalVat = 0;
+        foreach (var it in request.Items) { totalAmount += it.SupplyAmount; totalVat += it.VatAmount; }
+
+        await _db.ExecuteAsync(new CommandDefinition(
+            @"UPDATE sales_returns
+              SET partner_id=@PartnerId, return_date=@ReturnDate,
+                  total_amount=@Total, vat_amount=@Vat, memo=@Memo,
+                  return_reason=@ReturnReason, return_reason_memo=@ReturnReasonMemo, updated_at=NOW(6)
+              WHERE return_id=@Id AND tenant_id=@Tid AND status='draft'",
+            new
+            {
+                Id = returnId, Tid = tenantId, PartnerId = request.PartnerId, ReturnDate = returnDate,
+                Total = totalAmount, Vat = totalVat, Memo = request.Memo,
+                // sales_returns.return_reason 는 NOT NULL DEFAULT 'customer_return'(매입반품과 달리 NOT NULL).
+                // 화면이 사유를 안 보내면 NULL→1048(500)이 나므로 DDL DEFAULT 와 동일 값으로 폴백(14차 P1 봉합).
+                ReturnReason = request.ReturnReason ?? "customer_return", ReturnReasonMemo = request.ReturnReasonMemo
+            }, cancellationToken: ct));
+
+        await _db.ExecuteAsync(new CommandDefinition(
+            "DELETE FROM sales_return_items WHERE return_id=@Id AND tenant_id=@Tid",
+            new { Id = returnId, Tid = tenantId }, cancellationToken: ct));
+
+        foreach (var it in request.Items)
+        {
+            await _db.ExecuteAsync(new CommandDefinition(
+                @"INSERT INTO sales_return_items (return_item_id, return_id, tenant_id, delivery_item_id,
+                    item_id, qty, unit_price, original_unit_price, supply_amount, vat_amount, warehouse_id)
+                  VALUES (UUID(), @ReturnId, @Tid, @DeliveryItemId, @ItemId, @Qty, @Price, @OrigPrice, @Supply, @Vat, @Wh)",
+                new
+                {
+                    ReturnId = returnId, Tid = tenantId, DeliveryItemId = it.DeliveryItemId,
+                    ItemId = it.ItemId, Qty = it.Qty, Price = it.UnitPrice,
+                    OrigPrice = it.OriginalUnitPrice ?? it.UnitPrice,
+                    Supply = it.SupplyAmount, Vat = it.VatAmount, Wh = it.WarehouseId
+                }, cancellationToken: ct));
+        }
+    }
+
+    // 매출반품 확정 — draft → confirmed + 재고 IN + 매출 역분개 (단일 트랜잭션).
+    // 매입반품 ConfirmPurchaseReturnAsync의 거울 — move_type out→in, RecordPurchaseReturn→RecordSalesDeliveryCancel.
+    public async Task ConfirmSalesReturnAsync(string returnId, string tenantId, string? employeeId, CancellationToken ct = default)
+    {
+        var header = await _db.QueryFirstOrDefaultAsync<dynamic>(new CommandDefinition(
+            "SELECT return_id, partner_id, return_date, status, return_no, total_amount, vat_amount FROM sales_returns WHERE return_id=@Id AND tenant_id=@Tid AND is_deleted=0",
+            new { Id = returnId, Tid = tenantId }, cancellationToken: ct))
+            ?? throw new InvalidOperationException("반품 문서를 찾을 수 없습니다.");
+
+        if ((string)header.status != "draft")
+            throw new InvalidOperationException("draft 상태만 확정할 수 있습니다.");
+
+        DateTime rd = (DateTime)header.return_date;
+        await ApprovalTriggerHelper.EnsureNotClosedAsync(_db, tenantId, rd, ct);
+
+        var items = (await _db.QueryAsync<dynamic>(new CommandDefinition(
+            "SELECT item_id, qty, unit_price, supply_amount, warehouse_id FROM sales_return_items WHERE return_id=@Id AND tenant_id=@Tid",
+            new { Id = returnId, Tid = tenantId }, cancellationToken: ct))).ToList();
+
+        var returnNo = (string)header.return_no;
+        var partnerId = (string)header.partner_id;
+        var totalAmount = (decimal)header.total_amount;
+        var vatAmount = (decimal)header.vat_amount;
+
+        using var tx = await _unitOfWork.BeginTransactionAsync(ct);
+        try
+        {
+            var conn = _unitOfWork.GetDbConnection();
+            var dbTx = tx.DbTransaction;
+
+            // 기본창고 폴백 — 매입반품·판매·BOM과 동일(wh_code MAIN 우선, 헌법 #12 대칭).
+            var returnDefaultWh = await conn.ExecuteScalarAsync<string?>(new CommandDefinition(
+                """
+                SELECT warehouse_id FROM warehouses
+                 WHERE tenant_id = @TenantId AND is_active = 1
+                 ORDER BY (CASE WHEN wh_code IN ('MAIN','WH-MAIN') THEN 0 ELSE 1 END), wh_code
+                 LIMIT 1
+                """,
+                new { TenantId = tenantId }, transaction: dbTx, cancellationToken: ct));
+            if (string.IsNullOrEmpty(returnDefaultWh))
+                throw new InvalidOperationException("활성 창고가 없습니다. 창고를 먼저 등록해주세요.");
+
+            // stock_ledger UNIQUE 키(tenant, source_type=sales_return, source_id=returnId, item_id, move_type=in)
+            // 단위 유일 — 같은 품목 2라인이면 item_id 합산해 키당 1행만 기록(7차 B-1 대칭).
+            var returnGroups = items
+                .GroupBy(it => (string)it.item_id)
+                .Select(g => new
+                {
+                    ItemId = g.Key,
+                    Wh = string.IsNullOrEmpty((string?)g.First().warehouse_id) ? returnDefaultWh : (string)g.First().warehouse_id,
+                    Qty = g.Sum(x => (decimal)x.qty),
+                    Supply = g.Sum(x => (decimal)x.supply_amount),
+                    UnitPrice = (decimal)g.First().unit_price
+                })
+                .ToList();
+
+            // 1) 재고원장 Reverse IN INSERT (매출 OUT의 역행 — 반품 입고로 재고 증가)
+            foreach (var g in returnGroups)
+            {
+                await conn.ExecuteAsync(new CommandDefinition(
+                    """
+                    INSERT INTO stock_ledger
+                      (tenant_id, item_id, warehouse_id, partner_id, employee_id, ledger_date, ym,
+                       move_type, source_type, source_id, doc_no, qty_in, qty_out, unit_cost, supply_amount, memo)
+                    VALUES
+                      (@Tid, @ItemId, @Wh, @PartnerId, @EmpId, @Date, @Ym,
+                       'in', 'sales_return', @Rid, @DocNo, @Qty, 0, @UnitPrice, @Supply, '매출반품 (Reverse IN)')
+                    """,
+                    new
+                    {
+                        Tid = tenantId, ItemId = g.ItemId, Wh = g.Wh, PartnerId = partnerId, EmpId = employeeId,
+                        Date = rd, Ym = rd.ToString("yyyy-MM"), Rid = returnId, DocNo = returnNo,
+                        Qty = g.Qty, UnitPrice = g.UnitPrice, Supply = g.Supply
+                    },
+                    transaction: dbTx, cancellationToken: ct));
+
+                // 2) item_stock 증가 — 없는 레코드도 방어적 UPSERT
+                await conn.ExecuteAsync(new CommandDefinition(
+                    """
+                    INSERT INTO item_stock (stock_id, tenant_id, item_id, warehouse_id, current_qty, avg_cost, last_updated_at)
+                    VALUES (UUID(), @TenantId, @ItemId, @WarehouseId, @Qty, @UnitCost, NOW(6))
+                    ON DUPLICATE KEY UPDATE
+                      current_qty = current_qty + @Qty,
+                      last_updated_at = NOW(6)
+                    """,
+                    new { TenantId = tenantId, ItemId = g.ItemId, WarehouseId = g.Wh, Qty = g.Qty, UnitCost = g.UnitPrice },
+                    transaction: dbTx, cancellationToken: ct));
+            }
+
+            // 3) monthly_summary 매출 역산 — MonthlySummaryGuard 멱등 가드 (ConfirmDelivery 대칭)
+            await MonthlySummaryGuard.TryApplyAsync(
+                conn, dbTx, tenantId: tenantId, date: rd,
+                sourceType: "sales_return_confirmed", sourceId: returnId,
+                field: MonthlySummaryGuard.SummaryField.TotalSales, amount: -totalAmount, ct: ct);
+
+            // 4) partner_balance 매출 역산 (반품 확정 시 total_sales 차감)
+            await conn.ExecuteAsync(new CommandDefinition(
+                """
+                INSERT INTO partner_balance
+                  (balance_id, tenant_id, partner_id, total_sales, total_receipt, total_purchase, total_payment, last_updated_at)
+                VALUES
+                  (UUID(), @TenantId, @PartnerId, -@Amount, 0, 0, 0, NOW(6))
+                ON DUPLICATE KEY UPDATE
+                  total_sales     = total_sales - @Amount,
+                  last_updated_at = NOW(6)
+                """,
+                new { TenantId = tenantId, PartnerId = partnerId, Amount = totalAmount },
+                transaction: dbTx, cancellationToken: ct));
+
+            // 5) 회계 역분개 — 매출취소 역분개 재사용 (차변 매출+부가세예수금 / 대변 외상매출금)
+            if (totalAmount != 0m || vatAmount != 0m)
+            {
+                await AutoJournalHelper.RecordSalesDeliveryCancelAsync(
+                    conn, dbTx!, tenantId, returnId, returnNo, rd, partnerId, totalAmount, vatAmount, employeeId, ct);
+            }
+
+            // 6) 상태 전환
+            await conn.ExecuteAsync(new CommandDefinition(
+                "UPDATE sales_returns SET status='confirmed', updated_at=NOW(6) WHERE return_id=@Id AND tenant_id=@Tid",
+                new { Id = returnId, Tid = tenantId }, transaction: dbTx, cancellationToken: ct));
+
+            await tx.CommitAsync(ct);
+            await _audit.LogAsync("confirm", "sales_return", returnId, ct: ct);
+        }
+        catch (Exception)
+        {
+            try { await tx.RollbackAsync(ct); } catch (Exception rbex) { Console.Error.WriteLine($"[SalesService] rollback failed: {rbex.Message}"); }
+            throw;
+        }
+
+        // 결재 트리거 (커밋 이후) — 실패해도 반품 확정 원장은 유효
+        try
+        {
+            await ApprovalTriggerHelper.TryCreateApprovalAsync(_db,
+                "sales_return", returnId, returnNo,
+                $"매출반품 확정: {returnNo}", totalAmount + vatAmount,
+                tenantId, "system", "확정자", ct);
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Trace.TraceWarning($"[ApprovalTrigger] 매출반품 {returnNo} 결재 트리거 실패: {ex.Message}");
+        }
+    }
+
+    // ─────────────────────────────────────────────────────────────────────
+    // 매출반품 취소 — confirmed → canceled. 확정(ConfirmSalesReturnAsync)의 정확한 역행.
+    //   봉합 (2026-06-23, 15차 적대검증 15-P1): 종전엔 확정 반품을 되돌릴 경로가 없어, 잘못 확정 시
+    //   운영자가 원장을 직접 손대야 했다(헌법 #3 INSERT ONLY 위반 유발). 확정 6단계를 단일 트랜잭션으로 역행:
+    //   ① stock_ledger Reverse OUT(확정 IN 되돌림) ② item_stock 차감 ③ monthly_summary +복원
+    //   ④ partner_balance total_sales +복원 ⑤ 회계 매출복원 기표 ⑥ status=canceled.
+    //   멱등: confirmed 상태만 취소 가능 → 취소 후 canceled 라 두 번 눌러도 차단(stock_ledger/journal UNIQUE 보호).
+    // ─────────────────────────────────────────────────────────────────────
+    public async Task CancelSalesReturnAsync(string returnId, string tenantId, string? employeeId, CancellationToken ct = default)
+    {
+        var header = await _db.QueryFirstOrDefaultAsync<dynamic>(new CommandDefinition(
+            "SELECT return_no, partner_id, return_date, status, total_amount, vat_amount FROM sales_returns WHERE return_id=@Id AND tenant_id=@Tid AND is_deleted=0",
+            new { Id = returnId, Tid = tenantId }, cancellationToken: ct))
+            ?? throw new InvalidOperationException("반품 문서를 찾을 수 없습니다.");
+
+        if ((string)header.status != "confirmed")
+            throw new InvalidOperationException("확정된(confirmed) 반품만 취소할 수 있습니다.");
+
+        DateTime rd = (DateTime)header.return_date;
+        // 마감월 보호 — 확정과 동일(닫힌 월의 원장은 건드리지 않는다).
+        await ApprovalTriggerHelper.EnsureNotClosedAsync(_db, tenantId, rd, ct);
+
+        var items = (await _db.QueryAsync<dynamic>(new CommandDefinition(
+            "SELECT item_id, qty, unit_price, supply_amount, warehouse_id FROM sales_return_items WHERE return_id=@Id AND tenant_id=@Tid",
+            new { Id = returnId, Tid = tenantId }, cancellationToken: ct))).ToList();
+
+        var returnNo = (string)header.return_no;
+        var partnerId = (string)header.partner_id;
+        var totalAmount = (decimal)header.total_amount;
+        var vatAmount = (decimal)header.vat_amount;
+
+        using var tx = await _unitOfWork.BeginTransactionAsync(ct);
+        try
+        {
+            var conn = _unitOfWork.GetDbConnection();
+            var dbTx = tx.DbTransaction;
+
+            // 기본창고 폴백 — 확정과 동일(wh_code MAIN 우선, 헌법 #12 대칭).
+            var returnDefaultWh = await conn.ExecuteScalarAsync<string?>(new CommandDefinition(
+                """
+                SELECT warehouse_id FROM warehouses
+                 WHERE tenant_id = @TenantId AND is_active = 1
+                 ORDER BY (CASE WHEN wh_code IN ('MAIN','WH-MAIN') THEN 0 ELSE 1 END), wh_code
+                 LIMIT 1
+                """,
+                new { TenantId = tenantId }, transaction: dbTx, cancellationToken: ct));
+            if (string.IsNullOrEmpty(returnDefaultWh))
+                throw new InvalidOperationException("활성 창고가 없습니다. 창고를 먼저 등록해주세요.");
+
+            // 확정 시 item_id 합산 1행 기록과 대칭으로, 취소도 item_id 합산해 키당 1행만 역행 기록.
+            //   stock_ledger UNIQUE 키(tenant, source_type=sales_return_cancel, source_id=returnId, item_id, move_type=out).
+            var returnGroups = items
+                .GroupBy(it => (string)it.item_id)
+                .Select(g => new
+                {
+                    ItemId = g.Key,
+                    Wh = string.IsNullOrEmpty((string?)g.First().warehouse_id) ? returnDefaultWh : (string)g.First().warehouse_id,
+                    Qty = g.Sum(x => (decimal)x.qty),
+                    Supply = g.Sum(x => (decimal)x.supply_amount),
+                    UnitPrice = (decimal)g.First().unit_price
+                })
+                .ToList();
+
+            // 1) 재고원장 Reverse OUT INSERT (확정 IN 되돌림 — 반품 취소로 재고 다시 감소)
+            foreach (var g in returnGroups)
+            {
+                await conn.ExecuteAsync(new CommandDefinition(
+                    """
+                    INSERT INTO stock_ledger
+                      (tenant_id, item_id, warehouse_id, partner_id, employee_id, ledger_date, ym,
+                       move_type, source_type, source_id, doc_no, qty_in, qty_out, unit_cost, supply_amount, memo)
+                    VALUES
+                      (@Tid, @ItemId, @Wh, @PartnerId, @EmpId, @Date, @Ym,
+                       'out', 'sales_return_cancel', @Rid, @DocNo, 0, @Qty, @UnitPrice, @Supply, '매출반품 취소 (Reverse OUT)')
+                    """,
+                    new
+                    {
+                        Tid = tenantId, ItemId = g.ItemId, Wh = g.Wh, PartnerId = partnerId, EmpId = employeeId,
+                        Date = rd, Ym = rd.ToString("yyyy-MM"), Rid = returnId, DocNo = returnNo,
+                        Qty = g.Qty, UnitPrice = g.UnitPrice, Supply = g.Supply
+                    },
+                    transaction: dbTx, cancellationToken: ct));
+
+                // 2) item_stock 차감 — 확정 시 +Qty 의 역
+                await conn.ExecuteAsync(new CommandDefinition(
+                    """
+                    INSERT INTO item_stock (stock_id, tenant_id, item_id, warehouse_id, current_qty, avg_cost, last_updated_at)
+                    VALUES (UUID(), @TenantId, @ItemId, @WarehouseId, -@Qty, @UnitCost, NOW(6))
+                    ON DUPLICATE KEY UPDATE
+                      current_qty = current_qty - @Qty,
+                      last_updated_at = NOW(6)
+                    """,
+                    new { TenantId = tenantId, ItemId = g.ItemId, WarehouseId = g.Wh, Qty = g.Qty, UnitCost = g.UnitPrice },
+                    transaction: dbTx, cancellationToken: ct));
+            }
+
+            // 3) monthly_summary 매출 복원 — 확정 시 -totalAmount 의 역(+totalAmount). 전용 source_type 으로 멱등.
+            await MonthlySummaryGuard.TryApplyAsync(
+                conn, dbTx, tenantId: tenantId, date: rd,
+                sourceType: "sales_return_cancel", sourceId: returnId,
+                field: MonthlySummaryGuard.SummaryField.TotalSales, amount: totalAmount, ct: ct);
+
+            // 4) partner_balance 매출 복원 (확정 시 차감한 total_sales 를 다시 가산)
+            await conn.ExecuteAsync(new CommandDefinition(
+                """
+                INSERT INTO partner_balance
+                  (balance_id, tenant_id, partner_id, total_sales, total_receipt, total_purchase, total_payment, last_updated_at)
+                VALUES
+                  (UUID(), @TenantId, @PartnerId, @Amount, 0, 0, 0, NOW(6))
+                ON DUPLICATE KEY UPDATE
+                  total_sales     = total_sales + @Amount,
+                  last_updated_at = NOW(6)
+                """,
+                new { TenantId = tenantId, PartnerId = partnerId, Amount = totalAmount },
+                transaction: dbTx, cancellationToken: ct));
+
+            // 5) 회계 매출복원 기표 — 확정 역분개의 역(정상 매출분개 방향), 전용 source_type
+            if (totalAmount != 0m || vatAmount != 0m)
+            {
+                await AutoJournalHelper.RecordSalesReturnCancelAsync(
+                    conn, dbTx!, tenantId, returnId, returnNo, rd, partnerId, totalAmount, vatAmount, employeeId, ct);
+            }
+
+            // 6) 상태 전환
+            await conn.ExecuteAsync(new CommandDefinition(
+                "UPDATE sales_returns SET status='canceled', updated_at=NOW(6) WHERE return_id=@Id AND tenant_id=@Tid",
+                new { Id = returnId, Tid = tenantId }, transaction: dbTx, cancellationToken: ct));
+
+            await tx.CommitAsync(ct);
+            await _audit.LogAsync("cancel", "sales_return", returnId, ct: ct);
+        }
+        catch (Exception)
+        {
+            try { await tx.RollbackAsync(ct); } catch (Exception rbex) { Console.Error.WriteLine($"[SalesService] rollback failed: {rbex.Message}"); }
+            throw;
+        }
+    }
+
+    // 매출반품 draft 삭제 — confirmed 상태는 별도 취소 경로 필요(매입반품 대칭).
+    public async Task DeleteSalesReturnAsync(string returnId, string tenantId, CancellationToken ct = default)
+    {
+        var status = await _db.QueryFirstOrDefaultAsync<string?>(new CommandDefinition(
+            "SELECT status FROM sales_returns WHERE return_id=@Id AND tenant_id=@Tid AND is_deleted=0",
+            new { Id = returnId, Tid = tenantId }, cancellationToken: ct))
+            ?? throw new InvalidOperationException("반품 문서를 찾을 수 없습니다.");
+
+        if (status != "draft")
+            throw new InvalidOperationException("draft 상태만 삭제할 수 있습니다. 확정된 반품은 취소 처리가 필요합니다.");
+
+        using var tx = await _unitOfWork.BeginTransactionAsync(ct);
+        try
+        {
+            var conn = _unitOfWork.GetDbConnection();
+            var dbTx = tx.DbTransaction;
+
+            await conn.ExecuteAsync(new CommandDefinition(
+                "DELETE FROM sales_return_items WHERE return_id=@Id AND tenant_id=@Tid",
+                new { Id = returnId, Tid = tenantId }, transaction: dbTx, cancellationToken: ct));
+
+            await conn.ExecuteAsync(new CommandDefinition(
+                "DELETE FROM sales_returns WHERE return_id=@Id AND tenant_id=@Tid",
+                new { Id = returnId, Tid = tenantId }, transaction: dbTx, cancellationToken: ct));
+
+            await tx.CommitAsync(ct);
+            await _audit.LogAsync("delete", "sales_return", returnId, ct: ct);
+        }
+        catch (Exception)
+        {
+            try { await tx.RollbackAsync(ct); } catch (Exception rbex) { Console.Error.WriteLine($"[SalesService] rollback failed: {rbex.Message}"); }
+            throw;
+        }
+    }
+}

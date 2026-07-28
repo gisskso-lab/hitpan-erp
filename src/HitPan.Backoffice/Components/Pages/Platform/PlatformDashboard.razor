@@ -1,0 +1,11 @@
+@page "/platform/dashboard"
+@inject NavigationManager Nav
+
+@*
+    레거시 경로 → 본사 대시보드 리다이렉트 (사장님 결재 2026-06-05)
+    실제 작동 페이지: /admin/dashboard
+*@
+
+@code {
+    protected override void OnInitialized() => Nav.NavigateTo("/admin/dashboard", replace: true);
+}

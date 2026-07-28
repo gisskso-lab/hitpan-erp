@@ -1,0 +1,332 @@
+@page "/settings/subscription-billing"
+@namespace HitPan.Web.Pages.SettingsUi
+@attribute [Authorize]
+@using HitPan.Web.Models
+@using HitPan.Web.Services
+@inject BillingService BillingSvc
+@inject ISnackbar Snackbar
+@inject NavigationManager Nav
+
+<PageTitle>구독결제 관리</PageTitle>
+
+<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
+    <MudText Typo="Typo.h6">구독결제 관리</MudText>
+    <MudText Style="font-size:12px;color:var(--mud-palette-text-secondary)">
+        토스페이먼츠 사업자카드 자동결제 / 무통장입금(본사 가상계좌)
+    </MudText>
+</div>
+
+@if (_loading)
+{
+    <MudProgressLinear Indeterminate="true" Color="Color.Primary" />
+}
+else
+{
+    <MudGrid Spacing="3">
+        @* ── 좌측: 현재 구독 + 결제수단 + 본사 계좌 ───────── *@
+        <MudItem xs="12" md="7">
+            @* 현재 구독 상태 *@
+            <MudPaper Elevation="0" Class="pa-4 mb-3" Style="border:0.5px solid var(--mud-palette-lines-default);border-radius:12px">
+                <MudText Typo="Typo.subtitle2" Class="mb-3">현재 구독 상태</MudText>
+                @if (_subscription is null)
+                {
+                    <MudText Style="font-size:13px;color:var(--mud-palette-text-secondary)">활성 구독이 없습니다.</MudText>
+                }
+                else
+                {
+                    <MudGrid Spacing="2">
+                        <MudItem xs="6">
+                            <div style="font-size:11px;color:var(--mud-palette-text-secondary)">플랜</div>
+                            <div style="font-weight:700">@_subscription.PlanName (@_subscription.PlanCode)</div>
+                        </MudItem>
+                        <MudItem xs="6">
+                            <div style="font-size:11px;color:var(--mud-palette-text-secondary)">월 구독료</div>
+                            <div style="font-weight:700">@_subscription.MonthlyAmount.ToString("N0")원</div>
+                        </MudItem>
+                        <MudItem xs="6">
+                            <div style="font-size:11px;color:var(--mud-palette-text-secondary)">시작일</div>
+                            <div>@_subscription.StartedAt.ToString("yyyy-MM-dd")</div>
+                        </MudItem>
+                        <MudItem xs="6">
+                            <div style="font-size:11px;color:var(--mud-palette-text-secondary)">다음 결제일</div>
+                            <div>@(_subscription.NextBillingDate?.ToString("yyyy-MM-dd") ?? "-")</div>
+                        </MudItem>
+                        <MudItem xs="6">
+                            <div style="font-size:11px;color:var(--mud-palette-text-secondary)">만료일</div>
+                            <div>@(_subscription.ExpiresAt?.ToString("yyyy-MM-dd") ?? "-")</div>
+                        </MudItem>
+                        <MudItem xs="6">
+                            <div style="font-size:11px;color:var(--mud-palette-text-secondary)">라이선스</div>
+                            <div>@(_subscription.LicenseCount)개</div>
+                        </MudItem>
+                    </MudGrid>
+                }
+            </MudPaper>
+
+            @* 결제수단 *@
+            <MudPaper Elevation="0" Class="pa-4 mb-3" Style="border:0.5px solid var(--mud-palette-lines-default);border-radius:12px">
+                <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+                    <MudText Typo="Typo.subtitle2">결제수단</MudText>
+                    <MudButton Size="Size.Small" Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Add" OnClick="OpenRegisterDialog">
+                        결제수단 등록
+                    </MudButton>
+                </div>
+
+                @if (_paymentMethods.Count == 0)
+                {
+                    <MudText Style="font-size:13px;color:var(--mud-palette-text-secondary)">
+                        등록된 결제수단이 없습니다. [결제수단 등록] 버튼으로 토스 카드 또는 무통장입금을 등록하세요.
+                    </MudText>
+                }
+                else
+                {
+                    <MudTable Items="_paymentMethods" Dense="true" Hover="true" Bordered="false">
+                        <HeaderContent>
+                            <MudTh Style="width:80px">기본</MudTh>
+                            <MudTh Style="width:100px">유형</MudTh>
+                            <MudTh>표시명</MudTh>
+                            <MudTh Style="width:120px">등록일</MudTh>
+                            <MudTh Style="width:160px">동작</MudTh>
+                        </HeaderContent>
+                        <RowTemplate>
+                            <MudTd>@(context.IsDefault ? "✓" : "")</MudTd>
+                            <MudTd>@RenderProvider(context.Provider, context.MethodType)</MudTd>
+                            <MudTd>@context.DisplayName</MudTd>
+                            <MudTd>@context.RegisteredAt.ToString("yyyy-MM-dd")</MudTd>
+                            <MudTd>
+                                @if (!context.IsDefault)
+                                {
+                                    <MudButton Size="Size.Small" Variant="Variant.Text" OnClick="@(() => OnSetDefault(context))">기본설정</MudButton>
+                                }
+                                <MudButton Size="Size.Small" Variant="Variant.Text" Color="Color.Error" OnClick="@(() => OnDeleteMethod(context))">삭제</MudButton>
+                            </MudTd>
+                        </RowTemplate>
+                    </MudTable>
+                }
+            </MudPaper>
+
+            @* 본사 입금계좌 안내 *@
+            <MudPaper Elevation="0" Class="pa-4" Style="border:0.5px solid var(--mud-palette-lines-default);border-radius:12px;background:var(--hp-brand-50)">
+                <MudText Typo="Typo.subtitle2" Class="mb-2">무통장입금 안내 — 본사 가상계좌</MudText>
+                <MudGrid Spacing="2">
+                    <MudItem xs="6" md="4">
+                        <div style="font-size:11px;color:var(--mud-palette-text-secondary)">은행</div>
+                        <div style="font-weight:700">@(string.IsNullOrEmpty(_settings.HeadOfficeBank) ? "-" : _settings.HeadOfficeBank)</div>
+                    </MudItem>
+                    <MudItem xs="6" md="4">
+                        <div style="font-size:11px;color:var(--mud-palette-text-secondary)">계좌번호</div>
+                        <div style="font-weight:700">@(string.IsNullOrEmpty(_settings.HeadOfficeAccount) ? "-" : _settings.HeadOfficeAccount)</div>
+                    </MudItem>
+                    <MudItem xs="6" md="4">
+                        <div style="font-size:11px;color:var(--mud-palette-text-secondary)">예금주</div>
+                        <div style="font-weight:700">@(string.IsNullOrEmpty(_settings.HeadOfficeHolder) ? "-" : _settings.HeadOfficeHolder)</div>
+                    </MudItem>
+                </MudGrid>
+                <MudText Style="font-size:11px;color:var(--mud-palette-text-secondary);margin-top:8px">
+                    위 계좌로 입금하시면 본사가 입금 확인 후 결제 처리합니다. 입금자명에 회사명을 기재해 주세요.
+                </MudText>
+            </MudPaper>
+        </MudItem>
+
+        @* ── 우측: 결제 이력 ─────────────────────── *@
+        <MudItem xs="12" md="5">
+            <MudPaper Elevation="0" Class="pa-4" Style="border:0.5px solid var(--mud-palette-lines-default);border-radius:12px">
+                <MudText Typo="Typo.subtitle2" Class="mb-3">결제 이력</MudText>
+                @if (_invoices.Count == 0)
+                {
+                    <MudText Style="font-size:13px;color:var(--mud-palette-text-secondary)">결제 이력이 없습니다.</MudText>
+                }
+                else
+                {
+                    <MudTable Items="_invoices" Dense="true" Hover="true" Bordered="false">
+                        <HeaderContent>
+                            <MudTh>인보이스</MudTh>
+                            <MudTh Style="width:100px">금액</MudTh>
+                            <MudTh Style="width:80px">상태</MudTh>
+                        </HeaderContent>
+                        <RowTemplate>
+                            <MudTd>
+                                <div style="font-weight:600">@context.InvoiceNo</div>
+                                <div style="font-size:11px;color:var(--mud-palette-text-secondary)">
+                                    @context.BillingPeriodStart.ToString("yyyy-MM-dd") ~ @context.BillingPeriodEnd.ToString("yyyy-MM-dd")
+                                </div>
+                            </MudTd>
+                            <MudTd>@context.TotalAmount.ToString("N0")원</MudTd>
+                            <MudTd>@RenderStatus(context.Status)</MudTd>
+                        </RowTemplate>
+                    </MudTable>
+                }
+            </MudPaper>
+        </MudItem>
+    </MudGrid>
+
+    <div style="margin-top:24px;display:flex;justify-content:flex-end">
+        <MudButton Variant="Variant.Outlined" OnClick="@(() => Nav.NavigateTo("/settings"))">사용자정보설정으로 돌아가기</MudButton>
+    </div>
+}
+
+@* ─── 결제수단 등록 모달 ─── *@
+<MudDialog @bind-Visible="_dialogOpen" Options="@(new DialogOptions { CloseButton = true, MaxWidth = MaxWidth.Small, FullWidth = true })">
+    <TitleContent>
+        <MudText Typo="Typo.h6">결제수단 등록</MudText>
+    </TitleContent>
+    <DialogContent>
+        <MudGrid Spacing="2">
+            <MudItem xs="12">
+                <MudSelect T="string" Label="결제 방식" @bind-Value="_form.Provider" Variant="Variant.Outlined" Margin="Margin.Dense">
+                    <MudSelectItem Value="@("toss")">토스페이먼츠 (사업자카드 자동결제)</MudSelectItem>
+                    <MudSelectItem Value="@("manual")">무통장입금 (본사 가상계좌)</MudSelectItem>
+                </MudSelect>
+            </MudItem>
+
+            @if (_form.Provider == "toss")
+            {
+                <MudItem xs="12">
+                    <MudPaper Elevation="0" Class="pa-3" Style="background:var(--mud-palette-warning-lighten);border-radius:8px">
+                        <MudText Style="font-size:12px">
+                            <strong>토스페이먼츠 카드 등록은 정식 서비스 시점부터 활성화됩니다.</strong><br/>
+                            베타 기간에는 무통장입금을 이용해 주세요.
+                        </MudText>
+                    </MudPaper>
+                </MudItem>
+                <MudItem xs="12">
+                    <MudTextField T="string" Label="표시명 (예: 신한카드 ****1234)" @bind-Value="_form.DisplayName" Variant="Variant.Outlined" Margin="Margin.Dense" />
+                </MudItem>
+                <MudItem xs="6">
+                    <MudTextField T="string" Label="카드사" @bind-Value="_form.CardBrand" Variant="Variant.Outlined" Margin="Margin.Dense" />
+                </MudItem>
+                <MudItem xs="6">
+                    <MudTextField T="string" Label="카드 끝 4자리" @bind-Value="_form.CardLast4" Variant="Variant.Outlined" Margin="Margin.Dense" MaxLength="4" />
+                </MudItem>
+                <MudItem xs="12">
+                    <MudSelect T="string" Label="카드 명의" @bind-Value="_form.CardOwnerType" Variant="Variant.Outlined" Margin="Margin.Dense">
+                        <MudSelectItem Value="@("corporate")">법인/사업자</MudSelectItem>
+                        <MudSelectItem Value="@("personal")">개인</MudSelectItem>
+                    </MudSelect>
+                </MudItem>
+            }
+            else
+            {
+                <MudItem xs="12">
+                    <MudTextField T="string" Label="표시명 (예: 우리은행 무통장)" @bind-Value="_form.DisplayName" Variant="Variant.Outlined" Margin="Margin.Dense" />
+                </MudItem>
+                <MudItem xs="12">
+                    <MudPaper Elevation="0" Class="pa-3" Style="background:var(--hp-brand-50);border-radius:8px">
+                        <MudText Style="font-size:12px">
+                            본사 입금계좌:
+                            <strong>@_settings.HeadOfficeBank @_settings.HeadOfficeAccount (@_settings.HeadOfficeHolder)</strong>
+                        </MudText>
+                    </MudPaper>
+                </MudItem>
+            }
+
+            <MudItem xs="12">
+                <MudSwitch T="bool" @bind-Value="_form.SetAsDefault" Label="기본 결제수단으로 설정" Color="Color.Primary" />
+            </MudItem>
+        </MudGrid>
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="@(() => _dialogOpen = false)">취소</MudButton>
+        <MudButton Color="Color.Primary" Variant="Variant.Filled" OnClick="OnRegister" Disabled="_saving">등록</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    private bool _loading = true;
+    private BillingSettingsModel _settings = new();
+    private SubscriptionModel? _subscription;
+    private List<PaymentMethodModel> _paymentMethods = new();
+    private List<InvoiceListItemModel> _invoices = new();
+
+    private bool _dialogOpen;
+    private RegisterPaymentMethodModel _form = new();
+    private bool _saving;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await ReloadAsync();
+    }
+
+    private async Task ReloadAsync()
+    {
+        _loading = true;
+        var settingsTask = BillingSvc.GetSettingsAsync();
+        var subTask = BillingSvc.GetSubscriptionAsync();
+        var pmTask = BillingSvc.GetPaymentMethodsAsync();
+        var invTask = BillingSvc.GetInvoicesAsync();
+        await Task.WhenAll(settingsTask, subTask, pmTask, invTask);
+        _settings = settingsTask.Result;
+        _subscription = subTask.Result;
+        _paymentMethods = pmTask.Result;
+        _invoices = invTask.Result;
+        _loading = false;
+    }
+
+    private void OpenRegisterDialog()
+    {
+        _form = new RegisterPaymentMethodModel
+        {
+            Provider = "manual",
+            MethodType = "bank_transfer",
+            SetAsDefault = _paymentMethods.Count == 0
+        };
+        _dialogOpen = true;
+    }
+
+    private async Task OnRegister()
+    {
+        if (string.IsNullOrWhiteSpace(_form.DisplayName))
+        {
+            Snackbar.Add("표시명을 입력하세요.", Severity.Warning);
+            return;
+        }
+
+        _form.MethodType = _form.Provider == "toss" ? "card" : "bank_transfer";
+
+        _saving = true;
+        var ok = await BillingSvc.RegisterPaymentMethodAsync(_form);
+        _saving = false;
+
+        if (ok)
+        {
+            Snackbar.Add("결제수단이 등록되었습니다.", Severity.Success);
+            _dialogOpen = false;
+            await ReloadAsync();
+        }
+        else
+        {
+            Snackbar.Add("등록 실패. 토스 카드는 정식 서비스에서 활성화됩니다.", Severity.Error);
+        }
+    }
+
+    private async Task OnSetDefault(PaymentMethodModel m)
+    {
+        var ok = await BillingSvc.SetDefaultAsync(m.PaymentMethodId);
+        if (ok) { Snackbar.Add("기본 결제수단으로 설정했습니다.", Severity.Success); await ReloadAsync(); }
+        else { Snackbar.Add("설정 실패.", Severity.Error); }
+    }
+
+    private async Task OnDeleteMethod(PaymentMethodModel m)
+    {
+        var ok = await BillingSvc.DeletePaymentMethodAsync(m.PaymentMethodId);
+        if (ok) { Snackbar.Add("삭제 완료. (사용 이력이 있으면 비활성화됨)", Severity.Success); await ReloadAsync(); }
+        else { Snackbar.Add("삭제 실패.", Severity.Error); }
+    }
+
+    private static string RenderProvider(string provider, string methodType) => (provider, methodType) switch
+    {
+        ("toss", "card") => "토스 카드",
+        ("manual", "bank_transfer") => "무통장입금",
+        _ => $"{provider}/{methodType}"
+    };
+
+    private static string RenderStatus(string status) => status switch
+    {
+        "paid" => "결제완료",
+        "pending" => "대기",
+        "failed" => "실패",
+        "refunded" => "환불",
+        "cancelled" => "취소",
+        _ => status
+    };
+}

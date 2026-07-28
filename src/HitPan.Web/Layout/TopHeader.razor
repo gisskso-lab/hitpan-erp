@@ -1,0 +1,16 @@
+@inject NavigationManager Nav
+
+<header class="hitpan-top-header">
+    @* 좌측: AI 챗봇 바 (로고는 사이드바 상단으로 복귀 — 사장님 결재 2026-04-29 재변경) *@
+    <div class="hitpan-top-header-left">
+        <ChatbotBar />
+    </div>
+    @* 중앙: 다중 탭바 (탭만) *@
+    <div class="hitpan-top-header-center">
+        <MultiTabBar />
+    </div>
+    @* 우측: 계정 정보 + 로그아웃 *@
+    <div class="hitpan-top-header-right">
+        <AccountBadge />
+    </div>
+</header>

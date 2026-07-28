@@ -1,0 +1,17 @@
+services:
+  api:
+    image: mcr.microsoft.com/dotnet/sdk:8.0
+    working_dir: /app
+    environment:
+      ASPNETCORE_ENVIRONMENT: Development
+      ASPNETCORE_URLS: http://+:8080
+      DB_HOST: db
+      DB_PORT: 3306
+      DB_NAME: ${DB_NAME}
+      DB_USER: ${DB_USER}
+      DB_PASSWORD: ${DB_PASSWORD}
+      JWT_SECRET: ${JWT_SECRET}
+      ERP_ENCRYPTION_KEY: ${ERP_ENCRYPTION_KEY}
+    command: dotnet watch --project src/HitPan.API/HitPan.API.csproj run --urls http://0.0.0.0:8080
+    volumes:
+      - ./:/app

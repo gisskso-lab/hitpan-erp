@@ -1,0 +1,52 @@
+@using MudBlazor
+
+<MudDialog>
+    <DialogContent>
+        @if (Kind == BulkEditKind.UnitPrice)
+        {
+            <MudNumericField T="decimal" @bind-Value="_unitPrice" Label="적용 단가" Variant="Variant.Outlined" />
+        }
+        else if (Kind == BulkEditKind.Assignee)
+        {
+            <MudTextField T="string" @bind-Value="_assignee" Label="담당자" Variant="Variant.Outlined" />
+        }
+        else
+        {
+            <MudTextField T="string" @bind-Value="_warehouse" Label="창고" Variant="Variant.Outlined" />
+        }
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="Cancel">취소</MudButton>
+        <MudButton Color="Color.Primary" Variant="Variant.Filled" OnClick="Ok">적용</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    public enum BulkEditKind
+    {
+        UnitPrice,
+        Assignee,
+        Warehouse
+    }
+
+    [CascadingParameter] private IMudDialogInstance Dialog { get; set; } = default!;
+
+    [Parameter] public BulkEditKind Kind { get; set; }
+
+    private decimal _unitPrice;
+    private string _assignee = string.Empty;
+    private string _warehouse = string.Empty;
+
+    private void Ok()
+    {
+        object payload = Kind switch
+        {
+            BulkEditKind.UnitPrice => _unitPrice,
+            BulkEditKind.Assignee => _assignee,
+            _ => _warehouse
+        };
+        Dialog.Close(DialogResult.Ok(payload));
+    }
+
+    private void Cancel() => Dialog.Close(DialogResult.Cancel());
+}

@@ -1,0 +1,361 @@
+@page "/tax-invoice"
+@namespace HitPan.Web.Pages.SalesUi
+@attribute [Authorize]
+@using HitPan.Web.Models
+@using HitPan.Web.Services
+@inject DeliveryService DeliveryService
+@inject DocumentService DocService
+@inject TaxInvoiceApiService TaxInvoiceApi
+@inject ISnackbar Snackbar
+@inject IDialogService DialogService
+@inject NavigationManager Nav
+@inject IJSRuntime Js
+
+<PageTitle>세금계산서</PageTitle>
+
+<MudText Typo="Typo.h6" Class="mb-3">세금계산서</MudText>
+
+<!-- 필터 영역 -->
+<MudPaper Class="pa-3 mb-3" Elevation="0" Style="border:1px solid var(--mud-palette-lines-default);border-radius:12px">
+    <MudGrid Spacing="2" Class="align-center">
+        <MudItem xs="12" sm="2">
+            <MudDatePicker @bind-Date="_fromDate" Label="시작일" Variant="Variant.Outlined" Margin="Margin.Dense" Style="min-width:160px" DateFormat="yyyy-MM-dd" />
+        </MudItem>
+        <MudItem xs="12" sm="2">
+            <MudDatePicker @bind-Date="_toDate" Label="종료일" Variant="Variant.Outlined" Margin="Margin.Dense" Style="min-width:160px" DateFormat="yyyy-MM-dd" />
+        </MudItem>
+        <MudItem xs="12" sm="3">
+            <MudTextField @bind-Value="_partnerFilter" Label="업체명" Variant="Variant.Outlined" Margin="Margin.Dense"
+                          Adornment="Adornment.End" AdornmentIcon="@Icons.Material.Filled.Search" />
+        </MudItem>
+        <MudItem xs="12" sm="3">
+            <MudSelect T="string" @bind-Value="_statusFilter" Label="발행 상태" Variant="Variant.Outlined" Margin="Margin.Dense">
+                <MudSelectItem Value="@("all")">전체</MudSelectItem>
+                <MudSelectItem Value="@("invoiced")">미전자발행 (계산서 발행)</MudSelectItem>
+                <MudSelectItem Value="@("e-issued")">전자발행 완료</MudSelectItem>
+            </MudSelect>
+        </MudItem>
+        <MudItem xs="12" sm="2">
+            <MudButton Variant="Variant.Filled" Color="Color.Primary" FullWidth="true" OnClick="SearchAsync">조회</MudButton>
+        </MudItem>
+    </MudGrid>
+</MudPaper>
+
+<!-- 요약 + 전자발행 버튼 -->
+<MudPaper Class="pa-2 mb-2 d-flex align-center gap-3" Elevation="0">
+    <MudText Typo="Typo.body2">전체: @(_items.Count)건</MudText>
+    <MudText Typo="Typo.body2">선택: @(_items.Count(x => x.IsChecked))건</MudText>
+    <MudText Typo="Typo.body2">선택 공급가액: @(_items.Where(x => x.IsChecked).Sum(x => x.SupplyAmount).ToString("N0"))</MudText>
+    <MudText Typo="Typo.body2">선택 부가세: @(_items.Where(x => x.IsChecked).Sum(x => x.VatAmount).ToString("N0"))</MudText>
+    <MudSpacer />
+    <MudButton Variant="Variant.Outlined" Size="Size.Small" StartIcon="@Icons.Material.Filled.Print" OnClick="PrintAsync">인쇄</MudButton>
+    <MudButton Variant="Variant.Outlined" Size="Size.Small" StartIcon="@Icons.Material.Filled.TableChart" OnClick="ExcelAsync">엑셀</MudButton>
+    <MudButton Variant="Variant.Outlined" Size="Size.Small" StartIcon="@Icons.Material.Filled.PictureAsPdf" OnClick="PdfAsync">PDF</MudButton>
+    <MudButton Variant="Variant.Outlined" Size="Size.Small" StartIcon="@Icons.Material.Filled.Email" OnClick="EmailAsync">이메일</MudButton>
+    <MudButton Variant="Variant.Outlined" Size="Size.Small" StartIcon="@Icons.Material.Filled.Fax" OnClick="FaxAsync">팩스</MudButton>
+    <MudDivider Vertical="true" FlexItem="true" />
+    <MudButton Variant="Variant.Filled" Color="Color.Success" StartIcon="@Icons.Material.Filled.Send"
+               Disabled="@(!_items.Any(x => x.IsChecked && x.Status == "invoiced"))"
+               OnClick="BulkEIssueAsync">전자발행</MudButton>
+</MudPaper>
+
+<!-- 메인 그리드 -->
+<MudPaper Elevation="0" Class="hitpan-card" Style="overflow:hidden">
+    <MudTable T="TaxInvoiceItem" Items="_filteredItems" Dense="true" Hover="true" Striped="true" FixedHeader="true"
+              Height="calc(100vh - 340px)">
+        <HeaderContent>
+            <MudTh Style="width:48px"><MudCheckBox T="bool" Value="_allChecked" ValueChanged="ToggleAll" /></MudTh>
+            <MudTh>일자</MudTh>
+            <MudTh>전표번호</MudTh>
+            <MudTh>업체명</MudTh>
+            <MudTh Style="text-align:right">공급가액</MudTh>
+            <MudTh Style="text-align:right">부가세</MudTh>
+            <MudTh Style="text-align:right">합계</MudTh>
+            <MudTh Style="width:130px;text-align:center">상태</MudTh>
+        </HeaderContent>
+        <RowTemplate>
+            <MudTd><MudCheckBox T="bool" Value="context.IsChecked" ValueChanged="@(v => ToggleOne(context, v))" /></MudTd>
+            <MudTd @onclick="@(() => OpenDetailAsync(context))" Style="cursor:pointer">@context.InvoiceDate.ToString("yyyy-MM-dd")</MudTd>
+            <MudTd @onclick="@(() => OpenDetailAsync(context))" Style="cursor:pointer"><MudText Style="font-weight:500;color:var(--mud-palette-primary)">@context.DocumentNo</MudText></MudTd>
+            <MudTd @onclick="@(() => OpenDetailAsync(context))" Style="cursor:pointer">@context.PartnerName</MudTd>
+            <MudTd Style="text-align:right">@context.SupplyAmount.ToString("N0")</MudTd>
+            <MudTd Style="text-align:right">@context.VatAmount.ToString("N0")</MudTd>
+            <MudTd Style="text-align:right;font-weight:500">@((context.SupplyAmount + context.VatAmount).ToString("N0"))</MudTd>
+            <MudTd Style="text-align:center">
+                <MudChip T="string" Size="Size.Small"
+                         Color="@(context.Status == "e-issued" ? Color.Success : Color.Warning)"
+                         Variant="Variant.Text">
+                    @(context.Status == "e-issued" ? "전자발행 완료" : "계산서 발행")
+                </MudChip>
+            </MudTd>
+        </RowTemplate>
+        <NoRecordsContent>
+            <MudText Typo="Typo.body2" Class="pa-4" Style="color:var(--hitpan-text-faint)">조회된 계산서가 없습니다.</MudText>
+        </NoRecordsContent>
+    </MudTable>
+</MudPaper>
+
+<!-- 계산서 세부 팝업 -->
+<MudDialog @bind-Visible="_detailOpen" Options="new DialogOptions { MaxWidth = MaxWidth.Medium, FullWidth = true, CloseButton = true }">
+    <TitleContent>
+        <MudText Typo="Typo.h6">계산서 상세 — @_detailItem?.DocumentNo</MudText>
+    </TitleContent>
+    <DialogContent>
+        @if (_detailItem is not null)
+        {
+            <MudGrid Spacing="2" Class="mb-3">
+                <MudItem xs="6" sm="3"><MudText Typo="Typo.caption" Color="Color.Secondary">일자</MudText><MudText>@_detailItem.InvoiceDate.ToString("yyyy-MM-dd")</MudText></MudItem>
+                <MudItem xs="6" sm="3"><MudText Typo="Typo.caption" Color="Color.Secondary">전표번호</MudText><MudText Style="font-weight:500">@_detailItem.DocumentNo</MudText></MudItem>
+                <MudItem xs="6" sm="3"><MudText Typo="Typo.caption" Color="Color.Secondary">업체명</MudText><MudText>@_detailItem.PartnerName</MudText></MudItem>
+                <MudItem xs="6" sm="3"><MudText Typo="Typo.caption" Color="Color.Secondary">상태</MudText>
+                    <MudChip T="string" Size="Size.Small" Color="@(_detailItem.Status == "e-issued" ? Color.Success : Color.Warning)" Variant="Variant.Text">
+                        @(_detailItem.Status == "e-issued" ? "전자발행 완료" : "계산서 발행")
+                    </MudChip>
+                </MudItem>
+            </MudGrid>
+
+            <MudTable T="DeliveryItemDto" Items="_detailLines" Dense="true" Hover="true" Striped="true">
+                <HeaderContent>
+                    <MudTh>No</MudTh>
+                    <MudTh>품명</MudTh>
+                    <MudTh>규격</MudTh>
+                    <MudTh>단위</MudTh>
+                    <MudTh Style="text-align:right">수량</MudTh>
+                    <MudTh Style="text-align:right">단가</MudTh>
+                    <MudTh Style="text-align:right">공급가액</MudTh>
+                    <MudTh Style="text-align:right">부가세</MudTh>
+                </HeaderContent>
+                <RowTemplate>
+                    <MudTd>@context.RowNo</MudTd>
+                    <MudTd>@context.ItemName</MudTd>
+                    <MudTd>@context.Spec</MudTd>
+                    <MudTd>@context.Unit</MudTd>
+                    <MudTd Style="text-align:right">@context.Qty.ToString("N1")</MudTd>
+                    <MudTd Style="text-align:right">@context.UnitPrice.ToString("N0")</MudTd>
+                    <MudTd Style="text-align:right">@context.Amount.ToString("N0")</MudTd>
+                    <MudTd Style="text-align:right">@context.VatAmount.ToString("N0")</MudTd>
+                </RowTemplate>
+            </MudTable>
+
+            <MudStack Row="true" Spacing="3" Class="mt-3 pa-2" Style="background:#F8FAFC;border-radius:8px">
+                <MudText Typo="Typo.body2" Style="font-weight:600">공급가액: @_detailItem.SupplyAmount.ToString("N0")</MudText>
+                <MudText Typo="Typo.body2" Style="font-weight:600">부가세: @_detailItem.VatAmount.ToString("N0")</MudText>
+                <MudText Typo="Typo.body2" Style="font-weight:700">합계: @((_detailItem.SupplyAmount + _detailItem.VatAmount).ToString("N0"))</MudText>
+            </MudStack>
+        }
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="@(() => _detailOpen = false)">닫기</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    private DateTime? _fromDate = DateTime.Today.AddDays(-30);
+    private DateTime? _toDate = DateTime.Today;
+    private string _partnerFilter = "";
+    private string _statusFilter = "all";
+    private bool _allChecked;
+    private List<TaxInvoiceItem> _items = new();
+
+    // 상세 팝업
+    private bool _detailOpen;
+    private TaxInvoiceItem? _detailItem;
+    private List<DeliveryItemDto> _detailLines = new();
+
+    private IEnumerable<TaxInvoiceItem> _filteredItems => _statusFilter switch
+    {
+        "invoiced" => _items.Where(x => x.Status == "invoiced"),
+        "e-issued" => _items.Where(x => x.Status == "e-issued"),
+        _ => _items
+    };
+
+    protected override async Task OnInitializedAsync()
+    {
+        // DeliveryPage "세금" 버튼에서 넘어올 때 쿼리스트링으로 거래처/기간 필터 프리셋 반영.
+        var uri = Nav.ToAbsoluteUri(Nav.Uri);
+        var qs = System.Web.HttpUtility.ParseQueryString(uri.Query);
+        var partner = qs["partner"];
+        var from = qs["from"];
+        var to = qs["to"];
+        if (!string.IsNullOrWhiteSpace(partner)) _partnerFilter = partner!;
+        if (DateTime.TryParse(from, out var f)) _fromDate = f;
+        if (DateTime.TryParse(to, out var t)) _toDate = t;
+
+        await SearchAsync();
+    }
+
+    private async Task SearchAsync()
+    {
+        var fromStr = _fromDate?.ToString("yyyy-MM-dd") ?? "";
+        var toStr = _toDate?.ToString("yyyy-MM-dd") ?? "";
+        var list = await DeliveryService.GetListAsync(fromStr, toStr, _partnerFilter, "", CancellationToken.None);
+
+        // invoiced 또는 e-issued 상태만 계산서 목록에 표시
+        _items = list
+            .Where(d => d.Status is "invoiced" or "confirmed" or "e-issued")
+            .Select(d => new TaxInvoiceItem
+            {
+                DeliveryId = d.DeliveryId,
+                DocumentNo = d.DeliveryNo,
+                InvoiceDate = d.OrderDate,
+                PartnerId = d.PartnerId,
+                PartnerName = d.PartnerName,
+                SupplyAmount = d.SupplyAmount,
+                VatAmount = d.VatAmount,
+                Status = d.Status == "confirmed" ? "invoiced" : d.Status
+            }).ToList();
+
+        _allChecked = false;
+        StateHasChanged();
+    }
+
+    private void ToggleAll(bool value)
+    {
+        _allChecked = value;
+        foreach (var item in _filteredItems) item.IsChecked = value;
+    }
+
+    private void ToggleOne(TaxInvoiceItem item, bool value)
+    {
+        item.IsChecked = value;
+        _allChecked = _items.Any() && _items.All(x => x.IsChecked);
+    }
+
+    private async Task BulkEIssueAsync()
+    {
+        // 1계층(내부 마킹) 일괄 발행 — 거래명세서 confirmed → 계산서 발행 API 호출.
+        // 2/3계층(전자세금계산서 국세청 전송)은 별도 라운드.
+        var selected = _items.Where(x => x.IsChecked && x.Status is "invoiced" or "confirmed").ToList();
+        if (selected.Count == 0)
+        {
+            Snackbar.Add("발행 대상이 없습니다.", Severity.Warning);
+            return;
+        }
+
+        var confirm = await DialogService.ShowMessageBoxAsync(
+            "계산서 일괄 발행",
+            $"선택한 {selected.Count}건에 대해 계산서를 발행하시겠습니까?",
+            yesText: "발행", cancelText: "취소");
+        if (confirm != true) return;
+
+        var result = await TaxInvoiceApi.BulkIssueAsync(selected.Select(x => x.DeliveryId));
+
+        foreach (var s in result.Successes)
+        {
+            var item = _items.FirstOrDefault(x => x.DeliveryId == s.DeliveryId);
+            if (item is not null)
+            {
+                item.Status = "invoiced";
+                item.IsChecked = false;
+            }
+        }
+
+        _allChecked = false;
+
+        if (result.Failures.Count == 0)
+            Snackbar.Add($"{result.Successes.Count}건 계산서 발행 완료", Severity.Success);
+        else if (result.Successes.Count == 0)
+            Snackbar.Add($"전건 실패 ({result.Failures.Count}건): {result.Failures[0].Reason}", Severity.Error);
+        else
+            Snackbar.Add($"성공 {result.Successes.Count}건 / 실패 {result.Failures.Count}건. 첫 실패: {result.Failures[0].Reason}", Severity.Warning);
+
+        StateHasChanged();
+    }
+
+    private async Task OpenDetailAsync(TaxInvoiceItem item)
+    {
+        _detailItem = item;
+        try
+        {
+            var detail = await DeliveryService.GetAsync(item.DeliveryId);
+            _detailLines = detail?.Items ?? new();
+        }
+        catch (Exception _hp15Ex)
+        {
+            Console.Error.WriteLine($"[HP15] " + _hp15Ex.GetType().Name + ": " + _hp15Ex.Message);
+            _detailLines = new();
+        }
+        _detailOpen = true;
+        StateHasChanged();
+    }
+
+    private async Task PrintAsync()
+    {
+        // 브라우저 인쇄 — 선택이 없으면 화면 전체, 있으면 첫 건 상세 후 인쇄.
+        var selected = _items.Where(x => x.IsChecked).ToList();
+        if (selected.Count == 1)
+        {
+            await OpenDetailAsync(selected[0]);
+        }
+        await Js.InvokeVoidAsync("print");
+    }
+
+    private async Task ExcelAsync()
+    {
+        var selected = _items.Where(x => x.IsChecked).ToList();
+        if (selected.Count == 0)
+        {
+            Snackbar.Add("인쇄/다운로드할 계산서를 선택해주세요.", Severity.Warning);
+            return;
+        }
+        foreach (var item in selected)
+        {
+            await DocService.DownloadExcelAsync("delivery", item.DeliveryId);
+        }
+    }
+
+    private async Task PdfAsync()
+    {
+        var selected = _items.Where(x => x.IsChecked).ToList();
+        if (selected.Count == 0)
+        {
+            Snackbar.Add("인쇄/다운로드할 계산서를 선택해주세요.", Severity.Warning);
+            return;
+        }
+        foreach (var item in selected)
+        {
+            await DocService.DownloadPdfAsync("delivery", item.DeliveryId);
+        }
+    }
+
+    private async Task EmailAsync()
+    {
+        var selected = _items.Where(x => x.IsChecked).ToList();
+        if (selected.Count == 0)
+        {
+            Snackbar.Add("이메일 발송할 계산서를 선택해주세요.", Severity.Warning);
+            return;
+        }
+        var first = selected[0];
+        var parameters = new DialogParameters
+        {
+            ["DocumentType"] = "세금계산서",
+            ["DocumentTypeKey"] = "tax_invoice",
+            ["DocumentNo"] = selected.Count == 1 ? first.DocumentNo : $"{first.DocumentNo} 외 {selected.Count - 1}건",
+            ["DocumentId"] = first.DeliveryId,
+            ["PartnerId"] = first.PartnerId ?? ""
+        };
+        var options = new DialogOptions { MaxWidth = MaxWidth.Small, FullWidth = true, CloseButton = true };
+        await DialogService.ShowAsync<EmailSendDialog>("이메일 발송", parameters, options);
+    }
+
+    private Task FaxAsync()
+    {
+        // 팩스 전송은 외부 팩스 서비스(Phase 2) 전까지 안내만.
+        Snackbar.Add("팩스 발송 기능은 Phase 2에서 외부 팩스 서비스(엠클라우드/PC-FAX)와 연동 예정입니다.", Severity.Info);
+        return Task.CompletedTask;
+    }
+
+    private class TaxInvoiceItem
+    {
+        public string DeliveryId { get; set; } = "";
+        public string DocumentNo { get; set; } = "";
+        public DateTime InvoiceDate { get; set; }
+        public string PartnerId { get; set; } = "";
+        public string PartnerName { get; set; } = "";
+        public decimal SupplyAmount { get; set; }
+        public decimal VatAmount { get; set; }
+        public string Status { get; set; } = "invoiced";
+        public bool IsChecked { get; set; }
+    }
+}

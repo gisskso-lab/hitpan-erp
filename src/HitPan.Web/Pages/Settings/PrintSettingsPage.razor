@@ -1,0 +1,261 @@
+@page "/print-settings"
+@namespace HitPan.Web.Pages.SettingsUi
+@attribute [Authorize]
+@inject ISnackbar Snackbar
+
+<PageTitle>양식(인쇄)정보 설정</PageTitle>
+
+<MudContainer MaxWidth="MaxWidth.Medium" Class="py-4">
+    <MudText Typo="Typo.h5" Class="mb-4">양식(인쇄)정보 설정</MudText>
+
+    @* ── 회사 직인 업로드 영역 ── *@
+    <MudPaper Class="pa-4 mb-4" Elevation="1">
+        <MudText Typo="Typo.subtitle1" Class="mb-2">
+            <MudIcon Icon="@Icons.Material.Filled.Approval" Size="Size.Small" Class="mr-1" />
+            회사 직인
+        </MudText>
+        <MudText Typo="Typo.body2" Color="Color.Secondary" Class="mb-2">
+            직인 이미지 업로드 (현재: @(_sealFileName ?? "미등록"))
+        </MudText>
+        <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="2">
+            <MudFileUpload T="IBrowserFile" Accept=".png,.jpg,.jpeg,.gif"
+                           FilesChanged="OnSealFileChanged">
+                <ActivatorContent>
+                    <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.UploadFile">
+                        파일 선택
+                    </MudButton>
+                </ActivatorContent>
+            </MudFileUpload>
+            <MudButton Variant="Variant.Filled" Color="Color.Primary"
+                       StartIcon="@Icons.Material.Filled.CloudUpload"
+                       Disabled="@(_sealFile is null)"
+                       OnClick="UploadSeal">업로드</MudButton>
+            <MudButton Variant="Variant.Outlined" Color="Color.Error"
+                       StartIcon="@Icons.Material.Filled.Delete"
+                       Disabled="@(_sealFileName is null)"
+                       OnClick="DeleteSeal">삭제</MudButton>
+        </MudStack>
+    </MudPaper>
+
+    @* ── 회사 로고 업로드 영역 ── *@
+    <MudPaper Class="pa-4 mb-4" Elevation="1">
+        <MudText Typo="Typo.subtitle1" Class="mb-2">
+            <MudIcon Icon="@Icons.Material.Filled.Image" Size="Size.Small" Class="mr-1" />
+            회사 로고
+        </MudText>
+        <MudText Typo="Typo.body2" Color="Color.Secondary" Class="mb-2">
+            로고 이미지 업로드 (현재: @(_logoFileName ?? "미등록"))
+        </MudText>
+        <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="2">
+            <MudFileUpload T="IBrowserFile" Accept=".png,.jpg,.jpeg,.gif"
+                           FilesChanged="OnLogoFileChanged">
+                <ActivatorContent>
+                    <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.UploadFile">
+                        파일 선택
+                    </MudButton>
+                </ActivatorContent>
+            </MudFileUpload>
+            <MudButton Variant="Variant.Filled" Color="Color.Primary"
+                       StartIcon="@Icons.Material.Filled.CloudUpload"
+                       Disabled="@(_logoFile is null)"
+                       OnClick="UploadLogo">업로드</MudButton>
+            <MudButton Variant="Variant.Outlined" Color="Color.Error"
+                       StartIcon="@Icons.Material.Filled.Delete"
+                       Disabled="@(_logoFileName is null)"
+                       OnClick="DeleteLogo">삭제</MudButton>
+        </MudStack>
+    </MudPaper>
+
+    @* ── 문서별 설정 테이블 ── *@
+    <MudPaper Class="pa-4 mb-4" Elevation="1">
+        <MudText Typo="Typo.subtitle1" Class="mb-3">
+            <MudIcon Icon="@Icons.Material.Filled.Description" Size="Size.Small" Class="mr-1" />
+            문서별 설정
+        </MudText>
+        <MudSimpleTable Dense="true" Hover="true" Bordered="true" Style="overflow-x:auto">
+            <thead>
+                <tr>
+                    <th style="min-width:120px">문서 종류</th>
+                    <th style="min-width:250px">하단 문구</th>
+                    <th style="min-width:100px;text-align:center">비고 표시</th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var doc in _documentSettings)
+                {
+                    <tr>
+                        <td>@doc.DocumentType</td>
+                        <td>
+                            <MudTextField T="string" @bind-Value="doc.FooterText"
+                                          Variant="Variant.Outlined" Margin="Margin.Dense"
+                                          Style="min-width:200px" />
+                        </td>
+                        <td style="text-align:center">
+                            <MudSwitch T="bool" @bind-Value="doc.ShowRemarks"
+                                       Color="Color.Primary" />
+                        </td>
+                    </tr>
+                }
+            </tbody>
+        </MudSimpleTable>
+    </MudPaper>
+
+    @* ── 기본 설정 (용지, 여백, 빈 행) ── *@
+    <MudPaper Class="pa-4 mb-4" Elevation="1">
+        <MudText Typo="Typo.subtitle1" Class="mb-3">
+            <MudIcon Icon="@Icons.Material.Filled.Settings" Size="Size.Small" Class="mr-1" />
+            기본 설정
+        </MudText>
+
+        @* 용지 — A4 고정 *@
+        <MudGrid Class="mb-2">
+            <MudItem xs="12" sm="3">
+                <MudTextField T="string" Label="용지" Value="@("A4")" ReadOnly="true"
+                              Variant="Variant.Outlined" Margin="Margin.Dense" />
+            </MudItem>
+        </MudGrid>
+
+        @* 여백 설정 (mm) *@
+        <MudText Typo="Typo.body2" Class="mb-2">여백 (mm)</MudText>
+        <MudGrid Class="mb-3">
+            <MudItem xs="6" sm="3">
+                <MudNumericField T="int" Label="상" @bind-Value="_marginTop"
+                                 Variant="Variant.Outlined" Margin="Margin.Dense"
+                                 Min="0" Max="50" />
+            </MudItem>
+            <MudItem xs="6" sm="3">
+                <MudNumericField T="int" Label="하" @bind-Value="_marginBottom"
+                                 Variant="Variant.Outlined" Margin="Margin.Dense"
+                                 Min="0" Max="50" />
+            </MudItem>
+            <MudItem xs="6" sm="3">
+                <MudNumericField T="int" Label="좌" @bind-Value="_marginLeft"
+                                 Variant="Variant.Outlined" Margin="Margin.Dense"
+                                 Min="0" Max="50" />
+            </MudItem>
+            <MudItem xs="6" sm="3">
+                <MudNumericField T="int" Label="우" @bind-Value="_marginRight"
+                                 Variant="Variant.Outlined" Margin="Margin.Dense"
+                                 Min="0" Max="50" />
+            </MudItem>
+        </MudGrid>
+
+        @* 빈 행 표시 토글 *@
+        <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="2">
+            <MudText Typo="Typo.body2">빈 행 표시 (품목 아래 빈 행 표시 여부)</MudText>
+            <MudSwitch T="bool" @bind-Value="_showEmptyRows" Color="Color.Primary" />
+        </MudStack>
+    </MudPaper>
+
+    @* ── 저장 버튼 ── *@
+    <MudStack Row="true" Justify="Justify.FlexEnd">
+        <MudButton Variant="Variant.Filled" Color="Color.Primary"
+                   StartIcon="@Icons.Material.Filled.Save"
+                   OnClick="SaveSettings"
+                   Size="Size.Large">저장</MudButton>
+    </MudStack>
+</MudContainer>
+
+@code {
+    // ── 직인/로고 파일 상태 ──
+    private IBrowserFile? _sealFile;
+    private string? _sealFileName;
+    private IBrowserFile? _logoFile;
+    private string? _logoFileName;
+
+    // ── 문서별 설정 모델 ──
+    private List<DocumentPrintSetting> _documentSettings = new();
+
+    // ── 여백 기본값 (mm) ──
+    private int _marginTop = 15;
+    private int _marginBottom = 15;
+    private int _marginLeft = 15;
+    private int _marginRight = 15;
+
+    // ── 빈 행 표시 여부 ──
+    private bool _showEmptyRows = true;
+
+    /// <summary>
+    /// 초기화 시 문서별 기본 하단 문구를 세팅한다.
+    /// </summary>
+    protected override void OnInitialized()
+    {
+        _documentSettings = new List<DocumentPrintSetting>
+        {
+            new() { DocumentType = "견적서",    FooterText = "위 금액을 견적합니다",    ShowRemarks = true },
+            new() { DocumentType = "거래명세서", FooterText = "위 금액을 청구합니다",    ShowRemarks = true },
+            new() { DocumentType = "세금계산서", FooterText = "이 금액을 청구함",       ShowRemarks = true },
+            new() { DocumentType = "수주서",    FooterText = "위 금액을 수주합니다",    ShowRemarks = true },
+            new() { DocumentType = "발주서",    FooterText = "위 금액을 발주합니다",    ShowRemarks = true },
+            new() { DocumentType = "매입명세서", FooterText = "위 금액을 입고합니다",    ShowRemarks = true },
+        };
+    }
+
+    // ── 직인 파일 선택 ──
+    private void OnSealFileChanged(IBrowserFile file)
+    {
+        _sealFile = file;
+    }
+
+    // ── 직인 업로드 (현재 UI 전용 — 백엔드 API 미연동) ──
+    private void UploadSeal()
+    {
+        if (_sealFile is null) return;
+        _sealFileName = _sealFile.Name;
+        Snackbar.Add($"직인 이미지 '{_sealFileName}'가 선택되었습니다. (서버 업로드는 Phase 2)", Severity.Info);
+    }
+
+    // ── 직인 삭제 ──
+    private void DeleteSeal()
+    {
+        _sealFile = null;
+        _sealFileName = null;
+        Snackbar.Add("직인 이미지가 삭제되었습니다.", Severity.Info);
+    }
+
+    // ── 로고 파일 선택 ──
+    private void OnLogoFileChanged(IBrowserFile file)
+    {
+        _logoFile = file;
+    }
+
+    // ── 로고 업로드 (현재 UI 전용 — 백엔드 API 미연동) ──
+    private void UploadLogo()
+    {
+        if (_logoFile is null) return;
+        _logoFileName = _logoFile.Name;
+        Snackbar.Add($"로고 이미지 '{_logoFileName}'가 선택되었습니다. (서버 업로드는 Phase 2)", Severity.Info);
+    }
+
+    // ── 로고 삭제 ──
+    private void DeleteLogo()
+    {
+        _logoFile = null;
+        _logoFileName = null;
+        Snackbar.Add("로고 이미지가 삭제되었습니다.", Severity.Info);
+    }
+
+    /// <summary>
+    /// 설정 저장 — 현재 UI 전용이므로 스낵바 안내만 표시한다.
+    /// 백엔드 API 연동 시 실제 저장 로직으로 교체한다.
+    /// </summary>
+    private void SaveSettings()
+    {
+        Snackbar.Add("설정이 저장되었습니다.", Severity.Success);
+    }
+
+    /// <summary>
+    /// 문서별 인쇄 설정 내부 모델.
+    /// </summary>
+    private sealed class DocumentPrintSetting
+    {
+        // 문서 종류명
+        public string DocumentType { get; set; } = string.Empty;
+
+        // 하단 문구
+        public string FooterText { get; set; } = string.Empty;
+
+        // 비고 표시 여부
+        public bool ShowRemarks { get; set; } = true;
+    }
+}

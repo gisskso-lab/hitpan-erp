@@ -1,0 +1,11 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <RootNamespace>HitPan.Contracts</RootNamespace>
+    <Description>SharedKernel — DTO·계약 (Contract-First, DESIGN_PRINCIPLES §5.1). 의존성 없음.</Description>
+  </PropertyGroup>
+
+</Project>

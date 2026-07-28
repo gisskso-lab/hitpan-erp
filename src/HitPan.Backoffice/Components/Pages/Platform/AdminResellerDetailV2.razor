@@ -1,0 +1,241 @@
+@page "/admin/resellers/{ResellerId}"
+@layout PlatformLayout
+@attribute [Authorize]
+@rendermode InteractiveServer
+@inject IHttpClientFactory HttpFactory
+@inject ISnackbar Snackbar
+@inject NavigationManager Nav
+
+@*
+    협력업체 상세 V2 — 헌법 #35 백오피스 API(5258) 직접 호출 (사장님 결재 2026-06-04)
+    [BoPermission] resellers.detail
+    데이터: 본사 백오피스 DB resellers + tenants(영업 고객사 메타) 만
+*@
+
+<PageTitle>@(_item?.ResellerName ?? "협력업체 상세") — 히트판 백오피스</PageTitle>
+
+<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px;gap:12px;">
+    <div style="display:flex;align-items:center;gap:12px;">
+        <MudIconButton Icon="@Icons.Material.Filled.ArrowBack" Size="Size.Medium"
+                       OnClick='() => Nav.NavigateTo("/admin/resellers")' />
+        <div>
+            <MudText Typo="Typo.h5" Style="font-weight:600;">@(_item?.ResellerName ?? "로딩 중...")</MudText>
+            <MudText Typo="Typo.body2" Color="Color.Secondary">
+                @(_item?.ResellerCode) · 가입 @(_item?.JoinDate?.ToString("yyyy-MM-dd") ?? "-")
+            </MudText>
+        </div>
+    </div>
+</div>
+
+@if (_loading)
+{
+    <MudProgressLinear Indeterminate="true" Color="Color.Primary" />
+}
+else if (_item is null)
+{
+    <MudPaper Elevation="0" Class="pa-8" Style="border-radius:12px;background:#F9FAFB;text-align:center;">
+        <MudText Color="Color.Secondary">협력업체를 찾을 수 없습니다.</MudText>
+    </MudPaper>
+}
+else
+{
+    <MudGrid Spacing="3">
+        <MudItem xs="12" md="6">
+            <MudPaper Elevation="1" Class="pa-4" Style="border-radius:12px;height:100%;">
+                <MudText Typo="Typo.h6" Class="mb-3" Style="color:#0F6E56;">사업자 정보</MudText>
+                @RowText("협력업체 코드", _item.ResellerCode)
+                @RowText("회사명", _item.ResellerName)
+                @RowText("사업자등록번호", _item.BizNo ?? "-")
+                @RowText("대표자명", _item.CeoName ?? "-")
+                @RowText("연락처", _item.Tel ?? "-")
+                @RowText("주소", _item.Address ?? "-")
+                <div class="bo-row">
+                    <div class="bo-row-label">상태</div>
+                    <div class="bo-row-value">
+                        <MudChip T="string" Size="Size.Small" Color="@StatusColor(_item.Status)">
+                            @StatusLabel(_item.Status)
+                        </MudChip>
+                    </div>
+                </div>
+            </MudPaper>
+        </MudItem>
+
+        <MudItem xs="12" md="6">
+            <MudPaper Elevation="1" Class="pa-4" Style="border-radius:12px;height:100%;">
+                <MudText Typo="Typo.h6" Class="mb-3" Style="color:#0F6E56;">담당자 · 정산</MudText>
+                @RowText("담당자", _item.ContactPerson ?? "-")
+                @RowText("담당자 이메일", _item.ContactEmail ?? "-")
+                @RowText("담당자 연락처", _item.ContactPhone ?? "-")
+                @RowText("정산 은행", _item.BankName ?? "-")
+                @RowText("예금주", _item.AccountHolder ?? "-")
+                @RowText("영업 고객사 수", $"{_item.TenantCount}곳")
+            </MudPaper>
+        </MudItem>
+
+        <MudItem xs="12">
+            <MudPaper Elevation="1" Class="pa-4" Style="border-radius:12px;">
+                <MudText Typo="Typo.h6" Class="mb-3" Style="color:#0F6E56;">영업 고객사 (최근 20건)</MudText>
+                @if (_tenants is null || _tenants.Count == 0)
+                {
+                    <MudText Color="Color.Secondary">영업 고객사가 없습니다.</MudText>
+                }
+                else
+                {
+                    <MudSimpleTable Dense="true" Hover="true">
+                        <thead>
+                            <tr>
+                                <th>코드</th>
+                                <th>회사명</th>
+                                <th>상태</th>
+                                <th>구독</th>
+                                <th>가입일</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                        @foreach (var t in _tenants)
+                        {
+                            <tr>
+                                <td>
+                                    <MudLink Href="@($"/admin/tenants/{t.TenantId}")" Underline="Underline.Hover">
+                                        @t.TenantCode
+                                    </MudLink>
+                                </td>
+                                <td>
+                                    <MudLink Href="@($"/admin/tenants/{t.TenantId}")" Underline="Underline.Hover" Color="Color.Inherit">
+                                        @t.CompanyName
+                                    </MudLink>
+                                </td>
+                                <td>
+                                    <MudChip T="string" Size="Size.Small" Color="@TenantStatusColor(t.Status)">@TenantStatusLabel(t.Status)</MudChip>
+                                </td>
+                                <td>@(t.SubscriptionTier ?? "-")</td>
+                                <td style="font-size:12px;color:#6B7280;">@t.CreatedAt.ToString("yyyy-MM-dd")</td>
+                            </tr>
+                        }
+                        </tbody>
+                    </MudSimpleTable>
+                }
+            </MudPaper>
+        </MudItem>
+    </MudGrid>
+}
+
+@code {
+    [Parameter] public string ResellerId { get; set; } = "";
+
+    private ResellerDetail? _item;
+    private List<TenantBrief>? _tenants;
+    private bool _loading = true;
+
+    protected override async Task OnInitializedAsync() => await LoadAsync();
+
+    private async Task LoadAsync()
+    {
+        _loading = true;
+        try
+        {
+            var http = HttpFactory.CreateClient("backoffice-authed");
+            var res = await http.GetFromJsonAsync<DetailResponse>($"api/backoffice/resellers/{ResellerId}");
+            _item = res?.Item;
+            _tenants = res?.Tenants?.ToList();
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"상세 조회 실패: {ex.Message}", Severity.Error);
+            _item = null;
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    private static string StatusLabel(string s) => s switch
+    {
+        "active" => "활성",
+        "suspended" => "정지",
+        "inactive" => "비활성",
+        "terminated" => "해지",
+        _ => s
+    };
+
+    private static Color StatusColor(string s) => s switch
+    {
+        "active" => Color.Success,
+        "suspended" => Color.Warning,
+        "inactive" => Color.Default,
+        "terminated" => Color.Error,
+        _ => Color.Default
+    };
+
+    private static string TenantStatusLabel(string s) => s switch
+    {
+        "pending" => "대기",
+        "active" => "활성",
+        "suspended" => "정지",
+        "trial" => "체험",
+        "inactive" => "비활성",
+        _ => s
+    };
+
+    private static Color TenantStatusColor(string s) => s switch
+    {
+        "pending" => Color.Warning,
+        "active" => Color.Success,
+        "suspended" => Color.Error,
+        "trial" => Color.Info,
+        _ => Color.Default
+    };
+
+    private RenderFragment RowText(string label, string? value) => __builder =>
+    {
+        <div class="bo-row">
+            <div class="bo-row-label">@label</div>
+            <div class="bo-row-value">@value</div>
+        </div>
+    };
+
+    public class ResellerDetail
+    {
+        public string ResellerId { get; set; } = "";
+        public string ResellerCode { get; set; } = "";
+        public string ResellerName { get; set; } = "";
+        public string? BizNo { get; set; }
+        public string? CeoName { get; set; }
+        public string? Tel { get; set; }
+        public string? Address { get; set; }
+        public string? BankName { get; set; }
+        public string? AccountHolder { get; set; }
+        public string? ContactPerson { get; set; }
+        public string? ContactPhone { get; set; }
+        public string? ContactEmail { get; set; }
+        public string Status { get; set; } = "";
+        public DateTime? JoinDate { get; set; }
+        public DateTime CreatedAt { get; set; }
+        public DateTime UpdatedAt { get; set; }
+        public int TenantCount { get; set; }
+    }
+
+    public class TenantBrief
+    {
+        public string TenantId { get; set; } = "";
+        public string TenantCode { get; set; } = "";
+        public string CompanyName { get; set; } = "";
+        public string Status { get; set; } = "";
+        public string? SubscriptionTier { get; set; }
+        public DateTime CreatedAt { get; set; }
+    }
+
+    private class DetailResponse
+    {
+        public bool Success { get; set; }
+        public ResellerDetail? Item { get; set; }
+        public List<TenantBrief>? Tenants { get; set; }
+    }
+}
+
+<style>
+    .bo-row { display: flex; align-items: center; padding: 8px 0; border-bottom: 1px solid #F3F4F6; }
+    .bo-row-label { width: 140px; font-size: 13px; color: #6B7280; }
+    .bo-row-value { flex: 1; font-size: 14px; }
+</style>

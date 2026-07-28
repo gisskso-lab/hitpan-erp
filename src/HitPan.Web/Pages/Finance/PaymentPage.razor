@@ -1,0 +1,495 @@
+@page "/payments"
+@namespace HitPan.Web.Pages.FinanceUi
+@attribute [Authorize]
+@using HitPan.Web.Models
+@using HitPan.Web.Services
+@inject CollectionPaymentService CollSvc
+@inject ISnackbar Snackbar
+@inject NavigationManager Nav
+
+<PageTitle>지급</PageTitle>
+
+<PageHeader Title="지급 관리" Subtitle="거래처별 미지급금 → 전표 매칭 → 지급 처리">
+    <Actions>
+        <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Refresh" OnClick="ReloadAsync">새로고침</MudButton>
+        <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.History" OnClick="ToggleHistory">@(_showHistory ? "미지급금 보기" : "지급 이력 보기")</MudButton>
+    </Actions>
+</PageHeader>
+
+@if (_loading)
+{
+    <MudProgressLinear Indeterminate="true" Color="Color.Primary" />
+}
+else if (!_showHistory)
+{
+    <MudGrid Spacing="2" Class="mb-3">
+        <MudItem xs="12" sm="4">
+            <KpiCard Color="KpiCard.KpiColor.Warning"
+                     Icon="@Icons.Material.Filled.AccountBalance"
+                     Label="총 미지급금"
+                     Value="@_totalOutstanding.ToString("N0")" />
+        </MudItem>
+        <MudItem xs="12" sm="4">
+            <KpiCard Color="KpiCard.KpiColor.Info"
+                     Icon="@Icons.Material.Filled.People"
+                     Label="미지급 거래처"
+                     Value="@_payables.Summary.Count.ToString("N0")" />
+        </MudItem>
+        <MudItem xs="12" sm="4">
+            <KpiCard Color="KpiCard.KpiColor.Error"
+                     Icon="@Icons.Material.Filled.Warning"
+                     Label="연체 거래처 (61일+)"
+                     Value="@_overdueCount.ToString("N0")" />
+        </MudItem>
+    </MudGrid>
+
+    <SectionCard Title="거래처별 미지급금" Icon="@Icons.Material.Filled.AccountBalance">
+        <MudTable Items="_payables.Summary" Dense="true" Hover="true" T="PayableSummaryModel">
+            <HeaderContent>
+                <MudTh>거래처</MudTh>
+                <MudTh Style="text-align:right">미지급금</MudTh>
+                <MudTh Style="text-align:right">0~30일</MudTh>
+                <MudTh Style="text-align:right">31~60일</MudTh>
+                <MudTh Style="text-align:right">61~90일</MudTh>
+                <MudTh Style="text-align:right">90일+</MudTh>
+                <MudTh Style="text-align:center">연체</MudTh>
+                <MudTh Style="text-align:center;width:120px">처리</MudTh>
+            </HeaderContent>
+            <RowTemplate>
+                <MudTd><strong>@context.PartnerName</strong></MudTd>
+                <MudTd Style="text-align:right"><strong>@context.Outstanding.ToString("N0")</strong></MudTd>
+                <MudTd Style="text-align:right">@context.Aging0_30.ToString("N0")</MudTd>
+                <MudTd Style="text-align:right">@context.Aging31_60.ToString("N0")</MudTd>
+                <MudTd Style="text-align:right">@(context.Aging61_90 > 0 ? context.Aging61_90.ToString("N0") : "0")</MudTd>
+                <MudTd Style="text-align:right">@(context.Aging90Plus > 0 ? context.Aging90Plus.ToString("N0") : "0")</MudTd>
+                <MudTd Style="text-align:center">
+                    @if (context.IsOverdue)
+                    {
+                        <MudChip T="string" Color="Color.Error" Size="Size.Small">연체</MudChip>
+                    }
+                    else
+                    {
+                        <MudChip T="string" Color="Color.Success" Size="Size.Small">정상</MudChip>
+                    }
+                </MudTd>
+                <MudTd Style="text-align:center">
+                    <MudButton Variant="Variant.Filled" Color="Color.Primary" Size="Size.Small"
+                               OnClick="@(() => OpenDocsDialog(context))">전표 보기</MudButton>
+                </MudTd>
+            </RowTemplate>
+            <NoRecordsContent>
+                <EmptyState Icon="@Icons.Material.Filled.CheckCircle"
+                            Title="미지급금 없음"
+                            Subtitle="모든 거래처의 미지급금이 처리되었습니다." />
+            </NoRecordsContent>
+        </MudTable>
+    </SectionCard>
+}
+else
+{
+    <SectionCard Title="지급 이력" Icon="@Icons.Material.Filled.Receipt">
+        <MudTable Items="_history" Dense="true" Hover="true" T="PaymentModel">
+            <HeaderContent>
+                <MudTh>지급일</MudTh>
+                <MudTh>거래처</MudTh>
+                <MudTh Style="text-align:right">지급액</MudTh>
+                <MudTh>지급수단</MudTh>
+                <MudTh>참조 전표</MudTh>
+                <MudTh>비고</MudTh>
+            </HeaderContent>
+            <RowTemplate>
+                <MudTd>@context.PaymentDate.ToString("yyyy-MM-dd")</MudTd>
+                <MudTd>@context.PartnerName</MudTd>
+                <MudTd Style="text-align:right">@context.Amount.ToString("N0")원</MudTd>
+                <MudTd>@context.PaymentMethodLabel</MudTd>
+                <MudTd>
+                    @if (!string.IsNullOrEmpty(context.RefOrderId))
+                    {
+                        <MudChip T="string" Size="Size.Small" Color="Color.Info" Variant="Variant.Outlined">매입전표</MudChip>
+                    }
+                </MudTd>
+                <MudTd>@context.Memo</MudTd>
+            </RowTemplate>
+            <NoRecordsContent>
+                <EmptyState Icon="@Icons.Material.Filled.Receipt"
+                            Title="지급 이력 없음"
+                            Subtitle="아직 처리된 지급이 없습니다." />
+            </NoRecordsContent>
+        </MudTable>
+    </SectionCard>
+}
+
+@* === 전표 펼침 다이얼로그 === *@
+<MudDialog @bind-Visible="_docsDialogVisible" Options="@(new DialogOptions { MaxWidth = MaxWidth.Large, FullWidth = true })">
+    <TitleContent>
+        <MudText Typo="Typo.h6">@_dialogPartnerName 미지급 전표</MudText>
+    </TitleContent>
+    <DialogContent>
+        <MudTable Items="_dialogDocs" Dense="true" Hover="true" T="PayableDocumentModel">
+            <HeaderContent>
+                <MudTh Style="width:40px">
+                    <MudCheckBox T="bool" Value="_allChecked" ValueChanged="OnAllCheckedChanged" Dense="true" />
+                </MudTh>
+                <MudTh>전표번호</MudTh>
+                <MudTh>일자</MudTh>
+                <MudTh Style="text-align:right">금액(부가세포함)</MudTh>
+                <MudTh Style="text-align:right">기지급</MudTh>
+                <MudTh Style="text-align:right">미지급잔액</MudTh>
+                <MudTh Style="text-align:center">경과</MudTh>
+                <MudTh Style="text-align:center;width:120px">지급처리</MudTh>
+            </HeaderContent>
+            <RowTemplate>
+                <MudTd>
+                    <MudCheckBox T="bool" Value="_checkedDocIds.Contains(context.ReceiptId)"
+                                 ValueChanged="@((bool v) => OnDocCheckedChanged(context.ReceiptId, v))" Dense="true" />
+                </MudTd>
+                <MudTd><strong>@context.ReceiptNo</strong></MudTd>
+                <MudTd>@context.ReceiptDate.ToString("yyyy-MM-dd")</MudTd>
+                <MudTd Style="text-align:right">@context.TotalWithVat.ToString("N0")</MudTd>
+                <MudTd Style="text-align:right">@context.Paid.ToString("N0")</MudTd>
+                <MudTd Style="text-align:right"><strong>@context.Outstanding.ToString("N0")</strong></MudTd>
+                <MudTd Style="text-align:center">@AgingLabel(context.AgingBucket)</MudTd>
+                <MudTd Style="text-align:center">
+                    <MudButton Variant="Variant.Filled" Color="Color.Success" Size="Size.Small"
+                               OnClick="@(() => OpenPayDialog(context))">지급</MudButton>
+                </MudTd>
+            </RowTemplate>
+        </MudTable>
+
+        @if (_checkedDocIds.Count > 0)
+        {
+            <MudPaper Elevation="0" Class="pa-3 mt-3" Style="background:#FFF7ED;border:0.5px solid #FB923C;border-radius:8px">
+                <div class="d-flex align-center justify-space-between">
+                    <MudText Typo="Typo.body1">
+                        <strong>선택된 @_checkedDocIds.Count 건</strong>
+                        <span style="color:#6B7280;margin-left:8px">합계 <strong style="color:#0F6E56">@CheckedTotal.ToString("N0")원</strong></span>
+                    </MudText>
+                    <MudButton Variant="Variant.Filled" Color="Color.Warning"
+                               StartIcon="@Icons.Material.Filled.DoneAll"
+                               OnClick="OpenBulkPayDialog">일괄 지급처리</MudButton>
+                </div>
+            </MudPaper>
+        }
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="CloseDocsDialog">닫기</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@* === 일괄 지급 처리 다이얼로그 === *@
+<MudDialog @bind-Visible="_bulkDialogVisible" Options="@(new DialogOptions { MaxWidth = MaxWidth.Medium, FullWidth = true })">
+    <TitleContent>
+        <MudText Typo="Typo.h6">일괄 지급 처리 — @_dialogPartnerName</MudText>
+    </TitleContent>
+    <DialogContent>
+        <MudPaper Elevation="0" Class="pa-3 mb-3" Style="background:#F8FAFC;border:0.5px solid var(--mud-palette-lines-default);border-radius:8px">
+            <MudText Typo="Typo.body2" Style="color:#6B7280">선택된 전표</MudText>
+            <MudText Typo="Typo.body1" Class="mb-2"><strong>@_checkedDocIds.Count 건</strong></MudText>
+            <MudText Typo="Typo.body2" Style="color:#6B7280">총 지급 금액</MudText>
+            <MudText Typo="Typo.h5" Style="color:#0F6E56"><strong>@CheckedTotal.ToString("N0")원</strong></MudText>
+        </MudPaper>
+
+        <MudTable Items="_dialogDocs.Where(d => _checkedDocIds.Contains(d.ReceiptId))" Dense="true" T="PayableDocumentModel" Class="mb-3">
+            <HeaderContent>
+                <MudTh>전표번호</MudTh>
+                <MudTh>일자</MudTh>
+                <MudTh Style="text-align:right">미지급잔액(전액 지급)</MudTh>
+            </HeaderContent>
+            <RowTemplate>
+                <MudTd>@context.ReceiptNo</MudTd>
+                <MudTd>@context.ReceiptDate.ToString("yyyy-MM-dd")</MudTd>
+                <MudTd Style="text-align:right"><strong>@context.Outstanding.ToString("N0")</strong></MudTd>
+            </RowTemplate>
+        </MudTable>
+
+        <MudGrid Spacing="2">
+            <MudItem xs="12" sm="6">
+                <MudDatePicker Label="지급일자 (모두 동일)" @bind-Date="_bulkDate" Variant="Variant.Outlined" Margin="Margin.Dense" />
+            </MudItem>
+            <MudItem xs="12" sm="6">
+                <MudSelect T="string" Label="결제수단 (모두 동일)" @bind-Value="_bulkMethod" Variant="Variant.Outlined" Margin="Margin.Dense">
+                    <MudSelectItem Value="@("cash")">현금</MudSelectItem>
+                    <MudSelectItem Value="@("bank_transfer")">계좌이체</MudSelectItem>
+                    <MudSelectItem Value="@("card")">카드</MudSelectItem>
+                    <MudSelectItem Value="@("note")">어음</MudSelectItem>
+                    <MudSelectItem Value="@("check")">수표</MudSelectItem>
+                </MudSelect>
+            </MudItem>
+            <MudItem xs="12">
+                <MudTextField T="string" Label="메모 (선택, 모두 동일)" @bind-Value="_bulkMemo" Variant="Variant.Outlined" Margin="Margin.Dense" />
+            </MudItem>
+        </MudGrid>
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="CloseBulkPayDialog">취소</MudButton>
+        <MudButton Variant="Variant.Filled" Color="Color.Warning" OnClick="ProcessBulkPayAsync" Disabled="_processing">
+            @($"일괄 지급 처리 ({_checkedDocIds.Count}건)")
+        </MudButton>
+    </DialogActions>
+</MudDialog>
+
+@* === 지급 처리 다이얼로그 === *@
+<MudDialog @bind-Visible="_payDialogVisible" Options="@(new DialogOptions { MaxWidth = MaxWidth.Small, FullWidth = true })">
+    <TitleContent>
+        <MudText Typo="Typo.h6">지급 처리</MudText>
+    </TitleContent>
+    <DialogContent>
+        @if (_targetDoc is not null)
+        {
+            <MudPaper Elevation="0" Class="pa-3 mb-3" Style="background:#F8FAFC;border:0.5px solid var(--mud-palette-lines-default);border-radius:8px">
+                <MudText Typo="Typo.body2" Style="color:#6B7280">거래처</MudText>
+                <MudText Typo="Typo.body1" Class="mb-2"><strong>@_dialogPartnerName</strong></MudText>
+                <MudText Typo="Typo.body2" Style="color:#6B7280">전표</MudText>
+                <MudText Typo="Typo.body1" Class="mb-2"><strong>@_targetDoc.ReceiptNo</strong> (@_targetDoc.ReceiptDate.ToString("yyyy-MM-dd"))</MudText>
+                <MudText Typo="Typo.body2" Style="color:#6B7280">미지급 잔액</MudText>
+                <MudText Typo="Typo.h6" Style="color:#0F6E56"><strong>@_targetDoc.Outstanding.ToString("N0")원</strong></MudText>
+            </MudPaper>
+
+            <MudGrid Spacing="2">
+                <MudItem xs="12" sm="6">
+                    <MudNumericField T="decimal" Label="지급 금액" @bind-Value="_payAmount" Variant="Variant.Outlined" Margin="Margin.Dense" Format="N0" Max="_targetDoc.Outstanding" />
+                </MudItem>
+                <MudItem xs="12" sm="6">
+                    <MudDatePicker Label="지급일자" @bind-Date="_payDate" Variant="Variant.Outlined" Margin="Margin.Dense" />
+                </MudItem>
+                <MudItem xs="12" sm="6">
+                    <MudSelect T="string" Label="결제수단" @bind-Value="_payMethod" Variant="Variant.Outlined" Margin="Margin.Dense">
+                        <MudSelectItem Value="@("cash")">현금</MudSelectItem>
+                        <MudSelectItem Value="@("bank_transfer")">계좌이체</MudSelectItem>
+                        <MudSelectItem Value="@("card")">카드</MudSelectItem>
+                        <MudSelectItem Value="@("note")">어음</MudSelectItem>
+                        <MudSelectItem Value="@("check")">수표</MudSelectItem>
+                    </MudSelect>
+                </MudItem>
+                <MudItem xs="12">
+                    <MudTextField T="string" Label="메모(선택)" @bind-Value="_payMemo" Variant="Variant.Outlined" Margin="Margin.Dense" />
+                </MudItem>
+            </MudGrid>
+        }
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="ClosePayDialog">취소</MudButton>
+        <MudButton Variant="Variant.Filled" Color="Color.Success" OnClick="ProcessPayAsync" Disabled="_processing">지급 처리</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    private bool _loading = true;
+    private bool _processing;
+    private bool _showHistory;
+
+    private PayablesResponseModel _payables = new();
+    private decimal _totalOutstanding;
+    private int _overdueCount;
+
+    private List<PaymentModel> _history = new();
+
+    private bool _docsDialogVisible;
+    private string _dialogPartnerId = "";
+    private string _dialogPartnerName = "";
+    private List<PayableDocumentModel> _dialogDocs = new();
+
+    private bool _payDialogVisible;
+    private PayableDocumentModel? _targetDoc;
+    private decimal _payAmount;
+    private DateTime? _payDate = DateTime.Today;
+    private string _payMethod = "cash";
+    private string _payMemo = "";
+
+    // 일괄 지급 처리
+    private HashSet<string> _checkedDocIds = new();
+    private bool _allChecked;
+    private bool _bulkDialogVisible;
+    private DateTime? _bulkDate = DateTime.Today;
+    private string _bulkMethod = "cash";
+    private string _bulkMemo = "";
+
+    private decimal CheckedTotal => _dialogDocs
+        .Where(d => _checkedDocIds.Contains(d.ReceiptId))
+        .Sum(d => d.Outstanding);
+
+    protected override async Task OnInitializedAsync()
+    {
+        await ReloadAsync();
+        var uri = Nav.ToAbsoluteUri(Nav.Uri);
+        var qs = System.Web.HttpUtility.ParseQueryString(uri.Query);
+        var partnerId = qs["partner"];
+        if (!string.IsNullOrEmpty(partnerId))
+        {
+            var summary = _payables.Summary.FirstOrDefault(s => s.PartnerId == partnerId);
+            if (summary is not null)
+            {
+                OpenDocsDialog(summary);
+            }
+        }
+    }
+
+    private async Task ReloadAsync()
+    {
+        _loading = true;
+        StateHasChanged();
+        _payables = await CollSvc.GetPayablesAsync();
+        _totalOutstanding = _payables.Summary.Sum(s => s.Outstanding);
+        _overdueCount = _payables.Summary.Count(s => s.IsOverdue);
+        _loading = false;
+    }
+
+    private async Task ToggleHistory()
+    {
+        _showHistory = !_showHistory;
+        if (_showHistory)
+        {
+            _loading = true;
+            StateHasChanged();
+            _history = await CollSvc.GetPaymentsAsync();
+            _loading = false;
+        }
+    }
+
+    private void OpenDocsDialog(PayableSummaryModel summary)
+    {
+        _dialogPartnerId = summary.PartnerId;
+        _dialogPartnerName = summary.PartnerName;
+        _dialogDocs = _payables.Documents.Where(d => d.PartnerId == summary.PartnerId).ToList();
+        _checkedDocIds.Clear();
+        _allChecked = false;
+        _docsDialogVisible = true;
+    }
+
+    private void CloseDocsDialog()
+    {
+        _docsDialogVisible = false;
+        _checkedDocIds.Clear();
+        _allChecked = false;
+    }
+
+    private void OnAllCheckedChanged(bool value)
+    {
+        _allChecked = value;
+        if (value) _checkedDocIds = _dialogDocs.Select(d => d.ReceiptId).ToHashSet();
+        else _checkedDocIds.Clear();
+    }
+
+    private void OnDocCheckedChanged(string receiptId, bool value)
+    {
+        if (value) _checkedDocIds.Add(receiptId);
+        else _checkedDocIds.Remove(receiptId);
+        _allChecked = _checkedDocIds.Count == _dialogDocs.Count && _dialogDocs.Count > 0;
+    }
+
+    private void OpenBulkPayDialog()
+    {
+        _bulkDate = DateTime.Today;
+        _bulkMethod = "cash";
+        _bulkMemo = "";
+        _bulkDialogVisible = true;
+    }
+
+    private void CloseBulkPayDialog() => _bulkDialogVisible = false;
+
+    private async Task ProcessBulkPayAsync()
+    {
+        if (_checkedDocIds.Count == 0) { Snackbar.Add("선택된 전표가 없습니다.", Severity.Warning); return; }
+
+        _processing = true;
+        try
+        {
+            var targets = _dialogDocs.Where(d => _checkedDocIds.Contains(d.ReceiptId)).ToList();
+            int success = 0, fail = 0;
+            foreach (var doc in targets)
+            {
+                var model = new CreatePaymentModel
+                {
+                    PartnerId = _dialogPartnerId,
+                    PaymentDate = _bulkDate ?? DateTime.Today,
+                    Amount = doc.Outstanding,
+                    PaymentMethod = _bulkMethod,
+                    PaymentType = "purchase",
+                    RefOrderId = doc.ReceiptId,
+                    Memo = _bulkMemo
+                };
+                var ok = await CollSvc.CreatePaymentAsync(model);
+                if (ok) success++; else fail++;
+            }
+
+            if (fail == 0)
+            {
+                Snackbar.Add($"{success}건 일괄 지급 처리되었습니다 (합계 {CheckedTotal:N0}원).", Severity.Success);
+            }
+            else
+            {
+                Snackbar.Add($"{success}건 성공, {fail}건 실패.", Severity.Warning);
+            }
+            CloseBulkPayDialog();
+            CloseDocsDialog();
+            await ReloadAsync();
+        }
+        finally
+        {
+            _processing = false;
+        }
+    }
+
+    private void OpenPayDialog(PayableDocumentModel doc)
+    {
+        _targetDoc = doc;
+        _payAmount = doc.Outstanding;
+        _payDate = DateTime.Today;
+        _payMethod = "cash";
+        _payMemo = "";
+        _payDialogVisible = true;
+    }
+
+    private void ClosePayDialog()
+    {
+        _payDialogVisible = false;
+        _targetDoc = null;
+    }
+
+    private async Task ProcessPayAsync()
+    {
+        if (_targetDoc is null) return;
+        if (_payAmount <= 0) { Snackbar.Add("지급 금액을 입력해주세요.", Severity.Warning); return; }
+        if (_payAmount > _targetDoc.Outstanding) { Snackbar.Add("미지급 잔액보다 큰 금액은 처리할 수 없습니다.", Severity.Warning); return; }
+
+        _processing = true;
+        try
+        {
+            var model = new CreatePaymentModel
+            {
+                PartnerId = _dialogPartnerId,
+                PaymentDate = _payDate ?? DateTime.Today,
+                Amount = _payAmount,
+                PaymentMethod = _payMethod,
+                PaymentType = "purchase",
+                RefOrderId = _targetDoc.ReceiptId,
+                Memo = _payMemo
+            };
+            var ok = await CollSvc.CreatePaymentAsync(model);
+            if (ok)
+            {
+                Snackbar.Add($"{_payAmount:N0}원 지급 처리되었습니다.", Severity.Success);
+                ClosePayDialog();
+                CloseDocsDialog();
+                await ReloadAsync();
+            }
+            else
+            {
+                Snackbar.Add("지급 처리에 실패했습니다.", Severity.Error);
+            }
+        }
+        finally
+        {
+            _processing = false;
+        }
+    }
+
+    private static string AgingLabel(string bucket) => bucket switch
+    {
+        "0_30" => "정상",
+        "31_60" => "주의",
+        "61_90" => "연체",
+        "90_plus" => "장기연체",
+        _ => bucket
+    };
+}

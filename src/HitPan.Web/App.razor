@@ -1,0 +1,68 @@
+﻿@using HitPan.Web.Components
+@using HitPan.Web.Layout
+@using Microsoft.AspNetCore.Components.Authorization
+@using MudBlazor
+
+<MudThemeProvider Theme="_hitPanTheme" DefaultScrollbar="true" />
+<MudPopoverProvider />
+<MudDialogProvider />
+<MudSnackbarProvider />
+<CascadingAuthenticationState>
+    <Router AppAssembly="@typeof(App).Assembly">
+        <Found Context="routeData">
+            <AuthorizeRouteView RouteData="@routeData" DefaultLayout="@typeof(MainLayout)">
+                <NotAuthorized>
+                    <LayoutView Layout="@typeof(EmptyLayout)">
+                        <RedirectToLogin />
+                    </LayoutView>
+                </NotAuthorized>
+            </AuthorizeRouteView>
+            <FocusOnNavigate RouteData="@routeData" Selector="h1" />
+        </Found>
+        <NotFound>
+            <LayoutView Layout="@typeof(EmptyLayout)">
+                <p>페이지를 찾을 수 없습니다.</p>
+            </LayoutView>
+        </NotFound>
+    </Router>
+</CascadingAuthenticationState>
+
+@code {
+    // 토스 B 컨셉 (사장님 결재 2026-04-29)
+    // — Primary는 히트판 그린 #0F6E56 유지 (브랜드 정체성)
+    // — Pretendard로 교체 (한글 트렌디·가독성 1위, 토스 표준)
+    // — 폴백: Apple SD Gothic Neo → Noto Sans KR → sans-serif (안전망)
+    // — 색·간격·라운드 등 세부 토큰은 wwwroot/css/design-tokens.css 가 일괄 관리
+    private static readonly string[] _fontFamily = new[]
+    {
+        "Pretendard Variable", "Pretendard",
+        "-apple-system", "BlinkMacSystemFont",
+        "Apple SD Gothic Neo", "Noto Sans KR",
+        "Inter", "Helvetica Neue", "Arial", "sans-serif"
+    };
+
+    private readonly MudTheme _hitPanTheme = new()
+    {
+        PaletteLight = new PaletteLight
+        {
+            Primary = "#0F6E56",
+            Secondary = "#0F6E56",
+            AppbarBackground = "#0F6E56",
+            AppbarText = "#FFFFFF",
+            Error = "#A32D2D",
+        },
+        Typography = new Typography
+        {
+            Default = new DefaultTypography { FontFamily = _fontFamily },
+            Body1 = new Body1Typography { FontFamily = _fontFamily },
+            Body2 = new Body2Typography { FontFamily = _fontFamily },
+            Button = new ButtonTypography { FontFamily = _fontFamily },
+            H1 = new H1Typography { FontFamily = _fontFamily },
+            H2 = new H2Typography { FontFamily = _fontFamily },
+            H3 = new H3Typography { FontFamily = _fontFamily },
+            H4 = new H4Typography { FontFamily = _fontFamily },
+            H5 = new H5Typography { FontFamily = _fontFamily },
+            H6 = new H6Typography { FontFamily = _fontFamily },
+        },
+    };
+}

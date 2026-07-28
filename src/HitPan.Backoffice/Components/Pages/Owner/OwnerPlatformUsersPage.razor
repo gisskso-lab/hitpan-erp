@@ -1,0 +1,76 @@
+@*
+    Owner 전용 본사 직원 사용자 관리 허브 (사장님 결재 2026-06-05, 헌법 #35)
+    W11 백엔드 + W11/W9 화면 5개 신설 완료 — 본 페이지는 안내·이동 허브로 정정.
+*@
+
+@page "/owner/users"
+@page "/owner/platform-users"
+@layout PlatformLayout
+@attribute [Authorize(Policy = "OwnerOnly")]
+@inject NavigationManager Nav
+
+<PageTitle>본사 직원 관리 — 히트판 백오피스 (Owner)</PageTitle>
+
+<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px;">
+    <div>
+        <MudText Typo="Typo.h5" Style="font-weight:600;">본사 직원 관리</MudText>
+        <MudText Typo="Typo.body2" Color="Color.Secondary">
+            Owner 전용 — bo_users CRUD + 4-eyes 결재 인프라 신설 대기 (W11)
+        </MudText>
+    </div>
+</div>
+
+<MudAlert Severity="Severity.Success" Class="mb-4" Dense="true" Icon="@Icons.Material.Filled.CheckCircle">
+    W11 백엔드 + W11/W9 화면 5개 신설 완료 (2026-06-05). 아래에서 원하는 영역으로 이동하세요.
+</MudAlert>
+
+<MudGrid Spacing="3">
+    <MudItem xs="12" md="6">
+        <MudPaper Class="pa-4" Elevation="1" Style="border-radius:12px;cursor:pointer;"
+                  @onclick='() => Nav.NavigateTo("/admin/bo-users")'>
+            <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px;">
+                <MudIcon Icon="@Icons.Material.Filled.People" Color="Color.Primary" />
+                <MudText Typo="Typo.h6">Owner 사용자 관리</MudText>
+            </div>
+            <MudText Typo="Typo.body2" Color="Color.Secondary">
+                bo_users CRUD · 4-eyes 결재 (생성·삭제는 다른 Owner 1명 승인 필요)
+            </MudText>
+        </MudPaper>
+    </MudItem>
+    <MudItem xs="12" md="6">
+        <MudPaper Class="pa-4" Elevation="1" Style="border-radius:12px;cursor:pointer;"
+                  @onclick='() => Nav.NavigateTo("/admin/approvals")'>
+            <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px;">
+                <MudIcon Icon="@Icons.Material.Filled.HowToReg" Color="Color.Info" />
+                <MudText Typo="Typo.h6">4-eyes 결재함</MudText>
+            </div>
+            <MudText Typo="Typo.body2" Color="Color.Secondary">
+                대기·승인·반려 결재 — 요청자 본인은 승인 불가
+            </MudText>
+        </MudPaper>
+    </MudItem>
+    <MudItem xs="12" md="6">
+        <MudPaper Class="pa-4" Elevation="1" Style="border-radius:12px;cursor:pointer;"
+                  @onclick='() => Nav.NavigateTo("/admin/mfa-setup")'>
+            <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px;">
+                <MudIcon Icon="@Icons.Material.Filled.Security" Color="Color.Warning" />
+                <MudText Typo="Typo.h6">MFA 등록</MudText>
+            </div>
+            <MudText Typo="Typo.body2" Color="Color.Secondary">
+                TOTP 등록 · 백업 코드 발급 · 시크릿 AES-256 저장
+            </MudText>
+        </MudPaper>
+    </MudItem>
+    <MudItem xs="12" md="6">
+        <MudPaper Class="pa-4" Elevation="1" Style="border-radius:12px;cursor:pointer;"
+                  @onclick='() => Nav.NavigateTo("/owner/permissions")'>
+            <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px;">
+                <MudIcon Icon="@Icons.Material.Filled.VpnKey" Color="Color.Default" />
+                <MudText Typo="Typo.h6">권한 관리</MudText>
+            </div>
+            <MudText Typo="Typo.body2" Color="Color.Secondary">
+                bo_permissions 시드 + 역할별 권한 매핑
+            </MudText>
+        </MudPaper>
+    </MudItem>
+</MudGrid>

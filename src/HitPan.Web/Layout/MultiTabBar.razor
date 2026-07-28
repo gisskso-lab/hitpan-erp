@@ -1,0 +1,137 @@
+@implements IDisposable
+@using System.Security.Claims
+@using HitPan.Web.Models
+@using HitPan.Web.Services
+@using Microsoft.AspNetCore.Components.Web
+@inject WorkTabService TabService
+@inject AuthenticationStateProvider AuthStateProvider
+@inject TenantProfileService TenantProfile
+@inject IAuthService AuthService
+@inject NavigationManager Navigation
+
+<div class="hitpan-tabbar">
+    <div class="hitpan-tabbar-tabs">
+        @foreach (var tab in TabService.GetOrderedTabs())
+        {
+            var active = tab.Id == TabService.ActiveTabId;
+            <button type="button"
+                    class="hitpan-tab @(active ? "hitpan-tab--active" : null)"
+                    @onclick="@(() => TabService.SwitchTab(tab.Id))">
+                <span class="hitpan-tab-dot @GetDotClass(tab.Kind)" title="@tab.Kind"></span>
+                @if (tab.IsDirty)
+                {
+                    <span class="hitpan-tab-unsaved" aria-hidden="true">·</span>
+                }
+                <span class="hitpan-tab-title hitpan-mono">@tab.DisplayTitle</span>
+                <span class="hitpan-tab-close"
+                      role="button"
+                      tabindex="0"
+                      aria-label="탭 닫기"
+                      @onclick:stopPropagation="true"
+                      @onclick="@(async () => await TabService.CloseTabAsync(tab.Id))"
+                      @onkeydown="@(e => OnCloseKeyDownAsync(e, tab.Id))">×</span>
+            </button>
+        }
+        <MudMenu Icon="@Icons.Material.Filled.Add" Size="Size.Small" Dense="true" title="새 탭 추가"
+                 Class="hitpan-tab hitpan-tab--add" AnchorOrigin="Origin.BottomLeft">
+            <MudMenuItem OnClick="@(() => TabService.TryAddTab(WorkDocumentKind.Quotation))">견적서</MudMenuItem>
+            <MudMenuItem OnClick="@(() => TabService.TryAddTab(WorkDocumentKind.SalesDelivery))">거래명세서</MudMenuItem>
+            <MudMenuItem OnClick="@(() => TabService.TryAddTab(WorkDocumentKind.SalesOrder))">수주서</MudMenuItem>
+            <MudMenuItem OnClick="@(() => TabService.TryAddTab(WorkDocumentKind.PurchaseOrder))">발주서</MudMenuItem>
+            <MudMenuItem OnClick="@(() => TabService.TryAddTab(WorkDocumentKind.PurchaseReceipt))">매입명세서</MudMenuItem>
+            <MudMenuItem OnClick="@(() => TabService.TryAddTab(WorkDocumentKind.Return))">반품</MudMenuItem>
+        </MudMenu>
+    </div>
+    @* 계정 정보 + 로그아웃은 TopHeader 우측 AccountBadge 컴포넌트로 이동 *@
+</div>
+
+@code {
+    private string? _userName;
+
+    protected override async Task OnInitializedAsync()
+    {
+        TabService.StateChanged += OnTabsChanged;
+        TabService.NavigateRequested += OnNavigateRequested;
+        AuthStateProvider.AuthenticationStateChanged += OnAuthenticationStateChanged;
+        await LoadLabelsFromJwtAsync();
+    }
+
+    private void OnNavigateRequested(string url) => Navigation.NavigateTo(url);
+
+    private async void OnAuthenticationStateChanged(Task _)
+    {
+        await InvokeAsync(async () =>
+        {
+            await LoadLabelsFromJwtAsync();
+            StateHasChanged();
+        });
+    }
+
+    private async Task LoadLabelsFromJwtAsync()
+    {
+        try
+        {
+            var state = await AuthStateProvider.GetAuthenticationStateAsync();
+            var user = state.User;
+            if (user.Identity?.IsAuthenticated != true)
+            {
+                _userName = null;
+                TenantProfile.Clear();
+                return;
+            }
+
+            _userName = user.FindFirst("name")?.Value
+                        ?? user.FindFirst(ClaimTypes.Name)?.Value
+                        ?? user.Identity?.Name;
+
+            await TenantProfile.LoadAsync();
+        }
+        catch (Exception _hp15Ex)
+        {
+            Console.Error.WriteLine($"[HP15] " + _hp15Ex.GetType().Name + ": " + _hp15Ex.Message);
+            _userName = null;
+            TenantProfile.Clear();
+        }
+    }
+
+    private string FormatCompanyAndUser()
+    {
+        var company = string.IsNullOrWhiteSpace(TenantProfile.CompanyName) ? "—" : TenantProfile.CompanyName!;
+        var user = string.IsNullOrWhiteSpace(_userName) ? "—" : _userName!;
+        return $"{company} · {user}";
+    }
+
+    private async Task LogoutAsync()
+    {
+        await AuthService.LogoutAsync();
+        Navigation.NavigateTo("/login", forceLoad: true);
+    }
+
+    private void OnTabsChanged() => _ = InvokeAsync(StateHasChanged);
+
+    private static string GetDotClass(WorkDocumentKind kind) => kind switch
+    {
+        WorkDocumentKind.Quotation => "hitpan-tab-dot--quote",
+        WorkDocumentKind.SalesDelivery => "hitpan-tab-dot--delivery",
+        WorkDocumentKind.SalesOrder => "hitpan-tab-dot--order",
+        WorkDocumentKind.PurchaseOrder => "hitpan-tab-dot--po",
+        WorkDocumentKind.PurchaseReceipt => "hitpan-tab-dot--receipt",
+        WorkDocumentKind.Return => "hitpan-tab-dot--return",
+        _ => string.Empty
+    };
+
+    private async Task OnCloseKeyDownAsync(KeyboardEventArgs e, int tabId)
+    {
+        if (e.Key is "Enter" or " ")
+        {
+            await TabService.CloseTabAsync(tabId);
+        }
+    }
+
+    public void Dispose()
+    {
+        TabService.StateChanged -= OnTabsChanged;
+        TabService.NavigateRequested -= OnNavigateRequested;
+        AuthStateProvider.AuthenticationStateChanged -= OnAuthenticationStateChanged;
+    }
+}

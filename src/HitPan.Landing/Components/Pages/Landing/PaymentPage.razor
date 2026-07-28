@@ -1,0 +1,232 @@
+@page "/payment"
+@rendermode InteractiveServer
+@layout LandingLayout
+@inject NavigationManager Nav
+@inject HttpClient Http
+@using System.Net.Http.Json
+
+<PageTitle>결제 — 히트판 ERP</PageTitle>
+
+<section class="payment-section">
+    <div class="payment-card">
+        <h1>결제</h1>
+        <p class="lead">선택한 요금제로 첫 달 결제를 진행합니다.</p>
+
+        <div class="summary">
+            <div class="summary-row">
+                <span>요금제</span>
+                <strong>@_planLabel</strong>
+            </div>
+            <div class="summary-row">
+                <span>첫 달</span>
+                <strong>@_priceText</strong>
+            </div>
+            @if (!string.IsNullOrEmpty(_planNote))
+            {
+                <div class="summary-row" style="color:#0F6E56;font-size:13px;">
+                    <span>추가 비용</span>
+                    <strong>@_planNote</strong>
+                </div>
+            }
+            <div class="summary-row total">
+                <span>총 결제 금액</span>
+                <strong>@_priceText</strong>
+            </div>
+        </div>
+
+        <div class="methods">
+            <h3>결제 수단</h3>
+            <div class="method-grid">
+                <button class="method @(_method == "card" ? "active" : "")" @onclick='() => _method = "card"'>
+                    💳 카드결제
+                </button>
+                <button class="method @(_method == "transfer" ? "active" : "")" @onclick='() => _method = "transfer"'>
+                    🏦 계좌이체
+                </button>
+                <button class="method @(_method == "phone" ? "active" : "")" @onclick='() => _method = "phone"'>
+                    📱 휴대폰
+                </button>
+            </div>
+        </div>
+
+        @if (_tossConfigured == false)
+        {
+            <div class="notice-banner">
+                결제 시스템 점검 중입니다. 자격증명 설정 후 이용 가능합니다.
+                <span class="notice-detail">(본사 운영자 — /owner/credentials-status 확인)</span>
+            </div>
+        }
+
+        @if (!string.IsNullOrEmpty(_error))
+        {
+            <div class="error-banner">@_error</div>
+        }
+
+        <button class="btn-pay" @onclick="HandlePay" disabled="@(_processing || _tossConfigured == false)">
+            @(_processing ? "결제 진행 중..." : $"{_priceText} 결제하기")
+        </button>
+
+        <p class="security">
+            🔒 토스페이먼츠 통한 안전 결제. 카드 정보는 본사 서버에 저장되지 않습니다.
+        </p>
+    </div>
+</section>
+
+@code {
+    [SupplyParameterFromQuery]
+    public string? Plan { get; set; }
+
+    [SupplyParameterFromQuery]
+    public string? Token { get; set; }
+
+    private string _planLabel = "PRO";
+    private string _priceText = "49,000원";
+    private string _planNote = "";
+    private string _method = "card";
+    private bool _processing;
+    private bool? _tossConfigured;
+    private string? _error;
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            var cfg = await Http.GetFromJsonAsync<TossConfig>("api/payments/toss/config");
+            _tossConfigured = cfg?.Configured ?? false;
+        }
+        catch (Exception)
+        {
+            _tossConfigured = false;
+        }
+
+        // 사장님 결재 2026-06-11 B안: 가격 동적 로드 — 백오피스 마스터 영역 변경 반영
+        try
+        {
+            var resp = await Http.GetFromJsonAsync<PublicPricingResponse>("api/landing/pricing/public");
+            if (resp?.Success == true && resp.Data is { Count: > 0 } rows)
+            {
+                ApplyDynamicPricing(rows);
+                StateHasChanged();
+            }
+        }
+        catch (Exception)
+        {
+            // 폴백 유지 — OnParametersSet 정적 영역 (29k/49k/100k)
+        }
+    }
+
+    protected override void OnParametersSet()
+    {
+        // 폴백 영역 (API 실패 시) — BASIC 29k / PRO 49k / ENTERPRISE 100k+서버구축
+        // 옛 키 호환: premium → enterprise, standard → pro
+        var planKey = Plan switch
+        {
+            "premium" => "enterprise",
+            "standard" => "pro",
+            null or "" => "pro",
+            _ => Plan
+        };
+        (_planLabel, _priceText, _planNote) = planKey switch
+        {
+            "basic" => ("BASIC", "29,000원", ""),
+            "enterprise" => ("ENTERPRISE", "100,000원", "+ 서버 구축비용 (상담)"),
+            _ => ("PRO", "49,000원", "")
+        };
+    }
+
+    private void ApplyDynamicPricing(List<PublicPlanRow> rows)
+    {
+        var planKey = Plan switch
+        {
+            "premium" => "enterprise",
+            "standard" => "pro",
+            null or "" => "pro",
+            _ => Plan
+        };
+        var match = rows.FirstOrDefault(r => r.PlanId == planKey) ?? rows.FirstOrDefault(r => r.PlanId == "pro");
+        if (match is null) return;
+
+        _planLabel = match.PlanName.ToUpper();
+        _priceText = $"{match.MonthlyPrice:N0}원";
+        _planNote = match.PlanId == "enterprise" ? "+ 서버 구축비용 (상담)" : "";
+    }
+
+    private class PublicPricingResponse
+    {
+        public bool Success { get; set; }
+        public List<PublicPlanRow>? Data { get; set; }
+    }
+
+    private class PublicPlanRow
+    {
+        public string PlanId { get; set; } = "";
+        public string PlanName { get; set; } = "";
+        public decimal MonthlyPrice { get; set; }
+        public string PriceDisplay { get; set; } = "number";
+    }
+
+    private async Task HandlePay()
+    {
+        _error = null;
+        _processing = true;
+        try
+        {
+            // 사장님 결재 2026-06-02 (의중 B 모두결재) — 베타: 결제 SDK 미저장, API 직접 호출로 tenants.status='active'
+            // 정식 = 토스 빌링키 + webhook 전환 (W10+ TossWebhookController)
+            string? licenseKey = null;
+            if (!string.IsNullOrWhiteSpace(Token))
+            {
+                var resp = await Http.PostAsJsonAsync("api/landing/confirm-payment", new { SignupToken = Token });
+                if (!resp.IsSuccessStatusCode)
+                {
+                    // 헌법 #19 silent fail 금지 — 사용자에게 명시 안내
+                    var body = await resp.Content.ReadAsStringAsync();
+                    _error = $"결제 확인 실패 ({(int)resp.StatusCode}). 잠시 후 다시 시도해주세요.";
+                    return;
+                }
+                var data = await resp.Content.ReadFromJsonAsync<ConfirmResult>();
+                licenseKey = data?.LicenseKey;
+            }
+            var qs = $"plan={Plan}";
+            if (!string.IsNullOrWhiteSpace(licenseKey)) qs += $"&key={Uri.EscapeDataString(licenseKey)}";
+            Nav.NavigateTo($"/signup/welcome?{qs}");
+        }
+        catch (Exception ex)
+        {
+            // 헌법 #15 정합 — 빈 catch 금지
+            _error = $"결제 처리 중 오류: {ex.Message}";
+        }
+        finally
+        {
+            _processing = false;
+        }
+    }
+
+    private record ConfirmResult(bool Success, string? Message, string? LicenseKey);
+
+    private record TossConfig(bool Configured, string? ClientKey, string? Message);
+}
+
+<style>
+.payment-section { padding: 48px 0; background: #F9FAFB; min-height: calc(100vh - 200px); }
+.payment-card { max-width: 480px; margin: 0 auto; background: #fff; padding: 40px; border-radius: 16px; box-shadow: 0 4px 16px rgba(0,0,0,0.06); }
+.payment-card h1 { font-size: 28px; margin-bottom: 8px; }
+.lead { color: #6B7280; margin-bottom: 24px; font-size: 14px; }
+.summary { background: #F9FAFB; border-radius: 8px; padding: 20px; margin-bottom: 24px; }
+.summary-row { display: flex; justify-content: space-between; padding: 8px 0; font-size: 14px; }
+.summary-row.total { border-top: 1px solid #E5E7EB; margin-top: 8px; padding-top: 16px; font-size: 16px; }
+.summary-row.total strong { color: #0F6E56; font-size: 20px; }
+.methods { margin-bottom: 24px; }
+.methods h3 { font-size: 14px; font-weight: 600; margin-bottom: 12px; }
+.method-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+.method { padding: 16px 8px; background: #fff; border: 2px solid #E5E7EB; border-radius: 8px; font-size: 13px; cursor: pointer; }
+.method:hover { border-color: #0F6E56; }
+.method.active { border-color: #0F6E56; background: #F0F9F5; color: #0F6E56; font-weight: 600; }
+.btn-pay { width: 100%; padding: 16px; background: #0F6E56; color: #fff; border: none; border-radius: 8px; font-size: 16px; font-weight: 700; cursor: pointer; }
+.btn-pay:hover:not(:disabled) { background: #0A5240; }
+.btn-pay:disabled { opacity: 0.6; cursor: not-allowed; }
+.security { text-align: center; margin-top: 16px; font-size: 12px; color: #6B7280; }
+.notice-banner { background: #FFF7E6; border: 1px solid #FFD591; color: #8B5A00; border-radius: 8px; padding: 12px 16px; margin-bottom: 16px; font-size: 13px; }
+.notice-detail { display: block; margin-top: 4px; font-size: 11px; color: #B07B1A; }
+.error-banner { background: #FEE2E2; border: 1px solid #FECACA; color: #B91C1C; border-radius: 8px; padding: 12px 16px; margin-bottom: 16px; font-size: 13px; }
+</style>

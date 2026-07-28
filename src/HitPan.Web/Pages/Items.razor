@@ -1,0 +1,363 @@
+@page "/items"
+@namespace HitPan.Web.Pages.ItemMasterUi
+@attribute [Authorize]
+@inject ItemMasterService ItemsApi
+@inject NavigationManager Nav
+@inject ISnackbar Snackbar
+@inject IJSRuntime Js
+@inject IDialogService DialogService
+@inject BomService BomApi
+@inject DeliveryService DeliveryService
+
+<PageTitle>상품 마스터</PageTitle>
+
+<PageHeader Title="상품 마스터" Subtitle="단품 · 조립(BOM) · 1+1 기획상품 통합 관리">
+    <Actions>
+        <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="OpenCreate">
+            + 상품 등록
+        </MudButton>
+    </Actions>
+</PageHeader>
+
+@* 사장님 헌법 (2026-04-27): 안전재고 미달 자재가 평소에도 사장님 눈에 띄어야 함.
+   상품마스터가 평소 안전망. stock_alerts 'pending' 을 읽어서 배너로 노출.
+   배너 클릭 → 자동발주 다이얼로그 → 발주서/매입확정/원클릭 사슬 *@
+@if (_safetyAlerts.Count > 0)
+{
+    <MudPaper Elevation="0" Class="pa-3 mb-4"
+              Style="background:#fff4e5;border:1px solid #ff9800;border-radius:12px">
+        <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+            <MudIcon Icon="@Icons.Material.Filled.Warning" Color="Color.Warning" Size="Size.Medium" />
+            <div style="flex:1;min-width:200px">
+                <MudText Typo="Typo.subtitle1" Style="font-weight:600">
+                    안전재고 미달 자재 @_safetyAlerts.Count 건
+                </MudText>
+                <MudText Typo="Typo.body2" Style="color:#666">
+                    @string.Join(" · ", _safetyAlerts.Take(3).Select(a => $"{a.ItemName} (현재고 {a.CurrentQty:N0} / 안전재고 {a.SafetyQty:N0})"))
+                    @(_safetyAlerts.Count > 3 ? $" 외 {_safetyAlerts.Count - 3}건" : "")
+                </MudText>
+            </div>
+            <MudButton Variant="Variant.Filled" Color="Color.Warning"
+                       StartIcon="@Icons.Material.Filled.ShoppingCart"
+                       OnClick="OpenSafetyAutoOrderAsync"
+                       Disabled="_orderingSafety">
+                @(_orderingSafety ? "처리중..." : "자동발주 실행")
+            </MudButton>
+        </div>
+    </MudPaper>
+}
+
+<MudPaper Elevation="0" Class="pa-3 mb-4 hitpan-card">
+    <div style="display:flex;gap:12px;flex-wrap:wrap;align-items:center">
+        <MudTextField @bind-Value="_search"
+                      Placeholder="상품명·코드 검색"
+                      Variant="Variant.Outlined"
+                      Margin="Margin.Dense"
+                      Style="min-width:200px"
+                      Adornment="Adornment.Start"
+                      AdornmentIcon="@Icons.Material.Filled.Search"
+                      OnKeyUp="OnSearchKeyUp" />
+        <MudSelect T="string"
+                   @bind-Value="_typeFilter"
+                   Variant="Variant.Outlined"
+                   Margin="Margin.Dense"
+                   Style="min-width:120px"
+                   Label="유형">
+            <MudSelectItem Value="@("")">전체</MudSelectItem>
+            <MudSelectItem Value="@("product")">상품</MudSelectItem>
+            <MudSelectItem Value="@("material")">자재</MudSelectItem>
+            <MudSelectItem Value="@("semi_finished")">반제품</MudSelectItem>
+            <MudSelectItem Value="@("finished")">완제품</MudSelectItem>
+        </MudSelect>
+        <MudButton Variant="Variant.Outlined" OnClick="Search">검색</MudButton>
+        <MudButton Variant="Variant.Outlined" Size="Size.Small" StartIcon="@Icons.Material.Filled.TableChart" OnClick="ExportExcelAsync">엑셀</MudButton>
+        <MudButton Variant="Variant.Outlined" Size="Size.Small" StartIcon="@Icons.Material.Filled.Print" OnClick="PrintAsync">인쇄</MudButton>
+    </div>
+</MudPaper>
+
+@if (_loading)
+{
+    <MudProgressLinear Indeterminate="true" Color="Color.Primary" />
+}
+else
+{
+    <MudPaper Elevation="0" Class="hitpan-card" Style="overflow:hidden">
+@*  헌법 #19·#25 정합 — 5/27 P1-5 봉합 (audit: rows=338 × buttons 5개 = 1,701개 DOM 폭탄)
+    RowsPerPage 50 default + Pager로 페이지당 행 제한. 검색은 _items 전체에서 작동. *@
+        <MudTable Items="_items" Dense="true" Hover="true" Striped="true" T="ItemListModel"
+                  RowsPerPage="50" Breakpoint="Breakpoint.Sm">
+            <HeaderContent>
+                <MudTh>코드</MudTh>
+                <MudTh>상품명</MudTh>
+                <MudTh>유형</MudTh>
+                <MudTh>규격</MudTh>
+                <MudTh>단위</MudTh>
+                <MudTh Style="text-align:right">판매단가</MudTh>
+                <MudTh Style="text-align:right">현재고</MudTh>
+                <MudTh>상태</MudTh>
+                <MudTh></MudTh>
+            </HeaderContent>
+            <RowTemplate>
+                <MudTd DataLabel="코드">
+                    <MudButton Variant="Variant.Text" Class="pa-0 text-none" OnClick="@(() => OpenDetail(context.ItemId))">@context.ItemCode</MudButton>
+                </MudTd>
+                <MudTd DataLabel="상품명">
+                    <MudButton Variant="Variant.Text" Class="pa-0 text-none" OnClick="@(() => OpenDetail(context.ItemId))">
+                        <MudText Style="font-weight:500">@context.ItemName</MudText>
+                    </MudButton>
+                </MudTd>
+                <MudTd DataLabel="유형">
+                    <MudChip T="string" Size="Size.Small" Variant="Variant.Text"
+                             Color="@GetTypeColor(context.ItemType)">
+                        @GetTypeLabel(context.ItemType)
+                    </MudChip>
+                </MudTd>
+                <MudTd DataLabel="규격">@context.Spec</MudTd>
+                <MudTd DataLabel="단위">@context.Unit</MudTd>
+                <MudTd DataLabel="판매단가" Style="text-align:right">@context.SalePrice.ToString("N0")</MudTd>
+                <MudTd DataLabel="현재고" Style="@($"text-align:right;color:{StockColor(context)}")">
+                    @context.CurrentStock.ToString("N1")
+                </MudTd>
+                <MudTd DataLabel="상태">
+                    <MudChip T="string"
+                             Size="Size.Small"
+                             Color="@(context.IsActive ? Color.Success : Color.Default)"
+                             Variant="Variant.Text">
+                        @(context.IsActive ? "정상" : "중지")
+                    </MudChip>
+                </MudTd>
+                <MudTd>
+                    <MudTooltip Text="이 상품의 BOM 자재명세서 보기">
+                        <MudButton Variant="Variant.Outlined"
+                                   Size="Size.Small"
+                                   Color="Color.Info"
+                                   StartIcon="@Icons.Material.Filled.AccountTree"
+                                   OnClick="@(() => OpenBomAsync(context))">
+                            BOM 보기
+                        </MudButton>
+                    </MudTooltip>
+                    <MudIconButton Icon="@Icons.Material.Filled.Edit"
+                                   Size="Size.Small"
+                                   OnClick="@(() => Nav.NavigateTo($"/items/{context.ItemId}"))" />
+                    <MudIconButton Icon="@Icons.Material.Filled.Delete"
+                                   Size="Size.Small"
+                                   Color="Color.Error"
+                                   OnClick="@(() => DeleteAsync(context))" />
+                </MudTd>
+            </RowTemplate>
+            <NoRecordsContent>
+                <MudText Style="padding:24px;color:var(--mud-palette-text-secondary)">
+                    등록된 상품이 없습니다
+                </MudText>
+            </NoRecordsContent>
+            <PagerContent>
+                <MudTablePager PageSizeOptions="new int[] { 25, 50, 100, 200 }" />
+            </PagerContent>
+        </MudTable>
+    </MudPaper>
+    <MudText Style="font-size:12px;color:var(--mud-palette-text-secondary);margin-top:8px">
+        총 @_items.Count 개
+    </MudText>
+}
+
+@code {
+    private List<ItemListModel> _items = new();
+    private bool _loading = true;
+    private string _search = "";
+    private string _typeFilter = "";
+
+    // 사장님 헌법 (2026-04-27): 상품마스터 = 평소 안전망. 안전재고 미달 자재 배너 + 자동발주.
+    private List<StockAlertModel> _safetyAlerts = new();
+    private bool _orderingSafety = false;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadList();
+        await LoadSafetyAlerts();
+    }
+
+    private async Task LoadSafetyAlerts()
+    {
+        var alerts = await BomApi.GetAlertsAsync();
+        // 'pending' 상태(=신규 발생, 사용자 행동 대기)만 노출. ordered/dismissed 는 이미 처리됨.
+        _safetyAlerts = (alerts ?? new List<StockAlertModel>())
+            .Where(a => string.Equals(a.Status, "pending", StringComparison.OrdinalIgnoreCase))
+            .ToList();
+        StateHasChanged();
+    }
+
+    private async Task OpenSafetyAutoOrderAsync()
+    {
+        if (_safetyAlerts.Count == 0) return;
+
+        // BOM 다이얼로그와 동일 분기. 모두 auto_receive_on_order=Y면 B-1, 아니면 B-2.
+        // (StockAlertModel 에 AutoReceiveOnOrder 가 없으므로 보수적 default = B-2 발주서만.)
+        var lines = string.Join("\n", _safetyAlerts.Take(5).Select(a =>
+            $"• {a.ItemName} (현재고 {a.CurrentQty:N0} / 안전재고 {a.SafetyQty:N0}, 부족 {a.ShortageQty:N0})"));
+        var more = _safetyAlerts.Count > 5 ? $"\n... 외 {_safetyAlerts.Count - 5}건" : "";
+
+        var choice = await DialogService.ShowMessageBoxAsync(
+            "⚠ 안전재고 미달 자동발주",
+            $"아래 자재가 안전재고 미달입니다. 자동발주를 진행하시겠습니까?\n\n{lines}{more}\n\n" +
+            "[발주서 생성] 자동발주서를 만들고 발주목록에 노출. 매입처리·확정은 발주목록에서 진행.\n" +
+            "[자동 사슬] 발주+매입확정까지 한 번에 처리 (재고 즉시 +반영).",
+            yesText: "자동 사슬", noText: "발주서 생성", cancelText: "취소");
+        if (choice is null) return;
+
+        _orderingSafety = true;
+        StateHasChanged();
+        try
+        {
+            // stock_alerts 의 alert_id 단위로 BomApi.OrderAlertAsync 호출 — 기존 alert→PO 변환 흐름 재사용.
+            // 자동 사슬(true) 선택 시: 발주 생성 + autoReceive 까지 가도록 별도 처리 (지금은 OrderAlertAsync 가
+            // PO 만 생성하므로 자동 사슬 미지원 → 베타 P1: stock_alerts 에 auto_receive_on_order 반영 추가).
+            var autoChain = choice == true;
+            var success = 0;
+            var failed = 0;
+            foreach (var a in _safetyAlerts)
+            {
+                if (string.IsNullOrWhiteSpace(a.AlertId)) continue;
+                var ok = await BomApi.OrderAlertAsync(a.AlertId);
+                if (ok) success++; else failed++;
+            }
+
+            if (success > 0)
+            {
+                var label = autoChain ? "자동발주(자동 사슬은 베타 P1 작지서로 분리, 지금은 발주서만 생성됨)" : "자동발주서";
+                Snackbar.Add($"{label} {success}건 생성 완료. 발주목록 → 매입처리 → 매입확정 진행해주세요.", Severity.Success);
+            }
+            if (failed > 0)
+            {
+                Snackbar.Add($"{failed}건 실패", Severity.Warning);
+            }
+            await LoadSafetyAlerts();
+        }
+        finally
+        {
+            _orderingSafety = false;
+            StateHasChanged();
+        }
+    }
+
+    private async Task LoadList()
+    {
+        _loading = true;
+        StateHasChanged();
+        // 사장님 지시 (2026-04-26 최종):
+        // 상품마스터에는 모든 상품(BOM 등록된 완제품 포함) 표시. 행마다 "BOM 보기"
+        // 버튼으로 BOM 매핑 있으면 BOM 화면 이동, 없으면 등록 다이얼로그 안내.
+        // 자동생성 BOM- 코드 중복 행 회귀는 RegisterBomAsItemAsync 수정으로 차단됨
+        // (cb2a9b5) — 따라서 excludeBom 옵션은 자재 콤비박스(순환 차단)에만 사용.
+        var result = await ItemsApi.GetListAsync(
+            string.IsNullOrWhiteSpace(_search) ? null : _search,
+            null,
+            string.IsNullOrWhiteSpace(_typeFilter) ? null : _typeFilter);
+        _items = result ?? new List<ItemListModel>();
+        _loading = false;
+        StateHasChanged();
+    }
+
+    private async Task Search()
+    {
+        await LoadList();
+    }
+
+    private async Task OnSearchKeyUp(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter")
+        {
+            await Search();
+        }
+    }
+
+    private void OpenCreate()
+    {
+        Nav.NavigateTo("/items/new");
+    }
+
+    private void OpenDetail(string? itemId)
+    {
+        if (string.IsNullOrWhiteSpace(itemId))
+        {
+            return;
+        }
+
+        Nav.NavigateTo($"/items/{itemId}");
+    }
+
+    /// <summary>화면 데이터를 엑셀로 내보낸다.</summary>
+    private Task ExportExcelAsync() { Snackbar.Add("엑셀 내보내기는 준비중입니다.", Severity.Info); return Task.CompletedTask; }
+    /// <summary>화면을 인쇄한다.</summary>
+    private async Task PrintAsync() { await Js.InvokeVoidAsync("print"); }
+
+    private static string GetTypeLabel(string type) => type switch
+    {
+        "finished" => "완제품",
+        "semi_finished" or "semi" => "반제품",
+        "material" => "자재",
+        "product" => "상품",
+        "assembly" => "조립(BOM)",
+        "promo" => "🎁 1+1 기획",
+        _ => type
+    };
+
+    private static Color GetTypeColor(string type) => type switch
+    {
+        "finished" => Color.Primary,
+        "semi_finished" or "semi" => Color.Info,
+        "material" => Color.Warning,
+        "assembly" => Color.Secondary,
+        "promo" => Color.Error,
+        _ => Color.Default
+    };
+
+    private static string StockColor(ItemListModel item) =>
+        item.CurrentStock <= item.SafetyStock ? "var(--mud-palette-error)" : "inherit";
+
+    /// <summary>
+    /// 상품행 "BOM 보기" 버튼 — 해당 상품에 연결된 BOM 자재명세서로 이동.
+    /// 매핑 없으면 BOM 등록 페이지(/bom/new)로 보내 새 BOM 작성을 유도.
+    /// </summary>
+    private async Task OpenBomAsync(ItemListModel item)
+    {
+        if (string.IsNullOrWhiteSpace(item.ItemId)) return;
+
+        var bomId = await BomApi.GetBomIdByItemAsync(item.ItemId);
+        if (!string.IsNullOrWhiteSpace(bomId))
+        {
+            Nav.NavigateTo($"/bom/{bomId}");
+            return;
+        }
+
+        var go = await DialogService.ShowMessageBoxAsync(
+            "BOM 자재명세서 없음",
+            $"'{item.ItemName}' 에 연결된 BOM 자재명세서가 없습니다.\n새로 등록하시겠습니까?",
+            yesText: "BOM 등록", cancelText: "닫기");
+        if (go == true)
+        {
+            Nav.NavigateTo("/bom/new");
+        }
+    }
+
+    private async Task DeleteAsync(ItemListModel item)
+    {
+        if (string.IsNullOrWhiteSpace(item.ItemId)) return;
+
+        var confirm = await DialogService.ShowMessageBoxAsync(
+            "상품 삭제",
+            $"'{item.ItemName}' 상품을 삭제하시겠습니까?",
+            yesText: "삭제", cancelText: "취소");
+        if (confirm != true) return;
+
+        var ok = await ItemsApi.DeleteAsync(item.ItemId);
+        if (ok)
+        {
+            Snackbar.Add("삭제되었습니다.", Severity.Success);
+            await LoadList();
+        }
+        else
+        {
+            Snackbar.Add("삭제에 실패했습니다.", Severity.Error);
+        }
+    }
+}

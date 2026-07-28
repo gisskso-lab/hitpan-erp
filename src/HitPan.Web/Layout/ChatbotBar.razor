@@ -1,0 +1,470 @@
+@* ────────────────────────────────────────────────────────────────
+   히트판 AI 챗봇 바 — 상단 좌측 상시 노출 (Apple Spotlight 스타일)
+   - 평소: 슬림한 검색창 (Ctrl+K 배지)
+   - 클릭 시: 드롭다운 패널 (질문·답변·피드백·토큰)
+   4가지 상태: 빈 상태(인기질문 추천) / 로딩 / 답변 / 피드백
+   ────────────────────────────────────────────────────────────────
+*@
+@using HitPan.Web.Models
+@using HitPan.Web.Services
+@using Microsoft.AspNetCore.Components.Web
+@inject ChatbotService Chat
+@inject NavigationManager Nav
+@inject IJSRuntime Js
+@inject ISnackbar Snack
+
+<style>
+    .hitpan-ai-chart { display:flex; flex-direction:column; gap:4px; margin-bottom:6px; }
+    .hitpan-ai-chart-row { display:flex; align-items:center; gap:6px; font-size:11px; }
+    .hitpan-ai-chart-label { width:80px; flex-shrink:0; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; color:#444; }
+    .hitpan-ai-chart-bar-wrap { flex:1; background:#eee; border-radius:3px; height:14px; overflow:hidden; }
+    .hitpan-ai-chart-bar { display:block; height:100%; background:var(--hitpan-primary,#2e7d6b); border-radius:3px; transition:width .3s; min-width:2px; }
+    .hitpan-ai-chart-val { width:72px; flex-shrink:0; text-align:right; color:#333; font-variant-numeric:tabular-nums; }
+
+    .hitpan-chat-msg { margin-bottom:10px; padding:8px 10px; border-radius:8px; }
+    .hitpan-chat-user { background:var(--hitpan-primary,#2e7d6b); color:#fff; margin-left:auto; max-width:85%; width:fit-content; }
+    .hitpan-chat-user .mud-typography { color:#fff; }
+    .hitpan-chat-ai { background:#f5f5f5; max-width:100%; }
+
+    .hitpan-ai-approve-card { margin:8px 0; padding:10px 12px; border:1px solid var(--hitpan-primary,#2e7d6b); border-radius:8px; background:#f0f9f6; }
+    .hitpan-ai-approve-head { display:flex; align-items:center; gap:6px; font-weight:600; font-size:13px; color:var(--hitpan-primary,#2e7d6b); }
+    .hitpan-ai-approve-actions { display:flex; gap:8px; margin-top:8px; }
+</style>
+
+<div class="hitpan-chatbot-bar">
+    @* ── 상시 노출 텍스트박스 (버튼처럼 클릭) ── *@
+    <div class="hitpan-chatbot-input" @onclick="OpenPanel">
+        <MudIcon Icon="@Icons.Material.Filled.SmartToy" Style="color:var(--hitpan-primary);font-size:18px" />
+        <span class="hitpan-chatbot-placeholder">
+            @(string.IsNullOrEmpty(_currentQuestion) ? "히트판에게 물어보세요" : _currentQuestion)
+        </span>
+        <span class="hitpan-chatbot-kbd">Ctrl+K</span>
+    </div>
+
+    @if (_isOpen)
+    {
+        @* ── 외부 클릭 차단용 오버레이 (클릭 시 닫힘) ── *@
+        <div class="hitpan-chatbot-overlay" @onclick="ClosePanel"></div>
+
+        @* ── 답변 패널 ── *@
+        <div class="hitpan-chatbot-panel" @onclick:stopPropagation="true">
+
+            @* 헤더 *@
+            <div class="hitpan-chatbot-panel-header">
+                <MudIcon Icon="@Icons.Material.Filled.SmartToy" Style="color:var(--hitpan-primary)" />
+                <MudText Typo="Typo.subtitle1" Style="font-weight:600;flex:1">히트판 AI 도우미</MudText>
+                @* 새 대화 — 대화 누적·기억 비우고 처음부터 *@
+                <MudTooltip Text="새 대화 시작 (이전 대화 비우기)">
+                    <MudIconButton Icon="@Icons.Material.Filled.Refresh" Size="Size.Small"
+                                   OnClick="StartNewConversation" Disabled="@(_turns.Count == 0)" />
+                </MudTooltip>
+                <MudIconButton Icon="@Icons.Material.Filled.Close" Size="Size.Small" OnClick="ClosePanel" />
+            </div>
+
+            @* 입력창 *@
+            <div class="hitpan-chatbot-panel-input">
+                <MudTextField T="string" @bind-Value="_input" @ref="_inputRef"
+                              Placeholder="예: 견적서 어떻게 만들어요?"
+                              Variant="Variant.Outlined" Margin="Margin.Dense"
+                              Immediate="true" OnKeyDown="OnKeyDown"
+                              Adornment="Adornment.End"
+                              AdornmentIcon="@(_loading ? Icons.Material.Filled.HourglassTop : Icons.Material.Filled.Send)"
+                              OnAdornmentClick="SendAsync" />
+            </div>
+
+            @* 답변/상태 영역 — 채팅식 대화 누적 (사장님 결재 2026-06-20) *@
+            <div class="hitpan-chatbot-panel-body">
+                @if (_turns.Count == 0 && !_loading)
+                {
+                    @* 초기 상태 — 인기 질문 추천 *@
+                    <MudText Typo="Typo.subtitle2" Class="mb-2" Style="font-weight:600">💡 자주 묻는 질문</MudText>
+                    @if (_popularQuestions.Count == 0)
+                    {
+                        <MudText Typo="Typo.caption" Style="color:var(--hitpan-text-faint)">
+                            질문을 입력해 주세요.
+                        </MudText>
+                    }
+                    else
+                    {
+                        @foreach (var popular in _popularQuestions.Take(5))
+                        {
+                            <MudButton Variant="Variant.Text" FullWidth="true" Class="justify-start mb-1"
+                                       StartIcon="@Icons.Material.Filled.QuestionMark"
+                                       OnClick="@(() => AskSuggested(popular.Title))"
+                                       Style="text-transform:none;text-align:left">
+                                @popular.Title
+                            </MudButton>
+                        }
+                    }
+                }
+                else
+                {
+                    @* 대화 누적 — 위에서 아래로 시간순 *@
+                    @foreach (var turn in _turns)
+                    {
+                        @if (turn.Role == "user")
+                        {
+                            <div class="hitpan-chat-msg hitpan-chat-user">
+                                <MudText Typo="Typo.body2" Style="white-space:pre-line">@turn.Content</MudText>
+                            </div>
+                        }
+                        else
+                        {
+                            <div class="hitpan-chat-msg hitpan-chat-ai">
+                                @AnswerView(turn.Answer!)
+                            </div>
+                        }
+                    }
+
+                    @if (_loading)
+                    {
+                        <MudProgressLinear Indeterminate="true" Color="Color.Primary" Class="mt-2" />
+                        <MudText Typo="Typo.caption" Class="mt-1" Style="color:var(--hitpan-text-faint)">AI가 답변을 찾고 있어요...</MudText>
+                    }
+                }
+            </div>
+
+            @* 토큰 사용량 위젯 *@
+            @if (_quota != null)
+            {
+                <div class="hitpan-chatbot-quota">
+                    <div class="hitpan-chatbot-quota-row">
+                        <span>💎 이번달 CS 토큰</span>
+                        <span style="font-weight:600">
+                            @_quota.UsedTokens.ToString("N0") / @((_quota.MonthlyLimit + _quota.ExtraTokens).ToString("N0"))
+                        </span>
+                    </div>
+                    <MudProgressLinear Value="@TokenUsagePercent" Color="@TokenColor" Size="Size.Small" Class="mt-1" />
+                    @if (TokenUsagePercent >= 80)
+                    {
+                        <div class="mt-1" style="color:var(--hitpan-warning)">
+                            ⚠️ 토큰 소진 임박 —
+                            <a href="/settings/ai" @onclick="@(() => NavigateAndClose("/settings/ai"))" @onclick:preventDefault="true"
+                               style="color:var(--hitpan-primary);cursor:pointer">추가 구매 / 업그레이드</a>
+                        </div>
+                    }
+                </div>
+            }
+        </div>
+    }
+</div>
+
+@* ── 도우미 답변 1개 렌더 (배지·본문·분석 표/차트·관련메뉴) — 턴 반복에 재사용 ── *@
+@code {
+    private RenderFragment<ChatAnswerModel> AnswerView => ans =>
+    @<text>
+        @if (ans.ConfidenceScore >= 0.5m)
+        {
+            <MudChip T="string" Size="Size.Small" Color="Color.Success" Variant="Variant.Filled" Class="mb-2">
+                ✓ 히트판 공식 답변
+            </MudChip>
+        }
+
+        <MudText Typo="Typo.body2" Style="white-space:pre-line;line-height:1.7">@ans.Answer</MudText>
+
+        @if (ans.Analysis is { } an && an.Rows.Count > 0)
+        {
+            <MudDivider Class="my-3" />
+            @if (an.Chart is { Count: > 0 })
+            {
+                var maxVal = Math.Max(1, an.Chart.Max(c => Math.Abs(c.Value)));
+                <MudText Typo="Typo.caption" Style="color:#666;font-weight:600" Class="mb-1">
+                    @($"📊 {an.ChartValueLabel} (상위 {an.Chart.Count}개)")
+                </MudText>
+                <div class="hitpan-ai-chart">
+                    @foreach (var pt in an.Chart)
+                    {
+                        var pct = (int)(Math.Abs(pt.Value) / maxVal * 100);
+                        <div class="hitpan-ai-chart-row">
+                            <span class="hitpan-ai-chart-label" title="@pt.Label">@pt.Label</span>
+                            <span class="hitpan-ai-chart-bar-wrap">
+                                <span class="hitpan-ai-chart-bar" style="width:@(pct)%;@(pt.Value < 0 ? "background:var(--hitpan-error,#d32f2f)" : "")"></span>
+                            </span>
+                            <span class="hitpan-ai-chart-val">@pt.Value.ToString("N0")</span>
+                        </div>
+                    }
+                </div>
+            }
+            <MudText Typo="Typo.caption" Style="color:#666;font-weight:600" Class="mt-2 mb-1">
+                @($"📋 상세 내역 ({an.Rows.Count}행)")
+            </MudText>
+            <div style="max-height:260px;overflow:auto">
+                <MudSimpleTable Dense="true" Striped="true" Bordered="true" Style="font-size:12px">
+                    <thead>
+                        <tr>@foreach (var col in an.Columns) { <th style="white-space:nowrap">@col</th> }</tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var row in an.Rows)
+                        {
+                            <tr>
+                                @for (var i = 0; i < row.Count; i++)
+                                {
+                                    <td style="white-space:nowrap;@(i == 0 ? "" : "text-align:right")">@row[i]</td>
+                                }
+                            </tr>
+                        }
+                    </tbody>
+                </MudSimpleTable>
+            </div>
+        }
+
+        @* ── 승인/반려 카드 — 생성 명령 초안 (사장님 비전: AI는 준비, 실행은 사람) ── *@
+        @if (ans.PendingAction is { } pa)
+        {
+            <div class="hitpan-ai-approve-card">
+                <div class="hitpan-ai-approve-head">
+                    <MudIcon Icon="@Icons.Material.Filled.Assignment" Size="Size.Small" />
+                    <span>@pa.Title</span>
+                </div>
+                <MudText Typo="Typo.body2" Style="white-space:pre-line;margin:6px 0">@pa.Summary</MudText>
+                @if (!string.IsNullOrEmpty(pa.ChainNote))
+                {
+                    <MudText Typo="Typo.caption" Style="color:var(--hitpan-primary,#2e7d6b)">↳ @pa.ChainNote</MudText>
+                }
+                <div class="hitpan-ai-approve-actions">
+                    <MudButton Variant="Variant.Filled" Color="Color.Success" Size="Size.Small"
+                               StartIcon="@Icons.Material.Filled.Check"
+                               Disabled="@(_approving == pa.DraftId || _approvedDrafts.Contains(pa.DraftId ?? ""))"
+                               OnClick="@(() => ApproveAsync(pa))">
+                        @(_approvedDrafts.Contains(pa.DraftId ?? "") ? "승인됨" : "승인")
+                    </MudButton>
+                    <MudButton Variant="Variant.Outlined" Color="Color.Error" Size="Size.Small"
+                               StartIcon="@Icons.Material.Filled.Close"
+                               Disabled="@(_approvedDrafts.Contains(pa.DraftId ?? ""))"
+                               OnClick="@(() => RejectDraft(pa))">
+                        반려
+                    </MudButton>
+                </div>
+            </div>
+        }
+
+        @if (ans.RelatedArticles is { Count: > 0 } && ans.RelatedArticles.Any(a => !string.IsNullOrEmpty(a.RelatedMenuUrl)))
+        {
+            <MudDivider Class="my-3" />
+            <MudText Typo="Typo.caption" Style="color:#666;font-weight:600">관련 메뉴</MudText>
+            <div class="hitpan-chatbot-related-menus">
+                @foreach (var art in ans.RelatedArticles.Where(a => !string.IsNullOrEmpty(a.RelatedMenuUrl)))
+                {
+                    <MudButton Variant="Variant.Outlined" Size="Size.Small"
+                               StartIcon="@Icons.Material.Filled.ArrowForward"
+                               OnClick="@(() => NavigateAndClose(art.RelatedMenuUrl!))">
+                        @art.Title
+                    </MudButton>
+                }
+            </div>
+        }
+    </text>;
+
+    // ── 상태 ──
+    private bool _isOpen;
+    private string _input = string.Empty;
+    private string _currentQuestion = string.Empty;   // 검색창에 요약으로 노출할 마지막 질문
+    private MudTextField<string>? _inputRef;
+    private bool _loading;
+    // 채팅식 대화 누적 (사용자/도우미 턴이 시간순으로 쌓임). 단기 기억의 화면 표현.
+    private readonly List<ChatTurnModel> _turns = new();
+    // 승인 카드 상태: 처리 중인 초안ID + 이미 승인된 초안ID들(중복 승인 방지).
+    private string? _approving;
+    private readonly HashSet<string> _approvedDrafts = new();
+    private TokenQuotaModel? _quota;
+    private List<KbArticleModel> _popularQuestions = new();
+
+    // ── 계산값 ──
+    private double TokenUsagePercent
+    {
+        get
+        {
+            if (_quota is null) return 0;
+            var total = Math.Max(1, _quota.MonthlyLimit + _quota.ExtraTokens);
+            return Math.Min(100, (double)_quota.UsedTokens / total * 100);
+        }
+    }
+
+    private Color TokenColor => TokenUsagePercent switch
+    {
+        >= 95 => Color.Error,
+        >= 80 => Color.Warning,
+        _ => Color.Success
+    };
+
+    protected override async Task OnInitializedAsync()
+    {
+        // 초기 진입 시 쿼터/인기질문 프리페치 — 실패해도 UI는 정상 노출
+        await LoadQuotaAsync();
+        await LoadPopularAsync();
+    }
+
+    private async Task LoadQuotaAsync()
+    {
+        _quota = await Chat.GetQuotaAsync();
+    }
+
+    private async Task LoadPopularAsync()
+    {
+        _popularQuestions = await Chat.GetPopularKbAsync();
+    }
+
+    private void OpenPanel()
+    {
+        _isOpen = true;
+        StateHasChanged();
+
+        // 패널 렌더링 후 입력창에 포커스 (약간의 지연 필요)
+        _ = InvokeAsync(async () =>
+        {
+            await Task.Delay(80);
+            if (_inputRef is not null)
+            {
+                try { await _inputRef.FocusAsync(); } catch { /* 포커스 실패 무시 */ }
+            }
+        });
+    }
+
+    private void ClosePanel()
+    {
+        _isOpen = false;
+    }
+
+    private async Task OnKeyDown(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter" && !string.IsNullOrWhiteSpace(_input))
+        {
+            await SendAsync();
+        }
+        else if (e.Key == "Escape")
+        {
+            ClosePanel();
+        }
+    }
+
+    private async Task AskSuggested(string question)
+    {
+        _input = question;
+        await SendAsync();
+    }
+
+    private async Task SendAsync()
+    {
+        if (string.IsNullOrWhiteSpace(_input) || _loading) return;
+
+        var question = _input.Trim();
+        _currentQuestion = question;
+        _input = string.Empty;
+
+        // 사용자 발화를 즉시 화면에 누적(채팅식).
+        _turns.Add(new ChatTurnModel { Role = "user", Content = question });
+        _loading = true;
+        StateHasChanged();
+
+        try
+        {
+            // 직전 대화(이번 질문 제외)를 history 로 함께 전송 → 맥락 기억 + 재명령 처리.
+            var history = _turns
+                .Where(t => t != _turns[^1])   // 방금 추가한 이번 질문은 제외
+                .Select(t => new ChatTurnModel
+                {
+                    Role = t.Role,
+                    Content = t.Role == "assistant" ? (t.Answer?.Answer ?? t.Content) : t.Content
+                })
+                .ToList();
+
+            var answer = await Chat.AskAsync(question, history);
+            if (answer is not null)
+            {
+                _turns.Add(new ChatTurnModel { Role = "assistant", Content = answer.Answer, Answer = answer });
+            }
+            else
+            {
+                _turns.Add(new ChatTurnModel
+                {
+                    Role = "assistant",
+                    Content = "답변을 받지 못했어요. 다시 시도해 주세요.",
+                    Answer = new ChatAnswerModel { Answer = "답변을 받지 못했어요. 다시 시도해 주세요." }
+                });
+            }
+            await LoadQuotaAsync();   // 토큰 잔량 갱신
+        }
+        catch (Exception ex)
+        {
+            Snack.Add($"답변 실패: {ex.Message}", Severity.Error);
+        }
+        finally
+        {
+            _loading = false;
+            StateHasChanged();
+        }
+    }
+
+    /// <summary>초안 승인 — ApproveUrl(confirm) 호출 → 확정. 사람이 누를 때만 실행(헌법 #6).</summary>
+    private async Task ApproveAsync(PendingActionModel pa)
+    {
+        if (string.IsNullOrEmpty(pa.DraftId) || string.IsNullOrEmpty(pa.ApproveUrl)) return;
+        if (_approvedDrafts.Contains(pa.DraftId)) return;
+
+        _approving = pa.DraftId;
+        StateHasChanged();
+        try
+        {
+            // Lv.3 연쇄 승인 — 거래명세서 확정 + 수주 자동생성(chain=true).
+            var message = await Chat.ApproveActionAsync(pa.Kind, pa.DraftId, chain: true);
+            if (message is not null)
+            {
+                _approvedDrafts.Add(pa.DraftId);
+                var done = $"✅ {message}";
+                _turns.Add(new ChatTurnModel
+                {
+                    Role = "assistant",
+                    Content = done,
+                    Answer = new ChatAnswerModel { Answer = done }
+                });
+                Snack.Add("승인 완료", Severity.Success);
+            }
+            else
+            {
+                Snack.Add("확정 처리에 실패했어요. 잠시 후 다시 시도해 주세요.", Severity.Error);
+            }
+        }
+        catch (Exception ex)
+        {
+            Snack.Add($"승인 실패: {ex.Message}", Severity.Error);
+        }
+        finally
+        {
+            _approving = null;
+            StateHasChanged();
+        }
+    }
+
+    /// <summary>초안 반려 — 확정 안 함. 초안은 draft 로 남아 메뉴에서 수정·삭제 가능.</summary>
+    private void RejectDraft(PendingActionModel pa)
+    {
+        if (!string.IsNullOrEmpty(pa.DraftId))
+        {
+            _approvedDrafts.Add(pa.DraftId); // 카드 비활성화(재처리 방지).
+        }
+        _turns.Add(new ChatTurnModel
+        {
+            Role = "assistant",
+            Content = $"{pa.Title} 초안을 반려했습니다. 확정하지 않았어요(초안 상태로 남습니다).",
+            Answer = new ChatAnswerModel { Answer = $"{pa.Title} 초안을 반려했습니다. 확정하지 않았어요(초안 상태로 남습니다)." }
+        });
+        StateHasChanged();
+    }
+
+    /// <summary>새 대화 — 누적·기억을 비우고 처음부터(사장님 결재 2026-06-20).</summary>
+    private void StartNewConversation()
+    {
+        _turns.Clear();
+        _approvedDrafts.Clear();
+        _approving = null;
+        _currentQuestion = string.Empty;
+        _input = string.Empty;
+        StateHasChanged();
+    }
+
+    private void NavigateAndClose(string url)
+    {
+        ClosePanel();
+        Nav.NavigateTo(url);
+    }
+}

@@ -1,0 +1,122 @@
+@namespace HitPan.Backoffice.Components.Common
+@using System.Net.Http.Json
+@inject HttpClient Http
+
+@* ══════════════════════════════════════════════════════════════
+   StepUpDialog — 어드민 본인 비밀번호 재인증 (Step-up Authentication)
+   WO-20260430-9 (사장님 검증 발견 #신규-E, P0 보안)
+
+   민감 작업 진입 전 호출:
+     var ok = await StepUpDialog.RequestAsync(DialogService, "사용자 정보 수정");
+     if (!ok) return;
+     // ... 실제 액션 ...
+   ══════════════════════════════════════════════════════════════ *@
+
+<MudDialog>
+    <TitleContent>
+        <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="2">
+            <MudIcon Icon="@Icons.Material.Filled.Lock" Color="Color.Warning" />
+            <MudText Typo="Typo.h6">본인 확인</MudText>
+        </MudStack>
+    </TitleContent>
+    <DialogContent>
+        <MudText Typo="Typo.body2" Class="mb-3" Style="line-height:1.6">
+            @ActionLabel<br />
+            안전을 위해 <b>본인 비밀번호</b>를 한 번 더 입력해주세요.
+        </MudText>
+        <MudTextField T="string" @bind-Value="_password" Label="비밀번호"
+                      Variant="Variant.Outlined"
+                      InputType="@(_showPassword ? InputType.Text : InputType.Password)"
+                      Adornment="Adornment.End"
+                      AdornmentIcon="@(_showPassword ? Icons.Material.Filled.VisibilityOff : Icons.Material.Filled.Visibility)"
+                      OnAdornmentClick="@(() => _showPassword = !_showPassword)"
+                      OnKeyDown="@OnKeyDown"
+                      Immediate="true"
+                      Disabled="_busy" />
+        @if (!string.IsNullOrEmpty(_error))
+        {
+            <MudText Typo="Typo.caption" Color="Color.Error" Class="mt-2">@_error</MudText>
+        }
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="Cancel" Variant="Variant.Text" Disabled="_busy">취소</MudButton>
+        <MudButton OnClick="Verify" Variant="Variant.Filled" Color="Color.Primary"
+                   StartIcon="@Icons.Material.Filled.VerifiedUser"
+                   Disabled="_busy || string.IsNullOrEmpty(_password)">
+            @(_busy ? "확인 중..." : "확인")
+        </MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private IMudDialogInstance MudDialog { get; set; } = default!;
+
+    /// <summary>액션 안내 문구 (예: "사용자 정보 수정")</summary>
+    [Parameter] public string ActionLabel { get; set; } = "민감한 작업을 시작합니다.";
+
+    private string _password = string.Empty;
+    private bool _showPassword = false;
+    private bool _busy = false;
+    private string? _error;
+
+    private async Task Verify()
+    {
+        if (string.IsNullOrEmpty(_password))
+        {
+            _error = "비밀번호를 입력하세요.";
+            return;
+        }
+        _busy = true;
+        _error = null;
+        try
+        {
+            var resp = await Http.PostAsJsonAsync("api/auth/verify-password", new { Password = _password });
+            if (resp.IsSuccessStatusCode)
+            {
+                MudDialog.Close(DialogResult.Ok(true));
+            }
+            else
+            {
+                _error = "비밀번호가 일치하지 않습니다.";
+                _password = string.Empty;
+            }
+        }
+        catch (Exception ex)
+        {
+            _error = $"검증 실패: {ex.Message}";
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private async Task OnKeyDown(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter")
+        {
+            await Verify();
+        }
+    }
+
+    private void Cancel() => MudDialog.Cancel();
+
+    /// <summary>Step-up 요청. true=통과, false=취소·실패</summary>
+    public static async Task<bool> RequestAsync(IDialogService dialogService, string actionLabel)
+    {
+        var parameters = new DialogParameters
+        {
+            [nameof(ActionLabel)] = actionLabel
+        };
+        var options = new DialogOptions
+        {
+            MaxWidth = MaxWidth.ExtraSmall,
+            FullWidth = true,
+            CloseOnEscapeKey = true,
+            BackdropClick = false
+        };
+        var dlg = await dialogService.ShowAsync<StepUpDialog>("본인 확인", parameters, options);
+        var result = await dlg.Result;
+        return result is not null && !result.Canceled && result.Data is bool b && b;
+    }
+}

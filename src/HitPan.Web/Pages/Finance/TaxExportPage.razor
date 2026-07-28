@@ -1,0 +1,392 @@
+@page "/accounting/export"
+@namespace HitPan.Web.Pages.FinanceUi
+@attribute [Authorize]
+@using HitPan.Web.Models
+@using HitPan.Web.Services
+@using Microsoft.AspNetCore.Components.Forms
+@inject FinanceClientService FinSvc
+@inject HttpClient Http
+@inject IJSRuntime Js
+@inject ISnackbar Snackbar
+
+<PageTitle>세무사 자료 보내기</PageTitle>
+<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
+    <MudText Typo="Typo.h6">세무사 자료 보내기</MudText>
+    <MudText Style="font-size:12px;color:var(--mud-palette-text-secondary)">자동 추출 + 파일 첨부 → 세무사 이메일 전송</MudText>
+</div>
+
+<!-- ========== STEP 1: 세무사 정보 ========== -->
+<MudPaper Elevation="0" Class="pa-4 mb-3 hitpan-card">
+    <MudText Typo="Typo.subtitle1" Class="mb-2" Style="font-weight:600">STEP 1. 세무사 정보</MudText>
+    <MudGrid Spacing="2" Class="align-center">
+        <MudItem xs="12" md="3">
+            <MudTextField T="string" @bind-Value="_accountantOffice" Label="사무소명" Variant="Variant.Outlined" Margin="Margin.Dense" />
+        </MudItem>
+        <MudItem xs="12" md="2">
+            <MudTextField T="string" @bind-Value="_accountantName" Label="담당자명" Variant="Variant.Outlined" Margin="Margin.Dense" />
+        </MudItem>
+        <MudItem xs="12" md="3">
+            <MudTextField T="string" @bind-Value="_accountantEmail" Label="이메일" Variant="Variant.Outlined" Margin="Margin.Dense" InputType="InputType.Email" />
+        </MudItem>
+        <MudItem xs="12" md="2">
+            <MudTextField T="string" @bind-Value="_accountantPhone" Label="전화번호 (선택)" Variant="Variant.Outlined" Margin="Margin.Dense" />
+        </MudItem>
+        <MudItem xs="12" md="2">
+            <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Save" OnClick="SaveAccountantInfoAsync" FullWidth="true">저장</MudButton>
+        </MudItem>
+    </MudGrid>
+</MudPaper>
+
+<!-- ========== STEP 2: 자료 선택 ========== -->
+<MudPaper Elevation="0" Class="pa-4 mb-3 hitpan-card">
+    <MudText Typo="Typo.subtitle1" Class="mb-3" Style="font-weight:600">STEP 2. 자료 선택</MudText>
+
+    <!-- 자동 추출 (히트판 데이터) -->
+    <MudPaper Elevation="0" Class="pa-3 mb-3" Style="border:1px dashed var(--mud-palette-lines-default);border-radius:8px;background:var(--mud-palette-background-grey)">
+        <MudText Typo="Typo.subtitle2" Class="mb-2" Style="color:var(--mud-palette-primary)">자동 추출 (히트판 데이터)</MudText>
+        <MudGrid Spacing="2">
+            <MudItem xs="12" md="8">
+                <div class="d-flex flex-wrap gap-3">
+                    <MudCheckBox T="bool" @bind-Value="_chkLedger" Label="매입매출장" Color="Color.Primary" Dense="true" />
+                    <MudCheckBox T="bool" @bind-Value="_chkVat" Label="부가세 신고자료" Color="Color.Primary" Dense="true" />
+                    <MudCheckBox T="bool" @bind-Value="_chkCashbook" Label="현금출납장" Color="Color.Primary" Dense="true" />
+                    <MudCheckBox T="bool" @bind-Value="_chkExpenses" Label="경비 내역" Color="Color.Primary" Dense="true" />
+                    <MudCheckBox T="bool" @bind-Value="_chkProfit" Label="손익현황" Color="Color.Primary" Dense="true" />
+                </div>
+            </MudItem>
+            <MudItem xs="12" md="4">
+                <div class="d-flex gap-2 align-center">
+                    <MudSelect T="int" @bind-Value="_selectedYear" Label="연도" Variant="Variant.Outlined" Margin="Margin.Dense" Style="min-width:100px">
+                        @for (int y = DateTime.Today.Year; y >= DateTime.Today.Year - 3; y--)
+                        {
+                            <MudSelectItem T="int" Value="y">@(y)년</MudSelectItem>
+                        }
+                    </MudSelect>
+                    <MudSelect T="int" @bind-Value="_selectedQuarter" Label="분기" Variant="Variant.Outlined" Margin="Margin.Dense" Style="min-width:100px">
+                        <MudSelectItem T="int" Value="1">1분기</MudSelectItem>
+                        <MudSelectItem T="int" Value="2">2분기</MudSelectItem>
+                        <MudSelectItem T="int" Value="3">3분기</MudSelectItem>
+                        <MudSelectItem T="int" Value="4">4분기</MudSelectItem>
+                    </MudSelect>
+                </div>
+            </MudItem>
+        </MudGrid>
+    </MudPaper>
+
+    <!-- 파일 첨부 (외부 자료) -->
+    <MudPaper Elevation="0" Class="pa-3" Style="border:1px dashed var(--mud-palette-lines-default);border-radius:8px;background:var(--mud-palette-background-grey)">
+        <MudText Typo="Typo.subtitle2" Class="mb-2" Style="color:var(--hitpan-warning)">파일 첨부 (외부 자료)</MudText>
+        <MudFileUpload T="IReadOnlyList<IBrowserFile>" FilesChanged="OnFilesChanged"
+                       Accept=".pdf,.xlsx,.xls,.csv,.hwp,.doc,.docx,.zip" MaximumFileCount="10">
+            <ActivatorContent>
+                <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.AttachFile" Color="Color.Default">
+                    파일 선택 (드래그 앤 드롭 가능)
+                </MudButton>
+            </ActivatorContent>
+        </MudFileUpload>
+        @if (_attachedFiles.Any())
+        {
+            <div class="mt-2">
+                @foreach (var file in _attachedFiles)
+                {
+                    <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined" OnClose="() => RemoveFile(file)"
+                             Icon="@Icons.Material.Filled.AttachFile" Color="Color.Default">
+                        @file.Name (@FormatFileSize(file.Size))
+                    </MudChip>
+                }
+            </div>
+        }
+        <MudText Typo="Typo.caption" Class="mt-1" Style="color:var(--mud-palette-text-secondary)">
+            허용 형식: PDF, Excel, CSV, HWP, Word, ZIP | 최대 10MB/파일
+        </MudText>
+    </MudPaper>
+</MudPaper>
+
+<!-- ========== STEP 3: 전송 ========== -->
+<MudPaper Elevation="0" Class="pa-4 mb-3 hitpan-card">
+    <MudText Typo="Typo.subtitle1" Class="mb-2" Style="font-weight:600">STEP 3. 전송</MudText>
+
+    <MudTextField T="string" @bind-Value="_emailSubject" Label="제목" Variant="Variant.Outlined" Margin="Margin.Dense" Class="mb-2" />
+    <MudTextField T="string" @bind-Value="_emailBody" Label="본문" Variant="Variant.Outlined" Margin="Margin.Dense"
+                  Lines="5" Class="mb-3" />
+
+    <!-- 첨부 목록 요약 -->
+    <MudText Typo="Typo.subtitle2" Class="mb-1">첨부 목록</MudText>
+    <MudPaper Elevation="0" Class="pa-2 mb-3" Style="border:1px solid var(--mud-palette-lines-default);border-radius:8px;max-height:180px;overflow-y:auto">
+        @if (!_autoAttachments.Any() && !_attachedFiles.Any())
+        {
+            <MudText Typo="Typo.body2" Style="color:var(--mud-palette-text-secondary)">선택된 자료가 없습니다.</MudText>
+        }
+        else
+        {
+            @foreach (var item in _autoAttachments)
+            {
+                <div class="d-flex align-center gap-2 pa-1">
+                    <MudIcon Icon="@Icons.Material.Filled.Description" Size="Size.Small" Color="Color.Primary" />
+                    <MudText Typo="Typo.body2">@item (자동 추출)</MudText>
+                </div>
+            }
+            @foreach (var file in _attachedFiles)
+            {
+                <div class="d-flex align-center gap-2 pa-1">
+                    <MudIcon Icon="@Icons.Material.Filled.AttachFile" Size="Size.Small" Color="Color.Warning" />
+                    <MudText Typo="Typo.body2">@file.Name (@FormatFileSize(file.Size)) (첨부)</MudText>
+                </div>
+            }
+        }
+    </MudPaper>
+
+    <div class="d-flex justify-end">
+        <MudButton Variant="Variant.Filled" Color="Color.Primary" Size="Size.Large"
+                   StartIcon="@Icons.Material.Filled.Email" OnClick="SendAsync"
+                   Disabled="@(!CanSend)">
+            세무사에게 전송
+        </MudButton>
+    </div>
+</MudPaper>
+
+<!-- ========== 전송 이력 ========== -->
+<MudPaper Elevation="0" Class="pa-4 hitpan-card">
+    <MudText Typo="Typo.subtitle1" Class="mb-2" Style="font-weight:600">전송 이력 (최근 10건)</MudText>
+    @if (!_sendHistory.Any())
+    {
+        <MudText Typo="Typo.body2" Style="color:var(--mud-palette-text-secondary)">전송 이력이 없습니다.</MudText>
+    }
+    else
+    {
+        <MudSimpleTable Dense="true" Hover="true" Striped="true">
+            <thead>
+                <tr>
+                    <th>전송일</th>
+                    <th>제목</th>
+                    <th>첨부파일수</th>
+                    <th>수신자</th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var h in _sendHistory)
+                {
+                    <tr>
+                        <td>@h.SentAt.ToString("yyyy-MM-dd HH:mm")</td>
+                        <td>@h.Subject</td>
+                        <td>@h.FileCount 개</td>
+                        <td>@h.Recipient</td>
+                    </tr>
+                }
+            </tbody>
+        </MudSimpleTable>
+    }
+</MudPaper>
+
+@code {
+    // --- STEP 1: 세무사 정보 ---
+    private string _accountantOffice = string.Empty;
+    private string _accountantName = string.Empty;
+    private string _accountantEmail = string.Empty;
+    private string _accountantPhone = string.Empty;
+
+    // --- STEP 2: 자동 추출 체크박스 ---
+    private bool _chkLedger = true;
+    private bool _chkVat = true;
+    private bool _chkCashbook = true;
+    private bool _chkExpenses = true;
+    private bool _chkProfit = false;
+
+    // --- STEP 2: 기간 선택 ---
+    private int _selectedYear = DateTime.Today.Year;
+    private int _selectedQuarter = (DateTime.Today.Month - 1) / 3 + 1;
+
+    // --- STEP 2: 파일 첨부 ---
+    private List<IBrowserFile> _attachedFiles = new();
+
+    // --- STEP 3: 이메일 ---
+    private string _emailSubject = string.Empty;
+    private string _emailBody = string.Empty;
+
+    // --- 전송 이력 ---
+    private List<SendHistoryItem> _sendHistory = new();
+
+    /// <summary>자동 추출 첨부 목록 (체크된 항목 기반)</summary>
+    private List<string> _autoAttachments
+    {
+        get
+        {
+            var list = new List<string>();
+            var (from, to) = GetQuarterRange();
+            var period = $"{from:yyyyMMdd}_{to:yyyyMMdd}";
+            if (_chkLedger) list.Add($"매입매출장_{period}.pdf");
+            if (_chkVat) list.Add($"부가세신고자료_{_selectedYear}_{_selectedQuarter}분기.pdf");
+            if (_chkCashbook) list.Add($"현금출납장_{period}.pdf");
+            if (_chkExpenses) list.Add($"경비내역_{period}.pdf");
+            if (_chkProfit) list.Add($"손익현황_{_selectedYear}_{_selectedQuarter}분기.pdf");
+            return list;
+        }
+    }
+
+    /// <summary>전송 가능 여부 확인</summary>
+    private bool CanSend =>
+        !string.IsNullOrWhiteSpace(_accountantEmail) &&
+        (_autoAttachments.Any() || _attachedFiles.Any());
+
+    protected override async Task OnInitializedAsync()
+    {
+        // localStorage에서 세무사 정보 로드
+        await LoadAccountantInfoAsync();
+        // 전송 이력 로드
+        await LoadSendHistoryAsync();
+        // 기본 이메일 제목/본문 생성
+        UpdateEmailDefaults();
+    }
+
+    // ===== 세무사 정보 저장/로드 (localStorage) =====
+
+    private async Task SaveAccountantInfoAsync()
+    {
+        if (string.IsNullOrWhiteSpace(_accountantEmail))
+        {
+            Snackbar.Add("이메일은 필수 항목입니다.", Severity.Warning);
+            return;
+        }
+        await Js.InvokeVoidAsync("localStorage.setItem", "tax_accountant_office", _accountantOffice);
+        await Js.InvokeVoidAsync("localStorage.setItem", "tax_accountant_name", _accountantName);
+        await Js.InvokeVoidAsync("localStorage.setItem", "tax_accountant_email", _accountantEmail);
+        await Js.InvokeVoidAsync("localStorage.setItem", "tax_accountant_phone", _accountantPhone);
+        Snackbar.Add("세무사 정보가 저장되었습니다.", Severity.Success);
+        UpdateEmailDefaults();
+    }
+
+    private async Task LoadAccountantInfoAsync()
+    {
+        _accountantOffice = await Js.InvokeAsync<string>("localStorage.getItem", "tax_accountant_office") ?? string.Empty;
+        _accountantName = await Js.InvokeAsync<string>("localStorage.getItem", "tax_accountant_name") ?? string.Empty;
+        _accountantEmail = await Js.InvokeAsync<string>("localStorage.getItem", "tax_accountant_email") ?? string.Empty;
+        _accountantPhone = await Js.InvokeAsync<string>("localStorage.getItem", "tax_accountant_phone") ?? string.Empty;
+    }
+
+    // ===== 파일 첨부 =====
+
+    /// <summary>파일 추가 핸들러</summary>
+    private void OnFilesChanged(IReadOnlyList<IBrowserFile> files)
+    {
+        foreach (var file in files)
+        {
+            // 10MB 제한
+            if (file.Size > 10 * 1024 * 1024)
+            {
+                Snackbar.Add($"파일 크기 초과 (10MB 제한): {file.Name}", Severity.Error);
+                continue;
+            }
+            // 중복 방지
+            if (_attachedFiles.Any(f => f.Name == file.Name))
+            {
+                Snackbar.Add($"이미 첨부된 파일입니다: {file.Name}", Severity.Warning);
+                continue;
+            }
+            _attachedFiles.Add(file);
+        }
+    }
+
+    /// <summary>첨부 파일 제거</summary>
+    private void RemoveFile(IBrowserFile file)
+    {
+        _attachedFiles.Remove(file);
+    }
+
+    // ===== 전송 =====
+
+    /// <summary>세무사에게 전송</summary>
+    private async Task SendAsync()
+    {
+        if (string.IsNullOrWhiteSpace(_accountantEmail))
+        {
+            Snackbar.Add("세무사 이메일을 입력해주세요.", Severity.Warning);
+            return;
+        }
+        if (!_autoAttachments.Any() && !_attachedFiles.Any())
+        {
+            Snackbar.Add("전송할 자료를 선택해주세요.", Severity.Warning);
+            return;
+        }
+
+        // TODO: 실제 SMTP 연동 시 여기에 전송 로직 추가
+        // 현재는 성공 시뮬레이션
+        var totalFiles = _autoAttachments.Count + _attachedFiles.Count;
+        var history = new SendHistoryItem
+        {
+            SentAt = DateTime.Now,
+            Subject = _emailSubject,
+            FileCount = totalFiles,
+            Recipient = string.IsNullOrWhiteSpace(_accountantName)
+                ? _accountantEmail
+                : $"{_accountantName} ({_accountantOffice})"
+        };
+
+        // 전송 이력 저장
+        _sendHistory.Insert(0, history);
+        if (_sendHistory.Count > 10) _sendHistory = _sendHistory.Take(10).ToList();
+        await SaveSendHistoryAsync();
+
+        // 첨부 파일 초기화
+        _attachedFiles.Clear();
+
+        Snackbar.Add($"세무사에게 전송 완료! ({totalFiles}개 파일)", Severity.Success);
+    }
+
+    // ===== 전송 이력 저장/로드 (localStorage) =====
+
+    private async Task SaveSendHistoryAsync()
+    {
+        var json = System.Text.Json.JsonSerializer.Serialize(_sendHistory);
+        await Js.InvokeVoidAsync("localStorage.setItem", "tax_send_history", json);
+    }
+
+    private async Task LoadSendHistoryAsync()
+    {
+        var json = await Js.InvokeAsync<string>("localStorage.getItem", "tax_send_history");
+        if (!string.IsNullOrWhiteSpace(json))
+        {
+            try
+            {
+                _sendHistory = System.Text.Json.JsonSerializer.Deserialize<List<SendHistoryItem>>(json) ?? new();
+            }
+            catch (Exception ex) { _sendHistory = new(); Snackbar.Add($"송부 이력 파싱 실패: {ex.Message}", Severity.Warning); }
+        }
+    }
+
+    // ===== 유틸리티 =====
+
+    /// <summary>분기 기반 시작일/종료일 계산</summary>
+    private (DateTime from, DateTime to) GetQuarterRange()
+    {
+        var startMonth = (_selectedQuarter - 1) * 3 + 1;
+        var from = new DateTime(_selectedYear, startMonth, 1);
+        var to = from.AddMonths(3).AddDays(-1);
+        return (from, to);
+    }
+
+    /// <summary>이메일 제목/본문 기본값 생성</summary>
+    private void UpdateEmailDefaults()
+    {
+        _emailSubject = $"[히트판] {_selectedYear}년 {_selectedQuarter}분기 세무자료 송부";
+        var (from, to) = GetQuarterRange();
+        var name = !string.IsNullOrEmpty(_accountantName) ? $"{_accountantName} 세무사님" : "세무사님";
+        _emailBody = $"안녕하세요, {name}.\n\n{_selectedYear}년 {_selectedQuarter}분기 ({from:yyyy.MM.dd} ~ {to:yyyy.MM.dd}) 세무자료를 송부드립니다.\n확인 부탁드리며, 문의 사항 있으시면 연락 주세요.\n\n감사합니다.";
+    }
+
+    /// <summary>파일 크기 포맷 (KB/MB)</summary>
+    private static string FormatFileSize(long bytes)
+    {
+        if (bytes < 1024) return $"{bytes}B";
+        if (bytes < 1024 * 1024) return $"{bytes / 1024.0:F1}KB";
+        return $"{bytes / (1024.0 * 1024.0):F1}MB";
+    }
+
+    /// <summary>전송 이력 모델</summary>
+    private sealed class SendHistoryItem
+    {
+        public DateTime SentAt { get; set; }
+        public string Subject { get; set; } = string.Empty;
+        public int FileCount { get; set; }
+        public string Recipient { get; set; } = string.Empty;
+    }
+}

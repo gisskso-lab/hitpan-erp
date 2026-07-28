@@ -1,0 +1,378 @@
+@using HitPan.Web.Models
+@using HitPan.Web.Services
+@using MudBlazor
+@inject IDialogService DialogService
+@inject DeliveryService DeliveryService
+@inject ISnackbar Snackbar
+
+<MudDialog Style="min-width:900px;max-width:1100px">
+    <TitleContent>
+        <MudText Typo="Typo.h6">판매 목록 조회</MudText>
+    </TitleContent>
+    <DialogContent>
+        <MudGrid Spacing="2" Class="pa-2">
+            <MudItem xs="12" sm="3">
+                <MudDatePicker @bind-Date="FilterFrom"
+                               Label="시작일"
+                               Variant="Variant.Outlined"
+                               Margin="Margin.Dense"
+                               DateFormat="yyyy-MM-dd" />
+            </MudItem>
+            <MudItem xs="12" sm="3">
+                <MudDatePicker @bind-Date="FilterTo"
+                               Label="종료일"
+                               Variant="Variant.Outlined"
+                               Margin="Margin.Dense"
+                               DateFormat="yyyy-MM-dd" />
+            </MudItem>
+            <MudItem xs="12" sm="4">
+                <MudTextField @bind-Value="FilterPartner"
+                              Label="업체명"
+                              Variant="Variant.Outlined"
+                              Margin="Margin.Dense"
+                              Style="font-size:13px"
+                              Adornment="Adornment.End"
+                              AdornmentIcon="@Icons.Material.Filled.Search" />
+            </MudItem>
+            <MudItem xs="12" sm="2">
+                <MudButton Variant="Variant.Filled"
+                           Color="Color.Primary"
+                           FullWidth="true"
+                           Style="font-size:13px"
+                           OnClick="Search">찾기실행</MudButton>
+            </MudItem>
+        </MudGrid>
+
+        <MudTable T="SalesListItem" Items="Items" Dense="true" Hover="true" Striped="true" FixedHeader="true" Height="400px">
+            <HeaderContent>
+                <MudTh Style="width:48px"><MudCheckBox T="bool" Value="AllChecked" ValueChanged="ToggleAll" Size="Size.Small" /></MudTh>
+                <MudTh>일자</MudTh>
+                <MudTh>전표번호</MudTh>
+                <MudTh>업체</MudTh>
+                <MudTh>상태</MudTh>
+                <MudTh Style="text-align:right">금액</MudTh>
+                <MudTh Style="text-align:right">부가세</MudTh>
+            </HeaderContent>
+            <RowTemplate>
+                <MudTd><MudCheckBox T="bool" Value="context.IsChecked" ValueChanged="@(v => OnCheck(context, v))" Disabled="context.IsProcessed" Size="Size.Small" /></MudTd>
+                <MudTd @ondblclick="@(() => SelectRow(context))">@context.OrderDate.ToString("yyyy-MM-dd")</MudTd>
+                <MudTd @ondblclick="@(() => SelectRow(context))"><MudText Style="font-weight:500">@context.OrderNo</MudText></MudTd>
+                <MudTd @ondblclick="@(() => SelectRow(context))">@context.PartnerName</MudTd>
+                <MudTd><MudChip T="string" Size="Size.Small" Color="@GetStatusColor(context.Status)" Variant="Variant.Text">@GetStatusLabel(context.Status)</MudChip></MudTd>
+                <MudTd Style="text-align:right">@context.TotalAmount.ToString("N0")</MudTd>
+                <MudTd Style="text-align:right">@context.VatAmount.ToString("N0")</MudTd>
+            </RowTemplate>
+            <NoRecordsContent><MudText Class="pa-4" Style="color:#9CA3AF">조회된 거래명세서가 없습니다.</MudText></NoRecordsContent>
+        </MudTable>
+
+        <MudText Typo="Typo.caption"
+                 Class="pa-1"
+                 Style="color:#6B7280">
+            선택: @Items.Count(x => x.IsChecked)건 / 전체: @Items.Count 건
+        </MudText>
+    </DialogContent>
+
+    <DialogActions>
+        <MudButton OnClick="IssueInvoiceAsync"
+                   Variant="Variant.Outlined"
+                   Size="Size.Small"
+                   Style="font-size:12px"
+                   Disabled="!HasDraftChecked">계산서 발행</MudButton>
+        <MudButton OnClick="IssueElectronic"
+                   Variant="Variant.Outlined"
+                   Size="Size.Small"
+                   Style="font-size:12px"
+                   Disabled="!HasInvoicedChecked">전자발행</MudButton>
+        @* AuthorizeView 는 MudDialog 캐스케이드 밖에서 Task<AuthenticationState>를 못 받아
+           "Authorization requires a cascading parameter" 오류 발생.
+           권한 검증은 백엔드 [Authorize(Policy = "SalesManager")] 가 강제하고
+           UI 는 항상 노출 → 권한 없으면 서버가 403 반환, 사용자에게 안내. *@
+        <MudButton OnClick="BulkDeleteAsync"
+                   Variant="Variant.Outlined"
+                   Color="Color.Error"
+                   Size="Size.Small"
+                   Style="font-size:12px"
+                   StartIcon="@Icons.Material.Filled.Delete"
+                   Disabled="!HasDeletableChecked">선택 삭제</MudButton>
+        <MudSpacer />
+        <MudButton OnClick="Close"
+                   Variant="Variant.Outlined"
+                   Size="Size.Small"
+                   Style="font-size:12px">종료(E)</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [Parameter] public string ListType { get; set; } = "sales";
+    [CascadingParameter] private IMudDialogInstance MudDialog { get; set; } = default!;
+
+    private DateTime? FilterFrom = DateTime.Today.AddDays(-30);
+    private DateTime? FilterTo = DateTime.Today;
+    private string FilterPartner = string.Empty;
+    private List<SalesListItem> Items = new();
+    private bool AllChecked;
+    private bool HasChecked => Items.Any(x => x.IsChecked);
+    private bool HasDraftChecked => Items.Any(x => x.IsChecked && x.Status == "draft");
+    private bool HasInvoicedChecked => Items.Any(x => x.IsChecked && x.Status == "invoiced");
+    /// <summary>삭제 가능 = 선택됨 AND 계산서 발행 전(invoiced 아님). 권한은 AuthorizeView에서.</summary>
+    private bool HasDeletableChecked => Items.Any(x => x.IsChecked && x.Status != "invoiced");
+
+    protected override async Task OnInitializedAsync()
+    {
+        await Search();
+    }
+
+    private async Task Search()
+    {
+        var fromStr = FilterFrom?.ToString("yyyy-MM-dd") ?? "";
+        var toStr = FilterTo?.ToString("yyyy-MM-dd") ?? "";
+        var list = await DeliveryService.GetListAsync(fromStr, toStr, FilterPartner, "", CancellationToken.None);
+        Items = list.Select(d => new SalesListItem
+        {
+            OrderId = d.DeliveryId,
+            OrderDate = d.OrderDate,
+            OrderNo = d.DeliveryNo,
+            PartnerId = d.PartnerId,
+            PartnerName = d.PartnerName,
+            TotalAmount = d.TotalAmount,
+            VatAmount = d.VatAmount,
+            Status = d.Status
+        }).ToList();
+        AllChecked = false;
+    }
+
+    private void ToggleAll(bool val)
+    {
+        AllChecked = val;
+        foreach (var item in Items.Where(x => !x.IsProcessed))
+        {
+            item.IsChecked = val;
+        }
+    }
+
+    private void OnCheck(SalesListItem item, bool val)
+    {
+        item.IsChecked = val;
+        AllChecked = Items.Where(x => !x.IsProcessed).All(x => x.IsChecked);
+    }
+
+    /// <summary>행 더블클릭 시 해당 문서를 선택하여 닫는다.</summary>
+    private void SelectRow(SalesListItem item)
+    {
+        MudDialog.Close(DialogResult.Ok(item));
+    }
+
+    private async Task IssueInvoiceAsync()
+    {
+        var checkedItems = Items.Where(x => x.IsChecked && x.Status == "draft").ToList();
+        if (checkedItems.Count == 0) return;
+
+        var result = await DialogService.ShowMessageBoxAsync(
+            "계산서 발행",
+            $"선택한 {checkedItems.Count}건을 확정 처리하시겠습니까?",
+            yesText: "확정",
+            cancelText: "취소");
+        if (result != true) return;
+
+        try
+        {
+            var ids = checkedItems.Select(x => x.OrderId).ToList();
+            var resp = await DeliveryService.BulkConfirmAsync(ids);
+            var successSet = resp.Success.ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+            // 성공한 것만 UI 상태 업데이트. 실패는 상태 유지 + 사유 노출.
+            foreach (var item in checkedItems)
+            {
+                if (successSet.Contains(item.OrderId))
+                {
+                    item.Status = "confirmed";
+                    item.IsChecked = false;
+                }
+            }
+
+            AllChecked = false;
+
+            if (successSet.Count > 0)
+            {
+                Snackbar.Add($"{successSet.Count}건 확정 완료", Severity.Success);
+            }
+
+            if (resp.Failed.Count > 0)
+            {
+                var first = resp.Failed[0];
+                Snackbar.Add($"{resp.Failed.Count}건 확정 실패 — {first.Reason ?? "알 수 없는 오류"}", Severity.Error);
+
+                // 사장님 지시 (2026-04-26): 재고 부족으로 확정 실패한 건이 있으면
+                // 자동발주 후보를 모아 한 번에 다이얼로그로 묻고 OK 시 발주서 생성.
+                var stockShortageIds = resp.Failed
+                    .Where(f => (f.Reason ?? string.Empty).Contains("재고")
+                                && (f.Reason ?? string.Empty).Contains("부족"))
+                    .Select(f => f.Id)
+                    .Where(id => !string.IsNullOrWhiteSpace(id))
+                    .Select(id => id!)
+                    .ToList();
+                if (stockShortageIds.Count > 0)
+                {
+                    await PromptAutoOrderForFailedAsync(stockShortageIds);
+                }
+            }
+
+            StateHasChanged();
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"확정 처리 중 오류: {ex.Message}", Severity.Error);
+        }
+    }
+
+    /// <summary>
+    /// 선택 삭제 — 사장님 지시 (2026-04-26): 판매확정 되더라도 전자계산서 발행 전엔
+    /// 삭제 가능. 권한은 AuthorizeView 로 tenant_admin / sales_manager 등에 제한.
+    /// 서버 DELETE /api/sales/deliveries/{id} 가 자체적으로:
+    ///   - tax_invoices 발행 레코드 있으면 거부
+    ///   - draft → cancelled 표시
+    ///   - confirmed → Reverse 원장 발행 후 cancelled
+    /// </summary>
+    private async Task BulkDeleteAsync()
+    {
+        var targets = Items.Where(x => x.IsChecked && x.Status != "invoiced").ToList();
+        if (targets.Count == 0) return;
+
+        // 사장님 지시 (2026-04-26): "취소가 곧 삭제고, 삭제가 곧 취소".
+        // 현장 직원 친화 문구로 통일 — 재고/회계 reverse 같은 기술 용어 제외.
+        var ok = await DialogService.ShowMessageBoxAsync(
+            "거래명세서 삭제",
+            $"선택한 {targets.Count}건을 삭제하시겠습니까?\n\n" +
+            "해당 목록을 삭제하시면, 해당 거래목록도 취소로 반영됩니다.\n" +
+            "(계산서 발행된 거래는 자동으로 제외됩니다.)",
+            yesText: "삭제", cancelText: "취소");
+        if (ok != true) return;
+
+        var success = 0;
+        var failed = new List<(string No, string Reason)>();
+        foreach (var t in targets)
+        {
+            var r = await DeliveryService.DeleteAsync(t.OrderId);
+            if (r) success++;
+            else failed.Add((t.OrderNo, "서버 거부"));
+        }
+
+        if (success > 0) Snackbar.Add($"{success}건 삭제 완료.", Severity.Success);
+        if (failed.Count > 0)
+        {
+            Snackbar.Add($"{failed.Count}건 삭제 실패: {failed[0].No} ({failed[0].Reason})", Severity.Warning);
+        }
+
+        await Search();
+    }
+
+    /// <summary>
+    /// 일괄 확정 실패한 거래명세서들의 자동발주 후보를 합쳐 다이얼로그로 묻고,
+    /// OK 시 발주서를 한 번에 생성한다 (§20 워크플로우 끊김 금지).
+    /// </summary>
+    private async Task PromptAutoOrderForFailedAsync(List<string> deliveryIds)
+    {
+        var allCandidates = new List<HitPan.Web.Models.AutoOrderCandidateModel>();
+        foreach (var id in deliveryIds)
+        {
+            var list = await DeliveryService.GetAutoOrderCandidatesAsync(id);
+            foreach (var c in list)
+            {
+                if (!allCandidates.Any(x => x.ItemId == c.ItemId))
+                {
+                    allCandidates.Add(c);
+                }
+            }
+        }
+        if (allCandidates.Count == 0) return;
+
+        var outOfStock = allCandidates.Count(c => c.Reason == "out_of_stock");
+        var belowSafety = allCandidates.Count - outOfStock;
+
+        var msg = new System.Text.StringBuilder();
+        msg.AppendLine($"재고 부족으로 확정 실패한 거래명세서 {deliveryIds.Count}건이 있습니다.");
+        msg.AppendLine();
+        if (outOfStock > 0) msg.AppendLine($"재고가 없는 품목: {outOfStock}건");
+        if (belowSafety > 0) msg.AppendLine($"안전재고 이하 품목: {belowSafety}건");
+        msg.AppendLine();
+        foreach (var c in allCandidates.Take(5))
+        {
+            msg.AppendLine($"• {c.ItemName}: 현재고 {c.CurrentQty:N0} / 안전재고 {c.SafetyQty:N0}"
+                + (string.IsNullOrWhiteSpace(c.PartnerName) ? " (공급처 미설정)" : $" → {c.PartnerName}"));
+        }
+        if (allCandidates.Count > 5) msg.AppendLine($"... 외 {allCandidates.Count - 5}건");
+        msg.AppendLine();
+        msg.AppendLine("[자동발주+매입처리] 발주서 생성 후 매입확정까지 진행 (재고 즉시 +반영)");
+        msg.AppendLine("[발주서만] 발주서만 생성, 매입은 수동");
+
+        var choice = await DialogService.ShowMessageBoxAsync(
+            "⚠ 재고부족 자동발주",
+            msg.ToString(),
+            yesText: "자동발주+매입처리",
+            noText: "발주서만",
+            cancelText: "취소");
+        if (choice is null) return;
+
+        var autoReceive = choice == true;
+        var results = await DeliveryService.CreateAutoOrdersAsync(allCandidates, autoReceive);
+        var success = results.Where(r => r.Success).ToList();
+        var failed = results.Where(r => !r.Success).ToList();
+
+        if (success.Count > 0)
+        {
+            var noList = string.Join(", ", success.Select(r => r.PoNo));
+            Snackbar.Add($"자동발주서 {success.Count}건 생성 완료: {noList}", Severity.Success);
+        }
+        if (failed.Count > 0)
+        {
+            var firstReason = failed[0].Reason ?? "사유 미상";
+            Snackbar.Add($"{failed.Count}건 자동발주 실패: {firstReason[..Math.Min(150, firstReason.Length)]}", Severity.Warning);
+        }
+    }
+
+    private async Task IssueElectronic()
+    {
+        var checkedItems = Items.Where(x => x.IsChecked).ToList();
+        var result = await DialogService.ShowMessageBoxAsync(
+            "전자발행",
+            $"선택한 {checkedItems.Count}건을 전자발행 처리하시겠습니까?",
+            yesText: "발행",
+            cancelText: "취소");
+        if (result != true)
+        {
+            return;
+        }
+
+        await Search();
+    }
+
+    private void Close()
+    {
+        MudDialog.Close(DialogResult.Cancel());
+    }
+
+    private Color GetStatusColor(string status) => status switch
+    {
+        "confirmed" => Color.Success,
+        "invoiced" => Color.Primary,
+        "draft" => Color.Default,
+        "quotation" => Color.Warning,
+        "order" => Color.Info,
+        "cancelled" => Color.Error,
+        _ => Color.Default
+    };
+
+    private string GetStatusLabel(string status) => status switch
+    {
+        "confirmed" => "판매확정",
+        "invoiced" => "계산서발행",
+        "draft" => "임시",
+        "quotation" => "견적",
+        "order" => "수주",
+        "cancelled" => "취소",
+        _ => status
+    };
+
+    private string RowStyle(SalesListItem item, int index)
+        => "height:36px;font-size:13px;" + (item.IsProcessed ? "color:#9CA3AF;" : string.Empty);
+}

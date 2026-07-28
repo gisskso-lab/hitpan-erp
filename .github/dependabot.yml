@@ -1,0 +1,23 @@
+# Dependabot — GitHub Actions 버전 자동 갱신 (20260724작3 B-7)
+# ══════════════════════════════════════════════════════════════════════════
+# 왜 필요한가: 워크플로 액션을 40자 커밋 SHA 로 핀(pin)하면 공급망 변조를 막지만,
+#   핀한 뒤에는 보안 패치가 자동으로 안 들어온다(고정이므로). Dependabot 이 매주
+#   최신 릴리스의 SHA 로 갱신 PR 을 열어, 사람이 CODEOWNER 리뷰로 승인하는 루프를 만든다.
+#   → "SHA 핀(변조 차단) + Dependabot(패치 유입)" 두 개가 짝이다(B-7).
+#
+# ⚠️ 현재 상태(정직): 이 파일(=짝의 절반, 패치 유입)만 선반영됐고, 나머지 절반인
+#   **워크플로 액션 SHA 핀은 아직 0건**(전 워크플로가 @v5·@main 가변태그, trufflehog@main 포함).
+#   SHA 핀 본체는 정확한 40자 커밋 해시가 필요해 GitHub 조회 가능한 트랙2(작3 잔여)에서 일괄 적용한다.
+#   그전까지 dependabot 은 가변태그 갱신 PR 만 열 뿐, 공급망 변조 차단(핀)은 미완이다.
+#   → SHA 핀 적용 완료 전에는 이 dependabot 을 "B-7 봉합 완료"로 오독하지 말 것(검증팀 F-1).
+# 헌법 정합: #23(5중 검증)·#19(품질 게이트).
+version: 2
+updates:
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    # 갱신 PR 은 CODEOWNER 리뷰 대상(.github/CODEOWNERS). 자동 머지 금지.
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: "ci(actions)"

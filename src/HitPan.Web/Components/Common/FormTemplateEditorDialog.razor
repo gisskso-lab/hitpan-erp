@@ -1,0 +1,175 @@
+@* 양식 템플릿 신규/수정 다이얼로그 (사장님 작업지시 작지②·③) *@
+@using System.Net.Http.Json
+@using HitPan.Web.Pages.SettingsUi
+@inject HttpClient Http
+@inject ISnackbar Snackbar
+
+<MudDialog>
+    <DialogContent>
+        <MudGrid>
+            <MudItem xs="12" md="6">
+                <MudSelect T="string" @bind-Value="_form.FormType" Label="양식 유형" Required="true" Margin="Margin.Dense">
+                    @foreach (var ft in FormTypes)
+                    {
+                        <MudSelectItem T="string" Value="@ft.Key">@ft.Value</MudSelectItem>
+                    }
+                </MudSelect>
+            </MudItem>
+            <MudItem xs="12" md="6">
+                <MudTextField T="string" @bind-Value="_form.TemplateName" Label="양식 이름" Required="true" Margin="Margin.Dense" />
+            </MudItem>
+            <MudItem xs="12" md="6">
+                <MudSelect T="string" @bind-Value="_form.PaperMode" Label="용지 모드" Margin="Margin.Dense">
+                    <MudSelectItem Value="@("plain")">순백지 (테두리·로고·필드 모두 인쇄)</MudSelectItem>
+                    <MudSelectItem Value="@("preprint")">양식용지 (필드값만 좌표대로)</MudSelectItem>
+                </MudSelect>
+            </MudItem>
+            <MudItem xs="6" md="3">
+                <MudSelect T="string" @bind-Value="_form.PaperSize" Label="용지 크기" Margin="Margin.Dense">
+                    <MudSelectItem Value="@("A4")">A4</MudSelectItem>
+                    <MudSelectItem Value="@("A5")">A5</MudSelectItem>
+                    <MudSelectItem Value="@("Letter")">Letter</MudSelectItem>
+                </MudSelect>
+            </MudItem>
+            <MudItem xs="6" md="3">
+                <MudSelect T="string" @bind-Value="_form.Orientation" Label="방향" Margin="Margin.Dense">
+                    <MudSelectItem Value="@("portrait")">세로</MudSelectItem>
+                    <MudSelectItem Value="@("landscape")">가로</MudSelectItem>
+                </MudSelect>
+            </MudItem>
+            <MudItem xs="6" md="3">
+                <MudNumericField T="decimal" @bind-Value="_form.MarginTopMm" Label="여백 상(mm)" Margin="Margin.Dense" />
+            </MudItem>
+            <MudItem xs="6" md="3">
+                <MudNumericField T="decimal" @bind-Value="_form.MarginLeftMm" Label="여백 좌(mm)" Margin="Margin.Dense" />
+            </MudItem>
+            <MudItem xs="6" md="3">
+                <MudNumericField T="decimal" @bind-Value="_form.MarginRightMm" Label="여백 우(mm)" Margin="Margin.Dense" />
+            </MudItem>
+            <MudItem xs="6" md="3">
+                <MudNumericField T="decimal" @bind-Value="_form.MarginBottomMm" Label="여백 하(mm)" Margin="Margin.Dense" />
+            </MudItem>
+            <MudItem xs="12" md="4">
+                <MudCheckBox T="bool" @bind-Value="_form.ShowCompanyLogo" Label="회사 로고 표시" Dense="true" />
+            </MudItem>
+            <MudItem xs="12" md="4">
+                <MudCheckBox T="bool" @bind-Value="_form.ShowCompanySeal" Label="회사 도장 표시" Dense="true" />
+            </MudItem>
+            <MudItem xs="12" md="4">
+                <MudCheckBox T="bool" @bind-Value="_form.ShowBorder" Label="테두리 표시" Dense="true" />
+            </MudItem>
+            <MudItem xs="12">
+                <MudCheckBox T="bool" @bind-Value="_form.IsDefault" Label="기본 양식으로 설정 (1 form_type 당 1개)" Dense="true" />
+            </MudItem>
+            @if (_form.PaperMode == "preprint")
+            {
+                <MudItem xs="12">
+                    <MudTextField T="string" @bind-Value="_form.BackgroundImageUrl" Label="배경 이미지 URL (양식용지 미리보기 참조)" Margin="Margin.Dense" />
+                </MudItem>
+                <MudItem xs="12">
+                    <MudTextField T="string" @bind-Value="_form.FieldCoordsJson" Label="필드 좌표 JSON (예: [{key,x_mm,y_mm,font_pt}])" Margin="Margin.Dense" Lines="4" Variant="Variant.Outlined" />
+                </MudItem>
+            }
+        </MudGrid>
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="Cancel">취소</MudButton>
+        <MudButton Color="Color.Primary" Variant="Variant.Filled" Disabled="_busy" OnClick="SaveAsync">@(_busy ? "저장 중…" : "저장")</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    private static readonly Dictionary<string, string> FormTypes = new()
+    {
+        ["estimate"] = "견적서",
+        ["sales_order"] = "수주서",
+        ["delivery"] = "거래명세서",
+        ["purchase_order"] = "발주서",
+        ["receipt"] = "매입명세서",
+        ["purchase_return"] = "매입반품",
+        ["sales_return"] = "판매반품",
+        ["tax_invoice"] = "세금계산서"
+    };
+
+    [CascadingParameter] private IMudDialogInstance MudDialog { get; set; } = default!;
+    [Parameter] public FormTemplatesPage.FormTemplateDto? Template { get; set; }
+
+    private FormTemplatesPage.FormTemplateDto _form = new();
+    private bool _busy;
+
+    protected override void OnInitialized()
+    {
+        if (Template != null)
+        {
+            _form = new FormTemplatesPage.FormTemplateDto
+            {
+                TemplateId = Template.TemplateId,
+                FormType = Template.FormType,
+                TemplateName = Template.TemplateName,
+                PaperMode = Template.PaperMode,
+                PaperSize = Template.PaperSize,
+                Orientation = Template.Orientation,
+                MarginTopMm = Template.MarginTopMm,
+                MarginLeftMm = Template.MarginLeftMm,
+                MarginRightMm = Template.MarginRightMm,
+                MarginBottomMm = Template.MarginBottomMm,
+                FieldCoordsJson = Template.FieldCoordsJson,
+                BackgroundImageUrl = Template.BackgroundImageUrl,
+                ShowCompanyLogo = Template.ShowCompanyLogo,
+                ShowCompanySeal = Template.ShowCompanySeal,
+                ShowBorder = Template.ShowBorder,
+                IsDefault = Template.IsDefault,
+                IsActive = Template.IsActive
+            };
+        }
+        else
+        {
+            _form.FormType = "estimate";
+            _form.TemplateName = "신규 양식";
+        }
+    }
+
+    private async Task SaveAsync()
+    {
+        if (string.IsNullOrWhiteSpace(_form.FormType) || string.IsNullOrWhiteSpace(_form.TemplateName))
+        {
+            Snackbar.Add("양식 유형과 이름은 필수입니다.", Severity.Warning);
+            return;
+        }
+
+        _busy = true;
+        try
+        {
+            HttpResponseMessage resp;
+            if (string.IsNullOrEmpty(_form.TemplateId))
+            {
+                resp = await Http.PostAsJsonAsync("api/settings/form-templates", _form);
+            }
+            else
+            {
+                resp = await Http.PutAsJsonAsync($"api/settings/form-templates/{_form.TemplateId}", _form);
+            }
+
+            if (resp.IsSuccessStatusCode)
+            {
+                Snackbar.Add("저장되었습니다.", Severity.Success);
+                MudDialog.Close(DialogResult.Ok(true));
+            }
+            else
+            {
+                var body = await resp.Content.ReadAsStringAsync();
+                Snackbar.Add($"저장 실패 ({(int)resp.StatusCode}): {body}", Severity.Error);
+            }
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"저장 실패: {ex.Message}", Severity.Error);
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private void Cancel() => MudDialog.Cancel();
+}

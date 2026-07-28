@@ -1,0 +1,54 @@
+@page "/hr/attendance-calendar"
+@namespace HitPan.Web.Pages.HrUi
+@attribute [Authorize]
+@using HitPan.Web.Models
+@using HitPan.Web.Services
+@inject HrClientService HrSvc
+
+<PageTitle>근태 현황</PageTitle>
+<PageHeader Title="근태 현황" Subtitle="기간별 출퇴근 기록" />
+
+@* 기간 필터 *@
+<MudPaper Class="pa-3 mb-3" Elevation="0" Style="border:1px solid var(--mud-palette-lines-default);border-radius:12px">
+    <MudGrid Spacing="2" Class="align-center">
+        <MudItem xs="6" md="2"><MudDatePicker Label="시작일" @bind-Date="_from" Variant="Variant.Outlined" Margin="Margin.Dense" Style="min-width:160px" /></MudItem>
+        <MudItem xs="6" md="2"><MudDatePicker Label="종료일" @bind-Date="_to" Variant="Variant.Outlined" Margin="Margin.Dense" Style="min-width:160px" /></MudItem>
+        <MudItem xs="12" md="2"><MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="LoadAsync">조회</MudButton></MudItem>
+    </MudGrid>
+</MudPaper>
+
+<MudPaper Elevation="0" Class="pa-2 hitpan-card">
+    <MudTable Items="_items" Dense="true" Hover="true" Striped="true">
+        <HeaderContent>
+            <MudTh>날짜</MudTh><MudTh>사원</MudTh><MudTh>출근</MudTh><MudTh>퇴근</MudTh>
+            <MudTh Style="text-align:right">근무시간</MudTh><MudTh>상태</MudTh><MudTh>메모</MudTh>
+        </HeaderContent>
+        <RowTemplate>
+            <MudTd DataLabel="날짜">@context.WorkDate.ToString("yyyy-MM-dd")</MudTd>
+            <MudTd DataLabel="사원">@context.EmployeeName</MudTd>
+            <MudTd DataLabel="출근">@(context.CheckIn?.ToString("HH:mm") ?? "-")</MudTd>
+            <MudTd DataLabel="퇴근">@(context.CheckOut?.ToString("HH:mm") ?? "-")</MudTd>
+            <MudTd DataLabel="근무시간" Style="text-align:right">@(context.WorkHours?.ToString("N1") ?? "-")h</MudTd>
+            <MudTd DataLabel="상태">
+                <MudChip T="string" Size="Size.Small" Variant="Variant.Text"
+                    Color="@(context.Status == "normal" ? Color.Success : Color.Warning)">
+                    @(context.Status == "normal" ? "정상" : context.Status)
+                </MudChip>
+            </MudTd>
+            <MudTd DataLabel="메모">@context.Memo</MudTd>
+        </RowTemplate>
+        <NoRecordsContent><MudText Class="pa-4" Style="color:var(--hitpan-text-faint)">근태 기록이 없습니다.</MudText></NoRecordsContent>
+    </MudTable>
+</MudPaper>
+
+@code {
+    private List<AttendanceModel> _items = new();
+    // 기본 기간: 이번 달 1일 ~ 오늘
+    private DateTime? _from = new DateTime(DateTime.Today.Year, DateTime.Today.Month, 1);
+    private DateTime? _to = DateTime.Today;
+
+    protected override async Task OnInitializedAsync() => await LoadAsync();
+
+    // 로드 실패 시 GetAttendanceAsync 내부 catch가 빈 목록을 반환 → 크래시 없음
+    private async Task LoadAsync() => _items = await HrSvc.GetAttendanceAsync(_from, _to);
+}

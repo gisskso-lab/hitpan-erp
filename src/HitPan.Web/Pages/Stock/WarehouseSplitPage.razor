@@ -1,0 +1,153 @@
+@page "/stock/warehouse-split"
+@namespace HitPan.Web.Pages.StockUi
+@attribute [Authorize]
+@using System.Net.Http.Json
+@inject HttpClient Http
+@inject ISnackbar Snackbar
+
+<PageTitle>창고분리 (자사/위탁)</PageTitle>
+<MudText Typo="Typo.h6" Class="mb-3">창고분리 (자사/위탁)</MudText>
+
+@* KPI 카드 영역 *@
+<MudGrid Spacing="3" Class="mb-3">
+    <MudItem xs="12" sm="3">
+        <MudPaper Class="pa-3 text-center" Elevation="0" Style="border:0.5px solid var(--mud-palette-lines-default);border-radius:12px">
+            <MudText Typo="Typo.caption" Style="color:#6B7280">자사창고 수</MudText>
+            <MudText Typo="Typo.h5" Style="color:#0F6E56;font-weight:700">@_kpi.OwnCount.ToString("N0")</MudText>
+        </MudPaper>
+    </MudItem>
+    <MudItem xs="12" sm="3">
+        <MudPaper Class="pa-3 text-center" Elevation="0" Style="border:0.5px solid var(--mud-palette-lines-default);border-radius:12px">
+            <MudText Typo="Typo.caption" Style="color:#6B7280">위탁창고 수</MudText>
+            <MudText Typo="Typo.h5" Style="color:#2563EB;font-weight:700">@_kpi.ConsignCount.ToString("N0")</MudText>
+        </MudPaper>
+    </MudItem>
+    <MudItem xs="12" sm="3">
+        <MudPaper Class="pa-3 text-center" Elevation="0" Style="border:0.5px solid var(--mud-palette-lines-default);border-radius:12px">
+            <MudText Typo="Typo.caption" Style="color:#6B7280">총 품목수</MudText>
+            <MudText Typo="Typo.h5" Style="font-weight:700">@_kpi.TotalItems.ToString("N0")</MudText>
+        </MudPaper>
+    </MudItem>
+    <MudItem xs="12" sm="3">
+        <MudPaper Class="pa-3 text-center" Elevation="0" Style="border:0.5px solid var(--mud-palette-lines-default);border-radius:12px">
+            <MudText Typo="Typo.caption" Style="color:#6B7280">총 재고금액</MudText>
+            <MudText Typo="Typo.h5" Style="font-weight:700">@_kpi.TotalAmount.ToString("N0")</MudText>
+        </MudPaper>
+    </MudItem>
+</MudGrid>
+
+@* 로딩 바 *@
+@if (_isLoading)
+{
+    <MudProgressLinear Color="Color.Primary" Indeterminate="true" Class="mb-2" />
+}
+
+@* 창고 분리 테이블 *@
+<MudPaper Elevation="0" Style="border:0.5px solid var(--mud-palette-lines-default);border-radius:12px;overflow:hidden">
+    <MudTable T="WarehouseSplitRow" Items="_rows" Dense="true" Hover="true" Striped="true" FixedHeader="true" Height="calc(100vh - 320px)">
+        <HeaderContent>
+            <MudTh>창고코드</MudTh>
+            <MudTh>창고명</MudTh>
+            <MudTh>유형</MudTh>
+            <MudTh>위치</MudTh>
+            <MudTh Style="text-align:right">품목수</MudTh>
+            <MudTh Style="text-align:right">재고수량</MudTh>
+            <MudTh Style="text-align:right">재고금액</MudTh>
+        </HeaderContent>
+        <RowTemplate>
+            <MudTd>@context.WarehouseCode</MudTd>
+            <MudTd>@context.WarehouseName</MudTd>
+            <MudTd>
+                <MudChip T="string" Size="Size.Small" Color="@GetTypeColor(context.WarehouseType)" Variant="Variant.Filled">
+                    @GetTypeLabel(context.WarehouseType)
+                </MudChip>
+            </MudTd>
+            <MudTd>@context.Location</MudTd>
+            <MudTd Style="text-align:right">@context.ItemCount.ToString("N0")</MudTd>
+            <MudTd Style="text-align:right">@context.StockQty.ToString("N1")</MudTd>
+            <MudTd Style="text-align:right;font-weight:500">@context.StockAmount.ToString("N0")</MudTd>
+        </RowTemplate>
+        <NoRecordsContent><MudText Class="pa-4" Style="color:#9CA3AF">등록된 창고가 없습니다.</MudText></NoRecordsContent>
+    </MudTable>
+</MudPaper>
+
+@code {
+    private bool _isLoading;
+    private List<WarehouseSplitRow> _rows = new();
+    private KpiData _kpi = new();
+
+    protected override async Task OnInitializedAsync() => await LoadDataAsync();
+
+    /// <summary>창고 분리 현황을 조회한다.</summary>
+    private async Task LoadDataAsync()
+    {
+        _isLoading = true;
+        StateHasChanged();
+        try
+        {
+            var result = await Http.GetFromJsonAsync<WarehouseSplitResult>("api/stock/warehouse-split");
+            if (result != null)
+            {
+                _rows = result.Rows ?? new();
+                _kpi = result.Kpi ?? new();
+            }
+        }
+        catch (Exception _hp15Ex)
+        {
+            Console.Error.WriteLine($"[HP15] " + _hp15Ex.GetType().Name + ": " + _hp15Ex.Message);
+            _rows = new();
+            _kpi = new();
+        }
+        finally
+        {
+            _isLoading = false;
+            StateHasChanged();
+        }
+    }
+
+    /// <summary>창고 유형에 따른 칩 색상을 반환한다.</summary>
+    private Color GetTypeColor(string type) => type switch
+    {
+        "normal" => Color.Success,
+        "consign" => Color.Info,
+        "defect" => Color.Error,
+        "return" => Color.Warning,
+        _ => Color.Default
+    };
+
+    /// <summary>창고 유형 라벨을 반환한다.</summary>
+    private string GetTypeLabel(string type) => type switch
+    {
+        "normal" => "자사",
+        "consign" => "위탁",
+        "defect" => "불량",
+        "return" => "반품",
+        _ => type
+    };
+
+    // --- 내부 모델 ---
+    private class WarehouseSplitResult
+    {
+        public List<WarehouseSplitRow>? Rows { get; set; }
+        public KpiData? Kpi { get; set; }
+    }
+
+    private class KpiData
+    {
+        public int OwnCount { get; set; }
+        public int ConsignCount { get; set; }
+        public int TotalItems { get; set; }
+        public decimal TotalAmount { get; set; }
+    }
+
+    private class WarehouseSplitRow
+    {
+        public string WarehouseCode { get; set; } = "";
+        public string WarehouseName { get; set; } = "";
+        public string WarehouseType { get; set; } = "";
+        public string Location { get; set; } = "";
+        public int ItemCount { get; set; }
+        public decimal StockQty { get; set; }
+        public decimal StockAmount { get; set; }
+    }
+}

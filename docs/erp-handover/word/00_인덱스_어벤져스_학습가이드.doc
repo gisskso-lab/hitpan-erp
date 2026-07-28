@@ -1,0 +1,111 @@
+﻿<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:w="urn:schemas-microsoft-com:office:word" xmlns="http://www.w3.org/TR/REC-html40">
+<head>
+<meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
+<meta name="ProgId" content="Word.Document">
+<meta name="Generator" content="Microsoft Word">
+<title>00_인덱스_어벤져스_학습가이드</title>
+<!--[if gte mso 9]>
+<xml>
+<w:WordDocument>
+<w:View>Print</w:View>
+<w:Zoom>100</w:Zoom>
+</w:WordDocument>
+</xml>
+<![endif]-->
+<style>
+body { font-family: 'Malgun Gothic', sans-serif; font-size: 11pt; line-height: 1.6; }
+table { border-collapse: collapse; }
+</style>
+</head>
+<body><p><h1 style="border-bottom:2px solid #333;padding-bottom:5px;color:#1976D2;">히트판 ERP — 어벤져스 팀 학습 인계서 (인덱스)</h1></p><p><blockquote style="border-left:4px solid #1976D2;padding-left:10px;color:#555;margin:10px 0;"><strong>작성</strong>: 2026-06-01 PM 브라운킴</blockquote>
+<blockquote style="border-left:4px solid #1976D2;padding-left:10px;color:#555;margin:10px 0;"><strong>용도</strong>: 어벤져스 팀 (AI수석·백엔드·DB·보안·프론트·디자이너·ERP·기술영업·마케팅) 전반적 이해·공부</blockquote>
+<blockquote style="border-left:4px solid #1976D2;padding-left:10px;color:#555;margin:10px 0;"><strong>대상</strong>: 백오피스·랜딩페이지 설계 진입 전 ERP 현재 상태 학습</blockquote>
+<blockquote style="border-left:4px solid #1976D2;padding-left:10px;color:#555;margin:10px 0;"><strong>형식</strong>: 페이퍼(워드/PDF) 변환용 마크다운 원본</blockquote></p><p><hr style="border:none;border-top:1px solid #ccc;"></p><p><h2 style="border-bottom:1px solid #999;padding-bottom:3px;color:#1976D2;">📚 문서 목차 (22종)</h2></p><p><h3 style="color:#333;">1. 분석 자료</h3>
+<table style='border-collapse:collapse;margin:10px 0;'><thead><tr><th style='border:1px solid #aaa;padding:4px 8px;background:#e3f2fd;'>#</th><th style='border:1px solid #aaa;padding:4px 8px;background:#e3f2fd;'>문서</th><th style='border:1px solid #aaa;padding:4px 8px;background:#e3f2fd;'>파일</th><th style='border:1px solid #aaa;padding:4px 8px;background:#e3f2fd;'>용도</th></tr></thead><tbody><tr><td style='border:1px solid #aaa;padding:4px 8px;'>01</td><td style='border:1px solid #aaa;padding:4px 8px;'>요구사항정의서</td><td style='border:1px solid #aaa;padding:4px 8px;'><code style='background:#eee;font-family:Consolas;font-size:9pt;padding:1px 4px;'>01_요구사항정의서.md</code></td><td style='border:1px solid #aaa;padding:4px 8px;'>ERP가 무엇을 해야 하는가</td></tr>
+<tr><td style='border:1px solid #aaa;padding:4px 8px;'>02</td><td style='border:1px solid #aaa;padding:4px 8px;'>기능차트</td><td style='border:1px solid #aaa;padding:4px 8px;'><code style='background:#eee;font-family:Consolas;font-size:9pt;padding:1px 4px;'>02_기능차트.md</code></td><td style='border:1px solid #aaa;padding:4px 8px;'>6단계 워크플로우 + 87개 라우트</td></tr>
+<tr><td style='border:1px solid #aaa;padding:4px 8px;'>03</td><td style='border:1px solid #aaa;padding:4px 8px;'>프로세스정의서</td><td style='border:1px solid #aaa;padding:4px 8px;'><code style='background:#eee;font-family:Consolas;font-size:9pt;padding:1px 4px;'>03_프로세스정의서.md</code></td><td style='border:1px solid #aaa;padding:4px 8px;'>워크플로우 3흐름 (매입·BOM·판매)</td></tr>
+<tr><td style='border:1px solid #aaa;padding:4px 8px;'>04</td><td style='border:1px solid #aaa;padding:4px 8px;'>인터페이스정의서</td><td style='border:1px solid #aaa;padding:4px 8px;'><code style='background:#eee;font-family:Consolas;font-size:9pt;padding:1px 4px;'>04_인터페이스정의서.md</code></td><td style='border:1px solid #aaa;padding:4px 8px;'>API endpoint 명세</td></tr>
+<tr><td style='border:1px solid #aaa;padding:4px 8px;'>05</td><td style='border:1px solid #aaa;padding:4px 8px;'>기능정의서</td><td style='border:1px solid #aaa;padding:4px 8px;'><code style='background:#eee;font-family:Consolas;font-size:9pt;padding:1px 4px;'>05_기능정의서.md</code></td><td style='border:1px solid #aaa;padding:4px 8px;'>화면별 기능 상세</td></tr></tbody></table>
+<h3 style="color:#333;">2. 설계</h3>
+<table style='border-collapse:collapse;margin:10px 0;'><thead><tr><th style='border:1px solid #aaa;padding:4px 8px;background:#e3f2fd;'>#</th><th style='border:1px solid #aaa;padding:4px 8px;background:#e3f2fd;'>문서</th><th style='border:1px solid #aaa;padding:4px 8px;background:#e3f2fd;'>파일</th><th style='border:1px solid #aaa;padding:4px 8px;background:#e3f2fd;'>용도</th></tr></thead><tbody><tr><td style='border:1px solid #aaa;padding:4px 8px;'>06</td><td style='border:1px solid #aaa;padding:4px 8px;'>UI설계서</td><td style='border:1px solid #aaa;padding:4px 8px;'><code style='background:#eee;font-family:Consolas;font-size:9pt;padding:1px 4px;'>06_UI설계서.md</code></td><td style='border:1px solid #aaa;padding:4px 8px;'>87개 화면 레이아웃 + MudBlazor 패턴</td></tr>
+<tr><td style='border:1px solid #aaa;padding:4px 8px;'>07</td><td style='border:1px solid #aaa;padding:4px 8px;'>ERD</td><td style='border:1px solid #aaa;padding:4px 8px;'><code style='background:#eee;font-family:Consolas;font-size:9pt;padding:1px 4px;'>07_ERD.md</code></td><td style='border:1px solid #aaa;padding:4px 8px;'>137개 테이블 관계도</td></tr>
+<tr><td style='border:1px solid #aaa;padding:4px 8px;'>08</td><td style='border:1px solid #aaa;padding:4px 8px;'>테이블정의서</td><td style='border:1px solid #aaa;padding:4px 8px;'><code style='background:#eee;font-family:Consolas;font-size:9pt;padding:1px 4px;'>08_테이블정의서.md</code></td><td style='border:1px solid #aaa;padding:4px 8px;'>137개 테이블 컬럼 명세</td></tr>
+<tr><td style='border:1px solid #aaa;padding:4px 8px;'>09</td><td style='border:1px solid #aaa;padding:4px 8px;'>프로그램목록</td><td style='border:1px solid #aaa;padding:4px 8px;'><code style='background:#eee;font-family:Consolas;font-size:9pt;padding:1px 4px;'>09_프로그램목록.md</code></td><td style='border:1px solid #aaa;padding:4px 8px;'>Razor + Controller + Service 247개 파일</td></tr>
+<tr><td style='border:1px solid #aaa;padding:4px 8px;'>10</td><td style='border:1px solid #aaa;padding:4px 8px;'>개발표준정의서</td><td style='border:1px solid #aaa;padding:4px 8px;'><code style='background:#eee;font-family:Consolas;font-size:9pt;padding:1px 4px;'>10_개발표준정의서.md</code></td><td style='border:1px solid #aaa;padding:4px 8px;'>헌법 32개 + 절대원칙 25개</td></tr>
+<tr><td style='border:1px solid #aaa;padding:4px 8px;'>11</td><td style='border:1px solid #aaa;padding:4px 8px;'>단위테스트시나리오</td><td style='border:1px solid #aaa;padding:4px 8px;'><code style='background:#eee;font-family:Consolas;font-size:9pt;padding:1px 4px;'>11_단위테스트시나리오.md</code></td><td style='border:1px solid #aaa;padding:4px 8px;'>xUnit 165건 명세</td></tr>
+<tr><td style='border:1px solid #aaa;padding:4px 8px;'>12</td><td style='border:1px solid #aaa;padding:4px 8px;'>통합테스트시나리오</td><td style='border:1px solid #aaa;padding:4px 8px;'><code style='background:#eee;font-family:Consolas;font-size:9pt;padding:1px 4px;'>12_통합테스트시나리오.md</code></td><td style='border:1px solid #aaa;padding:4px 8px;'>Playwright 시나리오</td></tr></tbody></table>
+<h3 style="color:#333;">3. 개발</h3>
+<table style='border-collapse:collapse;margin:10px 0;'><thead><tr><th style='border:1px solid #aaa;padding:4px 8px;background:#e3f2fd;'>#</th><th style='border:1px solid #aaa;padding:4px 8px;background:#e3f2fd;'>문서</th><th style='border:1px solid #aaa;padding:4px 8px;background:#e3f2fd;'>파일</th><th style='border:1px solid #aaa;padding:4px 8px;background:#e3f2fd;'>용도</th></tr></thead><tbody><tr><td style='border:1px solid #aaa;padding:4px 8px;'>13</td><td style='border:1px solid #aaa;padding:4px 8px;'>소스코드 (아카이브 + 가이드)</td><td style='border:1px solid #aaa;padding:4px 8px;'><code style='background:#eee;font-family:Consolas;font-size:9pt;padding:1px 4px;'>13_소스코드_가이드.md</code></td><td style='border:1px solid #aaa;padding:4px 8px;'>Git 태그 + zip 위치 + 코드 탐색 가이드</td></tr>
+<tr><td style='border:1px solid #aaa;padding:4px 8px;'>14</td><td style='border:1px solid #aaa;padding:4px 8px;'>단위테스트결과서</td><td style='border:1px solid #aaa;padding:4px 8px;'><code style='background:#eee;font-family:Consolas;font-size:9pt;padding:1px 4px;'>14_단위테스트결과서.md</code></td><td style='border:1px solid #aaa;padding:4px 8px;'>165/165 PASS 결과</td></tr>
+<tr><td style='border:1px solid #aaa;padding:4px 8px;'>15</td><td style='border:1px solid #aaa;padding:4px 8px;'>결함/오류보고서</td><td style='border:1px solid #aaa;padding:4px 8px;'><code style='background:#eee;font-family:Consolas;font-size:9pt;padding:1px 4px;'>15_결함오류보고서.md</code></td><td style='border:1px solid #aaa;padding:4px 8px;'>진범 #1~#100 박제</td></tr>
+<tr><td style='border:1px solid #aaa;padding:4px 8px;'>16</td><td style='border:1px solid #aaa;padding:4px 8px;'>통합테스트결과서</td><td style='border:1px solid #aaa;padding:4px 8px;'><code style='background:#eee;font-family:Consolas;font-size:9pt;padding:1px 4px;'>16_통합테스트결과서.md</code></td><td style='border:1px solid #aaa;padding:4px 8px;'>Playwright 87/87 진입 결과</td></tr>
+<tr><td style='border:1px solid #aaa;padding:4px 8px;'>17</td><td style='border:1px solid #aaa;padding:4px 8px;'>시스템이행계획서</td><td style='border:1px solid #aaa;padding:4px 8px;'><code style='background:#eee;font-family:Consolas;font-size:9pt;padding:1px 4px;'>17_시스템이행계획서.md</code></td><td style='border:1px solid #aaa;padding:4px 8px;'>베타 출시 계획</td></tr></tbody></table>
+<h3 style="color:#333;">4. 구현</h3>
+<table style='border-collapse:collapse;margin:10px 0;'><thead><tr><th style='border:1px solid #aaa;padding:4px 8px;background:#e3f2fd;'>#</th><th style='border:1px solid #aaa;padding:4px 8px;background:#e3f2fd;'>문서</th><th style='border:1px solid #aaa;padding:4px 8px;background:#e3f2fd;'>파일</th><th style='border:1px solid #aaa;padding:4px 8px;background:#e3f2fd;'>용도</th></tr></thead><tbody><tr><td style='border:1px solid #aaa;padding:4px 8px;'>19</td><td style='border:1px solid #aaa;padding:4px 8px;'>사용자매뉴얼</td><td style='border:1px solid #aaa;padding:4px 8px;'><code style='background:#eee;font-family:Consolas;font-size:9pt;padding:1px 4px;'>19_사용자매뉴얼.md</code></td><td style='border:1px solid #aaa;padding:4px 8px;'>일반 사용자 (경리·구매·창고)</td></tr>
+<tr><td style='border:1px solid #aaa;padding:4px 8px;'>20</td><td style='border:1px solid #aaa;padding:4px 8px;'>운영자매뉴얼</td><td style='border:1px solid #aaa;padding:4px 8px;'><code style='background:#eee;font-family:Consolas;font-size:9pt;padding:1px 4px;'>20_운영자매뉴얼.md</code></td><td style='border:1px solid #aaa;padding:4px 8px;'>tenant_admin / system_admin</td></tr>
+<tr><td style='border:1px solid #aaa;padding:4px 8px;'>21</td><td style='border:1px solid #aaa;padding:4px 8px;'>교육(인수)명세서</td><td style='border:1px solid #aaa;padding:4px 8px;'><code style='background:#eee;font-family:Consolas;font-size:9pt;padding:1px 4px;'>21_교육명세서.md</code></td><td style='border:1px solid #aaa;padding:4px 8px;'>어벤져스 팀별 학습 커리큘럼</td></tr>
+<tr><td style='border:1px solid #aaa;padding:4px 8px;'>22</td><td style='border:1px solid #aaa;padding:4px 8px;'>산출물별 검사리스트</td><td style='border:1px solid #aaa;padding:4px 8px;'><code style='background:#eee;font-family:Consolas;font-size:9pt;padding:1px 4px;'>22_검사리스트.md</code></td><td style='border:1px solid #aaa;padding:4px 8px;'>5중 검증 체크리스트</td></tr>
+<tr><td style='border:1px solid #aaa;padding:4px 8px;'>23</td><td style='border:1px solid #aaa;padding:4px 8px;'>현재상태 보고서</td><td style='border:1px solid #aaa;padding:4px 8px;'><code style='background:#eee;font-family:Consolas;font-size:9pt;padding:1px 4px;'>23_현재상태보고서.md</code></td><td style='border:1px solid #aaa;padding:4px 8px;'>2026-06-01 PM/CTO 관점 85% B+</td></tr></tbody></table>
+<h3 style="color:#333;">산출 제외 (사장님 결재)</h3>
+<ul><li><strong>18. 시스템이행결과서</strong>: ERP 아직 이행 안 됨 → 23번 현재상태 보고서로 대체</li></p><p></ul>---</p><p><h2 style="border-bottom:1px solid #999;padding-bottom:3px;color:#1976D2;">🎯 어벤져스 팀별 학습 우선순위</h2></p><p><h3 style="color:#333;">AI수석 (구조·프롬프트·검증)</h3>
+<ul><li><strong>필독</strong>: 10 개발표준 → 03 프로세스 → 12 통합테스트 → 23 현재상태</li>
+<li><strong>핵심 학습</strong>: 헌법 32개, 워크플로우 3흐름, AI 협업 5중 검증 (헌법 #23)</li></p><p></ul><h3 style="color:#333;">백엔드 매니저</h3>
+<ul><li><strong>필독</strong>: 04 인터페이스 → 09 프로그램목록 → 08 테이블 → 11 단위테스트 → 14 결과</li>
+<li><strong>핵심 학습</strong>: Controller 56개, Service 55개, Dapper 패턴, EnsureOpen</li></p><p></ul><h3 style="color:#333;">DB 매니저</h3>
+<ul><li><strong>필독</strong>: 07 ERD → 08 테이블 → 15 결함 (진범 #99 UUID→Guid 등)</li>
+<li><strong>핵심 학습</strong>: 137개 테이블, utf8mb4_unicode_ci, INSERT ONLY 원장 (헌법 #3)</li></p><p></ul><h3 style="color:#333;">보안 매니저 1·2</h3>
+<ul><li><strong>필독</strong>: 10 개발표준 (헌법 #5·#7·#22·#23·#31) → 22 검사리스트 → 15 결함</li>
+<li><strong>핵심 학습</strong>: JWT 클레임 격리, 데이터 최소주의, 5중 검증, 백신 5종 호환</li></p><p></ul><h3 style="color:#333;">프론트 매니저</h3>
+<ul><li><strong>필독</strong>: 06 UI → 09 프로그램목록 → 15 결함 (진범 #100 WASM fetch)</li>
+<li><strong>핵심 학습</strong>: 136개 Razor, MudBlazor, OnAfterRenderAsync 패턴</li></p><p></ul><h3 style="color:#333;">수석 웹디자이너</h3>
+<ul><li><strong>필독</strong>: 06 UI → 05 기능정의서 → 19 사용자매뉴얼</li>
+<li><strong>핵심 학습</strong>: 한 화면 완결 원칙, 더존/이카운트 벤치마크</li></p><p></ul><h3 style="color:#333;">ERP 매니저</h3>
+<ul><li><strong>필독</strong>: 01 요구사항 → 02 기능차트 → 03 프로세스 → 19 사용자매뉴얼</li>
+<li><strong>핵심 학습</strong>: 6단계 워크플로우, 워크플로우 3흐름, "3분 안에 쓸 수 있냐"</li></p><p></ul><h3 style="color:#333;">기술영업팀장</h3>
+<ul><li><strong>필독</strong>: 01 요구사항 → 05 기능정의서 → 19 매뉴얼 → 23 현재상태</li>
+<li><strong>핵심 학습</strong>: 셀링 포인트, 더존·이카운트 대비 차별점</li></p><p></ul><h3 style="color:#333;">마케팅팀장</h3>
+<ul><li><strong>필독</strong>: 01 요구사항 → 19 사용자매뉴얼 → 23 현재상태</li>
+<li><strong>핵심 학습</strong>: "30초 안에 설명 가능한가", 메시징 키워드</li></p><p></ul>---</p><p><h2 style="border-bottom:1px solid #999;padding-bottom:3px;color:#1976D2;">📊 ERP 현재 상태 요약 (2026-06-01)</h2></p><p><table style='border-collapse:collapse;margin:10px 0;'><thead><tr><th style='border:1px solid #aaa;padding:4px 8px;background:#e3f2fd;'>영역</th><th style='border:1px solid #aaa;padding:4px 8px;background:#e3f2fd;'>점수</th><th style='border:1px solid #aaa;padding:4px 8px;background:#e3f2fd;'>비고</th></tr></thead><tbody><tr><td style='border:1px solid #aaa;padding:4px 8px;'>기능 구현 (87개 화면 + API + DB)</td><td style='border:1px solid #aaa;padding:4px 8px;'>95% A</td><td style='border:1px solid #aaa;padding:4px 8px;'>골격 완성</td></tr>
+<tr><td style='border:1px solid #aaa;padding:4px 8px;'>빌드·테스트·보안</td><td style='border:1px solid #aaa;padding:4px 8px;'>100% A+</td><td style='border:1px solid #aaa;padding:4px 8px;'>0 errors / 165/165 / 보안 0건</td></tr>
+<tr><td style='border:1px solid #aaa;padding:4px 8px;'>실사용 흐름 검증 (CRUD·E2E)</td><td style='border:1px solid #aaa;padding:4px 8px;'>60% C</td><td style='border:1px solid #aaa;padding:4px 8px;'>진입만 검증, 클릭 미실측</td></tr>
+<tr><td style='border:1px solid #aaa;padding:4px 8px;'>EVF·통신·백신 (베타 게이트)</td><td style='border:1px solid #aaa;padding:4px 8px;'>30% F</td><td style='border:1px solid #aaa;padding:4px 8px;'>3시스템 통합 후 봉합</td></tr>
+<tr><td style='border:1px solid #aaa;padding:4px 8px;'><strong>PM/CTO 종합</strong></td><td style='border:1px solid #aaa;padding:4px 8px;'><strong>85% B+</strong></td><td style='border:1px solid #aaa;padding:4px 8px;'><strong>조건부 GO — 랜딩·백오피스 진입</strong></td></tr></tbody></table>
+<hr style="border:none;border-top:1px solid #ccc;"></p><p><h2 style="border-bottom:1px solid #999;padding-bottom:3px;color:#1976D2;">🏛 절대 헌법 (32개) — 1줄 요약</h2></p><p>1. 수정 OK, 덮어쓰기 금지
+2. tenant_id는 JWT 클레임에서만
+3. INSERT ONLY 원장
+4. 금액은 decimal
+5. 암호화 필수 컬럼
+6. 원장 반영은 confirmed 시점
+7. SaaS ↔ ERP 권한 혼용 금지
+8. 6단계 워크플로우 순서
+9. DB는 미리 다, 코드는 필요할 때만
+10. 한 화면씩 완성 → 결재
+11. 권한은 어드민이 직접
+12. 인터페이스 확장 시 grep 필수
+13. 새 SQL 전 DESCRIBE 의무
+14. Razor에 raw string 금지
+15. 빈 catch 금지
+16. MySqlConnection + Task.WhenAll 금지
+17. 신규 테이블 InnoDB 명시
+18. 본사로 업무 데이터 전송 금지
+19. errors 0 + warnings 0
+20. 워크플로우 끊김 절대 금지
+21. appsettings.json 절대 보호
+22. 본사 데이터 최소주의
+23. AI 협업 코드 5중 검증
+24. 책임 분산 + 가르침 의무
+25. 쉽게·정확하게·안전하게
+26. 마이그 목표-Timeout 분리
+27. 통신 무결성 절대 우선
+28. Windows Update 후 cloudflared 자동 복구
+29. 인프라 조작 사전 승인제
+30. 고객 PC 자가 회복
+31. OS 보안 도구 호환성 (Defender·백신 5종)
+32. <strong>점수·평가 받아쓰기 절대 금지</strong></p><p><hr style="border:none;border-top:1px solid #ccc;"></p><p><h2 style="border-bottom:1px solid #999;padding-bottom:3px;color:#1976D2;">📂 디렉터리 구조</h2></p><p><pre style='background:#f4f4f4;padding:8px;font-family:Consolas;font-size:9pt;border:1px solid #ddd;'>docs/erp-handover/
+├── 00_인덱스_어벤져스_학습가이드.md     ← 이 문서
+├── 01~23_*.md                              ← 22개 본문 (18 제외)
+├── word/                                   ← .docx 변환본
+└── source/                                 ← 소스코드 zip (별도)</pre></p><p><hr style="border:none;border-top:1px solid #ccc;"></p><p><h2 style="border-bottom:1px solid #999;padding-bottom:3px;color:#1976D2;">✅ 사장님 결재 박제</h2></p><p><ul><li><strong>2026-06-01 00:30</strong>: "내일부턴 백오피스, 랜딩페이지 설계로 들어갈거야"</li>
+<li><strong>2026-06-01 새벽</strong>: "어벤져스 학습용 22개 페이퍼 형식 11시까지" + "18번 제외, 23번 현재상태로 대체"</li></p><p></ul><strong>PM 브라운킴 박제 종료.</strong>
+</p></body>
+</html>

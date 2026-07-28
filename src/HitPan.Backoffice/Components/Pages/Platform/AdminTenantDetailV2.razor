@@ -1,0 +1,385 @@
+@page "/admin/tenants/{TenantId}"
+@layout PlatformLayout
+@attribute [Authorize]
+@rendermode InteractiveServer
+@inject IHttpClientFactory HttpFactory
+@inject ISnackbar Snackbar
+@inject IDialogService Dialog
+@inject NavigationManager Nav
+@using HitPan.Backoffice.Components.Common
+
+@*
+    고객사 상세 V2 — 헌법 #35 백오피스 API(5258) 직접 호출 (사장님 결재 2026-06-04)
+    [BoPermission] tenants.detail / .suspend / .activate
+    데이터: 본사 백오피스 DB tenants + tenant_payments 메타만 (평문 사업자정보·카드정보 0)
+*@
+
+<PageTitle>@(_item?.CompanyName ?? "고객사 상세") — 히트판 백오피스</PageTitle>
+
+<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px;gap:12px;">
+    <div style="display:flex;align-items:center;gap:12px;">
+        <MudIconButton Icon="@Icons.Material.Filled.ArrowBack" Size="Size.Medium"
+                       OnClick='() => Nav.NavigateTo("/admin/tenants")' />
+        <div>
+            <MudText Typo="Typo.h5" Style="font-weight:600;">@(_item?.CompanyName ?? "로딩 중...")</MudText>
+            <MudText Typo="Typo.body2" Color="Color.Secondary">
+                @(_item?.TenantCode) · 가입 @(_item?.CreatedAt.ToString("yyyy-MM-dd") ?? "")
+            </MudText>
+        </div>
+    </div>
+    @if (_item is not null)
+    {
+        <div style="display:flex;gap:8px;">
+            @if (_item.Status == "active")
+            {
+                <MudButton Variant="Variant.Outlined" Color="Color.Warning"
+                           StartIcon="@Icons.Material.Filled.PauseCircle"
+                           OnClick="SuspendAsync">정지</MudButton>
+            }
+            else if (_item.Status == "suspended" || _item.Status == "pending")
+            {
+                <MudButton Variant="Variant.Filled" Color="Color.Success"
+                           StartIcon="@Icons.Material.Filled.PlayCircle"
+                           OnClick="ActivateAsync">복구</MudButton>
+            }
+            @* 고객사 삭제 (사장님 결재 2026-07-04) — tenants+landing_signups+DNS 일괄 정리.
+               되돌릴 수 없는 작업이라 위험 경고 2중 확인 후에만 실행. API: DELETE api/backoffice/tenants/{id} *@
+            <MudButton Variant="Variant.Outlined" Color="Color.Error"
+                       StartIcon="@Icons.Material.Filled.DeleteForever"
+                       OnClick="DeleteAsync">삭제</MudButton>
+        </div>
+    }
+</div>
+
+@if (_loading)
+{
+    <MudProgressLinear Indeterminate="true" Color="Color.Primary" />
+}
+else if (_item is null)
+{
+    <MudPaper Elevation="0" Class="pa-8" Style="border-radius:12px;background:#F9FAFB;text-align:center;">
+        <MudText Color="Color.Secondary">고객사를 찾을 수 없습니다.</MudText>
+    </MudPaper>
+}
+else
+{
+    <MudGrid Spacing="3">
+        <MudItem xs="12" md="6">
+            <MudPaper Elevation="1" Class="pa-4" Style="border-radius:12px;height:100%;">
+                <MudText Typo="Typo.h6" Class="mb-3" Style="color:#0F6E56;">기본 정보</MudText>
+                @RowText("고객사 코드", _item.TenantCode)
+                @RowText("회사명", _item.CompanyName)
+                @RowText("연락처", _item.Tel ?? "-")
+                <div class="bo-row">
+                    <div class="bo-row-label">상태</div>
+                    <div class="bo-row-value">
+                        <MudChip T="string" Size="Size.Small" Color="@StatusColor(_item.Status)">
+                            @StatusLabel(_item.Status)
+                        </MudChip>
+                    </div>
+                </div>
+                <div class="bo-row">
+                    <div class="bo-row-label">ERP 설치</div>
+                    <div class="bo-row-value">
+                        @if (_item.IsLocked == 1)
+                        {
+                            <MudChip T="string" Size="Size.Small" Color="Color.Success">완료 (@_item.BootstrapAt?.ToString("yyyy-MM-dd HH:mm"))</MudChip>
+                        }
+                        else
+                        {
+                            <MudChip T="string" Size="Size.Small" Color="Color.Warning">미설치</MudChip>
+                        }
+                    </div>
+                </div>
+                @RowText("가입일", _item.CreatedAt.ToString("yyyy-MM-dd HH:mm"))
+                @RowText("라이선스 해시(앞 12자)", _item.LicenseHashPrefix ?? "-", mono: true)
+            </MudPaper>
+        </MudItem>
+
+        <MudItem xs="12" md="6">
+            <MudPaper Elevation="1" Class="pa-4" Style="border-radius:12px;height:100%;">
+                <MudText Typo="Typo.h6" Class="mb-3" Style="color:#0F6E56;">구독 · 협력업체</MudText>
+                @RowText("구독 등급", _item.SubscriptionTier ?? "basic")
+                @RowText("AI 모드", _item.AiMode ?? "hitpan_pool")
+                @RowText("AI 토큰 한도", $"{_item.AiTokenMonthlyLimit:N0} / 월")
+                @RowText("기기 슬롯", $"{_item.MaxUsers} 사용자")
+                <div class="bo-row">
+                    <div class="bo-row-label">협력업체</div>
+                    <div class="bo-row-value">
+                        @if (!string.IsNullOrEmpty(_item.ResellerId))
+                        {
+                            <span>@_item.ResellerName <span style="color:#9CA3AF;font-size:11px;">(@_item.ResellerCode)</span></span>
+                        }
+                        else
+                        {
+                            <span style="color:#9CA3AF;">직판 (대리점 없음)</span>
+                        }
+                    </div>
+                </div>
+                @if (_item.TrialEndsAt.HasValue)
+                {
+                    @RowText("체험 만료", _item.TrialEndsAt.Value.ToString("yyyy-MM-dd"))
+                }
+            </MudPaper>
+        </MudItem>
+
+        <MudItem xs="12">
+            <MudPaper Elevation="1" Class="pa-4" Style="border-radius:12px;">
+                <MudText Typo="Typo.h6" Class="mb-3" Style="color:#0F6E56;">결제 이력 (최근 10건, 메타만)</MudText>
+                @if (_payments is null || _payments.Count == 0)
+                {
+                    <MudText Color="Color.Secondary">결제 이력이 없습니다.</MudText>
+                }
+                else
+                {
+                    <MudSimpleTable Dense="true" Hover="true">
+                        <thead>
+                            <tr>
+                                <th>주문번호</th>
+                                <th>금액</th>
+                                <th>방법</th>
+                                <th>상태</th>
+                                <th>승인 시각</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                        @foreach (var p in _payments)
+                        {
+                            <tr>
+                                <td><code style="font-size:11px;">@p.OrderId</code></td>
+                                <td>@p.Amount.ToString("N0")원</td>
+                                <td>@(p.Method ?? "-")</td>
+                                <td>
+                                    <MudChip T="string" Size="Size.Small" Color="@PaymentStatusColor(p.Status)">@p.Status</MudChip>
+                                </td>
+                                <td style="font-size:12px;color:#6B7280;">@(p.ApprovedAt ?? p.CreatedAt.ToString("yyyy-MM-dd HH:mm"))</td>
+                            </tr>
+                        }
+                        </tbody>
+                    </MudSimpleTable>
+                }
+            </MudPaper>
+        </MudItem>
+    </MudGrid>
+}
+
+@code {
+    [Parameter] public string TenantId { get; set; } = "";
+
+    private TenantDetail? _item;
+    private List<PaymentMeta>? _payments;
+    private bool _loading = true;
+
+    protected override async Task OnInitializedAsync() => await LoadAsync();
+
+    private async Task LoadAsync()
+    {
+        _loading = true;
+        try
+        {
+            var http = HttpFactory.CreateClient("backoffice-authed");
+            var res = await http.GetFromJsonAsync<DetailResponse>($"api/backoffice/tenants/{TenantId}");
+            _item = res?.Item;
+            _payments = res?.Payments?.ToList();
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"상세 조회 실패: {ex.Message}", Severity.Error);
+            _item = null;
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    private async Task SuspendAsync()
+    {
+        if (_item is null) return;
+        var parameters = new DialogParameters
+        {
+            ["Row"] = new AdminTenantsV2.TenantRow
+            {
+                TenantId = _item.TenantId,
+                TenantCode = _item.TenantCode,
+                CompanyName = _item.CompanyName,
+                Status = _item.Status
+            }
+        };
+        var dialog = await Dialog.ShowAsync<TenantSuspendDialog>("고객사 정지", parameters);
+        var result = await dialog.Result;
+        if (result?.Canceled != false || result.Data is not string reason || string.IsNullOrWhiteSpace(reason)) return;
+
+        try
+        {
+            var http = HttpFactory.CreateClient("backoffice-authed");
+            var res = await http.PostAsJsonAsync($"api/backoffice/tenants/{TenantId}/suspend", new { Reason = reason });
+            var payload = await res.Content.ReadFromJsonAsync<ActionResponse>();
+            if (res.IsSuccessStatusCode && payload?.Success == true)
+            {
+                Snackbar.Add(payload.Message ?? "정지 처리되었습니다.", Severity.Warning);
+                await LoadAsync();
+            }
+            else
+            {
+                Snackbar.Add(payload?.Message ?? $"정지 실패 ({(int)res.StatusCode})", Severity.Error);
+            }
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"정지 처리 오류: {ex.Message}", Severity.Error);
+        }
+    }
+
+    private async Task ActivateAsync()
+    {
+        if (_item is null) return;
+        var ok = await ConfirmDialog.ShowAsync(Dialog,
+            "고객사 복구",
+            $"{_item.CompanyName} ({_item.TenantCode}) 고객사를 활성화 복구하시겠습니까?",
+            confirmText: "복구", cancelText: "취소", severity: Severity.Success);
+        if (!ok) return;
+
+        try
+        {
+            var http = HttpFactory.CreateClient("backoffice-authed");
+            var res = await http.PostAsync($"api/backoffice/tenants/{TenantId}/activate", null);
+            var payload = await res.Content.ReadFromJsonAsync<ActionResponse>();
+            if (res.IsSuccessStatusCode && payload?.Success == true)
+            {
+                Snackbar.Add(payload.Message ?? "활성화 복구되었습니다.", Severity.Success);
+                await LoadAsync();
+            }
+            else
+            {
+                Snackbar.Add(payload?.Message ?? $"복구 실패 ({(int)res.StatusCode})", Severity.Error);
+            }
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"복구 처리 오류: {ex.Message}", Severity.Error);
+        }
+    }
+
+    // 고객사 삭제 (사장님 결재 2026-07-04) — 되돌릴 수 없음. 위험 경고 2중 확인 후 DELETE 호출.
+    //   서버(TenantsAdminController.Delete)가 tenants + landing_signups + tenant_devices
+    //   + serial_verify_attempts + Cloudflare DNS(도메인 CNAME)까지 일괄 정리한다(좀비 DNS 방지).
+    private async Task DeleteAsync()
+    {
+        if (_item is null) return;
+        var ok = await ConfirmDialog.ShowAsync(Dialog,
+            "고객사 완전 삭제",
+            $"'{_item.CompanyName}' ({_item.TenantCode}) 고객사를 완전히 삭제합니다.\n\n" +
+            "· 가입 정보, 라이선스, 기기 등록, 도메인(DNS)이 모두 삭제됩니다.\n" +
+            "· 이 작업은 되돌릴 수 없습니다.\n\n정말 삭제하시겠습니까?",
+            confirmText: "완전 삭제", cancelText: "취소", severity: Severity.Error);
+        if (!ok) return;
+
+        try
+        {
+            var http = HttpFactory.CreateClient("backoffice-authed");
+            var res = await http.DeleteAsync($"api/backoffice/tenants/{TenantId}");
+            var payload = await res.Content.ReadFromJsonAsync<ActionResponse>();
+            if (res.IsSuccessStatusCode && payload?.Success == true)
+            {
+                Snackbar.Add(payload.Message ?? "고객사가 삭제되었습니다.", Severity.Success);
+                Nav.NavigateTo("/admin/tenants");
+            }
+            else
+            {
+                Snackbar.Add(payload?.Message ?? $"삭제 실패 ({(int)res.StatusCode})", Severity.Error);
+            }
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"삭제 처리 오류: {ex.Message}", Severity.Error);
+        }
+    }
+
+    private static string StatusLabel(string s) => s switch
+    {
+        "pending" => "대기",
+        "active" => "활성",
+        "suspended" => "정지",
+        "trial" => "체험",
+        "inactive" => "비활성",
+        _ => s
+    };
+
+    private static Color StatusColor(string s) => s switch
+    {
+        "pending" => Color.Warning,
+        "active" => Color.Success,
+        "suspended" => Color.Error,
+        "trial" => Color.Info,
+        "inactive" => Color.Default,
+        _ => Color.Default
+    };
+
+    private static Color PaymentStatusColor(string s) => s switch
+    {
+        "confirmed" => Color.Success,
+        "canceled" => Color.Default,
+        "failed" => Color.Error,
+        _ => Color.Warning
+    };
+
+    private RenderFragment RowText(string label, string? value, bool mono = false) => __builder =>
+    {
+        <div class="bo-row">
+            <div class="bo-row-label">@label</div>
+            <div class="bo-row-value" style="@(mono ? "font-family:Consolas,Monaco,monospace;font-size:12px;" : "")">@value</div>
+        </div>
+    };
+
+    public class TenantDetail
+    {
+        public string TenantId { get; set; } = "";
+        public string TenantCode { get; set; } = "";
+        public string CompanyName { get; set; } = "";
+        public string? Tel { get; set; }
+        public string Status { get; set; } = "";
+        public int IsLocked { get; set; }
+        public DateTime? TrialEndsAt { get; set; }
+        public DateTime? BootstrapAt { get; set; }
+        public DateTime CreatedAt { get; set; }
+        public DateTime UpdatedAt { get; set; }
+        public string? ResellerId { get; set; }
+        public string? ResellerName { get; set; }
+        public string? ResellerCode { get; set; }
+        public int MaxUsers { get; set; }
+        public string? LicenseHashPrefix { get; set; }
+        public string? SubscriptionTier { get; set; }
+        public string? AiMode { get; set; }
+        public int AiTokenMonthlyLimit { get; set; }
+    }
+
+    public class PaymentMeta
+    {
+        public string OrderId { get; set; } = "";
+        public long Amount { get; set; }
+        public string? Method { get; set; }
+        public string Status { get; set; } = "";
+        public string? ApprovedAt { get; set; }
+        public DateTime CreatedAt { get; set; }
+    }
+
+    private class DetailResponse
+    {
+        public bool Success { get; set; }
+        public TenantDetail? Item { get; set; }
+        public List<PaymentMeta>? Payments { get; set; }
+    }
+
+    private class ActionResponse
+    {
+        public bool Success { get; set; }
+        public string? Message { get; set; }
+    }
+}
+
+<style>
+    .bo-row { display: flex; align-items: center; padding: 8px 0; border-bottom: 1px solid #F3F4F6; }
+    .bo-row-label { width: 140px; font-size: 13px; color: #6B7280; }
+    .bo-row-value { flex: 1; font-size: 14px; }
+</style>

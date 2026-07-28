@@ -1,0 +1,698 @@
+@page "/settings/mdb-migration"
+@namespace HitPan.Web.Pages.SettingsUi
+@attribute [Authorize]
+@using Microsoft.AspNetCore.SignalR.Client
+@using HitPan.Web.Models
+@using HitPan.Web.Providers
+@inject HttpClient Http
+@inject ISnackbar Snackbar
+@inject IDialogService DialogService
+@inject HitPanProtectedLocalStorage Storage
+@inject HitPan.Web.Services.IAuthService Auth
+@implements IAsyncDisposable
+
+<PageTitle>데이터 이관</PageTitle>
+
+<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
+    <MudText Typo="Typo.h6">기존 히트판 데이터 이관</MudText>
+    <MudText Style="font-size:12px;color:var(--mud-palette-text-secondary)">
+        기존 히트판의 데이터를 새 히트판으로 간편하게 가져옵니다
+    </MudText>
+</div>
+
+@* 경고 알림 *@
+<MudAlert Severity="Severity.Warning" Class="mb-4" Dense="true" Icon="@Icons.Material.Filled.Warning">
+    이관 전 반드시 기존 데이터를 백업하세요. 중복 데이터가 생길 수 있습니다.
+</MudAlert>
+
+@* MDB 폴더 경로 입력 + 버튼 *@
+<MudPaper Elevation="0" Class="pa-4 mb-4" Style="border:0.5px solid var(--mud-palette-lines-default);border-radius:12px">
+    <MudText Typo="Typo.subtitle2" Class="mb-3">기존 히트판 설치 폴더</MudText>
+    <MudGrid Spacing="2">
+        <MudItem xs="12" md="6">
+            <MudTextField T="string" Label="MDB 폴더 경로" @bind-Value="_folderPath"
+                          Variant="Variant.Outlined" Margin="Margin.Dense"
+                          Placeholder="예: C:\HITWIN"
+                          HelperText="기존 히트판이 설치된 폴더 경로를 입력하세요 (보통 C:\HITWIN)" />
+        </MudItem>
+        <MudItem xs="12" md="2">
+            @* 핫픽스 2026-05-13: 레거시 MDB 비번 입력 칸 (예: 7618968) *@
+            <MudTextField T="string" Label="MDB 비밀번호" @bind-Value="_mdbPassword"
+                          Variant="Variant.Outlined" Margin="Margin.Dense"
+                          InputType="InputType.Password"
+                          HelperText="MDB에 비번이 걸려있으면 입력 (없으면 비워두세요)" />
+        </MudItem>
+        <MudItem xs="12" md="2">
+            <MudButton Variant="Variant.Outlined" Color="Color.Primary"
+                       StartIcon="@Icons.Material.Filled.Search"
+                       OnClick="PreviewAsync"
+                       Disabled="@(_loading || string.IsNullOrWhiteSpace(_folderPath))"
+                       Style="height:40px;margin-top:4px;width:100%">
+                미리보기
+            </MudButton>
+        </MudItem>
+        <MudItem xs="12" md="2">
+            <MudButton Variant="Variant.Filled" Color="Color.Primary"
+                       StartIcon="@Icons.Material.Filled.PlayArrow"
+                       OnClick="StartMigrationAsync"
+                       Disabled="@(_loading || _previewResult == null)"
+                       Style="height:40px;margin-top:4px;width:100%">
+                이관 시작
+            </MudButton>
+        </MudItem>
+    </MudGrid>
+</MudPaper>
+
+@* P0 #6 (2026-05-14): Sticky 헤더 — 마이그 진행 중 항상 상단 고정 가시화 *@
+@if (_loading)
+{
+    <div style="position:sticky;top:0;z-index:50;background:var(--mud-palette-background);padding:12px 0;border-bottom:1px solid var(--mud-palette-lines-default);margin-bottom:16px">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+            <MudText Typo="Typo.subtitle2">
+                <MudIcon Icon="@Icons.Material.Filled.Sync" Size="Size.Small" Class="mr-1" Style="animation:spin 2s linear infinite" />
+                마이그레이션 진행 중
+            </MudText>
+            <MudText Typo="Typo.body2" Style="color:var(--mud-palette-text-secondary)">
+                @_completedTables / @_totalTables 완료 · 경과 @(_elapsedSeconds)초
+            </MudText>
+        </div>
+        <MudProgressLinear Color="Color.Primary" Value="@_progressPercent" Class="mb-2" Style="height:8px" />
+        <MudText Typo="Typo.caption" Style="color:var(--mud-palette-text-secondary)">
+            @_statusMessage
+        </MudText>
+        @if (_cancelRequested)
+        {
+            <MudText Typo="Typo.caption" Color="Color.Warning" Class="mt-1">
+                중단 요청됨 — 안전 종료까지 잠시 기다려 주세요.
+            </MudText>
+        }
+    </div>
+
+    @* 테이블별 카드 그리드 — 16개 테이블 진행 상태 *@
+    <MudGrid Spacing="2" Class="mb-4">
+        @foreach (var t in _tableCards)
+        {
+            <MudItem xs="6" sm="4" md="3" lg="2">
+                <MudPaper Elevation="0" Class="pa-2"
+                          Style="@($"border:1px solid {GetCardBorder(t.Status)};border-radius:8px;background:{GetCardBg(t.Status)};min-height:78px")">
+                    <div style="display:flex;align-items:center;gap:4px;margin-bottom:4px">
+                        <MudIcon Icon="@GetStatusIcon(t.Status)" Size="Size.Small" Color="@GetStatusColor(t.Status)" />
+                        <MudText Typo="Typo.body2" Style="font-weight:500;font-size:12px">@t.Label</MudText>
+                    </div>
+                    <MudText Typo="Typo.body2" Style="font-size:11px;color:var(--mud-palette-text-secondary)">
+                        @if (t.Status == "completed")
+                        {
+                            @* 진범 #69 봉합 (2026-05-20, 옵션 B'): hover 시 INSERT/중복 상세 표시. *@
+                            <MudTooltip Arrow="true" Placement="Placement.Top">
+                                <ChildContent>
+                                    @($"{t.Rows:N0}행 · {t.ElapsedMs / 1000.0:F1}s")
+                                    @if (t.SkippedRows > 0)
+                                    {
+                                        <span style="color:var(--mud-palette-warning);font-weight:500">&nbsp;⚠</span>
+                                    }
+                                </ChildContent>
+                                <TooltipContent>
+                                    <div style="text-align:left">
+                                        <div>후보 (staging) : @t.Rows.ToString("N0")행</div>
+                                        <div>INSERT 적재 : @((t.InsertedRows > 0 ? t.InsertedRows : t.Rows).ToString("N0"))행</div>
+                                        @if (t.SkippedRows > 0)
+                                        {
+                                            <div style="color:#ffb74d">중복 차단 : @t.SkippedRows.ToString("N0")건</div>
+                                        }
+                                    </div>
+                                </TooltipContent>
+                            </MudTooltip>
+                        }
+                        else if (t.Status == "running")
+                        {
+                            <span>진행 중...</span>
+                        }
+                        else if (t.Status == "failed")
+                        {
+                            <span style="color:var(--mud-palette-error)">@(t.ErrorMessage ?? "실패")</span>
+                        }
+                        else
+                        {
+                            <span>대기</span>
+                        }
+                    </MudText>
+                </MudPaper>
+            </MudItem>
+        }
+    </MudGrid>
+
+    <style>
+        @@keyframes spin { from { transform:rotate(0deg) } to { transform:rotate(360deg) } }
+    </style>
+}
+
+@* 미리보기 / 결과 2단 레이아웃 *@
+@if (_previewResult != null || _migrationResult != null)
+{
+    <MudGrid Spacing="3">
+        @* 좌측: 원본(MDB) 테이블 현황 *@
+        <MudItem xs="12" md="6">
+            <MudPaper Elevation="0" Class="pa-4" Style="border:0.5px solid var(--mud-palette-lines-default);border-radius:12px">
+                <MudText Typo="Typo.subtitle2" Class="mb-3">
+                    <MudIcon Icon="@Icons.Material.Filled.Storage" Size="Size.Small" Class="mr-1" />
+                    기존 히트판 데이터
+                </MudText>
+
+                @if (_previewResult != null)
+                {
+                    <MudTable Items="_previewResult" Dense="true" Hover="true" Elevation="0"
+                              Style="border:0.5px solid var(--mud-palette-lines-default);border-radius:8px">
+                        <HeaderContent>
+                            <MudTh>테이블명</MudTh>
+                            <MudTh Style="text-align:right">레코드 수</MudTh>
+                        </HeaderContent>
+                        <RowTemplate>
+                            <MudTd DataLabel="테이블명">@context.Key</MudTd>
+                            <MudTd DataLabel="레코드 수" Style="text-align:right">
+                                @context.Value.ToString("N0")
+                            </MudTd>
+                        </RowTemplate>
+                    </MudTable>
+
+                    <MudText Typo="Typo.body2" Class="mt-2" Style="color:var(--mud-palette-text-secondary)">
+                        총 @_previewResult.Values.Sum().ToString("N0") 건
+                    </MudText>
+                }
+            </MudPaper>
+        </MudItem>
+
+        @* 우측: 마이그레이션 결과 (새 히트판) *@
+        <MudItem xs="12" md="6">
+            <MudPaper Elevation="0" Class="pa-4" Style="border:0.5px solid var(--mud-palette-lines-default);border-radius:12px">
+                <MudText Typo="Typo.subtitle2" Class="mb-3">
+                    <MudIcon Icon="@Icons.Material.Filled.CloudUpload" Size="Size.Small" Class="mr-1" />
+                    이관 결과 (새 히트판)
+                </MudText>
+
+                @if (_migrationResult != null)
+                {
+                    <MudTable Items="_migrationRows" Dense="true" Hover="true" Elevation="0"
+                              Style="border:0.5px solid var(--mud-palette-lines-default);border-radius:8px">
+                        <HeaderContent>
+                            <MudTh>대상 테이블</MudTh>
+                            <MudTh Style="text-align:right">가져온 건수</MudTh>
+                            <MudTh Style="text-align:center;width:48px">상태</MudTh>
+                        </HeaderContent>
+                        <RowTemplate>
+                            <MudTd DataLabel="대상 테이블">@context.Name</MudTd>
+                            <MudTd DataLabel="가져온 건수" Style="text-align:right">
+                                @context.Count.ToString("N0")
+                            </MudTd>
+                            <MudTd DataLabel="상태" Style="text-align:center">
+                                @if (context.Count > 0)
+                                {
+                                    <MudIcon Icon="@Icons.Material.Filled.CheckCircle" Color="Color.Success" Size="Size.Small" />
+                                }
+                                else
+                                {
+                                    <MudIcon Icon="@Icons.Material.Filled.Remove" Color="Color.Default" Size="Size.Small" />
+                                }
+                            </MudTd>
+                        </RowTemplate>
+                    </MudTable>
+
+                    <MudText Typo="Typo.body2" Class="mt-2" Style="color:var(--mud-palette-text-secondary)">
+                        총 @_migrationRows.Sum(r => r.Count).ToString("N0") 건 가져옴
+                    </MudText>
+                }
+                else
+                {
+                    <MudText Typo="Typo.body2" Style="color:var(--mud-palette-text-secondary)">
+                        미리보기 확인 후 "이관 시작" 버튼을 눌러주세요.
+                    </MudText>
+                }
+            </MudPaper>
+        </MudItem>
+    </MudGrid>
+}
+
+@code {
+    /* ── 상태 변수 ── */
+    private string _folderPath = @"C:\HITWIN";
+    private string _mdbPassword = ""; // 핫픽스 2026-05-13: 레거시 MDB 비번
+    private bool _loading;
+    private string _statusMessage = "";
+    private Dictionary<string, int>? _previewResult;
+    private MigrationResult? _migrationResult;
+    private List<MigrationRow> _migrationRows = new();
+
+    /* ── P0 #6 (2026-05-14): 테이블별 진행 카드 ── */
+    private List<TableCard> _tableCards = BuildInitialCards();
+    private int _completedTables;
+    // 진범 #20 봉합 (2026-05-18): WS-D-1·D-2 신규 잡 2개 추가 (sales_deliveries·journal_entries).
+    // 진범 #23 봉합 (2026-05-18): 견적·반품 잡 2개 추가 (quotations·sales_returns).
+    // 진범 #24 봉합 (2026-05-20, 사장님 자문 #3 옵션 A): DOCF1/F2 transactions 잡 제거 (17→16).
+    private int _totalTables = 16;
+    private int _elapsedSeconds;
+    private double _progressPercent => _totalTables == 0 ? 0 : (double)_completedTables / _totalTables * 100.0;
+
+    // 헌법 #26 v3 (2026-05-18): 10분·30분·1시간 시점 Y/n 다이얼로그 발동 트래커
+    private readonly HashSet<int> _dialogShownAt = new();
+    // 중단 요청 플래그 — Snackbar 안내용. 서버 측 강제 취소는 후속 작업(SignalR Cancel).
+    private bool _cancelRequested;
+    private static readonly int[] DialogThresholds = { 600, 1800, 3600 };
+
+    private static List<TableCard> BuildInitialCards() => new()
+    {
+        new("warehouse_migration", "기본창고"),
+        new("pyojun_master", "마스터(업체+상품+BOM+사원)"),
+        // 진범 #24 봉합 (2026-05-20, 자문 #3 옵션 A): transactions 카드 제거.
+        new("stock_ledger", "재고원장(입출고)"),
+        new("collections", "수금"),
+        new("cashbook", "경비(현금출납)"),
+        new("expenses", "전표(비용처리)"),
+        new("purchase_orders", "매입발주"),
+        new("sales_orders", "매출주문"),
+        new("tax_invoices", "세금계산서"),
+        new("bills", "어음"),
+        new("card_payments", "카드결제"),
+        new("bank_transactions", "은행거래"),
+        // 진범 #20 봉합 (2026-05-18): WS-D-1·D-2 신규 잡 — 거래명세서·회계분개.
+        new("sales_deliveries", "거래명세서(매출+매입)"),
+        new("journal_entries", "회계전표·분개"),
+        // 진범 #23 봉합 (2026-05-18): 견적·반품 — ERP 매니저 자문 후 본구현.
+        new("quotations", "견적서(자문대기)"),
+        new("sales_returns", "반품(자문대기)"),
+    };
+
+    private static string GetStatusIcon(string status) => status switch
+    {
+        "completed" => Icons.Material.Filled.CheckCircle,
+        "running"   => Icons.Material.Filled.Sync,
+        "failed"    => Icons.Material.Filled.Error,
+        _           => Icons.Material.Outlined.RadioButtonUnchecked,
+    };
+
+    private static Color GetStatusColor(string status) => status switch
+    {
+        "completed" => Color.Success,
+        "running"   => Color.Primary,
+        "failed"    => Color.Error,
+        _           => Color.Default,
+    };
+
+    private static string GetCardBorder(string status) => status switch
+    {
+        "completed" => "var(--mud-palette-success)",
+        "running"   => "var(--mud-palette-primary)",
+        "failed"    => "var(--mud-palette-error)",
+        _           => "var(--mud-palette-lines-default)",
+    };
+
+    private static string GetCardBg(string status) => status switch
+    {
+        "completed" => "rgba(76,175,80,0.06)",
+        "running"   => "rgba(33,150,243,0.08)",
+        "failed"    => "rgba(244,67,54,0.06)",
+        _           => "transparent",
+    };
+
+    /* ── 미리보기 ── */
+    private async Task PreviewAsync()
+    {
+        try
+        {
+            _loading = true;
+            _statusMessage = "기존 데이터를 분석하는 중...";
+            _migrationResult = null;
+            _migrationRows.Clear();
+            StateHasChanged();
+
+            // 핫픽스 2026-05-13: 비번 파라미터 추가
+            var url = $"api/migration/legacy-mdb/preview?folderPath={Uri.EscapeDataString(_folderPath)}";
+            if (!string.IsNullOrEmpty(_mdbPassword))
+            {
+                url += $"&mdbPassword={Uri.EscapeDataString(_mdbPassword)}";
+            }
+            _previewResult = await Http.GetFromJsonAsync<Dictionary<string, int>>(url);
+
+            if (_previewResult == null || _previewResult.Count == 0)
+            {
+                Snackbar.Add("기존 히트판 데이터를 찾을 수 없습니다.", Severity.Warning);
+            }
+            else
+            {
+                Snackbar.Add($"총 {_previewResult.Values.Sum():N0}건 발견", Severity.Success);
+            }
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"미리보기 실패: {ex.Message}", Severity.Error);
+            _previewResult = null;
+        }
+        finally
+        {
+            _loading = false;
+            _statusMessage = "";
+        }
+    }
+
+    /* ── SignalR HubConnection (정공법 CODE-01, 2026-05-14) ── */
+    private HubConnection? _hub;
+    private string? _currentJobId;
+    private System.Threading.CancellationTokenSource? _elapsedCts;
+
+    /* ── 마이그레이션 시작 — 정공법 CODE-01 (2026-05-14): SignalR push (폴링 폐기) ── */
+    private async Task StartMigrationAsync()
+    {
+        try
+        {
+            _loading = true;
+            _statusMessage = "마이그레이션 시작 중...";
+            // P0 #6 (2026-05-14): 카드 초기화 (이전 잡 상태 잔재 제거).
+            _tableCards = BuildInitialCards();
+            _completedTables = 0;
+            _elapsedSeconds = 0;
+            StateHasChanged();
+
+            // 1) Start — 즉시 JobId 반환 (1초 내, 524 안 걸림)
+            var payload = new { folderPath = _folderPath, mdbPassword = string.IsNullOrEmpty(_mdbPassword) ? null : _mdbPassword };
+            var startResp = await Http.PostAsJsonAsync("api/migration/legacy-mdb/start", payload);
+            if (!startResp.IsSuccessStatusCode)
+            {
+                var err = await startResp.Content.ReadAsStringAsync();
+                Snackbar.Add($"시작 실패 ({(int)startResp.StatusCode}): {err}", Severity.Error);
+                return;
+            }
+            var startBody = await startResp.Content.ReadFromJsonAsync<StartResponse>();
+            var jobId = startBody?.JobId;
+            if (string.IsNullOrEmpty(jobId))
+            {
+                Snackbar.Add("잡 ID를 받지 못했습니다.", Severity.Error);
+                return;
+            }
+            _currentJobId = jobId;
+
+            // 2) SignalR Hub 연결 — 폴링 폐기, 서버 push로 즉시 갱신.
+            var tokenResult = await Storage.GetAsync<string>(AuthStorageKeys.AccessToken);
+            var token = tokenResult.Success ? tokenResult.Value : null;
+            // BaseAddress 절대 URL — Http.BaseAddress는 Program.cs에서 apiUri 끝 슬래시 포함.
+            var hubUrl = new Uri(Http.BaseAddress!, "hubs/migration").ToString();
+
+            _hub = new HubConnectionBuilder()
+                .WithUrl(hubUrl, options =>
+                {
+                    options.AccessTokenProvider = () => Task.FromResult<string?>(token);
+                })
+                .WithAutomaticReconnect()
+                .Build();
+
+            // 테이블별 진행률 수신.
+            _hub.On<ProgressPayload>("ProgressUpdate", payload =>
+            {
+                var card = _tableCards.FirstOrDefault(c => c.Key == payload.TableName);
+                if (card is not null)
+                {
+                    card.Status = payload.Status;
+                    card.Rows = payload.Rows;
+                    card.ElapsedMs = payload.ElapsedMs;
+                    card.ErrorMessage = payload.ErrorMessage;
+                }
+                _completedTables = _tableCards.Count(c => c.Status is "completed" or "failed");
+                _statusMessage = payload.Status == "running"
+                    ? $"진행 중: {payload.TableName}"
+                    : $"{payload.TableName} {payload.Status}";
+                InvokeAsync(StateHasChanged);
+            });
+
+            // 잡 종료 수신 — 최종 result는 별도 GET 1회로 가져옴 (Hub payload 크기 최소화).
+            var completionTcs = new TaskCompletionSource<JobStatus?>();
+            _hub.On<JobCompletedPayload>("JobCompleted", async payload =>
+            {
+                try
+                {
+                    if (payload.Status == "completed")
+                    {
+                        // 진범 #22 봉합 (2026-05-18): 장시간 마이그 도중 JWT 만료 → status GET 401.
+                        // 1차 시도 → 401이면 RefreshAsync 후 재시도 1회.
+                        var statusResp = await Http.GetAsync($"api/migration/legacy-mdb/status/{jobId}");
+                        if (statusResp.StatusCode == System.Net.HttpStatusCode.Unauthorized)
+                        {
+                            var refreshed = await Auth.RefreshAsync();
+                            if (refreshed)
+                            {
+                                statusResp = await Http.GetAsync($"api/migration/legacy-mdb/status/{jobId}");
+                            }
+                        }
+                        if (statusResp.IsSuccessStatusCode)
+                        {
+                            var status = await statusResp.Content.ReadFromJsonAsync<JobStatus>();
+                            completionTcs.TrySetResult(status);
+                            return;
+                        }
+                    }
+                    completionTcs.TrySetResult(new JobStatus { JobId = jobId, Status = payload.Status, ErrorMessage = payload.ErrorMessage });
+                }
+                catch (Exception ex)
+                {
+                    completionTcs.TrySetException(ex);
+                }
+            });
+
+            await _hub.StartAsync();
+            await _hub.InvokeAsync("SubscribeJob", jobId);
+
+            // 경과 초 카운터 (UI용, 1초 tick).
+            _elapsedCts = new System.Threading.CancellationTokenSource();
+            _ = TickElapsedAsync(_elapsedCts.Token);
+
+            // 잡 종료 대기 (최대 60분 — Hub disconnect 대비 안전망).
+            var timeout = Task.Delay(TimeSpan.FromMinutes(60));
+            var finished = await Task.WhenAny(completionTcs.Task, timeout);
+            if (finished == timeout)
+            {
+                Snackbar.Add("이관 타임아웃 (60분). 백엔드 로그를 확인하세요.", Severity.Warning);
+                return;
+            }
+
+            var finalStatus = await completionTcs.Task;
+            if (finalStatus is null)
+            {
+                Snackbar.Add("이관 결과를 받지 못했습니다.", Severity.Warning);
+                return;
+            }
+
+            if (finalStatus.Status == "completed" && finalStatus.Result is not null)
+            {
+                _migrationResult = new MigrationResult
+                {
+                    Partners = finalStatus.Result.Partners, Items = finalStatus.Result.Items, BomHeaders = finalStatus.Result.BomHeaders,
+                    Employees = finalStatus.Result.Employees, PurchaseOrders = finalStatus.Result.PurchaseOrders, SalesOrders = finalStatus.Result.SalesOrders,
+                    StockLedger = finalStatus.Result.StockLedger, Collections = finalStatus.Result.Collections, Cashbook = finalStatus.Result.Cashbook,
+                    Expenses = finalStatus.Result.Expenses, PurchaseOrdersFromIU = finalStatus.Result.PurchaseOrdersFromIU,
+                    SalesOrdersFromIO = finalStatus.Result.SalesOrdersFromIO, TaxInvoices = finalStatus.Result.TaxInvoices,
+                    Bills = finalStatus.Result.Bills, CardPayments = finalStatus.Result.CardPayments, BankTransactions = finalStatus.Result.BankTransactions
+                };
+                _migrationRows = new List<MigrationRow>
+                {
+                    new("업체(거래처)", _migrationResult.Partners),
+                    new("상품(품목)", _migrationResult.Items),
+                    new("BOM(자재명세서)", _migrationResult.BomHeaders),
+                    new("사원", _migrationResult.Employees),
+                    new("거래명세 매입(K2)", _migrationResult.PurchaseOrders),
+                    new("거래명세 매출(K2)", _migrationResult.SalesOrders),
+                    new("매입발주(IU)", _migrationResult.PurchaseOrdersFromIU),
+                    new("매출주문(IO)", _migrationResult.SalesOrdersFromIO),
+                    new("세금계산서(TX)", _migrationResult.TaxInvoices),
+                    new("재고원장(입출고)", _migrationResult.StockLedger),
+                    new("수금", _migrationResult.Collections),
+                    new("경비(현금출납)", _migrationResult.Cashbook),
+                    new("전표(비용처리)", _migrationResult.Expenses),
+                    new("어음(EU+EQ)", _migrationResult.Bills),
+                    new("카드결제(CD)", _migrationResult.CardPayments),
+                    new("은행거래(BANKF)", _migrationResult.BankTransactions),
+                };
+                var total = _migrationRows.Sum(r => r.Count);
+                Snackbar.Add($"이관 완료! 총 {total:N0}건 (경과 {_elapsedSeconds}초)", Severity.Success);
+            }
+            else if (finalStatus.Status == "failed")
+            {
+                Snackbar.Add($"이관 실패: {finalStatus.ErrorMessage}", Severity.Error);
+            }
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"이관 오류: {ex.Message}", Severity.Error);
+        }
+        finally
+        {
+            _elapsedCts?.Cancel();
+            _elapsedCts?.Dispose();
+            _elapsedCts = null;
+            if (_hub is not null)
+            {
+                try { await _hub.DisposeAsync(); }
+                catch (Exception ex)
+                {
+                    // 헌법 #15 빈 catch 금지 — dispose 실패는 사용자에게 무영향, 디버그 로그만.
+                    Console.Error.WriteLine($"[MdbMigration] Hub dispose 실패: {ex.Message}");
+                }
+                _hub = null;
+            }
+            _loading = false;
+            _statusMessage = "";
+        }
+    }
+
+    /// <summary>경과 초 1초 tick — Sticky 헤더 표시용 + 헌법 #26 v3 Y/n 다이얼로그.</summary>
+    private async Task TickElapsedAsync(System.Threading.CancellationToken ct)
+    {
+        try
+        {
+            while (!ct.IsCancellationRequested)
+            {
+                await Task.Delay(1000, ct);
+                _elapsedSeconds++;
+                await InvokeAsync(StateHasChanged);
+
+                // 헌법 #26 v3 (2026-05-18 사장님 결재): 10분·30분·1시간 경과 시 진행 확인 다이얼로그.
+                // 사장님 안: "데이터 양이 많아 작업이 지연되고 있습니다. 계속 진행하시겠습니까?" Y/n
+                foreach (var threshold in DialogThresholds)
+                {
+                    if (_elapsedSeconds == threshold && _dialogShownAt.Add(threshold))
+                    {
+                        await ShowContinueDialogAsync(threshold);
+                    }
+                }
+            }
+        }
+        catch (TaskCanceledException)
+        {
+            // 정상 종료 — 빈 catch 아님(예외 타입 명시).
+        }
+    }
+
+    /// <summary>
+    /// 헌법 #26 v3 Y/n 다이얼로그 — 10분·30분·1시간 경과 시 고객 통제권 부여.
+    /// "계속 진행" 선택 시 다음 임계값까지 대기, "중단" 선택 시 _cancelRequested=true.
+    /// </summary>
+    private async Task ShowContinueDialogAsync(int threshold)
+    {
+        var minutes = threshold / 60;
+        var parameters = new DialogParameters
+        {
+            ["ContentText"] = $"데이터 양이 많아 작업이 지연되고 있습니다 (경과 {minutes}분). 계속 진행하시겠습니까?",
+            ["ButtonText"] = "계속 진행",
+            ["CancelText"] = "중단",
+            ["Color"] = Color.Primary,
+        };
+        var options = new DialogOptions { CloseButton = false, BackdropClick = false };
+        var dialog = await DialogService.ShowAsync<MudMessageBox>($"마이그 진행 확인 ({minutes}분 경과)", parameters, options);
+        var result = await dialog.Result;
+        if (result is not null && !result.Canceled && result.Data is bool ok && !ok)
+        {
+            _cancelRequested = true;
+            Snackbar.Add("중단 요청을 받았습니다. 진행 중인 작업이 안전하게 마무리되면 종료됩니다.", Severity.Warning);
+        }
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        _elapsedCts?.Cancel();
+        _elapsedCts?.Dispose();
+        if (_hub is not null)
+        {
+            try { await _hub.DisposeAsync(); }
+            catch (Exception ex)
+            {
+                Console.Error.WriteLine($"[MdbMigration] Hub dispose 실패: {ex.Message}");
+            }
+        }
+    }
+
+    /// <summary>SignalR 진행 페이로드 — 서버 MigrationProgressService payload와 일치.</summary>
+    private class ProgressPayload
+    {
+        public string JobId { get; set; } = "";
+        public string TableName { get; set; } = "";
+        public string Status { get; set; } = "pending";
+        public int Rows { get; set; }
+        public long ElapsedMs { get; set; }
+        public string? ErrorMessage { get; set; }
+    }
+
+    /// <summary>SignalR 잡 종료 페이로드.</summary>
+    private class JobCompletedPayload
+    {
+        public string JobId { get; set; } = "";
+        public string Status { get; set; } = "";
+        public string? ErrorMessage { get; set; }
+    }
+
+    private class StartResponse
+    {
+        public string JobId { get; set; } = "";
+        public string Status { get; set; } = "";
+    }
+
+    private class JobStatus
+    {
+        public string JobId { get; set; } = "";
+        public string Status { get; set; } = "";
+        public string CurrentStep { get; set; } = "";
+        public int ElapsedSeconds { get; set; }
+        public MigrationResult? Result { get; set; }
+        public string? ErrorMessage { get; set; }
+        public Dictionary<string, TableProgressDto>? TableProgress { get; set; }
+    }
+
+    /// <summary>P0 #6 (2026-05-14): 테이블별 진행 상태 — Sticky 카드용.</summary>
+    private class TableProgressDto
+    {
+        public string Status { get; set; } = "pending";
+        public int Rows { get; set; }
+        public long ElapsedMs { get; set; }
+        public string? ErrorMessage { get; set; }
+    }
+
+    private sealed class TableCard
+    {
+        public string Key { get; }
+        public string Label { get; }
+        public string Status { get; set; } = "pending";
+        public int Rows { get; set; }
+        public long ElapsedMs { get; set; }
+        public string? ErrorMessage { get; set; }
+        // 진범 #69 봉합 (2026-05-20, 사장님 결재 옵션 B'): UI staging 사기 차단.
+        // 후보(BulkCopy staging) vs INSERT 적재 vs 중복 차단 3중 투명 표시 (hover 상세).
+        // Rows = 후보(staging) — 카드 본문에 표시 (기존 호환).
+        // InsertedRows = 실 INSERT 적재 (DB 실측 일치) — hover 툴팁에 표시.
+        // SkippedRows = 중복 IGNORE — hover 툴팁에 표시.
+        public int InsertedRows { get; set; }
+        public int SkippedRows { get; set; }
+        public TableCard(string key, string label) { Key = key; Label = label; }
+    }
+
+    /* ── DTO: 미리보기 결과 — Dictionary<string, int> 직접 사용 ── */
+
+    /* ── DTO: 마이그레이션 결과 ── */
+    private class MigrationResult
+    {
+        public int Partners { get; set; }
+        public int Items { get; set; }
+        public int BomHeaders { get; set; }
+        public int Employees { get; set; }
+        public int PurchaseOrders { get; set; }
+        public int SalesOrders { get; set; }
+        public int StockLedger { get; set; }
+        public int Collections { get; set; }
+        public int Cashbook { get; set; }
+        public int Expenses { get; set; }
+        public int PurchaseOrdersFromIU { get; set; }
+        public int SalesOrdersFromIO { get; set; }
+        public int TaxInvoices { get; set; }
+        public int Bills { get; set; }
+        public int CardPayments { get; set; }
+        public int BankTransactions { get; set; }
+        public int Total { get; set; }
+    }
+
+    /* ── 테이블 행 표시용 레코드 ── */
+    private record MigrationRow(string Name, int Count);
+
+}

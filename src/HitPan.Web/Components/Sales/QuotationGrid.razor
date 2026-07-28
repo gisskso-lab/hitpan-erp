@@ -1,0 +1,62 @@
+@using HitPan.Web.Models
+@namespace HitPan.Web.Components.Sales
+
+<MudTable T="QuotationLineModel" Items="Lines" Dense="true" Hover="true" Striped="true" FixedHeader="true" Height="calc(100vh - 360px)">
+    <HeaderContent>
+        <MudTh Style="width:48px">
+            <MudCheckBox T="bool" Value="_allSelected" ValueChanged="ToggleAllAsync" />
+        </MudTh>
+        <MudTh Style="width:60px">No</MudTh>
+        <MudTh>품명</MudTh>
+        <MudTh>규격</MudTh>
+        <MudTh Style="width:90px">단위</MudTh>
+        <MudTh Class="text-right">수량</MudTh>
+        <MudTh Class="text-right">단가</MudTh>
+        <MudTh Class="text-right">할인율(%)</MudTh>
+        <MudTh Class="text-right">금액</MudTh>
+        <MudTh Class="text-right">부가세액</MudTh>
+        <MudTh>비고</MudTh>
+    </HeaderContent>
+    <RowTemplate>
+        <MudTd>
+            <div @onclick:stopPropagation="true">
+                <MudCheckBox T="bool"
+                             Value="context.IsSelected"
+                             ValueChanged="@(v => ToggleOneAsync(context, v))"
+                             Disabled="@IsReadOnly" />
+            </div>
+        </MudTd>
+        <MudTd @onclick="@(() => SelectRowAsync(context))">@context.No</MudTd>
+        <MudTd>
+            <MudAutocomplete T="string" Value="context.ItemName" SearchFunc="SearchItemAsync"
+                ValueChanged="@(async v => { await UpdateItemNameAsync(context, v); AutoFillItem(context, v); })"
+                Margin="Margin.Dense" Dense="true" Placeholder="품명 검색" Disabled="@IsReadOnly" />
+        </MudTd>
+        <MudTd>
+            @* 작지① 규격 콤보박스 (사장님 작업지시 2026-05-31) — 품명 ItemId 저장 후 옵션 자동 로드 + 직접 입력 허용 *@
+            <ItemSpecAutocomplete ItemId="@context.ItemId" Value="@context.Spec"
+                                   ValueChanged="@(v => UpdateSpecAsync(context, v))"
+                                   Disabled="@IsReadOnly" />
+        </MudTd>
+        <MudTd>
+            <MudTextField T="string" Value="context.Unit" ValueChanged="@(v => UpdateUnitAsync(context, v))" Margin="Margin.Dense" Disabled="@IsReadOnly" />
+        </MudTd>
+        <MudTd>
+            <MudNumericField T="decimal" Value="context.Qty" ValueChanged="@(v => UpdateQtyAsync(context, v))" Margin="Margin.Dense" Class="quotation-num-right" Disabled="@IsReadOnly" />
+        </MudTd>
+        <MudTd>
+            <MudNumericField T="decimal" Value="context.UnitPrice" ValueChanged="@(v => UpdateUnitPriceAsync(context, v))" Margin="Margin.Dense" Class="quotation-num-right" Disabled="@IsReadOnly" />
+        </MudTd>
+        <MudTd>
+            <MudNumericField T="decimal" Value="context.DiscountRate" ValueChanged="@(v => UpdateDiscountRateAsync(context, v))" Margin="Margin.Dense" Class="quotation-num-right" Disabled="@IsReadOnly" />
+        </MudTd>
+        <MudTd Class="quotation-num-right">@context.Amount.ToString("N0")</MudTd>
+        <MudTd Class="quotation-num-right">@context.VatAmount.ToString("N0")</MudTd>
+        <MudTd>
+            <MudTextField T="string" Value="context.Note" ValueChanged="@(v => UpdateNoteAsync(context, v))" Margin="Margin.Dense" Disabled="@IsReadOnly" />
+        </MudTd>
+    </RowTemplate>
+    <NoRecordsContent>
+        <MudText Typo="Typo.body2" Class="pa-4">견적 품목이 없습니다.</MudText>
+    </NoRecordsContent>
+</MudTable>

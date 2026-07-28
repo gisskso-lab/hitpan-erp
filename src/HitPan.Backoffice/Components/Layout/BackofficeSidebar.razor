@@ -1,0 +1,115 @@
+@using Microsoft.AspNetCore.Components.Authorization
+@inject NavigationManager Nav
+@inject AuthenticationStateProvider AuthState
+
+@*
+    백오피스 v2 사이드바 (사장님 결재 2026-06-01)
+    - 헌법 #1 정합: 기존 메뉴 구조 보존, 섹션 그루핑·시각 갱신만
+    - 6 섹션: 대시보드 / 고객사 / 대리점 / 결제 / 운영 / 시스템(Owner)
+*@
+
+<div class="bo-sidebar bo2-sidebar-inner">
+    <div class="bo2-brand">
+        <div class="bo2-brand-logo">HP</div>
+        <div class="bo2-brand-text">
+            <div class="bo2-brand-title">@_brandTitle</div>
+            <div class="bo2-brand-sub">@_brandSub</div>
+        </div>
+    </div>
+
+    <nav class="bo2-nav">
+        @* 헌법 #35 W1+W2+W5 (사장님 결재 2026-06-04): 활성 메뉴만 노출.
+            W9 대기 메뉴(시리얼 발급·결제·환불·정산·CS·워치독·통계)는 백오피스 API 신설 후 복원. *@
+        @if (_isPlatformAdmin || _isPlatformOwner)
+        {
+            <div class="bo2-nav-section">
+                <div class="bo2-nav-section-label">대시보드</div>
+                <NavLinkItem Href="/admin/dashboard" Icon="dashboard" Label="대시보드" Match="@NavLinkMatch.All" />
+            </div>
+
+            <div class="bo2-nav-section">
+                <div class="bo2-nav-section-label">고객사</div>
+                <NavLinkItem Href="/admin/tenants" Icon="business" Label="고객사 목록" Count="@_countTenants" />
+            </div>
+
+            <div class="bo2-nav-section">
+                <div class="bo2-nav-section-label">협력업체</div>
+                <NavLinkItem Href="/admin/resellers" Icon="store" Label="협력업체 목록" Count="@_countResellers" />
+                <NavLinkItem Href="/admin/reseller-applications" Icon="how_to_reg" Label="협력업체 신청" />
+            </div>
+
+            @* W9 대리점 영역 (사장님 결재 2026-06-05) *@
+            <div class="bo2-nav-section">
+                <div class="bo2-nav-section-label">대리점 (W9)</div>
+                <NavLinkItem Href="/admin/reseller-settlements" Icon="monetization_on" Label="대리점 정산" />
+                <NavLinkItem Href="/admin/reseller-serials" Icon="qr_code" Label="대리점 시리얼" />
+            </div>
+
+            @* W17 마케팅 (사장님 결재 2026-06-05) *@
+            <div class="bo2-nav-section">
+                <div class="bo2-nav-section-label">마케팅 (W17)</div>
+                <NavLinkItem Href="/admin/promotions" Icon="campaign" Label="프로모션 관리" />
+            </div>
+
+            @if (_isPlatformOwner)
+            {
+                <div class="bo2-nav-section bo2-nav-section-owner">
+                    <div class="bo2-nav-section-label">시스템 <span class="bo2-owner-tag">OWNER</span></div>
+                    <NavLinkItem Href="/owner/system-config" Icon="settings" Label="System Config" />
+                    <NavLinkItem Href="/admin/bo-users" Icon="admin_panel_settings" Label="Owner 사용자 관리" />
+                    <NavLinkItem Href="/admin/approvals" Icon="how_to_reg" Label="4-eyes 결재함" />
+                    <NavLinkItem Href="/admin/mfa-setup" Icon="security" Label="MFA 등록" />
+                    <NavLinkItem Href="/owner/permissions" Icon="vpn_key" Label="권한 관리" />
+                    <NavLinkItem Href="/owner/credentials-status" Icon="shield" Label="자격증명 상태" />
+                    <NavLinkItem Href="/admin/tenant-domains" Icon="dns" Label="도메인 자동 발급" />
+                </div>
+            }
+        }
+        else
+        {
+            @* 대리점 메뉴 — W9 대기 *@
+            <div class="bo2-nav-section">
+                <div class="bo2-nav-section-label">대시보드</div>
+                <NavLinkItem Href="/admin/dashboard" Icon="dashboard" Label="대시보드" Match="@NavLinkMatch.All" />
+            </div>
+        }
+    </nav>
+
+    <div class="bo2-sidebar-footer">
+        <div class="bo2-sidebar-env">
+            <span class="bo2-env-dot"></span>
+            <span>운영 환경</span>
+        </div>
+    </div>
+</div>
+
+@code {
+    private bool _isPlatformAdmin;
+    private bool _isPlatformOwner;
+    private string _brandTitle = "히트판 백오피스";
+    private string _brandSub = "본사 관리";
+
+    // 카운트 뱃지 — 시드 0건 시 null로 숨김 처리
+    private int? _countTenants = null;
+    private int? _countResellers = null;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var state = await AuthState.GetAuthenticationStateAsync();
+        var accountType = state.User.FindFirst("account_type")?.Value;
+        _isPlatformAdmin = accountType == "platform_admin" || accountType == "platform_owner";
+        _isPlatformOwner = accountType == "platform_owner";
+
+        if (_isPlatformAdmin)
+        {
+            _brandTitle = "히트판 백오피스";
+            _brandSub = _isPlatformOwner ? "Owner Console" : "본사 관리";
+        }
+        else
+        {
+            var resellerName = state.User.FindFirst("name")?.Value ?? string.Empty;
+            _brandTitle = "히트판 파트너";
+            _brandSub = resellerName;
+        }
+    }
+}

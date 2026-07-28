@@ -1,0 +1,80 @@
+@page "/accounting/purchase-sales"
+@namespace HitPan.Web.Pages.FinanceUi
+@attribute [Authorize]
+@using HitPan.Web.Models
+@using HitPan.Web.Services
+@inject FinanceClientService FinSvc
+
+<PageTitle>매입매출장</PageTitle>
+
+<PageHeader Title="매입매출장" Subtitle="확정된 매입·매출 전표 자동 집계">
+    <Actions>
+        <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="LoadAsync">조회</MudButton>
+    </Actions>
+</PageHeader>
+
+@* KPI 요약 *@
+<MudGrid Spacing="2" Class="mb-3">
+    <MudItem xs="12" sm="4">
+        <KpiCard Color="KpiCard.KpiColor.Primary"
+                 Icon="@Icons.Material.Filled.TrendingUp"
+                 Label="매출 합계"
+                 Value="@_salesTotalText" />
+    </MudItem>
+    <MudItem xs="12" sm="4">
+        <KpiCard Color="KpiCard.KpiColor.Warning"
+                 Icon="@Icons.Material.Filled.ShoppingCart"
+                 Label="매입 합계"
+                 Value="@_purchaseTotalText" />
+    </MudItem>
+    <MudItem xs="12" sm="4">
+        <KpiCard Color="KpiCard.KpiColor.Info"
+                 Icon="@Icons.Material.Filled.Receipt"
+                 Label="전표 건수"
+                 Value="@_items.Count.ToString("N0")" />
+    </MudItem>
+</MudGrid>
+
+<SectionCard Title="조회 조건">
+    <MudGrid Spacing="2">
+        <MudItem xs="6" md="2"><MudDatePicker Label="시작일" @bind-Date="_from" Variant="Variant.Outlined" Margin="Margin.Dense" Style="min-width:160px" /></MudItem>
+        <MudItem xs="6" md="2"><MudDatePicker Label="종료일" @bind-Date="_to" Variant="Variant.Outlined" Margin="Margin.Dense" Style="min-width:160px" /></MudItem>
+    </MudGrid>
+</SectionCard>
+
+<SectionCard Variant="SectionCard.SectionVariant.Flat">
+    <MudTable Items="_items" Dense="true" Hover="true" Striped="true">
+        <HeaderContent>
+            <MudTh>일자</MudTh><MudTh>구분</MudTh><MudTh>전표번호</MudTh><MudTh>거래처</MudTh>
+            <MudTh Style="text-align:right">공급가</MudTh><MudTh Style="text-align:right">부가세</MudTh>
+            <MudTh Style="text-align:right;font-weight:600">합계</MudTh>
+        </HeaderContent>
+        <RowTemplate>
+            <MudTd>@context.TxDate.ToString("yyyy-MM-dd")</MudTd>
+            <MudTd><MudChip T="string" Size="Size.Small" Color="@(context.DocType=="매출"?Color.Primary:Color.Warning)" Variant="Variant.Text">@context.DocType</MudChip></MudTd>
+            <MudTd>@context.DocNo</MudTd>
+            <MudTd>@context.PartnerName</MudTd>
+            <MudTd Style="text-align:right">@context.SupplyAmount.ToString("N0")</MudTd>
+            <MudTd Style="text-align:right">@context.VatAmount.ToString("N0")</MudTd>
+            <MudTd Style="text-align:right;font-weight:600">@context.TotalAmount.ToString("N0")</MudTd>
+        </RowTemplate>
+        <NoRecordsContent>
+            <EmptyState Icon="@Icons.Material.Filled.Receipt"
+                        Title="조회된 전표가 없습니다"
+                        Subtitle="조회 기간을 확장하거나 매입·매출 전표를 확정해 주세요." />
+        </NoRecordsContent>
+    </MudTable>
+</SectionCard>
+
+@code {
+    private List<PurchaseSalesLedgerModel> _items = new();
+    private DateTime? _from = DateTime.Today.AddDays(-90);
+    private DateTime? _to = DateTime.Today;
+
+    // KPI 표시용 — Razor 표현식에서 문자열 리터럴 이스케이프 이슈 피하려고 계산 프로퍼티로 분리
+    private string _salesTotalText => _items.Where(x => x.DocType == "매출").Sum(x => x.TotalAmount).ToString("N0");
+    private string _purchaseTotalText => _items.Where(x => x.DocType == "매입").Sum(x => x.TotalAmount).ToString("N0");
+
+    protected override async Task OnInitializedAsync() => await LoadAsync();
+    private async Task LoadAsync() { _items = await FinSvc.GetPurchaseSalesLedgerAsync(_from, _to); StateHasChanged(); }
+}

@@ -1,0 +1,214 @@
+@*
+    LeaveCalendar — 대시보드 월간 직원 연차 캘린더 (사장님 결재 2026-04-29 v2)
+
+    v2: 사원 × 일자 매트릭스 → "이쁜 월간 달력" (구글캘린더 스타일).
+    토스 감성: 둥근 라운드, 부드러운 그림자, 가독성 우선.
+    7일 × 5~6주 그리드. 일자 셀에 휴가 직원 칩 표시.
+*@
+@using HitPan.Web.Models
+@using HitPan.Web.Services
+@inject LeaveRequestService LeaveSvc
+
+<div class="hp-cal-card">
+
+    @* 헤더: 제목 + 월 네비 *@
+    <div class="hp-cal-header">
+        <div>
+            <h2 class="hp-cal-title">@(_data?.Year ?? _year)년 @(_data?.Month ?? _month)월 연차 현황</h2>
+            <p class="hp-cal-sub">
+                @if (_data is { TotalLeaveCount: > 0 })
+                {
+                    <text>이번달 휴가 <strong>@(_data.TotalLeaveCount)일</strong></text>
+                    if (!string.IsNullOrEmpty(_data.TopUserName))
+                    {
+                        <text> · 가장 많이 쉰 사람 <strong>@_data.TopUserName</strong></text>
+                    }
+                }
+                else
+                {
+                    <text>휴가 없음 — 평온한 한 달이에요 ☀️</text>
+                }
+            </p>
+        </div>
+        <div class="hp-cal-nav">
+            <button class="hp-nav-btn" @onclick="PrevMonth" aria-label="이전 달">
+                <MudIcon Icon="@Icons.Material.Filled.ChevronLeft" Size="Size.Small" />
+            </button>
+            <button class="hp-nav-btn hp-nav-today" @onclick="GoToday">오늘</button>
+            <button class="hp-nav-btn" @onclick="NextMonth" aria-label="다음 달">
+                <MudIcon Icon="@Icons.Material.Filled.ChevronRight" Size="Size.Small" />
+            </button>
+        </div>
+    </div>
+
+    @* 요일 헤더 (일~토) *@
+    <div class="hp-cal-weekdays">
+        <div class="hp-cal-wd hp-cal-wd-sun">일</div>
+        <div class="hp-cal-wd">월</div>
+        <div class="hp-cal-wd">화</div>
+        <div class="hp-cal-wd">수</div>
+        <div class="hp-cal-wd">목</div>
+        <div class="hp-cal-wd">금</div>
+        <div class="hp-cal-wd hp-cal-wd-sat">토</div>
+    </div>
+
+    @if (_loading)
+    {
+        <div class="hp-cal-empty">
+            <MudProgressCircular Color="Color.Primary" Indeterminate="true" Size="Size.Small" />
+            <span style="margin-left:8px;color:var(--hp-text-tertiary)">불러오는 중...</span>
+        </div>
+    }
+    else if (_data is null)
+    {
+        <div class="hp-cal-empty">
+            <MudIcon Icon="@Icons.Material.Filled.CalendarMonth" Style="font-size:32px;color:var(--hp-text-disabled)" />
+            <p style="color:var(--hp-text-tertiary);margin-top:8px;font-size:14px">데이터를 불러올 수 없습니다</p>
+        </div>
+    }
+    else
+    {
+        <div class="hp-cal-grid">
+            @{
+                var firstDay = new DateTime(_data.Year, _data.Month, 1);
+                // 일요일=0 시작 → 첫 주 빈 칸 수
+                var leadingBlanks = (int)firstDay.DayOfWeek;
+                var byDay = BuildIndex(_data);
+            }
+
+            @* 이전 달 빈 셀 *@
+            @for (int i = 0; i < leadingBlanks; i++)
+            {
+                <div class="hp-cal-cell hp-cal-blank"></div>
+            }
+
+            @* 이번 달 셀 *@
+            @for (int d = 1; d <= _data.DayCount; d++)
+            {
+                var date = new DateTime(_data.Year, _data.Month, d);
+                var dow = (int)date.DayOfWeek;
+                var isToday = date.Date == DateTime.Today;
+                var cellCls = "hp-cal-cell"
+                    + (dow == 0 ? " hp-cal-sun" : "")
+                    + (dow == 6 ? " hp-cal-sat" : "")
+                    + (isToday ? " hp-cal-today" : "");
+                var people = byDay.TryGetValue(d, out var list) ? list : new List<DayLeave>();
+
+                <div class="@cellCls">
+                    <div class="hp-cal-day-num">@d</div>
+                    @if (people.Count > 0)
+                    {
+                        <div class="hp-cal-people">
+                            @foreach (var p in people.Take(3))
+                            {
+                                <div class="hp-cal-chip hp-leave-@p.LeaveType @(p.Status == "pending" ? "hp-leave-pending" : "")"
+                                     title="@($"{p.EmpName} - {LeaveTypeLabel(p.LeaveType)}{(p.Status == "pending" ? " (대기)" : "")}")">
+                                    <span class="hp-cal-chip-mark">@LeaveMark(p.LeaveType)</span>
+                                    <span class="hp-cal-chip-name">@p.EmpName</span>
+                                </div>
+                            }
+                            @if (people.Count > 3)
+                            {
+                                <div class="hp-cal-more">외 @(people.Count - 3)명</div>
+                            }
+                        </div>
+                    }
+                </div>
+            }
+
+            @* 마지막 주 빈 셀 (7의 배수로 맞춤) *@
+            @{
+                var totalCells = leadingBlanks + _data.DayCount;
+                var trailingBlanks = (7 - (totalCells % 7)) % 7;
+            }
+            @for (int i = 0; i < trailingBlanks; i++)
+            {
+                <div class="hp-cal-cell hp-cal-blank"></div>
+            }
+        </div>
+
+        @* 범례 *@
+        <div class="hp-cal-legend">
+            <span class="hp-cal-leg"><span class="hp-cal-leg-dot hp-leave-annual"></span>연차</span>
+            <span class="hp-cal-leg"><span class="hp-cal-leg-dot hp-leave-half"></span>반차</span>
+            <span class="hp-cal-leg"><span class="hp-cal-leg-dot hp-leave-sick"></span>병가</span>
+            <span class="hp-cal-leg"><span class="hp-cal-leg-dot hp-leave-official"></span>공가</span>
+            <span class="hp-cal-leg"><span class="hp-cal-leg-dot hp-leave-pending"></span>승인 대기</span>
+        </div>
+    }
+</div>
+
+@code {
+    private LeaveCalendarModel? _data;
+    private int _year = DateTime.Today.Year;
+    private int _month = DateTime.Today.Month;
+    private bool _loading = true;
+
+    private sealed record DayLeave(string EmpName, string LeaveType, string Status);
+
+    protected override async Task OnInitializedAsync() => await LoadAsync();
+
+    private async Task LoadAsync()
+    {
+        _loading = true;
+        StateHasChanged();
+        _data = await LeaveSvc.GetCalendarAsync(_year, _month);
+        _loading = false;
+        StateHasChanged();
+    }
+
+    private async Task PrevMonth()
+    {
+        var d = new DateTime(_year, _month, 1).AddMonths(-1);
+        _year = d.Year; _month = d.Month;
+        await LoadAsync();
+    }
+    private async Task NextMonth()
+    {
+        var d = new DateTime(_year, _month, 1).AddMonths(1);
+        _year = d.Year; _month = d.Month;
+        await LoadAsync();
+    }
+    private async Task GoToday()
+    {
+        _year = DateTime.Today.Year; _month = DateTime.Today.Month;
+        await LoadAsync();
+    }
+
+    /// 일자 → 그날 휴가 직원 목록 매핑 (구글캘린더 스타일).
+    private static Dictionary<int, List<DayLeave>> BuildIndex(LeaveCalendarModel model)
+    {
+        var dict = new Dictionary<int, List<DayLeave>>();
+        foreach (var row in model.Rows)
+        {
+            foreach (var cell in row.Cells)
+            {
+                if (!dict.TryGetValue(cell.Date.Day, out var list))
+                {
+                    list = new List<DayLeave>();
+                    dict[cell.Date.Day] = list;
+                }
+                list.Add(new DayLeave(row.EmpName, cell.LeaveType, cell.Status));
+            }
+        }
+        return dict;
+    }
+
+    private static string LeaveMark(string type) => type switch
+    {
+        "annual" => "●",
+        "half" => "◐",
+        "sick" => "◆",
+        "official" => "■",
+        _ => "●"
+    };
+
+    private static string LeaveTypeLabel(string type) => type switch
+    {
+        "annual" => "연차",
+        "half" => "반차",
+        "sick" => "병가",
+        "official" => "공가",
+        _ => type
+    };
+}

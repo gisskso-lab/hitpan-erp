@@ -1,0 +1,226 @@
+@page "/sales/summary"
+@namespace HitPan.Web.Pages.SalesUi
+@attribute [Authorize]
+@using HitPan.Web.Models
+@using System.Net.Http.Json
+@inject HttpClient Http
+@inject IJSRuntime Js
+@inject ISnackbar Snackbar
+@inject IJSRuntime Js
+@inject PartnerMasterService PartnersApi
+@inject ItemMasterService ItemsApi
+
+<PageTitle>판매현황</PageTitle>
+<MudText Typo="Typo.h6" Class="mb-3">판매현황</MudText>
+
+<MudPaper Class="pa-3 mb-3" Elevation="0" Style="border:1px solid var(--mud-palette-lines-default);border-radius:12px">
+    <div class="hitpan-filter-bar">
+        <div class="hitpan-filter-field hitpan-filter-field--lg">
+            <MudSelect T="string" @bind-Value="_viewType" Label="조회유형" Variant="Variant.Outlined" Margin="Margin.Dense">
+                <MudSelectItem Value="@("monthly")">상품판매일(월)계표</MudSelectItem>
+                <MudSelectItem Value="@("period")">기간별 세부판매현황</MudSelectItem>
+                <MudSelectItem Value="@("item")">품목별 세부판매현황</MudSelectItem>
+                <MudSelectItem Value="@("partner")">업체별 세부판매현황</MudSelectItem>
+                <MudSelectItem Value="@("partner-yearly")">업체별 판매집계표(년간)</MudSelectItem>
+                <MudSelectItem Value="@("employee")">사원별 세부판매현황</MudSelectItem>
+                <MudSelectItem Value="@("quote-vs-sales")">견적제출대비 판매현황</MudSelectItem>
+                <MudSelectItem Value="@("price-change")">기간별 판매단가변동현황</MudSelectItem>
+                <MudSelectItem Value="@("return")">매출반품현황</MudSelectItem>
+                <MudSelectItem Value="@("total")">판매종합현황(반품포함)</MudSelectItem>
+                <MudSelectItem Value="@("new-partner")">신규업체개척현황</MudSelectItem>
+            </MudSelect>
+        </div>
+        <div class="hitpan-filter-field hitpan-filter-field--sm">
+            <MudDatePicker @bind-Date="_from" Label="시작일" Variant="Variant.Outlined" Margin="Margin.Dense" DateFormat="yyyy-MM-dd" />
+        </div>
+        <div class="hitpan-filter-field hitpan-filter-field--sm">
+            <MudDatePicker @bind-Date="_to" Label="종료일" Variant="Variant.Outlined" Margin="Margin.Dense" DateFormat="yyyy-MM-dd" />
+        </div>
+        @if (ShowSearchBox())
+        {
+            <div class="hitpan-filter-field hitpan-filter-field--md">
+                @if (_viewType is "item" or "price-change")
+                {
+                    <MudAutocomplete T="string" Value="_searchText" ValueChanged="@(v => _searchText = v)"
+                        SearchFunc="SearchItemAsync" Margin="Margin.Dense" Label="품명" Placeholder="검색"
+                        Variant="Variant.Outlined" />
+                }
+                else if (_viewType is "partner" or "partner-yearly" or "new-partner")
+                {
+                    <MudAutocomplete T="string" Value="_searchText" ValueChanged="@(v => _searchText = v)"
+                        SearchFunc="SearchPartnerAsync" Margin="Margin.Dense" Label="업체" Placeholder="검색"
+                        Variant="Variant.Outlined" />
+                }
+                else
+                {
+                    <MudTextField @bind-Value="_searchText" Label="@GetFilterLabel()" Variant="Variant.Outlined"
+                        Margin="Margin.Dense" Adornment="Adornment.End" AdornmentIcon="@Icons.Material.Filled.Search" />
+                }
+            </div>
+        }
+        <div class="hitpan-filter-actions">
+            <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="SearchAsync">조회</MudButton>
+            <MudButton Variant="Variant.Outlined" Size="Size.Small" StartIcon="@Icons.Material.Filled.TableChart" OnClick="ExportExcelAsync">엑셀</MudButton>
+            <MudButton Variant="Variant.Outlined" Size="Size.Small" StartIcon="@Icons.Material.Filled.Print" OnClick="PrintAsync">인쇄</MudButton>
+        </div>
+    </div>
+</MudPaper>
+
+@* 사장님 결재 2026-04-29: 11종 조회유형 모두 백엔드 분기 완료 → 가드 제거 *@
+<MudPaper Elevation="0" Class="hitpan-card" Style="overflow:hidden">
+    <MudTable T="ReportRow" Items="_reportData" Dense="true" Hover="true" Striped="true" FixedHeader="true" Height="calc(100vh - 280px)">
+        <HeaderContent>
+            <MudTh>@GetLabelHeader()</MudTh>
+            <MudTh Style="text-align:right">@GetCountHeader()</MudTh>
+            @if (ShowQtyColumn()) { <MudTh Style="text-align:right">@GetQtyHeader()</MudTh> }
+            <MudTh Style="text-align:right">@GetSupplyHeader()</MudTh>
+            <MudTh Style="text-align:right">@GetVatHeader()</MudTh>
+            <MudTh Style="text-align:right">@GetTotalHeader()</MudTh>
+        </HeaderContent>
+        <RowTemplate>
+            <MudTd>@context.Label</MudTd>
+            <MudTd Style="text-align:right">@context.Count.ToString("N0")</MudTd>
+            @if (ShowQtyColumn()) { <MudTd Style="text-align:right">@context.Qty.ToString("N1")</MudTd> }
+            <MudTd Style="text-align:right">@context.SupplyAmount.ToString("N0")</MudTd>
+            <MudTd Style="text-align:right">@context.VatAmount.ToString("N0")</MudTd>
+            <MudTd Style="text-align:right;font-weight:500">@context.TotalAmount.ToString("N0")</MudTd>
+        </RowTemplate>
+        <NoRecordsContent><MudText Class="pa-4" Style="color:var(--hitpan-text-faint)">조회된 판매 데이터가 없습니다.</MudText></NoRecordsContent>
+    </MudTable>
+</MudPaper>
+
+@code {
+    private string _viewType = "period";
+    private DateTime? _from = DateTime.Today.AddDays(-30);
+    private DateTime? _to = DateTime.Today;
+    private string _searchText = "";
+    private List<ReportRow> _reportData = new();
+
+    // 작7 (2026-06-26): 대시보드 카드 클릭 → 기간 프리필터 수신. 값 있으면 그 기간으로 초기 조회.
+    //   오늘매출(from=to=오늘)·이번달매출(from=월초,to=오늘). 없으면 기존 기본(최근 30일) 유지.
+    [Parameter, SupplyParameterFromQuery(Name = "from")] public string? FromQuery { get; set; }
+    [Parameter, SupplyParameterFromQuery(Name = "to")] public string? ToQuery { get; set; }
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (DateTime.TryParse(FromQuery, out var f)) _from = f.Date;
+        if (DateTime.TryParse(ToQuery, out var t)) _to = t.Date;
+        await SearchAsync();
+    }
+
+    private async Task SearchAsync()
+    {
+        var qs = new List<string>();
+        qs.Add($"view={_viewType}");
+        if (_from.HasValue) qs.Add($"from={_from:yyyy-MM-dd}");
+        if (_to.HasValue) qs.Add($"to={_to:yyyy-MM-dd}");
+        if (!string.IsNullOrWhiteSpace(_searchText)) qs.Add($"partner={Uri.EscapeDataString(_searchText)}");
+        var path = "api/reports/sales?" + string.Join("&", qs);
+        try
+        {
+            _reportData = await Http.GetFromJsonAsync<List<ReportRow>>(path) ?? new();
+        }
+        catch (Exception _hp15Ex)
+        {
+            Console.Error.WriteLine($"[HP15] " + _hp15Ex.GetType().Name + ": " + _hp15Ex.Message);
+            _reportData = new();
+        }
+        StateHasChanged();
+    }
+
+    /// <summary>화면 데이터를 엑셀로 내보낸다.</summary>
+    private Task ExportExcelAsync() { Snackbar.Add("엑셀 내보내기는 준비중입니다.", Severity.Info); return Task.CompletedTask; }
+    /// <summary>화면을 인쇄한다.</summary>
+    private async Task PrintAsync() { await Js.InvokeVoidAsync("print"); }
+
+    private string GetLabelHeader() => _viewType switch
+    {
+        "partner" or "partner-yearly" or "new-partner" or "quote-vs-sales" => "업체명",
+        "item" or "price-change" => "품명",
+        "employee" => "사원명",
+        "monthly" => "월",
+        "return" or "total" => "기간",
+        _ => "기간"
+    };
+
+    // 컬럼 라벨 (조회유형별 동적 변경) — 견적제출대비/단가변동은 의미 다름
+    private string GetCountHeader() => _viewType switch
+    {
+        "quote-vs-sales" => "견적건수",
+        "price-change" => "건수",
+        _ => "건수"
+    };
+
+    private string GetQtyHeader() => _viewType switch
+    {
+        "quote-vs-sales" => "판매건수",
+        _ => "수량"
+    };
+
+    private string GetSupplyHeader() => _viewType switch
+    {
+        "quote-vs-sales" => "견적금액",
+        "price-change" => "최저단가",
+        _ => "공급가액"
+    };
+
+    private string GetVatHeader() => _viewType switch
+    {
+        "quote-vs-sales" => "판매금액",
+        "price-change" => "최고단가",
+        _ => "부가세"
+    };
+
+    private string GetTotalHeader() => _viewType switch
+    {
+        "quote-vs-sales" => "전환률(%)",
+        "price-change" => "평균단가",
+        _ => "합계"
+    };
+
+    private bool ShowQtyColumn() => _viewType is "item" or "monthly" or "partner-yearly"
+        or "employee" or "price-change" or "return" or "quote-vs-sales";
+
+    private string GetViewLabel() => _viewType switch
+    {
+        "monthly" => "상품판매일(월)계표",
+        "period" => "기간별 세부판매현황",
+        "item" => "품목별 세부판매현황",
+        "partner" => "업체별 세부판매현황",
+        "partner-yearly" => "업체별 판매집계표(년간)",
+        "employee" => "사원별 세부판매현황",
+        "quote-vs-sales" => "견적제출대비 판매현황",
+        "price-change" => "기간별 판매단가변동현황",
+        "return" => "매출반품현황",
+        "total" => "판매종합현황(반품포함)",
+        "new-partner" => "신규업체개척현황",
+        _ => "판매현황"
+    };
+
+    private string GetFilterLabel() => _viewType switch
+    {
+        "partner" or "partner-yearly" or "new-partner" => "업체명",
+        "item" or "price-change" => "품명",
+        "employee" => "사원명",
+        _ => "검색어"
+    };
+
+    private bool ShowSearchBox() => _viewType is not ("period" or "monthly");
+
+    private List<PartnerListRow>? _partnerCache;
+    private List<ItemListModel>? _itemCache;
+
+    private async Task<IEnumerable<string>> SearchPartnerAsync(string value, CancellationToken ct)
+    {
+        _partnerCache ??= await PartnersApi.GetListAsync() ?? new();
+        if (string.IsNullOrWhiteSpace(value)) return _partnerCache.Select(p => p.PartnerName).Distinct();
+        return _partnerCache.Where(p => p.PartnerName.Contains(value, StringComparison.OrdinalIgnoreCase)).Select(p => p.PartnerName).Distinct();
+    }
+
+    private async Task<IEnumerable<string>> SearchItemAsync(string value, CancellationToken ct)
+    {
+        _itemCache ??= await ItemsApi.GetListAsync() ?? new();
+        if (string.IsNullOrWhiteSpace(value)) return _itemCache.Select(i => i.ItemName).Distinct();
+        return _itemCache.Where(i => i.ItemName.Contains(value, StringComparison.OrdinalIgnoreCase)).Select(i => i.ItemName).Distinct();
+    }
+}

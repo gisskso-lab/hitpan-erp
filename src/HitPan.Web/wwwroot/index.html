@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html lang="ko">
+
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>히트판 ERP</title>
+    <base href="/" />
+    <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
+    <meta http-equiv="Pragma" content="no-cache" />
+    <meta http-equiv="Expires" content="0" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin />
+    <!-- 토스 감성 메인 폰트 — Pretendard (한국 표준). Noto Sans KR은 폴백. -->
+    <link rel="stylesheet" as="style" crossorigin
+          href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.css" />
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&family=Noto+Sans+KR:wght@400;500;600;700&display=swap" rel="stylesheet" />
+    <link href="https://fonts.googleapis.com/icon?family=Material+Icons" rel="stylesheet" />
+    <link href="_content/MudBlazor/MudBlazor.min.css" rel="stylesheet" />
+    <!-- 디자인 토큰 헌장 — 토스 B 컨셉 (사장님 결재 2026-04-29). app.css·hitpan.css는 보존. -->
+    <link rel="stylesheet" href="css/design-tokens.css?v=20260504d" />
+    <link rel="stylesheet" href="css/hp-toss.css?v=20260504d" />
+    <link rel="stylesheet" href="css/landing-v2.css?v=20260601b" />
+    <link rel="stylesheet" href="css/app.css?v=20260504d" />
+    <link rel="stylesheet" href="css/hitpan.css?v=20260504e" />
+    <!-- backoffice-dashboard.css 링크 제거 (보안 격벽 2026-06-18): 본사 대시보드는 HitPan.Backoffice 전담 -->
+    <link rel="icon" type="image/png" href="favicon.png" />
+    <link href="HitPan.Web.styles.css" rel="stylesheet" />
+</head>
+
+<body>
+    <div id="app">
+        <svg class="loading-progress">
+            <circle r="40%" cx="50%" cy="50%" />
+            <circle r="40%" cx="50%" cy="50%" />
+        </svg>
+        <div class="loading-progress-text"></div>
+    </div>
+
+    <div id="blazor-error-ui">
+        오류가 발생했습니다.
+        <a href="." class="reload">새로고침</a>
+        <span class="dismiss">✕</span>
+    </div>
+    <script src="js/storage.js"></script>
+    <script src="js/device-fingerprint.js"></script>
+    <script src="js/hitpan-shortcuts.js"></script>
+    <script src="js/chatbot-drag.js"></script>
+    <!-- 약관 동의 postMessage 브리지 (사장님 결재 2026-06-01) -->
+    <script src="js/hitpan-signup.js?v=20260601a"></script>
+    <!-- 사장님 헌법 (2026-04-29): Enter→다음 칸 / 그리드 ↑↓ 행 이동 키보드 네비. -->
+    <script src="js/hitpan-keyboard-nav.js"></script>
+    <!-- 핫픽스 2026-05-13: Blazor WASM 강력 캐시 해소용 — Service Worker 강제 해제 -->
+    <script>
+        if ('serviceWorker' in navigator) {
+            navigator.serviceWorker.getRegistrations().then(rs => rs.forEach(r => r.unregister()));
+        }
+        if (window.caches) {
+            caches.keys().then(keys => keys.forEach(k => caches.delete(k)));
+        }
+    </script>
+    <script src="_framework/blazor.webassembly.js"></script>
+    <script src="_content/MudBlazor/MudBlazor.min.js"></script>
+    <!-- 카카오 우편번호 API -->
+    <script src="https://t1.daumcdn.net/mapjsapi/bundle/postcode/prod/postcode.v2.js"></script>
+
+    <!-- 히트판 우편번호 찾기 interop -->
+    <script>
+        // 카카오 우편번호 팝업을 열고 선택 결과를 Blazor로 전달한다.
+        function openDaumPostcode(dotNetRef) {
+            new daum.Postcode({
+                oncomplete: function (data) {
+                    // 선택한 우편번호와 기본주소를 Blazor 콜백으로 전달한다.
+                    dotNetRef.invokeMethodAsync('OnAddressSelected', data.zonecode, data.roadAddress || data.jibunAddress);
+                }
+            }).open();
+        }
+    </script>
+
+    <!-- 히트판 공용 JS 헬퍼 -->
+    <script>
+        window.hitpan = window.hitpan || {};
+
+        // PDF/Excel 열기 — iOS Safari 팝업 차단 우회 (<a> click trick) + 모바일 PDF 봉합
+        // 모바일(iOS/Android)에서는 _blank 시 PDF가 빈 화면으로 뜨는 버그 봉합 →
+        //   동일 창에서 location.href 로 강제 (Safari는 PDF 미리보기 인라인, Chrome은 다운로드)
+        window.hitpan.openFile = function (url) {
+            var ua = (navigator.userAgent || '').toLowerCase();
+            var isMobile = /iphone|ipad|ipod|android/.test(ua);
+            var isPdf = /\/pdf(\?|$)|\.pdf(\?|$)/i.test(url);
+
+            // 모바일 + PDF = 동일 창 이동 (Safari 인라인 미리보기 정합)
+            if (isMobile && isPdf) {
+                window.location.href = url;
+                return;
+            }
+
+            var a = document.createElement('a');
+            a.href = url;
+            a.target = '_blank';
+            a.rel = 'noopener noreferrer';
+            document.body.appendChild(a);
+            a.click();
+            setTimeout(function () {
+                if (a.parentNode) { a.parentNode.removeChild(a); }
+            }, 1000);
+        };
+
+        // 네비게이션 앱 딥링크 + 웹 폴백
+        window.hitpan.openNavi = function (deepLink, webUrl) {
+            var iframe = document.createElement('iframe');
+            iframe.style.display = 'none';
+            document.body.appendChild(iframe);
+            iframe.src = deepLink;
+            setTimeout(function () {
+                if (iframe.parentNode) { iframe.parentNode.removeChild(iframe); }
+                if (!document.hidden) {
+                    window.open(webUrl, '_blank', 'noopener');
+                }
+            }, 300);
+        };
+    </script>
+
+    <!-- 툴바 마우스 휠 → 가로 스크롤 변환 -->
+    <script>
+        document.addEventListener('wheel', function (e) {
+            var toolbar = e.target.closest('.mud-toolbar');
+            if (toolbar && toolbar.scrollWidth > toolbar.clientWidth) {
+                e.preventDefault();
+                toolbar.scrollLeft += e.deltaY;
+            }
+        }, { passive: false });
+    </script>
+</body>
+
+</html>

@@ -1,0 +1,28 @@
+<!DOCTYPE html>
+<html lang="ko">
+
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <base href="/" />
+    <link rel="stylesheet" href="lib/bootstrap/dist/css/bootstrap.min.css" />
+    <link rel="stylesheet" href="https://fonts.googleapis.com/icon?family=Material+Icons" />
+    <link rel="stylesheet" href="_content/MudBlazor/MudBlazor.min.css" />
+    <link rel="stylesheet" href="css/backoffice-v2.css" />
+    <link rel="stylesheet" href="css/backoffice-dashboard.css" />
+    <link rel="stylesheet" href="app.css" />
+    <link rel="stylesheet" href="HitPan.Backoffice.styles.css" />
+    <link rel="icon" type="image/png" href="favicon.png" />
+    <HeadOutlet />
+</head>
+
+<body>
+    @* @rendermode InteractiveServer — MudBlazor Provider(Popover·Dialog·Snackbar)를
+       인터랙티브 회로로 렌더해야 다이얼로그·버튼이 동작. 미지정 시 정적 SSR로만 렌더되어
+       'Missing MudPopoverProvider' 예외 → 회로 사망 → 버튼 무반응·전반 지연. (사장님 결재 2026-07-04) *@
+    <Routes @rendermode="InteractiveServer" />
+    <script src="_framework/blazor.web.js"></script>
+    <script src="_content/MudBlazor/MudBlazor.min.js"></script>
+</body>
+
+</html>

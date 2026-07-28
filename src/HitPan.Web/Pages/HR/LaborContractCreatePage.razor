@@ -1,0 +1,255 @@
+@page "/hr/labor-contracts/create"
+@namespace HitPan.Web.Pages.HrUi
+@attribute [Authorize]
+@using HitPan.Web.Components.Common
+@using HitPan.Web.Models
+@using HitPan.Web.Services
+@inject LaborContractService ContractSvc
+@inject EmployeeService EmployeeSvc
+@inject NavigationManager Nav
+@inject ISnackbar Snackbar
+
+<PageTitle>근로계약서 작성 — 히트판 ERP</PageTitle>
+
+<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
+    <div>
+        <MudText Typo="Typo.h6">근로계약서 작성</MudText>
+        <MudText Typo="Typo.body2" Style="color:var(--mud-palette-text-secondary)">
+            좌측에 기본 정보, 우측에 근로 조건을 입력한 뒤 임시저장 또는 즉시 발송하세요.
+        </MudText>
+    </div>
+    <MudButton Variant="Variant.Text" StartIcon="@Icons.Material.Filled.ArrowBack" OnClick="GoBack">목록으로</MudButton>
+</div>
+
+<MudGrid Spacing="3">
+    @* ── 좌측: 기본 정보 ── *@
+    <MudItem xs="12" md="6">
+        <MudPaper Elevation="0" Class="pa-4 hitpan-card" Style="height:100%">
+            <MudText Typo="Typo.subtitle1" Class="mb-3" Style="font-weight:600">기본 정보</MudText>
+
+            <MudAutocomplete T="EmployeeListItemModel"
+                             Label="사원 선택"
+                             Value="_selectedEmployee"
+                             ValueChanged="OnEmployeeChanged"
+                             SearchFunc="SearchEmployee"
+                             ToStringFunc="@(e => e == null ? "" : $"{e.EmpName} ({e.DeptName ?? "-"})")"
+                             Variant="Variant.Outlined"
+                             Margin="Margin.Dense"
+                             Class="mb-3"
+                             Required="true" />
+
+            <MudText Typo="Typo.caption" Class="mb-1">계약형태</MudText>
+            <MudRadioGroup T="string" @bind-Value="_edit.ContractType" Class="mb-3">
+                <MudRadio T="string" Value="@("regular")" Color="Color.Primary">정규직</MudRadio>
+                <MudRadio T="string" Value="@("contract")" Color="Color.Primary">계약직</MudRadio>
+                <MudRadio T="string" Value="@("part_time")" Color="Color.Primary">파트타임</MudRadio>
+                <MudRadio T="string" Value="@("daily")" Color="Color.Primary">일용직</MudRadio>
+            </MudRadioGroup>
+
+            <MudGrid Spacing="2">
+                <MudItem xs="6">
+                    <MudDatePicker Label="시작일" @bind-Date="_startDate"
+                                   Variant="Variant.Outlined" Margin="Margin.Dense"
+                                   Style="min-width:160px" DateFormat="yyyy-MM-dd" />
+                </MudItem>
+                <MudItem xs="6">
+                    <MudDatePicker Label="종료일 (선택)" @bind-Date="_endDate"
+                                   Variant="Variant.Outlined" Margin="Margin.Dense"
+                                   Style="min-width:160px" DateFormat="yyyy-MM-dd" Clearable="true" />
+                </MudItem>
+            </MudGrid>
+
+            <MudTextField T="string" Label="근무장소" @bind-Value="_edit.WorkLocation"
+                          Variant="Variant.Outlined" Margin="Margin.Dense" Class="mt-3" />
+
+            <MudTextField T="string" Label="담당업무" @bind-Value="_edit.JobDescription"
+                          Variant="Variant.Outlined" Margin="Margin.Dense" Class="mt-3"
+                          Lines="2" />
+
+            <MudTextField T="string" Label="근무시간" @bind-Value="_edit.WorkHours"
+                          Placeholder="예: 09:00~18:00 (주 5일, 주휴 포함)"
+                          Variant="Variant.Outlined" Margin="Margin.Dense" Class="mt-3" />
+        </MudPaper>
+    </MudItem>
+
+    @* ── 우측: 근로 조건 ── *@
+    <MudItem xs="12" md="6">
+        <MudPaper Elevation="0" Class="pa-4 hitpan-card" Style="height:100%">
+            <MudText Typo="Typo.subtitle1" Class="mb-3" Style="font-weight:600">근로 조건</MudText>
+
+            <MudGrid Spacing="2">
+                <MudItem xs="7">
+                    <MudNumericField T="decimal" Label="급여액" @bind-Value="_edit.Salary"
+                                     Variant="Variant.Outlined" Margin="Margin.Dense"
+                                     Format="N0" Min="0" />
+                </MudItem>
+                <MudItem xs="5">
+                    <MudSelect T="string" Label="급여형태" @bind-Value="_edit.SalaryType"
+                               Variant="Variant.Outlined" Margin="Margin.Dense">
+                        <MudSelectItem Value="@("monthly")">월급</MudSelectItem>
+                        <MudSelectItem Value="@("hourly")">시급</MudSelectItem>
+                        <MudSelectItem Value="@("daily")">일급</MudSelectItem>
+                        <MudSelectItem Value="@("annual")">연봉</MudSelectItem>
+                    </MudSelect>
+                </MudItem>
+            </MudGrid>
+
+            <MudNumericField T="int?" Label="급여일 (매월 N일)" @bind-Value="_edit.PayDay"
+                             Variant="Variant.Outlined" Margin="Margin.Dense" Class="mt-3"
+                             Min="1" Max="31" />
+
+            <MudText Typo="Typo.caption" Class="mt-4 mb-1">4대 보험 적용</MudText>
+            <MudGrid Spacing="0">
+                <MudItem xs="6">
+                    <MudCheckBox T="bool" @bind-Value="_insNational" Color="Color.Primary" Dense="true">국민연금</MudCheckBox>
+                </MudItem>
+                <MudItem xs="6">
+                    <MudCheckBox T="bool" @bind-Value="_insHealth" Color="Color.Primary" Dense="true">건강보험</MudCheckBox>
+                </MudItem>
+                <MudItem xs="6">
+                    <MudCheckBox T="bool" @bind-Value="_insEmployment" Color="Color.Primary" Dense="true">고용보험</MudCheckBox>
+                </MudItem>
+                <MudItem xs="6">
+                    <MudCheckBox T="bool" @bind-Value="_insIndustrial" Color="Color.Primary" Dense="true">산재보험</MudCheckBox>
+                </MudItem>
+            </MudGrid>
+
+            <MudNumericField T="decimal?" Label="연차휴가 (일)" @bind-Value="_edit.AnnualLeaveDays"
+                             Variant="Variant.Outlined" Margin="Margin.Dense" Class="mt-3"
+                             Min="0" Max="365" />
+
+            <MudTextField T="string" Label="특약사항" @bind-Value="_edit.SpecialTerms"
+                          Variant="Variant.Outlined" Margin="Margin.Dense" Class="mt-3"
+                          Lines="3" Placeholder="수습기간, 비밀유지, 경업금지 등" />
+        </MudPaper>
+    </MudItem>
+</MudGrid>
+
+@* ── 하단 버튼 ── *@
+<div style="display:flex;justify-content:flex-end;gap:8px;margin-top:24px">
+    <MudButton Variant="Variant.Outlined" Color="Color.Default"
+               StartIcon="@Icons.Material.Filled.Save"
+               OnClick="@(() => SaveAsync(false))"
+               Disabled="_saving">임시저장</MudButton>
+    <MudButton Variant="Variant.Filled" Color="Color.Primary"
+               StartIcon="@Icons.Material.Filled.Send"
+               OnClick="@(() => SaveAsync(true))"
+               Disabled="_saving">발송</MudButton>
+</div>
+
+@code {
+    private CreateLaborContractModel _edit = new();
+    private DateTime? _startDate = DateTime.Today;
+    private DateTime? _endDate;
+
+    private bool _insNational = true;
+    private bool _insHealth = true;
+    private bool _insEmployment = true;
+    private bool _insIndustrial = true;
+
+    private List<EmployeeListItemModel> _employees = new();
+    private EmployeeListItemModel? _selectedEmployee;
+
+    private bool _saving;
+
+    protected override async Task OnInitializedAsync()
+    {
+        _employees = await EmployeeSvc.GetListAsync();
+    }
+
+    private void OnEmployeeChanged(EmployeeListItemModel? emp)
+    {
+        _selectedEmployee = emp;
+        _edit.EmployeeId = emp?.EmployeeId ?? string.Empty;
+        // 봉합 (2026-06-22, 10차 P0-2): EmployeeName을 함께 채운다.
+        // 미전송 시 백엔드 LaborContractService가 공백 검증으로 400을 던진다.
+        _edit.EmployeeName = emp?.EmpName ?? string.Empty;
+    }
+
+    /// <summary>
+    /// 사원 자동완성 검색 함수이다.
+    /// </summary>
+    private Task<IEnumerable<EmployeeListItemModel>> SearchEmployee(string? value, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+            return Task.FromResult(_employees.Take(20));
+
+        var q = value.Trim();
+        return Task.FromResult(_employees
+            .Where(e => (e.EmpName ?? "").Contains(q, StringComparison.OrdinalIgnoreCase)
+                        || (e.EmpNo ?? "").Contains(q, StringComparison.OrdinalIgnoreCase)
+                        || (e.DeptName ?? "").Contains(q, StringComparison.OrdinalIgnoreCase))
+            .Take(20));
+    }
+
+    /// <summary>
+    /// 근로계약서를 저장한다. sendNow=true면 저장 후 즉시 발송한다.
+    /// </summary>
+    private async Task SaveAsync(bool sendNow)
+    {
+        // 검증
+        if (string.IsNullOrWhiteSpace(_edit.EmployeeId))
+        {
+            Snackbar.Add("사원을 선택해주세요.", Severity.Warning);
+            return;
+        }
+        if (_startDate is null)
+        {
+            Snackbar.Add("계약 시작일을 선택해주세요.", Severity.Warning);
+            return;
+        }
+        if (_edit.Salary <= 0)
+        {
+            Snackbar.Add("급여액을 입력해주세요.", Severity.Warning);
+            return;
+        }
+
+        _edit.StartDate = _startDate.Value;
+        _edit.EndDate = _endDate;
+
+        // 4대 보험을 문자열로 변환
+        var ins = new List<string>();
+        if (_insNational) ins.Add("국민연금");
+        if (_insHealth) ins.Add("건강보험");
+        if (_insEmployment) ins.Add("고용보험");
+        if (_insIndustrial) ins.Add("산재보험");
+        _edit.SocialInsurance = string.Join(",", ins);
+
+        _edit.SendImmediately = sendNow;
+
+        _saving = true;
+        StateHasChanged();
+
+        var contractId = await ContractSvc.CreateAsync(_edit);
+        if (string.IsNullOrWhiteSpace(contractId))
+        {
+            _saving = false;
+            // 봉합 (2026-06-22, 10차 P0-2): 백엔드 실패 사유를 그대로 노출(헌법 #15). 없으면 일반 메시지.
+            var reason = ContractSvc.LastCreateError;
+            Snackbar.Add(string.IsNullOrWhiteSpace(reason) ? "저장에 실패했습니다." : $"저장에 실패했습니다: {reason}", Severity.Error);
+            return;
+        }
+
+        if (sendNow)
+        {
+            var sent = await ContractSvc.SendAsync(contractId);
+            if (!sent)
+            {
+                _saving = false;
+                Snackbar.Add("저장되었지만 발송에 실패했습니다.", Severity.Warning);
+                Nav.NavigateTo("/hr/labor-contracts");
+                return;
+            }
+            Snackbar.Add("근로계약서가 저장되고 발송되었습니다.", Severity.Success);
+        }
+        else
+        {
+            Snackbar.Add("근로계약서가 임시저장되었습니다.", Severity.Success);
+        }
+
+        _saving = false;
+        Nav.NavigateTo("/hr/labor-contracts");
+    }
+
+    private void GoBack() => Nav.NavigateTo("/hr/labor-contracts");
+}

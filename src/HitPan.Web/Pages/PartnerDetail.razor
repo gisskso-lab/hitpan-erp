@@ -1,0 +1,292 @@
+@page "/partners/new"
+@page "/partners/{Id}"
+@attribute [Authorize]
+@inject PartnerMasterService PartnersApi
+@inject NavigationManager Nav
+@inject ISnackbar Snackbar
+@inject IDialogService DialogService
+@inject IJSRuntime JS
+
+<PageTitle>@(_isNew ? "업체 등록" : "업체 수정")</PageTitle>
+
+<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
+    <MudText Typo="Typo.h6">@(_isNew ? "업체 등록" : "업체 수정")</MudText>
+    <div style="display:flex;gap:8px">
+        <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="SaveAsync" Disabled="_saving">저장</MudButton>
+        <MudButton Variant="Variant.Outlined" Color="Color.Error" OnClick="DeleteAsync" Disabled="_isNew || _saving">삭제</MudButton>
+        <MudButton Variant="Variant.Text" OnClick="BackToList">목록으로</MudButton>
+    </div>
+</div>
+
+@if (_loading)
+{
+    <MudProgressLinear Indeterminate="true" Color="Color.Primary" />
+}
+else
+{
+    <MudGrid Spacing="2">
+        <MudItem xs="12" md="6">
+            <MudPaper Class="pa-4" Elevation="0" Style="border:1px solid var(--mud-palette-lines-default);border-radius:12px">
+                <MudText Typo="Typo.subtitle1" Class="mb-2">기본정보</MudText>
+                <MudTextField @bind-Value="_model.PartnerName" Label="업체명" Required="true" Variant="Variant.Outlined" Margin="Margin.Dense" />
+                <MudTextField @bind-Value="_model.PartnerCode" Label="업체코드" Variant="Variant.Outlined" Margin="Margin.Dense" />
+                <MudSelect T="string" @bind-Value="_model.PartnerType" Label="구분" Variant="Variant.Outlined" Margin="Margin.Dense">
+                    <MudSelectItem Value="@("customer")">매출처</MudSelectItem>
+                    <MudSelectItem Value="@("supplier")">매입처</MudSelectItem>
+                    <MudSelectItem Value="@("both")">매출+매입</MudSelectItem>
+                </MudSelect>
+                <MudTextField @bind-Value="_model.BizNo" Label="사업자번호" Variant="Variant.Outlined" Margin="Margin.Dense" />
+                <MudTextField @bind-Value="_model.CeoName" Label="대표자" Variant="Variant.Outlined" Margin="Margin.Dense" />
+                <MudTextField @bind-Value="_model.BizType" Label="업태" Variant="Variant.Outlined" Margin="Margin.Dense" />
+                <MudTextField @bind-Value="_model.BizItem" Label="업종" Variant="Variant.Outlined" Margin="Margin.Dense" />
+            </MudPaper>
+        </MudItem>
+
+        <MudItem xs="12" md="6">
+            <MudPaper Class="pa-4" Elevation="0" Style="border:1px solid var(--mud-palette-lines-default);border-radius:12px">
+                <MudText Typo="Typo.subtitle1" Class="mb-2">연락처</MudText>
+
+                @* 업체 전화 + 원터치 전화걸기 *@
+                <div class="hp-contact-row">
+                    <MudTextField @bind-Value="_model.Tel" Label="전화" Variant="Variant.Outlined" Margin="Margin.Dense" Class="hp-contact-field" />
+                    @if (!string.IsNullOrWhiteSpace(_model.Tel))
+                    {
+                        <a href="tel:@_model.Tel" class="hp-contact-btn hp-contact-btn--call" title="전화걸기">
+                            <MudIcon Icon="@Icons.Material.Filled.Phone" Style="font-size:18px;" />
+                        </a>
+                    }
+                </div>
+
+                <MudTextField @bind-Value="_model.Fax" Label="팩스" Variant="Variant.Outlined" Margin="Margin.Dense" />
+
+                @* 주소 + 카카오/티맵 네비 버튼 *@
+                <div style="display:flex;gap:8px;align-items:end">
+                    <MudTextField @bind-Value="_model.ZipCode" Label="우편번호" Variant="Variant.Outlined" Margin="Margin.Dense" ReadOnly="true" Style="flex:1" />
+                    <MudButton Variant="Variant.Outlined" Size="Size.Small" OnClick="SearchAddress" Style="height:40px;white-space:nowrap">우편번호 찾기</MudButton>
+                </div>
+                <MudTextField @bind-Value="_model.Address" Label="주소" Variant="Variant.Outlined" Margin="Margin.Dense" ReadOnly="true" />
+                <MudTextField @bind-Value="_model.AddressDetail" Label="상세주소" Variant="Variant.Outlined" Margin="Margin.Dense" Placeholder="상세주소를 입력하세요" />
+
+                @* 네비게이션 버튼 — 주소가 있을 때만 표시 *@
+                @if (!string.IsNullOrWhiteSpace(_model.Address))
+                {
+                    <div class="hp-navi-row">
+                        <span class="hp-navi-label">네비게이션</span>
+                        <button type="button" class="hp-navi-btn hp-navi-btn--kakao"
+                                @onclick="OpenKakaoNavi">
+                            <img src="https://t1.kakaocdn.net/kakao_for_business/images/icon/favicon/favicon-16x16.png" width="14" height="14" alt="" style="border-radius:3px" />
+                            카카오내비
+                        </button>
+                        <button type="button" class="hp-navi-btn hp-navi-btn--tmap"
+                                @onclick="OpenTmapNavi">
+                            <MudIcon Icon="@Icons.Material.Filled.Navigation" Style="font-size:14px;" />
+                            티맵
+                        </button>
+                    </div>
+                }
+
+                @* 이메일 + 바로 발송 *@
+                <div class="hp-contact-row">
+                    <MudTextField @bind-Value="_model.Email" Label="이메일" Variant="Variant.Outlined" Margin="Margin.Dense" Class="hp-contact-field" />
+                    @if (!string.IsNullOrWhiteSpace(_model.Email))
+                    {
+                        <a href="mailto:@_model.Email" class="hp-contact-btn hp-contact-btn--email" title="이메일 보내기">
+                            <MudIcon Icon="@Icons.Material.Filled.Email" Style="font-size:18px;" />
+                        </a>
+                    }
+                </div>
+
+                <MudTextField @bind-Value="_model.Homepage" Label="홈페이지" Variant="Variant.Outlined" Margin="Margin.Dense" />
+                <MudTextField @bind-Value="_model.ManagerName" Label="담당자명" Variant="Variant.Outlined" Margin="Margin.Dense" />
+
+                @* 담당자 연락처 + 원터치 전화걸기 *@
+                <div class="hp-contact-row">
+                    <MudTextField @bind-Value="_model.ManagerTel" Label="담당자 연락처" Variant="Variant.Outlined" Margin="Margin.Dense" Class="hp-contact-field" />
+                    @if (!string.IsNullOrWhiteSpace(_model.ManagerTel))
+                    {
+                        <a href="tel:@_model.ManagerTel" class="hp-contact-btn hp-contact-btn--call" title="담당자에게 전화">
+                            <MudIcon Icon="@Icons.Material.Filled.Phone" Style="font-size:18px;" />
+                        </a>
+                    }
+                </div>
+            </MudPaper>
+        </MudItem>
+
+        <MudItem xs="12">
+            <MudPaper Class="pa-4" Elevation="0" Style="border:1px solid var(--mud-palette-lines-default);border-radius:12px">
+                <MudText Typo="Typo.subtitle1" Class="mb-2">거래조건</MudText>
+                <MudGrid Spacing="2">
+                    <MudItem xs="12" md="3">
+                        <MudSelect T="string" @bind-Value="_model.PriceGrade" Label="단가등급" Variant="Variant.Outlined" Margin="Margin.Dense">
+                            <MudSelectItem Value="@("A")">A</MudSelectItem>
+                            <MudSelectItem Value="@("B")">B</MudSelectItem>
+                            <MudSelectItem Value="@("C")">C</MudSelectItem>
+                            <MudSelectItem Value="@("D")">D</MudSelectItem>
+                            <MudSelectItem Value="@("E")">E</MudSelectItem>
+                        </MudSelect>
+                    </MudItem>
+                    <MudItem xs="12" md="3">
+                        <MudNumericField T="int" @bind-Value="_model.PaymentTerms" Label="결제조건(일)" Variant="Variant.Outlined" Margin="Margin.Dense" />
+                    </MudItem>
+                    <MudItem xs="12" md="3">
+                        <MudNumericField T="decimal" @bind-Value="_model.CreditLimit" Label="여신한도" Variant="Variant.Outlined" Margin="Margin.Dense" />
+                    </MudItem>
+                    <MudItem xs="12" md="3">
+                        <MudSelect T="string" @bind-Value="_model.TaxType" Label="부가세 유형" Variant="Variant.Outlined" Margin="Margin.Dense">
+                            <MudSelectItem Value="@("taxable")">과세</MudSelectItem>
+                            <MudSelectItem Value="@("zero")">영세</MudSelectItem>
+                            <MudSelectItem Value="@("exempt")">면세</MudSelectItem>
+                        </MudSelect>
+                    </MudItem>
+                    <MudItem xs="12">
+                        <MudTextField @bind-Value="_model.Memo" Label="메모" Variant="Variant.Outlined" Margin="Margin.Dense" Lines="3" />
+                    </MudItem>
+                </MudGrid>
+            </MudPaper>
+        </MudItem>
+    </MudGrid>
+}
+
+@code {
+    [Parameter] public string? Id { get; set; }
+
+    private PartnerDetailModel _model = new();
+    private bool _loading = true;
+    private bool _saving;
+    private bool _isNew;
+
+    private string FullAddress => string.IsNullOrWhiteSpace(_model.AddressDetail)
+        ? _model.Address ?? ""
+        : $"{_model.Address} {_model.AddressDetail}";
+
+    private async Task OpenKakaoNavi()
+    {
+        var addr = FullAddress;
+        if (string.IsNullOrWhiteSpace(addr)) return;
+
+        // 1) 주소를 클립보드에 복사 (앱 내 붙여넣기용)
+        await JS.InvokeVoidAsync("navigator.clipboard.writeText", addr);
+
+        // 2) 카카오맵 앱 딥링크 시도 → 실패 시 웹 카카오맵으로 폴백
+        var enc = Uri.EscapeDataString(addr);
+        var nameEnc = Uri.EscapeDataString(_model.PartnerName ?? addr);
+        await JS.InvokeVoidAsync("hitpan.openNavi",
+            $"kakaomap://route?ep={enc}&by=CAR",
+            $"https://map.kakao.com/link/to/{nameEnc},{enc}");
+
+        Snackbar.Add($"주소가 클립보드에 복사됐어요. 앱에서 붙여넣기하세요.", Severity.Info, cfg => cfg.VisibleStateDuration = 2500);
+    }
+
+    private async Task OpenTmapNavi()
+    {
+        var addr = FullAddress;
+        if (string.IsNullOrWhiteSpace(addr)) return;
+
+        // 1) 주소를 클립보드에 복사
+        await JS.InvokeVoidAsync("navigator.clipboard.writeText", addr);
+
+        // 2) 티맵 앱 딥링크 시도 → 실패 시 티맵 웹으로 폴백
+        var enc = Uri.EscapeDataString(addr);
+        var nameEnc = Uri.EscapeDataString(_model.PartnerName ?? addr);
+        await JS.InvokeVoidAsync("hitpan.openNavi",
+            $"tmap://route?goalname={nameEnc}&goal={enc}",
+            $"https://tmap.life/?goal={enc}&goalname={nameEnc}");
+
+        Snackbar.Add($"주소가 클립보드에 복사됐어요. 앱에서 붙여넣기하세요.", Severity.Info, cfg => cfg.VisibleStateDuration = 2500);
+    }
+
+    protected override async Task OnParametersSetAsync()
+    {
+        _isNew = string.IsNullOrWhiteSpace(Id) || string.Equals(Id, "new", StringComparison.OrdinalIgnoreCase);
+        _loading = true;
+        if (_isNew)
+        {
+            _model = new PartnerDetailModel
+            {
+                PartnerType = "both",
+                PriceGrade = "A",
+                TaxType = "taxable",
+                IsActive = true
+            };
+        }
+        else
+        {
+            var loaded = await PartnersApi.GetAsync(Id!);
+            _model = loaded ?? new PartnerDetailModel();
+        }
+        _loading = false;
+    }
+
+    private async Task SaveAsync()
+    {
+        if (string.IsNullOrWhiteSpace(_model.PartnerName))
+        {
+            Snackbar.Add("업체명은 필수입니다.", Severity.Warning);
+            return;
+        }
+
+        _saving = true;
+        var result = _isNew
+            ? await PartnersApi.CreateAsync(_model)
+            : await PartnersApi.UpdateAsync(Id!, _model);
+        _saving = false;
+
+        if (!result.ok)
+        {
+            Snackbar.Add(result.errorMessage ?? "저장에 실패했습니다.", Severity.Error);
+            return;
+        }
+
+        Snackbar.Add("저장되었습니다.", Severity.Success);
+        BackToList();
+    }
+
+    private async Task DeleteAsync()
+    {
+        if (_isNew)
+        {
+            return;
+        }
+
+        var confirm = await DialogService.ShowMessageBoxAsync(
+            "업체 삭제",
+            $"'{_model.PartnerName}' 업체를 삭제하시겠습니까?",
+            yesText: "삭제", cancelText: "취소");
+        if (confirm != true)
+        {
+            return;
+        }
+
+        _saving = true;
+        var ok = await PartnersApi.DeleteAsync(Id!);
+        _saving = false;
+        if (!ok)
+        {
+            Snackbar.Add("삭제에 실패했습니다.", Severity.Error);
+            return;
+        }
+
+        Snackbar.Add("삭제되었습니다.", Severity.Success);
+        BackToList();
+    }
+
+    private async Task SearchAddress()
+    {
+        var dotNetRef = DotNetObjectReference.Create(this);
+        await JS.InvokeVoidAsync("openDaumPostcode", dotNetRef);
+    }
+
+    [JSInvokable]
+    public Task OnAddressSelected(string zipCode, string address)
+    {
+        _model.ZipCode = zipCode;
+        _model.Address = address;
+        StateHasChanged();
+        return Task.CompletedTask;
+    }
+
+    private void BackToList()
+    {
+        Nav.NavigateTo("/partners");
+    }
+}

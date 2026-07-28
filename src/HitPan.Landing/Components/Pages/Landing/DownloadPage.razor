@@ -1,0 +1,185 @@
+@page "/download"
+@page "/landing/download"
+@rendermode InteractiveServer
+@layout LandingLayout
+@inject IJSRuntime JS
+@inject IConfiguration Config
+@inject ILogger<DownloadPage> Logger
+@inject IHttpClientFactory HttpFactory
+
+<PageTitle>다운로드 — 히트판 ERP</PageTitle>
+
+<section class="download-section">
+    <div class="download-card">
+        <div class="icon">⬇️</div>
+        <h1>히트판 ERP 다운로드</h1>
+        <p class="lead">설치 파일을 받아 두 번 누르시면 자동으로 설치됩니다.<br />시리얼 키는 가입 안내 메일에서 확인하세요.</p>
+
+        @if (!string.IsNullOrWhiteSpace(Key))
+        {
+            @* 사장님 결재 2026-06-02 — 시리얼 키 화면 표시 (1회, 헌법 #22 정합) *@
+            <div class="license-box">
+                <div class="license-label">📋 시리얼 키 (가입 안내 메일과 동일)</div>
+                <div class="license-key">@Key</div>
+                <button class="btn-copy" @onclick="CopyKey">@(_copied ? "✓ 복사됨" : "복사")</button>
+            </div>
+        }
+
+        <div class="download-list">
+            <div class="download-item">
+                @if (ReleaseConfigured)
+                {
+                    <div class="info">
+                        <strong>Windows 10/11 (x64)</strong>
+                        <span>권장 · 280 MB · 버전 @InstallerVersion</span>
+                    </div>
+                    <a href="@DownloadUrl"
+                       class="btn-dl"
+                       download>설치 파일 받기</a>
+                }
+                else
+                {
+                    @* 설치 파일 정보를 못 읽은 경우 — 틀린 버전을 안내하느니 안내하지 않는다(위 @code 주석 참조).
+                       고객에게는 원인이 아니라 다음 행동을 알려준다(고객 노출 문구에 개발 용어 금지). *@
+                    <div class="info">
+                        <strong>설치 파일을 준비 중입니다</strong>
+                        <span>잠시 후 다시 확인해 주세요. 급하시면 고객센터로 연락 주시면 바로 보내드립니다.</span>
+                    </div>
+                }
+            </div>
+        </div>
+
+        <div class="install-steps">
+            <h3>설치 5단계 (10분 이내)</h3>
+            <ol>
+                <li>설치 파일 두 번 누르기 → 관리자 권한 허용</li>
+                <li>가입 안내 메일에서 받은 <strong>시리얼 키</strong> 입력</li>
+                <li>자동 설치 (데이터베이스 · 실행환경 · 통신연결 · 보안설정)</li>
+                <li>설치 완료 → 브라우저 자동 열림 ({고객사ID}.hitpan.kr)</li>
+                <li>로그인 → 약관 동의 → 사용 시작</li>
+            </ol>
+        </div>
+
+        <div class="support">
+            <h3>설치가 안 되나요?</h3>
+            <div class="support-grid">
+                <div>
+                    <strong>📞 콜센터</strong>
+                    <p>준비 중 (베타1 기간) · 1:1 문의 cs@hitpan.kr</p>
+                </div>
+                <div>
+                    <strong>💬 AI 챗봇</strong>
+                    <p>"히트판에게 물어보세요" 24/7</p>
+                </div>
+                <div>
+                    <strong>🖥️ 원격 지원</strong>
+                    <p>애니소프트 원격 (가입 메일 안내)</p>
+                </div>
+            </div>
+        </div>
+    </div>
+</section>
+
+<style>
+.download-section { padding: 48px 0; background: #F9FAFB; min-height: calc(100vh - 200px); }
+.download-card { max-width: 640px; margin: 0 auto; background: #fff; padding: 40px; border-radius: 16px; box-shadow: 0 4px 16px rgba(0,0,0,0.06); }
+.icon { font-size: 56px; text-align: center; margin-bottom: 12px; }
+.download-card h1 { font-size: 28px; text-align: center; margin-bottom: 12px; }
+.lead { text-align: center; color: #6B7280; margin-bottom: 32px; font-size: 14px; line-height: 1.6; }
+.download-list { margin-bottom: 32px; }
+.download-item { display: flex; align-items: center; justify-content: space-between; padding: 20px; border: 2px solid #E5E7EB; border-radius: 12px; margin-bottom: 12px; }
+.download-item .info strong { display: block; font-size: 16px; margin-bottom: 4px; }
+.download-item .info span { font-size: 13px; color: #6B7280; }
+.btn-dl { padding: 12px 24px; background: #0F6E56; color: #fff; border-radius: 8px; text-decoration: none; font-weight: 600; }
+.btn-dl:hover { background: #0A5240; }
+.btn-secondary { background: #6B7280; }
+.install-steps { background: #F0F9F5; padding: 24px; border-radius: 12px; margin-bottom: 24px; }
+.install-steps h3 { color: #0F6E56; font-size: 16px; margin-bottom: 12px; }
+.install-steps ol { padding-left: 20px; }
+.install-steps li { padding: 6px 0; font-size: 14px; color: #4B5563; line-height: 1.6; }
+.support { background: #FFF7ED; padding: 24px; border-radius: 12px; }
+.support h3 { color: #C2410C; font-size: 16px; margin-bottom: 16px; }
+.support-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
+.support-grid strong { display: block; margin-bottom: 4px; }
+.support-grid p { font-size: 13px; color: #6B7280; margin: 0; }
+@@media (max-width: 640px) { .support-grid { grid-template-columns: 1fr; } }
+.license-box { background:#0F1419; color:#fff; border-radius:8px; padding:16px; margin-bottom:24px; }
+.license-label { font-size:12px; color:#9CA3AF; margin-bottom:8px; }
+.license-key { font-family:'Consolas',monospace; font-size:18px; letter-spacing:1px; font-weight:700; word-break:break-all; }
+.btn-copy { margin-top:8px; padding:6px 12px; background:#0F6E56; color:#fff; border:none; border-radius:6px; font-size:12px; cursor:pointer; }
+</style>
+
+@code {
+    [SupplyParameterFromQuery] public string? Key { get; set; }
+    private bool _copied;
+
+    // 출하 버전 단일출처 (2026-07-16, 작1 W4-0 — 검증팀 F-5 적발 / 재검증 Q6 재적발)
+    //   종전엔 이 페이지에 "1.2.33" 이, 가입 승인 메일 코드에는 "1.2.28" 이 각각 손으로 적혀 있었다.
+    //   두 곳을 사람이 따로 고치다 갈라졌고, 메일로 받은 고객은 로그인이 안 되는 옛 EXE 를 설치했다.
+    //   배포 때 바뀌는 값은 코드가 아니라 설정에서 읽는다(백오피스 appsettings 의 Release 섹션과 같은 키).
+    //
+    //   ⚠️ 폴백을 두지 않는 이유 (초판의 `?? "1.2.33"` 을 제거함 — 검증팀 재적발)
+    //     초판은 미설정 시 조용히 "1.2.33" 으로 폴백했다. 그런데 백오피스 메일은 미설정 시 예외를 던진다.
+    //     이 비대칭이 F-5 재발 경로다 — NCP 랜딩에 환경변수 주입이 빠지면 랜딩은 조용히 옛 버전을,
+    //     메일은 새 버전을 안내해 "같은 회사가 두 경로에서 다른 EXE 를 주는" 사고가 그대로 되살아난다.
+    //     게다가 조용한 폴백이라 아무도 모른다(헌법 #15). 값이 없으면 안내하지 않는 편이 안전하다.
+    // ★ 사장님 결재 2026-07-21 — "랜딩은 무조건 최신 설치파일". 종전엔 Release:InstallerVersion 설정값을
+    //   사람이 손으로 맞춰야 해(오늘 사고: NCP 랜딩은 7/4 옛 배포본이라 설정조차 없어 옛 EXE 안내), 새 버전마다
+    //   까먹으면 옛 EXE 가 나갔다. 이제 자동 업데이트의 단일 진실원인 manifest(updates.hitpan.kr/manifest.json,
+    //   항상 최신)를 읽어 다운로드 버전을 자동 결정한다. 새 버전은 manifest 만 갱신하면 랜딩·자동업데이트가
+    //   동시에 최신 = 랜딩만 옛 버전 나가는 사고 구조적 불가(헌법 #20·#35 유기적 연결 정합).
+    //   폴백: manifest 조회 실패 시에만 설정값(Release:InstallerVersion) → 그것도 없으면 미표시(헌법 #15 로그).
+    private string ManifestUrl =>
+        Config["Release:ManifestUrl"] ?? "https://updates.hitpan.kr/manifest.json";
+    private string DownloadBaseUrl =>
+        (Config["Release:DownloadBaseUrl"] ?? "https://updates.hitpan.kr/packages").TrimEnd('/');
+
+    private string? _installerVersion;
+    private string? InstallerVersion => _installerVersion;
+    private bool ReleaseConfigured => !string.IsNullOrWhiteSpace(InstallerVersion);
+    private string DownloadUrl =>
+        $"{DownloadBaseUrl}/HitPan-ERP-Setup-{InstallerVersion}.exe";
+
+    protected override async Task OnInitializedAsync()
+    {
+        // 1) manifest 에서 최신 버전 조회 (단일 진실원)
+        try
+        {
+            var http = HttpFactory.CreateClient();
+            http.Timeout = TimeSpan.FromSeconds(5);
+            using var doc = System.Text.Json.JsonDocument.Parse(
+                await http.GetStringAsync(ManifestUrl));
+            if (doc.RootElement.TryGetProperty("version", out var v))
+            {
+                var ver = v.GetString();
+                if (!string.IsNullOrWhiteSpace(ver))
+                    _installerVersion = ver.Trim();
+            }
+        }
+        catch (Exception ex)
+        {
+            // 헌법 #15: 침묵 금지. manifest 조회 실패는 흔적을 남기고 설정값으로 폴백한다.
+            Logger.LogWarning(ex,
+                "[DownloadPage] manifest({Url}) 조회 실패 — 설정값(Release:InstallerVersion)으로 폴백.",
+                ManifestUrl);
+        }
+
+        // 2) 폴백 — manifest 실패 시에만 설정값 사용
+        if (string.IsNullOrWhiteSpace(_installerVersion))
+            _installerVersion = Config["Release:InstallerVersion"];
+
+        // 3) 그래도 없으면 운영 사고 — 침묵 금지(헌법 #15)
+        if (!ReleaseConfigured)
+            Logger.LogError(
+                "[DownloadPage] 다운로드 버전을 결정하지 못했습니다 — manifest 조회 실패 + Release:InstallerVersion 미설정. " +
+                "manifest 서빙 상태를 확인하세요.");
+    }
+
+    private async Task CopyKey()
+    {
+        if (string.IsNullOrWhiteSpace(Key)) return;
+        await JS.InvokeVoidAsync("navigator.clipboard.writeText", Key);
+        _copied = true;
+        StateHasChanged();
+    }
+}

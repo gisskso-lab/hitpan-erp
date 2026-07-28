@@ -1,0 +1,260 @@
+@page "/settings/user-info"
+@page "/company"
+@namespace HitPan.Web.Pages.SettingsUi
+@attribute [Authorize]
+@using HitPan.Web.Models
+
+<PageTitle>사용자정보설정</PageTitle>
+
+<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
+    <MudText Typo="Typo.h6">사용자정보설정</MudText>
+    <MudText Style="font-size:12px;color:var(--mud-palette-text-secondary)">테넌트 기본정보 및 출력 이미지 관리</MudText>
+</div>
+
+@if (_loading)
+{
+    <MudProgressLinear Indeterminate="true" Color="Color.Primary" />
+}
+else
+{
+    @if (_model.IsLockedFromLanding)
+    {
+        @* 헌법 #35 (사장님 결재 2026-06-04) — 랜딩 자동 반영 잠금 안내 *@
+        <MudAlert Severity="Severity.Warning" Class="mb-3" Dense="true" Icon="@Icons.Material.Filled.Lock">
+            이 회사 정보는 가입 시 사업자등록증으로 자동 반영된 정보입니다.
+            <b>회사명·사업자번호·대표자명</b>은 변경할 수 없습니다.
+            변경이 필요하면 본사 고객지원으로 사업자등록증 재등록을 요청해주세요.
+        </MudAlert>
+    }
+    <MudGrid Spacing="3">
+        <MudItem xs="12" md="8">
+            <MudPaper Elevation="0" Class="pa-4" Style="border:0.5px solid var(--mud-palette-lines-default);border-radius:12px">
+                <MudText Typo="Typo.subtitle2" Class="mb-3">기본 사업장 정보</MudText>
+                <MudGrid Spacing="2">
+                    <MudItem xs="12" md="6">
+                        <MudTextField T="string" Label="사용업체명" @bind-Value="_model.CompanyName" Variant="Variant.Outlined" Margin="Margin.Dense" ReadOnly="@_model.IsLockedFromLanding" HelperText="@(_model.IsLockedFromLanding ? "🔒 랜딩 자동 반영 (변경 불가)" : null)" />
+                    </MudItem>
+                    <MudItem xs="12" md="3">
+                        <MudTextField T="string" Label="우편번호" @bind-Value="_model.ZipCode" ReadOnly="true" Variant="Variant.Outlined" Margin="Margin.Dense" />
+                    </MudItem>
+                    <MudItem xs="12" md="2">
+                        <MudButton Variant="Variant.Outlined" OnClick="OpenZipcodeSearch" Style="height:40px;margin-top:4px">우편번호 찾기</MudButton>
+                    </MudItem>
+                    <MudItem xs="12" md="3">
+                        <MudTextField T="string" Label="전화" @bind-Value="_model.Phone" Variant="Variant.Outlined" Margin="Margin.Dense" />
+                    </MudItem>
+                    <MudItem xs="12" md="5">
+                        <MudTextField T="string" Label="주소" @bind-Value="_model.Address" ReadOnly="true" Variant="Variant.Outlined" Margin="Margin.Dense" />
+                    </MudItem>
+                    <MudItem xs="12" md="5">
+                        <MudTextField T="string" Label="상세주소" @bind-Value="_model.AddressDetail" Variant="Variant.Outlined" Margin="Margin.Dense" Placeholder="상세주소 직접 입력" />
+                    </MudItem>
+                    <MudItem xs="12" md="4">
+                        <MudTextField T="string" Label="사업자번호" @bind-Value="_model.BusinessNo" Variant="Variant.Outlined" Margin="Margin.Dense" ReadOnly="@_model.IsLockedFromLanding" HelperText="@(_model.IsLockedFromLanding ? "🔒 랜딩 자동 반영 (변경 불가)" : null)" />
+                    </MudItem>
+                    <MudItem xs="12" md="4">
+                        <MudTextField T="string" Label="종사업장번호" @bind-Value="_model.BranchNo" Variant="Variant.Outlined" Margin="Margin.Dense" />
+                    </MudItem>
+                    <MudItem xs="12" md="4">
+                        <MudTextField T="string" Label="법인등록번호" @bind-Value="_model.CorporateNo" Variant="Variant.Outlined" Margin="Margin.Dense" />
+                    </MudItem>
+                    <MudItem xs="12" md="4">
+                        <MudTextField T="string" Label="업태" @bind-Value="_model.BusinessType" Variant="Variant.Outlined" Margin="Margin.Dense" />
+                    </MudItem>
+                    <MudItem xs="12" md="4">
+                        <MudTextField T="string" Label="업종" @bind-Value="_model.BusinessCategory" Variant="Variant.Outlined" Margin="Margin.Dense" />
+                    </MudItem>
+                    <MudItem xs="12" md="4">
+                        <MudTextField T="string" Label="대표자" @bind-Value="_model.CeoName" Variant="Variant.Outlined" Margin="Margin.Dense" ReadOnly="@_model.IsLockedFromLanding" HelperText="@(_model.IsLockedFromLanding ? "🔒 랜딩 자동 반영 (변경 불가)" : null)" />
+                    </MudItem>
+                    <MudItem xs="12" md="4">
+                        <MudTextField T="string" Label="팩스" @bind-Value="_model.Fax" Variant="Variant.Outlined" Margin="Margin.Dense" />
+                    </MudItem>
+                    <MudItem xs="12" md="4">
+                        <MudTextField T="string" Label="홈페이지" @bind-Value="_model.Homepage" Variant="Variant.Outlined" Margin="Margin.Dense" />
+                    </MudItem>
+                    <MudItem xs="12" md="4">
+                        <MudTextField T="string" Label="이메일" @bind-Value="_model.Email" Variant="Variant.Outlined" Margin="Margin.Dense" />
+                    </MudItem>
+                    <MudItem xs="12">
+                        <MudTextField T="string" Label="비고" @bind-Value="_model.Note" Variant="Variant.Outlined" Margin="Margin.Dense" Lines="2" />
+                    </MudItem>
+                </MudGrid>
+            </MudPaper>
+        </MudItem>
+
+        <MudItem xs="12" md="4">
+            <MudPaper Elevation="0" Class="pa-4 mb-3" Style="border:0.5px solid var(--mud-palette-lines-default);border-radius:12px">
+                <MudText Typo="Typo.subtitle2" Class="mb-2">출력 이미지 등록</MudText>
+                <MudStack Spacing="2">
+                    <MudButton Variant="Variant.Outlined" OnClick="OpenLogoUpload">로고 등록</MudButton>
+                    <InputFile OnChange="OnLogoChanged" accept=".png,.jpg,.jpeg,.svg" style="display:none" @ref="_logoInput" />
+                    @if (!string.IsNullOrWhiteSpace(_model.LogoPreviewUrl))
+                    {
+                        <MudPaper Elevation="0" Class="pa-2" Style="border:0.5px dashed var(--mud-palette-lines-default)">
+                            <MudText Style="font-size:11px;color:var(--mud-palette-text-secondary)">로고 미리보기</MudText>
+                            <img src="@_model.LogoPreviewUrl" alt="로고 미리보기" style="max-width:100%;max-height:80px;object-fit:contain" />
+                        </MudPaper>
+                    }
+
+                    <MudButton Variant="Variant.Outlined" OnClick="OpenSealUpload">인장 등록</MudButton>
+                    <InputFile OnChange="OnSealChanged" accept=".png,.jpg,.jpeg" style="display:none" @ref="_sealInput" />
+                    @if (!string.IsNullOrWhiteSpace(_model.SealPreviewUrl))
+                    {
+                        <MudPaper Elevation="0" Class="pa-2" Style="border:0.5px dashed var(--mud-palette-lines-default)">
+                            <MudText Style="font-size:11px;color:var(--mud-palette-text-secondary)">인장 미리보기</MudText>
+                            <img src="@_model.SealPreviewUrl" alt="인장 미리보기" style="max-width:100%;max-height:80px;object-fit:contain" />
+                        </MudPaper>
+                    }
+
+                    <MudButton Variant="Variant.Outlined" OnClick="OpenHeaderUpload">헤더 등록</MudButton>
+                    <InputFile OnChange="OnHeaderChanged" accept=".png,.jpg,.jpeg" style="display:none" @ref="_headerInput" />
+                    @if (!string.IsNullOrWhiteSpace(_model.HeaderPreviewUrl))
+                    {
+                        <MudPaper Elevation="0" Class="pa-2" Style="border:0.5px dashed var(--mud-palette-lines-default)">
+                            <MudText Style="font-size:11px;color:var(--mud-palette-text-secondary)">헤더 미리보기</MudText>
+                            <img src="@_model.HeaderPreviewUrl" alt="헤더 미리보기" style="max-width:100%;max-height:80px;object-fit:contain" />
+                        </MudPaper>
+                    }
+                </MudStack>
+            </MudPaper>
+
+            <MudPaper Elevation="0" Class="pa-4 mb-3" Style="border:0.5px solid var(--mud-palette-lines-default);border-radius:12px">
+                <MudText Typo="Typo.subtitle2" Class="mb-2">사용자추가·관리</MudText>
+                <MudText Style="font-size:12px;color:var(--mud-palette-text-secondary)" Class="mb-2">현재 테넌트 소속 직원 목록 조회 전용</MudText>
+                <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="OpenUserListDialog">사용자추가·관리</MudButton>
+            </MudPaper>
+
+            @* 시리얼 인증 (브라운킴 PM 2026-06-08, 사장님 결재) *@
+            <MudPaper Elevation="0" Class="pa-4 mb-3" Style="border:0.5px solid var(--mud-palette-lines-default);border-radius:12px">
+                <MudText Typo="Typo.subtitle2" Class="mb-2">
+                    @if (_serialVerified)
+                    {
+                        <MudIcon Icon="@Icons.Material.Filled.VerifiedUser" Color="Color.Success" Size="Size.Small" /> <span>시리얼 인증 완료</span>
+                    }
+                    else
+                    {
+                        <MudIcon Icon="@Icons.Material.Filled.VpnKey" Size="Size.Small" /> <span>시리얼 인증 (필수)</span>
+                    }
+                </MudText>
+
+                @if (_serialVerified)
+                {
+                    <MudText Style="font-size:12px;color:var(--mud-palette-text-secondary)">
+                        본사에서 발급한 시리얼로 인증된 사업장입니다.
+                    </MudText>
+                    @if (!string.IsNullOrWhiteSpace(_serialVerifiedAt))
+                    {
+                        <MudText Style="font-size:11px;color:var(--mud-palette-text-secondary)" Class="mt-1">
+                            인증일시: @_serialVerifiedAt
+                        </MudText>
+                    }
+
+                    @* 기기 등록 흐름 (사장님 결재 2026-06-08 - 네이버·넷플릭스 방식) *@
+                    @if (!_deviceRegistered && !_deviceDialogShown)
+                    {
+                        <MudPaper Elevation="0" Class="pa-3 mt-3" Style="background:#FFF7E6;border:1px solid #F59E0B;border-radius:8px;">
+                            <MudText Typo="Typo.body2" Style="font-weight:600;color:#92400E;">
+                                이 PC를 등록된 기기로 사용하시겠습니까?
+                            </MudText>
+                            <MudText Style="font-size:11px;color:#92400E;" Class="mb-2">
+                                구독플랜의 사용 기기 한도 내에서만 등록됩니다. 등록된 기기에서만 ERP 로그인이 허용됩니다.
+                            </MudText>
+                            <div style="display:flex;gap:8px;">
+                                <MudButton Variant="Variant.Filled" Color="Color.Warning" Size="Size.Small"
+                                           OnClick="RegisterDeviceAsync" Disabled="_deviceSubmitting"
+                                           StartIcon="@Icons.Material.Filled.DevicesOther">
+                                    @(_deviceSubmitting ? "등록 중..." : "Y - 등록")
+                                </MudButton>
+                                <MudButton Variant="Variant.Text" Size="Size.Small"
+                                           OnClick="@(() => _deviceDialogShown = true)">
+                                    N - 나중에
+                                </MudButton>
+                            </div>
+                        </MudPaper>
+                    }
+                    else if (_deviceRegistered)
+                    {
+                        <MudPaper Elevation="0" Class="pa-2 mt-3" Style="background:#ECFDF5;border:1px solid #10B981;border-radius:8px;">
+                            <MudText Typo="Typo.body2" Style="font-weight:600;color:#065F46;">
+                                <MudIcon Icon="@Icons.Material.Filled.Verified" Color="Color.Success" Size="Size.Small" />
+                                이 PC 등록 완료
+                            </MudText>
+                            <MudText Style="font-size:11px;color:#065F46;">
+                                기기 인증서가 발급되어 보안 저장소에 저장되었습니다.
+                            </MudText>
+                            @if (_deviceCount > 0 && _deviceLimit > 0)
+                            {
+                                <MudText Style="font-size:11px;color:#065F46;">
+                                    등록 기기: @_deviceCount / @_deviceLimit 대
+                                </MudText>
+                            }
+                        </MudPaper>
+                    }
+
+                    @if (!string.IsNullOrEmpty(_deviceMessage))
+                    {
+                        <MudAlert Severity="@(_deviceSuccess ? Severity.Success : Severity.Warning)" Dense="true" Class="mt-2">
+                            @_deviceMessage
+                        </MudAlert>
+                    }
+                }
+                else
+                {
+                    <MudText Style="font-size:12px;color:var(--mud-palette-text-secondary)" Class="mb-2">
+                        본사에서 발급받은 시리얼(HITP-XXXX-XXXX-XXXX-XXXX)을 입력해주세요.
+                    </MudText>
+                    <MudTextField T="string" @bind-Value="_serialKey"
+                                  Variant="Variant.Outlined" Margin="Margin.Dense"
+                                  Placeholder="HITP-XXXX-XXXX-XXXX-XXXX"
+                                  Disabled="_serialLocked || _serialSubmitting" />
+
+                    @if (_serialLocked)
+                    {
+                        <MudAlert Severity="Severity.Error" Dense="true" Class="my-2" Icon="@Icons.Material.Filled.Block">
+                            시리얼 5회 입력 실패로 사용이 중지되었습니다.<br/>
+                            본사 고객센터에 문의해주세요.
+                        </MudAlert>
+                    }
+                    else if (!string.IsNullOrEmpty(_serialMessage))
+                    {
+                        <MudAlert Severity="@(_serialSuccess ? Severity.Success : Severity.Warning)" Dense="true" Class="my-2">
+                            @_serialMessage
+                        </MudAlert>
+                    }
+
+                    <MudButton Variant="Variant.Filled" Color="Color.Primary" FullWidth="true"
+                               OnClick="VerifySerialAsync"
+                               Disabled="_serialLocked || _serialSubmitting || string.IsNullOrWhiteSpace(_serialKey)"
+                               StartIcon="@Icons.Material.Filled.VpnKey" Class="mt-2">
+                        @(_serialSubmitting ? "인증 중..." : "시리얼 인증")
+                    </MudButton>
+                }
+            </MudPaper>
+
+            <MudPaper Elevation="0" Class="pa-4" Style="border:0.5px solid var(--mud-palette-lines-default);border-radius:12px">
+                <MudText Typo="Typo.subtitle2" Class="mb-2">구독정보 (읽기 전용)</MudText>
+                <MudGrid Spacing="1">
+                    <MudItem xs="5"><MudText Style="font-size:12px;color:var(--mud-palette-text-secondary)">현재 플랜명</MudText></MudItem>
+                    <MudItem xs="7"><MudText Style="font-size:12px">@_subscription.PlanName</MudText></MudItem>
+                    <MudItem xs="5"><MudText Style="font-size:12px;color:var(--mud-palette-text-secondary)">구독 만료일</MudText></MudItem>
+                    <MudItem xs="7"><MudText Style="font-size:12px">@_subscription.ExpireDate.ToString("yyyy-MM-dd")</MudText></MudItem>
+                    <MudItem xs="5"><MudText Style="font-size:12px;color:var(--mud-palette-text-secondary)">라이선스 사용</MudText></MudItem>
+                    <MudItem xs="7"><MudText Style="font-size:12px">@_subscription.UsedLicense / @_subscription.TotalLicense</MudText></MudItem>
+                </MudGrid>
+                @* 사장님 결재 2026-04-29: 구독결제 관리 진입 버튼 *@
+                <MudButton Variant="Variant.Filled" Color="Color.Primary" FullWidth="true"
+                           StartIcon="@Icons.Material.Filled.Payment"
+                           OnClick="@(() => Navigation.NavigateTo("/settings/subscription-billing"))"
+                           Class="mt-3">
+                    구독결제 관리
+                </MudButton>
+            </MudPaper>
+        </MudItem>
+    </MudGrid>
+
+    <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:20px">
+        <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="ApplyAsync" Disabled="_saving">@(_saving ? "적용 중..." : "적용")</MudButton>
+        <MudButton Variant="Variant.Outlined" OnClick="Close">닫기</MudButton>
+    </div>
+}
