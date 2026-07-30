@@ -371,14 +371,14 @@ jobs:
           Write-Host "[installer] $expect ($size bytes) sha256=$sha"
 
       - name: Upload update artifact
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v7
         with:
           name: update-pkg-${{ inputs.version }}
           path: dist/updates/
           retention-days: 7
 
       - name: Upload installer artifact
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v7
         with:
           name: installer-exe-${{ inputs.version }}
           path: dist/installer/
