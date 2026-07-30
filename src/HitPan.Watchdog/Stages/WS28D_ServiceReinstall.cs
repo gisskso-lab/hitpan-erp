@@ -9,9 +9,18 @@ public class WS28D_ServiceReinstall
 {
     private readonly ILogger<WS28D_ServiceReinstall> _logger;
 
-    public WS28D_ServiceReinstall(ILogger<WS28D_ServiceReinstall> logger)
+    // 봉합 20260730작8 P0-4: 토큰 유실 시 본사 자력 재발급.
+    //   **선택적(nullable) 주입**으로 둔 이유 — 기존 호출부(테스트·다른 스테이지)가 1인자
+    //   생성자를 그대로 쓰고 있다. 필수로 만들면 그 호출부가 전부 깨진다(헌법 #1·#12).
+    //   미주입이면 재발급을 건너뛰고 종전 동작(토큰 없이 시도)을 유지한다 = 무손상.
+    private readonly AutoUpdate.ITunnelTokenRecovery? _tokenRecovery;
+
+    public WS28D_ServiceReinstall(
+        ILogger<WS28D_ServiceReinstall> logger,
+        AutoUpdate.ITunnelTokenRecovery? tokenRecovery = null)
     {
         _logger = logger;
+        _tokenRecovery = tokenRecovery;
     }
 
     public bool ServiceExists(string serviceName = "cloudflared")
@@ -51,11 +60,34 @@ public class WS28D_ServiceReinstall
             //   읽어 동일 모델로 재설치한다. 토큰 부재(LOCAL 모드·구버전 설치)면 인자 없이 호출하되 경고를
             //   남긴다 — 관리형 터널이면 이 경로는 실패하고 다음 사이클이 재시도(자해 아님, 단순 무복구).
             var tunnelToken = DbConfReader.GetValue("TUNNEL_TOKEN");
+
+            // ★ 봉합 20260730작8 P0-4 (사장님 지시: "토큰이슈!!!!! 문제 없게 해야된다니까",
+            //   "토큰기간을 늘리던지 자동갱신되게 하던지", "아니 둘다 해")
+            //   ■ 종전 결함 — 토큰이 없으면 그냥 포기했다
+            //     아래 경고만 남기고 'service install'(토큰 없이)을 호출했다. 그런데 현재 터널은
+            //     관리형(config_src=cloudflare)이라 **토큰 없이는 절대 붙지 않는다.**
+            //     즉 db.conf 유실·수동구성 PC 는 워치독이 매 사이클 실패만 반복하며 영구 미복구였다.
+            //     실측 2026-07-30(demo PC): cloudflared 서비스 미등록 + db.conf 부재 →
+            //       토큰이 어디에도 없어 사람이 대시보드를 열지 않으면 복구 불가능한 상태.
+            //   ■ 봉합 — 없으면 본사에서 받아온다
+            //     시리얼(LICENSE_KEY)로 백오피스에 재발급을 요청한다. 백오피스는 같은 테넌트면
+            //     기존 터널을 찾아 토큰만 새로 발급한다(멱등 — 터널이 늘어나지 않는다).
+            //     받은 즉시 db.conf 에 저장하므로 다음 사이클엔 재요청도 불필요하다.
+            //   ■ 토큰 '기간'에 대한 정정
+            //     관리형 터널 토큰은 만료가 없다 — 늘릴 기간이 없다. 실제 위험은 (a) 값 유실
+            //     (b) 본사 재발급으로 옛 값 무효화. 그래서 '영구 보존 + 유실 시 자력 재발급'이
+            //     자동갱신의 실질이다(헌법 #28·#30 고객 손 0번).
+            if (string.IsNullOrWhiteSpace(tunnelToken) && _tokenRecovery is not null)
+            {
+                _logger.LogWarning("WS-28-D: db.conf 에 TUNNEL_TOKEN 부재 — 본사에 자력 재발급 요청(P0-4)");
+                tunnelToken = await _tokenRecovery.RecoverAsync(ct);
+            }
+
             var installArgs = string.IsNullOrWhiteSpace(tunnelToken)
                 ? "service install"
                 : $"service install {tunnelToken}";
             if (string.IsNullOrWhiteSpace(tunnelToken))
-                _logger.LogWarning("WS-28-D: db.conf 에 TUNNEL_TOKEN 부재 — 토큰 없이 재설치 시도(관리형 터널이면 미복구, 다음 사이클 재시도)");
+                _logger.LogWarning("WS-28-D: TUNNEL_TOKEN 확보 실패(재발급 포함) — 토큰 없이 재설치 시도(관리형 터널이면 미복구, 다음 사이클 재시도)");
 
             // ★ 봉합 (2026-07-15, 작지서 20260714작1 W2 — Sandbox 실측: 토큰 180자 존재+서비스 부재인데
             //   7분+ 무복구): 종전엔 'service install' 1회 실패(ExitCode!=0)면 그대로 false 반환 → 다음

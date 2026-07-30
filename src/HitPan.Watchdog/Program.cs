@@ -42,6 +42,10 @@ builder.Services.AddHttpClient();
 builder.Services.AddSingleton<WS28A_WindowsUpdate>();
 builder.Services.AddSingleton<WS28B_PostRebootCheck>();
 builder.Services.AddSingleton<WS28C_TunnelSecret>();
+// 봉합 20260730작8 P0-4 (사장님 결재): 터널 토큰 유실·무효 시 본사 자력 재발급.
+//   WS28D 가 선택적으로 주입받는다 — 등록해두면 토큰이 없을 때 스스로 받아와 복구한다.
+//   미등록이어도 WS28D 는 종전 동작을 유지하므로(nullable) 안전하다.
+builder.Services.AddSingleton<ITunnelTokenRecovery, TunnelTokenRecovery>();
 builder.Services.AddSingleton<WS28D_ServiceReinstall>();
 builder.Services.AddSingleton<WS28E_ExternalHealthCheck>();
 builder.Services.AddSingleton<WS28F_CoolDown>();
