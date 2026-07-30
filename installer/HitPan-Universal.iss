@@ -1266,6 +1266,75 @@ end;
 //     영구히 1033 이 된다(헌법 #28 자가복구가 구조적으로 무력화).
 //   ⇒ 새 토큰을 받은 즉시 db.conf 의 해당 줄만 교체한다. 다른 줄은 손대지 않는다(헌법 #1).
 //   ACL(icacls Administrators·SYSTEM)은 파일을 새로 만들지 않고 내용만 덮으므로 유지된다.
+
+// ★ 봉합 20260730작10 P0-5 (사장님 결재 2026-07-30 "결재!!") — 침묵 실패 가시화
+//
+// ■ 왜 이 함수가 필요한가 (오늘 손실의 직접 원인)
+//   6-1·6-2(cloudflared 좀비정리·service install)는 Exec(..., SW_HIDE, ...) 로 돌면서
+//   ResultCode 를 받아놓고 **한 번도 검사하지 않았고 로그도 남기지 않았다.**
+//   그래서 cloudflared 가 명확한 오류를 내도 세 겹으로 은폐됐다:
+//     ① SW_HIDE  → 화면에 안 보임
+//     ② ResultCode 미검사 → 실패를 무시하고 다음 단계로 진행
+//     ③ 로그 0줄 → 기록도 없음
+//   실측 2026-07-30 샌드박스: sc query cloudflared = 1060(미등록)인데 설치 로그의 마지막 줄은
+//     '[FixupWatchdog] 정정 완료' 였다. 6-1·6-2 가 성공했는지 실패했는지 **아무 흔적이 없어**
+//     PM 이 원인을 9번 잘못 짚었다(MariaDB·seed-parent·PowerShell·timeout·파일누락·실행불가·
+//     토큰손상·권한·샌드박스제약 — 전부 실측이 반증). 오류 한 줄만 로그에 있었으면 5분에 끝났다.
+//   ⇒ 헌법 #15(빈 catch 금지 = 실패를 침묵시키지 않는다) 위반을 봉합한다.
+//
+// ■ 무엇을 하나
+//   cmd /C 로 명령을 돌리면서 stdout·stderr 를 임시파일로 받아 **로그에 그대로 남긴다.**
+//   종료코드도 함께 기록한다. 이제 다음 설치에서는 원인이 로그에 직접 찍힌다.
+//
+// ■ 설계 판단
+//   · Exec 는 출력을 못 받는다(Inno 제약) → `> file 2>&1` 리다이렉트 + LoadStringsFromFile.
+//     이 파일의 기존 사용례(395·519행 PowerShell 결과 수신)와 동일 패턴이라 안전하다.
+//   · 실패해도 설치를 중단하지 않는다. 이 함수는 '보이게 하는' 역할만 한다.
+//     중단 판단은 호출부가 한다(6-3 RUNNING 확인이 최종 판정 — 작8 P0-1).
+//   · 출력이 길 수 있어 최대 12줄만 남긴다(로그 폭주 방지). cloudflared 오류는 앞부분에 나온다.
+//   · 임시파일은 {tmp} 에 두고 즉시 삭제한다. 토큰이 인자에 있을 수 있어 **명령문 전문은 로그에
+//     남기지 않는다**(헌법 #22 — 시크릿 로그 유출 차단). Tag 로만 구분한다.
+function ExecLogged(const Tag, CmdLine: String): Integer;
+var
+  OutFile: String;
+  Lines: TArrayOfString;
+  i, ResultCode, Shown: Integer;
+begin
+  OutFile := ExpandConstant('{tmp}\execlog-' + Tag + '.txt');
+  DeleteFile(OutFile);
+
+  // cmd /C "명령 > 파일 2>&1" — 바깥 따옴표는 cmd 가 벗기므로 내부 인용을 그대로 보존한다.
+  Exec(ExpandConstant('{cmd}'), '/C ' + CmdLine + ' > "' + OutFile + '" 2>&1',
+       '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+  Result := ResultCode;
+
+  if ResultCode = 0 then
+    Log('[작10 P0-5][' + Tag + '] 종료코드 0 (성공)')
+  else
+    Log('[작10 P0-5][' + Tag + '] ❌ 종료코드 ' + IntToStr(ResultCode) + ' (실패)');
+
+  // 출력 본문 — 성공이어도 남긴다. cloudflared 는 실패를 exit 0 으로 내는 사례가 있어
+  //   (작8 P0-3 실측: 무효 토큰 → exit 0 으로 조용히 종료) 종료코드만으로는 부족하다.
+  if FileExists(OutFile) and LoadStringsFromFile(OutFile, Lines) then
+  begin
+    Shown := 0;
+    for i := 0 to GetArrayLength(Lines) - 1 do
+    begin
+      if (Trim(Lines[i]) <> '') and (Shown < 12) then
+      begin
+        Log('[작10 P0-5][' + Tag + '] > ' + Lines[i]);
+        Shown := Shown + 1;
+      end;
+    end;
+    if Shown = 0 then
+      Log('[작10 P0-5][' + Tag + '] > (출력 없음)');
+  end
+  else
+    Log('[작10 P0-5][' + Tag + '] > (출력 파일 미생성 — 명령 자체가 실행되지 않았을 수 있다)');
+
+  DeleteFile(OutFile);
+end;
+
 procedure UpdateDbConfValue(const Key, Value: String);
 var
   Lines: TStringList;
@@ -1783,27 +1852,41 @@ begin
     // 6-1. 좀비 cloudflared 서비스 영역 제거 (사고 #11·#28 봉합)
     //     봉합 #28: stop·delete 영역 후 영역 프로세스 영역 종료·재검사 영역 박음
     //     좀비 영역 박혀있으면 service install 영역 또 좀비 박힘 차단
-    Exec(ExpandConstant('{cmd}'),
-         '/C sc stop cloudflared & timeout /t 3 /nobreak & sc delete cloudflared & timeout /t 2 /nobreak',
-         '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+    // ★ 봉합 20260730작10 P0-5: 이하 6-1·6-2 를 ExecLogged 로 교체 — 침묵 실패 가시화.
+    //   종전엔 ResultCode 를 받고도 검사·기록을 0건 했다(헌법 #15 위반). 그 결과 오늘 샌드박스에서
+    //   'sc query = 1060(미등록)'인데 로그 마지막 줄이 [FixupWatchdog] 이라 원인 추적이 불가능했다.
+    ExecLogged('6-1-stopdel',
+      'sc stop cloudflared & timeout /t 3 /nobreak & sc delete cloudflared & timeout /t 2 /nobreak');
     // 좀비 프로세스 영역 제거 (taskkill 영역 — 서비스 영역 안 박혔어도 프로세스 영역 살아있을 가능)
-    Exec(ExpandConstant('{cmd}'),
-         '/C taskkill /F /IM cloudflared.exe',
-         '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+    ExecLogged('6-1-taskkill', 'taskkill /F /IM cloudflared.exe');
     Sleep(2000);
 
     // 6-1-2. 좀비 영역 재검사 영역 — 박혀있으면 sc delete 영역 한 번 더
     //   StopPending 영역에 박힌 영역 = 재부팅 영역까지 영역 사라짐 0건
     //   하지만 service install 영역 새 영역 시도 영역 가도되도록 영역 sc delete 영역 한 번 더
-    Exec(ExpandConstant('{cmd}'),
-         '/C sc query cloudflared >nul 2>&1 && sc delete cloudflared',
-         '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+    // 작10 P0-5: 종전 '>nul 2>&1' 은 ExecLogged 의 파일 리다이렉트와 충돌한다(같은 명령에
+    //   리다이렉트 2개 → 뒤쪽이 이기며 앞쪽 출력이 유실되거나 cmd 파싱이 흔들린다).
+    //   출력은 ExecLogged 가 파일로 받으므로 nul 억제는 불필요하다 — 제거한다.
+    ExecLogged('6-1-2-recheck', 'sc query cloudflared && sc delete cloudflared');
     Sleep(1000);
 
     // 6-2. service install 박음 (사고 #11·#28 봉합 후)
-    Exec(ExpandConstant('{app}\cloudflared.exe'),
-         'service install ' + G_TunnelToken,
-         ExpandConstant('{app}'), SW_HIDE, ewWaitUntilTerminated, ResultCode);
+    //
+    // ★ 봉합 20260730작10 P0-5 (사장님 결재): **이 단계가 오늘 실패의 현장이다.**
+    //   실측 2026-07-30 샌드박스: 전제 전부 정상(cloudflared.exe 54MB·version 2026.7.3·
+    //   토큰 디코딩 정합·부트스트랩 success·6-1 정상·관리자 권한)인데 결과는 sc query 1060(미등록).
+    //   종전 코드는 이 Exec 의 ResultCode 를 버렸고 SW_HIDE 로 출력도 버렸다 → 원인 불명.
+    //   ⇒ 이제 종료코드와 cloudflared 의 stdout·stderr 를 로그에 남긴다.
+    //
+    //   ■ 토큰 노출 차단 (헌법 #22)
+    //     토큰은 인자에 실린다. ExecLogged 는 **명령문 전문을 로그에 남기지 않고** Tag 만 남기므로
+    //     설치 로그에 시크릿이 새지 않는다. 출력 본문은 cloudflared 의 메시지일 뿐 토큰을 되뱉지 않는다.
+    //
+    //   ■ 경로 인용
+    //     {app} 에 공백이 있다("C:\Program Files\HitPan") → cmd 경유이므로 반드시 따옴표로 감싼다.
+    //     종전 Exec 는 파일명을 직접 넘겨 인용이 불필요했으나, cmd /C 로 바뀌었으니 필수다.
+    ExecLogged('6-2-serviceinstall',
+      '"' + ExpandConstant('{app}\cloudflared.exe') + '" service install ' + G_TunnelToken);
     Sleep(3000);
 
     // 6-3. 서비스 시작
@@ -1820,13 +1903,11 @@ begin
     //     그래서 재부팅·서비스 종료 후 자동 복귀가 보장되지 않는다. 아래 sc config 로
     //     start= auto 를 못박아 "고객 손 0번"을 지킨다(헌법 #28·#30).
     //     ※ delayed-auto 가 아니라 auto 다 — 부팅 직후 터널이 붙어야 외부 접속이 산다.
-    Exec(ExpandConstant('{cmd}'), '/C sc config cloudflared start= auto',
-         '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
-    if ResultCode <> 0 then
-      Log('[20260730작8 P0-1] sc config start= auto 실패 (code=' + IntToStr(ResultCode) + ') — 재부팅 후 터널 미복구 위험');
+    // 작10 P0-5: 출력까지 남긴다 — 'sc config' 는 서비스 미등록 시 1060 을 내는데,
+    //   그 1060 이 곧 6-2 실패의 확증이다(종전엔 code 만 남겨 원인 판별이 안 됐다).
+    ExecLogged('6-3-scconfig', 'sc config cloudflared start= auto');
 
-    Exec(ExpandConstant('{cmd}'), '/C sc start cloudflared',
-         '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+    ExecLogged('6-3-scstart', 'sc start cloudflared');
 
     // ★ 봉합 20260714작1 (W1-3, 원자성): 6-1 이 기존 서비스를 지운 뒤 6-2 설치가 실패하면 터널이
     //   통째로 소멸하는데 종전엔 어떤 검사도 없었다(7/14 Sandbox 재설치 1033 유력 진범). 설치 후
@@ -1834,19 +1915,17 @@ begin
     //   ※ 서비스명: cloudflared 2026.3.0 의 `service install` 등록명은 'Cloudflared' — sc 는 대소문자
     //     무시라 'cloudflared' 로 조회 가능(2026-07-15 바이너리 실측). demo PC 의 'CloudflaredAgent' 는
     //     폐기된 옛 수동 스크립트 잔재로 본 경로와 무관.
-    Exec(ExpandConstant('{cmd}'), '/C sc query cloudflared',
-         '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+    ResultCode := ExecLogged('6-3-scquery', 'sc query cloudflared');
     if ResultCode <> 0 then begin
       Log('[20260714작1 W1-3] cloudflared 서비스 미존재 — service install 1회 재시도');
       Sleep(3000);
-      Exec(ExpandConstant('{app}\cloudflared.exe'),
-           'service install ' + G_TunnelToken,
-           ExpandConstant('{app}'), SW_HIDE, ewWaitUntilTerminated, ResultCode);
+      // 작10 P0-5: 재시도의 출력이 진단의 핵심이다. 1차와 2차가 같은 오류를 내면
+      //   원인이 일시적 경합이 아니라 구조적(권한·정책·바이너리)이라는 뜻이다.
+      ExecLogged('6-3-retry-serviceinstall',
+        '"' + ExpandConstant('{app}\cloudflared.exe') + '" service install ' + G_TunnelToken);
       Sleep(3000);
-      Exec(ExpandConstant('{cmd}'), '/C sc start cloudflared',
-           '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
-      Exec(ExpandConstant('{cmd}'), '/C sc query cloudflared',
-           '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+      ExecLogged('6-3-retry-scstart', 'sc start cloudflared');
+      ResultCode := ExecLogged('6-3-retry-scquery', 'sc query cloudflared');
       if ResultCode <> 0 then
         WarnTunnelFailure('터널 서비스 설치(service install) 재시도 실패', ResultCode);
     end;
@@ -1899,17 +1978,15 @@ begin
         UpdateDbConfValue('TUNNEL_TOKEN', G_TunnelToken);
         if G_TunnelId <> '' then
           UpdateDbConfValue('TUNNEL_ID', G_TunnelId);
-        Exec(ExpandConstant('{cmd}'),
-             '/C sc stop cloudflared & timeout /t 3 /nobreak & sc delete cloudflared & timeout /t 2 /nobreak',
-             '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
-        Exec(ExpandConstant('{app}\cloudflared.exe'),
-             'service install ' + G_TunnelToken,
-             ExpandConstant('{app}'), SW_HIDE, ewWaitUntilTerminated, ResultCode);
+        // 작10 P0-5: 자동복구 경로도 가시화한다. 여기까지 왔다는 건 이미 1차가 실패한 상황이므로
+        //   출력이 없으면 "복구를 시도했는데 왜 안 됐는지"를 영영 알 수 없다.
+        ExecLogged('P0-3-stopdel',
+          'sc stop cloudflared & timeout /t 3 /nobreak & sc delete cloudflared & timeout /t 2 /nobreak');
+        ExecLogged('P0-3-serviceinstall',
+          '"' + ExpandConstant('{app}\cloudflared.exe') + '" service install ' + G_TunnelToken);
         Sleep(3000);
-        Exec(ExpandConstant('{cmd}'), '/C sc config cloudflared start= auto',
-             '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
-        Exec(ExpandConstant('{cmd}'), '/C sc start cloudflared',
-             '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+        ExecLogged('P0-3-scconfig', 'sc config cloudflared start= auto');
+        ExecLogged('P0-3-scstart', 'sc start cloudflared');
         // 재확인 — 여기서도 안 되면 토큰 문제가 아니다.
         TunnelTry := 0;
         while (TunnelTry < 5) and (not TunnelRunning) do
