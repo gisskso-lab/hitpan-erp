@@ -1258,6 +1258,41 @@ begin
   end;
 end;
 
+// ★ 봉합 20260730작8 P0-3 (사장님 지시: "재설치 할때 동작할수 있게 만들어놔")
+//   ■ 왜 필요한가 (급소)
+//     db.conf 는 6단계(터널)보다 **앞**에서 저장된다(SaveToFile). 그래서 6단계에서 자동복구로
+//     새 터널 토큰을 받아도 db.conf 에는 **옛(죽은) 토큰이 그대로 남는다.**
+//     그러면 워치독 WS-28-D 가 자가복구할 때 또 죽은 토큰으로 service install 을 해
+//     영구히 1033 이 된다(헌법 #28 자가복구가 구조적으로 무력화).
+//   ⇒ 새 토큰을 받은 즉시 db.conf 의 해당 줄만 교체한다. 다른 줄은 손대지 않는다(헌법 #1).
+//   ACL(icacls Administrators·SYSTEM)은 파일을 새로 만들지 않고 내용만 덮으므로 유지된다.
+procedure UpdateDbConfValue(const Key, Value: String);
+var
+  Lines: TStringList;
+  i: Integer;
+  Found: Boolean;
+  ConfPath: String;
+begin
+  ConfPath := ExpandConstant('{app}\db.conf');
+  if not FileExists(ConfPath) then Exit;
+  Found := False;
+  Lines := TStringList.Create;
+  try
+    Lines.LoadFromFile(ConfPath);
+    for i := 0 to Lines.Count - 1 do begin
+      if Pos(Key + '=', Trim(Lines[i])) = 1 then begin
+        Lines[i] := Key + '=' + Value;
+        Found := True;
+      end;
+    end;
+    if not Found then Lines.Add(Key + '=' + Value);
+    Lines.SaveToFile(ConfPath);
+    Log('[20260730작8 P0-3] db.conf 갱신: ' + Key + ' (값 길이 ' + IntToStr(Length(Value)) + ')');
+  finally
+    Lines.Free;
+  end;
+end;
+
 // ★ 봉합 20260714작1 (W5, 재설치 P0 — 2026-07-15 Sandbox 실측 로그 확정): 덮어 재설치는 [UninstallRun]
 //   을 거치지 않아 기존에 실행 중인 API(schtasks HitPan-ERP-API-*)·워치독·cloudflared 가 DLL 을 붙잡은 채로
 //   남는다. 그 위에 파일을 덮으면 수백 건 'DeleteFile 실패; 코드 5(ACCESS_DENIED=파일 사용중)' → 신·구 DLL
@@ -1327,6 +1362,9 @@ var
   ConfFile, BatchFile, BootstrapFile: String;
   KeysContent, BatchContent, BootstrapContent: TStringList;
   SeedOk: Boolean;
+  // 봉합 20260730작8 P0-1: cloudflared RUNNING 확인용(지역 변수 — 전역 오염 0).
+  TunnelRunning: Boolean;
+  TunnelTry: Integer;
 begin
   // ★ 봉합 20260714작1 (W5): 파일 복사(ssInstall) 직전 = 기존 실행 프로세스 정지의 유일한 안전 시점.
   //   ssPostInstall(복사 후)에 하면 이미 잠금 사고가 끝난 뒤라 늦다.
@@ -1555,6 +1593,23 @@ begin
       Log('[20260714작1 W1-2] 터널 토큰 미수령 — 기존 db.conf 값 보존(재설치 정합)');
   end;
 
+  // ★ 봉합 20260730작8 P0-3 (사장님 지시: "재설치 할때 동작할수 있게 만들어놔")
+  //   ■ W1-2 보존 로직의 사각지대 (재설치 1033 진범 후보)
+  //     W1-2 는 "새 토큰을 못 받으면 옛 토큰을 되살려 쓴다". 재설치 연속성엔 옳다.
+  //     그런데 **본사에서 터널을 삭제한 뒤 재설치**하면 그 옛 토큰은 이미 죽은 토큰이다.
+  //     cloudflared 는 무효 토큰을 받으면 오류가 아니라 **정상 종료(exit 0)** 로 조용히 죽는다.
+  //       → 실측(test2): sc query = STOPPED / WIN32_EXIT_CODE = 0 (오류 아님) → 1033
+  //     즉 "보존"이 "죽은 토큰 재사용"으로 뒤집히는 순간 침묵 고장이 된다(헌법 #15).
+  //
+  //   ■ 무엇을 하나 — 죽은 토큰을 물었을 가능성을 가시화한다
+  //     이번 설치에서 백오피스가 새 토큰을 줬다면(G_BootstrapOk) 그 값이 최신이므로 안전하다.
+  //     반대로 부트스트랩이 실패했는데 옛 토큰으로 진행하는 경우 = 검증 불가 상태다.
+  //     여기서 설치를 막지는 않는다(오프라인·일시 장애 재설치를 살려야 한다 — W1-2 취지 보존).
+  //     대신 아래 6-3 의 RUNNING 확인이 실패를 반드시 잡도록 흔적을 남긴다.
+  if (G_TunnelToken <> '') and (not G_BootstrapOk) then
+    Log('[20260730작8 P0-3] ⚠️ 부트스트랩 미성공 + db.conf 옛 토큰 사용 — 본사에서 터널이 삭제됐다면 ' +
+        '이 토큰은 무효이고 cloudflared 가 exit 0 으로 조용히 종료한다(1033). 6-3 RUNNING 확인이 최종 판정.');
+
   BootstrapContent := TStringList.Create;
   try
     BootstrapContent.Add('DB_HOST=localhost');
@@ -1752,6 +1807,24 @@ begin
     Sleep(3000);
 
     // 6-3. 서비스 시작
+    //
+    // ★ 봉합 20260730작8 P0-1 (사장님 결재 · test2 실측 확정):
+    //   진범 = 서비스가 등록·시작까지 됐는데도 그 뒤 STOPPED 로 남아 1033 이 됐다.
+    //   실측(test2 PC): sc query = STOPPED / WIN32_EXIT_CODE = 0 (오류 아님, 정상 종료)
+    //                  → sc start 수동 실행하니 RUNNING + 접속 즉시 정상
+    //   Cloudflare 대시보드 교차확인: 터널 hitpan-t001~t003 전부 '복제본 0'
+    //   (= 접속하는 cloudflared 가 하나도 없음). demo 만 복제본 1 → 502(터널 통과).
+    //
+    //   ■ 왜 sc start 만으로 부족한가
+    //     `cloudflared service install` 이 등록하는 시작 유형을 우리가 명시하지 않았다.
+    //     그래서 재부팅·서비스 종료 후 자동 복귀가 보장되지 않는다. 아래 sc config 로
+    //     start= auto 를 못박아 "고객 손 0번"을 지킨다(헌법 #28·#30).
+    //     ※ delayed-auto 가 아니라 auto 다 — 부팅 직후 터널이 붙어야 외부 접속이 산다.
+    Exec(ExpandConstant('{cmd}'), '/C sc config cloudflared start= auto',
+         '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+    if ResultCode <> 0 then
+      Log('[20260730작8 P0-1] sc config start= auto 실패 (code=' + IntToStr(ResultCode) + ') — 재부팅 후 터널 미복구 위험');
+
     Exec(ExpandConstant('{cmd}'), '/C sc start cloudflared',
          '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
 
@@ -1776,6 +1849,92 @@ begin
            '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
       if ResultCode <> 0 then
         WarnTunnelFailure('터널 서비스 설치(service install) 재시도 실패', ResultCode);
+    end;
+
+    // ★ 봉합 20260730작8 P0-1 / N-2 (사장님 결재): "실행 중"까지 확인해야 봉합이다.
+    //   위 6-3 은 sc start 를 '호출'하지만 실제로 RUNNING 이 됐는지는 아무도 안 봤다.
+    //   그래서 서비스가 죽은 채로 설치가 "완료"로 끝났다(침묵 고장 — 헌법 #15 위반).
+    //   sc query 의 종료코드는 '서비스 존재'만 알려주고 상태는 알려주지 않으므로,
+    //   `sc query … | find "RUNNING"` 으로 상태 문자열을 직접 확인한다(find 는 미발견 시 exit 1).
+    //   시작에 시간이 걸릴 수 있어(START_PENDING) 2초 간격 5회까지 기다린다.
+    //   비차단(경고)로 둔 이유: 여기서 설치를 되돌리면 이미 등록된 DB·서비스가 고아가 된다.
+    //   대신 고객이 반드시 알도록 가시화한다 — 조용한 성공만은 만들지 않는다.
+    //   ※ while 로 쓴 이유: Inno Setup Pascal Script 의 for 루프 안 Break 지원이 판본별로
+    //     불확실하다. 이 파일에 기존 사용례가 0건이라 실증할 수 없어, 확실히 동작하는
+    //     조건 루프로 쓴다(컴파일 실패 = 전 고객 설치 불가라 모험하지 않는다).
+    TunnelRunning := False;
+    TunnelTry := 0;
+    while (TunnelTry < 5) and (not TunnelRunning) do
+    begin
+      TunnelTry := TunnelTry + 1;
+      Exec(ExpandConstant('{cmd}'), '/C sc query cloudflared | find "RUNNING"',
+           '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+      if ResultCode = 0 then
+        TunnelRunning := True
+      else
+        Sleep(2000);
+    end;
+    if TunnelRunning then
+      Log('[20260730작8 P0-1] cloudflared RUNNING 확인 (시도 ' + IntToStr(TunnelTry) + '회)');
+    // ★ 봉합 20260730작8 P0-3 자동복구 (사장님 지시: "재설치 할때 동작할수 있게 만들어놔")
+    //   ■ 왜 필요한가 — 재설치의 가장 흔한 실패가 '죽은 토큰'이다
+    //     본사에서 터널을 삭제·재발급한 뒤 재설치하면 db.conf 의 옛 토큰(W1-2 보존분)은 무효다.
+    //     cloudflared 는 무효 토큰에 오류를 내지 않고 **정상 종료(exit 0)** 한다 → 조용히 1033.
+    //     사람이 sc start 를 쳐도 다시 죽는다(토큰이 무효라 근본이 안 풀림).
+    //   ■ 무엇을 하나
+    //     RUNNING 실패 = '토큰이 죽었을 가능성'이 가장 크다. 시리얼이 있으면 백오피스에
+    //     **새 토큰을 1회 다시 요청**해 service install 을 재실행한다. 이게 되면 고객 손 0번으로
+    //     재설치가 완주한다(헌법 #28·#30 자가회복 · #20 흐름 불단절).
+    //   ■ 1회만 시도하는 이유
+    //     무한 재시도는 설치를 멈추게 한다. 1회로 안 되면 원인이 토큰이 아니라 백신·방화벽 쪽이므로
+    //     아래 경고로 넘긴다(추측 재시도 금지 — 두더지잡기 방지).
+    if (not TunnelRunning) and (G_LicenseKey <> '') then
+    begin
+      Log('[20260730작8 P0-3] RUNNING 실패 — 죽은 토큰 의심. 백오피스에 새 토큰 1회 재요청.');
+      if CallBootstrapApi(G_LicenseKey) and (G_TunnelToken <> '') then
+      begin
+        Log('[20260730작8 P0-3] 새 토큰 수령 — service install 재실행');
+        // db.conf 를 새 토큰·터널ID 로 갱신한다 — 워치독(WS-28-D)이 다음에 죽은 토큰을 쓰지 않도록.
+        //   db.conf 저장이 6단계보다 앞이라 이 갱신이 없으면 자가복구가 영구 무력해진다.
+        UpdateDbConfValue('TUNNEL_TOKEN', G_TunnelToken);
+        if G_TunnelId <> '' then
+          UpdateDbConfValue('TUNNEL_ID', G_TunnelId);
+        Exec(ExpandConstant('{cmd}'),
+             '/C sc stop cloudflared & timeout /t 3 /nobreak & sc delete cloudflared & timeout /t 2 /nobreak',
+             '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+        Exec(ExpandConstant('{app}\cloudflared.exe'),
+             'service install ' + G_TunnelToken,
+             ExpandConstant('{app}'), SW_HIDE, ewWaitUntilTerminated, ResultCode);
+        Sleep(3000);
+        Exec(ExpandConstant('{cmd}'), '/C sc config cloudflared start= auto',
+             '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+        Exec(ExpandConstant('{cmd}'), '/C sc start cloudflared',
+             '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+        // 재확인 — 여기서도 안 되면 토큰 문제가 아니다.
+        TunnelTry := 0;
+        while (TunnelTry < 5) and (not TunnelRunning) do
+        begin
+          TunnelTry := TunnelTry + 1;
+          Exec(ExpandConstant('{cmd}'), '/C sc query cloudflared | find "RUNNING"',
+               '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+          if ResultCode = 0 then
+            TunnelRunning := True
+          else
+            Sleep(2000);
+        end;
+        if TunnelRunning then
+          Log('[20260730작8 P0-3] ✅ 자동복구 성공 — 새 토큰으로 RUNNING (재설치 완주)')
+        else
+          Log('[20260730작8 P0-3] 자동복구 후에도 RUNNING 실패 — 토큰 외 원인(백신·방화벽) 의심');
+      end
+      else
+        Log('[20260730작8 P0-3] 새 토큰 재요청 실패 — 본사 통신 또는 시리얼 문제');
+    end;
+
+    if not TunnelRunning then
+    begin
+      Log('[20260730작8 P0-1] cloudflared 가 RUNNING 이 아니다 — 외부 접속(1033) 발생');
+      WarnTunnelFailure('터널 연결 프로그램이 실행되지 않았습니다(백신 차단 가능성)', -2);
     end;
 
     // 6-4. HITPAN_SUBDOMAIN 영역 db.conf 영역 박음 (사고 #41·#42·#39 봉합 — 환경변수 폐기)
