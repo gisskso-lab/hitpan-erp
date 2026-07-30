@@ -77,7 +77,7 @@ jobs:
 
     steps:
       - name: Download publish artifacts
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@v5
         with:
           name: ncp-publish
           path: publish/

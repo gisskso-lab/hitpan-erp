@@ -400,14 +400,14 @@ jobs:
     timeout-minutes: 15
     steps:
       - name: Download update artifact
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@v5
         with:
           name: update-pkg-${{ inputs.version }}
           path: dist/updates/
 
       # 설치 EXE 동반 (20260730작3 ①안) — zip 과 한 단위로 게시하기 위해 여기서도 받는다.
       - name: Download installer artifact
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@v5
         with:
           name: installer-exe-${{ inputs.version }}
           path: dist/installer/
