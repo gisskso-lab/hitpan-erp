@@ -1,0 +1,558 @@
+# 자동업데이트 영구 CD — deploy-update.yml (20260723작1)
+# ══════════════════════════════════════════════════════════════════════════
+# ⚠️ 이 파일은 `.disabled` 확장자로 비활성 상태다. 아래 착수 게이트 전부 통과 전
+#    활성화(파일명에서 .disabled 제거) 절대 금지 — PRD §2, 작4 B-4 정신.
+#
+#   [G-A] publish-update.sh + sign-manifest.sh 를 NCP /opt/hitpan/installer/updates/ 에
+#         동일 디렉토리 상주 배치 (사장님 sudo 1회). publish 가 sign 을 source 하므로 함께.
+#         + publish-run.sh(B-4 래퍼)·deploy-web.sh 를 /opt/hitpan/deploy/ 에 상주 배치.
+#   [G-B] sudoers 화이트리스트 — publish-run.sh·deploy-web.sh 두 래퍼만 NOPASSWD.
+#         ★ publish-update.sh·sign-manifest.sh 는 sudoers 에서 제외(래퍼 경유로만 호출).
+#         래퍼가 오버라이드(--webroot/--private/--feed-url/--allow-republish)를 절대 전달 안 함(B-2). (사장님 sudo 1회)
+#         ★ 검증팀 M-2 필수(안 하면 B-4 무음 스킵): sudo 는 env_reset 이라 HITPAN_* 를 스트립한다.
+#           publish-run.sh 는 명령줄 인라인 할당(sudo HITPAN_...=... /경로/publish-run.sh)으로 받는데,
+#           이게 자식에 도달하려면 sudoers 에 `SETENV:` 태그가 있어야 한다. 없으면 HITPAN_GH_* 가 사라져
+#           래퍼의 B-4 가 "메타 없음 → 거부"로 fail-closed 된다(무음 통과가 아니라 거부라 안전측이나,
+#           정상 게시도 막히므로 SETENV 필수). 단 HITPAN_B4_ALLOW_UNVERIFIED 는 SETENV 목록에서 '제외'해
+#           러너가 명령줄로 우회 스위치를 못 켜게 한다. deploy-web.sh 도 RELEASE_VERSION 위해 SETENV 필요.
+#   [G-C] publish-update.sh:41 webroot 기본값 → /var/www/updates 정정. ✅ 완료(197c534).
+#   [G-D] manifest.json no-cache 헤더 확인 — Cloudflare 엣지 경유. ✅ 이미 no-cache 걸림(소멸).
+#   [G-E] environment: production/beta required reviewer(사장님 폰 1탭) + .github/CODEOWNERS.
+#   [G-F] (B-4 트랙2) NCP 에 git 미러(/opt/hitpan/repo) + GitHub 토큰(HITPAN_GH_TOKEN) 배치 →
+#         래퍼 독립재조회 fail-closed 활성. 미배치 시 HITPAN_B4_ALLOW_UNVERIFIED 없어 게시 거부.
+#
+#   G-A·B·C 는 사장님 NCP sudo 1회 세션으로 묶는다. 이후 CD 사람 손 0.
+# ══════════════════════════════════════════════════════════════════════════
+#
+# 헌법 정합: #22(개인키 NCP)·#29(인프라 사전승인=게이트)·#34(영구 CD 정식완성도).
+#
+# 보안 불변식 (PRD §5 — 구현/수정 시 절대 위반 금지):
+#   1. 개인키 GHA 반입 0 (서명은 NCP publish-update.sh 안에서만)
+#   2. 실행 스크립트(.sh) rsync 0 — 데이터(zip·unsigned manifest)만 /tmp
+#   3. sudo 대상 = publish-run.sh 래퍼 1개, 인자 = --zip/--manifest 만 (래퍼가 B-4 재조회 후 publish 호출)
+#   4. CI 는 /tmp 스테이징만, update-keys(700 root) 읽기조차 불가
+#   5. 서명 규격 3벌 무변경
+#   6. 버전 SSOT 단조증가 (다운그레이드 방어가 여기 의존)
+#   7. cloudflared·DNS·방화벽·systemctl 미접촉 (CD 런타임)
+#   ★ SSH 페이로드 = publish-run.sh 단일 호출. 임의 셸 블록 0 (CTO 권고3)
+#   ★ B-4: NCP 가 러너발 commit·run_id·sha 를 GitHub API/git 으로 독립 재조회 후에만 서명(관통결함 급소)
+
+name: Deploy Auto-Update (자동업데이트 영구 CD)
+
+# ── 20260723작2 I-3 (검사2 구멍③): 품질게이트 규율 ──
+#   ⚠️ 이 워크플로는 workflow_dispatch 라 임의 커밋/브랜치에서 게시할 수 있다.
+#   그런데 build 잡에 test·warnaserror 품질게이트가 없다(자동업데이트 zip 산출만).
+#   → dispatch 하기 전, 게시할 그 커밋이 build-and-test.yml 초록(빌드 0/0 + ddl-smoke +
+#     migsmoke)을 통과했는지 운영자가 반드시 확인한다(헌법 #19 우회 방지).
+#   자동 강제(needs로 build-and-test 승계)는 별건. 지금은 이 규율을 명문화한다.
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: '릴리스 버전 (3자, 예: 1.2.40). 직전 게시본보다 높아야 함(다운그레이드 게이트). dispatch 전 이 커밋이 build-and-test 초록인지 확인(I-3).'
+        required: true
+        type: string
+      channel:
+        description: '적용 시점 채널. 팝업은 Major 만 뜸(게시함정3-③은 여기서 주입, 게시 시 jq 금지).'
+        required: true
+        default: Major
+        type: choice
+        options: [Major, Normal, Emergency]
+      environment:
+        description: '배포 대상 피드. production 만 실동작(beta 는 피드 물리생성 별건 전엔 nginx 403).'
+        required: true
+        default: production
+        type: choice
+        options: [production, beta]
+
+permissions:
+  contents: read
+
+# ── B-11: 동시 게시 직렬화 (Secret 전환 TOCTOU·mv 경합 차단) ──
+#   같은 그룹의 이전 게시를 취소하지 않고(cancel-in-progress:false) 순서대로 흘린다.
+#   두 dispatch 가 겹쳐 NCP publish 의 mv·백업이 경합하는 창을 없앤다.
+concurrency:
+  group: deploy-update
+  cancel-in-progress: false
+
+jobs:
+  # ── build 잡: 재빌드 방식 (아티팩트 승계 아님) ──
+  #   근거 = "게시할 커밋 = 빌드한 커밋" SSOT 불변식. build-manifest.ps1 이 api EXE
+  #   FileVersion 을 단방향으로 읽어 manifest 를 만든다. 다른 커밋 아티팩트 승계 = 불변식 파괴.
+  #   ⚠️ build-installer.yml 의 EXE 컴파일(ISCC)·Create Release 스텝은 가져오지 말 것(G2 별건).
+  build:
+    name: Build update package (재빌드 · SSOT)
+    runs-on: windows-latest
+    # 20260730작3: 기존 zip 만 만들 땐 4분이면 됐으나, 설치 EXE 동반(번들 5종 다운로드 수백MB +
+    #   Inno Setup 설치 + ISCC 컴파일)이 붙어 실측 기준 약 11~15분으로 늘어난다. 여유 포함 45분.
+    timeout-minutes: 45
+    steps:
+      # ── 20260723작2 I-2 (검사2 구멍②): beta 실행 차단 가드 (fail-fast) ──
+      #   beta 는 §3.3 인자분기가 배선돼 있으나, deploy 잡의 sudoers 화이트리스트는
+      #   `--zip`/`--manifest` 2인자만 허용(G-B)이라 beta 의 --webroot/--feed-url 을 못 넘긴다.
+      #   또 nginx `/beta/` location 은 현재 403(별건 결재 전 물리 미생성).
+      #   → beta 로 dispatch 하면 build 성공 후 deploy 에서 실패하는 혼란 경로가 생긴다.
+      #   배선(§3.3)은 미래 위해 보존하되, 실행만 여기서 fail-fast 로 막는다(choice 제거 아님).
+      #   beta 실동작은 별건 결재(nginx /beta/ + sudoers beta 라인) 후 이 가드를 해제한다.
+      - name: Guard — beta not yet operational (별건 결재 전 차단)
+        if: ${{ inputs.environment == 'beta' }}
+        run: |
+          echo "::error::environment=beta 는 아직 실동작 불가. nginx /beta/ location + sudoers beta 라인 별건 결재 전엔 production 만 게시 가능(PRD §3.3). 배선은 보존됨."
+          exit 1
+
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Setup .NET 8
+        uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: '8.0.x'
+
+      # N-1 fail-closed: version input == 산출 FileVersion == zip/manifest 파일명 3자 정합.
+      # 불일치 시 build 진입 즉시 중단 (오타를 게시 전에 세운다).
+      - name: Verify version input (fail-closed)
+        shell: pwsh
+        run: |
+          $v = '${{ inputs.version }}'
+          if ($v -notmatch '^\d+\.\d+\.\d+$') {
+            Write-Error "::error::version input '$v' 이 3자 SemVer 아님. 게시 전 중단."
+            exit 1
+          }
+          Write-Host "[VersionGate] version=$v"
+
+      - name: Restore
+        run: dotnet restore src/HitPan.sln
+
+      # ── publish 3종 — build-installer.yml:76-135 와 동일 구성(자동업데이트 zip 재료만) ──
+      #   ⚠️ EXE(ISCC)·번들 다운로드·Create Release 는 자동업데이트와 무관 → 가져오지 않음(G2 별건).
+      #   -p:HitPanVersion 단일 주입 = SSOT 정합(W4-0). 빠지면 워치독이 자기를 1.0.0 으로 알고
+      #   모든 manifest 를 "새 버전"으로 받아 다운그레이드 방어까지 무력화된다.
+      - name: Publish ERP API (single-file)
+        shell: pwsh
+        run: |
+          dotnet publish src/HitPan.API/HitPan.API.csproj `
+            -c Release -r win-x64 --self-contained false `
+            -p:PublishSingleFile=true `
+            -p:HitPanVersion=${{ inputs.version }} `
+            -o installer/payload/api
+
+      - name: Publish ERP Web (Blazor WASM)
+        shell: pwsh
+        run: |
+          dotnet publish src/HitPan.Web/HitPan.Web.csproj `
+            -c Release `
+            -p:HitPanVersion=${{ inputs.version }} `
+            -o installer/payload/web
+
+      # ★ 7/22 작3 봉합 필수(터널 404 진범): Blazor 정적자산을 api/wwwroot 로 복사해야
+      #   API 가 터널(test1.hitpan.kr→5257)에서 Blazor 를 서빙한다. 이게 자동업데이트 zip 에도 실려야 함.
+      - name: Copy Blazor static assets into api/wwwroot (tunnel serving)
+        shell: pwsh
+        run: |
+          $src = 'installer/payload/web/wwwroot'
+          $dst = 'installer/payload/api/wwwroot'
+          if (-not (Test-Path $src)) { throw "web/wwwroot 없음 — Web publish 실패" }
+          if (Test-Path $dst) { Remove-Item $dst -Recurse -Force }
+          Copy-Item $src $dst -Recurse -Force
+          $n = (Get-ChildItem $dst -Recurse -File).Count
+          Write-Host "api/wwwroot 복사 완료: $n files"
+          if (-not (Test-Path "$dst/index.html")) { throw "api/wwwroot/index.html 없음 — 복사 실패" }
+          if ($n -lt 100) { throw "api/wwwroot 파일 수 비정상($n) — Blazor 산출물 확인" }
+
+      # self-contained(단일파일 아님) — build-manifest.ps1 이 HitPan.Watchdog.dll 의 FileVersion 을
+      #   읽어 api 와 갈라짐을 차단하므로 dll 이 산출물에 있어야 한다.
+      - name: Publish Watchdog (self-contained)
+        shell: pwsh
+        run: |
+          dotnet publish src/HitPan.Watchdog/HitPan.Watchdog.csproj `
+            -c Release -r win-x64 --self-contained true `
+            -p:HitPanVersion=${{ inputs.version }} `
+            -o installer/payload/watchdog --nologo
+
+      # ── 시크릿 파일 산출물 제거 (첫 실측 P0 봉합 2026-07-28 · 검증팀 SoD 과제2 확장) ──────
+      #   dotnet publish 는 리포에 커밋된 환경별 appsettings(appsettings.<환경>.json)를 산출물에
+      #   그대로 복사한다. 이게 update zip 에 실리면 NCP "Scan secrets" 게이트가 파일명 규칙
+      #   (환경별 설정=위험)으로 배포를 정상 차단한다(첫 실측 1.2.40 실패 진범 = Production·Local 2종).
+      #   ★ 게이트는 그대로 유지(느슨하게 안 함). 미래에 진짜 시크릿이 든 환경파일이 섞여도
+      #     게이트가 막아야 하므로 "산출물에서 뺀다"로 근본 봉합(헌법 #22 정합, 우회 아님).
+      #   ★ 검증팀 SoD CONFIRMED(과제2): strip 3개 하드코딩 < 게이트 regex(모든 환경접미사)라
+      #     향후 appsettings.Staging.json 등 추가 시 재발. → 게이트와 동형으로 "환경접미사 전부"
+      #     제거하도록 확장(appsettings.<임의영문접미사>.json). 접미사 없는 일반 appsettings.json 은
+      #     코드 동봉 정상이라 보존(게이트도 파일명만으론 안 막고 내용 스캔).
+      #   ⚠️ 순서 의존: 이 스텝은 반드시 "Copy Blazor static assets" 뒤에 있어야 한다 —
+      #     Copy 가 web/wwwroot 를 api/wwwroot 로 통째 복사하므로, 그 복사본까지 여기서 제거해야 한다.
+      #     이 스텝을 Copy 앞으로 옮기면 api/wwwroot 복사본이 안 잡혀 게이트가 재차단(첫 실측 재발).
+      - name: Strip env-specific appsettings from payload (secret-gate 정합)
+        shell: pwsh
+        run: |
+          # 게이트 regex 와 동형: appsettings.<영문접미사>.json + 백업접미사(.bak/.old/.orig/.save)
+          #   접미사 없는 일반 appsettings.json 은 제외(코드 동봉 정상).
+          # ── 20260729작3 봉합 (병렬이슈 01 · 사장님 직권 결재) ──────────────────────────
+          #   종전 $rx 에 백업접미사 절이 없어 게이트와 비대칭이었다.
+          #   appsettings.Production.json.bak → strip 미제거 / 게이트 차단 = 배포 fail.
+          #   ★ 게이트를 느슨하게 하지 않고 strip 을 게이트 수준으로 올린다(헌법 #22).
+          #   ★ -Filter 도 함께 고친다: 'appsettings.*.json' 은 .bak 을 열거조차 못 해
+          #     regex 만 고치면 봉합이 성립하지 않는다(실측 확인). → 'appsettings.*'
+          $rx = '^appsettings\.[A-Za-z]+\.json(\.(bak|old|orig|save))?$'
+          $removed = 0
+          Get-ChildItem -Path installer/payload -Recurse -File -Filter 'appsettings.*' -ErrorAction SilentlyContinue |
+            Where-Object { $_.Name -match $rx } |
+            ForEach-Object {
+              Write-Host "[strip] 제거: $($_.FullName)"
+              Remove-Item $_.FullName -Force
+              $removed++
+            }
+          Write-Host "[strip] 환경별 appsettings $removed 개 제거 완료 (게이트 regex 동형 · 접미사 없는 일반 appsettings.json 보존)"
+
+      # ── environment 분기(보강3/G7): download-url-base 를 production/beta 로 가른다. PRD §3.3 인자표 ──
+      #   production = updates.hitpan.kr/packages / beta = updates.hitpan.kr/beta/packages
+      #   ⚠️ beta 는 배선만 — nginx /beta/ location 물리생성 별건 전엔 실동작 불가(403).
+      - name: Resolve download-url-base by environment
+        id: urlbase
+        shell: pwsh
+        run: |
+          $envName = '${{ inputs.environment }}'
+          if ($envName -eq 'beta') {
+            $base = 'https://updates.hitpan.kr/beta/packages'
+          } else {
+            $base = 'https://updates.hitpan.kr/packages'
+          }
+          "base=$base" >> $env:GITHUB_OUTPUT
+          Write-Host "[urlbase] environment=$envName -> $base"
+
+      # ── build-manifest.ps1 → hitpan-<ver>.zip + manifest(unsigned) — build-installer.yml:207-236 ──
+      #   -Channel = channel input(게시함정3-③ 상류 주입) / -DownloadUrlBase = environment 분기.
+      #   ★ 서명은 여기서 안 함 — 개인키 NCP 전용(C-1). CI 는 unsigned 까지만.
+      #   ★ HITPAN_RELEASED_AT 주입 필수(재현가능빌드, build-manifest.ps1:231 없으면 실패).
+      - name: Build update package (zip + unsigned manifest)
+        shell: pwsh
+        run: |
+          $payload = (Resolve-Path installer/payload).Path
+          $outDir  = Join-Path (Get-Location).Path 'dist/updates'
+          New-Item -ItemType Directory -Path $outDir -Force | Out-Null
+          $env:HITPAN_RELEASED_AT = (Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ')
+          Write-Host "[update] releasedAt = $env:HITPAN_RELEASED_AT"
+          $ver = '${{ inputs.version }}'
+          & pwsh -File installer/updates/build-manifest.ps1 `
+            -PayloadDir $payload `
+            -OutDir $outDir `
+            -Channel '${{ inputs.channel }}' `
+            -DownloadUrlBase '${{ steps.urlbase.outputs.base }}' `
+            -ReleaseNotes "히트판 ERP $ver 업데이트" `
+            -ConsentMessage "새 버전($ver)이 준비되었습니다. 자료를 자동으로 백업한 뒤 업데이트가 진행됩니다. 지금 진행하시겠습니까?"
+          if ($LASTEXITCODE -ne 0) { throw "build-manifest 실패 (exit $LASTEXITCODE)" }
+          Get-ChildItem $outDir | ForEach-Object { Write-Host "[update] 산출: $($_.Name)" }
+
+      # ── 설치 EXE 빌드 (20260730작3 ①안 — 랜딩 다운로드 404 봉합) ─────────────────
+      #   ■ 왜 여기서 같이 만드나 (급소)
+      #     랜딩 DownloadPage 는 manifest 버전으로 {packages}/HitPan-ERP-Setup-{V}.exe 를 만든다.
+      #     그런데 EXE 를 그 경로에 올리는 워크플로가 없어 1.2.29~1.2.41 전부 404 였다
+      #     — 랜딩 다운로드가 한 번도 작동한 적이 없다(2026-07-30 실측).
+      #     zip 만 게시하면 "자동업데이트는 되는데 신규 고객은 설치조차 못 하는" 상태가 유지된다.
+      #     ⇒ 같은 잡에서 같은 버전으로 만들어 한 단위로 게시한다(사장님 ①안 결재).
+      #   ■ payload 재사용: 위 publish 3종 + strip 이 이미 끝난 installer/payload 를 그대로 쓴다.
+      #     번들 5종(dotnet-hosting·mariadb.msi·vc_redist·cloudflared·hitpan_db.sql)만 추가로 받는다.
+      #   ⚠️ 코드 서명(Authenticode)은 여기서 안 한다 — build-installer.yml 과 동일하게 별건(결재 2).
+      - name: Download dependency bundle (for installer EXE)
+        shell: pwsh
+        run: |
+          & pwsh -File installer/download-bundle.ps1 -BundleDir installer/payload
+          if ($LASTEXITCODE -ne 0) { throw "번들 다운로드 실패 (exit $LASTEXITCODE)" }
+          Copy-Item installer/hitpan_db_clean.sql installer/payload/hitpan_db.sql -Force
+          # .iss 가 요구하는 8개 사전 확인 — 없으면 ISCC 가 모호한 오류를 내므로 여기서 명확히 세운다.
+          $required = @('dotnet-hosting.exe','mariadb.msi','vc_redist.x64.exe','cloudflared.exe','hitpan_db.sql','api','web','watchdog')
+          $missing = $required | Where-Object { -not (Test-Path "installer/payload/$_") }
+          if ($missing) { throw "payload 누락: $($missing -join ', ')" }
+
+      # ── EXE 전용 동봉물 시크릿 게이트 (검증팀 [3-V] D3 봉합 2026-07-30) ──────────────
+      #   ■ 왜 필요한가 (급소)
+      #     아래 "Scan update package for leaked secrets"(deploy 잡)는 **update zip 만** 스캔한다.
+      #     그런데 설치 EXE 는 zip 과 같은 payload 에 더해 hitpan_db.sql(DDL)·헬퍼 스크립트 4종
+      #     (AntivirusExceptions/FirewallRules/InstallWatchdog/web-server)을 **추가로** 담는다(.iss [Files]).
+      #     즉 EXE 전용 동봉물은 어떤 게이트도 안 거치고 고객 PC 로 간다 — 헌법 #22 방어선의 구멍.
+      #   ■ EXE 는 LZMA 압축이라 산출물을 열어볼 수 없다 → **컴파일 전에 소스 쪽을 스캔**한다.
+      - name: Scan installer-only payload for secrets (EXE 전용 동봉물)
+        shell: pwsh
+        run: |
+          $targets = @(
+            'installer/payload/hitpan_db.sql',
+            'installer/hitpan-start.bat',
+            'installer/web-server.ps1',
+            'installer/scripts/AntivirusExceptions.ps1',
+            'installer/scripts/FirewallRules.ps1',
+            'installer/scripts/InstallWatchdog.ps1'
+          )
+          # ■ 패턴 (검증팀 N2 봉합): 최초 4종은 DB/PEM 계열에 편중돼 API키·토큰을 0건 적발했다.
+          #   헬퍼 .ps1 은 성격상 토큰·webhook 이 들어갈 자리라 그쪽이 비어 있었다. 계열별로 확장한다.
+          $patterns = @(
+            # DB·커넥션 계열
+            'Password\s*=\s*["'']?[A-Za-z0-9!@#$%^&*]{6,}',
+            'Server=.*;.*(Pwd|Password)=',
+            'IDENTIFIED BY\s+["''][A-Za-z0-9!@#$%^&*]{6,}["'']',
+            '(?i)\b(DBPASS|DB_PASSWORD|MYSQL_PWD|ROOT_PASSWORD)\s*=\s*\S{6,}',
+            # 키·인증서 계열
+            'BEGIN (RSA |EC |OPENSSH |PGP )?PRIVATE KEY',
+            # API 키·토큰 계열 (N2 — 최초 게이트가 통째로 놓쳤다)
+            'sk-ant-[A-Za-z0-9_\-]{20,}',
+            'gh[pousr]_[A-Za-z0-9]{30,}',
+            'AKIA[0-9A-Z]{16}',
+            'eyJ[A-Za-z0-9_\-]{10,}\.[A-Za-z0-9_\-]{10,}\.',
+            '(?i)\b(api[_\-]?key|access[_\-]?token|secret[_\-]?key|bearer)\s*[:=]\s*["'']?[A-Za-z0-9_\-]{20,}',
+            'https://hooks\.slack\.com/\S+',
+            '(?i)xox[baprs]-[A-Za-z0-9\-]{10,}'
+          )
+          # ■ 제외 규칙 (검증팀 B3 봉합): 최초 구현은 '줄 단위' 제외라
+          #   `IDENTIFIED BY 'Hitpan2025!'; -- MariaRootPw` 처럼 같은 줄에 안전 토큰이 하나만 있어도
+          #   진짜 시크릿이 통째로 억제됐다. → **매치된 문자열 자체**가 플레이스홀더일 때만 제외한다.
+          $bad = @()
+          foreach ($t in $targets) {
+            if (-not (Test-Path $t)) { throw "EXE 동봉 대상 누락: $t — .iss 가 요구하는 파일이다." }
+            foreach ($p in $patterns) {
+              $hits = Select-String -Path $t -Pattern $p -AllMatches -ErrorAction SilentlyContinue
+              foreach ($h in $hits) {
+                foreach ($m in $h.Matches) {
+                  $v = $m.Value
+                  # 매치 안에 치환 자리표가 있으면 실값이 아니다(런타임 생성).
+                  if ($v -match '%[A-Za-z_]+%|\{#|\$env:|\$\(|ExpandConstant|GenerateAlphanumericKey|\{\d+\}|<[A-Za-z_]+>|CHANGEME|xxxx|\*\*\*') { continue }
+                  $bad += "$($h.Path):$($h.LineNumber): $($v.Trim())"
+                }
+              }
+            }
+          }
+          if ($bad.Count -gt 0) {
+            Write-Host "::error::설치 EXE 동봉물에 시크릿 의심 — 배포 중단:"
+            $bad | ForEach-Object { Write-Host "  $_" }
+            throw "EXE 동봉물 시크릿 게이트 실패"
+          }
+          Write-Host "[SecretGate/EXE] 동봉물 $($targets.Count)종 시크릿 미포함 확인"
+
+      # ⚠️ ISCC 는 러너에 기본 설치돼 있지 않다. 이 스텝이 없으면 아래 ISCC 호출이
+      #    "명령을 찾을 수 없음"으로 실패한다(build-installer.yml:156 과 동일 구성).
+      - name: Install Inno Setup 6
+        shell: pwsh
+        run: |
+          choco install innosetup -y --no-progress
+          if (-not (Test-Path 'C:\Program Files (x86)\Inno Setup 6\ISCC.exe')) {
+            throw "Inno Setup 설치 후에도 ISCC.exe 를 찾을 수 없습니다."
+          }
+          Write-Host "Inno Setup installed"
+
+      - name: Build installer EXE (ISCC)
+        shell: pwsh
+        run: |
+          $ver = '${{ inputs.version }}'
+          & 'C:\Program Files (x86)\Inno Setup 6\ISCC.exe' `
+            "/DAppVersion=$ver" `
+            "/DBundleDir=payload" `
+            "/DOutputDir=output" `
+            installer/HitPan-Universal.iss
+          if ($LASTEXITCODE -ne 0) { throw "Inno Setup compile failed (exit $LASTEXITCODE)" }
+
+      # 파일명 3자 정합 — 랜딩이 만드는 이름과 정확히 같아야 404 가 안 난다(N-1 정신).
+      #   ISCC 산출명이 규칙과 다르면 여기서 세운다. 게시 후에 발견하면 이미 고객이 404 를 본다.
+      - name: Verify installer EXE name + compute sha (fail-closed)
+        shell: pwsh
+        run: |
+          $ver = '${{ inputs.version }}'
+          $expect = "HitPan-ERP-Setup-$ver.exe"
+          $path = "installer/output/$expect"
+          if (-not (Test-Path $path)) {
+            Write-Host "[installer] output 내용:"
+            Get-ChildItem installer/output | ForEach-Object { Write-Host "  $($_.Name)" }
+            throw "설치 EXE 파일명이 기대와 다릅니다. 기대=$expect — 랜딩이 이 이름으로 링크를 만든다."
+          }
+          $size = (Get-Item $path).Length
+          if ($size -lt 50MB) { throw "설치 EXE 크기 비정상($size bytes) — 빌드 산출물 확인." }
+          $sha = (Get-FileHash $path -Algorithm SHA256).Hash.ToLower()
+          New-Item -ItemType Directory -Path dist/installer -Force | Out-Null
+          Copy-Item $path "dist/installer/$expect" -Force
+          # 래퍼가 NCP 에서 대조할 sha 동반 파일(전송 손상 검출).
+          [IO.File]::WriteAllText("dist/installer/$expect.sha256", $sha)
+          Write-Host "[installer] $expect ($size bytes) sha256=$sha"
+
+      - name: Upload update artifact
+        uses: actions/upload-artifact@v5
+        with:
+          name: update-pkg-${{ inputs.version }}
+          path: dist/updates/
+          retention-days: 7
+
+      - name: Upload installer artifact
+        uses: actions/upload-artifact@v5
+        with:
+          name: installer-exe-${{ inputs.version }}
+          path: dist/installer/
+          retention-days: 7
+
+  # ── deploy 잡: 데이터만 /tmp → NCP 상주본 sudo 2인자 호출 ──
+  #   ★ 웹 CD(deploy-ncp.yml)에서 복붙 금지 3구간:
+  #     - rsync 위치이동(→/opt)  : 여기선 데이터만 /tmp (B-1)
+  #     - 광역 sudo(임의 셸)     : 여기선 publish-update.sh 단일 호출만
+  #     - GHA 롤백 스텝          : 롤백 주체는 publish-update.sh 자기검증. 이중경합 금지.
+  deploy:
+    name: Sign & publish on NCP (상주본 호출)
+    needs: build
+    runs-on: ubuntu-latest
+    # G-E: required reviewer 등록 대상(사장님). 방아쇠 1회만 사람.
+    #   inputs.environment(production/beta) 를 GitHub environment 에 그대로 매핑 → PRD §3.3.
+    #   두 environment 모두 required reviewer 를 걸어야 전 고객 코드교체 방아쇠에 승인 게이트가 선다.
+    environment: ${{ inputs.environment }}
+    timeout-minutes: 15
+    steps:
+      - name: Download update artifact
+        uses: actions/download-artifact@v5
+        with:
+          name: update-pkg-${{ inputs.version }}
+          path: dist/updates/
+
+      # 설치 EXE 동반 (20260730작3 ①안) — zip 과 한 단위로 게시하기 위해 여기서도 받는다.
+      - name: Download installer artifact
+        uses: actions/download-artifact@v5
+        with:
+          name: installer-exe-${{ inputs.version }}
+          path: dist/installer/
+
+      # ── B-8: deploy 잡 진입 시 version 재검증 (fail-closed) ──
+      #   build 잡에서 검증했더라도 deploy 잡은 별도 실행 컨텍스트다. 여기서 다시 못박아
+      #   아래 모든 스텝이 신뢰하는 $VER 이 3자 SemVer 임을 보장한다(오염된 input 차단).
+      - name: Re-verify version (fail-closed)
+        env:
+          VER: ${{ inputs.version }}
+        run: |
+          case "$VER" in
+            *[!0-9.]*) echo "::error::version '$VER' 에 허용 안 된 문자 — 3자 SemVer 만."; exit 1 ;;
+          esac
+          echo "$VER" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+$' || { echo "::error::version '$VER' 3자 SemVer 아님."; exit 1; }
+          echo "[VersionGate/deploy] $VER"
+
+      # ── B-12: 운영 시크릿이 update zip 에 섞였는지 게이트 (다운로드 후, 전송 전) ──
+      #   update zip 에 appsettings.Production/Development·.pem·.pfx·db.conf·keys.conf 가 실리면
+      #   전 고객 PC 로 시크릿이 퍼진다. 발견 시 전송 전에 배포를 세운다.
+      - name: Scan update package for leaked secrets
+        env:
+          VER: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          # F-2(검증팀): unzip 존재 강제 — 없으면 게이트가 조용히 통과(거짓봉합). 헌법 #15.
+          command -v unzip >/dev/null 2>&1 || { echo "::error::unzip 미설치 — 시크릿 게이트 실행 불가. 배포 중단."; exit 1; }
+          ZIP="dist/updates/hitpan-$VER.zip"
+          [ -f "$ZIP" ] || { echo "::error::update zip 없음: $ZIP"; exit 1; }
+          LIST="$(unzip -Z1 "$ZIP")"
+          # F-3(검증팀): 패턴 확장 — .key/.p12/.crt/.env, Staging 등 환경접미사, .bak/.old 백업접미사까지.
+          #   $ 앵커 대신 백업접미사 허용(\.(bak|old|orig|save))? 로 db.conf.bak 등도 잡는다.
+          BAD="$(printf '%s\n' "$LIST" | grep -iE 'appsettings\.[A-Za-z]+\.json(\.(bak|old|orig|save))?$|\.(pem|pfx|p12|key|crt)$|(^|/)db\.conf(\.(bak|old|orig|save))?$|hitpan-keys\.conf(\.(bak|old|orig|save))?$|(^|/)\.env$|(^|/)secrets\.json$' || true)"
+          # appsettings.json(환경접미사 없는 일반)은 코드 동봉이 정상이라 위 패턴서 제외했고, 아래서 내용 스캔.
+          if [ -n "$BAD" ]; then
+            echo "::error::update zip 에 운영 시크릿으로 의심되는 파일 포함 — 배포 중단:"
+            printf '%s\n' "$BAD"
+            exit 1
+          fi
+          # appsettings.json(일반) 안에 실 커넥션스트링/비번이 박혔는지 얕은 스캔
+          if printf '%s\n' "$LIST" | grep -qi 'appsettings\.json$'; then
+            TMPD="$(mktemp -d)"
+            unzip -qq "$ZIP" '*appsettings.json' -d "$TMPD" || { echo "::error::appsettings.json 추출 실패 — 스캔 불가로 배포 중단."; rm -rf "$TMPD"; exit 1; }
+            if grep -rqiE '"(Password|Pwd)"[[:space:]]*[:=]|Server=.*;.*Password=' "$TMPD"; then
+              echo "::error::appsettings.json 에 실 비밀번호/커넥션스트링 흔적 — 배포 중단."; rm -rf "$TMPD"; exit 1
+            fi
+            rm -rf "$TMPD"
+          fi
+          echo "[SecretGate] update zip 시크릿 미포함 확인"
+
+      # ── 러너 실측 sha 계산 (B-4 대조용 — NCP 가 독립 재검증할 기준값) ──
+      - name: Compute package sha (for NCP independent recheck)
+        id: pkgsha
+        env:
+          VER: ${{ inputs.version }}
+        run: |
+          SHA="$(sha256sum dist/updates/hitpan-$VER.zip | awk '{print $1}')"
+          echo "sha=$SHA" >> "$GITHUB_OUTPUT"
+          echo "[pkgsha] $SHA"
+
+      # SSH 키 셋업 — deploy-ncp.yml:85-92 복붙 (동일 Secrets 3종, 재사용 OK)
+      - name: Setup SSH key
+        env:
+          SSH_KEY: ${{ secrets.NCP_SSH_PRIVATE_KEY }}
+        run: |
+          mkdir -p ~/.ssh
+          echo "$SSH_KEY" > ~/.ssh/ncp_key
+          chmod 600 ~/.ssh/ncp_key
+          ssh-keyscan -H ${{ secrets.NCP_HOST }} >> ~/.ssh/known_hosts
+
+      # 【데이터만 전송】 zip·unsigned manifest → NCP /tmp. 실행 스크립트(.sh) 절대 금지(B-1).
+      #   게시함정3-①: manifest 목적지 파일명을 publish 가 받는 이름으로 rename.
+      #   B-8: $VER 은 위에서 3자 SemVer 로 재검증됐으므로 파일명 보간이 안전하다.
+      - name: Rsync data only (zip + unsigned manifest + installer EXE)
+        env:
+          NCP_USER: ${{ secrets.NCP_USER }}
+          NCP_HOST: ${{ secrets.NCP_HOST }}
+          VER: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          rsync -avz -e "ssh -i ~/.ssh/ncp_key" \
+            "dist/updates/hitpan-$VER.zip" \
+            "$NCP_USER@$NCP_HOST:/tmp/hitpan-$VER.zip"
+          rsync -avz -e "ssh -i ~/.ssh/ncp_key" \
+            dist/updates/manifest.json \
+            "$NCP_USER@$NCP_HOST:/tmp/manifest-$VER-unsigned.json"
+
+          # ── 설치 EXE + sha 동반 전송 (20260730작3 ①안) ─────────────────────────
+          #   래퍼는 --zip/--manifest 2인자만 받는다(B-2 오버라이드 차단 유지). EXE 는 인자로 안 넘기고
+          #   래퍼가 zip 파일명의 버전에서 /tmp/HitPan-ERP-Setup-<VER>.exe 를 '유도'해 찾는다.
+          #   ⇒ 여기 파일명이 그 규칙과 다르면 래퍼가 fail-closed 로 게시를 세운다.
+          #   -z(압축) 제거: EXE 는 이미 압축된 260MB 라 재압축이 CPU 만 먹고 이득이 없다.
+          EXE="HitPan-ERP-Setup-$VER.exe"
+          [ -f "dist/installer/$EXE" ] || { echo "::error::설치 EXE 없음: dist/installer/$EXE"; exit 1; }
+          [ -f "dist/installer/$EXE.sha256" ] || { echo "::error::EXE sha 파일 없음"; exit 1; }
+          rsync -av --progress -e "ssh -i ~/.ssh/ncp_key" \
+            "dist/installer/$EXE" \
+            "$NCP_USER@$NCP_HOST:/tmp/$EXE"
+          rsync -av -e "ssh -i ~/.ssh/ncp_key" \
+            "dist/installer/$EXE.sha256" \
+            "$NCP_USER@$NCP_HOST:/tmp/$EXE.sha256"
+          echo "[rsync] 설치 EXE 전송 완료: /tmp/$EXE ($(stat -c%s "dist/installer/$EXE") bytes)"
+
+      # 【래퍼 호출 — B-1·B-2·B-4】 SSH 페이로드 = publish-run.sh 단일 호출, 2인자만.
+      #   ★ 기존: publish-update.sh 직접 호출 → NCP 가 러너발 값 그대로 신뢰(B-4 관통결함).
+      #   ★ 변경: publish-run.sh(래퍼)가 서명 전 NCP 안에서 commit·run_id·sha 를 독립 재조회 후 통과 시에만 publish.
+      #   B-4 대조용 메타를 env 로 넘긴다(러너 '주장'일 뿐 — NCP 가 GitHub API/git 으로 직접 재확인).
+      #   HITPAN_B4_ALLOW_UNVERIFIED 는 넘기지 않는다(git 미러·GitHub 토큰 트랙2 배치 후 fail-closed 로 동작).
+      #   production 은 오버라이드 인자 0 = sudoers 2인자 화이트리스트 정합(G-B).
+      - name: Invoke resident publish-run.sh wrapper (B-4 independent recheck)
+        env:
+          NCP_USER: ${{ secrets.NCP_USER }}
+          NCP_HOST: ${{ secrets.NCP_HOST }}
+          VER: ${{ inputs.version }}
+          PKG_SHA: ${{ steps.pkgsha.outputs.sha }}
+          GH_SHA: ${{ github.sha }}
+          GH_RUN_ID: ${{ github.run_id }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          # ★ 검증팀 2차 BLOCKER: `sudo ... bash <스크립트>` 는 sudo 대상이 /usr/bin/bash 라
+          #   sudoers(NOPASSWD: /opt/hitpan/deploy/publish-run.sh) 정확매칭 실패 → 게시 100% 실패.
+          #   → bash 제거, 직접 실행(shebang·+x). deploy-ncp.yml 봉합과 대칭.
+          #   HITPAN_* 는 sudo 명령줄 인라인 할당(sudoers SETENV 필수, G-B). ALLOW_UNVERIFIED 는 안 넘김.
+          ssh -i ~/.ssh/ncp_key "$NCP_USER@$NCP_HOST" \
+            "sudo HITPAN_EXPECT_SHA=$PKG_SHA HITPAN_GH_SHA=$GH_SHA HITPAN_GH_RUN_ID=$GH_RUN_ID HITPAN_GH_REPO=$GH_REPO \
+             /opt/hitpan/deploy/publish-run.sh --zip /tmp/hitpan-$VER.zip --manifest /tmp/manifest-$VER-unsigned.json"
+
+      # 【이중 확인】 서빙본 최신 확인 (N-3 이중 안전망일 뿐).
+      #   실패해도 publish-update.sh 자기검증이 이미 롤백함 — GHA 롤백 스텝 신설 금지(§4).
+      #   ★ jq 로 파싱(ubuntu-latest 기본 제공). python3 인라인은 실패를 삼켜 오탐 위험(검증팀장 권고).
+      #   ★ Cloudflare 엣지 캐시 우회: 캐시버스터 쿼리 + no-cache 헤더로 옛 manifest 오판 방지.
+      - name: Verify served manifest (double-check, no rollback here)
+        env:
+          VER: ${{ inputs.version }}
+          FEED_ENV: ${{ inputs.environment }}
+        run: |
+          if [ "$FEED_ENV" = "beta" ]; then
+            FEED="https://updates.hitpan.kr/beta/manifest.json"
+          else
+            FEED="https://updates.hitpan.kr/manifest.json"
+          fi
+          SERVED=$(curl -fsS -H "Cache-Control: no-cache" -H "Pragma: no-cache" "$FEED?_=$RANDOM$$" | jq -r '.version // ""')
+          echo "feed: $FEED / served version: '$SERVED' / expected: '$VER'"
+          if [ "$SERVED" != "$VER" ]; then
+            echo "::error::서빙 버전 불일치. publish-update.sh 자기검증이 이미 롤백했을 수 있음(정상 안전망 동작). NCP 로그 확인. GHA 에서 롤백하지 않음(이중경합 금지)."
+            exit 1
+          fi
+          echo "[VerifyGate] $FEED_ENV 피드 최신화 확인 — $VER"
