@@ -1298,7 +1298,8 @@ function ExecLogged(const Tag, CmdLine: String): Integer;
 var
   OutFile: String;
   Lines: TArrayOfString;
-  i, ResultCode, Shown: Integer;
+  Line: String;
+  i, ResultCode, Shown, Total: Integer;
 begin
   OutFile := ExpandConstant('{tmp}\execlog-' + Tag + '.txt');
   DeleteFile(OutFile);
@@ -1318,21 +1319,51 @@ begin
   if FileExists(OutFile) and LoadStringsFromFile(OutFile, Lines) then
   begin
     Shown := 0;
+    Total := 0;
     for i := 0 to GetArrayLength(Lines) - 1 do
     begin
-      if (Trim(Lines[i]) <> '') and (Shown < 12) then
+      if Trim(Lines[i]) <> '' then
       begin
-        Log('[작10 P0-5][' + Tag + '] > ' + Lines[i]);
-        Shown := Shown + 1;
+        Total := Total + 1;
+        // 검증 P1-2: 상한 20 (sc query 정상 출력이 12줄 근처라 12는 WIN32_EXIT_CODE 를 자를 수 있다.
+        //   작8 P0-1 이 확정한 진범 지표가 그 줄이므로 잘리면 진단이 무의미해진다).
+        if Shown < 20 then
+        begin
+          // 검증 P1-4: 제어문자 제거 — sc/cloudflared 출력에 CR(#13)·BS(#8) 가 섞이면
+          //   설치 로그가 깨진다(timeout 카운트다운의 '...1'+BS+'0' 이 실측 예).
+          //   ※ 문자 인덱스 대입(Line[j] := ...)은 이 파일에 선례가 0건이라 쓰지 않는다.
+          //     StringChangeEx 는 257·258행에 기존 사용례가 있어 검증된 수단이다
+          //     (검증팀 교훈: "선례 없는 기법을 '검증된 패턴'이라 부른 것이 P0 를 놓친 원인").
+          Line := Lines[i];
+          StringChangeEx(Line, #13, ' ', True);
+          StringChangeEx(Line, #10, ' ', True);
+          StringChangeEx(Line, #8,  '', True);
+          // 검증 #22 지적(V-4 미확정): cloudflared 가 인자 파싱 실패 시 usage 에 입력 인자를
+          //   에코하는 CLI 패턴이 흔하다. 실측 전이므로 **안전측으로 마스킹**한다.
+          //   토큰이 안 나오면 이 치환은 무해하고, 나오면 로그 유출을 막는다(헌법 #22).
+          if (G_TunnelToken <> '') and (Pos(G_TunnelToken, Line) > 0) then
+            StringChangeEx(Line, G_TunnelToken, '***TOKEN-MASKED***', True);
+          Log('[작10 P0-5][' + Tag + '] > ' + Trim(Line));
+          Shown := Shown + 1;
+        end;
       end;
     end;
     if Shown = 0 then
       Log('[작10 P0-5][' + Tag + '] > (출력 없음)');
+    // 검증 P1-2: 잘린 사실 자체를 남긴다. 종전엔 조용히 버려 "출력이 이게 전부"로 오판하게 했다.
+    if Total > Shown then
+      Log('[작10 P0-5][' + Tag + '] > (...' + IntToStr(Total - Shown) + '줄 생략)');
   end
   else
-    Log('[작10 P0-5][' + Tag + '] > (출력 파일 미생성 — 명령 자체가 실행되지 않았을 수 있다)');
+    // 검증 P1-1·P0-3: 단정 삭제. cmd 는 리다이렉트 좌변이 실행에 도달해야 파일을 만든다.
+    //   즉 '&&' 좌변 실패(정상 상황)에서도 파일이 안 생긴다 — 종전 문구
+    //   "명령 자체가 실행되지 않았을 수 있다"는 백지 신규설치 전건에 찍히는 거짓 진단이었다.
+    Log('[작10 P0-5][' + Tag + '] > (출력 파일 없음 — 위 종료코드로 판정할 것)');
 
-  DeleteFile(OutFile);
+  // 검증 P1-3: 삭제 실패를 침묵하지 않는다(헌법 #15). 백신이 파일을 잡으면 {tmp} 에 잔류하고,
+  //   6-2 출력에는 토큰이 에코될 가능성이 있어(V-4 미확정) 잔류 자체가 시크릿 노출 창이 된다.
+  if not DeleteFile(OutFile) then
+    Log('[작10 P0-5][' + Tag + '] ⚠️ 임시 출력파일 삭제 실패 — ' + OutFile + ' 잔류(백신 점유 의심)');
 end;
 
 procedure UpdateDbConfValue(const Key, Value: String);
@@ -1855,8 +1886,18 @@ begin
     // ★ 봉합 20260730작10 P0-5: 이하 6-1·6-2 를 ExecLogged 로 교체 — 침묵 실패 가시화.
     //   종전엔 ResultCode 를 받고도 검사·기록을 0건 했다(헌법 #15 위반). 그 결과 오늘 샌드박스에서
     //   'sc query = 1060(미등록)'인데 로그 마지막 줄이 [FixupWatchdog] 이라 원인 추적이 불가능했다.
-    ExecLogged('6-1-stopdel',
-      'sc stop cloudflared & timeout /t 3 /nobreak & sc delete cloudflared & timeout /t 2 /nobreak');
+    // ★ 검증팀 반려 봉합 (P0-1·P0-2, 2026-07-30 데이비드 박):
+    //   종전 한 줄 '&' 체인은 두 가지로 실패했다 — **실측 채증됨**:
+    //     ① 리다이렉트가 마지막 명령에만 붙어 sc stop·sc delete 출력이 100% 유실
+    //     ② 종료코드가 마지막 timeout 의 것이라 **항상 0** → sc delete 실패에도 '성공' 로그
+    //   실측: `sc delete NoSuchSvcXyz & timeout /t 1 /nobreak > f 2>&1`
+    //         → EXITCODE=0(실제 sc 는 1060), 파일엔 timeout 카운트다운만
+    //   즉 침묵을 **거짓 성공**으로 바꿨다(침묵보다 나쁘다 — 10번째 오답의 재료).
+    //   ⇒ 명령을 개별 호출로 분해한다. timeout 은 Pascal Sleep 으로 대체(로그도 깨끗해진다).
+    ExecLogged('6-1-scstop', 'sc stop cloudflared');
+    Sleep(3000);
+    ExecLogged('6-1-scdelete', 'sc delete cloudflared');
+    Sleep(2000);
     // 좀비 프로세스 영역 제거 (taskkill 영역 — 서비스 영역 안 박혔어도 프로세스 영역 살아있을 가능)
     ExecLogged('6-1-taskkill', 'taskkill /F /IM cloudflared.exe');
     Sleep(2000);
@@ -1864,10 +1905,20 @@ begin
     // 6-1-2. 좀비 영역 재검사 영역 — 박혀있으면 sc delete 영역 한 번 더
     //   StopPending 영역에 박힌 영역 = 재부팅 영역까지 영역 사라짐 0건
     //   하지만 service install 영역 새 영역 시도 영역 가도되도록 영역 sc delete 영역 한 번 더
-    // 작10 P0-5: 종전 '>nul 2>&1' 은 ExecLogged 의 파일 리다이렉트와 충돌한다(같은 명령에
-    //   리다이렉트 2개 → 뒤쪽이 이기며 앞쪽 출력이 유실되거나 cmd 파싱이 흔들린다).
-    //   출력은 ExecLogged 가 파일로 받으므로 nul 억제는 불필요하다 — 제거한다.
-    ExecLogged('6-1-2-recheck', 'sc query cloudflared && sc delete cloudflared');
+    // ★ 검증팀 반려 봉합 (P0-3):
+    //   종전 'sc query && sc delete' 는 (a) sc query 출력이 유실되고
+    //   (b) 좀비가 없는 정상 경로(=백지 신규설치 전건)에서 && 좌변 실패로 파일이 생성되지 않아
+    //   "(명령 자체가 실행되지 않았을 수 있다)" 라는 **거짓 진단**이 매번 찍혔다.
+    //   ⇒ query 로 존재를 판정하고(종료코드가 sc 의 것이라 정확하다), 있을 때만 delete 한다.
+    //   ※ 설계서 §4-6 의 "cmd 파싱이 흔들린다" 는 근거 없는 추측이었다 — 검증팀이 반증(무해).
+    //     실제 문제는 충돌이 아니라 '리다이렉트 범위'와 '출력 유실'이었다.
+    if ExecLogged('6-1-2-query', 'sc query cloudflared') = 0 then
+    begin
+      Log('[6-1-2] 좀비 서비스 잔존 확인 — sc delete 1회 더 실행');
+      ExecLogged('6-1-2-delete', 'sc delete cloudflared');
+    end
+    else
+      Log('[6-1-2] 좀비 서비스 없음(정상) — delete 건너뜀');
     Sleep(1000);
 
     // 6-2. service install 박음 (사고 #11·#28 봉합 후)
@@ -1980,8 +2031,11 @@ begin
           UpdateDbConfValue('TUNNEL_ID', G_TunnelId);
         // 작10 P0-5: 자동복구 경로도 가시화한다. 여기까지 왔다는 건 이미 1차가 실패한 상황이므로
         //   출력이 없으면 "복구를 시도했는데 왜 안 됐는지"를 영영 알 수 없다.
-        ExecLogged('P0-3-stopdel',
-          'sc stop cloudflared & timeout /t 3 /nobreak & sc delete cloudflared & timeout /t 2 /nobreak');
+        // 검증팀 반려 봉합 (P0-1·P0-2 동일 결함) — '&' 체인 분해 + timeout → Sleep
+        ExecLogged('P0-3-scstop', 'sc stop cloudflared');
+        Sleep(3000);
+        ExecLogged('P0-3-scdelete', 'sc delete cloudflared');
+        Sleep(2000);
         ExecLogged('P0-3-serviceinstall',
           '"' + ExpandConstant('{app}\cloudflared.exe') + '" service install ' + G_TunnelToken);
         Sleep(3000);
