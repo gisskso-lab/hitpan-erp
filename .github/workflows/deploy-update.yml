@@ -204,6 +204,67 @@ jobs:
             }
           Write-Host "[strip] 환경별 appsettings $removed 개 제거 완료 (게이트 regex 동형 · 접미사 없는 일반 appsettings.json 보존)"
 
+      # ── 출하본 ApiBaseUrl 중립화 (20260730작8 P0-2 · 사장님 결재) ─────────────────────
+      #   ■ 무엇이 문제였나 (실측 확정)
+      #     리포 appsettings.json 에 "ApiBaseUrl": "https://api-demo.hitpan.kr" 가 있다.
+      #     이건 2026-04-30 `867f636`("demo.hitpan.kr 통신 인프라 완전 봉합") 에서 넣은 값으로,
+      #     당시 고객이 demo 한 대뿐이라 **정답이었다**. 그런데 그 값이 출하본에 그대로 남아
+      #     고객이 늘어난 지금 **모든 고객사 브라우저가 demo 회사 API 를 호출**한다.
+      #       실측(test2, 2026-07-30): api-demo.hitpan.kr/api/auth/login → CORS 차단
+      #                              → 화면 "서버에 연결할 수 없습니다" (로그인 불가)
+      #     ⇒ 회귀가 아니라 **임시값이 정본으로 굳은 것**이다.
+      #
+      #   ■ 왜 리포 파일을 고치지 않고 여기서 하나 (급소)
+      #     `src/HitPan.Web/wwwroot/appsettings.json` 은 **헌법 #21 변경 금지 파일**이고
+      #     pre-commit 훅이 실제로 차단한다(실측). 훅은 WASM 부트 파괴를 막는 방어선이라
+      #     --no-verify 로 뚫지 않는다(사장님 지시: *"1회만 이라는 방법은 없어"*).
+      #     ⇒ **리포는 무손상. 출하 payload 의 값만 중립화**한다 — 훅·#21 을 지키면서 봉합.
+      #     (이 스텝 위 strip 도 같은 정신 — 리포는 두고 산출물만 정정한다.)
+      #
+      #   ■ 왜 "빈 값"이면 되나
+      #     src/HitPan.Web/Program.cs 는 :14 Configuration → :17·:22 환경변수 → :35 폴백 순서다.
+      #     :35 = `builder.HostEnvironment.BaseAddress` (= 지금 접속한 자기 도메인).
+      #     :34 주석이 오늘을 예언했다 — *"명시값(api-demo 등)이 있으면 위에서 채택되므로"*.
+      #     값을 비우면 IsNullOrWhiteSpace 를 타고 :35 가 살아나 **각 고객이 자기 도메인**을 부른다.
+      #     같은 출처라 CORS 자체가 없다. 특정 주소가 필요하면 환경변수(:17)로 주입한다.
+      #     ⇒ 고객사가 몇이 되든 **같은 사고가 구조적으로 재발 불가**.
+      #
+      #   ⚠️ 순서 의존: 위 "Copy Blazor static assets"(api/wwwroot 통째 복사) **뒤**여야 한다.
+      #     api/wwwroot 복사본까지 함께 정정해야 한다 — 터널이 서빙하는 실체가 그쪽이다.
+      #   ⚠️ fail-closed: 대상 파일이 0개면 실패시킨다. 조용히 넘어가면 이 사고가 그대로 재발한다.
+      - name: Neutralize ApiBaseUrl in payload (작8 P0-2 · 리포 무손상)
+        shell: pwsh
+        run: |
+          $targets = @(
+            'installer/payload/web/wwwroot/appsettings.json',
+            'installer/payload/api/wwwroot/appsettings.json'
+          )
+          $done = 0
+          foreach ($t in $targets) {
+            if (-not (Test-Path $t)) { Write-Host "[apibase] 건너뜀(없음): $t"; continue }
+            $j = Get-Content $t -Raw | ConvertFrom-Json
+            $before = $j.ApiBaseUrl
+            $j.ApiBaseUrl = ''
+            ($j | ConvertTo-Json -Depth 10) | Set-Content $t -Encoding utf8
+            Write-Host "[apibase] 중립화: $t  ('$before' -> '')"
+            $done++
+          }
+          if ($done -eq 0) {
+            Write-Error "::error::ApiBaseUrl 중립화 대상이 0개 — Web publish 경로 확인. 이대로 게시하면 전 고객 로그인 불가(작8 P0-2 재발)."
+            exit 1
+          }
+          # 검증: api-demo 잔존 0건이어야 한다(하드코딩이 살아있으면 봉합 실패)
+          foreach ($t in $targets) {
+            if (Test-Path $t) {
+              $raw = Get-Content $t -Raw
+              if ($raw -match 'api-demo') {
+                Write-Error "::error::$t 에 api-demo 가 남아있다 — 중립화 실패. 배포 중단."
+                exit 1
+              }
+            }
+          }
+          Write-Host "[apibase] 확인: 출하본 $done 개 중립화 완료 · api-demo 잔존 0건"
+
       # ── environment 분기(보강3/G7): download-url-base 를 production/beta 로 가른다. PRD §3.3 인자표 ──
       #   production = updates.hitpan.kr/packages / beta = updates.hitpan.kr/beta/packages
       #   ⚠️ beta 는 배선만 — nginx /beta/ location 물리생성 별건 전엔 실동작 불가(403).

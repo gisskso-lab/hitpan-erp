@@ -1327,6 +1327,9 @@ var
   ConfFile, BatchFile, BootstrapFile: String;
   KeysContent, BatchContent, BootstrapContent: TStringList;
   SeedOk: Boolean;
+  // 봉합 20260730작8 P0-1: cloudflared RUNNING 확인용(지역 변수 — 전역 오염 0).
+  TunnelRunning: Boolean;
+  TunnelTry: Integer;
 begin
   // ★ 봉합 20260714작1 (W5): 파일 복사(ssInstall) 직전 = 기존 실행 프로세스 정지의 유일한 안전 시점.
   //   ssPostInstall(복사 후)에 하면 이미 잠금 사고가 끝난 뒤라 늦다.
@@ -1752,6 +1755,24 @@ begin
     Sleep(3000);
 
     // 6-3. 서비스 시작
+    //
+    // ★ 봉합 20260730작8 P0-1 (사장님 결재 · test2 실측 확정):
+    //   진범 = 서비스가 등록·시작까지 됐는데도 그 뒤 STOPPED 로 남아 1033 이 됐다.
+    //   실측(test2 PC): sc query = STOPPED / WIN32_EXIT_CODE = 0 (오류 아님, 정상 종료)
+    //                  → sc start 수동 실행하니 RUNNING + 접속 즉시 정상
+    //   Cloudflare 대시보드 교차확인: 터널 hitpan-t001~t003 전부 '복제본 0'
+    //   (= 접속하는 cloudflared 가 하나도 없음). demo 만 복제본 1 → 502(터널 통과).
+    //
+    //   ■ 왜 sc start 만으로 부족한가
+    //     `cloudflared service install` 이 등록하는 시작 유형을 우리가 명시하지 않았다.
+    //     그래서 재부팅·서비스 종료 후 자동 복귀가 보장되지 않는다. 아래 sc config 로
+    //     start= auto 를 못박아 "고객 손 0번"을 지킨다(헌법 #28·#30).
+    //     ※ delayed-auto 가 아니라 auto 다 — 부팅 직후 터널이 붙어야 외부 접속이 산다.
+    Exec(ExpandConstant('{cmd}'), '/C sc config cloudflared start= auto',
+         '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+    if ResultCode <> 0 then
+      Log('[20260730작8 P0-1] sc config start= auto 실패 (code=' + IntToStr(ResultCode) + ') — 재부팅 후 터널 미복구 위험');
+
     Exec(ExpandConstant('{cmd}'), '/C sc start cloudflared',
          '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
 
@@ -1776,6 +1797,37 @@ begin
            '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
       if ResultCode <> 0 then
         WarnTunnelFailure('터널 서비스 설치(service install) 재시도 실패', ResultCode);
+    end;
+
+    // ★ 봉합 20260730작8 P0-1 / N-2 (사장님 결재): "실행 중"까지 확인해야 봉합이다.
+    //   위 6-3 은 sc start 를 '호출'하지만 실제로 RUNNING 이 됐는지는 아무도 안 봤다.
+    //   그래서 서비스가 죽은 채로 설치가 "완료"로 끝났다(침묵 고장 — 헌법 #15 위반).
+    //   sc query 의 종료코드는 '서비스 존재'만 알려주고 상태는 알려주지 않으므로,
+    //   `sc query … | find "RUNNING"` 으로 상태 문자열을 직접 확인한다(find 는 미발견 시 exit 1).
+    //   시작에 시간이 걸릴 수 있어(START_PENDING) 2초 간격 5회까지 기다린다.
+    //   비차단(경고)로 둔 이유: 여기서 설치를 되돌리면 이미 등록된 DB·서비스가 고아가 된다.
+    //   대신 고객이 반드시 알도록 가시화한다 — 조용한 성공만은 만들지 않는다.
+    //   ※ while 로 쓴 이유: Inno Setup Pascal Script 의 for 루프 안 Break 지원이 판본별로
+    //     불확실하다. 이 파일에 기존 사용례가 0건이라 실증할 수 없어, 확실히 동작하는
+    //     조건 루프로 쓴다(컴파일 실패 = 전 고객 설치 불가라 모험하지 않는다).
+    TunnelRunning := False;
+    TunnelTry := 0;
+    while (TunnelTry < 5) and (not TunnelRunning) do
+    begin
+      TunnelTry := TunnelTry + 1;
+      Exec(ExpandConstant('{cmd}'), '/C sc query cloudflared | find "RUNNING"',
+           '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+      if ResultCode = 0 then
+        TunnelRunning := True
+      else
+        Sleep(2000);
+    end;
+    if TunnelRunning then
+      Log('[20260730작8 P0-1] cloudflared RUNNING 확인 (시도 ' + IntToStr(TunnelTry) + '회)');
+    if not TunnelRunning then
+    begin
+      Log('[20260730작8 P0-1] cloudflared 가 RUNNING 이 아니다 — 외부 접속(1033) 발생');
+      WarnTunnelFailure('터널 연결 프로그램이 실행되지 않았습니다(백신 차단 가능성)', -2);
     end;
 
     // 6-4. HITPAN_SUBDOMAIN 영역 db.conf 영역 박음 (사고 #41·#42·#39 봉합 — 환경변수 폐기)
