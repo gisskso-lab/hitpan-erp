@@ -4,7 +4,7 @@
 // 작성일       : 2026-06-01
 // 작성팀       : 백엔드 매니저(Harvard·Oracle 30년) + 백오피스 개발자
 // 정합 산출물  : database/migrations/20260601_eight_propositions.sql §1·§2
-//                docs/design/EIGHT_PROPOSITIONS_BACKOFFICE_LANDING.md §#2·§#4
+//                docs/설계/랜딩/EIGHT_PROPOSITIONS_BACKOFFICE_LANDING.md §#2·§#4
 // 절대 원칙    :
 //   - 평문 사업자번호·상호·대표자 보관 금지 (8명제 #3, 헌법 §원칙 #5)
 //   - 임시 비번 메모리 1초 → Argon2id 해시 → DB → 평문 즉시 zeroing
