@@ -43,6 +43,7 @@ MAIN_REF="origin/main"                                      # commit 조상 판�
 GH_TOKEN_FILE="/var/hitpan/update-keys/github-b4-token"     # B-4 GitHub API 토큰(600 root, 러너 미경유)
 ALLOWED_ZIP_PREFIX="/tmp/hitpan-"                           # 러너 전송본 접두 고정
 ALLOWED_MAN_PREFIX="/tmp/manifest-"
+ALLOWED_EXE_PREFIX="/tmp/HitPan-ERP-Setup-"                 # 설치 EXE 접두 고정 (20260730작3 ①안)
 
 # ── 인자 파싱 — --zip/--manifest 2개만 수용. 그 외 전부 거부(B-2 짝) ────────────
 ZIP=""
@@ -65,6 +66,41 @@ done
 for tool in jq sha256sum openssl; do
   command -v "$tool" >/dev/null 2>&1 || die "$tool 이(가) 없습니다."
 done
+
+# ── 설치 EXE 동반 검증 (20260730작3 ①안 — 랜딩 다운로드 404 봉합) ─────────────────
+#   ■ 왜 인자로 안 받나 (급소)
+#     래퍼가 --zip/--manifest 2인자만 받는 것은 sudoers 정확매칭 + 오버라이드 주입 차단(B-2)이다.
+#     --exe 를 추가하면 그 신뢰경계가 넓어진다(사장님 ①안 선택 = 경계 무변경).
+#     대신 zip 파일명에 이미 버전이 있으므로 EXE 경로를 '유도'한다 — 새 인자 0개.
+#     경로가 /tmp/HitPan-ERP-Setup-<3자SemVer>.exe 로 고정이라 임의 경로 주입도 불가능하다.
+#
+#   ■ 왜 fail-closed 인가
+#     EXE 가 없으면 게시를 중단한다. "zip 만 올라가고 EXE 는 빠지는" 상태가 바로 이번 P0
+#     (랜딩이 1.2.29~1.2.41 전부 404 — 한 번도 작동한 적 없음)의 원인이다.
+#     한쪽만 올라갈 수 있으면 같은 사고가 반드시 재발한다. 둘은 한 단위로 묶여야 한다.
+ZIP_BASE="$(basename "$ZIP")"
+EXE_VER="${ZIP_BASE#hitpan-}"; EXE_VER="${EXE_VER%.zip}"
+[[ "$EXE_VER" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] \
+  || die "zip 파일명에서 3자 SemVer 를 얻지 못했습니다(파일명=$ZIP_BASE). EXE 유도 불가."
+
+EXE="${ALLOWED_EXE_PREFIX}${EXE_VER}.exe"
+EXE_SHA_FILE="${EXE}.sha256"
+[[ "$EXE" == "$ALLOWED_EXE_PREFIX"* ]] || die "EXE 경로 접두 위반: $EXE"   # 유도값 재확인(방어적)
+[[ -f "$EXE" ]] \
+  || die "설치 EXE 가 없습니다: $EXE — 게시 중단(fail-closed). zip 만 올리면 랜딩 다운로드가 404 가 된다."
+[[ -f "$EXE_SHA_FILE" ]] \
+  || die "EXE sha 파일이 없습니다: $EXE_SHA_FILE — 무결성 확인 불가로 게시 중단."
+
+EXE_SHA_EXPECT="$(tr -d ' \t\r\n' < "$EXE_SHA_FILE" | tr 'A-F' 'a-f')"
+EXE_SHA_ACTUAL="$(sha256sum "$EXE" | awk '{print tolower($1)}')"
+[[ "$EXE_SHA_EXPECT" =~ ^[0-9a-f]{64}$ ]] || die "EXE sha 파일 형식이 sha256 이 아닙니다: $EXE_SHA_FILE"
+[[ "$EXE_SHA_ACTUAL" == "$EXE_SHA_EXPECT" ]] \
+  || die "EXE 실측 sha ≠ 러너 계산 sha (전송 손상 의심). 실측=$EXE_SHA_ACTUAL 계산=$EXE_SHA_EXPECT"
+#   ⚠️ 한계 명시(정직): 이 대조는 '전송 손상'을 잡지, 훼손된 러너를 잡지 못한다(양쪽 다 러너발).
+#      그 역할은 위 B-4 독립 재조회가 한다. EXE 는 같은 게시 단위 안에 있어 그 통과에 함께 묶이므로
+#      EXE 단독 위조 경로는 열리지 않는다.
+ok "설치 EXE 동반 확인: $EXE ($(stat -c%s "$EXE" 2>/dev/null || echo '?') bytes, sha 일치)"
+export HITPAN_INSTALLER_EXE="$EXE"   # publish-update.sh 가 packages/ 에 함께 배치한다
 
 # ── B-4 독립 재조회 (급소) — fail-closed 구조 (검증팀 SoD 봉합 2026-07-24) ─────────
 #   ★ 검증팀 CRITICAL/HIGH 반증 반영: 이전 구조는 "메타가 있으면 검사, 없으면 통과"라
@@ -153,5 +189,6 @@ fi
 
 # ── 게시 호출 — 좁힌 2인자만. 오버라이드 절대 안 붙임(B-2 짝) ────────────────────
 [[ -x "$PUBLISH" || -f "$PUBLISH" ]] || die "게시 스크립트가 없습니다: $PUBLISH"
-log "게시 호출: $PUBLISH --zip $ZIP --manifest $MANIFEST"
+log "게시 호출: $PUBLISH --zip $ZIP --manifest $MANIFEST (EXE 동반=$HITPAN_INSTALLER_EXE)"
+# EXE 는 인자가 아니라 export 된 HITPAN_INSTALLER_EXE 로 넘긴다 — 인자 2개 계약 불변(B-2).
 exec bash "$PUBLISH" --zip "$ZIP" --manifest "$MANIFEST"

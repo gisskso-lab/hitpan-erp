@@ -83,7 +83,9 @@ jobs:
   build:
     name: Build update package (재빌드 · SSOT)
     runs-on: windows-latest
-    timeout-minutes: 30
+    # 20260730작3: 기존 zip 만 만들 땐 4분이면 됐으나, 설치 EXE 동반(번들 5종 다운로드 수백MB +
+    #   Inno Setup 설치 + ISCC 컴파일)이 붙어 실측 기준 약 11~15분으로 늘어난다. 여유 포함 45분.
+    timeout-minutes: 45
     steps:
       # ── 20260723작2 I-2 (검사2 구멍②): beta 실행 차단 가드 (fail-fast) ──
       #   beta 는 §3.3 인자분기가 배선돼 있으나, deploy 잡의 sudoers 화이트리스트는
@@ -241,11 +243,145 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "build-manifest 실패 (exit $LASTEXITCODE)" }
           Get-ChildItem $outDir | ForEach-Object { Write-Host "[update] 산출: $($_.Name)" }
 
+      # ── 설치 EXE 빌드 (20260730작3 ①안 — 랜딩 다운로드 404 봉합) ─────────────────
+      #   ■ 왜 여기서 같이 만드나 (급소)
+      #     랜딩 DownloadPage 는 manifest 버전으로 {packages}/HitPan-ERP-Setup-{V}.exe 를 만든다.
+      #     그런데 EXE 를 그 경로에 올리는 워크플로가 없어 1.2.29~1.2.41 전부 404 였다
+      #     — 랜딩 다운로드가 한 번도 작동한 적이 없다(2026-07-30 실측).
+      #     zip 만 게시하면 "자동업데이트는 되는데 신규 고객은 설치조차 못 하는" 상태가 유지된다.
+      #     ⇒ 같은 잡에서 같은 버전으로 만들어 한 단위로 게시한다(사장님 ①안 결재).
+      #   ■ payload 재사용: 위 publish 3종 + strip 이 이미 끝난 installer/payload 를 그대로 쓴다.
+      #     번들 5종(dotnet-hosting·mariadb.msi·vc_redist·cloudflared·hitpan_db.sql)만 추가로 받는다.
+      #   ⚠️ 코드 서명(Authenticode)은 여기서 안 한다 — build-installer.yml 과 동일하게 별건(결재 2).
+      - name: Download dependency bundle (for installer EXE)
+        shell: pwsh
+        run: |
+          & pwsh -File installer/download-bundle.ps1 -BundleDir installer/payload
+          if ($LASTEXITCODE -ne 0) { throw "번들 다운로드 실패 (exit $LASTEXITCODE)" }
+          Copy-Item installer/hitpan_db_clean.sql installer/payload/hitpan_db.sql -Force
+          # .iss 가 요구하는 8개 사전 확인 — 없으면 ISCC 가 모호한 오류를 내므로 여기서 명확히 세운다.
+          $required = @('dotnet-hosting.exe','mariadb.msi','vc_redist.x64.exe','cloudflared.exe','hitpan_db.sql','api','web','watchdog')
+          $missing = $required | Where-Object { -not (Test-Path "installer/payload/$_") }
+          if ($missing) { throw "payload 누락: $($missing -join ', ')" }
+
+      # ── EXE 전용 동봉물 시크릿 게이트 (검증팀 [3-V] D3 봉합 2026-07-30) ──────────────
+      #   ■ 왜 필요한가 (급소)
+      #     아래 "Scan update package for leaked secrets"(deploy 잡)는 **update zip 만** 스캔한다.
+      #     그런데 설치 EXE 는 zip 과 같은 payload 에 더해 hitpan_db.sql(DDL)·헬퍼 스크립트 4종
+      #     (AntivirusExceptions/FirewallRules/InstallWatchdog/web-server)을 **추가로** 담는다(.iss [Files]).
+      #     즉 EXE 전용 동봉물은 어떤 게이트도 안 거치고 고객 PC 로 간다 — 헌법 #22 방어선의 구멍.
+      #   ■ EXE 는 LZMA 압축이라 산출물을 열어볼 수 없다 → **컴파일 전에 소스 쪽을 스캔**한다.
+      - name: Scan installer-only payload for secrets (EXE 전용 동봉물)
+        shell: pwsh
+        run: |
+          $targets = @(
+            'installer/payload/hitpan_db.sql',
+            'installer/hitpan-start.bat',
+            'installer/web-server.ps1',
+            'installer/scripts/AntivirusExceptions.ps1',
+            'installer/scripts/FirewallRules.ps1',
+            'installer/scripts/InstallWatchdog.ps1'
+          )
+          # ■ 패턴 (검증팀 N2 봉합): 최초 4종은 DB/PEM 계열에 편중돼 API키·토큰을 0건 적발했다.
+          #   헬퍼 .ps1 은 성격상 토큰·webhook 이 들어갈 자리라 그쪽이 비어 있었다. 계열별로 확장한다.
+          $patterns = @(
+            # DB·커넥션 계열
+            'Password\s*=\s*["'']?[A-Za-z0-9!@#$%^&*]{6,}',
+            'Server=.*;.*(Pwd|Password)=',
+            'IDENTIFIED BY\s+["''][A-Za-z0-9!@#$%^&*]{6,}["'']',
+            '(?i)\b(DBPASS|DB_PASSWORD|MYSQL_PWD|ROOT_PASSWORD)\s*=\s*\S{6,}',
+            # 키·인증서 계열
+            'BEGIN (RSA |EC |OPENSSH |PGP )?PRIVATE KEY',
+            # API 키·토큰 계열 (N2 — 최초 게이트가 통째로 놓쳤다)
+            'sk-ant-[A-Za-z0-9_\-]{20,}',
+            'gh[pousr]_[A-Za-z0-9]{30,}',
+            'AKIA[0-9A-Z]{16}',
+            'eyJ[A-Za-z0-9_\-]{10,}\.[A-Za-z0-9_\-]{10,}\.',
+            '(?i)\b(api[_\-]?key|access[_\-]?token|secret[_\-]?key|bearer)\s*[:=]\s*["'']?[A-Za-z0-9_\-]{20,}',
+            'https://hooks\.slack\.com/\S+',
+            '(?i)xox[baprs]-[A-Za-z0-9\-]{10,}'
+          )
+          # ■ 제외 규칙 (검증팀 B3 봉합): 최초 구현은 '줄 단위' 제외라
+          #   `IDENTIFIED BY 'Hitpan2025!'; -- MariaRootPw` 처럼 같은 줄에 안전 토큰이 하나만 있어도
+          #   진짜 시크릿이 통째로 억제됐다. → **매치된 문자열 자체**가 플레이스홀더일 때만 제외한다.
+          $bad = @()
+          foreach ($t in $targets) {
+            if (-not (Test-Path $t)) { throw "EXE 동봉 대상 누락: $t — .iss 가 요구하는 파일이다." }
+            foreach ($p in $patterns) {
+              $hits = Select-String -Path $t -Pattern $p -AllMatches -ErrorAction SilentlyContinue
+              foreach ($h in $hits) {
+                foreach ($m in $h.Matches) {
+                  $v = $m.Value
+                  # 매치 안에 치환 자리표가 있으면 실값이 아니다(런타임 생성).
+                  if ($v -match '%[A-Za-z_]+%|\{#|\$env:|\$\(|ExpandConstant|GenerateAlphanumericKey|\{\d+\}|<[A-Za-z_]+>|CHANGEME|xxxx|\*\*\*') { continue }
+                  $bad += "$($h.Path):$($h.LineNumber): $($v.Trim())"
+                }
+              }
+            }
+          }
+          if ($bad.Count -gt 0) {
+            Write-Host "::error::설치 EXE 동봉물에 시크릿 의심 — 배포 중단:"
+            $bad | ForEach-Object { Write-Host "  $_" }
+            throw "EXE 동봉물 시크릿 게이트 실패"
+          }
+          Write-Host "[SecretGate/EXE] 동봉물 $($targets.Count)종 시크릿 미포함 확인"
+
+      # ⚠️ ISCC 는 러너에 기본 설치돼 있지 않다. 이 스텝이 없으면 아래 ISCC 호출이
+      #    "명령을 찾을 수 없음"으로 실패한다(build-installer.yml:156 과 동일 구성).
+      - name: Install Inno Setup 6
+        shell: pwsh
+        run: |
+          choco install innosetup -y --no-progress
+          if (-not (Test-Path 'C:\Program Files (x86)\Inno Setup 6\ISCC.exe')) {
+            throw "Inno Setup 설치 후에도 ISCC.exe 를 찾을 수 없습니다."
+          }
+          Write-Host "Inno Setup installed"
+
+      - name: Build installer EXE (ISCC)
+        shell: pwsh
+        run: |
+          $ver = '${{ inputs.version }}'
+          & 'C:\Program Files (x86)\Inno Setup 6\ISCC.exe' `
+            "/DAppVersion=$ver" `
+            "/DBundleDir=payload" `
+            "/DOutputDir=output" `
+            installer/HitPan-Universal.iss
+          if ($LASTEXITCODE -ne 0) { throw "Inno Setup compile failed (exit $LASTEXITCODE)" }
+
+      # 파일명 3자 정합 — 랜딩이 만드는 이름과 정확히 같아야 404 가 안 난다(N-1 정신).
+      #   ISCC 산출명이 규칙과 다르면 여기서 세운다. 게시 후에 발견하면 이미 고객이 404 를 본다.
+      - name: Verify installer EXE name + compute sha (fail-closed)
+        shell: pwsh
+        run: |
+          $ver = '${{ inputs.version }}'
+          $expect = "HitPan-ERP-Setup-$ver.exe"
+          $path = "installer/output/$expect"
+          if (-not (Test-Path $path)) {
+            Write-Host "[installer] output 내용:"
+            Get-ChildItem installer/output | ForEach-Object { Write-Host "  $($_.Name)" }
+            throw "설치 EXE 파일명이 기대와 다릅니다. 기대=$expect — 랜딩이 이 이름으로 링크를 만든다."
+          }
+          $size = (Get-Item $path).Length
+          if ($size -lt 50MB) { throw "설치 EXE 크기 비정상($size bytes) — 빌드 산출물 확인." }
+          $sha = (Get-FileHash $path -Algorithm SHA256).Hash.ToLower()
+          New-Item -ItemType Directory -Path dist/installer -Force | Out-Null
+          Copy-Item $path "dist/installer/$expect" -Force
+          # 래퍼가 NCP 에서 대조할 sha 동반 파일(전송 손상 검출).
+          [IO.File]::WriteAllText("dist/installer/$expect.sha256", $sha)
+          Write-Host "[installer] $expect ($size bytes) sha256=$sha"
+
       - name: Upload update artifact
         uses: actions/upload-artifact@v5
         with:
           name: update-pkg-${{ inputs.version }}
           path: dist/updates/
+          retention-days: 7
+
+      - name: Upload installer artifact
+        uses: actions/upload-artifact@v5
+        with:
+          name: installer-exe-${{ inputs.version }}
+          path: dist/installer/
           retention-days: 7
 
   # ── deploy 잡: 데이터만 /tmp → NCP 상주본 sudo 2인자 호출 ──
@@ -268,6 +404,13 @@ jobs:
         with:
           name: update-pkg-${{ inputs.version }}
           path: dist/updates/
+
+      # 설치 EXE 동반 (20260730작3 ①안) — zip 과 한 단위로 게시하기 위해 여기서도 받는다.
+      - name: Download installer artifact
+        uses: actions/download-artifact@v5
+        with:
+          name: installer-exe-${{ inputs.version }}
+          path: dist/installer/
 
       # ── B-8: deploy 잡 진입 시 version 재검증 (fail-closed) ──
       #   build 잡에서 검증했더라도 deploy 잡은 별도 실행 컨텍스트다. 여기서 다시 못박아
@@ -338,18 +481,35 @@ jobs:
       # 【데이터만 전송】 zip·unsigned manifest → NCP /tmp. 실행 스크립트(.sh) 절대 금지(B-1).
       #   게시함정3-①: manifest 목적지 파일명을 publish 가 받는 이름으로 rename.
       #   B-8: $VER 은 위에서 3자 SemVer 로 재검증됐으므로 파일명 보간이 안전하다.
-      - name: Rsync data only (zip + unsigned manifest)
+      - name: Rsync data only (zip + unsigned manifest + installer EXE)
         env:
           NCP_USER: ${{ secrets.NCP_USER }}
           NCP_HOST: ${{ secrets.NCP_HOST }}
           VER: ${{ inputs.version }}
         run: |
+          set -euo pipefail
           rsync -avz -e "ssh -i ~/.ssh/ncp_key" \
             "dist/updates/hitpan-$VER.zip" \
             "$NCP_USER@$NCP_HOST:/tmp/hitpan-$VER.zip"
           rsync -avz -e "ssh -i ~/.ssh/ncp_key" \
             dist/updates/manifest.json \
             "$NCP_USER@$NCP_HOST:/tmp/manifest-$VER-unsigned.json"
+
+          # ── 설치 EXE + sha 동반 전송 (20260730작3 ①안) ─────────────────────────
+          #   래퍼는 --zip/--manifest 2인자만 받는다(B-2 오버라이드 차단 유지). EXE 는 인자로 안 넘기고
+          #   래퍼가 zip 파일명의 버전에서 /tmp/HitPan-ERP-Setup-<VER>.exe 를 '유도'해 찾는다.
+          #   ⇒ 여기 파일명이 그 규칙과 다르면 래퍼가 fail-closed 로 게시를 세운다.
+          #   -z(압축) 제거: EXE 는 이미 압축된 260MB 라 재압축이 CPU 만 먹고 이득이 없다.
+          EXE="HitPan-ERP-Setup-$VER.exe"
+          [ -f "dist/installer/$EXE" ] || { echo "::error::설치 EXE 없음: dist/installer/$EXE"; exit 1; }
+          [ -f "dist/installer/$EXE.sha256" ] || { echo "::error::EXE sha 파일 없음"; exit 1; }
+          rsync -av --progress -e "ssh -i ~/.ssh/ncp_key" \
+            "dist/installer/$EXE" \
+            "$NCP_USER@$NCP_HOST:/tmp/$EXE"
+          rsync -av -e "ssh -i ~/.ssh/ncp_key" \
+            "dist/installer/$EXE.sha256" \
+            "$NCP_USER@$NCP_HOST:/tmp/$EXE.sha256"
+          echo "[rsync] 설치 EXE 전송 완료: /tmp/$EXE ($(stat -c%s "dist/installer/$EXE") bytes)"
 
       # 【래퍼 호출 — B-1·B-2·B-4】 SSH 페이로드 = publish-run.sh 단일 호출, 2인자만.
       #   ★ 기존: publish-update.sh 직접 호출 → NCP 가 러너발 값 그대로 신뢰(B-4 관통결함).

@@ -219,6 +219,66 @@ else
   ok "zip 배치 완료: $TARGET_ZIP"
 fi
 
+# ── 3-b) 설치 EXE 배치 (20260730작3 ①안 — 랜딩 다운로드 404 봉합) ────────────────
+#   ■ 왜 여기인가
+#     랜딩 DownloadPage 는 manifest 버전으로 {packages}/HitPan-ERP-Setup-{V}.exe 를 만든다.
+#     그런데 EXE 를 그 경로에 올리는 일이 어떤 워크플로에도 없었다 →
+#     1.2.29~1.2.41 전 버전이 404. 랜딩 다운로드가 한 번도 작동한 적이 없다(2026-07-30 실측).
+#     zip 과 '같은 게시 단위'로 묶어야 다음 릴리스에서 또 빠지지 않는다(사장님 ①안).
+#
+#   ■ 경로는 인자가 아니라 publish-run.sh 가 export 한 HITPAN_INSTALLER_EXE 로 받는다.
+#     래퍼의 --zip/--manifest 2인자 계약을 깨지 않기 위해서다(B-2 오버라이드 차단 유지).
+#     단독 실행(사장님 수동)일 때는 이 변수가 없을 수 있으므로 그 경우만 건너뛴다.
+#   ■ 🔴 미지정 시 '조용한 skip' 금지 (검증팀 [3-V] D2 BLOCKER 봉합 2026-07-30)
+#     최초 구현은 변수 미설정 시 warn 만 찍고 넘어갔다. PM 가정 = "래퍼 경유면 항상 설정된다".
+#     **그 가정이 틀렸다.** emergency-recovery.sh:132 가 래퍼를 우회해 이 스크립트를 직접 부른다
+#     (비상경로 = GitHub 미가용 전제). 그 경로에서 manifest 는 새 버전으로 교체되는데 EXE 는 빠져
+#     → **랜딩이 없는 EXE 링크를 만든다 = 오늘 봉합하려는 그 404 가 비상경로에 그대로 재현**된다.
+#     게다가 비상 상황이라 아무도 즉시 알아채지 못한다.
+#     ⇒ 미지정이면 게시를 **중단**한다. EXE 없이 manifest 만 올리는 경로를 남기지 않는다.
+#     ⇒ EXE 없이 manifest 만 갱신해야 하는 정당한 사유가 있으면 HITPAN_ALLOW_NO_INSTALLER=1 을
+#       명시해야 한다(의도를 손으로 적게 만든다 — 사고는 '기본값'에서 난다).
+INSTALLER_EXE="${HITPAN_INSTALLER_EXE:-}"
+if [[ -z "$INSTALLER_EXE" && "${HITPAN_ALLOW_NO_INSTALLER:-0}" != "1" ]]; then
+  die "설치 EXE 가 지정되지 않았습니다(HITPAN_INSTALLER_EXE 미설정) — 게시 중단.
+  zip 만 올리면 랜딩 다운로드가 404 가 된다(2026-07-30 P0 재현).
+  · 정상 경로: publish-run.sh 래퍼가 자동 설정한다.
+  · 비상 경로(emergency-recovery.sh): EXE 경로를 export 하고 부를 것.
+  · manifest 만 갱신이 정말 의도라면: HITPAN_ALLOW_NO_INSTALLER=1 을 명시할 것."
+fi
+
+if [[ -n "$INSTALLER_EXE" ]]; then
+  [[ -f "$INSTALLER_EXE" ]] || die "설치 EXE 가 없습니다: $INSTALLER_EXE"
+  EXE_BASENAME="$(basename "$INSTALLER_EXE")"
+  # 파일명 규칙 고정 — 랜딩이 만드는 이름과 정확히 같아야 404 가 안 난다.
+  EXPECT_EXE_NAME="HitPan-ERP-Setup-$VERSION.exe"
+  [[ "$EXE_BASENAME" == "$EXPECT_EXE_NAME" ]] \
+    || die "EXE 파일명이 manifest 버전과 어긋납니다: $EXE_BASENAME (기대=$EXPECT_EXE_NAME). 랜딩이 404 를 받게 된다."
+
+  TARGET_EXE="$PACKAGES_DIR/$EXE_BASENAME"
+  EXE_SHA_NEW="$(sha256sum "$INSTALLER_EXE" | awk '{print tolower($1)}')"
+  if [[ -f "$TARGET_EXE" ]]; then
+    EXE_SHA_OLD="$(sha256sum "$TARGET_EXE" | awk '{print tolower($1)}')"
+    if [[ "$EXE_SHA_OLD" == "$EXE_SHA_NEW" ]]; then
+      log "EXE 가 이미 배치돼 있고 sha256 동일 — 재복사 생략."
+    else
+      die "packages 에 같은 이름의 다른 EXE 가 있습니다($TARGET_EXE, sha 불일치). 손으로 확인 후 진행하세요."
+    fi
+  else
+    # 원자 배치: 임시명으로 복사 후 mv — 260MB 복사 도중 고객이 반쪽 파일을 받는 것 차단.
+    TMP_EXE="$PACKAGES_DIR/.${EXE_BASENAME}.tmp.$$"
+    cp -f "$INSTALLER_EXE" "$TMP_EXE" || die "EXE 복사 실패: $INSTALLER_EXE"
+    mv -f "$TMP_EXE" "$TARGET_EXE"    || die "EXE 원자 교체 실패: $TARGET_EXE"
+    ok "설치 EXE 배치 완료: $TARGET_EXE ($(stat -c%s "$TARGET_EXE") bytes)"
+  fi
+  chmod 0644 "$TARGET_EXE" 2>/dev/null || true
+else
+  # 여기 오는 유일한 경우 = HITPAN_ALLOW_NO_INSTALLER=1 을 사람이 명시했을 때.
+  warn "⚠️ EXE 배치를 의도적으로 건너뜁니다(HITPAN_ALLOW_NO_INSTALLER=1)."
+  warn "   → 랜딩 다운로드(HitPan-ERP-Setup-$VERSION.exe)는 404 가 된다. 신규 고객 설치 불가."
+  warn "   → manifest 만 갱신되므로 '기존 설치 고객의 자동업데이트'만 동작한다."
+fi
+
 # ── 4) 서명 + signature·kid 자동 삽입 (B-1 단일 출처) ────────────────────────────
 log "서명 중(kid=$KID) — 규격 문자열은 sign-manifest.sh 함수가 만든다(B-1)"
 SIGNATURE="$(hitpan_sign_payload "$PRIVATE" "$VERSION" "$CHANNEL" "$URL" "$SHA_EXPECT" "$SIZE" "$MIGRATION")" \
@@ -332,9 +392,29 @@ if [[ "$SELF_ZIP_SHA" != "$SELF_SHA_LC" ]]; then
 fi
 rm -f "$SELF" "$SELF_ZIP"
 
+# 설치 EXE 도 실제로 받아지는가 (20260730작3 — 랜딩 다운로드 404 재발 차단)
+#   zip 200 만 확인하고 끝냈던 것이 이번 P0 의 구조적 원인이다.
+#   랜딩이 고객에게 주는 링크가 바로 이 URL 이므로, 여기서 200 이 아니면 게시를 성공이라 할 수 없다.
+#   ⚠️ EXE 는 260MB 라 zip 처럼 전량 받아 sha 대조하지 않는다(게시 시간·디스크 낭비).
+#      배치 직전 이미 sha 를 대조했고(3-b), 여기서는 '고객이 받을 수 있는가'만 본다.
+if [[ -n "${INSTALLER_EXE:-}" ]]; then
+  SELF_EXE_URL="${SELF_URL%/*}/HitPan-ERP-Setup-$VERSION.exe"
+  SELF_EXE_CODE="$(curl -fsS -o /dev/null -w '%{http_code}' -r 0-0 \
+                     -H 'Cache-Control: no-cache' -H 'Pragma: no-cache' \
+                     "${SELF_EXE_URL}?_=${RELEASED_AT_SAFE}${RANDOM}" 2>/dev/null || echo 000)"
+  case "$SELF_EXE_CODE" in
+    200|206)
+      ok "설치 EXE 도달 확인: $SELF_EXE_URL (HTTP $SELF_EXE_CODE)" ;;
+    *)
+      warn "설치 EXE 가 서빙되지 않습니다: $SELF_EXE_URL (HTTP $SELF_EXE_CODE) — 랜딩 다운로드가 404 가 된다."
+      rollback ;;
+  esac
+fi
+
 # ── 성공 ─────────────────────────────────────────────────────────────────────
 ok  "배포 완료 — updates.hitpan.kr 이 이제 $VERSION 을 가리킵니다."
 log "  manifest : $LIVE_MANIFEST (서명 유효, 공개키 검증 통과)"
 log "  package  : $TARGET_ZIP (sha256 일치, 200 접근 가능)"
+[[ -n "${INSTALLER_EXE:-}" ]] && log "  installer: $PACKAGES_DIR/HitPan-ERP-Setup-$VERSION.exe (랜딩 다운로드 대상, 200 확인)"
 [[ -n "${BAK:-}" ]] && log "  backup   : $BAK"
 log "워치독이 다음 점검 주기에 이 버전을 감지합니다(고객 손 0)."

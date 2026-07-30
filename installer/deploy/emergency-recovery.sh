@@ -128,6 +128,53 @@ print(crypt.crypt(os.environ["ENTERED"], os.environ["STORED"]))
     #     RC 포착·소진·실패로그가 전부 스킵된다. → set +e 로 감싸 rc 를 반드시 포착한다.
     log "비상 게시 실행(서명·버전방어 유지)..."
     [[ -f "$PUBLISH_FALLBACK" ]] || die "게시 스크립트 없음: $PUBLISH_FALLBACK"
+
+    # ── 설치 EXE 동반 (20260730작3 ①안 · 검증팀 [3-V] D2 BLOCKER 봉합) ──────────────
+    #   ★ 왜 여기도 필요한가: 이 경로는 wrapper 를 우회하므로 wrapper 가 하던 EXE 세팅이 없다.
+    #     그대로 두면 manifest 만 새 버전으로 올라가고 EXE 는 빠져 → 랜딩이 없는 링크를 만든다
+    #     (= 2026-07-30 P0 404 가 비상경로에 그대로 재현). 비상 상황이라 아무도 즉시 못 알아챈다.
+    #   ★ wrapper 와 동일 규칙으로 zip 파일명에서 버전을 유도한다(인자 추가 없음).
+    #   ★ EXE 가 없으면? — 비상경로는 "지금 당장 올려야 하는" 상황이므로 게시를 막지 않는다.
+    #     대신 HITPAN_ALLOW_NO_INSTALLER=1 을 여기서 명시해 publish-update.sh 의 fail-closed 를
+    #     '의도된 예외'로 통과시키고, 화면·감사로그에 남긴다(침묵 금지, 헌법 #15·#24).
+    #   ★ 접두 검사 승계 (검증팀 N1): 래퍼(publish-run.sh:61)는 zip 이 /tmp/hitpan- 로 시작하는지
+    #     본다. 그 검사를 여기서 빠뜨리면 래퍼가 거부하는 /root/hitpan-1.2.42.zip 같은 경로를
+    #     비상경로만 통과시킨다 — 두 경로의 규칙이 갈라진다. 유도 문자열뿐 아니라 게이트도 같아야 한다.
+    [[ "$ZIP" == /tmp/hitpan-* ]] \
+      || die "zip 경로가 허용 접두(/tmp/hitpan-)로 시작하지 않습니다: $ZIP (래퍼와 동일 규칙)"
+
+    _ezb="$(basename "$ZIP")"; _ever="${_ezb#hitpan-}"; _ever="${_ever%.zip}"
+    [[ "$_ever" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] \
+      || die "zip 파일명에서 3자 SemVer 를 얻지 못했습니다(파일명=$_ezb)."
+
+    if [[ -f "/tmp/HitPan-ERP-Setup-$_ever.exe" ]]; then
+      export HITPAN_INSTALLER_EXE="/tmp/HitPan-ERP-Setup-$_ever.exe"
+      log "설치 EXE 동반: $HITPAN_INSTALLER_EXE"
+    else
+      #   ★ 자동 예외 부여 금지 (검증팀 N1 HIGH): 종전 구현은 EXE 가 없으면 스크립트가 알아서
+      #     HITPAN_ALLOW_NO_INSTALLER=1 을 켰다. 그건 '사람이 명시'가 아니라 기본값이다 —
+      #     publish-update.sh 에서 없앤 '조용한 skip' 구조를 여기서 되살린 셈이었다.
+      #     비상 상황이라 게시를 막지는 않되, **사람이 손으로 확인**하게 만든다.
+      warn "설치 EXE(/tmp/HitPan-ERP-Setup-$_ever.exe) 가 없습니다."
+      warn "  → manifest 만 게시하면 기존 고객 자동업데이트는 동작하나,"
+      warn "     **랜딩 신규 다운로드가 404** 가 된다(신규 고객 설치 불가)."
+      warn "  → 비상 복구 후 반드시 정규 경로로 EXE 를 게시할 것."
+      if [[ "${HITPAN_ALLOW_NO_INSTALLER:-0}" == "1" ]]; then
+        log "HITPAN_ALLOW_NO_INSTALLER=1 이 이미 지정됨 — EXE 없이 진행한다."
+      else
+        #   :93 의 복구코드 입력과 동일 방식(표준입력). 이 스크립트는 사람이 앉아 쓰는 전제다.
+        #   비대화식 실행이면 read 가 실패 → 빈 값 → die (fail-closed). 무인 자동화가 몰래 통과 못 한다.
+        read -r -p "[emergency] EXE 없이 manifest 만 게시하시겠습니까? (yes 입력 시에만 진행): " _noexe_ans || _noexe_ans=""
+        [[ "$_noexe_ans" == "yes" ]] \
+          || die "중단했습니다. EXE 를 /tmp/HitPan-ERP-Setup-$_ever.exe 로 올린 뒤 다시 실행하거나, 의도라면 HITPAN_ALLOW_NO_INSTALLER=1 을 명시하십시오."
+        export HITPAN_ALLOW_NO_INSTALLER=1
+      fi
+      #   ★ N3: 이 printf 가 else 블록 마지막 명령이라, AUDIT_LOG 쓰기 실패 시 set -e 로
+      #     비상 스크립트가 게시 직전에 즉사한다(AUDIT_LOG 는 chattr +a 대상). || true 로 닫는다.
+      printf '%s\tUSE-NO-INSTALLER\tby=%s\tver=%s\n' \
+        "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" "${SUDO_USER:-root}" "$_ever" >> "$AUDIT_LOG" || true
+    fi
+
     set +e
     bash "$PUBLISH_FALLBACK" --zip "$ZIP" --manifest "$MANIFEST"
     RC=$?
