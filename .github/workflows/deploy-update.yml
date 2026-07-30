@@ -617,3 +617,74 @@ jobs:
             exit 1
           fi
           echo "[VerifyGate] $FEED_ENV 피드 최신화 확인 — $VER"
+
+      # ── /tmp 스테이징 정리 (20260730작9 P0-B · 사장님 지시 "후속조치 즉시해") ──────
+      #   ■ 왜 필요한가 — 이 스텝이 없어서 2026-07-30 NCP 가 사망했다
+      #     위 rsync 는 zip·EXE·manifest 를 /tmp 에 올린다. publish-run.sh 가 그것을
+      #     packages/ 로 배치한 뒤에도 **/tmp 사본이 그대로 남았다.**
+      #     실측 채증(2026-07-30 18:30):
+      #       /tmp 1.6G = EXE 4개(1.2.42~45) + ZIP 4개  ← 전부 packages/ 와 중복인 순수 잔재
+      #       → 디스크 9.8G 가 100% (여유 0) → MySQL 기동 불가(mysql.service failed)
+      #       → 랜딩 가입이 500 (LandingSignupController.Signup:69 · DB 연결 실패)
+      #     즉 **게시 파이프라인이 자기 DB 를 죽였다.** 게시 1회당 /tmp 에만 357MB 누적.
+      #   ■ 왜 여기인가
+      #     서빙 검증(위 스텝) 통과 후. 검증 전에 지우면 실패 시 원인 분석 자료가 사라진다.
+      #   ■ 왜 와일드카드를 쓰지 않나
+      #     `rm -f /tmp/hitpan-*.zip` 은 동시 실행 중인 다른 게시의 중간산물을 지울 수 있다.
+      #     **이번 런의 버전만 명시 삭제**한다(멱등 · 남의 파일 무해).
+      #   ■ 보안 불변식 정합 (PRD §5)
+      #     #2 실행 스크립트 rsync 0 → 인라인 rm 뿐, 스크립트 전송 0
+      #     #3 sudo = 래퍼 1개      → **sudo 미사용**. hitpan-deployer 자기 소유 파일만 지운다
+      #                              (신규 sudoers 항목 불필요 = 사장님 sudo 세션 불필요)
+      #     #4 CI 는 /tmp 스테이징만 → /tmp 만 만진다. packages/ 는 건드리지 않는다
+      #                              (packages/ 는 www-data 소유라 애초에 권한도 없다)
+      #     #7 인프라 미접촉        → 파일 삭제뿐. 서비스·DNS·방화벽 0
+      #   ■ always() 인 이유
+      #     검증 실패로 롤백된 경우에도 /tmp 사본은 롤백에 쓰이지 않으므로 지운다.
+      #     packages/ 롤백은 publish-update.sh 가 이미 수행했다.
+      #     ⚠️ 게시 실패 원인을 /tmp 파일로 파헤쳐야 할 때는 이 스텝을 일시 비활성화할 것.
+      #   ■ 남은 구멍 (정직하게 — 이 스텝만으로 재발이 막히지 않는다)
+      #     packages/ 누적(게시 1회당 372MB)은 여기서 못 막는다. www-data 소유 + sudo 화이트리스트
+      #     밖이라 CI 권한으로는 삭제 불가다. 그건 작9 P0-A(publish-update.sh 패키지 회전 —
+      #     NCP 상주본 수정이라 헌법 #29 로 사장님 결재)에서 봉합한다.
+      #     ⇒ 이 스텝은 누적의 **약 절반(357/729MB)** 을 막는다. 나머지 절반은 P0-A 가 막는다.
+      - name: Clean /tmp staging artifacts (작9 P0-B)
+        if: always()
+        env:
+          NCP_USER: ${{ secrets.NCP_USER }}
+          NCP_HOST: ${{ secrets.NCP_HOST }}
+          VER: ${{ inputs.version }}
+        run: |
+          ssh -i ~/.ssh/ncp_key "$NCP_USER@$NCP_HOST" \
+            "rm -f /tmp/hitpan-$VER.zip \
+                   /tmp/manifest-$VER-unsigned.json \
+                   /tmp/HitPan-ERP-Setup-$VER.exe \
+                   /tmp/HitPan-ERP-Setup-$VER.exe.sha256 || true; \
+             echo \"[cleanup] /tmp 스테이징 삭제 완료(버전 $VER)\"; \
+             echo '[cleanup] 디스크 현황:'; df -h / | tail -1; \
+             echo '[cleanup] /tmp 잔여 게시물:'; \
+             ls -la /tmp/hitpan-*.zip /tmp/HitPan-ERP-Setup-*.exe 2>/dev/null || echo '  (없음 — 정상)'"
+
+      # ── 디스크 여유 경보 (20260730작9 P1-C 러너측 · 사장님 보고용) ─────────────────
+      #   P1-C 의 정식 게이트는 publish-update.sh 시작부(게시 전 차단)에 들어간다 —
+      #   그건 NCP 상주본이라 사장님 결재 대상이다(작9 §4-3).
+      #   여기서는 **게시 후 현황을 로그로 남겨** 사장님이 다음 게시 전에 판단할 수 있게 한다.
+      #   게시 1회 소요 ≈ 730MB(ZIP 102 + EXE 270 + /tmp 사본 357) 기준으로 남은 횟수를 계산한다.
+      - name: Report disk headroom (작9 P1-C 경보)
+        if: always()
+        env:
+          NCP_USER: ${{ secrets.NCP_USER }}
+          NCP_HOST: ${{ secrets.NCP_HOST }}
+        run: |
+          AVAIL_MB=$(ssh -i ~/.ssh/ncp_key "$NCP_USER@$NCP_HOST" "df -Pm / | awk 'NR==2{print \$4}'")
+          echo "NCP 루트 여유: ${AVAIL_MB}MB"
+          # 730MB/회 기준 잔여 게시 횟수(정수 나눗셈)
+          LEFT=$(( AVAIL_MB / 730 ))
+          echo "게시 1회 ≈ 730MB → 남은 게시 여유: 약 ${LEFT}회"
+          if [ "$AVAIL_MB" -lt 1200 ]; then
+            echo "::error::디스크 여유 ${AVAIL_MB}MB — 다음 게시가 실패하거나 DB 를 죽일 수 있다(2026-07-30 실측 사고). packages/ 구버전 회수 필요(작9 P0-A)."
+          elif [ "$AVAIL_MB" -lt 2500 ]; then
+            echo "::warning::디스크 여유 ${AVAIL_MB}MB — 게시 2~3회분뿐. 작9 P0-A(패키지 회전) 적용을 권고한다."
+          else
+            echo "[DiskGate] 여유 충분 — ${AVAIL_MB}MB"
+          fi
