@@ -41,3 +41,5 @@ detectors:
       - BEGIN RSA PRIVATE KEY
     regex:
       key: '-----BEGIN (OPENSSH|RSA) PRIVATE KEY-----'
+
+# 20260731 검증팀 P0-1: 이 제외 규칙이 실제로 매칭되는지 실측하기 위한 무해 변경.
