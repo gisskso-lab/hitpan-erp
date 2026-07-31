@@ -1897,7 +1897,18 @@ begin
     //         → EXITCODE=0(실제 sc 는 1060), 파일엔 timeout 카운트다운만
     //   즉 침묵을 **거짓 성공**으로 바꿨다(침묵보다 나쁘다 — 10번째 오답의 재료).
     //   ⇒ 명령을 개별 호출로 분해한다. timeout 은 Pascal Sleep 으로 대체(로그도 깨끗해진다).
-    ScStopCode := ExecLogged('6-1-scstop', 'sc stop cloudflared');
+    // ★ 봉합 20260731v2 (검증팀 P0-1 반려): 서비스 존재 판정을 sc stop 이 아니라 sc query 로 한다.
+    //   1차 봉합은 `ScStopCode = 1060` 으로 판정했는데 **실측 반증됐다**:
+    //     cmd /C "sc stop NoSuchSvcXyz > f 2>&1"  → **종료코드 36** (1060 아님)
+    //     1060 은 종료코드가 아니라 **출력 본문의 메시지 텍스트**였다.
+    //   ⇒ = 1060 은 절대 참이 될 수 없어 taskkill 이 종전과 100% 동일하게 실행됐다.
+    //     설계서 §2 에서 스스로 경계한 "봉합한 척" 을 1차 봉합이 그대로 저질렀다.
+    //   실측표(이 PC 3회 반복 동일):
+    //     sc query  없음=36 / 있음=0    ← 판정에 쓴다(0 이 명확)
+    //     sc stop   없음=36 / 권한부족=5
+    //     taskkill  대상없음=128
+    ScStopCode := ExecLogged('6-1-svcprobe', 'sc query cloudflared');
+    ExecLogged('6-1-scstop', 'sc stop cloudflared');
     Sleep(3000);
     ExecLogged('6-1-scdelete', 'sc delete cloudflared');
     Sleep(2000);
@@ -1931,12 +1942,16 @@ begin
     //     검증 없이 도입하면 taskkill 미종료 상태로 6-2 가 cloudflared.exe 를 만지는 위험이 생긴다.
     //   ■ 건너뛰어도 침묵하지 않는다 (헌법 #15 · 작10 P1-3 정신)
     //     "관측성을 넣는다며 관측성을 파괴" 한 작10 의 실수를 반복하지 않는다. 분기마다 로그를 남긴다.
-    if ScStopCode = 1060 then
-      Log('[작10 P0-5][6-1-taskkill] 건너뜀 — sc stop=1060(서비스 미등록)이라 잔존 프로세스 없음. ' +
-          'Sandbox 무한 hang 원천 차단(20260731 봉합 · 7/21작1 축 B)')
+    //   ※ 판정은 `<> 0`(안전측)이다. `= 36` 이 아니라 `<> 0` 인 이유:
+    //     sc query 가 0 이 아닌 값은 전부 "서비스를 정상 조회하지 못했다"는 뜻이고,
+    //     그 경우 죽일 프로세스가 있다고 볼 근거가 없다. 36 만 특정하면 다른 실패코드에서
+    //     또 taskkill 이 돌아 hang 한다(검증팀 P0-1 교훈 — 코드값을 추측하지 않는다).
+    if ScStopCode <> 0 then
+      Log('[작10 P0-5][6-1-taskkill] 건너뜀 — sc query=' + IntToStr(ScStopCode) +
+          '(서비스 미등록/조회불가)라 잔존 프로세스 없음. Sandbox 무한 hang 원천 차단(20260731v2 · 7/21작1 축 B)')
     else
     begin
-      Log('[작10 P0-5][6-1-taskkill] 실행 — sc stop=' + IntToStr(ScStopCode) + '(서비스 존재) → 잔존 프로세스 정리 필요');
+      Log('[작10 P0-5][6-1-taskkill] 실행 — sc query=0(서비스 존재) → 잔존 프로세스 정리 필요');
       ExecLogged('6-1-taskkill', 'taskkill /F /IM cloudflared.exe');
     end;
     Sleep(2000);
@@ -2327,9 +2342,12 @@ begin
   //   taskkill /F /IM 은 Sandbox 에서 프로세스 이미지 열거가 막혀 무한 hang 한다(7/21 실측).
   //   여기는 제거(uninstall) 경로라 hang 하면 **설치 마법사가 안 닫힌다.**
   //   서비스가 없으면 프로세스도 없으므로 taskkill 자체를 건너뛴다.
+  //   ※ 판정은 `<> 0` (검증팀 P0-1 반려 반영). sc 의 종료코드는 1060 이 아니라 36 이다
+  //     (1060 은 출력 본문 메시지). 코드값을 추측하지 않고 "정상 조회(0)" 만 참으로 본다.
   Exec(ExpandConstant('{cmd}'), '/C sc query cloudflared', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
-  if ResultCode = 1060 then
-    Log('[제거] cloudflared 서비스 미등록(1060) — sc/taskkill 건너뜀(Sandbox hang 차단 · 20260731 봉합)')
+  if ResultCode <> 0 then
+    Log('[제거] cloudflared 서비스 미등록/조회불가(종료코드 ' + IntToStr(ResultCode) +
+        ') — sc/taskkill 건너뜀(Sandbox hang 차단 · 20260731v2 봉합)')
   else
   begin
     Exec(ExpandConstant('{cmd}'),
