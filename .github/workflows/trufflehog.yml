@@ -26,9 +26,22 @@ jobs:
         uses: trufflesecurity/trufflehog@main
         with:
           path: ./
-          # PR이면 base..HEAD, push면 before..after, 둘 다 없으면 전체 히스토리
-          base: ${{ github.event.repository.default_branch }}
-          head: HEAD
+          # ★ 봉합 20260731 (main 푸시 스캔 11건 전건 실패 — 7/21~7/31 성공 0):
+          #   종전 `base: {default_branch}`(=항상 'main') + `head: HEAD` 는
+          #   **main 에 푸시되는 순간 base == HEAD** 가 되어 액션이 스캔 전에 죽었다:
+          #     ##[error]BASE and HEAD commits are the same. TruffleHog won't scan anything.
+          #     ##[error]Process completed with exit code 1
+          #   즉 시크릿이 발견된 게 아니라 **스캔이 시작조차 못 했다.** 그런데 결과는 빨간 X 라
+          #   "늘 실패하는 체크"가 되어 아무도 안 보게 됐다 — 진짜 유출이 나도 못 알아본다.
+          #   종전 주석은 "push면 before..after"라 적혀 있었으나 코드는 그렇게 동작하지 않았다
+          #   (주석과 코드 불일치 — 아무도 반증하지 않았다).
+          #
+          #   ⇒ base·head 를 **비운다.** 액션 내부 스크립트가 이벤트별로 알아서 잡는다(로그 실측):
+          #       push         → BASE=$COMMIT_IDS 첫 커밋의 before / HEAD=after
+          #       pull_request → BASE=PR base / HEAD=PR head
+          #     값을 넣는 행위 자체가 그 자동 분기를 막고 있었다.
+          #   ※ fetch-depth: 0 을 유지해야 before 커밋이 로컬에 있어 diff 가 성립한다.
+          #
           # 축 6-2 (2026-05-14): --config 로 히트판 자체 시크릿 룰셋 로드 (헌법 #23 ③ 보강).
           # --only-verified는 custom 룰의 verified=false 결과를 누락시키므로 제거.
           # OSS detectors는 verified 우선, custom은 regex 매칭만으로도 알림.
