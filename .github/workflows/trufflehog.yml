@@ -6,6 +6,20 @@ name: TruffleHog Secret Scan
 on:
   push:
   pull_request:
+  # ★ 봉합 20260731 (검증팀 P1-3 — 보안상무 안철수 재검증 반려):
+  #   push·pull_request 는 **차등 스캔**(before..after)이라 "변경된 파일"만 읽는다.
+  #   그래서 이미 레포에 있는 진탐은 그 파일을 건드리는 커밋이 없는 한 **영원히 안 보인다.**
+  #   실측: installer/install.bat(고객 공통 DB 비번 4건)의 최종 수정은 09369f8(2026-04-28).
+  #        이후 3개월간 어떤 차등 스캔에도 잡히지 않았다.
+  #   ⇒ 설계서 §5 의 "덮지 않으니 빨간 X 로 계속 보인다"는 **틀린 예측**이었다.
+  #      진탐은 덮이지도 않았지만 **보이지도 않았다** — 이 프로젝트가 반복해 온 '죽은 장치' 구조
+  #      (7/24~7/31 main Ruleset 이 꺼진 채 방치된 것과 같다).
+  #   ⇒ schedule 은 액션 소스상 BASE=""/HEAD="" → **전체 히스토리 스캔**이다(로그 실측:
+  #      `elif [ "$EVENT" == "workflow_dispatch" ] || [ "$EVENT" == "schedule" ]; then BASE=""`).
+  #      주 1회 전수 스캔이 있어야 G-3(진탐 미제외)가 실질적으로 성립한다.
+  schedule:
+    - cron: '0 18 * * 0'  # 매주 월요일 03:00 KST (UTC 일 18:00) — 전체 히스토리 전수
+  workflow_dispatch:      # 필요 시 수동 전수 스캔
 
 permissions:
   contents: read
