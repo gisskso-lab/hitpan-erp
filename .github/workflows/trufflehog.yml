@@ -45,4 +45,15 @@ jobs:
           # 축 6-2 (2026-05-14): --config 로 히트판 자체 시크릿 룰셋 로드 (헌법 #23 ③ 보강).
           # --only-verified는 custom 룰의 verified=false 결과를 누락시키므로 제거.
           # OSS detectors는 verified 우선, custom은 regex 매칭만으로도 알림.
-          extra_args: --config=.github/trufflehog-config.yaml
+          #
+          # ★ 봉합 20260731: --exclude-paths 추가.
+          #   base/head 봉합으로 스캔이 실제로 돌기 시작하자 **오탐 3건**이 드러났다 —
+          #   룰셋 파일이 자기 자신의 탐지 패턴에 매칭되고, 작업지시서 2건이 "이 룰을 만들라"며
+          #   그 regex 를 본문에 인용했다(실측: 세 파일 모두 키 본문 0건).
+          #   제외 목록은 별도 파일로 둔다 — 무엇을 왜 뺐는지가 추적돼야 하기 때문이다.
+          #   ⚠️ 진탐(installer/install.bat 의 고객 공통 DB 비번)은 **제외하지 않았다.**
+          #      그래서 이 스캔은 계속 실패로 뜬다. 덮지 않는 것이 의도다
+          #      (docs/설계/보안/20260731_시크릿스캔_정상화_설계서.md §5).
+          extra_args: >-
+            --config=.github/trufflehog-config.yaml
+            --exclude-paths=.github/trufflehog-exclude-paths.txt
