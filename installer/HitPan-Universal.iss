@@ -1542,7 +1542,9 @@ begin
   end;
 
   // 5. DB 셋업 (사고 #18 봉합 — 회사별 DB·user·비번 영역 분리)
-  //    봉합: hardcoded 'hitpan/Hitpan2025!' 박혔는데, 사고 #18 정합 → 회사별 분리
+  //    봉합: 예전엔 전 고객 공통 고정 계정·비번을 그대로 적어두었는데, 사고 #18 정합 → 회사별 분리
+  //    (20260731 시크릿스캔 봉합: 이 주석에 남아 있던 옛 비번 문자열 자체를 제거.
+  //     실행 코드가 아니라 이력 설명이라 값은 필요 없다 — 값이 남아 있으면 유출 표면만 는다)
   //    G_DbName = hitpan_erp_{tenantCode}
   //    G_DbUser = hitpan_{tenantCode}
   //    G_DbPassword = 랜덤 32자 영문·숫자 (사고 #26 봉합 — Base64 +/= SQL escape 사고 차단)
