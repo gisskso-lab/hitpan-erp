@@ -1465,6 +1465,9 @@ var
   // 봉합 20260730작8 P0-1: cloudflared RUNNING 확인용(지역 변수 — 전역 오염 0).
   TunnelRunning: Boolean;
   TunnelTry: Integer;
+  // 봉합 20260731: 6-1 sc stop 종료코드 보관 — 1060(서비스 미등록)이면 taskkill 을 건너뛴다.
+  //   Sandbox 에서 taskkill /IM 이 무한 hang 하는 것이 7/30 회귀 진범이었다(7/21작1 축 B).
+  ScStopCode: Integer;
 begin
   // ★ 봉합 20260714작1 (W5): 파일 복사(ssInstall) 직전 = 기존 실행 프로세스 정지의 유일한 안전 시점.
   //   ssPostInstall(복사 후)에 하면 이미 잠금 사고가 끝난 뒤라 늦다.
@@ -1539,7 +1542,9 @@ begin
   end;
 
   // 5. DB 셋업 (사고 #18 봉합 — 회사별 DB·user·비번 영역 분리)
-  //    봉합: hardcoded 'hitpan/Hitpan2025!' 박혔는데, 사고 #18 정합 → 회사별 분리
+  //    봉합: 예전엔 전 고객 공통 고정 계정·비번을 그대로 적어두었는데, 사고 #18 정합 → 회사별 분리
+  //    (20260731 시크릿스캔 봉합: 이 주석에 남아 있던 옛 비번 문자열 자체를 제거.
+  //     실행 코드가 아니라 이력 설명이라 값은 필요 없다 — 값이 남아 있으면 유출 표면만 는다)
   //    G_DbName = hitpan_erp_{tenantCode}
   //    G_DbUser = hitpan_{tenantCode}
   //    G_DbPassword = 랜덤 32자 영문·숫자 (사고 #26 봉합 — Base64 +/= SQL escape 사고 차단)
@@ -1894,12 +1899,63 @@ begin
     //         → EXITCODE=0(실제 sc 는 1060), 파일엔 timeout 카운트다운만
     //   즉 침묵을 **거짓 성공**으로 바꿨다(침묵보다 나쁘다 — 10번째 오답의 재료).
     //   ⇒ 명령을 개별 호출로 분해한다. timeout 은 Pascal Sleep 으로 대체(로그도 깨끗해진다).
+    // ★ 봉합 20260731v2 (검증팀 P0-1 반려): 서비스 존재 판정을 sc stop 이 아니라 sc query 로 한다.
+    //   1차 봉합은 `ScStopCode = 1060` 으로 판정했는데 **실측 반증됐다**:
+    //     cmd /C "sc stop NoSuchSvcXyz > f 2>&1"  → **종료코드 36** (1060 아님)
+    //     1060 은 종료코드가 아니라 **출력 본문의 메시지 텍스트**였다.
+    //   ⇒ = 1060 은 절대 참이 될 수 없어 taskkill 이 종전과 100% 동일하게 실행됐다.
+    //     설계서 §2 에서 스스로 경계한 "봉합한 척" 을 1차 봉합이 그대로 저질렀다.
+    //   실측표(이 PC 3회 반복 동일):
+    //     sc query  없음=36 / 있음=0    ← 판정에 쓴다(0 이 명확)
+    //     sc stop   없음=36 / 권한부족=5
+    //     taskkill  대상없음=128
+    ScStopCode := ExecLogged('6-1-svcprobe', 'sc query cloudflared');
     ExecLogged('6-1-scstop', 'sc stop cloudflared');
     Sleep(3000);
     ExecLogged('6-1-scdelete', 'sc delete cloudflared');
     Sleep(2000);
     // 좀비 프로세스 영역 제거 (taskkill 영역 — 서비스 영역 안 박혔어도 프로세스 영역 살아있을 가능)
-    ExecLogged('6-1-taskkill', 'taskkill /F /IM cloudflared.exe');
+    //
+    // ★ 봉합 20260731 (7/30 회귀 진범 — 7/21작1 축 B 미이행분의 잔여 이행):
+    //   ■ 진범
+    //     `taskkill /F /IM` 은 **Windows Sandbox 에서 무한 대기**한다. 7/21 실측 채증:
+    //       taskkill 1828 @23:58:11 → 25분 hang / 죽이면 taskkill 6644 가 또 hang
+    //     원인은 /IM 의 **프로세스 이미지 열거**가 Sandbox 제약 계층에서 응답을 못 받는 것이다
+    //     (같은 실측에서 Get-CimInstance Win32_Process 도 '액세스 거부').
+    //     Exec(..., ewWaitUntilTerminated) 라 반환이 없으면 **설치 전체가 영영 멈춘다.**
+    //   ■ 왜 7/30 에 재발했나 — 봉합이 3곳 중 1곳만 됐다
+    //     :1450-1452(StopRunningComponentsForReinstall) 만 IsPreviouslyInstalled() 로 가드했고
+    //     이 자리(6-1)와 DeinitializeSetup 은 무가드로 남았다. 7/21 커밋 f06615b 메시지가
+    //     "축 B 는 다음 작지서 P1 로 분리" 라 스스로 갭을 적어뒀고, 그것이 오늘까지 미이행이었다.
+    //     작10(b793664)이 ExecLogged 로 감싸기만 했을 뿐 hang 방어는 0건이었다.
+    //   ■ 로그 침묵이 이 지점을 지목한다
+    //     7/30 설치 로그 마지막 = '[FixupWatchdog] 정정 완료'(:1797). 그 다음 Log() 는
+    //     6-1-2 분기(:1917)까지 없다. 그 사이 실행 요소는 registry.json PS·6-1 sc체인·이 taskkill 뿐.
+    //   ■ 왜 IsPreviouslyInstalled() 가드를 쓰지 않았나 (PM 반증 — 그대로 썼으면 봉합한 척만 됐다)
+    //     그 함수는 {app}\db.conf 존재로 판정하는데, db.conf 는 :1747 에서 **이미 생성된다.**
+    //     즉 백지 신규설치인데도 6단계 시점엔 항상 true 라 가드가 무력이다.
+    //   ■ 채택한 봉합 — 실행 조건 축소
+    //     백지 신규설치에는 죽일 cloudflared 프로세스가 **존재하지 않는다.**
+    //     바로 위 sc stop 이 1060(서비스 없음)을 냈다는 것은 서비스도 프로세스도 없다는 확증이다.
+    //     ⇒ 그때는 taskkill 을 아예 실행하지 않는다. hang 원천 차단.
+    //     ⇒ 재설치 경로(서비스 존재)에서는 종전대로 실행한다 — 좀비 정리 기능 무손실.
+    //   ■ ewNoWait 는 쓰지 않았다 (작10 교훈 — 선례 없는 기법을 '검증된 패턴'이라 부르지 않는다)
+    //     이 파일의 ewNoWait 선례 3건은 전부 ShellExec(브라우저 열기)이고 **Exec 에는 0건**이다.
+    //     검증 없이 도입하면 taskkill 미종료 상태로 6-2 가 cloudflared.exe 를 만지는 위험이 생긴다.
+    //   ■ 건너뛰어도 침묵하지 않는다 (헌법 #15 · 작10 P1-3 정신)
+    //     "관측성을 넣는다며 관측성을 파괴" 한 작10 의 실수를 반복하지 않는다. 분기마다 로그를 남긴다.
+    //   ※ 판정은 `<> 0`(안전측)이다. `= 36` 이 아니라 `<> 0` 인 이유:
+    //     sc query 가 0 이 아닌 값은 전부 "서비스를 정상 조회하지 못했다"는 뜻이고,
+    //     그 경우 죽일 프로세스가 있다고 볼 근거가 없다. 36 만 특정하면 다른 실패코드에서
+    //     또 taskkill 이 돌아 hang 한다(검증팀 P0-1 교훈 — 코드값을 추측하지 않는다).
+    if ScStopCode <> 0 then
+      Log('[작10 P0-5][6-1-taskkill] 건너뜀 — sc query=' + IntToStr(ScStopCode) +
+          '(서비스 미등록/조회불가)라 잔존 프로세스 없음. Sandbox 무한 hang 원천 차단(20260731v2 · 7/21작1 축 B)')
+    else
+    begin
+      Log('[작10 P0-5][6-1-taskkill] 실행 — sc query=0(서비스 존재) → 잔존 프로세스 정리 필요');
+      ExecLogged('6-1-taskkill', 'taskkill /F /IM cloudflared.exe');
+    end;
     Sleep(2000);
 
     // 6-1-2. 좀비 영역 재검사 영역 — 박혀있으면 sc delete 영역 한 번 더
@@ -2284,12 +2340,26 @@ begin
 
   // 비정상 영역 종료 영역 — 부분 영역 정리 영역 가도
   // cloudflared 영역 좀비 영역 제거 (사고 #11 정합 영역)
-  Exec(ExpandConstant('{cmd}'),
-       '/C sc stop cloudflared & timeout /t 2 /nobreak & sc delete cloudflared',
-       '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
-  Exec(ExpandConstant('{cmd}'),
-       '/C taskkill /F /IM cloudflared.exe',
-       '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+  // ★ 봉합 20260731: sc query 로 서비스 존재를 먼저 판정한다(6-1 과 동일 원칙).
+  //   taskkill /F /IM 은 Sandbox 에서 프로세스 이미지 열거가 막혀 무한 hang 한다(7/21 실측).
+  //   여기는 제거(uninstall) 경로라 hang 하면 **설치 마법사가 안 닫힌다.**
+  //   서비스가 없으면 프로세스도 없으므로 taskkill 자체를 건너뛴다.
+  //   ※ 판정은 `<> 0` (검증팀 P0-1 반려 반영). sc 의 종료코드는 1060 이 아니라 36 이다
+  //     (1060 은 출력 본문 메시지). 코드값을 추측하지 않고 "정상 조회(0)" 만 참으로 본다.
+  Exec(ExpandConstant('{cmd}'), '/C sc query cloudflared', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+  if ResultCode <> 0 then
+    Log('[제거] cloudflared 서비스 미등록/조회불가(종료코드 ' + IntToStr(ResultCode) +
+        ') — sc/taskkill 건너뜀(Sandbox hang 차단 · 20260731v2 봉합)')
+  else
+  begin
+    Exec(ExpandConstant('{cmd}'),
+         '/C sc stop cloudflared & timeout /t 2 /nobreak & sc delete cloudflared',
+         '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+    Exec(ExpandConstant('{cmd}'),
+         '/C taskkill /F /IM cloudflared.exe',
+         '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+    Log('[제거] cloudflared 서비스 정리 완료(종료코드 ' + IntToStr(ResultCode) + ')');
+  end;
 
   // schtasks 영역 부분 영역 박힌 영역 제거 (모든 슬롯 영역)
   //   봉합 2026-06-25 (C): keepalive 작업(1~5)도 함께 제거 — 잔존 시 삭제된 ONSTART 작업을
