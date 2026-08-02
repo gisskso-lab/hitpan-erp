@@ -106,10 +106,12 @@ else
                         <MudButton Size="Size.Small" Variant="Variant.Outlined" Color="Color.Info"
                                    OnClick="@(() => ResendLicenseAsync(context))">시리얼 메일 재발송</MudButton>
                     }
-                    else
-                    {
-                        <MudText Typo="Typo.caption" Color="Color.Secondary">처리 완료</MudText>
-                    }
+                    @* 삭제는 상태와 무관하게 항상 — 사장님 직권 결재 2026-08-02.
+                       "승인건이든 반려건이든 백오피스에서 마스터로 삭제가 가능해야지."
+                       종전엔 반려건에 버튼이 없어(처리 완료 글자만) 화면에서 치울 방법이 아예 없었다. *@
+                    <MudButton Size="Size.Small" Variant="Variant.Text" Color="Color.Default"
+                               StartIcon="@Icons.Material.Filled.DeleteOutline"
+                               OnClick="@(() => DeleteAsync(context))">삭제</MudButton>
                 </MudTd>
             </RowTemplate>
         </MudTable>
@@ -226,6 +228,54 @@ else
         {
             Snackbar.Add($"반려 실패: {ex.Message}", Severity.Error);
         }
+    }
+
+    // 삭제 — 사장님 직권 결재 2026-08-02.
+    //   *"승인건이든 반려건이든 백오피스에서 마스터로 삭제가 가능해야지,
+    //     안그러면 가입·승인절차중 오류가 나서 백오피스에서만 떠있어,
+    //     히트판 가입설치를 막는 데이터가 있다면 안되겠지"*
+    //   종전엔 반려건에 버튼이 하나도 없어(else 분기 "처리 완료" 글자만) 화면에서 치울 방법이 없었다.
+    private async Task DeleteAsync(SignupRow row)
+    {
+        var ok = await ConfirmDialog.ShowAsync(Dialog,
+            "가입 신청 삭제",
+            $"'{row.CompanyName}' 신청을 목록에서 지웁니다. " +
+            "아직 승인되지 않은 고객사 정보가 함께 정리되어, 같은 ERP 주소로 다시 가입할 수 있게 됩니다. " +
+            "이미 사용 중인 고객사는 지워지지 않습니다.",
+            confirmText: "삭제", cancelText: "취소", severity: Severity.Error);
+        if (!ok) return;
+
+        try
+        {
+            var http = HttpFactory.CreateClient("backoffice-authed");
+            var resp = await http.DeleteAsync($"api/admin/signups/{row.SignupId}");
+            if (resp.IsSuccessStatusCode)
+            {
+                // 서버가 무엇을 함께 정리했는지 그대로 보여준다 — 조용히 처리하면 무엇이 풀렸는지 알 수 없다.
+                var body = await resp.Content.ReadFromJsonAsync<DeleteResult>();
+                Snackbar.Add(string.IsNullOrWhiteSpace(body?.Message) ? "삭제했습니다." : body!.Message!,
+                             Severity.Success);
+                await LoadAsync();
+            }
+            else
+            {
+                // 동명 회사 2건 이상이면 서버가 409 로 막는다(잘못 지울 위험). 그 사유를 그대로 노출한다.
+                var err = await resp.Content.ReadAsStringAsync();
+                Snackbar.Add($"삭제 실패: {err}", Severity.Error);
+            }
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"삭제 실패: {ex.Message}", Severity.Error);
+        }
+    }
+
+    private sealed class DeleteResult
+    {
+        public bool Success { get; set; }
+        public string? Message { get; set; }
+        public string? RemovedTenantCode { get; set; }
+        public string? FreedDomainAlias { get; set; }
     }
 
     private static Color StatusColor(string s) => s switch

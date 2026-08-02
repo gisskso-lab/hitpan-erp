@@ -19,15 +19,32 @@ namespace HitPan.Backoffice.API.Controllers;
 //   #18·#22 — 메타·해시만 저장, 평문 0건
 //   #20 — 가입 → 승인 → ERP 저장 끊김 0
 //   #35 — 랜딩 가입 → 백오피스 승인 → ERP 저장 유기적 연결
+// 🔴 P0 봉합 (2026-08-02, 보안 매니저 1 적발 — 2026-06-11 P0 봉합 누락분):
+//   종전엔 `[Authorize]` 단독이었다. 이건 "유효한 JWT면 누구나"라는 뜻이고,
+//   백오피스 JWT 는 대리점에게도 발급된다(BackofficeAuthController.cs:115 account_type=reseller_admin).
+//   ⇒ 대리점 계정으로 POST /api/admin/signups/{id}/approve 가 통과했다.
+//      남의 가입 승인 + 시리얼 발급 + 평문 시리얼 응답(:217 licenseKey) 탈취가 가능한 상태였다.
+//
+//   2026-06-11 "본사 마스터 계정만" P0 봉합 때 PricingAdmin·PromotionsAdmin 에는 Policy 가 붙었는데
+//   이 컨트롤러만 빠졌다. 백오피스 admin 컨트롤러 중 유일하게 인가가 0이었다.
+//
+//   왜 [BoPermission] 이 아니라 Policy 인가 (선택 근거):
+//     installer/backoffice/90_seed_permissions.sql 에 `signups.*` 권한 키가 0건이다.
+//     [BoPermission("signups.*")] 를 붙이면 DB 에 행이 없어 사장님 본인도 403 으로 튕긴다
+//     (2026-06-19 실제 사고 — 테이블만 있고 행이 없어 전원 403).
+//     Policy 는 JWT 클레임 기반이라 DB 어휘 불일치(platform_admins.role enum ↔ allowed_roles 문자열)를
+//     타지 않는다. 지금 필요한 건 "대리점 차단"이고 Policy 로 100% 달성된다.
+//     세분 권한(signups.delete 등)은 시드 추가와 함께 별건으로 간다.
 [ApiController]
 [Route("api/admin/signups")]
-[Authorize]
+[Authorize(Policy = "PlatformAdmin")]  // 본사 마스터 계정만 (2026-08-02 P0 봉합 — 대리점 JWT 차단)
 public class SignupsAdminController : ControllerBase
 {
     private readonly IConfiguration _config;
     private readonly IWebhookOutboundService _webhook;
     private readonly IEmailSender _email;
     private readonly ICloudflareDomainService _cfDomain;
+    private readonly IHttpClientFactory _httpFactory;   // 2026-08-02 P0: manifest 조회용
     private readonly ILogger<SignupsAdminController> _logger;
 
     public SignupsAdminController(
@@ -35,12 +52,14 @@ public class SignupsAdminController : ControllerBase
         IWebhookOutboundService webhook,
         IEmailSender email,
         ICloudflareDomainService cfDomain,
+        IHttpClientFactory httpFactory,
         ILogger<SignupsAdminController> logger)
     {
         _config = config;
         _webhook = webhook;
         _email = email;
         _cfDomain = cfDomain;
+        _httpFactory = httpFactory;
         _logger = logger;
     }
 
@@ -74,7 +93,11 @@ public class SignupsAdminController : ControllerBase
                     ORDER BY t2.created_at ASC
                     LIMIT 1
                 )
-                WHERE (@Status IS NULL OR @Status = '' OR s.status = @Status)
+                -- 삭제 처리분은 화면에서 뺀다 (2026-08-02 사장님 직권 결재).
+                --   논리삭제라 행은 남지만(결제·정산 추적 고리 보존) 목록에는 보이지 않는다.
+                --   이 한 줄이 빠지면 지웠는데 그대로 보이는 상태가 된다.
+                WHERE s.status <> 'deleted'
+                  AND (@Status IS NULL OR @Status = '' OR s.status = @Status)
                 ORDER BY s.submitted_at DESC
                 LIMIT 200",
                 new { Status = status });
@@ -196,7 +219,7 @@ public class SignupsAdminController : ControllerBase
                 //   예외를 그대로 올리면 운영자 화면엔 "승인 실패"(500)로 보여 재시도 → 중복 승인 위험이 생긴다.
                 //   기존 SendAsync 실패 경로와 동일하게 emailSent=false 로 떨어뜨려 "화면에서 직접 전달"로 안내한다.
                 //   (2026-07-16, 작1 W4-0 — 검증팀 재검증 Q7 적발)
-                var release = TryResolveReleaseInfo(signupId);
+                var release = await TryResolveReleaseInfoAsync(signupId, ct);
                 if (release is not null)
                 {
                     var htmlBody = BuildLicenseKeyEmailBody(
@@ -286,7 +309,7 @@ public class SignupsAdminController : ControllerBase
                 //   예외를 그대로 올리면 운영자 화면엔 "승인 실패"(500)로 보여 재시도 → 중복 승인 위험이 생긴다.
                 //   기존 SendAsync 실패 경로와 동일하게 emailSent=false 로 떨어뜨려 "화면에서 직접 전달"로 안내한다.
                 //   (2026-07-16, 작1 W4-0 — 검증팀 재검증 Q7 적발)
-                var release = TryResolveReleaseInfo(signupId);
+                var release = await TryResolveReleaseInfoAsync(signupId, ct);
                 if (release is not null)
                 {
                     var htmlBody = BuildLicenseKeyEmailBody(
@@ -334,6 +357,183 @@ public class SignupsAdminController : ControllerBase
         {
             _logger.LogError(ex, "[SignupsAdmin] reject 처리 실패 id={Id}", signupId);
             return StatusCode(500, new { success = false, message = "반려 처리 실패" });
+        }
+    }
+
+    /// <summary>
+    /// 가입 신청 삭제 — 사장님 직권 결재 2026-08-02.
+    ///
+    /// 사장님 오더: *"승인건이든 반려건이든 백오피스에서 마스터로 삭제가 가능해야지,
+    ///   안그러면 가입·승인절차중 오류가 나서 백오피스에서만 떠있어,
+    ///   히트판 가입설치를 막는 데이터가 있다면 안되겠지"*
+    ///
+    /// 종전엔 삭제 수단이 아예 없었다. Reject 는 status 를 'rejected' 로 바꿀 뿐이고
+    /// 목록(:77)은 전체를 보여주므로 반려건이 화면에 영원히 남았다. 게다가 Reject 는
+    /// landing_signups 만 건드려 tenants 의 pending 행이 그대로 살아남는다.
+    /// 그 고아 행이 domain_alias 를 점유해(DomainAliasService:79 — 여기는 상태를 안 본다)
+    /// 같은 ERP 주소로 재가입이 막힌다. 사장님이 말한 "가입·설치를 막는 데이터"가 이것이다.
+    ///
+    /// 설계 판단:
+    ///   · landing_signups = 논리삭제(status='deleted').
+    ///     tenant_payments.signup_token · promotion_usages.signup_token 이 FK 없이 이 행을 참조하고,
+    ///     ResellerSettlementCalculator 가 이 행을 조인해 대리점 수수료를 계산한다(정산 근거).
+    ///     물리삭제하면 결제·정산 추적 고리가 끊긴다. 화면에서 사라지는 결과는 동일하다.
+    ///   · tenants = 물리삭제, 단 status='pending' 인 것만.
+    ///     이게 실제로 가입을 막는 잔재다. active/suspended 는 실고객이므로 절대 손대지 않는다.
+    ///   · 선행 조건: tenant_code 채번을 COUNT(*)+1 → MAX+1 로 이미 고쳤다
+    ///     (LandingSignupController). 안 고치고 지우면 번호가 되돌아가 다음 가입이 죽는다.
+    ///   · DNS 는 이 API 가 건드리지 않는다 — 헌법 #29(인프라 조작 사전 승인제).
+    ///     응답에 도메인 별칭을 실어 보내 화면이 안내하게 한다.
+    ///   · 감사추적: bo_audit_log 에 삭제 전 원본을 통째로 남긴다. 실패하면 삭제도 하지 않는다.
+    /// </summary>
+    [HttpDelete("{signupId:long}")]
+    public async Task<IActionResult> Delete(long signupId, CancellationToken ct)
+    {
+        try
+        {
+            await using var db = await OpenAsync(ct);
+
+            var signup = await db.QueryFirstOrDefaultAsync<dynamic>(
+                @"SELECT signup_id, signup_token, company_name, email, phone, plan_type,
+                         desired_domain, reseller_code, status, submitted_at
+                  FROM landing_signups WHERE signup_id = @Id",
+                new { Id = signupId });
+
+            if (signup is null)
+                return NotFound(new { success = false, message = "가입 신청을 찾을 수 없습니다." });
+
+            string status = signup.status;
+            if (status == "deleted")
+                return BadRequest(new { success = false, message = "이미 삭제된 신청입니다." });
+
+            string companyName = signup.company_name;
+            DateTime submittedAt = signup.submitted_at;
+
+            // 대응 tenant 조회 — approve 와 동일한 매칭 규칙(회사명 + 신청시각 근접).
+            //   사고 #5(동명 회사) 재발 차단: 2건 이상이면 지우지 않고 사람에게 돌린다.
+            var tenants = (await db.QueryAsync<dynamic>(@"
+                SELECT CAST(tenant_id AS CHAR) AS tenant_id, tenant_code, domain_alias, status
+                FROM tenants
+                WHERE company_name = @CompanyName
+                ORDER BY ABS(TIMESTAMPDIFF(SECOND, created_at, @SubmittedAt))
+                LIMIT 2",
+                new { CompanyName = companyName, SubmittedAt = submittedAt })).ToList();
+
+            string? removedTenantCode = null;
+            string? freedAlias = null;
+            string tenantNote;
+
+            if (tenants.Count == 0)
+            {
+                tenantNote = "대응 고객사 없음 — 신청서만 정리했습니다.";
+            }
+            else if (tenants.Count > 1)
+            {
+                // fail-closed. 동명 회사가 둘이면 어느 쪽이 이 신청 건인지 기계가 단정할 수 없다.
+                return Conflict(new
+                {
+                    success = false,
+                    message = $"'{companyName}' 이름의 고객사가 2건 이상입니다. " +
+                              "잘못 지울 위험이 있어 중단했습니다. 고객사 관리 화면에서 직접 확인해 주십시오."
+                });
+            }
+            else
+            {
+                string tStatus = tenants[0].status;
+                string tCode = tenants[0].tenant_code;
+                string? tAlias = tenants[0].domain_alias;
+                string tId = tenants[0].tenant_id;
+
+                if (tStatus == "pending")
+                {
+                    // 이것이 가입을 막던 잔재. 지운다.
+                    await db.ExecuteAsync("DELETE FROM tenant_domains WHERE tenant_id = @Tid", new { Tid = tId });
+                    await db.ExecuteAsync("DELETE FROM webhook_outbox  WHERE tenant_id = @Tid", new { Tid = tId });
+                    await db.ExecuteAsync("DELETE FROM tenants         WHERE tenant_id = @Tid AND status = 'pending'",
+                        new { Tid = tId });
+                    removedTenantCode = tCode;
+                    freedAlias = tAlias;
+                    tenantNote = string.IsNullOrWhiteSpace(tAlias)
+                        ? $"미승인 고객사({tCode})를 함께 정리했습니다."
+                        : $"미승인 고객사({tCode})를 함께 정리했습니다. 이제 '{tAlias}' 주소를 다시 쓸 수 있습니다.";
+                }
+                else
+                {
+                    // 실고객이다. 신청서만 화면에서 치우고 회사는 건드리지 않는다.
+                    tenantNote = $"고객사({tCode})는 '{tStatus}' 상태라 유지했습니다 — 신청서만 정리했습니다. " +
+                                 "고객사를 지우려면 고객사 관리 화면에서 진행하십시오.";
+                }
+            }
+
+            // 감사추적 먼저. 남지 않으면 지우지 않는다(증거 없이 사라지는 삭제 금지).
+            var detail = System.Text.Json.JsonSerializer.Serialize(new
+            {
+                signup_id = signupId,
+                signup_token = (string?)signup.signup_token,
+                company_name = companyName,
+                email = (string?)signup.email,
+                phone = (string?)signup.phone,
+                plan_type = (string?)signup.plan_type,
+                desired_domain = (string?)signup.desired_domain,
+                reseller_code = (string?)signup.reseller_code,
+                status_before = status,
+                submitted_at = submittedAt,
+                removed_tenant_code = removedTenantCode,
+                freed_domain_alias = freedAlias
+            });
+
+            // bo_audit_log 는 actor_email·actor_role 이 NOT NULL 이고 actor_user_id 는 char(36) 이다
+            //   (00_backoffice_core.sql:281-297). 스키마를 실제로 확인하고 맞췄다 — 헌법 #13.
+            //   값이 없어도 INSERT 가 죽으면 안 되므로 빈 문자열이 아니라 'unknown' 으로 채운다.
+            var actorId = User?.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value
+                          ?? User?.FindFirst("sub")?.Value
+                          ?? "unknown";
+            var actorEmail = User?.FindFirst(System.Security.Claims.ClaimTypes.Email)?.Value
+                             ?? User?.FindFirst("email")?.Value
+                             ?? User?.Identity?.Name
+                             ?? "unknown";
+            var actorRole = User?.FindFirst("account_type")?.Value
+                            ?? User?.FindFirst(System.Security.Claims.ClaimTypes.Role)?.Value
+                            ?? "unknown";
+            if (actorId.Length > 36) actorId = actorId[..36];
+
+            await db.ExecuteAsync(@"
+                INSERT INTO bo_audit_log
+                  (actor_user_id, actor_email, actor_role, action, target_type, target_id, detail_json, ip_address, created_at)
+                VALUES
+                  (@ActorId, @ActorEmail, @ActorRole, 'signup.delete', 'landing_signup', @Target, @Detail, @Ip, UTC_TIMESTAMP())",
+                new
+                {
+                    ActorId = actorId,
+                    ActorEmail = actorEmail,
+                    ActorRole = actorRole,
+                    Target = signupId.ToString(),
+                    Detail = detail,
+                    Ip = HttpContext?.Connection?.RemoteIpAddress?.ToString()
+                });
+            var actor = actorEmail;
+
+            await db.ExecuteAsync(
+                "UPDATE landing_signups SET status = 'deleted' WHERE signup_id = @Id",
+                new { Id = signupId });
+
+            _logger.LogInformation(
+                "[SignupsAdmin] signup deleted id={Id} company={Company} statusBefore={Before} " +
+                "tenantRemoved={Tenant} aliasFreed={Alias} actor={Actor}",
+                signupId, companyName, status, removedTenantCode ?? "-", freedAlias ?? "-", actor);
+
+            return Ok(new
+            {
+                success = true,
+                message = "삭제했습니다. " + tenantNote,
+                removedTenantCode,
+                freedDomainAlias = freedAlias
+            });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "[SignupsAdmin] 삭제 실패 id={Id}", signupId);
+            return StatusCode(500, new { success = false, message = "삭제 처리에 실패했습니다." });
         }
     }
 
@@ -387,19 +587,67 @@ public class SignupsAdminController : ControllerBase
     ///   기존 SendAsync 실패 경로와 동일하게 emailSent=false 로 떨어져 "화면에서 직접 전달" 안내가 나간다.
     ///   대신 LogError 로 흔적을 남긴다(침묵 금지, 헌법 #15).
     /// </summary>
-    private ReleaseInfo? TryResolveReleaseInfo(long signupId)
+    /// 🔴 P0 봉합 (2026-08-02 — 대리점 "설치가 안 됐다" 진범):
+    ///   위 주석이 예언한 사고가 그대로 재발했다. 코드에서 설정으로 옮겼을 뿐,
+    ///   **여전히 손으로 적는 값**이라 실배포와 갈라지는 구조가 남아 있었다.
+    ///
+    ///   실측 (2026-08-02):
+    ///     appsettings Release:InstallerVersion = 1.2.33
+    ///     https://updates.hitpan.kr/packages/HitPan-ERP-Setup-1.2.33.exe → **404**
+    ///     실제 존재 = 1.2.45 · 1.2.46 만 200
+    ///   ⇒ 승인 메일의 다운로드 단추가 404. 고객은 설치를 시작조차 못 한다.
+    ///
+    ///   왜 파일이 사라졌나: scripts/ncp-patch-작9-P0A-패키지회전.sh:68 (KEEP=2).
+    ///     7/29 디스크 100% 봉합이 EXE 를 최신 2개만 남기고 지웠는데,
+    ///     그 스크립트는 "메일이 어느 버전을 가리키는지" 모른다. 한 봉합이 다른 곳을 부순 전형.
+    ///
+    ///   봉합: 랜딩과 같은 축으로 통일한다. 랜딩은 이미 2026-07-21 사장님 결재
+    ///   (*"랜딩은 무조건 최신 설치파일"*, DownloadPage.razor:126)로 manifest 단일 진실원을 읽는다.
+    ///   메일만 그 봉합에서 빠져 있었다. manifest 는 게시와 동시에 갱신되므로
+    ///   **사람이 값을 옮겨 적는 단계가 사라져** 같은 사고가 구조적으로 불가능해진다.
+    ///
+    ///   폴백 순서: manifest → 설정값 → null(메일 미발송). 틀린 버전을 조용히 안내하느니 안 보낸다.
+    private async Task<ReleaseInfo?> TryResolveReleaseInfoAsync(long signupId, CancellationToken ct)
     {
-        var version = _config["Release:InstallerVersion"];
+        var baseUrl = (_config["Release:DownloadBaseUrl"] ?? "https://updates.hitpan.kr/packages").TrimEnd('/');
+        var manifestUrl = _config["Release:ManifestUrl"] ?? "https://updates.hitpan.kr/manifest.json";
+
+        // 1) manifest = 단일 진실원 (게시와 동시에 갱신되므로 실배포와 갈릴 수 없다)
+        string? version = null;
+        try
+        {
+            var http = _httpFactory.CreateClient();
+            http.Timeout = TimeSpan.FromSeconds(5);
+            using var doc = System.Text.Json.JsonDocument.Parse(
+                await http.GetStringAsync(manifestUrl, ct));
+            if (doc.RootElement.TryGetProperty("version", out var v))
+            {
+                var ver = v.GetString();
+                if (!string.IsNullOrWhiteSpace(ver))
+                    version = ver.Trim();
+            }
+        }
+        catch (Exception ex)
+        {
+            // 헌법 #15 침묵 금지. 조회 실패는 흔적을 남기고 설정값으로 폴백한다.
+            _logger.LogWarning(ex,
+                "[SignupsAdmin] manifest({Url}) 조회 실패 — 설정값(Release:InstallerVersion)으로 폴백. signupId={Id}",
+                manifestUrl, signupId);
+        }
+
+        // 2) 폴백 — manifest 실패 시에만 설정값
+        if (string.IsNullOrWhiteSpace(version))
+            version = _config["Release:InstallerVersion"];
+
         if (string.IsNullOrWhiteSpace(version))
         {
             _logger.LogError(
-                "[SignupsAdmin] Release:InstallerVersion 미설정 — 안내 메일을 만들지 못했습니다(승인 자체는 완료). " +
-                "signupId={Id}. 환경변수 BACKOFFICE_Release__InstallerVersion 또는 appsettings 를 확인하세요. " +
+                "[SignupsAdmin] 안내 버전을 결정하지 못했습니다 — manifest 조회 실패 + Release:InstallerVersion 미설정. " +
+                "안내 메일을 만들지 못했습니다(승인 자체는 완료). signupId={Id}. " +
                 "그동안 고객에게는 화면에서 직접 시리얼과 설치 파일을 전달해야 합니다.", signupId);
             return null;
         }
 
-        var baseUrl = (_config["Release:DownloadBaseUrl"] ?? "https://updates.hitpan.kr/packages").TrimEnd('/');
         return new ReleaseInfo(version, $"{baseUrl}/HitPan-ERP-Setup-{version}.exe");
     }
 
