@@ -83,8 +83,10 @@ public class DomainAliasService : IDomainAliasService
                 SuggestAlternatives(normalized));
 
         var signupHit = await db.ExecuteScalarAsync<int>(
+            // 'deleted' 추가 (2026-08-02): 삭제 처리한 신청이 ERP 주소를 계속 점유하면
+            //   지운 의미가 없다. 반려와 같은 취급 — 그 주소는 다시 쓸 수 있어야 한다.
             @"SELECT COUNT(*) FROM landing_signups
-              WHERE desired_domain = @A AND status NOT IN ('rejected')",
+              WHERE desired_domain = @A AND status NOT IN ('rejected', 'deleted')",
             new { A = normalized });
         if (signupHit > 0)
             return new(false, "pending",

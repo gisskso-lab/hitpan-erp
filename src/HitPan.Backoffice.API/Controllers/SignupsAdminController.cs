@@ -93,7 +93,11 @@ public class SignupsAdminController : ControllerBase
                     ORDER BY t2.created_at ASC
                     LIMIT 1
                 )
-                WHERE (@Status IS NULL OR @Status = '' OR s.status = @Status)
+                -- 삭제 처리분은 화면에서 뺀다 (2026-08-02 사장님 직권 결재).
+                --   논리삭제라 행은 남지만(결제·정산 추적 고리 보존) 목록에는 보이지 않는다.
+                --   이 한 줄이 빠지면 지웠는데 그대로 보이는 상태가 된다.
+                WHERE s.status <> 'deleted'
+                  AND (@Status IS NULL OR @Status = '' OR s.status = @Status)
                 ORDER BY s.submitted_at DESC
                 LIMIT 200",
                 new { Status = status });
@@ -353,6 +357,183 @@ public class SignupsAdminController : ControllerBase
         {
             _logger.LogError(ex, "[SignupsAdmin] reject 처리 실패 id={Id}", signupId);
             return StatusCode(500, new { success = false, message = "반려 처리 실패" });
+        }
+    }
+
+    /// <summary>
+    /// 가입 신청 삭제 — 사장님 직권 결재 2026-08-02.
+    ///
+    /// 사장님 오더: *"승인건이든 반려건이든 백오피스에서 마스터로 삭제가 가능해야지,
+    ///   안그러면 가입·승인절차중 오류가 나서 백오피스에서만 떠있어,
+    ///   히트판 가입설치를 막는 데이터가 있다면 안되겠지"*
+    ///
+    /// 종전엔 삭제 수단이 아예 없었다. Reject 는 status 를 'rejected' 로 바꿀 뿐이고
+    /// 목록(:77)은 전체를 보여주므로 반려건이 화면에 영원히 남았다. 게다가 Reject 는
+    /// landing_signups 만 건드려 tenants 의 pending 행이 그대로 살아남는다.
+    /// 그 고아 행이 domain_alias 를 점유해(DomainAliasService:79 — 여기는 상태를 안 본다)
+    /// 같은 ERP 주소로 재가입이 막힌다. 사장님이 말한 "가입·설치를 막는 데이터"가 이것이다.
+    ///
+    /// 설계 판단:
+    ///   · landing_signups = 논리삭제(status='deleted').
+    ///     tenant_payments.signup_token · promotion_usages.signup_token 이 FK 없이 이 행을 참조하고,
+    ///     ResellerSettlementCalculator 가 이 행을 조인해 대리점 수수료를 계산한다(정산 근거).
+    ///     물리삭제하면 결제·정산 추적 고리가 끊긴다. 화면에서 사라지는 결과는 동일하다.
+    ///   · tenants = 물리삭제, 단 status='pending' 인 것만.
+    ///     이게 실제로 가입을 막는 잔재다. active/suspended 는 실고객이므로 절대 손대지 않는다.
+    ///   · 선행 조건: tenant_code 채번을 COUNT(*)+1 → MAX+1 로 이미 고쳤다
+    ///     (LandingSignupController). 안 고치고 지우면 번호가 되돌아가 다음 가입이 죽는다.
+    ///   · DNS 는 이 API 가 건드리지 않는다 — 헌법 #29(인프라 조작 사전 승인제).
+    ///     응답에 도메인 별칭을 실어 보내 화면이 안내하게 한다.
+    ///   · 감사추적: bo_audit_log 에 삭제 전 원본을 통째로 남긴다. 실패하면 삭제도 하지 않는다.
+    /// </summary>
+    [HttpDelete("{signupId:long}")]
+    public async Task<IActionResult> Delete(long signupId, CancellationToken ct)
+    {
+        try
+        {
+            await using var db = await OpenAsync(ct);
+
+            var signup = await db.QueryFirstOrDefaultAsync<dynamic>(
+                @"SELECT signup_id, signup_token, company_name, email, phone, plan_type,
+                         desired_domain, reseller_code, status, submitted_at
+                  FROM landing_signups WHERE signup_id = @Id",
+                new { Id = signupId });
+
+            if (signup is null)
+                return NotFound(new { success = false, message = "가입 신청을 찾을 수 없습니다." });
+
+            string status = signup.status;
+            if (status == "deleted")
+                return BadRequest(new { success = false, message = "이미 삭제된 신청입니다." });
+
+            string companyName = signup.company_name;
+            DateTime submittedAt = signup.submitted_at;
+
+            // 대응 tenant 조회 — approve 와 동일한 매칭 규칙(회사명 + 신청시각 근접).
+            //   사고 #5(동명 회사) 재발 차단: 2건 이상이면 지우지 않고 사람에게 돌린다.
+            var tenants = (await db.QueryAsync<dynamic>(@"
+                SELECT CAST(tenant_id AS CHAR) AS tenant_id, tenant_code, domain_alias, status
+                FROM tenants
+                WHERE company_name = @CompanyName
+                ORDER BY ABS(TIMESTAMPDIFF(SECOND, created_at, @SubmittedAt))
+                LIMIT 2",
+                new { CompanyName = companyName, SubmittedAt = submittedAt })).ToList();
+
+            string? removedTenantCode = null;
+            string? freedAlias = null;
+            string tenantNote;
+
+            if (tenants.Count == 0)
+            {
+                tenantNote = "대응 고객사 없음 — 신청서만 정리했습니다.";
+            }
+            else if (tenants.Count > 1)
+            {
+                // fail-closed. 동명 회사가 둘이면 어느 쪽이 이 신청 건인지 기계가 단정할 수 없다.
+                return Conflict(new
+                {
+                    success = false,
+                    message = $"'{companyName}' 이름의 고객사가 2건 이상입니다. " +
+                              "잘못 지울 위험이 있어 중단했습니다. 고객사 관리 화면에서 직접 확인해 주십시오."
+                });
+            }
+            else
+            {
+                string tStatus = tenants[0].status;
+                string tCode = tenants[0].tenant_code;
+                string? tAlias = tenants[0].domain_alias;
+                string tId = tenants[0].tenant_id;
+
+                if (tStatus == "pending")
+                {
+                    // 이것이 가입을 막던 잔재. 지운다.
+                    await db.ExecuteAsync("DELETE FROM tenant_domains WHERE tenant_id = @Tid", new { Tid = tId });
+                    await db.ExecuteAsync("DELETE FROM webhook_outbox  WHERE tenant_id = @Tid", new { Tid = tId });
+                    await db.ExecuteAsync("DELETE FROM tenants         WHERE tenant_id = @Tid AND status = 'pending'",
+                        new { Tid = tId });
+                    removedTenantCode = tCode;
+                    freedAlias = tAlias;
+                    tenantNote = string.IsNullOrWhiteSpace(tAlias)
+                        ? $"미승인 고객사({tCode})를 함께 정리했습니다."
+                        : $"미승인 고객사({tCode})를 함께 정리했습니다. 이제 '{tAlias}' 주소를 다시 쓸 수 있습니다.";
+                }
+                else
+                {
+                    // 실고객이다. 신청서만 화면에서 치우고 회사는 건드리지 않는다.
+                    tenantNote = $"고객사({tCode})는 '{tStatus}' 상태라 유지했습니다 — 신청서만 정리했습니다. " +
+                                 "고객사를 지우려면 고객사 관리 화면에서 진행하십시오.";
+                }
+            }
+
+            // 감사추적 먼저. 남지 않으면 지우지 않는다(증거 없이 사라지는 삭제 금지).
+            var detail = System.Text.Json.JsonSerializer.Serialize(new
+            {
+                signup_id = signupId,
+                signup_token = (string?)signup.signup_token,
+                company_name = companyName,
+                email = (string?)signup.email,
+                phone = (string?)signup.phone,
+                plan_type = (string?)signup.plan_type,
+                desired_domain = (string?)signup.desired_domain,
+                reseller_code = (string?)signup.reseller_code,
+                status_before = status,
+                submitted_at = submittedAt,
+                removed_tenant_code = removedTenantCode,
+                freed_domain_alias = freedAlias
+            });
+
+            // bo_audit_log 는 actor_email·actor_role 이 NOT NULL 이고 actor_user_id 는 char(36) 이다
+            //   (00_backoffice_core.sql:281-297). 스키마를 실제로 확인하고 맞췄다 — 헌법 #13.
+            //   값이 없어도 INSERT 가 죽으면 안 되므로 빈 문자열이 아니라 'unknown' 으로 채운다.
+            var actorId = User?.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value
+                          ?? User?.FindFirst("sub")?.Value
+                          ?? "unknown";
+            var actorEmail = User?.FindFirst(System.Security.Claims.ClaimTypes.Email)?.Value
+                             ?? User?.FindFirst("email")?.Value
+                             ?? User?.Identity?.Name
+                             ?? "unknown";
+            var actorRole = User?.FindFirst("account_type")?.Value
+                            ?? User?.FindFirst(System.Security.Claims.ClaimTypes.Role)?.Value
+                            ?? "unknown";
+            if (actorId.Length > 36) actorId = actorId[..36];
+
+            await db.ExecuteAsync(@"
+                INSERT INTO bo_audit_log
+                  (actor_user_id, actor_email, actor_role, action, target_type, target_id, detail_json, ip_address, created_at)
+                VALUES
+                  (@ActorId, @ActorEmail, @ActorRole, 'signup.delete', 'landing_signup', @Target, @Detail, @Ip, UTC_TIMESTAMP())",
+                new
+                {
+                    ActorId = actorId,
+                    ActorEmail = actorEmail,
+                    ActorRole = actorRole,
+                    Target = signupId.ToString(),
+                    Detail = detail,
+                    Ip = HttpContext?.Connection?.RemoteIpAddress?.ToString()
+                });
+            var actor = actorEmail;
+
+            await db.ExecuteAsync(
+                "UPDATE landing_signups SET status = 'deleted' WHERE signup_id = @Id",
+                new { Id = signupId });
+
+            _logger.LogInformation(
+                "[SignupsAdmin] signup deleted id={Id} company={Company} statusBefore={Before} " +
+                "tenantRemoved={Tenant} aliasFreed={Alias} actor={Actor}",
+                signupId, companyName, status, removedTenantCode ?? "-", freedAlias ?? "-", actor);
+
+            return Ok(new
+            {
+                success = true,
+                message = "삭제했습니다. " + tenantNote,
+                removedTenantCode,
+                freedDomainAlias = freedAlias
+            });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "[SignupsAdmin] 삭제 실패 id={Id}", signupId);
+            return StatusCode(500, new { success = false, message = "삭제 처리에 실패했습니다." });
         }
     }
 
