@@ -52,7 +52,21 @@ public class BizNoVerifyController : ControllerBase
         }
 
         // 2) 국세청 진위확인 (토큰 저장된 경우만)
-        var ntsKey = _config["BizVerify:NtsApiKey"];
+        //
+        // 🔴 P0 봉합 (2026-08-02, 샌드박스 실측에서 사장님이 막힘):
+        //   종전엔 여기서 _config["BizVerify:NtsApiKey"] 만 읽었다.
+        //   그런데 실제 가입 처리(LandingSignupController:83)는 환경변수 NTS_API_KEY 를 '먼저' 본다.
+        //   운영 NCP 는 환경변수에만 키가 있고 appsettings 는 빈 문자열이다.
+        //   ⇒ 같은 사업자번호인데 두 경로의 결과가 갈렸다:
+        //        [검증] 버튼 → 키를 못 봄 → 체크섬만 통과 → "유효합니다" ✅
+        //        [가입] 제출 → 환경변수 키로 실호출 → 실패 → 400 ❌
+        //   고객은 "검증까지 됐는데 가입이 안 된다"는 상태에 빠진다. 원인 안내도 불가능하다.
+        //
+        //   봉합: 두 경로가 '같은 키'를 같은 순서로 보게 통일한다(환경변수 우선 → 설정).
+        //   검증과 실제 처리가 다른 값을 보면 검증은 검증이 아니다.
+        var ntsKey = Environment.GetEnvironmentVariable("NTS_API_KEY");
+        if (string.IsNullOrWhiteSpace(ntsKey))
+            ntsKey = _config["BizVerify:NtsApiKey"];
         if (string.IsNullOrWhiteSpace(ntsKey))
         {
             // 자격증명 결재 전 — 체크섬 통과만으로 응답 (사장님 결재 영역)
