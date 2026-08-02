@@ -1,0 +1,22 @@
+<Configuration>
+  <VGpu>Disable</VGpu>
+  <Networking>Default</Networking>
+  <MappedFolders>
+    <MappedFolder>
+      <HostFolder>C:\HitPanTest125</HostFolder>
+      <SandboxFolder>C:\hitpan-test</SandboxFolder>
+      <!-- 2026-08-02 봉합: true 였다.
+           안내문은 "닫기 전에 %temp%\Setup Log*.txt 를 이 폴더로 복사하라"고 하는데
+           읽기 전용이면 그 복사가 물리적으로 불가능하다. 샌드박스는 닫는 순간 전부 소멸하므로
+           로그를 못 꺼내면 실측이 통째로 무의미해진다(7/30 로그 소실로 이미 한 번 겪었다).
+           EXE 는 어차피 서버에서 다시 받을 수 있으니 쓰기 허용의 위험보다 로그 확보가 크다. -->
+      <ReadOnly>false</ReadOnly>
+    </MappedFolder>
+  </MappedFolders>
+  <LogonCommand>
+    <!-- 안내문을 띄우고, 로그 회수 도구를 바탕화면에 복사해 눈에 띄게 둔다.
+         (2026-08-02) 닫기 전 로그 회수를 잊으면 실측이 통째로 소멸한다 — 7/30 실제 사례. -->
+    <Command>cmd.exe /c copy /Y "C:\hitpan-test\로그꺼내기.bat" "%USERPROFILE%\Desktop\" &amp; start "" "C:\Windows\System32\notepad.exe" "C:\hitpan-test\읽어주세요.txt"</Command>
+  </LogonCommand>
+  <MemoryInMB>8192</MemoryInMB>
+</Configuration>
