@@ -223,8 +223,26 @@ public class LandingSignupController : ControllerBase
 
             // 헌법 #20·#22 정합 — 가입 즉시 tenants에 메타 저장 (업무 데이터 0, status=pending)
             var tenantId = Guid.NewGuid().ToString();
-            var codeSeq = await db.QueryFirstOrDefaultAsync<int>("SELECT COUNT(*) + 1 FROM tenants");
-            var tenantCode = $"T-{codeSeq:D3}";
+
+            // 🔴 P0 봉합 (2026-08-02, DB 매니저 적발 — 삭제 기능의 선행 조건):
+            //   종전: SELECT COUNT(*) + 1 FROM tenants  → T-{seq:D3}
+            //   이건 시퀀스가 아니라 '현재 행 수'다. uq_tenant_code(00_backoffice_core.sql:136)는 UNIQUE 다.
+            //
+            //   왜 지금 고치나 — 삭제 기능과 공존이 불가능하기 때문이다:
+            //     T-001~T-005 가 있는 상태에서 T-003 을 지우면 COUNT=4 → 다음 가입이 T-005 를 시도
+            //     → 이미 존재 → uq_tenant_code 위반 → INSERT 실패 → catch → HTTP 500.
+            //     그런데 landing_signups INSERT(:206)는 이 위에서 '이미 끝난' 뒤이고 트랜잭션도 없다.
+            //     ⇒ 회사(tenants)는 안 만들어졌는데 신청서만 남는다. 그리고 그 다음 가입도 계속 실패한다.
+            //        가입 흐름이 영구히 막힌다(헌법 #20 — 워크플로우는 절대 안 끊긴다).
+            //
+            //   봉합: 실제 발급된 최대 번호 + 1. 행을 지워도 번호가 되돌아가지 않는다(단조증가).
+            //     SUBSTRING(tenant_code, 3) = 'T-' 접두사 제거. 형식이 다른 값은 CAST 가 0 이 되어 무해.
+            //     COALESCE — 테이블이 비면 MAX 가 NULL 이므로 0 으로 떨어뜨려 첫 코드가 T-001 이 되게 한다.
+            var maxSeq = await db.QueryFirstOrDefaultAsync<int>(
+                @"SELECT COALESCE(MAX(CAST(SUBSTRING(tenant_code, 3) AS UNSIGNED)), 0)
+                  FROM tenants
+                  WHERE tenant_code LIKE 'T-%'");
+            var tenantCode = $"T-{maxSeq + 1:D3}";
 
             // 데이터 흐름도 정정 (사장님 결재 2026-06-18 "길 B — 백오피스 평문 0건"):
             //   [이전] biz_no·ceo_name 평문을 tenants에 저장(2026-06-08 결재) → 헌법 #22 위반으로 회수.

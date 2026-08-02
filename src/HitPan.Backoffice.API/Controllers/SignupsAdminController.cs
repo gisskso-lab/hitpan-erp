@@ -19,15 +19,32 @@ namespace HitPan.Backoffice.API.Controllers;
 //   #18·#22 — 메타·해시만 저장, 평문 0건
 //   #20 — 가입 → 승인 → ERP 저장 끊김 0
 //   #35 — 랜딩 가입 → 백오피스 승인 → ERP 저장 유기적 연결
+// 🔴 P0 봉합 (2026-08-02, 보안 매니저 1 적발 — 2026-06-11 P0 봉합 누락분):
+//   종전엔 `[Authorize]` 단독이었다. 이건 "유효한 JWT면 누구나"라는 뜻이고,
+//   백오피스 JWT 는 대리점에게도 발급된다(BackofficeAuthController.cs:115 account_type=reseller_admin).
+//   ⇒ 대리점 계정으로 POST /api/admin/signups/{id}/approve 가 통과했다.
+//      남의 가입 승인 + 시리얼 발급 + 평문 시리얼 응답(:217 licenseKey) 탈취가 가능한 상태였다.
+//
+//   2026-06-11 "본사 마스터 계정만" P0 봉합 때 PricingAdmin·PromotionsAdmin 에는 Policy 가 붙었는데
+//   이 컨트롤러만 빠졌다. 백오피스 admin 컨트롤러 중 유일하게 인가가 0이었다.
+//
+//   왜 [BoPermission] 이 아니라 Policy 인가 (선택 근거):
+//     installer/backoffice/90_seed_permissions.sql 에 `signups.*` 권한 키가 0건이다.
+//     [BoPermission("signups.*")] 를 붙이면 DB 에 행이 없어 사장님 본인도 403 으로 튕긴다
+//     (2026-06-19 실제 사고 — 테이블만 있고 행이 없어 전원 403).
+//     Policy 는 JWT 클레임 기반이라 DB 어휘 불일치(platform_admins.role enum ↔ allowed_roles 문자열)를
+//     타지 않는다. 지금 필요한 건 "대리점 차단"이고 Policy 로 100% 달성된다.
+//     세분 권한(signups.delete 등)은 시드 추가와 함께 별건으로 간다.
 [ApiController]
 [Route("api/admin/signups")]
-[Authorize]
+[Authorize(Policy = "PlatformAdmin")]  // 본사 마스터 계정만 (2026-08-02 P0 봉합 — 대리점 JWT 차단)
 public class SignupsAdminController : ControllerBase
 {
     private readonly IConfiguration _config;
     private readonly IWebhookOutboundService _webhook;
     private readonly IEmailSender _email;
     private readonly ICloudflareDomainService _cfDomain;
+    private readonly IHttpClientFactory _httpFactory;   // 2026-08-02 P0: manifest 조회용
     private readonly ILogger<SignupsAdminController> _logger;
 
     public SignupsAdminController(
@@ -35,12 +52,14 @@ public class SignupsAdminController : ControllerBase
         IWebhookOutboundService webhook,
         IEmailSender email,
         ICloudflareDomainService cfDomain,
+        IHttpClientFactory httpFactory,
         ILogger<SignupsAdminController> logger)
     {
         _config = config;
         _webhook = webhook;
         _email = email;
         _cfDomain = cfDomain;
+        _httpFactory = httpFactory;
         _logger = logger;
     }
 
@@ -196,7 +215,7 @@ public class SignupsAdminController : ControllerBase
                 //   예외를 그대로 올리면 운영자 화면엔 "승인 실패"(500)로 보여 재시도 → 중복 승인 위험이 생긴다.
                 //   기존 SendAsync 실패 경로와 동일하게 emailSent=false 로 떨어뜨려 "화면에서 직접 전달"로 안내한다.
                 //   (2026-07-16, 작1 W4-0 — 검증팀 재검증 Q7 적발)
-                var release = TryResolveReleaseInfo(signupId);
+                var release = await TryResolveReleaseInfoAsync(signupId, ct);
                 if (release is not null)
                 {
                     var htmlBody = BuildLicenseKeyEmailBody(
@@ -286,7 +305,7 @@ public class SignupsAdminController : ControllerBase
                 //   예외를 그대로 올리면 운영자 화면엔 "승인 실패"(500)로 보여 재시도 → 중복 승인 위험이 생긴다.
                 //   기존 SendAsync 실패 경로와 동일하게 emailSent=false 로 떨어뜨려 "화면에서 직접 전달"로 안내한다.
                 //   (2026-07-16, 작1 W4-0 — 검증팀 재검증 Q7 적발)
-                var release = TryResolveReleaseInfo(signupId);
+                var release = await TryResolveReleaseInfoAsync(signupId, ct);
                 if (release is not null)
                 {
                     var htmlBody = BuildLicenseKeyEmailBody(
@@ -387,19 +406,67 @@ public class SignupsAdminController : ControllerBase
     ///   기존 SendAsync 실패 경로와 동일하게 emailSent=false 로 떨어져 "화면에서 직접 전달" 안내가 나간다.
     ///   대신 LogError 로 흔적을 남긴다(침묵 금지, 헌법 #15).
     /// </summary>
-    private ReleaseInfo? TryResolveReleaseInfo(long signupId)
+    /// 🔴 P0 봉합 (2026-08-02 — 대리점 "설치가 안 됐다" 진범):
+    ///   위 주석이 예언한 사고가 그대로 재발했다. 코드에서 설정으로 옮겼을 뿐,
+    ///   **여전히 손으로 적는 값**이라 실배포와 갈라지는 구조가 남아 있었다.
+    ///
+    ///   실측 (2026-08-02):
+    ///     appsettings Release:InstallerVersion = 1.2.33
+    ///     https://updates.hitpan.kr/packages/HitPan-ERP-Setup-1.2.33.exe → **404**
+    ///     실제 존재 = 1.2.45 · 1.2.46 만 200
+    ///   ⇒ 승인 메일의 다운로드 단추가 404. 고객은 설치를 시작조차 못 한다.
+    ///
+    ///   왜 파일이 사라졌나: scripts/ncp-patch-작9-P0A-패키지회전.sh:68 (KEEP=2).
+    ///     7/29 디스크 100% 봉합이 EXE 를 최신 2개만 남기고 지웠는데,
+    ///     그 스크립트는 "메일이 어느 버전을 가리키는지" 모른다. 한 봉합이 다른 곳을 부순 전형.
+    ///
+    ///   봉합: 랜딩과 같은 축으로 통일한다. 랜딩은 이미 2026-07-21 사장님 결재
+    ///   (*"랜딩은 무조건 최신 설치파일"*, DownloadPage.razor:126)로 manifest 단일 진실원을 읽는다.
+    ///   메일만 그 봉합에서 빠져 있었다. manifest 는 게시와 동시에 갱신되므로
+    ///   **사람이 값을 옮겨 적는 단계가 사라져** 같은 사고가 구조적으로 불가능해진다.
+    ///
+    ///   폴백 순서: manifest → 설정값 → null(메일 미발송). 틀린 버전을 조용히 안내하느니 안 보낸다.
+    private async Task<ReleaseInfo?> TryResolveReleaseInfoAsync(long signupId, CancellationToken ct)
     {
-        var version = _config["Release:InstallerVersion"];
+        var baseUrl = (_config["Release:DownloadBaseUrl"] ?? "https://updates.hitpan.kr/packages").TrimEnd('/');
+        var manifestUrl = _config["Release:ManifestUrl"] ?? "https://updates.hitpan.kr/manifest.json";
+
+        // 1) manifest = 단일 진실원 (게시와 동시에 갱신되므로 실배포와 갈릴 수 없다)
+        string? version = null;
+        try
+        {
+            var http = _httpFactory.CreateClient();
+            http.Timeout = TimeSpan.FromSeconds(5);
+            using var doc = System.Text.Json.JsonDocument.Parse(
+                await http.GetStringAsync(manifestUrl, ct));
+            if (doc.RootElement.TryGetProperty("version", out var v))
+            {
+                var ver = v.GetString();
+                if (!string.IsNullOrWhiteSpace(ver))
+                    version = ver.Trim();
+            }
+        }
+        catch (Exception ex)
+        {
+            // 헌법 #15 침묵 금지. 조회 실패는 흔적을 남기고 설정값으로 폴백한다.
+            _logger.LogWarning(ex,
+                "[SignupsAdmin] manifest({Url}) 조회 실패 — 설정값(Release:InstallerVersion)으로 폴백. signupId={Id}",
+                manifestUrl, signupId);
+        }
+
+        // 2) 폴백 — manifest 실패 시에만 설정값
+        if (string.IsNullOrWhiteSpace(version))
+            version = _config["Release:InstallerVersion"];
+
         if (string.IsNullOrWhiteSpace(version))
         {
             _logger.LogError(
-                "[SignupsAdmin] Release:InstallerVersion 미설정 — 안내 메일을 만들지 못했습니다(승인 자체는 완료). " +
-                "signupId={Id}. 환경변수 BACKOFFICE_Release__InstallerVersion 또는 appsettings 를 확인하세요. " +
+                "[SignupsAdmin] 안내 버전을 결정하지 못했습니다 — manifest 조회 실패 + Release:InstallerVersion 미설정. " +
+                "안내 메일을 만들지 못했습니다(승인 자체는 완료). signupId={Id}. " +
                 "그동안 고객에게는 화면에서 직접 시리얼과 설치 파일을 전달해야 합니다.", signupId);
             return null;
         }
 
-        var baseUrl = (_config["Release:DownloadBaseUrl"] ?? "https://updates.hitpan.kr/packages").TrimEnd('/');
         return new ReleaseInfo(version, $"{baseUrl}/HitPan-ERP-Setup-{version}.exe");
     }
 
