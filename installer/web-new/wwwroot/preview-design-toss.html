@@ -1,0 +1,739 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>히트판 ERP — 디자인 미리보기 (Toss 감성 강화)</title>
+<link rel="stylesheet" as="style" crossorigin
+      href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.css" />
+<style>
+:root {
+    /* Toss 감성 — 큰 여백, 큰 타이포, 부드러운 컬러 */
+    --bg:        #F9FAFB;
+    --bg-card:   #FFFFFF;
+    --bg-soft:   #F2F4F6;
+    --bg-hover:  #EDF0F2;
+
+    --text-1:    #191F28;
+    --text-2:    #4E5968;
+    --text-3:    #8B95A1;
+    --text-4:    #B0B8C1;
+
+    --border:    #E5E8EB;
+    --border-soft:#F2F4F6;
+
+    /* 히트판 그린 + 토스 감성 보조 컬러 */
+    --brand:     #0F6E56;
+    --brand-soft:#E6F4F0;
+    --brand-deep:#0A5240;
+
+    /* 토스의 시그니처 — 컬러풀 파스텔 */
+    --t-blue:    #3182F6;
+    --t-blue-soft:#E8F2FE;
+    --t-pink:    #F46C82;
+    --t-pink-soft:#FEEDF1;
+    --t-orange:  #FF9F40;
+    --t-orange-soft:#FFF3E5;
+    --t-purple:  #9572D9;
+    --t-purple-soft:#F1ECFB;
+
+    --r-sm:  8px;
+    --r-md:  12px;
+    --r-lg:  20px;
+    --r-xl:  28px;
+
+    --shadow-soft:  0 2px 8px rgba(0,0,0,0.04);
+    --shadow-card:  0 4px 16px rgba(0,0,0,0.04);
+    --shadow-pop:   0 12px 32px rgba(0,0,0,0.08);
+
+    --font: "Pretendard Variable", Pretendard, -apple-system, BlinkMacSystemFont,
+            "Apple SD Gothic Neo", "Noto Sans KR", sans-serif;
+}
+
+* { margin:0; padding:0; box-sizing:border-box; }
+
+html, body {
+    background: var(--bg);
+    color: var(--text-1);
+    font-family: var(--font);
+    font-size: 15px;
+    line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
+    letter-spacing: -0.01em;
+}
+
+button, input, select { font-family: inherit; }
+
+/* ━━━ Layout ━━━ */
+.app {
+    display: grid;
+    grid-template-columns: 240px 1fr;
+    min-height: 100vh;
+}
+@media (max-width: 1024px) {
+    .app { grid-template-columns: 64px 1fr; }
+    .sidebar .nav-label, .sidebar .brand-text, .sidebar .nav-section-title { display: none; }
+    .sidebar .nav-shortcut { display: none; }
+}
+
+/* ━━━ Sidebar (토스 감성 — 더 부드럽고 큰 여백) ━━━ */
+.sidebar {
+    background: var(--bg-card);
+    padding: 24px 16px;
+    position: sticky; top: 0;
+    height: 100vh; overflow-y: auto;
+    border-right: 1px solid var(--border-soft);
+}
+
+.brand {
+    display: flex; align-items: center; gap: 12px;
+    padding: 8px 8px 32px;
+}
+.brand-mark {
+    width: 36px; height: 36px;
+    border-radius: var(--r-sm);
+    background: linear-gradient(135deg, var(--brand) 0%, var(--brand-deep) 100%);
+    display: grid; place-items: center;
+    color: #fff; font-weight: 700; font-size: 16px;
+    box-shadow: var(--shadow-soft);
+}
+.brand-text {
+    font-weight: 700; font-size: 17px;
+    letter-spacing: -0.02em;
+}
+
+.nav-section { margin-bottom: 28px; }
+.nav-section-title {
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--text-3);
+    padding: 0 12px 8px;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+}
+.nav-item {
+    display: flex; align-items: center; gap: 12px;
+    padding: 10px 12px;
+    border-radius: var(--r-sm);
+    color: var(--text-2);
+    text-decoration: none;
+    font-size: 14px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.15s;
+    margin-bottom: 2px;
+}
+.nav-item:hover { background: var(--bg-soft); color: var(--text-1); }
+.nav-item.active {
+    background: var(--brand-soft);
+    color: var(--brand-deep);
+    font-weight: 600;
+}
+.nav-icon { width: 20px; height: 20px; flex-shrink: 0; }
+.nav-shortcut {
+    margin-left: auto;
+    font-size: 11px;
+    color: var(--text-3);
+    background: var(--bg-soft);
+    padding: 2px 6px;
+    border-radius: 4px;
+    font-weight: 600;
+}
+
+
+/* ━━━ Main (토스 시원한 여백) ━━━ */
+.main {
+    padding: 56px 64px;
+    max-width: 1400px;
+}
+@media (max-width: 1366px) { .main { padding: 40px 40px; } }
+@media (max-width: 1024px) { .main { padding: 32px 24px; } }
+
+
+/* ━━━ Hero (토스 진짜 감성 — 큰 타이틀, 시원한 여백) ━━━ */
+.hero {
+    margin-bottom: 56px;
+}
+.hero-greeting {
+    font-size: 16px;
+    color: var(--text-3);
+    margin-bottom: 12px;
+    font-weight: 500;
+}
+.hero-greeting strong { color: var(--text-1); font-weight: 600; }
+.hero-title {
+    font-size: 38px;
+    font-weight: 700;
+    line-height: 1.25;
+    letter-spacing: -0.03em;
+    color: var(--text-1);
+    margin-bottom: 8px;
+}
+.hero-amount {
+    color: var(--brand);
+    font-variant-numeric: tabular-nums;
+}
+.hero-subtitle {
+    font-size: 17px;
+    color: var(--text-2);
+    line-height: 1.5;
+}
+
+
+/* ━━━ Quick Actions (토스 시그니처 — 큰 카드 4개) ━━━ */
+.quick-grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 16px;
+    margin-bottom: 56px;
+}
+@media (max-width: 1366px) { .quick-grid { grid-template-columns: repeat(2, 1fr); } }
+@media (max-width: 768px)  { .quick-grid { grid-template-columns: 1fr; } }
+
+.quick-card {
+    background: var(--bg-card);
+    padding: 28px 24px;
+    border-radius: var(--r-lg);
+    cursor: pointer;
+    transition: transform 0.2s cubic-bezier(0.16, 1, 0.3, 1),
+                box-shadow 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+    box-shadow: var(--shadow-soft);
+    position: relative;
+    overflow: hidden;
+}
+.quick-card:hover {
+    transform: translateY(-4px);
+    box-shadow: var(--shadow-pop);
+}
+.quick-icon {
+    width: 48px; height: 48px;
+    border-radius: 14px;
+    display: grid; place-items: center;
+    margin-bottom: 16px;
+}
+.quick-icon svg { width: 24px; height: 24px; }
+.quick-icon.green  { background: var(--brand-soft); color: var(--brand); }
+.quick-icon.blue   { background: var(--t-blue-soft); color: var(--t-blue); }
+.quick-icon.pink   { background: var(--t-pink-soft); color: var(--t-pink); }
+.quick-icon.orange { background: var(--t-orange-soft); color: var(--t-orange); }
+.quick-icon.purple { background: var(--t-purple-soft); color: var(--t-purple); }
+
+.quick-title {
+    font-size: 17px;
+    font-weight: 700;
+    color: var(--text-1);
+    margin-bottom: 4px;
+    letter-spacing: -0.02em;
+}
+.quick-desc {
+    font-size: 13px;
+    color: var(--text-3);
+    line-height: 1.5;
+}
+.quick-arrow {
+    position: absolute;
+    right: 24px; bottom: 24px;
+    width: 24px; height: 24px;
+    color: var(--text-4);
+    transition: transform 0.2s;
+}
+.quick-card:hover .quick-arrow { transform: translateX(4px); color: var(--text-2); }
+
+
+/* ━━━ Section ━━━ */
+.section { margin-bottom: 48px; }
+.section-head {
+    display: flex; align-items: flex-end; justify-content: space-between;
+    margin-bottom: 20px;
+    flex-wrap: wrap; gap: 12px;
+}
+.section-title {
+    font-size: 22px;
+    font-weight: 700;
+    letter-spacing: -0.02em;
+    color: var(--text-1);
+}
+.section-link {
+    color: var(--text-2);
+    text-decoration: none;
+    font-size: 14px;
+    font-weight: 500;
+    display: inline-flex; align-items: center; gap: 4px;
+    transition: color 0.15s;
+}
+.section-link:hover { color: var(--text-1); }
+
+
+/* ━━━ KPI 큰 카드 (토스 큰 숫자 감성) ━━━ */
+.kpi-row {
+    display: grid;
+    grid-template-columns: 1.6fr 1fr 1fr;
+    gap: 16px;
+    margin-bottom: 56px;
+}
+@media (max-width: 1366px) { .kpi-row { grid-template-columns: 1fr; } }
+
+.kpi-hero {
+    background: linear-gradient(135deg, var(--brand) 0%, var(--brand-deep) 100%);
+    color: #fff;
+    padding: 36px 32px;
+    border-radius: var(--r-xl);
+    box-shadow: var(--shadow-card);
+    position: relative;
+    overflow: hidden;
+}
+.kpi-hero::before {
+    content: ""; position: absolute;
+    right: -40px; top: -40px;
+    width: 200px; height: 200px;
+    border-radius: 50%;
+    background: rgba(255,255,255,0.06);
+}
+.kpi-hero::after {
+    content: ""; position: absolute;
+    right: 40px; bottom: -60px;
+    width: 140px; height: 140px;
+    border-radius: 50%;
+    background: rgba(255,255,255,0.04);
+}
+.kpi-hero-label {
+    font-size: 14px;
+    opacity: 0.85;
+    margin-bottom: 12px;
+    font-weight: 500;
+}
+.kpi-hero-value {
+    font-size: 44px;
+    font-weight: 700;
+    line-height: 1.1;
+    letter-spacing: -0.03em;
+    font-variant-numeric: tabular-nums;
+    margin-bottom: 12px;
+}
+.kpi-hero-delta {
+    display: inline-flex; align-items: center; gap: 6px;
+    font-size: 14px;
+    font-weight: 600;
+    background: rgba(255,255,255,0.18);
+    padding: 6px 12px;
+    border-radius: 999px;
+    backdrop-filter: blur(10px);
+}
+
+.kpi-card {
+    background: var(--bg-card);
+    padding: 28px 24px;
+    border-radius: var(--r-lg);
+    box-shadow: var(--shadow-soft);
+}
+.kpi-label {
+    font-size: 14px;
+    color: var(--text-3);
+    margin-bottom: 8px;
+    font-weight: 500;
+}
+.kpi-value {
+    font-size: 28px;
+    font-weight: 700;
+    letter-spacing: -0.02em;
+    color: var(--text-1);
+    font-variant-numeric: tabular-nums;
+    margin-bottom: 8px;
+    line-height: 1.2;
+}
+.kpi-delta {
+    display: inline-flex; align-items: center; gap: 4px;
+    font-size: 13px;
+    font-weight: 600;
+}
+.kpi-delta.up   { color: #15803D; }
+.kpi-delta.down { color: #DC2626; }
+
+
+/* ━━━ List 카드 (토스 거래 내역 스타일) ━━━ */
+.list-card {
+    background: var(--bg-card);
+    border-radius: var(--r-lg);
+    box-shadow: var(--shadow-soft);
+    overflow: hidden;
+}
+.list-row {
+    display: flex; align-items: center; gap: 16px;
+    padding: 18px 24px;
+    border-bottom: 1px solid var(--border-soft);
+    cursor: pointer;
+    transition: background 0.15s;
+}
+.list-row:hover { background: var(--bg-soft); }
+.list-row:last-child { border-bottom: none; }
+
+.list-icon {
+    width: 44px; height: 44px;
+    border-radius: 50%;
+    display: grid; place-items: center;
+    flex-shrink: 0;
+    background: var(--brand-soft);
+    color: var(--brand-deep);
+    font-weight: 700;
+    font-size: 14px;
+}
+.list-icon.cancelled { background: var(--bg-soft); color: var(--text-3); }
+.list-icon.draft     { background: var(--t-orange-soft); color: var(--t-orange); }
+
+.list-info { flex: 1; min-width: 0; }
+.list-title {
+    font-size: 15px;
+    font-weight: 600;
+    color: var(--text-1);
+    letter-spacing: -0.01em;
+    margin-bottom: 2px;
+}
+.list-meta {
+    font-size: 13px;
+    color: var(--text-3);
+}
+.list-amount {
+    font-size: 16px;
+    font-weight: 700;
+    color: var(--text-1);
+    font-variant-numeric: tabular-nums;
+    letter-spacing: -0.01em;
+}
+.list-amount.cancelled { color: var(--text-4); text-decoration: line-through; }
+.list-status {
+    font-size: 12px;
+    font-weight: 600;
+    padding: 4px 10px;
+    border-radius: 999px;
+}
+.list-status.confirmed { background: var(--brand-soft); color: var(--brand-deep); }
+.list-status.cancelled { background: var(--bg-soft); color: var(--text-3); }
+.list-status.draft     { background: var(--t-orange-soft); color: var(--t-orange); }
+
+
+/* ━━━ 2단 ━━━ */
+.two-col {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 24px;
+}
+@media (max-width: 1366px) { .two-col { grid-template-columns: 1fr; } }
+
+
+/* ━━━ Form (토스 입력 감성 — 큰 인풋) ━━━ */
+.form-card {
+    background: var(--bg-card);
+    border-radius: var(--r-lg);
+    padding: 32px;
+    box-shadow: var(--shadow-soft);
+}
+.field {
+    display: flex; flex-direction: column; gap: 8px;
+    margin-bottom: 20px;
+}
+.field-label {
+    font-size: 13px;
+    color: var(--text-2);
+    font-weight: 600;
+}
+.input, .select {
+    height: 52px;
+    padding: 0 16px;
+    border-radius: var(--r-sm);
+    border: 1.5px solid transparent;
+    background: var(--bg-soft);
+    color: var(--text-1);
+    font-size: 15px;
+    font-weight: 500;
+    transition: all 0.15s;
+}
+.input:focus, .select:focus {
+    outline: none;
+    background: var(--bg-card);
+    border-color: var(--brand);
+    box-shadow: 0 0 0 4px var(--brand-soft);
+}
+.input::placeholder { color: var(--text-4); font-weight: 500; }
+
+.btn {
+    display: inline-flex; align-items: center; justify-content: center;
+    gap: 8px;
+    height: 52px;
+    padding: 0 24px;
+    border: none;
+    border-radius: var(--r-sm);
+    background: var(--bg-soft);
+    color: var(--text-1);
+    font-weight: 600;
+    font-size: 15px;
+    cursor: pointer;
+    transition: all 0.15s;
+}
+.btn:hover { background: var(--bg-hover); }
+.btn-primary {
+    background: var(--brand);
+    color: #fff;
+    box-shadow: 0 4px 12px rgba(15, 110, 86, 0.2);
+}
+.btn-primary:hover {
+    background: var(--brand-deep);
+    box-shadow: 0 6px 16px rgba(15, 110, 86, 0.28);
+    transform: translateY(-1px);
+}
+.btn-block { width: 100%; }
+.kbd {
+    font-size: 11px;
+    padding: 2px 6px;
+    border-radius: 4px;
+    background: rgba(255,255,255,0.18);
+    font-family: ui-monospace, monospace;
+    margin-left: 4px;
+}
+
+.tip-bar {
+    margin-top: 8px;
+    padding: 14px 16px;
+    border-radius: var(--r-sm);
+    background: var(--t-blue-soft);
+    color: var(--t-blue);
+    font-size: 13px;
+    font-weight: 500;
+    display: flex; align-items: center; gap: 12px;
+    flex-wrap: wrap;
+}
+.tip-bar .kbd-chip {
+    font-family: ui-monospace, monospace;
+    background: #fff;
+    padding: 2px 8px;
+    border-radius: 4px;
+    font-size: 11px;
+    font-weight: 700;
+}
+</style>
+</head>
+
+<body>
+
+<div class="app">
+
+    <!-- Sidebar -->
+    <aside class="sidebar">
+        <div class="brand">
+            <div class="brand-mark">H</div>
+            <div class="brand-text">히트판 ERP</div>
+        </div>
+
+        <div class="nav-section">
+            <div class="nav-section-title">설정</div>
+            <a class="nav-item">
+                <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 0 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1A2 2 0 1 1 4.3 17l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 0 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1z"/></svg>
+                <span class="nav-label">사용자정보</span>
+            </a>
+            <a class="nav-item">
+                <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/></svg>
+                <span class="nav-label">사원관리</span>
+                <span class="nav-shortcut">⌘E</span>
+            </a>
+        </div>
+
+        <div class="nav-section">
+            <div class="nav-section-title">마스터</div>
+            <a class="nav-item">
+                <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>
+                <span class="nav-label">업체관리</span>
+                <span class="nav-shortcut">⌘P</span>
+            </a>
+            <a class="nav-item">
+                <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 21V9"/></svg>
+                <span class="nav-label">상품관리</span>
+                <span class="nav-shortcut">⌘I</span>
+            </a>
+        </div>
+
+        <div class="nav-section">
+            <div class="nav-section-title">매입</div>
+            <a class="nav-item"><svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg><span class="nav-label">발주</span></a>
+            <a class="nav-item"><svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 7h18l-2 13H5L3 7z"/></svg><span class="nav-label">매입</span></a>
+        </div>
+
+        <div class="nav-section">
+            <div class="nav-section-title">판매</div>
+            <a class="nav-item"><svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/></svg><span class="nav-label">견적</span></a>
+            <a class="nav-item active">
+                <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 1v22M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
+                <span class="nav-label">수주</span>
+                <span class="nav-shortcut">⌘O</span>
+            </a>
+            <a class="nav-item"><svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 3h18v6H3zM3 15h18v6H3z"/></svg><span class="nav-label">거래명세서</span></a>
+            <a class="nav-item"><svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="5" width="20" height="14" rx="2"/></svg><span class="nav-label">세금계산서</span></a>
+        </div>
+    </aside>
+
+
+    <!-- Main -->
+    <main class="main">
+
+        <!-- Hero (토스 진짜 감성 — 큰 인사 + 큰 숫자) -->
+        <div class="hero">
+            <p class="hero-greeting"><strong>안녕하세요, 사장님</strong> · 4월 29일 수요일</p>
+            <h1 class="hero-title">오늘 매출 <span class="hero-amount">12,430,000원</span></h1>
+            <p class="hero-subtitle">어제보다 <strong style="color:#15803D">+8.4%</strong> 늘었어요. 좋은 하루의 시작입니다 👏</p>
+        </div>
+
+
+        <!-- Quick Actions (토스 시그니처 4카드) -->
+        <div class="quick-grid">
+            <div class="quick-card">
+                <div class="quick-icon green">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg>
+                </div>
+                <div class="quick-title">새 수주 작성</div>
+                <div class="quick-desc">고객사 주문을 빠르게 접수해요</div>
+                <svg class="quick-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12h14M13 5l7 7-7 7"/></svg>
+            </div>
+            <div class="quick-card">
+                <div class="quick-icon blue">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>
+                </div>
+                <div class="quick-title">발주 처리</div>
+                <div class="quick-desc">3건의 발주가 대기 중이에요</div>
+                <svg class="quick-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12h14M13 5l7 7-7 7"/></svg>
+            </div>
+            <div class="quick-card">
+                <div class="quick-icon pink">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="5" width="20" height="14" rx="2"/><path d="M2 10h20"/></svg>
+                </div>
+                <div class="quick-title">세금계산서</div>
+                <div class="quick-desc">이번달 5건 발행 완료</div>
+                <svg class="quick-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12h14M13 5l7 7-7 7"/></svg>
+            </div>
+            <div class="quick-card">
+                <div class="quick-icon orange">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+                </div>
+                <div class="quick-title">미수금 알림</div>
+                <div class="quick-desc">3건이 30일 경과했어요</div>
+                <svg class="quick-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12h14M13 5l7 7-7 7"/></svg>
+            </div>
+        </div>
+
+
+        <!-- KPI Hero + 보조 2개 (토스 큰 숫자 감성) -->
+        <div class="kpi-row">
+            <div class="kpi-hero">
+                <div class="kpi-hero-label">이번달 누적 매출</div>
+                <div class="kpi-hero-value">312,820,000<span style="font-size:24px; font-weight:600; opacity:0.85; margin-left:4px;">원</span></div>
+                <span class="kpi-hero-delta">▲ 지난달 대비 +12.3%</span>
+            </div>
+            <div class="kpi-card">
+                <div class="kpi-label">재고 자산</div>
+                <div class="kpi-value">95개</div>
+                <span class="kpi-delta up">▲ 안전재고 위 (62)</span>
+            </div>
+            <div class="kpi-card">
+                <div class="kpi-label">미수금</div>
+                <div class="kpi-value">3,210,000<span style="font-size:18px; color:var(--text-3); margin-left:2px;">원</span></div>
+                <span class="kpi-delta down">▲ 3건 30일 경과</span>
+            </div>
+        </div>
+
+
+        <!-- 2단: 최근 판매 + 수주 작성 -->
+        <div class="two-col">
+
+            <!-- 최근 판매 (토스 거래 내역 스타일) -->
+            <div class="section">
+                <div class="section-head">
+                    <h2 class="section-title">최근 판매</h2>
+                    <a class="section-link">전체 보기 →</a>
+                </div>
+                <div class="list-card">
+                    <div class="list-row">
+                        <div class="list-icon">공</div>
+                        <div class="list-info">
+                            <div class="list-title">공영정보</div>
+                            <div class="list-meta">SD-20260429-005 · 4월 29일</div>
+                        </div>
+                        <div class="list-amount">+13,200원</div>
+                    </div>
+                    <div class="list-row">
+                        <div class="list-icon">한</div>
+                        <div class="list-info">
+                            <div class="list-title">한국전산</div>
+                            <div class="list-meta">SD-20260429-004 · 4월 29일</div>
+                        </div>
+                        <div class="list-amount">+2,420,000원</div>
+                    </div>
+                    <div class="list-row">
+                        <div class="list-icon">공</div>
+                        <div class="list-info">
+                            <div class="list-title">공영정보</div>
+                            <div class="list-meta">SD-20260428-003 · 4월 28일</div>
+                        </div>
+                        <div class="list-amount">+13,200원</div>
+                    </div>
+                    <div class="list-row">
+                        <div class="list-icon cancelled">공</div>
+                        <div class="list-info">
+                            <div class="list-title" style="color:var(--text-3)">공영정보</div>
+                            <div class="list-meta">SD-20260428-002 · 4월 28일 · <span class="list-status cancelled">취소</span></div>
+                        </div>
+                        <div class="list-amount cancelled">13,200원</div>
+                    </div>
+                    <div class="list-row">
+                        <div class="list-icon draft">샘</div>
+                        <div class="list-info">
+                            <div class="list-title">샘플상사</div>
+                            <div class="list-meta">SD-20260428-001 · 4월 28일 · <span class="list-status draft">임시저장</span></div>
+                        </div>
+                        <div class="list-amount">22원</div>
+                    </div>
+                </div>
+            </div>
+
+
+            <!-- 수주 입력 폼 (토스 큰 인풋 감성) -->
+            <div class="section">
+                <div class="section-head">
+                    <h2 class="section-title">새 수주 작성</h2>
+                </div>
+                <div class="form-card">
+                    <div class="field">
+                        <label class="field-label">수주일자</label>
+                        <input class="input" type="text" value="2026-04-29" />
+                    </div>
+                    <div class="field">
+                        <label class="field-label">업체</label>
+                        <input class="input" type="text" placeholder="업체명 또는 사업자번호" autofocus />
+                    </div>
+                    <div class="field">
+                        <label class="field-label">담당자</label>
+                        <input class="input" type="text" placeholder="홍길동" />
+                    </div>
+                    <div class="field">
+                        <label class="field-label">결제조건</label>
+                        <select class="select">
+                            <option>현금</option>
+                            <option>외상 30일</option>
+                            <option>외상 60일</option>
+                        </select>
+                    </div>
+
+                    <button class="btn btn-primary btn-block" style="margin-top: 8px;">
+                        저장하고 라인 입력 <span class="kbd">⌘ S</span>
+                    </button>
+
+                    <div class="tip-bar">
+                        <span class="kbd-chip">Enter</span>
+                        <span>다음 칸으로 이동해요</span>
+                    </div>
+                </div>
+            </div>
+
+        </div>
+
+    </main>
+</div>
+
+</body>
+</html>

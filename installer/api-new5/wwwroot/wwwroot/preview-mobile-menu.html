@@ -1,0 +1,782 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+<title>히트판 ERP — 모바일 UI 미리보기</title>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/icon?family=Material+Icons+Outlined&family=Material+Icons" rel="stylesheet">
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; -webkit-font-smoothing: antialiased; }
+body {
+    font-family: "Noto Sans KR", sans-serif;
+    background: #e8eaed;
+    min-height: 100vh;
+    display: flex;
+    justify-content: center;
+    align-items: flex-start;
+    gap: 28px;
+    padding: 28px 20px 40px;
+    flex-wrap: wrap;
+}
+
+/* ── 폰 프레임 ── */
+.phone {
+    width: 375px;
+    height: 812px;
+    border-radius: 50px;
+    background: #f2f4f6;
+    box-shadow:
+        0 0 0 10px #1a1a1a,
+        0 0 0 12px #3a3a3a,
+        0 30px 80px rgba(0,0,0,0.35);
+    overflow: hidden;
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    flex-shrink: 0;
+}
+
+/* 다이나믹 아일랜드 */
+.dynamic-island {
+    position: absolute;
+    top: 12px;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 120px;
+    height: 34px;
+    background: #000;
+    border-radius: 20px;
+    z-index: 100;
+}
+
+/* 상태바 */
+.status-bar {
+    height: 54px;
+    padding: 14px 24px 0;
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-end;
+    flex-shrink: 0;
+    background: #fff;
+    position: relative;
+    z-index: 10;
+    padding-bottom: 8px;
+}
+.status-bar span { font-size: 13px; font-weight: 700; color: #111; }
+.status-icons { display: flex; gap: 5px; align-items: center; }
+.status-icons .material-icons { font-size: 15px; color: #111; }
+
+/* ── iOS 상단바 ── */
+.app-header {
+    background: #fff;
+    border-bottom: 1px solid rgba(0,0,0,0.07);
+    flex-shrink: 0;
+}
+.app-header-inner {
+    height: 52px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0 16px;
+}
+.brand { display: flex; align-items: center; gap: 8px; }
+.brand-mark {
+    width: 30px; height: 30px;
+    border-radius: 8px;
+    background: #0F6E56;
+    color: #fff;
+    display: flex; align-items: center; justify-content: center;
+    font-weight: 800; font-size: 16px;
+}
+.brand-text { font-size: 17px; font-weight: 700; color: #111; letter-spacing: -0.3px; }
+
+.header-actions { display: flex; gap: 2px; align-items: center; }
+.hbtn {
+    width: 38px; height: 38px;
+    border: none; background: transparent;
+    display: flex; align-items: center; justify-content: center;
+    border-radius: 19px; cursor: pointer; color: #333; position: relative;
+}
+.hbtn .material-icons-outlined { font-size: 22px; }
+.badge {
+    position: absolute; top: 4px; right: 4px;
+    width: 16px; height: 16px;
+    background: #FF3B30; color: #fff;
+    border-radius: 8px; font-size: 9px; font-weight: 800;
+    display: flex; align-items: center; justify-content: center;
+    border: 1.5px solid #fff;
+}
+.avatar {
+    width: 28px; height: 28px; border-radius: 14px;
+    background: #0F6E56; color: #fff;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 13px; font-weight: 700;
+}
+
+/* ── 스크롤 영역 ── */
+.scroll {
+    flex: 1;
+    overflow-y: auto;
+    overflow-x: hidden;
+    -webkit-overflow-scrolling: touch;
+    padding-bottom: 80px;
+}
+.scroll::-webkit-scrollbar { display: none; }
+
+/* ── 하단 탭바 ── */
+.tab-bar {
+    position: absolute; bottom: 0; left: 0; right: 0;
+    height: 72px;
+    background: rgba(255,255,255,0.92);
+    -webkit-backdrop-filter: blur(20px);
+    backdrop-filter: blur(20px);
+    border-top: 1px solid rgba(0,0,0,0.08);
+    display: flex; align-items: center; justify-content: space-around;
+    padding: 0 0 8px;
+    z-index: 50;
+}
+.tab-item {
+    flex: 1; display: flex; flex-direction: column;
+    align-items: center; justify-content: center;
+    gap: 3px; border: none; background: transparent;
+    color: #aaa; cursor: pointer; padding: 8px 0 0;
+    font-family: "Noto Sans KR", sans-serif;
+}
+.tab-item.active { color: #0f6e56; }
+.tab-item.active .tab-label { font-weight: 700; }
+.tab-item .material-icons { font-size: 24px; }
+.tab-label { font-size: 10px; letter-spacing: -0.2px; }
+
+/* ════════════════════════════
+   화면 1: 홈 대시보드
+════════════════════════════ */
+.home-scroll { padding: 14px 14px 0; background: #f2f4f6; }
+
+/* 인사말 */
+.greeting { padding: 2px 0 14px; }
+.greeting-hi { font-size: 13px; color: #888; }
+.greeting-name { font-size: 20px; font-weight: 700; color: #111; letter-spacing: -0.4px; margin-top: 2px; }
+
+/* KPI 카드 */
+.kpi-row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 14px; }
+.kpi-card {
+    background: #fff;
+    border-radius: 18px;
+    padding: 16px 14px 14px;
+    box-shadow: 0 1px 6px rgba(0,0,0,0.06);
+}
+.kpi-label { font-size: 11px; color: #888; margin-bottom: 6px; font-weight: 500; }
+.kpi-value { font-size: 20px; font-weight: 800; color: #111; letter-spacing: -0.5px; }
+.kpi-sub { font-size: 11px; margin-top: 4px; font-weight: 500; }
+.kpi-up { color: #0f6e56; }
+.kpi-warn { color: #FF3B30; }
+.kpi-gray { color: #aaa; }
+
+/* 섹션 헤더 */
+.sec-header {
+    display: flex; justify-content: space-between; align-items: center;
+    margin-bottom: 10px;
+}
+.sec-title { font-size: 15px; font-weight: 700; color: #111; letter-spacing: -0.3px; }
+.sec-more { font-size: 12px; color: #0f6e56; font-weight: 600; }
+
+/* 알림 카드 */
+.notice-card {
+    background: #fff;
+    border-radius: 18px;
+    padding: 14px 16px;
+    margin-bottom: 14px;
+    box-shadow: 0 1px 6px rgba(0,0,0,0.06);
+}
+.notice-row {
+    display: flex; align-items: center; gap: 10px;
+    padding: 9px 0;
+    border-bottom: 1px solid #f5f5f5;
+}
+.notice-row:last-child { border-bottom: none; padding-bottom: 0; }
+.notice-dot {
+    width: 8px; height: 8px; border-radius: 4px; flex-shrink: 0;
+}
+.notice-txt { flex: 1; font-size: 13px; color: #333; }
+.notice-badge {
+    font-size: 11px; font-weight: 700;
+    padding: 2px 8px; border-radius: 10px;
+}
+.badge-blue { background: #EBF3FF; color: #1565C0; }
+.badge-orange { background: #FFF0E6; color: #E65100; }
+.badge-green { background: #E6F4F1; color: #0f6e56; }
+
+/* 최근 거래 */
+.tx-card {
+    background: #fff;
+    border-radius: 18px;
+    padding: 14px 16px;
+    margin-bottom: 14px;
+    box-shadow: 0 1px 6px rgba(0,0,0,0.06);
+}
+.tx-row {
+    display: flex; justify-content: space-between; align-items: center;
+    padding: 10px 0;
+    border-bottom: 1px solid #f5f5f5;
+}
+.tx-row:last-child { border-bottom: none; padding-bottom: 0; }
+.tx-icon {
+    width: 36px; height: 36px; border-radius: 12px;
+    display: flex; align-items: center; justify-content: center;
+    margin-right: 10px; flex-shrink: 0;
+}
+.tx-left { display: flex; align-items: center; }
+.tx-info-name { font-size: 13px; font-weight: 600; color: #111; }
+.tx-info-sub { font-size: 11px; color: #aaa; margin-top: 2px; }
+.tx-amount { font-size: 15px; font-weight: 700; }
+.tx-plus { color: #1565C0; }
+.tx-minus { color: #E65100; }
+
+/* ════════════════════════════
+   화면 2: 전체메뉴
+════════════════════════════ */
+.menu-page { padding: 12px 12px 0; }
+.menu-groups { display: flex; flex-direction: column; gap: 8px; }
+
+.folder {
+    background: #fff;
+    border-radius: 18px;
+    overflow: hidden;
+    box-shadow: 0 1px 5px rgba(0,0,0,0.06);
+    transition: box-shadow 0.18s;
+}
+.folder.open { box-shadow: 0 4px 18px rgba(0,0,0,0.10); }
+
+.folder-header {
+    display: flex; align-items: center; gap: 12px;
+    padding: 13px 14px;
+    cursor: pointer; -webkit-tap-highlight-color: transparent;
+}
+.f-icon {
+    width: 40px; height: 40px; border-radius: 12px;
+    display: flex; align-items: center; justify-content: center; flex-shrink: 0;
+}
+.f-icon .material-icons { font-size: 20px; }
+.f-title { flex: 1; font-size: 15px; font-weight: 600; color: #111; }
+.f-quick {
+    border: 1.5px solid rgba(15,110,86,0.4);
+    border-radius: 20px; padding: 4px 11px;
+    font-size: 11px; font-weight: 600;
+    background: transparent; cursor: pointer;
+    color: #0f6e56; white-space: nowrap; flex-shrink: 0;
+    font-family: "Noto Sans KR", sans-serif;
+}
+.f-chevron {
+    color: #ccc; display: flex; align-items: center;
+    transition: transform 0.22s ease;
+}
+.folder.open .f-chevron { transform: rotate(180deg); }
+.f-chevron .material-icons { font-size: 20px; }
+
+.folder-items {
+    display: grid; grid-template-columns: repeat(4,1fr);
+    gap: 2px; padding: 0 10px;
+    max-height: 0; overflow: hidden;
+    background: rgba(0,0,0,0.015);
+    border-top: 0px solid #f0f0f0;
+    transition: max-height 0.28s ease, padding 0.22s, border-top-width 0.1s;
+}
+.folder.open .folder-items {
+    max-height: 500px; padding: 6px 10px 14px; border-top-width: 1px;
+}
+
+.menu-item {
+    display: flex; flex-direction: column;
+    align-items: center; gap: 5px;
+    padding: 10px 2px 8px;
+    border: none; background: transparent;
+    border-radius: 12px; cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+    transition: background 0.12s, transform 0.1s;
+}
+.menu-item:active { background: rgba(0,0,0,0.05); transform: scale(0.93); }
+.mi-icon {
+    width: 46px; height: 46px; border-radius: 13px;
+    background: #fff;
+    border: 1px solid rgba(0,0,0,0.06);
+    box-shadow: 0 1px 4px rgba(0,0,0,0.07);
+    display: flex; align-items: center; justify-content: center;
+}
+.mi-icon .material-icons { font-size: 20px; }
+.mi-label {
+    font-size: 10px; color: #444;
+    text-align: center; line-height: 1.25;
+    max-width: 56px; overflow: hidden;
+    text-overflow: ellipsis; white-space: nowrap;
+    font-family: "Noto Sans KR", sans-serif;
+}
+
+/* ════════════════════════════
+   화면 3: 거래명세서 목록
+════════════════════════════ */
+.list-page { padding: 14px 14px 0; }
+.search-bar {
+    display: flex; align-items: center;
+    background: #fff; border-radius: 14px;
+    padding: 0 14px; height: 44px;
+    gap: 8px; margin-bottom: 14px;
+    box-shadow: 0 1px 5px rgba(0,0,0,0.06);
+}
+.search-bar .material-icons { font-size: 18px; color: #aaa; }
+.search-bar input {
+    flex: 1; border: none; outline: none;
+    font-size: 14px; color: #333; background: transparent;
+    font-family: "Noto Sans KR", sans-serif;
+}
+.filter-chips {
+    display: flex; gap: 7px; margin-bottom: 14px; overflow-x: auto;
+    -webkit-overflow-scrolling: touch; padding-bottom: 2px;
+}
+.filter-chips::-webkit-scrollbar { display: none; }
+.chip {
+    flex-shrink: 0;
+    border: 1.5px solid #e0e0e0; border-radius: 20px;
+    padding: 5px 12px; font-size: 12px; font-weight: 500;
+    background: #fff; color: #888; cursor: pointer;
+    font-family: "Noto Sans KR", sans-serif;
+    white-space: nowrap;
+}
+.chip.active {
+    border-color: #0f6e56; background: #0f6e56; color: #fff; font-weight: 600;
+}
+
+.doc-list { display: flex; flex-direction: column; gap: 8px; }
+.doc-card {
+    background: #fff; border-radius: 18px;
+    padding: 14px 16px;
+    box-shadow: 0 1px 5px rgba(0,0,0,0.06);
+    cursor: pointer; -webkit-tap-highlight-color: transparent;
+    transition: transform 0.1s;
+}
+.doc-card:active { transform: scale(0.98); }
+.doc-top {
+    display: flex; justify-content: space-between;
+    align-items: flex-start; margin-bottom: 8px;
+}
+.doc-partner { font-size: 15px; font-weight: 700; color: #111; letter-spacing: -0.3px; }
+.doc-amount { font-size: 16px; font-weight: 800; color: #1565C0; letter-spacing: -0.4px; }
+.doc-bottom { display: flex; justify-content: space-between; align-items: center; }
+.doc-no { font-size: 12px; color: #aaa; }
+.doc-status {
+    font-size: 11px; font-weight: 600;
+    padding: 3px 10px; border-radius: 10px;
+}
+.st-confirmed { background: #E6F4F1; color: #0f6e56; }
+.st-draft { background: #F5F5F5; color: #888; }
+.st-pending { background: #FFF0E6; color: #E65100; }
+
+/* 새 문서 FAB */
+.fab {
+    position: absolute; bottom: 82px; right: 18px;
+    width: 52px; height: 52px; border-radius: 26px;
+    background: #0f6e56; color: #fff;
+    border: none; cursor: pointer;
+    display: flex; align-items: center; justify-content: center;
+    box-shadow: 0 4px 16px rgba(15,110,86,0.4);
+    z-index: 30;
+}
+.fab .material-icons { font-size: 26px; }
+
+/* 라벨 */
+.label { text-align: center; font-size: 13px; font-weight: 600; color: #555; margin-bottom: 10px; }
+</style>
+</head>
+<body>
+
+<!-- ════ 화면 1: 홈 대시보드 ════ -->
+<div>
+<p class="label">① 홈 — 대시보드</p>
+<div class="phone">
+    <div class="dynamic-island"></div>
+    <div class="status-bar">
+        <span>9:41</span>
+        <div class="status-icons">
+            <span class="material-icons">signal_cellular_4_bar</span>
+            <span class="material-icons">wifi</span>
+            <span class="material-icons">battery_full</span>
+        </div>
+    </div>
+    <div class="app-header">
+        <div class="app-header-inner">
+            <div class="brand">
+                <div class="brand-mark">H</div>
+                <span class="brand-text">히트판 ERP</span>
+            </div>
+            <div class="header-actions">
+                <button class="hbtn">
+                    <span class="material-icons-outlined">notifications</span>
+                    <span class="badge">3</span>
+                </button>
+                <button class="hbtn"><div class="avatar">소</div></button>
+            </div>
+        </div>
+    </div>
+
+    <div class="scroll">
+        <div class="home-scroll">
+
+            <div class="greeting">
+                <div class="greeting-hi">좋은 아침이에요 👋</div>
+                <div class="greeting-name">소순근 대표님</div>
+            </div>
+
+            <!-- KPI -->
+            <div class="kpi-row">
+                <div class="kpi-card">
+                    <div class="kpi-label">오늘 매출</div>
+                    <div class="kpi-value" style="color:#1565C0;">284만</div>
+                    <div class="kpi-sub kpi-up">▲ 12% 어제 대비</div>
+                </div>
+                <div class="kpi-card">
+                    <div class="kpi-label">이번달 매입</div>
+                    <div class="kpi-value" style="color:#E65100;">123만</div>
+                    <div class="kpi-sub kpi-gray">목표 68%</div>
+                </div>
+                <div class="kpi-card">
+                    <div class="kpi-label">미수금</div>
+                    <div class="kpi-value" style="color:#880E4F;">58만</div>
+                    <div class="kpi-sub kpi-warn">3건 미수</div>
+                </div>
+                <div class="kpi-card">
+                    <div class="kpi-label">재고 부족</div>
+                    <div class="kpi-value" style="color:#00695C;">2건</div>
+                    <div class="kpi-sub kpi-warn">안전재고 미달</div>
+                </div>
+            </div>
+
+            <!-- 알림 -->
+            <div class="sec-header">
+                <span class="sec-title">결재 대기</span>
+                <span class="sec-more">전체보기</span>
+            </div>
+            <div class="notice-card">
+                <div class="notice-row">
+                    <div class="notice-dot" style="background:#1565C0;"></div>
+                    <span class="notice-txt">거래명세서 발-20260504-012</span>
+                    <span class="notice-badge badge-blue">검토중</span>
+                </div>
+                <div class="notice-row">
+                    <div class="notice-dot" style="background:#E65100;"></div>
+                    <span class="notice-txt">경비신청 — 홍길동 과장</span>
+                    <span class="notice-badge badge-orange">대기</span>
+                </div>
+                <div class="notice-row">
+                    <div class="notice-dot" style="background:#0f6e56;"></div>
+                    <span class="notice-txt">발주서 발-20260504-003</span>
+                    <span class="notice-badge badge-green">승인완료</span>
+                </div>
+            </div>
+
+            <!-- 최근 거래 -->
+            <div class="sec-header">
+                <span class="sec-title">최근 거래</span>
+                <span class="sec-more">전체보기</span>
+            </div>
+            <div class="tx-card">
+                <div class="tx-row">
+                    <div class="tx-left">
+                        <div class="tx-icon" style="background:#EBF3FF;">
+                            <span class="material-icons" style="font-size:18px;color:#1565C0;">receipt</span>
+                        </div>
+                        <div>
+                            <div class="tx-info-name">㈜한국무역</div>
+                            <div class="tx-info-sub">거래명세서 · 14:22</div>
+                        </div>
+                    </div>
+                    <span class="tx-amount tx-plus">+1,200,000</span>
+                </div>
+                <div class="tx-row">
+                    <div class="tx-left">
+                        <div class="tx-icon" style="background:#FFF0E6;">
+                            <span class="material-icons" style="font-size:18px;color:#E65100;">shopping_cart</span>
+                        </div>
+                        <div>
+                            <div class="tx-info-name">서울부품㈜</div>
+                            <div class="tx-info-sub">매입확정 · 11:05</div>
+                        </div>
+                    </div>
+                    <span class="tx-amount tx-minus">-480,000</span>
+                </div>
+                <div class="tx-row">
+                    <div class="tx-left">
+                        <div class="tx-icon" style="background:#EBF3FF;">
+                            <span class="material-icons" style="font-size:18px;color:#1565C0;">receipt</span>
+                        </div>
+                        <div>
+                            <div class="tx-info-name">대한유통</div>
+                            <div class="tx-info-sub">거래명세서 · 09:30</div>
+                        </div>
+                    </div>
+                    <span class="tx-amount tx-plus">+860,000</span>
+                </div>
+            </div>
+
+        </div>
+    </div>
+
+    <div class="tab-bar">
+        <button class="tab-item active"><span class="material-icons">home</span><span class="tab-label">홈</span></button>
+        <button class="tab-item"><span class="material-icons">receipt</span><span class="tab-label">판매</span></button>
+        <button class="tab-item"><span class="material-icons">attach_money</span><span class="tab-label">수금</span></button>
+        <button class="tab-item"><span class="material-icons">inventory</span><span class="tab-label">재고</span></button>
+        <button class="tab-item"><span class="material-icons">grid_view</span><span class="tab-label">전체메뉴</span></button>
+    </div>
+</div>
+</div>
+
+<!-- ════ 화면 2: 전체메뉴 ════ -->
+<div>
+<p class="label">② 전체메뉴 — 폴더 열림</p>
+<div class="phone">
+    <div class="dynamic-island"></div>
+    <div class="status-bar"><span>9:41</span><div class="status-icons"><span class="material-icons">signal_cellular_4_bar</span><span class="material-icons">battery_full</span></div></div>
+    <div class="app-header">
+        <div class="app-header-inner">
+            <div class="brand"><div class="brand-mark">H</div><span class="brand-text">전체 메뉴</span></div>
+            <div class="header-actions">
+                <button class="hbtn"><span class="material-icons-outlined">notifications</span><span class="badge">3</span></button>
+                <button class="hbtn"><div class="avatar">소</div></button>
+            </div>
+        </div>
+    </div>
+
+    <div class="scroll">
+        <div class="menu-page">
+            <div class="menu-groups">
+
+                <!-- 판매관리 열림 -->
+                <div class="folder open">
+                    <div class="folder-header" onclick="toggle(this)">
+                        <div class="f-icon" style="background:#EBF3FF;"><span class="material-icons" style="color:#1565C0;">point_of_sale</span></div>
+                        <span class="f-title">판매관리</span>
+                        <div class="f-chevron"><span class="material-icons">expand_more</span></div>
+                    </div>
+                    <div class="folder-items" style="max-height:500px;padding:6px 10px 14px;border-top-width:1px;">
+                        <button class="menu-item"><div class="mi-icon"><span class="material-icons" style="color:#1565C0;">request_quote</span></div><span class="mi-label">견적서</span></button>
+                        <button class="menu-item"><div class="mi-icon"><span class="material-icons" style="color:#1565C0;">list_alt</span></div><span class="mi-label">견적현황</span></button>
+                        <button class="menu-item"><div class="mi-icon"><span class="material-icons" style="color:#1565C0;">assignment</span></div><span class="mi-label">수주서</span></button>
+                        <button class="menu-item"><div class="mi-icon"><span class="material-icons" style="color:#1565C0;">receipt</span></div><span class="mi-label">거래명세서</span></button>
+                        <button class="menu-item"><div class="mi-icon"><span class="material-icons" style="color:#1565C0;">bar_chart</span></div><span class="mi-label">판매현황</span></button>
+                        <button class="menu-item"><div class="mi-icon"><span class="material-icons" style="color:#1565C0;">emoji_events</span></div><span class="mi-label">판매순위</span></button>
+                        <button class="menu-item"><div class="mi-icon"><span class="material-icons" style="color:#1565C0;">trending_up</span></div><span class="mi-label">수익성분석</span></button>
+                        <button class="menu-item"><div class="mi-icon"><span class="material-icons" style="color:#1565C0;">analytics</span></div><span class="mi-label">판매통계</span></button>
+                    </div>
+                </div>
+
+                <!-- 매입관리 -->
+                <div class="folder">
+                    <div class="folder-header" onclick="toggle(this)">
+                        <div class="f-icon" style="background:#FFF0E6;"><span class="material-icons" style="color:#E65100;">shopping_cart</span></div>
+                        <span class="f-title">매입관리</span>
+                        <button class="f-quick" onclick="event.stopPropagation()">매입처리</button>
+                        <div class="f-chevron"><span class="material-icons">expand_more</span></div>
+                    </div>
+                    <div class="folder-items"></div>
+                </div>
+
+                <!-- 재고관리 -->
+                <div class="folder">
+                    <div class="folder-header" onclick="toggle(this)">
+                        <div class="f-icon" style="background:#E0F7F4;"><span class="material-icons" style="color:#00695C;">warehouse</span></div>
+                        <span class="f-title">재고관리</span>
+                        <button class="f-quick" onclick="event.stopPropagation()">재고현황</button>
+                        <div class="f-chevron"><span class="material-icons">expand_more</span></div>
+                    </div>
+                    <div class="folder-items"></div>
+                </div>
+
+                <!-- 회계관리 -->
+                <div class="folder">
+                    <div class="folder-header" onclick="toggle(this)">
+                        <div class="f-icon" style="background:#EDE7F6;"><span class="material-icons" style="color:#4527A0;">account_balance</span></div>
+                        <span class="f-title">회계관리</span>
+                        <button class="f-quick" onclick="event.stopPropagation()">수금</button>
+                        <div class="f-chevron"><span class="material-icons">expand_more</span></div>
+                    </div>
+                    <div class="folder-items"></div>
+                </div>
+
+                <!-- 계산서관리 -->
+                <div class="folder">
+                    <div class="folder-header" onclick="toggle(this)">
+                        <div class="f-icon" style="background:#FCE4EC;"><span class="material-icons" style="color:#880E4F;">description</span></div>
+                        <span class="f-title">계산서관리</span>
+                        <button class="f-quick" onclick="event.stopPropagation()">세금계산서</button>
+                        <div class="f-chevron"><span class="material-icons">expand_more</span></div>
+                    </div>
+                    <div class="folder-items"></div>
+                </div>
+
+                <div class="folder">
+                    <div class="folder-header" onclick="toggle(this)">
+                        <div class="f-icon" style="background:#F3E5F5;"><span class="material-icons" style="color:#6A1B9A;">business</span></div>
+                        <span class="f-title">업체관리</span>
+                        <div class="f-chevron"><span class="material-icons">expand_more</span></div>
+                    </div>
+                    <div class="folder-items"></div>
+                </div>
+
+                <div class="folder">
+                    <div class="folder-header" onclick="toggle(this)">
+                        <div class="f-icon" style="background:#E8F5E9;"><span class="material-icons" style="color:#1B5E20;">inventory</span></div>
+                        <span class="f-title">상품관리</span>
+                        <div class="f-chevron"><span class="material-icons">expand_more</span></div>
+                    </div>
+                    <div class="folder-items"></div>
+                </div>
+
+                <div class="folder">
+                    <div class="folder-header" onclick="toggle(this)">
+                        <div class="f-icon" style="background:#FFF8E1;"><span class="material-icons" style="color:#F57F17;">groups</span></div>
+                        <span class="f-title">그룹웨어</span>
+                        <div class="f-chevron"><span class="material-icons">expand_more</span></div>
+                    </div>
+                    <div class="folder-items"></div>
+                </div>
+
+                <div class="folder" style="margin-bottom:4px;">
+                    <div class="folder-header" onclick="toggle(this)">
+                        <div class="f-icon" style="background:#ECEFF1;"><span class="material-icons" style="color:#37474F;">manage_accounts</span></div>
+                        <span class="f-title">계정관리</span>
+                        <div class="f-chevron"><span class="material-icons">expand_more</span></div>
+                    </div>
+                    <div class="folder-items"></div>
+                </div>
+
+            </div>
+        </div>
+    </div>
+
+    <div class="tab-bar">
+        <button class="tab-item"><span class="material-icons">home</span><span class="tab-label">홈</span></button>
+        <button class="tab-item"><span class="material-icons">receipt</span><span class="tab-label">판매</span></button>
+        <button class="tab-item"><span class="material-icons">attach_money</span><span class="tab-label">수금</span></button>
+        <button class="tab-item"><span class="material-icons">inventory</span><span class="tab-label">재고</span></button>
+        <button class="tab-item active"><span class="material-icons">grid_view</span><span class="tab-label">전체메뉴</span></button>
+    </div>
+</div>
+</div>
+
+<!-- ════ 화면 3: 거래명세서 목록 ════ -->
+<div>
+<p class="label">③ 거래명세서 목록</p>
+<div class="phone" style="position:relative;">
+    <div class="dynamic-island"></div>
+    <div class="status-bar"><span>9:41</span><div class="status-icons"><span class="material-icons">signal_cellular_4_bar</span><span class="material-icons">battery_full</span></div></div>
+    <div class="app-header">
+        <div class="app-header-inner">
+            <div style="display:flex;align-items:center;gap:6px;cursor:pointer;">
+                <span class="material-icons" style="font-size:20px;color:#555;">arrow_back_ios</span>
+                <span class="brand-text">거래명세서</span>
+            </div>
+            <div class="header-actions">
+                <button class="hbtn"><span class="material-icons-outlined">filter_list</span></button>
+                <button class="hbtn"><span class="material-icons-outlined">search</span></button>
+            </div>
+        </div>
+    </div>
+
+    <div class="scroll">
+        <div class="list-page">
+            <!-- 검색 -->
+            <div class="search-bar">
+                <span class="material-icons">search</span>
+                <input placeholder="업체명·문서번호 검색" readonly>
+            </div>
+
+            <!-- 필터 칩 -->
+            <div class="filter-chips">
+                <div class="chip active">전체</div>
+                <div class="chip">오늘</div>
+                <div class="chip">이번 주</div>
+                <div class="chip">이번 달</div>
+                <div class="chip">확정</div>
+                <div class="chip">초안</div>
+            </div>
+
+            <!-- 문서 목록 -->
+            <div class="doc-list">
+                <div class="doc-card">
+                    <div class="doc-top">
+                        <span class="doc-partner">㈜한국무역</span>
+                        <span class="doc-amount">1,200,000원</span>
+                    </div>
+                    <div class="doc-bottom">
+                        <span class="doc-no">발-20260504-012 · 오늘 14:22</span>
+                        <span class="doc-status st-confirmed">확정</span>
+                    </div>
+                </div>
+                <div class="doc-card">
+                    <div class="doc-top">
+                        <span class="doc-partner">대한유통</span>
+                        <span class="doc-amount">860,000원</span>
+                    </div>
+                    <div class="doc-bottom">
+                        <span class="doc-no">발-20260504-011 · 오늘 09:30</span>
+                        <span class="doc-status st-confirmed">확정</span>
+                    </div>
+                </div>
+                <div class="doc-card">
+                    <div class="doc-top">
+                        <span class="doc-partner">미래산업㈜</span>
+                        <span class="doc-amount">3,450,000원</span>
+                    </div>
+                    <div class="doc-bottom">
+                        <span class="doc-no">발-20260503-009 · 어제</span>
+                        <span class="doc-status st-pending">대기</span>
+                    </div>
+                </div>
+                <div class="doc-card">
+                    <div class="doc-top">
+                        <span class="doc-partner">서울전자</span>
+                        <span class="doc-amount">540,000원</span>
+                    </div>
+                    <div class="doc-bottom">
+                        <span class="doc-no">발-20260503-008 · 어제</span>
+                        <span class="doc-status st-draft">초안</span>
+                    </div>
+                </div>
+                <div class="doc-card">
+                    <div class="doc-top">
+                        <span class="doc-partner">경기물류</span>
+                        <span class="doc-amount">2,100,000원</span>
+                    </div>
+                    <div class="doc-bottom">
+                        <span class="doc-no">발-20260502-006 · 5/2</span>
+                        <span class="doc-status st-confirmed">확정</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- FAB -->
+    <button class="fab"><span class="material-icons">add</span></button>
+
+    <div class="tab-bar">
+        <button class="tab-item"><span class="material-icons">home</span><span class="tab-label">홈</span></button>
+        <button class="tab-item active"><span class="material-icons">receipt</span><span class="tab-label">판매</span></button>
+        <button class="tab-item"><span class="material-icons">attach_money</span><span class="tab-label">수금</span></button>
+        <button class="tab-item"><span class="material-icons">inventory</span><span class="tab-label">재고</span></button>
+        <button class="tab-item"><span class="material-icons">grid_view</span><span class="tab-label">전체메뉴</span></button>
+    </div>
+</div>
+</div>
+
+<script>
+function toggle(header) {
+    const folder = header.closest('.folder');
+    const wasOpen = folder.classList.contains('open');
+    // 같은 그룹 내 모두 닫기
+    folder.closest('.menu-groups')?.querySelectorAll('.folder.open').forEach(f => f.classList.remove('open'));
+    if (!wasOpen) folder.classList.add('open');
+}
+</script>
+</body>
+</html>

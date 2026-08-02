@@ -312,9 +312,56 @@ trap - EXIT
 ok "manifest.json 원자 교체 완료 → 버전 $VERSION"
 
 # N-3: 백업 회전 — 최근 BACKUP_KEEP 개만 유지
+#   ⚠️ 이건 manifest .bak(수 KB)만 회전한다. 패키지 본체(EXE 259MB·ZIP 98MB)는 아래에서 따로.
 mapfile -t BAKS < <(ls -1t "$WEBROOT"/manifest.json.bak-* 2>/dev/null || true)
 if (( ${#BAKS[@]} > BACKUP_KEEP )); then
   for old in "${BAKS[@]:$BACKUP_KEEP}"; do rm -f "$old"; log "오래된 백업 삭제: $(basename "$old")"; done
+fi
+
+# ── N-3b: 패키지 본체 회전 (2026-08-02 사장님 오더 — 레포 정본화) ───────────
+#
+#   *"설치실패로 불필요한 설치파일 빌드 업로드건은 삭제하고 수정본을 올리는 게 맞는데
+#     왜 무지성으로 계속 업로드만 하는거야?"*  — 사장님, 2026-08-02
+#
+#   실측 이력:
+#     · 레포본엔 패키지 회전이 0줄이었다. 게시할 때마다 357MB(EXE+ZIP)가 무조건 쌓였다.
+#     · 7/29 디스크 100% 로 DB 가 죽자 서버에서 급히 손으로 회전 코드를 넣었는데
+#       레포엔 반영하지 않았다 ⇒ 다음 배포가 레포본으로 덮으면 회전이 사라진다.
+#     · 그 손수정 회전에는 '현행 버전 보호'가 없었다. 그래서 승인 메일이 가리키던
+#       1.2.33 이 mtime 기준으로 지워졌고, 대리점이 다운로드 404 를 맞았다.
+#       (docs/운영기록/20260802_사고기록_대리점_설치실패_승인메일_404.md)
+#
+#   ⇒ 여기서 두 가지를 동시에 정본화한다:
+#      (1) 패키지 본체도 회전한다 — 무한 누적 차단
+#      (2) 방금 게시한 버전($VERSION)은 KEEP 계산에서 아예 제외 = 절대 안 지워진다
+#          "몇 개 남기냐"보다 "현역을 지우지 않는다"가 먼저다. 그게 404 의 교훈이다.
+#
+#   mtime 정렬을 쓰는 이유: 버전 문자열 정렬은 1.2.9 > 1.2.10 으로 오판한다.
+PKG_KEEP="${HITPAN_PKG_KEEP:-3}"
+rotate_packages() {
+  local pattern="$1" label="$2"
+  local -a files=()
+  # 현행 버전이 이름에 들어간 파일은 목록에서 먼저 뺀다(보호).
+  while IFS= read -r f; do
+    [[ -n "$f" ]] || continue
+    if [[ "$(basename "$f")" == *"$VERSION"* ]]; then
+      log "$label 보호: $(basename "$f") (방금 게시한 현행 버전)"
+      continue
+    fi
+    files+=("$f")
+  done < <(ls -1t "$PACKAGES_DIR"/$pattern 2>/dev/null || true)
+
+  (( ${#files[@]} > PKG_KEEP )) || return 0
+  for old in "${files[@]:$PKG_KEEP}"; do
+    rm -f "$old" && log "$label 회전 삭제: $(basename "$old")"
+  done
+}
+if [[ -d "$PACKAGES_DIR" ]]; then
+  rotate_packages 'HitPan-ERP-Setup-*.exe' 'EXE'
+  rotate_packages 'hitpan-*.zip'           'ZIP'
+  log "패키지 회전 완료(KEEP=$PKG_KEEP, 현행 $VERSION 보호) — 사용량: $(du -sh "$PACKAGES_DIR" 2>/dev/null | cut -f1)"
+else
+  warn "packages 경로 없음($PACKAGES_DIR) — 회전 건너뜀"
 fi
 
 # ── 6) 자기검증 (서빙본 재취득 → 롤백까지) ────────────────────────────────────

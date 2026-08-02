@@ -1,0 +1,262 @@
+/*
+ * 히트판 디자인 시스템 — 토큰 헌장 (사장님 결재 2026-04-29)
+ *
+ * 원칙:
+ *  1. 키보드 우선 — 포커스링·인디케이터 강함, Tab/Enter 흐름 자연
+ *  2. 레거시 히트판 정신 — 처음 본 직원도 그냥 됨
+ *  3. 가독성 — 한글 14~16px, 라인높이 1.6, 명확한 위계
+ *  4. 데이터 시각화 — Stripe 수준 KPI/차트/테이블
+ *  5. 트렌디 — Toss 한글 친화 + Linear 정밀 + Apple 여백
+ *
+ * 모든 화면은 이 토큰만 참조한다. 화면별 하드코딩 색상·간격 금지.
+ * 변경은 토큰만 수정하면 전 화면 일괄 반영.
+ */
+
+:root {
+    /* ───────────────────────────────────────────────
+     * 1. COLOR — Brand
+     * ─────────────────────────────────────────────── */
+    --hp-brand-50:  #E6F4F0;
+    --hp-brand-100: #C2E5DA;
+    --hp-brand-200: #97D3BF;
+    --hp-brand-300: #6BC0A4;
+    --hp-brand-400: #3FAA8A;
+    --hp-brand-500: #0F6E56;  /* Primary — 기존 히트판 그린 유지 */
+    --hp-brand-600: #0D604B;
+    --hp-brand-700: #0A5240;
+    --hp-brand-800: #084035;
+    --hp-brand-900: #052E27;
+
+    /* ───────────────────────────────────────────────
+     * 2. COLOR — Surface (배경 위계)
+     * ─────────────────────────────────────────────── */
+    --hp-surface-base:    #FAFBFC;  /* 페이지 배경 (가장 뒤) */
+    --hp-surface-raised:  #FFFFFF;  /* 카드·테이블·폼 */
+    --hp-surface-overlay: #FFFFFF;  /* 모달·드롭다운 */
+    --hp-surface-sunken:  #F4F6F8;  /* 그룹 배경·인풋 채움 */
+    --hp-surface-hover:   #F0F3F5;  /* hover 상태 */
+    --hp-surface-active:  #E6EBEF;  /* active/selected 상태 */
+
+    /* ───────────────────────────────────────────────
+     * 3. COLOR — Text (콘트라스트 위계)
+     * ─────────────────────────────────────────────── */
+    --hp-text-primary:   #0F1419;   /* 본문 — WCAG AAA */
+    --hp-text-secondary: #3D4852;   /* 보조 — WCAG AA */
+    --hp-text-tertiary:  #6B7280;   /* 캡션·메타 */
+    --hp-text-disabled:  #9CA3AF;
+    --hp-text-inverse:   #FFFFFF;   /* 어두운 배경 위 */
+    --hp-text-link:      var(--hp-brand-600);
+
+    /* ───────────────────────────────────────────────
+     * 4. COLOR — Border (윤곽 위계)
+     * ─────────────────────────────────────────────── */
+    --hp-border-subtle:    #EAEDF0;  /* 미세 구분 */
+    --hp-border-default:   #D5DAE0;  /* 기본 */
+    --hp-border-strong:    #A8B0BA;  /* 강조 */
+    --hp-border-focus:     var(--hp-brand-500);
+
+    /* ───────────────────────────────────────────────
+     * 5. COLOR — Status (의미 색상)
+     * ─────────────────────────────────────────────── */
+    --hp-status-info-bg:    #E8F1FB;
+    --hp-status-info-fg:    #1C5BB0;
+    --hp-status-info-border:#A8C8EE;
+
+    --hp-status-success-bg: #E6F5EC;
+    --hp-status-success-fg: #1B7A3E;
+    --hp-status-success-border:#A6D9B7;
+
+    --hp-status-warn-bg:    #FDF3E2;
+    --hp-status-warn-fg:    #8B5E0F;
+    --hp-status-warn-border:#F1C97A;
+
+    --hp-status-error-bg:   #FBE9E9;
+    --hp-status-error-fg:   #A32D2D;        /* 기존 히트판 에러 유지 */
+    --hp-status-error-border:#EDA4A4;
+
+    /* ───────────────────────────────────────────────
+     * 6. COLOR — Data Visualization (Stripe 영감)
+     *    KPI·차트·태그에서만 사용. 본문 색으로 쓰지 말 것.
+     * ─────────────────────────────────────────────── */
+    --hp-data-1: #0F6E56;  /* 매출 — 브랜드 */
+    --hp-data-2: #1C5BB0;  /* 매입 — 블루 */
+    --hp-data-3: #8B5CF6;  /* 재고 — 퍼플 */
+    --hp-data-4: #F59E0B;  /* 미수금 — 앰버 */
+    --hp-data-5: #EC4899;  /* 부가세 — 핑크 */
+    --hp-data-6: #14B8A6;  /* 비용 — 틸 */
+    --hp-data-7: #6366F1;  /* 인사 — 인디고 */
+    --hp-data-8: #84CC16;  /* 자산 — 라임 */
+
+    /* ───────────────────────────────────────────────
+     * 7. TYPOGRAPHY — Font Family
+     *    한글: Pretendard (가독성·트렌디 1순위) → Noto Sans KR (폴백)
+     *    영숫자: Inter (수치·UI) / JetBrains Mono (금액·코드)
+     * ─────────────────────────────────────────────── */
+    --hp-font-sans:
+        "Pretendard Variable", "Pretendard",
+        -apple-system, BlinkMacSystemFont,
+        "Apple SD Gothic Neo", "Noto Sans KR",
+        "Inter", "Roboto", "Helvetica Neue",
+        Arial, sans-serif,
+        "Apple Color Emoji", "Segoe UI Emoji";
+    --hp-font-mono:
+        "JetBrains Mono", "SF Mono",
+        Consolas, "Liberation Mono", monospace;
+
+    /* ───────────────────────────────────────────────
+     * 8. TYPOGRAPHY — Scale (한글 가독성 우선)
+     *    본문은 14px/15px 권장 (16px은 모니터에서 너무 큼)
+     * ─────────────────────────────────────────────── */
+    --hp-fs-display: 32px;      /* 대시보드 KPI 큰 숫자 */
+    --hp-fs-h1:      26px;      /* 페이지 제목 */
+    --hp-fs-h2:      22px;
+    --hp-fs-h3:      18px;
+    --hp-fs-h4:      16px;
+    --hp-fs-body:    14px;      /* 본문 기본 */
+    --hp-fs-body-lg: 15px;
+    --hp-fs-caption: 12px;
+    --hp-fs-meta:    11px;
+
+    --hp-lh-tight:   1.2;       /* 큰 숫자·제목 */
+    --hp-lh-snug:    1.4;       /* 부제 */
+    --hp-lh-normal:  1.6;       /* 본문 — 한글 가독성 표준 */
+    --hp-lh-relaxed: 1.8;       /* 긴 글 */
+
+    --hp-fw-normal:  400;
+    --hp-fw-medium:  500;
+    --hp-fw-semi:    600;
+    --hp-fw-bold:    700;
+
+    --hp-ls-tight:  -0.02em;    /* 큰 숫자에 살짝 좁게 */
+    --hp-ls-normal: 0;
+
+    /* ───────────────────────────────────────────────
+     * 9. SPACING — 4px 그리드
+     * ─────────────────────────────────────────────── */
+    --hp-space-1:  4px;
+    --hp-space-2:  8px;
+    --hp-space-3:  12px;
+    --hp-space-4:  16px;
+    --hp-space-5:  20px;
+    --hp-space-6:  24px;
+    --hp-space-8:  32px;
+    --hp-space-10: 40px;
+    --hp-space-12: 48px;
+    --hp-space-16: 64px;
+    --hp-space-20: 80px;
+
+    /* ───────────────────────────────────────────────
+     * 10. RADIUS
+     * ─────────────────────────────────────────────── */
+    --hp-radius-sm:  4px;       /* 태그·뱃지 */
+    --hp-radius-md:  6px;       /* 인풋·버튼 */
+    --hp-radius-lg:  10px;      /* 카드 */
+    --hp-radius-xl:  16px;      /* 모달·다이얼로그 */
+    --hp-radius-full: 999px;    /* 칩·아바타 */
+
+    /* ───────────────────────────────────────────────
+     * 11. SHADOW (위계) — Apple 영감, 부드럽고 얕음
+     * ─────────────────────────────────────────────── */
+    --hp-shadow-xs: 0 1px 2px rgba(15, 20, 25, 0.04);
+    --hp-shadow-sm: 0 1px 3px rgba(15, 20, 25, 0.06),
+                    0 1px 2px rgba(15, 20, 25, 0.04);
+    --hp-shadow-md: 0 4px 8px rgba(15, 20, 25, 0.06),
+                    0 2px 4px rgba(15, 20, 25, 0.04);
+    --hp-shadow-lg: 0 10px 20px rgba(15, 20, 25, 0.08),
+                    0 4px 8px rgba(15, 20, 25, 0.04);
+    --hp-shadow-xl: 0 20px 40px rgba(15, 20, 25, 0.12),
+                    0 8px 16px rgba(15, 20, 25, 0.06);
+
+    /* ───────────────────────────────────────────────
+     * 12. FOCUS — 키보드 우선 인디케이터 (사장님 헌법)
+     *    마우스 hover 보다 키보드 focus 가 더 강해야 함
+     * ─────────────────────────────────────────────── */
+    --hp-focus-ring:
+        0 0 0 2px var(--hp-surface-raised),
+        0 0 0 4px var(--hp-brand-500);
+    --hp-focus-ring-error:
+        0 0 0 2px var(--hp-surface-raised),
+        0 0 0 4px var(--hp-status-error-fg);
+    --hp-focus-outline: 2px solid var(--hp-brand-500);
+    --hp-focus-offset:  2px;
+
+    /* ───────────────────────────────────────────────
+     * 13. MOTION
+     * ─────────────────────────────────────────────── */
+    --hp-ease-out:    cubic-bezier(0.16, 1, 0.3, 1);     /* 진입 */
+    --hp-ease-in-out: cubic-bezier(0.65, 0, 0.35, 1);    /* 토글 */
+    --hp-ease-in:     cubic-bezier(0.4, 0, 1, 1);        /* 퇴장 */
+
+    --hp-dur-fast:   150ms;     /* hover·focus */
+    --hp-dur-base:   200ms;     /* 일반 */
+    --hp-dur-slow:   300ms;     /* 모달·시트 */
+
+    /* ───────────────────────────────────────────────
+     * 14. Z-INDEX
+     * ─────────────────────────────────────────────── */
+    --hp-z-base:     1;
+    --hp-z-sticky:   100;
+    --hp-z-overlay:  1000;
+    --hp-z-modal:    1100;
+    --hp-z-popover:  1200;
+    --hp-z-snackbar: 1300;
+    --hp-z-tooltip:  1400;
+
+    /* ───────────────────────────────────────────────
+     * 15. BREAKPOINTS — PC 우선 (모바일은 Phase 5)
+     * ─────────────────────────────────────────────── */
+    --hp-bp-sm: 1024px;     /* 노트북 작은 — 사장님이 말씀하신 "낮은 해상도" 하한 */
+    --hp-bp-md: 1366px;     /* 일반 노트북 */
+    --hp-bp-lg: 1600px;     /* 데스크톱 */
+    --hp-bp-xl: 1920px;     /* 풀HD */
+    --hp-bp-2xl: 2560px;    /* QHD */
+
+    /* ───────────────────────────────────────────────
+     * 16. LAYOUT — Sidebar/Header/Content
+     * ─────────────────────────────────────────────── */
+    --hp-sidebar-w:        260px;
+    --hp-sidebar-w-narrow: 64px;        /* 접힌 상태 (1024px 이하) */
+    --hp-header-h:         56px;
+    --hp-content-max:      1600px;      /* 본문 최대폭 (xl 이상) */
+
+    /* ───────────────────────────────────────────────
+     * 17. TABLE — ERP 표준 그리드
+     * ─────────────────────────────────────────────── */
+    --hp-table-row-h:        40px;      /* 표준 */
+    --hp-table-row-h-dense:  32px;      /* 빽빽 (대량 데이터) */
+    --hp-table-header-bg:    var(--hp-surface-sunken);
+    --hp-table-zebra-bg:     #FBFCFD;
+    --hp-table-row-hover:    var(--hp-surface-hover);
+    --hp-table-row-selected: var(--hp-brand-50);
+
+    /* ───────────────────────────────────────────────
+     * 18. INPUT — 키보드 우선 사이즈
+     * ─────────────────────────────────────────────── */
+    --hp-input-h-sm:  32px;
+    --hp-input-h:     36px;     /* 표준 (ERP 그리드 친화) */
+    --hp-input-h-lg:  44px;     /* 모달·로그인 */
+}
+
+/*
+ * MudBlazor 변수 매핑 — MudBlazor 컴포넌트가 자동으로 우리 토큰을 따른다.
+ * (App.razor 의 PaletteLight 와 함께 작동, 양쪽 모두 같은 값 유지)
+ */
+:root {
+    --mud-palette-primary: var(--hp-brand-500);
+    --mud-palette-primary-hover: var(--hp-brand-600);
+    --mud-palette-primary-darken: var(--hp-brand-700);
+    --mud-palette-primary-lighten: var(--hp-brand-100);
+    --mud-palette-background: var(--hp-surface-base);
+    --mud-palette-surface: var(--hp-surface-raised);
+    --mud-palette-text-primary: var(--hp-text-primary);
+    --mud-palette-text-secondary: var(--hp-text-secondary);
+    --mud-palette-text-disabled: var(--hp-text-disabled);
+    --mud-palette-divider: var(--hp-border-subtle);
+    --mud-palette-error: var(--hp-status-error-fg);
+    --mud-palette-success: var(--hp-status-success-fg);
+    --mud-palette-warning: var(--hp-status-warn-fg);
+    --mud-palette-info: var(--hp-status-info-fg);
+    --mud-typography-default-family: var(--hp-font-sans);
+    --mud-typography-default-size: var(--hp-fs-body);
+    --mud-typography-default-lineheight: var(--hp-lh-normal);
+}
