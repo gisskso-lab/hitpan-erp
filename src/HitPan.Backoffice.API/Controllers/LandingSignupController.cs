@@ -98,7 +98,15 @@ public class LandingSignupController : ControllerBase
                 using var res = await http.SendAsync(msg, ct);
                 if (!res.IsSuccessStatusCode)
                 {
-                    _logger.LogWarning("[LandingSignup] nts api fail status={Status}", (int)res.StatusCode);
+                    // 2026-08-02 봉합: 종전엔 status 코드만 남겨 원인을 못 좁혔다.
+                    //   odcloud 는 실패 사유를 본문(JSON)에 담아 보낸다 —
+                    //   키 만료/일일한도/파라미터 오류가 전부 여기서 갈린다.
+                    //   본문 없이는 "국세청 장애"인지 "우리 키 문제"인지 영원히 알 수 없다(헌법 #15).
+                    //   ⚠ 본문에 serviceKey 는 들어가지 않는다(쿼리스트링에만 있음) — 시크릿 유출 없음.
+                    var errBody = await res.Content.ReadAsStringAsync(ct);
+                    if (errBody.Length > 500) errBody = errBody[..500];
+                    _logger.LogError("[LandingSignup] nts api fail status={Status} body={Body}",
+                        (int)res.StatusCode, errBody);
                     return BadRequest(new { success = false, message = "국세청 서비스 일시 장애입니다. 잠시 후 다시 시도해주세요." });
                 }
                 var body = await res.Content.ReadAsStringAsync(ct);
