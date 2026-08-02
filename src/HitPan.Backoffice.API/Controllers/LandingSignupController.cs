@@ -86,6 +86,10 @@ public class LandingSignupController : ControllerBase
             var cfgKey = _config["BizVerify:NtsApiKey"];
             if (!string.IsNullOrWhiteSpace(cfgKey)) ntsKey = cfgKey;
         }
+        // 국세청 확인을 건너뛴 사유. 비어 있으면 정상 확인됐다는 뜻.
+        //   승인 화면이 이 값을 보고 "사람이 직접 확인해야 함"을 알 수 있어야 한다(2026-08-02).
+        string? ntsSkippedReason = null;
+
         if (!string.IsNullOrWhiteSpace(ntsKey))
         {
             try
@@ -107,29 +111,71 @@ public class LandingSignupController : ControllerBase
                     if (errBody.Length > 500) errBody = errBody[..500];
                     _logger.LogError("[LandingSignup] nts api fail status={Status} body={Body}",
                         (int)res.StatusCode, errBody);
-                    return BadRequest(new { success = false, message = "국세청 서비스 일시 장애입니다. 잠시 후 다시 시도해주세요." });
-                }
-                var body = await res.Content.ReadAsStringAsync(ct);
-                using var doc = System.Text.Json.JsonDocument.Parse(body);
-                if (!doc.RootElement.TryGetProperty("data", out var arr) || arr.GetArrayLength() == 0)
-                    return BadRequest(new { success = false, message = "국세청 응답 확인 실패. 잠시 후 다시 시도해주세요." });
-                var item = arr[0];
-                var bSttCd = item.TryGetProperty("b_stt_cd", out var e) ? e.GetString() ?? "" : "";
-                if (bSttCd != "01")
-                {
-                    var msg2 = bSttCd switch
+
+                    // 🔴 P0 봉합 (2026-08-02): 국세청이 응답을 못 주면 '가입 전면 차단'이었다.
+                    //   실제 발생 — 공공데이터포털 전환 작업(7/29 19:00 ~ 8/02 18:00)으로
+                    //   기존 키가 -5("API 서버 오류")를 받아 신규 가입이 통째로 막혔다.
+                    //   우리 잘못도, 고객 잘못도 아닌 사유로 영업이 멈추는 구조다.
+                    //
+                    //   ⇒ 체크섬(오프라인 계산, 외부 의존 0)으로 최소 관문은 통과시키고
+                    //      그 사실을 반드시 기록한다. 체크섬은 휴업·폐업을 못 거른다 —
+                    //      그건 국세청만 안다. 따라서 이건 '대체'가 아니라 '유예'다.
+                    //      복구 후 백오피스 승인 단계에서 사람이 다시 본다(승인=사람 결재).
+                    if (BizNoChecksum.IsValid(bizNoNormalized))
                     {
-                        "02" => "휴업 상태 사업자입니다. 정상 사업자만 가입 가능합니다.",
-                        "03" => "폐업 상태 사업자입니다. 정상 사업자만 가입 가능합니다.",
-                        _ => "국세청에 등록되지 않은 사업자번호입니다."
-                    };
-                    return BadRequest(new { success = false, message = msg2 });
+                        _logger.LogWarning(
+                            "[LandingSignup] 국세청 무응답 → 체크섬 통과로 가입 진행 bizNo={Masked} status={Status}. " +
+                            "⚠️ 휴업·폐업 여부 미확인 상태다. 백오피스 승인 시 반드시 사람이 확인할 것.",
+                            BizNoChecksum.Mask(bizNoNormalized), (int)res.StatusCode);
+                        ntsSkippedReason = $"국세청 무응답(HTTP {(int)res.StatusCode})";
+                    }
+                    else
+                    {
+                        // 체크섬조차 틀리면 명백한 오입력이다. 이건 국세청 없이도 판정된다.
+                        return BadRequest(new { success = false, message = "올바르지 않은 사업자등록번호입니다. 번호를 다시 확인해주세요." });
+                    }
+                }
+                else
+                {
+                    // 정상 응답 — 국세청이 판정한 사업 상태를 그대로 따른다.
+                    var body = await res.Content.ReadAsStringAsync(ct);
+                    using var doc = System.Text.Json.JsonDocument.Parse(body);
+                    if (!doc.RootElement.TryGetProperty("data", out var arr) || arr.GetArrayLength() == 0)
+                        return BadRequest(new { success = false, message = "국세청 응답 확인 실패. 잠시 후 다시 시도해주세요." });
+                    var item = arr[0];
+                    var bSttCd = item.TryGetProperty("b_stt_cd", out var e) ? e.GetString() ?? "" : "";
+                    if (bSttCd != "01")
+                    {
+                        var msg2 = bSttCd switch
+                        {
+                            "02" => "휴업 상태 사업자입니다. 정상 사업자만 가입 가능합니다.",
+                            "03" => "폐업 상태 사업자입니다. 정상 사업자만 가입 가능합니다.",
+                            _ => "국세청에 등록되지 않은 사업자번호입니다."
+                        };
+                        return BadRequest(new { success = false, message = msg2 });
+                    }
                 }
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "[LandingSignup] nts api 호출 실패");
-                return BadRequest(new { success = false, message = "국세청 서비스 일시 장애입니다. 잠시 후 다시 시도해주세요." });
+                _logger.LogError(ex, "[LandingSignup] nts api 호출 실패 bizNo={Masked}",
+                    BizNoChecksum.Mask(bizNoNormalized));
+
+                // 위 HTTP 실패 분기와 같은 이유의 폴백 — 타임아웃·DNS·TLS 등 예외 경로.
+                //   2026-08-02 실측: 포털 전환 작업 중 -5 와 25초 타임아웃이 번갈아 났다.
+                //   HTTP 오류만 막고 예외를 안 막으면 절반은 여전히 가입이 차단된다.
+                if (BizNoChecksum.IsValid(bizNoNormalized))
+                {
+                    _logger.LogWarning(
+                        "[LandingSignup] 국세청 호출 예외 → 체크섬 통과로 가입 진행 bizNo={Masked}. " +
+                        "⚠️ 휴업·폐업 여부 미확인 상태다. 백오피스 승인 시 반드시 사람이 확인할 것.",
+                        BizNoChecksum.Mask(bizNoNormalized));
+                    ntsSkippedReason = "국세청 호출 실패(응답 없음)";
+                }
+                else
+                {
+                    return BadRequest(new { success = false, message = "올바르지 않은 사업자등록번호입니다. 번호를 다시 확인해주세요." });
+                }
             }
         }
 
