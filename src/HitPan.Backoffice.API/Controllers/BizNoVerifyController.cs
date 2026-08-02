@@ -1,3 +1,4 @@
+using HitPan.Backoffice.API.Services;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
@@ -96,12 +97,42 @@ public class BizNoVerifyController : ControllerBase
             if (!res.IsSuccessStatusCode)
             {
                 _logger.LogWarning("[BizNoVerify] nts api {Status} body={Body}", (int)res.StatusCode, body);
-                // 헌법 #22 정합 — 국세청 장애 시 가입 거부 (사장님 결재 2026-06-08)
+
+                // 🔴 P0 봉합 (2026-08-02): 종전엔 여기서 무조건 Valid=false 였다.
+                //   2026-06-08 결재("국세청 장애 시 가입 거부")의 의도는 '휴업·폐업자를 통과시키지 말라'다.
+                //   그런데 실제 효과는 '국세청이 멈추면 정상 사업자도 화면에서 막힌다'였다.
+                //   실측 2026-08-02: 공공데이터포털 전환 작업(7/29~8/02)으로 -5 가 계속 나와
+                //   [검증] 버튼에서 막혀 가입 화면을 넘어갈 수 없었다.
+                //
+                //   ⇒ 같은 날 가입 API(LandingSignupController)에는 체크섬 폴백을 넣었는데
+                //      검증 버튼에는 안 넣어 반쪽이 됐다. 검증을 통과 못 하면 제출까지 가지도 못한다.
+                //
+                //   봉합 원칙: 거부를 '통과'로 바꾸는 게 아니라 '보류'로 바꾼다.
+                //     · 체크섬은 통과 → 화면 진행 가능 (Valid=true)
+                //     · 단 Source='checksum-fallback' 로 표시하고, 문구로 미확인임을 알린다
+                //     · 휴업·폐업 판정은 여전히 국세청만 할 수 있다 → 백오피스 승인 때 사람이 본다
+                //   즉 2026-06-08 결재의 취지(부적격자 차단)는 승인 단계로 옮겨 지키고,
+                //   가입 화면이 외부 장애로 멈추는 것만 막는다.
+                if (BizNoChecksum.IsValid(normalized))
+                {
+                    _logger.LogWarning(
+                        "[BizNoVerify] 국세청 무응답({Status}) → 체크섬 보류 통과 bizNo={Masked}. " +
+                        "⚠️ 휴업·폐업 미확인 — 백오피스 승인 시 사람이 반드시 확인할 것.",
+                        (int)res.StatusCode, Mask(normalized));
+                    return Ok(new VerifyResponse
+                    {
+                        Valid = true,
+                        Message = "사업자번호 형식이 확인되었습니다. (국세청 조회가 일시적으로 지연되어 가입 승인 시 다시 확인합니다)",
+                        Source = "checksum-fallback"
+                    });
+                }
+
+                // 체크섬조차 틀리면 국세청 없이도 오입력이 확정된다.
                 return Ok(new VerifyResponse
                 {
                     Valid = false,
-                    Message = "국세청 서비스 일시 장애입니다. 잠시 후 다시 시도해주세요.",
-                    Source = "nts-error"
+                    Message = "올바르지 않은 사업자번호입니다.",
+                    Source = "checksum"
                 });
             }
 
@@ -176,12 +207,29 @@ public class BizNoVerifyController : ControllerBase
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "[BizNoVerify] nts api 호출 실패 bizNo={Masked}", Mask(normalized));
-            // 헌법 #22 정합 — 장애 시 가입 거부 (보안 우선)
+
+            // 위 HTTP 실패 분기와 동일한 폴백 — 타임아웃·DNS·TLS 등 예외 경로.
+            //   2026-08-02 실측: 포털 전환 중 -5(HTTP 503)와 25초 타임아웃이 번갈아 났다.
+            //   HTTP 분기만 막고 예외를 안 막으면 절반은 여전히 화면에서 멈춘다.
+            if (BizNoChecksum.IsValid(normalized))
+            {
+                _logger.LogWarning(
+                    "[BizNoVerify] 국세청 호출 예외 → 체크섬 보류 통과 bizNo={Masked}. " +
+                    "⚠️ 휴업·폐업 미확인 — 백오피스 승인 시 사람이 반드시 확인할 것.",
+                    Mask(normalized));
+                return Ok(new VerifyResponse
+                {
+                    Valid = true,
+                    Message = "사업자번호 형식이 확인되었습니다. (국세청 조회가 일시적으로 지연되어 가입 승인 시 다시 확인합니다)",
+                    Source = "checksum-fallback"
+                });
+            }
+
             return Ok(new VerifyResponse
             {
                 Valid = false,
-                Message = "국세청 서비스 일시 장애입니다. 잠시 후 다시 시도해주세요.",
-                Source = "nts-error"
+                Message = "올바르지 않은 사업자번호입니다.",
+                Source = "checksum"
             });
         }
     }
