@@ -830,7 +830,11 @@ footer {
 </footer>
 
 <script>
-const API_BASE = 'https://api-demo.hitpan.kr';
+// 🔴 봉합 20260803 (P1, 테넌트 격리) — 상세 근거는 landing.html 주석 참조.
+//   api-demo(개발용 데모) 고정 → 본사 공용 back.hitpan.kr 로 교체.
+//   이 파일은 wwwroot 라 출하 EXE·업데이트 zip 에 실려 고객 PC 에 배포된다.
+//   ※ /api/landing/beta-signup 은 백오피스 API 에만 있어 빈 값(같은 출처)이면 404 가 된다.
+const API_BASE = 'https://back.hitpan.kr';
 
 function scrollTo(id) {
   document.getElementById(id).scrollIntoView({ behavior: 'smooth' });
