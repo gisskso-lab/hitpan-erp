@@ -1977,6 +1977,42 @@ begin
       Log('[6-1-2] 좀비 서비스 없음(정상) — delete 건너뜀');
     Sleep(1000);
 
+    // ★★★ 봉합 20260803작1 W-1 (P0 — 8/03 백지 Sandbox 실측 확정, 사장님 오더) ★★★
+    //
+    // ■ 진범 (사장님 직접 실행으로 채증)
+    //     > sc delete Cloudflared
+    //       [SC] DeleteService SUCCESS            ← SCM 에서는 지워졌다
+    //     > cloudflared.exe service install
+    //       cloudflared service is already installed at Cloudflared;
+    //       ... you can do `cloudflared service uninstall` to clean up ...
+    //   **방금 지웠는데도 "이미 설치돼 있다"며 설치를 거부한다.**
+    //   이어서 uninstall → install 을 하니 그제서야 성공했고, 그때 진짜 이유가 나왔다:
+    //       Cannot install event logger:
+    //       SYSTEM\CurrentControlSet\Services\EventLog\Application\Cloudflared
+    //       registry key already exists
+    //   ⇒ cloudflared 는 서비스 존재를 SCM 이 아니라 **자체 레지스트리 키**로 판정한다.
+    //     `sc delete` 는 그 키를 지우지 않는다. 키가 남으면 **영구히 설치를 거부**한다.
+    //   또 하나: uninstall 출력의 'The specified service has been marked for deletion' —
+    //     `sc delete` 직후 서비스는 즉시 사라지지 않고 **삭제 표시 상태**로 남는다.
+    //     6-1 이 지우고 3초 뒤 6-2 가 설치를 시도하면 그 상태에 정면으로 걸린다.
+    //
+    // ■ 8/03 19:02 설치 로그가 이 하나로 전부 설명된다
+    //     6-1-scdelete        1060  (SCM 엔 없음. 그러나 cloudflared 잔재는 남음)
+    //     6-2-serviceinstall  **1**  ← 잔재 때문에 거부 = 서비스가 안 만들어짐
+    //     6-3-scconfig/start/query 1060 (없는 서비스라 당연)
+    //     → 터널 미연결 → **외부 접속 1033**
+    //
+    // ■ 봉합 — cloudflared 자기 명령으로 정리한다
+    //   `sc delete` 로는 안 된다. cloudflared 가 오류 메시지에서 직접 안내한 방법을 쓴다.
+    //   실패해도 무시한다 — 백지 신규설치엔 잔재가 없어 실패가 정상이다(비차단).
+    //   ※ 6-1 의 sc delete 는 남긴다. SCM 등록분 정리는 여전히 필요하다(헌법 #1 — 추가만).
+    //   ※ taskkill 가드(6-1)는 한 글자도 건드리지 않는다 — 8/03 실측 통과분(50분 → 2초).
+    ExecLogged('6-1-3-svcuninstall',
+      '"' + ExpandConstant('{app}\cloudflared.exe') + '" service uninstall');
+    // 'marked for deletion' 해소 대기. SCM 이 삭제를 실제로 반영하려면 핸들이 모두 닫혀야 한다.
+    //   3초는 6-2 가 삭제 대기 상태에 걸리기 충분히 짧았다(8/03 실측) → 6초로 늘린다.
+    Sleep(6000);
+
     // 6-2. service install 박음 (사고 #11·#28 봉합 후)
     //
     // ★ 봉합 20260730작10 P0-5 (사장님 결재): **이 단계가 오늘 실패의 현장이다.**
@@ -2025,7 +2061,12 @@ begin
     ResultCode := ExecLogged('6-3-scquery', 'sc query cloudflared');
     if ResultCode <> 0 then begin
       Log('[20260714작1 W1-3] cloudflared 서비스 미존재 — service install 1회 재시도');
-      Sleep(3000);
+      // ★ 20260803작1 W-1: 재시도 앞에도 잔재 정리를 넣는다.
+      //   8/03 실측에서 재시도(6-3-retry-serviceinstall)도 **동일하게 코드 1** 로 실패했다.
+      //   잔재를 안 지우면 몇 번을 다시 해도 같은 이유로 거부당한다(= 재시도가 무의미했다).
+      ExecLogged('6-3-retry-svcuninstall',
+        '"' + ExpandConstant('{app}\cloudflared.exe') + '" service uninstall');
+      Sleep(6000);
       // 작10 P0-5: 재시도의 출력이 진단의 핵심이다. 1차와 2차가 같은 오류를 내면
       //   원인이 일시적 경합이 아니라 구조적(권한·정책·바이너리)이라는 뜻이다.
       ExecLogged('6-3-retry-serviceinstall',
@@ -2092,6 +2133,11 @@ begin
         Sleep(3000);
         ExecLogged('P0-3-scdelete', 'sc delete cloudflared');
         Sleep(2000);
+        // ★ 20260803작1 W-1: 자동복구 경로도 sc delete 만으로는 cloudflared 잔재가 안 지워진다.
+        //   여기서 막히면 '새 토큰을 받아왔는데 설치가 거부되는' 침묵 실패가 된다.
+        ExecLogged('P0-3-svcuninstall',
+          '"' + ExpandConstant('{app}\cloudflared.exe') + '" service uninstall');
+        Sleep(6000);
         ExecLogged('P0-3-serviceinstall',
           '"' + ExpandConstant('{app}\cloudflared.exe') + '" service install ' + G_TunnelToken);
         Sleep(3000);
