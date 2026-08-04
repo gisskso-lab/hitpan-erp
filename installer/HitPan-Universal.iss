@@ -1001,32 +1001,103 @@ begin
     Result := Result + Copy(Chars, Idx, 1);
   end;
 end;
-
-// 봉합 2026-06-17 1.2.13 — Blazor WASM CORS 사고 차단 (P0)
-//   appsettings.json ApiBaseUrl을 고객사 실제 도메인으로 정정.
-//   1.2.12까지 api-demo.hitpan.kr 박힌 채 가도 → CORS preflight 차단 사고.
-//   사장님 헌법 #21 정합 (삭제·수정 금지 = 부트 가능 상태 유지하며 정정 OK)
-// 단일 appsettings.json 파일의 ApiBaseUrl 을 회사 도메인으로 정정.
+// 단일 appsettings.json 의 ApiBaseUrl **값만** 정정한다(다른 키·주석·서식 전부 보존).
+//
+// ★★ 봉합 20260804 P0-E (검증팀 데이비드 박 [4] 최종검증 적발) — 인코딩 ★★
+//   ■ 무엇이 문제였나
+//     직전 구현은 Pascal 로 읽고(LoadStringsFromFile) Pascal 로 썼다(SaveStringToFile(..,False)).
+//     그런데 SaveStringToFile 의 3번째 인자 False = **ANSI(CP949)** 다. 대상 파일은
+//     한글·이모지 주석을 담은 **UTF-8** 이다. 실측(CP949 라운드트립):
+//       · '🔴'(U+1F534) → '??'  복원 불가
+//       · CP949 산출물을 엄격 UTF-8 로 디코드 → 예외 / 브라우저(관대) → U+FFFD 599개
+//     구조 문자({ " :)가 ASCII 라 JSON 파싱과 ApiBaseUrl='' 자체는 살아남아 **로그인은 된다.**
+//     즉 격리는 안 무너진다. 그러나 깨지는 대상이 하필 **재발방지 주석**이다 —
+//     이 함수를 전면덮어쓰기에서 값치환으로 바꾼 **명시적 목적이 주석 보존**이었는데
+//     인코딩이 그 목적을 스스로 무효화했다. 다음 사고 조사자가 고객 PC 를 열면 경고를 못 읽는다.
+//
+//   ■ 이 파일이 같은 진범에 이미 한 번 당했다 (1226-1229행 참조)
+//     20260707작2 W1-7 — "SaveStringToFile(..,False)=ANSI 로 쓰는데 상대는 UTF-8 로 읽는다"
+//     → 한글이 U+FFFD 로 깨져 로그인 영구 불가. 그때는 JsonEscape 로 봉합했다.
+//     직전 구현은 **그 교훈을 같은 파일 안에서 재적용하지 않았다.**
+//
+//   ■ 왜 LoadStringsFromFile 도 못 믿나 (직전 커밋의 '선례 4건' 주장 정정 — 헌법 #32)
+//     선례 395·519·531·627 은 전부 **PowerShell 이 UTF-8 로 쓴 ASCII 기계 출력**
+//     (슬롯번호·API 응답)을 되읽는 자리다. **한글 UTF-8 원본을 읽는 선례는 0건.**
+//     ⇒ 읽기 쪽 UTF-8 정합도 미검증이었다. 쓰기만 고치면 반쪽이다.
+//
+//   ■ 채택: 읽기·수정·쓰기를 통째로 PowerShell 에 위임한다
+//     · UTF8Encoding($false) 로 **읽고 쓴다** — BOM 없이, 왕복 무손실. 양쪽 다 UTF-8 로 통일.
+//     · 이 파일의 지배적 관용구다(WriteAllText 선례 389·497·503·505·609·615 = 6건).
+//       Pascal 문자열 수술(선례 0건)보다 검증된 경로다.
+//     · 정규식으로 "ApiBaseUrl" **값만** 치환 —
+//       (?<!\w) 로 '_comment_ApiBaseUrl'·'BackofficeApiBaseUrl' 오매칭을 원천 차단한다.
+//     · 실패해도 원본을 건드리지 않는다(치환 0건이면 그대로 종료) — 파괴 금지.
+//   ⚠️ 정적 분석만으로 확정할 수 없는 영역이라 **Sandbox 실측으로 산출 파일을 눈으로 확인**한다
+//     (검증팀 단서 조건). '코드 고쳤다'는 봉합이 아니다.
 procedure FixupOneAppSettings(AppSettingsPath: String; TargetUrl: String);
 var
-  NewContent: AnsiString;
+  PsFile, ResultFile, PsScript: String;
+  Lines: TArrayOfString;
+  ResultCode: Integer;
+  Outcome: String;
 begin
   if not FileExists(AppSettingsPath) then begin
     Log('[FixupBlazor] 0건(파일없음): ' + AppSettingsPath);
     Exit;
   end;
-  // 표준 JSON 단일행 정정 (Blazor WASM 표준 부트 정합 유지)
-  NewContent := '{' + #13#10 +
-                '  "ApiBaseUrl": "' + TargetUrl + '",' + #13#10 +
-                '  "BackofficeApiBaseUrl": "https://back.hitpan.kr"' + #13#10 +
-                '}' + #13#10;
-  if not SaveStringToFile(AppSettingsPath, NewContent, False) then begin
-    // ★ 봉합 20260707작2 (W2-1): 실패를 Log 만 남기고 통과하면 appsettings 에 api-demo 원본이 잔존해
-    //   로그인이 demo 서버로 새는 진범 — 실패를 설치 실패로 승격한다(헌법 #15·#19, "완료처럼 보이는 실패" 차단).
-    Log('[FixupBlazor] SaveStringToFile 실패: ' + AppSettingsPath);
+
+  PsFile     := ExpandConstant('{tmp}\hitpan-fixup-appsettings.ps1');
+  ResultFile := ExpandConstant('{tmp}\hitpan-fixup-appsettings.out');
+  DeleteFile(ResultFile);
+
+  // TargetUrl 은 도메인 또는 빈 문자열이라 따옴표·역슬래시가 들어올 여지가 없다.
+  //   그래도 정규식 치환문에서 '$' 는 특수문자이므로 리터럴로 넘기기 위해 -replace 대신
+  //   [Regex]::Replace 의 MatchEvaluator 를 쓰지 않고, 값에 $ 가 없음을 전제로 단순 치환한다.
+  PsScript :=
+    '$ErrorActionPreference = ''Stop'';' + #13#10 +
+    '$enc = New-Object System.Text.UTF8Encoding($false);' + #13#10 +
+    'try {' + #13#10 +
+    '  $p = "' + AppSettingsPath + '";' + #13#10 +
+    '  $raw = [System.IO.File]::ReadAllText($p, $enc);' + #13#10 +
+    // (?<!\w) = 앞 문자가 단어문자가 아님 → _comment_ApiBaseUrl / BackofficeApiBaseUrl 배제
+    '  $re = ''(?<!\w)("ApiBaseUrl"\s*:\s*")[^"]*(")'';' + #13#10 +
+    '  $new = [System.Text.RegularExpressions.Regex]::Replace($raw, $re, ''${1}' + TargetUrl + '${2}'');' + #13#10 +
+    '  if ($new -eq $raw) {' + #13#10 +
+    // 이미 정답이거나 키가 없다. 어느 쪽이든 원본을 건드리지 않는다.
+    '    [System.IO.File]::WriteAllText("' + ResultFile + '", "NOCHANGE", $enc);' + #13#10 +
+    '    exit 0;' + #13#10 +
+    '  }' + #13#10 +
+    '  [System.IO.File]::WriteAllText($p, $new, $enc);' + #13#10 +
+    '  [System.IO.File]::WriteAllText("' + ResultFile + '", "OK", $enc);' + #13#10 +
+    '  exit 0;' + #13#10 +
+    '} catch {' + #13#10 +
+    '  try { [System.IO.File]::WriteAllText("' + ResultFile + '", "ERR:" + $_.Exception.Message, $enc); } catch { }' + #13#10 +
+    '  exit 1;' + #13#10 +
+    '}';
+
+  SaveStringToFile(PsFile, PsScript, False);
+  Exec('powershell.exe', '-NoProfile -ExecutionPolicy Bypass -File "' + PsFile + '"',
+       '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+
+  Outcome := '';
+  if FileExists(ResultFile) and LoadStringsFromFile(ResultFile, Lines) and (GetArrayLength(Lines) > 0) then
+    Outcome := Trim(Lines[0]);
+
+  DeleteFile(PsFile);
+  DeleteFile(ResultFile);
+
+  if (ResultCode <> 0) or (Copy(Outcome, 1, 4) = 'ERR:') then begin
+    // ★ 봉합 20260707작2 (W2-1) 유지: 실패를 Log 만 남기고 통과하면 잘못된 주소가 잔존해
+    //   로그인이 남의 서버로 샌다 — 실패를 설치 실패로 승격한다(헌법 #15·#19).
+    Log('[FixupBlazor] 정정 실패(exit=' + IntToStr(ResultCode) + ', ' + Outcome + '): ' + AppSettingsPath);
     RaiseException('설정 파일(appsettings.json) 갱신에 실패했습니다. 설치를 다시 실행해 주세요: ' + AppSettingsPath);
   end;
-  Log('[FixupBlazor] 정정 완료 → ' + AppSettingsPath + ' = ' + TargetUrl);
+
+  if Outcome = 'NOCHANGE' then
+    // 레포 원본이 이미 빈 값이면 정상적으로 여기 걸린다(= 정정할 게 없음).
+    Log('[FixupBlazor] 변경 없음(이미 정답이거나 키 없음): ' + AppSettingsPath)
+  else
+    Log('[FixupBlazor] 정정 완료 → ' + AppSettingsPath + ' = [' + TargetUrl + ']');
 end;
 
 procedure FixupBlazorAppSettings();
@@ -1050,7 +1121,31 @@ begin
     Exit;
   end;
 
-  TargetUrl := 'https://' + G_PrimaryDomain;
+  // ★★★ 봉합 20260803작2 P0-1 (병렬검증 적발 · 사장님 지시 "고쳐") ★★★
+  //
+  // ■ 종전: TargetUrl := 'https://' + G_PrimaryDomain 을 써넣었다.
+  //   그러면 격리가 **G_PrimaryDomain 이 정확하다는 가정 하나**에만 걸린다.
+  //   그 값이 오염되면(7/01·7/07 계통) 고객 화면이 남의 서버를 본다 = 테넌트 격리 붕괴.
+  //   2026-08-03 사고가 정확히 그 계통이었다(레포 원본 api-demo 가 살아남).
+  //
+  // ■ 이제: **빈 값**으로 통일한다. LOCAL 분기와 같다.
+  //   빈 값이면 Program.cs:35 가 HostEnvironment.BaseAddress(현재 페이지 출처)로 폴백한다.
+  //   실측으로 확인한 두 접속 경로 모두 이 폴백이 자기 회사 API 로 간다:
+  //     · 터널 — ingress origin = http://localhost:5257(API). API 는 자기 wwwroot 로
+  //       Blazor 를 서빙하면서 /api/* 도 같은 프로세스가 처리한다(Program.cs:59-65).
+  //       ⇒ 페이지 출처 = API 출처. 같은 출처라 CORS 자체가 없다.
+  //     · localhost:5234 — web-server.ps1:89 이 /api/* 를 슬롯 API 포트로 프록시한다.
+  //
+  // ■ 왜 이게 더 안전한가 — 격리가 '값이 맞는가'에서 '구조'로 바뀐다
+  //   도메인을 써넣으면 그 값이 틀릴 가능성이 영원히 남는다.
+  //   빈 값이면 **틀릴 값 자체가 없다.** 브라우저가 자기가 열린 곳으로만 요청한다.
+  //   ⇒ 남의 회사 서버를 보는 것이 구조적으로 불가능해진다.
+  //
+  // ■ 부수 봉합: api\wwwroot\appsettings.Local.json 이 이 분기에서 누락돼 있었다(4개만 정정).
+  //   web 쪽은 3개를 정정하면서 api 쪽은 1개만 봤다 — 비대칭. 5개로 맞춘다.
+  TargetUrl := '';
+  Log('[FixupBlazor] 정식 설치 → ApiBaseUrl 빈 값 정정(자기 출처 폴백). ' +
+      '도메인(' + G_PrimaryDomain + ')을 써넣지 않는다 — 20260803작2 P0-1 격리 봉합');
 
   // ★ 진범 봉합 2026-06-18: Blazor WASM 은 web\wwwroot 에서 서빙됨(web-server.ps1:3).
   //   기존엔 api\wwwroot 만 고쳐서 로그인이 읽는 web\wwwroot 는 api-demo 데모주소 그대로 →
@@ -1059,6 +1154,7 @@ begin
   FixupOneAppSettings(ExpandConstant('{app}') + '\web\wwwroot\appsettings.Local.json', TargetUrl);
   FixupOneAppSettings(ExpandConstant('{app}') + '\web\wwwroot\appsettings.Development.json', TargetUrl);
   FixupOneAppSettings(ExpandConstant('{app}') + '\api\wwwroot\appsettings.json', TargetUrl);
+  FixupOneAppSettings(ExpandConstant('{app}') + '\api\wwwroot\appsettings.Local.json', TargetUrl);
 end;
 
 // 봉합 2026-06-23 (6차 전수조사 D-P0-01·D-P1-02): 워치독 appsettings.json 의 HealthCheckUrl(demo 고정)·
