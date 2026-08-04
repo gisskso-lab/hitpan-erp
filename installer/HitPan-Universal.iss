@@ -1007,19 +1007,107 @@ end;
 //   1.2.12까지 api-demo.hitpan.kr 박힌 채 가도 → CORS preflight 차단 사고.
 //   사장님 헌법 #21 정합 (삭제·수정 금지 = 부트 가능 상태 유지하며 정정 OK)
 // 단일 appsettings.json 파일의 ApiBaseUrl 을 회사 도메인으로 정정.
+// ★ 봉합 20260803작2 P0-1 — "ApiBaseUrl": "..." 의 **값만** 바꾼다.
+//   JSON 파서를 쓰지 않는 이유: Inno Pascal 에 JSON 파서가 없고, 이 파일에 선례도 0건이다.
+//   선례 없는 기법을 '검증된 패턴'이라 부르지 않는다(작10 교훈).
+//   ⇒ 이 파일에 사용례가 있는 Pos/Copy 문자열 조작만 쓴다.
+//   찾지 못하면 빈 문자열을 반환한다 — 호출부가 '원본 보존'으로 처리한다(파괴 금지).
+function ReplaceApiBaseUrlValue(const Raw: String; const NewUrl: String): String;
+var
+  KeyPos, ColonPos, Q1, Q2, i: Integer;
+begin
+  Result := '';
+  KeyPos := Pos('"ApiBaseUrl"', Raw);
+  if KeyPos = 0 then Exit;
+
+  // 키 뒤의 콜론을 찾는다.
+  ColonPos := 0;
+  for i := KeyPos + Length('"ApiBaseUrl"') to Length(Raw) do
+  begin
+    if Copy(Raw, i, 1) = ':' then begin ColonPos := i; Break; end;
+    // 콜론 전에 공백 외의 문자가 나오면 우리가 아는 형식이 아니다.
+    if (Copy(Raw, i, 1) <> ' ') and (Copy(Raw, i, 1) <> #9) then Exit;
+  end;
+  if ColonPos = 0 then Exit;
+
+  // 값의 여는 따옴표
+  Q1 := 0;
+  for i := ColonPos + 1 to Length(Raw) do
+  begin
+    if Copy(Raw, i, 1) = '"' then begin Q1 := i; Break; end;
+    if (Copy(Raw, i, 1) <> ' ') and (Copy(Raw, i, 1) <> #9) then Exit;
+  end;
+  if Q1 = 0 then Exit;
+
+  // 값의 닫는 따옴표 (URL 에 역슬래시 이스케이프가 들어갈 일이 없어 단순 탐색으로 충분)
+  Q2 := 0;
+  for i := Q1 + 1 to Length(Raw) do
+  begin
+    if Copy(Raw, i, 1) = '"' then begin Q2 := i; Break; end;
+  end;
+  if Q2 = 0 then Exit;
+
+  //  앞부분 + 새 값 + 뒷부분 — 주석·다른 키·줄바꿈 전부 보존된다.
+  Result := Copy(Raw, 1, Q1) + NewUrl + Copy(Raw, Q2, Length(Raw) - Q2 + 1);
+end;
+
 procedure FixupOneAppSettings(AppSettingsPath: String; TargetUrl: String);
 var
   NewContent: AnsiString;
+  RawContent: AnsiString;
+  RawLines: TArrayOfString;
+  LineIdx: Integer;
 begin
   if not FileExists(AppSettingsPath) then begin
     Log('[FixupBlazor] 0건(파일없음): ' + AppSettingsPath);
     Exit;
   end;
-  // 표준 JSON 단일행 정정 (Blazor WASM 표준 부트 정합 유지)
-  NewContent := '{' + #13#10 +
-                '  "ApiBaseUrl": "' + TargetUrl + '",' + #13#10 +
-                '  "BackofficeApiBaseUrl": "https://back.hitpan.kr"' + #13#10 +
-                '}' + #13#10;
+  // ★ 봉합 20260803작2 P0-1 (병렬검증 적발 · 사장님 지시 "고쳐"):
+  //   ■ 무엇이 문제였나
+  //     이 함수는 대상 파일을 **읽지 않고 고정 2키 JSON 으로 전면 덮어쓴다.** 그래서
+  //     ① 레포 원본에 심은 재발방지 주석(_comment_ApiBaseUrl)이 설치 시점에 100% 소멸했다.
+  //        다음 사고 조사자가 고객 PC 를 열면 아무 경고도 못 본다.
+  //     ② appsettings.Local.json 에 원본에 없던 BackofficeApiBaseUrl 키가 주입돼
+  //        파일 스키마가 설치 전후로 달라졌다.
+  //     ③ 무엇보다, 비-LOCAL(정식 설치) 분기가 TargetUrl 로 **도메인을 다시 써넣어**
+  //        레포 원본을 빈 값으로 비운 격리 봉합이 정식 설치 경로에서 무효화됐다.
+  //        ⇒ 격리가 G_PrimaryDomain 단일 실패점에 걸린다(그 값이 오염되면 즉시 재붕괴).
+  //
+  //   ■ 왜 값을 유지(Preserve)하지 않고 그대로 두는 쪽을 택했나
+  //     레포 원본이 이미 빈 값이다(20260803 P0 봉합). 빈 값이면 Program.cs:35 가
+  //     HostEnvironment.BaseAddress(= 현재 페이지 출처)로 폴백한다. 실측 확인:
+  //       · 터널 경로 — ingress origin 이 http://localhost:5257(API)이고, API 는 자기
+  //         wwwroot 로 Blazor 를 서빙하면서 /api/* 도 같은 프로세스가 처리한다
+  //         (Program.cs:59-65 + MapControllers) ⇒ 페이지 출처 = API. 같은 출처라 CORS 0.
+  //       · localhost:5234 경로 — web-server.ps1:89 이 /api/* 를 슬롯 API 포트로 프록시.
+  //     ⇒ **어느 경로든 빈 값이 자기 회사 API 로 간다.** 도메인을 써넣을 이유 자체가 없고,
+  //       안 써넣으면 격리가 '정정이 도는가'에 의존하지 않는 구조가 된다(정정은 업데이트를
+  //       이길 수 없다 — UpdateOrchestrator 가 web/·api/ 를 폴더째 통교체하기 때문).
+  //
+  //   ■ 그래도 이 함수를 남기는 이유 (헌법 #1 — 삭제 아닌 추가)
+  //     출하물이 어떤 이유로든 비어있지 않게 나온 경우의 **마지막 안전망**이다.
+  //     이제는 전면 덮어쓰기가 아니라 **ApiBaseUrl 값만 치환**하고 나머지 줄은 보존한다.
+  //     호출부가 TargetUrl='' 을 주면 빈 값으로 정정한다(= 자기 출처 폴백 발동).
+  //   ※ 읽기는 LoadStringsFromFile(줄 배열)로 한다 — 이 파일에 사용례 4건(395·519·531·627)이
+  //     있는 검증된 관용구다. LoadStringFromFile(단수)은 선례 0건이라 쓰지 않는다
+  //     (작10 교훈: 선례 없는 기법을 '검증된 패턴'이라 부르지 않는다. 컴파일 실패 = 전 고객 설치 불가).
+  if not LoadStringsFromFile(AppSettingsPath, RawLines) then begin
+    Log('[FixupBlazor] 읽기 실패 — 정정 건너뜀(원본 보존): ' + AppSettingsPath);
+    Exit;
+  end;
+  RawContent := '';
+  for LineIdx := 0 to GetArrayLength(RawLines) - 1 do
+  begin
+    if LineIdx > 0 then RawContent := RawContent + #13#10;
+    RawContent := RawContent + RawLines[LineIdx];
+  end;
+  NewContent := ReplaceApiBaseUrlValue(RawContent, TargetUrl);
+  if NewContent = '' then begin
+    // ApiBaseUrl 키를 못 찾았다 = 우리가 아는 형식이 아니다. 통째로 덮어써서 다른 설정을
+    //   날리는 것보다 그대로 두는 편이 안전하다(원본이 빈 값이면 이미 정답이다).
+    Log('[FixupBlazor] ApiBaseUrl 키 미발견 — 원본 보존: ' + AppSettingsPath);
+    Exit;
+  end;
   if not SaveStringToFile(AppSettingsPath, NewContent, False) then begin
     // ★ 봉합 20260707작2 (W2-1): 실패를 Log 만 남기고 통과하면 appsettings 에 api-demo 원본이 잔존해
     //   로그인이 demo 서버로 새는 진범 — 실패를 설치 실패로 승격한다(헌법 #15·#19, "완료처럼 보이는 실패" 차단).
@@ -1050,7 +1138,31 @@ begin
     Exit;
   end;
 
-  TargetUrl := 'https://' + G_PrimaryDomain;
+  // ★★★ 봉합 20260803작2 P0-1 (병렬검증 적발 · 사장님 지시 "고쳐") ★★★
+  //
+  // ■ 종전: TargetUrl := 'https://' + G_PrimaryDomain 을 써넣었다.
+  //   그러면 격리가 **G_PrimaryDomain 이 정확하다는 가정 하나**에만 걸린다.
+  //   그 값이 오염되면(7/01·7/07 계통) 고객 화면이 남의 서버를 본다 = 테넌트 격리 붕괴.
+  //   2026-08-03 사고가 정확히 그 계통이었다(레포 원본 api-demo 가 살아남).
+  //
+  // ■ 이제: **빈 값**으로 통일한다. LOCAL 분기와 같다.
+  //   빈 값이면 Program.cs:35 가 HostEnvironment.BaseAddress(현재 페이지 출처)로 폴백한다.
+  //   실측으로 확인한 두 접속 경로 모두 이 폴백이 자기 회사 API 로 간다:
+  //     · 터널 — ingress origin = http://localhost:5257(API). API 는 자기 wwwroot 로
+  //       Blazor 를 서빙하면서 /api/* 도 같은 프로세스가 처리한다(Program.cs:59-65).
+  //       ⇒ 페이지 출처 = API 출처. 같은 출처라 CORS 자체가 없다.
+  //     · localhost:5234 — web-server.ps1:89 이 /api/* 를 슬롯 API 포트로 프록시한다.
+  //
+  // ■ 왜 이게 더 안전한가 — 격리가 '값이 맞는가'에서 '구조'로 바뀐다
+  //   도메인을 써넣으면 그 값이 틀릴 가능성이 영원히 남는다.
+  //   빈 값이면 **틀릴 값 자체가 없다.** 브라우저가 자기가 열린 곳으로만 요청한다.
+  //   ⇒ 남의 회사 서버를 보는 것이 구조적으로 불가능해진다.
+  //
+  // ■ 부수 봉합: api\wwwroot\appsettings.Local.json 이 이 분기에서 누락돼 있었다(4개만 정정).
+  //   web 쪽은 3개를 정정하면서 api 쪽은 1개만 봤다 — 비대칭. 5개로 맞춘다.
+  TargetUrl := '';
+  Log('[FixupBlazor] 정식 설치 → ApiBaseUrl 빈 값 정정(자기 출처 폴백). ' +
+      '도메인(' + G_PrimaryDomain + ')을 써넣지 않는다 — 20260803작2 P0-1 격리 봉합');
 
   // ★ 진범 봉합 2026-06-18: Blazor WASM 은 web\wwwroot 에서 서빙됨(web-server.ps1:3).
   //   기존엔 api\wwwroot 만 고쳐서 로그인이 읽는 web\wwwroot 는 api-demo 데모주소 그대로 →
@@ -1059,6 +1171,7 @@ begin
   FixupOneAppSettings(ExpandConstant('{app}') + '\web\wwwroot\appsettings.Local.json', TargetUrl);
   FixupOneAppSettings(ExpandConstant('{app}') + '\web\wwwroot\appsettings.Development.json', TargetUrl);
   FixupOneAppSettings(ExpandConstant('{app}') + '\api\wwwroot\appsettings.json', TargetUrl);
+  FixupOneAppSettings(ExpandConstant('{app}') + '\api\wwwroot\appsettings.Local.json', TargetUrl);
 end;
 
 // 봉합 2026-06-23 (6차 전수조사 D-P0-01·D-P1-02): 워치독 appsettings.json 의 HealthCheckUrl(demo 고정)·
