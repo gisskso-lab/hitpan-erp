@@ -2297,7 +2297,22 @@ begin
     Exec('powershell.exe',
          '-NoProfile -ExecutionPolicy Bypass -File "' + ExpandConstant('{app}\scripts\InstallWatchdog.ps1') + '" -InstallPath "' + ExpandConstant('{app}') + '"',
          '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
-    if ResultCode <> 0 then
+    // ★ 봉합 20260804작1: 종료코드 3분화에 맞춰 안내를 가른다.
+    //   InstallWatchdog.ps1 규약 — 0=완전성공 / 1=서비스 자체 없음(치명) / 2=기동만 실패(자가복구 가능)
+    //   종전엔 <>0 하나로 뭉뚱그려 **exit 1 인데도 "재부팅하면 시작됩니다"** 라고 안내했다.
+    //   서비스가 아예 안 만들어진 경우엔 재부팅해도 안 뜬다 — 고객에게 틀린 안내였다(헌법 #24 가르침 의무).
+    if ResultCode = 2 then begin
+      // 서비스·Guardian 은 만들어졌고 기동만 실패 → 5분 뒤 Guardian, 재부팅 시 start=auto.
+      //   설치를 막지 않으며, 사실인 안내만 한다.
+      Log('[20260804작1] 워치독 기동만 실패(exit=2) — Guardian/재부팅으로 자가복구 예정. 설치 계속.');
+      if not G_StartupWarnShown then begin
+        G_StartupWarnShown := True;
+        MsgBox('히트판 자동 관리 프로그램이 아직 시작되지 않았습니다.' + #13#10 +
+               '잠시 후 자동으로 시작되며, 그래도 안 되면 PC를 다시 켜면 시작됩니다.',
+               mbInformation, MB_OK);
+      end;
+    end
+    else if ResultCode <> 0 then
       WarnStartupRegistrationFailure('워치독 서비스 등록(InstallWatchdog.ps1)', ResultCode);
   end;
 
