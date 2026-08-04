@@ -61,6 +61,12 @@ for ($i = 1; $i -le 3; $i++) {
         Write-Output "[WARN] service already exists (1073) — reusing"
         $createOk = $true; break
     }
+    # ★ P1 ([4] 검증팀): 5 = 액세스 거부. 시간이 해결하지 않는다 — 재시도해도 무조건 실패라 즉시 중단.
+    #   재시도가 의미 있는 것은 1072(marked for deletion) 처럼 '기다리면 풀리는' 상태뿐이다.
+    if ($LASTEXITCODE -eq 5) {
+        Write-Output "[FAIL] sc create 액세스 거부(5) — 관리자 권한 필요. 재시도 무의미, 즉시 중단"
+        break
+    }
     Write-Output "[WARN] sc create attempt $i failed (exit=$LASTEXITCODE) — retry in 3s"
     Start-Sleep -Seconds 3
 }
@@ -108,7 +114,9 @@ $GuardianTask = 'HitPanWatchdogGuardian'
 $GuardianPs1  = Join-Path $InstallPath 'scripts\Guardian.ps1'
 
 # Guardian.ps1 작성 — 반드시 작업 등록보다 먼저(등록 즉시 실행될 수 있으므로 파일이 있어야 한다)
-@'
+#   ※ schtasks 는 /ST 생략 시 현재 시각부터 시작한다 = 등록 직후 1회 실행될 수 있다.
+#     그래서 파일이 먼저 있어야 한다(순서 고정).
+$guardianBody = @'
 $svc = Get-Service -Name HitPanWatchdog -ErrorAction SilentlyContinue
 if ($null -eq $svc -or $svc.Status -ne 'Running') {
     try {
@@ -118,7 +126,20 @@ if ($null -eq $svc -or $svc.Status -ne 'Running') {
             -Message "Guardian restarted HitPanWatchdog" -ErrorAction SilentlyContinue
     } catch { }
 }
-'@ | Out-File $GuardianPs1 -Encoding utf8
+'@
+# ★ 봉합 20260804작1 P0-2 ([4] 검증팀 적발): Out-File 실패를 trap 에 흘리지 않는다.
+#   디스크 가득·백신 잠금·권한으로 이 쓰기가 실패하면 종전엔 trap → exit 3 이었다.
+#   그런데 그 시점엔 sc create 는 이미 성공했고 Start-Service 는 **한 번도 실행되지 않았다**
+#   → 워치독이 안 떠 있는데 설치는 "자동 시작 등록 실패"로만 안내되는 침묵 고장.
+#   Guardian 파일 쓰기 실패는 **2층 안전망 부재**일 뿐 치명이 아니므로,
+#   경고만 남기고 기동 단계까지 진행시킨다(헌법 #15 — 침묵 금지, 비차단).
+$guardianFileOk = $false
+try {
+    Set-Content -Path $GuardianPs1 -Value $guardianBody -Encoding UTF8 -ErrorAction Stop
+    $guardianFileOk = $true
+} catch {
+    Write-Output "[WARN] Guardian.ps1 작성 실패: $($_.Exception.Message) — 2층 안전망 없이 계속"
+}
 
 # 작업 스케줄러 등록 (5분 주기, 무한)
 #   /SC MINUTE /MO 5 = 5분마다 무한 반복 (종전 -Once + RepetitionInterval 과 동등)
@@ -139,14 +160,19 @@ if ($null -eq $svc -or $svc.Status -ne 'Running') {
 #     봉합: \" 로 이스케이프한 문자열을 **변수에 담아** 넘긴다(실측: 한 인자로 온전히 전달).
 #   ⚠️ 검증은 반드시 공백 포함 경로에서 하라 — 공백 없는 경로로 테스트하면 통과해버려 못 잡는다.
 $guardianOk = $false
-$guardianTr = 'powershell.exe -NoProfile -ExecutionPolicy Bypass -File \"' + $GuardianPs1 + '\"'
-& schtasks.exe /Create /F /TN $GuardianTask /TR $guardianTr `
-    /SC MINUTE /MO 5 /RU SYSTEM /RL HIGHEST | Out-Null
-if ($LASTEXITCODE -eq 0) {
-    $guardianOk = $true
-    Write-Output "[OK] $GuardianTask scheduled (5min interval)"
+if (-not $guardianFileOk) {
+    # 파일이 없는데 작업만 등록하면 5분마다 '없는 스크립트'를 실행하는 유령 작업이 된다.
+    Write-Output "[WARN] Guardian.ps1 없음 — 작업 등록 건너뜀(유령 작업 방지)"
 } else {
-    Write-Output "[WARN] $GuardianTask 등록 실패 (exit=$LASTEXITCODE) — 2층 안전망 없이 계속"
+    $guardianTr = 'powershell.exe -NoProfile -ExecutionPolicy Bypass -File \"' + $GuardianPs1 + '\"'
+    & schtasks.exe /Create /F /TN $GuardianTask /TR $guardianTr `
+        /SC MINUTE /MO 5 /RU SYSTEM /RL HIGHEST | Out-Null
+    if ($LASTEXITCODE -eq 0) {
+        $guardianOk = $true
+        Write-Output "[OK] $GuardianTask scheduled (5min interval)"
+    } else {
+        Write-Output "[WARN] $GuardianTask 등록 실패 (exit=$LASTEXITCODE) — 2층 안전망 없이 계속"
+    }
 }
 
 # =================================================================
