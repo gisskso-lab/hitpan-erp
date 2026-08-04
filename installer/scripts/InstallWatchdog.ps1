@@ -19,7 +19,16 @@ $ExePath     = Join-Path $InstallPath 'watchdog\HitPan.Watchdog.exe'
 #   2 = 서비스·Guardian 은 만들어졌고 **기동만** 실패 = 자가복구 가능(5분 뒤 Guardian, 재부팅 시 auto).
 #   종전엔 1/2 구분이 없어 .iss 가 "재부팅하면 시작됩니다" 라는 같은 안내를 냈다.
 #   그러나 sc create 자체가 실패한 경우 재부팅해도 안 뜬다 — 고객에게 틀린 안내였다.
-$EXIT_OK = 0; $EXIT_FATAL = 1; $EXIT_START_FAILED = 2
+#   3 = 예상 못 한 오류(미처리 예외) — 아래 trap 이 낸다.
+#     ★ 봉합 20260804작1 P1 ([3-V] 병렬검증 적발): PowerShell 은 **미처리 종료예외에도 exit 1** 을 낸다.
+#       그대로 두면 EXIT_FATAL(서비스 생성 실패)과 구분이 안 돼 위 규약이 깨진다
+#       (Out-File·Get-Service 등이 죽어도 1). trap 으로 3 을 분리해 규약을 지킨다.
+$EXIT_OK = 0; $EXIT_FATAL = 1; $EXIT_START_FAILED = 2; $EXIT_UNEXPECTED = 3
+
+trap {
+    Write-Output "[FAIL] 예상 못 한 오류: $($_.Exception.Message)"
+    exit $EXIT_UNEXPECTED
+}
 
 if (-not (Test-Path $ExePath)) {
     # 봉합 (2026-07-14, Sandbox 실측 적발): 종전 exit 0 = "설치 성공인데 워치독 없음" 침묵 실패.
@@ -117,9 +126,21 @@ if ($null -eq $svc -or $svc.Status -ne 'Running') {
 #   /F = 이미 있으면 덮어씀(멱등, 재설치 정합) — 종전 -Force 와 동등
 #   ⚠️ Guardian 등록 실패는 **치명이 아니다**(2층 안전망 부재일 뿐 워치독 본체는 동작).
 #     그래서 여기서 스크립트를 죽이지 않는다 — 경고만 남기고 기동으로 진행한다(헌법 #15).
+#   ★★ 봉합 20260804작1 P0 ([3-V] 병렬검증 적발) — /TR 따옴표 파손 ★★
+#     PS 5.1 은 네이티브 exe 를 부를 때 안쪽 `" 를 **벗겨서** 넘긴다. 그래서
+#       /TR "powershell.exe ... -File `"$GuardianPs1`""
+#     는 공백에서 쪼개진다(실측):
+#       ARG[5] = <powershell.exe ... -File C:\Program>
+#       ARG[6] = <Files\HitPan\scripts\Guardian.ps1>
+#     .iss:58 DefaultDirName={autopf}\HitPan = "C:\Program Files\HitPan" — **공백이 항상 있다.**
+#     ⇒ 기본 설치 전건에서 schtasks 가 'Verify' 인수 오류로 실패하고 Guardian 이 안 깔린다.
+#     게다가 아래 분기가 경고만 남기고 exit 0 으로 통과시켜, 이 작지서가 없애려던
+#     **침묵실패를 형태만 바꿔 재생산**한다.
+#     봉합: \" 로 이스케이프한 문자열을 **변수에 담아** 넘긴다(실측: 한 인자로 온전히 전달).
+#   ⚠️ 검증은 반드시 공백 포함 경로에서 하라 — 공백 없는 경로로 테스트하면 통과해버려 못 잡는다.
 $guardianOk = $false
-& schtasks.exe /Create /F /TN $GuardianTask `
-    /TR "powershell.exe -NoProfile -ExecutionPolicy Bypass -File `"$GuardianPs1`"" `
+$guardianTr = 'powershell.exe -NoProfile -ExecutionPolicy Bypass -File \"' + $GuardianPs1 + '\"'
+& schtasks.exe /Create /F /TN $GuardianTask /TR $guardianTr `
     /SC MINUTE /MO 5 /RU SYSTEM /RL HIGHEST | Out-Null
 if ($LASTEXITCODE -eq 0) {
     $guardianOk = $true
