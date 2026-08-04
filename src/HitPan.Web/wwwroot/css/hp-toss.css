@@ -190,6 +190,17 @@ button, input, select, textarea { font-family: inherit; }
     margin-top: 1px;
 }
 
+/* 사이드바 최하단 버전 표기 — 사장님 오더 2026-08-04 ("자료관리 탭 밑에 작게").
+   메뉴를 방해하지 않도록 11px·보조색·중앙정렬. 클릭 대상이 아니므로 pointer-events 없음. */
+.hp-sidebar-version {
+    padding: 10px 16px 14px;
+    font-size: 11px;
+    color: var(--hp-text-secondary);
+    text-align: center;
+    opacity: 0.75;
+    user-select: text;   /* 고객센터 문의 시 읽어서 불러줄 수 있어야 한다 */
+}
+
 
 /* ───────────────────────────────────────────────
  * 3. 카드 (MudPaper, MudCard)
