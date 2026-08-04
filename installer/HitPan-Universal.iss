@@ -1001,120 +1001,103 @@ begin
     Result := Result + Copy(Chars, Idx, 1);
   end;
 end;
-
-// 봉합 2026-06-17 1.2.13 — Blazor WASM CORS 사고 차단 (P0)
-//   appsettings.json ApiBaseUrl을 고객사 실제 도메인으로 정정.
-//   1.2.12까지 api-demo.hitpan.kr 박힌 채 가도 → CORS preflight 차단 사고.
-//   사장님 헌법 #21 정합 (삭제·수정 금지 = 부트 가능 상태 유지하며 정정 OK)
-// 단일 appsettings.json 파일의 ApiBaseUrl 을 회사 도메인으로 정정.
-// ★ 봉합 20260803작2 P0-1 — "ApiBaseUrl": "..." 의 **값만** 바꾼다.
-//   JSON 파서를 쓰지 않는 이유: Inno Pascal 에 JSON 파서가 없고, 이 파일에 선례도 0건이다.
-//   선례 없는 기법을 '검증된 패턴'이라 부르지 않는다(작10 교훈).
-//   ⇒ 이 파일에 사용례가 있는 Pos/Copy 문자열 조작만 쓴다.
-//   찾지 못하면 빈 문자열을 반환한다 — 호출부가 '원본 보존'으로 처리한다(파괴 금지).
-function ReplaceApiBaseUrlValue(const Raw: String; const NewUrl: String): String;
-var
-  KeyPos, ColonPos, Q1, Q2, i: Integer;
-begin
-  Result := '';
-  KeyPos := Pos('"ApiBaseUrl"', Raw);
-  if KeyPos = 0 then Exit;
-
-  // 키 뒤의 콜론을 찾는다.
-  ColonPos := 0;
-  for i := KeyPos + Length('"ApiBaseUrl"') to Length(Raw) do
-  begin
-    if Copy(Raw, i, 1) = ':' then begin ColonPos := i; Break; end;
-    // 콜론 전에 공백 외의 문자가 나오면 우리가 아는 형식이 아니다.
-    if (Copy(Raw, i, 1) <> ' ') and (Copy(Raw, i, 1) <> #9) then Exit;
-  end;
-  if ColonPos = 0 then Exit;
-
-  // 값의 여는 따옴표
-  Q1 := 0;
-  for i := ColonPos + 1 to Length(Raw) do
-  begin
-    if Copy(Raw, i, 1) = '"' then begin Q1 := i; Break; end;
-    if (Copy(Raw, i, 1) <> ' ') and (Copy(Raw, i, 1) <> #9) then Exit;
-  end;
-  if Q1 = 0 then Exit;
-
-  // 값의 닫는 따옴표 (URL 에 역슬래시 이스케이프가 들어갈 일이 없어 단순 탐색으로 충분)
-  Q2 := 0;
-  for i := Q1 + 1 to Length(Raw) do
-  begin
-    if Copy(Raw, i, 1) = '"' then begin Q2 := i; Break; end;
-  end;
-  if Q2 = 0 then Exit;
-
-  //  앞부분 + 새 값 + 뒷부분 — 주석·다른 키·줄바꿈 전부 보존된다.
-  Result := Copy(Raw, 1, Q1) + NewUrl + Copy(Raw, Q2, Length(Raw) - Q2 + 1);
-end;
-
+// 단일 appsettings.json 의 ApiBaseUrl **값만** 정정한다(다른 키·주석·서식 전부 보존).
+//
+// ★★ 봉합 20260804 P0-E (검증팀 데이비드 박 [4] 최종검증 적발) — 인코딩 ★★
+//   ■ 무엇이 문제였나
+//     직전 구현은 Pascal 로 읽고(LoadStringsFromFile) Pascal 로 썼다(SaveStringToFile(..,False)).
+//     그런데 SaveStringToFile 의 3번째 인자 False = **ANSI(CP949)** 다. 대상 파일은
+//     한글·이모지 주석을 담은 **UTF-8** 이다. 실측(CP949 라운드트립):
+//       · '🔴'(U+1F534) → '??'  복원 불가
+//       · CP949 산출물을 엄격 UTF-8 로 디코드 → 예외 / 브라우저(관대) → U+FFFD 599개
+//     구조 문자({ " :)가 ASCII 라 JSON 파싱과 ApiBaseUrl='' 자체는 살아남아 **로그인은 된다.**
+//     즉 격리는 안 무너진다. 그러나 깨지는 대상이 하필 **재발방지 주석**이다 —
+//     이 함수를 전면덮어쓰기에서 값치환으로 바꾼 **명시적 목적이 주석 보존**이었는데
+//     인코딩이 그 목적을 스스로 무효화했다. 다음 사고 조사자가 고객 PC 를 열면 경고를 못 읽는다.
+//
+//   ■ 이 파일이 같은 진범에 이미 한 번 당했다 (1226-1229행 참조)
+//     20260707작2 W1-7 — "SaveStringToFile(..,False)=ANSI 로 쓰는데 상대는 UTF-8 로 읽는다"
+//     → 한글이 U+FFFD 로 깨져 로그인 영구 불가. 그때는 JsonEscape 로 봉합했다.
+//     직전 구현은 **그 교훈을 같은 파일 안에서 재적용하지 않았다.**
+//
+//   ■ 왜 LoadStringsFromFile 도 못 믿나 (직전 커밋의 '선례 4건' 주장 정정 — 헌법 #32)
+//     선례 395·519·531·627 은 전부 **PowerShell 이 UTF-8 로 쓴 ASCII 기계 출력**
+//     (슬롯번호·API 응답)을 되읽는 자리다. **한글 UTF-8 원본을 읽는 선례는 0건.**
+//     ⇒ 읽기 쪽 UTF-8 정합도 미검증이었다. 쓰기만 고치면 반쪽이다.
+//
+//   ■ 채택: 읽기·수정·쓰기를 통째로 PowerShell 에 위임한다
+//     · UTF8Encoding($false) 로 **읽고 쓴다** — BOM 없이, 왕복 무손실. 양쪽 다 UTF-8 로 통일.
+//     · 이 파일의 지배적 관용구다(WriteAllText 선례 389·497·503·505·609·615 = 6건).
+//       Pascal 문자열 수술(선례 0건)보다 검증된 경로다.
+//     · 정규식으로 "ApiBaseUrl" **값만** 치환 —
+//       (?<!\w) 로 '_comment_ApiBaseUrl'·'BackofficeApiBaseUrl' 오매칭을 원천 차단한다.
+//     · 실패해도 원본을 건드리지 않는다(치환 0건이면 그대로 종료) — 파괴 금지.
+//   ⚠️ 정적 분석만으로 확정할 수 없는 영역이라 **Sandbox 실측으로 산출 파일을 눈으로 확인**한다
+//     (검증팀 단서 조건). '코드 고쳤다'는 봉합이 아니다.
 procedure FixupOneAppSettings(AppSettingsPath: String; TargetUrl: String);
 var
-  NewContent: AnsiString;
-  RawContent: AnsiString;
-  RawLines: TArrayOfString;
-  LineIdx: Integer;
+  PsFile, ResultFile, PsScript: String;
+  Lines: TArrayOfString;
+  ResultCode: Integer;
+  Outcome: String;
 begin
   if not FileExists(AppSettingsPath) then begin
     Log('[FixupBlazor] 0건(파일없음): ' + AppSettingsPath);
     Exit;
   end;
-  // ★ 봉합 20260803작2 P0-1 (병렬검증 적발 · 사장님 지시 "고쳐"):
-  //   ■ 무엇이 문제였나
-  //     이 함수는 대상 파일을 **읽지 않고 고정 2키 JSON 으로 전면 덮어쓴다.** 그래서
-  //     ① 레포 원본에 심은 재발방지 주석(_comment_ApiBaseUrl)이 설치 시점에 100% 소멸했다.
-  //        다음 사고 조사자가 고객 PC 를 열면 아무 경고도 못 본다.
-  //     ② appsettings.Local.json 에 원본에 없던 BackofficeApiBaseUrl 키가 주입돼
-  //        파일 스키마가 설치 전후로 달라졌다.
-  //     ③ 무엇보다, 비-LOCAL(정식 설치) 분기가 TargetUrl 로 **도메인을 다시 써넣어**
-  //        레포 원본을 빈 값으로 비운 격리 봉합이 정식 설치 경로에서 무효화됐다.
-  //        ⇒ 격리가 G_PrimaryDomain 단일 실패점에 걸린다(그 값이 오염되면 즉시 재붕괴).
-  //
-  //   ■ 왜 값을 유지(Preserve)하지 않고 그대로 두는 쪽을 택했나
-  //     레포 원본이 이미 빈 값이다(20260803 P0 봉합). 빈 값이면 Program.cs:35 가
-  //     HostEnvironment.BaseAddress(= 현재 페이지 출처)로 폴백한다. 실측 확인:
-  //       · 터널 경로 — ingress origin 이 http://localhost:5257(API)이고, API 는 자기
-  //         wwwroot 로 Blazor 를 서빙하면서 /api/* 도 같은 프로세스가 처리한다
-  //         (Program.cs:59-65 + MapControllers) ⇒ 페이지 출처 = API. 같은 출처라 CORS 0.
-  //       · localhost:5234 경로 — web-server.ps1:89 이 /api/* 를 슬롯 API 포트로 프록시.
-  //     ⇒ **어느 경로든 빈 값이 자기 회사 API 로 간다.** 도메인을 써넣을 이유 자체가 없고,
-  //       안 써넣으면 격리가 '정정이 도는가'에 의존하지 않는 구조가 된다(정정은 업데이트를
-  //       이길 수 없다 — UpdateOrchestrator 가 web/·api/ 를 폴더째 통교체하기 때문).
-  //
-  //   ■ 그래도 이 함수를 남기는 이유 (헌법 #1 — 삭제 아닌 추가)
-  //     출하물이 어떤 이유로든 비어있지 않게 나온 경우의 **마지막 안전망**이다.
-  //     이제는 전면 덮어쓰기가 아니라 **ApiBaseUrl 값만 치환**하고 나머지 줄은 보존한다.
-  //     호출부가 TargetUrl='' 을 주면 빈 값으로 정정한다(= 자기 출처 폴백 발동).
-  //   ※ 읽기는 LoadStringsFromFile(줄 배열)로 한다 — 이 파일에 사용례 4건(395·519·531·627)이
-  //     있는 검증된 관용구다. LoadStringFromFile(단수)은 선례 0건이라 쓰지 않는다
-  //     (작10 교훈: 선례 없는 기법을 '검증된 패턴'이라 부르지 않는다. 컴파일 실패 = 전 고객 설치 불가).
-  if not LoadStringsFromFile(AppSettingsPath, RawLines) then begin
-    Log('[FixupBlazor] 읽기 실패 — 정정 건너뜀(원본 보존): ' + AppSettingsPath);
-    Exit;
-  end;
-  RawContent := '';
-  for LineIdx := 0 to GetArrayLength(RawLines) - 1 do
-  begin
-    if LineIdx > 0 then RawContent := RawContent + #13#10;
-    RawContent := RawContent + RawLines[LineIdx];
-  end;
-  NewContent := ReplaceApiBaseUrlValue(RawContent, TargetUrl);
-  if NewContent = '' then begin
-    // ApiBaseUrl 키를 못 찾았다 = 우리가 아는 형식이 아니다. 통째로 덮어써서 다른 설정을
-    //   날리는 것보다 그대로 두는 편이 안전하다(원본이 빈 값이면 이미 정답이다).
-    Log('[FixupBlazor] ApiBaseUrl 키 미발견 — 원본 보존: ' + AppSettingsPath);
-    Exit;
-  end;
-  if not SaveStringToFile(AppSettingsPath, NewContent, False) then begin
-    // ★ 봉합 20260707작2 (W2-1): 실패를 Log 만 남기고 통과하면 appsettings 에 api-demo 원본이 잔존해
-    //   로그인이 demo 서버로 새는 진범 — 실패를 설치 실패로 승격한다(헌법 #15·#19, "완료처럼 보이는 실패" 차단).
-    Log('[FixupBlazor] SaveStringToFile 실패: ' + AppSettingsPath);
+
+  PsFile     := ExpandConstant('{tmp}\hitpan-fixup-appsettings.ps1');
+  ResultFile := ExpandConstant('{tmp}\hitpan-fixup-appsettings.out');
+  DeleteFile(ResultFile);
+
+  // TargetUrl 은 도메인 또는 빈 문자열이라 따옴표·역슬래시가 들어올 여지가 없다.
+  //   그래도 정규식 치환문에서 '$' 는 특수문자이므로 리터럴로 넘기기 위해 -replace 대신
+  //   [Regex]::Replace 의 MatchEvaluator 를 쓰지 않고, 값에 $ 가 없음을 전제로 단순 치환한다.
+  PsScript :=
+    '$ErrorActionPreference = ''Stop'';' + #13#10 +
+    '$enc = New-Object System.Text.UTF8Encoding($false);' + #13#10 +
+    'try {' + #13#10 +
+    '  $p = "' + AppSettingsPath + '";' + #13#10 +
+    '  $raw = [System.IO.File]::ReadAllText($p, $enc);' + #13#10 +
+    // (?<!\w) = 앞 문자가 단어문자가 아님 → _comment_ApiBaseUrl / BackofficeApiBaseUrl 배제
+    '  $re = ''(?<!\w)("ApiBaseUrl"\s*:\s*")[^"]*(")'';' + #13#10 +
+    '  $new = [System.Text.RegularExpressions.Regex]::Replace($raw, $re, ''${1}' + TargetUrl + '${2}'');' + #13#10 +
+    '  if ($new -eq $raw) {' + #13#10 +
+    // 이미 정답이거나 키가 없다. 어느 쪽이든 원본을 건드리지 않는다.
+    '    [System.IO.File]::WriteAllText("' + ResultFile + '", "NOCHANGE", $enc);' + #13#10 +
+    '    exit 0;' + #13#10 +
+    '  }' + #13#10 +
+    '  [System.IO.File]::WriteAllText($p, $new, $enc);' + #13#10 +
+    '  [System.IO.File]::WriteAllText("' + ResultFile + '", "OK", $enc);' + #13#10 +
+    '  exit 0;' + #13#10 +
+    '} catch {' + #13#10 +
+    '  try { [System.IO.File]::WriteAllText("' + ResultFile + '", "ERR:" + $_.Exception.Message, $enc); } catch { }' + #13#10 +
+    '  exit 1;' + #13#10 +
+    '}';
+
+  SaveStringToFile(PsFile, PsScript, False);
+  Exec('powershell.exe', '-NoProfile -ExecutionPolicy Bypass -File "' + PsFile + '"',
+       '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+
+  Outcome := '';
+  if FileExists(ResultFile) and LoadStringsFromFile(ResultFile, Lines) and (GetArrayLength(Lines) > 0) then
+    Outcome := Trim(Lines[0]);
+
+  DeleteFile(PsFile);
+  DeleteFile(ResultFile);
+
+  if (ResultCode <> 0) or (Copy(Outcome, 1, 4) = 'ERR:') then begin
+    // ★ 봉합 20260707작2 (W2-1) 유지: 실패를 Log 만 남기고 통과하면 잘못된 주소가 잔존해
+    //   로그인이 남의 서버로 샌다 — 실패를 설치 실패로 승격한다(헌법 #15·#19).
+    Log('[FixupBlazor] 정정 실패(exit=' + IntToStr(ResultCode) + ', ' + Outcome + '): ' + AppSettingsPath);
     RaiseException('설정 파일(appsettings.json) 갱신에 실패했습니다. 설치를 다시 실행해 주세요: ' + AppSettingsPath);
   end;
-  Log('[FixupBlazor] 정정 완료 → ' + AppSettingsPath + ' = ' + TargetUrl);
+
+  if Outcome = 'NOCHANGE' then
+    // 레포 원본이 이미 빈 값이면 정상적으로 여기 걸린다(= 정정할 게 없음).
+    Log('[FixupBlazor] 변경 없음(이미 정답이거나 키 없음): ' + AppSettingsPath)
+  else
+    Log('[FixupBlazor] 정정 완료 → ' + AppSettingsPath + ' = [' + TargetUrl + ']');
 end;
 
 procedure FixupBlazorAppSettings();
