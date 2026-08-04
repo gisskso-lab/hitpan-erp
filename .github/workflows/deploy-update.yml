@@ -239,13 +239,31 @@ jobs:
             'installer/payload/web/wwwroot/appsettings.json',
             'installer/payload/api/wwwroot/appsettings.json'
           )
+          # ★ 봉합 20260804 (인코딩) — 종전 구현은 대상 파일을 두 번 망가뜨렸다.
+          #   ① `Get-Content $t -Raw` 에 -Encoding 이 없어 **콘솔 코드페이지**로 읽었다.
+          #      대상은 한글 주석이 든 UTF-8 이다 → 읽는 순간 깨진다.
+          #      실측: '이 값은 반드시' → '??媛믪? 諛섎뱶' (UTF-8 을 CP949 로 읽은 전형적 흔적)
+          #   ② `ConvertTo-Json` + `Set-Content -Encoding utf8` 은 비ASCII 를 \uXXXX 로
+          #      이스케이프하고 **BOM 을 붙인다** → 원본 서식·주석이 원형을 잃는다.
+          #      실측: 954자 주석 → 1119자, '🔴' 소실.
+          #   ⇒ installer/HitPan-Universal.iss 의 P0-E 와 **같은 계통**(인코딩 가정 오류)이
+          #     CI 에도 있었다. 격리 값 자체는 살아남지만 재발방지 주석이 파괴된다.
+          #
+          #   ■ 채택: JSON 재직렬화를 하지 않는다. UTF-8 로 읽고, **값만** 정규식 치환하고,
+          #     BOM 없는 UTF-8 로 되쓴다(= .iss 봉합과 동일 기법, 실측 검증됨).
+          #     (?<!\w) 로 _comment_ApiBaseUrl · BackofficeApiBaseUrl 오매칭을 차단한다.
+          $enc = New-Object System.Text.UTF8Encoding($false)
+          $re  = '(?<!\w)("ApiBaseUrl"\s*:\s*")[^"]*(")'
           $done = 0
           foreach ($t in $targets) {
             if (-not (Test-Path $t)) { Write-Host "[apibase] 건너뜀(없음): $t"; continue }
-            $j = Get-Content $t -Raw | ConvertFrom-Json
-            $before = $j.ApiBaseUrl
-            $j.ApiBaseUrl = ''
-            ($j | ConvertTo-Json -Depth 10) | Set-Content $t -Encoding utf8
+            $full   = (Resolve-Path $t).Path
+            $raw    = [System.IO.File]::ReadAllText($full, $enc)
+            # 삼항연산자(PS7+)를 쓰지 않는다 — P0 경로에 셸 버전 의존을 만들지 않기 위해서다.
+            if (([regex]::Match($raw, $re)).Success) { $before = ($raw | ConvertFrom-Json).ApiBaseUrl }
+            else { $before = '(키없음)' }
+            $new    = [regex]::Replace($raw, $re, '${1}${2}')
+            if ($new -ne $raw) { [System.IO.File]::WriteAllText($full, $new, $enc) }
             Write-Host "[apibase] 중립화: $t  ('$before' -> '')"
             $done++
           }
@@ -253,17 +271,37 @@ jobs:
             Write-Error "::error::ApiBaseUrl 중립화 대상이 0개 — Web publish 경로 확인. 이대로 게시하면 전 고객 로그인 불가(작8 P0-2 재발)."
             exit 1
           }
-          # 검증: api-demo 잔존 0건이어야 한다(하드코딩이 살아있으면 봉합 실패)
+          # 검증: 중립화가 실제로 먹었는지 확인한다.
+          #
+          # ★ 봉합 20260804 (1.2.52 게시 실패 실측):
+          #   종전 이 검증은 `$raw -match 'api-demo'` — **파일 원문 문자열 검색**이었다.
+          #   그래서 20260803 격리 P0 봉합이 심은 **재발방지 주석**(그 사고를 설명하려면
+          #   'api-demo' 라는 단어를 쓸 수밖에 없다)에 걸려 FAIL 했다.
+          #   실측 로그: ApiBaseUrl 은 '' -> '' 로 이미 정답인데도 배포가 중단됐다.
+          #
+          #   ⇒ 이 게이트는 "값이 안전한가"를 물어야 하는데 "글자가 없는가"를 물었다.
+          #     같은 계통의 결함이 smoke-test.ps1 에도 있었다(거기선 반대로 api-demo 가
+          #     **있어야** PASS 였다). 문자열 검사는 봉합을 설명하는 문서를 적으로 만든다.
+          #
+          #   ■ 채택: 파싱한 **값**만 본다(화이트리스트).
+          #     ApiBaseUrl 은 반드시 빈 값이어야 한다 — 고객 PC 에서 Program.cs 의
+          #     HostEnvironment.BaseAddress 폴백이 발동해 '자기 회사 API' 로 가야 하기 때문.
+          #     값이 비어있지 않으면 그게 무슨 주소든(api-demo 든 남의 고객사든) 격리 붕괴다.
+          #     ⇒ 'api-demo 인가'가 아니라 '비어있는가'가 올바른 질문이다.
+          #   ■ 주석·다른 키는 검사 대상이 아니다. 주석은 다음 사고 조사자에게 남기는 자산이다.
           foreach ($t in $targets) {
             if (Test-Path $t) {
-              $raw = Get-Content $t -Raw
-              if ($raw -match 'api-demo') {
-                Write-Error "::error::$t 에 api-demo 가 남아있다 — 중립화 실패. 배포 중단."
+              # -Encoding 없는 Get-Content 는 콘솔 코드페이지로 읽어 한글을 깨뜨린다(위 ① 참조).
+              #   여기서 보는 값은 ASCII URL 이라 실피해는 없지만, 같은 파일 안에 틀린 관용구를
+              #   남기지 않는다 — 다음 사람이 이 줄을 복사한다.
+              $v = ([System.IO.File]::ReadAllText((Resolve-Path $t).Path, $enc) | ConvertFrom-Json).ApiBaseUrl
+              if (-not [string]::IsNullOrWhiteSpace($v)) {
+                Write-Error "::error::$t 의 ApiBaseUrl 이 비어있지 않다('$v') — 중립화 실패. 이대로 게시하면 전 고객이 이 주소 한 곳을 본다(테넌트 격리 붕괴). 배포 중단."
                 exit 1
               }
             }
           }
-          Write-Host "[apibase] 확인: 출하본 $done 개 중립화 완료 · api-demo 잔존 0건"
+          Write-Host "[apibase] 확인: 출하본 $done 개 중립화 완료 · ApiBaseUrl 전부 빈 값(자기 출처 폴백)"
 
       # ── environment 분기(보강3/G7): download-url-base 를 production/beta 로 가른다. PRD §3.3 인자표 ──
       #   production = updates.hitpan.kr/packages / beta = updates.hitpan.kr/beta/packages
