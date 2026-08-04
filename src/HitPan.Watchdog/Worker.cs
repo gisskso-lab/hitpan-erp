@@ -287,6 +287,19 @@ public class Worker : BackgroundService
         if (_pendingConsentUpdate is { } consentPending)
         {
             await ConsumeConsentForMajorAsync(consentPending, ct);
+            // ★ 봉합 20260804작2 P0-1 ([3-V] 병렬검증 적발) — 사장님 오더 ② "바로 수정해서 다시 띄운다"
+            //   ■ 무엇이 막혀 있었나
+            //     여기서 무조건 return 하고, 아래 하루 1회 게이트(_lastUpdateCheckDate)는 이미 오늘로
+            //     찍혀 있다. 그래서 사장님이 [나중에] 를 눌러 펜딩이 비워져도 **그날 안에는 새 버전을
+            //     다시 발견하지 못한다.** 수정 → 재게시 → 재확인 사이클이 하루 1회로 묶였다.
+            //   ■ 봉합: 펜딩이 해소(거부 폐기·적용 진입)된 경우 하루 게이트를 즉시 푼다.
+            //     그러면 다음 루프에서 feed 를 다시 읽어 새로 올라온 버전을 발견한다.
+            //     펜딩이 그대로면(영업시간 보류 등) 종전처럼 재조회 없이 반환한다 — 불필요한 폴링 0.
+            if (_pendingConsentUpdate is null)
+            {
+                _lastUpdateCheckDate = null;
+                _logger.LogInformation("[Update] Major 펜딩 해소 — 하루 게이트 해제. 새 버전이 올라와 있으면 다음 루프에서 발견합니다.");
+            }
             // 동의 처리(승인 적용 진입/거부 폐기) 후엔 펜딩이 비워졌을 수 있다. 다른 채널 평가와 섞지 않고 반환.
             return;
         }
