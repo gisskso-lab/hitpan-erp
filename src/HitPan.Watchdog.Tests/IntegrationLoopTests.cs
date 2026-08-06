@@ -32,6 +32,8 @@ public class IntegrationLoopTests
             {
                 o.MetaPingEndpoint = "http://127.0.0.1:9";
                 o.MetaPingEmergencyEndpoint = "http://127.0.0.1:9";
+                // 20260806작4: 본사 업데이트 기록 보고 경로. 포트 9(discard)라 실제로 나가지 않는다.
+                o.UpdateHistoryEndpoint = "http://127.0.0.1:9";
                 o.HealthCheckUrl = "http://127.0.0.1:9";
                 o.Processes = new ProcessesConfig
                 {
@@ -48,6 +50,7 @@ public class IntegrationLoopTests
         builder.Services.AddSingleton<WS28F_CoolDown>();
         builder.Services.AddSingleton<WS28I_FourProcess>();
         builder.Services.AddSingleton<MetaPingClient>();
+        builder.Services.AddSingleton<UpdateHistoryClient>();
 
         // 정합 (2026-07-16, 작1 W4-0): Program.cs:45-58 의 자동 업데이트 연결축 등록을 반영한다.
         //   2026-06-29 고리1~2 에서 Worker 가 이들을 생성자로 받기 시작했는데 여기 목록이 안 따라와

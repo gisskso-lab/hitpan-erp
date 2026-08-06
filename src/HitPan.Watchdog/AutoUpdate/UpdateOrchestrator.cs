@@ -31,6 +31,7 @@ public sealed class UpdateOrchestrator
     private readonly WatchdogOptions _options;
     private readonly WatchdogStatusWriter _statusWriter;
     private readonly MetaPingClient _meta;
+    private readonly UpdateHistoryClient _updateHistory;
     private readonly string _stagingDir;
 
     // W4-6: 이번 적용이 "마이그 교차검증 게이트"에 걸려 중단됐는지 표식. TrySwapFilesAsync 실패를
@@ -58,7 +59,10 @@ public sealed class UpdateOrchestrator
         IHttpClientFactory httpFactory,
         IOptions<WatchdogOptions> options,
         WatchdogStatusWriter statusWriter,
-        MetaPingClient meta)
+        MetaPingClient meta,
+        // 20260806작4 (사장님 오더 ③): 업데이트 결과를 본사 백오피스에 보고한다.
+        //   DI 싱글턴이며 UpdateOrchestrator 에 의존하지 않아 순환참조가 없다(기존 인자 뒤에 추가만 — 헌법 #1).
+        UpdateHistoryClient updateHistory)
     {
         _client = client;
         _logger = logger;
@@ -70,6 +74,7 @@ public sealed class UpdateOrchestrator
         _options = options.Value;
         _statusWriter = statusWriter;
         _meta = meta;
+        _updateHistory = updateHistory;
         _stagingDir = Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
             "HitPan", "Updates", "staging");
@@ -825,6 +830,81 @@ public sealed class UpdateOrchestrator
         {
             // 헌법 #15: 기록 실패도 침묵 금지. 적용 자체의 성패와 별개라 여기서 흐름을 끊지 않는다.
             _logger.LogError(ex, "[Update] 적용결과 기록 호출 실패 — 버전 {V}, 결과 {R}", manifest.Version, result);
+        }
+
+        // ★ 20260806작4 (사장님 오더 ③) — 같은 결과를 본사 백오피스에도 보고한다.
+        //   여기에 거는 이유: 이 메서드가 **모든 종점이 지나는 단일 깔때기**다(호출부 7곳).
+        //   개별 종점마다 따로 배선하면 새 종점이 생겼을 때 조용히 빠진다 — 그게 이 프로젝트가
+        //   반복해 온 '한 칸 비어 있는 사슬' 구조다.
+        //
+        // 🔴 봉합 ([3-V] 병렬검증 P0 적발): 여기서 **await 하지 않는다.**
+        //   초안은 await 했다. 예외는 잘 막았지만 **지연을 못 막았다** — 그게 더 위험했다.
+        //   이 메서드의 최대 호출처(:235 성공 종점)는 `finally` 의 keepalive 복원(:248) **앞**,
+        //   즉 **ERP 가 내려가 있는 구간** 안이다. 본사가 죽지 않고 '느리기만' 하면
+        //   (TCP 는 붙는데 응답이 없는 상태) HttpClient 타임아웃을 꽉 채운다
+        //   ⇒ **본사 사정으로 고객 ERP 가 그만큼 더 내려가 있게 된다**(헌법 #20·#30 위반).
+        //   ⇒ 보고는 흐름에서 떼어낸다. 실패해도, 늦어도, 업데이트는 이미 제 갈 길을 간다.
+        //   ⚠️ ct 를 넘기지 않는다 — 넘기면 업데이트 종료와 함께 보고가 취소돼 버린다.
+        //      취소 없이 짧은 자체 타임아웃(UpdateHistoryClient)으로 스스로 끝낸다.
+        _ = ReportUpdateHistoryToHqAsync(manifest, result, detail, CancellationToken.None);
+    }
+
+    /// <summary>
+    /// 고객이 [나중에] 를 눌러 적용하지 않은 것을 본사에 보고한다 (20260806작4, 사장님 오더 ③ 3시점 중 ③).
+    ///
+    /// ★ [3-V] 병렬검증 P0 적발 봉합: 종전엔 이 경로가 **없었다.**
+    ///   거부는 ApplyUpdateAsync 를 타지 않아(Worker 가 펜딩만 해제하고 끝낸다)
+    ///   RecordApplyStatusAsync 를 지나지 않는다 ⇒ 'rejected' 를 넘기는 호출부가 0건이었고,
+    ///   ReportUpdateHistoryToHqAsync 의 "rejected" 분기는 **도달 불가 코드**였다.
+    ///   그 결과 CS 는 "이 고객사가 왜 계속 구버전인가"를 영영 알 수 없었다 —
+    ///   사장님이 이 기능을 요구한 이유(A 케이스: 귀찮아 업데이트 안 한 고객)가 정확히 이것이다.
+    ///
+    /// 🔴 거부는 정상 동작이다(고객 통제권 — 헌법 #24). 보고만 하고 아무것도 강제하지 않는다.
+    /// </summary>
+    public void ReportConsentRejected(UpdateManifest manifest)
+    {
+        // 적용 흐름 밖이지만 동일 원칙 — 기다리지 않는다(await 없음, ct 없음).
+        _ = ReportUpdateHistoryToHqAsync(manifest, "rejected", "고객이 [나중에] 선택", CancellationToken.None);
+    }
+
+    /// <summary>
+    /// 본사 백오피스에 업데이트 결과를 보고한다 (20260806작4).
+    ///
+    /// 🔴 이 보고의 어떤 실패도 고객 업데이트를 막지 않는다(헌법 #20·#30).
+    ///   UpdateHistoryClient 가 예외를 밖으로 던지지 않지만, 여기서도 한 번 더 막는다
+    ///   — 본사 사정으로 고객 PC 가 멈추는 일은 없어야 한다.
+    /// </summary>
+    private async Task ReportUpdateHistoryToHqAsync(
+        UpdateManifest manifest, string applyResult, string? detail, CancellationToken ct)
+    {
+        // 내부 상태값(success/blocked/rolled_back/rollback_failed)을 본사 3분류로 접는다.
+        //   본사가 알아야 하는 건 "됐나 / 안 됐나 / 고객이 미뤘나" 세 가지다(강지원 요구 세트).
+        var result = applyResult switch
+        {
+            "success" => "success",
+            "rejected" => "rejected",
+            _ => "failed"      // blocked · rolled_back · rollback_failed 전부 '적용 안 됨'
+        };
+
+        try
+        {
+            await _updateHistory.ReportAsync(
+                fromVersion: VersionInfo.Current,
+                toVersion: manifest.Version,
+                channel: manifest.Channel.ToString(),
+                result: result,
+                // 성공엔 사유가 없다. 실패면 내부 상태값까지 함께 남겨 CS 가 원인을 좁힐 수 있게 한다.
+                failureReason: result == "success" ? null : $"{applyResult}: {detail ?? "(사유 없음)"}",
+                ct: ct).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            _logger.LogDebug("[Update] 본사 보고 취소됨(서비스 종료).");
+        }
+        catch (Exception ex)
+        {
+            // 헌법 #15 침묵 금지 + #20·#30 흐름 보호 — 기록만 하고 절대 전파하지 않는다.
+            _logger.LogWarning(ex, "[Update] 본사 업데이트 기록 보고 실패 — 업데이트 자체에는 영향 없습니다.");
         }
     }
 

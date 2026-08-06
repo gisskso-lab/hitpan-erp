@@ -11,6 +11,11 @@ public class WatchdogOptions
     public int HealthCheckFailThreshold { get; set; } = 3;
     public string MetaPingEndpoint { get; set; } = "https://back.hitpan.kr/watchdog/ping";
     public string MetaPingEmergencyEndpoint { get; set; } = "https://back.hitpan.kr/watchdog/emergency";
+
+    // 20260806작4 (사장님 오더 ③) — 업데이트 결과 보고 경로.
+    //   ⚠️ 위 MetaPing 2개와 **다른 경로**다. /watchdog/* 수신부는 백오피스에 아직 0건이라
+    //     지금도 400 이 난다(실측 2026-08-06). 그 복구는 별건이고, 이 경로는 새로 만든 문이다.
+    public string UpdateHistoryEndpoint { get; set; } = "https://back.hitpan.kr/api/telemetry/update-history";
     public int MetaPingIntervalMinutes { get; set; } = 5;
     public int CoolDownMaxPerHour { get; set; } = 5;
     public ProcessesConfig Processes { get; set; } = new();

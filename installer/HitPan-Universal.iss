@@ -1186,6 +1186,10 @@ begin
     '    "HealthCheckFailThreshold": 3,' + #13#10 +
     '    "MetaPingEndpoint": "https://back.hitpan.kr/watchdog/ping",' + #13#10 +
     '    "MetaPingEmergencyEndpoint": "https://back.hitpan.kr/watchdog/emergency",' + #13#10 +
+    // 20260806작4 (사장님 오더 ③) — 업데이트 결과 보고. 위 MetaPing 2개와 다른 신규 경로다.
+    //   ★ [3-V] P2 적발: 이 파일이 appsettings.json 을 통째로 새로 쓰므로 여기 없으면
+    //     신규 설치 PC 의 설정 파일에 이 키가 안 보인다(.Bind 라 동작은 하지만 손댈 자리가 없다).
+    '    "UpdateHistoryEndpoint": "https://back.hitpan.kr/api/telemetry/update-history",' + #13#10 +
     '    "MetaPingIntervalMinutes": 5,' + #13#10 +
     '    "CoolDownMaxPerHour": 5,' + #13#10 +
     '    "Processes": {' + #13#10 +
