@@ -118,6 +118,16 @@ public sealed class AuthService : IAuthService
             // 서버 연결 실패 등 — 동의 기록 실패. 다음 로그인에 재안내된다.
             return false;
         }
+        catch (TaskCanceledException)
+        {
+            // ★ 봉합 20260806작1 P1 ([4] 검증팀 적발): 타임아웃은 HttpRequestException 이 아니라
+            //   TaskCanceledException 으로 온다. 종전엔 이게 안 잡혀 호출부 catch 로 튀었고,
+            //   그 결과 **가장 흔한 네트워크 장애(타임아웃)에서 화면이 그대로 침묵**했다
+            //   (= 사장님이 지적하신 "아무반응이 없네" 가 그 경로에선 안 고쳐진 상태였다).
+            //   false 를 돌려 호출부가 "전달하지 못했습니다" 를 안내하게 한다.
+            //   ※ ct 취소(사용자 이탈)도 여기 걸리나, 그때는 화면이 이미 사라져 무해하다.
+            return false;
+        }
     }
 
     public async Task<bool> RefreshAsync(CancellationToken ct = default)
