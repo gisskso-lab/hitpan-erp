@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Globalization;
 using System.IO.Compression;
 using System.Text.Json;
 using HitPan.Watchdog.Stages;
@@ -344,8 +345,12 @@ public sealed class UpdateOrchestrator
             Directory.Move(appApi, appApiOld);
             Directory.Move(extractApi, appApi);
 
-            // ── 3) watchdog 은 스왑하지 않는다(W4-3 제외). 신버전 워치독을 곁에 두기만 한다. ──
-            //   자기 자신(실행 중 EXE)을 교체하는 것은 고리5 별건이라 여기서 하지 않는다.
+            // ── 3) watchdog 신버전을 watchdog.new 에 배치한다(자기교체 재료). ──
+            //   ★ 20260806작3: 여기서 **바로 교체하지 않는** 이유는 고리5 별건이라서가 아니다.
+            //     지금 이 코드가 그 EXE 로 돌고 있어 파일이 잠겨 있다 — 실행 중 자기 자신은 교체 불가다.
+            //     그렇다고 자기를 먼저 멈추면 교체를 수행할 주체가 사라진다.
+            //     ⇒ 자기 밖의 예약작업이 "멈추고·바꾸고·다시 켠다"(TryScheduleWatchdogSelfReplace).
+            //   api/web 교체·검증이 모두 끝난 뒤 CleanupAfterSuccess 에서 예약을 건다.
             if (Directory.Exists(extractWatchdog))
             {
                 var appWatchdogNew = Path.Combine(appRoot, "watchdog.new");
@@ -356,9 +361,9 @@ public sealed class UpdateOrchestrator
                 }
                 catch (Exception ex)
                 {
-                    // watchdog.new 배치 실패는 스왑 성패를 좌우하지 않는다(고리5에서 쓸 예비물일 뿐).
-                    //   침묵은 금지(헌법 #15) — 경고만 남기고 진행한다.
-                    _logger.LogWarning(ex, "[Update] watchdog.new 배치 실패 — api/web 교체는 유효합니다(고리5 예비물만 누락).");
+                    // watchdog.new 배치 실패는 api/web 스왑 성패를 좌우하지 않는다.
+                    //   침묵은 금지(헌법 #15) — 경고만 남기고 진행한다. 워치독은 구버전으로 계속 돈다.
+                    _logger.LogWarning(ex, "[Update] watchdog.new 배치 실패 — api/web 교체는 유효합니다(워치독은 구버전 유지).");
                 }
             }
 
@@ -958,11 +963,370 @@ public sealed class UpdateOrchestrator
         // 롤백 조사용으로 남았을 수 있는 .failed 잔재도 정리.
         TryDeleteDir(Path.Combine(appRoot, "api.failed"));
         TryDeleteDir(Path.Combine(appRoot, "web.failed"));
-        // 신버전 워치독 예비물(W4-3 미교체). 고리5 전까지는 쓰지 않으므로 성공 시 치운다.
-        TryDeleteDir(Path.Combine(appRoot, "watchdog.new"));
+        // ★ 20260806작3 (사장님 오더 "같이 교체를 해야지 왜 선택적교체를 하는거야??")
+        //   watchdog.new 를 **지우지 않는다.** 종전 주석은 "고리5 전까지는 쓰지 않으므로 성공 시 치운다"
+        //   였다 — 받자마자 버렸다는 뜻이고, 그래서 워치독 버그는 자동업데이트로 영원히 안 고쳐졌다
+        //   (재설치는 폐기된 경로다, 2026-07-15). 이제 이 폴더는 자기교체의 재료다.
+        //   ⚠️ 여기서 지우면 자기교체가 재료를 잃는다 — 삭제 금지. 예약작업이 소비 후 스스로 정리한다.
+        //
+        // api/web 이 성공 확정된 **이 시점**에만 자기교체를 건다.
+        //   실패해도 적용 성공을 뒤집지 않는다 — 워치독만 구버전으로 남을 뿐이다(헌법 #30 자가회복 유지).
+        TryScheduleWatchdogSelfReplace(appRoot);
         // 다운로드·해제 잔재.
         TryDeleteDir(Path.Combine(_stagingDir, "extract"));
-        _logger.LogInformation("[Update] 성공 정리 완료 — .old·.failed·watchdog.new·staging\\extract 제거(슬롯 {Slot}).", slot);
+        _logger.LogInformation("[Update] 성공 정리 완료 — .old·.failed·staging\\extract 제거(슬롯 {Slot}). watchdog.new 는 자기교체용으로 보존.", slot);
+    }
+
+    // ══════════════════════════════════════════════════════════════════════════════════
+    // W4-3 워치독 자기교체 (20260806작3 — 1차 상신 반려분 재상신)
+    //
+    // 사장님 오더: "같이 교체를 해야지 왜 선택적교체를 하는거야??"
+    //
+    // ■ 왜 밖에서 바꾸나
+    //   실행 중인 자기 EXE 는 잠겨 있어 교체할 수 없고, 자기를 먼저 멈추면 실행 주체가 사라진다.
+    //   ⇒ 자기 밖의 schtasks 예약작업이 "멈추고 · 바꾸고 · 다시 켠다".
+    //
+    // ■ 1차 상신이 반려된 이유 = 영구 고립 (전부 실측 재현됨, 작3 §2)
+    //   A-1 Move-Item -Force 는 목적지 폴더가 있으면 **대체가 아니라 안으로 중첩**시킨다.
+    //       watchdog.old\watchdog\HitPan.Watchdog.exe 로 갇히고 예외도 안 난다.
+    //       롤백 조건은 성립하는데 EXE 는 제자리에 없다 ⇒ 서비스가 찾는 경로가 빈 폴더.
+    //   A-2 watchdog 이 없는 순간에 전원이 끊기면 /SC ONCE 는 이미 끝났고 부팅 복구 코드가 0건.
+    //   A-3 Stop-Service 실패를 이중으로 삼키고 그대로 교체 → 잠긴 EXE → A-1 유발.
+    //   B-1 23:59+1분=00:00 은 과거 시각인데 schtasks 가 경고만 내고 exit 0 ⇒ 침묵 실패.
+    //
+    //   영구 고립 = 그 고객 PC 의 자동업데이트·자가복구 영구 종료. 유일한 복구가 재설치인데
+    //   사장님이 폐기한 경로다(2026-07-15). 그래서 아래 규칙은 타협 대상이 아니다.
+    //
+    // ■ 불변 안전 원칙 (작3 §4)
+    //   1) 이 기능의 어떤 실패도 "업데이트 성공"을 뒤집지 않는다 — 최악이어도 워치독만 구버전.
+    //   2) 영구 고립 0 — 어느 순간에 전원이 끊겨도 다음 부팅에 복구된다.
+    //   3) 바닥 없이 뛰지 않는다 — 부팅복구 등록 → 예약 등록 → 중지 확인, 전부 성공 후에만 교체.
+    //   4) 침묵 금지(헌법 #15). exit 0 을 성공의 근거로 삼지 않는다.
+    //   5) 스크립트는 순수 ASCII — 인코딩 왕복 사고 원천 차단(20260804 P0-E 교훈).
+    //   6) schtasks 사용 — CIM 미의존(Sandbox 에서 Register-ScheduledTask 가 CIM 거부로 실패).
+    //
+    // ■ 효력 시점 — 1.2.55 부터다 (작3 §6)
+    //   교체를 수행하는 주체는 "받는 버전"이 아니라 "이미 돌고 있는 버전"이다.
+    //     1.2.53 → 1.2.54 : 수행 주체 1.2.53(이 코드 없음) ⇒ 워치독 안 바뀜
+    //     1.2.54 → 1.2.55 : 수행 주체 1.2.54(이 코드 있음) ⇒ 바뀜
+    //   1차 상신에서 PM 이 사장님께 "1.2.54 에서 됩니다"라고 답한 것은 틀렸다.
+    // ══════════════════════════════════════════════════════════════════════════════════
+
+    /// <summary>예약작업 이름 — 교체 본체.</summary>
+    private const string SelfReplaceTaskName = "HitPanWatchdogSelfReplace";
+
+    /// <summary>예약작업 이름 — 부팅 복구 안전망(A-2). 교체 성공 시 스스로 삭제된다.</summary>
+    private const string SelfReplaceRecoverTaskName = "HitPanWatchdogSelfReplaceRecover";
+
+    /// <summary>
+    /// 워치독 자기교체를 예약한다. 실패해도 "업데이트 성공"을 뒤집지 않는다(원칙 1).
+    /// </summary>
+    private void TryScheduleWatchdogSelfReplace(string appRoot)
+    {
+        if (!OperatingSystem.IsWindows()) return;
+
+        var newDir = Path.Combine(appRoot, "watchdog.new");
+        if (!Directory.Exists(newDir))
+        {
+            _logger.LogInformation("[Update/W4-3] watchdog.new 없음 — 자기교체 건너뜀(워치독 구버전 유지).");
+            return;
+        }
+        // 재료가 온전한지 먼저 본다 — 빈 폴더로 교체하면 그 PC 는 워치독을 잃는다.
+        //   ⚠️ 폴더 존재가 아니라 EXE 존재로 판정한다(A-1 이 정확히 그 오판이었다).
+        if (!File.Exists(Path.Combine(newDir, "HitPan.Watchdog.exe")))
+        {
+            _logger.LogWarning("[Update/W4-3] watchdog.new 에 실행 파일이 없습니다 — 자기교체 중단(구버전 유지).");
+            TryDeleteDir(newDir);
+            return;
+        }
+
+        try
+        {
+            var scriptDir = Path.Combine(appRoot, "scripts");
+            Directory.CreateDirectory(scriptDir);
+
+            // BOM 없는 UTF-8. 스크립트는 순수 ASCII 라 인코딩 사고 여지가 없다(원칙 5).
+            var enc = new System.Text.UTF8Encoding(false);
+            var recoverPs1 = Path.Combine(scriptDir, "RecoverWatchdog.ps1");
+            var swapPs1 = Path.Combine(scriptDir, "SelfReplaceWatchdog.ps1");
+            File.WriteAllText(recoverPs1, BuildRecoverScript(), enc);
+            File.WriteAllText(swapPs1, BuildSelfReplaceScript(), enc);
+
+            // ── ① 부팅 복구 안전망을 **교체보다 먼저** 등록한다 (A-2 봉합 / 원칙 3) ──
+            //   이게 없으면 폴더가 없는 순간의 정전이 곧 영구 고립이다.
+            //   등록에 실패하면 교체를 아예 시작하지 않는다 — 바닥 없이 뛰지 않는다.
+            var recoverCode = RunSchtasks(
+                $"/Create /F /TN \"{SelfReplaceRecoverTaskName}\" /TR \"{PsRunner(recoverPs1)}\" " +
+                "/SC ONSTART /RU SYSTEM /RL HIGHEST");
+            if (recoverCode != 0)
+            {
+                _logger.LogWarning(
+                    "[Update/W4-3] 부팅 복구 안전망 등록 실패(exit={Code}) — 자기교체를 시작하지 않습니다(구버전 유지). " +
+                    "안전망 없이 교체하면 교체 도중 정전 시 영구 고립됩니다.", recoverCode);
+                return;
+            }
+
+            // ── ② 교체 본체 예약 (B-1 봉합) ──
+            //   /SD 로 **날짜까지** 지정한다. /ST 만 주면 23:59+2분이 "오늘 00:01"(과거)로 등록되고
+            //   schtasks 는 경고만 내고 exit 0 을 반환해 영원히 안 도는 작업이 된다(실측).
+            //   ⚠️ InvariantCulture 고정 — [3-V] 병렬검증 적발.
+            //     .NET 서식의 '/' 는 리터럴이 아니라 **문화권 날짜 구분자 자리표시자**다.
+            //     고객 PC(ko-KR)에서는 "2026-08-07", de-DE 는 "2026.08.07", hu-HU 는 공백 포함으로
+            //     렌더되어 인자가 쪼개질 수 있다. 로케일에 따라 결과가 달라지는 코드를 남기지 않는다.
+            var runAt = DateTime.Now.AddMinutes(2);
+            var sd = runAt.ToString("yyyy/MM/dd", CultureInfo.InvariantCulture);
+            var st = runAt.ToString("HH:mm", CultureInfo.InvariantCulture);
+            var swapCode = RunSchtasks(
+                $"/Create /F /TN \"{SelfReplaceTaskName}\" /TR \"{PsRunner(swapPs1)}\" " +
+                $"/SC ONCE /SD {sd} /ST {st} /RU SYSTEM /RL HIGHEST");
+            if (swapCode != 0)
+            {
+                // 교체는 안 걸렸으니 안전망도 되돌린다 — 쓸모없는 부팅 작업을 남기지 않는다.
+                RunSchtasks($"/Delete /TN \"{SelfReplaceRecoverTaskName}\" /F");
+                _logger.LogWarning("[Update/W4-3] 교체 예약 실패(exit={Code}) — 워치독은 구버전으로 계속 동작합니다.", swapCode);
+                return;
+            }
+
+            _logger.LogInformation(
+                "[Update/W4-3] 워치독 자기교체 예약 완료({At:yyyy-MM-dd HH:mm}) — 부팅 복구 안전망 등록됨.", runAt);
+        }
+        catch (Exception ex)
+        {
+            // 헌법 #15 — 침묵 금지. 실패해도 업데이트 성공을 뒤집지 않는다(원칙 1).
+            _logger.LogWarning(ex, "[Update/W4-3] 자기교체 예약 중 예외 — 워치독은 구버전 유지.");
+        }
+    }
+
+    /// <summary>
+    /// schtasks /TR 에 넣을 PowerShell 실행 문자열.
+    /// ⚠️ 경로는 \" 로 감싼다 — 공백이 있으면 인자가 쪼개진다(20260804작1 실측).
+    /// </summary>
+    private static string PsRunner(string ps1)
+        => "powershell.exe -NoProfile -ExecutionPolicy Bypass -File \\\"" + ps1 + "\\\"";
+
+    /// <summary>
+    /// 교체 스크립트 — 이 워치독 프로세스 **밖에서** 실행된다.
+    ///   중지확인(A-3) → watchdog→.old → .new→watchdog (A-1: 목적지 선삭제) → 시작 → 실패 시 롤백.
+    /// 순수 ASCII (원칙 5).
+    /// </summary>
+    private static string BuildSelfReplaceScript()
+    {
+        return string.Join("\r\n", new[]
+        {
+            "$ErrorActionPreference = 'Stop'",
+            "$root = Split-Path -Parent $PSScriptRoot",
+            "$cur  = Join-Path $root 'watchdog'",
+            "$new  = Join-Path $root 'watchdog.new'",
+            "$old  = Join-Path $root 'watchdog.old'",
+            "$exe  = 'HitPan.Watchdog.exe'",
+            "function Log($m) { try { Write-EventLog -LogName Application -Source HitPanWatchdog -EntryType Information -EventId 28030 -Message $m -ErrorAction SilentlyContinue } catch {} }",
+            // A-1 봉합의 핵심: 목적지를 먼저 지운 뒤 옮긴다. 안 그러면 안으로 중첩된다.
+            "function SwapDir($from, $to) { if (Test-Path $to) { Remove-Item $to -Recurse -Force }; Move-Item $from $to -Force }",
+            "",
+            "if (-not (Test-Path (Join-Path $new $exe))) { Log 'W4-3 abort: watchdog.new missing'; exit 1 }",
+            "",
+            // ── Guardian 정지 ([3-V] 병렬검증 적발) ──
+            //   Guardian(HitPanWatchdogGuardian)은 5분마다 워치독이 Running 이 아니면 되살린다.
+            //   교체 창은 의도적으로 Stopped 인 구간이라 Guardian 이 **반드시 끼어들 수 있다.**
+            //   되살아난 구버전이 EXE 를 잡으면 폴더 이동은 되지만 **삭제가 안 되고**(실측:
+            //   UnauthorizedAccessException), $ErrorActionPreference='Stop' 이라 교체가 중단된다
+            //   ⇒ 매 사이클 실패해 **자기교체가 영원히 안 되는** 상태가 된다(기능 목적 무효화).
+            //   /End 가 아니라 /Change /DISABLE 인 이유: /End 는 트리거를 살려둬 5분 뒤 또 돈다
+            //   (UpdateProcessGate 가 keepalive 에 쓰는 것과 동일한 검증된 관용구다).
+            //   ⚠️ 아래 모든 종료 경로에서 반드시 다시 켠다 — 꺼진 채 남으면 2층 안전망이 사라진다.
+            "$guardian = 'HitPanWatchdogGuardian'",
+            "function GuardianOn { schtasks.exe /Change /TN $guardian /ENABLE 2>$null | Out-Null }",
+            "schtasks.exe /Change /TN $guardian /DISABLE 2>$null | Out-Null",
+            "schtasks.exe /End /TN $guardian 2>$null | Out-Null",
+            "",
+            // ── A-3 봉합: 중지를 확인한다. 안 멈췄으면 교체를 시작하지 않는다(잠긴 EXE = A-1 유발).
+            "try { Stop-Service HitPanWatchdog -Force -ErrorAction SilentlyContinue } catch {}",
+            "$stopped = $false",
+            "for ($i = 0; $i -lt 30; $i++) {",
+            "  $svc = Get-Service HitPanWatchdog -ErrorAction SilentlyContinue",
+            "  if ($null -eq $svc -or $svc.Status -eq 'Stopped') { $stopped = $true; break }",
+            "  Start-Sleep -Seconds 1",
+            "}",
+            "if (-not $stopped) {",
+            "  Log 'W4-3 abort: service did not stop within 30s (old version kept)'",
+            "  GuardianOn",
+            "  Start-Service HitPanWatchdog -ErrorAction SilentlyContinue",
+            "  exit 1",
+            "}",
+            "",
+            // ── 교체. 여기부터 watchdog 이 없는 창이 열린다 — 부팅 복구 작업이 뒤를 받친다(A-2).
+            "try {",
+            "  SwapDir $cur $old",
+            "  SwapDir $new $cur",
+            "} catch {",
+            "  Log ('W4-3 swap failed: ' + $_.Exception.Message)",
+            "  if ((-not (Test-Path (Join-Path $cur $exe))) -and (Test-Path (Join-Path $old $exe))) { SwapDir $old $cur }",
+            "  GuardianOn",
+            "  Start-Service HitPanWatchdog -ErrorAction SilentlyContinue",
+            "  exit 1",
+            "}",
+            "",
+            "try {",
+            "  Start-Service HitPanWatchdog -ErrorAction Stop",
+            "} catch {",
+            // 새 워치독이 안 뜨면 구버전으로 되돌리고 다시 켠다 — 영구 고립 금지.
+            "  Log ('W4-3 new watchdog failed to start: ' + $_.Exception.Message + ' -> rollback')",
+            "  try {",
+            "    SwapDir $cur (Join-Path $root 'watchdog.failed')",
+            "    SwapDir $old $cur",
+            "    Start-Service HitPanWatchdog -ErrorAction SilentlyContinue",
+            "  } catch { Log ('W4-3 rollback failed: ' + $_.Exception.Message) }",
+            // 롤백 성패와 무관하게 Guardian 은 되살린다 — 롤백이 실패했을수록 더 필요하다.
+            "  GuardianOn",
+            "  exit 1",
+            "}",
+            "",
+            // 성공 확정 후에만 롤백 자산과 안전망을 치운다(원칙 2·3).
+            "Log 'W4-3 self-replace OK'",
+            "GuardianOn",
+            "Remove-Item $old -Recurse -Force -ErrorAction SilentlyContinue",
+            "schtasks.exe /Delete /TN " + SelfReplaceRecoverTaskName + " /F | Out-Null",
+            "schtasks.exe /Delete /TN " + SelfReplaceTaskName + " /F | Out-Null",
+            "exit 0"
+        });
+    }
+
+    /// <summary>
+    /// 부팅 복구 스크립트 (A-2) — 교체 도중 전원이 끊긴 PC 를 다음 부팅에 되살린다.
+    ///
+    /// 판정은 **폴더 존재가 아니라 EXE 존재**로 한다(A-1 이 그 오판이었다).
+    /// 전원 차단 시점별 조합을 전수 나열한 결과, watchdog 이 없는 단계는 'cur→old 직후' 하나뿐이고
+    /// 그때 .old·.new 가 둘 다 남아 있다 ⇒ **복구 자산이 없는 조합은 발생하지 않는다**(작3 §2 A-2).
+    /// </summary>
+    private static string BuildRecoverScript()
+    {
+        return string.Join("\r\n", new[]
+        {
+            "$ErrorActionPreference = 'Stop'",
+            "$root = Split-Path -Parent $PSScriptRoot",
+            "$cur  = Join-Path $root 'watchdog'",
+            "$new  = Join-Path $root 'watchdog.new'",
+            "$old  = Join-Path $root 'watchdog.old'",
+            "$exe  = 'HitPan.Watchdog.exe'",
+            "function Log($m) { try { Write-EventLog -LogName Application -Source HitPanWatchdog -EntryType Warning -EventId 28031 -Message $m -ErrorAction SilentlyContinue } catch {} }",
+            "function SwapDir($from, $to) { if (Test-Path $to) { Remove-Item $to -Recurse -Force }; Move-Item $from $to -Force }",
+            "",
+            // ★ Guardian 복원을 **맨 먼저** 한다 ([3-V] 적발 봉합의 3층).
+            //   교체 스크립트가 Guardian 을 끈 직후 정전되면 GuardianOn 이 실행되지 못한다.
+            //   그대로 두면 2층 안전망이 영영 꺼진 채 남는다 — 업데이트가 안전망을 없애는 꼴이다.
+            //   이미 켜져 있으면 무해한 no-op 이므로 조건 없이 켠다.
+            "schtasks.exe /Change /TN HitPanWatchdogGuardian /ENABLE 2>$null | Out-Null",
+            "",
+            // ① 제자리에 EXE 가 있으면 복구 불필요 — 서비스만 확인한다.
+            "if (Test-Path (Join-Path $cur $exe)) {",
+            "  Start-Service HitPanWatchdog -ErrorAction SilentlyContinue",
+            "  exit 0",
+            "}",
+            "",
+            // ② 신버전이 성하면 그걸로 (교체 도중 정전 = 이 경우)
+            "if (Test-Path (Join-Path $new $exe)) {",
+            "  Log 'W4-3 recover: restoring from watchdog.new'",
+            "  SwapDir $new $cur",
+            "  Start-Service HitPanWatchdog -ErrorAction SilentlyContinue",
+            "  exit 0",
+            "}",
+            "",
+            // ③ 최후 보루 — 구버전이라도 살린다. 구버전 워치독은 다음 업데이트를 다시 받을 수 있다.
+            "if (Test-Path (Join-Path $old $exe)) {",
+            "  Log 'W4-3 recover: restoring from watchdog.old (old version)'",
+            "  SwapDir $old $cur",
+            "  Start-Service HitPanWatchdog -ErrorAction SilentlyContinue",
+            "  exit 0",
+            "}",
+            "",
+            // ④ 셋 다 없으면 여기서 뭘 더 해도 상태만 악화된다. 기록만 남긴다.
+            "Log 'W4-3 recover: no usable watchdog found (cur/new/old all missing exe)'",
+            "exit 1"
+        });
+    }
+
+    /// <summary>
+    /// 워치독 기동 시 자가 점검 — 끝나지 않은 자기교체의 잔재를 정리한다.
+    ///
+    /// ★ [3-V] 병렬검증 P1-2 봉합: 부팅 복구 작업(ONSTART)은 **교체 스크립트가 성공했을 때만**
+    ///   스스로 지워진다. 예약 후 2분 사이에 서비스 재시작·전원 차단이 나면 교체는 영영 안 돌고
+    ///   복구 작업만 매 부팅 남는다(무해하지만 무기한 누적 = 바닥을 안 치우는 것).
+    ///
+    /// 판정: watchdog.new 가 없다 = 교체가 끝났거나 애초에 할 게 없다 ⇒ 안전망을 걷는다.
+    ///       watchdog.new 가 있으면 아직 교체 예정이므로 **건드리지 않는다.**
+    /// Guardian 이 꺼진 채 남아 있을 수도 있으므로(교체 직후 정전) 항상 켠다 — 이미 켜져 있으면 no-op.
+    /// </summary>
+    public void CleanupStaleSelfReplaceArtifacts()
+    {
+        if (!OperatingSystem.IsWindows()) return;
+
+        try
+        {
+            // 안전망이 꺼진 채 남는 최악을 먼저 막는다(무해한 no-op 이므로 조건 없이).
+            RunSchtasks("/Change /TN \"HitPanWatchdogGuardian\" /ENABLE");
+
+            var newDir = Path.Combine(AppRoot(), "watchdog.new");
+            if (Directory.Exists(newDir)) return;   // 교체 예정 — 안전망을 걷으면 안 된다.
+
+            // 남아 있으면 지운다. 없으면 schtasks 가 실패하는데 그건 정상이라 로그를 남기지 않는다.
+            if (RunSchtasks($"/Query /TN \"{SelfReplaceRecoverTaskName}\"") == 0)
+            {
+                RunSchtasks($"/Delete /TN \"{SelfReplaceRecoverTaskName}\" /F");
+                _logger.LogInformation("[Update/W4-3] 끝나지 않은 자기교체의 부팅 복구 작업을 정리했습니다.");
+            }
+        }
+        catch (Exception ex)
+        {
+            // 헌법 #15 — 침묵 금지. 정리 실패는 기능에 영향 없다(잔재만 남을 뿐).
+            _logger.LogWarning(ex, "[Update/W4-3] 자기교체 잔재 정리 중 예외 — 무시하고 계속합니다.");
+        }
+    }
+
+    /// <summary>
+    /// schtasks 실행 — 종료코드를 돌려준다. 30초 내 미종료면 죽이고 -1.
+    ///
+    /// ⚠️ [3-V] 병렬검증 적발 2건 봉합:
+    ///   ① 종전엔 타임아웃 시 그냥 -1 을 반환했다. Dispose() 는 자식을 죽이지 않으므로
+    ///      schtasks.exe 가 고아로 남는다 — 매 업데이트마다 쌓인다.
+    ///   ② 출력을 리다이렉트해놓고 **한 번도 읽지 않았다.** 실패해도 사유가 버려져
+    ///      로그에 종료코드만 남는다(헌법 #15 침묵 금지의 취지 미달).
+    ///      비동기로 읽어 파이프도 비우고 사유도 남긴다.
+    /// </summary>
+    private int RunSchtasks(string args)
+    {
+        using var p = Process.Start(new ProcessStartInfo
+        {
+            FileName = "schtasks.exe",
+            Arguments = args,
+            UseShellExecute = false,
+            CreateNoWindow = true,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true
+        })!;
+
+        // 파이프를 비우면서 사유를 모은다(동기 ReadToEnd 는 교착 위험이라 비동기로).
+        var stdout = p.StandardOutput.ReadToEndAsync();
+        var stderr = p.StandardError.ReadToEndAsync();
+
+        if (!p.WaitForExit(30_000))
+        {
+            try { p.Kill(entireProcessTree: true); } catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "[Update/W4-3] schtasks 타임아웃 후 종료 실패(고아 프로세스 가능).");
+            }
+            _logger.LogWarning("[Update/W4-3] schtasks 30초 내 미종료 — 강제 종료했습니다({Args}).", args);
+            return -1;
+        }
+
+        if (p.ExitCode != 0)
+        {
+            // 실패 사유를 남긴다 — 종료코드만으로는 원인을 못 찾는다.
+            var err = (stderr.IsCompletedSuccessfully ? stderr.Result : "").Trim();
+            var outp = (stdout.IsCompletedSuccessfully ? stdout.Result : "").Trim();
+            _logger.LogWarning("[Update/W4-3] schtasks 실패(exit={Code}) — {Detail}",
+                               p.ExitCode, string.IsNullOrWhiteSpace(err) ? outp : err);
+        }
+        return p.ExitCode;
     }
 
     /// <summary>

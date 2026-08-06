@@ -101,6 +101,12 @@ public class Worker : BackgroundService
         if (OperatingSystem.IsWindows())
             _updateGate.SelfHealKeepaliveIfAbandoned(_updateLock);
 
+        // W4-3 ③ 자가 점검 (20260806작3, [3-V] 병렬검증 P1-2 봉합) — 위와 같은 이유로 기동 즉시 한다.
+        //   자기교체가 예약만 되고 끝나지 못하면(2분 사이 재시작·정전) 부팅 복구 작업이 매 부팅 남고,
+        //   Guardian 이 꺼진 채 남을 수도 있다. 둘 다 여기서 되돌린다.
+        if (OperatingSystem.IsWindows())
+            _update.CleanupStaleSelfReplaceArtifacts();
+
         // W4-6 펜딩 소실 복원: _pendingConsentUpdate 는 인메모리라 워치독 재시작 시 Major 펜딩이 날아간다.
         //   하루 1회 게이트 때문에 그날 이미 평가했으면 다음날까지 동의 폴링이 죽는다. 로컬에 '발견해 둔'
         //   Major(local_update_status)가 있으면 하루 게이트를 즉시 풀어(재조회) manifest 를 다시 받아
