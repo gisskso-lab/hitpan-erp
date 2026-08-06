@@ -415,6 +415,25 @@ else if (!app.Environment.IsProduction())
     app.MapGet("/", () => Results.Redirect("/swagger")).ExcludeFromDescription();
 }
 
+// ══════════════════════════════════════════════════════════════════════════════════
+//  W4-3-H — 구버전 워치독 자동 교체 인계 (20260806작6, 사장님 오더 "업데이트가 기본이야")
+//
+//  구버전(1.2.52 이하) 워치독은 자기 자신을 교체하지 못한다. 신버전 워치독을 {app}\watchdog.new
+//  까지 받아놓고도 성공 직후 지워버린다(UpdateOrchestrator.cs:882). 그래서 워치독 코드 봉합은
+//  자동업데이트로 **영원히 고객에게 도달하지 못한다** — 두 달간 버전만 오르던 무한루프의 원인.
+//
+//  업데이트는 api 폴더를 통째로 교체한 뒤 SYSTEM 권한으로 이 프로세스를 재기동한다. 그 통로를 타고
+//  새 API 가 워치독 교체를 대신 성사시킨다. 고객 조작 0 — 재설치도 수동 조작도 없다.
+//
+//  ★ app.Run() **앞**에 두는 이유: Run 은 블로킹이라 뒤에 두면 종료 시점까지 실행되지 않는다.
+//  ★ 이 호출은 즉시 반환한다(내부에서 백그라운드로 던진다) — ERP 기동을 1ms 도 늦추지 않는다.
+//  ★ 어떤 실패도 ERP 기동을 막지 않는다(헌법 #20). 실패 시 구버전 워치독이 그대로 유지될 뿐이다.
+if (OperatingSystem.IsWindows())
+{
+    HitPan.API.Startup.WatchdogHandoffBootstrap.ScheduleIfPending(
+        app.Services.GetRequiredService<ILoggerFactory>().CreateLogger("WatchdogHandoff"));
+}
+
 app.Run();
 
 // seed-parent 서브커맨드가 있어 진입점이 int 를 반환하므로, 정상 웹 실행 경로도 명시적으로 0 을 반환한다.
