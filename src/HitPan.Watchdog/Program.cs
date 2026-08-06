@@ -51,6 +51,8 @@ builder.Services.AddSingleton<WS28E_ExternalHealthCheck>();
 builder.Services.AddSingleton<WS28F_CoolDown>();
 builder.Services.AddSingleton<WS28I_FourProcess>();
 builder.Services.AddSingleton<MetaPingClient>();
+// 20260806작4 (사장님 오더 ③): 업데이트 결과를 본사 백오피스에 보고 — MetaPing 과 별개 경로.
+builder.Services.AddSingleton<UpdateHistoryClient>();
 
 // 봉합 (2026-06-29, 작1 고리1 — UpdateOrchestrator 를 워치독 Worker 에 연결):
 //   기존 WS28A~I 등록 패턴 그대로 따라 버전 업데이트 연결축을 DI 에 추가한다(헌법 #1 추가만, #34 정식 완성도).

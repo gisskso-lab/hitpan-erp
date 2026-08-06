@@ -449,6 +449,10 @@ public class Worker : BackgroundService
 
             case ConsentDecision.Reject:
                 _logger.LogInformation("[Update] Major 버전 {V} 거부 — 적용 안 함, 펜딩 해제(재제시는 ERP 몫)", m.Version);
+                // 20260806작4 (사장님 오더 ③ 3시점 중 ③) — 거부도 본사에 알린다.
+                //   [3-V] 적발: 종전엔 이 경로가 빠져 CS 가 "왜 계속 구버전인가"를 알 수 없었다.
+                //   기다리지 않는다(내부에서 fire-and-forget). 거부는 정상 동작이라 아무것도 강제하지 않는다.
+                _update.ReportConsentRejected(m);
                 _pendingConsentUpdate = null;
                 break;
 
