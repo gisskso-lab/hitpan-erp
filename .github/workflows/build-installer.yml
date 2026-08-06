@@ -231,7 +231,7 @@ jobs:
             -Channel $channel `
             -DownloadUrlBase 'https://updates.hitpan.kr/packages' `
             -ReleaseNotes "히트판 ERP $ver 업데이트" `
-            -ConsentMessage "새 버전($ver)이 준비되었습니다. 자료를 자동으로 백업한 뒤 업데이트가 진행됩니다. 지금 진행하시겠습니까?"
+            -ConsentMessage "새 버전($ver)이 준비되었습니다. 자료를 자동으로 백업한 뒤 지금 바로 업데이트가 진행됩니다. 진행 중 히트판이 잠시 꺼졌다가 다시 켜지니, 저장하지 않은 입력이 있으면 먼저 저장해 주세요. 지금 진행하시겠습니까?"
           if ($LASTEXITCODE -ne 0) { throw "build-manifest 실패 (exit $LASTEXITCODE)" }
           Get-ChildItem $outDir | ForEach-Object { Write-Host "[update] 산출: $($_.Name)" }
 
