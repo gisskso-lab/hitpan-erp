@@ -338,7 +338,7 @@ jobs:
             -Channel '${{ inputs.channel }}' `
             -DownloadUrlBase '${{ steps.urlbase.outputs.base }}' `
             -ReleaseNotes "히트판 ERP $ver 업데이트" `
-            -ConsentMessage "새 버전($ver)이 준비되었습니다. 자료를 자동으로 백업한 뒤 업데이트가 진행됩니다. 지금 진행하시겠습니까?"
+            -ConsentMessage "새 버전($ver)이 준비되었습니다. [예] 를 누르면 자료를 자동으로 백업한 뒤 업데이트가 진행되며, 그 사이 히트판이 잠시 꺼졌다가 다시 켜집니다. 저장하지 않은 입력이 있으면 [나중에] 를 눌러 저장을 마친 뒤 다시 진행해 주세요."
           if ($LASTEXITCODE -ne 0) { throw "build-manifest 실패 (exit $LASTEXITCODE)" }
           Get-ChildItem $outDir | ForEach-Object { Write-Host "[update] 산출: $($_.Name)" }
 

@@ -387,7 +387,9 @@ public class Worker : BackgroundService
 
     /// <summary>
     /// 작1 고리2 워치독 측 — 펜딩 Major 업데이트의 로컬 동의를 읽어 적용 가부를 판단한다(A안, 헌법 #30).
-    ///   approve  → 영업시간 외에 ApplyUpdateAsync 진입(백업→차단→고리4 교체·재시작·검증·롤백). 영업시간이면 미루기(다음 루프 재판단).
+    ///   approve  → **즉시** ApplyUpdateAsync 진입(백업→차단→고리4 교체·재시작·검증·롤백).
+    ///              ※ 20260806작1: 종전엔 영업시간이면 미뤘으나, 고객이 직접 [예] 를 누른 건을
+    ///                아무 안내 없이 8시간 미루는 것은 "동작하지 않는 기능"이었다(사장님 지적).
     ///   reject   → 적용 안 함. 펜딩 폐기(다음 로그인 재제시는 ERP 몫 — 새 동의가 들어오면 manifest 재발견 시 재펜딩).
     ///   None     → 미응답. 펜딩 유지(다음 루프 재조회).
     ///   Error    → 조회 실패. 펜딩 유지(보수적, 다음 루프 재시도).
@@ -407,17 +409,33 @@ public class Worker : BackgroundService
         switch (decision)
         {
             case ConsentDecision.Approve:
-                // Major 는 동의했어도 영업시간엔 미룬다(기존 IsBusinessHour 게이트 활용 — 업무 방해 0).
-                if (_update.IsBusinessHour(DateTime.Now))
-                {
-                    _logger.LogInformation("[Update] Major 버전 {V} 동의 확인 — 영업시간이라 적용 보류(영업시간 외 자동 적용)", m.Version);
-                    return; // 펜딩 유지, 다음 루프 영업시간 외에 재판단
-                }
+                // ★★ 봉합 20260806작1 (사장님 오더) — 영업시간 보류를 제거한다 ★★
+                //   ■ 사장님 지적
+                //     "팝업이 뜨는게 중요한게 아니라 뜬 팝업으로 옵션을 선택할때, 제대로 동작하느냐가 중요한거지."
+                //   ■ 무엇이 문제였나 (2026-08-06 실측)
+                //     종전엔 여기서 IsBusinessHour 면 return 했다. 실측: 목요일 10:57 에 [예] 를 눌렀더니
+                //     동의는 기록됐는데(local_update_consents id=1, approve) **ERP 는 1.2.52 그대로**였다.
+                //     화면에 진행 표시도 안내도 없다 — 팝업만 사라진다. 고객은 고장으로 인식한다.
+                //     즉 이 기능은 "표시"였고 "동작"이 아니었다.
+                //   ■ 왜 제거가 맞는가
+                //     영업시간 보호는 **묻지 않고 바꾸는 자동 적용(Normal)** 에 필요한 규칙이다.
+                //     Major 는 고객이 "지금 진행하시겠습니까?" 에 **직접 [예] 라고 답한 건**이다.
+                //     본인이 명시적으로 선택한 행위를 8시간 미루면서 아무 고지도 하지 않는 것은
+                //     헌법 #24(가르치지 않고 넘기는 건 거짓말)·#25(쉽게) 양쪽에 어긋난다.
+                //     팝업이 "지금 진행" 이라고 물었으면 지금 해야 한다 — 문구와 동작이 일치해야 한다.
+                //   ■ 범위: 이 분기는 ConsentDecision.Approve 전용이다. [나중에]는 Reject 로,
+                //     자동 적용(Emergency/Normal)은 이 함수를 타지 않는다(RunOneLoop 의 별도 분기).
+                //   ⚠️ IsBusinessHour 함수 자체는 **삭제하지 않는다**(헌법 #1 — 수정은 OK, 제거는 금지).
+                //     ※ 정정(헌법 #32): 작성 중 "Normal 채널이 계속 쓴다"고 적었으나 **사실이 아니다.**
+                //       grep 실측 결과 이 봉합 이후 IsBusinessHour 의 실제 호출처는 **0건**이고,
+                //       Normal 은 IsNightWindow(:308·:344)를 쓴다. 그래도 함수를 남기는 이유는
+                //       ① 향후 '업무시간 중 자동작업 자제' 판정에 재사용 여지가 있고
+                //       ② 헌법 #1 이 제거를 금지하기 때문이다. 호출처 0건임을 알고 남긴다.
 
                 // 멱등 기록을 먼저 남긴 뒤 적용 — 적용 중 예외가 나도 같은 버전을 무한 재시도하지 않게 한다.
                 _consentAppliedVersions.Add(m.Version);
                 _pendingConsentUpdate = null;
-                _logger.LogInformation("[Update] Major 버전 {V} 동의 확인(영업시간 외) — 적용 진입(백업→...)", m.Version);
+                _logger.LogInformation("[Update] Major 버전 {V} 동의 확인 — 즉시 적용 진입(백업→차단→교체→재기동). 고객이 [예] 를 눌렀으므로 영업시간을 이유로 미루지 않는다.", m.Version);
                 try { await _update.ApplyUpdateAsync(m, ct); }
                 catch (OperationCanceledException) { throw; }
                 catch (Exception ex) { _logger.LogWarning(ex, "[Update] Major 동의 적용 중 예외 — 버전 {V}", m.Version); }
