@@ -73,6 +73,12 @@ builder.Services.AddSingleton<WatchdogBackupRunner>();
 builder.Services.AddSingleton<UpdateLockFile>();
 builder.Services.AddSingleton<UpdateProcessGate>();
 
+// ★ 20260807작2 N-10 (4안 혼합 · 사장님 결재 7건 2026-08-07): 마지막 새 버전 확인 시각을 {app} 에 기록.
+//   2026-08-07 백지환경 실측에서 게시본을 워치독이 스스로 못 찾고 `sc stop`/`sc start` 로만 잡혔다.
+//   확인 주기를 N시간(기본 60분)으로 줄이면서, 그 기억이 재시작으로 날아가 크래시 루프 PC 가 기동마다
+//   본사를 두드리는 것을 막는 상한 장치다. UpdateLockFile 과 같은 {app} 관례·같은 fail-open 정책.
+builder.Services.AddSingleton<UpdateCheckStampFile>();
+
 builder.Services.AddSingleton<UpdateOrchestrator>();
 
 // 봉합 (2026-06-29, 작1 고리2 워치독 측 — 로컬 동의 리더):
