@@ -1,0 +1,298 @@
+@* 업데이트 중 안내화면 (20260806작7, 사장님 결재 "a안으로 결재")
+
+   ─ 왜 필요한가 (오늘 실측에서 실제로 발생):
+     업데이트 중 히트판이 꺼지면 고객 화면에 **502 오류 페이지**가 뜬다.
+     사장님(히트판을 만든 사람)이 직접 "502 에러 떴다"며 고장으로 읽으셨다. 고객은 100% 전화한다.
+
+   ─ 왜 히트판 안이 아니라 여기인가:
+     502 를 내는 주체는 히트판이 아니라 터널이다(HitPan-Universal.iss:1134 — ingress origin=5257 직결).
+     히트판이 꺼진 동안 그 안의 코드는 한 줄도 실행되지 않는다.
+     ⇒ **[예] 를 누른 시점에 이 화면을 먼저 띄운다.** Blazor WASM 은 이미 브라우저에서 도므로
+       히트판이 꺼져도 이 화면은 살아 있다. 5초마다 두드리다 살아나면 자동으로 들어간다.
+       `Ctrl+Shift+R` 을 사람 대신 이 페이지가 하는 것이다(사장님: "자동으로 넘어감이 더 좋다").
+
+   ─ 고객 조작 0회. 자동 복귀가 실패할 때만 F5 한 번(사장님: "이게 더 낫겠다").
+*@
+@using System.Net.Http.Json
+@using MudBlazor
+@implements IDisposable
+@inject HttpClient Http
+@inject NavigationManager Nav
+
+@if (_visible)
+{
+    @* 전체를 덮는다. 뒤 화면(꺼진 히트판)이 보이면 안 된다. *@
+    <div class="hp-upd-overlay">
+        <div class="hp-upd-card">
+            @if (_stalled)
+            {
+                @* 10분 초과 — 폴링을 멈췄다. 기다리라고만 하면 영원히 갇힌다([3-V] P0-V3-A). *@
+                <div class="hp-upd-title">업데이트가 예상보다 오래 걸립니다</div>
+                <div class="hp-upd-body">
+                    히트판은 계속 업데이트를 진행하고 있습니다.<br />
+                    아래 버튼을 눌러 다시 확인해 주세요.
+                </div>
+                <button class="hp-upd-btn" @onclick="RetryAsync">다시 확인</button>
+            }
+            else if (!_done)
+            {
+                <div class="hp-upd-title">히트판 업데이트 중</div>
+                <div class="hp-upd-body">
+                    잠시만 기다려 주세요.<br />끝나면 자동으로 돌아옵니다.
+                </div>
+                <div class="hp-upd-dots"><span></span><span></span><span></span></div>
+                <div class="hp-upd-note">창을 닫으셔도 업데이트는 계속됩니다.</div>
+
+                @* 90초 경과 — 자동 복귀가 늦을 때만 조용히 한 줄(사장님 확정 "이게 더 낫겠다").
+                   ★ 30초가 아니라 90초인 이유는 상수 주석 참조 — 워치독 판정창이 60초라
+                     30초에 띄우면 정상 진행 중에 F5 를 권하게 되고, 그 F5 가 502 를 부른다. *@
+                @if (_showManualHint)
+                {
+                    <div class="hp-upd-hint">오래 걸리면 F5 를 눌러 주세요</div>
+                }
+            }
+            else
+            {
+                <div class="hp-upd-check">✅</div>
+                <div class="hp-upd-title">업데이트가 끝났습니다</div>
+                <div class="hp-upd-body">
+                    히트판 @_newVersion<br />잠시 후 화면이 열립니다
+                </div>
+            }
+        </div>
+    </div>
+}
+
+@code {
+    /// <summary>폴링 간격. 재기동 중인 히트판에 부담을 주지 않도록 넉넉히 잡는다.</summary>
+    private const int PollSeconds = 5;
+
+    /// <summary>
+    /// 이 시간이 지나도 안 돌아오면 안내를 한 줄 덧붙인다.
+    ///
+    /// ★ 재봉합 [3-V] P0-V5-A — 사장님 원안은 30초였다. 그런데 **워치독의 판정창이 60초**다
+    ///   (UpdateOrchestrator.cs:649 `deadline = UtcNow + 60초`). 30초에 안내를 띄우면
+    ///   **정상적으로 업데이트가 진행 중인 흔한 경우**에 뜬다. 그리고 그때 F5 를 누르면
+    ///   히트판이 아직 안 떠 있어 **502 를 보게 된다** — 502 를 안 보여주려고 만든 화면이
+    ///   502 를 보라고 지시하는 자기모순이다.
+    ///   ⇒ 90초로 늘린다(워치독 60초 + 재기동 여유). 사장님 의도("오래 걸리면 안내")는 그대로다.
+    /// </summary>
+    private const int ManualHintSeconds = 90;
+
+    /// <summary>완료 표시를 보여주는 시간. 이 뒤 자동 이동(사장님: "자동으로 넘어감이 더 좋다").</summary>
+    private const int DoneHoldSeconds = 3;
+
+    /// <summary>
+    /// 이 시간을 넘겨서도 **옛 버전이 정상 응답**하면 롤백된 것으로 본다([3-V] P0-V2-C).
+    /// 워치독 판정창 60초 + 롤백·재기동 여유. 이보다 짧으면 "아직 교체 전"을 롤백으로 오판한다.
+    /// </summary>
+    private const int RollbackJudgeSeconds = 120;
+
+    /// <summary>
+    /// 무한 대기 금지. 이 시간을 넘기면 폴링을 멈추고 안내를 바꾼다.
+    /// 업데이트가 실패해 히트판이 영영 안 뜨는 경우, 화면이 영원히 도는 것을 막는다.
+    /// </summary>
+    private const int GiveUpMinutes = 10;
+
+    private bool _visible;
+    private bool _done;
+    private bool _showManualHint;
+
+    /// <summary>10분을 넘겨 폴링을 멈춘 상태([3-V] P0-V3-A). 고객에게 빠져나갈 길을 준다.</summary>
+    private bool _stalled;
+    private string? _newVersion;
+    private string? _currentVersion;
+    private CancellationTokenSource? _cts;
+
+    /// <summary>
+    /// [예] 직후 호출. 즉시 화면을 덮고 폴링을 시작한다.
+    /// **await 하지 않는다** — 호출부(팝업 처리)를 붙잡으면 화면이 안 그려진다.
+    /// </summary>
+    public void Start(string newVersion, string? currentVersion)
+    {
+        _newVersion = newVersion;
+        _currentVersion = currentVersion;
+        _visible = true;
+        _done = false;
+        _showManualHint = false;
+        _stalled = false;
+        _cts?.Cancel();
+        _cts = new CancellationTokenSource();
+        StateHasChanged();
+
+        _ = WatchAsync(newVersion, currentVersion, _cts.Token);
+    }
+
+    /// <summary>
+    /// 10분 초과로 멈춘 뒤 고객이 누르는 버튼([3-V] P0-V3-A).
+    /// 한 번 확인해서 살아 있으면 바로 들어가고, 아직이면 다시 기다린다.
+    /// F5 를 권하지 않는 이유: 히트판이 아직 안 떴으면 F5 가 곧 502 다.
+    /// </summary>
+    private async Task RetryAsync()
+    {
+        var live = await TryGetLiveVersionAsync(CancellationToken.None);
+        if (live is not null)
+        {
+            // 살아 있으면 버전과 무관하게 들여보낸다 — 화면에 가둬 두는 것보다 낫다.
+            Nav.NavigateTo(Nav.Uri, forceLoad: true);
+            return;
+        }
+
+        // 아직이다. 다시 기다린다(같은 상한이 또 적용된다).
+        _stalled = false;
+        _showManualHint = true;
+        StateHasChanged();
+        _cts?.Cancel();
+        _cts = new CancellationTokenSource();
+        _ = WatchAsync(_newVersion!, _currentVersion, _cts.Token);
+    }
+
+    private async Task WatchAsync(string newVersion, string? currentVersion, CancellationToken ct)
+    {
+        var started = DateTime.UtcNow;
+        var hintShown = false;
+
+        try
+        {
+            while (!ct.IsCancellationRequested)
+            {
+                await Task.Delay(TimeSpan.FromSeconds(PollSeconds), ct);
+                var elapsed = DateTime.UtcNow - started;
+
+                // 30초 경과 — F5 안내를 덧붙인다(한 번만).
+                if (!hintShown && elapsed.TotalSeconds >= ManualHintSeconds)
+                {
+                    hintShown = true;
+                    _showManualHint = true;
+                    StateHasChanged();
+                }
+
+                // ★ 재봉합 [3-V] P0-V3-A — 무한 대기 금지.
+                //   업데이트가 실패해 히트판이 영영 안 뜨면 화면이 영원히 돈다. 그건 502 보다 나쁘다 —
+                //   502 는 최소한 F5 로 벗어나지만, 이 화면은 "기다리라"고 **지시**하기 때문이다.
+                //   10분을 넘기면 폴링을 멈추고 **빠져나갈 길**을 준다.
+                if (elapsed.TotalMinutes >= GiveUpMinutes)
+                {
+                    _stalled = true;
+                    StateHasChanged();
+                    return;
+                }
+
+                var live = await TryGetLiveVersionAsync(ct);
+
+                // 히트판이 아직 안 떴다(꺼짐·502·타임아웃) → 계속 기다린다. 이게 정상 경로다.
+                if (live is null) continue;
+
+                // ★ 거짓 완료 차단 — 200 만으로는 안 된다.
+                //   교체 직후 옛 프로세스가 아직 살아 옛 버전 200 을 답하는 창이 있다
+                //   (워치독 자신도 이 함정 때문에 /health version + FileVersion 2중 판정을 쓴다:
+                //    UpdateOrchestrator.VerifyNewVersionAsync). 화면도 같은 기준을 쓴다.
+                if (!VersionMatches(live, newVersion))
+                {
+                    // 옛 버전이 살아서 응답했다 = 아직 교체 전이거나, 교체 실패로 롤백됐다.
+                    //
+                    // ★ 재봉합 [3-V] P0-V2-C — 브라우저는 롤백 신호를 받을 경로가 없다.
+                    //   워치독만 알고 화면은 모른다. 그래서 **시간으로 구분**한다:
+                    //   워치독의 판정창은 60초이고, 실패하면 그 뒤 롤백해 옛 버전을 되살린다
+                    //   (UpdateOrchestrator.cs:649,673). 즉 판정창을 한참 넘겨서도 옛 버전이
+                    //   **정상 응답**하고 있으면 롤백이 끝난 것으로 본다.
+                    //
+                    //   그때 "업데이트가 끝났습니다"는 거짓말이다. 완료 표시 없이 조용히 화면을 걷는다.
+                    //   실패를 굳이 알려 불안하게 만들지도 않는다 — 히트판은 멀쩡히 돌고 있고,
+                    //   워치독이 다음 기회에 다시 시도한다(헌법 #24 — 거짓말하지 않되 겁주지도 않는다).
+                    if (currentVersion is not null
+                        && VersionMatches(live, currentVersion)
+                        && elapsed.TotalSeconds >= RollbackJudgeSeconds)
+                    {
+                        _visible = false;
+                        StateHasChanged();
+                        return;
+                    }
+                    continue;
+                }
+
+                // 새 버전이 실제로 살아서 응답했다 → 완료.
+                _done = true;
+                StateHasChanged();
+
+                await Task.Delay(TimeSpan.FromSeconds(DoneHoldSeconds), ct);
+
+                // 자동 이동. 새 버전을 받아야 하므로 전체 새로고침(forceLoad)으로 들어간다.
+                Nav.NavigateTo(Nav.Uri, forceLoad: true);
+                return;
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            // 컴포넌트가 사라졌다. 정상 종료.
+        }
+        catch (Exception ex)
+        {
+            // 헌법 #15 — 침묵 금지. 다만 화면은 유지한다(F5 안내가 남아 고객이 빠져나갈 수 있다).
+            Console.Error.WriteLine("[UpdateProgressOverlay] " + ex.GetType().Name + ": " + ex.Message);
+            _showManualHint = true;
+            StateHasChanged();
+        }
+    }
+
+    /// <summary>
+    /// 지금 살아 있는 히트판의 버전. 못 부르면(꺼짐·502·타임아웃) null.
+    ///
+    /// ★ 재봉합 [3-V] P0-V2-A — 종전엔 `/health` 를 불렀는데 **브라우저에서는 403 이다.**
+    ///   인증보다 앞선 HealthIpWhitelistMiddleware(:15)가 `/health` 로 시작하는 경로를 가로채
+    ///   루프백 외에는 전부 막는다. `[AllowAnonymous]` 는 인증만 면제할 뿐 이걸 통과시키지 못한다.
+    ///   터널이 로컬 프록시라 우연히 통과할 수도 있으나 그건 보장이 아니라 배포 형태에 기댄 우연이다.
+    ///   ⇒ 화이트리스트를 건드리지 않고(보안 축소 0) 전용 경로 `api/app-version` 을 쓴다.
+    ///
+    /// 같은 출처(현재 페이지 도메인)로 부르므로 CORS 를 타지 않는다
+    /// (Web/Program.cs:35 — ApiBaseUrl 폴백이 HostEnvironment.BaseAddress).
+    /// `127.0.0.1:5257` 직접 호출은 3중으로 불가하다 — 다른 출처 + HTTPS→HTTP 혼합콘텐츠 차단 +
+    /// CSP `connect-src 'self' https: wss:`. 반드시 상대경로여야 한다.
+    /// </summary>
+    private async Task<string?> TryGetLiveVersionAsync(CancellationToken ct)
+    {
+        try
+        {
+            using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            timeout.CancelAfter(TimeSpan.FromSeconds(4));   // 폴링 간격보다 짧게 — 요청이 겹치지 않게.
+
+            var res = await Http.GetAsync("api/app-version", timeout.Token);
+
+            // 502(터널이 대신 답함)·503(부팅 중 DB 미준비)·403 — 전부 "아직 안 떴다"로 본다.
+            //   예외로 던지지 않고 조용히 계속 기다린다([3-V] P1-V3-B).
+            if (!res.IsSuccessStatusCode) return null;
+
+            var doc = await res.Content.ReadFromJsonAsync<AppVersionResponse>(cancellationToken: timeout.Token);
+            var v = doc?.Version;
+            return string.IsNullOrWhiteSpace(v) ? null : v;
+        }
+        catch
+        {
+            // 연결 실패·타임아웃·JSON 파싱 실패 — 전부 "아직 안 떴다"로 본다.
+            //   여기서 로그를 남기면 5초마다 콘솔이 오염된다(정상 경로이므로 침묵이 맞다).
+            return null;
+        }
+    }
+
+    /// <summary>"1.2.55" 와 "1.2.55.0" 을 같게 본다. 파싱 불가면 문자열 비교로 폴백.</summary>
+    private static bool VersionMatches(string a, string b)
+    {
+        if (Version.TryParse(a.Trim(), out var va) && Version.TryParse(b.Trim(), out var vb))
+        {
+            static Version Norm(Version v) => new(v.Major, v.Minor, Math.Max(v.Build, 0), Math.Max(v.Revision, 0));
+            return Norm(va) == Norm(vb);
+        }
+        return string.Equals(a.Trim(), b.Trim(), StringComparison.OrdinalIgnoreCase);
+    }
+
+    public void Dispose()
+    {
+        _cts?.Cancel();
+        _cts?.Dispose();
+    }
+
+    private sealed class AppVersionResponse
+    {
+        public string? Version { get; set; }
+    }
+}
