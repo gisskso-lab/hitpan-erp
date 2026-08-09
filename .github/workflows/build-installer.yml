@@ -28,15 +28,17 @@ on:
       #   Major     = ERP 로그인 Y/N 동의 + 영업시간 외에만 적용
       #   ※ 낮에 Major/Normal 로 올리면 워치독 로그에 "보류"가 뜨는 게 정상이다.
       #     그것을 "업데이트 실패"로 오판하지 말 것(2026-07-20 진범 오판 재발 방지).
+      # 🔴 채널 고정 (2026-08-09, 사장님 지시) — deploy-update.yml 과 동일 규율
+      #   "모든 히트판 배포는 이렇게 진행되는걸로 통일해야지"(사장님).
+      #   게시(deploy-update)만 막고 여기를 열어두면 같은 사고가 이쪽으로 새어 나온다.
+      #   히트판 업데이트는 Major(팝업 Y/N) 하나뿐이다. 상세 사유는 deploy-update.yml 채널 주석.
       channel:
-        description: 'Update channel (Emergency=즉시 / Normal=야간 / Major=동의+영업시간외)'
+        description: '고정: Major(팝업 Y/N). 선택 불가 — 변경은 사장님 결재 + 코드 수정.'
         required: false
         type: choice
         default: 'Major'
         options:
           - Major
-          - Normal
-          - Emergency
 
 permissions:
   contents: write
