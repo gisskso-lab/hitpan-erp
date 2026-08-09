@@ -234,4 +234,4 @@ PM 결재 완료               → 아래 순서로 진행
 - 문서 틀: [`_틀/`](_틀/)
 - 폴더 담당: [`POLICY_폴더담당.md`](POLICY_폴더담당.md)
 - 진입점: [`START_HERE.md`](START_HERE.md)
-- 헌법 전문: [`헌법/헌법원문_1-42.md`](헌법/헌법원문_1-42.md) · 통합본 [`헌법/HITPAN_CONSTITUTION.md`](헌법/HITPAN_CONSTITUTION.md)
+- 헌법 전문: [`헌법/헌법원문_1-43.md`](헌법/헌법원문_1-43.md) · 통합본 [`헌법/HITPAN_CONSTITUTION.md`](헌법/HITPAN_CONSTITUTION.md)
