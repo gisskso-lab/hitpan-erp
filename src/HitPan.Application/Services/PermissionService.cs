@@ -11,6 +11,12 @@ public class PermissionService : IPermissionService
     private readonly IDbConnection _db;
     private readonly ICurrentTenant _currentTenant;
 
+    // 🔴 ERP 권한 메뉴 진실원.
+    //
+    // ⚠️ 이 목록을 고칠 때는 반드시 프론트
+    //    src/HitPan.Web/Pages/Settings/PermissionPage.razor.cs 의 ErpMenus 를 함께 고친다.
+    //    한쪽만 고치면 화면에서 체크·저장해도 권한이 영원히 안 먹는다(2026-08-09 봉합 사고).
+    //    CI 스크립트 scripts/check-permission-menu-sync.sh 가 두 목록의 Code 집합을 비교해 막는다.
     private static readonly List<(string Code, string Name)> MenuList =
     [
         ("DELIVERY", "거래명세서"),

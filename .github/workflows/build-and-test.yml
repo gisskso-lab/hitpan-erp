@@ -129,3 +129,19 @@ jobs:
           HITPAN_DB_HOST: '127.0.0.1'
           HITPAN_DB_PORT: '3306'
         run: bash scripts/ddl-smoke-test.sh
+
+  # 20260809작4 ①번 — 권한 메뉴 코드 정합 (사장님 결재).
+  #   프론트 ErpMenus 와 백엔드 MenuList 의 코드가 어긋나면
+  #   화면은 "권한이 저장됐습니다" 라고 말하는데 직원은 계속 403 이다.
+  #   빌드는 통과하고 화면도 정상으로 보이므로 사람 눈으로는 안 잡힌다 — CI 가 대신 기억한다.
+  #   build 잡과 독립 병렬(needs 없음) — 컴파일과 무관한 데이터 계약 축이다.
+  permission-menu-sync:
+    name: 권한 메뉴 코드 정합 (프론트 ↔ 백엔드)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Check permission menu code sync
+        run: bash scripts/check-permission-menu-sync.sh
