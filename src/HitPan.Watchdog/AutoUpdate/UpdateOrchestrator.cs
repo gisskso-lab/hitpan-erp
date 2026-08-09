@@ -506,13 +506,15 @@ public sealed class UpdateOrchestrator
         //    종전엔 sqlFiles.Length>0 만으로 차단했는데, Migrations\SQL 은 누적 이력(DB-02~DB-84)이라 항상
         //    존재한다 → 모든 릴리스 영구 차단(2026-07-22 실측 확정, 게이트 ②·빌드타임 §3 는 이미 정밀한데 ①만 거침).
         //
-        //    A'안 판정:
+        //    A'안 판정 (2026-08-09 고리5 완성으로 '신규 있음' 처리가 바뀌었다):
         //      · zip 의 DB-*.sql 중 로컬 schema_migrations(success=1)에 없는 '신규'가 있는가?
         //      · 신규 없음(누적 이력만) → 통과. 순수 코드배포 릴리스가 자동교체된다(오탐 제거).
-        //      · 신규 있음 → RequiresMigration 값과 무관하게 차단. 워치독은 DB 마이그를 적용하지 않으므로
-        //        (고리5 미구현, Worker.cs 참조) 마이그 필요 릴리스를 통과시키면 적용 주체가 없어 500 P0.
-        //        마이그 필요 릴리스는 고리5 완성 전까지 수동 경로(재설치)로 간다 — 이건 정직이다(사장님 승인 2026-07-22).
-        //      · schema_migrations 조회 불가(구 DB·조회 실패) → null → 안전측(차단). 검증 없이 교체 안 함(헌법 #20).
+        //      · 신규 있음 → ⚠️ 경고 후 통과. 종전엔 차단이었다 — 워치독에 적용 주체가 없었기 때문이다.
+        //        지금은 HitPan.API 기동 시 MigrationRunner 가 적용한다(Program.cs 고리5 배선).
+        //        스왑은 api 교체 → 기동 순서라, 새 코드가 첫 쿼리를 던지기 전에 컬럼이 생긴다.
+        //      · schema_migrations 조회 불가(구 DB·조회 실패) → null → 안전측(차단). 이건 그대로 둔다.
+        //        고리5 가 있어도 'DB 를 읽지도 못하는 상태' 는 판정 자체가 불가능하다 — 검증 없이 교체하지
+        //        않는다(헌법 #20). 이 경우는 DB 연결 자체가 문제이므로 자동 교체로 풀 일이 아니다.
         var applied = await _statusWriter.GetAppliedMigrationIdsAsync(ct).ConfigureAwait(false);
         if (applied is null)
         {
@@ -532,12 +534,28 @@ public sealed class UpdateOrchestrator
 
         if (newMigrations.Count > 0)
         {
-            _logger.LogError("[Update] 🛑 교차검증 차단 — 로컬 미적용 신규 마이그 {N}개({List}). " +
-                             "워치독은 DB 마이그를 적용하지 않습니다(고리5 미구현) — 통과 시 신 스키마 부재로 500. " +
-                             "이 릴리스는 수동 경로(재설치)로 적용해야 합니다 — 자동교체를 중단합니다({V}).",
-                             newMigrations.Count, string.Join(", ", newMigrations.Take(10)), manifest.Version);
-            _lastSwapBlockedByMigrationGate = true;   // W4-6: apply_status 에 'blocked' 로 기록되게 표식.
-            return false;
+            // ★ 2026-08-09 고리5 완성 (사장님 결재 "승인") — 여기서 더 이상 차단하지 않는다.
+            //
+            //   종전: 워치독에 DB 마이그 적용 주체가 없어(고리5 미구현) 신규 마이그가 있는 릴리스를
+            //         전량 차단했다. 그래서 DB 가 바뀌면 자동 업데이트가 막히고 재설치로만 갈 수 있었다.
+            //         차단은 결함이 아니라 정직한 안전장치였다 — 적용 주체가 없는데 통과시키면 500 이다.
+            //
+            //   지금: 적용 주체가 섰다. HitPan.API 가 기동할 때 MigrationRunner 가 미적용분을 적용한다
+            //         (Program.cs 'var app = builder.Build()' 직후, 고리5 배선).
+            //         스왑 순서상 api 교체 → 기동 이므로, 새 코드가 첫 쿼리를 던지기 전에 컬럼이 생긴다.
+            //
+            //   🔴 그래도 통과가 아니라 '경고 후 통과' 인 이유
+            //     적용 주체가 있다는 것과 그 적용이 성공한다는 것은 다르다. 실패하면 MigrationRunner 가
+            //     그 지점에서 멈추고 success=0 을 기록한다(더 망가뜨리지 않는다). 그때 새 컬럼을 쓰는
+            //     화면만 오류가 나고 나머지 업무는 계속 돈다 — 재설치보다 피해가 작다.
+            //     ⇒ 무엇이 실려 왔는지를 로그에 남겨, 사고 시 "무엇이 적용되려 했나"를 즉시 알 수 있게 한다.
+            //
+            //   ⚠️ 백업은 이미 이 흐름 앞단에서 워치독이 수행한다(사장님 결재 업데이트 흐름).
+            //      마이그가 데이터를 변형하는 종류로 넓어지면 이 판단을 재결재받는다.
+            _logger.LogWarning("[Update] ⚠️ 신규 마이그 {N}개 포함({List}) — 교체를 계속합니다. " +
+                               "적용 주체: HitPan.API 기동 시 MigrationRunner(고리5). " +
+                               "적용 실패 시 해당 지점에서 중단되고 새 컬럼을 쓰는 화면만 영향을 받습니다({V}).",
+                               newMigrations.Count, string.Join(", ", newMigrations.Take(10)), manifest.Version);
         }
         // 신규 마이그 0건 = 누적 이력만 있는 정상 릴리스 → ① 통과. (스키마 변경 검사는 아래 ②가 계속 수행.)
 
