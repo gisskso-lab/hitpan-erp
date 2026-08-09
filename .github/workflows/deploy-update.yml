@@ -52,12 +52,29 @@ on:
         description: '릴리스 버전 (3자, 예: 1.2.40). 직전 게시본보다 높아야 함(다운그레이드 게이트). dispatch 전 이 커밋이 build-and-test 초록인지 확인(I-3).'
         required: true
         type: string
+      # 🔴 채널 고정 (2026-08-09, 사장님 지시) — 선택지를 없앤다
+      #   ■ 무엇을 겪고서
+      #     2026-08-09 PM 이 N-10 실측 편의로 Emergency 를 골라 게시했다. Emergency 는 팝업이
+      #     없는 채널이라 고객 동의 없이 즉시 적용됐고, **이 시스템의 존재 이유인 팝업 경로를
+      #     통째로 건너뛴 배포**가 됐다.
+      #   ■ 사장님 지시
+      #     "팝업 띄워서 팝업에 Y/N 선택시 업데이트 정상진행 안정적으로 되도록 해놔"
+      #     "test1 뿐 아니라 모든 히트판 배포는 이렇게 진행되는걸로 통일해야지"
+      #   ■ 왜 default 로는 부족한가
+      #     종전에도 default 는 Major 였다. 그런데 **사람이 고를 수 있으면 고른다.** 오늘이 그 증거다.
+      #     기본값은 규율이 아니다. 선택지를 없애야 규율이다.
+      #   ■ 히트판 업데이트의 정본 흐름 (이것만 있다)
+      #     Major 발견 → local_update_status 적재 → ERP 로그인 시 Y/N 팝업
+      #       [예]     → 즉시 적용(백업 → 교체 → 재기동 → 검증 → 실패 시 롤백)
+      #       [나중에] → 적용 안 함. 다음 로그인에 다시 물어본다
+      #   ⚠️ Normal·Emergency 가 정말 필요한 상황이 생기면 **사장님 결재 후 이 파일을 고친다.**
+      #     워크플로 입력으로 열어두지 않는다 — 열려 있으면 또 골라 쓴다.
       channel:
-        description: '적용 시점 채널. 팝업은 Major 만 뜸(게시함정3-③은 여기서 주입, 게시 시 jq 금지).'
+        description: '고정: Major(팝업 Y/N). 선택 불가 — 사유는 위 주석. 변경은 사장님 결재 + 코드 수정.'
         required: true
         default: Major
         type: choice
-        options: [Major, Normal, Emergency]
+        options: [Major]
       environment:
         description: '배포 대상 피드. production 만 실동작(beta 는 피드 물리생성 별건 전엔 nginx 403).'
         required: true

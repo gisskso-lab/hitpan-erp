@@ -124,7 +124,7 @@ PM 이나 설계팀이 만들어내는 요구가 아니다. **사장님 오더�
 
 | 속하는 것 | 예 |
 |---|---|
-| 헌법 원문·통합본 | `헌법원문_1-42.md` · `HITPAN_CONSTITUTION.md` |
+| 헌법 원문·통합본 | `헌법원문_1-43.md` · `HITPAN_CONSTITUTION.md` |
 | 설계 원칙 | `DESIGN_PRINCIPLES.md` |
 | 개발 규범·체크리스트 | `MANAGER_5VERIFY_CHECKLIST.md` · `5중검증_자동화_파이프라인.md` |
 | 헌법 위반 이력 | `CONSTITUTION_VIOLATION_LEDGER.md` |
