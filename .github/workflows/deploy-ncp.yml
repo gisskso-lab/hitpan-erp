@@ -1,7 +1,17 @@
 # NCP 자동 배포 (사장님 결재 Plan 2026-06-09 — cicd-velvety-reef)
 #
-# 트리거: develop push (백오피스 API/랜딩 영역만)
+# 트리거: main·develop push (백오피스 API/랜딩 영역만)
 # 대상: NCP 서버 (back.hitpan.kr + landing.hitpan.kr)
+#
+# ■ 봉합 (2026-08-09, 병렬이슈 07 · 사장님 결재) — main 이 빠져 있었다
+#   종전 트리거는 `branches: [develop]` 뿐이었는데, 우리 작업은 전부 `main` 으로 머지된다.
+#   그래서 자동 배포가 **한 번도 걸리지 않았고** workflow_dispatch(수동)로만 돌았다.
+#   실측: 마지막 배포 2026-08-02(전부 수동) / 업데이트기록 수신부 작성 2026-08-06
+#         → 그 사이 자동 배포 0회. 8/06 에 아무도 안 눌렀다.
+#   결과: main 에 있는 P0 4건이 서버에 없었다. 특히 f934d34
+#         "국세청 무응답 시 가입 전면차단 해소" 가 미배포라, 국세청 API 가 흔들리면
+#         신규 가입이 통째로 막히는 상태로 남아 있었다.
+#   ⇒ 사람 기억에 의존하는 배포는 이미 한 번 실패했다. main 을 트리거에 넣는다.
 #
 # 헌법 정합:
 #   #22·#35 — 본사 클라우드 (백오피스 + 랜딩만 NCP 배포, ERP는 고객 PC 로컬 절대)
@@ -15,7 +25,9 @@ name: Deploy to NCP
 
 on:
   push:
-    branches: [develop]
+    # 🔴 main 이 먼저다 — 우리 작업의 머지 대상이 main 이다(병렬이슈 07).
+    #   develop 은 종전 동작 유지를 위해 존치한다(헌법 #1 — 수정은 OK, 덮어쓰기 금지).
+    branches: [main, develop]
     paths:
       - 'src/HitPan.Backoffice.API/**'
       - 'src/HitPan.Backoffice/**'

@@ -73,6 +73,18 @@ builder.Services.AddSingleton<WatchdogBackupRunner>();
 builder.Services.AddSingleton<UpdateLockFile>();
 builder.Services.AddSingleton<UpdateProcessGate>();
 
+// ★ 20260807작2 N-10 (4안 혼합 · 사장님 결재 7건 2026-08-07): 마지막 새 버전 확인 시각을 {app} 에 기록.
+//   2026-08-07 백지환경 실측에서 게시본을 워치독이 스스로 못 찾고 `sc stop`/`sc start` 로만 잡혔다.
+//   확인 주기를 N시간(기본 60분)으로 줄이면서, 그 기억이 재시작으로 날아가 크래시 루프 PC 가 기동마다
+//   본사를 두드리는 것을 막는 상한 장치다. UpdateLockFile 과 같은 {app} 관례·같은 fail-open 정책.
+builder.Services.AddSingleton<UpdateCheckStampFile>();
+
+// 20260809작2 P0-1 (사장님 결재 2026-08-09): 적용 전 디스크 여유공간 검사.
+//   3팀이 독립 지목했고 실측 결과 src/ 전체에 검사 코드가 0건이었다. 롤백도 디스크를 쓰므로
+//   부족한 순간 안전망까지 무너진다 — 다운로드 전에 막는다(UpdateOrchestrator §0).
+//   ⚠️ 이 줄을 추가할 때 IntegrationLoopTests 등록 목록도 함께 갱신했다(병렬이슈 06 재발 방지).
+builder.Services.AddSingleton<UpdateDiskSpaceGuard>();
+
 builder.Services.AddSingleton<UpdateOrchestrator>();
 
 // 봉합 (2026-06-29, 작1 고리2 워치독 측 — 로컬 동의 리더):

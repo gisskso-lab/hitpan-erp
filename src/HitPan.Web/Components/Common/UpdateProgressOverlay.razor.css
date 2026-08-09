@@ -1,0 +1,105 @@
+/* 업데이트 중 안내화면 (20260806작7)
+
+   ── 왜 컴포넌트 전용 CSS 인가 ──
+   전역 CSS(hp-toss.css 등)를 건드리지 않는다. 이 화면은 업데이트 중에만 뜨는 독립 화면이고,
+   전역을 손대면 다른 화면에 파급될 수 있다(헌법 #1 — 기존 것을 덮지 않는다).
+
+   ── 왜 외부 폰트·이미지를 안 쓰는가 ──
+   이 화면이 뜨는 순간 히트판은 꺼져 있다. 그때 새로 받아야 하는 자원이 하나라도 있으면
+   화면이 깨진다. 색·글자·움직임 전부 브라우저 기본으로만 만든다. */
+
+.hp-upd-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 20000;              /* MudBlazor 다이얼로그(1400대)보다 위 */
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: #f7f8fa;         /* 어둡게 덮지 않는다 — 고장난 느낌을 주지 않기 위해 */
+    font-family: inherit;
+}
+
+.hp-upd-card {
+    text-align: center;
+    padding: 48px 40px;
+    max-width: 420px;
+}
+
+.hp-upd-title {
+    font-size: 22px;
+    font-weight: 700;
+    color: #1a1a1a;
+    margin-bottom: 16px;
+}
+
+.hp-upd-body {
+    font-size: 16px;
+    line-height: 1.7;
+    color: #4a4a4a;
+}
+
+.hp-upd-note {
+    margin-top: 28px;
+    font-size: 14px;
+    color: #8a8a8a;
+}
+
+/* 30초 뒤에만 나타나는 한 줄. 눈에 띄되 불안하게 만들지 않는 톤. */
+.hp-upd-hint {
+    margin-top: 20px;
+    padding-top: 18px;
+    border-top: 1px solid #e4e6ea;
+    font-size: 14px;
+    color: #666;
+}
+
+/* 10분 초과 시에만 나타나는 탈출구. 기다리라고만 하면 고객이 화면에 갇힌다. */
+.hp-upd-btn {
+    margin-top: 28px;
+    padding: 12px 32px;
+    font-size: 16px;
+    font-family: inherit;
+    color: #fff;
+    background: #2b6ef2;
+    border: none;
+    border-radius: 8px;
+    cursor: pointer;
+}
+
+.hp-upd-btn:hover  { background: #245fd6; }
+.hp-upd-btn:active { background: #1f52ba; }
+
+.hp-upd-check {
+    font-size: 44px;
+    line-height: 1;
+    margin-bottom: 16px;
+}
+
+/* 진행 표시 — "멈춘 게 아니라 돌고 있다"를 보여주는 유일한 신호라 반드시 움직여야 한다. */
+.hp-upd-dots {
+    margin-top: 28px;
+    display: flex;
+    gap: 8px;
+    justify-content: center;
+}
+
+.hp-upd-dots span {
+    width: 9px;
+    height: 9px;
+    border-radius: 50%;
+    background: #b8bdc7;
+    animation: hp-upd-bounce 1.4s infinite ease-in-out both;
+}
+
+.hp-upd-dots span:nth-child(1) { animation-delay: -0.32s; }
+.hp-upd-dots span:nth-child(2) { animation-delay: -0.16s; }
+
+@keyframes hp-upd-bounce {
+    0%, 80%, 100% { opacity: 0.3; transform: scale(0.8); }
+    40%           { opacity: 1;   transform: scale(1); }
+}
+
+/* 움직임을 줄이도록 설정한 사용자에게는 깜빡임만 남긴다(접근성). */
+@media (prefers-reduced-motion: reduce) {
+    .hp-upd-dots span { animation-duration: 2.4s; }
+}
