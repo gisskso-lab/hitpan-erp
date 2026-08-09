@@ -1191,6 +1191,11 @@ begin
     //     신규 설치 PC 의 설정 파일에 이 키가 안 보인다(.Bind 라 동작은 하지만 손댈 자리가 없다).
     '    "UpdateHistoryEndpoint": "https://back.hitpan.kr/api/telemetry/update-history",' + #13#10 +
     '    "MetaPingIntervalMinutes": 5,' + #13#10 +
+    // 20260809 (사장님 지시 "바로 바꿔") — 새 버전 확인 주기(초). 60초 = 루프마다 확인 = 사실상 실시간.
+    //   위 [3-V] P2 와 같은 이유로 여기 반드시 넣는다. 이 파일이 appsettings.json 을 통째로 새로 쓰므로
+    //   빠지면 신규 설치 PC 의 설정 파일에 이 키가 안 보인다(.Bind 라 기본값 60 으로 동작은 하지만
+    //   CS 가 조정할 자리가 없다). 상·하한 30~3600초는 코드가 강제한다(설정 우회 불가).
+    '    "UpdateCheckIntervalSeconds": 60,' + #13#10 +
     '    "CoolDownMaxPerHour": 5,' + #13#10 +
     '    "Processes": {' + #13#10 +
     '      "Services": [ "MariaDB", "cloudflared" ],' + #13#10 +

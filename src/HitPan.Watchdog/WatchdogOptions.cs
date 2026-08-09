@@ -24,36 +24,50 @@ public class WatchdogOptions
     //     종전은 "하루 1회"였다. 2026-08-07 사장님 백지환경 실측에서 게시한 1.2.55 를 워치독이
     //     스스로 발견하지 못했고, `sc stop`/`sc start` 를 직접 치신 뒤에야 잡혔다.
     //     고객 PC 에는 재시작할 사람이 없다 — 최대 24시간 못 받으면서 화면은 정상으로 보인다.
-    //   ■ 기본 60분인 이유
-    //     사장님 3단계(코드수정 → 업데이트 → 실측)가 최대 1시간 / 평균 30분에 성립한다.
-    //     부하: 고객사 1,000곳 기준 24,000 req/일 ≈ 0.28 req/s. manifest 는 1KB 미만이고
-    //     nginx 정적 서빙 기준으로 부하라 부르기 어렵다(설계서 §3-1).
+    //   ■ 🔴 정정 (2026-08-09, 사장님 지시) — 60분은 틀렸다. 실시간이어야 한다.
+    //     사장님: "워치독은 업데이트 된 파일을 실시간으로 인식하며 돌아야 되는거 아니야??"
+    //             "배포 전 수정, 테스트 과정에선 더더욱 실시간으로 업데이트 파일을 빌드하고
+    //              확인하며 테스트 하는게 중요해. 바로 바꿔"
+    //
+    //     종전 60분의 근거는 "오리진 부하"였는데, 그 계산을 보수적으로 읽은 것이 오판이었다:
+    //       manifest.json 은 **1KB 미만 정적 파일**이다. 1분 주기라도 1,000사 기준
+    //       1,440,000 req/일 = **16.7 req/s = 16.7KB/s**. nginx 정적 서빙에 부하가 아니다.
+    //       (종전 주석은 288,000 req/일을 "이미 상당하다"고 적었으나 3.3 req/s 였다.)
+    //
+    //     그리고 무엇보다 — **60분은 고객이 겪는 시간**이다. 새 버전이 올라와도 최대 1시간
+    //     동안 화면은 정상으로 보이고 아무 일도 안 일어난다. 개발·테스트 중에는 그 1시간이
+    //     사이클 전체를 잡아먹는다(사장님 3단계: 코드수정 → 업데이트 → 실측).
+    //
     //   ⚠️ manifest.json 은 no-cache 라 Cloudflare 가 흡수하지 않는다. 폴링 1건 = 오리진 1건이다.
     //     "CDN 뒤라 괜찮다"는 직관은 이 파일에 대해서만은 틀렸다(설계서 §1-4).
-    public int UpdateCheckIntervalMinutes { get; set; } = 60;
+    //     그래도 1KB × 16.7/s 는 감당 범위다.
+    //
+    //   📌 근본 해법은 폴링이 아니라 **게시 신호(2안)** 다 — 본사가 게시하면 워치독에 알린다.
+    //     작2 결재-7 에서 `/watchdog/*` 수신부 부재로 보류됐고, 그 부재는 병렬이슈 07(2026-08-09)
+    //     에서 실측 확인됐다(MetaPing HTTP 400). 그것이 서면 주기 폴링 자체가 보조 수단이 된다.
+    public int UpdateCheckIntervalSeconds { get; set; } = 60;
 
     // 🔴 상·하한을 코드에 두는 이유 (결재-1 · 설계서 A-8) — 설정으로 우회 가능하면 그 자체가 사고다.
-    //   ■ 상한 60분: N > 1h 이면 야간 창을 통째로 건너뛸 수 있다.
+    //   ■ 상한 3600초(60분): N > 1h 이면 야간 창을 통째로 건너뛸 수 있다.
     //     IsNightWindow 는 새벽 3시대 **1시간뿐**이다(UpdateOrchestrator — Hour >= 3 && Hour < 4).
-    //     N ≤ 60분이라야 3시대에 반드시 1회 이상 평가가 걸린다. 이것이 상한의 진짜 근거이며,
-    //     야간 창 정책 자체는 이번 범위에서 건드리지 않는다(작2 §5-5 — N ≤ 1h 로 회피).
-    //   ■ 하한 5분: 고객사가 설정을 15초로 낮추면 본사 오리진 자해다(설계서 §6-1 마이클 소견).
-    //     5분이면 1,000사 기준 288,000 req/일 — 이미 상당하다. 그 아래로는 열지 않는다.
-    //     MetaPingIntervalMinutes(5분)와 같은 자릿수로 맞춰, 워치독이 본사를 두드리는 최소 간격을 통일한다.
+    //     N ≤ 60분이라야 3시대에 반드시 1회 이상 평가가 걸린다. 이 보장은 그대로 유지된다.
+    //   ■ 하한 30초: 워치독 메인 루프가 60초 주기(LoopIntervalSeconds)이므로 그보다 짧게 잡아도
+    //     실제 조회는 루프 주기에 묶인다. 30초는 "루프마다 매번 확인"과 사실상 같은 값이며,
+    //     그 아래로 열어도 얻는 것이 없고 설정 실수만 유발한다.
     //   ■ 개발과 고객이 같은 값을 쓴다(설계서 §10-2). 분기하는 순간 "개발 PC 에선 됐는데" 를 구조로 만든다.
-    public const int UpdateCheckIntervalMinMinutes = 5;
-    public const int UpdateCheckIntervalMaxMinutes = 60;
+    public const int UpdateCheckIntervalMinSeconds = 30;
+    public const int UpdateCheckIntervalMaxSeconds = 3600;
 
     /// <summary>
     /// 상·하한을 강제한 실제 확인 주기. 설정값이 범위를 벗어나면 조용히 잘라낸다(설정으로 우회 불가).
     /// 0 이하 같은 무의미한 값도 하한으로 수렴하므로 "설정 실수 = 폴링 폭주" 가 성립하지 않는다.
     /// </summary>
-    public TimeSpan ResolvedUpdateCheckInterval => TimeSpan.FromMinutes(
-        Math.Clamp(UpdateCheckIntervalMinutes, UpdateCheckIntervalMinMinutes, UpdateCheckIntervalMaxMinutes));
+    public TimeSpan ResolvedUpdateCheckInterval => TimeSpan.FromSeconds(
+        Math.Clamp(UpdateCheckIntervalSeconds, UpdateCheckIntervalMinSeconds, UpdateCheckIntervalMaxSeconds));
 
     /// <summary>설정값이 상·하한에 걸려 잘렸는가. 걸렸으면 기동 시 1회 로그로 알린다(헌법 #15 침묵 금지).</summary>
     public bool IsUpdateCheckIntervalClamped =>
-        UpdateCheckIntervalMinutes != (int)ResolvedUpdateCheckInterval.TotalMinutes;
+        UpdateCheckIntervalSeconds != (int)ResolvedUpdateCheckInterval.TotalSeconds;
 
     public ProcessesConfig Processes { get; set; } = new();
 }

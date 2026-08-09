@@ -176,17 +176,17 @@ public class Worker : BackgroundService
         var checkInterval = _options.ResolvedUpdateCheckInterval;
         if (_options.IsUpdateCheckIntervalClamped)
         {
-            // 설정값이 상·하한(5~60분)에 걸려 잘렸다. 조용히 잘라내면 "설정했는데 왜 안 먹지" 가 된다.
+            // 설정값이 상·하한(30~3600초)에 걸려 잘렸다. 조용히 잘라내면 "설정했는데 왜 안 먹지" 가 된다.
             //   특히 상한 초과는 야간 창(새벽 3시대 1시간)을 건너뛰는 사고와 직결되므로 반드시 알린다.
-            _logger.LogWarning("[Update] 확인 주기 설정 {Set}분이 허용 범위({Min}~{Max}분)를 벗어나 {Applied}분으로 조정됐습니다. 상한 근거: {Max}분을 넘기면 야간 창(새벽 3시대 1시간)을 통째로 건너뛸 수 있습니다.",
-                _options.UpdateCheckIntervalMinutes,
-                WatchdogOptions.UpdateCheckIntervalMinMinutes,
-                WatchdogOptions.UpdateCheckIntervalMaxMinutes,
-                (int)checkInterval.TotalMinutes,
-                WatchdogOptions.UpdateCheckIntervalMaxMinutes);
+            _logger.LogWarning("[Update] 확인 주기 설정 {Set}초가 허용 범위({Min}~{Max}초)를 벗어나 {Applied}초로 조정됐습니다. 상한 근거: {Max}초를 넘기면 야간 창(새벽 3시대 1시간)을 통째로 건너뛸 수 있습니다.",
+                _options.UpdateCheckIntervalSeconds,
+                WatchdogOptions.UpdateCheckIntervalMinSeconds,
+                WatchdogOptions.UpdateCheckIntervalMaxSeconds,
+                (int)checkInterval.TotalSeconds,
+                WatchdogOptions.UpdateCheckIntervalMaxSeconds);
         }
-        _logger.LogInformation("[Update] 새 버전 확인 주기 {N}분. 마지막 확인 기록: {Last} (기록 파일 {Path})",
-            (int)checkInterval.TotalMinutes,
+        _logger.LogInformation("[Update] 새 버전 확인 주기 {N}초. 마지막 확인 기록: {Last} (기록 파일 {Path})",
+            (int)checkInterval.TotalSeconds,
             _lastUpdateCheckUtc?.ToString("o") ?? "없음(첫 확인은 즉시)",
             _updateCheckStamp.Path);
 
