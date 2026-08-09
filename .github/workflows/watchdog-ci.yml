@@ -33,7 +33,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v5
+        uses: actions/checkout@v7
 
       - name: Setup .NET 8
         uses: actions/setup-dotnet@v5
@@ -115,7 +115,7 @@ jobs:
     timeout-minutes: 5
     steps:
       - name: Checkout
-        uses: actions/checkout@v5
+        uses: actions/checkout@v7
 
       # ★ 봉합 (2026-07-21, CI 2주 마비 진범 ② — 사장님 지시로 실측 확인):
       #   이 단계가 2026-06-12 부터 계속 실패하며 Watchdog CI 를 빨간불로 고정시켰다.
@@ -158,7 +158,7 @@ jobs:
     timeout-minutes: 5
     steps:
       - name: Checkout
-        uses: actions/checkout@v5
+        uses: actions/checkout@v7
 
       # ★ 봉합 (2026-07-21, CI 점검 중 선제 적발 — 아직 터지지 않았으나 오탐·미탐 둘 다 낸다):
       #   ① $errs 를 루프 밖에서 한 번만 초기화해 Tokenize 결과가 파일 간 누적됐다.
