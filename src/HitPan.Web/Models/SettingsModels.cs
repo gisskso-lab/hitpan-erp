@@ -47,6 +47,20 @@ public sealed class TenantCompanyModel
     /// <summary>종사업장번호.</summary>
     public string? SubsidiaryNo { get; set; }
 
+    // ── 출력 이미지 (DB-85) ──
+    // 서버 DTO(UpdateTenantCompanyDto)와 이름이 같아야 역직렬화된다. 종전에는 이 세 필드가
+    // 화면 모델에 없어, 서버가 값을 돌려줘도 화면이 받지 못하고 저장 때도 빠져나갔다.
+    // 이미지 자체가 아니라 파일 경로만 담는다(컬럼 varchar(200)).
+
+    /// <summary>로고 이미지 경로.</summary>
+    public string? LogoUrl { get; set; }
+
+    /// <summary>인장 이미지 경로. 거래명세서·견적서 출력에 쓰인다.</summary>
+    public string? SealUrl { get; set; }
+
+    /// <summary>출력 헤더 이미지 경로.</summary>
+    public string? HeaderUrl { get; set; }
+
     /// <summary>헌법 #35 (사장님 결재 2026-06-04) — 랜딩 자동 반영 잠금 (회사명·사업자번호·대표자명 변경 불가).</summary>
     public bool IsLockedFromLanding { get; set; }
 }

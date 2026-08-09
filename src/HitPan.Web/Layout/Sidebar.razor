@@ -33,7 +33,11 @@
         <MudNavLink Href="/users" Icon="@Icons.Material.Filled.PersonAdd">직원 계정 관리</MudNavLink>
         <MudNavLink Href="/users/permissions" Icon="@Icons.Material.Filled.Lock">권한 설정</MudNavLink>
         <MudNavLink Href="/settings/approval" Icon="@Icons.Material.Filled.Rule">결재 설정</MudNavLink>
-        <MudNavLink Href="/settings/approval-lines" Icon="@Icons.Material.Filled.AccountTree">결재라인 설정</MudNavLink>
+        @* 사장님 결재(2026-08-09) "통일": [결재라인 설정](/settings/approval-lines)을 메뉴에서 내렸다.
+           그 화면이 저장하던 표는 실제 결재 흐름이 읽지 않아, 거기서 결재라인을 다 넣어도 결재가 걸리지
+           않았다. 결재라인은 [결재 설정] 한 곳에서만 관리한다. 화면과 주소는 남겨 뒀다 — 즐겨찾기나
+           주소를 직접 입력해 들어오는 사람에게 갑자기 화면이 없어지면 더 혼란스럽기 때문이며,
+           그 화면 상단에서 [결재 설정]으로 안내한다. *@
         <MudNavLink Href="/settings/positions" Icon="@Icons.Material.Filled.Badge">직급 관리</MudNavLink>
         <MudNavLink Href="/settings/devices" Icon="@Icons.Material.Filled.Devices">등록 기기 관리</MudNavLink>
         <MudNavLink Href="/settings" Icon="@Icons.Material.Filled.Tune">사용환경 설정</MudNavLink>
