@@ -64,6 +64,12 @@ public class IntegrationLoopTests
         builder.Services.AddSingleton<WatchdogConsentReader>();
         builder.Services.AddSingleton<WatchdogStatusWriter>();
 
+        // 정합 (2026-08-09, 20260809작1 · CI 적발): 20260807작2 N-10 이 Worker 생성자에
+        //   UpdateCheckStampFile 을 추가했는데(Program.cs:80) 이 목록이 따라오지 않아
+        //   Worker 조립이 깨졌다 — 위 §16-22 가 예고한 그 갈라짐이 그대로 재발했다.
+        //   47일간 방치됐던 지난번과 달리 이번엔 PR CI 가 즉시 잡았다(105건 중 1건 실패).
+        builder.Services.AddSingleton<UpdateCheckStampFile>();
+
         builder.Services.AddHostedService<Worker>();
 
         var host = builder.Build();
