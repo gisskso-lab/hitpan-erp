@@ -79,6 +79,12 @@ builder.Services.AddSingleton<UpdateProcessGate>();
 //   본사를 두드리는 것을 막는 상한 장치다. UpdateLockFile 과 같은 {app} 관례·같은 fail-open 정책.
 builder.Services.AddSingleton<UpdateCheckStampFile>();
 
+// 20260809작2 P0-1 (사장님 결재 2026-08-09): 적용 전 디스크 여유공간 검사.
+//   3팀이 독립 지목했고 실측 결과 src/ 전체에 검사 코드가 0건이었다. 롤백도 디스크를 쓰므로
+//   부족한 순간 안전망까지 무너진다 — 다운로드 전에 막는다(UpdateOrchestrator §0).
+//   ⚠️ 이 줄을 추가할 때 IntegrationLoopTests 등록 목록도 함께 갱신했다(병렬이슈 06 재발 방지).
+builder.Services.AddSingleton<UpdateDiskSpaceGuard>();
+
 builder.Services.AddSingleton<UpdateOrchestrator>();
 
 // 봉합 (2026-06-29, 작1 고리2 워치독 측 — 로컬 동의 리더):

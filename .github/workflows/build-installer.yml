@@ -45,6 +45,14 @@ jobs:
   build-installer:
     name: Build HitPan Installer EXE
     runs-on: windows-latest
+    # 🔴 승인 게이트 (2026-08-09, 20260809작2 P0-2 · 사장님 결재) — 2중 방어의 ②
+    #   deploy-update.yml:498 이 이미 쓰는 방식 그대로다(새 기법 금지 — 사장님이 이미 익숙하시다).
+    #   GitHub Settings > Environments > production 에 required reviewer(사장님)를 걸면
+    #   태그를 밀어도 **이 job 이 승인 대기에서 멈춘다.** 폰 1탭.
+    #   ⚠️ required reviewer 등록은 GitHub 웹 설정이라 코드로 강제되지 않는다.
+    #      등록 전까지는 이 줄이 게이트로 동작하지 않고, draft(①)만이 유일한 방어다.
+    #      → 미등록이면 Settings 에서 사장님이 직접 1회 등록해야 2중 방어가 완성된다.
+    environment: production
     timeout-minutes: 45
 
     steps:
@@ -252,10 +260,19 @@ jobs:
           path: installer/output/*.exe
           retention-days: 30
 
-      - name: Create GitHub Release
+      # 🔴 안전 게이트 (2026-08-09, 20260809작2 P0-2 · 사장님 결재) — 종전엔 태그 하나면 즉시 공개였다
+      #   종전: `git tag v1.2.56 && git push --tags` 만으로 **공개 Release 가 생성**됐다.
+      #         draft·prerelease·environment 어느 것도 없어 승인 지점이 0 이었다.
+      #   위반: 헌법 #29(인프라 조작 사전 승인제). 이 파일 머리말이 스스로
+      #         "GO 결재 후에만 실제 배포" 라 적어놓고 **강제하지 않았다** — 주석은 안전장치가 아니다.
+      #   ⇒ 2중 방어: ① draft 로 생성해 사장님이 [Publish] 를 눌러야 공개된다(여기)
+      #                ② job 레벨 environment 승인(아래 publish-gate job 주석 참조)
+      #   ⚠️ draft 를 지우려면 그 전에 §2중 방어의 다른 한 겹이 살아 있는지 먼저 확인할 것.
+      - name: Create GitHub Release (draft — 사장님 [Publish] 전까지 비공개)
         if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
         with:
+          draft: true
           files: installer/output/*.exe
           name: HitPan Installer ${{ steps.ver.outputs.version }}
           body: |

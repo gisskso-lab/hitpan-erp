@@ -70,6 +70,10 @@ public class IntegrationLoopTests
         //   47일간 방치됐던 지난번과 달리 이번엔 PR CI 가 즉시 잡았다(105건 중 1건 실패).
         builder.Services.AddSingleton<UpdateCheckStampFile>();
 
+        // 정합 (2026-08-09, 20260809작2 P0-1): UpdateOrchestrator 생성자에 UpdateDiskSpaceGuard 가
+        //   추가됐다(Program.cs). 위 병렬이슈 06 과 **같은 실수를 그 자리에서 막기 위해** 함께 넣는다.
+        builder.Services.AddSingleton<UpdateDiskSpaceGuard>();
+
         builder.Services.AddHostedService<Worker>();
 
         var host = builder.Build();

@@ -33,6 +33,8 @@ public sealed class UpdateOrchestrator
     private readonly WatchdogStatusWriter _statusWriter;
     private readonly MetaPingClient _meta;
     private readonly UpdateHistoryClient _updateHistory;
+    // 20260809작2 P0-1: 적용 전 디스크 여유공간 검사(fail-open — 확실히 부족할 때만 막는다).
+    private readonly UpdateDiskSpaceGuard _diskGuard;
     private readonly string _stagingDir;
 
     // W4-6: 이번 적용이 "마이그 교차검증 게이트"에 걸려 중단됐는지 표식. TrySwapFilesAsync 실패를
@@ -63,7 +65,11 @@ public sealed class UpdateOrchestrator
         MetaPingClient meta,
         // 20260806작4 (사장님 오더 ③): 업데이트 결과를 본사 백오피스에 보고한다.
         //   DI 싱글턴이며 UpdateOrchestrator 에 의존하지 않아 순환참조가 없다(기존 인자 뒤에 추가만 — 헌법 #1).
-        UpdateHistoryClient updateHistory)
+        UpdateHistoryClient updateHistory,
+        // 20260809작2 P0-1 (사장님 결재 2026-08-09): 적용 전 디스크 여유공간 검사.
+        //   ⚠️ 인자를 **뒤에** 추가한다(헌법 #1). 그리고 Program.cs DI 등록과
+        //      IntegrationLoopTests 등록 목록을 **함께** 갱신할 것 — 병렬이슈 06 이 정확히 이걸 놓쳐 났다.
+        UpdateDiskSpaceGuard diskGuard)
     {
         _client = client;
         _logger = logger;
@@ -76,6 +82,7 @@ public sealed class UpdateOrchestrator
         _statusWriter = statusWriter;
         _meta = meta;
         _updateHistory = updateHistory;
+        _diskGuard = diskGuard;
         _stagingDir = Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
             "HitPan", "Updates", "staging");
@@ -137,6 +144,20 @@ public sealed class UpdateOrchestrator
     /// </summary>
     public async Task<bool> ApplyUpdateAsync(UpdateManifest manifest, CancellationToken ct)
     {
+        // 0) ★ 디스크 여유공간 검사 (2026-08-09, 20260809작2 P0-1 · 사장님 결재)
+        //    다운로드 **전**이어야 한다 — 받고 나서 알면 이미 패키지 크기만큼 썼다.
+        //    막는 이유는 "업데이트 실패"가 아니라 **롤백도 디스크를 쓴다**는 것이다.
+        //    해제 단계에서 차면 옛 버전은 지워졌고 새 버전은 안 풀렸는데 복구할 공간도 없다.
+        //    ⚠️ 이 검사는 fail-open 이다 — 판정 불가면 진행시킨다(UpdateDiskSpaceGuard 참조).
+        //       확실히 부족할 때만 여기서 멈춘다.
+        if (!_diskGuard.HasEnoughSpace(manifest.SizeBytes))
+        {
+            // 아무것도 안 바꿨고 구버전 그대로다(blocked) — 백업 실패 차단과 같은 처리다.
+            await RecordApplyStatusAsync(manifest, "blocked", "디스크 여유공간 부족 — 업데이트 시작 차단", ct);
+            await _meta.NotifyEmergencyAsync("update_disk_insufficient", $"pre-download:{manifest.Version}", ct);
+            return false;
+        }
+
         // 1) 다운로드 + sha256 검증 (실패 시 적용 진입 금지)
         var verified = await DownloadAndVerifyAsync(manifest, ct);
         if (!verified)

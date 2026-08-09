@@ -67,6 +67,26 @@ public class Worker : BackgroundService
     //     바뀌어 사실과 달라졌다. 이 필드의 역할 자체는 그대로다 — 야간 창까지 manifest 를 들고 있는다.
     private UpdateManifest? _pendingNightUpdate;
 
+    // 🔴 관측 (2026-08-09, 20260809작2 P0-3 · 사장님 결재 — **정책은 안 건드린다, 침묵만 깬다**)
+    //   ■ 무엇이 문제인가
+    //     야간 창은 새벽 3시대 **1시간뿐**이다(UpdateOrchestrator.IsNightWindow — Hour >= 3 && Hour < 4).
+    //     그런데 **사무실 PC 는 밤에 끈다.** 그러면 그 창이 영영 오지 않아 Normal 채널 업데이트가
+    //     그 고객에게 **구조적으로 도달하지 않는다.**
+    //   ■ 더 나쁜 것은 침묵이다
+    //     TrackUpdateStallAsync 는 "feed 조회가 성공했는가"만 본다. 낮에 조회는 잘 되므로
+    //     카운터는 0 이고 7일 경보도 안 울린다. 화면·로그·경보 전부 정상으로 보이는데
+    //     고객만 옛 버전에 고정된다 — **고객도 본사도 모른다.**
+    //   ■ 그래서 이번에 하는 것 / 하지 않는 것
+    //     한다   : 펜딩이 며칠째인지 세어 로그로 남긴다(아래). 정책과 무관하다.
+    //     안 한다: 야간 창을 넓히거나, 낮에 적용하거나, 임계를 정하는 것 —
+    //              전부 사장님 결재 사안이다(작2 §4-5). 낮에 적용하면 영업 중 재기동 위험이 있다.
+    //     ⇒ **데이터가 있어야 사장님이 정책을 정하실 수 있다.** 그 데이터를 만드는 것이 이 필드다.
+    private DateTime? _pendingNightSinceUtc;
+
+    // 야간 대기 경과 안내를 하루 1회로 제한한다(60초 루프라 매번 남기면 로그가 오염된다).
+    //   _lastUpdateSkipNoticeUtc 와 같은 빈도 조절 패턴이다(과설계 방지).
+    private DateOnly? _lastNightPendingNoticeDate;
+
     // 봉합 (2026-06-29, 작1 고리2): Major(동의 필요) 새 버전을 발견하면 manifest 를 들고 있다가,
     //   다음 메타 ping 에 latest_version·update_channel·consent_message 를 실어 본사에 알린다.
     //   A안(2026-06-29 결재): ERP 로그인 동의(고리2 UI)는 본사를 거치지 않고 고객 PC 로컬에서 완결된다 —
@@ -395,11 +415,41 @@ public class Worker : BackgroundService
         {
             var toApply = _pendingNightUpdate;
             _pendingNightUpdate = null;
-            _logger.LogInformation("[Update] Normal 채널 — 야간 창 진입, 보류분 자동 적용: {V}", toApply.Version);
+            // 20260809작2 P0-3 관측: 야간 창이 실제로 왔다 — 대기 시계를 푼다.
+            var waited = _pendingNightSinceUtc is { } since ? DateTime.UtcNow - since : (TimeSpan?)null;
+            _pendingNightSinceUtc = null;
+            _lastNightPendingNoticeDate = null;
+            _logger.LogInformation("[Update] Normal 채널 — 야간 창 진입, 보류분 자동 적용: {V} (대기 {Waited})",
+                toApply.Version, waited is { } w ? $"{w.TotalDays:F1}일" : "미상");
             try { await _update.ApplyUpdateAsync(toApply, ct); }
             catch (OperationCanceledException) { throw; }
             catch (Exception ex) { _logger.LogWarning(ex, "[Update] Normal 보류분 적용 중 예외"); }
             return;
+        }
+
+        // 🔴 20260809작2 P0-3 관측 — 야간 창에 도달하지 못한 채 며칠이 흘렀는가 (사장님 결재 · 침묵 깨기)
+        //   야간 창이 아직 안 왔는데 펜딩이 계속 남아 있으면, 그 사실을 **하루 1줄** 남긴다.
+        //   ■ 왜 Information 인가
+        //     Debug 로 두면 고객 PC 기본 로그레벨에서 0 줄이다. 종전 :497 이 정확히 그래서
+        //     아무 흔적도 없었다. 이 관측의 목적은 CS 가 로그만 보고 알아채는 것이다.
+        //   ■ 왜 하루 1줄인가
+        //     60초 루프라 매번 남기면 하루 1,440줄로 로그가 오염된다(N-10 에서 배운 것).
+        //   ■ 여기서 판정하지 않는다
+        //     "며칠이면 이상인가"는 임계 정책이고 사장님 결재 사안이다(작2 §4-5).
+        //     이 코드는 **세어서 남기기만** 한다. 경보·차단·정책 변경 어느 것도 하지 않는다.
+        if (_pendingNightUpdate is { } stillPending && _pendingNightSinceUtc is { } pendingSince)
+        {
+            var today = DateOnly.FromDateTime(DateTime.Now);
+            if (_lastNightPendingNoticeDate != today)
+            {
+                _lastNightPendingNoticeDate = today;
+                var elapsed = DateTime.UtcNow - pendingSince;
+                _logger.LogInformation(
+                    "[Update] Normal 보류분 야간 대기 경과 — {V} 를 {Days:F1}일째 적용하지 못했다. " +
+                    "야간 창(새벽 3시대 1시간)에 PC 가 켜져 있어야 적용된다. " +
+                    "밤에 PC 를 끄는 환경이면 이 값이 계속 늘어난다(정책 미변경 · 관측 기록).",
+                    stillPending.Version, elapsed.TotalDays);
+            }
         }
 
         // ★★ 20260807작2 N-10 (4안 혼합 · 사장님 결재 7건) — 확인 게이트: 날짜 → 시각 ★★
@@ -494,6 +544,9 @@ public class Worker : BackgroundService
                         //   확인 게이트는 그대로 둬서 feed 를 매 루프 재조회하지 않는다(주기 게이트 정신 유지).
                         //   ※ 20260807작2 N-10: 종전 "날짜 게이트 … 하루 1회 정신" → N시간 주기 게이트.
                         _pendingNightUpdate = m;
+                        // 20260809작2 P0-3 관측: 이 펜딩이 **언제부터** 대기 중인지 기억한다.
+                        //   같은 버전을 계속 대기 중이면 시작 시각을 유지한다(매 루프 리셋하면 경과를 못 센다).
+                        _pendingNightSinceUtc ??= DateTime.UtcNow;
                         _logger.LogDebug("[Update] Normal 채널 새 버전({V}) — 야간(새벽 3시대) 자동 적용 대기(보류)", m.Version);
                     }
                     break;
