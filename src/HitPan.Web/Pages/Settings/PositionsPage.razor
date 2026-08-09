@@ -3,8 +3,10 @@
 @attribute [Authorize]
 @using HitPan.Web.Models
 @using HitPan.Web.Services
+@using HitPan.Web.Components.Common
 @inject PositionService PositionSvc
 @inject ISnackbar Snackbar
+@inject IDialogService DialogService
 
 <PageTitle>직급 관리</PageTitle>
 
@@ -47,6 +49,26 @@
     {
         <MudProgressLinear Indeterminate="true" Color="Color.Primary" />
     }
+    else if (_loadFailed)
+    {
+        @* 🔴 못 불러온 것 — "직급 0건" 과 다른 사실이다.
+           종전에는 실패도 빈 표로 보여서 "직급이 다 지워졌다" 로 오해할 수 있었다. *@
+        <LoadFailedState Title="직급 목록을 불러오지 못했습니다"
+                         Subtitle="직급이 삭제된 것이 아닙니다. 연결이 회복되면 다시 보입니다."
+                         Retrying="@_loading"
+                         OnRetry="ReloadAsync" />
+    }
+    else if (_list.Count == 0)
+    {
+        @* 빈 상태 — 진짜로 0건일 때만 온다 *@
+        <div style="padding:32px 16px;text-align:center">
+            <MudIcon Icon="@Icons.Material.Outlined.Badge" Size="Size.Large" Style="color:var(--mud-palette-text-secondary);font-size:56px" />
+            <MudText Typo="Typo.subtitle1" Class="mt-2">아직 등록된 직급이 없습니다</MudText>
+            <MudText Typo="Typo.body2" Style="color:var(--mud-palette-text-secondary)">
+                위 [직급 입력] 에서 코드와 직급명을 넣고 추가하면 결재라인에서 쓸 수 있습니다.
+            </MudText>
+        </div>
+    }
     else
     {
         <MudTable Items="_list" Dense="true" Hover="true" Bordered="false">
@@ -77,6 +99,9 @@
     private string? _editingId;
     private bool _loading = true;
     private bool _saving;
+    // 목록을 못 불러왔는지 여부. 🔴 "직급 0건" 과 반드시 구분한다(20260809작4 ②번 봉합).
+    //   종전에는 실패도 빈 표로 보여서, 직급이 등록된 회사에서 다 지워진 것처럼 보였다.
+    private bool _loadFailed;
 
     protected override async Task OnInitializedAsync()
     {
@@ -86,8 +111,26 @@
     private async Task ReloadAsync()
     {
         _loading = true;
-        _list = await PositionSvc.GetListAsync();
-        _loading = false;
+        _loadFailed = false;
+        try
+        {
+            var list = await PositionSvc.GetListAsync();
+            if (list is null)
+            {
+                // null = 실패. 정상 0건과 다른 사실이므로 화면에서 갈라 보여준다.
+                _loadFailed = true;
+                _list = new();
+            }
+            else
+            {
+                _list = list;
+            }
+        }
+        finally
+        {
+            // 예외가 나도 진행바가 영원히 돌지 않게 한다.
+            _loading = false;
+        }
     }
 
     private async Task OnSave()
@@ -136,6 +179,17 @@
 
     private async Task OnDeleteRow(PositionListItemModel row)
     {
+        // 🔴 확인 절차 없이 곧바로 지우던 것을 봉합했다(20260809작4).
+        //    표에서 [수정] 옆에 [삭제] 가 붙어 있어, 잘못 누르면 되돌릴 방법 없이 사라졌다.
+        var confirmed = await ConfirmDialog.ShowAsync(
+            DialogService,
+            title: "직급 삭제",
+            message: $"'{row.Name}' 직급을 삭제하시겠습니까?\n결재라인에서 사용 중이면 삭제 대신 사용 안 함으로 바뀝니다.",
+            confirmText: "삭제",
+            cancelText: "취소",
+            severity: Severity.Error);
+        if (!confirmed) return;
+
         var ok = await PositionSvc.DeleteAsync(row.PositionId);
         if (ok)
         {

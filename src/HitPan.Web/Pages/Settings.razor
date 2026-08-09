@@ -15,6 +15,18 @@
     <MudProgressLinear Indeterminate="true"
         Color="Color.Primary" />
 }
+else if (_loadFailed)
+{
+    @* 🔴 조회 실패 시 화면을 아예 안 그린다 (병렬이슈 08 봉합 · 사장님 결재 작4 ③번).
+       종전에는 실패해도 하드코딩 기본값을 진짜 설정처럼 보여줬다.
+       거기서 저장을 누르면 27개 컬럼이 ON DUPLICATE KEY UPDATE 로 전부 덮어써져
+       단가 배율·여신 한도·마이너스 재고 정책이 조용히 초기화됐다. 되돌릴 수 없다.
+       ⇒ 못 불러왔으면 보여주지도, 저장하지도 않는다. *@
+    <LoadFailedState Title="설정을 불러오지 못했습니다"
+                     Subtitle="지금 저장하면 기존 설정이 잘못 덮어써질 수 있어, 설정 화면을 열지 않았습니다. 연결이 회복된 뒤 다시 시도해주세요."
+                     Retrying="@_loading"
+                     OnRetry="LoadAsync" />
+}
 else
 {
 <MudGrid Spacing="3">
@@ -328,27 +340,58 @@ else
 
     private List<PriceGradeModel> _priceGrades = new();
 
+    // 🔴 설정을 못 불러왔는지 여부 (병렬이슈 08 · 사장님 결재 작4 ③번).
+    //   이 값이 true 면 화면을 그리지 않는다 — 저장 경로 자체를 막기 위해서다.
+    //   종전에는 실패해도 하드코딩 기본값(new TenantSettingsModel())이 진짜 설정처럼 보였고,
+    //   저장 시 서버가 ON DUPLICATE KEY UPDATE 로 27개 컬럼을 통째로 덮어썼다.
+    private bool _loadFailed;
+
     protected override async Task OnInitializedAsync()
     {
-        var result = await SettingsSvc.GetAsync().ConfigureAwait(false);
-        if (result != null)
+        await LoadAsync().ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// 설정을 조회한다. "다시 시도" 버튼도 이 메서드를 그대로 부른다.
+    /// </summary>
+    private async Task LoadAsync()
+    {
+        _loading = true;
+        _loadFailed = false;
+        try
         {
+            var result = await SettingsSvc.GetAsync().ConfigureAwait(false);
+            if (result is null)
+            {
+                // null = 실패. 기본값으로 화면을 그리면 그 값이 저장되어 실제 설정을 덮어쓴다.
+                _loadFailed = true;
+                return;
+            }
+
             _s = result;
             _originalStockMethod = _s.StockEvalMethod;
             _autoVatOff = !_s.AutoVatAdjust;
             _vatRound = _s.VatRoundType == "round";
+
+            _priceGrades = new List<PriceGradeModel>
+            {
+                new("A단가", _s.PriceARate),
+                new("B단가", _s.PriceBRate),
+                new("C단가", _s.PriceCRate),
+                new("D단가", _s.PriceDRate),
+                new("E단가", _s.PriceERate),
+            };
         }
-
-        _priceGrades = new List<PriceGradeModel>
+        catch (Exception ex)
         {
-            new("A단가", _s.PriceARate),
-            new("B단가", _s.PriceBRate),
-            new("C단가", _s.PriceCRate),
-            new("D단가", _s.PriceDRate),
-            new("E단가", _s.PriceERate),
-        };
-
-        _loading = false;
+            _loadFailed = true;
+            Snackbar.Add($"설정을 불러오지 못했습니다: {ex.Message}", Severity.Error);
+        }
+        finally
+        {
+            // 예외가 나도 진행바가 영원히 돌지 않게 한다.
+            _loading = false;
+        }
     }
 
     private Task OnStockEvalMethodChanged(string v)
@@ -397,41 +440,83 @@ else
         }
         else
         {
+            // 🔴 저장에 실패했으면 화면도 서버 상태로 되돌린다 (작4 ③번).
+            //   종전에는 실패 토스트만 띄우고 바뀐 값을 화면에 그대로 뒀다.
+            //   토스트는 3초 뒤 사라지므로, 직원은 저장된 줄 알고 나간다.
+            //   다시 들어오면 예전 값이라 "설정이 자꾸 풀린다" 는 민원이 된다.
             Snackbar.Add(
-                "저장 실패. 다시 시도해주세요.",
+                "저장하지 못했습니다. 화면을 서버 상태로 되돌립니다.",
                 Severity.Error);
+            await LoadAsync().ConfigureAwait(false);
         }
     }
 
+    /// <summary>
+    /// 모든 설정을 기본값으로 되돌리고 <b>서버에 저장까지</b> 한다.
+    /// </summary>
+    /// <remarks>
+    /// 🔴 작4 ③번 봉합 — 종전에는 로컬 필드만 바꾸고 "기본값으로 초기화됐습니다" 라는
+    /// <b>완료형 문구</b>를 띄웠다. 서버 호출이 없어 DB는 그대로였고,
+    /// 직원은 끝난 줄 알고 화면을 떠났다. 별도로 [저장]을 눌러야 한다는 안내도 없었다.
+    /// 버튼 이름이 약속한 일을 실제로 하도록 고쳤다.
+    /// </remarks>
     private async Task Reset()
     {
         var confirm = await DialogService
             .ShowMessageBoxAsync(
                 "초기화",
-                "모든 설정을 기본값으로 되돌립니까?",
-                yesText: "초기화",
+                "모든 설정을 기본값으로 되돌린 뒤 바로 저장합니다. 계속하시겠습니까?",
+                yesText: "초기화하고 저장",
                 cancelText: "취소");
         if (confirm != true)
         {
             return;
         }
 
+        var restore = _s;   // 실패 시 되돌릴 현재 값
+
         _s = new TenantSettingsModel();
-        _originalStockMethod = _s.StockEvalMethod;
-        _stockMethodChanged = false;
         _autoVatOff = !_s.AutoVatAdjust;
         _vatRound = _s.VatRoundType == "round";
         _priceGrades = new List<PriceGradeModel>
         {
-            new("A단가", 1.00m),
-            new("B단가", 1.10m),
-            new("C단가", 1.20m),
-            new("D단가", 1.30m),
-            new("E단가", 1.50m),
+            new("A단가", _s.PriceARate),
+            new("B단가", _s.PriceBRate),
+            new("C단가", _s.PriceCRate),
+            new("D단가", _s.PriceDRate),
+            new("E단가", _s.PriceERate),
         };
-        Snackbar.Add(
-            "기본값으로 초기화됐습니다.",
-            Severity.Info);
+
+        _saving = true;
+        var ok = await SettingsSvc.SaveAsync(_s).ConfigureAwait(false);
+        _saving = false;
+
+        if (ok)
+        {
+            _originalStockMethod = _s.StockEvalMethod;
+            _stockMethodChanged = false;
+            Snackbar.Add(
+                "기본값으로 초기화하고 저장했습니다.",
+                Severity.Success);
+        }
+        else
+        {
+            // 저장이 안 됐으면 화면도 되돌린다 — 초기화된 것처럼 보이면 안 된다.
+            _s = restore;
+            _autoVatOff = !_s.AutoVatAdjust;
+            _vatRound = _s.VatRoundType == "round";
+            _priceGrades = new List<PriceGradeModel>
+            {
+                new("A단가", _s.PriceARate),
+                new("B단가", _s.PriceBRate),
+                new("C단가", _s.PriceCRate),
+                new("D단가", _s.PriceDRate),
+                new("E단가", _s.PriceERate),
+            };
+            Snackbar.Add(
+                "초기화하지 못했습니다. 설정은 그대로입니다.",
+                Severity.Error);
+        }
     }
 
     private sealed class PriceGradeModel

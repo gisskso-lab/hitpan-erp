@@ -14,6 +14,11 @@ public partial class PermissionPage : ComponentBase
 {
     // 로딩 상태
     private bool _loading = true;
+    // 목록을 못 불러왔는지 여부. 🔴 "직원 0명" 과 반드시 구분한다(20260809작4 ②번 봉합).
+    //   종전에는 GetAllAsync() 가 null 을 줘도 `?? new()` 로 뭉개서,
+    //   좌측 직원목록이 빈 카드가 되고 우측은 "좌측에서 직원을 선택하세요" 로 교착됐다.
+    //   화면만 보면 직원이 다 사라진 것처럼 보인다 — "없다" 와 "못 불러왔다" 는 다른 사실이다.
+    private bool _loadFailed;
     // 직원 권한 목록
     private List<UserPermissionModel> _users = new();
     // 선택된 직원 ID
@@ -64,10 +69,29 @@ public partial class PermissionPage : ComponentBase
     /// </summary>
     protected override async Task OnInitializedAsync()
     {
+        await LoadAsync().ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// 직원 권한 목록을 조회한다. "다시 시도" 버튼도 이 메서드를 그대로 부른다.
+    /// </summary>
+    private async Task LoadAsync()
+    {
+        _loading = true;
+        _loadFailed = false;
         try
         {
-            _loading = true;
-            _users = await PermSvc.GetAllAsync().ConfigureAwait(false) ?? new();
+            var list = await PermSvc.GetAllAsync().ConfigureAwait(false);
+            if (list is null)
+            {
+                // null = 실패. 정상 0건과 다른 사실이므로 화면에서 갈라 보여준다.
+                _loadFailed = true;
+                _users = new();
+                _selectedUserId = null;
+                return;
+            }
+
+            _users = list;
 
             // ERP 메뉴 보정 (코드는 백엔드 MenuList 와 동일해야 한다 — ErpMenus 주석 참조)
             foreach (var user in _users)
@@ -79,10 +103,15 @@ public partial class PermissionPage : ComponentBase
         }
         catch (Exception ex)
         {
+            // 서비스가 삼키지 못한 예외까지 여기서 받아 "못 불러왔다" 로 확정한다.
+            _loadFailed = true;
+            _users = new();
+            _selectedUserId = null;
             Snackbar.Add($"권한 목록을 불러오지 못했습니다: {ex.Message}", Severity.Error);
         }
         finally
         {
+            // 예외가 나도 진행바가 영원히 돌지 않게 한다.
             _loading = false;
         }
     }

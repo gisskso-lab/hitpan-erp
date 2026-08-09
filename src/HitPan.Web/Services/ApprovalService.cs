@@ -15,6 +15,21 @@ public sealed class ApprovalService(HttpClient http, ILogger<ApprovalService> lo
         catch (Exception ex) { logger.LogWarning(ex, "GetSettingsAsync failed"); return new(); }
     }
 
+    /// <summary>
+    /// 결재 설정을 조회한다. 실패 시 <c>null</c> 을 돌려준다.
+    /// </summary>
+    /// <remarks>
+    /// 🔴 위 <see cref="GetSettingsAsync"/> 는 실패를 빈 목록으로 뭉갠다.
+    /// 그래서 화면이 "헤더만 있는 빈 표" 를 그렸고, 사장님은 결재 설정이 지워진 줄 아셨다.
+    /// "없다" 와 "못 불러왔다" 는 다른 사실이므로 실패를 <c>null</c> 로 분리해 알린다.
+    /// 기존 메서드는 다른 호출부가 있을 수 있어 그대로 둔다(헌법 #1 덮어쓰기 금지).
+    /// </remarks>
+    public async Task<List<ApprovalSettingModel>?> GetSettingsOrNullAsync(CancellationToken ct = default)
+    {
+        try { return await http.GetFromJsonAsync<List<ApprovalSettingModel>>("api/approval/settings", ct) ?? new(); }
+        catch (Exception ex) { logger.LogWarning(ex, "결재 설정 조회 실패"); return null; }
+    }
+
     public async Task<bool> SaveSettingAsync(SaveApprovalSettingModel model, CancellationToken ct = default)
     {
         try { using var r = await http.PostAsJsonAsync("api/approval/settings", model, ct); return r.IsSuccessStatusCode; }

@@ -268,11 +268,13 @@ public sealed class SettingsService : ISettingsService
         await EnsureOpenAsync(ct).ConfigureAwait(false);
 
         // NOT NULL 컬럼(상호·대표·사업자번호)은 빈 값이 오면 DB 기존 값을 유지한다.
+        // is_locked_from_landing 도 함께 읽는다 — 잠금 시 이 3필드는 서버가 변경을 거부한다(아래).
         const string selectRequired = """
             SELECT
               company_name AS CompanyName,
               ceo_name AS CeoName,
-              biz_no AS BizNo
+              biz_no AS BizNo,
+              is_locked_from_landing AS IsLockedFromLanding
             FROM local_company
             WHERE tenant_id = @TenantId
             """;
@@ -286,20 +288,34 @@ public sealed class SettingsService : ISettingsService
             return;
         }
 
-        var companyName = string.IsNullOrWhiteSpace(dto.CompanyName) ? required.CompanyName : dto.CompanyName.Trim();
-        var ceoName = string.IsNullOrWhiteSpace(dto.CeoName) ? required.CeoName : dto.CeoName.Trim();
-        var bizNo = string.IsNullOrWhiteSpace(dto.BizNo) ? required.BizNo : dto.BizNo.Trim();
+        // 🔴 랜딩 잠금 강제 (헌법 #35 · 작4 §2-6-2 봉합).
+        //   종전에는 화면에서만 ReadOnly 로 막았고 서버엔 검증이 없었다.
+        //   화면 잠금은 화면을 거치지 않는 요청을 못 막는다 — 서버가 최종 관문이다.
+        //   잠긴 테넌트는 회사명·사업자번호·대표자명 3필드를 무조건 DB 기존 값으로 되돌린다.
+        //   (변경이 필요하면 본사 고객지원으로 사업자등록증을 재등록한다.)
+        var lockedFromLanding = required.IsLockedFromLanding;
+
+        var companyName = lockedFromLanding || string.IsNullOrWhiteSpace(dto.CompanyName)
+            ? required.CompanyName
+            : dto.CompanyName.Trim();
+        var ceoName = lockedFromLanding || string.IsNullOrWhiteSpace(dto.CeoName)
+            ? required.CeoName
+            : dto.CeoName.Trim();
+        var bizNo = lockedFromLanding || string.IsNullOrWhiteSpace(dto.BizNo)
+            ? required.BizNo
+            : dto.BizNo.Trim();
         if (bizNo.Length > 12)
         {
             bizNo = bizNo[..12];
         }
 
-        // local_company.address 단일 컬럼이므로 기본주소와 상세주소를 한 줄로 합친다.
-        var combinedAddress = $"{dto.Address?.Trim() ?? string.Empty} {dto.AddressDetail?.Trim() ?? string.Empty}".Trim();
-        if (combinedAddress.Length > 200)
-        {
-            combinedAddress = combinedAddress[..200];
-        }
+        // 🔴 2026-08-09 봉합 (사장님 지적 · 작4 ⑤번) — 기본주소와 상세주소를 분리 저장한다.
+        //   종전에는 두 값을 공백으로 합쳐 address 한 칸에 넣었는데, 조회 SQL 은 상세주소를 안 읽었다.
+        //   그래서 새로고침하면 상세주소칸이 비었고, 다시 입력해 저장하면 중복 누적돼
+        //   저장할 때마다 주소가 길어지다가 200자에서 잘렸다.
+        //   DB-85 에서 address_detail 컬럼을 신설해 각자 제자리에 저장한다.
+        var address = TruncateNullable(dto.Address, 200);
+        var addressDetail = TruncateNullable(dto.AddressDetail, 200);
 
         var subsidiaryNo = dto.SubsidiaryNo?.Trim() ?? string.Empty;
         if (subsidiaryNo.Length > 4)
@@ -334,6 +350,10 @@ public sealed class SettingsService : ISettingsService
               homepage = @Homepage,
               zip_code = @ZipCode,
               address = @Address,
+              address_detail = @AddressDetail,
+              logo_url = @LogoUrl,
+              seal_url = @SealUrl,
+              header_url = @HeaderUrl,
               corp_no = @CorpNo,
               subsidiary_no = @SubsidiaryNo,
               updated_at = NOW(6)
@@ -355,7 +375,11 @@ public sealed class SettingsService : ISettingsService
                     Email = email,
                     Homepage = homepage,
                     ZipCode = zipCode,
-                    Address = string.IsNullOrEmpty(combinedAddress) ? null : combinedAddress,
+                    Address = address,
+                    AddressDetail = addressDetail,
+                    LogoUrl = TruncateNullable(dto.LogoUrl, 200),
+                    SealUrl = TruncateNullable(dto.SealUrl, 200),
+                    HeaderUrl = TruncateNullable(dto.HeaderUrl, 200),
                     CorpNo = corpNo,
                     SubsidiaryNo = string.IsNullOrEmpty(subsidiaryNo) ? null : subsidiaryNo
                 },
@@ -382,8 +406,13 @@ public sealed class SettingsService : ISettingsService
               homepage AS Homepage,
               zip_code AS ZipCode,
               address AS Address,
+              address_detail AS AddressDetail,
+              logo_url AS LogoUrl,
+              seal_url AS SealUrl,
+              header_url AS HeaderUrl,
               corp_no AS CorpNo,
-              subsidiary_no AS SubsidiaryNo
+              subsidiary_no AS SubsidiaryNo,
+              is_locked_from_landing AS IsLockedFromLanding
             FROM local_company
             WHERE tenant_id = @TenantId
             """;
@@ -599,6 +628,9 @@ public sealed class SettingsService : ISettingsService
         public string CeoName { get; set; } = string.Empty;
 
         public string BizNo { get; set; } = string.Empty;
+
+        /// <summary>랜딩 가입 자동 반영 잠금. 참이면 위 3필드는 저장 시 변경을 거부한다(헌법 #35).</summary>
+        public bool IsLockedFromLanding { get; set; }
     }
 
     private sealed class TenantSettingsRow
