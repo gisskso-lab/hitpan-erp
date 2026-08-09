@@ -36,9 +36,17 @@
 {
     <MudProgressLinear Indeterminate="true" Color="Color.Primary" />
 }
+else if (_loadFailed)
+{
+    @* 🔴 못 불러온 것 — "0명" 과 다른 사실이다. 없다고 단정하지 않는다. *@
+    <LoadFailedState Title="사용자 목록을 불러오지 못했습니다"
+                     Subtitle="계정이 삭제된 것이 아닙니다. 연결이 회복되면 다시 보입니다."
+                     Retrying="@_loading"
+                     OnRetry="LoadAsync" />
+}
 else if (_users.Count == 0)
 {
-    @* 빈 상태 *@
+    @* 빈 상태 — 진짜로 0명일 때만 온다 *@
     <MudPaper Elevation="0" Class="pa-8 text-center" Style="border:0.5px dashed var(--mud-palette-lines-default);border-radius:12px">
         <MudIcon Icon="@Icons.Material.Outlined.PeopleAlt" Size="Size.Large" Style="color:var(--mud-palette-text-secondary);font-size:64px" />
         <MudText Typo="Typo.h6" Class="mt-3">아직 등록된 사용자가 없습니다</MudText>
@@ -318,12 +326,34 @@ else
         await LoadAsync();
     }
 
+    // 목록을 못 불러왔는지 여부. 🔴 "0명" 과 반드시 구분한다(20260809작4 ②번 봉합).
+    //   종전에는 실패를 빈 리스트로 뭉개 "아직 등록된 사용자가 없습니다" 가 떴고,
+    //   직원 12명이 있는 회사에서 사장님이 계정이 다 날아간 줄 아셨다.
+    private bool _loadFailed;
+
     private async Task LoadAsync()
     {
         _loading = true;
-        var list = await UserSvc.GetAllAsync();
-        _users = list ?? new();
-        _loading = false;
+        _loadFailed = false;
+        try
+        {
+            var list = await UserSvc.GetAllAsync();
+            if (list is null)
+            {
+                // null = 실패. 빈 리스트(정상 0건) 와 다른 사실이다.
+                _loadFailed = true;
+                _users = new();
+            }
+            else
+            {
+                _users = list;
+            }
+        }
+        finally
+        {
+            // 예외가 나도 진행바가 영원히 돌지 않게 한다.
+            _loading = false;
+        }
     }
 
     // ── 추가 ──

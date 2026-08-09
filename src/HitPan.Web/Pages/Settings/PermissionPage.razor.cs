@@ -14,29 +14,50 @@ public partial class PermissionPage : ComponentBase
 {
     // 로딩 상태
     private bool _loading = true;
+    // 목록을 못 불러왔는지 여부. 🔴 "직원 0명" 과 반드시 구분한다(20260809작4 ②번 봉합).
+    //   종전에는 GetAllAsync() 가 null 을 줘도 `?? new()` 로 뭉개서,
+    //   좌측 직원목록이 빈 카드가 되고 우측은 "좌측에서 직원을 선택하세요" 로 교착됐다.
+    //   화면만 보면 직원이 다 사라진 것처럼 보인다 — "없다" 와 "못 불러왔다" 는 다른 사실이다.
+    private bool _loadFailed;
     // 직원 권한 목록
     private List<UserPermissionModel> _users = new();
     // 선택된 직원 ID
     private string? _selectedUserId;
 
-    // ERP 15개 메뉴 템플릿
+    // ERP 메뉴 템플릿 — 🔴 백엔드 PermissionService.MenuList 와 코드가 100% 같아야 한다.
+    //
+    // 2026-08-09 봉합 (사장님 결재 · 작4 ①번):
+    //   종전 프론트 15개 중 4개가 백엔드와 코드가 달라 권한이 영원히 안 먹었다.
+    //     ITEM_MASTER→ITEM · PARTNER_MASTER→PARTNER · PURCHASE_RECEIPT→PURCHASE · RETURN(백엔드 없음)
+    //   체크하고 저장하면 "저장됐습니다"가 뜨는데 실제 권한 조회는 menu_code='ITEM' 로 하므로 항상 0이었다.
+    //   또 백엔드에만 있던 5개(APPROVAL·HR·MONTHLY_CLOSING·CERTIFICATE·SETTINGS·USERS)는 화면에서 사라져
+    //   부여할 방법 자체가 없었다. USERS·APPROVAL 은 컨트롤러가 실제로 강제하는 코드다.
+    //
+    // ⚠️ 이 목록을 고칠 때는 반드시 백엔드
+    //    src/HitPan.Application/Services/PermissionService.cs MenuList 를 함께 고친다.
+    //    한쪽만 고치면 같은 사고가 재발한다. (헌법 #12 — 인터페이스 확장 시 모든 구현체 확인)
     private static readonly List<(string Code, string Name)> ErpMenus = new()
     {
         ("DELIVERY", "거래명세서"),
         ("QUOTATION", "견적서"),
         ("SALES_ORDER", "수주서"),
         ("PURCHASE_ORDER", "발주서"),
-        ("PURCHASE_RECEIPT", "매입명세서"),
-        ("RETURN", "반품"),
-        ("ITEM_MASTER", "상품마스터"),
-        ("PARTNER_MASTER", "업체마스터"),
-        ("BOM", "BOM자재명세서"),
+        ("PURCHASE", "매입명세서"),
+        ("ITEM", "상품마스터"),
+        ("PARTNER", "업체마스터"),
+        ("BOM", "BOM 자재명세서"),
         ("STOCK", "재고현황"),
         ("LEDGER", "원장"),
         ("COLLECTION", "수금"),
         ("PAYMENT", "지급"),
         ("ACCOUNTING", "회계"),
-        ("DASHBOARD", "대시보드")
+        ("APPROVAL", "결재"),
+        ("HR", "인사"),
+        ("MONTHLY_CLOSING", "월마감"),
+        ("CERTIFICATE", "범용인증서"),
+        ("DASHBOARD", "대시보드"),
+        ("SETTINGS", "사용환경설정"),
+        ("USERS", "사용자관리")
     };
 
     // 현재 선택된 직원
@@ -48,12 +69,31 @@ public partial class PermissionPage : ComponentBase
     /// </summary>
     protected override async Task OnInitializedAsync()
     {
+        await LoadAsync().ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// 직원 권한 목록을 조회한다. "다시 시도" 버튼도 이 메서드를 그대로 부른다.
+    /// </summary>
+    private async Task LoadAsync()
+    {
+        _loading = true;
+        _loadFailed = false;
         try
         {
-            _loading = true;
-            _users = await PermSvc.GetAllAsync().ConfigureAwait(false) ?? new();
+            var list = await PermSvc.GetAllAsync().ConfigureAwait(false);
+            if (list is null)
+            {
+                // null = 실패. 정상 0건과 다른 사실이므로 화면에서 갈라 보여준다.
+                _loadFailed = true;
+                _users = new();
+                _selectedUserId = null;
+                return;
+            }
 
-            // ERP 15개 메뉴 보정
+            _users = list;
+
+            // ERP 메뉴 보정 (코드는 백엔드 MenuList 와 동일해야 한다 — ErpMenus 주석 참조)
             foreach (var user in _users)
             {
                 EnsureErpMenus(user);
@@ -63,10 +103,15 @@ public partial class PermissionPage : ComponentBase
         }
         catch (Exception ex)
         {
+            // 서비스가 삼키지 못한 예외까지 여기서 받아 "못 불러왔다" 로 확정한다.
+            _loadFailed = true;
+            _users = new();
+            _selectedUserId = null;
             Snackbar.Add($"권한 목록을 불러오지 못했습니다: {ex.Message}", Severity.Error);
         }
         finally
         {
+            // 예외가 나도 진행바가 영원히 돌지 않게 한다.
             _loading = false;
         }
     }
@@ -124,7 +169,9 @@ public partial class PermissionPage : ComponentBase
     }
 
     /// <summary>
-    /// 직원 권한에 ERP 15개 메뉴를 보정한다.
+    /// 직원 권한 목록을 ERP 메뉴 템플릿(<see cref="ErpMenus"/>)에 맞춰 보정한다.
+    /// 백엔드가 내려준 권한 중 템플릿에 없는 코드는 화면에서 사라지므로,
+    /// 템플릿은 백엔드 MenuList 와 항상 같아야 한다.
     /// </summary>
     private static void EnsureErpMenus(UserPermissionModel user)
     {

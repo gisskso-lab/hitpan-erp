@@ -79,8 +79,10 @@ builder.Services.AddSingleton<HitPan.Application.Interfaces.IBinaryCryptoService
 builder.Services.AddSingleton<IHashService, HashService>();
 builder.Services.AddInfrastructure();
 // 고리4 P1 (사장님 결재 2026-06-30, 작4): DB 스키마 마이그(DB-*.sql) 적용 주체 등록.
-//   ★ 수동 호출만 — 앱시작 자동 실행 배선 0건(IMigrationRunner.cs ① 범위, 헌법 #39 운영 보호).
 //   의존(IMigrationDbConnectionFactory=InfrastructureExtensions.cs:46 Singleton · ILogger)은 이미 등록됨.
+//   ★ 2026-08-09 (사장님 결재 "승인") — 고리5: 앱 시작 자동 적용을 배선했다(아래 var app = builder.Build() 직후).
+//     종전 "수동 호출만" 상태였고, 그래서 새 마이그가 포함된 릴리스는 워치독이 자동교체를 스스로 차단했다
+//     (UpdateOrchestrator.cs:512 — "적용 주체가 없어 통과시키면 500"). 즉 DB가 바뀌면 자동 업데이트가 막혔다.
 builder.Services.AddScoped<IMigrationRunner, MigrationRunner>();
 builder.Services.AddScoped<IUnitOfWork, UnitOfWork>();
 builder.Services.AddScoped<IAuthUserLookup, AuthUserLookup>();
@@ -317,6 +319,85 @@ builder.Services.AddCors(options =>
 });
 
 var app = builder.Build();
+
+// ═══════════════════════════════════════════════════════════════════════════
+// 고리5 — DB 스키마 마이그 자동 적용 (사장님 결재 2026-08-09 "승인")
+// ═══════════════════════════════════════════════════════════════════════════
+//
+// 왜 필요했나
+//   업데이트는 '프로그램 파일 교체'만 한다. DB 컬럼을 추가하는 주체가 없었다.
+//   그래서 새 컬럼을 읽는 코드가 배포되면 고객 PC 는 "그런 칸 없다" 로 500 이 난다.
+//   워치독은 이걸 알고 새 마이그가 있는 릴리스를 스스로 차단해 왔다
+//   (UpdateOrchestrator.cs:512 "워치독은 DB 마이그를 적용하지 않으므로 … 500 P0").
+//   ⇒ DB 가 바뀌면 자동 업데이트가 막히고 재설치로만 갈 수 있었다.
+//   ⇒ 여기서 적용 주체를 세워, DB 가 백 번 바뀌어도 고객은 팝업 [예] 한 번으로 끝난다.
+//
+// 안전 설계 (사장님 승인 조건 3가지 — 전부 MigrationRunner 가 이미 구현하고 있다)
+//   ① 멱등 — 이미 success=1 인 마이그는 건너뛴다. 몇 번을 켜도 안전(MigrationRunner:104).
+//   ② 실패 시 즉시 중단 — 실패한 마이그를 success=0 으로 기록하고 다음 것을 건드리지 않는다
+//      (MigrationRunner:143-162). MariaDB DDL 은 암묵 커밋이라 롤백이 불가하므로,
+//      '더 망가뜨리지 않는 것' 이 최선의 안전이다.
+//   ③ 업데이트 전 자동 백업 — 워치독이 이미 수행한다(사장님 결재 업데이트 흐름).
+//
+// 🔴 실패해도 앱을 죽이지 않는 이유
+//   여기서 Environment.Exit 을 하면 ERP 가 아예 안 뜬다. 고객은 화면조차 못 보고,
+//   원격 진단도 불가능해진다(고객 PC 로컬 구조 — 헌법 #30, 본사 의존 0).
+//   대신 기동은 시키되 무엇이 실패했는지 로그에 명확히 남긴다. 실패한 화면만 500 이 나고
+//   나머지 업무는 계속 돌아간다 — 전면 중단보다 피해가 작다.
+//   ⚠️ 단, 이 판단은 '부분 실패' 전제다. 마이그가 데이터를 변형하는 종류로 넓어지면
+//     그때는 기동 차단이 맞을 수 있다. 그 시점에 재결재를 받는다.
+//
+// 헌법: #9 DB 는 미리 다 / #13 조회 전 존재 보장 / #15 빈 catch 금지 /
+//       #26 마이그 목표(10분)-Timeout(24h) 분리 / #30 본사 의존 0 / #39 사람 손 ALTER 대체
+{
+    using var migScope = app.Services.CreateScope();
+    var migLogger = migScope.ServiceProvider.GetRequiredService<ILoggerFactory>()
+        .CreateLogger("HitPan.Startup.Migration");
+    try
+    {
+        var runner = migScope.ServiceProvider.GetRequiredService<IMigrationRunner>();
+        var appVersion = typeof(Program).Assembly.GetName().Version?.ToString();
+
+        var result = await runner.ApplyPendingAsync(appVersion).ConfigureAwait(false);
+
+        if (result.Success)
+        {
+            if (result.AppliedMigrationIds.Count > 0)
+            {
+                migLogger.LogWarning(
+                    "[Startup/Migration] ✅ DB 스키마 갱신 완료 — 신규 적용 {Applied}건({List}), 건너뜀 {Skipped}건.",
+                    result.AppliedMigrationIds.Count,
+                    string.Join(", ", result.AppliedMigrationIds),
+                    result.SkippedCount);
+            }
+            else
+            {
+                migLogger.LogInformation(
+                    "[Startup/Migration] DB 스키마 최신 — 적용할 것 없음(건너뜀 {Skipped}건).",
+                    result.SkippedCount);
+            }
+        }
+        else
+        {
+            // 헌법 #15 — 삼키지 않는다. 무엇이 어디서 실패했는지 남긴다.
+            migLogger.LogError(
+                "[Startup/Migration] 🛑 DB 스키마 갱신 실패 — 실패 마이그: {Failed}. 사유: {Reason}. " +
+                "이 지점에서 중단했고 다음 마이그는 진행하지 않았습니다. " +
+                "이미 적용된 {Applied}건은 유효합니다. " +
+                "새 컬럼을 쓰는 화면은 오류가 날 수 있으나 나머지 업무는 계속 사용할 수 있습니다.",
+                result.FailedMigrationId ?? "(미상)",
+                result.FailureMessage ?? "(사유 미상)",
+                result.AppliedMigrationIds.Count);
+        }
+    }
+    catch (Exception ex)
+    {
+        // 러너 자체가 터져도 기동은 시킨다(위 '앱을 죽이지 않는 이유' 참조).
+        migLogger.LogError(ex,
+            "[Startup/Migration] 🛑 DB 스키마 갱신 중 예기치 못한 오류 — 기동은 계속합니다. " +
+            "새 컬럼을 쓰는 화면에서 오류가 날 수 있습니다.");
+    }
+}
 
 if (app.Environment.IsDevelopment())
 {

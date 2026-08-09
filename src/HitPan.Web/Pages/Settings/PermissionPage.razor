@@ -22,6 +22,27 @@
 {
     <MudProgressLinear Indeterminate="true" Color="Color.Primary" />
 }
+else if (_loadFailed)
+{
+    @* 🔴 못 불러온 것 — "직원 0명" 과 다른 사실이다.
+       종전에는 여기서 빈 직원목록 + "좌측에서 직원을 선택하세요" 로 교착돼,
+       선택할 것이 없는데 선택하라고만 하는 화면이 됐다. *@
+    <LoadFailedState Title="권한 정보를 불러오지 못했습니다"
+                     Subtitle="직원이나 권한이 삭제된 것이 아닙니다. 연결이 회복되면 다시 보입니다."
+                     Retrying="@_loading"
+                     OnRetry="LoadAsync" />
+}
+else if (_users.Count == 0)
+{
+    @* 빈 상태 — 진짜로 직원이 0명일 때만 온다 *@
+    <MudPaper Elevation="0" Class="pa-8" Style="border:0.5px dashed var(--mud-palette-lines-default);border-radius:12px;text-align:center">
+        <MudIcon Icon="@Icons.Material.Outlined.Lock" Size="Size.Large" Style="color:var(--mud-palette-text-secondary);font-size:64px" />
+        <MudText Typo="Typo.h6" Class="mt-3">권한을 부여할 직원이 없습니다</MudText>
+        <MudText Typo="Typo.body2" Style="color:var(--mud-palette-text-secondary)">
+            [사용자 추가·관리] 에서 직원 계정을 먼저 등록하면 여기에서 메뉴별 권한을 줄 수 있습니다.
+        </MudText>
+    </MudPaper>
+}
 else
 {
     <MudGrid Spacing="3">

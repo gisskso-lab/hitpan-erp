@@ -65,6 +65,9 @@ CHECKS=(
   "collections source_id"                   # 16차 수금
   "approval_settings doc_type"              # 15차
   "partner_special_prices discount_rate"    # 19차 업체특별단가 할인율
+  "local_company address_detail"            # DB-85 상세주소 분리(20260809작4 ⑤) — 없으면 회사정보 저장·조회 500
+  "local_company seal_url"                  # DB-85 인장 — 없으면 회사정보 화면 500
+  "local_company header_url"                # DB-85 출력 헤더 — 없으면 회사정보 화면 500
 )
 MISSING=0
 for chk in "${CHECKS[@]}"; do

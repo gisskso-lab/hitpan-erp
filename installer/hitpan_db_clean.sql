@@ -1776,9 +1776,12 @@ CREATE TABLE `local_company` (
   `tel` varchar(20) DEFAULT NULL,
   `fax` varchar(20) DEFAULT NULL,
   `address` varchar(200) DEFAULT NULL,
+  `address_detail` varchar(200) DEFAULT NULL COMMENT '상세주소(동·호수 등). DB-85 — 기본주소와 분리 저장',
   `zip_code` varchar(10) DEFAULT NULL,
   `email` varchar(100) DEFAULT NULL,
   `logo_url` varchar(200) DEFAULT NULL,
+  `seal_url` varchar(200) DEFAULT NULL COMMENT '인장 이미지 경로. DB-85 — 거래명세서·견적서 출력용',
+  `header_url` varchar(200) DEFAULT NULL COMMENT '출력 헤더 이미지 경로. DB-85',
   `corp_no` varchar(20) DEFAULT NULL,
   `subsidiary_no` varchar(20) DEFAULT NULL,
   `homepage` varchar(200) DEFAULT NULL,
@@ -3067,7 +3070,7 @@ INSERT INTO `schema_migrations` (`migration_id`, `app_version`, `success`) VALUE
 ('DB-70','clean-ddl',1),('DB-71','clean-ddl',1),('DB-72','clean-ddl',1),('DB-73','clean-ddl',1),
 ('DB-74','clean-ddl',1),('DB-75','clean-ddl',1),('DB-76','clean-ddl',1),('DB-77','clean-ddl',1),
 ('DB-78','clean-ddl',1),('DB-79','clean-ddl',1),('DB-80','clean-ddl',1),('DB-81','clean-ddl',1),
-('DB-82','clean-ddl',1),('DB-83','clean-ddl',1),('DB-84','clean-ddl',1);
+('DB-82','clean-ddl',1),('DB-83','clean-ddl',1),('DB-84','clean-ddl',1),('DB-85','clean-ddl',1);
 
 --
 -- Table structure for table `service_tickets`
