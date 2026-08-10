@@ -3436,6 +3436,7 @@ CREATE TABLE `tenant_devices` (
   `last_seen_at` datetime(6) DEFAULT NULL,
   `revoked_at` datetime(6) DEFAULT NULL,
   `revoked_reason` varchar(200) DEFAULT NULL,
+  `is_main_pc` tinyint(1) NOT NULL DEFAULT 0 COMMENT '메인PC(히트판 본체·DB 보유) 여부. 테넌트당 1대 — 보장은 애플리케이션에서 한다 (DB-86)',
   PRIMARY KEY (`device_id`),
   UNIQUE KEY `uq_tenant_fp` (`tenant_id`,`fingerprint`),
   KEY `idx_tenant_type_status` (`tenant_id`,`device_type`,`status`),

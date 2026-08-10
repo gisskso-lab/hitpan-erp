@@ -62,7 +62,16 @@ public sealed class DeviceController : ControllerBase
         if (accountType != "tenant_admin")
             return Forbid();
 
-        await _svc.RevokeAsync(id, tid, uid, body?.Reason, ct);
+        try
+        {
+            await _svc.RevokeAsync(id, tid, uid, body?.Reason, ct);
+        }
+        catch (InvalidOperationException ex)
+        {
+            // 회사 서버(메인PC) 폐기 시도 — 서비스가 막는다 (20260810작3).
+            // 500 이 아니라 이유를 담아 400 으로 돌려준다. 화면이 그대로 보여줄 문장이다.
+            return BadRequest(new { message = ex.Message });
+        }
         return Ok(new { message = "기기가 폐기되었습니다." });
     }
 

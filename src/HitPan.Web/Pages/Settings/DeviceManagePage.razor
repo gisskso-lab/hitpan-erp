@@ -83,6 +83,18 @@
                 <RowTemplate>
                     <MudTd DataLabel="기기명">
                         @(string.IsNullOrWhiteSpace(context.DeviceName) ? "(이름없음)" : context.DeviceName)
+                        @* 메인PC 표식 — 고객지원이 "그 컴퓨터가 회사 서버인가" 를 화면으로 확인해야
+                           응대가 갈린다. 회사 서버면 그 컴퓨터를 살려야 하고, 아니면 회사 서버가
+                           꺼졌는지부터 물어야 한다. 설치 담당 직원이 없어도 목록만 보면 알 수 있게 한다. *@
+                        @if (context.IsMainPc)
+                        {
+                            <MudChip T="string" Size="Size.Small" Class="ml-2"
+                                     Color="Color.Primary" Variant="Variant.Filled"
+                                     Icon="@Icons.Material.Filled.Dns"
+                                     title="히트판이 설치되어 자료를 보관하는 컴퓨터입니다. 이 컴퓨터가 꺼지면 다른 컴퓨터에서도 히트판을 쓸 수 없습니다.">
+                                회사 서버
+                            </MudChip>
+                        }
                     </MudTd>
                     <MudTd DataLabel="유형">
                         <MudChip T="string" Size="Size.Small"
@@ -105,7 +117,19 @@
                         </MudChip>
                     </MudTd>
                     <MudTd DataLabel="액션" Style="text-align:center">
-                        @if (context.Status == "approved")
+                        @* 🔴 회사 서버는 폐기할 수 없다.
+                           폐기하면 그 컴퓨터로 로그인이 막히는데, 되살리는 기능이 없다
+                           (고객이 스스로 풀 방법이 0개다). 그리고 그 컴퓨터는 회사 자료를
+                           전부 가진 컴퓨터다. 실수 한 번이 복구 불가로 이어지므로 버튼을 막는다. *@
+                        @if (context.IsMainPc)
+                        {
+                            <MudIconButton Icon="@Icons.Material.Filled.Lock"
+                                           Color="Color.Default"
+                                           Size="Size.Small"
+                                           Disabled="true"
+                                           title="회사 서버는 해제할 수 없습니다. 자료를 보관하는 컴퓨터입니다." />
+                        }
+                        else if (context.Status == "approved")
                         {
                             <MudIconButton Icon="@Icons.Material.Filled.Block"
                                            Color="Color.Error"
@@ -133,6 +157,8 @@
         public string Status { get; set; } = "";
         public DateTime RegisteredAt { get; set; }
         public DateTime? LastSeenAt { get; set; }
+        /// <summary>회사 서버(히트판 본체·자료를 가진 컴퓨터) 여부. 회사당 1대.</summary>
+        public bool IsMainPc { get; set; }
     }
 
     private sealed class DeviceQuotaDto

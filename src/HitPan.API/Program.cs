@@ -230,6 +230,12 @@ builder.Services.AddScoped<IEventPublisher, SyncEventPublisher>();
 builder.Services.AddHostedService<IdempotencyCleanupService>();
 // 정합성 자동감지 — 재고 음수·monthly_summary 불일치 6h 주기 감지 → audit_trail 기록
 builder.Services.AddHostedService<IntegrityCheckService>();
+// 메인PC 자동등록 — 히트판 본체·DB 를 가진 이 PC 를 등록 기기 목록에 넣는다 (20260810작3)
+//   기기 슬롯을 계정이 아니라 기기로 세기로 한 결정에 맞춰, 설치된 그 PC 도 목록에 잡히게 한다.
+//   ⭐ 사람이 로그인하지 않아도 등록된다 — 메인PC 는 24시간 켜두는 무인 PC 일 수 있고,
+//     부모계정이 그 PC 에서 쓰인다는 보장도 없다(계정 축과 기기 축은 별개).
+//   고객지원이 "그 PC 가 메인PC 인가" 를 화면으로 확인할 수 있어야 응대가 갈린다.
+builder.Services.AddHostedService<MainPcRegistrationService>();
 // 워치독 emergency → CS 자동 발신 (헌법 #28-F, appsettings.CsAutoDispatch.Enabled=true 시만)
 builder.Services.AddHostedService<HitPan.API.Services.CsAutoDispatchService>();
 // 본사 ERP ↔ 백오피스 단방향 Outbox (WS-20260601-20, 8명제 #3 + 헌법 #18·#22)
