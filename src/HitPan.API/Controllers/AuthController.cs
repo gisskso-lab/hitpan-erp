@@ -45,8 +45,31 @@ public class AuthController : ControllerBase
             //   판별 = loopback 접속 여부. 메인PC 본인은 localhost/127.0.0.1(loopback)로 접속하고
             //   (installer HitPan-Universal.iss 바로가기), 클라이언트는 터널 도메인으로만 온다.
             //   IP 기반이 아니라 loopback 여부라 cloudflared 터널 프록시가 위조할 수 없다(신뢰 가능).
-            var isMainPcLoopback = HttpContext.Connection.RemoteIpAddress?.Equals(System.Net.IPAddress.Loopback) == true
-                || HttpContext.Connection.RemoteIpAddress?.Equals(System.Net.IPAddress.IPv6Loopback) == true;
+            // 🔴 2026-08-10 [3-V] 보강 — loopback 만으로는 부족하다.
+            //   터널(cloudflared)은 **API 에 로컬로 연결**한다(HitPan-Universal.iss:1134 —
+            //   ingress origin = http://localhost:5257). 그래서 터널로 들어온 클라이언트PC 도
+            //   RemoteIpAddress 가 127.0.0.1 로 보인다.
+            //   같은 파일 AppVersionController.cs:16 이 이미 경고하고 있었다:
+            //     *"터널이 로컬 프록시라 RemoteIpAddress 가 우연히 127.0.0.1 이 될 수는 있으나,
+            //       그건 보장이 아니라 배포 형태에 기댄 우연이다"*
+            //   그리고 RateLimitMiddleware.cs:106 이 답을 갖고 있다 —
+            //     *"Cloudflare 터널: CF-Connecting-IP가 진짜 클라이언트 IP"*
+            //
+            //   ⚠️ 이것을 안 보면 **모든 기기가 메인PC 로 판정**되어
+            //     ① 전부 "자료 보관 컴퓨터" 표식이 붙고
+            //     ② 한도 면제까지 받아 **basic 5대 요금정책이 통째로 무너진다.**
+            //     사장님 결재(*"그래야 요금정책이 의미가 있지"*)와 정면으로 어긋난다.
+            //
+            //   ⇒ 프록시 헤더가 하나라도 있으면 **외부에서 들어온 것**이므로 메인PC 가 아니다.
+            //     헤더는 위조될 수 있으나, 위조하면 메인PC 자격을 **잃는 방향**이라 안전하다
+            //     (권한을 얻는 쪽으로 악용할 수 없다).
+            var viaProxy = !string.IsNullOrWhiteSpace(Request.Headers["CF-Connecting-IP"].ToString())
+                || !string.IsNullOrWhiteSpace(Request.Headers["X-Forwarded-For"].ToString())
+                || !string.IsNullOrWhiteSpace(Request.Headers["CF-Ray"].ToString());
+
+            var isMainPcLoopback = !viaProxy
+                && (HttpContext.Connection.RemoteIpAddress?.Equals(System.Net.IPAddress.Loopback) == true
+                    || HttpContext.Connection.RemoteIpAddress?.Equals(System.Net.IPAddress.IPv6Loopback) == true);
 
             // 🔴 2026-08-10 (사장님 결재 · 20260810작2 T3) — 메인PC 도 기기로 등록하고 슬롯을 쓴다.
             //
