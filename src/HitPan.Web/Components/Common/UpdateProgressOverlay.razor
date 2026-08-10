@@ -255,8 +255,22 @@
         }
         catch (Exception ex)
         {
-            // 헌법 #15 — 침묵 금지. 다만 화면은 유지한다(F5 안내가 남아 고객이 빠져나갈 수 있다).
+            // 헌법 #15 — 침묵 금지.
             Console.Error.WriteLine("[UpdateProgressOverlay] " + ex.GetType().Name + ": " + ex.Message);
+
+            // 🔴 2026-08-10 봉합 [4] D-1 (검증팀장 데이비드 박 적발 · P1 회귀).
+            //   여기까지 오면 **폴링은 죽었다** — 이 메서드가 곧 끝나기 때문이다.
+            //   그런데 종전엔 `_showManualHint` 만 세우고 `_stalled` 는 false 로 남겼다.
+            //   그 상태에서 [다시 확인] 을 누르면 RetryAsync 가 `!_stalled` 를 보고
+            //   "폴링이 살아 있으니 그냥 기다리자" 며 **아무것도 하지 않고 return** 한다.
+            //   ⇒ 버튼이 무반응이 되고, 자동 복귀도 10분 탈출도 함께 막혀 고객이 화면에 갇힌다.
+            //     (이 파일 :198 이 스스로 "영원히 도는 것은 502 보다 나쁘다" 고 적어 둔 그 상황이다)
+            //
+            //   원인은 한 줄로 말하면 **상태가 사실과 달라진 것**이다.
+            //   폴링이 멈췄으면 멈췄다고 적어야 RetryAsync 가 되살릴 수 있다.
+            //   ⚠️ 이 결함은 _stalled 분기를 넣으면서 생긴 회귀다. 종전 코드는 조건 없이
+            //     WatchAsync 를 다시 걸었으므로 이 경우에도 살아났다.
+            _stalled = true;
             _showManualHint = true;
             StateHasChanged();
         }

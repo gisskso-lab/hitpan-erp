@@ -100,8 +100,11 @@ public class AuthController : ControllerBase
                             UserAgent = Request.Headers["User-Agent"].ToString()
                         };
 
+                        // 🔴 isMainPc 전달 (2026-08-10 [4] D-3·D-5 봉합).
+                        //   메인PC 는 슬롯을 **소모하되**(사장님 결재) 한도·폐기로 **잠기지는 않는다.**
+                        //   자료를 가진 PC 가 잠기면 고객이 스스로 풀 방법이 없기 때문이다.
                         var (allowed, reason, deviceId, newlyRegistered) = await _deviceService.RegisterOrRefreshAsync(
-                            response.TenantId, userId, deviceReq, ipAddress, ct);
+                            response.TenantId, userId, deviceReq, ipAddress, isMainPcLoopback, ct);
 
                         if (!allowed)
                         {
