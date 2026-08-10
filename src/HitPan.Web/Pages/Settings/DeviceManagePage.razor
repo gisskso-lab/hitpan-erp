@@ -6,6 +6,8 @@
 @inject HttpClient Http
 @inject ISnackbar Snackbar
 @inject IDialogService DialogService
+@* 슬롯 구매 시 랜딩페이지 이동용 (20260811작1 (C)) *@
+@inject NavigationManager Nav
 
 <PageTitle>등록 기기 관리 — 히트판 ERP</PageTitle>
 
@@ -13,6 +15,14 @@
     <PageHeader Title="등록 기기 관리"
                 Subtitle="히트판은 디바이스 개수 과금 — 계정 수는 무제한, 총 기기 수만 제한됩니다.">
         <Actions>
+            @* 모바일기기 등록 (사장님 오더 2026-08-11, 20260811작1 (D)):
+               "등록기기 관리메뉴에 '모바일기기 등록' 버튼을 만들어" *@
+            <MudButton Variant="Variant.Filled" Color="Color.Primary" Size="Size.Small"
+                       StartIcon="@Icons.Material.Filled.QrCode2"
+                       OnClick="OpenMobileRegisterAsync"
+                       Class="mr-2">
+                모바일기기 등록
+            </MudButton>
             <MudIconButton Icon="@Icons.Material.Filled.Refresh"
                            Color="Color.Primary"
                            Size="Size.Medium"
@@ -20,6 +30,45 @@
                            title="새로고침" />
         </Actions>
     </PageHeader>
+
+    @* ── 승인 대기 구역 (20260811작1 (B)) ──
+       사장님 설계: "승인대기. 대표에게 기기승인의 권한을 주기"
+       대기 기기가 있을 때만 나타난다. 없으면 화면이 조용하다 — 평소엔 안 보이는 게 맞다. *@
+    @if (_pending.Count > 0)
+    {
+        <MudPaper Elevation="0" Class="pa-4 mb-4"
+                  Style="border:1px solid var(--mud-palette-warning); border-radius:12px; background:rgba(255,152,0,0.06)">
+            <div style="display:flex;align-items:center;gap:8px;margin-bottom:12px">
+                <MudIcon Icon="@Icons.Material.Filled.PendingActions" Color="Color.Warning" />
+                <MudText Typo="Typo.subtitle2">
+                    승인을 기다리는 기기 @_pending.Count 대
+                </MudText>
+            </div>
+            <MudText Typo="Typo.body2" Class="mb-3" Style="color:var(--mud-palette-text-secondary)">
+                모르는 기기라면 <b>거부</b>해 주세요. 승인하면 그 기기에서 히트판을 쓸 수 있고, 슬롯 1대를 차지합니다.
+            </MudText>
+
+            @foreach (var d in _pending)
+            {
+                <div style="display:flex;align-items:center;gap:12px;padding:10px 0;border-top:0.5px solid var(--mud-palette-lines-default)">
+                    <MudIcon Icon="@(d.DeviceType == "pc" ? Icons.Material.Filled.Computer : Icons.Material.Filled.PhoneAndroid)"
+                             Color="Color.Default" />
+                    <div style="flex:1">
+                        <MudText Typo="Typo.body2" Style="font-weight:600">
+                            @(string.IsNullOrWhiteSpace(d.DeviceName) ? "(이름없음)" : d.DeviceName)
+                        </MudText>
+                        <MudText Typo="Typo.caption" Style="color:var(--mud-palette-text-secondary)">
+                            @(d.UserName ?? "-") · @(d.IpAddress ?? "-") · @d.RegisteredAt.ToLocalTime().ToString("MM-dd HH:mm")
+                        </MudText>
+                    </div>
+                    <MudButton Size="Size.Small" Variant="Variant.Filled" Color="Color.Primary"
+                               OnClick="@(async () => await ApproveAsync(d))">승인</MudButton>
+                    <MudButton Size="Size.Small" Variant="Variant.Outlined" Color="Color.Error"
+                               OnClick="@(async () => await RejectAsync(d))">거부</MudButton>
+                </div>
+            }
+        </MudPaper>
+    }
 
     @* ── KPI 카드 4개 (PC / Mobile / 추가슬롯 / 구독티어) — 공용 KpiCard 사용 ── *@
     <MudGrid Spacing="3" Class="mb-4">
@@ -144,6 +193,84 @@
     </MudPaper>
 </MudContainer>
 
+@* ── 모바일기기 등록 QR (20260811작1 (D), 사장님 오더 5단계) ──
+   "모바일 등록기기 버튼 클릭시 QR생성. 아래엔 '스마트폰으로으로 QR코드를 찍어 주세요' 라고 표기" *@
+<MudDialog @bind-Visible="_showQr" Options="@(new DialogOptions { MaxWidth = MaxWidth.ExtraSmall, FullWidth = true })">
+    <TitleContent><MudText Typo="Typo.h6">모바일기기 등록</MudText></TitleContent>
+    <DialogContent>
+        <div style="text-align:center;padding:8px 0">
+            @if (string.IsNullOrEmpty(_qrImage))
+            {
+                <MudProgressCircular Indeterminate="true" Color="Color.Primary" />
+            }
+            else
+            {
+                <img src="@_qrImage" alt="모바일 등록 QR 코드"
+                     style="width:220px;height:220px;border:1px solid var(--mud-palette-lines-default);border-radius:12px;padding:8px;background:#fff" />
+                <MudText Typo="Typo.body1" Class="mt-3" Style="font-weight:600">
+                    스마트폰으로 QR코드를 찍어 주세요
+                </MudText>
+                <MudText Typo="Typo.caption" Class="mt-1" Style="color:var(--mud-palette-text-secondary)">
+                    이 코드는 10분 뒤 사라집니다. 시간이 지나면 다시 눌러 주세요.
+                </MudText>
+            }
+        </div>
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="@(() => _showQr = false)">닫기</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@* ── 슬롯 판매 알림 (20260811작1 (C), 사장님 오더) ──
+   "비인증 PC에서 접속이 시도되었습니다. 슬롯1개를 추가하시겠습니까?"
+     Y → 랜딩페이지로 이동 / N → 등록기기 변경 or 기기차단 *@
+<MudDialog @bind-Visible="_showSlotOffer" Options="@(new DialogOptions { MaxWidth = MaxWidth.ExtraSmall, FullWidth = true })">
+    <TitleContent>
+        <MudText Typo="Typo.h6">
+            <MudIcon Icon="@Icons.Material.Filled.NotificationsActive" Color="Color.Warning" Class="mr-1" />
+            기기 슬롯이 부족합니다
+        </MudText>
+    </TitleContent>
+    <DialogContent>
+        <MudText Typo="Typo.body2" Class="mb-3">
+            비인증 @(_offerDeviceLabel)에서 접속이 시도되었습니다.<br />
+            <b>슬롯 1개를 추가하시겠습니까?</b>
+        </MudText>
+        <MudText Typo="Typo.caption" Style="color:var(--mud-palette-text-secondary)">
+            슬롯 1개당 1만원입니다. 추가하지 않으셔도 됩니다 — 쓰지 않는 기기를 정리해 자리를 만들 수 있습니다.
+        </MudText>
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="OnSlotOfferNo">아니오</MudButton>
+        <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="OnSlotOfferYes">
+            네, 추가합니다
+        </MudButton>
+    </DialogActions>
+</MudDialog>
+
+@* N 선택 시 — "등록기기를 변경하시겠습니까? or 기기차단을 하시겠습니까?" (사장님 오더) *@
+<MudDialog @bind-Visible="_showSlotAlt" Options="@(new DialogOptions { MaxWidth = MaxWidth.ExtraSmall, FullWidth = true })">
+    <TitleContent><MudText Typo="Typo.h6">어떻게 할까요?</MudText></TitleContent>
+    <DialogContent>
+        <MudText Typo="Typo.body2" Class="mb-2">
+            슬롯을 추가하지 않으면 아래 둘 중 하나를 고르실 수 있습니다.
+        </MudText>
+        <MudList T="string" Dense="true">
+            <MudListItem T="string" Icon="@Icons.Material.Filled.SwapHoriz">
+                <b>등록기기 변경</b> — 쓰지 않는 기기를 해제하고 그 자리를 내줍니다
+            </MudListItem>
+            <MudListItem T="string" Icon="@Icons.Material.Filled.Block">
+                <b>기기차단</b> — 그 접속을 막습니다
+            </MudListItem>
+        </MudList>
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="@(() => _showSlotAlt = false)">닫기</MudButton>
+        <MudButton Variant="Variant.Outlined" Color="Color.Error" OnClick="OnChooseBlock">기기차단</MudButton>
+        <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="OnChooseSwap">등록기기 변경</MudButton>
+    </DialogActions>
+</MudDialog>
+
 @code {
     // ── DTO (서버 응답 매핑용) ──
     private sealed class DeviceListDto
@@ -175,6 +302,20 @@
     private DeviceQuotaDto? _quota;
     private bool _loading = true;
 
+    // ── 승인 대기 (20260811작1 (B)) ──
+    //   목록에서 pending 만 추린다. 별도 API 를 만들지 않는다 — 진실원이 둘이 되면
+    //   한쪽만 갱신되는 사고가 난다(과거 버전 하드코딩 8곳 계통).
+    private List<DeviceListDto> _pending = new();
+
+    // ── 모바일 QR (20260811작1 (D)) ──
+    private bool _showQr;
+    private string? _qrImage;
+
+    // ── 슬롯 판매 알림 (20260811작1 (C)) ──
+    private bool _showSlotOffer;
+    private bool _showSlotAlt;
+    private string _offerDeviceLabel = "PC";
+
     protected override async Task OnInitializedAsync() => await LoadAsync();
 
     private async Task LoadAsync()
@@ -188,6 +329,12 @@
             await Task.WhenAll(listTask, quotaTask);
             _devices = listTask.Result ?? new();
             _quota = quotaTask.Result;
+
+            // 승인 대기분을 따로 추린다 (20260811작1 (B)). 오래 기다린 것이 위로.
+            _pending = _devices
+                .Where(d => d.Status == "pending")
+                .OrderBy(d => d.RegisteredAt)
+                .ToList();
         }
         catch (Exception ex)
         {
@@ -227,6 +374,148 @@
         {
             Snackbar.Add($"폐기 실패: {ex.Message}", Severity.Error);
         }
+    }
+
+    // ── 기기 승인 (20260811작1 (B)) ──
+    //   사장님 설계: "승인대기. 대표에게 기기승인의 권한을 주기"
+    private async Task ApproveAsync(DeviceListDto device)
+    {
+        try
+        {
+            var resp = await Http.PostAsJsonAsync($"api/devices/approve/{device.DeviceId}", new { });
+            if (resp.IsSuccessStatusCode)
+            {
+                Snackbar.Add($"'{device.DeviceName ?? "기기"}' 를 승인했습니다.", Severity.Success);
+                await LoadAsync();
+                return;
+            }
+
+            // 한도 초과 — 여기가 판매 경로의 입구다 (사장님 설계 (C)).
+            //   승인하려는데 슬롯이 없으면 "안 됩니다" 로 끝내지 않고 슬롯 구매를 제안한다.
+            var body = await resp.Content.ReadFromJsonAsync<ApiMessage>();
+            var msg = body?.Message ?? $"승인 실패 ({(int)resp.StatusCode})";
+
+            if (msg.Contains("한도초과"))
+            {
+                _offerDeviceLabel = device.DeviceType == "pc" ? "PC" : "모바일 기기";
+                _showSlotOffer = true;
+                return;
+            }
+            Snackbar.Add(msg, Severity.Error);
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"승인 실패: {ex.Message}", Severity.Error);
+        }
+    }
+
+    // ── 기기 승인 거부 (20260811작1 (B)) ──
+    private async Task RejectAsync(DeviceListDto device)
+    {
+        var confirmed = await ConfirmDialog.ShowAsync(
+            DialogService,
+            title: "기기 등록 거부",
+            message: $"'{device.DeviceName ?? "(이름없음)"}' 의 등록을 거부하시겠습니까?\n그 기기에서는 히트판을 쓸 수 없습니다.",
+            confirmText: "거부",
+            cancelText: "취소",
+            severity: Severity.Error);
+        if (!confirmed) return;
+
+        try
+        {
+            var resp = await Http.PostAsJsonAsync($"api/devices/reject/{device.DeviceId}", new { reason = "대표계정 승인 거부" });
+            if (resp.IsSuccessStatusCode)
+            {
+                Snackbar.Add("기기 등록을 거부했습니다.", Severity.Success);
+                await LoadAsync();
+            }
+            else
+            {
+                var body = await resp.Content.ReadFromJsonAsync<ApiMessage>();
+                Snackbar.Add(body?.Message ?? $"거부 실패 ({(int)resp.StatusCode})", Severity.Error);
+            }
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"거부 실패: {ex.Message}", Severity.Error);
+        }
+    }
+
+    // ── 모바일기기 등록 QR (20260811작1 (D)) ──
+    //   사장님 오더: "모바일 등록기기 버튼 클릭시 QR생성"
+    private async Task OpenMobileRegisterAsync()
+    {
+        _qrImage = null;
+        _showQr = true;
+
+        try
+        {
+            var resp = await Http.PostAsJsonAsync("api/devices/mobile-token", new { });
+            if (resp.IsSuccessStatusCode)
+            {
+                var data = await resp.Content.ReadFromJsonAsync<MobileTokenResponse>();
+                _qrImage = data?.QrImage;
+            }
+            else
+            {
+                Snackbar.Add($"QR 생성 실패 ({(int)resp.StatusCode})", Severity.Error);
+                _showQr = false;
+            }
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"QR 생성 실패: {ex.Message}", Severity.Error);
+            _showQr = false;
+        }
+    }
+
+    // ── 슬롯 판매 알림 (20260811작1 (C)) ──
+    //   사장님 오더: "Y로 선택하면 바로 랜딩페이지로 이동"
+    private void OnSlotOfferYes()
+    {
+        _showSlotOffer = false;
+        // ⚠️ 결제 미연동 (사장님 확인 2026-08-11 "아직"). 지금은 랜딩 이동까지가 범위다.
+        //   토스 결제는 공영정보(주) 명의 신청 후 이 자리에 얹는다.
+        Nav.NavigateTo("https://landing.hitpan.kr/pricing", forceLoad: true);
+    }
+
+    //   사장님 오더: "N로 선택하면 '등록기기를 변경하시겠습니까? or 기기차단을 하시겠습니까?'"
+    private void OnSlotOfferNo()
+    {
+        _showSlotOffer = false;
+        _showSlotAlt = true;
+    }
+
+    // 등록기기 변경 — 쓰지 않는 기기를 해제하도록 목록으로 보낸다.
+    private void OnChooseSwap()
+    {
+        _showSlotAlt = false;
+        Snackbar.Add("아래 목록에서 사용하지 않는 기기를 해제하면 자리가 생깁니다.", Severity.Info);
+    }
+
+    // 기기차단 — 대기 중인 그 기기를 거부한다.
+    private async Task OnChooseBlock()
+    {
+        _showSlotAlt = false;
+        var target = _pending.FirstOrDefault();
+        if (target is null)
+        {
+            Snackbar.Add("차단할 대기 기기가 없습니다.", Severity.Info);
+            return;
+        }
+        await RejectAsync(target);
+    }
+
+    private sealed class ApiMessage
+    {
+        public string? Message { get; set; }
+    }
+
+    private sealed class MobileTokenResponse
+    {
+        /// <summary>QR 이미지 (data:image/png;base64,...)</summary>
+        public string? QrImage { get; set; }
+        public string? Token { get; set; }
     }
 
     // ── UI 헬퍼 ──
