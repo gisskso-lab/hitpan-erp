@@ -11,10 +11,12 @@ namespace HitPan.API.Controllers;
 public sealed class SettingsController : ControllerBase
 {
     private readonly ISettingsService _settingsService;
+    private readonly ILogger<SettingsController> _logger;
 
-    public SettingsController(ISettingsService settingsService)
+    public SettingsController(ISettingsService settingsService, ILogger<SettingsController> logger)
     {
         _settingsService = settingsService;
+        _logger = logger;
     }
 
     [HttpGet]
@@ -80,8 +82,28 @@ public sealed class SettingsController : ControllerBase
             return Forbid();
         }
 
-        await _settingsService.SaveCompanyAsync(dto, tenantId, ct).ConfigureAwait(false);
-        return Ok();
+        // 🔴 2026-08-10 ([3-V] 병렬검증 I-6) — 잠긴 항목은 조용히 무시하지 않는다.
+        //   종전엔 잠금 위반이 와도 그대로 200 "적용되었습니다" 였다. 고객은 고쳤다고 믿는데
+        //   값은 그대로라 원인을 알 수 없었다(2026-08-09 권한 화면과 같은 구조).
+        //   ⇒ 저장은 하되(나머지 항목은 정상 반영) 무엇이 반영되지 않았는지 함께 돌려준다.
+        var rejected = await _settingsService.SaveCompanyAsync(dto, tenantId, ct).ConfigureAwait(false);
+
+        if (rejected.Count > 0)
+        {
+            _logger.LogWarning(
+                "[SaveCompany] 잠긴 항목 변경 시도 거부 tenant={TenantId} fields={Fields}",
+                tenantId, string.Join(",", rejected));
+
+            return Ok(new
+            {
+                saved = true,
+                rejectedFields = rejected,
+                message = $"{string.Join(" · ", rejected)} 항목은 사업자등록증에서 자동으로 채워진 정보라 "
+                          + "변경되지 않았습니다. 변경하시려면 [기본 사업장 정보 변경 요청] 을 이용해주세요."
+            });
+        }
+
+        return Ok(new { saved = true, rejectedFields = Array.Empty<string>() });
     }
 
     [HttpPost("validate-unit-price")]

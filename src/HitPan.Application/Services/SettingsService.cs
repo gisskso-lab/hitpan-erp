@@ -263,17 +263,29 @@ public sealed class SettingsService : ISettingsService
     /// <summary>
     /// local_company 테이블에 사업장 연락처·주소 등 표시용 정보를 저장한다.
     /// </summary>
-    public async Task SaveCompanyAsync(UpdateTenantCompanyDto dto, string tenantId, CancellationToken ct = default)
+    public async Task<IReadOnlyList<string>> SaveCompanyAsync(UpdateTenantCompanyDto dto, string tenantId, CancellationToken ct = default)
     {
         await EnsureOpenAsync(ct).ConfigureAwait(false);
 
         // NOT NULL 컬럼(상호·대표·사업자번호)은 빈 값이 오면 DB 기존 값을 유지한다.
-        // is_locked_from_landing 도 함께 읽는다 — 잠금 시 이 3필드는 서버가 변경을 거부한다(아래).
+        // is_locked_from_landing 도 함께 읽는다 — 잠금 시 아래 8필드는 서버가 변경을 거부한다.
+        //
+        // 🔴 2026-08-10 확장 (사장님 결재 · 20260810작1):
+        //   종전엔 상호·대표자·사업자번호 3필드만 되돌렸다. 그런데 사업자등록증에 적힌 값은
+        //   업태·종목·주소·우편번호·법인등록번호까지 8개다. 나머지 5개는 잠금 밖이라
+        //   정상 가입한 뒤 이 5개만 바꿔 다른 사업장인 것처럼 쓸 수 있었다(무단사용 경로).
+        //   ⇒ 등록증에서 읽은 값 전부를 잠근다. 등록증에 없는 값(전화·팩스·홈페이지·이메일·
+        //      상세주소·종사업장번호)은 대조할 원본이 없으므로 잠그지 않는다.
         const string selectRequired = """
             SELECT
               company_name AS CompanyName,
               ceo_name AS CeoName,
               biz_no AS BizNo,
+              biz_type AS BizType,
+              biz_item AS BizItem,
+              zip_code AS ZipCode,
+              address AS Address,
+              corp_no AS CorpNo,
               is_locked_from_landing AS IsLockedFromLanding
             FROM local_company
             WHERE tenant_id = @TenantId
@@ -285,25 +297,54 @@ public sealed class SettingsService : ISettingsService
 
         if (required is null)
         {
-            return;
+            return Array.Empty<string>();
         }
+
+        // 잠겨 있어 저장하지 않은 항목을 모아 호출자에게 돌려준다.
+        // 조용히 무시하면 고객은 "고쳤는데 안 바뀐다" 는 상태에 빠지고 원인도 알 수 없다.
+        var rejected = new List<string>();
 
         // 🔴 랜딩 잠금 강제 (헌법 #35 · 작4 §2-6-2 봉합).
         //   종전에는 화면에서만 ReadOnly 로 막았고 서버엔 검증이 없었다.
         //   화면 잠금은 화면을 거치지 않는 요청을 못 막는다 — 서버가 최종 관문이다.
-        //   잠긴 테넌트는 회사명·사업자번호·대표자명 3필드를 무조건 DB 기존 값으로 되돌린다.
-        //   (변경이 필요하면 본사 고객지원으로 사업자등록증을 재등록한다.)
+        //   잠긴 테넌트는 사업자등록증 기재 항목을 무조건 DB 기존 값으로 되돌린다.
+        //   (변경이 필요하면 [기본 사업장 정보 변경 요청] 으로 본사 승인을 받는다.)
         var lockedFromLanding = required.IsLockedFromLanding;
 
-        var companyName = lockedFromLanding || string.IsNullOrWhiteSpace(dto.CompanyName)
-            ? required.CompanyName
-            : dto.CompanyName.Trim();
-        var ceoName = lockedFromLanding || string.IsNullOrWhiteSpace(dto.CeoName)
-            ? required.CeoName
-            : dto.CeoName.Trim();
-        var bizNo = lockedFromLanding || string.IsNullOrWhiteSpace(dto.BizNo)
-            ? required.BizNo
-            : dto.BizNo.Trim();
+        // 🔴 2026-08-10 (사장님 결재 · 20260810작1 T7) — 잠금 대상을 3필드 → 8필드로 확장.
+        //   사업자등록증에 적힌 값 전부를 잠근다. 종전엔 업태·종목·주소·우편번호·법인등록번호가
+        //   잠금 밖이라, 정상 가입한 뒤 이 5개만 바꿔 다른 사업장처럼 쓸 수 있었다(무단사용 경로).
+        //
+        //   ⚠️ 단 "값이 이미 있을 때만" 잠근다.
+        //   기존 값이 비어 있는 채로 잠그면 고객이 영원히 못 채우는 칸이 된다.
+        //   실제로 지금 부트스트랩은 주소·업태·종목을 안 채워 보내는 경우가 있어(수집 자체가
+        //   해시만 했다) 그 칸들이 빈 상태다 — 여기서 무조건 잠그면 화면이 잠긴 빈칸이 된다.
+        //   ⇒ 백오피스 수집(T2)이 값을 채워 주기 전까지는 빈 칸을 고객이 채울 수 있게 둔다.
+        //      값이 한 번 들어오면 그때부터 잠긴다.
+        string? LockIfPresent(bool locked, string? current, string? incoming, string fieldLabel)
+        {
+            if (!locked || string.IsNullOrWhiteSpace(current))
+            {
+                return incoming;
+            }
+
+            // 실제로 다른 값을 보내온 경우에만 "거부" 로 기록한다.
+            // 화면이 잠긴 값을 그대로 되돌려 보내는 것은 정상이므로 알릴 필요가 없다.
+            if (!string.IsNullOrWhiteSpace(incoming)
+                && !string.Equals(current.Trim(), incoming.Trim(), StringComparison.Ordinal))
+            {
+                rejected.Add(fieldLabel);
+            }
+
+            return current;
+        }
+
+        var companyName = LockIfPresent(lockedFromLanding, required.CompanyName, dto.CompanyName, "사용업체명")
+            is { } cn && !string.IsNullOrWhiteSpace(cn) ? cn.Trim() : required.CompanyName;
+        var ceoName = LockIfPresent(lockedFromLanding, required.CeoName, dto.CeoName, "대표자")
+            is { } ceo && !string.IsNullOrWhiteSpace(ceo) ? ceo.Trim() : required.CeoName;
+        var bizNo = LockIfPresent(lockedFromLanding, required.BizNo, dto.BizNo, "사업자번호")
+            is { } bn && !string.IsNullOrWhiteSpace(bn) ? bn.Trim() : required.BizNo;
         if (bizNo.Length > 12)
         {
             bizNo = bizNo[..12];
@@ -314,7 +355,8 @@ public sealed class SettingsService : ISettingsService
         //   그래서 새로고침하면 상세주소칸이 비었고, 다시 입력해 저장하면 중복 누적돼
         //   저장할 때마다 주소가 길어지다가 200자에서 잘렸다.
         //   DB-85 에서 address_detail 컬럼을 신설해 각자 제자리에 저장한다.
-        var address = TruncateNullable(dto.Address, 200);
+        //   주소는 잠금 대상(등록증 소재지), 상세주소는 잠금 제외(층·호수는 등록증에 없을 수 있다).
+        var address = TruncateNullable(LockIfPresent(lockedFromLanding, required.Address, dto.Address, "사업장 주소"), 200);
         var addressDetail = TruncateNullable(dto.AddressDetail, 200);
 
         var subsidiaryNo = dto.SubsidiaryNo?.Trim() ?? string.Empty;
@@ -323,7 +365,8 @@ public sealed class SettingsService : ISettingsService
             subsidiaryNo = subsidiaryNo[..4];
         }
 
-        var corpNo = dto.CorpNo?.Trim();
+        //   법인등록번호는 잠금 대상(등록증 기재).
+        var corpNo = LockIfPresent(lockedFromLanding, required.CorpNo, dto.CorpNo, "법인등록번호")?.Trim();
         if (!string.IsNullOrEmpty(corpNo) && corpNo.Length > 13)
         {
             corpNo = corpNo[..13];
@@ -333,9 +376,11 @@ public sealed class SettingsService : ISettingsService
         var fax = TruncateNullable(dto.Fax, 20);
         var email = TruncateNullable(dto.Email, 100);
         var homepage = TruncateNullable(dto.Homepage, 200);
-        var zipCode = TruncateNullable(dto.ZipCode, 10);
-        var bizType = TruncateNullable(dto.BizType, 50);
-        var bizItem = TruncateNullable(dto.BizItem, 100);
+        //   우편번호·업태·종목은 잠금 대상(등록증 기재). 전화·팩스·이메일·홈페이지는 제외 —
+        //   등록증에 없는 값이라 대조할 원본이 없다(연락처를 고정하는 것이 목적이 아니다).
+        var zipCode = TruncateNullable(LockIfPresent(lockedFromLanding, required.ZipCode, dto.ZipCode, "우편번호"), 10);
+        var bizType = TruncateNullable(LockIfPresent(lockedFromLanding, required.BizType, dto.BizType, "업태"), 50);
+        var bizItem = TruncateNullable(LockIfPresent(lockedFromLanding, required.BizItem, dto.BizItem, "업종"), 100);
 
         const string updateSql = """
             UPDATE local_company SET
@@ -385,6 +430,10 @@ public sealed class SettingsService : ISettingsService
                 },
                 cancellationToken: ct))
             .ConfigureAwait(false);
+
+        // 거부 목록은 호출자(컨트롤러)가 응답과 로그로 알린다.
+        // 이 서비스에는 로거가 주입되어 있지 않아 여기서 기록하지 않는다.
+        return rejected;
     }
 
     /// <summary>
@@ -629,7 +678,24 @@ public sealed class SettingsService : ISettingsService
 
         public string BizNo { get; set; } = string.Empty;
 
-        /// <summary>랜딩 가입 자동 반영 잠금. 참이면 위 3필드는 저장 시 변경을 거부한다(헌법 #35).</summary>
+        // 🔴 2026-08-10 (20260810작1 T7) — 잠금 대상 확장분.
+        //   사업자등록증에 적힌 값이라 잠근다. 위 3개와 달리 NULL 허용이므로 string? 이다.
+        public string? BizType { get; set; }
+
+        public string? BizItem { get; set; }
+
+        public string? ZipCode { get; set; }
+
+        public string? Address { get; set; }
+
+        public string? CorpNo { get; set; }
+
+        /// <summary>
+        /// 사업자등록증 자동 반영 잠금. 참이면 등록증 기재 8필드
+        /// (상호·대표자·사업자번호·업태·종목·우편번호·주소·법인등록번호)는 저장 시 변경을 거부한다.
+        /// 단 기존 값이 비어 있는 칸은 잠그지 않는다 — 영원히 못 채우는 칸이 되기 때문이다.
+        /// 헌법 #35 · 무단사용 차단 2관문(20260810작1 §1-1).
+        /// </summary>
         public bool IsLockedFromLanding { get; set; }
     }
 
