@@ -8,6 +8,8 @@
 @inject IDialogService DialogService
 @* 슬롯 구매 시 랜딩페이지 이동용 (20260811작1 (C)) *@
 @inject NavigationManager Nav
+@inject IJSRuntime JS
+@inject ILogger<DeviceManagePage> _logger
 
 <PageTitle>등록 기기 관리 — 히트판 ERP</PageTitle>
 
@@ -224,6 +226,49 @@
 @* ── 슬롯 판매 알림 (20260811작1 (C), 사장님 오더) ──
    "비인증 PC에서 접속이 시도되었습니다. 슬롯1개를 추가하시겠습니까?"
      Y → 랜딩페이지로 이동 / N → 등록기기 변경 or 기기차단 *@
+@* 승인 완료 — 인증키 전달 (20260811작3 (A), 사장님 확정)
+   "메인PC에서 인증키가 생성되면, 요청한 클라이언트PC에서 입력하는 방식.
+    그 메인PC에서 키를 주는 방식은 대표 마음이지."
+   ⚠️ 이 값은 지금 한 번만 볼 수 있다 — 서버는 대조용 흔적만 갖는다. *@
+<MudDialog @bind-Visible="_showAuthKey" Options="@(new DialogOptions { MaxWidth = MaxWidth.Small, FullWidth = true, CloseOnEscapeKey = false })">
+    <TitleContent>
+        <MudText Typo="Typo.h6">
+            <MudIcon Icon="@Icons.Material.Filled.CheckCircle" Color="Color.Success" Class="mr-1" />
+            승인했습니다 — 아래 번호를 알려주세요
+        </MudText>
+    </TitleContent>
+    <DialogContent>
+        <MudText Typo="Typo.body2" Class="mb-3">
+            <b>@_issuedForDevice</b> 를 승인했습니다.<br />
+            이 번호를 그 컴퓨터를 쓰는 직원에게 알려주세요.
+            직원이 자기 화면에 이 번호를 넣으면 바로 쓸 수 있습니다.
+        </MudText>
+
+        <MudPaper Elevation="0" Class="pa-3 mb-3"
+                  Style="background:var(--mud-palette-background-grey); word-break:break-all;">
+            <MudText Typo="Typo.body1" Style="font-family:monospace; font-size:1.05rem; letter-spacing:0.5px;">
+                @_issuedAuthKey
+            </MudText>
+        </MudPaper>
+
+        <MudButton Variant="Variant.Outlined" Size="Size.Small"
+                   StartIcon="@Icons.Material.Filled.ContentCopy"
+                   OnClick="CopyAuthKeyAsync" Class="mb-3">
+            번호 복사
+        </MudButton>
+
+        <MudAlert Severity="Severity.Warning" Dense="true" Class="mt-1">
+            이 번호는 <b>지금 한 번만</b> 보입니다. 창을 닫으면 다시 볼 수 없습니다 —
+            그때는 이 기기를 해제하고 다시 승인하셔야 합니다.
+        </MudAlert>
+    </DialogContent>
+    <DialogActions>
+        <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="CloseAuthKey">
+            알려줬습니다
+        </MudButton>
+    </DialogActions>
+</MudDialog>
+
 <MudDialog @bind-Visible="_showSlotOffer" Options="@(new DialogOptions { MaxWidth = MaxWidth.ExtraSmall, FullWidth = true })">
     <TitleContent>
         <MudText Typo="Typo.h6">
@@ -316,6 +361,12 @@
     private bool _showSlotAlt;
     private string _offerDeviceLabel = "PC";
 
+    // ── 승인 시 발급된 인증키 (20260811작3 (A)) ──
+    //   ⚠️ 이 값은 이 화면에서만, 이 한 번만 볼 수 있다. 서버는 해시만 갖는다.
+    private bool _showAuthKey;
+    private string? _issuedAuthKey;
+    private string _issuedForDevice = "";
+
     protected override async Task OnInitializedAsync() => await LoadAsync();
 
     private async Task LoadAsync()
@@ -385,7 +436,25 @@
             var resp = await Http.PostAsJsonAsync($"api/devices/approve/{device.DeviceId}", new { });
             if (resp.IsSuccessStatusCode)
             {
-                Snackbar.Add($"'{device.DeviceName ?? "기기"}' 를 승인했습니다.", Severity.Success);
+                // 🔴 승인하면 **인증키**가 만들어진다. 그 키를 화면에 띄워
+                //   대표가 직원에게 알려주게 한다 (사장님 확정 2026-08-11:
+                //   *"메인PC에서 인증키가 생성되면, 요청한 클라이언트PC에서 입력하는 방식.
+                //     그 메인PC에서 키를 주는 방식은 대표 마음이지."*)
+                //
+                //   ⚠️ 이 값은 **지금 한 번만** 볼 수 있다. 서버는 해시만 갖고 있어
+                //     나중에 다시 알려줄 수 없다. 그래서 스낵바(잠깐 떴다 사라짐)가 아니라
+                //     **대표가 닫기 전까지 남는 창**으로 보여준다.
+                var approved = await resp.Content.ReadFromJsonAsync<ApproveResult>();
+                if (!string.IsNullOrWhiteSpace(approved?.AuthKey))
+                {
+                    _issuedAuthKey = approved.AuthKey;
+                    _issuedForDevice = device.DeviceName ?? "기기";
+                    _showAuthKey = true;
+                }
+                else
+                {
+                    Snackbar.Add($"'{device.DeviceName ?? "기기"}' 를 승인했습니다.", Severity.Success);
+                }
                 await LoadAsync();
                 return;
             }
@@ -506,9 +575,42 @@
         await RejectAsync(target);
     }
 
+    // ── 인증키 전달 (20260811작3 (A)) ──
+    private async Task CopyAuthKeyAsync()
+    {
+        if (string.IsNullOrWhiteSpace(_issuedAuthKey)) return;
+        try
+        {
+            await JS.InvokeVoidAsync("navigator.clipboard.writeText", _issuedAuthKey);
+            Snackbar.Add("번호를 복사했습니다.", Severity.Success);
+        }
+        catch (Exception ex)
+        {
+            // 브라우저가 복사를 막는 경우가 있다(주소가 https 가 아닐 때 등).
+            // 화면에 번호가 그대로 보이므로 직접 옮겨 적으면 된다 — 흐름을 끊지 않는다.
+            _logger.LogWarning(ex, "인증키 복사 실패 — 사용자가 직접 옮겨 적어야 함");
+            Snackbar.Add("복사가 안 됩니다. 화면의 번호를 직접 알려주세요.", Severity.Info);
+        }
+    }
+
+    private void CloseAuthKey()
+    {
+        _showAuthKey = false;
+        // 화면 변수에서도 지운다 — 남겨둘 이유가 없다.
+        _issuedAuthKey = null;
+        _issuedForDevice = "";
+    }
+
     private sealed class ApiMessage
     {
         public string? Message { get; set; }
+    }
+
+    private sealed class ApproveResult
+    {
+        public string? Message { get; set; }
+        /// <summary>승인 시 발급된 인증키 원문. 이미 승인돼 있던 기기면 null.</summary>
+        public string? AuthKey { get; set; }
     }
 
     private sealed class MobileTokenResponse

@@ -244,6 +244,25 @@ window.hitpanDevice = {
         catch (e) { /* noop */ }
     },
 
+    // ── 기기 인증 번호 (20260811작3 (A), 사장님 오더 2026-08-11) ──
+    //   대표가 승인하면 메인PC 화면에 번호가 뜨고, 대표가 그것을 직원에게 알려준다.
+    //   직원이 자기 화면에 넣으면 여기 보관되고, 다음부터는 다시 넣지 않는다.
+    //
+    //   ⚠️ 이 번호는 **문을 여는 열쇠**다. 기기 대수를 세는 것과는 다른 일이다
+    //     (대수는 기기 목록의 줄 수로 이미 센다).
+    getAuthKey: function () {
+        try { return localStorage.getItem('hitpan_auth_key'); }
+        catch (e) { return null; }
+    },
+    setAuthKey: function (key) {
+        try { if (key) localStorage.setItem('hitpan_auth_key', key); }
+        catch (e) { /* 사생활 보호 모드 등 — 못 넣으면 다음에 다시 묻는다 */ }
+    },
+    clearAuthKey: function () {
+        try { localStorage.removeItem('hitpan_auth_key'); }
+        catch (e) { /* noop */ }
+    },
+
     // ── 모바일 홈화면 추가 (20260811작1 (D), 사장님 오더 2026-08-11) ──
     //   "Y 터치시 모바일 홈화면에 히트판ERP 아이콘 생성"
     //   아이폰과 안드로이드가 완전히 다르게 동작하므로 갈라서 다룬다.

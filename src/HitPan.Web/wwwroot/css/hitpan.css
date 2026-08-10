@@ -1834,3 +1834,23 @@ html, body {
     border-radius: 3px 4px 4px 3px;
     background: var(--mud-palette-surface);
 }
+
+/* ── 기기 인증 게이트 (20260811작3 (A), 사장님 오더 2026-08-11) ──
+   "인증키가 없어 인증할 수 없는 슬롯은 로그인만 되고 화면은 비활성화 그리고
+    비활성화된 화면에 '인증된 기기가 아닙니다...' 안내"
+
+   화면 전체를 덮는다. 로그인은 이미 됐고, 업무 화면만 못 쓰게 한다.
+   뒤가 비쳐 보이게 두는 이유 — 히트판이 죽은 게 아니라 이 기기가 아직
+   인증되지 않았을 뿐이라는 것이 한눈에 보여야 한다. */
+.hp-device-gate {
+    position: fixed;
+    inset: 0;
+    z-index: 2000;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 16px;
+    background: rgba(255, 255, 255, 0.82);
+    backdrop-filter: blur(3px);
+    -webkit-backdrop-filter: blur(3px);
+}

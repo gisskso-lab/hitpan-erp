@@ -38,7 +38,11 @@ public interface ITenantDeviceService
     /// pending → approved 로 바꾸고 누가 언제 승인했는지 남긴다.
     /// 승인 시점에 한도를 **다시 확인**한다 — 대기 중에 다른 기기가 슬롯을 채웠을 수 있다.
     /// </summary>
-    Task ApproveAsync(string deviceId, string tenantId, string approverUserId, CancellationToken ct = default);
+    /// <summary>기기 승인 (대표계정). 반환값 = 새로 발급한 인증키 원문 (이미 승인된 기기면 null).</summary>
+    Task<string?> ApproveAsync(string deviceId, string tenantId, string approverUserId, CancellationToken ct = default);
+
+    /// <summary>직원 PC 가 입력한 인증키를 대조한다. 맞으면 기기 번호, 틀리면 null.</summary>
+    Task<string?> VerifyAuthKeyAsync(string authKey, string tenantId, CancellationToken ct = default);
 
     /// <summary>
     /// 기기 승인 거부 — 대표계정만 (20260811작1 (B)).

@@ -93,16 +93,30 @@ public sealed class DeviceController : ControllerBase
         if (accountType != "tenant_admin")
             return Forbid();
 
+        string? authKey;
         try
         {
-            await _svc.ApproveAsync(id, tid, uid, ct);
+            // 대표가 승인하는 그 자리에서 인증키가 만들어진다(TenantDeviceService.ApproveAsync).
+            authKey = await _svc.ApproveAsync(id, tid, uid, ct);
         }
         catch (InvalidOperationException ex)
         {
             // 한도 초과·폐기된 기기 등 — 화면이 그대로 보여줄 문장이다.
             return BadRequest(new { message = ex.Message });
         }
-        return Ok(new { message = "기기가 승인되었습니다." });
+
+        // 🔴 인증키 원문을 대표 화면으로 올린다 (사장님 확정 2026-08-11):
+        //   *"메인PC에서 인증키가 생성되면, 요청한 클라이언트PC에서 입력하는 방식.
+        //     그 메인PC에서 키를 주는 방식은 대표 마음이지."*
+        //   ⇒ 우리는 화면에 보여주는 데까지만 한다. 대표가 직원에게 어떻게 알려주는지는
+        //     대표가 정한다(구두·메신저·메모).
+        //   ⚠️ 이 값은 우리 DB 에 해시로만 남는다 — 이 응답을 놓치면 다시 알려줄 수 없다.
+        //     화면이 반드시 사람에게 보여줘야 한다.
+        return Ok(new
+        {
+            message = "기기가 승인되었습니다.",
+            authKey                       // null = 이미 승인돼 있던 기기(다시 눌렀을 때)
+        });
     }
 
     /// <summary>기기 승인 거부 — 대표계정만 (20260811작1 (B)).</summary>
@@ -179,6 +193,38 @@ public sealed class DeviceController : ControllerBase
 
         if (!ok) return BadRequest(new { message });
         return Ok(new { message, deviceId });
+    }
+
+    /// <summary>
+    /// 직원 PC 가 대표에게 받은 인증키를 **입력**한다 (20260811작3 (A)).
+    ///
+    /// 사장님 확정: *"메인PC에서 인증키가 생성되면, 요청한 클라이언트PC에서 입력하는 방식.
+    ///                그 메인PC에서 키를 주는 방식은 대표 마음이지."*
+    ///
+    /// 🔴 이 방식이 "그게 직원인지 해커인지" 를 푼다 — 키를 **아는 사람만** 넣을 수 있고,
+    ///    그 키는 **대표가 직접 건넨 것**이다. 서버가 추측할 일이 없다.
+    /// </summary>
+    [HttpPost("verify-key")]
+    public async Task<IActionResult> VerifyKey([FromBody] VerifyKeyRequest? body, CancellationToken ct)
+    {
+        var tid = HttpContext.Items["TenantId"]?.ToString();
+        if (string.IsNullOrEmpty(tid)) return Forbid();
+
+        if (body is null || string.IsNullOrWhiteSpace(body.AuthKey))
+            return BadRequest(new { message = "인증키를 입력해 주세요." });
+
+        var deviceId = await _svc.VerifyAuthKeyAsync(body.AuthKey.Trim(), tid, ct);
+
+        if (deviceId is null)
+            // 어느 쪽이 틀렸는지 알려주지 않는다 — 알려주면 찍어 맞히는 데 도움이 된다.
+            return BadRequest(new { message = "인증키가 올바르지 않습니다. 관리자에게 다시 확인해 주세요." });
+
+        return Ok(new { message = "기기 인증이 완료되었습니다.", deviceId });
+    }
+
+    public sealed class VerifyKeyRequest
+    {
+        public string AuthKey { get; set; } = "";
     }
 
     public sealed class MobileRegisterRequest

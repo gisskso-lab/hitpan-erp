@@ -90,6 +90,7 @@ builder.Services.AddScoped(sp =>
     var handler = new HitPanApiAuthHandler(
         sp.GetRequiredService<HitPanProtectedLocalStorage>(),
         sp.GetRequiredService<MudBlazor.ISnackbar>(),
+        sp.GetRequiredService<Microsoft.JSInterop.IJSRuntime>(),
         sp.GetRequiredService<ILogger<HitPanApiAuthHandler>>())
     {
         InnerHandler = new HttpClientHandler()

@@ -361,7 +361,9 @@ public sealed class TenantDeviceService : ITenantDeviceService
 
     // ── 기기 승인 (대표계정) ── 20260811작1 (B)
     //   사장님 설계: "승인대기. 대표에게 기기승인의 권한을 주기"
-    public async Task ApproveAsync(string deviceId, string tenantId, string approverUserId, CancellationToken ct = default)
+    //   반환값 = **새로 발급한 인증키 원문**. 이미 승인된 기기를 다시 누르면 null 이다
+    //   (원문은 우리가 갖고 있지 않으므로 다시 알려줄 수 없다 — 재발급은 별건).
+    public async Task<string?> ApproveAsync(string deviceId, string tenantId, string approverUserId, CancellationToken ct = default)
     {
         await EnsureOpenAsync(ct);
 
@@ -374,7 +376,7 @@ public sealed class TenantDeviceService : ITenantDeviceService
             throw new InvalidOperationException("기기를 찾을 수 없습니다.");
 
         var (curStatus, devType) = target.Value;
-        if (curStatus == "approved") return;             // 이미 승인됨 — 두 번 눌러도 안전(멱등)
+        if (curStatus == "approved") return null;         // 이미 승인됨 — 두 번 눌러도 안전(멱등)
         if (curStatus == "revoked")
             throw new InvalidOperationException("폐기된 기기는 승인할 수 없습니다. 그 기기에서 다시 접속해 주세요.");
 
@@ -406,17 +408,76 @@ public sealed class TenantDeviceService : ITenantDeviceService
         if ((devType == "mobile" || devType == "tablet") && mobileUsed >= mobileLimit)
             throw new InvalidOperationException("인증기기 한도초과. 슬롯을 추가하거나 사용하지 않는 기기를 해제해 주세요.");
 
+        // 🔴 승인하는 **그 순간** 인증키를 발급한다 (20260811작3 · 사장님 오더).
+        //   *"사용PC에는 물리적으로 간단한 인증서 같은 인증키를 부여"*
+        //   *"인증 슬롯을 식별할 수 있도록 슬롯인증 절차에서 인증키 같은 걸 심자"*
+        //
+        //   [왜 인증키인가] 종전엔 서버가 **브라우저에게 "너 누구냐"** 를 물었다(지문).
+        //     브라우저는 자기 안에만 흔적을 남기므로 같은 컴퓨터라도 Edge 와 Chrome 이
+        //     각자 다른 답을 한다 — **한 대가 두 대로 세어지고 고객이 돈을 더 낸다.**
+        //     인증키는 묻는 대상을 **"네가 받은 키를 내놔라"** 로 바꾼다.
+        //     추측을 정교하게 만드는 게 아니라 **애초에 추측을 안 하게** 만든다.
+        //
+        //   🔴 [왜 "나중에 그 기기가 달라고 하면 준다" 가 아닌가 — 사장님 지적]
+        //     *"그게 직원인지, 해커인지 어떻게 아니??"*
+        //     승인만 나 있으면 **먼저 물어본 쪽이 키를 가져간다.** 물어보는 쪽이
+        //     그 직원인지 확인할 방법이 없다 — 지문은 브라우저가 스스로 신고하는 값이라
+        //     흉내낼 수 있다. 그래서 **대표가 승인하는 그 자리에서** 발급한다.
+        //     발급 시점을 사람이 지키는 것이 유일하게 확실한 문지기다.
+        //
+        //   [원문을 갖지 않는다] 이 키는 그 자체로 접속 권한이다. 우리가 보관하면
+        //     DB 가 새는 날 남의 기기로 들어올 수 있다. 해시만 남기고 원문은
+        //     **발급 순간 한 번만** 위로 올린다(QR 토큰과 같은 원칙 · 헌법 #5).
+        var authKey = Guid.NewGuid().ToString("N") + Guid.NewGuid().ToString("N");
+
         await _db.ExecuteAsync(new CommandDefinition(
             """
             UPDATE tenant_devices
             SET status = 'approved',
                 approved_by = @Approver,
-                approved_at = NOW()
+                approved_at = NOW(),
+                auth_key_hash = @KeyHash,
+                auth_key_issued_at = NOW(6)
             WHERE device_id = @Id AND tenant_id = @TenantId
             """,
-            new { Id = deviceId, TenantId = tenantId, Approver = approverUserId }, cancellationToken: ct));
+            new { Id = deviceId, TenantId = tenantId, Approver = approverUserId, KeyHash = Sha256Hex(authKey) },
+            cancellationToken: ct));
 
         await _audit.LogAsync("approve", "device", deviceId, ct: ct);
+
+        // 원문은 딱 한 번 올라간다. 로그·감사기록에 남기지 않는다.
+        return authKey;
+    }
+
+    /// 직원 PC 가 입력한 인증키를 대조한다 (20260811작3 (A)).
+    ///
+    /// 🔴 사장님 확정: *"메인PC에서 인증키가 생성되면, 요청한 클라이언트PC에서 입력하는 방식."*
+    ///
+    ///   여기서 서버가 하는 일은 **대조 하나**다. 추측하지 않는다.
+    ///   넘어온 키를 해시로 만들어 저장된 해시와 같은지만 본다.
+    ///
+    ///   ⚠️ 같은 회사(tenant) 안에서만 찾는다 — 남의 회사 키로 들어올 수 없다(헌법 #2).
+    ///   ⚠️ 승인된 기기만 인정한다 — 폐기된 기기의 옛 키가 살아나면 안 된다.
+    ///
+    /// 반환: 맞으면 그 기기 번호, 틀리면 null
+    public async Task<string?> VerifyAuthKeyAsync(string authKey, string tenantId, CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(authKey)) return null;
+
+        await EnsureOpenAsync(ct);
+
+        var deviceId = await _db.QueryFirstOrDefaultAsync<string?>(new CommandDefinition(
+            """
+            SELECT device_id
+            FROM tenant_devices
+            WHERE tenant_id = @TenantId
+              AND auth_key_hash = @KeyHash
+              AND status = 'approved'
+            LIMIT 1
+            """,
+            new { TenantId = tenantId, KeyHash = Sha256Hex(authKey) }, cancellationToken: ct));
+
+        return deviceId;
     }
 
     // ── 기기 승인 거부 (대표계정) ── 20260811작1 (B)

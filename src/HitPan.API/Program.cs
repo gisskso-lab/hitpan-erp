@@ -485,6 +485,11 @@ app.UseMiddleware<RateLimitMiddleware>();
 app.UseMiddleware<TenantMiddleware>();
 app.UseMiddleware<SessionLimitMiddleware>();
 app.UseMiddleware<TermsConsentMiddleware>();  // 헌법 #24: 첫 로그인 약관 4건 강제 동의 검증
+
+// 기기 인증 검사 (20260811작3 (A)) — 인증 번호가 없으면 업무 기능만 막는다.
+//   로그인·기기 인증 길은 막지 않는다(막으면 번호를 넣으러 갈 수 없다).
+//   DeviceApproval:Enabled 가 false 면 통째로 건너뛴다.
+app.UseMiddleware<DeviceAuthMiddleware>();
 // 멱등 처리: TenantMiddleware 이후 (tenantId 필요), MapControllers 이전 — [IdempotencyKey] 옵트인 액션만 영향 (DESIGN_PRINCIPLES §5.3 / 작업지시서 20260425작4)
 app.UseMiddleware<IdempotencyMiddleware>();
 
