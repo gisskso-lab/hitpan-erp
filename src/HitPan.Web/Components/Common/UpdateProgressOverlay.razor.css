@@ -69,6 +69,21 @@
 .hp-upd-btn:hover  { background: #245fd6; }
 .hp-upd-btn:active { background: #1f52ba; }
 
+/* 90초 뒤 진행 중 화면에 나오는 버튼(20260810작2 T1).
+   아직 정상 진행 중일 수 있으므로 10분 초과 버튼처럼 강하게 보이면 안 된다.
+   "눌러야 할 것 같은" 인상 대신 "눌러도 되는" 정도의 톤으로 둔다. */
+.hp-upd-btn-quiet {
+    margin-top: 14px;
+    padding: 9px 22px;
+    font-size: 14px;
+    color: #2b6ef2;
+    background: #fff;
+    border: 1px solid #c9d6ef;
+}
+
+.hp-upd-btn-quiet:hover  { background: #f3f7ff; }
+.hp-upd-btn-quiet:active { background: #e7efff; }
+
 .hp-upd-check {
     font-size: 44px;
     line-height: 1;
