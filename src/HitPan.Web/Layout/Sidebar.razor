@@ -27,11 +27,13 @@
 
 <MudNavMenu Class="hp-sidebar">
 
-    @* 2. 계정관리 *@
-    <MudNavGroup Title="계정관리" Icon="@Icons.Material.Filled.ManageAccounts" Expanded="false">
+    @* 2. 설정관리 (사장님 오더 2026-08-11: "대메뉴 계정관리→설정관리로 메뉴명 변경")
+       ─ 왜 이름을 바꾸나: 여기 담긴 것이 계정만이 아니다. 회사정보·기기·사용환경·양식·메일까지
+         히트판을 **쓰기 전에 맞춰 두는 것들**이 모여 있다. "계정관리" 라는 이름이 실제 내용보다 좁았다. *@
+    <MudNavGroup Title="설정관리" Icon="@Icons.Material.Filled.Tune" Expanded="false">
         <MudNavLink Href="/company" Icon="@Icons.Material.Filled.Business">회사 정보</MudNavLink>
         <MudNavLink Href="/users" Icon="@Icons.Material.Filled.PersonAdd">직원 계정 관리</MudNavLink>
-        @* 권한 설정은 계정관리에 남는다 (사장님 결재 2026-08-10):
+        @* 권한 설정은 여기 남는다 (사장님 결재 2026-08-10):
            "권한설정은 히트판의 권한을 설정하는 과목이니 계정관리가 맞아."
            계정을 만드는 한 호흡(직원계정 생성 → 권한 부여)이 여기서 끝나고,
            그 다음 사람·조직 축(직급·결재·사원·HR)이 그룹웨어로 넘어간다. *@
@@ -41,6 +43,14 @@
            그 결재가 그룹웨어에서 돈다. 사원관리·HR직원현황과 한 묶음이어야 흐름이 안 끊긴다. *@
         <MudNavLink Href="/settings/devices" Icon="@Icons.Material.Filled.Devices">등록 기기 관리</MudNavLink>
         <MudNavLink Href="/settings" Icon="@Icons.Material.Filled.Tune">사용환경 설정</MudNavLink>
+        @* 자료관리 → 설정관리 이동분 (사장님 오더 2026-08-11 ②):
+           양식·메일은 "자료" 가 아니라 **쓰기 전에 맞춰 두는 설정**이다. 한 번 정하면 계속 쓴다. *@
+        <MudNavLink Href="/print-settings" Icon="@Icons.Material.Filled.Print">양식(인쇄)정보 설정</MudNavLink>
+        <MudNavLink Href="/settings/form-templates" Icon="@Icons.Material.Filled.Description">양식 템플릿 (순백지·양식용지)</MudNavLink>
+        <MudNavLink Href="/settings/email" Icon="@Icons.Material.Filled.Email">이메일(SMTP) 설정</MudNavLink>
+        @* AI 도우미 연동 — 자료관리에 있던 같은 항목을 여기로 병합 (사장님 오더 2026-08-11 ③).
+           두 대메뉴에 같은 주소가 두 번 걸려 있었다. 같은 화면이 두 곳에 보이면 고객은
+           "다른 기능인가" 하고 헷갈린다. 설정 축인 여기 하나만 남긴다. *@
         <MudNavLink Href="/settings/ai-assistant" Icon="@Icons.Material.Filled.SmartToy">AI 도우미 연동</MudNavLink>
     </MudNavGroup>
 
@@ -126,6 +136,11 @@
             <MudChip T="string" Size="Size.Small" Variant="Variant.Text" Color="Color.Default" Class="ml-2">준비 중</MudChip>
         </MudNavLink>
         <MudNavLink Href="/tax/certificate" Icon="@Icons.Material.Filled.VpnKey">범용인증서 관리</MudNavLink>
+        @* 자료관리 → 계산서관리 이동분 (사장님 오더 2026-08-11 ④).
+           세금계산서를 발행하려면 인증서가 있어야 하고, 발행하고 나면 이력을 본다.
+           그 둘이 다른 대메뉴에 있으면 발행하다 말고 자료관리로 건너가야 했다. *@
+        <MudNavLink Href="/settings/tax-invoice-cert" Icon="@Icons.Material.Filled.VerifiedUser">전자세금계산서 인증서</MudNavLink>
+        <MudNavLink Href="/sales/tax-invoice-history" Icon="@Icons.Material.Filled.History">세금계산서 발행이력</MudNavLink>
         <MudNavLink Href="/tax-invoice-stats" Icon="@Icons.Material.Filled.BarChart">세금계산서 통계</MudNavLink>
     </MudNavGroup>
 
@@ -159,17 +174,13 @@
 
     @* 11. 자료관리 — 백업·이관·양식 *@
     <MudNavGroup Title="자료관리" Icon="@Icons.Material.Filled.Backup" Expanded="false">
+        @* 자료관리에 남는 것 = **자료 그 자체를 옮기고 지키는 일** (사장님 오더 2026-08-11 정리 후).
+           설정(양식·메일·AI)은 설정관리로, 세금계산서 부속(인증서·발행이력)은 계산서관리로 옮겼다. *@
         <MudNavLink Href="/data/backup" Icon="@Icons.Material.Filled.Save">자료 백업·복구</MudNavLink>
         <MudNavLink Href="/settings/mdb-migration" Icon="@Icons.Material.Filled.SwapHoriz" Class="hp-nav-2line">
             <span class="hp-nav-2line-1">자료이관</span>
             <span class="hp-nav-2line-2">(구히트판MDB)</span>
         </MudNavLink>
-        <MudNavLink Href="/print-settings" Icon="@Icons.Material.Filled.Print">양식(인쇄)정보 설정</MudNavLink>
-        <MudNavLink Href="/settings/form-templates" Icon="@Icons.Material.Filled.Description">양식 템플릿 (순백지·양식용지)</MudNavLink>
-        <MudNavLink Href="/settings/email" Icon="@Icons.Material.Filled.Email">이메일(SMTP) 설정</MudNavLink>
-        <MudNavLink Href="/settings/ai-assistant" Icon="@Icons.Material.Filled.SmartToy">AI 도우미 연동</MudNavLink>
-        <MudNavLink Href="/settings/tax-invoice-cert" Icon="@Icons.Material.Filled.VerifiedUser">전자세금계산서 인증서</MudNavLink>
-        <MudNavLink Href="/sales/tax-invoice-history" Icon="@Icons.Material.Filled.History">세금계산서 발행이력</MudNavLink>
         <MudNavLink Href="/data/logs" Icon="@Icons.Material.Filled.ManageSearch">ERP 로그 기록</MudNavLink>
         @* 모든데이터 초기화 (사장님 결재 2026-06-23) — 부모계정·회사정보·로그 제외 전체 포맷 *@
         <MudNavLink Href="/data/reset" Icon="@Icons.Material.Filled.DeleteForever">모든데이터 초기화</MudNavLink>
