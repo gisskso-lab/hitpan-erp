@@ -1,5 +1,7 @@
 using HitPan.Application.DTOs.Device;
 using HitPan.Application.Interfaces;
+// 모바일 등록 QR 생성 (20260811작1 (D))
+using HitPan.Infrastructure.Services;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
@@ -73,6 +75,117 @@ public sealed class DeviceController : ControllerBase
             return BadRequest(new { message = ex.Message });
         }
         return Ok(new { message = "기기가 폐기되었습니다." });
+    }
+
+    /// <summary>
+    /// 기기 승인 — 대표계정(tenant_admin)만 (20260811작1 (B)).
+    /// 사장님 설계: "승인대기. 대표에게 기기승인의 권한을 주기"
+    /// </summary>
+    [HttpPost("approve/{id}")]
+    public async Task<IActionResult> Approve(string id, CancellationToken ct)
+    {
+        var tid = HttpContext.Items["TenantId"]?.ToString();
+        var uid = HttpContext.Items["UserId"]?.ToString();
+        if (string.IsNullOrEmpty(tid) || string.IsNullOrEmpty(uid)) return Forbid();
+
+        // 승인 권한은 대표계정에만 있다 — 직원이 자기 기기를 스스로 승인하면 승인제가 무의미해진다.
+        var accountType = User.FindFirst("account_type")?.Value;
+        if (accountType != "tenant_admin")
+            return Forbid();
+
+        try
+        {
+            await _svc.ApproveAsync(id, tid, uid, ct);
+        }
+        catch (InvalidOperationException ex)
+        {
+            // 한도 초과·폐기된 기기 등 — 화면이 그대로 보여줄 문장이다.
+            return BadRequest(new { message = ex.Message });
+        }
+        return Ok(new { message = "기기가 승인되었습니다." });
+    }
+
+    /// <summary>기기 승인 거부 — 대표계정만 (20260811작1 (B)).</summary>
+    [HttpPost("reject/{id}")]
+    public async Task<IActionResult> Reject(string id, [FromBody] RevokeDeviceRequest? body, CancellationToken ct)
+    {
+        var tid = HttpContext.Items["TenantId"]?.ToString();
+        var uid = HttpContext.Items["UserId"]?.ToString();
+        if (string.IsNullOrEmpty(tid) || string.IsNullOrEmpty(uid)) return Forbid();
+
+        var accountType = User.FindFirst("account_type")?.Value;
+        if (accountType != "tenant_admin")
+            return Forbid();
+
+        try
+        {
+            await _svc.RejectAsync(id, tid, uid, body?.Reason, ct);
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(new { message = ex.Message });
+        }
+        return Ok(new { message = "기기 등록을 거부했습니다." });
+    }
+
+    /// <summary>
+    /// 모바일기기 등록 QR 발급 — 대표계정만 (20260811작1 (D)).
+    /// 사장님 오더: "모바일 등록기기 버튼 클릭시 QR생성"
+    /// </summary>
+    [HttpPost("mobile-token")]
+    public async Task<IActionResult> IssueMobileToken(CancellationToken ct)
+    {
+        var tid = HttpContext.Items["TenantId"]?.ToString();
+        var uid = HttpContext.Items["UserId"]?.ToString();
+        if (string.IsNullOrEmpty(tid) || string.IsNullOrEmpty(uid)) return Forbid();
+
+        var accountType = User.FindFirst("account_type")?.Value;
+        if (accountType != "tenant_admin")
+            return Forbid();
+
+        var token = await _svc.IssueMobileRegisterTokenAsync(tid, uid, ct);
+
+        // QR 에 담을 주소 — 폰이 이 주소를 열면 등록 화면이 뜬다.
+        //   접속한 그 주소를 그대로 쓴다. 고객사마다 도메인이 다르므로(= {고객사ID}.hitpan.kr)
+        //   하드코딩하면 남의 회사 주소로 보내는 사고가 난다.
+        var origin = $"{Request.Scheme}://{Request.Host}";
+        var url = $"{origin}/m/device-register?t={token}";
+
+        var matrix = QrCodeGenerator.Encode(url);
+        var qrImage = QrCodeGenerator.ToPngDataUri(matrix);
+
+        return Ok(new { qrImage, expiresInMinutes = 10 });
+    }
+
+    /// <summary>
+    /// QR 로 모바일기기 등록 — **로그인 없이** 호출된다 (20260811작1 (D)).
+    ///
+    /// 사장님 설계: 폰으로 QR 을 찍으면 바로 등록 화면이 뜨고 Y/N 만 누른다.
+    /// 로그인을 요구하면 그 자리에서 흐름이 끊긴다 — 현장 직원은 폰에 히트판 계정이 없을 수도 있다.
+    /// 대신 **토큰 자체가 열쇠**다: 대표계정만 발급할 수 있고, 10분 만료·1회용이다.
+    /// </summary>
+    [AllowAnonymous]
+    [HttpPost("mobile-register")]
+    public async Task<IActionResult> RegisterMobile([FromBody] MobileRegisterRequest body, CancellationToken ct)
+    {
+        if (body is null || string.IsNullOrWhiteSpace(body.Token))
+            return BadRequest(new { message = "등록 정보가 올바르지 않습니다." });
+
+        var ip = HttpContext.Connection.RemoteIpAddress?.ToString() ?? "";
+        var ua = Request.Headers.UserAgent.ToString();
+
+        var (ok, message, deviceId) = await _svc.RegisterMobileByTokenAsync(
+            body.Token, body.DeviceName ?? "모바일 기기", body.Fingerprint ?? "", ip, ua, ct);
+
+        if (!ok) return BadRequest(new { message });
+        return Ok(new { message, deviceId });
+    }
+
+    public sealed class MobileRegisterRequest
+    {
+        public string Token { get; set; } = "";
+        public string? DeviceName { get; set; }
+        public string? Fingerprint { get; set; }
     }
 
     public sealed class RevokeDeviceRequest

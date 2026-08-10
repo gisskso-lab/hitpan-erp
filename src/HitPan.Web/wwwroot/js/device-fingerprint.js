@@ -135,5 +135,46 @@ window.hitpanDevice = {
     clearDeviceId: function () {
         try { localStorage.removeItem('hitpan_device_id'); }
         catch (e) { /* noop */ }
+    },
+
+    // ── 모바일 홈화면 추가 (20260811작1 (D), 사장님 오더 2026-08-11) ──
+    //   "Y 터치시 모바일 홈화면에 히트판ERP 아이콘 생성"
+    //   아이폰과 안드로이드가 완전히 다르게 동작하므로 갈라서 다룬다.
+
+    /// 아이폰·아이패드인가.
+    ///   아이패드는 iPadOS 13+ 부터 UA 가 맥과 같아진다 — 그래서 터치 지원 여부를 함께 본다.
+    ///   이 판정이 틀리면 아이폰 사용자에게 안드로이드 설명이 보인다(더 헷갈린다).
+    isIos: function () {
+        try {
+            var ua = navigator.userAgent || '';
+            if (/iPhone|iPod/i.test(ua)) return true;
+            if (/iPad/i.test(ua)) return true;
+            // iPadOS 13+ : "Macintosh" 로 위장하지만 터치가 된다
+            if (/Macintosh/i.test(ua) && navigator.maxTouchPoints > 1) return true;
+            return false;
+        } catch (e) { return false; }
+    },
+
+    /// 브라우저가 "홈 화면에 추가" 버튼을 줄 수 있는가(안드로이드 크롬 계열).
+    ///   아이폰은 이 이벤트를 아예 안 준다 — 애플이 자동 추가를 막아놨다.
+    canInstallPrompt: function () {
+        return !!window.__hitpanInstallPrompt;
+    },
+
+    /// 저장해 둔 설치 프롬프트를 띄운다.
+    promptInstall: function () {
+        try {
+            var p = window.__hitpanInstallPrompt;
+            if (!p) return;
+            p.prompt();
+            window.__hitpanInstallPrompt = null;   // 한 번 쓰면 다시 못 쓴다
+        } catch (e) { /* noop */ }
     }
 };
+
+// 안드로이드 크롬은 설치 가능 시점에 이 이벤트를 준다. 잡아 뒀다가 사용자가
+// [홈 화면에 추가] 를 누를 때 띄운다 — 브라우저가 알아서 띄우는 배너는 놓치기 쉽다.
+window.addEventListener('beforeinstallprompt', function (e) {
+    e.preventDefault();
+    window.__hitpanInstallPrompt = e;
+});

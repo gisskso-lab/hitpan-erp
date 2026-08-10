@@ -3271,6 +3271,30 @@ CREATE TABLE `sync_tokens` (
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
+-- Table structure for table `device_register_tokens`
+--   모바일기기 등록 QR 토큰 (20260811작1 (D), 사장님 결재 2026-08-11)
+--   사장님 오더: "모바일 등록기기 버튼 클릭시 QR생성" / "QR토큰전용 테이블 생성해"
+--
+
+DROP TABLE IF EXISTS `device_register_tokens`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!40101 SET character_set_client = utf8mb4 */;
+CREATE TABLE `device_register_tokens` (
+  `token_id` char(36) NOT NULL COMMENT 'UUID',
+  `tenant_id` char(36) NOT NULL COMMENT '테넌트 ID',
+  `token_hash` varchar(128) NOT NULL COMMENT 'SHA-256 hash — 평문 토큰은 저장하지 않는다(sync_tokens 와 같은 원칙)',
+  `issued_by` varchar(36) DEFAULT NULL COMMENT '발급한 대표계정 user_id — QR 을 띄운 사람이 곧 승인자다',
+  `issued_at` datetime(6) NOT NULL DEFAULT current_timestamp(6) COMMENT '발급 시각',
+  `expires_at` datetime(6) NOT NULL COMMENT '만료 시각 (발급 + 10분). 짧게 두는 이유: QR 이 화면에 떠 있는 동안만 유효해야 한다',
+  `used_at` datetime(6) DEFAULT NULL COMMENT '사용 시각 — 1회용. 한 번 쓰면 다시 못 쓴다',
+  `used_device_id` varchar(36) DEFAULT NULL COMMENT '이 토큰으로 등록된 기기',
+  PRIMARY KEY (`token_id`),
+  UNIQUE KEY `uq_devreg_token_hash` (`token_hash`),
+  KEY `idx_devreg_tenant_active` (`tenant_id`,`used_at`,`expires_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='모바일기기 등록 QR 토큰 — 10분 만료·1회용, 해시만 저장';
+/*!40101 SET character_set_client = @saved_cs_client */;
+
+--
 -- Table structure for table `tax_invoice_items`
 --
 
