@@ -81,6 +81,26 @@ on:
         default: production
         type: choice
         options: [production, beta]
+      # 🔴 스키마 변경 릴리스 표식 (20260811 PI-02 봉합)
+      #   ■ 무엇을 겪고서
+      #     1.2.63 에 새 테이블(device_register_tokens)을 실었는데 이 값이 늘 false 로 나갔다.
+      #     워크플로가 build-manifest.ps1 에 -RequiresMigration 을 **아예 안 넘기고 있었다.**
+      #     그 결과 고객 DB 에 테이블이 안 생겨 QR 생성이 500 으로 죽었다(사장님 실측 적발).
+      #   ■ 왜 자동 판정이 아니라 사람이 고르나
+      #     build-manifest.ps1 §24 에 "requiresMigration 자동 산출은 아직 못박지 않았다
+      #     (사장님·CTO 결재 대기)" 라고 남아 있다. 결재 전까지는 게시자가 고른다.
+      #   ■ 어떻게 고르나 — 한 문장
+      #     이번 릴리스에 `src/HitPan.API/Migrations/SQL/DB-NN_*.sql` 을 **새로 추가했다면 true**.
+      #   ■ 잘못 고르면
+      #     true 인데 SQL 이 없으면 → 워치독이 무시(무해).
+      #     **false 인데 SQL 이 있으면 → 워치독 교차검증 게이트가 업데이트를 강제 중단한다.**
+      #     안전측은 true 다.
+      requiresMigration:
+        description: '이번 릴리스에 새 마이그레이션(Migrations/SQL/DB-NN)이 있으면 true. 애매하면 true(안전측).'
+        required: true
+        default: 'false'
+        type: choice
+        options: ['false', 'true']
 
 permissions:
   contents: read
@@ -349,10 +369,15 @@ jobs:
           $env:HITPAN_RELEASED_AT = (Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ')
           Write-Host "[update] releasedAt = $env:HITPAN_RELEASED_AT"
           $ver = '${{ inputs.version }}'
+          # 🔴 PI-02 봉합 (2026-08-11): 종전에는 이 스위치를 안 넘겨 항상 false 로 나갔다.
+          #   그래서 1.2.63 이 새 테이블을 싣고도 고객 DB 에 반영이 안 됐다(QR 500).
+          $mig = '${{ inputs.requiresMigration }}' -eq 'true'
+          Write-Host "[update] requiresMigration = $mig"
           & pwsh -File installer/updates/build-manifest.ps1 `
             -PayloadDir $payload `
             -OutDir $outDir `
             -Channel '${{ inputs.channel }}' `
+            -RequiresMigration:$mig `
             -DownloadUrlBase '${{ steps.urlbase.outputs.base }}' `
             -ReleaseNotes "히트판 ERP $ver 업데이트" `
             -ConsentMessage "새 버전($ver)이 준비되었습니다. [예] 를 누르면 자료를 자동으로 백업한 뒤 업데이트가 진행되며, 그 사이 히트판이 잠시 꺼졌다가 다시 켜집니다. 저장하지 않은 입력이 있으면 [나중에] 를 눌러 저장을 마친 뒤 다시 진행해 주세요."
