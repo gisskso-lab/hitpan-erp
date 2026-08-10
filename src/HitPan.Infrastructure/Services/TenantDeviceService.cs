@@ -132,16 +132,34 @@ public sealed class TenantDeviceService : ITenantDeviceService
                 return (false, "폐기된 기기입니다. 관리자에게 문의하세요.", null, false);
             }
 
-            // approved / pending → last_seen / ip / ua 갱신
+            // approved / pending → last_seen / ip / ua / 이름 갱신
+            //
+            // 🔴 2026-08-10 [4] D-4 봉합 — device_name 을 갱신 대상에 넣는다.
+            //   종전 UPDATE 는 device_name 을 건드리지 않았고, 이름이 쓰이는 곳은 INSERT 뿐이었다.
+            //   ⇒ 이름은 "그 기기가 처음 등록되는 순간" 에만 붙었다. 그런데 지문은 접속 주소와
+            //     무관하게 설계돼 있어(device-fingerprint.js), 이미 등록된 기기는 갱신 경로로만
+            //     들어온다 — 그런 기기에는 이름이 **영원히 안 붙는다.**
+            //   ⇒ COALESCE 로 **넘어온 이름이 있을 때만** 덮는다. null 이면 기존 이름을 보존한다.
+            //
+            // ⚠️ 예약된 사고: 고객이 목록에서 기기 이름을 직접 바꾸는 기능이 생기는 날,
+            //   이 COALESCE 가 그 이름을 로그인마다 덮어쓴다. 그 기능의 작업지시서에
+            //   이 문장이 반드시 실려야 한다. (지금은 이름 변경 입구가 0개라 발생하지 않는다)
             await _db.ExecuteAsync(new CommandDefinition(
                 """
                 UPDATE tenant_devices
                 SET last_seen_at = NOW(),
                     ip_address   = @Ip,
-                    user_agent   = COALESCE(@Ua, user_agent)
+                    user_agent   = COALESCE(@Ua, user_agent),
+                    device_name  = COALESCE(@Name, device_name)
                 WHERE device_id = @Id
                 """,
-                new { Id = id, Ip = ipAddress, Ua = req.UserAgent }, cancellationToken: ct));
+                new
+                {
+                    Id = id,
+                    Ip = ipAddress,
+                    Ua = req.UserAgent,
+                    Name = string.IsNullOrWhiteSpace(req.DeviceName) ? null : req.DeviceName
+                }, cancellationToken: ct));
 
             await LogLoginAsync(tenantId, userId, ipAddress, id, "success", ct);
             // 기존 기기 재접속 — 신규 아님(newlyRegistered=false)

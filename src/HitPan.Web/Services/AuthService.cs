@@ -37,10 +37,14 @@ public sealed class AuthService : IAuthService
             // JS 미로드/private 모드 등 실패해도 로그인은 진행 (서버에서 fingerprint 없으면 스킵).
             string? fingerprint = null;
             string? deviceType = null;
+            string? deviceName = null;
             try
             {
                 fingerprint = await _js.InvokeAsync<string>("hitpanDevice.getFingerprint");
                 deviceType = await _js.InvokeAsync<string>("hitpanDevice.getDeviceType");
+                // 🔴 2026-08-10 [4] D-4 봉합 — 종전엔 이 값을 아무도 보내지 않아
+                //   기기 목록이 전부 "(이름없음)" 이었고 메인PC 표식도 이름 없이 만들어졌다.
+                deviceName = await _js.InvokeAsync<string>("hitpanDevice.getDeviceName");
             }
             catch { /* 지문 수집 실패 시 기본 로그인 플로우로 진행 */ }
 
@@ -51,7 +55,8 @@ public sealed class AuthService : IAuthService
                     Email = email,
                     Password = password,
                     DeviceFingerprint = fingerprint,
-                    DeviceType = deviceType
+                    DeviceType = deviceType,
+                    DeviceName = deviceName
                 },
                 cancellationToken: ct);
 

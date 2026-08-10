@@ -76,6 +76,45 @@ window.hitpanDevice = {
         return fp;
     },
 
+    // 기기 이름 — 고객이 목록에서 "어느 컴퓨터인지" 알아보기 위한 값.
+    //
+    // 🔴 2026-08-10 [4] D-4 봉합 (검증팀장 데이비드 박 적발 · P0).
+    //   종전엔 로그인 요청에 DeviceName 을 **아무도 보내지 않았다.** LoginRequest.DeviceName 은
+    //   정의만 있고 채우는 쪽이 0개였다. 그 결과 기기 목록이 전부 "(이름없음)" 으로 보였고,
+    //   메인PC 표식도 이름 없이 "자료 보관 컴퓨터" 단독으로만 만들어졌다.
+    //
+    //   ⚠️ 브라우저는 **PC 의 실제 컴퓨터 이름을 알 수 없다**(OS 정보 접근이 막혀 있다).
+    //     그래서 알 수 있는 것(OS 계열 + 브라우저 계열)으로 사람이 알아볼 이름을 만든다.
+    //     예: "Windows · Chrome" — 완벽하진 않지만 "(이름없음)" 보다 훨씬 낫고,
+    //     고객이 나중에 목록에서 직접 이름을 바꿀 수 있게 하는 것은 별건이다.
+    //
+    //   고객이 읽는 값이라 개발용어를 쓰지 않는다(헌법 — 고객 노출 영역 개발용어 금지).
+    getDeviceName: function () {
+        try {
+            var ua = navigator.userAgent || '';
+
+            var os = '알 수 없는 기기';
+            if (/Windows/i.test(ua)) os = 'Windows';
+            else if (/Macintosh|Mac OS/i.test(ua)) os = 'Mac';
+            else if (/Android/i.test(ua)) os = 'Android';
+            else if (/iPhone|iPad|iPod/i.test(ua)) os = 'iPhone/iPad';
+            else if (/Linux/i.test(ua)) os = 'Linux';
+
+            // 순서 주의: Edge·Whale 은 UA 에 Chrome 을 포함하므로 먼저 걸러야 한다.
+            var browser = '';
+            if (/Edg\//i.test(ua)) browser = 'Edge';
+            else if (/Whale/i.test(ua)) browser = '웨일';
+            else if (/OPR\/|Opera/i.test(ua)) browser = 'Opera';
+            else if (/Chrome/i.test(ua)) browser = 'Chrome';
+            else if (/Firefox/i.test(ua)) browser = 'Firefox';
+            else if (/Safari/i.test(ua)) browser = 'Safari';
+
+            return browser ? (os + ' · ' + browser) : os;
+        } catch (e) {
+            return '알 수 없는 기기';
+        }
+    },
+
     // UA 기반 디바이스 타입 간이 판별
     getDeviceType: function () {
         var ua = navigator.userAgent || '';

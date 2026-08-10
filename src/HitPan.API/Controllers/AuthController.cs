@@ -40,33 +40,19 @@ public class AuthController : ControllerBase
         {
             var response = await _authService.LoginAsync(request, ct);
 
-            // ── 메인PC 판별 (작1 결재 2026-07-02, 헌법 사장님 정의) ──
-            //   메인PC = 데이터+ERP 설치마법사가 깔린 PC(1도메인 1대).
-            //   판별 = loopback 접속 여부. 메인PC 본인은 localhost/127.0.0.1(loopback)로 접속하고
-            //   (installer HitPan-Universal.iss 바로가기), 클라이언트는 터널 도메인으로만 온다.
-            //   IP 기반이 아니라 loopback 여부라 cloudflared 터널 프록시가 위조할 수 없다(신뢰 가능).
-            var isMainPcLoopback = HttpContext.Connection.RemoteIpAddress?.Equals(System.Net.IPAddress.Loopback) == true
-                || HttpContext.Connection.RemoteIpAddress?.Equals(System.Net.IPAddress.IPv6Loopback) == true;
-
-            // 🔴 2026-08-10 (사장님 결재 · 20260810작2 T3) — 메인PC 도 기기로 등록하고 슬롯을 쓴다.
+            // 🔴 2026-08-10 [3-V] — 접속 경로로 메인PC 를 판별하려는 시도를 전부 걷어냈다.
+            //   여기 있던 loopback 판정(isMainPcLoopback)은 **고객사에서 항상 참**이었다.
+            //   터널이 고객 PC 안에서 localhost 를 다시 부르고, 히트판은 127.0.0.1 에만 귀를 열며,
+            //   사내 PC 경로는 Host 를 버리고 X-Forwarded-For 를 안 붙인다.
+            //   ⇒ 그 위에 세운 것(한도 면제·폐기 부활·이름 표식)이 전부 전 기기에 적용돼
+            //     요금정책과 접근 차단이 함께 무너질 뻔했다.
+            //   근거: docs/검증/병렬이슈/20260810_병렬이슈_09_작2봉합_독립반증.md
             //
-            //   ■ 종전: 메인PC 는 등록에서 통째로 건너뛰었다(`&& !isMainPcLoopback`).
-            //     주석은 "설치 시점에 이미 등록된 존재" 라고 적었으나 [3-V] 실측 결과 **사실이 아니었다** —
-            //     설치마법사(.iss) 전체에 tenant_devices 를 넣는 코드가 0건이다.
-            //     즉 메인PC 는 '등록된 기기' 가 아니라 **아무 데도 없는 기기**였다.
-            //     그 결과 본사는 고객사에 메인PC 가 있는지조차 알 수 없었다.
+            //   ⭐ 메인PC 구분은 tenant_devices.is_main_pc(DB-86)에서 하고,
+            //     MainPcRegistrationService 가 서버 기동 시점에 표시한다(20260810작3).
+            //     "요청이 어디서 왔나" 가 아니라 "내가 어디서 도나" 를 보므로 흔들리지 않는다.
             //
-            //   ■ 사장님 결재: *"메인PC가 슬롯기기를 소모해야 정상이지.
-            //     그래야 1계정당 베이직플랜, 프로플랜의 요금정책이 의미가 있지."*
-            //     메인PC 도 실제로 쓰는 기기다. 안 세면 basic(5대)이 사실상 6대가 되어
-            //     요금제 계산이 정직하지 않게 된다.
-            //
-            //   ⇒ loopback 조건을 제거해 메인PC 도 같은 경로로 등록·갱신한다.
-            //     isMainPcLoopback 은 이제 '면제 스위치' 가 아니라 **기기 이름 표식**에 쓴다(아래).
-            //
-            //   ⚠️ 슬롯이 1개 줄어드는 효과가 있다. 이미 한도를 꽉 채운 테넌트는 다음 로그인에서
-            //      거부될 수 있다(아래 catch 가 아니라 `allowed=false` 경로). 베타 대리점 규모에서는
-            //      여유가 있으나, 확대 전 백오피스로 실제 기기 수를 확인해야 한다.
+            //   ⚠️ 이 자리에 접속 경로 판정을 **다시 넣지 말 것.** 두 번 무너진 자리다.
             //
             // ── 기기 기반 라이선싱: 로그인 성공 후 기기 등록/갱신 ──
             // - fingerprint 없으면 스킵 (기존 클라이언트 호환)
@@ -83,14 +69,23 @@ public class AuthController : ControllerBase
                     {
                         var ipAddress = HttpContext.Connection.RemoteIpAddress?.ToString() ?? "";
 
-                        // 🔴 2026-08-10 (20260810작2 T4) — 메인PC 표식.
-                        //   사장님: "메인PC에 대한 표식 같은건 분명 있어야 한다."
-                        //   메인PC 는 자료(DB)를 가진 단 한 대이고, 그 PC 가 꺼지면 회사 전체가 멈춘다.
-                        //   그래서 목록에서 다른 기기와 구분되어야 한다 — 함부로 정리하면 안 되는 기기다.
-                        //   별도 컬럼을 새로 만들지 않는다(DB 변경 0). 이름에 표식을 붙여 목록에서 바로 보이게 한다.
-                        var deviceName = isMainPcLoopback
-                            ? BuildMainPcName(request.DeviceName)
-                            : request.DeviceName;
+                        // 🔴 2026-08-10 [3-V] 철회 — loopback 으로 메인PC 를 판정하지 않는다.
+                        //
+                        //   종전 코드는 isMainPcLoopback 이면 이름에 "(자료 보관 컴퓨터)" 를 붙였다.
+                        //   그런데 그 판정은 고객사에서 **항상 참**이다:
+                        //     · 터널(cloudflared)은 고객 PC 안에서 돌며 자기 PC 의 localhost 를 다시 부른다
+                        //       (HitPan-Universal.iss:1134 — ingress origin = http://localhost:5257)
+                        //     · 히트판은 --urls http://127.0.0.1 로 loopback 에만 귀를 연다(:2359)
+                        //       ⇒ 도달한 요청은 100% loopback
+                        //     · 사내 다른 PC 경로(web-server.ps1:98)는 Host 를 버리고 X-Forwarded-For 를
+                        //       붙이지 않는다 ⇒ 프록시 헤더로도 못 거른다
+                        //   ⇒ **전 기기에 표식이 붙어** 구분하려고 만든 표식이 구분을 없앤다.
+                        //   근거: docs/검증/병렬이슈/20260810_병렬이슈_09_작2봉합_독립반증.md (V9-3)
+                        //
+                        //   ⭐ 메인PC 구분은 이제 별도 축에서 한다 — tenant_devices.is_main_pc 컬럼(DB-86)에
+                        //     MainPcRegistrationService 가 서버 기동 시점에 표시한다(20260810작3).
+                        //     접속 경로를 보지 않고 "내가 어디서 도나" 를 보므로 흔들리지 않는다.
+                        var deviceName = request.DeviceName;
 
                         var deviceReq = new RegisterDeviceRequest
                         {
@@ -481,40 +476,12 @@ public class AuthController : ControllerBase
     /// </summary>
     private static string GetCurrentErpVersion() => VersionInfo.Current;
 
-    /// <summary>
-    /// 메인PC 로 등록되는 기기의 이름을 만든다(20260810작2 T4).
-    ///
-    /// 메인PC = 자료(DB)를 가진 단 한 대. 그 PC 가 꺼지면 회사 전체가 멈추므로
-    /// 기기 목록에서 다른 기기와 구분되어야 한다 — 함부로 정리하면 안 되는 기기다.
-    ///
-    /// 고객이 읽는 값이라 개발용어를 쓰지 않는다("메인PC"·"loopback"·"host" 금지).
-    /// 이미 표식이 붙어 있으면 덧붙이지 않는다(로그인마다 이름이 길어지는 것을 막는다).
-    /// </summary>
-    private static string BuildMainPcName(string? deviceName)
-    {
-        const string mark = "자료 보관 컴퓨터";
-
-        if (string.IsNullOrWhiteSpace(deviceName))
-        {
-            return mark;
-        }
-
-        var trimmed = deviceName.Trim();
-        if (trimmed.Contains(mark, StringComparison.Ordinal))
-        {
-            return trimmed;
-        }
-
-        // device_name 은 varchar(100). 넘치면 조용히 잘려 표식이 사라지므로 이름 쪽을 줄인다.
-        var suffix = $" ({mark})";
-        var room = 100 - suffix.Length;
-        if (trimmed.Length > room)
-        {
-            trimmed = trimmed[..room];
-        }
-
-        return trimmed + suffix;
-    }
+    // 🔴 BuildMainPcName 제거 (2026-08-10 [3-V]).
+    //   메인PC 이름에 표식을 붙이던 함수다. 함수 자체는 정확했으나(100자 계산·중복 부착 방지),
+    //   그것을 부르는 판정(loopback)이 고객사에서 항상 참이라 **전 기기에 표식이 붙었다.**
+    //   구분하려고 만든 표식이 구분을 없앴다.
+    //   ⇒ 메인PC 이름은 이제 MainPcRegistrationService 가 등록 시점에 직접 정한다(20260810작3).
+    //     이름을 만드는 자리를 두 곳에 두지 않는다 — 갈라지면 어느 쪽이 진짜인지 알 수 없게 된다.
 }
 
 public sealed record VerifyPasswordRequest(string Password);
