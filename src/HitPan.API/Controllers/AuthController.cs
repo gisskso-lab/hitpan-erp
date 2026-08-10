@@ -40,36 +40,36 @@ public class AuthController : ControllerBase
         {
             var response = await _authService.LoginAsync(request, ct);
 
-            // ── 메인PC 판별 (작1 결재 2026-07-02, 헌법 사장님 정의) ──
-            //   메인PC = 데이터+ERP 설치마법사가 깔린 PC(1도메인 1대).
-            //   판별 = loopback 접속 여부. 메인PC 본인은 localhost/127.0.0.1(loopback)로 접속하고
-            //   (installer HitPan-Universal.iss 바로가기), 클라이언트는 터널 도메인으로만 온다.
-            //   IP 기반이 아니라 loopback 여부라 cloudflared 터널 프록시가 위조할 수 없다(신뢰 가능).
-            // 🔴 2026-08-10 [3-V] 보강 — loopback 만으로는 부족하다.
-            //   터널(cloudflared)은 **API 에 로컬로 연결**한다(HitPan-Universal.iss:1134 —
-            //   ingress origin = http://localhost:5257). 그래서 터널로 들어온 클라이언트PC 도
-            //   RemoteIpAddress 가 127.0.0.1 로 보인다.
-            //   같은 파일 AppVersionController.cs:16 이 이미 경고하고 있었다:
-            //     *"터널이 로컬 프록시라 RemoteIpAddress 가 우연히 127.0.0.1 이 될 수는 있으나,
-            //       그건 보장이 아니라 배포 형태에 기댄 우연이다"*
-            //   그리고 RateLimitMiddleware.cs:106 이 답을 갖고 있다 —
-            //     *"Cloudflare 터널: CF-Connecting-IP가 진짜 클라이언트 IP"*
+            // ── 메인PC 판별 — 🔴 **현재 쓰지 않는다** (2026-08-10 [3-V] 이후) ──────────────
             //
-            //   ⚠️ 이것을 안 보면 **모든 기기가 메인PC 로 판정**되어
-            //     ① 전부 "자료 보관 컴퓨터" 표식이 붙고
-            //     ② 한도 면제까지 받아 **basic 5대 요금정책이 통째로 무너진다.**
-            //     사장님 결재(*"그래야 요금정책이 의미가 있지"*)와 정면으로 어긋난다.
+            //   ⚠️ 이 값을 다시 쓰기 전에 반드시 아래를 읽어라.
+            //     `docs/검증/병렬이슈/20260810_병렬이슈_09_작2봉합_독립반증.md`
             //
-            //   ⇒ 프록시 헤더가 하나라도 있으면 **외부에서 들어온 것**이므로 메인PC 가 아니다.
-            //     헤더는 위조될 수 있으나, 위조하면 메인PC 자격을 **잃는 방향**이라 안전하다
-            //     (권한을 얻는 쪽으로 악용할 수 없다).
-            var viaProxy = !string.IsNullOrWhiteSpace(Request.Headers["CF-Connecting-IP"].ToString())
-                || !string.IsNullOrWhiteSpace(Request.Headers["X-Forwarded-For"].ToString())
-                || !string.IsNullOrWhiteSpace(Request.Headers["CF-Ray"].ToString());
-
-            var isMainPcLoopback = !viaProxy
-                && (HttpContext.Connection.RemoteIpAddress?.Equals(System.Net.IPAddress.Loopback) == true
-                    || HttpContext.Connection.RemoteIpAddress?.Equals(System.Net.IPAddress.IPv6Loopback) == true);
+            //   ■ 종전 주석이 이렇게 적고 있었다(그리고 그것은 **사실이 아니었다**):
+            //     *"메인PC 본인은 loopback 으로 접속하고, 클라이언트는 터널 도메인으로만 온다.
+            //       loopback 여부라 터널 프록시가 위조할 수 없다(신뢰 가능)."*
+            //
+            //   ■ 반증 — 위조가 필요 없다. **터널을 거치면 원래 loopback 이다.**
+            //     · 터널 ingress origin = http://localhost:5257 (HitPan-Universal.iss:1134)
+            //       cloudflared 는 고객 PC 안에서 돌며 자기 PC 의 localhost 를 다시 부른다
+            //     · 히트판은 --urls http://127.0.0.1:{포트} 로 **loopback 에만 귀를 연다**
+            //       (HitPan-Universal.iss:2359) ⇒ 도달한 요청은 100% loopback 이다
+            //     · 사내 다른 PC 경로(web-server.ps1)는 X-Forwarded-For 를 **붙이지 않는다**
+            //       ⇒ 프록시 헤더 검사로도 이 경로는 걸러지지 않는다
+            //     · src/ 전체에 UseForwardedHeaders 배선 0건
+            //
+            //   ■ 그래서 이 판정을 쓰면 **고객사에서 모든 기기가 메인PC 가 된다.**
+            //     한도 면제를 걸면 요금정책이 사라지고, 표식을 붙이면 전 기기에 붙어
+            //     구분하려고 만든 표식이 구분을 없앤다. 둘 다 목적과 정반대다.
+            //
+            //   ⇒ 판정 근거를 **접속 경로가 아닌 것**으로 바꿔야 한다
+            //     (설치 시점 식별자 / 테넌트당 1건 제한 등). 설계 변경이라 사장님·CTO 결재 사항.
+            //     그때까지 이 변수는 **아무데도 쓰지 않는다.**
+            //
+            //   ★ 이 코드를 지우지 않는 이유: 지우면 다음 사람이 같은 함정을 처음부터 다시 밟는다.
+            //     남겨 두되 "쓰면 안 된다" 는 근거를 함께 남기는 쪽이 안전하다.
+            //     같은 저장소의 AppVersionController.cs:16 · HealthController.cs:19 도
+            //     이미 같은 경고를 하고 있었는데, 작2 가 그 경고를 읽지 않고 만들었다.
 
             // 🔴 2026-08-10 (사장님 결재 · 20260810작2 T3) — 메인PC 도 기기로 등록하고 슬롯을 쓴다.
             //
@@ -111,9 +111,14 @@ public class AuthController : ControllerBase
                         //   메인PC 는 자료(DB)를 가진 단 한 대이고, 그 PC 가 꺼지면 회사 전체가 멈춘다.
                         //   그래서 목록에서 다른 기기와 구분되어야 한다 — 함부로 정리하면 안 되는 기기다.
                         //   별도 컬럼을 새로 만들지 않는다(DB 변경 0). 이름에 표식을 붙여 목록에서 바로 보이게 한다.
-                        var deviceName = isMainPcLoopback
-                            ? BuildMainPcName(request.DeviceName)
-                            : request.DeviceName;
+                        //   🔴 2026-08-10 [3-V] 되돌림 — 표식 부착을 **보류**한다.
+                        //     메인PC 판정이 고객사에서 항상 참이라(아래 isMainPcLoopback 주석),
+                        //     표식을 붙이면 **모든 기기에 "자료 보관 컴퓨터" 가 붙어** 구분이 사라진다.
+                        //     구분하려고 만든 표식이 구분을 없애는 결과다.
+                        //   ⇒ 판정 근거가 바로잡힐 때까지 이름은 클라이언트가 보낸 값을 그대로 쓴다.
+                        //     (그 값 자체는 D-4 봉합으로 이제 실제로 채워져 들어온다 —
+                        //      종전 "(이름없음)" 문제는 표식과 무관하게 해소됐다)
+                        var deviceName = request.DeviceName;
 
                         var deviceReq = new RegisterDeviceRequest
                         {
@@ -123,11 +128,12 @@ public class AuthController : ControllerBase
                             UserAgent = Request.Headers["User-Agent"].ToString()
                         };
 
-                        // 🔴 isMainPc 전달 (2026-08-10 [4] D-3·D-5 봉합).
-                        //   메인PC 는 슬롯을 **소모하되**(사장님 결재) 한도·폐기로 **잠기지는 않는다.**
-                        //   자료를 가진 PC 가 잠기면 고객이 스스로 풀 방법이 없기 때문이다.
+                        // 🔴 isMainPc 는 false 로 둔다 (2026-08-10 [3-V]).
+                        //   메인PC 판정이 고객사에서 항상 참이라, 참을 넘기면 한도·폐기가
+                        //   **전 기기에서** 무력화된다(위 판별 주석의 근거 4가지).
+                        //   판정 근거가 바로잡히면 그때 실제 값을 넘긴다.
                         var (allowed, reason, deviceId, newlyRegistered) = await _deviceService.RegisterOrRefreshAsync(
-                            response.TenantId, userId, deviceReq, ipAddress, isMainPcLoopback, ct);
+                            response.TenantId, userId, deviceReq, ipAddress, isMainPc: false, ct);
 
                         if (!allowed)
                         {
@@ -510,12 +516,18 @@ public class AuthController : ControllerBase
     /// <summary>
     /// 메인PC 로 등록되는 기기의 이름을 만든다(20260810작2 T4).
     ///
+    /// 🔴 **현재 호출부가 없다** (2026-08-10 [3-V]). 함수 자체는 정확하나
+    /// **그 앞의 메인PC 판정이 고객사에서 항상 참**이라 붙이면 전 기기에 표식이 붙는다.
+    /// 판정 근거가 바로잡히면 그대로 다시 쓸 수 있어 남겨 둔다.
+    /// 근거 → `docs/검증/병렬이슈/20260810_병렬이슈_09_작2봉합_독립반증.md`
+    ///
     /// 메인PC = 자료(DB)를 가진 단 한 대. 그 PC 가 꺼지면 회사 전체가 멈추므로
     /// 기기 목록에서 다른 기기와 구분되어야 한다 — 함부로 정리하면 안 되는 기기다.
     ///
     /// 고객이 읽는 값이라 개발용어를 쓰지 않는다("메인PC"·"loopback"·"host" 금지).
     /// 이미 표식이 붙어 있으면 덧붙이지 않는다(로그인마다 이름이 길어지는 것을 막는다).
     /// </summary>
+#pragma warning disable IDE0051 // 판정 근거 재설계 후 다시 쓴다(위 설명 참조)
     private static string BuildMainPcName(string? deviceName)
     {
         const string mark = "자료 보관 컴퓨터";
@@ -541,6 +553,7 @@ public class AuthController : ControllerBase
 
         return trimmed + suffix;
     }
+#pragma warning restore IDE0051
 }
 
 public sealed record VerifyPasswordRequest(string Password);

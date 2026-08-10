@@ -129,21 +129,22 @@ public sealed class TenantDeviceService : ITenantDeviceService
         {
             var (id, status) = existing.Value;
             // 폐기된 기기는 재사용 금지
+            // 폐기된 기기는 재사용 금지.
+            //
+            // 🔴 2026-08-10 [3-V] 되돌림 — 메인PC 자동 부활을 **철회**한다.
+            //   직전 봉합은 "메인PC 면 폐기 상태를 되살린다" 였다. 그런데 메인PC 판정이
+            //   고객사에서 항상 참이므로(위 한도 주석의 3가지 근거), 이 예외는
+            //   **폐기한 기기를 전부 다음 로그인에 부활**시킨다.
+            //   폐기는 DeviceController 가 주는 유일한 접근 차단 수단이다 —
+            //   퇴사자 노트북·분실 태블릿까지 되살아나면 차단 기능 자체가 사라진다.
+            //   ⇒ 종전대로 거부한다.
+            //
+            //   ⬜ 원래 D-5(메인PC 가 폐기됐으면 영구 잠김)는 아직 미해결로 남는다.
+            //     복구 수단(관리자 해제 API 또는 본사 경유)이 필요하며 결재 사항이다.
             if (status == "revoked")
             {
-                // 🔴 2026-08-10 [4] D-5 봉합 (P1) — 단, 메인PC 는 예외다.
-                //   메인PC 가 과거에 클라이언트로 등록됐다가 관리자가 목록 정리 중 폐기했다면,
-                //   이 경로에서 **자료를 가진 PC 가 영구히 잠긴다.** 해제 API 가 없어(DeviceController 에
-                //   목록·쿼터·폐기만 있고 복구가 없다) 고객이 스스로 풀 방법이 0개다.
-                //   ⚠️ 표식의 목적이 "함부로 정리하면 안 되는 기기" 를 알리는 것인데,
-                //     표식이 붙기 전에 정리된 기기는 그 보호를 못 받는다 — 순서가 뒤집혀 있었다.
-                //   ⇒ 메인PC 는 폐기 상태를 자동으로 되돌린다(아래 UPDATE 가 status 를 approved 로).
-                //     자료를 가진 PC 를 잠그는 것보다, 되살리고 기록을 남기는 쪽이 안전하다.
-                if (!isMainPc)
-                {
-                    await LogDeniedAsync(tenantId, userId, ipAddress, id, "denied_revoked", ct);
-                    return (false, "폐기된 기기입니다. 관리자에게 문의하세요.", null, false);
-                }
+                await LogDeniedAsync(tenantId, userId, ipAddress, id, "denied_revoked", ct);
+                return (false, "폐기된 기기입니다. 관리자에게 문의하세요.", null, false);
             }
 
             // approved / pending → last_seen / ip / ua 갱신
@@ -157,15 +158,13 @@ public sealed class TenantDeviceService : ITenantDeviceService
             //   ⇒ COALESCE 로 **넘어온 이름이 있을 때만** 덮는다. null 이면 기존 이름을 보존하므로
             //     클라이언트PC 의 기존 이름이 지워지는 사고는 없다.
             //
-            // 메인PC 면 status 도 approved 로 되돌린다(D-5). 아니면 기존 status 를 그대로 둔다.
             await _db.ExecuteAsync(new CommandDefinition(
                 """
                 UPDATE tenant_devices
                 SET last_seen_at = NOW(),
                     ip_address   = @Ip,
                     user_agent   = COALESCE(@Ua, user_agent),
-                    device_name  = COALESCE(@Name, device_name),
-                    status       = CASE WHEN @IsMainPc = 1 THEN 'approved' ELSE status END
+                    device_name  = COALESCE(@Name, device_name)
                 WHERE device_id = @Id
                 """,
                 new
@@ -173,16 +172,12 @@ public sealed class TenantDeviceService : ITenantDeviceService
                     Id = id,
                     Ip = ipAddress,
                     Ua = req.UserAgent,
-                    Name = string.IsNullOrWhiteSpace(req.DeviceName) ? null : req.DeviceName,
-                    IsMainPc = isMainPc ? 1 : 0
+                    Name = string.IsNullOrWhiteSpace(req.DeviceName) ? null : req.DeviceName
                 }, cancellationToken: ct));
 
             await LogLoginAsync(tenantId, userId, ipAddress, id, "success", ct);
-
-            // 메인PC 는 위에서 approved 로 되돌렸으므로 항상 통과한다.
-            var effectiveStatus = isMainPc ? "approved" : status;
             // 기존 기기 재접속 — 신규 아님(newlyRegistered=false)
-            return (effectiveStatus == "approved", effectiveStatus == "approved" ? "" : "기기 승인 대기 중입니다.", id, false);
+            return (status == "approved", status == "approved" ? "" : "기기 승인 대기 중입니다.", id, false);
         }
 
         // 2) 신규 기기 — 티어별 한도 검사
@@ -231,29 +226,35 @@ public sealed class TenantDeviceService : ITenantDeviceService
         //       고객은 로그인해 들어와서 필요 없는 기기를 스스로 정리할 수 있다 — 탈출구를 남긴다.
         //
         //   ⚠️ 클라이언트PC 는 종전대로 막는다. 막혀도 메인PC 로 가면 풀 수 있기 때문이다.
-        var overLimit = (type == "pc" && pcUsed >= pcLimit)
-            || ((type == "mobile" || type == "tablet") && mobileUsed >= mobileLimit);
-
-        if (overLimit && isMainPc)
-        {
-            // 거부하지 않는다. 다만 **조용히 넘기지 않는다**(헌법 #15) — 한도 초과 상태로
-            // 들어온 사실을 남겨야 본사가 요금제 상향을 안내할 수 있다.
-            _logger.LogWarning(
-                "[Device] 메인PC 한도 초과 등록 — 거부하지 않음. tenant={TenantId} type={Type} pcUsed={PcUsed}/{PcLimit} mobileUsed={MobileUsed}/{MobileLimit}",
-                tenantId, type, pcUsed, pcLimit, mobileUsed, mobileLimit);
-        }
-        else if (type == "pc" && pcUsed >= pcLimit)
+        // 🔴 2026-08-10 [3-V] 되돌림 — 한도 면제를 **철회**한다.
+        //
+        //   직전 봉합은 "메인PC 면 한도를 넘겨도 통과" 였다. 그런데 [3-V] 병렬검증이
+        //   그 봉합이 딛고 선 전제를 무너뜨렸다 — **메인PC 판정이 고객사에서 항상 참이다.**
+        //     · 터널은 히트판을 같은 PC 안에서 부른다(HitPan-Universal.iss:1134)
+        //     · 히트판은 127.0.0.1 로만 귀를 연다(HitPan-Universal.iss:2359)
+        //       ⇒ 도달한 요청은 100% loopback 이다
+        //     · 사내 다른 PC 경로(web-server.ps1)는 X-Forwarded-For 를 붙이지 않는다
+        //       ⇒ 프록시 헤더 검사로도 이 경로는 못 거른다
+        //
+        //   ⇒ 한도 면제를 두면 **모든 기기가 면제**를 받아 basic 5대 제한이 사라진다.
+        //     슬롯을 정직하게 세라는 사장님 결재가 슬롯을 없애는 결과가 된다. 정반대다.
+        //
+        //   ⚠️ 되돌리면 검증팀이 지적한 D-3(메인PC 잠김 P0)이 되살아난다. 그러나 그것은
+        //     **한도가 꽉 찬 테넌트에서만** 나고, 지금 봉합은 **모든 테넌트**의 과금을 무너뜨린다.
+        //     둘 다 P0 지만 지금 상태가 더 나쁘다. 안전한 쪽으로 되돌린다.
+        //
+        //   ⬜ 진짜 해결은 판정 근거를 **접속 경로가 아닌 것**으로 바꾸는 것이다
+        //     (설치 시점 식별자 / 테넌트당 1건 제한 등). 설계 변경이라 사장님·CTO 결재 사항이며
+        //     `docs/검증/병렬이슈/20260810_병렬이슈_09_작2봉합_독립반증.md` 에 선택지가 있다.
+        if (type == "pc" && pcUsed >= pcLimit)
         {
             await LogDeniedAsync(tenantId, userId, ipAddress, null, "denied_limit", ct);
             return (false, $"등록된 기기가 아닙니다. PC 기기 한도({pcLimit}대)를 초과했습니다. 기존 기기를 해제하거나 관리자에게 문의하세요.", null, false);
         }
-        else if (type == "mobile" || type == "tablet")
+        if ((type == "mobile" || type == "tablet") && mobileUsed >= mobileLimit)
         {
-            if (mobileUsed >= mobileLimit)
-            {
-                await LogDeniedAsync(tenantId, userId, ipAddress, null, "denied_limit", ct);
-                return (false, $"등록된 기기가 아닙니다. 모바일 기기 한도({mobileLimit}대)를 초과했습니다. 기존 기기를 해제하거나 관리자에게 문의하세요.", null, false);
-            }
+            await LogDeniedAsync(tenantId, userId, ipAddress, null, "denied_limit", ct);
+            return (false, $"등록된 기기가 아닙니다. 모바일 기기 한도({mobileLimit}대)를 초과했습니다. 기존 기기를 해제하거나 관리자에게 문의하세요.", null, false);
         }
 
         // 3) INSERT (MVP: 자동 승인)
