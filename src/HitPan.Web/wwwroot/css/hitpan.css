@@ -1781,3 +1781,56 @@ html, body {
     border-color: #F48FB1 !important;
 }
 
+
+/* ────────────────────────────────────────────────────────────────
+   기본 사업장 정보 — 사업자등록증 자동 반영 묶음
+   2026-08-10 (사장님 결재 "A안으로 가자" · 디자인명세서 §2·§5-2)
+
+   잠금은 칸마다의 성질이 아니라 묶음의 성질이다. 그래서 칸마다 자물쇠를
+   반복하지 않고, 묶음 배경 + 칸 왼쪽 띠로 한 덩어리임을 보여준다.
+   ──────────────────────────────────────────────────────────────── */
+.hitpan-locked-group {
+    background: var(--mud-palette-background);
+    border-radius: 8px;
+    padding: 16px 16px 18px;
+}
+
+.hitpan-group-head {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 14px;
+    padding-bottom: 10px;
+    border-bottom: 1px dashed var(--mud-palette-lines-default);
+}
+
+.hitpan-group-head .head-label {
+    font-size: 13px;
+    font-weight: 700;
+    color: var(--mud-palette-text-primary);
+}
+
+.hitpan-group-head .head-sub {
+    font-size: 12px;
+    color: var(--mud-palette-text-secondary);
+}
+
+.hitpan-group-action {
+    display: flex;
+    justify-content: flex-end;
+    margin-top: 14px;
+}
+
+/* 잠긴 입력칸 — 왼쪽 초록 띠로 "자동으로 채워진 값" 임을 알린다.
+   ReadOnly 를 쓰므로 글자는 또렷하게 읽히고 복사도 된다(Disabled 는 둘 다 막힌다). */
+.hitpan-locked-field .mud-input-slot,
+.hitpan-locked-field input {
+    font-weight: 600;
+}
+
+.hitpan-locked-field .mud-input-control,
+.hitpan-locked-field .mud-input {
+    border-left: 2.5px solid var(--hitpan-primary);
+    border-radius: 3px 4px 4px 3px;
+    background: var(--mud-palette-surface);
+}

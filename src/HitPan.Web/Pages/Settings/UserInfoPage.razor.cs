@@ -24,6 +24,33 @@ public partial class UserInfoPage : ComponentBase, IDisposable
     private bool _saving;
     private UserInfoViewModel _model = new();
 
+    // 🔴 2026-08-10 (사장님 결재 · 20260810작1 T7) — 사업자등록증 기재 항목 잠금 판정.
+    //   서버(SettingsService.SaveCompanyAsync)와 **같은 규칙**을 쓴다. 규칙이 갈리면
+    //   화면에서는 고칠 수 있는데 저장이 조용히 무시되는 상태가 되고, 고객은 이유를 모른다.
+    //
+    //   규칙: 잠겨 있고(IsLockedFromLanding) + 값이 이미 있을 때만 잠근다.
+    //   값이 비어 있는 칸까지 잠그면 고객이 영원히 못 채우는 칸이 된다. 지금 실제로
+    //   업태·종목·주소가 비어 있는 설치본이 있다(백오피스가 그 값을 수집하지 않았다).
+    //   백오피스 수집이 값을 채워 주면 그때부터 자동으로 잠긴다.
+    private bool _lockBizType;
+    private bool _lockBizItem;
+    private bool _lockCorpNo;
+    private bool _lockAddress;
+    private bool _lockZipCode;
+
+    private void RecomputeLockFlags()
+    {
+        var locked = _model.IsLockedFromLanding;
+        _lockBizType = locked && !string.IsNullOrWhiteSpace(_model.BusinessType);
+        _lockBizItem = locked && !string.IsNullOrWhiteSpace(_model.BusinessCategory);
+        _lockCorpNo = locked && !string.IsNullOrWhiteSpace(_model.CorporateNo);
+        _lockAddress = locked && !string.IsNullOrWhiteSpace(_model.Address);
+
+        // 우편번호가 비어 있으면 잠그지 않는다 — [우편번호 찾기] 로 채울 수 있어야 한다.
+        // ([3-V] 병렬검증 I-5/I-7: 종전엔 고정 잠금이라 빈 칸을 채울 길이 없었다)
+        _lockZipCode = locked && !string.IsNullOrWhiteSpace(_model.ZipCode);
+    }
+
     // 구독정보는 불러오지 못할 수 있다. 못 불러온 상태(null)와 "0원 요금제"를 구분해야
     // 화면이 거짓 숫자를 지어내지 않는다(사장님 지적 2026-08-09).
     private SubscriptionModel? _subscription;
@@ -175,6 +202,9 @@ public partial class UserInfoPage : ComponentBase, IDisposable
                 _model.LogoPreviewUrl = company.LogoUrl;
                 _model.SealPreviewUrl = company.SealUrl;
                 _model.HeaderPreviewUrl = company.HeaderUrl;
+
+                // 값을 다 채운 뒤에 잠금을 판정한다(값이 있어야 잠글지 알 수 있다).
+                RecomputeLockFlags();
             }
 
             // 실제 구독 정보를 불러온다. 종전에는 "Business / 7·10" 이 코드에 적혀 있어
@@ -196,6 +226,22 @@ public partial class UserInfoPage : ComponentBase, IDisposable
     // 그 버튼들은 파일선택창을 여는 코드가 없어 눌러도 아무 일이 없었다.
     // 이제 화면의 label 이 파일선택창을 직접 연다(.razor 의 hitpan-file-pick 참고).
 
+    // 🔴 2026-08-10 (사장님 결재 · 20260810작1 T5) — [기본 사업장 정보 변경 요청]
+    //
+    //   사장님이 정하신 종단 흐름:
+    //     클릭 → 사업자등록증 인증 → 바로 본사로 전송 → 본사 승인 → 시리얼 재발급 → 이메일 발송
+    //
+    //   ⚠️ 지금은 그 뒷단(인증·본사 접수·승인·재발급)이 아직 없다.
+    //      없는 기능을 "접수되었습니다" 로 알리면 고객은 기다리는데 아무도 못 받는다.
+    //      2026-08-09 에 권한 화면이 "저장되었습니다" 를 띄우고 아무 일도 안 했던 것과 같은 사고다.
+    //   ⇒ 준비 중임을 사실대로 알린다. 뒷단이 붙으면 이 자리를 실제 호출로 바꾼다.
+    private void OpenChangeRequest()
+    {
+        Snackbar.Add(
+            "사업자등록증 재인증 기능을 준비하고 있습니다. 준비되면 이 화면에서 바로 요청하실 수 있습니다.",
+            Severity.Info);
+    }
+
     private async Task OpenZipcodeSearch()
     {
         _dotNetRef?.Dispose();
@@ -206,8 +252,19 @@ public partial class UserInfoPage : ComponentBase, IDisposable
     [JSInvokable]
     public async Task OnAddressSelected(string zonecode, string fullAddress)
     {
-        _model.ZipCode = zonecode ?? string.Empty;
-        _model.Address = fullAddress ?? string.Empty;
+        // 잠긴 값은 주소창에서 고른 값으로도 덮지 않는다.
+        // (서버가 어차피 되돌리므로, 화면만 바뀌면 "고쳤는데 저장이 안 된다" 로 보인다)
+        if (!_lockZipCode)
+        {
+            _model.ZipCode = zonecode ?? string.Empty;
+        }
+
+        if (!_lockAddress)
+        {
+            _model.Address = fullAddress ?? string.Empty;
+        }
+
+        RecomputeLockFlags();
         await InvokeAsync(StateHasChanged);
     }
 
@@ -300,12 +357,24 @@ public partial class UserInfoPage : ComponentBase, IDisposable
             CorpNo = _model.CorporateNo,
             SubsidiaryNo = _model.BranchNo
         };
-        var okCompany = await SettingsSvc.SaveCompanyAsync(company).ConfigureAwait(false);
+        var companyResult = await SettingsSvc.SaveCompanyDetailedAsync(company).ConfigureAwait(false);
 
         _saving = false;
-        if (okSettings && okCompany)
+        if (okSettings && companyResult.Saved)
         {
-            Snackbar.Add("사용자정보설정이 적용되었습니다.", Severity.Success);
+            // 잠긴 항목이 있으면 "적용되었습니다" 만 띄우지 않는다.
+            // 무엇이 반영되지 않았는지 알려야 고객이 다음 행동을 할 수 있다(2026-08-10).
+            if (companyResult.RejectedFields.Count > 0)
+            {
+                Snackbar.Add(
+                    companyResult.Message
+                        ?? $"{string.Join(" · ", companyResult.RejectedFields)} 항목은 변경되지 않았습니다.",
+                    Severity.Warning);
+            }
+            else
+            {
+                Snackbar.Add("사용자정보설정이 적용되었습니다.", Severity.Success);
+            }
         }
         else
         {

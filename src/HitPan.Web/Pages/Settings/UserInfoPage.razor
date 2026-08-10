@@ -18,55 +18,133 @@
 }
 else
 {
-    @if (_model.IsLockedFromLanding)
-    {
-        @* 헌법 #35 (사장님 결재 2026-06-04) — 랜딩 자동 반영 잠금 안내 *@
-        <MudAlert Severity="Severity.Warning" Class="mb-3" Dense="true" Icon="@Icons.Material.Filled.Lock">
-            이 회사 정보는 가입 시 사업자등록증으로 자동 반영된 정보입니다.
-            <b>회사명·사업자번호·대표자명</b>은 변경할 수 없습니다.
-            변경이 필요하면 본사 고객지원으로 사업자등록증 재등록을 요청해주세요.
-        </MudAlert>
-    }
+    @*
+        🔴 2026-08-10 (사장님 결재 · 20260810작1 T7 · 디자인명세서 §7)
+        종전 이 자리에 잠금 안내 MudAlert 가 있었으나 제거했다. 두 가지 이유다.
+          1) 잠긴 필드를 "회사명·사업자번호·대표자명" 3개로 적어 두었는데 잠금이 8개로 늘어
+             그 문장이 그 자리에서 거짓이 된다.
+          2) "본사 고객지원으로 요청" 이라고 안내하면서 연락처가 없어 안내가 성립하지 않았다.
+        역할은 아래 묶음 머리글 + [기본 사업장 정보 변경 요청] 버튼이 대신한다.
+    *@
     <MudGrid Spacing="3">
         <MudItem xs="12" md="8">
             <MudPaper Elevation="0" Class="pa-4" Style="border:0.5px solid var(--mud-palette-lines-default);border-radius:12px">
                 <MudText Typo="Typo.subtitle2" Class="mb-3">기본 사업장 정보</MudText>
+
+                @*
+                    🔴 2026-08-10 재배치 (사장님 결재 "A안으로 가자" · 디자인명세서 §2·§4)
+                    사업자등록증에서 자동으로 채워지는 항목을 위에, 직접 입력하는 항목을 아래에 둔다.
+                    읽는 순서가 곧 일하는 순서가 되고, 빈칸이 아래에만 모여 "여기만 쓰면 된다" 가 보인다.
+
+                    잠금 대상(등록증 기재 8개): 사용업체명·사업자번호·대표자·업태·업종·법인등록번호·우편번호·주소
+                    잠금 제외(등록증에 없음): 전화·팩스·홈페이지·이메일·상세주소·종사업장번호·비고
+                      — 대조할 원본이 없는 값은 잠글 근거가 없다. 연락처를 고정하는 것이 목적이 아니다.
+                *@
+                @if (_model.IsLockedFromLanding)
+                {
+                    <div class="hitpan-locked-group">
+                        <div class="hitpan-group-head">
+                            <MudIcon Icon="@Icons.Material.Filled.Lock" Size="Size.Small" Style="color:var(--hitpan-primary)" />
+                            <span class="head-label">사업자등록증에서 자동으로 채워진 정보입니다</span>
+                            <span class="head-sub">— 고칠 수 없습니다</span>
+                        </div>
+                        <MudGrid Spacing="2">
+                            <MudItem xs="12" md="4">
+                                <MudTextField T="string" Label="사용업체명" @bind-Value="_model.CompanyName" Variant="Variant.Outlined" Margin="Margin.Dense" ReadOnly="true" Class="hitpan-locked-field" />
+                            </MudItem>
+                            <MudItem xs="12" md="4">
+                                <MudTextField T="string" Label="사업자번호" @bind-Value="_model.BusinessNo" Variant="Variant.Outlined" Margin="Margin.Dense" ReadOnly="true" Class="hitpan-locked-field" />
+                            </MudItem>
+                            <MudItem xs="12" md="4">
+                                <MudTextField T="string" Label="대표자" @bind-Value="_model.CeoName" Variant="Variant.Outlined" Margin="Margin.Dense" ReadOnly="true" Class="hitpan-locked-field" />
+                            </MudItem>
+                            <MudItem xs="12" md="4">
+                                <MudTextField T="string" Label="업태" @bind-Value="_model.BusinessType" Variant="Variant.Outlined" Margin="Margin.Dense" ReadOnly="@_lockBizType" Class="@(_lockBizType ? "hitpan-locked-field" : null)" />
+                            </MudItem>
+                            <MudItem xs="12" md="4">
+                                <MudTextField T="string" Label="업종" @bind-Value="_model.BusinessCategory" Variant="Variant.Outlined" Margin="Margin.Dense" ReadOnly="@_lockBizItem" Class="@(_lockBizItem ? "hitpan-locked-field" : null)" />
+                            </MudItem>
+                            <MudItem xs="12" md="4">
+                                <MudTextField T="string" Label="법인등록번호" @bind-Value="_model.CorporateNo" Variant="Variant.Outlined" Margin="Margin.Dense" ReadOnly="@_lockCorpNo" Class="@(_lockCorpNo ? "hitpan-locked-field" : null)" />
+                            </MudItem>
+                            @*
+                                우편번호는 사업자등록증 주소에서 함께 넣어준다(사장님 지시 2026-08-10).
+                                내 회사 주소는 등록증이 원본이므로 주소창 검색이 필요 없다.
+                                — 주소창 검색은 등록증이 없는 남의 회사 주소, 즉 업체마스터(거래처)에만 쓴다.
+                            *@
+                            <MudItem xs="12" md="3">
+                                <MudTextField T="string" Label="우편번호" @bind-Value="_model.ZipCode" Variant="Variant.Outlined" Margin="Margin.Dense" ReadOnly="true" Class="@(_lockZipCode ? "hitpan-locked-field" : null)" />
+                            </MudItem>
+                            <MudItem xs="12" md="9">
+                                <MudTextField T="string" Label="사업장 주소" @bind-Value="_model.Address" Variant="Variant.Outlined" Margin="Margin.Dense" ReadOnly="@_lockAddress" Class="@(_lockAddress ? "hitpan-locked-field" : null)" />
+                            </MudItem>
+                        </MudGrid>
+
+                        @*
+                            잠긴 항목을 여는 유일한 경로. 막기만 하고 여는 길이 없으면 고객이 갇힌다.
+                            문구는 사장님이 정하신 그대로 쓴다(줄이거나 바꾸지 않는다).
+                        *@
+                        <div class="hitpan-group-action">
+                            <MudButton Variant="Variant.Outlined" Color="Color.Warning"
+                                       StartIcon="@Icons.Material.Filled.EditNote"
+                                       OnClick="OpenChangeRequest">
+                                기본 사업장 정보 변경 요청
+                            </MudButton>
+                        </div>
+                    </div>
+
+                    <MudDivider Style="height:2px;background:var(--hitpan-primary);opacity:.35;margin:20px 0" />
+
+                    <div class="hitpan-group-head">
+                        <MudIcon Icon="@Icons.Material.Filled.Edit" Size="Size.Small" Style="color:var(--mud-palette-text-secondary)" />
+                        <span class="head-label">직접 입력하실 정보입니다</span>
+                    </div>
+                }
+
                 <MudGrid Spacing="2">
-                    <MudItem xs="12" md="6">
-                        <MudTextField T="string" Label="사용업체명" @bind-Value="_model.CompanyName" Variant="Variant.Outlined" Margin="Margin.Dense" ReadOnly="@_model.IsLockedFromLanding" HelperText="@(_model.IsLockedFromLanding ? "🔒 랜딩 자동 반영 (변경 불가)" : null)" />
-                    </MudItem>
-                    <MudItem xs="12" md="3">
-                        <MudTextField T="string" Label="우편번호" @bind-Value="_model.ZipCode" ReadOnly="true" Variant="Variant.Outlined" Margin="Margin.Dense" />
-                    </MudItem>
-                    <MudItem xs="12" md="2">
-                        <MudButton Variant="Variant.Outlined" OnClick="OpenZipcodeSearch" Style="height:40px;margin-top:4px">우편번호 찾기</MudButton>
-                    </MudItem>
-                    <MudItem xs="12" md="3">
-                        <MudTextField T="string" Label="전화" @bind-Value="_model.Phone" Variant="Variant.Outlined" Margin="Margin.Dense" />
-                    </MudItem>
-                    <MudItem xs="12" md="5">
-                        <MudTextField T="string" Label="주소" @bind-Value="_model.Address" ReadOnly="true" Variant="Variant.Outlined" Margin="Margin.Dense" />
-                    </MudItem>
-                    <MudItem xs="12" md="5">
+                    @if (!_model.IsLockedFromLanding)
+                    {
+                        @*
+                            잠기지 않은 상태(부트스트랩 전) — 종전처럼 전 항목을 직접 입력한다.
+                            이 경로는 설치 직후·수동 등록 시에만 쓰인다.
+                        *@
+                        <MudItem xs="12" md="4">
+                            <MudTextField T="string" Label="사용업체명" @bind-Value="_model.CompanyName" Variant="Variant.Outlined" Margin="Margin.Dense" />
+                        </MudItem>
+                        <MudItem xs="12" md="4">
+                            <MudTextField T="string" Label="사업자번호" @bind-Value="_model.BusinessNo" Variant="Variant.Outlined" Margin="Margin.Dense" />
+                        </MudItem>
+                        <MudItem xs="12" md="4">
+                            <MudTextField T="string" Label="대표자" @bind-Value="_model.CeoName" Variant="Variant.Outlined" Margin="Margin.Dense" />
+                        </MudItem>
+                        <MudItem xs="12" md="4">
+                            <MudTextField T="string" Label="업태" @bind-Value="_model.BusinessType" Variant="Variant.Outlined" Margin="Margin.Dense" />
+                        </MudItem>
+                        <MudItem xs="12" md="4">
+                            <MudTextField T="string" Label="업종" @bind-Value="_model.BusinessCategory" Variant="Variant.Outlined" Margin="Margin.Dense" />
+                        </MudItem>
+                        <MudItem xs="12" md="4">
+                            <MudTextField T="string" Label="법인등록번호" @bind-Value="_model.CorporateNo" Variant="Variant.Outlined" Margin="Margin.Dense" />
+                        </MudItem>
+                        <MudItem xs="12" md="3">
+                            <MudTextField T="string" Label="우편번호" @bind-Value="_model.ZipCode" ReadOnly="true" Variant="Variant.Outlined" Margin="Margin.Dense" />
+                        </MudItem>
+                        <MudItem xs="12" md="2">
+                            <MudButton Variant="Variant.Outlined" OnClick="OpenZipcodeSearch" Style="height:40px;margin-top:4px">우편번호 찾기</MudButton>
+                        </MudItem>
+                        <MudItem xs="12" md="7">
+                            <MudTextField T="string" Label="주소" @bind-Value="_model.Address" ReadOnly="true" Variant="Variant.Outlined" Margin="Margin.Dense" />
+                        </MudItem>
+                    }
+
+                    <MudItem xs="12" md="4">
                         <MudTextField T="string" Label="상세주소" @bind-Value="_model.AddressDetail" Variant="Variant.Outlined" Margin="Margin.Dense" Placeholder="상세주소 직접 입력" />
                     </MudItem>
                     <MudItem xs="12" md="4">
-                        <MudTextField T="string" Label="사업자번호" @bind-Value="_model.BusinessNo" Variant="Variant.Outlined" Margin="Margin.Dense" ReadOnly="@_model.IsLockedFromLanding" HelperText="@(_model.IsLockedFromLanding ? "🔒 랜딩 자동 반영 (변경 불가)" : null)" />
+                        <MudTextField T="string" Label="전화" @bind-Value="_model.Phone" Variant="Variant.Outlined" Margin="Margin.Dense" />
                     </MudItem>
                     <MudItem xs="12" md="4">
                         <MudTextField T="string" Label="종사업장번호" @bind-Value="_model.BranchNo" Variant="Variant.Outlined" Margin="Margin.Dense" />
-                    </MudItem>
-                    <MudItem xs="12" md="4">
-                        <MudTextField T="string" Label="법인등록번호" @bind-Value="_model.CorporateNo" Variant="Variant.Outlined" Margin="Margin.Dense" />
-                    </MudItem>
-                    <MudItem xs="12" md="4">
-                        <MudTextField T="string" Label="업태" @bind-Value="_model.BusinessType" Variant="Variant.Outlined" Margin="Margin.Dense" />
-                    </MudItem>
-                    <MudItem xs="12" md="4">
-                        <MudTextField T="string" Label="업종" @bind-Value="_model.BusinessCategory" Variant="Variant.Outlined" Margin="Margin.Dense" />
-                    </MudItem>
-                    <MudItem xs="12" md="4">
-                        <MudTextField T="string" Label="대표자" @bind-Value="_model.CeoName" Variant="Variant.Outlined" Margin="Margin.Dense" ReadOnly="@_model.IsLockedFromLanding" HelperText="@(_model.IsLockedFromLanding ? "🔒 랜딩 자동 반영 (변경 불가)" : null)" />
                     </MudItem>
                     <MudItem xs="12" md="4">
                         <MudTextField T="string" Label="팩스" @bind-Value="_model.Fax" Variant="Variant.Outlined" Margin="Margin.Dense" />

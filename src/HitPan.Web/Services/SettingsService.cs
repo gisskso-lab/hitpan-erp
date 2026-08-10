@@ -55,16 +55,49 @@ public sealed class SettingsService(HttpClient http, ILogger<SettingsService> lo
     /// </summary>
     public async Task<bool> SaveCompanyAsync(TenantCompanyModel model, CancellationToken ct = default)
     {
+        var result = await SaveCompanyDetailedAsync(model, ct).ConfigureAwait(false);
+        return result.Saved;
+    }
+
+    /// <summary>
+    /// 사업장 기본정보를 저장하고, 잠겨 있어 반영되지 않은 항목까지 함께 돌려준다.
+    /// 잠금 위반을 조용히 넘기면 고객은 "고쳤는데 안 바뀐다" 는 상태에 빠진다(2026-08-10).
+    /// </summary>
+    public async Task<SaveCompanyResult> SaveCompanyDetailedAsync(TenantCompanyModel model, CancellationToken ct = default)
+    {
         try
         {
             using var res = await http.PutAsJsonAsync("api/settings/company", model, ct).ConfigureAwait(false);
-            return res.IsSuccessStatusCode;
+            if (!res.IsSuccessStatusCode)
+            {
+                return new SaveCompanyResult(false, Array.Empty<string>(), null);
+            }
+
+            var body = await res.Content.ReadFromJsonAsync<SaveCompanyResponse>(cancellationToken: ct)
+                .ConfigureAwait(false);
+
+            return new SaveCompanyResult(
+                true,
+                (IReadOnlyList<string>?)body?.RejectedFields ?? Array.Empty<string>(),
+                body?.Message);
         }
         catch (Exception ex)
         {
             logger.LogWarning(ex, "사업장 기본정보 저장 실패");
-            return false;
+            return new SaveCompanyResult(false, Array.Empty<string>(), null);
         }
+    }
+
+    /// <summary>저장 결과. RejectedFields 가 비어 있지 않으면 그 항목은 반영되지 않았다.</summary>
+    public sealed record SaveCompanyResult(bool Saved, IReadOnlyList<string> RejectedFields, string? Message);
+
+    private sealed class SaveCompanyResponse
+    {
+        public bool Saved { get; set; }
+
+        public List<string>? RejectedFields { get; set; }
+
+        public string? Message { get; set; }
     }
 
     /// <summary>
