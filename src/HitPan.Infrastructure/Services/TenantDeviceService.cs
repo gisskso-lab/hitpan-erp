@@ -44,11 +44,12 @@ public sealed class TenantDeviceService : ITenantDeviceService
                    d.ip_address    AS IpAddress,
                    d.status        AS Status,
                    d.registered_at AS RegisteredAt,
-                   d.last_seen_at  AS LastSeenAt
+                   d.last_seen_at  AS LastSeenAt,
+                   d.is_main_pc    AS IsMainPc
             FROM tenant_devices d
             LEFT JOIN users u ON u.user_id = d.user_id
             WHERE d.tenant_id = @TenantId
-            ORDER BY d.registered_at DESC
+            ORDER BY d.is_main_pc DESC, d.registered_at DESC
             """,
             new { TenantId = tenantId }, cancellationToken: ct))).ToList();
         return rows;
@@ -222,6 +223,23 @@ public sealed class TenantDeviceService : ITenantDeviceService
     public async Task RevokeAsync(string deviceId, string tenantId, string userId, string? reason, CancellationToken ct = default)
     {
         await EnsureOpenAsync(ct);
+
+        // 🔴 메인PC(회사 서버)는 폐기하지 않는다 (20260810작3).
+        //   폐기하면 그 PC 에서 로그인이 막히는데 되살리는 API 가 없다 —
+        //   DeviceController 에는 목록·쿼터·폐기뿐이고 복구가 0건이다.
+        //   그리고 그 PC 는 회사의 모든 자료를 가진 PC 다(DB_HOST=localhost).
+        //   ⚠️ 화면에서도 버튼을 막지만(DeviceManagePage), 화면만으로는 가드가 아니다 —
+        //     API 를 직접 부르면 통과하므로 여기서 막는다.
+        var isMainPc = await _db.ExecuteScalarAsync<bool>(new CommandDefinition(
+            "SELECT COALESCE(is_main_pc, 0) FROM tenant_devices WHERE device_id = @Id AND tenant_id = @TenantId LIMIT 1",
+            new { Id = deviceId, TenantId = tenantId }, cancellationToken: ct));
+
+        if (isMainPc)
+        {
+            throw new InvalidOperationException(
+                "회사 서버는 해제할 수 없습니다. 자료를 보관하는 컴퓨터입니다.");
+        }
+
         await _db.ExecuteAsync(new CommandDefinition(
             """
             UPDATE tenant_devices
