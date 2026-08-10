@@ -169,13 +169,33 @@ public sealed class TenantDeviceService : ITenantDeviceService
             // ⚠️ 예약된 사고: 고객이 목록에서 기기 이름을 직접 바꾸는 기능이 생기는 날,
             //   이 COALESCE 가 그 이름을 로그인마다 덮어쓴다. 그 기능의 작업지시서에
             //   이 문장이 반드시 실려야 한다. (지금은 이름 변경 입구가 0개라 발생하지 않는다)
+            // 🔴 2026-08-11 20260811작2 봉합 — device_type 도 갱신 대상에 넣는다 (사장님 지시).
+            //   *"업데이트 이후 막히지 않고 **정확하게 모바일이냐 PC냐 잡으면 됨**"*
+            //
+            //   [왜 필요한가] 종전 UPDATE 는 종류를 건드리지 않았다. 그래서 아이패드를 컴퓨터로
+            //     잘못 판정하던 시절에 등록된 기기는, 판정을 고친 뒤에도 **영원히 컴퓨터 칸을 먹었다.**
+            //     히트판은 기기 수로 요금을 매기므로 이건 고객이 계속 잘못된 자리를 잃는다는 뜻이다.
+            //     ⇒ 고객이 업데이트를 받으면 **그 다음 접속에 스스로 제자리를 찾아가야** 한다.
+            //
+            //   [🔴 막히지 않는다는 보장] 이 자리는 **이미 등록된 기기**만 지나간다(위 existing 분기).
+            //     종류가 바뀌어도 한도 검사(아래 2번)에 **다시 들어가지 않는다.**
+            //     ⇒ 휴대기기 칸이 꽉 찬 상태에서 아이패드가 컴퓨터→휴대기기로 옮겨와도
+            //       **그 사람이 쫓겨나지 않는다.** 칸 수를 잠깐 넘길 수는 있으나, 쓰던 사람을
+            //       막지 않는 쪽을 택한다 (2026-08-10 아침 4차 사고 계통 — 규칙을 켜서 쓰던
+            //       사람이 막히는 일을 두 번 만들지 않는다).
+            //
+            //   ⚠️ COALESCE 인 이유: 지문만 보내고 종류를 못 보내는 옛 화면이 있으면
+            //     기존 값을 지우지 않는다. 넘어온 값이 있을 때만 고친다.
+            var normalizedType = NormalizeDeviceType(req.DeviceType);
+
             await _db.ExecuteAsync(new CommandDefinition(
                 """
                 UPDATE tenant_devices
                 SET last_seen_at = NOW(),
                     ip_address   = @Ip,
                     user_agent   = COALESCE(@Ua, user_agent),
-                    device_name  = COALESCE(@Name, device_name)
+                    device_name  = COALESCE(@Name, device_name),
+                    device_type  = COALESCE(@Type, device_type)
                 WHERE device_id = @Id
                 """,
                 new
@@ -183,7 +203,8 @@ public sealed class TenantDeviceService : ITenantDeviceService
                     Id = id,
                     Ip = ipAddress,
                     Ua = req.UserAgent,
-                    Name = string.IsNullOrWhiteSpace(req.DeviceName) ? null : req.DeviceName
+                    Name = string.IsNullOrWhiteSpace(req.DeviceName) ? null : req.DeviceName,
+                    Type = normalizedType
                 }, cancellationToken: ct));
 
             await LogLoginAsync(tenantId, userId, ipAddress, id, "success", ct);
@@ -217,8 +238,10 @@ public sealed class TenantDeviceService : ITenantDeviceService
         int pcUsed = counts.Where(x => x.t == "pc").Sum(x => x.c);
         int mobileUsed = counts.Where(x => x.t == "mobile" || x.t == "tablet").Sum(x => x.c);
 
-        var type = string.IsNullOrWhiteSpace(req.DeviceType) ? "pc" : req.DeviceType.ToLowerInvariant();
-        if (type is not ("pc" or "mobile" or "tablet")) type = "pc";
+        // 🔴 20260811작2 — 판정을 NormalizeDeviceType 한 곳으로 모았다.
+        //   종전엔 이 자리에만 있었고, 갱신 경로(위)는 종류를 아예 안 봤다.
+        //   두 경로가 각자 판단하면 한쪽만 고쳐지는 사고가 난다.
+        var type = NormalizeDeviceType(req.DeviceType) ?? "pc";
 
         // 한도 초과 체크
         //
@@ -583,6 +606,45 @@ public sealed class TenantDeviceService : ITenantDeviceService
                 cancellationToken: ct));
         }
         catch { /* 로그 실패는 주 로직 보호를 위해 무시 */ }
+    }
+
+    /// 기기 종류를 저장 가능한 값으로 정리한다.
+    ///
+    /// 🔴 2026-08-11 20260811작2 (사장님 판정 기준 확정):
+    ///   *"태블릿도 모바일로 잡으면 됨 — **운영체제가 안드로이드이거나 iOS이기 때문에**"*
+    ///   *"**태블릿, 폰, 스마트TV = 모바일** · 운영체제로 구분하면 됨"*
+    ///   *"**윈도우, 맥OS, 리눅스 등의 PC기반 운영체제가 아닌 것은 모두 모바일**"*
+    ///
+    ///   [왜 운영체제로 가르나] 화면 크기나 터치 여부로 가르면 경계가 계속 흔들린다.
+    ///     터치 되는 노트북, 화면 큰 태블릿, 데스크톱 화면을 요청한 아이패드…
+    ///     끝이 없다. 그러나 **운영체제는 흔들리지 않는다.**
+    ///     Windows·Mac·리눅스는 책상에 두고 쓰는 컴퓨터의 운영체제이고, 나머지는 아니다.
+    ///
+    ///   ⇒ 그래서 칸도 **둘뿐**이다: 휴대기기(mobile) · 컴퓨터(pc).
+    ///     'tablet' 은 받아주되 **모바일로 흡수**한다 — 요금 계산이 이미 둘을 같은 칸에
+    ///     합산하고 있었으므로(아래 mobileUsed), 굳이 셋으로 나눠 부를 이유가 없다.
+    ///
+    ///   🔴 [모르는 값은 휴대기기로 본다] 컴퓨터 칸이 더 비싸다. 판정이 애매할 때
+    ///     컴퓨터로 세면 **고객이 쓰지도 않은 자리에 돈을 낸다.** 반대로 세면 우리가 조금
+    ///     손해 볼 뿐이다. ⇒ 애매한 것은 **고객에게 유리한 쪽**으로 보낸다.
+    ///     (클라이언트도 같은 방향으로 판정한다 — device-fingerprint.js getDeviceType)
+    ///
+    ///   ⚠️ null 을 돌려주는 경우: 클라이언트가 종류를 **안 보냈을 때**.
+    ///     갱신 경로에서 COALESCE 로 받아 **기존 값을 지우지 않게** 하기 위함이다.
+    ///     신규 등록 경로는 호출부에서 ?? "pc" 로 받는다 — 값이 아예 없으면 종전 동작을
+    ///     유지한다(옛 화면 호환). 값이 왔는데 모르는 값일 때만 휴대기기로 본다.
+    private static string? NormalizeDeviceType(string? raw)
+    {
+        if (string.IsNullOrWhiteSpace(raw)) return null;
+
+        var t = raw.Trim().ToLowerInvariant();
+
+        // 태블릿은 휴대기기 칸으로 흡수한다 (사장님 판정 — 컴퓨터 운영체제가 아니다)
+        if (t is "tablet") return "mobile";
+        if (t is "mobile" or "pc") return t;
+
+        // 모르는 값은 휴대기기로 본다 — 비싼 칸을 잘못 깎지 않는 쪽
+        return "mobile";
     }
 
     private async Task LogDeniedAsync(string tenantId, string userId, string ip, string? deviceId, string result, CancellationToken ct)
