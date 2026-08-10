@@ -31,14 +31,14 @@
     <MudNavGroup Title="계정관리" Icon="@Icons.Material.Filled.ManageAccounts" Expanded="false">
         <MudNavLink Href="/company" Icon="@Icons.Material.Filled.Business">회사 정보</MudNavLink>
         <MudNavLink Href="/users" Icon="@Icons.Material.Filled.PersonAdd">직원 계정 관리</MudNavLink>
+        @* 권한 설정은 계정관리에 남는다 (사장님 결재 2026-08-10):
+           "권한설정은 히트판의 권한을 설정하는 과목이니 계정관리가 맞아."
+           계정을 만드는 한 호흡(직원계정 생성 → 권한 부여)이 여기서 끝나고,
+           그 다음 사람·조직 축(직급·결재·사원·HR)이 그룹웨어로 넘어간다. *@
         <MudNavLink Href="/users/permissions" Icon="@Icons.Material.Filled.Lock">권한 설정</MudNavLink>
-        <MudNavLink Href="/settings/approval" Icon="@Icons.Material.Filled.Rule">결재 설정</MudNavLink>
-        @* 사장님 결재(2026-08-09) "통일": [결재라인 설정](/settings/approval-lines)을 메뉴에서 내렸다.
-           그 화면이 저장하던 표는 실제 결재 흐름이 읽지 않아, 거기서 결재라인을 다 넣어도 결재가 걸리지
-           않았다. 결재라인은 [결재 설정] 한 곳에서만 관리한다. 화면과 주소는 남겨 뒀다 — 즐겨찾기나
-           주소를 직접 입력해 들어오는 사람에게 갑자기 화면이 없어지면 더 혼란스럽기 때문이며,
-           그 화면 상단에서 [결재 설정]으로 안내한다. *@
-        <MudNavLink Href="/settings/positions" Icon="@Icons.Material.Filled.Badge">직급 관리</MudNavLink>
+        @* 직급 관리·결재 설정 → 그룹웨어로 이동 (사장님 결재 2026-08-10): "그룹웨어에 필요한 기능이니".
+           둘 다 계정 축이 아니라 사람·조직 축이다. 결재라인이 직급·부서를 읽고,
+           그 결재가 그룹웨어에서 돈다. 사원관리·HR직원현황과 한 묶음이어야 흐름이 안 끊긴다. *@
         <MudNavLink Href="/settings/devices" Icon="@Icons.Material.Filled.Devices">등록 기기 관리</MudNavLink>
         <MudNavLink Href="/settings" Icon="@Icons.Material.Filled.Tune">사용환경 설정</MudNavLink>
         <MudNavLink Href="/settings/ai-assistant" Icon="@Icons.Material.Filled.SmartToy">AI 도우미 연동</MudNavLink>
@@ -55,6 +55,15 @@
         </MudNavLink>
         <MudNavLink Href="/approval/sent" Icon="@Icons.Material.Filled.Send">내가 보낸 결재</MudNavLink>
         <MudNavLink Href="/approval/completed" Icon="@Icons.Material.Filled.CheckCircle">완료된 결재</MudNavLink>
+        @* 계정관리 → 그룹웨어 이동분 (사장님 결재 2026-08-10). 결재 3형제 바로 뒤에 둔다 —
+           [결재 설정]에서 세운 결재라인이 위 결재함에서 실제로 도는 순서이기 때문이다.
+           사장님 결재(2026-08-09) "통일": [결재라인 설정](/settings/approval-lines)은 메뉴에서 내린 상태다.
+           그 화면이 저장하던 표는 실제 결재 흐름이 읽지 않아, 거기서 결재라인을 다 넣어도 결재가 걸리지
+           않았다. 결재라인은 [결재 설정] 한 곳에서만 관리한다. 화면과 주소는 남겨 뒀다 — 즐겨찾기나
+           주소를 직접 입력해 들어오는 사람에게 갑자기 화면이 없어지면 더 혼란스럽기 때문이며,
+           그 화면 상단에서 [결재 설정]으로 안내한다. *@
+        <MudNavLink Href="/settings/approval" Icon="@Icons.Material.Filled.Rule">결재 설정</MudNavLink>
+        <MudNavLink Href="/settings/positions" Icon="@Icons.Material.Filled.Badge">직급 관리</MudNavLink>
         <MudNavLink Href="/employees" Icon="@Icons.Material.Filled.People">사원관리</MudNavLink>
         <MudNavLink Href="/hr/employees" Icon="@Icons.Material.Filled.Badge">HR 직원현황</MudNavLink>
         <MudNavLink Href="/hr/attendance" Icon="@Icons.Material.Filled.AccessTime">근태 관리</MudNavLink>

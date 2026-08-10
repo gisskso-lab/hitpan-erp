@@ -7,7 +7,8 @@
 @inject IDialogService DialogService
 
 <PageTitle>모든데이터 초기화</PageTitle>
-<PageHeader Title="모든데이터 초기화" Subtitle="히트판 자료 포맷 — 부모계정·회사정보·로그만 남기고 모든 업무 데이터를 비웁니다" />
+@* 용어 정정 (사장님 오더 2026-08-10, 20260810작4) — 부모계정 → 대표계정 *@
+<PageHeader Title="모든데이터 초기화" Subtitle="히트판 자료 포맷 — 대표계정·회사정보·로그만 남기고 모든 업무 데이터를 비웁니다" />
 
 <MudPaper Elevation="0" Class="pa-6" Style="border:1px solid var(--mud-palette-error);border-radius:12px;max-width:720px">
 
@@ -23,13 +24,13 @@
 
     <MudText Typo="Typo.subtitle2" Class="mb-1" Style="color:var(--mud-palette-success)">보존되는 데이터</MudText>
     <MudText Typo="Typo.body2" Class="mb-4" Style="color:#4B5563">
-        부모계정(로그인)·회사정보·이용 로그·시스템 설정은 그대로 유지됩니다.
+        대표계정(로그인)·회사정보·이용 로그·시스템 설정은 그대로 유지됩니다.
         실행 직전 <b>자동으로 전체 백업</b>이 먼저 만들어진 뒤 초기화가 진행됩니다.
     </MudText>
 
     <MudDivider Class="my-4" />
 
-    <MudTextField @bind-Value="_password" Label="부모계정 비밀번호 재입력"
+    <MudTextField @bind-Value="_password" Label="대표계정 비밀번호 재입력"
                   InputType="InputType.Password" Variant="Variant.Outlined" Margin="Margin.Dense"
                   Class="mb-3" Immediate="true" />
 

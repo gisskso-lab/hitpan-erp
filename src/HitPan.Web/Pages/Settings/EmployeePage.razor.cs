@@ -35,6 +35,18 @@ public partial class EmployeePage : ComponentBase
     private decimal _annualRemain = 15m;
     private string? _selectedPendingLeaveId;
 
+    /// <summary>
+    /// 흐름 연결 (사장님 오더 2026-08-10, 20260810작4).
+    /// HR직원현황에서 어느 직원을 눌렀는지 받는다 — <c>/employees?empId=EMP-002</c>.
+    ///
+    /// ■ 왜 필요한가
+    ///   종전에는 12명 중 김대리를 눌러도 파라미터 없이 <c>/employees</c> 로만 보내
+    ///   목록 맨 위(첫 사원)가 열렸다. 누른 사람과 열린 사람이 다르다.
+    ///   값이 없으면 기존대로 첫 사원을 연다 — 사이드바로 직접 들어오는 경로가 안 깨진다.
+    /// </summary>
+    [Parameter, SupplyParameterFromQuery(Name = "empId")]
+    public string? EmpIdFromQuery { get; set; }
+
     protected override async Task OnInitializedAsync()
     {
         try
@@ -64,7 +76,15 @@ public partial class EmployeePage : ComponentBase
 
         if (_employees.Count > 0)
         {
-            await SelectEmployeeAsync(_employees[0].EmployeeId).ConfigureAwait(false);
+            // 흐름 연결 (20260810작4): HR직원현황에서 지목한 사원이 있으면 그 사람을 연다.
+            //   목록에 없는 값(퇴직·삭제·주소 직접 입력)이면 조용히 첫 사원으로 되돌린다 —
+            //   화면이 비거나 오류를 띄우는 것보다 낫다.
+            var target = !string.IsNullOrWhiteSpace(EmpIdFromQuery)
+                && _employees.Any(e => e.EmployeeId == EmpIdFromQuery)
+                    ? EmpIdFromQuery!
+                    : _employees[0].EmployeeId;
+
+            await SelectEmployeeAsync(target).ConfigureAwait(false);
         }
         else
         {

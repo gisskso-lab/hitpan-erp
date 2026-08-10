@@ -12,10 +12,23 @@
 <PageTitle>권한설정</PageTitle>
 
 <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
-    <MudText Typo="Typo.h6">권한설정</MudText>
-    <MudText Style="font-size:12px;color:var(--mud-palette-text-secondary)">
-        고객사 관리자(사장)가 자기 회사 직원에게 메뉴별 권한 부여
-    </MudText>
+    <div>
+        <MudText Typo="Typo.h6">권한설정</MudText>
+        <MudText Style="font-size:12px;color:var(--mud-palette-text-secondary)">
+            직원에게 메뉴별 권한 부여 · 계정은 [직원 계정 관리] 메뉴
+        </MudText>
+    </div>
+    @* 흐름 손잡이 (사장님 오더 2026-08-10, 20260810작4):
+       직원계정 → 계정생성 → 권한설정(여기) → **사원관리** → HR직원현황.
+       종전에는 권한을 다 주고 나서 다음에 뭘 하는지 화면에 아무 안내가 없었다. *@
+    <div class="d-flex gap-2">
+        <MudButton Variant="Variant.Text" Size="Size.Small"
+                   StartIcon="@Icons.Material.Filled.ArrowBack"
+                   Href="/users">직원 계정 관리</MudButton>
+        <MudButton Variant="Variant.Outlined" Size="Size.Small" Color="Color.Primary"
+                   EndIcon="@Icons.Material.Filled.ArrowForward"
+                   Href="/employees">다음: 사원 정보</MudButton>
+    </div>
 </div>
 
 @if (_loading)
@@ -38,9 +51,13 @@ else if (_users.Count == 0)
     <MudPaper Elevation="0" Class="pa-8" Style="border:0.5px dashed var(--mud-palette-lines-default);border-radius:12px;text-align:center">
         <MudIcon Icon="@Icons.Material.Outlined.Lock" Size="Size.Large" Style="color:var(--mud-palette-text-secondary);font-size:64px" />
         <MudText Typo="Typo.h6" Class="mt-3">권한을 부여할 직원이 없습니다</MudText>
-        <MudText Typo="Typo.body2" Style="color:var(--mud-palette-text-secondary)">
-            [사용자 추가·관리] 에서 직원 계정을 먼저 등록하면 여기에서 메뉴별 권한을 줄 수 있습니다.
+        <MudText Typo="Typo.body2" Class="mb-3" Style="color:var(--mud-palette-text-secondary)">
+            직원계정을 먼저 만들면 여기에서 메뉴별 권한을 줄 수 있습니다.
         </MudText>
+        @* 글자로만 "거기서 하세요" 하면 고객은 그 메뉴를 찾아 헤맨다 — 버튼으로 바로 보낸다 (20260810작4) *@
+        <MudButton Variant="Variant.Filled" Color="Color.Primary"
+                   StartIcon="@Icons.Material.Filled.PersonAdd"
+                   Href="/users">직원계정 만들러 가기</MudButton>
     </MudPaper>
 }
 else

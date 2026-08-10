@@ -132,9 +132,15 @@ else
         _loading = false;
     }
 
+    /// <summary>
+    /// 행을 누르면 사원관리에서 <b>그 사원</b>을 연다 (사장님 오더 2026-08-10, 20260810작4).
+    ///
+    /// 종전에는 누구를 눌렀는지 안 넘기고 <c>/employees</c> 로만 보내, 12명 중 김대리를
+    /// 눌러도 목록 맨 위 사원이 열렸다. 누른 사람과 열린 사람이 달랐다.
+    /// </summary>
     private void OnRowClick(TableRowClickEventArgs<EmployeeListItemModel> args)
     {
         if (args.Item is null) return;
-        Nav.NavigateTo($"/employees");
+        Nav.NavigateTo($"/employees?empId={Uri.EscapeDataString(args.Item.EmployeeId)}");
     }
 }
