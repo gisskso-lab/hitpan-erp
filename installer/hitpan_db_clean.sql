@@ -3045,7 +3045,7 @@ CREATE TABLE `schema_migrations` (
 
 --
 -- 신규설치 시드 (20260722작4 봉합 #1 — 사장님 결재 2026-07-23):
---   이 clean DDL 은 아래 55개 마이그(DB-02~DB-84)가 '이미 반영된' 최종 스키마다.
+--   이 clean DDL 은 아래 마이그(DB-02~DB-86)가 '이미 반영된' 최종 스키마다.
 --   그런데 신규설치 DB 는 이 이력이 비어(0행) 있어, 자동업데이트의 마이그 교차검증 게이트
 --   (UpdateOrchestrator.PassesMigrationCrossCheckAsync)가 zip 의 DB-*.sql 을 전부 '미적용 신규'로
 --   오판·차단했다 → 신규 고객의 첫 자동업데이트가 영구 차단됐다(2026-07-22 Sandbox 실측 확정).
@@ -3070,7 +3070,8 @@ INSERT INTO `schema_migrations` (`migration_id`, `app_version`, `success`) VALUE
 ('DB-70','clean-ddl',1),('DB-71','clean-ddl',1),('DB-72','clean-ddl',1),('DB-73','clean-ddl',1),
 ('DB-74','clean-ddl',1),('DB-75','clean-ddl',1),('DB-76','clean-ddl',1),('DB-77','clean-ddl',1),
 ('DB-78','clean-ddl',1),('DB-79','clean-ddl',1),('DB-80','clean-ddl',1),('DB-81','clean-ddl',1),
-('DB-82','clean-ddl',1),('DB-83','clean-ddl',1),('DB-84','clean-ddl',1),('DB-85','clean-ddl',1);
+('DB-82','clean-ddl',1),('DB-83','clean-ddl',1),('DB-84','clean-ddl',1),('DB-85','clean-ddl',1),
+('DB-86','clean-ddl',1);
 
 --
 -- Table structure for table `service_tickets`
