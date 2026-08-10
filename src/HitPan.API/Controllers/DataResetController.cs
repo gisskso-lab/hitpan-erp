@@ -14,6 +14,9 @@ namespace HitPan.API.Controllers;
 [ApiController]
 [Route("api/data-reset")]
 [Authorize(Policy = "TenantAdminOnly")]
+// 🔴 2026-08-11 (사장님 지시): 자료관리는 **부모계정 + 메인PC 환경에서만**.
+//   화면을 감추는 것만으로는 API 를 직접 부르면 그대로 지워진다. 서버에서도 막는다.
+[HitPan.API.Security.MainPcOnly]
 public sealed class DataResetController : HitPanControllerBase
 {
     private readonly IDataResetService _service;

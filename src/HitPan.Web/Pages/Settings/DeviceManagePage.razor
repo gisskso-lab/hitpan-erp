@@ -1,6 +1,8 @@
 @page "/settings/devices"
 @namespace HitPan.Web.Pages.SettingsUi
-@attribute [Authorize]
+@* 🔴 2026-08-11 (사장님 지시): 설정관리는 **부모계정(대표)만**.
+     메뉴에서 감추는 것만으로는 주소를 직접 치면 그대로 들어온다 — 화면에서도 막는다. *@
+@attribute [Authorize(Roles = "system_admin,tenant_admin,TenantAdmin")]
 @using System.Net.Http.Json
 @using HitPan.Web.Components.Common
 @inject HttpClient Http
@@ -286,9 +288,13 @@
         </MudText>
     </DialogContent>
     <DialogActions>
+        @* 🔴 2026-08-11 문구 정정 (사장님 지시 "거짓문구는 모두 삭제").
+             "네, 추가합니다" 를 눌러도 자리가 늘지 않는다 — 결제가 아직 연결되지 않아
+             가격 안내 화면으로 넘어가기만 한다(사장님 확인 2026-08-11 "아직").
+             버튼 글자가 하는 일 그대로여야 한다. *@
         <MudButton OnClick="OnSlotOfferNo">아니오</MudButton>
         <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="OnSlotOfferYes">
-            네, 추가합니다
+            가격 보러 가기
         </MudButton>
     </DialogActions>
 </MudDialog>

@@ -1,0 +1,71 @@
+@* 메인PC(자료보관 컴퓨터)에서 열었을 때만 안쪽 내용을 보여준다.
+
+   🔴 2026-08-11 (사장님 지시): *"자료관리는 **부모계정 + 메인PC 환경에서만** 돌도록"*
+
+   [왜 필요한가] 백업·복구·자료이관·모든데이터 초기화는 **자료가 실제로 들어 있는
+     그 컴퓨터**에서 해야 하는 일이다. 다른 자리에서 원격으로 남의 회사 자료를
+     지우거나 되돌릴 수 있으면 안 된다.
+
+   [판정은 서버가 한다] 브라우저에게 "너 메인PC냐" 고 묻지 않는다 —
+     그건 얼마든지 그렇다고 답할 수 있다. 서버가 접속해 들어온 자리를 직접 본다.
+
+   ⚠️ 이것만으로 막았다고 하지 않는다. 화면을 감추는 것은 **차단이 아니다.**
+     자료를 실제로 건드리는 일은 서버에서도 같은 판정으로 막아야 한다.
+*@
+@inject HttpClient Http
+@inject ILogger<MainPcOnly> _logger
+
+@if (_checking)
+{
+    <div class="d-flex justify-center pa-6">
+        <MudProgressCircular Indeterminate="true" Size="Size.Medium" />
+    </div>
+}
+else if (_isMainPc)
+{
+    @ChildContent
+}
+else
+{
+    <MudPaper Elevation="0" Class="pa-6" Style="text-align:center;">
+        <MudIcon Icon="@Icons.Material.Filled.Computer" Color="Color.Warning"
+                 Style="font-size:48px;" Class="mb-3" />
+        <MudText Typo="Typo.h6" Class="mb-2">자료보관 컴퓨터에서만 사용할 수 있습니다</MudText>
+        <MudText Typo="Typo.body2" Style="color:var(--mud-palette-text-secondary)">
+            이 기능은 회사 자료가 들어 있는 컴퓨터에서만 열 수 있습니다.<br />
+            히트판이 설치된 그 컴퓨터에서 다시 열어 주세요.
+        </MudText>
+    </MudPaper>
+}
+
+@code {
+    [Parameter] public RenderFragment? ChildContent { get; set; }
+
+    private bool _checking = true;
+    private bool _isMainPc;
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            var r = await Http.GetFromJsonAsync<MainPcResult>("api/devices/is-main-pc");
+            _isMainPc = r?.IsMainPc ?? false;
+        }
+        catch (Exception ex)
+        {
+            // 못 물어봤으면 **안 보여준다.** 확인이 안 된 상태에서 열어주면
+            // 막은 적이 없는 것과 같다.
+            _logger.LogWarning(ex, "자료보관 컴퓨터 여부를 확인하지 못했습니다 — 잠근 채로 둡니다.");
+            _isMainPc = false;
+        }
+        finally
+        {
+            _checking = false;
+        }
+    }
+
+    private sealed class MainPcResult
+    {
+        public bool IsMainPc { get; set; }
+    }
+}

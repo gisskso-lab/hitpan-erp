@@ -51,6 +51,39 @@ public sealed class DeviceController : ControllerBase
         return Ok(await _svc.GetQuotaAsync(tid, ct));
     }
 
+    /// <summary>
+    /// 지금 보고 있는 이 화면이 **메인PC(자료보관 컴퓨터)에서 열린 것인지** 알려준다.
+    ///
+    /// 🔴 2026-08-11 (사장님 지시):
+    ///   *"자료관리는 **부모계정 + 메인PC 환경에서만** 돌도록"*
+    ///
+    ///   [왜 필요한가] 백업·복구·자료이관·모든데이터 초기화는 **자료가 실제로 들어 있는
+    ///     그 컴퓨터**에서 해야 하는 일이다. 다른 자리에서 원격으로 남의 회사 컴퓨터 자료를
+    ///     지우거나 되돌릴 수 있으면 안 된다.
+    ///
+    ///   [어떻게 아는가] 브라우저에게 "너 메인PC냐" 고 묻지 않는다 — 그건 얼마든지
+    ///     그렇다고 답할 수 있다. **서버가 접속해 들어온 자리를 직접 본다.**
+    ///     히트판 본체는 자료가 있는 그 컴퓨터에서 돈다. 그러니 그 컴퓨터에서 화면을 열면
+    ///     자기 자신에게 붙는 것이고(로컬), 다른 컴퓨터에서 열면 바깥에서 들어온다.
+    ///
+    ///   ⚠️ 터널을 타고 들어온 요청은 **원래 주소가 헤더에 있다.** 그것을 먼저 본다.
+    ///     헤더가 있는데 로컬만 보고 판단하면, 바깥 접속을 메인PC 로 오인한다.
+    /// </summary>
+    [HttpGet("is-main-pc")]
+    public IActionResult IsMainPc()
+    {
+        // 터널(cloudflared)을 지나온 요청은 원래 주소를 헤더에 달고 온다.
+        // 헤더가 **하나라도 있으면** 바깥에서 들어온 것이다 — 로컬일 수 없다.
+        var viaTunnel =
+            Request.Headers.ContainsKey("CF-Connecting-IP") ||
+            Request.Headers.ContainsKey("X-Forwarded-For");
+
+        var remote = HttpContext.Connection.RemoteIpAddress;
+        var isLoopback = remote is not null && System.Net.IPAddress.IsLoopback(remote);
+
+        return Ok(new { isMainPc = !viaTunnel && isLoopback });
+    }
+
     /// <summary>기기 폐기 — TenantAdmin만.</summary>
     [HttpPost("revoke/{id}")]
     public async Task<IActionResult> Revoke(string id, [FromBody] RevokeDeviceRequest? body, CancellationToken ct)
