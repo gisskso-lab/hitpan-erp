@@ -5,6 +5,8 @@
 @using HitPan.Web.Services
 @using HitPan.Web.Components.Common
 @inject UserService UserSvc
+@* 부서 선택지 (20260810작4) — 사원관리와 같은 부서 마스터를 본다 *@
+@inject EmployeeService EmpSvc
 @inject ISnackbar Snackbar
 @inject NavigationManager Nav
 @inject IJSRuntime JS
@@ -60,10 +62,13 @@ else if (_users.Count == 0)
 }
 else
 {
-    @* 헌법 #35 (사장님 결재 2026-06-04) — 부모/자식 안내 *@
+    @* 헌법 #35 (사장님 결재 2026-06-04) — 계정 계층 안내.
+       용어 정정 (사장님 오더 2026-08-10, 20260810작4): "부모계정, 자식계정 이라고 하는 개발용어는
+       숨기고 대표계정, 직원계정 이라고 바꾸자." → 화면에 보이는 글자만 바꾼다.
+       DB 컬럼(is_parent)·C# 속성(IsParent)·내부 판정 로직은 그대로다(헌법 #38·#40 구조 불변). *@
     <MudAlert Severity="Severity.Info" Class="mb-3" Dense="true" Icon="@Icons.Material.Filled.AccountTree">
-        여기서 추가하는 계정은 <b>자식 계정</b>입니다. 부모 계정만 자식을 생성할 수 있으며, 본사 백오피스에는 노출되지 않습니다.
-        부모 계정은 가입 시점에 자동 생성되며 삭제할 수 없습니다.
+        여기서 추가하는 계정은 <b>직원계정</b>입니다. 대표계정만 직원계정을 만들 수 있으며, 본사에는 노출되지 않습니다.
+        대표계정은 가입 시점에 자동 생성되며 삭제할 수 없습니다.
     </MudAlert>
 
     <MudPaper Elevation="0" Class="pa-2 hitpan-card">
@@ -72,7 +77,8 @@ else
                 <MudTh>이메일</MudTh>
                 <MudTh>이름</MudTh>
                 <MudTh>부서·직책</MudTh>
-                <MudTh Style="text-align:center">계층</MudTh>
+                @* "계층" 도 개발용어다 — 고객은 대표/직원 구분으로 읽는다 (20260810작4) *@
+                <MudTh Style="text-align:center">계정 구분</MudTh>
                 <MudTh Style="text-align:center">역할</MudTh>
                 <MudTh Style="text-align:center">사원 연결</MudTh>
                 <MudTh Style="text-align:center">상태</MudTh>
@@ -85,14 +91,15 @@ else
                     @($"{context.Department} · {context.Position}".Trim(' ', '·'))
                 </MudTd>
                 <MudTd Style="text-align:center">
+                    @* 용어 정정 (20260810작4) — 화면 표기만. IsParent 판정은 그대로 쓴다. *@
                     @if (context.IsParent)
                     {
                         <MudChip T="string" Size="Size.Small" Variant="Variant.Filled" Color="Color.Primary"
-                                 Icon="@Icons.Material.Filled.Stars">부모</MudChip>
+                                 Icon="@Icons.Material.Filled.Stars">대표계정</MudChip>
                     }
                     else
                     {
-                        <MudChip T="string" Size="Size.Small" Variant="Variant.Text" Color="Color.Default">자식</MudChip>
+                        <MudChip T="string" Size="Size.Small" Variant="Variant.Text" Color="Color.Default">직원계정</MudChip>
                     }
                 </MudTd>
                 <MudTd Style="text-align:center">
@@ -129,7 +136,7 @@ else
                     }
                     else if (context.IsParent)
                     {
-                        <MudTooltip Text="부모 계정은 삭제할 수 없습니다 (헌법 #35)">
+                        <MudTooltip Text="대표계정은 삭제할 수 없습니다">
                             <MudIconButton Icon="@Icons.Material.Filled.Lock" Size="Size.Small" Color="Color.Default" Disabled="true" />
                         </MudTooltip>
                     }
@@ -155,7 +162,20 @@ else
                 HelperText="@PasswordHint(_createModel.Password)" Class="flex-grow-1" />
             <MudButton Variant="Variant.Outlined" Size="Size.Small" OnClick="GenerateTempPassword">랜덤생성</MudButton>
         </div>
-        <MudTextField T="string" @bind-Value="_createModel.Department" Label="부서" Variant="Variant.Outlined" Class="mb-2" />
+        @* 부서 봉합 (사장님 오더 2026-08-10, 20260810작4)
+           ─ 진범: 여기가 자유 텍스트라 "영업부"라고 쳐도 사원관리(부서 마스터 dept_id)와 글자가
+             안 맞아, 사원관리·HR직원현황에서 부서가 계속 "-" 로 나왔다(사장님 Sandbox 실측).
+           ─ 봉합: 부서 마스터에서 골라 넣는다. 저장되는 값은 종전과 같은 **부서명 문자열**이라
+             API·DTO·SQL 은 한 줄도 안 바뀐다(users.department 는 문자열 컬럼).
+           ─ 미선택 허용: 부서 마스터가 빈 회사에서도 계정은 만들어져야 한다. 필수 아님. *@
+        <MudSelect T="string" @bind-Value="_createModel.Department" Label="부서" Variant="Variant.Outlined"
+                   Class="mb-2" Clearable="true"
+                   HelperText="@(_departments.Count == 0 ? "등록된 부서가 없습니다 — 비워두고 나중에 지정해도 됩니다" : null)">
+            @foreach (var d in _departments)
+            {
+                <MudSelectItem T="string" Value="@d.DeptName">@d.DeptName</MudSelectItem>
+            }
+        </MudSelect>
         <MudTextField T="string" @bind-Value="_createModel.Position" Label="직책" Variant="Variant.Outlined" Class="mb-2" />
         <MudTextField T="string" @bind-Value="_createModel.Phone" Label="전화번호" Variant="Variant.Outlined" Class="mb-2" />
         <MudDatePicker @bind-Date="_createModel.HireDate" Label="입사일" Variant="Variant.Outlined" Class="mb-2" Editable="true" DateFormat="yyyy-MM-dd" />
@@ -176,12 +196,56 @@ else
     </DialogActions>
 </MudDialog>
 
+@* 계정 생성 후 다음 걸음 안내 (사장님 오더 2026-08-10, 20260810작4)
+   ─ 왜 필요한가: 계정만 만들면 그 직원은 로그인은 되는데 아무 메뉴도 못 본다.
+     "처음 보는 사람이 혼자 쓸 수 있냐"(히트판 최종 통과 기준)를 지키려면
+     다음에 뭘 해야 하는지 화면이 말해줘야 한다.
+   ─ 흐름: 계정생성 → [권한설정] → 사원관리 → HR직원현황 *@
+<MudDialog @bind-Visible="_showNextStep" Options="@(new DialogOptions { MaxWidth = MaxWidth.Small, FullWidth = true })">
+    <TitleContent>
+        <MudText Typo="Typo.h6">
+            <MudIcon Icon="@Icons.Material.Filled.CheckCircle" Color="Color.Success" Class="mr-1" />
+            @_createdUserName 님 계정이 만들어졌습니다
+        </MudText>
+    </TitleContent>
+    <DialogContent>
+        <MudText Typo="Typo.body2" Class="mb-3">
+            아직 이 직원은 <b>볼 수 있는 메뉴가 없습니다.</b> 권한을 정해주셔야 히트판을 쓸 수 있습니다.
+        </MudText>
+        <MudPaper Elevation="0" Class="pa-3" Style="background:var(--mud-palette-background-grey);border-radius:8px">
+            <MudText Typo="Typo.caption" Style="color:var(--mud-palette-text-secondary)">다음 순서</MudText>
+            <MudText Typo="Typo.body2" Class="mt-1">
+                계정 만들기 ✓ → <b>권한 설정</b> → 사원 정보 → 직원 현황
+            </MudText>
+        </MudPaper>
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="@(() => _showNextStep = false)">나중에</MudButton>
+        <MudButton Variant="Variant.Filled" Color="Color.Primary"
+                   StartIcon="@Icons.Material.Filled.Lock"
+                   OnClick="@(() => Nav.NavigateTo("/users/permissions"))">
+            권한 설정하러 가기
+        </MudButton>
+    </DialogActions>
+</MudDialog>
+
 @* 사용자 수정 다이얼로그 *@
 <MudDialog @bind-Visible="_showEdit" Options="@(new DialogOptions { MaxWidth = MaxWidth.Small, FullWidth = true })">
     <TitleContent><MudText Typo="Typo.h6">사용자 수정 — @_editTarget?.Email</MudText></TitleContent>
     <DialogContent>
         <MudTextField T="string" @bind-Value="_editModel.UserName" Label="이름 *" Variant="Variant.Outlined" Class="mb-2" />
-        <MudTextField T="string" @bind-Value="_editModel.Department" Label="부서" Variant="Variant.Outlined" Class="mb-2" />
+        @* 수정 쪽도 같이 드롭다운으로 (20260810작4). 추가만 고치면 수정할 때 다시 어긋난다.
+           🔴 [3-V] 병렬검증 적발 (2026-08-10): 기존 계정은 부서가 **자유 텍스트**로 저장돼 있다
+              (test1-1 "영업부" 등, 사장님 Sandbox 실측분). 그 이름이 부서 마스터에 없으면
+              드롭다운이 값을 못 찾아 빈 칸으로 보이고, 이름만 고쳐 저장하면 **부서가 조용히 지워진다.**
+              → 마스터에 없는 기존 값도 선택지에 얹어 살려 둔다(_editDeptOptions). *@
+        <MudSelect T="string" @bind-Value="_editModel.Department" Label="부서" Variant="Variant.Outlined"
+                   Class="mb-2" Clearable="true">
+            @foreach (var name in _editDeptOptions)
+            {
+                <MudSelectItem T="string" Value="@name">@name</MudSelectItem>
+            }
+        </MudSelect>
         <MudTextField T="string" @bind-Value="_editModel.Position" Label="직책" Variant="Variant.Outlined" Class="mb-2" />
         <MudTextField T="string" @bind-Value="_editModel.Phone" Label="전화번호" Variant="Variant.Outlined" Class="mb-2" />
         <MudSelect T="string" @bind-Value="_editModel.Role" Label="역할" Variant="Variant.Outlined" Class="mb-2">
@@ -312,6 +376,20 @@ else
 
     // 다이얼로그 상태
     private bool _showCreate, _showEdit, _showDeactivate, _showResetResult, _showBulk;
+    // 계정 생성 후 "다음 걸음" 안내 (20260810작4 흐름 연결)
+    private bool _showNextStep;
+    private string _createdUserName = "";
+
+    // 부서 선택지 (20260810작4). 사원관리와 같은 부서 마스터를 본다 — 그래야 글자가 맞는다.
+    private List<DepartmentModel> _departments = new();
+
+    /// <summary>
+    /// 수정 다이얼로그의 부서 선택지 ([3-V] 병렬검증 적발 봉합, 2026-08-10).
+    ///
+    /// 부서 마스터 + <b>지금 이 계정에 저장돼 있는 값</b>. 마스터에 없는 옛 자유 텍스트라도
+    /// 선택지에 있어야 드롭다운이 그 값을 표시하고, 이름만 고쳐 저장할 때 부서가 안 지워진다.
+    /// </summary>
+    private List<string> _editDeptOptions = new();
     private CreateUserModel _createModel = new();
     private UpdateUserModel _editModel = new();
     private UserListModel? _editTarget, _deactivateTarget, _resetTarget;
@@ -324,6 +402,25 @@ else
     protected override async Task OnInitializedAsync()
     {
         await LoadAsync();
+        await LoadDepartmentsAsync();
+    }
+
+    /// <summary>
+    /// 부서 선택지를 사원관리와 같은 마스터에서 읽는다 (20260810작4).
+    /// 실패해도 화면을 막지 않는다 — 부서는 선택 항목이고, 계정 생성 자체는 되어야 한다(헌법 #20).
+    /// </summary>
+    private async Task LoadDepartmentsAsync()
+    {
+        try
+        {
+            _departments = await EmpSvc.GetDepartmentsAsync();
+        }
+        catch (Exception ex)
+        {
+            // 헌법 #15 빈 catch 금지 — 흔적은 남기되 계정 관리는 계속 쓸 수 있어야 한다.
+            Console.Error.WriteLine($"[HP15][Users/Departments] {ex.GetType().Name}: {ex.Message}");
+            _departments = new();
+        }
     }
 
     // 목록을 못 불러왔는지 여부. 🔴 "0명" 과 반드시 구분한다(20260809작4 ②번 봉합).
@@ -376,9 +473,15 @@ else
         _busy = false;
         if (ok)
         {
-            Snackbar.Add("사용자가 추가되었습니다.", Severity.Success);
             _showCreate = false;
             await LoadAsync();
+
+            // 흐름 연결 (사장님 오더 2026-08-10, 20260810작4):
+            //   직원계정 → 계정생성 → **권한설정** → 사원관리 → HR직원현황
+            // 종전에는 여기서 스낵바 한 줄 뜨고 길이 끊겼다. 계정만 만들어 두면 그 사람은
+            // 로그인은 되는데 아무것도 못 하는 상태로 남는다 — 다음 걸음을 화면이 알려줘야 한다.
+            _createdUserName = _createModel.UserName;
+            _showNextStep = true;
         }
         else
         {
@@ -395,6 +498,16 @@ else
         if (!stepUp) return;
 
         _editTarget = user;
+
+        // [3-V] 봉합 (20260810작4): 마스터 부서 + 이 계정에 이미 저장된 부서를 합친다.
+        //   마스터에 없는 옛 값(자유 텍스트)이 선택지에서 빠지면 드롭다운이 빈 칸으로 보이고,
+        //   그대로 저장하면 부서가 조용히 지워진다.
+        _editDeptOptions = _departments.Select(d => d.DeptName).ToList();
+        if (!string.IsNullOrWhiteSpace(user.Department) && !_editDeptOptions.Contains(user.Department))
+        {
+            _editDeptOptions.Insert(0, user.Department);
+        }
+
         _editModel = new()
         {
             UserName = user.UserName,

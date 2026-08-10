@@ -8,10 +8,23 @@
 <PageTitle>사원관리</PageTitle>
 
 <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
-    <MudText Typo="Typo.h6">사원관리</MudText>
-    <MudText Style="font-size:12px;color:var(--mud-palette-text-secondary)">
-        사원 기본정보 · 권한 · 연차 신청/결재
-    </MudText>
+    <div>
+        <MudText Typo="Typo.h6">사원관리</MudText>
+        <MudText Style="font-size:12px;color:var(--mud-palette-text-secondary)">
+            사원 기본정보 · 권한 · 연차 신청/결재
+        </MudText>
+    </div>
+    @* 흐름 손잡이 (사장님 오더 2026-08-10, 20260810작4):
+       직원계정 → 계정생성 → 권한설정 → 사원관리(여기) → **HR직원현황**.
+       종전에는 HR직원현황에서 이리로 오는 길만 있고, 여기서 나가는 길이 없었다. *@
+    <div class="d-flex gap-2">
+        <MudButton Variant="Variant.Text" Size="Size.Small"
+                   StartIcon="@Icons.Material.Filled.ArrowBack"
+                   Href="/users/permissions">권한 설정</MudButton>
+        <MudButton Variant="Variant.Outlined" Size="Size.Small" Color="Color.Primary"
+                   EndIcon="@Icons.Material.Filled.ArrowForward"
+                   Href="/hr/employees">다음: 직원 현황</MudButton>
+    </div>
 </div>
 
 @if (_loading)

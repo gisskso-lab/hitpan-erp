@@ -19,7 +19,7 @@
       Step 1: 라이선스 키 + 사업자번호 입력 → 백오피스 API 검증
       Step 2: 검증 통과 → 회사 추가정보 입력 (대표·연락처·이메일·주소·업태·종목)
       Step 3: ERP API /api/setup/bootstrap 호출 → tenants UPDATE + is_locked_from_landing=1
-      Step 4: 부모계정 로그인 안내
+      Step 4: 대표계정(내부 is_parent=1) 로그인 안내
 *@
 
 <PageTitle>히트판 ERP 첫 설치 — 라이선스 등록</PageTitle>
@@ -29,7 +29,9 @@
         <div class="setup-brand">
             <div class="setup-logo">HP</div>
             <h1>히트판 ERP 설치</h1>
-            <p>가입 시 받으신 부모 계정ID(라이선스 키)로 회사 정보를 자동 반영합니다.</p>
+            @* 용어 정정 (사장님 오더 2026-08-10, 20260810작4) — 부모/자식 → 대표/직원.
+               여기는 신규 고객이 히트판을 처음 보는 화면이라 개발용어가 특히 걸린다(헌법 #23). *@
+            <p>가입 시 받으신 대표계정ID(라이선스 키)로 회사 정보를 자동 반영합니다.</p>
         </div>
 
         <div class="setup-steps">
@@ -37,7 +39,7 @@
             <div class="step-line"></div>
             <div class="step @(_step >= 2 ? "active" : "")">2. 회사 정보</div>
             <div class="step-line"></div>
-            <div class="step @(_step >= 3 ? "active" : "")">3. 부모 계정</div>
+            <div class="step @(_step >= 3 ? "active" : "")">3. 대표계정</div>
             <div class="step-line"></div>
             <div class="step @(_step >= 4 ? "active" : "")">4. 완료</div>
         </div>
@@ -51,7 +53,7 @@
         {
             <div class="setup-section">
                 <div class="setup-field">
-                    <label>부모 계정ID (라이선스 키) *</label>
+                    <label>대표계정ID (라이선스 키) *</label>
                     <input type="text" @bind="_licenseKey"
                            placeholder="HITP-XXXX-XXXX-XXXX-XXXX" maxlength="24"
                            style="font-family:Consolas,Monaco,monospace;letter-spacing:1px;" />
@@ -120,7 +122,7 @@
                 </div>
 
                 <button type="button" class="setup-submit" @onclick="BootstrapAsync" disabled="@_busy">
-                    @(_busy ? "저장 중..." : "다음 단계 — 부모 계정 생성")
+                    @(_busy ? "저장 중..." : "다음 단계 — 대표계정 생성")
                 </button>
                 <button type="button" class="setup-back" @onclick="@(() => _step = 1)" disabled="@_busy">
                     이전 단계로
@@ -136,8 +138,8 @@
                 </div>
 
                 <p class="setup-info">
-                    부모 계정은 ERP 마스터 계정입니다.<br/>
-                    이 계정으로만 자식 계정(직원)을 만들 수 있습니다.
+                    대표계정은 히트판의 최상위 계정입니다.<br/>
+                    이 계정으로만 직원계정을 만들 수 있습니다.
                 </p>
 
                 <div class="setup-field">
@@ -160,7 +162,7 @@
                 </div>
 
                 <button type="button" class="setup-submit" @onclick="CreateParentAsync" disabled="@_busy">
-                    @(_busy ? "계정 생성 중..." : "부모 계정 생성")
+                    @(_busy ? "계정 생성 중..." : "대표계정 생성")
                 </button>
                 <button type="button" class="setup-back" @onclick="@(() => _step = 2)" disabled="@_busy">
                     이전 단계로
@@ -172,7 +174,7 @@
             <div class="setup-done">
                 <div class="setup-done-icon">✓</div>
                 <h2>설치가 완료되었습니다</h2>
-                <p><b>@_companyName</b> ERP 설치와 부모 계정 생성이 모두 완료되었습니다.</p>
+                <p><b>@_companyName</b> 히트판 설치와 대표계정 생성이 모두 완료되었습니다.</p>
                 <div class="setup-id">
                     <div class="setup-id-label">고객사 코드</div>
                     <div class="setup-id-value">@_tenantCode</div>
@@ -241,7 +243,7 @@
             return Task.CompletedTask;
         }
 
-        _error = "설치는 설치마법사에서 완료됩니다. 로그인 화면에서 부모 계정으로 접속해 주세요.";
+        _error = "설치는 설치마법사에서 완료됩니다. 로그인 화면에서 대표계정으로 접속해 주세요.";
         _busy = false;
         return Task.CompletedTask;
     }
@@ -279,7 +281,7 @@
                 _parentEmail = _email;
                 _parentName = _ceoName;
                 _step = 3;
-                Snackbar.Add("회사 정보 자동 반영 완료. 부모 계정을 생성해주세요.", MudBlazor.Severity.Success);
+                Snackbar.Add("회사 정보 자동 반영 완료. 대표계정을 생성해주세요.", MudBlazor.Severity.Success);
             }
             else
             {
@@ -349,11 +351,11 @@
             if (res.IsSuccessStatusCode && result?.Success == true)
             {
                 _step = 4;
-                Snackbar.Add("부모 계정이 생성되었습니다. 로그인하시면 ERP를 사용할 수 있습니다.", MudBlazor.Severity.Success);
+                Snackbar.Add("대표계정이 생성되었습니다. 로그인하시면 히트판을 사용할 수 있습니다.", MudBlazor.Severity.Success);
             }
             else
             {
-                _error = result?.Message ?? $"부모 계정 생성 실패 ({(int)res.StatusCode})";
+                _error = result?.Message ?? $"대표계정 생성 실패 ({(int)res.StatusCode})";
             }
         }
         catch (Exception ex)
