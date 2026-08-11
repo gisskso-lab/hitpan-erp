@@ -138,9 +138,9 @@ public sealed class TenantDeviceService : ITenantDeviceService
         await EnsureOpenAsync(ct);
 
         // 1) 기존 기기(같은 tenant + fingerprint)가 있는지 확인
-        var existing = await _db.QueryFirstOrDefaultAsync<(string id, string status)?>(new CommandDefinition(
+        var existing = await _db.QueryFirstOrDefaultAsync<(string id, string status, bool isMainPc)?>(new CommandDefinition(
             """
-            SELECT device_id AS id, status AS status
+            SELECT device_id AS id, status AS status, COALESCE(is_main_pc, 0) AS isMainPc
             FROM tenant_devices
             WHERE tenant_id = @TenantId AND fingerprint = @Fp
             LIMIT 1
@@ -149,9 +149,25 @@ public sealed class TenantDeviceService : ITenantDeviceService
 
         if (existing is not null)
         {
-            var (id, status) = existing.Value;
-            // 폐기된 기기는 재사용 금지
-            if (status == "revoked")
+            var (id, status, isMainPc) = existing.Value;
+
+            // 🔴 2026-08-11 사장님 실측 적발 — "메인PC가 폐기되는게 말이되?"
+            //
+            //   [무엇이 났나] 메인PC(회사 서버)가 `revoked` 상태가 되자 **로그인 자체가 막혔다.**
+            //     그 컴퓨터는 자료가 들어 있는 그 자리이고, 거기서 막히면 대표계정이
+            //     등록기기 화면에 들어가 폐기를 되돌릴 수도 없다 — **스스로 못 빠져나온다.**
+            //
+            //   [왜 생겼나] 화면에는 자물쇠를 달아 메인PC 폐기 버튼을 막아뒀다(:340).
+            //     그런데 그건 **앞으로 폐기되는 것**을 막을 뿐, **이미 revoked 인 기록**은 손대지 못한다.
+            //     ⇒ 막는 자리를 화면에만 두고 **로그인 검사에는 두지 않은 것**이 진범이다.
+            //
+            //   [고침] 메인PC 는 폐기 상태여도 로그인을 막지 않는다.
+            //     메인PC 는 슬롯을 세지 않고 한도에도 안 걸리는 특별한 자리다(설계 원칙).
+            //     "그 컴퓨터에서 히트판이 돈다" 는 사실 자체가 인증이므로, 폐기라는 표식이
+            //     그것을 뒤집을 수 없다.
+            //
+            //   ⚠️ 일반 기기는 종전대로 막는다 — 폐기의 의미가 사라지면 안 된다.
+            if (status == "revoked" && !isMainPc)
             {
                 await LogDeniedAsync(tenantId, userId, ipAddress, id, "denied_revoked", ct);
                 return (false, "폐기된 기기입니다. 관리자에게 문의하세요.", null, false);
