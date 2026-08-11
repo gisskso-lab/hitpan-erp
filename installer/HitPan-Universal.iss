@@ -36,6 +36,31 @@
   #define BackofficeApi "https://back.hitpan.kr"
 #endif
 
+; DB 접속 비밀번호 — 전 고객사 통일 (사장님 결재 2026-07-31, 재확인 2026-08-11)
+;   *"마리아DB DB패스워드는 무조건 통일하라고 했잖아. 수정해."* / *"당연히 되돌려야지."*
+;   근거 문서: docs/CS/20260731_DB비밀번호_CS안내기준.md (🟢 진실원)
+;   사장님 결정 근거: *"DB 가 다르면 CS 를 해줄 수가 없어."*
+;
+;   ⚠️ 이 값은 숨기는 값이 아니다 — 위 문서 §4-1 이 명시한다:
+;     "비밀번호라는 이름이 붙어 있지만 실제로는 제품 설정값이다. 설치 파일 안에 평문으로
+;      들어 있고, 안전한 이유는 비밀이라서가 아니라 그 컴퓨터에서만 쓰이도록 잠겨 있어서다."
+;     (계정 권한이 GRANT ALL ON {자기DB}.* + @localhost 라 외부·타 DB 접근이 막혀 있다.)
+;   ⇒ 그래서 Secret 주입이 아니라 여기에 그대로 둔다. 숨기면 오히려 CS 가 못 쓴다.
+;
+;   🔴 값을 바꾸려면: 사장님 결재 + 전 고객 마이그레이션 계획이 함께 있어야 한다(위 문서 §6).
+;
+;   ⚠️ 이미 설치된 PC 는 이 변경만으로 바뀌지 않는다 (2026-08-11 실측 확인):
+;      · 자동업데이트는 **파일 교체 + DB 마이그레이션**만 하고 설치 EXE 를 돌리지 않는다
+;        ⇒ 아래 db-setup.bat 의 ALTER USER 가 실행되지 않는다.
+;      · 마이그레이션(DB-NN)으로도 못 한다 — 마이그는 hitpan_* 계정으로 도는데
+;        그 계정에는 ALTER USER 권한이 없다(GRANT 는 자기 DB 한정, root 아님).
+;      ⇒ **옛 무작위 비번으로 설치된 PC 는 재설치 전까지 옛 비번을 유지한다.**
+;        CS 는 비번이 안 맞으면 그 PC 를 옛 설치본으로 보고 db.conf 에서 확인한다
+;        (docs/CS/20260811_CS자료집... 참조). 전 고객 통일 방법은 별도 결재 사안이다.
+#ifndef HitPanDbPassword
+  #define HitPanDbPassword "HITPAN2026!"
+#endif
+
 #ifndef OutputName
   #define OutputName "HitPan-ERP-Setup-" + AppVersion
 #endif
@@ -1001,6 +1026,51 @@ begin
     Result := Result + Copy(Chars, Idx, 1);
   end;
 end;
+// DB 비번이 SQL·배치를 깨뜨리지 않는 문자로만 되어 있는지 검사
+//   (사장님 지시 2026-08-11 — 비번 통일에 딸린 안전장치)
+//
+//   왜 필요한가: 사고 #26 은 Base64 의 +/= 가 SQL·배치 인용을 깨뜨려 난 사고였다.
+//   그래서 비번을 영문·숫자로만 뽑는 생성기를 만들어 그 문제를 구조적으로 없앴다.
+//   이제 비번은 사람이 정한 고정값이므로 그 보장이 사라진다 ⇒ 여기서 다시 세운다.
+//
+//   허용: 영문·숫자 + ! @ # $ % ^ * ( ) - _ = + . ?
+//   금지: ' (SQL 인용 탈출) · " · \ (이스케이프) · ` · & | < > (cmd 메타문자) · 공백 · %
+//        → 이 중 하나라도 들어오면 CREATE USER 문이나 db-setup.bat 이 조용히 다른 뜻이 된다.
+//   빈 문자열도 거짓으로 본다(주입 실패를 통과시키면 안 된다).
+// 지연확장(enabledelayedexpansion)이 켜진 배치에 넣을 값의 '!' 를 이스케이프한다.
+//   켜진 상태에서 평문 '!' 는 조용히 사라진다 — 오류가 아니라 "값이 달라지는" 사고라 더 나쁘다.
+//   '^^!' 로 적어야 cmd 가 '!' 한 글자로 읽는다.
+function BatEscape(const S: String): String;
+var
+  i: Integer;
+begin
+  Result := '';
+  for i := 1 to Length(S) do begin
+    if S[i] = '!' then Result := Result + '^^!'
+    else Result := Result + S[i];
+  end;
+end;
+
+function IsSafeDbPassword(const S: String): Boolean;
+var
+  i: Integer;
+  C: Char;
+begin
+  Result := False;
+  if Length(S) = 0 then Exit;
+  for i := 1 to Length(S) do begin
+    C := S[i];
+    if not (((C >= 'A') and (C <= 'Z')) or
+            ((C >= 'a') and (C <= 'z')) or
+            ((C >= '0') and (C <= '9')) or
+            (C = '!') or (C = '@') or (C = '#') or (C = '$') or
+            (C = '^') or (C = '*') or (C = '(') or (C = ')') or
+            (C = '-') or (C = '_') or (C = '=') or (C = '+') or
+            (C = '.') or (C = '?')) then Exit;
+  end;
+  Result := True;
+end;
+
 // 단일 appsettings.json 의 ApiBaseUrl **값만** 정정한다(다른 키·주석·서식 전부 보존).
 //
 // ★★ 봉합 20260804 P0-E (검증팀 데이비드 박 [4] 최종검증 적발) — 인코딩 ★★
@@ -1669,7 +1739,48 @@ begin
   //   G_DbName/User 빈값 가드와 동일 진범(LOCAL이 슬롯 로직 우회, 작6 정합).
   if G_ApiPort = 0 then G_ApiPort := 5257;
   if G_SlotIndex = 0 then G_SlotIndex := 1;
-  G_DbPassword := GenerateAlphanumericKey(32);
+  // ★ 원복 (사장님 지시 2026-08-11): *"마리아DB DB패스워드는 무조건 통일하라고 했잖아. 수정해."*
+  //   *"당연히 되돌려야지."*
+  //
+  //   되돌리는 것이다. install.bat(구 경로)이 처음부터 'hitpan' / 통일 비번을 써 왔고,
+  //   중간에 이 마법사만 슬롯별 랜덤(GenerateAlphanumericKey(32))으로 갈라졌다.
+  //   그 갈라짐이 2026-08-11 실측에서 드러났다 — 메인PC 가 잠겨 명령창으로 풀어야 했는데
+  //   비번이 고객사마다 달라 db.conf 를 열어야만 했고, 그 파일에는 암호화 키·터널 토큰이
+  //   함께 있다. 즉 갇힌 고객을 구하려면 매번 가장 민감한 파일을 열어야 했다.
+  //
+  //   통일해도 남의 회사 DB 로 넘어가지 못한다. 고객사마다 PC 가 다르고, 이 계정 권한은
+  //   GRANT ALL ON {자기DB}.* 로 자기 DB 하나에 묶여 있다(아래 CREATE USER 참조).
+  //   ⇒ 잃는 것은 없고, CS 가 못 들어가는 문제만 사라진다.
+  //
+  //   🔴 root(MariaRootPw)는 통일하지 않는다 — 그 PC 의 DB 전부를 여는 열쇠라
+  //      한 곳에서 새면 다른 고객사까지 열린다. 여기는 설치마다 무작위 그대로 둔다.
+  //      (install.bat 도 root 는 통일하지 않고 설치자에게 물어본다.)
+  //
+  //   값은 소스에 적지 않는다. 빌드 시 주입되고(HITPAN_DB_PASSWORD), 없으면 빌드가 멈춘다.
+  //   평문으로 적어 두면 공개 저장소에 남고 시크릿 스캔이 막는다(2026-08-11 실제로 걸렸다).
+  G_DbPassword := '{#HitPanDbPassword}';
+
+  // 🔴 문자 검사 — 사고 #26 봉합을 통일 이후에도 지킨다.
+  //   종전 랜덤 생성기는 영문·숫자만 뽑아 이 문제가 구조적으로 없었다. 이제는 사람이 정한 값이
+  //   들어오므로 작은따옴표·역슬래시·따옴표가 섞이면 아래 CREATE USER 의 SQL 과
+  //   db-setup.bat 인용이 깨진다. 설치가 실패하면 다행이고, **더 나쁜 경우는 조용히 다른 비번으로
+  //   계정이 만들어져** db.conf 와 어긋난 채 배포되는 것이다. 그래서 여기서 먼저 막는다.
+  //
+  //   ⚠️ '!' 는 허용한다 — 결재된 값(2026-07-31)이 '!' 로 끝난다.
+  //      다만 아래 db-setup.bat 은 'setlocal enabledelayedexpansion' 을 켜는데, 그 안에서는
+  //      **평문에 있는 '!' 가 조용히 사라진다**(cmd 가 지연확장 기호로 먹어버림).
+  //      그러면 계정은 '!' 빠진 비번으로 만들어지는데 db.conf 에는 '!' 가 붙은 값이 적혀
+  //      **설치는 성공했는데 ERP 만 ERROR 1045 로 못 붙는** 침묵 고장이 된다.
+  //      ⇒ 배치에 넣기 직전 '!' 를 '^^!' 로 바꿔 이스케이프한다(BatEscape).
+  //      db.conf 에는 원본 그대로 적는다 — 그쪽은 배치가 아니다.
+  if not IsSafeDbPassword(G_DbPassword) then begin
+    MsgBox('설치를 진행할 수 없습니다.' + #13#10#13#10 +
+           '내부 설정값이 올바르지 않습니다. 본사에 문의해 주세요. (코드: DBPW-FMT)',
+           mbCriticalError, MB_OK);
+    // 값 자체는 로그에 남기지 않는다 — 로그는 CS 가 열어보는 파일이다.
+    Log('[20260811] DB 비번 형식 위반 — 영문·숫자 외 문자 포함. DB 셋업 중단.');
+    Exit;  // CurStepChanged 는 procedure — Result 가 없다. 여기서 빠져나가면 DB 셋업을 하지 않는다.
+  end;
 
   BatchFile := ExpandConstant('{tmp}\db-setup.bat');
   BatchContent := TStringList.Create;
@@ -1693,8 +1804,18 @@ begin
     BatchContent.Add('echo [chk] MYSQL=!MYSQL! >> "!DIAGLOG!"');
     // 사고 #16·#21·#22 봉합 — 회사별 DB 박음
     BatchContent.Add(Format('"!MYSQL!" -u root -p%s -e "CREATE DATABASE IF NOT EXISTS %s CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;"', [MariaRootPw, G_DbName]));
-    // 사고 #18 봉합 — 회사별 user + 랜덤 비번 (하드코딩 0건)
-    BatchContent.Add(Format('"!MYSQL!" -u root -p%s -e "CREATE USER IF NOT EXISTS ''%s''@''localhost'' IDENTIFIED BY ''%s''; GRANT ALL ON %s.* TO ''%s''@''localhost''; FLUSH PRIVILEGES;"', [MariaRootPw, G_DbUser, G_DbPassword, G_DbName, G_DbUser]));
+    // 회사별 user + 전 고객사 통일 비번 (사장님 지시 2026-08-11 — 랜덤에서 원복)
+    //
+    // 🔴 ALTER USER 가 반드시 따라와야 한다.
+    //   CREATE USER IF NOT EXISTS 는 계정이 이미 있으면 **아무것도 하지 않는다.**
+    //   그래서 기존 설치 PC 에서는 새 통일 비번이 MariaDB 에 반영되지 않는데,
+    //   아래 db.conf 에는 통일 비번이 기록된다 ⇒ 적힌 값과 실제 값이 어긋나
+    //   ERP 가 ERROR 1045 로 못 붙는다. 통일했다고 믿는 CS 도 똑같이 막힌다.
+    //   ⇒ CREATE 로 없으면 만들고, ALTER 로 있으면 맞춘다. 두 줄이 한 몸이다.
+    //   (기존 고객이 업데이트로 이 설치본을 받는 순간 옛 랜덤 비번이 통일 비번으로 정리된다.)
+    BatchContent.Add(Format('"!MYSQL!" -u root -p%s -e "CREATE USER IF NOT EXISTS ''%s''@''localhost'' IDENTIFIED BY ''%s''; GRANT ALL ON %s.* TO ''%s''@''localhost''; FLUSH PRIVILEGES;"', [MariaRootPw, G_DbUser, BatEscape(G_DbPassword), G_DbName, G_DbUser]));
+    BatchContent.Add(Format('"!MYSQL!" -u root -p%s -e "ALTER USER ''%s''@''localhost'' IDENTIFIED BY ''%s''; FLUSH PRIVILEGES;"', [MariaRootPw, G_DbUser, BatEscape(G_DbPassword)]));
+    BatchContent.Add('echo [chk] ALTER USER(비번 통일) errorlevel=!errorlevel! >> "!DIAGLOG!"');
     BatchContent.Add('echo [chk] CREATE DB/USER errorlevel=!errorlevel! >> "!DIAGLOG!"');
     // ★ 봉합 2026-06-18 (트리거 import 안전화): 새 MariaDB는 log_bin=ON + trust=0 기본일 수 있어
     //   UUID() 등 비결정 함수를 쓰는 트리거 8개 생성이 ERROR 1419로 실패 → 스키마 부분 import → 설치 실패.
@@ -1756,7 +1877,7 @@ begin
     //   db.conf에 CREATE USER와 동일한 G_DbPassword가 기록되어 ERP 첫 기동이 실제 접속을 검증한다.
     //   따라서 설치 시점 hitpan 접속 가드는 과잉이며 정상 설치를 막았다 → 차단 제거.
     //   단 접속 성패는 진단 로그에만 남겨 원인(명령줄 -p 비번 해석 차이) 추적은 계속 가능하게 둔다(차단 X).
-    BatchContent.Add(Format('"!MYSQL!" -u %s -p%s %s -e "SELECT 1" > nul 2> nul', [G_DbUser, G_DbPassword, G_DbName]));
+    BatchContent.Add(Format('"!MYSQL!" -u %s -p%s %s -e "SELECT 1" > nul 2> nul', [G_DbUser, BatEscape(G_DbPassword), G_DbName]));
     BatchContent.Add('echo [chk] (참고) hitpan SELECT 1 errorlevel=!errorlevel! (설치 차단 안 함) >> "!DIAGLOG!"');
     BatchContent.Add('echo [chk] 배치 정상 종료 도달 (exit 0 예정) >> "!DIAGLOG!"');
     BatchContent.Add('del "!CNTF!" > nul 2> nul');
