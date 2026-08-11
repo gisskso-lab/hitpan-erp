@@ -482,6 +482,9 @@ jobs:
         shell: pwsh
         run: |
           $ver = '${{ inputs.version }}'
+          # DB 비번(/DHitPanDbPassword)은 주입하지 않는다 — .iss 의 #define 이 단일 출처다.
+          #   전 고객사 통일값이고 제품 설정값 성격이라 Secret 이 아니다
+          #   (docs/CS/20260731_DB비밀번호_CS안내기준.md §4-1, 사장님 결재).
           & 'C:\Program Files (x86)\Inno Setup 6\ISCC.exe' `
             "/DAppVersion=$ver" `
             "/DBundleDir=payload" `

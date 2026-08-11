@@ -179,6 +179,7 @@ jobs:
             Write-Error "Installer script not found: $iss"
             exit 1
           }
+          # DB 비번은 .iss #define 이 단일 출처 — 여기서 주입하지 않는다(deploy-update.yml 과 동일).
           # ★ 봉합 (2026-07-21): /DBundleDir 주입 누락 — CI 는 installer/payload 에 산출물을 놓는데
           #   .iss 기본값은 ..\installer-build\bundle 이라 서로 다른 곳을 보고 있었다(경로 불일치).
           #   .iss 의 상대경로 기준은 .iss 파일 위치(installer/)이므로 payload 로 준다.
