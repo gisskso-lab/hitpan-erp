@@ -40,7 +40,14 @@ die()  { printf '[deploy-web] 🔴 %s\n' "$*" >&2; exit 1; }
 # ── 상수 (경로·서비스명·EXCLUDES — 전부 하드코딩, 러너가 못 바꿈) ───────────────
 STAGING="/var/hitpan/staging/web"          # 러너가 데이터만 올리는 스테이징(경계 A)
 OPT="/opt/hitpan"                          # 서비스 WorkingDirectory 정합 경로
-BACKUP_KEEP=5                              # -bak 세대 N개만 유지(B-16 디스크)
+# -bak 세대 N개만 유지(B-16 디스크)
+#   🔴 5 → 2 (2026-08-11, 사장님 지시 "자동 디스크 정리")
+#   실측: 한 세대 = backoffice-api 88M + backoffice-web 23M + landing 9M ≈ 120M.
+#   5세대면 3디렉토리 × 5 = 15개 · 595M 이다. 이 서버는 9.8G 뿐이라
+#   업데이트 패키지(716M)와 겹치는 순간 2048MB 게이트를 못 넘긴다(오늘 실제로 못 넘겼다).
+#   ⇒ 2세대면 약 240M. 현행(N) + 직전(N-1) 로 롤백은 그대로 가능하다
+#     (게시 쪽 작9 P0-A 패키지 회전이 쓰는 기준과 같다 — 규율을 하나로 맞춘다).
+BACKUP_KEEP="${HITPAN_BACKUP_KEEP:-2}"
 MIN_FREE_MB=2048                           # 배포 전 최소 여유공간(B-16 프리플라이트)
 LOCK="/var/hitpan/deploy/deploy-web.lock"
 
@@ -105,10 +112,36 @@ if [[ -n "$RELEASE_VERSION" ]]; then
 fi
 
 # ── 3) free-space 프리플라이트 (B-16 — 백업이 디스크를 채워 배포가 반쯤 죽는 사고 차단) ──
+#
+# 🔴 봉합 2026-08-11 (사장님 지시 "자동 디스크 정리") — 순서가 뒤집혀 있었다.
+#   종전: [공간검사(108)] → [백업생성(120)] → [세대정리(123)]
+#   세대 정리가 공간 검사 **뒤**에 있어, 공간이 모자라면 정리에 닿기 전에 die 했다.
+#   즉 **지울 게 눈앞에 있는데 못 지우고 죽는다.** 스스로 잠긴 구조다.
+#   실측 2026-08-11 09:xx — 여유 1949MB < 2048MB 로 배포 실패. 그때 서버에는
+#   -bak 15개 595M 이 그대로 있었다. 그걸 지웠으면 통과했을 양이다.
+#   (사장님이 손으로 지우고서야 배포가 됐다 — 자동화가 해야 할 일을 사람이 했다.)
+#
+#   봉합: **정리를 먼저 하고 나서 공간을 잰다.** 정리는 멱등이라 먼저 해도 안전하다.
+#   ⚠️ 이번 배포분 백업은 아직 만들기 전이라 여기서 지워지지 않는다 — 롤백 대상은 보존된다.
+hitpan_rotate_baks() {
+  local d
+  for d in "${OPT_DIRS[@]}"; do
+    # 최신 BACKUP_KEEP 개만 남긴다. mtime 최신순(-t) 이라 이름 정렬 오판이 없다.
+    ls -td "$OPT/$d"-bak-* 2>/dev/null | tail -n +$((BACKUP_KEEP + 1)) | xargs -r rm -rf
+  done
+}
+
+BEFORE_MB=$(df -Pm "$OPT" | awk 'NR==2{print $4}')
+hitpan_rotate_baks
 FREE_MB=$(df -Pm "$OPT" | awk 'NR==2{print $4}')
 [[ -n "$FREE_MB" ]] || die "여유공간을 읽지 못했습니다($OPT)."
+if [[ -n "$BEFORE_MB" && "$FREE_MB" != "$BEFORE_MB" ]]; then
+  log "오래된 -bak 정리: ${BEFORE_MB}MB → ${FREE_MB}MB 확보(세대 유지 ${BACKUP_KEEP})"
+fi
 if (( FREE_MB < MIN_FREE_MB )); then
-  die "여유공간 부족: ${FREE_MB}MB < 최소 ${MIN_FREE_MB}MB. 오래된 -bak 정리 후 재시도(B-16 디스크 96.8% 실측)."
+  # 여기까지 왔으면 지울 수 있는 -bak 은 이미 다 지운 상태다.
+  #   ⇒ 남은 원인은 -bak 이 아니다(로그·저널·다른 산출물). 그 사실을 메시지에 담는다.
+  die "여유공간 부족: ${FREE_MB}MB < 최소 ${MIN_FREE_MB}MB. -bak 세대 정리는 이미 수행했다 — 다른 원인을 확인하라(예: du -sh /var/log/* /opt/hitpan/*)."
 fi
 log "free-space 확인: ${FREE_MB}MB (>= ${MIN_FREE_MB}MB)"
 
@@ -119,10 +152,13 @@ for i in "${!OPT_DIRS[@]}"; do
   if [[ -d "$OPT/$d" ]]; then
     cp -r "$OPT/$d" "$OPT/$d-bak-$TS"
     log "백업: $OPT/$d → $OPT/$d-bak-$TS"
-    # 세대 정리: 최신 BACKUP_KEEP 개만 남기고 삭제
-    ls -td "$OPT/$d"-bak-* 2>/dev/null | tail -n +$((BACKUP_KEEP + 1)) | xargs -r rm -rf
   fi
 done
+# 세대 정리 — 방금 만든 백업까지 포함해 다시 센다(위 §3 에서 쓴 함수를 재사용).
+#   §3 정리는 "배포를 시작할 공간"을 만드는 것이고, 여기 정리는 "이번 세대가 늘어난 만큼"을 줄인다.
+#   둘 다 필요하다: §3 만 있으면 세대가 +1 된 채로 끝나고, 여기만 있으면 오늘처럼 시작조차 못 한다.
+hitpan_rotate_baks
+log "백업 세대 정리 완료(유지 ${BACKUP_KEEP}) — 여유 $(df -Pm "$OPT" | awk 'NR==2{print $4}')MB"
 
 # ── 5) 스테이징 → /opt 이동 (시크릿 exclude) + 재기동 ─────────────────────────
 for i in "${!COMPONENTS[@]}"; do
