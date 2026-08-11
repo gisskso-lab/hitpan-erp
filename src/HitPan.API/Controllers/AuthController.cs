@@ -365,6 +365,143 @@ public class AuthController : ControllerBase
     }
 
     /// <summary>
+    /// 로그인 전(=미인증) 업데이트 상태 조회 — 로그인 화면의 업데이트 안내용.
+    ///
+    /// 🔴 왜 필요한가 (사장님 지시 2026-08-11)
+    ///   *"히트판 업데이트 팝업도 혹시 이런 문제가 생길지 모르니, 로그인 창에 띄워."*
+    ///
+    ///   그날 실제로 그 일이 났다. 기기 판정이 로그인을 막자 **업데이트로 고칠 수도 없었다** —
+    ///   봉합은 새 버전 안에 있는데, 그것을 받으려면 로그인해서 팝업을 눌러야 하고,
+    ///   그 로그인이 막혀 있었다. **고치는 수단 자체가 잠긴 것**이다.
+    ///   ⇒ 업데이트는 **로그인이 망가져도 닿을 수 있는 자리**에 있어야 한다. 마지막 탈출구다.
+    ///
+    /// 🔴 왜 로컬에서만 여는가
+    ///   인증을 걸지 않으므로, 터널 밖에서 아무나 버전을 묻거나 업데이트를 밀어넣으면 안 된다.
+    ///   그래서 **그 컴퓨터 앞에 앉은 사람**(loopback)만 쓸 수 있게 막는다.
+    ///   메인PC 판정과 같은 방식이다 — 브라우저에게 묻지 않고 **서버가 들어온 자리를 직접 본다.**
+    ///
+    /// ⚠️ 2026-07-22 작1 과 혼동 금지
+    ///   그때 걷어낸 것은 **로그인 "성공 후"** 팝업이다. 인증 상태가 방송되면서 /login 이 폐기돼
+    ///   팝업이 0.5초 만에 사라졌다. 이것은 **로그인 "전"** 이라 화면이 넘어가지 않는다. 다른 자리다.
+    ///
+    /// 어떤 예외도 UpdateAvailable=false 로 폴백한다 — 이 조회가 실패해도 로그인 화면은 떠야 한다.
+    /// </summary>
+    [HttpGet("update-status-local")]
+    [AllowAnonymous]
+    public async Task<IActionResult> GetUpdateStatusLocal(CancellationToken ct)
+    {
+        var remote = HttpContext.Connection.RemoteIpAddress;
+        var viaTunnel = Request.Headers.ContainsKey("CF-Connecting-IP")
+                     || Request.Headers.ContainsKey("X-Forwarded-For");
+
+        if (viaTunnel || remote is null || !System.Net.IPAddress.IsLoopback(remote))
+        {
+            // 바깥에서 온 요청 — 있는지 없는지도 알려주지 않는다
+            return NotFound();
+        }
+
+        try
+        {
+            var status = await ComputeUpdateStatusAsync(ct);
+            return Ok(status);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "로그인 전 업데이트 상태 조회 실패 — 안내를 건너뛴다");
+            return Ok(new UpdateStatusDto { UpdateAvailable = false });
+        }
+    }
+
+    /// <summary>
+    /// 로그인 전(=미인증) 업데이트 동의 — 로그인 화면의 [지금 업데이트] 버튼용.
+    ///
+    /// 🔴 왜 필요한가 (사장님 지시 2026-08-11)
+    ///   상태만 보여주고 누를 수 없으면 **갇힌 상태가 안 풀린다.** 그날 실제로 그랬다 —
+    ///   로그인이 막혔는데 그것을 고칠 업데이트도 로그인해야만 눌 수 있었다.
+    ///   ⇒ 보는 것과 누르는 것이 **같은 자리에** 있어야 탈출구가 된다.
+    ///
+    /// 🔴 안전장치 — 인증이 없는 대신 세 겹으로 좁힌다
+    ///   ① loopback 에서만 받는다 — 그 컴퓨터 앞에 앉은 사람만. 터널 밖에서는 404
+    ///   ② approve 만 받는다 — 거절은 로그인해서 하면 된다. 여기서 할 일은 탈출뿐이다
+    ///   ③ 워치독이 이미 적재한 버전과 **일치할 때만** 받는다 — 아무 값이나 넣지 못한다
+    ///
+    ///   ⇒ 이 셋이면 "그 PC 앞의 사람이, 이미 준비된 업데이트를, 승인만" 할 수 있다.
+    ///     남이 원격으로 임의 버전을 밀어넣는 길은 없다.
+    ///
+    /// user_id 는 JWT 가 없으므로 'local-console' 로 남긴다 — 누가 눌렀는지 구분되어야 하기 때문이다.
+    /// tenant_id 는 로컬 단일 테넌트 DB 라 tenants 에서 읽는다(헌법 #2 는 클레임 위조 방지가 목적이고,
+    /// 여기서는 애초에 파라미터로 받지 않는다).
+    /// </summary>
+    [HttpPost("update-consent-local")]
+    [AllowAnonymous]
+    public async Task<IActionResult> UpdateConsentLocal([FromBody] UpdateConsentRequest request, CancellationToken ct)
+    {
+        var remote = HttpContext.Connection.RemoteIpAddress;
+        var viaTunnel = Request.Headers.ContainsKey("CF-Connecting-IP")
+                     || Request.Headers.ContainsKey("X-Forwarded-For");
+
+        if (viaTunnel || remote is null || !System.Net.IPAddress.IsLoopback(remote))
+            return NotFound();
+
+        if (request is null || string.IsNullOrWhiteSpace(request.UpdateVersion))
+            return BadRequest(new { message = "업데이트 버전이 필요합니다." });
+
+        // ② 승인만 받는다
+        var action = (request.Action ?? "approve").Trim().ToLowerInvariant();
+        if (action != "approve")
+            return BadRequest(new { message = "로그인 전에는 승인만 할 수 있습니다." });
+
+        try
+        {
+            // ③ 워치독이 적재한 그 버전인지 대조
+            var status = await ComputeUpdateStatusAsync(ct);
+            if (!status.UpdateAvailable
+                || !string.Equals(status.LatestVersion, request.UpdateVersion.Trim(), StringComparison.OrdinalIgnoreCase))
+            {
+                return BadRequest(new { message = "준비된 업데이트가 없습니다." });
+            }
+
+            var db = HttpContext.RequestServices.GetRequiredService<System.Data.IDbConnection>();
+            if (db.State != System.Data.ConnectionState.Open)
+            {
+                if (db is System.Data.Common.DbConnection c) await c.OpenAsync(ct);
+                else db.Open();
+            }
+
+            var tenantId = await Dapper.SqlMapper.QueryFirstOrDefaultAsync<string>(db,
+                new Dapper.CommandDefinition("SELECT tenant_id FROM tenants LIMIT 1", cancellationToken: ct));
+
+            if (string.IsNullOrEmpty(tenantId))
+                return BadRequest(new { message = "준비된 업데이트가 없습니다." });
+
+            await Dapper.SqlMapper.ExecuteAsync(db, new Dapper.CommandDefinition(
+                """
+                INSERT INTO local_update_consents
+                    (tenant_id, user_id, update_version, action, consented_at)
+                VALUES
+                    (@TenantId, @UserId, @UpdateVersion, @Action, @ConsentedAt)
+                """,
+                new
+                {
+                    TenantId = tenantId,
+                    UserId = "local-console",
+                    UpdateVersion = request.UpdateVersion.Trim(),
+                    Action = action,
+                    ConsentedAt = DateTime.Now
+                },
+                cancellationToken: ct));
+
+            _logger.LogInformation("로그인 전 업데이트 승인 — {Version}", request.UpdateVersion);
+            return Ok(new { message = "업데이트를 시작합니다. 잠시 후 히트판이 꺼졌다가 다시 켜집니다." });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "로그인 전 업데이트 승인 실패");
+            return StatusCode(500, new { message = "업데이트 시작에 실패했습니다. 잠시 후 다시 시도해주세요." });
+        }
+    }
+
+    /// <summary>
     /// 워치독이 local_update_status(DB-83)에 적재한 최신 새버전을 읽어 설치버전과 SemVer 비교한다.
     ///   로그인 응답 보강(EnrichUpdateConsentInfoAsync)과 GET(update-status)의 단일 진실원.
     ///   테이블 부재·조회 실패·파싱 실패 등 어떤 예외도 UpdateAvailable=false 안전 폴백(헌법 #15 침묵 금지).

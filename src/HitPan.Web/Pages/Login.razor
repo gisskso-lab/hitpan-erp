@@ -5,6 +5,8 @@
 @inject NavigationManager Navigation
 @inject AuthenticationStateProvider AuthenticationStateProvider
 @inject IDialogService DialogService
+@inject HttpClient Http
+@inject ISnackbar Snackbar
 @using HitPan.Web.Components.Common
 
 <PageTitle>로그인 — 히트판 ERP</PageTitle>
@@ -16,6 +18,38 @@
             <MudText Typo="Typo.h5" Style="font-family: 'Noto Sans KR', sans-serif;">히트판 ERP</MudText>
             <MudText Typo="Typo.body2" Class="mud-text-secondary">사업을 한곳에서</MudText>
         </div>
+
+        @* 🔴 로그인 전 업데이트 안내 (사장님 지시 2026-08-11)
+             *"히트판 업데이트 팝업도 혹시 이런 문제가 생길지 모르니, 로그인 창에 띄워."*
+
+             그날 실제로 그 일이 났다. 기기 판정이 로그인을 막자 업데이트로 고칠 수도 없었다 —
+             봉합은 새 버전 안에 있는데 받으려면 로그인해야 했고, 그 로그인이 막혀 있었다.
+             ⇒ 업데이트는 로그인이 망가져도 닿는 자리에 있어야 한다. 마지막 탈출구다.
+
+             ⚠️ 2026-07-22 작1 과 다른 자리다. 그때 걷어낸 것은 로그인 "성공 후" 팝업이고
+                (인증 방송 → /login 폐기 → 팝업이 0.5초 만에 사라짐), 이것은 로그인 "전" 이라
+                화면이 넘어가지 않는다. 팝업이 아니라 화면에 붙은 안내라 사라질 수도 없다. *@
+        @if (_updateAvailable)
+        {
+            <MudAlert Severity="Severity.Info" Dense="true" Class="mb-4"
+                      Style="font-family: 'Noto Sans KR', sans-serif;">
+                <MudText Typo="Typo.body2">
+                    새 버전(@_latestVersion)이 준비되었습니다.
+                </MudText>
+                <MudButton Variant="Variant.Filled"
+                           Color="Color.Primary"
+                           Size="Size.Small"
+                           FullWidth="true"
+                           Class="mt-2"
+                           Disabled="_updateStarting"
+                           OnClick="StartUpdateAsync">
+                    @(_updateStarting ? "업데이트 준비 중…" : "지금 업데이트")
+                </MudButton>
+                <MudText Typo="Typo.caption" Class="mud-text-secondary d-block mt-1">
+                    자료를 자동으로 백업한 뒤 진행되며, 그 사이 히트판이 잠시 꺼졌다 켜집니다.
+                </MudText>
+            </MudAlert>
+        }
 
         <MudForm @ref="_form" ValidationDelay="0">
             <MudTextField @bind-Value="_email"
@@ -68,13 +102,79 @@
     private string? _errorMessage;
     private bool _busy;
 
+    // 🔴 로그인 전 업데이트 안내 (사장님 지시 2026-08-11) — 상세 근거는 위 마크업 주석
+    private bool _updateAvailable;
+    private string? _latestVersion;
+    private bool _updateStarting;
+
     protected override async Task OnInitializedAsync()
     {
         var state = await AuthenticationStateProvider.GetAuthenticationStateAsync();
         if (state.User.Identity?.IsAuthenticated == true)
         {
             Navigation.NavigateTo("/", forceLoad: true);
+            return;
         }
+
+        await LoadUpdateNoticeAsync();
+    }
+
+    /// <summary>
+    /// 로그인 전 업데이트 상태를 읽는다. 실패해도 로그인 화면은 그대로 떠야 하므로
+    /// 어떤 예외도 삼킨다 — 이 안내 때문에 로그인 자체가 막히면 본말전도다(헌법 #20).
+    /// </summary>
+    private async Task LoadUpdateNoticeAsync()
+    {
+        try
+        {
+            var status = await Http.GetFromJsonAsync<LoginUpdateStatus>("api/auth/update-status-local");
+            if (status?.UpdateAvailable == true && !string.IsNullOrWhiteSpace(status.LatestVersion))
+            {
+                _updateAvailable = true;
+                _latestVersion = status.LatestVersion;
+            }
+        }
+        catch (Exception ex)
+        {
+            // 헌법 #15 — 침묵하지 않는다. 다만 화면에는 아무것도 띄우지 않는다.
+            Console.Error.WriteLine("[Login] 업데이트 안내 조회 실패: " + ex.Message);
+        }
+    }
+
+    private async Task StartUpdateAsync()
+    {
+        if (_updateStarting || string.IsNullOrWhiteSpace(_latestVersion)) return;
+        _updateStarting = true;
+
+        try
+        {
+            using var res = await Http.PostAsJsonAsync(
+                "api/auth/update-consent-local",
+                new { UpdateVersion = _latestVersion, Action = "approve" });
+
+            if (res.IsSuccessStatusCode)
+            {
+                Snackbar.Add("업데이트를 시작합니다. 잠시 후 히트판이 꺼졌다가 다시 켜집니다.", Severity.Success);
+                _updateAvailable = false;
+            }
+            else
+            {
+                Snackbar.Add("업데이트를 시작하지 못했습니다. 잠시 후 다시 시도해 주세요.", Severity.Warning);
+                _updateStarting = false;
+            }
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine("[Login] 업데이트 시작 실패: " + ex.Message);
+            Snackbar.Add("업데이트를 시작하지 못했습니다. 잠시 후 다시 시도해 주세요.", Severity.Warning);
+            _updateStarting = false;
+        }
+    }
+
+    private sealed class LoginUpdateStatus
+    {
+        public bool UpdateAvailable { get; set; }
+        public string? LatestVersion { get; set; }
     }
 
     private async Task SubmitAsync()
