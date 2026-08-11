@@ -14,6 +14,13 @@ namespace HitPan.API.Controllers;
 [ApiController]
 [Route("api/backup")]
 [Authorize(Policy = "TenantAdminOnly")]
+// 🔴 2026-08-11 (사장님 지시): 자료관리는 **부모계정 + 메인PC 환경에서만**.
+//   백업·복원은 자료가 든 그 컴퓨터에서 하는 일이다. 원격에서 남의 회사 자료를
+//   되돌리는 경로를 만들지 않는다. 화면만 감추면 API 를 직접 불러 뚫린다.
+//
+//   ⚠️ 업데이트 직전 자동백업은 이 API 를 쓰지 않는다 — 워치독이 mysqldump 를 직접 돌린다
+//     (WatchdogBackupRunner). 그래서 여기를 막아도 업데이트 흐름은 끊기지 않는다. 확인함.
+[HitPan.API.Security.MainPcOnly]
 public sealed class BackupController : HitPanControllerBase
 {
     private readonly IBackupService _service;

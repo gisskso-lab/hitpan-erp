@@ -46,6 +46,11 @@
                        (2026-07-22 작1: /login 폐기로 팝업이 사라지던 진범 봉합). 약관 미동의 시엔 게이트가 스킵. *@
                     <UpdateConsentGate />
 
+                    @* 기기 인증 게이트 (20260811작3 (A), 사장님 오더 2026-08-11)
+                       "인증키가 없어 인증할 수 없는 슬롯은 로그인만 되고 화면은 비활성화"
+                       인증 안 된 기기면 화면을 덮고 안내 + 인증 번호 입력칸을 보여준다. *@
+                    <DeviceAuthGate />
+
                     <main class="hitpan-content mud-px-4 mud-py-4">
                         <ErrorBoundary>
                             <ChildContent>@Body</ChildContent>

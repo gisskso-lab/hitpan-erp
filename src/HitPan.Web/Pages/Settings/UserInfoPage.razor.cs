@@ -60,7 +60,9 @@ public partial class UserInfoPage : ComponentBase, IDisposable
     // 기기 등록 상태 (사장님 결재 2026-06-08 - 네이버·넷플릭스 방식)
     private bool _deviceRegistered;
     private bool _deviceDialogShown;
-    private bool _deviceSubmitting;
+    // ⚠️ "등록 중..." 표시용이었으나 화면에서 그 버튼을 뺐다(2026-08-11).
+    //   등록 본체(RegisterDeviceAsync)는 아래 주석대로 보존하되, 화면에 안 쓰이는 이 값은
+    //   빌드 경고(헌법 #19 — 경고 0)를 남기므로 지운다. 되살릴 때 한 줄 다시 넣으면 된다.
     private bool _deviceSuccess;
     private string _deviceMessage = "";
     private int _deviceCount;
@@ -87,7 +89,7 @@ public partial class UserInfoPage : ComponentBase, IDisposable
             return;
         }
 
-        _deviceSubmitting = true;
+        // (진행중 표시 제거 — 위 주석 참조)
         _deviceMessage = "";
         try
         {
@@ -150,7 +152,7 @@ public partial class UserInfoPage : ComponentBase, IDisposable
         }
         finally
         {
-            _deviceSubmitting = false;
+            // (진행중 표시 제거 — 위 주석 참조)
             StateHasChanged();
         }
     }

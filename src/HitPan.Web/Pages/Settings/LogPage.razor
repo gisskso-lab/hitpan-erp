@@ -1,6 +1,10 @@
 @page "/data/logs"
 @namespace HitPan.Web.Pages.SettingsUi
-@attribute [Authorize]
+@* 🔴 2026-08-11 (사장님 지시): 자료관리는 **부모계정만**.
+     ⚠️ 이 화면은 메인PC 조건을 걸지 않는다 — 자료를 **읽기만** 하고 건드리지 않는다.
+       고장 원인을 찾을 때 대표가 어디서든 봐야 하는 화면이다.
+       (백업·복원·초기화는 자료를 바꾸므로 MainPcOnly 를 함께 건다) *@
+@attribute [Authorize(Roles = "system_admin,tenant_admin,TenantAdmin")]
 @using HitPan.Web.Services
 
 @inject LogService LogApi

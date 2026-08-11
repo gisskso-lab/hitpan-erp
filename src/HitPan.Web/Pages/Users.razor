@@ -1,6 +1,8 @@
 @page "/users"
 @namespace HitPan.Web.Pages.UsersUi
-@attribute [Authorize]
+@* 🔴 2026-08-11 (사장님 지시): 설정관리는 **부모계정(대표)만**.
+     메뉴에서 감추는 것만으로는 주소를 직접 치면 그대로 들어온다 — 화면에서도 막는다. *@
+@attribute [Authorize(Roles = "system_admin,tenant_admin,TenantAdmin")]
 @using HitPan.Web.Models
 @using HitPan.Web.Services
 @using HitPan.Web.Components.Common

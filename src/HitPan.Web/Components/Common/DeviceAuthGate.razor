@@ -1,0 +1,151 @@
+@* 기기 인증 게이트 — 인증되지 않은 기기의 화면을 덮는다 (20260811작3 (A))
+
+   사장님 원문 (2026-08-11):
+     "인증키가 없어 인증할 수 없는 슬롯은
+        로그인만 되고 화면은 비활성화 그리고
+        비활성화된 화면에 '인증된 기기가 아닙니다. 히트판 관리자에게 문의하세요.' 안내"
+     "메인PC에서 인증키가 생성되면, 요청한 클라이언트PC에서 입력하는 방식.
+      그 메인PC에서 키를 주는 방식은 대표 마음이지."
+
+   🔴 로그인은 막지 않는다. 화면만 덮는다.
+      로그인부터 막으면 직원은 뭐가 잘못됐는지 모르고 전화한다.
+*@
+@using HitPan.Web.Services
+@using Microsoft.AspNetCore.Components.Web
+@implements IDisposable
+@inject HttpClient Http
+@inject IJSRuntime JS
+@inject ISnackbar Snackbar
+@inject ILogger<DeviceAuthGate> _logger
+
+@if (_blocked)
+{
+    <div class="hp-device-gate">
+        <MudPaper Elevation="8" Class="pa-6" Style="max-width:460px;width:100%;">
+            <div class="d-flex align-center mb-4">
+                <MudIcon Icon="@Icons.Material.Filled.Lock" Color="Color.Warning"
+                         Style="font-size:32px;" Class="mr-2" />
+                <MudText Typo="Typo.h6">인증된 기기가 아닙니다</MudText>
+            </div>
+
+            <MudText Typo="Typo.body1" Class="mb-4">
+                히트판 관리자에게 문의하세요.
+            </MudText>
+
+            <MudDivider Class="my-4" />
+
+            @* 관리자에게 번호를 받았으면 여기서 넣는다 *@
+            <MudText Typo="Typo.body2" Class="mb-2">
+                관리자에게 <b>인증 번호</b>를 받으셨나요? 아래에 넣어 주세요.
+            </MudText>
+
+            <MudTextField @bind-Value="_inputKey"
+                          Label="인증 번호"
+                          Variant="Variant.Outlined"
+                          Immediate="true"
+                          Disabled="_verifying"
+                          OnKeyDown="OnKeyDown"
+                          Class="mb-3" />
+
+            @if (!string.IsNullOrEmpty(_error))
+            {
+                <MudAlert Severity="Severity.Error" Dense="true" Class="mb-3">@_error</MudAlert>
+            }
+
+            <MudButton Variant="Variant.Filled" Color="Color.Primary" FullWidth="true"
+                       Disabled="_verifying || string.IsNullOrWhiteSpace(_inputKey)"
+                       OnClick="VerifyAsync">
+                @if (_verifying)
+                {
+                    <MudProgressCircular Size="Size.Small" Indeterminate="true" Class="mr-2" />
+                    <span>확인하는 중…</span>
+                }
+                else
+                {
+                    <span>확인</span>
+                }
+            </MudButton>
+        </MudPaper>
+    </div>
+}
+
+@code {
+    private bool _blocked;
+    private bool _verifying;
+    private string _inputKey = "";
+    private string? _error;
+
+    protected override void OnInitialized()
+    {
+        _blocked = DeviceAuthState.IsBlocked;
+        DeviceAuthState.Changed += OnStateChanged;
+    }
+
+    private void OnStateChanged() => InvokeAsync(() =>
+    {
+        _blocked = DeviceAuthState.IsBlocked;
+        StateHasChanged();
+    });
+
+    public void Dispose() => DeviceAuthState.Changed -= OnStateChanged;
+
+    private async Task OnKeyDown(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter" && !_verifying && !string.IsNullOrWhiteSpace(_inputKey))
+            await VerifyAsync();
+    }
+
+    private async Task VerifyAsync()
+    {
+        if (string.IsNullOrWhiteSpace(_inputKey)) return;
+
+        _verifying = true;
+        _error = null;
+
+        try
+        {
+            var resp = await Http.PostAsJsonAsync("api/devices/verify-key",
+                new { authKey = _inputKey.Trim() });
+
+            if (resp.IsSuccessStatusCode)
+            {
+                var body = await resp.Content.ReadFromJsonAsync<VerifyResult>();
+
+                // 번호가 맞았다 — 이 브라우저에 보관한다. 다음부터는 다시 넣지 않는다.
+                await JS.InvokeVoidAsync("hitpanDevice.setAuthKey", _inputKey.Trim());
+                if (!string.IsNullOrWhiteSpace(body?.DeviceId))
+                    await JS.InvokeVoidAsync("hitpanDevice.setDeviceId", body.DeviceId);
+
+                DeviceAuthState.MarkAllowed();
+                Snackbar.Add("기기 인증이 완료되었습니다.", Severity.Success);
+
+                // 화면을 다시 불러온다 — 막혀서 못 불러온 자료를 이제 받아야 한다.
+                await JS.InvokeVoidAsync("location.reload");
+                return;
+            }
+
+            var err = await resp.Content.ReadFromJsonAsync<ApiMessage>();
+            _error = err?.Message ?? "인증 번호가 올바르지 않습니다.";
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "기기 인증 번호 확인 실패");
+            _error = "지금은 확인할 수 없습니다. 잠시 후 다시 시도해 주세요.";
+        }
+        finally
+        {
+            _verifying = false;
+        }
+    }
+
+    private sealed class VerifyResult
+    {
+        public string? Message { get; set; }
+        public string? DeviceId { get; set; }
+    }
+
+    private sealed class ApiMessage
+    {
+        public string? Message { get; set; }
+    }
+}

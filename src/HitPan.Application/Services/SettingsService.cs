@@ -208,8 +208,27 @@ public sealed class SettingsService : ISettingsService
             """;
 
         var priceInputType = NormalizeEnum(dto.PriceInputType, new[] { "net", "inclusive" }, "net");
-        var stockEvalMethod = NormalizeEnum(dto.StockEvalMethod, new[] { "moving_avg", "fifo", "lifo" }, "moving_avg");
-        var vatRoundType = NormalizeEnum(dto.VatRoundType, new[] { "round", "floor", "ceil" }, "round");
+
+        // 🔴 2026-08-11 전수조사 봉합 — 화면이 보내는 값을 서버가 몰라서 **조용히 바뀌던** 자리.
+        //
+        //   [재고 평가방법] 화면은 `이동평균법·표준단가·최종매입가` 세 가지를 준다
+        //     (Settings.razor). 그런데 서버 허용목록은 `moving_avg·fifo·lifo` 였다.
+        //     ⇒ 고객이 **표준단가나 최종매입가를 고르면** 목록에 없으니 맨 끝 기본값(이동평균법)으로
+        //       되돌아갔다. 저장은 성공했다고 뜨고 값만 바뀌었다. 고객은 자기가 고른 대로
+        //       계산되는 줄 안다.
+        //
+        //   ⇒ 화면 쪽이 옳다. 화면 낱말은 **사장님이 정한 업무 용어**이고,
+        //     fifo·lifo 는 개발자가 임의로 넣은 것이다. 서버를 화면에 맞춘다.
+        //   ⚠️ fifo·lifo 도 계속 받아준다 — 이미 그 값으로 저장된 자료가 있으면
+        //     지우지 않기 위해서다(우리가 만든 규칙 때문에 기존 값이 날아가면 안 된다).
+        var stockEvalMethod = NormalizeEnum(dto.StockEvalMethod,
+            new[] { "moving_avg", "standard", "last_purchase", "fifo", "lifo" }, "moving_avg");
+
+        //   [끝전 반올림] 화면은 켜면 `round`, 끄면 `truncate` 를 보낸다.
+        //     서버 목록에 `truncate` 가 없어서 **끄면 다시 켜졌다** — 토글이 안 먹었다.
+        //     `truncate`(끝을 버린다)와 `floor`(내림)는 양수에서 결과가 같다.
+        var vatRoundType = NormalizeEnum(dto.VatRoundType,
+            new[] { "round", "truncate", "floor", "ceil" }, "round");
         var industryType = NormalizeEnum(dto.IndustryType, new[] { "retail", "metal", "elec", "plastic", "wood", "food" }, "retail");
         var creditAmount = dto.CreditLimitAmount < 0 ? 0 : dto.CreditLimitAmount;
 

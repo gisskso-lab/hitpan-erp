@@ -30,6 +30,11 @@
     @* 2. 설정관리 (사장님 오더 2026-08-11: "대메뉴 계정관리→설정관리로 메뉴명 변경")
        ─ 왜 이름을 바꾸나: 여기 담긴 것이 계정만이 아니다. 회사정보·기기·사용환경·양식·메일까지
          히트판을 **쓰기 전에 맞춰 두는 것들**이 모여 있다. "계정관리" 라는 이름이 실제 내용보다 좁았다. *@
+    @* 🔴 2026-08-11 (사장님 지시): 설정관리는 **부모계정(대표)만** 본다.
+         여기에는 회사 정보·직원 계정·권한·기기·사용환경이 들어 있다. 회사를 어떻게 굴릴지
+         정하는 자리이고, 직원이 만질 자리가 아니다. *@
+    @if (_isTenantAdmin)
+    {
     <MudNavGroup Title="설정관리" Icon="@Icons.Material.Filled.Tune" Expanded="false">
         <MudNavLink Href="/company" Icon="@Icons.Material.Filled.Business">회사 정보</MudNavLink>
         <MudNavLink Href="/users" Icon="@Icons.Material.Filled.PersonAdd">직원 계정 관리</MudNavLink>
@@ -53,6 +58,7 @@
            "다른 기능인가" 하고 헷갈린다. 설정 축인 여기 하나만 남긴다. *@
         <MudNavLink Href="/settings/ai-assistant" Icon="@Icons.Material.Filled.SmartToy">AI 도우미 연동</MudNavLink>
     </MudNavGroup>
+    }
 
     @* 3. 그룹웨어 — 결재함·인사·근태·사원관리 통합 *@
     <MudNavGroup Title="그룹웨어" Icon="@Icons.Material.Filled.Groups" Expanded="false">
@@ -173,6 +179,11 @@
     </MudNavGroup>
 
     @* 11. 자료관리 — 백업·이관·양식 *@
+    @* 🔴 2026-08-11 (사장님 지시): 자료관리도 **부모계정(대표)만** 본다.
+         백업·복구·자료이관·**모든데이터 초기화** 가 들어 있다. 잘못 누르면 회사 장부가
+         통째로 없어지는 자리다. 직원 화면에 있을 이유가 없다. *@
+    @if (_isTenantAdmin)
+    {
     <MudNavGroup Title="자료관리" Icon="@Icons.Material.Filled.Backup" Expanded="false">
         @* 자료관리에 남는 것 = **자료 그 자체를 옮기고 지키는 일** (사장님 오더 2026-08-11 정리 후).
            설정(양식·메일·AI)은 설정관리로, 세금계산서 부속(인증서·발행이력)은 계산서관리로 옮겼다. *@
@@ -185,6 +196,7 @@
         @* 모든데이터 초기화 (사장님 결재 2026-06-23) — 부모계정·회사정보·로그 제외 전체 포맷 *@
         <MudNavLink Href="/data/reset" Icon="@Icons.Material.Filled.DeleteForever">모든데이터 초기화</MudNavLink>
     </MudNavGroup>
+    }
 
     @* ★ 사장님 오더 2026-08-04: "현재 히트판 버전이 어떻게 되는지 자료관리 탭 밑에 작게 버전도 표기해."
        ─ 왜 필요한가: Y/N 동의 업데이트(20260804작2)를 쓰면 고객이 [예] 를 누른 뒤
@@ -209,8 +221,28 @@
     //   빈 문자열이면 화면에 아무것도 안 그린다(미인증·조회 실패 시 조용히 생략).
     private string? _appVersion;
 
+    // 🔴 2026-08-11 (사장님 지시): 설정관리·자료관리 대메뉴는 **부모계정만** 본다.
+    //   *"실제 계층에 의한 접근권한은 분명히 나눠야됨. 부모계정에게만 주는 걸로."*
+    //
+    //   ⚠️ 메뉴를 감추는 것은 **차단이 아니다.** 주소를 직접 치면 그대로 들어간다.
+    //     그래서 세 겹으로 막는다: ①여기(메뉴에서 감춤) ②각 화면(들어와도 막음)
+    //     ③서버(요청 자체를 거부). 셋 중 하나라도 빠지면 막았다고 말할 수 없다.
+    private bool _isTenantAdmin;
+
     protected override async Task OnInitializedAsync()
     {
+        try
+        {
+            var auth = await AuthStateProvider.GetAuthenticationStateAsync();
+            _isTenantAdmin = AccountTypeHelper.IsTenantAdmin(auth.User);
+        }
+        catch (Exception ex)
+        {
+            // 판정에 실패하면 **안 보여준다.** 못 읽었는데 열어주면 막은 적이 없는 것과 같다.
+            Console.Error.WriteLine($"[Sidebar] 계정 유형 판정 실패: {ex.GetType().Name}: {ex.Message}");
+            _isTenantAdmin = false;
+        }
+
         await LoadAppVersionAsync();
 
         // 결재 대기 건수 로딩

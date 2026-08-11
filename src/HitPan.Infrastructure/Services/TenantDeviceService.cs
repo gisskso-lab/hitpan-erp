@@ -169,13 +169,33 @@ public sealed class TenantDeviceService : ITenantDeviceService
             // ⚠️ 예약된 사고: 고객이 목록에서 기기 이름을 직접 바꾸는 기능이 생기는 날,
             //   이 COALESCE 가 그 이름을 로그인마다 덮어쓴다. 그 기능의 작업지시서에
             //   이 문장이 반드시 실려야 한다. (지금은 이름 변경 입구가 0개라 발생하지 않는다)
+            // 🔴 2026-08-11 20260811작2 봉합 — device_type 도 갱신 대상에 넣는다 (사장님 지시).
+            //   *"업데이트 이후 막히지 않고 **정확하게 모바일이냐 PC냐 잡으면 됨**"*
+            //
+            //   [왜 필요한가] 종전 UPDATE 는 종류를 건드리지 않았다. 그래서 아이패드를 컴퓨터로
+            //     잘못 판정하던 시절에 등록된 기기는, 판정을 고친 뒤에도 **영원히 컴퓨터 칸을 먹었다.**
+            //     히트판은 기기 수로 요금을 매기므로 이건 고객이 계속 잘못된 자리를 잃는다는 뜻이다.
+            //     ⇒ 고객이 업데이트를 받으면 **그 다음 접속에 스스로 제자리를 찾아가야** 한다.
+            //
+            //   [🔴 막히지 않는다는 보장] 이 자리는 **이미 등록된 기기**만 지나간다(위 existing 분기).
+            //     종류가 바뀌어도 한도 검사(아래 2번)에 **다시 들어가지 않는다.**
+            //     ⇒ 휴대기기 칸이 꽉 찬 상태에서 아이패드가 컴퓨터→휴대기기로 옮겨와도
+            //       **그 사람이 쫓겨나지 않는다.** 칸 수를 잠깐 넘길 수는 있으나, 쓰던 사람을
+            //       막지 않는 쪽을 택한다 (2026-08-10 아침 4차 사고 계통 — 규칙을 켜서 쓰던
+            //       사람이 막히는 일을 두 번 만들지 않는다).
+            //
+            //   ⚠️ COALESCE 인 이유: 지문만 보내고 종류를 못 보내는 옛 화면이 있으면
+            //     기존 값을 지우지 않는다. 넘어온 값이 있을 때만 고친다.
+            var normalizedType = NormalizeDeviceType(req.DeviceType);
+
             await _db.ExecuteAsync(new CommandDefinition(
                 """
                 UPDATE tenant_devices
                 SET last_seen_at = NOW(),
                     ip_address   = @Ip,
                     user_agent   = COALESCE(@Ua, user_agent),
-                    device_name  = COALESCE(@Name, device_name)
+                    device_name  = COALESCE(@Name, device_name),
+                    device_type  = COALESCE(@Type, device_type)
                 WHERE device_id = @Id
                 """,
                 new
@@ -183,7 +203,8 @@ public sealed class TenantDeviceService : ITenantDeviceService
                     Id = id,
                     Ip = ipAddress,
                     Ua = req.UserAgent,
-                    Name = string.IsNullOrWhiteSpace(req.DeviceName) ? null : req.DeviceName
+                    Name = string.IsNullOrWhiteSpace(req.DeviceName) ? null : req.DeviceName,
+                    Type = normalizedType
                 }, cancellationToken: ct));
 
             await LogLoginAsync(tenantId, userId, ipAddress, id, "success", ct);
@@ -217,8 +238,10 @@ public sealed class TenantDeviceService : ITenantDeviceService
         int pcUsed = counts.Where(x => x.t == "pc").Sum(x => x.c);
         int mobileUsed = counts.Where(x => x.t == "mobile" || x.t == "tablet").Sum(x => x.c);
 
-        var type = string.IsNullOrWhiteSpace(req.DeviceType) ? "pc" : req.DeviceType.ToLowerInvariant();
-        if (type is not ("pc" or "mobile" or "tablet")) type = "pc";
+        // 🔴 20260811작2 — 판정을 NormalizeDeviceType 한 곳으로 모았다.
+        //   종전엔 이 자리에만 있었고, 갱신 경로(위)는 종류를 아예 안 봤다.
+        //   두 경로가 각자 판단하면 한쪽만 고쳐지는 사고가 난다.
+        var type = NormalizeDeviceType(req.DeviceType) ?? "pc";
 
         // 한도 초과 체크
         //
@@ -338,7 +361,9 @@ public sealed class TenantDeviceService : ITenantDeviceService
 
     // ── 기기 승인 (대표계정) ── 20260811작1 (B)
     //   사장님 설계: "승인대기. 대표에게 기기승인의 권한을 주기"
-    public async Task ApproveAsync(string deviceId, string tenantId, string approverUserId, CancellationToken ct = default)
+    //   반환값 = **새로 발급한 인증키 원문**. 이미 승인된 기기를 다시 누르면 null 이다
+    //   (원문은 우리가 갖고 있지 않으므로 다시 알려줄 수 없다 — 재발급은 별건).
+    public async Task<string?> ApproveAsync(string deviceId, string tenantId, string approverUserId, CancellationToken ct = default)
     {
         await EnsureOpenAsync(ct);
 
@@ -351,7 +376,7 @@ public sealed class TenantDeviceService : ITenantDeviceService
             throw new InvalidOperationException("기기를 찾을 수 없습니다.");
 
         var (curStatus, devType) = target.Value;
-        if (curStatus == "approved") return;             // 이미 승인됨 — 두 번 눌러도 안전(멱등)
+        if (curStatus == "approved") return null;         // 이미 승인됨 — 두 번 눌러도 안전(멱등)
         if (curStatus == "revoked")
             throw new InvalidOperationException("폐기된 기기는 승인할 수 없습니다. 그 기기에서 다시 접속해 주세요.");
 
@@ -383,17 +408,76 @@ public sealed class TenantDeviceService : ITenantDeviceService
         if ((devType == "mobile" || devType == "tablet") && mobileUsed >= mobileLimit)
             throw new InvalidOperationException("인증기기 한도초과. 슬롯을 추가하거나 사용하지 않는 기기를 해제해 주세요.");
 
+        // 🔴 승인하는 **그 순간** 인증키를 발급한다 (20260811작3 · 사장님 오더).
+        //   *"사용PC에는 물리적으로 간단한 인증서 같은 인증키를 부여"*
+        //   *"인증 슬롯을 식별할 수 있도록 슬롯인증 절차에서 인증키 같은 걸 심자"*
+        //
+        //   [왜 인증키인가] 종전엔 서버가 **브라우저에게 "너 누구냐"** 를 물었다(지문).
+        //     브라우저는 자기 안에만 흔적을 남기므로 같은 컴퓨터라도 Edge 와 Chrome 이
+        //     각자 다른 답을 한다 — **한 대가 두 대로 세어지고 고객이 돈을 더 낸다.**
+        //     인증키는 묻는 대상을 **"네가 받은 키를 내놔라"** 로 바꾼다.
+        //     추측을 정교하게 만드는 게 아니라 **애초에 추측을 안 하게** 만든다.
+        //
+        //   🔴 [왜 "나중에 그 기기가 달라고 하면 준다" 가 아닌가 — 사장님 지적]
+        //     *"그게 직원인지, 해커인지 어떻게 아니??"*
+        //     승인만 나 있으면 **먼저 물어본 쪽이 키를 가져간다.** 물어보는 쪽이
+        //     그 직원인지 확인할 방법이 없다 — 지문은 브라우저가 스스로 신고하는 값이라
+        //     흉내낼 수 있다. 그래서 **대표가 승인하는 그 자리에서** 발급한다.
+        //     발급 시점을 사람이 지키는 것이 유일하게 확실한 문지기다.
+        //
+        //   [원문을 갖지 않는다] 이 키는 그 자체로 접속 권한이다. 우리가 보관하면
+        //     DB 가 새는 날 남의 기기로 들어올 수 있다. 해시만 남기고 원문은
+        //     **발급 순간 한 번만** 위로 올린다(QR 토큰과 같은 원칙 · 헌법 #5).
+        var authKey = Guid.NewGuid().ToString("N") + Guid.NewGuid().ToString("N");
+
         await _db.ExecuteAsync(new CommandDefinition(
             """
             UPDATE tenant_devices
             SET status = 'approved',
                 approved_by = @Approver,
-                approved_at = NOW()
+                approved_at = NOW(),
+                auth_key_hash = @KeyHash,
+                auth_key_issued_at = NOW(6)
             WHERE device_id = @Id AND tenant_id = @TenantId
             """,
-            new { Id = deviceId, TenantId = tenantId, Approver = approverUserId }, cancellationToken: ct));
+            new { Id = deviceId, TenantId = tenantId, Approver = approverUserId, KeyHash = Sha256Hex(authKey) },
+            cancellationToken: ct));
 
         await _audit.LogAsync("approve", "device", deviceId, ct: ct);
+
+        // 원문은 딱 한 번 올라간다. 로그·감사기록에 남기지 않는다.
+        return authKey;
+    }
+
+    /// 직원 PC 가 입력한 인증키를 대조한다 (20260811작3 (A)).
+    ///
+    /// 🔴 사장님 확정: *"메인PC에서 인증키가 생성되면, 요청한 클라이언트PC에서 입력하는 방식."*
+    ///
+    ///   여기서 서버가 하는 일은 **대조 하나**다. 추측하지 않는다.
+    ///   넘어온 키를 해시로 만들어 저장된 해시와 같은지만 본다.
+    ///
+    ///   ⚠️ 같은 회사(tenant) 안에서만 찾는다 — 남의 회사 키로 들어올 수 없다(헌법 #2).
+    ///   ⚠️ 승인된 기기만 인정한다 — 폐기된 기기의 옛 키가 살아나면 안 된다.
+    ///
+    /// 반환: 맞으면 그 기기 번호, 틀리면 null
+    public async Task<string?> VerifyAuthKeyAsync(string authKey, string tenantId, CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(authKey)) return null;
+
+        await EnsureOpenAsync(ct);
+
+        var deviceId = await _db.QueryFirstOrDefaultAsync<string?>(new CommandDefinition(
+            """
+            SELECT device_id
+            FROM tenant_devices
+            WHERE tenant_id = @TenantId
+              AND auth_key_hash = @KeyHash
+              AND status = 'approved'
+            LIMIT 1
+            """,
+            new { TenantId = tenantId, KeyHash = Sha256Hex(authKey) }, cancellationToken: ct));
+
+        return deviceId;
     }
 
     // ── 기기 승인 거부 (대표계정) ── 20260811작1 (B)
@@ -583,6 +667,45 @@ public sealed class TenantDeviceService : ITenantDeviceService
                 cancellationToken: ct));
         }
         catch { /* 로그 실패는 주 로직 보호를 위해 무시 */ }
+    }
+
+    /// 기기 종류를 저장 가능한 값으로 정리한다.
+    ///
+    /// 🔴 2026-08-11 20260811작2 (사장님 판정 기준 확정):
+    ///   *"태블릿도 모바일로 잡으면 됨 — **운영체제가 안드로이드이거나 iOS이기 때문에**"*
+    ///   *"**태블릿, 폰, 스마트TV = 모바일** · 운영체제로 구분하면 됨"*
+    ///   *"**윈도우, 맥OS, 리눅스 등의 PC기반 운영체제가 아닌 것은 모두 모바일**"*
+    ///
+    ///   [왜 운영체제로 가르나] 화면 크기나 터치 여부로 가르면 경계가 계속 흔들린다.
+    ///     터치 되는 노트북, 화면 큰 태블릿, 데스크톱 화면을 요청한 아이패드…
+    ///     끝이 없다. 그러나 **운영체제는 흔들리지 않는다.**
+    ///     Windows·Mac·리눅스는 책상에 두고 쓰는 컴퓨터의 운영체제이고, 나머지는 아니다.
+    ///
+    ///   ⇒ 그래서 칸도 **둘뿐**이다: 휴대기기(mobile) · 컴퓨터(pc).
+    ///     'tablet' 은 받아주되 **모바일로 흡수**한다 — 요금 계산이 이미 둘을 같은 칸에
+    ///     합산하고 있었으므로(아래 mobileUsed), 굳이 셋으로 나눠 부를 이유가 없다.
+    ///
+    ///   🔴 [모르는 값은 휴대기기로 본다] 컴퓨터 칸이 더 비싸다. 판정이 애매할 때
+    ///     컴퓨터로 세면 **고객이 쓰지도 않은 자리에 돈을 낸다.** 반대로 세면 우리가 조금
+    ///     손해 볼 뿐이다. ⇒ 애매한 것은 **고객에게 유리한 쪽**으로 보낸다.
+    ///     (클라이언트도 같은 방향으로 판정한다 — device-fingerprint.js getDeviceType)
+    ///
+    ///   ⚠️ null 을 돌려주는 경우: 클라이언트가 종류를 **안 보냈을 때**.
+    ///     갱신 경로에서 COALESCE 로 받아 **기존 값을 지우지 않게** 하기 위함이다.
+    ///     신규 등록 경로는 호출부에서 ?? "pc" 로 받는다 — 값이 아예 없으면 종전 동작을
+    ///     유지한다(옛 화면 호환). 값이 왔는데 모르는 값일 때만 휴대기기로 본다.
+    private static string? NormalizeDeviceType(string? raw)
+    {
+        if (string.IsNullOrWhiteSpace(raw)) return null;
+
+        var t = raw.Trim().ToLowerInvariant();
+
+        // 태블릿은 휴대기기 칸으로 흡수한다 (사장님 판정 — 컴퓨터 운영체제가 아니다)
+        if (t is "tablet") return "mobile";
+        if (t is "mobile" or "pc") return t;
+
+        // 모르는 값은 휴대기기로 본다 — 비싼 칸을 잘못 깎지 않는 쪽
+        return "mobile";
     }
 
     private async Task LogDeniedAsync(string tenantId, string userId, string ip, string? deviceId, string result, CancellationToken ct)

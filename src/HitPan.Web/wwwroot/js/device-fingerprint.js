@@ -76,6 +76,25 @@ window.hitpanDevice = {
         return fp;
     },
 
+    /// 스스로를 Mac 이라고 신고하지만 실은 손으로 만지는 기기(아이패드)인가.
+    ///
+    /// 🔴 2026-08-11 20260811작2 봉합 (사장님 실측 P0-1 · **과금이 걸린 자리**).
+    ///   애플은 아이패드가 "데스크톱 화면을 달라"고 요청할 때 스스로를 **Mac 으로 신고**하게 만들었다.
+    ///   그래서 기기가 보내주는 소개 문구(UA)만 읽으면 아이패드와 Mac 이 구분되지 않는다.
+    ///   구분할 수 있는 유일한 실마리가 **손가락 터치를 몇 개까지 받는가**다.
+    ///   Mac 은 터치가 없고(0), 아이패드는 여러 개를 받는다.
+    ///
+    ///   ⚠️ 히트판은 **기기 수로 요금을 매긴다.** 이 판정이 틀리면 아이패드가 컴퓨터 칸을 깎아
+    ///     고객이 쓰지도 않은 자리에 돈을 낸다. 그래서 이름 짓기(getDeviceName)와
+    ///     종류 가르기(getDeviceType) 가 **반드시 같은 답**을 쓰도록 이 한 곳에만 둔다.
+    ///     두 곳에 같은 판별을 적으면 한쪽만 고쳐지는 사고가 난다.
+    _isTouchMac: function (ua) {
+        try {
+            return /Macintosh/i.test(ua || navigator.userAgent || '')
+                && (navigator.maxTouchPoints || 0) > 1;
+        } catch (e) { return false; }
+    },
+
     // 기기 이름 — 고객이 목록에서 "어느 컴퓨터인지" 알아보기 위한 값.
     //
     // 🔴 2026-08-10 [4] D-4 봉합 (검증팀장 데이비드 박 적발 · P0).
@@ -94,11 +113,25 @@ window.hitpanDevice = {
             var ua = navigator.userAgent || '';
 
             var os = '알 수 없는 기기';
-            if (/Windows/i.test(ua)) os = 'Windows';
-            else if (/Macintosh|Mac OS/i.test(ua)) os = 'Mac';
-            else if (/Android/i.test(ua)) os = 'Android';
+            // 🔴 순서 주의 (20260811작2 · 사장님 실측 P0-2):
+            //   아이패드가 스스로를 Mac 이라고 신고하기 때문에, Mac 을 먼저 물어보면
+            //   아이패드가 전부 Mac 으로 확정된다. 사장님 화면에 "Mac · Safari" 로
+            //   보인 것이 이 자리다. 그래서 **위장한 아이패드부터 걸러낸다.**
+            //   ⚠️ 아이폰·구형 아이패드는 소개 문구에 "like Mac OS X" 라는 말이 들어 있다.
+            //     그래서 Mac 을 먼저 물어보면 **아이폰까지 Mac 으로 확정된다.**
+            //     아래처럼 애플 손기기(아이폰·아이패드)를 **Mac 보다 먼저** 가려야 한다.
+            // 🔴 순서는 getDeviceType 과 **똑같이** 간다 (검증팀 C-3, 2026-08-11).
+            //   두 함수가 다른 순서를 쓰면 **종류와 이름이 서로 어긋난다.**
+            //   실제로 안드로이드 기기가 종류는 휴대기기인데 이름은 'Windows' 로 나왔다
+            //   (소개 문구에 'Windows Phone' 이 들어간 기기 · Windows 검사가 위에 있었다).
+            //   ⇒ 휴대기기를 **먼저** 가리고, 그 다음에 컴퓨터를 가린다.
+            if (hitpanDevice._isTouchMac(ua)) os = 'iPhone/iPad';
             else if (/iPhone|iPad|iPod/i.test(ua)) os = 'iPhone/iPad';
-            else if (/Linux/i.test(ua)) os = 'Linux';
+            else if (/Android/i.test(ua)) os = 'Android';
+            else if (/Windows/i.test(ua)) os = 'Windows';
+            else if (/Macintosh|Mac OS/i.test(ua)) os = 'Mac';
+            else if (/CrOS/i.test(ua)) os = '크롬북';
+            else if (/X11|Wayland|Ubuntu|Fedora|Debian|FreeBSD|OpenBSD|Linux/i.test(ua)) os = 'Linux';
 
             // 순서 주의: Edge·Whale 은 UA 에 Chrome 을 포함하므로 먼저 걸러야 한다.
             var browser = '';
@@ -115,12 +148,86 @@ window.hitpanDevice = {
         }
     },
 
-    // UA 기반 디바이스 타입 간이 판별
+    // 기기 종류 가르기 — 🔴 **요금이 걸린 판정이다.**
+    //
+    // 🔴 2026-08-11 20260811작2 (사장님 판정 기준 확정):
+    //   *"태블릿도 모바일로 잡으면 됨 — **운영체제가 안드로이드이거나 iOS이기 때문에**"*
+    //
+    //   *"**윈도우, 맥OS, 리눅스 등의 PC기반 운영체제가 아닌 것은 모두 모바일**"*
+    //
+    //   [무엇으로 가르나] **컴퓨터 운영체제인지 하나만 묻는다.**
+    //     Windows · Mac · 리눅스  ⇒ 컴퓨터(pc)
+    //     그 밖 **전부**          ⇒ 휴대기기(mobile)
+    //
+    //   🔴 [브라우저로 판단하지 않는다] 사장님 못박음:
+    //     *"웹브라우저로 판단하면 안 돼. **윈도우PC에서 사파리를 돌릴 수도 있잖아**"*
+    //     사파리를 쓴다고 애플 기기가 아니고, 크롬을 쓴다고 컴퓨터가 아니다.
+    //     브라우저는 **사람이 고른 것**이고 기기 종류와 아무 상관이 없다.
+    //     ⇒ 아래 판정에 브라우저 이름이 **한 글자도 없다.** 운영체제만 본다.
+    //     (브라우저는 이름 짓기에만 쓴다 — "Windows · Safari" 처럼 고객이 어느 컴퓨터인지
+    //      알아보라고 붙이는 꼬리표일 뿐, 요금 칸과 무관하다)
+    //
+    //   ⚠️ 사장님이 예로 드신 스마트TV 는 **따로 다루지 않는다.** TV 로 히트판을 볼 일이
+    //     있다면 *"PC 에 TV 를 연결해서"* 보는 것이고, 그때 브라우저가 보는 것은 그 PC 의
+    //     Windows 다 — 이미 컴퓨터로 잡힌다. TV 브라우저가 직접 올 일은 없다.
+    //     설령 온다 해도 아래 3) 에서 저절로 휴대기기가 된다. **목록을 만들 필요가 없다.**
+    //
+    //   🔴 [묻는 방향이 중요하다] 휴대기기 목록을 만들어 놓고 "여기 있으면 모바일" 로
+    //     물으면, 목록에 없는 **처음 보는 기기가 전부 컴퓨터로 떨어진다.**
+    //     컴퓨터 칸이 더 비싸므로 그건 고객이 손해 보는 방향이다.
+    //     반대로 물으면 — 컴퓨터 운영체제는 셋뿐이고 새로 생기지 않는다 —
+    //     새 기기가 나와도 저절로 휴대기기 칸으로 간다. **모르는 것은 싼 칸으로.**
+    //
+    //   [왜 운영체제인가] 화면 크기·터치 여부로 가르면 경계가 끝없이 흔들린다 —
+    //     터치 되는 노트북, 화면 큰 태블릿, 데스크톱 화면을 요청한 아이패드.
+    //     실제로 종전 판정은 **안드로이드 태블릿**(소개 문구에 'Mobi' 도 'Tablet' 도 없다)과
+    //     **Windows 태블릿PC**(문구에 'Tablet' 이 들어간다)에서 둘 다 틀렸다.
+    //     운영체제는 흔들리지 않는다.
+    //
+    //   [칸은 둘뿐이다] 종전엔 'tablet' 을 따로 돌려줬으나, 요금 계산이 이미
+    //     휴대기기와 태블릿을 **같은 칸에 합산**하고 있었다. 셋으로 나눠 부를 이유가 없다.
+    //     (서버도 tablet 을 받으면 mobile 로 흡수한다 — TenantDeviceService.NormalizeDeviceType)
+    //
+    //   ⚠️ 아이패드가 어려운 이유: 스스로를 **Mac 이라고 신고**한다. 그래서 문구만 읽으면
+    //     책상 위 Mac 과 구분되지 않는다. 손가락 터치를 받는지가 유일한 실마리다(_isTouchMac).
+    //   ⚠️ 반대 방향도 똑같이 사고다 — **터치 없는 진짜 Mac 은 'pc' 여야 한다.**
+    //   🔴 [예외가 나도 절대 던지지 않는다] 검증팀 C-1 (2026-08-11).
+    //     이 함수만 감싸는 곳이 없었다. 그런데 이걸 부르는 쪽(AuthService)은 지문·종류·이름
+    //     **세 가지를 한 묶음으로 감싸** 두어서, 여기서 예외가 한 번 나면 **종류와 이름이
+    //     함께 날아간다.** 그러면 서버가 종류를 'pc' 로 채우고 이름은 비어버린다 —
+    //     **아이패드가 컴퓨터 칸을 먹는다.** 이번에 없애려던 바로 그 증상이다.
+    //     ⇒ 무슨 일이 있어도 값 하나는 돌려준다. 폴백은 'mobile' 이다(싼 칸 · §판정 기준).
     getDeviceType: function () {
+      try {
         var ua = navigator.userAgent || '';
-        if (/iPad|Tablet/i.test(ua)) return 'tablet';
-        if (/Mobi|Android|iPhone|iPod/i.test(ua)) return 'mobile';
-        return 'pc';
+
+        // 🔴 1) 컴퓨터 운영체제와 **헷갈리는 휴대기기부터** 걷어낸다. 순서가 전부다.
+        //
+        //    ⚠️ 아이폰·아이패드는 소개 문구에 **"like Mac OS X"** 라는 말을 달고 온다.
+        //      그래서 2) 의 Mac 검사가 **아이폰을 책상 위 Mac 으로 판정한다.**
+        //      (실제로 이 순서를 놓쳐 아이폰이 컴퓨터로 잡히는 일이 한 번 있었다)
+        //    ⚠️ 안드로이드도 문구에 'Linux' 가 들어간다 — 리눅스 위에서 돌기 때문이다.
+        //      역시 리눅스 컴퓨터로 오인되지 않게 여기서 먼저 걷어낸다.
+        if (hitpanDevice._isTouchMac(ua)) return 'mobile';   // Mac 으로 위장한 아이패드
+        if (/iPhone|iPad|iPod/i.test(ua)) return 'mobile';
+        if (/Android/i.test(ua)) return 'mobile';
+
+        // 2) 컴퓨터 운영체제인가 — Windows · Mac · 리눅스, 이 셋뿐이다.
+        if (/Windows NT|Win64|Win32/i.test(ua)) return 'pc';
+        if (/Macintosh|Mac OS X/i.test(ua)) return 'pc';
+
+        //    ⚠️ 리눅스는 조건을 좁게 잡는다. 'Linux' 라는 낱말 하나만 보면 안 된다 —
+        //      리눅스 위에서 도는 기기가 많아서 그것들이 컴퓨터로 새어든다.
+        //      **책상 위 리눅스 컴퓨터**는 창 시스템(X11·Wayland)이나 배포판 이름을 달고 온다.
+        if (/X11|Wayland|CrOS|Ubuntu|Fedora|Debian|FreeBSD|OpenBSD/i.test(ua)) return 'pc';
+
+        // 3) 컴퓨터 운영체제가 아니면 **전부 휴대기기** (사장님 판정).
+        //    아이폰·아이패드·스마트TV, 그리고 아직 세상에 없는 무엇이든 여기로 온다.
+        return 'mobile';
+      } catch (e) {
+        // 판정에 실패하면 **싼 칸**으로 보낸다. 비싼 칸을 잘못 깎지 않는 쪽이다.
+        return 'mobile';
+      }
     },
 
     // localStorage 기반 device_id 보관 (서버가 돌려준 값)
@@ -137,6 +244,25 @@ window.hitpanDevice = {
         catch (e) { /* noop */ }
     },
 
+    // ── 기기 인증 번호 (20260811작3 (A), 사장님 오더 2026-08-11) ──
+    //   대표가 승인하면 메인PC 화면에 번호가 뜨고, 대표가 그것을 직원에게 알려준다.
+    //   직원이 자기 화면에 넣으면 여기 보관되고, 다음부터는 다시 넣지 않는다.
+    //
+    //   ⚠️ 이 번호는 **문을 여는 열쇠**다. 기기 대수를 세는 것과는 다른 일이다
+    //     (대수는 기기 목록의 줄 수로 이미 센다).
+    getAuthKey: function () {
+        try { return localStorage.getItem('hitpan_auth_key'); }
+        catch (e) { return null; }
+    },
+    setAuthKey: function (key) {
+        try { if (key) localStorage.setItem('hitpan_auth_key', key); }
+        catch (e) { /* 사생활 보호 모드 등 — 못 넣으면 다음에 다시 묻는다 */ }
+    },
+    clearAuthKey: function () {
+        try { localStorage.removeItem('hitpan_auth_key'); }
+        catch (e) { /* noop */ }
+    },
+
     // ── 모바일 홈화면 추가 (20260811작1 (D), 사장님 오더 2026-08-11) ──
     //   "Y 터치시 모바일 홈화면에 히트판ERP 아이콘 생성"
     //   아이폰과 안드로이드가 완전히 다르게 동작하므로 갈라서 다룬다.
@@ -150,7 +276,9 @@ window.hitpanDevice = {
             if (/iPhone|iPod/i.test(ua)) return true;
             if (/iPad/i.test(ua)) return true;
             // iPadOS 13+ : "Macintosh" 로 위장하지만 터치가 된다
-            if (/Macintosh/i.test(ua) && navigator.maxTouchPoints > 1) return true;
+            //   🔴 20260811작2 — 같은 판별을 여기 또 적지 않는다. 두 곳에 적으면
+            //     한쪽만 고쳐진다. 판별의 근거는 _isTouchMac 한 곳에만 둔다.
+            if (hitpanDevice._isTouchMac(ua)) return true;
             return false;
         } catch (e) { return false; }
     },

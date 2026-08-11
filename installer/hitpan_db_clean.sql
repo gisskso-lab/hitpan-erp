@@ -3071,7 +3071,7 @@ INSERT INTO `schema_migrations` (`migration_id`, `app_version`, `success`) VALUE
 ('DB-74','clean-ddl',1),('DB-75','clean-ddl',1),('DB-76','clean-ddl',1),('DB-77','clean-ddl',1),
 ('DB-78','clean-ddl',1),('DB-79','clean-ddl',1),('DB-80','clean-ddl',1),('DB-81','clean-ddl',1),
 ('DB-82','clean-ddl',1),('DB-83','clean-ddl',1),('DB-84','clean-ddl',1),('DB-85','clean-ddl',1),
-('DB-86','clean-ddl',1),('DB-87','clean-ddl',1);
+('DB-86','clean-ddl',1),('DB-87','clean-ddl',1),('DB-88','clean-ddl',1);
 
 --
 -- Table structure for table `service_tickets`
@@ -3455,6 +3455,8 @@ CREATE TABLE `tenant_devices` (
   `ip_address` varchar(50) DEFAULT NULL,
   `user_agent` varchar(500) DEFAULT NULL,
   `status` varchar(20) NOT NULL DEFAULT 'approved' COMMENT 'pending/approved/revoked',
+  `auth_key_hash` varchar(64) DEFAULT NULL COMMENT '기기 인증키 SHA-256 (원문 미저장). NULL=아직 발급 안 됨 (DB-88)',
+  `auth_key_issued_at` datetime(6) DEFAULT NULL COMMENT '인증키 발급 시각 (DB-88)',
   `registered_at` datetime(6) NOT NULL DEFAULT current_timestamp(6),
   `approved_by` varchar(36) DEFAULT NULL,
   `approved_at` datetime(6) DEFAULT NULL,
@@ -3465,6 +3467,7 @@ CREATE TABLE `tenant_devices` (
   PRIMARY KEY (`device_id`),
   UNIQUE KEY `uq_tenant_fp` (`tenant_id`,`fingerprint`),
   KEY `idx_tenant_type_status` (`tenant_id`,`device_type`,`status`),
+  KEY `idx_auth_key_hash` (`auth_key_hash`),
   KEY `idx_user` (`user_id`),
   -- fk_device_tenant 제거 (무결 봉합 2026-06-18): tenants 삭제 FK 제거. tenant_id 컬럼 보존
   CONSTRAINT `fk_device_user` FOREIGN KEY (`user_id`) REFERENCES `users` (`user_id`) ON DELETE SET NULL

@@ -1,7 +1,9 @@
 @page "/settings/user-info"
 @page "/company"
 @namespace HitPan.Web.Pages.SettingsUi
-@attribute [Authorize]
+@* 🔴 2026-08-11 (사장님 지시): 설정관리는 **부모계정(대표)만**.
+     메뉴에서 감추는 것만으로는 주소를 직접 치면 그대로 들어온다 — 화면에서도 막는다. *@
+@attribute [Authorize(Roles = "system_admin,tenant_admin,TenantAdmin")]
 @using HitPan.Web.Models
 
 <PageTitle>사용자정보설정</PageTitle>
@@ -241,14 +243,19 @@ else
                 *@
                 @if (!_deviceRegistered && !_deviceDialogShown)
                 {
+                    @* 🔴 2026-08-11 문구 정정 (사장님 지시 "거짓문구는 모두 삭제").
+                         "이 컴퓨터 등록" 버튼은 눌러도 등록되지 않았다. 이 화면에서 시리얼 입력란을
+                         뺀 뒤로 등록에 도달하는 길이 막혀서, 누르면 안내만 뜨는 상태였다.
+                         게다가 지금은 기기가 **로그인할 때 저절로 등록된다**(20260811작1).
+                         ⇒ 버튼을 없애고, 실제로 일어나는 일을 적는다. 기기 관리는 전용 화면이 있다. *@
                     <MudText Style="font-size:12px;color:var(--mud-palette-text-secondary)" Class="mb-2">
-                        등록된 기기에서만 로그인할 수 있습니다. 구독하신 요금제의 사용 기기 수 안에서만 등록됩니다.
+                        이 컴퓨터는 로그인하실 때 자동으로 등록됩니다. 요금제에 포함된 기기 수 안에서 등록됩니다.
                     </MudText>
                     <div style="display:flex;gap:8px;">
                         <MudButton Variant="Variant.Outlined" Size="Size.Small"
-                                   OnClick="RegisterDeviceAsync" Disabled="_deviceSubmitting"
+                                   OnClick="@(() => Navigation.NavigateTo("/settings/devices"))"
                                    StartIcon="@Icons.Material.Filled.DevicesOther">
-                            @(_deviceSubmitting ? "등록 중..." : "이 컴퓨터 등록")
+                            등록된 기기 보기
                         </MudButton>
                         <MudButton Variant="Variant.Text" Size="Size.Small"
                                    OnClick="@(() => _deviceDialogShown = true)">

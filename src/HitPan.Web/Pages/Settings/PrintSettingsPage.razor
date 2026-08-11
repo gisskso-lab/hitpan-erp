@@ -1,6 +1,8 @@
 @page "/print-settings"
 @namespace HitPan.Web.Pages.SettingsUi
-@attribute [Authorize]
+@* 🔴 2026-08-11 (사장님 지시): 설정관리는 **부모계정(대표)만**.
+     메뉴에서 감추는 것만으로는 주소를 직접 치면 그대로 들어온다 — 화면에서도 막는다. *@
+@attribute [Authorize(Roles = "system_admin,tenant_admin,TenantAdmin")]
 @inject ISnackbar Snackbar
 
 <PageTitle>양식(인쇄)정보 설정</PageTitle>
@@ -236,12 +238,15 @@
     }
 
     /// <summary>
-    /// 설정 저장 — 현재 UI 전용이므로 스낵바 안내만 표시한다.
-    /// 백엔드 API 연동 시 실제 저장 로직으로 교체한다.
+    /// 설정 저장 — 🔴 아직 저장되지 않는다 (2026-08-11, 사장님 지시 "거짓문구는 모두 삭제").
+    ///
+    ///   종전에는 아무것도 저장하지 않고 "설정이 저장되었습니다." 라고 알렸다.
+    ///   고객은 저장된 줄 알고 화면을 닫았고, 다시 들어오면 값이 처음으로 돌아가 있었다.
+    ///   ⇒ 저장 기능이 붙기 전까지는 **저장했다고 말하지 않는다.**
     /// </summary>
     private void SaveSettings()
     {
-        Snackbar.Add("설정이 저장되었습니다.", Severity.Success);
+        Snackbar.Add("이 화면의 설정은 아직 저장되지 않습니다. 준비 중입니다.", Severity.Info);
     }
 
     /// <summary>

@@ -1,6 +1,9 @@
 @page "/data/reset"
 @namespace HitPan.Web.Pages.SettingsUi
-@attribute [Authorize]
+@* 🔴 2026-08-11 (사장님 지시): 자료관리는 **부모계정 + 메인PC 환경에서만**.
+     이 화면은 회사 업무 자료를 통째로 비운다. 두 겹으로 막는다 —
+     ①계정(아래 Authorize) ②자리(아래 MainPcOnly). *@
+@attribute [Authorize(Roles = "system_admin,tenant_admin,TenantAdmin")]
 @using HitPan.Web.Services
 @inject DataResetService ResetService
 @inject ISnackbar Snackbar
@@ -9,6 +12,10 @@
 <PageTitle>모든데이터 초기화</PageTitle>
 @* 용어 정정 (사장님 오더 2026-08-10, 20260810작4) — 부모계정 → 대표계정 *@
 <PageHeader Title="모든데이터 초기화" Subtitle="히트판 자료 포맷 — 대표계정·회사정보·로그만 남기고 모든 업무 데이터를 비웁니다" />
+
+@* 🔴 자료가 든 그 컴퓨터에서만 연다 (사장님 지시 2026-08-11).
+     원격에서 남의 회사 자료를 비우는 경로를 만들지 않는다. *@
+<MainPcOnly>
 
 <MudPaper Elevation="0" Class="pa-6" Style="border:1px solid var(--mud-palette-error);border-radius:12px;max-width:720px">
 
@@ -53,6 +60,8 @@
         </MudAlert>
     }
 </MudPaper>
+
+</MainPcOnly>
 
 @code {
     private string _password = "";

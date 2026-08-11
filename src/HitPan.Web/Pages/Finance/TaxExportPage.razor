@@ -12,7 +12,8 @@
 <PageTitle>세무사 자료 보내기</PageTitle>
 <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
     <MudText Typo="Typo.h6">세무사 자료 보내기</MudText>
-    <MudText Style="font-size:12px;color:var(--mud-palette-text-secondary)">자동 추출 + 파일 첨부 → 세무사 이메일 전송</MudText>
+    @* 🔴 2026-08-11 문구 정정 — 메일 보내기가 아직 안 된다. 되는 것만 적는다. *@
+    <MudText Style="font-size:12px;color:var(--mud-palette-text-secondary)">자료 자동 모으기 + 파일 첨부 → 내려받아 전달</MudText>
 </div>
 
 <!-- ========== STEP 1: 세무사 정보 ========== -->
@@ -136,10 +137,16 @@
         }
     </MudPaper>
 
-    <div class="d-flex justify-end">
+    @* 🔴 2026-08-11 (사장님 지시 "거짓문구는 모두 삭제") — 메일 보내기가 아직 안 된다.
+         버튼을 눌러야 준비 중인 걸 알게 하면 그것도 속이는 것이다. 눌리지 않게 두고
+         옆에 이유를 적는다. 자료 내려받기는 위에서 그대로 된다. *@
+    <div class="d-flex justify-end align-center" style="gap:12px">
+        <MudText Style="font-size:12px;color:var(--mud-palette-text-secondary)">
+            메일 보내기는 준비 중입니다. 위에서 자료를 내려받아 전달해 주세요.
+        </MudText>
         <MudButton Variant="Variant.Filled" Color="Color.Primary" Size="Size.Large"
                    StartIcon="@Icons.Material.Filled.Email" OnClick="SendAsync"
-                   Disabled="@(!CanSend)">
+                   Disabled="true">
             세무사에게 전송
         </MudButton>
     </div>
@@ -308,28 +315,19 @@
             return;
         }
 
-        // TODO: 실제 SMTP 연동 시 여기에 전송 로직 추가
-        // 현재는 성공 시뮬레이션
-        var totalFiles = _autoAttachments.Count + _attachedFiles.Count;
-        var history = new SendHistoryItem
-        {
-            SentAt = DateTime.Now,
-            Subject = _emailSubject,
-            FileCount = totalFiles,
-            Recipient = string.IsNullOrWhiteSpace(_accountantName)
-                ? _accountantEmail
-                : $"{_accountantName} ({_accountantOffice})"
-        };
-
-        // 전송 이력 저장
-        _sendHistory.Insert(0, history);
-        if (_sendHistory.Count > 10) _sendHistory = _sendHistory.Take(10).ToList();
-        await SaveSendHistoryAsync();
-
-        // 첨부 파일 초기화
-        _attachedFiles.Clear();
-
-        Snackbar.Add($"세무사에게 전송 완료! ({totalFiles}개 파일)", Severity.Success);
+        // 🔴 2026-08-11 (사장님 지시 "거짓문구는 모두 삭제") — 여기는 **메일이 나가지 않는다.**
+        //
+        //   종전 코드는 아무것도 보내지 않고 "세무사에게 전송 완료!" 라고 알리고,
+        //   보낸 기록까지 남겼다. 그래서 나중에 이력을 봐도 보낸 것으로 보였다.
+        //   부가세 신고 자료가 세무사에게 안 갔는데 갔다고 믿는 것 — **신고 누락 사고**다.
+        //
+        //   ⇒ 보내는 기능이 붙기 전까지는 **보낸 척하지 않는다.**
+        //     기록도 남기지 않는다(안 보낸 것을 보냈다고 적는 것이 더 나쁘다).
+        //   ⚠️ 자료를 내려받는 기능은 그대로 살아 있다. 지금은 그것으로 세무사에게 전달한다.
+        Snackbar.Add(
+            "메일 보내기는 아직 준비 중입니다. 위에서 자료를 내려받아 세무사에게 전달해 주세요.",
+            Severity.Info);
+        await Task.CompletedTask;
     }
 
     // ===== 전송 이력 저장/로드 (localStorage) =====
