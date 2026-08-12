@@ -52,7 +52,8 @@ public sealed class MigrationDbConnectionFactory : IMigrationDbConnectionFactory
         //   그 경로는 이 옵션과 무관하다(사장님 원칙 — 개발PC 정상은 검증이 아니다).
         _connStr =
             $"Server={host};Port={port};Database={db};User={user};Password={pwd};" +
-            "DefaultCommandTimeout=600;AllowLoadLocalInfile=true;AllowUserVariables=true;" +
+            // GuidFormat=None — char(36) 을 Guid 로 돌려주면 string DTO 매핑이 터진다 (봉합 2026-08-12, PI-07).
+            "DefaultCommandTimeout=600;AllowLoadLocalInfile=true;AllowUserVariables=true;GuidFormat=None;" +
             "Pooling=true;MinimumPoolSize=0;MaximumPoolSize=20;" +
             "ApplicationName=hitpan-migration;";
     }
