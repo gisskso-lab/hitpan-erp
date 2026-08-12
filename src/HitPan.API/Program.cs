@@ -171,14 +171,23 @@ builder.Services.AddScoped<IHrService, HrService>();
 //   신규(2026-06-19): KB 매칭 실패 시 외부 도우미 직통 호출 + 정체성 System Prompt.
 //   - 정체성 .md 는 앱 시작 1회 로드 캐싱 (Singleton). IChatbotSystemPrompt 경계로 ChatbotService 에 주입.
 //   - 외부 모델 호출은 IHttpClientFactory 기반(고객 PC → Anthropic 직통, 본사 프록시 0 / 헌법 #18·#22).
-//   - 모델·max_tokens 는 설정 가능(기본 claude-sonnet-4-6 / 1024). appsettings "Chatbot:Model","Chatbot:MaxTokens".
+//   - 모델·max_tokens 는 설정 가능(기본값은 각 어댑터의 DefaultModel / 1024). appsettings "Chatbot:Model","Chatbot:MaxTokens".
 builder.Services.AddHttpClient();
 builder.Services.AddSingleton<HitPan.API.AI.ChatbotIdentityProvider>();
 builder.Services.AddSingleton<HitPan.API.AI.IChatbotIdentityProvider>(
     sp => sp.GetRequiredService<HitPan.API.AI.ChatbotIdentityProvider>());
 builder.Services.AddSingleton<HitPan.Application.Services.IChatbotSystemPrompt>(
     sp => sp.GetRequiredService<HitPan.API.AI.ChatbotIdentityProvider>());
-builder.Services.AddSingleton<HitPan.Application.Services.IChatCompletionProvider>(sp =>
+
+// ── AI 공급자 3사 (2026-08-12, 작업지시서 20260812작1 · 사장님 결재) ──
+//   사장님 오더: "기존 : 클로드API만 지원 -> 수정 : 클로드, 챗지피티, 제미나이API까지 받을 수 있게"
+//   화면 표기 결재: 클로드AI / 챗GPT / 제미나이
+//
+//   🔴 무회귀: 아래 IChatCompletionProvider 등록은 종전 그대로 클로드AI 를 가리킨다.
+//      공급자를 고르는 곳은 IAiProviderFactory 이며, 모르는 값이면 클로드AI 로 떨어진다.
+//      = 마이그레이션만 적용되고 고객이 아무것도 안 바꿨으면 종전과 완전히 같게 동작한다.
+//   각 어댑터는 상태가 없다(HttpClientFactory 사용) → Singleton 안전.
+builder.Services.AddSingleton<HitPan.Application.Services.AnthropicChatProvider>(sp =>
 {
     var cfg = sp.GetRequiredService<IConfiguration>();
     var model = cfg["Chatbot:Model"];
@@ -190,6 +199,34 @@ builder.Services.AddSingleton<HitPan.Application.Services.IChatCompletionProvide
         model,
         maxTokens);
 });
+builder.Services.AddSingleton<HitPan.Application.Services.OpenAiChatProvider>(sp =>
+{
+    var cfg = sp.GetRequiredService<IConfiguration>();
+    var maxTokensRaw = cfg["Chatbot:MaxTokens"];
+    int? maxTokens = int.TryParse(maxTokensRaw, out var mt) ? mt : null;
+    return new HitPan.Application.Services.OpenAiChatProvider(
+        sp.GetRequiredService<IHttpClientFactory>(),
+        sp.GetRequiredService<ILogger<HitPan.Application.Services.OpenAiChatProvider>>(),
+        cfg["Chatbot:OpenAiModel"],
+        maxTokens);
+});
+builder.Services.AddSingleton<HitPan.Application.Services.GeminiChatProvider>(sp =>
+{
+    var cfg = sp.GetRequiredService<IConfiguration>();
+    var maxTokensRaw = cfg["Chatbot:MaxTokens"];
+    int? maxTokens = int.TryParse(maxTokensRaw, out var mt) ? mt : null;
+    return new HitPan.Application.Services.GeminiChatProvider(
+        sp.GetRequiredService<IHttpClientFactory>(),
+        sp.GetRequiredService<ILogger<HitPan.Application.Services.GeminiChatProvider>>(),
+        cfg["Chatbot:GeminiModel"],
+        maxTokens);
+});
+// 종전 경로 보존(헌법 #1) — 이 인터페이스를 주입받는 기존 코드는 그대로 클로드AI 를 받는다.
+builder.Services.AddSingleton<HitPan.Application.Services.IChatCompletionProvider>(
+    sp => sp.GetRequiredService<HitPan.Application.Services.AnthropicChatProvider>());
+// 공급자 선택 팩토리 — 테넌트의 ai_provider 값으로 어댑터를 고른다.
+builder.Services.AddSingleton<HitPan.Application.Services.Ai.IAiProviderFactory,
+    HitPan.Application.Services.Ai.AiProviderFactory>();
 // AI 직원 — 자연어 분석 명령을 실데이터 표+차트로 처리(읽기 전용, IReportService 재사용).
 builder.Services.AddScoped<HitPan.Application.Services.IAiEmployeeAnalysisService,
     HitPan.Application.Services.AiEmployeeAnalysisService>();

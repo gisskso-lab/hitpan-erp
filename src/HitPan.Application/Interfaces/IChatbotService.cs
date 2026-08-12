@@ -41,6 +41,25 @@ public interface IChatbotService
     /// <summary>AI 도우미 설정 현황(키 설정 여부·last4·한도)을 조회한다. 평문 키는 반환하지 않는다.</summary>
     Task<AiSettingsDto> GetAiSettingsAsync(string tenantId, CancellationToken ct = default);
 
+    // ── 3사 확장 (2026-08-12, 작업지시서 20260812작1 · 사장님 결재) ──
+    //    위 3개(SaveApiKey/DeleteApiKey/GetAiSettings)는 그대로 둔다(헌법 #1).
+    //    기존 것은 "현재 선택된 공급자" 에 대해 동작하도록 유지되고, 아래가 공급자를 명시하는 경로다.
+
+    /// <summary>지정한 공급자(anthropic/openai/google)의 연동 키를 암호화 저장한다.</summary>
+    Task SaveApiKeyAsync(string providerId, string apiKey, string tenantId, CancellationToken ct = default);
+
+    /// <summary>지정한 공급자의 연동 키만 삭제한다. 다른 공급자 키는 보존된다.</summary>
+    Task DeleteApiKeyAsync(string providerId, string tenantId, CancellationToken ct = default);
+
+    /// <summary>지금 사용할 공급자를 바꾼다(키는 건드리지 않는다).</summary>
+    Task SetActiveProviderAsync(string providerId, string tenantId, CancellationToken ct = default);
+
+    /// <summary>
+    /// 지정한 공급자에 <b>실제로 연결해 본다</b>(짧은 호출 1회).
+    /// 성공하면 *_key_verified_at 을 기록한다. 저장 여부만 보는 것이 아니다.
+    /// </summary>
+    Task<AiConnectionCheckDto> CheckConnectionAsync(string providerId, string tenantId, CancellationToken ct = default);
+
     /// <summary>이번 달 토큰 사용량을 ai_usage_logs(ym 기준)에서 집계한다.</summary>
     Task<AiUsageDto> GetUsageAsync(string tenantId, CancellationToken ct = default);
 

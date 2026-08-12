@@ -113,6 +113,42 @@ public sealed class AiSettingsModel
     public int MonthlyLimit { get; set; }
     public int ExtraTokens { get; set; }
     public string SubscriptionTier { get; set; } = string.Empty;
+
+    // ── 3사 확장 (2026-08-12, 20260812작1 · 사장님 결재) ──
+    //    위 필드들은 "현재 선택된 공급자" 의 상태다(서버가 그렇게 채워 보낸다).
+
+    /// <summary>현재 사용 공급자 — anthropic / openai / google</summary>
+    public string AiProvider { get; set; } = "anthropic";
+
+    /// <summary>3사 전체 연동 상태. 화면 탭이 이걸 보고 그린다.</summary>
+    public List<AiProviderStatusModel> Providers { get; set; } = new();
+}
+
+/// <summary>공급자 1곳의 연동 상태 — GET /api/ai-settings 응답의 providers[] 와 매핑.</summary>
+public sealed class AiProviderStatusModel
+{
+    public string ProviderId { get; set; } = string.Empty;
+
+    /// <summary>고객 화면 표기 (사장님 결재): 클로드AI / 챗GPT / 제미나이</summary>
+    public string DisplayName { get; set; } = string.Empty;
+
+    public bool KeyConfigured { get; set; }
+    public string? KeyLast4 { get; set; }
+    public string KeyStatus { get; set; } = "none";
+    public DateTime? KeySavedAt { get; set; }
+
+    /// <summary>실제 외부 호출로 연결이 확인된 시각. null 이면 아직 진짜로 확인된 적 없다.</summary>
+    public DateTime? KeyVerifiedAt { get; set; }
+}
+
+/// <summary>[연결 확인] 결과 — POST /api/ai-settings/check/{providerId} 응답과 매핑.</summary>
+public sealed class AiConnectionCheckModel
+{
+    public bool Succeeded { get; set; }
+    public string Message { get; set; } = string.Empty;
+    public string ProviderId { get; set; } = string.Empty;
+    public string DisplayName { get; set; } = string.Empty;
+    public DateTime? VerifiedAt { get; set; }
 }
 
 /// <summary>

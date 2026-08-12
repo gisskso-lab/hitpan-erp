@@ -195,6 +195,62 @@ public class AiSettingsDto
     public int MonthlyLimit { get; set; }
     public int ExtraTokens { get; set; }
     public string SubscriptionTier { get; set; } = "";
+
+    // ── 3사 확장 (2026-08-12, 작업지시서 20260812작1 · 사장님 결재) ──
+    //    위 KeyConfigured/KeyLast4/KeyStatus/KeySavedAt 는 그대로 둔다(헌법 #1).
+    //    그 값들은 "현재 선택된 공급자" 의 상태를 담아 종전 화면과 호환된다.
+
+    /// <summary>현재 사용 공급자 — anthropic(클로드AI) / openai(챗GPT) / google(제미나이)</summary>
+    public string AiProvider { get; set; } = "anthropic";
+
+    /// <summary>공급자별 연동 상태 (3사 전부). 화면 탭이 이걸 보고 그린다.</summary>
+    public List<AiProviderStatusDto> Providers { get; set; } = new();
+}
+
+/// <summary>
+/// [연결 확인] 결과 — 실제 외부 호출을 해 본 결과다.
+/// 🔴 저장 여부만 보고 성공이라 답하지 않는다(2026-08-12 봉합. 종전에는 틀린 키도 통과했다).
+/// </summary>
+public class AiConnectionCheckDto
+{
+    /// <summary>실제 호출이 성공했나</summary>
+    public bool Succeeded { get; set; }
+
+    /// <summary>고객에게 보여줄 안내 문구 (실패 사유를 뭉개지 않는다)</summary>
+    public string Message { get; set; } = "";
+
+    /// <summary>확인한 공급자 식별자</summary>
+    public string ProviderId { get; set; } = "";
+
+    /// <summary>고객 화면 표기 (클로드AI / 챗GPT / 제미나이)</summary>
+    public string DisplayName { get; set; } = "";
+
+    /// <summary>성공 시 기록된 확인 시각</summary>
+    public DateTime? VerifiedAt { get; set; }
+}
+
+/// <summary>공급자 1곳의 연동 상태 (평문 키 절대 반환 금지)</summary>
+public class AiProviderStatusDto
+{
+    /// <summary>공급자 식별자 — anthropic / openai / google</summary>
+    public string ProviderId { get; set; } = "";
+
+    /// <summary>고객 화면 표기 (사장님 결재 2026-08-12): 클로드AI / 챗GPT / 제미나이</summary>
+    public string DisplayName { get; set; } = "";
+
+    /// <summary>이 공급자에 키가 설정돼 있나 (status='valid' 이고 last4 존재)</summary>
+    public bool KeyConfigured { get; set; }
+
+    /// <summary>마스킹된 키 끝 4자리</summary>
+    public string? KeyLast4 { get; set; }
+
+    /// <summary>none / valid / invalid / expired</summary>
+    public string KeyStatus { get; set; } = "none";
+
+    public DateTime? KeySavedAt { get; set; }
+
+    /// <summary>실제 외부 호출로 연결이 확인된 시각. null 이면 아직 진짜로 확인된 적 없다.</summary>
+    public DateTime? KeyVerifiedAt { get; set; }
 }
 
 /// <summary>이번 달 토큰 사용량 집계 (GET /api/chatbot/usage)</summary>

@@ -25,7 +25,56 @@
     도우미를 쓰실 때 키를 발급한 곳으로만 직접 연결됩니다.
 </MudAlert>
 
-<SectionCard Title="연동 키">
+@* ── 지금 사용 중인 곳 (2026-08-12 3사 확장) ─────────────────────────────
+     사장님 결재 설계: 3사 키를 각각 넣어 두고, 지금 쓸 곳 하나를 고른다.
+     한 곳이 장애·한도 초과일 때 키를 다시 넣지 않고 갈아탈 수 있다. *@
+<SectionCard Title="지금 사용 중인 곳">
+    @if (_loading)
+    {
+        <MudProgressLinear Indeterminate="true" Color="Color.Primary" Class="mb-3" />
+    }
+    else if (_loadFailed)
+    {
+        <LoadFailedState Title="연동 상태를 불러오지 못했습니다"
+                         Subtitle="저장된 키가 지워진 것이 아닙니다. 상태를 확인하기 전에는 키를 다시 입력하지 마세요."
+                         MinHeight="140px"
+                         Retrying="@_busy"
+                         OnRetry="ReloadAsync" />
+    }
+    else
+    {
+        <MudText Typo="Typo.body2" Class="mb-2" Style="color:var(--mud-palette-text-secondary)">
+            도우미가 답할 때 사용할 곳을 하나 고릅니다. 아래 칸에서 각각의 키를 넣어 두시면 언제든 바꿔 쓰실 수 있습니다.
+        </MudText>
+
+        <MudRadioGroup T="string" Value="@_activeProvider" ValueChanged="OnActiveProviderChangedAsync">
+            @foreach (var p in _settings.Providers)
+            {
+                <MudRadio T="string" Value="@p.ProviderId" Color="Color.Primary" Disabled="@_busy">
+                    @p.DisplayName
+                    @if (p.KeyConfigured)
+                    {
+                        <MudChip T="string" Size="Size.Small" Color="Color.Success" Variant="Variant.Text">연동됨</MudChip>
+                    }
+                    else
+                    {
+                        <MudChip T="string" Size="Size.Small" Color="Color.Default" Variant="Variant.Text">미연동</MudChip>
+                    }
+                </MudRadio>
+            }
+        </MudRadioGroup>
+
+        @if (_activeStatus is not null && !_activeStatus.KeyConfigured)
+        {
+            <MudAlert Severity="Severity.Warning" Class="mt-2" Dense="true">
+                지금 고르신 @_activeStatus.DisplayName 에 연동 키가 없습니다. 아래에서 키를 넣어 주세요.
+            </MudAlert>
+        }
+    }
+</SectionCard>
+
+@* ── 공급자별 연동 키 ───────────────────────────────────────────────── *@
+<SectionCard Title="연동 키" Class="mt-3">
     @if (_loading)
     {
         <MudProgressLinear Indeterminate="true" Color="Color.Primary" Class="mb-3" />
@@ -34,50 +83,71 @@
     {
         @* 🔴 못 불러온 것 — "미연결" 과 다른 사실이다.
            미연결이라 단정하면, 키가 멀쩡히 저장돼 있는데도 고객이 키를 다시 붙여넣는다. *@
-        <LoadFailedState Title="연동 상태를 불러오지 못했습니다"
-                         Subtitle="저장된 키가 지워진 것이 아닙니다. 상태를 확인하기 전에는 키를 다시 입력하지 마세요."
-                         MinHeight="140px"
-                         Retrying="@_busy"
-                         OnRetry="ReloadAsync" />
-    }
-    else if (_settings.KeyConfigured)
-    {
-        <MudAlert Severity="Severity.Success" Class="mb-3" Dense="true" Icon="@Icons.Material.Filled.CheckCircle">
-            연결됨 (@MaskedKey())
-            @if (_settings.KeySavedAt is not null)
-            {
-                <span> · 저장: @_settings.KeySavedAt?.ToString("yyyy-MM-dd HH:mm")</span>
-            }
-        </MudAlert>
+        <MudText Typo="Typo.body2" Style="color:var(--mud-palette-text-secondary)">
+            상태를 확인하지 못해 키 입력을 잠시 막았습니다. 위에서 [다시 시도] 를 눌러 주세요.
+        </MudText>
     }
     else
     {
-        <MudAlert Severity="Severity.Normal" Class="mb-3" Dense="true" Icon="@Icons.Material.Filled.LinkOff">
-            미연결 — 키를 입력하고 저장하면 도우미 기능이 켜집니다.
-        </MudAlert>
-    }
+        <MudTabs Elevation="0" Rounded="true" ApplyEffectsToContainer="true" PanelClass="pt-4">
+            @foreach (var p in _settings.Providers)
+            {
+                <MudTabPanel Text="@p.DisplayName">
+                    @if (p.KeyConfigured)
+                    {
+                        <MudAlert Severity="Severity.Success" Class="mb-3" Dense="true" Icon="@Icons.Material.Filled.CheckCircle">
+                            연결됨 (@Masked(p.KeyLast4))
+                            @if (p.KeySavedAt is not null)
+                            {
+                                <span> · 저장: @p.KeySavedAt?.ToString("yyyy-MM-dd HH:mm")</span>
+                            }
+                            @* 🔴 "저장됨" 과 "실제로 연결해 봤음" 은 다른 사실이다. 구분해서 적는다. *@
+                            @if (p.KeyVerifiedAt is not null)
+                            {
+                                <span> · 연결 확인: @p.KeyVerifiedAt?.ToString("yyyy-MM-dd HH:mm")</span>
+                            }
+                            else
+                            {
+                                <span> · <b>아직 연결을 확인하지 않았습니다</b></span>
+                            }
+                        </MudAlert>
+                    }
+                    else if (string.Equals(p.KeyStatus, "invalid", StringComparison.OrdinalIgnoreCase))
+                    {
+                        <MudAlert Severity="Severity.Error" Class="mb-3" Dense="true">
+                            연결에 실패한 키입니다. @p.DisplayName 키가 맞는지 확인 후 다시 저장해 주세요.
+                        </MudAlert>
+                    }
+                    else
+                    {
+                        <MudAlert Severity="Severity.Normal" Class="mb-3" Dense="true" Icon="@Icons.Material.Filled.LinkOff">
+                            미연결 — 키를 입력하고 저장하면 @p.DisplayName 을(를) 쓸 수 있습니다.
+                        </MudAlert>
+                    }
 
-    @* 상태를 못 불러온 동안에는 입력·삭제를 막는다.
-       저장된 키가 있는지 모르는 채로 손대면 멀쩡한 키를 덮어쓸 수 있다. *@
-    @if (!_loading && !_loadFailed)
-    {
-        <MudGrid Spacing="2">
-            <MudItem xs="12" md="8">
-                <MudTextField T="string" Label="@(_settings.KeyConfigured ? "연동 키 (저장됨 — 변경 시에만 입력)" : "연동 키")"
-                              @bind-Value="_keyInput" Variant="Variant.Outlined" Margin="Margin.Dense"
-                              InputType="InputType.Password"
-                              HelperText="@(_settings.KeyConfigured ? "비워두면 기존 키 유지" : "회사 보유 키를 붙여넣으세요")" />
-            </MudItem>
-        </MudGrid>
+                    <MudGrid Spacing="2">
+                        <MudItem xs="12" md="8">
+                            <MudTextField T="string"
+                                          Label="@(p.KeyConfigured ? $"{p.DisplayName} 키 (저장됨 — 변경 시에만 입력)" : $"{p.DisplayName} 키")"
+                                          Value="@GetInput(p.ProviderId)"
+                                          ValueChanged="@(v => SetInput(p.ProviderId, v))"
+                                          Variant="Variant.Outlined" Margin="Margin.Dense"
+                                          InputType="InputType.Password"
+                                          HelperText="@(p.KeyConfigured ? "비워두면 기존 키 유지" : $"{p.DisplayName} 에서 발급받은 키를 붙여넣으세요")" />
+                        </MudItem>
+                    </MudGrid>
 
-        <div class="mt-3">
-            <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Save"
-                       OnClick="SaveAsync" Disabled="@_busy">저장</MudButton>
-            <MudButton Class="ml-2" Variant="Variant.Outlined" Color="Color.Primary" StartIcon="@Icons.Material.Filled.NetworkCheck"
-                       OnClick="CheckAsync" Disabled="@(_busy || !_settings.KeyConfigured)">연결 확인</MudButton>
-            <MudButton Class="ml-2" Variant="Variant.Outlined" Color="Color.Error" StartIcon="@Icons.Material.Filled.Delete"
-                       OnClick="DeleteAsync" Disabled="@(_busy || !_settings.KeyConfigured)">삭제</MudButton>
-        </div>
+                    <div class="mt-3">
+                        <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Save"
+                                   OnClick="@(() => SaveAsync(p.ProviderId))" Disabled="@_busy">저장</MudButton>
+                        <MudButton Class="ml-2" Variant="Variant.Outlined" Color="Color.Primary" StartIcon="@Icons.Material.Filled.NetworkCheck"
+                                   OnClick="@(() => CheckAsync(p.ProviderId))" Disabled="@(_busy || !p.KeyConfigured)">연결 확인</MudButton>
+                        <MudButton Class="ml-2" Variant="Variant.Outlined" Color="Color.Error" StartIcon="@Icons.Material.Filled.Delete"
+                                   OnClick="@(() => DeleteAsync(p.ProviderId, p.DisplayName))" Disabled="@(_busy || !p.KeyConfigured)">삭제</MudButton>
+                    </div>
+                </MudTabPanel>
+            }
+        </MudTabs>
     }
 </SectionCard>
 
@@ -126,8 +196,13 @@
 @code {
     private AiSettingsModel _settings = new();
     private AiUsageModel? _usage;
-    private string? _keyInput;
     private bool _busy;
+
+    // 공급자별 입력칸 — 한 탭에서 친 키가 다른 탭으로 새면 안 된다.
+    private readonly Dictionary<string, string?> _keyInputs = new();
+
+    // 지금 고른 공급자(라디오 바인딩용). 서버 값과 분리해 두어야 실패 시 되돌릴 수 있다.
+    private string _activeProvider = "anthropic";
 
     // 연동 설정을 못 불러왔는지 여부. 🔴 "미연결" 과 반드시 구분한다.
     //   종전에는 조회 실패도 새 설정(= 미연결)으로 뭉개서,
@@ -135,6 +210,9 @@
     private bool _loadFailed;
     // 첫 조회가 끝나기 전에는 연결/미연결을 단정하지 않는다.
     private bool _loading = true;
+
+    private AiProviderStatusModel? _activeStatus
+        => _settings.Providers.FirstOrDefault(p => p.ProviderId == _activeProvider);
 
     protected override async Task OnInitializedAsync()
     {
@@ -157,6 +235,8 @@
             else
             {
                 _settings = settings;
+                _activeProvider = string.IsNullOrWhiteSpace(settings.AiProvider)
+                    ? "anthropic" : settings.AiProvider;
             }
 
             // 사용량은 부가 정보라 실패해도 화면 전체를 막지 않는다(아래에서 따로 안내).
@@ -169,9 +249,15 @@
         }
     }
 
+    private string? GetInput(string providerId)
+        => _keyInputs.TryGetValue(providerId, out var v) ? v : null;
+
+    private void SetInput(string providerId, string? value)
+        => _keyInputs[providerId] = value;
+
     // 마스킹 표시 — 끝 4자리만 노출(평문 절대 표시 금지)
-    private string MaskedKey()
-        => string.IsNullOrEmpty(_settings.KeyLast4) ? "****" : $"****{_settings.KeyLast4}";
+    private static string Masked(string? last4)
+        => string.IsNullOrEmpty(last4) ? "****" : $"****{last4}";
 
     private double UsagePercent()
     {
@@ -188,9 +274,37 @@
         return Color.Primary;
     }
 
-    private async Task SaveAsync()
+    private async Task OnActiveProviderChangedAsync(string providerId)
     {
-        if (string.IsNullOrWhiteSpace(_keyInput))
+        if (string.IsNullOrWhiteSpace(providerId) || providerId == _activeProvider) return;
+
+        var previous = _activeProvider;
+        _activeProvider = providerId;   // 먼저 반영해 화면이 즉시 따라오게 한다
+
+        _busy = true;
+        try
+        {
+            var ok = await AiApi.SetActiveProviderAsync(providerId);
+            if (ok)
+            {
+                var name = _settings.Providers.FirstOrDefault(p => p.ProviderId == providerId)?.DisplayName ?? providerId;
+                Snackbar.Add($"{name} 을(를) 사용하도록 변경했습니다.", Severity.Success);
+                await ReloadAsync();
+            }
+            else
+            {
+                // 🔴 저장 실패했는데 화면만 바뀌어 있으면 고객은 바뀐 줄 안다. 되돌린다.
+                _activeProvider = previous;
+                Snackbar.Add("사용할 곳을 변경하지 못했습니다.", Severity.Error);
+            }
+        }
+        finally { _busy = false; }
+    }
+
+    private async Task SaveAsync(string providerId)
+    {
+        var input = GetInput(providerId);
+        if (string.IsNullOrWhiteSpace(input))
         {
             Snackbar.Add("연동 키를 입력하세요.", Severity.Warning);
             return;
@@ -201,11 +315,11 @@
         {
             // 🔴 저장 실패 사유를 그대로 전달한다. "저장에 실패했습니다" 한 줄만 보여주면
             //    무엇을 고쳐야 할지 알 수 없어 고객이 같은 키를 반복해서 붙여넣게 된다.
-            var (ok, error) = await AiApi.SaveApiKeyAsync(_keyInput.Trim());
+            var (ok, error) = await AiApi.SaveApiKeyAsync(providerId, input.Trim());
             if (ok)
             {
-                Snackbar.Add("연동 키가 저장되었습니다.", Severity.Success);
-                _keyInput = null; // 저장 후 입력칸 비움 — 다음엔 변경 시에만 입력
+                Snackbar.Add("연동 키가 저장되었습니다. [연결 확인] 을 눌러 실제로 연결되는지 확인해 보세요.", Severity.Success);
+                _keyInputs[providerId] = null; // 저장 후 입력칸 비움 — 다음엔 변경 시에만 입력
                 await ReloadAsync();
             }
             else
@@ -216,37 +330,39 @@
         finally { _busy = false; }
     }
 
-    private async Task CheckAsync()
+    // 🔴 실제로 연결해 본다 (2026-08-12 봉합, 20260812작1 §2-3).
+    //    종전에는 DB 를 다시 읽어 "설정되어 있습니다" 라고만 답해서 틀린 키도 통과했다.
+    private async Task CheckAsync(string providerId)
     {
         _busy = true;
         try
         {
-            // 현재 상태 재조회로 연결 여부 확인 (실제 외부 호출 검증은 Phase B)
-            await ReloadAsync();
-            if (_loadFailed)
+            var result = await AiApi.CheckConnectionAsync(providerId);
+            if (result is null)
             {
-                // 못 불러온 상태에서 "설정 안 됨" 이라고 답하면 거짓말이 된다.
-                Snackbar.Add("연동 상태를 확인하지 못했습니다. 잠시 후 다시 시도해주세요.", Severity.Warning);
+                // 통신 자체가 안 된 것 — "키가 틀렸다" 와 구분해서 안내한다.
+                Snackbar.Add("연결을 확인하지 못했습니다. 잠시 후 다시 시도해주세요.", Severity.Warning);
                 return;
             }
-            Snackbar.Add(_settings.KeyConfigured ? "연동 키가 설정되어 있습니다." : "연동 키가 설정되어 있지 않습니다.",
-                _settings.KeyConfigured ? Severity.Success : Severity.Warning);
+
+            Snackbar.Add(result.Message, result.Succeeded ? Severity.Success : Severity.Error);
+            await ReloadAsync();
         }
         finally { _busy = false; }
     }
 
-    private async Task DeleteAsync()
+    private async Task DeleteAsync(string providerId, string displayName)
     {
         var confirm = await DialogService.ShowMessageBoxAsync(
             "연동 해제",
-            "연동 키를 삭제하면 도우미 기능이 꺼집니다. 계속할까요?",
+            $"{displayName} 연동 키를 삭제합니다. 다른 곳의 키는 그대로 남습니다. 계속할까요?",
             yesText: "삭제", cancelText: "취소");
         if (confirm != true) return;
 
         _busy = true;
         try
         {
-            var ok = await AiApi.DeleteApiKeyAsync();
+            var ok = await AiApi.DeleteApiKeyAsync(providerId);
             Snackbar.Add(ok ? "연동 키가 삭제되었습니다." : "삭제에 실패했습니다.", ok ? Severity.Success : Severity.Error);
             if (ok) await ReloadAsync();
         }

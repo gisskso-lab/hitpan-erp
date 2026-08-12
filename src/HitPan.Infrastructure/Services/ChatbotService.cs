@@ -29,6 +29,8 @@ public sealed class ChatbotService : IChatbotService
     private readonly HitPan.Application.Services.Ai.IAiAgentService _agent;
     // 신규(2026-06-20): Lv.3 워크플로우 연쇄 — 거래명세서 승인 시 확정 + 수주 자동생성.
     private readonly ISalesService _sales;
+    // 신규(2026-08-12): AI 3사 확장 — 공급자 식별자로 호출 어댑터를 고른다(20260812작1).
+    private readonly HitPan.Application.Services.Ai.IAiProviderFactory _providerFactory;
     private readonly ILogger<ChatbotService> _logger;
 
     public ChatbotService(
@@ -40,6 +42,7 @@ public sealed class ChatbotService : IChatbotService
         IAiEmployeeAnalysisService analysis,
         HitPan.Application.Services.Ai.IAiAgentService agent,
         ISalesService sales,
+        HitPan.Application.Services.Ai.IAiProviderFactory providerFactory,
         ILogger<ChatbotService> logger)
     {
         _db = db;
@@ -50,6 +53,7 @@ public sealed class ChatbotService : IChatbotService
         _analysis = analysis;
         _agent = agent;
         _sales = sales;
+        _providerFactory = providerFactory;
         _logger = logger;
     }
 
@@ -396,7 +400,15 @@ public sealed class ChatbotService : IChatbotService
         IReadOnlySet<string>? policies,
         CancellationToken ct)
     {
-        // 키 행 조회(암호문 + 상태). valid 가 아니면 엔진 미동작(FSD 옵션 OFF).
+        // 🔴 이 경로는 의도적으로 클로드AI(anthropic) 고정이다 — 실수가 아니다.
+        //    (2026-08-12, 20260812작1 / 검증팀 P0-1 재검토 결과)
+        //    도구 사용(Tool Use)은 클로드 고유 content 블록 포맷에 엔진이 직접 의존한다.
+        //    신규 2사(챗GPT·제미나이)는 CompleteWithToolsAsync 가 Fail() 을 반환하므로,
+        //    여기서 그쪽으로 넘기면 AI 직원이 조용히 죽는다.
+        //    ⇒ 공급자를 챗GPT·제미나이로 골라도 AI 직원(도구 실행)만은 클로드 키로 돈다.
+        //       클로드 키가 없으면 AI 직원은 안 돌고 일반 대화로 폴백한다(정상 동작).
+        //    사장님 "챗봇은 나중에 할거야" 범위 밖이라 이번엔 여기까지다.
+        //    다음 차수(챗봇)에서 공급자 중립 Tool Use 추상화를 만들 때 함께 푼다.
         var keyRow = await _db.QueryFirstOrDefaultAsync<ByokKeyRow?>(new CommandDefinition(
             """
             SELECT anthropic_api_key_encrypted AS Encrypted,
@@ -594,11 +606,21 @@ public sealed class ChatbotService : IChatbotService
         IReadOnlyList<ChatHistoryTurn>? history,
         CancellationToken ct)
     {
-        // 1) 키 행 조회 (암호문 + 상태). 평문은 DB·로그에 없음(헌법 #5).
+        // 🔴 봉합 2026-08-12 (검증팀 P0-1 적발, 20260812작1):
+        //    종전엔 여기서 anthropic_* 컬럼을 고정으로 읽고 _chatProvider(클로드)를 그대로 불렀다.
+        //    그래서 고객이 화면에서 챗GPT 를 골라도 실제 대화는 클로드로 나갔다 —
+        //    화면은 "챗GPT 를 사용하도록 변경했습니다" 라고 답하면서 실제로는 안 바뀌는 '되는 척' 이었다.
+        //    이제 선택된 공급자를 읽어 그 공급자의 키로, 그 공급자 어댑터를 호출한다.
+
+        // 1) 지금 사용할 공급자 (모르는 값·빈 값이면 클로드AI 로 떨어진다)
+        var provider = await GetActiveProviderAsync(tenantId, ct).ConfigureAwait(false);
+        var prefix = ColumnPrefix(provider);
+
+        // 2) 키 행 조회 (암호문 + 상태). 평문은 DB·로그에 없음(헌법 #5).
         var keyRow = await _db.QueryFirstOrDefaultAsync<ByokKeyRow?>(new CommandDefinition(
-            """
-            SELECT anthropic_api_key_encrypted AS Encrypted,
-                   anthropic_key_status        AS Status
+            $"""
+            SELECT {prefix}_api_key_encrypted AS Encrypted,
+                   {prefix}_key_status        AS Status
             FROM local_subscription
             WHERE tenant_id = @TenantId
             """,
@@ -613,7 +635,7 @@ public sealed class ChatbotService : IChatbotService
             return null;
         }
 
-        // 2) 복호화 — 평문 키는 이 스코프 안에서만 사용.
+        // 3) 복호화 — 평문 키는 이 스코프 안에서만 사용.
         string decryptedKey;
         try
         {
@@ -626,8 +648,9 @@ public sealed class ChatbotService : IChatbotService
             return null;
         }
 
-        // 3) 외부 도우미 호출. System Prompt = 정체성 .md(캐싱) + 직전 대화(history) 전달.
-        var result = await _chatProvider
+        // 4) 선택된 공급자의 어댑터로 호출. System Prompt = 정체성 .md(캐싱) + 직전 대화(history).
+        var adapter = _providerFactory.Resolve(provider);
+        var result = await adapter
             .CompleteAsync(decryptedKey, _systemPrompt.Value, userMessage, history, ct)
             .ConfigureAwait(false);
 
@@ -854,16 +877,29 @@ public sealed class ChatbotService : IChatbotService
     {
         await EnsureOpenAsync(ct).ConfigureAwait(false);
 
-        var row = await _db.QueryFirstOrDefaultAsync<AiSettingsRow?>(new CommandDefinition(
+        // 3사 확장(2026-08-12, 20260812작1): 한 번의 조회로 3사 상태를 전부 가져온다.
+        //   🔴 기존 반환 필드(KeyConfigured/KeyLast4/KeyStatus/KeySavedAt)의 의미는 바꾸지 않는다.
+        //      "현재 선택된 공급자" 의 상태를 담아 종전 화면·호출부와 그대로 호환된다(헌법 #1).
+        var row = await _db.QueryFirstOrDefaultAsync<AllProvidersRow?>(new CommandDefinition(
             """
             SELECT
+              ai_provider               AS AiProvider,
               ai_mode                   AS AiMode,
               ai_token_monthly_limit    AS MonthlyLimit,
               ai_token_extra            AS ExtraTokens,
               subscription_tier         AS SubscriptionTier,
-              anthropic_api_key_last4   AS Last4,
-              anthropic_key_status      AS KeyStatus,
-              anthropic_key_saved_at    AS KeySavedAt
+              anthropic_api_key_last4   AS AnthropicLast4,
+              anthropic_key_status      AS AnthropicStatus,
+              anthropic_key_saved_at    AS AnthropicSavedAt,
+              anthropic_key_verified_at AS AnthropicVerifiedAt,
+              openai_api_key_last4      AS OpenaiLast4,
+              openai_key_status         AS OpenaiStatus,
+              openai_key_saved_at       AS OpenaiSavedAt,
+              openai_key_verified_at    AS OpenaiVerifiedAt,
+              google_api_key_last4      AS GoogleLast4,
+              google_key_status         AS GoogleStatus,
+              google_key_saved_at       AS GoogleSavedAt,
+              google_key_verified_at    AS GoogleVerifiedAt
             FROM local_subscription
             WHERE tenant_id = @TenantId
             """,
@@ -879,25 +915,64 @@ public sealed class ChatbotService : IChatbotService
                 AiMode = "hitpan_pool",
                 MonthlyLimit = 0,
                 ExtraTokens = 0,
-                SubscriptionTier = "basic"
+                SubscriptionTier = "basic",
+                AiProvider = HitPan.Application.Services.Ai.AiProviderIds.Anthropic,
+                Providers = BuildEmptyProviderList()
             };
         }
 
-        var status = row.KeyStatus ?? "none";
+        var active = HitPan.Application.Services.Ai.AiProviderIds.Normalize(row.AiProvider);
+
+        var providers = new List<AiProviderStatusDto>
+        {
+            BuildProviderStatus(HitPan.Application.Services.Ai.AiProviderIds.Anthropic,
+                row.AnthropicLast4, row.AnthropicStatus, row.AnthropicSavedAt, row.AnthropicVerifiedAt),
+            BuildProviderStatus(HitPan.Application.Services.Ai.AiProviderIds.OpenAi,
+                row.OpenaiLast4, row.OpenaiStatus, row.OpenaiSavedAt, row.OpenaiVerifiedAt),
+            BuildProviderStatus(HitPan.Application.Services.Ai.AiProviderIds.Google,
+                row.GoogleLast4, row.GoogleStatus, row.GoogleSavedAt, row.GoogleVerifiedAt)
+        };
+
+        // 종전 필드 = 현재 선택된 공급자의 상태.
+        var current = providers.First(p => p.ProviderId == active);
+
         return new AiSettingsDto
         {
-            KeyConfigured =
-                !string.IsNullOrEmpty(row.Last4)
-                && string.Equals(status, "valid", StringComparison.OrdinalIgnoreCase),
-            KeyLast4 = row.Last4,
-            KeyStatus = status,
-            KeySavedAt = row.KeySavedAt,
+            KeyConfigured = current.KeyConfigured,
+            KeyLast4 = current.KeyLast4,
+            KeyStatus = current.KeyStatus,
+            KeySavedAt = current.KeySavedAt,
             AiMode = row.AiMode ?? "hitpan_pool",
             MonthlyLimit = row.MonthlyLimit,
             ExtraTokens = row.ExtraTokens,
-            SubscriptionTier = row.SubscriptionTier ?? "basic"
+            SubscriptionTier = row.SubscriptionTier ?? "basic",
+            AiProvider = active,
+            Providers = providers
         };
     }
+
+    private static AiProviderStatusDto BuildProviderStatus(
+        string providerId, string? last4, string? status, DateTime? savedAt, DateTime? verifiedAt)
+    {
+        var s = string.IsNullOrWhiteSpace(status) ? "none" : status!;
+        return new AiProviderStatusDto
+        {
+            ProviderId = providerId,
+            DisplayName = HitPan.Application.Services.Ai.AiProviderIds.DisplayName(providerId),
+            KeyConfigured =
+                !string.IsNullOrEmpty(last4)
+                && string.Equals(s, "valid", StringComparison.OrdinalIgnoreCase),
+            KeyLast4 = last4,
+            KeyStatus = s,
+            KeySavedAt = savedAt,
+            KeyVerifiedAt = verifiedAt
+        };
+    }
+
+    private static List<AiProviderStatusDto> BuildEmptyProviderList()
+        => HitPan.Application.Services.Ai.AiProviderIds.All
+            .Select(id => BuildProviderStatus(id, null, "none", null, null))
+            .ToList();
 
     // ─────────────────────────────────────────────────────────────
     // 이번 달 토큰 사용량 집계 (ai_usage_logs / ym 기준)
@@ -1114,5 +1189,293 @@ public sealed class ChatbotService : IChatbotService
     {
         public string? Encrypted { get; set; }
         public string? Status { get; set; }
+    }
+
+    // ═════════════════════════════════════════════════════════════════════
+    // AI 연동 3사 확장 (2026-08-12 · 작업지시서 20260812작1 · 사장님 결재)
+    //   오더: "기존 : 클로드API만 지원 -> 수정 : 클로드, 챗지피티, 제미나이API까지 받을 수 있게"
+    //   결재 설계: 3사 키를 각각 저장하고 지금 쓸 곳 하나를 고른다.
+    //
+    //   🔴 위쪽 기존 메서드(SaveApiKeyAsync/DeleteApiKeyAsync/GetAiSettingsAsync)는
+    //      한 줄도 고치지 않았다(헌법 #1). 아래는 전부 추가분이다.
+    // ═════════════════════════════════════════════════════════════════════
+
+    /// <summary>
+    /// 공급자 → DB 컬럼 접두어.
+    /// 🔴 컬럼명을 문자열로 조립해 SQL 에 넣기 때문에, 반드시 이 화이트리스트를 거친다.
+    ///    Normalize 가 모르는 값을 전부 'anthropic' 으로 떨어뜨리므로 외부 입력이 그대로 실릴 수 없다.
+    /// </summary>
+    private static string ColumnPrefix(string providerId)
+        => HitPan.Application.Services.Ai.AiProviderIds.Normalize(providerId) switch
+        {
+            HitPan.Application.Services.Ai.AiProviderIds.OpenAi => "openai",
+            HitPan.Application.Services.Ai.AiProviderIds.Google => "google",
+            _ => "anthropic"
+        };
+
+    /// <summary>현재 선택된 공급자를 읽는다. 값이 없으면 클로드AI(기본값).</summary>
+    private async Task<string> GetActiveProviderAsync(string tenantId, CancellationToken ct)
+    {
+        await EnsureOpenAsync(ct).ConfigureAwait(false);
+
+        var raw = await _db.QueryFirstOrDefaultAsync<string?>(new CommandDefinition(
+            "SELECT ai_provider FROM local_subscription WHERE tenant_id = @TenantId",
+            new { TenantId = tenantId },
+            cancellationToken: ct)).ConfigureAwait(false);
+
+        return HitPan.Application.Services.Ai.AiProviderIds.Normalize(raw);
+    }
+
+    /// <summary>지정 공급자의 복호화된 키를 얻는다. 없거나 무효면 null.</summary>
+    private async Task<string?> GetDecryptedKeyAsync(string providerId, string tenantId, CancellationToken ct)
+    {
+        await EnsureOpenAsync(ct).ConfigureAwait(false);
+
+        var prefix = ColumnPrefix(providerId);
+        var row = await _db.QueryFirstOrDefaultAsync<ByokKeyRow?>(new CommandDefinition(
+            $"""
+            SELECT {prefix}_api_key_encrypted AS Encrypted,
+                   {prefix}_key_status        AS Status
+            FROM local_subscription
+            WHERE tenant_id = @TenantId
+            """,
+            new { TenantId = tenantId },
+            cancellationToken: ct)).ConfigureAwait(false);
+
+        if (row is null || string.IsNullOrWhiteSpace(row.Encrypted)) return null;
+
+        try
+        {
+            return _encryption.Decrypt(row.Encrypted!);
+        }
+        catch (Exception ex)
+        {
+            // 헌법 #15: 빈 catch 금지. 복호화 실패는 키 손상·암호화 키 변경 등.
+            _logger.LogWarning(ex, "연동 키 복호화에 실패했습니다. provider={Provider}", ColumnPrefix(providerId));
+            return null;
+        }
+    }
+
+    public async Task SaveApiKeyAsync(string providerId, string apiKey, string tenantId, CancellationToken ct = default)
+    {
+        await EnsureOpenAsync(ct).ConfigureAwait(false);
+
+        var provider = HitPan.Application.Services.Ai.AiProviderIds.Normalize(providerId);
+        var prefix = ColumnPrefix(provider);
+
+        var key = (apiKey ?? string.Empty).Trim();
+        if (key.Length < 8)
+        {
+            throw new ArgumentException("AI 도우미 연동 키 형식이 올바르지 않습니다.", nameof(apiKey));
+        }
+
+        // 평문 키는 즉시 AES-256 암호화 — DB·로그·메모리에 평문 잔류 금지(헌법 #5).
+        var encrypted = _encryption.Encrypt(key);
+        var last4 = key[^4..];
+
+        // 🔴 키를 새로 저장하면 verified_at 을 NULL 로 되돌린다.
+        //    이전 키로 확인했던 기록이 새 키의 확인 기록인 양 남으면 거짓이 된다.
+        var affected = await _db.ExecuteAsync(new CommandDefinition(
+            $"""
+            UPDATE local_subscription
+            SET {prefix}_api_key_encrypted = @Enc,
+                {prefix}_api_key_last4     = @Last4,
+                {prefix}_key_status        = 'valid',
+                {prefix}_key_saved_at      = NOW(),
+                {prefix}_key_verified_at   = NULL
+            WHERE tenant_id = @TenantId
+            """,
+            new { Enc = encrypted, Last4 = last4, TenantId = tenantId },
+            cancellationToken: ct)).ConfigureAwait(false);
+
+        if (affected == 0)
+        {
+            throw new InvalidOperationException("구독 정보를 찾을 수 없어 키를 저장하지 못했습니다.");
+        }
+
+        // 감사 로그 — 평문·암호문 절대 기록 금지, last4만.
+        await _audit.LogAsync(
+            actionType: "ai_key_save",
+            entityType: "ai_settings",
+            entityId: tenantId,
+            afterJson: System.Text.Json.JsonSerializer.Serialize(
+                new { provider, last4, status = "valid" }),
+            ct: ct).ConfigureAwait(false);
+    }
+
+    public async Task DeleteApiKeyAsync(string providerId, string tenantId, CancellationToken ct = default)
+    {
+        await EnsureOpenAsync(ct).ConfigureAwait(false);
+
+        var provider = HitPan.Application.Services.Ai.AiProviderIds.Normalize(providerId);
+        var prefix = ColumnPrefix(provider);
+
+        // 🔴 지정한 공급자 컬럼만 지운다. 다른 공급자 키는 그대로 남는다(실측 #7).
+        await _db.ExecuteAsync(new CommandDefinition(
+            $"""
+            UPDATE local_subscription
+            SET {prefix}_api_key_encrypted = NULL,
+                {prefix}_api_key_last4     = NULL,
+                {prefix}_key_status        = 'none',
+                {prefix}_key_saved_at      = NULL,
+                {prefix}_key_verified_at   = NULL
+            WHERE tenant_id = @TenantId
+            """,
+            new { TenantId = tenantId },
+            cancellationToken: ct)).ConfigureAwait(false);
+
+        await _audit.LogAsync(
+            actionType: "ai_key_delete",
+            entityType: "ai_settings",
+            entityId: tenantId,
+            afterJson: System.Text.Json.JsonSerializer.Serialize(new { provider, status = "none" }),
+            ct: ct).ConfigureAwait(false);
+    }
+
+    public async Task SetActiveProviderAsync(string providerId, string tenantId, CancellationToken ct = default)
+    {
+        await EnsureOpenAsync(ct).ConfigureAwait(false);
+
+        var provider = HitPan.Application.Services.Ai.AiProviderIds.Normalize(providerId);
+
+        var affected = await _db.ExecuteAsync(new CommandDefinition(
+            "UPDATE local_subscription SET ai_provider = @Provider WHERE tenant_id = @TenantId",
+            new { Provider = provider, TenantId = tenantId },
+            cancellationToken: ct)).ConfigureAwait(false);
+
+        if (affected == 0)
+        {
+            throw new InvalidOperationException("구독 정보를 찾을 수 없어 공급자를 변경하지 못했습니다.");
+        }
+
+        await _audit.LogAsync(
+            actionType: "ai_provider_change",
+            entityType: "ai_settings",
+            entityId: tenantId,
+            afterJson: System.Text.Json.JsonSerializer.Serialize(new { provider }),
+            ct: ct).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// 🔴 실제로 연결해 본다. 저장 여부만 보고 성공이라 답하지 않는다.
+    ///    종전 화면의 [연결 확인]은 DB 재조회만 해서 틀린 키도 통과했다(2026-08-12 봉합).
+    /// </summary>
+    public async Task<AiConnectionCheckDto> CheckConnectionAsync(
+        string providerId, string tenantId, CancellationToken ct = default)
+    {
+        var provider = HitPan.Application.Services.Ai.AiProviderIds.Normalize(providerId);
+        var display = HitPan.Application.Services.Ai.AiProviderIds.DisplayName(provider);
+
+        var result = new AiConnectionCheckDto { ProviderId = provider, DisplayName = display };
+
+        var key = await GetDecryptedKeyAsync(provider, tenantId, ct).ConfigureAwait(false);
+        if (string.IsNullOrWhiteSpace(key))
+        {
+            result.Succeeded = false;
+            result.Message = $"{display} 연동 키가 저장되어 있지 않습니다.";
+            return result;
+        }
+
+        // 짧은 호출 1회 — 답변 내용은 쓰지 않는다. 연결·인증이 되는지만 본다.
+        var adapter = _providerFactory.Resolve(provider);
+        ChatProviderResult call;
+        try
+        {
+            call = await adapter.CompleteAsync(
+                key,
+                systemPrompt: "You are a connection test. Reply with the single word: OK",
+                userMessage: "OK",
+                history: null,
+                ct: ct).ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            // 헌법 #15. 어댑터가 이미 예외를 삼키지만 방어적으로 한 겹 더.
+            _logger.LogWarning(ex, "{Display} 연결 확인 중 예외.", display);
+            result.Succeeded = false;
+            result.Message = $"{display} 에 연결하지 못했습니다. 잠시 후 다시 시도해 주세요.";
+            return result;
+        }
+
+        if (!call.Succeeded)
+        {
+            // 🔴 실패를 성공으로 뭉개지 않는다. 고객이 원인을 찾을 수 있어야 한다.
+            //    키를 다른 회사 칸에 넣은 경우가 여기서 걸린다(실측 #3).
+            //
+            // 🔴 봉합 2026-08-12 (검증팀 P1-2 적발):
+            //    종전엔 실패면 무조건 status='invalid' 를 적었다. 그런데 실패에는
+            //    "키가 거부됐다" 와 "지금 인터넷이 안 된다·상대 서버가 아프다" 가 섞여 있다.
+            //    잠깐 끊긴 사이 [연결 확인] 을 누른 고객의 **멀쩡한 키가 invalid 로 적히면**
+            //    그 뒤로 도우미가 폴백으로 죽고, 고객은 키를 다시 넣어야만 살아난다.
+            //    ⇒ 키가 실제로 거부된 경우(IsAuthFailure)에만 invalid 를 적는다.
+            if (call.IsAuthFailure)
+            {
+                await _db.ExecuteAsync(new CommandDefinition(
+                    $"UPDATE local_subscription SET {ColumnPrefix(provider)}_key_status = 'invalid' WHERE tenant_id = @TenantId",
+                    new { TenantId = tenantId },
+                    cancellationToken: ct)).ConfigureAwait(false);
+
+                result.Succeeded = false;
+                result.Message =
+                    $"{display} 이(가) 이 키를 받지 않았습니다. {display} 에서 발급한 키가 맞는지 확인해 주세요.";
+                return result;
+            }
+
+            // 키 문제가 아니다 — 저장된 상태를 건드리지 않는다.
+            result.Succeeded = false;
+            result.Message = call.StatusCode is null
+                ? $"{display} 에 연결하지 못했습니다. 인터넷 연결을 확인한 뒤 다시 시도해 주세요. (저장된 키는 그대로 있습니다)"
+                : $"{display} 쪽에서 일시적으로 응답하지 못했습니다({call.StatusCode}). 잠시 후 다시 시도해 주세요. (저장된 키는 그대로 있습니다)";
+            return result;
+        }
+
+        // 성공 — 이때만 확인 시각을 기록한다.
+        var now = DateTime.Now;
+        await _db.ExecuteAsync(new CommandDefinition(
+            $"""
+            UPDATE local_subscription
+            SET {ColumnPrefix(provider)}_key_status      = 'valid',
+                {ColumnPrefix(provider)}_key_verified_at = @Now
+            WHERE tenant_id = @TenantId
+            """,
+            new { Now = now, TenantId = tenantId },
+            cancellationToken: ct)).ConfigureAwait(false);
+
+        await _audit.LogAsync(
+            actionType: "ai_key_verify",
+            entityType: "ai_settings",
+            entityId: tenantId,
+            afterJson: System.Text.Json.JsonSerializer.Serialize(new { provider, verified = true }),
+            ct: ct).ConfigureAwait(false);
+
+        result.Succeeded = true;
+        result.VerifiedAt = now;
+        result.Message = $"{display} 에 정상적으로 연결되었습니다.";
+        return result;
+    }
+
+    /// <summary>3사 전체 연동 상태 조회용 로컬 행 DTO.</summary>
+    private sealed class AllProvidersRow
+    {
+        public string? AiProvider { get; set; }
+        public string? AiMode { get; set; }
+        public int MonthlyLimit { get; set; }
+        public int ExtraTokens { get; set; }
+        public string? SubscriptionTier { get; set; }
+
+        public string? AnthropicLast4 { get; set; }
+        public string? AnthropicStatus { get; set; }
+        public DateTime? AnthropicSavedAt { get; set; }
+        public DateTime? AnthropicVerifiedAt { get; set; }
+
+        public string? OpenaiLast4 { get; set; }
+        public string? OpenaiStatus { get; set; }
+        public DateTime? OpenaiSavedAt { get; set; }
+        public DateTime? OpenaiVerifiedAt { get; set; }
+
+        public string? GoogleLast4 { get; set; }
+        public string? GoogleStatus { get; set; }
+        public DateTime? GoogleSavedAt { get; set; }
+        public DateTime? GoogleVerifiedAt { get; set; }
     }
 }

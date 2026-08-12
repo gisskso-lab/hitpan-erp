@@ -25,7 +25,26 @@ public sealed class ChatProviderResult
     public int OutputTokens { get; init; }
     public string Model { get; init; } = "";
 
+    /// <summary>
+    /// 실패했을 때의 HTTP 상태코드(응답을 받은 경우). 네트워크 장애·취소·파싱실패면 null.
+    /// 🔴 추가 2026-08-12 (검증팀 P1-2): "키가 틀렸다" 와 "지금 인터넷이 안 된다" 는 다른 사실이다.
+    ///    이 둘을 구분 못 하면, 잠깐 끊긴 사이 [연결 확인] 을 누른 고객의 멀쩡한 키를
+    ///    invalid 로 적어 버려 도우미가 죽는다(고객은 키를 다시 넣어야 살아난다).
+    /// </summary>
+    public int? StatusCode { get; init; }
+
+    /// <summary>
+    /// 키 자체가 거부된 경우. 이때만 저장된 키를 invalid 로 내려도 된다.
+    /// 400 을 포함하는 이유: 제미나이는 잘못된 키에 <b>400</b> 을 준다(2026-08-12 실측).
+    /// 401/403 만 보면 제미나이의 틀린 키를 "일시 장애" 로 오판한다.
+    /// 5xx·429·타임아웃은 여기 포함하지 않는다 — 키 문제가 아니기 때문.
+    /// </summary>
+    public bool IsAuthFailure => StatusCode is 400 or 401 or 403;
+
     public static ChatProviderResult Fail() => new() { Succeeded = false };
+
+    /// <summary>HTTP 응답을 받고 실패한 경우 — 상태코드를 함께 남긴다.</summary>
+    public static ChatProviderResult Fail(int statusCode) => new() { Succeeded = false, StatusCode = statusCode };
 }
 
 /// <summary>
@@ -215,7 +234,8 @@ public sealed class AnthropicChatProvider : IChatCompletionProvider
                 _logger.LogWarning(
                     "외부 도우미 응답 실패: status={Status} body={Body}. KB-only 폴백으로 전환합니다.",
                     (int)resp.StatusCode, Truncate(body));
-                return ChatProviderResult.Fail();
+                // 상태코드를 함께 넘긴다 — 호출부가 "키 거부(401/403)" 와 "일시 장애" 를 구분해야 한다.
+                return ChatProviderResult.Fail((int)resp.StatusCode);
             }
 
             var parsed = JsonSerializer.Deserialize<AnthropicResponse>(body, JsonOpts);
