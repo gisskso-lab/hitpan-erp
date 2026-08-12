@@ -1316,6 +1316,8 @@ CREATE TABLE `form_templates` (
   `show_company_logo` tinyint(1) NOT NULL DEFAULT 1 COMMENT '순백지 모드에서만 적용',
   `show_company_seal` tinyint(1) NOT NULL DEFAULT 1,
   `show_border` tinyint(1) NOT NULL DEFAULT 1 COMMENT '순백지 = 1, 양식용지 = 0',
+  `print_copy_mode` varchar(10) NOT NULL DEFAULT 'recipient' COMMENT 'both=공급자+공급받는자 2장 / recipient=공급받는자만 / supplier=공급자만 (DB-90)',
+  `style_key` varchar(20) NOT NULL DEFAULT 'basic' COMMENT '디자인 스타일 (DB-90). 4종 확정 전까지 basic 단일',
   `is_default` tinyint(1) NOT NULL DEFAULT 0 COMMENT '1=신규 발행 시 기본 적용',
   `is_active` tinyint(1) NOT NULL DEFAULT 1,
   `created_at` datetime(3) NOT NULL DEFAULT current_timestamp(3),
@@ -3071,7 +3073,7 @@ INSERT INTO `schema_migrations` (`migration_id`, `app_version`, `success`) VALUE
 ('DB-74','clean-ddl',1),('DB-75','clean-ddl',1),('DB-76','clean-ddl',1),('DB-77','clean-ddl',1),
 ('DB-78','clean-ddl',1),('DB-79','clean-ddl',1),('DB-80','clean-ddl',1),('DB-81','clean-ddl',1),
 ('DB-82','clean-ddl',1),('DB-83','clean-ddl',1),('DB-84','clean-ddl',1),('DB-85','clean-ddl',1),
-('DB-86','clean-ddl',1),('DB-87','clean-ddl',1),('DB-88','clean-ddl',1),('DB-89','clean-ddl',1);
+('DB-86','clean-ddl',1),('DB-87','clean-ddl',1),('DB-88','clean-ddl',1),('DB-89','clean-ddl',1),('DB-90','clean-ddl',1);
 
 --
 -- Table structure for table `service_tickets`
