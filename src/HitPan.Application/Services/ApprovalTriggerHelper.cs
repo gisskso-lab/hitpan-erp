@@ -200,6 +200,11 @@ public static class ApprovalTriggerHelper
         "expense"         => "경비",
         "leave"           => "연차",
         "overtime"        => "초과근무",
+        // 작(2026-08-13) 단계3: 업무보고서 4종.
+        "report_daily"    => "일일보고서",
+        "report_weekly"   => "주간보고서",
+        "report_monthly"  => "월간보고서",
+        "report_incident" => "경위서",
         _                 => "결재 문서"
     };
 }

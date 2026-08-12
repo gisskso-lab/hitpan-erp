@@ -1407,6 +1407,41 @@ CREATE TABLE `hr_expense_requests` (
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
+-- Table structure for table `hr_reports`
+-- 작(2026-08-13) DB-92 — 업무보고서 4종(일일·주간·월간·경위서). 사장님 지시 2026-08-12.
+-- 🔴 마이그(DB-92)와 출하 DDL 을 함께 고쳐야 한다(헌법 #36). 한쪽만 하면
+--    기존 고객사와 신규 설치 고객사의 스키마가 갈린다.
+--
+
+DROP TABLE IF EXISTS `hr_reports`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!40101 SET character_set_client = utf8mb4 */;
+CREATE TABLE `hr_reports` (
+  `report_id` varchar(36) NOT NULL,
+  `tenant_id` varchar(36) NOT NULL,
+  `employee_id` varchar(36) NOT NULL COMMENT '사원 기준(설계서 §3-5 축 확정) — 계정 없어도 작성 가능',
+  `report_type` varchar(20) NOT NULL COMMENT 'daily/weekly/monthly/incident',
+  `period_start` date NOT NULL,
+  `period_end` date NOT NULL,
+  `title` varchar(200) NOT NULL,
+  `content` text NOT NULL COMMENT 'text — varchar 로는 월간보고서·경위서가 잘린다',
+  `cause` text DEFAULT NULL COMMENT '경위서 전용 — 원인',
+  `action_plan` text DEFAULT NULL COMMENT '경위서 전용 — 재발방지 대책',
+  `status` varchar(20) NOT NULL DEFAULT 'draft' COMMENT 'draft/pending/approved/rejected',
+  `submitted_at` datetime(6) DEFAULT NULL,
+  `approved_by` varchar(36) DEFAULT NULL,
+  `approved_at` datetime(6) DEFAULT NULL,
+  `reject_reason` varchar(200) DEFAULT NULL,
+  `created_at` datetime(6) NOT NULL DEFAULT current_timestamp(6),
+  `updated_at` datetime(6) NOT NULL DEFAULT current_timestamp(6) ON UPDATE current_timestamp(6),
+  PRIMARY KEY (`report_id`),
+  KEY `idx_hr_reports_tenant_emp` (`tenant_id`,`employee_id`,`report_type`,`period_start`),
+  KEY `idx_hr_reports_tenant_period` (`tenant_id`,`report_type`,`period_start`),
+  KEY `idx_hr_reports_tenant_status` (`tenant_id`,`status`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
+
+--
 -- Table structure for table `idempotency_keys`
 --
 
@@ -3084,7 +3119,7 @@ INSERT INTO `schema_migrations` (`migration_id`, `app_version`, `success`) VALUE
 ('DB-74','clean-ddl',1),('DB-75','clean-ddl',1),('DB-76','clean-ddl',1),('DB-77','clean-ddl',1),
 ('DB-78','clean-ddl',1),('DB-79','clean-ddl',1),('DB-80','clean-ddl',1),('DB-81','clean-ddl',1),
 ('DB-82','clean-ddl',1),('DB-83','clean-ddl',1),('DB-84','clean-ddl',1),('DB-85','clean-ddl',1),
-('DB-86','clean-ddl',1),('DB-87','clean-ddl',1),('DB-88','clean-ddl',1),('DB-89','clean-ddl',1),('DB-90','clean-ddl',1),('DB-91','clean-ddl',1);
+('DB-86','clean-ddl',1),('DB-87','clean-ddl',1),('DB-88','clean-ddl',1),('DB-89','clean-ddl',1),('DB-90','clean-ddl',1),('DB-91','clean-ddl',1),('DB-92','clean-ddl',1);
 
 --
 -- Table structure for table `service_tickets`

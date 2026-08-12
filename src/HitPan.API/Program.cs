@@ -161,6 +161,9 @@ builder.Services.AddHttpClient<HitPan.Application.Services.TaxInvoice.ITaxInvoic
     client.Timeout = TimeSpan.FromSeconds(hometaxOptions.TimeoutSeconds);
 });
 builder.Services.AddScoped<ILeaveRequestService, LeaveRequestService>();
+// 작(2026-08-13) 그룹웨어 단계3: 업무보고서 4종(일일·주간·월간·경위서).
+// ⚠️ IReportService(현황 리포트)와 다른 것이다 — 이름이 비슷해 처음에 그 파일을 덮어썼었다.
+builder.Services.AddScoped<IWorkReportService, WorkReportService>();
 builder.Services.AddScoped<IReportService, ReportService>();
 builder.Services.AddScoped<IApprovalService, ApprovalService>();
 builder.Services.AddScoped<ICollectionService, CollectionService>();

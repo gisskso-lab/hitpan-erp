@@ -26,8 +26,25 @@ public class ApprovalService : IApprovalService
         ["purchase_return"]  = "매입반품",
         ["expense"]          = "경비",
         ["leave"]            = "휴가",
-        ["overtime"]         = "초과근무"
+        ["overtime"]         = "초과근무",
+        // 작(2026-08-13) 단계3: 업무보고서 4종(사장님 지시 2026-08-12).
+        // 🔴 라벨을 빠뜨리면 결재함에 "report_daily" 같은 영문 코드가 그대로 뜬다
+        //    (고객 노출 영역 개발용어 금지). MapLabels 가 GetValueOrDefault(docType) 로
+        //    폴백하기 때문에 500 이 안 나고 조용히 영문이 보인다.
+        ["report_daily"]     = "일일보고서",
+        ["report_weekly"]    = "주간보고서",
+        ["report_monthly"]   = "월간보고서",
+        ["report_incident"]  = "경위서"
     };
+
+    /// <summary>
+    /// 업무보고서 결재 문서유형 접두. <c>ReportTypes.DocTypePrefix</c> 와 같은 값이다.
+    /// </summary>
+    /// <remarks>
+    /// ⚠️ Application 계층 안이라 DTO 를 참조할 수 있지만, 이 클래스는 DTO 의존을 최소로 두고 있어
+    /// 문자열만 둔다. <b>둘 중 하나를 바꾸면 다른 쪽도 바꿔야 한다</b>(게이트: ReportGuardTests).
+    /// </remarks>
+    private const string ReportDocTypePrefix = "report_";
 
     // 상태 라벨 매핑
     private static readonly Dictionary<string, string> StatusLabels = new()
@@ -607,6 +624,31 @@ public class ApprovalService : IApprovalService
                     // 실제로 pending→approved 전이된 경우만 차감(HR 화면이 먼저 승인했으면 0행 → 이중차감 방지).
                     if (leaveAffected > 0)
                         await LeaveBalanceHelper.DeductAsync(_db, tx, tenantId, doc.RefId, ct);
+                }
+            }
+
+            // 작(2026-08-13) 단계3: 업무보고서(일일·주간·월간·경위서) 원본 반영.
+            // 🔴 이 배선이 없으면 결재함에서 승인해도 보고서는 "결재중" 에 머문다 — "되는 척" 이다.
+            //    연차(위)와 같은 원칙으로 ★같은 트랜잭션★ 에서 동기화한다(헌법 #20 워크플로우 끊김 방지).
+            //    - 반려: 즉시 rejected + 사유 기록(사유가 없으면 작성자가 왜 반려됐는지 모른다)
+            //    - 승인: 최종 단계에서만 approved. 중간 단계는 아직 미확정이다(헌법 #6)
+            //    status='pending' 가드로 멱등 — 두 번 처리돼도 0행이라 무해하다.
+            else if (doc.DocType.StartsWith(ReportDocTypePrefix, StringComparison.Ordinal)
+                     && !string.IsNullOrEmpty(doc.RefId))
+            {
+                if (request.Action == "rejected")
+                {
+                    await _db.ExecuteAsync(new CommandDefinition(
+                        "UPDATE hr_reports SET status='rejected', reject_reason=@Reason, updated_at=NOW(6) WHERE tenant_id=@TenantId AND report_id=@RefId AND status='pending'",
+                        new { Reason = request.Comment, TenantId = tenantId, RefId = doc.RefId },
+                        transaction: tx, cancellationToken: ct));
+                }
+                else if (request.Action == "approved" && doc.CurrentSeq >= doc.TotalLines)
+                {
+                    await _db.ExecuteAsync(new CommandDefinition(
+                        "UPDATE hr_reports SET status='approved', approved_by=@Who, approved_at=NOW(6), reject_reason=NULL, updated_at=NOW(6) WHERE tenant_id=@TenantId AND report_id=@RefId AND status='pending'",
+                        new { Who = employeeId, TenantId = tenantId, RefId = doc.RefId },
+                        transaction: tx, cancellationToken: ct));
                 }
             }
 
