@@ -139,6 +139,10 @@ jobs:
 
       - name: Checkout
         uses: actions/checkout@v7
+        with:
+          # 🔴 마이그레이션 교차검증(migGate)이 git 이력으로 "직전 게시 이후 새 SQL" 을 센다.
+          #   기본값(depth 1)이면 이력이 없어 대조가 **조용히 건너뛰어진다** — 막는 척만 하는 게이트가 된다.
+          fetch-depth: 0
 
       - name: Setup .NET 8
         uses: actions/setup-dotnet@v6
@@ -355,6 +359,80 @@ jobs:
           }
           "base=$base" >> $env:GITHUB_OUTPUT
           Write-Host "[urlbase] environment=$envName -> $base"
+
+      # ── 🔴 requiresMigration 교차검증 (PI-06 봉합 2026-08-12) ──────────────
+      #   ■ 무엇을 겪고서
+      #     1.2.68 을 DB-90(신규)과 함께 게시하면서 requiresMigration 이 **false 로 나갔다.**
+      #     게시자가 이 입력을 넘기지 않아 기본값 'false' 가 들어간 것이다.
+      #     워치독 교차검증이 막아 고객에게는 안 갔지만, 게시본 하나를 통째로 버렸다.
+      #   ■ 같은 자리에서 두 번째다
+      #     1.2.63(PI-02) 때는 **워크플로가** 스위치를 안 넘겨 false 였다. 그건 봉합했다.
+      #     이번엔 **사람이** 입력을 안 넘겨 false 였다. 곳은 같고 주체만 바뀌었다.
+      #     ⇒ 사람의 선택을 믿지 않는다. 게시물 자체를 보고 판정한다.
+      #   ■ 어떻게 판정하나
+      #     payload 안의 Migrations/SQL/DB-*.sql 집합을 **직전 게시본과 대조**한다.
+      #     새 파일이 하나라도 있으면 마이그가 필요한 릴리스다 — 이건 사실이지 의견이 아니다.
+      #   ■ 어긋나면 막는다(fail-closed)
+      #     사람이 false 를 골랐는데 새 SQL 이 있으면 **게시를 중단한다.**
+      #     그대로 내보내면 워치독이 고객 PC 에서 업데이트를 멈춰 세운다 — 그때는 이미 늦다.
+      - name: Verify requiresMigration against payload (fail-closed)
+        shell: pwsh
+        run: |
+          $chosen = '${{ inputs.requiresMigration }}' -eq 'true'
+
+          # 이번 게시물이 싣고 가는 마이그레이션 파일
+          $migDir = Join-Path (Resolve-Path installer/payload).Path 'api/Migrations/SQL'
+          if (-not (Test-Path $migDir)) {
+            $found = Get-ChildItem -Path (Resolve-Path installer/payload).Path -Recurse -Filter 'DB-*.sql' -ErrorAction SilentlyContinue
+          } else {
+            $found = Get-ChildItem -Path $migDir -Filter 'DB-*.sql' -ErrorAction SilentlyContinue
+          }
+          $shipped = @($found | ForEach-Object { $_.Name } | Sort-Object -Unique)
+          Write-Host "[migGate] 게시물에 실린 마이그레이션: $($shipped.Count)건"
+
+          if ($shipped.Count -eq 0) {
+            # 마이그 파일이 아예 없으면 csproj 복사 지시가 깨진 것이다(과거 P0 재발).
+            throw "::error::게시물에 DB-*.sql 이 0건이다. Migrations/SQL 복사가 깨졌는지 확인하라(HitPan.API.csproj)."
+          }
+
+          # 직전 게시 시점 이후 **새로 추가된** 마이그레이션을 git 으로 센다.
+          #   ⚠️ 서버 사이드카(migrations-<ver>.txt)로 대조하려 했으나 nginx 가 403 으로 막는다
+          #     (2026-08-12 실측). 안 읽히면 대조가 조용히 건너뛰어져 **막는 척만 하는 게이트**가 된다.
+          #     ⇒ CI 에 이미 있는 git 이력을 쓴다. 릴리스 태그 없이도 직전 게시 커밋을 알 수 있다.
+          $prevVer = $null
+          try {
+            $prevVer = (Invoke-RestMethod -Uri 'https://updates.hitpan.kr/manifest.json' -TimeoutSec 20).version
+            Write-Host "[migGate] 직전 게시본 = $prevVer"
+          } catch {
+            Write-Host "[migGate] 직전 게시본을 못 읽었다($($_.Exception.Message))."
+          }
+
+          # 직전 게시본의 zip 이 담고 있던 SQL 집합을 알 수 없으므로,
+          #   "이번 릴리스에 새 SQL 이 있나" 는 소스 이력으로 판정한다.
+          #   기준선: 직전 게시 시각 이전 커밋. manifest 의 releasedAt 을 쓴다.
+          $newSql = @()
+          try {
+            $prevAt = (Invoke-RestMethod -Uri 'https://updates.hitpan.kr/manifest.json' -TimeoutSec 20).releasedAt
+            $base = (git log -1 --until="$prevAt" --format=%H) 2>$null
+            if ($base) {
+              $added = (git diff --name-only --diff-filter=A "$base" HEAD -- 'src/HitPan.API/Migrations/SQL/') 2>$null
+              $newSql = @($added | Where-Object { $_ -match 'DB-.*\.sql$' } | ForEach-Object { Split-Path $_ -Leaf })
+              Write-Host "[migGate] 기준 커밋 $($base.Substring(0,7)) ($prevAt) 이후 새 SQL: $($newSql.Count)건 $([string]::Join(', ', $newSql))"
+            } else {
+              Write-Host "[migGate] 기준 커밋을 못 찾았다 — 이력 대조 생략."
+            }
+          } catch {
+            Write-Host "[migGate] 이력 대조 실패($($_.Exception.Message)) — 생략."
+          }
+
+          if ($newSql.Count -gt 0 -and -not $chosen) {
+            throw "::error::새 마이그레이션 $($newSql.Count)건($([string]::Join(', ', $newSql)))이 있는데 requiresMigration=false 로 게시하려 한다. 이대로 나가면 워치독이 고객 PC 에서 업데이트를 중단시킨다. true 로 다시 게시하라."
+          }
+          if ($newSql.Count -eq 0 -and $chosen) {
+            # true 인데 새 SQL 이 없으면 워치독이 무시한다(무해) — 막지 않고 알리기만 한다.
+            Write-Host "::warning::새 마이그레이션이 없는데 requiresMigration=true 다. 무해하지만 의도한 것인지 확인하라."
+          }
+          Write-Host "[migGate] 통과 — requiresMigration=$chosen"
 
       # ── build-manifest.ps1 → hitpan-<ver>.zip + manifest(unsigned) — build-installer.yml:207-236 ──
       #   -Channel = channel input(게시함정3-③ 상류 주입) / -DownloadUrlBase = environment 분기.
