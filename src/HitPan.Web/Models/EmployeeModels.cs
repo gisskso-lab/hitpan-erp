@@ -148,3 +148,38 @@ public sealed class CreateLeaveRequestModel
     public DateTime EndDate { get; set; } = DateTime.Today;
     public string? Reason { get; set; }
 }
+
+/// <summary>
+/// 퇴사 처리 결과 모델이다. 작(2026-08-12) 단계0, 검증팀 P1-5 봉합.
+/// </summary>
+/// <remarks>
+/// 화면이 <b>실제로 일어난 일만</b> 말하게 하려고 결과를 받는다.
+/// 앞서는 성공하면 무조건 "로그인 계정도 함께 차단됐습니다" 라고 안내했는데,
+/// 계정이 없는 사원(실측 12명 중 11명)에게도 같은 문구가 떴다 — 되는 척이다.
+/// </remarks>
+public sealed class EmployeeResignResultModel
+{
+    /// <summary>로그인 계정을 실제로 차단했는가. 계정이 없거나 대표계정이면 false.</summary>
+    public bool AccountBlocked { get; set; }
+}
+
+/// <summary>
+/// 퇴사 처리 사전 점검 결과 모델이다. 작(2026-08-12) 그룹웨어 단계0 P0-B.
+/// </summary>
+/// <remarks>
+/// 퇴사를 <b>막지 않는다.</b> 무슨 일이 벌어지는지 알려주고 사람이 판단한다(반자동 원칙).
+/// </remarks>
+public sealed class EmployeeResignPrecheckModel
+{
+    /// <summary>이 사원이 결재자·대결자로 걸려 있는 결재선 수.</summary>
+    public int ApprovalLineCount { get; set; }
+
+    /// <summary>이 사원이 올린 진행 중 결재 건수.</summary>
+    public int PendingRequestCount { get; set; }
+
+    /// <summary>로그인 계정 보유 여부. 있으면 퇴사 시 함께 차단된다.</summary>
+    public bool HasUserAccount { get; set; }
+
+    /// <summary>알릴 것이 있는가.</summary>
+    public bool HasWarning => ApprovalLineCount > 0 || PendingRequestCount > 0;
+}

@@ -92,7 +92,10 @@ else
                 <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Add" OnClick="StartCreateMode">추가</MudButton>
                 <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Save" OnClick="SaveAsync">저장</MudButton>
                 <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Undo" OnClick="CancelEdit">취소</MudButton>
-                <MudButton Variant="Variant.Outlined" Color="Color.Error" StartIcon="@Icons.Material.Filled.Delete" OnClick="DeleteAsync" Disabled="@string.IsNullOrWhiteSpace(_selectedEmployeeId)">삭제</MudButton>
+                @* 작(2026-08-12) 단계0 P0-C: "삭제" → "퇴사 처리".
+                   원래도 지우는 게 아니라 비활성화였는데 이름이 "삭제"라 실제 동작과 달랐다.
+                   자료가 지워지는 줄 알고 못 누르거나, 반대로 지워진 줄 아는 오해가 생긴다. *@
+                <MudButton Variant="Variant.Outlined" Color="Color.Error" StartIcon="@Icons.Material.Filled.PersonOff" OnClick="ResignAsync" Disabled="@string.IsNullOrWhiteSpace(_selectedEmployeeId)">퇴사 처리</MudButton>
             </MudToolBar>
 
             <MudPaper Elevation="0" Class="pa-2" Style="border:0.5px solid var(--mud-palette-lines-default);border-radius:12px">

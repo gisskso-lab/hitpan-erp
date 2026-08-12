@@ -83,16 +83,19 @@
                         @GetProviderLabel(context.Provider)
                     </MudChip>
                 </MudTd>
+                @* 작(2026-08-12) 단계0 P0-D: 판정 기준을 Status → IsVoid 로 바로잡는다.
+                   API 가 내려주는 것은 IsVoid 이고 Status 는 채워지지 않는다(초기값 "signed" 고정).
+                   그래서 무효화된 서명도 "유효"로 보였고 [무효화] 버튼이 계속 노출됐다. *@
                 <MudTd Style="text-align:center">
                     <MudChip T="string" Size="Size.Small" Variant="Variant.Filled"
-                             Color="@(context.Status == "signed" ? Color.Success : Color.Error)">
-                        @(context.Status == "signed" ? "유효" : "무효")
+                             Color="@(context.IsVoid ? Color.Error : Color.Success)">
+                        @(context.IsVoid ? "무효" : "유효")
                     </MudChip>
                 </MudTd>
                 @if (_isTenantAdmin)
                 {
                     <MudTd Style="text-align:center">
-                        @if (context.Status == "signed")
+                        @if (!context.IsVoid)
                         {
                             <MudTooltip Text="서명 무효화">
                                 <MudIconButton Icon="@Icons.Material.Filled.Block"

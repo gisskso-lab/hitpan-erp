@@ -85,8 +85,11 @@
             <div class="mb-3">
                 <MudText Typo="Typo.subtitle1" Style="font-weight:700">제4조 (임금)</MudText>
                 <MudText Typo="Typo.body2" Style="margin-left:16px">
+                    @* 작(2026-08-12) 검증팀 P0-3 봉합: PayDay 는 varchar(20) 자유 문자열이다.
+                       "매월 25일" 같은 값이 그대로 들어오므로 뒤에 "일"을 또 붙이면 "매월 25일일"이 된다.
+                       값이 있으면 그대로 쓰고, 비었을 때만 안내한다. *@
                     @GetSalaryTypeLabel(_contract.SalaryType): <strong>@_contract.Salary.ToString("N0")원</strong><br />
-                    임금 지급일: 매월 @(_contract.PayDay?.ToString() ?? "25")일<br />
+                    임금 지급일: @(string.IsNullOrWhiteSpace(_contract.PayDay) ? "미정" : _contract.PayDay)<br />
                     지급방법: 근로자가 지정한 예금계좌로 입금
                 </MudText>
             </div>
@@ -102,8 +105,14 @@
             @* 6조: 연차휴가 *@
             <div class="mb-3">
                 <MudText Typo="Typo.subtitle1" Style="font-weight:700">제6조 (연차유급휴가)</MudText>
+                @* 작(2026-08-12) 검증팀 P0-3 봉합: AnnualLeave 는 varchar(100) 자유 문자열이다.
+                   🔴 그리고 "?? 15일" 이라는 기본값도 없앤다 — 계약서는 서명되면 법적 문서가 되는데,
+                      입력하지 않은 값을 시스템이 15일이라고 단정해 찍으면 안 된다.
+                      연차는 사업장 규모·근속·고용형태에 따라 달라진다(반자동 원칙). *@
                 <MudText Typo="Typo.body2" Style="margin-left:16px">
-                    연간 @(_contract.AnnualLeaveDays?.ToString("0.#") ?? "15")일
+                    @(string.IsNullOrWhiteSpace(_contract.AnnualLeaveDays)
+                        ? "관련 법령 및 취업규칙에 따름"
+                        : _contract.AnnualLeaveDays)
                 </MudText>
             </div>
 

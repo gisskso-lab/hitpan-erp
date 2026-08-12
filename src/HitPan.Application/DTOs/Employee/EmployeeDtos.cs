@@ -106,3 +106,43 @@ public sealed class UpdateEmployeeRequest
     public string? Email { get; set; }
     public string Role { get; set; } = "sales_user";
 }
+
+/// <summary>
+/// 퇴사 처리 요청 DTO이다. 작(2026-08-12) 그룹웨어 단계0 P0-C.
+/// </summary>
+/// <remarks>
+/// 반자동 원칙(사장님 2026-08-12 "히트판은 100% 자동화는 없어") — 퇴사일을 시스템이
+/// 단정하지 않고 <b>사람에게 받는다</b>. 봉합 전에는 <c>NOW()</c> 를 넣어 소급 퇴사 처리가
+/// 불가능했다. 실제 퇴사일과 처리한 날은 다를 수 있다.
+/// </remarks>
+public sealed class ResignEmployeeRequest
+{
+    /// <summary>실제 퇴사일. 미지정이면 오늘로 본다(기존 동작 보존).</summary>
+    public DateTime? ResignDate { get; set; }
+
+    /// <summary>퇴사 사유. 컬럼(<c>resign_reason</c>)은 원래 있었으나 ERP 가 채운 적이 없다.</summary>
+    public string? ResignReason { get; set; }
+}
+
+/// <summary>
+/// 퇴사 처리 사전 점검 결과이다. 작(2026-08-12) 그룹웨어 단계0 P0-B.
+/// </summary>
+/// <remarks>
+/// 퇴사를 <b>막지 않는다.</b> 무슨 일이 벌어지는지 알려주고 사람이 판단한다(반자동 원칙).
+/// 결재선이 사람 기반이라 결재자가 퇴사하면 그 차례에서 결재가 멈춘다(헌법 #20).
+/// 결재선 직급 정본화는 별도 차수 — 지금은 경고까지 한다.
+/// </remarks>
+public sealed class EmployeeResignPrecheckDto
+{
+    /// <summary>이 사원이 결재자·대결자로 걸려 있는 결재선 수. 0보다 크면 결재가 멈출 수 있다.</summary>
+    public int ApprovalLineCount { get; set; }
+
+    /// <summary>이 사원이 올린 진행 중(pending) 결재 건수.</summary>
+    public int PendingRequestCount { get; set; }
+
+    /// <summary>로그인 계정 보유 여부. 있으면 퇴사 처리 시 함께 차단된다.</summary>
+    public bool HasUserAccount { get; set; }
+
+    /// <summary>알릴 것이 있는가.</summary>
+    public bool HasWarning => ApprovalLineCount > 0 || PendingRequestCount > 0;
+}
