@@ -6,7 +6,7 @@
 @inject HttpClient Http
 @inject IJSRuntime Js
 @inject ISnackbar Snackbar
-@inject IJSRuntime Js
+@inject GridExportService GridExport
 @inject PartnerMasterService PartnersApi
 @inject ItemMasterService ItemsApi
 
@@ -115,7 +115,30 @@
     }
 
     /// <summary>화면 데이터를 엑셀로 내보낸다.</summary>
-    private Task ExportExcelAsync() { Snackbar.Add("엑셀 내보내기는 준비중입니다.", Severity.Info); return Task.CompletedTask; }
+    private async Task ExportExcelAsync()
+    {
+        // 🔴 봉합 2026-08-12 — 종전에는 "준비중입니다" 스낵바만 띄우는 가짜 버튼이었다.
+        //   순위는 화면에 보이는 그 순서(정렬된 목록의 위치)를 그대로 적는다.
+        //   수량 열은 품목별 조회일 때만 나온다 — 파일도 같아야 한다.
+        var showQty = _viewType == "item";
+
+        var headers = new List<string> { "순위", GetLabelHeader(), "건수" };
+        if (showQty) headers.Add("수량");
+        headers.AddRange(new[] { "공급가액", "부가세", "합계" });
+
+        var rows = _reportData.Select((r, i) =>
+        {
+            var cells = new List<object?> { i + 1, r.Label, r.Count };
+            if (showQty) cells.Add(r.Qty);
+            cells.Add(r.SupplyAmount);
+            cells.Add(r.VatAmount);
+            cells.Add(r.TotalAmount);
+            return (IReadOnlyList<object?>)cells;
+        }).ToList();
+
+        var subtitle = $"{_from:yyyy-MM-dd} ~ {_to:yyyy-MM-dd} · 총 {_reportData.Count:N0}건";
+        await GridExport.ExportExcelAsync("판매 순위표", headers, rows, subtitle);
+    }
     /// <summary>화면을 인쇄한다.</summary>
     private async Task PrintAsync() { await Js.InvokeVoidAsync("print"); }
 

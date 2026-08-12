@@ -890,4 +890,209 @@ public class ExcelExportService
         ws.Column(8).Width = 12;  // 세액
         ws.Column(9).Width = 12;  // 비고
     }
+
+    // ═══════════════════════════════════════════════════════════════
+    //  범용 표 엑셀 — 원장·현황·재고·미수 등 "자료 화면" 공용
+    //  (사장님 지시 2026-08-12)
+    // ═══════════════════════════════════════════════════════════════
+
+    /// <summary>
+    /// 화면에 보이는 표를 그대로 엑셀로 만든다 (원장·현황·통계·재고·미수 등 공용).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// 사장님 지시: <i>"원장, 마스타자료, 목록, 현황, 분석, 통계자료, 재고자료, 미수업체,
+    /// 미수자료 등 히트판에서 뽑을 수 있는 모든 자료들은 엑셀변환, 혹은 PDF, 인쇄로"</i>
+    /// </para>
+    /// <para>
+    /// 🔴 <b>왜 화면마다 만들지 않고 여기 하나로 두나</b> — 2026-08-12 조사 결과
+    /// 자료 화면 34개 중 실제로 내보내기가 되는 것은 <b>1개</b>뿐이었고,
+    /// 14개는 <c>"엑셀 내보내기는 준비중입니다"</c> 스낵바만 띄우는 <b>가짜 버튼</b>이었다.
+    /// 화면마다 따로 만들면 34곳에 34가지 방식이 생기고, 그중 몇 개는 또 가짜로 남는다.
+    /// </para>
+    /// <para>
+    /// ⚠️ <b>클라이언트 CSV 가 아니라 서버 생성인 이유</b>:
+    /// ① 진짜 .xlsx 라 엑셀이 경고창을 띄우지 않는다
+    /// ② 화면에 안 보이는 행(페이징 뒤)까지 전부 담긴다 — 클라이언트는 로드된 것만 내보내
+    ///    대량 자료에서 <b>조용히 누락</b>된다
+    /// ③ 쉼표·따옴표 이스케이프 문제가 아예 없다(CSV 가 아니므로)
+    /// ④ 금액이 문자열이 아니라 숫자로 들어가 엑셀에서 바로 합계가 된다
+    /// </para>
+    /// </remarks>
+    /// <param name="title">문서 제목 (예: "업체별 원장").</param>
+    /// <param name="headers">열 제목.</param>
+    /// <param name="rows">행 데이터. 각 행의 길이는 <paramref name="headers"/> 와 같아야 한다.</param>
+    /// <param name="subtitle">기간·조건 등 부제 (예: "2026-01-01 ~ 2026-08-12 · 거래처: 전체").</param>
+    public byte[] GenerateGridExcel(
+        string title,
+        IReadOnlyList<string> headers,
+        IReadOnlyList<IReadOnlyList<object?>> rows,
+        string? subtitle = null)
+    {
+        if (headers is null || headers.Count == 0)
+        {
+            throw new ArgumentException("열 제목이 비었습니다.", nameof(headers));
+        }
+
+        var colCount = headers.Count;
+        // 시트 이름에 쓸 수 없는 문자가 있으면 엑셀이 파일을 못 연다(: \ / ? * [ ]).
+        var sheetName = SanitizeSheetName(title);
+
+        using var workbook = new XLWorkbook();
+        var ws = workbook.Worksheets.Add(sheetName);
+
+        var row = 1;
+
+        // ── 제목 ──
+        var titleRange = ws.Range(row, 1, row, colCount).Merge();
+        titleRange.Value = title;
+        ApplyTitleStyle(titleRange);
+        row++;
+
+        // ── 부제(기간·조건) — 무엇을 뽑은 자료인지 파일만 봐도 알아야 한다 ──
+        if (!string.IsNullOrWhiteSpace(subtitle))
+        {
+            var subRange = ws.Range(row, 1, row, colCount).Merge();
+            subRange.Value = subtitle;
+            subRange.Style.Font.FontName = FontName;
+            subRange.Style.Font.FontSize = DataFontSize;
+            subRange.Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Center;
+            row++;
+        }
+
+        // 뽑은 시각 — 언제 기준 자료인지 없으면 나중에 대조가 안 된다.
+        var stampRange = ws.Range(row, 1, row, colCount).Merge();
+        stampRange.Value = $"출력: {DateTime.Now:yyyy-MM-dd HH:mm}";
+        stampRange.Style.Font.FontName = FontName;
+        stampRange.Style.Font.FontSize = LabelFontSize;
+        stampRange.Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Right;
+        row++;
+
+        row++; // 한 줄 띄우기
+
+        // ── 머리글 ──
+        var headerRow = row;
+        for (var c = 0; c < colCount; c++)
+        {
+            ws.Cell(headerRow, c + 1).Value = headers[c];
+        }
+        var headerRange = ws.Range(headerRow, 1, headerRow, colCount);
+        headerRange.Style.Font.Bold = true;
+        headerRange.Style.Font.FontName = FontName;
+        headerRange.Style.Font.FontSize = LabelFontSize;
+        headerRange.Style.Fill.BackgroundColor = XLColor.FromArgb(0xEE, 0xEE, 0xEE);
+        headerRange.Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Center;
+        headerRange.Style.Alignment.Vertical = XLAlignmentVerticalValues.Center;
+        headerRange.Style.Border.OutsideBorder = XLBorderStyleValues.Thin;
+        headerRange.Style.Border.InsideBorder = XLBorderStyleValues.Thin;
+        row++;
+
+        // ── 데이터 ──
+        var firstDataRow = row;
+        foreach (var r in rows)
+        {
+            for (var c = 0; c < colCount; c++)
+            {
+                var cell = ws.Cell(row, c + 1);
+                // 행이 짧으면 빈칸으로 둔다 — 길이가 안 맞는다고 통째로 실패시키면
+                //   자료 한 줄 때문에 내보내기 전체가 막힌다(헌법 #20 흐름 끊김).
+                var value = c < r.Count ? r[c] : null;
+                SetGridCell(cell, value);
+            }
+            row++;
+        }
+
+        var lastDataRow = row - 1;
+        if (lastDataRow >= firstDataRow)
+        {
+            var dataRange = ws.Range(firstDataRow, 1, lastDataRow, colCount);
+            dataRange.Style.Font.FontName = FontName;
+            dataRange.Style.Font.FontSize = DataFontSize;
+            dataRange.Style.Border.OutsideBorder = XLBorderStyleValues.Thin;
+            dataRange.Style.Border.InsideBorder = XLBorderStyleValues.Thin;
+
+            // 머리글 고정 — 원장·현황은 행이 길다. 스크롤하면 무슨 열인지 모르게 된다.
+            ws.SheetView.FreezeRows(headerRow);
+            // 자동 필터 — 받아서 바로 걸러 볼 수 있어야 실무에서 쓴다.
+            ws.Range(headerRow, 1, lastDataRow, colCount).SetAutoFilter();
+        }
+
+        // 열 너비 자동 — 다만 너무 넓어지지 않게 상한을 둔다(주소·비고가 화면을 다 먹는다).
+        ws.Columns().AdjustToContents();
+        for (var c = 1; c <= colCount; c++)
+        {
+            if (ws.Column(c).Width > 40) ws.Column(c).Width = 40;
+            if (ws.Column(c).Width < 8) ws.Column(c).Width = 8;
+        }
+
+        using var ms = new MemoryStream();
+        workbook.SaveAs(ms);
+        return ms.ToArray();
+    }
+
+    /// <summary>
+    /// 값의 종류에 맞게 셀에 넣는다. 숫자는 <b>숫자로</b> 넣어야 엑셀에서 합계가 된다.
+    /// </summary>
+    /// <remarks>
+    /// 전부 문자열로 넣으면 받는 사람이 다시 숫자로 바꿔야 한다 — 그게 지금 CSV 방식의 문제다.
+    /// 금액은 decimal 로 다룬다(헌법 #4 — float/double 금지).
+    /// </remarks>
+    private static void SetGridCell(IXLCell cell, object? value)
+    {
+        switch (value)
+        {
+            case null:
+                cell.Value = string.Empty;
+                break;
+            case decimal d:
+                cell.Value = d;
+                cell.Style.NumberFormat.Format = NumberFormat;
+                cell.Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Right;
+                break;
+            case int i:
+                cell.Value = i;
+                cell.Style.NumberFormat.Format = NumberFormat;
+                cell.Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Right;
+                break;
+            case long l:
+                cell.Value = l;
+                cell.Style.NumberFormat.Format = NumberFormat;
+                cell.Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Right;
+                break;
+            case DateTime dt:
+                cell.Value = dt;
+                cell.Style.DateFormat.Format = dt.TimeOfDay == TimeSpan.Zero
+                    ? "yyyy-MM-dd"
+                    : "yyyy-MM-dd HH:mm";
+                cell.Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Center;
+                break;
+            case bool b:
+                cell.Value = b ? "예" : "아니오";
+                cell.Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Center;
+                break;
+            default:
+                cell.Value = value.ToString() ?? string.Empty;
+                break;
+        }
+    }
+
+    /// <summary>
+    /// 엑셀 시트 이름 제약을 지킨다 — 31자 이하, <c>: \ / ? * [ ]</c> 금지.
+    /// </summary>
+    /// <remarks>
+    /// 이걸 안 지키면 파일이 만들어지긴 하는데 <b>엑셀이 열지 못한다.</b>
+    /// "업체별 원장 (2026/01~08)" 처럼 슬래시가 든 제목이 실제로 들어온다.
+    /// </remarks>
+    private static string SanitizeSheetName(string title)
+    {
+        if (string.IsNullOrWhiteSpace(title)) return "자료";
+
+        var cleaned = new string(title
+            .Where(ch => ch is not (':' or '\\' or '/' or '?' or '*' or '[' or ']'))
+            .ToArray())
+            .Trim();
+
+        if (string.IsNullOrWhiteSpace(cleaned)) return "자료";
+        return cleaned.Length > 31 ? cleaned[..31] : cleaned;
+    }
 }
