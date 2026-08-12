@@ -86,10 +86,19 @@ public sealed class WorkReportController : ControllerBase
         }
 
         var (myEmployeeId, isAdmin) = Identity();
+
+        // 🔴 봉합 (2026-08-13, 검증 P1-4): 본인·관리자에 더해 <b>결재자</b>도 볼 수 있다.
+        //    종전엔 결재선 2단계 결재자(비관리자)가 제목만 보고 승인해야 했다 — 안 읽고 찍는 결재다.
+        //    결재선 밖 사람은 여전히 못 본다(판정은 서비스가 위임까지 포함해 한다).
         if (!isAdmin && detail.EmployeeId != myEmployeeId)
         {
-            // 🔴 남의 보고서는 못 본다. 결재자 열람은 결재함 경로로 따로 다룬다(다음 차수).
-            return Forbid();
+            var isApprover = !string.IsNullOrEmpty(myEmployeeId)
+                && await _service.IsApproverAsync(tenantId, id, myEmployeeId, ct).ConfigureAwait(false);
+
+            if (!isApprover)
+            {
+                return Forbid();
+            }
         }
 
         return Ok(detail);
@@ -117,9 +126,16 @@ public sealed class WorkReportController : ControllerBase
 
         try
         {
-            var id = await _service.CreateAsync(tenantId, myEmployeeId, userName, request, ct)
+            var result = await _service.CreateAsync(tenantId, myEmployeeId, userName, request, ct)
                 .ConfigureAwait(false);
-            return Ok(new { reportId = id });
+
+            // 🔴 결재가 실제로 올라갔는지 그대로 전한다(P0-1 봉합 — 되는 척 제거).
+            return Ok(new
+            {
+                reportId = result.ReportId,
+                approvalCreated = result.ApprovalCreated,
+                approvalSkipReason = result.ApprovalSkipReason
+            });
         }
         catch (InvalidOperationException ex)
         {
@@ -144,13 +160,20 @@ public sealed class WorkReportController : ControllerBase
             return Forbid();
         }
 
-        var ok = await _service.UpdateAsync(tenantId, id, myEmployeeId, request, ct)
+        var result = await _service.UpdateAsync(tenantId, id, myEmployeeId, request, ct)
             .ConfigureAwait(false);
 
         // 🔴 "왜 안 되는지" 를 알려준다. 그냥 실패라고만 하면 고객이 다시 눌러 본다.
-        return ok
-            ? Ok()
-            : BadRequest(new { message = "결재가 진행 중이거나 완료된 보고서는 수정할 수 없습니다." });
+        if (!result.Saved)
+        {
+            return BadRequest(new { message = "결재가 진행 중이거나 완료된 보고서는 수정할 수 없습니다." });
+        }
+
+        return Ok(new
+        {
+            approvalCreated = result.ApprovalCreated,
+            approvalSkipReason = result.ApprovalSkipReason
+        });
     }
 
     /// <summary>작성중 보고서를 결재에 올린다.</summary>
@@ -171,12 +194,19 @@ public sealed class WorkReportController : ControllerBase
 
         var userName = HttpContext.Items["UserName"]?.ToString() ?? "직원";
 
-        var ok = await _service.SubmitAsync(tenantId, id, myEmployeeId, userName, ct)
+        var result = await _service.SubmitAsync(tenantId, id, myEmployeeId, userName, ct)
             .ConfigureAwait(false);
 
-        return ok
-            ? Ok()
-            : BadRequest(new { message = "이미 결재가 진행 중이거나 완료된 보고서입니다." });
+        if (!result.Saved)
+        {
+            return BadRequest(new { message = "이미 결재가 진행 중이거나 완료된 보고서입니다." });
+        }
+
+        return Ok(new
+        {
+            approvalCreated = result.ApprovalCreated,
+            approvalSkipReason = result.ApprovalSkipReason
+        });
     }
 
     /// <summary>작성중 보고서를 지운다.</summary>

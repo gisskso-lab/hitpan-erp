@@ -109,3 +109,25 @@ public sealed class SaveWorkReportModel
     /// <summary>true 면 저장 후 바로 결재에 올린다.</summary>
     public bool Submit { get; set; }
 }
+
+/// <summary>
+/// 저장·상신 결과. <b>저장됐는지</b>와 <b>결재가 실제로 올라갔는지</b>를 가른다.
+/// </summary>
+/// <remarks>
+/// 🔴 봉합 (2026-08-13, 검증 P0-1): 종전엔 성공 여부 하나만 받아, 결재 설정이 꺼져 있어도
+/// 화면이 <i>"결재에 올렸습니다"</i> 를 띄웠다. 실제로는 결재문서가 안 만들어져
+/// <b>아무도 승인할 수 없는 상태</b>였다(실측: <c>approval_documents</c> 0건).
+/// 화면은 이제 <see cref="ApprovalCreated"/> 를 보고 말을 가른다.
+/// </remarks>
+public sealed class WorkReportSaveOutcome
+{
+    public bool Ok { get; set; }
+    public string? Message { get; set; }
+    public string? ReportId { get; set; }
+
+    /// <summary>결재 문서가 실제로 만들어졌는가.</summary>
+    public bool ApprovalCreated { get; set; }
+
+    /// <summary>결재가 안 올라간 이유(사용자에게 그대로 보여준다).</summary>
+    public string? ApprovalSkipReason { get; set; }
+}

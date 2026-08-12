@@ -46,6 +46,46 @@ public class ApprovalService : IApprovalService
     /// </remarks>
     private const string ReportDocTypePrefix = "report_";
 
+    /// <summary>
+    /// 원본 표(<c>leave_requests</c>·<c>hr_reports</c>)의 <c>reject_reason</c> 컬럼 폭.
+    /// </summary>
+    private const int RejectReasonMaxLength = 200;
+
+    /// <summary>
+    /// 반려 사유를 원본 표 컬럼 폭에 맞게 자른다.
+    /// </summary>
+    /// <remarks>
+    /// 🔴 봉합 (2026-08-13, 단계3 검증 P0-2): 결재 의견은 <c>approval_history.comment</c> 가
+    /// <b>varchar(500)</b> 인데 원본 표의 <c>reject_reason</c> 은 <b>varchar(200)</b> 이다.
+    /// 결재함 입력칸은 자유서술(<c>Lines="3"</c>)이라 201자가 흔히 들어오고, MariaDB 가
+    /// <c>STRICT_TRANS_TABLES</c> 라 <c>ERROR 1406 Data too long</c> 이 난다. 이 UPDATE 는
+    /// 결재 트랜잭션 <b>안</b>에 있어서 예외가 나면 결재 이력·상태 전이까지 <b>전부 롤백</b>된다
+    /// ⇒ <b>사유를 길게 쓸수록 반려를 못 하는</b> 상태였다(실측 재현: ERROR 1406).
+    ///
+    /// 사유 전문은 <c>approval_history.comment</c> 에 500자 그대로 남으므로 잃는 것이 없다.
+    /// 여기 값은 작성자 화면에 바로 보여주기 위한 사본이다.
+    ///
+    /// ⚠️ 자르는 기준은 <b>글자 수</b>다 — <c>varchar(200)</c> 은 바이트가 아니라 문자 200개이고
+    /// (실측: 한글 200자 = CHAR_LENGTH 200 / LENGTH 600) utf8mb4 에서 안전하다.
+    /// 다만 이모지 등 서로게이트 쌍은 <c>string</c> 인덱스가 반쪽을 자를 수 있어
+    /// <see cref="System.Globalization.StringInfo"/> 로 문자 단위를 지킨다.
+    ///
+    /// 🔴 연차(<c>leave</c>)도 같은 결함을 갖고 있었다. 내가 만든 보고서 배선이 그것을
+    /// 복제한 것이라, 새 자리만 고치지 않고 <b>두 자리를 같은 헬퍼로</b> 봉합한다.
+    /// </remarks>
+    internal static string? TruncateRejectReason(string? reason)
+    {
+        if (string.IsNullOrEmpty(reason))
+        {
+            return reason;
+        }
+
+        var si = new System.Globalization.StringInfo(reason);
+        return si.LengthInTextElements <= RejectReasonMaxLength
+            ? reason
+            : si.SubstringByTextElements(0, RejectReasonMaxLength);
+    }
+
     // 상태 라벨 매핑
     private static readonly Dictionary<string, string> StatusLabels = new()
     {
@@ -612,7 +652,7 @@ public class ApprovalService : IApprovalService
                 {
                     await _db.ExecuteAsync(new CommandDefinition(
                         "UPDATE leave_requests SET status='rejected', approved_by=@Who, approved_at=NOW(6), reject_reason=@Reason, updated_at=NOW(6) WHERE tenant_id=@TenantId AND request_id=@RefId AND status='pending'",
-                        new { Who = employeeId, Reason = request.Comment, TenantId = tenantId, RefId = doc.RefId },
+                        new { Who = employeeId, Reason = TruncateRejectReason(request.Comment), TenantId = tenantId, RefId = doc.RefId },
                         transaction: tx, cancellationToken: ct));
                 }
                 else if (request.Action == "approved" && doc.CurrentSeq >= doc.TotalLines)
@@ -640,7 +680,7 @@ public class ApprovalService : IApprovalService
                 {
                     await _db.ExecuteAsync(new CommandDefinition(
                         "UPDATE hr_reports SET status='rejected', reject_reason=@Reason, updated_at=NOW(6) WHERE tenant_id=@TenantId AND report_id=@RefId AND status='pending'",
-                        new { Reason = request.Comment, TenantId = tenantId, RefId = doc.RefId },
+                        new { Reason = TruncateRejectReason(request.Comment), TenantId = tenantId, RefId = doc.RefId },
                         transaction: tx, cancellationToken: ct));
                 }
                 else if (request.Action == "approved" && doc.CurrentSeq >= doc.TotalLines)

@@ -120,7 +120,55 @@ public sealed class WorkReportService : IWorkReportService
             cancellationToken: ct)).ConfigureAwait(false);
     }
 
-    public async Task<string> CreateAsync(string tenantId, string employeeId, string employeeName,
+    /// <summary>
+    /// 이 사람이 이 보고서의 <b>결재자</b>인가(위임 포함).
+    /// </summary>
+    /// <remarks>
+    /// 🔴 봉합 (2026-08-13, 검증 P1-4): 종전엔 본인·관리자만 상세를 볼 수 있어
+    /// <b>결재자가 제목만 보고 승인</b>해야 했다. 근태·인사가 걸린 문서를 안 읽고 도장 찍는 구조라
+    /// 결재 설정을 켠 고객사에서 바로 막힌다(헌법 #20 워크플로우 끊김).
+    ///
+    /// ⚠️ 판정 조건은 <c>ApprovalService.ProcessAsync</c> 의 결재 권한 판정과 <b>같아야 한다</b> —
+    /// 위임 유효기간을 <c>CURDATE() BETWEEN</c> 으로 보는 것까지 같다. 시간원이 갈리면
+    /// "볼 수는 있는데 승인은 안 되는"(또는 그 반대) 자리가 생긴다(19차 P2 와 같은 병).
+    ///
+    /// 🔴 <b>결재선에 있으면 단계와 무관하게 볼 수 있다.</b> 2단계 결재자도 자기 차례가 오기 전에
+    /// 내용을 봐야 판단을 준비한다. 반대로 결재선 밖 사람은 여전히 못 본다.
+    /// </remarks>
+    public async Task<bool> IsApproverAsync(string tenantId, string reportId, string employeeId,
+        CancellationToken ct = default)
+    {
+        await EnsureOpenAsync(ct).ConfigureAwait(false);
+
+        const string sql = """
+            SELECT COUNT(*)
+            FROM hr_reports r
+            JOIN approval_documents ad
+              ON ad.tenant_id = r.tenant_id
+             AND ad.ref_id    = r.report_id
+            JOIN approval_doc_lines dl
+              ON dl.tenant_id = ad.tenant_id
+             AND dl.doc_type  = ad.doc_type
+             AND dl.is_active = 1
+            WHERE r.tenant_id  = @TenantId
+              AND r.report_id  = @ReportId
+              AND (
+                    dl.approver_id = @EmployeeId
+                 OR (dl.delegate_id = @EmployeeId
+                     AND dl.delegate_start IS NOT NULL AND dl.delegate_end IS NOT NULL
+                     AND CURDATE() BETWEEN dl.delegate_start AND dl.delegate_end)
+              )
+            """;
+
+        var hit = await _db.ExecuteScalarAsync<int>(new CommandDefinition(
+            sql,
+            new { TenantId = tenantId, ReportId = reportId, EmployeeId = employeeId },
+            cancellationToken: ct)).ConfigureAwait(false);
+
+        return hit > 0;
+    }
+
+    public async Task<CreateWorkReportResult> CreateAsync(string tenantId, string employeeId, string employeeName,
         SaveWorkReportRequest request, CancellationToken ct = default)
     {
         await EnsureOpenAsync(ct).ConfigureAwait(false);
@@ -171,16 +219,27 @@ public sealed class WorkReportService : IWorkReportService
             },
             cancellationToken: ct)).ConfigureAwait(false);
 
-        if (request.Submit)
+        if (!request.Submit)
         {
-            await TriggerApprovalAsync(tenantId, reportId, reportType, employeeId, employeeName, title, ct)
-                .ConfigureAwait(false);
+            return new CreateWorkReportResult { ReportId = reportId, Saved = true };
         }
 
-        return reportId;
+        // 🔴 새로 쓰면서 바로 결재에 올리는 경로도 같은 판정을 받는다.
+        //    세 경로(신규·수정·상신) 중 하나라도 빠지면 그 자리에서 되는 척이 남는다
+        //    — 단계2 알림 배선에서 3경로 중 1개만 걸어 검증에 잡혔던 그것과 같은 병이다.
+        var (created, skipReason) = await TriggerApprovalAsync(
+            tenantId, reportId, reportType, employeeId, employeeName, title, ct).ConfigureAwait(false);
+
+        return new CreateWorkReportResult
+        {
+            ReportId = reportId,
+            Saved = true,
+            ApprovalCreated = created,
+            ApprovalSkipReason = skipReason
+        };
     }
 
-    public async Task<bool> UpdateAsync(string tenantId, string reportId, string employeeId,
+    public async Task<SubmitWorkReportResult> UpdateAsync(string tenantId, string reportId, string employeeId,
         SaveWorkReportRequest request, CancellationToken ct = default)
     {
         await EnsureOpenAsync(ct).ConfigureAwait(false);
@@ -233,20 +292,28 @@ public sealed class WorkReportService : IWorkReportService
 
         if (affected == 0)
         {
-            return false;
+            return new SubmitWorkReportResult { Saved = false };
         }
 
-        if (request.Submit)
+        if (!request.Submit)
         {
-            var empName = await GetEmployeeNameAsync(tenantId, employeeId, ct).ConfigureAwait(false);
-            await TriggerApprovalAsync(tenantId, reportId, reportType, employeeId, empName, title, ct)
-                .ConfigureAwait(false);
+            // 임시저장은 결재와 무관하다.
+            return new SubmitWorkReportResult { Saved = true, ApprovalCreated = false };
         }
 
-        return true;
+        var empName = await GetEmployeeNameAsync(tenantId, employeeId, ct).ConfigureAwait(false);
+        var (created, skipReason) = await TriggerApprovalAsync(
+            tenantId, reportId, reportType, employeeId, empName, title, ct).ConfigureAwait(false);
+
+        return new SubmitWorkReportResult
+        {
+            Saved = true,
+            ApprovalCreated = created,
+            ApprovalSkipReason = skipReason
+        };
     }
 
-    public async Task<bool> SubmitAsync(string tenantId, string reportId, string employeeId,
+    public async Task<SubmitWorkReportResult> SubmitAsync(string tenantId, string reportId, string employeeId,
         string employeeName, CancellationToken ct = default)
     {
         await EnsureOpenAsync(ct).ConfigureAwait(false);
@@ -270,17 +337,30 @@ public sealed class WorkReportService : IWorkReportService
 
         if (affected == 0)
         {
-            return false;
+            return new SubmitWorkReportResult { Saved = false };
         }
 
         var detail = await GetAsync(tenantId, reportId, ct).ConfigureAwait(false);
-        if (detail is not null)
+        if (detail is null)
         {
-            await TriggerApprovalAsync(tenantId, reportId, detail.ReportType,
-                employeeId, employeeName, detail.Title, ct).ConfigureAwait(false);
+            // 상태는 바뀌었는데 다시 읽지 못한 경우. 저장은 됐다고 알리되 결재는 장담하지 않는다.
+            return new SubmitWorkReportResult
+            {
+                Saved = true,
+                ApprovalCreated = false,
+                ApprovalSkipReason = "결재 상태를 확인하지 못했습니다. 결재함에서 확인해주세요."
+            };
         }
 
-        return true;
+        var (created, skipReason) = await TriggerApprovalAsync(tenantId, reportId, detail.ReportType,
+            employeeId, employeeName, detail.Title, ct).ConfigureAwait(false);
+
+        return new SubmitWorkReportResult
+        {
+            Saved = true,
+            ApprovalCreated = created,
+            ApprovalSkipReason = skipReason
+        };
     }
 
     public async Task<bool> DeleteAsync(string tenantId, string reportId, string employeeId,
@@ -310,21 +390,37 @@ public sealed class WorkReportService : IWorkReportService
     // ───────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// 결재를 만든다. 결재 설정이 꺼져 있거나 결재선이 없으면 조용히 지나간다.
+    /// 결재를 만든다. <b>만들어졌는지, 못 만들었으면 왜인지</b> 돌려준다.
     /// </summary>
     /// <remarks>
     /// 🔴 결재 트리거 실패가 <b>이미 저장된 보고서를 되돌리면 안 된다.</b>
     /// 판매·매입·연차가 쓰는 원칙과 같다 — 본문은 이미 커밋, 결재는 부가.
     /// 다만 삼키지 않고 로그로 남긴다(헌법 #15).
+    ///
+    /// 🔴 봉합 (2026-08-13, 검증 P0-1): 종전엔 <c>Task</c> 라 <b>결과를 아무도 몰랐다</b>.
+    /// 설정이 꺼져 있으면 조용히 지나가는데 화면은 "결재에 올렸습니다" 를 띄웠다 — 되는 척.
+    /// 이제 판정을 <b>먼저</b> 물어보고(<see cref="ApprovalTriggerHelper.DescribeApprovalBlockerAsync"/>),
+    /// 그 사실을 화면까지 올려보낸다.
     /// </remarks>
-    private async Task TriggerApprovalAsync(string tenantId, string reportId, string reportType,
+    private async Task<(bool Created, string? SkipReason)> TriggerApprovalAsync(
+        string tenantId, string reportId, string reportType,
         string employeeId, string employeeName, string title, CancellationToken ct)
     {
+        var docType = WorkReportTypes.ToDocType(reportType);
+
+        // 먼저 물어본다 — 못 거는 상태면 이유를 그대로 돌려준다(조용한 실패 제거).
+        var blocker = await ApprovalTriggerHelper
+            .DescribeApprovalBlockerAsync(_db, tenantId, docType, ct).ConfigureAwait(false);
+        if (blocker is not null)
+        {
+            return (false, blocker);
+        }
+
         try
         {
             await ApprovalTriggerHelper.TryCreateApprovalAsync(
                 _db,
-                docType: WorkReportTypes.ToDocType(reportType),
+                docType: docType,
                 refId: reportId,
                 refNo: reportId[..8],
                 title: title,
@@ -340,7 +436,19 @@ public sealed class WorkReportService : IWorkReportService
         {
             System.Diagnostics.Trace.TraceWarning(
                 $"[ApprovalTrigger] 보고서 {reportId[..8]} 결재 트리거 실패: {ex}");
+            return (false, "결재 문서를 만들지 못했습니다. 잠시 후 다시 올려주세요.");
         }
+
+        // 🔴 만들었다고 믿지 않고 "있는지" 본다. 위 판정을 통과해도 중복 방지(exists>0)나
+        //    설정 변경이 겹치면 안 만들어질 수 있다 — "만들었을 것" 과 "있다" 는 다르다.
+        var created = await _db.ExecuteScalarAsync<int>(new CommandDefinition(
+            "SELECT COUNT(*) FROM approval_documents WHERE tenant_id=@TenantId AND doc_type=@DocType AND ref_id=@RefId",
+            new { TenantId = tenantId, DocType = docType, RefId = reportId },
+            cancellationToken: ct)).ConfigureAwait(false);
+
+        return created > 0
+            ? (true, null)
+            : (false, "결재 문서가 만들어지지 않았습니다. 결재설정·결재선을 확인해주세요.");
     }
 
     private async Task<string> GetEmployeeNameAsync(string tenantId, string employeeId,

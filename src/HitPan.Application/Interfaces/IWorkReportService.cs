@@ -28,19 +28,32 @@ public interface IWorkReportService
     /// <summary>보고서 상세.</summary>
     Task<WorkReportDetailDto?> GetAsync(string tenantId, string reportId, CancellationToken ct = default);
 
-    /// <summary>새 보고서를 만든다. 반환은 보고서 ID.</summary>
-    Task<string> CreateAsync(string tenantId, string employeeId, string employeeName,
+    /// <summary>
+    /// 이 사람이 이 보고서의 결재자인가(위임 포함). <b>결재자는 본문을 볼 수 있어야 한다</b>
+    /// — 안 읽고 승인하는 결재는 결재가 아니다(P1-4 봉합).
+    /// </summary>
+    Task<bool> IsApproverAsync(string tenantId, string reportId, string employeeId,
+        CancellationToken ct = default);
+
+    /// <summary>새 보고서를 만든다.</summary>
+    /// <returns>보고서 ID + 상신했다면 <b>결재가 실제로 올라갔는지</b>.</returns>
+    Task<CreateWorkReportResult> CreateAsync(string tenantId, string employeeId, string employeeName,
         SaveWorkReportRequest request, CancellationToken ct = default);
 
     /// <summary>
     /// 보고서를 고친다. <b>작성중·반려 상태에서만</b> 된다.
     /// </summary>
-    /// <returns>고쳤으면 true. 결재중·완료라서 못 고쳤으면 false.</returns>
-    Task<bool> UpdateAsync(string tenantId, string reportId, string employeeId,
+    /// <returns>
+    /// <see cref="SubmitWorkReportResult.Saved"/> 가 고쳐졌는지. 결재중·완료라서 못 고쳤으면 false.
+    /// 상신까지 한 경우 <see cref="SubmitWorkReportResult.ApprovalCreated"/> 로 <b>결재가 실제로
+    /// 올라갔는지</b> 도 함께 알려준다(P0-1 봉합 — 되는 척 제거).
+    /// </returns>
+    Task<SubmitWorkReportResult> UpdateAsync(string tenantId, string reportId, string employeeId,
         SaveWorkReportRequest request, CancellationToken ct = default);
 
     /// <summary>작성중 보고서를 결재에 올린다.</summary>
-    Task<bool> SubmitAsync(string tenantId, string reportId, string employeeId,
+    /// <returns>저장 여부와 <b>결재가 실제로 만들어졌는지</b>. 못 만들었으면 그 이유가 담긴다.</returns>
+    Task<SubmitWorkReportResult> SubmitAsync(string tenantId, string reportId, string employeeId,
         string employeeName, CancellationToken ct = default);
 
     /// <summary>

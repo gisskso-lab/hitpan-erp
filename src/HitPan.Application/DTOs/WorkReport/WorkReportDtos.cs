@@ -141,3 +141,38 @@ public sealed class SaveWorkReportRequest
     /// </remarks>
     public bool Submit { get; set; }
 }
+
+/// <summary>
+/// 상신 결과. <b>저장됐는지</b>와 <b>결재가 실제로 올라갔는지</b>를 따로 알려준다.
+/// </summary>
+/// <remarks>
+/// 🔴 봉합 (2026-08-13, 단계3 검증 P0-1): 종전엔 <c>bool</c> 하나만 돌려줘서 화면이
+/// 서버 200 만 보고 무조건 <i>"결재에 올렸습니다"</i> 를 띄웠다. 그런데 결재 설정이 꺼져 있거나
+/// (<c>approval_settings</c> 실측 <b>0행</b>) 결재선이 없으면(<c>approval_doc_lines</c> 실측 <b>0행</b>)
+/// <c>ApprovalTriggerHelper</c> 가 <b>조용히 지나간다</b> ⇒ 보고서는 <c>pending</c> 에 남고
+/// 결재함엔 안 뜬다. <b>아무도 승인할 수 없는 영구 대기</b>인데 직원은 올렸다고 믿는다.
+/// (실측 재현: 상신 후 <c>hr_reports.status='pending'</c>, <c>approval_documents</c> <b>0건</b>)
+///
+/// 되는 척을 없애려면 <b>화면이 사실을 알아야</b> 한다. 그래서 결과를 갈라 돌려준다.
+/// </remarks>
+public class SubmitWorkReportResult
+{
+    /// <summary>보고서 저장·상태 전이가 됐는가.</summary>
+    public bool Saved { get; set; }
+
+    /// <summary>결재 문서가 실제로 만들어졌는가.</summary>
+    public bool ApprovalCreated { get; set; }
+
+    /// <summary>
+    /// 결재가 안 만들어진 이유. 화면이 그대로 보여준다(사용자 말로 쓴다).
+    /// 결재가 만들어졌으면 null.
+    /// </summary>
+    public string? ApprovalSkipReason { get; set; }
+}
+
+/// <summary>새 보고서 작성 결과. 상신까지 한 경우 결재 성사 여부가 함께 담긴다.</summary>
+public sealed class CreateWorkReportResult : SubmitWorkReportResult
+{
+    /// <summary>만들어진 보고서 ID.</summary>
+    public string ReportId { get; set; } = string.Empty;
+}

@@ -314,4 +314,119 @@ public class WorkReportGuardTests
         // 삭제는 작성중에서만 — 결재에 올라간 것은 기록이라 더 좁다.
         Assert.Matches(new Regex(@"DELETE FROM hr_reports.*?status = 'draft'", RegexOptions.Singleline), code);
     }
+
+    // ───────────────────────────────────────────────────────────────
+    // 검증 [3-V] 지적분 봉합 게이트 (2026-08-13)
+    // ───────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// 🔴 <b>P0-1 봉합 — "결재에 올렸습니다" 가 거짓말이면 안 된다.</b>
+    /// 결재 설정이 꺼져 있거나 결재선이 없으면 결재문서가 안 만들어지는데(실측 0건)
+    /// 종전엔 화면이 무조건 성공을 띄웠다. 상신하는 <b>세 경로 전부</b>가 결과를 돌려줘야 한다.
+    /// </summary>
+    [Fact]
+    public void 상신_결과를_사실대로_돌려준다()
+    {
+        var code = ReadSource("src", "HitPan.Application", "Services", "WorkReportService.cs");
+
+        // 세 경로(신규·수정·상신) 모두 결과 객체를 돌려준다 — 하나라도 bool 이면 그 자리에 되는 척이 남는다.
+        Assert.Contains("Task<CreateWorkReportResult> CreateAsync", code);
+        Assert.Contains("Task<SubmitWorkReportResult> UpdateAsync", code);
+        Assert.Contains("Task<SubmitWorkReportResult> SubmitAsync", code);
+
+        // 트리거는 "만들었을 것" 이 아니라 "있는지" 를 본다.
+        Assert.Contains("DescribeApprovalBlockerAsync", code);
+        Assert.Contains("SELECT COUNT(*) FROM approval_documents", code);
+
+        // 화면이 사실을 보고 말을 가른다.
+        var page = ReadSource("src", "HitPan.Web", "Pages", "HR", "WorkReportPage.razor");
+        Assert.Contains("outcome.ApprovalCreated", page);
+        Assert.Contains("ApprovalSkipReason", page);
+    }
+
+    /// <summary>
+    /// 🔴 <b>P0-1 봉합 — 판정 조건이 갈리면 안 된다.</b>
+    /// 미리 물어보는 <c>DescribeApprovalBlockerAsync</c> 와 실제로 만드는 <c>TryCreateApprovalAsync</c> 가
+    /// 다른 조건을 보면, "된다고 했는데 안 되는"(또는 그 반대) 자리가 생긴다.
+    /// 둘 다 <b>설정 ON · 결재선 1행 이상</b> 두 조건만 본다.
+    /// </summary>
+    [Fact]
+    public void 결재_가능_판정이_실제_생성_조건과_같다()
+    {
+        var code = ReadSource("src", "HitPan.Application", "Services", "ApprovalTriggerHelper.cs");
+
+        // ⚠️ 이름은 XML 주석(<see cref=...>)에도 나온다. 구간은 <b>선언부</b> 로 잡아야 한다 —
+        //    처음엔 IndexOf 로 잡았다가 주석의 cref 에 걸려 엉뚱한 구간을 봤다.
+        var describeIdx = code.IndexOf("Task<string?> DescribeApprovalBlockerAsync", StringComparison.Ordinal);
+        Assert.True(describeIdx > 0, "판정 메서드 선언이 있어야 한다");
+
+        var tryIdx = code.IndexOf("Task TryCreateApprovalAsync", StringComparison.Ordinal);
+        Assert.True(tryIdx > describeIdx, "판정 메서드가 생성 메서드보다 앞에 있어야 한다(이 시험의 구간 가정)");
+
+        var describeBlock = code[describeIdx..tryIdx];
+
+        // 두 조건을 같은 표에서 본다.
+        Assert.Contains("approval_settings", describeBlock);
+        Assert.Contains("approval_doc_lines", describeBlock);
+        Assert.Contains("is_active = 1", describeBlock);
+
+        // 이유를 사용자 말로 돌려준다 — 개발용어 금지.
+        foreach (var jargon in new[] { "null", "false", "exception", "Exception" })
+        {
+            var msgs = Regex.Matches(describeBlock, @"return ""([^""]+)""");
+            foreach (Match m in msgs)
+            {
+                Assert.DoesNotContain(jargon, m.Groups[1].Value, StringComparison.OrdinalIgnoreCase);
+            }
+        }
+    }
+
+    /// <summary>
+    /// 🔴 <b>P0-2 봉합 — 반려 사유가 길다고 반려가 실패하면 안 된다.</b>
+    /// 결재 의견은 <c>approval_history.comment</c> varchar(500), 원본은 <c>reject_reason</c> varchar(200).
+    /// 201자면 STRICT 모드에서 <c>ERROR 1406</c> → 결재 트랜잭션 <b>전체가 롤백</b>된다(실측 재현).
+    /// 원본 표에 사유를 넣는 <b>모든 자리</b>가 잘라서 넣어야 한다.
+    /// </summary>
+    [Fact]
+    public void 반려_사유는_컬럼_폭에_맞게_잘라_넣는다()
+    {
+        var code = ReadSource("src", "HitPan.Application", "Services", "ApprovalService.cs");
+
+        Assert.Contains("TruncateRejectReason", code);
+        Assert.Contains("RejectReasonMaxLength = 200", code);
+
+        // reject_reason=@Reason 을 쓰는 자리는 전부 자른 값을 넘겨야 한다.
+        // (연차·업무보고서 두 자리 — 둘 다 같은 폭탄을 갖고 있었다)
+        var hits = Regex.Matches(code, @"reject_reason\s*=\s*@Reason");
+        Assert.True(hits.Count >= 2, $"reject_reason=@Reason 자리가 2곳 이상이어야 한다 (실제 {hits.Count})");
+
+        var raw = Regex.Matches(code, @"Reason\s*=\s*request\.Comment\b");
+        Assert.True(raw.Count == 0,
+            $"자르지 않은 request.Comment 를 reject_reason 에 넣는 자리가 남아 있다 ({raw.Count}곳). "
+            + "ERROR 1406 으로 반려 자체가 실패한다.");
+    }
+
+    /// <summary>
+    /// 🔴 <b>P1-4 봉합 — 결재자가 본문을 볼 수 있어야 한다.</b>
+    /// 안 읽고 승인하는 결재는 결재가 아니다. 단, 결재선 <b>밖</b> 사람은 여전히 못 본다.
+    /// 위임 판정은 <c>ApprovalService</c> 와 같은 시간원(<c>CURDATE()</c>)을 써야 한다 —
+    /// 갈리면 "볼 수는 있는데 승인은 안 되는" 자리가 생긴다.
+    /// </summary>
+    [Fact]
+    public void 결재자는_보고서_본문을_볼_수_있다()
+    {
+        var svc = ReadSource("src", "HitPan.Application", "Services", "WorkReportService.cs");
+
+        Assert.Contains("IsApproverAsync", svc);
+        Assert.Contains("approval_doc_lines", svc);
+
+        // 위임은 유효기간 안일 때만 — 만료된 위임자가 남의 보고서를 계속 보면 정보 유출이다.
+        Assert.Contains("CURDATE() BETWEEN", svc);
+        Assert.Contains("delegate_start IS NOT NULL", svc);
+
+        // 컨트롤러가 이 판정을 실제로 쓴다(만들어만 두고 안 부르면 아무 소용 없다).
+        var ctrl = ReadSource("src", "HitPan.API", "Controllers", "WorkReportController.cs");
+        Assert.Contains("IsApproverAsync", ctrl);
+        Assert.Contains("return Forbid();", ctrl);
+    }
 }

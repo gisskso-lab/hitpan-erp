@@ -295,35 +295,64 @@ else
             Submit = submit
         };
 
-        var (ok, message, _) = await ReportSvc.SaveAsync(_edit.ReportId, model).ConfigureAwait(false);
+        var outcome = await ReportSvc.SaveAsync(_edit.ReportId, model).ConfigureAwait(false);
 
         _saving = false;
 
-        if (!ok)
+        if (!outcome.Ok)
         {
             // 🔴 서버가 준 사유를 그대로 보여준다("결재 중이라 수정 불가" 같은 것).
-            Snackbar.Add(message ?? "저장하지 못했습니다.", Severity.Error);
+            Snackbar.Add(outcome.Message ?? "저장하지 못했습니다.", Severity.Error);
             StateHasChanged();
             return;
         }
 
-        Snackbar.Add(submit ? "결재에 올렸습니다." : "임시 저장했습니다.", Severity.Success);
+        ShowSaveResult(outcome, submit);
         _editing = false;
         await LoadAsync().ConfigureAwait(false);
     }
 
     private async Task SubmitAsync(string id)
     {
-        var (ok, message) = await ReportSvc.SubmitAsync(id).ConfigureAwait(false);
+        var outcome = await ReportSvc.SubmitAsync(id).ConfigureAwait(false);
 
-        if (!ok)
+        if (!outcome.Ok)
         {
-            Snackbar.Add(message ?? "결재에 올리지 못했습니다.", Severity.Error);
+            Snackbar.Add(outcome.Message ?? "결재에 올리지 못했습니다.", Severity.Error);
             return;
         }
 
-        Snackbar.Add("결재에 올렸습니다.", Severity.Success);
+        ShowSaveResult(outcome, submit: true);
         await LoadAsync().ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// 결과를 <b>사실대로</b> 알린다.
+    /// </summary>
+    /// <remarks>
+    /// 🔴 봉합 (2026-08-13, 검증 P0-1): 종전엔 서버 200 만 보고 무조건 "결재에 올렸습니다" 를 띄웠다.
+    /// 결재 설정이 꺼져 있거나 결재선이 없으면 결재문서가 <b>안 만들어지는데</b>(실측 0건)
+    /// 직원은 올렸다고 믿고, 결재자는 영원히 못 받는다 — 되는 척이다.
+    /// 이제 안 올라갔으면 <b>왜 안 올라갔는지·무엇을 해야 하는지</b> 를 경고로 띄운다.
+    /// </remarks>
+    private void ShowSaveResult(WorkReportSaveOutcome outcome, bool submit)
+    {
+        if (!submit)
+        {
+            Snackbar.Add("임시 저장했습니다.", Severity.Success);
+            return;
+        }
+
+        if (outcome.ApprovalCreated)
+        {
+            Snackbar.Add("결재에 올렸습니다.", Severity.Success);
+            return;
+        }
+
+        // 저장은 됐다는 사실과, 결재가 안 갔다는 사실을 함께 알린다.
+        Snackbar.Add(
+            outcome.ApprovalSkipReason ?? "저장은 됐지만 결재가 올라가지 않았습니다. 결재설정을 확인해주세요.",
+            Severity.Warning);
     }
 
     private async Task DeleteAsync(WorkReportListModel row)
