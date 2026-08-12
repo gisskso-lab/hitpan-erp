@@ -382,7 +382,16 @@ else
     }
 
     /// <summary>화면을 인쇄한다. 인쇄창에서 "PDF로 저장" 을 고르면 PDF 가 된다.</summary>
-    private async Task PrintAsync() => await GridExport.PrintAsync();
+    /// <remarks>
+    /// 이 화면은 표가 <b>둘</b>이다(미지급금 현황 / 지급 이력). 지금 보고 있는 쪽 이름을 찍는다 —
+    /// 종이 제목과 내용이 다르면 대사에 못 쓴다 (사장님 지시 2026-08-12).
+    /// </remarks>
+    private async Task PrintAsync()
+        => await GridExport.PrintAsync(
+            _showHistory ? "지급 이력" : "미지급금 현황",
+            _showHistory
+                ? null
+                : $"총 {_payables.Summary.Count:N0}개 업체 · 미지급 합계 {_payables.Summary.Sum(s => s.Outstanding):N0}원 · 연체 {_overdueCount:N0}개 업체");
 
     private void OpenDocsDialog(PayableSummaryModel summary)
     {

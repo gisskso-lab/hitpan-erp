@@ -126,5 +126,11 @@
     }
 
     /// <summary>화면을 인쇄한다. 인쇄창에서 "PDF로 저장" 을 고르면 PDF 가 된다.</summary>
-    private async Task PrintAsync() => await GridExport.PrintAsync();
+    /// <remarks>
+    /// 제목·기간을 같이 넘긴다 — 안 넘기면 종이에 표만 나와서
+    /// 거래처·세무사가 무슨 자료인지 알 수 없다 (사장님 지시 2026-08-12).
+    /// </remarks>
+    private async Task PrintAsync()
+        => await GridExport.PrintAsync("현금출납장",
+            $"{_from:yyyy-MM-dd} ~ {_to:yyyy-MM-dd} · 총 {_items.Count:N0}건");
 }

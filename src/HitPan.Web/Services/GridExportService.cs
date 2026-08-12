@@ -96,11 +96,24 @@ public sealed class GridExportService
     /// <summary>
     /// 화면을 인쇄한다. 브라우저 인쇄창에서 "PDF로 저장" 을 고르면 PDF 가 된다.
     /// </summary>
-    public async Task PrintAsync()
+    /// <param name="title">종이 맨 위에 찍을 제목 (예: "매입매출장").</param>
+    /// <param name="subtitle">기간·조건 (예: "2026-01-01 ~ 2026-08-12 · 총 320건").</param>
+    /// <remarks>
+    /// 🔴 <b>제목을 넘겨야 한다.</b> 안 넘기면 종이에 표만 나온다 —
+    /// 거래처·세무사는 우리 화면을 모르므로 <b>무슨 자료인지 알 수가 없다.</b>
+    /// </remarks>
+    public async Task PrintAsync(string? title = null, string? subtitle = null)
     {
         try
         {
-            await _js.InvokeVoidAsync("print");
+            if (string.IsNullOrWhiteSpace(title))
+            {
+                // 제목 없이 부르던 옛 방식 — 머리말 없이 그냥 인쇄한다(동작은 유지).
+                await _js.InvokeVoidAsync("print");
+                return;
+            }
+
+            await _js.InvokeVoidAsync("hitpanPrintGrid", title, subtitle);
         }
         catch (Exception ex)
         {

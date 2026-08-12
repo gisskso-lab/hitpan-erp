@@ -137,11 +137,20 @@
             return (IReadOnlyList<object?>)cells;
         }).ToList();
 
-        var subtitle = $"{_from:yyyy-MM-dd} ~ {_to:yyyy-MM-dd} · 총 {_reportData.Count:N0}건";
+        var subtitle = BuildSubtitle();
         await GridExport.ExportExcelAsync("수주 현황", headers, rows, subtitle);
     }
     /// <summary>화면을 인쇄한다.</summary>
-    private async Task PrintAsync() { await Js.InvokeVoidAsync("print"); }
+    /// <summary>엑셀·인쇄가 함께 쓰는 부제(기간·건수).</summary>
+    /// <remarks>한 곳에서 만든다 — 따로 만들면 파일과 종이의 기간이 갈린다.</remarks>
+    private string BuildSubtitle() => $"{_from:yyyy-MM-dd} ~ {_to:yyyy-MM-dd} · 총 {_reportData.Count:N0}건";
+
+    /// <summary>화면을 인쇄한다. 인쇄창에서 "PDF로 저장" 을 고르면 PDF 가 된다.</summary>
+    /// <remarks>
+    /// 제목·기간을 같이 넘긴다 — 안 넘기면 종이에 표만 나와서
+    /// 거래처·세무사가 무슨 자료인지 알 수 없다 (사장님 지시 2026-08-12).
+    /// </remarks>
+    private async Task PrintAsync() => await GridExport.PrintAsync("수주 현황", BuildSubtitle());
 
     private string GetLabelHeader() => _viewType switch
     {

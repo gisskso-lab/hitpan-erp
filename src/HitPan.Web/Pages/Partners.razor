@@ -244,7 +244,12 @@
         return string.Join(" · ", parts);
     }
     /// <summary>화면을 인쇄한다.</summary>
-    private async Task PrintAsync() { await Js.InvokeVoidAsync("print"); }
+    /// <remarks>
+    /// 제목·조건을 같이 넘긴다 — 안 넘기면 종이에 표만 나온다 (사장님 지시 2026-08-12).
+    /// ⚠️ 이 화면은 페이징이라 <b>지금 보고 있는 쪽만</b> 인쇄된다. 전부 뽑으려면 엑셀을 쓴다.
+    /// </remarks>
+    private async Task PrintAsync()
+        => await GridExport.PrintAsync("업체 마스터", BuildExportSubtitle(_totalCount));
 
     private void OpenDetail(string? partnerId)
     {
