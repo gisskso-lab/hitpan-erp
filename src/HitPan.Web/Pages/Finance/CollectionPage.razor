@@ -4,6 +4,7 @@
 @using HitPan.Web.Models
 @using HitPan.Web.Services
 @inject CollectionPaymentService CollSvc
+@inject GridExportService GridExport
 @inject ISnackbar Snackbar
 @inject NavigationManager Nav
 
@@ -13,6 +14,11 @@
     <Actions>
         <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Refresh" OnClick="ReloadAsync">새로고침</MudButton>
         <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.History" OnClick="ToggleHistory">@(_showHistory ? "미수금 보기" : "수금 이력 보기")</MudButton>
+        @* 사장님 지시 2026-08-12 — "미수업체, 미수자료" 를 뽑을 수 있어야 한다.
+             종전 이 화면에는 내보내기 버튼이 아예 없어, 거래처와 미수 대사를 하려면
+             화면을 보고 손으로 옮겨 적어야 했다. *@
+        <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.TableChart" OnClick="ExportExcelAsync">엑셀</MudButton>
+        <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Print" OnClick="PrintAsync">인쇄</MudButton>
     </Actions>
 </PageHeader>
 
@@ -353,6 +359,51 @@ else
         _showHistory = !_showHistory;
         // ServerData 패턴 — MudTable이 첫 렌더 시 자동으로 LoadHistoryServerDataAsync 호출.
     }
+
+    /// <summary>화면 자료를 엑셀로 내보낸다.</summary>
+    /// <remarks>
+    /// 사장님 지시 2026-08-12 — <i>"미수업체, 미수자료"</i> 를 뽑을 수 있어야 한다.
+    /// 종전 이 화면에는 내보내기가 아예 없어 거래처와 미수 대사를 하려면 손으로 옮겨 적어야 했다.
+    ///
+    /// 🔴 화면이 두 가지 표를 번갈아 보여준다(미수금 / 수금 이력).
+    /// <b>지금 보고 있는 표</b>를 내보낸다 — 보이는 것과 파일이 달라지면 대사에 못 쓴다.
+    /// </remarks>
+    private async Task ExportExcelAsync()
+    {
+        if (_showHistory)
+        {
+            // 수금 이력은 ServerData(페이징)라 화면에 현재 페이지만 있다 ⇒ 전체를 다시 받는다.
+            var all = await CollSvc.GetCollectionsPagedAsync(page: 1, pageSize: int.MaxValue);
+
+            var headers = new[] { "수금일", "거래처", "수금액", "수금수단", "참조 전표", "비고" };
+            var rows = all.Items.Select(c => (IReadOnlyList<object?>)new object?[]
+            {
+                c.CollectionDate,
+                c.PartnerName,
+                c.Amount,
+                c.CollectionMethodLabel,
+                string.IsNullOrWhiteSpace(c.RefDocId) ? "" : $"{c.RefDocType} {c.RefDocId}",
+                c.Memo
+            }).ToList();
+
+            await GridExport.ExportExcelAsync("수금 이력", headers, rows, $"총 {rows.Count:N0}건");
+            return;
+        }
+
+        var sumHeaders = new[] { "거래처", "미수금", "0~30일", "31~60일", "61~90일", "90일+", "연체" };
+        var sumRows = _receivables.Summary.Select(s => (IReadOnlyList<object?>)new object?[]
+        {
+            s.PartnerName, s.Outstanding, s.Aging0_30, s.Aging31_60, s.Aging61_90, s.Aging90Plus,
+            s.IsOverdue ? "연체" : ""
+        }).ToList();
+
+        var total = _receivables.Summary.Sum(s => s.Outstanding);
+        await GridExport.ExportExcelAsync("미수금 현황", sumHeaders, sumRows,
+            $"총 {sumRows.Count:N0}개 업체 · 미수 합계 {total:N0}원 · 연체 {_overdueCount:N0}개 업체");
+    }
+
+    /// <summary>화면을 인쇄한다. 인쇄창에서 "PDF로 저장" 을 고르면 PDF 가 된다.</summary>
+    private async Task PrintAsync() => await GridExport.PrintAsync();
 
     /// <summary>
     /// 수금 이력 ServerData 콜백 (2026-05-13 야간 신규, 헌법 #25 정공법).
