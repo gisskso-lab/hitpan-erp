@@ -24,11 +24,20 @@ public class ExcelExportService
     /// </summary>
     public byte[] GenerateExcel(DocumentDto data, string docType)
     {
+        // ⚠️ DocumentController 의 엑셀 표와 **같은 종류를 다뤄야 한다**(2026-08-12).
+        //   양쪽이 갈리면 어느 경로로 뽑았느냐에 따라 다른 문서가 나온다.
         return docType switch
         {
             "delivery" => GenerateDeliveryExcel(data),
             "quotation" => GenerateQuotationExcel(data),
             "tax-invoice" => GenerateTaxInvoiceExcel(data),
+            "invoice-exempt" => GenerateTaxInvoiceExcel(data, "계 산 서"),
+            "sales-order" => GenerateDeliveryExcel(data, "수주서", "수 주 서"),
+            "purchase-order" => GenerateDeliveryExcel(data, "발주서", "발 주 서"),
+            "purchase-receipt" => GenerateDeliveryExcel(data, "매입명세서", "매 입 명 세 서"),
+            "purchase-return" => GenerateDeliveryExcel(data, "매입반품", "매 입 반 품"),
+            "sales-return" => GenerateDeliveryExcel(data, "판매반품", "판 매 반 품"),
+            "payment-receipt" => GenerateDeliveryExcel(data, "입금표", "입 금 표"),
             _ => GenerateDeliveryExcel(data)
         };
     }
@@ -280,17 +289,24 @@ public class ExcelExportService
     /// <summary>
     /// 세금계산서 엑셀을 생성한다.
     /// </summary>
-    public byte[] GenerateTaxInvoiceExcel(DocumentDto data)
+    /// <param name="title">
+    /// 제목. 계산서(면세)는 세금계산서와 서식이 같고 세액란만 빠지므로 이 생성기를 함께 쓴다
+    /// (사장님 결재 2026-08-11 — 10종 확장). 값을 안 주면 종전대로 세금계산서다.
+    /// </param>
+    public byte[] GenerateTaxInvoiceExcel(DocumentDto data, string? title = null)
     {
+        var docTitle = string.IsNullOrWhiteSpace(title) ? "세 금 계 산 서 [전자]" : title;
+        var sheetName = string.IsNullOrWhiteSpace(title) ? "세금계산서" : title.Replace(" ", "");
+
         using var workbook = new XLWorkbook();
-        var ws = workbook.Worksheets.Add("세금계산서");
+        var ws = workbook.Worksheets.Add(sheetName);
 
         // ── 열 너비 설정 ──
         SetTaxInvoiceColumnWidths(ws);
 
         // ── Row 1: 제목 ──
         var titleRange = ws.Range("A1:I1").Merge();
-        titleRange.Value = "세 금 계 산 서 [전자]";
+        titleRange.Value = docTitle;
         ApplyTitleStyle(titleRange);
 
         // ── Row 2: 승인번호 ──

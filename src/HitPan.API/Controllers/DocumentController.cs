@@ -98,15 +98,25 @@ public class DocumentController : ControllerBase
         var data = await LoadDocumentAsync(type, id, tenantId);
 
         // 문서 타입별 엑셀 생성 — 제목만 다르게 동일 양식 활용
+        //   ⚠️ 여기 없는 종류는 default 로 떨어져 **거래명세서 모양으로 조용히 나온다.**
+        //     오류가 안 나서 더 위험하다 — 고객은 계산서를 눌렀는데 거래명세서를 받는다.
+        //     양식(form_type)을 늘릴 때 이 표도 같이 늘려야 한다(2026-08-12).
         var bytes = type switch
         {
             "quotation" => _excelService.GenerateQuotationExcel(data),
             "sales-order" => _excelService.GenerateDeliveryExcel(data, "수주서", "수 주 서"),
             "delivery" => _excelService.GenerateDeliveryExcel(data),
             "tax-invoice" => _excelService.GenerateTaxInvoiceExcel(data),
+            // 계산서(면세) — 세금계산서와 서식이 같고 세액란만 빠진다.
+            //   법정 2매 서식이라 세금계산서 생성기를 그대로 쓰되 제목만 바꾼다.
+            "invoice-exempt" => _excelService.GenerateTaxInvoiceExcel(data, "계 산 서"),
             "purchase-order" => _excelService.GenerateDeliveryExcel(data, "발주서", "발 주 서"),
             "purchase-receipt" => _excelService.GenerateDeliveryExcel(data, "매입명세서", "매 입 명 세 서"),
             "return" => _excelService.GenerateDeliveryExcel(data, "반품처리서", "반 품 처 리 서"),
+            // 🔴 봉합 2026-08-12 — 종전 누락분. 매입/판매 반품이 하나로 뭉뚱그려져 있었다.
+            "purchase-return" => _excelService.GenerateDeliveryExcel(data, "매입반품", "매 입 반 품"),
+            "sales-return" => _excelService.GenerateDeliveryExcel(data, "판매반품", "판 매 반 품"),
+            "payment-receipt" => _excelService.GenerateDeliveryExcel(data, "입금표", "입 금 표"),
             _ => _excelService.GenerateDeliveryExcel(data)
         };
 
@@ -135,15 +145,22 @@ public class DocumentController : ControllerBase
         var data = await LoadDocumentAsync(type, id, tenantId);
 
         // 문서 타입별 PDF 생성 — 제목만 다르게 동일 양식 활용
+        //   ⚠️ 위 엑셀 표와 **같은 종류를 다뤄야 한다.** 한쪽만 늘리면
+        //     "엑셀은 계산서로 나오는데 PDF 는 거래명세서로 나오는" 어긋남이 생긴다.
         var bytes = type switch
         {
             "quotation" => _pdfService.GenerateQuotationPdf(data),
             "sales-order" => _pdfService.GenerateDeliveryPdf(data, "수 주 서"),
             "delivery" => _pdfService.GenerateDeliveryPdf(data),
             "tax-invoice" => _pdfService.GenerateTaxInvoicePdf(data),
+            "invoice-exempt" => _pdfService.GenerateTaxInvoicePdf(data, "계 산 서"),
             "purchase-order" => _pdfService.GenerateDeliveryPdf(data, "발 주 서"),
             "purchase-receipt" => _pdfService.GenerateDeliveryPdf(data, "매 입 명 세 서"),
             "return" => _pdfService.GenerateDeliveryPdf(data, "반 품 처 리 서"),
+            // 🔴 봉합 2026-08-12 — 종전 누락분.
+            "purchase-return" => _pdfService.GenerateDeliveryPdf(data, "매 입 반 품"),
+            "sales-return" => _pdfService.GenerateDeliveryPdf(data, "판 매 반 품"),
+            "payment-receipt" => _pdfService.GenerateDeliveryPdf(data, "입 금 표"),
             _ => _pdfService.GenerateDeliveryPdf(data)
         };
 
@@ -674,9 +691,15 @@ public class DocumentController : ControllerBase
         "sales-order" => "수주서",
         "delivery" => "거래명세서",
         "tax-invoice" => "세금계산서",
+        "invoice-exempt" => "계산서",
         "purchase-order" => "발주서",
         "purchase-receipt" => "매입명세서",
         "return" => "반품처리서",
+        // 🔴 봉합 2026-08-12 — 이 표는 **내려받는 파일 이름**이 된다.
+        //   빠지면 판매반품을 받았는데 파일명이 "거래문서_..." 로 떨어져 고객이 무엇인지 모른다.
+        "purchase-return" => "매입반품",
+        "sales-return" => "판매반품",
+        "payment-receipt" => "입금표",
         _ => "거래문서"
     };
 }
