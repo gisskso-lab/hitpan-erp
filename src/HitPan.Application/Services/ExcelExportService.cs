@@ -15,6 +15,15 @@ public class ExcelExportService
     private const double LabelFontSize = 9;
     private const double DataFontSize = 9;
     private const string NumberFormat = "#,##0";
+
+    /// <summary>자료 내보내기 금액 서식 — 마이너스는 빨강에 괄호.</summary>
+    /// <remarks>
+    /// 🔴 <c>#,##0</c> 만 쓰면 <c>-500,000</c> 이 그냥 검은 글씨로 나온다.
+    ///   반품·손실·미수 차감이 섞인 자료에서 <b>마이너스가 눈에 안 들어오면 대사를 놓친다.</b>
+    ///   한국 경리 실무는 괄호 표기가 관례다 — 숫자 값 자체는 음수 그대로라 합계는 정상이다.
+    /// </remarks>
+    private const string MoneyFormat = "#,##0;[Red](#,##0)";
+
     private static readonly XLColor LabelBg = XLColor.FromHtml("#F5F5F5");
 
     // ─── 공개 라우팅 메서드 (하위 호환) ───
@@ -1014,7 +1023,14 @@ public class ExcelExportService
             // 머리글 고정 — 원장·현황은 행이 길다. 스크롤하면 무슨 열인지 모르게 된다.
             ws.SheetView.FreezeRows(headerRow);
             // 자동 필터 — 받아서 바로 걸러 볼 수 있어야 실무에서 쓴다.
+            //   ⚠️ 합계행을 넣기 **전에** 범위를 잡는다. 합계행이 필터에 걸리면
+            //     거래처 하나를 걸러 볼 때 합계행이 같이 사라지거나 엉뚱하게 남는다.
             ws.Range(headerRow, 1, lastDataRow, colCount).SetAutoFilter();
+
+            // ── 합계 행 (사장님 지시 2026-08-12 · 경쟁사 조사 반영) ──
+            //   미수금·매입매출장은 총액이 안 보이면 못 쓴다 — 받아서 손으로 더하게 된다.
+            //   숫자가 든 열만 합한다(일자·거래처명 밑에 합계가 붙으면 오히려 헷갈린다).
+            AppendTotalRow(ws, headers, rows, headerRow, firstDataRow, lastDataRow, colCount);
         }
 
         // 열 너비 자동 — 다만 너무 넓어지지 않게 상한을 둔다(주소·비고가 화면을 다 먹는다).
@@ -1028,6 +1044,87 @@ public class ExcelExportService
         using var ms = new MemoryStream();
         workbook.SaveAs(ms);
         return ms.ToArray();
+    }
+
+    /// <summary>
+    /// 맨 아래에 합계 행을 붙인다 (사장님 지시 2026-08-12).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// 🔴 <b>왜 필요한가</b> — 미수금·매입매출장·손익을 뽑았는데 <b>총액이 없으면</b>
+    /// 받는 사람이 엑셀에서 직접 더해야 한다. 거래처와 미수 대사를 하는 자리라
+    /// 총액이 없는 자료는 실무에서 그대로는 못 쓴다.
+    /// </para>
+    /// <para>
+    /// ⚠️ <b>값이 아니라 <c>SUM()</c> 수식을 넣는다.</b> 고객이 몇 줄을 지우거나 걸러 보면
+    /// 값으로 넣은 합계는 <b>틀린 채로 남는다</b> — 틀린 숫자가 남는 게 없는 것보다 나쁘다.
+    /// </para>
+    /// <para>
+    /// 숫자 열만 합한다. 일자·거래처명 밑에 합계가 붙으면 오히려 헷갈린다.
+    /// 잔액처럼 <b>누적</b>인 열은 더하면 뜻이 없는 숫자가 되므로 뺀다.
+    /// </para>
+    /// </remarks>
+    private static void AppendTotalRow(
+        IXLWorksheet ws,
+        IReadOnlyList<string> headers,
+        IReadOnlyList<IReadOnlyList<object?>> rows,
+        int headerRow, int firstDataRow, int lastDataRow, int colCount)
+    {
+        // 어느 열이 숫자인가 — 한 행이라도 숫자가 들었으면 숫자 열로 본다.
+        //   (첫 행만 보면 그 행이 비어 있을 때 열 전체를 놓친다)
+        var isNumeric = new bool[colCount];
+        foreach (var r in rows)
+        {
+            for (var c = 0; c < colCount && c < r.Count; c++)
+            {
+                if (r[c] is decimal or int or long) isNumeric[c] = true;
+            }
+        }
+
+        var totalRow = lastDataRow + 1;
+        var any = false;
+
+        for (var c = 0; c < colCount; c++)
+        {
+            if (!isNumeric[c]) continue;
+            // 누적 열은 합하면 뜻이 없다 — 잔액을 다 더한 값은 아무 의미가 없는 숫자다.
+            if (IsRunningTotalColumn(headers[c])) continue;
+
+            var colLetter = ws.Cell(headerRow, c + 1).Address.ColumnLetter;
+            var cell = ws.Cell(totalRow, c + 1);
+            // 값이 아니라 수식 — 고객이 행을 지우면 합계도 같이 맞춰진다.
+            cell.FormulaA1 = $"SUM({colLetter}{firstDataRow}:{colLetter}{lastDataRow})";
+            cell.Style.NumberFormat.Format = MoneyFormat;
+            cell.Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Right;
+            any = true;
+        }
+
+        if (!any) return;   // 숫자 열이 없으면 합계행 자체가 의미 없다(명단·목록류)
+
+        ws.Cell(totalRow, 1).Value = "합계";
+        ws.Cell(totalRow, 1).Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Center;
+
+        var totalRange = ws.Range(totalRow, 1, totalRow, colCount);
+        totalRange.Style.Font.Bold = true;
+        totalRange.Style.Font.FontName = FontName;
+        totalRange.Style.Font.FontSize = DataFontSize;
+        totalRange.Style.Fill.BackgroundColor = XLColor.FromArgb(0xEE, 0xEE, 0xEE);
+        totalRange.Style.Border.OutsideBorder = XLBorderStyleValues.Thin;
+        totalRange.Style.Border.InsideBorder = XLBorderStyleValues.Thin;
+        // 위쪽 두 줄 — 여기부터 자료가 아니라 합계라는 표시.
+        totalRange.Style.Border.TopBorder = XLBorderStyleValues.Double;
+    }
+
+    /// <summary>잔액처럼 누적이라 <b>더하면 안 되는</b> 열인지 본다.</summary>
+    /// <remarks>
+    /// 잔액을 전부 더한 값은 아무 뜻이 없는 숫자다. 그런데 합계 자리에 그럴듯하게 찍히면
+    /// 보는 사람은 그게 총 잔액인 줄 안다 — <b>틀린 숫자가 조용히 자리잡는</b> 경우라 막는다.
+    /// </remarks>
+    private static bool IsRunningTotalColumn(string header)
+    {
+        var h = header.Replace(" ", "");
+        return h.Contains("잔액") || h.Contains("잔고") || h.Contains("누계") || h.Contains("누적")
+            || h.Contains("재고수량") || h.Contains("현재고");
     }
 
     /// <summary>
@@ -1046,17 +1143,17 @@ public class ExcelExportService
                 break;
             case decimal d:
                 cell.Value = d;
-                cell.Style.NumberFormat.Format = NumberFormat;
+                cell.Style.NumberFormat.Format = MoneyFormat;
                 cell.Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Right;
                 break;
             case int i:
                 cell.Value = i;
-                cell.Style.NumberFormat.Format = NumberFormat;
+                cell.Style.NumberFormat.Format = MoneyFormat;
                 cell.Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Right;
                 break;
             case long l:
                 cell.Value = l;
-                cell.Style.NumberFormat.Format = NumberFormat;
+                cell.Style.NumberFormat.Format = MoneyFormat;
                 cell.Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Right;
                 break;
             case DateTime dt:

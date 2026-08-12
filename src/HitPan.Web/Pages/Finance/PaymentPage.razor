@@ -4,6 +4,7 @@
 @using HitPan.Web.Models
 @using HitPan.Web.Services
 @inject CollectionPaymentService CollSvc
+@inject GridExportService GridExport
 @inject ISnackbar Snackbar
 @inject NavigationManager Nav
 
@@ -13,6 +14,9 @@
     <Actions>
         <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Refresh" OnClick="ReloadAsync">새로고침</MudButton>
         <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.History" OnClick="ToggleHistory">@(_showHistory ? "미지급금 보기" : "지급 이력 보기")</MudButton>
+        @* 사장님 지시 2026-08-12 — 자료를 뽑을 수 있어야 한다(수금 화면과 같은 규율). *@
+        <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.TableChart" OnClick="ExportExcelAsync">엑셀</MudButton>
+        <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Print" OnClick="PrintAsync">인쇄</MudButton>
     </Actions>
 </PageHeader>
 
@@ -345,6 +349,49 @@ else
             _loading = false;
         }
     }
+
+    /// <summary>화면 자료를 엑셀로 내보낸다 (사장님 지시 2026-08-12).</summary>
+    /// <remarks>
+    /// 화면이 두 가지 표를 번갈아 보여준다(미지급금 / 지급 이력).
+    /// <b>지금 보고 있는 표</b>를 내보낸다 — 보이는 것과 파일이 달라지면 대사에 못 쓴다.
+    /// </remarks>
+    private async Task ExportExcelAsync()
+    {
+        if (_showHistory)
+        {
+            var headers = new[] { "지급일", "거래처", "지급액", "지급수단", "참조 전표", "비고" };
+            var rows = _history.Select(p => (IReadOnlyList<object?>)new object?[]
+            {
+                p.PaymentDate, p.PartnerName, p.Amount, p.PaymentMethodLabel, p.RefOrderId, p.Memo
+            }).ToList();
+
+            await GridExport.ExportExcelAsync("지급 이력", headers, rows, $"총 {rows.Count:N0}건");
+            return;
+        }
+
+        var sumHeaders = new[] { "거래처", "미지급금", "0~30일", "31~60일", "61~90일", "90일+", "연체" };
+        var sumRows = _payables.Summary.Select(s => (IReadOnlyList<object?>)new object?[]
+        {
+            s.PartnerName, s.Outstanding, s.Aging0_30, s.Aging31_60, s.Aging61_90, s.Aging90Plus,
+            s.IsOverdue ? "연체" : ""
+        }).ToList();
+
+        var total = _payables.Summary.Sum(s => s.Outstanding);
+        await GridExport.ExportExcelAsync("미지급금 현황", sumHeaders, sumRows,
+            $"총 {sumRows.Count:N0}개 업체 · 미지급 합계 {total:N0}원 · 연체 {_overdueCount:N0}개 업체");
+    }
+
+    /// <summary>화면을 인쇄한다. 인쇄창에서 "PDF로 저장" 을 고르면 PDF 가 된다.</summary>
+    /// <remarks>
+    /// 이 화면은 표가 <b>둘</b>이다(미지급금 현황 / 지급 이력). 지금 보고 있는 쪽 이름을 찍는다 —
+    /// 종이 제목과 내용이 다르면 대사에 못 쓴다 (사장님 지시 2026-08-12).
+    /// </remarks>
+    private async Task PrintAsync()
+        => await GridExport.PrintAsync(
+            _showHistory ? "지급 이력" : "미지급금 현황",
+            _showHistory
+                ? null
+                : $"총 {_payables.Summary.Count:N0}개 업체 · 미지급 합계 {_payables.Summary.Sum(s => s.Outstanding):N0}원 · 연체 {_overdueCount:N0}개 업체");
 
     private void OpenDocsDialog(PayableSummaryModel summary)
     {

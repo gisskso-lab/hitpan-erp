@@ -738,12 +738,53 @@ html, body {
     .hitpan-content,
     .hitpan-main-column { width: 100% !important; margin: 0 !important; padding: 0 !important; }
 
-    /* 테이블 인쇄 최적화 */
-    .mud-table { overflow: visible !important; height: auto !important; max-height: none !important; }
-    .mud-table-container { overflow: visible !important; height: auto !important; max-height: none !important; }
+    /* ── 테이블 인쇄 최적화 ──────────────────────────────────
+       🔴 자료 화면 19개 중 15개가 Height="520px" 같은 고정 높이 스크롤 상자를 쓴다.
+          그대로 인쇄하면 **화면에 보이는 만큼만 나오고 나머지는 조용히 빠진다.**
+          미수·원장을 뽑았는데 뒷장이 없으면 대사를 못 한다 — 오류도 안 난다.
+          MudBlazor 가 높이를 인라인 style 로 박기 때문에 자식 선택자까지 눌러야 한다. */
+    .mud-table,
+    .mud-table-container,
+    .mud-table > div,
+    .mud-table-container > div {
+        overflow: visible !important;
+        height: auto !important;
+        max-height: none !important;
+    }
 
-    /* 페이지 여백 */
-    @page { margin: 10mm; }
+    /* 🔴 페이지가 넘어가도 열 제목이 다시 나와야 한다.
+          없으면 2장부터는 무슨 열인지 모르는 숫자 나열이 된다.
+          ⚠️ MudBlazor 는 고정헤더에 position:sticky 를 건다(.mud-table-sticky-header
+             * table thead * th{position:sticky}). 그대로 두면 인쇄에서 머리행이
+             한 장에만 붙어 버려 2장부터 열 제목이 사라진다 ⇒ static 으로 되돌린다. */
+    .mud-table thead { display: table-header-group !important; }
+    .mud-table tfoot { display: table-footer-group !important; }
+    .mud-table thead th,
+    .mud-table-sticky-header * table thead * th {
+        position: static !important;
+        background-color: #eee !important;   /* 회색 머리행 — 화면 테마색은 종이에서 안 보인다 */
+        color: #000 !important;
+    }
+    /* 한 줄이 페이지 경계에서 잘리면 숫자가 반씩 갈린다. */
+    .mud-table tr { page-break-inside: avoid; break-inside: avoid; }
+
+    /* 페이저는 종이에서 뜻이 없다(“1-50 / 320” 이 찍혀 나온다). */
+    .mud-table-pagination,
+    .mud-table-toolbar { display: none !important; }
+
+    /* 인쇄에서는 줄무늬·마우스 강조가 오히려 잉크만 먹는다. */
+    .mud-table-striped tbody tr:nth-of-type(odd) > td,
+    .mud-table-hover tbody tr:hover > td { background: transparent !important; }
+
+    /* 표가 종이 폭을 넘지 않게 — 넘치면 오른쪽 열이 잘려 나간다. */
+    .mud-table table { width: 100% !important; table-layout: auto !important; }
+    .mud-table td, .mud-table th {
+        white-space: normal !important;   /* 한 줄 강제를 풀어 접히게 한다 */
+        word-break: break-word;
+    }
+
+    /* 자료가 많으면 가로로 눕혀야 열이 다 들어간다. */
+    @page { margin: 10mm; size: landscape; }
 }
 
 /* ════════════════════════════════════════════════════════════
@@ -854,6 +895,12 @@ html, body {
 .no-print { /* 화면에서는 그대로 보임 */ }
 .print-only { display: none; }
 
+/* ── 자료 인쇄 머리말 (사장님 지시 2026-08-12) ────────────────
+   🔴 종전에는 종이에 **표만** 나왔다. 무슨 자료인지·어느 기간인지 적혀 있지 않아
+      거래처나 세무사에게 넘기면 받는 사람이 알 수가 없었다.
+   인쇄 직전에만 만들어 붙이고 끝나면 지운다(화면에는 안 보인다). */
+#hitpan-print-header { display: none; }
+
 @media print {
     .no-print { display: none !important; }
     .print-only { display: block !important; }
@@ -867,6 +914,23 @@ html, body {
     body, .hitpan-shell, .hitpan-content, .hitpan-body {
         background: white !important;
     }
+    /* 자료 인쇄 머리말 — 무슨 자료인지·언제 기준인지 종이에 남는다. */
+    #hitpan-print-header {
+        display: block !important;
+        margin: 0 0 8px 0;
+        font-family: "맑은 고딕", "Malgun Gothic", sans-serif;
+        color: #000;
+    }
+    #hitpan-print-header .hp-print-title {
+        font-size: 16pt; font-weight: 700; text-align: center; margin-bottom: 4px;
+    }
+    #hitpan-print-header .hp-print-sub {
+        font-size: 9pt; text-align: center; color: #333;
+    }
+    #hitpan-print-header .hp-print-stamp {
+        font-size: 8pt; text-align: right; color: #555; margin-top: 2px;
+    }
+
     /* 인쇄 시 각 페이지 여백 */
     @page { margin: 15mm; }
 }

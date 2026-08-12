@@ -317,8 +317,20 @@ else
 
         await GridExport.ExportExcelAsync("상품 마스터", headers, rows, string.Join(" · ", parts));
     }
-    /// <summary>화면을 인쇄한다.</summary>
-    private async Task PrintAsync() { await Js.InvokeVoidAsync("print"); }
+    /// <summary>화면을 인쇄한다. 인쇄창에서 "PDF로 저장" 을 고르면 PDF 가 된다.</summary>
+    /// <remarks>
+    /// 제목·조건을 같이 넘긴다 — 안 넘기면 종이에 표만 나온다 (사장님 지시 2026-08-12).
+    /// ⚠️ 이 화면은 페이징이라 <b>지금 보고 있는 쪽만</b> 인쇄된다. 전부 뽑으려면 엑셀을 쓴다.
+    /// </remarks>
+    private async Task PrintAsync()
+    {
+        var parts = new List<string>();
+        if (!string.IsNullOrWhiteSpace(_search)) parts.Add($"검색: {_search}");
+        if (!string.IsNullOrWhiteSpace(_typeFilter)) parts.Add($"유형: {_typeFilter}");
+        parts.Add($"총 {_items.Count:N0}건");
+
+        await GridExport.PrintAsync("상품 마스터", string.Join(" · ", parts));
+    }
 
     private static string GetTypeLabel(string type) => type switch
     {
