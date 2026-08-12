@@ -164,7 +164,11 @@ public class AiProvider3WayGuardTests
     public void 마이그레이션은_멱등하게_작성돼_있다()
     {
         // 고객 PC 에서 두 번 돌 수 있다(업데이트 재시도). IF NOT EXISTS 가 없으면 두 번째에 죽는다.
-        var mig = Path.Combine(FindRepoRoot(), "installer", "migrations", "20260812_ai_provider_3way.sql");
+        // 🔴 경로 정정 2026-08-12 — 종전엔 installer/migrations/ 를 봤다. **틀린 자리였다.**
+        //    그 폴더는 배포본에 안 실려서, 게시하고 업데이트를 받아도 고객 DB 에 컬럼이 안 생겼다
+        //    (AI 도우미 연동 화면이 500 으로 죽음 — 사장님 실측 적발).
+        //    고객에게 실제로 가는 자리는 src/HitPan.API/Migrations/SQL/DB-NN_*.sql 뿐이다.
+        var mig = Path.Combine(FindRepoRoot(), "src", "HitPan.API", "Migrations", "SQL", "DB-91_ai_provider_3way.sql");
         Assert.True(File.Exists(mig), $"마이그레이션 파일을 못 찾았다: {mig}");
 
         var text = File.ReadAllText(mig);

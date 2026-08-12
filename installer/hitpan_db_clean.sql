@@ -1822,12 +1822,12 @@ CREATE TABLE `local_subscription` (
   `anthropic_key_status` varchar(20) NOT NULL DEFAULT 'none',
   `anthropic_key_saved_at` datetime DEFAULT NULL COMMENT 'BYOK 키 저장 시각 (P0 봉합 2026-06-23: ChatbotService SaveApiKey/GetAiSettings 사용)',
   `anthropic_key_verified_at` datetime DEFAULT NULL COMMENT 'BYOK 키 연결확인 시각 (P0 봉합 2026-06-23)',
-  `openai_api_key_encrypted` varchar(512) DEFAULT NULL COMMENT 'BYOK 챗GPT 키 AES-256 암호화 (20260812작1)',
+  `openai_api_key_encrypted` varchar(512) DEFAULT NULL COMMENT 'BYOK 챗GPT 키 AES-256 암호화 (DB-91)',
   `openai_api_key_last4` varchar(8) DEFAULT NULL COMMENT '챗GPT 키 마지막 4자리 (UI 표시용)',
   `openai_key_status` varchar(20) NOT NULL DEFAULT 'none' COMMENT 'none / valid / invalid / expired',
   `openai_key_saved_at` datetime DEFAULT NULL COMMENT '챗GPT 키 저장 시각',
   `openai_key_verified_at` datetime DEFAULT NULL COMMENT '챗GPT 키 연결확인 시각 (실제 외부 호출 성공 시각)',
-  `google_api_key_encrypted` varchar(512) DEFAULT NULL COMMENT 'BYOK 제미나이 키 AES-256 암호화 (20260812작1)',
+  `google_api_key_encrypted` varchar(512) DEFAULT NULL COMMENT 'BYOK 제미나이 키 AES-256 암호화 (DB-91)',
   `google_api_key_last4` varchar(8) DEFAULT NULL COMMENT '제미나이 키 마지막 4자리 (UI 표시용)',
   `google_key_status` varchar(20) NOT NULL DEFAULT 'none' COMMENT 'none / valid / invalid / expired',
   `google_key_saved_at` datetime DEFAULT NULL COMMENT '제미나이 키 저장 시각',
@@ -3084,7 +3084,7 @@ INSERT INTO `schema_migrations` (`migration_id`, `app_version`, `success`) VALUE
 ('DB-74','clean-ddl',1),('DB-75','clean-ddl',1),('DB-76','clean-ddl',1),('DB-77','clean-ddl',1),
 ('DB-78','clean-ddl',1),('DB-79','clean-ddl',1),('DB-80','clean-ddl',1),('DB-81','clean-ddl',1),
 ('DB-82','clean-ddl',1),('DB-83','clean-ddl',1),('DB-84','clean-ddl',1),('DB-85','clean-ddl',1),
-('DB-86','clean-ddl',1),('DB-87','clean-ddl',1),('DB-88','clean-ddl',1),('DB-89','clean-ddl',1),('DB-90','clean-ddl',1);
+('DB-86','clean-ddl',1),('DB-87','clean-ddl',1),('DB-88','clean-ddl',1),('DB-89','clean-ddl',1),('DB-90','clean-ddl',1),('DB-91','clean-ddl',1);
 
 --
 -- Table structure for table `service_tickets`
