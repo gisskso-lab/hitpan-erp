@@ -88,8 +88,65 @@
                 <MudItem xs="12">
                     <MudTextField T="string" @bind-Value="_form.BackgroundImageUrl" Label="배경 이미지 URL (양식용지 미리보기 참조)" Margin="Margin.Dense" />
                 </MudItem>
+                @* 🔴 종전에는 이 자리가 JSON 입력칸이었다 (사장님 지시 2026-08-12 정리).
+                     현장 직원이 대괄호·따옴표를 손으로 적어야 했고, 한 글자만 틀려도
+                     좌표가 통째로 무시됐다 — 그런데 오류도 안 났다.
+                     "처음 보는 사람이 혼자 쓸 수 있냐" 를 통과 못 하는 화면이었다.
+                     ⇒ 자로 잰 값을 칸에 적어 넣는 표로 바꾼다. JSON 은 저장할 때 우리가 만든다. *@
                 <MudItem xs="12">
-                    <MudTextField T="string" @bind-Value="_form.FieldCoordsJson" Label="필드 좌표 JSON (예: [{key,x_mm,y_mm,font_pt}])" Margin="Margin.Dense" Lines="4" Variant="Variant.Outlined" />
+                    <MudText Typo="Typo.subtitle2" Class="mt-2">양식용지 위치 맞추기</MudText>
+                    <MudText Typo="Typo.caption" Class="mud-text-secondary">
+                        양식용지 <b>왼쪽 위 모서리</b>에서 자로 재어 적으세요. 단위는 mm 입니다.
+                        비워 두면 히트판 기본 배치로 인쇄합니다.
+                    </MudText>
+                </MudItem>
+
+                @foreach (var c in _coords)
+                {
+                    <MudItem xs="12">
+                        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+                            <MudSelect T="string" @bind-Value="c.Key" Label="어느 칸" Margin="Margin.Dense"
+                                       Variant="Variant.Outlined" Style="min-width:170px">
+                                @foreach (var g in CoordFields)
+                                {
+                                    <MudSelectItem Value="@g.Key">@g.Value</MudSelectItem>
+                                }
+                            </MudSelect>
+                            <MudNumericField T="decimal" @bind-Value="c.XMm" Label="왼쪽에서(mm)" Margin="Margin.Dense"
+                                             Variant="Variant.Outlined" Min="0" Max="420" Style="width:130px" />
+                            <MudNumericField T="decimal" @bind-Value="c.YMm" Label="위에서(mm)" Margin="Margin.Dense"
+                                             Variant="Variant.Outlined" Min="0" Max="594" Style="width:130px" />
+                            <MudNumericField T="decimal" @bind-Value="c.FontPt" Label="글자크기" Margin="Margin.Dense"
+                                             Variant="Variant.Outlined" Min="5" Max="30" Style="width:110px" />
+                            <MudSelect T="string" @bind-Value="c.Align" Label="정렬" Margin="Margin.Dense"
+                                       Variant="Variant.Outlined" Style="width:120px">
+                                <MudSelectItem Value="@("left")">왼쪽</MudSelectItem>
+                                <MudSelectItem Value="@("right")">오른쪽</MudSelectItem>
+                                <MudSelectItem Value="@("center")">가운데</MudSelectItem>
+                            </MudSelect>
+                            @* 오른쪽·가운데 정렬은 칸 너비를 알아야 어디에 붙일지 정해진다. *@
+                            @if (c.Align != "left")
+                            {
+                                <MudNumericField T="decimal" @bind-Value="c.WidthMm" Label="칸 너비(mm)" Margin="Margin.Dense"
+                                                 Variant="Variant.Outlined" Min="0" Max="200" Style="width:130px" />
+                            }
+                            <MudIconButton Icon="@Icons.Material.Filled.Delete" Color="Color.Error" Size="Size.Small"
+                                           OnClick="@(() => _coords.Remove(c))" Title="이 칸 지우기" />
+                        </div>
+                    </MudItem>
+                }
+
+                <MudItem xs="12">
+                    <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+                        <MudButton Variant="Variant.Outlined" Size="Size.Small"
+                                   StartIcon="@Icons.Material.Filled.Add" OnClick="AddCoord">칸 추가</MudButton>
+                        @* 품목 줄은 첫 줄만 잡으면 아래로 같은 간격으로 반복된다 —
+                             줄마다 좌표를 적게 하면 아무도 못 쓴다. *@
+                        <MudNumericField T="decimal" @bind-Value="_rowPitchMm" Label="품목 줄 간격(mm)" Margin="Margin.Dense"
+                                         Variant="Variant.Outlined" Min="0" Max="50" Style="width:160px" />
+                        <MudNumericField T="int" @bind-Value="_maxRows" Label="한 장에 넣을 줄 수" Margin="Margin.Dense"
+                                         Variant="Variant.Outlined" Min="0" Max="99" Style="width:170px" />
+                    </div>
                 </MudItem>
             }
         </MudGrid>
@@ -120,11 +177,58 @@
     //   그대로 보이거나, 만들어졌는데 목록에 안 뜨는 어긋남이 난다.
     //   ⬜ 정리 대상: 서버가 목록을 내려주고 화면은 받아 쓰는 구조가 맞다(별건).
 
+    /// <summary>양식용지에서 위치를 잡을 수 있는 칸들. 서버 렌더가 아는 이름과 짝이다.</summary>
+    /// <remarks>
+    /// ⚠️ 여기 이름(왼쪽 값)은 <b>PdfRenderService.HeaderValue / LineValue</b> 가 받는 이름이어야 한다.
+    ///   화면에서 고를 수 있는데 서버가 모르는 이름이면 <b>그 칸만 조용히 안 찍힌다.</b>
+    /// </remarks>
+    private static readonly Dictionary<string, string> CoordFields = new()
+    {
+        ["거래처"] = "거래처 이름",
+        ["사업자번호"] = "거래처 사업자번호",
+        ["주소"] = "거래처 주소",
+        ["연락처"] = "거래처 연락처",
+        ["문서번호"] = "문서번호",
+        ["일자"] = "일자 (2026-08-12)",
+        ["년"] = "일자 — 년",
+        ["월"] = "일자 — 월",
+        ["일"] = "일자 — 일",
+        ["line.번호"] = "품목 줄 — 번호",
+        ["line.품목"] = "품목 줄 — 품목명",
+        ["line.규격"] = "품목 줄 — 규격",
+        ["line.수량"] = "품목 줄 — 수량",
+        ["line.단가"] = "품목 줄 — 단가",
+        ["line.공급가액"] = "품목 줄 — 공급가액",
+        ["line.세액"] = "품목 줄 — 세액",
+        ["line.금액"] = "품목 줄 — 금액",
+        ["공급가액"] = "합계 — 공급가액",
+        ["세액"] = "합계 — 세액",
+        ["합계"] = "합계 — 총액",
+        ["비고"] = "비고"
+    };
+
+    /// <summary>화면에서 다루는 좌표 한 줄. 저장할 때 JSON 으로 바꾼다.</summary>
+    private sealed class CoordRow
+    {
+        public string Key { get; set; } = "거래처";
+        public decimal XMm { get; set; }
+        public decimal YMm { get; set; }
+        public decimal FontPt { get; set; } = 10m;
+        public string Align { get; set; } = "left";
+        public decimal WidthMm { get; set; }
+    }
+
     [CascadingParameter] private IMudDialogInstance MudDialog { get; set; } = default!;
     [Parameter] public FormTemplatesPage.FormTemplateDto? Template { get; set; }
 
     private FormTemplatesPage.FormTemplateDto _form = new();
     private bool _busy;
+
+    private List<CoordRow> _coords = new();
+    private decimal _rowPitchMm = 6m;
+    private int _maxRows;
+
+    private void AddCoord() => _coords.Add(new CoordRow());
 
     protected override void OnInitialized()
     {
@@ -150,12 +254,105 @@
                 IsDefault = Template.IsDefault,
                 IsActive = Template.IsActive
             };
+            LoadCoords(Template.FieldCoordsJson);
         }
         else
         {
             _form.FormType = "estimate";
             _form.TemplateName = "신규 양식";
         }
+    }
+
+    /// <summary>저장돼 있던 좌표를 표로 되돌린다.</summary>
+    /// <remarks>
+    /// 예전에 JSON 칸으로 직접 적어 둔 고객이 있을 수 있다 — 그 값도 그대로 읽혀야 한다.
+    /// 읽다가 실패하면 화면이 안 뜨는 것보다 빈 표로 여는 편이 낫다.
+    /// </remarks>
+    private void LoadCoords(string? json)
+    {
+        _coords = new List<CoordRow>();
+        if (string.IsNullOrWhiteSpace(json)) return;
+
+        try
+        {
+            using var doc = System.Text.Json.JsonDocument.Parse(json);
+            if (doc.RootElement.ValueKind != System.Text.Json.JsonValueKind.Array) return;
+
+            foreach (var el in doc.RootElement.EnumerateArray())
+            {
+                if (el.ValueKind != System.Text.Json.JsonValueKind.Object) continue;
+                var key = Str(el, "key") ?? Str(el, "name");
+                if (string.IsNullOrWhiteSpace(key)) continue;
+
+                var x = (decimal)(Num(el, "x_mm", "xMm", "x") ?? 0d);
+                var y = (decimal)(Num(el, "y_mm", "yMm", "y") ?? 0d);
+
+                // 줄 간격·줄 수는 좌표가 아니라 설정값이라 별도 칸으로 뺀다.
+                if (key.Equals("row_pitch", StringComparison.OrdinalIgnoreCase)) { _rowPitchMm = y; continue; }
+                if (key.Equals("max_rows", StringComparison.OrdinalIgnoreCase)) { _maxRows = (int)x; continue; }
+
+                _coords.Add(new CoordRow
+                {
+                    Key = key,
+                    XMm = x,
+                    YMm = y,
+                    FontPt = (decimal)(Num(el, "font_pt", "fontPt", "font") ?? 10d),
+                    Align = (Str(el, "align") ?? "left").ToLowerInvariant(),
+                    WidthMm = (decimal)(Num(el, "width_mm", "widthMm", "width") ?? 0d)
+                });
+            }
+        }
+        catch
+        {
+            // 못 읽으면 빈 표로 연다 — 고장난 값 때문에 설정 화면 자체가 막히면 안 된다.
+            _coords = new List<CoordRow>();
+        }
+
+        static string? Str(System.Text.Json.JsonElement el, string n) =>
+            el.TryGetProperty(n, out var p) && p.ValueKind == System.Text.Json.JsonValueKind.String ? p.GetString() : null;
+
+        static double? Num(System.Text.Json.JsonElement el, params string[] names)
+        {
+            foreach (var n in names)
+            {
+                if (!el.TryGetProperty(n, out var p)) continue;
+                if (p.ValueKind == System.Text.Json.JsonValueKind.Number && p.TryGetDouble(out var d)) return d;
+                if (p.ValueKind == System.Text.Json.JsonValueKind.String
+                    && double.TryParse(p.GetString(), System.Globalization.NumberStyles.Float,
+                                       System.Globalization.CultureInfo.InvariantCulture, out var s)) return s;
+            }
+            return null;
+        }
+    }
+
+    /// <summary>표를 서버가 읽는 JSON 으로 바꾼다.</summary>
+    private string? BuildCoordsJson()
+    {
+        // 양식용지가 아니면 좌표는 의미가 없다 — 남겨 두면 나중에 모드만 바꿨을 때 엉뚱하게 살아난다.
+        if (_form.PaperMode != "preprint") return null;
+
+        var rows = _coords
+            .Where(c => !string.IsNullOrWhiteSpace(c.Key))
+            .Select(c => new Dictionary<string, object>
+            {
+                ["key"] = c.Key,
+                ["x_mm"] = c.XMm,
+                ["y_mm"] = c.YMm,
+                ["font_pt"] = c.FontPt,
+                ["align"] = c.Align,
+                ["width_mm"] = c.WidthMm
+            })
+            .ToList();
+
+        if (rows.Count == 0) return null;   // 빈 목록이면 기본 배치로 인쇄된다
+
+        // 줄 간격·줄 수는 같은 목록에 설정값으로 얹는다(서버가 이 이름으로 꺼내 쓴다).
+        if (_rowPitchMm > 0)
+            rows.Add(new Dictionary<string, object> { ["key"] = "row_pitch", ["x_mm"] = 0m, ["y_mm"] = _rowPitchMm });
+        if (_maxRows > 0)
+            rows.Add(new Dictionary<string, object> { ["key"] = "max_rows", ["x_mm"] = (decimal)_maxRows, ["y_mm"] = 0m });
+
+        return System.Text.Json.JsonSerializer.Serialize(rows);
     }
 
     private async Task SaveAsync()
@@ -165,6 +362,9 @@
             Snackbar.Add("양식 유형과 이름은 필수입니다.", Severity.Warning);
             return;
         }
+
+        // 표에 적은 위치를 서버가 읽는 형태로 바꿔 담는다 (사장님 지시 2026-08-12).
+        _form.FieldCoordsJson = BuildCoordsJson();
 
         _busy = true;
         try
