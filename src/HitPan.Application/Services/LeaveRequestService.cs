@@ -13,9 +13,13 @@ public sealed class LeaveRequestService : ILeaveRequestService
 {
     private readonly IDbConnection _db;
 
-    public LeaveRequestService(IDbConnection db)
+    // 작(2026-08-13) 단계2: 연차를 신청하면 결재자에게 바로 알린다.
+    private readonly INotificationService _notifier;
+
+    public LeaveRequestService(IDbConnection db, INotificationService notifier)
     {
         _db = db;
+        _notifier = notifier;
     }
 
     public async Task<List<LeaveRequestListDto>> GetListAsync(string tenantId, string? employeeId = null, CancellationToken ct = default)
@@ -115,7 +119,7 @@ public sealed class LeaveRequestService : ILeaveRequestService
                 _db, docType: "leave", refId: requestId, refNo: requestId[..8],
                 title: title, amount: request.LeaveDays,
                 tenantId: tenantId, requesterId: request.EmployeeId, requesterName: empName,
-                ct: ct).ConfigureAwait(false);
+                ct: ct, notifier: _notifier).ConfigureAwait(false);
         }
         catch (Exception ex)
         {

@@ -12,10 +12,14 @@ public class FinanceService : IFinanceService
     private readonly IDbConnection _db;
     private readonly IAuditService _audit;
 
-    public FinanceService(IDbConnection db, IAuditService audit)
+    // 작(2026-08-13) 단계2: 경비를 등록하면 결재자에게 바로 알린다.
+    private readonly INotificationService _notifier;
+
+    public FinanceService(IDbConnection db, IAuditService audit, INotificationService notifier)
     {
         _db = db;
         _audit = audit;
+        _notifier = notifier;
     }
 
     // ═══════════════════════════════════════
@@ -261,7 +265,7 @@ public class FinanceService : IFinanceService
             await ApprovalTriggerHelper.TryCreateApprovalAsync(_db,
                 "expense", id, docNo, title,
                 req.Amount + req.VatAmount,
-                tenantId, userId, "경비등록자", ct);
+                tenantId, userId, "경비등록자", ct, _notifier);
         }
         catch (Exception ex)
         {

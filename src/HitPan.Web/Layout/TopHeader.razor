@@ -9,8 +9,12 @@
     <div class="hitpan-top-header-center">
         <MultiTabBar />
     </div>
-    @* 우측: 계정 정보 + 로그아웃 *@
+    @* 우측: 알림 + 계정 정보 + 로그아웃 *@
     <div class="hitpan-top-header-right">
+        @* 작(2026-08-13) 단계2: 앱 내 알림(결재가 올라오면 즉시).
+           🔴 왼쪽 AI 챗봇(로봇)과 자리·아이콘을 뚜렷이 갈랐다 —
+              AI 는 대화를 외부로 보내고 이 알림은 회사 안에서만 돈다. *@
+        <NotificationBell />
         <AccountBadge />
     </div>
 </header>
