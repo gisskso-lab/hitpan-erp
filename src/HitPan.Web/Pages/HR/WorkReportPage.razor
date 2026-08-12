@@ -1,0 +1,408 @@
+@page "/hr/reports"
+@namespace HitPan.Web.Pages.HrUi
+@attribute [Authorize]
+@using HitPan.Web.Components.Common
+@using HitPan.Web.Models
+@using HitPan.Web.Services
+@inject WorkReportService ReportSvc
+@inject ISnackbar Snackbar
+@inject IDialogService DialogService
+
+@* 작(2026-08-13) 그룹웨어 단계3 — 업무보고서 4종.
+
+   사장님 지시(2026-08-12): "일일보고서, 주간보고서, 월간보고서, 경위서 메뉴 추가"
+
+   한 화면에서 목록·작성을 다 한다(히트판 정신 — 한 화면 완결).
+   종류를 탭으로 가르되 화면은 하나다. 네 화면을 따로 만들면 같은 것을 네 번 배워야 한다. *@
+
+<PageTitle>업무보고서</PageTitle>
+<PageHeader Title="업무보고서" Subtitle="일일 · 주간 · 월간 · 경위서 작성과 결재" />
+
+<MudTabs Elevation="0" Rounded="true" ApplyEffectsToContainer="true" PanelClass="pt-4"
+         @bind-ActivePanelIndex="_tabIndex">
+    @foreach (var t in _types)
+    {
+        <MudTabPanel Text="@WorkReportTypes.DisplayName(t)" />
+    }
+</MudTabs>
+
+<div class="d-flex justify-space-between align-center mb-3 mt-2">
+    <MudText Typo="Typo.subtitle2" Style="color:var(--mud-palette-text-secondary)">
+        @WorkReportTypes.DisplayName(CurrentType) 목록
+    </MudText>
+    <MudButton Variant="Variant.Filled" Color="Color.Primary" Size="Size.Small"
+               StartIcon="@Icons.Material.Filled.Add" OnClick="StartCreate">
+        새 @WorkReportTypes.DisplayName(CurrentType)
+    </MudButton>
+</div>
+
+@if (_loading)
+{
+    <MudProgressLinear Indeterminate="true" Color="Color.Primary" />
+}
+else if (_editing)
+{
+    @* ── 작성·수정 ── *@
+    <MudPaper Elevation="0" Class="pa-4 mb-3"
+              Style="border:0.5px solid var(--mud-palette-lines-default);border-radius:12px">
+
+        @if (!string.IsNullOrWhiteSpace(_edit.RejectReasonView))
+        {
+            @* 🔴 반려 사유를 보여준다. 없으면 왜 반려됐는지 몰라 같은 내용을 다시 올린다. *@
+            <MudAlert Severity="Severity.Warning" Dense="true" Class="mb-3">
+                <b>반려됨</b> — @_edit.RejectReasonView
+            </MudAlert>
+        }
+
+        <MudGrid Spacing="2">
+            @* 일일보고서·경위서는 하루짜리라 기간을 하나만 받는다. *@
+            <MudItem xs="12" md="@(IsSinglePeriod ? 4 : 3)">
+                <MudDatePicker Label="@(IsSinglePeriod ? "일자" : "시작일")"
+                               @bind-Date="_edit.PeriodStart"
+                               Variant="Variant.Outlined" Margin="Margin.Dense" />
+            </MudItem>
+            @if (!IsSinglePeriod)
+            {
+                <MudItem xs="12" md="3">
+                    <MudDatePicker Label="종료일" @bind-Date="_edit.PeriodEnd"
+                                   Variant="Variant.Outlined" Margin="Margin.Dense" />
+                </MudItem>
+            }
+            <MudItem xs="12" md="@(IsSinglePeriod ? 8 : 6)">
+                <MudTextField T="string" Label="제목" @bind-Value="_edit.Title"
+                              Variant="Variant.Outlined" Margin="Margin.Dense"
+                              Placeholder="비워 두면 날짜로 자동 생성됩니다" />
+            </MudItem>
+
+            <MudItem xs="12">
+                <MudTextField T="string" Label="@ContentLabel" @bind-Value="_edit.Content"
+                              Variant="Variant.Outlined" Margin="Margin.Dense"
+                              Lines="@(CurrentType == WorkReportTypes.Monthly ? 12 : 8)" />
+            </MudItem>
+
+            @* 경위서만 원인·대책을 따로 받는다. 사건 설명과 재발방지는 다른 이야기다. *@
+            @if (CurrentType == WorkReportTypes.Incident)
+            {
+                <MudItem xs="12" md="6">
+                    <MudTextField T="string" Label="원인" @bind-Value="_edit.Cause"
+                                  Variant="Variant.Outlined" Margin="Margin.Dense" Lines="4" />
+                </MudItem>
+                <MudItem xs="12" md="6">
+                    <MudTextField T="string" Label="재발방지 대책" @bind-Value="_edit.ActionPlan"
+                                  Variant="Variant.Outlined" Margin="Margin.Dense" Lines="4" />
+                </MudItem>
+            }
+        </MudGrid>
+
+        <div class="d-flex justify-end gap-2 mt-4">
+            <MudButton Variant="Variant.Text" OnClick="CancelEdit">취소</MudButton>
+            @* 🔴 저장과 상신을 가른다(반자동 원칙) — 저장하자마자 결재가 올라가면
+               쓰다 만 보고서가 결재자에게 간다. 월간보고서는 한 번에 다 못 쓴다. *@
+            <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Save"
+                       OnClick="@(() => SaveAsync(submit: false))" Disabled="@_saving">
+                임시 저장
+            </MudButton>
+            <MudButton Variant="Variant.Filled" Color="Color.Primary"
+                       StartIcon="@Icons.Material.Filled.Send"
+                       OnClick="@(() => SaveAsync(submit: true))" Disabled="@_saving">
+                결재 올리기
+            </MudButton>
+        </div>
+    </MudPaper>
+}
+else if (_list.Count == 0)
+{
+    <MudPaper Elevation="0" Class="pa-8"
+              Style="border:0.5px solid var(--mud-palette-lines-default);border-radius:12px;text-align:center">
+        <MudIcon Icon="@Icons.Material.Outlined.Description" Size="Size.Large"
+                 Style="color:var(--mud-palette-text-disabled)" />
+        <MudText Typo="Typo.body2" Class="mt-2" Style="color:var(--mud-palette-text-secondary)">
+            작성한 @WorkReportTypes.DisplayName(CurrentType)가 없습니다.
+        </MudText>
+    </MudPaper>
+}
+else
+{
+    <MudPaper Elevation="0" Class="pa-2"
+              Style="border:0.5px solid var(--mud-palette-lines-default);border-radius:12px">
+        <MudTable Items="_list" Dense="true" Hover="true">
+            <HeaderContent>
+                <MudTh>기간</MudTh>
+                <MudTh>제목</MudTh>
+                <MudTh Style="width:100px;text-align:center">상태</MudTh>
+                <MudTh Style="width:150px;text-align:center">처리</MudTh>
+            </HeaderContent>
+            <RowTemplate>
+                <MudTd DataLabel="기간">
+                    @(context.PeriodStart == context.PeriodEnd
+                        ? context.PeriodStart.ToString("yyyy-MM-dd")
+                        : $"{context.PeriodStart:yyyy-MM-dd} ~ {context.PeriodEnd:yyyy-MM-dd}")
+                </MudTd>
+                <MudTd DataLabel="제목">
+                    <MudLink OnClick="@(() => OpenAsync(context.ReportId))">@context.Title</MudLink>
+                    @if (context.Status == WorkReportStatuses.Rejected
+                         && !string.IsNullOrWhiteSpace(context.RejectReason))
+                    {
+                        <MudText Typo="Typo.caption" Style="color:var(--mud-palette-error)">
+                            반려 사유: @context.RejectReason
+                        </MudText>
+                    }
+                </MudTd>
+                <MudTd DataLabel="상태" Style="text-align:center">
+                    <MudChip T="string" Size="Size.Small" Variant="Variant.Filled"
+                             Color="@StatusColor(context.Status)">
+                        @context.StatusLabel
+                    </MudChip>
+                </MudTd>
+                <MudTd Style="text-align:center">
+                    @if (context.CanEdit)
+                    {
+                        <MudIconButton Icon="@Icons.Material.Filled.Edit" Size="Size.Small"
+                                       OnClick="@(() => OpenAsync(context.ReportId))" />
+                        <MudIconButton Icon="@Icons.Material.Filled.Send" Size="Size.Small"
+                                       Color="Color.Primary"
+                                       OnClick="@(() => SubmitAsync(context.ReportId))" />
+                        @if (context.Status == WorkReportStatuses.Draft)
+                        {
+                            <MudIconButton Icon="@Icons.Material.Filled.Delete" Size="Size.Small"
+                                           Color="Color.Error"
+                                           OnClick="@(() => DeleteAsync(context))" />
+                        }
+                    }
+                </MudTd>
+            </RowTemplate>
+        </MudTable>
+    </MudPaper>
+}
+
+@code {
+    private static readonly string[] _types =
+    [
+        WorkReportTypes.Daily, WorkReportTypes.Weekly,
+        WorkReportTypes.Monthly, WorkReportTypes.Incident
+    ];
+
+    private int _tabIndex;
+    private int _loadedTabIndex = -1;
+
+    private List<WorkReportListModel> _list = new();
+    private EditState _edit = new();
+    private bool _loading = true;
+    private bool _saving;
+    private bool _editing;
+
+    private string CurrentType => _types[Math.Clamp(_tabIndex, 0, _types.Length - 1)];
+
+    /// <summary>일일보고서·경위서는 하루짜리다.</summary>
+    private bool IsSinglePeriod =>
+        CurrentType is WorkReportTypes.Daily or WorkReportTypes.Incident;
+
+    private string ContentLabel => CurrentType == WorkReportTypes.Incident
+        ? "경위 (무슨 일이 있었는지)"
+        : "내용";
+
+    protected override async Task OnParametersSetAsync()
+    {
+        // 탭이 바뀌면 다시 읽는다. 같은 탭이면 헛조회하지 않는다.
+        if (_tabIndex != _loadedTabIndex)
+        {
+            _loadedTabIndex = _tabIndex;
+            _editing = false;
+            await LoadAsync().ConfigureAwait(false);
+        }
+    }
+
+    private async Task LoadAsync()
+    {
+        _loading = true;
+        StateHasChanged();
+
+        _list = await ReportSvc.GetListAsync(CurrentType).ConfigureAwait(false);
+
+        _loading = false;
+        StateHasChanged();
+    }
+
+    private void StartCreate()
+    {
+        _edit = new EditState
+        {
+            PeriodStart = DateTime.Today,
+            PeriodEnd = DateTime.Today
+        };
+        _editing = true;
+    }
+
+    private async Task OpenAsync(string id)
+    {
+        var detail = await ReportSvc.GetAsync(id).ConfigureAwait(false);
+        if (detail is null)
+        {
+            Snackbar.Add("보고서를 불러오지 못했습니다.", Severity.Error);
+            return;
+        }
+
+        if (!detail.CanEdit)
+        {
+            // 결재중·완료는 못 고친다. 열되 왜 못 고치는지 알려준다.
+            Snackbar.Add($"{detail.StatusLabel} 상태라 수정할 수 없습니다.", Severity.Info);
+        }
+
+        _edit = new EditState
+        {
+            ReportId = detail.ReportId,
+            PeriodStart = detail.PeriodStart,
+            PeriodEnd = detail.PeriodEnd,
+            Title = detail.Title,
+            Content = detail.Content,
+            Cause = detail.Cause,
+            ActionPlan = detail.ActionPlan,
+            RejectReasonView = detail.Status == WorkReportStatuses.Rejected
+                ? detail.RejectReason
+                : null
+        };
+        _editing = true;
+    }
+
+    private void CancelEdit()
+    {
+        _editing = false;
+        _edit = new EditState();
+    }
+
+    private async Task SaveAsync(bool submit)
+    {
+        if (string.IsNullOrWhiteSpace(_edit.Content))
+        {
+            Snackbar.Add("내용을 입력해 주세요.", Severity.Warning);
+            return;
+        }
+
+        _saving = true;
+        StateHasChanged();
+
+        var model = new SaveWorkReportModel
+        {
+            ReportType = CurrentType,
+            PeriodStart = _edit.PeriodStart ?? DateTime.Today,
+            PeriodEnd = IsSinglePeriod
+                ? (_edit.PeriodStart ?? DateTime.Today)
+                : (_edit.PeriodEnd ?? _edit.PeriodStart ?? DateTime.Today),
+            Title = _edit.Title ?? string.Empty,
+            Content = _edit.Content ?? string.Empty,
+            Cause = _edit.Cause,
+            ActionPlan = _edit.ActionPlan,
+            Submit = submit
+        };
+
+        var outcome = await ReportSvc.SaveAsync(_edit.ReportId, model).ConfigureAwait(false);
+
+        _saving = false;
+
+        if (!outcome.Ok)
+        {
+            // 🔴 서버가 준 사유를 그대로 보여준다("결재 중이라 수정 불가" 같은 것).
+            Snackbar.Add(outcome.Message ?? "저장하지 못했습니다.", Severity.Error);
+            StateHasChanged();
+            return;
+        }
+
+        ShowSaveResult(outcome, submit);
+        _editing = false;
+        await LoadAsync().ConfigureAwait(false);
+    }
+
+    private async Task SubmitAsync(string id)
+    {
+        var outcome = await ReportSvc.SubmitAsync(id).ConfigureAwait(false);
+
+        if (!outcome.Ok)
+        {
+            Snackbar.Add(outcome.Message ?? "결재에 올리지 못했습니다.", Severity.Error);
+            return;
+        }
+
+        ShowSaveResult(outcome, submit: true);
+        await LoadAsync().ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// 결과를 <b>사실대로</b> 알린다.
+    /// </summary>
+    /// <remarks>
+    /// 🔴 봉합 (2026-08-13, 검증 P0-1): 종전엔 서버 200 만 보고 무조건 "결재에 올렸습니다" 를 띄웠다.
+    /// 결재 설정이 꺼져 있거나 결재선이 없으면 결재문서가 <b>안 만들어지는데</b>(실측 0건)
+    /// 직원은 올렸다고 믿고, 결재자는 영원히 못 받는다 — 되는 척이다.
+    /// 이제 안 올라갔으면 <b>왜 안 올라갔는지·무엇을 해야 하는지</b> 를 경고로 띄운다.
+    /// </remarks>
+    private void ShowSaveResult(WorkReportSaveOutcome outcome, bool submit)
+    {
+        if (!submit)
+        {
+            Snackbar.Add("임시 저장했습니다.", Severity.Success);
+            return;
+        }
+
+        if (outcome.ApprovalCreated)
+        {
+            Snackbar.Add("결재에 올렸습니다.", Severity.Success);
+            return;
+        }
+
+        // 저장은 됐다는 사실과, 결재가 안 갔다는 사실을 함께 알린다.
+        Snackbar.Add(
+            outcome.ApprovalSkipReason ?? "저장은 됐지만 결재가 올라가지 않았습니다. 결재설정을 확인해주세요.",
+            Severity.Warning);
+    }
+
+    private async Task DeleteAsync(WorkReportListModel row)
+    {
+        // 이 레포가 쓰는 확인 대화상자 패턴(ESignHistoryPage 등과 동일).
+        var confirmed = await ConfirmDialog.ShowAsync(
+            DialogService,
+            title: "보고서 삭제",
+            message: $"'{row.Title}' 을(를) 삭제하시겠습니까?\n삭제한 보고서는 되돌릴 수 없습니다.",
+            confirmText: "삭제",
+            cancelText: "취소",
+            severity: Severity.Error).ConfigureAwait(false);
+
+        if (!confirmed)
+        {
+            return;
+        }
+
+        var (ok, message) = await ReportSvc.DeleteAsync(row.ReportId).ConfigureAwait(false);
+
+        if (!ok)
+        {
+            Snackbar.Add(message ?? "삭제하지 못했습니다.", Severity.Error);
+            return;
+        }
+
+        Snackbar.Add("삭제했습니다.", Severity.Success);
+        await LoadAsync().ConfigureAwait(false);
+    }
+
+    private static Color StatusColor(string status) => status switch
+    {
+        WorkReportStatuses.Approved => Color.Success,
+        WorkReportStatuses.Pending => Color.Info,
+        WorkReportStatuses.Rejected => Color.Error,
+        _ => Color.Default
+    };
+
+    /// <summary>작성 화면이 들고 있는 값.</summary>
+    private sealed class EditState
+    {
+        public string? ReportId { get; set; }
+        public DateTime? PeriodStart { get; set; } = DateTime.Today;
+        public DateTime? PeriodEnd { get; set; } = DateTime.Today;
+        public string? Title { get; set; }
+        public string? Content { get; set; }
+        public string? Cause { get; set; }
+        public string? ActionPlan { get; set; }
+
+        /// <summary>반려됐을 때만 채운다. 사유를 화면 위에 띄운다.</summary>
+        public string? RejectReasonView { get; set; }
+    }
+}

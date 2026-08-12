@@ -7,6 +7,44 @@ namespace HitPan.Application.Services;
 /// <summary>결재 트리거 + 월마감 체크 공통 헬퍼</summary>
 public static class ApprovalTriggerHelper
 {
+    /// <summary>
+    /// 이 문서유형에 결재를 걸 수 있는 상태인지 본다. <b>걸 수 없으면 그 이유를 사용자 말로 돌려준다.</b>
+    /// </summary>
+    /// <returns>결재를 걸 수 있으면 null. 못 걸면 사용자에게 보여줄 이유.</returns>
+    /// <remarks>
+    /// 🔴 봉합 (2026-08-13, 단계3 검증 P0-1): <see cref="TryCreateApprovalAsync"/> 는 설정이 꺼져 있거나
+    /// 결재선이 없으면 <b>조용히 return</b> 한다. 판매·매입처럼 <i>결재가 부가 기능</i>인 문서는 그래도 되지만,
+    /// 업무보고서·연차처럼 <b>결재가 존재 이유인</b> 문서는 그 침묵이 곧 <b>되는 척</b>이 된다 —
+    /// 직원은 "올렸다" 를 보고, 문서는 <c>pending</c> 에 갇히고, 결재함엔 안 뜬다.
+    ///
+    /// 그래서 <b>같은 판정</b>을 미리 물어볼 수 있게 갈라 둔다. 판정 조건이 갈라지면 안 되므로
+    /// <see cref="TryCreateApprovalAsync"/> 와 <b>같은 두 조건</b>(설정 ON · 결재선 1행 이상)만 본다.
+    /// (게이트: WorkReportGuardTests — 두 곳의 조건이 어긋나면 시험이 잡는다)
+    /// </remarks>
+    public static async Task<string?> DescribeApprovalBlockerAsync(
+        IDbConnection db, string tenantId, string docType, CancellationToken ct)
+    {
+        var enabled = await db.QueryFirstOrDefaultAsync<bool?>(new CommandDefinition(
+            "SELECT is_enabled FROM approval_settings WHERE tenant_id = @TenantId AND doc_type = @DocType",
+            new { TenantId = tenantId, DocType = docType }, cancellationToken: ct));
+
+        if (enabled is not true)
+        {
+            return "결재 설정이 꺼져 있어 결재가 올라가지 않았습니다. 설정 → 결재설정에서 켜주세요.";
+        }
+
+        var lineCount = await db.QueryFirstOrDefaultAsync<int>(new CommandDefinition(
+            "SELECT COUNT(*) FROM approval_doc_lines WHERE tenant_id = @TenantId AND doc_type = @DocType AND is_active = 1",
+            new { TenantId = tenantId, DocType = docType }, cancellationToken: ct));
+
+        if (lineCount == 0)
+        {
+            return "결재선이 없어 결재가 올라가지 않았습니다. 설정 → 결재선에서 결재자를 지정해주세요.";
+        }
+
+        return null;
+    }
+
     /// <summary>해당 날짜의 월이 마감되었으면 예외 발생</summary>
     public static async Task EnsureNotClosedAsync(IDbConnection db, string tenantId, DateTime date, CancellationToken ct)
     {
@@ -200,6 +238,11 @@ public static class ApprovalTriggerHelper
         "expense"         => "경비",
         "leave"           => "연차",
         "overtime"        => "초과근무",
+        // 작(2026-08-13) 단계3: 업무보고서 4종.
+        "report_daily"    => "일일보고서",
+        "report_weekly"   => "주간보고서",
+        "report_monthly"  => "월간보고서",
+        "report_incident" => "경위서",
         _                 => "결재 문서"
     };
 }

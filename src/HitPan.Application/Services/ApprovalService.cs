@@ -26,8 +26,65 @@ public class ApprovalService : IApprovalService
         ["purchase_return"]  = "매입반품",
         ["expense"]          = "경비",
         ["leave"]            = "휴가",
-        ["overtime"]         = "초과근무"
+        ["overtime"]         = "초과근무",
+        // 작(2026-08-13) 단계3: 업무보고서 4종(사장님 지시 2026-08-12).
+        // 🔴 라벨을 빠뜨리면 결재함에 "report_daily" 같은 영문 코드가 그대로 뜬다
+        //    (고객 노출 영역 개발용어 금지). MapLabels 가 GetValueOrDefault(docType) 로
+        //    폴백하기 때문에 500 이 안 나고 조용히 영문이 보인다.
+        ["report_daily"]     = "일일보고서",
+        ["report_weekly"]    = "주간보고서",
+        ["report_monthly"]   = "월간보고서",
+        ["report_incident"]  = "경위서"
     };
+
+    /// <summary>
+    /// 업무보고서 결재 문서유형 접두. <c>ReportTypes.DocTypePrefix</c> 와 같은 값이다.
+    /// </summary>
+    /// <remarks>
+    /// ⚠️ Application 계층 안이라 DTO 를 참조할 수 있지만, 이 클래스는 DTO 의존을 최소로 두고 있어
+    /// 문자열만 둔다. <b>둘 중 하나를 바꾸면 다른 쪽도 바꿔야 한다</b>(게이트: ReportGuardTests).
+    /// </remarks>
+    private const string ReportDocTypePrefix = "report_";
+
+    /// <summary>
+    /// 원본 표(<c>leave_requests</c>·<c>hr_reports</c>)의 <c>reject_reason</c> 컬럼 폭.
+    /// </summary>
+    private const int RejectReasonMaxLength = 200;
+
+    /// <summary>
+    /// 반려 사유를 원본 표 컬럼 폭에 맞게 자른다.
+    /// </summary>
+    /// <remarks>
+    /// 🔴 봉합 (2026-08-13, 단계3 검증 P0-2): 결재 의견은 <c>approval_history.comment</c> 가
+    /// <b>varchar(500)</b> 인데 원본 표의 <c>reject_reason</c> 은 <b>varchar(200)</b> 이다.
+    /// 결재함 입력칸은 자유서술(<c>Lines="3"</c>)이라 201자가 흔히 들어오고, MariaDB 가
+    /// <c>STRICT_TRANS_TABLES</c> 라 <c>ERROR 1406 Data too long</c> 이 난다. 이 UPDATE 는
+    /// 결재 트랜잭션 <b>안</b>에 있어서 예외가 나면 결재 이력·상태 전이까지 <b>전부 롤백</b>된다
+    /// ⇒ <b>사유를 길게 쓸수록 반려를 못 하는</b> 상태였다(실측 재현: ERROR 1406).
+    ///
+    /// 사유 전문은 <c>approval_history.comment</c> 에 500자 그대로 남으므로 잃는 것이 없다.
+    /// 여기 값은 작성자 화면에 바로 보여주기 위한 사본이다.
+    ///
+    /// ⚠️ 자르는 기준은 <b>글자 수</b>다 — <c>varchar(200)</c> 은 바이트가 아니라 문자 200개이고
+    /// (실측: 한글 200자 = CHAR_LENGTH 200 / LENGTH 600) utf8mb4 에서 안전하다.
+    /// 다만 이모지 등 서로게이트 쌍은 <c>string</c> 인덱스가 반쪽을 자를 수 있어
+    /// <see cref="System.Globalization.StringInfo"/> 로 문자 단위를 지킨다.
+    ///
+    /// 🔴 연차(<c>leave</c>)도 같은 결함을 갖고 있었다. 내가 만든 보고서 배선이 그것을
+    /// 복제한 것이라, 새 자리만 고치지 않고 <b>두 자리를 같은 헬퍼로</b> 봉합한다.
+    /// </remarks>
+    internal static string? TruncateRejectReason(string? reason)
+    {
+        if (string.IsNullOrEmpty(reason))
+        {
+            return reason;
+        }
+
+        var si = new System.Globalization.StringInfo(reason);
+        return si.LengthInTextElements <= RejectReasonMaxLength
+            ? reason
+            : si.SubstringByTextElements(0, RejectReasonMaxLength);
+    }
 
     // 상태 라벨 매핑
     private static readonly Dictionary<string, string> StatusLabels = new()
@@ -595,7 +652,7 @@ public class ApprovalService : IApprovalService
                 {
                     await _db.ExecuteAsync(new CommandDefinition(
                         "UPDATE leave_requests SET status='rejected', approved_by=@Who, approved_at=NOW(6), reject_reason=@Reason, updated_at=NOW(6) WHERE tenant_id=@TenantId AND request_id=@RefId AND status='pending'",
-                        new { Who = employeeId, Reason = request.Comment, TenantId = tenantId, RefId = doc.RefId },
+                        new { Who = employeeId, Reason = TruncateRejectReason(request.Comment), TenantId = tenantId, RefId = doc.RefId },
                         transaction: tx, cancellationToken: ct));
                 }
                 else if (request.Action == "approved" && doc.CurrentSeq >= doc.TotalLines)
@@ -607,6 +664,31 @@ public class ApprovalService : IApprovalService
                     // 실제로 pending→approved 전이된 경우만 차감(HR 화면이 먼저 승인했으면 0행 → 이중차감 방지).
                     if (leaveAffected > 0)
                         await LeaveBalanceHelper.DeductAsync(_db, tx, tenantId, doc.RefId, ct);
+                }
+            }
+
+            // 작(2026-08-13) 단계3: 업무보고서(일일·주간·월간·경위서) 원본 반영.
+            // 🔴 이 배선이 없으면 결재함에서 승인해도 보고서는 "결재중" 에 머문다 — "되는 척" 이다.
+            //    연차(위)와 같은 원칙으로 ★같은 트랜잭션★ 에서 동기화한다(헌법 #20 워크플로우 끊김 방지).
+            //    - 반려: 즉시 rejected + 사유 기록(사유가 없으면 작성자가 왜 반려됐는지 모른다)
+            //    - 승인: 최종 단계에서만 approved. 중간 단계는 아직 미확정이다(헌법 #6)
+            //    status='pending' 가드로 멱등 — 두 번 처리돼도 0행이라 무해하다.
+            else if (doc.DocType.StartsWith(ReportDocTypePrefix, StringComparison.Ordinal)
+                     && !string.IsNullOrEmpty(doc.RefId))
+            {
+                if (request.Action == "rejected")
+                {
+                    await _db.ExecuteAsync(new CommandDefinition(
+                        "UPDATE hr_reports SET status='rejected', reject_reason=@Reason, updated_at=NOW(6) WHERE tenant_id=@TenantId AND report_id=@RefId AND status='pending'",
+                        new { Reason = TruncateRejectReason(request.Comment), TenantId = tenantId, RefId = doc.RefId },
+                        transaction: tx, cancellationToken: ct));
+                }
+                else if (request.Action == "approved" && doc.CurrentSeq >= doc.TotalLines)
+                {
+                    await _db.ExecuteAsync(new CommandDefinition(
+                        "UPDATE hr_reports SET status='approved', approved_by=@Who, approved_at=NOW(6), reject_reason=NULL, updated_at=NOW(6) WHERE tenant_id=@TenantId AND report_id=@RefId AND status='pending'",
+                        new { Who = employeeId, TenantId = tenantId, RefId = doc.RefId },
+                        transaction: tx, cancellationToken: ct));
                 }
             }
 
