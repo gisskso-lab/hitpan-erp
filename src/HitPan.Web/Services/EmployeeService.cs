@@ -127,6 +127,63 @@ public sealed class EmployeeService(HttpClient http, ILogger<EmployeeService> lo
     }
 
     /// <summary>
+    /// 작(2026-08-12) 그룹웨어 단계0 P0-B: 퇴사 처리 전 사전 점검.
+    /// 결재선에 걸려 있거나 진행 중 결재가 있으면 알린다. 막지는 않는다(반자동 원칙).
+    /// </summary>
+    public async Task<EmployeeResignPrecheckModel?> GetResignPrecheckAsync(string id, CancellationToken ct = default)
+    {
+        try
+        {
+            return await http.GetFromJsonAsync<EmployeeResignPrecheckModel>(
+                $"api/employees/{Uri.EscapeDataString(id)}/resign-precheck", ct).ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "퇴사 사전점검 조회 실패 (id={EmployeeId})", id);
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// 작(2026-08-12) 그룹웨어 단계0 P0-A·C: 퇴사 처리.
+    /// </summary>
+    /// <remarks>
+    /// 기존 <see cref="DeleteAsync"/> 는 사원만 비활성화하고 <b>로그인 계정을 그대로 두었다.</b>
+    /// 이 경로는 계정 차단 + 사유·실제 퇴사일까지 기록한다.
+    /// </remarks>
+    /// <returns>
+    /// 성공 여부와, <b>로그인 계정을 실제로 차단했는지</b>. 실패면 null.
+    /// 계정 없는 사원(실측 12명 중 11명)에게 "계정도 차단했다"고 안내하지 않기 위해 결과를 받는다.
+    /// </returns>
+    public async Task<EmployeeResignResultModel?> ResignAsync(string id, DateTime? resignDate,
+        string? resignReason, CancellationToken ct = default)
+    {
+        try
+        {
+            using var res = await http.PostAsJsonAsync(
+                $"api/employees/{Uri.EscapeDataString(id)}/resign",
+                new { ResignDate = resignDate, ResignReason = resignReason },
+                ct).ConfigureAwait(false);
+
+            if (!res.IsSuccessStatusCode)
+            {
+                logger.LogWarning("퇴사 처리 실패 (id={EmployeeId}, status={Status})", id, res.StatusCode);
+                return null;
+            }
+
+            return await res.Content
+                .ReadFromJsonAsync<EmployeeResignResultModel>(cancellationToken: ct)
+                .ConfigureAwait(false)
+                ?? new EmployeeResignResultModel();
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "퇴사 처리 실패 (id={EmployeeId})", id);
+            return null;
+        }
+    }
+
+    /// <summary>
     /// 작20260429 연차 관리 (사장님 결재): 부여·사용 일수만 단독 저장.
     /// 사원관리 그리드의 연차 컬럼 인라인 편집 후 호출.
     /// </summary>

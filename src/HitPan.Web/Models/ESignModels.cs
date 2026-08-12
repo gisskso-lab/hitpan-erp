@@ -18,6 +18,14 @@ public sealed class ESignHistoryModel
     public string? SignerPhone { get; set; }
     public string? SignerBirth { get; set; }
     public string? TxId { get; set; }
+
+    // 작(2026-08-12) 단계0 P0-D: 무효화된 서명이 "유효"로 표시되던 결함 봉합.
+    // API 는 is_void AS IsVoid 로 내려주는데(ESignatureService.cs:72) 이 모델에는 IsVoid 가
+    // 아예 없었고, 화면은 존재하지 않는 Status 로 판정했다. Status 는 초기값 "signed" 에서
+    // 바뀌지 않으므로 무효 서명도 항상 "유효"로 보였고, 무효 건에 [무효화] 버튼까지 계속 떴다.
+    // 🔴 전자서명은 5년 보관·감사추적 대상이라 "무효인데 유효로 보이는 것"은 문서 신뢰의 문제다.
+    public bool IsVoid { get; set; }
+
     public string Status { get; set; } = "signed";
     public DateTime SignedAt { get; set; }
     public DateTime? VoidedAt { get; set; }
@@ -64,7 +72,26 @@ public sealed class LaborContractListModel
     public string ContractType { get; set; } = "regular";
     public DateTime StartDate { get; set; }
     public DateTime? EndDate { get; set; }
-    public decimal Salary { get; set; }
+
+    // 작(2026-08-12) 단계0 P0-D: 계약서 급여가 항상 0원으로 보이던 결함 봉합.
+    // API 는 salary_amount AS SalaryAmount 로 내려주는데
+    // (src/HitPan.Infrastructure/Services/LaborContractService.cs:46)
+    // 이 모델은 Salary 로 받고 있었다. 이름이 달라 역직렬화가 짝을 못 찾고 0 이 남았다.
+    // 500 이 안 나서 더 위험했다 — 고객이 "급여 0원"을 사실로 믿는다.
+    // 속성명을 바꾸면 이 모델을 쓰는 화면이 전부 깨지므로 JSON 이름만 맞춘다(헌법 #1).
+    //
+    // 🔴 검증팀 P0-2 봉합 — 이름만 맞추고 타입을 안 맞춰 새 결함을 만들었다.
+    //    salary_amount 는 NULL 허용이고 API DTO 도 decimal? 인데 여기가 non-nullable decimal 이면
+    //    NULL 이 오는 순간 JsonException 이 난다. 이름이 안 맞을 때는 그 키를 무시해서 조용했지만,
+    //    맞추는 순간 예외 경로가 열린다. 게다가 목록 조회의 catch 가 그 예외를 삼켜
+    //    급여 미입력 계약서가 한 장만 있어도 목록 전체가 빈 화면이 된다.
+    //    ⇒ decimal? 로 받고, 화면 표시용 기본값은 Salary 로 노출한다(기존 바인딩 보존).
+    [JsonPropertyName("salaryAmount")]
+    public decimal? SalaryAmount { get; set; }
+
+    /// <summary>화면 표시용. 급여 미입력이면 0 으로 본다.</summary>
+    [JsonIgnore]
+    public decimal Salary => SalaryAmount ?? 0m;
     public string SalaryType { get; set; } = "monthly";
     public string Status { get; set; } = "draft";
     public DateTime CreatedAt { get; set; }
@@ -85,14 +112,44 @@ public sealed class LaborContractDetailModel
     public string ContractType { get; set; } = "regular";
     public DateTime StartDate { get; set; }
     public DateTime? EndDate { get; set; }
+
+    // 작(2026-08-12) 단계0 P0-D: API 이름과 달라 값이 안 채워지던 필드 봉합.
+    // API(LaborContractService.cs:43~50)는 WorkPlace/WorkingHours/SalaryAmount/AnnualLeave/
+    // ExtraTerms 로 내려주는데 이 모델은 다른 이름으로 받고 있었다.
+    // ⇒ 계약서 상세에서 근무장소·근로시간·급여·연차·특약이 전부 비어 보였다.
+    // 속성명은 화면이 쓰고 있으므로 그대로 두고 JSON 이름만 맞춘다(헌법 #1).
+    [JsonPropertyName("workPlace")]
     public string? WorkLocation { get; set; }
     public string? JobDescription { get; set; }
+    [JsonPropertyName("workingHours")]
     public string? WorkHours { get; set; }
-    public decimal Salary { get; set; }
+
+    // 🔴 검증팀 P0-2 봉합: NULL 허용 컬럼이므로 decimal? 로 받는다(위 목록 모델과 같은 이유).
+    [JsonPropertyName("salaryAmount")]
+    public decimal? SalaryAmount { get; set; }
+
+    /// <summary>화면 표시용. 급여 미입력이면 0 으로 본다.</summary>
+    [JsonIgnore]
+    public decimal Salary => SalaryAmount ?? 0m;
+
     public string SalaryType { get; set; } = "monthly";
-    public int? PayDay { get; set; }
+
+    // 🔴 검증팀 P0-3 봉합 — 타입이 실제 컬럼과 달랐다.
+    //    DB 는 pay_day varchar(20) · annual_leave varchar(100) 이고 API DTO 도 둘 다 string? 이다.
+    //    자유 문자열을 받으라고 만든 칸이라 인사담당자는 "매월 25일", "연 15일" 처럼 쓴다.
+    //    그런데 여기가 int?/decimal? 이면 그 순간 JsonException 이 나고, 상세 조회의 catch 가
+    //    이를 삼켜 화면이 통째로 안 열린다.
+    //    ⚠️ PayDay 는 이름이 원래 맞아 있어서 봉합 전부터 잠복해 있던 결함이고
+    //      (숫자 문자열 "25" 만 우연히 통과했다), AnnualLeave 는 이번에 이름을 맞추면서 드러났다.
+    [JsonPropertyName("payDay")]
+    public string? PayDay { get; set; }
+
     public string? SocialInsurance { get; set; }
-    public decimal? AnnualLeaveDays { get; set; }
+
+    [JsonPropertyName("annualLeave")]
+    public string? AnnualLeaveDays { get; set; }
+
+    [JsonPropertyName("extraTerms")]
     public string? SpecialTerms { get; set; }
     public string Status { get; set; } = "draft";
     public DateTime CreatedAt { get; set; }

@@ -1,0 +1,117 @@
+@namespace HitPan.Web.Pages.SettingsUi
+@using HitPan.Web.Models
+@inject HitPan.Web.Services.EmployeeService EmployeeSvc
+@inject ISnackbar Snackbar
+
+@* 작(2026-08-12) 그룹웨어 단계0 P0-A·B·C — 퇴사 처리.
+
+   봉합 전에는 [삭제] 버튼이 확인창도 없이 사원을 비활성화하고 끝났다. 세 가지가 빠져 있었다.
+   ① 로그인 계정이 그대로 살아 있었다(로그인은 users.is_active 를 보는데 employees 만 껐다)
+   ② 결재선에 걸린 사람이 나가면 그 차례에서 결재가 멈추는데 아무도 알려주지 않았다
+   ③ 퇴사일이 "버튼 누른 시각"이라 소급 퇴사 처리가 불가능했고, 사유 칸은 있는데 안 채웠다
+
+   반자동 원칙(사장님 2026-08-12): 시스템이 퇴사일을 단정하지 않고 사람에게 받는다.
+   경고도 막지 않고 알리기만 한다 — 판단은 사람이 한다. *@
+
+<MudDialog>
+    <DialogContent>
+        <MudText Class="mb-3"><b>@EmployeeName</b> 님을 퇴사 처리합니다.</MudText>
+
+        @if (_loading)
+        {
+            <MudProgressLinear Indeterminate="true" Class="my-3" />
+        }
+        else if (_precheck is not null)
+        {
+            @* 무슨 일이 벌어지는지 미리 알려준다. 막지는 않는다. *@
+            @if (_precheck.ApprovalLineCount > 0)
+            {
+                <MudAlert Severity="Severity.Warning" Dense="true" Class="mb-2">
+                    이 사원이 <b>결재선 @(_precheck.ApprovalLineCount)곳</b>에 결재자로 지정돼 있습니다.
+                    퇴사 처리 후 <b>그 결재는 진행되지 않습니다.</b>
+                    [결재 설정]에서 결재자를 다른 사람으로 바꿔 주세요.
+                </MudAlert>
+            }
+            @if (_precheck.PendingRequestCount > 0)
+            {
+                <MudAlert Severity="Severity.Warning" Dense="true" Class="mb-2">
+                    이 사원이 올린 <b>진행 중 결재가 @(_precheck.PendingRequestCount)건</b> 있습니다.
+                    처리 여부를 먼저 확인해 주세요.
+                </MudAlert>
+            }
+            @if (_precheck.HasUserAccount)
+            {
+                <MudAlert Severity="Severity.Info" Dense="true" Class="mb-2">
+                    이 사원의 <b>로그인 계정이 함께 차단</b>됩니다. 더 이상 히트판에 접속할 수 없습니다.
+                </MudAlert>
+            }
+        }
+
+        <MudDatePicker @bind-Date="_resignDate" Label="퇴사일" Variant="Variant.Outlined"
+                       Margin="Margin.Dense" Class="mb-2"
+                       HelperText="실제 퇴사한 날입니다. 지난 날짜도 지정할 수 있습니다." />
+
+        <MudTextField @bind-Value="_reason" Label="퇴사 사유" Variant="Variant.Outlined"
+                      Margin="Margin.Dense" Lines="2"
+                      Placeholder="예: 개인 사정, 계약 만료" />
+
+        <MudText Typo="Typo.caption" Class="mt-2 mud-text-secondary">
+            사원 자료는 지워지지 않습니다. 목록에서만 내려가며 지난 기록은 그대로 남습니다.
+        </MudText>
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="Cancel" Color="Color.Default" Variant="Variant.Text">취소</MudButton>
+        <MudButton OnClick="Submit" Color="Color.Error" Variant="Variant.Filled" Disabled="@_submitting">
+            @if (_submitting)
+            {
+                <MudProgressCircular Size="Size.Small" Indeterminate="true" Class="mr-2" />
+            }
+            퇴사 처리
+        </MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private IMudDialogInstance MudDialog { get; set; } = null!;
+
+    [Parameter] public string EmployeeId { get; set; } = string.Empty;
+    [Parameter] public string EmployeeName { get; set; } = string.Empty;
+
+    private EmployeeResignPrecheckModel? _precheck;
+    private DateTime? _resignDate = DateTime.Today;
+    private string? _reason;
+    private bool _loading = true;
+    private bool _submitting;
+
+    protected override async Task OnInitializedAsync()
+    {
+        // 사전 점검이 실패해도 퇴사 처리 자체는 막지 않는다. 경고를 못 보여줄 뿐이다.
+        _precheck = await EmployeeSvc.GetResignPrecheckAsync(EmployeeId).ConfigureAwait(false);
+        _loading = false;
+    }
+
+    private void Cancel() => MudDialog.Cancel();
+
+    private async Task Submit()
+    {
+        _submitting = true;
+        StateHasChanged();
+
+        var result = await EmployeeSvc.ResignAsync(EmployeeId, _resignDate, _reason).ConfigureAwait(false);
+
+        _submitting = false;
+
+        if (result is null)
+        {
+            // 작(2026-08-12) 검증팀 P2-6 봉합: 실패하면 사용자에게 알린다.
+            // 앞서는 아무 말 없이 대화상자가 열린 채로 남아, 사용자가 안 눌린 줄 알고 다시 눌렀다.
+            // 옛 [삭제] 경로는 실패를 알려줬는데 새 경로가 그보다 후퇴해 있었다.
+            Snackbar.Add("퇴사 처리에 실패했습니다. 잠시 후 다시 시도해 주세요.", Severity.Error);
+            StateHasChanged();
+            return;
+        }
+
+        // 계정을 실제로 껐는지까지 부모 화면에 넘긴다(거짓 안내 방지 — 검증팀 P1-5).
+        MudDialog.Close(DialogResult.Ok(result.AccountBlocked));
+    }
+}

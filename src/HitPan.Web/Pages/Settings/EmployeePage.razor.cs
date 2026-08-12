@@ -14,6 +14,8 @@ public partial class EmployeePage : ComponentBase
     [Inject] private LeaveRequestService LeaveSvc { get; set; } = default!;
     [Inject] private PermissionService PermSvc { get; set; } = default!;
     [Inject] private ISnackbar Snackbar { get; set; } = default!;
+    // 작(2026-08-12) 단계0: 퇴사 처리 확인 대화상자용.
+    [Inject] private IDialogService DialogService { get; set; } = default!;
 
     private bool _loading = true;
     private List<EmployeeListItemModel> _employees = new();
@@ -158,6 +160,50 @@ public partial class EmployeePage : ComponentBase
         }
 
         Snackbar.Add("사원을 비활성화했습니다.", Severity.Success);
+        await ReloadAllAsync().ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// 작(2026-08-12) 그룹웨어 단계0 P0-A·B·C: 퇴사 처리.
+    /// </summary>
+    /// <remarks>
+    /// 기존 <see cref="DeleteAsync"/> 는 남겨 둔다(헌법 #1). 다만 화면 버튼은 이 경로를 쓴다.
+    /// 차이: ① 로그인 계정도 함께 차단 ② 결재선 영향 사전 경고 ③ 실제 퇴사일·사유 기록.
+    /// </remarks>
+    private async Task ResignAsync()
+    {
+        if (string.IsNullOrWhiteSpace(_selectedEmployeeId))
+        {
+            Snackbar.Add("퇴사 처리할 사원을 선택하세요.", Severity.Warning);
+            return;
+        }
+
+        var parameters = new DialogParameters
+        {
+            { nameof(EmployeeResignDialog.EmployeeId), _selectedEmployeeId },
+            { nameof(EmployeeResignDialog.EmployeeName), _edit.EmpName }
+        };
+
+        var dialog = await DialogService.ShowAsync<EmployeeResignDialog>(
+            "퇴사 처리", parameters).ConfigureAwait(false);
+        var result = await dialog.Result.ConfigureAwait(false);
+
+        if (result is null || result.Canceled)
+        {
+            return;
+        }
+
+        // 작(2026-08-12) 검증팀 P1-5 봉합: 실제로 일어난 일만 말한다.
+        // 앞서는 성공하면 무조건 "계정도 차단됐습니다" 라고 했는데, 계정이 없는 사원
+        // (실측 12명 중 11명)에게도 같은 문구가 떴다 — 되는 척이다.
+        var accountBlocked = result.Data is true;
+
+        Snackbar.Add(
+            accountBlocked
+                ? "퇴사 처리했습니다. 로그인 계정도 함께 차단됐습니다."
+                : "퇴사 처리했습니다.",
+            Severity.Success);
+
         await ReloadAllAsync().ConfigureAwait(false);
     }
 

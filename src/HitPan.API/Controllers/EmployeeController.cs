@@ -108,6 +108,49 @@ public sealed class EmployeeController : ControllerBase
     }
 
     /// <summary>
+    /// 작(2026-08-12) 그룹웨어 단계0 P0-B: 퇴사 처리 사전 점검.
+    /// 퇴사시키면 무슨 일이 벌어지는지 <b>미리 알려준다</b>. 막지는 않는다(반자동 원칙).
+    /// </summary>
+    [HttpGet("{id}/resign-precheck")]
+    public async Task<IActionResult> ResignPrecheck(string id, CancellationToken ct)
+    {
+        var tenantId = HttpContext.Items["TenantId"]?.ToString();
+        if (string.IsNullOrEmpty(tenantId))
+        {
+            return Forbid();
+        }
+
+        var result = await _employeeService.GetResignPrecheckAsync(tenantId, id, ct).ConfigureAwait(false);
+        return Ok(result);
+    }
+
+    /// <summary>
+    /// 작(2026-08-12) 그룹웨어 단계0 P0-A·C: 퇴사 처리.
+    /// </summary>
+    /// <remarks>
+    /// 기존 <c>DELETE</c> 는 <c>employees.is_active</c> 만 껐고 <b>로그인 계정은 살아 있었다</b>
+    /// (로그인은 <c>users.IsActive</c> 를 본다 — 다른 표의 다른 칸).
+    /// 이 경로는 계정 차단 + 퇴사 사유·<b>실제 퇴사일</b> 기록까지 한다.
+    /// 퇴사일을 받는 이유는 처리한 날과 실제 퇴사일이 다를 수 있기 때문이다(소급 처리).
+    /// </remarks>
+    [HttpPost("{id}/resign")]
+    public async Task<IActionResult> Resign(string id,
+        [FromBody] ResignEmployeeRequest request, CancellationToken ct)
+    {
+        var tenantId = HttpContext.Items["TenantId"]?.ToString();
+        if (string.IsNullOrEmpty(tenantId))
+        {
+            return Forbid();
+        }
+
+        // 계정을 실제로 껐는지 화면에 알려준다. 계정이 없는 사원(실측 12명 중 11명)에게도
+        // "계정도 차단했다"고 안내하던 거짓 표시를 없애기 위해서다(검증팀 P1-5).
+        var accountBlocked = await _employeeService.ResignAsync(
+            tenantId, id, request.ResignDate, request.ResignReason, ct).ConfigureAwait(false);
+        return Ok(new { accountBlocked });
+    }
+
+    /// <summary>
     /// 작20260429 연차 관리 (사장님 결재): 부여·사용 일수 단독 저장.
     /// 사원관리 그리드의 연차 컬럼 인라인 편집 후 호출된다.
     /// 다른 사원 정보는 변경하지 않는다 (워크플로우 영향 0건).
