@@ -149,6 +149,7 @@ public sealed class IntegrityCheckService : BackgroundService
         var pwd = TenantConfigReader.Get("DB_PASSWORD");
         if (string.IsNullOrEmpty(db) || string.IsNullOrEmpty(user) || string.IsNullOrEmpty(pwd))
             return string.Empty;
-        return $"Server={host};Port={port};Database={db};User={user};Password={pwd};DefaultCommandTimeout=30;";
+        // GuidFormat=None — char(36) 을 Guid 로 돌려주면 string DTO 매핑이 터진다 (봉합 2026-08-12, PI-07).
+        return $"Server={host};Port={port};Database={db};User={user};Password={pwd};DefaultCommandTimeout=30;GuidFormat=None;";
     }
 }

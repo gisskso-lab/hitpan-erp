@@ -37,7 +37,22 @@ public static class InfrastructureExtensions
         //     (특히 DB-89 는 메인PC 잠김 봉합이다 — 1.2.67 로 게시했으나 실제로는 안 돌았다.)
         //   개발 PC 에서 못 본 이유: 마이그를 mysql.exe 로 직접 넣어 확인했기 때문이다.
         //   그 경로는 이 옵션과 무관하다(사장님 원칙 — 개발PC 정상은 검증이 아니다).
-        var connStr = $"Server={host};Port={port};Database={db};User={user};Password={pwd};DefaultCommandTimeout=90;AllowLoadLocalInfile=true;AllowUserVariables=true;";
+        // 🔴 GuidFormat=None (봉합 2026-08-12, 사장님 실측 적발 — 양식템플릿 500)
+        //   MySqlConnector 는 기본으로 **CHAR(36) 컬럼을 Guid 로 돌려준다.**
+        //   우리 DTO 는 이런 ID 를 전부 string 으로 받으므로 Dapper 가 값을 못 넣고 터진다:
+        //     System.Data.DataException: Error parsing column 0 (TemplateId=... - Guid)
+        //   ⇒ 화면은 "양식 목록 조회 실패 … 500" 만 보인다. 원인이 화면에 안 드러난다.
+        //
+        //   ⚠️ 왜 지금까지 안 터졌나 — 대부분의 표가 varchar(36) 이라서다.
+        //     partners.partner_id = varchar(36) → String 으로 와서 멀쩡했다.
+        //     form_templates.template_id = char(36) → Guid 로 와서 터졌다.
+        //     같은 폭탄이 common_codes·item_specs·migration_jobs·sync_tokens 등
+        //     **char(36) 을 쓰는 표 전체**에 잠복해 있었다. 화면을 안 열어봤을 뿐이다.
+        //
+        //   None = "Guid 로 바꾸지 말고 있는 그대로(String) 달라". 우리 코드와 맞는 유일한 값이다.
+        //   실측(2026-08-12): 설정 없음/Char36 → 둘 다 FAIL(위 예외 그대로 재현),
+        //                     None → 반환형 String, 정상 조회.
+        var connStr = $"Server={host};Port={port};Database={db};User={user};Password={pwd};DefaultCommandTimeout=90;AllowLoadLocalInfile=true;AllowUserVariables=true;GuidFormat=None;";
         // v1.0.6: AutoDetect는 기동 시 DB 연결을 선행 호출 → 설치 직후 타이밍 민감 구간에서 지연·크래시 유발.
         // 설치파일은 MariaDB 11.4 MSI를 동봉하므로 고정 버전으로 안정화.
         var serverVersion = new MariaDbServerVersion(new Version(11, 4, 0));

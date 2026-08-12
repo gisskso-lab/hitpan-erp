@@ -17,7 +17,8 @@ public sealed class AppDbContextFactory : IDesignTimeDbContextFactory<AppDbConte
         var user = TenantConfigReader.GetRequired("DB_USER");
         var pwd = TenantConfigReader.GetRequired("DB_PASSWORD");
 
-        var connStr = $"Server={host};Port={port};Database={db};User={user};Password={pwd};";
+        // GuidFormat=None — char(36) 을 Guid 로 돌려주면 string DTO 매핑이 터진다 (봉합 2026-08-12, PI-07).
+        var connStr = $"Server={host};Port={port};Database={db};User={user};Password={pwd};GuidFormat=None;";
         var builder = new DbContextOptionsBuilder<AppDbContext>();
 
         // Design-time factory avoids AutoDetect network access during migration scaffolding.
