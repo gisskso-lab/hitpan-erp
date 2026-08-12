@@ -85,6 +85,9 @@ builder.Services.AddScoped<ChatbotService>();
 builder.Services.AddScoped<LandingContentService>();
 builder.Services.AddTransient<HitPanApiAuthHandler>();
 builder.Services.AddScoped<TenantProfileService>();
+// 자료 화면(원장·현황·통계·재고·미수) 공용 내보내기 (사장님 지시 2026-08-12).
+//   화면마다 만들면 34곳에 34가지가 생긴다 — 표만 넘기면 나머지는 이 서비스가 한다.
+builder.Services.AddScoped<GridExportService>();
 builder.Services.AddScoped(sp =>
 {
     var handler = new HitPanApiAuthHandler(

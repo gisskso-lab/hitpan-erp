@@ -98,6 +98,6 @@ public class FormTemplateController : ControllerBase
         if (string.IsNullOrEmpty(tenantId)) return Forbid();
 
         await _service.SeedDefaultsAsync(tenantId, ct);
-        return Ok(new { message = "6대 양식 기본 템플릿이 저장되었습니다." });
+        return Ok(new { message = "기본 양식이 만들어졌습니다." });
     }
 }

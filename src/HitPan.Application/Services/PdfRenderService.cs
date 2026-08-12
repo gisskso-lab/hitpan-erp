@@ -535,6 +535,9 @@ public sealed class PdfRenderService : IPdfRenderService
         if (_formTemplateService is null) return null;
 
         // documentType → form_type 매핑
+        //   ⚠️ 여기 빠진 문서는 **템플릿을 못 찾아 조용히 기본 모양으로 인쇄된다.**
+        //   오류가 안 나서 더 위험하다 — 고객은 양식을 설정했는데 왜 안 바뀌는지 알 수 없다.
+        //   ⇒ 양식(form_type)을 늘릴 때 이 표를 같이 늘려야 한다(2026-08-12 조사에서 적발).
         var formType = documentType switch
         {
             "quotation" => "estimate",
@@ -543,7 +546,13 @@ public sealed class PdfRenderService : IPdfRenderService
             "purchase_order" => "purchase_order",
             "purchase_receipt" => "receipt",
             "purchase_return" => "purchase_return",
+            // 🔴 봉합 2026-08-12 — 종전 누락분.
+            //   sales_return: 양식 시드는 됐는데 이 표에 없어 판매반품만 설정이 안 먹었다.
+            "sales_return" => "sales_return",
             "tax_invoice" => "tax_invoice",
+            // 사장님 결재 2026-08-11 (10종 확장) — 계산서·입금표
+            "invoice_exempt" => "invoice_exempt",
+            "payment_receipt" => "payment_receipt",
             _ => null
         };
         if (formType is null) return null;

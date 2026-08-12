@@ -5,6 +5,7 @@
 @inject HttpClient Http
 @inject IJSRuntime Js
 @inject ISnackbar Snackbar
+@inject GridExportService GridExport
 
 <PageTitle>재고이송 현황</PageTitle>
 <PageHeader Title="재고이송 현황" Subtitle="창고 간 이동 내역 조회" />
@@ -110,10 +111,22 @@
     }
 
     /// <summary>엑셀 내보내기를 실행한다.</summary>
-    private Task ExportExcelAsync()
+    /// <remarks>
+    /// 🔴 봉합 2026-08-12 — 종전에는 "준비중입니다" 스낵바만 띄우는 가짜 버튼이었다.
+    /// 화면이 보여주는 것은 <c>_filteredData</c>(필터 적용분)라 그것을 그대로 내보낸다.
+    /// </remarks>
+    private async Task ExportExcelAsync()
     {
-        Snackbar.Add("엑셀 내보내기는 준비중입니다.", Severity.Info);
-        return Task.CompletedTask;
+        var headers = new[] { "일자", "품목", "규격", "출고창고", "입고창고", "수량", "메모", "담당자" };
+
+        var rows = _filteredData.Select(r => (IReadOnlyList<object?>)new object?[]
+        {
+            r.TransferDate, r.ItemName, r.Spec, r.FromWarehouse, r.ToWarehouse, r.Qty, r.Memo, r.Handler
+        }).ToList();
+
+        // _filteredData 는 IEnumerable(지연 계산)이라 .Count 속성이 없다 — 이미 만든 rows 를 센다.
+        var subtitle = $"{_from:yyyy-MM-dd} ~ {_to:yyyy-MM-dd} · 총 {rows.Count:N0}건";
+        await GridExport.ExportExcelAsync("창고이동 현황", headers, rows, subtitle);
     }
 
     /// <summary>화면을 인쇄한다.</summary>

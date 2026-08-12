@@ -188,8 +188,13 @@ public class PdfExportService
     /// </summary>
     /// <param name="data">문서 데이터다.</param>
     /// <returns>PDF 바이트 배열이다.</returns>
-    public byte[] GenerateTaxInvoicePdf(DocumentDto data)
+    /// <param name="title">
+    /// 제목. 계산서(면세)는 세금계산서와 서식이 같고 세액란만 빠지므로 이 생성기를 함께 쓴다
+    /// (사장님 결재 2026-08-11 — 10종 확장). 값을 안 주면 종전대로 세금계산서다.
+    /// </param>
+    public byte[] GenerateTaxInvoicePdf(DocumentDto data, string? title = null)
     {
+        var docTitle = string.IsNullOrWhiteSpace(title) ? "세 금 계 산 서" : title;
         var document = Document.Create(container =>
         {
             container.Page(page =>
@@ -199,14 +204,19 @@ public class PdfExportService
                 page.Content().Column(col =>
                 {
                     // 제목: "세 금 계 산 서" + [전자] 뱃지
+                    //   ⚠️ [전자] 는 전자세금계산서 표식이라 **계산서(면세)에는 붙이지 않는다.**
+                    //     붙이면 없는 제도를 있는 것처럼 표시하는 셈이 된다.
                     col.Item().PaddingBottom(3).Row(titleRow =>
                     {
                         titleRow.RelativeItem(); // 왼쪽 여백
-                        titleRow.AutoItem().Text("세 금 계 산 서")
+                        titleRow.AutoItem().Text(docTitle)
                             .FontSize(20).Bold();
-                        titleRow.AutoItem().PaddingLeft(8).PaddingTop(5)
-                            .Border(1).Padding(2, Unit.Point)
-                            .Text("[전자]").FontSize(9).Bold();
+                        if (string.IsNullOrWhiteSpace(title))
+                        {
+                            titleRow.AutoItem().PaddingLeft(8).PaddingTop(5)
+                                .Border(1).Padding(2, Unit.Point)
+                                .Text("[전자]").FontSize(9).Bold();
+                        }
                         titleRow.RelativeItem(); // 오른쪽 여백
                     });
 
@@ -317,7 +327,12 @@ public class PdfExportService
         {
             "견적서" or "견 적 서" => GenerateQuotationPdf(data),
             "세금계산서" or "세 금 계 산 서" => GenerateTaxInvoicePdf(data),
-            _ => GenerateDeliveryPdf(data)
+            // 계산서(면세)도 세금계산서 서식을 쓰되 제목·[전자] 뱃지가 다르다(2026-08-12).
+            "계산서" or "계 산 서" => GenerateTaxInvoicePdf(data, "계 산 서"),
+            // 그 밖의 제목은 거래명세서 서식에 **그 제목 그대로** 찍는다.
+            //   종전에는 제목을 버리고 "거 래 명 세 서" 로만 나왔다 — 판매반품을 뽑아도
+            //   거래명세서라고 적힌 종이가 나왔다는 뜻이다.
+            _ => GenerateDeliveryPdf(data, string.IsNullOrWhiteSpace(title) ? "거 래 명 세 서" : title)
         };
     }
 

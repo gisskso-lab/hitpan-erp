@@ -2,6 +2,7 @@
 @namespace HitPan.Web.Pages.PartnerMasterUi
 @attribute [Authorize]
 @inject PartnerMasterService PartnersApi
+@inject GridExportService GridExport
 @inject NavigationManager Nav
 @inject ISnackbar Snackbar
 @inject IJSRuntime Js
@@ -176,7 +177,72 @@
     }
 
     /// <summary>화면 데이터를 엑셀로 내보낸다.</summary>
-    private Task ExportExcelAsync() { Snackbar.Add("엑셀 내보내기는 준비중입니다.", Severity.Info); return Task.CompletedTask; }
+    /// <remarks>
+    /// 🔴 봉합 2026-08-12 — 종전 이 메서드는 <c>"엑셀 내보내기는 준비중입니다"</c> 스낵바만
+    /// 띄웠다. 버튼은 멀쩡히 보이고 눌러도 오류가 안 나서 <b>고객은 되는 줄 알고 눌렀다가
+    /// 아무것도 못 받았다.</b> 같은 스텁이 14개 화면에 복사돼 있었다(사장님 지시로 정리).
+    ///
+    /// 화면 표와 <b>같은 열·같은 순서</b>로 넘긴다. 파일이 화면과 다르면 대사에 못 쓴다.
+    /// 금액은 <c>decimal</c> 그대로 넘겨 엑셀에서 숫자로 들어가게 한다 —
+    /// 문자열("1,000,000")로 넘기면 받는 사람이 합계를 못 낸다.
+    /// </remarks>
+    private async Task ExportExcelAsync()
+    {
+        // 🔴 이 표는 ServerData 방식이라 화면에는 **현재 페이지만** 있다.
+        //   화면에 보이는 것만 내보내면 1페이지(예: 20건)만 나가고 고객은 그게 전부인 줄 안다.
+        //   ⇒ 같은 조회 조건으로 **전체를 다시 받아** 내보낸다.
+        _loading = true;
+        try
+        {
+            var all = await PartnersApi.GetListPagedAsync(
+                page: 1,
+                pageSize: int.MaxValue,
+                string.IsNullOrWhiteSpace(_search) ? null : _search,
+                string.IsNullOrWhiteSpace(_type) ? null : _type);
+
+            var headers = new[] { "코드", "업체명", "유형", "등급", "여신한도", "잔액", "미수금", "연체일수", "사용" };
+
+            var rows = all.Items.Select(p =>
+            {
+                var aging = GetAging(p.PartnerId);
+                var overdue = aging is not null && aging.TotalUnpaid > 0 ? AgingDays(aging) : (int?)null;
+                return (IReadOnlyList<object?>)new object?[]
+                {
+                    p.PartnerCode,
+                    p.PartnerName,
+                    p.PartnerType,
+                    p.PriceGrade,
+                    p.CreditLimit,
+                    p.Balance,
+                    aging?.TotalUnpaid,
+                    overdue,
+                    p.IsActive ? "사용" : "미사용"
+                };
+            }).ToList();
+
+            await GridExport.ExportExcelAsync("업체 마스터", headers, rows, BuildExportSubtitle(all.TotalCount));
+        }
+        catch (Exception ex)
+        {
+            // 헌법 #15 — 침묵하지 않는다.
+            Console.Error.WriteLine("[Partners] 엑셀 내보내기 실패: " + ex.Message);
+            Snackbar.Add("엑셀 파일을 만들지 못했습니다. 잠시 후 다시 시도해 주세요.", Severity.Warning);
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    /// <summary>무엇을 뽑은 자료인지 파일만 봐도 알게 한다(조회 조건을 부제로).</summary>
+    private string BuildExportSubtitle(int total)
+    {
+        var parts = new List<string>();
+        if (!string.IsNullOrWhiteSpace(_search)) parts.Add($"검색: {_search}");
+        if (!string.IsNullOrWhiteSpace(_type)) parts.Add($"유형: {_type}");
+        parts.Add($"총 {total:N0}건");
+        return string.Join(" · ", parts);
+    }
     /// <summary>화면을 인쇄한다.</summary>
     private async Task PrintAsync() { await Js.InvokeVoidAsync("print"); }
 

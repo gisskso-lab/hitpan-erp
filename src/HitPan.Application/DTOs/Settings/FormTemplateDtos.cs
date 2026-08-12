@@ -20,6 +20,20 @@ public class FormTemplateDto
     public bool ShowCompanyLogo { get; set; } = true;
     public bool ShowCompanySeal { get; set; } = true;
     public bool ShowBorder { get; set; } = true;
+
+    /// <summary>
+    /// 한 번 인쇄할 때 누구 몫을 찍나 (DB-90, 사장님 지시 2026-08-11).
+    /// both=공급자+공급받는자 2장 / recipient=공급받는자만 / supplier=공급자만.
+    /// </summary>
+    /// <remarks>
+    /// paper_mode(어떤 <b>종이</b>) · style_key(어떤 <b>모양</b>) 와 다른 축이다.
+    /// 세금계산서·계산서는 법정 2매라 both 가 기본이다(부가가치세법 시행규칙).
+    /// </remarks>
+    public string PrintCopyMode { get; set; } = "recipient";
+
+    /// <summary>디자인 스타일 (DB-90). 4종 확정 전까지 basic 단일.</summary>
+    public string StyleKey { get; set; } = "basic";
+
     public bool IsDefault { get; set; }
     public bool IsActive { get; set; } = true;
 }
@@ -48,6 +62,20 @@ public class CreateFormTemplateRequest
     public bool ShowCompanyLogo { get; set; } = true;
     public bool ShowCompanySeal { get; set; } = true;
     public bool ShowBorder { get; set; } = true;
+
+    /// <summary>
+    /// 한 번 인쇄할 때 누구 몫을 찍나 (DB-90, 사장님 지시 2026-08-11).
+    /// both=공급자+공급받는자 2장 / recipient=공급받는자만 / supplier=공급자만.
+    /// </summary>
+    /// <remarks>
+    /// paper_mode(어떤 <b>종이</b>) · style_key(어떤 <b>모양</b>) 와 다른 축이다.
+    /// 세금계산서·계산서는 법정 2매라 both 가 기본이다(부가가치세법 시행규칙).
+    /// </remarks>
+    public string PrintCopyMode { get; set; } = "recipient";
+
+    /// <summary>디자인 스타일 (DB-90). 4종 확정 전까지 basic 단일.</summary>
+    public string StyleKey { get; set; } = "basic";
+
     public bool IsDefault { get; set; }
 }
 

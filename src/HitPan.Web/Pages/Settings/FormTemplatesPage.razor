@@ -11,7 +11,7 @@
 <MudPaper Class="pa-4 mb-3" Elevation="0">
     <MudText Typo="Typo.h5" Class="mb-1">양식정보설정</MudText>
     <MudText Typo="Typo.body2" Class="mud-text-secondary">
-        견적·수주·거래명세서·발주·매입·반품 6대 양식의 인쇄·이메일·PDF·엑셀 양식을 설정합니다.
+        견적·수주·거래명세서·세금계산서·계산서·발주·매입·반품·입금표 등 10가지 양식의 인쇄·PDF·엑셀 모양을 설정합니다.
         <strong>순백지(plain)</strong>는 일반 A4에 테두리·로고 포함 인쇄, <strong>양식용지(preprint)</strong>는 시판 양식용지에 필드값만 좌표대로 인쇄합니다.
     </MudText>
 </MudPaper>
@@ -26,7 +26,7 @@
     </MudSelect>
     <MudButton Variant="Variant.Outlined" Class="ml-2" StartIcon="@Icons.Material.Filled.Refresh" OnClick="LoadAsync">새로고침</MudButton>
     <MudSpacer />
-    <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.AutoFixHigh" OnClick="SeedDefaultsAsync">기본 양식 시드(6건)</MudButton>
+    <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.AutoFixHigh" OnClick="SeedDefaultsAsync">기본 양식 만들기</MudButton>
     <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Add" Class="ml-2" OnClick="OpenCreateDialog">신규 양식</MudButton>
 </MudToolBar>
 
@@ -40,7 +40,8 @@ else
         <HeaderContent>
             <MudTh>양식 유형</MudTh>
             <MudTh>이름</MudTh>
-            <MudTh>용지 모드</MudTh>
+            <MudTh>용지 종류</MudTh>
+            <MudTh>인쇄 매수</MudTh>
             <MudTh>용지·방향</MudTh>
             <MudTh>여백(상·좌·우·하 mm)</MudTh>
             <MudTh>기본</MudTh>
@@ -51,13 +52,29 @@ else
             <MudTd>@FormTypes.GetValueOrDefault(context.FormType, context.FormType)</MudTd>
             <MudTd>@context.TemplateName</MudTd>
             <MudTd>
+                @* 개발용어(preprint·plain) 노출 제거 — 고객이 읽는 화면이다(헌법). *@
                 @if (context.PaperMode == "preprint")
                 {
-                    <MudChip T="string" Color="Color.Warning" Size="Size.Small">양식용지(preprint)</MudChip>
+                    <MudChip T="string" Color="Color.Warning" Size="Size.Small">양식용지</MudChip>
                 }
                 else
                 {
-                    <MudChip T="string" Color="Color.Default" Size="Size.Small">순백지(plain)</MudChip>
+                    <MudChip T="string" Color="Color.Default" Size="Size.Small">빈 A4</MudChip>
+                }
+            </MudTd>
+            <MudTd>
+                @* 법정 2매(세금계산서·계산서)는 눈에 띄어야 한다 — 1장으로 바뀌면 위법이다. *@
+                @if (context.PrintCopyMode == "both")
+                {
+                    <MudChip T="string" Color="Color.Primary" Size="Size.Small">2장 (거래처+보관)</MudChip>
+                }
+                else if (context.PrintCopyMode == "supplier")
+                {
+                    <MudChip T="string" Color="Color.Default" Size="Size.Small">보관용만</MudChip>
+                }
+                else
+                {
+                    <MudChip T="string" Color="Color.Default" Size="Size.Small">거래처만</MudChip>
                 }
             </MudTd>
             <MudTd>@context.PaperSize · @(context.Orientation == "landscape" ? "가로" : "세로")</MudTd>
@@ -70,7 +87,7 @@ else
             </MudTd>
         </RowTemplate>
         <NoRecordsContent>
-            <MudText Typo="Typo.body2" Class="pa-4 mud-text-secondary">등록된 양식이 없습니다. 우측 상단 "기본 양식 시드(6건)" 버튼으로 시작하세요.</MudText>
+            <MudText Typo="Typo.body2" Class="pa-4 mud-text-secondary">등록된 양식이 없습니다. 우측 상단 [기본 양식 만들기] 를 누르면 바로 쓸 수 있는 양식이 만들어집니다.</MudText>
         </NoRecordsContent>
     </MudTable>
 }
@@ -85,7 +102,12 @@ else
         ["receipt"] = "매입명세서",
         ["purchase_return"] = "매입반품",
         ["sales_return"] = "판매반품",
-        ["tax_invoice"] = "세금계산서"
+        ["tax_invoice"] = "세금계산서",
+        // 사장님 결재 2026-08-11 — 10종 확장.
+        //   ⚠️ 서버(FormTemplateService.FormTypeNames)와 **같은 목록이어야 한다.**
+        //   한쪽만 늘리면 화면에 코드값(invoice_exempt)이 그대로 보인다.
+        ["invoice_exempt"] = "계산서",
+        ["payment_receipt"] = "입금표"
     };
 
     private List<FormTemplateDto> _all = new();
@@ -126,7 +148,7 @@ else
             var resp = await Http.PostAsync("api/settings/form-templates/seed-defaults", null);
             if (resp.IsSuccessStatusCode)
             {
-                Snackbar.Add("6대 양식 기본 템플릿이 등록되었습니다.", Severity.Success);
+                Snackbar.Add("기본 양식이 만들어졌습니다.", Severity.Success);
                 await LoadAsync();
             }
             else
@@ -194,6 +216,21 @@ else
         public bool ShowCompanyLogo { get; set; } = true;
         public bool ShowCompanySeal { get; set; } = true;
         public bool ShowBorder { get; set; } = true;
+
+        /// <summary>
+        /// 한 번 인쇄할 때 누구 몫을 찍나 (DB-90, 사장님 지시 2026-08-11).
+        /// both=거래처+보관용 2장 / recipient=거래처만 / supplier=보관용만.
+        /// </summary>
+        /// <remarks>
+        /// 세금계산서·계산서는 법정 2매라 서버가 both 로 세워 준다(부가가치세법 시행규칙).
+        /// ⚠️ 서버 DTO(HitPan.Application.DTOs.Settings.FormTemplateDto)와 이름이 같아야
+        /// JSON 이 매핑된다 — 다르면 값이 조용히 기본값으로 떨어진다.
+        /// </remarks>
+        public string PrintCopyMode { get; set; } = "recipient";
+
+        /// <summary>디자인 스타일 (DB-90). 4종 확정 전까지 basic 단일.</summary>
+        public string StyleKey { get; set; } = "basic";
+
         public bool IsDefault { get; set; }
         public bool IsActive { get; set; } = true;
     }
