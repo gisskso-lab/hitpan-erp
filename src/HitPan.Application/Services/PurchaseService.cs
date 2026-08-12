@@ -16,13 +16,17 @@ public class PurchaseService : IPurchaseService
     private readonly IAuditService _audit;
     private readonly IEventPublisher? _events;
 
-    public PurchaseService(IUnitOfWork unitOfWork, ICurrentTenant currentTenant, IDbConnection db, IAuditService audit, IEventPublisher? events = null)
+    // 작(2026-08-13) 단계2: 발주·매입 결재도 같은 결재함에 뜬다. 알림을 빼면 반쪽이 된다.
+    private readonly INotificationService? _notifier;
+
+    public PurchaseService(IUnitOfWork unitOfWork, ICurrentTenant currentTenant, IDbConnection db, IAuditService audit, IEventPublisher? events = null, INotificationService? notifier = null)
     {
         _unitOfWork = unitOfWork;
         _currentTenant = currentTenant;
         _db = db;
         _audit = audit;
         _events = events;
+        _notifier = notifier;
     }
 
     public async Task<string> CreateOrderAsync(CreatePurchaseOrderRequest request, CancellationToken ct = default)
@@ -475,7 +479,7 @@ public class PurchaseService : IPurchaseService
                 "receipt", receipt.ReceiptId, receipt.ReceiptNo,
                 $"매입명세서 확정: {receipt.ReceiptNo}",
                 receipt.TotalAmount + receipt.VatAmount,
-                receipt.TenantId, "system", "확정자", ct);
+                receipt.TenantId, "system", "확정자", ct, _notifier);
         }
         catch (Exception ex)
         {
@@ -1150,7 +1154,7 @@ public class PurchaseService : IPurchaseService
                 "purchase_return", returnId, returnNo,
                 $"매입반품 확정: {returnNo}",
                 totalAmount + vatAmount,
-                tenantId, "system", "확정자", ct);
+                tenantId, "system", "확정자", ct, _notifier);
         }
         catch (Exception ex)
         {

@@ -55,6 +55,10 @@ builder.Services.AddScoped<PermissionService>();
 builder.Services.AddScoped<UserService>();
 builder.Services.AddScoped<EmployeeService>();
 builder.Services.AddScoped<PositionService>();
+// 작(2026-08-13) 그룹웨어 단계2: 앱 내 결재 알림 수신기.
+// 🔴 화면 하나가 아니라 앱 전체에 떠야 하므로 레이아웃이 한 번만 연결한다.
+//    (WASM 에서 Scoped 는 앱 수명과 같다 — 주변 등록과 같은 수명을 쓴다.)
+builder.Services.AddScoped<NotificationClient>();
 builder.Services.AddScoped<ApprovalLineService>();
 builder.Services.AddScoped<BillingService>();
 builder.Services.AddScoped<BackupService>();

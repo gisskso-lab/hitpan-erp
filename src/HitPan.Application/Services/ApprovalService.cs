@@ -57,10 +57,19 @@ public class ApprovalService : IApprovalService
 
     private readonly IAuditService _audit;
 
-    public ApprovalService(IDbConnection db, IAuditService audit)
+    // 작(2026-08-13) 단계2, 검증팀 P0-1 봉합: 결재 알림.
+    // 🔴 처음에는 자동 트리거(ApprovalTriggerHelper)에만 알림을 붙였다. 그런데 결재가 도는 경로는
+    //    셋이다 — ①자동 트리거 ②수동 상신(CreateApprovalAsync) ③승인 후 다음 결재자(ProcessAsync).
+    //    ②③이 비어 있으면 1단계 결재자만 알림을 받고 2·3단계는 아무 신호도 못 받는다.
+    //    사이드바 뱃지가 최초 1회 조회뿐이라(이 작업의 출발점) 새로고침 전엔 아무도 모른다
+    //    ⇒ 결재선 2단 이상 고객사에서 첫 단계 이후 결재가 조용히 멈춘다(헌법 #20).
+    private readonly INotificationService? _notifier;
+
+    public ApprovalService(IDbConnection db, IAuditService audit, INotificationService? notifier = null)
     {
         _db = db;
         _audit = audit;
+        _notifier = notifier;
     }
 
     // ═══════════════════════════════════════════
@@ -320,6 +329,17 @@ public class ApprovalService : IApprovalService
             throw;
         }
 
+        // 작(2026-08-13) 검증팀 P0-1 봉합: 수동 상신 경로에도 알림을 붙인다.
+        // 🔴 자동승인된 건은 보내지 않는다 — 결재할 사람이 없는데 "결재가 올라왔습니다" 가 뜨면
+        //    눌러 들어가도 대기함이 비어 있어 고객이 헛걸음한다.
+        // 알림 실패가 이미 커밋된 결재를 되돌리면 안 되므로 트랜잭션 밖에서 부른다.
+        if (_notifier is not null && status == "pending")
+        {
+            await ApprovalTriggerHelper.NotifyApproverAsync(
+                _db, request.DocType, tenantId, request.Title, seqNo: 1, _notifier, ct)
+                .ConfigureAwait(false);
+        }
+
         return approvalId;
     }
 
@@ -446,9 +466,10 @@ public class ApprovalService : IApprovalService
         await EnsureOpenAsync(ct);
 
         // 현재 문서 조회 (RefId 추가 — NEW-A1: doc_type='leave' 최종처리 시 원본 leave_requests 동기화용)
-        var doc = await _db.QueryFirstOrDefaultAsync<(string Status, int CurrentSeq, int TotalLines, string DocType, string RefId)>(
+        // 작(2026-08-13) 단계2: Title 추가 — 다음 결재자 알림 본문에 "무엇에 대한 결재인가" 를 담는다.
+        var doc = await _db.QueryFirstOrDefaultAsync<(string Status, int CurrentSeq, int TotalLines, string DocType, string RefId, string Title)>(
             new CommandDefinition(
-                "SELECT status AS Status, current_seq AS CurrentSeq, total_lines AS TotalLines, doc_type AS DocType, ref_id AS RefId FROM approval_documents WHERE approval_id = @ApprovalId AND tenant_id = @TenantId",
+                "SELECT status AS Status, current_seq AS CurrentSeq, total_lines AS TotalLines, doc_type AS DocType, ref_id AS RefId, title AS Title FROM approval_documents WHERE approval_id = @ApprovalId AND tenant_id = @TenantId",
                 new { ApprovalId = approvalId, TenantId = tenantId }, cancellationToken: ct));
 
         // 봉합 (2026-06-20, APPR-02): 문서 미존재(QueryFirstOrDefault → default 튜플, Status=null)를
@@ -595,6 +616,27 @@ public class ApprovalService : IApprovalService
             var afterJson = $"{{\"action\":\"{request.Action}\",\"seq\":{doc.CurrentSeq},\"approver\":\"{employeeName}\"}}";
             await _audit.LogAsync("state_change", "approval", approvalId,
                 afterJson: afterJson, reason: request.Comment, ct: ct);
+
+            // 🔴 작(2026-08-13) 검증팀 P0-1 봉합: 다음 결재자에게 알린다.
+            //
+            // 이 자리가 빠져 있으면 1단계 결재자만 알림을 받고 2·3단계는 아무 신호도 못 받는다.
+            // 사이드바 뱃지는 최초 1회 조회뿐이라(이 작업의 출발점) 새로고침 전엔 아무도 모른다
+            // ⇒ 결재선이 2단 이상인 고객사에서 첫 단계 이후 결재가 조용히 멈춘다(헌법 #20).
+            //
+            // 중간 승인일 때만 보낸다:
+            //  - 반려면 흐름이 끝났으니 다음 결재자가 없다
+            //  - 최종 승인(current_seq >= total_lines)도 다음이 없다
+            // current_seq 는 위에서 +1 됐으므로 다음 단계 번호는 doc.CurrentSeq + 1 이다.
+            //
+            // 알림 실패가 이미 커밋된 결재를 되돌리면 안 되므로 트랜잭션 밖에서 부른다.
+            if (_notifier is not null
+                && request.Action == "approved"
+                && doc.CurrentSeq < doc.TotalLines)
+            {
+                await ApprovalTriggerHelper.NotifyApproverAsync(
+                    _db, doc.DocType, tenantId, doc.Title ?? string.Empty,
+                    seqNo: doc.CurrentSeq + 1, _notifier, ct).ConfigureAwait(false);
+            }
         }
         catch (Exception)
         {

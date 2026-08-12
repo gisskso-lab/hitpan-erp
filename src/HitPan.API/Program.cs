@@ -347,6 +347,11 @@ builder.Services.AddSwaggerWithJwt();
 builder.Services.AddSignalR();
 builder.Services.AddSingleton<IMigrationProgressService, MigrationProgressService>();
 
+// 작(2026-08-13) 그룹웨어 단계2: 앱 내 결재 알림.
+// 김삼성 상무 조언 1순위 — "'결재가 올라왔습니다' 알림부터. 그러면 직원이 메신저를 켤 이유가 생긴다."
+// 배관(SignalR)은 위 마이그 진행률용으로 이미 검증돼 있어 패턴만 복제한다.
+builder.Services.AddSingleton<INotificationService, SignalRNotificationService>();
+
 builder.Services.AddCors(options =>
 {
     options.AddPolicy("BlazorWasmDev", policy =>
@@ -533,6 +538,9 @@ app.UseMiddleware<IdempotencyMiddleware>();
 app.MapControllers();
 // 정공법 CODE-01 (2026-05-14): 마이그 진행률 Hub.
 app.MapHub<MigrationProgressHub>("/hubs/migration");
+// 작(2026-08-13) 그룹웨어 단계2: 앱 내 알림 Hub.
+// 🔴 이 줄이 빠지면 서비스·허브를 다 만들어도 연결 자체가 안 된다.
+app.MapHub<NotificationHub>("/hubs/notify");
 
 
 if (hasBlazor)

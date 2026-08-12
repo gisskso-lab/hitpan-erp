@@ -1,0 +1,135 @@
+@using HitPan.Web.Models
+@using HitPan.Web.Services
+@implements IDisposable
+@inject NotificationClient Notify
+@inject NavigationManager Nav
+@inject ISnackbar Snackbar
+
+@* 작(2026-08-13) 그룹웨어 단계2 — 앱 내 알림.
+
+   사장님: "히트판ERP내 알림되도록(인스타나 페이스북처럼)"
+   김삼성 상무: "'결재가 올라왔습니다' 알림부터 붙이세요. 그러면 직원이 메신저를 켤 이유가 생깁니다."
+
+   봉합 전에는 사이드바 결재 뱃지가 최초 1회 조회뿐이라, 결재가 올라와도
+   새로고침 전에는 아무도 몰랐다.
+
+   🔴 AI 챗봇과 아이콘·자리를 뚜렷이 가른다.
+      AI 챗봇(왼쪽·로봇)은 대화를 외부(클로드·챗GPT·제미나이)로 보내고,
+      이 알림(오른쪽·종)은 회사 안에서만 돈다. 둘이 비슷해 보이면
+      사내 내용이 외부로 나가는 오해·사고가 생긴다(헌법 #18·#22). *@
+
+<MudMenu Dense="true" AnchorOrigin="Origin.BottomRight" TransformOrigin="Origin.TopRight"
+         ActivationEvent="@MouseEvent.LeftClick">
+    <ActivatorContent>
+        <MudBadge Content="@Notify.UnreadCount" Color="Color.Error" Overlap="true"
+                  Visible="@(Notify.UnreadCount > 0)" Bordered="true">
+            <MudIconButton Icon="@Icons.Material.Outlined.Notifications"
+                           Color="Color.Default" Size="Size.Medium"
+                           aria-label="알림" />
+        </MudBadge>
+    </ActivatorContent>
+    <ChildContent>
+        <div style="min-width:300px;max-width:380px">
+            <div class="d-flex align-center justify-space-between px-4 py-2">
+                <MudText Typo="Typo.subtitle2" Style="font-weight:700">알림</MudText>
+                @if (Notify.Recent.Count > 0)
+                {
+                    <MudButton Size="Size.Small" Variant="Variant.Text"
+                               OnClick="MarkAllRead">모두 읽음</MudButton>
+                }
+            </div>
+            <MudDivider />
+
+            @if (Notify.Recent.Count == 0)
+            {
+                <div class="px-4 py-6" style="text-align:center">
+                    <MudText Typo="Typo.body2" Style="color:var(--mud-palette-text-secondary)">
+                        새 알림이 없습니다.
+                    </MudText>
+                </div>
+            }
+            else
+            {
+                @foreach (var n in Notify.Recent.Take(10))
+                {
+                    <MudMenuItem OnClick="@(() => Open(n))">
+                        <div class="d-flex align-start gap-2" style="padding:2px 0">
+                            <MudIcon Icon="@IconFor(n.Type)" Size="Size.Small"
+                                     Color="@(n.IsRead ? Color.Default : Color.Primary)" />
+                            <div>
+                                <MudText Typo="Typo.body2"
+                                         Style="@(n.IsRead ? "" : "font-weight:700")">@n.Title</MudText>
+                                @if (!string.IsNullOrWhiteSpace(n.Body))
+                                {
+                                    <MudText Typo="Typo.caption"
+                                             Style="color:var(--mud-palette-text-secondary)">@n.Body</MudText>
+                                }
+                            </div>
+                        </div>
+                    </MudMenuItem>
+                }
+            }
+        </div>
+    </ChildContent>
+</MudMenu>
+
+@code {
+    protected override async Task OnInitializedAsync()
+    {
+        Notify.OnNotification += OnNotified;
+
+        // 레이아웃이 뜰 때 한 번만 연결한다. 이미 연결돼 있으면 아무 일도 하지 않는다.
+        await Notify.StartAsync().ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// 알림이 오면 종 숫자를 갱신하고, 스낵바로도 한 번 띄운다.
+    /// 종만 바뀌면 화면을 보고 있어도 못 알아채기 때문이다.
+    /// </summary>
+    private void OnNotified(AppNotificationModel n)
+    {
+        InvokeAsync(() =>
+        {
+            Snackbar.Add(n.Title, Severity.Info, config =>
+            {
+                config.ShowCloseIcon = true;
+                config.VisibleStateDuration = 6000;
+                if (!string.IsNullOrWhiteSpace(n.Link))
+                {
+                    config.OnClick = _ =>
+                    {
+                        n.IsRead = true;
+                        Nav.NavigateTo(n.Link);
+                        return Task.CompletedTask;
+                    };
+                }
+            });
+
+            StateHasChanged();
+        });
+    }
+
+    private void Open(AppNotificationModel n)
+    {
+        n.IsRead = true;
+
+        if (!string.IsNullOrWhiteSpace(n.Link))
+        {
+            Nav.NavigateTo(n.Link);
+        }
+    }
+
+    private void MarkAllRead()
+    {
+        Notify.MarkAllRead();
+        StateHasChanged();
+    }
+
+    private static string IconFor(string type) => type switch
+    {
+        "approval_pending" => Icons.Material.Filled.HowToReg,
+        _ => Icons.Material.Filled.Notifications
+    };
+
+    public void Dispose() => Notify.OnNotification -= OnNotified;
+}

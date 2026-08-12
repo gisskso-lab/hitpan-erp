@@ -25,7 +25,9 @@ public class SalesService : ISalesService
         IDbConnection db,
         IPartnerService partnerService,
         IAuditService audit,
-        IServiceProvider services)
+        IServiceProvider services,
+        // 작(2026-08-13) 단계2: 견적·수주·거래명세서 결재도 같은 결재함에 뜬다.
+        INotificationService? notifier = null)
     {
         _unitOfWork = unitOfWork;
         _currentTenant = currentTenant;
@@ -33,7 +35,10 @@ public class SalesService : ISalesService
         _partnerService = partnerService;
         _audit = audit;
         _services = services;
+        _notifier = notifier;
     }
+
+    private readonly INotificationService? _notifier;
 
     public async Task<string> CreateOrderAsync(CreateSalesOrderRequest request, CancellationToken ct = default)
     {
@@ -584,7 +589,7 @@ public class SalesService : ISalesService
                 "delivery", delivery.DeliveryId, delivery.DeliveryNo,
                 $"거래명세서 확정: {delivery.DeliveryNo}",
                 delivery.TotalAmount + delivery.VatAmount,
-                delivery.TenantId, delivery.EmployeeId ?? "system", "확정자", ct);
+                delivery.TenantId, delivery.EmployeeId ?? "system", "확정자", ct, _notifier);
         }
         catch (Exception ex)
         {
@@ -2101,7 +2106,7 @@ public class SalesService : ISalesService
             await ApprovalTriggerHelper.TryCreateApprovalAsync(_db,
                 "sales_return", returnId, returnNo,
                 $"매출반품 확정: {returnNo}", totalAmount + vatAmount,
-                tenantId, "system", "확정자", ct);
+                tenantId, "system", "확정자", ct, _notifier);
         }
         catch (Exception ex)
         {
