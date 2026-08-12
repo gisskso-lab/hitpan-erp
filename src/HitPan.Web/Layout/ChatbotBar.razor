@@ -139,7 +139,9 @@
                     {
                         <div class="mt-1" style="color:var(--hitpan-warning)">
                             ⚠️ 토큰 소진 임박 —
-                            <a href="/settings/ai" @onclick="@(() => NavigateAndClose("/settings/ai"))" @onclick:preventDefault="true"
+                            @* 봉합 2026-08-12(20260812작1): 종전 "/settings/ai" 는 존재하지 않는 주소라
+                               누르면 404 였다. 실제 라우트는 AiAssistantPage.razor:1 의 "/settings/ai-assistant". *@
+                            <a href="/settings/ai-assistant" @onclick="@(() => NavigateAndClose("/settings/ai-assistant"))" @onclick:preventDefault="true"
                                style="color:var(--hitpan-primary);cursor:pointer">추가 구매 / 업그레이드</a>
                         </div>
                     }

@@ -176,6 +176,109 @@ public sealed class ChatbotService(HttpClient http, ILogger<ChatbotService> logg
         }
     }
 
+    // ═════════════════════════════════════════════════════════════════
+    // AI 연동 3사 확장 (2026-08-12 · 20260812작1 · 사장님 결재)
+    //   위 기존 메서드는 그대로 둔다(헌법 #1). 아래는 공급자를 명시하는 경로다.
+    // ═════════════════════════════════════════════════════════════════
+
+    /// <summary>지정 공급자의 연동 키를 저장한다(서버에서 AES-256 암호화).</summary>
+    public async Task<(bool ok, string? error)> SaveApiKeyAsync(
+        string providerId, string apiKey, CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(apiKey)) return (false, "연동 키를 입력해주세요.");
+        try
+        {
+            using var res = await http
+                .PutAsJsonAsync($"api/ai-settings/apikey/{providerId}", new { apiKey }, ct)
+                .ConfigureAwait(false);
+            if (res.IsSuccessStatusCode) return (true, null);
+
+            var body = await res.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
+            var reason = ExtractErrorMessage(body);
+            logger.LogWarning("연동 키 저장 실패 ({Status}): {Body}", (int)res.StatusCode, body);
+            return (false, reason);
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "연동 키 저장 실패");
+            return (false, "연결이 원활하지 않아 저장하지 못했습니다.");
+        }
+    }
+
+    /// <summary>지정 공급자의 연동 키만 삭제한다. 다른 공급자 키는 보존된다.</summary>
+    public async Task<bool> DeleteApiKeyAsync(string providerId, CancellationToken ct = default)
+    {
+        try
+        {
+            using var res = await http
+                .DeleteAsync($"api/ai-settings/apikey/{providerId}", ct).ConfigureAwait(false);
+            if (!res.IsSuccessStatusCode)
+            {
+                var body = await res.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
+                logger.LogWarning("연동 키 삭제 실패 ({Status}): {Body}", (int)res.StatusCode, body);
+            }
+            return res.IsSuccessStatusCode;
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "연동 키 삭제 실패");
+            return false;
+        }
+    }
+
+    /// <summary>지금 사용할 공급자를 바꾼다(키는 건드리지 않는다).</summary>
+    public async Task<bool> SetActiveProviderAsync(string providerId, CancellationToken ct = default)
+    {
+        try
+        {
+            using var res = await http
+                .PutAsJsonAsync($"api/ai-settings/provider/{providerId}", new { }, ct)
+                .ConfigureAwait(false);
+            if (!res.IsSuccessStatusCode)
+            {
+                var body = await res.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
+                logger.LogWarning("공급자 변경 실패 ({Status}): {Body}", (int)res.StatusCode, body);
+            }
+            return res.IsSuccessStatusCode;
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "공급자 변경 실패");
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// 🔴 지정 공급자에 <b>실제로 연결해 본다</b>.
+    /// 서버가 실패해도 200 + Succeeded=false 로 사유를 담아 보낸다.
+    /// null 을 돌려주는 경우는 통신 자체가 안 된 것 — 화면이 "확인하지 못했다"로 구분해 안내한다.
+    /// </summary>
+    public async Task<AiConnectionCheckModel?> CheckConnectionAsync(
+        string providerId, CancellationToken ct = default)
+    {
+        try
+        {
+            using var res = await http
+                .PostAsJsonAsync($"api/ai-settings/check/{providerId}", new { }, ct)
+                .ConfigureAwait(false);
+
+            if (!res.IsSuccessStatusCode)
+            {
+                var body = await res.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
+                logger.LogWarning("연결 확인 실패 ({Status}): {Body}", (int)res.StatusCode, body);
+                return null;
+            }
+
+            return await res.Content.ReadFromJsonAsync<AiConnectionCheckModel>(cancellationToken: ct)
+                .ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "연결 확인 실패");
+            return null;
+        }
+    }
+
     /// <summary>
     /// 서버가 <c>{ "error": "…" }</c> 형태로 보낸 거절 사유를 꺼낸다.
     /// </summary>
