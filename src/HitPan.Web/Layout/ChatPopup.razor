@@ -347,12 +347,15 @@
     {
         var url = refType switch
         {
-            "approval" => $"/approval/detail/{refId}",
+            // 🔴 봉합 (2026-08-13): /approval/detail/{id} 는 없는 화면이었다(404).
+            //    결재는 목록 3개뿐이고 상세는 목록 안에서 연다.
+            "approval" => "/approval/pending",
             "leave"    => "/hr/leave-status",
             "expense"  => "/hr/expense-status",
             "payroll"  => "/hr/payroll",
             "contract" => "/hr/labor-contracts",
-            "report"   => "/hr/work-report",
+            // 봉합 (2026-08-13): /hr/work-report 로 적어 404 였다. 실제 라우트는 /hr/reports.
+            "report"   => "/hr/reports",
             _ => string.Empty
         };
 

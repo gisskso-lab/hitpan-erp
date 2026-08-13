@@ -122,6 +122,76 @@ public sealed class ChatDocumentColumnGuardTests
     }
 
     /// <summary>
+    /// 🔴 문서 링크가 <b>실제로 있는 화면</b>으로 가는지 본다. 작(2026-08-13 봉합).
+    /// </summary>
+    /// <remarks>
+    /// 코드리뷰가 잡은 결함 — 업무보고서 링크를 <c>/hr/work-report</c> 로 적었는데
+    /// 실제 라우트는 <c>/hr/reports</c> 였다. <b>누르면 404</b> 다.
+    /// <para>
+    /// 빌드도 시험도 이걸 못 잡는다 — 그냥 문자열이기 때문이다.
+    /// ⇒ 링크 주소를 <b>화면의 @page 선언과 대조</b>한다.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public void 문서_링크가_있는_화면으로_간다()
+    {
+        var root = RepoRoot();
+        var pagesDir = Path.Combine(root, "src", "HitPan.Web", "Pages");
+
+        // 화면들이 선언한 라우트를 모두 모은다.
+        var routes = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var file in Directory.EnumerateFiles(pagesDir, "*.razor", SearchOption.AllDirectories))
+        {
+            foreach (Match m in Regex.Matches(File.ReadAllText(file), @"@page\s+""([^""]+)"""))
+            {
+                // 파라미터 자리는 걷어낸다: /chat/{RoomId} → /chat
+                var route = Regex.Replace(m.Groups[1].Value, @"/\{[^}]+\}", string.Empty);
+                routes.Add(route);
+            }
+        }
+
+        Assert.True(routes.Count > 20, $"화면 라우트를 모아야 한다(찾은 것 {routes.Count}개)");
+
+        // 메신저 두 곳(페이지·팝업)의 문서 링크를 검사한다.
+        string[] sources =
+        {
+            Path.Combine(root, "src", "HitPan.Web", "Pages", "HR", "ChatPage.razor"),
+            Path.Combine(root, "src", "HitPan.Web", "Layout", "ChatPopup.razor")
+        };
+
+        foreach (var source in sources)
+        {
+            // 주석은 걷어낸다 — 봉합 기록에 옛 주소가 남아 있고, 그건 되살아난 게 아니다.
+            var code = string.Join('\n', File.ReadAllLines(source).Where(l =>
+            {
+                var t = l.TrimStart();
+                return !t.StartsWith("//", StringComparison.Ordinal)
+                    && !t.StartsWith("@*", StringComparison.Ordinal);
+            }));
+
+            // "approval" => "/approval/pending" 같은 줄에서 주소만 뽑는다.
+            // 🔴 주소는 반드시 '/' 로 시작한다 — 주석 속 한글이 걸리지 않게 못 박는다.
+            foreach (Match m in Regex.Matches(code, @"""(approval|leave|expense|payroll|contract|report)""\s*=>\s*[$]?""(/[^""]*)"""))
+            {
+                var refType = m.Groups[1].Value;
+                var url = m.Groups[2].Value;
+
+                // 보간 자리를 걷어낸 앞부분만 본다: /approval/detail/{refId} → /approval/detail
+                var basePath = Regex.Replace(url, @"\{[^}]*\}", string.Empty).TrimEnd('/');
+                if (string.IsNullOrEmpty(basePath)) continue;
+
+                var exists = routes.Contains(basePath)
+                          || routes.Any(r => basePath.StartsWith(r, StringComparison.OrdinalIgnoreCase)
+                                          && r.Length > 1);
+
+                Assert.True(exists,
+                    $"{Path.GetFileName(source)} 의 '{refType}' 링크가 '{url}' 로 가는데 " +
+                    $"그런 화면이 없다 — 누르면 404 다.");
+            }
+        }
+    }
+
+    /// <summary>
     /// 🔴 문서 목록은 <b>내 것만</b> 나와야 한다 — 이 목록이 권한 판정도 겸한다.
     /// </summary>
     /// <remarks>
