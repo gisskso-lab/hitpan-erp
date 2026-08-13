@@ -86,6 +86,19 @@
             caches.keys().then(keys => keys.forEach(k => caches.delete(k)));
         }
     </script>
+    <!-- 🔴 작(2026-08-14) — 팝업창(메신저)에 로그인 상태를 물려준다.
+         사장님 지적: "히트판메신저 팝업은 여전히 안됨", "첫 로딩화면은 뜨는데, 빈 화면이 나옴"
+         진범: 토큰이 sessionStorage 인데 **sessionStorage 는 창마다 따로다.**
+               window.open 으로 연 창은 자기만의 빈 저장소를 갖는다 ⇒ 토큰을 못 찾아
+               [Authorize] 에 걸려 아무것도 안 그렸다(로딩 화면까지만 뜨는 이유).
+         🔴 **Blazor 시작 전에** 불러야 한다 — 늦으면 이미 로그인 화면으로 튕긴 뒤다.
+            순수 JS 라 동기로 즉시 끝난다(부팅을 늦추지 않는다).
+         ⚠️ 부모 창이 없으면(주소를 직접 친 경우) 아무 일도 안 한다. -->
+    <script>
+        if (window.hitpanStorage_inheritFromOpener) {
+            window.hitpanStorage_inheritFromOpener();
+        }
+    </script>
     <script src="_framework/blazor.webassembly.js"></script>
     <script src="_content/MudBlazor/MudBlazor.min.js"></script>
     <!-- 카카오 우편번호 API -->
