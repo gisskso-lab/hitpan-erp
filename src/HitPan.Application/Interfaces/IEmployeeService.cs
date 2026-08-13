@@ -7,7 +7,12 @@ namespace HitPan.Application.Interfaces;
 /// </summary>
 public interface IEmployeeService
 {
-    Task<List<EmployeeListDto>> GetListAsync(string tenantId, CancellationToken ct = default);
+    /// <summary>
+    /// 사원 목록. <b>기본은 재직자만</b> — 퇴사자는 감춘다(사장님 지시 2026-08-14).
+    /// </summary>
+    /// <param name="includeResigned">퇴사자까지 볼지 여부. 화면의 "퇴사자 포함" 스위치가 정한다.</param>
+    Task<List<EmployeeListDto>> GetListAsync(
+        string tenantId, bool includeResigned = false, CancellationToken ct = default);
 
     // 봉합 (2026-06-22, 10차 P1-1): 부서 드롭다운용 목록 조회 (departments 마스터, 읽기 전용).
     Task<List<DepartmentDto>> GetDepartmentsAsync(string tenantId, CancellationToken ct = default);

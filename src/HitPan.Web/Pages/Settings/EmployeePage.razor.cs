@@ -20,6 +20,17 @@ public partial class EmployeePage : ComponentBase
     [Inject] private IDialogService DialogService { get; set; } = default!;
 
     private bool _loading = true;
+
+    /// <summary>
+    /// 퇴사자까지 함께 볼지. 화면의 <b>"퇴사자 포함"</b> 스위치가 정한다. 작(2026-08-14).
+    /// </summary>
+    /// <remarks>
+    /// 사장님 지시: <i>"사원관리 메뉴에서 퇴사직원 숨김처리 될 수 있도록"</i>
+    /// 기본은 <c>false</c>(재직자만) — 평소 업무에는 퇴사자가 끼면 방해가 된다.
+    /// 다만 켤 수 있어야 한다. 경력증명서·지난 급여·잘못 누른 퇴사를 되돌릴 자리다.
+    /// </remarks>
+    private bool _includeResigned;
+
     private List<EmployeeListItemModel> _employees = new();
     // 봉합 (2026-06-22, 10차 P1-1): 부서 드롭다운 데이터. 사원 부서는 dept_id 로 저장되므로 선택지를 채운다.
     private List<DepartmentModel> _departments = new();
@@ -200,11 +211,39 @@ public partial class EmployeePage : ComponentBase
     }
 
     /// <summary>
+    /// "퇴사자 포함" 스위치를 바꾸면 목록을 다시 받아온다. 작(2026-08-14).
+    /// </summary>
+    /// <remarks>
+    /// 🔴 화면에서 거르지 않고 <b>서버에 다시 물어본다</b> — 퇴사자는 서버가 이미 걸러서
+    /// 안 보내주기 때문이다. 받아온 것 중에서 고르는 방식으로는 없는 사람을 못 보여준다.
+    /// </remarks>
+    private async Task OnIncludeResignedChangedAsync(bool value)
+    {
+        _includeResigned = value;
+
+        try
+        {
+            _employees = await EmployeeSvc.GetListAsync(_includeResigned).ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            // 헌법 #15 — 빈 catch 금지. 목록을 못 받으면 종전 목록을 그대로 둔다.
+            Console.Error.WriteLine($"[EmployeePage] 사원 목록 조회 실패: {ex.GetType().Name}: {ex.Message}");
+            Snackbar.Add("사원 목록을 불러오지 못했습니다. 잠시 후 다시 시도해 주세요.", Severity.Warning);
+        }
+
+        StateHasChanged();
+    }
+
+    /// <summary>
     /// 초기 진입/저장 후 공통 데이터를 재조회한다.
     /// </summary>
     private async Task ReloadAllAsync()
     {
-        _employees = await EmployeeSvc.GetListAsync().ConfigureAwait(false);
+        // 🔴 작(2026-08-14): 기본은 재직자만. "퇴사자 포함" 스위치를 켜면 함께 받아온다.
+        //   ⚠️ 인자를 안 넘기면 늘 재직자만 와서 **스위치를 켜도 아무 일이 안 일어난다.**
+        //     서버·DTO 를 다 뚫어놓고 이 한 줄을 안 바꾸면 사용자 눈엔 안 고쳐진 것이다.
+        _employees = await EmployeeSvc.GetListAsync(_includeResigned).ConfigureAwait(false);
         // 봉합 (2026-06-22, 10차 P1-1): 부서 선택지 로드 (읽기 전용 마스터).
         _departments = await EmployeeSvc.GetDepartmentsAsync().ConfigureAwait(false);
         // 작(2026-08-13) 단계4: 직급 선택지 로드.

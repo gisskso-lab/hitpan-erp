@@ -151,18 +151,39 @@ public sealed class AppDbContext : DbContext
 
     public string CurrentTenantId => _currentTenant.TenantId;
 
+    /// <summary>
+    /// 로그인 때 아이디로 계정을 찾는다. <b>여기가 로그인의 문이다.</b>
+    /// </summary>
+    /// <remarks>
+    /// 🔴 작(2026-08-14) — 사장님 지적: <i>"퇴사처리한 인원이 계정에 로그인 할 수 있다는 건데.
+    /// 계정은 죽여야지"</i>
+    /// <para>
+    /// 종전엔 <c>IsActive</c> 만 봤다. <b>지워진 계정이라도 활성 표시가 남아 있으면 로그인이 됐다.</b>
+    /// 퇴사 처리는 둘 다 끄지만, 지우기만 하고 활성을 안 끈 경로가 하나라도 있으면
+    /// 그 문으로 들어온다. <b>문을 막는 게 확실하다</b> — 지우는 쪽을 전부 믿지 않는다.
+    /// </para>
+    /// <para>
+    /// 두 조건은 성격이 다르다: <c>IsActive=0</c> 은 <b>잠시 막음</b>(휴직·정지),
+    /// <c>IsDeleted=1</c> 은 <b>없앤 것</b>. 어느 쪽이든 로그인은 안 된다.
+    /// </para>
+    /// </remarks>
     public async Task<User?> FindUserByEmailAsync(string email)
     {
         return await Users
             .IgnoreQueryFilters()
-            .FirstOrDefaultAsync(u => u.Email == email && u.IsActive == true);
+            .FirstOrDefaultAsync(u => u.Email == email && u.IsActive == true && !u.IsDeleted);
     }
 
+    /// <remarks>
+    /// 🔴 작(2026-08-14): <see cref="FindUserByEmailAsync"/> 와 같은 기준으로 막는다.
+    /// 이쪽은 토큰 갱신·본인 조회가 쓴다 — 여기만 열려 있으면
+    /// <b>이미 받아 둔 토큰으로 퇴사 후에도 계속 드나든다.</b>
+    /// </remarks>
     public async Task<User?> FindUserByIdAsync(string userId)
     {
         return await Users
             .IgnoreQueryFilters()
-            .FirstOrDefaultAsync(u => u.Id == userId && u.IsActive == true);
+            .FirstOrDefaultAsync(u => u.Id == userId && u.IsActive == true && !u.IsDeleted);
     }
 
     // EF Core가 내부에서 호출하는 정식 시그니처 (acceptAllChangesOnSuccess + CancellationToken).

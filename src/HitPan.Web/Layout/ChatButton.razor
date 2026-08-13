@@ -49,10 +49,45 @@
         await RefreshAsync();
     }
 
-    private async void OnNotified(Models.AppNotificationModel notification)
+    /// <summary>
+    /// 새 알림이 오면 배지를 다시 센다.
+    /// </summary>
+    /// <remarks>
+    /// 🔴 <b><c>async void</c> 를 쓰지 않는다</b> — 작(2026-08-14, 1.2.75 실사용 P0).
+    /// <para>
+    /// 사장님 지적: <i>"메신저 팝업 띄우면 브라우져화면아래 흰줄 새로고침 오류뜸"</i>
+    /// </para>
+    /// <para>
+    /// 종전엔 <c>async void</c> 였다. 거기서 난 예외는 <b>아무도 못 잡는다</b> —
+    /// Blazor 가 마지막에 받아 <c>index.html</c> 의 <c>blazor-error-ui</c>(화면 아래 흰 띠)를
+    /// 띄운다. 여기서 부르는 <see cref="RefreshAsync"/> 는 서버에 안 읽은 수를 물어보므로
+    /// 통신이 끊기거나 서버가 막으면(403) 예외가 난다 — <b>흔한 일이지 드문 일이 아니다.</b>
+    /// </para>
+    /// <para>
+    /// ⚠️ 같은 사고를 <c>ChatPage.razor</c> 에서 이미 한 번 겪고 고쳤는데
+    /// <b>여기는 같이 안 고쳤다.</b> 한 군데만 고치면 남은 자리에서 그대로 재발한다.
+    /// </para>
+    /// <para>
+    /// 배지를 못 세는 것은 <b>일을 막지 않는다</b> — 숫자가 잠깐 안 맞을 뿐이다.
+    /// 그것 때문에 화면 전체에 오류 띠를 띄우지 않는다.
+    /// </para>
+    /// </remarks>
+    private void OnNotified(Models.AppNotificationModel notification)
     {
         if (notification.Type is not ("chat_message" or "chat_approval")) return;
-        await InvokeAsync(RefreshAsync);
+
+        _ = InvokeAsync(async () =>
+        {
+            try
+            {
+                await RefreshAsync();
+            }
+            catch (Exception ex)
+            {
+                // 헌법 #15 — 빈 catch 금지. 배지만 못 세고 화면은 살려 둔다.
+                Console.Error.WriteLine($"[ChatButton] 안 읽은 수 갱신 실패: {ex.GetType().Name}: {ex.Message}");
+            }
+        });
     }
 
     /// <summary>
@@ -60,7 +95,17 @@
     /// </summary>
     public async Task RefreshAsync()
     {
-        _unread = await Chat.GetUnreadCountAsync();
+        try
+        {
+            _unread = await Chat.GetUnreadCountAsync();
+        }
+        catch (Exception ex)
+        {
+            // 🔴 작(2026-08-14): 여기서 터지면 부르는 쪽(상단바)까지 함께 죽어 흰 띠가 뜬다.
+            //   못 세면 종전 숫자를 그대로 둔다 — 0 으로 되돌리면 "읽었다"는 거짓말이 된다.
+            Console.Error.WriteLine($"[ChatButton] 안 읽은 수 조회 실패: {ex.GetType().Name}: {ex.Message}");
+        }
+
         StateHasChanged();
     }
 

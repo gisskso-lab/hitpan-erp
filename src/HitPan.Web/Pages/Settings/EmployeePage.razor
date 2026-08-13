@@ -150,6 +150,20 @@ else
             </MudToolBar>
 
             <MudPaper Elevation="0" Class="pa-2" Style="border:0.5px solid var(--mud-palette-lines-default);border-radius:12px">
+                @* 🔴 작(2026-08-14) — 사장님 지시: "사원관리 메뉴에서 퇴사직원 숨김처리 될 수 있도록"
+                   기본은 재직자만 보인다. 다만 **아예 못 보게 하면 안 된다** —
+                   퇴사자 경력증명서를 떼거나, 지난 급여를 보거나, 잘못 누른 퇴사를 되돌릴 일이 있다.
+                   그래서 **감추되 켜서 볼 수 있게** 한다(반자동 — 자동으로 정해 주되 사람이 바꾼다).
+                   ⚠️ 이 스위치가 없으면 한 번 퇴사 처리한 직원을 화면에서 영영 못 찾는다. *@
+                <div class="d-flex align-center justify-end pb-2">
+                    <MudSwitch T="bool" Value="_includeResigned" ValueChanged="OnIncludeResignedChangedAsync"
+                               Color="Color.Primary" Size="Size.Small"
+                               Label="퇴사자 포함" />
+                    <MudTooltip Text="켜면 퇴사한 직원도 함께 보입니다. 경력증명서·지난 급여 확인이나 잘못 누른 퇴사를 되돌릴 때 쓰세요.">
+                        <MudIcon Icon="@Icons.Material.Outlined.HelpOutline" Size="Size.Small"
+                                 Style="color:var(--hp-text-tertiary);margin-left:4px" />
+                    </MudTooltip>
+                </div>
                 @* 작20260429 연차 관리 (사장님 결재): 그리드에 부여·사용·잔여 + 인라인 편집·저장 *@
                 <MudTable Items="_employees" Dense="true" Hover="true">
                     <HeaderContent>
@@ -200,8 +214,15 @@ else
                                            OnClick="@(() => SaveAnnualLeaveAsync(context))" />
                         </MudTd>
                         <MudTd DataLabel="상태">
-                            <MudChip T="string" Size="Size.Small" Color="@(context.IsActive ? Color.Success : Color.Default)">
-                                @(context.IsActive ? "재직" : "비활성")
+                            @* 🔴 작(2026-08-14): 퇴사·휴직·연차를 갈라 보여준다.
+                               종전엔 "재직/비활성" 둘뿐이라 **퇴사자와 휴직자가 같은 말**이었다.
+                               인사 담당자에게 "비활성" 은 아무 정보도 아니다 — 무슨 일이 있었는지를 알려준다. *@
+                            <MudChip T="string" Size="Size.Small"
+                                     Color="@(context.IsResigned ? Color.Error
+                                            : !context.IsActive ? Color.Default
+                                            : context.WorkStatus is "absence" or "leave" ? Color.Warning
+                                            : Color.Success)">
+                                @context.StatusLabel
                             </MudChip>
                         </MudTd>
                     </RowTemplate>
