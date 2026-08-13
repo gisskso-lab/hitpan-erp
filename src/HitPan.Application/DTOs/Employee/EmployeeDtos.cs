@@ -17,6 +17,20 @@ public sealed class EmployeeListDto
     public bool IsActive { get; set; }
     public bool HasUserAccount { get; set; }
 
+    // ── 재직 상태 (작 2026-08-14, 사장님 지시 "퇴사직원 숨김처리") ──
+    // 🔴 종전엔 IsActive 하나뿐이라 화면이 **퇴사·휴직·단순비활성을 구분할 수 없었다.**
+    //    셋 다 "비활성" 한 마디로 뭉개져, 퇴사자인지 휴직자인지 보고도 알 수 없었다.
+    //    ⇒ 사실을 나눠 내려 준다. 어떻게 보여줄지는 화면이 정한다.
+
+    /// <summary>퇴사자인가. 퇴사 처리 시 <c>is_resigned=1</c> 이 함께 기록된다.</summary>
+    public bool IsResigned { get; set; }
+
+    /// <summary>퇴사일. 소급 퇴사가 가능하므로 오늘과 다를 수 있다.</summary>
+    public DateTime? ResignDate { get; set; }
+
+    /// <summary><c>active</c>(재직) · <c>absence</c>(휴직) · <c>leave</c>(연차) — 재직 중의 세부 상태.</summary>
+    public string? WorkStatus { get; set; }
+
     // 작20260429 연차 관리 (사장님 결재)
     public decimal AnnualLeaveTotal { get; set; }
     public decimal AnnualLeaveUsed { get; set; }

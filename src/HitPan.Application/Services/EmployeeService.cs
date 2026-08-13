@@ -23,7 +23,38 @@ public sealed class EmployeeService : IEmployeeService
         _audit = audit;
     }
 
-    public async Task<List<EmployeeListDto>> GetListAsync(string tenantId, CancellationToken ct = default)
+    /// <summary>
+    /// 사원 목록을 조회한다. <b>기본은 재직자만</b>이다.
+    /// </summary>
+    /// <param name="includeResigned">
+    /// 퇴사자까지 함께 볼지 여부. 화면의 <b>"퇴사자 포함"</b> 스위치가 이 값을 정한다.
+    /// </param>
+    /// <remarks>
+    /// 🔴 작(2026-08-14) — 사장님 지시: <i>"사원관리 메뉴에서 퇴사직원 숨김처리 될 수 있도록"</i>
+    /// <para>
+    /// ■ 종전 (실측): <c>WHERE e.tenant_id = @TenantId</c> 로 끝이었다. 상태를 <b>전혀 안 걸렀다.</b>
+    ///   퇴사 처리는 <c>is_active=0</c> 으로 정확히 기록하는데 <b>읽는 쪽이 안 거르니</b>
+    ///   목록에 그대로 남았다 — 사장님이 <i>"퇴사처리해도 사원관리에 남아있음"</i> 이라 하신 자리다.
+    ///   같은 표를 읽는 급여·결재·연차·휴직은 전부 <c>is_active=1</c> 을 걸고 있었다.
+    ///   <b>사원관리 하나만 빠져 있었다.</b>
+    /// </para>
+    /// <para>
+    /// ■ 왜 지우지 않고 감추나 — 퇴사자를 <b>아예 못 보게 하면 안 된다.</b>
+    ///   퇴사자 경력증명서를 떼거나, 지난 급여를 확인하거나, 잘못 누른 퇴사를 되돌릴 일이 있다.
+    ///   그래서 <b>기본은 감추고, 보고 싶을 때 켠다</b>(반자동 원칙 — 자동으로 정해 주되 사람이 바꾼다).
+    /// </para>
+    /// <para>
+    /// 🔴 <c>is_active</c> 로 거른다 — <c>is_resigned</c> 가 아니다. 실측하니 두 칸이 같은 사실을
+    ///   적고 있는데(퇴사 시 둘 다 바뀐다), <c>is_resigned</c> 는 <b>읽는 코드가 전 코드에 0건</b>인
+    ///   레거시 이관용 쓰기 전용 칸이다. 다른 화면들이 모두 쓰는 칸에 맞춘다.
+    ///   대신 <c>IsResigned</c> 를 함께 내려 준다 — 화면이 <b>휴직·비활성과 퇴사를 갈라</b> 보여줘야
+    ///   하기 때문이다(종전엔 둘 다 "비활성" 한 마디로 뭉개졌다).
+    /// </para>
+    /// </remarks>
+    public async Task<List<EmployeeListDto>> GetListAsync(
+        string tenantId,
+        bool includeResigned = false,
+        CancellationToken ct = default)
     {
         await EnsureOpenAsync(ct).ConfigureAwait(false);
 
@@ -39,6 +70,9 @@ public sealed class EmployeeService : IEmployeeService
               e.email AS Email,
               e.role AS Role,
               e.is_active AS IsActive,
+              e.is_resigned AS IsResigned,
+              e.resign_date AS ResignDate,
+              e.work_status AS WorkStatus,
               e.annual_leave_total AS AnnualLeaveTotal,
               e.annual_leave_used  AS AnnualLeaveUsed,
               CASE WHEN e.user_id IS NULL OR e.user_id = '' THEN 0 ELSE 1 END AS HasUserAccount
@@ -47,12 +81,13 @@ public sealed class EmployeeService : IEmployeeService
               ON d.dept_id = e.dept_id
              AND d.tenant_id = e.tenant_id
             WHERE e.tenant_id = @TenantId
-            ORDER BY e.emp_no
+              AND (@IncludeResigned = 1 OR e.is_active = 1)
+            ORDER BY e.is_active DESC, e.emp_no
             """;
 
         var rows = await _db.QueryAsync<EmployeeListDto>(new CommandDefinition(
             sql,
-            new { TenantId = tenantId },
+            new { TenantId = tenantId, IncludeResigned = includeResigned ? 1 : 0 },
             cancellationToken: ct)).ConfigureAwait(false);
 
         return rows.ToList();
@@ -545,18 +580,50 @@ public sealed class EmployeeService : IEmployeeService
             //      로그인이 잠겨 고객사 업무가 전면 정지된다(헌법 #38 — ERP 계정은 부모/자식뿐이라
             //      로컬에 복구 경로가 없다).
             //    부모 여부를 실제로 가리는 컬럼은 `is_parent` 다(UserService·프로비저너가 쓰는 그 칸).
+            // 🔴 작(2026-08-14) — 사장님 지시:
+            //    *"퇴사자는 직원계정관리에서 계정이 자동삭제 되도록!!!!"*
+            //    *"퇴사직원이 사용했던, 히트판계정은 사용 가능하도록 설계할것"*
+            //
+            //  ■ 종전: is_active=0 (끄기만) ⇒ 계정이 직원계정관리에 **그대로 남았다.**
+            //         게다가 uq_tenant_email(tenant_id, email) 이 그 자리를 계속 붙들어
+            //         **새 직원이 같은 아이디를 쓸 수 없었다** — 사장님이 말씀하신
+            //         "계정은 사용 가능하도록" 이 바로 이 자리다.
+            //
+            //  ■ 왜 진짜 DELETE 를 안 하나 (실측 근거)
+            //     users 를 가리키는 외래키가 3개 있다 —
+            //       ai_conversations · esign_records · tenant_devices.
+            //     그냥 지우면 외래키에 막혀 퇴사 자체가 실패하거나,
+            //     **전자근로계약서 서명 기록(esign_records)이 함께 날아간다.**
+            //     서명 기록은 퇴사 후에도 법적으로 보관해야 하는 증거다(법무팀장 소관).
+            //     ⇒ 화면에서는 사라지고(=사장님이 말씀하신 자동삭제),
+            //       법적 기록은 남는 **소프트 삭제**로 간다. UserService 가 이미 쓰는 방식이다
+            //       (is_deleted=1 이면 직원계정관리 목록·로그인 조회에서 전부 빠진다).
+            //
+            //  ■ 아이디 자리를 어떻게 비우나
+            //     email 을 그대로 두면 UNIQUE 가 자리를 붙든다. 그래서 지운 계정의 email 에
+            //     표식을 붙여 옮긴다 — 원래 주소가 비어 새 직원이 이어받을 수 있다.
+            //     원본은 표식 뒤에 그대로 남으므로 "누구 계정이었나" 를 나중에도 읽을 수 있다.
+            //     ⚠️ email 은 varchar(100) 이다. 표식을 앞에 붙이면 긴 주소가 잘려
+            //       서로 다른 계정이 같은 값이 될 수 있다 ⇒ 잘릴 자리를 미리 확보한다.
+            //
+            //  🔴 부모계정은 여기서도 제외한다(u.is_parent = 0). 대표 계정을 지우면
+            //     고객사가 로그인 자체를 못 한다 — 로컬에 복구 경로가 없다(헌법 #38·#40).
             const string userSql = """
                 UPDATE users u
                 JOIN employees e
                   ON e.user_id = u.user_id
                  AND e.tenant_id = u.tenant_id
                 SET u.is_active = 0,
+                    u.is_deleted = 1,
+                    u.deleted_at = NOW(6),
+                    u.email = CONCAT('resigned+', u.user_id, '+', LEFT(u.email, 40)),
                     u.updated_at = NOW(6)
                 WHERE e.tenant_id = @TenantId
                   AND e.employee_id = @EmployeeId
                   AND e.user_id IS NOT NULL
                   AND e.user_id <> ''
                   AND u.is_parent = 0
+                  AND u.is_deleted = 0
                 """;
 
             var accountBlocked = await _db.ExecuteAsync(new CommandDefinition(
@@ -564,6 +631,30 @@ public sealed class EmployeeService : IEmployeeService
                 new { TenantId = tenantId, EmployeeId = employeeId },
                 transaction: tx,
                 cancellationToken: ct)).ConfigureAwait(false);
+
+            // 🔴 사원과 계정의 연결을 끊는다. 작(2026-08-14).
+            //
+            //   계정을 지웠는데 employees.user_id 가 그대로 남아 있으면
+            //   **"계정 있는 사원"** 으로 계속 취급된다 — 실측하니 메신저 상대 목록이
+            //   딱 그 조건(user_id 유무)만 보고 있어, 퇴사자가 대화 상대에 계속 떴다
+            //   (ChatService.GetEmployeesAsync). 계정을 지운 것과 앞뒤가 맞지 않는다.
+            //
+            //   ⚠️ 연결만 끊는다. 사원 행 자체는 지우지 않는다 — 과거 전표·결재의
+            //     담당자가 사라지면 지난 장부를 못 읽는다(헌법 #1·#3).
+            if (accountBlocked > 0)
+            {
+                await _db.ExecuteAsync(new CommandDefinition(
+                    """
+                    UPDATE employees
+                    SET user_id = NULL,
+                        updated_at = NOW(6)
+                    WHERE tenant_id = @TenantId
+                      AND employee_id = @EmployeeId
+                    """,
+                    new { TenantId = tenantId, EmployeeId = employeeId },
+                    transaction: tx,
+                    cancellationToken: ct)).ConfigureAwait(false);
+            }
 
             // 🔴 검증팀 P2-7 봉합: 감사 기록. 트랜잭션 안에서 함께 남긴다 —
             // 퇴사는 됐는데 기록만 없는 상태가 생기면 안 된다.

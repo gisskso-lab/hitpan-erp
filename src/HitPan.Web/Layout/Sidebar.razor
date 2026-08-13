@@ -8,6 +8,9 @@
 @inject NavigationManager Nav
 @* 버전 표기용(사장님 오더 2026-08-04). UpdateConsentGate.razor 와 동일하게 기본 HttpClient 사용. *@
 @inject HttpClient Http
+@* 작(2026-08-14) — 메신저를 팝업창으로 열기 위해. 상단바(TopHeader)와 같은 JS 를 쓴다. *@
+@inject IJSRuntime JS
+@inject ISnackbar Snackbar
 
 @*
     히트판 ERP 사이드바 — 11그룹 + 로고 (사장님 결재 2026-04-29)
@@ -124,7 +127,12 @@
            막으면 직원이 자기 대화도 못 본다. 열람은 '방에 낀 사람인가'로 서버가 판정한다
            (부모계정도 남의 1:1 은 못 본다 — 사장님 결재 "본인 대화만 열람").
            계정이 없는 사원은 열어도 안내 문구가 뜬다("계정 있는 사원에게만", 사장님 8/12). *@
-        <MudNavLink Href="/chat" Icon="@Icons.Material.Filled.Chat">메신저</MudNavLink>
+        @* 🔴 작(2026-08-14): 메뉴로 들어와도 **팝업창**으로 연다.
+           사장님 지적(1.2.75): "사이드 메신저 대메뉴로 들어갈시 히트판 화면에서 메신저 동작"
+           종전엔 Href="/chat" 이라 ERP 화면 안에서 열려 쓰던 화면이 날아갔다.
+           들어온 길이 상단바든 메뉴든 **결과는 같아야 한다** — 창은 하나로 재사용된다.
+           (/chat 주소는 남겨 둔다 — 팝업이 막힌 PC 의 길이고, 옛 링크가 404 나지 않는다) *@
+        <MudNavLink Icon="@Icons.Material.Filled.Chat" OnClick="OpenChatWindowAsync">메신저</MudNavLink>
         @* 작(2026-08-13) 단계5 — 연차를 '주는' 화면. 위의 '연차 신청'(직원이 쓰는 것)과 다르다.
            반자동 3단: 자동 계산이 제안 → 관리자가 확인·수정 → 확정해야 잔여에 반영. *@
         @if (_isTenantAdmin)
@@ -262,6 +270,50 @@
 </MudNavMenu>
 
 @code {
+    /// <summary>
+    /// 메뉴에서도 메신저를 <b>팝업창</b>으로 연다. 작(2026-08-14).
+    /// </summary>
+    /// <remarks>
+    /// 사장님 지적(1.2.75 실사용): <i>"사이드 메신저 대메뉴로 들어갈시 히트판 화면에서 메신저 동작"</i>
+    /// <para>
+    /// 종전엔 <c>Href="/chat"</c> 이라 ERP 화면 안에서 열려 <b>쓰던 화면이 날아갔다.</b>
+    /// 견적서를 쓰다 물어보려고 눌렀는데 견적서가 사라지는 자리다.
+    /// </para>
+    /// <para>
+    /// 🔴 상단바(<c>TopHeader</c>)와 <b>같은 JS 를 부른다</b> — <c>hitpanChat.open</c> 은
+    /// <c>window.open(url, 'hitpanChat', ...)</c> 으로 <b>창 이름을 고정</b>해 쓰므로,
+    /// 상단바로 열든 메뉴로 열든 <b>창은 하나로 재사용된다.</b>
+    /// 여기서 JS 를 따로 짜 넣으면 창이 둘로 갈라진다 — 들어온 길이 달라도 결과는 같아야 한다.
+    /// </para>
+    /// <para>
+    /// 🔴 팝업이 막히면 <c>/chat</c> 으로 보낸다 — 상단바는 막혔을 때
+    /// <i>"메뉴 → 메신저 로도 열 수 있습니다"</i> 라고 안내한다.
+    /// 메뉴까지 팝업으로만 열면 <b>그 안내가 거짓말이 되고 갈 곳이 없어진다.</b>
+    /// 화면 안에서 열리더라도 <b>못 여는 것보다는 낫다.</b>
+    /// </para>
+    /// </remarks>
+    private async Task OpenChatWindowAsync()
+    {
+        try
+        {
+            var opened = await JS.InvokeAsync<bool>("hitpanChat.open", "/chat-window");
+            if (opened) return;
+
+            // 팝업 차단 — 조용히 넘기면 "눌렀는데 아무 일도 안 난다" 만 겪는다.
+            Snackbar.Add("브라우저가 팝업을 막아 화면 안에서 엽니다. "
+                + "따로 창으로 쓰시려면 주소창 오른쪽의 팝업 차단 아이콘에서 허용해 주세요.",
+                Severity.Info);
+        }
+        catch (Exception ex)
+        {
+            // 헌법 #15 — 빈 catch 금지. 여기서 터져도 메신저는 열어 준다.
+            // (JS 가 아직 안 올라온 순간에 누르면 날 수 있다 — 일을 막을 이유가 아니다.)
+            Console.Error.WriteLine($"[Sidebar] 메신저 창 열기 실패: {ex.GetType().Name}: {ex.Message}");
+        }
+
+        Nav.NavigateTo("/chat");
+    }
+
     // 헌법 #35 (2026-06-04) — 본사·대리점·Owner 영역 일체 HitPan.Backoffice 신규 프로젝트로 분리 완료.
     // HitPan.Web은 고객사 ERP 전용. /admin/* /reseller/* /owner/* 페이지 0건.
     private int _approvalPendingCount;

@@ -17,6 +17,32 @@ public sealed class EmployeeListItemModel
     public bool IsActive { get; set; }
     public bool HasUserAccount { get; set; }
 
+    // ── 재직 상태 (작 2026-08-14, 사장님 지시 "퇴사직원 숨김처리") ──
+    // 서버 EmployeeListDto 와 짝이다. 한쪽만 고치면 값이 안 실려 온다(헌법 #12).
+    /// <summary>퇴사자인가.</summary>
+    public bool IsResigned { get; set; }
+    /// <summary>퇴사일(소급 퇴사 가능).</summary>
+    public DateTime? ResignDate { get; set; }
+    /// <summary><c>active</c> · <c>absence</c>(휴직) · <c>leave</c>(연차).</summary>
+    public string? WorkStatus { get; set; }
+
+    /// <summary>
+    /// 화면에 보여줄 상태 한 마디. 작(2026-08-14).
+    /// </summary>
+    /// <remarks>
+    /// 🔴 종전엔 <c>IsActive ? "재직" : "비활성"</c> 둘뿐이라 <b>퇴사자와 휴직자가 같은 말</b>이었다.
+    /// 인사 담당자에게 "비활성"은 아무 정보도 아니다 — 무슨 일이 있었는지를 알려준다.
+    /// </remarks>
+    public string StatusLabel =>
+        IsResigned ? "퇴사"
+        : !IsActive ? "비활성"
+        : WorkStatus switch
+        {
+            "absence" => "휴직",
+            "leave" => "연차",
+            _ => "재직"
+        };
+
     // 작20260429 연차 관리 (사장님 결재): 그리드 인라인 편집·저장
     public decimal AnnualLeaveTotal { get; set; }
     public decimal AnnualLeaveUsed { get; set; }
