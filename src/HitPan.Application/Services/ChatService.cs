@@ -533,9 +533,19 @@ public sealed class ChatService : IChatService
                    d.dept_name AS DeptName, e.position AS Position
             FROM employees e
             LEFT JOIN departments d ON d.dept_id = e.dept_id AND d.tenant_id = e.tenant_id
+            -- 🔴 작(2026-08-14) — 샌드박스 실측 적발: 계정을 **실제로 확인**한다.
+            --   종전엔 `e.user_id` 칸이 비었는지만 봤다. 계정이 지워졌거나 아예 없어도
+            --   그 값이 남아 있으면 **대화 상대로 떴다.**
+            --   말을 걸어도 상대는 로그인을 못 하니 **영영 못 읽는다** — 보낸 사람은
+            --   읽씹당한 줄 안다. 없는 사람에게 말 걸 길을 아예 막는다.
+            JOIN users u
+              ON u.user_id = e.user_id
+             AND u.tenant_id = e.tenant_id
+             AND u.is_deleted = 0
+             AND u.is_active = 1
             WHERE e.tenant_id = @tenantId
-              AND e.employee_id <> @employeeId
-              AND e.user_id IS NOT NULL AND e.user_id <> ''
+              AND e.employee_id <> @employeeId   -- 나 자신은 뺀다(나에게 말 걸 일은 없다)
+              AND e.is_active = 1                -- 퇴사자는 상대로 안 뜬다
             ORDER BY d.sort_order, d.dept_name, e.emp_name
             """,
             new { tenantId, employeeId }, cancellationToken: ct)).ConfigureAwait(false);

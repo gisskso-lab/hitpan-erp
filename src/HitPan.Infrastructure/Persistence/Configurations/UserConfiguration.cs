@@ -37,6 +37,11 @@ public sealed class UserConfiguration : IEntityTypeConfiguration<User>
         builder.Property(e => e.DeptId).HasColumnName("dept_id").HasMaxLength(36);
         builder.Property(e => e.Phone).HasColumnName("phone").HasMaxLength(100);
         builder.Property(e => e.IsActive).HasColumnName("is_active").IsRequired();
+        // 🔴 작(2026-08-14) — 사장님 지적 "계정은 죽여야지".
+        //   DB 에는 이 칸이 원래 있었는데 **여기 매핑만 빠져 있었다.**
+        //   그래서 계정 목록(Dapper 로 is_deleted 를 직접 읽음)에서는 지운 계정이 사라졌는데
+        //   **로그인은 EF 라 이 칸을 몰라 그대로 뚫려 있었다.**
+        builder.Property(e => e.IsDeleted).HasColumnName("is_deleted").IsRequired().HasDefaultValue(false);
         builder.Property(e => e.FailedLoginCount).HasColumnName("failed_login_count").IsRequired().HasDefaultValue(0);
         builder.Property(e => e.LockoutEnd).HasColumnName("lockout_end");
         builder.Property(e => e.LastLoginAt).HasColumnName("last_login_at");
