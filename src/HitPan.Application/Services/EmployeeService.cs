@@ -75,11 +75,27 @@ public sealed class EmployeeService : IEmployeeService
               e.work_status AS WorkStatus,
               e.annual_leave_total AS AnnualLeaveTotal,
               e.annual_leave_used  AS AnnualLeaveUsed,
-              CASE WHEN e.user_id IS NULL OR e.user_id = '' THEN 0 ELSE 1 END AS HasUserAccount
+              -- 🔴 작(2026-08-14) — 샌드박스 실측 적발: 계정을 **실제로 확인**한다.
+              --   종전엔 `e.user_id` 칸이 비었는지만 봤다. 그 값이 남아 있기만 하면
+              --   **계정이 실제로 없어도 "계정 있음"** 이 됐다 —
+              --   실측에서 계정 2개인 회사가 사원 7명 전원 "계정 있음" 으로 나왔다.
+              --   그러면 화면에 "계정 만들기" 가 안 떠서 **로그인 못 하는 직원이 생긴다.**
+              --   users 를 걸어 **살아있는 계정만** 센다.
+              --
+              --   🔴 `is_deleted=0` 만으로는 모자란다 — **퇴사자를 "계정 있음" 으로 보면 안 된다.**
+              --     이번 봉합 전에 퇴사한 사람은 계정이 `is_active=0` 으로만 꺼져 있고
+              --     `is_deleted` 는 0 이다. 그 자리를 안 걸면 **퇴사자가 계속 "계정 있음"** 이 된다.
+              --     쓸 수 없는 계정은 없는 계정과 같다 — 로그인이 안 되기 때문이다.
+              CASE WHEN u.user_id IS NULL THEN 0 ELSE 1 END AS HasUserAccount
             FROM employees e
             LEFT JOIN departments d
               ON d.dept_id = e.dept_id
              AND d.tenant_id = e.tenant_id
+            LEFT JOIN users u
+              ON u.user_id = e.user_id
+             AND u.tenant_id = e.tenant_id
+             AND u.is_deleted = 0
+             AND u.is_active = 1
             WHERE e.tenant_id = @TenantId
               AND (@IncludeResigned = 1 OR e.is_active = 1)
             ORDER BY e.is_active DESC, e.emp_no

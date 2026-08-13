@@ -15,7 +15,12 @@ namespace HitPan.API.Controllers;
 /// </summary>
 [ApiController]
 [Route("api/settings/tax-invoice-cert")]
-[Authorize(Policy = "TenantAdmin")]
+// 🔴 작(2026-08-14) — 샌드박스 실측 적발: 정책 이름이 틀려 있었다.
+//   종전 "TenantAdmin" 은 **등록된 적 없는 이름**이다(Program.cs 의 실제 이름은
+//   "TenantAdminOnly"). ASP.NET Core 는 없는 정책을 만나면 요청을 **400 으로 튕긴다** —
+//   그래서 전자세금계산서 인증서 화면 3개가 **부모계정에게도** 통째로 안 열렸다.
+//   ⚠️ 오타라 빌드도 시험도 안 잡는다. 실제로 화면을 열어봐야만 드러나는 자리다.
+[Authorize(Policy = "TenantAdminOnly")]
 public sealed class TaxInvoiceCertController : ControllerBase
 {
     private readonly IDoubleEncryptionService _crypto;
