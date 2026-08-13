@@ -18,6 +18,10 @@ public sealed class PositionController : ControllerBase
         _service = service;
     }
 
+    // 🔴 봉합 (2026-08-14, 1.2.74 실사용 P0): 조회는 직원에게 연다.
+    //    직급 목록은 **결재선**이 직급으로 짜이고 사원 화면이 직급을 보여주므로 직원도 읽어야 한다.
+    //    ⚠️ 만들기·고치기·지우기는 그대로 관리자 전용이다(클래스 정책 유지).
+    [Authorize(Policy = "TenantOnly")]
     [HttpGet]
     public async Task<IActionResult> GetList(CancellationToken ct)
     {

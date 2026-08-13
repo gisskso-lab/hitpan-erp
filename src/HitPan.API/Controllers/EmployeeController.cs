@@ -20,6 +20,13 @@ public sealed class EmployeeController : ControllerBase
         _employeeService = employeeService;
     }
 
+    // 🔴 봉합 (2026-08-14, 1.2.74 실사용 P0): 사원 목록 조회는 직원에게 연다.
+    //    사장님: "권한설정으로 모든걸 풀었지만 ... 아무것도 못함."
+    //    직원 목록은 **메신저 상대 찾기·조직도·결재 상신**의 선행조건이다.
+    //    종전엔 클래스 레벨 TenantAdminOnly 가 조회까지 막아, 자식계정은 화면을 열어도
+    //    빈 목록만 봤다(웹 서비스가 403 을 빈 배열로 삼켜 "0명" 으로 보였다).
+    //    ⚠️ 등록·수정·삭제·퇴사처리는 그대로 관리자 전용이다(클래스 정책 유지).
+    [Authorize(Policy = "TenantOnly")]
     [HttpGet]
     public async Task<IActionResult> GetList(CancellationToken ct)
     {
@@ -37,6 +44,8 @@ public sealed class EmployeeController : ControllerBase
     /// 봉합 (2026-06-22, 10차 P1-1): 부서 드롭다운 목록 (읽기 전용).
     /// 사원 부서는 dept_id 로 저장되므로 화면이 부서를 선택할 수 있게 (dept_id, dept_name) 목록을 제공한다.
     /// </summary>
+    // 조회는 직원에게 연다(위 GetList 와 같은 이유 — 부서는 메신저 부서방의 선행조건).
+    [Authorize(Policy = "TenantOnly")]
     [HttpGet("departments")]
     public async Task<IActionResult> GetDepartments(CancellationToken ct)
     {
