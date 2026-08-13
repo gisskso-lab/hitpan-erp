@@ -1,0 +1,459 @@
+@page "/chat"
+@page "/chat/{RoomId}"
+@using HitPan.Web.Models
+@using HitPan.Web.Services
+@inject ChatService Chat
+@inject NavigationManager Nav
+@inject ISnackbar Snackbar
+@inject IDialogService DialogService
+
+@* ═══════════════════════════════════════════════════════════════
+   사내 메신저. 작(2026-08-13) 그룹웨어 단계9.
+
+   🔴 사장님 지시:
+     "단체대화, 부서별 대화, 1:1대화 모두 가능해야함"
+     "메신저에서 각 그룹웨어 문서들 연결 가능해야 함"
+     "「연차신청서」를 전송하였습니다. 클릭하시면 연차신청서 결재와 연결됩니다. 정도"
+     "메신저 전송 후 상대방이 메신저 읽을시, "읽음" 처리 되야 함"
+     "단체·부서방은 몇 명이 읽었는지 = 00"
+     "결재봇, 메시지봇 공유해도 될듯. 인스타나 페이스북 처럼.
+      다만 메시지인지, 결재안내인지는 안내"
+
+   🔴 여기서 문서를 만들지 않는다 — 있는 문서를 고르기만 한다.
+      "생성해서 만들고 결재까지 기능을 넣을 필요까진 없음. 연결까지만 해도 충분함"
+   ═══════════════════════════════════════════════════════════════ *@
+
+<PageTitle>메신저</PageTitle>
+
+<MudGrid Spacing="2" Class="pa-2">
+
+    @* ── 왼쪽: 방 목록 ── *@
+    <MudItem xs="12" md="4" lg="3">
+        <MudPaper Elevation="1" Class="pa-3" Style="height: calc(100vh - 130px); overflow-y: auto;">
+            <div class="d-flex align-center justify-space-between mb-3">
+                <MudText Typo="Typo.h6">대화</MudText>
+                <MudButton Size="Size.Small" Variant="Variant.Filled" Color="Color.Primary"
+                           StartIcon="@Icons.Material.Filled.Add" OnClick="OpenNewRoomAsync">
+                    새 대화
+                </MudButton>
+            </div>
+
+            @if (_loadingRooms)
+            {
+                <MudProgressLinear Indeterminate="true" Color="Color.Primary" />
+            }
+            else if (_roomsFailed)
+            {
+                <MudAlert Severity="Severity.Warning" Dense="true">
+                    대화 목록을 불러오지 못했습니다.
+                    <MudButton Size="Size.Small" OnClick="LoadRoomsAsync">다시 시도</MudButton>
+                </MudAlert>
+            }
+            else if (_rooms.Count == 0)
+            {
+                <MudAlert Severity="Severity.Info" Dense="true">
+                    아직 대화가 없습니다. <b>새 대화</b>를 눌러 시작해 보세요.
+                </MudAlert>
+            }
+            else
+            {
+                <MudList T="string" Dense="true">
+                    @foreach (var room in _rooms)
+                    {
+                        <MudListItem T="string" OnClick="@(() => OpenRoomAsync(room.RoomId))"
+                                     Class="@(room.RoomId == RoomId ? "mud-selected-item" : "")">
+                            <div class="d-flex align-center" style="gap:8px;">
+                                <MudIcon Icon="@RoomIcon(room.RoomType)" Size="Size.Small" />
+                                <div style="flex:1; min-width:0;">
+                                    <div class="d-flex align-center" style="gap:6px;">
+                                        <MudText Typo="Typo.body1" Style="font-weight:500;">
+                                            @room.DisplayName
+                                        </MudText>
+                                        @if (room.RoomType != "direct")
+                                        {
+                                            <MudText Typo="Typo.caption" Color="Color.Secondary">
+                                                @room.MemberCount
+                                            </MudText>
+                                        }
+                                    </div>
+                                    <MudText Typo="Typo.caption" Color="Color.Secondary"
+                                             Style="display:block; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">
+                                        @(room.LastMessage ?? "새 대화")
+                                    </MudText>
+                                </div>
+                                @if (room.UnreadCount > 0)
+                                {
+                                    <MudBadge Content="@room.UnreadCount" Color="Color.Error" Overlap="false" />
+                                }
+                            </div>
+                        </MudListItem>
+                    }
+                </MudList>
+            }
+        </MudPaper>
+    </MudItem>
+
+    @* ── 오른쪽: 대화 ── *@
+    <MudItem xs="12" md="8" lg="9">
+        <MudPaper Elevation="1" Class="pa-0 d-flex flex-column"
+                  Style="height: calc(100vh - 130px);">
+
+            @if (string.IsNullOrEmpty(RoomId))
+            {
+                <div class="d-flex align-center justify-center" style="height:100%;">
+                    <MudText Typo="Typo.body1" Color="Color.Secondary">
+                        왼쪽에서 대화를 고르거나, <b>새 대화</b>를 시작해 주세요.
+                    </MudText>
+                </div>
+            }
+            else
+            {
+                @* 방 이름 *@
+                <div class="pa-3" style="border-bottom:1px solid var(--mud-palette-divider);">
+                    <div class="d-flex align-center justify-space-between">
+                        <div class="d-flex align-center" style="gap:8px;">
+                            <MudIcon Icon="@RoomIcon(_currentRoom?.RoomType ?? "direct")" />
+                            <MudText Typo="Typo.h6">@(_currentRoom?.DisplayName ?? "대화")</MudText>
+                            @if (_currentRoom is not null && _currentRoom.RoomType != "direct")
+                            {
+                                <MudChip T="string" Size="Size.Small" Variant="Variant.Text">
+                                    @_currentRoom.MemberCount 명
+                                </MudChip>
+                            }
+                        </div>
+                        <MudButton Size="Size.Small" Variant="Variant.Text" Color="Color.Default"
+                                   StartIcon="@Icons.Material.Filled.Logout" OnClick="LeaveRoomAsync">
+                            나가기
+                        </MudButton>
+                    </div>
+                </div>
+
+                @* 대화 *@
+                <div class="pa-3" style="flex:1; overflow-y:auto;">
+                    @if (_loadingMessages)
+                    {
+                        <MudProgressLinear Indeterminate="true" Color="Color.Primary" />
+                    }
+                    else if (_messagesFailed)
+                    {
+                        <MudAlert Severity="Severity.Warning" Dense="true">
+                            대화를 불러오지 못했습니다.
+                            <MudButton Size="Size.Small" OnClick="LoadMessagesAsync">다시 시도</MudButton>
+                        </MudAlert>
+                    }
+                    else if (_messages.Count == 0)
+                    {
+                        <MudText Typo="Typo.body2" Color="Color.Secondary" Align="Align.Center" Class="mt-6">
+                            첫 메시지를 보내 보세요.
+                        </MudText>
+                    }
+                    else
+                    {
+                        @foreach (var msg in _messages)
+                        {
+                            <div class="@(msg.IsMine ? "d-flex justify-end mb-3" : "d-flex mb-3")">
+                                <div style="max-width:70%;">
+
+                                    @* 🔴 딱지 — 메시지인지 결재안내인지 (사장님 지시) *@
+                                    <div class="d-flex align-center mb-1" style="gap:6px;">
+                                        <MudChip T="string" Size="Size.Small"
+                                                 Color="@KindColor(msg.MsgKind)" Variant="Variant.Filled">
+                                            @KindLabel(msg.MsgKind)
+                                        </MudChip>
+                                        @if (!msg.IsMine)
+                                        {
+                                            <MudText Typo="Typo.caption">@msg.SenderName</MudText>
+                                        }
+                                        <MudText Typo="Typo.caption" Color="Color.Secondary">
+                                            @msg.SentAt.ToString("MM/dd HH:mm")
+                                        </MudText>
+                                    </div>
+
+                                    <MudPaper Elevation="0" Class="pa-3"
+                                              Style="@(msg.IsMine
+                                                  ? "background: var(--mud-palette-primary-lighten); border-radius:12px;"
+                                                  : "background: var(--mud-palette-background-grey); border-radius:12px;")">
+
+                                        <MudText Typo="Typo.body2" Style="white-space:pre-wrap;">@msg.Body</MudText>
+
+                                        @* 🔴 문서 링크 — 누르면 그 화면으로 간다 *@
+                                        @if (!string.IsNullOrEmpty(msg.RefType) && !string.IsNullOrEmpty(msg.RefId))
+                                        {
+                                            <MudButton Class="mt-2" Size="Size.Small" Variant="Variant.Outlined"
+                                                       Color="Color.Primary"
+                                                       StartIcon="@Icons.Material.Filled.OpenInNew"
+                                                       OnClick="@(() => GoToDocument(msg.RefType!, msg.RefId!))">
+                                                @(msg.RefTitle ?? "문서 열기")
+                                            </MudButton>
+                                        }
+
+                                        @* 파일 *@
+                                        @if (msg.File is not null)
+                                        {
+                                            <MudButton Class="mt-2" Size="Size.Small" Variant="Variant.Outlined"
+                                                       Color="Color.Default"
+                                                       StartIcon="@Icons.Material.Filled.Download"
+                                                       Href="@($"api/chat/files/{msg.File.FileId}")"
+                                                       Target="_blank">
+                                                @msg.File.OriginalName (@FormatSize(msg.File.FileSize))
+                                            </MudButton>
+                                        }
+                                    </MudPaper>
+
+                                    @* 🔴 읽음 — 1:1 은 "읽음", 단체·부서는 읽은 사람 수 *@
+                                    @if (msg.IsMine && msg.ReadCount > 0)
+                                    {
+                                        <MudText Typo="Typo.caption" Color="Color.Secondary"
+                                                 Align="Align.Right" Class="mt-1" Style="display:block;">
+                                            @ReadLabel(msg.ReadCount)
+                                        </MudText>
+                                    }
+                                </div>
+                            </div>
+                        }
+                    }
+                </div>
+
+                @* 보내기 *@
+                <div class="pa-3" style="border-top:1px solid var(--mud-palette-divider);">
+                    <div class="d-flex align-center" style="gap:8px;">
+                        <MudTooltip Text="그룹웨어 문서 연결">
+                            <MudIconButton Icon="@Icons.Material.Filled.AttachFile"
+                                           Color="Color.Default" OnClick="OpenDocPickerAsync" />
+                        </MudTooltip>
+
+                        <MudFileUpload T="IBrowserFile" FilesChanged="UploadFileAsync"
+                                       Accept="" MaximumFileCount="1">
+                            <ActivatorContent>
+                                <MudTooltip Text="파일 보내기 (20MB까지)">
+                                    <MudIconButton Icon="@Icons.Material.Filled.UploadFile" Color="Color.Default" />
+                                </MudTooltip>
+                            </ActivatorContent>
+                        </MudFileUpload>
+
+                        <MudTextField @bind-Value="_draft" Placeholder="메시지를 입력하세요"
+                                      Variant="Variant.Outlined" Margin="Margin.Dense"
+                                      Immediate="true" OnKeyDown="OnKeyDownAsync" Class="flex-grow-1" />
+
+                        <MudButton Variant="Variant.Filled" Color="Color.Primary"
+                                   Disabled="@_sending" OnClick="SendAsync">
+                            보내기
+                        </MudButton>
+                    </div>
+                </div>
+            }
+        </MudPaper>
+    </MudItem>
+</MudGrid>
+
+@code {
+    [Parameter] public string? RoomId { get; set; }
+
+    private List<ChatRoomModel> _rooms = new();
+    private List<ChatMessageModel> _messages = new();
+    private ChatRoomModel? _currentRoom;
+
+    private string _draft = string.Empty;
+    private bool _loadingRooms = true;
+    private bool _loadingMessages;
+    private bool _roomsFailed;
+    private bool _messagesFailed;
+    private bool _sending;
+
+    protected override async Task OnInitializedAsync() => await LoadRoomsAsync();
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (string.IsNullOrEmpty(RoomId)) return;
+
+        _currentRoom = _rooms.FirstOrDefault(r => r.RoomId == RoomId);
+        await LoadMessagesAsync();
+    }
+
+    private async Task LoadRoomsAsync()
+    {
+        _loadingRooms = true;
+        _roomsFailed = false;
+
+        var rooms = await Chat.GetRoomsAsync();
+        if (rooms is null) { _roomsFailed = true; }
+        else { _rooms = rooms; }
+
+        _currentRoom = _rooms.FirstOrDefault(r => r.RoomId == RoomId);
+        _loadingRooms = false;
+    }
+
+    private async Task LoadMessagesAsync()
+    {
+        if (string.IsNullOrEmpty(RoomId)) return;
+
+        _loadingMessages = true;
+        _messagesFailed = false;
+
+        var messages = await Chat.GetMessagesAsync(RoomId);
+        if (messages is null) { _messagesFailed = true; }
+        else { _messages = messages; }
+
+        _loadingMessages = false;
+
+        // 🔴 대화방을 열면 읽음이 된다 (사장님: "상대방이 메신저 읽을시 읽음 처리")
+        if (!_messagesFailed)
+        {
+            await Chat.MarkReadAsync(RoomId);
+            var room = _rooms.FirstOrDefault(r => r.RoomId == RoomId);
+            if (room is not null) room.UnreadCount = 0;
+        }
+    }
+
+    private async Task OpenRoomAsync(string roomId)
+    {
+        Nav.NavigateTo($"/chat/{roomId}");
+        await Task.CompletedTask;
+    }
+
+    private async Task SendAsync()
+    {
+        if (string.IsNullOrWhiteSpace(_draft) || string.IsNullOrEmpty(RoomId)) return;
+
+        _sending = true;
+        var (message, error) = await Chat.SendMessageAsync(RoomId,
+            new SendChatMessageModel { Body = _draft.Trim() });
+        _sending = false;
+
+        if (error is not null) { Snackbar.Add(error, Severity.Warning); return; }
+
+        if (message is not null) _messages.Add(message);
+        _draft = string.Empty;
+    }
+
+    private async Task OnKeyDownAsync(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter" && !e.ShiftKey) await SendAsync();
+    }
+
+    private async Task LeaveRoomAsync()
+    {
+        if (string.IsNullOrEmpty(RoomId)) return;
+
+        var confirmed = await DialogService.ShowMessageBoxAsync("대화방 나가기",
+            "나가기 전 대화는 계속 볼 수 있습니다. 나가시겠습니까?",
+            yesText: "나가기", cancelText: "취소");
+
+        if (confirmed != true) return;
+
+        if (await Chat.LeaveRoomAsync(RoomId))
+        {
+            Nav.NavigateTo("/chat");
+            await LoadRoomsAsync();
+        }
+    }
+
+    /// <summary>🔴 파일 한도·형식 판정은 서버가 한다. 화면은 사유를 그대로 보여준다.</summary>
+    private async Task UploadFileAsync(IBrowserFile? file)
+    {
+        if (file is null || string.IsNullOrEmpty(RoomId)) return;
+
+        const long maxBytes = 20L * 1024 * 1024;   // 사장님 확정 20MB
+        if (file.Size > maxBytes)
+        {
+            Snackbar.Add("파일은 20MB 까지 보낼 수 있습니다.", Severity.Warning);
+            return;
+        }
+
+        _sending = true;
+        await using var stream = file.OpenReadStream(maxBytes);
+        var (message, error) = await Chat.SendFileAsync(RoomId, stream, file.Name,
+            file.ContentType, file.Size);
+        _sending = false;
+
+        if (error is not null) { Snackbar.Add(error, Severity.Warning); return; }
+        if (message is not null) _messages.Add(message);
+    }
+
+    /// <summary>🔴 있는 문서를 고르기만 한다 — 여기서 만들지 않는다.</summary>
+    private async Task OpenDocPickerAsync()
+    {
+        if (string.IsNullOrEmpty(RoomId)) return;
+
+        var parameters = new DialogParameters<ChatDocPickerDialog>();
+        var dialog = await DialogService.ShowAsync<ChatDocPickerDialog>("문서 연결", parameters);
+        var result = await dialog.Result;
+
+        if (result is null || result.Canceled || result.Data is not ChatAttachableDocModel doc) return;
+
+        _sending = true;
+        var (message, error) = await Chat.SendMessageAsync(RoomId, new SendChatMessageModel
+        {
+            Body = string.Empty,          // 서버가 사장님 문구로 채운다
+            RefType = doc.RefType,
+            RefId = doc.RefId
+        });
+        _sending = false;
+
+        if (error is not null) { Snackbar.Add(error, Severity.Warning); return; }
+        if (message is not null) _messages.Add(message);
+    }
+
+    private async Task OpenNewRoomAsync()
+    {
+        var dialog = await DialogService.ShowAsync<ChatNewRoomDialog>("새 대화");
+        var result = await dialog.Result;
+
+        if (result is null || result.Canceled || result.Data is not string roomId) return;
+
+        await LoadRoomsAsync();
+        Nav.NavigateTo($"/chat/{roomId}");
+    }
+
+    /// <summary>🔴 문서로 가는 길. 메신저는 여기까지만 한다.</summary>
+    private void GoToDocument(string refType, string refId)
+    {
+        var url = refType switch
+        {
+            "approval" => $"/approval/detail/{refId}",
+            "leave"    => "/hr/leave-status",
+            "expense"  => "/hr/expense-status",
+            "payroll"  => "/hr/payroll",
+            "contract" => "/hr/labor-contracts",
+            "report"   => "/hr/work-report",
+            _ => string.Empty
+        };
+
+        if (!string.IsNullOrEmpty(url)) Nav.NavigateTo(url);
+    }
+
+    // ── 보여주기 ──
+
+    private static string RoomIcon(string roomType) => roomType switch
+    {
+        "dept"  => Icons.Material.Filled.Groups,
+        "group" => Icons.Material.Filled.Forum,
+        _       => Icons.Material.Filled.Person
+    };
+
+    /// <summary>🔴 사장님: "메시지인지, 결재안내인지는 안내"</summary>
+    private static string KindLabel(string kind) => kind switch
+    {
+        "approval" => "결재",
+        "file"     => "파일",
+        _          => "메시지"
+    };
+
+    private static Color KindColor(string kind) => kind switch
+    {
+        "approval" => Color.Warning,
+        "file"     => Color.Info,
+        _          => Color.Default
+    };
+
+    /// <summary>🔴 1:1 은 "읽음", 단체·부서는 읽은 사람 수(사장님: "몇 명이 읽었는지 = 00").</summary>
+    private string ReadLabel(int readCount)
+        => _currentRoom?.RoomType == "direct" ? "읽음" : $"{readCount} 읽음";
+
+    private static string FormatSize(long bytes)
+    {
+        if (bytes >= 1024 * 1024) return $"{bytes / 1024.0 / 1024.0:0.#}MB";
+        if (bytes >= 1024) return $"{bytes / 1024.0:0.#}KB";
+        return $"{bytes}B";
+    }
+}

@@ -64,6 +64,9 @@ builder.Services.AddScoped<AnnualLeaveService>();
 builder.Services.AddScoped<AbsenceService>();
 // 작(2026-08-13) 단계8: 급여·퇴직금. 금액을 사람이 직접 넣는다(계산하지 않는다).
 builder.Services.AddScoped<PayrollService>();
+// 작(2026-08-13) 단계9: 사내 메신저. 1:1·부서·단체 3종 + 문서 연결 + 읽음.
+// 🔴 문서를 만들거나 결재하지 않는다 — 연결만 한다(사장님: "연결까지만 해도 충분함").
+builder.Services.AddScoped<ChatService>();
 // 작(2026-08-13) 그룹웨어 단계3: 업무보고서 4종(일일·주간·월간·경위서).
 builder.Services.AddScoped<WorkReportService>();
 // 작(2026-08-13) 그룹웨어 단계2: 앱 내 결재 알림 수신기.
