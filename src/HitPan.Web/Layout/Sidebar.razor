@@ -107,6 +107,10 @@
         <MudNavLink Href="/hr/overtime" Icon="@Icons.Material.Filled.MoreTime">초과근무</MudNavLink>
         <MudNavLink Href="/hr/leave" Icon="@Icons.Material.Filled.EventAvailable">휴가·연차</MudNavLink>
         <MudNavLink Href="/hr/leave-request" Icon="@Icons.Material.Filled.EditCalendar">연차 신청</MudNavLink>
+        @* 작(2026-08-13) 단계6 — 휴직. 위의 '휴가·연차'(하루~며칠, 연차에서 깎임)와 다르다.
+           달·년 단위로 쉬는 것이라 표가 따로 있고, 연차 잔여를 건드리지 않는다.
+           직원이 신청하는 화면이라 관리자 게이트를 두지 않는다(본인 것만 보이는 건 서버가 정한다). *@
+        <MudNavLink Href="/hr/absence" Icon="@Icons.Material.Filled.EventBusy">휴직 관리</MudNavLink>
         @* 작(2026-08-13) 단계5 — 연차를 '주는' 화면. 위의 '연차 신청'(직원이 쓰는 것)과 다르다.
            반자동 3단: 자동 계산이 제안 → 관리자가 확인·수정 → 확정해야 잔여에 반영. *@
         @if (_isTenantAdmin)
