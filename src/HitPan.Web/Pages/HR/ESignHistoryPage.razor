@@ -10,10 +10,17 @@
 @inject ISnackbar Snackbar
 @inject AuthenticationStateProvider AuthState
 
-<PageTitle>전자서명 이력 — 히트판 ERP</PageTitle>
+@* 작(2026-08-13) 메뉴 간소화 — 이 화면은 이제 두 가지로 쓰인다.
+   ① 주소로 직접(/hr/esign-history) ② [전자근로계약서]의 '서명 이력' 탭 안에서.
+   탭 안에서는 제목을 내지 않는다 — 바깥 화면이 이미 제목을 냈고,
+   제목이 두 번 겹치면 어디에 있는지 헷갈린다. *@
+@if (!EmbeddedInTab)
+{
+    <PageTitle>전자서명 이력 — 히트판 ERP</PageTitle>
 
-<PageHeader Title="전자서명 이력"
-            Subtitle="근로계약서, 보안서약서 등 모든 전자서명 기록을 조회합니다." />
+    <PageHeader Title="전자서명 이력"
+                Subtitle="근로계약서, 보안서약서 등 모든 전자서명 기록을 조회합니다." />
+}
 
 @* === 필터 === *@
 <MudPaper Elevation="0" Class="pa-3 mb-3 hitpan-card">
@@ -111,6 +118,12 @@
 </MudPaper>
 
 @code {
+    /// <summary>
+    /// 다른 화면의 탭 안에 얹혀 있는가. 참이면 제목을 내지 않는다.
+    /// 주소로 직접 들어온 경우(기본값 false)는 종전과 똑같이 동작한다.
+    /// </summary>
+    [Parameter] public bool EmbeddedInTab { get; set; }
+
     private bool _loading;
     private bool _isTenantAdmin;
     private List<ESignHistoryModel> _all = new();

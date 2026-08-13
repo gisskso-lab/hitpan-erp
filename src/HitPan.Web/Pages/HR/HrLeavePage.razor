@@ -1,12 +1,23 @@
 @page "/hr/leave"
+@* 작(2026-08-13) 메뉴 간소화 — [휴가 현황](/hr/leave-status)·[휴가 달력](/hr/leave-calendar)을
+   여기로 합쳤다. 셋 다 LeaveRequestService.GetListAsync 하나를 읽고 있었다.
+   🔴 주소는 살려 둔다 — /hr/leave-status 로 메신저 문서 링크가 들어온다(ChatPopup.razor:353).
+   들어온 주소에 따라 알맞은 탭이 먼저 열린다(아래 OnInitializedAsync). *@
+@page "/hr/leave-status"
+@page "/hr/leave-calendar"
 @namespace HitPan.Web.Pages.HrUi
 @attribute [Authorize]
 @inject HitPan.Web.Services.LeaveRequestService LeaveService
 @inject ISnackbar Snackbar
 @inject IDialogService DialogService
+@inject NavigationManager Nav
 
 <PageTitle>휴가·연차 관리</PageTitle>
 <PageHeader Title="휴가·연차 관리" Subtitle="직원 휴가 신청 · 승인 · 잔여 연차" />
+
+<MudTabs Elevation="0" Rounded="true" ApplyEffectsToContainer="true" PanelClass="pt-4"
+         @bind-ActivePanelIndex="_tabIndex">
+<MudTabPanel Text="신청·승인" Icon="@Icons.Material.Filled.EventAvailable">
 
 @* === KPI 카드 === *@
 <MudGrid Spacing="3" Class="mb-4">
@@ -106,6 +117,90 @@
     </MudTable>
 </MudPaper>
 
+</MudTabPanel>
+
+@* === 전사 현황 (옛 /hr/leave-status) === *@
+<MudTabPanel Text="전사 현황" Icon="@Icons.Material.Filled.Assessment">
+    @* 상태별 건수 요약 — 신청·승인·반려·대기 한눈에 *@
+    <MudGrid Spacing="2" Class="mb-3">
+        <MudItem xs="6" md="3">
+            <MudPaper Elevation="0" Class="pa-3 hitpan-card text-center">
+                <MudText Typo="Typo.caption" Color="Color.Secondary">전체</MudText>
+                <MudText Typo="Typo.h6">@_allList.Count 건</MudText>
+            </MudPaper>
+        </MudItem>
+        <MudItem xs="6" md="3">
+            <MudPaper Elevation="0" Class="pa-3 hitpan-card text-center">
+                <MudText Typo="Typo.caption" Color="Color.Secondary">대기</MudText>
+                <MudText Typo="Typo.h6" Color="Color.Warning">@_allList.Count(x => x.Status == "pending") 건</MudText>
+            </MudPaper>
+        </MudItem>
+        <MudItem xs="6" md="3">
+            <MudPaper Elevation="0" Class="pa-3 hitpan-card text-center">
+                <MudText Typo="Typo.caption" Color="Color.Secondary">승인</MudText>
+                <MudText Typo="Typo.h6" Color="Color.Success">@_allList.Count(x => x.Status == "approved") 건</MudText>
+            </MudPaper>
+        </MudItem>
+        <MudItem xs="6" md="3">
+            <MudPaper Elevation="0" Class="pa-3 hitpan-card text-center">
+                <MudText Typo="Typo.caption" Color="Color.Secondary">반려</MudText>
+                <MudText Typo="Typo.h6" Color="Color.Error">@_allList.Count(x => x.Status == "rejected") 건</MudText>
+            </MudPaper>
+        </MudItem>
+    </MudGrid>
+
+    <MudPaper Elevation="0" Class="pa-2 hitpan-card">
+        <MudTable Items="_allList" Dense="true" Hover="true" Striped="true" Loading="_loading">
+            <HeaderContent>
+                <MudTh>사원</MudTh>
+                <MudTh>유형</MudTh>
+                <MudTh Style="text-align:right">일수</MudTh>
+                <MudTh>시작일</MudTh>
+                <MudTh>종료일</MudTh>
+                <MudTh Style="text-align:center">상태</MudTh>
+                <MudTh>사유</MudTh>
+            </HeaderContent>
+            <RowTemplate>
+                <MudTd DataLabel="사원">@context.EmployeeName</MudTd>
+                <MudTd DataLabel="유형">@GetLeaveTypeLabel(context.LeaveType)</MudTd>
+                <MudTd DataLabel="일수" Style="text-align:right">@context.LeaveDays.ToString("0.#")일</MudTd>
+                <MudTd DataLabel="시작일">@context.StartDate.ToString("yyyy-MM-dd")</MudTd>
+                <MudTd DataLabel="종료일">@context.EndDate.ToString("yyyy-MM-dd")</MudTd>
+                <MudTd DataLabel="상태" Style="text-align:center">
+                    <MudChip T="string" Size="Size.Small" Variant="Variant.Filled" Color="@GetStatusColor(context.Status)">
+                        @GetStatusLabel(context.Status)
+                    </MudChip>
+                </MudTd>
+                <MudTd DataLabel="사유">@(context.Status == "rejected" && !string.IsNullOrWhiteSpace(context.RejectReason) ? context.RejectReason : context.Reason)</MudTd>
+            </RowTemplate>
+            <NoRecordsContent>
+                <MudText Typo="Typo.body2" Color="Color.Secondary" Class="pa-4">신청된 연차가 없습니다.</MudText>
+            </NoRecordsContent>
+        </MudTable>
+    </MudPaper>
+</MudTabPanel>
+
+@* === 휴가 일정 (옛 /hr/leave-calendar) — 승인된 것만, 시작일 순 === *@
+<MudTabPanel Text="휴가 일정" Icon="@Icons.Material.Filled.EditCalendar">
+    <MudPaper Elevation="0" Class="pa-2 hitpan-card">
+        <MudTable Items="_scheduleList" Dense="true" Hover="true" Striped="true" Loading="_loading">
+            <HeaderContent>
+                <MudTh>사원</MudTh><MudTh>유형</MudTh><MudTh>시작일</MudTh><MudTh>종료일</MudTh>
+                <MudTh Style="text-align:right">일수</MudTh>
+            </HeaderContent>
+            <RowTemplate>
+                <MudTd DataLabel="사원">@context.EmployeeName</MudTd>
+                <MudTd DataLabel="유형">@GetLeaveTypeLabel(context.LeaveType)</MudTd>
+                <MudTd DataLabel="시작일">@context.StartDate.ToString("yyyy-MM-dd")</MudTd>
+                <MudTd DataLabel="종료일">@context.EndDate.ToString("yyyy-MM-dd")</MudTd>
+                <MudTd DataLabel="일수" Style="text-align:right">@context.LeaveDays.ToString("0.#")일</MudTd>
+            </RowTemplate>
+            <NoRecordsContent><MudText Class="pa-4" Style="color:var(--hitpan-text-faint)">예정된 휴가가 없습니다.</MudText></NoRecordsContent>
+        </MudTable>
+    </MudPaper>
+</MudTabPanel>
+</MudTabs>
+
 @code {
     // === 상태 변수 ===
     private bool _loading;
@@ -121,6 +216,17 @@
     private DateTime? _filterStartDate;
     private DateTime? _filterEndDate;
 
+    // 탭 위치. 0=신청·승인, 1=전사 현황, 2=휴가 일정
+    private int _tabIndex;
+
+    /// <summary>
+    /// 휴가 일정 탭 — 승인된 것만 시작일 순. 옛 [휴가 달력]이 하던 그대로다.
+    /// </summary>
+    private List<LeaveRequestModel> _scheduleList => _allList
+        .Where(x => x.Status == "approved")
+        .OrderBy(x => x.StartDate)
+        .ToList();
+
     /// <summary>
     /// 필터 적용된 목록을 반환한다.
     /// </summary>
@@ -130,8 +236,19 @@
         .Where(x => _filterEndDate == null || x.EndDate <= _filterEndDate)
         .OrderByDescending(x => x.CreatedAt);
 
+    /// <summary>
+    /// 합쳐서 없어진 주소로 들어오면 <b>그 화면이던 탭</b>을 먼저 연다.
+    /// </summary>
+    /// <remarks>
+    /// 주소만 살리고 첫 탭을 보여주면, 메신저 문서 링크를 누른 사람은
+    /// 자기가 보려던 것과 다른 화면을 보게 된다 — 404 는 아니지만 길을 잃은 건 같다.
+    /// </remarks>
     protected override async Task OnInitializedAsync()
     {
+        var uri = Nav.Uri;
+        if (uri.Contains("/hr/leave-status", StringComparison.OrdinalIgnoreCase)) _tabIndex = 1;
+        else if (uri.Contains("/hr/leave-calendar", StringComparison.OrdinalIgnoreCase)) _tabIndex = 2;
+
         await LoadDataAsync();
     }
 
@@ -162,9 +279,12 @@
 
     // === 라벨 헬퍼 ===
 
+    // 🔴 합치며 세 화면의 유형 목록을 합집합으로 모았다. 옛 [휴가 달력]에만 있던
+    // 'half'(반차)가 빠지면 반차가 화면에 'half' 라는 날글자로 뜬다.
     private static string GetLeaveTypeLabel(string type) => type switch
     {
         "annual" => "연차",
+        "half" => "반차",
         "sick" => "병가",
         "personal" => "개인사유",
         "bereavement" => "경조사",

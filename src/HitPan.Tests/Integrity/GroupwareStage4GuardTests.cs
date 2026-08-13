@@ -212,24 +212,75 @@ public sealed class GroupwareStage4GuardTests
     // ───────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// 🔴 <b>직급을 아무거나 칠 수 없어야 한다.</b>
-    /// 자유 텍스트였던 탓에 12명 중 8명이 직급 없음이었다(NULL·공백·"0").
+    /// 🔴 <b>직급은 마스터와 이어져 있어야 한다.</b>
     /// </summary>
+    /// <remarks>
+    /// <para>
+    /// 작(2026-08-13) <b>취지는 그대로, 방법이 바뀌었다.</b> 종전 이 시험은 직급 칸이
+    /// <c>MudSelect</c>(고르기 전용)일 것을 요구했다. 자유 텍스트였던 탓에 12명 중 8명이
+    /// 직급 없음이었기 때문이다(NULL 2 · 공백 5 · <c>"0"</c> 1).
+    /// </para>
+    /// <para>
+    /// 사장님 지시로 <b>없는 직급명을 쳐서 만드는 길</b>이 열렸다 —
+    /// <i>"직급을 설정하면 자동으로 직급이 생기고"</i>. 그래서 고르기 전용은 더 못 쓴다.
+    /// 대신 <b>막으려던 것은 그대로 막는다</b>: ①목록을 먼저 보여줘 있는 직급을 고르게 하고
+    /// ②새로 친 이름은 <b>마스터에 정식 등재</b>하며 ③빈값·<c>"0"</c> 같은 쓰레기는 서버가 거른다.
+    /// </para>
+    /// <para>
+    /// ⇒ 종전엔 "칠 수 없게" 막았고, 지금은 "치면 마스터에 올려서" 잇는다.
+    /// 어느 쪽이든 <b>직급이 마스터 밖에서 떠도는 상태</b>를 허용하지 않는다는 점은 같다.
+    /// </para>
+    /// </remarks>
     [Fact]
-    public void 사원_직급은_마스터에서_고른다()
+    public void 사원_직급은_마스터와_이어진다()
     {
         var page = ReadSource("src", "HitPan.Web", "Pages", "Settings", "EmployeePage.razor");
 
-        // 직급 자리가 MudSelect 여야 한다. MudTextField 로 남아 있으면 자유 입력이다.
         var posIdx = page.IndexOf("Label=\"직급\"", StringComparison.Ordinal);
         Assert.True(posIdx > 0, "직급 입력칸이 있어야 한다");
 
-        var around = page.Substring(Math.Max(0, posIdx - 300), Math.Min(400, page.Length - Math.Max(0, posIdx - 300)));
-        Assert.Contains("MudSelect", around);
+        // 맨 텍스트 칸은 여전히 금지다 — 목록을 안 보여주면 있는 직급도 다시 치게 된다.
         Assert.DoesNotContain("MudTextField T=\"string\" Label=\"직급\"", page);
 
-        // 선택지는 직급 마스터에서 온다.
-        Assert.Contains("PositionOptions", page);
+        // 자동완성이어야 한다: 목록을 보여주면서(고르기) 새 이름도 받는다(치기).
+        var around = page.Substring(Math.Max(0, posIdx - 400),
+            Math.Min(500, page.Length - Math.Max(0, posIdx - 400)));
+        Assert.Contains("MudAutocomplete", around);
+
+        // 선택지는 직급 마스터에서 온다. 자동완성으로 바뀌며 목록을 대는 자리가
+        // 화면(.razor)에서 코드비하인드(SearchPositions)로 옮겨갔다 — 거기서 확인한다.
+        var behind = ReadSource("src", "HitPan.Web", "Pages", "Settings", "EmployeePage.razor.cs");
+        Assert.Contains("SearchFunc=\"SearchPositions\"", page);
+        Assert.Contains("PositionOptions", behind);
+
+        // 새로 친 직급은 마스터에 등재된다 — 안 그러면 결재선이 그 직급을 못 쓴다.
+        var svc = ReadSource("src", "HitPan.Application", "Services", "EmployeeService.cs");
+        Assert.Contains("EnsurePositionExistsAsync", svc);
+        Assert.Contains("INSERT INTO positions", svc);
+    }
+
+    /// <summary>
+    /// 🔴 <b>쓰레기 값은 직급 마스터에 올라가지 않는다.</b>
+    /// </summary>
+    /// <remarks>
+    /// 자동 생성을 열어 준 대가로 생길 수 있는 새 사고다. 자유 텍스트 시절 실제로 들어와 있던
+    /// <c>"0"</c>·공백 같은 값까지 정식 직급으로 등재되면, 직급 관리 목록에 <c>"0"</c> 이
+    /// 직급으로 뜨고 결재선 선택지에도 나온다. 종전 시험이 막으려던 바로 그 값들이다.
+    /// </remarks>
+    [Fact]
+    public void 쓰레기_직급값은_마스터에_올리지_않는다()
+    {
+        var svc = ReadSource("src", "HitPan.Application", "Services", "EmployeeService.cs");
+
+        Assert.Contains("IsMeaningfulPositionName", svc);
+
+        // 숫자만 있는 값("0")과 글자가 하나도 없는 값을 걸러야 한다.
+        var idx = svc.IndexOf("IsMeaningfulPositionName(string name)", StringComparison.Ordinal);
+        Assert.True(idx > 0, "판정 함수가 있어야 한다");
+
+        var body = svc.Substring(idx, Math.Min(600, svc.Length - idx));
+        Assert.Contains("char.IsDigit", body);
+        Assert.Contains("char.IsLetterOrDigit", body);
     }
 
     /// <summary>

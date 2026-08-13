@@ -92,6 +92,19 @@ public sealed class CreateEmployeeRequest
 {
     public string EmpName { get; set; } = string.Empty;
     public string? DeptId { get; set; }
+
+    /// <summary>
+    /// 부서를 <b>이름으로</b> 지정한다. 작(2026-08-13) — 사장님 지시:
+    /// <i>"부서를 설정하면 자동으로 그 부서로 묶으면 되는거니"</i>.
+    /// </summary>
+    /// <remarks>
+    /// <see cref="DeptId"/> 가 있으면 그쪽이 이긴다(목록에서 고른 경우).
+    /// 비어 있고 이 이름만 오면 서버가 <b>같은 이름을 찾고, 없으면 만든다.</b>
+    /// 🔴 표(<c>departments</c>)는 그대로다 — 채우는 방법만 바뀐 것이다.
+    /// 메신저 부서방이 그 위에 서므로 표를 없애면 안 된다(사장님 지시 5).
+    /// </remarks>
+    public string? DeptName { get; set; }
+
     public string? Position { get; set; }
     public string? JobTitle { get; set; }
     public string EmpType { get; set; } = "regular";
@@ -118,6 +131,12 @@ public sealed class UpdateEmployeeRequest
 {
     public string EmpName { get; set; } = string.Empty;
     public string? DeptId { get; set; }
+
+    /// <summary>
+    /// 부서를 <b>이름으로</b> 지정한다. 규칙은 <see cref="CreateEmployeeRequest.DeptName"/> 과 같다.
+    /// </summary>
+    public string? DeptName { get; set; }
+
     public string? Position { get; set; }
     public string? JobTitle { get; set; }
     public string EmpType { get; set; } = "regular";

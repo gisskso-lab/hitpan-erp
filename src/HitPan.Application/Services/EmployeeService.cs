@@ -130,9 +130,181 @@ public sealed class EmployeeService : IEmployeeService
             cancellationToken: ct)).ConfigureAwait(false);
     }
 
+    /// <summary>
+    /// 부서를 정한다. 고른 <c>dept_id</c> 가 있으면 그것을, 이름만 왔으면
+    /// <b>같은 이름을 찾고 없으면 만든다.</b> 작(2026-08-13) — 사장님 지시:
+    /// <i>"부서를 설정하면 자동으로 그 부서로 묶으면 되는거니"</i>.
+    /// </summary>
+    /// <remarks>
+    /// 🔴 <b>표는 그대로다.</b> <c>departments</c> 를 없앤 게 아니라 채우는 방법을 늘렸다 —
+    /// 메신저 부서방이 <c>dept_id</c> 로 묶이므로 표가 죽으면 부서방이 죽는다(사장님 지시 5).
+    ///
+    /// 🔴 <b>대소문자·앞뒤 공백만 다른 이름은 같은 부서로 본다.</b> 안 그러면 "영업부" 와
+    /// "영업부 " 가 각각 생겨, 사원 화면 드롭다운에 같아 보이는 부서가 둘 뜬다.
+    /// <see cref="DepartmentService"/> 가 이름 중복을 막는 것과 같은 판단 기준이다.
+    ///
+    /// ⚠️ 우리가 조직도를 지어내지 않는다(헌법 #11). <b>고객이 친 이름 그대로</b> 만들 뿐,
+    /// 계층·정렬·코드를 추측하지 않는다 — 상위부서 없음, 정렬 맨 뒤, 코드 없음.
+    /// </remarks>
+    private async Task<string?> ResolveDeptIdAsync(string tenantId, string? deptId, string? deptName,
+        CancellationToken ct)
+    {
+        // 목록에서 고른 것이 있으면 그쪽이 이긴다.
+        if (!string.IsNullOrWhiteSpace(deptId))
+        {
+            return deptId;
+        }
+
+        var name = (deptName ?? string.Empty).Trim();
+        if (name.Length == 0)
+        {
+            return null; // 부서 없음도 정상이다(신입·미배정).
+        }
+
+        var existing = await _db.QueryFirstOrDefaultAsync<string>(new CommandDefinition(
+            """
+            SELECT dept_id
+            FROM departments
+            WHERE tenant_id = @TenantId
+              AND LOWER(TRIM(dept_name)) = LOWER(@DeptName)
+            ORDER BY is_active DESC
+            LIMIT 1
+            """,
+            new { TenantId = tenantId, DeptName = name },
+            cancellationToken: ct)).ConfigureAwait(false);
+
+        if (!string.IsNullOrEmpty(existing))
+        {
+            return existing;
+        }
+
+        var newId = Guid.NewGuid().ToString();
+
+        // ⚠️ sort_order·is_active·created_at·updated_at 은 NOT NULL 인데 기본값이 없다(헌법 #13).
+        //    DepartmentService.CreateAsync 와 같은 컬럼 구성으로 넣는다.
+        await _db.ExecuteAsync(new CommandDefinition(
+            """
+            INSERT INTO departments
+              (dept_id, tenant_id, parent_dept_id, dept_name, dept_code,
+               sort_order, is_active, created_at, updated_at)
+            VALUES
+              (@DeptId, @TenantId, NULL, @DeptName, NULL,
+               @SortOrder, 1, NOW(6), NOW(6))
+            """,
+            new
+            {
+                DeptId = newId,
+                TenantId = tenantId,
+                DeptName = name,
+                // 맨 뒤에 붙인다. 순서는 고객이 부서 관리에서 정할 몫이다.
+                SortOrder = 999
+            },
+            cancellationToken: ct)).ConfigureAwait(false);
+
+        return newId;
+    }
+
+    /// <summary>
+    /// 직급 이름이 마스터에 없으면 <b>만들어 둔다.</b> 작(2026-08-13) — 사장님 지시:
+    /// <i>"사원관리에서 직급을 설정하면 자동으로 직급이 생기고"</i>.
+    /// </summary>
+    /// <remarks>
+    /// 🔴 <b>부서와 다르다.</b> <c>employees.position</c> 은 이름 문자열을 담는 컬럼이라
+    /// (FK 가 아니다) 사원 저장 자체는 마스터가 없어도 된다. 그래도 여기서 마스터에 넣는 이유는
+    /// <b>결재선이 직급으로 짜이기</b> 때문이다 — 마스터에 없으면 그 직급으로 결재선을 못 만든다.
+    ///
+    /// ⚠️ <c>positions.code</c> 는 <c>UNIQUE(tenant_id, code)</c> 이고 영문 대문자를 쓰는 자리다
+    /// (CEO·MANAGER…). 한글 이름에서 영문 코드를 <b>지어내지 않는다</b> — "과장"을 MANAGER 로
+    /// 옮기는 판단은 우리가 할 일이 아니고(헌법 #11), 억지로 만들면 뜻이 어긋난 코드가 남는다.
+    /// 대신 충돌하지 않는 내부 코드를 붙인다. 코드는 <b>고객에게 보이지 않고</b> 화면은 이름으로 돈다.
+    ///
+    /// 실패해도 사원 저장은 막지 않는다 — 직급 마스터 등재는 곁다리고,
+    /// 이것 때문에 사원 등록이 통째로 실패하면 손해가 더 크다.
+    /// </remarks>
+    private async Task EnsurePositionExistsAsync(string tenantId, string? position, CancellationToken ct)
+    {
+        var name = (position ?? string.Empty).Trim();
+        if (name.Length == 0)
+        {
+            return;
+        }
+
+        // 🔴 쓰레기 값은 마스터에 올리지 않는다. 종전 자유 텍스트 시절에 실제로
+        //    들어와 있던 값들이다 — 12명 중 8명이 직급 없음이었고 그중 "0" 이 1건이었다.
+        //    자동 생성을 열어 준다고 그때 쓰레기까지 정식 직급으로 등재하면
+        //    직급 관리 목록에 "0" 이 직급으로 뜬다.
+        if (!IsMeaningfulPositionName(name))
+        {
+            return;
+        }
+
+        var exists = await _db.QueryFirstOrDefaultAsync<string>(new CommandDefinition(
+            """
+            SELECT position_id
+            FROM positions
+            WHERE tenant_id = @TenantId
+              AND LOWER(TRIM(name)) = LOWER(@Name)
+            LIMIT 1
+            """,
+            new { TenantId = tenantId, Name = name },
+            cancellationToken: ct)).ConfigureAwait(false);
+
+        if (!string.IsNullOrEmpty(exists))
+        {
+            return;
+        }
+
+        // 사람이 읽을 일이 없는 내부 코드. UNIQUE(tenant_id, code) 를 피하는 것이 목적이다.
+        var code = $"CUSTOM_{Guid.NewGuid():N}"[..24].ToUpperInvariant();
+
+        await _db.ExecuteAsync(new CommandDefinition(
+            """
+            INSERT INTO positions
+              (position_id, tenant_id, code, name, sort_order, is_active)
+            SELECT @PositionId, @TenantId, @Code, @Name, 0, 1
+            WHERE NOT EXISTS (
+                SELECT 1 FROM positions
+                WHERE tenant_id = @TenantId AND LOWER(TRIM(name)) = LOWER(@Name)
+            )
+            """,
+            new
+            {
+                PositionId = Guid.NewGuid().ToString(),
+                TenantId = tenantId,
+                Code = code,
+                Name = name
+            },
+            cancellationToken: ct)).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// 직급 이름으로 쓸 만한 값인가. 아니면 마스터에 올리지 않는다.
+    /// </summary>
+    /// <remarks>
+    /// 자유 텍스트 시절 실측으로 들어와 있던 값: <c>NULL</c> 2건 · 공백 5건 · <c>"0"</c> 1건.
+    /// 자동 생성이 열렸다고 이런 값까지 정식 직급으로 등재하면 직급 관리 목록이 더러워진다.
+    /// ⚠️ 이름을 <b>판정</b>하는 게 아니라 <b>명백한 쓰레기만</b> 거른다 —
+    /// 회사마다 직급 이름이 다르므로 우리가 옳은 이름을 정하지 않는다(헌법 #11).
+    /// </remarks>
+    private static bool IsMeaningfulPositionName(string name)
+    {
+        // 숫자만 있는 값("0", "1")은 직급이 아니다.
+        if (name.All(char.IsDigit))
+        {
+            return false;
+        }
+
+        // 문자·숫자가 하나도 없는 값("-", "...")도 아니다.
+        return name.Any(char.IsLetterOrDigit);
+    }
+
     public async Task<string> CreateAsync(string tenantId, CreateEmployeeRequest request, CancellationToken ct = default)
     {
         await EnsureOpenAsync(ct).ConfigureAwait(false);
+
+        var deptId = await ResolveDeptIdAsync(tenantId, request.DeptId, request.DeptName, ct)
+            .ConfigureAwait(false);
+        await EnsurePositionExistsAsync(tenantId, request.Position, ct).ConfigureAwait(false);
 
         // 사번은 EMP-001 형식으로 테넌트별 최대값 + 1 규칙으로 자동 채번한다.
         var maxEmpNo = await _db.QueryFirstOrDefaultAsync<string>(new CommandDefinition(
@@ -173,7 +345,8 @@ public sealed class EmployeeService : IEmployeeService
                 TenantId = tenantId,
                 EmpNo = empNo,
                 EmpName = request.EmpName,
-                DeptId = request.DeptId,
+                // 위 ResolveDeptIdAsync 가 정한 값 — 고른 것이거나, 이름으로 찾았거나, 새로 만든 것.
+                DeptId = deptId,
                 Position = request.Position,
                 JobTitle = request.JobTitle,
                 EmpType = request.EmpType,
@@ -197,6 +370,14 @@ public sealed class EmployeeService : IEmployeeService
     public async Task UpdateAsync(string tenantId, string employeeId, UpdateEmployeeRequest request, CancellationToken ct = default)
     {
         await EnsureOpenAsync(ct).ConfigureAwait(false);
+
+        // 수정에서도 새 부서명을 칠 수 있어야 한다. 등록에서만 되면
+        // "등록할 땐 됐는데 고칠 땐 안 되네" 가 된다.
+        // 수정에서도 새 부서명을 칠 수 있어야 한다. 등록에서만 되면
+        // "등록할 땐 됐는데 고칠 땐 안 되네" 가 된다.
+        var deptId = await ResolveDeptIdAsync(tenantId, request.DeptId, request.DeptName, ct)
+            .ConfigureAwait(false);
+        await EnsurePositionExistsAsync(tenantId, request.Position, ct).ConfigureAwait(false);
 
         const string sql = """
             UPDATE employees
@@ -223,7 +404,7 @@ public sealed class EmployeeService : IEmployeeService
                 TenantId = tenantId,
                 EmployeeId = employeeId,
                 EmpName = request.EmpName,
-                DeptId = request.DeptId,
+                DeptId = deptId,
                 Position = request.Position,
                 JobTitle = request.JobTitle,
                 EmpType = request.EmpType,

@@ -238,6 +238,13 @@ public class GroupwareStage0GuardTests
     /// 특히 초과근무는 사장님이 지시한 야근·주말근무의 토대이고,
     /// 부서 관리는 메신저 부서방의 선행조건이다.
     /// </summary>
+    /// <remarks>
+    /// 작(2026-08-13) 메뉴 간소화로 <b>목록이 줄었다.</b> 종전에 여기 있던
+    /// attendance-calendar·leave-calendar·leave-status·expense-status 네 개는
+    /// 각각 근태·휴가·경비 화면으로 합쳐져 <b>메뉴에서 내려간 것이 맞다.</b>
+    /// 다만 화면이 없어진 것이 아니므로 <b>주소는 살아 있어야 한다</b> —
+    /// 그쪽은 아래 <see cref="합쳐서_내린_주소도_여전히_열린다"/> 가 지킨다.
+    /// </remarks>
     [Fact]
     public void 숨어있던_화면들이_메뉴에_올라왔다()
     {
@@ -246,17 +253,69 @@ public class GroupwareStage0GuardTests
         string[] mustBeVisible =
         [
             "/hr/overtime",
-            "/hr/departments",
-            "/hr/attendance-calendar",
-            "/hr/leave-calendar",
-            "/hr/leave-status",
-            "/hr/expense-status"
+            "/hr/departments"
         ];
 
         foreach (var route in mustBeVisible)
         {
             Assert.Contains($"Href=\"{route}\"", sidebar);
         }
+    }
+
+    /// <summary>
+    /// 메뉴에서 내린 주소가 <b>여전히 열려야 한다.</b>
+    /// </summary>
+    /// <remarks>
+    /// 🔴 메뉴를 줄이는 작업에서 제일 위험한 자리다. 메뉴에서 안 보인다고 화면까지
+    /// 지우면, 즐겨찾기로 들어오던 사람과 <b>메신저 문서 링크</b>가 404 를 맞는다
+    /// (ChatPopup.razor 가 /hr/leave-status·/hr/expense-status 로 보낸다).
+    /// 실제로 8/13 에 메신저 링크 2건이 404 였고 시험이 잡았다 — 같은 사고를 반복하지 않는다.
+    /// </remarks>
+    [Fact]
+    public void 합쳐서_내린_주소도_여전히_열린다()
+    {
+        var pagesDir = Path.Combine(FindRepoRoot(), "src", "HitPan.Web", "Pages");
+
+        var declared = Directory.EnumerateFiles(pagesDir, "*.razor", SearchOption.AllDirectories)
+            .SelectMany(f => Regex.Matches(File.ReadAllText(f), @"@page\s+""([^""]+)""")
+                .Select(m => m.Groups[1].Value))
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        string[] mergedAway =
+        [
+            "/hr/employees",           // → 사원관리(/employees)
+            "/hr/attendance-calendar", // → 근태 관리 기간 버튼
+            "/hr/leave-calendar",      // → 휴가·연차 '휴가 일정' 탭
+            "/hr/leave-status",        // → 휴가·연차 '전사 현황' 탭 (메신저 링크)
+            "/hr/expense-status",      // → 경비 요약카드      (메신저 링크)
+            "/hr/esign-history"        // → 전자근로계약서 '서명 이력' 탭
+        ];
+
+        foreach (var route in mergedAway)
+        {
+            Assert.True(declared.Contains(route),
+                $"메뉴에서 내렸어도 {route} 주소는 살아 있어야 한다(즐겨찾기·메신저 문서 링크 404 금지)");
+        }
+    }
+
+    /// <summary>
+    /// 한 주소를 화면 <b>둘</b>이 가지면 라우팅이 터진다.
+    /// 합치면서 옛 주소를 새 화면에 얹었으므로, 옛 화면 파일이 남아 있으면 충돌한다.
+    /// </summary>
+    [Fact]
+    public void 같은_주소를_두_화면이_가지지_않는다()
+    {
+        var pagesDir = Path.Combine(FindRepoRoot(), "src", "HitPan.Web", "Pages");
+
+        var dupes = Directory.EnumerateFiles(pagesDir, "*.razor", SearchOption.AllDirectories)
+            .SelectMany(f => Regex.Matches(File.ReadAllText(f), @"@page\s+""([^""]+)""")
+                .Select(m => m.Groups[1].Value))
+            .GroupBy(r => r, StringComparer.OrdinalIgnoreCase)
+            .Where(g => g.Count() > 1)
+            .Select(g => g.Key)
+            .ToArray();
+
+        Assert.True(dupes.Length == 0, $"한 주소를 여러 화면이 가진다: {string.Join(", ", dupes)}");
     }
 
     /// <summary>
