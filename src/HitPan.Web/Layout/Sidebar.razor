@@ -111,6 +111,11 @@
            달·년 단위로 쉬는 것이라 표가 따로 있고, 연차 잔여를 건드리지 않는다.
            직원이 신청하는 화면이라 관리자 게이트를 두지 않는다(본인 것만 보이는 건 서버가 정한다). *@
         <MudNavLink Href="/hr/absence" Icon="@Icons.Material.Filled.EventBusy">휴직 관리</MudNavLink>
+        @* 작(2026-08-13) 단계8 — 급여. 🔴 메뉴를 관리자로 감추지 않는다.
+           급여 담당자는 부모계정이 아닐 수 있고(경리 직원), 권한은 서버가 menu_code='PAYROLL'
+           로 판정한다. 권한 없이 열면 목록 자리에 "볼 권한이 없습니다" 가 뜬다 —
+           메뉴를 숨기는 것은 차단이 아니므로 서버가 진짜 관문이다. *@
+        <MudNavLink Href="/hr/payroll" Icon="@Icons.Material.Filled.Payments">급여 관리</MudNavLink>
         @* 작(2026-08-13) 단계5 — 연차를 '주는' 화면. 위의 '연차 신청'(직원이 쓰는 것)과 다르다.
            반자동 3단: 자동 계산이 제안 → 관리자가 확인·수정 → 확정해야 잔여에 반영. *@
         @if (_isTenantAdmin)
