@@ -46,14 +46,23 @@ else
                         <MudTextField T="string" Label="이름" @bind-Value="_edit.EmpName" Variant="Variant.Outlined" Margin="Margin.Dense" />
                     </MudItem>
                     <MudItem xs="12" md="3">
-                        @* 봉합 (2026-06-22, 10차 P1-1): 부서를 자유 텍스트가 아니라 부서 마스터(dept_id) 드롭다운으로 선택한다.
-                           백엔드는 dept_id 만 저장하므로 DeptName 자유 입력은 저장되지 않아 부서가 유실되던 결함을 정합. *@
-                        <MudSelect T="string" Label="부서" @bind-Value="_edit.DeptId" Variant="Variant.Outlined" Margin="Margin.Dense" Clearable="true">
-                            @foreach (var dept in _departments)
-                            {
-                                <MudSelectItem T="string" Value="@dept.DeptId">@dept.DeptName</MudSelectItem>
-                            }
-                        </MudSelect>
+                        @* 봉합 (2026-06-22, 10차 P1-1): 부서를 자유 텍스트가 아니라 부서 마스터(dept_id) 로 저장한다.
+                           백엔드는 dept_id 만 저장하므로 DeptName 자유 입력은 저장되지 않아 부서가 유실되던 결함을 정합.
+
+                           작(2026-08-13) 사장님 지시: "부서를 설정하면 자동으로 그 부서로 묶으면 되는거니".
+                           고르는 것 + 없는 이름을 치는 것 둘 다 되게 바꿨다. 없는 이름을 치면
+                           서버가 그 부서를 만들고 사원을 거기 묶는다.
+                           🔴 표(departments)는 그대로다 — 채우는 방법만 늘었다(메신저 부서방이 그 위에 선다). *@
+                        <MudAutocomplete T="string" Label="부서" Value="_deptText" ValueChanged="OnDeptTextChanged"
+                                         SearchFunc="SearchDepartments" Variant="Variant.Outlined" Margin="Margin.Dense"
+                                         Clearable="true" CoerceValue="true" ResetValueOnEmptyText="true"
+                                         HelperText="목록에서 고르거나, 없는 부서명을 그대로 입력하세요" />
+                        @if (IsNewDeptName)
+                        {
+                            <MudText Typo="Typo.caption" Color="Color.Info">
+                                새 부서 「@_deptText」 가 함께 만들어집니다.
+                            </MudText>
+                        }
                     </MudItem>
                     <MudItem xs="12" md="3">
                         <MudDatePicker Label="입사일" Date="_edit.JoinDate" DateChanged="OnJoinDateChanged" Variant="Variant.Outlined" Margin="Margin.Dense" />
@@ -66,19 +75,19 @@ else
 
                            🔴 employees.position 은 '이름 문자열' 을 담는다(FK 아님).
                               그래서 이름으로 고른다 — 기존 "과장"·"사원" 값이 그대로 살아난다.
-                              ID 로 바꾸면 기존 값이 전부 매칭 실패로 날아간다. *@
-                        <MudSelect T="string" Label="직급" @bind-Value="_edit.Position" Variant="Variant.Outlined" Margin="Margin.Dense" Clearable="true">
-                            @foreach (var name in PositionOptions)
-                            {
-                                <MudSelectItem T="string" Value="@name">@name</MudSelectItem>
-                            }
-                        </MudSelect>
-                        @if (_positions.Count == 0)
+                              ID 로 바꾸면 기존 값이 전부 매칭 실패로 날아간다.
+
+                           작(2026-08-13) 사장님 지시: "직급을 설정하면 자동으로 직급이 생기고".
+                           고르는 것 + 없는 이름을 치는 것 둘 다 되게 바꿨다. 없는 직급을 치면
+                           서버가 직급 마스터에도 넣는다 — 결재선이 직급으로 짜이기 때문이다. *@
+                        <MudAutocomplete T="string" Label="직급" @bind-Value="_edit.Position"
+                                         SearchFunc="SearchPositions" Variant="Variant.Outlined" Margin="Margin.Dense"
+                                         Clearable="true" CoerceValue="true" ResetValueOnEmptyText="true"
+                                         HelperText="목록에서 고르거나, 없는 직급명을 그대로 입력하세요" />
+                        @if (IsNewPositionName)
                         {
-                            @* 직급 마스터가 비면 고를 게 없다. 어디서 채우는지 알려준다 —
-                               "왜 안 뜨지" 로 막히는 자리다(헌법 #11 관리자가 직접 설정). *@
-                            <MudText Typo="Typo.caption" Color="Color.Warning">
-                                등록된 직급이 없습니다. 설정 → 직급 관리에서 먼저 등록하세요.
+                            <MudText Typo="Typo.caption" Color="Color.Info">
+                                새 직급 「@_edit.Position」 이 함께 만들어집니다.
                             </MudText>
                         }
                     </MudItem>

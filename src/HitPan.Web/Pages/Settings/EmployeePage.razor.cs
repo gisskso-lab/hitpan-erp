@@ -71,6 +71,89 @@ public partial class EmployeePage : ComponentBase
             return names;
         }
     }
+
+    // ───────────────────────────────────────────────────────────────
+    // 부서·직급 자동 생성 (작 2026-08-13, 사장님 지시)
+    //   "사원관리에서 직급을 설정하면 자동으로 직급이 생기고,
+    //    부서를 설정하면 자동으로 그 부서로 묶으면 되는거니"
+    //
+    // 🔴 표는 그대로다. departments·positions 를 없앤 게 아니라
+    //    채우는 방법을 늘렸을 뿐이다 — 메신저 부서방·결재선이 그 위에 선다.
+    // ───────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// 부서 칸에 보이는 <b>이름</b>. 표에는 <c>dept_id</c> 가 저장되므로 둘을 함께 들고 있는다.
+    /// </summary>
+    private string? _deptText;
+
+    /// <summary>
+    /// 지금 부서 칸의 이름이 <b>마스터에 없는 새 이름</b>인가. 참이면 화면이 미리 알려준다 —
+    /// 저장하고 나서야 부서가 생긴 걸 알면 놀란다.
+    /// </summary>
+    private bool IsNewDeptName =>
+        !string.IsNullOrWhiteSpace(_deptText)
+        && !_departments.Any(d => string.Equals((d.DeptName ?? string.Empty).Trim(),
+            _deptText!.Trim(), StringComparison.OrdinalIgnoreCase));
+
+    /// <summary>
+    /// 지금 직급 칸의 이름이 마스터에 없는 새 이름인가.
+    /// </summary>
+    private bool IsNewPositionName =>
+        !string.IsNullOrWhiteSpace(_edit.Position)
+        && !_positions.Any(p => string.Equals((p.Name ?? string.Empty).Trim(),
+            _edit.Position!.Trim(), StringComparison.OrdinalIgnoreCase));
+
+    /// <summary>
+    /// 부서 이름이 바뀌면 <c>dept_id</c> 를 다시 맞춘다.
+    /// 아는 이름이면 그 id 를, 모르는 이름이면 <c>null</c> 로 두고 <b>이름만</b> 서버로 보낸다
+    /// (서버가 찾아보고 없으면 만든다).
+    /// </summary>
+    private void OnDeptTextChanged(string? text)
+    {
+        _deptText = text;
+        _edit.DeptName = text;
+
+        var match = _departments.FirstOrDefault(d =>
+            string.Equals((d.DeptName ?? string.Empty).Trim(), (text ?? string.Empty).Trim(),
+                StringComparison.OrdinalIgnoreCase));
+
+        _edit.DeptId = match?.DeptId;
+    }
+
+    /// <summary>
+    /// 부서 자동완성 후보. 빈칸이면 전체를 보여준다(고르러 온 사람도 있다).
+    /// </summary>
+    private Task<IEnumerable<string>> SearchDepartments(string? value, CancellationToken ct)
+    {
+        var names = _departments
+            .Select(d => d.DeptName ?? string.Empty)
+            .Where(n => !string.IsNullOrWhiteSpace(n));
+
+        if (!string.IsNullOrWhiteSpace(value))
+        {
+            names = names.Where(n => n.Contains(value.Trim(), StringComparison.OrdinalIgnoreCase));
+        }
+
+        return Task.FromResult(names.ToList().AsEnumerable());
+    }
+
+    /// <summary>
+    /// 직급 자동완성 후보. <see cref="PositionOptions"/> 를 그대로 쓴다 —
+    /// 거기에 <b>이 사원이 지금 가진 값</b>을 남기는 처리가 들어 있어,
+    /// 마스터에 없는 옛 값("과장" 등)이 저장 한 번에 날아가지 않는다.
+    /// </summary>
+    private Task<IEnumerable<string>> SearchPositions(string? value, CancellationToken ct)
+    {
+        var names = PositionOptions;
+
+        if (!string.IsNullOrWhiteSpace(value))
+        {
+            names = names.Where(n => n.Contains(value.Trim(), StringComparison.OrdinalIgnoreCase));
+        }
+
+        return Task.FromResult(names.ToList().AsEnumerable());
+    }
+
     private List<LeaveRequestModel> _leaveRequests = new();
     private List<UserPermissionModel> _permissionUsers = new();
     private UserPermissionModel? _selectedPermUser;
@@ -163,6 +246,7 @@ public partial class EmployeePage : ComponentBase
             Role = "sales_user",
             JoinDate = DateTime.Today
         };
+        _deptText = null;
     }
 
     private void CancelEdit()
@@ -184,6 +268,11 @@ public partial class EmployeePage : ComponentBase
             return;
         }
 
+        // 저장하면 부서·직급이 함께 생기는지 미리 봐 둔다 —
+        // 저장 뒤에는 목록이 갱신돼 '새 이름' 이 아니게 되므로 알릴 수 없다.
+        var createdDept = IsNewDeptName ? _deptText?.Trim() : null;
+        var createdPosition = IsNewPositionName ? _edit.Position?.Trim() : null;
+
         var ok = _isCreateMode
             ? await EmployeeSvc.CreateAsync(_edit).ConfigureAwait(false)
             : await EmployeeSvc.UpdateAsync(_selectedEmployeeId!, _edit).ConfigureAwait(false);
@@ -195,6 +284,19 @@ public partial class EmployeePage : ComponentBase
         }
 
         Snackbar.Add(_isCreateMode ? "사원을 등록했습니다." : "사원 정보를 수정했습니다.", Severity.Success);
+
+        // 🔴 함께 만든 것을 사실대로 알린다. 조용히 만들면 부서·직급이 어느새 늘어나 있고
+        //    고객은 누가 만들었는지 모른다(되는 척의 반대편 — 한 일을 감추지 않는다).
+        if (createdDept is not null)
+        {
+            Snackbar.Add($"새 부서 「{createdDept}」 를 만들었습니다.", Severity.Info);
+        }
+
+        if (createdPosition is not null)
+        {
+            Snackbar.Add($"새 직급 「{createdPosition}」 을 만들었습니다.", Severity.Info);
+        }
+
         await ReloadAllAsync().ConfigureAwait(false);
     }
 
@@ -317,6 +419,10 @@ public partial class EmployeePage : ComponentBase
             Email = detail.Email,
             Role = string.IsNullOrWhiteSpace(detail.Role) ? "sales_user" : detail.Role
         };
+
+        // 🔴 부서 칸은 이름으로 보여준다. 이걸 빠뜨리면 사원을 열었을 때 부서가 빈칸으로 보이고,
+        //    다른 항목만 고쳐 저장해도 부서가 조용히 지워진다(WeeklyHours 와 같은 자리).
+        _deptText = detail.DeptName;
 
         await ReloadLeaveAsync(employeeId).ConfigureAwait(false);
         // 연결 계정(user_id)이 있는 사원만 권한 패널과 연결한다.
