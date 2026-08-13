@@ -1,0 +1,134 @@
+@using HitPan.Web.Models
+@using HitPan.Web.Services
+@inject ChatService Chat
+
+@* ═══════════════════════════════════════════════════════════════
+   문서 연결 — 있는 문서를 고르기만 한다. 작(2026-08-13) 단계9.
+
+   🔴 사장님(2026-08-13):
+     "그룹웨어 문서 전송은 그룹웨어에 이미 있는 기능들 연결 정도만 해도 됨"
+     "메신저 채팅창에서 연차신청서 생성해서 만들고 결재까지 기능을 넣을 필요까진 없음.
+      연결까지만 해도 충분함"
+     "있는 기능 연결해서 사용하는게 훨씬 효율적임"
+
+   🔴 그래서 이 화면에 "새로 만들기" 버튼이 없다. 의도된 부재다.
+      만드는 일은 원래 그 화면이 한다 — 연차신청 화면은 이미
+      잔여연차 확인·결재선·이중차감 방지를 한다. 규칙이 두 벌이 되면 갈라진다.
+
+   🔴 목록에는 "내가 볼 수 있는 문서"만 나온다. 남의 급여는 애초에 안 뜬다.
+   ═══════════════════════════════════════════════════════════════ *@
+
+<MudDialog>
+    <DialogContent>
+        <MudSelect T="string" Value="_refType" Label="문서 종류"
+                   Variant="Variant.Outlined" Margin="Margin.Dense"
+                   ValueChanged="OnTypeChangedAsync" Class="mb-3">
+            <MudSelectItem T="string" Value="@("approval")">결재 문서</MudSelectItem>
+            <MudSelectItem T="string" Value="@("leave")">휴가·연차 신청</MudSelectItem>
+            <MudSelectItem T="string" Value="@("expense")">경비</MudSelectItem>
+            <MudSelectItem T="string" Value="@("payroll")">급여명세서</MudSelectItem>
+            <MudSelectItem T="string" Value="@("contract")">근로계약서</MudSelectItem>
+            <MudSelectItem T="string" Value="@("report")">업무보고서</MudSelectItem>
+        </MudSelect>
+
+        @if (_loading)
+        {
+            <MudProgressLinear Indeterminate="true" Color="Color.Primary" />
+        }
+        else if (_failed)
+        {
+            <MudAlert Severity="Severity.Warning" Dense="true">
+                문서를 불러오지 못했습니다.
+            </MudAlert>
+        }
+        else if (_docs.Count == 0)
+        {
+            <MudAlert Severity="Severity.Info" Dense="true">
+                연결할 문서가 없습니다.
+                <br />
+                <MudText Typo="Typo.caption">
+                    문서는 해당 화면에서 먼저 작성해 주세요. 여기서는 <b>이미 있는 문서만</b> 연결합니다.
+                </MudText>
+            </MudAlert>
+        }
+        else
+        {
+            <div style="max-height:320px; overflow-y:auto;">
+                <MudList T="string" Dense="true">
+                    @foreach (var doc in _docs)
+                    {
+                        <MudListItem T="string" OnClick="@(() => Pick(doc))">
+                            <div class="d-flex align-center justify-space-between">
+                                <div>
+                                    <MudText Typo="Typo.body2">@doc.Title</MudText>
+                                    @if (doc.DocDate.HasValue)
+                                    {
+                                        <MudText Typo="Typo.caption" Color="Color.Secondary">
+                                            @doc.DocDate.Value.ToString("yyyy-MM-dd")
+                                        </MudText>
+                                    }
+                                </div>
+                                @if (!string.IsNullOrWhiteSpace(doc.Status))
+                                {
+                                    <MudChip T="string" Size="Size.Small" Variant="Variant.Text">
+                                        @StatusLabel(doc.Status!)
+                                    </MudChip>
+                                }
+                            </div>
+                        </MudListItem>
+                    }
+                </MudList>
+            </div>
+        }
+    </DialogContent>
+
+    <DialogActions>
+        <MudButton OnClick="Cancel">취소</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private IMudDialogInstance MudDialog { get; set; } = default!;
+
+    private string _refType = "approval";
+    private List<ChatAttachableDocModel> _docs = new();
+    private bool _loading = true;
+    private bool _failed;
+
+    protected override async Task OnInitializedAsync() => await LoadAsync();
+
+    private async Task OnTypeChangedAsync(string value)
+    {
+        _refType = value;
+        await LoadAsync();
+    }
+
+    private async Task LoadAsync()
+    {
+        _loading = true;
+        _failed = false;
+
+        var docs = await Chat.GetDocumentsAsync(_refType);
+        if (docs is null) { _failed = true; _docs = new(); }
+        else { _docs = docs; }
+
+        _loading = false;
+    }
+
+    private void Pick(ChatAttachableDocModel doc) => MudDialog.Close(DialogResult.Ok(doc));
+
+    private void Cancel() => MudDialog.Cancel();
+
+    /// <summary>고객이 읽는 말로. 개발용어를 쓰지 않는다.</summary>
+    private static string StatusLabel(string status) => status switch
+    {
+        "pending"   => "대기",
+        "approved"  => "승인",
+        "rejected"  => "반려",
+        "cancelled" => "취소",
+        "confirmed" => "확정",
+        "paid"      => "지급",
+        "draft"     => "작성 중",
+        _           => status
+    };
+}

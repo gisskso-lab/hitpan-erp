@@ -3351,7 +3351,7 @@ INSERT INTO `schema_migrations` (`migration_id`, `app_version`, `success`) VALUE
 ('DB-74','clean-ddl',1),('DB-75','clean-ddl',1),('DB-76','clean-ddl',1),('DB-77','clean-ddl',1),
 ('DB-78','clean-ddl',1),('DB-79','clean-ddl',1),('DB-80','clean-ddl',1),('DB-81','clean-ddl',1),
 ('DB-82','clean-ddl',1),('DB-83','clean-ddl',1),('DB-84','clean-ddl',1),('DB-85','clean-ddl',1),
-('DB-86','clean-ddl',1),('DB-87','clean-ddl',1),('DB-88','clean-ddl',1),('DB-89','clean-ddl',1),('DB-90','clean-ddl',1),('DB-91','clean-ddl',1),('DB-92','clean-ddl',1),('DB-93','clean-ddl',1),('DB-94','clean-ddl',1),('DB-95','clean-ddl',1),('DB-96','clean-ddl',1),('DB-97','clean-ddl',1),('DB-98','clean-ddl',1),('DB-99','clean-ddl',1),('DB-100','clean-ddl',1);
+('DB-86','clean-ddl',1),('DB-87','clean-ddl',1),('DB-88','clean-ddl',1),('DB-89','clean-ddl',1),('DB-90','clean-ddl',1),('DB-91','clean-ddl',1),('DB-92','clean-ddl',1),('DB-93','clean-ddl',1),('DB-94','clean-ddl',1),('DB-95','clean-ddl',1),('DB-96','clean-ddl',1),('DB-97','clean-ddl',1),('DB-98','clean-ddl',1),('DB-99','clean-ddl',1),('DB-100','clean-ddl',1),('DB-101','clean-ddl',1);
 
 --
 -- Table structure for table `service_tickets`
@@ -4446,6 +4446,123 @@ INSERT INTO `common_codes` (`code_id`, `tenant_id`, `code_group`, `code_value`, 
 ('d73f74d1-3195-4d84-933d-f5daf5ca1ddd',NULL,'WH_TYPE','normal','normal',0,1,'2026-04-12 19:26:22'),
 ('da9b8d49-0e71-4e43-9a9f-b4d0e11be747',NULL,'ITEM_TYPE','product','product',0,1,'2026-04-12 19:26:22'),
 ('eb6a171c-64b0-4216-8cc9-c402b6a6b481',NULL,'UNIT','L','L',3,1,'2026-04-12 19:26:22');
+
+--
+-- ═══════════════════════════════════════════════════════════════
+-- 사내 메신저 (그룹웨어 단계9) — DB-101 · 2026-08-13
+-- ═══════════════════════════════════════════════════════════════
+-- 🔴 사장님 지시: "단체대화, 부서별 대화, 1:1대화 모두 가능해야함"
+--    "메신저에서 각 그룹웨어 문서들 연결 가능해야 함" (연결만 — 생성·결재는 원래 화면이)
+--    "승인 혹은 반려시, 최초 발신인(신청자)에게 메시지 보내야됨"
+--    "결재봇, 메시지봇 공유해도 될듯. 다만 메시지인지, 결재안내인지는 안내" → msg_kind
+--    "파일전송은 최소한으로" → 20MB · 디스크 보관 · 3중 한도
+--
+
+DROP TABLE IF EXISTS `chat_rooms`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!40101 SET character_set_client = utf8mb4 */;
+CREATE TABLE `chat_rooms` (
+  `room_id` varchar(36) NOT NULL COMMENT '방 PK',
+  `tenant_id` varchar(36) NOT NULL COMMENT '테넌트 (헌법 #2)',
+  `room_type` varchar(10) NOT NULL COMMENT 'direct(1:1) · dept(부서) · group(단체)',
+  `room_name` varchar(100) DEFAULT NULL COMMENT '단체방만. 1:1 은 NULL',
+  `dept_id` varchar(36) DEFAULT NULL COMMENT '부서방만. 부서 0건이어도 정상(고객사가 설정할 일)',
+  `direct_key` varchar(80) DEFAULT NULL COMMENT '1:1 중복 방지 — 사원ID 2개 정렬 결합',
+  `created_by` varchar(36) NOT NULL,
+  `created_at` datetime(6) NOT NULL DEFAULT current_timestamp(6),
+  `updated_at` datetime(6) NOT NULL DEFAULT current_timestamp(6) ON UPDATE current_timestamp(6),
+  PRIMARY KEY (`room_id`),
+  UNIQUE KEY `uq_chat_direct` (`tenant_id`,`direct_key`),
+  KEY `idx_chat_rooms_tenant_type` (`tenant_id`,`room_type`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='사내 메신저 방 — 1:1·부서·단체 3종';
+/*!40101 SET character_set_client = @saved_cs_client */;
+
+--
+-- Table structure for table `chat_room_members`
+--
+
+DROP TABLE IF EXISTS `chat_room_members`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!40101 SET character_set_client = utf8mb4 */;
+CREATE TABLE `chat_room_members` (
+  `member_id` varchar(36) NOT NULL,
+  `tenant_id` varchar(36) NOT NULL,
+  `room_id` varchar(36) NOT NULL,
+  `employee_id` varchar(36) NOT NULL COMMENT '사원 ID (user_id 아님 — 알림·결재와 같은 축)',
+  `last_read_at` datetime(6) DEFAULT NULL COMMENT '읽음의 유일한 근거',
+  `joined_at` datetime(6) NOT NULL DEFAULT current_timestamp(6),
+  `left_at` datetime(6) DEFAULT NULL COMMENT 'NULL=참여중. 나가도 줄을 지우지 않는다',
+  PRIMARY KEY (`member_id`),
+  UNIQUE KEY `uq_chat_member` (`room_id`,`employee_id`),
+  KEY `idx_chat_member_my` (`tenant_id`,`employee_id`,`left_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='메신저 방 참여자 — last_read_at 하나로 읽음 판정';
+/*!40101 SET character_set_client = @saved_cs_client */;
+
+--
+-- Table structure for table `chat_messages`
+--
+
+DROP TABLE IF EXISTS `chat_messages`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!40101 SET character_set_client = utf8mb4 */;
+CREATE TABLE `chat_messages` (
+  `message_id` varchar(36) NOT NULL,
+  `tenant_id` varchar(36) NOT NULL,
+  `room_id` varchar(36) NOT NULL,
+  `sender_id` varchar(36) NOT NULL COMMENT '보낸 사원. 결재 안내도 결재한 사람 ID',
+  `msg_kind` varchar(10) NOT NULL DEFAULT 'text' COMMENT '딱지 — text(메시지)·approval(결재)·file(파일)',
+  `body` varchar(2000) NOT NULL,
+  `ref_type` varchar(20) DEFAULT NULL COMMENT 'approval·leave·expense·payroll·contract·report',
+  `ref_id` varchar(36) DEFAULT NULL COMMENT '원본 문서 ID — 누르면 그 화면으로',
+  `ref_title` varchar(200) DEFAULT NULL COMMENT '미리보기용 제목만. 내용 아님',
+  `sent_at` datetime(6) NOT NULL DEFAULT current_timestamp(6),
+  `deleted_at` datetime(6) DEFAULT NULL COMMENT '숨김만. 원문은 남는다',
+  PRIMARY KEY (`message_id`),
+  KEY `idx_chat_msg_room` (`tenant_id`,`room_id`,`sent_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='메신저 메시지 — 문서는 참조만, 삭제는 숨김만';
+/*!40101 SET character_set_client = @saved_cs_client */;
+
+--
+-- Table structure for table `chat_files`
+--
+
+DROP TABLE IF EXISTS `chat_files`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!40101 SET character_set_client = utf8mb4 */;
+CREATE TABLE `chat_files` (
+  `file_id` varchar(36) NOT NULL COMMENT 'PK. 저장 파일명도 이것 — 원래 이름 쓰면 경로 조작',
+  `tenant_id` varchar(36) NOT NULL,
+  `room_id` varchar(36) NOT NULL,
+  `message_id` varchar(36) NOT NULL,
+  `original_name` varchar(255) NOT NULL COMMENT '보여주기용만',
+  `stored_path` varchar(500) NOT NULL COMMENT 'chat-files/{tenant_id}/{yyyyMM}/{file_id}.{ext}',
+  `content_type` varchar(100) NOT NULL DEFAULT 'application/octet-stream',
+  `file_size` bigint(20) NOT NULL COMMENT '20MB 한도',
+  `uploaded_by` varchar(36) NOT NULL,
+  `uploaded_at` datetime(6) NOT NULL DEFAULT current_timestamp(6),
+  PRIMARY KEY (`file_id`),
+  KEY `idx_chat_files_room` (`tenant_id`,`room_id`),
+  KEY `idx_chat_files_msg` (`message_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='메신저 파일 — 실제 파일은 디스크, 여기엔 경로만';
+/*!40101 SET character_set_client = @saved_cs_client */;
+
+--
+-- Table structure for table `chat_file_settings`
+--
+
+DROP TABLE IF EXISTS `chat_file_settings`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!40101 SET character_set_client = utf8mb4 */;
+CREATE TABLE `chat_file_settings` (
+  `tenant_id` varchar(36) NOT NULL,
+  `max_file_mb` int(11) NOT NULL DEFAULT 20 COMMENT '파일 한 개 (사장님 확정 20MB)',
+  `max_room_mb` int(11) NOT NULL DEFAULT 500 COMMENT '방 하나 누적',
+  `max_tenant_mb` int(11) NOT NULL DEFAULT 5120 COMMENT '회사 전체 누적 (5GB)',
+  `created_at` datetime(6) NOT NULL DEFAULT current_timestamp(6),
+  `updated_at` datetime(6) NOT NULL DEFAULT current_timestamp(6) ON UPDATE current_timestamp(6),
+  PRIMARY KEY (`tenant_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='메신저 파일 한도 — 파일이 ERP를 넘어뜨리지 못하게. 업무 데이터는 무관';
+/*!40101 SET character_set_client = @saved_cs_client */;
 
 /*!40103 SET TIME_ZONE=@OLD_TIME_ZONE */;
 
