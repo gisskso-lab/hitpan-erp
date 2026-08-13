@@ -58,12 +58,28 @@
 
     private void OnNavigateRequested(string url) => Navigation.NavigateTo(url);
 
-    private async void OnAuthenticationStateChanged(Task _)
+    /// <summary>
+    /// 로그인 상태가 바뀌면 탭 이름표를 다시 읽는다.
+    /// </summary>
+    /// <remarks>
+    /// 🔴 <c>async void</c> 를 쓰지 않는다 — 작(2026-08-14, 검증팀 P1 적발).
+    /// <see cref="AccountBadge"/> 와 같은 자리다. 상단바라 어느 화면에서든
+    /// 흰 띠가 뜬다. 탭 이름을 못 읽는 것으로 화면 전체를 죽이지 않는다.
+    /// </remarks>
+    private void OnAuthenticationStateChanged(Task _)
     {
-        await InvokeAsync(async () =>
+        _ = InvokeAsync(async () =>
         {
-            await LoadLabelsFromJwtAsync();
-            StateHasChanged();
+            try
+            {
+                await LoadLabelsFromJwtAsync();
+                StateHasChanged();
+            }
+            catch (Exception ex)
+            {
+                // 헌법 #15 — 빈 catch 금지.
+                Console.Error.WriteLine($"[MultiTabBar] 탭 표시 갱신 실패: {ex.GetType().Name}: {ex.Message}");
+            }
         });
     }
 

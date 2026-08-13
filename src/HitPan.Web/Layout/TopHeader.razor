@@ -47,12 +47,27 @@
     /// </remarks>
     private async Task OpenChatWindow()
     {
-        var opened = await JS.InvokeAsync<bool>("hitpanChat.open", "/chat-window");
-
-        if (!opened)
+        // 🔴 작(2026-08-14): try 로 감싼다 — 검증팀 P1 적발.
+        //   여기서 터지면 아무도 못 잡아 화면 아래 **흰 띠**가 뜬다.
+        //   사장님이 지적한 그 증상이고, 여기가 **메신저를 여는 주 버튼**이다.
+        //   ChatButton 만 감싸고 정작 창을 띄우는 이 자리를 비워 두면
+        //   "한 군데만 고쳐 남은 자리에서 재발" 을 그대로 되풀이한다.
+        //   (js 가 아직 안 올라온 순간에 누르면 실제로 난다 — 느린 PC·새로고침 직후)
+        try
         {
-            Snackbar.Add("브라우저가 팝업을 막았습니다. 주소창 오른쪽의 팝업 차단 아이콘에서 "
-                + "허용해 주세요. (메뉴 → 메신저 로도 열 수 있습니다)", Severity.Warning);
+            var opened = await JS.InvokeAsync<bool>("hitpanChat.open", "/chat-window");
+
+            if (!opened)
+            {
+                Snackbar.Add("브라우저가 팝업을 막았습니다. 주소창 오른쪽의 팝업 차단 아이콘에서 "
+                    + "허용해 주세요. (메뉴 → 메신저 로도 열 수 있습니다)", Severity.Warning);
+            }
+        }
+        catch (Exception ex)
+        {
+            // 헌법 #15 — 빈 catch 금지. 못 열었다고 화면 전체를 죽이지 않는다.
+            Console.Error.WriteLine($"[TopHeader] 메신저 창 열기 실패: {ex.GetType().Name}: {ex.Message}");
+            Snackbar.Add("메신저 창을 열지 못했습니다. 메뉴 → 메신저 로 열어 주세요.", Severity.Warning);
         }
 
         // 창을 열면 읽음이 될 수 있으니 배지를 다시 센다.

@@ -79,7 +79,31 @@ else if (_state == CommsState.Recovering)
     {
         _cts = new CancellationTokenSource();
         // 초기 폴링 5초 후 시작 (페이지 로드 직후 부담 줄이기)
-        _timer = new Timer(async _ => await PollHealthAsync(), null, 5_000, PollIntervalMs);
+        //
+        // 🔴 작(2026-08-14) — 타이머 콜백을 통째로 감싼다. 검증팀 P0 적발.
+        //   종전엔 `async _ => await PollHealthAsync()` 였다. 이 람다는 async void 와 같아
+        //   여기서 새는 예외를 **아무도 못 잡고** 화면 아래 흰 띠가 뜬다.
+        //   PollHealthAsync 안에 try 가 있지만 InvokeAsync(StateHasChanged) 두 곳이
+        //   **catch 바깥**이라 거기서 터지면 그대로 샌다(화면이 이미 걷힌 뒤 등).
+        //
+        //   🔴 이 배너는 **모든 화면에 상주**하고 **60초마다** 돈다 —
+        //     눌러야 나는 사고와 달리 **가만히 있어도 1분마다** 재발한다.
+        //     통신이 끊긴 상황을 알리려고 둔 것이 되레 화면을 죽이면 안 된다.
+        _timer = new Timer(_ =>
+        {
+            _ = Task.Run(async () =>
+            {
+                try
+                {
+                    await PollHealthAsync();
+                }
+                catch (Exception ex)
+                {
+                    // 헌법 #15 — 빈 catch 금지. 다음 주기에 다시 재본다.
+                    Console.Error.WriteLine($"[CommsRecoveryBanner] 통신 점검 실패: {ex.GetType().Name}: {ex.Message}");
+                }
+            });
+        }, null, 5_000, PollIntervalMs);
     }
 
     private async Task PollHealthAsync()
