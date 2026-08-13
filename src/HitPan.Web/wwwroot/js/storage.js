@@ -24,6 +24,50 @@ window.hitpanStorage_set = (key, value) => hitpanStorage.set(key, value);
 window.hitpanStorage_get = (key) => hitpanStorage.get(key);
 window.hitpanStorage_remove = (key) => hitpanStorage.remove(key);
 
+// ══════════════════════════════════════════════════════════════════
+// 🔴 팝업창(메신저)에 로그인 상태를 물려준다. 작(2026-08-14).
+//
+//   ■ 무엇을 겪고서
+//     사장님 지적: "히트판메신저 팝업은 여전히 안됨" — 창은 뜨는데 **빈 화면**이었다.
+//     진범: 토큰이 sessionStorage 인데 **sessionStorage 는 창마다 따로다.**
+//     window.open 으로 연 새 창은 자기만의 **빈** sessionStorage 를 갖는다 ⇒
+//     팝업이 토큰을 못 찾아 [Authorize] 에 걸려 아무것도 안 그렸다.
+//
+//   ■ 왜 localStorage 로 안 옮기나
+//     그러면 한 줄로 끝나지만 **보안이 나빠진다** — 이 파일 첫 줄이 밝힌 대로
+//     민감 토큰을 sessionStorage 에 둔 것은 XSS 노출 창을 줄이려는 판단이다.
+//     팝업 하나 때문에 그 판단을 뒤집지 않는다.
+//
+//   ■ 그래서 부모 창에서 **물려받는다**
+//     window.open 으로 연 창은 opener 로 부모를 가리킨다. **같은 출처**라
+//     토큰이 브라우저 밖으로 나가지 않는다 — 저장 정책은 그대로다.
+//     ⚠️ 다른 출처면 opener 접근 자체가 예외라 try 로 감싼다(그 경우 로그인 화면으로 간다).
+// ══════════════════════════════════════════════════════════════════
+window.hitpanStorage_inheritFromOpener = () => {
+    try {
+        // 부모가 없으면(직접 주소를 친 경우) 물려받을 것도 없다.
+        if (!window.opener || window.opener.closed) return false;
+
+        var inherited = false;
+        SESSION_KEYS.forEach(key => {
+            // 이미 있으면 덮지 않는다 — 이 창에서 따로 로그인했을 수 있다.
+            if (sessionStorage.getItem(key)) return;
+
+            var v = window.opener.sessionStorage.getItem(key);
+            if (v) {
+                sessionStorage.setItem(key, v);
+                inherited = true;
+            }
+        });
+
+        return inherited;
+    } catch (e) {
+        // 다른 출처면 여기로 온다. 막힌 게 정상이고, 팝업은 로그인 화면을 띄운다.
+        console.warn('[hitpanStorage] 부모 창에서 로그인 상태를 물려받지 못했습니다', e);
+        return false;
+    }
+};
+
 // 바이트 배열(Base64) → 브라우저 파일 다운로드
 window.downloadFileFromBytes = (fileName, contentType, base64) => {
     const bin = atob(base64);
