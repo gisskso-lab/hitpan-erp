@@ -15,6 +15,28 @@
            🔴 왼쪽 AI 챗봇(로봇)과 자리·아이콘을 뚜렷이 갈랐다 —
               AI 는 대화를 외부로 보내고 이 알림은 회사 안에서만 돈다. *@
         <NotificationBell />
+        @* 작(2026-08-13) 단계9: 메신저 버튼 — 사장님 지시
+           "메신저 알림아이콘 옆 메신저 버튼 생성.
+            메뉴에 기능이 있어야 하는건 맞지만, 메뉴에서만 찾는건 비효율적."
+           🔴 팝업이라 업무 화면이 안 바뀐다 — 견적서 쓰다 물어보고 그대로 이어서 쓴다
+              ("히트판erp 업무 멀티태스킹 기능도 됨"). 페이지로 가면 쓰던 게 날아간다. *@
+        <ChatButton @ref="_chatButton" Open="_chatOpen" OpenChanged="OnChatOpenChanged" />
         <AccountBadge />
     </div>
 </header>
+
+@* 오른쪽 아래 채팅창. 상단바 버튼이 켜고 끈다. *@
+<ChatPopup Open="_chatOpen" OpenChanged="OnChatOpenChanged" OnUnreadChanged="RefreshChatBadge" />
+
+@code {
+    private bool _chatOpen;
+    private ChatButton? _chatButton;
+
+    private void OnChatOpenChanged(bool open) => _chatOpen = open;
+
+    /// <summary>팝업이 읽음 처리를 하면 버튼 배지를 다시 센다.</summary>
+    private async Task RefreshChatBadge()
+    {
+        if (_chatButton is not null) await _chatButton.RefreshAsync();
+    }
+}

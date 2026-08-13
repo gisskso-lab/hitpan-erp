@@ -1,0 +1,393 @@
+@using HitPan.Web.Models
+@using HitPan.Web.Services
+@implements IDisposable
+@inject ChatService Chat
+@inject NotificationClient Notify
+@inject NavigationManager Nav
+@inject ISnackbar Snackbar
+
+@* ═══════════════════════════════════════════════════════════════
+   메신저 팝업 — 상단바 버튼으로 열고 닫는다. 작(2026-08-13).
+
+   🔴 사장님 지시 (2026-08-13):
+     "메신저 = 팝업으로 작동되도록"
+     "메신저 알림아이콘 옆 메신저 버튼 생성.
+      메뉴에 기능이 있어야 하는건 맞지만, 메뉴에서만 찾는건 비효율적."
+     "메신저를 팝업으로 운영해야 그룹웨어 결재 뿐 아니라,
+      히트판erp 업무 멀티태스킹 기능도 됨"
+
+   🔴 왜 팝업이어야 하나 — 이게 핵심이다.
+
+     견적서 작성 중 ──→ "이 단가 맞나요?" ──→ 답 받고 그대로 이어서 작성
+         ↑ 화면이 안 바뀐다. 입력하던 것도 안 날아간다.
+
+     페이지로 가면 작성 중이던 내용이 날아간다. 그러면 직원은 메신저를 안 쓰고
+     카톡으로 물어보게 되고, **업무 내용이 회사 밖으로 나간다**(헌법 #18·#22).
+     ⇒ 팝업이 멀티태스킹을 살리고, 대화를 회사 안에 잡아두는 자리다.
+
+   ⚠️ 메뉴의 /chat 페이지는 그대로 둔다(사장님: "메뉴에 기능이 있어야 하는건 맞지만").
+      넓게 보고 싶을 때 쓴다. 팝업은 일하면서 쓰는 자리다.
+   ═══════════════════════════════════════════════════════════════ *@
+
+@if (Open)
+{
+    <div class="hitpan-chat-popup">
+
+        @* ── 머리 ── *@
+        <div class="hitpan-chat-popup-head">
+            @if (_roomId is null)
+            {
+                <MudText Typo="Typo.subtitle2" Style="font-weight:700">메신저</MudText>
+            }
+            else
+            {
+                <div class="d-flex align-center" style="gap:4px;min-width:0;">
+                    <MudIconButton Icon="@Icons.Material.Filled.ArrowBack" Size="Size.Small"
+                                   OnClick="BackToList" aria-label="목록으로" />
+                    <MudText Typo="Typo.subtitle2" Style="font-weight:700;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">
+                        @(_currentRoom?.DisplayName ?? "대화")
+                    </MudText>
+                    @if (_currentRoom is not null && _currentRoom.RoomType != "direct")
+                    {
+                        <MudText Typo="Typo.caption" Color="Color.Secondary">@_currentRoom.MemberCount</MudText>
+                    }
+                </div>
+            }
+
+            <div class="d-flex align-center">
+                <MudTooltip Text="크게 보기">
+                    <MudIconButton Icon="@Icons.Material.Filled.OpenInFull" Size="Size.Small"
+                                   OnClick="OpenFullPage" aria-label="크게 보기" />
+                </MudTooltip>
+                <MudIconButton Icon="@Icons.Material.Filled.Close" Size="Size.Small"
+                               OnClick="OnClose" aria-label="닫기" />
+            </div>
+        </div>
+
+        <MudDivider />
+
+        @* ── 몸통 ── *@
+        <div class="hitpan-chat-popup-body">
+
+            @if (_roomId is null)
+            {
+                @* 방 목록 *@
+                @if (_loading)
+                {
+                    <MudProgressLinear Indeterminate="true" Color="Color.Primary" />
+                }
+                else if (_failed)
+                {
+                    <div class="pa-4">
+                        <MudAlert Severity="Severity.Warning" Dense="true">
+                            대화 목록을 불러오지 못했습니다.
+                            <MudButton Size="Size.Small" OnClick="LoadRoomsAsync">다시 시도</MudButton>
+                        </MudAlert>
+                    </div>
+                }
+                else if (_rooms.Count == 0)
+                {
+                    <div class="pa-4" style="text-align:center">
+                        <MudText Typo="Typo.body2" Color="Color.Secondary">
+                            아직 대화가 없습니다.
+                        </MudText>
+                        <MudButton Class="mt-2" Size="Size.Small" Variant="Variant.Filled"
+                                   Color="Color.Primary" OnClick="OpenFullPage">
+                            새 대화 시작
+                        </MudButton>
+                    </div>
+                }
+                else
+                {
+                    <MudList T="string" Dense="true">
+                        @foreach (var room in _rooms)
+                        {
+                            <MudListItem T="string" OnClick="@(() => OpenRoomAsync(room.RoomId))">
+                                <div class="d-flex align-center" style="gap:8px;">
+                                    <MudIcon Icon="@RoomIcon(room.RoomType)" Size="Size.Small" />
+                                    <div style="flex:1;min-width:0;">
+                                        <MudText Typo="Typo.body2" Style="font-weight:500">
+                                            @room.DisplayName
+                                        </MudText>
+                                        <MudText Typo="Typo.caption" Color="Color.Secondary"
+                                                 Style="display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">
+                                            @(room.LastMessage ?? "새 대화")
+                                        </MudText>
+                                    </div>
+                                    @if (room.UnreadCount > 0)
+                                    {
+                                        <MudBadge Content="@room.UnreadCount" Color="Color.Error" Overlap="false" />
+                                    }
+                                </div>
+                            </MudListItem>
+                        }
+                    </MudList>
+                }
+            }
+            else
+            {
+                @* 대화 *@
+                @if (_loadingMessages)
+                {
+                    <MudProgressLinear Indeterminate="true" Color="Color.Primary" />
+                }
+                else
+                {
+                    <div class="pa-2">
+                        @foreach (var msg in _messages)
+                        {
+                            <div class="@(msg.IsMine ? "d-flex justify-end mb-2" : "d-flex mb-2")">
+                                <div style="max-width:80%;">
+                                    <div class="d-flex align-center mb-1" style="gap:4px;">
+                                        <MudChip T="string" Size="Size.Small"
+                                                 Color="@KindColor(msg.MsgKind)" Variant="Variant.Filled">
+                                            @KindLabel(msg.MsgKind)
+                                        </MudChip>
+                                        @if (!msg.IsMine)
+                                        {
+                                            <MudText Typo="Typo.caption">@msg.SenderName</MudText>
+                                        }
+                                        <MudText Typo="Typo.caption" Color="Color.Secondary">
+                                            @msg.SentAt.ToString("HH:mm")
+                                        </MudText>
+                                    </div>
+
+                                    <MudPaper Elevation="0" Class="pa-2"
+                                              Style="@(msg.IsMine
+                                                  ? "background:var(--mud-palette-primary-lighten);border-radius:10px;"
+                                                  : "background:var(--mud-palette-background-grey);border-radius:10px;")">
+                                        <MudText Typo="Typo.body2" Style="white-space:pre-wrap;">@msg.Body</MudText>
+
+                                        @if (!string.IsNullOrEmpty(msg.RefType) && !string.IsNullOrEmpty(msg.RefId))
+                                        {
+                                            <MudButton Class="mt-1" Size="Size.Small" Variant="Variant.Outlined"
+                                                       Color="Color.Primary"
+                                                       StartIcon="@Icons.Material.Filled.OpenInNew"
+                                                       OnClick="@(() => GoToDocument(msg.RefType!, msg.RefId!))">
+                                                @(msg.RefTitle ?? "문서 열기")
+                                            </MudButton>
+                                        }
+
+                                        @if (msg.File is not null)
+                                        {
+                                            <MudButton Class="mt-1" Size="Size.Small" Variant="Variant.Outlined"
+                                                       StartIcon="@Icons.Material.Filled.Download"
+                                                       Href="@($"api/chat/files/{msg.File.FileId}")" Target="_blank">
+                                                @msg.File.OriginalName
+                                            </MudButton>
+                                        }
+                                    </MudPaper>
+
+                                    @if (msg.IsMine && msg.ReadCount > 0)
+                                    {
+                                        <MudText Typo="Typo.caption" Color="Color.Secondary"
+                                                 Align="Align.Right" Style="display:block;">
+                                            @ReadLabel(msg.ReadCount)
+                                        </MudText>
+                                    }
+                                </div>
+                            </div>
+                        }
+                    </div>
+                }
+            }
+        </div>
+
+        @* ── 보내기 (대화 열었을 때만) ── *@
+        @if (_roomId is not null)
+        {
+            <MudDivider />
+            <div class="hitpan-chat-popup-foot">
+                <MudTextField @bind-Value="_draft" Placeholder="메시지" Variant="Variant.Outlined"
+                              Margin="Margin.Dense" Immediate="true" OnKeyDown="OnKeyDownAsync"
+                              Class="flex-grow-1" />
+                <MudIconButton Icon="@Icons.Material.Filled.Send" Color="Color.Primary"
+                               Disabled="@_sending" OnClick="SendAsync" aria-label="보내기" />
+            </div>
+        }
+    </div>
+}
+
+@code {
+    /// <summary>상단바 버튼이 켜고 끈다.</summary>
+    [Parameter] public bool Open { get; set; }
+
+    [Parameter] public EventCallback<bool> OpenChanged { get; set; }
+
+    /// <summary>안 읽은 수가 바뀌면 상단바 배지에 알린다.</summary>
+    [Parameter] public EventCallback OnUnreadChanged { get; set; }
+
+    private List<ChatRoomModel> _rooms = new();
+    private List<ChatMessageModel> _messages = new();
+    private ChatRoomModel? _currentRoom;
+    private string? _roomId;
+
+    private string _draft = string.Empty;
+    private bool _loading;
+    private bool _loadingMessages;
+    private bool _failed;
+    private bool _sending;
+    private bool _subscribed;
+
+    protected override void OnInitialized()
+    {
+        // 🔴 새 메시지가 오면 목록을 다시 읽는다 — 기존 알림 배관을 그대로 쓴다(새 Hub 없음).
+        Notify.OnNotification += OnNotified;
+        _subscribed = true;
+    }
+
+    protected override async Task OnParametersSetAsync()
+    {
+        // 팝업을 열 때마다 최신으로 읽는다.
+        if (Open && _rooms.Count == 0 && !_loading) await LoadRoomsAsync();
+    }
+
+    /// <remarks>
+    /// 🔴 <b>메신저 알림일 때만</b> 새로 읽는다 — 결재 알림에 매번 흔들리면
+    /// 대화를 보고 있는 중에 화면이 튄다.
+    /// </remarks>
+    private async void OnNotified(AppNotificationModel notification)
+    {
+        var isChat = notification.Type is "chat_message" or "chat_approval";
+        if (!isChat) return;
+
+        if (!Open)
+        {
+            await InvokeAsync(NotifyUnreadAsync);
+            return;
+        }
+
+        if (_roomId is not null) await InvokeAsync(LoadMessagesAsync);
+        await InvokeAsync(LoadRoomsAsync);
+    }
+
+    private async Task LoadRoomsAsync()
+    {
+        _loading = true;
+        _failed = false;
+
+        var rooms = await Chat.GetRoomsAsync();
+        if (rooms is null) _failed = true; else _rooms = rooms;
+
+        _loading = false;
+        StateHasChanged();
+
+        await NotifyUnreadAsync();
+    }
+
+    private async Task NotifyUnreadAsync()
+    {
+        if (OnUnreadChanged.HasDelegate) await OnUnreadChanged.InvokeAsync();
+    }
+
+    private async Task OpenRoomAsync(string roomId)
+    {
+        _roomId = roomId;
+        _currentRoom = _rooms.FirstOrDefault(r => r.RoomId == roomId);
+        await LoadMessagesAsync();
+    }
+
+    private async Task LoadMessagesAsync()
+    {
+        if (_roomId is null) return;
+
+        _loadingMessages = true;
+        var messages = await Chat.GetMessagesAsync(_roomId, 30);
+        if (messages is not null) _messages = messages;
+        _loadingMessages = false;
+        StateHasChanged();
+
+        // 🔴 대화를 열면 읽음이 된다(사장님: "상대방이 메신저 읽을시 읽음 처리").
+        await Chat.MarkReadAsync(_roomId);
+
+        var room = _rooms.FirstOrDefault(r => r.RoomId == _roomId);
+        if (room is not null) room.UnreadCount = 0;
+
+        await NotifyUnreadAsync();
+    }
+
+    private async Task SendAsync()
+    {
+        if (string.IsNullOrWhiteSpace(_draft) || _roomId is null) return;
+
+        _sending = true;
+        var (message, error) = await Chat.SendMessageAsync(_roomId,
+            new SendChatMessageModel { Body = _draft.Trim() });
+        _sending = false;
+
+        if (error is not null) { Snackbar.Add(error, Severity.Warning); return; }
+        if (message is not null) _messages.Add(message);
+        _draft = string.Empty;
+    }
+
+    private async Task OnKeyDownAsync(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter" && !e.ShiftKey) await SendAsync();
+    }
+
+    private void BackToList()
+    {
+        _roomId = null;
+        _currentRoom = null;
+        _messages.Clear();
+    }
+
+    /// <summary>넓게 보고 싶을 때 — 메뉴의 그 화면으로 간다.</summary>
+    private async Task OpenFullPage()
+    {
+        var url = _roomId is null ? "/chat" : $"/chat/{_roomId}";
+        await OpenChanged.InvokeAsync(false);
+        Nav.NavigateTo(url);
+    }
+
+    private async Task OnClose() => await OpenChanged.InvokeAsync(false);
+
+    /// <summary>🔴 문서로 가면 팝업을 닫는다 — 그 화면을 봐야 하므로.</summary>
+    private async Task GoToDocument(string refType, string refId)
+    {
+        var url = refType switch
+        {
+            "approval" => $"/approval/detail/{refId}",
+            "leave"    => "/hr/leave-status",
+            "expense"  => "/hr/expense-status",
+            "payroll"  => "/hr/payroll",
+            "contract" => "/hr/labor-contracts",
+            "report"   => "/hr/work-report",
+            _ => string.Empty
+        };
+
+        if (string.IsNullOrEmpty(url)) return;
+
+        await OpenChanged.InvokeAsync(false);
+        Nav.NavigateTo(url);
+    }
+
+    private static string RoomIcon(string roomType) => roomType switch
+    {
+        "dept"  => Icons.Material.Filled.Groups,
+        "group" => Icons.Material.Filled.Forum,
+        _       => Icons.Material.Filled.Person
+    };
+
+    private static string KindLabel(string kind) => kind switch
+    {
+        "approval" => "결재",
+        "file"     => "파일",
+        _          => "메시지"
+    };
+
+    private static Color KindColor(string kind) => kind switch
+    {
+        "approval" => Color.Warning,
+        "file"     => Color.Info,
+        _          => Color.Default
+    };
+
+    private string ReadLabel(int readCount)
+        => _currentRoom?.RoomType == "direct" ? "읽음" : $"{readCount} 읽음";
+
+    public void Dispose()
+    {
+        if (_subscribed) Notify.OnNotification -= OnNotified;
+    }
+}

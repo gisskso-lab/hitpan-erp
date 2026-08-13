@@ -1,0 +1,65 @@
+/* ═══════════════════════════════════════════════════════════════
+   메신저 팝업 — 오른쪽 아래 채팅창. 작(2026-08-13).
+
+   🔴 사장님: "메신저를 팝업으로 운영해야 그룹웨어 결재 뿐 아니라,
+              히트판erp 업무 멀티태스킹 기능도 됨"
+
+   ⇒ 뒤의 업무 화면을 가리지 않는 것이 이 CSS 의 전부다.
+      가운데 큰 창으로 만들면 멀티태스킹이 죽는다.
+   ═══════════════════════════════════════════════════════════════ */
+
+.hitpan-chat-popup {
+    position: fixed;
+    right: 20px;
+    bottom: 20px;
+    width: 360px;
+    height: 520px;
+
+    display: flex;
+    flex-direction: column;
+
+    background: var(--mud-palette-surface);
+    border: 1px solid var(--mud-palette-lines-default);
+    border-radius: 12px;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, .18);
+
+    /* 다이얼로그(1400)보다 아래, 일반 내용보다는 위.
+       결재 팝업이 뜨면 그게 앞에 와야 한다. */
+    z-index: 1300;
+    overflow: hidden;
+}
+
+.hitpan-chat-popup-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    padding: 6px 8px 6px 12px;
+    min-height: 44px;
+    background: var(--mud-palette-background-grey);
+}
+
+.hitpan-chat-popup-body {
+    flex: 1;
+    overflow-y: auto;
+    overflow-x: hidden;
+}
+
+.hitpan-chat-popup-foot {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    padding: 8px;
+}
+
+/* 작은 화면에서는 아래쪽 전체를 쓴다 —
+   좁은 화면에 360px 을 띄우면 업무 화면이 통째로 가린다. */
+@media (max-width: 640px) {
+    .hitpan-chat-popup {
+        right: 8px;
+        left: 8px;
+        bottom: 8px;
+        width: auto;
+        height: 70vh;
+    }
+}

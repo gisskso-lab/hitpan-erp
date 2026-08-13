@@ -202,6 +202,29 @@ public sealed class ChatService(HttpClient http, ILogger<ChatService> logger)
         }
     }
 
+    /// <summary>
+    /// 안 읽은 메시지 수. 상단바 배지가 쓴다. 작(2026-08-13).
+    /// </summary>
+    /// <remarks>
+    /// 🔴 실패해도 <b>0</b> 을 돌린다. 여기만 <c>null</c> 이 아니다 —
+    /// 상단바는 <b>모든 화면에</b> 뜨므로, 실패를 알리면 화면마다 오류가 뜬다.
+    /// 배지가 잠깐 안 보이는 것이 화면마다 경고가 뜨는 것보다 낫다.
+    /// </remarks>
+    public async Task<int> GetUnreadCountAsync(CancellationToken ct = default)
+    {
+        try
+        {
+            var result = await http.GetFromJsonAsync<UnreadCountResponse>("api/chat/unread-count", ct)
+                .ConfigureAwait(false);
+            return result?.Count ?? 0;
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "안 읽은 메시지 수 조회 실패");
+            return 0;
+        }
+    }
+
     public async Task<ChatStorageModel?> GetStorageAsync(CancellationToken ct = default)
     {
         try
@@ -245,5 +268,10 @@ public sealed class ChatService(HttpClient http, ILogger<ChatService> logger)
     private sealed class ErrorResponse
     {
         public string? Message { get; set; }
+    }
+
+    private sealed class UnreadCountResponse
+    {
+        public int Count { get; set; }
     }
 }

@@ -238,6 +238,27 @@ public sealed class ChatController : ControllerBase
     public async Task<ActionResult<ChatStorageDto>> GetStorage(CancellationToken ct)
         => Ok(await _service.GetStorageAsync(_currentTenant.TenantId, ct));
 
+    /// <summary>
+    /// 안 읽은 메시지 수. 상단바 <b>메신저 버튼의 숫자 배지</b>가 쓴다. 작(2026-08-13).
+    /// </summary>
+    /// <remarks>
+    /// 🔴 사장님(2026-08-13): <i>"메신저 알림아이콘 옆 메신저 버튼 생성.
+    /// 메뉴에 기능이 있어야 하는건 맞지만, <b>메뉴에서만 찾는건 비효율적</b>"</i>
+    /// <para>
+    /// 계정이 사원으로 안 이어진 사람은 <b>0</b> 을 준다 — 막지 않는다.
+    /// 상단바는 모든 화면에 뜨므로 여기서 403 을 내면 <b>화면마다 오류가 뜬다.</b>
+    /// </para>
+    /// </remarks>
+    [HttpGet("unread-count")]
+    public async Task<ActionResult<object>> GetUnreadCount(CancellationToken ct)
+    {
+        var me = await ResolveMeAsync(ct);
+        if (me is null) return Ok(new { count = 0 });
+
+        var rooms = await _service.GetMyRoomsAsync(_currentTenant.TenantId, me, ct);
+        return Ok(new { count = rooms.Sum(r => r.UnreadCount) });
+    }
+
     // ─── 안쪽 ──────────────────────────────────────────────────────
 
     /// <summary>
