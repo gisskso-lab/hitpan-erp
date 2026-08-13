@@ -85,7 +85,15 @@ public class AuthService : IAuthService
         //   신규 가입(CompanyBootstrap)만 부모 employees 행을 만들었고, 그 전에 생성된 부모계정은 백필이
         //   없어 employee=null → 토큰 employee_id 빈 문자열 → 결재·경비·HR(13차) 전부 403. 부모계정인데
         //   연결 employees 행이 없으면 로그인 시 멱등 생성해 보장한다(라이브 DB 직접 변경 0, 런타임 자가치유).
-        if (employee is null && user.AccountType == "tenant_admin")
+        // 🔴 봉합 (2026-08-14, 1.2.74 실사용 P0): 자식계정도 백필한다.
+        //    사장님: "자식계정은 생성되었으나 ... 다른 그 어떤메뉴에도 그 계정직원은 안나옴."
+        //    사번 채번 충돌로 employees INSERT 가 실패해도 users 는 커밋돼 **고아 계정**이 남았는데,
+        //    이 백필이 tenant_admin 전용이라 **자식은 영원히 자가치유가 안 됐다** —
+        //    재등록은 이메일 중복으로 막히고, 사원관리에서 넣으면 연결 안 된 별개 행이 생겨
+        //    DB 직접 수술 외엔 길이 없었다.
+        //    ⇒ 이미 만들어진 고아 계정도 **다음 로그인 한 번으로 스스로 복구된다.**
+        //    (채번·트랜잭션은 UserService.CreateAsync 에서 봉합했으므로 새 고아는 더 안 생긴다.)
+        if (employee is null)
         {
             // 백필은 보조 자가치유 — 실패(비-1062 예외: 연결 끊김 등)해도 로그인 자체는 막지 않는다.
             // employee=null 이면 이번 세션은 employee_id 없이 진행하고, 다음 로그인에 재시도된다(13차 거짓봉합 재봉합).
@@ -191,7 +199,15 @@ public class AuthService : IAuthService
 
         // 백필 (2026-06-22, 13차 A안): refresh 경로도 동일 — 부모계정 employees 행 멱등 보장.
         // 실패해도 refresh(=세션 유지)는 막지 않는다(13차 거짓봉합 재봉합, 백필은 보조 자가치유).
-        if (employee is null && user.AccountType == "tenant_admin")
+        // 🔴 봉합 (2026-08-14, 1.2.74 실사용 P0): 자식계정도 백필한다.
+        //    사장님: "자식계정은 생성되었으나 ... 다른 그 어떤메뉴에도 그 계정직원은 안나옴."
+        //    사번 채번 충돌로 employees INSERT 가 실패해도 users 는 커밋돼 **고아 계정**이 남았는데,
+        //    이 백필이 tenant_admin 전용이라 **자식은 영원히 자가치유가 안 됐다** —
+        //    재등록은 이메일 중복으로 막히고, 사원관리에서 넣으면 연결 안 된 별개 행이 생겨
+        //    DB 직접 수술 외엔 길이 없었다.
+        //    ⇒ 이미 만들어진 고아 계정도 **다음 로그인 한 번으로 스스로 복구된다.**
+        //    (채번·트랜잭션은 UserService.CreateAsync 에서 봉합했으므로 새 고아는 더 안 생긴다.)
+        if (employee is null)
         {
             try { employee = await BackfillParentEmployeeAsync(user, ct); }
             catch (Exception ex) { System.Diagnostics.Trace.TraceWarning($"[Backfill] 부모계정 employees 백필 실패(refresh는 진행): {ex.Message}"); }
@@ -300,11 +316,26 @@ public class AuthService : IAuthService
         var already = existing.FirstOrDefault(e => e.UserId == user.Id && e.IsActive);
         if (already is not null) return already;
 
+        // 🔴 봉합 (2026-08-14, 1.2.74 실사용 P0): 접두가 붙은 사번을 못 읽던 자리.
+        //    int.TryParse("MIG-0007") 도 int.TryParse("EMP-001") 도 **실패해서 0** 이 된다.
+        //    실측한 DB 에는 0001 · MIG-0001~0010 뿐이라 MAX 가 0 으로 나왔고,
+        //    채번이 늘 0001 → 부모계정 기존 행과 uq_tenant_empno 충돌이 났다.
+        //    ⇒ 접두를 무시하고 **끝의 숫자**만 읽는다(UserService.CreateAsync 와 같은 규칙).
         var maxNo = existing
-            .Select(e => int.TryParse(e.EmpNo, out var n) ? n : 0)
+            .Select(e =>
+            {
+                var digits = System.Text.RegularExpressions.Regex.Match(
+                    e.EmpNo ?? string.Empty, @"[0-9]+$").Value;
+                return int.TryParse(digits, out var n) ? n : 0;
+            })
             .DefaultIfEmpty(0)
             .Max();
         var empNo = (maxNo + 1).ToString("D4");
+
+        // 🔴 작(2026-08-14): 부모/자식을 가른다. 종전엔 이 백필이 부모계정 전용이라
+        //    전부 tenant_admin 으로 굳어 있었다. 이제 자식계정도 여기로 들어오므로
+        //    **자식에게 대표 직급·관리자 역할을 붙이면 안 된다**(권한 승격 사고).
+        var isOwner = user.AccountType == "tenant_admin";
 
         // EmployeeId 는 EF 매핑상 Ignore(실 PK 는 BaseEntity.Id) — 설정 안 함. employee_id 클레임은 .Id 사용.
         var newEmployee = new Employee
@@ -313,14 +344,14 @@ public class AuthService : IAuthService
             UserId = user.Id,
             EmpNo = empNo,
             EmpName = user.UserName,
-            // 🔴 작(2026-08-14) 사장님 지시: "부모계정 = 직급은 자동으로 대표.등록"
-            //    이 백필은 부모계정(tenant_admin)에만 도는 자리라 대표 직급을 붙여도 안전하다.
+            // 🔴 사장님 지시(2026-08-14): "부모계정 = 직급은 자동으로 대표.등록"
             //    종전엔 비워 둬 부모계정 직급이 NULL 이었다 — 결재선에서 대표를 못 골랐다.
-            Position = HitPan.Domain.Common.OrgDefaults.OwnerPositionName,
+            //    ⚠️ 자식계정은 직급을 우리가 정하지 않는다(헌법 #11) — 사원관리에서 사람이 넣는다.
+            Position = isOwner ? HitPan.Domain.Common.OrgDefaults.OwnerPositionName : null,
             EmpType = HitPan.Domain.Enums.EmployeeType.Regular,
             JoinDate = DateTime.UtcNow,
             IsActive = true,
-            Role = "tenant_admin",
+            Role = isOwner ? "tenant_admin" : "tenant_user",
             Email = user.Email,
         };
 
