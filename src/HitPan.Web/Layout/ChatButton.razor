@@ -1,0 +1,67 @@
+@using HitPan.Web.Services
+@implements IDisposable
+@inject ChatService Chat
+@inject NotificationClient Notify
+
+@* ═══════════════════════════════════════════════════════════════
+   상단바 메신저 버튼 + 안 읽은 수 배지. 작(2026-08-13).
+
+   🔴 사장님 지시 (2026-08-13):
+     "메신저 알림아이콘 옆 메신저 버튼 생성.
+      메뉴에 기능이 있어야 하는건 맞지만, **메뉴에서만 찾는건 비효율적**."
+
+   ⇒ 알림 종(🔔) 바로 옆에 둔다. 누르면 오른쪽 아래 채팅창이 뜬다.
+
+   🔴 아이콘을 셋으로 가른다 — 헷갈리면 사고가 난다:
+     · 왼쪽 로봇   = AI 챗봇   → 대화가 **외부**(클로드·챗GPT)로 나간다
+     · 오른쪽 종   = 알림      → 회사 안. 읽으면 사라진다
+     · 오른쪽 말풍선 = 메신저   → 회사 안. **기록으로 남는다**
+   ═══════════════════════════════════════════════════════════════ *@
+
+<MudBadge Content="@_unread" Color="Color.Error" Overlap="true"
+          Visible="@(_unread > 0)" Bordered="true">
+    <MudTooltip Text="메신저">
+        <MudIconButton Icon="@Icons.Material.Outlined.ChatBubbleOutline"
+                       Color="@(Open ? Color.Primary : Color.Default)" Size="Size.Medium"
+                       OnClick="Toggle" aria-label="메신저" />
+    </MudTooltip>
+</MudBadge>
+
+@code {
+    [Parameter] public bool Open { get; set; }
+    [Parameter] public EventCallback<bool> OpenChanged { get; set; }
+
+    private int _unread;
+    private bool _subscribed;
+
+    protected override async Task OnInitializedAsync()
+    {
+        // 🔴 새 메시지가 오면 배지를 다시 센다 — 기존 알림 배관을 그대로 쓴다(새 Hub 없음).
+        Notify.OnNotification += OnNotified;
+        _subscribed = true;
+
+        await RefreshAsync();
+    }
+
+    private async void OnNotified(Models.AppNotificationModel notification)
+    {
+        if (notification.Type is not ("chat_message" or "chat_approval")) return;
+        await InvokeAsync(RefreshAsync);
+    }
+
+    /// <summary>
+    /// 안 읽은 수를 다시 센다. 팝업이 읽음 처리를 하면 이걸 불러 배지를 줄인다.
+    /// </summary>
+    public async Task RefreshAsync()
+    {
+        _unread = await Chat.GetUnreadCountAsync();
+        StateHasChanged();
+    }
+
+    private async Task Toggle() => await OpenChanged.InvokeAsync(!Open);
+
+    public void Dispose()
+    {
+        if (_subscribed) Notify.OnNotification -= OnNotified;
+    }
+}
