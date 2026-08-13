@@ -313,6 +313,10 @@ public class AuthService : IAuthService
             UserId = user.Id,
             EmpNo = empNo,
             EmpName = user.UserName,
+            // 🔴 작(2026-08-14) 사장님 지시: "부모계정 = 직급은 자동으로 대표.등록"
+            //    이 백필은 부모계정(tenant_admin)에만 도는 자리라 대표 직급을 붙여도 안전하다.
+            //    종전엔 비워 둬 부모계정 직급이 NULL 이었다 — 결재선에서 대표를 못 골랐다.
+            Position = HitPan.Domain.Common.OrgDefaults.OwnerPositionName,
             EmpType = HitPan.Domain.Enums.EmployeeType.Regular,
             JoinDate = DateTime.UtcNow,
             IsActive = true,

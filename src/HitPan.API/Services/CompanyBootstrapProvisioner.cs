@@ -1,6 +1,7 @@
 using Dapper;
 using HitPan.Infrastructure.Configuration;
 using MySqlConnector;
+using static HitPan.Domain.Common.OrgDefaults;
 
 namespace HitPan.API.Services;
 
@@ -238,14 +239,22 @@ public sealed class CompanyBootstrapProvisioner
             // employees.role = 'tenant_admin' 유지 (W1-2 구분 사유): employees.role은 EF enum 매핑이 아니라
             //   문자열 컬럼이며, 로그인 시 employeeRole claim(ClaimTypes.Role)으로 그대로 실려 Authorization
             //   정책(snake_case 어휘)과 짝을 이룬다 — users.role(enum 사전)과 다른 사전이므로 바꾸면 안 된다.
+            // 🔴 작(2026-08-14) 사장님 지시: "부모계정 = 직급은 자동으로 대표.등록"
+            //    종전엔 position 을 안 넣어 부모계정 직급이 NULL 이었다(실측 확인).
+            //    ⇒ 사원관리·직원현황에서 대표의 직급이 빈칸이고, 직급으로 짜는
+            //      결재선에서도 대표를 고를 수 없었다.
+            //    ⚠️ 이름은 직급 마스터에 이미 있는 "대표이사"(CEO, sort_order 100)를 그대로 쓴다.
+            //      새 이름("대표")을 만들면 "대표"와 "대표이사"가 둘 다 생겨 목록이 헷갈린다
+            //      (사장님 결재 2026-08-14). 마스터 시드는 아래 stdPositions 에 있다.
             await db.ExecuteAsync(new CommandDefinition(@"
                 INSERT INTO employees
                   (employee_id, tenant_id, user_id, emp_no, emp_name,
-                   emp_type, join_date, is_active, created_at, updated_at, role, email)
+                   position, emp_type, join_date, is_active, created_at, updated_at, role, email)
                 VALUES
                   (@EmployeeId, @TenantId, @UserId, '0001', @Name,
-                   'regular', UTC_TIMESTAMP(6), 1, UTC_TIMESTAMP(6), UTC_TIMESTAMP(6), 'tenant_admin', @Email)",
-                new { EmployeeId = employeeId, TenantId = tenantId, UserId = userId, input.Name, Email = loginId },
+                   @Position, 'regular', UTC_TIMESTAMP(6), 1, UTC_TIMESTAMP(6), UTC_TIMESTAMP(6), 'tenant_admin', @Email)",
+                new { EmployeeId = employeeId, TenantId = tenantId, UserId = userId, input.Name,
+                      Position = OwnerPositionName, Email = loginId },
                 transaction: tx, cancellationToken: ct));
 
             // 기본 창고 1행 (10차 P0-4) — NOT EXISTS 로 마이그 고객 보호.
