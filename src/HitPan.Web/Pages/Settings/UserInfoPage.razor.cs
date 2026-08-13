@@ -19,10 +19,29 @@ public partial class UserInfoPage : ComponentBase, IDisposable
     [Inject] private NavigationManager Navigation { get; set; } = default!;
     [Inject] private IJSRuntime JSRuntime { get; set; } = default!;
     [Inject] private IHttpClientFactory HttpFactory { get; set; } = default!;
+    // 작(2026-08-13) 단계4: 상시근로자수를 '제안' 하기 위해 재직자 수를 읽는다.
+    [Inject] private EmployeeService EmployeeSvc { get; set; } = default!;
 
     private bool _loading = true;
     private bool _saving;
     private UserInfoViewModel _model = new();
+
+    /// <summary>재직 중인 사원 수 — 상시근로자수 입력을 돕는 참고값.</summary>
+    private int? _activeEmployeeCount;
+
+    /// <summary>
+    /// 상시근로자수 칸 아래에 뜨는 안내.
+    /// </summary>
+    /// <remarks>
+    /// 🔴 반자동 3단(사장님 2026-08-12: "자동계산하되 수동으로 수정가능하도록")의
+    /// <b>제안</b> 단계다. 값을 채워 넣지 않고 <b>참고만 알려준다</b> —
+    /// 법정 상시근로자수는 '연인원 ÷ 가동일수' 라 재직자 수와 다를 수 있고,
+    /// 틀린 숫자로 "5인 미만 → 연차 없음" 이 판정되면 법정 미달이 되기 때문이다.
+    /// </remarks>
+    private string RegularEmployeeCountHint =>
+        _activeEmployeeCount is null
+            ? "비우면 미정입니다. 5인 미만이면 연차 규정이 달라집니다."
+            : $"참고: 현재 재직자 {_activeEmployeeCount}명. 법정 상시근로자수는 이와 다를 수 있어 직접 확정하세요.";
 
     // 🔴 2026-08-10 (사장님 결재 · 20260810작1 T7) — 사업자등록증 기재 항목 잠금 판정.
     //   서버(SettingsService.SaveCompanyAsync)와 **같은 규칙**을 쓴다. 규칙이 갈리면
@@ -198,6 +217,26 @@ public partial class UserInfoPage : ComponentBase, IDisposable
                 _model.CorporateNo = company.CorpNo ?? string.Empty;
                 _model.BranchNo = company.SubsidiaryNo ?? string.Empty;
                 _model.IsLockedFromLanding = company.IsLockedFromLanding;
+                // 작(2026-08-13) 단계4 — 사업장 노무 정보를 화면에 되돌려 넣는다.
+                // 🔴 이 세 줄이 없으면 저장해도 화면을 다시 열 때 늘 비어 보이고,
+                //    다른 항목만 고쳐 저장하면 값이 조용히 지워진다(출력 이미지가 겪었던 그것).
+                _model.TaxType = company.TaxType ?? string.Empty;
+                _model.BusinessEntityType = company.BusinessEntityType ?? string.Empty;
+                _model.RegularEmployeeCount = company.RegularEmployeeCount;
+                _model.EmployeeCountAsOf = company.EmployeeCountAsOf;
+
+                // 상시근로자수 '제안' 용 참고값. 실패해도 화면은 그대로 뜬다 —
+                // 참고 문구가 안 보일 뿐이고, 회사정보 저장을 막을 이유가 없다.
+                try
+                {
+                    var emps = await EmployeeSvc.GetListAsync().ConfigureAwait(false);
+                    _activeEmployeeCount = emps.Count(e => e.IsActive);
+                }
+                catch (Exception ex)
+                {
+                    // 헌법 #15 — 빈 catch 금지.
+                    Console.WriteLine($"[UserInfo] 재직자 수 조회 실패(참고값이라 무시): {ex.Message}");
+                }
 
                 // 저장해 둔 출력 이미지를 미리보기에 되살린다. 종전에는 이 세 줄이 없어
                 // 저장 여부와 무관하게 화면을 다시 열면 그림이 늘 비어 보였다.
@@ -357,7 +396,14 @@ public partial class UserInfoPage : ComponentBase, IDisposable
             Address = _model.Address,
             AddressDetail = _model.AddressDetail,
             CorpNo = _model.CorporateNo,
-            SubsidiaryNo = _model.BranchNo
+            SubsidiaryNo = _model.BranchNo,
+            // 작(2026-08-13) 단계4 — 사업장 노무 정보.
+            // 빈 문자열은 '미정' 이라 null 로 보낸다(서버도 모르는 값은 null 로 돌린다).
+            TaxType = string.IsNullOrWhiteSpace(_model.TaxType) ? null : _model.TaxType,
+            BusinessEntityType = string.IsNullOrWhiteSpace(_model.BusinessEntityType)
+                ? null : _model.BusinessEntityType,
+            RegularEmployeeCount = _model.RegularEmployeeCount,
+            EmployeeCountAsOf = _model.EmployeeCountAsOf
         };
         var companyResult = await SettingsSvc.SaveCompanyDetailedAsync(company).ConfigureAwait(false);
 
@@ -442,6 +488,35 @@ public sealed class UserInfoViewModel
     // 헌법 #35 (사장님 결재 2026-06-04) — 랜딩 가입 자동 반영 잠금 플래그
     // 1이면 회사명·사업자번호·대표자명 핵심 3필드 변경 불가
     public bool IsLockedFromLanding { get; set; }
+
+    // ───────────────────────────────────────────────────────────────
+    // 사업장 노무 정보 — 작(2026-08-13) 그룹웨어 단계4 토대
+    //
+    // 🔴 사장님(2026-08-12): "사업장의 직원수, 규모, 법인,개인,면세사업장, 등
+    //    여러상황이 있어서 자동화는 현실적으로 어려워. 반자동원칙"
+    // ───────────────────────────────────────────────────────────────
+
+    /// <summary>과세 유형: taxable 과세 / tax_free 면세. 빈 값 = 미정.</summary>
+    /// <remarks>
+    /// 🔴 컬럼은 처음부터 있었는데 조회·저장·화면 어디에도 없어 <b>값을 넣을 방법이 없었다</b>.
+    /// </remarks>
+    public string TaxType { get; set; } = string.Empty;
+
+    /// <summary>법인/개인: corporate 법인 / individual 개인. 빈 값 = 미정.</summary>
+    public string BusinessEntityType { get; set; } = string.Empty;
+
+    /// <summary>
+    /// 상시근로자수. <c>null</c> = 미정.
+    /// </summary>
+    /// <remarks>
+    /// 🔴 자동으로 채우지 않는다. 법정 계산이 '연인원 ÷ 가동일수' 라 사원 행을 세면 틀리고,
+    /// 그 숫자로 "5인 미만 → 연차 없음" 이 판정되면 법정 미달이 된다.
+    /// 화면이 <b>현재 재직자 수를 제안</b>하고 사람이 확정한다(반자동 3단).
+    /// </remarks>
+    public int? RegularEmployeeCount { get; set; }
+
+    /// <summary>상시근로자수 기준일 — 이 숫자가 언제 기준인지.</summary>
+    public DateTime? EmployeeCountAsOf { get; set; }
 }
 
 // 구독정보 표시용 모델(SubscriptionInfoViewModel)은 제거했다.

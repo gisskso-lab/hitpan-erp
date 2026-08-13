@@ -3,48 +3,283 @@
 @attribute [Authorize]
 @using HitPan.Web.Models
 @using HitPan.Web.Services
-@inject EmployeeService EmployeeSvc
+@using HitPan.Web.Components.Common
+@inject DepartmentService DeptSvc
+@inject ISnackbar Snackbar
+@inject IDialogService DialogService
 
 <PageTitle>부서 관리</PageTitle>
-<PageHeader Title="부서 관리" Subtitle="회사 부서 목록 조회" />
+<PageHeader Title="부서 관리" Subtitle="부서를 만들고 조직을 짠다" />
+
+@* 🔴 작(2026-08-13) 단계4 토대 — 종전엔 이 화면이 조회 전용이었다.
+   부서를 만들 방법이 어디에도 없어(코드 전체에 INSERT 0건) departments 가 0행이었고,
+   그래서 사원 등록의 부서 드롭다운 선택지가 0개, 사원 전원이 부서 없음이었다.
+   부서방(메신저)·조직도·부서별 결재선이 전부 이 축을 딛고 선다. *@
 
 <MudPaper Elevation="0" Class="pa-2 hitpan-card">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+        <MudText Typo="Typo.subtitle2" Color="Color.Secondary">
+            @if (_items is not null)
+            {
+                @($"부서 {_items.Count}개")
+            }
+        </MudText>
+        <MudButton Variant="Variant.Filled" Color="Color.Primary"
+                   StartIcon="@Icons.Material.Filled.Add"
+                   Disabled="@_saving"
+                   OnClick="@(() => OpenEditor(null))">
+            부서 추가
+        </MudButton>
+    </div>
+
     @if (_loading)
     {
         <MudProgressLinear Indeterminate="true" Color="Color.Primary" />
+    }
+    else if (_items is null)
+    {
+        @* 🔴 조회 실패와 "부서 0개" 를 가른다. 실패를 빈 표로 보여주면
+           부서가 있는 회사에서 "다 지워졌다" 로 오해한다. *@
+        <MudAlert Severity="Severity.Error" Class="ma-2">
+            부서 목록을 불러오지 못했습니다.
+            <MudButton Variant="Variant.Text" Color="Color.Inherit" OnClick="LoadAsync">다시 시도</MudButton>
+        </MudAlert>
     }
     else
     {
         <MudTable Items="_items" Dense="true" Hover="true" Striped="true">
             <HeaderContent>
-                <MudTh Style="width:200px">부서 코드</MudTh>
+                <MudTh Style="width:140px">부서 코드</MudTh>
                 <MudTh>부서명</MudTh>
+                <MudTh Style="width:160px">상위 부서</MudTh>
+                <MudTh Style="width:90px">인원</MudTh>
+                <MudTh Style="width:90px">사용</MudTh>
+                <MudTh Style="width:120px"></MudTh>
             </HeaderContent>
             <RowTemplate>
-                <MudTd DataLabel="부서 코드">@context.DeptId</MudTd>
+                <MudTd DataLabel="부서 코드">@(string.IsNullOrWhiteSpace(context.DeptCode) ? "-" : context.DeptCode)</MudTd>
                 <MudTd DataLabel="부서명">@context.DeptName</MudTd>
+                <MudTd DataLabel="상위 부서">@(string.IsNullOrWhiteSpace(context.ParentDeptName) ? "-" : context.ParentDeptName)</MudTd>
+                <MudTd DataLabel="인원">@(context.EmployeeCount > 0 ? $"{context.EmployeeCount}명" : "-")</MudTd>
+                <MudTd DataLabel="사용">
+                    @if (context.IsActive)
+                    {
+                        <MudChip T="string" Size="Size.Small" Color="Color.Success" Variant="Variant.Text">사용</MudChip>
+                    }
+                    else
+                    {
+                        <MudChip T="string" Size="Size.Small" Color="Color.Default" Variant="Variant.Text">사용 안 함</MudChip>
+                    }
+                </MudTd>
+                <MudTd>
+                    <MudIconButton Icon="@Icons.Material.Filled.Edit" Size="Size.Small"
+                                   Disabled="@_saving"
+                                   OnClick="@(() => OpenEditor(context))" />
+                    <MudIconButton Icon="@Icons.Material.Filled.Delete" Size="Size.Small" Color="Color.Error"
+                                   Disabled="@_saving"
+                                   OnClick="@(() => DeleteAsync(context))" />
+                </MudTd>
             </RowTemplate>
             <NoRecordsContent>
-                <MudText Typo="Typo.body2" Color="Color.Secondary" Class="pa-4">등록된 부서가 없습니다.</MudText>
+                <MudText Typo="Typo.body2" Color="Color.Secondary" Class="pa-4">
+                    등록된 부서가 없습니다. [부서 추가] 로 조직을 짜세요.
+                </MudText>
             </NoRecordsContent>
         </MudTable>
     }
 </MudPaper>
 
-@code {
-    private List<DepartmentModel> _items = new();
-    private bool _loading = true;
+<MudDialog @bind-Visible="_editing" Options="@(new DialogOptions { MaxWidth = MaxWidth.Small, FullWidth = true })">
+    <TitleContent>
+        <MudText Typo="Typo.h6">@(_isNew ? "부서 추가" : "부서 수정")</MudText>
+    </TitleContent>
+    <DialogContent>
+        <MudTextField @bind-Value="_edit.DeptName" Label="부서명" Required="true"
+                      Variant="Variant.Outlined" Margin="Margin.Dense" Class="mb-3"
+                      Immediate="true" MaxLength="50" />
 
-    protected override async Task OnInitializedAsync()
+        <MudTextField @bind-Value="_edit.DeptCode" Label="부서 코드 (선택)"
+                      Variant="Variant.Outlined" Margin="Margin.Dense" Class="mb-3"
+                      MaxLength="20" HelperText="회사에서 쓰는 코드가 있으면 넣으세요." />
+
+        @* 상위 부서를 두면 "영업부 > 영업1팀" 처럼 조직이 계층으로 선다.
+           자기 자신·자기 하위는 고를 수 없다(서버도 막지만 화면에서 아예 안 보여준다). *@
+        <MudSelect T="string" @bind-Value="_edit.ParentDeptId" Label="상위 부서 (선택)"
+                   Variant="Variant.Outlined" Margin="Margin.Dense" Class="mb-3" Clearable="true">
+            <MudSelectItem T="string" Value="@(null)">없음 (최상위)</MudSelectItem>
+            @foreach (var d in ParentCandidates)
+            {
+                <MudSelectItem T="string" Value="@d.DeptId">@d.DisplayName</MudSelectItem>
+            }
+        </MudSelect>
+
+        <MudNumericField @bind-Value="_edit.SortOrder" Label="정렬 순서"
+                         Variant="Variant.Outlined" Margin="Margin.Dense" Class="mb-3"
+                         Min="0" Max="32767" HelperText="작은 값이 위에 옵니다." />
+
+        <MudSwitch @bind-Value="_edit.IsActive" Color="Color.Primary" Label="사용" />
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="@(() => _editing = false)" Disabled="@_saving">취소</MudButton>
+        <MudButton Color="Color.Primary" Variant="Variant.Filled"
+                   Disabled="@_saving" OnClick="SaveAsync">저장</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    private List<DepartmentListItemModel>? _items;
+    private DepartmentEditModel _edit = new();
+    private bool _loading = true;
+    private bool _saving;
+    private bool _editing;
+    private bool _isNew = true;
+
+    /// <summary>
+    /// 상위 부서로 고를 수 있는 것들.
+    /// </summary>
+    /// <remarks>
+    /// 🔴 자기 자신과 <b>자기 하위</b>를 뺀다. 넣으면 조직도가 고리를 이뤄 무한히 돈다.
+    /// 서버도 막지만(<c>DepartmentService.IsDescendantAsync</c>), 화면에서 아예 안 보여주는 게
+    /// 사용자에게 친절하다 — 고르고 나서 거절당하는 것보다 낫다.
+    /// </remarks>
+    private IEnumerable<DepartmentListItemModel> ParentCandidates
     {
-        await LoadAsync();
+        get
+        {
+            if (_items is null) return Array.Empty<DepartmentListItemModel>();
+            if (_isNew || string.IsNullOrEmpty(_edit.DeptId)) return _items;
+
+            var blocked = CollectSelfAndDescendants(_edit.DeptId!);
+            return _items.Where(d => !blocked.Contains(d.DeptId));
+        }
     }
+
+    private HashSet<string> CollectSelfAndDescendants(string rootId)
+    {
+        var blocked = new HashSet<string>(StringComparer.Ordinal) { rootId };
+        if (_items is null) return blocked;
+
+        // 목록이 평면이라 몇 번 훑어 자손을 모은다. 부서 수가 많지 않아 이 정도면 충분하다.
+        bool added;
+        do
+        {
+            added = false;
+            foreach (var d in _items)
+            {
+                if (d.ParentDeptId is not null
+                    && blocked.Contains(d.ParentDeptId)
+                    && blocked.Add(d.DeptId))
+                {
+                    added = true;
+                }
+            }
+        } while (added);
+
+        return blocked;
+    }
+
+    protected override async Task OnInitializedAsync() => await LoadAsync();
 
     private async Task LoadAsync()
     {
         _loading = true;
-        // 부서 목록 조회. 실패 시 EmployeeService 가 빈 목록을 반환하므로 화면은 "부서 없음"으로 동작.
-        _items = await EmployeeSvc.GetDepartmentsAsync();
+        StateHasChanged();
+
+        _items = await DeptSvc.GetListAsync().ConfigureAwait(false);
+
         _loading = false;
+        StateHasChanged();
+    }
+
+    private void OpenEditor(DepartmentListItemModel? row)
+    {
+        _isNew = row is null;
+        _edit = row is null
+            ? new DepartmentEditModel
+              {
+                  // 새 부서는 목록 맨 뒤에 오게 한다.
+                  SortOrder = (_items?.Count ?? 0) + 1,
+                  IsActive = true
+              }
+            : new DepartmentEditModel
+              {
+                  DeptId = row.DeptId,
+                  DeptName = row.DeptName,
+                  DeptCode = row.DeptCode,
+                  ParentDeptId = row.ParentDeptId,
+                  SortOrder = row.SortOrder,
+                  IsActive = row.IsActive
+              };
+
+        _editing = true;
+    }
+
+    private async Task SaveAsync()
+    {
+        if (string.IsNullOrWhiteSpace(_edit.DeptName))
+        {
+            Snackbar.Add("부서명을 입력해 주세요.", Severity.Warning);
+            return;
+        }
+
+        _saving = true;
+
+        var (ok, message) = _isNew
+            ? await DeptSvc.CreateAsync(_edit).ConfigureAwait(false)
+            : await DeptSvc.UpdateAsync(_edit.DeptId!, _edit).ConfigureAwait(false);
+
+        _saving = false;
+
+        if (!ok)
+        {
+            // 🔴 서버가 준 사유를 그대로 보여준다("'영업부' 부서가 이미 있습니다" 같은 것).
+            Snackbar.Add(message ?? "저장하지 못했습니다.", Severity.Error);
+            StateHasChanged();
+            return;
+        }
+
+        Snackbar.Add(_isNew ? "부서를 추가했습니다." : "부서를 수정했습니다.", Severity.Success);
+        _editing = false;
+        await LoadAsync().ConfigureAwait(false);
+    }
+
+    private async Task DeleteAsync(DepartmentListItemModel row)
+    {
+        // 이 레포가 쓰는 확인 대화상자 패턴(WorkReportPage·ESignHistoryPage 등과 동일).
+        var message = row.EmployeeCount > 0
+            ? $"'{row.DeptName}' 부서에 {row.EmployeeCount}명이 있습니다.\n소속 사원이 있으면 지우지 않고 '사용 안 함' 으로 돌립니다."
+            : $"'{row.DeptName}' 부서를 삭제하시겠습니까?";
+
+        var confirmed = await ConfirmDialog.ShowAsync(
+            DialogService,
+            title: "부서 삭제",
+            message: message,
+            confirmText: "삭제",
+            cancelText: "취소",
+            severity: Severity.Error).ConfigureAwait(false);
+
+        if (!confirmed) return;
+
+        _saving = true;
+        var result = await DeptSvc.DeleteAsync(row.DeptId).ConfigureAwait(false);
+        _saving = false;
+
+        // 🔴 지운 것과 비활성으로 돌린 것을 가른다.
+        //    사원이 물려 있으면 지우지 않고 "사용 안 함" 으로 돌아가는데,
+        //    그걸 "삭제했습니다" 라고 하면 목록에 그대로 남아 되는 척이 된다.
+        if (result.Deleted)
+        {
+            Snackbar.Add("부서를 지웠습니다.", Severity.Success);
+        }
+        else if (result.Deactivated)
+        {
+            Snackbar.Add(result.Message ?? "사용 안 함으로 돌렸습니다.", Severity.Warning);
+        }
+        else
+        {
+            Snackbar.Add(result.Message ?? "부서를 지우지 못했습니다.", Severity.Error);
+        }
+
+        await LoadAsync().ConfigureAwait(false);
     }
 }

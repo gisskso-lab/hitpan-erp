@@ -76,10 +76,64 @@ public sealed class EmployeeEditModel
     public string? Position { get; set; }
     public string? JobTitle { get; set; }
     public string EmpType { get; set; } = "regular";
+
+    /// <summary>
+    /// 주당 소정근로시간(약정). <c>null</c> = 미정.
+    /// </summary>
+    /// <remarks>
+    /// 🔴 작(2026-08-13) 단계4. 연차·주휴·4대보험이 이 숫자로 갈린다(주 15시간이 갈림길).
+    /// 고용형태만으로는 판정이 안 된다 — 같은 알바라도 주 20시간과 10시간은 법적 취급이 다르다.
+    /// ⚠️ 기본값을 40 으로 두지 않는다. 모르는 것을 아는 척 채우면 그 값으로 연차가
+    /// 계산되고 틀린 줄도 모른 채 법정 미달이 된다(반자동 원칙, 사장님 2026-08-12).
+    /// </remarks>
+    public decimal? WeeklyHours { get; set; }
+
     public DateTime JoinDate { get; set; } = DateTime.Today;
     public string? Phone { get; set; }
     public string? Email { get; set; }
     public string Role { get; set; } = "sales_user";
+}
+
+/// <summary>
+/// 고용형태 표시 이름. 화면·명세서가 이걸 쓴다.
+/// </summary>
+/// <remarks>
+/// 🔴 사장님 지시(2026-08-12): <i>"정직원이냐, 알바냐, 계약직이냐, 무기계약직이냐 에 따라서도 달라짐"</i>
+/// 종전엔 <c>EmployeePage.razor</c> 마크업에 "정규직"·"파트타임" 이 하드코딩돼 있었고
+/// <b>무기계약직이 아예 없었다</b>. 한 곳에서만 정해 다른 화면이 생겨도 말이 안 갈리게 한다.
+///
+/// <para>
+/// ⚠️ 값(<c>regular</c>·<c>part</c> …)은 DB 에 저장된 그대로다. <b>값은 안 바꾸고 보이는 말만 바꿨다</b> —
+/// 값을 바꾸면 기존 행이 매칭 실패하는데 <c>EmployeeConfiguration.ParseEmpType</c> 이 그걸
+/// 조용히 <c>Regular</c> 로 폴백해 <b>화면엔 정직원으로 보이면서 DB엔 딴 값이 남는다</b>.
+/// </para>
+///
+/// ⚠️ 서버(<c>HitPan.Domain.Enums.EmployeeTypeLabels</c>)에도 같은 표가 있다.
+/// Web 이 Domain 을 참조하지 않아(계층 경계) 각자 둔다 — <b>한쪽을 고치면 다른 쪽도 고친다</b>.
+/// (게이트: EmployeeTypeLabelGuardTests)
+/// </remarks>
+public static class EmployeeTypeLabels
+{
+    public const string Regular = "정직원";
+    public const string Contract = "계약직";
+    public const string Part = "알바(단시간)";
+    public const string Dispatch = "파견";
+    public const string Permanent = "무기계약직";
+    public const string Daily = "일용직";
+
+    /// <summary>DB 값(소문자) → 사람이 읽는 이름.</summary>
+    public static string Of(string? empType) => empType?.ToLowerInvariant() switch
+    {
+        "regular" => Regular,
+        "contract" => Contract,
+        "part" => Part,
+        "dispatch" => Dispatch,
+        "permanent" => Permanent,
+        "daily" => Daily,
+        // 모르는 값은 감추지 않고 그대로 보여준다 — 조용히 "정직원" 으로 보이면
+        // 오염을 영영 못 찾는다.
+        _ => string.IsNullOrWhiteSpace(empType) ? "-" : empType!
+    };
 }
 
 /// <summary>
@@ -123,6 +177,13 @@ public sealed class EmployeeDetailModel
     public string? Position { get; set; }
     public string? JobTitle { get; set; }
     public string EmpType { get; set; } = "regular";
+
+    /// <summary>주당 소정근로시간(약정). <c>null</c> = 미정. 작(2026-08-13) 단계4.</summary>
+    public decimal? WeeklyHours { get; set; }
+
+    /// <summary>고용형태를 사람이 읽는 말로. 모르는 값은 감추지 않고 그대로 보여준다.</summary>
+    public string EmpTypeLabel => EmployeeTypeLabels.Of(EmpType);
+
     public DateTime JoinDate { get; set; }
     public DateTime? ResignDate { get; set; }
     public string? BirthDate { get; set; }

@@ -259,6 +259,46 @@ public sealed class CompanyBootstrapProvisioner
                 new { WarehouseId = Guid.NewGuid().ToString(), TenantId = tenantId },
                 transaction: tx, cancellationToken: ct));
 
+            // 기본 직급 6개 시드 (작 2026-08-13, 그룹웨어 단계4 토대) — 창고와 같은 패턴.
+            //
+            // 🔴 왜 여기인가: DB-22 가 직급을 시드했으나 `tenant_id='tenant-001'` 하드코딩이라
+            //    실제 고객에게 안 갔고(실측: positions 0행), 그 주석이 말한
+            //    "가입 프로비저닝에서 동일 시드" 는 구현되지 않았다. 그래서
+            //    ①사원 등록의 직급이 자유 텍스트로 남았고 ②12명 중 8명이 직급 없음이 됐다.
+            //    DB-93 이 기존 고객을 메우지만, 신규 설치는 사원이 생기기 전에 마이그가 돌아
+            //    거기서 안 걸린다 — 신규 고객사는 여기서 깔아야 한다.
+            //
+            // ⚠️ 출발점이지 정답이 아니다. 회사마다 직급 체계가 다르므로 관리자가
+            //    설정 → 직급 관리에서 고치고 지운다(헌법 #11 — 우리가 템플릿을 주지 않는다).
+            var stdPositions = new (string Code, string Name, int Sort)[]
+            {
+                ("CEO", "대표이사", 100),
+                ("DIRECTOR", "부장", 80),
+                ("DEPUTY", "차장", 70),
+                ("MANAGER", "과장", 60),
+                ("ASSISTANT_MANAGER", "대리", 50),
+                ("STAFF", "사원", 10),
+            };
+            foreach (var (code, name, sort) in stdPositions)
+            {
+                await db.ExecuteAsync(new CommandDefinition(@"
+                    INSERT INTO positions
+                      (position_id, tenant_id, code, name, sort_order, is_active)
+                    SELECT @PositionId, @TenantId, @Code, @Name, @Sort, 1
+                    WHERE NOT EXISTS (
+                        SELECT 1 FROM positions WHERE tenant_id = @TenantId AND code = @Code
+                    )",
+                    new
+                    {
+                        PositionId = Guid.NewGuid().ToString(),
+                        TenantId = tenantId,
+                        Code = code,
+                        Name = name,
+                        Sort = sort
+                    },
+                    transaction: tx, cancellationToken: ct));
+            }
+
             // 표준 8계정 시드 (12차 ACCOUNTS-SEED P0) — AutoJournalHelper 상수와 1:1. NOT EXISTS 로 재실행·마이그 보호.
             var stdAccounts = new (string Code, string Name, string Type)[]
             {

@@ -420,6 +420,12 @@ public sealed class SettingsService : ISettingsService
               header_url = @HeaderUrl,
               corp_no = @CorpNo,
               subsidiary_no = @SubsidiaryNo,
+              -- 작(2026-08-13) 단계4 토대 — 사업장 노무 정보.
+              -- 🔴 tax_type 은 컬럼만 있고 저장 경로가 없어 늘 기본값이었다. 여기서 잇는다.
+              tax_type = @TaxType,
+              regular_employee_count = @RegularEmployeeCount,
+              business_entity_type = @BusinessEntityType,
+              employee_count_asof = @EmployeeCountAsOf,
               updated_at = NOW(6)
             WHERE tenant_id = @TenantId
             """;
@@ -445,7 +451,17 @@ public sealed class SettingsService : ISettingsService
                     SealUrl = TruncateNullable(dto.SealUrl, 200),
                     HeaderUrl = TruncateNullable(dto.HeaderUrl, 200),
                     CorpNo = corpNo,
-                    SubsidiaryNo = string.IsNullOrEmpty(subsidiaryNo) ? null : subsidiaryNo
+                    SubsidiaryNo = string.IsNullOrEmpty(subsidiaryNo) ? null : subsidiaryNo,
+                    // 작(2026-08-13) 단계4 — 사업장 노무 정보.
+                    // 🔴 정해진 값만 받는다. 아무 문자열이나 들어가면 나중에 판정하는 쪽이
+                    //    모르는 값을 만나 조용히 기본값으로 흘러간다(emp_type 이 겪은 그 병).
+                    TaxType = NormalizeChoice(dto.TaxType, "taxable", "tax_free"),
+                    BusinessEntityType = NormalizeChoice(dto.BusinessEntityType, "corporate", "individual"),
+                    // 음수·비현실적인 값은 막는다. null 은 '미정' 이라 그대로 둔다.
+                    RegularEmployeeCount = dto.RegularEmployeeCount is > 0 and <= 1_000_000
+                        ? dto.RegularEmployeeCount
+                        : null,
+                    EmployeeCountAsOf = dto.EmployeeCountAsOf
                 },
                 cancellationToken: ct))
             .ConfigureAwait(false);
@@ -480,6 +496,13 @@ public sealed class SettingsService : ISettingsService
               header_url AS HeaderUrl,
               corp_no AS CorpNo,
               subsidiary_no AS SubsidiaryNo,
+              -- 작(2026-08-13) 단계4 토대 — 노무 판정에 쓰는 사업장 정보.
+              -- 🔴 tax_type 은 컬럼이 있는데도 SELECT·UPDATE·화면 어디에도 없어
+              --    값을 넣을 방법이 없었다(늘 기본값 'taxable'). 여기서 살린다.
+              tax_type AS TaxType,
+              regular_employee_count AS RegularEmployeeCount,
+              business_entity_type AS BusinessEntityType,
+              employee_count_asof AS EmployeeCountAsOf,
               is_locked_from_landing AS IsLockedFromLanding
             FROM local_company
             WHERE tenant_id = @TenantId
@@ -487,6 +510,27 @@ public sealed class SettingsService : ISettingsService
         return await _db.QueryFirstOrDefaultAsync<UpdateTenantCompanyDto>(
                 new CommandDefinition(sql, new { TenantId = tenantId }, cancellationToken: ct))
             .ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// 정해진 선택지 중 하나인지 본다. 아니면 <c>null</c>(미정)로 돌린다.
+    /// </summary>
+    /// <remarks>
+    /// 🔴 작(2026-08-13) 단계4. 아무 문자열이나 저장되면, 나중에 이 값으로 연차·보험을
+    /// 판정하는 쪽이 모르는 값을 만나 <b>조용히 기본값으로 흘러간다</b>.
+    /// <c>emp_type</c> 이 정확히 그 병을 갖고 있다 — 유령값이 들어와도
+    /// <c>ParseEmpType</c> 이 말없이 <c>Regular</c> 로 바꿔 화면엔 정상으로 보인다.
+    /// 여기서는 <b>모르는 값을 받지 않는다</b>. 미정은 미정으로 남긴다.
+    /// </remarks>
+    private static string? NormalizeChoice(string? value, params string[] allowed)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return null;
+        }
+
+        var t = value.Trim().ToLowerInvariant();
+        return Array.Exists(allowed, a => a == t) ? t : null;
     }
 
     /// <summary>

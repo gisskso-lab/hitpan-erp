@@ -13,6 +13,8 @@ public partial class EmployeePage : ComponentBase
     [Inject] private EmployeeService EmployeeSvc { get; set; } = default!;
     [Inject] private LeaveRequestService LeaveSvc { get; set; } = default!;
     [Inject] private PermissionService PermSvc { get; set; } = default!;
+    // 작(2026-08-13) 단계4 토대: 직급 마스터 드롭다운.
+    [Inject] private PositionService PositionSvc { get; set; } = default!;
     [Inject] private ISnackbar Snackbar { get; set; } = default!;
     // 작(2026-08-12) 단계0: 퇴사 처리 확인 대화상자용.
     [Inject] private IDialogService DialogService { get; set; } = default!;
@@ -21,6 +23,54 @@ public partial class EmployeePage : ComponentBase
     private List<EmployeeListItemModel> _employees = new();
     // 봉합 (2026-06-22, 10차 P1-1): 부서 드롭다운 데이터. 사원 부서는 dept_id 로 저장되므로 선택지를 채운다.
     private List<DepartmentModel> _departments = new();
+
+    /// <summary>
+    /// 직급 드롭다운 선택지. 작(2026-08-13) 단계4 토대.
+    /// </summary>
+    /// <remarks>
+    /// 🔴 종전엔 직급이 <b>자유 텍스트</b>였다. 그래서 12명 중 8명이 직급 없음이고
+    /// (NULL 2 · 공백 5 · <c>"0"</c> 1), 마스터(<c>positions</c>)와 아무 연결이 없었다.
+    /// 부서는 6/22 에 이미 드롭다운으로 봉합했는데 직급만 남아 있었다.
+    ///
+    /// ⚠️ <c>employees.position</c> 은 <b>이름 문자열</b>을 담는다(FK 아님).
+    /// 그래서 선택지도 <b>이름</b>으로 고른다 — 기존 "과장"·"사원" 값이 그대로 살아난다.
+    /// ID 로 바꾸면 기존 12명 값이 전부 매칭 실패로 날아간다(오염값 마이그가 선행돼야 함).
+    /// </remarks>
+    private List<PositionListItemModel> _positions = new();
+
+    /// <summary>
+    /// 직급 드롭다운에 보여줄 이름들.
+    /// </summary>
+    /// <remarks>
+    /// 🔴 <b>지금 이 사원이 가진 값이 마스터에 없어도 선택지에 남긴다.</b>
+    /// 안 남기면 그 사원을 열었을 때 드롭다운이 빈칸으로 보이고, 다른 항목만 고쳐 저장해도
+    /// <b>직급이 조용히 지워진다</b>. 실측으로 "과장"·"사원" 값을 가진 사원이 4명 있는데
+    /// <c>positions</c> 는 0행이라, 이 처리가 없으면 저장 한 번에 그 값들이 날아간다.
+    ///
+    /// 비활성 직급도 같은 이유로 남긴다 — 이미 그 직급인 사람이 있기 때문이다.
+    /// 다만 <b>새로 고를 수 있는 것</b>은 활성 직급뿐이라, 활성분을 앞에 둔다.
+    /// </remarks>
+    private IEnumerable<string> PositionOptions
+    {
+        get
+        {
+            var names = _positions
+                .Where(p => p.IsActive)
+                .Select(p => p.Name)
+                .Where(n => !string.IsNullOrWhiteSpace(n))
+                .ToList();
+
+            // 이 사원이 지금 가진 값이 목록에 없으면 끝에 덧붙인다(값 유실 방지).
+            var current = _edit.Position;
+            if (!string.IsNullOrWhiteSpace(current)
+                && !names.Contains(current, StringComparer.Ordinal))
+            {
+                names.Add(current!);
+            }
+
+            return names;
+        }
+    }
     private List<LeaveRequestModel> _leaveRequests = new();
     private List<UserPermissionModel> _permissionUsers = new();
     private UserPermissionModel? _selectedPermUser;
@@ -74,6 +124,10 @@ public partial class EmployeePage : ComponentBase
         _employees = await EmployeeSvc.GetListAsync().ConfigureAwait(false);
         // 봉합 (2026-06-22, 10차 P1-1): 부서 선택지 로드 (읽기 전용 마스터).
         _departments = await EmployeeSvc.GetDepartmentsAsync().ConfigureAwait(false);
+        // 작(2026-08-13) 단계4: 직급 선택지 로드.
+        // ⚠️ 조회 실패(null)와 "직급 0개"(빈 목록)를 가른다 — PositionService 가 그렇게 돌려준다.
+        //    실패를 빈 목록으로 뭉개면 직급이 등록된 회사에서 드롭다운이 비어 보인다.
+        _positions = await PositionSvc.GetListAsync().ConfigureAwait(false) ?? new List<PositionListItemModel>();
         _permissionUsers = await PermSvc.GetAllAsync().ConfigureAwait(false) ?? new List<UserPermissionModel>();
 
         if (_employees.Count > 0)
@@ -254,6 +308,10 @@ public partial class EmployeePage : ComponentBase
             Position = detail.Position,
             JobTitle = detail.JobTitle,
             EmpType = string.IsNullOrWhiteSpace(detail.EmpType) ? "regular" : detail.EmpType,
+            // 작(2026-08-13) 단계4: 주당 소정근로시간을 폼에 되돌려 넣는다.
+            // 🔴 이걸 빠뜨리면 다른 항목만 고쳐 저장해도 이 값이 null 로 덮여 사라진다.
+            //    null 은 '미정' 이라는 뜻이므로 그대로 실어 보낸다(40 으로 채우지 않는다).
+            WeeklyHours = detail.WeeklyHours,
             JoinDate = detail.JoinDate,
             Phone = detail.Phone,
             Email = detail.Email,

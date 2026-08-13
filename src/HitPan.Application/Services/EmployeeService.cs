@@ -101,6 +101,8 @@ public sealed class EmployeeService : IEmployeeService
               e.position AS Position,
               e.job_title AS JobTitle,
               e.emp_type AS EmpType,
+              -- 작(2026-08-13) 단계4: 주당 소정근로시간. 연차·주휴 판정이 이 숫자를 본다.
+              e.weekly_hours AS WeeklyHours,
               e.join_date AS JoinDate,
               e.resign_date AS ResignDate,
               e.birth_date AS BirthDate,
@@ -150,14 +152,14 @@ public sealed class EmployeeService : IEmployeeService
             INSERT INTO employees (
               employee_id, tenant_id, user_id,
               emp_no, emp_name, dept_id,
-              position, job_title, emp_type,
+              position, job_title, emp_type, weekly_hours,
               join_date, phone, email,
               role, is_active,
               created_at, updated_at)
             VALUES (
               @EmployeeId, @TenantId, NULL,
               @EmpNo, @EmpName, @DeptId,
-              @Position, @JobTitle, @EmpType,
+              @Position, @JobTitle, @EmpType, @WeeklyHours,
               @JoinDate, @Phone, @Email,
               @Role, 1,
               NOW(6), NOW(6))
@@ -196,6 +198,8 @@ public sealed class EmployeeService : IEmployeeService
                 position = @Position,
                 job_title = @JobTitle,
                 emp_type = @EmpType,
+                -- 작(2026-08-13) 단계4: 주당 소정근로시간. null 이면 '미정' 으로 되돌아간다.
+                weekly_hours = @WeeklyHours,
                 join_date = @JoinDate,
                 phone = @Phone,
                 email = @Email,
@@ -216,6 +220,7 @@ public sealed class EmployeeService : IEmployeeService
                 Position = request.Position,
                 JobTitle = request.JobTitle,
                 EmpType = request.EmpType,
+                WeeklyHours = request.WeeklyHours,
                 JoinDate = request.JoinDate == default ? DateTime.Today : request.JoinDate.Date,
                 Phone = request.Phone,
                 Email = request.Email,

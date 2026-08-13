@@ -1053,6 +1053,7 @@ CREATE TABLE `employees` (
   `position` varchar(30) DEFAULT NULL,
   `job_title` varchar(30) DEFAULT NULL,
   `emp_type` longtext NOT NULL,
+  `weekly_hours` decimal(4,1) DEFAULT NULL COMMENT '주당 소정근로시간(약정). NULL=미정 — 반자동 원칙상 임의로 채우지 않는다. DB-94',
   `join_date` datetime(6) NOT NULL,
   `resign_date` datetime(6) DEFAULT NULL,
   `birth_date` varchar(200) DEFAULT NULL,
@@ -1820,6 +1821,9 @@ CREATE TABLE `local_company` (
   `seal_url` varchar(200) DEFAULT NULL COMMENT '인장 이미지 경로. DB-85 — 거래명세서·견적서 출력용',
   `header_url` varchar(200) DEFAULT NULL COMMENT '출력 헤더 이미지 경로. DB-85',
   `corp_no` varchar(20) DEFAULT NULL,
+  `regular_employee_count` int(11) DEFAULT NULL COMMENT '상시근로자수. NULL=미정 — 자동계산 금지(연인원/가동일수, 사람이 확정). DB-95',
+  `business_entity_type` varchar(20) DEFAULT NULL COMMENT '법인/개인 구분: corporate|individual. NULL=미정. DB-95',
+  `employee_count_asof` date DEFAULT NULL COMMENT '상시근로자수 기준일. 이 숫자가 언제 기준인지. DB-95',
   `subsidiary_no` varchar(20) DEFAULT NULL,
   `homepage` varchar(200) DEFAULT NULL,
   `initial_date` date DEFAULT NULL,
@@ -3119,7 +3123,7 @@ INSERT INTO `schema_migrations` (`migration_id`, `app_version`, `success`) VALUE
 ('DB-74','clean-ddl',1),('DB-75','clean-ddl',1),('DB-76','clean-ddl',1),('DB-77','clean-ddl',1),
 ('DB-78','clean-ddl',1),('DB-79','clean-ddl',1),('DB-80','clean-ddl',1),('DB-81','clean-ddl',1),
 ('DB-82','clean-ddl',1),('DB-83','clean-ddl',1),('DB-84','clean-ddl',1),('DB-85','clean-ddl',1),
-('DB-86','clean-ddl',1),('DB-87','clean-ddl',1),('DB-88','clean-ddl',1),('DB-89','clean-ddl',1),('DB-90','clean-ddl',1),('DB-91','clean-ddl',1),('DB-92','clean-ddl',1);
+('DB-86','clean-ddl',1),('DB-87','clean-ddl',1),('DB-88','clean-ddl',1),('DB-89','clean-ddl',1),('DB-90','clean-ddl',1),('DB-91','clean-ddl',1),('DB-92','clean-ddl',1),('DB-93','clean-ddl',1),('DB-94','clean-ddl',1),('DB-95','clean-ddl',1);
 
 --
 -- Table structure for table `service_tickets`
