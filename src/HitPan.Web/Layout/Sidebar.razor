@@ -79,7 +79,14 @@
            주소를 직접 입력해 들어오는 사람에게 갑자기 화면이 없어지면 더 혼란스럽기 때문이며,
            그 화면 상단에서 [결재 설정]으로 안내한다. *@
         <MudNavLink Href="/settings/approval" Icon="@Icons.Material.Filled.Rule">결재 설정</MudNavLink>
-        <MudNavLink Href="/settings/positions" Icon="@Icons.Material.Filled.Badge">직급 관리</MudNavLink>
+        @* 🔴 봉합 (2026-08-13, 단계4 검증 P1-2): 관리자만 쓸 수 있는 화면은 관리자에게만 보인다.
+           종전엔 일반 직원에게도 [직급 관리]·[부서 관리]가 보였고, 눌러서 화면까지 열린 뒤
+           API 에서 403 이 나 "불러오지 못했습니다" 만 떴다. 못 쓸 메뉴를 보여주는 것 자체가
+           "처음 보는 사람이 혼자 쓸 수 있냐" 기준에 걸린다(히트판 정신). *@
+        @if (_isTenantAdmin)
+        {
+            <MudNavLink Href="/settings/positions" Icon="@Icons.Material.Filled.Badge">직급 관리</MudNavLink>
+        }
         <MudNavLink Href="/employees" Icon="@Icons.Material.Filled.People">사원관리</MudNavLink>
         <MudNavLink Href="/hr/employees" Icon="@Icons.Material.Filled.Badge">HR 직원현황</MudNavLink>
         @* 작(2026-08-12) 그룹웨어 단계1: 만들어 놓고 메뉴에 없던 화면 6개를 올린다.
@@ -91,12 +98,21 @@
            한 화면에서 종류를 탭으로 가른다. 네 메뉴로 늘리면 사이드바만 길어지고
            같은 화면을 네 번 배워야 한다. *@
         <MudNavLink Href="/hr/reports" Icon="@Icons.Material.Filled.Description">업무보고서</MudNavLink>
-        <MudNavLink Href="/hr/departments" Icon="@Icons.Material.Filled.AccountTree">부서 관리</MudNavLink>
+        @if (_isTenantAdmin)
+        {
+            <MudNavLink Href="/hr/departments" Icon="@Icons.Material.Filled.AccountTree">부서 관리</MudNavLink>
+        }
         <MudNavLink Href="/hr/attendance" Icon="@Icons.Material.Filled.AccessTime">근태 관리</MudNavLink>
         <MudNavLink Href="/hr/attendance-calendar" Icon="@Icons.Material.Filled.CalendarMonth">근태 달력</MudNavLink>
         <MudNavLink Href="/hr/overtime" Icon="@Icons.Material.Filled.MoreTime">초과근무</MudNavLink>
         <MudNavLink Href="/hr/leave" Icon="@Icons.Material.Filled.EventAvailable">휴가·연차</MudNavLink>
         <MudNavLink Href="/hr/leave-request" Icon="@Icons.Material.Filled.EditCalendar">연차 신청</MudNavLink>
+        @* 작(2026-08-13) 단계5 — 연차를 '주는' 화면. 위의 '연차 신청'(직원이 쓰는 것)과 다르다.
+           반자동 3단: 자동 계산이 제안 → 관리자가 확인·수정 → 확정해야 잔여에 반영. *@
+        @if (_isTenantAdmin)
+        {
+            <MudNavLink Href="/hr/annual-leave" Icon="@Icons.Material.Filled.Rule">연차 부여</MudNavLink>
+        }
         <MudNavLink Href="/hr/leave-calendar" Icon="@Icons.Material.Filled.EditCalendar">휴가 달력</MudNavLink>
         <MudNavLink Href="/hr/leave-status" Icon="@Icons.Material.Filled.Assessment">휴가 현황</MudNavLink>
         <MudNavLink Href="/hr/expense-request" Icon="@Icons.Material.Filled.ReceiptLong">경비 신청</MudNavLink>

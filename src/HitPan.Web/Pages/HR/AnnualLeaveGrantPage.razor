@@ -1,0 +1,373 @@
+@page "/hr/annual-leave"
+@namespace HitPan.Web.Pages.HrUi
+@attribute [Authorize]
+@using HitPan.Web.Models
+@using HitPan.Web.Services
+@inject AnnualLeaveService LeaveSvc
+@inject ISnackbar Snackbar
+
+<PageTitle>연차 부여</PageTitle>
+<PageHeader Title="연차 부여" Subtitle="자동 계산 → 확인·수정 → 확정" />
+
+@* 🔴 반자동 3단(사장님 2026-08-12: "히트판은 100%자동화는 없어. 무조건 반자동이야")
+   ① 자동 계산이 제안한다  ② 사람이 보고 고친다  ③ 확정해야 잔여에 반영된다
+   화면이 이 3단을 그대로 보여준다 — 제안값과 확정값을 나란히 두는 이유다. *@
+
+<MudTabs Elevation="0" Rounded="true" ApplyEffectsToContainer="true" PanelClass="pa-2">
+    <MudTabPanel Text="연차 부여">
+        <MudPaper Elevation="0" Class="pa-2 hitpan-card">
+            <div style="display:flex;gap:12px;align-items:center;margin-bottom:12px;flex-wrap:wrap">
+                <MudNumericField T="int" Label="귀속 연도" @bind-Value="_year"
+                                 Variant="Variant.Outlined" Margin="Margin.Dense"
+                                 Min="2000" Max="2100" Style="max-width:140px" />
+                <MudButton Variant="Variant.Filled" Color="Color.Primary"
+                           StartIcon="@Icons.Material.Filled.Calculate"
+                           Disabled="@_loading" OnClick="LoadAsync">
+                    계산하기
+                </MudButton>
+                <MudText Typo="Typo.caption" Color="Color.Secondary">
+                    계산은 <b>제안</b>일 뿐입니다. 확정을 눌러야 직원 잔여에 반영됩니다.
+                </MudText>
+            </div>
+
+            @if (_loading)
+            {
+                <MudProgressLinear Indeterminate="true" Color="Color.Primary" />
+            }
+            else if (_items is null)
+            {
+                <MudAlert Severity="Severity.Error" Class="ma-2">
+                    계산하지 못했습니다.
+                    <MudButton Variant="Variant.Text" Color="Color.Inherit" OnClick="LoadAsync">다시 시도</MudButton>
+                </MudAlert>
+            }
+            else
+            {
+                <MudTable Items="_items" Dense="true" Hover="true" Striped="true">
+                    <HeaderContent>
+                        <MudTh>직원</MudTh>
+                        <MudTh Style="width:90px">근속</MudTh>
+                        <MudTh Style="width:90px">종류</MudTh>
+                        <MudTh Style="width:100px">① 제안</MudTh>
+                        <MudTh Style="width:130px">② 확정 일수</MudTh>
+                        <MudTh>계산 근거 · 확인할 점</MudTh>
+                        <MudTh Style="width:110px">③</MudTh>
+                    </HeaderContent>
+                    <RowTemplate>
+                        <MudTd DataLabel="직원">@context.EmployeeName</MudTd>
+                        <MudTd DataLabel="근속">@context.ServiceYears 년</MudTd>
+                        <MudTd DataLabel="종류">@context.GrantTypeLabel</MudTd>
+                        <MudTd DataLabel="제안">
+                            <MudText Typo="Typo.body2" Color="Color.Secondary">@context.SuggestedDays 일</MudText>
+                        </MudTd>
+                        <MudTd DataLabel="확정 일수">
+                            @if (context.IsConfirmed)
+                            {
+                                <MudChip T="string" Size="Size.Small" Color="Color.Success" Variant="Variant.Text">
+                                    @context.ExistingGrantedDays 일 확정
+                                </MudChip>
+                            }
+                            else
+                            {
+                                @* ② 사람이 고치는 자리. 제안값이 들어와 있고 바꿀 수 있다. *@
+                                <MudNumericField T="decimal" @bind-Value="context.EditDays"
+                                                 Variant="Variant.Outlined" Margin="Margin.Dense"
+                                                 Min="0" Max="365" Step="0.5M" />
+                            }
+                        </MudTd>
+                        <MudTd DataLabel="근거">
+                            <MudText Typo="Typo.caption">@context.CalcBasis</MudText>
+                            @foreach (var w in context.Warnings)
+                            {
+                                @* 🔴 자동이 판단 못 하는 것을 감추지 않는다.
+                                   감추면 관리자가 모르고 확정해 법정 미달이 될 수 있다. *@
+                                <MudText Typo="Typo.caption" Color="Color.Warning">⚠ @w</MudText>
+                            }
+                            @if (!context.IsConfirmed && context.IsAdjusted)
+                            {
+                                <MudTextField T="string" @bind-Value="context.AdjustReason"
+                                              Label="제안과 다르게 정한 이유 (필수)"
+                                              Variant="Variant.Outlined" Margin="Margin.Dense"
+                                              Class="mt-2" Immediate="true" MaxLength="300" />
+                            }
+                        </MudTd>
+                        <MudTd>
+                            @if (!context.IsConfirmed)
+                            {
+                                <MudButton Size="Size.Small" Variant="Variant.Filled" Color="Color.Primary"
+                                           Disabled="@_saving" OnClick="@(() => ConfirmAsync(context))">
+                                    확정
+                                </MudButton>
+                            }
+                        </MudTd>
+                    </RowTemplate>
+                    <NoRecordsContent>
+                        <MudText Typo="Typo.body2" Color="Color.Secondary" Class="pa-4">
+                            재직 중인 직원이 없습니다.
+                        </MudText>
+                    </NoRecordsContent>
+                </MudTable>
+            }
+        </MudPaper>
+    </MudTabPanel>
+
+    <MudTabPanel Text="부여 이력">
+        <MudPaper Elevation="0" Class="pa-2 hitpan-card">
+            @if (_grants is null)
+            {
+                <MudText Typo="Typo.body2" Color="Color.Secondary" Class="pa-4">
+                    이력을 불러오지 못했습니다.
+                </MudText>
+            }
+            else
+            {
+                <MudTable Items="_grants" Dense="true" Hover="true" Striped="true">
+                    <HeaderContent>
+                        <MudTh Style="width:80px">연도</MudTh>
+                        <MudTh>직원</MudTh>
+                        <MudTh Style="width:90px">종류</MudTh>
+                        <MudTh Style="width:90px">제안</MudTh>
+                        <MudTh Style="width:90px">확정</MudTh>
+                        <MudTh>수정 사유 · 계산 근거</MudTh>
+                        <MudTh Style="width:150px">확정 일시</MudTh>
+                    </HeaderContent>
+                    <RowTemplate>
+                        <MudTd DataLabel="연도">@context.GrantYear</MudTd>
+                        <MudTd DataLabel="직원">@context.EmployeeName</MudTd>
+                        <MudTd DataLabel="종류">@context.GrantTypeLabel</MudTd>
+                        <MudTd DataLabel="제안">@context.SuggestedDays 일</MudTd>
+                        <MudTd DataLabel="확정">
+                            <b>@context.GrantedDays 일</b>
+                            @if (context.IsAdjusted)
+                            {
+                                <MudChip T="string" Size="Size.Small" Color="Color.Warning" Variant="Variant.Text">수정</MudChip>
+                            }
+                        </MudTd>
+                        <MudTd DataLabel="사유">
+                            @if (!string.IsNullOrWhiteSpace(context.AdjustReason))
+                            {
+                                <MudText Typo="Typo.caption" Color="Color.Warning">@context.AdjustReason</MudText>
+                            }
+                            <MudText Typo="Typo.caption" Color="Color.Secondary">@context.CalcBasis</MudText>
+                        </MudTd>
+                        <MudTd DataLabel="확정 일시">
+                            @(context.ConfirmedAt?.ToString("yyyy-MM-dd HH:mm") ?? "-")
+                        </MudTd>
+                    </RowTemplate>
+                    <NoRecordsContent>
+                        <MudText Typo="Typo.body2" Color="Color.Secondary" Class="pa-4">
+                            아직 부여한 연차가 없습니다.
+                        </MudText>
+                    </NoRecordsContent>
+                </MudTable>
+            }
+        </MudPaper>
+    </MudTabPanel>
+
+    <MudTabPanel Text="기준값">
+        <MudPaper Elevation="0" Class="pa-2 hitpan-card">
+            @* 🔴 법정값을 코드에 넣지 않는다(설계도 §0). 법이 바뀌면 여기 값만 고친다 —
+               프로그램을 다시 깔 필요가 없다. 사장님: "법이라는 게 언제, 어떻게 바뀔지는 몰라." *@
+            <MudAlert Severity="Severity.Info" Dense="true" Class="mb-3">
+                법이 바뀌면 <b>여기 값만 고치면 됩니다.</b> 프로그램을 다시 설치할 필요가 없습니다.
+                고친 값은 <b>시행일부터</b> 적용되고, 그 전 기간은 옛 값으로 계산됩니다.
+            </MudAlert>
+
+            @if (_policies is null)
+            {
+                <MudText Typo="Typo.body2" Color="Color.Secondary" Class="pa-4">
+                    기준값을 불러오지 못했습니다.
+                </MudText>
+            }
+            else
+            {
+                <MudTable Items="_policies" Dense="true" Hover="true" Striped="true">
+                    <HeaderContent>
+                        <MudTh>기준</MudTh>
+                        <MudTh Style="width:150px">값</MudTh>
+                        <MudTh Style="width:120px">시행일</MudTh>
+                        <MudTh>설명</MudTh>
+                        <MudTh Style="width:90px"></MudTh>
+                    </HeaderContent>
+                    <RowTemplate>
+                        <MudTd DataLabel="기준">
+                            @context.Label
+                            @if (context.IsStatutory)
+                            {
+                                <MudChip T="string" Size="Size.Small" Color="Color.Error" Variant="Variant.Text">법정</MudChip>
+                            }
+                        </MudTd>
+                        <MudTd DataLabel="값">
+                            <MudNumericField T="decimal" @bind-Value="context.EditValue"
+                                             Variant="Variant.Outlined" Margin="Margin.Dense"
+                                             Min="0" Step="0.5M" Adornment="Adornment.End"
+                                             AdornmentText="@context.UnitLabel" />
+                        </MudTd>
+                        <MudTd DataLabel="시행일">@context.EffectiveFrom.ToString("yyyy-MM-dd")</MudTd>
+                        <MudTd DataLabel="설명">
+                            <MudText Typo="Typo.caption">@context.Description</MudText>
+                            @if (context.IsStatutory)
+                            {
+                                <MudText Typo="Typo.caption" Color="Color.Error">
+                                    법정 기준입니다. 더 줄 수는 있어도 <b>줄이면 위법</b>입니다.
+                                </MudText>
+                            }
+                        </MudTd>
+                        <MudTd>
+                            <MudButton Size="Size.Small" Variant="Variant.Outlined"
+                                       Disabled="@(_saving || context.EditValue == context.PolicyValue)"
+                                       OnClick="@(() => OpenPolicyEditor(context))">
+                                고치기
+                            </MudButton>
+                        </MudTd>
+                    </RowTemplate>
+                </MudTable>
+            }
+        </MudPaper>
+    </MudTabPanel>
+</MudTabs>
+
+<MudDialog @bind-Visible="_policyEditing" Options="@(new DialogOptions { MaxWidth = MaxWidth.Small, FullWidth = true })">
+    <TitleContent><MudText Typo="Typo.h6">기준값 변경</MudText></TitleContent>
+    <DialogContent>
+        @if (_policyTarget is not null)
+        {
+            <MudText Typo="Typo.body2" Class="mb-3">
+                <b>@_policyTarget.Label</b> — @_policyTarget.PolicyValue@_policyTarget.UnitLabel
+                → <b>@_policyTarget.EditValue@_policyTarget.UnitLabel</b>
+            </MudText>
+
+            @* 🔴 시행일이 핵심이다. 법은 시행일이 있고, 그 전 기간은 옛 값으로 계산해야 한다.
+               오늘로 두면 과거 계산이 안 틀어진다. *@
+            <MudDatePicker Label="시행일 (이 날짜부터 적용)" @bind-Date="_policyEffectiveFrom"
+                           Variant="Variant.Outlined" Margin="Margin.Dense" Class="mb-3"
+                           HelperText="이 날짜 전 기간은 지금 값으로 계산됩니다." />
+
+            <MudTextField T="string" @bind-Value="_policyReason" Label="왜 고치나요? (법 개정 / 회사 규정)"
+                          Variant="Variant.Outlined" Margin="Margin.Dense" Lines="2" MaxLength="200"
+                          HelperText="나중에 왜 이 값이 됐는지 알 수 있어야 합니다." />
+        }
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="@(() => _policyEditing = false)" Disabled="@_saving">취소</MudButton>
+        <MudButton Color="Color.Primary" Variant="Variant.Filled"
+                   Disabled="@_saving" OnClick="SavePolicyAsync">저장</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    private int _year = DateTime.Today.Year;
+    private List<AnnualLeaveSuggestionModel>? _items;
+    private List<AnnualLeaveGrantModel>? _grants;
+    private List<LaborPolicyModel>? _policies;
+
+    private bool _loading = true;
+    private bool _saving;
+
+    private bool _policyEditing;
+    private LaborPolicyModel? _policyTarget;
+    private DateTime? _policyEffectiveFrom = DateTime.Today;
+    private string? _policyReason;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadAsync().ConfigureAwait(false);
+        await LoadSideAsync().ConfigureAwait(false);
+    }
+
+    private async Task LoadAsync()
+    {
+        _loading = true;
+        StateHasChanged();
+
+        _items = await LeaveSvc.SuggestAsync(_year).ConfigureAwait(false);
+
+        _loading = false;
+        StateHasChanged();
+    }
+
+    private async Task LoadSideAsync()
+    {
+        _grants = await LeaveSvc.GetGrantsAsync().ConfigureAwait(false);
+        _policies = await LeaveSvc.GetPoliciesAsync().ConfigureAwait(false);
+        StateHasChanged();
+    }
+
+    /// <summary>③ 확정 — 이때만 직원 잔여에 반영된다.</summary>
+    private async Task ConfirmAsync(AnnualLeaveSuggestionModel row)
+    {
+        // 🔴 제안과 다르게 정했으면 이유를 받는다(서버도 막지만 여기서 먼저 알린다).
+        //    이력이 없으면 "내 연차가 왜 이거냐" 에 답할 수 없다.
+        if (row.IsAdjusted && string.IsNullOrWhiteSpace(row.AdjustReason))
+        {
+            Snackbar.Add("자동 계산과 다르게 정했습니다. 이유를 적어주세요.", Severity.Warning);
+            return;
+        }
+
+        _saving = true;
+
+        var (ok, message) = await LeaveSvc.ConfirmAsync(new ConfirmAnnualLeaveModel
+        {
+            EmployeeId = row.EmployeeId,
+            GrantYear = row.GrantYear,
+            GrantType = row.GrantType,
+            SuggestedDays = row.SuggestedDays,
+            GrantedDays = row.EditDays,
+            AdjustReason = row.AdjustReason,
+            PeriodStart = new DateTime(row.GrantYear, 1, 1),
+            PeriodEnd = new DateTime(row.GrantYear, 12, 31),
+            ServiceYears = row.ServiceYears,
+            CalcBasis = row.CalcBasis
+        }).ConfigureAwait(false);
+
+        _saving = false;
+
+        if (!ok)
+        {
+            Snackbar.Add(message ?? "확정하지 못했습니다.", Severity.Error);
+            return;
+        }
+
+        Snackbar.Add($"{row.EmployeeName} 연차 {row.EditDays}일을 확정했습니다.", Severity.Success);
+
+        await LoadAsync().ConfigureAwait(false);
+        await LoadSideAsync().ConfigureAwait(false);
+    }
+
+    private void OpenPolicyEditor(LaborPolicyModel row)
+    {
+        _policyTarget = row;
+        _policyEffectiveFrom = DateTime.Today;
+        _policyReason = null;
+        _policyEditing = true;
+    }
+
+    private async Task SavePolicyAsync()
+    {
+        if (_policyTarget is null) return;
+
+        _saving = true;
+
+        var (ok, message) = await LeaveSvc.SavePolicyAsync(new SaveLaborPolicyModel
+        {
+            PolicyKey = _policyTarget.PolicyKey,
+            PolicyValue = _policyTarget.EditValue,
+            EffectiveFrom = _policyEffectiveFrom ?? DateTime.Today,
+            UpdatedReason = _policyReason
+        }).ConfigureAwait(false);
+
+        _saving = false;
+
+        if (!ok)
+        {
+            Snackbar.Add(message ?? "저장하지 못했습니다.", Severity.Error);
+            return;
+        }
+
+        Snackbar.Add("기준값을 바꿨습니다. 시행일부터 적용됩니다.", Severity.Success);
+        _policyEditing = false;
+
+        await LoadSideAsync().ConfigureAwait(false);
+        await LoadAsync().ConfigureAwait(false);
+    }
+}

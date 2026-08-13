@@ -1408,6 +1408,75 @@ CREATE TABLE `hr_expense_requests` (
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
+-- Table structure for table `labor_policy_settings`
+-- 작(2026-08-13) DB-96 — 노무 기준값. 그룹웨어 단계5(연차 엔진)의 토대.
+-- 🔴 법정값을 코드에 넣지 않는다(설계도 §0). 법이 바뀌면 이 표의 값만 갈아끼운다.
+--    사장님(2026-08-12): "법이라는 게 언제, 어떻게 바뀔지는 몰라. 계속 모니터링 해야 해."
+--    값마다 effective_from 을 둬 과거분은 옛 값으로 계산한다.
+--
+
+DROP TABLE IF EXISTS `labor_policy_settings`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!40101 SET character_set_client = utf8mb4 */;
+CREATE TABLE `labor_policy_settings` (
+  `policy_id` varchar(36) NOT NULL COMMENT 'PK',
+  `tenant_id` varchar(36) NOT NULL COMMENT '테넌트(헌법 #2 — JWT 클레임에서만 온다)',
+  `policy_key` varchar(60) NOT NULL COMMENT '기준값 열쇠. 예: annual_leave_base_days',
+  `policy_value` decimal(12,4) NOT NULL COMMENT '값. 일수·시간·비율 모두 숫자 하나로 담는다',
+  `value_unit` varchar(20) NOT NULL DEFAULT 'day' COMMENT '단위: day|hour|rate|count',
+  `effective_from` date NOT NULL COMMENT '적용 시작일. 과거분은 옛 값으로 계산한다',
+  `effective_to` date DEFAULT NULL COMMENT '적용 종료일. NULL=현재 유효',
+  `label` varchar(100) NOT NULL COMMENT '사람이 읽는 이름',
+  `description` varchar(300) DEFAULT NULL COMMENT '무엇을 뜻하는 값인지',
+  `is_statutory` tinyint(1) NOT NULL DEFAULT 1 COMMENT '1=법정 기준(줄이면 위법) 0=회사 규정',
+  `updated_by` varchar(36) DEFAULT NULL,
+  `updated_reason` varchar(200) DEFAULT NULL COMMENT '왜 고쳤나 — 반자동은 수정 이력이 필수',
+  `created_at` datetime(6) NOT NULL DEFAULT current_timestamp(6),
+  `updated_at` datetime(6) NOT NULL DEFAULT current_timestamp(6) ON UPDATE current_timestamp(6),
+  PRIMARY KEY (`policy_id`),
+  UNIQUE KEY `uk_policy_tenant_key_from` (`tenant_id`,`policy_key`,`effective_from`),
+  KEY `idx_policy_lookup` (`tenant_id`,`policy_key`,`effective_from`,`effective_to`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='노무 기준값 — 법이 바뀌면 값만 갈아끼운다. DB-96';
+/*!40101 SET character_set_client = @saved_cs_client */;
+
+--
+-- Table structure for table `annual_leave_grants`
+-- 작(2026-08-13) DB-97 — 연차 부여 이력. 반자동 3단(제안→수정→확정)의 정본.
+-- 🔴 사장님(2026-08-12): "히트판은 100%자동화는 없어. 무조건 반자동이야."
+--    수정 가능하면 수정 이력이 필수다 — 누가·언제·뭘·왜.
+--
+
+DROP TABLE IF EXISTS `annual_leave_grants`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!40101 SET character_set_client = utf8mb4 */;
+CREATE TABLE `annual_leave_grants` (
+  `grant_id` varchar(36) NOT NULL COMMENT 'PK',
+  `tenant_id` varchar(36) NOT NULL COMMENT '테넌트(헌법 #2)',
+  `employee_id` varchar(36) NOT NULL COMMENT '누구 연차인가',
+  `grant_year` smallint(6) NOT NULL COMMENT '귀속 연도',
+  `period_start` date NOT NULL COMMENT '이 연차가 쓰이는 기간 시작',
+  `period_end` date NOT NULL COMMENT '기간 끝',
+  `suggested_days` decimal(5,1) NOT NULL COMMENT '① 자동 계산이 제안한 일수',
+  `granted_days` decimal(5,1) NOT NULL COMMENT '② 사람이 확정한 일수',
+  `is_adjusted` tinyint(1) NOT NULL DEFAULT 0 COMMENT '제안과 확정이 다른가',
+  `adjust_reason` varchar(300) DEFAULT NULL COMMENT '왜 고쳤나 — 고쳤으면 반드시 남긴다',
+  `grant_type` varchar(30) NOT NULL DEFAULT 'annual' COMMENT 'annual|monthly|adjust|carryover',
+  `service_years` decimal(5,2) DEFAULT NULL COMMENT '계산 당시 근속 연수',
+  `calc_basis` varchar(500) DEFAULT NULL COMMENT '어떤 기준값으로 계산했는지',
+  `status` varchar(20) NOT NULL DEFAULT 'draft' COMMENT 'draft|confirmed|cancelled',
+  `confirmed_by` varchar(36) DEFAULT NULL COMMENT '③ 누가 확정했나',
+  `confirmed_at` datetime(6) DEFAULT NULL,
+  `created_at` datetime(6) NOT NULL DEFAULT current_timestamp(6),
+  `created_by` varchar(36) DEFAULT NULL,
+  `updated_at` datetime(6) NOT NULL DEFAULT current_timestamp(6) ON UPDATE current_timestamp(6),
+  PRIMARY KEY (`grant_id`),
+  UNIQUE KEY `uk_grant_emp_year_type` (`tenant_id`,`employee_id`,`grant_year`,`grant_type`),
+  KEY `idx_grant_emp` (`tenant_id`,`employee_id`,`grant_year`),
+  KEY `idx_grant_status` (`tenant_id`,`status`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='연차 부여 이력 — 제안→수정→확정 3단과 근거를 남긴다. DB-97';
+/*!40101 SET character_set_client = @saved_cs_client */;
+
+--
 -- Table structure for table `hr_reports`
 -- 작(2026-08-13) DB-92 — 업무보고서 4종(일일·주간·월간·경위서). 사장님 지시 2026-08-12.
 -- 🔴 마이그(DB-92)와 출하 DDL 을 함께 고쳐야 한다(헌법 #36). 한쪽만 하면
@@ -3123,7 +3192,7 @@ INSERT INTO `schema_migrations` (`migration_id`, `app_version`, `success`) VALUE
 ('DB-74','clean-ddl',1),('DB-75','clean-ddl',1),('DB-76','clean-ddl',1),('DB-77','clean-ddl',1),
 ('DB-78','clean-ddl',1),('DB-79','clean-ddl',1),('DB-80','clean-ddl',1),('DB-81','clean-ddl',1),
 ('DB-82','clean-ddl',1),('DB-83','clean-ddl',1),('DB-84','clean-ddl',1),('DB-85','clean-ddl',1),
-('DB-86','clean-ddl',1),('DB-87','clean-ddl',1),('DB-88','clean-ddl',1),('DB-89','clean-ddl',1),('DB-90','clean-ddl',1),('DB-91','clean-ddl',1),('DB-92','clean-ddl',1),('DB-93','clean-ddl',1),('DB-94','clean-ddl',1),('DB-95','clean-ddl',1);
+('DB-86','clean-ddl',1),('DB-87','clean-ddl',1),('DB-88','clean-ddl',1),('DB-89','clean-ddl',1),('DB-90','clean-ddl',1),('DB-91','clean-ddl',1),('DB-92','clean-ddl',1),('DB-93','clean-ddl',1),('DB-94','clean-ddl',1),('DB-95','clean-ddl',1),('DB-96','clean-ddl',1),('DB-97','clean-ddl',1);
 
 --
 -- Table structure for table `service_tickets`

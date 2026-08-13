@@ -109,6 +109,8 @@ builder.Services.AddScoped<IEmployeeService, EmployeeService>();
 builder.Services.AddScoped<IPositionService, PositionService>();
 // 작(2026-08-13) 단계4 토대: 부서 마스터 CRUD. 종전엔 조회만 있어 부서를 만들 방법이 없었다.
 builder.Services.AddScoped<IDepartmentService, DepartmentService>();
+// 작(2026-08-13) 단계5: 연차 엔진. 법정값은 labor_policy_settings 에서만 읽는다.
+builder.Services.AddScoped<IAnnualLeaveService, AnnualLeaveService>();
 builder.Services.AddScoped<IApprovalLineService, ApprovalLineService>();
 builder.Services.AddScoped<IBillingProvider, ManualBillingProvider>();
 builder.Services.AddScoped<IBillingService, BillingService>();

@@ -37,6 +37,52 @@ public sealed class GroupwareStage4GuardTests
         return File.ReadAllText(path);
     }
 
+    /// <summary>
+    /// SQL 에 쓰인 <c>@파라미터</c> 마다 <b>Dapper 파라미터 객체에 짝이 있는지</b> 본다.
+    /// </summary>
+    /// <remarks>
+    /// 🔴 <b>이 헬퍼가 이 파일에서 가장 중요하다.</b>
+    ///
+    /// 단계4 검증에서 P0 가 나왔다 — SQL 에 <c>@WeeklyHours</c> 가 있는데
+    /// 파라미터 객체에 <c>WeeklyHours</c> 가 없어 <b>신규 등록 시 값이 조용히 NULL</b> 로 들어갔다.
+    /// 그런데 <b>가드 15개가 전부 통과</b>했다. <c>Assert.Contains("@WeeklyHours", svc)</c> 로
+    /// <b>문자열이 있는지만</b> 봤기 때문이다.
+    ///
+    /// 검증팀 지적 그대로다: <i>"문자열 존재 확인은 배선 확인이 아니다. 바꾸지 않으면 다섯 번째가 온다."</i>
+    ///
+    /// ⚠️ 예외도 안 났다. 연결문자열의 <c>AllowUserVariables=true</c> 때문에 MySqlConnector 가
+    /// 바인딩 안 된 <c>@WeeklyHours</c> 를 MySQL 사용자변수(=NULL)로 재해석한다.
+    /// 그 옵션이 증상을 가려 <b>영영 안 드러날 수 있었다</b>.
+    /// </remarks>
+    /// <param name="expectedAtLeast">이 파라미터가 쓰이는 SQL 문 수의 최소치(예: INSERT + UPDATE = 2).</param>
+    private static void AssertDapperParametersBound(string source, string sqlParam, int expectedAtLeast)
+    {
+        Assert.StartsWith("@", sqlParam);
+        var propName = sqlParam[1..];
+
+        // SQL 안에서 몇 번 쓰였나(주석 줄은 뺀다).
+        var code = string.Join('\n', source.Split('\n').Where(l =>
+        {
+            var t = l.TrimStart();
+            return !t.StartsWith("//", StringComparison.Ordinal)
+                && !t.StartsWith("///", StringComparison.Ordinal)
+                && !t.StartsWith("--", StringComparison.Ordinal);
+        }));
+
+        var sqlUses = Regex.Matches(code, Regex.Escape(sqlParam) + @"\b").Count;
+        Assert.True(sqlUses >= expectedAtLeast,
+            $"{sqlParam} 가 SQL 에서 {expectedAtLeast}번 이상 쓰여야 한다(실제 {sqlUses}).");
+
+        // 파라미터 객체에 같은 이름으로 값을 넘기는 자리가 그만큼 있어야 한다.
+        //   `WeeklyHours = ...` 또는 축약형 `request.WeeklyHours`(Dapper 는 속성명을 쓴다).
+        var bindings = Regex.Matches(code, @"\b" + Regex.Escape(propName) + @"\s*=").Count;
+
+        Assert.True(bindings >= expectedAtLeast,
+            $"🔴 {sqlParam} 가 SQL 에 {sqlUses}번 쓰였는데 파라미터 바인딩은 {bindings}곳뿐이다. "
+            + "SQL 에만 있고 파라미터 객체에 없으면 값이 조용히 NULL 로 들어간다"
+            + "(AllowUserVariables=true 라 예외도 안 난다). 단계4 P0-1 과 같은 병이다.");
+    }
+
     // ───────────────────────────────────────────────────────────────
     // 부서 — 만들 수 있어야 한다
     // ───────────────────────────────────────────────────────────────
@@ -320,8 +366,18 @@ public sealed class GroupwareStage4GuardTests
 
         var svc = ReadSource("src", "HitPan.Application", "Services", "EmployeeService.cs");
         Assert.Contains("weekly_hours AS WeeklyHours", svc);   // 조회
-        Assert.Contains("@WeeklyHours", svc);                   // 저장
+        Assert.Contains("@WeeklyHours", svc);                   // SQL 에 있나
         Assert.Contains("weekly_hours = @WeeklyHours", svc);    // 수정
+
+        // 🔴 봉합 (2026-08-13, 검증 P0-1): <b>SQL 에 있는 것만으로는 저장되지 않는다.</b>
+        //    Dapper 는 파라미터 객체에 같은 이름이 있어야 값을 넘긴다.
+        //    실제로 INSERT 쪽 파라미터 객체에서 WeeklyHours 가 빠져 있었고,
+        //    신규 등록 시 입력값이 조용히 NULL 로 들어갔다(수정은 정상이라 더 안 보였다).
+        //    ⚠️ 예외조차 안 났다 — 연결문자열의 AllowUserVariables=true 때문에
+        //    MySqlConnector 가 바인딩 안 된 @WeeklyHours 를 사용자변수(NULL)로 읽었다.
+        //
+        //    ⇒ "문자열이 있나" 가 아니라 <b>"SQL 의 @파라미터마다 객체에 짝이 있나"</b> 를 본다.
+        AssertDapperParametersBound(svc, "@WeeklyHours", expectedAtLeast: 2);
 
         // 🔴 상세를 열 때 값을 되돌려 넣어야 한다.
         //    빠뜨리면 다른 항목만 고쳐 저장해도 이 값이 null 로 덮여 사라진다.

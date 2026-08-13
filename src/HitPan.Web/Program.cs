@@ -57,6 +57,8 @@ builder.Services.AddScoped<EmployeeService>();
 builder.Services.AddScoped<PositionService>();
 // 작(2026-08-13) 단계4 토대: 부서 마스터. 종전엔 조회만 있어 부서를 만들 수 없었다.
 builder.Services.AddScoped<DepartmentService>();
+// 작(2026-08-13) 단계5: 연차 엔진(반자동 3단 — 제안→수정→확정).
+builder.Services.AddScoped<AnnualLeaveService>();
 // 작(2026-08-13) 그룹웨어 단계3: 업무보고서 4종(일일·주간·월간·경위서).
 builder.Services.AddScoped<WorkReportService>();
 // 작(2026-08-13) 그룹웨어 단계2: 앱 내 결재 알림 수신기.
