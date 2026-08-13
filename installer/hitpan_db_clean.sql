@@ -2517,6 +2517,109 @@ DELIMITER ;
 /*!50003 SET collation_connection  = @saved_col_connection */ ;
 
 --
+-- Table structure for table `payroll_slips`
+-- 작(2026-08-13) DB-100 — 급여 명세. 사장님 지시 2026-08-13.
+--
+-- 🔴 "급여는 자동계산하지 말고 수동으로 int값 직접 받아서 입력하는게 가장 깔끔함"
+--    "각 고객사 니즈나 사정도 부합시킬 수 있고."
+--    ⇒ 4대보험 요율·간이세액표를 우리가 계산하지 않는다. 금액을 받는다.
+--       (요율은 매년 바뀌고, 회사마다 수당·비과세가 다르고, 틀리면 직원 돈이 틀린다)
+--
+-- 🔴 보호는 **권한 계층**이 한다("권한 계층분리로 급여를 관리해도 충분히 됨").
+--    금액은 평문이고 menu_code='PAYROLL' 로 막는다. 일반 직원은 본인 것만 본다.
+--
+
+DROP TABLE IF EXISTS `payroll_slips`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!40101 SET character_set_client = utf8mb4 */;
+CREATE TABLE `payroll_slips` (
+  `slip_id` varchar(36) NOT NULL,
+  `tenant_id` varchar(36) NOT NULL,
+  `employee_id` varchar(36) NOT NULL,
+  `pay_year` int(11) NOT NULL COMMENT '귀속 연도',
+  `pay_month` int(11) NOT NULL COMMENT '귀속 월(1~12)',
+  `pay_date` date DEFAULT NULL COMMENT '실제 지급일. 귀속월과 다를 수 있다',
+  `total_payment` decimal(15,2) NOT NULL DEFAULT 0.00 COMMENT '총지급액',
+  `total_deduct` decimal(15,2) NOT NULL DEFAULT 0.00 COMMENT '총공제액',
+  `net_payment` decimal(15,2) NOT NULL DEFAULT 0.00 COMMENT '실지급액',
+  `status` varchar(20) NOT NULL DEFAULT 'draft' COMMENT 'draft/confirmed/paid/cancelled',
+  `confirmed_by` varchar(36) DEFAULT NULL,
+  `confirmed_at` datetime(6) DEFAULT NULL,
+  `absence_id` varchar(36) DEFAULT NULL COMMENT '이 달에 휴직이 있으면 그 건(DB-98 연동)',
+  `memo` varchar(500) DEFAULT NULL,
+  `created_by` varchar(36) DEFAULT NULL,
+  `created_at` datetime(6) NOT NULL DEFAULT current_timestamp(6),
+  `updated_at` datetime(6) NOT NULL DEFAULT current_timestamp(6) ON UPDATE current_timestamp(6),
+  PRIMARY KEY (`slip_id`),
+  UNIQUE KEY `uk_payroll_emp_month` (`tenant_id`,`employee_id`,`pay_year`,`pay_month`),
+  KEY `idx_payroll_month` (`tenant_id`,`pay_year`,`pay_month`),
+  KEY `idx_payroll_status` (`tenant_id`,`status`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='급여 명세 — 금액을 사람이 직접 넣는다. DB-100';
+/*!40101 SET character_set_client = @saved_cs_client */;
+
+--
+-- Table structure for table `payroll_slip_lines`
+-- 작(2026-08-13) DB-100 — 급여 항목. 회사마다 수당이 달라 **이름도 사람이 적는다.**
+--
+
+DROP TABLE IF EXISTS `payroll_slip_lines`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!40101 SET character_set_client = utf8mb4 */;
+CREATE TABLE `payroll_slip_lines` (
+  `line_id` varchar(36) NOT NULL,
+  `tenant_id` varchar(36) NOT NULL,
+  `slip_id` varchar(36) NOT NULL,
+  `line_type` varchar(20) NOT NULL COMMENT 'payment=지급 · deduct=공제',
+  `item_name` varchar(60) NOT NULL COMMENT '항목 이름. 사람이 적는다(기본급·식대·국민연금 등)',
+  `amount` decimal(15,2) NOT NULL DEFAULT 0.00 COMMENT '금액. 사람이 직접 넣는다',
+  `sort_order` int(11) NOT NULL DEFAULT 0,
+  `is_taxable` tinyint(1) NOT NULL DEFAULT 1 COMMENT '1=과세 0=비과세. 사람이 고른다',
+  `memo` varchar(200) DEFAULT NULL,
+  `created_at` datetime(6) NOT NULL DEFAULT current_timestamp(6),
+  `updated_at` datetime(6) NOT NULL DEFAULT current_timestamp(6) ON UPDATE current_timestamp(6),
+  PRIMARY KEY (`line_id`),
+  KEY `idx_payroll_line_slip` (`tenant_id`,`slip_id`,`line_type`,`sort_order`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='급여 항목 — 이름도 사람이 적는다. DB-100';
+/*!40101 SET character_set_client = @saved_cs_client */;
+
+--
+-- Table structure for table `severance_payments`
+-- 작(2026-08-13) DB-100 — 퇴직금. 🔴 법정 산식을 우리가 돌리지 않는다.
+--   평균임금에 상여·연차수당을 어떻게 넣는지가 회사마다 다르고 다툼이 잦다.
+--   퇴직연금(DB·DC·IRP)이면 산식 자체가 다르다. 틀리면 법적 분쟁이 된다.
+--
+
+DROP TABLE IF EXISTS `severance_payments`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!40101 SET character_set_client = utf8mb4 */;
+CREATE TABLE `severance_payments` (
+  `severance_id` varchar(36) NOT NULL,
+  `tenant_id` varchar(36) NOT NULL,
+  `employee_id` varchar(36) NOT NULL,
+  `join_date` date NOT NULL,
+  `resign_date` date NOT NULL,
+  `service_days` int(11) NOT NULL DEFAULT 0 COMMENT '재직일수',
+  `avg_wage` decimal(15,2) NOT NULL DEFAULT 0.00 COMMENT '평균임금(1일). 사람이 넣는다',
+  `severance_amount` decimal(15,2) NOT NULL DEFAULT 0.00 COMMENT '퇴직금. 사람이 넣는다',
+  `tax_amount` decimal(15,2) NOT NULL DEFAULT 0.00 COMMENT '퇴직소득세 등 공제액',
+  `net_amount` decimal(15,2) NOT NULL DEFAULT 0.00 COMMENT '실지급액',
+  `pay_type` varchar(20) NOT NULL DEFAULT 'direct' COMMENT 'direct/db/dc/irp',
+  `pay_date` date DEFAULT NULL,
+  `status` varchar(20) NOT NULL DEFAULT 'draft' COMMENT 'draft/confirmed/paid/cancelled',
+  `confirmed_by` varchar(36) DEFAULT NULL,
+  `confirmed_at` datetime(6) DEFAULT NULL,
+  `calc_basis` varchar(500) DEFAULT NULL COMMENT '산정 근거. 분쟁 시 설명해야 한다',
+  `memo` varchar(500) DEFAULT NULL,
+  `created_by` varchar(36) DEFAULT NULL,
+  `created_at` datetime(6) NOT NULL DEFAULT current_timestamp(6),
+  `updated_at` datetime(6) NOT NULL DEFAULT current_timestamp(6) ON UPDATE current_timestamp(6),
+  PRIMARY KEY (`severance_id`),
+  KEY `idx_severance_emp` (`tenant_id`,`employee_id`),
+  KEY `idx_severance_status` (`tenant_id`,`status`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='퇴직금 — 금액을 사람이 직접 넣는다. DB-100';
+/*!40101 SET character_set_client = @saved_cs_client */;
+
+--
 -- Table structure for table `partners`
 --
 
@@ -3248,7 +3351,7 @@ INSERT INTO `schema_migrations` (`migration_id`, `app_version`, `success`) VALUE
 ('DB-74','clean-ddl',1),('DB-75','clean-ddl',1),('DB-76','clean-ddl',1),('DB-77','clean-ddl',1),
 ('DB-78','clean-ddl',1),('DB-79','clean-ddl',1),('DB-80','clean-ddl',1),('DB-81','clean-ddl',1),
 ('DB-82','clean-ddl',1),('DB-83','clean-ddl',1),('DB-84','clean-ddl',1),('DB-85','clean-ddl',1),
-('DB-86','clean-ddl',1),('DB-87','clean-ddl',1),('DB-88','clean-ddl',1),('DB-89','clean-ddl',1),('DB-90','clean-ddl',1),('DB-91','clean-ddl',1),('DB-92','clean-ddl',1),('DB-93','clean-ddl',1),('DB-94','clean-ddl',1),('DB-95','clean-ddl',1),('DB-96','clean-ddl',1),('DB-97','clean-ddl',1),('DB-98','clean-ddl',1),('DB-99','clean-ddl',1);
+('DB-86','clean-ddl',1),('DB-87','clean-ddl',1),('DB-88','clean-ddl',1),('DB-89','clean-ddl',1),('DB-90','clean-ddl',1),('DB-91','clean-ddl',1),('DB-92','clean-ddl',1),('DB-93','clean-ddl',1),('DB-94','clean-ddl',1),('DB-95','clean-ddl',1),('DB-96','clean-ddl',1),('DB-97','clean-ddl',1),('DB-98','clean-ddl',1),('DB-99','clean-ddl',1),('DB-100','clean-ddl',1);
 
 --
 -- Table structure for table `service_tickets`

@@ -62,6 +62,8 @@ builder.Services.AddScoped<AnnualLeaveService>();
 // 작(2026-08-13) 단계6: 휴직(육아·출산·병가 등 장기 부재). 휴가와 다른 표를 쓴다 —
 // 휴가 표의 일수 칸이 99.9일까지라 육아휴직이 안 들어가고, 승인되면 연차 잔여가 깎인다.
 builder.Services.AddScoped<AbsenceService>();
+// 작(2026-08-13) 단계8: 급여·퇴직금. 금액을 사람이 직접 넣는다(계산하지 않는다).
+builder.Services.AddScoped<PayrollService>();
 // 작(2026-08-13) 그룹웨어 단계3: 업무보고서 4종(일일·주간·월간·경위서).
 builder.Services.AddScoped<WorkReportService>();
 // 작(2026-08-13) 그룹웨어 단계2: 앱 내 결재 알림 수신기.
