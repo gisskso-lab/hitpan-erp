@@ -410,12 +410,18 @@
     {
         var url = refType switch
         {
-            "approval" => $"/approval/detail/{refId}",
+            // 🔴 봉합 (2026-08-13): /approval/detail/{id} 로 보냈는데 **그런 화면이 없다**(404).
+            //    결재는 목록 3개(대기·보낸·완료)뿐이고 상세는 목록 안에서 연다.
+            //    ⇒ 상세 화면을 새로 만들지 않고 **있는 화면**으로 보낸다
+            //      (사장님: "있는 기능 연결해서 사용하는게 훨씬 효율적임").
+            //      받은 사람이 처리할 자리는 '결재 대기' 다.
+            "approval" => "/approval/pending",
             "leave"    => "/hr/leave-status",
             "expense"  => "/hr/expense-status",
             "payroll"  => "/hr/payroll",
             "contract" => "/hr/labor-contracts",
-            "report"   => "/hr/work-report",
+            // 봉합 (2026-08-13): /hr/work-report 로 적어 404 였다. 실제 라우트는 /hr/reports.
+            "report"   => "/hr/reports",
             _ => string.Empty
         };
 
