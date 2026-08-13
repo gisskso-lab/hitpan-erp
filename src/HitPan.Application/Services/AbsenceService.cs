@@ -172,7 +172,12 @@ public sealed class AbsenceService : IAbsenceService
             FROM employee_leave_of_absence
             WHERE tenant_id = @TenantId
               AND employee_id = @EmpId
-              AND status IN ('pending', 'approved', 'active')
+              -- 🔴 봉합 (2026-08-13, 20260813검2): 'draft' 가 빠져 있었다.
+              --    새 건은 **전부 draft 로 들어간다**(저장만 하고 상신은 나중).
+              --    그래서 겹침 검사가 바로 앞에 저장한 건을 못 보고 통과시켰다
+              --    ⇒ 같은 사람·같은 기간으로 여러 건이 쌓이고, 둘 다 상신하면
+              --      급여가 그 달 휴직 급여를 **두 번** 집는다(GetPayForMonthAsync 가 둘 다 센다).
+              AND status IN ('draft', 'pending', 'approved', 'active')
               AND (@AbsenceId IS NULL OR absence_id <> @AbsenceId)
               AND start_date <= @End
               AND end_date   >= @Start
@@ -205,17 +210,22 @@ public sealed class AbsenceService : IAbsenceService
             await _db.ExecuteAsync(new CommandDefinition(
                 """
                 INSERT INTO employee_leave_of_absence
-                  (absence_id, tenant_id, employee_id,
+                  (absence_id, tenant_id, employee_id, absence_type,
                    start_date, end_date, status, reason,
                    pay_type, pay_amount, pay_note, created_by)
                 VALUES
-                  (@AbsenceId, @TenantId, @EmployeeId,
+                  (@AbsenceId, @TenantId, @EmployeeId, @AbsenceType,
                    @StartDate, @EndDate, 'draft', @Reason,
                    @PayType, @PayAmount, @PayNote, @CreatedBy)
                 """,
                 new
                 {
                     AbsenceId = absenceId,
+                    // 봉합 (2026-08-13, DB-102): 이 두 칸은 NOT NULL 인데 값을 안 보내
+                    //   ERROR 1364 로 **휴직 저장이 100% 실패**했다(실측 재현).
+                    //   화면이 종류를 안 받는 것은 사장님 지시("사유를 글로 받는다")이므로
+                    //   화면을 되돌리지 않고 여기서 기본값을 채운다. 컬럼은 남긴다(헌법 #1·#37).
+                    AbsenceType = "other",
                     TenantId = tenantId,
                     EmployeeId = request.EmployeeId,
                     StartDate = request.StartDate.Date,
@@ -453,12 +463,37 @@ public sealed class AbsenceService : IAbsenceService
                 AbsenceId = absenceId
             },
             cancellationToken: ct)).ConfigureAwait(false);
+
+        // 봉합 (2026-08-13, 20260813검2): 반려는 draft·pending 만 다루므로 사원 상태를
+        //   건드릴 일이 거의 없지만, 승인 뒤 되돌아온 건이 섞일 수 있어 함께 정리한다.
+        //   살아 있는 휴직이 있으면 그대로 둔다.
+        var target = await _db.QueryFirstOrDefaultAsync<string>(new CommandDefinition(
+            """
+            SELECT employee_id FROM employee_leave_of_absence
+            WHERE tenant_id = @TenantId AND absence_id = @AbsenceId
+            """,
+            new { TenantId = tenantId, AbsenceId = absenceId },
+            cancellationToken: ct)).ConfigureAwait(false);
+
+        if (!string.IsNullOrEmpty(target))
+        {
+            await RestoreWorkStatusAsync(tenantId, target, ct).ConfigureAwait(false);
+        }
     }
 
     public async Task CancelAsync(string tenantId, string actorId, string absenceId,
         CancellationToken ct = default)
     {
         await EnsureOpenAsync(ct).ConfigureAwait(false);
+
+        // 어느 사원 건인지 먼저 안다 — 상태를 되돌려야 하기 때문이다.
+        var target = await _db.QueryFirstOrDefaultAsync<string>(new CommandDefinition(
+            """
+            SELECT employee_id FROM employee_leave_of_absence
+            WHERE tenant_id = @TenantId AND absence_id = @AbsenceId
+            """,
+            new { TenantId = tenantId, AbsenceId = absenceId },
+            cancellationToken: ct)).ConfigureAwait(false);
 
         var affected = await _db.ExecuteAsync(new CommandDefinition(
             """
@@ -475,6 +510,41 @@ public sealed class AbsenceService : IAbsenceService
             throw new InvalidOperationException(
                 "취소할 수 없습니다. 이미 휴직이 시작됐거나 복직 처리된 건입니다.");
         }
+
+        // 🔴 봉합 (2026-08-13, 20260813검2): 승인된 건을 취소하면 휴직은 '취소' 가 되는데
+        //    **사원은 계속 '휴직' 으로 남았다.** 승인 시 work_status='absence' 로 바꾸는데
+        //    취소가 그걸 안 되돌린다 ⇒ 조직도·급여가 멀쩡히 일하는 직원을 휴직자로 본다.
+        //    복직 처리로도 못 고친다(취소 건은 복직 대상이 아니다).
+        //
+        // ⚠️ 다른 휴직이 살아 있으면 그대로 둔다 — 한 건 취소했다고 다른 휴직까지 지우면 안 된다.
+        if (!string.IsNullOrEmpty(target))
+        {
+            await RestoreWorkStatusAsync(tenantId, target, ct).ConfigureAwait(false);
+        }
+    }
+
+    /// <summary>
+    /// 살아 있는 휴직이 없으면 사원을 <b>재직</b> 으로 되돌린다. 작(2026-08-13 봉합).
+    /// </summary>
+    /// <remarks>
+    /// 🔴 <b>휴직 건 하나만 보고 판단하지 않는다.</b> 같은 사원에게 다른 휴직이
+    /// 살아 있을 수 있으므로, <b>전부 세어보고</b> 0 일 때만 되돌린다.
+    /// </remarks>
+    private async Task RestoreWorkStatusAsync(string tenantId, string employeeId, CancellationToken ct)
+    {
+        await _db.ExecuteAsync(new CommandDefinition(
+            """
+            UPDATE employees SET work_status = 'active', updated_at = NOW(6)
+            WHERE tenant_id = @TenantId AND employee_id = @EmployeeId
+              AND work_status = 'absence'
+              AND NOT EXISTS (
+                SELECT 1 FROM employee_leave_of_absence a
+                WHERE a.tenant_id = @TenantId AND a.employee_id = @EmployeeId
+                  AND a.status IN ('approved', 'active')
+              )
+            """,
+            new { TenantId = tenantId, EmployeeId = employeeId },
+            cancellationToken: ct)).ConfigureAwait(false);
     }
 
     // ───────────────────────────────────────────────────────────────

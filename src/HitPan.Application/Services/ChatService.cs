@@ -72,19 +72,23 @@ public sealed class ChatService : IChatService
                   SELECT e2.emp_name
                   FROM chat_room_members m2
                   JOIN employees e2 ON e2.employee_id = m2.employee_id AND e2.tenant_id = m2.tenant_id
-                  WHERE m2.room_id = r.room_id AND m2.employee_id <> @employeeId
+                  WHERE m2.tenant_id = r.tenant_id AND m2.room_id = r.room_id
+                    AND m2.employee_id <> @employeeId
                   LIMIT 1), '(대화 상대 없음)')
               END AS DisplayName,
               (SELECT COUNT(*) FROM chat_room_members mc
-                WHERE mc.room_id = r.room_id AND mc.left_at IS NULL) AS MemberCount,
+                WHERE mc.tenant_id = r.tenant_id AND mc.room_id = r.room_id
+                  AND mc.left_at IS NULL) AS MemberCount,
               (SELECT msg.body FROM chat_messages msg
-                WHERE msg.room_id = r.room_id AND msg.deleted_at IS NULL
+                WHERE msg.tenant_id = r.tenant_id AND msg.room_id = r.room_id
+                  AND msg.deleted_at IS NULL
                 ORDER BY msg.sent_at DESC LIMIT 1) AS LastMessage,
               (SELECT msg.sent_at FROM chat_messages msg
-                WHERE msg.room_id = r.room_id AND msg.deleted_at IS NULL
+                WHERE msg.tenant_id = r.tenant_id AND msg.room_id = r.room_id
+                  AND msg.deleted_at IS NULL
                 ORDER BY msg.sent_at DESC LIMIT 1) AS LastMessageAt,
               (SELECT COUNT(*) FROM chat_messages msg
-                WHERE msg.room_id = r.room_id
+                WHERE msg.tenant_id = r.tenant_id AND msg.room_id = r.room_id
                   AND msg.deleted_at IS NULL
                   AND msg.sender_id <> @employeeId
                   AND (m.last_read_at IS NULL OR msg.sent_at > m.last_read_at)) AS UnreadCount
@@ -185,9 +189,13 @@ public sealed class ChatService : IChatService
             if (!string.IsNullOrEmpty(existing))
             {
                 // 예전에 나갔던 사람이 다시 열면 되살린다.
+                // 봉합 (2026-08-13, 20260813검2): tenant_id 가 빠져 있었다(헌법 #2).
                 await _db.ExecuteAsync(new CommandDefinition(
-                    "UPDATE chat_room_members SET left_at = NULL WHERE room_id = @roomId AND employee_id = @employeeId",
-                    new { roomId = existing, employeeId }, cancellationToken: ct)).ConfigureAwait(false);
+                    """
+                    UPDATE chat_room_members SET left_at = NULL
+                    WHERE tenant_id = @tenantId AND room_id = @roomId AND employee_id = @employeeId
+                    """,
+                    new { tenantId, roomId = existing, employeeId }, cancellationToken: ct)).ConfigureAwait(false);
                 return existing;
             }
         }
@@ -303,7 +311,8 @@ public sealed class ChatService : IChatService
               msg.ref_title  AS RefTitle,
               msg.sent_at    AS SentAt,
               (SELECT COUNT(*) FROM chat_room_members rm
-                WHERE rm.room_id = msg.room_id
+                WHERE rm.tenant_id = msg.tenant_id
+                  AND rm.room_id = msg.room_id
                   AND rm.employee_id <> msg.sender_id
                   AND rm.last_read_at IS NOT NULL
                   AND rm.last_read_at >= msg.sent_at) AS ReadCount,
@@ -314,7 +323,7 @@ public sealed class ChatService : IChatService
               f.content_type  AS ContentType
             FROM chat_messages msg
             LEFT JOIN employees e ON e.employee_id = msg.sender_id AND e.tenant_id = msg.tenant_id
-            LEFT JOIN chat_files f ON f.message_id = msg.message_id
+            LEFT JOIN chat_files f ON f.message_id = msg.message_id AND f.tenant_id = msg.tenant_id
             WHERE msg.tenant_id = @tenantId
               AND msg.room_id = @roomId
               AND msg.deleted_at IS NULL
@@ -562,13 +571,20 @@ public sealed class ChatService : IChatService
                 WHERE tenant_id = @tenantId AND employee_id = @employeeId
                 ORDER BY start_date DESC LIMIT 50
                 """,
+            // 🔴 봉합 (2026-08-13, 20260813검2) — 두 가지가 한꺼번에 틀려 있었다:
+            //   ① `status` 컬럼이 없다. 실제 이름은 `approval_status`
+            //      ⇒ 경비를 고르면 MariaDB 1054 로 **500**. 이 기능은 한 번도 돈 적이 없다.
+            //   ② `employee_id` 필터가 빠져 있었다(다른 5개 갈래에는 전부 있다)
+            //      ⇒ 일반 직원이 **회사 전체 경비**를 보고, 남의 경비를 대화방에 붙일 수 있었다.
+            //        이 목록이 ResolveDocTitleAsync 의 권한 판정도 겸하므로 그대로 뚫린다.
+            //   헌법 #13(새 SQL 전 DESCRIBE 의무)을 지키지 않아 난 결함이다.
             "expense" =>
                 """
                 SELECT 'expense' AS RefType, expense_id AS RefId,
                        COALESCE(description, '경비') AS Title,
-                       status AS Status, expense_date AS DocDate
+                       approval_status AS Status, expense_date AS DocDate
                 FROM expenses
-                WHERE tenant_id = @tenantId
+                WHERE tenant_id = @tenantId AND employee_id = @employeeId
                 ORDER BY expense_date DESC LIMIT 50
                 """,
             "payroll" =>
@@ -589,13 +605,17 @@ public sealed class ChatService : IChatService
                 WHERE tenant_id = @tenantId AND employee_id = @employeeId
                 ORDER BY start_date DESC LIMIT 20
                 """,
+            // 🔴 봉합 (2026-08-13, 20260813검2): `report_date` 컬럼이 없다.
+            //    실제 날짜 칸은 period_start · period_end · submitted_at 이다.
+            //    ⇒ 보고서를 고르면 1054 로 **500**. 이 기능도 한 번도 돈 적이 없다.
             "report" =>
                 """
                 SELECT 'report' AS RefType, report_id AS RefId,
-                       COALESCE(title, '업무보고서') AS Title, status AS Status, report_date AS DocDate
+                       COALESCE(title, '업무보고서') AS Title, status AS Status,
+                       COALESCE(submitted_at, period_start) AS DocDate
                 FROM hr_reports
                 WHERE tenant_id = @tenantId AND employee_id = @employeeId
-                ORDER BY report_date DESC LIMIT 50
+                ORDER BY period_start DESC LIMIT 50
                 """,
             _ => null
         };
@@ -854,10 +874,18 @@ public sealed class ChatService : IChatService
 
         if (!string.IsNullOrEmpty(existing))
         {
-            // 나갔던 사람도 결재 소식은 받아야 한다.
+            // 🔴 봉합 (2026-08-13, 20260813검2): 종전에 조건이 `room_id` 하나뿐이라
+            //    **그 방 사람 전부**의 left_at 을 지웠다. 나가기로 한 사람이
+            //    남의 결재 때문에 말없이 다시 끌려 들어온다. tenant_id 도 빠져 있었다.
+            //    ⇒ 결재를 받아야 할 **두 사람만** 되살린다.
             await _db.ExecuteAsync(new CommandDefinition(
-                "UPDATE chat_room_members SET left_at = NULL WHERE room_id = @roomId",
-                new { roomId = existing }, cancellationToken: ct)).ConfigureAwait(false);
+                """
+                UPDATE chat_room_members SET left_at = NULL
+                WHERE tenant_id = @tenantId AND room_id = @roomId
+                  AND employee_id IN @ids AND left_at IS NOT NULL
+                """,
+                new { tenantId, roomId = existing, ids = new[] { a, b } },
+                cancellationToken: ct)).ConfigureAwait(false);
             return existing;
         }
 
@@ -910,7 +938,7 @@ public sealed class ChatService : IChatService
               f.file_size AS FileSize, f.content_type AS ContentType
             FROM chat_messages msg
             LEFT JOIN employees e ON e.employee_id = msg.sender_id AND e.tenant_id = msg.tenant_id
-            LEFT JOIN chat_files f ON f.message_id = msg.message_id
+            LEFT JOIN chat_files f ON f.message_id = msg.message_id AND f.tenant_id = msg.tenant_id
             WHERE msg.tenant_id = @tenantId AND msg.message_id = @messageId
             """,
             new { tenantId, messageId, employeeId }, cancellationToken: ct)).ConfigureAwait(false);
@@ -958,7 +986,19 @@ public sealed class ChatService : IChatService
             "INSERT IGNORE INTO chat_file_settings (tenant_id) VALUES (@tenantId)",
             new { tenantId }, cancellationToken: ct)).ConfigureAwait(false);
 
-        return new ChatFileSettings();
+        // 🔴 봉합 (2026-08-13, 20260813검2): 종전에 `new ChatFileSettings()` 를 돌려줘
+        //    **코드에 적힌 20/500/5120 을 그대로 썼다.** INSERT IGNORE 는 이미 줄이 있으면
+        //    아무 일도 안 하므로, 그 줄에 고객사가 정한 다른 값이 들어 있어도 무시된다
+        //    ⇒ 5MB 로 정해둔 회사에 20MB 가 올라간다.
+        //    사장님 기조 그대로다 — **고객사가 넣은 값을 받는다.** 코드 값은 첫 줄을 만들 때만 쓴다.
+        var ensured = await _db.QueryFirstOrDefaultAsync<ChatFileSettings>(new CommandDefinition(
+            """
+            SELECT max_file_mb AS MaxFileMb, max_room_mb AS MaxRoomMb, max_tenant_mb AS MaxTenantMb
+            FROM chat_file_settings WHERE tenant_id = @tenantId
+            """,
+            new { tenantId }, cancellationToken: ct)).ConfigureAwait(false);
+
+        return ensured ?? new ChatFileSettings();
     }
 
     private async Task EnsureOpenAsync(CancellationToken ct)

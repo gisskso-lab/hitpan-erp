@@ -106,11 +106,29 @@ public sealed class AnnualLeaveService : IAnnualLeaveService
     private static AnnualLeaveSuggestionDto Calculate(EmployeeRow emp, int grantYear,
         IReadOnlyDictionary<string, decimal> policies, WorkplaceRow? workplace)
     {
-        // 그 해 말 기준 근속 연수.
+        // 그 해 말 기준 근속.
         var asOf = new DateTime(grantYear, 12, 31);
         var joinDate = emp.JoinDate.Date;
         var serviceDays = (asOf - joinDate).TotalDays;
-        var serviceYears = (decimal)Math.Round(serviceDays / 365.25, 2);
+
+        // 🔴 봉합 (2026-08-13, 20260813검2): 종전 `Math.Round(serviceDays / 365.25, 2)` 는
+        //    **아직 1년이 안 된 사람을 1년 이상으로 판정**했다. 실측:
+        //
+        //      입사 2026-01-01 → 근속 364일 → 364/365.25 = 0.99658 → 반올림 **1.00**
+        //      ⇒ 하루가 모자란데 "1년 이상" 갈래로 넘어간다.
+        //
+        //    숫자가 커지는 것으로 끝나지 않는다 — grant_type='annual' 로 저장되면
+        //    uk_grant_emp_year_type(UNIQUE) 때문에 **담당자가 나중에 월차로 바꾸려 해도 막힌다.**
+        //    수동으로 정할 자유를 코드가 뺏는 셈이라 반자동 원칙에 어긋난다.
+        //
+        // ⇒ 반올림하지 않고 **실제로 지난 햇수**를 센다(생일 세는 법과 같다).
+        var completedYears = CompletedYears(joinDate, asOf);
+
+        // 화면·근거문에는 소수까지 보여준다(사람이 "몇 년 몇 개월" 을 가늠해야 하므로).
+        // 🔴 다만 **판정에는 쓰지 않는다** — 판정은 completedYears 로만 한다.
+        var serviceYears = serviceDays < 0
+            ? 0m
+            : (decimal)Math.Floor(serviceDays / 365.25 * 100) / 100m;   // 내림 — 올려서 넘기지 않는다
 
         var dto = new AnnualLeaveSuggestionDto
         {
@@ -141,7 +159,7 @@ public sealed class AnnualLeaveService : IAnnualLeaveService
         // ── 1년 미만: 한 달 개근에 하루 ──
         // ⚠️ 실제 개근 여부는 근태를 봐야 안다. 여기서는 '근무 개월 수' 로 최대치를 제안하고,
         //    결근이 있으면 사람이 줄인다(반자동).
-        if (serviceYears < 1m)
+        if (completedYears < 1)
         {
             var months = (int)Math.Floor(serviceDays / 30.4375);
             if (months < 0) months = 0;
@@ -157,10 +175,20 @@ public sealed class AnnualLeaveService : IAnnualLeaveService
         {
             // ── 1년 이상: 기본 + 가산 ──
             var extra = 0m;
-            if (serviceYears >= extraStart && extraCycle > 0)
+            if (completedYears >= extraStart && extraCycle > 0)
             {
-                // 가산 시작 연수부터 주기마다 하루씩.
-                var cycles = Math.Floor((serviceYears - extraStart) / extraCycle) + 1;
+                // 🔴 봉합 (2026-08-13, 20260813검2): 종전에 `+ 1` 이 붙어 있어
+                //    **설정표대로 안 나왔다.** 실측:
+                //      가산시작 3년·주기 2년으로 설정했는데 근속 3년에 이미 +1일,
+                //      5년에 +2일 — 시작하자마자 한 번 더해지고 있었다.
+                //
+                //    설정이 "3년부터 2년마다" 면 3년째는 기본값 그대로이고
+                //    첫 가산은 그 다음 주기에 붙는 것이 설정을 읽는 상식이다.
+                //
+                // ⇒ `+1` 을 걷어낸다. 🔴 <b>기준값은 전부 설정표에서 온다</b> —
+                //    여기에 법정 숫자를 적지 않는다(사장님: "법적검토를 따지지마",
+                //    "고객사가 입력하는 값만 받으면 되"). 값이 다르면 설정에서 바꾼다.
+                var cycles = Math.Floor((completedYears - extraStart) / extraCycle);
                 if (cycles < 0) cycles = 0;
                 extra = cycles * extraPer;
             }
@@ -273,6 +301,30 @@ public sealed class AnnualLeaveService : IAnnualLeaveService
                 throw new InvalidOperationException(
                     $"{request.GrantYear}년 연차가 이미 확정돼 있습니다. 바꾸려면 조정 부여를 쓰세요.");
             }
+
+            // 🔴 봉합 (2026-08-13, 20260813검2): UNIQUE(uk_grant_emp_year_type)는
+            //    **상태를 안 본다.** 위 검사는 'confirmed' 만 세므로, 취소된 줄이 남아 있으면
+            //    검사는 통과하고 INSERT 에서 1062 로 터진다 —
+            //    컨트롤러는 InvalidOperationException 만 잡으므로 담당자는 **까닭 없는 500** 을 본다.
+            //
+            //    담당자가 취소한 뒤 다시 주는 것은 **정상 업무**다(사장님: 수동으로 간다).
+            //    ⇒ 취소된 줄은 자리를 비켜 준다. 지우지 않고 종류에 표시를 남겨
+            //      이력은 그대로 보존한다(헌법 #3 정신 — 있었던 일은 남는다).
+            await _db.ExecuteAsync(new CommandDefinition(
+                """
+                UPDATE annual_leave_grants
+                SET grant_type = CONCAT(grant_type, '-x', LEFT(REPLACE(UUID(), '-', ''), 6)),
+                    updated_at = NOW(6)
+                WHERE tenant_id = @TenantId AND employee_id = @EmpId
+                  AND grant_year = @Year AND grant_type = @Type
+                  AND status = 'cancelled'
+                """,
+                new
+                {
+                    TenantId = tenantId, EmpId = request.EmployeeId,
+                    Year = request.GrantYear, Type = request.GrantType
+                },
+                transaction: tx, cancellationToken: ct)).ConfigureAwait(false);
 
             await _db.ExecuteAsync(new CommandDefinition(
                 """
@@ -503,6 +555,35 @@ public sealed class AnnualLeaveService : IAnnualLeaveService
     /// 기준값이 없으면 0 이 나오고, 그러면 화면에서 "기준값이 없다" 가 드러난다.
     /// 조용히 그럴듯한 값이 나오는 것보다 <b>안 나오는 게 낫다</b>.
     /// </remarks>
+    /// <summary>
+    /// 입사일부터 기준일까지 <b>실제로 지난 햇수</b>. 작(2026-08-13 봉합, 20260813검2).
+    /// </summary>
+    /// <remarks>
+    /// 🔴 <b>나이를 세는 방법과 같다</b> — 생일이 지나야 한 살을 먹는다.
+    /// 365.25 로 나눠 반올림하면 <b>364일 근무자가 1년으로 판정</b>되어
+    /// 담당자가 보기에 앞뒤가 안 맞는 제안이 나온다. 게다가 <c>grant_type</c> 이
+    /// 그렇게 저장되면 UNIQUE 때문에 <b>담당자가 나중에 바꾸지도 못한다.</b>
+    /// <para>
+    /// ⚠️ 이 함수는 <b>제안값을 만들 뿐</b>이다. 최종 일수는 담당자가 정한다
+    /// (사장님: <i>"고객사 내부사정에 따라 판단할수 없거나 기준을 잡을수 없는건
+    /// 담당자가 직접 부여하는 수동방식"</i>).
+    /// </para>
+    /// <para>
+    /// 윤년도 자동으로 맞는다 — 날짜를 더해 비교하므로 2/29 문제를 따로 다루지 않아도 된다.
+    /// </para>
+    /// </remarks>
+    private static decimal CompletedYears(DateTime joinDate, DateTime asOf)
+    {
+        if (asOf < joinDate) return 0m;
+
+        var years = asOf.Year - joinDate.Year;
+
+        // 아직 입사 기념일이 안 지났으면 한 해를 뺀다.
+        if (asOf < joinDate.AddYears(years)) years--;
+
+        return years < 0 ? 0m : years;
+    }
+
     private static decimal Policy(IReadOnlyDictionary<string, decimal> policies, string key)
         => policies.TryGetValue(key, out var v) ? v : 0m;
 
