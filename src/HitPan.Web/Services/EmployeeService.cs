@@ -9,11 +9,21 @@ namespace HitPan.Web.Services;
 /// </summary>
 public sealed class EmployeeService(HttpClient http, ILogger<EmployeeService> logger)
 {
-    public async Task<List<EmployeeListItemModel>> GetListAsync(CancellationToken ct = default)
+    /// <summary>
+    /// 사원 목록을 조회한다. <b>기본은 재직자만</b>(사장님 지시 2026-08-14 — 퇴사자 숨김).
+    /// </summary>
+    /// <param name="includeResigned">
+    /// 퇴사자까지 볼지 여부. 사원관리의 "퇴사자 포함" 스위치만 이 값을 켠다.
+    /// 🔴 기본이 <c>false</c> 라, 이 값을 안 넘기는 다른 화면들(근로계약서·결재선 등)은
+    /// 자동으로 재직자만 보게 된다 — 퇴사자를 새 계약 상대로 고르는 사고를 함께 막는다.
+    /// </param>
+    public async Task<List<EmployeeListItemModel>> GetListAsync(
+        bool includeResigned = false, CancellationToken ct = default)
     {
         try
         {
-            return await http.GetFromJsonAsync<List<EmployeeListItemModel>>("api/employees", ct).ConfigureAwait(false)
+            var url = includeResigned ? "api/employees?includeResigned=true" : "api/employees";
+            return await http.GetFromJsonAsync<List<EmployeeListItemModel>>(url, ct).ConfigureAwait(false)
                    ?? new List<EmployeeListItemModel>();
         }
         catch (Exception ex)

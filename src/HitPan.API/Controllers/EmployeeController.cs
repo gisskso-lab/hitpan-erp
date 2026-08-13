@@ -26,9 +26,17 @@ public sealed class EmployeeController : ControllerBase
     //    종전엔 클래스 레벨 TenantAdminOnly 가 조회까지 막아, 자식계정은 화면을 열어도
     //    빈 목록만 봤다(웹 서비스가 403 을 빈 배열로 삼켜 "0명" 으로 보였다).
     //    ⚠️ 등록·수정·삭제·퇴사처리는 그대로 관리자 전용이다(클래스 정책 유지).
+    /// <param name="includeResigned">
+    /// 퇴사자까지 함께 볼지 여부(작 2026-08-14). <b>기본은 <c>false</c> — 퇴사자를 감춘다.</b>
+    /// 사장님 지시: <i>"사원관리 메뉴에서 퇴사직원 숨김처리 될 수 있도록"</i>
+    /// <para>
+    /// 🔴 <b>기본값이 감추기</b>인 것이 중요하다. 화면이 이 값을 안 보내도 퇴사자가 안 나온다 —
+    /// 새 화면을 만들며 깜빡해도 사고가 나지 않는 쪽으로 기울여 둔다.
+    /// </para>
+    /// </param>
     [Authorize(Policy = "TenantOnly")]
     [HttpGet]
-    public async Task<IActionResult> GetList(CancellationToken ct)
+    public async Task<IActionResult> GetList([FromQuery] bool includeResigned, CancellationToken ct)
     {
         var tenantId = HttpContext.Items["TenantId"]?.ToString();
         if (string.IsNullOrEmpty(tenantId))
@@ -36,7 +44,7 @@ public sealed class EmployeeController : ControllerBase
             return Forbid();
         }
 
-        var list = await _employeeService.GetListAsync(tenantId, ct).ConfigureAwait(false);
+        var list = await _employeeService.GetListAsync(tenantId, includeResigned, ct).ConfigureAwait(false);
         return Ok(list);
     }
 
