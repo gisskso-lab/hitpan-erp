@@ -149,7 +149,10 @@ public sealed class AnnualLeaveEngineGuardTests
         // 확정에서만 이력과 잔여가 함께 움직인다.
         // ⚠️ 구간을 3500자로 잡았다가 UPDATE 가 그 밖에 있어 헛되이 실패했다.
         //    확정 메서드는 이력 INSERT·잔여 UPDATE·트랜잭션까지라 길다. 넉넉히 본다.
-        var confirmBlock = svc.Substring(confirmIdx, Math.Min(5000, svc.Length - confirmIdx));
+        // ⚠️ 2026-08-13 봉합(취소건 UNIQUE 자리 비켜주기)으로 또 늘어 5000 도 모자랐다.
+        //    글자 수로 메서드를 자르는 방식 자체가 약하다 — 봉합할 때마다 이 숫자를 올리게 된다.
+        //    다만 지금 이걸 파서로 바꾸면 이번 봉합 범위를 넘으므로 숫자만 올려 둔다.
+        var confirmBlock = svc.Substring(confirmIdx, Math.Min(8000, svc.Length - confirmIdx));
         Assert.Contains("INSERT INTO annual_leave_grants", confirmBlock);
         Assert.Contains("UPDATE employees", confirmBlock);
 

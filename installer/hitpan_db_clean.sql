@@ -1505,7 +1505,7 @@ CREATE TABLE `employee_leave_of_absence` (
   `absence_id` varchar(36) NOT NULL,
   `tenant_id` varchar(36) NOT NULL,
   `employee_id` varchar(36) NOT NULL,
-  `absence_type` varchar(30) NOT NULL COMMENT 'childcare/maternity/family_care/sick/military/study/personal/other',
+  `absence_type` varchar(30) NOT NULL DEFAULT 'other' COMMENT '휴직 종류. 화면에서 고르지 않는다(사장님: 사유를 글로 받는다) — 기본 other. DB-102',
   `absence_label` varchar(60) DEFAULT NULL COMMENT '회사가 부르는 이름',
   `start_date` date NOT NULL,
   `end_date` date NOT NULL,
@@ -3351,7 +3351,7 @@ INSERT INTO `schema_migrations` (`migration_id`, `app_version`, `success`) VALUE
 ('DB-74','clean-ddl',1),('DB-75','clean-ddl',1),('DB-76','clean-ddl',1),('DB-77','clean-ddl',1),
 ('DB-78','clean-ddl',1),('DB-79','clean-ddl',1),('DB-80','clean-ddl',1),('DB-81','clean-ddl',1),
 ('DB-82','clean-ddl',1),('DB-83','clean-ddl',1),('DB-84','clean-ddl',1),('DB-85','clean-ddl',1),
-('DB-86','clean-ddl',1),('DB-87','clean-ddl',1),('DB-88','clean-ddl',1),('DB-89','clean-ddl',1),('DB-90','clean-ddl',1),('DB-91','clean-ddl',1),('DB-92','clean-ddl',1),('DB-93','clean-ddl',1),('DB-94','clean-ddl',1),('DB-95','clean-ddl',1),('DB-96','clean-ddl',1),('DB-97','clean-ddl',1),('DB-98','clean-ddl',1),('DB-99','clean-ddl',1),('DB-100','clean-ddl',1),('DB-101','clean-ddl',1);
+('DB-86','clean-ddl',1),('DB-87','clean-ddl',1),('DB-88','clean-ddl',1),('DB-89','clean-ddl',1),('DB-90','clean-ddl',1),('DB-91','clean-ddl',1),('DB-92','clean-ddl',1),('DB-93','clean-ddl',1),('DB-94','clean-ddl',1),('DB-95','clean-ddl',1),('DB-96','clean-ddl',1),('DB-97','clean-ddl',1),('DB-98','clean-ddl',1),('DB-99','clean-ddl',1),('DB-100','clean-ddl',1),('DB-101','clean-ddl',1),('DB-102','clean-ddl',1);
 
 --
 -- Table structure for table `service_tickets`
