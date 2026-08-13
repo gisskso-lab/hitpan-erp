@@ -1,0 +1,50 @@
+@page "/chat-window"
+@page "/chat-window/{RoomId}"
+@namespace HitPan.Web.Pages.HrUi
+@layout EmptyLayout
+@attribute [Authorize]
+
+@* ═══════════════════════════════════════════════════════════════
+   메신저 팝업창 전용 화면. 작(2026-08-14).
+
+   🔴 사장님 지시:
+     "메신저를 별도 팝업창으로 구현하자고 했는데, 사장의 요구대로 안됨."
+     "pc카카오톡 사이즈로 팝업을 띄워 채팅운영을 할 것!!!"
+
+   ■ 왜 화면을 따로 두나
+     같은 컴포넌트는 주소마다 레이아웃을 바꿀 수 없다. 팝업창에 사이드바·상단바가
+     같이 뜨면 400px 창이 메뉴로 꽉 차 대화가 안 보인다.
+     ⇒ 여기서 EmptyLayout(메뉴 없음) 을 걸고 **본체 화면을 그대로 얹는다.**
+
+   🔴 대화 기능을 다시 짜지 않는다. <ChatPage /> 를 컴포넌트로 부른다 —
+      옮겨 적으면 한쪽만 고쳐져 두 화면이 갈라진다(메신저 404 봉합 때 겪은 자리).
+   ═══════════════════════════════════════════════════════════════ *@
+
+<PageTitle>메신저 — 히트판</PageTitle>
+
+<div class="hitpan-chat-window">
+    <ChatPage RoomId="@RoomId" />
+</div>
+
+<style>
+    /* 팝업창은 화면 전체가 대화창이다. 여백을 빼고 높이를 창에 맞춘다. */
+    .hitpan-chat-window {
+        height: 100vh;
+        overflow: hidden;
+        display: flex;
+        flex-direction: column;
+    }
+
+    .hitpan-chat-window > * {
+        flex: 1;
+        min-height: 0;
+    }
+</style>
+
+@code {
+    /// <summary>
+    /// 특정 대화방을 바로 열 때 쓴다(<c>/chat-window/{방번호}</c>).
+    /// 알림을 눌러 그 방으로 바로 들어가는 길이다.
+    /// </summary>
+    [Parameter] public string? RoomId { get; set; }
+}

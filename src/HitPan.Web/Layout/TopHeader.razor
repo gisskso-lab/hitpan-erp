@@ -1,4 +1,7 @@
 @inject NavigationManager Nav
+@* 작(2026-08-14) 메신저 팝업창 — hitpanChat.open 을 부르고, 차단되면 안내한다. *@
+@inject IJSRuntime JS
+@inject ISnackbar Snackbar
 
 <header class="hitpan-top-header">
     @* 좌측: AI 챗봇 바 (로고는 사이드바 상단으로 복귀 — 사장님 결재 2026-04-29 재변경) *@
@@ -20,19 +23,41 @@
             메뉴에 기능이 있어야 하는건 맞지만, 메뉴에서만 찾는건 비효율적."
            🔴 팝업이라 업무 화면이 안 바뀐다 — 견적서 쓰다 물어보고 그대로 이어서 쓴다
               ("히트판erp 업무 멀티태스킹 기능도 됨"). 페이지로 가면 쓰던 게 날아간다. *@
-        <ChatButton @ref="_chatButton" Open="_chatOpen" OpenChanged="OnChatOpenChanged" />
+        <ChatButton @ref="_chatButton" OnOpenRequested="OpenChatWindow" />
         <AccountBadge />
     </div>
 </header>
 
-@* 오른쪽 아래 채팅창. 상단바 버튼이 켜고 끈다. *@
-<ChatPopup Open="_chatOpen" OpenChanged="OnChatOpenChanged" OnUnreadChanged="RefreshChatBadge" />
+@* 🔴 작(2026-08-14): 화면 안 채팅창을 걷어냈다.
+   사장님: "메신저를 별도 팝업창으로 구현하자고 했는데, 사장의 요구대로 안됨."
+           "pc카카오톡 사이즈로 팝업을 띄워 채팅운영을 할 것!!!"
+   종전 <ChatPopup> 은 화면 안에 붙는 <div> 라 ERP 화면을 가렸다 — 말만 팝업이었다.
+   이제 버튼을 누르면 진짜 브라우저 창(/chat-window)이 뜬다.
+   화면과 파일은 남겨 둔다(헌법 #1) — 되돌릴 일이 생기면 그대로 쓴다. *@
 
 @code {
-    private bool _chatOpen;
     private ChatButton? _chatButton;
 
-    private void OnChatOpenChanged(bool open) => _chatOpen = open;
+    /// <summary>
+    /// 메신저 버튼을 누르면 <b>진짜 창</b>을 띄운다(PC 카카오톡 크기).
+    /// </summary>
+    /// <remarks>
+    /// 🔴 팝업 차단기에 막히면 <c>false</c> 가 온다. 조용히 넘기면 사용자는
+    /// "눌렀는데 아무 일도 안 난다" 만 겪는다 — 사실대로 알리고 길을 준다.
+    /// </remarks>
+    private async Task OpenChatWindow()
+    {
+        var opened = await JS.InvokeAsync<bool>("hitpanChat.open", "/chat-window");
+
+        if (!opened)
+        {
+            Snackbar.Add("브라우저가 팝업을 막았습니다. 주소창 오른쪽의 팝업 차단 아이콘에서 "
+                + "허용해 주세요. (메뉴 → 메신저 로도 열 수 있습니다)", Severity.Warning);
+        }
+
+        // 창을 열면 읽음이 될 수 있으니 배지를 다시 센다.
+        if (_chatButton is not null) await _chatButton.RefreshAsync();
+    }
 
     /// <summary>팝업이 읽음 처리를 하면 버튼 배지를 다시 센다.</summary>
     private async Task RefreshChatBadge()

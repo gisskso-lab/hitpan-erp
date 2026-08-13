@@ -20,16 +20,22 @@
 
 <MudBadge Content="@_unread" Color="Color.Error" Overlap="true"
           Visible="@(_unread > 0)" Bordered="true">
-    <MudTooltip Text="메신저">
+    <MudTooltip Text="메신저 (새 창)">
         <MudIconButton Icon="@Icons.Material.Outlined.ChatBubbleOutline"
-                       Color="@(Open ? Color.Primary : Color.Default)" Size="Size.Medium"
-                       OnClick="Toggle" aria-label="메신저" />
+                       Color="Color.Default" Size="Size.Medium"
+                       OnClick="RequestOpen" aria-label="메신저" />
     </MudTooltip>
 </MudBadge>
 
 @code {
-    [Parameter] public bool Open { get; set; }
-    [Parameter] public EventCallback<bool> OpenChanged { get; set; }
+    /// <summary>
+    /// 버튼을 누르면 알린다. 작(2026-08-14) — 창을 <b>누가</b> 띄울지는 상단바가 정한다.
+    /// </summary>
+    /// <remarks>
+    /// 종전엔 <c>Open</c> 참/거짓으로 화면 안 채팅창을 켜고 껐다. 이제 진짜 브라우저 창이라
+    /// 여기서는 <b>"눌렸다"만</b> 알리고, 창을 띄우는 일(JS)은 상단바가 맡는다.
+    /// </remarks>
+    [Parameter] public EventCallback OnOpenRequested { get; set; }
 
     private int _unread;
     private bool _subscribed;
@@ -58,7 +64,7 @@
         StateHasChanged();
     }
 
-    private async Task Toggle() => await OpenChanged.InvokeAsync(!Open);
+    private async Task RequestOpen() => await OnOpenRequested.InvokeAsync();
 
     public void Dispose()
     {
