@@ -55,13 +55,42 @@
 
     protected override async Task OnInitializedAsync() { _items = await HrSvc.GetHrExpensesAsync(); }
 
+    /// <summary>
+    /// 경비 신청. 작(2026-08-13) 단계7 — <b>결재가 올라갔는지 사실대로 알린다.</b>
+    /// </summary>
+    /// <remarks>
+    /// 🔴 단계3 P0-1 교훈: 종전엔 성공이면 "신청 완료" 를 무조건 띄웠다.
+    /// 결재 설정이 꺼져 있으면 결재가 조용히 안 올라가는데 직원은 올라간 줄 알고,
+    /// 문서는 갇히고 결재함엔 안 뜬다. <b>그 침묵이 곧 되는 척이다.</b>
+    /// </remarks>
     private async Task SaveAsync()
     {
         if (string.IsNullOrWhiteSpace(_edit.Description)) { Snackbar.Add("내용을 입력해주세요.", Severity.Warning); return; }
         if (_edit.Amount <= 0) { Snackbar.Add("금액을 입력해주세요.", Severity.Warning); return; }
         _edit.RequestDate = _editDate ?? DateTime.Today;
-        var ok = await HrSvc.CreateHrExpenseAsync(_edit);
-        if (ok) { Snackbar.Add("신청 완료", Severity.Success); _edit = new(); _editDate = DateTime.Today; _items = await HrSvc.GetHrExpensesAsync(); }
-        else Snackbar.Add("신청 실패", Severity.Error);
+
+        var (ok, result) = await HrSvc.CreateHrExpenseDetailedAsync(_edit);
+
+        if (!ok)
+        {
+            // 서버가 준 이유를 그대로 보여준다. 예: "2026년 07월은 마감된 기간입니다."
+            Snackbar.Add(result?.Message ?? "신청하지 못했습니다.", Severity.Error);
+            return;
+        }
+
+        if (result?.ApprovalCreated == true)
+        {
+            Snackbar.Add("신청했습니다. 결재에 올라갔습니다.", Severity.Success);
+        }
+        else
+        {
+            // 신청 자체는 저장됐다. 다만 결재가 안 갔다는 것을 감추지 않는다.
+            Snackbar.Add("신청은 저장했습니다. " + (result?.ApprovalSkipReason
+                ?? "다만 결재가 올라가지 않았습니다. 설정 → 결재설정을 확인해주세요."), Severity.Warning);
+        }
+
+        _edit = new();
+        _editDate = DateTime.Today;
+        _items = await HrSvc.GetHrExpensesAsync();
     }
 }

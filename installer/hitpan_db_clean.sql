@@ -1053,6 +1053,7 @@ CREATE TABLE `employees` (
   `position` varchar(30) DEFAULT NULL,
   `job_title` varchar(30) DEFAULT NULL,
   `emp_type` longtext NOT NULL,
+  `weekly_hours` decimal(4,1) DEFAULT NULL COMMENT '주당 소정근로시간(약정). NULL=미정 — 반자동 원칙상 임의로 채우지 않는다. DB-94',
   `join_date` datetime(6) NOT NULL,
   `resign_date` datetime(6) DEFAULT NULL,
   `birth_date` varchar(200) DEFAULT NULL,
@@ -1063,6 +1064,10 @@ CREATE TABLE `employees` (
   `bank_account` varchar(200) DEFAULT NULL,
   `base_salary` varchar(200) DEFAULT NULL,
   `is_active` tinyint(1) NOT NULL,
+  -- 작(2026-08-13) DB-99 — 사장님: "상태처리 : 재직 휴직 연차"
+  -- ⚠️ is_active(재직/퇴사)와 층이 다르다. 이 칸은 '재직 중 지금 어떤 상태냐' 다.
+  --    휴직자를 is_active=0 으로 두면 퇴사자와 구분이 안 되고, 1 로 두면 급여가 그대로 나간다.
+  `work_status` varchar(20) NOT NULL DEFAULT 'active' COMMENT 'active=재직 · absence=휴직 · leave=연차. DB-99',
   `created_at` datetime(6) NOT NULL,
   `created_by` varchar(36) DEFAULT NULL,
   `updated_at` datetime(6) NOT NULL,
@@ -1102,7 +1107,9 @@ CREATE TABLE `employees` (
   PRIMARY KEY (`employee_id`),
   UNIQUE KEY `uq_tenant_empno` (`tenant_id`,`emp_no`),
   KEY `idx_employees_resigned` (`tenant_id`,`is_resigned`),
-  KEY `idx_employees_dept` (`tenant_id`,`department`)
+  KEY `idx_employees_dept` (`tenant_id`,`department`),
+  -- 작(2026-08-13) DB-99 — "지금 누가 휴직인가" 를 조직도·급여·연차가 매번 묻는다.
+  KEY `idx_emp_work_status` (`tenant_id`,`work_status`)
   -- fk_employees_tenant 제거 (무결 봉합 2026-06-18): tenants 백오피스 계층 삭제 FK 제거. tenant_id 컬럼 보존
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
@@ -1404,6 +1411,125 @@ CREATE TABLE `hr_expense_requests` (
   PRIMARY KEY (`request_id`),
   KEY `idx_tenant_emp` (`tenant_id`,`employee_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
+
+--
+-- Table structure for table `labor_policy_settings`
+-- 작(2026-08-13) DB-96 — 노무 기준값. 그룹웨어 단계5(연차 엔진)의 토대.
+-- 🔴 법정값을 코드에 넣지 않는다(설계도 §0). 법이 바뀌면 이 표의 값만 갈아끼운다.
+--    사장님(2026-08-12): "법이라는 게 언제, 어떻게 바뀔지는 몰라. 계속 모니터링 해야 해."
+--    값마다 effective_from 을 둬 과거분은 옛 값으로 계산한다.
+--
+
+DROP TABLE IF EXISTS `labor_policy_settings`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!40101 SET character_set_client = utf8mb4 */;
+CREATE TABLE `labor_policy_settings` (
+  `policy_id` varchar(36) NOT NULL COMMENT 'PK',
+  `tenant_id` varchar(36) NOT NULL COMMENT '테넌트(헌법 #2 — JWT 클레임에서만 온다)',
+  `policy_key` varchar(60) NOT NULL COMMENT '기준값 열쇠. 예: annual_leave_base_days',
+  `policy_value` decimal(12,4) NOT NULL COMMENT '값. 일수·시간·비율 모두 숫자 하나로 담는다',
+  `value_unit` varchar(20) NOT NULL DEFAULT 'day' COMMENT '단위: day|hour|rate|count',
+  `effective_from` date NOT NULL COMMENT '적용 시작일. 과거분은 옛 값으로 계산한다',
+  `effective_to` date DEFAULT NULL COMMENT '적용 종료일. NULL=현재 유효',
+  `label` varchar(100) NOT NULL COMMENT '사람이 읽는 이름',
+  `description` varchar(300) DEFAULT NULL COMMENT '무엇을 뜻하는 값인지',
+  `is_statutory` tinyint(1) NOT NULL DEFAULT 1 COMMENT '1=법정 기준(줄이면 위법) 0=회사 규정',
+  `updated_by` varchar(36) DEFAULT NULL,
+  `updated_reason` varchar(200) DEFAULT NULL COMMENT '왜 고쳤나 — 반자동은 수정 이력이 필수',
+  `created_at` datetime(6) NOT NULL DEFAULT current_timestamp(6),
+  `updated_at` datetime(6) NOT NULL DEFAULT current_timestamp(6) ON UPDATE current_timestamp(6),
+  PRIMARY KEY (`policy_id`),
+  UNIQUE KEY `uk_policy_tenant_key_from` (`tenant_id`,`policy_key`,`effective_from`),
+  KEY `idx_policy_lookup` (`tenant_id`,`policy_key`,`effective_from`,`effective_to`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='노무 기준값 — 법이 바뀌면 값만 갈아끼운다. DB-96';
+/*!40101 SET character_set_client = @saved_cs_client */;
+
+--
+-- Table structure for table `annual_leave_grants`
+-- 작(2026-08-13) DB-97 — 연차 부여 이력. 반자동 3단(제안→수정→확정)의 정본.
+-- 🔴 사장님(2026-08-12): "히트판은 100%자동화는 없어. 무조건 반자동이야."
+--    수정 가능하면 수정 이력이 필수다 — 누가·언제·뭘·왜.
+--
+
+DROP TABLE IF EXISTS `annual_leave_grants`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!40101 SET character_set_client = utf8mb4 */;
+CREATE TABLE `annual_leave_grants` (
+  `grant_id` varchar(36) NOT NULL COMMENT 'PK',
+  `tenant_id` varchar(36) NOT NULL COMMENT '테넌트(헌법 #2)',
+  `employee_id` varchar(36) NOT NULL COMMENT '누구 연차인가',
+  `grant_year` smallint(6) NOT NULL COMMENT '귀속 연도',
+  `period_start` date NOT NULL COMMENT '이 연차가 쓰이는 기간 시작',
+  `period_end` date NOT NULL COMMENT '기간 끝',
+  `suggested_days` decimal(5,1) NOT NULL COMMENT '① 자동 계산이 제안한 일수',
+  `granted_days` decimal(5,1) NOT NULL COMMENT '② 사람이 확정한 일수',
+  `is_adjusted` tinyint(1) NOT NULL DEFAULT 0 COMMENT '제안과 확정이 다른가',
+  `adjust_reason` varchar(300) DEFAULT NULL COMMENT '왜 고쳤나 — 고쳤으면 반드시 남긴다',
+  `grant_type` varchar(30) NOT NULL DEFAULT 'annual' COMMENT 'annual|monthly|adjust|carryover',
+  `service_years` decimal(5,2) DEFAULT NULL COMMENT '계산 당시 근속 연수',
+  `calc_basis` varchar(500) DEFAULT NULL COMMENT '어떤 기준값으로 계산했는지',
+  `status` varchar(20) NOT NULL DEFAULT 'draft' COMMENT 'draft|confirmed|cancelled',
+  `confirmed_by` varchar(36) DEFAULT NULL COMMENT '③ 누가 확정했나',
+  `confirmed_at` datetime(6) DEFAULT NULL,
+  `created_at` datetime(6) NOT NULL DEFAULT current_timestamp(6),
+  `created_by` varchar(36) DEFAULT NULL,
+  `updated_at` datetime(6) NOT NULL DEFAULT current_timestamp(6) ON UPDATE current_timestamp(6),
+  PRIMARY KEY (`grant_id`),
+  UNIQUE KEY `uk_grant_emp_year_type` (`tenant_id`,`employee_id`,`grant_year`,`grant_type`),
+  KEY `idx_grant_emp` (`tenant_id`,`employee_id`,`grant_year`),
+  KEY `idx_grant_status` (`tenant_id`,`status`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='연차 부여 이력 — 제안→수정→확정 3단과 근거를 남긴다. DB-97';
+/*!40101 SET character_set_client = @saved_cs_client */;
+
+--
+-- Table structure for table `employee_leave_of_absence`
+-- 작(2026-08-13) DB-98 — 휴직(육아·출산·병가 등 장기 부재). 사장님 지시 2026-08-13.
+--
+-- 🔴 휴가(`leave_requests`)와 왜 나눴나 — 실측 근거 두 가지다.
+--   ① `leave_requests.leave_days` 는 decimal(3,1) = 최대 99.9일.
+--      육아휴직 1년 6개월(548일)을 넣으면 MySQL 이 거부한다
+--      (실측: ERROR 1264 Out of range value for column 'leave_days').
+--   ② 휴가가 승인되면 LeaveBalanceHelper 가 annual_leave_used 를 더한다.
+--      휴직을 휴가로 올리면 연차 잔여가 마이너스가 되어 복직 후 연차를 못 쓴다.
+--
+-- 🔴 사장님(2026-08-13): "휴직도 수동으로!!!!" / "상태처리, 상태확인 정도로만".
+--    기간은 사람이 넣고, 기준을 넘겨도 막지 않고 알려만 준다.
+--    법정 기간은 '최소 보장' 이라 회사가 더 주는 것은 위법이 아니다.
+--
+
+DROP TABLE IF EXISTS `employee_leave_of_absence`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!40101 SET character_set_client = utf8mb4 */;
+CREATE TABLE `employee_leave_of_absence` (
+  `absence_id` varchar(36) NOT NULL,
+  `tenant_id` varchar(36) NOT NULL,
+  `employee_id` varchar(36) NOT NULL,
+  `absence_type` varchar(30) NOT NULL DEFAULT 'other' COMMENT '휴직 종류. 화면에서 고르지 않는다(사장님: 사유를 글로 받는다) — 기본 other. DB-102',
+  `absence_label` varchar(60) DEFAULT NULL COMMENT '회사가 부르는 이름',
+  `start_date` date NOT NULL,
+  `end_date` date NOT NULL,
+  `actual_return_date` date DEFAULT NULL COMMENT '실제 복직일 — 예정과 다를 수 있어 따로 남긴다',
+  `status` varchar(20) NOT NULL DEFAULT 'draft' COMMENT 'draft/pending/approved/active/returned/rejected/cancelled',
+  `reason` varchar(500) DEFAULT NULL,
+  `exceeds_standard` tinyint(1) NOT NULL DEFAULT 0 COMMENT '1=회사·법정 기준을 넘김',
+  `exceed_reason` varchar(300) DEFAULT NULL COMMENT '넘겼는데 왜 승인했나',
+  `calc_basis` varchar(500) DEFAULT NULL COMMENT '판정 근거를 글로 남긴다',
+  `pay_type` varchar(20) NOT NULL DEFAULT 'unpaid' COMMENT 'unpaid/paid/partial (표기용. 정본은 pay_amount)',
+  `pay_amount` decimal(15,2) NOT NULL DEFAULT 0.00 COMMENT '휴직 중 지급 금액. 사람이 직접 넣는다. 0=무급. DB-99',
+  `pay_note` varchar(200) DEFAULT NULL COMMENT '급여 메모. DB-99',
+  `approval_id` varchar(36) DEFAULT NULL,
+  `approved_by` varchar(36) DEFAULT NULL,
+  `approved_at` datetime(6) DEFAULT NULL,
+  `reject_reason` varchar(500) DEFAULT NULL COMMENT '폭 500 — 단계3 P0-2(ERROR 1406) 재발 방지',
+  `created_by` varchar(36) DEFAULT NULL,
+  `created_at` datetime(6) NOT NULL DEFAULT current_timestamp(6),
+  `updated_at` datetime(6) NOT NULL DEFAULT current_timestamp(6) ON UPDATE current_timestamp(6),
+  PRIMARY KEY (`absence_id`),
+  KEY `idx_absence_tenant_emp` (`tenant_id`,`employee_id`,`start_date`),
+  KEY `idx_absence_status` (`tenant_id`,`status`),
+  KEY `idx_absence_period` (`tenant_id`,`status`,`start_date`,`end_date`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='휴직 — 기간이 있는 부재. 휴가와 다르다. DB-98';
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -1820,6 +1946,9 @@ CREATE TABLE `local_company` (
   `seal_url` varchar(200) DEFAULT NULL COMMENT '인장 이미지 경로. DB-85 — 거래명세서·견적서 출력용',
   `header_url` varchar(200) DEFAULT NULL COMMENT '출력 헤더 이미지 경로. DB-85',
   `corp_no` varchar(20) DEFAULT NULL,
+  `regular_employee_count` int(11) DEFAULT NULL COMMENT '상시근로자수. NULL=미정 — 자동계산 금지(연인원/가동일수, 사람이 확정). DB-95',
+  `business_entity_type` varchar(20) DEFAULT NULL COMMENT '법인/개인 구분: corporate|individual. NULL=미정. DB-95',
+  `employee_count_asof` date DEFAULT NULL COMMENT '상시근로자수 기준일. 이 숫자가 언제 기준인지. DB-95',
   `subsidiary_no` varchar(20) DEFAULT NULL,
   `homepage` varchar(200) DEFAULT NULL,
   `initial_date` date DEFAULT NULL,
@@ -2386,6 +2515,109 @@ DELIMITER ;
 /*!50003 SET character_set_client  = @saved_cs_client */ ;
 /*!50003 SET character_set_results = @saved_cs_results */ ;
 /*!50003 SET collation_connection  = @saved_col_connection */ ;
+
+--
+-- Table structure for table `payroll_slips`
+-- 작(2026-08-13) DB-100 — 급여 명세. 사장님 지시 2026-08-13.
+--
+-- 🔴 "급여는 자동계산하지 말고 수동으로 int값 직접 받아서 입력하는게 가장 깔끔함"
+--    "각 고객사 니즈나 사정도 부합시킬 수 있고."
+--    ⇒ 4대보험 요율·간이세액표를 우리가 계산하지 않는다. 금액을 받는다.
+--       (요율은 매년 바뀌고, 회사마다 수당·비과세가 다르고, 틀리면 직원 돈이 틀린다)
+--
+-- 🔴 보호는 **권한 계층**이 한다("권한 계층분리로 급여를 관리해도 충분히 됨").
+--    금액은 평문이고 menu_code='PAYROLL' 로 막는다. 일반 직원은 본인 것만 본다.
+--
+
+DROP TABLE IF EXISTS `payroll_slips`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!40101 SET character_set_client = utf8mb4 */;
+CREATE TABLE `payroll_slips` (
+  `slip_id` varchar(36) NOT NULL,
+  `tenant_id` varchar(36) NOT NULL,
+  `employee_id` varchar(36) NOT NULL,
+  `pay_year` int(11) NOT NULL COMMENT '귀속 연도',
+  `pay_month` int(11) NOT NULL COMMENT '귀속 월(1~12)',
+  `pay_date` date DEFAULT NULL COMMENT '실제 지급일. 귀속월과 다를 수 있다',
+  `total_payment` decimal(15,2) NOT NULL DEFAULT 0.00 COMMENT '총지급액',
+  `total_deduct` decimal(15,2) NOT NULL DEFAULT 0.00 COMMENT '총공제액',
+  `net_payment` decimal(15,2) NOT NULL DEFAULT 0.00 COMMENT '실지급액',
+  `status` varchar(20) NOT NULL DEFAULT 'draft' COMMENT 'draft/confirmed/paid/cancelled',
+  `confirmed_by` varchar(36) DEFAULT NULL,
+  `confirmed_at` datetime(6) DEFAULT NULL,
+  `absence_id` varchar(36) DEFAULT NULL COMMENT '이 달에 휴직이 있으면 그 건(DB-98 연동)',
+  `memo` varchar(500) DEFAULT NULL,
+  `created_by` varchar(36) DEFAULT NULL,
+  `created_at` datetime(6) NOT NULL DEFAULT current_timestamp(6),
+  `updated_at` datetime(6) NOT NULL DEFAULT current_timestamp(6) ON UPDATE current_timestamp(6),
+  PRIMARY KEY (`slip_id`),
+  UNIQUE KEY `uk_payroll_emp_month` (`tenant_id`,`employee_id`,`pay_year`,`pay_month`),
+  KEY `idx_payroll_month` (`tenant_id`,`pay_year`,`pay_month`),
+  KEY `idx_payroll_status` (`tenant_id`,`status`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='급여 명세 — 금액을 사람이 직접 넣는다. DB-100';
+/*!40101 SET character_set_client = @saved_cs_client */;
+
+--
+-- Table structure for table `payroll_slip_lines`
+-- 작(2026-08-13) DB-100 — 급여 항목. 회사마다 수당이 달라 **이름도 사람이 적는다.**
+--
+
+DROP TABLE IF EXISTS `payroll_slip_lines`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!40101 SET character_set_client = utf8mb4 */;
+CREATE TABLE `payroll_slip_lines` (
+  `line_id` varchar(36) NOT NULL,
+  `tenant_id` varchar(36) NOT NULL,
+  `slip_id` varchar(36) NOT NULL,
+  `line_type` varchar(20) NOT NULL COMMENT 'payment=지급 · deduct=공제',
+  `item_name` varchar(60) NOT NULL COMMENT '항목 이름. 사람이 적는다(기본급·식대·국민연금 등)',
+  `amount` decimal(15,2) NOT NULL DEFAULT 0.00 COMMENT '금액. 사람이 직접 넣는다',
+  `sort_order` int(11) NOT NULL DEFAULT 0,
+  `is_taxable` tinyint(1) NOT NULL DEFAULT 1 COMMENT '1=과세 0=비과세. 사람이 고른다',
+  `memo` varchar(200) DEFAULT NULL,
+  `created_at` datetime(6) NOT NULL DEFAULT current_timestamp(6),
+  `updated_at` datetime(6) NOT NULL DEFAULT current_timestamp(6) ON UPDATE current_timestamp(6),
+  PRIMARY KEY (`line_id`),
+  KEY `idx_payroll_line_slip` (`tenant_id`,`slip_id`,`line_type`,`sort_order`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='급여 항목 — 이름도 사람이 적는다. DB-100';
+/*!40101 SET character_set_client = @saved_cs_client */;
+
+--
+-- Table structure for table `severance_payments`
+-- 작(2026-08-13) DB-100 — 퇴직금. 🔴 법정 산식을 우리가 돌리지 않는다.
+--   평균임금에 상여·연차수당을 어떻게 넣는지가 회사마다 다르고 다툼이 잦다.
+--   퇴직연금(DB·DC·IRP)이면 산식 자체가 다르다. 틀리면 법적 분쟁이 된다.
+--
+
+DROP TABLE IF EXISTS `severance_payments`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!40101 SET character_set_client = utf8mb4 */;
+CREATE TABLE `severance_payments` (
+  `severance_id` varchar(36) NOT NULL,
+  `tenant_id` varchar(36) NOT NULL,
+  `employee_id` varchar(36) NOT NULL,
+  `join_date` date NOT NULL,
+  `resign_date` date NOT NULL,
+  `service_days` int(11) NOT NULL DEFAULT 0 COMMENT '재직일수',
+  `avg_wage` decimal(15,2) NOT NULL DEFAULT 0.00 COMMENT '평균임금(1일). 사람이 넣는다',
+  `severance_amount` decimal(15,2) NOT NULL DEFAULT 0.00 COMMENT '퇴직금. 사람이 넣는다',
+  `tax_amount` decimal(15,2) NOT NULL DEFAULT 0.00 COMMENT '퇴직소득세 등 공제액',
+  `net_amount` decimal(15,2) NOT NULL DEFAULT 0.00 COMMENT '실지급액',
+  `pay_type` varchar(20) NOT NULL DEFAULT 'direct' COMMENT 'direct/db/dc/irp',
+  `pay_date` date DEFAULT NULL,
+  `status` varchar(20) NOT NULL DEFAULT 'draft' COMMENT 'draft/confirmed/paid/cancelled',
+  `confirmed_by` varchar(36) DEFAULT NULL,
+  `confirmed_at` datetime(6) DEFAULT NULL,
+  `calc_basis` varchar(500) DEFAULT NULL COMMENT '산정 근거. 분쟁 시 설명해야 한다',
+  `memo` varchar(500) DEFAULT NULL,
+  `created_by` varchar(36) DEFAULT NULL,
+  `created_at` datetime(6) NOT NULL DEFAULT current_timestamp(6),
+  `updated_at` datetime(6) NOT NULL DEFAULT current_timestamp(6) ON UPDATE current_timestamp(6),
+  PRIMARY KEY (`severance_id`),
+  KEY `idx_severance_emp` (`tenant_id`,`employee_id`),
+  KEY `idx_severance_status` (`tenant_id`,`status`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='퇴직금 — 금액을 사람이 직접 넣는다. DB-100';
+/*!40101 SET character_set_client = @saved_cs_client */;
 
 --
 -- Table structure for table `partners`
@@ -3119,7 +3351,7 @@ INSERT INTO `schema_migrations` (`migration_id`, `app_version`, `success`) VALUE
 ('DB-74','clean-ddl',1),('DB-75','clean-ddl',1),('DB-76','clean-ddl',1),('DB-77','clean-ddl',1),
 ('DB-78','clean-ddl',1),('DB-79','clean-ddl',1),('DB-80','clean-ddl',1),('DB-81','clean-ddl',1),
 ('DB-82','clean-ddl',1),('DB-83','clean-ddl',1),('DB-84','clean-ddl',1),('DB-85','clean-ddl',1),
-('DB-86','clean-ddl',1),('DB-87','clean-ddl',1),('DB-88','clean-ddl',1),('DB-89','clean-ddl',1),('DB-90','clean-ddl',1),('DB-91','clean-ddl',1),('DB-92','clean-ddl',1);
+('DB-86','clean-ddl',1),('DB-87','clean-ddl',1),('DB-88','clean-ddl',1),('DB-89','clean-ddl',1),('DB-90','clean-ddl',1),('DB-91','clean-ddl',1),('DB-92','clean-ddl',1),('DB-93','clean-ddl',1),('DB-94','clean-ddl',1),('DB-95','clean-ddl',1),('DB-96','clean-ddl',1),('DB-97','clean-ddl',1),('DB-98','clean-ddl',1),('DB-99','clean-ddl',1),('DB-100','clean-ddl',1),('DB-101','clean-ddl',1),('DB-102','clean-ddl',1);
 
 --
 -- Table structure for table `service_tickets`
@@ -4214,6 +4446,123 @@ INSERT INTO `common_codes` (`code_id`, `tenant_id`, `code_group`, `code_value`, 
 ('d73f74d1-3195-4d84-933d-f5daf5ca1ddd',NULL,'WH_TYPE','normal','normal',0,1,'2026-04-12 19:26:22'),
 ('da9b8d49-0e71-4e43-9a9f-b4d0e11be747',NULL,'ITEM_TYPE','product','product',0,1,'2026-04-12 19:26:22'),
 ('eb6a171c-64b0-4216-8cc9-c402b6a6b481',NULL,'UNIT','L','L',3,1,'2026-04-12 19:26:22');
+
+--
+-- ═══════════════════════════════════════════════════════════════
+-- 사내 메신저 (그룹웨어 단계9) — DB-101 · 2026-08-13
+-- ═══════════════════════════════════════════════════════════════
+-- 🔴 사장님 지시: "단체대화, 부서별 대화, 1:1대화 모두 가능해야함"
+--    "메신저에서 각 그룹웨어 문서들 연결 가능해야 함" (연결만 — 생성·결재는 원래 화면이)
+--    "승인 혹은 반려시, 최초 발신인(신청자)에게 메시지 보내야됨"
+--    "결재봇, 메시지봇 공유해도 될듯. 다만 메시지인지, 결재안내인지는 안내" → msg_kind
+--    "파일전송은 최소한으로" → 20MB · 디스크 보관 · 3중 한도
+--
+
+DROP TABLE IF EXISTS `chat_rooms`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!40101 SET character_set_client = utf8mb4 */;
+CREATE TABLE `chat_rooms` (
+  `room_id` varchar(36) NOT NULL COMMENT '방 PK',
+  `tenant_id` varchar(36) NOT NULL COMMENT '테넌트 (헌법 #2)',
+  `room_type` varchar(10) NOT NULL COMMENT 'direct(1:1) · dept(부서) · group(단체)',
+  `room_name` varchar(100) DEFAULT NULL COMMENT '단체방만. 1:1 은 NULL',
+  `dept_id` varchar(36) DEFAULT NULL COMMENT '부서방만. 부서 0건이어도 정상(고객사가 설정할 일)',
+  `direct_key` varchar(80) DEFAULT NULL COMMENT '1:1 중복 방지 — 사원ID 2개 정렬 결합',
+  `created_by` varchar(36) NOT NULL,
+  `created_at` datetime(6) NOT NULL DEFAULT current_timestamp(6),
+  `updated_at` datetime(6) NOT NULL DEFAULT current_timestamp(6) ON UPDATE current_timestamp(6),
+  PRIMARY KEY (`room_id`),
+  UNIQUE KEY `uq_chat_direct` (`tenant_id`,`direct_key`),
+  KEY `idx_chat_rooms_tenant_type` (`tenant_id`,`room_type`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='사내 메신저 방 — 1:1·부서·단체 3종';
+/*!40101 SET character_set_client = @saved_cs_client */;
+
+--
+-- Table structure for table `chat_room_members`
+--
+
+DROP TABLE IF EXISTS `chat_room_members`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!40101 SET character_set_client = utf8mb4 */;
+CREATE TABLE `chat_room_members` (
+  `member_id` varchar(36) NOT NULL,
+  `tenant_id` varchar(36) NOT NULL,
+  `room_id` varchar(36) NOT NULL,
+  `employee_id` varchar(36) NOT NULL COMMENT '사원 ID (user_id 아님 — 알림·결재와 같은 축)',
+  `last_read_at` datetime(6) DEFAULT NULL COMMENT '읽음의 유일한 근거',
+  `joined_at` datetime(6) NOT NULL DEFAULT current_timestamp(6),
+  `left_at` datetime(6) DEFAULT NULL COMMENT 'NULL=참여중. 나가도 줄을 지우지 않는다',
+  PRIMARY KEY (`member_id`),
+  UNIQUE KEY `uq_chat_member` (`room_id`,`employee_id`),
+  KEY `idx_chat_member_my` (`tenant_id`,`employee_id`,`left_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='메신저 방 참여자 — last_read_at 하나로 읽음 판정';
+/*!40101 SET character_set_client = @saved_cs_client */;
+
+--
+-- Table structure for table `chat_messages`
+--
+
+DROP TABLE IF EXISTS `chat_messages`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!40101 SET character_set_client = utf8mb4 */;
+CREATE TABLE `chat_messages` (
+  `message_id` varchar(36) NOT NULL,
+  `tenant_id` varchar(36) NOT NULL,
+  `room_id` varchar(36) NOT NULL,
+  `sender_id` varchar(36) NOT NULL COMMENT '보낸 사원. 결재 안내도 결재한 사람 ID',
+  `msg_kind` varchar(10) NOT NULL DEFAULT 'text' COMMENT '딱지 — text(메시지)·approval(결재)·file(파일)',
+  `body` varchar(2000) NOT NULL,
+  `ref_type` varchar(20) DEFAULT NULL COMMENT 'approval·leave·expense·payroll·contract·report',
+  `ref_id` varchar(36) DEFAULT NULL COMMENT '원본 문서 ID — 누르면 그 화면으로',
+  `ref_title` varchar(200) DEFAULT NULL COMMENT '미리보기용 제목만. 내용 아님',
+  `sent_at` datetime(6) NOT NULL DEFAULT current_timestamp(6),
+  `deleted_at` datetime(6) DEFAULT NULL COMMENT '숨김만. 원문은 남는다',
+  PRIMARY KEY (`message_id`),
+  KEY `idx_chat_msg_room` (`tenant_id`,`room_id`,`sent_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='메신저 메시지 — 문서는 참조만, 삭제는 숨김만';
+/*!40101 SET character_set_client = @saved_cs_client */;
+
+--
+-- Table structure for table `chat_files`
+--
+
+DROP TABLE IF EXISTS `chat_files`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!40101 SET character_set_client = utf8mb4 */;
+CREATE TABLE `chat_files` (
+  `file_id` varchar(36) NOT NULL COMMENT 'PK. 저장 파일명도 이것 — 원래 이름 쓰면 경로 조작',
+  `tenant_id` varchar(36) NOT NULL,
+  `room_id` varchar(36) NOT NULL,
+  `message_id` varchar(36) NOT NULL,
+  `original_name` varchar(255) NOT NULL COMMENT '보여주기용만',
+  `stored_path` varchar(500) NOT NULL COMMENT 'chat-files/{tenant_id}/{yyyyMM}/{file_id}.{ext}',
+  `content_type` varchar(100) NOT NULL DEFAULT 'application/octet-stream',
+  `file_size` bigint(20) NOT NULL COMMENT '20MB 한도',
+  `uploaded_by` varchar(36) NOT NULL,
+  `uploaded_at` datetime(6) NOT NULL DEFAULT current_timestamp(6),
+  PRIMARY KEY (`file_id`),
+  KEY `idx_chat_files_room` (`tenant_id`,`room_id`),
+  KEY `idx_chat_files_msg` (`message_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='메신저 파일 — 실제 파일은 디스크, 여기엔 경로만';
+/*!40101 SET character_set_client = @saved_cs_client */;
+
+--
+-- Table structure for table `chat_file_settings`
+--
+
+DROP TABLE IF EXISTS `chat_file_settings`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!40101 SET character_set_client = utf8mb4 */;
+CREATE TABLE `chat_file_settings` (
+  `tenant_id` varchar(36) NOT NULL,
+  `max_file_mb` int(11) NOT NULL DEFAULT 20 COMMENT '파일 한 개 (사장님 확정 20MB)',
+  `max_room_mb` int(11) NOT NULL DEFAULT 500 COMMENT '방 하나 누적',
+  `max_tenant_mb` int(11) NOT NULL DEFAULT 5120 COMMENT '회사 전체 누적 (5GB)',
+  `created_at` datetime(6) NOT NULL DEFAULT current_timestamp(6),
+  `updated_at` datetime(6) NOT NULL DEFAULT current_timestamp(6) ON UPDATE current_timestamp(6),
+  PRIMARY KEY (`tenant_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='메신저 파일 한도 — 파일이 ERP를 넘어뜨리지 못하게. 업무 데이터는 무관';
+/*!40101 SET character_set_client = @saved_cs_client */;
 
 /*!40103 SET TIME_ZONE=@OLD_TIME_ZONE */;
 

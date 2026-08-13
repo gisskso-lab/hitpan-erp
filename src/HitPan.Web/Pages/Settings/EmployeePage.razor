@@ -4,6 +4,7 @@
 @attribute [Authorize(Roles = "system_admin,tenant_admin,TenantAdmin,hr_manager")]
 @using HitPan.Web.Models
 @using HitPan.Web.Services
+@* 작(2026-08-13) 단계4: 고용형태 표시 이름은 HitPan.Web.Models.EmployeeTypeLabels 한 곳에서만 정한다. *@
 
 <PageTitle>사원관리</PageTitle>
 
@@ -59,18 +60,59 @@ else
                     </MudItem>
 
                     <MudItem xs="12" md="3">
-                        <MudTextField T="string" Label="직급" @bind-Value="_edit.Position" Variant="Variant.Outlined" Margin="Margin.Dense" />
+                        @* 작(2026-08-13) 단계4 토대: 직급을 자유 텍스트 → 직급 마스터 드롭다운으로.
+                           종전엔 아무거나 칠 수 있어 12명 중 8명이 직급 없음이었다(NULL·공백·"0").
+                           부서는 6/22 에 이미 봉합했는데 직급만 남아 있었다.
+
+                           🔴 employees.position 은 '이름 문자열' 을 담는다(FK 아님).
+                              그래서 이름으로 고른다 — 기존 "과장"·"사원" 값이 그대로 살아난다.
+                              ID 로 바꾸면 기존 값이 전부 매칭 실패로 날아간다. *@
+                        <MudSelect T="string" Label="직급" @bind-Value="_edit.Position" Variant="Variant.Outlined" Margin="Margin.Dense" Clearable="true">
+                            @foreach (var name in PositionOptions)
+                            {
+                                <MudSelectItem T="string" Value="@name">@name</MudSelectItem>
+                            }
+                        </MudSelect>
+                        @if (_positions.Count == 0)
+                        {
+                            @* 직급 마스터가 비면 고를 게 없다. 어디서 채우는지 알려준다 —
+                               "왜 안 뜨지" 로 막히는 자리다(헌법 #11 관리자가 직접 설정). *@
+                            <MudText Typo="Typo.caption" Color="Color.Warning">
+                                등록된 직급이 없습니다. 설정 → 직급 관리에서 먼저 등록하세요.
+                            </MudText>
+                        }
                     </MudItem>
                     <MudItem xs="12" md="3">
                         <MudTextField T="string" Label="직책" @bind-Value="_edit.JobTitle" Variant="Variant.Outlined" Margin="Margin.Dense" />
                     </MudItem>
                     <MudItem xs="12" md="3">
+                        @* 작(2026-08-13) 단계4 — 사장님이 짚은 4형태로 맞춘다.
+                           "정직원이냐, 알바냐, 계약직이냐, 무기계약직이냐 에 따라서도 달라짐"(2026-08-12)
+                           무기계약직이 아예 없었고, "정규직"·"파트타임" 은 현장에서 쓰는 말과 달랐다.
+
+                           🔴 DB 값(regular/contract/…)은 그대로 두고 보이는 말만 바꿨다.
+                              값을 바꾸면 기존 행이 매칭 실패하는데, ParseEmpType 이 그걸
+                              조용히 Regular 로 폴백해 오염이 눈에 안 띈다. *@
                         <MudSelect T="string" Label="고용형태" @bind-Value="_edit.EmpType" Variant="Variant.Outlined" Margin="Margin.Dense">
-                                <MudSelectItem Value="@("regular")">정규직</MudSelectItem>
-                                <MudSelectItem Value="@("contract")">계약직</MudSelectItem>
-                                <MudSelectItem Value="@("part")">파트타임</MudSelectItem>
-                                <MudSelectItem Value="@("dispatch")">파견</MudSelectItem>
+                                <MudSelectItem Value="@("regular")">@EmployeeTypeLabels.Regular</MudSelectItem>
+                                <MudSelectItem Value="@("permanent")">@EmployeeTypeLabels.Permanent</MudSelectItem>
+                                <MudSelectItem Value="@("contract")">@EmployeeTypeLabels.Contract</MudSelectItem>
+                                <MudSelectItem Value="@("part")">@EmployeeTypeLabels.Part</MudSelectItem>
+                                <MudSelectItem Value="@("daily")">@EmployeeTypeLabels.Daily</MudSelectItem>
+                                <MudSelectItem Value="@("dispatch")">@EmployeeTypeLabels.Dispatch</MudSelectItem>
                         </MudSelect>
+                    </MudItem>
+                    <MudItem xs="12" md="3">
+                        @* 🔴 연차·주휴·4대보험이 이 숫자로 갈린다(주 15시간이 갈림길).
+                           고용형태만으로는 판정이 안 된다 — 같은 알바라도 주 20시간과 10시간은 다르다.
+
+                           ⚠️ 비워두면 '미정' 이다. 40 으로 채워주지 않는다 —
+                              모르는 것을 아는 척 채우면 그 값으로 연차가 계산되고
+                              틀린 줄도 모른 채 법정 미달이 된다(반자동 원칙). *@
+                        <MudNumericField T="decimal?" Label="주당 소정근로시간" @bind-Value="_edit.WeeklyHours"
+                                         Variant="Variant.Outlined" Margin="Margin.Dense"
+                                         Min="0" Max="168" Step="0.5M" Clearable="true"
+                                         HelperText="비우면 미정. 주 15시간 미만이면 연차·주휴가 달라집니다." />
                     </MudItem>
                     <MudItem xs="12" md="3">
                         <MudSelect T="string" Label="역할" @bind-Value="_edit.Role" Variant="Variant.Outlined" Margin="Margin.Dense">

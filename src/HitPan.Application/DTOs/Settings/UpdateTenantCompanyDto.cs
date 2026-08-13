@@ -75,4 +75,50 @@ public sealed class UpdateTenantCompanyDto
     /// (작4 §2-6-2). 화면에서만 선언되고 어디서도 강제되지 않던 것을 여기서 잇는다.
     /// </remarks>
     public bool IsLockedFromLanding { get; set; }
+
+    // ───────────────────────────────────────────────────────────────
+    // 사업장 노무 정보 — 작(2026-08-13) 그룹웨어 단계4 토대
+    //
+    // 🔴 사장님(2026-08-12): "사업장의 직원수, 규모, 법인,개인,면세사업장, 등
+    //    여러상황이 있어서 자동화는 현실적으로 어려워. 반자동원칙"
+    //    연차·퇴직금·수당이 이 조건들로 갈린다.
+    // ───────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// 과세 유형: <c>taxable</c> 과세 / <c>tax_free</c> 면세.
+    /// </summary>
+    /// <remarks>
+    /// 🔴 컬럼은 처음부터 있었는데 <b>조회·저장·화면 어디에도 없어 값을 넣을 방법이 없었다</b>
+    /// (늘 기본값 <c>taxable</c>). 단계4 에서 살린다.
+    /// </remarks>
+    public string? TaxType { get; set; }
+
+    /// <summary>
+    /// 상시근로자수. <c>null</c> = 미정.
+    /// </summary>
+    /// <remarks>
+    /// 🔴 <b>자동 계산하지 않는다.</b> 법정 상시근로자수는 '연인원 ÷ 가동일수' 이고
+    /// 알바·가족까지 세는 등 계산이 까다롭다. 사원 행을 세서 채우면 그럴듯하지만 틀린 숫자가 나오고,
+    /// 그 숫자로 "5인 미만 → 연차 없음" 이 판정되면 <b>법정 미달</b>이 된다.
+    /// 화면이 현재 재직자 수를 <b>제안</b>하고 사람이 확정한다(반자동 3단).
+    /// </remarks>
+    public int? RegularEmployeeCount { get; set; }
+
+    /// <summary>
+    /// 법인/개인 구분: <c>corporate</c> 법인 / <c>individual</c> 개인. <c>null</c> = 미정.
+    /// </summary>
+    /// <remarks>
+    /// ⚠️ <see cref="CorpNo"/>(법인등록번호) 유무로 추정하지 않는다 —
+    /// 개인사업자도 비어 있고 법인도 안 적을 수 있어 그걸로 판정하면 틀린다.
+    /// </remarks>
+    public string? BusinessEntityType { get; set; }
+
+    /// <summary>
+    /// 상시근로자수 기준일. 이 숫자가 <b>언제 기준</b>인지.
+    /// </summary>
+    /// <remarks>
+    /// 설계도 §0 지침: <i>"값마다 적용시작일을 둔다. 과거분은 옛 값으로 계산해야 한다."</i>
+    /// "지금 7명" 이 아니라 "언제 기준 7명" 이어야 뜻이 산다.
+    /// </remarks>
+    public DateTime? EmployeeCountAsOf { get; set; }
 }

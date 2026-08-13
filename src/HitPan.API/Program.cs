@@ -107,6 +107,24 @@ builder.Services.AddScoped<ITenantCertificateService, TenantCertificateService>(
 builder.Services.AddScoped<ITenantDeviceService, TenantDeviceService>();
 builder.Services.AddScoped<IEmployeeService, EmployeeService>();
 builder.Services.AddScoped<IPositionService, PositionService>();
+// 작(2026-08-13) 단계4 토대: 부서 마스터 CRUD. 종전엔 조회만 있어 부서를 만들 방법이 없었다.
+builder.Services.AddScoped<IDepartmentService, DepartmentService>();
+// 작(2026-08-13) 단계5: 연차 엔진. 법정값은 labor_policy_settings 에서만 읽는다.
+builder.Services.AddScoped<IAnnualLeaveService, AnnualLeaveService>();
+// 작(2026-08-13) 단계6: 휴직. 휴가(leave_requests)와 나눈 이유는 AbsenceDtos 주석 참고
+// (일수 칸이 99.9일까지라 육아휴직이 안 들어가고, 승인 시 연차 잔여가 깎인다).
+builder.Services.AddScoped<IAbsenceService, AbsenceService>();
+// 작(2026-08-13) 단계8: 급여·퇴직금. 🔴 계산하지 않는다 — 금액을 사람이 직접 넣는다
+// (사장님: "급여는 자동계산하지 말고 수동으로 int값 직접 받아서 입력하는게 가장 깔끔함").
+// 보호는 권한 계층(menu_code='PAYROLL')이 한다 — 컬럼 암호화는 내부자 열람을 못 막는다.
+builder.Services.AddScoped<IPayrollService, PayrollService>();
+// 작(2026-08-13) 단계9: 사내 메신저. 🔴 문서를 만들거나 결재하지 않는다 — 연결만 한다
+// (사장님: "연결까지만 해도 충분함" / "있는 기능 연결해서 사용하는게 훨씬 효율적임").
+// 열람은 방 참여 여부로 판정한다 — 부모계정도 남의 1:1 은 못 본다("본인 대화만 열람").
+builder.Services.AddScoped<IChatService, ChatService>();
+// 파일은 디스크에, DB 에는 경로만. DB 에 통째로 넣으면 백업·복구·업데이트가 다 느려진다
+// (사장님: "히트판 ERP 데이터양이 많으면 과부화가 올 수 있어. 파일전송은 최소한으로").
+builder.Services.AddSingleton<IChatFileStore, ChatFileStore>();
 builder.Services.AddScoped<IApprovalLineService, ApprovalLineService>();
 builder.Services.AddScoped<IBillingProvider, ManualBillingProvider>();
 builder.Services.AddScoped<IBillingService, BillingService>();

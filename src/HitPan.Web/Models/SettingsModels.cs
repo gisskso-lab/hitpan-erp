@@ -47,6 +47,23 @@ public sealed class TenantCompanyModel
     /// <summary>종사업장번호.</summary>
     public string? SubsidiaryNo { get; set; }
 
+    // ── 사업장 노무 정보 (작 2026-08-13, 그룹웨어 단계4 토대) ──
+    // 서버 DTO(UpdateTenantCompanyDto)와 이름이 같아야 역직렬화된다.
+    // 🔴 이름이 어긋나면 서버가 값을 줘도 화면이 못 받고, 저장 때도 조용히 빠져나간다
+    //    (출력 이미지 3필드가 정확히 그 사고를 겪었다 — 바로 위 주석 참조).
+
+    /// <summary>과세 유형: taxable 과세 / tax_free 면세. null = 미정.</summary>
+    public string? TaxType { get; set; }
+
+    /// <summary>상시근로자수. null = 미정 — 자동 계산하지 않는다.</summary>
+    public int? RegularEmployeeCount { get; set; }
+
+    /// <summary>법인/개인: corporate / individual. null = 미정.</summary>
+    public string? BusinessEntityType { get; set; }
+
+    /// <summary>상시근로자수 기준일.</summary>
+    public DateTime? EmployeeCountAsOf { get; set; }
+
     // ── 출력 이미지 (DB-85) ──
     // 서버 DTO(UpdateTenantCompanyDto)와 이름이 같아야 역직렬화된다. 종전에는 이 세 필드가
     // 화면 모델에 없어, 서버가 값을 돌려줘도 화면이 받지 못하고 저장 때도 빠져나갔다.

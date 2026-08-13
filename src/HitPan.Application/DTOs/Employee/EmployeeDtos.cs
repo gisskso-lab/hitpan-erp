@@ -38,6 +38,16 @@ public sealed class EmployeeDetailDto
     public string? Position { get; set; }
     public string? JobTitle { get; set; }
     public string EmpType { get; set; } = "regular";
+
+    /// <summary>
+    /// 주당 소정근로시간(약정). <c>null</c> = 미정. 작(2026-08-13) 단계4.
+    /// </summary>
+    /// <remarks>
+    /// 🔴 연차·주휴·4대보험이 이 숫자로 갈린다(주 15시간이 갈림길).
+    /// ⚠️ 기본값을 40 으로 두지 않는다 — 모르는 것을 채우면 그 값으로 연차가 계산돼
+    /// 법정 미달이 될 수 있다(반자동 원칙).
+    /// </remarks>
+    public decimal? WeeklyHours { get; set; }
     public DateTime JoinDate { get; set; }
     public DateTime? ResignDate { get; set; }
     public string? BirthDate { get; set; }
@@ -85,6 +95,16 @@ public sealed class CreateEmployeeRequest
     public string? Position { get; set; }
     public string? JobTitle { get; set; }
     public string EmpType { get; set; } = "regular";
+
+    /// <summary>
+    /// 주당 소정근로시간(약정). <c>null</c> = 미정. 작(2026-08-13) 단계4.
+    /// </summary>
+    /// <remarks>
+    /// 🔴 연차·주휴·4대보험이 이 숫자로 갈린다(주 15시간이 갈림길).
+    /// ⚠️ 기본값을 40 으로 두지 않는다 — 모르는 것을 채우면 그 값으로 연차가 계산돼
+    /// 법정 미달이 될 수 있다(반자동 원칙).
+    /// </remarks>
+    public decimal? WeeklyHours { get; set; }
     public DateTime JoinDate { get; set; }
     public string? Phone { get; set; }
     public string? Email { get; set; }
@@ -101,6 +121,16 @@ public sealed class UpdateEmployeeRequest
     public string? Position { get; set; }
     public string? JobTitle { get; set; }
     public string EmpType { get; set; } = "regular";
+
+    /// <summary>
+    /// 주당 소정근로시간(약정). <c>null</c> = 미정. 작(2026-08-13) 단계4.
+    /// </summary>
+    /// <remarks>
+    /// 🔴 연차·주휴·4대보험이 이 숫자로 갈린다(주 15시간이 갈림길).
+    /// ⚠️ 기본값을 40 으로 두지 않는다 — 모르는 것을 채우면 그 값으로 연차가 계산돼
+    /// 법정 미달이 될 수 있다(반자동 원칙).
+    /// </remarks>
+    public decimal? WeeklyHours { get; set; }
     public DateTime JoinDate { get; set; }
     public string? Phone { get; set; }
     public string? Email { get; set; }

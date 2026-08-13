@@ -101,6 +101,8 @@ public sealed class EmployeeService : IEmployeeService
               e.position AS Position,
               e.job_title AS JobTitle,
               e.emp_type AS EmpType,
+              -- 작(2026-08-13) 단계4: 주당 소정근로시간. 연차·주휴 판정이 이 숫자를 본다.
+              e.weekly_hours AS WeeklyHours,
               e.join_date AS JoinDate,
               e.resign_date AS ResignDate,
               e.birth_date AS BirthDate,
@@ -150,14 +152,14 @@ public sealed class EmployeeService : IEmployeeService
             INSERT INTO employees (
               employee_id, tenant_id, user_id,
               emp_no, emp_name, dept_id,
-              position, job_title, emp_type,
+              position, job_title, emp_type, weekly_hours,
               join_date, phone, email,
               role, is_active,
               created_at, updated_at)
             VALUES (
               @EmployeeId, @TenantId, NULL,
               @EmpNo, @EmpName, @DeptId,
-              @Position, @JobTitle, @EmpType,
+              @Position, @JobTitle, @EmpType, @WeeklyHours,
               @JoinDate, @Phone, @Email,
               @Role, 1,
               NOW(6), NOW(6))
@@ -175,6 +177,13 @@ public sealed class EmployeeService : IEmployeeService
                 Position = request.Position,
                 JobTitle = request.JobTitle,
                 EmpType = request.EmpType,
+                // 🔴 봉합 (2026-08-13, 단계4 검증 P0-1): 여기가 빠져 있었다.
+                //    SQL 에는 @WeeklyHours 가 있는데 파라미터 객체에 없어서
+                //    신규 등록 시 입력값이 조용히 NULL 로 들어갔다(수정은 정상이라 더 안 보였다).
+                //    ⚠️ 예외조차 안 났다 — 연결문자열의 AllowUserVariables=true 때문에
+                //    MySqlConnector 가 바인딩 안 된 @WeeklyHours 를 사용자변수(NULL)로 읽었다.
+                //    그 옵션이 없었다면 첫 등록에서 바로 터져 발견됐을 것이다.
+                WeeklyHours = NormalizeWeeklyHours(request.WeeklyHours),
                 JoinDate = request.JoinDate == default ? DateTime.Today : request.JoinDate.Date,
                 Phone = request.Phone,
                 Email = request.Email,
@@ -196,6 +205,8 @@ public sealed class EmployeeService : IEmployeeService
                 position = @Position,
                 job_title = @JobTitle,
                 emp_type = @EmpType,
+                -- 작(2026-08-13) 단계4: 주당 소정근로시간. null 이면 '미정' 으로 되돌아간다.
+                weekly_hours = @WeeklyHours,
                 join_date = @JoinDate,
                 phone = @Phone,
                 email = @Email,
@@ -216,6 +227,7 @@ public sealed class EmployeeService : IEmployeeService
                 Position = request.Position,
                 JobTitle = request.JobTitle,
                 EmpType = request.EmpType,
+                WeeklyHours = NormalizeWeeklyHours(request.WeeklyHours),
                 JoinDate = request.JoinDate == default ? DateTime.Today : request.JoinDate.Date,
                 Phone = request.Phone,
                 Email = request.Email,
@@ -223,6 +235,24 @@ public sealed class EmployeeService : IEmployeeService
             },
             cancellationToken: ct)).ConfigureAwait(false);
     }
+
+    /// <summary>
+    /// 주당 소정근로시간을 현실 범위로 다듬는다. 벗어나면 <c>null</c>(미정).
+    /// </summary>
+    /// <remarks>
+    /// 🔴 봉합 (2026-08-13, 단계4 검증 P1-1): 화면에 <c>Min=0 Max=168</c> 이 있으나
+    /// 그건 브라우저에서만 도는 것이라 API 를 직접 부르면 음수도 들어갔다
+    /// (실측: -5 저장됨). 음수 근로시간으로 연차를 계산하면 결과를 믿을 수 없다.
+    ///
+    /// ⚠️ 같은 작업 안에서 <c>RegularEmployeeCount</c> 는 서버에서 막고 있었다
+    /// (<c>SettingsService</c>) — <b>기준이 갈렸다</b>. 여기서 맞춘다.
+    ///
+    /// 한 주는 168시간(24×7)이 최대다. 그 이상은 입력 사고다.
+    /// 값을 잘라내지 않고 <c>null</c>(미정)로 돌린다 — 잘못된 숫자를 그럴듯하게
+    /// 고쳐 넣으면 사람이 틀린 줄 모른다(반자동 원칙).
+    /// </remarks>
+    private static decimal? NormalizeWeeklyHours(decimal? weeklyHours)
+        => weeklyHours is >= 0m and <= 168m ? weeklyHours : null;
 
     /// <summary>
     /// 작20260429 (사장님 결재): 연차 부여·사용 일수만 단독 저장 (사원관리 그리드용).

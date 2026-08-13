@@ -1,0 +1,499 @@
+@page "/hr/payroll"
+@namespace HitPan.Web.Pages.HrUi
+@attribute [Authorize]
+@using HitPan.Web.Models
+@using HitPan.Web.Services
+@inject PayrollService PayrollSvc
+@inject ISnackbar Snackbar
+@inject IDialogService DialogService
+
+<PageTitle>급여 관리</PageTitle>
+<PageHeader Title="급여 관리" Subtitle="금액을 직접 넣습니다. 계산하지 않습니다." />
+
+@* 🔴 사장님이 정한 방식(2026-08-13):
+     "급여는 자동계산하지 말고 수동으로 int값 직접 받아서 입력하는게 가장 깔끔함"
+     "각 고객사 니즈나 사정도 부합시킬 수 있고."
+   ⇒ 4대보험·소득세를 우리가 계산하지 않는다. 회사가 쓰던 방식(세무사·엑셀·공단 프로그램)
+      으로 낸 금액을 그대로 넣는다. 서버가 하는 계산은 줄의 합계뿐이다.
+
+   🔴 보호는 권한 계층이 한다("권한 계층분리로 급여를 관리해도 충분히 됨").
+      권한 없는 직원은 이 화면을 열어도 목록이 안 나오고 사유가 뜬다. *@
+
+<MudPaper Elevation="0" Class="pa-3 mb-3 hitpan-card">
+    <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap">
+        <MudNumericField T="int" Label="귀속 연도" @bind-Value="_year" Min="2000" Max="2100"
+                         Variant="Variant.Outlined" Margin="Margin.Dense" Style="max-width:130px" />
+        <MudNumericField T="int" Label="귀속 월" @bind-Value="_month" Min="1" Max="12"
+                         Variant="Variant.Outlined" Margin="Margin.Dense" Style="max-width:110px" />
+
+        <MudButton Variant="Variant.Filled" Color="Color.Primary"
+                   StartIcon="@Icons.Material.Filled.Search"
+                   Disabled="@_loading" OnClick="LoadAsync">조회</MudButton>
+
+        @* 🔴 급여를 만드는 것은 부모계정·담당자만이다(사장님 2026-08-13).
+             일반 직원에게는 이 단추를 보여주지 않는다 — 눌러도 서버가 403 을 주는데,
+             못 쓸 단추를 보여주는 것 자체가 "처음 보는 사람이 혼자 쓸 수 있냐" 에 걸린다.
+             ⚠️ 감추는 것은 차단이 아니다. 진짜 관문은 서버의 RequirePermission 이다. *@
+        @if (_canManage)
+        {
+            <MudButton Variant="Variant.Filled" Color="Color.Secondary"
+                       StartIcon="@Icons.Material.Filled.Add"
+                       Disabled="@_loading" OnClick="@(() => OpenEditorAsync(null))">급여 등록</MudButton>
+        }
+
+        <MudSpacer />
+
+        @if (_slips is { Count: > 0 })
+        {
+            <MudText Typo="Typo.caption" Color="Color.Secondary">
+                @_slips.Count 명 · 실지급 합계 <b>@_slips.Sum(s => s.NetPayment).ToString("#,0")</b>원
+            </MudText>
+        }
+    </div>
+</MudPaper>
+
+@if (_loading)
+{
+    <MudProgressLinear Indeterminate="true" Color="Color.Primary" />
+}
+else if (_slips is null)
+{
+    @* 🔴 실패와 '0건' 을 구분한다. 급여가 있는데 없다고 보이면 담당자가 다시 만들어
+         이중 지급이 난다. *@
+    <MudAlert Severity="Severity.Error" Class="ma-2">
+        급여 명세를 불러오지 못했습니다. 권한이 없거나 연결에 문제가 있을 수 있습니다.
+        <MudButton Variant="Variant.Text" Color="Color.Inherit" OnClick="LoadAsync">다시 시도</MudButton>
+    </MudAlert>
+}
+else if (_slips.Count == 0)
+{
+    <MudAlert Severity="Severity.Info" Class="ma-2">
+        @if (_canManage)
+        {
+            @($"{_year}년 {_month}월분 급여 명세가 없습니다. [급여 등록] 으로 만드세요.")
+        }
+        else
+        {
+            @* 일반 직원에게 "만드세요" 라고 하면 안 된다 — 만들 수 없는 사람이다. *@
+            @($"{_year}년 {_month}월분 본인 급여 명세가 없습니다.")
+        }
+    </MudAlert>
+}
+else
+{
+    <MudTable Items="_slips" Dense="true" Hover="true" Striped="true" Elevation="0" Class="hitpan-card">
+        <HeaderContent>
+            <MudTh Style="width:140px">직원</MudTh>
+            <MudTh Style="width:120px">지급일</MudTh>
+            <MudTh Style="width:120px">총지급</MudTh>
+            <MudTh Style="width:120px">총공제</MudTh>
+            <MudTh Style="width:130px">실지급</MudTh>
+            <MudTh Style="width:100px">진행</MudTh>
+            <MudTh>비고</MudTh>
+            <MudTh Style="width:210px">처리</MudTh>
+        </HeaderContent>
+        <RowTemplate>
+            <MudTd DataLabel="직원">
+                @context.EmployeeName
+                @if (!string.IsNullOrWhiteSpace(context.DeptName))
+                {
+                    <MudText Typo="Typo.caption" Color="Color.Secondary">@context.DeptName</MudText>
+                }
+            </MudTd>
+            <MudTd DataLabel="지급일">
+                @(context.PayDate?.ToString("yyyy-MM-dd") ?? "-")
+            </MudTd>
+            <MudTd DataLabel="총지급">@context.TotalPayment.ToString("#,0")</MudTd>
+            <MudTd DataLabel="총공제">@context.TotalDeduct.ToString("#,0")</MudTd>
+            <MudTd DataLabel="실지급"><b>@context.NetPayment.ToString("#,0")</b></MudTd>
+            <MudTd DataLabel="진행">
+                <MudChip T="string" Size="Size.Small" Variant="Variant.Text"
+                         Color="@ToColor(context.StatusColor)">@context.StatusDisplay</MudChip>
+            </MudTd>
+            <MudTd DataLabel="비고">
+                @if (context.HasAbsence)
+                {
+                    @* 휴직이 걸린 달은 표시한다 — 담당자가 그냥 지나치면 안 된다. *@
+                    <MudText Typo="Typo.caption" Color="Color.Warning">휴직 있음</MudText>
+                }
+                @if (!string.IsNullOrWhiteSpace(context.Memo))
+                {
+                    <MudText Typo="Typo.body2">@context.Memo</MudText>
+                }
+            </MudTd>
+            <MudTd DataLabel="처리">
+                @* 🔴 처리 단추는 급여를 주는 사람(부모계정·담당자)만 본다.
+                     일반 직원은 자기 명세를 **보기만** 한다 — 자기 급여를 스스로 확정하거나
+                     지급 처리하면 안 된다. *@
+                @if (_canManage)
+                {
+                    <div style="display:flex;gap:4px;flex-wrap:wrap">
+                        @if (context.CanEdit)
+                        {
+                            <MudButton Size="Size.Small" Variant="Variant.Text"
+                                       OnClick="@(() => OpenEditorAsync(context))">수정</MudButton>
+                        }
+                        @if (context.CanConfirm)
+                        {
+                            <MudButton Size="Size.Small" Variant="Variant.Text" Color="Color.Primary"
+                                       OnClick="@(() => ConfirmAsync(context))">확정</MudButton>
+                        }
+                        @if (context.CanPay)
+                        {
+                            <MudButton Size="Size.Small" Variant="Variant.Filled" Color="Color.Success"
+                                       OnClick="@(() => PayAsync(context))">지급완료</MudButton>
+                        }
+                        @if (context.CanCancel)
+                        {
+                            <MudButton Size="Size.Small" Variant="Variant.Text" Color="Color.Default"
+                                       OnClick="@(() => CancelAsync(context))">취소</MudButton>
+                        }
+                    </div>
+                }
+                else
+                {
+                    <MudText Typo="Typo.caption" Color="Color.Secondary">본인 명세</MudText>
+                }
+            </MudTd>
+        </RowTemplate>
+    </MudTable>
+}
+
+@* ───────────── 등록·수정 ───────────── *@
+<MudDialog @bind-Visible="_editorOpen" Options="_dialogOptions">
+    <TitleContent>
+        <MudText Typo="Typo.h6">@(_isNew ? "급여 등록" : "급여 수정")</MudText>
+    </TitleContent>
+    <DialogContent>
+        <div style="display:flex;flex-direction:column;gap:12px;min-width:560px">
+            @if (_isNew)
+            {
+                @* @bind-Value 와 ValueChanged 를 같이 못 쓴다(Razor 가 둘 다 ValueChanged 로 편다).
+                   직원이 바뀌면 그 사람의 휴직 정보를 다시 봐야 하므로 Value + ValueChanged 를 손으로 짝짓는다. *@
+                <MudSelect T="string" Label="직원" Value="_edit.EmployeeId" Dense="true"
+                           Variant="Variant.Outlined" Margin="Margin.Dense" Required="true"
+                           ValueChanged="OnEmployeeChanged">
+                    @foreach (var c in _context)
+                    {
+                        <MudSelectItem T="string" Value="@c.EmployeeId">
+                            @c.EmployeeName @(c.HasSlip ? " (명세 있음)" : "")
+                        </MudSelectItem>
+                    }
+                </MudSelect>
+            }
+            else
+            {
+                <MudText Typo="Typo.subtitle2">@_editName — @_year 년 @_month 월분</MudText>
+            }
+
+            @if (_selectedContext is { IsOnAbsence: true })
+            {
+                @* 🔴 단계6 에서 사람이 정해 둔 금액을 보여준다. 자동으로 넣지 않는다 —
+                     넣을지 말지는 담당자가 정한다(반자동). *@
+                <MudAlert Severity="Severity.Warning" Dense="true">
+                    <MudText Typo="Typo.body2">
+                        이 달에 휴직이 있습니다
+                        (@_selectedContext.AbsenceStart?.ToString("yyyy-MM-dd") ~
+                         @_selectedContext.AbsenceEnd?.ToString("yyyy-MM-dd"))@(string.IsNullOrWhiteSpace(_selectedContext.AbsenceReason) ? "" : $" — {_selectedContext.AbsenceReason}").
+                        정해 둔 지급액은 <b>@_selectedContext.AbsencePayAmount?.ToString("#,0")원</b>입니다.
+                    </MudText>
+                    <MudButton Size="Size.Small" Variant="Variant.Text" Color="Color.Inherit"
+                               OnClick="ApplyAbsencePay">이 금액으로 지급 항목 추가</MudButton>
+                </MudAlert>
+            }
+
+            <MudDatePicker Label="지급일" @bind-Date="_payDate" Variant="Variant.Outlined"
+                           Margin="Margin.Dense" DateFormat="yyyy-MM-dd"
+                           HelperText="귀속월과 다를 수 있습니다(2월분을 3월에 주는 경우)." />
+
+            @* ── 지급 항목 ── *@
+            <MudText Typo="Typo.subtitle2" Class="mt-2">지급 항목</MudText>
+            @foreach (var line in _edit.Lines.Where(l => l.LineType == "payment").ToList())
+            {
+                <div style="display:flex;gap:8px;align-items:center">
+                    <MudTextField T="string" Label="항목" @bind-Value="line.ItemName"
+                                  Variant="Variant.Outlined" Margin="Margin.Dense"
+                                  Placeholder="기본급 · 식대 · 직책수당" />
+                    <MudNumericField T="decimal" Label="금액" @bind-Value="line.Amount" Min="0"
+                                     Variant="Variant.Outlined" Margin="Margin.Dense"
+                                     Format="N0" HideSpinButtons="true" Style="max-width:160px" />
+                    <MudCheckBox T="bool" @bind-Value="line.IsTaxable" Label="과세" Dense="true" />
+                    <MudIconButton Icon="@Icons.Material.Filled.Delete" Size="Size.Small"
+                                   OnClick="@(() => _edit.Lines.Remove(line))" />
+                </div>
+            }
+            <MudButton Size="Size.Small" Variant="Variant.Text" StartIcon="@Icons.Material.Filled.Add"
+                       OnClick="@(() => AddLine("payment"))">지급 항목 추가</MudButton>
+
+            @* ── 공제 항목 ── *@
+            <MudText Typo="Typo.subtitle2" Class="mt-2">공제 항목</MudText>
+            @foreach (var line in _edit.Lines.Where(l => l.LineType == "deduct").ToList())
+            {
+                <div style="display:flex;gap:8px;align-items:center">
+                    <MudTextField T="string" Label="항목" @bind-Value="line.ItemName"
+                                  Variant="Variant.Outlined" Margin="Margin.Dense"
+                                  Placeholder="국민연금 · 건강보험 · 소득세" />
+                    <MudNumericField T="decimal" Label="금액" @bind-Value="line.Amount" Min="0"
+                                     Variant="Variant.Outlined" Margin="Margin.Dense"
+                                     Format="N0" HideSpinButtons="true" Style="max-width:160px" />
+                    <MudIconButton Icon="@Icons.Material.Filled.Delete" Size="Size.Small"
+                                   OnClick="@(() => _edit.Lines.Remove(line))" />
+                </div>
+            }
+            <MudButton Size="Size.Small" Variant="Variant.Text" StartIcon="@Icons.Material.Filled.Add"
+                       OnClick="@(() => AddLine("deduct"))">공제 항목 추가</MudButton>
+
+            @* 합계는 서버가 다시 낸다. 여기는 담당자가 눈으로 보는 용도다. *@
+            <MudPaper Elevation="0" Class="pa-2 mt-2" Style="background:var(--mud-palette-background-grey)">
+                <MudText Typo="Typo.body2">
+                    총지급 <b>@_edit.Lines.Where(l => l.LineType == "payment").Sum(l => l.Amount).ToString("#,0")</b>원
+                    · 총공제 <b>@_edit.Lines.Where(l => l.LineType == "deduct").Sum(l => l.Amount).ToString("#,0")</b>원
+                    · 실지급 <b>@((_edit.Lines.Where(l => l.LineType == "payment").Sum(l => l.Amount)
+                                 - _edit.Lines.Where(l => l.LineType == "deduct").Sum(l => l.Amount)).ToString("#,0"))</b>원
+                </MudText>
+            </MudPaper>
+
+            <MudTextField T="string" Label="비고" @bind-Value="_edit.Memo" Lines="2"
+                          Variant="Variant.Outlined" Margin="Margin.Dense" />
+        </div>
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="@(() => _editorOpen = false)">닫기</MudButton>
+        <MudButton Color="Color.Primary" Variant="Variant.Filled"
+                   Disabled="@_saving" OnClick="SaveAsync">저장</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    private List<PayrollSlipModel>? _slips;
+    private List<PayrollContextModel> _context = new();
+    private PayrollContextModel? _selectedContext;
+
+    private bool _loading;
+    private bool _saving;
+    private int _year = DateTime.Today.Year;
+    private int _month = DateTime.Today.Month;
+
+    /// <summary>
+    /// 급여를 <b>만들 수 있는 사람인가</b>(부모계정 또는 급여 담당자).
+    /// </summary>
+    /// <remarks>
+    /// 🔴 화면이 <b>스스로 판단하지 않는다.</b> 계정 유형을 여기서 다시 따지면
+    /// 서버 판정과 갈라질 수 있다(단계6 에서 실제로 갈렸다 — 정책은 account_type 을 보는데
+    /// 컨트롤러는 role 을 봤다).
+    ///
+    /// ⇒ <c>context</c>(전 직원 명단) 호출이 <b>되는지로 판정</b>한다.
+    ///   그 API 는 서버가 <c>RequirePermission</c> 으로 막으므로, 성공하면 곧 권한이 있는 것이다.
+    ///   <b>서버가 정답이고 화면은 그 결과를 따른다.</b>
+    /// </remarks>
+    private bool _canManage;
+
+    private bool _editorOpen;
+    private bool _isNew = true;
+    private string _editName = "";
+    private SavePayrollSlipModel _edit = new();
+    private DateTime? _payDate;
+
+    private readonly DialogOptions _dialogOptions = new()
+    {
+        MaxWidth = MaxWidth.Medium,
+        FullWidth = true,
+        CloseOnEscapeKey = true
+    };
+
+    protected override async Task OnInitializedAsync() => await LoadAsync();
+
+    private async Task LoadAsync()
+    {
+        _loading = true;
+        StateHasChanged();
+        try
+        {
+            _slips = await PayrollSvc.GetSlipsAsync(_year, _month);
+
+            // 🔴 서버가 막으면 null 이 온다 = 급여를 만들 권한이 없다 = 일반 직원이다.
+            //    화면이 계정 유형을 다시 따지지 않고 **서버 판정을 그대로 따른다.**
+            var ctx = await PayrollSvc.GetContextAsync(_year, _month);
+            _canManage = ctx is not null;
+            _context = ctx ?? new List<PayrollContextModel>();
+        }
+        finally
+        {
+            _loading = false;
+            StateHasChanged();
+        }
+    }
+
+    private async Task OpenEditorAsync(PayrollSlipModel? existing)
+    {
+        if (existing is null)
+        {
+            _isNew = true;
+            _editName = "";
+            _edit = new SavePayrollSlipModel
+            {
+                PayYear = _year,
+                PayMonth = _month,
+                EmployeeId = _context.FirstOrDefault(c => !c.HasSlip)?.EmployeeId
+                             ?? _context.FirstOrDefault()?.EmployeeId ?? ""
+            };
+            _payDate = null;
+            OnEmployeeChanged(_edit.EmployeeId);
+        }
+        else
+        {
+            // 항목까지 받아와야 고칠 수 있다. 목록의 것은 요약이다.
+            var full = await PayrollSvc.GetSlipAsync(existing.SlipId);
+            if (full is null)
+            {
+                Snackbar.Add("급여 명세를 불러오지 못했습니다.", Severity.Error);
+                return;
+            }
+
+            _isNew = false;
+            _editName = full.EmployeeName;
+            _edit = new SavePayrollSlipModel
+            {
+                SlipId = full.SlipId,
+                EmployeeId = full.EmployeeId,
+                PayYear = full.PayYear,
+                PayMonth = full.PayMonth,
+                PayDate = full.PayDate,
+                Memo = full.Memo,
+                Lines = full.Lines
+            };
+            _payDate = full.PayDate;
+            _selectedContext = _context.FirstOrDefault(c => c.EmployeeId == full.EmployeeId);
+        }
+
+        _editorOpen = true;
+    }
+
+    private void OnEmployeeChanged(string employeeId)
+    {
+        _edit.EmployeeId = employeeId;
+        _selectedContext = _context.FirstOrDefault(c => c.EmployeeId == employeeId);
+        StateHasChanged();
+    }
+
+    /// <summary>
+    /// 🔴 휴직 지급액을 <b>담당자가 눌렀을 때만</b> 넣는다.
+    /// 자동으로 넣으면 담당자가 확인 없이 지나친다(반자동 원칙).
+    /// </summary>
+    private void ApplyAbsencePay()
+    {
+        if (_selectedContext?.AbsencePayAmount is not { } amount) return;
+
+        _edit.Lines.Add(new PayrollSlipLineModel
+        {
+            LineType = "payment",
+            ItemName = "휴직 중 지급액",
+            Amount = amount,
+            IsTaxable = true
+        });
+
+        Snackbar.Add("휴직 지급액을 항목으로 넣었습니다. 금액은 고칠 수 있습니다.", Severity.Info);
+    }
+
+    private void AddLine(string lineType)
+        => _edit.Lines.Add(new PayrollSlipLineModel { LineType = lineType, IsTaxable = lineType == "payment" });
+
+    private async Task SaveAsync()
+    {
+        if (string.IsNullOrWhiteSpace(_edit.EmployeeId))
+        {
+            Snackbar.Add("직원을 선택해주세요.", Severity.Warning);
+            return;
+        }
+
+        if (_edit.Lines.Count == 0)
+        {
+            Snackbar.Add("지급 항목을 하나 이상 넣어주세요.", Severity.Warning);
+            return;
+        }
+
+        if (_edit.Lines.Any(l => string.IsNullOrWhiteSpace(l.ItemName)))
+        {
+            Snackbar.Add("항목 이름이 빈 줄이 있습니다.", Severity.Warning);
+            return;
+        }
+
+        _edit.PayDate = _payDate;
+
+        _saving = true;
+        try
+        {
+            var (ok, _, message) = await PayrollSvc.SaveSlipAsync(_edit);
+
+            if (!ok)
+            {
+                Snackbar.Add(message ?? "저장하지 못했습니다.", Severity.Error);
+                return;
+            }
+
+            _editorOpen = false;
+            Snackbar.Add("저장했습니다.", Severity.Success);
+            await LoadAsync();
+        }
+        finally
+        {
+            _saving = false;
+        }
+    }
+
+    private async Task ConfirmAsync(PayrollSlipModel item)
+    {
+        var confirmed = await DialogService.ShowMessageBoxAsync("급여 확정",
+            $"{item.EmployeeName} 님의 {item.PeriodDisplay} 급여를 확정합니까? "
+            + $"실지급 {item.NetPayment:#,0}원. 확정하면 고칠 수 없습니다.",
+            yesText: "확정", cancelText: "취소");
+
+        if (confirmed != true) return;
+
+        var (ok, message) = await PayrollSvc.ConfirmSlipAsync(item.SlipId);
+        Snackbar.Add(ok ? "확정했습니다." : message ?? "확정하지 못했습니다.",
+            ok ? Severity.Success : Severity.Error);
+
+        if (ok) await LoadAsync();
+    }
+
+    private async Task PayAsync(PayrollSlipModel item)
+    {
+        var confirmed = await DialogService.ShowMessageBoxAsync("지급 완료",
+            $"{item.EmployeeName} 님의 급여를 오늘({DateTime.Today:yyyy-MM-dd}) 자로 지급 처리합니까?",
+            yesText: "지급 처리", cancelText: "취소");
+
+        if (confirmed != true) return;
+
+        var (ok, message) = await PayrollSvc.MarkPaidAsync(item.SlipId, DateTime.Today);
+        Snackbar.Add(ok ? "지급 처리했습니다." : message ?? "지급 처리하지 못했습니다.",
+            ok ? Severity.Success : Severity.Error);
+
+        if (ok) await LoadAsync();
+    }
+
+    private async Task CancelAsync(PayrollSlipModel item)
+    {
+        var confirmed = await DialogService.ShowMessageBoxAsync("급여 취소",
+            $"{item.EmployeeName} 님의 {item.PeriodDisplay} 급여 명세를 취소합니까?",
+            yesText: "취소하기", cancelText: "돌아가기");
+
+        if (confirmed != true) return;
+
+        var (ok, message) = await PayrollSvc.CancelSlipAsync(item.SlipId);
+        Snackbar.Add(ok ? "취소했습니다." : message ?? "취소하지 못했습니다.",
+            ok ? Severity.Success : Severity.Error);
+
+        if (ok) await LoadAsync();
+    }
+
+    private static Color ToColor(string name) => name switch
+    {
+        "Warning" => Color.Warning,
+        "Info" => Color.Info,
+        "Success" => Color.Success,
+        "Error" => Color.Error,
+        "Primary" => Color.Primary,
+        _ => Color.Default,
+    };
+}

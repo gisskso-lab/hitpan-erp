@@ -1,0 +1,182 @@
+@using HitPan.Web.Models
+@using HitPan.Web.Services
+@inject ChatService Chat
+@inject DepartmentService Departments
+@inject ISnackbar Snackbar
+
+@* ═══════════════════════════════════════════════════════════════
+   새 대화 — 3갈래를 한 화면에서 고른다. 작(2026-08-13) 단계9.
+
+   🔴 사장님: "단체대화, 부서별 대화, 1:1대화 모두 가능해야함"
+   🔴 사장님: "부서가 당연히 0건이지. 부서는 고객사가 설정할 일"
+      ⇒ 부서 0건이면 부서방만 안내가 뜬다. 1:1·단체는 그대로 된다.
+
+   "이 화면, 처음 보는 사람이 혼자 쓸 수 있냐?" — 세 갈래를 한 자리에서 고른다.
+   ═══════════════════════════════════════════════════════════════ *@
+
+<MudDialog>
+    <DialogContent>
+        <MudRadioGroup T="string" @bind-Value="_roomType" Class="mb-4">
+            <MudRadio T="string" Value="@("direct")">1:1 대화</MudRadio>
+            <MudRadio T="string" Value="@("dept")">부서 대화</MudRadio>
+            <MudRadio T="string" Value="@("group")">단체 대화</MudRadio>
+        </MudRadioGroup>
+
+        @if (_loading)
+        {
+            <MudProgressLinear Indeterminate="true" Color="Color.Primary" />
+        }
+        else
+        {
+            @if (_roomType == "dept")
+            {
+                @if (_departments.Count == 0)
+                {
+                    @* 🔴 결함이 아니다 — 고객사가 부서를 아직 안 만든 것이다. *@
+                    <MudAlert Severity="Severity.Info" Dense="true">
+                        아직 등록된 부서가 없습니다.
+                        <b>설정 → 부서 관리</b>에서 부서를 먼저 만들어 주세요.
+                        <br />
+                        <MudText Typo="Typo.caption">
+                            1:1 대화와 단체 대화는 지금도 하실 수 있습니다.
+                        </MudText>
+                    </MudAlert>
+                }
+                else
+                {
+                    <MudSelect T="string" @bind-Value="_deptId" Label="부서" Variant="Variant.Outlined"
+                               Margin="Margin.Dense">
+                        @foreach (var dept in _departments)
+                        {
+                            <MudSelectItem T="string" Value="@dept.DeptId">@dept.DeptName</MudSelectItem>
+                        }
+                    </MudSelect>
+                    <MudText Typo="Typo.caption" Color="Color.Secondary" Class="mt-2">
+                        그 부서 직원 중 <b>계정이 있는 분</b>이 대화방에 들어갑니다.
+                    </MudText>
+                }
+            }
+            else
+            {
+                @if (_roomType == "group")
+                {
+                    <MudTextField @bind-Value="_roomName" Label="대화방 이름"
+                                  Variant="Variant.Outlined" Margin="Margin.Dense" Class="mb-3" />
+                }
+
+                @if (_employees.Count == 0)
+                {
+                    <MudAlert Severity="Severity.Info" Dense="true">
+                        대화할 수 있는 직원이 없습니다.
+                        메신저는 <b>계정이 있는 직원</b>만 쓸 수 있습니다.
+                    </MudAlert>
+                }
+                else
+                {
+                    <MudText Typo="Typo.body2" Class="mb-2">
+                        @(_roomType == "direct" ? "대화 상대 한 명을 고르세요." : "함께 대화할 직원을 고르세요.")
+                    </MudText>
+
+                    <div style="max-height:280px; overflow-y:auto;">
+                        @foreach (var emp in _employees)
+                        {
+                            <div class="d-flex align-center" style="gap:8px;">
+                                <MudCheckBox T="bool"
+                                             Value="@_selected.Contains(emp.EmployeeId)"
+                                             ValueChanged="@(v => ToggleEmployee(emp.EmployeeId, v))"
+                                             Dense="true" />
+                                <MudText Typo="Typo.body2">
+                                    @emp.EmpName
+                                    @if (!string.IsNullOrWhiteSpace(emp.DeptName))
+                                    {
+                                        <MudText Typo="Typo.caption" Color="Color.Secondary" Class="ml-1">
+                                            @emp.DeptName @emp.Position
+                                        </MudText>
+                                    }
+                                </MudText>
+                            </div>
+                        }
+                    </div>
+                }
+            }
+        }
+    </DialogContent>
+
+    <DialogActions>
+        <MudButton OnClick="Cancel">취소</MudButton>
+        <MudButton Variant="Variant.Filled" Color="Color.Primary"
+                   Disabled="@(_creating || !CanCreate())" OnClick="CreateAsync">
+            대화 시작
+        </MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private IMudDialogInstance MudDialog { get; set; } = default!;
+
+    private string _roomType = "direct";
+    private string? _roomName;
+    private string? _deptId;
+
+    private List<ChatEmployeeModel> _employees = new();
+    private List<DepartmentListItemModel> _departments = new();
+    private readonly HashSet<string> _selected = new();
+
+    private bool _loading = true;
+    private bool _creating;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var employees = await Chat.GetEmployeesAsync();
+        if (employees is not null) _employees = employees;
+
+        var departments = await Departments.GetListAsync();
+        // 쓰지 않는 부서는 대화방 대상이 아니다.
+        if (departments is not null) _departments = departments.Where(d => d.IsActive).ToList();
+
+        _loading = false;
+    }
+
+    private void ToggleEmployee(string employeeId, bool selected)
+    {
+        if (selected)
+        {
+            // 1:1 은 한 명만 — 새로 고르면 앞의 것을 지운다.
+            if (_roomType == "direct") _selected.Clear();
+            _selected.Add(employeeId);
+        }
+        else
+        {
+            _selected.Remove(employeeId);
+        }
+    }
+
+    private bool CanCreate() => _roomType switch
+    {
+        "dept"  => !string.IsNullOrEmpty(_deptId),
+        "direct" => _selected.Count == 1,
+        _       => _selected.Count >= 1
+    };
+
+    private async Task CreateAsync()
+    {
+        _creating = true;
+
+        var (roomId, error) = await Chat.CreateRoomAsync(new CreateChatRoomModel
+        {
+            RoomType = _roomType,
+            RoomName = _roomName,
+            DeptId = _deptId,
+            EmployeeIds = _selected.ToList()
+        });
+
+        _creating = false;
+
+        if (error is not null) { Snackbar.Add(error, Severity.Warning); return; }
+        if (string.IsNullOrEmpty(roomId)) { Snackbar.Add("대화방을 만들지 못했습니다.", Severity.Warning); return; }
+
+        MudDialog.Close(DialogResult.Ok(roomId));
+    }
+
+    private void Cancel() => MudDialog.Cancel();
+}
