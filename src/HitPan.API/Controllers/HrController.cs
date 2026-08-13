@@ -102,6 +102,17 @@ public class HrController : ControllerBase
         return Ok(await _svc.GetHrExpensesAsync(tid, employeeId, ct));
     }
 
+    /// <summary>
+    /// 경비 신청. 작(2026-08-13) 단계7 — <b>결재가 실제로 올라갔는지 사실대로 돌려준다.</b>
+    /// </summary>
+    /// <remarks>
+    /// 🔴 단계3 P0-1 교훈: 종전엔 무조건 <c>201 Created</c> 만 돌려줬다. 결재 설정이 꺼져 있으면
+    /// 결재 생성이 조용히 건너뛰는데, 화면은 "신청했습니다" 를 띄우고 직원은 올라간 줄 안다.
+    /// 그러면 문서는 <c>pending</c> 에 갇히고 결재함엔 안 뜬다 — <b>되는 척</b>이다.
+    ///
+    /// ⚠️ 결재가 안 올라가도 <b>신청 자체는 성공</b>이다(201 유지). 경비 행은 이미 저장됐고,
+    /// 결재를 안 쓰는 회사도 정상 운영이다. 다만 <b>그 사실을 감추지 않는다.</b>
+    /// </remarks>
     [HttpPost("expense-requests")]
     [RequirePermission("HR", "create")]
     public async Task<IActionResult> CreateHrExpense([FromBody] CreateHrExpenseRequest req, CancellationToken ct)
@@ -109,7 +120,21 @@ public class HrController : ControllerBase
         var tid = HttpContext.Items["TenantId"]?.ToString();
         var eid = HttpContext.Items["EmployeeId"]?.ToString();
         if (string.IsNullOrEmpty(tid) || string.IsNullOrEmpty(eid)) return Forbid();
-        var id = await _svc.CreateHrExpenseAsync(req, tid, eid, ct);
-        return Created($"/api/hr/expense-requests/{id}", new { id });
+
+        try
+        {
+            var id = await _svc.CreateHrExpenseAsync(req, tid, eid, ct);
+
+            var (approvalCreated, skipReason) = await _svc
+                .CheckHrExpenseApprovalAsync(tid, id, ct).ConfigureAwait(false);
+
+            return Created($"/api/hr/expense-requests/{id}",
+                new { id, approvalCreated, approvalSkipReason = skipReason });
+        }
+        catch (InvalidOperationException ex)
+        {
+            // "마감된 기간입니다" 같은 이유를 그대로 전한다.
+            return BadRequest(new { message = ex.Message });
+        }
     }
 }
