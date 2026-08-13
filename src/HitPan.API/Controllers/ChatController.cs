@@ -104,7 +104,12 @@ public sealed class ChatController : ControllerBase
         }
         catch (UnauthorizedAccessException ex)
         {
-            return Forbid(ex.Message);
+            // 🔴 봉합 (2026-08-14, 1.2.74 실사용 P0): 종전엔 Forbid(ex.Message) 였다.
+            //    ASP.NET Core 의 Forbid(string) 은 그 문자열을 **인증 스킴 이름**으로 받는다.
+            //    "이 대화를 볼 수 있는 권한이 없습니다." 라는 스킴은 없으므로 서버가 예외를 던졌고,
+            //    403 대신 400/500 이 나가 화면 아래 흰 띠(blazor-error-ui)가 떴다.
+            //    메신저는 상단바에 상주하므로 **모든 화면·모바일에서** 그 띠가 따라다녔다.
+            return StatusCode(StatusCodes.Status403Forbidden, new { message = ex.Message });
         }
     }
 
@@ -122,7 +127,12 @@ public sealed class ChatController : ControllerBase
         }
         catch (UnauthorizedAccessException ex)
         {
-            return Forbid(ex.Message);
+            // 🔴 봉합 (2026-08-14, 1.2.74 실사용 P0): 종전엔 Forbid(ex.Message) 였다.
+            //    ASP.NET Core 의 Forbid(string) 은 그 문자열을 **인증 스킴 이름**으로 받는다.
+            //    "이 대화를 볼 수 있는 권한이 없습니다." 라는 스킴은 없으므로 서버가 예외를 던졌고,
+            //    403 대신 400/500 이 나가 화면 아래 흰 띠(blazor-error-ui)가 떴다.
+            //    메신저는 상단바에 상주하므로 **모든 화면·모바일에서** 그 띠가 따라다녔다.
+            return StatusCode(StatusCodes.Status403Forbidden, new { message = ex.Message });
         }
         catch (InvalidOperationException ex)
         {
@@ -203,7 +213,12 @@ public sealed class ChatController : ControllerBase
         }
         catch (UnauthorizedAccessException ex)
         {
-            return Forbid(ex.Message);
+            // 🔴 봉합 (2026-08-14, 1.2.74 실사용 P0): 종전엔 Forbid(ex.Message) 였다.
+            //    ASP.NET Core 의 Forbid(string) 은 그 문자열을 **인증 스킴 이름**으로 받는다.
+            //    "이 대화를 볼 수 있는 권한이 없습니다." 라는 스킴은 없으므로 서버가 예외를 던졌고,
+            //    403 대신 400/500 이 나가 화면 아래 흰 띠(blazor-error-ui)가 떴다.
+            //    메신저는 상단바에 상주하므로 **모든 화면·모바일에서** 그 띠가 따라다녔다.
+            return StatusCode(StatusCodes.Status403Forbidden, new { message = ex.Message });
         }
         catch (InvalidOperationException ex)
         {
@@ -229,7 +244,12 @@ public sealed class ChatController : ControllerBase
         }
         catch (UnauthorizedAccessException ex)
         {
-            return Forbid(ex.Message);
+            // 🔴 봉합 (2026-08-14, 1.2.74 실사용 P0): 종전엔 Forbid(ex.Message) 였다.
+            //    ASP.NET Core 의 Forbid(string) 은 그 문자열을 **인증 스킴 이름**으로 받는다.
+            //    "이 대화를 볼 수 있는 권한이 없습니다." 라는 스킴은 없으므로 서버가 예외를 던졌고,
+            //    403 대신 400/500 이 나가 화면 아래 흰 띠(blazor-error-ui)가 떴다.
+            //    메신저는 상단바에 상주하므로 **모든 화면·모바일에서** 그 띠가 따라다녔다.
+            return StatusCode(StatusCodes.Status403Forbidden, new { message = ex.Message });
         }
     }
 

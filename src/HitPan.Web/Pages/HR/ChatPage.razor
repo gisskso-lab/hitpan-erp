@@ -1,8 +1,11 @@
 @page "/chat"
 @page "/chat/{RoomId}"
+@implements IDisposable
 @using HitPan.Web.Models
 @using HitPan.Web.Services
 @inject ChatService Chat
+@* 작(2026-08-14) 실시간 갱신 — 기존 알림 배관을 그대로 쓴다(새 Hub 없음). *@
+@inject NotificationClient Notify
 @inject NavigationManager Nav
 @inject ISnackbar Snackbar
 @inject IDialogService DialogService
@@ -260,7 +263,94 @@
     private bool _messagesFailed;
     private bool _sending;
 
-    protected override async Task OnInitializedAsync() => await LoadRoomsAsync();
+    // ─────────────────────────────────────────────────────────────
+    // 실시간 갱신 (작 2026-08-14)
+    //
+    // 🔴 사장님: "채팅이 너무 느림."
+    //
+    //  ■ 종전에 무엇이 문제였나
+    //    ① 이 화면에는 **실시간 갱신이 아예 없었다.** 상대가 보낸 말이
+    //       새로고침 전까지 안 보였다.
+    //    ② 화면 안 채팅창(ChatPopup)은 알림이 올 때마다 **API 를 두 번** 왕복했다 —
+    //       메시지 30개 전부 + 방 목록 전부를 다시 읽었다. 한 줄 보여주려고 전부 다시 읽었다.
+    //
+    //  ⇒ 새 말이 오면 **그 방의 새 메시지만** 가져와 뒤에 붙인다(카카오톡과 같은 방식).
+    //    방 목록은 미리보기·안읽음만 바뀌므로 **열려 있지 않은 방의 알림일 때만** 다시 읽는다.
+    // ─────────────────────────────────────────────────────────────
+
+    private bool _subscribed;
+
+    protected override async Task OnInitializedAsync()
+    {
+        Notify.OnNotification += OnChatNotified;
+        _subscribed = true;
+
+        await LoadRoomsAsync();
+    }
+
+    /// <summary>
+    /// 새 말이 왔다. <b>지금 보고 있는 방이면 그 말만 붙이고</b>, 아니면 목록만 새로 센다.
+    /// </summary>
+    /// <remarks>
+    /// 🔴 <c>async void</c> 를 쓰지 않는다 — 거기서 난 예외는 아무도 못 잡아
+    /// 화면 아래 흰 띠(blazor-error-ui)가 뜬다. 8/14 에 그 사고를 겪었다.
+    /// </remarks>
+    private void OnChatNotified(AppNotificationModel notification)
+    {
+        if (notification.Type is not ("chat_message" or "chat_approval")) return;
+
+        _ = InvokeAsync(async () =>
+        {
+            try
+            {
+                if (!string.IsNullOrEmpty(RoomId))
+                {
+                    await AppendNewMessagesAsync();
+                }
+
+                // 미리보기·안읽음 수는 방 목록에 있다. 가벼운 호출이라 같이 갱신한다.
+                var rooms = await Chat.GetRoomsAsync();
+                if (rooms is not null)
+                {
+                    _rooms = rooms;
+                    _currentRoom = _rooms.FirstOrDefault(r => r.RoomId == RoomId);
+                }
+
+                StateHasChanged();
+            }
+            catch (Exception ex)
+            {
+                // 갱신 실패로 화면을 죽이지 않는다(헌법 #15).
+                Console.Error.WriteLine($"[ChatPage] 실시간 갱신 실패: {ex.Message}");
+            }
+        });
+    }
+
+    /// <summary>
+    /// 🔴 <b>새로 온 것만</b> 붙인다. 30개를 통째로 다시 읽지 않는다 —
+    /// 그게 "채팅이 느림" 의 원인이었다.
+    /// </summary>
+    private async Task AppendNewMessagesAsync()
+    {
+        var latest = await Chat.GetMessagesAsync(RoomId!);
+        if (latest is null) return;
+
+        // 이미 화면에 있는 것은 건너뛴다(중복 표시 방지).
+        var known = _messages.Select(m => m.MessageId).ToHashSet(StringComparer.Ordinal);
+        var fresh = latest.Where(m => !known.Contains(m.MessageId)).ToList();
+
+        if (fresh.Count == 0) return;
+
+        _messages.AddRange(fresh);
+
+        // 보고 있는 방에 온 말은 읽은 것으로 친다(사장님: "상대방이 메신저 읽을시 읽음 처리").
+        await Chat.MarkReadAsync(RoomId!);
+    }
+
+    public void Dispose()
+    {
+        if (_subscribed) Notify.OnNotification -= OnChatNotified;
+    }
 
     protected override async Task OnParametersSetAsync()
     {

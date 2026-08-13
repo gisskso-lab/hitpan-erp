@@ -60,6 +60,36 @@ public partial class PermissionPage : ComponentBase
         ("USERS", "사용자관리")
     };
 
+    /// <summary>
+    /// 🔴 <b>서버가 실제로 강제하는 메뉴</b>. 작(2026-08-14, 1.2.74 실사용 P0).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// 사장님: <i>"권한설정으로 모든걸 풀었지만 ... 아무것도 못함."</i>
+    /// 실측하니 위 20개 중 <b>서버에 <c>[RequirePermission]</c> 이 붙은 것은 8개뿐</b>이고,
+    /// 나머지 12개는 <b>켜도 꺼도 서버 동작이 같았다</b> — 아무 데도 안 붙은 체크박스였다.
+    /// </para>
+    /// <para>
+    /// 🔴 <b>안 먹는 체크박스를 보여주는 것이 제일 나쁘다.</b> 사장님이 전부 켜 놓고
+    /// "다 풀었다" 고 여기신 것이 바로 이것 때문이다 — 되는 척의 한 형태다.
+    /// ⇒ 강제되지 않는 항목은 <b>화면에서 감춘다.</b> 목록에서 지우지는 않는다 —
+    /// 지우면 백엔드 <c>MenuList</c> 와 어긋나 CI 정합 검사가 깨진다(헌법 #12).
+    /// </para>
+    /// <para>
+    /// ⚠️ 이건 <b>임시 조치</b>다. 나머지 12개에 실제 권한 강제를 붙이는 것이 정답이고,
+    /// 그때 이 집합에 하나씩 옮겨 담는다(사장님 결재 2026-08-14 — 지금은 감추기).
+    /// </para>
+    /// </remarks>
+    private static readonly HashSet<string> EnforcedMenus = new(StringComparer.Ordinal)
+    {
+        "ACCOUNTING", "APPROVAL", "CERTIFICATE", "COLLECTION",
+        "HR", "MONTHLY_CLOSING", "PAYMENT", "USERS"
+    };
+
+    /// <summary>화면에 보여줄 메뉴 — 실제로 먹는 것만.</summary>
+    private static IEnumerable<(string Code, string Name)> VisibleMenus =>
+        ErpMenus.Where(m => EnforcedMenus.Contains(m.Code));
+
     // 현재 선택된 직원
     private UserPermissionModel? _selectedUser
         => _users.FirstOrDefault(u => u.UserId == _selectedUserId);
@@ -173,12 +203,17 @@ public partial class PermissionPage : ComponentBase
     /// 백엔드가 내려준 권한 중 템플릿에 없는 코드는 화면에서 사라지므로,
     /// 템플릿은 백엔드 MenuList 와 항상 같아야 한다.
     /// </summary>
+    /// <remarks>
+    /// 🔴 작(2026-08-14): <see cref="VisibleMenus"/> 만 돈다 — <b>서버가 실제로 강제하는 것만</b>
+    /// 보여준다. 안 먹는 체크박스를 보여주면 "다 풀었는데 안 된다" 가 된다(사장님 1.2.74 지적).
+    /// 이미 저장된 값은 <b>지우지 않는다</b> — 감추기만 한다. 나중에 강제를 붙이면 그대로 살아난다.
+    /// </remarks>
     private static void EnsureErpMenus(UserPermissionModel user)
     {
         var existing = user.Permissions.ToDictionary(p => p.MenuCode, StringComparer.OrdinalIgnoreCase);
         var normalized = new List<MenuPermissionModel>();
 
-        foreach (var (code, name) in ErpMenus)
+        foreach (var (code, name) in VisibleMenus)
         {
             if (existing.TryGetValue(code, out var found))
             {

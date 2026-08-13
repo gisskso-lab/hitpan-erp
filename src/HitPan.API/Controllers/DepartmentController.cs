@@ -25,6 +25,13 @@ public sealed class DepartmentController : ControllerBase
         _service = service;
     }
 
+    // 🔴 봉합 (2026-08-14, 1.2.74 실사용 P0): 조회는 직원에게 연다.
+    //    사장님: "부모계정으로 자식계정에게 권한설정으로 모든걸 풀었지만, 클라이언트 pc에서
+    //    첫 접속시 권한설정으로 막혀, 아무것도 못함."
+    //    클래스 레벨 TenantAdminOnly 가 조회까지 막고 있었는데, 부서 목록은
+    //    **메신저 부서방과 결재선**의 선행조건이라 직원도 읽어야 한다.
+    //    ⚠️ 만들기·고치기·지우기는 그대로 관리자 전용이다(클래스 정책 유지).
+    [Authorize(Policy = "TenantOnly")]
     [HttpGet]
     public async Task<IActionResult> GetList(CancellationToken ct)
     {
