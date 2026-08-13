@@ -128,7 +128,13 @@ else
 
     protected override async Task OnInitializedAsync()
     {
-        _items = await EmpSvc.GetListAsync();
+        // 🔴 작(2026-08-14): 여기는 **퇴사자까지 받아온다**(includeResigned: true).
+        //   사원관리(설정)는 기본이 재직자만이지만, 이 화면은 성격이 다르다 —
+        //   위 요약카드가 "퇴직" 수를 세고, 상태 필터에 "퇴직" 항목이 있다.
+        //   재직자만 받아오면 **퇴직 카드가 늘 0, 필터를 골라도 빈 표**가 되어
+        //   멀쩡하던 화면이 조용히 거짓말을 한다(검증팀 P1 적발).
+        //   거르는 일은 아래 _filtered 가 이미 하고 있다. 받아오는 쪽에서 또 거르면 두 번 거른다.
+        _items = await EmpSvc.GetListAsync(includeResigned: true);
         _loading = false;
     }
 
