@@ -299,6 +299,71 @@ public sealed class CompanyBootstrapProvisioner
                     transaction: tx, cancellationToken: ct));
             }
 
+            // ─────────────────────────────────────────────────────────────
+            // 노무 기준값 시드 (작 2026-08-13, 단계6 실측 P0)
+            // ─────────────────────────────────────────────────────────────
+            //
+            // 🔴 실측으로 잡은 결함이다. DB-96·DB-98 의 시드는
+            //      SELECT DISTINCT tenant_id FROM employees
+            //    로 회사를 고른다. 그런데 **신규 설치는 이 시점에 직원이 0명**이라
+            //    어느 회사에도 안 깔린다. 직급(DB-93)이 같은 이유로 안 깔렸던 것과 같은 자리다.
+            //
+            //    그대로 뒀으면 신규 고객사에서:
+            //      · 연차 계산이 15일이 아니라 **0일** 로 나오고(기준값이 없으면 0 — 폴백을 안 두므로)
+            //      · 휴직은 "기준이 정해져 있지 않습니다" 만 뜬다
+            //    둘 다 화면은 열리는데 값이 안 나오는, 고객이 열어봐야 아는 종류다.
+            //
+            // ⚠️ 여기 숫자는 **2026-08 시점의 법정 최소**다. 법이 바뀌면 관리자가
+            //    설정에서 **새 시행일로 행을 추가**한다(기존 행을 고치지 않는다 — 과거분이 틀어진다).
+            //    마이그 파일과 이 목록이 갈라지면 안 된다(게이트: AbsenceGuardTests).
+            var stdPolicies = new (string Key, decimal Value, string Unit, string From,
+                string Label, bool Statutory)[]
+            {
+                // 연차 (DB-96)
+                ("annual_leave_base_days", 15.0m, "day", "2018-05-29", "기본 연차 일수", true),
+                ("annual_leave_extra_per_years", 1.0m, "day", "2018-05-29", "가산 연차 일수", true),
+                ("annual_leave_extra_cycle_years", 2.0m, "count", "2018-05-29", "가산 주기(년)", true),
+                ("annual_leave_extra_start_years", 3.0m, "count", "2018-05-29", "가산 시작 근속(년)", true),
+                ("annual_leave_max_days", 25.0m, "day", "2018-05-29", "연차 상한(일)", true),
+                ("monthly_leave_days_under_1y", 1.0m, "day", "2018-05-29", "1년 미만 월차(일)", true),
+                ("small_business_threshold", 5.0m, "count", "2018-05-29", "소규모 사업장 기준(명)", true),
+                ("short_time_weekly_hours", 15.0m, "hour", "2018-05-29", "단시간 근로 기준(주 시간)", true),
+
+                // 휴직 (DB-98) — 육아휴직은 2025-02-23 에 12→18개월로 바뀌었다.
+                ("childcare_leave_max_months", 18.0m, "count", "2025-02-23", "육아휴직 최대 기간(개월)", true),
+                ("childcare_leave_split_count", 3.0m, "count", "2025-02-23", "육아휴직 분할 횟수", true),
+                ("maternity_leave_days", 90.0m, "day", "2018-05-29", "출산전후휴가(일)", true),
+                ("maternity_leave_days_multiple", 120.0m, "day", "2018-05-29", "출산전후휴가 다태아(일)", true),
+                ("family_care_leave_max_days", 90.0m, "day", "2020-01-01", "가족돌봄휴직 최대(일)", true),
+                ("family_care_leave_min_split_days", 30.0m, "day", "2020-01-01", "가족돌봄휴직 분할 최소(일)", true),
+                ("sick_leave_max_months", 6.0m, "count", "2018-05-29", "질병휴직 최대(개월)", false),
+                ("personal_leave_max_months", 12.0m, "count", "2018-05-29", "개인사정 휴직 최대(개월)", false),
+            };
+            foreach (var (key, value, unit, from, label, statutory) in stdPolicies)
+            {
+                await db.ExecuteAsync(new CommandDefinition(@"
+                    INSERT INTO labor_policy_settings
+                      (policy_id, tenant_id, policy_key, policy_value, value_unit,
+                       effective_from, label, is_statutory)
+                    SELECT @PolicyId, @TenantId, @Key, @Value, @Unit, @From, @Label, @Statutory
+                    WHERE NOT EXISTS (
+                        SELECT 1 FROM labor_policy_settings
+                        WHERE tenant_id = @TenantId AND policy_key = @Key AND effective_from = @From
+                    )",
+                    new
+                    {
+                        PolicyId = Guid.NewGuid().ToString(),
+                        TenantId = tenantId,
+                        Key = key,
+                        Value = value,
+                        Unit = unit,
+                        From = from,
+                        Label = label,
+                        Statutory = statutory ? 1 : 0
+                    },
+                    transaction: tx, cancellationToken: ct));
+            }
+
             // 표준 8계정 시드 (12차 ACCOUNTS-SEED P0) — AutoJournalHelper 상수와 1:1. NOT EXISTS 로 재실행·마이그 보호.
             var stdAccounts = new (string Code, string Name, string Type)[]
             {

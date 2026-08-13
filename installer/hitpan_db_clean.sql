@@ -1064,6 +1064,10 @@ CREATE TABLE `employees` (
   `bank_account` varchar(200) DEFAULT NULL,
   `base_salary` varchar(200) DEFAULT NULL,
   `is_active` tinyint(1) NOT NULL,
+  -- 작(2026-08-13) DB-99 — 사장님: "상태처리 : 재직 휴직 연차"
+  -- ⚠️ is_active(재직/퇴사)와 층이 다르다. 이 칸은 '재직 중 지금 어떤 상태냐' 다.
+  --    휴직자를 is_active=0 으로 두면 퇴사자와 구분이 안 되고, 1 로 두면 급여가 그대로 나간다.
+  `work_status` varchar(20) NOT NULL DEFAULT 'active' COMMENT 'active=재직 · absence=휴직 · leave=연차. DB-99',
   `created_at` datetime(6) NOT NULL,
   `created_by` varchar(36) DEFAULT NULL,
   `updated_at` datetime(6) NOT NULL,
@@ -1103,7 +1107,9 @@ CREATE TABLE `employees` (
   PRIMARY KEY (`employee_id`),
   UNIQUE KEY `uq_tenant_empno` (`tenant_id`,`emp_no`),
   KEY `idx_employees_resigned` (`tenant_id`,`is_resigned`),
-  KEY `idx_employees_dept` (`tenant_id`,`department`)
+  KEY `idx_employees_dept` (`tenant_id`,`department`),
+  -- 작(2026-08-13) DB-99 — "지금 누가 휴직인가" 를 조직도·급여·연차가 매번 묻는다.
+  KEY `idx_emp_work_status` (`tenant_id`,`work_status`)
   -- fk_employees_tenant 제거 (무결 봉합 2026-06-18): tenants 백오피스 계층 삭제 FK 제거. tenant_id 컬럼 보존
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
@@ -1474,6 +1480,56 @@ CREATE TABLE `annual_leave_grants` (
   KEY `idx_grant_emp` (`tenant_id`,`employee_id`,`grant_year`),
   KEY `idx_grant_status` (`tenant_id`,`status`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='연차 부여 이력 — 제안→수정→확정 3단과 근거를 남긴다. DB-97';
+/*!40101 SET character_set_client = @saved_cs_client */;
+
+--
+-- Table structure for table `employee_leave_of_absence`
+-- 작(2026-08-13) DB-98 — 휴직(육아·출산·병가 등 장기 부재). 사장님 지시 2026-08-13.
+--
+-- 🔴 휴가(`leave_requests`)와 왜 나눴나 — 실측 근거 두 가지다.
+--   ① `leave_requests.leave_days` 는 decimal(3,1) = 최대 99.9일.
+--      육아휴직 1년 6개월(548일)을 넣으면 MySQL 이 거부한다
+--      (실측: ERROR 1264 Out of range value for column 'leave_days').
+--   ② 휴가가 승인되면 LeaveBalanceHelper 가 annual_leave_used 를 더한다.
+--      휴직을 휴가로 올리면 연차 잔여가 마이너스가 되어 복직 후 연차를 못 쓴다.
+--
+-- 🔴 사장님(2026-08-13): "휴직도 수동으로!!!!" / "상태처리, 상태확인 정도로만".
+--    기간은 사람이 넣고, 기준을 넘겨도 막지 않고 알려만 준다.
+--    법정 기간은 '최소 보장' 이라 회사가 더 주는 것은 위법이 아니다.
+--
+
+DROP TABLE IF EXISTS `employee_leave_of_absence`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!40101 SET character_set_client = utf8mb4 */;
+CREATE TABLE `employee_leave_of_absence` (
+  `absence_id` varchar(36) NOT NULL,
+  `tenant_id` varchar(36) NOT NULL,
+  `employee_id` varchar(36) NOT NULL,
+  `absence_type` varchar(30) NOT NULL COMMENT 'childcare/maternity/family_care/sick/military/study/personal/other',
+  `absence_label` varchar(60) DEFAULT NULL COMMENT '회사가 부르는 이름',
+  `start_date` date NOT NULL,
+  `end_date` date NOT NULL,
+  `actual_return_date` date DEFAULT NULL COMMENT '실제 복직일 — 예정과 다를 수 있어 따로 남긴다',
+  `status` varchar(20) NOT NULL DEFAULT 'draft' COMMENT 'draft/pending/approved/active/returned/rejected/cancelled',
+  `reason` varchar(500) DEFAULT NULL,
+  `exceeds_standard` tinyint(1) NOT NULL DEFAULT 0 COMMENT '1=회사·법정 기준을 넘김',
+  `exceed_reason` varchar(300) DEFAULT NULL COMMENT '넘겼는데 왜 승인했나',
+  `calc_basis` varchar(500) DEFAULT NULL COMMENT '판정 근거를 글로 남긴다',
+  `pay_type` varchar(20) NOT NULL DEFAULT 'unpaid' COMMENT 'unpaid/paid/partial (표기용. 정본은 pay_amount)',
+  `pay_amount` decimal(15,2) NOT NULL DEFAULT 0.00 COMMENT '휴직 중 지급 금액. 사람이 직접 넣는다. 0=무급. DB-99',
+  `pay_note` varchar(200) DEFAULT NULL COMMENT '급여 메모. DB-99',
+  `approval_id` varchar(36) DEFAULT NULL,
+  `approved_by` varchar(36) DEFAULT NULL,
+  `approved_at` datetime(6) DEFAULT NULL,
+  `reject_reason` varchar(500) DEFAULT NULL COMMENT '폭 500 — 단계3 P0-2(ERROR 1406) 재발 방지',
+  `created_by` varchar(36) DEFAULT NULL,
+  `created_at` datetime(6) NOT NULL DEFAULT current_timestamp(6),
+  `updated_at` datetime(6) NOT NULL DEFAULT current_timestamp(6) ON UPDATE current_timestamp(6),
+  PRIMARY KEY (`absence_id`),
+  KEY `idx_absence_tenant_emp` (`tenant_id`,`employee_id`,`start_date`),
+  KEY `idx_absence_status` (`tenant_id`,`status`),
+  KEY `idx_absence_period` (`tenant_id`,`status`,`start_date`,`end_date`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='휴직 — 기간이 있는 부재. 휴가와 다르다. DB-98';
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -3192,7 +3248,7 @@ INSERT INTO `schema_migrations` (`migration_id`, `app_version`, `success`) VALUE
 ('DB-74','clean-ddl',1),('DB-75','clean-ddl',1),('DB-76','clean-ddl',1),('DB-77','clean-ddl',1),
 ('DB-78','clean-ddl',1),('DB-79','clean-ddl',1),('DB-80','clean-ddl',1),('DB-81','clean-ddl',1),
 ('DB-82','clean-ddl',1),('DB-83','clean-ddl',1),('DB-84','clean-ddl',1),('DB-85','clean-ddl',1),
-('DB-86','clean-ddl',1),('DB-87','clean-ddl',1),('DB-88','clean-ddl',1),('DB-89','clean-ddl',1),('DB-90','clean-ddl',1),('DB-91','clean-ddl',1),('DB-92','clean-ddl',1),('DB-93','clean-ddl',1),('DB-94','clean-ddl',1),('DB-95','clean-ddl',1),('DB-96','clean-ddl',1),('DB-97','clean-ddl',1);
+('DB-86','clean-ddl',1),('DB-87','clean-ddl',1),('DB-88','clean-ddl',1),('DB-89','clean-ddl',1),('DB-90','clean-ddl',1),('DB-91','clean-ddl',1),('DB-92','clean-ddl',1),('DB-93','clean-ddl',1),('DB-94','clean-ddl',1),('DB-95','clean-ddl',1),('DB-96','clean-ddl',1),('DB-97','clean-ddl',1),('DB-98','clean-ddl',1),('DB-99','clean-ddl',1);
 
 --
 -- Table structure for table `service_tickets`
