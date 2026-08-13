@@ -18,4 +18,14 @@ public interface IHrService
     // HR 경비신청
     Task<List<HrExpenseRequestDto>> GetHrExpensesAsync(string tenantId, string? employeeId, CancellationToken ct = default);
     Task<string> CreateHrExpenseAsync(CreateHrExpenseRequest req, string tenantId, string employeeId, CancellationToken ct = default);
+
+    /// <summary>
+    /// 이 경비 신청이 <b>실제로 결재에 올라갔는지</b> 본다. 작(2026-08-13) 단계7.
+    /// </summary>
+    /// <remarks>
+    /// 🔴 단계3 P0-1 교훈 — 결재 설정이 꺼져 있으면 결재 생성이 <b>조용히 건너뛴다</b>.
+    /// 화면이 "신청했습니다" 만 띄우면 직원은 올라간 줄 알고 문서는 갇힌다.
+    /// </remarks>
+    Task<(bool Created, string? SkipReason)> CheckHrExpenseApprovalAsync(
+        string tenantId, string requestId, CancellationToken ct = default);
 }
