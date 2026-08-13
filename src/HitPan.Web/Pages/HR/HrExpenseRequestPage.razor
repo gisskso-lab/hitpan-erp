@@ -1,4 +1,9 @@
 @page "/hr/expense-request"
+@* 작(2026-08-13) 메뉴 간소화 — [경비 현황](/hr/expense-status)을 여기로 합쳤다.
+   두 화면은 같은 GetHrExpensesAsync 를 읽고 표 6컬럼이 같았다. 현황에만 있던
+   건수·금액 요약카드 4개를 아래로 옮겨 왔으므로 기능은 하나도 안 버렸다.
+   🔴 주소는 살려 둔다 — 메신저 문서 링크가 /hr/expense-status 로 들어온다(ChatPopup.razor:354). *@
+@page "/hr/expense-status"
 @namespace HitPan.Web.Pages.HrUi
 @attribute [Authorize]
 @using HitPan.Web.Models
@@ -6,10 +11,39 @@
 @inject HrClientService HrSvc
 @inject ISnackbar Snackbar
 
-<PageTitle>경비 신청</PageTitle>
+<PageTitle>경비</PageTitle>
 <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
-    <MudText Typo="Typo.h6">경비 신청 (지출결의서)</MudText>
+    <MudText Typo="Typo.h6">경비 (지출결의서)</MudText>
 </div>
+
+@* 요약 — 옛 [경비 현황]에 있던 카드 4개. 신청하러 들어온 사람도
+   내 경비가 지금 어디까지 왔는지 같은 화면에서 본다. *@
+<MudGrid Spacing="2" Class="mb-3">
+    <MudItem xs="6" md="3">
+        <MudPaper Elevation="0" Class="pa-3 hitpan-card text-center">
+            <MudText Typo="Typo.caption" Color="Color.Secondary">전체</MudText>
+            <MudText Typo="Typo.h6">@_items.Count 건</MudText>
+        </MudPaper>
+    </MudItem>
+    <MudItem xs="6" md="3">
+        <MudPaper Elevation="0" Class="pa-3 hitpan-card text-center">
+            <MudText Typo="Typo.caption" Color="Color.Secondary">대기</MudText>
+            <MudText Typo="Typo.h6" Color="Color.Warning">@_pendingCount 건</MudText>
+        </MudPaper>
+    </MudItem>
+    <MudItem xs="6" md="3">
+        <MudPaper Elevation="0" Class="pa-3 hitpan-card text-center">
+            <MudText Typo="Typo.caption" Color="Color.Secondary">승인</MudText>
+            <MudText Typo="Typo.h6" Color="Color.Success">@_approvedCount 건</MudText>
+        </MudPaper>
+    </MudItem>
+    <MudItem xs="6" md="3">
+        <MudPaper Elevation="0" Class="pa-3 hitpan-card text-center">
+            <MudText Typo="Typo.caption" Color="Color.Secondary">총 금액</MudText>
+            <MudText Typo="Typo.h6">@_totalAmount.ToString("N0")원</MudText>
+        </MudPaper>
+    </MudItem>
+</MudGrid>
 
 <MudPaper Elevation="0" Class="pa-4 mb-3 hitpan-card">
     <MudGrid Spacing="2">
@@ -53,7 +87,39 @@
     private CreateHrExpenseModel _edit = new();
     private DateTime? _editDate = DateTime.Today;
 
-    protected override async Task OnInitializedAsync() { _items = await HrSvc.GetHrExpensesAsync(); }
+    // 옛 [경비 현황] 요약카드 수치
+    private int _pendingCount;
+    private int _approvedCount;
+    private decimal _totalAmount;
+
+    protected override async Task OnInitializedAsync() => await LoadAsync();
+
+    /// <summary>
+    /// 목록을 불러오고 요약 수치를 다시 센다.
+    /// </summary>
+    /// <remarks>
+    /// 🔴 합치며 옛 [경비 현황]의 catch 를 가져왔다(헌법 #15). 종전 신청 화면은
+    /// 실패하면 그대로 터졌고, 현황 화면만 빈 목록으로 받아냈다. 합친 화면이
+    /// 둘 중 <b>약한 쪽</b>을 물려받으면 합치면서 화면이 더 잘 죽는 꼴이 된다.
+    /// </remarks>
+    private async Task LoadAsync()
+    {
+        try
+        {
+            _items = await HrSvc.GetHrExpensesAsync();
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine($"[HrExpenseRequestPage] {ex.GetType().Name}: {ex.Message}");
+            _items = new();
+        }
+        finally
+        {
+            _pendingCount = _items.Count(x => x.Status == "pending");
+            _approvedCount = _items.Count(x => x.Status == "approved");
+            _totalAmount = _items.Sum(x => x.Amount);
+        }
+    }
 
     /// <summary>
     /// 경비 신청. 작(2026-08-13) 단계7 — <b>결재가 올라갔는지 사실대로 알린다.</b>
@@ -91,6 +157,7 @@
 
         _edit = new();
         _editDate = DateTime.Today;
-        _items = await HrSvc.GetHrExpensesAsync();
+        // 🔴 LoadAsync 로 부른다 — 목록만 새로 받으면 위 요약카드가 옛 숫자로 남는다.
+        await LoadAsync();
     }
 }

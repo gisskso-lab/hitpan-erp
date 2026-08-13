@@ -1,13 +1,19 @@
 @page "/hr/attendance"
+@* 작(2026-08-13) 메뉴 간소화 — [근태 달력](/hr/attendance-calendar)을 여기로 합쳤다.
+   두 화면은 같은 GetAttendanceAsync 를 읽고 컬럼 7개가 글자까지 같았다. 다른 것은
+   기본 기간 하나뿐이라(이번 달 1일~오늘 vs 최근 7일) 아래 기간 버튼으로 흡수했다.
+   🔴 주소는 살려 둔다 — 즐겨찾기·직접 입력으로 들어오는 사람에게 404 를 주지 않는다(헌법 #1). *@
+@page "/hr/attendance-calendar"
 @namespace HitPan.Web.Pages.HrUi
 @attribute [Authorize]
 @using HitPan.Web.Models
 @using HitPan.Web.Services
 @inject HrClientService HrSvc
 @inject ISnackbar Snackbar
+@inject NavigationManager Nav
 
 <PageTitle>근태 관리</PageTitle>
-<PageHeader Title="근태 관리" Subtitle="출근·퇴근 기록 및 이력">
+<PageHeader Title="근태 관리" Subtitle="출근·퇴근 기록 · 기간별 조회">
     <Actions>
         <MudButton Variant="Variant.Filled" Color="Color.Success" StartIcon="@Icons.Material.Filled.Login" OnClick="CheckInAsync">출근</MudButton>
         <MudButton Variant="Variant.Filled" Color="Color.Error" StartIcon="@Icons.Material.Filled.Logout" OnClick="CheckOutAsync">퇴근</MudButton>
@@ -20,6 +26,16 @@
         <MudItem xs="6" md="2"><MudDatePicker Label="시작일" @bind-Date="_from" Variant="Variant.Outlined" Margin="Margin.Dense" Style="min-width:160px" /></MudItem>
         <MudItem xs="6" md="2"><MudDatePicker Label="종료일" @bind-Date="_to" Variant="Variant.Outlined" Margin="Margin.Dense" Style="min-width:160px" /></MudItem>
         <MudItem xs="12" md="2"><MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="LoadAsync">조회</MudButton></MudItem>
+        @* 기간 버튼 — 옛 [근태 달력]이 하던 '이번 달' 보기가 여기 들어있다.
+           날짜를 두 번 고르지 않고 한 번에 바꾸도록 한다(히트판 정신 — 묻지 않고 되게). *@
+        <MudItem xs="12" md="6" Class="d-flex justify-end gap-2">
+            <MudButton Variant="@PeriodVariant(Period.Week)" Color="Color.Default" Size="Size.Small"
+                       OnClick="@(() => ApplyPeriodAsync(Period.Week))">최근 7일</MudButton>
+            <MudButton Variant="@PeriodVariant(Period.ThisMonth)" Color="Color.Default" Size="Size.Small"
+                       OnClick="@(() => ApplyPeriodAsync(Period.ThisMonth))">이번 달</MudButton>
+            <MudButton Variant="@PeriodVariant(Period.LastMonth)" Color="Color.Default" Size="Size.Small"
+                       OnClick="@(() => ApplyPeriodAsync(Period.LastMonth))">지난 달</MudButton>
+        </MudItem>
     </MudGrid>
 </MudPaper>
 
@@ -52,8 +68,47 @@
     private DateTime? _from = DateTime.Today.AddDays(-7);
     private DateTime? _to = DateTime.Today;
 
-    protected override async Task OnInitializedAsync() => await LoadAsync();
+    private enum Period { Week, ThisMonth, LastMonth, Custom }
+    private Period _period = Period.Week;
+
+    /// <summary>
+    /// 옛 <b>[근태 달력]</b> 주소로 들어오면 그 화면이 보여주던 기간(이번 달)으로 맞춘다.
+    /// 합치기 전과 <b>같은 것이 보여야</b> 합친 것이지, 주소만 살리고 다른 걸 보여주면
+    /// 쓰던 사람에겐 화면이 없어진 것과 같다.
+    /// </summary>
+    protected override async Task OnInitializedAsync()
+    {
+        if (Nav.Uri.Contains("/hr/attendance-calendar", StringComparison.OrdinalIgnoreCase))
+        {
+            _period = Period.ThisMonth;
+            (_from, _to) = RangeOf(Period.ThisMonth);
+        }
+        await LoadAsync();
+    }
+
     private async Task LoadAsync() { _items = await HrSvc.GetAttendanceAsync(_from, _to); }
+
+    private async Task ApplyPeriodAsync(Period p)
+    {
+        _period = p;
+        (_from, _to) = RangeOf(p);
+        await LoadAsync();
+    }
+
+    private static (DateTime?, DateTime?) RangeOf(Period p)
+    {
+        var today = DateTime.Today;
+        return p switch
+        {
+            Period.Week => (today.AddDays(-7), today),
+            Period.ThisMonth => (new DateTime(today.Year, today.Month, 1), today),
+            Period.LastMonth => (new DateTime(today.Year, today.Month, 1).AddMonths(-1),
+                                 new DateTime(today.Year, today.Month, 1).AddDays(-1)),
+            _ => (today.AddDays(-7), today)
+        };
+    }
+
+    private Variant PeriodVariant(Period p) => _period == p ? Variant.Filled : Variant.Outlined;
 
     private async Task CheckInAsync()
     {
