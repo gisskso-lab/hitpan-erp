@@ -1317,6 +1317,10 @@ var
   InputFile, ExePath, Json: String;
   ResultCode: Integer;
   Launched: Boolean;
+  // 작(2026-08-15): seed-parent 출력 캡처 — 실패 이유를 설치 로그에 남긴다.
+  SeedLogFile: String;
+  SeedLines: TArrayOfString;
+  SeedIdx: Integer;
 begin
   Result := False;
   // ★ 봉합 20260707작2 (W1-6): 종료코드 전역 초기화 — 사전 단계 실패·Exec 실패 시 -1 유지.
@@ -1354,7 +1358,32 @@ begin
   // 오프라인 서브커맨드 실행 — 웹 호스트·터널·API 포트 불필요(DI 만 빌드 후 종료). db.conf 는 이미 기록됨.
   //   서브커맨드가 입력 파일을 읽는 즉시 스스로 소각한다(SeedParentCommand.TryDeleteFile). 아래에서 2차 소각.
   ResultCode := -1;
-  Launched := Exec(ExePath, 'seed-parent "' + InputFile + '"',
+
+  // 🔴 작(2026-08-15) — 실패 이유를 로그에 남긴다. 검증팀 반증 보고 권고.
+  //
+  //   ■ 무엇을 겪고서
+  //     8/15 백지 샌드박스 신규설치가 exit 5 로 실패했는데 **로그에 종료코드만 남고
+  //     이유가 없었다.** seed-parent 는 이유를 stderr 로 내는데(SeedParentCommand:208
+  //     "seed-parent: 예기치 못한 오류 — {메시지}") 종전 Exec 가 그것을 **버렸다.**
+  //     ⇒ 원인을 볼 수 없으니 추측만 반복했다(그날 PM 이 다섯 번 헛짚었다).
+  //        exit 5 는 7/15 에도 났던 증상이라 **한 달을 못 본 채로 지나왔다.**
+  //
+  //   ■ 그래서 cmd 로 감싸 출력을 파일로 받는다
+  //     같은 파일의 ExecLogged 와 같은 방식이다. 여기서 직접 감싸는 이유는
+  //     ExePath·작업디렉터리(app\api)를 그대로 지켜야 하기 때문이다.
+  //     ⚠️ 종료코드가 살아야 한다 — cmd /C 는 자식의 종료코드를 그대로 돌려주므로
+  //       exit 6·10 구분 판정(아래)이 종전과 똑같이 작동한다.
+  //
+  //   🔴 출력 파일은 읽은 즉시 소각한다. 예외 메시지에 입력값 일부가 섞일 수 있어
+  //     비밀번호 파일과 같은 기준으로 다룬다(평문 잔존 0).
+  SeedLogFile := ExpandConstant('{tmp}\seed-parent-out.txt');
+  DeleteFile(SeedLogFile);
+
+  //   ⚠️ 인용은 같은 파일 ExecLogged(:1523) 와 **똑같은 모양**으로 쓴다 —
+  //     바깥 따옴표로 한 번 더 감싸면 경로의 공백(Program Files)에서 어긋나
+  //     실행 자체가 실패한다. 검증된 형태를 벗어나지 않는다.
+  Launched := Exec(ExpandConstant('{cmd}'),
+       '/C "' + ExePath + '" seed-parent "' + InputFile + '" > "' + SeedLogFile + '" 2>&1',
        ExpandConstant('{app}\api'), SW_HIDE, ewWaitUntilTerminated, ResultCode);
 
   if Launched then begin
@@ -1364,6 +1393,21 @@ begin
     Log('[SeedParent] exit code = ' + IntToStr(ResultCode));
   end else
     Log('[SeedParent] 프로세스 실행 자체 실패(Exec=False).');
+
+  // 🔴 출력을 설치 로그로 옮긴다 — 성공했어도 남긴다(다음 사고 때 정상 모습과 대조할 근거).
+  if LoadStringsFromFile(SeedLogFile, SeedLines) then begin
+    for SeedIdx := 0 to GetArrayLength(SeedLines) - 1 do begin
+      if Trim(SeedLines[SeedIdx]) <> '' then
+        Log('[SeedParent][out] ' + SeedLines[SeedIdx]);
+    end;
+  end else
+    Log('[SeedParent][out] (출력 없음 — 프로세스가 아무것도 남기지 않았다)');
+
+  // 즉시 소각 — 비밀번호 입력파일과 같은 기준으로 다룬다.
+  if FileExists(SeedLogFile) then begin
+    SaveStringToFile(SeedLogFile, StringOfChar(' ', 512), False);
+    DeleteFile(SeedLogFile);
+  end;
 
   // 2차 소각 — 서브커맨드가 못 지웠을 경우 대비(비번 평문 잔존 차단). 공백 덮어쓰기 후 삭제.
   if FileExists(InputFile) then begin
