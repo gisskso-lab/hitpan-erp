@@ -1382,8 +1382,18 @@ begin
   //   ⚠️ 인용은 같은 파일 ExecLogged(:1523) 와 **똑같은 모양**으로 쓴다 —
   //     바깥 따옴표로 한 번 더 감싸면 경로의 공백(Program Files)에서 어긋나
   //     실행 자체가 실패한다. 검증된 형태를 벗어나지 않는다.
+  //   🔴 봉합(2026-08-15 재차) — 전체를 큰따옴표로 한 번 더 감싼다.
+  //     실측: 1.2.78 에서 exit 1 + 출력 0 이 났다. seed-parent 는 1 을 내는 경로가 없다
+  //     (0·2·3·4·5·6·10 뿐) ⇒ **프로그램이 실행조차 안 됐다**는 뜻이고, 1 은 cmd 가 낸 값이다.
+  //     원인: cmd /C 는 명령줄에 따옴표가 둘 이상이면 **첫 따옴표와 마지막 따옴표를 벗긴다.**
+  //       /C "C:\...\HitPan.API.exe" seed-parent "...json" > "...txt"
+  //          ↑ 벗겨짐                                        ↑ 벗겨짐
+  //       ⇒ 경로가 'C:\Program Files' 의 공백에서 잘려 실행 실패.
+  //     ⇒ 바깥을 한 겹 더 두르면 cmd 가 그 한 겹만 벗기고 안쪽 인용은 그대로 산다.
+  //     ⚠️ 앞선 주석에서 "ExecLogged 와 같은 모양" 이라 적었는데 그 판단이 틀렸다 —
+  //       ExecLogged 는 명령을 통째로 문자열로 받아 형태가 다르다.
   Launched := Exec(ExpandConstant('{cmd}'),
-       '/C "' + ExePath + '" seed-parent "' + InputFile + '" > "' + SeedLogFile + '" 2>&1',
+       '/C ""' + ExePath + '" seed-parent "' + InputFile + '" > "' + SeedLogFile + '" 2>&1"',
        ExpandConstant('{app}\api'), SW_HIDE, ewWaitUntilTerminated, ResultCode);
 
   if Launched then begin
