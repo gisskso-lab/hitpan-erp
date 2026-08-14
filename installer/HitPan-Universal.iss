@@ -2006,8 +2006,9 @@ begin
     Exec(ExpandConstant('{cmd}'),
          '/C icacls "' + ProbeCnfFile + '" /inheritance:r /grant:r "Administrators:F" /grant:r "SYSTEM:F"',
          '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
-    BatchContent.Add(Format('"!MYSQL!" --defaults-extra-file="%s" -h localhost %s < "%s" > nul 2> nul',
-      [ProbeCnfFile, G_DbName, ProbeSqlFile]));
+    // 🔴 인자 배열을 다음 줄로 내리지 않는다 — 줄 맨 앞의 '[' 를 Inno Setup 이
+    //   **섹션 태그로 읽어** 컴파일이 깨진다(실측: "Error on line 2010: Invalid section tag").
+    BatchContent.Add(Format('"!MYSQL!" --defaults-extra-file="%s" -h localhost %s < "%s" > nul 2> nul', [ProbeCnfFile, G_DbName, ProbeSqlFile]));
     BatchContent.Add('set "PROBE_RC=!errorlevel!"');
     BatchContent.Add('echo [chk] 접속 확인(db.conf 값 그대로) errorlevel=!PROBE_RC! >> "!DIAGLOG!"');
     BatchContent.Add('if !PROBE_RC! NEQ 0 (echo [오류] 업무용 계정으로 데이터베이스에 접속하지 못했습니다. & exit /b 1)');
