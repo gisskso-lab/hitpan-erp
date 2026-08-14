@@ -1681,6 +1681,10 @@ var
   ConfFile, BatchFile, BootstrapFile: String;
   KeysContent, BatchContent, BootstrapContent: TStringList;
   SeedOk: Boolean;
+  // 작(2026-08-15) 신규설치 DOA 봉합: DB 계정 SQL·접속확인 설정을 **설치 프로그램이 직접** 만든다.
+  //   배치 echo 로 만들면 지연확장(!) 때문에 비번이 변형된다 — 그것이 이번 진범이었다.
+  UserSqlFile, ProbeCnfFile, ProbeSqlFile: String;
+  UserSqlContent: TStringList;
   // 봉합 20260730작8 P0-1: cloudflared RUNNING 확인용(지역 변수 — 전역 오염 0).
   TunnelRunning: Boolean;
   TunnelTry: Integer;
@@ -1857,10 +1861,48 @@ begin
     //   ERP 가 ERROR 1045 로 못 붙는다. 통일했다고 믿는 CS 도 똑같이 막힌다.
     //   ⇒ CREATE 로 없으면 만들고, ALTER 로 있으면 맞춘다. 두 줄이 한 몸이다.
     //   (기존 고객이 업데이트로 이 설치본을 받는 순간 옛 랜덤 비번이 통일 비번으로 정리된다.)
-    BatchContent.Add(Format('"!MYSQL!" -u root -p%s -e "CREATE USER IF NOT EXISTS ''%s''@''localhost'' IDENTIFIED BY ''%s''; GRANT ALL ON %s.* TO ''%s''@''localhost''; FLUSH PRIVILEGES;"', [MariaRootPw, G_DbUser, BatEscape(G_DbPassword), G_DbName, G_DbUser]));
-    BatchContent.Add(Format('"!MYSQL!" -u root -p%s -e "ALTER USER ''%s''@''localhost'' IDENTIFIED BY ''%s''; FLUSH PRIVILEGES;"', [MariaRootPw, G_DbUser, BatEscape(G_DbPassword)]));
-    BatchContent.Add('echo [chk] ALTER USER(비번 통일) errorlevel=!errorlevel! >> "!DIAGLOG!"');
-    BatchContent.Add('echo [chk] CREATE DB/USER errorlevel=!errorlevel! >> "!DIAGLOG!"');
+    // 🔴🔴 작(2026-08-15) — 신규설치 DOA 진범 봉합. 사장님 백지 샌드박스 실측으로 확정.
+    //
+    //   ■ 무엇을 겪었나
+    //     설치가 "부모 계정 생성에 실패했습니다" 로 죽었다(seed-parent exit 5).
+    //     실측하니 스키마 138개는 정상, 계정도 정상, 권한도 정상인데
+    //     **그 계정으로 접속만 안 됐다**(ERROR 1045).
+    //     저장된 해시가 `HITPAN2026!` / `^^!` / `^!` / `!` 없음 **어느 것과도 안 맞았다** —
+    //     즉 아무도 모르는 제3의 값이 들어가 있었다.
+    //
+    //   ■ 진범 — 같은 비번을 두 경로가 **다르게** 쓰고 있었다
+    //     · db.conf  ← G_DbPassword            (원본 그대로)
+    //     · MariaDB  ← BatEscape(G_DbPassword) ('!' → '^^!' 로 변형)
+    //     배치의 지연확장(enabledelayedexpansion) 안에서 '^^!' 가 어떻게 풀리는지는
+    //     **인용 문맥마다 다르다.** 그래서 적힌 값과 실제 값이 갈렸다.
+    //     ⇒ ERP 는 db.conf 를 믿고 붙으니 영원히 ERROR 1045 다.
+    //
+    //   ■ 봉합 — 비번을 **배치 명령줄에 넣지 않는다**
+    //     SQL 을 파일로 써서 `mysql < 파일` 로 넘긴다. 파일 내용은 cmd 가 해석하지 않으므로
+    //     이스케이프가 **아예 개입하지 않는다.** 같은 파일의 스키마 import 가 쓰는 방식이다.
+    //     🔴 이스케이프 결과를 예측하려 들지 않는다 — 예측이 틀려서 난 사고다.
+    //     ⚠️ 파일에는 평문 비번이 들어가므로 ACL 로 잠그고, 쓰고 나면 즉시 소각한다
+    //       (db-setup.bat 자신과 같은 기준).
+    //   🔴 SQL 파일은 **설치 프로그램이 직접 만든다** — 배치의 echo 로 만들지 않는다.
+    //     배치는 `setlocal enabledelayedexpansion` 상태라 echo 안의 '!' 도 똑같이 먹힌다.
+    //     (db.conf 를 만드는 방식과 같다 — 그 파일은 이 사고가 없었다.)
+    UserSqlFile := ExpandConstant('{tmp}\hitpan_user.sql');
+    UserSqlContent := TStringList.Create;
+    try
+      UserSqlContent.Add(Format('CREATE USER IF NOT EXISTS ''%s''@''localhost'' IDENTIFIED BY ''%s'';', [G_DbUser, G_DbPassword]));
+      UserSqlContent.Add(Format('ALTER USER ''%s''@''localhost'' IDENTIFIED BY ''%s'';', [G_DbUser, G_DbPassword]));
+      UserSqlContent.Add(Format('GRANT ALL ON %s.* TO ''%s''@''localhost'';', [G_DbName, G_DbUser]));
+      UserSqlContent.Add('FLUSH PRIVILEGES;');
+      UserSqlContent.SaveToFile(UserSqlFile);
+    finally
+      UserSqlContent.Free;
+    end;
+    // 평문 비번 파일 — 즉시 ACL 잠금(Administrators·SYSTEM 만). db-setup.bat 과 같은 기준.
+    Exec(ExpandConstant('{cmd}'),
+         '/C icacls "' + UserSqlFile + '" /inheritance:r /grant:r "Administrators:F" /grant:r "SYSTEM:F"',
+         '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+    BatchContent.Add(Format('"!MYSQL!" -u root -p%s < "%s"', [MariaRootPw, UserSqlFile]));
+    BatchContent.Add('echo [chk] CREATE/ALTER USER(SQL 파일 경유) errorlevel=!errorlevel! >> "!DIAGLOG!"');
     // ★ 봉합 2026-06-18 (트리거 import 안전화): 새 MariaDB는 log_bin=ON + trust=0 기본일 수 있어
     //   UUID() 등 비결정 함수를 쓰는 트리거 8개 생성이 ERROR 1419로 실패 → 스키마 부분 import → 설치 실패.
     //   import 전 GLOBAL log_bin_trust_function_creators=1 로 트리거 생성을 허용(헌법 #20 끊김 방지).
@@ -1921,8 +1963,51 @@ begin
     //   db.conf에 CREATE USER와 동일한 G_DbPassword가 기록되어 ERP 첫 기동이 실제 접속을 검증한다.
     //   따라서 설치 시점 hitpan 접속 가드는 과잉이며 정상 설치를 막았다 → 차단 제거.
     //   단 접속 성패는 진단 로그에만 남겨 원인(명령줄 -p 비번 해석 차이) 추적은 계속 가능하게 둔다(차단 X).
-    BatchContent.Add(Format('"!MYSQL!" -u %s -p%s %s -e "SELECT 1" > nul 2> nul', [G_DbUser, BatEscape(G_DbPassword), G_DbName]));
-    BatchContent.Add('echo [chk] (참고) hitpan SELECT 1 errorlevel=!errorlevel! (설치 차단 안 함) >> "!DIAGLOG!"');
+    //
+    // 🔴🔴 작(2026-08-15) — 가드를 **되살린다.** 위 7/01 판단이 틀렸다.
+    //
+    //   ■ 그때 무엇을 놓쳤나
+    //     "이 가드만 실패해 유일하게 설치를 막는다 ⇒ 과잉" 이라고 판단했다.
+    //     그런데 **과잉이 아니라 진짜 결함을 정확히 잡고 있었다.**
+    //     원인까지 위 주석에 적혀 있다 — "명령줄 -p 비번 해석 차이".
+    //     알고도 원인을 고치는 대신 **경보기를 껐다.**
+    //
+    //   ■ 그래서 무슨 일이 벌어졌나 (8/15 백지 실측)
+    //     비번이 어긋난 채로 설치가 "성공" 하고, 그 다음 단계인 부모계정 생성이
+    //     ERROR 1045 로 죽어 **"시리얼·사업자번호·증표를 확인하세요"** 라는
+    //     엉뚱한 메시지가 떴다. 고객은 시리얼을 몇 번이고 다시 넣게 된다.
+    //     🔴 경보기를 껐더니 **불이 난 자리가 아니라 엉뚱한 곳에서 연기가 났다.**
+    //
+    //   ■ 이제 안전하다
+    //     위에서 비번을 SQL 파일 경유로 바꿔 두 경로(db.conf ↔ MariaDB)가 같아졌다.
+    //     여기 검사도 BatEscape 를 걷어내 **db.conf 에 적히는 값 그대로** 시험한다.
+    //     ⇒ 이 검사가 통과한다는 것은 **ERP 가 실제로 붙을 수 있다**는 뜻이다.
+    //       실패하면 그 자리에서 멈춰야 한다 — 헌법 #20("완료처럼 보이는 실패" 차단).
+    //
+    //   ⚠️ 비번을 명령줄에 두지 않기 위해 여기서도 SQL 파일을 쓴다.
+    //   🔴 비번을 명령줄(-p...)에 두지 않는다 — 거기 두면 '!' 가 지연확장에 다시 걸려
+    //     방금 고친 사고를 그대로 되풀이한다. mysql 설정파일에 담아 넘긴다.
+    //   설정파일도 **설치 프로그램이 직접 만든다**(배치 echo 는 '!' 가 먹힌다).
+    ProbeCnfFile := ExpandConstant('{tmp}\hitpan_probe.cnf');
+    ProbeSqlFile := ExpandConstant('{tmp}\hitpan_probe.sql');
+    UserSqlContent := TStringList.Create;
+    try
+      UserSqlContent.Add('[client]');
+      UserSqlContent.Add('user=' + G_DbUser);
+      UserSqlContent.Add('password=' + G_DbPassword);
+      UserSqlContent.SaveToFile(ProbeCnfFile);
+    finally
+      UserSqlContent.Free;
+    end;
+    SaveStringToFile(ProbeSqlFile, 'SELECT 1;', False);
+    Exec(ExpandConstant('{cmd}'),
+         '/C icacls "' + ProbeCnfFile + '" /inheritance:r /grant:r "Administrators:F" /grant:r "SYSTEM:F"',
+         '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+    BatchContent.Add(Format('"!MYSQL!" --defaults-extra-file="%s" -h localhost %s < "%s" > nul 2> nul',
+      [ProbeCnfFile, G_DbName, ProbeSqlFile]));
+    BatchContent.Add('set "PROBE_RC=!errorlevel!"');
+    BatchContent.Add('echo [chk] 접속 확인(db.conf 값 그대로) errorlevel=!PROBE_RC! >> "!DIAGLOG!"');
+    BatchContent.Add('if !PROBE_RC! NEQ 0 (echo [오류] 업무용 계정으로 데이터베이스에 접속하지 못했습니다. & exit /b 1)');
     BatchContent.Add('echo [chk] 배치 정상 종료 도달 (exit 0 예정) >> "!DIAGLOG!"');
     BatchContent.Add('del "!CNTF!" > nul 2> nul');
     BatchContent.SaveToFile(BatchFile);
@@ -1952,6 +2037,18 @@ begin
   SaveStringToFile(BatchFile, StringOfChar(' ', 1024), False);
   SaveStringToFile(BatchFile, StringOfChar(' ', 1024), False);
   DeleteFile(BatchFile);
+
+  // 🔴 작(2026-08-15): 비번이 든 보조 파일도 같은 기준으로 소각한다.
+  //   배치를 SQL·설정 파일 경유로 바꾸면서 생긴 것들이다(진범 봉합 참조).
+  if FileExists(UserSqlFile) then begin
+    SaveStringToFile(UserSqlFile, StringOfChar(' ', 512), False);
+    DeleteFile(UserSqlFile);
+  end;
+  if FileExists(ProbeCnfFile) then begin
+    SaveStringToFile(ProbeCnfFile, StringOfChar(' ', 512), False);
+    DeleteFile(ProbeCnfFile);
+  end;
+  DeleteFile(ProbeSqlFile);
 
   // 5-1. db.conf 영역 DB 정보 박음 (사고 #46 봉합 — TenantConfigReader 정합)
   //   사장님 결재 2026-06-12: 환경변수 영역 폐기 + db.conf 영역 직접 영역
