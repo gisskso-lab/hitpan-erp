@@ -1,5 +1,11 @@
 @page "/chat"
 @page "/chat/{RoomId}"
+@* 🔴 봉합 20260815작1 — 이 폴더(Pages/HR) 23개 중 20개가 HrUi 다. 어제(8/14) 만든 채팅 3종만
+   선언이 빠져 폴더 기본값(HitPan.Web.Pages.HR)으로 갈렸다.
+   그 결과 HrUi 에 있는 ChatWindowPage 가 <ChatPage /> 를 **못 찾았고**,
+   Blazor 는 모르는 태그를 오류 없이 HTML 로 흘려보내 팝업이 **빈 화면**이 됐다.
+   (빌드 0/0·콘솔 0건·시험 통과 전부 정상이라 조용히 숨었다 — 작업지시서 §3) *@
+@namespace HitPan.Web.Pages.HrUi
 @implements IDisposable
 @using HitPan.Web.Models
 @using HitPan.Web.Services

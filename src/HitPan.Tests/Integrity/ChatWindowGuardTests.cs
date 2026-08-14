@@ -98,6 +98,52 @@ public class ChatWindowGuardTests
     }
 
     /// <summary>
+    /// 🔴 팝업창이 부르는 채팅 컴포넌트들은 <b>같은 namespace 여야 한다.</b>
+    /// </summary>
+    /// <remarks>
+    /// ■ 무엇을 겪고서 (2026-08-15 백지 샌드박스 실측, 작업지시서 20260815작1)
+    ///   팝업창이 <b>빈 화면</b>이었다. 진범은 namespace 분열이었다 —
+    ///   <c>ChatWindowPage</c> 는 <c>HrUi</c> 인데 <c>ChatPage</c> 는 선언이 빠져
+    ///   폴더 기본값(<c>HitPan.Web.Pages.HR</c>)이었다. 서로 안 보인다.
+    ///
+    /// 🔴 <b>Blazor 는 모르는 태그를 오류 없이 HTML 로 흘려보낸다.</b>
+    ///   그래서 빌드 0/0 · 콘솔 0건 · 이 파일의 다른 시험까지 <b>전부 통과</b>하는데
+    ///   화면만 비었다. 위 <c>팝업창_화면은_메뉴없이_뜬다</c> 는 <c>"&lt;ChatPage"</c> 라는
+    ///   <b>글자만</b> 봐서 이 사고를 못 잡았다.
+    ///
+    /// ⇒ 글자가 아니라 <b>해석이 되는지</b>를 검사한다.
+    ///   ChatWindowPage 가 부르는 컴포넌트가 같은 namespace 이거나,
+    ///   그 namespace 를 <c>@using</c> 으로 들여왔는지 확인한다.
+    /// </remarks>
+    [Fact]
+    public void 팝업창이_부르는_채팅컴포넌트는_같은_namespace_다()
+    {
+        const string 기대 = "@namespace HitPan.Web.Pages.HrUi";
+
+        var window = ReadSource("src", "HitPan.Web", "Pages", "HR", "ChatWindowPage.razor");
+        Assert.Contains(기대, window);
+
+        // ChatWindowPage 가 태그로 부르는 것 + 그것이 다시 여는 대화상자까지.
+        //   하나라도 갈리면 그 자리에서 조용히 빈 화면이 된다.
+        string[] 부속 = { "ChatPage", "ChatNewRoomDialog", "ChatDocPickerDialog" };
+
+        foreach (var 이름 in 부속)
+        {
+            var 원본 = ReadSource("src", "HitPan.Web", "Pages", "HR", $"{이름}.razor");
+
+            // 같은 namespace 이거나, ChatWindowPage 가 @using 으로 들여왔거나 — 둘 중 하나면 보인다.
+            var 같은칸 = 원본.Contains(기대, StringComparison.Ordinal);
+            var 들여옴 = window.Contains("@using HitPan.Web.Pages.HR\n", StringComparison.Ordinal)
+                      || window.Contains("@using HitPan.Web.Pages.HR\r\n", StringComparison.Ordinal);
+
+            Assert.True(같은칸 || 들여옴,
+                $"{이름}.razor 가 ChatWindowPage 에서 안 보인다. " +
+                $"'{기대}' 를 넣거나 ChatWindowPage 에 @using 을 더해라. " +
+                "(Blazor 는 모르는 태그를 오류 없이 넘겨 화면만 조용히 빈다 — 20260815작1)");
+        }
+    }
+
+    /// <summary>
     /// 🔴 새 말이 오면 <b>새로 온 것만</b> 붙여야 한다.
     /// </summary>
     /// <remarks>
