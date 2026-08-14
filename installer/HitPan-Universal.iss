@@ -1992,7 +1992,10 @@ begin
     ProbeSqlFile := ExpandConstant('{tmp}\hitpan_probe.sql');
     UserSqlContent := TStringList.Create;
     try
-      UserSqlContent.Add('[client]');
+      // 🔴 '[client]' 를 한 덩어리로 쓰면 **Inno Setup 이 섹션 태그로 읽어** 컴파일이 깨진다
+      //   (실측 2026-08-15: "Error on line 2007: Invalid section tag" 로 EXE 빌드 전체 실패).
+      //   대괄호를 쪼개 문자열로 잇는다 — 파일에 쓰이는 값은 똑같이 [client] 다.
+      UserSqlContent.Add(Chr(91) + 'client' + Chr(93));
       UserSqlContent.Add('user=' + G_DbUser);
       UserSqlContent.Add('password=' + G_DbPassword);
       UserSqlContent.SaveToFile(ProbeCnfFile);
