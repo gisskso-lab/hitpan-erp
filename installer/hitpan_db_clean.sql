@@ -3351,7 +3351,7 @@ INSERT INTO `schema_migrations` (`migration_id`, `app_version`, `success`) VALUE
 ('DB-74','clean-ddl',1),('DB-75','clean-ddl',1),('DB-76','clean-ddl',1),('DB-77','clean-ddl',1),
 ('DB-78','clean-ddl',1),('DB-79','clean-ddl',1),('DB-80','clean-ddl',1),('DB-81','clean-ddl',1),
 ('DB-82','clean-ddl',1),('DB-83','clean-ddl',1),('DB-84','clean-ddl',1),('DB-85','clean-ddl',1),
-('DB-86','clean-ddl',1),('DB-87','clean-ddl',1),('DB-88','clean-ddl',1),('DB-89','clean-ddl',1),('DB-90','clean-ddl',1),('DB-91','clean-ddl',1),('DB-92','clean-ddl',1),('DB-93','clean-ddl',1),('DB-94','clean-ddl',1),('DB-95','clean-ddl',1),('DB-96','clean-ddl',1),('DB-97','clean-ddl',1),('DB-98','clean-ddl',1),('DB-99','clean-ddl',1),('DB-100','clean-ddl',1),('DB-101','clean-ddl',1),('DB-102','clean-ddl',1);
+('DB-86','clean-ddl',1),('DB-87','clean-ddl',1),('DB-88','clean-ddl',1),('DB-89','clean-ddl',1),('DB-90','clean-ddl',1),('DB-91','clean-ddl',1),('DB-92','clean-ddl',1),('DB-93','clean-ddl',1),('DB-94','clean-ddl',1),('DB-95','clean-ddl',1),('DB-96','clean-ddl',1),('DB-97','clean-ddl',1),('DB-98','clean-ddl',1),('DB-99','clean-ddl',1),('DB-100','clean-ddl',1),('DB-101','clean-ddl',1),('DB-102','clean-ddl',1),('DB-103','clean-ddl',1),('DB-104','clean-ddl',1);
 
 --
 -- Table structure for table `service_tickets`
@@ -3731,7 +3731,8 @@ CREATE TABLE `tenant_devices` (
   `user_id` varchar(36) DEFAULT NULL COMMENT '최근 로그인 사용자',
   `device_type` varchar(10) NOT NULL COMMENT 'pc / mobile / tablet',
   `device_name` varchar(100) DEFAULT NULL COMMENT '기기 별명 (예: 홍길동 사무실 PC)',
-  `fingerprint` varchar(64) NOT NULL COMMENT 'UA+OS+해상도+시간대 SHA-256',
+  `fingerprint` varchar(64) NOT NULL COMMENT '[옛 기기 호환 전용] 브라우저 환경해시(HFPv2-)·메인PC(MAINPC-). 새 기기는 hardware_id 로 잡는다 (DB-103 격하)',
+  `hardware_id` varchar(128) DEFAULT NULL COMMENT '장비넘버(하드웨어 식별값). 서버가 읽는 변하지 않는 값. NULL=아직 못 받은 옛 기기 (DB-103)',
   `ip_address` varchar(50) DEFAULT NULL,
   `user_agent` varchar(500) DEFAULT NULL,
   `status` varchar(20) NOT NULL DEFAULT 'approved' COMMENT 'pending/approved/revoked',
@@ -3746,12 +3747,42 @@ CREATE TABLE `tenant_devices` (
   `is_main_pc` tinyint(1) NOT NULL DEFAULT 0 COMMENT '메인PC(히트판 본체·DB 보유) 여부. 테넌트당 1대 — 보장은 애플리케이션에서 한다 (DB-86)',
   PRIMARY KEY (`device_id`),
   UNIQUE KEY `uq_tenant_fp` (`tenant_id`,`fingerprint`),
+  -- DB-103: 장비넘버는 회사 안에서 유일하다. NULL 은 몇 개든 공존한다(옛 기기 보존).
+  UNIQUE KEY `uq_tenant_hardware` (`tenant_id`,`hardware_id`),
   KEY `idx_tenant_type_status` (`tenant_id`,`device_type`,`status`),
   KEY `idx_auth_key_hash` (`auth_key_hash`),
   KEY `idx_user` (`user_id`),
   -- fk_device_tenant 제거 (무결 봉합 2026-06-18): tenants 삭제 FK 제거. tenant_id 컬럼 보존
   CONSTRAINT `fk_device_user` FOREIGN KEY (`user_id`) REFERENCES `users` (`user_id`) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='테넌트 기기 목록 — 기기 대수 과금 + 접근 제어';
+/*!40101 SET character_set_client = @saved_cs_client */;
+
+--
+-- Table structure for table `device_slot_policy_settings`
+--   기기 슬롯 기준값 (DB-104) — 요금 한도를 코드가 아니라 여기서 읽는다(헌법 #11).
+--   ⚠️ 값 시드는 회사가 만들어질 때 넣는다(마이그 DB-104 참조). 신규 설치 시점엔 회사가 없어 0행이다.
+--     표가 비어 있으면 서비스가 종전 숫자로 떨어지므로(FallbackLimits) 한도가 없어지지 않는다.
+--
+
+DROP TABLE IF EXISTS `device_slot_policy_settings`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!40101 SET character_set_client = utf8mb4 */;
+CREATE TABLE `device_slot_policy_settings` (
+  `policy_id` varchar(36) NOT NULL COMMENT 'PK',
+  `tenant_id` varchar(36) NOT NULL COMMENT '테넌트(헌법 #2 — JWT 클레임에서만 온다)',
+  `policy_key` varchar(60) NOT NULL COMMENT '기준값 열쇠. 예: tier.basic.pc_limit',
+  `policy_value` int(11) NOT NULL COMMENT '값. 대수·금액 모두 정수 하나로 담는다',
+  `value_unit` varchar(20) NOT NULL DEFAULT 'count' COMMENT '단위: count(대)|krw(원)',
+  `label` varchar(100) NOT NULL COMMENT '사람이 읽는 이름. 화면에 그대로 보여준다',
+  `description` varchar(300) DEFAULT NULL COMMENT '무엇을 뜻하는 값인지',
+  `updated_by` varchar(36) DEFAULT NULL COMMENT '누가 고쳤나',
+  `updated_reason` varchar(200) DEFAULT NULL COMMENT '왜 고쳤나 — 요금이라 수정 이력이 필수다',
+  `created_at` datetime(6) NOT NULL DEFAULT current_timestamp(6),
+  `updated_at` datetime(6) NOT NULL DEFAULT current_timestamp(6) ON UPDATE current_timestamp(6),
+  PRIMARY KEY (`policy_id`),
+  UNIQUE KEY `uk_slot_policy_tenant_key` (`tenant_id`,`policy_key`),
+  KEY `idx_slot_policy_lookup` (`tenant_id`,`policy_key`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='기기 슬롯 기준값 — 요금제가 바뀌면 값만 갈아끼운다(코드 재배포 없이). DB-104';
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --

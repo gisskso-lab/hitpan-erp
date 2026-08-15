@@ -74,9 +74,26 @@ public class DeviceRegistrationController : ControllerBase
                 return BadRequest(new { success = false, message = "시리얼 인증이 필요합니다." });
 
             // 2) device_type 정규화 (pc / mobile)
-            var deviceType = string.IsNullOrWhiteSpace(req.DeviceType) ? "pc" : req.DeviceType.ToLowerInvariant();
-            if (deviceType != "pc" && deviceType != "mobile")
-                deviceType = "pc";
+            //
+            // 🔴 2026-08-15 20260815작3 P1 (G-13 · I-6) — 종전 판정이 두 가지를 틀렸다.
+            //
+            //   ① `tablet` 을 **`pc` 로 바꿔 저장**했다. 태블릿은 휴대기기다
+            //      (사장님 판정 — *"운영체제가 안드로이드이거나 iOS이기 때문에"*).
+            //      ⇒ 고객이 **싼 칸에 들어갈 기기로 비싼 칸을 먹었다.**
+            //   ② **모르는 값도 `pc`** 로 보냈다. 컴퓨터 칸이 더 비싸므로
+            //      판정이 애매할 때 컴퓨터로 세면 **고객이 쓰지도 않은 자리에 돈을 낸다.**
+            //
+            //   [고침] ERP 의 NormalizeDeviceType 과 **같은 규칙**으로 맞춘다:
+            //     tablet → mobile 로 흡수 · 모르는 값 → mobile(고객에게 유리한 쪽).
+            //   ⚠️ 규칙만 같게 하고 **코드는 각자 갖는다** — 백오피스는 별 시스템이다(D-2).
+            var raw = (req.DeviceType ?? "").Trim().ToLowerInvariant();
+            var deviceType = raw switch
+            {
+                "pc" => "pc",
+                "" => "mobile",         // 안 보냈으면 싼 칸
+                "tablet" => "mobile",   // 태블릿은 휴대기기 (종전엔 pc 로 갔다)
+                _ => "mobile"           // 모르는 값도 싼 칸
+            };
 
             // 3) 이미 등록된 기기 확인 (fingerprint 해시 일치)
             var existing = await db.QueryFirstOrDefaultAsync<string>(@"
@@ -95,10 +112,31 @@ public class DeviceRegistrationController : ControllerBase
             }
 
             // 4) PC·모바일 분리 카운트 + 한도 비교
-            var typeCount = await db.ExecuteScalarAsync<int>(@"
-                SELECT COUNT(*) FROM tenant_devices
-                WHERE tenant_id = @TenantId AND status = 'approved' AND device_type = @Type",
-                new { TenantId = tenant.TenantId, Type = deviceType });
+            //
+            // 🔴 2026-08-15 20260815작3 P1 (G-13) — `tablet` 이 어느 칸에도 안 잡히던 것을 봉합한다.
+            //
+            //   [무엇이 났나] 종전은 `device_type = @Type` **등호** 비교였다.
+            //     그래서 `deviceType` 이 'mobile' 일 때 **'tablet' 행이 세어지지 않았다.**
+            //     ERP 쪽은 같은 계산에서 tablet 을 휴대기기 칸에 합산하는데(NormalizeDeviceType),
+            //     백오피스만 빠뜨려 **태블릿이 공짜로 쓰였다.** 요금이 새는 자리다.
+            //
+            //   [고침] 휴대기기 칸은 'mobile' 과 'tablet' 을 **둘 다** 센다. ERP 와 같은 규칙이다.
+            //
+            //   ⚠️ **ERP 의 단일 메서드를 여기서 부르지 않는다** (P0 실측 D-2).
+            //     백오피스는 **별 시스템·별 DB·별 배포**다. ERP 서비스를 끌어다 쓰면
+            //     본사와 고객 PC 가 코드로 묶여 헌법 #30(본사 의존 0)·#35(3시스템 분리)를 어긴다.
+            //     ⇒ 같은 **규칙**을 쓰되 코드는 각자 갖는다. 고치는 것은 규칙의 어긋남 하나뿐이다.
+            var typeCount = deviceType == "pc"
+                ? await db.ExecuteScalarAsync<int>(@"
+                    SELECT COUNT(*) FROM tenant_devices
+                    WHERE tenant_id = @TenantId AND status = 'approved'
+                      AND device_type = 'pc'",
+                    new { TenantId = tenant.TenantId })
+                : await db.ExecuteScalarAsync<int>(@"
+                    SELECT COUNT(*) FROM tenant_devices
+                    WHERE tenant_id = @TenantId AND status = 'approved'
+                      AND device_type IN ('mobile','tablet')",
+                    new { TenantId = tenant.TenantId });
 
             var deviceLimit = deviceType == "pc" ? tenant.MaxPcDevices : tenant.MaxMobileDevices;
             var typeLabel = deviceType == "pc" ? "PC" : "모바일";
@@ -243,7 +281,10 @@ public class DeviceRegistrationController : ControllerBase
     {
         public string LicenseKey { get; set; } = "";
         public string Fingerprint { get; set; } = "";
-        public string? DeviceType { get; set; } = "pc";
+        // 🔴 20260815작3 P1 (I-6) — 기본값 "pc" 를 없앴다.
+        //   위 정규화를 고쳐도 **여기가 "pc" 로 채워 버리면 아무것도 안 바뀐다.**
+        //   안 보내면 null 로 두고, 판정은 한 곳(위 switch)에서만 한다.
+        public string? DeviceType { get; set; }
         public string? DeviceName { get; set; }
         public string? UserAgent { get; set; }
         public string? OsInfo { get; set; }

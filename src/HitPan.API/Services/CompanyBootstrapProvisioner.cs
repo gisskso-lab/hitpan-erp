@@ -2,6 +2,8 @@ using Dapper;
 using HitPan.Infrastructure.Configuration;
 using MySqlConnector;
 using static HitPan.Domain.Common.OrgDefaults;
+// 🔴 20260816작1 R-1 봉합 — 기기 슬롯 기준값의 **단일 정의**. 숫자를 여기 또 적지 않는다.
+using HitPan.Application.Services;
 
 namespace HitPan.API.Services;
 
@@ -61,8 +63,18 @@ public sealed class CompanyBootstrapProvisioner
             "SELECT is_locked_from_landing FROM local_company WHERE tenant_id = @TenantId",
             new { TenantId = tenantId });
         if (lockedRaw == 1)
+        {
+            // 🔴 CR2-1 봉합 — 돌아가기 **전에** 기준값을 깔아 준다.
+            //
+            //   여기로 오는 회사가 정확히 **R-1 이 덮으려던 집단**이다(이미 설치가 끝난 회사).
+            //   R-1 1차 봉합은 시드를 CreateParentAsync 맨 끝에 뒀는데, 그 함수는
+            //   ParentExists 로 **시드에 닿기 전에** 돌아간다 — 기존 회사는 영원히 못 받았다.
+            //   ⇒ 조기 return 앞에 둔다. 멱등이므로(테넌트 단위 무접촉) 몇 번 와도 안전하다.
+            await SeedDeviceSlotPolicyAsync(db, tenantId, tenantCode, ct);
+
             return (BootstrapOutcome.AlreadyLocked,
                 "이미 설치가 완료된 라이선스입니다. 회사정보 변경은 랜딩에서 사업자등록증 재등록이 필요합니다.");
+        }
 
         await db.ExecuteAsync(@"
             INSERT INTO local_company
@@ -158,6 +170,12 @@ public sealed class CompanyBootstrapProvisioner
                     SyncSource = input.SyncSource
                 });
         }
+
+        // 🔴 CR2-1 봉합 — 회사 행이 생긴 **이 시점**이 기준값을 깔 수 있는 가장 이른 자리다.
+        //   여기서 깔면 뒤이은 부모계정 생성이 실패해도(아이디 중복 등) 기준값은 이미 있다.
+        //   CreateParentAsync 에도 같은 호출이 남아 있다 — 멱등이라 두 번 불려도 행이 안 늘어난다(G-21).
+        //   두 곳 다 두는 이유: 두 경로(웹 API · 오프라인 seed-parent)의 어느 쪽이 먼저 오든 덮인다.
+        await SeedDeviceSlotPolicyAsync(db, tenantId, tenantCode, ct);
 
         _logger.LogInformation("[CompanyBootstrap] 자동 반영 완료 tenant={Code} source={Source}",
             tenantCode, input.SyncSource);
@@ -406,9 +424,136 @@ public sealed class CompanyBootstrapProvisioner
             throw;
         }
 
+        // 🔴 기기 슬롯 기준값 시드 (20260816작1 R-1 봉합) — 트랜잭션 **밖**이다. 아래 사유 참조.
+        await SeedDeviceSlotPolicyAsync(db, tenantId, tenantCode, ct);
+
         _logger.LogInformation("[CompanyBootstrap] 부모계정+사원+기본창고 생성 완료 tenant={Code} loginId={LoginId}",
             tenantCode, loginId);
         return (CreateParentOutcome.Ok, null, userId);
+    }
+
+    /// <summary>
+    /// 기기 슬롯 기준값(DB-104)을 이 회사에 깔아 준다 — <b>신규 설치 R-1 봉합</b> (20260816작1).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// 🔴 <b>무엇이 고장나 있었나</b> — 검증팀이 격리 DB 에 출하 DDL 을 그대로 넣어 실측한 결과다.
+    /// DB-104 시드는 <c>SELECT DISTINCT tenant_id FROM local_subscription</c> 을 기준으로 도는데
+    /// <b>신규 설치 시점엔 그 표가 0행</b>이다(회사가 아직 없다). 그리고 출하 DDL 이
+    /// <c>('DB-104','clean-ddl',1)</c> 로 <b>이미 성공 표시</b>를 해서, 나중에 회사가 생겨도
+    /// <c>MigrationRunner</c> 가 <c>success=1</c> 이면 건너뛴다.
+    /// ⇒ <b>신규 고객은 정책 표가 영원히 비어</b> 요금 한도가 언제나 코드 상수(안전망)로 결정됐다.
+    /// 요금 한도를 설정으로 꺼낸다는 작업의 목적이 <b>신규 고객에게만 무력</b>이었다.
+    /// </para>
+    /// <para>
+    /// ⚠️ <b>회귀가 아니라 미달성이다</b> — 안전망 숫자가 시드와 같으므로 <b>요금이 틀리지는 않았다.</b>
+    /// 다만 대표가 화면에서 한도를 고쳐도 <b>반영될 표가 없었다.</b>
+    /// </para>
+    /// <para>
+    /// 🔴 <b>왜 여기인가</b> — 바로 위 <c>labor_policy_settings</c>(DB-96) 시드가
+    /// <b>똑같은 문제를 이미 이렇게 풀었다.</b> 새 구조를 만들지 않고 <b>선례를 그대로 따른다.</b>
+    /// 회사가 만들어지는 이 시점에는 테넌트가 존재하므로 <c>CROSS JOIN</c> 문제가 없다.
+    /// </para>
+    ///
+    /// <para>
+    /// 🔴 <b>왜 트랜잭션 밖인가 — 시드가 회사 생성을 막으면 안 된다</b>
+    /// </para>
+    /// <para>
+    /// 위 트랜잭션 안에 넣으면 이 표 하나가 잘못됐을 때
+    /// <b>부모계정·사원·창고까지 통째로 되돌아가 설치 자체가 실패</b>한다.
+    /// 그런데 이 표는 <b>없어도 회사가 돈다</b> — 안전망(<c>FallbackLimits</c>)이 같은 숫자를 준다.
+    /// 있으면 좋은 것 때문에 <b>반드시 되어야 하는 것</b>을 무너뜨리는 것이 가장 나쁘다(작지서 §7).
+    /// ⇒ 커밋 뒤에 따로, <b>실패해도 회사는 만들어지게</b>. 단 <b>기록은 반드시 남긴다</b>(헌법 #15).
+    /// </para>
+    /// <para>
+    /// ⚠️ <b>이미 값을 손댄 회사는 건드리지 않는다</b>(헌법 #1 덮어쓰기 금지 · #11).
+    /// <c>WHERE NOT EXISTS</c> 의 기준이 <b>열쇠가 아니라 테넌트</b>인 것이 핵심이다 —
+    /// DB-104 의 의도를 그대로 옮겼다. 대표가 열쇠 하나만 고치고 나머지를 지웠더라도
+    /// 우리가 <b>지운 것을 되살리지 않는다.</b> 그것도 대표의 설정이기 때문이다.
+    /// 그래서 <b>두 번 돌려도 행이 안 늘어난다</b>(멱등 · G-21).
+    /// </para>
+    /// <para>
+    /// 🔴 <b>숫자를 여기 적지 않는다</b> — <see cref="SlotPolicyDefaults"/> 가 유일한 정의다.
+    /// 마이그 DB-104 와 <b>한 글자도 다르지 않아야</b> 하고, 그 일치는 게이트가 실제로 대조한다
+    /// (<c>DeviceSlotGuardTests</c> G-20). 여기 숫자를 또 적으면 <b>나중에 반드시 갈라진다.</b>
+    /// </para>
+    /// </remarks>
+    private async Task SeedDeviceSlotPolicyAsync(
+        MySqlConnection db, string tenantId, string tenantCode, CancellationToken ct)
+    {
+        try
+        {
+            // 🔴 "손댔는가" 는 **맨 앞에서 한 번만** 묻는다.
+            //
+            //   ⚠️ 이 자리를 처음엔 틀렸고 **G-19 가 잡았다**(15줄을 기대했는데 1줄만 들어왔다).
+            //     줄마다 `WHERE NOT EXISTS (… p.tenant_id = @TenantId)` 를 걸었더니,
+            //     **첫 줄이 들어간 순간 그 줄이 스스로 조건을 깨뜨려** 2~15번째가 전부 건너뛰었다.
+            //     조건의 기준이 **열쇠가 아니라 테넌트**라서 생기는 일이다.
+            //
+            //   ⇒ 판단을 루프 밖으로 뺀다. 이러면 두 요구가 동시에 선다:
+            //     · 손 안 댄 회사     → 15줄이 **전부** 깔린다(G-19)
+            //     · 이미 손댄 회사   → **한 줄도 안 건드린다**(G-22 · DB-104 의 의도 그대로)
+            //     · 두 번 돌려도     → 두 번째엔 이미 있으므로 안 늘어난다(G-21 멱등)
+            var alreadyHas = await db.QueryFirstOrDefaultAsync<int>(new CommandDefinition(
+                "SELECT COUNT(*) FROM device_slot_policy_settings WHERE tenant_id = @TenantId",
+                new { TenantId = tenantId }, cancellationToken: ct));
+
+            var inserted = 0;
+
+            if (alreadyHas == 0)
+            {
+                foreach (var row in SlotPolicyDefaults.Rows)
+                {
+                    // ⚠️ 줄 단위 NOT EXISTS 는 **열쇠 기준**이다 — 위 테넌트 판단과 역할이 다르다.
+                    //   같은 열쇠가 두 벌이 되는 것(UNIQUE 충돌)만 막는 안전장치다.
+                    inserted += await db.ExecuteAsync(new CommandDefinition(@"
+                        INSERT INTO device_slot_policy_settings
+                          (policy_id, tenant_id, policy_key, policy_value, value_unit, label, description)
+                        SELECT @PolicyId, @TenantId, @Key, @Value, @Unit, @Label, @Description
+                        WHERE NOT EXISTS (
+                            SELECT 1 FROM device_slot_policy_settings p
+                            WHERE p.tenant_id = @TenantId AND p.policy_key = @Key
+                        )",
+                        new
+                        {
+                            PolicyId = Guid.NewGuid().ToString(),
+                            TenantId = tenantId,
+                            row.Key,
+                            row.Value,
+                            Unit = row.Unit,
+                            row.Label,
+                            row.Description
+                        },
+                        cancellationToken: ct));
+                }
+            }
+
+            if (inserted > 0)
+            {
+                _logger.LogInformation(
+                    "[CompanyBootstrap] 기기 슬롯 기준값 {Count}건 시드 완료 tenant={Code}",
+                    inserted, tenantCode);
+            }
+            else
+            {
+                // 이미 값이 있는 회사다 — 정상이다. 덮어쓰지 않은 것이 옳다.
+                _logger.LogInformation(
+                    "[CompanyBootstrap] 기기 슬롯 기준값이 이미 있어 건너뛴다(덮어쓰지 않는다) tenant={Code}",
+                    tenantCode);
+            }
+        }
+        catch (Exception ex)
+        {
+            // 🔴 헌법 #15 — 빈 catch 금지. 그리고 이 실패로 회사 생성을 막지 않는다(작지서 §7).
+            //   표가 없어도 안전망이 같은 숫자를 주므로 **업무는 정상으로 돈다.**
+            //   다만 "대표가 화면에서 한도를 고쳐도 반영될 표가 없는" 상태이므로
+            //   조용히 지나가면 안 된다 — R-1 이 두 달 안 보였던 이유가 정확히 그것이다.
+            _logger.LogError(ex,
+                "[CompanyBootstrap] 🔴 기기 슬롯 기준값 시드 실패 — 회사 생성은 계속한다. "
+                + "이 회사는 요금 한도가 설정표가 아니라 안전망(코드 기본값)으로 돈다. "
+                + "숫자는 같으므로 요금이 틀리지는 않으나, 설정 화면에서 고쳐도 반영될 표가 없다. "
+                + "tenant={Code}", tenantCode);
+        }
     }
 }
 

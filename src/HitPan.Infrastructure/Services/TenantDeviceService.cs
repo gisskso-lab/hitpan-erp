@@ -5,20 +5,33 @@ using HitPan.Application.DTOs.Device;
 using HitPan.Application.Interfaces;
 // 기기 승인제 끄기 스위치 (20260811작1 (E)) — appsettings 에서 읽는다
 using Microsoft.Extensions.Configuration;
+// 🔴 20260816작1 (B-5) — 기준값을 못 읽은 사유를 **운영 로그에** 남긴다(헌법 #15).
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 
 namespace HitPan.Application.Services;
 
 /// <summary>
 /// 테넌트 기기 등록/조회/폐기 서비스.
 /// - 히트판 과금 모델: 계정 무제한, 기기 수 제한(PC + 모바일).
-/// - 티어별 기본 한도:
-///     basic  = PC 5  / Mobile 3   (= 8대)
-///     pro    = PC 10 / Mobile 8   (= 18대)
-///     premium= PC 100/ Mobile 80  (= 180대)
-///     trial  = PC 10 / Mobile 5
-///     기본   = PC 5  / Mobile 3
-/// - 추가 슬롯 1개 구매 = PC +1 OR 모바일 +1, 그리고 보너스로 모바일 +1 추가 허용.
-///   (단순화: pc_limit += extra, mobile_limit += extra*2)
+///
+/// 🔴 2026-08-15 20260815작3 P1·P2 — 계수와 한도를 <b>한 곳으로 모았다.</b>
+///
+///   [종전] 슬롯을 세는 SQL 이 이 파일에만 4곳(:97 · :245 · :410 · :597), 한도 계산이 또 4곳.
+///     같은 일을 하는 코드가 여덟 자리에 흩어져 있었고 <b>모양도 서로 달랐다.</b>
+///     ⇒ 요금이 틀렸을 때 <b>어디가 틀렸는지 못 찾는다.</b> 한 곳만 고치면 나머지가 옛 규칙으로 돈다.
+///
+///   [지금] <see cref="CountUsedSlotsAsync"/> 하나가 세고, <see cref="GetLimitsAsync"/> 하나가 한도를 만든다.
+///     ⚠️ 모으면서 <b>동작은 한 줄도 바꾸지 않았다.</b> 호출부마다 비교 대상이 다른 것은 그대로 뒀다
+///        (QR 은 여전히 모바일만 본다 — P0 실측 D-1).
+///
+/// - 티어별 기본 한도는 이제 <b>코드에 없다</b> — <c>device_slot_policy_settings</c>(DB-104)에서 읽는다.
+///   헌법 #11(기준값은 어드민이 설정) · #21(appsettings 무접촉).
+///   표가 비어 있으면 종전 숫자로 떨어진다(무회귀 안전망 — <see cref="FallbackLimits"/>).
+///
+/// - 추가 슬롯 1개 구매 = <b>PC +1 · 모바일 +1</b> (사장님 확정 2026-08-15: "추가슬롯 1+1당 1만원").
+///   ⚠️ 종전 코드는 모바일에 +2 를 줬다. 설정으로 정정했다.
+///
 /// - MVP에서는 OTP/관리자 승인 없이 자동 approved. 추후 고도화.
 /// </summary>
 public sealed class TenantDeviceService : ITenantDeviceService
@@ -47,12 +60,35 @@ public sealed class TenantDeviceService : ITenantDeviceService
     /// </summary>
     private readonly bool _approvalEnabled;
 
-    public TenantDeviceService(IDbConnection db, IAuditService audit, IConfiguration? config = null)
+    /// <summary>
+    /// 🔴 20260816작1 (B-5) — 기준값 표를 못 읽었을 때 <b>운영에 남는</b> 기록.
+    /// </summary>
+    /// <remarks>
+    /// 종전엔 <c>Debug.WriteLine</c> 이었다. 그것은 <c>[Conditional("DEBUG")]</c> 이라
+    /// <b>Release 빌드에서 호출 자체가 사라진다</b> — 고객 PC 에는 아무 기록도 안 남았다.
+    /// <para>
+    /// 🔴 <b>왜 이것이 중요한가</b>: 이 catch 가 삼키는 것은
+    /// <b>"요금 한도를 설정에서 못 읽었다"</b> 는 신호다. 그 신호가 사라지면
+    /// 표가 비어 있어도 아무도 모른 채 안전망 숫자로 조용히 돈다.
+    /// <b>R-1(신규 설치에서 표가 영원히 빈 사고)을 눈에 안 띄게 만든 것이 바로 이 조항</b>이라,
+    /// 검증팀이 둘을 <b>한 몸</b>으로 보라고 판정했다.
+    /// </para>
+    /// ⚠️ 로그를 안 넘겨도 죽지 않게 <c>NullLogger</c> 로 떨어뜨린다 — 이 서비스는
+    /// 로그인 경로에서 불리므로 <b>로그 때문에 로그인이 막히면 안 된다.</b>
+    /// </remarks>
+    private readonly ILogger<TenantDeviceService> _logger;
+
+    public TenantDeviceService(
+        IDbConnection db,
+        IAuditService audit,
+        IConfiguration? config = null,
+        ILogger<TenantDeviceService>? logger = null)
     {
         _db = db;
         _audit = audit;
         // 설정이 없으면 꺼짐(false) — 안전측. 종전 동작 그대로다.
         _approvalEnabled = config?.GetValue<bool>("DeviceApproval:Enabled") ?? false;
+        _logger = logger ?? NullLogger<TenantDeviceService>.Instance;
     }
 
     // ── 목록 조회 ──
@@ -84,27 +120,27 @@ public sealed class TenantDeviceService : ITenantDeviceService
     public async Task<DeviceQuotaDto> GetQuotaAsync(string tenantId, CancellationToken ct = default)
     {
         await EnsureOpenAsync(ct);
-        var tenant = await _db.QueryFirstOrDefaultAsync<(string? tier, int extra)>(new CommandDefinition(
-            "SELECT subscription_tier AS tier, COALESCE(extra_device_slots, 0) AS extra FROM local_subscription WHERE tenant_id = @TenantId",
+
+        // 화면에 보여주기만 한다 — 여기서는 한도를 비교하지 않는다(P0 스냅샷 경우 6).
+        var (pcLimit, mobileLimit) = await GetLimitsAsync(tenantId, ct);
+        var (pcUsed, mobileUsed) = await CountUsedSlotsAsync(tenantId, ct);
+
+        // 화면에 그대로 보여줄 값이라 요금제 이름은 저장된 원문을 쓴다
+        // (설정 열쇠용 정규화값 NormalizeTier 와 다르다 — 'default' 를 고객에게 보이면 안 된다).
+        // 🔴 2026-08-16 CR2-5 — 같은 행을 **두 번 읽던 것을 한 번으로** 합쳤다.
+        //   요금제 이름과 추가슬롯 수는 `local_subscription` 의 **같은 한 행**에 있다.
+        //   따로 읽으면 두 번째 조회 사이에 값이 바뀔 때 **서로 안 맞는 짝**이 나올 수 있고,
+        //   무엇보다 화면 한 번 그리는 데 왕복이 늘어난다.
+        //   ⚠️ 행이 없을 수 있다(부트스트랩 전) — 그때는 둘 다 기본값으로 떨어진다.
+        var sub = await _db.QueryFirstOrDefaultAsync<(string? tier, int extra)?>(new CommandDefinition(
+            """
+            SELECT subscription_tier AS tier, COALESCE(extra_device_slots, 0) AS extra
+            FROM local_subscription WHERE tenant_id = @TenantId
+            """,
             new { TenantId = tenantId }, cancellationToken: ct));
 
-        var (pcLimit, mobileLimit) = GetLimitsForTier(tenant.tier);
-        // 추가 슬롯은 단순화 규칙: pc +1, mobile +2
-        pcLimit += tenant.extra;
-        mobileLimit += tenant.extra * 2;
-
-        // approved 기기 수 집계 (pc는 pc/tablet 합산이 아니라 pc만, tablet은 mobile로 묶음)
-        var counts = (await _db.QueryAsync<(string t, int c)>(new CommandDefinition(
-            """
-            SELECT device_type AS t, COUNT(*) AS c
-            FROM tenant_devices
-            WHERE tenant_id = @TenantId AND status = 'approved'
-            GROUP BY device_type
-            """,
-            new { TenantId = tenantId }, cancellationToken: ct))).ToList();
-
-        int pcUsed = counts.Where(x => x.t == "pc").Sum(x => x.c);
-        int mobileUsed = counts.Where(x => x.t == "mobile" || x.t == "tablet").Sum(x => x.c);
+        var tier = sub?.tier;
+        var extra = sub?.extra ?? 0;
 
         return new DeviceQuotaDto
         {
@@ -112,8 +148,8 @@ public sealed class TenantDeviceService : ITenantDeviceService
             MobileLimit = mobileLimit,
             PcUsed = pcUsed,
             MobileUsed = mobileUsed,
-            ExtraSlots = tenant.extra,
-            SubscriptionTier = tenant.tier ?? "basic"
+            ExtraSlots = extra,
+            SubscriptionTier = tier ?? "basic"
         };
     }
 
@@ -162,9 +198,25 @@ public sealed class TenantDeviceService : ITenantDeviceService
             //     ⇒ 막는 자리를 화면에만 두고 **로그인 검사에는 두지 않은 것**이 진범이다.
             //
             //   [고침] 메인PC 는 폐기 상태여도 로그인을 막지 않는다.
-            //     메인PC 는 슬롯을 세지 않고 한도에도 안 걸리는 특별한 자리다(설계 원칙).
             //     "그 컴퓨터에서 히트판이 돈다" 는 사실 자체가 인증이므로, 폐기라는 표식이
             //     그것을 뒤집을 수 없다.
+            //
+            //   🔴 2026-08-15 20260815작3 P1 — **이 자리 주석이 틀려 있었다. 정정한다.**
+            //
+            //     [틀린 문장] *"메인PC 는 슬롯을 세지 않고 한도에도 안 걸리는 특별한 자리다"*
+            //
+            //     [실제] 메인PC 는 **슬롯을 1대로 센다.** 사장님 확정 — *"기기 1대 = 슬롯 1개, 메인PC 포함"*.
+            //       계수 SQL 어디에도 `is_main_pc` 를 빼는 절이 없고(CountUsedSlotsAsync),
+            //       메인PC 행은 `status='approved'` · `device_type='pc'` 이므로 정상적으로 잡힌다.
+            //       ⇒ **코드가 맞고 주석이 틀렸다.**
+            //
+            //     [절반만 맞았던 부분] 메인PC 가 **자기를 등록할 때**는 한도를 보지 않는다
+            //       (MainPcRegistrationService — 한도가 찬 회사에서도 메인PC 표식은 붙어야
+            //        CS 가 "그 컴퓨터가 본체입니다" 를 찾을 수 있기 때문이다).
+            //       그러나 **등록된 뒤에는 다른 기기들의 한도 계산에 1대로 포함된다.**
+            //
+            //     🔴 이 주석을 읽고 계수 SQL 에 `AND is_main_pc = 0` 을 넣으면
+            //       **적게 세어 요금이 샌다.** 넣지 마라(P0 실측 D-3).
             //
             //   ⚠️ 일반 기기는 종전대로 막는다 — 폐기의 의미가 사라지면 안 된다.
             if (status == "revoked" && !isMainPc)
@@ -234,30 +286,46 @@ public sealed class TenantDeviceService : ITenantDeviceService
         }
 
         // 2) 신규 기기 — 티어별 한도 검사
-        var tenant = await _db.QueryFirstOrDefaultAsync<(string? tier, int extra)>(new CommandDefinition(
-            "SELECT subscription_tier AS tier, COALESCE(extra_device_slots, 0) AS extra FROM local_subscription WHERE tenant_id = @TenantId",
-            new { TenantId = tenantId }, cancellationToken: ct));
-
-        var (pcLimit, mobileLimit) = GetLimitsForTier(tenant.tier);
-        pcLimit += tenant.extra;
-        mobileLimit += tenant.extra * 2;
-
-        var counts = (await _db.QueryAsync<(string t, int c)>(new CommandDefinition(
-            """
-            SELECT device_type AS t, COUNT(*) AS c
-            FROM tenant_devices
-            WHERE tenant_id = @TenantId AND status = 'approved'
-            GROUP BY device_type
-            """,
-            new { TenantId = tenantId }, cancellationToken: ct))).ToList();
-
-        int pcUsed = counts.Where(x => x.t == "pc").Sum(x => x.c);
-        int mobileUsed = counts.Where(x => x.t == "mobile" || x.t == "tablet").Sum(x => x.c);
+        //   🔴 20260815작3 P1 — 계수와 한도를 단일 메서드로 모았다.
+        var (pcLimit, mobileLimit) = await GetLimitsAsync(tenantId, ct);
+        var (pcUsed, mobileUsed) = await CountUsedSlotsAsync(tenantId, ct);
 
         // 🔴 20260811작2 — 판정을 NormalizeDeviceType 한 곳으로 모았다.
         //   종전엔 이 자리에만 있었고, 갱신 경로(위)는 종류를 아예 안 봤다.
         //   두 경로가 각자 판단하면 한쪽만 고쳐지는 사고가 난다.
-        var type = NormalizeDeviceType(req.DeviceType) ?? "pc";
+        //
+        // 🔴 20260815작3 P1 (I-6) — `?? "pc"` 폴백을 없앴다.
+        //
+        //   [무엇이 문제였나] 종류를 안 보내는 클라이언트가 오면 무조건 `pc`(비싼 칸)로 갔다.
+        //     NormalizeDeviceType 은 이미 *"모르는 값은 휴대기기로 본다"* 는 원칙을 갖고 있는데
+        //     (:724 — 애매하면 고객에게 유리한 쪽), 그 원칙이 **이 경로에서는 도달하지 못했다.**
+        //     폴백이 먼저 채워 버렸기 때문이다.
+        //
+        //   [왜 mobile 인가] 컴퓨터 칸이 더 비싸다. 판정이 애매할 때 컴퓨터로 세면
+        //     **고객이 쓰지도 않은 자리에 돈을 낸다.** 반대로 세면 우리가 조금 손해 볼 뿐이다.
+        //
+        //   ⚠️ 폴백이 **두 곳**이었다 — 여기와 AuthController.cs:93. 한 곳만 고치면
+        //     아무것도 안 바뀐다(P0 실측 D-9). 두 곳을 같이 고쳤다.
+        //
+        // 🔴 2026-08-16 CR2-2 최종 판정 — **이 폴백은 결함이 아니다. 그대로 둔다.**
+        //
+        //   판정이 **네 번 엇갈린 자리**다(병렬검증 "한 곳만" ↔ 개발팀 "4곳" ↔ 검증팀 "개발팀 승"
+        //   ↔ 코드리뷰 2회차 "다시 문제"). 말로 갈리지 않아 **코드로 갈랐다.**
+        //
+        //   [코드리뷰 2회차 주장] *getDeviceType 이 예외를 던지면 진짜 PC 가 모바일 칸으로 간다.*
+        //   [실측 결과] **그 경로는 존재하지 않는다.** 세 겹이 막는다:
+        //     ① 클라이언트 getDeviceType 은 자체 catch 로 'mobile' **문자열**을 돌려준다
+        //        (device-fingerprint.js) — 예외가 나도 **빈 값이 오지 않는다.**
+        //     ② NormalizeDeviceType 이 null 을 주는 경우는 **값을 아예 안 보냈을 때뿐**이고
+        //        (IsNullOrWhiteSpace), 모르는 값은 이미 안에서 'mobile' 로 간다(:948·:957).
+        //     ③ 🔴 결정적 — 값이 비는 유일한 상황은 AuthService 의 try 가 통째로 깨질 때인데,
+        //        그 try 의 **첫 줄이 getFingerprint** 다. 거기서 던지면 지문도 null 이 되고,
+        //        AuthController 는 `IsNullOrEmpty(DeviceFingerprint)` 로 **기기 등록을 통째로 건너뛴다.**
+        //        ⇒ 이 줄에 **도달하지 못한다.**
+        //
+        //   ⇒ 폴백을 'pc' 로 되돌리면 오히려 P0 다 — 종류를 모를 때 비싼 칸으로 세어
+        //     **고객이 쓰지도 않은 자리에 돈을 낸다**(이 차수가 존재하는 이유 그 자체).
+        var type = NormalizeDeviceType(req.DeviceType) ?? "mobile";
 
         // 한도 초과 체크
         //
@@ -277,6 +345,13 @@ public sealed class TenantDeviceService : ITenantDeviceService
             await LogDeniedAsync(tenantId, userId, ipAddress, null, "denied_limit", ct);
             return (false, LimitExceededMessage, null, false);
         }
+        // ⚠️ 2026-08-16 CR2-4 — 여기 `type == "tablet"` 은 **죽은 가지다.**
+        //   위 `type` 은 NormalizeDeviceType 을 거쳐 오는데 그 함수가 tablet 을 이미
+        //   mobile 로 흡수한다(:972). 그래서 이 비교는 참이 될 수 없다.
+        //   🔴 그래도 **지우지 않는다** — 지워도 동작이 1도 안 바뀌는 대신,
+        //     나중에 정규화를 건너뛰는 경로가 생기면 조용히 새는 자리가 된다(헌법 #1 가산 원칙).
+        //   ⚠️ 혼동 금지: ApproveAsync:475 의 똑같이 생긴 검사는 **살아 있다.**
+        //     거기 `devType` 은 DB 에서 읽은 값이라 옛 행에 'tablet' 이 남아 있을 수 있다.
         if ((type == "mobile" || type == "tablet") && mobileUsed >= mobileLimit)
         {
             await LogDeniedAsync(tenantId, userId, ipAddress, null, "denied_limit", ct);
@@ -399,25 +474,15 @@ public sealed class TenantDeviceService : ITenantDeviceService
         // 🔴 승인 시점에 한도를 **다시** 본다.
         //   대기 목록에 3대가 쌓여 있고 남은 슬롯이 1대라면, 첫 승인은 되고 나머지는 막혀야 한다.
         //   등록 시점에만 검사하면 대기분이 한도를 넘겨 통과한다(슬롯 과금이 무너지는 자리).
-        var tenant = await _db.QueryFirstOrDefaultAsync<(string? tier, int extra)>(new CommandDefinition(
-            "SELECT subscription_tier AS tier, COALESCE(extra_device_slots, 0) AS extra FROM local_subscription WHERE tenant_id = @TenantId",
-            new { TenantId = tenantId }, cancellationToken: ct));
-
-        var (pcLimit, mobileLimit) = GetLimitsForTier(tenant.tier);
-        pcLimit += tenant.extra;
-        mobileLimit += tenant.extra * 2;
-
-        var counts = (await _db.QueryAsync<(string t, int c)>(new CommandDefinition(
-            """
-            SELECT device_type AS t, COUNT(*) AS c
-            FROM tenant_devices
-            WHERE tenant_id = @TenantId AND status = 'approved'
-            GROUP BY device_type
-            """,
-            new { TenantId = tenantId }, cancellationToken: ct))).ToList();
-
-        int pcUsed = counts.Where(x => x.t == "pc").Sum(x => x.c);
-        int mobileUsed = counts.Where(x => x.t == "mobile" || x.t == "tablet").Sum(x => x.c);
+        //   🔴 20260815작3 P1 — 계수와 한도를 단일 메서드로 모았다.
+        //
+        //   ⚠️ **자기 자신은 아직 `pending` 이라 안 세어진다** — 이 전제 위에 아래 비교가 서 있다.
+        //     CountUsedSlotsAsync 가 `status='approved'` 만 세기 때문에 성립한다.
+        //     🔴 계수 대상을 pending 까지 넓히면 승인하려는 그 기기가 자기를 세어
+        //       남은 자리가 있어도 `pcUsed >= pcLimit` 이 참이 되어 **승인이 영원히 막힌다**
+        //       (P0 실측 D-4). I-7 게이트가 이 경계를 지킨다.
+        var (pcLimit, mobileLimit) = await GetLimitsAsync(tenantId, ct);
+        var (pcUsed, mobileUsed) = await CountUsedSlotsAsync(tenantId, ct);
 
         if (devType == "pc" && pcUsed >= pcLimit)
             throw new InvalidOperationException("인증기기 한도초과. 슬롯을 추가하거나 사용하지 않는 기기를 해제해 주세요.");
@@ -587,20 +652,16 @@ public sealed class TenantDeviceService : ITenantDeviceService
         }
 
         // 모바일 한도 확인 — QR 로 들어와도 슬롯 규칙은 같다.
-        var tenant = await _db.QueryFirstOrDefaultAsync<(string? tier, int extra)>(new CommandDefinition(
-            "SELECT subscription_tier AS tier, COALESCE(extra_device_slots, 0) AS extra FROM local_subscription WHERE tenant_id = @TenantId",
-            new { TenantId = tenantId }, cancellationToken: ct));
-
-        var (_, mobileLimit) = GetLimitsForTier(tenant.tier);
-        mobileLimit += tenant.extra * 2;
-
-        var mobileUsed = await _db.ExecuteScalarAsync<int>(new CommandDefinition(
-            """
-            SELECT COUNT(*) FROM tenant_devices
-            WHERE tenant_id = @TenantId AND status = 'approved'
-              AND device_type IN ('mobile','tablet')
-            """,
-            new { TenantId = tenantId }, cancellationToken: ct));
+        //   🔴 20260815작3 P1 — 계수와 한도를 단일 메서드로 모았다.
+        //
+        //   🔴 **이 경로는 휴대기기 칸만 본다. 컴퓨터 칸을 보면 안 된다** (P0 실측 D-1).
+        //     QR 로 들어오는 것은 폰뿐이라 컴퓨터 한도와는 무관하다.
+        //     단일 메서드가 두 값을 다 돌려주지만 **여기서는 모바일 값만 비교한다** —
+        //     "일관성" 을 이유로 컴퓨터 한도까지 검사하게 만들면
+        //     **종전에 통과하던 QR 등록이 갑자기 막힌다.**
+        //     ⇒ 계수를 모으는 일은 호출부의 비교식까지 같게 만드는 일이 아니다.
+        var (_, mobileLimit) = await GetLimitsAsync(tenantId, ct);
+        var (_, mobileUsed) = await CountUsedSlotsAsync(tenantId, ct);
 
         if (mobileUsed >= mobileLimit)
             return (false, "인증기기 한도초과. 관리자에게 문의하세요.", null);
@@ -658,15 +719,215 @@ public sealed class TenantDeviceService : ITenantDeviceService
         return status == "approved";
     }
 
-    // ── 내부 헬퍼 ──
-    private static (int pc, int mobile) GetLimitsForTier(string? tier) => (tier ?? "basic").ToLowerInvariant() switch
+    // ══════════════════════════════════════════════════════════════════
+    // 슬롯 계수·한도 — 🔴 여기가 유일한 자리다 (20260815작3 P1·P2)
+    // ══════════════════════════════════════════════════════════════════
+
+    /// <summary>
+    /// 지금 몇 슬롯을 쓰고 있는가 — <b>슬롯을 세는 유일한 자리</b>.
+    /// </summary>
+    /// <remarks>
+    /// 🔴 <b>종전엔 이 SQL 이 네 곳에 복제돼 있었다</b>(:97 · :245 · :410 · :597).
+    /// 네 곳이 <b>모양까지 서로 달라서</b> 한 곳을 고쳐도 나머지가 옛 규칙으로 돌았다.
+    /// 요금이 걸린 계산이라 갈리면 안 된다.
+    ///
+    /// <para>
+    /// ⚠️ <b>세는 규칙 — 바꾸면 요금이 샌다. P0 스냅샷 ①-4 가 봉인한 현행이다.</b>
+    /// </para>
+    /// <list type="bullet">
+    /// <item><b><c>status='approved'</c> 만 센다.</b> pending·revoked 는 안 센다.
+    ///   🔴 <c>pending</c> 을 넣으면 <see cref="ApproveAsync"/> 가 <b>영원히 막힌다</b> —
+    ///   승인하려는 그 기기가 자기 자신을 세어 버려 한도가 항상 꽉 찬 것으로 보인다
+    ///   (P0 실측 D-4). I-7 게이트가 이것을 지킨다.</item>
+    /// <item><b><c>tablet</c> 은 휴대기기 칸에 합산한다.</b> 사장님 판정 — 컴퓨터 운영체제가 아니다.
+    ///   🔴 등호(<c>= 'mobile'</c>)로 비교하면 <b>태블릿이 어느 칸에도 안 잡혀 공짜로 쓰인다.</b>
+    ///   G-13 게이트가 이것을 지킨다.</item>
+    /// <item>🔴 <b><c>is_main_pc</c> 를 빼지 않는다.</b> 메인PC 도 1대로 센다(사장님 확정).
+    ///   <c>AND is_main_pc = 0</c> 을 넣으면 <b>적게 세어 요금이 샌다</b>(P0 실측 D-3).</item>
+    /// </list>
+    /// </remarks>
+    /// <returns>(컴퓨터 사용 대수, 휴대기기 사용 대수)</returns>
+    private async Task<(int pcUsed, int mobileUsed)> CountUsedSlotsAsync(string tenantId, CancellationToken ct)
     {
-        "basic"   => (5, 3),
-        "pro"     => (10, 8),
-        "premium" => (100, 80),
-        "trial"   => (10, 5),
-        _         => (5, 3)
-    };
+        await EnsureOpenAsync(ct);
+
+        // 한 번의 조회로 두 칸을 다 만든다. 칸별로 따로 물으면 그 사이에 값이 바뀔 수 있다.
+        var counts = (await _db.QueryAsync<(string t, int c)>(new CommandDefinition(
+            """
+            SELECT device_type AS t, COUNT(*) AS c
+            FROM tenant_devices
+            WHERE tenant_id = @TenantId AND status = 'approved'
+            GROUP BY device_type
+            """,
+            new { TenantId = tenantId }, cancellationToken: ct))).ToList();
+
+        return (PcUsedFrom(counts), MobileUsedFrom(counts));
+    }
+
+    /// <summary>컴퓨터 칸으로 세는 것 — <c>pc</c> 하나뿐이다.</summary>
+    /// <remarks>⚠️ internal 인 이유는 시험이 직접 부르기 때문이다(G-13 · I-7).</remarks>
+    internal static int PcUsedFrom(IEnumerable<(string t, int c)> counts)
+        => counts.Where(x => x.t == "pc").Sum(x => x.c);
+
+    /// <summary>
+    /// 휴대기기 칸으로 세는 것 — <c>mobile</c> 과 <c>tablet</c> <b>둘 다</b>.
+    /// 🔴 <c>tablet</c> 을 빼면 그 기기가 공짜로 쓰인다(G-13).
+    /// </summary>
+    /// <remarks>⚠️ internal 인 이유는 시험이 직접 부르기 때문이다(G-13).</remarks>
+    internal static int MobileUsedFrom(IEnumerable<(string t, int c)> counts)
+        => counts.Where(x => x.t == "mobile" || x.t == "tablet").Sum(x => x.c);
+
+    /// <summary>
+    /// 이 회사가 쓸 수 있는 한도는 몇 대인가 — <b>한도를 만드는 유일한 자리</b>.
+    /// </summary>
+    /// <remarks>
+    /// 🔴 <b>종전엔 한도 계산도 네 곳에 복제돼 있었다</b>(:93-94 · :242-243 · :407-408 · :595).
+    /// 계수만 모으고 한도를 안 모으면 <b>여전히 네 곳이 갈린다</b>(P0 실측 D-7).
+    ///
+    /// <para>
+    /// 🔴 <b>숫자는 코드에 없다</b> — <c>device_slot_policy_settings</c>(DB-104)에서 읽는다.
+    /// 요금제는 사업이 정하는 것이라 <b>고칠 때 재배포가 필요하면 안 된다</b>(헌법 #11).
+    /// 상수로 옮기는 것은 설정화가 아니다 — 자리만 옮긴 것이다(DB-96 이 같은 판단을 했다).
+    /// </para>
+    ///
+    /// <para>
+    /// 추가슬롯: <b>1개 = 컴퓨터 +1 · 휴대기기 +1</b> (사장님 확정 "추가슬롯 1+1당 1만원").
+    /// ⚠️ 종전 코드는 휴대기기에 <c>extra * 2</c> 를 줬다. 배수도 설정에서 읽는다.
+    /// </para>
+    /// </remarks>
+    private async Task<(int pcLimit, int mobileLimit)> GetLimitsAsync(string tenantId, CancellationToken ct)
+    {
+        await EnsureOpenAsync(ct);
+
+        var tenant = await _db.QueryFirstOrDefaultAsync<(string? tier, int extra)>(new CommandDefinition(
+            "SELECT subscription_tier AS tier, COALESCE(extra_device_slots, 0) AS extra FROM local_subscription WHERE tenant_id = @TenantId",
+            new { TenantId = tenantId }, cancellationToken: ct));
+
+        // 설정표를 한 번에 읽는다 — 열쇠마다 따로 물으면 왕복이 늘어난다.
+        var settings = await LoadSlotPolicyAsync(tenantId, ct);
+
+        return ResolveLimits(tenant.tier, tenant.extra, settings);
+    }
+
+    /// <summary>
+    /// 설정값 + 요금제 + 추가슬롯 → <b>실제 한도</b>. 판정의 전부가 여기 있다.
+    /// </summary>
+    /// <remarks>
+    /// 🔴 <b>DB 를 타지 않는 순수 계산</b>으로 떼어 둔 이유는 <b>시험 때문</b>이다(G-8).
+    ///
+    /// <para>
+    /// 작업지시서 §5 가 못 박았다 — <i>"코드에 리터럴이 없는지"</i> 를 보는 게이트는
+    /// <b>상수를 옮기면 통과하는 가짜</b>다. 8/15 메신저 사고(<c>ChatWindowGuardTests</c> 가
+    /// 글자만 봐서 통과시켰다)를 근거로 든 지적이다.
+    /// ⇒ 게이트가 물어야 할 것은 <b>"설정값을 바꾸면 실제 한도가 바뀌는가"</b> 하나다.
+    /// 그러려면 시험이 이 판정을 <b>직접 부를 수 있어야</b> 한다.
+    /// </para>
+    /// </remarks>
+    /// <param name="rawTier">저장된 요금제 이름 원문(정규화 전).</param>
+    /// <param name="extraSlots">구매한 추가슬롯 개수.</param>
+    /// <param name="settings">DB-104 설정표. 비어 있으면 종전 숫자로 떨어진다.</param>
+    internal static (int pcLimit, int mobileLimit) ResolveLimits(
+        string? rawTier, int extraSlots, IReadOnlyDictionary<string, int> settings)
+    {
+        var tier = NormalizeTier(rawTier);
+        var (fbPc, fbMobile) = FallbackLimits(tier);
+
+        var pcLimit     = Pick(settings, $"tier.{tier}.pc_limit",     fbPc);
+        var mobileLimit = Pick(settings, $"tier.{tier}.mobile_limit", fbMobile);
+
+        // 🔴 1+1 — 사장님 확정. 배수도 설정값이라 사업이 바뀌면 값만 갈아끼운다.
+        var pcPerSlot     = Pick(settings, "extra_slot.pc_per_slot",     1);
+        var mobilePerSlot = Pick(settings, "extra_slot.mobile_per_slot", 1);
+
+        pcLimit     += extraSlots * pcPerSlot;
+        mobileLimit += extraSlots * mobilePerSlot;
+
+        return (pcLimit, mobileLimit);
+    }
+
+    /// <summary>기기 슬롯 기준값 표(DB-104)를 통째로 읽는다.</summary>
+    /// <remarks>
+    /// ⚠️ 표가 아직 없는 DB(마이그레이션 전)에서도 죽지 않아야 한다 —
+    /// 로그인 경로에서 불리므로 여기서 던지면 <b>고객이 로그인을 못 한다.</b>
+    /// 못 읽으면 빈 사전을 돌려주고 호출부가 종전 숫자로 떨어진다.
+    /// </remarks>
+    private async Task<Dictionary<string, int>> LoadSlotPolicyAsync(string tenantId, CancellationToken ct)
+    {
+        try
+        {
+            var rows = await _db.QueryAsync<(string k, int v)>(new CommandDefinition(
+                """
+                SELECT policy_key AS k, policy_value AS v
+                FROM device_slot_policy_settings
+                WHERE tenant_id = @TenantId
+                """,
+                new { TenantId = tenantId }, cancellationToken: ct));
+
+            var map = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+            foreach (var (k, v) in rows) map[k] = v;
+            return map;
+        }
+        catch (Exception ex)
+        {
+            // 🔴 헌법 #15 — 빈 catch 금지. 왜 종전 숫자로 떨어졌는지 남긴다.
+            //   ⚠️ 종전엔 Debug.WriteLine 이었다 — Release 에서 사라져 **운영에 아무 기록도 안 남았다**(B-5).
+            //     운영에서 사라지는 기록은 기록이 아니다. 요금이 걸린 신호라 더욱.
+            _logger.LogWarning(ex,
+                "[TenantDeviceService] 기기 슬롯 기준값 표(device_slot_policy_settings)를 못 읽었다 — "
+                + "종전 숫자(안전망)로 진행한다. tenant={TenantId}", tenantId);
+            return new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        }
+    }
+
+    private static int Pick(IReadOnlyDictionary<string, int> settings, string key, int fallback)
+        => settings.TryGetValue(key, out var v) ? v : fallback;
+
+    /// <summary>
+    /// 요금제 이름을 설정 열쇠로 쓸 수 있게 정리한다.
+    /// </summary>
+    /// <remarks>
+    /// 🔴 <b><c>enterprise</c> 가 실제로 발급되는 최상위 값이다</b>(명세서 §17-4 · PI-14).
+    /// 코드만 <c>premium</c> 이라 쓰고 있었고 DDL·시리얼 발급·백오피스는 전부 <c>enterprise</c> 라,
+    /// 최상위 고객이 갈래를 못 찾아 <b>basic 한도로 떨어지고 있었다.</b>
+    /// ⚠️ <c>premium</c> 도 살려 둔다 — 옛 데이터에 남아 있을 수 있다(P0 실측 D-16).
+    /// 모르는 값은 <c>default</c> 로 보내 종전 <c>_ =&gt; (5,3)</c> 과 같게 만든다.
+    /// </remarks>
+    private static string NormalizeTier(string? tier)
+    {
+        var t = (tier ?? "basic").Trim().ToLowerInvariant();
+        return t switch
+        {
+            "basic" or "pro" or "enterprise" or "premium" or "trial" => t,
+            _ => "default"
+        };
+    }
+
+    /// <summary>
+    /// 설정표를 못 읽었을 때 쓰는 숫자 — <b>종전 코드와 한 글자도 다르지 않다.</b>
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// ⚠️ 이것은 <b>설정의 대체물이 아니라 안전망</b>이다. 마이그레이션이 아직 안 돈 DB 나
+    /// 표가 비어 있는 회사에서 <b>로그인이 죽지 않게</b> 하는 것이 유일한 목적이다.
+    /// 🔴 이 숫자를 고쳐서 요금제를 바꾸려 하면 안 된다 — 설정표(DB-104)를 고쳐야 한다.
+    /// 정상 경로에서는 이 값이 <b>쓰이지 않는다</b>(G-8 이 그것을 시험한다).
+    /// </para>
+    /// <para>
+    /// 🔴 <b>2026-08-16 (20260816작1) — 숫자를 여기 적지 않는다.</b>
+    /// 종전엔 이 <c>switch</c> 안에 <c>(5,3)·(10,8)…</c> 이 직접 적혀 있어,
+    /// 회사 생성 시드(<see cref="SlotPolicyDefaults"/>)와 <b>같은 숫자가 두 벌</b>이 됐다.
+    /// 한쪽만 고치면 <b>신규 고객과 안전망이 서로 다른 한도로 돈다</b> —
+    /// 이 차수가 계수 8곳을 모으며 없앤 바로 그 병이다.
+    /// ⇒ 안전망도 <b>시드와 같은 정의를 읽는다.</b> 갈라질 수가 없다(G-20).
+    /// </para>
+    /// </remarks>
+    private static (int pc, int mobile) FallbackLimits(string normalizedTier)
+    {
+        // 모르는 요금제는 NormalizeTier 가 이미 "default" 로 보낸다(종전 `_ => (5,3)` 과 동일).
+        var pc     = SlotPolicyDefaults.Value($"tier.{normalizedTier}.pc_limit");
+        var mobile = SlotPolicyDefaults.Value($"tier.{normalizedTier}.mobile_limit");
+        return (pc, mobile);
+    }
 
     private async Task LogLoginAsync(string tenantId, string userId, string ip, string deviceId, string result, CancellationToken ct)
     {
@@ -708,9 +969,14 @@ public sealed class TenantDeviceService : ITenantDeviceService
     ///
     ///   ⚠️ null 을 돌려주는 경우: 클라이언트가 종류를 **안 보냈을 때**.
     ///     갱신 경로에서 COALESCE 로 받아 **기존 값을 지우지 않게** 하기 위함이다.
-    ///     신규 등록 경로는 호출부에서 ?? "pc" 로 받는다 — 값이 아예 없으면 종전 동작을
-    ///     유지한다(옛 화면 호환). 값이 왔는데 모르는 값일 때만 휴대기기로 본다.
-    private static string? NormalizeDeviceType(string? raw)
+    ///
+    ///   🔴 2026-08-15 20260815작3 P1 (I-6) — **이 자리 주석이 낡았다. 정정한다.**
+    ///     [옛 문장] *"신규 등록 경로는 호출부에서 ?? "pc" 로 받는다"*
+    ///     [지금] 신규 등록 경로는 **`?? "mobile"`** 로 받는다. 폴백을 싼 칸으로 돌렸다.
+    ///     컴퓨터 칸이 더 비싸므로, 종류를 모를 때 컴퓨터로 세면 고객이 쓰지도 않은 자리에
+    ///     돈을 낸다. ⇒ 값이 아예 없든 모르는 값이든 **똑같이 휴대기기**로 간다.
+    /// <remarks>⚠️ internal 인 이유는 시험이 직접 부르기 때문이다(I-6).</remarks>
+    internal static string? NormalizeDeviceType(string? raw)
     {
         if (string.IsNullOrWhiteSpace(raw)) return null;
 
