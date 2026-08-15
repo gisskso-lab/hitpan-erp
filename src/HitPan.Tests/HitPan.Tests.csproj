@@ -18,6 +18,11 @@
   <ItemGroup>
     <ProjectReference Include="..\HitPan.Application\HitPan.Application.csproj" />
     <ProjectReference Include="..\HitPan.Infrastructure\HitPan.Infrastructure.csproj" />
+    <!-- 🔴 20260816작1 (G-19~G-22) — 회사 생성 시드를 **실제로 불러** 검사하기 위해 참조한다.
+         R-1 은 "글자는 맞는데 신규 고객에게 안 간다" 는 결함이었고, 게이트 13/13 이
+         전부 통과하고도 살아남았다. 소스 글자를 읽는 시험으로는 절대 못 잡는다.
+         ⇒ 시험이 CompanyBootstrapProvisioner 를 직접 불러 **표에 행이 생기는지 눈으로 본다.** -->
+    <ProjectReference Include="..\HitPan.API\HitPan.API.csproj" />
   </ItemGroup>
 
   <ItemGroup>

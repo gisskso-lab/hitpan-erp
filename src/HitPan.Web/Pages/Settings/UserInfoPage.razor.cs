@@ -122,6 +122,15 @@ public partial class UserInfoPage : ComponentBase, IDisposable
             {
                 licenseKey = _lastVerifiedLicenseKey,
                 fingerprint,
+                // 🔴 2026-08-16 B-1 최종 판정 — **지금은 도달하지 않는 줄이다.**
+                //   `_lastVerifiedLicenseKey` 는 :99 에서 "" 로 시작해 **어디서도 대입되지 않는다**
+                //   (실측: 이 파일 4곳이 전부이고 대입은 :143 의 초기화뿐).
+                //   ⇒ :103 의 조기 return 에 **항상** 걸려 이 요청 자체가 나가지 않는다.
+                //   그래서 이 "pc" 는 요금을 틀리게 하지 않는다(폰이 PC 칸을 먹는 일은 없다).
+                //
+                //   ⚠️ 다만 **되살리는 순간 결함이 된다.** 이 화면에 시리얼 입력을 다시 넣으면
+                //     휴대기기에서 등록해도 컴퓨터 칸으로 간다. 되살릴 때
+                //     `hitpanDevice.getDeviceType()` 으로 바꿔야 한다(다른 경로는 전부 그렇게 한다).
                 deviceType = "pc",
                 deviceName = $"PC ({DateTime.Now:MMdd-HHmm})",
                 userAgent,

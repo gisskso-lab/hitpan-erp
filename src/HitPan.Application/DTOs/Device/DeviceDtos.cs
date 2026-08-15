@@ -29,12 +29,38 @@ public class DeviceListDto
 /// <summary>
 /// 로그인 시 클라이언트가 전달하는 기기 정보.
 /// - Fingerprint: 브라우저 기반 SHA-256 또는 간이 해시
-/// - DeviceType: pc / mobile / tablet
+/// - DeviceType: pc / mobile / tablet — <b>안 보내면 null</b>
 /// </summary>
 public class RegisterDeviceRequest
 {
     public string Fingerprint { get; set; } = "";
-    public string DeviceType { get; set; } = "pc";
+
+    /// <summary>
+    /// 기기 종류. <b>클라이언트가 안 보내면 <c>null</c></b> 이다.
+    /// </summary>
+    /// <remarks>
+    /// 🔴 2026-08-15 20260815작3 P1 (I-6) — 기본값 <c>"pc"</c> 를 없앴다.
+    ///
+    /// <para>
+    /// [무엇이 문제였나] 이 자리의 <c>= "pc"</c> 는 <b>세 번째 폴백</b>이었다.
+    /// AuthController 와 TenantDeviceService 의 <c>?? "pc"</c> 두 곳을 고쳐도
+    /// <b>여기가 살아 있으면 아무것도 안 바뀐다</b> — 역직렬화가 값을 안 채우면
+    /// 이 기본값이 그대로 <c>"pc"</c> 로 들어가기 때문이다.
+    /// </para>
+    ///
+    /// <para>
+    /// [왜 null 인가] 종류를 모를 때 컴퓨터(비싼 칸)로 세면 <b>고객이 쓰지도 않은 자리에 돈을 낸다.</b>
+    /// null 로 두면 판정이 <c>NormalizeDeviceType</c> 한 곳으로 모이고,
+    /// 거기서 <b>모르는 값은 휴대기기</b>(고객에게 유리한 쪽)로 간다.
+    /// </para>
+    ///
+    /// <para>
+    /// ⚠️ null 은 <b>갱신 경로에서도 뜻이 있다</b> — COALESCE 로 받아 <b>기존 종류를 지우지 않는다.</b>
+    /// 종류를 못 보내는 옛 화면이 이미 등록된 기기의 칸을 덮어쓰지 않게 하는 장치다.
+    /// </para>
+    /// </remarks>
+    public string? DeviceType { get; set; }
+
     public string? DeviceName { get; set; }
     public string? UserAgent { get; set; }
 }

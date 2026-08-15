@@ -87,10 +87,22 @@ public class AuthController : ControllerBase
                         //     접속 경로를 보지 않고 "내가 어디서 도나" 를 보므로 흔들리지 않는다.
                         var deviceName = request.DeviceName;
 
+                        // 🔴 2026-08-15 20260815작3 P1 (I-6) — `?? "pc"` 폴백을 없앴다.
+                        //
+                        //   [무엇이 문제였나] 종류를 안 보내는 클라이언트가 오면 여기서 **미리 `pc` 로 채워**
+                        //     넘겼다. 그래서 TenantDeviceService 의 *"모르는 값은 휴대기기로 본다"* 는
+                        //     원칙(NormalizeDeviceType)이 **이 경로에서는 도달조차 하지 못했다.**
+                        //     컴퓨터 칸이 더 비싸므로 **고객이 쓰지도 않은 자리에 돈을 냈다.**
+                        //
+                        //   [고침] 값을 채우지 않고 **그대로 넘긴다.** 판정은 서비스 한 곳에서만 한다.
+                        //     null 이면 서비스가 휴대기기로 본다(고객에게 유리한 쪽).
+                        //
+                        //   ⚠️ 폴백이 **두 곳**이었다 — 여기와 TenantDeviceService 신규 등록 경로.
+                        //     한 곳만 고치면 아무것도 안 바뀐다(P0 실측 D-9). 두 곳을 같이 고쳤다.
                         var deviceReq = new RegisterDeviceRequest
                         {
                             Fingerprint = request.DeviceFingerprint!,
-                            DeviceType = request.DeviceType ?? "pc",
+                            DeviceType = request.DeviceType,
                             DeviceName = deviceName,
                             UserAgent = Request.Headers["User-Agent"].ToString()
                         };
