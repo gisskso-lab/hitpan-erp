@@ -18,7 +18,62 @@
 @inject ISnackbar Snackbar
 @inject ILogger<DeviceAuthGate> _logger
 
-@if (_blocked)
+@if (_awaitingApproval)
+{
+    @* ── 🔴 승인 대기 관문 (20260816작2 · 사장님 전결) ──────────────────────
+       사장님 설계: 로그인 → [디바이스 인증] → 히트판 ERP.
+         "등록되지 않은 기기입니다. 등록을 하시겠습니까?"
+           → 메인PC 에 "0000기기가 등록을 요청합니다" → 대표 Y/N
+
+       이 기기는 이미 로그인은 통과했고 `pending` 으로 들어와 있다(= 신청은 끝났다).
+       여기서는 **대표가 누를 때까지 기다린다.** 슬롯은 아직 안 먹는다.
+    *@
+    <div class="hp-device-gate">
+        <MudPaper Elevation="8" Class="pa-6" Style="max-width:460px;width:100%;">
+            <div class="d-flex align-center mb-4">
+                <MudIcon Icon="@Icons.Material.Filled.HourglassTop" Color="Color.Primary"
+                         Style="font-size:32px;" Class="mr-2" />
+                <MudText Typo="Typo.h6">기기 등록을 요청했습니다</MudText>
+            </div>
+
+            <MudText Typo="Typo.body1" Class="mb-2">
+                대표님 컴퓨터에서 <b>등록을 허락</b>하면 바로 시작됩니다.
+            </MudText>
+
+            @if (!string.IsNullOrEmpty(_confirmCode))
+            {
+                @* 🔴 대표 화면에도 같은 번호가 뜬다 — 대표가 눈으로 대조한다(사장님 결재).
+                     같은 기종이 여러 대여도 이 번호로 어느 것인지 갈린다. *@
+                <MudPaper Outlined="true" Class="pa-4 my-4 d-flex flex-column align-center">
+                    <MudText Typo="Typo.body2" Class="mb-1">확인 번호</MudText>
+                    <MudText Typo="Typo.h3" Color="Color.Primary"
+                             Style="letter-spacing:.35rem;font-weight:700;">@_confirmCode</MudText>
+                    <MudText Typo="Typo.caption" Class="mt-2" Align="Align.Center">
+                        대표님 화면에 같은 번호가 보이면 그것이 이 기기입니다.
+                    </MudText>
+                </MudPaper>
+            }
+
+            <MudAlert Severity="Severity.Info" Dense="true" Class="mb-3">
+                이 화면을 열어 두시면 허락되는 즉시 넘어갑니다.
+            </MudAlert>
+
+            <MudButton Variant="Variant.Text" Color="Color.Default" FullWidth="true"
+                       Disabled="_checking" OnClick="CheckGateAsync">
+                @if (_checking)
+                {
+                    <MudProgressCircular Size="Size.Small" Indeterminate="true" Class="mr-2" />
+                    <span>확인하는 중…</span>
+                }
+                else
+                {
+                    <span>지금 확인</span>
+                }
+            </MudButton>
+        </MudPaper>
+    </div>
+}
+else if (_blocked)
 {
     <div class="hp-device-gate">
         <MudPaper Elevation="8" Class="pa-6" Style="max-width:460px;width:100%;">
@@ -75,19 +130,102 @@
     private string _inputKey = "";
     private string? _error;
 
+    // ── 🔴 승인 대기 관문 (20260816작2) ──
+    private bool _awaitingApproval;
+    private bool _checking;
+    private string? _confirmCode;
+    private System.Threading.Timer? _poll;
+
     protected override void OnInitialized()
     {
         _blocked = DeviceAuthState.IsBlocked;
+        _awaitingApproval = DeviceAuthState.IsAwaitingApproval;
         DeviceAuthState.Changed += OnStateChanged;
+
+        if (_awaitingApproval) StartPolling();
     }
 
     private void OnStateChanged() => InvokeAsync(() =>
     {
         _blocked = DeviceAuthState.IsBlocked;
+
+        var wasAwaiting = _awaitingApproval;
+        _awaitingApproval = DeviceAuthState.IsAwaitingApproval;
+
+        if (_awaitingApproval && !wasAwaiting) StartPolling();
+        else if (!_awaitingApproval && wasAwaiting) StopPolling();
+
         StateHasChanged();
     });
 
-    public void Dispose() => DeviceAuthState.Changed -= OnStateChanged;
+    /// 대표가 [예] 를 누르는 순간 넘어가야 한다 — 직원이 새로고침을 반복하게 두지 않는다.
+    ///   ⚠️ 간격을 너무 좁히면 대기 중인 기기가 서버를 계속 두드린다. 3초면 사람이 기다릴 만하다.
+    private void StartPolling()
+    {
+        StopPolling();
+        _poll = new System.Threading.Timer(
+            async _ => await InvokeAsync(CheckGateAsync),
+            null, TimeSpan.FromSeconds(3), TimeSpan.FromSeconds(3));
+    }
+
+    private void StopPolling()
+    {
+        _poll?.Dispose();
+        _poll = null;
+    }
+
+    /// 이 기기 지금 쓸 수 있나 — 서버에 묻는다.
+    private async Task CheckGateAsync()
+    {
+        if (_checking) return;
+        _checking = true;
+
+        try
+        {
+            var deviceId = await JS.InvokeAsync<string?>("hitpanDevice.getDeviceId");
+            var url = string.IsNullOrWhiteSpace(deviceId)
+                ? "api/devices/gate-status"
+                : $"api/devices/gate-status?deviceId={Uri.EscapeDataString(deviceId)}";
+
+            var body = await Http.GetFromJsonAsync<GateStatus>(url);
+            if (body is null) return;
+
+            _confirmCode = body.ConfirmCode;
+
+            if (body.Approved)
+            {
+                // 대표가 허락했다 — 슬롯은 이 순간 1개 늘었다.
+                StopPolling();
+                DeviceAuthState.MarkAllowed();
+                Snackbar.Add("기기 등록이 허락되었습니다.", Severity.Success);
+
+                // 막혀서 못 받은 자료를 이제 받아야 한다.
+                await JS.InvokeVoidAsync("location.reload");
+            }
+        }
+        catch (Exception ex)
+        {
+            // 통신이 잠시 끊겨도 관문을 풀지 않는다 — 다음 차례에 다시 묻는다.
+            _logger.LogWarning(ex, "기기 관문 상태 확인 실패");
+        }
+        finally
+        {
+            _checking = false;
+            StateHasChanged();
+        }
+    }
+
+    public void Dispose()
+    {
+        StopPolling();
+        DeviceAuthState.Changed -= OnStateChanged;
+    }
+
+    private sealed class GateStatus
+    {
+        public bool Approved { get; set; }
+        public string? ConfirmCode { get; set; }
+    }
 
     private async Task OnKeyDown(KeyboardEventArgs e)
     {

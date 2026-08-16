@@ -18,6 +18,12 @@ public sealed class LoginRequestDto
     public string? DeviceFingerprint { get; set; }
     public string? DeviceType { get; set; }
     public string? DeviceName { get; set; }
+
+    // 🔴 장비넘버 — 지난번에 서버가 내려준 이 기기의 번호 (20260816작2 · 명세서 §4-4).
+    //   지문보다 **먼저** 이 값으로 기기를 찾는다. 브라우저가 바뀌어도 안 바뀌므로
+    //   Edge ↔ Chrome 을 오가도 같은 줄이다 = 슬롯이 새로 안 는다.
+    //   ⚠️ 서버 LoginRequest.DeviceId 와 **이름이 같아야** 실려 간다(DTO 가 두 벌이다).
+    public string? DeviceId { get; set; }
 }
 
 public sealed class LoginApiResponse
@@ -36,6 +42,12 @@ public sealed class LoginApiResponse
     //   방식 = (a) 자동 등록 후 통지: 처음 등록된 신규 기기면 로그인 후 사용자에게 알린다.
     public bool DeviceNewlyRegistered { get; set; }
     public string? DeviceNotice { get; set; }
+
+    // 🔴 이 기기가 아직 승인 대기인가 (20260816작2 — 사장님 전결).
+    //   true 면 Login.razor 가 [디바이스 인증] 관문을 띄우고 ERP 진입을 막는다.
+    //   ⚠️ 이 칸은 서버 LoginResponse.DeviceAwaitingApproval 과 **이름이 같아야** 채워진다.
+    //     DTO 가 두 벌(서버/웹)이라 한쪽만 고치면 값이 조용히 false 로 온다.
+    public bool DeviceAwaitingApproval { get; set; }
 
     // 헌법 #24: 약관 v2.0.0 미동의 시 true (Login.razor에서 /terms 강제 이동)
     public bool RequiresTermsConsent { get; set; }

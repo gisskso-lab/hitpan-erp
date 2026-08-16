@@ -33,8 +33,44 @@ public static class DeviceAuthState
     /// 인증 번호를 넣어 통과했다.
     public static void MarkAllowed()
     {
-        if (!_blocked) return;
+        // 🔴 20260816작2 — 승인 대기도 함께 푼다.
+        //   대표가 [예] 를 눌러 통과하는 길과 인증번호를 넣어 통과하는 길이 **둘 다** 여기로 온다.
+        //   한쪽만 풀면 통과했는데도 관문이 그대로 남는다.
+        if (!_blocked && !_awaitingApproval) return;
         _blocked = false;
+        _awaitingApproval = false;
+        Changed?.Invoke();
+    }
+
+    // ══════════════════════════════════════════════════════════════
+    // 🔴 승인 대기 — 로그인과 ERP 사이의 관문 (20260816작2 · 사장님 전결)
+    // ══════════════════════════════════════════════════════════════
+
+    private static bool _awaitingApproval;
+
+    /// <summary>
+    /// 이 기기가 <b>대표의 허락을 기다리는 중</b>인가.
+    ///
+    /// <para>
+    /// 사장님 설계: 로그인 → <b>[디바이스 인증]</b> → 히트판 ERP.
+    /// 로그인은 통과했지만(401 을 내지 않는다) 아직 업무 화면에 들어가면 안 되는 상태다.
+    /// </para>
+    ///
+    /// <para>
+    /// ⚠️ <see cref="IsBlocked"/> 와 다르다. 그쪽은 <i>"인증 번호를 받아 오세요"</i>(직원이 할 일이 있다),
+    /// 이쪽은 <i>"대표님이 허락하면 바로 시작됩니다"</i>(직원은 기다리기만 하면 된다).
+    /// 둘을 합치면 직원에게 <b>할 수 없는 일을 시키는 안내</b>가 뜬다.
+    /// </para>
+    ///
+    /// <para>🔴 이 상태에서도 <b>슬롯은 아직 안 먹는다.</b> 대표가 [예] 를 누를 때 1개 는다.</para>
+    /// </summary>
+    public static bool IsAwaitingApproval => _awaitingApproval;
+
+    /// 로그인 응답이 "이 기기는 승인 대기" 라고 알려줬다.
+    public static void MarkAwaitingApproval()
+    {
+        if (_awaitingApproval) return;   // 이미 알고 있으면 화면을 흔들지 않는다
+        _awaitingApproval = true;
         Changed?.Invoke();
     }
 }

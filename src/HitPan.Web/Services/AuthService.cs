@@ -38,6 +38,7 @@ public sealed class AuthService : IAuthService
             string? fingerprint = null;
             string? deviceType = null;
             string? deviceName = null;
+            string? deviceId = null;
             try
             {
                 fingerprint = await _js.InvokeAsync<string>("hitpanDevice.getFingerprint");
@@ -45,6 +46,19 @@ public sealed class AuthService : IAuthService
                 // 🔴 2026-08-10 [4] D-4 봉합 — 종전엔 이 값을 아무도 보내지 않아
                 //   기기 목록이 전부 "(이름없음)" 이었고 메인PC 표식도 이름 없이 만들어졌다.
                 deviceName = await _js.InvokeAsync<string>("hitpanDevice.getDeviceName");
+
+                // 🔴 2026-08-16 20260816작2 — **장비넘버를 도로 보낸다** (명세서 §4-4).
+                //
+                //   [무엇이 없었나] 서버가 장비넘버를 내려주고(:89 아래에서 저장한다),
+                //     기기가 localStorage 에 보관까지 하는데 **다음 접속에 도로 보내지 않았다.**
+                //     읽는 함수(getDeviceId)는 있는데 **부르는 쪽이 0곳**이었다(명세서 §2-2 실측).
+                //
+                //   [무엇이 났나] 서버는 매번 지문으로만 기기를 찾았고, 지문은 브라우저가 바뀌면
+                //     달라진다(_envSeed 가 userAgent 를 쓴다) ⇒ 같은 PC 인데 Edge 와 Chrome 이
+                //     **서로 다른 기기**로 잡혀 슬롯을 두 번 먹었다. 사장님이 실측하신 그 증상이다.
+                //
+                //   ⇒ 이 한 줄이 사장님 오더 *"100번을 접속해도 한번만"* 을 성립시킨다.
+                deviceId = await _js.InvokeAsync<string?>("hitpanDevice.getDeviceId");
             }
             catch { /* 지문 수집 실패 시 기본 로그인 플로우로 진행 */ }
 
@@ -56,7 +70,8 @@ public sealed class AuthService : IAuthService
                     Password = password,
                     DeviceFingerprint = fingerprint,
                     DeviceType = deviceType,
-                    DeviceName = deviceName
+                    DeviceName = deviceName,
+                    DeviceId = deviceId
                 },
                 cancellationToken: ct);
 

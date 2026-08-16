@@ -104,22 +104,56 @@ public class AuthController : ControllerBase
                             Fingerprint = request.DeviceFingerprint!,
                             DeviceType = request.DeviceType,
                             DeviceName = deviceName,
-                            UserAgent = Request.Headers["User-Agent"].ToString()
+                            UserAgent = Request.Headers["User-Agent"].ToString(),
+
+                            // 🔴 20260816작2 — 기기가 보관해 둔 장비넘버를 그대로 넘긴다 (명세서 §4-4).
+                            //   이 한 줄이 빠지면 서비스가 지문으로만 찾게 되어
+                            //   **브라우저를 바꿀 때마다 새 슬롯**을 먹는다(사장님 실측 증상).
+                            //   ⚠️ 칸만 만들고 넘기지 않으면 아무것도 안 바뀐다 —
+                            //     `hardware_id` 가 1차에서 딱 그렇게 됐다(컬럼만 있고 배선 0곳).
+                            DeviceId = request.DeviceId
                         };
 
                         var (allowed, reason, deviceId, newlyRegistered) = await _deviceService.RegisterOrRefreshAsync(
                             response.TenantId, userId, deviceReq, ipAddress, ct);
 
-                        if (!allowed)
+                        // 🔴 2026-08-16 20260816작2 P0 봉합 — **승인 대기는 로그인 거부가 아니다.**
+                        //
+                        //   [무엇이 났나] TenantDeviceService 는 승인제가 켜지면 allowed=false 를 주면서
+                        //     주석에 *"이것은 로그인 거부가 아니다"* 라고 적어 뒀다. 그런데 여기서는
+                        //     allowed=false 를 **전부 401 로** 바꿨다. ⇒ 승인제를 켜는 순간
+                        //     **새 기기가 로그인조차 못 한다.**
+                        //
+                        //   [왜 결함인가] 사장님 결재(20260815 §3)와 정면으로 어긋난다 —
+                        //     *"한도 초과. **401 을 내지 않는다.** 로그인은 통과, 중간 화면에서 제어"*
+                        //     로그인이 막히면 사장님이 설계하신 [디바이스 인증 화면] 에 **도달조차 못 한다.**
+                        //     화면을 만들어도 아무도 그 화면을 볼 수 없다.
+                        //
+                        //   [고침] 승인 대기(deviceId 가 나온 경우)는 **통과시키고 상태만 실어 보낸다.**
+                        //     화면이 그 상태를 보고 관문을 띄운다.
+                        //     ⚠️ deviceId 가 null 이면 등록 자체가 안 된 것(폐기된 기기 등) → 종전대로 401.
+                        //       이 갈래를 없애면 **폐기한 기기가 다시 들어온다.**
+                        var deviceAwaitingApproval = !allowed && !string.IsNullOrEmpty(deviceId);
+
+                        if (!allowed && !deviceAwaitingApproval)
                         {
-                            // 기기 한도 초과·폐기 등 → 로그인 거부 (작1 F3: "등록된 기기가 아닙니다" 명확한 사유)
+                            // 폐기된 기기 등 → 로그인 거부 (작1 F3: "등록된 기기가 아닙니다" 명확한 사유)
                             return Unauthorized(new { message = reason });
                         }
 
                         response.DeviceId = deviceId;
                         // 작1 F3 — 처음 등록된 신규 기기면 클라이언트가 안내 노출(첫 접속 인지)
                         response.DeviceNewlyRegistered = newlyRegistered;
-                        if (newlyRegistered)
+
+                        // 🔴 관문이 읽는 값 — 이 기기가 아직 승인 대기인가.
+                        //   true 면 화면이 [디바이스 인증] 관문을 띄우고 ERP 진입을 막는다.
+                        response.DeviceAwaitingApproval = deviceAwaitingApproval;
+
+                        if (deviceAwaitingApproval)
+                            response.DeviceNotice = string.IsNullOrWhiteSpace(reason)
+                                ? "기기 승인 대기 중입니다."
+                                : reason;
+                        else if (newlyRegistered)
                             response.DeviceNotice = "이 기기가 새 기기로 등록되었습니다.";
                     }
                 }

@@ -24,6 +24,20 @@ public class DeviceListDto
     /// 설치를 맡았던 직원이 퇴사하면 표식 없이는 아무도 어느 PC 인지 모른다.
     /// </summary>
     public bool IsMainPc { get; set; }
+
+    /// <summary>
+    /// 🔴 등록 **확인번호** 4자리 — 대표가 눈으로 대조한다 (20260816작2 · 사장님 결재).
+    ///
+    /// 대표 화면: *"{기기이름} (인증번호 <b>4726</b>) 가 등록을 요청합니다"*
+    /// 신청한 기기 화면에도 **같은 번호**가 뜬다.
+    ///
+    /// 기기 이름만으로는 사무실의 같은 기종 PC·폰 두 대가 구분되지 않는다.
+    /// 구분이 안 되면 대표는 아무거나 누르게 되고 승인제가 무의미해진다.
+    ///
+    /// ⚠️ 승인 대기(pending)일 때만 값이 있다. 이미 승인된 기기는 대조할 일이 없다.
+    /// ⚠️ 비밀번호가 아니다 — 계산으로 나오며 저장하지 않는다. 자세한 것은 <see cref="Common.DeviceConfirmCode"/>.
+    /// </summary>
+    public string? ConfirmCode { get; set; }
 }
 
 /// <summary>
@@ -63,6 +77,19 @@ public class RegisterDeviceRequest
 
     public string? DeviceName { get; set; }
     public string? UserAgent { get; set; }
+
+    /// <summary>
+    /// 🔴 <b>장비넘버</b> — 이 기기가 지난번에 받아 보관해 둔 자기 번호 (20260816작2 · 명세서 §4-3·§4-4).
+    ///
+    /// <para>
+    /// 값이 있으면 <b>지문보다 먼저</b> 이것으로 기존 기기를 찾는다.
+    /// 지문은 브라우저가 바뀌면 달라지지만(<c>_envSeed</c> 가 userAgent 를 쓴다) 이 번호는 안 바뀐다
+    /// ⇒ 같은 PC 에서 Edge ↔ Chrome 을 오가도 <b>한 줄</b>이다.
+    /// </para>
+    ///
+    /// <para>⚠️ 처음 오는 기기·옛 기기는 <c>null</c> 이다 — 그때는 종전대로 지문으로 찾는다(호환).</para>
+    /// </summary>
+    public string? DeviceId { get; set; }
 }
 
 /// <summary>

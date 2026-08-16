@@ -1,3 +1,4 @@
+using HitPan.Application.Common;
 using HitPan.Application.DTOs.Device;
 using HitPan.Application.Interfaces;
 // 모바일 등록 QR 생성 (20260811작1 (D))
@@ -82,6 +83,41 @@ public sealed class DeviceController : ControllerBase
         var isLoopback = remote is not null && System.Net.IPAddress.IsLoopback(remote);
 
         return Ok(new { isMainPc = !viaTunnel && isLoopback });
+    }
+
+    /// <summary>
+    /// 🔴 [디바이스 인증] 관문이 묻는다 — 이 기기 지금 쓸 수 있나? (20260816작2 · 사장님 전결)
+    ///
+    /// 사장님 설계: *"로그인 후 로딩화면에 기기슬롯 과정을 넣으면 되잖아"*
+    ///   로그인은 통과했고(401 을 내지 않는다 — 20260815 §3 결재), 화면이 여기에 물어
+    ///   **승인됐으면 그대로 ERP 로, 아니면 관문에 머문다.**
+    ///
+    /// 승인 대기 중인 기기가 **자기 상태를 확인하려고** 반복해서 부른다.
+    /// 대표가 [예] 를 누르는 순간 approved=true 로 바뀌고, 화면은 그때 ERP 로 넘어간다.
+    ///
+    /// ⚠️ 로그인은 했으므로 인증은 있다. 남의 기기는 물을 수 없다 —
+    ///   tenant_id 는 JWT 클레임에서만 온다(헌법 #2).
+    /// </summary>
+    [HttpGet("gate-status")]
+    public async Task<IActionResult> GateStatus([FromQuery] string? deviceId, CancellationToken ct)
+    {
+        var tid = HttpContext.Items["TenantId"]?.ToString();
+        if (string.IsNullOrEmpty(tid)) return Forbid();
+
+        // deviceId 가 없으면 = 기기 등록 자체를 안 거친 접속(지문 미지원 등).
+        //   종전대로 통과시킨다 — 여기서 막으면 지문을 못 만드는 기기가 영영 못 들어온다.
+        if (string.IsNullOrWhiteSpace(deviceId))
+            return Ok(new { approved = true, confirmCode = (string?)null });
+
+        var approved = await _svc.IsDeviceAllowedAsync(deviceId, tid, ct);
+
+        return Ok(new
+        {
+            approved,
+            // 대표 화면과 **같은 번호**를 보여준다 — 대표가 눈으로 대조한다(사장님 결재).
+            //   승인이 난 뒤에는 보여줄 이유가 없다.
+            confirmCode = approved ? null : DeviceConfirmCode.From(deviceId)
+        });
     }
 
     /// <summary>기기 폐기 — TenantAdmin만.</summary>
