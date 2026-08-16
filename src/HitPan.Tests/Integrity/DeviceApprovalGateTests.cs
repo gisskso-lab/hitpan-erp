@@ -407,6 +407,114 @@ public class DeviceApprovalGateTests
             "서버가 '승인 대기' 표시를 응답에 채우지 않는다 — 화면은 언제나 false 를 받는다.");
     }
 
+    // ══════════════════════════════════════════════════════════════════
+    // G-29 — 대표가 자기 화면에서 막히지 않는다 (🔴 사장님 실측 P0)
+    // ══════════════════════════════════════════════════════════════════
+
+    /// <summary>
+    /// 🔴 <b>G-29. 대표계정은 기기 인증 미들웨어가 막지 않는다.</b>
+    ///
+    /// <para>
+    /// [무엇이 났나] 사장님이 1.2.82 를 받으시자 <b>메인PC 가 자기 화면에서 막혔다.</b>
+    /// 안내 문구는 <i>"관리자에게 문의하세요"</i> 인데 <b>그 관리자가 사장님 자신</b>이었다.
+    /// 승인해 줄 수 있는 유일한 사람이 승인 화면에 못 들어가는 <b>막다른 방</b>이 됐다.
+    /// </para>
+    ///
+    /// <para>
+    /// [왜 났나] 미들웨어가 <c>auth_key_hash</c> 만 봤다. 그런데 메인PC 는 그 번호를
+    /// <b>받은 적이 없다</b> — 인증번호는 대표가 <i>다른</i> 기기를 승인할 때 생기는 값이고,
+    /// 메인PC 는 <c>MainPcRegistrationService</c> 가 서버 기동 시 스스로 등록한다.
+    /// </para>
+    ///
+    /// <para>
+    /// [반증] <c>account_type == "tenant_admin"</c> 예외를 지우면 FAIL.
+    /// </para>
+    ///
+    /// <para>
+    /// ⚠️ 이 게이트를 지우려면 먼저 답해야 한다 — <b>"대표가 막히면 누가 풀어주나?"</b>
+    /// </para>
+    /// </summary>
+    [Fact]
+    public void G29_대표계정은_기기인증에_막히지_않는다()
+    {
+        var code = CodeOnly(ReadSource("src", "HitPan.API", "Middleware", "DeviceAuthMiddleware.cs"));
+
+        Assert.True(
+            code.Contains("tenant_admin", StringComparison.Ordinal),
+            "기기 인증 미들웨어에 대표계정 예외가 없다. " +
+            "대표가 막히면 승인 화면에 못 들어가고, 그를 풀어줄 사람은 자기 자신뿐이라 " +
+            "영원히 못 빠져나온다(사장님 1.2.82 실측 P0).");
+
+        Assert.True(
+            Regex.IsMatch(code, @"account_type"),
+            "대표계정 여부를 JWT 클레임(account_type)으로 보지 않는다.");
+    }
+
+    /// <summary>
+    /// 🚨 <b>G-29-b. 메인PC 판정에 접속 경로(loopback)를 쓰지 않는다.</b>
+    ///
+    /// <para>
+    /// 2026-08-10 에 <c>IsLoopback</c> 판정이 <b>고객사에서는 항상 참</b>임이 드러나 걷어낸 자리다 —
+    /// 터널(cloudflared)이 고객 PC 안에서 localhost 를 다시 부르고, 히트판은 127.0.0.1 에만 귀를 연다.
+    /// 그 위에 한도 면제를 세웠다가 <b>전 기기에 적용돼 요금정책이 무너질 뻔했다.</b>
+    /// </para>
+    ///
+    /// <para>🔴 이 미들웨어에 같은 판정을 다시 넣으면 <b>모든 기기가 통과</b>한다.</para>
+    /// </summary>
+    [Fact]
+    public void G29b_미들웨어가_접속경로로_메인PC를_판정하지_않는다()
+    {
+        var code = CodeOnly(ReadSource("src", "HitPan.API", "Middleware", "DeviceAuthMiddleware.cs"));
+
+        Assert.False(
+            code.Contains("IsLoopback", StringComparison.Ordinal),
+            "기기 인증 미들웨어가 접속 경로(loopback)로 판정하려 한다. " +
+            "그 판정은 고객사에서 항상 참이라 모든 기기가 통과한다 — 2026-08-10 에 걷어낸 자리다.");
+    }
+
+    /// <summary>
+    /// <b>G-29-c. 직원 계정은 여전히 막힌다.</b>
+    /// 대표 예외를 넣느라 <b>전원 통과</b>가 되면 요금·접근 통제가 통째로 사라진다.
+    /// </summary>
+    [Fact]
+    public void G29c_직원계정은_여전히_막힌다()
+    {
+        var code = CodeOnly(ReadSource("src", "HitPan.API", "Middleware", "DeviceAuthMiddleware.cs"));
+
+        Assert.True(
+            code.Contains("Status403Forbidden", StringComparison.Ordinal),
+            "차단 갈래가 사라졌다 — 대표 예외를 넣느라 전원을 통과시키면 통제가 없어진다.");
+
+        // 무조건 통과(ok = true 를 조건 없이)로 만들지 않았는지.
+        Assert.False(
+            Regex.IsMatch(code, @"var\s+ok\s*=\s*true\s*;"),
+            "ok 를 조건 없이 true 로 두었다 — 모든 기기가 통과한다.");
+    }
+
+    /// <summary>
+    /// 🔴 <b>G-29-d. 빠져나갈 길(기기 관리·업데이트)은 막지 않는다.</b>
+    ///
+    /// <para>
+    /// <c>/api/devices</c> 를 막으면 <b>번호를 넣거나 승인하러 갈 수 없다.</b>
+    /// <c>/api/appversion</c>·<c>/api/watchdog</c> 을 막으면 <b>업데이트로 고칠 방법이 사라진다</b> —
+    /// 잘못 배포했을 때 되돌릴 유일한 길이다.
+    /// </para>
+    /// </summary>
+    [Theory]
+    [InlineData("/api/auth")]
+    [InlineData("/api/devices")]
+    [InlineData("/api/appversion")]
+    [InlineData("/api/watchdog")]
+    public void G29d_빠져나갈_길은_막지_않는다(string path)
+    {
+        var code = CodeOnly(ReadSource("src", "HitPan.API", "Middleware", "DeviceAuthMiddleware.cs"));
+
+        Assert.True(
+            code.Contains($"\"{path}\"", StringComparison.Ordinal),
+            $"{path} 가 통과 목록에서 빠졌다. " +
+            "이 길이 막히면 기기를 승인하거나 업데이트로 고칠 방법이 사라진다.");
+    }
+
     /// <summary>
     /// 🔴 <b>G-28-c. 로그인이 장비넘버를 서버로 보낸다.</b>
     ///

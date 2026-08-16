@@ -29,6 +29,10 @@ public sealed class DeviceAuthMiddleware
     /// 직원 화면이 인증 번호를 실어 보내는 헤더.
     private const string DeviceKeyHeader = "X-HitPan-Device-Key";
 
+    // 🔴 장비넘버 헤더 (20260816작2) — 인증번호를 받은 적 없는 기기(메인PC)가 통과할 길.
+    //   ⚠️ 클라이언트 HitPanApiAuthHandler.DeviceIdHeader 와 **글자가 같아야** 한다.
+    private const string DeviceIdHeader = "X-HitPan-Device-Id";
+
     /// 🔴 이 길들은 막지 않는다.
     ///   번호를 넣으러 가는 길(verify-key)까지 막으면 **영원히 빠져나올 수 없다.**
     private static readonly string[] BypassPrefixes = new[]
@@ -96,6 +100,7 @@ public sealed class DeviceAuthMiddleware
         }
 
         var authKey = context.Request.Headers[DeviceKeyHeader].ToString();
+        var deviceId = context.Request.Headers[DeviceIdHeader].ToString();
 
         try
         {
@@ -110,6 +115,60 @@ public sealed class DeviceAuthMiddleware
                        WHERE tenant_id = @Tid AND auth_key_hash = @Hash AND status = 'approved'",
                     new { Tid = tenantId, Hash = Sha256Hex(authKey) },
                     cancellationToken: context.RequestAborted))) > 0;
+            }
+
+            // 🔴 2026-08-16 20260816작2 P0 봉합 — **메인PC 가 자기 화면에서 막혔다** (사장님 실측).
+            //
+            //   [무엇이 났나] 이 미들웨어는 **인증번호(auth_key_hash)만** 봤다.
+            //     그런데 메인PC 는 그 번호를 **받은 적이 없다** — 인증번호는 대표가 *다른* 기기를
+            //     승인할 때 만들어지는 값이고, 메인PC 는 MainPcRegistrationService 가
+            //     서버 기동 시 **스스로** 등록하기 때문이다(is_main_pc=1, status='approved').
+            //     ⇒ 승인제를 켜자 **자기 자신이 막혔고, 그 화면에서 풀어줄 사람이 자기 자신**이라
+            //       스스로 못 빠져나온다.
+            //
+            //   [왜 결재 위반인가] 사장님 1차 결재 — *"메인PC = **설치 = 승인**"*.
+            //     설치한 그 PC 는 이미 승인된 것이고 거기 앉은 사람이 대표다.
+            //
+            //   ⚠️ 같은 덫을 이미 한 번 겪었다 — RevokeAsync 가 메인PC 폐기를 막는 이유,
+            //     RegisterOrRefreshAsync 가 revoked 메인PC 의 로그인을 통과시키는 이유가 전부
+            //     *"막히면 되살릴 화면에 못 들어간다"* 였다. 이 미들웨어에만 그 규칙이 없었다.
+            //
+            //   [고침] **장비넘버로도 통과할 수 있게 한다.**
+            //     ⚠️ 아무 기기나 통과시키는 것이 아니다 — `status='approved'` 인 기기만 인정한다.
+            //       승인 대기(pending)·폐기(revoked)는 여전히 막힌다. 대조는 서버가 한다.
+            if (!ok && !string.IsNullOrWhiteSpace(deviceId))
+            {
+                ok = (await db.ExecuteScalarAsync<int>(new CommandDefinition(
+                    @"SELECT COUNT(*) FROM tenant_devices
+                       WHERE tenant_id = @Tid AND device_id = @Did AND status = 'approved'",
+                    new { Tid = tenantId, Did = deviceId },
+                    cancellationToken: context.RequestAborted))) > 0;
+            }
+
+            // 🔴 2026-08-16 20260816작2 P0 — **대표계정은 막지 않는다.**
+            //
+            //   [무엇이 났나] 사장님이 1.2.82 를 받으시자 **메인PC 가 자기 화면에서 막혔다.**
+            //     그 화면에 뜬 안내는 *"관리자에게 문의하세요"* 인데 **그 관리자가 사장님 자신**이다.
+            //     승인을 해줄 수 있는 유일한 사람이 승인 화면에 못 들어간다 —
+            //     **스스로 못 빠져나오는 방**이 된다.
+            //
+            //   [왜 이 축인가] 메인PC 인지를 접속 경로(loopback)로 판정하는 길은 **쓰지 않는다.**
+            //     2026-08-10 에 그 판정이 *"고객사에서는 항상 참"* 임이 드러나 걷어낸 자리다
+            //     (터널이 고객 PC 안에서 localhost 를 다시 부른다). 그 위에 무엇을 세우면
+            //     전 기기에 적용돼 요금정책이 무너진다.
+            //     ⇒ 대신 **누가 로그인했나**를 본다. 이 값은 JWT 클레임이라 흔들리지 않는다.
+            //
+            //   [왜 안전한가] 대표계정은 **어차피 모든 기기를 승인할 수 있는 사람**이다.
+            //     막아도 기기 관리 화면(/api/devices)은 이미 통과 목록이라 스스로 풀 수 있다 —
+            //     즉 이 예외가 새로 열어주는 권한은 없고, **막다른 길만 없앤다.**
+            //     ⚠️ 직원 계정(tenant_user)은 그대로 막힌다. 요금·접근 통제는 유지된다.
+            //
+            //   ⚠️ 이 예외를 지우려면 먼저 답해야 한다 — *"대표가 막히면 누가 풀어주나?"*
+            if (!ok)
+            {
+                var accountType = context.User?.FindFirst("account_type")?.Value;
+                if (string.Equals(accountType, "tenant_admin", StringComparison.Ordinal))
+                    ok = true;
             }
 
             if (!ok)
