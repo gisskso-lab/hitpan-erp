@@ -16,6 +16,10 @@ public sealed class HitPanApiAuthHandler(
 {
     /// 기기 인증 번호를 실어 보내는 헤더 이름 (20260811작3 (A)).
     private const string DeviceKeyHeader = "X-HitPan-Device-Key";
+
+    // 🔴 장비넘버 헤더 (20260816작2) — 인증번호가 없는 기기(메인PC)도 통과할 길.
+    //   ⚠️ 서버 DeviceAuthMiddleware.DeviceIdHeader 와 **글자가 같아야** 한다.
+    private const string DeviceIdHeader = "X-HitPan-Device-Id";
     // 동시 다발 401 시 refresh 가 중복 호출되지 않도록 직렬화한다(토큰 회전 충돌 방지).
     private static readonly SemaphoreSlim RefreshLock = new(1, 1);
 
@@ -135,6 +139,20 @@ public sealed class HitPanApiAuthHandler(
                 .ConfigureAwait(false);
             if (!string.IsNullOrWhiteSpace(key))
                 request.Headers.TryAddWithoutValidation(DeviceKeyHeader, key);
+
+            // 🔴 2026-08-16 20260816작2 봉합 — **장비넘버도 함께 보낸다.**
+            //
+            //   [무엇이 났나] 종전에는 인증번호만 보냈다. 그런데 **메인PC 는 인증번호를 받은 적이 없다** —
+            //     그 번호는 대표가 *다른* 기기를 승인할 때 만들어지는 값이고,
+            //     메인PC 는 서버가 스스로 등록하기 때문이다(MainPcRegistrationService).
+            //     ⇒ 승인제를 켜자 **메인PC 가 자기 화면에서 막혔다.** 그 화면에서 풀어줄 사람은
+            //       자기 자신이라 **스스로 못 빠져나온다**(사장님 실측 2026-08-16).
+            //
+            //   ⇒ 승인된 기기는 장비넘버만으로도 통과할 수 있어야 한다. 판정은 서버가 한다.
+            var deviceId = await js.InvokeAsync<string?>("hitpanDevice.getDeviceId", Array.Empty<object?>())
+                .ConfigureAwait(false);
+            if (!string.IsNullOrWhiteSpace(deviceId))
+                request.Headers.TryAddWithoutValidation(DeviceIdHeader, deviceId);
         }
         catch (Exception ex)
         {
