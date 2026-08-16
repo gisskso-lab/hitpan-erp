@@ -1,6 +1,8 @@
 using System.Data;
 using System.Data.Common;
 using Dapper;
+// 🔴 20260816작2 — 등록 확인번호(대표가 눈으로 대조하는 4자리). 계산은 그 파일 한 곳에만 있다.
+using HitPan.Application.Common;
 using HitPan.Application.DTOs.Device;
 using HitPan.Application.Interfaces;
 // 기기 승인제 끄기 스위치 (20260811작1 (E)) — appsettings 에서 읽는다
@@ -113,6 +115,17 @@ public sealed class TenantDeviceService : ITenantDeviceService
             ORDER BY d.is_main_pc DESC, d.registered_at DESC
             """,
             new { TenantId = tenantId }, cancellationToken: ct))).ToList();
+
+        // 🔴 확인번호는 **계산값**이라 DB 에 없다 (20260816작2 · 사장님 결재).
+        //   대표 화면에 *"{기기이름} (인증번호 4726) 가 등록을 요청합니다"* 로 뜨고,
+        //   신청한 기기 화면에도 같은 번호가 떠서 대표가 **눈으로 대조**한다.
+        //   ⚠️ 승인 대기 중인 기기만 채운다 — 이미 승인된 기기는 대조할 일이 없다.
+        foreach (var r in rows)
+        {
+            if (r.Status == "pending")
+                r.ConfirmCode = DeviceConfirmCode.From(r.DeviceId);
+        }
+
         return rows;
     }
 
@@ -173,8 +186,40 @@ public sealed class TenantDeviceService : ITenantDeviceService
 
         await EnsureOpenAsync(ct);
 
-        // 1) 기존 기기(같은 tenant + fingerprint)가 있는지 확인
-        var existing = await _db.QueryFirstOrDefaultAsync<(string id, string status, bool isMainPc)?>(new CommandDefinition(
+        // 1) 기존 기기가 있는지 확인 — 🔴 **찾는 순서를 뒤집었다** (20260816작2 · 명세서 §4-3)
+        //
+        //   [종전] 지문 하나로만 찾았다.
+        //   [무엇이 났나] 지문은 브라우저가 바뀌면 달라진다. `device-fingerprint.js` 의
+        //     `_envSeed()` 가 씨앗에 **userAgent 를 포함**하기 때문이다(:48).
+        //     ⇒ 같은 PC 인데 Edge 로 들어오면 A, Chrome 으로 들어오면 B ⇒ **서로 다른 기기**로
+        //       잡혀 슬롯을 두 번 먹었다. 사장님이 1.2.81 백지 실측에서 보신 바로 그 증상이다.
+        //     ⇒ 메인PC 는 더 심하다 — 서버가 만드는 `MAINPC-…` 와 브라우저가 만드는 `HFPv2-…` 가
+        //       애초에 **다른 산식**이라 같은 컴퓨터가 반드시 두 줄이 된다(DB-103 진단).
+        //
+        //   [고침] **장비넘버(device_id)를 1순위 열쇠로 둔다.** 지문은 옛 기기 호환용 2순위다.
+        //     장비넘버는 서버가 발급해 기기가 보관하는 값이라 **브라우저가 바뀌어도 안 바뀐다.**
+        //
+        //   ⚠️ 지문 조회를 **없애지 않는다**(헌법 #37 · #1). 이미 등록된 고객 기기는 전부
+        //     지문으로만 찾을 수 있다. 지우는 순간 쓰던 사람이 전부 새 기기가 되어 슬롯을 다시 먹는다.
+        //
+        //   ⚠️ 장비넘버는 **같은 테넌트 안에서만** 인정한다. 남의 회사 번호를 들고 와도
+        //     tenant_id 가 다르면 안 잡힌다(헌법 #2 — tenant_id 는 JWT 클레임에서만 온다).
+        (string id, string status, bool isMainPc)? existing = null;
+
+        if (!string.IsNullOrWhiteSpace(req.DeviceId))
+        {
+            existing = await _db.QueryFirstOrDefaultAsync<(string id, string status, bool isMainPc)?>(new CommandDefinition(
+                """
+                SELECT device_id AS id, status AS status, COALESCE(is_main_pc, 0) AS isMainPc
+                FROM tenant_devices
+                WHERE tenant_id = @TenantId AND device_id = @DeviceId
+                LIMIT 1
+                """,
+                new { TenantId = tenantId, DeviceId = req.DeviceId }, cancellationToken: ct));
+        }
+
+        // 2순위 — 옛 기기(장비넘버를 아직 못 받은 기기)는 지문으로 찾는다.
+        existing ??= await _db.QueryFirstOrDefaultAsync<(string id, string status, bool isMainPc)?>(new CommandDefinition(
             """
             SELECT device_id AS id, status AS status, COALESCE(is_main_pc, 0) AS isMainPc
             FROM tenant_devices
@@ -666,6 +711,19 @@ public sealed class TenantDeviceService : ITenantDeviceService
         if (mobileUsed >= mobileLimit)
             return (false, "인증기기 한도초과. 관리자에게 문의하세요.", null);
 
+        // 🔴 2026-08-16 20260816작2 — **QR 도 대표 승인을 거친다** (사장님 전결).
+        //
+        //   [뒤집은 결재] 1차에서는 *"QR 을 띄운 것 자체가 대표의 승인"* 으로 결재받아
+        //     바로 approved 로 넣었다. 사장님이 2026-08-16 에 이것을 뒤집으셨다 —
+        //     *"PC환경 절차와 같은 절차가 있어야 함."*
+        //
+        //   [왜] QR 이 화면에 떠 있는 10분 동안 **옆 사람 폰이 찍어도 등록**된다.
+        //     대표가 "내가 등록시키려던 그 폰이 맞나" 를 확인할 자리가 없었다.
+        //     ⇒ 폰도 대기줄에 서고, 대표 화면에서 확인번호를 대조한 뒤 [예] 를 누른다.
+        //
+        //   ⚠️ 승인제가 꺼져 있으면 **종전 그대로** 즉시 approved 다(개발·시험 편의).
+        var qrStatus = _approvalEnabled ? "pending" : "approved";
+
         var deviceId = Guid.NewGuid().ToString();
         await _db.ExecuteAsync(new CommandDefinition(
             """
@@ -675,8 +733,8 @@ public sealed class TenantDeviceService : ITenantDeviceService
                registered_at, approved_by, approved_at, last_seen_at)
             VALUES
               (@Id, @TenantId, NULL, 'mobile', @Name,
-               @Fp, @Ip, @Ua, 'approved',
-               NOW(6), @By, NOW(6), NOW(6))
+               @Fp, @Ip, @Ua, @Status,
+               NOW(6), @By, @ApprovedAt, NOW(6))
             """,
             new
             {
@@ -686,13 +744,21 @@ public sealed class TenantDeviceService : ITenantDeviceService
                 Fp = fingerprint,
                 Ip = ipAddress,
                 Ua = userAgent,
-                By = issuedBy      // QR 을 띄운 대표계정이 곧 승인자다
+                Status = qrStatus,
+
+                // 승인 대기로 들어가면 아직 승인자가 없다 — 대표가 [예] 를 누를 때 채워진다.
+                //   ⚠️ 여기에 issuedBy 를 그냥 넣으면 **승인받지 않았는데 승인된 것처럼** 기록된다.
+                By = _approvalEnabled ? null : issuedBy,
+                ApprovedAt = _approvalEnabled ? (DateTime?)null : DateTime.Now
             }, cancellationToken: ct));
 
         await MarkTokenUsedAsync(tokenId, deviceId, ct);
         await _audit.LogAsync("register", "device", deviceId, afterJson: "{\"type\":\"mobile\",\"via\":\"qr\"}", ct: ct);
 
-        return (true, "모바일 기기가 등록되었습니다.", deviceId);
+        // 폰 화면이 무엇을 안내할지 갈린다 — 대기면 "대표님 허락을 기다립니다" 를 보여줘야 한다.
+        return _approvalEnabled
+            ? (true, "등록을 요청했습니다. 대표님이 허락하면 바로 쓸 수 있습니다.", deviceId)
+            : (true, "모바일 기기가 등록되었습니다.", deviceId);
     }
 
     private async Task MarkTokenUsedAsync(string tokenId, string deviceId, CancellationToken ct)

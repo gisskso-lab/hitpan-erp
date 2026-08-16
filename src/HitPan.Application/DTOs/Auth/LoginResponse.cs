@@ -31,6 +31,21 @@ public class LoginResponse
     public string? DeviceNotice { get; set; }
 
     /// <summary>
+    /// 🔴 이 기기가 아직 **승인 대기**인가 (20260816작2 — 사장님 전결).
+    ///
+    /// true 면 화면이 로그인과 ERP 사이에서 [디바이스 인증] 관문을 띄우고 업무 화면 진입을 막는다.
+    /// 사장님 설계: *"로그인 후 로딩화면에 기기슬롯 과정을 넣으면 되잖아"* —
+    /// 새 화면을 세우지 않고 **이미 있는 로딩 구간**에서 판정한다.
+    ///
+    /// ⚠️ 이 값이 true 라고 **로그인이 실패한 것이 아니다.** 사장님 결재(20260815 §3):
+    ///   *"한도 초과. 401 을 내지 않는다. 로그인은 통과, 중간 화면에서 제어"*
+    ///   401 로 막으면 그 중간 화면에 **도달조차 못 한다.**
+    ///
+    /// 승인이 나면(대표가 [예]) 다음 접속부터 false 다. 슬롯은 그때 1개 는다.
+    /// </summary>
+    public bool DeviceAwaitingApproval { get; set; }
+
+    /// <summary>
     /// 헌법 #24 약관 v2.0.0 미동의 시 true → 클라이언트가 /terms 강제 이동.
     /// AuthController에서 ITermsConsentService.HasAgreedAsync 결과로 저장.
     /// </summary>
