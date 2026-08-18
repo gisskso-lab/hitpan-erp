@@ -48,20 +48,38 @@
 
                     @* 기기 인증 게이트 (20260811작3 (A), 사장님 오더 2026-08-11)
                        "인증키가 없어 인증할 수 없는 슬롯은 로그인만 되고 화면은 비활성화"
-                       인증 안 된 기기면 화면을 덮고 안내 + 인증 번호 입력칸을 보여준다. *@
-                    <DeviceAuthGate />
+                       인증 안 된 기기면 화면을 덮고 안내 + 인증 번호 입력칸을 보여준다.
+
+                       🔴 2026-08-18 20260818작1 (증상③) — **관문을 본문(Body) 의 부모로 올렸다.**
+
+                         [무엇이 문제였나] <DeviceAuthGate /> 가 <main> 과 **형제**였다.
+                           관문이 떠도 그 아래 본문(Body) 은 **무조건 렌더**됐다 —
+                           화면은 덮이는데 **뒤에서 업무 API 가 계속 돌았다.**
+                           ⇒ CSS 로 가린 것이지 막은 것이 아니었다. 관문의 뜻이 없다.
+
+                         [고침] 관문이 켜져 있으면 **본문(Body) 을 아예 그리지 않는다.**
+                           안 그리면 그 페이지의 OnInitializedAsync 가 안 돌고,
+                           API 호출도 **일어나지 않는다.** 가림이 아니라 **구조적 차단**이다.
+
+                         🔴 **승인된 기기는 아무것도 안 바뀐다** — GateActive 가 false 면
+                           종전과 **똑같은 트리**를 그린다. 정상 고객이 화면을 하나 더 보면
+                           사장님 설계 취지가 깨진다(작업지시서 §2). *@
+                    <DeviceAuthGate @bind-GateActive="_gateActive" />
 
                     <main class="hitpan-content mud-px-4 mud-py-4">
-                        <ErrorBoundary>
-                            <ChildContent>@Body</ChildContent>
-                            <ErrorContent Context="ex">
-                                <div class="hp-error-boundary">
-                                    <MudIcon Icon="@Icons.Material.Filled.ErrorOutline" Style="font-size:40px;color:#e53935;" />
-                                    <p class="hp-error-msg">페이지 로드 중 오류가 발생했습니다.</p>
-                                    <MudButton Variant="Variant.Outlined" OnClick="@(() => Nav.NavigateTo("/dashboard"))">홈으로</MudButton>
-                                </div>
-                            </ErrorContent>
-                        </ErrorBoundary>
+                        @if (!_gateActive)
+                        {
+                            <ErrorBoundary>
+                                <ChildContent>@Body</ChildContent>
+                                <ErrorContent Context="ex">
+                                    <div class="hp-error-boundary">
+                                        <MudIcon Icon="@Icons.Material.Filled.ErrorOutline" Style="font-size:40px;color:#e53935;" />
+                                        <p class="hp-error-msg">페이지 로드 중 오류가 발생했습니다.</p>
+                                        <MudButton Variant="Variant.Outlined" OnClick="@(() => Nav.NavigateTo("/dashboard"))">홈으로</MudButton>
+                                    </div>
+                                </ErrorContent>
+                            </ErrorBoundary>
+                        }
                     </main>
 
                     <MobileBottomNav />
@@ -78,3 +96,15 @@
         </NotAuthorized>
     </AuthorizeView>
 </CascadingAuthenticationState>
+
+@code {
+    /// 🔴 20260818작1 (증상③) — 관문이 켜져 있나.
+    ///
+    ///   이 값이 true 면 위에서 <b>본문(Body) 을 아예 그리지 않는다.</b>
+    ///   화면을 덮는 것이 아니라 **업무 화면 자체를 만들지 않는 것**이라
+    ///   그 페이지의 초기화·API 호출이 **일어나지 않는다.**
+    ///
+    ///   ⚠️ 기본값은 false 다 — 관문이 답하기 전까지는 종전과 똑같이 그린다.
+    ///     승인된 기기는 여기서 아무 일도 겪지 않는다.
+    private bool _gateActive;
+}

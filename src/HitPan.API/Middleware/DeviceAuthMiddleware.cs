@@ -136,11 +136,31 @@ public sealed class DeviceAuthMiddleware
             //   [고침] **장비넘버로도 통과할 수 있게 한다.**
             //     ⚠️ 아무 기기나 통과시키는 것이 아니다 — `status='approved'` 인 기기만 인정한다.
             //       승인 대기(pending)·폐기(revoked)는 여전히 막힌다. 대조는 서버가 한다.
+            //   🔴 2026-08-18 20260818작1 (1-2) — **이 길을 메인PC 한 줄로 좁혔다.**
+            //
+            //     [무엇이 문제였나] `status='approved'` 만 봤다. 그런데 `device_id` 는
+            //       **비밀이 아니다** — 기기 목록 화면에 보이고, gate-status **쿼리스트링
+            //       (서버 로그에 평문)** 에 실리며, 브라우저 저장소에 그대로 있다.
+            //       ⇒ 승인된 아무 기기의 번호나 헤더에 넣으면 **그것만으로 문이 열렸다.**
+            //
+            //     [정확히 무엇을 고친 것인가] 이것은 **"도용 차단" 이 아니다.**
+            //       번호가 비밀이 아닌 이상 메인PC 번호를 손에 넣은 자는 **여전히 통과한다.**
+            //       이 봉합이 하는 일은 **통과 가능한 범위를 메인PC 한 줄로 좁히는 것**이다.
+            //       ⚠️ 이것을 "도용을 막았다" 고 적으면 거짓봉합이 된다. 남은 구멍(기기별 비밀값)은
+            //         다음 차수 몫이고, 게이트 G-32-d 가 그 사실을 값으로 세워 두었다.
+            //
+            //     [왜 하필 메인PC 인가] 이 길은 **메인PC 를 구하려고** 낸 길이다(8/16 P0) —
+            //       메인PC 는 인증키를 받은 적이 없어 **다른 길이 없다.**
+            //       나머지 기기는 **인증키라는 제 길**이 있으므로 이 길을 열어 둘 이유가 없다.
+            //
+            //     ⚠️ 판정을 TenantDeviceService.IsDeviceAllowedAsync 와 **같은 모양**으로 둔다.
+            //       두 자리가 갈리면 한쪽만 고쳐지는 사고가 난다(이 파일이 이미 그 사고를 겪었다).
             if (!ok && !string.IsNullOrWhiteSpace(deviceId))
             {
                 ok = (await db.ExecuteScalarAsync<int>(new CommandDefinition(
                     @"SELECT COUNT(*) FROM tenant_devices
-                       WHERE tenant_id = @Tid AND device_id = @Did AND status = 'approved'",
+                       WHERE tenant_id = @Tid AND device_id = @Did
+                         AND status = 'approved' AND is_main_pc = 1",
                     new { Tid = tenantId, Did = deviceId },
                     cancellationToken: context.RequestAborted))) > 0;
             }
@@ -164,10 +184,29 @@ public sealed class DeviceAuthMiddleware
             //     ⚠️ 직원 계정(tenant_user)은 그대로 막힌다. 요금·접근 통제는 유지된다.
             //
             //   ⚠️ 이 예외를 지우려면 먼저 답해야 한다 — *"대표가 막히면 누가 풀어주나?"*
+            //   🔴 2026-08-18 20260818작1 (1-3) — **예외를 지우지 않았다. 경로만 좁혔다.**
+            //
+            //     [무엇이 문제였나] 이 예외에 **경로 조건이 0개**였다.
+            //       ⇒ 대표계정으로 로그인하면 **미승인 기기가 ERP 전체를 쓴다.**
+            //         대표 한 명의 계정이 모든 기기 통제를 무력화하는 자리였다.
+            //
+            //     [왜 지우지 않는가] 지우면 *"대표가 막히면 누가 풀어주나"* 가 되살아난다 —
+            //       8/16 PR#169 가 닫은 자리다(헌법 #1). **막다른 길은 그대로 없애고,
+            //       열려 있던 ERP 전체만 닫는다.**
+            //
+            //     [무엇만 남기나] 대표가 **스스로 빠져나오는 데 필요한 길**뿐이다:
+            //       · `/api/devices` — 자기 기기를 승인·해제하는 화면
+            //       · `/api/auth`    — 로그인·갱신·내 정보
+            //       ⚠️ 이 두 길은 사실 위 BypassPrefixes 에 이미 있어 여기 오지도 않는다.
+            //         그래도 **명시해 둔다** — 나중에 누가 BypassPrefixes 에서 빼는 날
+            //         대표가 갇히는 것을 이 목록이 막는다(그 사고를 이미 한 번 겪었다).
+            //
+            //     ⚠️ 직원 계정(tenant_user)은 종전대로 막힌다. 요금·접근 통제는 유지된다.
             if (!ok)
             {
                 var accountType = context.User?.FindFirst("account_type")?.Value;
-                if (string.Equals(accountType, "tenant_admin", StringComparison.Ordinal))
+                if (string.Equals(accountType, "tenant_admin", StringComparison.Ordinal)
+                    && IsOwnerEscapePath(path))
                     ok = true;
             }
 
@@ -191,6 +230,27 @@ public sealed class DeviceAuthMiddleware
         }
 
         await _next(context);
+    }
+
+    /// 🔴 대표계정이 **스스로 빠져나오는 데 필요한 길** (20260818작1 1-3).
+    ///
+    ///   ⚠️ 이 목록은 **좁을수록 옳다.** 여기에 길을 더하는 것은
+    ///     *"미승인 기기의 대표계정에게 그 기능을 열어준다"* 는 뜻이다.
+    ///     더하기 전에 물어라 — **그 길이 없으면 대표가 갇히는가?** 아니면 넣지 마라.
+    private static readonly string[] OwnerEscapePrefixes = new[]
+    {
+        "/api/devices",   // 기기 승인·해제 — 대표가 자기를 푸는 자리
+        "/api/auth"       // 로그인·갱신·내 정보
+    };
+
+    private static bool IsOwnerEscapePath(string path)
+    {
+        foreach (var prefix in OwnerEscapePrefixes)
+        {
+            if (path.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+                return true;
+        }
+        return false;
     }
 
     private static string Sha256Hex(string input)

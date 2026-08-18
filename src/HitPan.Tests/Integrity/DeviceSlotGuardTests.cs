@@ -267,7 +267,20 @@ public class DeviceSlotGuardTests
         //   [반증] `pc` 로 바꾸면 FAIL 한다.
         Assert.Equal("mobile", TenantDeviceService.NormalizeDeviceType("스마트TV"));
         Assert.Equal("mobile", TenantDeviceService.NormalizeDeviceType("watch"));
-        Assert.Equal("mobile", TenantDeviceService.NormalizeDeviceType("tablet"));
+
+        // 🔴 2026-08-18 20260818작2 (2-6) — **이 줄의 기대값을 바꿨다. 규칙이 바뀌었기 때문이다.**
+        //
+        //   [옛 기대] `tablet` → `"mobile"` (저장까지 뭉갰다)
+        //   [지금]   `tablet` → `"tablet"` (저장은 가르고, **과금만** 합친다)
+        //
+        //   🔴 **사장님 결재 3 과 어긋나지 않는다** — *"테블렛,모바일 같이 씀"* 은 **과금** 이야기이고,
+        //     과금은 아래 G13 이 지킨다(MobileUsedFrom 이 mobile 과 tablet 을 함께 센다).
+        //     칸은 여전히 **둘**이다. 가격표 2칸 구조는 그대로다.
+        //
+        //   ⚠️ 시험 기대값을 코드에 맞춰 고친 것이 아니라, **규칙이 뒤집혀서 함께 고쳤다.**
+        //     근거: docs/운영기록/20260818작2 §2 (2-6) — *"저장은 세밀하게, 과금은 단순하게"*.
+        //     저장까지 뭉개면 나중에 *"태블릿은 따로 받자"* 하실 때 **과거 자료가 없어 못 간다.**
+        Assert.Equal("tablet", TenantDeviceService.NormalizeDeviceType("tablet"));
 
         // 아는 값은 그대로
         Assert.Equal("pc", TenantDeviceService.NormalizeDeviceType("pc"));
@@ -430,10 +443,31 @@ public class DeviceSlotGuardTests
 
         Assert.True(refresh.Success, "갱신 경로 분기를 못 찾았다.");
 
+        // 🔴 2026-08-18 20260818작2 (2-1) — **무엇을 금지하는지 정확히 했다.**
+        //
+        //   [옛 기대] 갱신 경로에 `CountUsedSlotsAsync`·`GetLimitsAsync` 가 **한 글자도 없을 것.**
+        //   [지금] 2-1 이 `mobile → pc` **승격**에 한도를 다시 본다 — 그래서 계수를 부른다.
+        //
+        //   🔴 **D-5 의 목적은 조금도 약해지지 않았다.** D-5 가 지키는 것은
+        //     *"계수를 부르지 마라"* 가 아니라 **"쓰던 사람을 막지 마라"** 다.
+        //     2-1 은 한도를 넘어도 **막지 않는다 — 종류를 안 바꿀 뿐**이고,
+        //     그 사람은 계속 종전 칸으로 쓴다(불편 0).
+        //     ⇒ 금지해야 할 것은 **계수 호출이 아니라 그 결과로 나가는 거부**다.
+        //
+        //   ⚠️ 그래서 **정확히 그것**을 검사한다: 갱신 경로에서 한도를 이유로
+        //     `LogDeniedAsync("denied_limit")` 를 남기거나 **거부 반환**을 하면 FAIL.
+        //   ⚠️ 글자검사의 한계 — **진짜 판정은 표로 한다.**
+        //     `DeviceTypeQrGateTests.G13b_모바일에서_PC_승격은_한도가_차면_안_바뀐다` 가
+        //     한도를 꽉 채운 격리 DB 에서 실제로 `allowed == true` 를 확인한다.
         Assert.False(
-            refresh.Value.Contains("CountUsedSlotsAsync", StringComparison.Ordinal)
-            || refresh.Value.Contains("GetLimitsAsync", StringComparison.Ordinal),
-            "기존 기기 갱신 경로에 한도 검사가 들어갔다 — 쓰던 사람이 로그인에서 막힌다(D-5).");
+            Regex.IsMatch(refresh.Value, @"denied_limit", RegexOptions.IgnoreCase),
+            "기존 기기 갱신 경로가 한도를 이유로 접속을 거부한다 — "
+            + "쓰던 사람이 로그인에서 막힌다(D-5 · 2026-08-10 사고 계통).");
+
+        Assert.False(
+            Regex.IsMatch(refresh.Value, @"return\s*\(\s*false\s*,\s*LimitExceededMessage"),
+            "기존 기기 갱신 경로가 한도초과로 거부를 돌려준다 — "
+            + "'막는다' 가 아니라 '안 바꾼다' 여야 한다(20260818작2 §2 2-1).");
     }
 
     // ══════════════════════════════════════════════════════════════

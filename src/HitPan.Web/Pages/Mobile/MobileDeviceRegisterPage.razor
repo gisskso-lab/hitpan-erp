@@ -33,9 +33,30 @@
         }
         else if (_state == State.Done)
         {
+            @* 🔴 2026-08-18 20260818작2 (2-4) — **문구를 사실에 맞췄다.**
+               이제 QR 등록은 **스위치와 무관하게 항상 대표 승인을 기다린다.**
+               ⚠️ 종전 문구("이제 쓸 수 있습니다")를 그대로 두면 **표는 대기인데 화면은 완료**라
+                 직원이 되는 줄 알고 기다리지 않는다 — 그게 곧 문의 전화다. *@
             <div class="mreg-done">✓</div>
-            <p class="mreg-ask">등록이 끝났습니다</p>
-            <p class="mreg-sub">이제 이 휴대폰으로 히트판을 쓸 수 있습니다.</p>
+            <p class="mreg-ask">등록을 요청했습니다</p>
+            <p class="mreg-sub">
+                대표님이 허락하면 바로 쓸 수 있습니다.<br />
+                @* 🔴 직원에게 **갈 곳**을 준다 (헌법 #20) — 종전엔 누구에게 말할지 몰랐다.
+                   ⚠️ 연락처를 못 읽으면 이 줄은 안 뜬다. 그때도 위 문장만으로 안내가 성립한다. *@
+                @if (_adminContact is not null)
+                {
+                    <span class="mreg-contact">
+                        @if (!string.IsNullOrWhiteSpace(_adminContact.Phone))
+                        {
+                            <text>@_adminContact.Name 님 (@_adminContact.Phone) 에게 말씀해 주세요.</text>
+                        }
+                        else
+                        {
+                            <text>@_adminContact.Name 님에게 말씀해 주세요.</text>
+                        }
+                    </span>
+                }
+            </p>
 
             @* 사장님 오더 4·5단계: 홈화면 아이콘.
                🔴 접속 기기를 보고 **맞는 쪽만** 보여준다 — 둘 다 보이면 더 헷갈린다. *@
@@ -91,7 +112,24 @@
         {
             <div class="mreg-fail">!</div>
             <p class="mreg-ask">등록하지 못했습니다</p>
-            <p class="mreg-sub">@_error</p>
+            <p class="mreg-sub">
+                @_error
+                @* 🔴 막혔을 때야말로 갈 곳이 필요하다 — 한도가 찬 것은 직원 혼자 못 푼다(헌법 #20). *@
+                @if (_adminContact is not null)
+                {
+                    <br />
+                    <span class="mreg-contact">
+                        @if (!string.IsNullOrWhiteSpace(_adminContact.Phone))
+                        {
+                            <text>@_adminContact.Name 님 (@_adminContact.Phone) 에게 말씀해 주세요.</text>
+                        }
+                        else
+                        {
+                            <text>@_adminContact.Name 님에게 말씀해 주세요.</text>
+                        }
+                    </span>
+                }
+            </p>
             <p class="mreg-note">
                 회사 컴퓨터에서 [등록 기기 관리] → [모바일기기 등록] 을 다시 눌러 새 코드를 받아 주세요.
             </p>
@@ -154,6 +192,8 @@
     }
     .mreg-icon-share { color: #0F6E56; display: inline-flex; }
     .mreg-note { font-size: 12px; color: #9CA3AF; margin-top: 10px; line-height: 1.5; }
+    /* 대표 연락처 — 직원이 갈 곳 (20260818작2) */
+    .mreg-contact { display: inline-block; margin-top: 6px; color: #0F6E56; font-weight: 600; }
 </style>
 
 @code {
@@ -164,6 +204,12 @@
     private string _error = "";
     private bool _isIos;
     private bool _canInstall;
+
+    /// <summary>
+    /// 🔴 대표 연락처 — 등록 응답에 실려 온다 (20260818작2).
+    /// <para>⚠️ null 이면 화면은 연락처 줄 없이 안내만 띄운다 — <b>안내가 사라지면 안 된다.</b></para>
+    /// </summary>
+    private AdminContact? _adminContact;
 
     [Parameter, SupplyParameterFromQuery(Name = "t")]
     public string? Token { get; set; }
@@ -211,21 +257,69 @@
 
             var name = await JS.InvokeAsync<string>("hitpanDevice.getDeviceName");
 
+            // 🔴 2026-08-18 20260818작2 (2-2) — **이 폰이 지난번에 받은 자기 번호를 함께 보낸다.**
+            //
+            //   [무엇이 문제였나] 이 화면은 지문만 보냈다. 그런데 지문은 브라우저 환경에서
+            //     만들어져 **흔들린다** — 사파리에서 크롬으로 옮기거나, 브라우저를 새로 깔거나,
+            //     사생활 보호 모드로 들어가면 다른 값이 나온다.
+            //     ⇒ **같은 폰이 다시 찍어도 "처음 온 폰"** 이 되어 새 줄이 생겼다.
+            //       사장님 8/16 증상② — *"한 기기에서 슬롯 중복으로 잡힘"* — 그 자체다.
+            //
+            //   ⚠️ 못 읽어도 등록을 막지 않는다. 번호가 없으면 서버가 종전대로 지문으로 찾는다.
+            string? knownDeviceId = null;
+            try
+            {
+                knownDeviceId = await JS.InvokeAsync<string?>("hitpanDevice.getDeviceId");
+            }
+            catch (Exception ex)
+            {
+                // 헌법 #15 — 흔적은 남기되 등록 자체를 막지 않는다.
+                Console.Error.WriteLine($"[HP15][MobileRegister/getDeviceId] {ex.GetType().Name}: {ex.Message}");
+            }
+
             var resp = await Http.PostAsJsonAsync("api/devices/mobile-register", new
             {
                 token = Token,
                 deviceName = name,
-                fingerprint
+                fingerprint,
+                deviceId = knownDeviceId
             });
 
             if (resp.IsSuccessStatusCode)
             {
+                // 🔴 2026-08-18 20260818작2 (2-2) — **서버가 준 번호를 보관한다.**
+                //
+                //   서버는 이 번호를 **이미 응답에 실어 보내고 있었다.** 폰이 그것을 버리고 있었을 뿐이다.
+                //   ⇒ PC 경로(AuthService.cs)와 **같은 모양**으로 부른다. 함수도 이미 있었다
+                //     (wwwroot/js/device-fingerprint.js — setDeviceId).
+                //
+                //   ⚠️ **한 줄이라고 얕보지 마라.** 이 한 줄이 없어서 증상②가 났다.
+                //     위(보내는 쪽)와 여기(받는 쪽)는 **한 몸**이다 — 한쪽만 있으면 아무것도 안 바뀐다.
+                try
+                {
+                    var body = await resp.Content.ReadFromJsonAsync<RegisterResult>();
+                    if (!string.IsNullOrEmpty(body?.DeviceId))
+                        await JS.InvokeVoidAsync("hitpanDevice.setDeviceId", body.DeviceId);
+
+                    // 🔴 대표 연락처 — 직원이 **누구에게** 말할지 알아야 한다(헌법 #20).
+                    //   ⚠️ 없으면 null 이고, 화면은 그때 연락처 줄 없이 안내만 띄운다.
+                    _adminContact = body?.AdminContact;
+                }
+                catch (Exception ex)
+                {
+                    // 보관에 실패해도 등록 자체는 끝났다 — 다음번에 지문으로 찾는다(종전 동작).
+                    Console.Error.WriteLine($"[HP15][MobileRegister/setDeviceId] {ex.GetType().Name}: {ex.Message}");
+                }
+
                 _state = State.Done;
             }
             else
             {
-                var body = await resp.Content.ReadFromJsonAsync<ApiMessage>();
+                // 🔴 실패 응답도 **같은 모양**으로 읽는다 — 한도 초과 같은 경우 서버가
+                //   대표 연락처를 함께 보낸다. ApiMessage 로 읽으면 그것을 버린다.
+                var body = await resp.Content.ReadFromJsonAsync<RegisterResult>();
                 _error = body?.Message ?? "잠시 후 다시 시도해 주세요.";
+                _adminContact = body?.AdminContact;
                 _state = State.Failed;
             }
         }
@@ -260,5 +354,26 @@
     private sealed class ApiMessage
     {
         public string? Message { get; set; }
+    }
+
+    /// <summary>
+    /// 등록 성공 응답 — 🔴 <c>DeviceId</c> 가 이 폰이 앞으로 쓸 <b>자기 번호</b>다 (20260818작2 · 2-2).
+    /// </summary>
+    private sealed class RegisterResult
+    {
+        public string? Message { get; set; }
+        public string? DeviceId { get; set; }
+
+        /// <summary>🔴 대표 연락처 — 직원이 갈 곳 (헌법 #20). 없으면 null.</summary>
+        public AdminContact? AdminContact { get; set; }
+    }
+
+    /// <summary>
+    /// 대표 연락처 — <b>고객사 안에서만</b> 보이는 값이다(헌법 #18·#22).
+    /// </summary>
+    private sealed class AdminContact
+    {
+        public string? Name { get; set; }
+        public string? Phone { get; set; }
     }
 }

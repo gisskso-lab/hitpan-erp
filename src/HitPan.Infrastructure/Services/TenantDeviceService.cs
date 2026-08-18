@@ -204,13 +204,17 @@ public sealed class TenantDeviceService : ITenantDeviceService
         //
         //   ⚠️ 장비넘버는 **같은 테넌트 안에서만** 인정한다. 남의 회사 번호를 들고 와도
         //     tenant_id 가 다르면 안 잡힌다(헌법 #2 — tenant_id 는 JWT 클레임에서만 온다).
-        (string id, string status, bool isMainPc)? existing = null;
+        // 🔴 2026-08-18 20260818작2 (2-1) — `device_type` 을 **함께 읽는다.**
+        //   종류 변경을 방향별로 가르려면 **지금 무슨 칸에 있는지**를 알아야 한다.
+        //   종전엔 안 읽어서 "바뀌는가" 만 알았고 "어느 쪽으로 바뀌는가" 를 몰랐다.
+        (string id, string status, bool isMainPc, string curType)? existing = null;
 
         if (!string.IsNullOrWhiteSpace(req.DeviceId))
         {
-            existing = await _db.QueryFirstOrDefaultAsync<(string id, string status, bool isMainPc)?>(new CommandDefinition(
+            existing = await _db.QueryFirstOrDefaultAsync<(string id, string status, bool isMainPc, string curType)?>(new CommandDefinition(
                 """
-                SELECT device_id AS id, status AS status, COALESCE(is_main_pc, 0) AS isMainPc
+                SELECT device_id AS id, status AS status, COALESCE(is_main_pc, 0) AS isMainPc,
+                       device_type AS curType
                 FROM tenant_devices
                 WHERE tenant_id = @TenantId AND device_id = @DeviceId
                 LIMIT 1
@@ -219,7 +223,7 @@ public sealed class TenantDeviceService : ITenantDeviceService
         }
 
         // 2순위 — 옛 기기(장비넘버를 아직 못 받은 기기)는 지문으로 찾는다.
-        existing ??= await _db.QueryFirstOrDefaultAsync<(string id, string status, bool isMainPc)?>(new CommandDefinition(
+        existing ??= await _db.QueryFirstOrDefaultAsync<(string id, string status, bool isMainPc, string curType)?>(new CommandDefinition(
             """
             SELECT device_id AS id, status AS status, COALESCE(is_main_pc, 0) AS isMainPc
             FROM tenant_devices
@@ -230,7 +234,7 @@ public sealed class TenantDeviceService : ITenantDeviceService
 
         if (existing is not null)
         {
-            var (id, status, isMainPc) = existing.Value;
+            var (id, status, isMainPc, curType) = existing.Value;
 
             // 🔴 2026-08-11 사장님 실측 적발 — "메인PC가 폐기되는게 말이되?"
             //
@@ -270,6 +274,83 @@ public sealed class TenantDeviceService : ITenantDeviceService
                 return (false, "폐기된 기기입니다. 관리자에게 문의하세요.", null, false);
             }
 
+            // ══════════════════════════════════════════════════════════════
+            // 🔴 2026-08-18 20260818작2 (DP-2 ②) — **메인PC 는 `rejected` 에서도 빠져나온다.**
+            //   (검증팀 [4] 적발 · docs/검증/병렬이슈/20260818_검증팀_DP1_DP2_폐기키생존_메인PC반려.md)
+            //
+            //   [무엇이 문제였나] 위 구제책은 **`"revoked"` 라는 문자열 하나**에 걸려 있었다.
+            //     작1 이 **정당한 이유로** `rejected` 라는 새 상태를 만들자,
+            //     구제책이 **조용히 그 상태를 안 덮게** 됐다. 아무도 그것을 못 봤다.
+            //     ⇒ 🔴 **새 상태를 만들 때는 그 상태를 이름으로 검사하는 곳을 전부 찾아야 한다**(헌법 #12).
+            //       `grep -n '"revoked"'` 한 번이면 나왔다.
+            //
+            //   [왜 pending 이 아니라 approved 인가] 아래 1-4 갈래는 거절당한 기기를 `pending` 으로
+            //     되돌려 **대표의 판단을 다시 받게** 한다. 그것은 일반 기기에 옳다.
+            //     🔴 그러나 메인PC 에 그러면 **아무것도 안 고친 것**이다 —
+            //       승인해 줄 수 있는 유일한 사람이 **자기가 승인 대기에 갇혀** 승인 화면에 못 들어간다.
+            //       (8/16 P0 커밋 30e3873 이 정확히 그 사고였다)
+            //     ⇒ 메인PC 는 **되돌려 세운다.** "그 컴퓨터에서 히트판이 돈다" 는 사실 자체가 인증이다.
+            //
+            //   ⚠️ 이 갈래는 **메인PC 한 줄에만** 해당한다(`isMainPc`). 일반 기기는 아래 1-4 로 간다.
+            // ══════════════════════════════════════════════════════════════
+            if (status == "rejected" && isMainPc)
+            {
+                await _db.ExecuteAsync(new CommandDefinition(
+                    """
+                    UPDATE tenant_devices
+                    SET status = 'approved',
+                        revoked_at = NULL,
+                        revoked_reason = NULL,
+                        last_seen_at = NOW(6),
+                        ip_address = @Ip
+                    WHERE device_id = @Id AND tenant_id = @TenantId
+                    """,
+                    new { Id = id, TenantId = tenantId, Ip = ipAddress }, cancellationToken: ct));
+
+                await _audit.LogAsync("device_mainpc_selfrescue", "device", id,
+                    reason: "메인PC 가 반려 상태에서 스스로 회복 (DP-2)", ct: ct);
+
+                _logger.LogWarning(
+                    "[TenantDeviceService] 메인PC 가 반려(rejected) 상태였다 — 스스로 회복시켰다. "
+                    + "누군가 회사 서버를 반려했다는 뜻이다. device={DeviceId} tenant={TenantId}",
+                    id, tenantId);
+
+                status = "approved";
+            }
+
+            // 🔴 2026-08-18 20260818작1 (1-4) — **거절당한 기기는 다시 신청할 수 있다.**
+            //
+            //   사장님 오더: *"거절하면 첫 화면 회귀"*
+            //
+            //   [왜 여기인가] `rejected` 를 `revoked` 에서 가르기만 하고 이 자리를 안 만들면
+            //     **아무것도 안 고친 것**이다. 칸 이름만 바뀌고 직원은 여전히 갇힌다 —
+            //     거절당한 기기가 다시 와도 `rejected` 인 채로 머물러 **대표의 승인 대기 목록에
+            //     다시 뜨지 않는다.** 대표는 승인할 기회조차 없다.
+            //
+            //   [고침] 다시 온 그 기기를 **대기 줄에 다시 세운다.** 대표가 다시 판단한다.
+            //     ⚠️ 자동 승인이 아니다 — `pending` 으로 돌릴 뿐이다. 문지기는 그대로 대표다.
+            //
+            //   ⚠️ `revoked` 는 여기로 오지 않는다(위에서 이미 갈렸다). 폐기는 폐기로 남는다.
+            if (status == "rejected")
+            {
+                await _db.ExecuteAsync(new CommandDefinition(
+                    """
+                    UPDATE tenant_devices
+                    SET status = 'pending',
+                        revoked_at = NULL,
+                        revoked_reason = NULL,
+                        last_seen_at = NOW(6),
+                        ip_address = @Ip
+                    WHERE device_id = @Id AND tenant_id = @TenantId
+                    """,
+                    new { Id = id, TenantId = tenantId, Ip = ipAddress }, cancellationToken: ct));
+
+                await _audit.LogAsync("device_reapply", "device", id,
+                    reason: "거절된 기기의 재신청", ct: ct);
+
+                return (false, "기기 승인 대기 중입니다.", id, false);
+            }
+
             // approved / pending → last_seen / ip / ua / 이름 갱신
             //
             // 🔴 2026-08-10 [4] D-4 봉합 — device_name 을 갱신 대상에 넣는다.
@@ -299,7 +380,58 @@ public sealed class TenantDeviceService : ITenantDeviceService
             //
             //   ⚠️ COALESCE 인 이유: 지문만 보내고 종류를 못 보내는 옛 화면이 있으면
             //     기존 값을 지우지 않는다. 넘어온 값이 있을 때만 고친다.
-            var normalizedType = NormalizeDeviceType(req.DeviceType);
+            //
+            // ══════════════════════════════════════════════════════════════
+            // 🔴 2026-08-18 20260818작2 (2-1) — **위 주석을 지우지 않고 갱신한다.**
+            //
+            //   [위 문장은 절반만 맞았다] *"종류가 바뀌어도 한도 검사에 다시 들어가지 않는다"* 는
+            //     **버그가 아니라 결정**이었다(8/10 사고 뒤 쓰던 사람을 보호하려고 일부러 그랬다).
+            //     🔴 그런데 그 결정이 **한쪽 방향에서만 옳았다.**
+            //
+            //   | 방향 | 뜻 | 8/10 의도 | 요금 |
+            //   |---|---|---|---|
+            //   | pc → mobile | 아이패드가 제자리를 찾아감 | ✅ 이게 그 경우다 | 위험 없음 |
+            //   | mobile → pc | 폰이 컴퓨터로 승격 | ❌ 무관 | 🔴 구멍 |
+            //
+            //   [무엇이 새고 있었나] 싼 칸(mobile)으로 등록해 두고 다음 접속에 pc 를 신고하면
+            //     **컴퓨터 한도가 0이어도 컴퓨터 칸이 무제한**으로 늘었다. 검사가 없으니까.
+            //
+            //   🔴 [고침 — 가장 오해하기 쉬운 줄이다] `mobile → pc` 승격은 **한도를 다시 본다.**
+            //     그러나 **초과해도 막지 않는다. 그냥 안 바꾼다.**
+            //     ⇒ 그 사람은 **계속 휴대기기 칸으로 쓴다** — 불편함 0, 요금 구멍 0.
+            //     ⚠️ 이것을 *"막는다"* 로 구현하면 **8/10 사고 그 자체**다. 절대 그러지 마라.
+            //
+            //   ⚠️ `pc → mobile` 은 **종전 그대로 무검사**다. 그쪽은 요금 위험이 없고,
+            //     검사를 넣으면 아이패드가 제자리를 못 찾아 8/10 사고가 재발한다.
+            //
+            //   🔴 판정값 자체도 서버가 다시 본다(V-05) — 아래 ResolveDeviceType 참조.
+            //     클라이언트 신고만 믿으면 승격을 막아도 **최초 등록에서 그냥 새어 나간다.**
+            // ══════════════════════════════════════════════════════════════
+            var normalizedType = ResolveDeviceType(req.DeviceType, req.UserAgent);
+
+            // 🔴 승격(휴대기기 → 컴퓨터)일 때만 한도를 다시 본다.
+            //   ⚠️ 자기 자신이 지금 휴대기기 칸에 세어지고 있으므로, 컴퓨터 칸만 보면 된다.
+            var isPromotionToPc = normalizedType == "pc" && curType != "pc";
+
+            if (isPromotionToPc)
+            {
+                var (promoPcLimit, _) = await GetLimitsAsync(tenantId, ct);
+                var (promoPcUsed, _) = await CountUsedSlotsAsync(tenantId, ct);
+
+                if (promoPcUsed >= promoPcLimit)
+                {
+                    // 🔴 **막지 않는다. 안 바꿀 뿐이다.** 그 기기는 종전 칸으로 계속 쓴다.
+                    //   ⇒ 아래 UPDATE 에 null 을 주면 COALESCE 가 기존 값을 보존한다.
+                    //   ⚠️ return 하지 않는다 — return 하면 그것이 곧 "막는다" 이고 8/10 사고다.
+                    normalizedType = null;
+
+                    _logger.LogInformation(
+                        "[TenantDeviceService] 기기 종류 승격을 보류했다 — 컴퓨터 칸이 찼다. "
+                        + "그 기기는 종전 칸({CurType})으로 계속 쓴다(막지 않는다). "
+                        + "device={DeviceId} pcUsed={PcUsed} pcLimit={PcLimit}",
+                        curType, id, promoPcUsed, promoPcLimit);
+                }
+            }
 
             await _db.ExecuteAsync(new CommandDefinition(
                 """
@@ -370,7 +502,29 @@ public sealed class TenantDeviceService : ITenantDeviceService
         //
         //   ⇒ 폴백을 'pc' 로 되돌리면 오히려 P0 다 — 종류를 모를 때 비싼 칸으로 세어
         //     **고객이 쓰지도 않은 자리에 돈을 낸다**(이 차수가 존재하는 이유 그 자체).
-        var type = NormalizeDeviceType(req.DeviceType) ?? "mobile";
+        // 🔴 2026-08-18 20260818작2 ([3-V] V-05) — **여기가 진짜 구멍이었다.**
+        //
+        //   [왜 2-1(승격 검사)만으로는 부족한가] 공격자는 **승격할 이유가 없다.**
+        //     처음부터 `mobile` 이라 신고하고 **안 바꾸면 그만**이다 —
+        //     컴퓨터 한도가 0이어도 컴퓨터가 휴대기기 칸으로 무제한 들어온다.
+        //     ⇒ 2-1 만 하면 게이트는 초록불이고 **구멍은 그대로다**(거짓봉합).
+        //
+        //   [고침] 서버가 **자기가 직접 읽은 User-Agent** 로 교차 검증한다.
+        //     신고값과 어긋나면 **서버 판정이 이긴다**(ResolveDeviceType).
+        //
+        //   ⚠️ **완벽하지 않다.** User-Agent 도 위조할 수 있다.
+        //     이 봉합이 하는 일은 *"신고값을 그대로 믿지 않는 것"* 하나다 —
+        //     화면 조작만으로 칸을 고르던 것을 **헤더까지 함께 위조해야** 되게 바꾼다.
+        //     🔴 이것을 *"위조를 막았다"* 고 적으면 거짓봉합이다.
+        //
+        //   🔴 [`?? "mobile"` 이 어디로 갔나 — 없앤 게 아니라 **안으로 옮겼다**]
+        //     ResolveDeviceType 이 **항상 값을 돌려준다**(null 을 안 돌려준다). 그 안 마지막 줄이
+        //     `normalized ?? "mobile"` 이다 — 8/16 CR2-2 로 종결된 그 결정이 **그대로 살아 있다.**
+        //     ⚠️ 여기에 `?? "mobile"` 을 또 적으면 **절대 실행되지 않는 죽은 코드**가 되어,
+        //       읽는 사람이 *"여기가 폴백을 지킨다"* 고 **잘못 믿는다.** 그래서 안 적는다.
+        //     🔴 되돌려 `"pc"` 로 만들면 P0 다 — 종류를 모를 때 비싼 칸으로 세면
+        //       고객이 쓰지도 않은 자리에 돈을 낸다.
+        var type = ResolveDeviceType(req.DeviceType, req.UserAgent);
 
         // 한도 초과 체크
         //
@@ -482,12 +636,33 @@ public sealed class TenantDeviceService : ITenantDeviceService
                 "회사 서버는 해제할 수 없습니다. 자료를 보관하는 컴퓨터입니다.");
         }
 
+        // ══════════════════════════════════════════════════════════════
+        // 🔴 2026-08-18 20260818작2 (DP-1) — **폐기하면 열쇠도 함께 없앤다.**
+        //   (검증팀 [4] 적발 · docs/검증/병렬이슈/20260818_검증팀_DP1_DP2_폐기키생존_메인PC반려.md)
+        //
+        //   [무엇이 문제였나] 종전엔 `status`·`revoked_at`·`revoked_reason` 만 바꾸고
+        //     **`auth_key_hash` 를 그대로 뒀다.** 폐기된 기기의 열쇠가 표에 살아 있었다.
+        //     막는 것은 VerifyAuthKeyAsync 안의 **한 줄뿐**(`if (status == "revoked") return null;`)이고,
+        //     🔴 **검증팀이 그 한 줄을 빼도 게이트가 12/12 초록불이었다** —
+        //       유일한 방어를 지켜보는 눈이 **0개**였다는 뜻이다.
+        //
+        //   [고침 — 근본은 이쪽이다] **키가 없으면 방어할 것도 없다.**
+        //     상태 검사는 "열쇠는 살아 있지만 문을 잠갔다" 이고, 이것은 "열쇠를 없앴다" 이다.
+        //     ⇒ 상태 검사 한 줄이 미래에 사라지거나 우회돼도 **되살아날 키 자체가 없다.**
+        //
+        //   ⚠️ `auth_key_issued_at` 도 함께 지운다 — 키가 없는데 발급 시각만 남으면
+        //     화면·기록이 *"키가 있다"* 고 말하는 셈이 된다.
+        //   ⚠️ VerifyAuthKeyAsync 의 `status == "revoked"` 검사는 **그대로 둔다**(작1 소관 · 헌법 #1).
+        //     둘은 겹치는 것이 아니라 **겹쳐서 막는 것**이다 — 이미 폐기된 옛 행에는 키가 남아 있다.
+        // ══════════════════════════════════════════════════════════════
         await _db.ExecuteAsync(new CommandDefinition(
             """
             UPDATE tenant_devices
             SET status = 'revoked',
                 revoked_at = NOW(),
-                revoked_reason = @Reason
+                revoked_reason = @Reason,
+                auth_key_hash = NULL,
+                auth_key_issued_at = NULL
             WHERE device_id = @Id AND tenant_id = @TenantId
             """,
             new { Id = deviceId, TenantId = tenantId, Reason = reason }, cancellationToken: ct));
@@ -499,7 +674,8 @@ public sealed class TenantDeviceService : ITenantDeviceService
     //   사장님 설계: "승인대기. 대표에게 기기승인의 권한을 주기"
     //   반환값 = **새로 발급한 인증키 원문**. 이미 승인된 기기를 다시 누르면 null 이다
     //   (원문은 우리가 갖고 있지 않으므로 다시 알려줄 수 없다 — 재발급은 별건).
-    public async Task<string?> ApproveAsync(string deviceId, string tenantId, string approverUserId, CancellationToken ct = default)
+    public async Task<string?> ApproveAsync(string deviceId, string tenantId, string approverUserId,
+        string? assignUserId = null, CancellationToken ct = default)
     {
         await EnsureOpenAsync(ct);
 
@@ -556,17 +732,52 @@ public sealed class TenantDeviceService : ITenantDeviceService
         //     **발급 순간 한 번만** 위로 올린다(QR 토큰과 같은 원칙 · 헌법 #5).
         var authKey = Guid.NewGuid().ToString("N") + Guid.NewGuid().ToString("N");
 
+        // 🔴 2026-08-18 20260818작2 (2-5) — **대표가 승인하며 "누구 기기인가" 를 고른다.**
+        //
+        //   [무엇이 문제였나] QR 로 들어온 폰은 `user_id` 가 NULL 이었다.
+        //     등록 시점엔 **누구 폰인지 알 방법이 없다** — QR 은 로그인 없이 찍는다.
+        //     그래서 기기 목록에 주인 없는 폰이 쌓이고, 대표는 나중에 그게 누구 것인지 모른다.
+        //
+        //   [고침] **아는 사람이 아는 자리에서** 채운다. 대표는 승인할 때 그 폰이 누구 것인지 안다
+        //     (직원이 전화해서 "제 폰 승인해 주세요" 라고 한 그 순간이다).
+        //
+        //   ⚠️ **존재하는 사용자만** 받는다 — `fk_device_user` FK 라 없는 번호를 넣으면
+        //     UPDATE 자체가 터져 **승인이 통째로 실패**한다. 대표가 못 고르는 게 아니라
+        //     **아무도 승인이 안 되는** 사고가 된다. 그래서 먼저 확인한다.
+        //   ⚠️ 같은 회사 사람만 받는다(헌법 #2) — 남의 회사 사람에게 우리 기기를 붙일 수 없다.
+        string? resolvedUserId = null;
+
+        if (!string.IsNullOrWhiteSpace(assignUserId))
+        {
+            resolvedUserId = await _db.QueryFirstOrDefaultAsync<string?>(new CommandDefinition(
+                "SELECT user_id FROM users WHERE user_id = @Uid AND tenant_id = @TenantId LIMIT 1",
+                new { Uid = assignUserId, TenantId = tenantId }, cancellationToken: ct));
+
+            if (resolvedUserId is null)
+                throw new InvalidOperationException("지정한 사용자를 찾을 수 없습니다. 목록에서 다시 골라 주세요.");
+        }
+
         await _db.ExecuteAsync(new CommandDefinition(
             """
             UPDATE tenant_devices
             SET status = 'approved',
                 approved_by = @Approver,
                 approved_at = NOW(),
+                user_id = COALESCE(@AssignUser, user_id),
                 auth_key_hash = @KeyHash,
                 auth_key_issued_at = NOW(6)
             WHERE device_id = @Id AND tenant_id = @TenantId
             """,
-            new { Id = deviceId, TenantId = tenantId, Approver = approverUserId, KeyHash = Sha256Hex(authKey) },
+            // ⚠️ COALESCE 인 이유: 대표가 사람을 안 고르면 **기존 주인을 지우지 않는다.**
+            //   PC 경로는 로그인한 사람이 이미 붙어 있다 — 승인 한 번으로 그것을 날리면 안 된다.
+            new
+            {
+                Id = deviceId,
+                TenantId = tenantId,
+                Approver = approverUserId,
+                AssignUser = resolvedUserId,
+                KeyHash = Sha256Hex(authKey)
+            },
             cancellationToken: ct));
 
         await _audit.LogAsync("approve", "device", deviceId, ct: ct);
@@ -586,24 +797,147 @@ public sealed class TenantDeviceService : ITenantDeviceService
     ///   ⚠️ 승인된 기기만 인정한다 — 폐기된 기기의 옛 키가 살아나면 안 된다.
     ///
     /// 반환: 맞으면 그 기기 번호, 틀리면 null
-    public async Task<string?> VerifyAuthKeyAsync(string authKey, string tenantId, CancellationToken ct = default)
+    ///
+    /// 🔴 2026-08-18 20260818작1 (1-1) — **키를 "검색 열쇠"에서 "대조 열쇠"로 바꿨다.**
+    ///
+    ///   [무엇이 문제였나] 종전 SQL 은 **키만 보고 줄을 검색**했다:
+    ///     `WHERE tenant_id=@T AND auth_key_hash=@H AND status='approved'` — **device_id 조건이 없다.**
+    ///     ⇒ 남의 키를 넣으면 **그 남의 줄이 그대로 반환**된다.
+    ///       인증키가 **회사 공용 열쇠**가 되어 아무 기기나 남의 줄을 열고 통과했다.
+    ///       요금과 접근통제가 **동시에** 무너지는 자리다.
+    ///
+    ///   [고침 — 핵심 원칙] 🔴 **키는 "맞나 틀리나"만 판정한다. 무엇을 열지는 키가 정하지 않는다.**
+    ///     ① 이 세션이 신청한 줄을 **먼저 특정**한다 (device_id 로).
+    ///     ② 그 줄의 해시와 **대조**한다.
+    ///     ⇒ 남의 키를 넣어도 **자기 줄에서 대조되어 틀림으로 끝난다.**
+    ///       남의 device_id 를 반환하는 경로가 **0** 이 된다.
+    ///
+    ///   🔴 [왜 새 줄을 만들지 않는가 — [3-V] V-02 판정]
+    ///     "성공 시 서버가 새 device_id 를 발급해 새 줄을 만든다" 로 짜면 **착수 당일 1062** 가 난다.
+    ///     `fingerprint` 는 **NOT NULL** 이고 `uq_tenant_fp(tenant_id, fingerprint)` 가 **UNIQUE** 다:
+    ///       NULL 불가 · 같은 지문 불가(1062) · 임의값은 다음 접속에 못 찾아 또 새 줄(지금 사고 재발).
+    ///     ⇒ 🔴 **줄은 이미 있다.** 직원이 관문에서 신청할 때 `pending` 줄이 생겼다.
+    ///       verify-key 가 하는 일은 **그 줄을 승인으로 바꾸는 것**이지 새로 만드는 것이 아니다.
+    ///       INSERT 가 아니라 **UPDATE** 다. UNIQUE·NOT NULL 을 건드릴 일이 없다.
+    ///
+    ///   🔴 [1회용] 대조에 성공하면 **해시를 즉시 지운다**(사장님 결재 4 — *"1회용 + 재발급"*).
+    ///     키가 계속 살아 있으면 **옆에서 본 사람이 나중에 그 키로 들어온다.**
+    ///     ⚠️ 오타로 막힌 직원은 대표가 [인증키 재발급] 을 눌러 되살린다(1-8) —
+    ///       재발급이 없으면 **오타 낸 직원이 영구 차단**되고 그것이 8/10 사고와 같은 모양이다.
+    ///
+    ///   ⚠️ 같은 회사(tenant) 안에서만 찾는다 — 남의 회사 키로 들어올 수 없다(헌법 #2).
+    ///
+    /// <param name="sessionDeviceId">
+    ///   🔴 **이 세션이 관문에서 발급받은 장비넘버.** 이것이 "어느 줄인가" 를 정한다.
+    ///   비어 있으면 열 줄을 특정할 수 없으므로 **아무것도 열지 않는다**(null).
+    /// </param>
+    public async Task<string?> VerifyAuthKeyAsync(
+        string authKey, string tenantId, string? sessionDeviceId, CancellationToken ct = default)
     {
         if (string.IsNullOrWhiteSpace(authKey)) return null;
 
+        // 🔴 열 줄을 모르면 아무것도 열지 않는다.
+        //   종전처럼 "키로 찾아서 열어 주기" 로 되돌아가면 그 순간 공용 열쇠가 부활한다.
+        if (string.IsNullOrWhiteSpace(sessionDeviceId)) return null;
+
         await EnsureOpenAsync(ct);
 
-        var deviceId = await _db.QueryFirstOrDefaultAsync<string?>(new CommandDefinition(
+        // ① 이 세션의 줄을 **먼저** 잡는다. 키로 찾는 것이 아니다.
+        //   ⚠️ status 를 조건에 넣지 않는다 — 폐기된 줄이면 아래에서 갈라 거절해야
+        //     "왜 안 되는지" 를 서버가 알 수 있다.
+        var row = await _db.QueryFirstOrDefaultAsync<(string? hash, string status)?>(new CommandDefinition(
             """
-            SELECT device_id
+            SELECT auth_key_hash AS hash, status AS status
             FROM tenant_devices
-            WHERE tenant_id = @TenantId
-              AND auth_key_hash = @KeyHash
-              AND status = 'approved'
+            WHERE tenant_id = @TenantId AND device_id = @DeviceId
             LIMIT 1
             """,
-            new { TenantId = tenantId, KeyHash = Sha256Hex(authKey) }, cancellationToken: ct));
+            new { TenantId = tenantId, DeviceId = sessionDeviceId }, cancellationToken: ct));
 
-        return deviceId;
+        if (row is null) return null;
+
+        var (storedHash, status) = row.Value;
+
+        // 폐기된 기기는 옛 키가 남아 있어도 되살아나지 않는다.
+        if (status == "revoked") return null;
+
+        // 아직 키를 못 받은 줄(대표가 승인을 안 눌렀다) — 대조할 것이 없다.
+        if (string.IsNullOrWhiteSpace(storedHash)) return null;
+
+        // ② **대조 하나.** 이 줄의 해시와 같은가.
+        //   🔴 다른 줄의 해시와는 절대 비교하지 않는다 — 그것이 공용 열쇠를 만드는 자리였다.
+        if (!string.Equals(storedHash, Sha256Hex(authKey), StringComparison.OrdinalIgnoreCase))
+            return null;
+
+        // ③ 맞았다 — 이 줄을 승인으로 올리고 **키를 즉시 소거한다(1회용).**
+        //   ⚠️ UPDATE 다. 새 줄을 만들지 않으므로 uq_tenant_fp·NOT NULL 을 건드리지 않는다.
+        await _db.ExecuteAsync(new CommandDefinition(
+            """
+            UPDATE tenant_devices
+            SET status = 'approved',
+                approved_at = COALESCE(approved_at, NOW(6)),
+                auth_key_hash = NULL,
+                last_seen_at = NOW(6)
+            WHERE tenant_id = @TenantId AND device_id = @DeviceId
+            """,
+            new { TenantId = tenantId, DeviceId = sessionDeviceId }, cancellationToken: ct));
+
+        await _audit.LogAsync("device_key_verified", "device", sessionDeviceId, ct: ct);
+
+        return sessionDeviceId;
+    }
+
+    // ── 🔴 인증키 재발급 (대표계정) ── 20260818작1 (1-8) · 사장님 결재 4
+    //
+    //   사장님 문구 그대로: *"1회용 + 재발급 화면 필요 — 버튼 [인증키 재발급]"*
+    //
+    //   🔴 [왜 1-1 과 한 몸인가] 1-1 이 키를 **1회용**으로 만들었다. 1회용은 그 자체로는 위험하다 —
+    //     직원이 **오타를 내거나** 키를 잃으면 **되살릴 길이 없다.**
+    //     ⇒ 그 순간 8/10 사고와 **같은 모양**이 된다: *쓰던 사람이 새 규칙에 막혀 못 들어온다.*
+    //     그래서 1-1 과 1-8 은 **한 작업**이고 쪼개면 안 된다(작업지시서 §2).
+    //
+    //   [동작] 옛 해시를 **버리고** 새 키를 만든다. 옛 키는 그 순간 죽는다.
+    //     ⚠️ 원문은 우리가 보관하지 않는다 — 돌려주는 이 반환값이 **유일하게 존재하는 순간**이다.
+    //       화면이 그것을 대표에게 한 번 보여주고 끝난다(헌법 #5 · ApproveAsync 와 같은 원칙).
+    //
+    //   🔴 [알림에 싣지 않는다] 사장님 8/16 오더 — *"옆에서 보면 샌다"*.
+    //     이 값은 **화면에만** 뜬다. 알림·메일·문자에 절대 싣지 않는다.
+    //
+    //   ⚠️ 폐기된 기기는 재발급하지 않는다 — 폐기를 되돌리는 길은 여기가 아니다(폐기 해제가 따로 있다).
+    /// <summary>인증키 재발급 (대표계정). 반환값 = 새 인증키 원문 — 이 순간에만 존재한다.</summary>
+    public async Task<string?> ReissueAuthKeyAsync(
+        string deviceId, string tenantId, string approverUserId, CancellationToken ct = default)
+    {
+        await EnsureOpenAsync(ct);
+
+        var status = await _db.QueryFirstOrDefaultAsync<string?>(new CommandDefinition(
+            "SELECT status FROM tenant_devices WHERE device_id = @Id AND tenant_id = @TenantId LIMIT 1",
+            new { Id = deviceId, TenantId = tenantId }, cancellationToken: ct));
+
+        if (status is null)
+            throw new InvalidOperationException("기기를 찾을 수 없습니다.");
+
+        if (status == "revoked")
+            throw new InvalidOperationException("폐기된 기기는 인증키를 재발급할 수 없습니다.");
+
+        var authKey = Guid.NewGuid().ToString("N") + Guid.NewGuid().ToString("N");
+
+        await _db.ExecuteAsync(new CommandDefinition(
+            """
+            UPDATE tenant_devices
+            SET auth_key_hash = @KeyHash,
+                auth_key_issued_at = NOW(6)
+            WHERE device_id = @Id AND tenant_id = @TenantId
+            """,
+            new { Id = deviceId, TenantId = tenantId, KeyHash = Sha256Hex(authKey) },
+            cancellationToken: ct));
+
+        // 이력 — 누가·언제·어느 기기 (기존 감사기록 패턴 재사용).
+        //   ⚠️ 키 자체는 남기지 않는다. 남기면 보관 안 하는 의미가 사라진다.
+        await _audit.LogAsync("device_key_reissue", "device", deviceId,
+            reason: "대표계정 인증키 재발급", ct: ct);
+
+        return authKey;
     }
 
     // ── 기기 승인 거부 (대표계정) ── 20260811작1 (B)
@@ -613,10 +947,57 @@ public sealed class TenantDeviceService : ITenantDeviceService
 
         // 대기 중인 기기만 거부한다. 이미 쓰고 있는(approved) 기기를 여기서 끊지 않는다 —
         // 그건 폐기(RevokeAsync)이고, 회사 서버 보호 가드가 그쪽에 있다.
+        //
+        // 🔴 2026-08-18 20260818작1 (1-4) — **거절을 폐기에서 갈랐다.**
+        //
+        //   [무엇이 문제였나] 여기가 `SET status='revoked'` 였다.
+        //     **"이번엔 아니다"** 와 **"폐기"** 가 **같은 칸**에 들어가 있었다.
+        //     ⇒ 거절당한 직원은 RegisterOrRefreshAsync 의 `revoked` 갈래에 걸려
+        //       *"폐기된 기기입니다"* 로 **로그인 자체가 막힌다.** 다시 신청할 길이 없다.
+        //       ⇒ 사장님 오더 *"거절하면 첫 화면 회귀"* 가 **물리적으로 불가능**했다.
+        //
+        //   [고침] `rejected` 라는 **제 칸**을 준다. 그 기기는 **다시 신청할 수 있다.**
+        //     🟢 DDL 변경 없음 — `status` 가 `varchar(20)` 이라 ALTER 가 필요 없다(실측).
+        //
+        //   🔴 **`revoked` 의 뜻은 한 글자도 안 바꿨다.** 폐기는 그대로 폐기다(작업지시서 §8).
+        //     기존 `revoked` 행을 일괄 전환하지도 않는다 — 대표가 폐기한 것은 폐기로 남는다.
+
+        // ══════════════════════════════════════════════════════════════
+        // 🔴 2026-08-18 20260818작2 (DP-2) — **메인PC 는 반려할 수 없다.**
+        //   (검증팀 [4] 적발 · docs/검증/병렬이슈/20260818_검증팀_DP1_DP2_폐기키생존_메인PC반려.md)
+        //
+        //   [무엇이 문제였나] 폐기(RevokeAsync)에는 메인PC 가드가 있는데 **반려에는 없었다.**
+        //     그리고 **메인PC 도 `pending` 일 수 있다**(MainPcRegistrationService 가 pending 줄을 승격시킨다)
+        //     ⇒ 검증팀이 **메인PC 를 실제로 `rejected` 로 만드는 데 성공했다.**
+        //
+        //   🔴 [왜 이게 게시를 막는 사고인가] 8/16 에 **대표가 자기 화면에서 막혀 스스로 못 빠져나온**
+        //     P0 가 있었다(커밋 30e3873 — 사장님이 직접 겪으셨다). 그때 만든 구제책이
+        //     RegisterOrRefreshAsync 의 `status == "revoked" && !isMainPc` 인데,
+        //     그것은 **`revoked` 만 덮는다.** ⇒ 메인PC 가 `rejected` 가 되면 구제 경로가 없고,
+        //     **승인해 줄 수 있는 유일한 사람이 승인 화면에 못 들어간다.**
+        //
+        //   [고침은 두 자리다 — 하나만 하면 다른 경로로 같은 사고가 난다]
+        //     ① **막는 자리** = 여기. 애초에 메인PC 가 반려되지 않게 한다.
+        //     ② **빠져나오는 자리** = RegisterOrRefreshAsync 의 구제 조건(`rejected` 도 덮게 했다).
+        //     🔴 막는 것과 빠져나오는 것은 **다른 역할**이다. ②만 있으면 표가 더러워지고,
+        //       ①만 있으면 이미 rejected 인 기존 행이 영영 못 나온다.
+        //
+        //   ⚠️ 일반 기기는 **종전대로 반려된다** — 여기서 전부 막으면 1-4(거절→재신청)가 죽는다.
+        // ══════════════════════════════════════════════════════════════
+        var rejectTargetIsMainPc = await _db.ExecuteScalarAsync<bool>(new CommandDefinition(
+            "SELECT COALESCE(is_main_pc, 0) FROM tenant_devices WHERE device_id = @Id AND tenant_id = @TenantId LIMIT 1",
+            new { Id = deviceId, TenantId = tenantId }, cancellationToken: ct));
+
+        if (rejectTargetIsMainPc)
+        {
+            throw new InvalidOperationException(
+                "회사 서버는 거부할 수 없습니다. 자료를 보관하는 컴퓨터입니다.");
+        }
+
         var affected = await _db.ExecuteAsync(new CommandDefinition(
             """
             UPDATE tenant_devices
-            SET status = 'revoked',
+            SET status = 'rejected',
                 revoked_at = NOW(),
                 revoked_reason = @Reason
             WHERE device_id = @Id AND tenant_id = @TenantId AND status = 'pending'
@@ -627,6 +1008,62 @@ public sealed class TenantDeviceService : ITenantDeviceService
             throw new InvalidOperationException("승인 대기 중인 기기가 아닙니다.");
 
         await _audit.LogAsync("reject", "device", deviceId, reason: reason, ct: ct);
+    }
+
+    // ── 대표 연락처 (20260818작2 — 직원이 갈 곳을 만든다) ──
+    //
+    //   사장님 오더 계통: 관문에 막힌 직원이 **누구에게 전화할지** 알아야 흐름이 안 끊긴다(헌법 #20).
+    //
+    //   🔴 [새 컬럼을 만들지 않았다] `users`·`employees` 에 이미 있는 값을 읽을 뿐이다(헌법 #9).
+    //     ⚠️ 작업지시서는 `employees.home_phone` 도 있다고 적었으나 **출하 DDL 실측 결과 없다**
+    //       (`employees` 에는 `phone`·`email` 만 있다). 있는 것만 쓴다 — 없는 컬럼을 SQL 에 적으면
+    //       런타임 500 이다(헌법 #13 DESCRIBE 선행).
+    //
+    //   🔴 [본사로 안 나간다] 헌법 #18·#22 — 이 값은 고객사 화면에만 뜬다.
+    //
+    //   ⚠️ [못 찾으면 null] 대표가 없거나 이름이 비면 null 을 돌려준다.
+    //     화면은 그때 종전 문구("관리자에게 문의")로 그대로 간다 — **안내가 사라지면 안 된다.**
+    public async Task<AdminContactDto?> GetAdminContactAsync(string tenantId, CancellationToken ct = default)
+    {
+        await EnsureOpenAsync(ct);
+
+        try
+        {
+            // 대표계정(tenant_admin) 한 사람을 찾는다.
+            //   ⚠️ 부모계정(is_parent=1)을 앞에 세운다 — 대표가 여럿일 수 있고, 그중 원본은 부모다.
+            //   ⚠️ 전화번호는 users 에 없으면 employees 에서 찾는다(사람은 같은데 값이 갈려 있다).
+            var row = await _db.QueryFirstOrDefaultAsync<(string? name, string? phone)?>(new CommandDefinition(
+                """
+                SELECT COALESCE(NULLIF(u.emp_name, ''), u.user_name) AS name,
+                       COALESCE(NULLIF(u.phone, ''), NULLIF(e.phone, '')) AS phone
+                FROM users u
+                LEFT JOIN employees e
+                       ON e.user_id = u.user_id AND e.tenant_id = u.tenant_id
+                WHERE u.tenant_id = @TenantId
+                  AND u.account_type = 'tenant_admin'
+                  AND u.is_active = 1
+                  AND u.is_deleted = 0
+                ORDER BY u.is_parent DESC, u.created_at ASC
+                LIMIT 1
+                """,
+                new { TenantId = tenantId }, cancellationToken: ct));
+
+            if (row is null) return null;
+
+            var (name, phone) = row.Value;
+            if (string.IsNullOrWhiteSpace(name)) return null;
+
+            return new AdminContactDto { Name = name, Phone = string.IsNullOrWhiteSpace(phone) ? null : phone };
+        }
+        catch (Exception ex)
+        {
+            // 🔴 헌법 #15 — 빈 catch 금지. 연락처를 못 읽었다고 **관문 화면이 죽으면 안 된다.**
+            //   못 찾은 것과 같게 처리한다 ⇒ 화면은 종전 문구로 간다.
+            _logger.LogWarning(ex,
+                "[TenantDeviceService] 대표 연락처를 못 읽었다 — 관문 화면은 종전 문구로 간다. tenant={TenantId}",
+                tenantId);
+            return null;
+        }
     }
 
     // ── 모바일기기 등록 QR 토큰 발급 (20260811작1 (D)) ──
@@ -658,13 +1095,28 @@ public sealed class TenantDeviceService : ITenantDeviceService
     }
 
     // ── QR 토큰으로 모바일기기 등록 (20260811작1 (D)) ──
-    //   QR 을 띄운 것 자체가 대표계정의 승인이다 → 별도 승인 단계 없이 approved 로 들어간다.
-    public async Task<(bool ok, string message, string? deviceId)> RegisterMobileByTokenAsync(
+    //
+    // 🔴 2026-08-18 20260818작2 (2-4b) — **옛 주석을 걷어냈다. 그 결재는 뒤집혔다.**
+    //
+    //   [여기 있던 옛 문장] *"QR 을 띄운 것 자체가 대표계정의 승인이다
+    //     → 별도 승인 단계 없이 approved 로 들어간다."*
+    //
+    //   [뒤집힌 근거] 2026-08-16 사장님 전결 — *"PC환경 절차와 같은 절차가 있어야 함."*
+    //     (docs/운영기록/20260816작2 §7 결재 2 · docs/운영기록/20260818작2 §2 (2-4))
+    //
+    //   [왜 뒤집혔나] QR 이 화면에 떠 있는 10분 동안 **옆 사람 폰이 찍어도 등록**된다.
+    //     "띄운 것"과 "그 폰인 것"은 다른 사실이다. 대표는 앞의 것만 알고 뒤의 것을 모른다.
+    //
+    //   🔴 **이 주석을 옛 문장으로 되돌리지 마라.** 주석이 옛 규칙을 말하면 다음 사람이
+    //     그것을 근거로 아래 `qrStatus` 를 approved 로 되돌린다. 실제로 이 자리가
+    //     8/16 봉합 뒤에도 옛 문장을 그대로 달고 있어 2-4b 로 따로 잡혔다.
+    public async Task<(bool ok, string message, string? deviceId, AdminContactDto? adminContact)> RegisterMobileByTokenAsync(
         string token, string deviceName, string fingerprint, string ipAddress, string? userAgent,
+        string? knownDeviceId = null,
         CancellationToken ct = default)
     {
         if (string.IsNullOrWhiteSpace(token) || string.IsNullOrWhiteSpace(fingerprint))
-            return (false, "등록 정보가 올바르지 않습니다.", null);
+            return (false, "등록 정보가 올바르지 않습니다.", null, null);
 
         await EnsureOpenAsync(ct);
         var hash = Sha256Hex(token);
@@ -681,19 +1133,81 @@ public sealed class TenantDeviceService : ITenantDeviceService
                 new { Hash = hash }, cancellationToken: ct));
 
         if (row is null)
-            return (false, "만료되었거나 이미 사용된 코드입니다. 다시 시도해 주세요.", null);
+            return (false, "만료되었거나 이미 사용된 코드입니다. 다시 시도해 주세요.", null, null);
 
-        var (tokenId, tenantId, issuedBy) = row.Value;
+        // 🔴 2026-08-18 20260818작2 (2-4) — `issued_by`(QR 을 띄운 사람)를 **더 이상 쓰지 않는다.**
+        //   종전엔 승인제가 꺼져 있을 때 이 사람을 `approved_by` 에 적었다.
+        //   그러나 그는 승인한 적이 없다 — QR 을 띄웠을 뿐이고 **누가 찍었는지 모른다.**
+        //   ⚠️ 조회 SQL 에서 `issued_by` 를 빼지 않는다(헌법 #37 · #1) — 값은 계속 저장되고,
+        //     "누가 이 QR 을 띄웠나" 는 나중에 추적할 때 쓰이는 사실이다. 여기서 안 읽을 뿐이다.
+        var (tokenId, tenantId, _) = row.Value;
 
         // 같은 폰이 다시 찍은 경우 — 이미 등록돼 있으면 그대로 성공 처리(멱등).
-        var existing = await _db.QueryFirstOrDefaultAsync<string?>(new CommandDefinition(
-            "SELECT device_id FROM tenant_devices WHERE tenant_id = @TenantId AND fingerprint = @Fp LIMIT 1",
-            new { TenantId = tenantId, Fp = fingerprint }, cancellationToken: ct));
+        //
+        // 🔴 2026-08-18 20260818작2 (2-3) — **번호를 먼저 보고, 없으면 지문을 본다.**
+        //
+        //   [무엇이 문제였나] 종전엔 **지문 하나로만** 찾았다. 그런데 지문은 브라우저 환경에서
+        //     만들어져 **흔들린다** — 사파리에서 크롬으로 옮기거나, 브라우저를 새로 깔거나,
+        //     사생활 보호 모드로 들어가면 다른 값이 나온다.
+        //     ⇒ **같은 폰이 다시 찍어도 "처음 온 폰"** 이 되어 새 줄이 생겼다.
+        //       이것이 사장님 8/16 증상② — *"한 기기에서 슬롯 중복으로 잡힘"* — 그 자체다.
+        //
+        //   [고침] PC 경로(RegisterOrValidateAsync)가 이미 쓰는 **같은 순서**로 맞춘다:
+        //     ① 폰이 보관해 둔 자기 번호(device_id) → ② 없으면 종전대로 지문.
+        //     번호는 서버가 준 값이라 브라우저를 바꿔도 안 흔들린다.
+        //
+        //   🔴 [지문 조회를 없애지 않는다 — 헌법 #37] *"안 읽힌다 ≠ 잔재"*.
+        //     번호를 아직 못 받은 **옛 폰**은 지문밖에 없다. 지문 갈래를 지우면 그 폰들이
+        //     전부 새 줄로 다시 등록되어 슬롯을 두 번 먹는다. **앞에 더하는 것이지 지우는 게 아니다.**
+        //
+        //   ⚠️ tenant_id 를 함께 본다 — 남의 회사 번호를 들고 와도 이 회사 줄은 안 열린다(헌법 #2).
+        string? existing = null;
+
+        if (!string.IsNullOrWhiteSpace(knownDeviceId))
+        {
+            existing = await _db.QueryFirstOrDefaultAsync<string?>(new CommandDefinition(
+                "SELECT device_id FROM tenant_devices WHERE tenant_id = @TenantId AND device_id = @Dev LIMIT 1",
+                new { TenantId = tenantId, Dev = knownDeviceId }, cancellationToken: ct));
+        }
+
+        if (string.IsNullOrEmpty(existing))
+        {
+            existing = await _db.QueryFirstOrDefaultAsync<string?>(new CommandDefinition(
+                "SELECT device_id FROM tenant_devices WHERE tenant_id = @TenantId AND fingerprint = @Fp LIMIT 1",
+                new { TenantId = tenantId, Fp = fingerprint }, cancellationToken: ct));
+        }
 
         if (!string.IsNullOrEmpty(existing))
         {
+            // 🔴 지문이 흔들려 번호로 찾아온 폰은 **지금 지문으로 갱신**해 둔다.
+            //   그래야 번호를 잃어버린(저장소를 지운) 다음번에도 지문 갈래가 그 폰을 알아본다.
+            //   ⚠️ uq_tenant_fp UNIQUE 에 걸릴 수 있다 — 그 지문을 이미 **다른 줄**이 쓰고 있으면
+            //     갱신을 조용히 포기한다. 갱신 실패가 등록 자체를 죽이면 안 된다(헌법 #15 — 흔적은 남긴다).
+            try
+            {
+                await _db.ExecuteAsync(new CommandDefinition(
+                    """
+                    UPDATE tenant_devices
+                    SET fingerprint  = @Fp,
+                        last_seen_at = NOW(6),
+                        ip_address   = @Ip,
+                        user_agent   = COALESCE(@Ua, user_agent)
+                    WHERE device_id = @Id AND tenant_id = @TenantId
+                    """,
+                    new { Id = existing, TenantId = tenantId, Fp = fingerprint, Ip = ipAddress, Ua = userAgent },
+                    cancellationToken: ct));
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex,
+                    "[TenantDeviceService] QR 재등록 — 지문 갱신을 못 했다(다른 줄이 그 지문을 쓰는 중일 수 있다). "
+                    + "등록 자체는 그대로 성공시킨다. device={DeviceId}", existing);
+            }
+
             await MarkTokenUsedAsync(tokenId, existing, ct);
-            return (true, "이미 등록된 기기입니다.", existing);
+
+            // ⚠️ 이미 등록된 폰도 **아직 대기 중일 수 있다** — 그때도 누구에게 말할지 알려줘야 한다.
+            return (true, "이미 등록된 기기입니다.", existing, await GetAdminContactAsync(tenantId, ct));
         }
 
         // 모바일 한도 확인 — QR 로 들어와도 슬롯 규칙은 같다.
@@ -709,7 +1223,12 @@ public sealed class TenantDeviceService : ITenantDeviceService
         var (_, mobileUsed) = await CountUsedSlotsAsync(tenantId, ct);
 
         if (mobileUsed >= mobileLimit)
-            return (false, "인증기기 한도초과. 관리자에게 문의하세요.", null);
+        {
+            // 🔴 한도가 찼을 때야말로 **대표에게 말해야 하는 자리**다 — 직원 혼자서는 못 푼다.
+            //   슬롯을 늘리거나 안 쓰는 기기를 해제하는 것은 대표만 할 수 있다.
+            return (false, "인증기기 한도초과. 관리자에게 문의하세요.", null,
+                await GetAdminContactAsync(tenantId, ct));
+        }
 
         // 🔴 2026-08-16 20260816작2 — **QR 도 대표 승인을 거친다** (사장님 전결).
         //
@@ -721,10 +1240,40 @@ public sealed class TenantDeviceService : ITenantDeviceService
         //     대표가 "내가 등록시키려던 그 폰이 맞나" 를 확인할 자리가 없었다.
         //     ⇒ 폰도 대기줄에 서고, 대표 화면에서 확인번호를 대조한 뒤 [예] 를 누른다.
         //
-        //   ⚠️ 승인제가 꺼져 있으면 **종전 그대로** 즉시 approved 다(개발·시험 편의).
-        var qrStatus = _approvalEnabled ? "pending" : "approved";
+        //   🔴 2026-08-18 20260818작2 (2-4) — **스위치를 안 본다. 항상 대기줄이다.**
+        //
+        //     [여기 있던 옛 문장] *"승인제가 꺼져 있으면 종전 그대로 즉시 approved 다(개발·시험 편의)."*
+        //
+        //     [왜 없앴나] 이 경로는 **`[AllowAnonymous]`** 다. PC 는 **로그인을 통과한 뒤**
+        //       관문 앞에 서는데, QR 은 **로그인 없이** 들어온다.
+        //       ⇒ 더 엄해야 할 자리가 **더 느슨했다.** 개발 편의로 열 문이 아니다.
+        //
+        //     ⚠️ **개발·시험 편의가 사라진다.** 스위치를 꺼도 QR 은 대기줄에 선다.
+        //       시험은 **승인 API(ApproveAsync)를 불러** 통과시킨다 — 스위치로 우회하지 않는다.
+        //       (되돌리려면 이 한 줄만 고치면 되도록 별도 자리에 둔다 — 작업지시서 §6 롤백 2순위)
+        const string qrStatus = "pending";
+
+        // 🔴 2026-08-18 20260818작2 (2-6) — **저장은 세밀하게, 과금은 단순하게.**
+        //
+        //   [무엇이 문제였나] 아래 INSERT 는 종류를 **`'mobile'` 리터럴로 고정**했다.
+        //     태블릿이 QR 로 들어와도 저장값은 mobile 이었다.
+        //     ⇒ 사장님이 나중에 *"태블릿은 따로 받자"* 하시면 **과거 자료가 없어 못 간다.**
+        //
+        //   [고침] 서버가 판정한 값을 **그대로 저장**한다. tablet 은 tablet 으로 남는다.
+        //     🟢 DDL 변경 0 — `device_type varchar(10)` 이고 주석에 이미 `pc / mobile / tablet` 이 있다.
+        //
+        //   🔴 [과금은 한 칸 그대로 — 사장님 결재 3 *"테블렛,모바일 같이 씀"*]
+        //     `MobileUsedFrom` 이 `mobile` 과 `tablet` 을 **함께 센다.** 계수 로직은 한 글자도 안 건드렸다.
+        //     ⇒ 칸이 셋으로 늘지 않는다. 가격표 2칸 구조 그대로다(작업지시서 §8).
+        //
+        //   ⚠️ QR 은 폰이 찍는 경로라 pc 가 올 일이 없다 — 그래도 **판정 결과를 믿지 않고**
+        //     휴대기기 칸(mobile/tablet)으로 좁힌다. 컴퓨터가 이 문으로 슬쩍 들어와
+        //     **모바일 한도만 통과하고 컴퓨터 칸을 공짜로 먹는** 일이 없어야 한다.
+        var qrType = ResolveDeviceType(null, userAgent);
+        if (qrType != "tablet") qrType = "mobile";
 
         var deviceId = Guid.NewGuid().ToString();
+
         await _db.ExecuteAsync(new CommandDefinition(
             """
             INSERT INTO tenant_devices
@@ -732,33 +1281,43 @@ public sealed class TenantDeviceService : ITenantDeviceService
                fingerprint, ip_address, user_agent, status,
                registered_at, approved_by, approved_at, last_seen_at)
             VALUES
-              (@Id, @TenantId, NULL, 'mobile', @Name,
+              (@Id, @TenantId, NULL, @Type, @Name,
                @Fp, @Ip, @Ua, @Status,
-               NOW(6), @By, @ApprovedAt, NOW(6))
+               NOW(6), NULL, NULL, NOW(6))
             """,
             new
             {
                 Id = deviceId,
                 TenantId = tenantId,
+                Type = qrType,
                 Name = string.IsNullOrWhiteSpace(deviceName) ? "모바일 기기" : deviceName,
                 Fp = fingerprint,
                 Ip = ipAddress,
                 Ua = userAgent,
-                Status = qrStatus,
+                Status = qrStatus
 
-                // 승인 대기로 들어가면 아직 승인자가 없다 — 대표가 [예] 를 누를 때 채워진다.
-                //   ⚠️ 여기에 issuedBy 를 그냥 넣으면 **승인받지 않았는데 승인된 것처럼** 기록된다.
-                By = _approvalEnabled ? null : issuedBy,
-                ApprovedAt = _approvalEnabled ? (DateTime?)null : DateTime.Now
+                // 🔴 2026-08-18 20260818작2 (2-4 · 2-5) — `approved_by` · `approved_at` 은 **항상 NULL** 이다.
+                //
+                //   [옛 코드] `By = _approvalEnabled ? null : issuedBy` — 스위치가 꺼져 있으면
+                //     QR 을 발급한 사람을 **승인자로 기록**했다. 그러나 그 사람은 승인한 적이 없다.
+                //     QR 을 띄웠을 뿐이고, 그 사이 **누가 찍었는지 모른다.**
+                //   [지금] 위 (2-4)로 상태가 항상 `pending` 이므로 승인자가 있을 수 없다.
+                //     대표가 [예] 를 누르는 순간 ApproveAsync 가 채운다.
+                //
+                //   🔴 (2-5) `user_id` 도 NULL 이다 — **등록 시점엔 누구 폰인지 모른다.**
+                //     대표가 승인하며 사람을 고른다(ApproveAsync 의 assignUserId).
             }, cancellationToken: ct));
 
         await MarkTokenUsedAsync(tokenId, deviceId, ct);
-        await _audit.LogAsync("register", "device", deviceId, afterJson: "{\"type\":\"mobile\",\"via\":\"qr\"}", ct: ct);
+        await _audit.LogAsync("register", "device", deviceId,
+            afterJson: $"{{\"type\":\"{qrType}\",\"via\":\"qr\"}}", ct: ct);
 
-        // 폰 화면이 무엇을 안내할지 갈린다 — 대기면 "대표님 허락을 기다립니다" 를 보여줘야 한다.
-        return _approvalEnabled
-            ? (true, "등록을 요청했습니다. 대표님이 허락하면 바로 쓸 수 있습니다.", deviceId)
-            : (true, "모바일 기기가 등록되었습니다.", deviceId);
+        // 🔴 2026-08-18 20260818작2 (2-4) — 상태가 **항상 대기**이므로 안내도 하나다.
+        //   종전엔 스위치를 보고 두 문장으로 갈렸는데, 이제 갈릴 일이 없다.
+        //   ⚠️ 여기서 스위치를 다시 보면 **화면과 표가 어긋난다** — 표는 pending 인데
+        //     폰에는 "등록되었습니다" 가 뜨고, 직원은 되는 줄 알고 기다리지 않는다.
+        return (true, "등록을 요청했습니다. 대표님이 허락하면 바로 쓸 수 있습니다.", deviceId,
+            await GetAdminContactAsync(tenantId, ct));
     }
 
     private async Task MarkTokenUsedAsync(string tokenId, string deviceId, CancellationToken ct)
@@ -775,7 +1334,61 @@ public sealed class TenantDeviceService : ITenantDeviceService
     }
 
     // ── 미들웨어용: 기기 허용 여부 ──
+    //
+    // 🔴 2026-08-18 20260818작1 (1-2) — **헤더 통과를 메인PC 한 줄로 좁혔다.**
+    //
+    //   [무엇이 문제였나] 종전은 `status='approved'` 만 봤다.
+    //     그런데 `device_id` 는 **비밀이 아니다** — 기기 목록 화면에 보이고,
+    //     `gate-status` **쿼리스트링(서버 로그에 평문)** 에 실리며, 브라우저 저장소에 그대로 있다.
+    //     ⇒ 승인된 아무 기기의 번호나 헤더에 넣으면 **그것만으로 문이 열렸다.**
+    //
+    //   🔴 [무엇을 고친 것인가 — 표현을 정확히 한다 · [3-V] V-04]
+    //     이것은 **"도용 차단" 이 아니다.** 번호가 비밀이 아닌 이상 그 번호를 손에 넣은 자는
+    //     **여전히 통과한다.** 이 봉합이 하는 일은 **통과 가능한 범위를 메인PC 한 줄로 좁히는 것**이다.
+    //     ⚠️ 이것을 "도용을 막았다" 고 적으면 **거짓봉합**이 된다. 남은 구멍(기기별 비밀값)은
+    //       다음 차수 몫이고, G-32-d 가 그 사실을 값으로 세워 두었다.
+    //
+    //   [왜 하필 메인PC 인가] 이 헤더 통과 길은 **메인PC 를 구하려고** 낸 길이다(8/16 P0).
+    //     메인PC 는 인증키를 **받은 적이 없다** — 인증키는 대표가 *다른* 기기를 승인할 때
+    //     생기는 값이고, 메인PC 는 MainPcRegistrationService 가 스스로 등록하기 때문이다.
+    //     ⇒ 메인PC 에겐 **이 길 말고 다른 길이 없다.**
+    //     나머지 기기는 **인증키라는 제 길**이 있으므로 이 길을 열어 둘 이유가 없다.
+    //
+    //   ⚠️ 조건은 **AND** 다 — "메인PC **이면서** 승인됨". 메인PC 표식이 승인 검사를 덮지 않는다.
     public async Task<bool> IsDeviceAllowedAsync(string deviceId, string tenantId, CancellationToken ct = default)
+    {
+        if (string.IsNullOrEmpty(deviceId)) return false;
+        await EnsureOpenAsync(ct);
+        var ok = await _db.ExecuteScalarAsync<int>(new CommandDefinition(
+            """
+            SELECT COUNT(*)
+            FROM tenant_devices
+            WHERE device_id = @Id
+              AND tenant_id = @TenantId
+              AND status = 'approved'
+              AND is_main_pc = 1
+            """,
+            new { Id = deviceId, TenantId = tenantId }, cancellationToken: ct));
+        return ok > 0;
+    }
+
+    // ── 🔴 관문용: 이 기기가 승인됐는가 ── 20260818작1
+    //
+    //   🔴 **IsDeviceAllowedAsync 와 묻는 것이 다르다. 합치면 안 된다.**
+    //
+    //   [두 물음이 다르다]
+    //     · IsDeviceAllowedAsync  = *"이 헤더만으로 문을 열어도 되나"*  → **메인PC 만** (1-2)
+    //     · IsDeviceApprovedAsync = *"이 기기가 승인은 났나"*          → **모든 승인 기기**
+    //
+    //   [왜 갈랐나 — 안 가르면 그 자리에서 P0 다]
+    //     관문(gate-status)이 1-2 로 좁힌 판정을 쓰면, **승인받은 평범한 직원 기기가
+    //     영원히 "승인 대기" 화면에 갇힌다.** 대표가 [예] 를 눌러도 화면이 안 넘어간다 —
+    //     메인PC 가 아니라서 false 가 돌아오기 때문이다.
+    //     ⇒ 정확히 **8/10 사고와 같은 모양**(규칙을 좁혀서 쓰던 사람이 막힘)이 된다.
+    //
+    //   ⚠️ 이 메서드는 **문을 열지 않는다.** 화면에게 상태를 알려줄 뿐이다.
+    //     업무 API 를 통과시키는 판정은 여전히 인증키(미들웨어)와 IsDeviceAllowedAsync 가 한다.
+    public async Task<bool> IsDeviceApprovedAsync(string deviceId, string tenantId, CancellationToken ct = default)
     {
         if (string.IsNullOrEmpty(deviceId)) return false;
         await EnsureOpenAsync(ct);
@@ -1048,13 +1661,134 @@ public sealed class TenantDeviceService : ITenantDeviceService
 
         var t = raw.Trim().ToLowerInvariant();
 
-        // 태블릿은 휴대기기 칸으로 흡수한다 (사장님 판정 — 컴퓨터 운영체제가 아니다)
-        if (t is "tablet") return "mobile";
+        // 🔴 2026-08-18 20260818작2 (2-6) — **`tablet` 을 더 이상 뭉개지 않는다.**
+        //
+        //   [옛 코드] `if (t is "tablet") return "mobile";` — 저장까지 mobile 로 덮었다.
+        //   [지금] `tablet` 은 `tablet` 으로 남는다.
+        //
+        //   🔴 **과금은 한 글자도 안 바뀐다** (사장님 결재 3 — *"테블렛,모바일 같이 씀"*).
+        //     칸을 세는 자리는 MobileUsedFrom 하나뿐이고, 그 함수가 `mobile` 과 `tablet` 을
+        //     **원래부터 함께 세고 있었다.** ⇒ 저장만 갈라지고 칸 수는 그대로 둘이다.
+        //
+        //   ⚠️ 이 값을 **셋째 칸으로 착각하지 마라.** 가격표는 2칸이다(작업지시서 §8).
+        //     저장을 가르는 이유는 하나뿐 — 나중에 *"태블릿은 따로 받자"* 하실 때
+        //     **과거 자료가 있어야** 갈 수 있기 때문이다.
+        if (t is "tablet") return "tablet";
         if (t is "mobile" or "pc") return t;
 
         // 모르는 값은 휴대기기로 본다 — 비싼 칸을 잘못 깎지 않는 쪽
         return "mobile";
     }
+
+    /// <summary>
+    /// 🔴 <b>기기 종류를 서버가 정한다</b> — 클라이언트 신고값을 <b>그대로 믿지 않는다</b> (20260818작2 · [3-V] V-05).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// 🔴 <b>진짜 구멍은 승격이 아니라 최초 등록이었다.</b>
+    /// 2-1 은 <c>mobile → pc</c> 승격에 한도를 다시 보게 만든다. 그런데 <b>공격자는 승격할 이유가 없다</b> —
+    /// 처음부터 <c>mobile</c> 이라고 신고하고 <b>안 바꾸면 그만</b>이다. 컴퓨터 한도가 0이어도
+    /// 컴퓨터가 휴대기기 칸으로 무제한 들어온다.
+    /// ⇒ <b>2-1 만 하면 게이트는 초록이고 구멍은 그대로다.</b> 그것을 막으려고 이 함수가 있다.
+    /// </para>
+    /// <para>
+    /// [무엇을 하나] 클라이언트가 <c>DeviceType</c> 을 신고하지만, 그 값은 브라우저 안의 스크립트가
+    /// 만든 것이라 <b>사람이 손으로 바꿔 보낼 수 있다.</b> 반면 <c>User-Agent</c> 는 브라우저가
+    /// 스스로 붙여 서버가 <b>직접</b> 읽는 값이다(<c>Request.Headers.UserAgent</c>).
+    /// ⇒ 둘이 <b>어긋나면 서버 판정을 쓴다.</b>
+    /// </para>
+    /// <para>
+    /// ⚠️ <b>완벽을 약속하지 않는다.</b> User-Agent 도 마음만 먹으면 바꿀 수 있다.
+    /// 이 함수가 하는 일은 <b>"신고값을 그대로 믿지 않는 것"</b> 하나다 —
+    /// 화면 조작만으로 칸을 고르던 것을, <b>헤더까지 함께 위조해야</b>만 되게 바꾼다.
+    /// 🔴 이것을 <i>"위조를 막았다"</i> 고 적으면 <b>거짓봉합</b>이다.
+    /// </para>
+    /// <para>
+    /// 🔴 <b>판정 순서는 클라이언트(<c>device-fingerprint.js getDeviceType</c>)와 똑같이 간다.</b>
+    /// 두 곳이 다른 순서를 쓰면 <b>정상 기기가 어긋남으로 잡혀</b> 멀쩡한 고객의 칸이 바뀐다.
+    /// 특히 <b>휴대기기를 먼저 걷어낸다</b> — 아이폰·아이패드는 <c>like Mac OS X</c> 를,
+    /// 안드로이드는 <c>Linux</c> 를 달고 오기 때문이다.
+    /// </para>
+    /// <para>
+    /// ⚠️ <b>어긋남이 없으면 신고값을 존중한다.</b> User-Agent 로 못 가리는 것(태블릿 세부 구분 등)까지
+    /// 서버가 뭉개면, 클라이언트가 애써 판정한 정보를 잃는다.
+    /// </para>
+    /// </remarks>
+    /// <param name="claimed">클라이언트가 신고한 종류. 안 보냈으면 <c>null</c>.</param>
+    /// <param name="userAgent">서버가 직접 읽은 <c>User-Agent</c>. 없으면 <c>null</c>.</param>
+    internal static string ResolveDeviceType(string? claimed, string? userAgent)
+    {
+        var normalized = NormalizeDeviceType(claimed);
+        var judged = JudgeTypeFromUserAgent(userAgent);
+
+        // User-Agent 가 없거나 못 가리면 서버가 할 말이 없다 — 종전 규칙 그대로.
+        //   🔴 그래도 `?? "mobile"` 로 끝낸다(8/16 CR2-2 종결 — 싼 칸이 고객에게 유리하다).
+        if (judged is null) return normalized ?? "mobile";
+
+        // 신고를 안 했으면 서버 판정을 쓴다.
+        if (normalized is null) return judged;
+
+        // 🔴 **어긋나면 서버가 이긴다.** 여기가 V-05 의 본체다.
+        //   컴퓨터로 보이는데 휴대기기라고 신고했다 ⇒ 컴퓨터로 센다(요금이 새지 않는다).
+        //   휴대기기로 보이는데 컴퓨터라고 신고했다 ⇒ 휴대기기로 센다(고객이 덜 낸다).
+        var normalizedIsPc = normalized == "pc";
+        var judgedIsPc = judged == "pc";
+        if (normalizedIsPc != judgedIsPc) return judged;
+
+        // 어긋나지 않는다 — 신고값을 존중한다(tablet 같은 세부 구분을 잃지 않기 위해서다).
+        return normalized;
+    }
+
+    /// <summary>
+    /// 🔴 <b>서버가 <c>User-Agent</c> 만 보고 종류를 가른다</b> (20260818작2 · [3-V] V-05).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// 🔴 <b>순서가 전부다.</b> <c>device-fingerprint.js</c> 의 <c>getDeviceType</c> 과
+    /// <b>같은 순서</b>를 쓴다 — 두 곳이 갈리면 정상 기기가 어긋남으로 잡힌다.
+    /// </para>
+    /// <para>
+    /// ⚠️ <b>못 가리면 <c>null</c> 을 돌려준다.</b> 억지로 하나를 고르면
+    /// <b>모르는 것을 아는 척</b>하는 것이고, 그 값이 고객의 칸을 바꾼다.
+    /// 모르면 신고값을 존중하는 쪽이 맞다.
+    /// </para>
+    /// <para>
+    /// ⚠️ <b>서버는 손가락 터치를 알 수 없다.</b> 클라이언트는 <c>maxTouchPoints</c> 로
+    /// Mac 으로 위장한 아이패드를 잡아내지만(<c>_isTouchMac</c>), 그 값은 헤더에 없다.
+    /// ⇒ 서버 눈에 아이패드는 <b>Mac(pc)</b> 으로 보인다. 그래서 클라이언트가 <c>mobile</c> 이라
+    /// 신고하면 <b>어긋남으로 잡혀 pc 로 뒤집힐 위험</b>이 있다 —
+    /// 🔴 그것이 정확히 <b>2026-08-10 사고</b>(아이패드가 컴퓨터 칸을 먹던 일)의 재발이다.
+    /// ⇒ <b>Mac 계열은 판정하지 않고 <c>null</c> 로 비켜선다.</b> 아이패드는 클라이언트 말을 믿는다.
+    /// </para>
+    /// </remarks>
+    internal static string? JudgeTypeFromUserAgent(string? userAgent)
+    {
+        if (string.IsNullOrWhiteSpace(userAgent)) return null;
+
+        var ua = userAgent;
+
+        // 1) 컴퓨터 운영체제와 헷갈리는 휴대기기부터 걷어낸다 — 클라이언트와 같은 순서다.
+        //    ⚠️ 아이폰·아이패드는 "like Mac OS X" 를, 안드로이드는 "Linux" 를 달고 온다.
+        if (Contains(ua, "iPhone") || Contains(ua, "iPad") || Contains(ua, "iPod")) return "mobile";
+        if (Contains(ua, "Android")) return "mobile";
+
+        // 2) 컴퓨터 운영체제인가 — Windows 와 책상 위 리눅스만 확신한다.
+        if (Contains(ua, "Windows NT") || Contains(ua, "Win64") || Contains(ua, "Win32")) return "pc";
+        if (Contains(ua, "X11") || Contains(ua, "Wayland") || Contains(ua, "CrOS")
+            || Contains(ua, "Ubuntu") || Contains(ua, "Fedora")
+            || Contains(ua, "FreeBSD") || Contains(ua, "OpenBSD")) return "pc";
+
+        // 🔴 3) Mac 계열은 **판정하지 않는다.** 위 remarks 참조 —
+        //    서버는 터치 여부를 못 봐서 아이패드와 책상 위 Mac 을 가를 수 없다.
+        //    억지로 pc 라 하면 2026-08-10 사고가 재발한다.
+        //
+        //    ⚠️ 그 대가를 정확히 적는다: **Mac 을 사칭하면 이 검사를 빠져나간다.**
+        //      막는 것은 다음 차수의 장비넘버(hardware_id) 몫이고, 여기서 약속하지 않는다.
+        return null;
+    }
+
+    private static bool Contains(string haystack, string needle)
+        => haystack.Contains(needle, StringComparison.OrdinalIgnoreCase);
 
     private async Task LogDeniedAsync(string tenantId, string userId, string ip, string? deviceId, string result, CancellationToken ct)
     {
