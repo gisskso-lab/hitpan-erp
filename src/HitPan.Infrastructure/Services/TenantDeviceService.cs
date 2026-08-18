@@ -236,6 +236,78 @@ public sealed class TenantDeviceService : ITenantDeviceService
         {
             var (id, status, isMainPc, curType) = existing.Value;
 
+            // ══════════════════════════════════════════════════════════════
+            // 🔴 2026-08-18 20260818작4 — **서버가 도는 그 컴퓨터의 화면은 메인PC 다.**
+            //   (사장님 실측: *"모바일·외부 클라이언트는 봉합됨. 하지만 메인pc도 막힘"*)
+            //
+            //   [무엇이 났나] 메인PC 는 **반드시 두 줄**이 된다:
+            //     · 서버 줄 — 지문 `MAINPC-…`(컴퓨터 이름), `is_main_pc=1`, `approved`
+            //     · 화면 줄 — 지문 `HFPv2-…`(userAgent), `is_main_pc=0`, `pending`
+            //     두 지문은 **서로 만들 수 없다** — MainPcRegistrationService 가 일부러 갈라 놨다
+            //     (*"네임스페이스가 겹치면 안 된다"*). 위 :197 주석도 *"반드시 두 줄이 된다"* 고
+            //     이미 진단해 뒀다.
+            //
+            //   🔴 [왜 8/16 봉합이 이걸 못 막았나] 그때 장비넘버를 1순위 열쇠로 올린 것은
+            //     **브라우저끼리 갈리는 것**(Edge↔Chrome)을 막았을 뿐이다.
+            //     `is_main_pc` 표식이 **서버 지문 줄에만** 붙는다는 사실은 그대로 뒀다.
+            //     ⇒ 사장님은 **그 컴퓨터에 앉아 계신데** 화면 줄이 승인 대기라 막혔고,
+            //       승인 화면에 들어갈 수 있는 유일한 사람이 **자기가 갇혔다.**
+            //       8/16 P0(커밋 30e3873)·8/11 revoked 구제와 **같은 계통의 세 번째 재발**이다.
+            //
+            //   [고침] 그 컴퓨터에서 직접 연 화면이면 **그 줄을 메인PC 로 인정한다.**
+            //     "그 컴퓨터에서 히트판이 돈다" 는 사실 자체가 인증이다 — 8/11 부터 지켜 온 축이다.
+            //
+            //   🔴 [왜 새 슬롯이 안 새는가] **줄을 만들지 않는다. 있는 줄에 표식만 옮긴다.**
+            //     그리고 옮기기 전에 **옛 서버 줄을 내린다**(아래 ①) — 그래서 `is_main_pc=1` 은
+            //     언제나 한 줄뿐이다. 슬롯 계수는 `status='approved'` 로 세므로
+            //     화면 줄이 승인되는 만큼 **서버 줄이 통계에서 빠지지 않는다** ⇒ 아래 ①이 그것도 정리한다.
+            //
+            //   ⚠️ `IsLocalConsole` 은 **서버가 채운 값**이다(AuthController). 클라이언트가 못 정한다.
+            //     터널을 지나온 접속은 헤더로 배제되므로 **바깥에서는 절대 참이 될 수 없다.**
+            //     ⚠️ 이 조건을 `req` 가 아닌 다른 데서 받게 바꾸면 **아무나 메인PC 를 자칭한다.**
+            // ══════════════════════════════════════════════════════════════
+            if (req.IsLocalConsole && !isMainPc)
+            {
+                // ① 옛 서버 줄을 내린다 — 표식도, 슬롯도 한 줄만 남긴다.
+                //   ⚠️ `revoked` 로 두는 이유: 지우면 감사 기록이 사라진다(헌법 #1 — 덮어쓰기 금지).
+                //     폐기 상태는 슬롯 계수에서 빠지므로 요금이 이중으로 잡히지 않는다.
+                var demoted = await _db.ExecuteAsync(new CommandDefinition(
+                    """
+                    UPDATE tenant_devices
+                    SET is_main_pc     = 0,
+                        status         = 'revoked',
+                        revoked_at     = NOW(6),
+                        revoked_reason = '메인PC 표식을 실제 사용 화면으로 옮김 (20260818작4)'
+                    WHERE tenant_id = @TenantId AND is_main_pc = 1 AND device_id <> @Id
+                    """,
+                    new { TenantId = tenantId, Id = id }, cancellationToken: ct));
+
+                // ② 지금 쓰는 그 줄을 메인PC 로 세운다.
+                await _db.ExecuteAsync(new CommandDefinition(
+                    """
+                    UPDATE tenant_devices
+                    SET is_main_pc     = 1,
+                        status         = 'approved',
+                        approved_at    = COALESCE(approved_at, NOW(6)),
+                        revoked_at     = NULL,
+                        revoked_reason = NULL
+                    WHERE device_id = @Id AND tenant_id = @TenantId
+                    """,
+                    new { Id = id, TenantId = tenantId }, cancellationToken: ct));
+
+                await _audit.LogAsync("device_mainpc_adopt", "device", id,
+                    reason: $"서버가 도는 컴퓨터의 화면을 메인PC 로 인정 (옛 서버 줄 {demoted}건 내림)", ct: ct);
+
+                _logger.LogWarning(
+                    "[TenantDeviceService] 메인PC 표식을 실제 사용 화면으로 옮겼다 — "
+                    + "서버 지문 줄과 브라우저 지문 줄이 갈려 있었다. "
+                    + "device={DeviceId} tenant={TenantId} 내린옛줄={Demoted}",
+                    id, tenantId, demoted);
+
+                isMainPc = true;
+                status = "approved";
+            }
+
             // 🔴 2026-08-11 사장님 실측 적발 — "메인PC가 폐기되는게 말이되?"
             //
             //   [무엇이 났나] 메인PC(회사 서버)가 `revoked` 상태가 되자 **로그인 자체가 막혔다.**
@@ -568,7 +640,21 @@ public sealed class TenantDeviceService : ITenantDeviceService
         //   종전과 100% 동일하게 즉시 approved 다. 아무것도 안 바뀐다.
         //   ⇒ 이것이 (F) "기존 기기는 인증된 것으로 인정" 의 실현이기도 하다.
         //     기본값이 꺼짐이므로 규칙을 켜기 전까지 아무도 안 막힌다.
-        var newStatus = _approvalEnabled ? "pending" : "approved";
+        // 🔴 2026-08-18 20260818작4 — **서버가 도는 그 컴퓨터의 첫 화면은 곧바로 승인이다.**
+        //
+        //   [왜 갱신 경로만 고치면 안 되나] 위 봉합은 **이미 줄이 있는** 기기를 구한다.
+        //     그런데 **새로 설치한 PC 의 첫 로그인**은 여기로 온다 — 줄이 아직 없다.
+        //     여기를 안 고치면 대표가 **설치 직후 자기 컴퓨터에서 승인 대기에 갇힌다.**
+        //     ⇒ 승인해 줄 사람이 자기인데 그 화면에 못 들어간다. **한 곳만 고치면 아무것도 안 고친 것**이다
+        //       (D-9 계통 — 폴백이 두 곳이라 한 곳만 고쳐 아무것도 안 바뀐 사고를 이미 겪었다).
+        //
+        //   ⚠️ 표식(`is_main_pc`)은 여기서 붙이지 **않는다.** 옛 서버 줄을 내리는 일과 함께
+        //     한 곳에서만 해야 하고(위 갱신 경로 ①②), 그 자리는 **다음 접속에 반드시 지나간다.**
+        //     여기서 같이 붙이면 표식을 세우는 자리가 둘이 되어 한쪽만 고쳐지는 사고가 난다.
+        //     ⇒ 여기서는 **막히지만 않게** 한다. 표식은 다음 접속에 제자리를 찾는다.
+        //
+        //   ⚠️ `IsLocalConsole` 은 서버가 채운 값이다 — 터널을 지나온 접속은 절대 참이 아니다.
+        var newStatus = (_approvalEnabled && !req.IsLocalConsole) ? "pending" : "approved";
         var deviceId = Guid.NewGuid().ToString();
         await _db.ExecuteAsync(new CommandDefinition(
             """
@@ -593,8 +679,11 @@ public sealed class TenantDeviceService : ITenantDeviceService
                 Ua = req.UserAgent,
                 Status = newStatus,
                 // 승인 대기 상태에서는 "누가 승인했다" 를 기록하지 않는다 — 아직 아무도 승인 안 했다.
-                ApprovedBy = _approvalEnabled ? null : userId,
-                ApprovedAt = _approvalEnabled ? (DateTime?)null : DateTime.Now
+                //   🔴 20260818작4 — 판정 기준을 위 `newStatus` 와 **같은 식**으로 맞춘다.
+                //     여기만 `_approvalEnabled` 를 보면 `approved` 인데 승인자가 비는
+                //     **앞뒤가 안 맞는 줄**이 생긴다.
+                ApprovedBy = newStatus == "pending" ? null : userId,
+                ApprovedAt = newStatus == "pending" ? (DateTime?)null : DateTime.Now
             }, cancellationToken: ct));
 
         await LogLoginAsync(tenantId, userId, ipAddress, deviceId, "success", ct);
@@ -610,7 +699,10 @@ public sealed class TenantDeviceService : ITenantDeviceService
         //     "일단 로그인, 접속까지는 가능하게 해. 그러나, 인증기기 외 아무 메뉴도 열지 못하고"
         //   ⇒ 로그인은 통과시키고 화면에서 메뉴를 잠근다. 호출부(AuthController)가 이 값을
         //     기기 상태로 실어 보내고, 화면이 안내문 + [기기 인증하기] 를 띄운다.
-        return _approvalEnabled
+        //   🔴 20260818작4 — 여기도 `newStatus` 를 본다. `_approvalEnabled` 를 보면
+        //     방금 `approved` 로 넣어 놓고 화면에는 *"승인 대기"* 라 답하는
+        //     **정반대 답**이 나간다 ⇒ 대표가 자기 컴퓨터에서 관문에 갇힌다(이 차수의 증상 그 자체).
+        return newStatus == "pending"
             ? (false, "기기 승인 대기 중입니다.", deviceId, true)
             : (true, "", deviceId, true);
     }

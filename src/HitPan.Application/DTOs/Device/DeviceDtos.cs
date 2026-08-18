@@ -90,6 +90,37 @@ public class RegisterDeviceRequest
     /// <para>⚠️ 처음 오는 기기·옛 기기는 <c>null</c> 이다 — 그때는 종전대로 지문으로 찾는다(호환).</para>
     /// </summary>
     public string? DeviceId { get; set; }
+
+    /// <summary>
+    /// 🔴 <b>이 접속이 서버가 도는 그 컴퓨터에서 왔는가</b> (20260818작4 · 사장님 실측 *"메인pc도 막힘"*).
+    ///
+    /// <para>
+    /// [무엇이 문제였나] 메인PC 는 <b>반드시 두 줄</b>이 된다.
+    /// 서버는 <c>MAINPC-…</c>(컴퓨터 이름), 브라우저는 <c>HFPv2-…</c>(userAgent) 로
+    /// <b>서로 만들 수 없는 지문</b>을 쓰기 때문이다 — 일부러 그렇게 갈라 놨다
+    /// (<c>MainPcRegistrationService.BuildServerFingerprint</c> 주석: *"네임스페이스가 겹치면 안 된다"*).
+    /// 그런데 <c>is_main_pc</c> 표식은 <b>서버 지문 줄에만</b> 붙는다.
+    /// ⇒ 사장님이 <b>그 컴퓨터에 앉아 계신데</b> 브라우저 줄은 <c>is_main_pc=0 · pending</c> 이라
+    ///   관문이 막았다. <b>승인해 줄 사람이 자기가 갇혔다.</b>
+    /// </para>
+    ///
+    /// <para>
+    /// ⚠️ <b>이 값은 클라이언트가 못 정한다.</b> <c>AuthController</c> 가
+    /// 접속 소켓(loopback)과 터널 헤더를 보고 <b>서버에서</b> 채운다.
+    /// 요청 본문으로 받으면 아무나 <c>true</c> 라 적어 보내 메인PC 가 된다.
+    /// </para>
+    ///
+    /// <para>
+    /// 🔴 <b>2026-08-10 에 걷어낸 판정과 혼동 금지.</b> 그때 문제는 loopback 을
+    /// <b>모든 기기의 통과 조건</b>으로 쓴 것이었다 — 터널이 고객 PC 안에서 localhost 를
+    /// 다시 부르므로 <i>"고객사에서는 항상 참"</i> 이 됐다.
+    /// 🔴 여기서는 <b>터널 헤더가 하나라도 있으면 false</b> 다. 터널을 지나온 접속은 배제되고
+    /// 남는 것은 <b>그 컴퓨터 안에서 직접 연 화면</b>뿐이다.
+    /// 같은 판정을 <c>AuthController.GetUpdateStatusLocal</c>·<c>DeviceController.IsMainPc</c> 가
+    /// 이미 같은 모양으로 쓴다 — <b>새 축을 만든 것이 아니라 쓰던 축을 가져왔다.</b>
+    /// </para>
+    /// </summary>
+    public bool IsLocalConsole { get; set; }
 }
 
 /// <summary>

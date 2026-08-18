@@ -135,6 +135,14 @@ Source: "web-server.ps1"; DestDir: "{app}"; Flags: ignoreversion
 Source: "scripts\AntivirusExceptions.ps1"; DestDir: "{app}\scripts"; Flags: ignoreversion
 Source: "scripts\FirewallRules.ps1"; DestDir: "{app}\scripts"; Flags: ignoreversion
 Source: "scripts\InstallWatchdog.ps1"; DestDir: "{app}\scripts"; Flags: ignoreversion
+; 🔴 20260818작3 — CS 수동 조치 도구 (사장님 오더 "수동, 강제로 할 수 있는 길을 열어놔야됨")
+;   [왜 동봉하나] 2026-08-18 실측: 화면이 무한 반복에 빠져 업데이트 팝업이 뜰 수 없었다.
+;     봉합은 게시됐는데 그것을 받을 길이 없었다 — 자동만 있으면 이 상태에서 못 빠져나온다.
+;   [왜 파일로 두나] CS 가 고객 PC 에 접속해 **명령 한 줄**로 조치해야 한다(사장님 결재 1).
+;     파일을 옮겨야 하면 그 자체가 마찰이고, 급할 때 그 마찰이 사고가 된다.
+;   🔴 이 도구는 DB 비밀번호를 묻지 않는다 — db.conf 에서 읽는다.
+;     CS 는 고객 DB 비밀번호를 모르고, 알아서도 안 된다(헌법 #24 책임 경계).
+Source: "scripts\force-update.ps1"; DestDir: "{app}\scripts"; Flags: ignoreversion
 ; 폐기 (WS-20260612-01 Q1=A 사장님 결재 2026-06-12): InstallCloudflared.ps1 + SelfCheck.ps1 + BootstrapInstall.ps1
 ; → installer/_deprecated_20260612/ 영역으로 이동, .iss CurStepChanged에 통합 박힘
 

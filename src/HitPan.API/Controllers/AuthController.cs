@@ -120,7 +120,24 @@ public class AuthController : ControllerBase
                             //   **브라우저를 바꿀 때마다 새 슬롯**을 먹는다(사장님 실측 증상).
                             //   ⚠️ 칸만 만들고 넘기지 않으면 아무것도 안 바뀐다 —
                             //     `hardware_id` 가 1차에서 딱 그렇게 됐다(컬럼만 있고 배선 0곳).
-                            DeviceId = request.DeviceId
+                            DeviceId = request.DeviceId,
+
+                            // 🔴 20260818작4 — **이 접속이 서버가 도는 그 컴퓨터에서 왔는가.**
+                            //   (사장님 실측: *"모바일·외부는 봉합됐다. 하지만 메인pc도 막힘"*)
+                            //
+                            //   [왜 여기서 정하나] 클라이언트에게 물으면 **아무나 참이라 답한다.**
+                            //     소켓 주소와 터널 헤더는 **서버만** 볼 수 있다.
+                            //   ⚠️ `request` 에서 읽지 마라 — 읽는 순간 메인PC 를 자칭할 수 있게 된다.
+                            //
+                            //   [왜 이 판정이 안전한가] 터널 헤더가 **하나라도 있으면 거짓**이다.
+                            //     2026-08-10 에 걷어낸 판정은 이 배제절이 없어
+                            //     *"고객사에서는 항상 참"* 이 됐다(터널이 안에서 localhost 를 다시 부른다).
+                            //     ⇒ 같은 모양을 GetUpdateStatusLocal(:491)·DeviceController.IsMainPc 가 이미 쓴다.
+                            IsLocalConsole =
+                                !Request.Headers.ContainsKey("CF-Connecting-IP")
+                                && !Request.Headers.ContainsKey("X-Forwarded-For")
+                                && HttpContext.Connection.RemoteIpAddress is not null
+                                && System.Net.IPAddress.IsLoopback(HttpContext.Connection.RemoteIpAddress)
                         };
 
                         var (allowed, reason, deviceId, newlyRegistered) = await _deviceService.RegisterOrRefreshAsync(
