@@ -36,13 +36,22 @@
   .\force-update.ps1 -Version 1.2.85
   버전을 직접 지정한다.
 
+.EXAMPLE
+  .\force-update.ps1 -RestartWatchdog
+  🔴 한 번 시도했다가 실패한 버전을 다시 받을 때. 워치독을 다시 시작해
+  "새 버전 발견" 상태를 되살린다 — 이것 없이는 멱등 장치에 걸려 무시된다.
+
 .NOTES
   관리자 권한으로 실행할 것. 실행 사실은 표에 남는다(user_id='manual-force').
 #>
 [CmdletBinding(SupportsShouldProcess)]
 param(
     [string]$Version,
-    [switch]$Reject
+    [switch]$Reject,
+
+    # 🔴 워치독을 다시 시작해 "새 버전 발견" 상태를 되살린다.
+    #   한 번 시도했다가 실패한 버전은 이것 없이는 무시된다(멱등 장치, Worker.cs:602).
+    [switch]$RestartWatchdog
 )
 
 $ErrorActionPreference = 'Stop'
@@ -122,15 +131,16 @@ if (-not $dbName) {
     exit 1
 }
 
-# 🔴 DB_USER 가 db.conf 에 없는 설치본이 있다(개발·초기 설치본 실측).
-#   워치독도 같은 자리에서 빈 값을 받으므로 **그 PC 는 자동 동의 조회 자체가 안 된다.**
-#   ⇒ 이 도구는 히트판이 실제로 쓰는 계정으로 갈음해 **일단 되게 한다.**
-#     (표에 한 줄 넣는 것뿐이고, 그 줄을 읽는 것은 워치독이다.)
+# DB_USER 가 없는 db.conf 를 만난 경우.
+#   ⚠️ **정식 설치본에는 반드시 있다** — 설치 마법사가 쓴다(`HitPan-Universal.iss:2104`, 실측).
+#     없다면 그 PC 는 설치 경로를 거치지 않은 것이다(개발 조각·수동 구성).
+#   ⇒ 히트판이 쓰는 기본 계정으로 갈음해 일단 되게 한다.
+#     표에 한 줄 넣는 것뿐이고, 그 줄을 읽는 것은 워치독이다.
 if (-not $dbUser) {
     $dbUser = 'hitpan'
     if (-not $dbPass) { $dbPass = 'Hitpan2025!' }
     Write-Warn2 "db.conf 에 DB_USER 가 없어 기본 계정으로 붙습니다."
-    Write-Warn2 "⚠️ 이 PC 는 워치독의 자동 동의 조회도 같은 이유로 실패합니다 — 별건으로 봐야 합니다."
+    Write-Warn2 "이 PC 는 설치 마법사를 거치지 않은 것으로 보입니다(정식 설치본에는 이 값이 있습니다)."
 }
 Write-Ok ("데이터베이스: {0} ({1}:{2})" -f $dbName, $dbHost, $dbPort)
 
@@ -235,10 +245,41 @@ if ($Reject) {
     exit 0
 }
 
+# ══════════════════════════════════════════════════════════════
+# 🔴 동의를 넣는 것만으로는 부족한 경우가 있다 (설계팀 실측, 2026-08-18)
+#
+#   워치독은 **두 겹의 문**을 지나야 동의를 읽는다(`Worker.cs`):
+#     ① `_pendingConsentUpdate` 가 있어야 읽는다(:388)      — 새 버전을 "발견"한 상태
+#     ② 이미 시도한 버전이면 읽지도 않고 끝낸다(:602)        — 멱등 장치
+#
+#   🔴 둘 다 **인메모리**다(:102, :563). 서비스를 다시 시작하면 초기화되고,
+#     워치독이 게시원을 다시 보고 새 버전을 **다시 발견**하면서 ①이 선다.
+#
+#   ⇒ 오늘처럼 [예] 를 눌렀는데 적용이 완주하지 못한 버전은
+#     **동의만 넣으면 ②에 걸려 조용히 무시된다.** 서비스를 다시 시작해야 한다.
+# ══════════════════════════════════════════════════════════════
 Write-Host ""
-Write-Host "  최대 1분 안에 워치독이 이 동의를 읽고 시작합니다." -ForegroundColor Cyan
-Write-Host "  자료를 먼저 백업한 뒤 교체하고, 히트판이 잠시 꺼졌다 켜집니다."
-Write-Host "  실패하면 스스로 되돌립니다 — 종전 자동 업데이트와 같은 절차입니다."
+if ($RestartWatchdog) {
+    Write-Step "워치독을 다시 시작합니다..."
+    try {
+        Restart-Service HitPanWatchdog -Force -ErrorAction Stop
+        Write-Ok "다시 시작했습니다 — 새 버전을 다시 발견하고 방금 넣은 동의를 읽습니다."
+    } catch {
+        Write-Warn2 "다시 시작하지 못했습니다: $($_.Exception.Message)"
+        Write-Warn2 "관리자 권한으로 직접 실행해 주세요: Restart-Service HitPanWatchdog"
+    }
+} else {
+    Write-Host "  ▸ 이 동의는 워치독이 '새 버전을 발견한 상태' 일 때 읽힙니다." -ForegroundColor Cyan
+    Write-Host "    한 번 시도했다가 실패한 버전이면 그대로는 무시됩니다(중복 적용 방지 장치)."
+    Write-Host ""
+    Write-Host "  ▸ 확실하게 하려면 이렇게 다시 돌리십시오:" -ForegroundColor Yellow
+    Write-Host "      .\force-update.ps1 -RestartWatchdog"
+    Write-Host "    또는 직접:  Restart-Service HitPanWatchdog"
+}
+Write-Host ""
+Write-Host "  그 뒤는 종전 자동 업데이트와 **같은 절차**입니다 —" -ForegroundColor Cyan
+Write-Host "  자료를 먼저 백업하고, 교체하고, 히트판이 잠시 꺼졌다 켜지고,"
+Write-Host "  실패하면 스스로 되돌립니다. 건너뛰는 것은 없습니다."
 Write-Host ""
 # 🔴 로그 자리를 **찾아서** 알려 준다 — 추측한 경로를 적으면 고객이 헛다리를 짚는다.
 $logHint = $null
