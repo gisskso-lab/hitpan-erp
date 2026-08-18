@@ -120,6 +120,10 @@ jobs:
   build:
     name: Build update package (재빌드 · SSOT)
     runs-on: windows-latest
+    outputs:
+      # 🔴 다듬은 버전(앞뒤 빈칸 제거). deploy 잡이 이 값을 쓴다 —
+      #   원본(inputs.version)을 그대로 쓰면 build 는 통과하고 deploy 만 빈칸 붙은 이름을 찾다 실패한다.
+      version: ${{ steps.ver.outputs.value }}
     # 20260730작3: 기존 zip 만 만들 땐 4분이면 됐으나, 설치 EXE 동반(번들 5종 다운로드 수백MB +
     #   Inno Setup 설치 + ISCC 컴파일)이 붙어 실측 기준 약 11~15분으로 늘어난다. 여유 포함 45분.
     timeout-minutes: 45
@@ -152,14 +156,34 @@ jobs:
       # N-1 fail-closed: version input == 산출 FileVersion == zip/manifest 파일명 3자 정합.
       # 불일치 시 build 진입 즉시 중단 (오타를 게시 전에 세운다).
       - name: Verify version input (fail-closed)
+        id: ver
         shell: pwsh
         run: |
-          $v = '${{ inputs.version }}'
+          # ══════════════════════════════════════════════════════════════
+          # 🔴 2026-08-18 — **앞뒤 빈칸은 다듬고 시작한다.**
+          #   [무엇이 났나] 1.2.85 게시가 여기서 멈췄다. 값이 ' 1.2.85' 였다 —
+          #     앞에 빈칸 하나. 웹 화면에 손으로 넣다 보면 붙는다(붙여넣기·자동완성).
+          #   [왜 그냥 통과시키면 안 되나] 이 값은 **파일 이름**이 된다
+          #     (`hitpan- 1.2.85.zip`). 랜딩이 만드는 링크와 어긋나 **고객이 404 를 본다.**
+          #   ⇒ 빈칸은 **다듬고**, 형식이 틀린 것은 **종전대로 막는다.**
+          #     다듬은 값을 뒤 단계가 쓰도록 출력으로 넘긴다 — 원본을 그대로 쓰면
+          #     여기만 통과하고 파일명에 빈칸이 그대로 실린다.
+          # ══════════════════════════════════════════════════════════════
+          # ⚠️ 여기만은 **원본**을 읽는다 — 다듬은 값을 만들어 내는 자리이기 때문이다.
+          $raw = '${{ inputs.version }}'
+          $v = $raw.Trim()
+
+          if ($v -ne $raw) {
+            Write-Host "[VersionGate] 앞뒤 빈칸을 다듬었다: '$raw' -> '$v'"
+          }
+
           if ($v -notmatch '^\d+\.\d+\.\d+$') {
-            Write-Error "::error::version input '$v' 이 3자 SemVer 아님. 게시 전 중단."
+            Write-Error "::error::version input '$raw' 이 3자 SemVer 아님. 게시 전 중단."
             exit 1
           }
+
           Write-Host "[VersionGate] version=$v"
+          "value=$v" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
 
       - name: Restore
         run: dotnet restore src/HitPan.sln
@@ -174,7 +198,7 @@ jobs:
           dotnet publish src/HitPan.API/HitPan.API.csproj `
             -c Release -r win-x64 --self-contained false `
             -p:PublishSingleFile=true `
-            -p:HitPanVersion=${{ inputs.version }} `
+            -p:HitPanVersion=${{ steps.ver.outputs.value }} `
             -o installer/payload/api
 
       - name: Publish ERP Web (Blazor WASM)
@@ -182,7 +206,7 @@ jobs:
         run: |
           dotnet publish src/HitPan.Web/HitPan.Web.csproj `
             -c Release `
-            -p:HitPanVersion=${{ inputs.version }} `
+            -p:HitPanVersion=${{ steps.ver.outputs.value }} `
             -o installer/payload/web
 
       # ★ 7/22 작3 봉합 필수(터널 404 진범): Blazor 정적자산을 api/wwwroot 로 복사해야
@@ -207,7 +231,7 @@ jobs:
         run: |
           dotnet publish src/HitPan.Watchdog/HitPan.Watchdog.csproj `
             -c Release -r win-x64 --self-contained true `
-            -p:HitPanVersion=${{ inputs.version }} `
+            -p:HitPanVersion=${{ steps.ver.outputs.value }} `
             -o installer/payload/watchdog --nologo
 
       # ── 시크릿 파일 산출물 제거 (첫 실측 P0 봉합 2026-07-28 · 검증팀 SoD 과제2 확장) ──────
@@ -446,7 +470,7 @@ jobs:
           New-Item -ItemType Directory -Path $outDir -Force | Out-Null
           $env:HITPAN_RELEASED_AT = (Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ')
           Write-Host "[update] releasedAt = $env:HITPAN_RELEASED_AT"
-          $ver = '${{ inputs.version }}'
+          $ver = '${{ steps.ver.outputs.value }}'
           # 🔴 PI-02 봉합 (2026-08-11): 종전에는 이 스위치를 안 넘겨 항상 false 로 나갔다.
           #   그래서 1.2.63 이 새 테이블을 싣고도 고객 DB 에 반영이 안 됐다(QR 500).
           $mig = '${{ inputs.requiresMigration }}' -eq 'true'
@@ -559,7 +583,7 @@ jobs:
       - name: Build installer EXE (ISCC)
         shell: pwsh
         run: |
-          $ver = '${{ inputs.version }}'
+          $ver = '${{ steps.ver.outputs.value }}'
           # DB 비번(/DHitPanDbPassword)은 주입하지 않는다 — .iss 의 #define 이 단일 출처다.
           #   전 고객사 통일값이고 제품 설정값 성격이라 Secret 이 아니다
           #   (docs/CS/20260731_DB비밀번호_CS안내기준.md §4-1, 사장님 결재).
@@ -575,7 +599,7 @@ jobs:
       - name: Verify installer EXE name + compute sha (fail-closed)
         shell: pwsh
         run: |
-          $ver = '${{ inputs.version }}'
+          $ver = '${{ steps.ver.outputs.value }}'
           $expect = "HitPan-ERP-Setup-$ver.exe"
           $path = "installer/output/$expect"
           if (-not (Test-Path $path)) {
@@ -595,14 +619,14 @@ jobs:
       - name: Upload update artifact
         uses: actions/upload-artifact@v5
         with:
-          name: update-pkg-${{ inputs.version }}
+          name: update-pkg-${{ steps.ver.outputs.value }}
           path: dist/updates/
           retention-days: 7
 
       - name: Upload installer artifact
         uses: actions/upload-artifact@v5
         with:
-          name: installer-exe-${{ inputs.version }}
+          name: installer-exe-${{ steps.ver.outputs.value }}
           path: dist/installer/
           retention-days: 7
 
@@ -624,14 +648,14 @@ jobs:
       - name: Download update artifact
         uses: actions/download-artifact@v8
         with:
-          name: update-pkg-${{ inputs.version }}
+          name: update-pkg-${{ needs.build.outputs.version }}
           path: dist/updates/
 
       # 설치 EXE 동반 (20260730작3 ①안) — zip 과 한 단위로 게시하기 위해 여기서도 받는다.
       - name: Download installer artifact
         uses: actions/download-artifact@v8
         with:
-          name: installer-exe-${{ inputs.version }}
+          name: installer-exe-${{ needs.build.outputs.version }}
           path: dist/installer/
 
       # ── B-8: deploy 잡 진입 시 version 재검증 (fail-closed) ──
@@ -639,7 +663,7 @@ jobs:
       #   아래 모든 스텝이 신뢰하는 $VER 이 3자 SemVer 임을 보장한다(오염된 input 차단).
       - name: Re-verify version (fail-closed)
         env:
-          VER: ${{ inputs.version }}
+          VER: ${{ needs.build.outputs.version }}
         run: |
           case "$VER" in
             *[!0-9.]*) echo "::error::version '$VER' 에 허용 안 된 문자 — 3자 SemVer 만."; exit 1 ;;
@@ -652,7 +676,7 @@ jobs:
       #   전 고객 PC 로 시크릿이 퍼진다. 발견 시 전송 전에 배포를 세운다.
       - name: Scan update package for leaked secrets
         env:
-          VER: ${{ inputs.version }}
+          VER: ${{ needs.build.outputs.version }}
         run: |
           set -euo pipefail
           # F-2(검증팀): unzip 존재 강제 — 없으면 게이트가 조용히 통과(거짓봉합). 헌법 #15.
@@ -684,7 +708,7 @@ jobs:
       - name: Compute package sha (for NCP independent recheck)
         id: pkgsha
         env:
-          VER: ${{ inputs.version }}
+          VER: ${{ needs.build.outputs.version }}
         run: |
           SHA="$(sha256sum dist/updates/hitpan-$VER.zip | awk '{print $1}')"
           echo "sha=$SHA" >> "$GITHUB_OUTPUT"
@@ -707,7 +731,7 @@ jobs:
         env:
           NCP_USER: ${{ secrets.NCP_USER }}
           NCP_HOST: ${{ secrets.NCP_HOST }}
-          VER: ${{ inputs.version }}
+          VER: ${{ needs.build.outputs.version }}
         run: |
           set -euo pipefail
           rsync -avz -e "ssh -i ~/.ssh/ncp_key" \
@@ -743,7 +767,7 @@ jobs:
         env:
           NCP_USER: ${{ secrets.NCP_USER }}
           NCP_HOST: ${{ secrets.NCP_HOST }}
-          VER: ${{ inputs.version }}
+          VER: ${{ needs.build.outputs.version }}
           PKG_SHA: ${{ steps.pkgsha.outputs.sha }}
           GH_SHA: ${{ github.sha }}
           GH_RUN_ID: ${{ github.run_id }}
@@ -763,7 +787,7 @@ jobs:
       #   ★ Cloudflare 엣지 캐시 우회: 캐시버스터 쿼리 + no-cache 헤더로 옛 manifest 오판 방지.
       - name: Verify served manifest (double-check, no rollback here)
         env:
-          VER: ${{ inputs.version }}
+          VER: ${{ needs.build.outputs.version }}
           FEED_ENV: ${{ inputs.environment }}
         run: |
           if [ "$FEED_ENV" = "beta" ]; then
@@ -814,7 +838,7 @@ jobs:
         env:
           NCP_USER: ${{ secrets.NCP_USER }}
           NCP_HOST: ${{ secrets.NCP_HOST }}
-          VER: ${{ inputs.version }}
+          VER: ${{ needs.build.outputs.version }}
         run: |
           ssh -i ~/.ssh/ncp_key "$NCP_USER@$NCP_HOST" \
             "rm -f /tmp/hitpan-$VER.zip \
