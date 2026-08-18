@@ -1066,6 +1066,54 @@ public sealed class TenantDeviceService : ITenantDeviceService
         }
     }
 
+    // ══════════════════════════════════════════════════════════════
+    // 🔴 20260818작3 — 승인 요청을 알릴 **대표계정의 사원 ID**
+    //
+    //   [무엇이 문제였나] 사장님 실측: *"승인 메시지 안 떴어."*
+    //     승인 화면은 있었으나 **알림이 0곳**이었다 — 대표가 [설정 → 등록 기기 관리] 에
+    //     **직접 들어가야만** 요청이 온 줄 알 수 있었다.
+    //     ⇒ 직원은 기다리고 대표는 모른다. 아무도 틀리지 않았는데 일이 안 된다.
+    //
+    //   [왜 GetAdminContactAsync 와 가르나] 그것은 **직원 화면에 보여 줄** 이름·전화번호이고,
+    //     이것은 **알림을 보낼 주소**다. 물음이 다르다 —
+    //     하나로 묶으면 화면에 쓸 값을 알림이 끌고 다니게 된다.
+    //     (8/18 에 `IsDeviceAllowedAsync` 를 관문이 같이 쓰다 난 사고와 같은 모양이다.)
+    //
+    //   ⚠️ 대표가 사원으로 등록돼 있지 않으면 null — 그때는 알림을 조용히 건너뛴다.
+    //     알림이 없다고 **등록 자체가 막히면 안 된다**(부수 기능이 본 기능을 죽이지 않는다).
+    // ══════════════════════════════════════════════════════════════
+    public async Task<string?> GetAdminEmployeeIdAsync(string tenantId, CancellationToken ct = default)
+    {
+        await EnsureOpenAsync(ct);
+
+        try
+        {
+            // 대표계정(tenant_admin) 의 **사원 ID**. 부모계정을 앞에 세운다(원본이 부모다).
+            return await _db.ExecuteScalarAsync<string?>(new CommandDefinition(
+                """
+                SELECT e.employee_id
+                FROM users u
+                JOIN employees e
+                  ON e.user_id = u.user_id AND e.tenant_id = u.tenant_id
+                WHERE u.tenant_id = @TenantId
+                  AND u.account_type = 'tenant_admin'
+                  AND u.is_active = 1
+                  AND u.is_deleted = 0
+                ORDER BY u.is_parent DESC, u.created_at ASC
+                LIMIT 1
+                """,
+                new { TenantId = tenantId }, cancellationToken: ct));
+        }
+        catch (Exception ex)
+        {
+            // 🔴 헌법 #15 — 빈 catch 금지. 알림 주소를 못 찾았다고 **등록이 죽으면 안 된다.**
+            _logger.LogWarning(ex,
+                "[TenantDeviceService] 대표 사원 ID 를 못 읽었다 — 승인 요청 알림을 건너뛴다. tenant={TenantId}",
+                tenantId);
+            return null;
+        }
+    }
+
     // ── 모바일기기 등록 QR 토큰 발급 (20260811작1 (D)) ──
     //   사장님 오더: "모바일 등록기기 버튼 클릭시 QR생성"
     public async Task<string> IssueMobileRegisterTokenAsync(string tenantId, string issuerUserId, CancellationToken ct = default)

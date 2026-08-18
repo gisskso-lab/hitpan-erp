@@ -137,6 +137,22 @@ public interface ITenantDeviceService
     Task<AdminContactDto?> GetAdminContactAsync(string tenantId, CancellationToken ct = default);
 
     /// <summary>
+    /// 🔴 승인 요청을 알릴 <b>대표계정의 사원 ID</b> 를 찾는다 (20260818작3).
+    ///
+    /// <para>
+    /// [왜 따로 두나] <see cref="GetAdminContactAsync"/> 는 <b>직원 화면에 보여 줄</b> 이름·전화번호다.
+    /// 이것은 <b>알림을 보낼 주소</b>다. 물음이 다르므로 함수를 가른다 —
+    /// 하나로 묶으면 화면에 쓸 값을 알림이 끌고 다니게 된다.
+    /// </para>
+    ///
+    /// <para>
+    /// ⚠️ 알림 배관은 <c>employee_id</c> 로 보낸다(<c>user_id</c> 가 아니다 — 결재 체계와 같다).
+    /// 대표가 사원으로 등록돼 있지 않으면 <c>null</c> 이고, 그때는 알림을 조용히 건너뛴다.
+    /// </para>
+    /// </summary>
+    Task<string?> GetAdminEmployeeIdAsync(string tenantId, CancellationToken ct = default);
+
+    /// <summary>
     /// 모바일기기 등록 QR 토큰 발급 — 대표계정만 (20260811작1 (D)).
     /// 사장님 오더: "모바일 등록기기 버튼 클릭시 QR생성"
     ///

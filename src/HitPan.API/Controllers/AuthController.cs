@@ -16,6 +16,13 @@ public class AuthController : ControllerBase
     private readonly IHrService _hrService;
     private readonly ITenantDeviceService _deviceService;
     private readonly ITermsConsentService _termsConsentService;
+
+    /// <summary>
+    /// 승인 요청을 대표에게 알린다 (20260818작3 — 사장님 실측 *"승인 메시지 안 떴어"*).
+    /// 🔴 결재 알림과 <b>같은 배관</b>이다. 새로 만들지 않는다.
+    /// </summary>
+    private readonly INotificationService _notifications;
+
     private readonly ILogger<AuthController> _logger;
 
     public AuthController(
@@ -23,12 +30,14 @@ public class AuthController : ControllerBase
         IHrService hrService,
         ITenantDeviceService deviceService,
         ITermsConsentService termsConsentService,
+        INotificationService notifications,
         ILogger<AuthController> logger)
     {
         _authService = authService;
         _hrService = hrService;
         _deviceService = deviceService;
         _termsConsentService = termsConsentService;
+        _notifications = notifications;
         _logger = logger;
     }
 
@@ -150,9 +159,52 @@ public class AuthController : ControllerBase
                         response.DeviceAwaitingApproval = deviceAwaitingApproval;
 
                         if (deviceAwaitingApproval)
+                        {
                             response.DeviceNotice = string.IsNullOrWhiteSpace(reason)
                                 ? "기기 승인 대기 중입니다."
                                 : reason;
+
+                            // ══════════════════════════════════════════════════════════════
+                            // 🔴 20260818작3 — **대표에게 알린다.** (사장님 실측: *"승인 메시지 안 떴어"*)
+                            //
+                            //   [무엇이 문제였나] 승인 화면은 있었으나 **알림이 0곳**이었다.
+                            //     대표가 [설정 → 등록 기기 관리] 에 **직접 들어가야만** 요청을 봤다.
+                            //     ⇒ 직원은 기다리고 대표는 모른다. **아무도 틀리지 않았는데 일이 안 된다.**
+                            //
+                            //   [왜 새 배관을 안 만드나] 종(🔔) 알림이 이미 있다(결재용).
+                            //     새로 만들면 대표가 볼 곳이 둘이 되고, 둘 중 하나는 반드시 잊힌다.
+                            //
+                            //   ⚠️ 알림이 실패해도 **로그인은 그대로 간다** — 부수 기능이 본 기능을 죽이지 않는다.
+                            //     확인번호는 알림에 싣지 않는다(사장님 8/16 오더 — 옆에서 보면 샌다).
+                            // ══════════════════════════════════════════════════════════════
+                            try
+                            {
+                                var adminEmpId = await _deviceService
+                                    .GetAdminEmployeeIdAsync(response.TenantId!, ct);
+
+                                if (!string.IsNullOrWhiteSpace(adminEmpId))
+                                {
+                                    await _notifications.NotifyEmployeeAsync(
+                                        response.TenantId!,
+                                        adminEmpId,
+                                        new AppNotification
+                                        {
+                                            Type = "device_pending",
+                                            Title = "기기 등록 요청이 왔습니다",
+                                            Body = $"{response.UserName} 님이 새 기기에서 접속했습니다. 확인 후 승인해 주세요.",
+                                            Link = "/settings/devices"
+                                        },
+                                        ct);
+                                }
+                            }
+                            catch (Exception nex)
+                            {
+                                // 🔴 헌법 #15 — 빈 catch 금지. 알림 실패가 로그인을 막지 않는다.
+                                _logger.LogWarning(nex,
+                                    "기기 승인 요청 알림 실패 — 로그인은 그대로 진행한다. TenantId: {TenantId}",
+                                    response.TenantId);
+                            }
+                        }
                         else if (newlyRegistered)
                             response.DeviceNotice = "이 기기가 새 기기로 등록되었습니다.";
                     }
