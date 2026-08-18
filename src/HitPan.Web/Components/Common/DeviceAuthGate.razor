@@ -125,10 +125,33 @@ else if (_blocked)
 }
 
 @code {
+    /// 🔴 20260818작1 (증상③) — **관문이 켜져 있음을 부모(MainLayout)에게 알린다.**
+    ///
+    ///   [왜 필요한가] 종전엔 이 관문이 `<main>` 과 **형제**였다. 관문이 떠도
+    ///     그 아래 본문은 **무조건 렌더**돼서, 화면은 덮이는데 **뒤에서 업무 API 가 계속 돌았다.**
+    ///     ⇒ CSS 로 가린 것이지 막은 것이 아니었다.
+    ///
+    ///   [고침] 이 값이 true 가 되면 MainLayout 이 **본문을 아예 그리지 않는다.**
+    ///     안 그리면 그 페이지의 초기화가 안 돌고 **API 호출도 일어나지 않는다.**
+    ///
+    ///   ⚠️ 승인된 기기에서는 이 값이 **항상 false** 라 종전과 똑같은 화면이 나온다.
+    [Parameter] public bool GateActive { get; set; }
+    [Parameter] public EventCallback<bool> GateActiveChanged { get; set; }
+
     private bool _blocked;
     private bool _verifying;
     private string _inputKey = "";
     private string? _error;
+
+    /// 관문 상태가 바뀌면 부모에게 알린다 — 알리지 않으면 본문이 계속 렌더된다.
+    private async Task SyncGateActiveAsync()
+    {
+        var active = _awaitingApproval || _blocked;
+        if (active == GateActive) return;
+
+        GateActive = active;
+        await GateActiveChanged.InvokeAsync(active);
+    }
 
     // ── 🔴 승인 대기 관문 (20260816작2) ──
     private bool _awaitingApproval;
@@ -136,16 +159,34 @@ else if (_blocked)
     private string? _confirmCode;
     private System.Threading.Timer? _poll;
 
-    protected override void OnInitialized()
+    protected override async Task OnInitializedAsync()
     {
         _blocked = DeviceAuthState.IsBlocked;
         _awaitingApproval = DeviceAuthState.IsAwaitingApproval;
         DeviceAuthState.Changed += OnStateChanged;
 
+        // 🔴 2026-08-18 20260816작2 P0 봉합 — **메모리 표시만 믿으면 관문이 안 뜬다** (사장님 실측 반려).
+        //
+        //   [무엇이 났나] Login.razor 가 MarkAwaitingApproval() 로 표시를 켠 **바로 다음 줄**에서
+        //     `NavigateTo("/", forceLoad: true)` 를 부른다. forceLoad 는 **브라우저를 통째로 다시 읽는다.**
+        //     그 순간 앱이 새로 시작되고 DeviceAuthState 는 **정적 메모리 변수**라 **초기화된다.**
+        //     ⇒ 켠 표시가 한 줄 뒤에 증발한다. 관문이 뜰 수가 없었다.
+        //
+        //   [왜 게이트가 못 잡았나] G-28 은 *"로그인 화면이 MarkAwaitingApproval 을 부르는가"* 만 봤다.
+        //     **부르는 것과 그 값이 살아남는 것은 다른 일이다.** 글자는 있는데 동작이 없었다.
+        //
+        //   [고침] 화면이 뜰 때 **서버에 직접 묻는다.** 메모리가 날아가도 서버는 안 잊는다.
+        //     ⚠️ 이 한 번의 물음이 관문의 진실원이다 — 메모리는 거들 뿐이다.
+        if (!_awaitingApproval && !_blocked)
+            await CheckGateAsync(initialProbe: true);
+
         if (_awaitingApproval) StartPolling();
+
+        // 🔴 관문 상태를 부모에게 알린다 — 안 알리면 본문이 계속 렌더된다(증상③).
+        await SyncGateActiveAsync();
     }
 
-    private void OnStateChanged() => InvokeAsync(() =>
+    private void OnStateChanged() => InvokeAsync(async () =>
     {
         _blocked = DeviceAuthState.IsBlocked;
 
@@ -155,6 +196,7 @@ else if (_blocked)
         if (_awaitingApproval && !wasAwaiting) StartPolling();
         else if (!_awaitingApproval && wasAwaiting) StopPolling();
 
+        await SyncGateActiveAsync();
         StateHasChanged();
     });
 
@@ -175,7 +217,9 @@ else if (_blocked)
     }
 
     /// 이 기기 지금 쓸 수 있나 — 서버에 묻는다.
-    private async Task CheckGateAsync()
+    private Task CheckGateAsync() => CheckGateAsync(false);
+
+    private async Task CheckGateAsync(bool initialProbe)
     {
         if (_checking) return;
         _checking = true;
@@ -191,6 +235,19 @@ else if (_blocked)
             if (body is null) return;
 
             _confirmCode = body.ConfirmCode;
+
+            if (!body.Approved && initialProbe)
+            {
+                // 🔴 서버가 "아직 아니다" 라고 답했다 — 관문을 켠다.
+                //   메모리 표시가 forceLoad 로 날아갔어도 이 물음이 되살린다.
+                //   ⚠️ 여기서 안 켜면 미승인 기기가 그대로 ERP 로 들어간다(사장님 실측 반려 자리).
+                DeviceAuthState.MarkAwaitingApproval();
+                _awaitingApproval = true;
+                StartPolling();
+                // 🔴 본문 렌더를 여기서 끊는다 — 알리지 않으면 미승인 기기 뒤에서 업무 API 가 돈다.
+                await SyncGateActiveAsync();
+                return;
+            }
 
             if (body.Approved)
             {
@@ -242,8 +299,14 @@ else if (_blocked)
 
         try
         {
+            // 🔴 20260818작1 (1-1) — **이 세션의 장비넘버를 함께 보낸다.**
+            //   서버는 이 번호로 **어느 줄을 대조할지** 정한다. 키가 줄을 고르지 않는다.
+            //   ⚠️ 번호가 없으면 서버가 열 줄을 특정할 수 없어 거절한다 — 그것이 옳다.
+            //     (종전엔 키만 보내면 서버가 그 키를 가진 **남의 줄**을 찾아 열어줬다)
+            var sessionDeviceId = await JS.InvokeAsync<string?>("hitpanDevice.getDeviceId");
+
             var resp = await Http.PostAsJsonAsync("api/devices/verify-key",
-                new { authKey = _inputKey.Trim() });
+                new { authKey = _inputKey.Trim(), deviceId = sessionDeviceId });
 
             if (resp.IsSuccessStatusCode)
             {

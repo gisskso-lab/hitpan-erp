@@ -104,3 +104,31 @@ public class DeviceQuotaDto
     public int ExtraSlots { get; set; }
     public string SubscriptionTier { get; set; } = "";
 }
+
+/// <summary>
+/// 🔴 <b>대표 연락처</b> — 직원이 관문 앞에서 <b>누구에게 전화할지</b> 알기 위한 값 (20260818작2).
+/// </summary>
+/// <remarks>
+/// <para>
+/// [왜 만들었나] 종전 안내는 <i>"관리자에게 문의하세요"</i> 로 끝났다.
+/// 직원은 <b>누구에게</b> 전화할지 모른다 — <b>갈 곳 없는 안내는 흐름이 끊긴 것</b>이다(헌법 #20).
+/// </para>
+/// <para>
+/// 🔴 <b>고객사 안에서만 보이는 값이다</b>(헌법 #18·#22). 본사로 나가는 경로가 없다.
+/// </para>
+/// <para>
+/// ⚠️ <b>새 컬럼을 만들지 않았다</b> — <c>users</c>·<c>employees</c> 에 이미 있는 값을 읽을 뿐이다(헌법 #9).
+/// </para>
+/// </remarks>
+public class AdminContactDto
+{
+    /// <summary>대표 이름. 못 찾으면 null — 그때 화면은 종전 문구로 간다.</summary>
+    public string? Name { get; set; }
+
+    /// <summary>
+    /// 연락처.
+    /// ⚠️ <b>없을 수 있다</b> — <c>phone</c> 은 둘 다 <c>NULL</c> 허용이고 실제로 비어 있는 회사가 많다.
+    /// 화면은 <b>번호가 없어도 이름만으로</b> 안내가 성립해야 한다.
+    /// </summary>
+    public string? Phone { get; set; }
+}

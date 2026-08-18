@@ -43,6 +43,34 @@ public sealed class DeviceController : ControllerBase
         return Ok(all);
     }
 
+    /// <summary>
+    /// 🔴 <b>대표에게 연락할 곳</b> — 관문에 막힌 직원이 <b>누구에게 전화할지</b> 알기 위한 값 (20260818작2).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// [왜 필요한가] 종전 안내는 <i>"관리자에게 문의하세요"</i> 로 끝났다.
+    /// 직원은 <b>누구에게</b> 전화할지 모른다 — <b>갈 곳 없는 안내는 흐름이 끊긴 것</b>이다(헌법 #20).
+    /// </para>
+    /// <para>
+    /// ⚠️ <b>승인 안 난 기기도 이 길은 지나갈 수 있어야 한다</b> — 막히면 안내를 못 받는다.
+    /// <c>/api/devices</c> 는 <c>DeviceAuthMiddleware</c> 의 통과 목록에 이미 있다(그 파일은 안 건드렸다).
+    /// </para>
+    /// <para>
+    /// 🔴 <b>고객사 안에서만 보이는 값이다</b>(헌법 #18·#22) — 본사로 나가는 경로가 없다.
+    /// ⚠️ 이름·전화번호뿐이며, 그 이상은 돌려주지 않는다(필요 최소).
+    /// </para>
+    /// </remarks>
+    [HttpGet("admin-contact")]
+    public async Task<IActionResult> GetAdminContact(CancellationToken ct)
+    {
+        var tid = HttpContext.Items["TenantId"]?.ToString();
+        if (string.IsNullOrEmpty(tid)) return Forbid();
+
+        // ⚠️ 못 찾으면 null 을 그대로 돌려준다 — 화면은 그때 종전 문구로 간다.
+        //   404 로 만들지 않는다. 없는 것은 오류가 아니라 **그냥 없는 것**이다.
+        return Ok(await _svc.GetAdminContactAsync(tid, ct));
+    }
+
     /// <summary>현재 테넌트의 기기 쿼터 (한도·사용량).</summary>
     [HttpGet("quota")]
     public async Task<IActionResult> GetQuota(CancellationToken ct)
@@ -104,12 +132,27 @@ public sealed class DeviceController : ControllerBase
         var tid = HttpContext.Items["TenantId"]?.ToString();
         if (string.IsNullOrEmpty(tid)) return Forbid();
 
-        // deviceId 가 없으면 = 기기 등록 자체를 안 거친 접속(지문 미지원 등).
-        //   종전대로 통과시킨다 — 여기서 막으면 지문을 못 만드는 기기가 영영 못 들어온다.
+        // 🔴 20260818작1 (증상③) — **번호가 없다고 무조건 통과시키던 구멍을 닫았다.**
+        //
+        //   [종전] `deviceId` 가 비면 `approved = true` 로 돌려줬다.
+        //     ⇒ 관문이 **묻기만 하면 열리는 문**이었다. 번호를 안 보내면 그만이다.
+        //
+        //   [🔴 종전 주석의 걱정에 답한다 — 무시하고 닫지 않았다]
+        //     그 자리엔 *"여기서 막으면 지문을 못 만드는 기기가 영영 못 들어온다"* 고 적혀 있었다.
+        //     그 걱정은 **번호를 기기가 스스로 만들어 와야 하던 시절**의 것이다.
+        //     지금은 **서버가 등록 때 번호를 발급해 내려준다**(RegisterOrRefreshAsync 가 device_id 를 돌려주고
+        //     화면이 그것을 보관한다). ⇒ **번호 없는 접속 자체가 없어졌다.**
+        //     ⚠️ 그래서 이 구멍은 1-1 이 들어간 **뒤에야** 닫을 수 있었다(작업지시서 §4 순서 ③).
+        //
+        //   [닫는 방식] 통과가 아니라 **대기**로 돌린다. 화면은 관문에 머물고,
+        //     다음 접속에서 번호를 받으면 그때 넘어간다. **아무도 영구히 갇히지 않는다.**
+        //     ⚠️ 로그인은 여전히 통과한다 — 여기서 하는 일은 화면 상태 판정뿐이다.
         if (string.IsNullOrWhiteSpace(deviceId))
-            return Ok(new { approved = true, confirmCode = (string?)null });
+            return Ok(new { approved = false, confirmCode = (string?)null });
 
-        var approved = await _svc.IsDeviceAllowedAsync(deviceId, tid, ct);
+        // 🔴 IsDeviceAllowedAsync 가 아니다 — 그것은 1-2 로 **메인PC 만** 통과시킨다.
+        //   관문이 그 판정을 쓰면 승인받은 직원 기기가 영원히 대기 화면에 갇힌다(8/10 사고형).
+        var approved = await _svc.IsDeviceApprovedAsync(deviceId, tid, ct);
 
         return Ok(new
         {
@@ -151,7 +194,7 @@ public sealed class DeviceController : ControllerBase
     /// 사장님 설계: "승인대기. 대표에게 기기승인의 권한을 주기"
     /// </summary>
     [HttpPost("approve/{id}")]
-    public async Task<IActionResult> Approve(string id, CancellationToken ct)
+    public async Task<IActionResult> Approve(string id, [FromBody] ApproveDeviceRequest? body, CancellationToken ct)
     {
         var tid = HttpContext.Items["TenantId"]?.ToString();
         var uid = HttpContext.Items["UserId"]?.ToString();
@@ -166,7 +209,11 @@ public sealed class DeviceController : ControllerBase
         try
         {
             // 대표가 승인하는 그 자리에서 인증키가 만들어진다(TenantDeviceService.ApproveAsync).
-            authKey = await _svc.ApproveAsync(id, tid, uid, ct);
+            //
+            // 🔴 2026-08-18 20260818작2 (2-5) — 대표가 **누구 기기인지** 함께 고른다.
+            //   QR 로 들어온 폰은 주인이 비어 있다(등록 시점엔 알 수 없다).
+            //   ⚠️ 안 고르면 null 이고, 그때는 기존 주인을 그대로 둔다(안 지운다).
+            authKey = await _svc.ApproveAsync(id, tid, uid, body?.AssignUserId, ct);
         }
         catch (InvalidOperationException ex)
         {
@@ -257,11 +304,32 @@ public sealed class DeviceController : ControllerBase
         var ip = HttpContext.Connection.RemoteIpAddress?.ToString() ?? "";
         var ua = Request.Headers.UserAgent.ToString();
 
-        var (ok, message, deviceId) = await _svc.RegisterMobileByTokenAsync(
-            body.Token, body.DeviceName ?? "모바일 기기", body.Fingerprint ?? "", ip, ua, ct);
+        // 🔴 2026-08-18 20260818작2 (2-3) — 폰이 보관해 둔 **자기 번호**를 함께 넘긴다.
+        //   지문은 브라우저가 바뀌면 흔들리지만 이 번호는 안 흔들린다.
+        //   ⇒ 같은 폰이 다시 찍어도 **같은 줄**로 간다(사장님 8/16 증상② — 슬롯 중복).
+        //   ⚠️ 처음 오는 폰은 null 이다. 그때는 종전대로 지문으로 찾는다(헌법 #37).
+        var (ok, message, deviceId, adminContact) = await _svc.RegisterMobileByTokenAsync(
+            body.Token, body.DeviceName ?? "모바일 기기", body.Fingerprint ?? "", ip, ua,
+            body.DeviceId, ct);
 
-        if (!ok) return BadRequest(new { message });
-        return Ok(new { message, deviceId });
+        // 🔴 실패할 때도 연락처를 함께 보낸다 — **막혔을 때야말로 갈 곳이 필요하다**(헌법 #20).
+        //   한도 초과는 직원 혼자 못 푼다(슬롯 추가·기기 해제는 대표만 가능).
+        if (!ok) return BadRequest(new { message, adminContact });
+
+        // 🔴 2026-08-18 20260818작2 — **대표 연락처를 여기 실어 보낸다** (직원이 갈 곳 · 헌법 #20).
+        //
+        //   [왜 별도 호출이 아닌가] 이 화면은 `[AllowAnonymous]` 다 — 폰에는 로그인 토큰이 없어서
+        //     `/api/devices/admin-contact` 를 부를 수 없다(그 길은 로그인한 PC 관문용이다).
+        //     ⇒ **이미 통과한 이 응답에 얹는다.** QR 토큰이 곧 그 회사 사람이라는 증명이다.
+        //
+        //   ⚠️ 못 찾으면 null 이고, 폰 화면은 그때 연락처 줄 없이 안내만 띄운다.
+        //   🔴 이름·전화번호뿐이다(필요 최소). 고객사 안에서만 보이며 본사로 안 나간다(헌법 #18·#22).
+        //
+        //   ⚠️ 회사(tenant)를 **컨트롤러가 정하지 않는다** — 그 값은 QR 토큰에서만 나온다(헌법 #2).
+        //     그래서 서비스가 등록을 끝내며 **자기가 아는 회사의** 연락처를 함께 돌려준다.
+
+        // 🔴 폰이 이 번호를 받아 보관해야 다음번에 같은 줄로 온다 — 응답에 반드시 실린다(2-2 의 짝).
+        return Ok(new { message, deviceId, adminContact });
     }
 
     /// <summary>
@@ -282,7 +350,26 @@ public sealed class DeviceController : ControllerBase
         if (body is null || string.IsNullOrWhiteSpace(body.AuthKey))
             return BadRequest(new { message = "인증키를 입력해 주세요." });
 
-        var deviceId = await _svc.VerifyAuthKeyAsync(body.AuthKey.Trim(), tid, ct);
+        // 🔴 20260818작1 (1-1) — **어느 줄을 열지는 세션이 정한다. 키가 정하지 않는다.**
+        //
+        //   [무엇이 문제였나] 종전엔 키만 서비스로 넘겼고, 서비스가 **그 키를 가진 줄을 찾아** 열었다.
+        //     ⇒ 남의 키를 넣으면 **남의 줄이 열렸다** — 인증키가 회사 공용 열쇠였다.
+        //
+        //   [고침] 이 세션이 관문에서 받은 **장비넘버**를 함께 넘긴다.
+        //     서버는 그 줄을 먼저 잡고, **그 줄의 해시와만** 대조한다.
+        //     ⇒ 남의 키를 넣어도 **자기 줄에서 틀림으로 끝난다.**
+        //
+        //   ⚠️ 헤더를 먼저 보고, 없으면 본문 값을 쓴다 — 화면이 둘 중 무엇으로 보내든 받는다.
+        //     🔴 이 값은 **신분 증명이 아니다.** 남의 번호를 넣어도 그 줄의 키를 모르면 못 연다.
+        //       번호가 하는 일은 **"어느 줄을 대조할 것인가"** 하나뿐이다.
+        var sessionDeviceId = Request.Headers["X-HitPan-Device-Id"].ToString();
+        if (string.IsNullOrWhiteSpace(sessionDeviceId))
+            sessionDeviceId = body.DeviceId;
+
+        if (string.IsNullOrWhiteSpace(sessionDeviceId))
+            return BadRequest(new { message = "기기 정보를 확인할 수 없습니다. 화면을 새로고침한 뒤 다시 시도해 주세요." });
+
+        var deviceId = await _svc.VerifyAuthKeyAsync(body.AuthKey.Trim(), tid, sessionDeviceId.Trim(), ct);
 
         if (deviceId is null)
             // 어느 쪽이 틀렸는지 알려주지 않는다 — 알려주면 찍어 맞히는 데 도움이 된다.
@@ -291,9 +378,49 @@ public sealed class DeviceController : ControllerBase
         return Ok(new { message = "기기 인증이 완료되었습니다.", deviceId });
     }
 
+    /// <summary>
+    /// 🔴 인증키 재발급 — 대표계정만 (20260818작1 (1-8) · 사장님 결재 4).
+    ///
+    /// <para>사장님 문구: <i>"1회용 + 재발급 화면 필요 — 버튼 [인증키 재발급]"</i></para>
+    ///
+    /// <para>
+    /// 🔴 <b>왜 필요한가</b> — 1-1 이 인증키를 <b>1회용</b>으로 만들었다.
+    /// 직원이 <b>오타를 내거나</b> 키를 잃으면 되살릴 길이 없어 <b>영구 차단</b>된다.
+    /// 그것이 8/10 사고와 같은 모양이라 <b>1-1 과 한 몸으로</b> 넣는다.
+    /// </para>
+    ///
+    /// <para>⚠️ 새 키는 <b>응답에 한 번만</b> 실린다. 화면이 대표에게 보여주고 끝이다 —
+    /// 알림·메일·문자에 싣지 않는다(사장님 8/16 오더 <i>"옆에서 보면 샌다"</i>).</para>
+    /// </summary>
+    [HttpPost("reissue-key/{id}")]
+    public async Task<IActionResult> ReissueKey(string id, CancellationToken ct)
+    {
+        var tid = HttpContext.Items["TenantId"]?.ToString();
+        var uid = HttpContext.Items["UserId"]?.ToString();
+        if (string.IsNullOrEmpty(tid) || string.IsNullOrEmpty(uid)) return Forbid();
+
+        // 대표계정만 — 승인과 같은 문지기다(본사 계층은 백오피스 전용).
+        var accountType = User.FindFirst("account_type")?.Value;
+        if (accountType != "tenant_admin")
+            return Forbid();
+
+        try
+        {
+            var authKey = await _svc.ReissueAuthKeyAsync(id, tid, uid, ct);
+            return Ok(new { message = "인증키를 다시 발급했습니다.", authKey });
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(new { message = ex.Message });
+        }
+    }
+
     public sealed class VerifyKeyRequest
     {
         public string AuthKey { get; set; } = "";
+
+        /// 🔴 이 세션의 장비넘버 (20260818작1 1-1). 헤더가 없을 때 쓰는 자리다.
+        public string? DeviceId { get; set; }
     }
 
     public sealed class MobileRegisterRequest
@@ -301,10 +428,31 @@ public sealed class DeviceController : ControllerBase
         public string Token { get; set; } = "";
         public string? DeviceName { get; set; }
         public string? Fingerprint { get; set; }
+
+        /// <summary>
+        /// 🔴 <b>이 폰이 지난번에 받아 보관해 둔 자기 번호</b> (20260818작2 · 2-3).
+        /// <para>
+        /// 값이 있으면 서버가 <b>지문보다 먼저</b> 이것으로 기존 줄을 찾는다 — PC 경로와 같은 순서다.
+        /// ⚠️ 처음 오는 폰은 <c>null</c> 이며, 그때는 종전대로 지문으로 찾는다(헌법 #37 호환 보존).
+        /// </para>
+        /// </summary>
+        public string? DeviceId { get; set; }
     }
 
     public sealed class RevokeDeviceRequest
     {
         public string? Reason { get; set; }
+    }
+
+    /// <summary>
+    /// 기기 승인 요청 본문 (20260818작2 · 2-5).
+    /// </summary>
+    public sealed class ApproveDeviceRequest
+    {
+        /// <summary>
+        /// 🔴 대표가 고른 <b>이 기기를 쓸 사람</b>. QR 로 들어온 폰은 주인이 비어 있다.
+        /// <para>⚠️ 안 고르면 <c>null</c> 이고, 그때는 기존 주인을 <b>그대로 둔다</b>(안 지운다).</para>
+        /// </summary>
+        public string? AssignUserId { get; set; }
     }
 }

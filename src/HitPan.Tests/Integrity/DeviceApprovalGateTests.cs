@@ -327,15 +327,37 @@ public class DeviceApprovalGateTests
     {
         var code = DeviceServiceCode();
 
-        // QR INSERT 가 status 를 **고정 문자열로 박지 않고** 스위치를 보는지.
+        // QR INSERT 가 status 를 **고정 문자열로 박지 않고** 이름 붙은 값으로 정하는지.
         Assert.True(
             code.Contains("qrStatus", StringComparison.Ordinal),
-            "QR 등록이 승인제 스위치를 보지 않는다. " +
+            "QR 등록이 승인 상태를 따로 정하지 않는다. " +
             "QR 이 떠 있는 10분 동안 옆 사람 폰이 찍어도 그대로 등록된다(사장님 전결 위반).");
 
+        // 🔴 2026-08-18 20260818작2 (2-4) — **기대값을 바꿨다. 규칙이 더 엄해졌기 때문이다.**
+        //
+        //   [옛 기대] `qrStatus = _approvalEnabled ? "pending" : "approved"`
+        //     ⇒ **스위치를 끄면 QR 이 즉시 approved** 였다.
+        //   [지금]   `qrStatus = "pending"` (항상)
+        //
+        //   [왜 뒤집혔나] 이 경로는 `[AllowAnonymous]` 다. PC 는 **로그인을 통과한 뒤** 관문에 서는데
+        //     QR 은 **로그인 없이** 들어온다 ⇒ 더 엄해야 할 자리가 **개발 편의로 열려** 있었다.
+        //     근거: docs/운영기록/20260818작2 §2 (2-4).
+        //
+        //   🔴 **이 게이트의 목적은 약해지지 않았다 — 강해졌다.** 종전엔 "스위치를 보는가" 였고
+        //     지금은 "스위치와 무관하게 대기줄인가" 다. 옛 정규식을 그대로 두면
+        //     **되돌아간 코드가 초록불**이 된다(정반대의 사고).
+        //
+        //   ⚠️ 글자검사의 한계를 여기 적어 둔다 — **진짜 판정은 표로 한다.**
+        //     `DeviceTypeQrGateTests.GQr승인_스위치를_꺼도_QR은_pending이다` 가
+        //     격리 DB 에 실제로 넣어 보고 `status` 컬럼을 읽는다.
         Assert.True(
-            Regex.IsMatch(code, @"qrStatus\s*=\s*_approvalEnabled\s*\?\s*""pending""\s*:\s*""approved"""),
-            "QR 의 status 가 승인제 스위치에 따라 갈리지 않는다.");
+            Regex.IsMatch(code, @"qrStatus\s*=\s*""pending"""),
+            "QR 등록이 스위치와 무관하게 대기줄에 서지 않는다 — " +
+            "승인제를 끄면 [AllowAnonymous] 경로가 통째로 열린다.");
+
+        Assert.False(
+            Regex.IsMatch(code, @"qrStatus\s*=\s*_approvalEnabled"),
+            "QR 상태가 다시 승인제 스위치를 본다 — 2-4 봉합이 되돌아갔다.");
     }
 
     /// <summary>
@@ -351,10 +373,27 @@ public class DeviceApprovalGateTests
     {
         var code = DeviceServiceCode();
 
-        Assert.True(
+        // 🔴 2026-08-18 20260818작2 (2-4 · 2-5) — **기대값을 바꿨다. 규칙이 더 엄해졌기 때문이다.**
+        //
+        //   [옛 기대] `By = _approvalEnabled ? null : issuedBy`
+        //     ⇒ 스위치가 꺼져 있으면 **QR 을 띄운 사람을 승인자로 기록**했다.
+        //     🔴 그러나 그는 승인한 적이 없다 — QR 을 띄웠을 뿐이고 **누가 찍었는지 모른다.**
+        //   [지금] QR INSERT 는 `approved_by`·`approved_at` 을 **항상 NULL** 로 넣는다.
+        //     상태가 항상 `pending` 이므로(2-4) 승인자가 있을 수 없다.
+        //
+        //   ⚠️ 글자검사의 한계 — **진짜 판정은 표로 한다.**
+        //     `DeviceTypeQrGateTests.GQr승인_스위치를_꺼도_QR은_pending이다` 가
+        //     실제로 등록한 뒤 `approved_by` 컬럼이 비어 있는지 읽는다.
+        Assert.False(
             Regex.IsMatch(code, @"By\s*=\s*_approvalEnabled\s*\?\s*null\s*:\s*issuedBy"),
-            "QR 등록이 승인 대기인데도 승인자를 적어 넣는다 — " +
-            "승인받지 않은 기기가 '대표가 승인함' 으로 기록된다.");
+            "QR 등록이 승인제가 꺼지면 발급자를 승인자로 적는다 — " +
+            "승인받지 않은 기기가 '대표가 승인함' 으로 기록된다(2-4 봉합이 되돌아갔다).");
+
+        // QR INSERT 자리에 승인자·승인시각이 NULL 로 들어가는지.
+        Assert.True(
+            Regex.IsMatch(code, @"NOW\(6\),\s*NULL,\s*NULL,\s*NOW\(6\)"),
+            "QR INSERT 가 승인자·승인시각을 NULL 로 넣지 않는다 — " +
+            "아직 아무도 승인하지 않았는데 승인 기록이 남는다.");
     }
 
     // ══════════════════════════════════════════════════════════════════
