@@ -1,6 +1,4 @@
 using System.Data;
-using System.Security.Cryptography;
-using System.Text;
 using Dapper;
 using Microsoft.AspNetCore.Http;
 
@@ -79,7 +77,8 @@ public sealed class DeviceAuthMiddleware
         _enabled = config?.GetValue<bool>("DeviceApproval:Enabled") ?? false;
     }
 
-    public async Task InvokeAsync(HttpContext context, IDbConnection db)
+    public async Task InvokeAsync(HttpContext context, IDbConnection db,
+        HitPan.Application.Interfaces.ITenantDeviceService deviceSvc)
     {
         if (!_enabled)
         {
@@ -128,13 +127,22 @@ public sealed class DeviceAuthMiddleware
 
             if (!string.IsNullOrWhiteSpace(authKey))
             {
-                // 대조 하나. 같은 회사 안에서만 찾는다(헌법 #2) — 남의 회사 번호로 못 들어온다.
-                // 승인된 기기만 인정한다 — 해제된 기기의 옛 번호가 살아나면 안 된다.
-                ok = (await db.ExecuteScalarAsync<int>(new CommandDefinition(
-                    @"SELECT COUNT(*) FROM tenant_devices
-                       WHERE tenant_id = @Tid AND auth_key_hash = @Hash AND status = 'approved'",
-                    new { Tid = tenantId, Hash = Sha256Hex(authKey) },
-                    cancellationToken: context.RequestAborted))) > 0;
+                // 🔴 2026-08-19 20260819작1 (K-3) — **비밀값과 기기 번호를 짝으로 요구한다.**
+                //
+                //   [무엇이 문제였나] 종전 축① 은 해시만 봤다:
+                //     `WHERE tenant_id=@Tid AND auth_key_hash=@Hash AND status='approved'`
+                //     기기 조건이 없어 **한 기기의 비밀값이 회사 공용 통행증**이 될 수 있었다.
+                //     8/18 축② 주석이 *"남은 구멍(기기별 비밀값)은 다음 차수 몫"* 이라 적은 그 자리다.
+                //
+                //   [고침] 판정을 TenantDeviceService.VerifyDeviceSecretAsync 로 모았다 —
+                //     같은 회사 · **그 기기 번호** · 그 줄의 해시 · 승인 상태, 넷이 전부 맞아야 통과다.
+                //     ⚠️ 인라인 SQL 을 서비스 호출로 바꾼 것은 두 자리가 갈리는 사고를 막기 위해서다
+                //       (축② 가 IsDeviceAllowedAsync 와 같은 모양을 유지하는 이유와 같다).
+                //
+                //   ⚠️ 이 헤더에 실리는 값은 이제 **사람 키가 아니라 기계비밀**이다(K-1) —
+                //     verify-key 성공 시 서버가 만들어 화면이 보관한 값. 사람 키는 verify 순간 죽는다.
+                ok = await deviceSvc.VerifyDeviceSecretAsync(
+                    deviceId, authKey, tenantId, context.RequestAborted);
             }
 
             // 🔴 2026-08-16 20260816작2 P0 봉합 — **메인PC 가 자기 화면에서 막혔다** (사장님 실측).
@@ -273,9 +281,5 @@ public sealed class DeviceAuthMiddleware
         return false;
     }
 
-    private static string Sha256Hex(string input)
-    {
-        var bytes = SHA256.HashData(Encoding.UTF8.GetBytes(input));
-        return Convert.ToHexString(bytes).ToLowerInvariant();
-    }
+    // Sha256Hex 는 K-3(20260819작1)에서 제거 — 해시 대조가 VerifyDeviceSecretAsync 로 모였다.
 }

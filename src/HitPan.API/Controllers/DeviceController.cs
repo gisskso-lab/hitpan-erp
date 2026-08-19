@@ -369,13 +369,23 @@ public sealed class DeviceController : ControllerBase
         if (string.IsNullOrWhiteSpace(sessionDeviceId))
             return BadRequest(new { message = "기기 정보를 확인할 수 없습니다. 화면을 새로고침한 뒤 다시 시도해 주세요." });
 
-        var deviceId = await _svc.VerifyAuthKeyAsync(body.AuthKey.Trim(), tid, sessionDeviceId.Trim(), ct);
+        // 🔴 20260819작1 (K-1) — 성공 반환값은 이제 **기계비밀 원문**이다.
+        //   사람이 본 인증키는 이 순간 죽고(해시가 교체된다 — 결재 4 의도 유지),
+        //   기계비밀이 이 기기의 매 요청 통행증(미들웨어 축①)이 된다.
+        //   ⚠️ 원문은 서버에 남지 않는다 — 이 응답을 화면이 브라우저 저장소에 넣는 것으로 끝난다.
+        //     알림·메일·문자에 싣지 않는다(사장님 8/16 오더 "옆에서 보면 샌다" 와 같은 원칙).
+        var deviceKey = await _svc.VerifyAuthKeyAsync(body.AuthKey.Trim(), tid, sessionDeviceId.Trim(), ct);
 
-        if (deviceId is null)
+        if (deviceKey is null)
             // 어느 쪽이 틀렸는지 알려주지 않는다 — 알려주면 찍어 맞히는 데 도움이 된다.
             return BadRequest(new { message = "인증키가 올바르지 않습니다. 관리자에게 다시 확인해 주세요." });
 
-        return Ok(new { message = "기기 인증이 완료되었습니다.", deviceId });
+        return Ok(new
+        {
+            message = "기기 인증이 완료되었습니다.",
+            deviceId = sessionDeviceId.Trim(),   // 화면이 보관할 이 세션의 장비넘버 (종전 계약 유지)
+            deviceKey                            // 🔴 기계비밀 — 이 순간에만 존재한다
+        });
     }
 
     /// <summary>
