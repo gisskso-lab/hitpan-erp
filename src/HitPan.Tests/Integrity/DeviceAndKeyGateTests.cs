@@ -1052,4 +1052,172 @@ public sealed class DeviceAndKeyGateTests : IDisposable
         Assert.False(await svc.VerifyDeviceSecretAsync(pendingDev, someKey, TenantId),
             "🔴 승인 대기 기기가 매 요청 통행을 지났다 — 승인제가 무너졌다(스위치가 있으나 없으나 같다).");
     }
+
+    // ══════════════════════════════════════════════════════════════
+    // G-39 · G-40 — 회사서버 줄 합류 (20260820작2 2-1 · PM·CTO 전결)
+    //
+    //   사장님 실측: 메인PC 컴퓨터가 서버 슬롯 + 브라우저 슬롯 = 2개.
+    //   봉합: 관문의 [회사서버 컴퓨터] 갈래가 서버 줄(is_main_pc=1)에 합류한다 —
+    //   reissue → verify → 기계비밀. 아래는 그 종단을 서비스 값으로 세운다.
+    //   ⚠️ 관문 UI·신분 유지 가드(AuthService)는 브라우저 동작이라 xUnit 재현 불가 —
+    //     Playwright 이월 + TEST1 실측(실4·실4′)이 판정한다(작업지시서 §3에 명시).
+    // ══════════════════════════════════════════════════════════════
+
+    /// <summary>
+    /// 🟢 <b>G-39. 서버 줄 합류 종단 — 서버 줄 재발급 키로 verify 하면 기계비밀로 매 요청이 통한다.</b>
+    ///
+    /// <para>서버 줄은 원래 인증키를 받은 적이 없다(해시 NULL — MainPcRegistrationService 가 스스로 등록).
+    /// 합류는 그 줄에 재발급으로 해시를 만들고, verify 로 기계비밀을 받는 흐름이다.</para>
+    /// <para>🔴 합류를 갈아타면(재발급 반복) <b>직전 탑승자의 비밀이 죽는다</b> — 무료 탑승 동시 1개 자기 제한.</para>
+    /// </summary>
+    [Fact(DisplayName = "G-39 🟢 회사서버 줄 합류 — 재발급→verify→기계비밀 통행 + 직전 탑승자 사멸")]
+    public async Task G39_서버줄_합류_종단()
+    {
+        if (!ServerAvailable()) return;
+        SetUpFreshInstall();
+
+        await using var db = new MySqlConnection(DbConnString());
+        await db.OpenAsync();
+
+        var svc = NewService(db);
+
+        // 회사서버 줄 — 스스로 등록돼 승인 상태, 해시는 없다(키를 받은 적이 없다).
+        const string serverRow = "dddddddd-0000-0000-0000-00000000000d";
+        await InsertDeviceAsync(db, serverRow, "approved", "MAINPC-고유지문", isMainPc: true);
+
+        // 1차 합류 — 대표 브라우저.
+        var key1 = await svc.ReissueAuthKeyAsync(serverRow, TenantId, "owner-user");
+        Assert.False(string.IsNullOrWhiteSpace(key1), "서버 줄 재발급이 키를 돌려주지 않았다 — 합류 갈래가 죽었다.");
+
+        var secret1 = await svc.VerifyAuthKeyAsync(key1!, TenantId, serverRow);
+        Assert.False(string.IsNullOrWhiteSpace(secret1), "서버 줄 재발급 키로 verify 가 안 된다.");
+        Assert.True(await svc.VerifyDeviceSecretAsync(serverRow, secret1!, TenantId),
+            "🔴 합류 직후 매 요청이 막혔다 — [회사서버 컴퓨터] 를 눌러도 대표가 그대로 갇힌다.");
+
+        // 2차 합류 — 다른 브라우저가 갈아탄다. 직전 탑승자의 비밀은 죽어야 한다.
+        var key2 = await svc.ReissueAuthKeyAsync(serverRow, TenantId, "owner-user");
+        var secret2 = await svc.VerifyAuthKeyAsync(key2!, TenantId, serverRow);
+        Assert.False(string.IsNullOrWhiteSpace(secret2));
+        Assert.True(await svc.VerifyDeviceSecretAsync(serverRow, secret2!, TenantId));
+        Assert.False(await svc.VerifyDeviceSecretAsync(serverRow, secret1!, TenantId),
+            "🔴 갈아탔는데 직전 탑승자의 비밀이 살아 있다 — 서버 줄이 무제한 무료 통행증이 된다.");
+    }
+
+    /// <summary>
+    /// <b>G-40. 합류는 아무것도 승인하지 않는다 — 서버 줄 표식 무변 + pending 줄 그대로 (G-43 무접촉).</b>
+    ///
+    /// <para>합류 흐름(reissue→verify)이 서버 줄의 <c>is_main_pc</c> 를 건드리거나
+    /// 브라우저의 pending 줄을 승인해 버리면, 요금·표식이 함께 무너진다.</para>
+    /// </summary>
+    [Fact(DisplayName = "G-40 합류해도 서버 줄 표식 무변 + 브라우저 pending 줄은 대기 그대로")]
+    public async Task G40_합류는_아무것도_승인하지_않는다()
+    {
+        if (!ServerAvailable()) return;
+        SetUpFreshInstall();
+
+        await using var db = new MySqlConnection(DbConnString());
+        await db.OpenAsync();
+
+        var svc = NewService(db);
+
+        const string serverRow = "dddddddd-0000-0000-0000-00000000000d";
+        const string browserRow = "bbbbbbbb-0000-0000-0000-00000000000b";
+        await InsertDeviceAsync(db, serverRow, "approved", "MAINPC-고유지문", isMainPc: true);
+        await InsertDeviceAsync(db, browserRow, "pending", "FP-대표브라우저-고유지문");
+
+        var key = await svc.ReissueAuthKeyAsync(serverRow, TenantId, "owner-user");
+        var secret = await svc.VerifyAuthKeyAsync(key!, TenantId, serverRow);
+        Assert.False(string.IsNullOrWhiteSpace(secret));
+
+        // 서버 줄: 표식·상태 무변. 브라우저 줄: 여전히 대기(슬롯 0).
+        var server = await db.QueryFirstAsync<(string status, bool main)>(
+            "SELECT status AS status, is_main_pc AS main FROM tenant_devices WHERE device_id = @Id",
+            new { Id = serverRow });
+        Assert.Equal("approved", server.status);
+        Assert.True(server.main, "합류가 서버 표식을 지웠다 — CS 가 본체를 못 찾는다.");
+
+        var (_, browserStatus) = await ReadRowAsync(db, browserRow);
+        Assert.True(browserStatus == "pending",
+            $"🔴 합류했는데 브라우저 pending 줄이 '{browserStatus}' 가 됐다 — " +
+            "합류는 새 슬롯을 만들지 않는 갈래인데 어딘가가 승인을 흘렸다(G-43 · 요금).");
+
+        // 계수 확인 — 그 기계 합계는 서버 줄 1대뿐이다(pending 은 안 센다).
+        var counts = (await db.QueryAsync<(string t, int c)>(
+            "SELECT device_type AS t, COUNT(*) AS c FROM tenant_devices WHERE tenant_id = @Tid AND status='approved' GROUP BY device_type",
+            new { Tid = TenantId })).ToList();
+        Assert.Equal(1, TenantDeviceService.PcUsedFrom(counts));
+    }
+
+    /// <summary>
+    /// 🔴 <b>G-41. 회사서버 줄의 정체는 갱신이 덮지 못한다 ([3-V] 실재 판정 ②③).</b>
+    ///
+    /// <para>
+    /// [무엇이 문제였나] 로그인 갱신은 장비넘버 1순위 대조인데, 합류(2-1)로 브라우저가
+    /// 서버 줄 번호를 신분으로 갖는다 ⇒ 그 브라우저의 매 로그인이 서버 줄의
+    /// 이름·UA·IP 를 브라우저 것으로 덮고(CS 가 본체를 못 찾는다), 대표 <b>폰</b>이 합류하면
+    /// COALESCE 가 종류를 mobile 로 바꿔 <b>요금 칸이 이동</b>한다(pc 계수 -1).
+    /// </para>
+    /// <para>[반증] RegisterOrRefresh 의 preserveMainPcIdentity 를 빼면 종류·이름이 덮여 FAIL.</para>
+    /// </summary>
+    [Fact(DisplayName = "G-41 🔴 회사서버 줄의 이름·종류·UA·IP 는 로그인 갱신이 덮지 못한다")]
+    public async Task G41_서버줄_정체는_갱신이_덮지_못한다()
+    {
+        if (!ServerAvailable()) return;
+        SetUpFreshInstall();
+
+        await using var db = new MySqlConnection(DbConnString());
+        await db.OpenAsync();
+
+        var svc = NewService(db);
+
+        const string serverRow = "dddddddd-0000-0000-0000-00000000000d";
+        await InsertDeviceAsync(db, serverRow, "approved", "MAINPC-고유지문", isMainPc: true);
+
+        // 합류한 대표 폰이 로그인한다 — 장비넘버 = 서버 줄, 신고 종류 = mobile.
+        var (allowed, _, _, _) = await svc.RegisterOrRefreshAsync(
+            TenantId, "owner-user",
+            new HitPan.Application.DTOs.Device.RegisterDeviceRequest
+            {
+                Fingerprint = "FP-대표폰-고유지문",
+                DeviceId = serverRow,
+                DeviceType = "mobile",
+                DeviceName = "iPhone 대표폰",
+                UserAgent = "Mozilla/5.0 (iPhone)"
+            },
+            "203.0.113.9");
+        Assert.True(allowed, "승인된 서버 줄인데 로그인이 막혔다 — 8/10 사고 계통.");
+
+        var row = await db.QueryFirstAsync<(string type, string? name, string? ua, string? ip)>(
+            "SELECT device_type AS type, device_name AS name, user_agent AS ua, ip_address AS ip "
+            + "FROM tenant_devices WHERE device_id = @Id", new { Id = serverRow });
+
+        Assert.True(row.type == "pc",
+            $"🔴 서버 줄의 종류가 '{row.type}' 로 바뀌었다 — 요금 칸이 pc→mobile 로 이동한다(계수 -1).");
+        Assert.True(row.name != "iPhone 대표폰",
+            "🔴 서버 줄의 이름이 브라우저 이름으로 덮였다 — CS 가 본체를 못 찾는다(IsMainPc 표식의 존재 이유).");
+        Assert.True(row.ua is null || !row.ua.Contains("iPhone"),
+            "🔴 서버 줄의 UA 가 브라우저 UA 로 덮였다.");
+        Assert.True(row.ip != "203.0.113.9",
+            "🔴 서버 줄의 IP 가 합류 브라우저의 IP 로 덮였다.");
+
+        // 짝 확인 — 일반 기기는 종전대로 갱신된다(보존을 넓히다 갱신 자체를 죽이면 D-4 회귀).
+        const string normalDev = "cccccccc-0000-0000-0000-00000000000c";
+        await InsertDeviceAsync(db, normalDev, "approved", "FP-일반-고유지문");
+        await svc.RegisterOrRefreshAsync(
+            TenantId, "owner-user",
+            new HitPan.Application.DTOs.Device.RegisterDeviceRequest
+            {
+                Fingerprint = "FP-일반-고유지문",
+                DeviceId = normalDev,
+                DeviceType = "pc",
+                DeviceName = "새 이름",
+                UserAgent = "UA-2"
+            },
+            "198.51.100.7");
+        var normal = await db.QueryFirstAsync<(string? name, string? ip)>(
+            "SELECT device_name AS name, ip_address AS ip FROM tenant_devices WHERE device_id = @Id",
+            new { Id = normalDev });
+        Assert.Equal("새 이름", normal.name);
+        Assert.Equal("198.51.100.7", normal.ip);
+    }
 }

@@ -159,7 +159,7 @@ window.hitpanDevice = {
     //     Windows · Mac · 리눅스  ⇒ 컴퓨터(pc)
     //     그 밖 **전부**          ⇒ 휴대기기(mobile)
     //
-    //   🔴 [브라우저로 판단하지 않는다] 사장님 못박음:
+    //   🔴 [브라우저로 판단하지 않는다] 사장님 확정:
     //     *"웹브라우저로 판단하면 안 돼. **윈도우PC에서 사파리를 돌릴 수도 있잖아**"*
     //     사파리를 쓴다고 애플 기기가 아니고, 크롬을 쓴다고 컴퓨터가 아니다.
     //     브라우저는 **사람이 고른 것**이고 기기 종류와 아무 상관이 없다.
@@ -260,6 +260,19 @@ window.hitpanDevice = {
     },
     clearAuthKey: function () {
         try { localStorage.removeItem('hitpan_auth_key'); }
+        catch (e) { /* noop */ }
+    },
+
+    // ── 기기 신분의 회사 표식 (20260820작2 · [3-V] 갇힘 A 봉합) ──
+    //   기기 번호·인증 번호는 회사(tenant)별 값이다. 한 브라우저로 두 사업자를 오가면
+    //   (사장님 결재 — 한 PC 다중 사업자) 다른 회사의 신분을 들고 있게 되므로,
+    //   "통행증이 있는 동안 신분 유지" 가드는 **같은 회사일 때만** 신분을 지킨다.
+    getAuthTenant: function () {
+        try { return localStorage.getItem('hitpan_auth_tenant'); }
+        catch (e) { return null; }
+    },
+    setAuthTenant: function (tenantId) {
+        try { if (tenantId) localStorage.setItem('hitpan_auth_tenant', tenantId); }
         catch (e) { /* noop */ }
     },
 

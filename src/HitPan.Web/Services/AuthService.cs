@@ -101,9 +101,39 @@ public sealed class AuthService : IAuthService
             }
 
             // 서버가 device_id를 돌려줬으면 localStorage에 보관 (다음 로그인/미들웨어 활용용)
+            //
+            // 🔴 2026-08-20 20260820작2 (2-1 가드) — **통행증이 있는 동안은 신분을 갈아타지 않는다.**
+            //
+            //   [무엇이 문제였나] 여기서 로그인마다 무조건 덮어썼다. 그런데 로그인 응답의 deviceId 는
+            //     서버가 **브라우저 지문**으로 찾은 줄이다 — 대표가 관문에서 [이 컴퓨터는 회사서버]로
+            //     **다른 줄(서버 줄)에 합류**해 그 줄의 기계비밀을 보관하고 있어도, 다음 로그인이
+            //     신분을 지문 줄로 되돌려 **비밀과 번호의 짝이 갈라지고**(축① 은 짝 판정 · K-3)
+            //     봉합이 로그인 한 번 만에 풀린다.
+            //
+            //   [규칙] 보관된 통행증(키)과 장비넘버가 둘 다 있고 **같은 회사의 것이면** 그대로 둔다.
+            //     통행증이 없거나(첫 등록·정리된 브라우저) 번호가 없거나 **다른 회사로 로그인하면**
+            //     새 신분을 받는다 — 🔴 회사 조건이 없으면 한 브라우저 다중 사업자(사장님 결재)에서
+            //     남의 회사 신분을 영구히 고집해 직원이 갇힌다([3-V] 갇힘 A).
+            //   ⚠️ 죽은 통행증에 갇히지 않는다 — 비밀이 죽으면 관문이 뜨고, 관문의 verify 성공이
+            //     deviceId 와 키를 **그 자리에서 다시 세팅**한다(DeviceAuthGate — 회복 경로).
             if (!string.IsNullOrEmpty(data.DeviceId))
             {
-                try { await _js.InvokeVoidAsync("hitpanDevice.setDeviceId", data.DeviceId); }
+                try
+                {
+                    var storedKey = await _js.InvokeAsync<string?>("hitpanDevice.getAuthKey");
+                    var storedId = await _js.InvokeAsync<string?>("hitpanDevice.getDeviceId");
+                    var storedTenant = await _js.InvokeAsync<string?>("hitpanDevice.getAuthTenant");
+
+                    var keepIdentity = !string.IsNullOrEmpty(storedKey)
+                                    && !string.IsNullOrEmpty(storedId)
+                                    && string.Equals(storedTenant, data.TenantId, StringComparison.OrdinalIgnoreCase);
+
+                    if (!keepIdentity)
+                    {
+                        await _js.InvokeVoidAsync("hitpanDevice.setDeviceId", data.DeviceId);
+                        await _js.InvokeVoidAsync("hitpanDevice.setAuthTenant", data.TenantId);
+                    }
+                }
                 catch { /* 보관 실패해도 로그인은 계속 */ }
             }
 

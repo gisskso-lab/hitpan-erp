@@ -505,11 +505,25 @@ public sealed class TenantDeviceService : ITenantDeviceService
                 }
             }
 
+            // 🔴 2026-08-20 20260820작2 ([3-V] 실재 판정 ②③) — **회사서버 줄의 정체는 서버가 정한다.**
+            //
+            //   [무엇이 문제였나] 이 갱신은 장비넘버 1순위 대조다. 그런데 관문의 [회사서버 컴퓨터]
+            //     합류(2-1)로 **브라우저가 서버 줄의 번호를 신분으로 갖게 됐다** ⇒ 그 브라우저의
+            //     매 로그인이 서버 줄의 이름·UA·IP 를 브라우저 것으로 덮는다 — CS 가 본체를 못 찾는다
+            //     (DeviceListDto.IsMainPc 의 존재 이유가 그 식별이다). 대표 **폰**이 합류하면
+            //     COALESCE 가 종류를 mobile 로 바꿔 **요금 칸까지 이동**한다(pc 계수 -1).
+            //
+            //   [고침] is_main_pc=1 줄은 last_seen_at 만 갱신한다. 이름·종류·UA·IP 는
+            //     MainPcRegistrationService 가 심은 값을 보존한다.
+            //   ⚠️ 로컬 콘솔(지문 통일 8/18작4)의 갱신도 같은 줄을 지나므로 함께 보존된다 —
+            //     서버 줄 이름이 브라우저 이름으로 바뀌던 종전 동작도 이것으로 멎는다(의도).
+            var preserveMainPcIdentity = isMainPc;
+
             await _db.ExecuteAsync(new CommandDefinition(
                 """
                 UPDATE tenant_devices
                 SET last_seen_at = NOW(),
-                    ip_address   = @Ip,
+                    ip_address   = COALESCE(@Ip, ip_address),
                     user_agent   = COALESCE(@Ua, user_agent),
                     device_name  = COALESCE(@Name, device_name),
                     device_type  = COALESCE(@Type, device_type)
@@ -518,10 +532,10 @@ public sealed class TenantDeviceService : ITenantDeviceService
                 new
                 {
                     Id = id,
-                    Ip = ipAddress,
-                    Ua = req.UserAgent,
-                    Name = string.IsNullOrWhiteSpace(req.DeviceName) ? null : req.DeviceName,
-                    Type = normalizedType
+                    Ip = preserveMainPcIdentity ? null : ipAddress,
+                    Ua = preserveMainPcIdentity ? null : req.UserAgent,
+                    Name = preserveMainPcIdentity || string.IsNullOrWhiteSpace(req.DeviceName) ? null : req.DeviceName,
+                    Type = preserveMainPcIdentity ? null : normalizedType
                 }, cancellationToken: ct));
 
             await LogLoginAsync(tenantId, userId, ipAddress, id, "success", ct);
