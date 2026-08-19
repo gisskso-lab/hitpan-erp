@@ -55,17 +55,36 @@ public interface ITenantDeviceService
         string? assignUserId = null, CancellationToken ct = default);
 
     /// <summary>
-    /// 직원 PC 가 입력한 인증키를 <b>자기 줄에서 대조</b>한다. 맞으면 기기 번호, 틀리면 null.
+    /// 직원 PC 가 입력한 인증키를 <b>자기 줄에서 대조</b>한다.
+    /// 맞으면 <b>이 기기의 기계비밀 원문</b>(이 순간에만 존재), 틀리면 null.
     ///
     /// <para>
     /// 🔴 20260818작1 (1-1) — <b>키는 "맞나 틀리나"만 판정한다. 무엇을 열지는 키가 정하지 않는다.</b>
     /// 종전엔 키만 보고 줄을 검색해서 <b>남의 키를 넣으면 남의 줄이 열렸다</b>(회사 공용 열쇠).
     /// 이제 <paramref name="sessionDeviceId"/> 로 줄을 먼저 특정하고 그 줄의 해시와만 대조한다.
     /// </para>
-    /// <para>🔴 성공하면 해시를 소거한다 — <b>1회용</b>(사장님 결재 4). 되살리는 길은 <see cref="ReissueAuthKeyAsync"/>.</para>
+    /// <para>
+    /// 🔴 20260819작1 (K-1) — 성공하면 해시를 소거가 아니라 <b>기계비밀 해시로 교체</b>한다.
+    /// 사람이 본 키는 지금처럼 죽고(결재 4 의도 유지), 기계비밀이 매 요청 통행증
+    /// (<see cref="VerifyDeviceSecretAsync"/>)이 된다 — 소거는 그 기기의 통행로 자체를 없앴다(K-0 잠재 P0).
+    /// 되살리는 길은 <see cref="ReissueAuthKeyAsync"/>.
+    /// </para>
     /// </summary>
     /// <param name="sessionDeviceId">이 세션이 관문에서 발급받은 장비넘버. 비면 아무것도 열지 않는다.</param>
     Task<string?> VerifyAuthKeyAsync(string authKey, string tenantId, string? sessionDeviceId, CancellationToken ct = default);
+
+    /// <summary>
+    /// 🔴 매 요청 통행 판정 — <b>이 기기의 기계비밀이 맞는가</b> (20260819작1 K-3).
+    ///
+    /// <para>
+    /// 미들웨어 축① 이 요청마다 부른다. 넷이 전부 맞아야 true 다:
+    /// 같은 회사(헌법 #2) · <b>그 기기 번호</b> · 그 줄의 해시 · 승인 상태.
+    /// 종전 축① 은 해시만 봐서 한 기기의 비밀값이 회사 공용 통행증이 될 수 있었다 —
+    /// 비밀값과 기기 번호를 <b>짝으로</b> 요구한다(8/18 주석의 "다음 차수 몫" 이행).
+    /// </para>
+    /// <para>⚠️ <see cref="IsDeviceAllowedAsync"/>(메인PC 헤더 통과)와 묻는 것이 다르다. 합치면 안 된다.</para>
+    /// </summary>
+    Task<bool> VerifyDeviceSecretAsync(string deviceId, string deviceSecret, string tenantId, CancellationToken ct = default);
 
     /// <summary>
     /// 인증키 재발급 — 대표계정만 (20260818작1 (1-8) · 사장님 결재 4 <i>"1회용 + 재발급 화면 필요"</i>).

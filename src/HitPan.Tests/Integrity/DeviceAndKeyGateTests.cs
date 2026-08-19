@@ -225,6 +225,30 @@ public sealed class DeviceAndKeyGateTests : IDisposable
         return Convert.ToHexString(bytes).ToLowerInvariant();
     }
 
+    /// 🔴 슬롯 한도를 시험이 정확히 지정한다 — 승인(ApproveAsync)이 한도를 다시 보기 때문이다.
+    ///   (DeviceTypeQrGateTests 의 같은 헬퍼와 같은 모양 — 갈리면 한쪽만 고쳐지는 사고가 난다)
+    private static async Task SetSlotPolicyAsync(MySqlConnection db, int pcLimit, int mobileLimit)
+    {
+        // ⚠️ `policy_id`(PK)·`label` 은 기본값이 없다 — 실측(헌법 #13 DESCRIBE 선행).
+        await db.ExecuteAsync(
+            """
+            INSERT INTO device_slot_policy_settings
+              (policy_id, tenant_id, policy_key, policy_value, label)
+            VALUES
+              (@PcId, @Tid, 'tier.basic.pc_limit', @Pc, '컴퓨터 한도(시험)'),
+              (@MobId, @Tid, 'tier.basic.mobile_limit', @Mobile, '휴대기기 한도(시험)')
+            ON DUPLICATE KEY UPDATE policy_value = VALUES(policy_value)
+            """,
+            new
+            {
+                PcId = Guid.NewGuid().ToString(),
+                MobId = Guid.NewGuid().ToString(),
+                Tid = TenantId,
+                Pc = pcLimit,
+                Mobile = mobileLimit
+            });
+    }
+
     /// <summary>🔴 임시 DB 는 반드시 지운다 — 검증이 흔적을 남기지 않는다(헌법 #39).</summary>
     public void Dispose()
     {
@@ -362,7 +386,8 @@ public sealed class DeviceAndKeyGateTests : IDisposable
 
         var opened = await svc.VerifyAuthKeyAsync(authKeyB, TenantId, deviceB);
 
-        // 🔴 판정은 표로 한다 — 자기 키를 넣었으면 **자기 줄이 실제로 승인되고 키가 소거**돼야 한다.
+        // 🔴 판정은 표로 한다 — 자기 키를 넣었으면 **자기 줄이 실제로 승인되고
+        //   사람 키가 기계비밀로 교체**돼야 한다(20260819작1 K-1).
         //   반환값만 보면 "값은 맞게 주면서 표는 안 고치는" 구현도 통과한다.
         var (bHash, bStatus) = await ReadRowAsync(db, deviceB);
 
@@ -371,11 +396,21 @@ public sealed class DeviceAndKeyGateTests : IDisposable
             $"자기 키를 넣었는데 자기 줄이 승인되지 않았다(지금: {bStatus} / 돌아온 값: {opened ?? "null"}). " +
             "좁히는 봉합이 정상 경로까지 막았다 — 8/10 사고(쓰던 사람이 새로 막힘)와 같은 모양이다.");
 
+        // 🔴 K-1 (20260819작1) — 소거(NULL)가 아니라 **교체**다.
+        //   NULL 이면 이 기기의 매 요청 통행로(축①)가 함께 사라진다 — 그것이 K-0 잠재 P0 였다.
         Assert.True(
-            bHash is null,
-            "인증에 성공했는데 키가 소거되지 않았다 — 1회용이 아니다(사장님 결재 4).");
+            bHash is not null,
+            "🔴 인증에 성공했는데 해시가 **소거(NULL)** 됐다 — 이 기기는 매 요청 통행로(축①)를 잃는다. " +
+            "업무 API 전면 403(K-0 잠재 P0)이 되살아난 것이다(20260819작1 K-1).");
 
-        Assert.Equal(deviceB, opened);
+        Assert.True(
+            bHash != Sha256Hex(authKeyB),
+            "🔴 인증에 성공했는데 **사람이 본 키가 표에 그대로 살아 있다** — " +
+            "옆에서 본 사람이 나중에 그 키로 들어온다(사장님 결재 4 의도 위반).");
+
+        // 반환값 = 기계비밀 원문. 표의 해시와 맞아야 화면이 보관한 값으로 매 요청이 통한다.
+        Assert.False(string.IsNullOrWhiteSpace(opened), "인증에 성공했는데 기계비밀이 돌아오지 않았다.");
+        Assert.Equal(Sha256Hex(opened!), bHash);
     }
 
     /// <summary>
@@ -777,8 +812,9 @@ public sealed class DeviceAndKeyGateTests : IDisposable
             "재발급이 돌려준 키와 표에 저장된 해시가 다르다 — 대표가 알려준 번호로 직원이 못 들어간다.");
 
         // 새 키로 실제 인증이 되는가 — 되살아나야 한다(직원 영구 차단 방지).
+        //   ⚠️ K-1(20260819작1) 이후 성공 반환값은 기기 번호가 아니라 **기계비밀**이다.
         var withNew = await svc.VerifyAuthKeyAsync(newKey!, TenantId, deviceId);
-        Assert.True(withNew == deviceId,
+        Assert.False(string.IsNullOrWhiteSpace(withNew),
             "재발급한 새 키로 인증이 안 된다 — 재발급이 기기를 되살리지 못했다(직원 영구 차단).");
 
         // 🔴 옛 키로는 안 된다.
@@ -818,14 +854,16 @@ public sealed class DeviceAndKeyGateTests : IDisposable
             authKeyHash: Sha256Hex(key));
 
         var first = await svc.VerifyAuthKeyAsync(key, TenantId, deviceId);
-        Assert.Equal(deviceId, first);
+        Assert.False(string.IsNullOrWhiteSpace(first), "자기 키 첫 인증이 실패했다.");
 
-        // 🔴 표로 판정한다 — 인증이 되는 순간 **키가 표에서 사라져야** 한다.
-        //   이것이 1회용의 실체다. 반환값이 아니라 이 소거가 다음 사람을 막는다.
+        // 🔴 표로 판정한다 — 인증이 되는 순간 **사람이 본 키의 해시가 표에서 사라져야** 한다.
+        //   이것이 1회용의 실체다. 반환값이 아니라 이 교체가 다음 사람을 막는다.
+        //   ⚠️ K-1(20260819작1): 자리가 비는(NULL) 것이 아니라 **기계비밀 해시로 바뀐다** —
+        //     소거는 이 기기의 매 요청 통행로까지 없앴다(K-0 잠재 P0).
         var (hashAfterFirst, _) = await ReadRowAsync(db, deviceId);
         Assert.True(
-            hashAfterFirst is null,
-            "🔴 인증에 성공했는데 **키가 표에 그대로 남아 있다** — 1회용이 아니다(사장님 결재 4 위반). " +
+            hashAfterFirst != Sha256Hex(key),
+            "🔴 인증에 성공했는데 **사람이 본 키가 표에 그대로 남아 있다** — 1회용이 아니다(사장님 결재 4 위반). " +
             "키가 계속 살아 있으면 옆에서 본 사람이 나중에 그 키로 들어온다.");
 
         // 🔴 같은 키로 다시 온다 — 옆에서 본 사람이거나, 키가 적힌 쪽지를 주운 사람이다.
@@ -833,5 +871,185 @@ public sealed class DeviceAndKeyGateTests : IDisposable
 
         Assert.True(second is null,
             "🔴 같은 인증키로 **두 번째 인증**이 됐다 — 1회용이 아니다(사장님 결재 4 위반).");
+    }
+
+    // ══════════════════════════════════════════════════════════════
+    // G-35 ~ G-38 — 본안 K (20260819작1) · [3-V] 7회차 조건 2
+    //
+    //   🔴 왜 생겼나 — 8/18 의 두 봉합(1회용 소거 + 축② 좁힘)이 같은 커밋에 실리며
+    //     **인증 완료한 직원 기기의 매 요청 통행로가 사라졌다**(K-0 잠재 P0).
+    //     그런데 기존 게이트 38/38 이 전부 초록이었다 — *"verify 를 통과한 기기가
+    //     그 뒤 요청을 통과한다"* 를 값으로 세운 게이트가 **0개**였다(사각 10번째).
+    //   ⇒ 아래 게이트는 그 종단을 값으로 세운다. 축① 판정 본체(VerifyDeviceSecretAsync)를
+    //     직접 부른다 — 미들웨어가 같은 메서드를 부르므로 두 자리가 갈릴 수 없다.
+    // ══════════════════════════════════════════════════════════════
+
+    /// <summary>
+    /// 🔴🔴 <b>G-35. 직원 종단 — verify 를 통과한 기기는 그 뒤 요청도 통과한다 (K-0 닫힘).</b>
+    ///
+    /// <para>
+    /// [무엇이 문제였나] verify 성공이 해시를 <b>소거</b>했다. 화면이 보관한 사람 키는 죽은 키라
+    /// 매 요청 축① 이 <c>COUNT=0</c> — <b>인증 직후부터 업무 API 전면 403</b>(스위치 ON 상태).
+    /// 사장님 실측 6회 갇힘과 같은 모양이 전 직원 기기에서 나는 자리였다.
+    /// </para>
+    /// <para>[반증 — G-E 실측 절차] K-1 을 되돌려 <c>auth_key_hash = NULL</c> 소거로 바꾸면
+    /// 기계비밀이 없어 이 시험이 FAIL 한다. 코딩 직후 실제로 되돌려 FAIL 을 확인한다(가짜게이트 방지).</para>
+    /// </summary>
+    [Fact(DisplayName = "G-35 🔴🔴 verify 통과한 직원 기기는 기계비밀로 매 요청을 통과한다 (K-0 닫힘)")]
+    public async Task G35_verify_통과한_직원기기는_매요청을_통과한다()
+    {
+        if (!ServerAvailable()) return;
+        SetUpFreshInstall();
+
+        await using var db = new MySqlConnection(DbConnString());
+        await db.OpenAsync();
+
+        var svc = NewService(db);
+
+        // 평범한 직원 기기 — 대표가 승인해 키를 받았고(해시 보유), 지금 그 키를 넣는다.
+        const string deviceB = "bbbbbbbb-0000-0000-0000-00000000000b";
+        const string authKeyB = "BBBB1111CCCC2222DDDD3333EEEE4444";
+        await InsertDeviceAsync(db, deviceB, "pending", "FP-B-고유지문", authKeyHash: Sha256Hex(authKeyB));
+
+        var secret = await svc.VerifyAuthKeyAsync(authKeyB, TenantId, deviceB);
+        Assert.False(string.IsNullOrWhiteSpace(secret), "verify 가 기계비밀을 돌려주지 않았다.");
+
+        // 🔴 종단 — 다음 요청. 화면이 보관한 기계비밀 + 자기 번호로 축① 판정 본체를 지난다.
+        var passes = await svc.VerifyDeviceSecretAsync(deviceB, secret!, TenantId);
+        Assert.True(passes,
+            "🔴 인증을 통과한 직원 기기가 **바로 다음 요청에서 막혔다** — K-0 잠재 P0 그대로다. " +
+            "verify 성공이 준 값이 매 요청 통행증이 되지 못하면, 직원은 인증하고도 업무 화면 전부 403 이다.");
+
+        // 🔴 그리고 **사람이 본 키로는 매 요청이 안 통한다** — 결재 4 의도(옆에서 본 사람 차단) 유지.
+        var humanKeyPasses = await svc.VerifyDeviceSecretAsync(deviceB, authKeyB, TenantId);
+        Assert.False(humanKeyPasses,
+            "🔴 **사람이 본 인증키가 매 요청 통행증으로 살아 있다** — 옆에서 본 사람이 " +
+            "그 키를 헤더에 넣으면 계속 들어온다(사장님 결재 4 의도 위반).");
+    }
+
+    /// <summary>
+    /// 🔴 <b>G-36. 교차쌍 차단 — 남의 기계비밀 + 자기 번호(또는 반대)는 0 이다 (K-3).</b>
+    ///
+    /// <para>
+    /// [무엇이 문제였나] 종전 축① 은 해시만 봤다 — <c>device_id</c> 조건이 없어
+    /// <b>한 기기의 비밀값이 회사 공용 통행증</b>이 될 수 있었다(8/18 주석의 "다음 차수 몫").
+    /// </para>
+    /// <para>[반증] K-3 의 <c>device_id</c> 결합을 빼면 남의 비밀로 통과하여 FAIL.</para>
+    /// </summary>
+    [Fact(DisplayName = "G-36 🔴 남의 기계비밀 + 자기 번호는 통하지 않는다 (K-3 짝 결합)")]
+    public async Task G36_교차쌍은_통하지_않는다()
+    {
+        if (!ServerAvailable()) return;
+        SetUpFreshInstall();
+
+        await using var db = new MySqlConnection(DbConnString());
+        await db.OpenAsync();
+
+        var svc = NewService(db);
+
+        // A·B 두 직원 기기 — 각자 verify 를 통과해 각자의 기계비밀을 가졌다.
+        const string deviceA = "aaaaaaaa-0000-0000-0000-00000000000a";
+        const string deviceB = "bbbbbbbb-0000-0000-0000-00000000000b";
+        const string keyA = "AAAA1111BBBB2222CCCC3333DDDD4444";
+        const string keyB = "BBBB1111CCCC2222DDDD3333EEEE4444";
+        await InsertDeviceAsync(db, deviceA, "pending", "FP-A-고유지문", authKeyHash: Sha256Hex(keyA));
+        await InsertDeviceAsync(db, deviceB, "pending", "FP-B-고유지문", authKeyHash: Sha256Hex(keyB));
+
+        var secretA = await svc.VerifyAuthKeyAsync(keyA, TenantId, deviceA);
+        var secretB = await svc.VerifyAuthKeyAsync(keyB, TenantId, deviceB);
+        Assert.False(string.IsNullOrWhiteSpace(secretA));
+        Assert.False(string.IsNullOrWhiteSpace(secretB));
+
+        // 🔴 교차 — B 가 A 의 비밀을 훔쳐 자기 번호와 함께 낸다 / A 의 번호와 B 의 비밀.
+        Assert.False(await svc.VerifyDeviceSecretAsync(deviceB, secretA!, TenantId),
+            "🔴 남의 기계비밀 + 자기 번호가 통과했다 — 비밀값이 회사 공용 통행증이다(K-3 미결합).");
+        Assert.False(await svc.VerifyDeviceSecretAsync(deviceA, secretB!, TenantId),
+            "🔴 자기 번호 + 남의 기계비밀이 통과했다 — 비밀값이 회사 공용 통행증이다(K-3 미결합).");
+
+        // 짝이 맞으면 통한다 — 좁히다가 다 막으면 8/10 모양이다(막는 게이트와 통하는 게이트는 한 쌍).
+        Assert.True(await svc.VerifyDeviceSecretAsync(deviceA, secretA!, TenantId));
+        Assert.True(await svc.VerifyDeviceSecretAsync(deviceB, secretB!, TenantId));
+    }
+
+    /// <summary>
+    /// 🟢 <b>G-37. 대표 자기승인 종단 — approve → verify → 통행, 그리고 끊겨도 재발급으로 잇는다 (K-4).</b>
+    ///
+    /// <para>
+    /// 관문의 [이 컴퓨터 승인] 이 거는 문과 같은 문을 서비스 층에서 그대로 건다:
+    /// ① <c>ApproveAsync</c>(키 발급) → ② <c>VerifyAuthKeyAsync</c>(기계비밀 수령) → ③ 매 요청 통과.
+    /// </para>
+    /// <para>
+    /// 🔴 [3-V] 7회차 조건 1 — ①과 ② 사이가 끊긴 채 재클릭하면 <c>ApproveAsync</c> 는
+    /// <b>null</b>(멱등)이라 verify 할 키가 없다. 그 갈래는 <b>재발급 경유</b>로 이어져야 한다.
+    /// </para>
+    /// <para>[반증] 재발급 경유가 죽으면(또는 재발급 후 verify 가 안 되면) FAIL.</para>
+    /// </summary>
+    [Fact(DisplayName = "G-37 🟢 대표 자기승인 종단 — 끊겨도 재발급 경유로 통행까지 잇는다 (K-4 조건 1)")]
+    public async Task G37_자기승인_종단과_재시도_갈래()
+    {
+        if (!ServerAvailable()) return;
+        SetUpFreshInstall();
+
+        await using var db = new MySqlConnection(DbConnString());
+        await db.OpenAsync();
+        await SetSlotPolicyAsync(db, pcLimit: 5, mobileLimit: 5);
+
+        var svc = NewService(db);
+
+        // 대표의 두 번째 컴퓨터 — 터널로 접속해 pending 으로 들어와 있다(8/18 사장님 자리).
+        const string ownerPc = "ffffffff-0000-0000-0000-00000000000f";
+        await InsertDeviceAsync(db, ownerPc, "pending", "FP-대표기기-고유지문");
+
+        // ① 정상 경로: approve → 키 → verify → 기계비밀 → 통행.
+        var key1 = await svc.ApproveAsync(ownerPc, TenantId, "owner-user");
+        Assert.False(string.IsNullOrWhiteSpace(key1), "승인이 인증키를 돌려주지 않았다.");
+
+        var secret1 = await svc.VerifyAuthKeyAsync(key1!, TenantId, ownerPc);
+        Assert.False(string.IsNullOrWhiteSpace(secret1), "승인 키로 verify 가 안 된다.");
+        Assert.True(await svc.VerifyDeviceSecretAsync(ownerPc, secret1!, TenantId),
+            "🔴 자기승인 완료 직후 업무 요청이 막혔다 — 대표가 승인하고도 갇힌다(실1′ 자리).");
+
+        // ② 🔴 재시도 갈래: approve 를 다시 누르면 null(멱등) — 여기서 멈추면 덫이다.
+        var key2 = await svc.ApproveAsync(ownerPc, TenantId, "owner-user");
+        Assert.Null(key2);   // 멱등 확인 — 이 null 이 [3-V] 7회차가 잡은 덫의 입구다
+
+        //   ⇒ 화면은 이 갈래에서 reissue-key 를 경유한다. 그 경유가 실제로 잇는지 값으로 본다.
+        var key3 = await svc.ReissueAuthKeyAsync(ownerPc, TenantId, "owner-user");
+        Assert.False(string.IsNullOrWhiteSpace(key3), "재발급이 키를 돌려주지 않았다 — 재시도 갈래가 죽었다.");
+
+        var secret2 = await svc.VerifyAuthKeyAsync(key3!, TenantId, ownerPc);
+        Assert.False(string.IsNullOrWhiteSpace(secret2),
+            "🔴 재발급 키로 verify 가 안 된다 — 자동 투입이 한 번 끊긴 대표는 영영 못 들어온다(K-0 과 같은 덫).");
+        Assert.True(await svc.VerifyDeviceSecretAsync(ownerPc, secret2!, TenantId));
+
+        // 옛 기계비밀은 재발급 순간 죽는다 — 현행 재발급 의미론 그대로.
+        Assert.False(await svc.VerifyDeviceSecretAsync(ownerPc, secret1!, TenantId),
+            "재발급했는데 옛 기계비밀이 살아 있다 — 재발급의 의미가 사라진다.");
+    }
+
+    /// <summary>
+    /// <b>G-38. 승인 안 난(pending) 기기는 기계비밀 모양의 값을 내도 통하지 않는다.</b>
+    ///
+    /// <para>축① 판정은 <c>status='approved'</c> 를 함께 본다 — 승인제가 살아 있는지(G-P 계열).</para>
+    /// <para>[반증] <c>VerifyDeviceSecretAsync</c> 에서 status 조건을 빼면 FAIL.</para>
+    /// </summary>
+    [Fact(DisplayName = "G-38 승인 대기 기기는 해시가 맞아도 매 요청 통행이 안 된다")]
+    public async Task G38_대기_기기는_통행이_안된다()
+    {
+        if (!ServerAvailable()) return;
+        SetUpFreshInstall();
+
+        await using var db = new MySqlConnection(DbConnString());
+        await db.OpenAsync();
+
+        var svc = NewService(db);
+
+        // pending 인데 해시가 있는 줄 — 대표가 승인(키 발급)만 하고 아직 verify 전인 기기.
+        const string pendingDev = "99999999-0000-0000-0000-000000000009";
+        const string someKey = "PEND1111KEY22223333VALUE4444FIVE";
+        await InsertDeviceAsync(db, pendingDev, "pending", "FP-대기-고유지문", authKeyHash: Sha256Hex(someKey));
+
+        Assert.False(await svc.VerifyDeviceSecretAsync(pendingDev, someKey, TenantId),
+            "🔴 승인 대기 기기가 매 요청 통행을 지났다 — 승인제가 무너졌다(스위치가 있으나 없으나 같다).");
     }
 }

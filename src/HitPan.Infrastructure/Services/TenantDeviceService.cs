@@ -888,7 +888,7 @@ public sealed class TenantDeviceService : ITenantDeviceService
     ///   ⚠️ 같은 회사(tenant) 안에서만 찾는다 — 남의 회사 키로 들어올 수 없다(헌법 #2).
     ///   ⚠️ 승인된 기기만 인정한다 — 폐기된 기기의 옛 키가 살아나면 안 된다.
     ///
-    /// 반환: 맞으면 그 기기 번호, 틀리면 null
+    /// 반환: 맞으면 **이 기기의 기계비밀 원문**(K-1 · 이 순간에만 존재), 틀리면 null
     ///
     /// 🔴 2026-08-18 20260818작1 (1-1) — **키를 "검색 열쇠"에서 "대조 열쇠"로 바꿨다.**
     ///
@@ -912,8 +912,14 @@ public sealed class TenantDeviceService : ITenantDeviceService
     ///       verify-key 가 하는 일은 **그 줄을 승인으로 바꾸는 것**이지 새로 만드는 것이 아니다.
     ///       INSERT 가 아니라 **UPDATE** 다. UNIQUE·NOT NULL 을 건드릴 일이 없다.
     ///
-    ///   🔴 [1회용] 대조에 성공하면 **해시를 즉시 지운다**(사장님 결재 4 — *"1회용 + 재발급"*).
-    ///     키가 계속 살아 있으면 **옆에서 본 사람이 나중에 그 키로 들어온다.**
+    ///   🔴 [1회용 → 교체] 대조에 성공하면 해시를 **기계비밀의 해시로 교체**한다
+    ///     (20260819작1 K-1 · 사장님 8/20 오더로 결재 4 자구 조정).
+    ///     🔴 **사람이 본 키는 지금처럼 죽는다** — 옆에서 본 사람은 여전히 못 들어온다(결재 4 의도 유지).
+    ///     ⚠️ 왜 소거(NULL)가 아닌가 — **소거는 그 기기의 통행로 자체를 없앴다**(K-0 잠재 P0):
+    ///       미들웨어 축①(auth_key_hash)이 이 기기의 매 요청 통행증인데, 소거하면 축① 이 영원히 0 이고
+    ///       축②(is_main_pc)·축③(대표 탈출로)은 직원 기기에 해당이 없다 ⇒ **업무 API 전면 403.**
+    ///       8/18 의 두 봉합(소거 + 축② 좁힘)이 **같은 커밋(c25a6dce)에 실리며 서로를 몰랐다.**
+    ///     ⇒ 기계비밀(사람 눈에 안 보이는 값)이 그 자리를 이어받아 **매 요청 통행증**이 된다.
     ///     ⚠️ 오타로 막힌 직원은 대표가 [인증키 재발급] 을 눌러 되살린다(1-8) —
     ///       재발급이 없으면 **오타 낸 직원이 영구 차단**되고 그것이 8/10 사고와 같은 모양이다.
     ///
@@ -961,22 +967,62 @@ public sealed class TenantDeviceService : ITenantDeviceService
         if (!string.Equals(storedHash, Sha256Hex(authKey), StringComparison.OrdinalIgnoreCase))
             return null;
 
-        // ③ 맞았다 — 이 줄을 승인으로 올리고 **키를 즉시 소거한다(1회용).**
+        // ③ 맞았다 — 이 줄을 승인으로 올리고 **사람 키를 기계비밀로 교체한다(K-1).**
         //   ⚠️ UPDATE 다. 새 줄을 만들지 않으므로 uq_tenant_fp·NOT NULL 을 건드리지 않는다.
+        //
+        //   🔴 소거(NULL)가 아니라 교체인 이유 — 소거는 이 기기의 매 요청 통행로(미들웨어 축①)를
+        //     함께 없앴다(K-0 잠재 P0 · 20260819작1). 사람이 본 키는 이 교체로 지금처럼 죽고,
+        //     사람 눈에 안 보인 기계비밀이 통행증 역할만 이어받는다.
+        //   ⚠️ 원문은 보관하지 않는다 — 이 반환값이 유일하게 존재하는 순간이고,
+        //     화면(DeviceAuthGate)이 브라우저 저장소에 넣는 것으로 끝난다(헌법 #5 원칙 동일).
+        var deviceSecret = Guid.NewGuid().ToString("N") + Guid.NewGuid().ToString("N");
+
         await _db.ExecuteAsync(new CommandDefinition(
             """
             UPDATE tenant_devices
             SET status = 'approved',
                 approved_at = COALESCE(approved_at, NOW(6)),
-                auth_key_hash = NULL,
+                auth_key_hash = @SecretHash,
                 last_seen_at = NOW(6)
             WHERE tenant_id = @TenantId AND device_id = @DeviceId
             """,
-            new { TenantId = tenantId, DeviceId = sessionDeviceId }, cancellationToken: ct));
+            new { TenantId = tenantId, DeviceId = sessionDeviceId, SecretHash = Sha256Hex(deviceSecret) },
+            cancellationToken: ct));
 
         await _audit.LogAsync("device_key_verified", "device", sessionDeviceId, ct: ct);
 
-        return sessionDeviceId;
+        return deviceSecret;
+    }
+
+    /// 🔴 매 요청 통행 판정 — **이 기기의 기계비밀이 맞는가** (20260819작1 K-3).
+    ///
+    ///   미들웨어 축①(DeviceAuthMiddleware)이 요청마다 부르는 판정 본체다.
+    ///   🔴 넷이 전부 맞아야 한다: 같은 회사(헌법 #2) · **그 기기 번호** · 그 줄의 해시 · 승인 상태.
+    ///
+    ///   [왜 device_id 를 결합하나 — K-3] 종전 축① 은 해시만 봤다:
+    ///     `WHERE tenant_id=@T AND auth_key_hash=@H AND status='approved'` — 기기 조건이 없어
+    ///     **한 기기의 비밀값이 회사 공용 통행증**이 될 수 있었다(8/18 주석의 "다음 차수 몫" 이 이 자리다).
+    ///   ⇒ 비밀값과 기기 번호를 **짝으로** 요구한다. 남의 비밀 + 자기 번호도, 자기 비밀 + 남의 번호도 0 이다.
+    ///
+    ///   ⚠️ 판정 SQL 을 미들웨어에 인라인으로 두지 않고 여기로 모았다 —
+    ///     축① 과 서비스 판정이 갈리면 한쪽만 고쳐지는 사고가 난다(이 파일이 이미 그 사고를 겪었다).
+    public async Task<bool> VerifyDeviceSecretAsync(
+        string deviceId, string deviceSecret, string tenantId, CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(deviceId)) return false;
+        if (string.IsNullOrWhiteSpace(deviceSecret)) return false;
+        if (string.IsNullOrWhiteSpace(tenantId)) return false;
+
+        await EnsureOpenAsync(ct);
+
+        return (await _db.ExecuteScalarAsync<int>(new CommandDefinition(
+            """
+            SELECT COUNT(*) FROM tenant_devices
+            WHERE tenant_id = @Tid AND device_id = @Did
+              AND auth_key_hash = @Hash AND status = 'approved'
+            """,
+            new { Tid = tenantId, Did = deviceId, Hash = Sha256Hex(deviceSecret) },
+            cancellationToken: ct))) > 0;
     }
 
     // ── 🔴 인증키 재발급 (대표계정) ── 20260818작1 (1-8) · 사장님 결재 4
@@ -1635,7 +1681,7 @@ public sealed class TenantDeviceService : ITenantDeviceService
     /// 🔴 <b>DB 를 타지 않는 순수 계산</b>으로 떼어 둔 이유는 <b>시험 때문</b>이다(G-8).
     ///
     /// <para>
-    /// 작업지시서 §5 가 못 박았다 — <i>"코드에 리터럴이 없는지"</i> 를 보는 게이트는
+    /// 작업지시서 §5 가 고정했다 — <i>"코드에 리터럴이 없는지"</i> 를 보는 게이트는
     /// <b>상수를 옮기면 통과하는 가짜</b>다. 8/15 메신저 사고(<c>ChatWindowGuardTests</c> 가
     /// 글자만 봐서 통과시켰다)를 근거로 든 지적이다.
     /// ⇒ 게이트가 물어야 할 것은 <b>"설정값을 바꾸면 실제 한도가 바뀌는가"</b> 하나다.
