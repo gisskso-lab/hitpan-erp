@@ -171,9 +171,13 @@ jobs:
           #   (FlipSizeAndCenterIfNeeded→FlipAndCenterIfNeeded, KeepSizeX 읽기전용),
           #   6.7.x 대에서도 같은 일이 또 날 수 있다.
           #   ⇒ 고정하지 않으면 **우리가 커밋 하나 안 해도 남이 우리 게시를 깬다.**
-          #   6.7.3 = 20260821작2 봉합을 실제로 컴파일해 확인한 버전.
-          choco install innosetup -y --no-progress --version=6.7.3
-          Write-Host "Inno Setup 6.7.3 installed (pinned)"
+          #   6.7.1 = Chocolatey 가 실제로 제공하는 최신 버전.
+          #     (처음엔 6.7.3 으로 박았다가 게시가 죽었다 — 내 PC 버전을 확인 없이 박았고
+          #      choco 에는 그 버전이 없었다. "있는 줄 알았다"로 또 한 번 깨진 자리다.)
+          #     봉합 검증은 로컬 6.7.3 으로 했다. 둘 다 6.6.0 이후라 CreateCustomForm
+          #     새 시그니처가 같아 유효하다. CI 컴파일 통과가 최종 확인이다.
+          choco install innosetup -y --no-progress --version=6.7.1
+          Write-Host "Inno Setup 6.7.1 installed (pinned)"
 
       - name: Compile installer
         shell: pwsh
