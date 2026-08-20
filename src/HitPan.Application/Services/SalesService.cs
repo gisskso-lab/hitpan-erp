@@ -1641,6 +1641,28 @@ public class SalesService : ISalesService
                      COALESCE(s.qty, 0) <= COALESCE(i.safety_stock, i.safe_stock, 0)
                   OR COALESCE(s.qty, 0) <= 0
                    )
+               -- 봉합 (2026-08-21, 20260821작1 W4, 사장님 실측 지적): 멱등 필터.
+               --   종전엔 실시간 재고만 봐서 "이미 자동발주한 사실"이 조회에 반영되지 않았다.
+               --   발주해도 물건이 입고되기 전까지 재고는 그대로이므로, 다음 거래명세서 확정 때
+               --   같은 품목이 또 후보로 떠 중복 발주가 났다. is_auto=1 은 쓰기만 하고 읽지 않았다.
+               --   BOM 경로(BomService.OrderAlertAsync)는 stock_alerts.status 로 이미 정상 동작 —
+               --   판매 경로만 비어 있었다. 두 경로 동작을 일치시킨다.
+               --   status enum 실측(§#13): draft/ordered/partial/received/cancelled.
+               --   · draft·ordered·partial = 입고 미완 → 재고 미반영 → 중복 위험 구간이므로 제외
+               --   · partial(부분입고)은 잔량이 미결이라 반드시 포함. 빠지면 부분입고에서 중복 재발.
+               --   · received 는 재고가 올라가 자연 탈락하므로 별도 제외 불필요
+               --   · cancelled·is_deleted 는 제외하지 않는다 — 재발주가 가능해야 한다 (§#20)
+               AND NOT EXISTS (
+                     SELECT 1
+                       FROM purchase_order_items poi
+                       JOIN purchase_orders po
+                         ON po.po_id = poi.po_id AND po.tenant_id = poi.tenant_id
+                      WHERE poi.tenant_id = i.tenant_id
+                        AND poi.item_id   = i.item_id
+                        AND po.is_auto    = 1
+                        AND po.is_deleted = 0
+                        AND po.status IN ('draft','ordered','partial')
+                   )
             """;
 
         var rows = await _db.QueryAsync<AutoOrderCandidateDto>(new CommandDefinition(

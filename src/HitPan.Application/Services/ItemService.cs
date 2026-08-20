@@ -117,6 +117,7 @@ public sealed class ItemService : IItemService
                              i.auto_order_partner_id AS AutoOrderPartnerId,
                              IFNULL(i.auto_order_qty, 0) AS AutoOrderQty,
                              IFNULL(i.auto_receive_on_order, 0) AS AutoReceiveOnOrder,
+                             i.default_warehouse_id AS DefaultWarehouseId,
                              i.barcode AS Barcode,
                              i.memo AS Memo,
                              IFNULL(i.row_version, 0) AS RowVersion
@@ -190,6 +191,7 @@ public sealed class ItemService : IItemService
               purchase_price, sale_price, standard_price,
               tax_type, safety_stock, barcode, memo,
               auto_order_enabled, auto_order_partner_id, auto_order_qty, auto_receive_on_order,
+              default_warehouse_id,
               std_price, cost_price, safe_stock,
               is_active, is_deleted, row_version,
               created_at, updated_at)
@@ -201,6 +203,7 @@ public sealed class ItemService : IItemService
               @PurchasePrice, @SalePrice, @StandardPrice,
               @TaxType, @SafetyStock, @Barcode, @Memo,
               @AutoOrderEnabled, @AutoOrderPartnerId, @AutoOrderQty, @AutoReceiveOnOrder,
+              @DefaultWarehouseId,
               @StandardPrice, @PurchasePrice, @SafetyStock,
               1, 0, 0,
               NOW(6), NOW(6))
@@ -225,7 +228,9 @@ public sealed class ItemService : IItemService
                 AutoOrderEnabled = dto.AutoOrderEnabled ? 1 : 0,
                 AutoOrderPartnerId = dto.AutoOrderPartnerId,
                 AutoOrderQty = dto.AutoOrderQty,
-                AutoReceiveOnOrder = dto.AutoReceiveOnOrder ? 1 : 0
+                AutoReceiveOnOrder = dto.AutoReceiveOnOrder ? 1 : 0,
+                // 빈 문자열은 NULL 로 — "미지정" 을 빈 문자열로 저장하면 폴백 판정이 어긋난다
+                DefaultWarehouseId = string.IsNullOrWhiteSpace(dto.DefaultWarehouseId) ? null : dto.DefaultWarehouseId
             },
             cancellationToken: ct)).ConfigureAwait(false);
 
@@ -271,6 +276,7 @@ public sealed class ItemService : IItemService
                 auto_order_partner_id = @AutoOrderPartnerId,
                 auto_order_qty   = @AutoOrderQty,
                 auto_receive_on_order = @AutoReceiveOnOrder,
+                default_warehouse_id = @DefaultWarehouseId,
                 std_price        = @StandardPrice,
                 cost_price       = @PurchasePrice,
                 safe_stock       = @SafetyStock,
@@ -303,6 +309,7 @@ public sealed class ItemService : IItemService
                 AutoOrderPartnerId = dto.AutoOrderPartnerId,
                 AutoOrderQty = dto.AutoOrderQty,
                 AutoReceiveOnOrder = dto.AutoReceiveOnOrder ? 1 : 0,
+                DefaultWarehouseId = string.IsNullOrWhiteSpace(dto.DefaultWarehouseId) ? null : dto.DefaultWarehouseId,
                 IsActive = dto.IsActive ? 1 : 0,
                 RowVersion = dto.RowVersion
             },

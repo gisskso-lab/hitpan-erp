@@ -95,7 +95,11 @@ else
                         <MudTextField @bind-Value="_model.Barcode" Label="바코드" Variant="Variant.Outlined" Margin="Margin.Dense" />
                     </MudItem>
                     <MudItem xs="12" md="3">
-                        <MudSelect T="string" @bind-Value="_selectedWarehouseId" Label="기본 창고" Variant="Variant.Outlined" Margin="Margin.Dense">
+                        @* 20260821작1 W6 (사장님 결재 A안): 이제 실제로 저장되고 발주·매입이 이 값을 쓴다.
+                           종전엔 _selectedWarehouseId 라는 화면 변수에만 담겨 저장되지 않았고,
+                           발주·매입은 테넌트 기본창고만 봐서 설정해도 아무 변화가 없었다. *@
+                        <MudSelect T="string" @bind-Value="_model.DefaultWarehouseId" Label="기본 창고" Variant="Variant.Outlined" Margin="Margin.Dense"
+                                   HelperText="비워두면 회사 기본창고로 입고됩니다" HelperTextOnFocus="true">
                             <MudSelectItem Value="@((string?)null)">미지정</MudSelectItem>
                             @foreach (var wh in _warehouses)
                             {
@@ -118,7 +122,8 @@ else
     private ItemDetailModel _model = new();
     private List<PartnerListRow> _partners = new();
     private List<WarehouseItem> _warehouses = new();
-    private string? _selectedWarehouseId; // 참조용 — DB에 저장하지 않음
+    // 20260821작1 W6: 기본창고는 _model.DefaultWarehouseId 로 저장된다.
+    //   (종전의 _selectedWarehouseId 화면 변수는 저장되지 않아 제거)
     private bool _loading = true;
     private bool _saving;
     private bool _isNew;

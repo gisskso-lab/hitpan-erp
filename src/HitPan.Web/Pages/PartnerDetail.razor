@@ -85,16 +85,34 @@ else
                     </div>
                 }
 
-                @* 이메일 + 바로 발송 *@
+                @* 이메일 + 바로 발송
+                   20260821작1 W2 (사장님 오더 "담당자 이메일: 이메일 자동 전송"):
+                     종전엔 mailto: 링크뿐이라 메일 앱을 열 뿐 실제로 보내지 않았다.
+                     [보내기] 버튼이 SMTP 실발송(EmailSendDialog)으로 간다.
+                     mailto: 는 지우지 않고 보조로 남긴다 (§#1 덮어쓰기 금지). *@
                 <div class="hp-contact-row">
                     <MudTextField @bind-Value="_model.Email" Label="이메일" Variant="Variant.Outlined" Margin="Margin.Dense" Class="hp-contact-field" />
                     @if (!string.IsNullOrWhiteSpace(_model.Email))
                     {
-                        <a href="mailto:@_model.Email" class="hp-contact-btn hp-contact-btn--email" title="이메일 보내기">
+                        <MudButton Variant="Variant.Filled" Color="Color.Primary" Size="Size.Small"
+                                   StartIcon="@Icons.Material.Filled.Send" OnClick="OpenEmailDialog"
+                                   Style="height:40px;white-space:nowrap">메일 보내기</MudButton>
+                        <a href="mailto:@_model.Email" class="hp-contact-btn hp-contact-btn--email" title="메일 앱으로 열기">
                             <MudIcon Icon="@Icons.Material.Filled.Email" Style="font-size:18px;" />
                         </a>
                     }
                 </div>
+
+                @* 팩스 + 실제 전송
+                   20260821작1 W3 (사장님 오더 "업체팩스번호: 실제 팩스전송") *@
+                @if (!string.IsNullOrWhiteSpace(_model.Fax))
+                {
+                    <div class="hp-contact-row">
+                        <MudButton Variant="Variant.Outlined" Color="Color.Secondary" Size="Size.Small"
+                                   StartIcon="@Icons.Material.Filled.Print" OnClick="OpenFaxDialog"
+                                   Style="height:40px;white-space:nowrap">팩스 보내기</MudButton>
+                    </div>
+                }
 
                 <MudTextField @bind-Value="_model.Homepage" Label="홈페이지" Variant="Variant.Outlined" Margin="Margin.Dense" />
                 <MudTextField @bind-Value="_model.ManagerName" Label="담당자명" Variant="Variant.Outlined" Margin="Margin.Dense" />
@@ -159,6 +177,64 @@ else
         ? _model.Address ?? ""
         : $"{_model.Address} {_model.AddressDetail}";
 
+    /// <summary>좌표가 모두 있으면 true — 이때만 카카오 스킴이 정확한 위치를 찍는다.</summary>
+    private bool HasCoords => _model.Latitude.HasValue && _model.Longitude.HasValue;
+
+    /// <summary>
+    /// 담당자 이메일 실제 발송 (20260821작1 W2).
+    /// 공용 EmailSendDialog 재사용 — SMTP 발송·이력은 기존 인프라가 처리한다.
+    /// </summary>
+    private async Task OpenEmailDialog()
+    {
+        if (string.IsNullOrWhiteSpace(_model.Email))
+        {
+            Snackbar.Add("이메일 주소를 먼저 입력하세요.", Severity.Warning);
+            return;
+        }
+
+        var parameters = new DialogParameters
+        {
+            // 업체 마스터에서 보내는 메일은 특정 문서에 속하지 않는다 → 문서 없이 본문만 보낸다.
+            { nameof(HitPan.Web.Components.Common.EmailSendDialog.DocumentType), "업체 안내" },
+            { nameof(HitPan.Web.Components.Common.EmailSendDialog.DocumentNo), _model.PartnerName ?? "" },
+            { nameof(HitPan.Web.Components.Common.EmailSendDialog.DocumentTypeKey), "partner_notice" },
+            { nameof(HitPan.Web.Components.Common.EmailSendDialog.DocumentId), "" },
+            { nameof(HitPan.Web.Components.Common.EmailSendDialog.PartnerEmail), _model.Email },
+            { nameof(HitPan.Web.Components.Common.EmailSendDialog.PartnerId), Id }
+        };
+
+        await DialogService.ShowAsync<HitPan.Web.Components.Common.EmailSendDialog>(
+            "이메일 발송", parameters,
+            new DialogOptions { MaxWidth = MaxWidth.Small, FullWidth = true });
+    }
+
+    /// <summary>
+    /// 업체 팩스 발송 (20260821작1 W3).
+    /// 공급자 미설정이면 다이얼로그가 먼저 경고한다 — 보낸 줄 알게 두지 않는다 (§#23).
+    /// </summary>
+    private async Task OpenFaxDialog()
+    {
+        if (string.IsNullOrWhiteSpace(_model.Fax))
+        {
+            Snackbar.Add("팩스번호를 먼저 입력하세요.", Severity.Warning);
+            return;
+        }
+
+        var parameters = new DialogParameters
+        {
+            { nameof(HitPan.Web.Components.Common.FaxSendDialog.DocumentTypeKey), "partner_notice" },
+            { nameof(HitPan.Web.Components.Common.FaxSendDialog.DocumentNo), _model.PartnerName ?? "" },
+            { nameof(HitPan.Web.Components.Common.FaxSendDialog.DocumentId), "" },
+            { nameof(HitPan.Web.Components.Common.FaxSendDialog.PartnerFaxNo), _model.Fax },
+            { nameof(HitPan.Web.Components.Common.FaxSendDialog.PartnerName), _model.PartnerName },
+            { nameof(HitPan.Web.Components.Common.FaxSendDialog.PartnerId), Id }
+        };
+
+        await DialogService.ShowAsync<HitPan.Web.Components.Common.FaxSendDialog>(
+            "팩스 발송", parameters,
+            new DialogOptions { MaxWidth = MaxWidth.Small, FullWidth = true });
+    }
+
     private async Task OpenKakaoNavi()
     {
         var addr = FullAddress;
@@ -167,14 +243,31 @@ else
         // 1) 주소를 클립보드에 복사 (앱 내 붙여넣기용)
         await JS.InvokeVoidAsync("navigator.clipboard.writeText", addr);
 
-        // 2) 카카오맵 앱 딥링크 시도 → 실패 시 웹 카카오맵으로 폴백
-        var enc = Uri.EscapeDataString(addr);
         var nameEnc = Uri.EscapeDataString(_model.PartnerName ?? addr);
-        await JS.InvokeVoidAsync("hitpan.openNavi",
-            $"kakaomap://route?ep={enc}&by=CAR",
-            $"https://map.kakao.com/link/to/{nameEnc},{enc}");
 
-        Snackbar.Add($"주소가 클립보드에 복사됐어요. 앱에서 붙여넣기하세요.", Severity.Info, cfg => cfg.VisibleStateDuration = 2500);
+        // 2) 봉합 (2026-08-21, 20260821작1 W1 — 사장님 지적 "맵이 뜨긴 하지만 좌표가 안찍힘"):
+        //    카카오 스킴의 ep / link/to 는 **좌표(위도,경도)** 를 요구한다. 종전엔 주소 문자열을
+        //    좌표 자리에 넣어 파싱이 실패했고, 지도가 해당 위치가 아닌 기본 위치로 열렸다.
+        //    좌표가 있으면 좌표로 정확히 찍고, 없으면 주소 검색으로 연다 (§#20 — 끊기지 않는다).
+        if (HasCoords)
+        {
+            var lat = _model.Latitude!.Value.ToString(System.Globalization.CultureInfo.InvariantCulture);
+            var lng = _model.Longitude!.Value.ToString(System.Globalization.CultureInfo.InvariantCulture);
+            await JS.InvokeVoidAsync("hitpan.openNavi",
+                $"kakaomap://route?ep={lat},{lng}&by=CAR",
+                $"https://map.kakao.com/link/to/{nameEnc},{lat},{lng}");
+            Snackbar.Add("카카오맵에서 위치를 엽니다.", Severity.Info, cfg => cfg.VisibleStateDuration = 2000);
+        }
+        else
+        {
+            // 좌표 미확보 — 주소 검색으로 연다. 지도 설정(좌표 변환)을 하면 정확해진다.
+            var enc = Uri.EscapeDataString(addr);
+            await JS.InvokeVoidAsync("hitpan.openNavi",
+                $"kakaomap://search?q={enc}",
+                $"https://map.kakao.com/link/search/{enc}");
+            Snackbar.Add("주소로 검색해 엽니다. 주소가 클립보드에 복사됐어요.",
+                Severity.Info, cfg => cfg.VisibleStateDuration = 2500);
+        }
     }
 
     private async Task OpenTmapNavi()
@@ -185,12 +278,25 @@ else
         // 1) 주소를 클립보드에 복사
         await JS.InvokeVoidAsync("navigator.clipboard.writeText", addr);
 
-        // 2) 티맵 앱 딥링크 시도 → 실패 시 티맵 웹으로 폴백
         var enc = Uri.EscapeDataString(addr);
         var nameEnc = Uri.EscapeDataString(_model.PartnerName ?? addr);
-        await JS.InvokeVoidAsync("hitpan.openNavi",
-            $"tmap://route?goalname={nameEnc}&goal={enc}",
-            $"https://tmap.life/?goal={enc}&goalname={nameEnc}");
+
+        // 2) 티맵 — 좌표가 있으면 좌표로 목적지를 지정한다 (goalx/goaly).
+        //    없으면 종전대로 주소 문자열로 연다 (§#20 끊김 금지).
+        if (HasCoords)
+        {
+            var lat = _model.Latitude!.Value.ToString(System.Globalization.CultureInfo.InvariantCulture);
+            var lng = _model.Longitude!.Value.ToString(System.Globalization.CultureInfo.InvariantCulture);
+            await JS.InvokeVoidAsync("hitpan.openNavi",
+                $"tmap://route?goalname={nameEnc}&goalx={lng}&goaly={lat}",
+                $"https://tmap.life/?goal={enc}&goalname={nameEnc}");
+        }
+        else
+        {
+            await JS.InvokeVoidAsync("hitpan.openNavi",
+                $"tmap://route?goalname={nameEnc}&goal={enc}",
+                $"https://tmap.life/?goal={enc}&goalname={nameEnc}");
+        }
 
         Snackbar.Add($"주소가 클립보드에 복사됐어요. 앱에서 붙여넣기하세요.", Severity.Info, cfg => cfg.VisibleStateDuration = 2500);
     }

@@ -13,15 +13,43 @@ public sealed class PartnerService : IPartnerService
     private readonly ICurrentTenant _currentTenant;
     private readonly IPartnerBalanceRepository _partnerBalanceRepository;
     private readonly IDbConnection _db;
+    private readonly IGeocodingService _geocoding;
 
     public PartnerService(
         ICurrentTenant currentTenant,
         IPartnerBalanceRepository partnerBalanceRepository,
-        IDbConnection db)
+        IDbConnection db,
+        IGeocodingService geocoding)
     {
         _currentTenant = currentTenant;
         _partnerBalanceRepository = partnerBalanceRepository;
         _db = db;
+        _geocoding = geocoding;
+    }
+
+    /// <summary>
+    /// 주소로 좌표를 채운다 (20260821작1 W1).
+    ///
+    /// 사장님 지적: "맵이 뜨긴 하지만 실제 해당주소 좌표가 안찍힘"
+    ///   카카오맵·내비 딥링크는 좌표를 요구하는데 보관하는 값이 없었다.
+    ///   업체를 저장할 때 주소로 좌표를 한 번 구해 둔다.
+    ///
+    /// 🔴 실패해도 저장을 막지 않는다 (§#20). 좌표가 없으면 지도는 현행 주소 방식으로 열린다.
+    /// 🔴 반자동 원칙: 화면에서 이미 좌표를 보내왔으면(사람이 확인·수정한 값) 그대로 존중하고
+    ///    덮어쓰지 않는다. 변환은 좌표가 비어 있을 때만 한다.
+    /// </summary>
+    private async Task<(decimal? Lat, decimal? Lng)> ResolveCoordinatesAsync(
+        decimal? incomingLat, decimal? incomingLng, string? address, string? addressDetail, CancellationToken ct)
+    {
+        if (incomingLat.HasValue && incomingLng.HasValue)
+            return (incomingLat, incomingLng);
+
+        if (string.IsNullOrWhiteSpace(address))
+            return (null, null);
+
+        // 상세주소까지 붙이면 오히려 못 찾는 경우가 있어 기본주소로 조회한다.
+        var result = await _geocoding.GeocodeAsync(address.Trim(), ct).ConfigureAwait(false);
+        return result.Success ? (result.Latitude, result.Longitude) : (null, null);
     }
 
     public Task<PartnerBalanceDto?> GetBalanceAsync(string partnerId, CancellationToken ct = default)
@@ -325,6 +353,8 @@ public sealed class PartnerService : IPartnerService
                              p.zip_code AS ZipCode,
                              p.address AS Address,
                              p.address_detail AS AddressDetail,
+                             p.latitude AS Latitude,
+                             p.longitude AS Longitude,
                              p.email AS Email,
                              p.manager_name AS ManagerName,
                              p.manager_tel AS ManagerTel,
@@ -371,6 +401,10 @@ public sealed class PartnerService : IPartnerService
             throw new InvalidOperationException("이미 등록된 거래처명입니다.");
         }
 
+        // 20260821작1 W1: 좌표 확보 — 실패해도 저장은 계속된다 (§#20)
+        var (geoLat, geoLng) = await ResolveCoordinatesAsync(
+            dto.Latitude, dto.Longitude, dto.Address, dto.AddressDetail, ct).ConfigureAwait(false);
+
         var id = Guid.NewGuid().ToString();
         var code = string.IsNullOrWhiteSpace(dto.PartnerCode)
             ? "P-" + id[..Math.Min(8, id.Length)]
@@ -400,6 +434,7 @@ public sealed class PartnerService : IPartnerService
               partner_type, biz_no, ceo_name,
               biz_type, biz_item,
               tel, fax, zip_code, address, address_detail,
+              latitude, longitude,
               email, manager_name, manager_tel,
               credit_limit, price_grade,
               tax_type, payment_terms, memo,
@@ -412,6 +447,7 @@ public sealed class PartnerService : IPartnerService
               @PartnerType, @BizNo, @CeoName,
               @BizType, @BizItem,
               @Tel, @Fax, @ZipCode, @Address, @AddressDetail,
+              @Latitude, @Longitude,
               @Email, @ManagerName, @ManagerTel,
               @CreditLimit, @PriceGrade,
               @TaxType, @PaymentTerms, @Memo,
@@ -435,6 +471,8 @@ public sealed class PartnerService : IPartnerService
                 ZipCode = dto.ZipCode,
                 Address = dto.Address,
                 AddressDetail = dto.AddressDetail,
+                Latitude = geoLat,
+                Longitude = geoLng,
                 Email = dto.Email,
                 ManagerName = dto.ManagerName,
                 ManagerTel = dto.ManagerTel,
@@ -458,6 +496,11 @@ public sealed class PartnerService : IPartnerService
             : dto.PartnerCode.Trim();
         var pType = NormalizePartnerType(dto.PartnerType);
 
+        // 20260821작1 W1: 주소가 바뀌었을 수 있으므로 좌표를 다시 확보한다.
+        //   화면이 좌표를 함께 보냈으면(사람이 확인한 값) 그것을 존중하고 변환하지 않는다.
+        var (geoLat, geoLng) = await ResolveCoordinatesAsync(
+            dto.Latitude, dto.Longitude, dto.Address, dto.AddressDetail, ct).ConfigureAwait(false);
+
         var affected = await _db.ExecuteAsync(new CommandDefinition(
             """
             UPDATE partners SET
@@ -473,6 +516,8 @@ public sealed class PartnerService : IPartnerService
                 zip_code      = @ZipCode,
                 address       = @Address,
                 address_detail = @AddressDetail,
+                latitude      = @Latitude,
+                longitude     = @Longitude,
                 email         = @Email,
                 manager_name  = @ManagerName,
                 manager_tel   = @ManagerTel,
@@ -505,6 +550,8 @@ public sealed class PartnerService : IPartnerService
                 ZipCode = dto.ZipCode,
                 Address = dto.Address,
                 AddressDetail = dto.AddressDetail,
+                Latitude = geoLat,
+                Longitude = geoLng,
                 Email = dto.Email,
                 ManagerName = dto.ManagerName,
                 ManagerTel = dto.ManagerTel,

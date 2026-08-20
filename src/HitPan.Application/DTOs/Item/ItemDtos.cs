@@ -46,6 +46,10 @@ public class ItemDetailDto : ItemListDto
     // 사장님 헌법 (2026-04-26): 자동발주 시 매입확정까지 자동 사슬.
     public bool AutoReceiveOnOrder { get; set; }
 
+    // 20260821작1 W6 (사장님 결재 A안): 품목 기본창고.
+    //   종전엔 화면에 드롭다운만 있고 저장되지 않아 설정해도 발주·매입이 그대로였다.
+    public string? DefaultWarehouseId { get; set; }
+
     public string? Barcode { get; set; }
 
     public string? Memo { get; set; }
@@ -97,6 +101,11 @@ public class CreateItemDto
 
     // 사장님 헌법 (2026-04-26): 자동발주 시 매입확정까지 자동 사슬.
     public bool AutoReceiveOnOrder { get; set; }
+
+    // 20260821작1 W6 (사장님 결재 A안): 품목 기본창고.
+    //   빈 값이면 테넌트 기본창고(MAIN 우선) 폴백이 받는다 — 끊기지 않는다 (§#20).
+    [MaxLength(36)]
+    public string? DefaultWarehouseId { get; set; }
 
     [MaxLength(50)]
     public string? Barcode { get; set; }
