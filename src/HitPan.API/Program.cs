@@ -507,6 +507,25 @@ app.Use(async (ctx, next) =>
             "font-src 'self' https://fonts.gstatic.com https://cdn.jsdelivr.net data:; " +
             "img-src 'self' data: https:; " +
             "connect-src 'self' https: wss:; " +
+            // 봉합 2026-08-20 20260820작4 (설계1) — 우편번호 찾기 창이 안 뜨던 것.
+            //
+            //   [무엇이 났나] 6/17(1.2.13) CSP 봉합이 **script-src 3종만 넣고 frame-src 를 빠뜨렸다.**
+            //     카카오 우편번호는 **iframe 으로 뜬다.** frame-src 가 없으면 `default-src 'self'` 가
+            //     상속되어 바깥 도메인 틀이 통째로 차단된다.
+            //     ⇒ 스크립트는 정상으로 받아지고 버튼도 눌리는데 **창만 안 뜬다.**
+            //       (`index.html:105` 로딩 · `openDaumPostcode` interop · 버튼 · 콜백 4층 전부 멀쩡했다)
+            //     ⚠️ 업체등록(`PartnerDetail.razor:65`)과 사업장정보(`UserInfoPage.razor:167`)가
+            //       **함께 죽어 있었다.** 사장님은 업체등록에서 발견하셨다.
+            //
+            //   🔴 [왜 개발팀이 못 봤나 — 이 자리의 교훈] 이 블록은 `if (!isDevelopment)` 안이다.
+            //     ⇒ 개발PC 에서는 CSP 자체가 안 붙어 **우편번호가 항상 열린다.**
+            //       터널·운영에서만 끊긴다. *"개발PC 에서 됩니다"* 가 이 건에서는 **구조적으로 무의미**하다.
+            //     🔴 이 줄을 검증할 때는 반드시 **Production(CSP 켜진 상태)** 에서 연다.
+            //
+            //   ⚠️ [도메인이 왜 둘인가] 스크립트는 `t1.daumcdn.net` 에서 오지만
+            //     **iframe 문서는 `postcode.map.daum.net` 에서 온다.** 하나만 적으면 여전히 안 뜬다.
+            //     ⚠️ 넓게 열지 마라 — `frame-src https:` 같은 전체 허용은 **보안 후퇴**다.
+            "frame-src 'self' https://t1.daumcdn.net https://postcode.map.daum.net; " +
             "frame-ancestors 'none'";
         h["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains";
     }
