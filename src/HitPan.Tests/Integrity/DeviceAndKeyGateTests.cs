@@ -749,9 +749,100 @@ public sealed class DeviceAndKeyGateTests : IDisposable
             },
             "127.0.0.1");
 
+        // 🔴 2026-08-20 20260820작3 — **뜻은 그대로, 판정 축만 정확히 한다.**
+        //
+        //   사장님 정정: *"게이트 의미를 재정의 하는게 아니라 **회귀 게이트만 열어두면 되**"*
+        //
+        //   [이 게이트가 지키는 것] *"대표가 '못 쓰게 해' 라고 누른 것이 무효가 되지 않는다"*
+        //     ⇒ 그 뜻은 **`approved` 가 되지 않는다** 는 것이다. 그것은 지금도 참이다.
+        //   [바뀐 것] 종전엔 그것을 `allowed == false` **하나로** 봤는데,
+        //     사장님 오더로 폐기 기기는 이제 **로그인은 통과하고 대기(pending)로 회귀**한다
+        //     (*"관리자에게 문의하세요" 로 끝나면 문의해도 대표가 손쓸 자리가 없다* — 실측).
+        //     ⇒ 판정을 **표의 status** 로 옮긴다. 값이 더 정확해질 뿐 **막는 사실은 그대로**다.
         Assert.False(allowed,
-            "🔴 폐기된 기기가 통과했다 — 대표가 '못 쓰게 해' 라고 누른 것이 무효가 됐다.");
-        Assert.Null(returnedId);
+            "🔴 폐기된 기기가 **바로 통과**했다 — 대표가 '못 쓰게 해' 라고 누른 것이 무효가 됐다. " +
+            "회귀는 대기(pending)까지다. 승인은 대표가 누른다.");
+
+        var statusAfter = await db.ExecuteScalarAsync<string>(
+            "SELECT status FROM tenant_devices WHERE device_id = @Id", new { Id = deviceId });
+
+        Assert.True(statusAfter != "approved",
+            $"🔴 폐기된 기기가 **스스로 승인 상태가 됐다**(지금: {statusAfter}) — " +
+            "재접속만으로 폐기가 풀리면 도난·퇴사 기기를 막을 방법이 사라진다.");
+    }
+
+    // ══════════════════════════════════════════════════════════════
+    // G-42 — 폐기 기기의 회귀 (20260820작3 · 사장님 실측 오더)
+    //
+    //   사장님: *"'폐기된 기기 입니다. 관리자에게 문의하세요' 가 아닌,
+    //             **기기 등록 전 상태로 회귀**하도록"*
+    //           *"지금 상황은 … 관리자에게 문의해봐야 **어떻게 못하는 상황**"*
+    //   ⇒ 여는 게이트는 **이것 하나**다. 다른 게이트의 뜻은 건드리지 않는다.
+    // ══════════════════════════════════════════════════════════════
+
+    /// <summary>
+    /// 🟢 <b>G-42. 폐기된 기기가 다시 접속하면 <b>대기(pending)로 회귀</b>한다 — 그리고 거기까지다.</b>
+    ///
+    /// <para>
+    /// [무엇이 문제였나] 종전엔 <b>로그인 자체를 거부</b>했다(<c>deviceId: null</c> ⇒ 401).
+    /// 그 기기는 <b>관문에 도달할 길이 없고</b>, 대표 화면에도 폐기 기기를 되살릴 자리가 없다
+    /// (<c>DeviceManagePage.razor</c> 는 승인 대기 구역만 그린다).
+    /// ⇒ 안내문이 <i>"관리자에게 문의하세요"</i> 인데 <b>문의해도 대표가 손쓸 수 없었다</b>(사장님 실측).
+    /// </para>
+    /// <para>
+    /// 🔴 <b>그러나 폐기의 뜻은 남는다</b> — 회귀 도착지는 <c>pending</c> 이고,
+    /// 쓰려면 <b>대표가 [승인]을 눌러야</b> 한다. 옛 인증키도 죽은 채다(폐기 때 소거 · G-DP1).
+    /// </para>
+    /// <para>[반증] 회귀 갈래를 되돌려 거부(<c>return … null</c>)로 두면 <c>deviceId</c> 가 안 와 FAIL.</para>
+    /// </summary>
+    [Fact(DisplayName = "G-42 🟢 폐기된 기기는 대기로 회귀한다 (승인은 여전히 대표 몫 · 옛 키는 죽은 채)")]
+    public async Task G42_폐기된_기기는_대기로_회귀한다()
+    {
+        if (!ServerAvailable()) return;
+        SetUpFreshInstall();
+
+        await using var db = new MySqlConnection(DbConnString());
+        await db.OpenAsync();
+
+        var svc = NewService(db);
+
+        // 대표가 폐기한 일반 기기 — 폐기 때 인증키는 이미 지워져 있다(RevokeAsync · G-DP1).
+        const string deviceId = "aaaaaaaa-0000-0000-0000-0000000000a1";
+        const string fp = "FP-폐기회귀-고유지문";
+        await InsertDeviceAsync(db, deviceId, "revoked", fp, isMainPc: false);
+
+        var (allowed, reason, returnedId, _) = await svc.RegisterOrRefreshAsync(
+            TenantId, "user-1",
+            new HitPan.Application.DTOs.Device.RegisterDeviceRequest
+            {
+                DeviceId = deviceId,
+                Fingerprint = fp,
+                DeviceType = "pc",
+                DeviceName = "폐기됐던 PC"
+            },
+            "127.0.0.1");
+
+        // ① 관문에 도달할 수 있어야 한다 — deviceId 가 와야 AuthController 가 401 을 안 낸다.
+        Assert.True(returnedId == deviceId,
+            $"🔴 폐기된 기기가 **관문에 도달하지 못한다**(돌아온 값: {returnedId ?? "null"} / 사유: {reason}). " +
+            "로그인이 401 로 끝나면 화면은 '관리자에게 문의하세요' 에서 멈추고, " +
+            "대표 화면에도 그 기기가 안 떠서 **문의해도 아무도 손쓸 수 없다**(사장님 실측).");
+
+        // ② 표가 대기로 회귀했는가 — 대표의 승인 대기 목록에 다시 떠야 한다.
+        var statusNow = await db.ExecuteScalarAsync<string>(
+            "SELECT status FROM tenant_devices WHERE device_id = @Id", new { Id = deviceId });
+        Assert.True(statusNow == "pending",
+            $"폐기 기기가 대기로 회귀하지 않았다(지금: {statusNow}). " +
+            "대표 화면 승인 대기 목록에 뜨지 않으면 대표는 승인할 기회조차 없다.");
+
+        // ③ 🔴 그러나 통과는 아니다 — 폐기의 뜻이 남는 자리.
+        Assert.False(allowed,
+            "🔴 폐기된 기기가 **그대로 통과**했다 — 재접속만으로 폐기가 풀리면 안 된다.");
+
+        // ④ 🔴 옛 인증키는 죽은 채다 — 회귀가 열쇠를 되살리지 않는다(G-DP1 무회귀).
+        var (hashNow, _) = await ReadRowAsync(db, deviceId);
+        Assert.True(hashNow is null,
+            "🔴 회귀하면서 **옛 인증키가 되살아났다** — 폐기 때 지운 열쇠가 돌아오면 안 된다(G-DP1).");
     }
 
     // ══════════════════════════════════════════════════════════════

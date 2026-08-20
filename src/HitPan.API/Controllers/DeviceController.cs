@@ -154,12 +154,19 @@ public sealed class DeviceController : ControllerBase
         //   관문이 그 판정을 쓰면 승인받은 직원 기기가 영원히 대기 화면에 갇힌다(8/10 사고형).
         var approved = await _svc.IsDeviceApprovedAsync(deviceId, tid, ct);
 
+        // 🔴 20260820작3 (사장님 문구) — **폐기였다가 돌아온 기기인지 알려준다.**
+        //   사장님: *"폐기된 기기입니다. 관리자의 재승인이 필요합니다. 승인요청 하시겠습니까?"*
+        //   그냥 처음 등록하는 대기와 **말이 달라야** 직원이 상황을 안다.
+        //   ⚠️ 화면 문구용 값 하나뿐이다 — 통행 판정에는 쓰지 않는다(문은 여전히 대표가 연다).
+        var reapplied = !approved && await _svc.WasRevokedBeforeAsync(deviceId, tid, ct);
+
         return Ok(new
         {
             approved,
             // 대표 화면과 **같은 번호**를 보여준다 — 대표가 눈으로 대조한다(사장님 결재).
             //   승인이 난 뒤에는 보여줄 이유가 없다.
-            confirmCode = approved ? null : DeviceConfirmCode.From(deviceId)
+            confirmCode = approved ? null : DeviceConfirmCode.From(deviceId),
+            reapplied
         });
     }
 

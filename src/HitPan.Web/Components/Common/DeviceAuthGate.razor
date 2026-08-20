@@ -36,12 +36,28 @@
             <div class="d-flex align-center mb-4">
                 <MudIcon Icon="@Icons.Material.Filled.HourglassTop" Color="Color.Primary"
                          Style="font-size:32px;" Class="mr-2" />
-                <MudText Typo="Typo.h6">기기 등록을 요청했습니다</MudText>
+                <MudText Typo="Typo.h6">
+                    @(_reapplied ? "관리자의 재승인이 필요합니다" : "기기 등록을 요청했습니다")
+                </MudText>
             </div>
 
-            <MudText Typo="Typo.body1" Class="mb-2">
-                대표님 컴퓨터에서 <b>등록을 허락</b>하면 바로 시작됩니다.
-            </MudText>
+            @* 🔴 20260820작3 (사장님 문구) — 폐기됐다 돌아온 기기는 **말이 달라야** 한다.
+                 종전엔 *"폐기된 기기입니다. 관리자에게 문의하세요"* 로 끝나서
+                 **문의해도 대표가 손쓸 자리가 없었다**(폐기 기기는 대표 화면에 안 뜬다).
+                 이제 이 화면 자체가 승인 요청이다 — 대표의 대기 목록에 다시 올라가 있다. *@
+            @if (_reapplied)
+            {
+                <MudText Typo="Typo.body1" Class="mb-2">
+                    이 기기는 <b>폐기된 기기</b>입니다. 관리자의 <b>재승인</b>이 필요합니다.<br />
+                    <b>승인을 요청했습니다</b> — 대표님이 허락하면 바로 시작됩니다.
+                </MudText>
+            }
+            else
+            {
+                <MudText Typo="Typo.body1" Class="mb-2">
+                    대표님 컴퓨터에서 <b>등록을 허락</b>하면 바로 시작됩니다.
+                </MudText>
+            }
 
             @if (!string.IsNullOrEmpty(_confirmCode))
             {
@@ -244,6 +260,9 @@ else if (_blocked)
     private bool _awaitingApproval;
     private bool _checking;
     private string? _confirmCode;
+
+    /// 폐기됐다 돌아온 기기인가 (20260820작3) — **화면 문구만** 가른다. 통행 판정과 무관하다.
+    private bool _reapplied;
     private System.Threading.Timer? _poll;
 
     // ── 🟢 대표 자기승인 (20260819작1 K-4) ──
@@ -344,6 +363,7 @@ else if (_blocked)
             if (body is null) return;
 
             _confirmCode = body.ConfirmCode;
+            _reapplied = body.Reapplied;   // 폐기 회귀 기기인가 — 문구만 가른다 (20260820작3)
 
             if (!body.Approved && initialProbe)
             {
@@ -418,6 +438,9 @@ else if (_blocked)
     {
         public bool Approved { get; set; }
         public string? ConfirmCode { get; set; }
+
+        /// 폐기됐다 돌아온 기기 (20260820작3) — 화면 문구용. 통행 판정에 쓰지 않는다.
+        public bool Reapplied { get; set; }
     }
 
     private async Task OnKeyDown(KeyboardEventArgs e)

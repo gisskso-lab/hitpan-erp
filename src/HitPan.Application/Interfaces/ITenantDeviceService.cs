@@ -138,6 +138,15 @@ public interface ITenantDeviceService
     Task<bool> IsDeviceApprovedAsync(string deviceId, string tenantId, CancellationToken ct = default);
 
     /// <summary>
+    /// 🔴 이 기기가 <b>폐기됐다가 돌아온 기기인가</b> (20260820작3 · <b>화면 문구용</b>).
+    ///
+    /// <para>사장님 문구: <i>"폐기된 기기입니다. 관리자의 재승인이 필요합니다."</i>
+    /// 처음 등록하는 대기와 <b>말이 달라야</b> 직원이 상황을 안다.</para>
+    /// <para>⚠️ <b>문을 열거나 닫지 않는다</b> — 통행·승인 판정에 쓰지 마라. 문지기는 그대로 대표다.</para>
+    /// </summary>
+    Task<bool> WasRevokedBeforeAsync(string deviceId, string tenantId, CancellationToken ct = default);
+
+    /// <summary>
     /// 🔴 <b>대표에게 연락할 곳</b> — 직원이 관문 앞에서 <b>누구에게 전화할지</b> 알기 위한 값 (20260818작2).
     /// </summary>
     /// <remarks>

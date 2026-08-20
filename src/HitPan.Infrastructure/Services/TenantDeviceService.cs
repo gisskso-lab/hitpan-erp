@@ -340,10 +340,50 @@ public sealed class TenantDeviceService : ITenantDeviceService
             //       **적게 세어 요금이 샌다.** 넣지 마라(P0 실측 D-3).
             //
             //   ⚠️ 일반 기기는 종전대로 막는다 — 폐기의 의미가 사라지면 안 된다.
+            //
+            // ══════════════════════════════════════════════════════════════
+            // 🔴 2026-08-20 20260820작3 (사장님 실측 오더) — **막는 방식을 바꾼다. 막는 사실은 그대로다.**
+            //
+            //   사장님 원문: *"'폐기된 기기 입니다. 관리자에게 문의하세요' 가 아닌,
+            //                  **기기 등록 전 상태로 회귀**하도록"*
+            //
+            //   [무엇이 문제였나] 종전엔 **로그인 자체를 거부**했다(`deviceId: null` ⇒ AuthController 401).
+            //     ⇒ 그 기기는 **관문에 도달할 길이 없다.** 대표가 실수로 폐기하면 그 기기를
+            //       되살릴 방법이 화면에 0개다(등록기기관리에는 폐기 행에 버튼이 안 그려진다).
+            //     ⇒ 거절(rejected)에는 *"첫 화면 회귀"* 갈래를 만들어 줬는데(1-4),
+            //       폐기에는 안 만들어 **사실상 되돌릴 수 없는 삭제**로 동작했다.
+            //
+            //   [고침] **대기(pending)로 되돌린다.** 그 기기는 "등록 전 상태" 화면으로 회귀한다.
+            //     🔴 **자동 승인이 아니다.** 문지기는 그대로 대표다 — 대기 줄에 다시 설 뿐이고,
+            //       대표가 [승인]을 눌러야 쓸 수 있다. 폐기했다는 판단은 **승인 화면에서 다시 묻는다.**
+            //     🔴 **옛 열쇠는 되살아나지 않는다** — 폐기 때 `auth_key_hash` 를 이미 지웠고
+            //       (RevokeAsync · G-DP1) 이 갈래는 그것을 **건드리지 않는다.**
+            //     ⚠️ 감사기록에 *폐기였다가 다시 신청함* 을 남긴다 — 폐기 이력이 사라지지 않는다.
+            //
+            //   ⚠️ **조건문은 그대로 둔다**(`&& !isMainPc`) — 이 조건은 *"메인PC 는 여기 안 걸리고
+            //     통과"* 라는 8/11 P0 구제(위 주석)를 **겸하는 자리**다. 지우면 그 사고가 재발한다.
+            // ══════════════════════════════════════════════════════════════
             if (status == "revoked" && !isMainPc)
             {
-                await LogDeniedAsync(tenantId, userId, ipAddress, id, "denied_revoked", ct);
-                return (false, "폐기된 기기입니다. 관리자에게 문의하세요.", null, false);
+                await _db.ExecuteAsync(new CommandDefinition(
+                    """
+                    UPDATE tenant_devices
+                    SET status = 'pending',
+                        revoked_at = NULL,
+                        revoked_reason = NULL,
+                        last_seen_at = NOW(6),
+                        ip_address = @Ip
+                    WHERE device_id = @Id AND tenant_id = @TenantId
+                    """,
+                    new { Id = id, TenantId = tenantId, Ip = ipAddress }, cancellationToken: ct));
+
+                await _audit.LogAsync("device_reapply_after_revoke", "device", id,
+                    reason: "폐기된 기기의 재신청 — 등록 전 상태로 회귀 (20260820작3)", ct: ct);
+
+                // 🔴 사장님 문구 (2026-08-20): *"폐기된 기기입니다. 관리자의 재승인이 필요합니다."*
+                //   ⚠️ 폐기였다는 사실을 **숨기지 않는다** — 그냥 대기와 구분되어야 직원이 상황을 안다.
+                //     그러면서도 갈 곳이 있다(승인 요청). 사장님: *"어차피 관리자 재승인 없이는 등록못함"*
+                return (false, "폐기된 기기입니다. 관리자의 재승인이 필요합니다.", id, false);
             }
 
             // ══════════════════════════════════════════════════════════════
@@ -1596,6 +1636,29 @@ public sealed class TenantDeviceService : ITenantDeviceService
             "SELECT status FROM tenant_devices WHERE device_id = @Id AND tenant_id = @TenantId LIMIT 1",
             new { Id = deviceId, TenantId = tenantId }, cancellationToken: ct));
         return status == "approved";
+    }
+
+    /// 🔴 이 기기가 **폐기됐다가 돌아온 기기인가** (20260820작3 · 화면 문구용).
+    ///
+    ///   사장님 문구: *"폐기된 기기입니다. **관리자의 재승인이 필요합니다.**"*
+    ///   그냥 처음 등록하는 대기와 **말이 달라야** 직원이 상황을 안다.
+    ///
+    ///   ⚠️ **문을 열거나 닫지 않는다.** 화면이 어떤 문장을 보여줄지만 정한다 —
+    ///     통행·승인 판정에 이 값을 쓰면 안 된다(문지기는 그대로 대표다).
+    ///   ⚠️ 상태 컬럼이 아니라 **감사기록**을 본다. 회귀하면서 `revoked_at` 을 비웠기 때문이고,
+    ///     기록은 지우지 않으므로 *"폐기였다"* 는 사실이 남아 있다(헌법 #1).
+    public async Task<bool> WasRevokedBeforeAsync(string deviceId, string tenantId, CancellationToken ct = default)
+    {
+        if (string.IsNullOrEmpty(deviceId)) return false;
+        await EnsureOpenAsync(ct);
+
+        return (await _db.ExecuteScalarAsync<int>(new CommandDefinition(
+            """
+            SELECT COUNT(*) FROM audit_trail
+            WHERE tenant_id = @TenantId AND entity_type = 'device' AND entity_id = @Id
+              AND action_type = 'device_reapply_after_revoke'
+            """,
+            new { Id = deviceId, TenantId = tenantId }, cancellationToken: ct))) > 0;
     }
 
     // ══════════════════════════════════════════════════════════════════
