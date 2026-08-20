@@ -53,8 +53,25 @@ public sealed class CspFrameSrcGateTests
     /// </remarks>
     private const string PostcodeFrameHost = "https://postcode.map.kakao.com";
 
-    /// <summary>우편번호 스크립트가 오는 곳.</summary>
+    /// <summary>우편번호 <b>로더</b>가 오는 곳.</summary>
     private const string PostcodeScriptHost = "https://t1.daumcdn.net";
+
+    /// <summary>
+    /// 우편번호 창 <b>안쪽</b>이 쓰는 자원(js·css)이 오는 곳.
+    /// </summary>
+    /// <remarks>
+    /// 🔴 <b>1·2차가 놓친 자리다 — 세 번째에야 잡았다.</b>
+    /// 우편번호 창은 <c>about:blank</c> iframe 에 <c>document.write</c> 로 그려지므로
+    /// <b>우리 origin 을 물려받아 우리 CSP 를 따른다.</b>
+    /// ⇒ <c>frame-src</c> 로 <b>틀</b>만 열어 줘도, 그 안이 부르는 스크립트·CSS 가 막히면
+    /// 사장님 화면에는 <i>"이 콘텐츠는 차단되었습니다"</i> 가 뜬다(1.2.92 실측).
+    /// <para>
+    /// 확인 방법: <c>curl -s https://postcode.map.kakao.com/search</c> 를 받아 도메인을 <c>grep</c> 한다.
+    /// <c>t1.kakaocdn.net/postcode/cssjs/…</c> 가 나온다.
+    /// </para>
+    /// ⚠️ <c>t1.daumcdn.net</c>(로더)과 <b>다른 도메인</b>이다. 하나로 뭉뚱그리지 마라.
+    /// </remarks>
+    private const string PostcodeAssetHost = "https://t1.kakaocdn.net";
 
     private static string RepoRoot()
     {
@@ -162,6 +179,34 @@ public sealed class CspFrameSrcGateTests
 
         Assert.True(IsAllowed(csp, "frame-src", PostcodeScriptHost),
             $"{PostcodeScriptHost} 도 frame-src 에 있어야 한다 — 위젯이 두 도메인을 함께 쓴다.");
+    }
+
+    /// <summary>
+    /// 🔴 <b>G-45b — 창 <u>안쪽</u> 자원까지 열려 있다.</b> (1.2.92 실측 봉합)
+    /// </summary>
+    /// <remarks>
+    /// 🔴 <b>이 시험이 없어서 두 번을 헛게시했다.</b>
+    /// G-45(틀)만 보고 초록불이라 게시했는데, 창 안쪽 스크립트·CSS 가 막혀
+    /// 사장님 화면에는 여전히 <i>"이 콘텐츠는 차단되었습니다"</i> 가 떴다.
+    /// ⇒ <b>틀을 여는 것과 그 안이 도는 것은 다른 일이다.</b>
+    /// </remarks>
+    [Fact]
+    public void G45b_우편번호_창_안쪽_자원이_허용된다()
+    {
+        var csp = ParseCsp(BuildCspHeader());
+
+        foreach (var directive in new[] { "script-src", "script-src-elem" })
+        {
+            Assert.True(IsAllowed(csp, directive, PostcodeAssetHost),
+                $"{directive} 에 {PostcodeAssetHost} 가 없다 — 우편번호 창 안쪽 스크립트가 막혀 "
+                + "창이 빈 채로 뜬다 (사장님 1.2.92 실측).");
+        }
+
+        foreach (var directive in new[] { "style-src", "style-src-elem" })
+        {
+            Assert.True(IsAllowed(csp, directive, PostcodeAssetHost),
+                $"{directive} 에 {PostcodeAssetHost} 가 없다 — 우편번호 창이 스타일 없이 깨진다.");
+        }
     }
 
     /// <summary>
