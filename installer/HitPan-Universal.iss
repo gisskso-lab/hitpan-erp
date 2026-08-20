@@ -1979,12 +1979,38 @@ begin
     BatchContent.Add('set "MYSQL=C:\Program Files\MariaDB 11.4\bin\mysql.exe"');
     BatchContent.Add('if not exist "!MYSQL!" set "MYSQL=C:\Program Files\MariaDB 10.11\bin\mysql.exe"');
     BatchContent.Add('set "CNTF=%LOCALAPPDATA%\Temp\hitpan_cnt.txt"');
+
+    // 🔴 R-3 봉합 (20260820작5 3차) — root 비번을 **명령줄에서 뺀다**.
+    //
+    //   진범: 이 배치는 위에서 'setlocal enabledelayedexpansion' 을 켠다.
+    //   그 안에서는 평문 '!' 가 조용히 사라진다. 통일값은 '!' 로 끝나므로
+    //     -pHITPAN2026!  →  cmd 가 먹어  →  -pHITPAN2026
+    //   가 되어 실제 root 와 안 맞는다 → ERROR 1045 → TBL_COUNT=0 → 설치 DOA.
+    //   ⇒ 1·2차 봉합(R-1 통일)을 해도 이 자리에서 다시 죽었다. 실측 3회 재현.
+    //
+    //   BatEscape() 함수가 이 목적으로 정의돼 있었으나 **호출되는 곳이 한 군데도 없었다**
+    //   (2008행 주석에만 남아 있다). 그리고 그 주석 스스로가 이렇게 적고 있다 —
+    //     "이스케이프 결과를 예측하려 들지 않는다 — 예측이 틀려서 난 사고다."
+    //   같은 파일이 hitpan 계정에는 이미 옳은 답을 쓰고 있다: SQL 을 파일로 넘긴다.
+    //
+    //   root 는 -p 인자가 필요해 SQL 파일만으로는 안 된다. 그래서 MariaDB 표준 수단인
+    //   **옵션 파일(--defaults-extra-file)** 을 쓴다. 파일 내용은 cmd 가 해석하지 않으므로
+    //   지연확장이 **아예 개입하지 않는다.** 이스케이프를 예측할 필요도 없다.
+    //
+    //   🔴 파일은 %TEMP% 에 만들고 배치 끝에서 반드시 지운다(비번 잔류 0건).
+    BatchContent.Add('set "ROOTCNF=%LOCALAPPDATA%\Temp\hitpan_root.cnf"');
+    BatchContent.Add('> "!ROOTCNF!" echo [client]');
+    BatchContent.Add('>> "!ROOTCNF!" echo user=root');
+    // 값은 escape 하지 않는다 — 파일 한 줄로 그대로 적힌다. 다만 이 echo 자체가
+    // 지연확장 안이므로 '!' 가 먹히지 않도록 여기서만 '^!' 로 쓴다.
+    BatchContent.Add('>> "!ROOTCNF!" echo password=' + BatEscape(MariaRootPw));
+    BatchContent.Add('echo [chk] ROOTCNF 생성 errorlevel=!errorlevel! >> "!DIAGLOG!"');
     // ★ 진단 로그 (작7): 배치 각 단계 성패를 파일로 남긴다(봉합 검증용, 비번 미기록).
     BatchContent.Add('set "DIAGLOG=%LOCALAPPDATA%\Temp\hitpan_dbsetup_diag.log"');
     BatchContent.Add('echo ===== db-setup 진단 시작 %DATE% %TIME% ===== > "!DIAGLOG!"');
     BatchContent.Add('echo [chk] MYSQL=!MYSQL! >> "!DIAGLOG!"');
     // 사고 #16·#21·#22 봉합 — 회사별 DB 박음
-    BatchContent.Add(Format('"!MYSQL!" -u root -p%s -e "CREATE DATABASE IF NOT EXISTS %s CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;"', [MariaRootPw, G_DbName]));
+    BatchContent.Add(Format('"!MYSQL!" --defaults-extra-file="!ROOTCNF!" -e "CREATE DATABASE IF NOT EXISTS %s CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;"', [G_DbName]));
     // 회사별 user + 전 고객사 통일 비번 (사장님 지시 2026-08-11 — 랜덤에서 원복)
     //
     // 🔴 ALTER USER 가 반드시 따라와야 한다.
@@ -2034,12 +2060,12 @@ begin
     Exec(ExpandConstant('{cmd}'),
          '/C icacls "' + UserSqlFile + '" /inheritance:r /grant:r "Administrators:F" /grant:r "SYSTEM:F"',
          '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
-    BatchContent.Add(Format('"!MYSQL!" -u root -p%s < "%s"', [MariaRootPw, UserSqlFile]));
+    BatchContent.Add(Format('"!MYSQL!" --defaults-extra-file="!ROOTCNF!" < "%s"', [UserSqlFile]));
     BatchContent.Add('echo [chk] CREATE/ALTER USER(SQL 파일 경유) errorlevel=!errorlevel! >> "!DIAGLOG!"');
     // ★ 봉합 2026-06-18 (트리거 import 안전화): 새 MariaDB는 log_bin=ON + trust=0 기본일 수 있어
     //   UUID() 등 비결정 함수를 쓰는 트리거 8개 생성이 ERROR 1419로 실패 → 스키마 부분 import → 설치 실패.
     //   import 전 GLOBAL log_bin_trust_function_creators=1 로 트리거 생성을 허용(헌법 #20 끊김 방지).
-    BatchContent.Add(Format('"!MYSQL!" -u root -p%s -e "SET GLOBAL log_bin_trust_function_creators=1;"', [MariaRootPw]));
+    BatchContent.Add('"!MYSQL!" --defaults-extra-file="!ROOTCNF!" -e "SET GLOBAL log_bin_trust_function_creators=1;"');
     BatchContent.Add('echo [chk] SET GLOBAL errorlevel=!errorlevel! >> "!DIAGLOG!"');
     // 봉합 2026-06-17 (1.2.14): 로그인 500 진범 봉합 — 스키마 import 판정 정정.
     //   진범1: hitpan_db.sql 안 'USE hitpan_erp'로 회사별 DB 지정이 무력화 → 별도 봉합(덤프 스트립).
@@ -2053,13 +2079,13 @@ begin
     // ★ P0 근본 재봉합 (작7 안C): 카운트를 for/f 대신 '파일 출력 → set /p 읽기'로 (위 §안C 주석 참조).
     //   for/f (''mysql...'')가 PATH 공백에서 mysql을 못 실행하는 진범을 통째 제거.
     BatchContent.Add('set TBL_COUNT=0');
-    BatchContent.Add(Format('"!MYSQL!" -u root -p%s %s -N -B -e "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema=DATABASE() AND table_type=''BASE TABLE''" > "!CNTF!" 2> nul', [MariaRootPw, G_DbName]));
+    BatchContent.Add(Format('"!MYSQL!" --defaults-extra-file="!ROOTCNF!" %s -N -B -e "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema=DATABASE() AND table_type=''BASE TABLE''" > "!CNTF!" 2> nul', [G_DbName]));
     BatchContent.Add('set /p TBL_COUNT=<"!CNTF!"');
     BatchContent.Add('if "!TBL_COUNT!"=="" set TBL_COUNT=0');
     BatchContent.Add('echo [chk] 1차 TBL_COUNT=[!TBL_COUNT!] >> "!DIAGLOG!"');
     BatchContent.Add('set EXISTING_DATA=0');
     // 운영 데이터 카운트는 테이블이 있을 때만 의미 — 없으면 쿼리가 에러내므로 TBL_COUNT>0일 때만 조회
-    BatchContent.Add(Format('if !TBL_COUNT! GTR 0 ("!MYSQL!" -u root -p%s -N -B -e "SELECT COALESCE((SELECT COUNT(*) FROM %s.items),0)+COALESCE((SELECT COUNT(*) FROM %s.partners),0)" > "!CNTF!" 2> nul & set /p EXISTING_DATA=<"!CNTF!")', [MariaRootPw, G_DbName, G_DbName]));
+    BatchContent.Add(Format('if !TBL_COUNT! GTR 0 ("!MYSQL!" --defaults-extra-file="!ROOTCNF!" -N -B -e "SELECT COALESCE((SELECT COUNT(*) FROM %s.items),0)+COALESCE((SELECT COUNT(*) FROM %s.partners),0)" > "!CNTF!" 2> nul & set /p EXISTING_DATA=<"!CNTF!")', [G_DbName, G_DbName]));
     BatchContent.Add('if "!EXISTING_DATA!"=="" set EXISTING_DATA=0');
     // 봉합 2026-06-17 (1.2.15, P1): 재설치 멱등성 — 운영 데이터 0건인데 스키마 불완전(91개 미만)이면
     //   손상된 부분 import로 간주하고 DROP 후 재생성. 운영 데이터 있으면 절대 DROP 금지(헌법 #1·#22).
@@ -2067,27 +2093,27 @@ begin
     // 봉합 (2026-06-29, A안 고리2): local_update_consents(헌법 #30) 편입으로 정본 121→122 정정.
     // 봉합 (2026-06-29, A안 고리2 마지막 빈 칸): local_update_status(헌법 #30) 편입으로 정본 122→123 정정.
     // 봉합 (2026-06-29, 고리4 ①단계): schema_migrations(헌법 #36) 편입으로 정본 123→124 정정.
-    BatchContent.Add(Format('if !EXISTING_DATA! EQU 0 if !TBL_COUNT! GTR 0 if !TBL_COUNT! LSS 124 (echo 불완전 스키마 !TBL_COUNT!/124 감지 - 재생성. & "!MYSQL!" -u root -p%s -e "DROP DATABASE IF EXISTS %s; CREATE DATABASE %s CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci; GRANT ALL ON %s.* TO ''%s''@''localhost''; FLUSH PRIVILEGES;" & set TBL_COUNT=0)', [MariaRootPw, G_DbName, G_DbName, G_DbName, G_DbUser]));
+    BatchContent.Add(Format('if !EXISTING_DATA! EQU 0 if !TBL_COUNT! GTR 0 if !TBL_COUNT! LSS 124 (echo 불완전 스키마 !TBL_COUNT!/124 감지 - 재생성. & "!MYSQL!" --defaults-extra-file="!ROOTCNF!" -e "DROP DATABASE IF EXISTS %s; CREATE DATABASE %s CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci; GRANT ALL ON %s.* TO ''%s''@''localhost''; FLUSH PRIVILEGES;" & set TBL_COUNT=0)', [G_DbName, G_DbName, G_DbName, G_DbUser]));
     // 분기: 운영 데이터 있으면 보호(건너뜀, 헌법 #1) / 없으면 import
     //   봉합 2026-06-17 (1.2.15, P1): import stderr를 로그로 남기고 errorlevel 즉시 검사(--force 금지, 헌법 #15)
     //   ★ 안C: import mysql도 절대경로(!MYSQL!)로. import는 '< file' stdin이라 for/f는 아니었으나 PATH 의존 제거로 통일.
-    BatchContent.Add(Format('if !EXISTING_DATA! GTR 0 (echo 기존 운영 데이터 !EXISTING_DATA!건 감지. 시드 import 건너뜀.) else (echo 스키마 import 실행. & "!MYSQL!" -u root -p%s --show-warnings %s < "%s" 2> "%%TEMP%%\hitpan_import_err.log" & if errorlevel 1 (echo [오류] 스키마 import 실패. 로그: %%TEMP%%\hitpan_import_err.log & exit /b 1))', [MariaRootPw, G_DbName, ExpandConstant('{app}\hitpan_db.sql')]));
+    BatchContent.Add(Format('if !EXISTING_DATA! GTR 0 (echo 기존 운영 데이터 !EXISTING_DATA!건 감지. 시드 import 건너뜀.) else (echo 스키마 import 실행. & "!MYSQL!" --defaults-extra-file="!ROOTCNF!" --show-warnings %s < "%s" 2> "%%TEMP%%\hitpan_import_err.log" & if errorlevel 1 (echo [오류] 스키마 import 실패. 로그: %%TEMP%%\hitpan_import_err.log & del "!ROOTCNF!" > nul 2> nul & exit /b 1))', [G_DbName, ExpandConstant('{app}\hitpan_db.sql')]));
     // 봉합 검증 가드(1.2.15, SHIP-DDL-01 정정 2026-06-23 / A안 고리2 2026-06-29 local_update_status 122→123 / 고리4 ① schema_migrations 123→124): import 후 테이블 124개 + users 실존 재확인. 미달이면 명확한 실패(헌법 #15·#19).
     // ★ P0 재봉합 (작7, 안A): 최종 검증 카운트도 root 통일 (위 §진범 주석 참조).
     BatchContent.Add('echo [chk] import 이후 TBL_COUNT=[!TBL_COUNT!] EXISTING_DATA=[!EXISTING_DATA!] >> "!DIAGLOG!"');
     // ★ P0 근본 재봉합 (작7 안C): 최종 검증 카운트도 for/f 제거 → 파일출력.
     BatchContent.Add('set FINAL_COUNT=0');
-    BatchContent.Add(Format('"!MYSQL!" -u root -p%s %s -N -B -e "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema=DATABASE() AND table_type=''BASE TABLE''" > "!CNTF!" 2> nul', [MariaRootPw, G_DbName]));
+    BatchContent.Add(Format('"!MYSQL!" --defaults-extra-file="!ROOTCNF!" %s -N -B -e "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema=DATABASE() AND table_type=''BASE TABLE''" > "!CNTF!" 2> nul', [G_DbName]));
     BatchContent.Add('set /p FINAL_COUNT=<"!CNTF!"');
     BatchContent.Add('if "!FINAL_COUNT!"=="" set FINAL_COUNT=0');
     BatchContent.Add('set USERS_OK=0');
-    BatchContent.Add(Format('"!MYSQL!" -u root -p%s %s -N -B -e "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema=DATABASE() AND table_name=''users''" > "!CNTF!" 2> nul', [MariaRootPw, G_DbName]));
+    BatchContent.Add(Format('"!MYSQL!" --defaults-extra-file="!ROOTCNF!" %s -N -B -e "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema=DATABASE() AND table_name=''users''" > "!CNTF!" 2> nul', [G_DbName]));
     BatchContent.Add('set /p USERS_OK=<"!CNTF!"');
     BatchContent.Add('if "!USERS_OK!"=="" set USERS_OK=0');
     BatchContent.Add('echo [chk] 최종검증 FINAL_COUNT=[!FINAL_COUNT!] USERS_OK=[!USERS_OK!] >> "!DIAGLOG!"');
     // 운영 데이터 보호로 import 건너뛴 경우(EXISTING_DATA>0)는 이미 정상 DB이므로 검증 통과로 간주
     BatchContent.Add('if !EXISTING_DATA! GTR 0 (echo 기존 운영 DB 유지 - 검증 생략. & exit /b 0)');
-    BatchContent.Add(Format('if !USERS_OK! EQU 0 (echo [오류] DB 초기 설정 실패 - users 테이블 없음. & exit /b 1)', []));
+    BatchContent.Add(Format('if !USERS_OK! EQU 0 (echo [오류] DB 초기 설정 실패 - users 테이블 없음. & del "!ROOTCNF!" > nul 2> nul & exit /b 1)', []));
     BatchContent.Add(Format('if !FINAL_COUNT! LSS 124 (echo [오류] DB 초기 설정 실패 - 테이블 !FINAL_COUNT!/124개만 생성됨. & exit /b 1) else (echo DB 스키마 검증 완료 - 테이블 !FINAL_COUNT!개 + users 정상.)', []));
     // ★ P0 재봉합 (작7, 사장님 결재 2026-07-01, hitpan 가드 제거): 어제 안A에서 넣은 hitpan 접속 가드를
     //   설치 차단(exit 1)에서 제외한다. 진범 확정(1.2.19 진단 로그): 카운트 검증(124/124/users)은 안C로
@@ -2144,9 +2170,12 @@ begin
     BatchContent.Add(Format('"!MYSQL!" --defaults-extra-file="%s" -h localhost %s < "%s" > nul 2> nul', [ProbeCnfFile, G_DbName, ProbeSqlFile]));
     BatchContent.Add('set "PROBE_RC=!errorlevel!"');
     BatchContent.Add('echo [chk] 접속 확인(db.conf 값 그대로) errorlevel=!PROBE_RC! >> "!DIAGLOG!"');
-    BatchContent.Add('if !PROBE_RC! NEQ 0 (echo [오류] 업무용 계정으로 데이터베이스에 접속하지 못했습니다. & exit /b 1)');
+    BatchContent.Add('if !PROBE_RC! NEQ 0 (echo [오류] 업무용 계정으로 데이터베이스에 접속하지 못했습니다. & del "!ROOTCNF!" > nul 2> nul & exit /b 1)');
     BatchContent.Add('echo [chk] 배치 정상 종료 도달 (exit 0 예정) >> "!DIAGLOG!"');
     BatchContent.Add('del "!CNTF!" > nul 2> nul');
+    // 🔴 R-3 — root 옵션 파일을 반드시 지운다. 비번이 디스크에 남지 않는다.
+    //   (헌법 #22 · PRD_설치파일:163 "root 비번은 어디에도 기록 금지")
+    BatchContent.Add('del "!ROOTCNF!" > nul 2> nul');
     BatchContent.SaveToFile(BatchFile);
   finally
     BatchContent.Free;
