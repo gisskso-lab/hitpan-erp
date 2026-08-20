@@ -1692,6 +1692,111 @@ begin
          or FileExists(ExpandConstant('{app}\hitpan-keys.conf'));
 end;
 
+// ────────────────────────────────────────────────────────────────────────
+// 🔴 P0 봉합 (20260821작2) — 설치 EXE 가 컴파일조차 안 되던 것
+//
+//   [무엇이 났나]
+//     1.2.96 게시가 EXE 굽는 단계에서 죽었다:
+//       Error on line 1876: Unknown identifier 'InputQuery'  → Compile aborted.
+//     `InputQuery` 는 **델파이 VCL 함수**다. Inno Setup 의 Pascal Script 에는 없다.
+//     공식 지원 함수는 MsgBox·TaskDialogMsgBox·GetOpenFileName·GetSaveFileName·
+//     BrowseForFolder·ExitSetupMsgBox·SelectDisk 뿐 — InputQuery 는 그 목록에 없다.
+//
+//   [파괴력] 1.2.96 만이 아니다. **어떤 버전도 게시가 안 됐다.** EXE 자체를 못 굽는다.
+//     어제(8/20) P0 였던 "두 번째 사업자 설치" 도 이 EXE 가 나와야 시작할 수 있다.
+//
+//   [왜 어제 안 걸렸나 — 이게 진짜 교훈]
+//     PR CI 의 `Installer Inno Setup Lint` 는 **파싱만** 한다.
+//     `[Code]` 섹션 **컴파일**은 실제 게시(ISCC)에서만 일어난다.
+//     ⇒ PR 검사 9개가 전부 초록인데 게시에서 터졌다. 초록불의 출처를 봐야 하는 이유다.
+//
+//   [왜 마법사 페이지를 못 쓰나]
+//     이 함수는 CurStepChanged(ssInstall) 에서 불린다 = **마법사가 이미 끝난 뒤**다.
+//     기존 SerialKeyPage·ParentAccountPage 같은 TInputQueryWizardPage 는
+//     InitializeWizard 에서 미리 만들어 마법사 흐름에 끼우는 물건이고,
+//     애초에 *페이지*라 ShowModal 이 없다(TForm 이 아니다).
+//     ⇒ 런타임 모달은 CreateCustomForm 으로만 만든다(공식 문서가 보증하는 유일한 길).
+//
+//   [무인설치 무한대기 — 함께 막는다]
+//     🔴 모달은 /SILENT·/VERYSILENT 에서 **답할 사람이 없는데 영원히 기다린다.**
+//     /SUPPRESSMSGBOXES 도 Code 함수 대화상자는 못 막는다(공식 문서 명시).
+//     컴파일 오류보다 나쁘다 — 실패가 아니라 **멈춤**이라 아무도 모르고 고객은 못 빠져나온다.
+//     WizardSilent 면 묻지 않고 즉시 False. 호출부가 DB-ROOT-AUTH 로 명확히 중단한다.
+//
+//   ⚠️ 후임자: 이 함수를 InputQuery 로 되돌리지 마라. 컴파일이 깨진다.
+//      WizardSilent 가드도 빼지 마라 — 무인설치가 영구 정지한다.
+// ────────────────────────────────────────────────────────────────────────
+function AskPassword(const ACaption, APrompt: String; var APassword: String): Boolean;
+var
+  Form: TSetupForm;
+  Lbl: TNewStaticText;
+  Edit: TPasswordEdit;
+  OKButton, CancelButton: TNewButton;
+begin
+  Result := False;
+  APassword := '';
+
+  // 무인설치 = 물어볼 사람이 없다. 띄우면 영원히 멈춘다.
+  if WizardSilent then Exit;
+
+  Form := CreateCustomForm(ScaleX(380), ScaleY(180), False, False);
+  try
+    Form.Caption := ACaption;
+    Form.BorderStyle := bsDialog;
+
+    Lbl := TNewStaticText.Create(Form);
+    Lbl.Parent   := Form;
+    Lbl.Left     := ScaleX(12);
+    Lbl.Top      := ScaleY(12);
+    Lbl.Width    := Form.ClientWidth - ScaleX(24);
+    Lbl.AutoSize := False;
+    Lbl.WordWrap := True;
+    Lbl.Height   := ScaleY(88);
+    Lbl.Caption  := APrompt;
+
+    Edit := TPasswordEdit.Create(Form);
+    Edit.Parent    := Form;
+    Edit.Left      := ScaleX(12);
+    Edit.Top       := ScaleY(108);
+    Edit.Width     := Form.ClientWidth - ScaleX(24);
+    Edit.Height    := ScaleY(23);
+    Edit.Password  := True;      // 어깨너머로 안 보이게 가린다
+    Edit.MaxLength := 128;
+    Edit.TabOrder  := 0;
+
+    OKButton := TNewButton.Create(Form);
+    OKButton.Parent      := Form;
+    OKButton.Width       := ScaleX(75);
+    OKButton.Height      := ScaleY(23);
+    OKButton.Left        := Form.ClientWidth - ScaleX(75 + 6 + 75 + 12);
+    OKButton.Top         := Form.ClientHeight - ScaleY(23 + 12);
+    OKButton.Caption     := '확인';
+    OKButton.ModalResult := mrOk;
+    OKButton.Default     := True;
+    OKButton.TabOrder    := 1;
+
+    CancelButton := TNewButton.Create(Form);
+    CancelButton.Parent      := Form;
+    CancelButton.Width       := ScaleX(75);
+    CancelButton.Height      := ScaleY(23);
+    CancelButton.Left        := Form.ClientWidth - ScaleX(75 + 12);
+    CancelButton.Top         := Form.ClientHeight - ScaleY(23 + 12);
+    CancelButton.Caption     := '취소';
+    CancelButton.ModalResult := mrCancel;
+    CancelButton.Cancel      := True;
+    CancelButton.TabOrder    := 2;
+
+    Form.ActiveControl := Edit;
+
+    if Form.ShowModal() = mrOk then begin
+      APassword := Edit.Text;
+      Result := True;
+    end;
+  finally
+    Form.Free();
+  end;
+end;
+
 procedure StopRunningComponentsForReinstall();
 var
   ResultCode, i: Integer;
@@ -1873,7 +1978,10 @@ begin
     if not TryRootLogin(MariaRootPw) then begin
       RootOk := False;
       for RootTry := 1 to 3 do begin
-        if InputQuery('기존 데이터베이스 확인',
+        // 봉합 (20260821작2): InputQuery → AskPassword.
+        //   InputQuery 는 Inno 에 없는 함수라 EXE 가 컴파일조차 안 됐다(위 AskPassword 주석 참조).
+        //   인자 모양은 같다(제목, 안내문, var 값) — 로직은 어제 설계 그대로 둔다.
+        if AskPassword('기존 데이터베이스 확인',
              '이 컴퓨터에는 이미 데이터베이스가 설치되어 있습니다.' + #13#10 +
              '설치를 계속하려면 그 관리자 비밀번호가 필요합니다.' + #13#10 + #13#10 +
              '(' + IntToStr(RootTry) + '/3회)',
@@ -1891,12 +1999,18 @@ begin
       end;
 
       // 🔴 침묵 실패 금지 — 왜 못 하는지 그대로 말한다(검증서 6-1:187).
+      //   봉합 (20260821작2): MsgBox → SuppressibleMsgBox.
+      //     무인설치(/SILENT·/VERYSILENT)에서 MsgBox 는 답할 사람이 없는데 기다린다 =
+      //     설치가 실패하는 게 아니라 **멈춘다**. 멈춘 설치는 고객이 스스로 못 빠져나온다.
+      //     SuppressibleMsgBox 는 /SUPPRESSMSGBOXES 일 때 기본값을 쓰고 그냥 지나간다.
+      //     ⇒ 화면 있는 설치는 종전대로 안내를 보고, 무인설치는 멈추지 않고
+      //        아래 Abort() 로 **실패 코드를 남기며 끝난다**(#20 — 끊기더라도 침묵하지 않는다).
       if not RootOk then begin
-        MsgBox('설치를 계속할 수 없습니다.' + #13#10#13#10 +
+        SuppressibleMsgBox('설치를 계속할 수 없습니다.' + #13#10#13#10 +
                '이 컴퓨터에 이미 설치된 데이터베이스의 관리자 비밀번호를' + #13#10 +
                '확인하지 못했습니다. 비밀번호를 확인하신 뒤 설치를 다시' + #13#10 +
                '실행해 주세요. (코드: DB-ROOT-AUTH)',
-               mbCriticalError, MB_OK);
+               mbCriticalError, MB_OK, IDOK);
         Abort();
       end;
     end;

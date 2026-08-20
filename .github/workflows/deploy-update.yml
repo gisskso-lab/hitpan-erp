@@ -574,7 +574,10 @@ jobs:
       - name: Install Inno Setup 6
         shell: pwsh
         run: |
-          choco install innosetup -y --no-progress
+          # 🔴 버전 고정 (20260821작2) — build-installer.yml 과 같은 값으로 묶는다.
+          #   두 워크플로가 다른 Inno 로 구우면 "인스톨러는 되는데 게시는 깨지는" 갈라짐이 난다.
+          #   6.7.3 = 20260821작2 봉합을 실제로 컴파일해 확인한 버전.
+          choco install innosetup -y --no-progress --version=6.7.3
           if (-not (Test-Path 'C:\Program Files (x86)\Inno Setup 6\ISCC.exe')) {
             throw "Inno Setup 설치 후에도 ISCC.exe 를 찾을 수 없습니다."
           }
