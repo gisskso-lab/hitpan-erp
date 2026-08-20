@@ -673,6 +673,67 @@ public sealed class EmployeeService : IEmployeeService
             }
 
             // 🔴 검증팀 P2-7 봉합: 감사 기록. 트랜잭션 안에서 함께 남긴다 —
+            // ── 🔴 결재선 정리 + 미결 회수 ────────────────────────────────────
+            // 작(2026-08-21) 김삼성 상무 최우선 지적:
+            //   "부장이 퇴사하면, 그 부장이 2단계 결재자인 ★모든 문서가 동시에 멈춘다.★
+            //    한 건이 아니라 전부다. 인사 실무에서 이건 매달 일어나는 일이다."
+            //
+            // 🔴 스스로 못 빠져나오는 이유 — 셋이 동시에 막는다:
+            //   ① GetPendingAsync 가 approver_id 로 INNER JOIN → 퇴사자 외엔 결재함에 안 뜬다
+            //   ② ProcessAsync 는 line.ApproverId != employeeId → "결재 권한이 없습니다"
+            //   ③ SaveLinesAsync 는 pendingCount > 0 이면 결재선 변경 자체를 막는다
+            //   ⇒ 승인 0 · 반려 0 · 결재선 수정 0 = 영구 고착 (헌법 #20 워크플로우 끊김 = P0)
+            //
+            // ⚠️ 퇴사를 막지 않는다 — 반자동 원칙(GetResignPrecheckAsync 가 알려만 준다).
+            //    ★막는 게 아니라 뒤처리를 한다.★
+            //
+            // ⚠️ 결재선은 지우지 않고 is_active=0 으로 끈다(헌법 #1 — 기록 보존).
+            //    누가 결재자였는지는 남아야 한다.
+            const string approvalLineSql = """
+                UPDATE approval_doc_lines
+                SET is_active = 0,
+                    updated_at = NOW(6)
+                WHERE tenant_id = @TenantId
+                  AND approver_id = @EmployeeId
+                  AND is_active = 1
+                """;
+
+            var linesRemoved = await _db.ExecuteAsync(new CommandDefinition(
+                approvalLineSql,
+                new { TenantId = tenantId, EmployeeId = employeeId },
+                transaction: tx, cancellationToken: ct)).ConfigureAwait(false);
+
+            // 🔴 결재선에서 빼는 것만으로는 부족하다 — ★이미 올라간 pending 문서★ 는 그대로 갇힌다.
+            //    그것이 남아 있으면 ③(결재선 변경 차단)이 계속 걸려 새 결재자를 넣지도 못한다.
+            //    ⇒ 퇴사자가 결재자인 미결 문서를 'cancelled' 로 회수한다.
+            //      (DB-15 status 허용값: pending·approved·rejected·cancelled — DESCRIBE 확인, 헌법 #13)
+            //
+            // ⚠️ ★퇴사자가 결재자인 건만★ 대상이다. 테넌트 pending 을 통째로 취소하면
+            //    멀쩡한 결재까지 죽는다. approval_doc_lines 로 한정한다.
+            //
+            // ⚠️ 기안자가 퇴사한 건은 건드리지 않는다 — 그 문서는 결재자가 살아 있으면 계속 돈다.
+            //    회수 대상은 "결재할 사람이 사라진 문서" 다.
+            const string approvalDocSql = """
+                UPDATE approval_documents d
+                SET d.status = 'cancelled',
+                    d.completed_at = NOW(6),
+                    d.updated_at = NOW(6),
+                    d.memo = CONCAT(COALESCE(d.memo, ''), ' / 결재자 퇴사로 회수')
+                WHERE d.tenant_id = @TenantId
+                  AND d.status = 'pending'
+                  AND EXISTS (
+                      SELECT 1 FROM approval_doc_lines l
+                      WHERE l.tenant_id = d.tenant_id
+                        AND l.doc_type  = d.doc_type
+                        AND l.approver_id = @EmployeeId
+                  )
+                """;
+
+            var docsRecalled = await _db.ExecuteAsync(new CommandDefinition(
+                approvalDocSql,
+                new { TenantId = tenantId, EmployeeId = employeeId },
+                transaction: tx, cancellationToken: ct)).ConfigureAwait(false);
+
             // 퇴사는 됐는데 기록만 없는 상태가 생기면 안 된다.
             // 급여 같은 민감값은 넣지 않는다(감사로그에 평문으로 남는다).
             await _audit.LogAsync(
@@ -682,7 +743,10 @@ public sealed class EmployeeService : IEmployeeService
                 afterJson: System.Text.Json.JsonSerializer.Serialize(new
                 {
                     resignDate,
-                    accountBlocked = accountBlocked > 0
+                    accountBlocked = accountBlocked > 0,
+                    // 🔴 몇 건이 정리됐는지 남긴다 — 나중에 "왜 그 결재가 취소됐나" 를 밝힐 근거다.
+                    linesRemoved,
+                    docsRecalled
                 }),
                 reason: resignReason,
                 tx: tx,
