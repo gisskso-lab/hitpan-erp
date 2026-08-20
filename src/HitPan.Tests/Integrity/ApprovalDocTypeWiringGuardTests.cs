@@ -254,4 +254,103 @@ public sealed class ApprovalDocTypeWiringGuardTests
             → 시작일이 이미 지났는데도 '승인(시작 전)' 에 멈춰 급여·조직도가 재직자로 본다.
             """);
     }
+
+    /// <summary>
+    /// 🔴 초과근무 — 설정화면에서 <b>켤 수 있으면</b> 상신 코드도 있어야 한다.
+    /// </summary>
+    /// <remarks>
+    /// 고객이 결재설정에서 "초과근무" 를 켜고 결재선까지 짰는데 아무 일도 안 일어나면,
+    /// 그건 기능이 없는 것보다 나쁘다 — <b>했다고 믿게 만든다.</b>
+    /// (사장님 오더 7번 · V2 "결재로 일원화")
+    /// </remarks>
+    [Fact]
+    public void 초과근무_설정이_있으면_상신코드도_있다()
+    {
+        if (!DocTypeLabelKeys().Contains("overtime"))
+        {
+            return; // 설정에서 내렸다면 이 시험은 대상 밖이다.
+        }
+
+        var hr = CodeLines(ReadSource(
+            "src", "HitPan.Application", "Services", "HrService.cs"));
+
+        Assert.True(
+            Regex.IsMatch(hr, @"TryCreateApprovalAsync\s*\([^;]*?""overtime""", RegexOptions.Singleline),
+            """
+            결재설정 화면에 "초과근무" 가 뜨는데(= 고객이 켤 수 있는데)
+            HrService 에서 "overtime" 으로 TryCreateApprovalAsync 를 부르는 곳이 없다.
+            고객이 켜고 결재선을 짜도 아무 일이 일어나지 않는다.
+            """);
+    }
+
+    /// <summary>
+    /// 🔴 초과근무 — 결재 승인이 <b>원본 <c>overtime.status</c></b> 까지 바꿔야 한다.
+    /// </summary>
+    /// <remarks>
+    /// 상신만 배선하고 원본 반영을 빠뜨리면 <b>"결재는 승인됐는데 신청서는 대기중"</b> 이 된다.
+    /// 화면이 <c>overtime.status</c> 로 칩을 그리므로 사용자에게는 <b>계속 "대기"</b> 로 보인다.
+    /// </remarks>
+    [Fact]
+    public void 초과근무_결재승인은_원본상태를_반영한다()
+    {
+        var hr = CodeLines(ReadSource(
+            "src", "HitPan.Application", "Services", "HrService.cs"));
+
+        // 상신 배선이 없으면 원본 반영을 요구할 이유도 없다(배선과 함께 들어와야 한다).
+        if (!Regex.IsMatch(hr, @"TryCreateApprovalAsync\s*\([^;]*?""overtime""", RegexOptions.Singleline))
+        {
+            return;
+        }
+
+        var code = ApprovalServiceCode();
+        var start = code.IndexOf("ProcessAsync", StringComparison.Ordinal);
+        Assert.True(start >= 0, "ProcessAsync 를 찾아야 한다");
+        var body = code[start..];
+
+        // 🔴 승인·반려를 ★따로★ 본다.
+        // ⚠️ 처음에는 "UPDATE overtime SET" 존재만 봤는데, 대조실험에서 승인 UPDATE 만
+        //    무력화했더니 ★반려 줄이 조건을 대신 만족시켜 시험이 통과했다.★
+        //    한쪽만 살아 있어도 초록불이 뜨는 반쪽 게이트였다 — 승인이 조용히 죽는다.
+        Assert.True(
+            Regex.IsMatch(body, @"UPDATE\s+overtime\s+SET\s+status\s*=\s*'approved'"),
+            """
+            초과근무 상신은 배선됐는데 결재 '승인' 이 원본(overtime)을 반영하지 않는다.
+            → 결재함에서 승인해도 신청서는 '대기중' 에 남고 화면 칩도 "대기" 로 보인다.
+            """);
+
+        Assert.True(
+            Regex.IsMatch(body, @"UPDATE\s+overtime\s+SET\s+status\s*=\s*'rejected'"),
+            """
+            초과근무 결재 '반려' 가 원본(overtime)을 반영하지 않는다.
+            → 반려해도 신청서는 '대기중' 에 남는다.
+            """);
+    }
+
+    /// <summary>
+    /// 🔴 <b>급여 무접촉</b> — 결재 승인이 급여 표를 건드리면 안 된다.
+    /// </summary>
+    /// <remarks>
+    /// 사장님 못박음(2026-08-21): <i>"급여는 수동입력원칙이야 그래서 급여가 휴직을 모르고
+    /// 사원만 알면 됨"</i> / <i>"사원마스터에 상태처리 급여는 수동설정으로 고객이 알아서"</i>.
+    /// 휴직·초과근무 승인은 <b>사원 상태까지</b>다. 금액은 고객이 직접 넣는다.
+    /// </remarks>
+    [Fact]
+    public void 결재승인은_급여표를_건드리지_않는다()
+    {
+        var code = ApprovalServiceCode();
+        var start = code.IndexOf("ProcessAsync", StringComparison.Ordinal);
+        Assert.True(start >= 0, "ProcessAsync 를 찾아야 한다");
+        var body = code[start..];
+
+        var payrollWrites = Regex.Matches(body, @"(UPDATE|INSERT\s+INTO|DELETE\s+FROM)\s+(payroll_\w+|severance_\w+)")
+            .Select(m => m.Value)
+            .ToList();
+
+        Assert.True(payrollWrites.Count == 0,
+            $"""
+            결재 승인이 급여 표를 건드린다: {string.Join(", ", payrollWrites)}
+            🔴 급여는 수동입력 원칙이다(사장님 2026-08-21).
+               결재·휴직·근태가 급여 금액을 자동으로 만들지 않는다.
+            """);
+    }
 }

@@ -755,6 +755,41 @@ public class ApprovalService : IApprovalService
                 }
             }
 
+            // ── 초과근무(overtime) 원본 반영 ────────────────────────────────────
+            // 작(2026-08-21) V2 — 사장님 결재: "결재로 일원화".
+            //
+            // 🔴 상신만 배선하고 여기를 빠뜨리면 "결재는 승인됐는데 신청서는 대기중" 이 된다.
+            //    화면(HrOvertimePage)이 overtime.status 로 칩을 그리므로 사용자에게는
+            //    계속 "대기" 로 보인다 — 전형적인 "고쳤는데 안 갔다".
+            //
+            // ⚠️ overtime 표에는 reject_reason 컬럼이 ★없다★ (leave_requests·hr_reports 와 다르다).
+            //    반려 사유는 approval_history.comment 에 전문이 남으므로 잃는 것은 없다.
+            //    없는 컬럼에 쓰면 런타임 500 이고, 이 UPDATE 는 결재 트랜잭션 안이라
+            //    결재 이력·상태 전이까지 전부 롤백된다(2026-08-13 에 겪은 ERROR 1406 과 같은 자리).
+            //
+            // ⚠️ 급여는 건드리지 않는다 — 사장님 못박음: "급여는 수동입력원칙".
+            //    승인은 status 만 바꾼다. 수당 계산·급여 반영 없다. hours 는 이미 저장돼 있고
+            //    급여 명세는 고객이 직접 넣는다.
+            //
+            // ⚠️ status='pending' 가드로 멱등 — 화면 자체 승인이 먼저 처리했으면 0행이라 무해하다.
+            if (doc.DocType == "overtime" && !string.IsNullOrEmpty(doc.RefId))
+            {
+                if (request.Action == "rejected")
+                {
+                    await _db.ExecuteAsync(new CommandDefinition(
+                        "UPDATE overtime SET status='rejected', approved_by=@Who, approved_at=NOW(6), updated_at=NOW(6) WHERE tenant_id=@TenantId AND overtime_id=@RefId AND status='pending'",
+                        new { Who = employeeId, TenantId = tenantId, RefId = doc.RefId },
+                        transaction: tx, cancellationToken: ct));
+                }
+                else if (request.Action == "approved" && doc.CurrentSeq >= doc.TotalLines)
+                {
+                    await _db.ExecuteAsync(new CommandDefinition(
+                        "UPDATE overtime SET status='approved', approved_by=@Who, approved_at=NOW(6), updated_at=NOW(6) WHERE tenant_id=@TenantId AND overtime_id=@RefId AND status='pending'",
+                        new { Who = employeeId, TenantId = tenantId, RefId = doc.RefId },
+                        transaction: tx, cancellationToken: ct));
+                }
+            }
+
             // 작(2026-08-13) 단계3: 업무보고서(일일·주간·월간·경위서) 원본 반영.
             // 🔴 이 배선이 없으면 결재함에서 승인해도 보고서는 "결재중" 에 머문다 — "되는 척" 이다.
             //    연차(위)와 같은 원칙으로 ★같은 트랜잭션★ 에서 동기화한다(헌법 #20 워크플로우 끊김 방지).

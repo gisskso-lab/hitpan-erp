@@ -119,6 +119,38 @@ public class HrService : IHrService
             """,
             new { Id = id, TenantId = tenantId, EmpId = employeeId, req.WorkDate,
                   Start = req.StartTime, End = req.EndTime, Hours = hours, Type = req.OvertimeType, req.Reason }, cancellationToken: ct));
+
+        // 작(2026-08-21) V2 — 사장님 결재: "결재로 일원화" / 오더 7번 "초과근무신청서 작성시 결재메뉴로".
+        //
+        // 🔴 종전에는 INSERT 만 하고 끝났다. 그런데 결재설정 화면에는 "초과근무" 가 떠서
+        //    고객이 켜고 결재선까지 짤 수 있었다 — 켜도 아무 일이 안 일어나는 상태였다.
+        //    (기능이 없는 것보다 나쁘다. 했다고 믿게 만든다.)
+        //
+        // ⚠️ amount 자리에 hours 를 넣는다. 연차가 LeaveDays 를 넣는 것과 같은 방식이다
+        //    (LeaveRequestService.cs:120). 이 자리는 '금액' 이 아니라 '기준값' 으로 쓰인다 —
+        //    고객이 결재설정에서 자동승인 기준을 시간으로 잡을 수 있다(예: 2시간 미만은 결재 불요).
+        //
+        // ⚠️ 예외를 삼키지 않는다(헌법 #15). 결재 트리거가 실패해도 초과근무 신청 자체는
+        //    이미 저장됐으므로 되돌리지 않는다 — 연차·보고서가 쓰는 방식과 같다.
+        var empName = await _db.QueryFirstOrDefaultAsync<string>(new CommandDefinition(
+            "SELECT emp_name FROM employees WHERE tenant_id = @TenantId AND employee_id = @EmpId",
+            new { TenantId = tenantId, EmpId = employeeId }, cancellationToken: ct)) ?? string.Empty;
+
+        try
+        {
+            await ApprovalTriggerHelper.TryCreateApprovalAsync(
+                _db, docType: "overtime", refId: id, refNo: id[..8],
+                title: $"초과근무 신청: {req.WorkDate:yyyy-MM-dd} {hours}시간",
+                amount: (decimal)hours,
+                tenantId: tenantId, requesterId: employeeId, requesterName: empName,
+                ct: ct, notifier: _notifier).ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Trace.TraceWarning(
+                $"[ApprovalTrigger] 초과근무 {id[..8]} 결재 트리거 실패: {ex}");
+        }
+
         return id;
     }
 
