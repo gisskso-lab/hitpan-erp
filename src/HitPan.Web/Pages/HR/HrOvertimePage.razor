@@ -1,10 +1,13 @@
 @page "/hr/overtime"
 @namespace HitPan.Web.Pages.HrUi
 @attribute [Authorize]
+@using HitPan.Web.Helpers
 @using HitPan.Web.Models
 @using HitPan.Web.Services
+@using Microsoft.AspNetCore.Components.Authorization
 @inject HrClientService HrSvc
 @inject ISnackbar Snackbar
+@inject AuthenticationStateProvider AuthStateProvider
 
 <PageTitle>초과근무</PageTitle>
 <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
@@ -46,7 +49,11 @@
             <MudTd><MudChip T="string" Size="Size.Small" Variant="Variant.Filled" Color="@(context.Status == "approved" ? Color.Success : context.Status == "rejected" ? Color.Error : Color.Warning)">@(context.Status switch { "approved" => "승인", "rejected" => "반려", _ => "대기" })</MudChip></MudTd>
             @* 봉합 (2026-06-23, 19차): 대기 상태일 때만 승인/반려 버튼 — 종전엔 신청만 되고 승인 경로가 없었다. *@
             <MudTd Style="text-align:center">
-                @if (context.Status == "pending")
+                @* 작(2026-08-21) 김삼성 상무 판정: 승인/반려는 관리자만.
+                   🔴 종전엔 status 만 봐서 일반 직원에게도 버튼이 보였고,
+                      본인이 신청한 건을 본인이 승인하는 버튼까지 떴다(인사 감사 지적 자리).
+                      휴직 화면(AbsencePage)은 처음부터 _isAdmin 으로 걸렀다 — 같은 기준으로 맞춘다. *@
+                @if (_isAdmin && context.Status == "pending")
                 {
                     <MudButton Size="Size.Small" Variant="Variant.Text" Color="Color.Success" OnClick="@(() => ProcessAsync(context, "approved"))">승인</MudButton>
                     <MudButton Size="Size.Small" Variant="Variant.Text" Color="Color.Error" OnClick="@(() => ProcessAsync(context, "rejected"))">반려</MudButton>
@@ -63,7 +70,25 @@
     private TimeSpan? _startTime = new(18, 0, 0);
     private TimeSpan? _endTime = new(21, 0, 0);
 
-    protected override async Task OnInitializedAsync() { _items = await HrSvc.GetOvertimeAsync(); }
+    private bool _isAdmin;
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            var auth = await AuthStateProvider.GetAuthenticationStateAsync();
+            _isAdmin = AccountTypeHelper.IsTenantAdmin(auth.User);
+        }
+        catch (Exception ex)
+        {
+            // 판정에 실패하면 관리자로 보지 않는다 — 못 읽었는데 열어주면 막은 적이 없는 것과 같다.
+            // (휴직 화면과 같은 원칙. 게이트: OvertimeApproverGateGuardTests)
+            Console.Error.WriteLine($"[HrOvertimePage] 계정 유형 판정 실패: {ex.GetType().Name}: {ex.Message}");
+            _isAdmin = false;
+        }
+
+        _items = await HrSvc.GetOvertimeAsync();
+    }
 
     private async Task SaveAsync()
     {
