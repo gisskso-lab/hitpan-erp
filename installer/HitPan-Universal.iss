@@ -1727,9 +1727,6 @@ procedure CurStepChanged(CurStep: TSetupStep);
 var
   ResultCode: Integer;
   JwtKey, AesKey, MariaRootPw: String;
-  TypedRootPw: String;    // R-2: 사용자가 입력한 기존 root 비번(로그·conf 기록 금지)
-  RootTry: Integer;       // R-2: 입력 시도 횟수(최대 3)
-  RootOk: Boolean;        // R-2: 실제 접속 성공 여부
   ConfFile, BatchFile, BootstrapFile: String;
   KeysContent, BatchContent, BootstrapContent: TStringList;
   SeedOk: Boolean;
@@ -1870,35 +1867,22 @@ begin
     //   🔴 입력값은 로그·conf 에 절대 기록하지 않는다(20260425작3:129, PRD:163).
     //      hitpan-keys.conf 에 적히는 MARIADB_ROOT_PW 는 아래 SyncRootPw 로
     //      실제 통한 값이 되며, 그 파일은 관리자 전용 ACL 이 걸린다.
+    //   ⚠️ 여기서 비번을 입력받지 않는다. 이 지점은 ssPostInstall 이라 마법사 페이지를
+    //      띄울 수 없고, Inno Setup 에는 InputQuery/InputBox 가 없다(빌드 1차 실패로 확인).
+    //      대신 **왜 막혔는지 그대로 말하고 멈춘다** — 종전의 침묵 실패
+    //      ("설치는 성공, 로그인은 사망", 검증서 6-1:187)보다 이쪽이 옳다.
+    //      입력 폴백이 필요하면 마법사 페이지(CreateInputQueryPage)로 앞단에
+    //      세워야 하며, 그것은 별도 작업지시서 사안이다.
     if not TryRootLogin(MariaRootPw) then begin
-      RootOk := False;
-      for RootTry := 1 to 3 do begin
-        if InputQuery('기존 데이터베이스 확인',
-             '이 컴퓨터에는 이미 데이터베이스가 설치되어 있습니다.' + #13#10 +
-             '설치를 계속하려면 그 관리자 비밀번호가 필요합니다.' + #13#10 + #13#10 +
-             '(' + IntToStr(RootTry) + '/3회)',
-             TypedRootPw) then begin
-          if TryRootLogin(TypedRootPw) then begin
-            MariaRootPw := TypedRootPw;
-            RootOk := True;
-            Break;
-          end
-          else
-            MsgBox('비밀번호가 맞지 않습니다. 다시 입력해 주세요.', mbError, MB_OK);
-        end
-        else
-          Break;   // 사용자가 취소
-      end;
-
-      // 🔴 침묵 실패 금지 — 왜 못 하는지 그대로 말한다(검증서 6-1:187).
-      if not RootOk then begin
-        MsgBox('설치를 계속할 수 없습니다.' + #13#10#13#10 +
-               '이 컴퓨터에 이미 설치된 데이터베이스의 관리자 비밀번호를' + #13#10 +
-               '확인하지 못했습니다. 비밀번호를 확인하신 뒤 설치를 다시' + #13#10 +
-               '실행해 주세요. (코드: DB-ROOT-AUTH)',
-               mbCriticalError, MB_OK);
-        Abort();
-      end;
+      MsgBox('설치를 계속할 수 없습니다.' + #13#10#13#10 +
+             '이 컴퓨터에는 이미 다른 데이터베이스가 설치되어 있고,' + #13#10 +
+             '그 관리자 비밀번호가 히트판이 사용하는 값과 다릅니다.' + #13#10#13#10 +
+             '아래 중 한 가지로 해결됩니다.' + #13#10 +
+             '  · 기존 데이터베이스를 제거한 뒤 설치를 다시 실행' + #13#10 +
+             '  · 고객센터에 연락하여 비밀번호를 맞춤' + #13#10#13#10 +
+             '(코드: DB-ROOT-AUTH)',
+             mbCriticalError, MB_OK);
+      Abort();
     end;
   end;
 
