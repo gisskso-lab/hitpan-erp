@@ -274,6 +274,37 @@ begin
   if FileExists('C:\Program Files\MySQL\MySQL Server 8.4\bin\mysql.exe') then Result := False;
 end;
 
+// ============================================================
+// 🔴 R-2 봉합 (20260820작5) — root 접속 가능 여부를 실제로 확인한다.
+//   글자 검사가 아니라 **붙여 본다**. 붙지 않으면 False.
+//   결과 판정은 mysql 종료코드로만 한다 — 화면 문자열을 읽지 않는다
+//   (한글 콘솔 인코딩에 좌우되면 그 자체가 거짓 게이트가 된다).
+// ============================================================
+function MySqlExePath: String;
+begin
+  Result := '';
+  if FileExists('C:\Program Files\MariaDB 11.4\bin\mysql.exe') then
+    Result := 'C:\Program Files\MariaDB 11.4\bin\mysql.exe'
+  else if FileExists('C:\Program Files\MariaDB 10.11\bin\mysql.exe') then
+    Result := 'C:\Program Files\MariaDB 10.11\bin\mysql.exe'
+  else if FileExists('C:\Program Files\MySQL\MySQL Server 8.4\bin\mysql.exe') then
+    Result := 'C:\Program Files\MySQL\MySQL Server 8.4\bin\mysql.exe';
+end;
+
+function TryRootLogin(Pw: String): Boolean;
+var
+  Exe: String;
+  Rc: Integer;
+begin
+  Result := False;
+  Exe := MySqlExePath();
+  if Exe = '' then Exit;
+  // -p 와 값 사이에 공백을 두지 않는다(mysql 규약). 실패해도 화면에 아무것도 남기지 않는다.
+  if Exec(Exe, Format('-h 127.0.0.1 -u root -p%s -e "SELECT 1"', [Pw]),
+          '', SW_HIDE, ewWaitUntilTerminated, Rc) then
+    Result := (Rc = 0);
+end;
+
 // WatchdogExists 제거 (2026-07-14 봉합): 설치 시점에 빌드PC 경로를 검사하는 논리 오류로
 //   워치독 추출을 전 고객에서 차단하던 함수 — [Files] 무조건 복사로 대체(위 봉합 주석 참조).
 
@@ -1696,6 +1727,9 @@ procedure CurStepChanged(CurStep: TSetupStep);
 var
   ResultCode: Integer;
   JwtKey, AesKey, MariaRootPw: String;
+  TypedRootPw: String;    // R-2: 사용자가 입력한 기존 root 비번(로그·conf 기록 금지)
+  RootTry: Integer;       // R-2: 입력 시도 횟수(최대 3)
+  RootOk: Boolean;        // R-2: 실제 접속 성공 여부
   ConfFile, BatchFile, BootstrapFile: String;
   KeysContent, BatchContent, BootstrapContent: TStringList;
   SeedOk: Boolean;
@@ -1729,7 +1763,46 @@ begin
   // 1. 보안 키 생성
   JwtKey := GenerateRandomKey(32);
   AesKey := GenerateRandomKey(32);
-  MariaRootPw := GenerateRandomKey(24);
+
+  // 🔴 R-1 봉합 (20260820작5, 사장님 지시) — root 비번을 통일한다.
+  //
+  //   종전: MariaRootPw := GenerateRandomKey(24)  — 설치마다 난수.
+  //   그런데 아래 4번 msiexec 은 NeedsMariaDB(=MariaDB 미설치) 일 때만 돈다.
+  //   ⇒ MariaDB 가 이미 깔린 PC 에서는 그 난수가 실제 DB 에 **적용되지 않는데**
+  //      이후 mysql 호출 12개소는 전부 그 난수를 쓴다 → ERROR 1045 → 설치 DOA.
+  //
+  //   실측 2026-08-20: 개발PC 설치 실패 재현. root 를 다른 값으로 재설정해도
+  //   여전히 실패했다 — 설치기가 자기가 방금 만든 난수를 쓰기 때문이다.
+  //
+  //   🔴 진짜 파괴력은 다중 사업자다. DetermineMultiTenantSlot() 은 한 PC 최대
+  //   5 사업자(슬롯별 DB·계정·포트·폴더 분리)를 이미 구현해 두었는데,
+  //   2번째 사업자 설치 시점엔 MariaDB 가 이미 있어 위 연쇄가 그대로 터진다.
+  //   ⇒ **설계된 다중 사업자 기능이 한 번도 동작한 적이 없다**(헌법 #20 P0).
+  //
+  //   아래 "root 는 통일하지 않는다" 주석(2026-08-11)은 지우지 않고 그 자리에
+  //   경위를 갱신해 남긴다(헌법 #1). 뒤집는 근거는
+  //   docs/운영기록/20260820작5_설치_root통일_다중사업자슬롯봉합_작업지시서.md §4.
+  //   요지: 한 PC = 한 고객사(같은 회사의 여러 사업자)이고, 실 격리는
+  //   hitpan_{tenantCode} 의 GRANT ALL ON {자기DB}.* 로 계정 단위에서 이미 선다.
+  //
+  //   값은 hitpan 계정과 같은 주입값을 쓴다 — 소스에 평문으로 적지 않는다
+  //   (2026-08-11 시크릿스캔 적발 이력).
+  //
+  //   ⚠️ G_DbPassword 변수를 쓰지 않는다. 그 변수는 아래 5번(DB 셋업) 구간에서야
+  //      값이 들어가는데, 이 지점은 그보다 **앞선다**. 변수를 참조하면 빈 문자열이
+  //      들어가 '-p' 뒤가 비고 → ERROR 1045 → 봉합 전과 똑같이 설치가 죽는다.
+  //      (봉합 직후 실측에서 이 순서 역전을 잡았다.)
+  //      전처리 상수를 직접 쓰면 대입 순서와 무관하다.
+  MariaRootPw := '{#HitPanDbPassword}';
+
+  // 🔴 문자 검사 — root 에도 동일 적용(사고 #26 정합).
+  //   장래 root 만 별도 값으로 갈릴 때 db-setup.bat 인용이 깨지는 것을 막는다.
+  if not IsSafeDbPassword(MariaRootPw) then begin
+    MsgBox('설치를 진행할 수 없습니다.' + #13#10#13#10 +
+           '내부 설정값이 올바르지 않습니다. 본사에 문의해 주세요. (코드: DBPW-ROOT)',
+           mbCriticalError, MB_OK);
+    Abort();
+  end;
 
   // 2. hitpan-keys.conf — 관리자만 읽기
   ConfFile := ExpandConstant('{app}\hitpan-keys.conf');
@@ -1780,6 +1853,53 @@ begin
          Format('/i "%s\mariadb.msi" /quiet SERVICENAME=MariaDB PASSWORD="%s"', [ExpandConstant('{tmp}'), MariaRootPw]),
          '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
     Sleep(10000);
+  end
+  else begin
+    // 🔴 R-2 봉합 (20260820작5) — 기존 MariaDB 는 root 비번이 통일값과 다를 수 있다.
+    //
+    //   R-1 로 통일했지만, **통일 이전에 설치된 MariaDB** 는 여전히 옛 값을 쓴다.
+    //   그 PC 는 지금까지 설치가 불가능했고(ERROR 1045 → TBL_COUNT=0),
+    //   고객이 본 것은 "고객센터에 문의해 주세요" 뿐이었다.
+    //
+    //   설계에는 이 폴백이 처음부터 있었다 —
+    //     docs/운영기록/20260425작3_원클릭설치_v1.0.7_S2시나리오.md:102
+    //     "root 실패 → 사용자에게 root 비번 요청"
+    //   구현만 빠져 있었고, 2026-07-31 검증서 6-1:187 이 "침묵 실패"로 적발했다.
+    //   여기서 그 설계를 구현한다.
+    //
+    //   🔴 입력값은 로그·conf 에 절대 기록하지 않는다(20260425작3:129, PRD:163).
+    //      hitpan-keys.conf 에 적히는 MARIADB_ROOT_PW 는 아래 SyncRootPw 로
+    //      실제 통한 값이 되며, 그 파일은 관리자 전용 ACL 이 걸린다.
+    if not TryRootLogin(MariaRootPw) then begin
+      RootOk := False;
+      for RootTry := 1 to 3 do begin
+        if InputQuery('기존 데이터베이스 확인',
+             '이 컴퓨터에는 이미 데이터베이스가 설치되어 있습니다.' + #13#10 +
+             '설치를 계속하려면 그 관리자 비밀번호가 필요합니다.' + #13#10 + #13#10 +
+             '(' + IntToStr(RootTry) + '/3회)',
+             TypedRootPw) then begin
+          if TryRootLogin(TypedRootPw) then begin
+            MariaRootPw := TypedRootPw;
+            RootOk := True;
+            Break;
+          end
+          else
+            MsgBox('비밀번호가 맞지 않습니다. 다시 입력해 주세요.', mbError, MB_OK);
+        end
+        else
+          Break;   // 사용자가 취소
+      end;
+
+      // 🔴 침묵 실패 금지 — 왜 못 하는지 그대로 말한다(검증서 6-1:187).
+      if not RootOk then begin
+        MsgBox('설치를 계속할 수 없습니다.' + #13#10#13#10 +
+               '이 컴퓨터에 이미 설치된 데이터베이스의 관리자 비밀번호를' + #13#10 +
+               '확인하지 못했습니다. 비밀번호를 확인하신 뒤 설치를 다시' + #13#10 +
+               '실행해 주세요. (코드: DB-ROOT-AUTH)',
+               mbCriticalError, MB_OK);
+        Abort();
+      end;
+    end;
   end;
 
   // 5. DB 셋업 (사고 #18 봉합 — 회사별 DB·user·비번 영역 분리)
@@ -1821,6 +1941,17 @@ begin
   //   🔴 root(MariaRootPw)는 통일하지 않는다 — 그 PC 의 DB 전부를 여는 열쇠라
   //      한 곳에서 새면 다른 고객사까지 열린다. 여기는 설치마다 무작위 그대로 둔다.
   //      (install.bat 도 root 는 통일하지 않고 설치자에게 물어본다.)
+  //
+  //   ⬛ 위 결정은 2026-08-20 사장님 지시로 뒤집혔다(20260820작5). 지우지 않고
+  //      경위를 남긴다(헌법 #1). 무작위로 두면 **MariaDB 가 이미 깔린 PC 에서
+  //      설치가 원천 불가**했다 — msiexec 은 NeedsMariaDB 일 때만 도는데
+  //      그 난수를 이후 mysql 호출이 전부 쓰기 때문이다(위 R-1 봉합 주석 참조).
+  //      특히 **2번째 사업자 설치**가 항상 이 자리에서 죽어, 슬롯 2~5 가
+  //      한 번도 동작한 적이 없었다.
+  //      "한 곳에서 새면 다른 고객사까지" 라는 전제도 이 구조에선 서지 않는다 —
+  //      한 PC 에 들어오는 것은 **같은 회사의 여러 사업자**이고, 실 격리는
+  //      hitpan_{tenantCode} 의 GRANT ALL ON {자기DB}.* 로 계정 단위에서 선다.
+  //      ⇒ 통일값 + 불일치 시 1회 입력 폴백(R-2)으로 대체한다.
   //
   //   값은 소스에 적지 않는다. 빌드 시 주입되고(HITPAN_DB_PASSWORD), 없으면 빌드가 멈춘다.
   //   평문으로 적어 두면 공개 저장소에 남고 시크릿 스캔이 막는다(2026-08-11 실제로 걸렸다).
