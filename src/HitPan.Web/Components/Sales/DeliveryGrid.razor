@@ -1,4 +1,7 @@
 @using HitPan.Web.Models
+@using HitPan.Web.Components.Common
+@using HitPan.Web.Services
+@inject PriceHintService HintService
 
 <MudTable T="DeliveryLineModel" Items="Lines" Dense="true" Hover="true" Striped="true" FixedHeader="true" Height="calc(100vh - 340px)">
     <HeaderContent>
@@ -19,7 +22,7 @@
         <MudTd>
             <div style="display:flex;align-items:center;gap:4px">
                 <MudAutocomplete T="string" Value="context.ItemName" SearchFunc="SearchItemAsync"
-                    ValueChanged="@(v => { context.ItemName = v; context.IsPlaceholder = false; AutoFillItem(context, v); NotifyChanged(); })"
+                    ValueChanged="@(async v => { context.ItemName = v; context.IsPlaceholder = false; await AutoFillItemAsync(context, v); NotifyChanged(); })"
                     Margin="Margin.Dense" Dense="true" Placeholder="품명 검색" />
                 <ItemTypeChip ItemType="@context.ItemType" />
             </div>
@@ -31,7 +34,12 @@
         </MudTd>
         <MudTd><MudTextField T="string" Value="context.Unit" ValueChanged="@(v => { context.Unit = v; NotifyChanged(); })" Margin="Margin.Dense" /></MudTd>
         <MudTd><MudNumericField T="decimal" Value="context.Qty" ValueChanged="@(v => { context.Qty = v; RecalcLine(context); })" Margin="Margin.Dense" /></MudTd>
-        <MudTd><MudNumericField T="decimal" Value="context.UnitPrice" ValueChanged="@(v => { context.UnitPrice = v; RecalcLine(context); })" Margin="Margin.Dense" /></MudTd>
+        @* 단가 — 커서를 올리면 참고값 4종이 뜬다 (20260820작4 · 설계2 C안). 입력은 막지 않는다. *@
+        <MudTd><PriceHintCell Value="context.UnitPrice"
+                              ValueChanged="@(v => { context.UnitPrice = v; RecalcLine(context); })"
+                              ItemId="@context.ItemId"
+                              PartnerId="@PartnerId"
+                              IsPurchase="false" /></MudTd>
         <MudTd Class="text-right">@context.Amount.ToString("N0")</MudTd>
         <MudTd Class="text-right">@context.VatAmount.ToString("N0")</MudTd>
         <MudTd><MudTextField T="string" Value="context.Note" ValueChanged="@(v => { context.Note = v; NotifyChanged(); })" Margin="Margin.Dense" /></MudTd>
@@ -57,7 +65,16 @@
         return Task.FromResult(ItemCache.Where(i => i.ItemName.Contains(value, StringComparison.OrdinalIgnoreCase)).Select(i => i.ItemName).Distinct());
     }
 
-    private void AutoFillItem(DeliveryLineModel line, string itemName)
+    /// <summary>
+    /// 품목을 고르면 규격·단위·단가를 채운다.
+    /// </summary>
+    /// <remarks>
+    /// 🔴 <b>업체특별단가가 있으면 그 값이 이긴다</b> (20260820작4 · 설계2 C안 · 사장님 확정).
+    ///   없으면 종전대로 판매단가로 채운다 — <b>기존 동작을 없애지 않는다</b>(헌법 #1).
+    /// ⚠️ 자동 적용에 끼는 축은 <b>업체특별단가 하나뿐</b>이다(설계2 §4-4).
+    /// ⚠️ 채운 값을 <b>잠그지 않는다.</b> 사람이 지우고 다시 칠 수 있다(게이트 G-4b).
+    /// </remarks>
+    private async Task AutoFillItemAsync(DeliveryLineModel line, string itemName)
     {
         if (ItemCache is null) return;
         var item = ItemCache.FirstOrDefault(i => i.ItemName == itemName);
@@ -67,7 +84,16 @@
         line.Unit = item.Unit;
         line.UnitPrice = item.SalePrice;
         line.ItemType = item.ItemType;  // promo/assembly 칩 자동 반영
+
+        var hint = await HintService.GetAsync(PartnerId, item.ItemId, isPurchase: false);
+        if (hint?.PartnerSpecialPrice is { } sp)
+        {
+            line.UnitPrice = sp;
+        }
     }
+
+    /// <summary>이 문서의 업체 — 참고값·자동 채움에 쓴다 (20260820작4 · 설계2 C안).</summary>
+    [Parameter] public string? PartnerId { get; set; }
 
     private bool AllSelected => Lines.Any(l => !l.IsPlaceholder) && Lines.Where(l => !l.IsPlaceholder).All(l => l.IsSelected);
 

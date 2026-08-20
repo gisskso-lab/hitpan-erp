@@ -1,4 +1,5 @@
 @using HitPan.Web.Models
+@using HitPan.Web.Components.Common
 @namespace HitPan.Web.Components.Sales
 
 <MudTable T="QuotationLineModel" Items="Lines" Dense="true" Hover="true" Striped="true" FixedHeader="true" Height="calc(100vh - 360px)">
@@ -29,7 +30,7 @@
         <MudTd @onclick="@(() => SelectRowAsync(context))">@context.No</MudTd>
         <MudTd>
             <MudAutocomplete T="string" Value="context.ItemName" SearchFunc="SearchItemAsync"
-                ValueChanged="@(async v => { await UpdateItemNameAsync(context, v); AutoFillItem(context, v); })"
+                ValueChanged="@(async v => { await UpdateItemNameAsync(context, v); await AutoFillItemAsync(context, v); })"
                 Margin="Margin.Dense" Dense="true" Placeholder="품명 검색" Disabled="@IsReadOnly" />
         </MudTd>
         <MudTd>
@@ -45,7 +46,14 @@
             <MudNumericField T="decimal" Value="context.Qty" ValueChanged="@(v => UpdateQtyAsync(context, v))" Margin="Margin.Dense" Class="quotation-num-right" Disabled="@IsReadOnly" />
         </MudTd>
         <MudTd>
-            <MudNumericField T="decimal" Value="context.UnitPrice" ValueChanged="@(v => UpdateUnitPriceAsync(context, v))" Margin="Margin.Dense" Class="quotation-num-right" Disabled="@IsReadOnly" />
+            @* 단가 — 커서를 올리면 참고값 4종이 뜬다 (20260820작4 · 설계2 C안). 입력은 막지 않는다. *@
+            <PriceHintCell Value="context.UnitPrice"
+                           ValueChanged="@(v => UpdateUnitPriceAsync(context, v))"
+                           ItemId="@context.ItemId"
+                           PartnerId="@PartnerId"
+                           IsPurchase="false"
+                           Disabled="@IsReadOnly"
+                           CssClass="quotation-num-right" />
         </MudTd>
         <MudTd>
             <MudNumericField T="decimal" Value="context.DiscountRate" ValueChanged="@(v => UpdateDiscountRateAsync(context, v))" Margin="Margin.Dense" Class="quotation-num-right" Disabled="@IsReadOnly" />

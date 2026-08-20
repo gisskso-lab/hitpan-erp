@@ -49,6 +49,9 @@ builder.Services.AddScoped<DeliveryService>();
 builder.Services.AddScoped<QuotationService>();
 builder.Services.AddScoped<SettingsService>();
 builder.Services.AddScoped<PartnerMasterService>();
+// 단가 참고값 말풍선 (20260820작4 · 설계2 C안) — 6화면(발주·매입·반품·견적·수주·판매) 공용.
+//   한 줄 캐시를 들고 있어 Scoped 다. Singleton 으로 바꾸면 업체를 바꿔도 앞 값이 남는다.
+builder.Services.AddScoped<PriceHintService>();
 builder.Services.AddScoped<ItemMasterService>();
 builder.Services.AddScoped<BomService>();
 builder.Services.AddScoped<PermissionService>();

@@ -1,0 +1,118 @@
+@using HitPan.Web.Models
+@using HitPan.Web.Services
+@namespace HitPan.Web.Components.Common
+@inject PriceHintService HintService
+
+@* 단가 입력칸 + 참고값 말풍선 (20260820작4 · 설계2 C안 · 사장님 확정 2026-08-20)
+
+   사장님 원문:
+     "단가는 모든 워크플로우 명세서 작성시(발주,판매,반품,견적,수주,판매) 직접 작성이 가능하되,
+      마우스 커서 갖다대면, 업체특별단가, 최종단가, 표준단가, 혹은 상품특별단가를
+      고객이 볼 수 있도록 해주는건?"
+     "고로 필터링은 필요가 없음 직접입력, 혹은 커서 갖다대서 나오는 금액 선택"
+
+   🔴 이 한 곳만 고치면 6화면이 같이 바뀐다.
+      화면마다 따로 짜면 값이 서로 달라지고, 그게 원장·회계까지 번진다(설계2 §4).
+
+   🔴 입력을 막지 않는다. 말풍선은 참고이고, 사람이 아무 값이나 칠 수 있다(게이트 G-5).
+*@
+
+<div class="hp-price-hint" @onmouseenter="LoadAsync">
+    <MudNumericField T="decimal"
+                     Value="Value"
+                     ValueChanged="OnValueChanged"
+                     Margin="Margin.Dense"
+                     HideSpinButtons="true"
+                     Disabled="Disabled"
+                     Class="@CssClass" />
+
+    @* 값이 하나도 없으면 말풍선을 아예 안 띄운다 — 빈 상자가 뜨면 고장으로 보인다. *@
+    @if (_hint is { HasAny: true })
+    {
+        <div class="hp-price-hint-pop">
+            @* ⚠️ 순서는 사장님이 부르신 순서 그대로다 —
+                 업체특별단가 · 최종단가 · 표준단가 · "혹은" 상품특별단가(맨 아래). *@
+            @RenderRow("업체특별단가", _hint.PartnerSpecialPrice, true)
+            @RenderRow("최종단가", _hint.LastPrice, false, _hint.LastPriceDate)
+            @RenderRow("표준단가", _hint.StdPrice, false)
+            @RenderRow("상품특별단가", _hint.ItemSpecialPrice, false)
+            <div class="hp-price-hint-foot">클릭하면 그 금액이 들어갑니다</div>
+        </div>
+    }
+</div>
+
+@code {
+    /// <summary>지금 칸에 있는 단가.</summary>
+    [Parameter] public decimal Value { get; set; }
+
+    [Parameter] public EventCallback<decimal> ValueChanged { get; set; }
+
+    /// <summary>이 줄의 상품. 안 정해졌으면 참고값을 안 읽는다.</summary>
+    [Parameter] public string? ItemId { get; set; }
+
+    /// <summary>이 문서의 업체. 안 정해졌으면 참고값을 안 읽는다.</summary>
+    [Parameter] public string? PartnerId { get; set; }
+
+    /// <summary>
+    /// 🔴 발주·매입·반품이면 true(산 값), 견적·수주·판매면 false(판 값).
+    /// 최종단가의 출처가 갈린다 — 섞이면 매입 화면에 판 가격이 뜬다.
+    /// </summary>
+    [Parameter] public bool IsPurchase { get; set; }
+
+    [Parameter] public bool Disabled { get; set; }
+
+    [Parameter] public string? CssClass { get; set; }
+
+    private PriceHint? _hint;
+
+    /// <summary>
+    /// 커서를 올렸을 때 읽는다.
+    /// </summary>
+    /// <remarks>
+    /// 🔴 <b>미리 읽지 않는다.</b> 줄이 수십 개인 명세서에서 화면을 열자마자 전부 읽으면
+    /// 요청이 줄 수만큼 나간다. 커서가 온 줄만 읽고, 읽은 값은 서비스가 캐시한다.
+    /// </remarks>
+    private async Task LoadAsync()
+    {
+        if (_hint is not null) return;
+        if (string.IsNullOrWhiteSpace(ItemId) || string.IsNullOrWhiteSpace(PartnerId)) return;
+
+        _hint = await HintService.GetAsync(PartnerId, ItemId, IsPurchase);
+        StateHasChanged();
+    }
+
+    private async Task OnValueChanged(decimal v) => await ValueChanged.InvokeAsync(v);
+
+    /// <summary>
+    /// 참고값 한 줄. <b>값이 없으면 줄 자체를 그리지 않는다</b> — 게이트 G-8.
+    /// </summary>
+    /// <remarks>
+    /// 🔴 <c>null</c> 을 0 으로 그리면 <b>진짜 0원과 구별이 안 된다.</b>
+    /// 경리가 0원을 실제 단가로 믿고 그대로 확정하면 매출이 0 으로 잡힌다.
+    /// </remarks>
+    private RenderFragment? RenderRow(string label, decimal? price, bool emphasize, DateTime? on = null)
+    {
+        if (price is null) return null;
+
+        return builder =>
+        {
+            builder.OpenElement(0, "div");
+            builder.AddAttribute(1, "class",
+                emphasize ? "hp-price-hint-row hp-price-hint-row--main" : "hp-price-hint-row");
+            builder.AddAttribute(2, "onclick",
+                EventCallback.Factory.Create(this, () => ValueChanged.InvokeAsync(price.Value)));
+
+            builder.OpenElement(3, "span");
+            builder.AddAttribute(4, "class", "hp-price-hint-label");
+            builder.AddContent(5, on.HasValue ? $"{label} ({on:yyyy-MM-dd})" : label);
+            builder.CloseElement();
+
+            builder.OpenElement(6, "span");
+            builder.AddAttribute(7, "class", "hp-price-hint-value");
+            builder.AddContent(8, price.Value.ToString("N0"));
+            builder.CloseElement();
+
+            builder.CloseElement();
+        };
+    }
+}

@@ -614,3 +614,43 @@ public sealed class PurchaseReturnListItem
     public string? Memo { get; set; }
     public bool IsChecked { get; set; }
 }
+
+/// <summary>
+/// 단가 참고값 4종 — 명세서 화면에서 <b>커서를 올리면 보여주는 값</b> (20260820작4 · 설계2 C안).
+/// </summary>
+/// <remarks>
+/// 🔴 <b>이 값들은 "적용된 단가" 가 아니다.</b> 사람이 보고 고르라고 주는 <b>참고 자료</b>다.
+/// 문서에 실제로 들어가는 값은 입력칸에 있는 것이고, 사람이 언제든 고칠 수 있다.
+///
+/// <para>
+/// ⚠️ <b>값이 없으면 <c>null</c> 이다. 0 이 아니다.</b> 0 으로 그리면 화면에서
+/// <b>진짜 0원과 구별이 안 된다</b>(게이트 G-8). 없는 줄은 <b>빼고 그린다.</b>
+/// </para>
+/// </remarks>
+public sealed class PriceHint
+{
+    public string ItemId { get; set; } = string.Empty;
+
+    /// <summary>업체특별단가 — 🔴 <b>자동 채움에 쓰이는 유일한 값</b>(C안).</summary>
+    public decimal? PartnerSpecialPrice { get; set; }
+
+    /// <summary>최종단가 — 그 업체와 마지막으로 거래한 단가(판매/매입이 서로 다르다).</summary>
+    public decimal? LastPrice { get; set; }
+
+    /// <summary>최종단가가 언제 거래분인지.</summary>
+    public DateTime? LastPriceDate { get; set; }
+
+    /// <summary>표준단가 — 상품 마스터의 기준 금액.</summary>
+    public decimal? StdPrice { get; set; }
+
+    /// <summary>
+    /// 상품특별단가 — 🔴 <b>표시 전용. 자동 채움에 끼지 않는다</b>(설계2 §4-4).
+    /// 사장님 판정: <i>"상품 특별단가는 존재 자체가 큰 의미가 없네"</i>
+    /// </summary>
+    public decimal? ItemSpecialPrice { get; set; }
+
+    /// <summary>보여줄 값이 하나라도 있나 — 없으면 말풍선을 아예 띄우지 않는다.</summary>
+    public bool HasAny =>
+        PartnerSpecialPrice.HasValue || LastPrice.HasValue
+        || StdPrice.HasValue || ItemSpecialPrice.HasValue;
+}

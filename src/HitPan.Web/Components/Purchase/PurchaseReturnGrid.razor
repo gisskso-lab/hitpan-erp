@@ -1,5 +1,8 @@
 @using HitPan.Web.Models
+@using HitPan.Web.Components.Common
+@using HitPan.Web.Services
 @namespace HitPan.Web.Components.Purchase
+@inject PriceHintService HintService
 
 @* 작지 #3 반품 전용 그리드 (사장님 작업지시 2026-05-31)
    PurchaseOrderGrid 재사용 한계 봉합 — 반품 사유 컬럼 + 반품 사유 메모 저장 *@
@@ -38,7 +41,7 @@
         <MudTd><MudCheckBox T="bool" Value="context.IsSelected" ValueChanged="@(v => { context.IsSelected = v; _allSelected = Lines.Where(x => !x.IsPlaceholder).All(x => x.IsSelected); })" /></MudTd>
         <MudTd>@context.No</MudTd>
         <MudTd><MudAutocomplete T="string" Value="context.ItemName" SearchFunc="SearchItemAsync"
-            ValueChanged="@(v => { context.ItemName = v; context.IsPlaceholder = false; AutoFillItem(context, v); NotifyChanged(); })"
+            ValueChanged="@(async v => { context.ItemName = v; context.IsPlaceholder = false; await AutoFillItemAsync(context, v); NotifyChanged(); })"
             Margin="Margin.Dense" Dense="true" Placeholder="품명 검색" /></MudTd>
         <MudTd>
             <ItemSpecAutocomplete ItemId="@context.ItemId" Value="@context.Spec"
@@ -46,7 +49,7 @@
         </MudTd>
         <MudTd><MudTextField T="string" Value="context.Unit" ValueChanged="@(v => { context.Unit = v; NotifyChanged(); })" Margin="Margin.Dense" /></MudTd>
         <MudTd><MudNumericField T="decimal" Value="context.Qty" ValueChanged="@(v => { context.Qty = v; RecalcLine(context); })" Margin="Margin.Dense" /></MudTd>
-        <MudTd><MudNumericField T="decimal" Value="context.UnitPrice" ValueChanged="@(v => { context.UnitPrice = v; RecalcLine(context); })" Margin="Margin.Dense" /></MudTd>
+        <MudTd><PriceHintCell Value="context.UnitPrice" ValueChanged="@(v => { context.UnitPrice = v; RecalcLine(context); })" ItemId="@context.ItemId" PartnerId="@PartnerId" IsPurchase="true" /></MudTd>
         <MudTd Class="text-right">@context.Amount.ToString("N0")</MudTd>
         <MudTd Class="text-right">@context.VatAmount.ToString("N0")</MudTd>
         <MudTd><MudTextField T="string" Value="context.Note" ValueChanged="@(v => { context.Note = v; NotifyChanged(); })" Margin="Margin.Dense" Placeholder="품목별 반품 사유" /></MudTd>
@@ -77,7 +80,16 @@
         return Task.FromResult(ItemCache.Where(i => i.ItemName.Contains(value, StringComparison.OrdinalIgnoreCase)).Select(i => i.ItemName).Distinct());
     }
 
-    private void AutoFillItem(DeliveryLineModel line, string itemName)
+    /// <summary>
+    /// 품목을 고르면 규격·단위·단가를 채운다.
+    /// </summary>
+    /// <remarks>
+    /// 🔴 <b>업체특별단가가 있으면 그 값이 이긴다</b> (20260820작4 · 설계2 C안 · 사장님 확정).
+    ///   없으면 종전대로 매입단가로 채운다 — <b>기존 동작을 없애지 않는다</b>(헌법 #1).
+    /// ⚠️ 자동 적용에 끼는 축은 <b>업체특별단가 하나뿐</b>이다(설계2 §4-4).
+    /// ⚠️ 채운 값을 <b>잠그지 않는다.</b> 사람이 지우고 다시 칠 수 있다(게이트 G-4b).
+    /// </remarks>
+    private async Task AutoFillItemAsync(DeliveryLineModel line, string itemName)
     {
         if (ItemCache is null) return;
         var item = ItemCache.FirstOrDefault(i => i.ItemName == itemName);
@@ -86,7 +98,16 @@
         line.Spec = item.Spec ?? "";
         line.Unit = item.Unit;
         line.UnitPrice = item.PurchasePrice;
+
+        var hint = await HintService.GetAsync(PartnerId, item.ItemId, isPurchase: true);
+        if (hint?.PartnerSpecialPrice is { } sp)
+        {
+            line.UnitPrice = sp;
+        }
     }
+
+    /// <summary>이 문서의 업체 — 참고값·자동 채움에 쓴다 (20260820작4 · 설계2 C안).</summary>
+    [Parameter] public string? PartnerId { get; set; }
 
     private async Task ToggleAllAsync(bool value)
     {
