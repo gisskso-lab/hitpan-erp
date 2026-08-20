@@ -706,6 +706,137 @@ public sealed class PartnerService : IPartnerService
         };
     }
 
+    /// <summary>
+    /// 단가 참고값 4종을 한 번에 읽는다 — 명세서 화면 말풍선용 (20260820작4 · 설계2).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// 🔴 <b>왜 한 번에 읽나</b> — 헌법 #16: <c>Task.WhenAll</c> 로 같은 커넥션을 동시에 쓰면 터진다.
+    /// <c>UNION ALL</c> 로 <b>한 왕복</b>에 끝낸다. 그리드에서 줄마다 부르는 자리라 왕복이 곧 체감 속도다.
+    /// </para>
+    ///
+    /// <para>
+    /// 🔴 <b><paramref name="isPurchase"/> 가 최종단가의 출처를 가른다.</b>
+    /// 판 값과 산 값은 다른 금액이다 — 발주·매입·반품이면 <c>purchase_receipt_items</c>,
+    /// 견적·수주·판매면 <c>sales_delivery_items</c> 에서 온다.
+    /// ⚠️ 이 갈래를 지우고 한쪽만 쓰면 <b>매입 화면에 판 가격이 뜬다.</b>
+    /// </para>
+    ///
+    /// <para>
+    /// ⚠️ <b>값이 없으면 <c>null</c> 로 둔다. 0 으로 채우지 마라</b>(게이트 G-8) —
+    /// 화면에서 <b>진짜 0원과 구별이 안 된다.</b>
+    /// </para>
+    ///
+    /// <para>
+    /// 🔴 <b>할인율 모드</b>: <c>partner_special_prices.price_type='discount'</c> 면
+    /// <c>special_price</c> 가 0 이고 할인율만 있다(<c>PartnerService.UpsertSpecialPriceAsync</c> 참고).
+    /// 그대로 주면 화면에 <b>0원</b>이 뜨므로 여기서 <b>표준단가 × (1 - 할인율/100)</b> 로 환산한다.
+    /// ⚠️ 표준단가가 없으면 환산할 밑값이 없다 ⇒ <c>NULL</c> 로 둔다(0 으로 만들지 않는다).
+    /// </para>
+    /// </remarks>
+    public async Task<PriceHintDto?> GetPriceHintAsync(
+        string partnerId, string itemId, string tenantId, bool isPurchase, CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(partnerId) || string.IsNullOrWhiteSpace(itemId))
+        {
+            return null;
+        }
+
+        await EnsureOpenAsync(ct).ConfigureAwait(false);
+
+        // 최종단가 — 화면 성격에 따라 매입/판매 중 한쪽만 읽는다(위 remarks 참고).
+        //
+        // 🔴 [괄호를 지우지 마라 — 실측으로 잡은 문법 오류] MariaDB 는 `UNION ALL` 로 묶인 각 갈래에
+        //   `ORDER BY`·`LIMIT` 이 붙으면 **괄호를 요구한다.** 없으면 파싱 단계에서 1064 로 죽는다
+        //   (2026-08-20 실 DB 실측 — 괄호 없이 짰다가 문법 오류를 받고 고쳤다).
+        //   ⚠️ 빌드는 통과한다. SQL 은 문자열이라 컴파일러가 못 본다 ⇒ **런타임 500** 이 된다.
+        var lastPriceSql = isPurchase
+            ? """
+              (SELECT 'last' AS Kind, ri.unit_price AS Price, r.receipt_date AS PriceDate
+               FROM purchase_receipt_items ri
+               JOIN purchase_receipts r
+                 ON r.receipt_id = ri.receipt_id AND r.tenant_id = ri.tenant_id
+               WHERE ri.tenant_id = @TenantId AND ri.item_id = @ItemId AND r.partner_id = @PartnerId
+               ORDER BY r.receipt_date DESC, r.created_at DESC
+               LIMIT 1)
+              """
+            : """
+              (SELECT 'last' AS Kind, di.unit_price AS Price, d.delivery_date AS PriceDate
+               FROM sales_delivery_items di
+               JOIN sales_deliveries d
+                 ON d.delivery_id = di.delivery_id AND d.tenant_id = di.tenant_id
+               WHERE di.tenant_id = @TenantId AND di.item_id = @ItemId AND d.partner_id = @PartnerId
+                 AND d.deleted_at IS NULL
+               ORDER BY d.delivery_date DESC, d.created_at DESC
+               LIMIT 1)
+              """;
+
+        var sql = $"""
+                   (SELECT 'partner' AS Kind,
+                           CASE
+                             WHEN IFNULL(psp.price_type, 'fixed') = 'discount'
+                               THEN CASE WHEN i.std_price IS NULL OR i.std_price = 0 THEN NULL
+                                         ELSE i.std_price * (1 - IFNULL(psp.discount_rate, 0) / 100) END
+                             ELSE psp.special_price
+                           END AS Price,
+                           NULL AS PriceDate
+                    FROM partner_special_prices psp
+                    LEFT JOIN items i ON i.item_id = psp.item_id AND i.tenant_id = psp.tenant_id
+                    WHERE psp.tenant_id = @TenantId AND psp.partner_id = @PartnerId
+                      AND psp.item_id = @ItemId AND psp.is_active = 1
+                    LIMIT 1)
+
+                   UNION ALL
+
+                   (SELECT 'std' AS Kind, i.std_price AS Price, NULL AS PriceDate
+                    FROM items i
+                    WHERE i.tenant_id = @TenantId AND i.item_id = @ItemId
+                    LIMIT 1)
+
+                   UNION ALL
+
+                   (SELECT 'item' AS Kind,
+                           CASE
+                             WHEN IFNULL(isp.price_type, 'fixed') = 'discount'
+                               THEN CASE WHEN i2.std_price IS NULL OR i2.std_price = 0 THEN NULL
+                                         ELSE i2.std_price * (1 - IFNULL(isp.discount_rate, 0) / 100) END
+                             ELSE isp.unit_price
+                           END AS Price,
+                           NULL AS PriceDate
+                    FROM item_special_prices isp
+                    LEFT JOIN items i2 ON i2.item_id = isp.item_id AND i2.tenant_id = isp.tenant_id
+                    WHERE isp.tenant_id = @TenantId AND isp.item_id = @ItemId
+                      AND isp.partner_id = @PartnerId AND isp.is_active = 1
+                    LIMIT 1)
+
+                   UNION ALL
+
+                   {lastPriceSql}
+                   """;
+
+        var rows = await _db.QueryAsync<(string Kind, decimal? Price, DateTime? PriceDate)>(
+            new CommandDefinition(sql,
+                new { TenantId = tenantId, PartnerId = partnerId, ItemId = itemId },
+                cancellationToken: ct)).ConfigureAwait(false);
+
+        var hint = new PriceHintDto { ItemId = itemId };
+        foreach (var r in rows)
+        {
+            switch (r.Kind)
+            {
+                case "partner": hint.PartnerSpecialPrice = r.Price; break;
+                case "std": hint.StdPrice = r.Price; break;
+                case "item": hint.ItemSpecialPrice = r.Price; break;
+                case "last":
+                    hint.LastPrice = r.Price;
+                    hint.LastPriceDate = r.PriceDate;
+                    break;
+            }
+        }
+
+        return hint;
+    }
+
     private async Task EnsureOpenAsync(CancellationToken ct)
     {
         if (_db.State == ConnectionState.Open)

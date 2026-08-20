@@ -1,4 +1,5 @@
 using HitPan.Web.Models;
+using HitPan.Web.Services;
 using Microsoft.AspNetCore.Components;
 
 namespace HitPan.Web.Components.Sales;
@@ -94,7 +95,13 @@ public partial class QuotationGrid : ComponentBase
     /// <summary>
     /// 품목 선택 시 규격·단위·단가를 자동 채운다.
     /// </summary>
-    private void AutoFillItem(QuotationLineModel line, string itemName)
+    /// <remarks>
+    /// 🔴 <b>업체특별단가가 있으면 그 값이 이긴다</b> (20260820작4 · 설계2 C안 · 사장님 확정).
+    ///   없으면 종전대로 판매단가로 채운다 — <b>기존 동작을 없애지 않는다</b>(헌법 #1).
+    /// ⚠️ 자동 적용에 끼는 축은 <b>업체특별단가 하나뿐</b>이다(설계2 §4-4).
+    /// ⚠️ 채운 값을 <b>잠그지 않는다.</b> 사람이 지우고 다시 칠 수 있다(게이트 G-4b).
+    /// </remarks>
+    private async Task AutoFillItemAsync(QuotationLineModel line, string itemName)
     {
         if (ItemCache is null) return;
         var item = ItemCache.FirstOrDefault(i => i.ItemName == itemName);
@@ -103,7 +110,19 @@ public partial class QuotationGrid : ComponentBase
         line.Spec = item.Spec ?? "";
         line.Unit = item.Unit;
         line.UnitPrice = item.SalePrice;
+
+        var hint = await HintService.GetAsync(PartnerId, item.ItemId, isPurchase: false);
+        if (hint?.PartnerSpecialPrice is { } sp)
+        {
+            line.UnitPrice = sp;
+        }
     }
+
+    /// <summary>이 문서의 업체 — 참고값·자동 채움에 쓴다 (20260820작4 · 설계2 C안).</summary>
+    [Parameter] public string? PartnerId { get; set; }
+
+    /// <summary>단가 참고값 조회 — 6화면 공용 서비스.</summary>
+    [Inject] private PriceHintService HintService { get; set; } = default!;
 
     /// <summary>
     /// 품목명을 갱신한다.

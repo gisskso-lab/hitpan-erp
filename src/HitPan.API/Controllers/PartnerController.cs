@@ -255,6 +255,46 @@ public class PartnerController : ControllerBase
         return Ok();
     }
 
+    /// <summary>
+    /// 단가 참고값 4종을 읽는다 — 명세서 화면 말풍선용 (20260820작4 · 설계2).
+    /// </summary>
+    /// <remarks>
+    /// 🔴 사장님 설계: <i>"마우스 커서 갖다대면, 업체특별단가·최종단가·표준단가·혹은
+    /// 상품특별단가를 고객이 볼 수 있도록"</i>
+    ///
+    /// <para>
+    /// ⚠️ <paramref name="purchase"/> 는 <b>최종단가의 출처</b>를 가른다 —
+    /// 발주·매입·반품은 <c>true</c>(산 값), 견적·수주·판매는 <c>false</c>(판 값).
+    /// </para>
+    ///
+    /// <para>
+    /// 🔴 권한은 <b>조회 계열</b>(<c>SalesOnly</c>)로 둔다. 단가 <b>등록</b>은
+    /// <c>SalesManager</c> 지만, 이 값은 명세서를 쓰는 실무자가 <b>보기만</b> 하는 것이라
+    /// 등록 권한을 요구하면 <b>정작 쓸 사람이 못 본다.</b>
+    /// ⚠️ 담당업체 제한(<c>sales_user</c>)은 위 조회 API 와 <b>똑같이</b> 건다 — 남의 업체 단가는 못 본다.
+    /// </para>
+    /// </remarks>
+    [HttpGet("{id}/price-hint/{itemId}")]
+    [Authorize(Policy = "SalesOnly")]
+    public async Task<IActionResult> GetPriceHint(
+        string id, string itemId, [FromQuery] bool purchase, CancellationToken ct)
+    {
+        var tenantId = HttpContext.Items["TenantId"]?.ToString();
+        if (string.IsNullOrEmpty(tenantId)) return Forbid();
+
+        var role = User.FindFirst(ClaimTypes.Role)?.Value;
+        var employeeId = User.FindFirst("employee_id")?.Value;
+        if (role == "sales_user")
+        {
+            var ok = await _partnerService.IsAssignedPartnerAsync(employeeId, id, tenantId, ct);
+            if (!ok) return Forbid();
+        }
+
+        var hint = await _partnerService.GetPriceHintAsync(id, itemId, tenantId, purchase, ct)
+            .ConfigureAwait(false);
+        return Ok(hint);
+    }
+
     [HttpDelete("{id}/special-prices/{itemId}")]
     [Authorize(Policy = "SalesManager")]
     public async Task<IActionResult> DeleteSpecialPrice(string id, string itemId, CancellationToken ct)

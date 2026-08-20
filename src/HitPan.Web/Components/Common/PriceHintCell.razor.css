@@ -1,0 +1,63 @@
+/* 단가 참고값 말풍선 (20260820작4 · 설계2 C안)
+
+   커서를 올린 줄에만 뜬다. 그리드 안이라 자리가 좁으므로 칸 위로 띄운다. */
+
+.hp-price-hint {
+    position: relative;
+}
+
+/* 말풍선 — 기본은 숨김. 칸에 커서가 올라간 동안만 보인다. */
+.hp-price-hint-pop {
+    display: none;
+    position: absolute;
+    right: 0;
+    bottom: calc(100% + 4px);
+    z-index: 30;
+    min-width: 190px;
+    padding: 6px 0 4px;
+    background: var(--mud-palette-surface, #fff);
+    border: 1px solid var(--mud-palette-lines-default, #d5d8dc);
+    border-radius: 6px;
+    box-shadow: 0 4px 14px rgba(0, 0, 0, .16);
+    font-size: .78rem;
+}
+
+.hp-price-hint:hover .hp-price-hint-pop {
+    display: block;
+}
+
+.hp-price-hint-row {
+    display: flex;
+    justify-content: space-between;
+    gap: 14px;
+    padding: 3px 10px;
+    cursor: pointer;
+    white-space: nowrap;
+}
+
+.hp-price-hint-row:hover {
+    background: var(--mud-palette-action-default-hover, #f1f3f5);
+}
+
+/* 업체특별단가 — 자동 채움에 쓰이는 값이라 눈에 먼저 들어와야 한다. */
+.hp-price-hint-row--main .hp-price-hint-label,
+.hp-price-hint-row--main .hp-price-hint-value {
+    font-weight: 700;
+    color: var(--mud-palette-primary, #1867c0);
+}
+
+.hp-price-hint-label {
+    color: var(--mud-palette-text-secondary, #6b7280);
+}
+
+.hp-price-hint-value {
+    font-variant-numeric: tabular-nums;
+}
+
+.hp-price-hint-foot {
+    margin-top: 3px;
+    padding: 3px 10px 0;
+    border-top: 1px solid var(--mud-palette-lines-default, #e5e7eb);
+    color: var(--mud-palette-text-disabled, #9aa0a6);
+    font-size: .72rem;
+}
