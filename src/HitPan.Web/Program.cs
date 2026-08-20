@@ -83,6 +83,7 @@ builder.Services.AddScoped<DataResetService>();
 builder.Services.AddScoped<LogService>();
 builder.Services.AddScoped<BillsCardsBankService>();
 builder.Services.AddScoped<EmailClientService>();
+builder.Services.AddScoped<FaxClientService>();   // 20260821작1 W3
 // 작B v3.0 (2026-05-26): 전자세금계산서 인증서 등록 (방식 A 다이렉트)
 builder.Services.AddScoped<TaxInvoiceCertClientService>();
 builder.Services.AddScoped<LeaveRequestService>();

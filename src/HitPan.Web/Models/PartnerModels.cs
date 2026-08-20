@@ -86,6 +86,9 @@ public sealed class PartnerDetailModel : PartnerListRow
     public string? ZipCode { get; set; }
     public string? Address { get; set; }
     public string? AddressDetail { get; set; }
+    // 20260821작1 W1: 카카오맵·내비 좌표 (서버가 주소로 채운다)
+    public decimal? Latitude { get; set; }
+    public decimal? Longitude { get; set; }
     public string? Email { get; set; }
     public string? Homepage { get; set; }
     public string? ManagerName { get; set; }

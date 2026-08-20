@@ -47,6 +47,10 @@ public class PartnerDetailDto : PartnerListDto
 
     public string? AddressDetail { get; set; }
 
+    // 20260821작1 W1: 카카오맵·내비 딥링크용 좌표. NULL 이면 주소 방식으로 폴백한다 (§#20).
+    public decimal? Latitude { get; set; }
+    public decimal? Longitude { get; set; }
+
     public string? ManagerTel { get; set; }
 
     public string TaxType { get; set; } = "taxable";
@@ -96,6 +100,10 @@ public class CreatePartnerDto
 
     [MaxLength(200)]
     public string? AddressDetail { get; set; }
+
+    // 20260821작1 W1: 좌표. 저장 시 서버가 주소로 채워 넣는다 (반자동 — 사람이 수정 가능).
+    public decimal? Latitude { get; set; }
+    public decimal? Longitude { get; set; }
 
     [MaxLength(100)]
     public string? Email { get; set; }

@@ -1013,6 +1013,87 @@ CREATE TABLE `email_send_history` (
 -- Table structure for table `email_settings`
 --
 
+--
+-- Table structure for table `geocoding_settings`  (DB-105)
+--
+
+DROP TABLE IF EXISTS `geocoding_settings`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!40101 SET character_set_client = utf8mb4 */;
+CREATE TABLE `geocoding_settings` (
+  `tenant_id` varchar(36) NOT NULL,
+  `provider` varchar(30) NOT NULL DEFAULT 'kakao',
+  `api_key_enc` varbinary(512) DEFAULT NULL,
+  `is_active` tinyint(1) NOT NULL DEFAULT 0,
+  `last_test_at` datetime DEFAULT NULL,
+  `last_test_result` varchar(20) DEFAULT NULL,
+  `last_test_error` text DEFAULT NULL,
+  `created_at` datetime NOT NULL DEFAULT current_timestamp(),
+  `updated_at` datetime NOT NULL DEFAULT current_timestamp() ON UPDATE current_timestamp(),
+  PRIMARY KEY (`tenant_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
+
+--
+-- Table structure for table `fax_send_history`  (DB-105)
+--
+
+DROP TABLE IF EXISTS `fax_send_history`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!40101 SET character_set_client = utf8mb4 */;
+CREATE TABLE `fax_send_history` (
+  `fax_id` varchar(36) NOT NULL,
+  `tenant_id` varchar(36) NOT NULL,
+  `sent_at` datetime NOT NULL,
+  `sent_by_user` varchar(36) DEFAULT NULL,
+  `document_type` varchar(20) NOT NULL,
+  `document_no` varchar(40) NOT NULL,
+  `document_id` varchar(36) DEFAULT NULL,
+  `partner_id` varchar(36) DEFAULT NULL,
+  `recipient_fax_no` varchar(20) NOT NULL,
+  `recipient_name` varchar(60) DEFAULT NULL,
+  `page_count` int(11) DEFAULT NULL,
+  `provider` varchar(30) NOT NULL DEFAULT 'mock',
+  `provider_job_id` varchar(100) DEFAULT NULL,
+  `status` varchar(20) NOT NULL,
+  `error_message` text DEFAULT NULL,
+  `provider_response` varchar(500) DEFAULT NULL,
+  PRIMARY KEY (`fax_id`),
+  KEY `ix_faxhist_tenant_date` (`tenant_id`,`sent_at` DESC),
+  KEY `ix_faxhist_doc` (`tenant_id`,`document_type`,`document_no`),
+  KEY `ix_faxhist_partner` (`tenant_id`,`partner_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
+
+--
+-- Table structure for table `fax_settings`  (DB-105)
+--
+
+DROP TABLE IF EXISTS `fax_settings`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!40101 SET character_set_client = utf8mb4 */;
+CREATE TABLE `fax_settings` (
+  `tenant_id` varchar(36) NOT NULL,
+  `provider` varchar(30) NOT NULL DEFAULT 'mock',
+  `api_endpoint` varchar(200) DEFAULT NULL,
+  `api_key_enc` varbinary(512) DEFAULT NULL,
+  `api_secret_enc` varbinary(512) DEFAULT NULL,
+  `sender_fax_no` varchar(20) DEFAULT NULL,
+  `sender_name` varchar(60) DEFAULT NULL,
+  `is_active` tinyint(1) NOT NULL DEFAULT 0,
+  `last_test_at` datetime DEFAULT NULL,
+  `last_test_result` varchar(20) DEFAULT NULL,
+  `last_test_error` text DEFAULT NULL,
+  `created_at` datetime NOT NULL DEFAULT current_timestamp(),
+  `updated_at` datetime NOT NULL DEFAULT current_timestamp() ON UPDATE current_timestamp(),
+  PRIMARY KEY (`tenant_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
+
+--
+-- Table structure for table `email_settings`
+--
+
 DROP TABLE IF EXISTS `email_settings`;
 /*!40101 SET @saved_cs_client     = @@character_set_client */;
 /*!40101 SET character_set_client = utf8mb4 */;
@@ -1765,11 +1846,13 @@ CREATE TABLE `items` (
   `unit_secondary` varchar(10) DEFAULT NULL COMMENT '2? ?? (S_UNIT2)',
   `reorder_point` decimal(15,3) DEFAULT 0.000 COMMENT '??? ?? (S_REORD)',
   `supplier_default_id` char(36) DEFAULT NULL COMMENT '?? ??? (S_VENDOR FK)',
+  `default_warehouse_id` varchar(36) DEFAULT NULL COMMENT 'DB-105 item default warehouse',
   PRIMARY KEY (`item_id`),
   UNIQUE KEY `uq_tenant_code` (`tenant_id`,`item_code`),
   KEY `idx_tenant_name` (`tenant_id`,`item_name`),
   KEY `idx_tenant_active` (`tenant_id`,`is_active`),
-  KEY `idx_items_supplier` (`tenant_id`,`supplier_default_id`)
+  KEY `idx_items_supplier` (`tenant_id`,`supplier_default_id`),
+  KEY `idx_items_default_wh` (`tenant_id`,`default_warehouse_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
@@ -2641,6 +2724,8 @@ CREATE TABLE `partners` (
   `email` varchar(100) DEFAULT NULL,
   `address` varchar(200) DEFAULT NULL,
   `address_detail` varchar(200) DEFAULT NULL,
+  `latitude` decimal(10,7) DEFAULT NULL COMMENT 'DB-105 kakao map/navi latitude',
+  `longitude` decimal(10,7) DEFAULT NULL COMMENT 'DB-105 kakao map/navi longitude',
   `credit_limit` decimal(15,2) DEFAULT NULL,
   `payment_terms` tinyint(3) unsigned DEFAULT NULL,
   `bank_name` varchar(30) DEFAULT NULL,

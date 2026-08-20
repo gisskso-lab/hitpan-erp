@@ -151,6 +151,19 @@ builder.Services.AddScoped<HitPan.API.Services.Notifications.INotificationDispat
 builder.Services.AddScoped<IPasswordEncryptor, PasswordEncryptorAdapter>();
 builder.Services.AddScoped<IPdfRenderService, PdfRenderService>();
 builder.Services.AddScoped<IEmailService, EmailService>();
+// 팩스 (20260821작1 W3) — 이메일과 동일 골격.
+//   공급자는 IFaxProvider 로 분리했다. 지금은 Mock 하나뿐이며 실제 송출하지 않는다.
+//   🔴 벤더 결재 후 실제 Provider 를 여기에 한 줄 추가하면 실송출로 전환된다.
+//      (Mock 은 지우지 말 것 — 공급자 미설정 테넌트의 폴백이자 안전장치다)
+builder.Services.AddScoped<IFaxProvider, MockFaxProvider>();
+builder.Services.AddScoped<IFaxService, FaxService>();
+// 좌표 변환 (20260821작1 W1) — 카카오맵·내비 딥링크가 좌표를 요구한다.
+//   키는 고객사별로 DB(geocoding_settings)에 암호화 보관한다 (§#18·#21·#22).
+//   키 미설정이면 변환을 시도하지 않고 지도는 현행 주소 방식으로 열린다 (§#20).
+builder.Services.AddHttpClient<IGeocodingService, KakaoGeocodingService>(c =>
+{
+    c.Timeout = TimeSpan.FromSeconds(10);   // 좌표 조회가 업체 저장을 붙잡지 않게 한다
+});
 // 작B v3.0 (2026-05-26): 전자세금계산서 방식 A 다이렉트 — 사장님 결재 5/25 22:00 + 23:00
 // 헌법 #22 (본사 데이터 0) + #23 (5중 검증) + #25 (3대 원칙) + 보안 매니저 1·2 + Red Team 본질 진단
 builder.Services.AddSingleton<HitPan.Application.Services.Security.ITpmKeyService,

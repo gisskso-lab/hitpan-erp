@@ -127,23 +127,29 @@ public class PurchaseService : IPurchaseService
         var emptyWhLines = request.Items.Where(x => string.IsNullOrWhiteSpace(x.WarehouseId)).ToList();
         if (emptyWhLines.Count > 0)
         {
-            var defaultWh = await _db.QueryFirstOrDefaultAsync<string>(
-                new CommandDefinition(
-                    """
-                    SELECT warehouse_id FROM warehouses
-                     WHERE tenant_id = @TenantId AND is_active = 1
-                     ORDER BY (CASE WHEN wh_code IN ('MAIN','WH-MAIN') THEN 0 ELSE 1 END), wh_code
-                     LIMIT 1
-                    """,
-                    new { TenantId = _currentTenant.TenantId },
-                    cancellationToken: ct));
-            if (string.IsNullOrEmpty(defaultWh))
-            {
-                throw new InvalidOperationException("등록된 창고가 없습니다.");
-            }
+            // 봉합 (2026-08-21, 20260821작1 W6, 사장님 결재 A안): 품목 기본창고를 먼저 본다.
+            //   종전엔 곧바로 테넌트 폴백으로 갔고, 상품마스터의 '기본 창고' 는 저장조차 되지 않아
+            //   설정해도 발주·매입이 그대로였다("설정하면 발주,매입이 안되는거 같은데" — 사장님).
+            //   테넌트 폴백은 지우지 않고 그 앞에 한 단계만 얹는다 (§#1).
+            var itemDefaults = await LoadItemDefaultWarehousesAsync(
+                _currentTenant.TenantId!, emptyWhLines.Select(x => x.ItemId), ct).ConfigureAwait(false);
+
+            string? tenantDefaultWh = null;
             foreach (var line in emptyWhLines)
             {
-                line.WarehouseId = defaultWh;
+                if (itemDefaults.TryGetValue(line.ItemId, out var itemWh) && !string.IsNullOrEmpty(itemWh))
+                {
+                    line.WarehouseId = itemWh;
+                    continue;
+                }
+                // 품목 기본창고가 없을 때만 테넌트 폴백 — 조회는 1회만 (§#16 정신)
+                tenantDefaultWh ??= await ResolveTenantDefaultWarehouseAsync(_currentTenant.TenantId!, ct)
+                    .ConfigureAwait(false);
+                if (string.IsNullOrEmpty(tenantDefaultWh))
+                {
+                    throw new InvalidOperationException("등록된 창고가 없습니다.");
+                }
+                line.WarehouseId = tenantDefaultWh;
             }
         }
 
@@ -651,24 +657,25 @@ public class PurchaseService : IPurchaseService
             //   wh_code='MAIN'(또는 'WH-MAIN') 을 우선, 그 다음 wh_code 순으로 실제 활성 창고 1행을 고른다.
             //   프로비저닝(CompanyBootstrapController)이 가입 시 'MAIN' 창고를 항상 1개 만들므로 정상 경로에선 반드시 잡힌다.
             //   그래도 정말 없으면 판매처럼 명확한 에러를 던져 유령 id 기록을 원천 차단한다(헌법 #20 정합 차단이 유령 기록보다 안전).
-            var defaultWh = await _db.QueryFirstOrDefaultAsync<string>(
-                new CommandDefinition(
-                    """
-                    SELECT warehouse_id FROM warehouses
-                     WHERE tenant_id = @TenantId AND is_active = 1
-                     ORDER BY (CASE WHEN wh_code IN ('MAIN','WH-MAIN') THEN 0 ELSE 1 END), wh_code
-                     LIMIT 1
-                    """,
-                    new { TenantId = tenantId },
-                    cancellationToken: ct));
+            // 추가 (2026-08-21, 20260821작1 W6, 사장님 결재 A안): 품목 기본창고를 먼저 본다.
+            //   위 P0-4 폴백은 그대로 둔다 — 품목 기본창고가 없거나 무효일 때 받는 자리다 (§#1).
+            var itemDefaults = await LoadItemDefaultWarehousesAsync(
+                tenantId, emptyWhItems.Select(x => x.ItemId), ct).ConfigureAwait(false);
 
-            if (string.IsNullOrEmpty(defaultWh))
-            {
-                throw new InvalidOperationException("등록된 창고가 없습니다.");
-            }
-
+            string? defaultWh = null;
             foreach (var item in emptyWhItems)
             {
+                if (itemDefaults.TryGetValue(item.ItemId, out var itemWh) && !string.IsNullOrEmpty(itemWh))
+                {
+                    item.WarehouseId = itemWh;
+                    continue;
+                }
+
+                defaultWh ??= await ResolveTenantDefaultWarehouseAsync(tenantId, ct).ConfigureAwait(false);
+                if (string.IsNullOrEmpty(defaultWh))
+                {
+                    throw new InvalidOperationException("등록된 창고가 없습니다.");
+                }
                 item.WarehouseId = defaultWh;
             }
         }
@@ -1591,4 +1598,66 @@ public class PurchaseService : IPurchaseService
             throw;
         }
     }
+
+    // ─────────────────────────────────────────────────────────────────────
+    // 창고 결정 헬퍼 (20260821작1 W6, 사장님 결재 A안)
+    //
+    // 사장님 지적: "기본창고 설정하면 발주,매입이 안되는거 같은데"
+    //   원인은 두 겹이었다. ① 상품마스터 드롭다운이 저장을 안 했고(컬럼 자체가 없었다)
+    //   ② 발주·매입은 품목별 기본창고를 조회조차 하지 않고 테넌트 폴백만 썼다.
+    //   DB-105 로 ①을, 이 헬퍼로 ②를 푼다.
+    //
+    // 창고 결정 순서 (§#20 — 어느 단계에서도 안 끊긴다):
+    //   1. 라인에 직접 지정한 창고   2. items.default_warehouse_id
+    //   3. 테넌트 기본창고(MAIN 우선) 4. 없으면 명확한 오류
+    // ─────────────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// 품목별 기본창고를 한 번에 조회한다 (N+1 방지).
+    /// 🔴 warehouses 와 조인해 **실재하고 활성인 창고만** 돌려준다.
+    ///    창고가 지워지거나 비활성화된 뒤 items 에 남은 낡은 id 를 그대로 쓰면
+    ///    item_stock·stock_ledger 가 유령 창고에 쌓인다 — 10차 P0-4 가 막았던 사고다.
+    ///    유효하지 않으면 이 사전에서 빠지고 테넌트 폴백이 받는다.
+    /// </summary>
+    private async Task<Dictionary<string, string>> LoadItemDefaultWarehousesAsync(
+        string tenantId, IEnumerable<string> itemIds, CancellationToken ct)
+    {
+        var ids = itemIds.Where(x => !string.IsNullOrWhiteSpace(x)).Distinct().ToList();
+        if (ids.Count == 0) return new Dictionary<string, string>();
+
+        var rows = await _db.QueryAsync<(string ItemId, string WarehouseId)>(
+            new CommandDefinition(
+                """
+                SELECT i.item_id, i.default_warehouse_id
+                  FROM items i
+                  JOIN warehouses w
+                    ON w.warehouse_id = i.default_warehouse_id
+                   AND w.tenant_id    = i.tenant_id
+                   AND w.is_active    = 1
+                 WHERE i.tenant_id = @TenantId
+                   AND i.item_id IN @Ids
+                   AND i.default_warehouse_id IS NOT NULL
+                   AND i.default_warehouse_id <> ''
+                """,
+                new { TenantId = tenantId, Ids = ids },
+                cancellationToken: ct)).ConfigureAwait(false);
+
+        return rows.ToDictionary(r => r.ItemId, r => r.WarehouseId);
+    }
+
+    /// <summary>
+    /// 테넌트 기본창고 — 기존 폴백을 그대로 옮긴 것이다 (동작 변경 없음).
+    /// wh_code 'MAIN'/'WH-MAIN' 우선, 그다음 wh_code 순. 판매·BOM 과 동일 전략.
+    /// </summary>
+    private async Task<string?> ResolveTenantDefaultWarehouseAsync(string tenantId, CancellationToken ct)
+        => await _db.QueryFirstOrDefaultAsync<string>(
+            new CommandDefinition(
+                """
+                SELECT warehouse_id FROM warehouses
+                 WHERE tenant_id = @TenantId AND is_active = 1
+                 ORDER BY (CASE WHEN wh_code IN ('MAIN','WH-MAIN') THEN 0 ELSE 1 END), wh_code
+                 LIMIT 1
+                """,
+                new { TenantId = tenantId },
+                cancellationToken: ct)).ConfigureAwait(false);
 }

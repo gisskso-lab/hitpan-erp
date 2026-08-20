@@ -1,0 +1,161 @@
+@* 팩스 발송 다이얼로그 — 재사용 가능한 공통 컴포넌트 *@
+@* 사장님 오더 2026-08-21: "업체팩스번호: 실제 팩스전송" *@
+@namespace HitPan.Web.Components.Common
+@using HitPan.Web.Models
+@using HitPan.Web.Services
+@inject FaxClientService FaxApi
+
+<MudDialog>
+    <TitleContent>
+        <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="2">
+            <MudIcon Icon="@Icons.Material.Filled.Print" Color="Color.Secondary" />
+            <MudText Typo="Typo.h6">팩스 발송</MudText>
+        </MudStack>
+    </TitleContent>
+    <DialogContent>
+        <MudStack Spacing="3">
+
+            @* 🔴 공급자 미설정 경고 — 보내기 전에 알린다.
+                 누른 뒤에 "안 갔습니다" 라고 하면 이미 갔다고 믿은 뒤다. *@
+            @if (_settingsLoaded && !_canSendReal)
+            {
+                <MudAlert Severity="Severity.Warning" Dense="true">
+                    <MudText Typo="Typo.body2">
+                        <b>팩스 공급자가 설정되지 않았습니다.</b><br />
+                        지금 보내면 발송 기록만 남고 <b>실제로 전송되지 않습니다.</b><br />
+                        설정 › 팩스 설정에서 공급자를 먼저 등록하세요.
+                    </MudText>
+                </MudAlert>
+            }
+
+            <MudTextField T="string"
+                          Label="받는 팩스번호"
+                          @bind-Value="_recipientFaxNo"
+                          Placeholder="예: 02-1234-5678"
+                          Adornment="Adornment.Start"
+                          AdornmentIcon="@Icons.Material.Filled.Print"
+                          Variant="Variant.Outlined"
+                          Margin="Margin.Dense" />
+
+            <MudTextField T="string"
+                          Label="받는 곳 이름"
+                          @bind-Value="_recipientName"
+                          Variant="Variant.Outlined"
+                          Margin="Margin.Dense"
+                          Adornment="Adornment.Start"
+                          AdornmentIcon="@Icons.Material.Filled.Business" />
+
+            @if (!string.IsNullOrWhiteSpace(DocumentNo))
+            {
+                <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="1">
+                    <MudIcon Icon="@Icons.Material.Filled.Description" Size="Size.Small" Color="Color.Secondary" />
+                    <MudText Typo="Typo.body2">보낼 문서: <b>@DocumentNo</b></MudText>
+                </MudStack>
+            }
+        </MudStack>
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="Cancel" Variant="Variant.Text">취소</MudButton>
+        <MudButton OnClick="Send" Variant="Variant.Filled" Color="Color.Secondary"
+                   StartIcon="@Icons.Material.Filled.Send" Disabled="@_busy">
+            @(_busy ? "보내는 중…" : "보내기")
+        </MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter]
+    private IMudDialogInstance MudDialog { get; set; } = default!;
+
+    [Inject]
+    private ISnackbar Snackbar { get; set; } = default!;
+
+    /// <summary>문서 종류 키 — quotation/sales_order/delivery/tax_invoice/purchase_order/purchase_receipt.</summary>
+    [Parameter] public string DocumentTypeKey { get; set; } = string.Empty;
+
+    /// <summary>문서 번호 (표시용).</summary>
+    [Parameter] public string DocumentNo { get; set; } = string.Empty;
+
+    /// <summary>문서 PK — PDF 렌더링용.</summary>
+    [Parameter] public string DocumentId { get; set; } = string.Empty;
+
+    /// <summary>거래처 팩스번호 — 있으면 자동 채움.</summary>
+    [Parameter] public string? PartnerFaxNo { get; set; }
+
+    /// <summary>거래처명 — 있으면 자동 채움.</summary>
+    [Parameter] public string? PartnerName { get; set; }
+
+    /// <summary>거래처 ID (이력 기록용).</summary>
+    [Parameter] public string? PartnerId { get; set; }
+
+    private string _recipientFaxNo = string.Empty;
+    private string? _recipientName;
+    private bool _busy;
+    private bool _canSendReal;
+    private bool _settingsLoaded;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (!string.IsNullOrWhiteSpace(PartnerFaxNo) && string.IsNullOrEmpty(_recipientFaxNo))
+            _recipientFaxNo = PartnerFaxNo;
+        if (!string.IsNullOrWhiteSpace(PartnerName) && string.IsNullOrEmpty(_recipientName))
+            _recipientName = PartnerName;
+
+        if (!_settingsLoaded)
+        {
+            var cfg = await FaxApi.GetSettingsAsync();
+            _canSendReal = cfg.CanSendReal && cfg.IsActive;
+            _settingsLoaded = true;
+        }
+    }
+
+    private async Task Send()
+    {
+        if (string.IsNullOrWhiteSpace(_recipientFaxNo))
+        {
+            Snackbar.Add("받는 팩스번호를 입력하세요.", Severity.Warning);
+            return;
+        }
+
+        _busy = true;
+        try
+        {
+            var result = await FaxApi.SendDocumentAsync(new SendFaxModel
+            {
+                DocumentType = DocumentTypeKey,
+                DocumentId = DocumentId,
+                DocumentNo = DocumentNo,
+                PartnerId = PartnerId,
+                RecipientFaxNo = _recipientFaxNo.Trim(),
+                RecipientName = _recipientName
+            });
+
+            // 🔴 Mock 은 성공으로 표시하지 않는다. 실제로 안 갔기 때문이다 (§#23).
+            if (result.IsMock)
+            {
+                Snackbar.Add(
+                    result.Notice ?? "팩스 공급자가 설정되지 않아 실제로 전송되지 않았습니다.",
+                    Severity.Warning,
+                    cfg => cfg.VisibleStateDuration = 6000);
+                MudDialog.Close(DialogResult.Ok(false));
+                return;
+            }
+
+            if (result.Success)
+            {
+                Snackbar.Add($"팩스를 보냈습니다. ({_recipientFaxNo})", Severity.Success);
+                MudDialog.Close(DialogResult.Ok(true));
+            }
+            else
+            {
+                Snackbar.Add($"팩스 발송 실패: {result.Error}", Severity.Error, cfg => cfg.VisibleStateDuration = 6000);
+            }
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private void Cancel() => MudDialog.Cancel();
+}
