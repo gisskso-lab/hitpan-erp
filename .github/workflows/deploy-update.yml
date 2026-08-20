@@ -576,8 +576,9 @@ jobs:
         run: |
           # 🔴 버전 고정 (20260821작2) — build-installer.yml 과 같은 값으로 묶는다.
           #   두 워크플로가 다른 Inno 로 구우면 "인스톨러는 되는데 게시는 깨지는" 갈라짐이 난다.
-          #   6.7.3 = 20260821작2 봉합을 실제로 컴파일해 확인한 버전.
-          choco install innosetup -y --no-progress --version=6.7.3
+          #   6.7.1 = Chocolatey 가 실제로 제공하는 최신 버전(6.7.3 은 choco 에 없다 — 실측).
+          #     봉합 검증은 로컬 6.7.3. 둘 다 6.6.0 이후라 CreateCustomForm 새 시그니처가 같다.
+          choco install innosetup -y --no-progress --version=6.7.1
           if (-not (Test-Path 'C:\Program Files (x86)\Inno Setup 6\ISCC.exe')) {
             throw "Inno Setup 설치 후에도 ISCC.exe 를 찾을 수 없습니다."
           }
