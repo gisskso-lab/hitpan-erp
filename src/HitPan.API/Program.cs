@@ -500,10 +500,24 @@ app.Use(async (ctx, next) =>
     {
         // 봉합 2026-06-17 1.2.13 — CSP 3종 도메인 정합 (pretendard·다음우편·CF insights)
         h["Content-Security-Policy"] = "default-src 'self'; " +
-            "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://t1.daumcdn.net https://static.cloudflareinsights.com; " +
-            "script-src-elem 'self' 'unsafe-inline' 'unsafe-eval' https://t1.daumcdn.net https://static.cloudflareinsights.com; " +
-            "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://cdn.jsdelivr.net; " +
-            "style-src-elem 'self' 'unsafe-inline' https://fonts.googleapis.com https://cdn.jsdelivr.net; " +
+            // 🔴 [2026-08-20 3차 봉합 — `t1.kakaocdn.net`] 사장님 1.2.92 실측:
+            //   *"이 콘텐츠는 차단되었습니다. 문제를 해결하려면 사이트 소유자에게 문의하세요."*
+            //
+            //   [무엇을 놓쳤나] 1·2차는 **틀(frame-src)만** 봤다. 그런데 우편번호 창은
+            //     **`about:blank` iframe 에 `document.write` 로 그려진다**(로더 실측).
+            //     ⇒ 그 문서는 **우리 origin 을 물려받아 우리 CSP 를 그대로 따른다.**
+            //     ⇒ 틀을 열어 줘도 **그 안이 불러오는 스크립트·CSS 가 우리 CSP 에 막히면** 창이 빈 채로 뜬다.
+            //   [실측] `https://postcode.map.kakao.com/search` 문서가 부르는 것:
+            //     `t1.kakaocdn.net/postcode/cssjs/…/service.v2.min.js` · `…min.css` · jquery · tiara
+            //     ⇒ **`t1.kakaocdn.net` 이 script-src·style-src 에 없어 전부 차단**됐다.
+            //   🔴 [교훈 — 3번 만에 잡았다] 바깥 위젯을 붙일 때는 **틀 + 그 안의 자원**을 함께 본다.
+            //     `frame-src` 만 열고 끝내면 이 자리에 또 온다. 확인은 iframe 문서를 직접 받아
+            //     (`curl … /search`) 도메인을 `grep` 하는 것으로 끝난다.
+            //   ⚠️ `t1.daumcdn.net`(로더)과 `t1.kakaocdn.net`(창 내부 자원)은 **다른 도메인**이다. 둘 다 필요하다.
+            "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://t1.daumcdn.net https://t1.kakaocdn.net https://static.cloudflareinsights.com; " +
+            "script-src-elem 'self' 'unsafe-inline' 'unsafe-eval' https://t1.daumcdn.net https://t1.kakaocdn.net https://static.cloudflareinsights.com; " +
+            "style-src 'self' 'unsafe-inline' https://t1.kakaocdn.net https://fonts.googleapis.com https://cdn.jsdelivr.net; " +
+            "style-src-elem 'self' 'unsafe-inline' https://t1.kakaocdn.net https://fonts.googleapis.com https://cdn.jsdelivr.net; " +
             "font-src 'self' https://fonts.gstatic.com https://cdn.jsdelivr.net data:; " +
             "img-src 'self' data: https:; " +
             "connect-src 'self' https: wss:; " +
