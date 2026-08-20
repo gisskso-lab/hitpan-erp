@@ -522,10 +522,17 @@ app.Use(async (ctx, next) =>
             //       터널·운영에서만 끊긴다. *"개발PC 에서 됩니다"* 가 이 건에서는 **구조적으로 무의미**하다.
             //     🔴 이 줄을 검증할 때는 반드시 **Production(CSP 켜진 상태)** 에서 연다.
             //
-            //   ⚠️ [도메인이 왜 둘인가] 스크립트는 `t1.daumcdn.net` 에서 오지만
-            //     **iframe 문서는 `postcode.map.daum.net` 에서 온다.** 하나만 적으면 여전히 안 뜬다.
-            //     ⚠️ 넓게 열지 마라 — `frame-src https:` 같은 전체 허용은 **보안 후퇴**다.
-            "frame-src 'self' https://t1.daumcdn.net https://postcode.map.daum.net; " +
+            //   🔴 [2026-08-20 2차 봉합 — 1차가 틀린 도메인을 적었다] 사장님 1.2.91 실측: *"우편번호 창 안뜸"*.
+            //     [무엇이 틀렸나] 1차에 iframe 출처를 `postcode.map.daum.net` 으로 적었다. **추측이었고 틀렸다.**
+            //       실제 로더(`postcode.v2.js`)를 받아 열어 보니 창을 여는 주소가
+            //       **`https://postcode.map.kakao.com/guide`** 였다(같은 파일에 `/search` 도 있다).
+            //       ⇒ CSP 는 나갔는데 **허용한 도메인이 실제와 달라** 창이 그대로 막혔다.
+            //     🔴 [교훈] 바깥 위젯의 도메인은 **문서·기억이 아니라 그 위젯 파일에서 확인**한다.
+            //       `curl` 로 받아 `grep` 하면 5초다. 추측하면 배포를 한 번 더 태운다(실제로 그랬다).
+            //     ⚠️ `daum.net` 을 지우지 않고 남겨 둔다 — 카카오가 옛 도메인으로도 서비스할 수 있고,
+            //       한 줄 더 있다고 손해가 없다. 반대로 지웠다가 옛 경로가 살아 있으면 또 막힌다.
+            //   ⚠️ 넓게 열지 마라 — `frame-src https:` 같은 전체 허용은 **보안 후퇴**다.
+            "frame-src 'self' https://t1.daumcdn.net https://postcode.map.kakao.com https://postcode.map.daum.net; " +
             "frame-ancestors 'none'";
         h["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains";
     }

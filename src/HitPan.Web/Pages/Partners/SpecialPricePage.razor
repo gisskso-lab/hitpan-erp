@@ -5,6 +5,9 @@
 @inject SpecialPriceService SpService
 @inject IDialogService DialogService
 @inject PartnerMasterService PartnersApi
+@* 20260820작4 봉합 — 새 줄에서 품목을 고르려면 품목 목록이 필요하다(종전엔 이 화면에 아예 없었다). *@
+@inject ItemMasterService ItemsApi
+@inject ISnackbar Snackbar
 
 <div class="sp-page">
     <MudPaper Elevation="0" Class="pa-3 mb-2" Style="border-bottom:1px solid #E5E7EB">
@@ -67,9 +70,34 @@
                  EditMode="DataGridEditMode.Cell"
                  RowStyleFunc="RowStyle">
         <Columns>
-            <PropertyColumn Property="x => x.ItemName"
-                            Title="품목명"
-                            CellStyle="font-size:13px" />
+            @* 🔴 2026-08-20 20260820작4 봉합 — 사장님 실측: *"업체특별단가 입력 자체가 안됨"*.
+                 [무엇이 났나] 품목명이 **읽기 전용 PropertyColumn** 이었다.
+                   [추가] 버튼은 빈 줄을 만드는데(AddRow), 그 줄에 **품목을 고를 방법이 없었다.**
+                   ItemId 가 빈 채로 남으니 저장해도 서버가 받을 수 없다 ⇒ **등록이 원천 불가.**
+                   그래서 `partner_special_prices` 가 **0건**이었다(등록을 안 한 게 아니라 못 한 것).
+                 [고침] 새 줄에서만 품목을 고를 수 있게 한다. 이미 등록된 줄은 **종전대로 글자만** —
+                   품목을 바꾸면 다른 상품의 단가가 되어 버리므로 **바꾸게 두지 않는다**(지우고 다시 넣는다).
+                 ⚠️ 이 칸을 다시 PropertyColumn 으로 되돌리지 마라. 등록 경로가 통째로 사라진다. *@
+            <TemplateColumn Title="품목명" CellStyle="font-size:13px">
+                <CellTemplate>
+                    @if (string.IsNullOrEmpty(context.Item.Id))
+                    {
+                        <MudAutocomplete T="string"
+                                         Value="context.Item.ItemName"
+                                         ValueChanged="@(v => OnItemPicked(context.Item, v))"
+                                         SearchFunc="SearchItemAsync"
+                                         Variant="Variant.Text"
+                                         Margin="Margin.Dense"
+                                         Dense="true"
+                                         Placeholder="품목 검색"
+                                         Style="font-size:13px" />
+                    }
+                    else
+                    {
+                        @context.Item.ItemName
+                    }
+                </CellTemplate>
+            </TemplateColumn>
             <PropertyColumn Property="x => x.Spec"
                             Title="규격"
                             CellStyle="font-size:13px" />
@@ -191,7 +219,17 @@
             return;
         }
 
-        foreach (var item in Items)
+        // 🔴 품목을 안 고른 줄은 보내지 않는다 — 서버가 받을 수 없다(ItemId 가 열쇠다).
+        //   ⚠️ 조용히 거르면 *"저장했는데 없다"* 가 되므로 **몇 줄을 건너뛰었는지 말해 준다.**
+        var ready = Items.Where(x => !string.IsNullOrWhiteSpace(x.ItemId)).ToList();
+        var skipped = Items.Count - ready.Count;
+        if (ready.Count == 0)
+        {
+            Snackbar.Add("품목을 선택한 줄이 없습니다.", Severity.Warning);
+            return;
+        }
+
+        foreach (var item in ready)
         {
             await SpService.SaveAsync(SelectedPartnerId, new SpecialPriceUpsertDto
             {
@@ -208,6 +246,12 @@
         }
 
         Items = await SpService.GetAsync(SelectedPartnerId);
+
+        Snackbar.Add(
+            skipped > 0
+                ? $"{ready.Count}건 저장했습니다. 품목을 안 고른 {skipped}건은 저장하지 않았습니다."
+                : $"{ready.Count}건 저장했습니다.",
+            skipped > 0 ? Severity.Warning : Severity.Success);
     }
 
     private async Task DeleteConfirm(SpecialPriceItem item)
@@ -228,11 +272,51 @@
 
     private void AddRow()
     {
+        // ⚠️ 업체를 먼저 골라야 한다 — 안 고르면 어느 업체 단가인지 정할 수 없다.
+        if (string.IsNullOrWhiteSpace(SelectedPartnerId))
+        {
+            Snackbar.Add("업체를 먼저 선택하세요.", Severity.Warning);
+            return;
+        }
+
         Items.Add(new SpecialPriceItem
         {
             PartnerId = SelectedPartnerId,
             IsEditing = true
         });
+    }
+
+    /// <summary>품목 목록 — 새 줄에서 고르기 위해 한 번만 읽는다.</summary>
+    private List<ItemListModel>? _itemCache;
+
+    private async Task<IEnumerable<string>> SearchItemAsync(string value, CancellationToken ct)
+    {
+        _itemCache ??= await ItemsApi.GetListAsync() ?? new();
+        var names = _itemCache.Select(i => i.ItemName).Distinct();
+        return string.IsNullOrWhiteSpace(value)
+            ? names
+            : names.Where(n => n.Contains(value, StringComparison.OrdinalIgnoreCase));
+    }
+
+    /// <summary>
+    /// 새 줄에서 품목을 고르면 <b>ItemId·규격·단위·표준단가</b>를 함께 채운다.
+    /// </summary>
+    /// <remarks>
+    /// 🔴 <c>ItemId</c> 가 이 화면의 급소다. 이름만 넣고 <c>ItemId</c> 를 비워 두면
+    /// 저장은 눌러지는데 <b>서버가 받을 수 없다</b> — 그것이 이번 사고의 모양이었다.
+    /// ⚠️ 표준단가를 함께 채우는 이유: 할인율 모드가 <b>표준단가를 밑값으로</b> 계산하기 때문이다
+    /// (<c>CalcDiscountedPrice</c>). 비어 있으면 할인율을 넣어도 계산이 0 이 된다.
+    /// </remarks>
+    private void OnItemPicked(SpecialPriceItem row, string itemName)
+    {
+        row.ItemName = itemName;
+        var item = _itemCache?.FirstOrDefault(i => i.ItemName == itemName);
+        if (item is null) return;
+
+        row.ItemId = item.ItemId;
+        row.Spec = item.Spec;
+        row.Unit = item.Unit;
+        row.StdPrice = item.StandardPrice > 0 ? item.StandardPrice : item.SalePrice;
     }
 
     /// <summary>할인율 모드 미리보기 — 표준단가 × (1 - 할인율%). (19차 봉합)</summary>
