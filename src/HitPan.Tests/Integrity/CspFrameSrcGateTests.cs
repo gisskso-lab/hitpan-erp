@@ -38,8 +38,20 @@ namespace HitPan.Tests.Integrity;
 /// </remarks>
 public sealed class CspFrameSrcGateTests
 {
-    /// <summary>카카오 우편번호 iframe 문서가 실제로 오는 곳.</summary>
-    private const string PostcodeFrameHost = "https://postcode.map.daum.net";
+    /// <summary>
+    /// 카카오 우편번호 iframe 문서가 <b>실제로</b> 오는 곳.
+    /// </summary>
+    /// <remarks>
+    /// 🔴 <b>이 값은 실측으로 확인한 것이다. 추측으로 바꾸지 마라.</b>
+    /// 2026-08-20 1차 봉합이 여기를 <c>postcode.map.daum.net</c> 으로 적었다 — <b>틀렸다.</b>
+    /// 게이트는 초록불이었는데 사장님 화면에서는 창이 안 떴다(<i>"우편번호 창 안뜸"</i>).
+    /// <b>게이트가 틀린 사실을 지키고 있었던 것</b>이다.
+    /// <para>
+    /// 확인 방법(5초): <c>curl -s https://t1.daumcdn.net/mapjsapi/bundle/postcode/prod/postcode.v2.js</c>
+    /// 를 받아 도메인을 <c>grep</c> 한다. 로더 안에 <c>postcode.map.kakao.com/guide</c>·<c>/search</c> 가 있다.
+    /// </para>
+    /// </remarks>
+    private const string PostcodeFrameHost = "https://postcode.map.kakao.com";
 
     /// <summary>우편번호 스크립트가 오는 곳.</summary>
     private const string PostcodeScriptHost = "https://t1.daumcdn.net";
