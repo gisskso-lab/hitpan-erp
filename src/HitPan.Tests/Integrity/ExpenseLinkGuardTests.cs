@@ -56,6 +56,129 @@ public sealed class ExpenseLinkGuardTests
     ///
     /// ⚠️ 이 시험은 <b>앞서 나가는 것을 막는다.</b> 원장 전수점검 때 사장님 결재를 받고 붙인다.
     /// </remarks>
+    /// <summary>
+    /// 🔴 <b>결재 승인이 원본 상태를 바꾼다.</b> 작(2026-08-21) 작8 B1.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>무엇을 겪고서</b> — [3-V] 병렬이슈2: 경비는 상신은 되는데 <c>ProcessAsync</c> 에
+    /// 원본 반영 블록이 <b>통째로 없어</b> 결재함에서 승인해도 <c>hr_expense_requests</c> 가
+    /// <c>pending</c> 그대로였다. <b>그 상태로 이미 출하됐다.</b>
+    /// </para>
+    /// <para>
+    /// 🔴 <b>왜 아무도 몰랐나</b> — 이 파일의 다른 시험 8개가 전부 <i>"상신을 부르는가"</i> 만 봤다.
+    /// <i>"승인이 원본에 갔는가"</i> 를 본 시험이 <b>0개</b>였다. 빌드 0/0 · 시험 전부 통과
+    /// 상태에서 결함이 살아 있었다. ⚠️ 이 시험을 지우면 그 상태로 되돌아간다.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public void 경비_결재승인이_원본상태를_바꾼다()
+    {
+        var code = StripComments(ReadSource("src", "HitPan.Application", "Services", "ApprovalService.cs"));
+
+        Assert.True(Regex.IsMatch(code, @"DocType\s*==\s*""expense"""),
+            "ProcessAsync 가 doc_type='expense' 를 알아봐야 한다. " +
+            "이 분기가 없으면 결재함에서 승인해도 경비 원본은 대기중 그대로다(병렬이슈2).");
+
+        Assert.True(Regex.IsMatch(code, @"UPDATE\s+hr_expense_requests"),
+            "직원 신청분(hr_expense_requests)의 상태를 바꿔야 한다.");
+
+        Assert.True(Regex.IsMatch(code, @"UPDATE\s+expenses\s+SET\s+approval_status"),
+            "경리 등록분(expenses)의 상태도 바꿔야 한다.");
+    }
+
+    /// <summary>
+    /// 🔴 <b>정본을 하나로 고르지 않는다 — 두 표 모두 시도한다.</b>
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// 사장님(2026-08-21): <i>"경리없이 대표가 직접 경리업무 보는 소규모 회사도 있고,
+    /// 경리팀이나 회계팀 조직을 빌딩할 정도로 큰 회사도 있고 <b>이건 케바케라</b>."</i>
+    /// </para>
+    /// <para>
+    /// 경비는 들어오는 표가 <b>둘</b>이고 둘 다 <c>doc_type='expense'</c> 로 상신한다.
+    /// 어느 표를 가리키는지 승인 시점에 알 수 없다.
+    /// <b>정본을 하나 고르면 한쪽 회사 유형이 죽는다.</b>
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public void 경비_원본반영이_두_표를_모두_시도한다()
+    {
+        var code = StripComments(ReadSource("src", "HitPan.Application", "Services", "ApprovalService.cs"));
+
+        Assert.True(Regex.IsMatch(code, @"hr_expense_requests[\s\S]{0,1600}?==\s*0[\s\S]{0,400}?UPDATE\s+expenses"),
+            "직원 신청 표에서 안 잡혔을 때(0행)만 경리 등록 표를 시도해야 한다. " +
+            "무조건 둘 다 UPDATE 하면 이중 반영이 난다.");
+    }
+
+        /// <summary>
+    /// 🔴 <b>봉합이 살아 있는 조건인가</b> — [3-V] 적발분(2026-08-21).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>무엇을 겪고서</b> — 위 두 시험을 짜고 [3-V] 가 반증했다.
+    /// <c>if (request.Action == "rejected" || doc.CurrentSeq &gt;= doc.TotalLines)</c> 를
+    /// <c>if (false)</c> 로 바꿔 <b>코드를 절대 실행 안 되게</b> 만들었는데
+    /// <b>시험 10개가 전부 통과</b>했다. UPDATE 문 글자는 그대로 남아 있었기 때문이다.
+    /// </para>
+    /// <para>
+    /// 🔴 <b>글자 검사는 게이트가 아니다.</b> 실제 회귀는 블록을 통째로 지우는 식으로 오지 않는다 —
+    /// 조건 한 줄이 바뀌거나 분기가 죽는 식으로 온다.
+    /// </para>
+    /// <para>
+    /// ⚠️ 이 시험은 <b>상수 조건(<c>if (false)</c>/<c>if (true)</c>)으로 분기가 죽거나
+    /// 항상 열리는 것</b>을 잡는다.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public void 경비_원본반영이_죽은_코드가_아니다()
+    {
+        var code = StripComments(ReadSource("src", "HitPan.Application", "Services", "ApprovalService.cs"));
+
+        var start = code.IndexOf(@"DocType == ""expense""", StringComparison.Ordinal);
+        Assert.True(start >= 0, "expense 분기가 있어야 한다");
+
+        var end = code.IndexOf("tx.Commit()", start, StringComparison.Ordinal);
+        Assert.True(end > start, "블록 끝을 찾아야 한다");
+
+        var block = code[start..end];
+
+        Assert.False(Regex.IsMatch(block, @"if\s*\(\s*(false|true)\s*\)"),
+            "경비 원본반영 블록에 상수 조건(if(false)/if(true))이 있으면 안 된다. " +
+            "if(false) 면 코드가 통째로 죽고, if(true) 면 헌법 #6(중간단계 미확정)이 깨진다. " +
+            "글자는 남아 있어 다른 시험이 전부 통과한다 — [3-V] 가 실제로 이렇게 뚫었다.");
+    }
+
+    /// <summary>
+    /// 🔴 <b>중간 단계 승인은 원본을 건드리지 않는다</b>(헌법 #6). [3-V] 적발분.
+    /// </summary>
+    /// <remarks>
+    /// 2단 이상 결재선에서 1단계만 승인했는데 경비가 <c>approved</c> 가 되면,
+    /// <b>결재가 다 안 났는데 돈이 승인 처리</b>된다.
+    /// <c>leave</c>·<c>absence</c>·<c>overtime</c> 블록이 전부 지키는 규칙이다.
+    /// </remarks>
+    [Fact]
+    public void 경비는_최종단계_승인에서만_원본을_바꾼다()
+    {
+        var code = StripComments(ReadSource("src", "HitPan.Application", "Services", "ApprovalService.cs"));
+
+        var start = code.IndexOf(@"DocType == ""expense""", StringComparison.Ordinal);
+        Assert.True(start >= 0, "expense 분기가 있어야 한다");
+
+        var end = code.IndexOf("tx.Commit()", start, StringComparison.Ordinal);
+        var block = code[start..end];
+
+        Assert.True(Regex.IsMatch(block, @"CurrentSeq\s*>=\s*\w*\.?TotalLines"),
+            "최종 단계 판정(CurrentSeq >= TotalLines)이 있어야 한다. " +
+            "없으면 2단 결재선에서 1단계 승인만으로 경비가 승인된다(헌법 #6 위반).");
+
+        // UPDATE 가 그 판정 뒤에 와야 한다 — 앞에 있으면 판정이 무의미하다.
+        var gate = block.IndexOf("TotalLines", StringComparison.Ordinal);
+        var firstUpdate = block.IndexOf("UPDATE", StringComparison.Ordinal);
+        Assert.True(gate < firstUpdate,
+            "최종 단계 판정이 UPDATE 보다 앞에 있어야 한다.");
+    }
+
     [Fact]
     public void 경비는_아직_기표하지_않는다()
     {

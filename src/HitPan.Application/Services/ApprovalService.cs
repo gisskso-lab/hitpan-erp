@@ -815,6 +815,70 @@ public class ApprovalService : IApprovalService
                 }
             }
 
+            // ── 경비(expense) 원본 반영 ─────────────────────────────────────────
+            // 작(2026-08-21) 작8 B1 — 사장님 전결. [3-V] 병렬이슈2 적발분 봉합.
+            //
+            // 🔴 이 배선이 통째로 없어서 "결재함에서 승인해도 경비는 대기중" 이었다.
+            //    연차·휴직·초과근무·보고서는 다 있는데 경비만 빠졌고, 그 상태로 이미 출하됐다.
+            //    빌드 0/0 · 시험 전부 통과 상태에서 이 결함이 살아 있었다 — 가드시험이
+            //    "상신을 부르는가" 라는 글자만 보고 "승인이 원본에 갔는가" 라는 동작을 안 봤다.
+            //
+            // 🔴 경비는 다른 문서와 달리 ★들어오는 표가 둘★ 이다. 정본을 하나 고르면 안 된다
+            //    (사장님 2026-08-21: "경리없이 대표가 직접 경리업무 보는 소규모 회사도 있고,
+            //     경리팀이나 회계팀 조직을 빌딩할 정도로 큰 회사도 있고 이건 케바케라").
+            //      · 직원 신청  HrService.cs      → hr_expense_requests.request_id
+            //      · 경리 등록  FinanceService.cs → expenses.expense_id
+            //    둘 다 doc_type='expense' 로 상신하고 RefId 만 다르다. 어느 표를 가리키는지
+            //    승인 시점에 알 수 없으므로 ★두 표 모두 시도★ 한다.
+            //    FinanceService.ApproveExpenseAsync 가 쓰는 방식(updated==0 이면 다른 표)과 같다.
+            //
+            // ⚠️ 두 표는 컬럼이 다르다 — 한쪽 SQL 을 복사해 쓰면 런타임 500 이 난다(헌법 #13).
+            //      · hr_expense_requests : status      + approved_by/approved_at/reject_reason
+            //      · expenses            : approval_status + approval_id (승인자·사유 칸 ★없음★)
+            //
+            // ⚠️ status='pending' 가드로 멱등 — 화면이 먼저 처리했으면 0행이라 무해하다.
+            //    leave·absence 블록이 쓰는 방식과 같다.
+            else if (doc.DocType == "expense" && !string.IsNullOrEmpty(doc.RefId))
+            {
+                var nextStatus = request.Action == "rejected" ? "rejected" : "approved";
+
+                // 중간 단계 승인은 아직 미확정이라 원본을 건드리지 않는다(헌법 #6).
+                if (request.Action == "rejected" || doc.CurrentSeq >= doc.TotalLines)
+                {
+                    // ① 직원 신청 표
+                    var hrAffected = await _db.ExecuteAsync(new CommandDefinition(
+                        """
+                        UPDATE hr_expense_requests
+                           SET status = @Status, approved_by = @Who, approved_at = NOW(6),
+                               reject_reason = @Reason, updated_at = NOW(6)
+                         WHERE tenant_id = @TenantId AND request_id = @RefId AND status = 'pending'
+                        """,
+                        new
+                        {
+                            Status = nextStatus,
+                            Who = employeeId,
+                            Reason = request.Action == "rejected" ? TruncateRejectReason(request.Comment) : null,
+                            TenantId = tenantId,
+                            RefId = doc.RefId
+                        },
+                        transaction: tx, cancellationToken: ct));
+
+                    // ② 경리 등록 표 — ①에서 안 잡혔을 때만. 두 표에 같은 id 가 있을 수 없다.
+                    if (hrAffected == 0)
+                    {
+                        await _db.ExecuteAsync(new CommandDefinition(
+                            """
+                            UPDATE expenses
+                               SET approval_status = @Status, approval_id = @ApprovalId, updated_at = NOW(6)
+                             WHERE tenant_id = @TenantId AND expense_id = @RefId
+                               AND approval_status = 'pending' AND is_active = 1
+                            """,
+                            new { Status = nextStatus, ApprovalId = approvalId, TenantId = tenantId, RefId = doc.RefId },
+                            transaction: tx, cancellationToken: ct));
+                    }
+                }
+            }
+
             tx.Commit();
 
             // 감사로그 — 결재 승인/반려
