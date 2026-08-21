@@ -1,0 +1,146 @@
+{
+  "base": "https://test1234.hitpan.kr",
+  "at": "2026-08-21T13:35:23.681Z",
+  "results": [
+    {
+      "id": "E-1",
+      "what": "API 도달 · 버전",
+      "got": "HTTP 200 · v1.3.0 · db=ok",
+      "pass": true,
+      "note": ""
+    },
+    {
+      "id": "E-2",
+      "what": "로그인 · account_type",
+      "got": "tenant_admin · tenant=5a0c19e4…",
+      "pass": true,
+      "note": "tenant_admin 이면 Layer 0 바이패스 대상 — 이 사실이 뒤 판정의 전제다"
+    },
+    {
+      "id": "E-3",
+      "what": "메인PC 기기줄 (정상 통행로 축②)",
+      "got": "회사 서버 (자료 보관 컴퓨터) · status=approved",
+      "pass": true,
+      "note": "appsettings 를 고치지 않고 승인된 기기줄로 통과한다 (헌법 #21·#29)"
+    },
+    {
+      "id": "E-4",
+      "what": "사원 수 (demo 는 12명이었다)",
+      "got": "1명",
+      "pass": true,
+      "note": "T-004 백지 테넌트 — 운영 아님 확인"
+    },
+    {
+      "id": "W-1",
+      "what": "메뉴코드에 SALES 가 있나 (설8 초안 반증)",
+      "got": "SALES 없음 · DELIVERY=true · PURCHASE=true (총 21개)",
+      "pass": true,
+      "note": "작11 정정(DELIVERY·PURCHASE)이 실물과 맞는지 — 소스가 아니라 돌아가는 응답으로 판정"
+    },
+    {
+      "id": "W-2",
+      "what": "대표의 DELIVERY 권한 상태",
+      "got": "view=false · create=false · update=false",
+      "pass": true,
+      "note": "전부 false 인 상태로 확정을 시도한다 — 막히면 권한이 있는 것, 안 막히면 없는 것"
+    },
+    {
+      "id": "W-3",
+      "what": "거래명세서 확정",
+      "got": "HTTP 400",
+      "pass": true,
+      "note": "403 아님 = 인가를 통과해 업무로직까지 갔다 (막는 것이 없다)"
+    },
+    {
+      "id": "W-4",
+      "what": "매입 확정",
+      "got": "HTTP 400",
+      "pass": true,
+      "note": "403 아님 = 인가를 통과해 업무로직까지 갔다 (막는 것이 없다)"
+    },
+    {
+      "id": "W-5",
+      "what": "매입반품 확정",
+      "got": "HTTP 400",
+      "pass": true,
+      "note": "403 아님 = 인가를 통과해 업무로직까지 갔다 (막는 것이 없다)"
+    },
+    {
+      "id": "W-6",
+      "what": "판매반품 확정(유일하게 통제됨)",
+      "got": "HTTP 400",
+      "pass": true,
+      "note": "403 아님 = 인가를 통과해 업무로직까지 갔다 (막는 것이 없다)"
+    },
+    {
+      "id": "A-1",
+      "what": "남의 회사 employee_id 지정",
+      "got": "HTTP 400 · \"대상 직원을 찾을 수 없습니다.\"",
+      "pass": true,
+      "note": "200 이면 테넌트 격리가 뚫린 것 = P0"
+    },
+    {
+      "id": "A-2",
+      "what": "자기 회사 employee_id 지정",
+      "got": "HTTP 400 · \"오늘 이미 출근 처리되었습니다.\"",
+      "pass": null,
+      "note": "이 줄 자체는 합격/불합격이 아니다 — 다음 줄의 대조 재료다"
+    },
+    {
+      "id": "A-3",
+      "what": "🔴 두 응답이 갈리나 (대조 판정)",
+      "got": "다르다 · 남=\"대상 직원을 찾을 수 없습니다.\" / 내=\"오늘 이미 출근 처리되었습니다.\"",
+      "pass": true,
+      "note": "같으면 \"그냥 다 실패하는 것\" 과 구분 못 한다. 달라야 가드가 소속을 실제로 본 것이다"
+    },
+    {
+      "id": "A-4",
+      "what": "자동 근퇴 회귀 없음",
+      "got": "\"오늘 이미 출근\" = 로그인 자동출근이 돌았다는 증거",
+      "pass": true,
+      "note": "AuthController.cs:236-258 자동 출근이 살아 있나"
+    },
+    {
+      "id": "G-5a",
+      "what": "권한 화면이 실제로 떴나",
+      "got": "권한 화면 렌더됨",
+      "pass": true,
+      "note": "안 떴으면 아래 판정은 전부 의미 없다 (초록불 출처 확인)"
+    },
+    {
+      "id": "G-5b",
+      "what": "권한 화면에 \"근태 대리입력\" 이 뜨나",
+      "got": "보임",
+      "pass": true,
+      "note": "HR_PROXY — 작10 A 가 EnforcedMenus 에 넣었다. 없으면 작10 A 가 화면에서 죽은 것"
+    },
+    {
+      "id": "G-5c",
+      "what": "권한 화면에 \"거래명세서\" 이 뜨나",
+      "got": "안 보임",
+      "pass": true,
+      "note": "DELIVERY — 작11 착수 전이라 지금은 \"안 보이는 게 정상\". 보이면 이미 등록된 것"
+    },
+    {
+      "id": "G-5d",
+      "what": "권한 화면에 \"매입명세서\" 이 뜨나",
+      "got": "안 보임",
+      "pass": true,
+      "note": "PURCHASE — 위와 동일"
+    },
+    {
+      "id": "G-6",
+      "what": "근태 화면이 떴나",
+      "got": "렌더됨",
+      "pass": true,
+      "note": ""
+    },
+    {
+      "id": "G-7",
+      "what": "브라우저 콘솔 오류",
+      "got": "0건",
+      "pass": true,
+      "note": ""
+    }
+  ]
+}
