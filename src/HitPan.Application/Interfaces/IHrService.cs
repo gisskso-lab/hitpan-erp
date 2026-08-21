@@ -10,6 +10,12 @@ public interface IHrService
     Task<string> CheckInAsync(string tenantId, string employeeId, CheckInOutRequest req, CancellationToken ct = default);
     Task CheckOutAsync(string tenantId, string employeeId, CancellationToken ct = default);
 
+    // 🔴 대리 근태 — 계정 없는 직원분. 작(2026-08-21) 작10 A.
+    //    권한 HR_PROXY(5축 밖 별도 항목·기본 OFF)로만 통제된다.
+    //    🚨 구현체는 대상 사원의 테넌트 소속을 반드시 검증한다(헌법 #2).
+    Task<string> CheckInProxyAsync(string tenantId, string targetEmployeeId, string actorEmployeeId, CheckInOutRequest req, CancellationToken ct = default);
+    Task CheckOutProxyAsync(string tenantId, string targetEmployeeId, string actorEmployeeId, CancellationToken ct = default);
+
     // 초과근무
     Task<List<OvertimeDto>> GetOvertimeAsync(string tenantId, DateTime? from, DateTime? to, CancellationToken ct = default);
     Task<string> CreateOvertimeAsync(CreateOvertimeRequest req, string tenantId, string employeeId, CancellationToken ct = default);
