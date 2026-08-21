@@ -52,6 +52,48 @@ public class HrController : ControllerBase
         return Ok(new { message = "퇴근 완료" });
     }
 
+    // ── 🔴 대리 근태 (작10 A) ──────────────────────────────────────────────
+    //
+    // 사장님(2026-08-21): "사원등록만 되있고 계정이 없는 직원은 인사담당자가 수동으로
+    //   근퇴처리 할 수 있는 장치를 만들어야 됨" / "남의 근퇴 넣는건 권한설정에 넣자."
+    //
+    // 🔴 권한을 HR 이 아니라 ★HR_PROXY★ 로 가른다. HR 5축은 "내 데이터에 무엇을 하나" 축이고
+    //    대리입력은 "남의 데이터를 건드리나" 축이다. HR update 에 얹으면 자기 근태 고치라고
+    //    준 권한이 남의 근태까지 연다.
+    //
+    // 🔴 역할("인사담당자")을 코드에 박지 않는다 — 누구에게 줄지는 고객사가 정한다(헌법 #11).
+    //    사장님: "이건 고객사 마음이지" / "우리가 정할게 아님"
+    //
+    // 🚨 employeeId 를 파라미터로 받는 첫 경로다. tenantId 는 여전히 JWT 에서만 오고(#2),
+    //    서비스가 대상 사원의 소속을 검증한다.
+
+    [HttpPost("attendance/proxy/check-in")]
+    [RequirePermission("HR_PROXY", "create")]
+    public async Task<IActionResult> CheckInProxy([FromBody] ProxyCheckInRequest req, CancellationToken ct)
+    {
+        var tid = HttpContext.Items["TenantId"]?.ToString();
+        var actor = HttpContext.Items["EmployeeId"]?.ToString();
+        if (string.IsNullOrEmpty(tid) || string.IsNullOrEmpty(actor)) return Forbid();
+        if (string.IsNullOrWhiteSpace(req.EmployeeId)) return BadRequest(new { message = "대상 직원을 선택해 주세요." });
+
+        var id = await _svc.CheckInProxyAsync(tid, req.EmployeeId, actor,
+            new CheckInOutRequest { Memo = req.Memo }, ct);
+        return Ok(new { id, message = "출근 처리했습니다." });
+    }
+
+    [HttpPost("attendance/proxy/check-out")]
+    [RequirePermission("HR_PROXY", "update")]
+    public async Task<IActionResult> CheckOutProxy([FromBody] ProxyCheckOutRequest req, CancellationToken ct)
+    {
+        var tid = HttpContext.Items["TenantId"]?.ToString();
+        var actor = HttpContext.Items["EmployeeId"]?.ToString();
+        if (string.IsNullOrEmpty(tid) || string.IsNullOrEmpty(actor)) return Forbid();
+        if (string.IsNullOrWhiteSpace(req.EmployeeId)) return BadRequest(new { message = "대상 직원을 선택해 주세요." });
+
+        await _svc.CheckOutProxyAsync(tid, req.EmployeeId, actor, ct);
+        return Ok(new { message = "퇴근 처리했습니다." });
+    }
+
     // ── 초과근무 ──
 
     [HttpGet("overtime")]

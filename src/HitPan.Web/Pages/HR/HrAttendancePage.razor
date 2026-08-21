@@ -11,6 +11,9 @@
 @inject HrClientService HrSvc
 @inject ISnackbar Snackbar
 @inject NavigationManager Nav
+@inject PermissionService PermSvc
+@inject EmployeeService EmpSvc
+@inject AuthenticationStateProvider AuthStateProvider
 
 <PageTitle>근태 관리</PageTitle>
 <PageHeader Title="근태 관리" Subtitle="출근·퇴근 기록 · 기간별 조회">
@@ -19,6 +22,52 @@
         <MudButton Variant="Variant.Filled" Color="Color.Error" StartIcon="@Icons.Material.Filled.Logout" OnClick="CheckOutAsync">퇴근</MudButton>
     </Actions>
 </PageHeader>
+
+@* 🔴 대리 근태 (작10 A) — 계정 없는 직원분을 대신 넣는다.
+   사장님(2026-08-21): "사원등록만 되있고 계정이 없는 직원은 인사담당자가 수동으로
+     근퇴처리 할 수 있는 장치를 만들어야 됨" / "남의 근퇴 넣는건 권한설정에 넣자."
+
+   🔴 권한이 없으면 이 카드를 아예 안 그린다 — 눌러도 안 되는 버튼을 보여주지 않는다.
+      (되는 척 금지. 1.2.74 "권한 다 풀었는데 아무것도 못함" 과 같은 계열)
+   🔴 기본값이 [계정 없는 직원만] 이다 — 이 기능이 있는 이유가 그 사람들이라서다.
+      실측(그룹웨어 흐름설계서): 사원 12명 중 계정 보유 1명. *@
+@if (_canProxy)
+{
+    <MudPaper Class="pa-3 mb-3" Elevation="0" Style="border:1px solid var(--mud-palette-lines-default);border-radius:12px">
+        <MudGrid Spacing="2" Class="align-center">
+            <MudItem xs="12" md="3">
+                <MudSelect T="string" @bind-Value="_proxyEmployeeId" Label="직원" Variant="Variant.Outlined"
+                           Margin="Margin.Dense" Placeholder="직원을 고르세요">
+                    @foreach (var e in ProxyCandidates)
+                    {
+                        <MudSelectItem Value="@e.EmployeeId">
+                            @e.EmpName@(string.IsNullOrWhiteSpace(e.DeptName) ? "" : $" · {e.DeptName}")
+                        </MudSelectItem>
+                    }
+                </MudSelect>
+            </MudItem>
+            <MudItem xs="12" md="3">
+                <MudTextField @bind-Value="_proxyMemo" Label="메모 (선택)" Variant="Variant.Outlined" Margin="Margin.Dense" />
+            </MudItem>
+            <MudItem xs="12" md="3" Class="d-flex gap-2">
+                <MudButton Variant="Variant.Filled" Color="Color.Success" Size="Size.Small"
+                           StartIcon="@Icons.Material.Filled.PersonAdd"
+                           Disabled="@(_proxyBusy || string.IsNullOrEmpty(_proxyEmployeeId))"
+                           OnClick="ProxyCheckInAsync">대신 출근</MudButton>
+                <MudButton Variant="Variant.Outlined" Color="Color.Error" Size="Size.Small"
+                           Disabled="@(_proxyBusy || string.IsNullOrEmpty(_proxyEmployeeId))"
+                           OnClick="ProxyCheckOutAsync">대신 퇴근</MudButton>
+            </MudItem>
+            <MudItem xs="12" md="3" Class="d-flex justify-end">
+                <MudSwitch T="bool" @bind-Value="_onlyNoAccount" Color="Color.Primary" Size="Size.Small"
+                           Label="계정 없는 직원만" />
+            </MudItem>
+        </MudGrid>
+        <MudText Typo="Typo.caption" Class="mt-1" Style="color:var(--hitpan-text-faint)">
+            대신 넣은 기록에는 처리한 사람이 함께 남습니다.
+        </MudText>
+    </MudPaper>
+}
 
 @* 필터 *@
 <MudPaper Class="pa-3 mb-3" Elevation="0" Style="border:1px solid var(--mud-palette-lines-default);border-radius:12px">
@@ -83,10 +132,91 @@
             _period = Period.ThisMonth;
             (_from, _to) = RangeOf(Period.ThisMonth);
         }
+        await LoadProxyStateAsync();
         await LoadAsync();
     }
 
     private async Task LoadAsync() { _items = await HrSvc.GetAttendanceAsync(_from, _to); }
+
+    // ── 🔴 대리 근태 (작10 A) ──────────────────────────────────────────────
+    //
+    // ⚠️ 이 화면 판정은 ★표시용★ 이다. 진짜 문지기는 서버의 [RequirePermission("HR_PROXY", ...)] 다.
+    //    화면 값을 고쳐도 서버가 403 을 준다(헌법 #2 — 판정은 서버가 JWT·DB 로).
+    //    화면에서 감추는 이유는 보안이 아니라 ★눌러도 안 되는 버튼을 보여주지 않기 위해서★ 다.
+    private bool _canProxy;
+    private bool _proxyBusy;
+    private bool _onlyNoAccount = true;
+    private string _proxyEmployeeId = string.Empty;
+    private string? _proxyMemo;
+    private List<EmployeeListItemModel> _employees = new();
+
+    /// <summary>
+    /// 대상 후보. 기본은 <b>계정 없는 직원만</b> — 이 기능이 있는 이유가 그 사람들이다.
+    /// </summary>
+    /// <remarks>
+    /// 실측(그룹웨어 흐름설계서): <b>사원 12명 중 계정 보유 1명.</b>
+    /// 스위치를 끄면 전원이 보인다 — 계정이 있어도 깜빡한 사람을 대신 넣어야 할 때가 있다.
+    /// </remarks>
+    private IEnumerable<EmployeeListItemModel> ProxyCandidates
+        => _onlyNoAccount ? _employees.Where(e => !e.HasUserAccount) : _employees;
+
+    /// <summary>
+    /// 🔴 <b>권한설정에서 켠 사람만</b> 이 카드를 본다. 역할(관리자)로 판정하지 않는다.
+    /// </summary>
+    /// <remarks>
+    /// 사장님: <i>"남의 근퇴 넣는건 권한설정에 넣자."</i> / <i>"이건 고객사 마음이지."</i>
+    /// ⇒ 역할로 고정하면 회사마다 다른 사정을 우리가 정해버리는 것이 된다(헌법 #11).
+    /// ⚠️ 판정에 실패하면 <b>열어주지 않는다</b> — 못 읽었는데 열면 막은 적이 없는 것과 같다.
+    /// </remarks>
+    private async Task LoadProxyStateAsync()
+    {
+        try
+        {
+            var auth = await AuthStateProvider.GetAuthenticationStateAsync();
+            var userId = auth.User.FindFirst("user_id")?.Value;
+            if (string.IsNullOrEmpty(userId)) return;
+
+            var perm = await PermSvc.GetAsync(userId);
+            _canProxy = perm?.Permissions?.Any(p =>
+                string.Equals(p.MenuCode, "HR_PROXY", StringComparison.Ordinal)
+                && (p.CanCreate || p.CanUpdate)) == true;
+
+            if (_canProxy) _employees = await EmpSvc.GetListAsync();
+        }
+        catch (Exception ex)
+        {
+            _canProxy = false;
+            Console.Error.WriteLine($"[HrAttendancePage] 대리입력 권한 확인 실패: {ex.Message}");
+        }
+    }
+
+    private async Task ProxyCheckInAsync()
+    {
+        _proxyBusy = true;
+        try
+        {
+            var (ok, msg) = await HrSvc.CheckInProxyAsync(_proxyEmployeeId, _proxyMemo);
+            // 🔴 실패 사유를 그대로 보여준다 — 권한이 없는 것과 이미 출근한 것은
+            //    사용자가 해야 할 일이 다르다. "실패" 로 뭉개면 무엇을 할지 모른다.
+            if (ok) { Snackbar.Add("출근 처리했습니다.", Severity.Success); _proxyMemo = null; await LoadAsync(); }
+            else Snackbar.Add(msg, Severity.Error);
+        }
+        finally { _proxyBusy = false; }
+    }
+
+    private async Task ProxyCheckOutAsync()
+    {
+        _proxyBusy = true;
+        try
+        {
+            var (ok, msg) = await HrSvc.CheckOutProxyAsync(_proxyEmployeeId);
+            if (ok) { Snackbar.Add("퇴근 처리했습니다.", Severity.Success); await LoadAsync(); }
+            else Snackbar.Add(msg, Severity.Error);
+        }
+        finally { _proxyBusy = false; }
+    }
+
+
 
     private async Task ApplyPeriodAsync(Period p)
     {

@@ -34,6 +34,13 @@ public class PermissionService : IPermissionService
         ("ACCOUNTING", "회계"),
         ("APPROVAL", "결재"),
         ("HR", "인사"),
+        // 작(2026-08-21) 작10 A — 남의 근태를 대신 넣는 권한. 사장님: "남의 근퇴 넣는건 권한설정에 넣자."
+        // 🔴 HR 5축(view/create/update/delete/export)에 얹지 않는다.
+        //    5축은 "내 데이터에 무엇을 하나" 축이고 이것은 "남의 데이터를 건드리나" 축이다.
+        //    update 에 얹으면 자기 근태 고치라고 준 권한이 남의 근태까지 연다.
+        // 🔴 기본 OFF — 고객사가 켠다. 전원 계정 주는 회사는 안 켜면 그만이다(헌법 #11).
+        //    사장님: "이건 고객사 마음이지" / "우리가 정할게 아님"
+        ("HR_PROXY", "근태 대리입력"),
         ("MONTHLY_CLOSING", "월마감"),
         ("CERTIFICATE", "범용인증서"),
         ("DASHBOARD", "대시보드"),

@@ -53,6 +53,7 @@ public partial class PermissionPage : ComponentBase
         ("ACCOUNTING", "회계"),
         ("APPROVAL", "결재"),
         ("HR", "인사"),
+        ("HR_PROXY", "근태 대리입력"),
         ("MONTHLY_CLOSING", "월마감"),
         ("CERTIFICATE", "범용인증서"),
         ("DASHBOARD", "대시보드"),
@@ -83,7 +84,7 @@ public partial class PermissionPage : ComponentBase
     private static readonly HashSet<string> EnforcedMenus = new(StringComparer.Ordinal)
     {
         "ACCOUNTING", "APPROVAL", "CERTIFICATE", "COLLECTION",
-        "HR", "MONTHLY_CLOSING", "PAYMENT", "USERS"
+        "HR", "HR_PROXY", "MONTHLY_CLOSING", "PAYMENT", "USERS"
     };
 
     /// <summary>화면에 보여줄 메뉴 — 실제로 먹는 것만.</summary>

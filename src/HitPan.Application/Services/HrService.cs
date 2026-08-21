@@ -86,6 +86,69 @@ public class HrService : IHrService
             new { Now = now, Hours = hours, Id = att.Id }, cancellationToken: ct));
     }
 
+    /// <summary>
+    /// 🔴 <b>대리 출근</b> — 계정 없는 직원의 근태를 권한 있는 사람이 대신 넣는다. 작(2026-08-21) 작10 A.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>왜 필요한가</b> — 종전 <c>CheckInAsync</c> 는 호출자가 늘 JWT 의 <c>employee_id</c> 를
+    /// 넘겼다(<c>HrController</c>·<c>AuthController</c> 둘 다). 그래서
+    /// <b>계정이 없는 직원은 근태를 남길 방법이 아예 없었다.</b>
+    /// 실측(그룹웨어 흐름설계서): <b>사원 12명 중 계정 보유 1명.</b>
+    /// </para>
+    /// <para>
+    /// 🚨 <b>헌법 #2</b> — <c>employeeId</c> 를 <b>파라미터로 받는 첫 경로</b>다.
+    /// <c>tenantId</c> 는 여전히 JWT 에서만 오지만, 대상 사원이 <b>정말 내 테넌트 소속인지</b>
+    /// 확인하지 않으면 남의 회사 사원 번호를 넣어 근태를 만들 수 있다.
+    /// ⇒ <b>소속 검증을 먼저 한다.</b> 이 검사를 지우면 테넌트 격리가 뚫린다.
+    /// </para>
+    /// <para>
+    /// ⚠️ <b>누가 대신 넣었는지 남긴다</b> — <c>memo</c> 에 대리 처리자를 기록한다.
+    /// 남의 근태를 만드는 행위라 흔적이 없으면 나중에 다툼이 난다.
+    /// </para>
+    /// <para>
+    /// 🔴 <b>자동 근퇴 경로(<c>CheckInAsync</c>)는 건드리지 않는다.</b> 이미 돌고 있고
+    /// 6/22 봉합이 <c>employee_id</c> 키를 통일해 뒀다(자동/수동 이중행 방지).
+    /// </para>
+    /// </remarks>
+    public async Task<string> CheckInProxyAsync(string tenantId, string targetEmployeeId,
+        string actorEmployeeId, CheckInOutRequest req, CancellationToken ct = default)
+    {
+        await EnsureOpenAsync(ct);
+        await EnsureSameTenantEmployeeAsync(tenantId, targetEmployeeId, ct);
+
+        var actorNote = $"대리입력({actorEmployeeId})";
+        var memo = string.IsNullOrWhiteSpace(req.Memo) ? actorNote : $"{req.Memo} / {actorNote}";
+        return await CheckInAsync(tenantId, targetEmployeeId, new CheckInOutRequest { Memo = memo }, ct);
+    }
+
+    /// <summary>🔴 <b>대리 퇴근</b>. 소속 검증은 <see cref="CheckInProxyAsync"/> 와 같은 이유로 필수다.</summary>
+    public async Task CheckOutProxyAsync(string tenantId, string targetEmployeeId,
+        string actorEmployeeId, CancellationToken ct = default)
+    {
+        await EnsureOpenAsync(ct);
+        await EnsureSameTenantEmployeeAsync(tenantId, targetEmployeeId, ct);
+        await CheckOutAsync(tenantId, targetEmployeeId, ct);
+    }
+
+    /// <summary>
+    /// 🚨 <b>테넌트 격리 수문장</b>(헌법 #2). 대상 사원이 내 테넌트 소속일 때만 통과한다.
+    /// </summary>
+    /// <remarks>
+    /// <c>employee_id</c> 는 GUID 라 추측이 어렵지만 <b>비밀이 아니다</b> —
+    /// 화면·API 응답에 실려 나간다. 번호를 알아낸 사람이 남의 회사 근태를 만드는 것을 막는 것은
+    /// <b>이 검사 하나뿐</b>이다.
+    /// </remarks>
+    private async Task EnsureSameTenantEmployeeAsync(string tenantId, string employeeId, CancellationToken ct)
+    {
+        var exists = await _db.QueryFirstOrDefaultAsync<string>(new CommandDefinition(
+            "SELECT employee_id FROM employees WHERE tenant_id = @TenantId AND employee_id = @EmpId AND is_active = 1",
+            new { TenantId = tenantId, EmpId = employeeId }, cancellationToken: ct));
+
+        if (string.IsNullOrEmpty(exists))
+            throw new InvalidOperationException("대상 직원을 찾을 수 없습니다.");
+    }
+
     // ═══ 초과근무 ═══
 
     public async Task<List<OvertimeDto>> GetOvertimeAsync(string tenantId, DateTime? from, DateTime? to, CancellationToken ct = default)

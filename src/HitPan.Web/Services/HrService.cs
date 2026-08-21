@@ -31,6 +31,46 @@ public sealed class HrClientService(HttpClient http)
         catch (Exception ex) { LogFailure(nameof(CheckOutAsync), ex); return false; }
     }
 
+    // ── 🔴 대리 근태 (작10 A) ──────────────────────────────────────────────
+    //
+    // 사장님(2026-08-21): "사원등록만 되있고 계정이 없는 직원은 인사담당자가 수동으로
+    //   근퇴처리 할 수 있는 장치를 만들어야 됨" / "남의 근퇴 넣는건 권한설정에 넣자."
+    //
+    // ⚠️ 위 CheckInAsync 는 bool 만 돌려줘 ★왜 실패했는지가 사라진다★.
+    //    대리입력은 실패 사유가 갈린다 — 권한이 없는 것(403)과 이미 출근한 것(400)은
+    //    사용자가 해야 할 일이 다르다. 그래서 여기서는 서버 메시지를 살려서 넘긴다.
+
+    /// <summary>대리 출근. 성공 여부와 함께 <b>서버가 준 사유</b>를 돌려준다.</summary>
+    public async Task<(bool Ok, string Message)> CheckInProxyAsync(string employeeId, string? memo, CancellationToken ct = default)
+        => await PostProxyAsync("api/hr/attendance/proxy/check-in", new { employeeId, memo }, ct);
+
+    /// <summary>대리 퇴근.</summary>
+    public async Task<(bool Ok, string Message)> CheckOutProxyAsync(string employeeId, CancellationToken ct = default)
+        => await PostProxyAsync("api/hr/attendance/proxy/check-out", new { employeeId }, ct);
+
+    private async Task<(bool Ok, string Message)> PostProxyAsync(string url, object body, CancellationToken ct)
+    {
+        try
+        {
+            using var r = await http.PostAsJsonAsync(url, body, ct);
+            if (r.IsSuccessStatusCode) return (true, string.Empty);
+
+            // 🔴 권한 없음을 "실패" 로 뭉개지 않는다 — 관리자가 권한설정에서 켜야 하는 것이라
+            //    무엇을 해야 하는지 알려줘야 한다(고객 노출 영역 개발용어 금지).
+            if (r.StatusCode == System.Net.HttpStatusCode.Forbidden)
+                return (false, "권한이 없습니다. 관리자에게 [근태 대리입력] 권한을 요청해 주세요.");
+
+            var msg = await ReadMessageAsync(r, ct);
+            return (false, string.IsNullOrWhiteSpace(msg) ? "처리하지 못했습니다." : msg!);
+        }
+        catch (Exception ex)
+        {
+            LogFailure(nameof(PostProxyAsync), ex);
+            return (false, "서버에 연결하지 못했습니다.");
+        }
+    }
+
+
     // 초과근무
     public async Task<List<OvertimeModel>> GetOvertimeAsync(DateTime? from = null, DateTime? to = null, CancellationToken ct = default)
     {
