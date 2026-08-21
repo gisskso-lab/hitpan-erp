@@ -316,6 +316,33 @@ public class AuthService : IAuthService
         var already = existing.FirstOrDefault(e => e.UserId == user.Id && e.IsActive);
         if (already is not null) return already;
 
+        // 🔴 작(2026-08-21) 사장님 지시 ①·③ — 퇴사자에게 새 사번을 발급하지 않는다.
+        //
+        //    이 백필은 ★고아 계정 자가치유★ 용이다(2026-06-22·08-14 봉합):
+        //    users 는 만들어졌는데 employees 행이 ★없는★ 사람을 구제한다.
+        //    그런데 판정이 IsActive 하나뿐이라 ★퇴사자★(행은 있는데 꺼진 사람)까지
+        //    "행이 없는 사람" 으로 보고 새 행을 만들어 버렸다.
+        //
+        //    ⇒ 퇴사 기록 1행 + 새로 만든 재직 1행 = 같은 사람이 둘이 되고 사번이 갈린다.
+        //       사장님 지시 ③ "재입사도 상태변경으로" 가 깨진다 — 상태변경이 아니라 새 사람이 생긴다.
+        //       재입사 권한(부모계정 관리자만)도 우회된다 — 본인 로그인만으로 재직 행이 생기므로.
+        //
+        // ⚠️ 지금은 ResignAsync 가 users.is_active 도 꺼서 로그인 자체가 막히지만,
+        //    ★재입사 기능이 계정을 되살리는 순간 이 경로가 열린다.★ 그래서 먼저 막는다.
+        //
+        // ⚠️ 백필을 없애는 게 아니다 — 고아 계정 구제는 그대로 살려둔다(8/14 사장님 P0).
+        //    "자식계정은 생성되었으나 다른 그 어떤메뉴에도 그 계정직원은 안나옴."
+        //    ★퇴사자만 갈라낸다.★ (게이트: ResignedLoginGateGuardTests)
+        var resignedRow = existing.FirstOrDefault(e => e.UserId == user.Id && !e.IsActive);
+        if (resignedRow is not null)
+        {
+            System.Diagnostics.Trace.TraceWarning(
+                $"[Backfill] 퇴사 이력이 있는 계정이라 새 사원 행을 만들지 않는다 " +
+                $"(user={user.Id}, employee={resignedRow.EmployeeId}). " +
+                $"재입사는 부모계정 관리자가 사원관리에서 상태를 되돌린다.");
+            return null;
+        }
+
         // 🔴 봉합 (2026-08-14, 1.2.74 실사용 P0): 접두가 붙은 사번을 못 읽던 자리.
         //    int.TryParse("MIG-0007") 도 int.TryParse("EMP-001") 도 **실패해서 0** 이 된다.
         //    실측한 DB 에는 0001 · MIG-0001~0010 뿐이라 MAX 가 0 으로 나왔고,

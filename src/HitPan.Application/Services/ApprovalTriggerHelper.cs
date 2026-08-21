@@ -243,6 +243,9 @@ public static class ApprovalTriggerHelper
         "report_weekly"   => "주간보고서",
         "report_monthly"  => "월간보고서",
         "report_incident" => "경위서",
+        // 작(2026-08-21) P0 봉합: 위 주석이 "두 곳을 함께 고쳐야 한다" 고 경고해 놓고
+        // 정작 absence 에서 빠뜨렸다. 없으면 알림이 "결재 문서" 로 뭉개진다.
+        "absence"         => "휴직",
         _                 => "결재 문서"
     };
 }

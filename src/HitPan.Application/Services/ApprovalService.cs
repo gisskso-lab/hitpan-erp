@@ -34,7 +34,16 @@ public class ApprovalService : IApprovalService
         ["report_daily"]     = "일일보고서",
         ["report_weekly"]    = "주간보고서",
         ["report_monthly"]   = "월간보고서",
-        ["report_incident"]  = "경위서"
+        ["report_incident"]  = "경위서",
+        // 작(2026-08-21) P0 봉합: 휴직(absence) 이 여기 없어서 결재가 구조적으로 불가능했다.
+        // 🔴 AbsenceService 는 처음부터 "absence" 로 상신을 불렀는데, 설정 행은 이 사전을
+        //    순회해(GetSettingsAsync) 만들어지므로 화면에 "휴직" 행이 아예 뜨지 않았다
+        //    → is_enabled 를 켤 방법이 없다 → TryCreateApprovalAsync 가
+        //    'if (!setting.IsEnabled) return;' 로 조용히 종료했다.
+        //    화면은 "결재상신" 버튼을 보여주는데 눌러도 아무 일이 없었다.
+        // ⚠️ 이 항목을 지우면 휴직 결재가 다시 죽는다. 가드시험이 지킨다
+        //    (ApprovalDocTypeWiringGuardTests.휴직_상신_docType_이_설정화면_목록에_있다).
+        ["absence"]          = "휴직"
     };
 
     /// <summary>
@@ -50,6 +59,25 @@ public class ApprovalService : IApprovalService
     /// 원본 표(<c>leave_requests</c>·<c>hr_reports</c>)의 <c>reject_reason</c> 컬럼 폭.
     /// </summary>
     private const int RejectReasonMaxLength = 200;
+
+    /// <summary>
+    /// 휴직 승인 시 사원에게 넣는 <c>work_status</c> 값.
+    /// </summary>
+    /// <remarks>
+    /// 🔴 <c>WorkStatusLabels.Absence</c> 와 <b>같은 값이어야 한다.</b> 문자열을 여기서 지어내면
+    /// 휴직 화면 경로와 결재 경로가 서로 다른 값을 넣어 조직도·급여 판정이 갈린다.
+    /// (게이트: ApprovalDocTypeWiringGuardTests.휴직_결재승인은_원본과_사원상태를_함께_반영한다)
+    /// </remarks>
+    private const string AbsenceWorkStatus = DTOs.Leave.WorkStatusLabels.Absence;
+
+    /// <summary>
+    /// 휴직 결재 승인 시 원본에서 읽어야 하는 값. 시작일로 <c>active</c>/<c>approved</c> 를 가른다.
+    /// </summary>
+    private sealed class AbsenceSyncRow
+    {
+        public string EmployeeId { get; set; } = string.Empty;
+        public DateTime StartDate { get; set; }
+    }
 
     /// <summary>
     /// 반려 사유를 원본 표 컬럼 폭에 맞게 자른다.
@@ -664,6 +692,101 @@ public class ApprovalService : IApprovalService
                     // 실제로 pending→approved 전이된 경우만 차감(HR 화면이 먼저 승인했으면 0행 → 이중차감 방지).
                     if (leaveAffected > 0)
                         await LeaveBalanceHelper.DeductAsync(_db, tx, tenantId, doc.RefId, ct);
+                }
+            }
+
+            // ── 휴직(absence) 원본 반영 ──────────────────────────────────────────
+            // 작(2026-08-21) 사장님 지시: "영향 없다면 결재승인 작업해".
+            //
+            // 🔴 휴직은 다른 문서와 다르다. 원본 표만 바꾸면 부족하고 ★사원 work_status 까지★
+            //    함께 바뀌어야 한다. 결재 경로가 그 처리를 안 타고 있어서, 결재함에서 승인하면
+            //    휴직 신청서는 '대기중', 사원은 '재직' 으로 남았다
+            //    (= 결재는 갔는데 아무것도 안 바뀐 상태).
+            //
+            // ⚠️ 사장님 못박음(2026-08-21): "급여는 수동입력 원칙이야. 그래서 급여가 휴직을 모르고
+            //    사원만 알면 됨" / "사원마스터에 상태처리, 급여는 수동설정으로 고객이 알아서".
+            //    ⇒ 여기서 바꾸는 것은 ★사원 상태(work_status)까지★ 다. 급여 금액은 건드리지 않는다.
+            //    급여 명세는 고객이 직접 넣는다(PayrollService 는 absence_id 로 '어느 명세가
+            //    휴직분인지' 잇기만 하고 금액을 자동 계산하지 않는다 — 그 구조를 그대로 둔다).
+            //
+            // ⚠️ 시작일 판정을 AbsenceService 와 ★같은 규칙★ 으로 맞춘다. 승인 시점에 이미
+            //    시작일이 지났으면 'active'(휴직중), 아직이면 'approved'(시작 전).
+            //    두 경로가 다른 값을 넣으면 사원 상태가 경로에 따라 갈린다.
+            //
+            // ⚠️ status='pending' 가드로 멱등 — 휴직 화면(AbsenceService)이 먼저 처리했으면
+            //    0행이라 무해하다. leave 블록이 쓰는 방식과 같다.
+            if (doc.DocType == "absence" && !string.IsNullOrEmpty(doc.RefId))
+            {
+                if (request.Action == "rejected")
+                {
+                    await _db.ExecuteAsync(new CommandDefinition(
+                        "UPDATE employee_leave_of_absence SET status='rejected', approved_by=@Who, approved_at=NOW(6), reject_reason=@Reason, updated_at=NOW(6) WHERE tenant_id=@TenantId AND absence_id=@RefId AND status='pending'",
+                        new { Who = employeeId, Reason = TruncateRejectReason(request.Comment), TenantId = tenantId, RefId = doc.RefId },
+                        transaction: tx, cancellationToken: ct));
+                }
+                else if (request.Action == "approved" && doc.CurrentSeq >= doc.TotalLines)
+                {
+                    // 시작일을 읽어 'active'(이미 시작) / 'approved'(시작 전) 를 가른다.
+                    var absence = await _db.QueryFirstOrDefaultAsync<AbsenceSyncRow>(new CommandDefinition(
+                        "SELECT employee_id AS EmployeeId, start_date AS StartDate FROM employee_leave_of_absence WHERE tenant_id=@TenantId AND absence_id=@RefId AND status='pending'",
+                        new { TenantId = tenantId, RefId = doc.RefId },
+                        transaction: tx, cancellationToken: ct));
+
+                    if (absence is not null)
+                    {
+                        var started = absence.StartDate.Date <= DateTime.Today;
+                        var nextStatus = started ? "active" : "approved";
+
+                        var absenceAffected = await _db.ExecuteAsync(new CommandDefinition(
+                            "UPDATE employee_leave_of_absence SET status=@Status, approved_by=@Who, approved_at=NOW(6), reject_reason=NULL, updated_at=NOW(6) WHERE tenant_id=@TenantId AND absence_id=@RefId AND status='pending'",
+                            new { Status = nextStatus, Who = employeeId, TenantId = tenantId, RefId = doc.RefId },
+                            transaction: tx, cancellationToken: ct));
+
+                        // 🔴 실제 전이된 경우에만 사원 상태를 바꾼다. 그리고 시작일이 지난 건만이다 —
+                        //    아직 시작 전인 휴직으로 사원을 '휴직' 으로 바꾸면 재직 중인 사람이 빠진다.
+                        if (absenceAffected > 0 && started)
+                        {
+                            await _db.ExecuteAsync(new CommandDefinition(
+                                "UPDATE employees SET work_status=@WorkStatus, updated_at=NOW(6) WHERE tenant_id=@TenantId AND employee_id=@EmployeeId",
+                                new { WorkStatus = AbsenceWorkStatus, TenantId = tenantId, EmployeeId = absence.EmployeeId },
+                                transaction: tx, cancellationToken: ct));
+                        }
+                    }
+                }
+            }
+
+            // ── 초과근무(overtime) 원본 반영 ────────────────────────────────────
+            // 작(2026-08-21) V2 — 사장님 결재: "결재로 일원화".
+            //
+            // 🔴 상신만 배선하고 여기를 빠뜨리면 "결재는 승인됐는데 신청서는 대기중" 이 된다.
+            //    화면(HrOvertimePage)이 overtime.status 로 칩을 그리므로 사용자에게는
+            //    계속 "대기" 로 보인다 — 전형적인 "고쳤는데 안 갔다".
+            //
+            // ⚠️ overtime 표에는 reject_reason 컬럼이 ★없다★ (leave_requests·hr_reports 와 다르다).
+            //    반려 사유는 approval_history.comment 에 전문이 남으므로 잃는 것은 없다.
+            //    없는 컬럼에 쓰면 런타임 500 이고, 이 UPDATE 는 결재 트랜잭션 안이라
+            //    결재 이력·상태 전이까지 전부 롤백된다(2026-08-13 에 겪은 ERROR 1406 과 같은 자리).
+            //
+            // ⚠️ 급여는 건드리지 않는다 — 사장님 못박음: "급여는 수동입력원칙".
+            //    승인은 status 만 바꾼다. 수당 계산·급여 반영 없다. hours 는 이미 저장돼 있고
+            //    급여 명세는 고객이 직접 넣는다.
+            //
+            // ⚠️ status='pending' 가드로 멱등 — 화면 자체 승인이 먼저 처리했으면 0행이라 무해하다.
+            if (doc.DocType == "overtime" && !string.IsNullOrEmpty(doc.RefId))
+            {
+                if (request.Action == "rejected")
+                {
+                    await _db.ExecuteAsync(new CommandDefinition(
+                        "UPDATE overtime SET status='rejected', approved_by=@Who, approved_at=NOW(6), updated_at=NOW(6) WHERE tenant_id=@TenantId AND overtime_id=@RefId AND status='pending'",
+                        new { Who = employeeId, TenantId = tenantId, RefId = doc.RefId },
+                        transaction: tx, cancellationToken: ct));
+                }
+                else if (request.Action == "approved" && doc.CurrentSeq >= doc.TotalLines)
+                {
+                    await _db.ExecuteAsync(new CommandDefinition(
+                        "UPDATE overtime SET status='approved', approved_by=@Who, approved_at=NOW(6), updated_at=NOW(6) WHERE tenant_id=@TenantId AND overtime_id=@RefId AND status='pending'",
+                        new { Who = employeeId, TenantId = tenantId, RefId = doc.RefId },
+                        transaction: tx, cancellationToken: ct));
                 }
             }
 
