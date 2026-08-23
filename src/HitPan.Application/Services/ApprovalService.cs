@@ -283,6 +283,15 @@ public class ApprovalService : IApprovalService
             // ⚠️ 이 자리는 tenant_admin(대표)만 부를 수 있다 — 권한 상승 구멍이 아니라
             //    **대표가 자기 발등을 찍는 자리**다. 그래서 막는다.
             //
+            // 🔴🔴 COALESCE 가 없으면 계정 없는 사원이 검사를 통째로 빠져나간다 (터널 실측 적발).
+            //    계정이 없으면 LEFT JOIN 이 실패해 u.is_parent 가 NULL 이 된다. 그러면
+            //      NOT (NULL = 1 OR NULL IS NOT NULL)  →  NOT (NULL)  →  NULL
+            //    이고, WHERE 는 NULL 을 TRUE 로 보지 않으므로 그 사람은 결과에 안 담긴다.
+            //    ⇒ "못 막는 사람" 목록에조차 안 잡혀서 저장이 그냥 통과했다.
+            //    ⇒ 제일 확실히 막아야 할 사람(로그인 자체가 안 되는 사람)이 제일 잘 빠져나갔다.
+            //    실측: 2026-08-23 터널 test1234 에서 계정 없는 사원을 결재선에 저장 → HTTP 200.
+            //    ⚠️ 시험DB 는 이 케이스를 안 만들어 놓쳤다 — 조회는 봤는데 저장을 안 봤다.
+            //
             // 🔴 §7 "막지 말고 알린다" 와 어긋나지 않는다.
             //    §7 이 지키는 것은 **이미 저장된 결재선**이다(갑자기 막으면 도는 결재가 선다).
             //    여기는 **지금 새로 저장하는 순간**이라, 막아야 잘못된 결재선이 안 생긴다.
@@ -303,7 +312,7 @@ public class ApprovalService : IApprovalService
                  AND p.can_view = 1
                 WHERE e.tenant_id = @TenantId
                   AND e.employee_id IN @Ids
-                  AND NOT (u.is_parent = 1 OR p.user_id IS NOT NULL)
+                  AND NOT (COALESCE(u.is_parent, 0) = 1 OR p.user_id IS NOT NULL)
                 """,
                 new { TenantId = tenantId, Ids = ids }, cancellationToken: ct))).ToList();
 
