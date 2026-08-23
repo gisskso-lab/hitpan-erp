@@ -24,6 +24,16 @@ public static class ApprovalTriggerHelper
     public static async Task<string?> DescribeApprovalBlockerAsync(
         IDbConnection db, string tenantId, string docType, CancellationToken ct)
     {
+        // 🔴 작20260823작1 [B] — TryCreateApprovalAsync 와 **같은 판정**을 유지한다.
+        //    저쪽이 ERP 를 입구에서 되돌리는데 여기만 안 보면 두 곳의 조건이 갈라진다.
+        //    그러면 ERP 문서에서 이걸 물었을 때 "결재 설정이 꺼져 있어요" 라는
+        //    **틀린 안내**가 나간다 — 켜라고 해도 안 올라간다(설정 문제가 아니기 때문).
+        //    ⇒ ERP 는 애초에 그룹웨어 결재 대상이 아니라고 정직하게 답한다.
+        if (ApprovalService.IsErpDocType(docType))
+        {
+            return "ERP 문서는 그룹웨어 결재 대상이 아닙니다. 확정으로 승인됩니다.";
+        }
+
         var enabled = await db.QueryFirstOrDefaultAsync<bool?>(new CommandDefinition(
             "SELECT is_enabled FROM approval_settings WHERE tenant_id = @TenantId AND doc_type = @DocType",
             new { TenantId = tenantId, DocType = docType }, cancellationToken: ct));
@@ -90,6 +100,24 @@ public static class ApprovalTriggerHelper
         CancellationToken ct,
         INotificationService? notifier = null)
     {
+        // ── 🔴 작20260823작1 [B] — ERP 는 그룹웨어 결재로 올리지 않는다 ──
+        //
+        // 사장님: "erp와 그룹웨어 결재를 묶으면 안됨. 분리해"
+        //         "erp 자료는 '확정' 이라는 단계가 이미 있음"
+        //         "이거 넣고 결재 돌리면 난리난다. 하루에 수십수백건씩 견적, 발주, 거래가 잡힐텐데"
+        //
+        // 🔴 왜 호출부 4곳이 아니라 여기서 막나.
+        //    트리거는 전부 이 한 곳을 지난다. 여기서 막으면 호출부를 하나 빠뜨려도 안 샌다.
+        //    호출부에서 지우는 방식이면 나중에 누가 새 호출을 추가할 때 다시 열린다.
+        //    ⇒ 문을 하나로 두고 그 문에서 막는다.
+        //
+        // 🔴 확정 로직은 건드리지 않았다. 결재 호출만 여기서 되돌린다.
+        //    확정이 곧 승인이라는 축은 그대로다.
+        //
+        // ⚠️ 이미 만들어진 ERP 결재 문서는 그대로 흐른다(승인·반려 경로 무변경).
+        //    신규만 막는다 — 갑자기 끊으면 도는 결재가 선다(헌법 #20).
+        if (ApprovalService.IsErpDocType(docType)) return;
+
         // 결재 설정 확인
         var setting = await db.QueryFirstOrDefaultAsync<(bool IsEnabled, decimal Threshold, bool AutoBelow)>(
             new CommandDefinition(
@@ -246,6 +274,10 @@ public static class ApprovalTriggerHelper
         // 작(2026-08-21) P0 봉합: 위 주석이 "두 곳을 함께 고쳐야 한다" 고 경고해 놓고
         // 정작 absence 에서 빠뜨렸다. 없으면 알림이 "결재 문서" 로 뭉개진다.
         "absence"         => "휴직",
+        // 작20260823작1 [D] — 창구 통합으로 채운 2종. 알림 라벨도 함께 넣는다.
+        //   🔴 빠뜨리면 알림에 영문 코드가 그대로 나간다(가드시험이 잡는 자리).
+        "resignation"     => "사직서",
+        "labor_contract"  => "전자근로계약서",
         _                 => "결재 문서"
     };
 }
