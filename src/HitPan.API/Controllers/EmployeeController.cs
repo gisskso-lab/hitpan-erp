@@ -67,6 +67,39 @@ public sealed class EmployeeController : ControllerBase
         return Ok(list);
     }
 
+    /// <summary>
+    /// 작20260822작1 G1-[B] — 결재선에 넣을 수 있는 사람 목록.
+    /// <para>사장님 결재(2026-08-23): <b>"부모계정, 그리고 권한자만"</b></para>
+    /// </summary>
+    /// <remarks>
+    /// 🔴 <b>사원 목록(<c>GET /api/employees</c>)과 반드시 갈라 둔다.</b>
+    /// 사원 목록은 메신저·조직도가 함께 쓰므로 전원이 나와야 한다.
+    /// 결재자 후보는 <b>골라선 안 되는 사람을 아예 안 보여주는 것</b>이 목적이라
+    /// 같은 조회를 돌려 쓰면 둘 중 하나가 반드시 틀린다.
+    /// <para>
+    /// 🔴 라우트 자리 주의 — <c>[HttpGet("{id}")]</c> <b>앞</b>에 둔다.
+    /// 뒤에 두면 <c>approver-candidates</c> 가 <c>{id}</c> 로 먹혀 사원 조회로 샌다.
+    /// </para>
+    /// <para>
+    /// 조회 권한은 사원 목록과 같은 <c>TenantOnly</c> 다 — 결재선을 <b>보는</b> 것은
+    /// 직원도 한다(자기 문서가 누구에게 가는지 알아야 한다).
+    /// 결재선을 <b>고치는</b> 것은 종전대로 관리자 전용이다(클래스 정책).
+    /// </para>
+    /// </remarks>
+    [Authorize(Policy = "TenantOnly")]
+    [HttpGet("approver-candidates")]
+    public async Task<IActionResult> GetApproverCandidates(CancellationToken ct)
+    {
+        var tenantId = HttpContext.Items["TenantId"]?.ToString();
+        if (string.IsNullOrEmpty(tenantId))
+        {
+            return Forbid();
+        }
+
+        var list = await _employeeService.GetApproverCandidatesAsync(tenantId, ct).ConfigureAwait(false);
+        return Ok(list);
+    }
+
     [HttpGet("{id}")]
     public async Task<IActionResult> Get(string id, CancellationToken ct)
     {

@@ -38,4 +38,22 @@ public interface IEmployeeService
     // 작20260429 연차 관리 — 부여·사용 일수만 단독 저장 (사원관리 그리드용).
     Task UpdateAnnualLeaveAsync(string tenantId, string employeeId,
         decimal annualLeaveTotal, decimal annualLeaveUsed, CancellationToken ct = default);
+
+    // ── 작20260822작1 G1-[B] 결재자 후보 목록 (사장님 결재 2026-08-23) ──
+    // 사장님 확정: "대표이사 마지막 결재 외는 권한가진자가 하는걸로."
+    //              "부모계정, 그리고 권한자만"
+    //
+    // 🔴 왜 사원 목록을 그대로 못 쓰는가.
+    //    결재선에 APPROVAL 권한 없는 사람이 들어가면 그 사람은 결재함에
+    //    [RequirePermission("APPROVAL","view")] 에서 막혀 진입 자체를 못 한다.
+    //    ⇒ 그 문서가 영영 안 간다. 아무도 모른 채 일이 선다.
+    //
+    // 🔴 부모계정을 반드시 함께 뽑는 이유 (사장님이 PM 권고를 정정하신 자리).
+    //    PermissionService.HasPermissionAsync 는 Layer 0 에서 부모계정(tenant_admin)을
+    //    user_permissions 조회 전에 통과시킨다(락아웃 방지).
+    //    ⇒ 대표는 user_permissions 에 줄이 없을 수 있다.
+    //    ⇒ 권한자만 뽑으면 **대표가 목록에서 사라진다.**
+    //    ⇒ 그런데 최종 결재 단계는 대표여야 한다 — 스스로와 충돌한다.
+    Task<List<EmployeeListDto>> GetApproverCandidatesAsync(
+        string tenantId, CancellationToken ct = default);
 }

@@ -93,6 +93,37 @@ else
                 <MudButton Variant="Variant.Outlined" Size="Size.Small" StartIcon="@Icons.Material.Filled.Add" OnClick="AddLine">추가</MudButton>
             </div>
 
+            @* ── 작20260822작1 G1-[B] 후보 0명 ── *@
+            @* 결재선을 짤 수 없는 상태다. "다시 시도" 가 아니라 갈 곳을 알려준다.  *@
+            @if (_noApproverCandidates)
+            {
+                <MudAlert Severity="Severity.Error" Dense="true" Class="mb-3">
+                    결재할 수 있는 직원이 없습니다. 결재 권한을 가진 직원이 있어야 결재선을 만들 수 있습니다.
+                    <MudButton Variant="Variant.Text" Size="Size.Small" Color="Color.Inherit"
+                        Href="/users/permissions">권한설정으로 이동</MudButton>
+                </MudAlert>
+            }
+
+            @* ── 작20260822작1 G1-[A] 마지막 결재자가 대표가 아니면 경고 ── *@
+            @* 🔴 사장님 결재(Q1): **경고만 한다. 자동으로 넣지 않는다.**                *@
+            @*    사람이 짠 결재선을 시스템이 덮어쓰면 반자동 원칙에 어긋난다.          *@
+            @if (FinalApproverWarning is not null)
+            {
+                <MudAlert Severity="Severity.Warning" Dense="true" Class="mb-3">@FinalApproverWarning</MudAlert>
+            }
+
+            @* ── 작20260822작1 G1-[C] 권한 잃은 결재자가 결재선에 남아 있다 ── *@
+            @* 🔴 막지 않고 알린다(작업지시서 §7) — 갑자기 막으면 지금 도는 결재가 선다. *@
+            @if (_permissionLostNames.Count > 0)
+            {
+                <MudAlert Severity="Severity.Warning" Dense="true" Class="mb-3">
+                    @(string.Join(", ", _permissionLostNames)) 님은 결재 권한이 없어 결재함을 열 수 없습니다.
+                    이대로 두면 이 결재선의 문서가 그 단계에서 멈춥니다. 변경하시겠습니까?
+                    <MudButton Variant="Variant.Text" Size="Size.Small" Color="Color.Inherit"
+                        Href="/users/permissions">권한설정으로 이동</MudButton>
+                </MudAlert>
+            }
+
             <MudTable Items="_lines" Dense="true" Hover="true">
                 <HeaderContent>
                     <MudTh Style="width:50px">순서</MudTh>
@@ -151,9 +182,22 @@ else
     private string? _editingDocType;
     private string? _editingDocTypeLabel;
     private List<ApprovalLineItemModel> _lines = new();
-    // 사원 목록 (결재자 선택용)
+    // 🔴 작20260822작1 G1-[B] — 목록이 둘이다. 하나로 합치면 반드시 사고가 난다.
+    //
+    //   _employees      = **고를 수 있는 사람** (부모계정 + APPROVAL 권한자만)
+    //   _employeeLookup = **이름을 찾아볼 사람** (전 직원)
+    //
+    //   왜 갈랐나. 이미 저장된 결재선에 권한을 잃은 사람이 남아 있을 수 있다.
+    //   후보 목록만 들고 있으면 그 사람 이름을 못 찾아 **결재자 칸이 빈칸으로 보인다.**
+    //   빈칸은 "결재자가 없다" 로 읽혀서, 담당자가 멀쩡한 결재선을 지우게 만든다.
+    //   ⇒ 고르는 것은 막고, 보이는 것은 살린다(작업지시서 §7 "막지 말고 알린다").
     private List<EmployeeListItemModel> _employees = new();
     private Dictionary<string, EmployeeListItemModel> _employeeLookup = new();
+
+    // 결재자 후보가 0명인가. 🔴 "못 불러왔다"(_loadFailed) 와 다른 사실이다.
+    //   0명이면 결재선을 아예 짤 수 없다 — 권한을 준 사람이 없다는 뜻이므로
+    //   "다시 시도" 가 아니라 **권한설정으로 가라**고 안내해야 한다.
+    private bool _noApproverCandidates;
     private bool _loading = true;
 
     // 설정을 못 불러왔는지 여부. 🔴 "설정이 하나도 없다" 와 반드시 구분한다.
@@ -173,22 +217,34 @@ else
         try
         {
             var settings = await ApprovalSvc.GetSettingsOrNullAsync();
-            var employees = await EmployeeSvc.GetListOrNullAsync();
+
+            // 🔴 작20260822작1 G1-[B] — 두 목록을 따로 받는다.
+            //   candidates = 고를 수 있는 사람(서버가 부모계정 + APPROVAL 권한자만 걸러 준다)
+            //   allEmps    = 이름을 찾아볼 사람(전 직원 — 이미 저장된 결재자 표시용)
+            var candidates = await EmployeeSvc.GetApproverCandidatesOrNullAsync();
+            var allEmps = await EmployeeSvc.GetListOrNullAsync();
 
             // null = 실패. 빈 목록(정상 0건) 과 다른 사실이다.
             // 결재자를 못 고르는 화면은 반쪽이므로 사원 목록 실패도 실패로 본다.
-            if (settings is null || employees is null)
+            if (settings is null || candidates is null || allEmps is null)
             {
                 _loadFailed = true;
                 _settings = new();
                 _employees = new();
                 _employeeLookup = new();
+                _noApproverCandidates = false;
                 return;
             }
 
             _settings = settings;
-            _employees = employees;
-            _employeeLookup = _employees.ToDictionary(e => e.EmployeeId, e => e);
+            _employees = candidates;
+
+            // 🔴 이름 찾기는 **전 직원**으로 만든다. 후보로 만들면 권한 잃은 기존
+            //    결재자의 이름이 사라져 빈칸으로 보인다(위 필드 주석 참조).
+            _employeeLookup = allEmps.ToDictionary(e => e.EmployeeId, e => e);
+
+            // 후보 0명 = 권한 가진 사람이 아무도 없다. 결재선을 짤 수 없는 상태다.
+            _noApproverCandidates = candidates.Count == 0;
         }
         finally
         {
@@ -273,6 +329,10 @@ else
             DelegateStart = l.DelegateStart,
             DelegateEnd = l.DelegateEnd
         }).ToList();
+
+        // 🔴 작20260822작1 G1-[C] — 불러온 결재선에 권한 잃은 사람이 있는지 즉시 본다.
+        //    화면을 열자마자 알려야 한다. 저장할 때 알리면 이미 늦다.
+        RecomputePermissionLost();
         StateHasChanged();
     }
 
@@ -292,6 +352,7 @@ else
         _lines.Remove(line);
         for (var i = 0; i < _lines.Count; i++)
             _lines[i].SeqNo = i + 1;
+        RecomputePermissionLost();
     }
 
     private void OnApproverChanged(ApprovalLineItemModel line, EmployeeListItemModel? emp)
@@ -299,6 +360,7 @@ else
         if (emp is null) return;
         line.ApproverId = emp.EmployeeId;
         line.ApproverName = emp.EmpName;
+        RecomputePermissionLost();
     }
 
     private void OnDelegateChanged(ApprovalLineItemModel line, EmployeeListItemModel? emp)
@@ -324,6 +386,68 @@ else
     {
         if (string.IsNullOrEmpty(id)) return null;
         return _employeeLookup.GetValueOrDefault(id);
+    }
+
+    // ── 작20260822작1 G1-[A] 마지막 결재자 = 대표이사 ──
+    //
+    // 사장님 오더: "대표이사 마지막 결재 외는 권한가진자가 하는걸로."
+    // 사장님 결재(Q1): **경고만.** 자동으로 대표를 넣지 않는다 — 반자동 원칙.
+    //
+    // 🔴 대표 판정은 IsParentAccount(= users.is_parent) 로만 한다.
+    //    Position 문자열로 판정하면 안 된다 — T-004 실측에서 대표인데도 null 이었다(G1-5).
+    //
+    // 🔴 후보 목록(_employees)이 아니라 _employeeLookup 에서 찾는다.
+    //    이미 저장된 결재자가 후보에서 빠져 있을 수 있고, 그때 "모른다" 를
+    //    "대표가 아니다" 로 단정하면 없는 경고가 뜬다.
+    private string? FinalApproverWarning
+    {
+        get
+        {
+            if (_lines.Count == 0) return null;
+
+            var last = _lines[_lines.Count - 1];
+            if (string.IsNullOrEmpty(last.ApproverId))
+                return "마지막 결재자가 비어 있습니다. 최종 결재는 대표이사여야 합니다.";
+
+            var emp = _employeeLookup.GetValueOrDefault(last.ApproverId);
+
+            // 누군지 모르면 경고하지 않는다. 모르는 것과 틀린 것은 다르다.
+            if (emp is null) return null;
+
+            if (emp.CanBeFinalApprover) return null;
+
+            return $"마지막 결재자가 대표이사가 아닙니다(현재: {emp.EmpName}). 최종 결재는 대표이사여야 합니다.";
+        }
+    }
+
+    // ── 작20260822작1 G1-[C] 권한 잃은 결재자 ──
+    //
+    // 결재선에 있는데 APPROVAL 권한이 없는 사람을 찾아 이름을 모은다.
+    // 🔴 막지 않는다(작업지시서 §7). 갑자기 막으면 지금 도는 결재가 선다.
+    //
+    // 판정: **후보 목록에 없으면** 권한이 없는 것이다.
+    //   후보 목록은 서버가 "부모계정 OR APPROVAL 권한자" 로 만든 것이므로,
+    //   거기 없다는 것은 그 사람이 결재함에 못 들어간다는 뜻이다.
+    //   ⚠️ 화면이 권한을 직접 판정하지 않는다 — user_permissions 를 볼 수 없고,
+    //      부모계정은 그 표를 거치지도 않기 때문이다.
+    private List<string> _permissionLostNames = new();
+
+    private void RecomputePermissionLost()
+    {
+        var candidateIds = _employees.Select(e => e.EmployeeId).ToHashSet();
+        var names = new List<string>();
+
+        foreach (var line in _lines)
+        {
+            if (string.IsNullOrEmpty(line.ApproverId)) continue;
+            if (candidateIds.Contains(line.ApproverId)) continue;
+
+            // 후보에 없다 = 결재 못 한다. 이름은 전 직원 목록에서 찾는다.
+            var emp = _employeeLookup.GetValueOrDefault(line.ApproverId);
+            names.Add(emp?.EmpName ?? line.ApproverName ?? "(이름 미상)");
+        }
+
+        _permissionLostNames = names.Distinct().ToList();
     }
 
     private Task<IEnumerable<EmployeeListItemModel>> SearchEmployee(string? value, CancellationToken ct)

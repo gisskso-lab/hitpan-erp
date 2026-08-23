@@ -47,6 +47,27 @@ public sealed class EmployeeListItemModel
     public decimal AnnualLeaveTotal { get; set; }
     public decimal AnnualLeaveUsed { get; set; }
     public decimal AnnualLeaveRemaining => AnnualLeaveTotal - AnnualLeaveUsed;
+
+    // ── 작20260822작1 G1 결재자 후보 판정 (사장님 결재 2026-08-23) ──
+    // 서버 EmployeeListDto 와 짝이다. 한쪽만 고치면 값이 안 실려 온다(헌법 #12).
+    // 결재자 후보 조회에서만 채워진다 — 일반 사원 목록에서는 둘 다 false 다.
+
+    /// <summary>부모계정(대표이사)인가. 서버가 <c>users.is_parent</c> 로 판정해 내려준다.</summary>
+    public bool IsParentAccount { get; set; }
+
+    /// <summary>
+    /// APPROVAL 권한을 실제로 가졌는가.
+    /// 🔴 <b>"결재 가능" 을 이 값 하나로 판정하지 마라</b> — 부모계정은 이 값이 <c>false</c>
+    ///    여도 결재한다(권한검사가 user_permissions 를 보기 전에 통과시킨다).
+    ///    결재 가능 여부는 <c>IsParentAccount || HasApprovalPermission</c> 이다.
+    /// </summary>
+    public bool HasApprovalPermission { get; set; }
+
+    /// <summary>
+    /// 결재선 <b>마지막</b> 단계에 놓을 수 있는가 = 대표이사인가. 작20260822작1 G1-[A].
+    /// 🔴 <c>Position</c> 문자열로 판정하지 않는다 — 실측에서 대표인데도 <c>null</c> 이었다.
+    /// </summary>
+    public bool CanBeFinalApprover => IsParentAccount;
 }
 
 /// <summary>
