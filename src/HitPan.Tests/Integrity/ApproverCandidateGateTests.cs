@@ -408,6 +408,66 @@ public sealed class ApproverCandidateGateTests : IDisposable
         await svc.SaveLinesAsync(req, TenantId);   // 예외가 나면 FAIL
     }
 
+    /// <summary>
+    /// 🔴🔴 <b>계정 없는 사원을 결재선에 저장하면 막히는가</b> — 터널 실측이 잡은 버그.
+    /// </summary>
+    /// <remarks>
+    /// 🔴 <b>2026-08-23 실측 적발</b> — 터널 test1234 에서 계정 없는 사원을 결재선에
+    /// 저장했더니 <b>HTTP 200 "저장되었습니다"</b> 가 나왔다. 서버가 안 막았다.
+    /// <para>
+    /// <b>원인 — SQL 3값 논리.</b> 계정이 없으면 <c>LEFT JOIN users</c> 가 실패해
+    /// <c>u.is_parent</c> 가 NULL 이 된다. 그러면
+    /// <code>NOT (NULL = 1 OR NULL IS NOT NULL) → NOT (NULL) → NULL</code>
+    /// 이고 <c>WHERE</c> 는 NULL 을 TRUE 로 안 보므로 <b>그 사람이 결과에 안 담긴다</b> —
+    /// "못 막는 사람" 목록에조차 안 잡혀 저장이 통과했다.
+    /// ⇒ <b>제일 확실히 막아야 할 사람(로그인 자체가 안 되는 사람)이 제일 잘 빠져나갔다.</b>
+    /// </para>
+    /// <para>
+    /// ⚠️ <b>왜 종전 시험이 못 잡았나</b> — <c>계정없는_사원은_후보가_아니다</c> 는
+    /// <b>조회</b>만 봤다. <b>저장</b>을 안 봤다. 같은 사람인데 경로가 둘이었다.
+    /// </para>
+    /// <para>[반증] <c>COALESCE(u.is_parent, 0)</c> 를 <c>u.is_parent</c> 로 되돌리면 저장이 통과해 FAIL.</para>
+    /// </remarks>
+    [Fact]
+    public async Task 계정없는_사원을_결재선에_저장하면_막힌다()
+    {
+        if (!ServerAvailable()) return;
+
+        SetUpFreshInstall();
+        await using var db = new MySqlConnection(DbConnString());
+        await db.OpenAsync();
+
+        await InsertPersonAsync(db, "u-own2--0001", "e-own2--0001", "김대표", isParent: true);
+
+        // 계정 없는 사원 — employees 만 있고 users 가 없다(user_id NULL).
+        await db.ExecuteAsync(
+            """
+            INSERT INTO employees
+              (employee_id, tenant_id, user_id, emp_no, emp_name, emp_type,
+               join_date, is_active, is_resigned, created_at, updated_at)
+            VALUES
+              ('e-noacc-0077', @Tid, NULL, 'E77001', '무계정', 'regular',
+               NOW(6), 1, 0, NOW(6), NOW(6))
+            """,
+            new { Tid = TenantId });
+
+        var svc = new ApprovalService(db, new NoOpAudit());
+
+        var req = new HitPan.Application.DTOs.Approval.SaveApprovalLinesRequest
+        {
+            DocType = "leave",
+            Lines = new List<HitPan.Application.DTOs.Approval.ApprovalLineItem>
+            {
+                new() { SeqNo = 1, ApproverId = "e-noacc-0077", ApproverName = "무계정" }
+            }
+        };
+
+        // 🔴 로그인을 못 하는 사람은 결재도 못 한다 — 저장이 막혀야 한다.
+        var ex = await Assert.ThrowsAnyAsync<Exception>(() => svc.SaveLinesAsync(req, TenantId));
+        Assert.True(ex is InvalidOperationException,
+            $"막히긴 했는데 다른 이유다: {ex.GetType().Name} — {ex.Message}");
+    }
+
     public void Dispose()
     {
         if (!_created) return;
