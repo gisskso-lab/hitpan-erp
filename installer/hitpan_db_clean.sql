@@ -1956,6 +1956,49 @@ CREATE TABLE `labor_contracts` (
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
+-- Table structure for table `resignation_letters`  (DB-106)
+--
+-- 입사(labor_contracts) 바로 옆에 둔다 — 「입사/퇴사」 한 메뉴의 두 문서다.
+-- 🔴 2026-08-24 봉합: 이 표가 clean DDL 에 없어 신규 고객은 표 자체가 없었다(헌법 #36 위반).
+--    같은 날 번호 충돌(DB-100 중복)로 기존 고객도 못 받았다 — 결함이 둘이었고 DDL Smoke 가 둘째를 잡았다.
+--
+
+DROP TABLE IF EXISTS `resignation_letters`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!40101 SET character_set_client = utf8mb4 */;
+CREATE TABLE `resignation_letters` (
+  `resignation_id` varchar(36) NOT NULL COMMENT '사직서 ID',
+  `tenant_id` varchar(36) NOT NULL COMMENT '테넌트 (JWT 클레임에서만 — 헌법 #2)',
+  `employee_id` varchar(36) NOT NULL COMMENT '사직하는 사원',
+  `employee_name` varchar(100) NOT NULL COMMENT '작성 시점 이름 (사원명이 바뀌어도 문서는 그대로여야 한다)',
+  `dept_name` varchar(100) DEFAULT NULL COMMENT '작성 시점 부서 (같은 이유로 문자열로 넣는다)',
+  `position_name` varchar(50) DEFAULT NULL COMMENT '작성 시점 직급',
+  `resign_type` varchar(20) NOT NULL DEFAULT 'voluntary' COMMENT '자발(voluntary) · 권고사직(recommended) · 계약만료(expired) · 정년(retirement)',
+  `desired_date` date NOT NULL COMMENT '희망 퇴사일 (직원이 적는 날)',
+  `actual_date` date DEFAULT NULL COMMENT '실제 퇴사일 (회사가 수리하며 정한 날 — 다를 수 있다)',
+  `reason` varchar(500) DEFAULT NULL COMMENT '사직 사유',
+  `handover_to` varchar(100) DEFAULT NULL COMMENT '인수인계 받을 사람',
+  `handover_note` text DEFAULT NULL COMMENT '인수인계 내용',
+  `return_items` varchar(500) DEFAULT NULL COMMENT '반납물 (사원증·노트북·차량 등)',
+  `status` varchar(20) NOT NULL DEFAULT 'draft' COMMENT 'draft · pending · approved · rejected · completed · withdrawn',
+  `approval_id` varchar(36) DEFAULT NULL COMMENT 'approval_documents.approval_id — 결재는 그쪽이 돈다',
+  `submitted_at` datetime(6) DEFAULT NULL COMMENT '제출(상신) 시각',
+  `approved_at` datetime(6) DEFAULT NULL COMMENT '수리 시각',
+  `reject_reason` varchar(500) DEFAULT NULL COMMENT '반려 사유',
+  `signed_at` datetime(6) DEFAULT NULL COMMENT '직원이 서명한 시각',
+  `signature_data` longtext DEFAULT NULL COMMENT '서명 이미지 (data URI)',
+  `created_at` datetime(6) NOT NULL DEFAULT current_timestamp(6),
+  `created_by` varchar(36) DEFAULT NULL,
+  `updated_at` datetime(6) NOT NULL DEFAULT current_timestamp(6) ON UPDATE current_timestamp(6),
+  `updated_by` varchar(36) DEFAULT NULL,
+  PRIMARY KEY (`resignation_id`),
+  KEY `idx_tenant_emp` (`tenant_id`,`employee_id`),
+  KEY `idx_tenant_status` (`tenant_id`,`status`),
+  KEY `idx_approval` (`approval_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='전자 퇴직서(사직서) — 직원이 올리는 문서. 관리자 퇴사처리(employees)와 다른 자리다. DB-106';
+/*!40101 SET character_set_client = @saved_cs_client */;
+
+--
 -- Table structure for table `leave_requests`
 --
 
@@ -3436,7 +3479,7 @@ INSERT INTO `schema_migrations` (`migration_id`, `app_version`, `success`) VALUE
 ('DB-74','clean-ddl',1),('DB-75','clean-ddl',1),('DB-76','clean-ddl',1),('DB-77','clean-ddl',1),
 ('DB-78','clean-ddl',1),('DB-79','clean-ddl',1),('DB-80','clean-ddl',1),('DB-81','clean-ddl',1),
 ('DB-82','clean-ddl',1),('DB-83','clean-ddl',1),('DB-84','clean-ddl',1),('DB-85','clean-ddl',1),
-('DB-86','clean-ddl',1),('DB-87','clean-ddl',1),('DB-88','clean-ddl',1),('DB-89','clean-ddl',1),('DB-90','clean-ddl',1),('DB-91','clean-ddl',1),('DB-92','clean-ddl',1),('DB-93','clean-ddl',1),('DB-94','clean-ddl',1),('DB-95','clean-ddl',1),('DB-96','clean-ddl',1),('DB-97','clean-ddl',1),('DB-98','clean-ddl',1),('DB-99','clean-ddl',1),('DB-100','clean-ddl',1),('DB-101','clean-ddl',1),('DB-102','clean-ddl',1),('DB-103','clean-ddl',1),('DB-104','clean-ddl',1),('DB-105','clean-ddl',1);
+('DB-86','clean-ddl',1),('DB-87','clean-ddl',1),('DB-88','clean-ddl',1),('DB-89','clean-ddl',1),('DB-90','clean-ddl',1),('DB-91','clean-ddl',1),('DB-92','clean-ddl',1),('DB-93','clean-ddl',1),('DB-94','clean-ddl',1),('DB-95','clean-ddl',1),('DB-96','clean-ddl',1),('DB-97','clean-ddl',1),('DB-98','clean-ddl',1),('DB-99','clean-ddl',1),('DB-100','clean-ddl',1),('DB-101','clean-ddl',1),('DB-102','clean-ddl',1),('DB-103','clean-ddl',1),('DB-104','clean-ddl',1),('DB-105','clean-ddl',1),('DB-106','clean-ddl',1);
 
 --
 -- Table structure for table `service_tickets`
