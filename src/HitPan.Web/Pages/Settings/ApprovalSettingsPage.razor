@@ -365,9 +365,16 @@ else
 
     private void OnDelegateChanged(ApprovalLineItemModel line, EmployeeListItemModel? emp)
     {
-        if (emp is null) { line.DelegateId = null; line.DelegateName = null; return; }
+        if (emp is null)
+        {
+            line.DelegateId = null;
+            line.DelegateName = null;
+            RecomputePermissionLost();   // 지웠으면 그 경고도 사라져야 한다
+            return;
+        }
         line.DelegateId = emp.EmployeeId;
         line.DelegateName = emp.EmpName;
+        RecomputePermissionLost();
     }
 
     private async Task SaveLinesAsync()
@@ -439,15 +446,35 @@ else
 
         foreach (var line in _lines)
         {
-            if (string.IsNullOrEmpty(line.ApproverId)) continue;
-            if (candidateIds.Contains(line.ApproverId)) continue;
-
-            // 후보에 없다 = 결재 못 한다. 이름은 전 직원 목록에서 찾는다.
-            var emp = _employeeLookup.GetValueOrDefault(line.ApproverId);
-            names.Add(emp?.EmpName ?? line.ApproverName ?? "(이름 미상)");
+            // 🔴 결재자와 **위임자를 함께 본다.** 위임자도 실제로 결재한다 —
+            //    ApprovalService.ProcessAsync 가 delegate_id 로도 결재를 받는다.
+            //    ⇒ 위임자가 권한을 잃으면 결재자와 **똑같이** 문서가 선다.
+            //    [3-V] 동시검증 적발: 종전엔 ApproverId 만 봐서 위임자를 놓쳤다.
+            AddIfCannotApprove(line.ApproverId, line.ApproverName, candidateIds, names);
+            AddIfCannotApprove(line.DelegateId, line.DelegateName, candidateIds, names);
         }
 
         _permissionLostNames = names.Distinct().ToList();
+    }
+
+    /// <summary>
+    /// 한 사람이 결재할 수 없으면 이름을 모은다. 결재자·위임자 둘 다 이걸 통과한다.
+    /// </summary>
+    /// <remarks>
+    /// 판정은 <b>후보 목록에 있는가</b> 하나다. 후보 목록은 서버가
+    /// "부모계정 OR APPROVAL 권한자" 로 만든 것이므로, 거기 없으면 결재함에 못 들어간다.
+    /// ⚠️ 화면이 권한을 직접 판정하지 않는다 — <c>user_permissions</c> 를 볼 수 없고,
+    ///    부모계정은 그 표를 거치지도 않기 때문이다.
+    /// </remarks>
+    private void AddIfCannotApprove(
+        string? employeeId, string? fallbackName,
+        HashSet<string> candidateIds, List<string> names)
+    {
+        if (string.IsNullOrEmpty(employeeId)) return;   // 안 정한 자리는 경고 대상이 아니다
+        if (candidateIds.Contains(employeeId)) return;  // 결재할 수 있다
+
+        var emp = _employeeLookup.GetValueOrDefault(employeeId);
+        names.Add(emp?.EmpName ?? fallbackName ?? "(이름 미상)");
     }
 
     private Task<IEnumerable<EmployeeListItemModel>> SearchEmployee(string? value, CancellationToken ct)
