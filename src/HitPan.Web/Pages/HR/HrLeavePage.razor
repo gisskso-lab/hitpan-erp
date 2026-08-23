@@ -5,18 +5,115 @@
    들어온 주소에 따라 알맞은 탭이 먼저 열린다(아래 OnInitializedAsync). *@
 @page "/hr/leave-status"
 @page "/hr/leave-calendar"
+@* ── 작20260824작2 [1] 「연차 신청」을 여기로 합쳤다 (사장님 지시 2026-08-24) ──
+   사장님: "휴가연차+연차신청 통합"
+
+   🔴 두 화면이 **같은 KPI(총·사용·잔여 연차)를 각각** 보여주고 있었다. 직원은
+      내 잔여를 보러 [연차 신청]에 갔다가, 남들 것을 보려면 [휴가·연차]로 또 갔다.
+   ⇒ 첫 탭 「내 연차」가 직원 자리, 나머지 탭이 관리자 자리다.
+   🔴 주소 /hr/leave-request 는 살려 둔다 — 결재관리 [결재 올리기] 안내가 그리로 보낸다. *@
+@page "/hr/leave-request"
 @namespace HitPan.Web.Pages.HrUi
 @attribute [Authorize]
+@using HitPan.Web.Models
+@using HitPan.Web.Services
+@using Microsoft.AspNetCore.Components.Authorization
 @inject HitPan.Web.Services.LeaveRequestService LeaveService
+@inject EmployeeService EmpSvc
 @inject ISnackbar Snackbar
 @inject IDialogService DialogService
 @inject NavigationManager Nav
+@inject AuthenticationStateProvider AuthState
 
 <PageTitle>휴가·연차 관리</PageTitle>
-<PageHeader Title="휴가·연차 관리" Subtitle="직원 휴가 신청 · 승인 · 잔여 연차" />
+<PageHeader Title="휴가·연차 관리" Subtitle="내 연차 신청 · 전사 현황 · 휴가 일정" />
 
 <MudTabs Elevation="0" Rounded="true" ApplyEffectsToContainer="true" PanelClass="pt-4"
          @bind-ActivePanelIndex="_tabIndex">
+
+@* ── 탭 0 「내 연차」 — 옛 /hr/leave-request 가 하던 그대로 ──
+     직원이 열면 여기가 먼저 보인다. 내 잔여를 보고 그 자리에서 신청한다. *@
+<MudTabPanel Text="내 연차" Icon="@Icons.Material.Filled.EditCalendar">
+
+    @if (_myEmployee is not null)
+    {
+        <MudGrid Spacing="2" Class="mb-3">
+            <MudItem xs="6" md="3">
+                <MudPaper Elevation="0" Class="pa-3 hitpan-card text-center">
+                    <MudText Typo="Typo.h5" Style="font-weight:700;color:var(--mud-palette-primary)">@_myEmployee.AnnualLeaveTotal.ToString("N1")</MudText>
+                    <MudText Typo="Typo.caption">부여 연차</MudText>
+                </MudPaper>
+            </MudItem>
+            <MudItem xs="6" md="3">
+                <MudPaper Elevation="0" Class="pa-3 hitpan-card text-center">
+                    <MudText Typo="Typo.h5" Style="font-weight:700;color:var(--mud-palette-warning)">@_myEmployee.AnnualLeaveUsed.ToString("N1")</MudText>
+                    <MudText Typo="Typo.caption">사용 연차</MudText>
+                </MudPaper>
+            </MudItem>
+            <MudItem xs="6" md="3">
+                <MudPaper Elevation="0" Class="pa-3 hitpan-card text-center">
+                    <MudText Typo="Typo.h5" Style="@_remainStyle">@_myEmployee.AnnualLeaveRemaining.ToString("N1")</MudText>
+                    <MudText Typo="Typo.caption">잔여 연차</MudText>
+                </MudPaper>
+            </MudItem>
+            <MudItem xs="6" md="3">
+                <MudPaper Elevation="0" Class="pa-3 hitpan-card text-center d-flex align-center justify-center">
+                    <MudButton Variant="Variant.Filled" Color="Color.Primary"
+                               StartIcon="@Icons.Material.Filled.Add" OnClick="@(() => _myDialogOpen = true)">
+                        연차 신청
+                    </MudButton>
+                </MudPaper>
+            </MudItem>
+        </MudGrid>
+    }
+    else
+    {
+        @* 🔴 계정은 있는데 사원 줄이 없는 사람 — 신청 자체가 불가능하다. 조용히 빈 화면을
+             보여주면 "왜 안 되지" 로 끝난다. 무엇을 해야 하는지 말해준다. *@
+        <MudAlert Severity="Severity.Info" Class="mb-3" Dense="true">
+            직원 정보가 없어 연차를 신청할 수 없습니다. 사원관리에서 직원 등록 후 이용하세요.
+        </MudAlert>
+    }
+
+    <MudPaper Elevation="0" Class="hitpan-card">
+        <MudTable Items="_myRequests" Dense="true" Hover="true" Striped="true"
+                  FixedHeader="true" Height="calc(100vh - 380px)" T="LeaveRequestModel">
+            <ToolBarContent>
+                <MudText Typo="Typo.subtitle1" Style="font-weight:600">내 연차 신청 현황</MudText>
+            </ToolBarContent>
+            <HeaderContent>
+                <MudTh>신청일</MudTh>
+                <MudTh>휴가종류</MudTh>
+                <MudTh Style="text-align:center">시작일</MudTh>
+                <MudTh Style="text-align:center">종료일</MudTh>
+                <MudTh Style="text-align:center">일수</MudTh>
+                <MudTh>사유</MudTh>
+                <MudTh Style="text-align:center">상태</MudTh>
+                <MudTh>반려사유</MudTh>
+            </HeaderContent>
+            <RowTemplate>
+                <MudTd>@context.CreatedAt.ToString("yyyy-MM-dd")</MudTd>
+                <MudTd>@GetLeaveTypeLabel(context.LeaveType)</MudTd>
+                <MudTd Style="text-align:center">@context.StartDate.ToString("yyyy-MM-dd")</MudTd>
+                <MudTd Style="text-align:center">@context.EndDate.ToString("yyyy-MM-dd")</MudTd>
+                <MudTd Style="text-align:center;font-weight:600">@context.LeaveDays.ToString("N1")</MudTd>
+                <MudTd>@(context.Reason ?? "-")</MudTd>
+                <MudTd Style="text-align:center">
+                    <MudChip T="string" Size="Size.Small" Variant="Variant.Filled"
+                             Color="@GetMyStatusColor(context.Status)">
+                        @GetMyStatusLabel(context.Status)
+                    </MudChip>
+                </MudTd>
+                <MudTd Style="color:var(--mud-palette-error)">@(context.RejectReason ?? "")</MudTd>
+            </RowTemplate>
+            <NoRecordsContent>
+                <MudText Class="pa-4" Style="color:var(--hitpan-text-faint)">신청한 연차가 없습니다.</MudText>
+            </NoRecordsContent>
+        </MudTable>
+    </MudPaper>
+
+</MudTabPanel>
+
 <MudTabPanel Text="신청·승인" Icon="@Icons.Material.Filled.EventAvailable">
 
 @* === KPI 카드 === *@
@@ -201,6 +298,46 @@
 </MudTabPanel>
 </MudTabs>
 
+@* ── 연차 신청 다이얼로그 (옛 /hr/leave-request 에서 그대로 옮겼다) ── *@
+<MudDialog @bind-IsVisible="_myDialogOpen">
+    <TitleContent>
+        <MudText Typo="Typo.h6">연차 신청</MudText>
+    </TitleContent>
+    <DialogContent>
+        <MudGrid Spacing="2">
+            <MudItem xs="12">
+                <MudSelect T="string" @bind-Value="_myReq.LeaveType" Label="휴가 종류"
+                           Variant="Variant.Outlined" Margin="Margin.Dense">
+                    <MudSelectItem Value="@("annual")">연차</MudSelectItem>
+                    <MudSelectItem Value="@("half")">반차</MudSelectItem>
+                    <MudSelectItem Value="@("sick")">병가</MudSelectItem>
+                    <MudSelectItem Value="@("special")">특별휴가</MudSelectItem>
+                </MudSelect>
+            </MudItem>
+            <MudItem xs="6">
+                <MudDatePicker @bind-Date="_myStartDate" Label="시작일"
+                               Variant="Variant.Outlined" Margin="Margin.Dense" DateFormat="yyyy-MM-dd" />
+            </MudItem>
+            <MudItem xs="6">
+                <MudDatePicker @bind-Date="_myEndDate" Label="종료일"
+                               Variant="Variant.Outlined" Margin="Margin.Dense" DateFormat="yyyy-MM-dd" />
+            </MudItem>
+            <MudItem xs="12">
+                <MudNumericField T="decimal" @bind-Value="_myReq.LeaveDays" Label="신청 일수"
+                                 Variant="Variant.Outlined" Margin="Margin.Dense" Min="0.5m" Step="0.5m" />
+            </MudItem>
+            <MudItem xs="12">
+                <MudTextField @bind-Value="_myReq.Reason" Label="신청 사유 (선택)"
+                              Variant="Variant.Outlined" Margin="Margin.Dense" Lines="2" />
+            </MudItem>
+        </MudGrid>
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="@(() => _myDialogOpen = false)">취소</MudButton>
+        <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="SubmitMyLeaveAsync">신청</MudButton>
+    </DialogActions>
+</MudDialog>
+
 @code {
     // === 상태 변수 ===
     private bool _loading;
@@ -216,8 +353,24 @@
     private DateTime? _filterStartDate;
     private DateTime? _filterEndDate;
 
-    // 탭 위치. 0=신청·승인, 1=전사 현황, 2=휴가 일정
+    // 탭 위치. 0=내 연차, 1=신청·승인, 2=전사 현황, 3=휴가 일정
+    // 🔴 작20260824작2 에서 「내 연차」가 0번으로 들어와 **뒤가 전부 한 칸씩 밀렸다.**
+    //    아래 OnInitializedAsync 의 옛 주소 매핑도 같이 옮겼다 — 안 옮기면
+    //    /hr/leave-status 가 [신청·승인]을 열어 **엉뚱한 화면**이 뜬다.
     private int _tabIndex;
+
+    // ── 「내 연차」 탭 (옛 /hr/leave-request) ──
+    private List<LeaveRequestModel> _myRequests = new();
+    private EmployeeListItemModel? _myEmployee;
+    private string _myEmployeeId = "";
+    private bool _myDialogOpen;
+    private CreateLeaveRequestModel _myReq = new();
+    private DateTime? _myStartDate = DateTime.Today;
+    private DateTime? _myEndDate = DateTime.Today;
+
+    private string _remainStyle => _myEmployee is null || _myEmployee.AnnualLeaveRemaining >= 0
+        ? "font-weight:700;color:var(--mud-palette-success)"
+        : "font-weight:700;color:var(--mud-palette-error)";
 
     /// <summary>
     /// 휴가 일정 탭 — 승인된 것만 시작일 순. 옛 [휴가 달력]이 하던 그대로다.
@@ -246,11 +399,92 @@
     protected override async Task OnInitializedAsync()
     {
         var uri = Nav.Uri;
-        if (uri.Contains("/hr/leave-status", StringComparison.OrdinalIgnoreCase)) _tabIndex = 1;
-        else if (uri.Contains("/hr/leave-calendar", StringComparison.OrdinalIgnoreCase)) _tabIndex = 2;
+        // 🔴 「내 연차」가 0번으로 들어오며 뒤가 한 칸씩 밀렸다(1→2, 2→3).
+        if (uri.Contains("/hr/leave-status", StringComparison.OrdinalIgnoreCase)) _tabIndex = 2;
+        else if (uri.Contains("/hr/leave-calendar", StringComparison.OrdinalIgnoreCase)) _tabIndex = 3;
+        // /hr/leave-request 로 들어오면 0번(내 연차)이 열린다 — 옛 화면이 하던 그대로다.
 
         await LoadDataAsync();
+        await LoadMyLeaveAsync();
     }
+
+    /// <summary>
+    /// 「내 연차」 탭 — 내 사원 줄과 내 신청 목록을 읽는다. 옛 <c>/hr/leave-request</c> 그대로.
+    /// </summary>
+    /// <remarks>
+    /// 🔴 <c>employee_id</c> 클레임으로 나를 찾는다(<c>user_id</c> 아님 — 6/21 A-P0-1 축).
+    /// </remarks>
+    private async Task LoadMyLeaveAsync()
+    {
+        var auth = await AuthState.GetAuthenticationStateAsync();
+        _myEmployeeId = auth.User.FindFirst("employee_id")?.Value ?? "";
+
+        if (string.IsNullOrWhiteSpace(_myEmployeeId))
+        {
+            _myEmployee = null;
+            _myRequests = new();
+            return;
+        }
+
+        var empTask = EmpSvc.GetListAsync();
+        var reqTask = LeaveService.GetListAsync(_myEmployeeId);
+        await Task.WhenAll(empTask, reqTask);
+
+        _myEmployee = empTask.Result.FirstOrDefault(e => e.EmployeeId == _myEmployeeId);
+        _myRequests = reqTask.Result;
+    }
+
+    /// <summary>내 연차를 신청한다. 옛 <c>/hr/leave-request</c> 의 <c>SubmitAsync</c> 그대로.</summary>
+    private async Task SubmitMyLeaveAsync()
+    {
+        if (string.IsNullOrWhiteSpace(_myEmployeeId))
+        {
+            Snackbar.Add("직원 정보가 없습니다. 사원관리에서 직원을 등록하세요.", Severity.Warning);
+            return;
+        }
+        if (_myStartDate is null || _myEndDate is null)
+        {
+            Snackbar.Add("시작일과 종료일을 선택하세요.", Severity.Warning);
+            return;
+        }
+
+        _myReq.EmployeeId = _myEmployeeId;
+        _myReq.StartDate = _myStartDate.Value;
+        _myReq.EndDate = _myEndDate.Value;
+
+        var ok = await LeaveService.CreateAsync(_myReq);
+        if (ok)
+        {
+            Snackbar.Add("연차 신청이 완료됐습니다.", Severity.Success);
+            _myDialogOpen = false;
+            _myReq = new CreateLeaveRequestModel();
+            _myStartDate = _myEndDate = DateTime.Today;
+
+            // 🔴 내 목록만이 아니라 전사 목록도 다시 읽는다 — 같은 화면의 다른 탭이
+            //    옛 숫자를 들고 있으면 방금 낸 신청이 [신청·승인] 에 안 보인다.
+            await LoadMyLeaveAsync();
+            await LoadDataAsync();
+        }
+        else
+        {
+            Snackbar.Add("신청에 실패했습니다. 다시 시도해주세요.", Severity.Error);
+        }
+    }
+
+    private static string GetMyStatusLabel(string s) => s switch
+    {
+        "pending" => "대기",
+        "approved" => "승인",
+        "rejected" => "반려",
+        _ => s
+    };
+
+    private static Color GetMyStatusColor(string s) => s switch
+    {
+        "approved" => Color.Success,
+        "rejected" => Color.Error,
+        _ => Color.Warning
+    };
 
     /// <summary>
     /// API에서 연차 신청 목록을 불러온다.

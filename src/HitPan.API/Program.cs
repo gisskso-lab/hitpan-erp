@@ -197,6 +197,8 @@ builder.Services.AddScoped<ILeaveRequestService, LeaveRequestService>();
 builder.Services.AddScoped<IWorkReportService, WorkReportService>();
 builder.Services.AddScoped<IReportService, ReportService>();
 builder.Services.AddScoped<IApprovalService, ApprovalService>();
+// 작(2026-08-24) 작2 [4] — 전자 퇴직서(사직서). 사장님: "전자근로계약서 = 입사/퇴사 로 메뉴변경"
+builder.Services.AddScoped<IResignationService, ResignationService>();
 builder.Services.AddScoped<ICollectionService, CollectionService>();
 builder.Services.AddScoped<IMonthlyClosingService, MonthlyClosingService>();
 builder.Services.AddScoped<IFinanceService, FinanceService>();

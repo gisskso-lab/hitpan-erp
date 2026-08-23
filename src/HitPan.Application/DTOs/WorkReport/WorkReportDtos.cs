@@ -24,6 +24,17 @@ public static class WorkReportTypes
     public const string Monthly = "monthly";
     public const string Incident = "incident";
 
+    /// <summary>
+    /// 출장/외근 보고서. 작(2026-08-24) 작3 — 사장님: <i>"보고서관리 : 출장/외근보고서 추가"</i>
+    /// </summary>
+    /// <remarks>
+    /// 🔴 <b>일일보고서로 대신할 수 없다.</b> 출장은 <b>어디에·왜 갔는지</b>가 핵심이고,
+    /// 일일보고서는 <b>오늘 무엇을 했는지</b>다. 현장에서 둘을 같은 칸에 적으면
+    /// 나중에 "누가 언제 어디 갔나" 를 찾을 수 없다.
+    /// ⚠️ 경비(교통비·숙박비) 청구와 짝이 되는 문서이기도 하다.
+    /// </remarks>
+    public const string Business = "business";
+
     /// <summary>결재 문서유형 접두. <c>approval_settings.doc_type</c> 과 짝이다.</summary>
     public const string DocTypePrefix = "report_";
 
@@ -33,6 +44,7 @@ public static class WorkReportTypes
         Weekly => Weekly,
         Monthly => Monthly,
         Incident => Incident,
+        Business => Business,
         _ => Daily
     };
 
@@ -42,13 +54,14 @@ public static class WorkReportTypes
         Weekly => "주간보고서",
         Monthly => "월간보고서",
         Incident => "경위서",
+        Business => "출장·외근보고서",
         _ => "일일보고서"
     };
 
     /// <summary>결재 문서유형(<c>report_daily</c> 등).</summary>
     public static string ToDocType(string? value) => DocTypePrefix + Normalize(value);
 
-    public static readonly string[] All = [Daily, Weekly, Monthly, Incident];
+    public static readonly string[] All = [Daily, Weekly, Monthly, Incident, Business];
 }
 
 /// <summary>업무보고서 상태.</summary>

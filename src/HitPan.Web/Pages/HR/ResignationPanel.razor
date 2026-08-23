@@ -1,0 +1,305 @@
+@namespace HitPan.Web.Pages.HrUi
+@using HitPan.Web.Models
+@using HitPan.Web.Services
+@inject ResignationService ResignSvc
+@inject ISnackbar Snackbar
+@inject IDialogService DialogService
+
+@*
+    전자 퇴직서(사직서) — 작20260824작2 [4]
+
+    사장님 지시(2026-08-24):
+      "전자근로계약서 = 입사/퇴사 로 메뉴변경 전자근로계약서 작성, 전자 퇴직서 작성"
+      착수 전 결재: "퇴직서까지 오늘 다 만든다"
+
+    🔴 관리자 퇴사 처리(사원관리 → 퇴사)와 다른 자리다.
+       그쪽은 관리자가 **결과를 찍는** 것이고, 여기는 직원이 **문서를 올리는** 자리다.
+       수리하면 그때 기존 퇴사 처리가 돈다 — 같은 일을 두 번 만들지 않는다.
+*@
+
+<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
+    <MudText Style="font-size:13px;color:var(--mud-palette-text-secondary)">
+        사직서를 작성해 결재를 올립니다. 회사가 수리하면 퇴사 처리까지 이어집니다.
+    </MudText>
+    <MudButton Variant="Variant.Filled" Color="Color.Primary" Size="Size.Small"
+               StartIcon="@Icons.Material.Filled.Add" OnClick="OpenNew">
+        사직서 작성
+    </MudButton>
+</div>
+
+@if (_loading)
+{
+    <MudProgressLinear Indeterminate="true" Color="Color.Primary" />
+}
+else if (_loadFailed)
+{
+    @* 🔴 "없다" 와 "못 불러왔다" 를 다르게 보여준다. *@
+    <MudPaper Elevation="0" Class="pa-8 text-center hitpan-card">
+        <MudIcon Icon="@Icons.Material.Filled.CloudOff" Size="Size.Large" Color="Color.Error" Class="mb-2" />
+        <MudText Typo="Typo.body1">사직서 목록을 불러오지 못했습니다.</MudText>
+        <MudButton Variant="Variant.Outlined" Size="Size.Small" Class="mt-3" OnClick="LoadAsync">다시 시도</MudButton>
+    </MudPaper>
+}
+else if (_items.Count == 0)
+{
+    <MudPaper Elevation="0" Class="pa-8 text-center hitpan-card">
+        <MudIcon Icon="@Icons.Material.Filled.Inbox" Size="Size.Large" Class="mb-2" />
+        <MudText Typo="Typo.body1">작성된 사직서가 없습니다.</MudText>
+    </MudPaper>
+}
+else
+{
+    <MudPaper Elevation="0" Class="pa-2 hitpan-card">
+        <MudTable Items="_items" Dense="true" Hover="true" T="ResignationLetterModel">
+            <HeaderContent>
+                <MudTh>사원</MudTh>
+                <MudTh>구분</MudTh>
+                <MudTh Style="text-align:center">희망 퇴사일</MudTh>
+                <MudTh Style="text-align:center">실제 퇴사일</MudTh>
+                <MudTh>사유</MudTh>
+                <MudTh Style="width:90px;text-align:center">상태</MudTh>
+                <MudTh Style="width:200px">처리</MudTh>
+            </HeaderContent>
+            <RowTemplate>
+                <MudTd>
+                    <div>@context.EmployeeName</div>
+                    <MudText Typo="Typo.caption" Color="Color.Secondary">
+                        @(context.DeptName ?? "-") @(context.PositionName ?? "")
+                    </MudText>
+                </MudTd>
+                <MudTd>@context.ResignTypeLabel</MudTd>
+                <MudTd Style="text-align:center">@context.DesiredDate.ToString("yyyy-MM-dd")</MudTd>
+                <MudTd Style="text-align:center">@(context.ActualDate?.ToString("yyyy-MM-dd") ?? "-")</MudTd>
+                <MudTd>@(context.Reason ?? "-")</MudTd>
+                <MudTd Style="text-align:center">
+                    <MudChip T="string" Size="Size.Small" Variant="Variant.Filled" Color="@StatusColor(context.Status)">
+                        @context.StatusLabel
+                    </MudChip>
+                </MudTd>
+                <MudTd>
+                    <div class="d-flex gap-1 flex-wrap">
+                        @if (context.Status is "draft" or "rejected")
+                        {
+                            <MudButton Size="Size.Small" Variant="Variant.Outlined" OnClick="@(() => OpenEdit(context))">수정</MudButton>
+                            <MudButton Size="Size.Small" Variant="Variant.Filled" Color="Color.Primary"
+                                       OnClick="@(() => SubmitAsync(context))">제출</MudButton>
+                        }
+                        else if (context.Status == "pending")
+                        {
+                            <MudButton Size="Size.Small" Variant="Variant.Outlined" Color="Color.Warning"
+                                       OnClick="@(() => WithdrawAsync(context))">철회</MudButton>
+                        }
+                        else if (context.Status == "approved")
+                        {
+                            <MudButton Size="Size.Small" Variant="Variant.Filled" Color="Color.Error"
+                                       OnClick="@(() => OpenAccept(context))">수리·퇴사처리</MudButton>
+                        }
+                    </div>
+                    @if (!string.IsNullOrWhiteSpace(context.RejectReason))
+                    {
+                        <MudText Typo="Typo.caption" Color="Color.Error">@context.RejectReason</MudText>
+                    }
+                </MudTd>
+            </RowTemplate>
+        </MudTable>
+    </MudPaper>
+}
+
+@* ── 작성·수정 ── *@
+<MudDialog @bind-Visible="_editOpen" Options="@(new DialogOptions { MaxWidth = MaxWidth.Small, FullWidth = true })">
+    <TitleContent><MudText Typo="Typo.h6">@(_edit.ResignationId is null ? "사직서 작성" : "사직서 수정")</MudText></TitleContent>
+    <DialogContent>
+        <MudGrid Spacing="2">
+            <MudItem xs="12" sm="6">
+                <MudSelect T="string" @bind-Value="_edit.ResignType" Label="구분"
+                           Variant="Variant.Outlined" Margin="Margin.Dense">
+                    <MudSelectItem Value="@("voluntary")">자발적 퇴사</MudSelectItem>
+                    <MudSelectItem Value="@("recommended")">권고사직</MudSelectItem>
+                    <MudSelectItem Value="@("expired")">계약만료</MudSelectItem>
+                    <MudSelectItem Value="@("retirement")">정년퇴직</MudSelectItem>
+                </MudSelect>
+            </MudItem>
+            <MudItem xs="12" sm="6">
+                @* 🔴 기본값을 오늘로 두지 않는다. 사직은 통상 예고 기간이 있다 —
+                     오늘로 두면 눌러서 넘기는 사람이 생긴다. *@
+                <MudDatePicker @bind-Date="_desiredDate" Label="희망 퇴사일"
+                               Variant="Variant.Outlined" Margin="Margin.Dense" DateFormat="yyyy-MM-dd" />
+            </MudItem>
+            <MudItem xs="12">
+                <MudTextField @bind-Value="_edit.Reason" Label="사직 사유"
+                              Variant="Variant.Outlined" Margin="Margin.Dense" Lines="2" />
+            </MudItem>
+            <MudItem xs="12" sm="6">
+                <MudTextField @bind-Value="_edit.HandoverTo" Label="인수인계 받을 사람"
+                              Variant="Variant.Outlined" Margin="Margin.Dense" />
+            </MudItem>
+            <MudItem xs="12" sm="6">
+                <MudTextField @bind-Value="_edit.ReturnItems" Label="반납물"
+                              Variant="Variant.Outlined" Margin="Margin.Dense"
+                              HelperText="사원증·노트북·차량 등" />
+            </MudItem>
+            <MudItem xs="12">
+                <MudTextField @bind-Value="_edit.HandoverNote" Label="인수인계 내용"
+                              Variant="Variant.Outlined" Margin="Margin.Dense" Lines="3" />
+            </MudItem>
+        </MudGrid>
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="@(() => _editOpen = false)">취소</MudButton>
+        <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="SaveAsync">저장</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@* ── 수리 ── *@
+<MudDialog @bind-Visible="_acceptOpen" Options="@(new DialogOptions { MaxWidth = MaxWidth.Small, FullWidth = true })">
+    <TitleContent><MudText Typo="Typo.h6">사직서 수리</MudText></TitleContent>
+    <DialogContent>
+        <MudAlert Severity="Severity.Warning" Dense="true" Class="mb-3">
+            수리하면 <b>@(_acceptTarget?.EmployeeName)</b> 님이 <b>퇴사 처리</b>됩니다.
+            계정이 정지되고 결재선에서 빠집니다.
+        </MudAlert>
+        @* 🔴 희망일을 그대로 쓰지 않는다. 인수인계가 늦어져 실제 날짜가 달라지는 일이 흔하다.
+             반자동 원칙 — 시스템이 단정하지 않고 사람에게 받는다. *@
+        <MudDatePicker @bind-Date="_acceptDate" Label="실제 퇴사일"
+                       Variant="Variant.Outlined" Margin="Margin.Dense" DateFormat="yyyy-MM-dd"
+                       HelperText="희망일과 다를 수 있습니다. 실제로 마지막 근무하는 날입니다." />
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="@(() => _acceptOpen = false)">취소</MudButton>
+        <MudButton Variant="Variant.Filled" Color="Color.Error" OnClick="AcceptAsync">수리하고 퇴사처리</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    private List<ResignationLetterModel> _items = new();
+    private bool _loading = true;
+    private bool _loadFailed;
+
+    private bool _editOpen;
+    private SaveResignationModel _edit = new();
+    private DateTime? _desiredDate = DateTime.Today.AddDays(30);
+
+    private bool _acceptOpen;
+    private ResignationLetterModel? _acceptTarget;
+    private DateTime? _acceptDate = DateTime.Today;
+
+    protected override async Task OnInitializedAsync() => await LoadAsync();
+
+    private async Task LoadAsync()
+    {
+        _loading = true;
+        _loadFailed = false;
+
+        var result = await ResignSvc.GetListAsync();
+        if (result is null) { _loadFailed = true; _items = new(); }
+        else _items = result;
+
+        _loading = false;
+    }
+
+    private static Color StatusColor(string s) => s switch
+    {
+        "completed" => Color.Success,
+        "approved"  => Color.Info,
+        "rejected"  => Color.Error,
+        "withdrawn" => Color.Default,
+        "pending"   => Color.Warning,
+        _           => Color.Default
+    };
+
+    private void OpenNew()
+    {
+        _edit = new SaveResignationModel();
+        _desiredDate = DateTime.Today.AddDays(30);
+        _editOpen = true;
+    }
+
+    private void OpenEdit(ResignationLetterModel m)
+    {
+        _edit = new SaveResignationModel
+        {
+            ResignationId = m.ResignationId,
+            EmployeeId = m.EmployeeId,
+            ResignType = m.ResignType,
+            DesiredDate = m.DesiredDate,
+            Reason = m.Reason,
+            HandoverTo = m.HandoverTo,
+            HandoverNote = m.HandoverNote,
+            ReturnItems = m.ReturnItems
+        };
+        _desiredDate = m.DesiredDate;
+        _editOpen = true;
+    }
+
+    private async Task SaveAsync()
+    {
+        if (_desiredDate is null)
+        {
+            Snackbar.Add("희망 퇴사일을 선택하세요.", Severity.Warning);
+            return;
+        }
+        _edit.DesiredDate = _desiredDate.Value;
+
+        var (ok, msg) = await ResignSvc.SaveAsync(_edit);
+        if (ok)
+        {
+            Snackbar.Add("저장했습니다.", Severity.Success);
+            _editOpen = false;
+            await LoadAsync();
+        }
+        else Snackbar.Add(msg ?? "저장에 실패했습니다.", Severity.Error);
+    }
+
+    private async Task SubmitAsync(ResignationLetterModel m)
+    {
+        var (ok, msg) = await ResignSvc.SubmitAsync(m.ResignationId);
+        if (ok)
+        {
+            Snackbar.Add("사직서를 제출했습니다. 결재가 올라갔습니다.", Severity.Success);
+            await LoadAsync();
+        }
+        else
+        {
+            // 🔴 "결재 설정이 꺼져 있다" 같은 사유를 그대로 보여준다.
+            //    삼키면 직원은 냈다고 여기는데 결재함엔 안 뜬다.
+            Snackbar.Add(msg ?? "제출에 실패했습니다.", Severity.Error);
+        }
+    }
+
+    private async Task WithdrawAsync(ResignationLetterModel m)
+    {
+        var ok = await DialogService.ShowMessageBoxAsync(
+            "사직서 철회", "제출한 사직서를 거둬들입니다. 계속할까요?",
+            yesText: "철회", cancelText: "취소");
+        if (ok != true) return;
+
+        var (done, msg) = await ResignSvc.WithdrawAsync(m.ResignationId);
+        if (done) { Snackbar.Add("철회했습니다.", Severity.Success); await LoadAsync(); }
+        else Snackbar.Add(msg ?? "철회에 실패했습니다.", Severity.Error);
+    }
+
+    private void OpenAccept(ResignationLetterModel m)
+    {
+        _acceptTarget = m;
+        _acceptDate = m.DesiredDate;
+        _acceptOpen = true;
+    }
+
+    private async Task AcceptAsync()
+    {
+        if (_acceptTarget is null || _acceptDate is null)
+        {
+            Snackbar.Add("실제 퇴사일을 선택하세요.", Severity.Warning);
+            return;
+        }
+
+        var (ok, msg) = await ResignSvc.AcceptAsync(_acceptTarget.ResignationId, _acceptDate.Value, null);
+        if (ok)
+        {
+            Snackbar.Add("수리하고 퇴사 처리했습니다.", Severity.Success);
+            _acceptOpen = false;
+            await LoadAsync();
+        }
+        else Snackbar.Add(msg ?? "수리에 실패했습니다.", Severity.Error);
+    }
+}

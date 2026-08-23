@@ -54,6 +54,9 @@ public partial class PermissionPage : ComponentBase
         ("APPROVAL", "결재"),
         ("HR", "인사"),
         ("HR_PROXY", "근태 대리입력"),
+        // 작(2026-08-24) 작2 [3][4] — 백엔드 MenuList 와 같은 코드여야 한다(CI 정합 검사).
+        ("ANNUAL_LEAVE_GRANT", "연차 부여"),
+        ("RESIGNATION", "입사/퇴사"),
         ("MONTHLY_CLOSING", "월마감"),
         ("CERTIFICATE", "범용인증서"),
         ("DASHBOARD", "대시보드"),
@@ -84,7 +87,13 @@ public partial class PermissionPage : ComponentBase
     private static readonly HashSet<string> EnforcedMenus = new(StringComparer.Ordinal)
     {
         "ACCOUNTING", "APPROVAL", "CERTIFICATE", "COLLECTION",
-        "HR", "HR_PROXY", "MONTHLY_CLOSING", "PAYMENT", "USERS"
+        "HR", "HR_PROXY", "MONTHLY_CLOSING", "PAYMENT", "USERS",
+        // 작(2026-08-24) 작2 [3][4] — 서버가 실제로 강제한다. 그래서 여기 넣을 자격이 있다.
+        //   ANNUAL_LEAVE_GRANT → AnnualLeaveController 클래스 [RequirePermission(view)]
+        //                        + confirm 만 update (보는 것과 주는 것을 가른다)
+        //   RESIGNATION        → ResignationController [RequirePermission]
+        // 🔴 강제 없이 여기 넣으면 "체크는 되는데 안 먹는" 되는 척이 된다(8/14 사장님 지적).
+        "ANNUAL_LEAVE_GRANT", "RESIGNATION"
     };
 
     /// <summary>화면에 보여줄 메뉴 — 실제로 먹는 것만.</summary>

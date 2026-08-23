@@ -15,10 +15,16 @@
 @inject AuthenticationStateProvider AuthState
 @inject IJSRuntime JS
 
-<PageTitle>전자근로계약서 — 히트판 ERP</PageTitle>
+@* ── 작20260824작2 [4] 「전자근로계약서」 → 「입사/퇴사」 (사장님 지시 2026-08-24) ──
+   사장님: "전자근로계약서 = 입사/퇴사 로 메뉴변경 전자근로계약서 작성, 전자 퇴직서 작성"
 
-<PageHeader Title="전자근로계약서"
-            Subtitle="근로계약서를 작성·발송하고 직원의 전자서명으로 체결합니다.">
+   🔴 들어올 때(근로계약서)와 나갈 때(사직서)는 **같은 사람이 다루는 한 묶음**이다.
+      메뉴를 따로 두면 인사 담당이 두 군데를 오간다.
+   ⚠️ 주소 /hr/labor-contracts 는 그대로다 — 즐겨찾기·링크가 죽지 않는다. *@
+<PageTitle>입사/퇴사 — 히트판 ERP</PageTitle>
+
+<PageHeader Title="입사/퇴사"
+            Subtitle="전자근로계약서 작성·체결 · 전자 퇴직서 작성·수리">
     <Actions>
         @if (_isTenantAdmin)
         {
@@ -154,13 +160,21 @@
 
     @* 서명 이력 — 화면을 새로 그리지 않고 있던 화면을 그대로 얹는다.
        옮겨 적으면 무효화 같은 기능이 조용히 빠질 수 있다(설계서 지킬것 #4). *@
+    @* ── 작20260824작2 [4] 전자 퇴직서 (사장님: "전자 퇴직서 작성") ──
+       🔴 계약서(들어올 때)와 사직서(나갈 때)를 한 화면 두 탭으로 둔다.
+          표는 나눴다(resignation_letters) — 담는 칸이 다르기 때문이다.
+       🔴 관리자 퇴사 처리(사원관리 → 퇴사)는 그대로 산다. 여기는 그 **앞단** 문서다. *@
+    <MudTabPanel Text="전자 퇴직서" Icon="@Icons.Material.Filled.ExitToApp">
+        <ResignationPanel />
+    </MudTabPanel>
+
     <MudTabPanel Text="서명 이력" Icon="@Icons.Material.Filled.History">
         <ESignHistoryPage EmbeddedInTab="true" />
     </MudTabPanel>
 </MudTabs>
 
 @code {
-    // 탭 위치. 0=계약서, 1=서명 이력
+    // 탭 위치. 0=계약서, 1=전자 퇴직서, 2=서명 이력 (작20260824작2 [4] 에서 퇴직서가 1번으로 들어왔다)
     private int _tabIndex;
 
     // ── 상태 ──
