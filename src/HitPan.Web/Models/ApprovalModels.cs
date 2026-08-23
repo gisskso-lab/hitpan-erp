@@ -234,3 +234,12 @@ public class PayablesResponseModel
     public List<PayableSummaryModel> Summary { get; set; } = new();
     public List<PayableDocumentModel> Documents { get; set; } = new();
 }
+
+/// <summary>결재관리 <b>필터2</b> 콤보 항목 — 문서종류 하나. 작20260824작1 ②</summary>
+public class ApprovalDocTypeModel
+{
+    public string DocType { get; set; } = string.Empty;
+
+    /// <summary>화면에 보이는 한글 이름. 🔴 고객 노출 — 영문 코드가 뜨면 안 된다.</summary>
+    public string DocTypeName { get; set; } = string.Empty;
+}

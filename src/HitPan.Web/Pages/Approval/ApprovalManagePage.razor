@@ -1,0 +1,343 @@
+@page "/approval"
+@namespace HitPan.Web.Pages.ApprovalUi
+@attribute [Authorize]
+@using HitPan.Web.Models
+@using HitPan.Web.Services
+@inject ApprovalService ApprovalSvc
+@inject ISnackbar Snackbar
+@inject NavigationManager Nav
+
+@*
+    결재관리 — 작20260824작1 ②
+
+    🔴 사장님 지시(2026-08-24):
+       "결재관리 메뉴에 필터링1(결재대기, 결재완료, 반려), 필터링2(각 결재들) 만들어."
+
+    착수 전 결재받은 것:
+      · 필터1 = 대기·완료·반려·내가보낸·모두 (5개)
+      · 필터2 = 보고서 4종을 "펼친다" (PM 의 "묶기" 권고는 반려됨)
+      · 사이드바 3줄을 이 화면 1줄로 합친다
+      · 「모든 결재」 = 보낸이 · 결재자 · 대표이사가 본다
+
+    ⚠️ 옛 3화면(Pending·Sent·Completed)은 지우지 않았다 — 북마크·메신저 링크가 죽는다.
+       그 주소들은 이 화면으로 넘어오고, 필터1 이 그에 맞게 열린다.
+*@
+
+<PageTitle>결재관리</PageTitle>
+
+<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
+    <MudText Typo="Typo.h6">결재관리</MudText>
+    <div style="display:flex;align-items:center;gap:12px">
+        <MudText Style="font-size:12px;color:var(--mud-palette-text-secondary)">
+            @ScopeHint
+        </MudText>
+        <MudButton Variant="Variant.Filled" Color="Color.Primary" Size="Size.Small"
+                   StartIcon="@Icons.Material.Filled.Add" OnClick="@(() => _newDraftOpen = true)">
+            결재 올리기
+        </MudButton>
+    </div>
+</div>
+
+@* ── 필터 2개 ── *@
+<MudPaper Elevation="0" Class="pa-3 mb-3 hitpan-card">
+    <MudGrid Spacing="2" Class="align-center">
+        <MudItem xs="12" sm="6" md="4">
+            <MudSelect T="string" Value="_scope" ValueChanged="OnScopeChanged" Label="결재 구분"
+                       Dense="true" Variant="Variant.Outlined" Margin="Margin.Dense">
+                <MudSelectItem Value="@("pending")">결재 대기</MudSelectItem>
+                <MudSelectItem Value="@("completed")">결재 완료</MudSelectItem>
+                <MudSelectItem Value="@("rejected")">반려</MudSelectItem>
+                <MudSelectItem Value="@("sent")">내가 보낸 결재</MudSelectItem>
+                <MudSelectItem Value="@("all")">모든 결재</MudSelectItem>
+            </MudSelect>
+        </MudItem>
+        <MudItem xs="12" sm="6" md="4">
+            @* 🔴 목록을 화면이 손으로 갖지 않는다. 서버가 라벨 사전을 순회해 내려준다 —
+                 문서종류가 늘어도 여기가 따라온다. *@
+            <MudSelect T="string" Value="_docType" ValueChanged="OnDocTypeChanged" Label="결재 종류"
+                       Dense="true" Variant="Variant.Outlined" Margin="Margin.Dense">
+                <MudSelectItem Value="@("")">전체</MudSelectItem>
+                @foreach (var t in _docTypes)
+                {
+                    <MudSelectItem Value="@t.DocType">@t.DocTypeName</MudSelectItem>
+                }
+            </MudSelect>
+        </MudItem>
+        <MudItem xs="12" md="4" Class="d-flex align-center justify-end">
+            <MudText Style="font-size:13px;color:var(--mud-palette-text-secondary)">
+                @if (!_loading && _loadFailed == false)
+                {
+                    <span>@_items.Count 건</span>
+                }
+            </MudText>
+        </MudItem>
+    </MudGrid>
+</MudPaper>
+
+@if (_loading)
+{
+    <MudProgressLinear Indeterminate="true" Color="Color.Primary" />
+}
+else if (_loadFailed)
+{
+    @* 🔴 "결재가 없다" 와 "못 불러왔다" 를 다르게 보여준다.
+         둘 다 빈 표로 보이면 결재가 사라진 줄 안다. *@
+    <MudPaper Elevation="0" Class="pa-8 text-center hitpan-card">
+        <MudIcon Icon="@Icons.Material.Filled.CloudOff" Size="Size.Large" Color="Color.Error" Class="mb-2" />
+        <MudText Typo="Typo.body1">결재 목록을 불러오지 못했습니다.</MudText>
+        <MudText Typo="Typo.caption" Class="mb-3">잠시 후 다시 시도해주세요.</MudText>
+        <MudButton Variant="Variant.Outlined" Size="Size.Small" OnClick="LoadAsync">다시 시도</MudButton>
+    </MudPaper>
+}
+else if (_items.Count == 0)
+{
+    <MudPaper Elevation="0" Class="pa-8 text-center hitpan-card">
+        <MudIcon Icon="@Icons.Material.Filled.Inbox" Size="Size.Large" Color="Color.Default" Class="mb-2" />
+        <MudText Typo="Typo.body1">@EmptyMessage</MudText>
+    </MudPaper>
+}
+else
+{
+    <MudPaper Elevation="0" Class="pa-2 hitpan-card">
+        <MudTable Items="_items" Dense="true" Hover="true" OnRowClick="OnRowClick" T="ApprovalDocumentModel">
+            <HeaderContent>
+                <MudTh>결재 종류</MudTh>
+                <MudTh>제목</MudTh>
+                <MudTh Style="text-align:right">금액</MudTh>
+                <MudTh>신청자</MudTh>
+                <MudTh>신청일</MudTh>
+                <MudTh Style="width:90px">상태</MudTh>
+                <MudTh Style="width:80px">진행</MudTh>
+                @if (_scope == "pending")
+                {
+                    <MudTh Style="width:160px">처리</MudTh>
+                }
+            </HeaderContent>
+            <RowTemplate>
+                <MudTd>
+                    <MudChip T="string" Size="Size.Small" Color="Color.Info" Variant="Variant.Outlined">@context.DocTypeLabel</MudChip>
+                </MudTd>
+                <MudTd>@context.Title</MudTd>
+                <MudTd Style="text-align:right">@context.Amount.ToString("N0")원</MudTd>
+                <MudTd>@context.RequesterName</MudTd>
+                <MudTd>@context.RequestedAt.ToString("yyyy-MM-dd")</MudTd>
+                <MudTd>
+                    <MudChip T="string" Size="Size.Small" Variant="Variant.Text" Color="@StatusColor(context.Status)">
+                        @context.StatusLabel
+                    </MudChip>
+                </MudTd>
+                <MudTd>@context.CurrentSeq / @context.TotalLines</MudTd>
+                @if (_scope == "pending")
+                {
+                    @* 처리 버튼은 내 차례일 때만 낸다 — 다른 필터에선 누를 수 없는 버튼이 된다. *@
+                    <MudTd>
+                        <MudButtonGroup Variant="Variant.Outlined" Size="Size.Small">
+                            <MudButton Color="Color.Primary" OnClick="@(() => ProcessAsync(context.ApprovalId, "approved"))">승인</MudButton>
+                            <MudButton Color="Color.Error" OnClick="@(() => OpenRejectDialog(context.ApprovalId))">반려</MudButton>
+                        </MudButtonGroup>
+                    </MudTd>
+                }
+            </RowTemplate>
+        </MudTable>
+    </MudPaper>
+}
+
+@* ── 결재 올리기 안내 ──
+     🔴 옛 「내가 보낸 결재」 화면의 "기안 작성" 을 여기로 옮기면서 목록을 바로잡았다.
+        그 화면은 경비처리·발주·거래명세서로 안내하고 있었는데, ①(작20260823작1)이
+        발주·거래명세서를 결재에서 뺐다. 그대로 옮겼으면 눌러 가도 결재가 안 도는
+        **막다른 길**로 안내하게 된다. 그룹웨어 신청 화면으로만 보낸다. *@
+<MudDialog @bind-Visible="_newDraftOpen" Options="@(new DialogOptions { MaxWidth = MaxWidth.Small, FullWidth = true })">
+    <TitleContent><MudText Typo="Typo.h6">결재 올리기</MudText></TitleContent>
+    <DialogContent>
+        <MudText Typo="Typo.body2" Color="Color.Secondary" Class="mb-4">
+            올릴 문서의 화면으로 이동해 작성한 뒤 결재를 신청하세요.
+        </MudText>
+        <MudList T="string" Dense="true">
+            <MudListItem T="string" Icon="@Icons.Material.Filled.EventAvailable" Href="/hr/leave-request">휴가 신청 →</MudListItem>
+            <MudListItem T="string" Icon="@Icons.Material.Filled.EventBusy" Href="/hr/absence">휴직 신청 →</MudListItem>
+            <MudListItem T="string" Icon="@Icons.Material.Filled.Receipt" Href="/hr/expense-request">경비 신청 →</MudListItem>
+            <MudListItem T="string" Icon="@Icons.Material.Filled.MoreTime" Href="/hr/overtime">초과근무 신청 →</MudListItem>
+            <MudListItem T="string" Icon="@Icons.Material.Filled.Description" Href="/hr/reports">업무보고서 →</MudListItem>
+            <MudListItem T="string" Icon="@Icons.Material.Filled.Assignment" Href="/hr/labor-contracts">전자근로계약서 →</MudListItem>
+        </MudList>
+    </DialogContent>
+    <DialogActions><MudButton OnClick="@(() => _newDraftOpen = false)">닫기</MudButton></DialogActions>
+</MudDialog>
+
+@* ── 결재 상세 다이얼로그 ── *@
+@if (_detail is not null)
+{
+    <MudDialog @bind-Visible="_showDetail" Options="@(new DialogOptions { MaxWidth = MaxWidth.Medium, FullWidth = true })">
+        <TitleContent>
+            <MudText Typo="Typo.h6">@_detail.Document.Title</MudText>
+        </TitleContent>
+        <DialogContent>
+            <MudGrid Spacing="2" Class="mb-3">
+                <MudItem xs="6" md="3"><MudText Typo="Typo.caption">결재 종류</MudText><MudText>@_detail.Document.DocTypeLabel</MudText></MudItem>
+                <MudItem xs="6" md="3"><MudText Typo="Typo.caption">문서번호</MudText><MudText>@(_detail.Document.RefNo ?? "-")</MudText></MudItem>
+                <MudItem xs="6" md="3"><MudText Typo="Typo.caption">금액</MudText><MudText>@_detail.Document.Amount.ToString("N0")원</MudText></MudItem>
+                <MudItem xs="6" md="3"><MudText Typo="Typo.caption">신청자</MudText><MudText>@_detail.Document.RequesterName</MudText></MudItem>
+            </MudGrid>
+
+            @if (_detail.Document.Memo is not null)
+            {
+                <MudText Typo="Typo.caption">신청 메모</MudText>
+                <MudText Class="mb-3">@_detail.Document.Memo</MudText>
+            }
+
+            <MudText Typo="Typo.subtitle2" Class="mb-2">결재 이력</MudText>
+            <MudTimeline TimelinePosition="TimelinePosition.Start">
+                @foreach (var h in _detail.History)
+                {
+                    <MudTimelineItem Color="@(h.Action == "approved" ? Color.Success : Color.Error)" Size="Size.Small">
+                        <ItemContent>
+                            <MudText Typo="Typo.body2"><b>@h.ApproverName</b> — @h.ActionLabel @(h.IsDelegated ? "(위임)" : "")</MudText>
+                            @if (!string.IsNullOrWhiteSpace(h.Comment)) { <MudText Typo="Typo.caption">@h.Comment</MudText> }
+                            <MudText Typo="Typo.caption" Color="Color.Secondary">@h.ActedAt.ToString("yyyy-MM-dd HH:mm")</MudText>
+                        </ItemContent>
+                    </MudTimelineItem>
+                }
+            </MudTimeline>
+        </DialogContent>
+        <DialogActions>
+            <MudButton OnClick="@(() => _showDetail = false)">닫기</MudButton>
+        </DialogActions>
+    </MudDialog>
+}
+
+@* ── 반려 사유 입력 다이얼로그 ── *@
+<MudDialog @bind-Visible="_showReject" Options="@(new DialogOptions { MaxWidth = MaxWidth.Small, FullWidth = true })">
+    <TitleContent><MudText Typo="Typo.h6">반려 사유</MudText></TitleContent>
+    <DialogContent>
+        <MudTextField T="string" @bind-Value="_rejectComment" Label="반려 사유" Variant="Variant.Outlined"
+            Lines="3" Placeholder="반려 사유를 입력해주세요." />
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="@(() => _showReject = false)">취소</MudButton>
+        <MudButton Variant="Variant.Filled" Color="Color.Error" OnClick="ConfirmReject">반려</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [Parameter]
+    [SupplyParameterFromQuery(Name = "scope")]
+    public string? ScopeParam { get; set; }
+
+    private List<ApprovalDocumentModel> _items = new();
+    private List<ApprovalDocTypeModel> _docTypes = new();
+    private ApprovalDetailModel? _detail;
+
+    private string _scope = "pending";
+    private string _docType = "";
+
+    private bool _loading = true;
+    private bool _loadFailed;
+    private bool _newDraftOpen;
+    private bool _showDetail;
+    private bool _showReject;
+    private string _rejectApprovalId = "";
+    private string _rejectComment = "";
+
+    /// <summary>필터1 이 무엇을 보여주는지 한 줄로 알린다.</summary>
+    private string ScopeHint => _scope switch
+    {
+        "pending"   => "내가 처리해야 할 결재",
+        "completed" => "내가 결재한 승인 완료 문서",
+        "rejected"  => "반려된 문서",
+        "sent"      => "내가 올린 결재",
+        "all"       => "내가 관여한 모든 결재",
+        _           => ""
+    };
+
+    private string EmptyMessage => _scope switch
+    {
+        "pending"   => "대기중인 결재가 없습니다.",
+        "completed" => "결재 완료된 문서가 없습니다.",
+        "rejected"  => "반려된 문서가 없습니다.",
+        "sent"      => "내가 올린 결재가 없습니다.",
+        _           => "결재 문서가 없습니다."
+    };
+
+    private static Color StatusColor(string status) => status switch
+    {
+        "approved"  => Color.Success,
+        "rejected"  => Color.Error,
+        "cancelled" => Color.Default,
+        _           => Color.Warning
+    };
+
+    protected override async Task OnInitializedAsync()
+    {
+        // 옛 주소에서 넘어온 경우 그 필터로 연다(/approval?scope=sent 등).
+        if (!string.IsNullOrEmpty(ScopeParam)) _scope = ScopeParam;
+
+        _docTypes = await ApprovalSvc.GetFilterDocTypesAsync();
+        await LoadAsync();
+    }
+
+    private async Task LoadAsync()
+    {
+        _loading = true;
+        _loadFailed = false;
+
+        var result = await ApprovalSvc.GetDocumentsAsync(_scope, string.IsNullOrEmpty(_docType) ? null : _docType);
+
+        // 🔴 null 은 "못 불러왔다" 다. 빈 목록("없다")과 다르게 보여준다.
+        if (result is null)
+        {
+            _loadFailed = true;
+            _items = new();
+        }
+        else
+        {
+            _items = result;
+        }
+
+        _loading = false;
+    }
+
+    private async Task OnScopeChanged(string value)
+    {
+        _scope = value;
+        await LoadAsync();
+    }
+
+    private async Task OnDocTypeChanged(string value)
+    {
+        _docType = value ?? "";
+        await LoadAsync();
+    }
+
+    private async Task OnRowClick(TableRowClickEventArgs<ApprovalDocumentModel> args)
+    {
+        if (args.Item is null) return;
+        _detail = await ApprovalSvc.GetDetailAsync(args.Item.ApprovalId);
+        _showDetail = true;
+    }
+
+    private async Task ProcessAsync(string approvalId, string action, string? comment = null)
+    {
+        var ok = await ApprovalSvc.ProcessAsync(approvalId, action, comment);
+        if (ok)
+        {
+            Snackbar.Add(action == "approved" ? "승인 완료" : "반려 완료", Severity.Success);
+            await LoadAsync();
+        }
+        else Snackbar.Add("처리 실패", Severity.Error);
+    }
+
+    private void OpenRejectDialog(string approvalId)
+    {
+        _rejectApprovalId = approvalId;
+        _rejectComment = "";
+        _showReject = true;
+    }
+
+    private async Task ConfirmReject()
+    {
+        if (string.IsNullOrWhiteSpace(_rejectComment)) { Snackbar.Add("반려 사유를 입력해주세요.", Severity.Warning); return; }
+        _showReject = false;
+        await ProcessAsync(_rejectApprovalId, "rejected", _rejectComment);
+    }
+}

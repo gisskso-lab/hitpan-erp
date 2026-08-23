@@ -1,4 +1,12 @@
-@page "/approval/pending"
+@* ── 작20260824작1 ② 결재관리 필터 — 이 화면의 주소를 내렸다 ──
+
+   🔴 파일과 내용은 그대로 둔다(헌법 #1 덮어쓰기 금지). 뗀 것은 라우트 한 줄뿐이다.
+      주소 "/approval/pending" 은 ApprovalRedirectPage 가 받아 결재관리(/approval)로
+      넘긴다 — 필터1 이 「결재대기」 로 열린다. 북마크·메신저에 뿌린 링크가 죽지 않는다.
+
+   ⚠️ 라우트가 겹치면 Blazor 가 AmbiguousMatchException 을 던진다. 그래서 이 줄을
+      떼지 않으면 새 리다이렉트가 못 산다.
+*@
 @namespace HitPan.Web.Pages.ApprovalUi
 @attribute [Authorize]
 @using HitPan.Web.Models

@@ -127,3 +127,19 @@ public class ApprovalDetailDto
     public List<ApprovalHistoryDto> History { get; set; } = new();
     public List<ApprovalLineDto> Lines { get; set; } = new();
 }
+
+/// <summary>
+/// 결재관리 <b>필터2</b> 콤보 항목 — 문서종류 하나.
+/// </summary>
+/// <remarks>
+/// 작20260824작1 ②. 목록은 <c>ApprovalService.GetFilterDocTypes()</c> 가
+/// <b>라벨 사전을 순회해</b> 만든다 — 화면에 손으로 적지 않는다.
+/// </remarks>
+public class ApprovalDocTypeDto
+{
+    /// <summary>문서종류 코드(<c>leave</c> 등). 필터 파라미터로 그대로 나간다.</summary>
+    public string DocType { get; set; } = string.Empty;
+
+    /// <summary>화면에 보이는 한글 이름(<c>휴가</c>). 🔴 고객 노출 — 영문 코드가 뜨면 안 된다.</summary>
+    public string DocTypeName { get; set; } = string.Empty;
+}
