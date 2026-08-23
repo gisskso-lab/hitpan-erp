@@ -138,6 +138,64 @@ public class ApprovalController : ControllerBase
         return Ok(await _approvalService.GetCompletedAsync(tenantId, employeeId, ct));
     }
 
+    /// <summary>
+    /// 결재관리 목록 — <b>필터1(scope) × 필터2(docType)</b>. 작20260824작1 ②
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// 사장님 지시(2026-08-24): <i>"결재관리 메뉴에 필터링1(결재대기, 결재완료, 반려),
+    /// 필터링2(각 결재들) 만들어."</i>
+    /// </para>
+    /// <para>
+    /// 🔴 <b>위 3개(pending·sent·completed)를 지우지 않았다</b>(헌법 #1). 사이드바 대기
+    /// 배지와 8/23 실측 스크립트가 그 주소를 부른다 — 지우면 배지가 죽는다.
+    /// </para>
+    /// <para>
+    /// 🔴 <c>employeeId</c> 축이다(2026-06-21 A-P0-1 과 같은 자리). <c>user_id</c> 를 넘기면
+    /// 목록이 통째로 빈다.
+    /// </para>
+    /// </remarks>
+    [Authorize(Policy = "TenantOnly")]
+    [HttpGet("documents")]
+    [RequirePermission("APPROVAL", "view")]
+    public async Task<IActionResult> GetDocuments(
+        [FromQuery] string scope, [FromQuery] string? docType, CancellationToken ct)
+    {
+        var tenantId = HttpContext.Items["TenantId"]?.ToString();
+        var employeeId = HttpContext.Items["EmployeeId"]?.ToString();
+        if (string.IsNullOrEmpty(tenantId) || string.IsNullOrEmpty(employeeId)) return Forbid();
+
+        // 🔴 알 수 없는 필터는 400 으로 되돌린다. 서비스가 던지는 예외를 500 으로 내보내면
+        //    화면에 "오류" 만 뜨고 무엇이 잘못됐는지 아무도 모른다.
+        if (!AllowedScopes.Contains(scope))
+        {
+            return BadRequest(new { message = "알 수 없는 결재 필터입니다." });
+        }
+
+        return Ok(await _approvalService.GetDocumentsAsync(tenantId, employeeId, scope, docType, ct));
+    }
+
+    /// <summary>필터1 에서 받는 값 — 이 다섯 개뿐이다(사장님 결재 2026-08-24).</summary>
+    private static readonly HashSet<string> AllowedScopes = new()
+    {
+        "pending", "completed", "rejected", "sent", "all"
+    };
+
+    /// <summary>필터2 콤보 항목 — 문서종류 목록(그룹웨어 것만). 작20260824작1 ②</summary>
+    /// <remarks>
+    /// 🔴 화면이 목록을 손으로 갖고 있으면 ③④⑤ 에서 문서종류가 늘 때 <b>필터2만 옛 목록으로
+    /// 남는다.</b> 서버가 라벨 사전을 순회해 내려준다.
+    /// </remarks>
+    [Authorize(Policy = "TenantOnly")]
+    [HttpGet("doc-types")]
+    [RequirePermission("APPROVAL", "view")]
+    public IActionResult GetFilterDocTypes()
+    {
+        var tenantId = HttpContext.Items["TenantId"]?.ToString();
+        if (string.IsNullOrEmpty(tenantId)) return Forbid();
+        return Ok(_approvalService.GetFilterDocTypes());
+    }
+
     /// <summary>결재 상세 (문서 + 이력 + 라인)</summary>
     [Authorize(Policy = "TenantOnly")]
     [HttpGet("documents/{approvalId}")]

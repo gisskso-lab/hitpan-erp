@@ -1073,4 +1073,165 @@ public class ApprovalService : IApprovalService
         if (_db is DbConnection c) { await c.OpenAsync(ct); return; }
         _db.Open();
     }
+
+    // ══════════════════════════════════════════════════════════════════════
+    //  작20260824작1 ② — 결재관리 필터 (콤보박스 2개)
+    // ══════════════════════════════════════════════════════════════════════
+
+    /// <summary>
+    /// 이 사원이 <b>대표이사(부모계정)</b> 인가 — <c>users.is_parent = 1</c>.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// 🔴 <b>새 축을 만들지 않는다.</b> G1(작20260822작1)이 결재선 후보를 뽑을 때 쓴
+    /// 바로 그 판정이다(<c>EmployeeService.GetApproverCandidatesAsync</c>).
+    /// </para>
+    /// <para>
+    /// 🔴 <c>account_type = 'tenant_admin'</c> 으로 판정하면 <b>안 된다.</b> 그건 로그인 축이고,
+    /// 결재는 <c>employee_id</c> 축으로 돈다. 2026-06-21 A-P0-1 봉합이 정확히 이 자리였다 —
+    /// <c>user_id</c> 를 넘겨서 대기함이 빈 목록이 됐었다.
+    /// </para>
+    /// <para>
+    /// 계정이 죽었으면(<c>is_deleted=1</c> · <c>is_active=0</c>) 대표가 아니다.
+    /// 로그인 못 하는 계정은 없는 계정과 같다.
+    /// </para>
+    /// </remarks>
+    private async Task<bool> IsOwnerEmployeeAsync(string tenantId, string employeeId, CancellationToken ct)
+    {
+        var isParent = await _db.QueryFirstOrDefaultAsync<int?>(new CommandDefinition(
+            """
+            SELECT u.is_parent
+            FROM employees e
+            INNER JOIN users u
+              ON u.user_id = e.user_id
+             AND u.tenant_id = e.tenant_id
+             AND u.is_deleted = 0
+             AND u.is_active = 1
+            WHERE e.tenant_id = @TenantId AND e.employee_id = @EmployeeId
+            """,
+            new { TenantId = tenantId, EmployeeId = employeeId }, cancellationToken: ct));
+
+        return isParent == 1;
+    }
+
+    /// <summary>
+    /// 결재관리 목록 — <b>필터1(scope) × 필터2(docType)</b>.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// 사장님 지시(2026-08-24): <i>"결재관리 메뉴에 필터링1(결재대기, 결재완료, 반려),
+    /// 필터링2(각 결재들) 만들어."</i>
+    /// </para>
+    /// <para>
+    /// 🔴 <b>기존 3개(GetPending·GetSent·GetCompleted)를 대체하지 않는다.</b> 헌법 #1 —
+    /// 사이드바 대기 배지와 8/23 실측 스크립트가 그 셋을 부른다. 여기에 <b>추가</b>한다.
+    /// </para>
+    /// <para>
+    /// 🔴 <b>「모든 결재」 범위</b> — 사장님 결재(2026-08-24):
+    /// <i>"내가 보낸결재는 보낸이가 볼수 있어야 하고, 결재자, 대표이사도 볼 수 있어야 함."</i>
+    /// ⇒ 대표는 <b>회사 전체</b>, 그 외는 <b>보낸이 + 결재자</b> 합집합.
+    /// 갈래를 <b>C# 에서 눈에 보이게</b> 가른다 — SQL 안에 <c>OR (SELECT is_parent…)</c> 로
+    /// 섞으면 조건 하나 빠뜨렸을 때 <b>전 직원에게 회사 전체가 샌다.</b>
+    /// </para>
+    /// </remarks>
+    public async Task<List<ApprovalDocumentDto>> GetDocumentsAsync(
+        string tenantId, string employeeId, string scope, string? docType, CancellationToken ct = default)
+    {
+        await EnsureOpenAsync(ct);
+
+        // 🔴 대표 판정은 all 갈래에서만 쓴다. 여기서 한 번만 물어본다.
+        var isOwner = scope == "all" && await IsOwnerEmployeeAsync(tenantId, employeeId, ct);
+
+        // ── 필터1(scope) → WHERE 조건 ──
+        // 🔴 completed 는 status='approved' 를 본다. 종전 GetCompletedAsync 는 이걸 안 봐서
+        //    반려건과 아직 도는 중인 건까지 "완료" 에 섞였다(실측 확인). 그 결함의 봉합이다.
+        var scopeSql = scope switch
+        {
+            "pending" => PendingCondition,
+            "completed" => CompletedCondition,
+            // 🔴 requester_id 를 OR 로 넣는다. 1차에서 반려되면 내 이력이 없다 —
+            //    신청자에게 안 보이면 "왜 안 오는지 모른다" 가 그대로 남는다.
+            "rejected" => RejectedCondition,
+            "sent" => "ad.requester_id = @EmployeeId",
+            // 대표면 조건이 통째로 빠진다(회사 전체). 아니면 관여 3갈래의 OR.
+            "all" => isOwner ? "1 = 1" : InvolvedCondition,
+            _ => throw new ArgumentException($"알 수 없는 결재 필터입니다: {scope}", nameof(scope))
+        };
+
+        // ── 필터2(docType) ──
+        // 🔴 ERP 7종은 목록에 안 뜬다. ① 과 같은 기준(ErpDocTypes)을 쓴다.
+        //    ⚠️ 사전(DocTypeLabels)은 건드리지 않는다 — 옛 ERP 문서의 라벨은 계속 찾아야 한다.
+        var erpExclusion = string.Join(", ", ErpDocTypes.Select(t => $"'{t}'"));
+
+        // 🔴 콤보 밖의 값이 오면 조건을 만들지 않고 빈 목록을 돌려준다.
+        //    파라미터 바인딩이라 주입은 안 되지만, 없는 종류로 조회하는 길 자체를 막는다.
+        if (!string.IsNullOrEmpty(docType) &&
+            (!DocTypeLabels.ContainsKey(docType) || ErpDocTypes.Contains(docType)))
+        {
+            return new List<ApprovalDocumentDto>();
+        }
+
+        var docTypeSql = string.IsNullOrEmpty(docType) ? string.Empty : " AND ad.doc_type = @DocType";
+
+        var sql = $"""
+            SELECT ad.approval_id AS ApprovalId, ad.doc_type AS DocType, ad.ref_id AS RefId,
+                   ad.ref_no AS RefNo, ad.title AS Title, ad.amount AS Amount,
+                   ad.status AS Status, ad.current_seq AS CurrentSeq, ad.total_lines AS TotalLines,
+                   ad.requester_id AS RequesterId, ad.requester_name AS RequesterName,
+                   ad.requested_at AS RequestedAt, ad.completed_at AS CompletedAt, ad.memo AS Memo
+            FROM approval_documents ad
+            WHERE ad.tenant_id = @TenantId
+              AND ad.doc_type NOT IN ({erpExclusion})
+              {docTypeSql}
+              AND ({scopeSql})
+            ORDER BY ad.requested_at DESC
+            """;
+
+        var rows = await _db.QueryAsync<ApprovalDocumentDto>(new CommandDefinition(
+            sql,
+            new { TenantId = tenantId, EmployeeId = employeeId, DocType = docType }, cancellationToken: ct));
+
+        return MapLabels(rows);
+    }
+
+    /// <summary>지금 <b>내 차례</b>인가 — 위임 포함. <c>GetPendingAsync</c> 와 같은 판정.</summary>
+    private const string MyTurnExists = """
+        EXISTS (SELECT 1 FROM approval_doc_lines al
+                WHERE al.tenant_id = ad.tenant_id
+                  AND al.doc_type = ad.doc_type
+                  AND al.seq_no = ad.current_seq
+                  AND al.is_active = 1
+                  AND (al.approver_id = @EmployeeId
+                       OR (al.delegate_id = @EmployeeId
+                           AND CURDATE() BETWEEN al.delegate_start AND al.delegate_end)))
+        """;
+
+    /// <summary>내가 <b>결재한 이력</b>이 있는가.</summary>
+    private const string MyHistoryExists = """
+        EXISTS (SELECT 1 FROM approval_history ah
+                WHERE ah.approval_id = ad.approval_id
+                  AND ah.tenant_id = ad.tenant_id
+                  AND ah.approver_id = @EmployeeId)
+        """;
+
+    private const string PendingCondition = "ad.status = 'pending' AND " + MyTurnExists;
+    private const string CompletedCondition = "ad.status = 'approved' AND " + MyHistoryExists;
+    private const string RejectedCondition =
+        "ad.status = 'rejected' AND (ad.requester_id = @EmployeeId OR " + MyHistoryExists + ")";
+    private const string InvolvedCondition =
+        "(ad.requester_id = @EmployeeId OR " + MyHistoryExists + " OR " + MyTurnExists + ")";
+
+    /// <summary>
+    /// 필터2 콤보에 넣을 <b>문서종류 목록</b> — 그룹웨어 것만.
+    /// </summary>
+    /// <remarks>
+    /// 🔴 <b>사전(DocTypeLabels)을 순회해 만든다.</b> 화면에 목록을 손으로 적으면
+    /// ③④⑤ 에서 문서종류가 늘 때 <b>필터2만 조용히 옛 목록으로 남는다.</b>
+    /// 사전에 한 줄 넣으면 필터2가 따라오게 둔다 — 결재 설정 화면이 쓰는 방식과 같다.
+    /// </remarks>
+    public List<ApprovalDocTypeDto> GetFilterDocTypes()
+        => DocTypeLabels
+            .Where(kv => !ErpDocTypes.Contains(kv.Key))
+            .Select(kv => new ApprovalDocTypeDto { DocType = kv.Key, DocTypeName = kv.Value })
+            .ToList();
 }

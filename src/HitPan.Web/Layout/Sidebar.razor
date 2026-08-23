@@ -65,15 +65,20 @@
 
     @* 3. 그룹웨어 — 결재함·인사·근태·사원관리 통합 *@
     <MudNavGroup Title="그룹웨어" Icon="@Icons.Material.Filled.Groups" Expanded="false">
-        <MudNavLink Href="/approval/pending" Icon="@Icons.Material.Filled.HourglassTop">
-            결재 대기
+        @* ── 작20260824작1 ② 결재 3줄 → 「결재관리」 1줄 (사장님 결재 2026-08-24) ──
+           사장님: "결재관리 메뉴에 필터링1(결재대기, 결재완료, 반려), 필터링2(각 결재들) 만들어."
+
+           🔴 종전 3줄(결재 대기 / 내가 보낸 결재 / 완료된 결재)이 여기 있었다. 세 화면을
+              다 열어봐야 찾던 것을 한 화면 콤보박스 2개로 고르게 바꿨다.
+           🔴 대기 건수 배지는 그대로 여기 단다 — 이게 사라지면 결재가 온 줄 모른다.
+           ⚠️ 옛 3주소는 살아 있다(ApprovalRedirectPage 가 필터를 맞춰 넘긴다). *@
+        <MudNavLink Href="/approval" Icon="@Icons.Material.Filled.FactCheck" Match="NavLinkMatch.Prefix">
+            결재관리
             @if (_approvalPendingCount > 0)
             {
                 <MudChip T="string" Size="Size.Small" Color="Color.Error" Variant="Variant.Filled" Class="ml-2">@_approvalPendingCount</MudChip>
             }
         </MudNavLink>
-        <MudNavLink Href="/approval/sent" Icon="@Icons.Material.Filled.Send">내가 보낸 결재</MudNavLink>
-        <MudNavLink Href="/approval/completed" Icon="@Icons.Material.Filled.CheckCircle">완료된 결재</MudNavLink>
         @* 계정관리 → 그룹웨어 이동분 (사장님 결재 2026-08-10). 결재 3형제 바로 뒤에 둔다 —
            [결재 설정]에서 세운 결재라인이 위 결재함에서 실제로 도는 순서이기 때문이다.
            사장님 결재(2026-08-09) "통일": [결재라인 설정](/settings/approval-lines)은 메뉴에서 내린 상태다.

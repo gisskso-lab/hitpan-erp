@@ -70,6 +70,42 @@ public sealed class ApprovalService(HttpClient http, ILogger<ApprovalService> lo
         catch (Exception ex) { logger.LogWarning(ex, "GetCompletedAsync failed"); return new(); }
     }
 
+    // ── 결재관리 필터 (작20260824작1 ②) ──
+
+    /// <summary>
+    /// 결재관리 목록 — <b>필터1(scope) × 필터2(docType)</b>.
+    /// 실패는 <c>null</c> 로 알린다.
+    /// </summary>
+    /// <remarks>
+    /// 🔴 <b>빈 목록으로 뭉개지 않는다.</b> 위 <see cref="GetSettingsOrNullAsync"/> 주석과 같은
+    /// 이유다 — "결재가 없다" 와 "못 불러왔다" 는 다른 사실인데, 둘 다 빈 표로 보이면
+    /// 사장님은 결재가 사라진 줄 아신다.
+    /// </remarks>
+    public async Task<List<ApprovalDocumentModel>?> GetDocumentsAsync(
+        string scope, string? docType = null, CancellationToken ct = default)
+    {
+        var url = $"api/approval/documents?scope={Uri.EscapeDataString(scope)}";
+        if (!string.IsNullOrEmpty(docType)) url += $"&docType={Uri.EscapeDataString(docType)}";
+
+        try { return await http.GetFromJsonAsync<List<ApprovalDocumentModel>>(url, ct) ?? new(); }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "결재관리 목록 조회 실패 scope={Scope} docType={DocType}", scope, docType);
+            return null;
+        }
+    }
+
+    /// <summary>필터2 콤보 항목 — 문서종류 목록(그룹웨어 것만).</summary>
+    /// <remarks>
+    /// 🔴 화면이 목록을 손으로 갖지 않는다. 서버가 라벨 사전을 순회해 내려주므로
+    /// 문서종류가 늘어도 필터2가 <b>따라온다.</b>
+    /// </remarks>
+    public async Task<List<ApprovalDocTypeModel>> GetFilterDocTypesAsync(CancellationToken ct = default)
+    {
+        try { return await http.GetFromJsonAsync<List<ApprovalDocTypeModel>>("api/approval/doc-types", ct) ?? new(); }
+        catch (Exception ex) { logger.LogWarning(ex, "결재 문서종류 목록 조회 실패"); return new(); }
+    }
+
     public async Task<ApprovalDetailModel?> GetDetailAsync(string approvalId, CancellationToken ct = default)
     {
         try { return await http.GetFromJsonAsync<ApprovalDetailModel>($"api/approval/documents/{Uri.EscapeDataString(approvalId)}", ct); }

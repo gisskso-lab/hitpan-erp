@@ -1,0 +1,42 @@
+@page "/approval/pending"
+@page "/approval/sent"
+@page "/approval/completed"
+@namespace HitPan.Web.Pages.ApprovalUi
+@attribute [Authorize]
+@inject NavigationManager Nav
+
+@*
+    옛 결재 3주소 → 결재관리(/approval) — 작20260824작1 ②
+
+    🔴 사장님 결재(2026-08-24): 사이드바 결재 3줄을 「결재관리」 1줄로 합쳤다.
+       메뉴에서는 내렸지만 **주소를 죽이지는 않는다** — 즐겨찾기·북마크·사내 메신저에
+       뿌려둔 링크가 그대로 살아야 한다. 넘길 때 **필터1 을 그 주소에 맞춰 연다.**
+
+    ⚠️ 옛 화면 3개(ApprovalPendingPage·SentPage·CompletedPage)는 지우지 않았다.
+       @page 한 줄만 뗐다(헌법 #1). 되돌릴 일이 있으면 그 줄만 되살리면 된다.
+*@
+
+<MudProgressLinear Indeterminate="true" Color="Color.Primary" />
+
+@code {
+    /// <summary>
+    /// 어느 주소로 들어왔느냐에 따라 결재관리의 <b>필터1</b> 을 정해 넘긴다.
+    /// </summary>
+    /// <remarks>
+    /// 🔴 <c>replace: true</c> 로 넘긴다. 아니면 뒤로가기를 눌렀을 때 이 주소로 돌아와
+    /// <b>다시 튕겨나가</b> 사용자가 뒤로 못 간다.
+    /// </remarks>
+    protected override void OnInitialized()
+    {
+        var path = new Uri(Nav.Uri).AbsolutePath.TrimEnd('/');
+
+        var scope = path switch
+        {
+            var p when p.EndsWith("/sent", StringComparison.OrdinalIgnoreCase)      => "sent",
+            var p when p.EndsWith("/completed", StringComparison.OrdinalIgnoreCase) => "completed",
+            _                                                                       => "pending"
+        };
+
+        Nav.NavigateTo($"/approval?scope={scope}", replace: true);
+    }
+}
