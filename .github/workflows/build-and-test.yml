@@ -145,3 +145,17 @@ jobs:
 
       - name: Check permission menu code sync
         run: bash scripts/check-permission-menu-sync.sh
+
+  migration-id-collision:
+    name: 마이그레이션 번호 충돌 (DB-NN 유일성)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      # 왜 이 잡이 있나 (2026-08-24 P0): DB-100 이 급여·퇴직서 두 파일에 겹쳐,
+      # 급여가 이미 적용된 고객 DB 에서 퇴직서 SQL 이 통째로 skip 됐다 → 그 화면만 500.
+      # 빌드 0/0 과 로컬 빈 DB 실측은 이걸 못 잡는다(파일 이름 문제 + 빈 DB 엔 기록이 없음).
+      - name: Check migration id collision
+        run: bash scripts/check-migration-id-collision.sh
