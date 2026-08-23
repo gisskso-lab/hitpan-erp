@@ -57,6 +57,36 @@ public sealed class EmployeeService(HttpClient http, ILogger<EmployeeService> lo
     }
 
     /// <summary>
+    /// 작20260822작1 G1-[B] — 결재선에 넣을 수 있는 사람만 받아온다.
+    /// <para>사장님 결재(2026-08-23): <b>"부모계정, 그리고 권한자만"</b></para>
+    /// </summary>
+    /// <remarks>
+    /// 🔴 <b>화면에서 거르지 않는다. 서버가 거른 것을 그대로 받는다.</b>
+    /// 누가 APPROVAL 권한을 가졌는지는 <c>user_permissions</c> 에 있고 화면은 그 표를 못 본다.
+    /// 게다가 부모계정은 그 표를 <b>거치지도 않는다</b>(권한검사가 먼저 통과시킨다).
+    /// 화면이 자기 손으로 거르려 하면 반드시 대표를 빠뜨린다.
+    /// <para>
+    /// 🔴 실패를 빈 목록으로 뭉개지 않는다(<see cref="GetListOrNullAsync"/> 와 같은 이유).
+    /// 결재자 후보가 0명인 것과 못 불러온 것은 <b>화면이 해야 할 말이 다르다</b> —
+    /// 전자는 "권한을 주세요", 후자는 "다시 시도하세요" 다.
+    /// </para>
+    /// </remarks>
+    public async Task<List<EmployeeListItemModel>?> GetApproverCandidatesOrNullAsync(CancellationToken ct = default)
+    {
+        try
+        {
+            return await http.GetFromJsonAsync<List<EmployeeListItemModel>>(
+                       "api/employees/approver-candidates", ct).ConfigureAwait(false)
+                   ?? new List<EmployeeListItemModel>();
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "결재자 후보 목록 조회 실패");
+            return null;
+        }
+    }
+
+    /// <summary>
     /// 봉합 (2026-06-22, 10차 P1-1): 부서 드롭다운 목록 조회 (읽기 전용).
     /// 사원 부서는 백엔드가 dept_id 로 저장하므로, 화면 선택지를 채우기 위해 부서 목록을 받는다.
     /// </summary>

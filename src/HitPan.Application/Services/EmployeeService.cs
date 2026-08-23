@@ -110,6 +110,87 @@ public sealed class EmployeeService : IEmployeeService
     }
 
     /// <summary>
+    /// 작20260822작1 G1-[B] — 결재선에 넣을 수 있는 사람만 뽑는다.
+    /// <para>사장님 결재(2026-08-23): <b>"부모계정, 그리고 권한자만"</b></para>
+    /// </summary>
+    /// <remarks>
+    /// 🔴 <b>두 갈래를 OR 로 묶는다. 하나만 쓰면 사고가 난다.</b>
+    /// <list type="number">
+    ///   <item><c>u.is_parent = 1</c> — 대표이사. 최종 결재 단계에 반드시 있어야 한다.</item>
+    ///   <item><c>APPROVAL</c> 권한자 — 그 외 단계를 맡는다.</item>
+    /// </list>
+    /// <para>
+    /// 부모계정을 빼면 <b>대표가 목록에서 사라진다.</b> PermissionService 가 부모계정을
+    /// user_permissions 조회 <b>전에</b> 통과시키므로(락아웃 방지) 대표는 그 표에 줄이
+    /// 없을 수 있다. 그런데 최종 단계는 대표여야 하므로, 권한자만 뽑으면 화면이
+    /// 스스로와 충돌한다 — 반드시 넣어야 할 사람을 고를 수 없게 된다.
+    /// </para>
+    /// <para>
+    /// 🔴 계정이 <b>살아 있는지</b>까지 본다(<c>is_deleted=0 AND is_active=1</c>).
+    /// 2026-08-14 실측 사고와 같은 자리다 — 퇴사자는 계정이 <c>is_active=0</c> 으로만
+    /// 꺼지고 <c>is_deleted</c> 는 0 이다. 이 조건을 빼면 <b>퇴사자가 결재자 후보로
+    /// 올라온다.</b> 로그인이 안 되는 계정은 없는 계정과 같다.
+    /// </para>
+    /// <para>
+    /// 계정이 아예 없는 사원(<c>e.user_id IS NULL</c>)은 INNER JOIN 에서 자연히 빠진다 —
+    /// 로그인을 못 하니 결재도 못 한다.
+    /// </para>
+    /// </remarks>
+    public async Task<List<EmployeeListDto>> GetApproverCandidatesAsync(
+        string tenantId, CancellationToken ct = default)
+    {
+        await EnsureOpenAsync(ct).ConfigureAwait(false);
+
+        const string sql = """
+            SELECT
+              e.employee_id AS EmployeeId,
+              e.emp_no AS EmpNo,
+              e.emp_name AS EmpName,
+              d.dept_name AS DeptName,
+              e.position AS Position,
+              e.job_title AS JobTitle,
+              e.phone AS Phone,
+              e.email AS Email,
+              e.role AS Role,
+              e.is_active AS IsActive,
+              e.is_resigned AS IsResigned,
+              e.resign_date AS ResignDate,
+              e.work_status AS WorkStatus,
+              e.annual_leave_total AS AnnualLeaveTotal,
+              e.annual_leave_used  AS AnnualLeaveUsed,
+              1 AS HasUserAccount,
+              u.is_parent AS IsParentAccount,
+              CASE WHEN p.user_id IS NULL THEN 0 ELSE 1 END AS HasApprovalPermission
+            FROM employees e
+            INNER JOIN users u
+              ON u.user_id = e.user_id
+             AND u.tenant_id = e.tenant_id
+             AND u.is_deleted = 0
+             AND u.is_active = 1
+            LEFT JOIN departments d
+              ON d.dept_id = e.dept_id
+             AND d.tenant_id = e.tenant_id
+            LEFT JOIN user_permissions p
+              ON p.user_id = u.user_id
+             AND p.tenant_id = u.tenant_id
+             AND p.menu_code = 'APPROVAL'
+             AND p.can_view = 1
+            WHERE e.tenant_id = @TenantId
+              AND e.is_active = 1
+              AND e.is_resigned = 0
+              AND (u.is_parent = 1 OR p.user_id IS NOT NULL)
+            ORDER BY u.is_parent DESC, e.emp_no
+            """;
+
+        var rows = await _db.QueryAsync<EmployeeListDto>(new CommandDefinition(
+            sql,
+            new { TenantId = tenantId },
+            cancellationToken: ct)).ConfigureAwait(false);
+
+        return rows.ToList();
+    }
+
+    /// <summary>
     /// 봉합 (2026-06-22, 10차 P1-1): 부서 드롭다운용 목록 (departments 마스터, 읽기 전용).
     /// 사원의 부서는 dept_id 로 저장하므로 화면 선택지를 (dept_id, dept_name)로 내려준다.
     /// 활성 부서만, sort_order → dept_name 순으로 정렬한다.

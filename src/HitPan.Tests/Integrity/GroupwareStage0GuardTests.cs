@@ -319,17 +319,31 @@ public class GroupwareStage0GuardTests
     }
 
     /// <summary>
-    /// 직급 화면이 둘 다 메뉴에 뜨면 어느 쪽에서 고쳐야 하는지 헷갈린다.
-    /// 같은 서비스·같은 데이터를 보므로 <b>메뉴에는 한 곳만</b> 둔다.
-    /// 다만 화면과 주소는 지우지 않는다(헌법 #1 — 즐겨찾기·주소 직접 입력).
+    /// 작20260822작1 G1-[D] — 직급 관리는 <b>메뉴에서 내린다</b>(사장님 결재 2026-08-23).
+    /// <para>사장님: <i>"직책관리 메뉴가 굳이 필요 없눈거야"</i></para>
     /// </summary>
+    /// <remarks>
+    /// 🔴 <b>메뉴만 내린다. 화면·주소·표는 살린다.</b>
+    /// 이 시험이 지키는 것은 "지웠나" 가 아니라 <b>"안 지웠나"</b> 다 —
+    /// 메뉴를 내리면서 화면까지 지우면 즐겨찾기·직접입력이 404 가 된다(G1-6, 헌법 #1·#37).
+    /// <para>
+    /// [반증] 사이드바에 <c>/settings/positions</c> 링크를 되살리면 첫 단언에서 FAIL.
+    ///        화면 파일을 지우면 뒤 두 단언에서 FAIL.
+    /// </para>
+    /// </remarks>
     [Fact]
-    public void 직급화면은_메뉴에_한_곳만_있다()
+    public void 직급관리는_메뉴에서_내리되_화면과_주소는_살린다()
     {
         var sidebar = ReadSource("src", "HitPan.Web", "Layout", "Sidebar.razor");
 
-        Assert.Contains("Href=\"/settings/positions\"", sidebar);
+        // 메뉴에서 내렸다 — 둘 다 없어야 한다.
+        Assert.DoesNotContain("Href=\"/settings/positions\"", sidebar);
         Assert.DoesNotContain("Href=\"/hr/positions\"", sidebar);
+
+        // 🔴 화면과 주소는 남는다. 지우면 404 다(헌법 #1·#37).
+        var settingsPage = Path.Combine(FindRepoRoot(),
+            "src", "HitPan.Web", "Pages", "Settings", "PositionsPage.razor");
+        Assert.True(File.Exists(settingsPage), "주소는 살린다 — 404 금지(G1-6)");
 
         var hrPage = Path.Combine(FindRepoRoot(),
             "src", "HitPan.Web", "Pages", "HR", "HrPositionsPage.razor");
