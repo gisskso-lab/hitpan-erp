@@ -15,8 +15,11 @@
    한 화면에서 목록·작성을 다 한다(히트판 정신 — 한 화면 완결).
    종류를 탭으로 가르되 화면은 하나다. 네 화면을 따로 만들면 같은 것을 네 번 배워야 한다. *@
 
-<PageTitle>업무보고서</PageTitle>
-<PageHeader Title="업무보고서" Subtitle="일일 · 주간 · 월간 · 경위서 작성과 결재" />
+@* ── 작20260824작3 「업무보고서」 → 「보고서관리」 + 출장/외근 추가 (사장님 지시 2026-08-24) ──
+   사장님: "업무보고서 -> 보고서관리 : 출장/외근보고서 추가"
+   🔴 종류는 탭으로 는다. 메뉴를 늘리지 않는다(8/13 간소화 원칙 그대로). *@
+<PageTitle>보고서관리</PageTitle>
+<PageHeader Title="보고서관리" Subtitle="일일 · 주간 · 월간 · 경위서 · 출장/외근 작성과 결재" />
 
 <MudTabs Elevation="0" Rounded="true" ApplyEffectsToContainer="true" PanelClass="pt-4"
          @bind-ActivePanelIndex="_tabIndex">
@@ -179,7 +182,11 @@ else
     private static readonly string[] _types =
     [
         WorkReportTypes.Daily, WorkReportTypes.Weekly,
-        WorkReportTypes.Monthly, WorkReportTypes.Incident
+        WorkReportTypes.Monthly, WorkReportTypes.Incident,
+        // 작(2026-08-24) 작3 — 사장님: "보고서관리 : 출장/외근보고서 추가"
+        // 🔴 서버 WorkReportTypes.All 과 같은 집합이어야 한다. 여기만 빠지면 탭이 안 생기고,
+        //    저쪽만 빠지면 결재 설정에 행이 안 떠서 상신이 조용히 죽는다(8/21 휴직 P0 자리).
+        WorkReportTypes.Business
     ];
 
     private int _tabIndex;

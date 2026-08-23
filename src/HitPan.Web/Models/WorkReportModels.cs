@@ -14,11 +14,16 @@ public static class WorkReportTypes
     public const string Monthly = "monthly";
     public const string Incident = "incident";
 
+    /// <summary>출장·외근보고서. 작(2026-08-24) 작3 — 사장님: "보고서관리 : 출장/외근보고서 추가"</summary>
+    /// <remarks>🔴 서버 <c>WorkReportTypes</c> 와 <b>같은 값</b>이어야 한다. 다르면 라벨이 영문으로 뜬다.</remarks>
+    public const string Business = "business";
+
     public static string DisplayName(string? value) => value switch
     {
         Weekly => "주간보고서",
         Monthly => "월간보고서",
         Incident => "경위서",
+        Business => "출장·외근보고서",
         _ => "일일보고서"
     };
 }
