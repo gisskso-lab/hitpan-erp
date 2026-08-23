@@ -270,6 +270,54 @@ public class ApprovalService : IApprovalService
             if (invalid.Count > 0)
                 throw new InvalidOperationException(
                     $"결재자/위임자로 지정할 수 없는 사원이 있습니다(미존재 또는 퇴직): {string.Join(", ", invalid)}");
+
+            // ── 작20260822작1 G1-[B] 서버측 검사 ([3-V] 동시검증 적발) ──
+            //
+            // 🔴 화면만 거르면 그것은 규칙이 아니라 권유다.
+            //    화면은 결재자 후보를 "부모계정 + APPROVAL 권한자" 로 걸러 보여주지만,
+            //    이 엔드포인트는 종전에 **활성 사원인지만** 보고 권한은 안 봤다.
+            //    ⇒ 화면을 거치지 않는 저장(직접 호출·옛 화면·자동화)이면 권한 없는 사람이
+            //       그대로 결재선에 앉는다. 그러면 그 사람은 결재함에 못 들어가고
+            //       (RequirePermission("APPROVAL","view")) **그 문서가 영영 안 간다.**
+            //
+            // ⚠️ 이 자리는 tenant_admin(대표)만 부를 수 있다 — 권한 상승 구멍이 아니라
+            //    **대표가 자기 발등을 찍는 자리**다. 그래서 막는다.
+            //
+            // 🔴 §7 "막지 말고 알린다" 와 어긋나지 않는다.
+            //    §7 이 지키는 것은 **이미 저장된 결재선**이다(갑자기 막으면 도는 결재가 선다).
+            //    여기는 **지금 새로 저장하는 순간**이라, 막아야 잘못된 결재선이 안 생긴다.
+            //    바로 위 퇴직자 검사도 똑같이 저장 시점에 막고 있다 — 같은 판단이다.
+            var cannotApprove = (await _db.QueryAsync<string>(new CommandDefinition(
+                """
+                SELECT e.employee_id
+                FROM employees e
+                LEFT JOIN users u
+                  ON u.user_id = e.user_id
+                 AND u.tenant_id = e.tenant_id
+                 AND u.is_deleted = 0
+                 AND u.is_active = 1
+                LEFT JOIN user_permissions p
+                  ON p.user_id = u.user_id
+                 AND p.tenant_id = u.tenant_id
+                 AND p.menu_code = 'APPROVAL'
+                 AND p.can_view = 1
+                WHERE e.tenant_id = @TenantId
+                  AND e.employee_id IN @Ids
+                  AND NOT (u.is_parent = 1 OR p.user_id IS NOT NULL)
+                """,
+                new { TenantId = tenantId, Ids = ids }, cancellationToken: ct))).ToList();
+
+            if (cannotApprove.Count > 0)
+            {
+                // 이름으로 알린다 — ID 를 보여주면 담당자가 누군지 모른다.
+                var names = (await _db.QueryAsync<string>(new CommandDefinition(
+                    "SELECT emp_name FROM employees WHERE tenant_id = @TenantId AND employee_id IN @Ids",
+                    new { TenantId = tenantId, Ids = cannotApprove }, cancellationToken: ct))).ToList();
+
+                throw new InvalidOperationException(
+                    $"결재 권한이 없는 사람은 결재자·위임자로 지정할 수 없습니다: {string.Join(", ", names)}. "
+                    + "권한설정에서 결재 권한을 먼저 주세요.");
+            }
         }
 
         // 봉합 (2026-06-23, 5차 전수조사 APPR-F2 P1, 사장님 결재 B안):
