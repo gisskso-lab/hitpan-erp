@@ -124,8 +124,12 @@
         <MudNavLink Href="/hr/attendance" Icon="@Icons.Material.Filled.AccessTime">근태 관리</MudNavLink>
         <MudNavLink Href="/hr/overtime" Icon="@Icons.Material.Filled.MoreTime">초과근무</MudNavLink>
         @* 휴가·연차 — 옛 [휴가 현황]·[휴가 달력]을 탭으로 흡수했다(셋 다 같은 API 하나였다). *@
+        @* ── 작20260824작2 [1] 「연차 신청」을 [휴가·연차] 안으로 합쳤다 (사장님 지시 2026-08-24) ──
+           사장님: "휴가연차+연차신청 통합"
+           🔴 두 화면이 같은 KPI(총·사용·잔여 연차)를 각각 보여주고 있었다.
+              이제 첫 탭 「내 연차」가 직원 자리, 나머지 탭이 관리자 자리다.
+           ⚠️ /hr/leave-request 주소는 살아 있다 — 결재관리 [결재 올리기] 안내가 그리로 보낸다. *@
         <MudNavLink Href="/hr/leave" Icon="@Icons.Material.Filled.EventAvailable">휴가·연차</MudNavLink>
-        <MudNavLink Href="/hr/leave-request" Icon="@Icons.Material.Filled.EditCalendar">연차 신청</MudNavLink>
         @* 작(2026-08-13) 단계6 — 휴직. 위의 '휴가·연차'(하루~며칠, 연차에서 깎임)와 다르다.
            달·년 단위로 쉬는 것이라 표가 따로 있고, 연차 잔여를 건드리지 않는다.
            직원이 신청하는 화면이라 관리자 게이트를 두지 않는다(본인 것만 보이는 건 서버가 정한다). *@
@@ -145,19 +149,34 @@
            종전엔 Href="/chat" 이라 ERP 화면 안에서 열려 쓰던 화면이 날아갔다.
            들어온 길이 상단바든 메뉴든 **결과는 같아야 한다** — 창은 하나로 재사용된다.
            (/chat 주소는 남겨 둔다 — 팝업이 막힌 PC 의 길이고, 옛 링크가 404 나지 않는다) *@
-        <MudNavLink Icon="@Icons.Material.Filled.Chat" OnClick="OpenChatWindowAsync">메신저</MudNavLink>
+        @* ── 작20260824작2 [2] 메신저를 메뉴에서 내렸다 (사장님 지시 2026-08-24) ──
+           사장님: "메신저 그룹웨어 메뉴에서 삭제, 아이콘으로 동작제어"
+
+           🔴 기능은 그대로다. 상단바 메신저 버튼(TopHeader.razor:26 `<ChatButton>`,
+              알림 아이콘 옆 — 사장님이 8/13 에 그 자리를 지정하셨다)이 같은 팝업창을 연다.
+              ⚠️ 실측으로 확인했다 — 아이콘이 없는데 메뉴만 지우면 들어갈 길이 사라진다.
+           🔴 /chat 주소도 살아 있다(팝업이 막힌 PC 의 길 · 옛 링크 404 금지).
+           ⇒ 메뉴에서만 뺀다. 들어오는 길이 줄어든 게 아니라 **중복된 길**을 지웠다. *@
         @* 작(2026-08-13) 단계5 — 연차를 '주는' 화면. 위의 '연차 신청'(직원이 쓰는 것)과 다르다.
            반자동 3단: 자동 계산이 제안 → 관리자가 확인·수정 → 확정해야 잔여에 반영. *@
-        @if (_isTenantAdmin)
-        {
-            <MudNavLink Href="/hr/annual-leave" Icon="@Icons.Material.Filled.Rule">연차 부여</MudNavLink>
-        }
+        @* ── 작20260824작2 [3] 「연차 부여」를 [사원관리] 안 탭으로 옮겼다 (사장님 지시 2026-08-24) ──
+           사장님: "연차부여 삭제 = 사원관리에 연차부여 넣기 = 권한에 연차부여 권한 추가"
+
+           🔴 연차를 주는 일은 사원 목록을 보며 하는 일이다. 따로 두면 두 화면을 오간다.
+           🔴 권한을 새로 만들었다 — ANNUAL_LEAVE_GRANT (기본 OFF, 헌법 #11).
+              종전엔 TenantAdminOnly 라 **대표만** 줄 수 있었다. 이제 경리·인사에게 맡길 수 있다.
+              ⚠️ 안 켜면 대표만 쓰는 종전 상태 그대로다 — 회귀 0.
+           ⚠️ /hr/annual-leave 주소는 살아 있다(즐겨찾기·직접입력 404 금지, 헌법 #1). *@
         @* 경비 — 옛 [경비 현황]의 요약카드 4개를 신청 화면에 얹어 하나로 합쳤다. *@
         <MudNavLink Href="/hr/expense-request" Icon="@Icons.Material.Filled.ReceiptLong">경비</MudNavLink>
         @* 전자근로계약서 — 옛 [전자서명 이력]을 '서명 이력' 탭으로 합쳤다.
            🔴 지우지 않고 탭으로 남긴 이유: 서명 무효화가 거기서만 되고,
            되돌릴 수 없는 동작이라 흔적이 남을 자리가 있어야 한다. *@
-        <MudNavLink Href="/hr/labor-contracts" Icon="@Icons.Material.Filled.Description">전자근로계약서</MudNavLink>
+        @* ── 작20260824작2 [4] 「전자근로계약서」 → 「입사/퇴사」 (사장님 지시 2026-08-24) ──
+           사장님: "전자근로계약서 = 입사/퇴사 로 메뉴변경 전자근로계약서 작성, 전자 퇴직서 작성"
+           🔴 한 화면 세 탭 — [계약서] · [전자 퇴직서] · [서명 이력].
+              들어올 때와 나갈 때는 같은 사람(인사 담당)이 다루는 한 묶음이다. *@
+        <MudNavLink Href="/hr/labor-contracts" Icon="@Icons.Material.Filled.SwapHoriz">입사/퇴사</MudNavLink>
     </MudNavGroup>
 
     @* 4. 업체관리 *@

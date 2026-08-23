@@ -1,4 +1,13 @@
-@page "/hr/leave-request"
+@* ── 작20260824작2 [1] 이 화면을 [휴가·연차]로 합쳤다 (사장님 지시 2026-08-24) ──
+
+   사장님: "휴가연차+연차신청 통합"
+
+   🔴 파일과 내용은 그대로 둔다(헌법 #1). 뗀 것은 라우트 한 줄뿐이다.
+      주소 "/hr/leave-request" 는 이제 HrLeavePage 가 받아 「내 연차」 탭을 연다.
+      결재관리 [결재 올리기] 안내가 이 주소로 보내므로 죽으면 안 된다.
+
+   ⚠️ 라우트가 겹치면 Blazor 가 AmbiguousMatchException 을 던진다.
+*@
 @namespace HitPan.Web.Pages.HrUi
 @attribute [Authorize]
 @using HitPan.Web.Models

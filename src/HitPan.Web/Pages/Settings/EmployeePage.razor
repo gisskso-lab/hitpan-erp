@@ -28,6 +28,15 @@
     </div>
 </div>
 
+@* ── 작20260824작2 [3] 「연차 부여」를 여기 탭으로 넣었다 (사장님 지시 2026-08-24) ──
+   사장님: "연차부여 삭제 = 사원관리에 연차부여 넣기 = 권한에 연차부여 권한 추가"
+
+   🔴 화면을 복사하지 않고 **컴포넌트로 부른다**(373줄). 복사하면 두 벌이 되고
+      한쪽만 고쳐지는 날이 온다 — 연차는 숫자가 갈리면 바로 사고다.
+   🔴 권한은 서버가 판정한다(menu_code='ANNUAL_LEAVE'). 탭을 숨기는 것은 차단이 아니다. *@
+<MudTabs Elevation="0" Rounded="true" ApplyEffectsToContainer="true" PanelClass="pt-4">
+<MudTabPanel Text="사원 목록" Icon="@Icons.Material.Filled.People">
+
 @if (_loading)
 {
     <MudProgressLinear Indeterminate="true" Color="Color.Primary" />
@@ -342,3 +351,14 @@ else
         </MudItem>
     </MudGrid>
 }
+
+</MudTabPanel>
+
+@* ── 탭 「연차 부여」 — 옛 /hr/annual-leave 를 그대로 부른다 ──
+     🔴 복사가 아니라 **호출**이다. 그 화면이 고쳐지면 여기도 같이 고쳐진다.
+     ⚠️ /hr/annual-leave 주소는 살아 있다(즐겨찾기·직접입력 404 금지, 헌법 #1). *@
+<MudTabPanel Text="연차 부여" Icon="@Icons.Material.Filled.Rule">
+    <HitPan.Web.Pages.HrUi.AnnualLeaveGrantPage />
+</MudTabPanel>
+
+</MudTabs>

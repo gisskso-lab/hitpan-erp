@@ -100,6 +100,8 @@ builder.Services.AddScoped<FinanceClientService>();
 builder.Services.AddScoped<HrClientService>();
 builder.Services.AddScoped<ESignService>();
 builder.Services.AddScoped<LaborContractService>();
+// 작(2026-08-24) 작2 [4] — 전자 퇴직서(사직서). 입사/퇴사 화면의 두 번째 탭이 쓴다.
+builder.Services.AddScoped<ResignationService>();
 builder.Services.AddScoped<ChatbotService>();
 // BackofficeService DI 제거 (보안 격벽 2026-06-18): 백오피스 인증·관리는 HitPan.Backoffice.API 전담.
 //   ERP 프론트에 본사/대리점 호출 코드가 남지 않게 함(헌법 #35).
