@@ -35,7 +35,25 @@ public class ApprovalService : IApprovalService
         ["report_weekly"]    = "주간보고서",
         ["report_monthly"]   = "월간보고서",
         ["report_incident"]  = "경위서",
-        // 작(2026-08-21) P0 봉합: 휴직(absence) 이 여기 없어서 결재가 구조적으로 불가능했다.
+        // ── 작20260823작1 [D] 창구 통합 — 필터2 에 있어야 할 2종을 채운다 ──
+    //   사장님: "창구 하나로 통합하기 위해서 추가 해야 되는 부분들 추가하고,
+    //            뺴야되는 ERP영역은 모두 빼"
+    //
+    // 🔴 등재가 먼저다. 8/21 휴직 P0 가 정확히 반대였다 —
+    //    AbsenceService 는 처음부터 "absence" 로 상신을 불렀는데 이 사전에 없어서
+    //    설정 화면에 행이 안 떴고 ⇒ 켤 방법이 없고 ⇒ 상신이 조용히 죽었다.
+    //    화면은 결재상신 버튼을 보여주는데 눌러도 아무 일이 없었다.
+    //    ⇒ 트리거를 먼저 붙이면 같은 사고가 난다. 사전 등재부터 한다.
+    //
+    // ⚠️ 이 둘은 아직 상신 트리거가 없다(등재만). 트리거는 뒤 단계다.
+    //    resignation    화면·표 신설이 남았다(⑤ 신규 메뉴)
+    //                   ※ 퇴사 처리는 이미 멀쩡하다(EmployeeResignDialog·ResignAsync).
+    //                     없는 것은 "직원이 올리는 문서" 쪽이다.
+    //    labor_contract 화면 3개(Create/List/Sign)와 labor_contracts 표가 이미 있다.
+    //                   신규가 아니라 배선이다 — 결재로 넘기는 연결만 없다.
+    ["resignation"]      = "사직서",
+    ["labor_contract"]   = "전자근로계약서",
+    // 작(2026-08-21) P0 봉합: 휴직(absence) 이 여기 없어서 결재가 구조적으로 불가능했다.
         // 🔴 AbsenceService 는 처음부터 "absence" 로 상신을 불렀는데, 설정 행은 이 사전을
         //    순회해(GetSettingsAsync) 만들어지므로 화면에 "휴직" 행이 아예 뜨지 않았다
         //    → is_enabled 를 켤 방법이 없다 → TryCreateApprovalAsync 가
@@ -150,6 +168,63 @@ public class ApprovalService : IApprovalService
     //    ⇒ 결재선 2단 이상 고객사에서 첫 단계 이후 결재가 조용히 멈춘다(헌법 #20).
     private readonly INotificationService? _notifier;
 
+    /// <summary>
+    /// 🔴 <b>ERP 문서종류 — 그룹웨어 결재 창구에서 뺀다</b> (작20260823작1 [A]).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// 사장님: <i>"erp와 그룹웨어 결재를 묶으면 안됨. 분리해"</i>
+    /// <i>"erp 자료는 '확정' 이라는 단계가 이미 있음"</i>
+    /// <i>"이거 넣고 결재 돌리면 난리난다. 하루에 수십수백건씩 견적, 발주, 거래가 잡힐텐데"</i>
+    /// </para>
+    /// <para>
+    /// 🔴 <b>왜 사전에서 지우지 않고 집합으로 거르나.</b>
+    /// <see cref="DocTypeLabels"/> 는 <b>두 가지 일</b>을 한다 —
+    /// 설정 화면 목록을 만들고(<c>GetSettingsAsync</c>), <b>라벨을 찾아준다</b>
+    /// (<c>MapLabels</c> 계열 2곳). 사전에서 지우면 이미 있는 ERP 결재 문서가
+    /// <c>GetValueOrDefault(docType)</c> 폴백을 타서 화면에 <b><c>delivery</c> 같은 영문 코드</b>가 뜬다.
+    /// 500 이 안 나고 <b>조용히</b> 영문이 보인다(고객 노출 개발용어 금지).
+    /// ⇒ <b>사전은 살리고, 목록 만들 때만 거른다.</b>
+    /// </para>
+    /// <para>
+    /// ⚠️ <b>개수를 세지 않는다.</b> 실측상 견적·수주·발주는 상신 트리거가 <b>0건</b>이라
+    /// "켜도 아무 일이 안 일어나는" <b>가짜 스위치</b>다. 트리거가 있는 4종은 실제로
+    /// 결재함을 덮고, 없는 3종은 거짓말을 한다 — <b>7종 전부 뺀다.</b>
+    /// 사장님: <i>"4종이던 1종이던 erp 결재 도는것 자체가 이미 문제"</i>
+    /// </para>
+    /// <para>
+    /// 🔴 <c>expense</c>(경비)는 <b>여기 없다.</b> 경비는 그룹웨어다 —
+    /// 사장님 지시대로 영수증 첨부·지출결의서 형태로 결재에 올라간다.
+    /// </para>
+    /// </remarks>
+    private static readonly HashSet<string> ErpDocTypes = new()
+    {
+        "quotation", "sales_order", "delivery",
+        "purchase_order", "receipt",
+        "sales_return", "purchase_return"
+    };
+
+    /// <summary>
+    /// 이 문서종류가 <b>ERP</b> 인가 — 그룹웨어 결재 창구에서 뺄 대상인가.
+    /// </summary>
+    /// <remarks>
+    /// 🔴 <c>ApprovalTriggerHelper</c> 가 <b>상신 입구에서</b> 이걸 물어 되돌린다.
+    /// 호출부 4곳에서 각각 지우는 대신 <b>문을 하나로 두고 그 문에서 막는다</b> —
+    /// 나중에 누가 새 호출을 추가해도 안 샌다.
+    /// </remarks>
+    public static bool IsErpDocType(string docType) => ErpDocTypes.Contains(docType);
+
+    /// <summary>
+    /// 문서종류의 <b>한글 라벨</b>. 사전에 없으면 코드를 그대로 돌려준다(기존 폴백과 동일).
+    /// </summary>
+    /// <remarks>
+    /// 🔴 ERP 를 목록에서 뺀 뒤에도 <b>이 길은 계속 살아 있어야 한다.</b>
+    /// 이미 있는 ERP 결재 문서가 화면에 <c>delivery</c> 같은 <b>영문 코드</b>로 뜨면 안 된다
+    /// (500 이 안 나고 조용히 영문이 보인다 — 고객 노출 개발용어 금지).
+    /// </remarks>
+    public static string GetDocTypeLabel(string docType)
+        => DocTypeLabels.GetValueOrDefault(docType, docType);
+
     public ApprovalService(IDbConnection db, IAuditService audit, INotificationService? notifier = null)
     {
         _db = db;
@@ -179,6 +254,12 @@ public class ApprovalService : IApprovalService
         var result = new List<ApprovalSettingDto>();
         foreach (var (docType, label) in DocTypeLabels)
         {
+            // 🔴 작20260823작1 [A] — ERP 는 결재 창구에 올리지 않는다.
+            //    ERP 워크플로에는 "확정" 이 이미 있고 그것이 승인 자리를 한다.
+            //    여기 두면 거래명세서만으로 결재함이 덮여 사람 결재가 안 보인다.
+            //    ⚠️ 사전에서 지운 게 아니라 목록에서만 빼는 것이다 — 라벨은 계속 찾아야 한다.
+            if (ErpDocTypes.Contains(docType)) continue;
+
             var s = existing.FirstOrDefault(x => x.DocType == docType);
             result.Add(new ApprovalSettingDto
             {
