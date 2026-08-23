@@ -1,0 +1,114 @@
+[
+  {
+    "id": "E-1",
+    "what": "API · 버전",
+    "got": "HTTP 200 · v1.3.3",
+    "pass": true,
+    "note": "🔴 1.3.3 이 아니면 옛 코드를 재는 것 — 판정 무효"
+  },
+  {
+    "id": "E-2",
+    "what": "로그인",
+    "got": "HTTP 200",
+    "pass": true,
+    "note": ""
+  },
+  {
+    "id": "E-3",
+    "what": "메인PC 기기줄",
+    "got": "있음",
+    "pass": true,
+    "note": ""
+  },
+  {
+    "id": "E-4",
+    "what": "사원 수 (운영 아님 확인)",
+    "got": "2명",
+    "pass": true,
+    "note": ""
+  },
+  {
+    "id": "E1-0",
+    "what": "결재 설정 조회",
+    "got": "HTTP 200 · 10종",
+    "pass": true,
+    "note": ""
+  },
+  {
+    "id": "E1-1",
+    "what": "🔴 ERP 7종이 목록에서 빠졌나",
+    "got": "7종 전부 빠짐",
+    "pass": true,
+    "note": "남아 있으면 거래명세서가 결재함을 덮는다"
+  },
+  {
+    "id": "E1-2",
+    "what": "그룹웨어 종류는 그대로 있나",
+    "got": "8종 전부 있음",
+    "pass": true,
+    "note": "🔴 expense 가 사라지면 경비 결재가 죽는다 (8/21 P0 자리)"
+  },
+  {
+    "id": "E1-8",
+    "what": "🔴 채운 2종이 화면에 뜨나",
+    "got": "resignation=사직서 · labor_contract=전자근로계약서",
+    "pass": true,
+    "note": "안 뜨면 8/21 휴직 P0 재발 — 켤 방법이 없어 조용히 죽는다"
+  },
+  {
+    "id": "E1-8b",
+    "what": "채운 2종의 라벨이 한글인가",
+    "got": "한글 라벨 정상",
+    "pass": true,
+    "note": "영문이면 고객에게 개발용어가 노출된다"
+  },
+  {
+    "id": "E1-9-resignation",
+    "what": "사직서 결재선 저장",
+    "got": "HTTP 200",
+    "pass": true,
+    "note": ""
+  },
+  {
+    "id": "E1-9-labor_contract",
+    "what": "전자근로계약서 결재선 저장",
+    "got": "HTTP 200",
+    "pass": true,
+    "note": ""
+  },
+  {
+    "id": "E1-5",
+    "what": "ERP 결재 문서 라벨",
+    "got": "이 테넌트에 ERP 결재 문서가 0건 — 시험이 대신 지킨다",
+    "pass": null,
+    "note": "ErpApprovalSeparationGateTests.ERP_를_뺐어도_옛문서_라벨은_한글로_뜬다"
+  },
+  {
+    "id": "E1-R1",
+    "what": "결재 대기함",
+    "got": "HTTP 200 · JSON",
+    "pass": true,
+    "note": "JSON 이어야 진짜 API 다"
+  },
+  {
+    "id": "E1-R2",
+    "what": "내가 보낸 결재",
+    "got": "HTTP 200 · JSON",
+    "pass": true,
+    "note": "JSON 이어야 진짜 API 다"
+  },
+  {
+    "id": "E1-R3",
+    "what": "완료된 결재",
+    "got": "HTTP 200 · JSON",
+    "pass": true,
+    "note": "JSON 이어야 진짜 API 다"
+  },
+  {
+    "id": "E1-R4",
+    "what": "사원 목록",
+    "got": "HTTP 200 · JSON",
+    "pass": true,
+    "note": "JSON 이어야 진짜 API 다"
+  }
+]
