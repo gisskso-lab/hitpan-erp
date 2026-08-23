@@ -126,8 +126,20 @@ public static class ApprovalTriggerHelper
 
         if (!setting.IsEnabled) return;
 
-        // 기준금액 미만 자동승인이면 결재 불요
-        if (setting.AutoBelow && setting.Threshold > 0 && amount < setting.Threshold) return;
+        // 🔴 작(2026-08-24) 작4 ① — 기준금액 미만 자동승인을 **껐다.** 사장님 지시.
+        //
+        //   종전 동작:
+        //       if (AutoBelow && Threshold > 0 && amount < Threshold) return;
+        //     ⇒ 여기서 return 하면 **결재 문서 자체가 만들어지지 않았다.**
+        //       ApprovalService 쪽(status="approved")보다 영향이 크다 — 그쪽은 승인된 문서라도
+        //       남지만, 여기는 **결재 이력이 아예 없다.** 나중에 "이 건 결재 받았나" 를 볼 수 없다.
+        //
+        //   왜 껐나 — 반자동 원칙. 결재는 사람이 판단하는 자리다.
+        //   ⇒ 이제 금액과 무관하게 결재 문서를 만든다. 결재선이 그대로 돈다.
+        //
+        // 🔴 위 SELECT 의 Threshold · AutoBelow 는 **읽되 쓰지 않는다**(헌법 #37).
+        //    컬럼을 지우지 않았으므로 조회는 그대로 두고, 판정에서만 뺐다.
+        //    IsEnabled 는 계속 쓴다 — 결재 ON/OFF 는 살아 있는 기능이다.
 
         // 결재 라인 수 확인
         // 봉합 (2026-06-23, 5차 후속 APPR-TRIGGER P0급): 종전엔 FROM approval_lines 에서 doc_type 으로

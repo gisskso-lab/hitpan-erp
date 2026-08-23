@@ -484,19 +484,25 @@ public class ApprovalService : IApprovalService
         if (lines.Count == 0)
             throw new InvalidOperationException("결재 라인이 설정되지 않았습니다. 결재 설정에서 라인을 먼저 구성해주세요.");
 
-        // 기준금액 자동승인 체크
-        var setting = await _db.QueryFirstOrDefaultAsync<ApprovalSettingDto>(new CommandDefinition(
-            "SELECT threshold_amount AS ThresholdAmount, auto_approve_below AS AutoApproveBelow FROM approval_settings WHERE tenant_id = @TenantId AND doc_type = @DocType",
-            new { TenantId = tenantId, DocType = request.DocType }, cancellationToken: ct));
-
         var approvalId = Guid.NewGuid().ToString();
-        var status = "pending";
 
-        // 기준금액 미만 자동승인 처리
-        if (setting is { AutoApproveBelow: true, ThresholdAmount: > 0 } && request.Amount < setting.ThresholdAmount)
-        {
-            status = "approved";
-        }
+        // 🔴 작(2026-08-24) 작4 ① — 기준금액 미만 자동승인을 **껐다.** 사장님 지시.
+        //
+        //   종전 동작:
+        //       if (AutoApproveBelow && Amount < ThresholdAmount) status = "approved";
+        //     ⇒ 금액이 기준 미만이면 **결재선을 통째로 건너뛰고** 그 자리에서 승인됐다.
+        //
+        //   왜 껐나 — 반자동 원칙(사장님 헌법)과 정면으로 부딪힌다.
+        //     결재는 **사람이 판단하는 자리**다. 금액이 작다고 시스템이 대신 승인하면
+        //     **결재선에 이름이 올라간 사람이 보지도 못한 문서가 승인된 것으로 남는다.**
+        //     실무에서는 "내가 결재한 적 없는데 내 이름으로 승인돼 있다" 가 된다 — 감사 추적이 깨진다.
+        //
+        //   ⇒ 이제 금액과 무관하게 **항상 pending** 으로 시작한다. 결재선이 그대로 돈다.
+        //
+        // 🔴 threshold_amount · auto_approve_below **컬럼과 DTO 는 지우지 않았다**(헌법 #37 —
+        //    "안 읽힌다 ≠ 잔재"). 이미 값을 넣어 둔 고객사의 기록이고, 되돌릴 때 필요하다.
+        //    여기서 **읽지 않을 뿐**이다. 지우려면 별도 결재를 받는다.
+        const string status = "pending";
 
         // 봉합 (2026-06-23, 5차 전수조사 APPR-F1 P1):
         //   종전엔 approval_documents INSERT 와 자동승인 approval_history INSERT 가 트랜잭션 없이 분리돼,
@@ -534,19 +540,14 @@ public class ApprovalService : IApprovalService
                     UserId = userId
                 }, transaction: tx, cancellationToken: ct));
 
-            // 자동승인인 경우 이력 기록 (동일 트랜잭션 — 문서·이력 원자화)
-            if (status == "approved")
-            {
-                await _db.ExecuteAsync(new CommandDefinition(
-                    """
-                    INSERT INTO approval_history
-                      (history_id, tenant_id, approval_id, seq_no, approver_id, approver_name, action, comment, acted_at)
-                    VALUES
-                      (UUID(), @TenantId, @ApprovalId, 0, 'system', '시스템', 'approved', '기준금액 미만 자동승인', NOW(6))
-                    """,
-                    new { TenantId = tenantId, ApprovalId = approvalId }, transaction: tx, cancellationToken: ct));
-            }
-
+            // 작(2026-08-24) 작4 ① — 자동승인 이력 INSERT 를 뺐다.
+            //   status 가 항상 "pending" 이 되어 이 블록은 **도달할 수 없는 코드**가 됐다
+            //   (빌드 warning CS0162 — 헌법 #19 는 경고 0 을 요구한다).
+            //   종전엔 여기서 approver_name='시스템', comment='기준금액 미만 자동승인' 이력을 남겼다.
+            //   자동승인이 사라졌으니 남길 이력도 없다.
+            //
+            // ⚠️ 트랜잭션(tx)은 **그대로 둔다.** 문서 INSERT 하나만 커밋되는 형태라 동작은 같고,
+            //    2026-06-23 APPR-F1 봉합이 만든 원자성 구조를 되돌리지 않는다(헌법 #1).
             tx.Commit();
         }
         catch
@@ -556,10 +557,13 @@ public class ApprovalService : IApprovalService
         }
 
         // 작(2026-08-13) 검증팀 P0-1 봉합: 수동 상신 경로에도 알림을 붙인다.
-        // 🔴 자동승인된 건은 보내지 않는다 — 결재할 사람이 없는데 "결재가 올라왔습니다" 가 뜨면
-        //    눌러 들어가도 대기함이 비어 있어 고객이 헛걸음한다.
         // 알림 실패가 이미 커밋된 결재를 되돌리면 안 되므로 트랜잭션 밖에서 부른다.
-        if (_notifier is not null && status == "pending")
+        //
+        // 작(2026-08-24) 작4 ① — 종전 조건 `&& status == "pending"` 을 뺐다.
+        //   자동승인이 사라져 status 는 **항상 pending** 이다(위 const 참조).
+        //   종전 주석의 취지("자동승인 건엔 알림을 보내지 않는다 — 눌러도 대기함이 비어 헛걸음")는
+        //   자동승인 자체가 없어져 해당 사례가 생기지 않는다.
+        if (_notifier is not null)
         {
             await ApprovalTriggerHelper.NotifyApproverAsync(
                 _db, request.DocType, tenantId, request.Title, seqNo: 1, _notifier, ct)
