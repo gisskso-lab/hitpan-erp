@@ -357,6 +357,57 @@ public sealed class ApproverCandidateGateTests : IDisposable
         Assert.DoesNotContain("남의대표", names);
     }
 
+    /// <summary>
+    /// 🔴 <b>서버가 막는가</b> — 화면만 거르면 그것은 규칙이 아니라 권유다.
+    /// ([3-V] 동시검증 적발 — 저장 경로가 권한을 안 봤다)
+    /// </summary>
+    /// <remarks>
+    /// 화면은 후보를 걸러 보여주지만, 화면을 거치지 않는 저장이면 권한 없는 사람이
+    /// 그대로 결재선에 앉는다. 그러면 그 사람은 결재함에 못 들어가
+    /// (<c>RequirePermission("APPROVAL","view")</c>) <b>그 문서가 영영 안 간다.</b>
+    /// <para>
+    /// ⚠️ 이 자리는 <c>tenant_admin</c>(대표)만 부를 수 있다 — 권한 상승 구멍이 아니라
+    /// <b>대표가 자기 발등을 찍는 자리</b>다.
+    /// </para>
+    /// <para>[반증] <c>SaveLinesAsync</c> 의 권한 검사 블록을 지우면 저장이 통과해 FAIL 한다.</para>
+    /// </remarks>
+    [Fact]
+    public async Task 권한없는_사람을_결재선에_저장하면_막힌다()
+    {
+        if (!ServerAvailable()) return;
+
+        SetUpFreshInstall();
+        await using var db = new MySqlConnection(DbConnString());
+        await db.OpenAsync();
+
+        await InsertPersonAsync(db, "u-sown--0001", "e-sown--0001", "김대표", isParent: true);
+        await InsertPersonAsync(db, "u-snon--0002", "e-snon--0002", "박무권", isParent: false);
+
+        var svc = new ApprovalService(db, new NoOpAudit());
+
+        var req = new HitPan.Application.DTOs.Approval.SaveApprovalLinesRequest
+        {
+            DocType = "expense",
+            Lines = new List<HitPan.Application.DTOs.Approval.ApprovalLineItem>
+            {
+                new() { SeqNo = 1, ApproverId = "e-snon--0002", ApproverName = "박무권" },
+                new() { SeqNo = 2, ApproverId = "e-sown--0001", ApproverName = "김대표" }
+            }
+        };
+
+        // 🔴 권한 없는 박무권이 끼어 있으므로 저장이 막혀야 한다.
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(
+            () => svc.SaveLinesAsync(req, TenantId));
+        Assert.Contains("박무권", ex.Message);
+
+        // 🔴 대표만 남기면 통과해야 한다 — 대표는 user_permissions 에 줄이 없어도 결재한다.
+        req.Lines = new List<HitPan.Application.DTOs.Approval.ApprovalLineItem>
+        {
+            new() { SeqNo = 1, ApproverId = "e-sown--0001", ApproverName = "김대표" }
+        };
+        await svc.SaveLinesAsync(req, TenantId);   // 예외가 나면 FAIL
+    }
+
     public void Dispose()
     {
         if (!_created) return;
