@@ -7,8 +7,13 @@
 @inject EmployeeService EmployeeSvc
 @inject ISnackbar Snackbar
 @* 작(2026-08-24) 작4 ② — 「설정」 누르면 결재라인 영역으로 데려가기 위해.
-   MudBlazor 표준 서비스다(AddMudServices 가 등록). 새 JS 파일을 만들지 않는다. *@
-@inject IScrollManager ScrollManager
+   🔴 MudBlazor `IScrollManager` 를 먼저 썼다가 실패했다(1.3.6 · 사장님 실측).
+      그건 **창(window)** 을 스크롤하는데, 이 앱은 창이 스크롤되지 않는다 —
+      `MainLayout.razor:69` 의 `<main class="hitpan-content">`(overflow:auto)가
+      실제 스크롤 컨테이너이고 페이지 내용은 전부 그 안에 있다(hitpan.css:70-74).
+      `scrollIntoView` 는 스크롤 가능한 조상을 브라우저가 찾아 준다 — js/hitpan-scroll.js *@
+@inject IJSRuntime JS
+@inject ILogger<ApprovalSettingsPage> Logger
 
 <PageTitle>결재 설정</PageTitle>
 
@@ -80,7 +85,7 @@ else
 
     @* ── 2. 결재라인 편집 영역 ── *@
     @* 작(2026-08-24) 작4 ② — id 는 「설정」 클릭 시 여기로 데려오기 위한 좌표다.
-       🔴 이름을 바꾸면 OpenLineEditor 의 ScrollToAsync 대상도 같이 바꿔야 한다.  *@
+       🔴 이름을 바꾸면 OpenLineEditor 의 스크롤 대상도 같이 바꿔야 한다.        *@
     @if (_editingDocType is not null)
     {
         <MudPaper id="@LineEditorAnchorId" Elevation="0" Class="pa-4 mb-4" Style="border:0.5px solid var(--mud-palette-lines-default);border-radius:12px">
@@ -342,8 +347,29 @@ else
         // 🔴 StateHasChanged() **뒤에** 부른다. 그 전에 부르면 _editingDocType 이 아직 null 이라
         //    @if 블록이 렌더되지 않아 **대상 요소가 존재하지 않는다** — 스크롤이 조용히 실패한다.
         //    한 박자 양보해 브라우저가 실제로 그리게 한 뒤 옮긴다.
+        // 🔴 1차 시도(1.3.6)가 실패했다 — 사장님 실측: *"결재 클릭시 스크롤 자동으로 안내려감"*
+        //    원인: `ScrollManager.ScrollToAsync` 는 **창(window)** 을 스크롤한다. 그런데 이 앱은
+        //    창이 스크롤되지 않는다 — `.hitpan-content`(overflow:auto)가 실제 스크롤 컨테이너다.
+        //    창은 이미 끝까지 있는 상태라 **아무 일도 안 일어났고, 오류도 안 났다.**
         await Task.Yield();
-        await ScrollManager.ScrollToAsync($"#{LineEditorAnchorId}", 0, 0, ScrollBehavior.Smooth);
+        try
+        {
+            // 🔴 반환값을 받는다 — 대상을 못 찾으면 false 다.
+            //    조용히 실패하면 이번 같은 사고("눌러도 안 움직인다")를 또 못 잡는다.
+            var moved = await JS.InvokeAsync<bool>("hitpanScroll.toElement", LineEditorAnchorId);
+            if (!moved)
+            {
+                Logger.LogWarning(
+                    "결재라인 영역(id={AnchorId})을 찾지 못해 화면을 옮기지 못했습니다. " +
+                    "렌더 시점이 어긋났거나 id 가 바뀐 것입니다.", LineEditorAnchorId);
+            }
+        }
+        catch (Exception ex)
+        {
+            // 헌법 #15 — 빈 catch 금지. 스크롤은 편의 기능이라 실패해도 편집 자체는 계속돼야 한다.
+            //   여기서 예외를 올리면 「설정」 이 아예 안 열린다 — 못 움직이는 것보다 나쁘다.
+            Logger.LogWarning(ex, "결재라인 영역으로 화면을 옮기지 못했습니다. 편집 영역은 정상 열립니다.");
+        }
     }
 
     private void CloseLineEditor()
