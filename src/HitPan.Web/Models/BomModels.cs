@@ -11,6 +11,13 @@ public class BomListModel
     public bool IsActive { get; set; }
     public int MaterialCount { get; set; }
     public decimal TotalCost { get; set; }
+
+    /// <summary>지금 자재 재고로 몇 개까지 만들 수 있나 (20260825작1 W6).</summary>
+    public decimal ProducibleQty { get; set; }
+
+    /// <summary>제조 단계 — 자재=1, 반제품=2, 완제품=3… (20260825작1 W5). BomVersion 과 다른 것이다.</summary>
+    public int BomLevel { get; set; }
+
     public DateTime CreatedAt { get; set; }
 }
 

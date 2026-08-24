@@ -13,6 +13,23 @@ public class BomListDto
     public bool IsActive { get; set; }
     public int MaterialCount { get; set; }
     public decimal TotalCost { get; set; }
+
+    /// <summary>
+    /// 지금 자재 재고로 <b>몇 개까지 만들 수 있나</b> (20260825작1 W6, 사장님 지시).
+    /// 자재별 (현재고 ÷ 1개당 소요량) 중 <b>가장 작은 값</b> — 제일 모자란 자재가 결정한다.
+    /// 창고는 합산한다. 자재가 없는 BOM 은 0.
+    /// </summary>
+    public decimal ProducibleQty { get; set; }
+
+    /// <summary>
+    /// <b>제조 단계</b> (20260825작1 W5, 사장님 지시). 사 오는 자재 = 1,
+    /// 자재로 만든 반제품 = 2, 그 반제품을 쓰는 완제품 = 3 …
+    /// <para>
+    /// ⚠️ <c>BomVersion</c>(문서 개정 회차)과 <b>다른 것</b>이다. 섞지 마라.
+    /// </para>
+    /// </summary>
+    public int BomLevel { get; set; }
+
     public DateTime CreatedAt { get; set; }
 }
 

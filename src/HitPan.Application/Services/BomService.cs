@@ -35,18 +35,119 @@ public class BomService : IBomService
               bh.is_active AS IsActive,
               COUNT(bi.bom_item_id) AS MaterialCount,
               COALESCE(SUM(bi.qty * (1 + bi.loss_rate/100) * COALESCE(i2.purchase_price, i2.cost_price, 0)),0) AS TotalCost,
+              -- 신규 (2026-08-25, 20260825작1 W6, 사장님 지시):
+              --   "BOM그리드에 반제품 혹은 자재의 수량에 맞춰 생산가능 수가 나와야 함"
+              --   자재마다 (현재고 ÷ 1개당 소요량) 을 구하고 그중 가장 작은 값 = 만들 수 있는 개수.
+              --   가장 모자란 자재 하나가 생산 수량을 결정한다.
+              --   · FLOOR — 반 개는 못 만든다. 내림이 맞다
+              --   · NULLIF(...,0) — 소요량 0 인 줄이 있으면 0 나눗셈이 되어 통째로 NULL 이 된다
+              --   · 자재가 한 줄도 없는 BOM 은 MIN 이 NULL ⇒ 바깥 COALESCE 로 0
+              --   · 재고 행이 없는 자재는 s2.qty 가 NULL ⇒ 0 으로 봐서 생산가능 0 (부족한 게 맞다)
+              COALESCE(MIN(FLOOR(
+                  COALESCE(s2.qty, 0) / NULLIF(bi.qty * (1 + bi.loss_rate/100), 0)
+              )), 0) AS ProducibleQty,
               bh.created_at AS CreatedAt
             FROM bom_headers bh
             LEFT JOIN items i ON i.item_id = bh.product_item_id
             LEFT JOIN bom_items bi ON bi.bom_id = bh.bom_id
             LEFT JOIN items i2 ON i2.item_id = bi.material_item_id
+            -- 🔴 창고합산 서브쿼리 — item_stock 은 (item_id, warehouse_id) 단위라
+            --    단순 JOIN 하면 창고가 여럿일 때 같은 자재가 여러 줄로 붙어 원가·개수가 부풀려진다.
+            --    GetAssembleAutoOrderCandidatesAsync(:1163-1166) 가 쓰는 방식을 그대로 따른다.
+            LEFT JOIN (
+                 SELECT tenant_id, item_id, SUM(current_qty) AS qty
+                   FROM item_stock GROUP BY tenant_id, item_id
+            ) s2 ON s2.tenant_id = bi.tenant_id AND s2.item_id = bi.material_item_id
             WHERE bh.tenant_id = @TenantId
               AND bh.is_active = 1
             GROUP BY bh.bom_id, bh.product_item_id, i.item_name, bh.bom_name, bh.bom_version, bh.is_default, bh.is_active, bh.created_at
             ORDER BY i.item_name, bh.bom_version DESC
             """,
             new { TenantId = tenantId }, cancellationToken: ct)).ConfigureAwait(false);
-        return rows.ToList();
+
+        var list = rows.ToList();
+        await FillBomLevelsAsync(list, tenantId, ct).ConfigureAwait(false);
+        return list;
+    }
+
+    /// <summary>
+    /// 각 BOM 의 <b>제조 단계</b>를 채운다 (20260825작1 W5, 사장님 지시).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// 🔴 사장님 원문: <i>"BOM 그리드에 버전 의미가 반제품→반반제품→…→완제품과 같은 상품의 버전 아님?
+    /// 볼트너트(1차반제품)-볼트너트오링(완제품)인데 V1로 나옴"</i>
+    /// </para>
+    /// <para>
+    /// <c>bom_version</c> 은 <b>문서 개정 회차</b>라 제조 단계와 무관하다(완성품마다 첫 등록이면 늘 1).
+    /// 고장이 아니라 <b>다른 것</b>이었다. 그래서 단계를 <b>따로</b> 계산해 보여준다.
+    /// </para>
+    /// <para>
+    /// <b>단계 = 자기 자재 중 가장 깊은 것 + 1.</b> 사 오는 자재(BOM 이 없는 품목)는 1단계.
+    /// 볼트너트(자재로만 구성) = 2, 볼트너트오링(볼트너트를 자재로 씀) = 3.
+    /// </para>
+    /// <para>
+    /// 🔴 <b>DB 를 안 바꾼다</b> — 컬럼을 새로 만들지 않고 이미 있는 부모·자식 관계로 계산한다.
+    /// 🔴 <b>쿼리는 1회</b> — 목록 화면이라 BOM 마다 재귀 조회를 날리면 화면이 느려진다.
+    /// 테넌트 전체 연결을 한 번에 읽어 <b>메모리에서</b> 푼다.
+    /// 🔴 <b>순환참조가 있어도 멈추지 않는다</b> — 손상된 데이터로 화면이 굳으면 P0 다.
+    /// 방문 중인 품목을 다시 만나면 그 가지를 <b>끊고</b> 계속한다.
+    /// </para>
+    /// </remarks>
+    private async Task FillBomLevelsAsync(List<BomListDto> list, string tenantId, CancellationToken ct)
+    {
+        if (list.Count == 0) return;
+
+        // 이 테넌트의 (완성품 → 자재) 연결을 통째로 한 번에 읽는다.
+        var edges = (await _db.QueryAsync<(string ProductItemId, string MaterialItemId)>(
+            new CommandDefinition(
+                """
+                SELECT bh.product_item_id AS ProductItemId, bi.material_item_id AS MaterialItemId
+                  FROM bom_headers bh
+                  JOIN bom_items bi ON bi.bom_id = bh.bom_id AND bi.tenant_id = bh.tenant_id
+                 WHERE bh.tenant_id = @TenantId
+                   AND bh.is_active = 1
+                """,
+                new { TenantId = tenantId }, cancellationToken: ct)).ConfigureAwait(false)).ToList();
+
+        var childrenOf = edges
+            .GroupBy(e => e.ProductItemId, StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(
+                g => g.Key,
+                g => g.Select(e => e.MaterialItemId).Distinct(StringComparer.OrdinalIgnoreCase).ToList(),
+                StringComparer.OrdinalIgnoreCase);
+
+        var memo = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        var onPath = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var row in list)
+        {
+            row.BomLevel = Depth(row.ProductItemId);
+        }
+
+        int Depth(string itemId)
+        {
+            if (memo.TryGetValue(itemId, out var done)) return done;
+
+            // 순환 — 이 가지를 끊는다. 값을 memo 에 넣지 않는다(다른 경로에서는 정상일 수 있다).
+            if (!onPath.Add(itemId)) return 1;
+
+            var level = 1;
+            if (childrenOf.TryGetValue(itemId, out var mats))
+            {
+                var deepest = 0;
+                foreach (var mat in mats)
+                {
+                    var d = Depth(mat);
+                    if (d > deepest) deepest = d;
+                }
+                level = deepest + 1;
+            }
+
+            onPath.Remove(itemId);
+            memo[itemId] = level;
+            return level;
+        }
     }
 
     public async Task<BomDetailDto?> GetAsync(string bomId, string tenantId, CancellationToken ct = default)
