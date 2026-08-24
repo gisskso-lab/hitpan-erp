@@ -87,8 +87,17 @@ else
       <HeaderContent>
         <MudTh>완성품</MudTh>
         <MudTh>BOM 이름</MudTh>
-        <MudTh>버전</MudTh>
+        @* 변경 (2026-08-25, 20260825작1 W5, 사장님 결재):
+           「버전」→「개정」 으로 이름만 바꾸고, 제조 단계를 보여줄 「단계」 칸을 새로 만든다.
+           사장님이 「버전」을 제조 단계(반제품→완제품)로 읽으셨는데 실제로는 문서 개정 회차였다.
+           🔴 개정 칸을 지우지 않는다(#1·#37) — 같은 제품에 BOM 이 여러 개면 구분이 필요하다. *@
+        <MudTh>단계</MudTh>
+        <MudTh>개정</MudTh>
         <MudTh>자재 수</MudTh>
+        @* 신규 (2026-08-25, 20260825작1 W6, 사장님 지시):
+           "BOM그리드에 반제품 혹은 자재의 수량에 맞춰 생산가능 수가 나와야 함"
+           생산 버튼을 누르기 전에 보이도록 「생산」 칸 왼쪽에 둔다. *@
+        <MudTh Style="text-align:right">생산가능</MudTh>
         <MudTh Style="text-align:right">BOM 원가</MudTh>
         <MudTh>기본</MudTh>
         <MudTh Style="width:180px;text-align:center">관리</MudTh>
@@ -96,8 +105,22 @@ else
       <RowTemplate>
         <MudTd><MudText Style="font-weight:500">@context.ProductItemName</MudText></MudTd>
         <MudTd>@context.BomName</MudTd>
+        @* 숫자만 보여주면 "2가 뭔데?" 가 된다. 사장님이 쓰신 말 그대로 보여준다. *@
+        <MudTd><MudChip T="string" Size="Size.Small" Variant="Variant.Text"
+                        Color="@LevelColor(context.BomLevel)">@LevelLabel(context.BomLevel)</MudChip></MudTd>
         <MudTd>v@(context.BomVersion)</MudTd>
         <MudTd>@context.MaterialCount 개</MudTd>
+        @* 0 개면 지금 못 만든다는 뜻이라 눈에 띄어야 한다 — 숫자만 있으면 그냥 지나친다. *@
+        <MudTd Style="text-align:right">
+          @if (context.ProducibleQty > 0)
+          {
+            <MudText Typo="Typo.body2" Style="font-weight:600">@context.ProducibleQty.ToString("N0") 개</MudText>
+          }
+          else
+          {
+            <MudChip T="string" Size="Size.Small" Color="Color.Warning" Variant="Variant.Text">자재 부족</MudChip>
+          }
+        </MudTd>
         <MudTd Style="text-align:right">@context.TotalCost.ToString("N0")원</MudTd>
         <MudTd>
           @if (context.IsDefault)
@@ -377,6 +400,27 @@ private async Task ExecuteProduceAsync()
         _producing = false;
     }
 }
+
+// 제조 단계 라벨 (20260825작1 W5, 사장님 지시).
+//   사장님 원문: "반제품→반반제품→반반반반제품-완제품과 같은 상품의 버전 아님?"
+//   숫자 대신 사장님이 쓰신 말로 보여준다 — "2단계" 보다 "1차 반제품" 이 현장에서 통한다.
+//   1 = 사 오는 자재(BOM 이 없다) / 2 = 자재로 만든 것 / 3 이상 = 그 위에 쌓인 것.
+private static string LevelLabel(int level) => level switch
+{
+    <= 1 => "자재",
+    2 => "1차 반제품",
+    3 => "2차 반제품",
+    4 => "3차 반제품",
+    _ => $"{level - 1}차 반제품"
+};
+
+private static Color LevelColor(int level) => level switch
+{
+    <= 1 => Color.Default,
+    2 => Color.Info,
+    3 => Color.Primary,
+    _ => Color.Secondary
+};
 
 private async Task DeleteBomAsync(BomListModel bom)
 {
