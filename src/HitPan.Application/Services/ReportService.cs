@@ -503,6 +503,10 @@ public class ReportService : IReportService
         """;
 
     // 매출반품현황 — sales_returns 기준.
+    // 사장님 결재 2026-08-25: 확정분(confirmed)만 집계. 종전에는 status 조건이 아예 없어
+    // 미확정(draft)·취소분까지 매출반품에 합산됐다. 재고·회계가 confirmed 에만 반응하므로
+    // 현황 숫자도 같은 잣대로 맞춘다(헌법 #6). 철자(canceled/cancelled) 혼재를 피하려
+    // 부정(<>) 이 아닌 양성(=) 비교를 쓴다 — 철자에 의존하지 않는다.
     private const string SALES_RETURN = """
         SELECT
             DATE_FORMAT(sr.return_date, '%Y-%m-%d') AS Label,
@@ -514,7 +518,7 @@ public class ReportService : IReportService
         FROM sales_returns sr
         LEFT JOIN sales_return_items sri ON sri.return_id = sr.return_id AND sri.tenant_id = sr.tenant_id
         LEFT JOIN partners p ON p.partner_id = sr.partner_id AND p.tenant_id = sr.tenant_id
-        WHERE sr.tenant_id = @TenantId AND sr.is_deleted = 0
+        WHERE sr.tenant_id = @TenantId AND sr.is_deleted = 0 AND sr.status = 'confirmed'
           AND (@From IS NULL OR sr.return_date >= @From)
           AND (@To IS NULL OR sr.return_date <= @To)
           AND (@Partner IS NULL OR p.partner_name LIKE CONCAT('%', @Partner, '%'))
@@ -556,7 +560,7 @@ public class ReportService : IReportService
             FROM sales_returns sr
             LEFT JOIN sales_return_items sri ON sri.return_id = sr.return_id AND sri.tenant_id = sr.tenant_id
             LEFT JOIN partners p ON p.partner_id = sr.partner_id AND p.tenant_id = sr.tenant_id
-            WHERE sr.tenant_id = @TenantId AND sr.is_deleted = 0
+            WHERE sr.tenant_id = @TenantId AND sr.is_deleted = 0 AND sr.status = 'confirmed'
               AND (@From IS NULL OR sr.return_date >= @From)
               AND (@To IS NULL OR sr.return_date <= @To)
               AND (@Partner IS NULL OR p.partner_name LIKE CONCAT('%', @Partner, '%'))
@@ -959,6 +963,9 @@ public class ReportService : IReportService
         string? partner = null, CancellationToken ct = default)
     {
         // 사장님 결재 2026-04-29: 매입반품현황 4종. employee 추가 (created_by 기반).
+        // 사장님 결재 2026-08-25: 확정분(confirmed)만 집계. 종전 필터는 status <> 'cancelled'(L둘)
+        // 이었는데 실제 기록값은 'canceled'(L하나)라 항상 참이 되어 취소분이 그대로 남았다.
+        // 양성(=) 비교로 바꿔 철자 혼재와 draft 포함 문제를 함께 해소한다.
         var sql = viewType switch
         {
             "partner" => RT_BY_PARTNER,
@@ -990,7 +997,7 @@ public class ReportService : IReportService
             COALESCE(SUM(rt.total_amount + rt.vat_amount), 0) AS TotalAmount
         FROM purchase_returns rt
         LEFT JOIN partners p ON p.partner_id = rt.partner_id AND p.tenant_id = rt.tenant_id
-        WHERE rt.tenant_id = @TenantId AND rt.is_deleted = 0 AND rt.status <> 'cancelled'
+        WHERE rt.tenant_id = @TenantId AND rt.is_deleted = 0 AND rt.status = 'confirmed'
           AND (@From IS NULL OR rt.return_date >= @From)
           AND (@To IS NULL OR rt.return_date <= @To)
           AND (@Partner IS NULL OR p.partner_name LIKE CONCAT('%', @Partner, '%'))
@@ -1008,7 +1015,7 @@ public class ReportService : IReportService
             COALESCE(SUM(rt.total_amount + rt.vat_amount), 0) AS TotalAmount
         FROM purchase_returns rt
         LEFT JOIN partners p ON p.partner_id = rt.partner_id AND p.tenant_id = rt.tenant_id
-        WHERE rt.tenant_id = @TenantId AND rt.is_deleted = 0 AND rt.status <> 'cancelled'
+        WHERE rt.tenant_id = @TenantId AND rt.is_deleted = 0 AND rt.status = 'confirmed'
           AND (@From IS NULL OR rt.return_date >= @From)
           AND (@To IS NULL OR rt.return_date <= @To)
           AND (@Partner IS NULL OR p.partner_name LIKE CONCAT('%', @Partner, '%'))
@@ -1027,7 +1034,7 @@ public class ReportService : IReportService
         FROM purchase_return_items rti
         INNER JOIN purchase_returns rt ON rt.return_id = rti.return_id AND rt.tenant_id = rti.tenant_id
         LEFT JOIN items i ON i.item_id = rti.item_id AND i.tenant_id = rti.tenant_id
-        WHERE rt.tenant_id = @TenantId AND rt.is_deleted = 0 AND rt.status <> 'cancelled'
+        WHERE rt.tenant_id = @TenantId AND rt.is_deleted = 0 AND rt.status = 'confirmed'
           AND (@From IS NULL OR rt.return_date >= @From)
           AND (@To IS NULL OR rt.return_date <= @To)
           AND (@Partner IS NULL OR i.item_name LIKE CONCAT('%', @Partner, '%'))
@@ -1048,7 +1055,7 @@ public class ReportService : IReportService
         FROM purchase_returns rt
         LEFT JOIN purchase_receipts pr ON pr.receipt_id = rt.receipt_id AND pr.tenant_id = rt.tenant_id
         LEFT JOIN employees e ON e.user_id = pr.created_by AND e.tenant_id = rt.tenant_id
-        WHERE rt.tenant_id = @TenantId AND rt.is_deleted = 0 AND rt.status <> 'cancelled'
+        WHERE rt.tenant_id = @TenantId AND rt.is_deleted = 0 AND rt.status = 'confirmed'
           AND (@From IS NULL OR rt.return_date >= @From)
           AND (@To IS NULL OR rt.return_date <= @To)
           AND (@Partner IS NULL OR e.emp_name LIKE CONCAT('%', @Partner, '%'))
