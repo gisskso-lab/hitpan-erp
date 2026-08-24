@@ -189,12 +189,19 @@ public class BomController : ControllerBase
         return Ok();
     }
 
+    /// <summary>
+    /// 안전재고 알림 발주. <paramref name="autoReceive"/> 가 true 면 매입확정까지 시도한다 (20260825작1 W2).
+    /// </summary>
+    /// <remarks>
+    /// 🔴 결과를 그대로 돌려준다 — 화면이 <b>발주만 됐는지 매입확정까지 갔는지</b>에 따라
+    /// 다른 안내를 띄워야 하기 때문이다(사장님 8/25 지시).
+    /// </remarks>
     [HttpPost("alerts/{alertId}/order")]
-    public async Task<IActionResult> Order(string alertId, CancellationToken ct)
+    public async Task<IActionResult> Order(string alertId, [FromQuery] bool autoReceive, CancellationToken ct)
     {
         var tid = HttpContext.Items["TenantId"]?.ToString();
         if (string.IsNullOrEmpty(tid)) return Forbid();
-        await _svc.OrderAlertAsync(alertId, tid, ct).ConfigureAwait(false);
-        return Ok(new { message = "발주 처리됐습니다." });
+        var result = await _svc.OrderAlertAsync(alertId, tid, autoReceive, ct).ConfigureAwait(false);
+        return Ok(result);
     }
 }

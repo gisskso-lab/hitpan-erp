@@ -65,8 +65,10 @@
         <div style="display:flex;gap:4px">
           @if (alert.PartnerId != null)
           {
+            @* 🔴 Disabled 로 연타를 막는다 (20260825작1 W4, 사장님 지시) — 종전엔 잠금이 없었다. *@
             <MudButton Size="Size.Small" Variant="Variant.Filled" Color="Color.Warning"
-              OnClick="@(() => OrderAlert(alert.AlertId))">발주하기</MudButton>
+              OnClick="@(() => OrderAlert(alert.AlertId))"
+              Disabled="_orderingAlert">@(_orderingAlert ? "처리중..." : "발주하기")</MudButton>
           }
           <MudButton Size="Size.Small" Variant="Variant.Text"
             OnClick="@(() => DismissAlert(alert.AlertId))">나중에</MudButton>
@@ -442,13 +444,57 @@ private async Task DeleteBomAsync(BomListModel bom)
     }
 }
 
+// 봉합 (2026-08-25, 20260825작1 W2·W3·W4, 사장님 결재):
+//   ① 종전엔 사슬 선택지 자체가 없어 늘 발주서만 만들었다. 이제 상품마스터와 같은 흐름을 탄다.
+//   ② 🔴 버튼 잠금이 없었다 — 연타하면 같은 알림으로 발주가 여러 번 나갈 수 있었다(사장님 지시).
+//   ③ 결과에 따라 안내가 다르다(발주만 / 매입확정까지).
+private bool _orderingAlert;
+
 private async Task OrderAlert(string alertId)
 {
-    var ok = await BomApi.OrderAlertAsync(alertId);
-    if (ok)
+    if (_orderingAlert) return;          // 더블클릭 차단 — 서버에도 가드가 있지만 화면에서 먼저 막는다
+    var alert = _alerts.FirstOrDefault(a => a.AlertId == alertId);
+
+    var choice = await DialogService.ShowMessageBoxAsync(
+        "자재 부족 자동발주",
+        $"{alert?.ItemName ?? "해당 자재"}를 자동발주 하시겠습니까?\n\n" +
+        "[발주서 생성] 발주서를 만들고 발주목록에 올립니다. 매입처리는 발주목록에서 진행합니다.\n" +
+        "[자동 사슬] 발주부터 매입확정까지 한 번에 처리해 재고에 바로 반영합니다.",
+        yesText: "자동 사슬", noText: "발주서 생성", cancelText: "취소");
+    if (choice is null) return;
+
+    _orderingAlert = true;
+    StateHasChanged();
+    try
     {
-        Snackbar.Add("발주 처리됐습니다.", Severity.Success);
+        var r = await BomApi.OrderAlertAsync(alertId, autoReceive: choice == true);
+        if (r is null || !r.OrderCreated)
+        {
+            Snackbar.Add("발주하지 못했습니다. 자동발주 공급처가 설정됐는지 확인해주세요.", Severity.Warning);
+            return;
+        }
+
+        if (r.ReceiptConfirmed)
+        {
+            Snackbar.Add($"재고부족품목 {r.ItemName} 매입처리까지 완료되어 재고에 반영되었습니다.", Severity.Success);
+        }
+        else
+        {
+            Snackbar.Add($"재고부족품목 {r.ItemName}이(가) 자동발주 되었습니다. 매입처리 하셔야 재고에 반영됩니다.", Severity.Info);
+        }
+
+        // 🔴 사슬을 못 탄 이유를 감추지 않는다 (반제품·단가 없음 등).
+        if (!string.IsNullOrWhiteSpace(r.ChainSkippedReason))
+        {
+            Snackbar.Add(r.ChainSkippedReason, Severity.Warning);
+        }
+
         await LoadAlerts();
+    }
+    finally
+    {
+        _orderingAlert = false;
+        StateHasChanged();
     }
 }
 

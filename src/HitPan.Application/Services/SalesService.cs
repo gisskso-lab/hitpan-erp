@@ -1,5 +1,6 @@
 using System.Data;
 using Dapper;
+using HitPan.Application.Common;
 using HitPan.Application.DTOs.Sales;
 using HitPan.Application.DTOs.Purchase;
 using HitPan.Application.Events;
@@ -1590,7 +1591,11 @@ public class SalesService : ISalesService
                    CASE
                      WHEN COALESCE(s.qty, 0) <= 0 THEN 'out_of_stock'
                      ELSE 'below_safety'
-                   END AS Reason
+                   END AS Reason,
+                   -- 신규 (2026-08-25, 20260825작1 W2): 사슬 판정용.
+                   --   후보에서 빼지 않는다 — 반제품도 발주는 나가야 한다(외주 매입 경로).
+                   --   막는 것은 매입확정뿐이다.
+                   COALESCE(i.item_type, 'material') AS ItemType
               FROM sales_delivery_items di
               JOIN items i
                 ON i.item_id = di.item_id AND i.tenant_id = di.tenant_id
@@ -1696,7 +1701,10 @@ public class SalesService : ISalesService
                         PoId = poId, Tid = tenantId, PoNo = poNo,
                         PartnerId = partnerId, PoDate = today,
                         Supply = supply, Vat = vat,
-                        Memo = "안전재고 자동발주 (판매확정 트리거)"
+                        // 변경 (2026-08-25, 20260825작1 W2-0-B, 사장님 결재): 비고 앞머리에 「자동발주서」.
+                        //   종전 "안전재고 자동발주 (판매확정 트리거)" — 「트리거」는 개발용어다.
+                        //   목록에서 비고는 잘려 보이므로 앞부분이 살아야 한다.
+                        Memo = "자동발주서 — 안전재고 미달(판매확정)"
                     }, transaction: tx, cancellationToken: ct));
 
                 foreach (var line in lines)
@@ -1737,7 +1745,26 @@ public class SalesService : ISalesService
 
                 // 사장님 지시 (2026-04-26): 자동발주 → 매입처리까지 원클릭.
                 // autoReceive=true 면 발주 직후 매입전환 + 매입 확정까지 진행 → 자재 재고 즉시 +반영.
-                if (autoReceive)
+                //
+                // 봉합 (2026-08-25, 20260825작1 W2, 사장님 결재 "데이터 정합성이 중요하지 막아!!"):
+                //   🔴 반제품·완제품은 사슬을 안 태운다. 만들어 채우는 물건이라 매입확정을 태우면
+                //      재고뿐 아니라 매입 분개와 외상매입금(partner_balance)까지 잡힌다 —
+                //      사지 않은 물건에 갚을 돈이 생긴다.
+                //   🔴 BOM 경로와 같은 규칙을 쓴다(AutoChainPolicy 한 곳) — 두 곳이 각자 판정하면
+                //      한쪽만 고쳐지는 일이 또 난다. 8/21 이 정확히 그랬다.
+                //   ⚠️ 발주서는 그대로 만든다. 막는 것은 매입확정뿐이다(#20 흐름 안 끊김).
+                var blockedByType = lines
+                    .Where(x => !AutoChainPolicy.CanAutoReceive(x.ItemType))
+                    .Select(x => x.ItemName)
+                    .ToList();
+
+                if (autoReceive && blockedByType.Count > 0)
+                {
+                    resultRow.Reason =
+                        $"발주서만 만들었습니다 — {string.Join(", ", blockedByType.Take(3))}은(는) "
+                      + "만들어서 채우는 품목이라 매입확정까지 자동으로 하지 않습니다.";
+                }
+                else if (autoReceive)
                 {
                     try
                     {

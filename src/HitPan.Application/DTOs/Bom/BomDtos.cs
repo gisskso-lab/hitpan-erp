@@ -157,3 +157,28 @@ public class StockAlertDto
     public string Status { get; set; } = "";
     public DateTime CreatedAt { get; set; }
 }
+
+/// <summary>
+/// 자동발주 한 건의 결과 (20260825작1 W2). 화면이 <b>어떤 안내를 띄울지</b> 정하는 근거다.
+/// </summary>
+/// <remarks>
+/// 🔴 사장님이 요구하신 안내가 두 가지라 <b>결과를 구분해서 돌려줘야</b> 한다:
+/// 발주만 된 건은 <i>"매입처리 하셔야 재고에 반영됩니다"</i>,
+/// 사슬까지 간 건은 <i>"매입처리까지 완료되어 재고에 반영되었습니다"</i>.
+/// </remarks>
+public class OrderAlertResultDto
+{
+    public string ItemName { get; set; } = "";
+
+    /// <summary>발주서가 만들어졌나. 이게 false 면 아무 일도 안 일어났다.</summary>
+    public bool OrderCreated { get; set; }
+
+    /// <summary>매입확정까지 갔나 — 재고·장부에 실제로 올라갔다는 뜻.</summary>
+    public bool ReceiptConfirmed { get; set; }
+
+    /// <summary>
+    /// 사슬을 안 탄 이유. 🔴 사람에게 그대로 보여주는 글이라 <b>개발용어를 쓰지 않는다.</b>
+    /// 발주만 하기로 한 정상 경우(스위치 꺼짐)엔 비운다 — 이유를 댈 일이 아니다.
+    /// </summary>
+    public string? ChainSkippedReason { get; set; }
+}
