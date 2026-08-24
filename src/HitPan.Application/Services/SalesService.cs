@@ -1,5 +1,6 @@
 using System.Data;
 using Dapper;
+using HitPan.Application.Common;
 using HitPan.Application.DTOs.Sales;
 using HitPan.Application.DTOs.Purchase;
 using HitPan.Application.Events;
@@ -109,8 +110,15 @@ public class SalesService : ISalesService
             throw new InvalidOperationException("품목이 한 줄 이상 필요합니다.");
         }
 
-        // 1+1 기획상품(promo) 자동 2배 처리 — 영업이 1개 입력해도 시스템이 2개로 기록
-        await ApplyPromoDoubleAsync(request.Items, ct);
+        // 폐기 (2026-08-25, 20260825작1, 사장님 결재): 1+1 기획상품(promo) 자동 2배 처리 제거.
+        //   사장님 원문: "1+1기획은 할인프로모션인데, 두배가격으로 자동조정된다면
+        //   고객사의고객사 입장에서 두개주문하지. 1+1을 구매할 이유가 없고,
+        //   히트판 이용고객도 바보가 아닌이상 가격을 그렇게 할 리가 없음."
+        //   종전 로직은 Qty 와 함께 SupplyAmount·VatAmount 까지 2배로 만들어(구 :1256-1259)
+        //   1+1 인데 값을 두 배 받는 정반대 동작이었다. 할인이 아니라 인상이다.
+        //   1+1 은 BOM 으로 구현한다(사장님: "이건 BOM으로 구현 가능해").
+        //   배포 전이라 promo 로 등록된 고객 데이터 0건 — 회귀 위험 없음.
+        //   ⚠️ item_type='promo' 데이터는 지우지 않는다(#1·#37). 화면 선택지만 없앤다.
 
         var deliveryRepo = _unitOfWork.Repository<SalesDelivery>();
         var itemRepo = _unitOfWork.Repository<SalesDeliveryItem>();
@@ -777,8 +785,8 @@ public class SalesService : ISalesService
             throw new InvalidOperationException("품목이 한 줄 이상 필요합니다.");
         }
 
-        // 1+1 기획상품 자동 2배 (UpdateDelivery 경로에도 적용)
-        await ApplyPromoDoubleToUpdateAsync(dto.Items, tenantId, ct);
+        // 폐기 (2026-08-25, 20260825작1, 사장님 결재): 1+1 자동 2배 제거 — 생성 경로(:112)와 동일 사유.
+        //   두 경로를 함께 뺀다. 한쪽만 빼면 "만들 때와 고칠 때 수량이 달라지는" 더 나쁜 상태가 된다.
 
         // 다창고 정합 봉합(13차 후순위→봉합): 매입·BOM·매입반품과 동일하게 기본창고(MAIN) 우선 선택.
         // 기존 ORDER BY warehouse_id 는 알파벳순이라 다창고 환경에서 MAIN 아닌 창고가 선택되어
@@ -1236,53 +1244,12 @@ public class SalesService : ISalesService
     // 결재 트리거는 ApprovalTriggerHelper.TryCreateApprovalAsync로 통합됨
 
     // ─────────────────────────────────────────────────────────────────────
-    // 1+1 기획상품 런타임: promo 타입 품목의 qty·금액을 자동 2배 처리
-    // 영업이 "1개" 입력해도 실제 2개가 기록되어 증정분 누락 방지.
-    // ─────────────────────────────────────────────────────────────────────
-    // UpdateDelivery 경로 전용 — DTO 타입 분기
-    private async Task ApplyPromoDoubleToUpdateAsync(List<DeliveryItemDto> lines, string tenantId, CancellationToken ct)
-    {
-        var itemIds = lines.Where(x => !string.IsNullOrWhiteSpace(x.ItemId))
-                           .Select(x => x.ItemId).Distinct().ToList();
-        if (itemIds.Count == 0) return;
-
-        const string sql = "SELECT item_id FROM items WHERE tenant_id=@TenantId AND item_type='promo' AND item_id IN @Ids";
-        var promoIds = (await _db.QueryAsync<string>(
-                           new CommandDefinition(sql, new { TenantId = tenantId, Ids = itemIds },
-                                                 cancellationToken: ct))).ToHashSet();
-        if (promoIds.Count == 0) return;
-
-        foreach (var line in lines.Where(l => promoIds.Contains(l.ItemId)))
-        {
-            line.Qty *= 2m;
-            line.Amount *= 2m;
-            line.VatAmount *= 2m;
-        }
-    }
-
-    private async Task ApplyPromoDoubleAsync(List<CreateDeliveryItemRequest> lines, CancellationToken ct)
-    {
-        var itemIds = lines.Where(x => !string.IsNullOrWhiteSpace(x.ItemId))
-                           .Select(x => x.ItemId!).Distinct().ToList();
-        if (itemIds.Count == 0) return;
-
-        const string sql = "SELECT item_id, item_type FROM items WHERE tenant_id=@TenantId AND item_id IN @Ids";
-        var rows = (await _db.QueryAsync<(string item_id, string item_type)>(
-                        new CommandDefinition(sql, new { TenantId = _currentTenant.TenantId, Ids = itemIds },
-                                              cancellationToken: ct))).ToList();
-        var promoIds = rows.Where(r => r.item_type == "promo").Select(r => r.item_id).ToHashSet();
-        if (promoIds.Count == 0) return;
-
-        foreach (var line in lines)
-        {
-            if (line.ItemId != null && promoIds.Contains(line.ItemId))
-            {
-                line.Qty *= 2m;
-                line.SupplyAmount *= 2m;
-                line.VatAmount *= 2m;
-            }
-        }
-    }
+    // 폐기 (2026-08-25, 20260825작1, 사장님 결재): 1+1 기획상품(promo) 자동 2배 메서드 2개 제거.
+    //   ApplyPromoDoubleAsync / ApplyPromoDoubleToUpdateAsync — 호출부(:112·:781)와 함께 뺐다.
+    //   사유: qty 뿐 아니라 금액까지 2배로 만들어 "1+1 인데 값이 두 배"가 되는 정반대 동작이었다.
+    //   1+1 은 BOM 으로 구현한다. 남겨두면 경고(미사용)가 나므로 함께 제거한다(#19 warnings 0).
+    //   ⚠️ DB 의 item_type='promo' 값과 GetTypeLabel 의 라벨은 지우지 않는다(#1·#37) —
+    //      과거 데이터가 있으면 화면에서 이름은 읽혀야 한다.
 
     // ─────────────────────────────────────────────────────────────────────
     // 조립상품 BOM 폭파: assembly 품목 출고 시 BOM 자재별 추가 OUT 원장 생성
@@ -1624,7 +1591,11 @@ public class SalesService : ISalesService
                    CASE
                      WHEN COALESCE(s.qty, 0) <= 0 THEN 'out_of_stock'
                      ELSE 'below_safety'
-                   END AS Reason
+                   END AS Reason,
+                   -- 신규 (2026-08-25, 20260825작1 W2): 사슬 판정용.
+                   --   후보에서 빼지 않는다 — 반제품도 발주는 나가야 한다(외주 매입 경로).
+                   --   막는 것은 매입확정뿐이다.
+                   COALESCE(i.item_type, 'material') AS ItemType
               FROM sales_delivery_items di
               JOIN items i
                 ON i.item_id = di.item_id AND i.tenant_id = di.tenant_id
@@ -1730,7 +1701,10 @@ public class SalesService : ISalesService
                         PoId = poId, Tid = tenantId, PoNo = poNo,
                         PartnerId = partnerId, PoDate = today,
                         Supply = supply, Vat = vat,
-                        Memo = "안전재고 자동발주 (판매확정 트리거)"
+                        // 변경 (2026-08-25, 20260825작1 W2-0-B, 사장님 결재): 비고 앞머리에 「자동발주서」.
+                        //   종전 "안전재고 자동발주 (판매확정 트리거)" — 「트리거」는 개발용어다.
+                        //   목록에서 비고는 잘려 보이므로 앞부분이 살아야 한다.
+                        Memo = "자동발주서 — 안전재고 미달(판매확정)"
                     }, transaction: tx, cancellationToken: ct));
 
                 foreach (var line in lines)
@@ -1771,7 +1745,26 @@ public class SalesService : ISalesService
 
                 // 사장님 지시 (2026-04-26): 자동발주 → 매입처리까지 원클릭.
                 // autoReceive=true 면 발주 직후 매입전환 + 매입 확정까지 진행 → 자재 재고 즉시 +반영.
-                if (autoReceive)
+                //
+                // 봉합 (2026-08-25, 20260825작1 W2, 사장님 결재 "데이터 정합성이 중요하지 막아!!"):
+                //   🔴 반제품·완제품은 사슬을 안 태운다. 만들어 채우는 물건이라 매입확정을 태우면
+                //      재고뿐 아니라 매입 분개와 외상매입금(partner_balance)까지 잡힌다 —
+                //      사지 않은 물건에 갚을 돈이 생긴다.
+                //   🔴 BOM 경로와 같은 규칙을 쓴다(AutoChainPolicy 한 곳) — 두 곳이 각자 판정하면
+                //      한쪽만 고쳐지는 일이 또 난다. 8/21 이 정확히 그랬다.
+                //   ⚠️ 발주서는 그대로 만든다. 막는 것은 매입확정뿐이다(#20 흐름 안 끊김).
+                var blockedByType = lines
+                    .Where(x => !AutoChainPolicy.CanAutoReceive(x.ItemType))
+                    .Select(x => x.ItemName)
+                    .ToList();
+
+                if (autoReceive && blockedByType.Count > 0)
+                {
+                    resultRow.Reason =
+                        $"발주서만 만들었습니다 — {string.Join(", ", blockedByType.Take(3))}은(는) "
+                      + "만들어서 채우는 품목이라 매입확정까지 자동으로 하지 않습니다.";
+                }
+                else if (autoReceive)
                 {
                     try
                     {

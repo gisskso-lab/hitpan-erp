@@ -516,9 +516,20 @@ public class PurchaseService : IPurchaseService
                            LEFT JOIN partners p
                                ON p.partner_id = po.partner_id
                                   AND p.tenant_id = po.tenant_id
+                           -- 변경 (2026-08-25, 20260825작1 W2-0-B, 사장님 결재):
+                           --   종전 `AND po.is_auto = 0` 을 제거했다.
+                           --   사장님 원문: "발주서가 자동생성되도록 하는건, 발주서 자동생성이
+                           --   워크플로우 흐름의 정합성에 가장 잘 맞을것 같은데?"
+                           --
+                           --   🔴 그 줄은 5/4 커밋 e09ff8bb 에서 개발팀이 자체 판단으로 넣었고
+                           --      ("자동발주 목록 노출 차단") 사장님 결재 문서가 없다(전수 검색).
+                           --      결과: 판매 자동발주서가 아무도 모르게 쌓였다. 매입전환을 안 하니
+                           --      재고가 안 늘고, 그래서 또 자동발주가 나갔다.
+                           --   🟢 목록에 뜨면 발주(3단계) → 매입전환 → 매입확정 → 재고 라는
+                           --      6단계 흐름(#8)을 그대로 탄다. 매입전환 버튼은 이미 있다.
+                           --   🟢 자동/수동 구분은 비고 앞머리의 「자동발주서」 로 한다.
                            WHERE po.tenant_id = @TenantId
                              AND po.is_deleted = 0
-                             AND po.is_auto = 0
                              AND (@From IS NULL OR po.po_date >= @From)
                              AND (@To IS NULL OR po.po_date <= @To)
                              AND (@Status IS NULL OR po.status = @Status)

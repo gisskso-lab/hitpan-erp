@@ -11,6 +11,13 @@ public class BomListModel
     public bool IsActive { get; set; }
     public int MaterialCount { get; set; }
     public decimal TotalCost { get; set; }
+
+    /// <summary>지금 자재 재고로 몇 개까지 만들 수 있나 (20260825작1 W6).</summary>
+    public decimal ProducibleQty { get; set; }
+
+    /// <summary>제조 단계 — 자재=1, 반제품=2, 완제품=3… (20260825작1 W5). BomVersion 과 다른 것이다.</summary>
+    public int BomLevel { get; set; }
+
     public DateTime CreatedAt { get; set; }
 }
 
@@ -110,4 +117,23 @@ public class StockAlertModel
     public decimal OrderQty { get; set; }
     public string Status { get; set; } = "";
     public DateTime CreatedAt { get; set; }
+    /// <summary>마지막 상태 변경 시각 (20260825작1 W3). 사슬 완료 안내 30분 기준.</summary>
+    public DateTime UpdatedAt { get; set; }
+}
+
+/// <summary>
+/// 자동발주 한 건의 결과 (20260825작1 W2). 화면이 어떤 안내를 띄울지 정하는 근거다.
+/// </summary>
+public class OrderAlertResultModel
+{
+    public string ItemName { get; set; } = "";
+
+    /// <summary>발주서가 만들어졌나.</summary>
+    public bool OrderCreated { get; set; }
+
+    /// <summary>매입확정까지 갔나 — 재고에 실제로 올라갔다는 뜻.</summary>
+    public bool ReceiptConfirmed { get; set; }
+
+    /// <summary>사슬을 안 탄 이유. 사람에게 그대로 보여주는 글이다.</summary>
+    public string? ChainSkippedReason { get; set; }
 }

@@ -65,14 +65,52 @@
         <div style="display:flex;gap:4px">
           @if (alert.PartnerId != null)
           {
+            @* 🔴 Disabled 로 연타를 막는다 (20260825작1 W4, 사장님 지시) — 종전엔 잠금이 없었다. *@
             <MudButton Size="Size.Small" Variant="Variant.Filled" Color="Color.Warning"
-              OnClick="@(() => OrderAlert(alert.AlertId))">발주하기</MudButton>
+              OnClick="@(() => OrderAlert(alert.AlertId))"
+              Disabled="_orderingAlert">@(_orderingAlert ? "처리중..." : "발주하기")</MudButton>
           }
           <MudButton Size="Size.Small" Variant="Variant.Text"
             OnClick="@(() => DismissAlert(alert.AlertId))">나중에</MudButton>
         </div>
       </div>
     }
+  </MudPaper>
+}
+
+@* 신규 (2026-08-25, 20260825작1 W3, 사장님 지시) — 상품마스터와 같은 안내를 BOM 에도 둔다.
+   두 화면이 같은 알림을 읽는데 한쪽만 알려주면 어디서 눌렀냐에 따라 안내가 달라진다. *@
+@if (_orderedAlerts.Count > 0)
+{
+  <MudPaper Elevation="0" Class="pa-3 mb-4"
+    Style="background:#e3f2fd;border:1px solid #1976d2;border-radius:12px">
+    <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+      <MudIcon Icon="@Icons.Material.Filled.LocalShipping" Color="Color.Info" />
+      <div style="flex:1;min-width:200px">
+        <MudText Typo="Typo.subtitle1" Style="font-weight:600">
+          재고부족품목 @AlertNames(_orderedAlerts)이(가) 자동발주 되었습니다.
+        </MudText>
+        <MudText Typo="Typo.body2" Style="color:#666">매입처리 하셔야 재고에 반영됩니다.</MudText>
+      </div>
+      <MudButton Variant="Variant.Filled" Color="Color.Info"
+                 StartIcon="@Icons.Material.Filled.Inventory"
+                 OnClick="@(() => Nav.NavigateTo("/purchase-orders"))">
+        매입처리 하러 가기
+      </MudButton>
+    </div>
+  </MudPaper>
+}
+
+@if (_chainedAlerts.Count > 0)
+{
+  <MudPaper Elevation="0" Class="pa-3 mb-4"
+    Style="background:#e8f5e9;border:1px solid #2e7d32;border-radius:12px">
+    <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+      <MudIcon Icon="@Icons.Material.Filled.CheckCircle" Color="Color.Success" />
+      <MudText Typo="Typo.subtitle1" Style="font-weight:600;flex:1;min-width:200px">
+        재고부족품목 @AlertNames(_chainedAlerts) 매입처리까지 완료되어 재고에 반영되었습니다.
+      </MudText>
+    </div>
   </MudPaper>
 }
 
@@ -87,8 +125,17 @@ else
       <HeaderContent>
         <MudTh>완성품</MudTh>
         <MudTh>BOM 이름</MudTh>
-        <MudTh>버전</MudTh>
+        @* 변경 (2026-08-25, 20260825작1 W5, 사장님 결재):
+           「버전」→「개정」 으로 이름만 바꾸고, 제조 단계를 보여줄 「단계」 칸을 새로 만든다.
+           사장님이 「버전」을 제조 단계(반제품→완제품)로 읽으셨는데 실제로는 문서 개정 회차였다.
+           🔴 개정 칸을 지우지 않는다(#1·#37) — 같은 제품에 BOM 이 여러 개면 구분이 필요하다. *@
+        <MudTh>단계</MudTh>
+        <MudTh>개정</MudTh>
         <MudTh>자재 수</MudTh>
+        @* 신규 (2026-08-25, 20260825작1 W6, 사장님 지시):
+           "BOM그리드에 반제품 혹은 자재의 수량에 맞춰 생산가능 수가 나와야 함"
+           생산 버튼을 누르기 전에 보이도록 「생산」 칸 왼쪽에 둔다. *@
+        <MudTh Style="text-align:right">생산가능</MudTh>
         <MudTh Style="text-align:right">BOM 원가</MudTh>
         <MudTh>기본</MudTh>
         <MudTh Style="width:180px;text-align:center">관리</MudTh>
@@ -96,8 +143,22 @@ else
       <RowTemplate>
         <MudTd><MudText Style="font-weight:500">@context.ProductItemName</MudText></MudTd>
         <MudTd>@context.BomName</MudTd>
+        @* 숫자만 보여주면 "2가 뭔데?" 가 된다. 사장님이 쓰신 말 그대로 보여준다. *@
+        <MudTd><MudChip T="string" Size="Size.Small" Variant="Variant.Text"
+                        Color="@LevelColor(context.BomLevel)">@LevelLabel(context.BomLevel)</MudChip></MudTd>
         <MudTd>v@(context.BomVersion)</MudTd>
         <MudTd>@context.MaterialCount 개</MudTd>
+        @* 0 개면 지금 못 만든다는 뜻이라 눈에 띄어야 한다 — 숫자만 있으면 그냥 지나친다. *@
+        <MudTd Style="text-align:right">
+          @if (context.ProducibleQty > 0)
+          {
+            <MudText Typo="Typo.body2" Style="font-weight:600">@context.ProducibleQty.ToString("N0") 개</MudText>
+          }
+          else
+          {
+            <MudChip T="string" Size="Size.Small" Color="Color.Warning" Variant="Variant.Text">자재 부족</MudChip>
+          }
+        </MudTd>
         <MudTd Style="text-align:right">@context.TotalCost.ToString("N0")원</MudTd>
         <MudTd>
           @if (context.IsDefault)
@@ -216,10 +277,26 @@ private async Task LoadBoms()
     _loading = false;
 }
 
+// 변경 (2026-08-25, 20260825작1 W3): 서버가 pending 외에 ordered·received(최근 30분)도 내려준다.
+//   🔴 종전처럼 통째로 _alerts 에 넣으면 이미 발주한 것·매입까지 끝난 것까지
+//      "재고 부족" 으로 뜬다. 상태별로 갈라 담는다(상품마스터와 같은 방식).
+private List<StockAlertModel> _orderedAlerts = new();
+private List<StockAlertModel> _chainedAlerts = new();
+
 private async Task LoadAlerts()
 {
-    _alerts = await BomApi.GetAlertsAsync() ?? new();
+    var all = await BomApi.GetAlertsAsync() ?? new();
+
+    _alerts = all.Where(a => string.Equals(a.Status, "pending", StringComparison.OrdinalIgnoreCase)).ToList();
+    _orderedAlerts = all.Where(a => string.Equals(a.Status, "ordered", StringComparison.OrdinalIgnoreCase)).ToList();
+    _chainedAlerts = all.Where(a => string.Equals(a.Status, "received", StringComparison.OrdinalIgnoreCase)).ToList();
 }
+
+// 사장님 지시 문구 그대로 — "재고부족품목 000외 0건".
+private static string AlertNames(List<StockAlertModel> list) =>
+    list.Count == 0 ? "" :
+    list.Count == 1 ? list[0].ItemName
+                    : $"{list[0].ItemName}외 {list.Count - 1}건";
 
 private void OpenProduceDialog(BomListModel bom)
 {
@@ -378,6 +455,27 @@ private async Task ExecuteProduceAsync()
     }
 }
 
+// 제조 단계 라벨 (20260825작1 W5, 사장님 지시).
+//   사장님 원문: "반제품→반반제품→반반반반제품-완제품과 같은 상품의 버전 아님?"
+//   숫자 대신 사장님이 쓰신 말로 보여준다 — "2단계" 보다 "1차 반제품" 이 현장에서 통한다.
+//   1 = 사 오는 자재(BOM 이 없다) / 2 = 자재로 만든 것 / 3 이상 = 그 위에 쌓인 것.
+private static string LevelLabel(int level) => level switch
+{
+    <= 1 => "자재",
+    2 => "1차 반제품",
+    3 => "2차 반제품",
+    4 => "3차 반제품",
+    _ => $"{level - 1}차 반제품"
+};
+
+private static Color LevelColor(int level) => level switch
+{
+    <= 1 => Color.Default,
+    2 => Color.Info,
+    3 => Color.Primary,
+    _ => Color.Secondary
+};
+
 private async Task DeleteBomAsync(BomListModel bom)
 {
     var confirm = await DialogService.ShowMessageBoxAsync(
@@ -398,13 +496,51 @@ private async Task DeleteBomAsync(BomListModel bom)
     }
 }
 
+// 봉합 (2026-08-25, 20260825작1 W2·W3·W4, 사장님 결재):
+//   ① 종전엔 사슬 선택지 자체가 없어 늘 발주서만 만들었다. 이제 상품마스터와 같은 흐름을 탄다.
+//   ② 🔴 버튼 잠금이 없었다 — 연타하면 같은 알림으로 발주가 여러 번 나갈 수 있었다(사장님 지시).
+//   ③ 결과에 따라 안내가 다르다(발주만 / 매입확정까지).
+private bool _orderingAlert;
+
 private async Task OrderAlert(string alertId)
 {
-    var ok = await BomApi.OrderAlertAsync(alertId);
-    if (ok)
+    if (_orderingAlert) return;          // 더블클릭 차단 — 서버에도 가드가 있지만 화면에서 먼저 막는다
+    var alert = _alerts.FirstOrDefault(a => a.AlertId == alertId);
+
+    var choice = await DialogService.ShowMessageBoxAsync(
+        "자재 부족 자동발주",
+        $"{alert?.ItemName ?? "해당 자재"}를 자동발주 하시겠습니까?\n\n" +
+        "[발주서 생성] 발주서를 만들고 발주목록에 올립니다. 매입처리는 발주목록에서 진행합니다.\n" +
+        "[자동 사슬] 발주부터 매입확정까지 한 번에 처리해 재고에 바로 반영합니다.",
+        yesText: "자동 사슬", noText: "발주서 생성", cancelText: "취소");
+    if (choice is null) return;
+
+    _orderingAlert = true;
+    StateHasChanged();
+    try
     {
-        Snackbar.Add("발주 처리됐습니다.", Severity.Success);
+        var r = await BomApi.OrderAlertAsync(alertId, autoReceive: choice == true);
+        if (r is null || !r.OrderCreated)
+        {
+            Snackbar.Add("발주하지 못했습니다. 자동발주 공급처가 설정됐는지 확인해주세요.", Severity.Warning);
+            return;
+        }
+
+        // 두 안내는 배너가 맡는다(위 _orderedAlerts·_chainedAlerts) — 여기서 또 띄우면 겹친다.
+        Snackbar.Add("자동발주 처리했습니다.", Severity.Success);
+
+        // 🔴 사슬을 못 탄 이유를 감추지 않는다 (반제품·단가 없음 등).
+        if (!string.IsNullOrWhiteSpace(r.ChainSkippedReason))
+        {
+            Snackbar.Add(r.ChainSkippedReason, Severity.Warning);
+        }
+
         await LoadAlerts();
+    }
+    finally
+    {
+        _orderingAlert = false;
+        StateHasChanged();
     }
 }
 

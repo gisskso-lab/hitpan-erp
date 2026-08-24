@@ -21,7 +21,16 @@ public interface IBomService
     Task DisassembleAsync(BomAssembleDto dto, string tenantId, string userId, CancellationToken ct = default);
     Task<List<StockAlertDto>> GetAlertsAsync(string tenantId, CancellationToken ct = default);
     Task DismissAlertAsync(string alertId, string tenantId, CancellationToken ct = default);
-    Task OrderAlertAsync(string alertId, string tenantId, CancellationToken ct = default);
+    /// <summary>
+    /// 안전재고 알림 한 건을 발주한다. 결과로 <b>사슬까지 갔는지</b>를 돌려준다 (20260825작1 W2).
+    /// </summary>
+    /// <param name="autoReceive">
+    /// 사용자가 「자동 사슬」을 골랐나. 🔴 이것만으로 사슬을 태우지 않는다 —
+    /// 품목의 「자동 매입확정」 스위치가 켜져 있고, 그 품목이 <b>사 오는 물건</b>이어야 한다
+    /// (<see cref="Common.AutoChainPolicy"/>).
+    /// </param>
+    Task<OrderAlertResultDto> OrderAlertAsync(string alertId, string tenantId,
+                                              bool autoReceive = false, CancellationToken ct = default);
 
     /// <summary>
     /// 상품마스터의 item_id 로 매핑된 BOM 헤더의 bom_id 를 찾는다.

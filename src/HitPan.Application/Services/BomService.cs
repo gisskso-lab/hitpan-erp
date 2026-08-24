@@ -1,7 +1,9 @@
 using System.Data;
 using System.Data.Common;
 using Dapper;
+using HitPan.Application.Common;
 using HitPan.Application.DTOs.Bom;
+using HitPan.Application.DTOs.Purchase;
 using HitPan.Application.Events;
 using HitPan.Application.Interfaces;
 
@@ -13,11 +15,26 @@ public class BomService : IBomService
     private readonly IEventPublisher _events;
     private readonly IAuditService _audit;
 
-    public BomService(IDbConnection db, IEventPublisher events, IAuditService audit)
+    /// <summary>
+    /// 자동 사슬에서 <c>IPurchaseService</c> 를 꺼내 쓴다 (20260825작1 W2).
+    /// <para>
+    /// 🔴 <c>IPurchaseService</c> 를 <b>생성자로 직접 받지 않는다</b> — 순환 의존 위험.
+    /// 판매 정본(<c>SalesService</c>)도 같은 이유로 <c>IServiceProvider</c> 를 통해 꺼낸다.
+    /// </para>
+    /// <para>
+    /// ⚠️ 없어도 <b>발주까지는 정상 동작</b>해야 한다 — 사슬만 못 탄다.
+    /// 그래서 필수가 아니라 선택 인자다(기존 시험 코드를 깨뜨리지 않는다).
+    /// </para>
+    /// </summary>
+    private readonly IServiceProvider? _services;
+
+    public BomService(IDbConnection db, IEventPublisher events, IAuditService audit,
+                      IServiceProvider? services = null)
     {
         _db = db;
         _events = events;
         _audit = audit;
+        _services = services;
     }
 
     public async Task<List<BomListDto>> GetListAsync(string tenantId, CancellationToken ct = default)
@@ -35,18 +52,119 @@ public class BomService : IBomService
               bh.is_active AS IsActive,
               COUNT(bi.bom_item_id) AS MaterialCount,
               COALESCE(SUM(bi.qty * (1 + bi.loss_rate/100) * COALESCE(i2.purchase_price, i2.cost_price, 0)),0) AS TotalCost,
+              -- 신규 (2026-08-25, 20260825작1 W6, 사장님 지시):
+              --   "BOM그리드에 반제품 혹은 자재의 수량에 맞춰 생산가능 수가 나와야 함"
+              --   자재마다 (현재고 ÷ 1개당 소요량) 을 구하고 그중 가장 작은 값 = 만들 수 있는 개수.
+              --   가장 모자란 자재 하나가 생산 수량을 결정한다.
+              --   · FLOOR — 반 개는 못 만든다. 내림이 맞다
+              --   · NULLIF(...,0) — 소요량 0 인 줄이 있으면 0 나눗셈이 되어 통째로 NULL 이 된다
+              --   · 자재가 한 줄도 없는 BOM 은 MIN 이 NULL ⇒ 바깥 COALESCE 로 0
+              --   · 재고 행이 없는 자재는 s2.qty 가 NULL ⇒ 0 으로 봐서 생산가능 0 (부족한 게 맞다)
+              COALESCE(MIN(FLOOR(
+                  COALESCE(s2.qty, 0) / NULLIF(bi.qty * (1 + bi.loss_rate/100), 0)
+              )), 0) AS ProducibleQty,
               bh.created_at AS CreatedAt
             FROM bom_headers bh
             LEFT JOIN items i ON i.item_id = bh.product_item_id
             LEFT JOIN bom_items bi ON bi.bom_id = bh.bom_id
             LEFT JOIN items i2 ON i2.item_id = bi.material_item_id
+            -- 🔴 창고합산 서브쿼리 — item_stock 은 (item_id, warehouse_id) 단위라
+            --    단순 JOIN 하면 창고가 여럿일 때 같은 자재가 여러 줄로 붙어 원가·개수가 부풀려진다.
+            --    GetAssembleAutoOrderCandidatesAsync(:1163-1166) 가 쓰는 방식을 그대로 따른다.
+            LEFT JOIN (
+                 SELECT tenant_id, item_id, SUM(current_qty) AS qty
+                   FROM item_stock GROUP BY tenant_id, item_id
+            ) s2 ON s2.tenant_id = bi.tenant_id AND s2.item_id = bi.material_item_id
             WHERE bh.tenant_id = @TenantId
               AND bh.is_active = 1
             GROUP BY bh.bom_id, bh.product_item_id, i.item_name, bh.bom_name, bh.bom_version, bh.is_default, bh.is_active, bh.created_at
             ORDER BY i.item_name, bh.bom_version DESC
             """,
             new { TenantId = tenantId }, cancellationToken: ct)).ConfigureAwait(false);
-        return rows.ToList();
+
+        var list = rows.ToList();
+        await FillBomLevelsAsync(list, tenantId, ct).ConfigureAwait(false);
+        return list;
+    }
+
+    /// <summary>
+    /// 각 BOM 의 <b>제조 단계</b>를 채운다 (20260825작1 W5, 사장님 지시).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// 🔴 사장님 원문: <i>"BOM 그리드에 버전 의미가 반제품→반반제품→…→완제품과 같은 상품의 버전 아님?
+    /// 볼트너트(1차반제품)-볼트너트오링(완제품)인데 V1로 나옴"</i>
+    /// </para>
+    /// <para>
+    /// <c>bom_version</c> 은 <b>문서 개정 회차</b>라 제조 단계와 무관하다(완성품마다 첫 등록이면 늘 1).
+    /// 고장이 아니라 <b>다른 것</b>이었다. 그래서 단계를 <b>따로</b> 계산해 보여준다.
+    /// </para>
+    /// <para>
+    /// <b>단계 = 자기 자재 중 가장 깊은 것 + 1.</b> 사 오는 자재(BOM 이 없는 품목)는 1단계.
+    /// 볼트너트(자재로만 구성) = 2, 볼트너트오링(볼트너트를 자재로 씀) = 3.
+    /// </para>
+    /// <para>
+    /// 🔴 <b>DB 를 안 바꾼다</b> — 컬럼을 새로 만들지 않고 이미 있는 부모·자식 관계로 계산한다.
+    /// 🔴 <b>쿼리는 1회</b> — 목록 화면이라 BOM 마다 재귀 조회를 날리면 화면이 느려진다.
+    /// 테넌트 전체 연결을 한 번에 읽어 <b>메모리에서</b> 푼다.
+    /// 🔴 <b>순환참조가 있어도 멈추지 않는다</b> — 손상된 데이터로 화면이 굳으면 P0 다.
+    /// 방문 중인 품목을 다시 만나면 그 가지를 <b>끊고</b> 계속한다.
+    /// </para>
+    /// </remarks>
+    private async Task FillBomLevelsAsync(List<BomListDto> list, string tenantId, CancellationToken ct)
+    {
+        if (list.Count == 0) return;
+
+        // 이 테넌트의 (완성품 → 자재) 연결을 통째로 한 번에 읽는다.
+        var edges = (await _db.QueryAsync<(string ProductItemId, string MaterialItemId)>(
+            new CommandDefinition(
+                """
+                SELECT bh.product_item_id AS ProductItemId, bi.material_item_id AS MaterialItemId
+                  FROM bom_headers bh
+                  JOIN bom_items bi ON bi.bom_id = bh.bom_id AND bi.tenant_id = bh.tenant_id
+                 WHERE bh.tenant_id = @TenantId
+                   AND bh.is_active = 1
+                """,
+                new { TenantId = tenantId }, cancellationToken: ct)).ConfigureAwait(false)).ToList();
+
+        var childrenOf = edges
+            .GroupBy(e => e.ProductItemId, StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(
+                g => g.Key,
+                g => g.Select(e => e.MaterialItemId).Distinct(StringComparer.OrdinalIgnoreCase).ToList(),
+                StringComparer.OrdinalIgnoreCase);
+
+        var memo = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        var onPath = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var row in list)
+        {
+            row.BomLevel = Depth(row.ProductItemId);
+        }
+
+        int Depth(string itemId)
+        {
+            if (memo.TryGetValue(itemId, out var done)) return done;
+
+            // 순환 — 이 가지를 끊는다. 값을 memo 에 넣지 않는다(다른 경로에서는 정상일 수 있다).
+            if (!onPath.Add(itemId)) return 1;
+
+            var level = 1;
+            if (childrenOf.TryGetValue(itemId, out var mats))
+            {
+                var deepest = 0;
+                foreach (var mat in mats)
+                {
+                    var d = Depth(mat);
+                    if (d > deepest) deepest = d;
+                }
+                level = deepest + 1;
+            }
+
+            onPath.Remove(itemId);
+            memo[itemId] = level;
+            return level;
+        }
     }
 
     public async Task<BomDetailDto?> GetAsync(string bomId, string tenantId, CancellationToken ct = default)
@@ -846,11 +964,20 @@ public class BomService : IBomService
               AND COALESCE(i.safety_stock, i.safe_stock, 0) > 0
               AND COALESCE(s.current_qty, 0) <= COALESCE(i.safety_stock, i.safe_stock, 0)
               AND COALESCE(i.auto_order_enabled, 0) = 1
+              -- 봉합 (2026-08-25, 20260825작1 W1, 사장님 실측 지적): 재삽입 루프 차단.
+              --   종전 가드는 status='pending' 만 봤다. 그래서 발주로 알림이 'ordered' 로 넘어간 직후
+              --   화면이 갱신되면(Items.razor:234 / Bom.razor:407) 이 INSERT 가 가드를 그냥 통과해
+              --   같은 품목에 새 'pending' 을 만들었다 ⇒ "발주해도 경고가 안 사라진다"(사장님).
+              --   발주만으론 재고가 안 늘므로 미달 조건은 계속 참이고, 갱신할수록 유령 행이 쌓였다.
+              --   'ordered' 를 가드에 포함해 "이미 조치된 품목"을 다시 만들지 않는다.
+              --   · 'dismissed' 는 넣지 않는다 — 사용자가 닫은 뒤 다시 미달이면 알려야 한다
+              --   · 'received' 도 넣지 않는다 — 입고로 닫힌 뒤 재차 미달이면 새 알림이 맞다
+              --   (매입확정 시 PurchaseService:398-408 이 pending·ordered 를 'received' 로 닫는다)
               AND NOT EXISTS (
                 SELECT 1 FROM stock_alerts sa
                 WHERE sa.tenant_id = i.tenant_id
                   AND sa.item_id = i.item_id
-                  AND sa.status = 'pending'
+                  AND sa.status IN ('pending', 'ordered')
               )
             """,
             new { TenantId = tenantId }, cancellationToken: ct)).ConfigureAwait(false);
@@ -861,11 +988,24 @@ public class BomService : IBomService
               sa.alert_id AS AlertId, sa.item_id AS ItemId, i.item_name AS ItemName,
               sa.alert_type AS AlertType, sa.current_qty AS CurrentQty, sa.safety_qty AS SafetyQty,
               sa.shortage_qty AS ShortageQty, sa.partner_id AS PartnerId, p.partner_name AS PartnerName,
-              sa.order_qty AS OrderQty, sa.status AS Status, sa.created_at AS CreatedAt
+              sa.order_qty AS OrderQty, sa.status AS Status, sa.created_at AS CreatedAt,
+              sa.updated_at AS UpdatedAt
             FROM stock_alerts sa
             LEFT JOIN items i ON i.item_id = sa.item_id
             LEFT JOIN partners p ON p.partner_id = sa.partner_id
-            WHERE sa.tenant_id=@TenantId AND sa.status='pending'
+            -- 변경 (2026-08-25, 20260825작1 W3, 사장님 지시): 'pending' 외 두 가지를 더 내려보낸다.
+            --   화면이 세 가지 안내를 구분해 띄워야 하기 때문이다:
+            --   · pending  → 🔴 미달 경고 (조치 필요)
+            --   · ordered  → 🟡 "자동발주 되었습니다. 매입처리 하셔야 재고에 반영됩니다"
+            --                 사장님 지시: **매입처리 될 때까지** 뜬다 ⇒ 기한을 안 건다
+            --   · received → 🟢 "매입처리까지 완료되어 재고에 반영되었습니다"
+            --                 사장님 지시: **30분간** ⇒ updated_at(매입확정 시각) 기준으로 자른다
+            --   ⚠️ 조회를 넓히는 것뿐이다. 배너에 무엇을 띄울지는 화면이 status 로 가른다.
+            WHERE sa.tenant_id=@TenantId
+              AND (
+                    sa.status IN ('pending', 'ordered')
+                 OR (sa.status = 'received' AND sa.updated_at >= NOW(6) - INTERVAL 30 MINUTE)
+                  )
             ORDER BY sa.created_at DESC
             """,
             new { TenantId = tenantId }, cancellationToken: ct)).ConfigureAwait(false);
@@ -880,21 +1020,26 @@ public class BomService : IBomService
             new { AlertId = alertId, TenantId = tenantId }, cancellationToken: ct)).ConfigureAwait(false);
     }
 
-    public async Task OrderAlertAsync(string alertId, string tenantId, CancellationToken ct = default)
+    public async Task<OrderAlertResultDto> OrderAlertAsync(
+        string alertId, string tenantId, bool autoReceive = false, CancellationToken ct = default)
     {
         await EnsureOpenAsync(ct).ConfigureAwait(false);
 
         // 1) 알림에서 item_id·부족수량 조회 — bom_items 에는 auto_order_* 컬럼이 없으므로
         //    items.auto_order_partner_id / auto_order_qty 만 사용 (사장님 보고 2026-04-26 회귀 수정).
-        var alert = await _db.QueryFirstOrDefaultAsync<(string ItemId, decimal ShortageQty, string? AutoOrderPartnerId, decimal AutoOrderQty, decimal PurchasePrice, string Status)>(
+        var alert = await _db.QueryFirstOrDefaultAsync<(string ItemId, string ItemName, decimal ShortageQty, string? AutoOrderPartnerId, decimal AutoOrderQty, decimal PurchasePrice, string Status, string ItemType, bool AutoReceiveOnOrder)>(
             new CommandDefinition(
                 """
                 SELECT sa.item_id AS ItemId,
+                       COALESCE(i.item_name, '') AS ItemName,
                        sa.shortage_qty AS ShortageQty,
                        i.auto_order_partner_id AS AutoOrderPartnerId,
                        COALESCE(NULLIF(i.auto_order_qty, 0), sa.shortage_qty) AS AutoOrderQty,
                        COALESCE(i.purchase_price, i.cost_price, 0) AS PurchasePrice,
-                       sa.status AS Status
+                       sa.status AS Status,
+                       -- 신규 (2026-08-25, 20260825작1 W2): 사슬 판정에 필요한 두 칸.
+                       COALESCE(i.item_type, 'material') AS ItemType,
+                       COALESCE(i.auto_receive_on_order, 0) AS AutoReceiveOnOrder
                 FROM stock_alerts sa
                 LEFT JOIN items i ON i.item_id = sa.item_id AND i.tenant_id = sa.tenant_id
                 WHERE sa.alert_id = @AlertId AND sa.tenant_id = @TenantId
@@ -918,6 +1063,30 @@ public class BomService : IBomService
         var supply = orderQty * unitPrice;
         var vat = Math.Round(supply * 0.1m, 0, MidpointRounding.AwayFromZero);
 
+        // 사슬을 태워도 되는지 여기서 정한다 (20260825작1 W2, 사장님 결재).
+        //   세 조건이 모두 맞아야 한다 — 하나라도 아니면 발주서만 만든다.
+        //   ① 사용자가 「자동 사슬」을 골랐다
+        //   ② 품목의 「자동 매입확정」 스위치가 켜져 있다 (반자동 원칙 — 코드가 임의로 켜지 않는다)
+        //   ③ 🔴 그 품목이 '사 오는 물건' 이다 (반제품·완제품이면 막는다 — 회계 오염 차단)
+        var result = new OrderAlertResultDto { ItemName = alert.ItemName };
+        var wantChain = autoReceive && alert.AutoReceiveOnOrder;
+
+        if (wantChain && !AutoChainPolicy.CanAutoReceive(alert.ItemType))
+        {
+            wantChain = false;
+            result.ChainSkippedReason = AutoChainPolicy.BlockedReason(alert.ItemName);
+        }
+
+        // 🔴 단가가 0 이면 매입확정이 거부된다("합계가 0원인 매입은 확정할 수 없습니다").
+        //    미리 걸러 이유를 보여준다 — 안 그러면 발주만 남고 사슬이 조용히 끊긴다.
+        if (wantChain && supply <= 0)
+        {
+            wantChain = false;
+            result.ChainSkippedReason =
+                $"{alert.ItemName}의 매입단가가 없어 매입확정까지 자동으로 하지 않았습니다. "
+              + "발주서만 만들었습니다. 상품에서 매입단가를 넣어주세요.";
+        }
+
         // 2) 발주서 번호 채번(해당일자 순번) — WO-11 한글 prefix
         var today = DateTime.Today;
         var prefix = $"발-{today:yyyyMMdd}-";
@@ -935,10 +1104,14 @@ public class BomService : IBomService
 
             await _db.ExecuteAsync(new CommandDefinition(
                 """
+                -- 변경 (2026-08-25, 20260825작1 W2-0-B, 사장님 결재): is_auto=1 추가.
+                --   종전엔 이 컬럼 자체가 빠져 있어 0 이 들어갔다(판매 경로는 1 을 넣는다).
+                --   그 탓에 판매 경로 멱등 필터(po.is_auto=1 요구)가 BOM 발주를 못 봐서
+                --   BOM 에서 발주한 품목이 판매확정 때 또 후보로 떴다 — 중복 발주.
                 INSERT INTO purchase_orders
-                  (po_id, tenant_id, po_no, partner_id, po_date, status, total_amount, vat_amount, memo, created_at, updated_at)
+                  (po_id, tenant_id, po_no, partner_id, po_date, status, total_amount, vat_amount, memo, is_auto, created_at, updated_at)
                 VALUES
-                  (@PoId, @TenantId, @PoNo, @PartnerId, @PoDate, 'draft', @Supply, @Vat, @Memo, NOW(6), NOW(6))
+                  (@PoId, @TenantId, @PoNo, @PartnerId, @PoDate, 'draft', @Supply, @Vat, @Memo, 1, NOW(6), NOW(6))
                 """,
                 new
                 {
@@ -949,7 +1122,10 @@ public class BomService : IBomService
                     PoDate = today,
                     Supply = supply,
                     Vat = vat,
-                    Memo = $"BOM 자재부족 자동발주 (alert {alertId[..8]})"
+                    // 변경 (2026-08-25, 20260825작1 W2, 사장님 결재): 비고 앞머리에 「자동발주서」.
+                    //   종전: "BOM 자재부족 자동발주 (alert 3f2a8b1c)" ← alert·내부 식별자가
+                    //   고객 화면에 그대로 노출됐다. 목록에서 비고는 잘려 보이므로 앞부분이 살아야 한다.
+                    Memo = "자동발주서 — BOM 자재부족"
                 }, transaction: tx, cancellationToken: ct)).ConfigureAwait(false);
 
             await _db.ExecuteAsync(new CommandDefinition(
@@ -983,6 +1159,52 @@ public class BomService : IBomService
             catch (Exception rbex) { Console.Error.WriteLine($"[BomService] rollback failed: {rbex.Message}"); }
             throw;
         }
+
+        result.OrderCreated = true;
+
+        // ── 자동 사슬 — 🔴 반드시 tx.Commit() **뒤**에서 부른다 (20260825작1 W2-1) ──────────
+        //
+        //  왜 밖인가: IPurchaseService 는 EF DbContext 커넥션을 쓰고 여기 _db 는 Dapper 커넥션이다.
+        //  DI 등록이 서로 다른 인스턴스를 준다(InfrastructureExtensions:60·65) ⇒ **물리적으로 다른 커넥션**.
+        //  tx 안에서 부르면 EF 쪽에서 아직 커밋 안 된 발주서가 안 보여
+        //  "발주서를 찾을 수 없습니다" 가 나거나, stock_alerts 같은 행을 두 커넥션이 잡아 락 대기가 난다.
+        //  🔴 판매 정본(SalesService:1757→1774)도 정확히 이 순서다 — 커밋 → 감사로그 → 사슬.
+        //
+        //  ⚠️ 사슬이 실패해도 **발주서는 남는다**(위에서 이미 커밋됐다). 그게 맞다 —
+        //     발주는 실제로 났고, 매입확정만 사람이 마저 하면 된다. 흐름이 안 끊긴다(#20).
+        if (!wantChain) return result;
+
+        var purSvc = _services?.GetService(typeof(IPurchaseService)) as IPurchaseService;
+        if (purSvc is null)
+        {
+            result.ChainSkippedReason =
+                $"{alert.ItemName}의 매입확정을 자동으로 처리하지 못했습니다. 발주서만 만들었습니다.";
+            Console.Error.WriteLine(
+                $"[WARN] 자동 사슬: IPurchaseService 를 못 찾았다 — AlertId={alertId} TenantId={tenantId}");
+            return result;
+        }
+
+        try
+        {
+            var (receiptId, _) = await purSvc.ConvertOrderToReceiptAsync(poId, tenantId, ct)
+                                             .ConfigureAwait(false);
+            await purSvc.ConfirmReceiptAsync(receiptId, new ConfirmReceiptRequest(), ct)
+                        .ConfigureAwait(false);
+            result.ReceiptConfirmed = true;
+        }
+        catch (Exception ex)
+        {
+            // 🔴 조용히 성공으로 위장하지 않는다 (#15 빈 catch 금지).
+            //    4/28 사고가 정확히 이것이었다 — 사용자는 성공이라 알았는데 원장이 안 올라갔고,
+            //    그래서 "재고부족이 안 사라진다" 로 나타났다.
+            result.ChainSkippedReason =
+                $"{alert.ItemName}은(는) 발주서까지 만들었고 매입확정은 못 했습니다. 발주서에서 매입처리를 진행해주세요.";
+            Console.Error.WriteLine(
+                $"[WARN] 자동 사슬 매입확정 실패 — AlertId={alertId} TenantId={tenantId} "
+              + $"ex={ex.GetType().Name} msg={ex.Message}");
+        }
+
+        return result;
     }
 
     /// <summary>
