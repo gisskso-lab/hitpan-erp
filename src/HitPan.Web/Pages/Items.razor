@@ -48,6 +48,51 @@
     </MudPaper>
 }
 
+@* 신규 (2026-08-25, 20260825작1 W3, 사장님 지시):
+   "자동발주만 된 품목은 «...자동발주 되었습니다. 매입처리 하셔야 재고에 반영됩니다.
+    매입처리 하시겠습니까?» 라고 알림메시지 뜨도록 → 매입처리 될 때까지"
+   🔴 스낵바가 아니라 배너다 — 몇 초 뒤 사라지면 "매입처리 될 때까지" 가 안 된다.
+   매입확정하면 서버가 알림을 닫으므로 이 배너는 저절로 사라진다(새 코드 불필요). *@
+@if (_orderedAlerts.Count > 0)
+{
+    <MudPaper Elevation="0" Class="pa-3 mb-4"
+              Style="background:#e3f2fd;border:1px solid #1976d2;border-radius:12px">
+        <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+            <MudIcon Icon="@Icons.Material.Filled.LocalShipping" Color="Color.Info" Size="Size.Medium" />
+            <div style="flex:1;min-width:200px">
+                <MudText Typo="Typo.subtitle1" Style="font-weight:600">
+                    재고부족품목 @AlertNames(_orderedAlerts)이(가) 자동발주 되었습니다.
+                </MudText>
+                <MudText Typo="Typo.body2" Style="color:#666">
+                    매입처리 하셔야 재고에 반영됩니다.
+                </MudText>
+            </div>
+            <MudButton Variant="Variant.Filled" Color="Color.Info"
+                       StartIcon="@Icons.Material.Filled.Inventory"
+                       @* 🔴 라우트 실측 확인: PurchaseOrderPage.razor:1 == "/purchase-orders".
+                          "/purchase/orders" 로 적으면 빈 화면으로 간다 — 추측 금지. *@
+                       OnClick="@(() => Nav.NavigateTo("/purchase-orders"))">
+                매입처리 하러 가기
+            </MudButton>
+        </div>
+    </MudPaper>
+}
+
+@* 사장님 지시: "자동 사슬 처리 한 항목은 «...매입처리까지 완료되어 재고에 반영되었습니다.»
+   라고 30분간 메시지 뜨도록" — 30분 자르기는 서버가 한다(매입확정 시각 기준). *@
+@if (_chainedAlerts.Count > 0)
+{
+    <MudPaper Elevation="0" Class="pa-3 mb-4"
+              Style="background:#e8f5e9;border:1px solid #2e7d32;border-radius:12px">
+        <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+            <MudIcon Icon="@Icons.Material.Filled.CheckCircle" Color="Color.Success" Size="Size.Medium" />
+            <MudText Typo="Typo.subtitle1" Style="font-weight:600;flex:1;min-width:200px">
+                재고부족품목 @AlertNames(_chainedAlerts) 매입처리까지 완료되어 재고에 반영되었습니다.
+            </MudText>
+        </div>
+    </MudPaper>
+}
+
 <MudPaper Elevation="0" Class="pa-3 mb-4 hitpan-card">
     <div style="display:flex;gap:12px;flex-wrap:wrap;align-items:center">
         <MudTextField @bind-Value="_search"
@@ -177,15 +222,38 @@ else
         await LoadSafetyAlerts();
     }
 
+    // 변경 (2026-08-25, 20260825작1 W3, 사장님 지시): 배너가 세 가지가 됐다.
+    //   ① pending  = 미달 경고 (조치 필요)
+    //   ② ordered  = "자동발주 되었습니다. 매입처리 하셔야 재고에 반영됩니다"
+    //                🔴 매입처리 될 때까지 남는다 — 기한을 안 건다.
+    //                매입확정하면 서버가 'received' 로 닫으므로 저절로 사라진다.
+    //   ③ received = "매입처리까지 완료되어 재고에 반영되었습니다" — 🔴 30분간(서버가 잘라서 준다)
+    //   🔴 스낵바로는 ②를 못 한다 — 몇 초 뒤 사라져서 "매입처리 될 때까지" 가 안 된다.
+    private List<StockAlertModel> _orderedAlerts = new();
+    private List<StockAlertModel> _chainedAlerts = new();
+
     private async Task LoadSafetyAlerts()
     {
-        var alerts = await BomApi.GetAlertsAsync();
-        // 'pending' 상태(=신규 발생, 사용자 행동 대기)만 노출. ordered/dismissed 는 이미 처리됨.
-        _safetyAlerts = (alerts ?? new List<StockAlertModel>())
+        var alerts = await BomApi.GetAlertsAsync() ?? new List<StockAlertModel>();
+
+        _safetyAlerts = alerts
             .Where(a => string.Equals(a.Status, "pending", StringComparison.OrdinalIgnoreCase))
             .ToList();
+        _orderedAlerts = alerts
+            .Where(a => string.Equals(a.Status, "ordered", StringComparison.OrdinalIgnoreCase))
+            .ToList();
+        _chainedAlerts = alerts
+            .Where(a => string.Equals(a.Status, "received", StringComparison.OrdinalIgnoreCase))
+            .ToList();
+
         StateHasChanged();
     }
+
+    // 사장님 지시 문구 그대로 — "재고부족품목 000외 0건".
+    private static string AlertNames(List<StockAlertModel> list) =>
+        list.Count == 0 ? "" :
+        list.Count == 1 ? list[0].ItemName
+                        : $"{list[0].ItemName}외 {list.Count - 1}건";
 
     private async Task OpenSafetyAutoOrderAsync()
     {
@@ -219,7 +287,6 @@ else
             var chained = 0;      // 매입확정까지 간 건
             var failed = 0;
             var reasons = new List<string>();
-            var firstName = "";
 
             foreach (var a in _safetyAlerts)
             {
@@ -227,28 +294,20 @@ else
                 var r = await BomApi.OrderAlertAsync(a.AlertId, autoChain);
                 if (r is null || !r.OrderCreated) { failed++; continue; }
 
-                if (string.IsNullOrEmpty(firstName)) firstName = r.ItemName;
                 if (r.ReceiptConfirmed) chained++; else ordered++;
                 if (!string.IsNullOrWhiteSpace(r.ChainSkippedReason)) reasons.Add(r.ChainSkippedReason!);
             }
 
-            // 사장님 지시 (8/25) — 결과에 따라 안내가 다르다.
-            //   ① 발주만 된 건: "매입처리 하셔야 재고에 반영됩니다" (매입처리 될 때까지 배너로 남는다)
-            //   ② 사슬까지 간 건: "매입처리까지 완료되어 재고에 반영되었습니다"
-            if (chained > 0)
+            // 사장님 지시 (8/25) 두 안내는 **배너**가 맡는다(화면 위쪽 _orderedAlerts·_chainedAlerts).
+            //   스낵바로는 "매입처리 될 때까지" 를 못 한다 — 몇 초 뒤 사라진다.
+            //   여기서 같은 말을 또 띄우면 배너와 겹쳐 시끄럽다. 결과 요약만 짧게 남긴다.
+            if (chained + ordered > 0)
             {
-                Snackbar.Add(
-                    $"재고부족품목 {firstName}{(chained > 1 ? $"외 {chained - 1}건" : "")} "
-                  + "매입처리까지 완료되어 재고에 반영되었습니다.", Severity.Success);
-            }
-            if (ordered > 0)
-            {
-                Snackbar.Add(
-                    $"재고부족품목 {firstName}{(ordered > 1 ? $"외 {ordered - 1}건" : "")}이 자동발주 되었습니다. "
-                  + "매입처리 하셔야 재고에 반영됩니다.", Severity.Info);
+                Snackbar.Add($"자동발주 {chained + ordered}건 처리했습니다.", Severity.Success);
             }
 
-            // 🔴 사슬을 못 탄 이유를 감추지 않는다 — 종전엔 "N건 실패" 만 떠서 원인을 알 수 없었다.
+            // 🔴 사슬을 못 탄 이유는 배너가 아니라 여기서 알린다 — 그때 한 번만 알면 되는 정보다.
+            //    종전엔 "N건 실패" 만 떠서 원인을 알 수 없었다.
             foreach (var reason in reasons.Distinct().Take(3))
             {
                 Snackbar.Add(reason, Severity.Warning);
