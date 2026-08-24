@@ -139,6 +139,7 @@ public partial class ReturnPage : ComponentBase
     /// </summary>
     private async Task SaveAsync()
     {
+        if (_isSaving) return;
         if (_draft is null) return;
 
         var partnerName = _draft.SalesCompany;
@@ -189,6 +190,7 @@ public partial class ReturnPage : ComponentBase
         var basePath = isSalesReturn ? "api/sales/returns" : "api/purchase/returns";
         var docLabel = isSalesReturn ? "매출반품" : "매입반품";
 
+        _isSaving = true;
         try
         {
             if (_isNew)
@@ -229,6 +231,10 @@ public partial class ReturnPage : ComponentBase
         catch (Exception ex)
         {
             Snackbar.Add($"반품 저장 오류: {ex.Message}", Severity.Error);
+        }
+        finally
+        {
+            _isSaving = false;
         }
     }
 
@@ -275,8 +281,11 @@ public partial class ReturnPage : ComponentBase
     /// </summary>
     private async Task DeleteAsync()
     {
+        if (_isDeleting) return;
+
         if (!_isNew && _draft is not null && !string.IsNullOrWhiteSpace(_draft.Id))
         {
+            _isDeleting = true;
             try
             {
                 // 14차 P0 봉합(B안): 반품유형에 따라 삭제 경로 분기.
@@ -294,6 +303,10 @@ public partial class ReturnPage : ComponentBase
             {
                 Snackbar.Add($"삭제 중 오류: {ex.Message}", Severity.Error);
                 return;
+            }
+            finally
+            {
+                _isDeleting = false;
             }
         }
 
@@ -427,6 +440,13 @@ public partial class ReturnPage : ComponentBase
         await InvokeAsync(StateHasChanged);
     }
 
+    /// <summary>삭제 연타 차단 (20260825작4) — 같은 문서에 삭제 요청이 두 번 간다.</summary>
+    private bool _isDeleting;
+
+    /// <summary>저장 연타 차단 (20260825작4) — 연타하면 반품 전표가 중복 생성된다.</summary>
+    private bool _isSaving;
+
+    /// <summary>확정·확정취소 연타 차단. 취소는 진입 가드가 빠져 있었다 (20260825작4).</summary>
     private bool _isConfirming;
     private async Task ConfirmReturnAsync()
     {
@@ -493,6 +513,7 @@ public partial class ReturnPage : ComponentBase
     //   잘못 확정한 반품을 원장 무결성 유지하며 되돌리는 유일한 경로 — 삭제(draft 전용)와 구분된다.
     private async Task CancelReturnAsync()
     {
+        if (_isConfirming) return;
         if (_draft is null || string.IsNullOrEmpty(_draft.Id))
         {
             Snackbar.Add("저장된 반품 문서를 먼저 선택해주세요.", Severity.Warning);
