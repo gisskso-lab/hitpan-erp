@@ -170,12 +170,15 @@ public sealed class SyncEventPublisher : IEventPublisher
                 continue;
             }
 
+            // 봉합 (2026-08-25, 20260825작1 W1): BomService.GetAlertsAsync 와 동일 결함.
+            //   'pending' 만 보면 이미 발주된('ordered') 품목에 알림이 다시 생긴다.
+            //   두 경로의 가드를 일치시킨다 — 한쪽만 고치면 이벤트 경로로 유령 알림이 되살아난다.
             var exists = await _db.QueryFirstOrDefaultAsync<int>(new CommandDefinition(
                 """
                 SELECT COUNT(*) FROM stock_alerts
                 WHERE tenant_id = @TenantId
                   AND item_id = @ItemId
-                  AND status = 'pending'
+                  AND status IN ('pending', 'ordered')
                 """,
                 new { TenantId = tenantId, ItemId = itemId },
                 cancellationToken: ct)).ConfigureAwait(false);

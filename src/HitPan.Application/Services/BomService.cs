@@ -846,11 +846,20 @@ public class BomService : IBomService
               AND COALESCE(i.safety_stock, i.safe_stock, 0) > 0
               AND COALESCE(s.current_qty, 0) <= COALESCE(i.safety_stock, i.safe_stock, 0)
               AND COALESCE(i.auto_order_enabled, 0) = 1
+              -- 봉합 (2026-08-25, 20260825작1 W1, 사장님 실측 지적): 재삽입 루프 차단.
+              --   종전 가드는 status='pending' 만 봤다. 그래서 발주로 알림이 'ordered' 로 넘어간 직후
+              --   화면이 갱신되면(Items.razor:234 / Bom.razor:407) 이 INSERT 가 가드를 그냥 통과해
+              --   같은 품목에 새 'pending' 을 만들었다 ⇒ "발주해도 경고가 안 사라진다"(사장님).
+              --   발주만으론 재고가 안 늘므로 미달 조건은 계속 참이고, 갱신할수록 유령 행이 쌓였다.
+              --   'ordered' 를 가드에 포함해 "이미 조치된 품목"을 다시 만들지 않는다.
+              --   · 'dismissed' 는 넣지 않는다 — 사용자가 닫은 뒤 다시 미달이면 알려야 한다
+              --   · 'received' 도 넣지 않는다 — 입고로 닫힌 뒤 재차 미달이면 새 알림이 맞다
+              --   (매입확정 시 PurchaseService:398-408 이 pending·ordered 를 'received' 로 닫는다)
               AND NOT EXISTS (
                 SELECT 1 FROM stock_alerts sa
                 WHERE sa.tenant_id = i.tenant_id
                   AND sa.item_id = i.item_id
-                  AND sa.status = 'pending'
+                  AND sa.status IN ('pending', 'ordered')
               )
             """,
             new { TenantId = tenantId }, cancellationToken: ct)).ConfigureAwait(false);
