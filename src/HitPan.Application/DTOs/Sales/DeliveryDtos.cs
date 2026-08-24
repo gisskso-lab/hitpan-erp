@@ -123,6 +123,13 @@ public class AutoOrderCandidateDto
     public decimal UnitPrice { get; set; }
     /// <summary>"out_of_stock" | "below_safety"</summary>
     public string Reason { get; set; } = string.Empty;
+
+    /// <summary>
+    /// 품목 유형 (20260825작1 W2). <b>사슬을 태워도 되는지</b> 판정에 쓴다 —
+    /// 반제품·완제품은 만들어 채우는 것이라 매입확정을 자동으로 태우면
+    /// 사지 않은 물건에 매입 분개와 외상매입금이 잡힌다.
+    /// </summary>
+    public string ItemType { get; set; } = string.Empty;
 }
 
 /// <summary>자동발주 생성 결과 — 공급처별 발주서 1건 또는 실패 사유.</summary>

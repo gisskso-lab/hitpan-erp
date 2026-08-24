@@ -118,3 +118,20 @@ public class StockAlertModel
     public string Status { get; set; } = "";
     public DateTime CreatedAt { get; set; }
 }
+
+/// <summary>
+/// 자동발주 한 건의 결과 (20260825작1 W2). 화면이 어떤 안내를 띄울지 정하는 근거다.
+/// </summary>
+public class OrderAlertResultModel
+{
+    public string ItemName { get; set; } = "";
+
+    /// <summary>발주서가 만들어졌나.</summary>
+    public bool OrderCreated { get; set; }
+
+    /// <summary>매입확정까지 갔나 — 재고에 실제로 올라갔다는 뜻.</summary>
+    public bool ReceiptConfirmed { get; set; }
+
+    /// <summary>사슬을 안 탄 이유. 사람에게 그대로 보여주는 글이다.</summary>
+    public string? ChainSkippedReason { get; set; }
+}

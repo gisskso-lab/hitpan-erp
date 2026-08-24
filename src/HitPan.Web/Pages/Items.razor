@@ -209,27 +209,53 @@ else
         StateHasChanged();
         try
         {
-            // stock_alerts 의 alert_id 단위로 BomApi.OrderAlertAsync 호출 — 기존 alert→PO 변환 흐름 재사용.
-            // 자동 사슬(true) 선택 시: 발주 생성 + autoReceive 까지 가도록 별도 처리 (지금은 OrderAlertAsync 가
-            // PO 만 생성하므로 자동 사슬 미지원 → 베타 P1: stock_alerts 에 auto_receive_on_order 반영 추가).
+            // 봉합 (2026-08-25, 20260825작1 W2·W3, 사장님 결재):
+            //   종전엔 「자동 사슬」을 골라도 OrderAlertAsync 가 발주서만 만들었다 —
+            //   autoChain 은 안내문 글자에만 쓰이고 실제 분기가 없었다(사장님 실측: "발주까지 가네").
+            //   이제 autoReceive 를 서버로 넘긴다. 다만 사슬을 태울지는 **서버가** 정한다:
+            //   품목 스위치가 켜져 있고 '사 오는 물건' 이어야 한다(반제품은 막힌다).
             var autoChain = choice == true;
-            var success = 0;
+            var ordered = 0;      // 발주서만 만들어진 건
+            var chained = 0;      // 매입확정까지 간 건
             var failed = 0;
+            var reasons = new List<string>();
+            var firstName = "";
+
             foreach (var a in _safetyAlerts)
             {
                 if (string.IsNullOrWhiteSpace(a.AlertId)) continue;
-                var ok = await BomApi.OrderAlertAsync(a.AlertId);
-                if (ok) success++; else failed++;
+                var r = await BomApi.OrderAlertAsync(a.AlertId, autoChain);
+                if (r is null || !r.OrderCreated) { failed++; continue; }
+
+                if (string.IsNullOrEmpty(firstName)) firstName = r.ItemName;
+                if (r.ReceiptConfirmed) chained++; else ordered++;
+                if (!string.IsNullOrWhiteSpace(r.ChainSkippedReason)) reasons.Add(r.ChainSkippedReason!);
             }
 
-            if (success > 0)
+            // 사장님 지시 (8/25) — 결과에 따라 안내가 다르다.
+            //   ① 발주만 된 건: "매입처리 하셔야 재고에 반영됩니다" (매입처리 될 때까지 배너로 남는다)
+            //   ② 사슬까지 간 건: "매입처리까지 완료되어 재고에 반영되었습니다"
+            if (chained > 0)
             {
-                var label = autoChain ? "자동발주(자동 사슬은 베타 P1 작지서로 분리, 지금은 발주서만 생성됨)" : "자동발주서";
-                Snackbar.Add($"{label} {success}건 생성 완료. 발주목록 → 매입처리 → 매입확정 진행해주세요.", Severity.Success);
+                Snackbar.Add(
+                    $"재고부족품목 {firstName}{(chained > 1 ? $"외 {chained - 1}건" : "")} "
+                  + "매입처리까지 완료되어 재고에 반영되었습니다.", Severity.Success);
+            }
+            if (ordered > 0)
+            {
+                Snackbar.Add(
+                    $"재고부족품목 {firstName}{(ordered > 1 ? $"외 {ordered - 1}건" : "")}이 자동발주 되었습니다. "
+                  + "매입처리 하셔야 재고에 반영됩니다.", Severity.Info);
+            }
+
+            // 🔴 사슬을 못 탄 이유를 감추지 않는다 — 종전엔 "N건 실패" 만 떠서 원인을 알 수 없었다.
+            foreach (var reason in reasons.Distinct().Take(3))
+            {
+                Snackbar.Add(reason, Severity.Warning);
             }
             if (failed > 0)
             {
-                Snackbar.Add($"{failed}건 실패", Severity.Warning);
+                Snackbar.Add($"{failed}건은 발주하지 못했습니다. 자동발주 공급처가 설정됐는지 확인해주세요.", Severity.Warning);
             }
             await LoadSafetyAlerts();
         }

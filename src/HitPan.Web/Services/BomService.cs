@@ -158,8 +158,12 @@ public sealed class BomService(HttpClient http)
         {
             return await http.GetFromJsonAsync<List<StockAlertModel>>("api/bom/alerts", ct).ConfigureAwait(false);
         }
-        catch (Exception)
+        catch (Exception ex)
         {
+            // 봉합 (2026-08-25, 20260825작1 W2-4): 빈 catch 였다(#15 위반).
+            //   조회가 실패해도 null → 화면은 "미달 0건" 으로 읽는다 ⇒ 실패가 정상으로 위장된다.
+            //   최소한 왜 실패했는지는 남긴다.
+            Console.Error.WriteLine($"[WARN] 안전재고 알림 조회 실패 — {ex.GetType().Name}: {ex.Message}");
             return null;
         }
     }
@@ -177,16 +181,41 @@ public sealed class BomService(HttpClient http)
         }
     }
 
-    public async Task<bool> OrderAlertAsync(string alertId, CancellationToken ct = default)
+    /// <summary>
+    /// 안전재고 알림 발주 (20260825작1 W2). <paramref name="autoReceive"/> 면 매입확정까지 시도한다.
+    /// </summary>
+    /// <returns>
+    /// 결과. 실패하면 <c>null</c>. 🔴 <b>왜 실패했는지</b>를 화면이 보여줄 수 있게
+    /// 서버 메시지를 <see cref="OrderAlertResultModel.ChainSkippedReason"/> 에 담아 돌려준다 —
+    /// 종전엔 <c>bool</c> 이라 이유가 통째로 사라졌다.
+    /// </returns>
+    public async Task<OrderAlertResultModel?> OrderAlertAsync(
+        string alertId, bool autoReceive = false, CancellationToken ct = default)
     {
         try
         {
-            using var res = await http.PostAsync($"api/bom/alerts/{alertId}/order", null, ct).ConfigureAwait(false);
-            return res.IsSuccessStatusCode;
+            using var res = await http.PostAsync(
+                $"api/bom/alerts/{alertId}/order?autoReceive={(autoReceive ? "true" : "false")}",
+                null, ct).ConfigureAwait(false);
+
+            if (!res.IsSuccessStatusCode)
+            {
+                var body = await res.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
+                Console.Error.WriteLine($"[WARN] 자동발주 실패 — {(int)res.StatusCode}: {body}");
+                return null;
+            }
+
+            return await res.Content
+                            .ReadFromJsonAsync<OrderAlertResultModel>(cancellationToken: ct)
+                            .ConfigureAwait(false);
         }
-        catch (Exception)
+        catch (Exception ex)
         {
-            return false;
+            // 봉합 (2026-08-25, 20260825작1 W2-4): 빈 catch 였다(#15 위반).
+            //   서버가 "자동발주 공급처가 설정되지 않았습니다" 라고 알려줘도 통째로 버려져,
+            //   화면엔 "1건 실패" 라는 노란 알림만 떴다 — 사장님이 이유를 알 방법이 없었다.
+            Console.Error.WriteLine($"[WARN] 자동발주 호출 실패 — {ex.GetType().Name}: {ex.Message}");
+            return null;
         }
     }
 
