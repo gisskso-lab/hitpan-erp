@@ -16,7 +16,7 @@
 <MudPaper Class="pa-3 mb-3" Elevation="0" Style="border:1px solid var(--mud-palette-lines-default);border-radius:12px">
     <div class="hitpan-filter-bar">
         <div class="hitpan-filter-field hitpan-filter-field--lg">
-            <MudSelect T="string" @bind-Value="_viewType" Label="조회유형" Variant="Variant.Outlined" Margin="Margin.Dense">
+            <MudSelect T="string" Value="_viewType" ValueChanged="OnViewTypeChangedAsync" Label="조회유형" Variant="Variant.Outlined" Margin="Margin.Dense">
                 <MudSelectItem Value="@("item-monthly")">년간 월별 판매통계(품목)</MudSelectItem>
                 <MudSelectItem Value="@("partner-monthly")">년간 월별 판매통계(업체)</MudSelectItem>
                 <MudSelectItem Value="@("employee-monthly")">년간 월별 판매통계(사원)</MudSelectItem>
@@ -122,6 +122,20 @@
     private List<ReportRow> _reportData = new();
 
     protected override async Task OnInitializedAsync() => await SearchAsync();
+
+    /// <summary>
+    /// 조회유형 변경 시 즉시 재조회한다 (20260825작2).
+    /// 사장님 실측 8/25: 콤보만 바꾸면 헤더만 바뀌고 그리드는 기간별(날짜) 그대로 남았다.
+    /// 원인 — 재조회가 「조회」 버튼과 최초 진입에만 걸려 있었다.
+    /// 검색어도 함께 비운다: 조회유형이 바뀌면 검색어의 의미(품명↔업체)가 달라져
+    /// 앞 유형의 입력이 남으면 엉뚱한 필터가 되어 0건이 된다.
+    /// </summary>
+    private async Task OnViewTypeChangedAsync(string value)
+    {
+        _viewType = value;
+        _searchText = "";
+        await SearchAsync();
+    }
 
     private async Task SearchAsync()
     {
