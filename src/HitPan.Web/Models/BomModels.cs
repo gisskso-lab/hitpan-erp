@@ -117,6 +117,8 @@ public class StockAlertModel
     public decimal OrderQty { get; set; }
     public string Status { get; set; } = "";
     public DateTime CreatedAt { get; set; }
+    /// <summary>마지막 상태 변경 시각 (20260825작1 W3). 사슬 완료 안내 30분 기준.</summary>
+    public DateTime UpdatedAt { get; set; }
 }
 
 /// <summary>

@@ -988,11 +988,24 @@ public class BomService : IBomService
               sa.alert_id AS AlertId, sa.item_id AS ItemId, i.item_name AS ItemName,
               sa.alert_type AS AlertType, sa.current_qty AS CurrentQty, sa.safety_qty AS SafetyQty,
               sa.shortage_qty AS ShortageQty, sa.partner_id AS PartnerId, p.partner_name AS PartnerName,
-              sa.order_qty AS OrderQty, sa.status AS Status, sa.created_at AS CreatedAt
+              sa.order_qty AS OrderQty, sa.status AS Status, sa.created_at AS CreatedAt,
+              sa.updated_at AS UpdatedAt
             FROM stock_alerts sa
             LEFT JOIN items i ON i.item_id = sa.item_id
             LEFT JOIN partners p ON p.partner_id = sa.partner_id
-            WHERE sa.tenant_id=@TenantId AND sa.status='pending'
+            -- 변경 (2026-08-25, 20260825작1 W3, 사장님 지시): 'pending' 외 두 가지를 더 내려보낸다.
+            --   화면이 세 가지 안내를 구분해 띄워야 하기 때문이다:
+            --   · pending  → 🔴 미달 경고 (조치 필요)
+            --   · ordered  → 🟡 "자동발주 되었습니다. 매입처리 하셔야 재고에 반영됩니다"
+            --                 사장님 지시: **매입처리 될 때까지** 뜬다 ⇒ 기한을 안 건다
+            --   · received → 🟢 "매입처리까지 완료되어 재고에 반영되었습니다"
+            --                 사장님 지시: **30분간** ⇒ updated_at(매입확정 시각) 기준으로 자른다
+            --   ⚠️ 조회를 넓히는 것뿐이다. 배너에 무엇을 띄울지는 화면이 status 로 가른다.
+            WHERE sa.tenant_id=@TenantId
+              AND (
+                    sa.status IN ('pending', 'ordered')
+                 OR (sa.status = 'received' AND sa.updated_at >= NOW(6) - INTERVAL 30 MINUTE)
+                  )
             ORDER BY sa.created_at DESC
             """,
             new { TenantId = tenantId }, cancellationToken: ct)).ConfigureAwait(false);
