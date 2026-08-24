@@ -248,7 +248,10 @@ public sealed class AutoChainPolicyGateTests
         var host = Environment.GetEnvironmentVariable("HITPAN_DB_HOST") ?? "localhost";
         var port = Environment.GetEnvironmentVariable("HITPAN_DB_PORT") ?? "3306";
         var user = Environment.GetEnvironmentVariable("HITPAN_DB_USER") ?? "hitpan";
-        var pass = Environment.GetEnvironmentVariable("HITPAN_DB_PASS") ?? "Hitpan2025!";
+        // 🔴 비밀번호를 코드에 적지 않는다 — 기존 게이트(ApproverCandidateGateTests:65) 관례를 따른다.
+        //    로컬에서 돌릴 때는 HITPAN_DB_PASS 를 환경변수로 준다. 비어 있으면 DB 에 못 붙어
+        //    이 게이트는 "안 돌았다" 로 건너뛴다(초록불을 검증으로 읽지 마라).
+        var pass = Environment.GetEnvironmentVariable("HITPAN_DB_PASS") ?? "";
         return $"Server={host};Port={port};Database={TestDb};User={user};Password={pass};"
              + "DefaultCommandTimeout=90;GuidFormat=None;AllowUserVariables=true;";
     }
