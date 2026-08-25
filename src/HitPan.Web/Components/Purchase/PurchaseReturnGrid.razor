@@ -3,6 +3,8 @@
 @using HitPan.Web.Services
 @namespace HitPan.Web.Components.Purchase
 @inject PriceHintService HintService
+@inject HttpClient Http
+@using System.Net.Http.Json
 
 @* 작지 #3 반품 전용 그리드 (사장님 작업지시 2026-05-31)
    PurchaseOrderGrid 재사용 한계 봉합 — 반품 사유 컬럼 + 반품 사유 메모 저장 *@
@@ -10,13 +12,16 @@
 <MudPaper Class="pa-2 mb-2" Elevation="0">
     <MudGrid>
         <MudItem xs="12" md="4">
-            <MudSelect T="string" @bind-Value="ReturnReason" Label="반품 사유" Margin="Margin.Dense" Variant="Variant.Outlined">
-                <MudSelectItem Value="@("defect")">불량</MudSelectItem>
-                <MudSelectItem Value="@("wrong_item")">오배송</MudSelectItem>
-                <MudSelectItem Value="@("over_qty")">수량초과</MudSelectItem>
-                <MudSelectItem Value="@("customer_cancel")">고객취소</MudSelectItem>
-                <MudSelectItem Value="@("etc")">기타</MudSelectItem>
-            </MudSelect>
+            @* 🔴 20260825작16 — 자율 입력. 우리가 사유 코드를 정하지 않는다.
+               사장님 지시: "반품처리 반품사유도 판매쪽 반품확인서와 마찬가지로 자유입력".
+               종전엔 고정 5종 콤보(불량/오배송/수량초과/고객취소/기타)뿐이라
+               현장에서 실제로 쓰는 말을 적을 수가 없었다.
+               쓴 말이 곧 다음 선택지가 된다(SearchReasonAsync). *@
+            <MudAutocomplete T="string" Value="@ReturnReason" ValueChanged="OnReasonChangedAsync"
+                             SearchFunc="SearchReasonAsync" Label="반품 사유" Margin="Margin.Dense"
+                             Variant="Variant.Outlined" CoerceValue="true" CoerceText="false"
+                             Clearable="true" ResetValueOnEmptyText="false" MaxItems="50"
+                             Placeholder="직접 입력하거나 이전에 쓴 사유 선택" />
         </MudItem>
         <MudItem xs="12" md="8">
             <MudTextField T="string" @bind-Value="ReturnReasonMemo" Label="반품 사유 상세 (자유 입력)" Margin="Margin.Dense" Variant="Variant.Outlined" MaxLength="500" />
@@ -72,6 +77,45 @@
     [Parameter] public EventCallback<string?> ReturnReasonChanged { get; set; }
     [Parameter] public string? ReturnReasonMemo { get; set; }
     [Parameter] public EventCallback<string?> ReturnReasonMemoChanged { get; set; }
+
+    // ── 20260825작16 — 반품사유 자율 입력 (사장님 지시) ──
+    private List<string>? _reasonCache;
+
+    /// <summary>
+    /// 이전에 쓴 사유를 모아온다. 실패해도 화면은 살아 있어야 한다 —
+    /// 목록이 안 와도 직접 입력은 되어야 하기 때문이다(CoerceValue=true).
+    /// </summary>
+    private async Task<IEnumerable<string>> SearchReasonAsync(string value, CancellationToken ct)
+    {
+        if (_reasonCache is null)
+        {
+            try
+            {
+                _reasonCache = await Http.GetFromJsonAsync<List<string>>("api/purchase/returns/reasons", ct) ?? new();
+            }
+            catch (Exception ex)
+            {
+                Console.Error.WriteLine($"[PurchaseReturnGrid] 반품사유 목록 조회 실패: {ex.Message}");
+                _reasonCache = new();
+            }
+        }
+
+        if (string.IsNullOrWhiteSpace(value)) return _reasonCache;
+        return _reasonCache.Where(r => r.Contains(value, StringComparison.OrdinalIgnoreCase));
+    }
+
+    private async Task OnReasonChangedAsync(string? value)
+    {
+        ReturnReason = value;
+        await ReturnReasonChanged.InvokeAsync(value);
+
+        // 새로 쓴 말이 다음 조회에 바로 뜨도록 캐시에 얹는다.
+        if (!string.IsNullOrWhiteSpace(value) && _reasonCache is not null && !_reasonCache.Contains(value))
+        {
+            _reasonCache.Add(value);
+        }
+    }
+
 
     private Task<IEnumerable<string>> SearchItemAsync(string value, CancellationToken ct)
     {

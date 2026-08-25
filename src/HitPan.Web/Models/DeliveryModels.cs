@@ -358,6 +358,10 @@ public sealed class PurchaseOrderListItem
     public decimal SupplyAmount { get; set; }
     public string Status { get; set; } = string.Empty;
     public string? Memo { get; set; }
+    /// <summary>전표를 작성한 사원 이름 (20260825작16).
+    /// 서버가 employees.user_id = created_by 조인으로 채운다.</summary>
+    public string? CreatedByName { get; set; }
+
     public bool IsChecked { get; set; }
 }
 
@@ -377,6 +381,10 @@ public sealed class PurchaseReceiptListItem
     public decimal SupplyAmount { get; set; }
     public string Status { get; set; } = string.Empty;
     public string? Memo { get; set; }
+    /// <summary>전표를 작성한 사원 이름 (20260825작16).
+    /// 서버가 employees.user_id = created_by 조인으로 채운다.</summary>
+    public string? CreatedByName { get; set; }
+
     public bool IsChecked { get; set; }
 }
 

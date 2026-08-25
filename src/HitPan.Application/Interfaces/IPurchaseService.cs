@@ -32,6 +32,14 @@ public interface IPurchaseService
         string tenantId,
         CancellationToken ct = default);
 
+    /// <summary>
+    /// 지금까지 쓰인 매입반품 사유 목록 — 자율 입력값의 재사용 (20260825작16).
+    /// 사장님 지시: <i>"반품처리 반품사유도 판매쪽 반품확인서와 마찬가지로 자유입력"</i>.
+    /// </summary>
+    Task<List<string>> GetPurchaseReturnReasonsAsync(
+        string tenantId,
+        CancellationToken ct = default);
+
     Task<List<PurchaseReturnListDto>> GetReturnsAsync(
         string tenantId,
         DateTime? from = null,

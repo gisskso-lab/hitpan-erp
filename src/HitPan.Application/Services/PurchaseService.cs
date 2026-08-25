@@ -56,7 +56,11 @@ public class PurchaseService : IPurchaseService
             Status = PurchaseOrderStatus.Draft,
             TotalAmount = request.Items.Sum(x => x.SupplyAmount),
             VatAmount = request.Items.Sum(x => x.VatAmount),
-            Memo = request.Memo
+            Memo = request.Memo,
+            // 🔴 20260825작16 — 작성자. 사장님 지시: "목록 그리드도 판매관리와 마찬가지로 담당자 행 추가".
+            //   판매 전표와 같은 축이다 — user_id 를 담고 employees.user_id 로 조인해 이름을 낸다.
+            //   ⚠️ EmployeeId(담당사원)와 다른 값이다. 담당자는 지정하는 사람, 작성자는 실제로 친 사람.
+            CreatedBy = _currentTenant.UserId
         };
         await poRepo.AddAsync(po);
 
@@ -116,7 +120,11 @@ public class PurchaseService : IPurchaseService
             Status = PurchaseReceiptStatus.Draft,
             TotalAmount = request.Items.Sum(x => x.SupplyAmount),
             VatAmount = request.Items.Sum(x => x.VatAmount),
-            Memo = request.Memo
+            Memo = request.Memo,
+            // 🔴 20260825작16 — 작성자. 사장님 지시: "목록 그리드도 판매관리와 마찬가지로 담당자 행 추가".
+            //   판매 전표와 같은 축이다 — user_id 를 담고 employees.user_id 로 조인해 이름을 낸다.
+            //   ⚠️ EmployeeId(담당사원)와 다른 값이다. 담당자는 지정하는 사람, 작성자는 실제로 친 사람.
+            CreatedBy = _currentTenant.UserId
         };
         await receiptRepo.AddAsync(receipt);
 
@@ -511,8 +519,12 @@ public class PurchaseService : IPurchaseService
                                po.vat_amount AS VatAmount,
                                po.total_amount AS SupplyAmount,
                                po.status AS Status,
-                               po.memo AS Memo
+                               po.memo AS Memo,
+                               ec.emp_name AS CreatedByName
                            FROM purchase_orders po
+                           LEFT JOIN employees ec
+                               ON ec.user_id = po.created_by
+                                  AND ec.tenant_id = po.tenant_id
                            LEFT JOIN partners p
                                ON p.partner_id = po.partner_id
                                   AND p.tenant_id = po.tenant_id
@@ -571,8 +583,12 @@ public class PurchaseService : IPurchaseService
                                pr.vat_amount AS VatAmount,
                                pr.total_amount AS SupplyAmount,
                                pr.status AS Status,
-                               pr.memo AS Memo
+                               pr.memo AS Memo,
+                               ec.emp_name AS CreatedByName
                            FROM purchase_receipts pr
+                           LEFT JOIN employees ec
+                               ON ec.user_id = pr.created_by
+                                  AND ec.tenant_id = pr.tenant_id
                            LEFT JOIN partners p
                                ON p.partner_id = pr.partner_id
                                   AND p.tenant_id = pr.tenant_id
@@ -710,6 +726,33 @@ public class PurchaseService : IPurchaseService
         return (receiptId, receiptNo);
     }
 
+    /// <inheritdoc />
+    public async Task<List<string>> GetPurchaseReturnReasonsAsync(
+        string tenantId, CancellationToken ct = default)
+    {
+        // 20260825작16 — 사장님 지시: 매입 반품사유도 판매쪽과 마찬가지로 자유입력이다.
+        //   우리가 사유 코드를 미리 정하지 않는다. 한 번 쓴 말이 다음부터 선택지가 된다
+        //   (헌법 #11 "권한은 어드민이 직접" 과 같은 축 — 기준은 고객사가 정한다).
+        //   삭제분(is_deleted=1)은 뺀다. 지운 문서의 말이 목록에 남으면 안 된다.
+        //
+        //   ⚠️ 종전 5종 코드(defect/wrong_item/over_qty/customer_cancel/etc)로 저장된
+        //     기존 전표가 있으면 그 코드값이 그대로 목록에 뜬다. 지우지 않는다 —
+        //     남아 있는 전표의 값이라 없애면 그 전표의 사유가 설명 불가가 된다.
+        var rows = await _db.QueryAsync<string>(new CommandDefinition(
+            """
+            SELECT DISTINCT return_reason
+              FROM purchase_returns
+             WHERE tenant_id = @Tid
+               AND is_deleted = 0
+               AND return_reason IS NOT NULL
+               AND TRIM(return_reason) <> ''
+             ORDER BY return_reason
+            """,
+            new { Tid = tenantId }, cancellationToken: ct));
+
+        return rows.ToList();
+    }
+
     public async Task<List<PurchaseReturnListDto>> GetReturnsAsync(
         string tenantId, DateTime? from = null, DateTime? to = null, CancellationToken ct = default)
     {
@@ -723,9 +766,11 @@ public class PurchaseService : IPurchaseService
             SELECT r.return_id AS ReturnId, r.return_no AS ReturnNo, r.return_date AS ReturnDate,
                    r.partner_id AS PartnerId, COALESCE(p.partner_name,'') AS PartnerName,
                    r.total_amount AS TotalAmount, r.vat_amount AS VatAmount,
-                   r.status AS Status, r.memo AS Memo
+                   r.status AS Status, r.memo AS Memo,
+                   ec.emp_name AS CreatedByName
             FROM purchase_returns r
             LEFT JOIN partners p ON p.partner_id = r.partner_id
+            LEFT JOIN employees ec ON ec.user_id = r.created_by AND ec.tenant_id = r.tenant_id
             WHERE r.tenant_id = @Tid AND r.is_deleted = 0
             """;
         var conditions = new List<string>();
@@ -780,16 +825,17 @@ public class PurchaseService : IPurchaseService
         await _db.ExecuteAsync(new CommandDefinition(
             """
             INSERT INTO purchase_returns (return_id, tenant_id, return_no, receipt_id, partner_id,
-              return_date, return_type, status, total_amount, vat_amount, memo, created_at, updated_at)
+              return_date, return_type, status, total_amount, vat_amount, memo, created_by, created_at, updated_at)
             VALUES (@ReturnId, @Tid, @ReturnNo, @ReceiptId, @PartnerId,
-              @ReturnDate, 'purchase_return', 'draft', @Total, @Vat, @Memo, NOW(6), NOW(6))
+              @ReturnDate, 'purchase_return', 'draft', @Total, @Vat, @Memo, @CreatedBy, NOW(6), NOW(6))
             """,
             new
             {
                 ReturnId = returnId, Tid = tenantId, ReturnNo = returnNo,
                 ReceiptId = receiptId, PartnerId = (string)receipt.partner_id,
                 ReturnDate = today, Total = totalAmount, Vat = totalVat,
-                Memo = $"매입 {(string)receipt.receipt_no} 에서 반품 전환"
+                Memo = $"매입 {(string)receipt.receipt_no} 에서 반품 전환",
+                CreatedBy = _currentTenant.UserId
             }, cancellationToken: ct));
 
         // 반품 품목 생성
@@ -853,10 +899,10 @@ public class PurchaseService : IPurchaseService
         await _db.ExecuteAsync(new CommandDefinition(
             @"INSERT INTO purchase_returns (return_id, tenant_id, return_no, receipt_id, partner_id,
                 return_date, return_type, status, total_amount, vat_amount, memo,
-                return_reason, return_reason_memo, created_at, updated_at)
+                return_reason, return_reason_memo, created_by, created_at, updated_at)
               VALUES (@ReturnId, @Tid, @ReturnNo, @ReceiptId, @PartnerId,
                 @ReturnDate, 'purchase_return', 'draft', @Total, @Vat, @Memo,
-                @ReturnReason, @ReturnReasonMemo, NOW(6), NOW(6))",
+                @ReturnReason, @ReturnReasonMemo, @CreatedBy, NOW(6), NOW(6))",
             new
             {
                 ReturnId = returnId, Tid = tenantId, ReturnNo = returnNo,
@@ -865,7 +911,8 @@ public class PurchaseService : IPurchaseService
                 ReturnDate = returnDate, Total = totalAmount, Vat = totalVat,
                 Memo = request.Memo,
                 ReturnReason = request.ReturnReason,
-                ReturnReasonMemo = request.ReturnReasonMemo
+                ReturnReasonMemo = request.ReturnReasonMemo,
+                CreatedBy = _currentTenant.UserId
             }, cancellationToken: ct));
 
         foreach (var it in request.Items)

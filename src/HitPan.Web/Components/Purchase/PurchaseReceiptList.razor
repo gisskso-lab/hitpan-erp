@@ -58,6 +58,8 @@
             <MudTh>일자</MudTh>
             <MudTh>전표번호</MudTh>
             <MudTh>업체</MudTh>
+            @* 20260825작16 — 사장님 지시: 판매관리 전표 목록과 마찬가지로 작성자를 보인다 *@
+            <MudTh>작성자</MudTh>
             <MudTh>상태</MudTh>
             <MudTh Class="text-right">합계</MudTh>
             <MudTh Style="width:56px"></MudTh>
@@ -68,7 +70,7 @@
                     <MudCheckBox T="bool"
                                  Value="context.IsChecked"
                                  ValueChanged="@(v => ToggleOneAsync(context, v))"
-                                 Disabled="@IsConfirmed(context)" />
+                                 />
                 </div>
             </MudTd>
             <MudTd @ondblclick="@(() => SelectRowAsync(context))" style="cursor:pointer">@context.ReceiptDate.ToString("yyyy-MM-dd")</MudTd>
@@ -76,6 +78,7 @@
                 <MudText Class="@GetSelectedClass(context)">@context.ReceiptNo</MudText>
             </MudTd>
             <MudTd @ondblclick="@(() => SelectRowAsync(context))" style="cursor:pointer">@context.PartnerName</MudTd>
+            <MudTd @ondblclick="@(() => SelectRowAsync(context))" style="cursor:pointer">@(context.CreatedByName ?? "")</MudTd>
             <MudTd @ondblclick="@(() => SelectRowAsync(context))" style="cursor:pointer">
                 @if (IsConfirmed(context))
                 {
@@ -89,6 +92,19 @@
             <MudTd Class="text-right" @ondblclick="@(() => SelectRowAsync(context))" style="cursor:pointer">@context.TotalAmount.ToString("N0")</MudTd>
             <MudTd>
                 <div @onclick:stopPropagation="true">
+                    @* 🔴 20260825작16 — 단건 「매입확정」. 사장님 지시:
+                         "선택일괄확정버튼 옆에 매입확정 버튼 만들기".
+                       종전엔 목록에서 확정하려면 전표를 열거나 일괄확정을 써야 했다.
+                       한 건만 확정하는 게 현장에선 더 흔하다.
+                       ⚠️ 권한은 서버(403)에 맡긴다 — 이 목록은 다이얼로그로도 열리는데
+                         MudDialogProvider 가 CascadingAuthenticationState 밖이라
+                         AuthorizeView 를 쓰면 목록이 통째로 죽는다(작11 에서 겪었다). *@
+                    <MudIconButton Icon="@Icons.Material.Filled.CheckCircle"
+                                   Color="Color.Success"
+                                   Size="Size.Small"
+                                   Title="매입확정"
+                                   Disabled="@(!string.Equals(context.Status, "draft", StringComparison.OrdinalIgnoreCase) || _confirmingId == context.ReceiptId)"
+                                   OnClick="@(() => ConfirmOneAsync(context))" />
                     <MudIconButton Icon="@Icons.Material.Filled.Delete"
                                    Color="Color.Error"
                                    Size="Size.Small"
