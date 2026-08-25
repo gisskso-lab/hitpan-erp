@@ -248,4 +248,66 @@ public class ReturnMeasuredRejectGateTests
         var page = StatusPage();
         Assert.Contains("반품확정", page, StringComparison.Ordinal);
     }
+
+    // ─────────────────────────────────────────────────────────────
+    // [4번] 반품확정 버튼이 보여야 한다 — 화면 권한 = 서버 정책 (20260825작9)
+    // ─────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// 매출반품 화면의 확정·취소 버튼 권한이 <b>서버 정책과 같아야</b> 한다.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// 사장님 실측 반려: <i>"반품확정 버튼 없음"</i>.
+    /// </para>
+    /// <para>
+    /// 🔴 이 화면은 작6 에서 <b>매출</b>반품 전용으로 갈라져 나왔는데,
+    /// 버튼의 권한 목록만 <b>매입</b> 쪽(<c>purchase_manager</c>)에 남아 있었다.
+    /// 서버는 <c>Policy="SalesManager"</c>(system_admin·sales_manager·tenant_admin)를 요구한다.
+    /// </para>
+    /// <para>
+    /// 그래서 <c>sales_manager</c> 는 <b>서버가 허용하는데 버튼이 안 보였고</b>,
+    /// <c>purchase_manager</c> 는 <b>버튼이 보이는데 눌러도 403</b> 이었다.
+    /// <b>화면 권한은 서버보다 관대해도, 인색해도 안 된다.</b>
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public void 매출반품_확정버튼_권한은_서버정책과_같다()
+    {
+        var razor = CodeLines(Read("src", "HitPan.Web", "Pages", "Sales", "SalesReturnPage.razor"));
+
+        // 매입 전용 역할이 매출 화면의 "권한 속성"에 남아 있으면 안 된다 — 4번 반려의 원인.
+        //   ⚠️ 낱말로 보면 안 된다. 여러 줄 주석의 이어지는 줄은 CodeLines 가 못 걸러서,
+        //      원인을 설명한 주석 문구까지 걸린다(실제로 이 게이트가 그렇게 한 번 빨간불이 났다).
+        //      검사 대상은 Roles= 속성 그 자체다.
+        Assert.DoesNotContain("Roles=\"tenant_admin,purchase_manager\"", razor, StringComparison.Ordinal);
+
+        // 확정·취소 두 자리 모두 매출 정책이어야 한다(한쪽만 고치면 되돌리지 못하는 반쪽이 된다).
+        var count = razor.Split(new[] { "Roles=\"system_admin,tenant_admin,sales_manager\"" },
+            StringSplitOptions.None).Length - 1;
+        Assert.True(count >= 2,
+            $"확정·취소 두 버튼 모두 매출 정책이어야 한다 (현재 {count}곳).");
+    }
+
+    /// <summary>
+    /// 서버의 매출반품 확정·취소가 <c>SalesManager</c> 정책을 유지해야 한다.
+    /// </summary>
+    /// <remarks>
+    /// 화면만 맞춰 놓고 서버 정책이 바뀌면 다시 어긋난다 — 양쪽을 함께 고정한다.
+    /// </remarks>
+    [Fact]
+    public void 서버_매출반품_확정취소는_SalesManager_정책이다()
+    {
+        var ctrl = CodeLines(Read("src", "HitPan.API", "Controllers", "SalesController.cs"));
+
+        foreach (var route in new[] { "returns/{id}/confirm", "returns/{id}/cancel" })
+        {
+            var i = ctrl.IndexOf($"[HttpPost(\"{route}\")]", StringComparison.Ordinal);
+            Assert.True(i > 0, $"{route} 엔드포인트를 찾아야 한다");
+
+            // 바로 다음 줄에 정책이 붙어 있어야 한다.
+            var next = ctrl.Substring(i, Math.Min(200, ctrl.Length - i));
+            Assert.Contains("Policy = \"SalesManager\"", next, StringComparison.Ordinal);
+        }
+    }
 }
