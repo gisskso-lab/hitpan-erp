@@ -28,6 +28,17 @@ public partial class ReturnPage : ComponentBase
     private string? _returnReason;
     private string? _returnReasonMemo;
 
+    /// <summary>
+    /// 열려는 반품서 ID — 매입에서 「반품전환」 직후 그 문서로 데려올 때 쓴다 (20260825작18).
+    /// </summary>
+    /// <remarks>
+    /// 🔴 사장님 결재: <i>"전환 후 반품서 화면으로 이동하는 방향으로 잡어."</i>
+    /// 전환 직후 문서는 매입 품목을 전량 복사한 미완성품이라 사람이 수량·사유를 고쳐야 한다.
+    /// 목록으로 보내면 담당자가 자기 문서를 다시 찾아야 하므로, 그 문서 앞에 바로 앉힌다.
+    /// </remarks>
+    [Parameter, SupplyParameterFromQuery(Name = "id")]
+    public string? ReturnIdFromQuery { get; set; }
+
     protected override async Task OnInitializedAsync()
     {
         _itemCache = await ItemsApi.GetListAsync() ?? new();
@@ -41,6 +52,38 @@ public partial class ReturnPage : ComponentBase
         };
         RefreshWorkflow();
         RecalculateSummary();
+
+        // 쿼리로 반품서 ID 가 오면 그 문서를 연다. 매입반품 경로라 isSalesReturn=false.
+        if (!string.IsNullOrWhiteSpace(ReturnIdFromQuery))
+        {
+            _loadedFromQueryId = ReturnIdFromQuery;
+            await LoadReturnAsync(ReturnIdFromQuery, isSalesReturn: false);
+        }
+    }
+
+    /// <summary>쿼리로 열어둔 반품서 ID — 같은 화면에서 다른 문서로 갈아탈 때 비교 기준이다.</summary>
+    private string? _loadedFromQueryId;
+
+    /// <summary>
+    /// 🔴 두 번째 전환부터 화면이 안 바뀌던 것을 막는다 (20260825작18 · 검증팀 적발).
+    /// </summary>
+    /// <remarks>
+    /// <c>@page "/returns"</c> 는 단일 라우트이고 <c>WorkTabService</c> 가 반품 탭을 그 URL 하나로
+    /// <b>재사용</b>한다. 그래서 반품 화면이 이미 열린 상태에서 매입→전환을 다시 하면
+    /// Blazor 가 <b>같은 컴포넌트를 재사용</b>해 <c>OnInitializedAsync</c> 가 돌지 않고
+    /// <b>이전 반품서가 그대로 남는다</b> — 사장님이 반려하신 <i>"전환했는데 안 보인다"</i> 가
+    /// 두 번째부터 그대로 재발한다.
+    /// <para>
+    /// ⚠️ <b>끊기는 자리만 옮겨간 것</b>이다. 첫 전환만 보고 "고쳤다" 하면 안 된다.
+    /// </para>
+    /// </remarks>
+    protected override async Task OnParametersSetAsync()
+    {
+        if (string.IsNullOrWhiteSpace(ReturnIdFromQuery)) return;
+        if (string.Equals(ReturnIdFromQuery, _loadedFromQueryId, StringComparison.Ordinal)) return;
+
+        _loadedFromQueryId = ReturnIdFromQuery;
+        await LoadReturnAsync(ReturnIdFromQuery, isSalesReturn: false);
     }
 
     private async Task<IEnumerable<string>> SearchPartnerAsync(string value, CancellationToken ct)
@@ -354,6 +397,112 @@ public partial class ReturnPage : ComponentBase
     {
         if (_draft is null || string.IsNullOrWhiteSpace(_draft.Id)) { Snackbar.Add("저장된 문서를 먼저 선택해주세요.", Severity.Warning); return; }
         await DocService.DownloadPdfAsync("return", _draft.Id);
+    }
+
+    /// <summary>진행 중 재진입 잠금 — 더블클릭으로 품목이 두 번 들어오는 것을 막는다.</summary>
+    private bool _isLoadingReceipt;
+
+    /// <summary>
+    /// 「매입불러오기」 — 매입명세서 한 건의 품목을 반품 줄로 옮긴다 (20260825작18).
+    /// </summary>
+    /// <remarks>
+    /// 🔴 <b>사장님 결재</b>: <i>"매입불러오기 화면을 따로 만들게 아니라 그 버튼 클릭시,
+    /// 매입처리의 매입목록으로 바로 화면을 보내면 되잖아."</i>
+    /// <para>
+    /// 그래서 새 다이얼로그를 만들지 않고 기존 <c>PurchaseReceiptList</c> 를 그대로 연다.
+    /// 그 컴포넌트는 이미 행 클릭 시 <c>MudDialog.Close(Ok(ReceiptId))</c> 로 선택을 돌려준다.
+    /// </para>
+    /// </remarks>
+    private async Task LoadFromReceiptAsync()
+    {
+        if (_isLoadingReceipt || _draft is null) return;
+
+        var options = new DialogOptions { MaxWidth = MaxWidth.ExtraLarge, FullWidth = true, CloseButton = true };
+        var dlg = await DialogService.ShowAsync<PurchaseReceiptList>("매입 목록에서 불러오기", options);
+        var result = await dlg.Result;
+        if (result is null || result.Canceled) return;
+        if (result.Data is not string receiptId || string.IsNullOrWhiteSpace(receiptId)) return;
+
+        _isLoadingReceipt = true;
+        try
+        {
+            var detail = await DeliveryService.GetPurchaseReceiptDetailAsync(receiptId);
+            if (detail is null)
+            {
+                Snackbar.Add("매입명세서를 불러오지 못했습니다.", Severity.Error);
+                return;
+            }
+
+            // 헌법 #6 — 받은 적 없는 물건은 반품 대상이 아니다.
+            //   판매쪽과 같은 가드다(SalesReturnPage "판매확정 전 거래는 반품할 수 없습니다").
+            //   서버도 전환 경로에서 같은 검사를 하지만, 화면에서 먼저 막아야 헛걸음이 없다.
+            if (!string.Equals(detail.Status, "confirmed", StringComparison.OrdinalIgnoreCase))
+            {
+                Snackbar.Add("매입확정 전 명세서는 반품할 수 없습니다. 먼저 매입확정 해주세요.", Severity.Warning);
+                return;
+            }
+
+            if (detail.Items.Count == 0)
+            {
+                Snackbar.Add($"[{detail.ReceiptNo}] 에 품목이 없습니다.", Severity.Warning);
+                return;
+            }
+
+            // 헌법 #1 — 이미 입력한 줄을 말없이 덮어쓰지 않는다.
+            var existing = _draft.Lines.Count(l => !l.IsPlaceholder && !string.IsNullOrWhiteSpace(l.ItemId));
+            if (existing > 0)
+            {
+                var ok = await DialogService.ShowMessageBoxAsync(
+                    "품목 교체",
+                    $"이미 입력된 품목 {existing}건이 있습니다.\n\n"
+                    + $"[{detail.ReceiptNo}] 의 품목으로 바꾸시겠습니까?",
+                    yesText: "바꾸기", cancelText: "취소");
+                if (ok != true) return;
+            }
+
+            var lines = new List<DeliveryLineModel>();
+            var no = 1;
+            foreach (var it in detail.Items)
+            {
+                lines.Add(new DeliveryLineModel
+                {
+                    No = no,
+                    RowNo = no,
+                    ItemId = it.ItemId,
+                    ItemName = it.ItemName,
+                    Spec = it.Spec ?? string.Empty,
+                    Unit = string.IsNullOrWhiteSpace(it.Unit) ? "EA" : it.Unit!,
+                    Quantity = it.Qty,
+                    // 반품은 산 값으로 돌려준다 — 여기서 단가를 다시 계산하면 반품액이 어긋난다.
+                    UnitPrice = it.UnitPrice,
+                    Warehouse = it.WarehouseId ?? string.Empty,
+                    IsPlaceholder = false
+                });
+                no++;
+            }
+            lines.Add(new DeliveryLineModel { No = no, RowNo = no, IsPlaceholder = true });
+
+            _draft.Lines = lines;
+            _draft.PartnerId = detail.PartnerId;
+            _draft.SalesCompany = detail.PartnerName;
+
+            // 🔴 작8 사고 이식 — 저장부가 거래처를 _partnerCache 에서 "이름으로" 찾는다.
+            //   그 캐시는 사람이 자동완성에 타이핑해야 처음 적재되므로, 불러오기로 들어오면
+            //   거래처가 화면에 멀쩡히 보이는데도 저장이 "거래처를 선택해주세요" 로 막힌다.
+            //   판매쪽에서 이미 겪은 사고다 — 매입에서 되풀이하지 않는다.
+            _partnerCache ??= await PartnersApi.GetListAsync() ?? new();
+
+            _selectedLine = null;
+            MarkDirty();
+            RecalculateSummary();
+            RefreshWorkflow();
+
+            Snackbar.Add($"[{detail.ReceiptNo}] 품목 {detail.Items.Count}건을 불러왔습니다. 반품할 수량으로 고쳐주세요.", Severity.Success);
+        }
+        finally
+        {
+            _isLoadingReceipt = false;
+        }
     }
 
     private async Task OpenListAsync()

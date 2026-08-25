@@ -134,15 +134,28 @@ public partial class PurchaseReturnList : ComponentBase
     {
         if (string.IsNullOrWhiteSpace(row.ReturnId)) return;
 
+        // 🔴 20260825작18 P0 — 확정만 IsSalesReturn 분기가 빠져 있었다.
+        //   같은 파일의 삭제(DeleteOneAsync)·일괄삭제는 진작 분기하는데 확정만 무조건
+        //   매출 경로로 갔다. 매입반품 ID 는 purchase_returns 에 있어 sales_returns 조회가
+        //   반드시 0건 → "반품 문서를 찾을 수 없습니다". 즉 목록에서 매입반품은
+        //   확정할 길이 아예 없었고, 그래서 반품현황(=confirmed 집계)도 영영 0건이었다.
+        //   ⇒ 사장님 증상 "반품처리가 작동이 안되니 당연(현황도 안 보임)" 의 실제 자리.
+        //   안내 문구도 갈라야 한다 — 매입반품은 매출·미수가 아니라 매입·미지급금을 건드린다.
+        var effectText = IsSalesReturn
+            ? "확정하면 반품 수량이 재고에 반영되고 매출·미수에서 차감됩니다."
+            : "확정하면 반품 수량이 재고에서 차감되고 매입·미지급금에서 차감됩니다.";
+
         var confirm = await DialogService.ShowMessageBoxAsync(
             "반품확정",
             $"[{row.ReturnNo}] 을(를) 확정하시겠습니까?\n\n"
-            + "확정하면 반품 수량이 재고에 반영되고 매출·미수에서 차감됩니다.\n"
-            + "확정 후에는 반품확인현황에 집계됩니다.",
+            + effectText + "\n"
+            + "확정 후에는 반품현황에 집계됩니다.",
             yesText: "확정", cancelText: "취소");
         if (confirm != true) return;
 
-        var (ok, error) = await DeliveryService.ConfirmSalesReturnAsync(row.ReturnId);
+        var (ok, error) = IsSalesReturn
+            ? await DeliveryService.ConfirmSalesReturnAsync(row.ReturnId)
+            : await DeliveryService.ConfirmPurchaseReturnAsync(row.ReturnId);
         if (ok)
         {
             Snackbar.Add($"[{row.ReturnNo}] 반품확정 되었습니다.", Severity.Success);

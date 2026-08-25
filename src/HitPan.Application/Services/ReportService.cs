@@ -1209,8 +1209,15 @@ public class ReportService : IReportService
         ORDER BY SupplyAmount DESC
         """;
 
-    // 사원별 — purchase_returns 에 created_by 컬럼 없음.
-    // 대신 receipt_id 로 연결된 purchase_receipts.created_by 로 추적.
+    // 사원별 — 반품 전표를 실제로 작성한 사람(purchase_returns.created_by)으로 집계한다.
+    //
+    // 🔴 20260825작18 봉합: 종전 주석은 "purchase_returns 에 created_by 컬럼 없음" 이라 적고
+    //   receipt_id → purchase_receipts.created_by 로 우회 조인했다. 그 주석이 **거짓**이었다 —
+    //   DESCRIBE 실측 결과 purchase_returns.created_by 는 실재하고, 같은 레포의
+    //   PurchaseService.GetReturnsAsync 는 이미 r.created_by 로 조인하고 있었다.
+    //   우회 조인 때문에 receipt_id 가 NULL 인 반품(= 매입명세서 없이 직접 작성한 건)은
+    //   작성자를 못 찾아 전부 '미지정' 으로 뭉쳤다. 게다가 매입을 친 사람과 반품을 친 사람이
+    //   다르면 엉뚱한 사람 실적이 됐다. 틀린 주석 위에 코드가 서 있던 자리다.
     private const string RT_BY_EMPLOYEE = """
         SELECT
             COALESCE(e.emp_name, '미지정') AS Label,
@@ -1220,13 +1227,12 @@ public class ReportService : IReportService
             COALESCE(SUM(rt.vat_amount), 0) AS VatAmount,
             COALESCE(SUM(rt.total_amount + rt.vat_amount), 0) AS TotalAmount
         FROM purchase_returns rt
-        LEFT JOIN purchase_receipts pr ON pr.receipt_id = rt.receipt_id AND pr.tenant_id = rt.tenant_id
-        LEFT JOIN employees e ON e.user_id = pr.created_by AND e.tenant_id = rt.tenant_id
+        LEFT JOIN employees e ON e.user_id = rt.created_by AND e.tenant_id = rt.tenant_id
         WHERE rt.tenant_id = @TenantId AND rt.is_deleted = 0 AND rt.status = 'confirmed'
           AND (@From IS NULL OR rt.return_date >= @From)
           AND (@To IS NULL OR rt.return_date <= @To)
           AND (@Partner IS NULL OR e.emp_name LIKE CONCAT('%', @Partner, '%'))
-        GROUP BY pr.created_by, e.emp_name
+        GROUP BY rt.created_by, e.emp_name
         ORDER BY SupplyAmount DESC
         """;
 

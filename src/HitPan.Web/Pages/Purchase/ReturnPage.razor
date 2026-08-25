@@ -54,6 +54,12 @@
 
         <MudToolBar Dense="true" Style="overflow-x:auto;flex-wrap:nowrap" Class="pa-1 gap-1">
             <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Add" OnClick="AddNewAsync">추가</MudButton>
+            @* 🔴 20260825작18 — 사장님 오더 "반품처리에 매입자료 불러오기 버튼 생성".
+                 사장님 결재로 **새 화면을 만들지 않는다** — 매입처리의 매입목록을 그대로 연다.
+                 담당자가 이미 아는 화면이라 배울 것이 없다. *@
+            <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Download"
+                       OnClick="LoadFromReceiptAsync"
+                       Disabled="@(_status != "Draft" || _isLoadingReceipt)">매입불러오기</MudButton>
             <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Save" OnClick="SaveAsync">저장</MudButton>
             <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Undo" OnClick="CancelAsync">취소</MudButton>
             <MudButton Variant="Variant.Outlined" Color="Color.Error" StartIcon="@Icons.Material.Filled.Delete" OnClick="DeleteConfirmAsync">삭제</MudButton>

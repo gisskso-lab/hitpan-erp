@@ -392,14 +392,26 @@ public partial class PurchaseReceiptList : ComponentBase
             yesText: "전환", cancelText: "취소");
         if (confirm != true) return;
 
+        // 20260825작18 — 실패 사유를 삼키지 않는다. 종전엔 성공 건수만 세어,
+        //   전환이 왜 안 됐는지 담당자가 알 길이 없었다 (헌법 #15).
         var success = 0;
+        var failed = new List<string>();
         foreach (var id in ids)
         {
-            var ok = await DeliveryService.ConvertReceiptToReturnAsync(id);
+            var (ok, _, _, error) = await DeliveryService.ConvertReceiptToReturnAsync(id);
             if (ok) success++;
+            else failed.Add(string.IsNullOrWhiteSpace(error) ? "알 수 없는 오류" : error);
         }
 
-        Snackbar.Add($"{success}건 반품 전환 완료", Severity.Success);
+        if (failed.Count == 0)
+        {
+            Snackbar.Add($"{success}건 반품 전환 완료", Severity.Success);
+        }
+        else
+        {
+            Snackbar.Add($"{success}건 전환 · {failed.Count}건 실패: {failed[0]}", Severity.Warning);
+        }
+
         await LoadAsync();
     }
 
