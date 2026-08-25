@@ -282,6 +282,19 @@ public class SalesController : ControllerBase
         return Ok(list);
     }
 
+
+    /// <summary>
+    /// 지금까지 쓰인 매출반품 사유 목록을 조회한다 — 자율 입력값의 재사용 (20260825작6).
+    /// </summary>
+    [HttpGet("returns/reasons")]
+    public async Task<IActionResult> GetSalesReturnReasons(CancellationToken ct)
+    {
+        var tenantId = HttpContext.Items["TenantId"]?.ToString();
+        if (string.IsNullOrEmpty(tenantId)) return Forbid();
+
+        var reasons = await _salesService.GetSalesReturnReasonsAsync(tenantId, ct);
+        return Ok(reasons);
+    }
     [HttpGet("returns/{id}")]
     public async Task<IActionResult> GetSalesReturnDetail(string id, CancellationToken ct)
     {

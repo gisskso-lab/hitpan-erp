@@ -788,6 +788,26 @@ public sealed class DeliveryService(HttpClient http)
         }
     }
 
+    /// <summary>매출반품 단건 상세 — 반품확인서 화면 전용 (20260825작6).</summary>
+    /// <remarks>
+    /// 🔴 기존 <see cref="GetSalesReturnDetailAsync"/> 를 고치지 않고 <b>따로 둔다.</b>
+    /// 그 메서드는 매입관리 반품 화면도 쓰고 있어, 반환 타입을 바꾸면 매입이 깨진다.
+    /// (실제로 한 번 바꿨다가 빌드가 잡았다 — 헌법 #1 · #12)
+    /// 이쪽만 <see cref="SalesReturnDetailModel"/> 로 받아 <b>로스</b> 표시를 살려 온다.
+    /// </remarks>
+    public async Task<SalesReturnDetailModel?> GetSalesReturnDetailForSalesAsync(string returnId, CancellationToken ct = default)
+    {
+        try
+        {
+            return await http.GetFromJsonAsync<SalesReturnDetailModel>(
+                $"api/sales/returns/{Uri.EscapeDataString(returnId)}", JsonOptions, ct);
+        }
+        catch (Exception)
+        {
+            return null;
+        }
+    }
+
     /// <summary>매출반품 삭제 (draft만). 성공 시 (true, null).</summary>
     public async Task<(bool Success, string? Error)> DeleteSalesReturnAsync(string returnId, CancellationToken ct = default)
     {

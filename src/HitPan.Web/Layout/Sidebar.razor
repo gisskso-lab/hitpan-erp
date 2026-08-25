@@ -235,6 +235,8 @@
         <MudNavLink Href="/sales/summary" Icon="@Icons.Material.Filled.BarChart">판매현황</MudNavLink>
         <MudNavLink Href="/sales/ranking" Icon="@Icons.Material.Filled.EmojiEvents">판매순위표</MudNavLink>
         <MudNavLink Href="/sales/profitability" Icon="@Icons.Material.Filled.TrendingUp">판매수익성분석</MudNavLink>
+        <MudNavLink Icon="@Icons.Material.Filled.AssignmentReturned" OnClick="@(() => TabService.TryAddTab(WorkDocumentKind.SalesReturn))">반품확인서</MudNavLink>
+        <MudNavLink Href="/sales-return-status" Icon="@Icons.Material.Filled.ListAlt">반품확인현황</MudNavLink>
         <MudNavLink Href="/sales/statistics" Icon="@Icons.Material.Filled.Analytics">판매통계</MudNavLink>
     </MudNavGroup>
 

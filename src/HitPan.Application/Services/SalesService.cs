@@ -1848,6 +1848,27 @@ public class SalesService : ISalesService
     // BOM 폭파 역행은 불필요(반품은 완제품 그대로 입고).
     // ═════════════════════════════════════════════════════════════════════
 
+
+    /// <inheritdoc />
+    public async Task<List<string>> GetSalesReturnReasonsAsync(string tenantId, CancellationToken ct = default)
+    {
+        // 20260825작6 — 사장님 지시: 사유는 콤보가 아니라 자율 입력이고,
+        //   한 번 쓴 말이 다음부터 선택지가 된다. 우리가 코드를 미리 정하지 않는다(헌법 #11 과 같은 축).
+        //   삭제분(is_deleted=1)은 뺀다 — 지운 문서의 말이 목록에 남으면 안 된다.
+        var rows = await _db.QueryAsync<string>(new CommandDefinition(
+            """
+            SELECT DISTINCT return_reason
+              FROM sales_returns
+             WHERE tenant_id = @Tid
+               AND is_deleted = 0
+               AND return_reason IS NOT NULL
+               AND TRIM(return_reason) <> ''
+             ORDER BY return_reason
+            """,
+            new { Tid = tenantId }, cancellationToken: ct));
+
+        return rows.ToList();
+    }
     public async Task<List<SalesReturnListDto>> GetSalesReturnsAsync(
         string tenantId, DateTime? from = null, DateTime? to = null, string? status = null, CancellationToken ct = default)
     {
@@ -1892,7 +1913,8 @@ public class SalesService : ISalesService
             SELECT sri.return_item_id AS ReturnItemId, sri.item_id AS ItemId,
                    COALESCE(i.item_name,'') AS ItemName, i.spec AS Spec, i.unit AS Unit,
                    sri.warehouse_id AS WarehouseId, sri.qty AS Qty, sri.unit_price AS UnitPrice,
-                   sri.supply_amount AS SupplyAmount, sri.vat_amount AS VatAmount
+                   sri.supply_amount AS SupplyAmount, sri.vat_amount AS VatAmount,
+                   sri.is_loss AS IsLoss
             FROM sales_return_items sri
             LEFT JOIN items i ON i.item_id = sri.item_id
             WHERE sri.return_id = @Id AND sri.tenant_id = @Tid
@@ -1951,14 +1973,16 @@ public class SalesService : ISalesService
         {
             await _db.ExecuteAsync(new CommandDefinition(
                 @"INSERT INTO sales_return_items (return_item_id, return_id, tenant_id, delivery_item_id,
-                    item_id, qty, unit_price, original_unit_price, supply_amount, vat_amount, warehouse_id)
-                  VALUES (UUID(), @ReturnId, @Tid, @DeliveryItemId, @ItemId, @Qty, @Price, @OrigPrice, @Supply, @Vat, @Wh)",
+                    item_id, qty, unit_price, original_unit_price, supply_amount, vat_amount, warehouse_id, is_loss)
+                  VALUES (UUID(), @ReturnId, @Tid, @DeliveryItemId, @ItemId, @Qty, @Price, @OrigPrice, @Supply, @Vat, @Wh, @IsLoss)",
                 new
                 {
                     ReturnId = returnId, Tid = tenantId, DeliveryItemId = it.DeliveryItemId,
                     ItemId = it.ItemId, Qty = it.Qty, Price = it.UnitPrice,
                     OrigPrice = it.OriginalUnitPrice ?? it.UnitPrice,
-                    Supply = it.SupplyAmount, Vat = it.VatAmount, Wh = it.WarehouseId
+                    Supply = it.SupplyAmount, Vat = it.VatAmount, Wh = it.WarehouseId,
+                    // 20260825작6: 파손 로스 여부 — 확정 시 재고 반영을 가른다.
+                    IsLoss = it.IsLoss
                 }, cancellationToken: ct));
         }
 
@@ -2014,14 +2038,16 @@ public class SalesService : ISalesService
         {
             await _db.ExecuteAsync(new CommandDefinition(
                 @"INSERT INTO sales_return_items (return_item_id, return_id, tenant_id, delivery_item_id,
-                    item_id, qty, unit_price, original_unit_price, supply_amount, vat_amount, warehouse_id)
-                  VALUES (UUID(), @ReturnId, @Tid, @DeliveryItemId, @ItemId, @Qty, @Price, @OrigPrice, @Supply, @Vat, @Wh)",
+                    item_id, qty, unit_price, original_unit_price, supply_amount, vat_amount, warehouse_id, is_loss)
+                  VALUES (UUID(), @ReturnId, @Tid, @DeliveryItemId, @ItemId, @Qty, @Price, @OrigPrice, @Supply, @Vat, @Wh, @IsLoss)",
                 new
                 {
                     ReturnId = returnId, Tid = tenantId, DeliveryItemId = it.DeliveryItemId,
                     ItemId = it.ItemId, Qty = it.Qty, Price = it.UnitPrice,
                     OrigPrice = it.OriginalUnitPrice ?? it.UnitPrice,
-                    Supply = it.SupplyAmount, Vat = it.VatAmount, Wh = it.WarehouseId
+                    Supply = it.SupplyAmount, Vat = it.VatAmount, Wh = it.WarehouseId,
+                    // 20260825작6: 파손 로스 여부 — 확정 시 재고 반영을 가른다.
+                    IsLoss = it.IsLoss
                 }, cancellationToken: ct));
         }
     }
@@ -2042,7 +2068,8 @@ public class SalesService : ISalesService
         await ApprovalTriggerHelper.EnsureNotClosedAsync(_db, tenantId, rd, ct);
 
         var items = (await _db.QueryAsync<dynamic>(new CommandDefinition(
-            "SELECT item_id, qty, unit_price, supply_amount, warehouse_id FROM sales_return_items WHERE return_id=@Id AND tenant_id=@Tid",
+            // 20260825작6: is_loss 를 함께 읽는다 — 파손품은 재고에 넣지 않는다.
+            "SELECT item_id, qty, unit_price, supply_amount, warehouse_id, is_loss FROM sales_return_items WHERE return_id=@Id AND tenant_id=@Tid",
             new { Id = returnId, Tid = tenantId }, cancellationToken: ct))).ToList();
 
         var returnNo = (string)header.return_no;
@@ -2070,7 +2097,13 @@ public class SalesService : ISalesService
 
             // stock_ledger UNIQUE 키(tenant, source_type=sales_return, source_id=returnId, item_id, move_type=in)
             // 단위 유일 — 같은 품목 2라인이면 item_id 합산해 키당 1행만 기록(7차 B-1 대칭).
+            // 🔴 20260825작6 — 파손 로스는 재고에 넣지 않는다.
+            //   사장님 정의: "파손이면 로스로 정의, 파손이 아니면 재입고(재고반영)".
+            //   팔 수 없는 물건을 재고로 잡으면 현장에서 세는 숫자와 어긋난다.
+            //   ⚠️ 걸러내는 것은 재고뿐이다 — 매출·미수 차감(③④)은 로스도 그대로 간다.
+            //      물건은 못 쓰지만 고객에게 돈은 돌려주기 때문이다.
             var returnGroups = items
+                .Where(it => (int)(it.is_loss ?? 0) == 0)
                 .GroupBy(it => (string)it.item_id)
                 .Select(g => new
                 {
@@ -2193,7 +2226,8 @@ public class SalesService : ISalesService
         await ApprovalTriggerHelper.EnsureNotClosedAsync(_db, tenantId, rd, ct);
 
         var items = (await _db.QueryAsync<dynamic>(new CommandDefinition(
-            "SELECT item_id, qty, unit_price, supply_amount, warehouse_id FROM sales_return_items WHERE return_id=@Id AND tenant_id=@Tid",
+            // 20260825작6: 확정과 대칭 — is_loss 를 함께 읽어 로스는 역행에서도 뺀다.
+            "SELECT item_id, qty, unit_price, supply_amount, warehouse_id, is_loss FROM sales_return_items WHERE return_id=@Id AND tenant_id=@Tid",
             new { Id = returnId, Tid = tenantId }, cancellationToken: ct))).ToList();
 
         var returnNo = (string)header.return_no;
@@ -2221,7 +2255,10 @@ public class SalesService : ISalesService
 
             // 확정 시 item_id 합산 1행 기록과 대칭으로, 취소도 item_id 합산해 키당 1행만 역행 기록.
             //   stock_ledger UNIQUE 키(tenant, source_type=sales_return_cancel, source_id=returnId, item_id, move_type=out).
+            // 🔴 20260825작6 — 확정에서 재고에 안 넣은 로스는 취소에서도 빼지 않는다.
+            //   안 넣은 것을 빼면 재고가 그만큼 마이너스로 어긋난다. 확정과 반드시 같은 잣대여야 한다.
             var returnGroups = items
+                .Where(it => (int)(it.is_loss ?? 0) == 0)
                 .GroupBy(it => (string)it.item_id)
                 .Select(g => new
                 {

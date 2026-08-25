@@ -1,0 +1,197 @@
+@page "/sales-return-status"
+@namespace HitPan.Web.Pages.SalesUi
+@attribute [Authorize]
+@using HitPan.Web.Models
+@using System.Net.Http.Json
+@inject HttpClient Http
+@inject IJSRuntime Js
+@inject ISnackbar Snackbar
+@inject GridExportService GridExport
+@inject PartnerMasterService PartnersApi
+@inject ItemMasterService ItemsApi
+
+<PageTitle>반품확인현황</PageTitle>
+<MudText Typo="Typo.h6" Class="mb-3">반품확인현황</MudText>
+
+<MudPaper Class="pa-3 mb-3" Elevation="0" Style="border:1px solid var(--mud-palette-lines-default);border-radius:12px">
+    <div class="hitpan-filter-bar">
+        <div class="hitpan-filter-field hitpan-filter-field--md">
+            <MudSelect T="string" Value="_viewType" ValueChanged="OnViewTypeChangedAsync" Label="조회유형" Variant="Variant.Outlined" Margin="Margin.Dense">
+                <MudSelectItem Value="@("period")">기간별 반품확인현황</MudSelectItem>
+                <MudSelectItem Value="@("item")">품목별 반품확인현황</MudSelectItem>
+                <MudSelectItem Value="@("partner")">업체별 반품확인현황</MudSelectItem>
+                <MudSelectItem Value="@("employee")">사원별 반품확인현황</MudSelectItem>
+            </MudSelect>
+        </div>
+        <div class="hitpan-filter-field hitpan-filter-field--sm">
+            <MudDatePicker @bind-Date="_from" Label="시작일" Variant="Variant.Outlined" Margin="Margin.Dense" DateFormat="yyyy-MM-dd" />
+        </div>
+        <div class="hitpan-filter-field hitpan-filter-field--sm">
+            <MudDatePicker @bind-Date="_to" Label="종료일" Variant="Variant.Outlined" Margin="Margin.Dense" DateFormat="yyyy-MM-dd" />
+        </div>
+        @if (ShowSearchBox())
+        {
+            <div class="hitpan-filter-field hitpan-filter-field--md">
+                @if (_viewType is "item")
+                {
+                    <MudAutocomplete T="string" Value="_searchText" ValueChanged="@(v => _searchText = v)"
+                        SearchFunc="SearchItemAsync" Margin="Margin.Dense" Label="품명" Placeholder="검색"
+                        Variant="Variant.Outlined" />
+                }
+                else if (_viewType is "partner")
+                {
+                    <MudAutocomplete T="string" Value="_searchText" ValueChanged="@(v => _searchText = v)"
+                        SearchFunc="SearchPartnerAsync" Margin="Margin.Dense" Label="업체" Placeholder="검색"
+                        Variant="Variant.Outlined" />
+                }
+                else
+                {
+                    <MudTextField @bind-Value="_searchText" Label="@GetFilterLabel()" Variant="Variant.Outlined"
+                        Margin="Margin.Dense" Adornment="Adornment.End" AdornmentIcon="@Icons.Material.Filled.Search" />
+                }
+            </div>
+        }
+        <div class="hitpan-filter-actions">
+            <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="SearchAsync">조회</MudButton>
+            <MudButton Variant="Variant.Outlined" Size="Size.Small" StartIcon="@Icons.Material.Filled.TableChart" OnClick="ExportExcelAsync">엑셀</MudButton>
+            <MudButton Variant="Variant.Outlined" Size="Size.Small" StartIcon="@Icons.Material.Filled.Print" OnClick="PrintAsync">인쇄</MudButton>
+        </div>
+    </div>
+</MudPaper>
+
+@* 사장님 결재 2026-04-29: 4종 풀스택 → 가드 제거 *@
+<MudPaper Elevation="0" Class="hitpan-card" Style="overflow:hidden">
+    <MudTable T="ReportRow" Items="_reportData" Dense="true" Hover="true" Striped="true" FixedHeader="true" Height="calc(100vh - 280px)">
+        <HeaderContent>
+            <MudTh>@GetLabelHeader()</MudTh>
+            <MudTh Style="text-align:right">건수</MudTh>
+            @if (_viewType == "item") { <MudTh Style="text-align:right">수량</MudTh> }
+            <MudTh Style="text-align:right">공급가액</MudTh>
+            <MudTh Style="text-align:right">부가세</MudTh>
+            <MudTh Style="text-align:right">합계</MudTh>
+        </HeaderContent>
+        <RowTemplate>
+            <MudTd>@context.Label</MudTd>
+            <MudTd Style="text-align:right">@context.Count.ToString("N0")</MudTd>
+            @if (_viewType == "item") { <MudTd Style="text-align:right">@context.Qty.ToString("N1")</MudTd> }
+            <MudTd Style="text-align:right">@context.SupplyAmount.ToString("N0")</MudTd>
+            <MudTd Style="text-align:right">@context.VatAmount.ToString("N0")</MudTd>
+            <MudTd Style="text-align:right;font-weight:500">@context.TotalAmount.ToString("N0")</MudTd>
+        </RowTemplate>
+        <NoRecordsContent><MudText Class="pa-4" Style="color:var(--hitpan-text-faint)">조회된 반품확인서가 없습니다.</MudText></NoRecordsContent>
+    </MudTable>
+</MudPaper>
+
+@code {
+    private DateTime? _from = DateTime.Today.AddDays(-30);
+    private DateTime? _to = DateTime.Today;
+    private string _searchText = "";
+    private string _viewType = "period";
+    private List<ReportRow> _reportData = new();
+
+    protected override async Task OnInitializedAsync() => await SearchAsync();
+
+    /// <summary>
+    /// 조회유형 변경 시 즉시 재조회한다 (20260825작2 봉합 계승).
+    /// 매입반품현황은 @bind-Value 라 콤보를 바꿔도 헤더만 바뀌고 데이터는 그대로였다.
+    /// 신규 화면이 같은 결함을 갖고 태어나지 않도록 처음부터 넣는다.
+    /// 검색어도 비운다 — 유형이 바뀌면 검색어 의미(품명↔업체)가 달라져 0건이 된다.
+    /// </summary>
+    private async Task OnViewTypeChangedAsync(string value)
+    {
+        _viewType = value;
+        _searchText = "";
+        await SearchAsync();
+    }
+
+    private async Task SearchAsync()
+    {
+        var qs = new List<string>();
+        qs.Add($"view={_viewType}");
+        if (_from.HasValue) qs.Add($"from={_from:yyyy-MM-dd}");
+        if (_to.HasValue) qs.Add($"to={_to:yyyy-MM-dd}");
+        if (!string.IsNullOrWhiteSpace(_searchText)) qs.Add($"partner={Uri.EscapeDataString(_searchText)}");
+        var path = "api/reports/sales-returns?" + string.Join("&", qs);
+        try
+        {
+            _reportData = await Http.GetFromJsonAsync<List<ReportRow>>(path) ?? new();
+        }
+        catch (Exception _hp15Ex)
+        {
+            Console.Error.WriteLine($"[HP15] " + _hp15Ex.GetType().Name + ": " + _hp15Ex.Message);
+            _reportData = new();
+        }
+        StateHasChanged();
+    }
+
+    /// <summary>화면 데이터를 엑셀로 내보낸다.</summary>
+    private async Task ExportExcelAsync()
+    {
+        // 🔴 봉합 2026-08-12 — 종전에는 "준비중입니다" 스낵바만 띄우는 가짜 버튼이었다.
+        // 수량 열은 화면에서 품목별 조회일 때만 나온다 — 파일도 같아야 한다.
+        var showQty = _viewType == "item";
+
+        var headers = new List<string> { GetLabelHeader(), "건수" };
+        if (showQty) headers.Add("수량");
+        headers.AddRange(new[] { "공급가액", "부가세", "합계" });
+
+        var rows = _reportData.Select(r =>
+        {
+            var cells = new List<object?> { r.Label, r.Count };
+            if (showQty) cells.Add(r.Qty);
+            cells.Add(r.SupplyAmount);
+            cells.Add(r.VatAmount);
+            cells.Add(r.TotalAmount);
+            return (IReadOnlyList<object?>)cells;
+        }).ToList();
+
+        var subtitle = BuildSubtitle();
+        await GridExport.ExportExcelAsync("반품확인 현황", headers, rows, subtitle);
+    }
+    /// <summary>화면을 인쇄한다.</summary>
+    /// <summary>엑셀·인쇄가 함께 쓰는 부제(기간·건수).</summary>
+    /// <remarks>한 곳에서 만든다 — 따로 만들면 파일과 종이의 기간이 갈린다.</remarks>
+    private string BuildSubtitle() => $"{_from:yyyy-MM-dd} ~ {_to:yyyy-MM-dd} · 총 {_reportData.Count:N0}건";
+
+    /// <summary>화면을 인쇄한다. 인쇄창에서 "PDF로 저장" 을 고르면 PDF 가 된다.</summary>
+    /// <remarks>
+    /// 제목·기간을 같이 넘긴다 — 안 넘기면 종이에 표만 나와서
+    /// 거래처·세무사가 무슨 자료인지 알 수 없다 (사장님 지시 2026-08-12).
+    /// </remarks>
+    private async Task PrintAsync() => await GridExport.PrintAsync("반품확인 현황", BuildSubtitle());
+
+    private string GetLabelHeader() => _viewType switch
+    {
+        "partner" => "업체명",
+        "item" => "품명",
+        "employee" => "사원명",
+        _ => "기간"
+    };
+
+    private string GetFilterLabel() => _viewType switch
+    {
+        "partner" => "업체명",
+        "item" => "품명",
+        "employee" => "사원명",
+        _ => "검색어"
+    };
+
+    private bool ShowSearchBox() => _viewType is not "period";
+
+    private List<PartnerListRow>? _partnerCache;
+    private List<ItemListModel>? _itemCache;
+
+    private async Task<IEnumerable<string>> SearchPartnerAsync(string value, CancellationToken ct)
+    {
+        _partnerCache ??= await PartnersApi.GetListAsync() ?? new();
+        if (string.IsNullOrWhiteSpace(value)) return _partnerCache.Select(p => p.PartnerName).Distinct();
+        return _partnerCache.Where(p => p.PartnerName.Contains(value, StringComparison.OrdinalIgnoreCase)).Select(p => p.PartnerName).Distinct();
+    }
+
+    private async Task<IEnumerable<string>> SearchItemAsync(string value, CancellationToken ct)
+    {
+        _itemCache ??= await ItemsApi.GetListAsync() ?? new();
+        if (string.IsNullOrWhiteSpace(value)) return _itemCache.Select(i => i.ItemName).Distinct();
+        return _itemCache.Where(i => i.ItemName.Contains(value, StringComparison.OrdinalIgnoreCase)).Select(i => i.ItemName).Distinct();
+    }
+}

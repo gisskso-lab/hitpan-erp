@@ -34,6 +34,15 @@ public sealed class DeliveryLineModel
     public decimal VatAmount => decimal.Round(Amount * 0.1m, 2, MidpointRounding.AwayFromZero);
     public decimal Total => Amount + VatAmount;
     public string Note { get; set; } = string.Empty;
+
+    /// <summary>파손 로스 여부 — 매출반품에서만 쓴다 (20260825작6).</summary>
+    /// <remarks>
+    /// 사장님 정의: <i>"파손이면 로스로 정의, 파손이 아니면 재입고(재고반영)"</i>.
+    /// 체크하면 확정해도 <b>재고에 안 들어간다</b> — 팔 수 없는 물건이라서다.
+    /// 매출·미수 차감은 그대로 간다(고객에게 돈은 돌려준다).
+    /// </remarks>
+    public bool IsLoss { get; set; }
+
     public string Warehouse { get; set; } = string.Empty;
     public string LineAssignee { get; set; } = string.Empty;
     public bool IsPlaceholder { get; set; }
@@ -506,6 +515,47 @@ public sealed class PurchaseReturnDetailItem
     public decimal VatAmount { get; set; }
 }
 
+
+/// <summary>매출반품(반품확인서) 상세 — 매입반품과 별개 모델이다 (20260825작6).</summary>
+/// <remarks>
+/// 사장님 정의: <i>"매출에 있는 반품 = 사용자의 고객사가 반품처리한 품목관리"</i>.
+/// 매입반품 모델(<see cref="PurchaseReturnDetailModel"/>)을 재사용하지 않는다 —
+/// 매출에만 있는 <b>로스</b> 개념이 매입 화면으로 새어 들어가면 안 되기 때문이다.
+/// </remarks>
+public sealed class SalesReturnDetailModel
+{
+    public string ReturnId { get; set; } = string.Empty;
+    public string ReturnNo { get; set; } = string.Empty;
+    public DateTime ReturnDate { get; set; }
+    public string? DeliveryId { get; set; }
+    public string PartnerId { get; set; } = string.Empty;
+    public string PartnerName { get; set; } = string.Empty;
+    public decimal TotalAmount { get; set; }
+    public decimal VatAmount { get; set; }
+    public string Status { get; set; } = string.Empty;
+    public string? Memo { get; set; }
+    public string? ReturnReason { get; set; }
+    public string? ReturnReasonMemo { get; set; }
+    public List<SalesReturnDetailItem> Items { get; set; } = new();
+}
+
+/// <summary>매출반품 품목줄 — 로스 표시가 있다 (20260825작6).</summary>
+public sealed class SalesReturnDetailItem
+{
+    public string ReturnItemId { get; set; } = string.Empty;
+    public string ItemId { get; set; } = string.Empty;
+    public string ItemName { get; set; } = string.Empty;
+    public string? Spec { get; set; }
+    public string? Unit { get; set; }
+    public string? WarehouseId { get; set; }
+    public decimal Qty { get; set; }
+    public decimal UnitPrice { get; set; }
+    public decimal SupplyAmount { get; set; }
+    public decimal VatAmount { get; set; }
+
+    /// <summary>파손 로스 여부 — true 면 확정해도 재고에 안 들어간다.</summary>
+    public bool IsLoss { get; set; }
+}
 public enum DeliveryContextAction
 {
     CopyRow,

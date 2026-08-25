@@ -154,6 +154,33 @@ public class ReportController : ControllerBase
         return Ok(rows);
     }
 
+
+    /// <summary>
+    /// 매출반품(반품확인서) 현황을 조회한다 (20260825작6).
+    /// </summary>
+    /// <remarks>
+    /// 사장님 정의(2026-08-25): <i>"매출에 있는 반품 = 사용자의 고객사가 반품처리한 품목관리"</i>.
+    /// 매입반품(<c>GET returns</c>)과 방향이 반대인 별개 업무라 경로를 나눈다.
+    /// </remarks>
+    [HttpGet("sales-returns")]
+    [Authorize(Policy = "TenantOnly")]
+    public async Task<IActionResult> GetSalesReturnReport(
+        [FromQuery] string view = "period",
+        [FromQuery] DateTime? from = null,
+        [FromQuery] DateTime? to = null,
+        [FromQuery] string? partner = null,
+        CancellationToken ct = default)
+    {
+        var tenantId = HttpContext.Items["TenantId"]?.ToString();
+        if (string.IsNullOrEmpty(tenantId))
+        {
+            return Forbid();
+        }
+
+        var rows = await _reportService.GetSalesReturnReportAsync(view, tenantId, from, to, partner, ct)
+            .ConfigureAwait(false);
+        return Ok(rows);
+    }
     /// <summary>
     /// 판매 순위표를 조회한다.
     /// </summary>
