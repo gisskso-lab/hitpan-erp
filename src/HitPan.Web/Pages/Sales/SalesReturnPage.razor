@@ -84,9 +84,17 @@
             <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Undo" OnClick="CancelAsync">취소</MudButton>
             <MudButton Variant="Variant.Outlined" Color="Color.Error" StartIcon="@Icons.Material.Filled.Delete" OnClick="DeleteConfirmAsync">삭제</MudButton>
             <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.ContentCopy" OnClick="CopyAsync" Disabled="@_isNew">복사</MudButton>
+            @* 20260825작9 — 사장님 실측 반려 4번: "반품확정 버튼 없음".
+               🔴 이 화면은 작6 에서 매출반품(반품확인서) 전용으로 갈라져 나왔는데
+                  버튼의 권한 목록만 매입 쪽(purchase_manager)에 남아 있었다.
+               서버는 POST sales/returns/{id}/confirm 에 Policy="SalesManager"
+                 = system_admin · sales_manager · tenant_admin 을 요구한다.
+               ⇒ sales_manager 는 서버가 허용하는데 버튼이 안 보였고(이번 증상),
+                  purchase_manager 는 버튼이 보이는데 눌러도 서버가 403 이었다.
+               화면 권한을 서버 정책에 맞춘다 — 화면이 서버보다 관대해도, 인색해도 안 된다. *@
             @if (_status == "Draft" && !_isNew && !string.IsNullOrWhiteSpace(_draft.Id))
             {
-                <AuthorizeView Roles="tenant_admin,purchase_manager">
+                <AuthorizeView Roles="system_admin,tenant_admin,sales_manager">
                     <Authorized>
                         <MudButton Variant="Variant.Filled" Color="Color.Success"
                                    StartIcon="@Icons.Material.Filled.CheckCircle"
@@ -95,9 +103,11 @@
                 </AuthorizeView>
             }
             @* 확정된 반품 되돌리기 — 15차 적대검증 15-P1 봉합. 잘못 확정 시 원장 무결성 유지하며 복원. *@
+            @* 20260825작9: 취소도 같은 서버 정책(SalesManager)이다 — 확정만 고치고 취소를 두면
+               확정한 사람이 되돌리지 못하는 반쪽이 된다(작7 의 "생성은 넣고 수정은 안 넣던 비대칭"). *@
             @if (_status == "Confirmed" && !string.IsNullOrWhiteSpace(_draft.Id))
             {
-                <AuthorizeView Roles="tenant_admin,purchase_manager">
+                <AuthorizeView Roles="system_admin,tenant_admin,sales_manager">
                     <Authorized>
                         <MudButton Variant="Variant.Outlined" Color="Color.Warning"
                                    StartIcon="@Icons.Material.Filled.Undo"
