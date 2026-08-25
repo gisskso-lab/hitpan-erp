@@ -401,6 +401,19 @@ public class SalesController : ControllerBase
                         + "히트판을 껐다 켜 주시고, 그래도 같으면 관리자에게 알려주세요."
             });
         }
+        // 🔴 20260825작13 — 사장님 실측 반려(1.3.15): 확정이 여전히 500 이었다.
+        //   원장(stock_ledger·journal_entries)의 UNIQUE 제약 위반 = MySQL 1062.
+        //   레포 전체에서 1062 를 잡는 곳이 **한 군데도 없어**(grep 0건) 500 으로 샜다.
+        //   서비스 진입 가드가 1차로 막지만, 동시 클릭 등 경쟁 상황에서 여기까지 올 수 있다.
+        //   ⇒ 안전망을 둔다. 이미 반영된 것이므로 사용자에겐 실패가 아니라 **상태 안내**다.
+        catch (MySqlConnector.MySqlException ex) when (ex.Number == 1062)
+        {
+            return BadRequest(new
+            {
+                message = "이 반품은 이미 재고에 반영되어 있습니다. "
+                        + "목록을 새로고침해 상태를 확인해주세요."
+            });
+        }
     }
 
     // 매출반품 취소 — confirmed → canceled (15차 적대검증 15-P1 봉합). confirm 대칭.
@@ -427,6 +440,14 @@ public class SalesController : ControllerBase
             {
                 message = "업데이트가 아직 다 적용되지 않아 반품취소를 할 수 없습니다. "
                         + "히트판을 껐다 켜 주시고, 그래도 같으면 관리자에게 알려주세요."
+            });
+        }
+        // 20260825작13: 확정과 대칭 — 취소도 원장을 쓰므로 1062 가 날 수 있다.
+        catch (MySqlConnector.MySqlException ex) when (ex.Number == 1062)
+        {
+            return BadRequest(new
+            {
+                message = "이 반품은 이미 처리되어 있습니다. 목록을 새로고침해 상태를 확인해주세요."
             });
         }
     }
