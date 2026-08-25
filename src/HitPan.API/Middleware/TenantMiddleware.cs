@@ -27,6 +27,12 @@ public sealed class TenantMiddleware
             // /api/tenants/setup 제거 (2026-06-25): 익명 백도어 제거에 동반(부모계정은 create-parent 단일).
             || path.StartsWithSegments("/api/auth/login")
             || path.StartsWithSegments("/api/auth/refresh")
+            // 20260825작10 — 사장님 실측: 로그인창 콘솔에 401 이 계속 찍혔다.
+            //   이 주소는 "로그인 전" 업데이트 안내를 읽는다 — 토큰이 없는 게 정상이다.
+            //   엔드포인트에 [AllowAnonymous] 가 붙어 있는데도, 그 앞의 이 미들웨어가 먼저 401 로 잘랐다.
+            //   🔴 /api/auth 를 통째로 열지 않는다 — me·logout 까지 열린다. 이 주소 하나만 연다.
+            //   서버가 스스로 loopback 여부를 보고 판단하므로(AuthController), 열어도 정보가 새지 않는다.
+            || path.StartsWithSegments("/api/auth/update-status-local")
             || path.StartsWithSegments("/api/backoffice/auth")
             // 사장님 결재 저장 2026-06-02 모두결재 — 랜딩 가입·결제·설치 저장 = 인증 면제 (AllowAnonymous 저장 정합)
             || path.StartsWithSegments("/api/landing")

@@ -289,6 +289,115 @@ public class ReturnMeasuredRejectGateTests
             $"확정·취소 두 버튼 모두 매출 정책이어야 한다 (현재 {count}곳).");
     }
 
+    // ─────────────────────────────────────────────────────────────
+    // [작10] 500 의 원인을 말한다 · 401 면제 · 목록 확정버튼
+    // ─────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// 확정 경로가 <b>마이그 미적용 DB</b>에서도 죽지 않아야 한다.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// 사장님 1.3.13 실측 500 의 실제 원인 — <c>Unknown column 'is_loss' in 'SELECT'</c>.
+    /// DB-108(작6)이 아직 안 들어간 DB 에서 확정 SELECT 가 통째로 죽었다.
+    /// </para>
+    /// <para>
+    /// 🔴 헌법 #13 — 새 SQL 을 던지기 전에 실제 스키마를 확인한다.
+    /// 확정·취소 <b>양쪽</b>이 견뎌야 한다(한쪽만 고치면 되돌리지 못하는 반쪽이 된다).
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public void 반품확정취소는_is_loss_컬럼이_없어도_동작한다()
+    {
+        var svc = CodeLines(Read("src", "HitPan.Application", "Services", "SalesService.cs"));
+
+        // 스키마 확인 후 SELECT 를 고르는 경로가 있어야 한다.
+        Assert.Contains("HasSalesReturnLossColumnAsync", svc, StringComparison.Ordinal);
+        Assert.Contains("0 AS is_loss", svc, StringComparison.Ordinal);
+
+        // 확정·취소 두 곳 모두 — 정의 1 + 확정 1 + 취소 1 = 3회 이상 등장.
+        var uses = svc.Split(new[] { "HasSalesReturnLossColumnAsync" }, StringSplitOptions.None).Length - 1;
+        Assert.True(uses >= 3, $"확정·취소 양쪽이 스키마를 확인해야 한다 (현재 {uses}회).");
+    }
+
+    /// <summary>
+    /// 확정 실패 시 <b>무엇이 문제인지</b> 사용자에게 말해야 한다.
+    /// </summary>
+    /// <remarks>
+    /// 🔴 종전엔 <c>{"error":"서버 오류가 발생했습니다"}</c> 만 떴다.
+    /// 원인을 알 수 없는 것이 진짜 결함이었다 — 이걸 찾느라 하루를 썼다.
+    /// </remarks>
+    [Fact]
+    public void 확정실패는_스키마부재를_사용자말로_돌려준다()
+    {
+        var ctrl = CodeLines(Read("src", "HitPan.API", "Controllers", "SalesController.cs"));
+
+        // 1054(Unknown column) · 1146(Unknown table) 를 잡아 400 + 사유로 돌려준다.
+        Assert.Contains("1054", ctrl, StringComparison.Ordinal);
+        Assert.Contains("업데이트가 아직 다 적용되지 않아", ctrl, StringComparison.Ordinal);
+
+        // 개발용어 노출 금지 — 컬럼명·SQL 을 고객 화면에 쓰지 않는다.
+        Assert.DoesNotContain("Unknown column", ctrl, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// 화면이 <b>응답 JSON 을 통째로</b> 사용자에게 보여주면 안 된다.
+    /// </summary>
+    [Fact]
+    public void 반품확정_실패메시지는_JSON_원문을_노출하지_않는다()
+    {
+        var cs = ReturnPageCs();
+
+        Assert.Contains("ExtractServerMessage", cs, StringComparison.Ordinal);
+
+        // err 를 날것으로 스낵바에 넣던 표현이 남아 있으면 안 된다(사장님이 본 그 화면).
+        Assert.DoesNotContain("반품 확정 실패: {err}", cs, StringComparison.Ordinal);
+        Assert.DoesNotContain("반품 취소 실패: {err}", cs, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// 로그인 <b>전</b> 업데이트 안내 조회가 401 로 잘리면 안 된다.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// 엔드포인트는 <c>[AllowAnonymous]</c> 인데 앞단 <c>TenantMiddleware</c> 가 먼저 401 을 냈다.
+    /// </para>
+    /// <para>
+    /// 🔴 <c>/api/auth</c> 를 통째로 열면 <c>me</c>·<c>logout</c> 까지 열린다 — 이 주소 하나만 연다.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public void 로그인전_업데이트조회는_테넌트미들웨어를_통과한다()
+    {
+        var mw = CodeLines(Read("src", "HitPan.API", "Middleware", "TenantMiddleware.cs"));
+
+        Assert.Contains("/api/auth/update-status-local", mw, StringComparison.Ordinal);
+
+        // 면제를 넓히지 않았는지 — /api/auth 통째 개방 금지.
+        Assert.DoesNotContain("StartsWithSegments(\"/api/auth\")", mw, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// 반품 <b>목록</b>에도 확정 버튼이 있어야 한다.
+    /// </summary>
+    /// <remarks>
+    /// 사장님 실측: <i>"목록에는 없고, 반품확인서 전표작성에는 반품확정버튼 있음"</i>.
+    /// ⚠️ 매입반품과 공용 목록이라 <b>매출일 때만</b> 보여야 한다.
+    /// </remarks>
+    [Fact]
+    public void 반품목록에도_확정버튼이_있다()
+    {
+        var list = CodeLines(Read("src", "HitPan.Web", "Components", "Purchase", "PurchaseReturnList.razor"));
+
+        Assert.Contains("ConfirmOneAsync", list, StringComparison.Ordinal);
+
+        // 매출반품일 때만 — 매입에 잘못 뜨면 경로도 권한도 다른 확정이 나간다.
+        Assert.Contains("IsSalesReturn &&", list, StringComparison.Ordinal);
+
+        // 권한은 전표 화면과 동일해야 한다(작9).
+        Assert.Contains("Roles=\"system_admin,tenant_admin,sales_manager\"", list, StringComparison.Ordinal);
+    }
+
     /// <summary>
     /// 서버의 매출반품 확정·취소가 <c>SalesManager</c> 정책을 유지해야 한다.
     /// </summary>

@@ -2065,6 +2065,44 @@ public class SalesService : ISalesService
         }
     }
 
+    /// <summary>
+    /// <c>sales_return_items.is_loss</c> 가 이 DB 에 있는지 본다 (20260825작10).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// 사장님 1.3.13 실측에서 반품확정이 <b>500</b> 으로 죽었다. 재현해 보니 원인은
+    /// <c>Unknown column 'is_loss' in 'SELECT'</c> — DB-108(작6)이 아직 안 들어간 DB 였다.
+    /// </para>
+    /// <para>
+    /// 🔴 <b>헌법 #13</b> — 새 SQL 을 던지기 전에 실제 스키마를 확인한다.
+    /// 컬럼이 있을 거라 믿고 쓰면, 마이그가 하루라도 늦게 도착한 고객은 그날 업무를 못 한다.
+    /// </para>
+    /// <para>
+    /// ⚠️ 이 검사는 <b>기능을 끄지 않는다.</b> 컬럼이 생기는 순간 로스 판정은 그대로 살아난다.
+    /// </para>
+    /// </remarks>
+    private async Task<bool> HasSalesReturnLossColumnAsync(CancellationToken ct)
+    {
+        try
+        {
+            var n = await _db.ExecuteScalarAsync<int>(new CommandDefinition(
+                """
+                SELECT COUNT(*) FROM information_schema.COLUMNS
+                 WHERE TABLE_SCHEMA = DATABASE()
+                   AND TABLE_NAME   = 'sales_return_items'
+                   AND COLUMN_NAME  = 'is_loss'
+                """,
+                cancellationToken: ct)).ConfigureAwait(false);
+            return n > 0;
+        }
+        catch (Exception ex)
+        {
+            // 헌법 #15 — 침묵하지 않는다. 못 읽으면 없는 쪽(안전측)으로 본다.
+            System.Diagnostics.Trace.TraceWarning($"[SalesService] is_loss 컬럼 확인 실패: {ex.Message}");
+            return false;
+        }
+    }
+
     // 매출반품 확정 — draft → confirmed + 재고 IN + 매출 역분개 (단일 트랜잭션).
     // 매입반품 ConfirmPurchaseReturnAsync의 거울 — move_type out→in, RecordPurchaseReturn→RecordSalesDeliveryCancel.
     public async Task ConfirmSalesReturnAsync(string returnId, string tenantId, string? employeeId, CancellationToken ct = default)
@@ -2080,9 +2118,16 @@ public class SalesService : ISalesService
         DateTime rd = (DateTime)header.return_date;
         await ApprovalTriggerHelper.EnsureNotClosedAsync(_db, tenantId, rd, ct);
 
+        // 20260825작10: is_loss 컬럼이 아직 없는 DB 에서도 확정은 되어야 한다.
+        //   사장님 1.3.13 실측 500 의 실제 원인이 여기였다 — "Unknown column 'is_loss' in 'SELECT'".
+        //   DB-108(작6) 이 아직 안 들어간 고객 DB 에서 이 SELECT 가 통째로 죽었다.
+        //   🔴 로스 기능을 끄는 게 아니다. 컬럼이 생기면 그대로 동작한다.
+        //      마이그가 늦게 도착한 DB 에서도 반품확정 자체는 되게 한다(헌법 #20 — 흐름은 안 끊는다).
+        var hasLossColumn = await HasSalesReturnLossColumnAsync(ct).ConfigureAwait(false);
+        var lossSelect = hasLossColumn ? "is_loss" : "0 AS is_loss";
         var items = (await _db.QueryAsync<dynamic>(new CommandDefinition(
             // 20260825작6: is_loss 를 함께 읽는다 — 파손품은 재고에 넣지 않는다.
-            "SELECT item_id, qty, unit_price, supply_amount, warehouse_id, is_loss FROM sales_return_items WHERE return_id=@Id AND tenant_id=@Tid",
+            $"SELECT item_id, qty, unit_price, supply_amount, warehouse_id, {lossSelect} FROM sales_return_items WHERE return_id=@Id AND tenant_id=@Tid",
             new { Id = returnId, Tid = tenantId }, cancellationToken: ct))).ToList();
 
         var returnNo = (string)header.return_no;
@@ -2238,9 +2283,13 @@ public class SalesService : ISalesService
         // 마감월 보호 — 확정과 동일(닫힌 월의 원장은 건드리지 않는다).
         await ApprovalTriggerHelper.EnsureNotClosedAsync(_db, tenantId, rd, ct);
 
+        // 20260825작10: 확정과 대칭 — 여기도 컬럼 없는 DB 를 견딘다.
+        //   확정만 고치고 취소를 두면 "확정은 되는데 되돌리진 못하는" 반쪽이 된다(작9 교훈).
+        var hasLossColumnForCancel = await HasSalesReturnLossColumnAsync(ct).ConfigureAwait(false);
+        var lossSelectForCancel = hasLossColumnForCancel ? "is_loss" : "0 AS is_loss";
         var items = (await _db.QueryAsync<dynamic>(new CommandDefinition(
             // 20260825작6: 확정과 대칭 — is_loss 를 함께 읽어 로스는 역행에서도 뺀다.
-            "SELECT item_id, qty, unit_price, supply_amount, warehouse_id, is_loss FROM sales_return_items WHERE return_id=@Id AND tenant_id=@Tid",
+            $"SELECT item_id, qty, unit_price, supply_amount, warehouse_id, {lossSelectForCancel} FROM sales_return_items WHERE return_id=@Id AND tenant_id=@Tid",
             new { Id = returnId, Tid = tenantId }, cancellationToken: ct))).ToList();
 
         var returnNo = (string)header.return_no;
