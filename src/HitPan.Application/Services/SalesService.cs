@@ -671,6 +671,7 @@ public class SalesService : ISalesService
 
         const string itemSql = """
                                SELECT
+                                   di.delivery_item_id AS DeliveryItemId,
                                    di.item_id AS ItemId,
                                    it.item_name AS ItemName,
                                    CAST(NULL AS CHAR(100)) AS Spec,
@@ -679,6 +680,7 @@ public class SalesService : ISalesService
                                    di.unit_price AS UnitPrice,
                                    di.supply_amount AS Amount,
                                    di.vat_amount AS VatAmount,
+                                   di.warehouse_id AS WarehouseId,
                                    CAST(NULL AS CHAR(500)) AS Memo,
                                    0 AS RowNo
                                FROM sales_delivery_items di
@@ -1914,6 +1916,10 @@ public class SalesService : ISalesService
                    COALESCE(i.item_name,'') AS ItemName, i.spec AS Spec, i.unit AS Unit,
                    sri.warehouse_id AS WarehouseId, sri.qty AS Qty, sri.unit_price AS UnitPrice,
                    sri.supply_amount AS SupplyAmount, sri.vat_amount AS VatAmount,
+                   -- 20260825작7: 원 판매 줄 연결을 함께 돌려준다.
+                   --   이게 없으면 저장된 반품확인서를 다시 열어 고치는 순간
+                   --   화면이 링크를 모른 채 저장해 줄 단위 연결이 끊긴다.
+                   sri.delivery_item_id AS DeliveryItemId,
                    sri.is_loss AS IsLoss
             FROM sales_return_items sri
             LEFT JOIN items i ON i.item_id = sri.item_id
@@ -2016,14 +2022,21 @@ public class SalesService : ISalesService
         foreach (var it in request.Items) { totalAmount += it.SupplyAmount; totalVat += it.VatAmount; }
 
         await _db.ExecuteAsync(new CommandDefinition(
+            // 20260825작7: delivery_id 를 함께 갱신한다.
+            //   종전엔 이 SET 에 delivery_id 가 없어서, 불러온 반품확인서를 한 번만 더 고쳐 저장하면
+            //   원 거래명세서 연결이 조용히 끊겼다(생성은 넣는데 수정이 안 넣던 비대칭).
+            //   COALESCE 로 감싼 이유 — 화면이 값을 안 보내는 옛 경로에서 기존 링크를 지워버리면 안 된다.
+            //   화면이 링크를 지우려면 빈 문자열이 아니라 별도 해제 동작을 두는 게 맞다(헌법 #1).
             @"UPDATE sales_returns
               SET partner_id=@PartnerId, return_date=@ReturnDate,
+                  delivery_id=COALESCE(@DeliveryId, delivery_id),
                   total_amount=@Total, vat_amount=@Vat, memo=@Memo,
                   return_reason=@ReturnReason, return_reason_memo=@ReturnReasonMemo, updated_at=NOW(6)
               WHERE return_id=@Id AND tenant_id=@Tid AND status='draft'",
             new
             {
                 Id = returnId, Tid = tenantId, PartnerId = request.PartnerId, ReturnDate = returnDate,
+                DeliveryId = string.IsNullOrWhiteSpace(request.DeliveryId) ? null : request.DeliveryId,
                 Total = totalAmount, Vat = totalVat, Memo = request.Memo,
                 // sales_returns.return_reason 는 NOT NULL DEFAULT 'customer_return'(매입반품과 달리 NOT NULL).
                 // 화면이 사유를 안 보내면 NULL→1048(500)이 나므로 DDL DEFAULT 와 동일 값으로 폴백(14차 P1 봉합).

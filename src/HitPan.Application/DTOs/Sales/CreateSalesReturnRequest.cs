@@ -64,6 +64,17 @@ public class CreateSalesReturnItemRequest
 // draft 상태 매출반품 수정.
 public class UpdateSalesReturnRequest
 {
+    /// <summary>
+    /// 원 거래명세서 연결 (20260825작7). 단독 반품이면 null.
+    /// </summary>
+    /// <remarks>
+    /// 🔴 <b>종전엔 수정 UPDATE 에 이 필드가 없어, 두 번째 저장에서 링크가 조용히 끊겼다.</b>
+    /// 생성은 <c>delivery_id</c> 를 제대로 넣는데 수정이 안 건드리니,
+    /// 불러온 반품확인서를 한 번만 더 고치면 원 거래를 잃어버렸다.
+    /// 사장님 오더 <i>"당연히 반품확인서에 자동반영"</i> 이 여기서 깨지던 자리다.
+    /// </remarks>
+    public string? DeliveryId { get; set; }
+
     [Required]
     public string PartnerId { get; set; } = string.Empty;
 

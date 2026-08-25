@@ -3,6 +3,8 @@ using System.Net.Http.Json;
 using System.Text.Json.Serialization;
 using HitPan.Web.Components.Common;
 using HitPan.Web.Components.Purchase;
+// 20260825작7: 「판매불러오기」가 판매 목록 다이얼로그를 연다.
+using HitPan.Web.Components.Sales;
 using HitPan.Web.Models;
 using HitPan.Web.Services;
 using Microsoft.AspNetCore.Components;
@@ -32,6 +34,31 @@ public partial class SalesReturnPage : ComponentBase
     private string? _returnReason;
     private string? _returnReasonMemo;
 
+    // ─────────────────────────────────────────────────────────────────
+    // 20260825작7 — 원 거래명세서 연결
+    // 사장님 오더: "판매목록 불러오는 버튼이 있어야 됨 → 당연히 반품확인서에 자동반영"
+    // ─────────────────────────────────────────────────────────────────
+
+    /// <summary>이 반품이 어느 거래명세서에서 왔는지. 단독 반품이면 null.</summary>
+    private string? _linkedDeliveryId;
+
+    /// <summary>화면에 보여줄 원 거래명세서 번호. 불러온 직후에만 채워진다.</summary>
+    private string? _linkedDeliveryNo;
+
+    /// <summary>판매 불러오기 연타 차단 — 두 번 누르면 품목이 두 배로 들어간다.</summary>
+    private bool _isLoadingDelivery;
+
+    /// <summary>
+    /// 판매목록조회 「반품」 버튼이 넘겨주는 거래명세서 (20260825작7).
+    /// </summary>
+    /// <remarks>
+    /// 사장님 오더: <i>"거래명세서 판매목록조회에도 반품으로 상태변경하는 버튼이 있어야됨.
+    /// → 당연히 반품확인서에 자동반영"</i>
+    /// 값이 있으면 화면이 열리면서 그 거래의 품목을 바로 채운다.
+    /// </remarks>
+    [SupplyParameterFromQuery(Name = "deliveryId")]
+    public string? DeliveryIdParam { get; set; }
+
     protected override async Task OnInitializedAsync()
     {
         _itemCache = await ItemsApi.GetListAsync() ?? new();
@@ -45,6 +72,13 @@ public partial class SalesReturnPage : ComponentBase
         };
         RefreshWorkflow();
         RecalculateSummary();
+
+        // 20260825작7: 판매목록에서 「반품」으로 들어온 경우 바로 품목을 채운다.
+        //   다이얼로그를 다시 띄우지 않는다 — 사용자는 이미 거래를 골랐다.
+        if (!string.IsNullOrWhiteSpace(DeliveryIdParam))
+        {
+            await FillFromDeliveryAsync(DeliveryIdParam!, null);
+        }
     }
 
     private async Task<IEnumerable<string>> SearchPartnerAsync(string value, CancellationToken ct)
@@ -165,7 +199,11 @@ public partial class SalesReturnPage : ComponentBase
                 supplyAmount = l.Amount,
                 vatAmount = l.VatAmount,
                 // 20260825작6: 파손 로스 — 확정 시 재고 반영 여부를 가른다.
-                isLoss = l.IsLoss
+                isLoss = l.IsLoss,
+                // 20260825작7: 원 판매 줄 연결. 직접 입력한 줄은 null 이다.
+                //   종전엔 payload 에 이 항목이 아예 없어서, 백엔드가 받을 준비를 다 해놓고도
+                //   delivery_item_id 가 항상 NULL 로 들어갔다.
+                deliveryItemId = string.IsNullOrWhiteSpace(l.DeliveryItemId) ? null : l.DeliveryItemId
             })
             .ToList();
 
@@ -186,6 +224,10 @@ public partial class SalesReturnPage : ComponentBase
             memo = _draft.Memo,
             returnReason = _returnReason,
             returnReasonMemo = _returnReasonMemo,
+            // 20260825작7: 원 거래명세서 연결을 함께 보낸다.
+            //   백엔드 INSERT/UPDATE 는 @DeliveryId 를 정상 처리하는데 화면이 안 보내고 있었다.
+            //   그래서 지금까지 만들어진 반품확인서는 전부 delivery_id 가 NULL 이다.
+            deliveryId = string.IsNullOrWhiteSpace(_linkedDeliveryId) ? null : _linkedDeliveryId,
             items
         };
 
@@ -362,6 +404,154 @@ public partial class SalesReturnPage : ComponentBase
         await DocService.DownloadPdfAsync("return", _draft.Id);
     }
 
+    /// <summary>
+    /// 판매 불러오기 (20260825작7) — 거래명세서를 골라 그 품목을 반품확인서로 옮긴다.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// 사장님 오더: <i>"판매목록 불러오는 버튼이 있어야 됨 → 당연히 반품확인서에 자동반영"</i>
+    /// </para>
+    /// <para>
+    /// 🔴 <b>확정은 사람이 한다.</b> 여기서는 초안까지만 채운다 —
+    /// 실제 반품 수량은 판 수량보다 적은 게 보통이고, 파손 판정도 사람이 봐야 한다.
+    /// </para>
+    /// <para>
+    /// <b>로스는 전부 해제 상태로 시작한다.</b> 사장님: <i>"로스판정 기준은 고객사가 정하는거지, 너가 왜 정해."</i>
+    /// 반품사유로 파손을 추측하지 않는다.
+    /// </para>
+    /// </remarks>
+    private async Task LoadFromDeliveryAsync()
+    {
+        // 연타하면 같은 품목이 두 번 들어간다.
+        if (_isLoadingDelivery) return;
+        if (_draft is null) return;
+
+        if (!string.Equals(_status, "Draft", StringComparison.OrdinalIgnoreCase))
+        {
+            Snackbar.Add("확정된 반품확인서는 품목을 바꿀 수 없습니다.", Severity.Warning);
+            return;
+        }
+
+        var options = new DialogOptions { MaxWidth = MaxWidth.ExtraLarge, FullWidth = true, CloseButton = true };
+        var dlg = await DialogService.ShowAsync<SalesListDialog>("판매 목록에서 불러오기", new DialogParameters(), options);
+        var result = await dlg.Result;
+        if (result is null || result.Canceled) return;
+
+        if (result.Data is not SalesListItem picked || string.IsNullOrWhiteSpace(picked.OrderId)) return;
+
+        // 헌법 #6 — 판 적 없는 건은 반품 대상이 아니다.
+        if (string.Equals(picked.Status, "draft", StringComparison.OrdinalIgnoreCase))
+        {
+            Snackbar.Add("판매확정 전 거래는 반품할 수 없습니다. 먼저 판매확정 해주세요.", Severity.Warning);
+            return;
+        }
+
+        // 헌법 #1 — 이미 입력한 줄을 말없이 덮어쓰지 않는다.
+        var existing = _draft.Lines.Count(l => !l.IsPlaceholder && !string.IsNullOrWhiteSpace(l.ItemId));
+        if (existing > 0)
+        {
+            var ok = await DialogService.ShowMessageBoxAsync(
+                "품목 교체",
+                $"이미 입력된 품목 {existing}건이 있습니다.\n\n" +
+                $"[{picked.OrderNo}] 의 품목으로 바꾸시겠습니까?",
+                yesText: "바꾸기", cancelText: "취소");
+            if (ok != true) return;
+        }
+
+        await FillFromDeliveryAsync(picked.OrderId, picked.OrderNo);
+    }
+
+    /// <summary>
+    /// 거래명세서 한 건의 품목을 반품확인서 줄로 옮긴다 (20260825작7).
+    /// </summary>
+    /// <remarks>
+    /// 「판매불러오기」 버튼과 판매목록 「반품」 버튼이 <b>같은 이 경로</b>를 쓴다 —
+    /// 두 벌로 두면 한쪽만 고쳐지는 날이 온다.
+    /// </remarks>
+    /// <param name="deliveryId">원 거래명세서 ID.</param>
+    /// <param name="deliveryNo">화면에 보여줄 전표번호. 모르면 null(서버 값으로 채운다).</param>
+    private async Task FillFromDeliveryAsync(string deliveryId, string? deliveryNo)
+    {
+        if (_isLoadingDelivery) return;
+        if (_draft is null) return;
+
+        _isLoadingDelivery = true;
+        try
+        {
+            var detail = await DeliveryService.GetAsync(deliveryId);
+            if (detail is null)
+            {
+                Snackbar.Add("거래명세서를 불러오지 못했습니다.", Severity.Error);
+                return;
+            }
+
+            // 전표번호를 못 받아 왔으면 서버가 준 값을 쓴다 — 지어내지 않는다(20260825작5 계승).
+            var docNo = string.IsNullOrWhiteSpace(deliveryNo) ? detail.DeliveryNo : deliveryNo!;
+
+            if (detail.Items.Count == 0)
+            {
+                Snackbar.Add($"[{docNo}] 에 품목이 없습니다.", Severity.Warning);
+                return;
+            }
+
+            var lines = new List<DeliveryLineModel>();
+            var no = 1;
+            foreach (var it in detail.Items)
+            {
+                lines.Add(new DeliveryLineModel
+                {
+                    No = no,
+                    RowNo = no,
+                    ItemId = it.ItemId,
+                    ItemName = it.ItemName,
+                    Spec = it.Spec ?? string.Empty,
+                    Unit = string.IsNullOrWhiteSpace(it.Unit) ? "EA" : it.Unit!,
+                    Quantity = it.Qty,
+                    // 반품은 판 값으로 돌려준다 — 여기서 단가를 다시 계산하면 환불액이 어긋난다.
+                    UnitPrice = it.UnitPrice,
+                    Warehouse = it.WarehouseId ?? string.Empty,
+                    // 어느 판매 줄에서 왔는지 — 원단가 추적의 근거다.
+                    DeliveryItemId = it.DeliveryItemId,
+                    // 파손 판정은 고객사가 한다. 우리가 미리 켜두지 않는다.
+                    IsLoss = false,
+                    IsPlaceholder = false
+                });
+                no++;
+            }
+            lines.Add(new DeliveryLineModel { No = no, RowNo = no, IsPlaceholder = true });
+
+            _draft.Lines = lines;
+            _draft.PartnerId = detail.PartnerId;
+            _draft.SalesCompany = detail.PartnerName;
+            _linkedDeliveryId = deliveryId;
+            _linkedDeliveryNo = docNo;
+            _selectedLine = null;
+
+            MarkDirty();
+            RecalculateSummary();
+            RefreshWorkflow();
+
+            if (TabService.ActiveTabId is { } tabId)
+            {
+                TabService.UpdateSubTitle(tabId, _draft.SalesCompany);
+            }
+
+            Snackbar.Add(
+                $"[{docNo}] 품목 {detail.Items.Count}건을 불러왔습니다. " +
+                "반품 수량과 파손 여부를 확인한 뒤 저장해주세요.",
+                Severity.Success);
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"판매 불러오기 오류: {ex.Message}", Severity.Error);
+        }
+        finally
+        {
+            _isLoadingDelivery = false;
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+
     private async Task OpenListAsync()
     {
         // 14차 P0 봉합(B안): 반품유형에 따라 매출반품·매입반품 목록을 분기해 연다.
@@ -409,6 +599,8 @@ public partial class SalesReturnPage : ComponentBase
                 Warehouse = it.WarehouseId ?? string.Empty,
                 // 20260825작6: 저장된 로스 표시를 되살린다 — 안 하면 다시 열 때 체크가 사라진다.
                 IsLoss = it.IsLoss,
+                // 20260825작7: 원 판매 줄 연결을 되살린다 — 안 하면 다시 저장할 때 줄 링크가 끊긴다.
+                DeliveryItemId = it.DeliveryItemId,
                 IsPlaceholder = false
             });
         }
@@ -427,6 +619,12 @@ public partial class SalesReturnPage : ComponentBase
             Status = detail.Status,
             Lines = lines
         };
+
+        // 20260825작7: 원 거래명세서 연결을 되살린다.
+        //   이걸 안 하면 저장된 반품확인서를 다시 열어 고치는 순간 링크가 빈 값으로 저장돼
+        //   사장님 오더 "당연히 반품확인서에 자동반영" 이 두 번째 저장에서 깨진다.
+        _linkedDeliveryId = detail.DeliveryId;
+        _linkedDeliveryNo = null;
         _status = string.Equals(detail.Status, "confirmed", StringComparison.OrdinalIgnoreCase)
             ? "Confirmed" : "Draft";
         _isNew = false;
