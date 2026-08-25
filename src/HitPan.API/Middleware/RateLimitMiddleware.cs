@@ -10,6 +10,10 @@ public sealed class RateLimitMiddleware
     private static readonly ConcurrentDictionary<string, (int Count, DateTime Window)> ApiRequests = new();
     private static readonly ConcurrentDictionary<string, (int Count, DateTime Window)> WriteRequests = new();
     private static readonly ConcurrentDictionary<string, (int Count, DateTime Window)> ExportRequests = new();
+    // 🔴 20260825작12 — 로그인 전 업데이트 트리거 전용 (사장님 결재 B안).
+    //   loopback 제한을 풀었으므로 이 주소는 **미인증 원격**에서도 닿는다.
+    //   기존 쓰기 제한(분당 600)은 이 용도엔 무의미하게 헐겁다 — 재기동을 부르는 주소다.
+    private static readonly ConcurrentDictionary<string, (int Count, DateTime Window)> UpdateTriggers = new();
 
     public RateLimitMiddleware(RequestDelegate next)
     {
@@ -36,6 +40,25 @@ public sealed class RateLimitMiddleware
                 await context.Response.WriteAsJsonAsync(new
                 {
                     message = "너무 많은 로그인 시도입니다. 5분 후 다시 시도해주세요."
+                }).ConfigureAwait(false);
+                return;
+            }
+        }
+
+        // 🔴 20260825작12 — 로그인 전 업데이트 트리거 (사장님 결재 B안).
+        //   loopback 제한을 푼 대신 여기서 좁힌다. 승인은 **버전당 한 번**이면 되므로
+        //   5분에 5회면 사람이 쓰기엔 넉넉하고, 반복 재기동을 노린 호출에는 좁다.
+        //   (컨트롤러의 멱등 검사가 1차 방어이고, 이건 그 앞단 2차 방어다.)
+        if (path.Contains("/api/auth/update-consent-local", StringComparison.Ordinal))
+        {
+            // 인증 전이라 user_id 가 없다 — IP 기준으로 센다.
+            var updIpKey = ResolveClientIp(context);
+            if (!CheckRateLimit(UpdateTriggers, updIpKey, maxCount: 5, windowSeconds: 300))
+            {
+                context.Response.StatusCode = StatusCodes.Status429TooManyRequests;
+                await context.Response.WriteAsJsonAsync(new
+                {
+                    message = "업데이트 요청이 너무 잦습니다. 잠시 후 다시 시도해주세요."
                 }).ConfigureAwait(false);
                 return;
             }

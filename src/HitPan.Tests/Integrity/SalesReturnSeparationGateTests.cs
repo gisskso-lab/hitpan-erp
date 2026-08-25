@@ -175,8 +175,14 @@ public class SalesReturnSeparationGateTests
     {
         var svc = SalesService();
 
-        Assert.Contains("is_loss)", svc, StringComparison.Ordinal);
-        Assert.Contains("sri.is_loss AS IsLoss", svc, StringComparison.Ordinal);
+        // 🔴 20260825작12 — 글자 그대로("is_loss)")를 요구하던 것을 걷어낸다.
+        //   마이그(DB-108) 안 들어간 DB 에서 500 이 나서, 컬럼 유무에 따라
+        //   INSERT 컬럼목록·SELECT 를 갈라 넣도록 바뀌었다($"...{lossCol}").
+        //   ⇒ 리터럴 검사는 **봉합을 막는 게이트**가 된다(작11 에서 겪은 그 자리다).
+        //   지킬 것은 글자가 아니라 **로스가 저장·복원된다**는 동작이다.
+        Assert.Contains("IsLoss = it.IsLoss", svc, StringComparison.Ordinal);   // 저장 파라미터
+        Assert.Contains("AS IsLoss", svc, StringComparison.Ordinal);            // 복원 SELECT
+        Assert.Contains("is_loss", svc, StringComparison.Ordinal);              // 컬럼 자체는 살아 있다
 
         var page = CodeLines(Read("src", "HitPan.Web", "Pages", "Sales", "SalesReturnPage.razor.cs"));
         Assert.Contains("isLoss = l.IsLoss", page, StringComparison.Ordinal);
