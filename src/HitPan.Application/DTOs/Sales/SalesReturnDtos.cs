@@ -48,4 +48,7 @@ public class SalesReturnDetailItemDto
     public decimal UnitPrice { get; set; }
     public decimal SupplyAmount { get; set; }
     public decimal VatAmount { get; set; }
+
+    /// <summary>파손 로스 여부 (20260825작6) — true 면 확정해도 재고에 안 들어갔다.</summary>
+    public bool IsLoss { get; set; }
 }

@@ -7,7 +7,11 @@ public enum WorkDocumentKind
     SalesOrder,
     PurchaseOrder,
     PurchaseReceipt,
-    Return
+    Return,
+
+    /// <summary>매출반품(반품확인서) — 고객사가 반품한 품목 (20260825작6).</summary>
+    /// <remarks>매입반품(<see cref="Return"/>)과 방향이 반대인 별개 업무라 탭도 따로 둔다.</remarks>
+    SalesReturn
 }
 
 public sealed class WorkTabState

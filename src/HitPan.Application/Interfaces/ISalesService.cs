@@ -95,6 +95,16 @@ public interface ISalesService
     // ─────────────────────────────────────────────────────────────────────
 
     // 매출반품 목록 (status 필터 포함 — 13차 메모리 "매출반품 status 필터" 핵심).
+    /// <summary>
+    /// 지금까지 쓰인 매출반품 사유를 모아 돌려준다 — 자율 입력값의 재사용 목록이다 (20260825작6).
+    /// </summary>
+    /// <remarks>
+    /// 사장님 지시(2026-08-25): <i>"사유도 콤보박스로 두지 말고 텍스트박스로 자율적 기입하도록 하고,
+    /// 자율적으로 기입한걸 텍스트박스로 선택하도록 해"</i>.
+    /// 우리가 사유 코드를 미리 정하지 않는다 — 고객사가 쓴 말이 곧 목록이 된다(헌법 #11 과 같은 축).
+    /// </remarks>
+    Task<List<string>> GetSalesReturnReasonsAsync(string tenantId, CancellationToken ct = default);
+
     Task<List<SalesReturnListDto>> GetSalesReturnsAsync(
         string tenantId,
         DateTime? from = null,

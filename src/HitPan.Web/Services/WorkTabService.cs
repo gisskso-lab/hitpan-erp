@@ -168,6 +168,8 @@ public sealed class WorkTabService
             WorkDocumentKind.PurchaseOrder => ("발주서", "/purchase-orders", Icons.Material.Filled.AddShoppingCart),
             WorkDocumentKind.PurchaseReceipt => ("매입명세서", "/purchases", Icons.Material.Filled.MoveToInbox),
             WorkDocumentKind.Return => ("반품", "/returns", Icons.Material.Filled.AssignmentReturn),
+            // 20260825작6: 매출반품은 매입반품과 방향이 반대인 별개 업무라 탭·경로를 따로 둔다.
+            WorkDocumentKind.SalesReturn => ("반품확인서", "/sales-returns", Icons.Material.Filled.AssignmentReturned),
             _ => ("작업", "/", Icons.Material.Filled.Description)
         };
 

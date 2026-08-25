@@ -50,6 +50,15 @@ public class CreateSalesReturnItemRequest
 
     [Range(0, double.MaxValue, ErrorMessage = "부가세는 음수일 수 없습니다.")]
     public decimal VatAmount { get; set; }
+
+    /// <summary>파손 로스 여부 — true 면 재고에 반영하지 않는다 (20260825작6).</summary>
+    /// <remarks>
+    /// 사장님 정의(2026-08-25): <i>"파손이면 로스로 정의, 파손이 아니면 재입고(재고반영)"</i>.
+    /// <b>줄 단위</b>인 이유 — 한 반품에 정상품과 파손품이 섞여 온다.
+    /// <b>판정은 고객사가 한다</b> — 반품사유로 자동 판정하지 않는다(사장님 지시).
+    /// 로스여도 <b>매출·미수 차감은 그대로</b>다 — 물건은 못 쓰지만 돈은 돌려주기 때문이다.
+    /// </remarks>
+    public bool IsLoss { get; set; }
 }
 
 // draft 상태 매출반품 수정.

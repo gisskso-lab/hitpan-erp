@@ -1063,6 +1063,120 @@ public class ReportService : IReportService
         ORDER BY SupplyAmount DESC
         """;
 
+
+
+    /// <inheritdoc />
+    public async Task<List<ReportRow>> GetSalesReturnReportAsync(
+        string viewType, string tenantId,
+        DateTime? from = null, DateTime? to = null,
+        string? partner = null, CancellationToken ct = default)
+    {
+        // 사장님 결재 2026-08-25 (20260825작6): 매출반품현황 4종 신설.
+        //   실측 반려: "반품현황메뉴 생성안됨" — 종전 /return-status 는 매입반품만 집계했다.
+        //   매입반품(GetReturnReportAsync)의 거울이지만 분기가 아니라 별도 메서드다.
+        //   방향이 반대인 별개 업무라, 한쪽을 고치다 다른 쪽이 흔들리면 안 된다.
+        var sql = viewType switch
+        {
+            "partner" => SR_BY_PARTNER,
+            "item" => SR_BY_ITEM,
+            "employee" => SR_BY_EMPLOYEE,
+            _ => SR_BY_PERIOD
+        };
+
+        var rows = await _db.QueryAsync<ReportRow>(
+            new CommandDefinition(sql, new
+            {
+                TenantId = tenantId,
+                From = from?.Date,
+                To = to?.Date,
+                Partner = partner
+            }, cancellationToken: ct));
+
+        return rows.ToList();
+    }
+    // ─── 매출반품현황 4종 SQL (20260825작6) ───
+    //   사장님 정의(2026-08-25): "매출에 있는 반품 = 사용자의 고객사가 반품처리한 품목관리".
+    //   매입반품(RT_*)의 거울이다 — 방향만 반대고 집계 축은 같다.
+    //   ⚠️ 공통 규칙 세 가지를 앞선 결재에서 계승한다:
+    //     ① status = 'confirmed' 만 (20260825작3) — 재고·회계가 confirmed 에만 반응하므로
+    //        현황 숫자도 같은 잣대여야 한다(헌법 #6). 철자 혼재(canceled/cancelled)와도 무관해진다.
+    //     ② 작성자는 ec.user_id = sr.created_by (20260825작5) — created_by 는 user_id 체계다.
+    //     ③ 금액은 헤더(sr.total_amount) 기준. 품목별만 라인(sri) 을 편다.
+    private const string SR_BY_PERIOD = """
+        SELECT
+            DATE_FORMAT(sr.return_date, '%Y-%m-%d') AS Label,
+            COUNT(DISTINCT sr.return_id) AS Count,
+            0 AS Qty,
+            COALESCE(SUM(sr.total_amount), 0) AS SupplyAmount,
+            COALESCE(SUM(sr.vat_amount), 0) AS VatAmount,
+            COALESCE(SUM(sr.total_amount + sr.vat_amount), 0) AS TotalAmount
+        FROM sales_returns sr
+        LEFT JOIN partners p ON p.partner_id = sr.partner_id AND p.tenant_id = sr.tenant_id
+        WHERE sr.tenant_id = @TenantId AND sr.is_deleted = 0 AND sr.status = 'confirmed'
+          AND (@From IS NULL OR sr.return_date >= @From)
+          AND (@To IS NULL OR sr.return_date <= @To)
+          AND (@Partner IS NULL OR p.partner_name LIKE CONCAT('%', @Partner, '%'))
+        GROUP BY sr.return_date
+        ORDER BY sr.return_date DESC
+        """;
+
+    private const string SR_BY_PARTNER = """
+        SELECT
+            COALESCE(p.partner_name, '미지정') AS Label,
+            COUNT(DISTINCT sr.return_id) AS Count,
+            0 AS Qty,
+            COALESCE(SUM(sr.total_amount), 0) AS SupplyAmount,
+            COALESCE(SUM(sr.vat_amount), 0) AS VatAmount,
+            COALESCE(SUM(sr.total_amount + sr.vat_amount), 0) AS TotalAmount
+        FROM sales_returns sr
+        LEFT JOIN partners p ON p.partner_id = sr.partner_id AND p.tenant_id = sr.tenant_id
+        WHERE sr.tenant_id = @TenantId AND sr.is_deleted = 0 AND sr.status = 'confirmed'
+          AND (@From IS NULL OR sr.return_date >= @From)
+          AND (@To IS NULL OR sr.return_date <= @To)
+          AND (@Partner IS NULL OR p.partner_name LIKE CONCAT('%', @Partner, '%'))
+        GROUP BY sr.partner_id, p.partner_name
+        ORDER BY SupplyAmount DESC
+        """;
+
+    // 품목별만 라인(sales_return_items)을 편다 — 수량이 품목 단위라서다.
+    private const string SR_BY_ITEM = """
+        SELECT
+            COALESCE(i.item_name, '미지정') AS Label,
+            COUNT(DISTINCT sr.return_id) AS Count,
+            COALESCE(SUM(sri.qty), 0) AS Qty,
+            COALESCE(SUM(sri.supply_amount), 0) AS SupplyAmount,
+            COALESCE(SUM(sri.vat_amount), 0) AS VatAmount,
+            COALESCE(SUM(sri.supply_amount + sri.vat_amount), 0) AS TotalAmount
+        FROM sales_returns sr
+        INNER JOIN sales_return_items sri ON sri.return_id = sr.return_id AND sri.tenant_id = sr.tenant_id
+        LEFT JOIN items i ON i.item_id = sri.item_id AND i.tenant_id = sr.tenant_id
+        WHERE sr.tenant_id = @TenantId AND sr.is_deleted = 0 AND sr.status = 'confirmed'
+          AND (@From IS NULL OR sr.return_date >= @From)
+          AND (@To IS NULL OR sr.return_date <= @To)
+          AND (@Partner IS NULL OR i.item_name LIKE CONCAT('%', @Partner, '%'))
+        GROUP BY sri.item_id, i.item_name
+        ORDER BY SupplyAmount DESC
+        """;
+
+    // 사원별 — 매출반품은 자기 테이블에 created_by 가 있다(20260825작5 에서 채움).
+    // 매입반품(RT_BY_EMPLOYEE)이 부모 입고전표를 경유하는 것과 다르다.
+    private const string SR_BY_EMPLOYEE = """
+        SELECT
+            COALESCE(e.emp_name, '미지정') AS Label,
+            COUNT(DISTINCT sr.return_id) AS Count,
+            0 AS Qty,
+            COALESCE(SUM(sr.total_amount), 0) AS SupplyAmount,
+            COALESCE(SUM(sr.vat_amount), 0) AS VatAmount,
+            COALESCE(SUM(sr.total_amount + sr.vat_amount), 0) AS TotalAmount
+        FROM sales_returns sr
+        LEFT JOIN employees e ON e.user_id = sr.created_by AND e.tenant_id = sr.tenant_id
+        WHERE sr.tenant_id = @TenantId AND sr.is_deleted = 0 AND sr.status = 'confirmed'
+          AND (@From IS NULL OR sr.return_date >= @From)
+          AND (@To IS NULL OR sr.return_date <= @To)
+          AND (@Partner IS NULL OR e.emp_name LIKE CONCAT('%', @Partner, '%'))
+        GROUP BY sr.created_by, e.emp_name
+        ORDER BY SupplyAmount DESC
+        """;
     /// <inheritdoc />
     public async Task<List<ReportRow>> GetSalesRankingAsync(
         string viewType, string tenantId,
