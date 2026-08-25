@@ -49,6 +49,7 @@
                 <MudTh>일자</MudTh>
                 <MudTh>전표번호</MudTh>
                 <MudTh>업체</MudTh>
+                <MudTh>작성자</MudTh>
                 <MudTh>상태</MudTh>
                 <MudTh Style="text-align:right">금액</MudTh>
                 <MudTh Style="text-align:right">부가세</MudTh>
@@ -58,6 +59,7 @@
                 <MudTd @ondblclick="@(() => SelectRow(context))">@context.OrderDate.ToString("yyyy-MM-dd")</MudTd>
                 <MudTd @ondblclick="@(() => SelectRow(context))"><MudText Style="font-weight:500">@context.OrderNo</MudText></MudTd>
                 <MudTd @ondblclick="@(() => SelectRow(context))">@context.PartnerName</MudTd>
+                <MudTd @ondblclick="@(() => SelectRow(context))">@(context.CreatedByName ?? "")</MudTd>
                 <MudTd><MudChip T="string" Size="Size.Small" Color="@GetStatusColor(context.Status)" Variant="Variant.Text">@GetStatusLabel(context.Status)</MudChip></MudTd>
                 <MudTd Style="text-align:right">@context.TotalAmount.ToString("N0")</MudTd>
                 <MudTd Style="text-align:right">@context.VatAmount.ToString("N0")</MudTd>
@@ -136,7 +138,10 @@
             PartnerName = d.PartnerName,
             TotalAmount = d.TotalAmount,
             VatAmount = d.VatAmount,
-            Status = d.Status
+            Status = d.Status,
+
+            // 20260825작5: 작성자를 목록까지 실어 보낸다 — 여기서 빠뜨리면 그리드가 항상 공란이다.
+            CreatedByName = d.CreatedByName
         }).ToList();
         AllChecked = false;
     }

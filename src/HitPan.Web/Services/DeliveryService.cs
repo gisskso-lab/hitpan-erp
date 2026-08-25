@@ -75,7 +75,14 @@ public sealed class DeliveryService(HttpClient http)
                     draft.Id = body.Id;
                 }
 
-                return new DeliverySaveResult(true, body.DocumentNumber, null);
+                // 20260825작5: 수주 자동생성된 건이면 서버가 준 실제 수주번호로 채운다.
+                // 종전에는 화면이 "수-yyyyMMdd-001" 을 지어내 항상 -001 로 보였다.
+                if (!string.IsNullOrWhiteSpace(body.AutoCreatedOrderNo))
+                {
+                    draft.LinkedSalesOrderDocumentNo = body.AutoCreatedOrderNo;
+                }
+
+                return new DeliverySaveResult(true, body.DocumentNumber, null, body.AutoCreatedOrderNo);
             }
 
             return new DeliverySaveResult(false, null, "서버 응답에 문서번호가 없습니다.");
@@ -279,7 +286,10 @@ public sealed class DeliveryService(HttpClient http)
                 PartnerName = d.PartnerName,
                 TotalAmount = d.TotalAmount,
                 VatAmount = d.VatAmount,
-                Status = d.Status
+                Status = d.Status,
+
+                // 20260825작5: 작성자를 목록까지 실어 보낸다 — 여기서 빠뜨리면 그리드가 항상 공란이다.
+                CreatedByName = d.CreatedByName
             }).ToList();
         }
         catch (Exception)
@@ -338,7 +348,10 @@ public sealed class DeliveryService(HttpClient http)
             PartnerName = d.PartnerName,
             TotalAmount = d.TotalAmount,
             VatAmount = d.VatAmount,
-            Status = d.Status
+            Status = d.Status,
+
+            // 20260825작5: 작성자를 목록까지 실어 보낸다 — 여기서 빠뜨리면 그리드가 항상 공란이다.
+            CreatedByName = d.CreatedByName
         }).ToList();
     }
 

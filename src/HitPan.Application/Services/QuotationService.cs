@@ -13,13 +13,18 @@ public class QuotationService : IQuotationService
     // Dapper 쿼리 실행을 위한 DB 연결이다.
     private readonly IDbConnection _db;
 
+    // 전표 작성자(created_by) 를 채우기 위한 현재 로그인 정보다 (20260825작5).
+    private readonly ICurrentTenant _currentTenant;
+
     /// <summary>
     /// 생성자를 초기화한다.
     /// </summary>
     /// <param name="db">DB 연결 객체다.</param>
-    public QuotationService(IDbConnection db)
+    /// <param name="currentTenant">현재 로그인한 계정 정보다.</param>
+    public QuotationService(IDbConnection db, ICurrentTenant currentTenant)
     {
         _db = db;
+        _currentTenant = currentTenant;
     }
 
     /// <inheritdoc />
@@ -41,11 +46,15 @@ public class QuotationService : IQuotationService
                                q.valid_until AS ValidUntil,
                                q.status AS Status,
                                q.total_amount AS TotalAmount,
-                               q.vat_amount AS VatAmount
+                               q.vat_amount AS VatAmount,
+                               ec.emp_name AS CreatedByName
                            FROM quotations q
                            LEFT JOIN partners p
                                ON p.partner_id = q.partner_id
                               AND p.tenant_id = q.tenant_id
+                           LEFT JOIN employees ec
+                               ON ec.user_id = q.created_by
+                              AND ec.tenant_id = q.tenant_id
                            WHERE q.tenant_id = @TenantId
                              AND q.is_deleted = 0
                              AND (@From IS NULL OR q.quote_date >= @From)
@@ -177,7 +186,10 @@ public class QuotationService : IQuotationService
                 TotalAmount = totalAmount,
                 VatAmount = vatAmount,
                 request.Memo,
-                CreatedBy = request.EmployeeId
+                // 20260825작5 봉합: 종전에는 employee_id 를 넣었는데, 현황·순위표·분석의 사원별
+                // 집계가 e2.user_id = q.created_by 로 조인해 절대 매칭되지 않았다(견적 0행이라
+                // 표면화만 안 됐다). 사장님 결재 — created_by 는 user_id 체계로 통일한다.
+                CreatedBy = _currentTenant.UserId
             },
             cancellationToken: ct));
 
@@ -227,7 +239,8 @@ public class QuotationService : IQuotationService
                 TotalAmount = totalAmount,
                 VatAmount = vatAmount,
                 request.Memo,
-                UpdatedBy = request.EmployeeId
+                // 20260825작5: created_by 와 같은 체계(user_id)로 맞춘다.
+                UpdatedBy = _currentTenant.UserId
             },
             cancellationToken: ct));
 

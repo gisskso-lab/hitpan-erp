@@ -132,8 +132,10 @@ public class SalesController : ControllerBase
         var tenantId = HttpContext.Items["TenantId"]?.ToString();
         if (string.IsNullOrEmpty(tenantId)) return Forbid();
 
-        var (id, documentNumber) = await _salesService.CreateDeliveryAsync(request, ct);
-        return Created($"/api/sales/deliveries/{id}", new { id, documentNumber });
+        // 20260825작5: autoCreatedOrderNo 는 수주 없이 들어와 수주서를 자동 생성했을 때만 채워진다.
+        // 화면이 진짜 수주번호를 알아야 브레드크럼에 지어낸 번호 대신 실물을 띄울 수 있다.
+        var (id, documentNumber, autoCreatedOrderNo) = await _salesService.CreateDeliveryAsync(request, ct);
+        return Created($"/api/sales/deliveries/{id}", new { id, documentNumber, autoCreatedOrderNo });
     }
 
     [HttpPost("deliveries/{id}/confirm")]

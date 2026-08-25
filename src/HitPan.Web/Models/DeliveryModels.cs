@@ -111,6 +111,9 @@ public sealed class DeliverySummaryModel
 
 public sealed class SalesListItem
 {
+    /// <summary>전표를 작성한 사원 이름이다 (20260825작5).</summary>
+    public string? CreatedByName { get; set; }
+
     public string OrderId { get; set; } = string.Empty;
     public DateTime OrderDate { get; set; }
     public string OrderNo { get; set; } = string.Empty;
@@ -129,6 +132,9 @@ public sealed class SalesListItem
 
 public class DeliveryListDto
 {
+    /// <summary>전표를 작성한 사원 이름이다 (20260825작5).</summary>
+    public string? CreatedByName { get; set; }
+
     public string DeliveryId { get; set; } = "";
     public string DeliveryNo { get; set; } = "";
     public DateTime OrderDate { get; set; }
@@ -152,6 +158,10 @@ public sealed class DeliveryDetailDto : DeliveryListDto
     public decimal DiscountAmount { get; set; }
     public string? EmployeeId { get; set; }
     public string? EmployeeName { get; set; }
+
+    /// <summary>연결된 수주서 번호 (20260825작5). 화면이 지어내던 가짜 번호를 대체한다.</summary>
+    public string? LinkedOrderNo { get; set; }
+
     public List<DeliveryItemDto> Items { get; set; } = new();
     public decimal PrevReceivable { get; set; }
     public decimal TodaySales { get; set; }
@@ -206,10 +216,16 @@ public sealed class DeliverySaveApiResponse
 {
     public string? Id { get; set; }
     public string? DocumentNumber { get; set; }
+
+    /// <summary>
+    /// 수주 없이 저장해 수주서가 자동 생성된 경우에만 그 번호가 담긴다 (20260825작5).
+    /// 수주에서 전환된 정상 흐름이면 null.
+    /// </summary>
+    public string? AutoCreatedOrderNo { get; set; }
 }
 
 /// <summary>거래명세서 저장 결과. 실패 시 Error에 서버 응답 본문을 담아 UI에서 원인 표시.</summary>
-public sealed record DeliverySaveResult(bool Success, string? DocumentNumber, string? Error);
+public sealed record DeliverySaveResult(bool Success, string? DocumentNumber, string? Error, string? AutoCreatedOrderNo = null);
 
 /// <summary>서버 CreateDeliveryRequest와 동일 스키마(web 쪽 명시 매핑용).</summary>
 public sealed class CreateDeliveryPayload
@@ -262,6 +278,9 @@ public sealed class CreateSalesOrderItemPayload
 /// </summary>
 public sealed class SalesOrderRow
 {
+    /// <summary>전표를 작성한 사원 이름이다 (20260825작5).</summary>
+    public string? CreatedByName { get; set; }
+
     public string OrderId { get; set; } = string.Empty;
     public string OrderNo { get; set; } = string.Empty;
     public DateTime OrderDate { get; set; }
@@ -603,6 +622,9 @@ public class StockLedgerRow
 
 public sealed class PurchaseReturnListItem
 {
+    /// <summary>전표를 작성한 사원 이름이다 (20260825작5).</summary>
+    public string? CreatedByName { get; set; }
+
     public string ReturnId { get; set; } = string.Empty;
     public string ReturnNo { get; set; } = string.Empty;
     public DateTime ReturnDate { get; set; }

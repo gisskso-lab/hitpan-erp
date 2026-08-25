@@ -49,6 +49,7 @@
             <MudTh>일자</MudTh>
             <MudTh>전표번호</MudTh>
             <MudTh>업체</MudTh>
+            <MudTh>작성자</MudTh>
             <MudTh>상태</MudTh>
             <MudTh Class="text-right">공급가액</MudTh>
             <MudTh Class="text-right">부가세</MudTh>
@@ -67,6 +68,7 @@
                 <MudText Class="@GetOrderNoClass(context)">@context.DeliveryNo</MudText>
             </MudTd>
             <MudTd @onclick="@(() => SelectRowAsync(context))">@context.PartnerName</MudTd>
+            <MudTd @onclick="@(() => SelectRowAsync(context))">@(context.CreatedByName ?? "")</MudTd>
             <MudTd @onclick="@(() => SelectRowAsync(context))">@context.Status</MudTd>
             <MudTd Class="text-right" @onclick="@(() => SelectRowAsync(context))">@context.SupplyAmount.ToString("N0")</MudTd>
             <MudTd Class="text-right" @onclick="@(() => SelectRowAsync(context))">@context.VatAmount.ToString("N0")</MudTd>

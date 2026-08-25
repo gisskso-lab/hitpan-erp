@@ -119,8 +119,12 @@
                       ?? "담당자";
         _draft = await DeliveryService.CreateDraftAsync(manager);
         // WO-11 한글 prefix (견적·수주 폴백 placeholder)
-        _draft.LinkedQuoteDocumentNo = $"견-{_draft.SalesDate:yyyyMMdd}-001";
-        _draft.LinkedSalesOrderDocumentNo = $"수-{_draft.SalesDate:yyyyMMdd}-001";
+        // 20260825작5: 견적번호도 "견-yyyyMMdd-001" 을 지어내 항상 -001 로 보였다(수주와 같은 사고).
+        // 거래명세서는 견적을 직접 참조하지 않는다(연결은 견적→수주 한 방향) — 지어내는 대신 비운다.
+        _draft.LinkedQuoteDocumentNo = null;
+        // 20260825작5: 종전에는 "수-yyyyMMdd-001" 을 지어내 항상 -001 로 보였다.
+        // 새 문서는 수주가 아직 없다 — 비워 두고, 저장 후 서버가 준 실제 번호로 채운다.
+        _draft.LinkedSalesOrderDocumentNo = null;
         _itemCache = await ItemsApi.GetListAsync() ?? new();
         RefreshWorkflow();
         RecalculateSummary();
@@ -313,6 +317,22 @@
             return;
         }
 
+        // 20260825작5 — 사장님 오더: 수주 없이 바로 거래를 잡으면 흐름 정합성이 깨지지 않도록
+        // 수주서를 자동 생성한다. 사용자가 모르고 지나가지 않도록 저장 전에 알린다.
+        // 자동생성 자체는 서버가 이미 하고 있었다(SalesService) — 없던 것은 이 안내다.
+        if (_isNew && string.IsNullOrWhiteSpace(_draft.LinkedSalesOrderDocumentNo))
+        {
+            var proceed = await DialogService.ShowMessageBoxAsync(
+                "수주서 자동 생성",
+                "이 판매거래의 수주서가 없습니다. 수주서는 자동으로 생성됩니다.",
+                yesText: "저장",
+                noText: "취소");
+            if (proceed != true)
+            {
+                return;
+            }
+        }
+
         try
         {
             if (_isNew)
@@ -326,6 +346,13 @@
 
                 _isNew = false;
                 Snackbar.Add($"저장 완료: {result.DocumentNumber}", Severity.Success);
+
+                // 20260825작5: 실제로 자동 생성된 수주번호를 알린다 — 지어낸 번호가 아니라 서버가 준 실물.
+                if (!string.IsNullOrWhiteSpace(result.AutoCreatedOrderNo))
+                {
+                    Snackbar.Add($"수주서 {result.AutoCreatedOrderNo} 가 자동 생성되었습니다.", Severity.Info);
+                    RefreshWorkflow();
+                }
             }
             else
             {
@@ -922,9 +949,11 @@
             Lines = lines,
             Density = DeliveryGridDensity.Normal,
             DailySequence = 1,
-            // WO-11 한글 prefix
-            LinkedQuoteDocumentNo = $"견-{detail.OrderDate:yyyyMMdd}-001",
-            LinkedSalesOrderDocumentNo = $"수-{detail.OrderDate:yyyyMMdd}-001",
+            // 20260825작5: 지어낸 견적번호 제거. 거래명세서는 견적을 직접 참조하지 않는다.
+            LinkedQuoteDocumentNo = null,
+            // 20260825작5: 서버가 내려준 실제 수주번호. 종전에는 "수-yyyyMMdd-001" 을 지어내
+            // 항상 -001 로 보였다 — 자동 생성분이 -004 여도 화면은 -001 이었다.
+            LinkedSalesOrderDocumentNo = detail.LinkedOrderNo,
             Status = detail.Status  // 확정/취소 버튼 분기용
         };
 
@@ -963,8 +992,12 @@
                       ?? "담당자";
         _draft = await DeliveryService.CreateDraftAsync(manager);
         // WO-11 한글 prefix
-        _draft.LinkedQuoteDocumentNo = $"견-{_draft.SalesDate:yyyyMMdd}-001";
-        _draft.LinkedSalesOrderDocumentNo = $"수-{_draft.SalesDate:yyyyMMdd}-001";
+        // 20260825작5: 견적번호도 "견-yyyyMMdd-001" 을 지어내 항상 -001 로 보였다(수주와 같은 사고).
+        // 거래명세서는 견적을 직접 참조하지 않는다(연결은 견적→수주 한 방향) — 지어내는 대신 비운다.
+        _draft.LinkedQuoteDocumentNo = null;
+        // 20260825작5: 종전에는 "수-yyyyMMdd-001" 을 지어내 항상 -001 로 보였다.
+        // 새 문서는 수주가 아직 없다 — 비워 두고, 저장 후 서버가 준 실제 번호로 채운다.
+        _draft.LinkedSalesOrderDocumentNo = null;
         _selectedLine = null;
         _hasUnsavedChanges = false;
         if (TabService.ActiveTabId is { } tabId)
