@@ -77,6 +77,18 @@
     </DialogContent>
 
     <DialogActions>
+        @* 20260825작8 — 사장님 실측 반려 2번: "판매불러오기 클릭시 판매 못불러옴".
+           행을 고르는 수단이 더블클릭 하나뿐이라, 체크만 하고 「종료」를 누르면
+           DialogResult.Cancel() 로 닫혀 호출부가 아무것도 못 받았다.
+           🔴 로직(FillFromDeliveryAsync)은 정상이었다 — 끊긴 건 "고른 행을 돌려주는 자리"다.
+           더블클릭 경로는 그대로 둔다(헌법 #1 — 추가만 한다). *@
+        <MudButton OnClick="SelectChecked"
+                   Variant="Variant.Filled"
+                   Color="Color.Primary"
+                   Size="Size.Small"
+                   Style="font-size:12px"
+                   StartIcon="@Icons.Material.Filled.Check"
+                   Disabled="!CanSelectOne">선택</MudButton>
         <MudButton OnClick="IssueInvoiceAsync"
                    Variant="Variant.Outlined"
                    Size="Size.Small"
@@ -196,6 +208,39 @@
     {
         MudDialog.Close(DialogResult.Ok(item));
     }
+
+    /// <summary>
+    /// 체크한 1건을 호출부로 돌려준다 (20260825작8).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// 사장님 실측 반려: <i>"반품확인서 → 판매불러오기 클릭시 판매 못불러옴"</i>.
+    /// </para>
+    /// <para>
+    /// 🔴 <b>더블클릭을 아는 사람만 쓸 수 있는 화면은 못 쓰는 화면이다.</b>
+    /// <i>"처음 보는 사람이 혼자 쓸 수 있냐"</i> 가 통과 기준이다.
+    /// 체크박스가 보이는데 그 체크가 아무 일도 안 하면, 사용자는 고장 났다고 판단한다.
+    /// </para>
+    /// <para>
+    /// 더블클릭 경로(<see cref="SelectRow"/>)와 <b>같은 값</b>을 돌려준다 —
+    /// 두 벌로 갈라지면 한쪽만 고쳐지는 날이 온다(작7 교훈).
+    /// </para>
+    /// </remarks>
+    private void SelectChecked()
+    {
+        var picked = Items.FirstOrDefault(x => x.IsChecked);
+        if (picked is null) return;
+        MudDialog.Close(DialogResult.Ok(picked));
+    }
+
+    /// <summary>
+    /// 「선택」 가능 = 정확히 1건만 체크됨 (20260825작8).
+    /// </summary>
+    /// <remarks>
+    /// 여러 건을 고르면 어느 거래를 불러올지 알 수 없다.
+    /// 반품확인서는 <c>sales_returns.delivery_id</c> 가 단일 FK 라 어차피 1건만 붙는다.
+    /// </remarks>
+    private bool CanSelectOne => Items.Count(x => x.IsChecked) == 1;
 
     private async Task IssueInvoiceAsync()
     {

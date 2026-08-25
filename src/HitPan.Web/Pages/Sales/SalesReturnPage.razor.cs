@@ -182,7 +182,13 @@ public partial class SalesReturnPage : ComponentBase
 
         var partnerName = _draft.SalesCompany;
         var partner = _partnerCache?.FirstOrDefault(p => string.Equals(p.PartnerName, partnerName, StringComparison.Ordinal));
-        if (partner is null)
+
+        // 20260825작8: 캐시에 없더라도 이미 확정된 PartnerId 가 있으면 그걸 쓴다.
+        //   판매불러오기 경로는 서버가 준 거래처(detail.PartnerId)를 이미 갖고 있다 —
+        //   이름 대조에 실패했다고 사용자에게 다시 고르라고 하면, 그게 5번 반려의 증상이다.
+        //   🔴 이름은 바뀔 수 있고 중복될 수도 있다. 식별자가 있으면 식별자가 우선이다.
+        var partnerId = partner?.PartnerId ?? _draft.PartnerId;
+        if (string.IsNullOrWhiteSpace(partnerId))
         {
             Snackbar.Add("거래처를 선택해주세요.", Severity.Warning);
             return;
@@ -219,7 +225,7 @@ public partial class SalesReturnPage : ComponentBase
         //   화면 입력값을 그대로 전송한다(워크플로우는 정상이었고 사유 주석만 유실되던 결함).
         var payload = new
         {
-            partnerId = partner.PartnerId,
+            partnerId = partnerId,
             returnDate = _draft.SalesDate,
             memo = _draft.Memo,
             returnReason = _returnReason,
@@ -258,6 +264,7 @@ public partial class SalesReturnPage : ComponentBase
                     _isNew = false;
                 }
                 Snackbar.Add($"{docLabel}을 저장했습니다.", Severity.Success);
+                ShowConfirmRequiredHint(docLabel);
             }
             else
             {
@@ -269,6 +276,7 @@ public partial class SalesReturnPage : ComponentBase
                     return;
                 }
                 Snackbar.Add($"{docLabel}을 수정했습니다.", Severity.Success);
+                ShowConfirmRequiredHint(docLabel);
             }
 
             _hasUnsavedChanges = false;
@@ -284,6 +292,34 @@ public partial class SalesReturnPage : ComponentBase
         {
             _isSaving = false;
         }
+    }
+
+    /// <summary>
+    /// 저장은 됐지만 아직 확정 전임을 알린다 (20260825작8).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// 사장님 실측: <i>"반품확인현황에 반품현황 안뜸, 그리고 반품직원 그리드에 없음"</i>.
+    /// </para>
+    /// <para>
+    /// 🔴 <b>이것은 현황 화면의 결함이 아니다.</b> 현황 4종 SQL 은 <c>status='confirmed'</c> 만 집계하고,
+    /// 저장은 <c>'draft'</c> 로 들어간다. 재고·회계가 확정에만 반응하므로
+    /// 현황 숫자도 같은 잣대여야 한다(헌법 #6 · 작3·작6 계승).
+    /// <b>필터를 풀면 현황이 재고·회계와 어긋난다.</b>
+    /// </para>
+    /// <para>
+    /// 진짜 결함은 <b>다음에 뭘 해야 하는지 아무도 안 알려준 것</b>이다.
+    /// 사용자는 저장했으니 끝났다고 믿는다 — 그래서 현황이 비면 고장으로 읽는다.
+    /// 정합성은 지키되 흐름은 끊지 않는다(헌법 #20).
+    /// </para>
+    /// </remarks>
+    private void ShowConfirmRequiredHint(string docLabel)
+    {
+        if (!string.Equals(_status, "Draft", StringComparison.OrdinalIgnoreCase)) return;
+
+        Snackbar.Add(
+            $"아직 확정 전입니다. 「반품확정」을 눌러야 {docLabel} 현황과 사원별 집계에 반영됩니다.",
+            Severity.Info);
     }
 
     private class ReturnCreatedResponse
@@ -433,7 +469,10 @@ public partial class SalesReturnPage : ComponentBase
         }
 
         var options = new DialogOptions { MaxWidth = MaxWidth.ExtraLarge, FullWidth = true, CloseButton = true };
-        var dlg = await DialogService.ShowAsync<SalesListDialog>("판매 목록에서 불러오기", new DialogParameters(), options);
+        // 20260825작8: ListType 을 명시한다 — 종전엔 빈 DialogParameters 를 넘겨
+        //   거래명세서 화면(DeliveryPage)과 다른 조건으로 열리고 있었다.
+        var parameters = new DialogParameters { ["ListType"] = "sales" };
+        var dlg = await DialogService.ShowAsync<SalesListDialog>("판매 목록에서 불러오기", parameters, options);
         var result = await dlg.Result;
         if (result is null || result.Canceled) return;
 
@@ -523,6 +562,17 @@ public partial class SalesReturnPage : ComponentBase
             _draft.Lines = lines;
             _draft.PartnerId = detail.PartnerId;
             _draft.SalesCompany = detail.PartnerName;
+
+            // 20260825작8 — 사장님 실측 수정요청 5번: "거래처를 한번 더 선택해줘야됨".
+            //   🔴 원인은 거래처 칸이 아니라 저장부에 있었다.
+            //   SaveAsync 는 거래처를 _partnerCache 에서 "이름으로" 찾는데(184줄),
+            //   이 캐시는 사람이 자동완성에 타이핑해야 처음 적재된다(SearchPartnerAsync).
+            //   판매불러오기로 들어오면 캐시가 비어 있어, 거래처가 화면에 멀쩡히 보이는데도
+            //   저장이 "거래처를 선택해주세요" 로 막혔다. 그래서 한 번 더 골라야 했던 것이다.
+            //   ⇒ 서버가 이미 준 거래처를 쓸 수 있도록 캐시를 여기서 채워둔다.
+            //   자동 선택이 아니다 — 사용자가 고른 거래의 거래처를 그대로 반영할 뿐이다.
+            _partnerCache ??= await PartnersApi.GetListAsync() ?? new();
+
             _linkedDeliveryId = deliveryId;
             _linkedDeliveryNo = docNo;
             _selectedLine = null;
