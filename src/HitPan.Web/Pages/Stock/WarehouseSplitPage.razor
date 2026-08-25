@@ -55,17 +55,17 @@
             <MudTh Style="text-align:right">재고금액</MudTh>
         </HeaderContent>
         <RowTemplate>
-            <MudTd>@context.WarehouseCode</MudTd>
-            <MudTd>@context.WarehouseName</MudTd>
+            <MudTd>@context.WhCode</MudTd>
+            <MudTd>@context.WhName</MudTd>
             <MudTd>
-                <MudChip T="string" Size="Size.Small" Color="@GetTypeColor(context.WarehouseType)" Variant="Variant.Filled">
-                    @GetTypeLabel(context.WarehouseType)
+                <MudChip T="string" Size="Size.Small" Color="@GetTypeColor(context.WhType)" Variant="Variant.Filled">
+                    @GetTypeLabel(context.WhType)
                 </MudChip>
             </MudTd>
             <MudTd>@context.Location</MudTd>
             <MudTd Style="text-align:right">@context.ItemCount.ToString("N0")</MudTd>
-            <MudTd Style="text-align:right">@context.StockQty.ToString("N1")</MudTd>
-            <MudTd Style="text-align:right;font-weight:500">@context.StockAmount.ToString("N0")</MudTd>
+            <MudTd Style="text-align:right">@context.TotalQty.ToString("N1")</MudTd>
+            <MudTd Style="text-align:right;font-weight:500">@context.TotalValue.ToString("N0")</MudTd>
         </RowTemplate>
         <NoRecordsContent><MudText Class="pa-4" Style="color:#9CA3AF">등록된 창고가 없습니다.</MudText></NoRecordsContent>
     </MudTable>
@@ -85,12 +85,26 @@
         StateHasChanged();
         try
         {
-            var result = await Http.GetFromJsonAsync<WarehouseSplitResult>("api/stock/warehouse-split");
-            if (result != null)
+            // 🔴 20260825작19 — 서버는 **배열**을 준다 (StockService.GetWarehouseSplitAsync).
+            //   종전엔 객체(Rows/Kpi)로 받으려 해 `[` 를 만나자마자 터졌다:
+            //   JsonException ... Path: $ | BytePositionInLine: 1 — 사장님이 보신 그 오류다.
+            //   예외가 catch 로 빠지면서 그리드도 KPI 4개도 전부 비었다. 증상 여러 개, 원인 하나.
+            _rows = await Http.GetFromJsonAsync<List<WarehouseSplitRow>>("api/stock/warehouse-split") ?? new();
+
+            // KPI 는 서버가 주지 않는다 — 받은 줄로 화면에서 집계한다.
+            //   자사=normal · 위탁=consign. 불량·반품 창고는 창고 수에 안 넣되 품목·금액에는 포함한다
+            //   (실재하는 재고라 총액에서 빠지면 숫자가 안 맞는다).
+            //   ⚠️ 실측에서 걸린 것 — wh_type 이 **빈 문자열**인 창고가 있다(NULL 아님·기본값 없음).
+            //     서버 SQL 의 COALESCE 는 NULL 만 메우므로 빈 값은 그대로 온다. 낱말을 그대로 비교하면
+            //     실재하는 창고가 자사도 위탁도 아닌 것이 되어 **KPI 가 0** 으로 나온다.
+            //     ⇒ 유형이 비었으면 자사로 센다(창고관리 기본 생성이 자사다).
+            _kpi = new KpiData
             {
-                _rows = result.Rows ?? new();
-                _kpi = result.Kpi ?? new();
-            }
+                OwnCount = _rows.Count(r => IsOwnWarehouse(r.WhType)),
+                ConsignCount = _rows.Count(r => string.Equals(r.WhType, "consign", StringComparison.OrdinalIgnoreCase)),
+                TotalItems = _rows.Sum(r => r.ItemCount),
+                TotalAmount = _rows.Sum(r => r.TotalValue)
+            };
         }
         catch (Exception _hp15Ex)
         {
@@ -105,10 +119,47 @@
         }
     }
 
-    /// <summary>창고 유형에 따른 칩 색상을 반환한다.</summary>
-    private Color GetTypeColor(string type) => type switch
+    /// <summary>
+    /// 창고 유형을 하나의 축으로 정규화한다 (20260825작19).
+    /// </summary>
+    /// <remarks>
+    /// 🔴 <b>같은 뜻을 서로 다른 말로 저장하고 있었다.</b>
+    /// <list type="bullet">
+    /// <item>창고관리 화면(<c>WarehouseManagePage</c>)은 <b>한글</b>로 저장한다 — 자사창고 · 3PL · 기타</item>
+    /// <item>API 기본값(<c>WarehouseController</c>)도 <b>"자사창고"</b></item>
+    /// <item>그런데 이 화면은 <b>영문</b>(normal/consign)만 알고 있었다</item>
+    /// <item>실측: <c>wh_type</c> 이 <b>빈 문자열</b>인 행도 있다(NULL 아님 · 서버 COALESCE 가 못 메운다)</item>
+    /// </list>
+    /// ⇒ 창고관리에서 만든 창고가 자사도 위탁도 아닌 것이 되어 <b>KPI 가 전부 0</b> 이었다.
+    /// 사장님 실측 <i>"자사창고, 위탁창고 … 모두 미반영"</i> 의 자리다.
+    /// <para>
+    /// ⚠️ 저장 어휘를 영문으로 바꾸는 정규화는 <b>하지 않는다</b> — 이미 한글로 쌓인 데이터가 있어
+    /// 단독으로 바꾸면 회귀한다(헌법 #1). 읽는 쪽에서 관용적으로 받아준다 —
+    /// <c>WarehouseConfiguration.ParseWarehouseType</c> 이 이미 같은 방식이다.
+    /// </para>
+    /// </remarks>
+    private static string NormalizeType(string? type)
     {
-        "normal" => Color.Success,
+        var t = (type ?? string.Empty).Trim();
+        if (t.Length == 0) return "own";   // 미지정은 자사로 본다(창고관리 기본 생성이 자사다)
+
+        return t switch
+        {
+            "normal" or "자사창고" or "자사" or "기타" => "own",
+            "consign" or "위탁" or "위탁창고" or "3PL" or "3pl" => "consign",
+            "defect" or "불량" or "불량창고" => "defect",
+            "return" or "반품" or "반품창고" => "return",
+            _ => "own"   // 모르는 값은 자사로 세어 총계에서 새지 않게 한다
+        };
+    }
+
+    /// <summary>자사창고인가 — KPI 「자사창고 수」 판정.</summary>
+    private static bool IsOwnWarehouse(string? type) => NormalizeType(type) == "own";
+
+    /// <summary>창고 유형에 따른 칩 색상을 반환한다.</summary>
+    private Color GetTypeColor(string type) => NormalizeType(type) switch
+    {
+        "own" => Color.Success,
         "consign" => Color.Info,
         "defect" => Color.Error,
         "return" => Color.Warning,
@@ -116,9 +167,9 @@
     };
 
     /// <summary>창고 유형 라벨을 반환한다.</summary>
-    private string GetTypeLabel(string type) => type switch
+    private string GetTypeLabel(string type) => NormalizeType(type) switch
     {
-        "normal" => "자사",
+        "own" => "자사",
         "consign" => "위탁",
         "defect" => "불량",
         "return" => "반품",
@@ -126,12 +177,6 @@
     };
 
     // --- 내부 모델 ---
-    private class WarehouseSplitResult
-    {
-        public List<WarehouseSplitRow>? Rows { get; set; }
-        public KpiData? Kpi { get; set; }
-    }
-
     private class KpiData
     {
         public int OwnCount { get; set; }
@@ -140,14 +185,22 @@
         public decimal TotalAmount { get; set; }
     }
 
+    /// <summary>
+    /// 창고별 한 줄 — <b>서버 <c>WarehouseSplitDto</c> 와 이름을 맞춘다</b> (20260825작19).
+    /// </summary>
+    /// <remarks>
+    /// 🔴 종전엔 이름이 서로 달랐다(<c>WarehouseCode</c> vs 서버 <c>WhCode</c>).
+    /// 응답 형태만 고치고 이름을 안 맞추면 <b>표는 뜨는데 칸이 전부 비는</b> 더 나쁜 상태가 된다.
+    /// </remarks>
     private class WarehouseSplitRow
     {
-        public string WarehouseCode { get; set; } = "";
-        public string WarehouseName { get; set; } = "";
-        public string WarehouseType { get; set; } = "";
+        public string WarehouseId { get; set; } = "";
+        public string WhCode { get; set; } = "";
+        public string WhName { get; set; } = "";
+        public string WhType { get; set; } = "";
         public string Location { get; set; } = "";
         public int ItemCount { get; set; }
-        public decimal StockQty { get; set; }
-        public decimal StockAmount { get; set; }
+        public decimal TotalQty { get; set; }
+        public decimal TotalValue { get; set; }
     }
 }

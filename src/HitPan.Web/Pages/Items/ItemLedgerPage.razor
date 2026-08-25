@@ -8,6 +8,7 @@
 @inject ItemMasterService ItemSvc
 @inject IJSRuntime Js
 @inject ISnackbar Snackbar
+@inject NavigationManager Nav
 
 <PageTitle>상품별 원장</PageTitle>
 <PageHeader Title="상품별 원장 (수불부)" Subtitle="기간별 입출고 이력 조회" />
@@ -15,6 +16,18 @@
 @* 필터 영역 *@
 <MudPaper Class="pa-3 mb-3" Elevation="0" Style="border:1px solid var(--mud-palette-lines-default);border-radius:12px">
     <div class="hitpan-filter-bar">
+        @* 🔴 20260825작19 — 세 수불부가 같은 콤보를 갖는다 (사장님 오더).
+             *"업체별 원장, 상품별 원장, 재고 수불부의 '수불부종류' 콤보박스 설정 시에
+               동일한 정보가 나갈 수 있도록"*
+             세 화면이 이미 같은 서버(api/reports/stock-ledger)를 쓴다 — 다른 건 화면뿐이었다.
+             상품별 원장엔 콤보가 아예 없어 업체별로 갈아탈 방법이 없었다. *@
+        <div class="hitpan-filter-field hitpan-filter-field--md">
+            <MudSelect T="string" Value="@("item")" ValueChanged="OnLedgerKindChangedAsync"
+                       Label="수불부 종류" Variant="Variant.Outlined" Margin="Margin.Dense">
+                <MudSelectItem Value="@("item")">상품별 수불부</MudSelectItem>
+                <MudSelectItem Value="@("partner")">업체별 수불부</MudSelectItem>
+            </MudSelect>
+        </div>
         <div class="hitpan-filter-field hitpan-filter-field--sm">
             <MudDatePicker @bind-Date="_from" Label="시작일" Variant="Variant.Outlined" Margin="Margin.Dense" DateFormat="yyyy-MM-dd" />
         </div>
@@ -86,13 +99,36 @@
             i.ItemCode.Contains(value, StringComparison.OrdinalIgnoreCase)));
     }
 
+    /// <summary>
+    /// 수불부 종류를 바꾸면 해당 원장 화면으로 보낸다 (20260825작19 · 사장님 오더).
+    /// </summary>
+    /// <remarks>
+    /// 세 화면(상품별·업체별·재고)이 <b>같은 서버 엔드포인트</b>를 쓰지만 검색 대상이 달라
+    /// (상품명 ↔ 업체명) 화면이 따로 있다. 한 화면에 두 모드를 다 넣는 대신
+    /// <b>이미 있는 화면으로 보낸다</b> — 새 화면을 만들지 않는다(작18 에서 사장님이 잡아주신 원칙).
+    /// </remarks>
+    private Task OnLedgerKindChangedAsync(string value)
+    {
+        if (string.Equals(value, "partner", StringComparison.Ordinal))
+        {
+            Nav.NavigateTo("/partners/ledger");
+        }
+        return Task.CompletedTask;
+    }
+
     /// <summary>상품별 수불부를 조회한다.</summary>
     private async Task SearchAsync()
     {
         var qs = new List<string> { "view=item" };
         if (_from.HasValue) qs.Add($"from={_from:yyyy-MM-dd}");
         if (_to.HasValue) qs.Add($"to={_to:yyyy-MM-dd}");
-        if (!string.IsNullOrWhiteSpace(_partner)) qs.Add($"partner={Uri.EscapeDataString(_partner)}");
+        // 🔴 20260825작19 — 상품별인데 상품명을 `partner=` 로 보내고 있었다.
+        //   서버 item 브랜치(ReportService)는 `@Item` 만 item_name 에 매칭하고 `@Partner` 는 쳐다보지 않는다.
+        //   ⇒ 상품을 골라도 **필터가 통째로 무시되어 전체가 나왔다.**
+        //   SQL 대조실험: partner= 로 보내면 1건(=필터 무시), item= 로 보내면 0건(=제대로 걸림).
+        //   ⚠️ 같은 화면인 StockLedgerPage 는 진작 `item=` 로 보내고 있었다(19차 봉합).
+        //     **한쪽만 고쳐진 미봉합 잔여물**이다.
+        if (!string.IsNullOrWhiteSpace(_partner)) qs.Add($"item={Uri.EscapeDataString(_partner)}");
         var path = "api/reports/stock-ledger?" + string.Join("&", qs);
         try
         {
