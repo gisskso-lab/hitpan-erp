@@ -2137,6 +2137,33 @@ public class SalesService : ISalesService
         if ((string)header.status != "draft")
             throw new InvalidOperationException("draft 상태만 확정할 수 있습니다.");
 
+        // 🔴 20260825작13 — 사장님 실측 반려(1.3.15): 반품확정이 여전히 500.
+        //   [무엇이었나] `stock_ledger` 에 UNIQUE(uq_stock_ledger_source: source_type·source_id·item_id·move_type),
+        //     `journal_entries` 에 UNIQUE(uq_je_source: tenant_id·source_type·source_id) 가 걸려 있다.
+        //     원장이 이미 남아 있는 반품을 다시 확정하면 INSERT 가 **MySQL 1062(Duplicate entry)** 로 죽는다.
+        //   🔴 [왜 500 이었나] 1062 는 미들웨어의 어느 필터에도 안 걸린다 —
+        //     1054/1146(스키마) 도 아니고 1451/1452(FK→409) 도 아니라
+        //     마지막 catch(Exception) 으로 떨어져 **{"error":"서버 오류가 발생했습니다"} 500**.
+        //     레포 전체에서 1062 를 잡는 곳이 **한 군데도 없었다**(grep 0건).
+        //   [어떻게 생기나] 상태 전환(6단계)은 트랜잭션 마지막이다. 그 앞 단계가 커밋된 뒤
+        //     뒤에서 실패하면 상태는 draft 로 남고 원장만 남는 창이 생긴다.
+        //     그 뒤로는 몇 번을 눌러도 1062 → 500 이 반복된다. **누르는 사람은 이유를 알 수 없다.**
+        //   [고침] 원장이 이미 있으면 **중복 기록 대신 사람 말로 안내**한다(InvalidOperationException → 400).
+        //     헌법 #3(원장 INSERT ONLY)이라 지우지 않는다 — 지우는 게 아니라 **막는다.**
+        var ledgerExists = await _db.ExecuteScalarAsync<int>(new CommandDefinition(
+            """
+            SELECT COUNT(*) FROM stock_ledger
+             WHERE tenant_id = @Tid AND source_type = 'sales_return' AND source_id = @Id
+            """,
+            new { Id = returnId, Tid = tenantId }, cancellationToken: ct)).ConfigureAwait(false);
+
+        if (ledgerExists > 0)
+        {
+            throw new InvalidOperationException(
+                "이 반품은 이미 재고에 반영되어 있습니다. 목록을 새로고침해 상태를 확인해주세요. "
+                + "계속 같은 문제가 보이면 관리자에게 알려주세요.");
+        }
+
         DateTime rd = (DateTime)header.return_date;
         await ApprovalTriggerHelper.EnsureNotClosedAsync(_db, tenantId, rd, ct);
 
