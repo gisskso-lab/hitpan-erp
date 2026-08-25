@@ -81,17 +81,30 @@ public class SalesReturnSeparationGateTests
     // ───────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// 🔴 <b>판매관리 메뉴에 반품확인서·반품확인현황이 있는가.</b>
-    /// 사장님이 판매 쪽에서 찾으셨는데 둘 다 매입관리에 있었다.
+    /// 🔴 <b>20260825작15 — 반품확인 메뉴가 되살아나면 안 된다</b>(사장님 결재).
     /// </summary>
+    /// <remarks>
+    /// <para>
+    /// 사장님 오더: <i>"반품확정 메뉴를 아애 빼 … 반품확인메뉴에 대한 <b>모든걸 다 지워</b>"</i>
+    /// 대체 경로는 거래명세서 <b>확정취소</b>(재고·회계 역행 원장 자동 발행) 또는 <b>마이너스 전표</b>다.
+    /// </para>
+    /// <para>
+    /// ⚠️ 종전 이 자리에는 <c>판매관리_메뉴에_반품확인서와_반품확인현황이_있어야_한다</c> 가
+    /// <b>메뉴가 있어야 한다</b>고 강제하고 있었다. 결재로 뺐으므로 <b>정반대로 뒤집는다</b> —
+    /// 안 그러면 게이트가 제거를 막는다.
+    /// </para>
+    /// <para>
+    /// 🔴 <b>서버 로직·화면·API 는 남아 있다.</b> 이 게이트가 지키는 것은 <b>메뉴 진입점</b> 뿐이다.
+    /// 아래 SQL·서버 게이트들은 그대로 살아 있어, 되살릴 때 기능이 온전한지 보증한다.
+    /// </para>
+    /// </remarks>
     [Fact]
-    public void 판매관리_메뉴에_반품확인서와_반품확인현황이_있어야_한다()
+    public void 사이드바에_반품확인_메뉴가_되살아나면_안_된다()
     {
         var sidebar = CodeLines(Read("src", "HitPan.Web", "Layout", "Sidebar.razor"));
 
-        Assert.Contains("반품확인서", sidebar, StringComparison.Ordinal);
-        Assert.Contains("반품확인현황", sidebar, StringComparison.Ordinal);
-        Assert.Contains("/sales-return-status", sidebar, StringComparison.Ordinal);
+        Assert.DoesNotContain("/sales-return-status", sidebar, StringComparison.Ordinal);
+        Assert.DoesNotContain("WorkDocumentKind.SalesReturn", sidebar, StringComparison.Ordinal);
     }
 
     /// <summary>
@@ -147,9 +160,15 @@ public class SalesReturnSeparationGateTests
     {
         var svc = SalesService();
 
-        var filters = svc.Split("it.is_loss ?? 0").Length - 1;
-        Assert.True(filters >= 2,
-            $"확정·취소 두 경로 모두 로스를 걸러야 한다 (현재 {filters}곳). " +
+        // 🔴 20260825작15 — 리터럴 `it.is_loss ?? 0` 요구를 걷어낸다.
+        //   그 캐스팅이 바로 **반품확정 500 의 원인**이었다:
+        //   MySqlConnector 가 TINYINT(1) 을 Boolean 으로 주는데 `(int)` 로 받아
+        //   RuntimeBinderException → 미들웨어 마지막 catch → 500.
+        //   ⇒ 안전 판정(IsLossValue)으로 바꿨으므로 글자가 아니라 **동작**을 검사한다.
+        //   (작11·작12 에서도 리터럴 게이트가 봉합을 막았다 — 같은 자리다.)
+        var filters = svc.Split("IsLossValue").Length - 1;
+        Assert.True(filters >= 3,
+            $"확정·취소 두 경로 모두 로스를 걸러야 한다 (현재 {filters}회, 정의 포함). " +
             "확정에서 안 넣은 재고를 취소에서 빼면 재고가 마이너스로 어긋난다.");
     }
 

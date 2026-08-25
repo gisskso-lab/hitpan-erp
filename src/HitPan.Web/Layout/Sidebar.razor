@@ -235,8 +235,11 @@
         <MudNavLink Href="/sales/summary" Icon="@Icons.Material.Filled.BarChart">판매현황</MudNavLink>
         <MudNavLink Href="/sales/ranking" Icon="@Icons.Material.Filled.EmojiEvents">판매순위표</MudNavLink>
         <MudNavLink Href="/sales/profitability" Icon="@Icons.Material.Filled.TrendingUp">판매수익성분석</MudNavLink>
-        <MudNavLink Icon="@Icons.Material.Filled.AssignmentReturned" OnClick="@(() => TabService.TryAddTab(WorkDocumentKind.SalesReturn))">반품확인서</MudNavLink>
-        <MudNavLink Href="/sales-return-status" Icon="@Icons.Material.Filled.ListAlt">반품확인현황</MudNavLink>
+        @* 🔴 20260825작15 — 반품확인서·반품확인현황 제거 (사장님 결재).
+             사장님 오더: "반품확정 메뉴를 아애 빼 … 판매목록에도 반품으로 전환이라던지 모든걸 다 지워".
+             대체 경로: 거래명세서 **확정취소**(재고·회계 역행 원장 자동 발행) 또는 **마이너스 전표**.
+             ⚠️ 화면·API·서버 로직은 남아 있다 — 진입점만 없앴다. 되살릴 땐 이 자리에 두 줄을 복원한다.
+             (500 의 원인은 규명했다 — is_loss 를 코드가 숫자로 읽는데 DB 가 참/거짓을 준다. 작15 조사) *@
         <MudNavLink Href="/sales/statistics" Icon="@Icons.Material.Filled.Analytics">판매통계</MudNavLink>
     </MudNavGroup>
 

@@ -4,8 +4,6 @@
 @inject IDialogService DialogService
 @inject DeliveryService DeliveryService
 @inject ISnackbar Snackbar
-@* 20260825작7 — 「반품」 버튼이 반품확인서 탭을 열 때 쓴다. *@
-@inject WorkTabService TabService
 
 <MudDialog Style="min-width:900px;max-width:1100px">
     <TitleContent>
@@ -99,16 +97,6 @@
                    Size="Size.Small"
                    Style="font-size:12px"
                    Disabled="!HasInvoicedChecked">전자발행</MudButton>
-        @* 20260825작7 — 사장님 오더: "거래명세서 판매목록조회에도 반품으로 상태변경하는 버튼이 있어야됨".
-           판매확정된 건만 대상이다(헌법 #6) — 판 적 없는 걸 반품할 수는 없다.
-           한 반품확인서는 한 거래명세서에 붙으므로(delivery_id 단일 FK) 1건만 고를 수 있다. *@
-        <MudButton OnClick="CreateReturnAsync"
-                   Variant="Variant.Outlined"
-                   Color="Color.Warning"
-                   Size="Size.Small"
-                   Style="font-size:12px"
-                   StartIcon="@Icons.Material.Filled.AssignmentReturned"
-                   Disabled="!CanCreateReturn">반품</MudButton>
         @* AuthorizeView 는 MudDialog 캐스케이드 밖에서 Task<AuthenticationState>를 못 받아
            "Authorization requires a cascading parameter" 오류 발생.
            권한 검증은 백엔드 [Authorize(Policy = "SalesManager")] 가 강제하고
@@ -143,23 +131,9 @@
     /// <summary>삭제 가능 = 선택됨 AND 계산서 발행 전(invoiced 아님). 권한은 AuthorizeView에서.</summary>
     private bool HasDeletableChecked => Items.Any(x => x.IsChecked && x.Status != "invoiced");
 
-    /// <summary>
-    /// 반품 가능 = <b>판매확정 이후</b> 건이 <b>정확히 1건</b> 선택됨 (20260825작7).
-    /// </summary>
-    /// <remarks>
-    /// <para>
-    /// <b>draft 를 뺀 이유</b> — 아직 판 것이 아니다. 팔지 않은 물건은 돌아올 수 없다(헌법 #6).
-    /// 잘못 쓴 임시전표는 반품이 아니라 삭제로 지운다.
-    /// </para>
-    /// <para>
-    /// <b>1건으로 묶은 이유</b> — <c>sales_returns.delivery_id</c> 가 단일 FK 다.
-    /// 여러 거래를 한 반품확인서에 담으면 어느 거래에서 온 반품인지 못 적는다.
-    /// </para>
-    /// </remarks>
-    private bool CanCreateReturn =>
-        Items.Count(x => x.IsChecked
-                         && (x.Status == "confirmed" || x.Status == "invoiced")) == 1
-        && Items.Count(x => x.IsChecked) == 1;
+    // 🔴 20260825작15 — CanCreateReturn 제거 (사장님 결재: 반품확인 메뉴 전부 제거).
+    //   판매목록에서 반품으로 전환하는 경로 자체를 없앤다.
+    //   대체: 거래명세서 확정취소(재고·회계 역행 원장 자동 발행) 또는 마이너스 전표.
 
     protected override async Task OnInitializedAsync()
     {
@@ -426,44 +400,6 @@
         await Search();
     }
 
-    /// <summary>
-    /// 반품확인서를 열어 이 거래의 품목을 채운다 (20260825작7).
-    /// </summary>
-    /// <remarks>
-    /// <para>
-    /// 사장님 오더: <i>"거래명세서 판매목록조회에도 반품으로 상태변경하는 버튼이 있어야됨.
-    /// → 당연히 반품확인서에 자동반영"</i>
-    /// </para>
-    /// <para>
-    /// 🔴 <b>여기서 반품을 확정하지 않는다.</b> 초안만 열어 준다 —
-    /// 실제 반품 수량은 판 수량보다 적은 게 보통이고, 파손 판정은 고객사가 한다.
-    /// 확정은 반품확인서 화면의 「반품확정」 이 한다(헌법 #6).
-    /// </para>
-    /// <para>
-    /// ⚠️ <b>원 거래명세서 상태는 건드리지 않는다.</b> 반품확정이 이미 매출·미수를 차감하므로
-    /// 원 거래까지 바꾸면 <b>두 번 빠진다</b>. 원 거래 「반품」 표기는 4-C 차수에서
-    /// 부분반품·전체반품을 함께 보고 정한다(20260825작7 [5] 참조).
-    /// </para>
-    /// </remarks>
-    private async Task CreateReturnAsync()
-    {
-        var picked = Items.FirstOrDefault(x => x.IsChecked
-                                               && (x.Status == "confirmed" || x.Status == "invoiced"));
-        if (picked is null || string.IsNullOrWhiteSpace(picked.OrderId)) return;
-
-        var ok = await DialogService.ShowMessageBoxAsync(
-            "반품확인서 작성",
-            $"[{picked.OrderNo}] {picked.PartnerName}\n\n" +
-            "이 거래의 품목으로 반품확인서를 작성합니다.\n" +
-            "반품 수량과 파손 여부를 확인한 뒤 저장·확정해주세요.",
-            yesText: "작성", cancelText: "취소");
-        if (ok != true) return;
-
-        // 목록 다이얼로그를 닫고 반품확인서 탭을 연다.
-        MudDialog.Close(DialogResult.Cancel());
-        TabService.TryAddTab(WorkDocumentKind.SalesReturn,
-            $"?deliveryId={Uri.EscapeDataString(picked.OrderId)}");
-    }
 
     private void Close()
     {
