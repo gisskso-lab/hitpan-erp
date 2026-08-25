@@ -1,5 +1,6 @@
 using System.Data;
 using Dapper;
+using HitPan.Application.Common;
 using HitPan.Application.DTOs.Purchase;
 using HitPan.Application.Events;
 using HitPan.Application.Interfaces;
@@ -711,7 +712,7 @@ public class PurchaseService : IPurchaseService
         {
             PoId = poId,
             PartnerId = po.PartnerId,
-            ReceiptDate = DateTime.UtcNow.Date,
+            ReceiptDate = BusinessDate.Today,   // 20260825작18 W4 — UTC 는 한국 09시 이전에 어제가 된다
             Memo = $"발주 {po.PoNo} 에서 전환",
             Items = receiptItems
         };
@@ -769,7 +770,10 @@ public class PurchaseService : IPurchaseService
                    r.status AS Status, r.memo AS Memo,
                    ec.emp_name AS CreatedByName
             FROM purchase_returns r
-            LEFT JOIN partners p ON p.partner_id = r.partner_id
+            -- 20260825작18 (헌법 #2): partners 조인에 tenant_id 가 빠져 있었다. LEFT JOIN 이라
+            --   행이 늘진 않지만, 다른 테넌트에 같은 partner_id 가 있으면 거래처명이 교차 노출된다.
+            --   ReportService 4종은 진작 막고 있었는데 이 목록만 뚫려 있었다.
+            LEFT JOIN partners p ON p.partner_id = r.partner_id AND p.tenant_id = r.tenant_id
             LEFT JOIN employees ec ON ec.user_id = r.created_by AND ec.tenant_id = r.tenant_id
             WHERE r.tenant_id = @Tid AND r.is_deleted = 0
             """;
@@ -786,31 +790,64 @@ public class PurchaseService : IPurchaseService
     public async Task<(string ReturnId, string ReturnNo)> ConvertReceiptToReturnAsync(
         string receiptId, string tenantId, CancellationToken ct = default)
     {
-        if (_db.State != System.Data.ConnectionState.Open)
-        {
-            if (_db is System.Data.Common.DbConnection dbConn)
-                await dbConn.OpenAsync(ct);
-            else
-                _db.Open();
-        }
+        // 🔴 20260825작18 — 조회·검사·기록을 **한 커넥션 · 한 트랜잭션**에서 한다.
+        //   ⚠️ 이 자리에서 한 번 틀렸다: 처음엔 조회를 _db 로, 기록을 _unitOfWork 커넥션으로 했다.
+        //   그런데 IDbConnection 은 InfrastructureExtensions.cs:65 에서 `new MySqlConnection(connStr)`
+        //   으로 **EF DbContext 와 별개 커넥션**으로 등록된다. 커넥션이 다르면
+        //   ① 트랜잭션이 기록만 감싸고 검사는 밖에 남아 중복가드가 경합에 뚫리고
+        //   ② 롤백해도 검사 시점 스냅샷과 어긋난다.
+        //   같은 파일 ConfirmPurchaseReturnAsync 는 진작 conn 하나로만 일하고 있었다 — 그 패턴을 따른다.
+        using var tx = await _unitOfWork.BeginTransactionAsync(ct);
+        var conn = _unitOfWork.GetDbConnection();
+        var dbTx = tx.DbTransaction;
 
-        // 매입 정보 조회
-        var receipt = await _db.QueryFirstOrDefaultAsync<dynamic>(new CommandDefinition(
-            "SELECT receipt_id, receipt_no, partner_id FROM purchase_receipts WHERE receipt_id=@Id AND tenant_id=@Tid",
-            new { Id = receiptId, Tid = tenantId }, cancellationToken: ct))
+        try
+        {
+        // 매입 정보 조회 — status 도 함께 읽는다 (20260825작18 W5).
+        var receipt = await conn.QueryFirstOrDefaultAsync<dynamic>(new CommandDefinition(
+            "SELECT receipt_id, receipt_no, partner_id, status FROM purchase_receipts WHERE receipt_id=@Id AND tenant_id=@Tid",
+            new { Id = receiptId, Tid = tenantId }, transaction: dbTx, cancellationToken: ct))
             ?? throw new InvalidOperationException("매입명세서를 찾을 수 없습니다.");
 
+        // 🔴 W5-1 — 확정된 매입만 반품할 수 있다 (헌법 #6).
+        //   종전엔 status 를 아예 안 읽어, 저장만 하고 확정 안 한 매입(=창고에 안 들어온 물건)도
+        //   반품 전환됐다. 판매쪽은 이걸 막고 있다(SalesReturnPage.razor.cs:559 "판매확정 전 거래는
+        //   반품할 수 없습니다") — 매입만 무방비였다. 받지도 않은 물건을 거래처에 반품할 수는 없다.
+        var receiptStatus = ((string?)receipt.status ?? string.Empty).Trim();
+        if (!string.Equals(receiptStatus, "confirmed", StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidOperationException("매입확정 전 명세서는 반품할 수 없습니다. 먼저 매입확정 해주세요.");
+        }
+
+        // 🔴 W5-2 — 같은 매입명세서를 두 번 반품 전환하지 않는다.
+        //   종전엔 중복 가드가 전혀 없어 누를 때마다 반품서가 새로 생겼다. 전환 후 화면에
+        //   아무 변화가 없었으므로(작18 본안) 담당자는 "안 됐나?" 하고 한 번 더 눌렀다 —
+        //   그렇게 쌓인 반품서가 둘 다 확정되면 재고가 두 배로 빠진다.
+        //   취소분(canceled)은 다시 전환할 수 있어야 하므로 살아있는 것만 센다.
+        var existing = await conn.QueryFirstOrDefaultAsync<string>(new CommandDefinition(
+            """
+            SELECT return_no FROM purchase_returns
+            WHERE receipt_id=@Id AND tenant_id=@Tid AND is_deleted=0 AND status <> 'canceled'
+            LIMIT 1
+            FOR UPDATE
+            """,
+            new { Id = receiptId, Tid = tenantId }, transaction: dbTx, cancellationToken: ct));
+        if (!string.IsNullOrWhiteSpace(existing))
+        {
+            throw new InvalidOperationException($"이미 반품 전환된 매입명세서입니다. (반품번호 {existing})");
+        }
+
         // 매입 품목 조회
-        var items = (await _db.QueryAsync<dynamic>(new CommandDefinition(
+        var items = (await conn.QueryAsync<dynamic>(new CommandDefinition(
             "SELECT item_id, qty, unit_price, supply_amount, vat_amount, warehouse_id FROM purchase_receipt_items WHERE receipt_id=@Id AND tenant_id=@Tid",
-            new { Id = receiptId, Tid = tenantId }, cancellationToken: ct))).ToList();
+            new { Id = receiptId, Tid = tenantId }, transaction: dbTx, cancellationToken: ct))).ToList();
 
         // 반품 문서번호 채번 — WO-11 한글 prefix
-        var today = DateTime.UtcNow.Date;
+        var today = BusinessDate.Today;   // 20260825작18 W4 — 반품일자·채번 prefix 가 하루 어긋나던 자리
         var prefix = $"매반-{today:yyyyMMdd}-";
-        var cnt = await _db.QueryFirstOrDefaultAsync<int>(new CommandDefinition(
+        var cnt = await conn.QueryFirstOrDefaultAsync<int>(new CommandDefinition(
             "SELECT COUNT(*) FROM purchase_returns WHERE tenant_id=@Tid AND return_no LIKE CONCAT(@Pfx,'%')",
-            new { Tid = tenantId, Pfx = prefix }, cancellationToken: ct));
+            new { Tid = tenantId, Pfx = prefix }, transaction: dbTx, cancellationToken: ct));
         var returnNo = $"{prefix}{cnt + 1:000}";
         var returnId = Guid.NewGuid().ToString();
 
@@ -821,42 +858,53 @@ public class PurchaseService : IPurchaseService
             totalVat += (decimal)item.vat_amount;
         }
 
-        // 반품 헤더 생성
-        await _db.ExecuteAsync(new CommandDefinition(
-            """
-            INSERT INTO purchase_returns (return_id, tenant_id, return_no, receipt_id, partner_id,
-              return_date, return_type, status, total_amount, vat_amount, memo, created_by, created_at, updated_at)
-            VALUES (@ReturnId, @Tid, @ReturnNo, @ReceiptId, @PartnerId,
-              @ReturnDate, 'purchase_return', 'draft', @Total, @Vat, @Memo, @CreatedBy, NOW(6), NOW(6))
-            """,
-            new
-            {
-                ReturnId = returnId, Tid = tenantId, ReturnNo = returnNo,
-                ReceiptId = receiptId, PartnerId = (string)receipt.partner_id,
-                ReturnDate = today, Total = totalAmount, Vat = totalVat,
-                Memo = $"매입 {(string)receipt.receipt_no} 에서 반품 전환",
-                CreatedBy = _currentTenant.UserId
-            }, cancellationToken: ct));
+            // 🔴 W5-3 — 헤더와 품목이 한 트랜잭션이어야 한다 (20260825작18).
+            //   종전엔 각각 독립 커밋이라, 루프 중간에 실패하면 금액은 있는데 품목이 0건인
+            //   "유령 반품 헤더" 가 남았다. 그게 확정되면 기간별 집계와 품목별 집계가 영영 어긋난다.
 
-        // 반품 품목 생성
-        foreach (var item in items)
-        {
-            await _db.ExecuteAsync(new CommandDefinition(
+            // 반품 헤더 생성
+            await conn.ExecuteAsync(new CommandDefinition(
                 """
-                INSERT INTO purchase_return_items (return_item_id, return_id, tenant_id,
-                  item_id, qty, unit_price, supply_amount, vat_amount, warehouse_id)
-                VALUES (UUID(), @ReturnId, @Tid, @ItemId, @Qty, @Price, @Supply, @Vat, @Wh)
+                INSERT INTO purchase_returns (return_id, tenant_id, return_no, receipt_id, partner_id,
+                  return_date, return_type, status, total_amount, vat_amount, memo, created_by, created_at, updated_at)
+                VALUES (@ReturnId, @Tid, @ReturnNo, @ReceiptId, @PartnerId,
+                  @ReturnDate, 'purchase_return', 'draft', @Total, @Vat, @Memo, @CreatedBy, NOW(6), NOW(6))
                 """,
                 new
                 {
-                    ReturnId = returnId, Tid = tenantId,
-                    ItemId = (string)item.item_id, Qty = (decimal)item.qty,
-                    Price = (decimal)item.unit_price, Supply = (decimal)item.supply_amount,
-                    Vat = (decimal)item.vat_amount, Wh = (string?)item.warehouse_id
-                }, cancellationToken: ct));
-        }
+                    ReturnId = returnId, Tid = tenantId, ReturnNo = returnNo,
+                    ReceiptId = receiptId, PartnerId = (string)receipt.partner_id,
+                    ReturnDate = today, Total = totalAmount, Vat = totalVat,
+                    Memo = $"매입 {(string)receipt.receipt_no} 에서 반품 전환",
+                    CreatedBy = _currentTenant.UserId
+                }, transaction: dbTx, cancellationToken: ct));
 
-        return (returnId, returnNo);
+            // 반품 품목 생성
+            foreach (var item in items)
+            {
+                await conn.ExecuteAsync(new CommandDefinition(
+                    """
+                    INSERT INTO purchase_return_items (return_item_id, return_id, tenant_id,
+                      item_id, qty, unit_price, supply_amount, vat_amount, warehouse_id)
+                    VALUES (UUID(), @ReturnId, @Tid, @ItemId, @Qty, @Price, @Supply, @Vat, @Wh)
+                    """,
+                    new
+                    {
+                        ReturnId = returnId, Tid = tenantId,
+                        ItemId = (string)item.item_id, Qty = (decimal)item.qty,
+                        Price = (decimal)item.unit_price, Supply = (decimal)item.supply_amount,
+                        Vat = (decimal)item.vat_amount, Wh = (string?)item.warehouse_id
+                    }, transaction: dbTx, cancellationToken: ct));
+            }
+
+            await tx.CommitAsync(ct);
+            return (returnId, returnNo);
+        }
+        catch
+        {
+            await tx.RollbackAsync(ct);
+            throw;
+        }
     }
 
     // ─────────────────────────────────────────────────────────────────────
@@ -878,7 +926,7 @@ public class PurchaseService : IPurchaseService
                 _db.Open();
         }
 
-        var returnDate = request.ReturnDate == default ? DateTime.UtcNow.Date : request.ReturnDate.Date;
+        var returnDate = request.ReturnDate == default ? BusinessDate.Today : request.ReturnDate.Date;   // 20260825작18 W4
         var prefix = $"매반-{returnDate:yyyyMMdd}-";
         var cnt = await _db.QueryFirstOrDefaultAsync<int>(new CommandDefinition(
             "SELECT COUNT(*) FROM purchase_returns WHERE tenant_id=@Tid AND return_no LIKE CONCAT(@Pfx,'%')",
@@ -960,7 +1008,7 @@ public class PurchaseService : IPurchaseService
         if (!string.Equals(status, "draft", StringComparison.OrdinalIgnoreCase))
             throw new InvalidOperationException($"draft 상태만 수정 가능합니다. (현재: {status})");
 
-        var returnDate = request.ReturnDate == default ? DateTime.UtcNow.Date : request.ReturnDate.Date;
+        var returnDate = request.ReturnDate == default ? BusinessDate.Today : request.ReturnDate.Date;   // 20260825작18 W4
         decimal totalAmount = 0, totalVat = 0;
         foreach (var it in request.Items)
         {

@@ -563,7 +563,14 @@ public sealed class DeliveryService(HttpClient http)
             var list = await http.GetFromJsonAsync<List<PurchaseReturnListItem>>(path, JsonOptions, ct);
             return list ?? new();
         }
-        catch { return new(); }
+        catch (Exception ex)
+        {
+            // 🔴 20260825작18 (헌법 #15) — 종전 `catch { return new(); }` 는 예외 변수조차 없었다.
+            //   401·500·역직렬화 실패가 전부 "조회 0건" 과 구별되지 않아, 고장이 빈 화면으로
+            //   위장됐다. 오류를 오류로 보이게 하지 않으면 원인 규명 자체가 불가능하다.
+            Console.Error.WriteLine("[작18] 매입반품 목록 조회 실패: " + ex.GetType().Name + ": " + ex.Message);
+            return new();
+        }
     }
 
     /// <summary>거래명세서 확정 직후 자동발주 후보 조회 (사장님 지시 2026-04-26).</summary>
@@ -696,19 +703,45 @@ public sealed class DeliveryService(HttpClient http)
         }
     }
 
-    public async Task<bool> ConvertReceiptToReturnAsync(string receiptId, CancellationToken ct = default)
+    /// <summary>
+    /// 매입명세서를 반품으로 전환하고 <b>만들어진 반품서의 ID·번호를 돌려준다</b> (20260825작18).
+    /// </summary>
+    /// <remarks>
+    /// 🔴 종전엔 <c>bool</c> 만 돌려줬다. 서버는 <c>{returnId, returnNo}</c> 를 정상 반환하는데
+    /// 클라이언트가 그걸 <b>버렸다</b>. 그래서 담당자는 방금 만든 반품서의 번호도 위치도 모른 채
+    /// 원래 화면에 서 있었다 — 사장님이 본 <i>"전환했는데 아무 데도 안 보인다"</i> 의 뿌리다.
+    /// 값을 살려 호출부가 그 문서로 데려갈 수 있게 한다.
+    /// <para>
+    /// 실패 사유도 함께 돌려준다. 종전 <c>catch { return false; }</c> 는 원인을 통째로 삼켜
+    /// 화면이 <i>"전환에 실패했습니다"</i> 한 줄만 띄웠다 (헌법 #15).
+    /// </para>
+    /// </remarks>
+    public async Task<(bool Success, string? ReturnId, string? ReturnNo, string? ErrorMessage)>
+        ConvertReceiptToReturnAsync(string receiptId, CancellationToken ct = default)
     {
         try
         {
             using var resp = await http.PostAsync(
                 $"api/purchase/receipts/{Uri.EscapeDataString(receiptId)}/convert-to-return",
                 new StringContent("{}", Encoding.UTF8, "application/json"), ct);
-            return resp.IsSuccessStatusCode;
+
+            var body = await resp.Content.ReadAsStringAsync(ct);
+            if (!resp.IsSuccessStatusCode) return (false, null, null, body);
+
+            var created = System.Text.Json.JsonSerializer.Deserialize<ConvertToReturnResult>(body, JsonOptions);
+            return (true, created?.ReturnId, created?.ReturnNo, null);
         }
-        catch (Exception)
+        catch (Exception ex)
         {
-            return false;
+            return (false, null, null, ex.Message);
         }
+    }
+
+    /// <summary>전환 API 응답 — 서버 <c>PurchaseController.ConvertReceiptToReturn</c> 과 짝이다.</summary>
+    private sealed class ConvertToReturnResult
+    {
+        public string? ReturnId { get; set; }
+        public string? ReturnNo { get; set; }
     }
 
     /// <summary>

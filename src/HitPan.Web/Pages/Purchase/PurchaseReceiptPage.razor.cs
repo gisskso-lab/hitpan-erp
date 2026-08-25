@@ -580,11 +580,25 @@ public partial class PurchaseReceiptPage : ComponentBase
             yesText: "전환", cancelText: "취소");
         if (confirm != true) return;
 
-        var ok = await DeliveryService.ConvertReceiptToReturnAsync(_draft.Id);
-        if (ok)
-            Snackbar.Add("반품 전환이 완료되었습니다.", Severity.Success);
-        else
-            Snackbar.Add("반품 전환에 실패했습니다.", Severity.Error);
+        // 🔴 20260825작18 — 전환하면 그 반품서로 데려간다 (사장님 결재).
+        //   종전엔 스낵바만 띄우고 끝나, 담당자는 방금 만든 문서의 번호도 위치도 몰랐다.
+        //   전환 직후 문서는 매입 품목을 "전량 복사" 한 미완성품이라(100개 입고 중 3개 불량이어도
+        //   100개짜리 반품서) 반드시 사람이 수량·사유를 고쳐야 한다. 그 자리로 보내야
+        //   확정 버튼이 눈앞에 있고, 목록에서 자기 문서를 찾아 헤맬 일이 없다.
+        var (ok, returnId, returnNo, error) = await DeliveryService.ConvertReceiptToReturnAsync(_draft.Id);
+        if (!ok)
+        {
+            Snackbar.Add($"반품 전환에 실패했습니다. {error}", Severity.Error);
+            return;
+        }
+
+        Snackbar.Add($"반품 전환 완료 — {returnNo}. 수량·사유를 확인한 뒤 확정해 주세요.", Severity.Success);
+
+        if (!string.IsNullOrWhiteSpace(returnId))
+        {
+            _hasUnsavedChanges = false;   // 전환은 서버에 이미 커밋됐다 — 이탈 확인창을 띄우지 않는다
+            Nav.NavigateTo($"/returns?id={Uri.EscapeDataString(returnId)}");
+        }
     }
 
     /// <summary>
