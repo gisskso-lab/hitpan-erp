@@ -428,7 +428,7 @@ public class CollectionService : ICollectionService
               pr.receipt_date        AS ReceiptDate,
               (pr.total_amount + pr.vat_amount) AS TotalWithVat,
               IFNULL(pay.paid, 0)    AS Paid,
-              (pr.total_amount + pr.vat_amount) - IFNULL(pay.paid, 0) AS Outstanding,
+              (pr.total_amount + pr.vat_amount) - IFNULL(ret.returned, 0) - IFNULL(pay.paid, 0) AS Outstanding,
               CASE
                 WHEN DATEDIFF(CURDATE(), pr.receipt_date) <= 30 THEN '0_30'
                 WHEN DATEDIFF(CURDATE(), pr.receipt_date) <= 60 THEN '31_60'
@@ -442,9 +442,19 @@ public class CollectionService : ICollectionService
               WHERE is_active = 1 AND payment_type = 'purchase' AND tenant_id = @TenantId
               GROUP BY ref_order_id
             ) pay ON pay.ref_order_id = pr.receipt_id
+            -- 🔴 20260825작17 — 반품한 만큼은 줄 돈이 아니다.
+            --   종전엔 지급(payments)만 뺐다. 반품해도 미지급이 그대로 남아
+            --   돌려준 물건 값을 아직 줘야 하는 상태로 보였다(6/23 에 지급 축에서 겪은 것과 같은 병).
+            LEFT JOIN (
+              SELECT rt.receipt_id, SUM(rti.supply_amount + rti.vat_amount) AS returned
+              FROM purchase_returns rt
+              LEFT JOIN purchase_return_items rti ON rti.return_id = rt.return_id AND rti.tenant_id = rt.tenant_id
+              WHERE rt.tenant_id = @TenantId AND rt.is_deleted = 0 AND rt.status = 'confirmed'
+              GROUP BY rt.receipt_id
+            ) ret ON ret.receipt_id = pr.receipt_id
             WHERE pr.tenant_id = @TenantId
               AND pr.status = 'confirmed'
-              AND (pr.total_amount + pr.vat_amount) - IFNULL(pay.paid, 0) > 0
+              AND (pr.total_amount + pr.vat_amount) - IFNULL(ret.returned, 0) - IFNULL(pay.paid, 0) > 0
             ORDER BY pr.receipt_date ASC";
 
         var docs = (await _db.QueryAsync<PayableDocumentDto>(new CommandDefinition(

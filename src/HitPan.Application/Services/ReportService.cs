@@ -822,97 +822,264 @@ public class ReportService : IReportService
     }
 
     // ─── 매입현황 7종 SQL 상수 ───
+    // ─── 매입현황 SQL — 20260825작17: 반품 반영 ───
+    //
+    // 🔴 사장님 지시 (2026-08-25)
+    //   "반품은 조회전용이 아니라 워크플로우의 한 축이지. 따라서 매입목록이나,
+    //    매입관련 현황·분석·통계자료·순위표 에도 반영되야 하고, 회계·재고에도 자동반영되야 함."
+    //   "워크플로우 흐름에 따라 데이터 재고·금액의 정합성은 무조건 맞아야됨."
+    //
+    // 🔴 왜 유형을 더하지 않고 기존 SQL 자체를 바꾸나 (사장님 판단)
+    //   사장님 원문: "불량을 매입했다고 쳐도, 불량을 매출로 잡지 않고, 매입 수량에 딱 떨어지게
+    //   매출을 잡고, 창고에 재고를 0으로 맞추고 판매를 하는게 아니잖아."
+    //
+    //   ⇒ 불량 100개를 매입하고 반품하면 **그 100개는 처음부터 안 산 것**이다.
+    //     창고에도 없고 팔 수도 없다. "매입 100 - 반품 100 = 0" 을 사람이 계산해 보는 게 아니라,
+    //     **실제로 산 건 0** 이다. 그러니 「반품포함」 유형을 따로 만들어 고르게 하는 것은
+    //     *"불량도 매입에 넣고 볼까요, 뺄까요"* 를 묻는 셈인데 답은 하나뿐이다.
+    //
+    //   ⚠️ 나는 처음에 판매쪽이 「판매종합현황(반품포함)」을 별도 유형으로 뒀다는 이유로
+    //     매입도 유형 추가로 가려 했다. 사장님이 바로잡으셨다 —
+    //     **"매입을 매출에 맞춰서 하지 않잖아."** 매입은 매입 논리로 판단한다.
+    //
+    // ⚠️ 세무 총액은 이 화면 책임이 아니다 — 부가세 신고는 FinanceService 가 따로 집계한다.
+    //   두 자리는 소스가 별개다(이 화면은 조회 전용).
+    //
+    // ⚠️ status = 'confirmed' 인 반품만 뺀다 — 확정 안 한 반품은 아직 일어나지 않은 일이다(헌법 #6).
+    //   양성(=) 비교라 'canceled'/'cancelled' 철자 혼재에도 안전하다.
+    //   is_deleted = 0 도 함께 본다 — 지운 반품이 매입액을 깎으면 안 된다.
     private const string PR_BY_PERIOD = """
-        SELECT
-            DATE_FORMAT(pr.receipt_date, '%Y-%m-%d') AS Label,
-            COUNT(*) AS Count,
-            0 AS Qty,
-            COALESCE(SUM(pr.total_amount), 0) AS SupplyAmount,
-            COALESCE(SUM(pr.vat_amount), 0) AS VatAmount,
-            COALESCE(SUM(pr.total_amount + pr.vat_amount), 0) AS TotalAmount
-        FROM purchase_receipts pr
-        LEFT JOIN partners p ON p.partner_id = pr.partner_id AND p.tenant_id = pr.tenant_id
-        WHERE pr.tenant_id = @TenantId AND pr.status <> 'cancelled'
-          AND (@From IS NULL OR pr.receipt_date >= @From)
-          AND (@To IS NULL OR pr.receipt_date <= @To)
-          AND (@Partner IS NULL OR p.partner_name LIKE CONCAT('%', @Partner, '%'))
-        GROUP BY pr.receipt_date
-        ORDER BY pr.receipt_date
+        SELECT Label,
+               SUM(Count)        AS Count,
+               0                 AS Qty,
+               SUM(SupplyAmount) AS SupplyAmount,
+               SUM(VatAmount)    AS VatAmount,
+               SUM(TotalAmount)  AS TotalAmount
+        FROM (
+            SELECT
+                DATE_FORMAT(pr.receipt_date, '%Y-%m-%d') AS Label,
+                COUNT(*) AS Count,
+                COALESCE(SUM(pr.total_amount), 0) AS SupplyAmount,
+                COALESCE(SUM(pr.vat_amount), 0) AS VatAmount,
+                COALESCE(SUM(pr.total_amount + pr.vat_amount), 0) AS TotalAmount
+            FROM purchase_receipts pr
+            LEFT JOIN partners p ON p.partner_id = pr.partner_id AND p.tenant_id = pr.tenant_id
+            WHERE pr.tenant_id = @TenantId AND pr.status <> 'cancelled'
+              AND (@From IS NULL OR pr.receipt_date >= @From)
+              AND (@To IS NULL OR pr.receipt_date <= @To)
+              AND (@Partner IS NULL OR p.partner_name LIKE CONCAT('%', @Partner, '%'))
+            GROUP BY pr.receipt_date
+
+            UNION ALL
+
+            SELECT
+                DATE_FORMAT(rt.return_date, '%Y-%m-%d') AS Label,
+                -COUNT(*) AS Count,
+                -COALESCE(SUM(rti.supply_amount), 0) AS SupplyAmount,
+                -COALESCE(SUM(rti.vat_amount), 0) AS VatAmount,
+                -COALESCE(SUM(rti.supply_amount + rti.vat_amount), 0) AS TotalAmount
+            FROM purchase_returns rt
+            LEFT JOIN purchase_return_items rti ON rti.return_id = rt.return_id AND rti.tenant_id = rt.tenant_id
+            LEFT JOIN partners p ON p.partner_id = rt.partner_id AND p.tenant_id = rt.tenant_id
+            WHERE rt.tenant_id = @TenantId AND rt.is_deleted = 0 AND rt.status = 'confirmed'
+              AND (@From IS NULL OR rt.return_date >= @From)
+              AND (@To IS NULL OR rt.return_date <= @To)
+              AND (@Partner IS NULL OR p.partner_name LIKE CONCAT('%', @Partner, '%'))
+            GROUP BY rt.return_date
+        ) t
+        GROUP BY Label
+        ORDER BY Label
         """;
 
     private const string PR_BY_PARTNER = """
-        SELECT
-            p.partner_name AS Label,
-            COUNT(DISTINCT pr.receipt_id) AS Count,
-            0 AS Qty,
-            COALESCE(SUM(pr.total_amount), 0) AS SupplyAmount,
-            COALESCE(SUM(pr.vat_amount), 0) AS VatAmount,
-            COALESCE(SUM(pr.total_amount + pr.vat_amount), 0) AS TotalAmount
-        FROM purchase_receipts pr
-        LEFT JOIN partners p ON p.partner_id = pr.partner_id AND p.tenant_id = pr.tenant_id
-        WHERE pr.tenant_id = @TenantId AND pr.status <> 'cancelled'
-          AND (@From IS NULL OR pr.receipt_date >= @From)
-          AND (@To IS NULL OR pr.receipt_date <= @To)
-          AND (@Partner IS NULL OR p.partner_name LIKE CONCAT('%', @Partner, '%'))
-        GROUP BY pr.partner_id, p.partner_name
+        SELECT Label,
+               SUM(Count)        AS Count,
+               0                 AS Qty,
+               SUM(SupplyAmount) AS SupplyAmount,
+               SUM(VatAmount)    AS VatAmount,
+               SUM(TotalAmount)  AS TotalAmount
+        FROM (
+            SELECT
+                p.partner_name AS Label,
+                COUNT(DISTINCT pr.receipt_id) AS Count,
+                COALESCE(SUM(pr.total_amount), 0) AS SupplyAmount,
+                COALESCE(SUM(pr.vat_amount), 0) AS VatAmount,
+                COALESCE(SUM(pr.total_amount + pr.vat_amount), 0) AS TotalAmount
+            FROM purchase_receipts pr
+            LEFT JOIN partners p ON p.partner_id = pr.partner_id AND p.tenant_id = pr.tenant_id
+            WHERE pr.tenant_id = @TenantId AND pr.status <> 'cancelled'
+              AND (@From IS NULL OR pr.receipt_date >= @From)
+              AND (@To IS NULL OR pr.receipt_date <= @To)
+              AND (@Partner IS NULL OR p.partner_name LIKE CONCAT('%', @Partner, '%'))
+            GROUP BY pr.partner_id, p.partner_name
+
+            UNION ALL
+
+            SELECT
+                p.partner_name AS Label,
+                -COUNT(DISTINCT rt.return_id) AS Count,
+                -COALESCE(SUM(rti.supply_amount), 0) AS SupplyAmount,
+                -COALESCE(SUM(rti.vat_amount), 0) AS VatAmount,
+                -COALESCE(SUM(rti.supply_amount + rti.vat_amount), 0) AS TotalAmount
+            FROM purchase_returns rt
+            LEFT JOIN purchase_return_items rti ON rti.return_id = rt.return_id AND rti.tenant_id = rt.tenant_id
+            LEFT JOIN partners p ON p.partner_id = rt.partner_id AND p.tenant_id = rt.tenant_id
+            WHERE rt.tenant_id = @TenantId AND rt.is_deleted = 0 AND rt.status = 'confirmed'
+              AND (@From IS NULL OR rt.return_date >= @From)
+              AND (@To IS NULL OR rt.return_date <= @To)
+              AND (@Partner IS NULL OR p.partner_name LIKE CONCAT('%', @Partner, '%'))
+            GROUP BY rt.partner_id, p.partner_name
+        ) t
+        GROUP BY Label
+        -- 🔴 20260825작17 — 전량 반품된 건도 보여야 한다.
+        --   순액도 0, 건수도 0(매입 1 + 반품 -1)이 되어 조용히 사라졌다.
+        --   사장님 헌법: '목록에서 숨기면 사라지는 게 아니라 안 보이는 채로 쌓인다.'
+        --   ⇒ 거래가 한 번이라도 있었으면 뜬다(절대값 합산). 0원으로 보이는 게 사실이다.
+        HAVING SUM(ABS(Count)) <> 0 OR SUM(ABS(TotalAmount)) <> 0
         ORDER BY SupplyAmount DESC
         """;
 
     private const string PR_BY_ITEM = """
-        SELECT
-            i.item_name AS Label,
-            COUNT(DISTINCT pr.receipt_id) AS Count,
-            COALESCE(SUM(pri.qty), 0) AS Qty,
-            COALESCE(SUM(pri.supply_amount), 0) AS SupplyAmount,
-            COALESCE(SUM(pri.vat_amount), 0) AS VatAmount,
-            COALESCE(SUM(pri.supply_amount + pri.vat_amount), 0) AS TotalAmount
-        FROM purchase_receipt_items pri
-        INNER JOIN purchase_receipts pr ON pr.receipt_id = pri.receipt_id AND pr.tenant_id = pri.tenant_id
-        LEFT JOIN items i ON i.item_id = pri.item_id AND i.tenant_id = pri.tenant_id
-        WHERE pr.tenant_id = @TenantId AND pr.status <> 'cancelled'
-          AND (@From IS NULL OR pr.receipt_date >= @From)
-          AND (@To IS NULL OR pr.receipt_date <= @To)
-          AND (@Partner IS NULL OR i.item_name LIKE CONCAT('%', @Partner, '%'))
-        GROUP BY pri.item_id, i.item_name
+        SELECT Label,
+               SUM(Count)        AS Count,
+               SUM(Qty)          AS Qty,
+               SUM(SupplyAmount) AS SupplyAmount,
+               SUM(VatAmount)    AS VatAmount,
+               SUM(TotalAmount)  AS TotalAmount
+        FROM (
+            SELECT
+                i.item_name AS Label,
+                COUNT(DISTINCT pr.receipt_id) AS Count,
+                COALESCE(SUM(pri.qty), 0) AS Qty,
+                COALESCE(SUM(pri.supply_amount), 0) AS SupplyAmount,
+                COALESCE(SUM(pri.vat_amount), 0) AS VatAmount,
+                COALESCE(SUM(pri.supply_amount + pri.vat_amount), 0) AS TotalAmount
+            FROM purchase_receipt_items pri
+            INNER JOIN purchase_receipts pr ON pr.receipt_id = pri.receipt_id AND pr.tenant_id = pri.tenant_id
+            LEFT JOIN items i ON i.item_id = pri.item_id AND i.tenant_id = pri.tenant_id
+            WHERE pr.tenant_id = @TenantId AND pr.status <> 'cancelled'
+              AND (@From IS NULL OR pr.receipt_date >= @From)
+              AND (@To IS NULL OR pr.receipt_date <= @To)
+              AND (@Partner IS NULL OR i.item_name LIKE CONCAT('%', @Partner, '%'))
+            GROUP BY pri.item_id, i.item_name
+
+            UNION ALL
+
+            SELECT
+                i.item_name AS Label,
+                -COUNT(DISTINCT rt.return_id) AS Count,
+                -COALESCE(SUM(rti.qty), 0) AS Qty,
+                -COALESCE(SUM(rti.supply_amount), 0) AS SupplyAmount,
+                -COALESCE(SUM(rti.vat_amount), 0) AS VatAmount,
+                -COALESCE(SUM(rti.supply_amount + rti.vat_amount), 0) AS TotalAmount
+            FROM purchase_return_items rti
+            INNER JOIN purchase_returns rt ON rt.return_id = rti.return_id AND rt.tenant_id = rti.tenant_id
+            LEFT JOIN items i ON i.item_id = rti.item_id AND i.tenant_id = rti.tenant_id
+            WHERE rt.tenant_id = @TenantId AND rt.is_deleted = 0 AND rt.status = 'confirmed'
+              AND (@From IS NULL OR rt.return_date >= @From)
+              AND (@To IS NULL OR rt.return_date <= @To)
+              AND (@Partner IS NULL OR i.item_name LIKE CONCAT('%', @Partner, '%'))
+            GROUP BY rti.item_id, i.item_name
+        ) t
+        GROUP BY Label
+        -- 🔴 20260825작17 — 전량 반품된 건도 보여야 한다.
+        --   순액도 0, 건수도 0(매입 1 + 반품 -1)이 되어 조용히 사라졌다.
+        --   사장님 헌법: '목록에서 숨기면 사라지는 게 아니라 안 보이는 채로 쌓인다.'
+        --   ⇒ 거래가 한 번이라도 있었으면 뜬다(절대값 합산). 0원으로 보이는 게 사실이다.
+        HAVING SUM(ABS(Count)) <> 0 OR SUM(ABS(Qty)) <> 0
         ORDER BY SupplyAmount DESC
         """;
 
     private const string PR_MONTHLY = """
-        SELECT
-            DATE_FORMAT(pr.receipt_date, '%Y-%m') AS Label,
-            COUNT(DISTINCT pr.receipt_id) AS Count,
-            COALESCE(SUM(pri.qty), 0) AS Qty,
-            COALESCE(SUM(pri.supply_amount), 0) AS SupplyAmount,
-            COALESCE(SUM(pri.vat_amount), 0) AS VatAmount,
-            COALESCE(SUM(pri.supply_amount + pri.vat_amount), 0) AS TotalAmount
-        FROM purchase_receipt_items pri
-        INNER JOIN purchase_receipts pr ON pr.receipt_id = pri.receipt_id AND pr.tenant_id = pri.tenant_id
-        LEFT JOIN partners p ON p.partner_id = pr.partner_id AND p.tenant_id = pr.tenant_id
-        WHERE pr.tenant_id = @TenantId AND pr.status <> 'cancelled'
-          AND (@From IS NULL OR pr.receipt_date >= @From)
-          AND (@To IS NULL OR pr.receipt_date <= @To)
-          AND (@Partner IS NULL OR p.partner_name LIKE CONCAT('%', @Partner, '%'))
-        GROUP BY DATE_FORMAT(pr.receipt_date, '%Y-%m')
+        SELECT Label,
+               SUM(Count)        AS Count,
+               SUM(Qty)          AS Qty,
+               SUM(SupplyAmount) AS SupplyAmount,
+               SUM(VatAmount)    AS VatAmount,
+               SUM(TotalAmount)  AS TotalAmount
+        FROM (
+            SELECT
+                DATE_FORMAT(pr.receipt_date, '%Y-%m') AS Label,
+                COUNT(DISTINCT pr.receipt_id) AS Count,
+                COALESCE(SUM(pri.qty), 0) AS Qty,
+                COALESCE(SUM(pri.supply_amount), 0) AS SupplyAmount,
+                COALESCE(SUM(pri.vat_amount), 0) AS VatAmount,
+                COALESCE(SUM(pri.supply_amount + pri.vat_amount), 0) AS TotalAmount
+            FROM purchase_receipt_items pri
+            INNER JOIN purchase_receipts pr ON pr.receipt_id = pri.receipt_id AND pr.tenant_id = pri.tenant_id
+            LEFT JOIN partners p ON p.partner_id = pr.partner_id AND p.tenant_id = pr.tenant_id
+            WHERE pr.tenant_id = @TenantId AND pr.status <> 'cancelled'
+              AND (@From IS NULL OR pr.receipt_date >= @From)
+              AND (@To IS NULL OR pr.receipt_date <= @To)
+              AND (@Partner IS NULL OR p.partner_name LIKE CONCAT('%', @Partner, '%'))
+            GROUP BY DATE_FORMAT(pr.receipt_date, '%Y-%m')
+
+            UNION ALL
+
+            SELECT
+                DATE_FORMAT(rt.return_date, '%Y-%m') AS Label,
+                -COUNT(DISTINCT rt.return_id) AS Count,
+                -COALESCE(SUM(rti.qty), 0) AS Qty,
+                -COALESCE(SUM(rti.supply_amount), 0) AS SupplyAmount,
+                -COALESCE(SUM(rti.vat_amount), 0) AS VatAmount,
+                -COALESCE(SUM(rti.supply_amount + rti.vat_amount), 0) AS TotalAmount
+            FROM purchase_return_items rti
+            INNER JOIN purchase_returns rt ON rt.return_id = rti.return_id AND rt.tenant_id = rti.tenant_id
+            LEFT JOIN partners p ON p.partner_id = rt.partner_id AND p.tenant_id = rt.tenant_id
+            WHERE rt.tenant_id = @TenantId AND rt.is_deleted = 0 AND rt.status = 'confirmed'
+              AND (@From IS NULL OR rt.return_date >= @From)
+              AND (@To IS NULL OR rt.return_date <= @To)
+              AND (@Partner IS NULL OR p.partner_name LIKE CONCAT('%', @Partner, '%'))
+            GROUP BY DATE_FORMAT(rt.return_date, '%Y-%m')
+        ) t
+        GROUP BY Label
         ORDER BY Label
         """;
 
     private const string PR_PARTNER_YEARLY = """
-        SELECT
-            CONCAT(p.partner_name, ' (', DATE_FORMAT(pr.receipt_date, '%Y-%m'), ')') AS Label,
-            COUNT(DISTINCT pr.receipt_id) AS Count,
-            COALESCE(SUM(pri.qty), 0) AS Qty,
-            COALESCE(SUM(pri.supply_amount), 0) AS SupplyAmount,
-            COALESCE(SUM(pri.vat_amount), 0) AS VatAmount,
-            COALESCE(SUM(pri.supply_amount + pri.vat_amount), 0) AS TotalAmount
-        FROM purchase_receipt_items pri
-        INNER JOIN purchase_receipts pr ON pr.receipt_id = pri.receipt_id AND pr.tenant_id = pri.tenant_id
-        LEFT JOIN partners p ON p.partner_id = pr.partner_id AND p.tenant_id = pr.tenant_id
-        WHERE pr.tenant_id = @TenantId AND pr.status <> 'cancelled'
-          AND (@From IS NULL OR pr.receipt_date >= @From)
-          AND (@To IS NULL OR pr.receipt_date <= @To)
-          AND (@Partner IS NULL OR p.partner_name LIKE CONCAT('%', @Partner, '%'))
-        GROUP BY pr.partner_id, p.partner_name, DATE_FORMAT(pr.receipt_date, '%Y-%m')
-        ORDER BY p.partner_name, DATE_FORMAT(pr.receipt_date, '%Y-%m')
+        SELECT Label,
+               SUM(Count)        AS Count,
+               SUM(Qty)          AS Qty,
+               SUM(SupplyAmount) AS SupplyAmount,
+               SUM(VatAmount)    AS VatAmount,
+               SUM(TotalAmount)  AS TotalAmount
+        FROM (
+            SELECT
+                CONCAT(p.partner_name, ' (', DATE_FORMAT(pr.receipt_date, '%Y-%m'), ')') AS Label,
+                COUNT(DISTINCT pr.receipt_id) AS Count,
+                COALESCE(SUM(pri.qty), 0) AS Qty,
+                COALESCE(SUM(pri.supply_amount), 0) AS SupplyAmount,
+                COALESCE(SUM(pri.vat_amount), 0) AS VatAmount,
+                COALESCE(SUM(pri.supply_amount + pri.vat_amount), 0) AS TotalAmount
+            FROM purchase_receipt_items pri
+            INNER JOIN purchase_receipts pr ON pr.receipt_id = pri.receipt_id AND pr.tenant_id = pri.tenant_id
+            LEFT JOIN partners p ON p.partner_id = pr.partner_id AND p.tenant_id = pr.tenant_id
+            WHERE pr.tenant_id = @TenantId AND pr.status <> 'cancelled'
+              AND (@From IS NULL OR pr.receipt_date >= @From)
+              AND (@To IS NULL OR pr.receipt_date <= @To)
+              AND (@Partner IS NULL OR p.partner_name LIKE CONCAT('%', @Partner, '%'))
+            GROUP BY pr.partner_id, p.partner_name, DATE_FORMAT(pr.receipt_date, '%Y-%m')
+
+            UNION ALL
+
+            SELECT
+                CONCAT(p.partner_name, ' (', DATE_FORMAT(rt.return_date, '%Y-%m'), ')') AS Label,
+                -COUNT(DISTINCT rt.return_id) AS Count,
+                -COALESCE(SUM(rti.qty), 0) AS Qty,
+                -COALESCE(SUM(rti.supply_amount), 0) AS SupplyAmount,
+                -COALESCE(SUM(rti.vat_amount), 0) AS VatAmount,
+                -COALESCE(SUM(rti.supply_amount + rti.vat_amount), 0) AS TotalAmount
+            FROM purchase_return_items rti
+            INNER JOIN purchase_returns rt ON rt.return_id = rti.return_id AND rt.tenant_id = rti.tenant_id
+            LEFT JOIN partners p ON p.partner_id = rt.partner_id AND p.tenant_id = rt.tenant_id
+            WHERE rt.tenant_id = @TenantId AND rt.is_deleted = 0 AND rt.status = 'confirmed'
+              AND (@From IS NULL OR rt.return_date >= @From)
+              AND (@To IS NULL OR rt.return_date <= @To)
+              AND (@Partner IS NULL OR p.partner_name LIKE CONCAT('%', @Partner, '%'))
+            GROUP BY rt.partner_id, p.partner_name, DATE_FORMAT(rt.return_date, '%Y-%m')
+        ) t
+        GROUP BY Label
+        ORDER BY Label
         """;
 
     // 매입단가 변동현황 — 같은 품목의 unit_price 추이
@@ -1692,94 +1859,237 @@ public class ReportService : IReportService
     }
 
     // ─── 매입순위표 5종 SQL 상수 ───
+    // 🔴 20260825작17 — 반품을 UNION ALL 로 음수 합산한다.
+    //   사장님: "불량100개가 들어왓다고 해도, 100개를 반품하고 재주문 하겠지."
+    //   반품을 안 빼면 순위표가 200개 산 것처럼 보인다. 매입 1위 업체가 실은 반품 1위일 수 있다.
+    //   ⇒ 순위(ORDER BY)를 반품 뺀 금액으로 매겨야 "누구한테 제일 많이 샀나"가 맞는다.
+    // ⚠️ 반품 날짜축은 rt.return_date 다. 매입은 pr.receipt_date — 축을 섞으면 기간 필터가 거짓이 된다.
+    // ⚠️ ORDER BY 는 서브쿼리 안이 아니라 바깥에 둔다. 안에 두면 MySQL 이 무시한다.
+    // ⚠️ 확정 반품만(rt.status = 'confirmed'). 헌법 #6 — draft 반품은 아직 원장에 없다.
+    // ⚠️ UNION 양쪽은 컬럼 개수·순서·별칭이 정확히 같아야 한다. MySQL 은 이름이 아니라 위치로 맞춘다.
     private const string PRR_BY_PARTNER = """
-        SELECT
-            p.partner_name AS Label,
-            COUNT(DISTINCT pr.receipt_id) AS Count,
-            0 AS Qty,
-            COALESCE(SUM(pr.total_amount), 0) AS SupplyAmount,
-            COALESCE(SUM(pr.vat_amount), 0) AS VatAmount,
-            COALESCE(SUM(pr.total_amount + pr.vat_amount), 0) AS TotalAmount
-        FROM purchase_receipts pr
-        LEFT JOIN partners p ON p.partner_id = pr.partner_id AND p.tenant_id = pr.tenant_id
-        WHERE pr.tenant_id = @TenantId AND pr.status <> 'cancelled'
-          AND (@From IS NULL OR pr.receipt_date >= @From)
-          AND (@To IS NULL OR pr.receipt_date <= @To)
-          AND (@Partner IS NULL OR p.partner_name LIKE CONCAT('%', @Partner, '%'))
-        GROUP BY pr.partner_id, p.partner_name
-        ORDER BY SupplyAmount DESC
-        """;
+        SELECT Label,
+               SUM(Count)        AS Count,
+               0                 AS Qty,
+               SUM(SupplyAmount) AS SupplyAmount,
+               SUM(VatAmount)    AS VatAmount,
+               SUM(TotalAmount)  AS TotalAmount
+        FROM (
+            SELECT
+                p.partner_name AS Label,
+                COUNT(DISTINCT pr.receipt_id) AS Count,
+                COALESCE(SUM(pr.total_amount), 0) AS SupplyAmount,
+                COALESCE(SUM(pr.vat_amount), 0) AS VatAmount,
+                COALESCE(SUM(pr.total_amount + pr.vat_amount), 0) AS TotalAmount
+            FROM purchase_receipts pr
+            LEFT JOIN partners p ON p.partner_id = pr.partner_id AND p.tenant_id = pr.tenant_id
+            WHERE pr.tenant_id = @TenantId AND pr.status <> 'cancelled'
+              AND (@From IS NULL OR pr.receipt_date >= @From)
+              AND (@To IS NULL OR pr.receipt_date <= @To)
+              AND (@Partner IS NULL OR p.partner_name LIKE CONCAT('%', @Partner, '%'))
+            GROUP BY pr.partner_id, p.partner_name
 
-    private const string PRR_BY_ITEM = """
-        SELECT
-            i.item_name AS Label,
-            COUNT(DISTINCT pr.receipt_id) AS Count,
-            COALESCE(SUM(pri.qty), 0) AS Qty,
-            COALESCE(SUM(pri.supply_amount), 0) AS SupplyAmount,
-            COALESCE(SUM(pri.vat_amount), 0) AS VatAmount,
-            COALESCE(SUM(pri.supply_amount + pri.vat_amount), 0) AS TotalAmount
-        FROM purchase_receipt_items pri
-        INNER JOIN purchase_receipts pr ON pr.receipt_id = pri.receipt_id AND pr.tenant_id = pri.tenant_id
-        LEFT JOIN items i ON i.item_id = pri.item_id AND i.tenant_id = pri.tenant_id
-        WHERE pr.tenant_id = @TenantId AND pr.status <> 'cancelled'
-          AND (@From IS NULL OR pr.receipt_date >= @From)
-          AND (@To IS NULL OR pr.receipt_date <= @To)
-          AND (@Partner IS NULL OR i.item_name LIKE CONCAT('%', @Partner, '%'))
-        GROUP BY pri.item_id, i.item_name
-        ORDER BY SupplyAmount DESC
-        """;
+            UNION ALL
 
-    private const string PRR_BY_PERIOD = """
-        SELECT
-            DATE_FORMAT(pr.receipt_date, '%Y-%m') AS Label,
-            COUNT(DISTINCT pr.receipt_id) AS Count,
-            0 AS Qty,
-            COALESCE(SUM(pr.total_amount), 0) AS SupplyAmount,
-            COALESCE(SUM(pr.vat_amount), 0) AS VatAmount,
-            COALESCE(SUM(pr.total_amount + pr.vat_amount), 0) AS TotalAmount
-        FROM purchase_receipts pr
-        LEFT JOIN partners p ON p.partner_id = pr.partner_id AND p.tenant_id = pr.tenant_id
-        WHERE pr.tenant_id = @TenantId AND pr.status <> 'cancelled'
-          AND (@From IS NULL OR pr.receipt_date >= @From)
-          AND (@To IS NULL OR pr.receipt_date <= @To)
-          AND (@Partner IS NULL OR p.partner_name LIKE CONCAT('%', @Partner, '%'))
-        GROUP BY DATE_FORMAT(pr.receipt_date, '%Y-%m')
-        ORDER BY SupplyAmount DESC
-        """;
-
-    private const string PRR_BY_REGION = """
-        SELECT
-            COALESCE(NULLIF(SUBSTRING_INDEX(TRIM(p.address), ' ', 1), ''), '미지정') AS Label,
-            COUNT(DISTINCT pr.receipt_id) AS Count,
-            0 AS Qty,
-            COALESCE(SUM(pr.total_amount), 0) AS SupplyAmount,
-            COALESCE(SUM(pr.vat_amount), 0) AS VatAmount,
-            COALESCE(SUM(pr.total_amount + pr.vat_amount), 0) AS TotalAmount
-        FROM purchase_receipts pr
-        LEFT JOIN partners p ON p.partner_id = pr.partner_id AND p.tenant_id = pr.tenant_id
-        WHERE pr.tenant_id = @TenantId AND pr.status <> 'cancelled'
-          AND (@From IS NULL OR pr.receipt_date >= @From)
-          AND (@To IS NULL OR pr.receipt_date <= @To)
-          AND (@Partner IS NULL OR p.address LIKE CONCAT('%', @Partner, '%'))
+            SELECT
+                p.partner_name AS Label,
+                -COUNT(DISTINCT rt.return_id) AS Count,
+                -COALESCE(SUM(rti.supply_amount), 0) AS SupplyAmount,
+                -COALESCE(SUM(rti.vat_amount), 0) AS VatAmount,
+                -COALESCE(SUM(rti.supply_amount + rti.vat_amount), 0) AS TotalAmount
+            FROM purchase_return_items rti
+            INNER JOIN purchase_returns rt ON rt.return_id = rti.return_id AND rt.tenant_id = rti.tenant_id
+            LEFT JOIN partners p ON p.partner_id = rt.partner_id AND p.tenant_id = rt.tenant_id
+            WHERE rt.tenant_id = @TenantId AND rt.is_deleted = 0 AND rt.status = 'confirmed'
+              AND (@From IS NULL OR rt.return_date >= @From)
+              AND (@To IS NULL OR rt.return_date <= @To)
+              AND (@Partner IS NULL OR p.partner_name LIKE CONCAT('%', @Partner, '%'))
+            GROUP BY rt.partner_id, p.partner_name
+        ) t
         GROUP BY Label
         ORDER BY SupplyAmount DESC
         """;
 
+    private const string PRR_BY_ITEM = """
+        SELECT Label,
+               SUM(Count)        AS Count,
+               SUM(Qty)          AS Qty,
+               SUM(SupplyAmount) AS SupplyAmount,
+               SUM(VatAmount)    AS VatAmount,
+               SUM(TotalAmount)  AS TotalAmount
+        FROM (
+            SELECT
+                i.item_name AS Label,
+                COUNT(DISTINCT pr.receipt_id) AS Count,
+                COALESCE(SUM(pri.qty), 0) AS Qty,
+                COALESCE(SUM(pri.supply_amount), 0) AS SupplyAmount,
+                COALESCE(SUM(pri.vat_amount), 0) AS VatAmount,
+                COALESCE(SUM(pri.supply_amount + pri.vat_amount), 0) AS TotalAmount
+            FROM purchase_receipt_items pri
+            INNER JOIN purchase_receipts pr ON pr.receipt_id = pri.receipt_id AND pr.tenant_id = pri.tenant_id
+            LEFT JOIN items i ON i.item_id = pri.item_id AND i.tenant_id = pri.tenant_id
+            WHERE pr.tenant_id = @TenantId AND pr.status <> 'cancelled'
+              AND (@From IS NULL OR pr.receipt_date >= @From)
+              AND (@To IS NULL OR pr.receipt_date <= @To)
+              AND (@Partner IS NULL OR i.item_name LIKE CONCAT('%', @Partner, '%'))
+            GROUP BY pri.item_id, i.item_name
+
+            UNION ALL
+
+            SELECT
+                i.item_name AS Label,
+                -COUNT(DISTINCT rt.return_id) AS Count,
+                -COALESCE(SUM(rti.qty), 0) AS Qty,
+                -COALESCE(SUM(rti.supply_amount), 0) AS SupplyAmount,
+                -COALESCE(SUM(rti.vat_amount), 0) AS VatAmount,
+                -COALESCE(SUM(rti.supply_amount + rti.vat_amount), 0) AS TotalAmount
+            FROM purchase_return_items rti
+            INNER JOIN purchase_returns rt ON rt.return_id = rti.return_id AND rt.tenant_id = rti.tenant_id
+            LEFT JOIN items i ON i.item_id = rti.item_id AND i.tenant_id = rti.tenant_id
+            WHERE rt.tenant_id = @TenantId AND rt.is_deleted = 0 AND rt.status = 'confirmed'
+              AND (@From IS NULL OR rt.return_date >= @From)
+              AND (@To IS NULL OR rt.return_date <= @To)
+              AND (@Partner IS NULL OR i.item_name LIKE CONCAT('%', @Partner, '%'))
+            GROUP BY rti.item_id, i.item_name
+        ) t
+        GROUP BY Label
+        ORDER BY SupplyAmount DESC
+        """;
+
+    // ⚠️ 기간별 Label 은 '%Y-%m' 이다. 매입은 receipt_date, 반품은 return_date 를
+    //   각각 같은 월 문자열로 만들어야 같은 달 칸에서 상계된다.
+    private const string PRR_BY_PERIOD = """
+        SELECT Label,
+               SUM(Count)        AS Count,
+               0                 AS Qty,
+               SUM(SupplyAmount) AS SupplyAmount,
+               SUM(VatAmount)    AS VatAmount,
+               SUM(TotalAmount)  AS TotalAmount
+        FROM (
+            SELECT
+                DATE_FORMAT(pr.receipt_date, '%Y-%m') AS Label,
+                COUNT(DISTINCT pr.receipt_id) AS Count,
+                COALESCE(SUM(pr.total_amount), 0) AS SupplyAmount,
+                COALESCE(SUM(pr.vat_amount), 0) AS VatAmount,
+                COALESCE(SUM(pr.total_amount + pr.vat_amount), 0) AS TotalAmount
+            FROM purchase_receipts pr
+            LEFT JOIN partners p ON p.partner_id = pr.partner_id AND p.tenant_id = pr.tenant_id
+            WHERE pr.tenant_id = @TenantId AND pr.status <> 'cancelled'
+              AND (@From IS NULL OR pr.receipt_date >= @From)
+              AND (@To IS NULL OR pr.receipt_date <= @To)
+              AND (@Partner IS NULL OR p.partner_name LIKE CONCAT('%', @Partner, '%'))
+            GROUP BY DATE_FORMAT(pr.receipt_date, '%Y-%m')
+
+            UNION ALL
+
+            SELECT
+                DATE_FORMAT(rt.return_date, '%Y-%m') AS Label,
+                -COUNT(DISTINCT rt.return_id) AS Count,
+                -COALESCE(SUM(rti.supply_amount), 0) AS SupplyAmount,
+                -COALESCE(SUM(rti.vat_amount), 0) AS VatAmount,
+                -COALESCE(SUM(rti.supply_amount + rti.vat_amount), 0) AS TotalAmount
+            FROM purchase_return_items rti
+            INNER JOIN purchase_returns rt ON rt.return_id = rti.return_id AND rt.tenant_id = rti.tenant_id
+            LEFT JOIN partners p ON p.partner_id = rt.partner_id AND p.tenant_id = rt.tenant_id
+            WHERE rt.tenant_id = @TenantId AND rt.is_deleted = 0 AND rt.status = 'confirmed'
+              AND (@From IS NULL OR rt.return_date >= @From)
+              AND (@To IS NULL OR rt.return_date <= @To)
+              AND (@Partner IS NULL OR p.partner_name LIKE CONCAT('%', @Partner, '%'))
+            GROUP BY DATE_FORMAT(rt.return_date, '%Y-%m')
+        ) t
+        GROUP BY Label
+        ORDER BY SupplyAmount DESC
+        """;
+
+    // ⚠️ 지역은 partners.address 첫 토큰이다. 반품도 같은 SUBSTRING_INDEX 식으로 잘라야
+    //   '서울특별시' 가 매입/반품에서 서로 다른 칸으로 갈라지지 않는다.
+    private const string PRR_BY_REGION = """
+        SELECT Label,
+               SUM(Count)        AS Count,
+               0                 AS Qty,
+               SUM(SupplyAmount) AS SupplyAmount,
+               SUM(VatAmount)    AS VatAmount,
+               SUM(TotalAmount)  AS TotalAmount
+        FROM (
+            SELECT
+                COALESCE(NULLIF(SUBSTRING_INDEX(TRIM(p.address), ' ', 1), ''), '미지정') AS Label,
+                COUNT(DISTINCT pr.receipt_id) AS Count,
+                COALESCE(SUM(pr.total_amount), 0) AS SupplyAmount,
+                COALESCE(SUM(pr.vat_amount), 0) AS VatAmount,
+                COALESCE(SUM(pr.total_amount + pr.vat_amount), 0) AS TotalAmount
+            FROM purchase_receipts pr
+            LEFT JOIN partners p ON p.partner_id = pr.partner_id AND p.tenant_id = pr.tenant_id
+            WHERE pr.tenant_id = @TenantId AND pr.status <> 'cancelled'
+              AND (@From IS NULL OR pr.receipt_date >= @From)
+              AND (@To IS NULL OR pr.receipt_date <= @To)
+              AND (@Partner IS NULL OR p.address LIKE CONCAT('%', @Partner, '%'))
+            GROUP BY Label
+
+            UNION ALL
+
+            SELECT
+                COALESCE(NULLIF(SUBSTRING_INDEX(TRIM(p.address), ' ', 1), ''), '미지정') AS Label,
+                -COUNT(DISTINCT rt.return_id) AS Count,
+                -COALESCE(SUM(rti.supply_amount), 0) AS SupplyAmount,
+                -COALESCE(SUM(rti.vat_amount), 0) AS VatAmount,
+                -COALESCE(SUM(rti.supply_amount + rti.vat_amount), 0) AS TotalAmount
+            FROM purchase_return_items rti
+            INNER JOIN purchase_returns rt ON rt.return_id = rti.return_id AND rt.tenant_id = rti.tenant_id
+            LEFT JOIN partners p ON p.partner_id = rt.partner_id AND p.tenant_id = rt.tenant_id
+            WHERE rt.tenant_id = @TenantId AND rt.is_deleted = 0 AND rt.status = 'confirmed'
+              AND (@From IS NULL OR rt.return_date >= @From)
+              AND (@To IS NULL OR rt.return_date <= @To)
+              AND (@Partner IS NULL OR p.address LIKE CONCAT('%', @Partner, '%'))
+            GROUP BY Label
+        ) t
+        GROUP BY Label
+        ORDER BY SupplyAmount DESC
+        """;
+
+    // ⚠️ 사원별 조인축은 employees.user_id ← created_by 다 (매입 pr.created_by / 반품 rt.created_by).
+    //   🔴 purchase_returns.created_by 는 DB-109(20260825작16)로 오늘 막 생긴 컬럼이라
+    //      그 이전 반품 행은 전부 NULL 이다 ⇒ 당분간 '미지정' 칸에 음수로 뭉쳐 보인다.
+    //      값이 비어 보인다고 조인 축을 바꾸지 마라. 축을 바꾸면 앞으로 들어올 데이터가 틀어진다.
     private const string PRR_BY_EMPLOYEE = """
-        SELECT
-            COALESCE(e.emp_name, '미지정') AS Label,
-            COUNT(DISTINCT pr.receipt_id) AS Count,
-            0 AS Qty,
-            COALESCE(SUM(pr.total_amount), 0) AS SupplyAmount,
-            COALESCE(SUM(pr.vat_amount), 0) AS VatAmount,
-            COALESCE(SUM(pr.total_amount + pr.vat_amount), 0) AS TotalAmount
-        FROM purchase_receipts pr
-        LEFT JOIN employees e ON e.user_id = pr.created_by AND e.tenant_id = pr.tenant_id
-        WHERE pr.tenant_id = @TenantId AND pr.status <> 'cancelled'
-          AND (@From IS NULL OR pr.receipt_date >= @From)
-          AND (@To IS NULL OR pr.receipt_date <= @To)
-          AND (@Partner IS NULL OR e.emp_name LIKE CONCAT('%', @Partner, '%'))
-        GROUP BY pr.created_by, e.emp_name
+        SELECT Label,
+               SUM(Count)        AS Count,
+               0                 AS Qty,
+               SUM(SupplyAmount) AS SupplyAmount,
+               SUM(VatAmount)    AS VatAmount,
+               SUM(TotalAmount)  AS TotalAmount
+        FROM (
+            SELECT
+                COALESCE(e.emp_name, '미지정') AS Label,
+                COUNT(DISTINCT pr.receipt_id) AS Count,
+                COALESCE(SUM(pr.total_amount), 0) AS SupplyAmount,
+                COALESCE(SUM(pr.vat_amount), 0) AS VatAmount,
+                COALESCE(SUM(pr.total_amount + pr.vat_amount), 0) AS TotalAmount
+            FROM purchase_receipts pr
+            LEFT JOIN employees e ON e.user_id = pr.created_by AND e.tenant_id = pr.tenant_id
+            WHERE pr.tenant_id = @TenantId AND pr.status <> 'cancelled'
+              AND (@From IS NULL OR pr.receipt_date >= @From)
+              AND (@To IS NULL OR pr.receipt_date <= @To)
+              AND (@Partner IS NULL OR e.emp_name LIKE CONCAT('%', @Partner, '%'))
+            GROUP BY pr.created_by, e.emp_name
+
+            UNION ALL
+
+            SELECT
+                COALESCE(e.emp_name, '미지정') AS Label,
+                -COUNT(DISTINCT rt.return_id) AS Count,
+                -COALESCE(SUM(rti.supply_amount), 0) AS SupplyAmount,
+                -COALESCE(SUM(rti.vat_amount), 0) AS VatAmount,
+                -COALESCE(SUM(rti.supply_amount + rti.vat_amount), 0) AS TotalAmount
+            FROM purchase_return_items rti
+            INNER JOIN purchase_returns rt ON rt.return_id = rti.return_id AND rt.tenant_id = rti.tenant_id
+            LEFT JOIN employees e ON e.user_id = rt.created_by AND e.tenant_id = rt.tenant_id
+            WHERE rt.tenant_id = @TenantId AND rt.is_deleted = 0 AND rt.status = 'confirmed'
+              AND (@From IS NULL OR rt.return_date >= @From)
+              AND (@To IS NULL OR rt.return_date <= @To)
+              AND (@Partner IS NULL OR e.emp_name LIKE CONCAT('%', @Partner, '%'))
+            GROUP BY rt.created_by, e.emp_name
+        ) t
+        GROUP BY Label
         ORDER BY SupplyAmount DESC
         """;
 
@@ -1821,161 +2131,394 @@ public class ReportService : IReportService
     }
 
     // ─── 매입통계 8종 SQL 상수 ───
+    // 🔴 20260825작17 — 순위표와 같은 이유로 통계에서도 반품을 UNION ALL 로 음수 합산한다.
+    //   사장님: "매입관련 현황·분석·통계자료·순위표 에도 반영되야",
+    //           "워크플로우 흐름에 따라 데이터 재고·금액의 정합성은 무조건 맞아야됨."
+    //   월별 매트릭스는 반품이 일어난 '그 달'에서 빠진다(반품 날짜축 = rt.return_date).
+    //   ⚠️ 그래서 4월에 사고 5월에 반품하면 4월 매입은 그대로 남고 5월이 음수로 잡힌다.
+    //      이건 버그가 아니라 회계 사실이다 — 매입은 4월에, 반품은 5월에 일어났다.
+    //
+    // 🔴 YoY 4종 함정 — 반드시 양쪽 다 빼야 한다.
+    //   YoY 는 한 번 스캔하면서 CASE WHEN 으로 당해(@From~@To)와 전년(@FromPrev~@ToPrev)을
+    //   같은 행에 두 칸으로 벌려 담는 구조다 (Count=당기건수, Qty=전년건수,
+    //   SupplyAmount=당기액, VatAmount=전년액, TotalAmount=증감액).
+    //   ⇒ 반품 UNION 브랜치도 똑같이 CASE 를 두 개 만들어 당해·전년 양쪽에서 빼야 한다.
+    //      한쪽만 빼면 증감률이 거짓이 된다 — 예를 들어 전년 반품만 빼면 전년이 작아져
+    //      올해가 실제보다 더 성장한 것처럼 보인다.
+    //   ⚠️ WHERE 의 기간 조건도 반품 브랜치에서 두 구간을 OR 로 다 받아야 한다.
+    //      당해 구간만 받으면 전년 CASE 가 영영 0 이라 전년 반품이 통째로 증발한다.
+    //   ⚠️ HAVING 을 원본의 `> 0` 그대로 두면 안 된다. 전량 반품되어 순액이 0 이거나
+    //      음수가 된 행이 조용히 사라져 "샀다가 다 물렸다"는 사실이 화면에서 없어진다.
+    //      ⇒ `<> 0` 으로 바꿔 순액이 0 이 아닌 행은 남긴다.
     private const string PRSTATS_ITEM_MONTHLY = """
-        SELECT
-            CONCAT(i.item_name, ' (', DATE_FORMAT(pr.receipt_date, '%Y-%m'), ')') AS Label,
-            COUNT(DISTINCT pr.receipt_id) AS Count,
-            COALESCE(SUM(pri.qty), 0) AS Qty,
-            COALESCE(SUM(pri.supply_amount), 0) AS SupplyAmount,
-            COALESCE(SUM(pri.vat_amount), 0) AS VatAmount,
-            COALESCE(SUM(pri.supply_amount + pri.vat_amount), 0) AS TotalAmount
-        FROM purchase_receipt_items pri
-        INNER JOIN purchase_receipts pr ON pr.receipt_id = pri.receipt_id AND pr.tenant_id = pri.tenant_id
-        LEFT JOIN items i ON i.item_id = pri.item_id AND i.tenant_id = pri.tenant_id
-        WHERE pr.tenant_id = @TenantId AND pr.status <> 'cancelled'
-          AND (@From IS NULL OR pr.receipt_date >= @From)
-          AND (@To IS NULL OR pr.receipt_date <= @To)
-          AND (@Partner IS NULL OR i.item_name LIKE CONCAT('%', @Partner, '%'))
-        GROUP BY pri.item_id, i.item_name, DATE_FORMAT(pr.receipt_date, '%Y-%m')
-        ORDER BY i.item_name, DATE_FORMAT(pr.receipt_date, '%Y-%m')
+        SELECT Label,
+               SUM(Count)        AS Count,
+               SUM(Qty)          AS Qty,
+               SUM(SupplyAmount) AS SupplyAmount,
+               SUM(VatAmount)    AS VatAmount,
+               SUM(TotalAmount)  AS TotalAmount
+        FROM (
+            SELECT
+                CONCAT(i.item_name, ' (', DATE_FORMAT(pr.receipt_date, '%Y-%m'), ')') AS Label,
+                COUNT(DISTINCT pr.receipt_id) AS Count,
+                COALESCE(SUM(pri.qty), 0) AS Qty,
+                COALESCE(SUM(pri.supply_amount), 0) AS SupplyAmount,
+                COALESCE(SUM(pri.vat_amount), 0) AS VatAmount,
+                COALESCE(SUM(pri.supply_amount + pri.vat_amount), 0) AS TotalAmount
+            FROM purchase_receipt_items pri
+            INNER JOIN purchase_receipts pr ON pr.receipt_id = pri.receipt_id AND pr.tenant_id = pri.tenant_id
+            LEFT JOIN items i ON i.item_id = pri.item_id AND i.tenant_id = pri.tenant_id
+            WHERE pr.tenant_id = @TenantId AND pr.status <> 'cancelled'
+              AND (@From IS NULL OR pr.receipt_date >= @From)
+              AND (@To IS NULL OR pr.receipt_date <= @To)
+              AND (@Partner IS NULL OR i.item_name LIKE CONCAT('%', @Partner, '%'))
+            GROUP BY pri.item_id, i.item_name, DATE_FORMAT(pr.receipt_date, '%Y-%m')
+
+            UNION ALL
+
+            SELECT
+                CONCAT(i.item_name, ' (', DATE_FORMAT(rt.return_date, '%Y-%m'), ')') AS Label,
+                -COUNT(DISTINCT rt.return_id) AS Count,
+                -COALESCE(SUM(rti.qty), 0) AS Qty,
+                -COALESCE(SUM(rti.supply_amount), 0) AS SupplyAmount,
+                -COALESCE(SUM(rti.vat_amount), 0) AS VatAmount,
+                -COALESCE(SUM(rti.supply_amount + rti.vat_amount), 0) AS TotalAmount
+            FROM purchase_return_items rti
+            INNER JOIN purchase_returns rt ON rt.return_id = rti.return_id AND rt.tenant_id = rti.tenant_id
+            LEFT JOIN items i ON i.item_id = rti.item_id AND i.tenant_id = rti.tenant_id
+            WHERE rt.tenant_id = @TenantId AND rt.is_deleted = 0 AND rt.status = 'confirmed'
+              AND (@From IS NULL OR rt.return_date >= @From)
+              AND (@To IS NULL OR rt.return_date <= @To)
+              AND (@Partner IS NULL OR i.item_name LIKE CONCAT('%', @Partner, '%'))
+            GROUP BY rti.item_id, i.item_name, DATE_FORMAT(rt.return_date, '%Y-%m')
+        ) t
+        GROUP BY Label
+        ORDER BY Label
         """;
 
     private const string PRSTATS_PARTNER_MONTHLY = """
-        SELECT
-            CONCAT(p.partner_name, ' (', DATE_FORMAT(pr.receipt_date, '%Y-%m'), ')') AS Label,
-            COUNT(DISTINCT pr.receipt_id) AS Count,
-            COALESCE(SUM(pri.qty), 0) AS Qty,
-            COALESCE(SUM(pri.supply_amount), 0) AS SupplyAmount,
-            COALESCE(SUM(pri.vat_amount), 0) AS VatAmount,
-            COALESCE(SUM(pri.supply_amount + pri.vat_amount), 0) AS TotalAmount
-        FROM purchase_receipt_items pri
-        INNER JOIN purchase_receipts pr ON pr.receipt_id = pri.receipt_id AND pr.tenant_id = pri.tenant_id
-        LEFT JOIN partners p ON p.partner_id = pr.partner_id AND p.tenant_id = pr.tenant_id
-        WHERE pr.tenant_id = @TenantId AND pr.status <> 'cancelled'
-          AND (@From IS NULL OR pr.receipt_date >= @From)
-          AND (@To IS NULL OR pr.receipt_date <= @To)
-          AND (@Partner IS NULL OR p.partner_name LIKE CONCAT('%', @Partner, '%'))
-        GROUP BY pr.partner_id, p.partner_name, DATE_FORMAT(pr.receipt_date, '%Y-%m')
-        ORDER BY p.partner_name, DATE_FORMAT(pr.receipt_date, '%Y-%m')
+        SELECT Label,
+               SUM(Count)        AS Count,
+               SUM(Qty)          AS Qty,
+               SUM(SupplyAmount) AS SupplyAmount,
+               SUM(VatAmount)    AS VatAmount,
+               SUM(TotalAmount)  AS TotalAmount
+        FROM (
+            SELECT
+                CONCAT(p.partner_name, ' (', DATE_FORMAT(pr.receipt_date, '%Y-%m'), ')') AS Label,
+                COUNT(DISTINCT pr.receipt_id) AS Count,
+                COALESCE(SUM(pri.qty), 0) AS Qty,
+                COALESCE(SUM(pri.supply_amount), 0) AS SupplyAmount,
+                COALESCE(SUM(pri.vat_amount), 0) AS VatAmount,
+                COALESCE(SUM(pri.supply_amount + pri.vat_amount), 0) AS TotalAmount
+            FROM purchase_receipt_items pri
+            INNER JOIN purchase_receipts pr ON pr.receipt_id = pri.receipt_id AND pr.tenant_id = pri.tenant_id
+            LEFT JOIN partners p ON p.partner_id = pr.partner_id AND p.tenant_id = pr.tenant_id
+            WHERE pr.tenant_id = @TenantId AND pr.status <> 'cancelled'
+              AND (@From IS NULL OR pr.receipt_date >= @From)
+              AND (@To IS NULL OR pr.receipt_date <= @To)
+              AND (@Partner IS NULL OR p.partner_name LIKE CONCAT('%', @Partner, '%'))
+            GROUP BY pr.partner_id, p.partner_name, DATE_FORMAT(pr.receipt_date, '%Y-%m')
+
+            UNION ALL
+
+            SELECT
+                CONCAT(p.partner_name, ' (', DATE_FORMAT(rt.return_date, '%Y-%m'), ')') AS Label,
+                -COUNT(DISTINCT rt.return_id) AS Count,
+                -COALESCE(SUM(rti.qty), 0) AS Qty,
+                -COALESCE(SUM(rti.supply_amount), 0) AS SupplyAmount,
+                -COALESCE(SUM(rti.vat_amount), 0) AS VatAmount,
+                -COALESCE(SUM(rti.supply_amount + rti.vat_amount), 0) AS TotalAmount
+            FROM purchase_return_items rti
+            INNER JOIN purchase_returns rt ON rt.return_id = rti.return_id AND rt.tenant_id = rti.tenant_id
+            LEFT JOIN partners p ON p.partner_id = rt.partner_id AND p.tenant_id = rt.tenant_id
+            WHERE rt.tenant_id = @TenantId AND rt.is_deleted = 0 AND rt.status = 'confirmed'
+              AND (@From IS NULL OR rt.return_date >= @From)
+              AND (@To IS NULL OR rt.return_date <= @To)
+              AND (@Partner IS NULL OR p.partner_name LIKE CONCAT('%', @Partner, '%'))
+            GROUP BY rt.partner_id, p.partner_name, DATE_FORMAT(rt.return_date, '%Y-%m')
+        ) t
+        GROUP BY Label
+        ORDER BY Label
         """;
 
     private const string PRSTATS_EMPLOYEE_MONTHLY = """
-        SELECT
-            CONCAT(COALESCE(e.emp_name, '미지정'), ' (', DATE_FORMAT(pr.receipt_date, '%Y-%m'), ')') AS Label,
-            COUNT(DISTINCT pr.receipt_id) AS Count,
-            COALESCE(SUM(pri.qty), 0) AS Qty,
-            COALESCE(SUM(pri.supply_amount), 0) AS SupplyAmount,
-            COALESCE(SUM(pri.vat_amount), 0) AS VatAmount,
-            COALESCE(SUM(pri.supply_amount + pri.vat_amount), 0) AS TotalAmount
-        FROM purchase_receipt_items pri
-        INNER JOIN purchase_receipts pr ON pr.receipt_id = pri.receipt_id AND pr.tenant_id = pri.tenant_id
-        LEFT JOIN employees e ON e.user_id = pr.created_by AND e.tenant_id = pr.tenant_id
-        WHERE pr.tenant_id = @TenantId AND pr.status <> 'cancelled'
-          AND (@From IS NULL OR pr.receipt_date >= @From)
-          AND (@To IS NULL OR pr.receipt_date <= @To)
-          AND (@Partner IS NULL OR e.emp_name LIKE CONCAT('%', @Partner, '%'))
-        GROUP BY pr.created_by, e.emp_name, DATE_FORMAT(pr.receipt_date, '%Y-%m')
+        SELECT Label,
+               SUM(Count)        AS Count,
+               SUM(Qty)          AS Qty,
+               SUM(SupplyAmount) AS SupplyAmount,
+               SUM(VatAmount)    AS VatAmount,
+               SUM(TotalAmount)  AS TotalAmount
+        FROM (
+            SELECT
+                CONCAT(COALESCE(e.emp_name, '미지정'), ' (', DATE_FORMAT(pr.receipt_date, '%Y-%m'), ')') AS Label,
+                COUNT(DISTINCT pr.receipt_id) AS Count,
+                COALESCE(SUM(pri.qty), 0) AS Qty,
+                COALESCE(SUM(pri.supply_amount), 0) AS SupplyAmount,
+                COALESCE(SUM(pri.vat_amount), 0) AS VatAmount,
+                COALESCE(SUM(pri.supply_amount + pri.vat_amount), 0) AS TotalAmount
+            FROM purchase_receipt_items pri
+            INNER JOIN purchase_receipts pr ON pr.receipt_id = pri.receipt_id AND pr.tenant_id = pri.tenant_id
+            LEFT JOIN employees e ON e.user_id = pr.created_by AND e.tenant_id = pr.tenant_id
+            WHERE pr.tenant_id = @TenantId AND pr.status <> 'cancelled'
+              AND (@From IS NULL OR pr.receipt_date >= @From)
+              AND (@To IS NULL OR pr.receipt_date <= @To)
+              AND (@Partner IS NULL OR e.emp_name LIKE CONCAT('%', @Partner, '%'))
+            GROUP BY pr.created_by, e.emp_name, DATE_FORMAT(pr.receipt_date, '%Y-%m')
+
+            UNION ALL
+
+            SELECT
+                CONCAT(COALESCE(e.emp_name, '미지정'), ' (', DATE_FORMAT(rt.return_date, '%Y-%m'), ')') AS Label,
+                -COUNT(DISTINCT rt.return_id) AS Count,
+                -COALESCE(SUM(rti.qty), 0) AS Qty,
+                -COALESCE(SUM(rti.supply_amount), 0) AS SupplyAmount,
+                -COALESCE(SUM(rti.vat_amount), 0) AS VatAmount,
+                -COALESCE(SUM(rti.supply_amount + rti.vat_amount), 0) AS TotalAmount
+            FROM purchase_return_items rti
+            INNER JOIN purchase_returns rt ON rt.return_id = rti.return_id AND rt.tenant_id = rti.tenant_id
+            LEFT JOIN employees e ON e.user_id = rt.created_by AND e.tenant_id = rt.tenant_id
+            WHERE rt.tenant_id = @TenantId AND rt.is_deleted = 0 AND rt.status = 'confirmed'
+              AND (@From IS NULL OR rt.return_date >= @From)
+              AND (@To IS NULL OR rt.return_date <= @To)
+              AND (@Partner IS NULL OR e.emp_name LIKE CONCAT('%', @Partner, '%'))
+            GROUP BY rt.created_by, e.emp_name, DATE_FORMAT(rt.return_date, '%Y-%m')
+        ) t
+        GROUP BY Label
         ORDER BY Label
         """;
 
     private const string PRSTATS_REGION_MONTHLY = """
-        SELECT
-            CONCAT(
-                COALESCE(NULLIF(SUBSTRING_INDEX(TRIM(p.address), ' ', 1), ''), '미지정'),
-                ' (', DATE_FORMAT(pr.receipt_date, '%Y-%m'), ')'
-            ) AS Label,
-            COUNT(DISTINCT pr.receipt_id) AS Count,
-            COALESCE(SUM(pri.qty), 0) AS Qty,
-            COALESCE(SUM(pri.supply_amount), 0) AS SupplyAmount,
-            COALESCE(SUM(pri.vat_amount), 0) AS VatAmount,
-            COALESCE(SUM(pri.supply_amount + pri.vat_amount), 0) AS TotalAmount
-        FROM purchase_receipt_items pri
-        INNER JOIN purchase_receipts pr ON pr.receipt_id = pri.receipt_id AND pr.tenant_id = pri.tenant_id
-        LEFT JOIN partners p ON p.partner_id = pr.partner_id AND p.tenant_id = pr.tenant_id
-        WHERE pr.tenant_id = @TenantId AND pr.status <> 'cancelled'
-          AND (@From IS NULL OR pr.receipt_date >= @From)
-          AND (@To IS NULL OR pr.receipt_date <= @To)
-          AND (@Partner IS NULL OR p.address LIKE CONCAT('%', @Partner, '%'))
-        GROUP BY COALESCE(NULLIF(SUBSTRING_INDEX(TRIM(p.address), ' ', 1), ''), '미지정'),
-                 DATE_FORMAT(pr.receipt_date, '%Y-%m')
+        SELECT Label,
+               SUM(Count)        AS Count,
+               SUM(Qty)          AS Qty,
+               SUM(SupplyAmount) AS SupplyAmount,
+               SUM(VatAmount)    AS VatAmount,
+               SUM(TotalAmount)  AS TotalAmount
+        FROM (
+            SELECT
+                CONCAT(
+                    COALESCE(NULLIF(SUBSTRING_INDEX(TRIM(p.address), ' ', 1), ''), '미지정'),
+                    ' (', DATE_FORMAT(pr.receipt_date, '%Y-%m'), ')'
+                ) AS Label,
+                COUNT(DISTINCT pr.receipt_id) AS Count,
+                COALESCE(SUM(pri.qty), 0) AS Qty,
+                COALESCE(SUM(pri.supply_amount), 0) AS SupplyAmount,
+                COALESCE(SUM(pri.vat_amount), 0) AS VatAmount,
+                COALESCE(SUM(pri.supply_amount + pri.vat_amount), 0) AS TotalAmount
+            FROM purchase_receipt_items pri
+            INNER JOIN purchase_receipts pr ON pr.receipt_id = pri.receipt_id AND pr.tenant_id = pri.tenant_id
+            LEFT JOIN partners p ON p.partner_id = pr.partner_id AND p.tenant_id = pr.tenant_id
+            WHERE pr.tenant_id = @TenantId AND pr.status <> 'cancelled'
+              AND (@From IS NULL OR pr.receipt_date >= @From)
+              AND (@To IS NULL OR pr.receipt_date <= @To)
+              AND (@Partner IS NULL OR p.address LIKE CONCAT('%', @Partner, '%'))
+            GROUP BY COALESCE(NULLIF(SUBSTRING_INDEX(TRIM(p.address), ' ', 1), ''), '미지정'),
+                     DATE_FORMAT(pr.receipt_date, '%Y-%m')
+
+            UNION ALL
+
+            SELECT
+                CONCAT(
+                    COALESCE(NULLIF(SUBSTRING_INDEX(TRIM(p.address), ' ', 1), ''), '미지정'),
+                    ' (', DATE_FORMAT(rt.return_date, '%Y-%m'), ')'
+                ) AS Label,
+                -COUNT(DISTINCT rt.return_id) AS Count,
+                -COALESCE(SUM(rti.qty), 0) AS Qty,
+                -COALESCE(SUM(rti.supply_amount), 0) AS SupplyAmount,
+                -COALESCE(SUM(rti.vat_amount), 0) AS VatAmount,
+                -COALESCE(SUM(rti.supply_amount + rti.vat_amount), 0) AS TotalAmount
+            FROM purchase_return_items rti
+            INNER JOIN purchase_returns rt ON rt.return_id = rti.return_id AND rt.tenant_id = rti.tenant_id
+            LEFT JOIN partners p ON p.partner_id = rt.partner_id AND p.tenant_id = rt.tenant_id
+            WHERE rt.tenant_id = @TenantId AND rt.is_deleted = 0 AND rt.status = 'confirmed'
+              AND (@From IS NULL OR rt.return_date >= @From)
+              AND (@To IS NULL OR rt.return_date <= @To)
+              AND (@Partner IS NULL OR p.address LIKE CONCAT('%', @Partner, '%'))
+            GROUP BY COALESCE(NULLIF(SUBSTRING_INDEX(TRIM(p.address), ' ', 1), ''), '미지정'),
+                     DATE_FORMAT(rt.return_date, '%Y-%m')
+        ) t
+        GROUP BY Label
         ORDER BY Label
         """;
 
     // ─── 매입 YoY 4종 ─── (Count=당기건수, Qty=전년건수, Supply=당기액, Vat=전년액, Total=증감)
+    // 🔴 반품은 당해·전년 두 CASE 를 모두 만들어 양쪽에서 뺀다. 위 블록 주석의 함정 설명 참조.
     private const string PRSTATS_YOY_ITEM = """
-        SELECT
-            i.item_name AS Label,
-            COALESCE(SUM(CASE WHEN pr.receipt_date BETWEEN @From AND @To THEN 1 ELSE 0 END), 0) AS Count,
-            COALESCE(SUM(CASE WHEN pr.receipt_date BETWEEN @FromPrev AND @ToPrev THEN 1 ELSE 0 END), 0) AS Qty,
-            COALESCE(SUM(CASE WHEN pr.receipt_date BETWEEN @From AND @To THEN pri.supply_amount ELSE 0 END), 0) AS SupplyAmount,
-            COALESCE(SUM(CASE WHEN pr.receipt_date BETWEEN @FromPrev AND @ToPrev THEN pri.supply_amount ELSE 0 END), 0) AS VatAmount,
-            COALESCE(SUM(CASE WHEN pr.receipt_date BETWEEN @From AND @To THEN pri.supply_amount ELSE 0 END), 0)
-              - COALESCE(SUM(CASE WHEN pr.receipt_date BETWEEN @FromPrev AND @ToPrev THEN pri.supply_amount ELSE 0 END), 0) AS TotalAmount
-        FROM purchase_receipt_items pri
-        INNER JOIN purchase_receipts pr ON pr.receipt_id = pri.receipt_id AND pr.tenant_id = pri.tenant_id
-        LEFT JOIN items i ON i.item_id = pri.item_id AND i.tenant_id = pri.tenant_id
-        WHERE pr.tenant_id = @TenantId AND pr.status <> 'cancelled'
-          AND (pr.receipt_date BETWEEN @FromPrev AND @ToPrev OR pr.receipt_date BETWEEN @From AND @To)
-          AND (@Partner IS NULL OR i.item_name LIKE CONCAT('%', @Partner, '%'))
-        GROUP BY pri.item_id, i.item_name
-        HAVING SupplyAmount > 0 OR VatAmount > 0
+        SELECT Label,
+               SUM(Count)        AS Count,
+               SUM(Qty)          AS Qty,
+               SUM(SupplyAmount) AS SupplyAmount,
+               SUM(VatAmount)    AS VatAmount,
+               SUM(SupplyAmount) - SUM(VatAmount) AS TotalAmount
+        FROM (
+            SELECT
+                i.item_name AS Label,
+                COALESCE(SUM(CASE WHEN pr.receipt_date BETWEEN @From AND @To THEN 1 ELSE 0 END), 0) AS Count,
+                COALESCE(SUM(CASE WHEN pr.receipt_date BETWEEN @FromPrev AND @ToPrev THEN 1 ELSE 0 END), 0) AS Qty,
+                COALESCE(SUM(CASE WHEN pr.receipt_date BETWEEN @From AND @To THEN pri.supply_amount ELSE 0 END), 0) AS SupplyAmount,
+                COALESCE(SUM(CASE WHEN pr.receipt_date BETWEEN @FromPrev AND @ToPrev THEN pri.supply_amount ELSE 0 END), 0) AS VatAmount
+            FROM purchase_receipt_items pri
+            INNER JOIN purchase_receipts pr ON pr.receipt_id = pri.receipt_id AND pr.tenant_id = pri.tenant_id
+            LEFT JOIN items i ON i.item_id = pri.item_id AND i.tenant_id = pri.tenant_id
+            WHERE pr.tenant_id = @TenantId AND pr.status <> 'cancelled'
+              AND (pr.receipt_date BETWEEN @FromPrev AND @ToPrev OR pr.receipt_date BETWEEN @From AND @To)
+              AND (@Partner IS NULL OR i.item_name LIKE CONCAT('%', @Partner, '%'))
+            GROUP BY pri.item_id, i.item_name
+
+            UNION ALL
+
+            SELECT
+                i.item_name AS Label,
+                -COALESCE(SUM(CASE WHEN rt.return_date BETWEEN @From AND @To THEN 1 ELSE 0 END), 0) AS Count,
+                -COALESCE(SUM(CASE WHEN rt.return_date BETWEEN @FromPrev AND @ToPrev THEN 1 ELSE 0 END), 0) AS Qty,
+                -COALESCE(SUM(CASE WHEN rt.return_date BETWEEN @From AND @To THEN rti.supply_amount ELSE 0 END), 0) AS SupplyAmount,
+                -COALESCE(SUM(CASE WHEN rt.return_date BETWEEN @FromPrev AND @ToPrev THEN rti.supply_amount ELSE 0 END), 0) AS VatAmount
+            FROM purchase_return_items rti
+            INNER JOIN purchase_returns rt ON rt.return_id = rti.return_id AND rt.tenant_id = rti.tenant_id
+            LEFT JOIN items i ON i.item_id = rti.item_id AND i.tenant_id = rti.tenant_id
+            WHERE rt.tenant_id = @TenantId AND rt.is_deleted = 0 AND rt.status = 'confirmed'
+              AND (rt.return_date BETWEEN @FromPrev AND @ToPrev OR rt.return_date BETWEEN @From AND @To)
+              AND (@Partner IS NULL OR i.item_name LIKE CONCAT('%', @Partner, '%'))
+            GROUP BY rti.item_id, i.item_name
+        ) t
+        GROUP BY Label
+        -- 🔴 20260825작17 — 전량 반품이면 당해·전년 금액이 둘 다 0 이라 조용히 사라졌다.
+        --   거래가 있었으면 뜬다(절대값). 0 원으로 보이는 게 사실이다.
+        HAVING SUM(ABS(Count)) <> 0 OR SUM(ABS(Qty)) <> 0
+            OR SUM(ABS(SupplyAmount)) <> 0 OR SUM(ABS(VatAmount)) <> 0
         ORDER BY SupplyAmount DESC
         """;
 
     private const string PRSTATS_YOY_PARTNER = """
-        SELECT
-            p.partner_name AS Label,
-            COALESCE(SUM(CASE WHEN pr.receipt_date BETWEEN @From AND @To THEN 1 ELSE 0 END), 0) AS Count,
-            COALESCE(SUM(CASE WHEN pr.receipt_date BETWEEN @FromPrev AND @ToPrev THEN 1 ELSE 0 END), 0) AS Qty,
-            COALESCE(SUM(CASE WHEN pr.receipt_date BETWEEN @From AND @To THEN pr.total_amount ELSE 0 END), 0) AS SupplyAmount,
-            COALESCE(SUM(CASE WHEN pr.receipt_date BETWEEN @FromPrev AND @ToPrev THEN pr.total_amount ELSE 0 END), 0) AS VatAmount,
-            COALESCE(SUM(CASE WHEN pr.receipt_date BETWEEN @From AND @To THEN pr.total_amount ELSE 0 END), 0)
-              - COALESCE(SUM(CASE WHEN pr.receipt_date BETWEEN @FromPrev AND @ToPrev THEN pr.total_amount ELSE 0 END), 0) AS TotalAmount
-        FROM purchase_receipts pr
-        LEFT JOIN partners p ON p.partner_id = pr.partner_id AND p.tenant_id = pr.tenant_id
-        WHERE pr.tenant_id = @TenantId AND pr.status <> 'cancelled'
-          AND (pr.receipt_date BETWEEN @FromPrev AND @ToPrev OR pr.receipt_date BETWEEN @From AND @To)
-          AND (@Partner IS NULL OR p.partner_name LIKE CONCAT('%', @Partner, '%'))
-        GROUP BY pr.partner_id, p.partner_name
-        HAVING SupplyAmount > 0 OR VatAmount > 0
+        SELECT Label,
+               SUM(Count)        AS Count,
+               SUM(Qty)          AS Qty,
+               SUM(SupplyAmount) AS SupplyAmount,
+               SUM(VatAmount)    AS VatAmount,
+               SUM(SupplyAmount) - SUM(VatAmount) AS TotalAmount
+        FROM (
+            SELECT
+                p.partner_name AS Label,
+                COALESCE(SUM(CASE WHEN pr.receipt_date BETWEEN @From AND @To THEN 1 ELSE 0 END), 0) AS Count,
+                COALESCE(SUM(CASE WHEN pr.receipt_date BETWEEN @FromPrev AND @ToPrev THEN 1 ELSE 0 END), 0) AS Qty,
+                COALESCE(SUM(CASE WHEN pr.receipt_date BETWEEN @From AND @To THEN pr.total_amount ELSE 0 END), 0) AS SupplyAmount,
+                COALESCE(SUM(CASE WHEN pr.receipt_date BETWEEN @FromPrev AND @ToPrev THEN pr.total_amount ELSE 0 END), 0) AS VatAmount
+            FROM purchase_receipts pr
+            LEFT JOIN partners p ON p.partner_id = pr.partner_id AND p.tenant_id = pr.tenant_id
+            WHERE pr.tenant_id = @TenantId AND pr.status <> 'cancelled'
+              AND (pr.receipt_date BETWEEN @FromPrev AND @ToPrev OR pr.receipt_date BETWEEN @From AND @To)
+              AND (@Partner IS NULL OR p.partner_name LIKE CONCAT('%', @Partner, '%'))
+            GROUP BY pr.partner_id, p.partner_name
+
+            UNION ALL
+
+            SELECT
+                p.partner_name AS Label,
+                -COALESCE(SUM(CASE WHEN rt.return_date BETWEEN @From AND @To THEN 1 ELSE 0 END), 0) AS Count,
+                -COALESCE(SUM(CASE WHEN rt.return_date BETWEEN @FromPrev AND @ToPrev THEN 1 ELSE 0 END), 0) AS Qty,
+                -COALESCE(SUM(CASE WHEN rt.return_date BETWEEN @From AND @To THEN rt.total_amount ELSE 0 END), 0) AS SupplyAmount,
+                -COALESCE(SUM(CASE WHEN rt.return_date BETWEEN @FromPrev AND @ToPrev THEN rt.total_amount ELSE 0 END), 0) AS VatAmount
+            FROM purchase_returns rt
+            LEFT JOIN partners p ON p.partner_id = rt.partner_id AND p.tenant_id = rt.tenant_id
+            WHERE rt.tenant_id = @TenantId AND rt.is_deleted = 0 AND rt.status = 'confirmed'
+              AND (rt.return_date BETWEEN @FromPrev AND @ToPrev OR rt.return_date BETWEEN @From AND @To)
+              AND (@Partner IS NULL OR p.partner_name LIKE CONCAT('%', @Partner, '%'))
+            GROUP BY rt.partner_id, p.partner_name
+        ) t
+        GROUP BY Label
+        -- 🔴 20260825작17 — 전량 반품이면 당해·전년 금액이 둘 다 0 이라 조용히 사라졌다.
+        --   거래가 있었으면 뜬다(절대값). 0 원으로 보이는 게 사실이다.
+        HAVING SUM(ABS(Count)) <> 0 OR SUM(ABS(Qty)) <> 0
+            OR SUM(ABS(SupplyAmount)) <> 0 OR SUM(ABS(VatAmount)) <> 0
         ORDER BY SupplyAmount DESC
         """;
 
     private const string PRSTATS_YOY_EMPLOYEE = """
-        SELECT
-            COALESCE(e.emp_name, '미지정') AS Label,
-            COALESCE(SUM(CASE WHEN pr.receipt_date BETWEEN @From AND @To THEN 1 ELSE 0 END), 0) AS Count,
-            COALESCE(SUM(CASE WHEN pr.receipt_date BETWEEN @FromPrev AND @ToPrev THEN 1 ELSE 0 END), 0) AS Qty,
-            COALESCE(SUM(CASE WHEN pr.receipt_date BETWEEN @From AND @To THEN pr.total_amount ELSE 0 END), 0) AS SupplyAmount,
-            COALESCE(SUM(CASE WHEN pr.receipt_date BETWEEN @FromPrev AND @ToPrev THEN pr.total_amount ELSE 0 END), 0) AS VatAmount,
-            COALESCE(SUM(CASE WHEN pr.receipt_date BETWEEN @From AND @To THEN pr.total_amount ELSE 0 END), 0)
-              - COALESCE(SUM(CASE WHEN pr.receipt_date BETWEEN @FromPrev AND @ToPrev THEN pr.total_amount ELSE 0 END), 0) AS TotalAmount
-        FROM purchase_receipts pr
-        LEFT JOIN employees e ON e.user_id = pr.created_by AND e.tenant_id = pr.tenant_id
-        WHERE pr.tenant_id = @TenantId AND pr.status <> 'cancelled'
-          AND (pr.receipt_date BETWEEN @FromPrev AND @ToPrev OR pr.receipt_date BETWEEN @From AND @To)
-          AND (@Partner IS NULL OR e.emp_name LIKE CONCAT('%', @Partner, '%'))
-        GROUP BY pr.created_by, e.emp_name
-        HAVING SupplyAmount > 0 OR VatAmount > 0
+        SELECT Label,
+               SUM(Count)        AS Count,
+               SUM(Qty)          AS Qty,
+               SUM(SupplyAmount) AS SupplyAmount,
+               SUM(VatAmount)    AS VatAmount,
+               SUM(SupplyAmount) - SUM(VatAmount) AS TotalAmount
+        FROM (
+            SELECT
+                COALESCE(e.emp_name, '미지정') AS Label,
+                COALESCE(SUM(CASE WHEN pr.receipt_date BETWEEN @From AND @To THEN 1 ELSE 0 END), 0) AS Count,
+                COALESCE(SUM(CASE WHEN pr.receipt_date BETWEEN @FromPrev AND @ToPrev THEN 1 ELSE 0 END), 0) AS Qty,
+                COALESCE(SUM(CASE WHEN pr.receipt_date BETWEEN @From AND @To THEN pr.total_amount ELSE 0 END), 0) AS SupplyAmount,
+                COALESCE(SUM(CASE WHEN pr.receipt_date BETWEEN @FromPrev AND @ToPrev THEN pr.total_amount ELSE 0 END), 0) AS VatAmount
+            FROM purchase_receipts pr
+            LEFT JOIN employees e ON e.user_id = pr.created_by AND e.tenant_id = pr.tenant_id
+            WHERE pr.tenant_id = @TenantId AND pr.status <> 'cancelled'
+              AND (pr.receipt_date BETWEEN @FromPrev AND @ToPrev OR pr.receipt_date BETWEEN @From AND @To)
+              AND (@Partner IS NULL OR e.emp_name LIKE CONCAT('%', @Partner, '%'))
+            GROUP BY pr.created_by, e.emp_name
+
+            UNION ALL
+
+            SELECT
+                COALESCE(e.emp_name, '미지정') AS Label,
+                -COALESCE(SUM(CASE WHEN rt.return_date BETWEEN @From AND @To THEN 1 ELSE 0 END), 0) AS Count,
+                -COALESCE(SUM(CASE WHEN rt.return_date BETWEEN @FromPrev AND @ToPrev THEN 1 ELSE 0 END), 0) AS Qty,
+                -COALESCE(SUM(CASE WHEN rt.return_date BETWEEN @From AND @To THEN rt.total_amount ELSE 0 END), 0) AS SupplyAmount,
+                -COALESCE(SUM(CASE WHEN rt.return_date BETWEEN @FromPrev AND @ToPrev THEN rt.total_amount ELSE 0 END), 0) AS VatAmount
+            FROM purchase_returns rt
+            LEFT JOIN employees e ON e.user_id = rt.created_by AND e.tenant_id = rt.tenant_id
+            WHERE rt.tenant_id = @TenantId AND rt.is_deleted = 0 AND rt.status = 'confirmed'
+              AND (rt.return_date BETWEEN @FromPrev AND @ToPrev OR rt.return_date BETWEEN @From AND @To)
+              AND (@Partner IS NULL OR e.emp_name LIKE CONCAT('%', @Partner, '%'))
+            GROUP BY rt.created_by, e.emp_name
+        ) t
+        GROUP BY Label
+        -- 🔴 20260825작17 — 전량 반품이면 당해·전년 금액이 둘 다 0 이라 조용히 사라졌다.
+        --   거래가 있었으면 뜬다(절대값). 0 원으로 보이는 게 사실이다.
+        HAVING SUM(ABS(Count)) <> 0 OR SUM(ABS(Qty)) <> 0
+            OR SUM(ABS(SupplyAmount)) <> 0 OR SUM(ABS(VatAmount)) <> 0
         ORDER BY SupplyAmount DESC
         """;
 
     private const string PRSTATS_YOY_REGION = """
-        SELECT
-            COALESCE(NULLIF(SUBSTRING_INDEX(TRIM(p.address), ' ', 1), ''), '미지정') AS Label,
-            COALESCE(SUM(CASE WHEN pr.receipt_date BETWEEN @From AND @To THEN 1 ELSE 0 END), 0) AS Count,
-            COALESCE(SUM(CASE WHEN pr.receipt_date BETWEEN @FromPrev AND @ToPrev THEN 1 ELSE 0 END), 0) AS Qty,
-            COALESCE(SUM(CASE WHEN pr.receipt_date BETWEEN @From AND @To THEN pr.total_amount ELSE 0 END), 0) AS SupplyAmount,
-            COALESCE(SUM(CASE WHEN pr.receipt_date BETWEEN @FromPrev AND @ToPrev THEN pr.total_amount ELSE 0 END), 0) AS VatAmount,
-            COALESCE(SUM(CASE WHEN pr.receipt_date BETWEEN @From AND @To THEN pr.total_amount ELSE 0 END), 0)
-              - COALESCE(SUM(CASE WHEN pr.receipt_date BETWEEN @FromPrev AND @ToPrev THEN pr.total_amount ELSE 0 END), 0) AS TotalAmount
-        FROM purchase_receipts pr
-        LEFT JOIN partners p ON p.partner_id = pr.partner_id AND p.tenant_id = pr.tenant_id
-        WHERE pr.tenant_id = @TenantId AND pr.status <> 'cancelled'
-          AND (pr.receipt_date BETWEEN @FromPrev AND @ToPrev OR pr.receipt_date BETWEEN @From AND @To)
-          AND (@Partner IS NULL OR p.address LIKE CONCAT('%', @Partner, '%'))
+        SELECT Label,
+               SUM(Count)        AS Count,
+               SUM(Qty)          AS Qty,
+               SUM(SupplyAmount) AS SupplyAmount,
+               SUM(VatAmount)    AS VatAmount,
+               SUM(SupplyAmount) - SUM(VatAmount) AS TotalAmount
+        FROM (
+            SELECT
+                COALESCE(NULLIF(SUBSTRING_INDEX(TRIM(p.address), ' ', 1), ''), '미지정') AS Label,
+                COALESCE(SUM(CASE WHEN pr.receipt_date BETWEEN @From AND @To THEN 1 ELSE 0 END), 0) AS Count,
+                COALESCE(SUM(CASE WHEN pr.receipt_date BETWEEN @FromPrev AND @ToPrev THEN 1 ELSE 0 END), 0) AS Qty,
+                COALESCE(SUM(CASE WHEN pr.receipt_date BETWEEN @From AND @To THEN pr.total_amount ELSE 0 END), 0) AS SupplyAmount,
+                COALESCE(SUM(CASE WHEN pr.receipt_date BETWEEN @FromPrev AND @ToPrev THEN pr.total_amount ELSE 0 END), 0) AS VatAmount
+            FROM purchase_receipts pr
+            LEFT JOIN partners p ON p.partner_id = pr.partner_id AND p.tenant_id = pr.tenant_id
+            WHERE pr.tenant_id = @TenantId AND pr.status <> 'cancelled'
+              AND (pr.receipt_date BETWEEN @FromPrev AND @ToPrev OR pr.receipt_date BETWEEN @From AND @To)
+              AND (@Partner IS NULL OR p.address LIKE CONCAT('%', @Partner, '%'))
+            GROUP BY Label
+
+            UNION ALL
+
+            SELECT
+                COALESCE(NULLIF(SUBSTRING_INDEX(TRIM(p.address), ' ', 1), ''), '미지정') AS Label,
+                -COALESCE(SUM(CASE WHEN rt.return_date BETWEEN @From AND @To THEN 1 ELSE 0 END), 0) AS Count,
+                -COALESCE(SUM(CASE WHEN rt.return_date BETWEEN @FromPrev AND @ToPrev THEN 1 ELSE 0 END), 0) AS Qty,
+                -COALESCE(SUM(CASE WHEN rt.return_date BETWEEN @From AND @To THEN rt.total_amount ELSE 0 END), 0) AS SupplyAmount,
+                -COALESCE(SUM(CASE WHEN rt.return_date BETWEEN @FromPrev AND @ToPrev THEN rt.total_amount ELSE 0 END), 0) AS VatAmount
+            FROM purchase_returns rt
+            LEFT JOIN partners p ON p.partner_id = rt.partner_id AND p.tenant_id = rt.tenant_id
+            WHERE rt.tenant_id = @TenantId AND rt.is_deleted = 0 AND rt.status = 'confirmed'
+              AND (rt.return_date BETWEEN @FromPrev AND @ToPrev OR rt.return_date BETWEEN @From AND @To)
+              AND (@Partner IS NULL OR p.address LIKE CONCAT('%', @Partner, '%'))
+            GROUP BY Label
+        ) t
         GROUP BY Label
-        HAVING SupplyAmount > 0 OR VatAmount > 0
+        -- 🔴 20260825작17 — 전량 반품이면 당해·전년 금액이 둘 다 0 이라 조용히 사라졌다.
+        --   거래가 있었으면 뜬다(절대값). 0 원으로 보이는 게 사실이다.
+        HAVING SUM(ABS(Count)) <> 0 OR SUM(ABS(Qty)) <> 0
+            OR SUM(ABS(SupplyAmount)) <> 0 OR SUM(ABS(VatAmount)) <> 0
         ORDER BY SupplyAmount DESC
         """;
 
