@@ -394,8 +394,15 @@ public class ReturnMeasuredRejectGateTests
         // 매출반품일 때만 — 매입에 잘못 뜨면 경로도 권한도 다른 확정이 나간다.
         Assert.Contains("IsSalesReturn &&", list, StringComparison.Ordinal);
 
-        // 권한은 전표 화면과 동일해야 한다(작9).
-        Assert.Contains("Roles=\"system_admin,tenant_admin,sales_manager\"", list, StringComparison.Ordinal);
+        // 🔴 20260825작11 — 작10 이 여기 걸어둔 Roles= 검사를 걷어낸다.
+        //   이 목록은 DialogService.ShowAsync 로 열린다. 다이얼로그는 App.razor 에서
+        //   CascadingAuthenticationState 바깥(MudDialogProvider 8행 vs 10행)이라
+        //   AuthorizeView 가 렌더되는 순간 InvalidOperationException 으로 목록이 통째로 죽었다
+        //   (사장님 1.3.14 실측 반려 ②③ — "확정버튼없음" + "들어가면 오류").
+        //   ⇒ 화면 Roles 를 요구하던 이 줄이 바로 그 사고를 고정하고 있었다.
+        //   권한은 서버가 강제한다 — 아래 서버_매출반품_확정취소는_SalesManager_정책이다() 가 지킨다.
+        //   다이얼로그 안 AuthorizeView 금지는 DialogAuthorizeViewGateTests 가 지킨다.
+        Assert.DoesNotContain("<AuthorizeView", list, StringComparison.Ordinal);
     }
 
     /// <summary>

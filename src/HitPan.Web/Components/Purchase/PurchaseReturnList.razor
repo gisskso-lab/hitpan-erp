@@ -47,18 +47,25 @@
                        🔴 매출반품일 때만 보인다 — 이 목록은 매입반품과 공용이고,
                           매입 확정은 경로도 권한도 다르다(섞으면 잘못된 확정이 나간다).
                        권한은 전표 화면과 같다(작9) — 화면이 서버 정책보다 관대해도, 인색해도 안 된다. *@
+                    @* 🔴 20260825작11 — 작10 의 AuthorizeView 를 걷어낸다.
+                       이 컴포넌트는 DialogService.ShowAsync 로 열린다. MudDialogProvider 는
+                       App.razor 에서 <CascadingAuthenticationState> **바깥**(8행 vs 10행)에 있어
+                       다이얼로그 안에는 Task<AuthenticationState> 캐스케이드가 없다.
+                       ⇒ AuthorizeView 가 렌더되는 순간 InvalidOperationException 이 터져
+                          목록이 통째로 죽었다(반려 3번). 버튼이 안 보인 게 아니라 화면이 못 뜬 것이고,
+                          그래서 반려 2번("확정버튼 없음")도 뿌리가 같다 — 증상 2개, 원인 1개.
+                       같은 함정을 SalesListDialog.razor(112~115행)가 이미 겪고 주석까지 남겼는데
+                       작10 이 그걸 못 보고 되밟았다.
+                       ⇒ 권한은 서버가 강제한다 — POST sales/returns/{id}/confirm 은
+                          [Authorize(Policy = "SalesManager")] 다. 권한이 없으면 403 이 내려오고
+                          ConfirmOneAsync 가 그 문장을 사용자에게 보여준다. *@
                     @if (IsSalesReturn && string.Equals(context.Status, "draft", StringComparison.OrdinalIgnoreCase))
                     {
-                        @* Context="auth" — MudTable RowTemplate 의 context 와 이름이 겹치면 컴파일이 막힌다. *@
-                        <AuthorizeView Roles="system_admin,tenant_admin,sales_manager" Context="auth">
-                            <Authorized>
-                                <MudIconButton Icon="@Icons.Material.Filled.CheckCircle"
-                                               Color="Color.Success"
-                                               Size="Size.Small"
-                                               Title="반품확정"
-                                               OnClick="@(() => ConfirmOneAsync(context))" />
-                            </Authorized>
-                        </AuthorizeView>
+                        <MudIconButton Icon="@Icons.Material.Filled.CheckCircle"
+                                       Color="Color.Success"
+                                       Size="Size.Small"
+                                       Title="반품확정"
+                                       OnClick="@(() => ConfirmOneAsync(context))" />
                     }
                     <MudIconButton Icon="@Icons.Material.Filled.Delete"
                                    Color="Color.Error"
