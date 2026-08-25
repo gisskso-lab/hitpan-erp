@@ -16,7 +16,7 @@
 <MudPaper Class="pa-3 mb-3" Elevation="0" Style="border:1px solid var(--mud-palette-lines-default);border-radius:12px">
     <div class="hitpan-filter-bar">
         <div class="hitpan-filter-field hitpan-filter-field--md">
-            <MudSelect T="string" @bind-Value="_viewType" Label="조회유형" Variant="Variant.Outlined" Margin="Margin.Dense">
+            <MudSelect T="string" Value="_viewType" ValueChanged="OnViewTypeChangedAsync" Label="조회유형" Variant="Variant.Outlined" Margin="Margin.Dense">
                 <MudSelectItem Value="@("forecast")">발주예상량 산출</MudSelectItem>
                 <MudSelectItem Value="@("period")">기간별 발주현황</MudSelectItem>
                 <MudSelectItem Value="@("item")">품목별 발주현황</MudSelectItem>
@@ -93,6 +93,22 @@
     private List<ReportRow> _reportData = new();
 
     protected override async Task OnInitializedAsync() => await SearchAsync();
+
+    /// <summary>
+    /// 조회유형 변경 시 즉시 재조회한다 (20260825작16).
+    /// 사장님 실측 8/25: 매입 현황·순위·통계 5화면이 <b>조회유형과 상관없이 날짜로만</b> 나왔다.
+    /// 원인 — 콤보가 <c>@bind-Value</c> 라 값만 담고 <b>재조회를 안 걸었다.</b>
+    /// 재조회가 「조회」 버튼과 최초 진입에만 있어, 콤보를 바꿔도 앞 결과(기간별=날짜)가 남았다.
+    /// 🔴 판매쪽은 작2 에서 이미 같은 반려를 받아 고쳤는데 <b>매입에 옮기지 않았다.</b>
+    /// 검색어도 함께 비운다: 조회유형이 바뀌면 검색어 의미(품명↔업체)가 달라져
+    /// 앞 유형의 입력이 남으면 엉뚱한 필터가 되어 0건이 된다.
+    /// </summary>
+    private async Task OnViewTypeChangedAsync(string value)
+    {
+        _viewType = value;
+        _searchText = "";
+        await SearchAsync();
+    }
 
     private async Task SearchAsync()
     {
