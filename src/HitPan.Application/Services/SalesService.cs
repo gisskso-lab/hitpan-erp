@@ -2290,8 +2290,17 @@ public class SalesService : ISalesService
             await tx.CommitAsync(ct);
             await _audit.LogAsync("confirm", "sales_return", returnId, ct: ct);
         }
-        catch (Exception)
+        catch (Exception ex)
         {
+            // 🔴 20260825작14 — 무엇이 터졌는지 남긴다.
+            //   종전엔 조용히 롤백하고 다시 던지기만 해서, 로그엔 미들웨어의 마지막 줄만 남았다.
+            //   반품확정 500 을 세 차례(작10·작12·작13) 쫓는 동안 **어느 단계에서 죽었는지**
+            //   알 수 없어 매번 추측으로 다음 후보를 골랐다. 예외 종류와 MySQL 번호만 있어도
+            //   다음 사람은 첫 줄에서 시작할 수 있다(헌법 #15 — 침묵하지 않는다).
+            var mysqlNo = (ex as MySqlConnector.MySqlException)?.Number;
+            System.Diagnostics.Trace.TraceError(
+                $"[SalesService] 매출반품 확정 실패 return_id={returnId} "
+                + $"예외={ex.GetType().Name} MySQL번호={(mysqlNo?.ToString() ?? "없음")} 메시지={ex.Message}");
             try { await tx.RollbackAsync(ct); } catch (Exception rbex) { Console.Error.WriteLine($"[SalesService] rollback failed: {rbex.Message}"); }
             throw;
         }

@@ -75,10 +75,51 @@ public partial class SalesReturnPage : ComponentBase
 
         // 20260825작7: 판매목록에서 「반품」으로 들어온 경우 바로 품목을 채운다.
         //   다이얼로그를 다시 띄우지 않는다 — 사용자는 이미 거래를 골랐다.
-        if (!string.IsNullOrWhiteSpace(DeliveryIdParam))
-        {
-            await FillFromDeliveryAsync(DeliveryIdParam!, null);
-        }
+        // 🔴 20260825작14: 실제 채우기는 OnParametersSetAsync 가 한다(아래 주석 참조).
+        //   여기서 부르면 **화면이 이미 떠 있을 때** 다시 눌러도 아무 일이 안 일어난다.
+        await TryFillFromQueryAsync();
+    }
+
+    /// <summary>
+    /// 🔴 <b>20260825작14 — 사장님 실측 반려(1.3.16)</b>:
+    /// <i>"반품버튼 클릭하고, 반품확인서 작성 팝업에 작성 클릭하면,
+    /// <b>오류도 안뜨고, 반품으로 넘어가지도 않음</b>"</i>
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>[무엇이었나]</b> <c>deliveryId</c> 를 <c>OnInitializedAsync</c> 에서<b>만</b> 읽었다.
+    /// 그런데 <b>반품확인서 화면이 이미 떠 있는 상태</b>에서 다시 「반품」을 누르면,
+    /// Blazor 는 <b>같은 컴포넌트</b>로의 이동이라 판단해 <b>재초기화하지 않는다.</b>
+    /// ⇒ <c>OnInitializedAsync</c> 가 다시 돌지 않고, 넘긴 거래는 <b>조용히 버려진다.</b>
+    /// 오류도 없고 화면도 안 바뀐다 — 사장님이 보신 그대로다.
+    /// </para>
+    /// <para>
+    /// 🔴 <b>탭 개수와 무관하다.</b> 처음엔 MaxTabs(5) 를 의심했으나
+    /// 사장님이 <i>"탭 하나만 열어도 마찬가지"</i> 라고 정정해 주셨다 — 그 가설은 버렸다.
+    /// </para>
+    /// <para>
+    /// <b>[고침]</b> <c>OnParametersSetAsync</c> 에서 받는다. 파라미터가 바뀔 때마다 호출되므로
+    /// 화면이 떠 있어도 새 거래가 실린다.
+    /// ⚠️ <c>_filledDeliveryId</c> 로 <b>같은 값 재적용을 막는다</b> —
+    /// 이 콜백은 렌더마다 여러 번 불릴 수 있어, 가드가 없으면 사용자가 고친 수량을 덮어쓴다.
+    /// </para>
+    /// </remarks>
+    protected override async Task OnParametersSetAsync()
+    {
+        await TryFillFromQueryAsync();
+    }
+
+    /// <summary>이미 채운 거래 — 같은 값으로 두 번 채우지 않기 위한 표식 (20260825작14).</summary>
+    private string? _filledDeliveryId;
+
+    private async Task TryFillFromQueryAsync()
+    {
+        if (_draft is null) return;                              // 아직 초기화 전
+        if (string.IsNullOrWhiteSpace(DeliveryIdParam)) return;  // 넘어온 거래 없음
+        if (_filledDeliveryId == DeliveryIdParam) return;        // 이미 이 거래를 채웠다
+
+        _filledDeliveryId = DeliveryIdParam;
+        await FillFromDeliveryAsync(DeliveryIdParam!, null);
     }
 
     private async Task<IEnumerable<string>> SearchPartnerAsync(string value, CancellationToken ct)

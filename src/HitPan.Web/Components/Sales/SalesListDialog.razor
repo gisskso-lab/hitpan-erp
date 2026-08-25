@@ -459,10 +459,29 @@
             yesText: "작성", cancelText: "취소");
         if (ok != true) return;
 
-        // 목록 다이얼로그를 닫고 반품확인서 탭을 연다.
-        MudDialog.Close(DialogResult.Cancel());
-        TabService.TryAddTab(WorkDocumentKind.SalesReturn,
+        // 20260825작14 — 반환값을 버리지 않는다.
+        //
+        //   ⚠️ **이것은 사장님 반려(1.3.16)의 원인이 아니었다.** 진짜 원인은
+        //     반품확인서 화면이 `deliveryId` 를 OnInitializedAsync 에서만 읽어
+        //     **이미 떠 있는 화면에서는 조용히 버려지던 것**이다(SalesReturnPage 참조).
+        //     처음엔 MaxTabs(5) 를 의심했으나 사장님이 *"탭 하나만 열어도 마찬가지"* 라고
+        //     정정해 주셔서 그 가설은 버렸다.
+        //
+        //   다만 **반환값을 버리던 것 자체는 결함이 맞다.** TryAddTab 은 탭이 꽉 차면
+        //   열지 않고 false 를 주는데, 종전엔 그걸 무시하고 목록을 먼저 닫아
+        //   "탭은 최대 5개" 스낵바가 **닫히는 다이얼로그에 묻혔다.**
+        //   ⇒ 탭을 먼저 열고, 성공했을 때만 목록을 닫는다.
+        //   🔴 반환값을 버리면 실패가 침묵이 된다 — 헌법 #15·#20.
+        var opened = TabService.TryAddTab(WorkDocumentKind.SalesReturn,
             $"?deliveryId={Uri.EscapeDataString(picked.OrderId)}");
+
+        if (!opened)
+        {
+            // TryAddTab 이 이미 사유를 스낵바로 알린다. 목록은 닫지 않는다 — 닫으면 그 안내가 묻힌다.
+            return;
+        }
+
+        MudDialog.Close(DialogResult.Cancel());
     }
 
     private void Close()
