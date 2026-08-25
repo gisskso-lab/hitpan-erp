@@ -137,7 +137,28 @@ public class FinanceService : IFinanceService
         if (from.HasValue) purchaseSql += " AND r.receipt_date >= @From";
         if (to.HasValue) purchaseSql += " AND r.receipt_date <= @To";
 
-        var sql = $"({salesSql}) UNION ALL ({purchaseSql}) ORDER BY TxDate DESC";
+        // 🔴 20260825작17 — 매입반품도 장부에 뜬다.
+        //   여기는 **집계가 아니라 전표 목록**이다. 반품을 빼는 게 아니라 **행으로 보여야** 한다.
+        //   안 그러면 세무사·거래처가 장부를 볼 때 "매입은 있는데 돌려준 기록이 없는" 장부가 된다.
+        //   금액은 음수로 적는다 — 합계를 내면 실제 매입액이 되도록.
+        var returnSql = """
+            SELECT rt.return_date AS TxDate, '매입반품' AS DocType, rt.return_no AS DocNo,
+                   p.partner_name AS PartnerName,
+                   -COALESCE(SUM(rti.supply_amount), 0) AS SupplyAmount,
+                   -COALESCE(SUM(rti.vat_amount), 0) AS VatAmount,
+                   -COALESCE(SUM(rti.supply_amount + rti.vat_amount), 0) AS TotalAmount,
+                   rt.memo AS Memo
+            FROM purchase_returns rt
+            LEFT JOIN purchase_return_items rti ON rti.return_id = rt.return_id AND rti.tenant_id = rt.tenant_id
+            LEFT JOIN partners p ON p.partner_id = rt.partner_id AND p.tenant_id = rt.tenant_id
+            WHERE rt.tenant_id = @TenantId AND rt.is_deleted = 0 AND rt.status = 'confirmed'
+            """;
+        if (from.HasValue) returnSql += " AND rt.return_date >= @From";
+        if (to.HasValue) returnSql += " AND rt.return_date <= @To";
+        returnSql += " GROUP BY rt.return_id, rt.return_date, rt.return_no, p.partner_name, rt.memo";
+
+        var sql = $"({salesSql}) UNION ALL ({purchaseSql}) UNION ALL ({returnSql}) ORDER BY TxDate DESC";
+
         return (await _db.QueryAsync<PurchaseSalesLedgerDto>(new CommandDefinition(
             sql, new { TenantId = tenantId, From = from, To = to }, cancellationToken: ct))).ToList();
     }
@@ -166,10 +187,19 @@ public class FinanceService : IFinanceService
         // 매입 집계
         var purchase = await _db.QueryFirstOrDefaultAsync<(decimal Supply, decimal Vat, int Cnt)>(new CommandDefinition(
             """
-            SELECT COALESCE(SUM(total_amount),0) AS Supply, COALESCE(SUM(vat_amount),0) AS Vat, COUNT(*) AS Cnt
-            FROM purchase_receipts
-            WHERE tenant_id = @TenantId AND status = 'confirmed'
-              AND receipt_date BETWEEN @From AND @To
+            SELECT COALESCE(SUM(Supply),0) AS Supply, COALESCE(SUM(Vat),0) AS Vat, COALESCE(SUM(Cnt),0) AS Cnt
+            FROM (
+              SELECT COALESCE(SUM(total_amount),0) AS Supply, COALESCE(SUM(vat_amount),0) AS Vat, COUNT(*) AS Cnt
+              FROM purchase_receipts
+              WHERE tenant_id = @TenantId AND status = 'confirmed'
+                AND receipt_date BETWEEN @From AND @To
+              UNION ALL
+              SELECT -COALESCE(SUM(rti.supply_amount),0), -COALESCE(SUM(rti.vat_amount),0), -COUNT(DISTINCT rt.return_id)
+              FROM purchase_returns rt
+              LEFT JOIN purchase_return_items rti ON rti.return_id = rt.return_id AND rti.tenant_id = rt.tenant_id
+              WHERE rt.tenant_id = @TenantId AND rt.is_deleted = 0 AND rt.status = 'confirmed'
+                AND rt.return_date BETWEEN @From AND @To
+            ) t
             """,
             new { TenantId = tenantId, From = fromDate, To = toDate }, cancellationToken: ct));
 
@@ -348,9 +378,17 @@ public class FinanceService : IFinanceService
                 AND delivery_date BETWEEN @From AND @To GROUP BY ym
             ) s ON s.ym = m.mon
             LEFT JOIN (
-              SELECT YEAR(receipt_date)*100+MONTH(receipt_date) AS ym, SUM({{purchaseAmt}}) AS amt
-              FROM purchase_receipts WHERE tenant_id=@TenantId AND status='confirmed'
-                AND receipt_date BETWEEN @From AND @To GROUP BY ym
+              SELECT ym, SUM(amt) AS amt FROM (
+                SELECT YEAR(receipt_date)*100+MONTH(receipt_date) AS ym, SUM({{purchaseAmt}}) AS amt
+                FROM purchase_receipts WHERE tenant_id=@TenantId AND status='confirmed'
+                  AND receipt_date BETWEEN @From AND @To GROUP BY ym
+                UNION ALL
+                SELECT YEAR(rt.return_date)*100+MONTH(rt.return_date) AS ym, -SUM(rti.supply_amount + rti.vat_amount) AS amt
+                FROM purchase_returns rt
+                LEFT JOIN purchase_return_items rti ON rti.return_id=rt.return_id AND rti.tenant_id=rt.tenant_id
+                WHERE rt.tenant_id=@TenantId AND rt.is_deleted=0 AND rt.status='confirmed'
+                  AND rt.return_date BETWEEN @From AND @To GROUP BY ym
+              ) pu GROUP BY ym
             ) p ON p.ym = m.mon
             LEFT JOIN (
               SELECT YEAR(expense_date)*100+MONTH(expense_date) AS ym, SUM({{expenseAmt}}) AS amt
@@ -483,9 +521,13 @@ public class FinanceService : IFinanceService
               FROM sales_deliveries WHERE tenant_id=@TenantId AND status IN ('confirmed','invoiced') AND is_deleted=0
                 AND delivery_date>=@MonthStart AND delivery_date<=@Today
             UNION ALL
-            SELECT 'month_purchase', COALESCE(SUM(total_amount + vat_amount), 0)
-              FROM purchase_receipts WHERE tenant_id=@TenantId AND status='confirmed'
-                AND receipt_date>=@MonthStart AND receipt_date<=@Today
+            SELECT 'month_purchase',
+              COALESCE((SELECT SUM(total_amount + vat_amount) FROM purchase_receipts WHERE tenant_id=@TenantId AND status='confirmed'
+                AND receipt_date>=@MonthStart AND receipt_date<=@Today), 0)
+              - COALESCE((SELECT SUM(rti.supply_amount + rti.vat_amount) FROM purchase_returns rt
+                LEFT JOIN purchase_return_items rti ON rti.return_id=rt.return_id AND rti.tenant_id=rt.tenant_id
+                WHERE rt.tenant_id=@TenantId AND rt.is_deleted=0 AND rt.status='confirmed'
+                  AND rt.return_date>=@MonthStart AND rt.return_date<=@Today), 0)
             UNION ALL
             -- 봉합 (2026-06-23, 6차 전수조사 C2): 미수금 수금 차감을 'sales_delivery' 단일로 좁힘.
             --   종전 IN('sales_delivery','sales_order')은 다른 집계(CollectionService:382·SALES-01)와 불일치이고,
@@ -500,6 +542,7 @@ public class FinanceService : IFinanceService
             --   미지급이 지급해도 안 줄어 영구 과대 계상됐다(헌법 #20). payments 기준으로 GetPayablesAsync 와 일관화.
             SELECT 'payable',
               COALESCE((SELECT SUM(total_amount + vat_amount) FROM purchase_receipts WHERE tenant_id=@TenantId AND status='confirmed'), 0)
+              - COALESCE((SELECT COALESCE(SUM(rti.supply_amount + rti.vat_amount),0) FROM purchase_returns rt LEFT JOIN purchase_return_items rti ON rti.return_id=rt.return_id AND rti.tenant_id=rt.tenant_id WHERE rt.tenant_id=@TenantId AND rt.is_deleted=0 AND rt.status='confirmed'), 0)
               - COALESCE((SELECT SUM(amount) FROM payments WHERE tenant_id=@TenantId AND is_active=1 AND payment_type='purchase'), 0)
             UNION ALL
             SELECT 'low_stock',
@@ -546,12 +589,22 @@ public class FinanceService : IFinanceService
               GROUP BY ym
             ) s ON s.ym = DATE_FORMAT(m.mon_date, '%Y-%m-01')
             LEFT JOIN (
-              SELECT DATE_FORMAT(receipt_date, '%Y-%m-01') AS ym,
-                     SUM(total_amount + vat_amount) AS amt
-              FROM purchase_receipts
-              WHERE tenant_id = @TenantId AND status = 'confirmed'
-                AND receipt_date >= @Start
-              GROUP BY ym
+              SELECT ym, SUM(amt) AS amt FROM (
+                SELECT DATE_FORMAT(receipt_date, '%Y-%m-01') AS ym,
+                       SUM(total_amount + vat_amount) AS amt
+                FROM purchase_receipts
+                WHERE tenant_id = @TenantId AND status = 'confirmed'
+                  AND receipt_date >= @Start
+                GROUP BY ym
+                UNION ALL
+                SELECT DATE_FORMAT(rt.return_date, '%Y-%m-01') AS ym,
+                       -SUM(rti.supply_amount + rti.vat_amount) AS amt
+                FROM purchase_returns rt
+                LEFT JOIN purchase_return_items rti ON rti.return_id=rt.return_id AND rti.tenant_id=rt.tenant_id
+                WHERE rt.tenant_id = @TenantId AND rt.is_deleted = 0 AND rt.status = 'confirmed'
+                  AND rt.return_date >= @Start
+                GROUP BY ym
+              ) pu GROUP BY ym
             ) p ON p.ym = DATE_FORMAT(m.mon_date, '%Y-%m-01')
             ORDER BY m.mon_date
             """,
