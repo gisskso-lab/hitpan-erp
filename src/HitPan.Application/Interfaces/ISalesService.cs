@@ -5,7 +5,14 @@ namespace HitPan.Application.Interfaces;
 public interface ISalesService
 {
     Task<string> CreateOrderAsync(CreateSalesOrderRequest request, CancellationToken ct = default);
-    Task<(string Id, string DocumentNumber)> CreateDeliveryAsync(CreateDeliveryRequest request, CancellationToken ct = default);
+    /// <summary>
+    /// 거래명세서를 생성한다. 수주 없이 들어오면 정합성을 위해 수주서를 자동 생성한다(헌법 #20).
+    /// </summary>
+    /// <returns>
+    /// <c>AutoCreatedOrderNo</c> 는 <b>자동 생성했을 때만</b> 수주번호가 담긴다.
+    /// 수주에서 전환된 정상 흐름이면 <c>null</c> — 호출자는 이 값으로 안내 문구를 가른다 (20260825작5).
+    /// </returns>
+    Task<(string Id, string DocumentNumber, string? AutoCreatedOrderNo)> CreateDeliveryAsync(CreateDeliveryRequest request, CancellationToken ct = default);
     Task ConfirmDeliveryAsync(string deliveryId, ConfirmDeliveryRequest request, CancellationToken ct = default);
 
     Task<DeliveryDetailDto?> GetDeliveryAsync(string deliveryId, string tenantId, CancellationToken ct = default);

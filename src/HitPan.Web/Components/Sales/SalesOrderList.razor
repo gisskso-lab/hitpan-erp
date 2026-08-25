@@ -60,6 +60,7 @@
             <MudTh>일자</MudTh>
             <MudTh>전표번호</MudTh>
             <MudTh>업체</MudTh>
+            <MudTh>작성자</MudTh>
             <MudTh>상태</MudTh>
             <MudTh Class="text-right">합계</MudTh>
             <MudTh Style="width:56px"></MudTh>
@@ -78,6 +79,7 @@
                 <MudText Class="@GetSelectedClass(context)">@context.OrderNo</MudText>
             </MudTd>
             <MudTd @ondblclick="@(() => SelectRowAsync(context))" style="cursor:pointer">@context.PartnerName</MudTd>
+            <MudTd @ondblclick="@(() => SelectRowAsync(context))" style="cursor:pointer">@(context.CreatedByName ?? "")</MudTd>
             <MudTd @ondblclick="@(() => SelectRowAsync(context))" style="cursor:pointer">@HitPan.Web.Helpers.StatusLabel.SalesOrder(context.Status, context.IsAuto)</MudTd>
             <MudTd Class="text-right" @ondblclick="@(() => SelectRowAsync(context))" style="cursor:pointer">@context.TotalAmount.ToString("N0")</MudTd>
             <MudTd>

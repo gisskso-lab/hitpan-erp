@@ -69,7 +69,10 @@ public sealed class QuotationService(HttpClient http)
             ValidUntil = x.ValidUntil,
             Status = x.Status ?? "draft",
             TotalAmount = x.TotalAmount,
-            VatAmount = x.VatAmount
+            VatAmount = x.VatAmount,
+
+            // 20260825작5: 작성자를 목록까지 실어 보낸다 — 여기서 빠뜨리면 그리드가 항상 공란이다.
+            CreatedByName = x.CreatedByName
         }).ToList();
     }
 
@@ -238,6 +241,9 @@ public sealed class QuotationService(HttpClient http)
     /// </summary>
     private sealed class QuotationListResponse
     {
+        /// <summary>전표를 작성한 사원 이름이다 (20260825작5).</summary>
+        public string? CreatedByName { get; set; }
+
         public string? QuoteId { get; set; }
         public string? QuoteNo { get; set; }
         public string? PartnerName { get; set; }

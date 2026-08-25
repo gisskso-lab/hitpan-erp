@@ -4,6 +4,9 @@ namespace HitPan.Application.DTOs.Sales;
 
 public class DeliveryListDto
 {
+    /// <summary>전표를 작성한 사원 이름이다 (created_by = user_id 조인, 20260825작5).</summary>
+    public string? CreatedByName { get; set; }
+
     public string DeliveryId { get; set; } = string.Empty;
     public string DeliveryNo { get; set; } = string.Empty;
     public DateTime OrderDate { get; set; }
@@ -23,6 +26,13 @@ public class DeliveryDetailDto : DeliveryListDto
     public decimal DiscountAmount { get; set; }
     public string? EmployeeId { get; set; }
     public string? EmployeeName { get; set; }
+
+    /// <summary>
+    /// 연결된 수주서 번호다 (20260825작5).
+    /// 종전에는 화면이 "수-yyyyMMdd-001" 을 지어내 항상 -001 로 보였다.
+    /// </summary>
+    public string? LinkedOrderNo { get; set; }
+
     public List<DeliveryItemDto> Items { get; set; } = new();
     public decimal PrevReceivable { get; set; }
     public decimal TodaySales { get; set; }
@@ -64,6 +74,9 @@ public class UpdateDeliveryDto
 /// <summary>수주 목록 DTO</summary>
 public class SalesOrderListDto
 {
+    /// <summary>전표를 작성한 사원 이름이다 (created_by = user_id 조인, 20260825작5).</summary>
+    public string? CreatedByName { get; set; }
+
     public string OrderId { get; set; } = string.Empty;
     public string OrderNo { get; set; } = string.Empty;
     public DateTime OrderDate { get; set; }

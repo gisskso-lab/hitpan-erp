@@ -145,6 +145,9 @@ public sealed class QuotationSummaryModel
 /// </summary>
 public sealed class QuotationListItem
 {
+    /// <summary>전표를 작성한 사원 이름이다 (20260825작5).</summary>
+    public string? CreatedByName { get; set; }
+
     /// <summary>견적서 식별자다.</summary>
     public string QuoteId { get; set; } = string.Empty;
 

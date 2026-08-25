@@ -67,7 +67,10 @@ public class SalesService : ISalesService
             Status = SalesOrderStatus.Draft,
             TotalAmount = request.Items.Sum(x => x.SupplyAmount),
             VatAmount = request.Items.Sum(x => x.VatAmount),
-            Memo = request.Memo
+            Memo = request.Memo,
+
+            // 20260825작5: 전표 작성자 기록 (created_by = user_id 체계, 사장님 결재).
+            CreatedBy = _currentTenant.UserId
         };
         await orderRepo.AddAsync(order);
 
@@ -98,7 +101,7 @@ public class SalesService : ISalesService
         return orderId;
     }
 
-    public async Task<(string Id, string DocumentNumber)> CreateDeliveryAsync(CreateDeliveryRequest request, CancellationToken ct = default)
+    public async Task<(string Id, string DocumentNumber, string? AutoCreatedOrderNo)> CreateDeliveryAsync(CreateDeliveryRequest request, CancellationToken ct = default)
     {
         if (string.IsNullOrWhiteSpace(request.PartnerId))
         {
@@ -151,6 +154,10 @@ public class SalesService : ISalesService
             _db, _currentTenant.TenantId, "sales_deliveries", "delivery_no", prefix, ct);
 
         // 다이렉트 판매(수주 없이 바로 거래명세서) → 정합성을 위해 수주 자동생성(closed 상태)
+        // 20260825작5: 자동 생성했을 때만 수주번호를 담아 호출자에게 돌려준다.
+        // 종전에는 (deliveryId, deliveryNo) 만 반환해 화면이 진짜 수주번호를 알 길이 없었고,
+        // 그래서 브레드크럼이 "수-yyyyMMdd-001" 을 문자열로 지어내 항상 -001 로 보였다.
+        string? autoCreatedOrderNo = null;
         var linkedOrderId = request.OrderId;
         if (string.IsNullOrWhiteSpace(linkedOrderId))
         {
@@ -160,6 +167,8 @@ public class SalesService : ISalesService
             var orderPrefix = $"수-{date:yyyyMMdd}-";
             var autoOrderNo = await DocumentNumberHelper.NextNumberAsync(
                 _db, _currentTenant.TenantId, "sales_orders", "order_no", orderPrefix, ct);
+
+            autoCreatedOrderNo = autoOrderNo;
 
             linkedOrderId = Guid.NewGuid().ToString();
             await orderRepo2.AddAsync(new SalesOrder
@@ -176,7 +185,10 @@ public class SalesService : ISalesService
                 TotalAmount = request.Items.Sum(x => x.SupplyAmount),
                 VatAmount = request.Items.Sum(x => x.VatAmount),
                 Memo = request.Memo,
-                IsAuto = true
+                IsAuto = true,
+
+                // 20260825작5: 자동 생성 수주서도 작성자를 남긴다 — 거래명세서를 친 사람이 곧 작성자다.
+                CreatedBy = _currentTenant.UserId
             });
 
             foreach (var line in request.Items)
@@ -213,7 +225,12 @@ public class SalesService : ISalesService
             Status = SalesDeliveryStatus.Draft,
             TotalAmount = request.Items.Sum(x => x.SupplyAmount),
             VatAmount = request.Items.Sum(x => x.VatAmount),
-            Memo = request.Memo
+            Memo = request.Memo,
+
+            // 20260825작5: 전표 작성자 기록. 사장님 결재 — created_by 는 user_id 체계로 통일한다.
+            // 현황·순위표·분석의 사원별 집계가 이미 e.user_id = created_by 로 조인하고 있어 그 전제를 따른다.
+            // employee_id(담당 영업사원)와는 의미가 다르다 — 이 값은 "누가 이 전표를 쳤나"다.
+            CreatedBy = _currentTenant.UserId
         };
         await deliveryRepo.AddAsync(delivery);
 
@@ -270,7 +287,7 @@ public class SalesService : ISalesService
         var delAfterJson = $"{{\"delivery_no\":\"{deliveryNo}\",\"partner_id\":\"{request.PartnerId}\",\"item_count\":{request.Items.Count}}}";
         await _audit.LogAsync("create", "sales_delivery", deliveryId, afterJson: delAfterJson, ct: ct);
 
-        return (deliveryId, deliveryNo);
+        return (deliveryId, deliveryNo, autoCreatedOrderNo);
     }
 
     public async Task ConfirmDeliveryAsync(string deliveryId, ConfirmDeliveryRequest request, CancellationToken ct = default)
@@ -624,7 +641,9 @@ public class SalesService : ISalesService
                                CAST(0 AS DECIMAL(15,2)) AS CardAmount,
                                CAST(0 AS DECIMAL(15,2)) AS DiscountAmount,
                                d.employee_id AS EmployeeId,
-                               e.emp_name AS EmployeeName
+                               e.emp_name AS EmployeeName,
+                               o.order_no AS LinkedOrderNo,
+                               ec.emp_name AS CreatedByName
                            FROM sales_deliveries d
                            LEFT JOIN partners p
                                ON p.partner_id = d.partner_id
@@ -632,6 +651,12 @@ public class SalesService : ISalesService
                            LEFT JOIN employees e
                                ON e.employee_id = d.employee_id
                                   AND e.tenant_id = d.tenant_id
+                           LEFT JOIN sales_orders o
+                               ON o.order_id = d.order_id
+                                  AND o.tenant_id = d.tenant_id
+                           LEFT JOIN employees ec
+                               ON ec.user_id = d.created_by
+                                  AND ec.tenant_id = d.tenant_id
                            WHERE d.delivery_id = @DeliveryId
                              AND d.tenant_id = @TenantId
                            """;
@@ -720,11 +745,15 @@ public class SalesService : ISalesService
                                d.vat_amount AS VatAmount,
                                d.total_amount AS SupplyAmount,
                                d.status AS Status,
-                               d.memo AS Memo
+                               d.memo AS Memo,
+                               ec.emp_name AS CreatedByName
                            FROM sales_deliveries d
                            LEFT JOIN partners p
                                ON p.partner_id = d.partner_id
                                   AND p.tenant_id = d.tenant_id
+                           LEFT JOIN employees ec
+                               ON ec.user_id = d.created_by
+                                  AND ec.tenant_id = d.tenant_id
                            WHERE d.tenant_id = @TenantId
                              AND (d.is_deleted = 0 OR d.is_deleted IS NULL)
                              AND d.status <> 'cancelled'
@@ -1156,11 +1185,15 @@ public class SalesService : ISalesService
                                o.vat_amount AS VatAmount,
                                o.total_amount AS SupplyAmount,
                                o.status AS Status,
-                               o.memo AS Memo
+                               o.memo AS Memo,
+                               ec.emp_name AS CreatedByName
                            FROM sales_orders o
                            LEFT JOIN partners p
                                ON p.partner_id = o.partner_id
                                   AND p.tenant_id = o.tenant_id
+                           LEFT JOIN employees ec
+                               ON ec.user_id = o.created_by
+                                  AND ec.tenant_id = o.tenant_id
                            WHERE o.tenant_id = @TenantId
                              AND o.is_auto = 0
                              AND (@From IS NULL OR o.order_date >= @From)
@@ -1233,7 +1266,10 @@ public class SalesService : ISalesService
             Items = deliveryItems
         };
 
-        return await CreateDeliveryAsync(request, ct);
+        // 20260825작5: 이 경로는 OrderId 를 넘기므로 수주 자동생성이 일어나지 않는다.
+        // 세 번째 값(AutoCreatedOrderNo)은 항상 null 이라 기존 계약 그대로 두 값만 돌려준다.
+        var (deliveryId, documentNumber, _) = await CreateDeliveryAsync(request, ct);
+        return (deliveryId, documentNumber);
     }
 
     public Task<List<PartnerSearchDto>> SearchPartnersAsync(string tenantId, string keyword, CancellationToken ct = default)
@@ -1819,9 +1855,11 @@ public class SalesService : ISalesService
             SELECT sr.return_id AS ReturnId, sr.return_no AS ReturnNo, sr.return_date AS ReturnDate,
                    sr.partner_id AS PartnerId, COALESCE(p.partner_name,'') AS PartnerName,
                    COALESCE(sr.total_amount,0) AS TotalAmount, COALESCE(sr.vat_amount,0) AS VatAmount,
-                   sr.status AS Status, sr.memo AS Memo
+                   sr.status AS Status, sr.memo AS Memo,
+                   ec.emp_name AS CreatedByName
             FROM sales_returns sr
             LEFT JOIN partners p ON p.partner_id = sr.partner_id AND p.tenant_id = sr.tenant_id
+            LEFT JOIN employees ec ON ec.user_id = sr.created_by AND ec.tenant_id = sr.tenant_id
             WHERE sr.tenant_id = @Tid AND sr.is_deleted = 0
               AND (@From IS NULL OR sr.return_date >= @From)
               AND (@To IS NULL OR sr.return_date <= @To)
@@ -1892,10 +1930,10 @@ public class SalesService : ISalesService
         await _db.ExecuteAsync(new CommandDefinition(
             @"INSERT INTO sales_returns (return_id, tenant_id, return_no, delivery_id, partner_id,
                 return_date, status, total_amount, vat_amount, memo,
-                return_reason, return_reason_memo, created_at, updated_at, is_deleted)
+                return_reason, return_reason_memo, created_at, created_by, updated_at, is_deleted)
               VALUES (@ReturnId, @Tid, @ReturnNo, @DeliveryId, @PartnerId,
                 @ReturnDate, 'draft', @Total, @Vat, @Memo,
-                @ReturnReason, @ReturnReasonMemo, NOW(6), NOW(6), 0)",
+                @ReturnReason, @ReturnReasonMemo, NOW(6), @CreatedBy, NOW(6), 0)",
             new
             {
                 ReturnId = returnId, Tid = tenantId, ReturnNo = returnNo,
@@ -1904,6 +1942,9 @@ public class SalesService : ISalesService
                 // sales_returns.return_reason 는 NOT NULL DEFAULT 'customer_return'(매입반품과 달리 NOT NULL).
                 // 화면이 사유를 안 보내면 NULL→1048(500)이 나므로 DDL DEFAULT 와 동일 값으로 폴백(14차 P1 봉합).
                 ReturnReason = request.ReturnReason ?? "customer_return", ReturnReasonMemo = request.ReturnReasonMemo
+                ,
+                // 20260825작5: 전표 작성자 기록 (created_by = user_id 체계, 사장님 결재).
+                CreatedBy = _currentTenant.UserId
             }, cancellationToken: ct));
 
         foreach (var it in request.Items)

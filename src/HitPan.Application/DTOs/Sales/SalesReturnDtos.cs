@@ -5,6 +5,9 @@ namespace HitPan.Application.DTOs.Sales;
 
 public class SalesReturnListDto
 {
+    /// <summary>전표를 작성한 사원 이름이다 (created_by = user_id 조인, 20260825작5).</summary>
+    public string? CreatedByName { get; set; }
+
     public string ReturnId { get; set; } = string.Empty;
     public string ReturnNo { get; set; } = string.Empty;
     public DateTime ReturnDate { get; set; }

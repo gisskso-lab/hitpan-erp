@@ -122,12 +122,18 @@ public sealed class CreateDeliveryDraftTool : IHitpanTool
         };
 
         // 초안 생성 — 서비스는 draft 상태로 만든다(확정은 별도 confirm 엔드포인트).
-        var (id, documentNumber) = await _sales.CreateDeliveryAsync(request, ct).ConfigureAwait(false);
+        var (id, documentNumber, autoCreatedOrderNo) = await _sales.CreateDeliveryAsync(request, ct).ConfigureAwait(false);
 
         var summaryText =
             $"거래처: {partnerName}\n납품일: {deliveryDate:yyyy-MM-dd}\n" +
             summary.ToString() +
             $"합계(부가세 포함): {total:N0}원";
+
+        // 20260825작5: 수주 없이 만든 건이면 자동 생성된 수주서를 알린다(헌법 #20 흐름 정합).
+        if (!string.IsNullOrWhiteSpace(autoCreatedOrderNo))
+        {
+            summaryText += Environment.NewLine + $"수주서 없이 작성되어 수주서 {autoCreatedOrderNo} 가 자동 생성되었습니다.";
+        }
 
         var pending = new PendingActionDto
         {

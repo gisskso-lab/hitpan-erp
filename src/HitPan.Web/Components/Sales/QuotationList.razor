@@ -30,6 +30,7 @@
                 </MudTh>
                 <MudTh>견적번호</MudTh>
                 <MudTh>거래처</MudTh>
+                <MudTh>작성자</MudTh>
                 <MudTh>견적일</MudTh>
                 <MudTh>유효기한</MudTh>
                 <MudTh>상태</MudTh>
@@ -46,6 +47,7 @@
                 </MudTd>
                 <MudTd @ondblclick="@(() => SelectAsync(context))">@context.QuoteNo</MudTd>
                 <MudTd @ondblclick="@(() => SelectAsync(context))">@context.PartnerName</MudTd>
+                <MudTd @ondblclick="@(() => SelectAsync(context))">@(context.CreatedByName ?? "")</MudTd>
                 <MudTd @ondblclick="@(() => SelectAsync(context))">@context.QuoteDate.ToString("yyyy-MM-dd")</MudTd>
                 <MudTd @ondblclick="@(() => SelectAsync(context))">@context.ValidUntil?.ToString("yyyy-MM-dd")</MudTd>
                 <MudTd @ondblclick="@(() => SelectAsync(context))">@HitPan.Web.Helpers.StatusLabel.Quotation(context.Status)</MudTd>

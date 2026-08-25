@@ -7,6 +7,9 @@ namespace HitPan.Application.DTOs.Sales;
 /// </summary>
 public class QuotationListDto
 {
+    /// <summary>전표를 작성한 사원 이름이다 (created_by = user_id 조인, 20260825작5).</summary>
+    public string? CreatedByName { get; set; }
+
     /// <summary>
     /// 견적서 식별자다.
     /// </summary>
