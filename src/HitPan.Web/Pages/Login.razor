@@ -19,37 +19,15 @@
             <MudText Typo="Typo.body2" Class="mud-text-secondary">사업을 한곳에서</MudText>
         </div>
 
-        @* 🔴 로그인 전 업데이트 안내 (사장님 지시 2026-08-11)
-             *"히트판 업데이트 팝업도 혹시 이런 문제가 생길지 모르니, 로그인 창에 띄워."*
+        @* 🔴 20260825작19 — 상단 업데이트 배너 제거 (사장님 오더)
+             *"로그인 화면에 최신업데이트 버튼 상단버튼 삭제"*
 
-             그날 실제로 그 일이 났다. 기기 판정이 로그인을 막자 업데이트로 고칠 수도 없었다 —
-             봉합은 새 버전 안에 있는데 받으려면 로그인해야 했고, 그 로그인이 막혀 있었다.
-             ⇒ 업데이트는 로그인이 망가져도 닿는 자리에 있어야 한다. 마지막 탈출구다.
+             ⚠️ 작12 에서 배너와 하단 버튼을 "다른 물건" 이라며 **둘 다 남긴 것**이
+             사장님이 보신 「업데이트 버튼 2개」다. 배너는 새 버전이 있을 때만 뜨고
+             버튼은 항상 뜨므로, 정작 새 버전이 있을 때 둘이 겹쳤다.
 
-             ⚠️ 2026-07-22 작1 과 다른 자리다. 그때 걷어낸 것은 로그인 "성공 후" 팝업이고
-                (인증 방송 → /login 폐기 → 팝업이 0.5초 만에 사라짐), 이것은 로그인 "전" 이라
-                화면이 넘어가지 않는다. 팝업이 아니라 화면에 붙은 안내라 사라질 수도 없다. *@
-        @if (_updateAvailable)
-        {
-            <MudAlert Severity="Severity.Info" Dense="true" Class="mb-4"
-                      Style="font-family: 'Noto Sans KR', sans-serif;">
-                <MudText Typo="Typo.body2">
-                    새 버전(@_latestVersion)이 준비되었습니다.
-                </MudText>
-                <MudButton Variant="Variant.Filled"
-                           Color="Color.Primary"
-                           Size="Size.Small"
-                           FullWidth="true"
-                           Class="mt-2"
-                           Disabled="_updateStarting"
-                           OnClick="StartUpdateAsync">
-                    @(_updateStarting ? "업데이트 준비 중…" : "지금 업데이트")
-                </MudButton>
-                <MudText Typo="Typo.caption" Class="mud-text-secondary d-block mt-1">
-                    자료를 자동으로 백업한 뒤 진행되며, 그 사이 히트판이 잠시 꺼졌다 켜집니다.
-                </MudText>
-            </MudAlert>
-        }
+             🟢 기능 손실 없음 — 배너도 하단 버튼도 **같은 StartUpdateAsync 로 수렴**했다.
+             로그인 전 탈출구(2026-08-11 지시)는 하단 「최신버젼업데이트」가 그대로 지킨다. *@
 
         <MudForm @ref="_form" ValidationDelay="0">
             <MudTextField @bind-Value="_email"

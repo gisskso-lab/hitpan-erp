@@ -16,7 +16,9 @@
 <MudPaper Class="pa-3 mb-3" Elevation="0" Style="border:1px solid var(--mud-palette-lines-default);border-radius:12px">
     <div class="hitpan-filter-bar">
         <div class="hitpan-filter-field hitpan-filter-field--sm">
-            <MudSelect T="string" Label="수불부 종류" @bind-Value="_viewType" Variant="Variant.Outlined" Margin="Margin.Dense">
+            @* 🔴 20260825작19 — 종류를 바꾸면 바로 다시 조회한다. 종전 @bind-Value 는
+                 값만 담고 재조회를 안 걸어, 종류를 바꿔도 앞 결과가 그대로 남았다. *@
+            <MudSelect T="string" Label="수불부 종류" Value="_viewType" ValueChanged="OnLedgerKindChangedAsync" Variant="Variant.Outlined" Margin="Margin.Dense">
                 <MudSelectItem Value="@("item")">상품별 수불부</MudSelectItem>
                 <MudSelectItem Value="@("partner")">업체별 수불부</MudSelectItem>
             </MudSelect>
@@ -113,6 +115,21 @@
         return Task.FromResult(_partners.Where(p =>
             p.PartnerName.Contains(value, StringComparison.OrdinalIgnoreCase) ||
             p.PartnerCode.Contains(value, StringComparison.OrdinalIgnoreCase)));
+    }
+
+    /// <summary>
+    /// 수불부 종류를 바꾸면 즉시 다시 조회한다 (20260825작19 · 사장님 오더).
+    /// </summary>
+    /// <remarks>
+    /// 이 화면은 두 모드를 <b>한 화면에서</b> 갖췄으므로 이동하지 않고 그 자리에서 다시 읽는다.
+    /// 검색어는 비운다 — 종류가 바뀌면 검색 대상이 품목↔업체로 달라져 앞 입력이 남으면 0건이 된다.
+    /// </remarks>
+    private async Task OnLedgerKindChangedAsync(string value)
+    {
+        _viewType = value;
+        _selectedItem = null;
+        _selectedPartner = null;
+        await SearchAsync();
     }
 
     private async Task SearchAsync()

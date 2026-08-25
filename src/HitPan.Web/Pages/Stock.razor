@@ -42,7 +42,10 @@
 <SectionCard Title="조회 조건">
     <MudGrid Spacing="2" Class="align-center">
         <MudItem xs="12" sm="3">
-            <MudSelect T="string" @bind-Value="_viewType" Label="조회유형" Variant="Variant.Outlined" Margin="Margin.Dense">
+            @* 🔴 20260825작19 — 조회유형을 바꾸면 바로 다시 조회한다 (사장님 오더).
+                 종전 @bind-Value 는 값만 담고 재조회를 걸지 않아, 유형을 바꿔도 화면이 그대로였다.
+                 판매(작2)·매입(작16)에서 이미 고친 것과 **같은 병**이다 — 재고에만 남아 있었다. *@
+            <MudSelect T="string" Value="_viewType" ValueChanged="OnViewTypeChangedAsync" Label="조회유형" Variant="Variant.Outlined" Margin="Margin.Dense">
                 <MudSelectItem Value="@("current")">기간별 상품재고현황</MudSelectItem>
                 <MudSelectItem Value="@("warehouse")">창고별 재고현황</MudSelectItem>
                 <MudSelectItem Value="@("optimal")">적정재고대비 현황</MudSelectItem>
@@ -99,6 +102,21 @@
             : _reportData.Where(r => r.Label.Contains(_search, StringComparison.OrdinalIgnoreCase));
 
     protected override async Task OnInitializedAsync() => await SearchAsync();
+
+    /// <summary>
+    /// 조회유형을 바꾸면 즉시 다시 조회한다 (20260825작19 · 사장님 오더).
+    /// </summary>
+    /// <remarks>
+    /// 검색어도 함께 비운다 — 유형이 바뀌면 라벨의 의미(품목↔창고)가 달라져,
+    /// 앞 유형의 검색어가 남으면 엉뚱한 필터가 되어 0건처럼 보인다.
+    /// (여기 검색어는 화면 안에서 거르는 값이라 서버로는 안 나간다.)
+    /// </remarks>
+    private async Task OnViewTypeChangedAsync(string value)
+    {
+        _viewType = value;
+        _search = "";
+        await SearchAsync();
+    }
 
     /// <summary>재고현황을 조회한다.</summary>
     private async Task SearchAsync()
