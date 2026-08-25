@@ -116,6 +116,73 @@ public partial class PurchaseReturnList : ComponentBase
         }
     }
 
+    /// <summary>
+    /// 목록에서 바로 반품확정한다 (20260825작10).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// 사장님 실측 반려: <i>"목록에는 없고, 반품확인서 전표작성에는 반품확정버튼 있음"</i>.
+    /// 작9 에서 전표 화면에만 넣고 목록을 빠뜨렸다.
+    /// </para>
+    /// <para>
+    /// 🔴 <b>서버가 준 사유를 그대로 보여준다.</b> 종전에는 응답 본문(JSON)을 통째로 스낵바에 넣어
+    /// <c>{"error":"서버..."}</c> 같은 글자가 사용자에게 그대로 떴다 — 사장님이 받은 그 화면이다.
+    /// 사람이 읽을 수 있는 문장만 꺼낸다.
+    /// </para>
+    /// </remarks>
+    private async Task ConfirmOneAsync(PurchaseReturnListItem row)
+    {
+        if (string.IsNullOrWhiteSpace(row.ReturnId)) return;
+
+        var confirm = await DialogService.ShowMessageBoxAsync(
+            "반품확정",
+            $"[{row.ReturnNo}] 을(를) 확정하시겠습니까?\n\n"
+            + "확정하면 반품 수량이 재고에 반영되고 매출·미수에서 차감됩니다.\n"
+            + "확정 후에는 반품확인현황에 집계됩니다.",
+            yesText: "확정", cancelText: "취소");
+        if (confirm != true) return;
+
+        var (ok, error) = await DeliveryService.ConfirmSalesReturnAsync(row.ReturnId);
+        if (ok)
+        {
+            Snackbar.Add($"[{row.ReturnNo}] 반품확정 되었습니다.", Severity.Success);
+            await LoadAsync();
+            return;
+        }
+
+        Snackbar.Add($"반품확정 실패: {ExtractMessage(error)}", Severity.Error);
+    }
+
+    /// <summary>
+    /// 서버 응답에서 사람이 읽을 문장만 꺼낸다 (20260825작10).
+    /// </summary>
+    /// <remarks>
+    /// 서버는 <c>{"message":"…"}</c> 또는 <c>{"error":"…"}</c> 로 준다.
+    /// 파싱에 실패하면 원문을 짧게 자른다 — 아무것도 안 보여주는 것보다 낫다(헌법 #15).
+    /// </remarks>
+    private static string ExtractMessage(string? body)
+    {
+        if (string.IsNullOrWhiteSpace(body)) return "알 수 없는 오류";
+        try
+        {
+            using var doc = System.Text.Json.JsonDocument.Parse(body);
+            foreach (var key in new[] { "message", "error" })
+            {
+                if (doc.RootElement.TryGetProperty(key, out var v)
+                    && v.ValueKind == System.Text.Json.JsonValueKind.String)
+                {
+                    var s = v.GetString();
+                    if (!string.IsNullOrWhiteSpace(s)) return s!;
+                }
+            }
+        }
+        catch (System.Text.Json.JsonException)
+        {
+            // JSON 이 아니면 원문을 쓴다.
+        }
+        return body.Length > 200 ? body[..200] : body;
+    }
+
     private async Task BulkDeleteAsync()
     {
         var targets = _selectedRows

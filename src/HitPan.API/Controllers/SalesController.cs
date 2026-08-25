@@ -354,6 +354,19 @@ public class SalesController : ControllerBase
         {
             return BadRequest(new { message = ex.Message });
         }
+        // 20260825작10 — 사장님 실측: 확정이 {"error":"서버 오류가 발생했습니다"} 500 으로 죽었다.
+        //   실제 원인은 "Unknown column 'is_loss'"(마이그 미적용)였는데, 화면에는 아무 단서도 없었다.
+        //   🔴 원인을 알 수 없는 것이 진짜 결함이다 — 오늘 하루를 여기에 썼다.
+        //   스키마 부재(1054/1146)만 골라 "무엇이 문제인지" 를 돌려준다.
+        //   ⚠️ 고객 화면이라 개발용어는 쓰지 않는다(컬럼명·SQL 노출 금지).
+        catch (MySqlConnector.MySqlException ex) when (ex.Number is 1054 or 1146)
+        {
+            return BadRequest(new
+            {
+                message = "업데이트가 아직 다 적용되지 않아 반품확정을 할 수 없습니다. "
+                        + "히트판을 껐다 켜 주시고, 그래도 같으면 관리자에게 알려주세요."
+            });
+        }
     }
 
     // 매출반품 취소 — confirmed → canceled (15차 적대검증 15-P1 봉합). confirm 대칭.
@@ -372,6 +385,15 @@ public class SalesController : ControllerBase
         catch (InvalidOperationException ex)
         {
             return BadRequest(new { message = ex.Message });
+        }
+        // 20260825작10: 확정과 대칭 — 한쪽만 고치면 되돌릴 때 또 "서버 오류"만 뜬다.
+        catch (MySqlConnector.MySqlException ex) when (ex.Number is 1054 or 1146)
+        {
+            return BadRequest(new
+            {
+                message = "업데이트가 아직 다 적용되지 않아 반품취소를 할 수 없습니다. "
+                        + "히트판을 껐다 켜 주시고, 그래도 같으면 관리자에게 알려주세요."
+            });
         }
     }
 

@@ -322,6 +322,42 @@ public partial class SalesReturnPage : ComponentBase
             Severity.Info);
     }
 
+    /// <summary>
+    /// 서버 응답에서 사람이 읽을 문장만 꺼낸다 (20260825작10).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// 사장님 실측에 이렇게 떴다:
+    /// <c>반품 확정 실패: {"error":"서버 오류..."}</c>
+    /// </para>
+    /// <para>
+    /// 응답 본문(JSON)을 통째로 스낵바에 넣어서 생긴 일이다.
+    /// 🔴 <b>침묵하지 않되, 개발용어로 말하지 않는다</b>(헌법 #15 · 고객 노출 개발용어 금지).
+    /// </para>
+    /// </remarks>
+    private static string ExtractServerMessage(string? body)
+    {
+        if (string.IsNullOrWhiteSpace(body)) return "알 수 없는 오류";
+        try
+        {
+            using var doc = System.Text.Json.JsonDocument.Parse(body);
+            foreach (var key in new[] { "message", "error" })
+            {
+                if (doc.RootElement.TryGetProperty(key, out var v)
+                    && v.ValueKind == System.Text.Json.JsonValueKind.String)
+                {
+                    var s = v.GetString();
+                    if (!string.IsNullOrWhiteSpace(s)) return s!;
+                }
+            }
+        }
+        catch (System.Text.Json.JsonException)
+        {
+            // JSON 이 아니면 원문을 쓴다 — 아무것도 안 보여주는 것보단 낫다.
+        }
+        return body.Length > 200 ? body[..200] : body;
+    }
+
     private class ReturnCreatedResponse
     {
         [JsonPropertyName("returnId")] public string ReturnId { get; set; } = string.Empty;
@@ -753,7 +789,11 @@ public partial class SalesReturnPage : ComponentBase
             }
             else
             {
-                Snackbar.Add($"반품 확정 실패: {err}", Severity.Error);
+                // 20260825작10 — 사장님 실측에 뜬 그 화면이다:
+                //   반품 확정 실패: {"error":"서버 오류..."}
+                //   응답 본문(JSON)을 통째로 스낵바에 넣어 이스케이프된 글자가 그대로 보였다.
+                //   사람이 읽을 문장만 꺼낸다(헌법 #15 — 침묵하지 않되, 개발용어로 말하지 않는다).
+                Snackbar.Add($"반품 확정 실패: {ExtractServerMessage(err)}", Severity.Error);
             }
         }
         finally
@@ -810,7 +850,7 @@ public partial class SalesReturnPage : ComponentBase
             }
             else
             {
-                Snackbar.Add($"반품 취소 실패: {err}", Severity.Error);
+                Snackbar.Add($"반품 취소 실패: {ExtractServerMessage(err)}", Severity.Error);
             }
         }
         finally

@@ -42,6 +42,24 @@
             <MudTd Class="text-right" @ondblclick="@(() => SelectRowAsync(context))" style="cursor:pointer">@((context.TotalAmount + context.VatAmount).ToString("N0"))</MudTd>
             <MudTd>
                 <div @onclick:stopPropagation="true">
+                    @* 20260825작10 — 사장님 실측 반려 1번: "목록에는 없고, 전표작성에만 반품확정버튼 있음".
+                       작9 에서 전표 화면에만 넣고 목록을 빠뜨렸다(PM 누락).
+                       🔴 매출반품일 때만 보인다 — 이 목록은 매입반품과 공용이고,
+                          매입 확정은 경로도 권한도 다르다(섞으면 잘못된 확정이 나간다).
+                       권한은 전표 화면과 같다(작9) — 화면이 서버 정책보다 관대해도, 인색해도 안 된다. *@
+                    @if (IsSalesReturn && string.Equals(context.Status, "draft", StringComparison.OrdinalIgnoreCase))
+                    {
+                        @* Context="auth" — MudTable RowTemplate 의 context 와 이름이 겹치면 컴파일이 막힌다. *@
+                        <AuthorizeView Roles="system_admin,tenant_admin,sales_manager" Context="auth">
+                            <Authorized>
+                                <MudIconButton Icon="@Icons.Material.Filled.CheckCircle"
+                                               Color="Color.Success"
+                                               Size="Size.Small"
+                                               Title="반품확정"
+                                               OnClick="@(() => ConfirmOneAsync(context))" />
+                            </Authorized>
+                        </AuthorizeView>
+                    }
                     <MudIconButton Icon="@Icons.Material.Filled.Delete"
                                    Color="Color.Error"
                                    Size="Size.Small"
