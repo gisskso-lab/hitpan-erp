@@ -69,6 +69,23 @@ public class PurchaseController : ControllerBase
         }
     }
 
+    /// <summary>
+    /// 지금까지 쓰인 매입반품 사유 목록을 조회한다 — 자율 입력값의 재사용 (20260825작16).
+    /// </summary>
+    /// <remarks>
+    /// 🔴 이 라우트는 <c>returns/{id}</c> 보다 <b>먼저</b> 와야 한다.
+    ///   뒤에 두면 "reasons" 가 id 로 잡혀 상세 조회로 새어 404 가 난다.
+    /// </remarks>
+    [HttpGet("returns/reasons")]
+    public async Task<IActionResult> GetPurchaseReturnReasons(CancellationToken ct)
+    {
+        var tenantId = HttpContext.Items["TenantId"]?.ToString();
+        if (string.IsNullOrEmpty(tenantId)) return Forbid();
+
+        var reasons = await _purchaseService.GetPurchaseReturnReasonsAsync(tenantId, ct);
+        return Ok(reasons);
+    }
+
     [HttpGet("returns/{id}")]
     public async Task<IActionResult> GetReturn(string id, CancellationToken ct)
     {

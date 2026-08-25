@@ -30,12 +30,17 @@ public class SalesViewTypeReloadGateTests
     /// <summary>조회유형 콤보를 가진 판매관리 6화면.</summary>
     public static TheoryData<string> Pages => new()
     {
-        "QuotationStatusPage.razor",
-        "SalesOrderStatusPage.razor",
-        "SalesSummaryPage.razor",
-        "SalesRankingPage.razor",
-        "SalesProfitabilityPage.razor",
-        "SalesStatisticsPage.razor",
+        "Sales/QuotationStatusPage.razor",
+        "Sales/SalesOrderStatusPage.razor",
+        "Sales/SalesSummaryPage.razor",
+        "Sales/SalesRankingPage.razor",
+        "Sales/SalesProfitabilityPage.razor",
+        "Sales/SalesStatisticsPage.razor",
+        "Purchase/PurchaseOrderStatusPage.razor",
+        "Purchase/PurchaseStatusPage.razor",
+        "Purchase/ReturnStatusPage.razor",
+        "Purchase/PurchaseRankingPage.razor",
+        "Purchase/PurchaseStatisticsPage.razor",
     };
 
     private static string FindRepoRoot()
@@ -53,7 +58,9 @@ public class SalesViewTypeReloadGateTests
 
     private static string ReadPage(string fileName)
     {
-        var path = Path.Combine(FindRepoRoot(), "src", "HitPan.Web", "Pages", "Sales", fileName);
+        var path = Path.Combine(
+            new[] { FindRepoRoot(), "src", "HitPan.Web", "Pages" }
+                .Concat(fileName.Split(char.Parse("/"))).ToArray());
         Assert.True(File.Exists(path), $"{path} 가 있어야 한다");
         return File.ReadAllText(path);
     }

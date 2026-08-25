@@ -15,6 +15,12 @@ public class PurchaseOrderListDto
     public decimal SupplyAmount { get; set; }
     public string Status { get; set; } = string.Empty;
     public string? Memo { get; set; }
+
+    /// <summary>작성자 이름 — employees.user_id = created_by 조인 (20260825작16).
+    /// 판매 전표의 「작성자」와 같은 축이다. 담당사원(EmployeeId)과는 다른 값 —
+    /// 담당자는 지정하는 사람, 작성자는 실제로 전표를 친 사람이다.
+    /// ⚠️ 과거 전표는 비어 있다. 매입 경로가 created_by 를 쓰기 시작한 게 이번이라서다.</summary>
+    public string? CreatedByName { get; set; }
 }
 
 /// <summary>
@@ -32,6 +38,12 @@ public class PurchaseReceiptListDto
     public decimal SupplyAmount { get; set; }
     public string Status { get; set; } = string.Empty;
     public string? Memo { get; set; }
+
+    /// <summary>작성자 이름 — employees.user_id = created_by 조인 (20260825작16).
+    /// 판매 전표의 「작성자」와 같은 축이다. 담당사원(EmployeeId)과는 다른 값 —
+    /// 담당자는 지정하는 사람, 작성자는 실제로 전표를 친 사람이다.
+    /// ⚠️ 과거 전표는 비어 있다. 매입 경로가 created_by 를 쓰기 시작한 게 이번이라서다.</summary>
+    public string? CreatedByName { get; set; }
 }
 
 /// <summary>
@@ -143,4 +155,10 @@ public class PurchaseReturnListDto
     public decimal VatAmount { get; set; }
     public string Status { get; set; } = string.Empty;
     public string? Memo { get; set; }
+
+    /// <summary>작성자 이름 — employees.user_id = created_by 조인 (20260825작16).
+    /// 판매 전표의 「작성자」와 같은 축이다. 담당사원(EmployeeId)과는 다른 값 —
+    /// 담당자는 지정하는 사람, 작성자는 실제로 전표를 친 사람이다.
+    /// ⚠️ 과거 전표는 비어 있다. 매입 경로가 created_by 를 쓰기 시작한 게 이번이라서다.</summary>
+    public string? CreatedByName { get; set; }
 }

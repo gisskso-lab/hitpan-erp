@@ -184,7 +184,7 @@ public partial class PurchaseReceiptList : ComponentBase
         // 확정된 매입(confirmed)은 일괄확정·반품전환·삭제 대상이 아니므로 전체선택에서 제외.
         foreach (var row in _rows)
         {
-            row.IsChecked = value && !IsConfirmed(row);
+            row.IsChecked = value;
         }
 
         _selectedRows = _rows.Where(x => x.IsChecked).ToList();
@@ -204,13 +204,23 @@ public partial class PurchaseReceiptList : ComponentBase
     /// <summary>
     /// 단일 행 선택 토글.
     /// </summary>
+    /// <remarks>
+    /// 🔴 <b>20260825작16 — 확정 행 선택차단을 풀었다.</b> 사장님 전결:
+    /// <i>"반품은 조회전용이 아니라 워크플로우의 한 축이지."</i>
+    /// 종전 주석은 2026-04-26 지시(<i>확정 행은 조회 전용</i>)를 근거로 선택 자체를 무시했는데,
+    /// 그 결과 <b>확정된 매입은 반품으로 전환할 길이 없었다</b> — 정작 반품이 필요한 건은
+    /// 확정된 건이다(확정 전이면 그냥 고치면 된다).
+    /// <para>
+    /// ⚠️ 선택만 열고 위험한 동작은 그대로 막힌다. 일괄확정·일괄삭제는 각자
+    /// <c>Status=="draft"</c> 로 거르므로(<c>BulkConfirmAsync</c>·<c>BulkDeleteAsync</c>)
+    /// 확정 행이 섞여도 대상이 되지 않는다. <b>확정 행이 실제로 타는 길은 반품 전환뿐이다.</b>
+    /// </para>
+    /// </remarks>
     /// <param name="row">행</param>
     /// <param name="value">체크 여부</param>
     /// <returns>완료</returns>
     private async Task ToggleOneAsync(PurchaseReceiptListItem row, bool value)
     {
-        // 확정 행은 사장님 지시(2026-04-26)대로 조회 전용 — 선택 자체 무시.
-        if (IsConfirmed(row)) { row.IsChecked = false; await InvokeAsync(StateHasChanged); return; }
         row.IsChecked = value;
         _selectedRows = _rows.Where(x => x.IsChecked).ToList();
         _allSelected = _rows.Count > 0 && _rows.All(x => x.IsChecked);
@@ -222,6 +232,77 @@ public partial class PurchaseReceiptList : ComponentBase
     /// 선택 행 일괄 확정.
     /// </summary>
     /// <returns>비동기 처리</returns>
+    /// <summary>확정 진행 중인 행 — 더블클릭으로 두 번 나가는 것을 막는다.</summary>
+    private string? _confirmingId;
+
+    /// <summary>
+    /// 🔴 <b>단건 매입확정 (20260825작16).</b> 사장님 지시:
+    /// <i>"선택일괄확정버튼 옆에 매입확정 버튼 만들기"</i>.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// 확정은 <b>재고와 회계를 동시에 움직인다</b> — <c>stock_ledger</c> IN · <c>item_stock</c> 증가 ·
+    /// 매입 분개(차변 매입·부가세대급금 / 대변 외상매입금). 그래서 되돌리기가 쉽지 않다.
+    /// 눌렀는지 아닌지 헷갈려 두 번 누르는 일이 실제로 있어 <c>_confirmingId</c> 로 잠근다.
+    /// </para>
+    /// <para>
+    /// ⚠️ <c>Idempotency-Key</c> 를 붙인다 — 잠금이 뚫려도 서버가 두 번 반영하지 않는다.
+    /// 화면 잠금만 믿지 않는다(네트워크 재시도는 화면을 거치지 않는다).
+    /// </para>
+    /// </remarks>
+    private async Task ConfirmOneAsync(PurchaseReceiptListItem row)
+    {
+        if (string.IsNullOrWhiteSpace(row.ReceiptId)) return;
+        if (!string.Equals(row.Status, "draft", StringComparison.OrdinalIgnoreCase))
+        {
+            Snackbar.Add("이미 확정된 매입입니다.", Severity.Warning);
+            return;
+        }
+        if (_confirmingId is not null) return;
+
+        var confirm = await DialogService.ShowMessageBoxAsync(
+            "매입 확정",
+            $"{row.ReceiptNo} 을(를) 확정하시겠습니까? 재고와 회계에 바로 반영됩니다.",
+            yesText: "확정", cancelText: "취소");
+        if (confirm != true) return;
+
+        _confirmingId = row.ReceiptId;
+        await InvokeAsync(StateHasChanged);
+        try
+        {
+            using var req = new HttpRequestMessage(HttpMethod.Post,
+                $"api/purchase/receipts/{Uri.EscapeDataString(row.ReceiptId)}/confirm")
+            {
+                Content = new StringContent("{}", System.Text.Encoding.UTF8, "application/json")
+            };
+            req.Headers.TryAddWithoutValidation("Idempotency-Key", row.ReceiptId);
+            using var resp = await Http.SendAsync(req, CancellationToken.None);
+
+            if (resp.IsSuccessStatusCode)
+            {
+                row.Status = "confirmed";
+                Snackbar.Add($"{row.ReceiptNo} 매입 확정 완료 (재고 반영됨)", Severity.Success);
+            }
+            else
+            {
+                // 실패를 성공으로 위장하지 않는다 — 일괄확정과 같은 정책.
+                var body = await resp.Content.ReadAsStringAsync();
+                var reason = string.IsNullOrWhiteSpace(body) ? $"HTTP {(int)resp.StatusCode}" : body;
+                Snackbar.Add($"확정 실패: {reason[..Math.Min(200, reason.Length)]}", Severity.Error);
+            }
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"확정 실패: {ex.Message}", Severity.Error);
+        }
+        finally
+        {
+            _confirmingId = null;
+            RecalculateSelectionSummary();
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+
     private async Task BulkConfirmAsync()
     {
         var draftIds = _selectedRows
