@@ -1910,8 +1910,18 @@ public class SalesService : ISalesService
             new { Id = returnId, Tid = tenantId }, cancellationToken: ct));
         if (head is null) return null;
 
+        // 🔴 20260825작12 — 작10 이 여기를 안 막아서 500 이 계속 났다.
+        //   작10 은 "확정 시 500" 을 ConfirmSalesReturnAsync 안으로만 좁혀 읽고
+        //   확정·취소의 **읽는 자리 2곳**만 폴백을 걸었다.
+        //   그런데 사용자는 확정 버튼을 누르기 **전에** 이 상세조회를 먼저 지나간다
+        //   ⇒ 마이그(DB-108) 안 들어간 DB 에서는 문서를 **여는 순간** 1054 로 죽었다.
+        //   1054 는 미들웨어에서 FK(1451/1452) 필터도 InvalidOperationException 필터도
+        //   못 통과하고 마지막 catch(Exception) 으로 떨어져 **정확히 500** 이 된다.
+        var lossSelect = await HasSalesReturnLossColumnAsync(ct).ConfigureAwait(false)
+            ? "sri.is_loss"
+            : "0";
         var items = await _db.QueryAsync<SalesReturnDetailItemDto>(new CommandDefinition(
-            """
+            $"""
             SELECT sri.return_item_id AS ReturnItemId, sri.item_id AS ItemId,
                    COALESCE(i.item_name,'') AS ItemName, i.spec AS Spec, i.unit AS Unit,
                    sri.warehouse_id AS WarehouseId, sri.qty AS Qty, sri.unit_price AS UnitPrice,
@@ -1920,7 +1930,7 @@ public class SalesService : ISalesService
                    --   이게 없으면 저장된 반품확인서를 다시 열어 고치는 순간
                    --   화면이 링크를 모른 채 저장해 줄 단위 연결이 끊긴다.
                    sri.delivery_item_id AS DeliveryItemId,
-                   sri.is_loss AS IsLoss
+                   {lossSelect} AS IsLoss
             FROM sales_return_items sri
             LEFT JOIN items i ON i.item_id = sri.item_id
             WHERE sri.return_id = @Id AND sri.tenant_id = @Tid
@@ -1975,12 +1985,18 @@ public class SalesService : ISalesService
                 CreatedBy = _currentTenant.UserId
             }, cancellationToken: ct));
 
+        // 🔴 20260825작12 — 쓰는 자리도 막는다. 작10 은 읽는 자리만 막았다.
+        //   컬럼이 없는 DB 에서는 is_loss 를 빼고 넣는다(기본 0 = 정상품과 같다).
+        //   로스 기능을 끄는 게 아니다 — 컬럼이 생기면 그대로 저장된다(헌법 #20).
+        var hasLoss = await HasSalesReturnLossColumnAsync(ct).ConfigureAwait(false);
+        var lossCol = hasLoss ? ", is_loss" : "";
+        var lossVal = hasLoss ? ", @IsLoss" : "";
         foreach (var it in request.Items)
         {
             await _db.ExecuteAsync(new CommandDefinition(
-                @"INSERT INTO sales_return_items (return_item_id, return_id, tenant_id, delivery_item_id,
-                    item_id, qty, unit_price, original_unit_price, supply_amount, vat_amount, warehouse_id, is_loss)
-                  VALUES (UUID(), @ReturnId, @Tid, @DeliveryItemId, @ItemId, @Qty, @Price, @OrigPrice, @Supply, @Vat, @Wh, @IsLoss)",
+                $@"INSERT INTO sales_return_items (return_item_id, return_id, tenant_id, delivery_item_id,
+                    item_id, qty, unit_price, original_unit_price, supply_amount, vat_amount, warehouse_id{lossCol})
+                  VALUES (UUID(), @ReturnId, @Tid, @DeliveryItemId, @ItemId, @Qty, @Price, @OrigPrice, @Supply, @Vat, @Wh{lossVal})",
                 new
                 {
                     ReturnId = returnId, Tid = tenantId, DeliveryItemId = it.DeliveryItemId,
@@ -2047,12 +2063,18 @@ public class SalesService : ISalesService
             "DELETE FROM sales_return_items WHERE return_id=@Id AND tenant_id=@Tid",
             new { Id = returnId, Tid = tenantId }, cancellationToken: ct));
 
+        // 🔴 20260825작12 — 생성과 **대칭**으로 막는다.
+        //   작7 의 교훈: 생성은 넣고 수정은 안 넣으면 두 번째 저장에서 조용히 어긋난다.
+        //   여기서도 한쪽만 막으면 "새로 만들면 되는데 고치면 500" 이 된다.
+        var hasLossU = await HasSalesReturnLossColumnAsync(ct).ConfigureAwait(false);
+        var lossColU = hasLossU ? ", is_loss" : "";
+        var lossValU = hasLossU ? ", @IsLoss" : "";
         foreach (var it in request.Items)
         {
             await _db.ExecuteAsync(new CommandDefinition(
-                @"INSERT INTO sales_return_items (return_item_id, return_id, tenant_id, delivery_item_id,
-                    item_id, qty, unit_price, original_unit_price, supply_amount, vat_amount, warehouse_id, is_loss)
-                  VALUES (UUID(), @ReturnId, @Tid, @DeliveryItemId, @ItemId, @Qty, @Price, @OrigPrice, @Supply, @Vat, @Wh, @IsLoss)",
+                $@"INSERT INTO sales_return_items (return_item_id, return_id, tenant_id, delivery_item_id,
+                    item_id, qty, unit_price, original_unit_price, supply_amount, vat_amount, warehouse_id{lossColU})
+                  VALUES (UUID(), @ReturnId, @Tid, @DeliveryItemId, @ItemId, @Qty, @Price, @OrigPrice, @Supply, @Vat, @Wh{lossValU})",
                 new
                 {
                     ReturnId = returnId, Tid = tenantId, DeliveryItemId = it.DeliveryItemId,

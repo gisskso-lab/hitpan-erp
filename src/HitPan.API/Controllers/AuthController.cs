@@ -505,20 +505,31 @@ public class AuthController : ControllerBase
     [AllowAnonymous]
     public async Task<IActionResult> GetUpdateStatusLocal(CancellationToken ct)
     {
+        // 🔴 20260825작12 — 사장님 결재 B안: **터널에서도 조회를 허용한다.**
+        //   종전엔 터널이면 404 였다. 그래서 사장님(=터널 접속)께는 로그인 화면에
+        //   업데이트 안내가 **영영 안 떴다.** "로그인 전에 업데이트를 받게 한다"는
+        //   설계 의도가 정작 실사용 경로에서만 작동하지 않았다.
+        //
+        //   ⚠️ 다만 **밖에서 온 요청에는 필드를 좁힌다.**
+        //     버전 정보는 구버전 표적화 단서가 될 수 있으므로, 미인증 원격에는
+        //     화면이 실제로 쓰는 3개(CurrentVersion·UpdateAvailable·LatestVersion)만 준다.
+        //     UpdateChannel·ConsentMessage 는 loopback 에서만.
         var remote = HttpContext.Connection.RemoteIpAddress;
         var viaTunnel = Request.Headers.ContainsKey("CF-Connecting-IP")
                      || Request.Headers.ContainsKey("X-Forwarded-For");
-
-        if (viaTunnel || remote is null || !System.Net.IPAddress.IsLoopback(remote))
-        {
-            // 바깥에서 온 요청 — 있는지 없는지도 알려주지 않는다
-            return NotFound();
-        }
+        var isLocal = !viaTunnel && remote is not null && System.Net.IPAddress.IsLoopback(remote);
 
         try
         {
             var status = await ComputeUpdateStatusAsync(ct);
-            return Ok(status);
+            if (isLocal) return Ok(status);
+
+            return Ok(new UpdateStatusDto
+            {
+                CurrentVersion = status.CurrentVersion,
+                UpdateAvailable = status.UpdateAvailable,
+                LatestVersion = status.LatestVersion,
+            });
         }
         catch (Exception ex)
         {
@@ -551,12 +562,19 @@ public class AuthController : ControllerBase
     [AllowAnonymous]
     public async Task<IActionResult> UpdateConsentLocal([FromBody] UpdateConsentRequest request, CancellationToken ct)
     {
-        var remote = HttpContext.Connection.RemoteIpAddress;
+        // 🔴 20260825작12 — 사장님 결재 B안: 표시·실행 **모두 터널 허용**.
+        //   사장님 근거: *"로그인 전에 강제 업데이트 창구를 만드는 이유는 **로그인에서 갇히는 경우를
+        //   실제 경험**했음. **테스트 계정이라 망정이지 고객사였으면 대형사고**"*
+        //   ⇒ 갇힌 사람은 **터널로 들어온다.** loopback 제한은 정작 그 사람을 막고 있었다.
+        //     탈출구를 그려놓고 그 앞을 막아둔 꼴이라, 제한을 푸는 것이 원 설계 의도에 맞다.
+        //
+        //   ⚠️ loopback 을 뺀 자리를 **멱등(idempotent)** 으로 메운다 — 아래 ④.
+        //     남은 위험은 "가짜 버전 설치" 가 아니라(③ 대조·서명검증이 막는다)
+        //     "원할 때 반복 재시작시키기"(DoS) 뿐이고, 그건 같은 버전 재승인을
+        //     새 INSERT 없이 돌려보내면 사라진다.
+        // 관측용 — 어디서 눌렀는지 로그에 남긴다(작12). 판정에는 쓰지 않는다.
         var viaTunnel = Request.Headers.ContainsKey("CF-Connecting-IP")
                      || Request.Headers.ContainsKey("X-Forwarded-For");
-
-        if (viaTunnel || remote is null || !System.Net.IPAddress.IsLoopback(remote))
-            return NotFound();
 
         if (request is null || string.IsNullOrWhiteSpace(request.UpdateVersion))
             return BadRequest(new { message = "업데이트 버전이 필요합니다." });
@@ -589,6 +607,30 @@ public class AuthController : ControllerBase
             if (string.IsNullOrEmpty(tenantId))
                 return BadRequest(new { message = "준비된 업데이트가 없습니다." });
 
+            // ④ 🔴 멱등 — 같은 버전에 승인이 **이미 있으면 새로 넣지 않는다** (20260825작12, B안 결재).
+            //   loopback 을 푼 자리를 메우는 핵심 방어다.
+            //   이게 없으면 미인증 원격자가 이 주소를 반복 호출해 워치독이 매번 교체·재기동을 돌리고,
+            //   업무 중 ERP 가 계속 꺼진다(DoS). 승인은 **버전당 한 번**이면 충분하다.
+            //   ⚠️ 200 을 돌려준다 — 사용자에겐 이미 예약된 것이고, 실패가 아니다.
+            var already = await Dapper.SqlMapper.ExecuteScalarAsync<int>(db,
+                new Dapper.CommandDefinition(
+                    """
+                    SELECT COUNT(*) FROM local_update_consents
+                     WHERE tenant_id = @TenantId
+                       AND update_version = @UpdateVersion
+                       AND action = 'approve'
+                    """,
+                    new { TenantId = tenantId, UpdateVersion = request.UpdateVersion.Trim() },
+                    cancellationToken: ct));
+
+            if (already > 0)
+            {
+                _logger.LogInformation(
+                    "로그인 전 업데이트 승인 — 이미 예약됨(멱등), 중복 INSERT 안 함. {Version} · 경로={Path}",
+                    request.UpdateVersion, viaTunnel ? "터널" : "로컬");
+                return Ok(new { message = "이미 업데이트가 예약되어 있습니다. 곧 시작됩니다." });
+            }
+
             await Dapper.SqlMapper.ExecuteAsync(db, new Dapper.CommandDefinition(
                 """
                 INSERT INTO local_update_consents
@@ -606,8 +648,10 @@ public class AuthController : ControllerBase
                 },
                 cancellationToken: ct));
 
-            _logger.LogInformation("로그인 전 업데이트 승인 — {Version}", request.UpdateVersion);
-            return Ok(new { message = "업데이트를 시작합니다. 잠시 후 히트판이 꺼졌다가 다시 켜집니다." });
+            // 작12: 경로(터널/로컬)를 함께 남긴다 — loopback 제한을 푼 뒤라 누가 어디서 눌렀는지가 중요하다.
+            _logger.LogInformation("로그인 전 업데이트 승인 — {Version} · 경로={Path}",
+                request.UpdateVersion, viaTunnel ? "터널" : "로컬");
+            return Ok(new { message = "업데이트를 예약했습니다. 1분 이내에 시작됩니다." });
         }
         catch (Exception ex)
         {

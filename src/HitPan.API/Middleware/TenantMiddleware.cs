@@ -33,6 +33,17 @@ public sealed class TenantMiddleware
             //   🔴 /api/auth 를 통째로 열지 않는다 — me·logout 까지 열린다. 이 주소 하나만 연다.
             //   서버가 스스로 loopback 여부를 보고 판단하므로(AuthController), 열어도 정보가 새지 않는다.
             || path.StartsWithSegments("/api/auth/update-status-local")
+            // 🔴 20260825작12 — 작10 이 조회(GET)만 열고 실행(POST)을 빠뜨렸다.
+            //   사장님 오더: "로그인 전에 업데이트를 먼저 받을 수 있도록 하자고 해서 이렇게 된거면
+            //                 그럼 그렇게 구현이 되야지."
+            //   실측(loopback): GET update-status-local → 200 인데
+            //                   POST update-consent-local → **401**.
+            //   ⇒ 「지금 업데이트」 버튼은 배포 이후 **한 번도 눌린 적이 없다.**
+            //      안내는 떴는데 눌러도 아무 일이 안 났다 — 탈출구가 그려져만 있고 막혀 있었다.
+            //   이 주소도 [AllowAnonymous] 인데 이 미들웨어가 먼저 잘랐다. 조회와 같은 이유로 연다.
+            //   🔴 /api/auth 를 통째로 열지 않는다 — 이 주소 하나만 연다(작10 원칙 계승).
+            //   실행 가부는 AuthController 가 스스로 판단한다(버전 대조·서명검증은 워치독).
+            || path.StartsWithSegments("/api/auth/update-consent-local")
             || path.StartsWithSegments("/api/backoffice/auth")
             // 사장님 결재 저장 2026-06-02 모두결재 — 랜딩 가입·결제·설치 저장 = 인증 면제 (AllowAnonymous 저장 정합)
             || path.StartsWithSegments("/api/landing")

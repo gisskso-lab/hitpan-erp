@@ -91,6 +91,51 @@
                 }
                 로그인
             </MudButton>
+
+            @* 🔴 20260825작12 — 「최신버젼업데이트」 수동 버튼 (사장님 오더)
+                 *"수동업데이트로 받을 수 있도록 로그인 아래에 「최신버젼업데이트」 라는 버튼을 만들어."*
+
+                 위 배너(@_updateAvailable)와 다른 물건이다. 배너는 **새 버전이 있을 때만** 뜨는데,
+                 조회가 실패하면(사장님 = 터널 접속 → 서버가 404) 배너가 아예 안 떠서
+                 화면에 **탈출구가 하나도 안 보였다.** 이 버튼은 항상 있고 문구만 바뀐다.
+
+                 ⚠️ 워치독이 60초 주기로 승인을 집어가므로 즉시 안 꺼진다 — 안내 문구를 그렇게 쓴다. *@
+            <MudButton Variant="Variant.Outlined"
+                       Color="Color.Primary"
+                       FullWidth="true"
+                       Class="mt-3"
+                       Disabled="_updateChecking || _updateStarting"
+                       OnClick="ManualUpdateAsync"
+                       StartIcon="@Icons.Material.Filled.SystemUpdateAlt"
+                       Style="font-family: 'Noto Sans KR', sans-serif;">
+                @if (_updateChecking)
+                {
+                    <MudProgressCircular Color="Color.Primary" Size="Size.Small" Indeterminate="true" Class="mr-2" />
+                    <text>확인 중…</text>
+                }
+                else if (_updateStarting)
+                {
+                    <text>업데이트 준비 중…</text>
+                }
+                else if (_updateCheckFailed)
+                {
+                    <text>최신버젼업데이트 (확인 실패 — 다시 시도)</text>
+                }
+                else if (_updateAvailable)
+                {
+                    <text>최신버젼업데이트 (@_latestVersion)</text>
+                }
+                else
+                {
+                    <text>최신버젼업데이트</text>
+                }
+            </MudButton>
+            @if (!_updateChecking && !_updateAvailable && !_updateCheckFailed && !string.IsNullOrWhiteSpace(_currentVersion))
+            {
+                <MudText Typo="Typo.caption" Class="mud-text-secondary d-block mt-1" Align="Align.Center">
+                    현재 버전 @_currentVersion — 최신입니다
+                </MudText>
+            }
         </MudForm>
     </MudPaper>
 </div>
@@ -106,6 +151,15 @@
     private bool _updateAvailable;
     private string? _latestVersion;
     private bool _updateStarting;
+
+    // 🔴 20260825작12 — 「최신버젼업데이트」 수동 버튼 (사장님 오더)
+    //   *"수동업데이트로 받을 수 있도록 로그인 아래에 「최신버젼업데이트」 라는 버튼을 만들어."*
+    //   조건부 배너(_updateAvailable)와 **다른 물건**이다 — 배너는 새 버전이 있을 때만 뜨는데,
+    //   조회가 실패하면(터널 404 등) 배너가 아예 안 떠서 사장님께는 **아무 탈출구도 안 보였다.**
+    //   이 버튼은 **항상 보인다.** 상태에 따라 문구만 바뀐다.
+    private string? _currentVersion;
+    private bool _updateCheckFailed;   // 조회 자체가 실패 — 침묵하지 않는다(헌법 #15)
+    private bool _updateChecking;
 
     protected override async Task OnInitializedAsync()
     {
@@ -125,9 +179,12 @@
     /// </summary>
     private async Task LoadUpdateNoticeAsync()
     {
+        _updateChecking = true;
+        _updateCheckFailed = false;
         try
         {
             var status = await Http.GetFromJsonAsync<LoginUpdateStatus>("api/auth/update-status-local");
+            _currentVersion = status?.CurrentVersion;
             if (status?.UpdateAvailable == true && !string.IsNullOrWhiteSpace(status.LatestVersion))
             {
                 _updateAvailable = true;
@@ -136,9 +193,47 @@
         }
         catch (Exception ex)
         {
-            // 헌법 #15 — 침묵하지 않는다. 다만 화면에는 아무것도 띄우지 않는다.
+            // 헌법 #15 — 침묵하지 않는다.
+            // 🔴 20260825작12 — 종전엔 콘솔에만 남기고 화면은 침묵했다.
+            //   그래서 사장님께는 "새 버전이 없는 것"과 "조회가 고장난 것"이 **똑같아 보였다.**
+            //   실제로 터널 접속은 서버가 404 를 주는데(설계상 loopback 전용) 화면엔 아무 흔적도 없었다.
+            //   ⇒ 이제 버튼이 "업데이트 확인 실패" 로 **보이게** 한다. 고장은 보여야 고칠 수 있다.
+            _updateCheckFailed = true;
             Console.Error.WriteLine("[Login] 업데이트 안내 조회 실패: " + ex.Message);
         }
+        finally
+        {
+            _updateChecking = false;
+        }
+    }
+
+    /// <summary>
+    /// 「최신버젼업데이트」 버튼 (20260825작12 — 사장님 오더).
+    /// </summary>
+    /// <remarks>
+    /// 다시 조회해서 새 버전이 있으면 곧바로 실행까지 간다.
+    /// 조회가 실패해 있던 경우(터널 404 등) **다시 눌러볼 수 있어야** 하므로 재조회부터 한다.
+    /// </remarks>
+    private async Task ManualUpdateAsync()
+    {
+        if (_updateChecking || _updateStarting) return;
+
+        await LoadUpdateNoticeAsync();
+        StateHasChanged();
+
+        if (_updateCheckFailed)
+        {
+            Snackbar.Add("업데이트 상태를 확인하지 못했습니다. 잠시 후 다시 시도해 주세요.", Severity.Warning);
+            return;
+        }
+
+        if (!_updateAvailable)
+        {
+            Snackbar.Add($"이미 최신 버전입니다{(string.IsNullOrWhiteSpace(_currentVersion) ? "" : $" ({_currentVersion})")}.", Severity.Info);
+            return;
+        }
+
+        await StartUpdateAsync();
     }
 
     private async Task StartUpdateAsync()
@@ -154,8 +249,11 @@
 
             if (res.IsSuccessStatusCode)
             {
-                Snackbar.Add("업데이트를 시작합니다. 잠시 후 히트판이 꺼졌다가 다시 켜집니다.", Severity.Success);
+                // 20260825작12: "잠시 후" 는 모호했다 — 워치독이 60초 주기로 승인을 집어간다.
+                //   아무 일도 안 일어나는 1분 동안 고객은 고장으로 여긴다.
+                Snackbar.Add("업데이트를 예약했습니다. 1분 이내에 시작되며, 히트판이 꺼졌다가 다시 켜집니다.", Severity.Success);
                 _updateAvailable = false;
+                _updateStarting = false;   // 작12: 성공 분기에 복원이 없어 버튼이 "준비 중…" 으로 굳었다.
             }
             else
             {
@@ -175,6 +273,9 @@
     {
         public bool UpdateAvailable { get; set; }
         public string? LatestVersion { get; set; }
+        // 20260825작12: 「최신버젼업데이트」 버튼이 "현재 최신입니다 (1.3.14)" 를 보여주려면
+        //   지금 버전을 알아야 한다. 서버는 이미 주고 있었는데 화면이 안 받고 있었다.
+        public string? CurrentVersion { get; set; }
     }
 
     private async Task SubmitAsync()

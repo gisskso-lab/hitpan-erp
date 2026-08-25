@@ -300,8 +300,24 @@ public class SalesController : ControllerBase
     {
         var tenantId = HttpContext.Items["TenantId"]?.ToString();
         if (string.IsNullOrEmpty(tenantId)) return Forbid();
-        var detail = await _salesService.GetSalesReturnDetailAsync(id, tenantId, ct);
-        return detail is null ? NotFound() : Ok(detail);
+        try
+        {
+            var detail = await _salesService.GetSalesReturnDetailAsync(id, tenantId, ct);
+            return detail is null ? NotFound() : Ok(detail);
+        }
+        // 🔴 20260825작12 — 여기엔 try/catch 자체가 없었다.
+        //   작10 이 confirm·cancel 두 액션에만 이 catch 를 달았는데,
+        //   사용자는 확정을 누르기 **전에** 이 상세조회를 먼저 지나간다.
+        //   마이그 안 들어간 DB 에서 문서를 **여는 순간** 1054 → 미들웨어 마지막
+        //   catch(Exception) → **500**. 사장님이 받으신 그 모양이다.
+        catch (MySqlConnector.MySqlException ex) when (ex.Number is 1054 or 1146)
+        {
+            return BadRequest(new
+            {
+                message = "업데이트가 아직 다 적용되지 않아 반품 내용을 불러올 수 없습니다. "
+                        + "히트판을 껐다 켜 주시고, 그래도 같으면 관리자에게 알려주세요."
+            });
+        }
     }
 
     [HttpPost("returns")]
@@ -319,6 +335,15 @@ public class SalesController : ControllerBase
         {
             return BadRequest(new { message = ex.Message });
         }
+        // 20260825작12 — 저장 경로도 확정·취소와 같은 안내를 준다(작10 이 여기까지 안 왔다).
+        catch (MySqlConnector.MySqlException ex) when (ex.Number is 1054 or 1146)
+        {
+            return BadRequest(new
+            {
+                message = "업데이트가 아직 다 적용되지 않아 반품을 저장할 수 없습니다. "
+                        + "히트판을 껐다 켜 주시고, 그래도 같으면 관리자에게 알려주세요."
+            });
+        }
     }
 
     [HttpPut("returns/{id}")]
@@ -331,6 +356,15 @@ public class SalesController : ControllerBase
         {
             await _salesService.UpdateSalesReturnAsync(id, request, tenantId, ct);
             return Ok();
+        }
+        // 20260825작12 — 생성과 대칭. 한쪽만 달면 "새로 만들면 되는데 고치면 500" 이 된다.
+        catch (MySqlConnector.MySqlException ex) when (ex.Number is 1054 or 1146)
+        {
+            return BadRequest(new
+            {
+                message = "업데이트가 아직 다 적용되지 않아 반품을 저장할 수 없습니다. "
+                        + "히트판을 껐다 켜 주시고, 그래도 같으면 관리자에게 알려주세요."
+            });
         }
         catch (InvalidOperationException ex)
         {
