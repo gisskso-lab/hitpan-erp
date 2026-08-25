@@ -2103,6 +2103,59 @@ public class SalesService : ISalesService
     /// ⚠️ 이 검사는 <b>기능을 끄지 않는다.</b> 컬럼이 생기는 순간 로스 판정은 그대로 살아난다.
     /// </para>
     /// </remarks>
+    /// <summary>
+    /// 🔴 <b>20260825작15 — 반품확정 500 의 진짜 원인.</b>
+    /// <c>is_loss</c> 값을 <b>어떤 CLR 타입으로 와도</b> 안전하게 판정한다.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>[무엇이 문제였나]</b> 종전 코드는 <c>(int)(it.is_loss ?? 0) == 0</c> 이었다.
+    /// 그런데 MySqlConnector 는 <c>TINYINT(1)</c> 을 <b><c>Boolean</c></b> 으로 돌려준다
+    /// (연결문자열에 <c>TreatTinyAsBoolean=false</c> 가 없어 기본값 <c>true</c> 적용).
+    /// <c>dynamic</c> 캐스팅은 런타임 실제 타입이 정확히 맞아야 하므로
+    /// <c>bool → int</c> 는 <c>RuntimeBinderException</c> 이다.
+    /// </para>
+    /// <para>
+    /// 🔴 <b>세 번의 봉합이 전부 거꾸로였다.</b> 작10·작12 는 *"마이그(DB-108)가 안 들어간 DB"* 를 고쳤는데,
+    /// 폴백(<c>0 AS is_loss</c>)은 <c>Int32</c> 라 <b>정상 동작</b>했고
+    /// 정작 죽는 것은 <b>마이그가 들어간 DB</b>(실컬럼 → <c>Boolean</c>)였다.
+    /// 사장님 PC 는 DB-108 이 적용돼 있어 계속 500 이 났다.
+    /// </para>
+    /// <para>
+    /// <b>[증상 모양 대조]</b> <c>RuntimeBinderException</c> 은
+    /// <c>InvalidOperationException</c>(→400)도 <c>MySqlException</c>(1054/1146/1062→400, 1451/1452→409)도 아니라
+    /// 미들웨어 마지막 <c>catch(Exception)</c> 으로 떨어져 <b>정확히 500</b> 이다.
+    /// 실측으로 재현했다 — <c>Cannot convert type 'bool' to 'int'</c>.
+    /// </para>
+    /// <para>
+    /// ⚠️ 이 예외는 트랜잭션 <b>안</b>에서 터져 롤백된다 ⇒ <b>원장이 안 남는다</b> ⇒
+    /// 작13 이 넣은 "이미 재고에 반영됨" 진입 가드에도 안 걸린다.
+    /// 그래서 <b>몇 번을 눌러도 똑같이 500</b> 이었다.
+    /// </para>
+    /// <para>
+    /// 🔴 <b>타입을 하나로 못박지 않는다.</b> 연결문자열 설정·DB 버전·컬럼 정의에 따라
+    /// <c>bool</c>·<c>sbyte</c>·<c>int</c>·<c>long</c> 중 무엇이든 올 수 있다.
+    /// <c>Convert.ToInt32</c> 는 이 전부를 받는다 — 한 타입만 가정하면 같은 사고가 또 난다.
+    /// </para>
+    /// </summary>
+    /// <returns>파손 로스면 <c>true</c>. 값이 없으면 <c>false</c>(정상품 — 안전측).</returns>
+    private static bool IsLossValue(object? raw)
+    {
+        if (raw is null || raw is DBNull) return false;
+        try
+        {
+            return Convert.ToInt32(raw) != 0;
+        }
+        catch (Exception ex) when (ex is InvalidCastException or FormatException or OverflowException)
+        {
+            // 헌법 #15 — 침묵하지 않는다. 못 읽으면 정상품(재고 반영)으로 본다.
+            //   로스로 오판하면 재고가 안 늘어 현장 숫자와 어긋난다. 안전측은 false 다.
+            System.Diagnostics.Trace.TraceWarning(
+                $"[SalesService] is_loss 값을 읽지 못했다 — 정상품으로 본다. 실제타입={raw.GetType().Name} 값={raw}");
+            return false;
+        }
+    }
+
     private async Task<bool> HasSalesReturnLossColumnAsync(CancellationToken ct)
     {
         try
@@ -2210,7 +2263,7 @@ public class SalesService : ISalesService
             //   ⚠️ 걸러내는 것은 재고뿐이다 — 매출·미수 차감(③④)은 로스도 그대로 간다.
             //      물건은 못 쓰지만 고객에게 돈은 돌려주기 때문이다.
             var returnGroups = items
-                .Where(it => (int)(it.is_loss ?? 0) == 0)
+                .Where(it => !IsLossValue((object?)it.is_loss))
                 .GroupBy(it => (string)it.item_id)
                 .Select(g => new
                 {
@@ -2378,7 +2431,7 @@ public class SalesService : ISalesService
             // 🔴 20260825작6 — 확정에서 재고에 안 넣은 로스는 취소에서도 빼지 않는다.
             //   안 넣은 것을 빼면 재고가 그만큼 마이너스로 어긋난다. 확정과 반드시 같은 잣대여야 한다.
             var returnGroups = items
-                .Where(it => (int)(it.is_loss ?? 0) == 0)
+                .Where(it => !IsLossValue((object?)it.is_loss))
                 .GroupBy(it => (string)it.item_id)
                 .Select(g => new
                 {

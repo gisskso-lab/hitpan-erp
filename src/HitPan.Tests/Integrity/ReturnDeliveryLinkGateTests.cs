@@ -237,49 +237,56 @@ public class ReturnDeliveryLinkGateTests
     }
 
     /// <summary>
-    /// 🔴 <b>판매목록조회에 「반품」 버튼이 있는가.</b> 사장님 반려 ② 의 나머지 절반이다.
+    /// 🔴 <b>20260825작15 — 판매목록의 「반품」 진입점이 되살아나면 안 된다.</b>
     /// </summary>
+    /// <remarks>
+    /// <para>
+    /// 사장님 결재: <i>"반품확정 메뉴를 아애 빼 … <b>판매목록에도 반품으로 전환이라던지
+    /// 반품확인메뉴에 대한 모든걸 다 지워</b>"</i>
+    /// </para>
+    /// <para>
+    /// 종전 이 자리에는 <c>판매목록조회에_반품_버튼이_있어야_한다</c> 등 3개 게이트가
+    /// <b>버튼이 있어야 한다</b>고 강제하고 있었다. 기능을 뺐으므로 <b>정반대로 뒤집는다</b> —
+    /// 안 그러면 게이트가 제거를 막는다(작11·작12 에서 겪은 그 자리다).
+    /// </para>
+    /// <para>
+    /// ⚠️ <b>서버 로직·화면·API 는 남아 있다.</b> 이 게이트가 지키는 것은 <b>진입점</b> 뿐이다.
+    /// 되살릴 때는 사장님 결재를 받고 이 게이트를 다시 뒤집는다.
+    /// </para>
+    /// </remarks>
     [Fact]
-    public void 판매목록조회에_반품_버튼이_있어야_한다()
+    public void 판매목록에_반품_진입점이_없어야_한다()
     {
         var dlg = ListDialog();
 
-        Assert.Contains("CreateReturnAsync", dlg, StringComparison.Ordinal);
-        Assert.Contains("WorkDocumentKind.SalesReturn", dlg, StringComparison.Ordinal);
-        Assert.Contains("deliveryId=", dlg, StringComparison.Ordinal);
+        Assert.DoesNotContain("CreateReturnAsync", dlg, StringComparison.Ordinal);
+        Assert.DoesNotContain("WorkDocumentKind.SalesReturn", dlg, StringComparison.Ordinal);
     }
 
     /// <summary>
-    /// 🔴 <b>판 적 없는 건은 반품 못 하는가.</b>
-    /// <c>draft</c> 는 아직 판 것이 아니다 — 팔지 않은 물건은 돌아올 수 없다(헌법 #6).
-    /// 잘못 쓴 임시전표는 반품이 아니라 삭제로 지운다.
+    /// 🔴 <b>사이드바에 반품확인서·반품확인현황 메뉴가 없어야 한다</b>(사장님 결재).
     /// </summary>
     [Fact]
-    public void 판매확정_전_거래는_반품할_수_없어야_한다()
+    public void 사이드바에_반품확인_메뉴가_없어야_한다()
     {
-        var guard = Slice(ListDialog(), "private bool CanCreateReturn");
+        var sidebar = CodeLines(Read("src", "HitPan.Web", "Layout", "Sidebar.razor"));
 
-        Assert.Contains("confirmed", guard, StringComparison.Ordinal);
-        Assert.Contains("invoiced", guard, StringComparison.Ordinal);
-        Assert.False(guard.Contains("draft", StringComparison.Ordinal),
-            "draft 를 반품 대상에 넣으면 판 적 없는 거래가 반품된다.");
-
-        // 화면 쪽 2차 방어 — 다이얼로그를 우회해 들어와도 막는다.
-        var page = Slice(ReturnPageCs(), "private async Task LoadFromDeliveryAsync");
-        Assert.Contains("\"draft\"", page, StringComparison.Ordinal);
+        Assert.DoesNotContain("sales-return-status", sidebar, StringComparison.Ordinal);
+        Assert.DoesNotContain("WorkDocumentKind.SalesReturn", sidebar, StringComparison.Ordinal);
     }
 
     /// <summary>
-    /// 🔴 <b>여러 거래를 한 번에 반품 걸지 못하는가.</b>
-    /// <c>sales_returns.delivery_id</c> 는 <b>단일 FK</b> 다. 두 건을 담으면
-    /// 어느 거래에서 온 반품인지 못 적는다 — 링크가 있으나 마나가 된다.
+    /// 🔴 <b>주소를 직접 쳐도 못 들어가야 한다.</b>
+    /// 메뉴만 빼면 즐겨찾기·직접입력으로 들어올 수 있다 — 입구를 전부 막는다.
     /// </summary>
     [Fact]
-    public void 여러_거래를_한_반품확인서에_담을_수_없어야_한다()
+    public void 반품화면_라우트가_살아있으면_안_된다()
     {
-        var guard = Slice(ListDialog(), "private bool CanCreateReturn");
+        var page = CodeLines(Read("src", "HitPan.Web", "Pages", "Sales", "SalesReturnPage.razor"));
+        var status = CodeLines(Read("src", "HitPan.Web", "Pages", "Sales", "SalesReturnStatusPage.razor"));
 
-        Assert.Contains("== 1", guard, StringComparison.Ordinal);
+        Assert.DoesNotContain("@page \"/sales-returns\"", page, StringComparison.Ordinal);
+        Assert.DoesNotContain("@page \"/sales-return-status\"", status, StringComparison.Ordinal);
     }
 
     // ───────────────────────────────────────────────────────────────
@@ -394,40 +401,10 @@ public class ReturnDeliveryLinkGateTests
             "판매 불러오기는 매출 화면 기능이다. 매입에 얹으면 두 업무가 다시 섞인다.");
     }
 
-    /// <summary>
-    /// 🔴 <b>「반품」 버튼이 원 거래명세서 상태를 바꾸지 않는가.</b>
-    /// </summary>
-    /// <remarks>
-    /// 반품확정이 <b>이미</b> 매출·미수를 차감한다(20260825작6 실측).
-    /// 원 거래까지 <c>returned</c> 로 바꾸면 <b>두 번 빠진다</b>.
-    /// 부분반품(3개 중 1개)이면 원 거래를 통째로 바꿀 수도 없다.
-    /// 원 거래 표기는 4-C 차수에서 부분·전체를 함께 보고 정한다.
-    /// </remarks>
-    [Fact]
-    public void 반품버튼이_원거래_상태를_바꾸지_않아야_한다()
-    {
-        var create = Slice(ListDialog(), "private async Task CreateReturnAsync");
-
-        Assert.False(create.Contains("BulkConfirmAsync", StringComparison.Ordinal),
-            "반품 버튼이 판매확정을 부르면 안 된다.");
-        Assert.False(create.Contains("UpdateAsync", StringComparison.Ordinal),
-            "반품 버튼이 원 거래를 고치면 매출이 두 번 빠진다.");
-        Assert.False(create.Contains("DeleteAsync", StringComparison.Ordinal),
-            "반품은 원 거래 삭제가 아니다. 판 기록은 남아야 한다.");
-    }
-
-    /// <summary>
-    /// 🔴 <b>「반품」 버튼이 반품을 확정하지 않는가.</b> (헌법 #6)
-    /// 실제 반품 수량은 판 수량보다 적은 게 보통이고, 파손 판정도 사람이 봐야 한다.
-    /// 확정은 반품확인서 화면의 「반품확정」이 한다.
-    /// </summary>
-    [Fact]
-    public void 반품버튼은_확정하지_않고_초안만_열어야_한다()
-    {
-        var create = Slice(ListDialog(), "private async Task CreateReturnAsync");
-
-        Assert.False(create.Contains("ConfirmSalesReturnAsync", StringComparison.Ordinal),
-            "여기서 확정하면 사용자가 수량·파손을 고칠 기회가 없다.");
-        Assert.Contains("TryAddTab", create, StringComparison.Ordinal);
-    }
+    // 🔴 20260825작15 — 게이트 2건 제거 (사장님 결재: 반품 진입점 전부 삭제).
+    //   종전 여기에 「반품버튼이_원거래_상태를_바꾸지_않아야_한다」·
+    //   「반품버튼은_확정하지_않고_초안만_열어야_한다」 가 있었다.
+    //   둘 다 CreateReturnAsync 라는 **없어진 메서드**를 검사하던 것이라 의미가 사라졌다.
+    //   ⇒ 그 역할은 위 「판매목록에_반품_진입점이_없어야_한다」 가 대신한다 —
+    //      메서드 자체가 없으면 원 거래를 바꿀 일도, 확정할 일도 없다.
 }
