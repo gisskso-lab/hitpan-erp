@@ -78,7 +78,17 @@
             <MudTd Style="text-align:right">@context.VatAmount.ToString("N0")</MudTd>
             <MudTd Style="text-align:right;font-weight:500">@context.TotalAmount.ToString("N0")</MudTd>
         </RowTemplate>
-        <NoRecordsContent><MudText Class="pa-4" Style="color:var(--hitpan-text-faint)">조회된 반품확인서가 없습니다.</MudText></NoRecordsContent>
+        @* 20260825작8 — 사장님 실측: "반품확인현황에 반품현황 안뜸".
+           현황은 「반품확정」 된 건만 집계한다(헌법 #6 — 재고·회계와 같은 잣대).
+           빈 화면에 이유를 적어주지 않으면 사용자는 고장으로 읽는다. *@
+        <NoRecordsContent>
+            <div class="pa-4">
+                <MudText Style="color:var(--hitpan-text-faint)">조회된 반품확인서가 없습니다.</MudText>
+                <MudText Typo="Typo.caption" Style="color:var(--hitpan-text-faint)">
+                    반품확인서를 저장만 하고 「반품확정」을 누르지 않으면 현황에 나오지 않습니다.
+                </MudText>
+            </div>
+        </NoRecordsContent>
     </MudTable>
 </MudPaper>
 
