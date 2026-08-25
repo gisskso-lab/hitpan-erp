@@ -41,6 +41,15 @@ public class DeliveryDetailDto : DeliveryListDto
 
 public class DeliveryItemDto
 {
+    /// <summary>
+    /// 이 판매 줄의 식별자다 (20260825작7). 반품확인서가 <b>어느 판매 줄에서 왔는지</b> 적을 때 쓴다.
+    /// </summary>
+    /// <remarks>
+    /// <c>sales_return_items.delivery_item_id</c> 는 컬럼·FK·DTO 가 전부 있었는데
+    /// <b>화면에 값이 안 와서</b> 채울 수가 없었다. 여기가 끊긴 자리였다.
+    /// </remarks>
+    public string? DeliveryItemId { get; set; }
+
     public string ItemId { get; set; } = string.Empty;
     public string ItemName { get; set; } = string.Empty;
     public string? Spec { get; set; }
@@ -49,6 +58,10 @@ public class DeliveryItemDto
     public decimal UnitPrice { get; set; }
     public decimal Amount { get; set; }
     public decimal VatAmount { get; set; }
+
+    /// <summary>출고 창고 (20260825작7). 반품은 <b>나간 창고로 되돌아온다</b>.</summary>
+    public string? WarehouseId { get; set; }
+
     public string? Memo { get; set; }
     public int RowNo { get; set; }
 }

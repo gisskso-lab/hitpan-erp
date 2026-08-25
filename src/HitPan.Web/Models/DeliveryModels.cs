@@ -43,6 +43,15 @@ public sealed class DeliveryLineModel
     /// </remarks>
     public bool IsLoss { get; set; }
 
+    /// <summary>
+    /// 이 줄이 어느 판매 줄에서 왔는지 (20260825작7). 직접 입력한 줄이면 null.
+    /// </summary>
+    /// <remarks>
+    /// 「판매불러오기」로 채운 줄만 값이 있다. 저장 payload 에 그대로 실어 보내
+    /// <c>sales_return_items.delivery_item_id</c> 로 남는다 — 원단가 추적의 근거다.
+    /// </remarks>
+    public string? DeliveryItemId { get; set; }
+
     public string Warehouse { get; set; } = string.Empty;
     public string LineAssignee { get; set; } = string.Empty;
     public bool IsPlaceholder { get; set; }
@@ -179,6 +188,15 @@ public sealed class DeliveryDetailDto : DeliveryListDto
 
 public sealed class DeliveryItemDto
 {
+    /// <summary>
+    /// 이 판매 줄의 식별자다 (20260825작7). 반품확인서가 <b>어느 판매 줄에서 왔는지</b> 적을 때 쓴다.
+    /// </summary>
+    /// <remarks>
+    /// <c>sales_return_items.delivery_item_id</c> 는 컬럼·FK·DTO 가 전부 있었는데
+    /// <b>화면에 값이 안 와서</b> 채울 수가 없었다. 여기가 끊긴 자리였다.
+    /// </remarks>
+    public string? DeliveryItemId { get; set; }
+
     public string ItemId { get; set; } = "";
     public string ItemName { get; set; } = "";
     public string? Spec { get; set; }
@@ -187,6 +205,10 @@ public sealed class DeliveryItemDto
     public decimal UnitPrice { get; set; }
     public decimal Amount { get; set; }
     public decimal VatAmount { get; set; }
+
+    /// <summary>출고 창고 (20260825작7). 반품은 <b>나간 창고로 되돌아온다</b>.</summary>
+    public string? WarehouseId { get; set; }
+
     public string? Memo { get; set; }
     public int RowNo { get; set; }
 }
@@ -552,6 +574,9 @@ public sealed class SalesReturnDetailItem
     public decimal UnitPrice { get; set; }
     public decimal SupplyAmount { get; set; }
     public decimal VatAmount { get; set; }
+
+    /// <summary>원 판매 줄 연결 (20260825작7) — 다시 열어 고쳐도 링크가 살아 있게 한다.</summary>
+    public string? DeliveryItemId { get; set; }
 
     /// <summary>파손 로스 여부 — true 면 확정해도 재고에 안 들어간다.</summary>
     public bool IsLoss { get; set; }

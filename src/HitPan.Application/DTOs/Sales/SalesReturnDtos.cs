@@ -49,6 +49,9 @@ public class SalesReturnDetailItemDto
     public decimal SupplyAmount { get; set; }
     public decimal VatAmount { get; set; }
 
+    /// <summary>원 판매 줄 연결 (20260825작7) — 다시 열어 고쳐도 링크가 살아 있게 한다.</summary>
+    public string? DeliveryItemId { get; set; }
+
     /// <summary>파손 로스 여부 (20260825작6) — true 면 확정해도 재고에 안 들어갔다.</summary>
     public bool IsLoss { get; set; }
 }

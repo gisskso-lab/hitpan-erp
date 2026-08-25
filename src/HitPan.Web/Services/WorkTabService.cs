@@ -33,14 +33,37 @@ public sealed class WorkTabService
     /// <summary>
     /// 새 탭을 추가한다. 같은 종류의 빈 탭(새 문서)이 있으면 기존 탭으로 전환한다.
     /// </summary>
-    public bool TryAddTab(WorkDocumentKind kind)
+    public bool TryAddTab(WorkDocumentKind kind) => TryAddTab(kind, null);
+
+    /// <summary>
+    /// 새 탭을 열되, 화면에 넘길 질의문자열을 붙인다 (20260825작7).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// 판매목록조회 「반품」 버튼이 <c>?deliveryId=…</c> 로 원 거래를 넘길 때 쓴다.
+    /// 사장님 오더: <i>"거래명세서 판매목록조회에도 반품으로 상태변경하는 버튼이 있어야됨 → 당연히 반품확인서에 자동반영"</i>
+    /// </para>
+    /// <para>
+    /// ⚠️ <b>질의가 있으면 빈 탭 재사용을 하지 않는다.</b> 재사용하면 이미 열려 있던 빈 탭으로
+    /// 전환만 되고 <b>주소가 안 바뀌어</b> 넘긴 거래가 화면에 안 실린다 — 버튼이 먹통으로 보인다.
+    /// </para>
+    /// </remarks>
+    /// <param name="kind">문서 종류.</param>
+    /// <param name="query">앞에 <c>?</c> 를 포함한 질의문자열. 없으면 null.</param>
+    public bool TryAddTab(WorkDocumentKind kind, string? query)
     {
-        // 같은 종류의 빈 탭(새 문서)이 있으면 그 탭으로 전환
-        var existing = _tabs.Values.FirstOrDefault(t => t.Kind == kind && string.IsNullOrEmpty(t.SubTitle));
-        if (existing is not null)
+        var hasQuery = !string.IsNullOrWhiteSpace(query);
+
+        // 같은 종류의 빈 탭(새 문서)이 있으면 그 탭으로 전환.
+        // 단 질의를 넘겨야 하면 전환만으로는 값이 안 실리므로 새 탭을 연다.
+        if (!hasQuery)
         {
-            SwitchTab(existing.Id);
-            return true;
+            var existing = _tabs.Values.FirstOrDefault(t => t.Kind == kind && string.IsNullOrEmpty(t.SubTitle));
+            if (existing is not null)
+            {
+                SwitchTab(existing.Id);
+                return true;
+            }
         }
 
         if (_tabs.Count >= MaxTabs)
@@ -51,6 +74,10 @@ public sealed class WorkTabService
 
         var id = _nextId++;
         var state = CreateState(id, kind);
+        if (hasQuery)
+        {
+            state.Url += query;
+        }
         _tabs[id] = state;
         _order.Add(id);
         _activeTabId = id;
