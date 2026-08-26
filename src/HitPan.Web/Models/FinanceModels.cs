@@ -96,6 +96,49 @@ public class ProfitSummaryModel
 }
 
 // ── 계정과목 ──
+/// <summary>
+/// 🔴 20260827작4 — <b>합계잔액시산표</b> 한 줄. 서버 <c>TrialBalanceRowDto</c> 와 짝.
+/// </summary>
+public class TrialBalanceRowModel
+{
+    public string AccountCode { get; set; } = string.Empty;
+    public string AccountName { get; set; } = string.Empty;
+    public string AccountType { get; set; } = string.Empty;
+    public decimal DebitTotal { get; set; }
+    public decimal CreditTotal { get; set; }
+    public decimal Balance { get; set; }
+
+    /// <summary>화면 표기용 한글 이름. <see cref="AccountModel.AccountTypeLabel"/> 와 같은 규칙.</summary>
+    public string AccountTypeLabel => AccountType switch
+    {
+        "asset" => "자산",
+        "liability" => "부채",
+        "equity" => "자본",
+        "revenue" => "수익",
+        "expense" => "비용",
+        _ => "미분류"
+    };
+}
+
+/// <summary>
+/// 🔴 20260827작4 — 시산표 전체. 사장님 <i>"전체 돈 숫자가 모이는 곳"</i>.
+/// </summary>
+public class TrialBalanceModel
+{
+    public List<TrialBalanceRowModel> Rows { get; set; } = new();
+    public decimal TotalDebit { get; set; }
+    public decimal TotalCredit { get; set; }
+
+    /// <summary>차변합 == 대변합. <b>서버가 판정한 값</b>을 그대로 쓴다(화면이 다시 빼지 않는다).</summary>
+    public bool IsBalanced { get; set; }
+
+    /// <summary>아직 장부에 안 잡히는 업무 건수(수금·지급·경비).</summary>
+    public int UnpostedCount { get; set; }
+
+    /// <summary>안내문에 쓸 이름들 (예: "수금 12건").</summary>
+    public List<string> UnpostedSources { get; set; } = new();
+}
+
 public class AccountModel
 {
     public string AccountCode { get; set; } = string.Empty;

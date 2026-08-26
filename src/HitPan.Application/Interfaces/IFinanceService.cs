@@ -32,6 +32,11 @@ public interface IFinanceService
     // 대시보드
     Task<DashboardSummaryDto> GetDashboardAsync(string tenantId, CancellationToken ct = default);
 
+    // 🔴 회계장부 — 합계잔액시산표 (20260827작4)
+    //   사장님: "전체 돈 숫자가 모이는 곳". 읽기 전용(헌법 #3 — 원장은 INSERT ONLY).
+    Task<TrialBalanceDto> GetTrialBalanceAsync(
+        string tenantId, DateTime? from = null, DateTime? to = null, CancellationToken ct = default);
+
     // 계정과목
     Task<List<AccountDto>> GetAccountsAsync(string tenantId, CancellationToken ct = default);
     Task<string> CreateAccountAsync(string tenantId, CreateAccountRequest req, CancellationToken ct = default);

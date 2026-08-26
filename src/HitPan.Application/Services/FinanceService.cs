@@ -671,6 +671,155 @@ public class FinanceService : IFinanceService
     }
 
     // ═══════════════════════════════════════
+    // 회계장부 — 합계잔액시산표 (20260827작4)
+    // ═══════════════════════════════════════
+
+    /// <summary>
+    /// 🔴 20260827작4 — <b>합계잔액시산표.</b> 사장님 오더의 본안이다.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// 사장님: <i>"매입매출, 그밖에 모든 돈의 흐름을 한번에, <b>전체 돈 숫자가 모이는 곳</b>"</i>
+    /// · <i>"13개의 모든 돈 흐름이 모이는 회계장부가 필요한데, 회계에선 이게 핵심인데, 이 기능이 빠졌네"</i>
+    /// </para>
+    ///
+    /// <para>
+    /// 🔴 <b>왜 이게 없었나</b> — 실측 결과 <c>journal_entries</c>/<c>journal_lines</c> 를
+    /// <b>읽는 조회 화면이 이 시스템에 0건</b>이었다. 13개 회계 화면이 전부 원본 테이블
+    /// (<c>sales_deliveries</c>·<c>purchase_receipts</c>·<c>expenses</c>)을 각자 직독한다.
+    /// <b>분개를 쌓기만 하고 여는 문이 없었다.</b> 이 메서드가 그 첫 문이다.
+    /// </para>
+    ///
+    /// <para>
+    /// ⚠️ <b>읽기 전용이다</b> — 분개 생성은 각 업무(매입확정·판매확정 등)가 한다.
+    /// 여기서 <c>journal_lines</c> 를 쓰지 않는다(헌법 #3 INSERT ONLY 원장).
+    /// </para>
+    ///
+    /// <para>
+    /// ⚠️ <b>기간 필수</b> — 무기한 조회를 허용하면 전표 수만 건에서 화면이 죽는다.
+    /// 화면이 기본 당월을 보낸다. 인덱스 <c>idx_je_tenant_date</c> 적중.
+    /// </para>
+    /// </remarks>
+    public async Task<TrialBalanceDto> GetTrialBalanceAsync(
+        string tenantId, DateTime? from = null, DateTime? to = null, CancellationToken ct = default)
+    {
+        await EnsureOpenAsync(ct);
+
+        // 🔴 문자열 조립을 하지 않는다 — 20260826작2 의 `0AND` 500 사고 자리.
+        //   조건은 전부 (@X IS NULL OR ...) 로 고정 SQL 안에 둔다.
+        //
+        // 🔴 잔액 방향은 계정 성격이 정한다:
+        //     자산(asset)·비용(expense)   → 차변 − 대변
+        //     부채(liability)·자본(equity)·수익(revenue) → 대변 − 차변
+        //   화면이 회계 규칙을 다시 알 필요 없게 **서버가 계산해서** 내려보낸다.
+        //
+        // ⚠️ INNER JOIN accounts 가 아니라 LEFT JOIN 이다. 계정과목이 지워졌거나
+        //   시드에 없는 코드로 기표된 분개가 있어도 **시산표에서 사라지면 안 된다**
+        //   (사라지면 차변합≠대변합 이 되어 검산이 거짓으로 깨진다).
+        const string sql = """
+            SELECT jl.account_code                                   AS AccountCode,
+                   COALESCE(a.account_name, CONCAT('(미등록 ', jl.account_code, ')')) AS AccountName,
+                   COALESCE(a.account_type, 'unknown')               AS AccountType,
+                   COALESCE(SUM(jl.debit_amount), 0)                 AS DebitTotal,
+                   COALESCE(SUM(jl.credit_amount), 0)                AS CreditTotal,
+                   CASE
+                     WHEN COALESCE(a.account_type,'') IN ('asset','expense')
+                       THEN COALESCE(SUM(jl.debit_amount),0) - COALESCE(SUM(jl.credit_amount),0)
+                     ELSE COALESCE(SUM(jl.credit_amount),0) - COALESCE(SUM(jl.debit_amount),0)
+                   END                                               AS Balance
+              FROM journal_lines jl
+              JOIN journal_entries je
+                ON je.entry_id = jl.entry_id AND je.tenant_id = jl.tenant_id
+              LEFT JOIN accounts a
+                ON a.account_code = jl.account_code AND a.tenant_id = jl.tenant_id
+             WHERE jl.tenant_id = @TenantId
+               AND (@From IS NULL OR je.entry_date >= @From)
+               AND (@To   IS NULL OR je.entry_date <= @To)
+             GROUP BY jl.account_code, a.account_name, a.account_type, a.sort_order
+             ORDER BY COALESCE(a.sort_order, 999999), jl.account_code
+            """;
+
+        var rows = (await _db.QueryAsync<TrialBalanceRowDto>(new CommandDefinition(
+            sql,
+            new { TenantId = tenantId, From = from?.Date, To = to?.Date },
+            cancellationToken: ct))).ToList();
+
+        var dto = new TrialBalanceDto
+        {
+            Rows = rows,
+            TotalDebit = rows.Sum(r => r.DebitTotal),
+            TotalCredit = rows.Sum(r => r.CreditTotal)
+        };
+
+        // 🔴 검산 — 복식부기는 차변합 = 대변합 이 항상 성립해야 한다.
+        //   decimal 이라 == 비교가 안전하다(헌법 #4 — float 였으면 이 비교가 못 미더웠을 자리).
+        dto.IsBalanced = dto.TotalDebit == dto.TotalCredit;
+
+        // ⚠️ 아직 기표되지 않는 업무를 화면에 알려준다(20260827 설계 결재서 §4).
+        //   이게 없으면 담당자가 "수금 100건인데 장부에 0건" 을 보고 고장으로 오해한다.
+        //   🔴 "없는 것을 없다고 말해주는 것" 도 기능이다 — 히트판 정신(쉬움).
+        await AppendUnpostedNoticeAsync(dto, tenantId, from, to, ct);
+
+        return dto;
+    }
+
+    /// <summary>
+    /// 아직 분개로 안 들어오는 업무의 건수를 세어 안내문 재료를 채운다.
+    /// </summary>
+    /// <remarks>
+    /// 🔴 이 메서드는 <b>한시적</b>이다. 수금·지급·경비·급여 기표가 붙으면(3·4차)
+    /// 건수가 0 이 되어 안내문이 저절로 사라진다. 그때 이 코드를 지운다.
+    /// </remarks>
+    private async Task AppendUnpostedNoticeAsync(
+        TrialBalanceDto dto, string tenantId, DateTime? from, DateTime? to, CancellationToken ct)
+    {
+        // ⚠️ 표가 없는 고객 DB 도 있을 수 있다(마이그 시점 차이) — 실패해도 시산표 본안은 살린다.
+        try
+        {
+            const string sql = """
+                SELECT
+                  (SELECT COUNT(*) FROM collections
+                    WHERE tenant_id=@TenantId
+                      AND (@From IS NULL OR collection_date >= @From)
+                      AND (@To   IS NULL OR collection_date <= @To))  AS c1,
+                  (SELECT COUNT(*) FROM payments
+                    WHERE tenant_id=@TenantId
+                      AND (@From IS NULL OR payment_date >= @From)
+                      AND (@To   IS NULL OR payment_date <= @To))     AS c2,
+                  (SELECT COUNT(*) FROM expenses
+                    WHERE tenant_id=@TenantId
+                      AND (@From IS NULL OR expense_date >= @From)
+                      AND (@To   IS NULL OR expense_date <= @To))     AS c3
+                """;
+
+            var r = await _db.QueryFirstOrDefaultAsync<dynamic>(new CommandDefinition(
+                sql, new { TenantId = tenantId, From = from?.Date, To = to?.Date },
+                cancellationToken: ct));
+            if (r is null) return;
+
+            // ⚠️ COUNT 는 드라이버에 따라 long 으로 온다 — Convert 로 전 타입을 받는다
+            //   (dynamic 에 (int) 캐스팅하면 RuntimeBinderException 으로 500 이 난다. 8/25 사고 자리).
+            var c1 = Convert.ToInt32(r.c1);
+            var c2 = Convert.ToInt32(r.c2);
+            var c3 = Convert.ToInt32(r.c3);
+
+            if (c1 > 0) dto.UnpostedSources.Add($"수금 {c1:N0}건");
+            if (c2 > 0) dto.UnpostedSources.Add($"지급 {c2:N0}건");
+            if (c3 > 0) dto.UnpostedSources.Add($"경비 {c3:N0}건");
+            dto.UnpostedCount = c1 + c2 + c3;
+        }
+        catch (Exception ex)
+        {
+            // 헌법 #15 — 빈 catch 금지. 이 클래스엔 ILogger 주입이 없어(생성자 실측)
+            //   같은 파일의 기존 관례대로 stderr 에 남긴다. 안내문은 부가 기능이므로
+            //   실패해도 본안(시산표)은 그대로 반환한다.
+            Console.Error.WriteLine(
+                "[작4] 미기표 안내 집계 실패 — 시산표 본안은 정상 반환한다: "
+                + ex.GetType().Name + ": " + ex.Message);
+        }
+    }
+
+    // ═══════════════════════════════════════
     // 계정과목
     // ═══════════════════════════════════════
 

@@ -225,3 +225,70 @@ public class UpdateAccountRequest
     public bool IsActive { get; set; } = true;
     public int SortOrder { get; set; }
 }
+
+/// <summary>
+/// 🔴 20260827작4 — <b>합계잔액시산표</b> 한 줄(계정 하나).
+/// </summary>
+/// <remarks>
+/// <para>
+/// <b>시산표(試算表)</b> = 모든 계정의 차변·대변을 모아 <b>좌우 합계가 맞는지 검산</b>하는 표.
+/// 복식부기는 차변합 = 대변합 이 항상 성립해야 하고, 안 맞으면 장부가 틀렸다는 뜻이다.
+/// 경리가 <b>월마감 직전에 반드시 보는 화면</b>이다.
+/// </para>
+/// <para>
+/// 사장님 오더: <i>"매입매출, 그밖에 모든 돈의 흐름을 한번에, 전체 돈 숫자가 모이는 곳"</i>
+/// ⇒ 그게 바로 이 시산표다.
+/// </para>
+/// </remarks>
+public class TrialBalanceRowDto
+{
+    public string AccountCode { get; set; } = string.Empty;
+    public string AccountName { get; set; } = string.Empty;
+
+    /// <summary>asset(자산)·liability(부채)·equity(자본)·revenue(수익)·expense(비용).</summary>
+    public string AccountType { get; set; } = string.Empty;
+
+    /// <summary>기간 내 차변 합계.</summary>
+    public decimal DebitTotal { get; set; }
+
+    /// <summary>기간 내 대변 합계.</summary>
+    public decimal CreditTotal { get; set; }
+
+    /// <summary>
+    /// 잔액. <b>계정 성격에 따라 방향이 다르다</b> —
+    /// 자산·비용은 차변이 늘면 +, 부채·자본·수익은 대변이 늘면 +.
+    /// 서버가 계산해서 내려보낸다(화면이 회계 규칙을 다시 알 필요 없게).
+    /// </summary>
+    public decimal Balance { get; set; }
+}
+
+/// <summary>
+/// 🔴 20260827작4 — 시산표 전체(줄 + 검산 결과).
+/// </summary>
+public class TrialBalanceDto
+{
+    public List<TrialBalanceRowDto> Rows { get; set; } = new();
+
+    /// <summary>전체 차변 합계.</summary>
+    public decimal TotalDebit { get; set; }
+
+    /// <summary>전체 대변 합계.</summary>
+    public decimal TotalCredit { get; set; }
+
+    /// <summary>
+    /// 🔴 <b>검산 통과 여부.</b> 차변합 == 대변합 이면 true.
+    /// 화면이 직접 빼서 비교하지 않는다 — 서버가 판정한 값을 그대로 쓴다.
+    /// </summary>
+    public bool IsBalanced { get; set; }
+
+    /// <summary>
+    /// ⚠️ <b>아직 장부에 안 잡히는 업무가 있는지</b> 화면에 알려주기 위한 값.
+    /// 수금·지급·경비·급여는 현재 기표되지 않는다(20260827 설계 결재서 §4).
+    /// 이 숫자가 0 이 아니면 화면이 "아직 일부만 보입니다" 라고 말해준다.
+    /// ⇒ 담당자가 "고장났나" 하지 않게 하는 장치다.
+    /// </summary>
+    public int UnpostedCount { get; set; }
+
+    /// <summary>기표 안 되는 업무 이름들(화면 안내문용).</summary>
+    public List<string> UnpostedSources { get; set; } = new();
+}

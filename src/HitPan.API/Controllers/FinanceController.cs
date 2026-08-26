@@ -145,6 +145,24 @@ public class FinanceController : ControllerBase
 
     // ── 계정과목 ──
 
+    /// <summary>
+    /// 🔴 20260827작4 — <b>합계잔액시산표</b> (회계장부 1차).
+    /// </summary>
+    /// <remarks>
+    /// 사장님 오더: <i>"13개의 모든 돈 흐름이 모이는 회계장부"</i>.
+    /// ⚠️ 읽기 전용 — 원장을 쓰지 않는다(헌법 #3).
+    /// ⚠️ <c>tenant_id</c> 는 JWT 클레임에서만(헌법 #2) — 파라미터로 받지 않는다.
+    /// </remarks>
+    [HttpGet("trial-balance")]
+    [RequirePermission("ACCOUNTING", "view")]
+    public async Task<IActionResult> GetTrialBalance(
+        [FromQuery] DateTime? from, [FromQuery] DateTime? to, CancellationToken ct)
+    {
+        var tid = HttpContext.Items["TenantId"]?.ToString();
+        if (string.IsNullOrEmpty(tid)) return Forbid();
+        return Ok(await _svc.GetTrialBalanceAsync(tid, from, to, ct));
+    }
+
     [HttpGet("accounts")]
     [RequirePermission("ACCOUNTING", "view")]
     public async Task<IActionResult> GetAccounts(CancellationToken ct)

@@ -9,6 +9,8 @@
 @inject GridExportService GridExport
 @inject PartnerMasterService PartnersApi
 @inject ItemMasterService ItemsApi
+@* 🔴 20260827작3 — 전표별 매입장부가 쓰는 전표 목록 서비스 *@
+@inject DeliveryService DeliverySvc
 
 <PageTitle>매입현황</PageTitle>
 <MudText Typo="Typo.h6" Class="mb-3">매입현황</MudText>
@@ -17,6 +19,10 @@
     <div class="hitpan-filter-bar">
         <div class="hitpan-filter-field hitpan-filter-field--md">
             <MudSelect T="string" Value="_viewType" ValueChanged="OnViewTypeChangedAsync" Label="조회유형" Variant="Variant.Outlined" Margin="Margin.Dense">
+                @* 🔴 20260827작3 — 사장님 실측 반려: "전체 장부가 없네?? 그래서 확인이 안되네?"
+                     매입현황도 **집계뿐**이라 전표 한 건씩 보는 자리가 없었다.
+                     ⇒ 「전표별」을 맨 위에 둔다. 「반품전표」 칸이 있어 매입↔반품 대조가 여기서 된다. *@
+                <MudSelectItem Value="@("doc")">전표별 매입장부 (전체 목록)</MudSelectItem>
                 <MudSelectItem Value="@("monthly")">매입 일(월)계표</MudSelectItem>
                 <MudSelectItem Value="@("period")">기간별 매입현황</MudSelectItem>
                 <MudSelectItem Value="@("item")">품목별 매입현황</MudSelectItem>
@@ -63,6 +69,66 @@
 </MudPaper>
 
 @* 사장님 결재 2026-04-29: 7종 풀스택 → 가드 제거. price 는 단가변동(최저/최고/평균). *@
+@if (_viewType == "doc")
+{
+    @* 🔴 20260827작3 — 전표별 매입장부. 「반품전표」 칸으로 매입↔반품 연결이 여기서 읽힌다. *@
+    <MudPaper Elevation="0" Class="hitpan-card" Style="overflow:hidden">
+        <MudTable T="PurchaseReceiptListItem" Items="_docRows" Dense="true" Hover="true" Striped="true"
+                  FixedHeader="true" Height="calc(100vh - 280px)">
+            <HeaderContent>
+                <MudTh>일자</MudTh>
+                <MudTh>매입전표</MudTh>
+                <MudTh>업체</MudTh>
+                <MudTh>작성자</MudTh>
+                <MudTh>상태</MudTh>
+                <MudTh>반품전표</MudTh>
+                <MudTh Style="text-align:right">공급가액</MudTh>
+                <MudTh Style="text-align:right">부가세</MudTh>
+                <MudTh Style="text-align:right">합계</MudTh>
+            </HeaderContent>
+            <RowTemplate>
+                <MudTd>@context.ReceiptDate.ToString("yyyy-MM-dd")</MudTd>
+                <MudTd>@context.ReceiptNo</MudTd>
+                <MudTd>@context.PartnerName</MudTd>
+                <MudTd>@(context.CreatedByName ?? "")</MudTd>
+                <MudTd>
+                    @if (context.ReturnStatus == "confirmed")
+                    {
+                        <MudChip T="string" Size="Size.Small" Color="Color.Error" Variant="Variant.Filled">반품</MudChip>
+                    }
+                    else
+                    {
+                        <MudChip T="string" Size="Size.Small" Color="Color.Default" Variant="Variant.Outlined">@HitPan.Web.Helpers.StatusLabel.PurchaseReceipt(context.Status)</MudChip>
+                    }
+                </MudTd>
+                <MudTd>
+                    @if (!string.IsNullOrWhiteSpace(context.ReturnNos))
+                    {
+                        <MudText Typo="Typo.body2" Color="Color.Error">@context.ReturnNos</MudText>
+                    }
+                    else
+                    {
+                        <MudText Typo="Typo.caption" Color="Color.Secondary">-</MudText>
+                    }
+                </MudTd>
+                <MudTd Style="text-align:right">@context.SupplyAmount.ToString("N0")</MudTd>
+                <MudTd Style="text-align:right">@context.VatAmount.ToString("N0")</MudTd>
+                <MudTd Style="text-align:right;font-weight:500">@context.TotalAmount.ToString("N0")</MudTd>
+            </RowTemplate>
+            <FooterContent>
+                <MudTFootRow>
+                    <MudTh colspan="6" Style="text-align:right;font-weight:600">합계 @_docRows.Count.ToString("N0") 건</MudTh>
+                    <MudTh Style="text-align:right;font-weight:600">@_docRows.Sum(r => r.SupplyAmount).ToString("N0")</MudTh>
+                    <MudTh Style="text-align:right;font-weight:600">@_docRows.Sum(r => r.VatAmount).ToString("N0")</MudTh>
+                    <MudTh Style="text-align:right;font-weight:600">@_docRows.Sum(r => r.TotalAmount).ToString("N0")</MudTh>
+                </MudTFootRow>
+            </FooterContent>
+            <NoRecordsContent><MudText Class="pa-4" Style="color:var(--hitpan-text-faint)">조회된 매입이 없습니다.</MudText></NoRecordsContent>
+        </MudTable>
+    </MudPaper>
+}
+else
+{
 <MudPaper Elevation="0" Class="hitpan-card" Style="overflow:hidden">
     <MudTable T="ReportRow" Items="_reportData" Dense="true" Hover="true" Striped="true" FixedHeader="true" Height="calc(100vh - 280px)">
         <HeaderContent>
@@ -84,13 +150,18 @@
         <NoRecordsContent><MudText Class="pa-4" Style="color:var(--hitpan-text-faint)">조회된 매입이 없습니다.</MudText></NoRecordsContent>
     </MudTable>
 </MudPaper>
+}
 
 @code {
     private DateTime? _from = DateTime.Today.AddDays(-30);
     private DateTime? _to = DateTime.Today;
     private string _searchText = "";
-    private string _viewType = "period";
+    // 🔴 20260827작3 — 기본을 「전표별」로. 사장님이 확인하려던 것은 장부다.
+    private string _viewType = "doc";
     private List<ReportRow> _reportData = new();
+
+    /// <summary>🔴 20260827작3 — 전표별 매입장부 행.</summary>
+    private List<PurchaseReceiptListItem> _docRows = new();
 
     // 작7 (2026-06-26): 대시보드 '이번달매입' 카드 클릭 → 당월 기간 프리필터 수신. 없으면 기본(최근 30일).
     [Parameter, SupplyParameterFromQuery(Name = "from")] public string? FromQuery { get; set; }
@@ -121,6 +192,16 @@
 
     private async Task SearchAsync()
     {
+        // 🔴 20260827작3 — 「전표별」은 집계가 아니라 전표 목록 API 를 부른다.
+        //   ⚠️ includeReturns: true — 이 장부의 목적이 **매입↔반품 대조**다.
+        //     날짜창 밖 매입이라도 그 기간에 반품이 일어났으면 보여야 대조가 된다(작1 §8-B).
+        if (_viewType == "doc")
+        {
+            _docRows = await DeliverySvc.GetPurchaseReceiptListAsync(
+                _from, _to, null, default, includeReturns: true);
+            StateHasChanged();
+            return;
+        }
 
         var qs = new List<string>();
         qs.Add($"view={_viewType}");

@@ -288,6 +288,10 @@
 
     @* 10. 회계관리 — 수금지급 + 경리세무 통합 *@
     <MudNavGroup Title="회계관리" Icon="@Icons.Material.Filled.AccountBalance" Expanded="false">
+        @* 🔴 20260827작4 — 회계장부를 **맨 위**에 둔다.
+             사장님: "13개의 모든 돈 흐름이 모이는 회계장부가 필요한데, 회계에선 이게 핵심"
+             핵심이 목록 중간에 있으면 핵심으로 안 읽힌다. *@
+        <MudNavLink Href="/accounting/ledger" Icon="@Icons.Material.Filled.MenuBook">회계장부</MudNavLink>
         <MudNavLink Href="/collections" Icon="@Icons.Material.Filled.AttachMoney">수금</MudNavLink>
         <MudNavLink Href="/payments" Icon="@Icons.Material.Filled.Money">지급</MudNavLink>
         <MudNavLink Href="/accounting/cashbook" Icon="@Icons.Material.Filled.AccountBalanceWallet">현금출납장</MudNavLink>

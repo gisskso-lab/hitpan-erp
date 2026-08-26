@@ -392,6 +392,16 @@ public sealed class PurchaseReceiptListItem
     /// </remarks>
     public string? ReturnStatus { get; set; }
 
+    /// <summary>
+    /// 🔴 20260827작3 (사장님 실측 반려) — 이 매입이 나간 <b>반품전표 번호</b>(쉼표 구분).
+    /// </summary>
+    /// <remarks>
+    /// 종전엔 <see cref="ReturnStatus"/> 로 「반품」 <b>글자만</b> 보여줘서, 담당자가
+    /// <b>어느 반품전표인지</b> 알 수 없어 반품목록에서 눈으로 찾아야 했다.
+    /// ⚠️ 부분반품을 나눠서 하면 <b>둘 이상</b>이라 전부 온다.
+    /// </remarks>
+    public string? ReturnNos { get; set; }
+
     /// <summary>전표를 작성한 사원 이름 (20260825작16).
     /// 서버가 employees.user_id = created_by 조인으로 채운다.</summary>
     public string? CreatedByName { get; set; }
@@ -728,6 +738,16 @@ public sealed class PurchaseReturnListItem
     public decimal VatAmount { get; set; }
     public string Status { get; set; } = string.Empty;
     public string? Memo { get; set; }
+
+    /// <summary>
+    /// 🔴 20260827작3 — 이 반품이 나온 <b>원 매입전표</b>. 서버 <c>PurchaseReturnListDto</c> 와 짝.
+    /// ⚠️ NULL 가능(매입명세서 없이 직접 작성한 반품) ⇒ 화면은 「직접작성」으로 표기한다.
+    /// </summary>
+    public string? ReceiptId { get; set; }
+
+    /// <summary>원 매입전표 번호(사람이 읽는 값).</summary>
+    public string? ReceiptNo { get; set; }
+
     public bool IsChecked { get; set; }
 }
 

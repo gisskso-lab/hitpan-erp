@@ -607,6 +607,18 @@ public class PurchaseService : IPurchaseService
                                    AND r.tenant_id  = pr.tenant_id
                                    AND r.is_deleted = 0
                                    AND r.status <> 'canceled') AS ReturnStatus,
+                               -- 🔴 20260827작3 (사장님 실측 반려) — 「어느 반품전표로 나갔는가」.
+                               --   종전엔 「반품」 글자만 보여줘서, 담당자가 반품목록에서 눈으로
+                               --   찾아 맞춰야 했다. 그게 정합성이 안 맞아 보이던 자리다.
+                               --   ⚠️ 부분반품을 나눠서 하면 반품전표가 둘 이상이다 ⇒ 전부 보여준다.
+                               --     하나만 보여주면 나머지가 숨는다(상관 서브쿼리라 행은 안 늘어난다).
+                               (SELECT GROUP_CONCAT(r2.return_no ORDER BY r2.return_date, r2.return_no
+                                                    SEPARATOR ', ')
+                                  FROM purchase_returns r2
+                                 WHERE r2.receipt_id = pr.receipt_id
+                                   AND r2.tenant_id  = pr.tenant_id
+                                   AND r2.is_deleted = 0
+                                   AND r2.status <> 'canceled') AS ReturnNos,
                                ec.emp_name AS CreatedByName
                            FROM purchase_receipts pr
                            LEFT JOIN employees ec
@@ -817,8 +829,17 @@ public class PurchaseService : IPurchaseService
                    r.partner_id AS PartnerId, COALESCE(p.partner_name,'') AS PartnerName,
                    r.total_amount AS TotalAmount, r.vat_amount AS VatAmount,
                    r.status AS Status, r.memo AS Memo,
-                   ec.emp_name AS CreatedByName
+                   ec.emp_name AS CreatedByName,
+                   -- 🔴 20260827작3 (사장님 실측 반려) — 「이 반품이 어느 매입에서 왔는가」.
+                   --   receipt_id 는 진작 DB 에 있었는데 SELECT 를 안 해서 화면에 표기할 값이
+                   --   아예 안 내려왔다. 담당자는 반품목록만 보고 어느 매입 건인지 알 수 없었다.
+                   --   ⚠️ NULL 가능 — 매입명세서 없이 직접 작성한 반품. 화면이 「직접작성」으로 표기한다.
+                   r.receipt_id AS ReceiptId,
+                   pr.receipt_no AS ReceiptNo
             FROM purchase_returns r
+            -- ⚠️ LEFT JOIN 이어야 한다. INNER 로 하면 직접작성 반품이 목록에서 통째로 사라진다.
+            LEFT JOIN purchase_receipts pr
+                   ON pr.receipt_id = r.receipt_id AND pr.tenant_id = r.tenant_id
             -- 20260825작18 (헌법 #2): partners 조인에 tenant_id 가 빠져 있었다. LEFT JOIN 이라
             --   행이 늘진 않지만, 다른 테넌트에 같은 partner_id 가 있으면 거래처명이 교차 노출된다.
             --   ReportService 4종은 진작 막고 있었는데 이 목록만 뚫려 있었다.
