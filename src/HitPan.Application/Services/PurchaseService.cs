@@ -585,6 +585,27 @@ public class PurchaseService : IPurchaseService
                                pr.total_amount AS SupplyAmount,
                                pr.status AS Status,
                                pr.memo AS Memo,
+                               -- 🔴 20260826작5 — 사장님 지시: "매입명세서 목록에 반품처리된 전표는
+                               --   상태처리를 「반품」이라고 표기할것. 전표에 전부 매입확정이라고만 나옴"
+                               --
+                               --   반품확정은 purchase_receipts 를 **한 줄도 UPDATE 하지 않는다**
+                               --   (반품 전후가 바이트 동일 — 20260825작16 에서 예고된 자리).
+                               --   그래서 저장된 값이 없다. purchase_returns 를 **되짚어** 채운다.
+                               --
+                               -- ⚠️ JOIN 이 아니라 상관 서브쿼리다. JOIN 하면 반품서가 둘 이상일 때
+                               --   매입명세서 행이 **늘어난다**(목록에 같은 전표가 두 번 뜬다).
+                               --   지금은 중복가드(작18 W5-2)가 살아있는 반품을 하나로 막지만,
+                               --   그 가드가 바뀌어도 목록이 깨지지 않게 여기서부터 막는다.
+                               --
+                               -- ⚠️ 취소·삭제분은 뺀다 — 되돌린 반품을 「반품」으로 계속 보이면
+                               --   담당자가 이미 취소한 건을 살아있는 것으로 오인한다.
+                               --   confirmed 가 있으면 confirmed 를 우선한다(MIN: 'confirmed' < 'draft').
+                               (SELECT MIN(r.status)
+                                  FROM purchase_returns r
+                                 WHERE r.receipt_id = pr.receipt_id
+                                   AND r.tenant_id  = pr.tenant_id
+                                   AND r.is_deleted = 0
+                                   AND r.status <> 'canceled') AS ReturnStatus,
                                ec.emp_name AS CreatedByName
                            FROM purchase_receipts pr
                            LEFT JOIN employees ec

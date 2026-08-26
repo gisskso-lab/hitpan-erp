@@ -381,6 +381,17 @@ public sealed class PurchaseReceiptListItem
     public decimal SupplyAmount { get; set; }
     public string Status { get; set; } = string.Empty;
     public string? Memo { get; set; }
+
+    /// <summary>
+    /// 반품 상태 (20260826작5) — <c>null</c>=반품 없음 · <c>"draft"</c>=반품 작성중 · <c>"confirmed"</c>=반품 확정.
+    /// </summary>
+    /// <remarks>
+    /// 🔴 사장님 지시(2026-08-26): <i>"반품처리된 전표는 상태처리를 「반품」이라고 표기할것"</i>.
+    /// ⚠️ 매입확정과 <b>다른 축</b>이라 <c>Status</c> 를 덮지 않고 별도 값으로 온다 —
+    /// 반품했다고 매입이 취소된 게 아니다.
+    /// </remarks>
+    public string? ReturnStatus { get; set; }
+
     /// <summary>전표를 작성한 사원 이름 (20260825작16).
     /// 서버가 employees.user_id = created_by 조인으로 채운다.</summary>
     public string? CreatedByName { get; set; }
