@@ -30,6 +30,28 @@ namespace HitPan.Application.Services;
 /// </remarks>
 public sealed class PayrollService : IPayrollService
 {
+    /// <summary>
+    /// 급여명세서 결재·PDF 문서타입 (20260826작6).
+    /// </summary>
+    /// <remarks>
+    /// 🔴 <b>리터럴을 여기저기 적지 않는다.</b> <c>PdfRenderService.PayslipDocType</c> 하나를 가리킨다 —
+    /// 같은 뜻을 서로 다른 자리에 문자열로 적어두면 한쪽만 고쳐져 조용히 갈린다
+    /// (8/25 창고분리가 그 병으로 통째로 죽었다).
+    /// </remarks>
+    private const string PayslipDocType = PdfRenderService.PayslipDocType;
+
+    /// <summary>
+    /// 결재 목록에 보일 짧은 참조번호. <b>길이를 가정하지 않는다.</b>
+    /// </summary>
+    /// <remarks>
+    /// ⚠️ 종전엔 <c>slipId[..8]</c> 이었는데 <b>id 가 8자보다 짧으면 그 자리에서 죽었다</b>
+    /// (실측에서 잡았다 — <c>ArgumentOutOfRangeException</c>).
+    /// 지금은 GUID 라 8자를 넘지만, <b>남의 id 길이를 가정한 코드는 언젠가 터진다.</b>
+    /// 더구나 이 호출은 <c>catch</c> 안에서도 쓰여서, 예외 메시지를 만들다 **또 죽는** 자리였다.
+    /// </remarks>
+    private static string ShortRef(string id) =>
+        string.IsNullOrEmpty(id) ? "-" : (id.Length <= 8 ? id : id[..8]);
+
     private readonly IDbConnection _db;
     private readonly IAuditService? _audit;
 
@@ -437,6 +459,47 @@ public sealed class PayrollService : IPayrollService
         if (_audit is not null)
         {
             await _audit.LogAsync("confirm", "payroll_slip", slipId, ct: ct).ConfigureAwait(false);
+        }
+
+        // 🔴 20260826작6 — 확정하면 결재를 올린다. 사장님: "급여명세는 대표이사 결재로 넘길거임."
+        //
+        //   ⚠️ **금액에는 손대지 않는다.** 사장님(2026-08-26): "결재승인은 급여표에 써지는 내용을
+        //     건들라는게 아니고, **이미 써진 급여표의 동작만 표시**하면 되는거."
+        //     여기서 하는 일은 이미 손으로 넣은 명세를 결재로 **넘기는 것**뿐이다 —
+        //     수동입력 원칙(2026-08-21)과 기존 게이트(결재승인은_급여표를_건드리지_않는다)에 어긋나지 않는다.
+        //
+        //   ⚠️ 결재선이 꺼져 있으면 조용히 통과한다(TryCreateApprovalAsync 안의 IsEnabled 판정).
+        //     결재를 안 쓰는 회사도 급여는 확정할 수 있어야 한다(헌법 #20 — 흐름을 끊지 않는다).
+        //
+        //   ⚠️ 트리거 실패가 확정을 되돌리지 않는다 — 확정은 이미 커밋됐다. 초과근무·경비와 같은 축이다.
+        //     다만 **삼키지 않는다**(헌법 #15) — 실패를 남겨야 왜 결재함에 안 뜨는지 알 수 있다.
+        try
+        {
+            var info = await _db.QueryFirstOrDefaultAsync<(string EmpName, int PayYear, int PayMonth, decimal NetPayment, string EmployeeId)>(
+                new CommandDefinition(
+                    """
+                    SELECT COALESCE(e.emp_name, '') AS EmpName,
+                           s.pay_year    AS PayYear,
+                           s.pay_month   AS PayMonth,
+                           s.net_payment AS NetPayment,
+                           s.employee_id AS EmployeeId
+                    FROM payroll_slips s
+                    LEFT JOIN employees e ON e.employee_id = s.employee_id AND e.tenant_id = s.tenant_id
+                    WHERE s.tenant_id = @TenantId AND s.slip_id = @SlipId
+                    """,
+                    new { TenantId = tenantId, SlipId = slipId }, cancellationToken: ct)).ConfigureAwait(false);
+
+            await ApprovalTriggerHelper.TryCreateApprovalAsync(
+                _db, docType: PayslipDocType, refId: slipId, refNo: ShortRef(slipId),
+                title: $"급여명세서: {info.PayYear}년 {info.PayMonth}월 {info.EmpName}",
+                amount: info.NetPayment,
+                tenantId: tenantId, requesterId: actorId, requesterName: string.Empty,
+                ct: ct).ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Trace.TraceWarning(
+                $"[ApprovalTrigger] 급여명세서 {ShortRef(slipId)} 결재 트리거 실패: {ex}");
         }
     }
 
