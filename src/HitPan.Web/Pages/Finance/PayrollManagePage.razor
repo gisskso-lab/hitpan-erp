@@ -1,14 +1,16 @@
-@page "/hr/payroll"
-@namespace HitPan.Web.Pages.HrUi
+@page "/accounting/payroll"
+@namespace HitPan.Web.Pages.FinanceUi
 @attribute [Authorize]
 @using HitPan.Web.Models
 @using HitPan.Web.Services
 @inject PayrollService PayrollSvc
 @inject ISnackbar Snackbar
 @inject IDialogService DialogService
+@inject NavigationManager Nav
+@inject IJSRuntime JS
 
-<PageTitle>급여 관리</PageTitle>
-<PageHeader Title="급여 관리" Subtitle="금액을 직접 넣습니다. 계산하지 않습니다." />
+<PageTitle>급여 관리 — 회계</PageTitle>
+<PageHeader Title="급여 관리" Subtitle="명세서를 만들고, 대표이사 결재를 거쳐 직원에게 보냅니다. 금액은 직접 넣습니다." />
 
 @* 🔴 사장님이 정한 방식(2026-08-13):
      "급여는 자동계산하지 말고 수동으로 int값 직접 받아서 입력하는게 가장 깔끔함"
@@ -39,6 +41,15 @@
             <MudButton Variant="Variant.Filled" Color="Color.Secondary"
                        StartIcon="@Icons.Material.Filled.Add"
                        Disabled="@_loading" OnClick="@(() => OpenEditorAsync(null))">급여 등록</MudButton>
+
+            @* 🔴 20260826작6 W6 — 누르면 ★확인 화면★ 이 열린다. 여기서 바로 나가지 않는다.
+                 되돌릴 수 없는 발송이라 누가 받고 누가 못 받는지 보고 나서 확정한다.
+
+                 ⚠️ 결재 승인 팝업(W3)에서 「아니오」 를 눌러도 여기로 언제든 올 수 있다 —
+                    거절이 막다른 길이 되면 안 된다(헌법 #20). *@
+            <MudButton Variant="Variant.Outlined" Color="Color.Primary"
+                       StartIcon="@Icons.Material.Filled.Mail"
+                       Disabled="@_loading" OnClick="OpenSendAsync">명세서 메일발송</MudButton>
         }
 
         <MudSpacer />
@@ -152,7 +163,18 @@ else
                 }
                 else
                 {
-                    <MudText Typo="Typo.caption" Color="Color.Secondary">본인 명세</MudText>
+                    @* 🔴 여기는 ★회계★ 화면이다 — 경리가 전 직원 명세서를 다룬다.
+                         직원 본인 조회는 그룹웨어 /hr/payroll 이 따로 한다(그 화면은 본인 것만 나온다).
+
+                       ⚠️ 진짜 관문은 서버다. 이 화면이 전 직원을 보는 근거는 서버가 급여 권한을
+                          확인해 범위를 넓혀 주기 때문이지, 화면이 정하는 것이 아니다.
+
+                       ⚠️ /api/email/preview-pdf 를 쓰면 안 된다. 거기엔 사원 확인이 없어
+                          남의 명세서가 나간다(20260826작6 W5 에서 실측으로 확인하고 봉인). *@
+                    <MudButton Size="Size.Small" Variant="Variant.Text" Color="Color.Primary"
+                               StartIcon="@Icons.Material.Filled.Download"
+                               Disabled="@_downloading"
+                               OnClick="@(() => DownloadSlipAsync(context))">명세서 받기</MudButton>
                 }
             </MudTd>
         </RowTemplate>
@@ -264,6 +286,141 @@ else
     </DialogActions>
 </MudDialog>
 
+@* ───────────── 명세서 메일발송 (20260826작6 W6) ─────────────
+
+   🔴 되돌릴 수 없다. 잘못 나가면 전 직원에게 남의 연봉이 간다 — 회수 불가다.
+      그래서 ★보고 나서★ 누른다(사장님 반자동 원칙): 누가 받고 누가 못 받는지,
+      수신 주소가 무엇인지 눈으로 확인한 뒤에 확정한다.
+
+   ⚠️ 이 화면은 인라인 <MudDialog> 다. AuthorizeView 를 쓰지 않는다 —
+      다이얼로그는 인증 캐스케이드 밖이라 화면이 통째로 죽는다(20260825작11). *@
+<MudDialog @bind-Visible="_sendOpen" Options="_dialogOptions">
+    <TitleContent>
+        <MudText Typo="Typo.h6">급여명세서 메일발송 — @_year 년 @_month 월분</MudText>
+    </TitleContent>
+    <DialogContent>
+        <div style="display:flex;flex-direction:column;gap:12px;min-width:640px">
+
+            @if (_sendPreview is null)
+            {
+                <MudAlert Severity="Severity.Error" Dense="true">
+                    발송 명단을 불러오지 못했습니다. 잠시 후 다시 시도해 주세요.
+                </MudAlert>
+            }
+            else if (_sendResult is not null)
+            {
+                @* ── 발송 뒤 결과 ── *@
+                <MudAlert Severity="@(_sendResult.FailedCount == 0 ? Severity.Success : Severity.Warning)" Dense="true">
+                    성공 <b>@_sendResult.SuccessCount</b>건
+                    @if (_sendResult.FailedCount > 0)
+                    {
+                        <text> · 실패 <b>@_sendResult.FailedCount</b>건</text>
+                    }
+                </MudAlert>
+
+                <MudSimpleTable Dense="true" Striped="true" Style="max-height:340px;overflow:auto">
+                    <thead>
+                        <tr><th>직원</th><th>받는 주소</th><th>결과</th></tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var r in _sendResult.Items)
+                        {
+                            <tr>
+                                <td>@r.EmployeeName</td>
+                                <td>@(r.RecipientEmail ?? "-")</td>
+                                <td>
+                                    @if (r.Success)
+                                    {
+                                        <MudChip T="string" Size="Size.Small" Color="Color.Success" Variant="Variant.Filled">발송</MudChip>
+                                    }
+                                    else
+                                    {
+                                        @* 🔴 실패 사유를 그대로 보여준다. "실패 2건" 만 알려주면
+                                             경리는 무엇을 고쳐야 할지 모른다. *@
+                                        <MudChip T="string" Size="Size.Small" Color="Color.Error" Variant="Variant.Outlined">@r.Error</MudChip>
+                                    }
+                                </td>
+                            </tr>
+                        }
+                    </tbody>
+                </MudSimpleTable>
+            }
+            else
+            {
+                @* ── 발송 전 확인 ── *@
+                <MudAlert Severity="Severity.Info" Dense="true">
+                    <b>@_sendPreview.Targets.Count</b>명 중
+                    <b>@_sendPreview.SendableCount</b>명 발송 가능
+                    @if (_sendPreview.BlockedCount > 0)
+                    {
+                        <text> · <b>@_sendPreview.BlockedCount</b>명 발송 불가</text>
+                    }
+                </MudAlert>
+
+                @if (!_sendPreview.ApprovalRequired)
+                {
+                    <MudAlert Severity="Severity.Normal" Dense="true">
+                        결재를 쓰지 않는 설정입니다. 확정된 명세서가 바로 발송됩니다.
+                    </MudAlert>
+                }
+
+                <MudSimpleTable Dense="true" Striped="true" Style="max-height:340px;overflow:auto">
+                    <thead>
+                        <tr><th>직원</th><th>부서</th><th>받는 주소</th><th>상태</th></tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var t in _sendPreview.Targets)
+                        {
+                            <tr>
+                                <td>@t.EmployeeName</td>
+                                <td>@(t.DeptName ?? "-")</td>
+                                @* 🔴 주소를 그대로 보여준다 — 오입력이면 남의 메일함에 그 직원 연봉이 간다. *@
+                                <td>@(t.RecipientEmail ?? "-")</td>
+                                <td>
+                                    @if (t.CanSend)
+                                    {
+                                        <MudChip T="string" Size="Size.Small" Color="Color.Success" Variant="Variant.Filled">발송</MudChip>
+                                    }
+                                    else
+                                    {
+                                        <MudChip T="string" Size="Size.Small" Color="Color.Default" Variant="Variant.Outlined">@t.BlockReasonLabel</MudChip>
+                                    }
+                                </td>
+                            </tr>
+                        }
+                    </tbody>
+                </MudSimpleTable>
+
+                <MudText Typo="Typo.caption" Color="Color.Secondary">
+                    메일 본문에는 금액을 담지 않습니다. 명세서는 첨부파일로만 갑니다.
+                </MudText>
+            }
+        </div>
+    </DialogContent>
+    <DialogActions>
+        @if (_sendResult is not null && _sendResult.FailedCount > 0)
+        {
+            @* 🔴 실패분만 다시 보낸다. 전부 다시 보내면 이미 받은 사람이 두 번 받는다. *@
+            <MudButton Color="Color.Warning" Variant="Variant.Filled"
+                       Disabled="@_sending" OnClick="ResendFailedAsync">
+                실패분만 재발송 (@_sendResult.FailedCount)
+            </MudButton>
+        }
+
+        <MudSpacer />
+        <MudButton OnClick="CloseSendAsync">닫기</MudButton>
+
+        @if (_sendResult is null && _sendPreview is { SendableCount: > 0 })
+        {
+            <MudButton Variant="Variant.Filled" Color="Color.Primary"
+                       StartIcon="@Icons.Material.Filled.Send"
+                       Disabled="@_sending" OnClick="ConfirmSendAsync">
+                @_sendPreview.SendableCount 명에게 발송
+            </MudButton>
+        }
+    </DialogActions>
+</MudDialog>
+
 @code {
     private List<PayrollSlipModel>? _slips;
     private List<PayrollContextModel> _context = new();
@@ -301,7 +458,43 @@ else
         CloseOnEscapeKey = true
     };
 
-    protected override async Task OnInitializedAsync() => await LoadAsync();
+    /// <summary>결재 승인 팝업에서 넘어왔는가 — <c>?send=1</c>. 20260826작6 W3.</summary>
+    [Parameter, SupplyParameterFromQuery(Name = "send")] public string? SendQuery { get; set; }
+
+    /// <summary>발송 대상 명세서 id — <c>?slip=</c>. 이 명세서의 귀속 연·월로 화면을 연다.</summary>
+    [Parameter, SupplyParameterFromQuery(Name = "slip")] public string? SlipQuery { get; set; }
+
+    protected override async Task OnInitializedAsync()
+    {
+        // 🔴 승인된 명세서의 귀속 연·월로 맞춰서 연다.
+        //    맞추지 않으면 빈 화면이 열린다 — 이 화면 기본값은 ★이번 달★ 인데 승인된 명세서는
+        //    ★지난달분★ 인 경우가 흔하다(8월에 7월분 급여를 승인). 그대로 열면 "발송하러 왔는데
+        //    명세가 없습니다" 가 되어 사장님이 누른 Y 가 막다른 길이 된다(헌법 #20).
+        //
+        // ⚠️ 명세서를 못 읽어도 ★화면은 연다★. 연·월이 기본값으로 남을 뿐이고 직접 골라
+        //    발송할 수 있다. 여기서 막으면 그게 또 막다른 길이다.
+        if (!string.IsNullOrWhiteSpace(SlipQuery))
+        {
+            var slip = await PayrollSvc.GetSlipAsync(SlipQuery);
+            if (slip is not null && slip.PayYear > 0 && slip.PayMonth is >= 1 and <= 12)
+            {
+                _year = slip.PayYear;
+                _month = slip.PayMonth;
+            }
+        }
+
+        // ⚠️ send=1 은 ★발송하라★ 가 아니라 ★발송 확인 화면을 열라★ 는 뜻이다.
+        //    실제 발송은 W4·W6 의 확인 화면에서 사람이 눈으로 보고 확정한다(반자동 원칙).
+        _sendRequested = string.Equals(SendQuery, "1", StringComparison.Ordinal);
+
+        await LoadAsync();
+    }
+
+    /// <summary>
+    /// 결재 승인 팝업에서 「예」 로 넘어왔는가. W6 의 발송 확인 화면이 이 값을 보고 열린다.
+    /// </summary>
+    /// <remarks>🔴 <c>true</c> 라도 <b>발송하지 않는다</b>. 확인 화면을 여는 것뿐이다.</remarks>
+    private bool _sendRequested;
 
     private async Task LoadAsync()
     {
@@ -496,4 +689,167 @@ else
         "Primary" => Color.Primary,
         _ => Color.Default,
     };
+
+    // ═══════════════════════════════════════════════════════════════
+    //  급여명세서 메일발송 — 20260826작6 W6
+    // ═══════════════════════════════════════════════════════════════
+
+    private bool _sendOpen;
+    private bool _sending;
+    private bool _downloading;
+    private PayslipSendPreviewModel? _sendPreview;
+    private SendPayslipMailResultModel? _sendResult;
+
+    /// <summary>
+    /// 본인 급여명세서 PDF 를 받는다 (⑥결재).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// 🔴 <b><c>&lt;a href&gt;</c> 로 걸면 401 이 온다</b> — 브라우저가 직접 부르면 로그인
+    /// 토큰이 안 실린다. 인증된 <c>HttpClient</c> 로 바이트를 받아 브라우저에 넘긴다.
+    /// </para>
+    /// <para>
+    /// ⚠️ 결재 전이면 서버가 <b>사유와 함께</b> 거절한다. 그 사유를 그대로 보여준다 —
+    /// <i>"받지 못했습니다"</i> 로 뭉개면 직원은 결재 대기인지 권한 문제인지 모른다.
+    /// </para>
+    /// </remarks>
+    private async Task DownloadSlipAsync(PayrollSlipModel item)
+    {
+        _downloading = true;
+        StateHasChanged();
+        try
+        {
+            var (bytes, error) = await PayrollSvc.DownloadSlipPdfAsync(item.SlipId);
+
+            if (bytes is null || bytes.Length == 0)
+            {
+                Snackbar.Add(error ?? "명세서를 받지 못했습니다.", Severity.Warning);
+                return;
+            }
+
+            var fileName = $"급여명세서_{item.EmployeeName}_{item.PayYear}-{item.PayMonth:00}.pdf";
+            await JS.InvokeVoidAsync("downloadFileFromBytes",
+                fileName, "application/pdf", Convert.ToBase64String(bytes));
+        }
+        finally
+        {
+            _downloading = false;
+        }
+    }
+
+    /// <summary>
+    /// 발송 확인 화면을 연다. 🔴 <b>여는 것뿐이고 보내지 않는다.</b>
+    /// </summary>
+    /// <remarks>
+    /// 되돌릴 수 없는 발송이라 <b>단추 한 번으로 나가게 하지 않는다</b>(사장님 반자동 원칙).
+    /// 누가 받고 누가 못 받는지, 수신 주소가 무엇인지 <b>보고 나서</b> 확정한다.
+    /// </remarks>
+    private async Task OpenSendAsync()
+    {
+        _sendResult = null;
+        _sending = false;
+        _sendOpen = true;
+        StateHasChanged();
+
+        // 🔴 실패는 null 로 온다 — 빈 목록이 아니다. 화면이 사유를 보여준다.
+        _sendPreview = await PayrollSvc.GetSendPreviewAsync(_year, _month);
+        StateHasChanged();
+    }
+
+    /// <summary>발송 확정. 여기서만 실제로 나간다.</summary>
+    private async Task ConfirmSendAsync()
+    {
+        if (_sendPreview is null) return;
+
+        var ids = _sendPreview.Targets.Where(t => t.CanSend).Select(t => t.SlipId).ToList();
+        if (ids.Count == 0) return;
+
+        await SendAsync(ids);
+    }
+
+    /// <summary>
+    /// 실패분만 다시 보낸다.
+    /// </summary>
+    /// <remarks>
+    /// 🔴 <b>전부 다시 보내면 이미 받은 사람이 두 번 받는다.</b> 실패한 것만 넘긴다 —
+    /// 서버가 같은 API 로 받으므로 재발송용 통로가 따로 없다.
+    /// </remarks>
+    private async Task ResendFailedAsync()
+    {
+        var ids = _sendResult?.FailedSlipIds ?? new List<string>();
+        if (ids.Count == 0) return;
+
+        await SendAsync(ids);
+    }
+
+    /// <summary>실제 발송. ⚠️ 서버가 각 건을 <b>다시 판정</b>한다 — 여기 목록이 그대로 나가지 않는다.</summary>
+    private async Task SendAsync(List<string> slipIds)
+    {
+        _sending = true;
+        StateHasChanged();
+        try
+        {
+            var result = await PayrollSvc.SendMailAsync(_year, _month, slipIds);
+
+            if (result is null)
+            {
+                Snackbar.Add("발송 요청을 처리하지 못했습니다.", Severity.Error);
+                return;
+            }
+
+            _sendResult = result;
+
+            // 🔴 뭉뚱그린 "발송 완료" 를 띄우지 않는다. 실패가 있으면 그렇게 말한다.
+            Snackbar.Add(
+                result.FailedCount == 0
+                    ? $"{result.SuccessCount}명에게 발송했습니다."
+                    : $"성공 {result.SuccessCount}건 · 실패 {result.FailedCount}건",
+                result.FailedCount == 0 ? Severity.Success : Severity.Warning);
+        }
+        finally
+        {
+            _sending = false;
+        }
+    }
+
+    /// <summary>
+    /// 확인 화면을 닫는다.
+    /// </summary>
+    /// <remarks>
+    /// ⚠️ 결재 승인 팝업(W3)에서 넘어온 경우 주소에 <c>?send=1</c> 이 남아 있다.
+    /// 지우지 않으면 <b>새로고침할 때마다 확인 화면이 다시 뜬다</b>.
+    /// </remarks>
+    private async Task CloseSendAsync()
+    {
+        _sendOpen = false;
+
+        if (_sendRequested)
+        {
+            _sendRequested = false;
+            Nav.NavigateTo("/hr/payroll", replace: true);
+        }
+
+        await Task.CompletedTask;
+    }
+
+    /// <summary>
+    /// 결재 승인 팝업(W3)에서 「예」 로 넘어왔으면 확인 화면을 <b>자동으로 연다</b>.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// 🔴 <b>이 자리가 W3 와 W6 를 잇는다.</b> 여기서 안 받으면 사장님이 「예」 를 눌러도
+    /// 급여 화면만 열리고 <b>아무 일도 안 일어난다</b> — Y 가 헛걸음이 된다(헌법 #20).
+    /// </para>
+    /// <para>
+    /// ⚠️ <c>OnAfterRenderAsync</c> 에서 연다 — 첫 렌더 전에 열면 목록이 아직 없어
+    /// <b>빈 표</b>가 보인다. 그리고 <b>한 번만</b> 연다(<c>firstRender</c>).
+    /// </para>
+    /// </remarks>
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender || !_sendRequested || _sendOpen) return;
+
+        // 🔴 발송이 아니다 — 확인 화면을 여는 것뿐이다.
+        await OpenSendAsync();
+    }
 }

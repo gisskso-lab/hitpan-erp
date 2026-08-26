@@ -21,7 +21,7 @@ namespace HitPan.Tests.Integrity;
 public sealed class PayslipSendScreenGateTests
 {
     private static string Page() =>
-        ReadSource("src", "HitPan.Web", "Pages", "HR", "PayrollPage.razor");
+        ReadSource("src", "HitPan.Web", "Pages", "Finance", "PayrollManagePage.razor");
 
     // ══════════════════════════════════════════════════════════════════
     //  ① 단추 한 번에 안 나간다
