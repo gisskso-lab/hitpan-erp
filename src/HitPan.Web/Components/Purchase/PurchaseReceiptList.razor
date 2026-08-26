@@ -88,6 +88,21 @@
                 {
                     <MudChip T="string" Size="Size.Small" Color="Color.Default" Variant="Variant.Outlined">@HitPan.Web.Helpers.StatusLabel.PurchaseReceipt(context.Status)</MudChip>
                 }
+                @* 🔴 20260826작5 — 사장님 지시: "반품처리된 전표는 상태처리를 「반품」이라고 표기할것.
+                     전표에 전부 매입확정이라고만 나옴".
+
+                     ⚠️ 매입확정 칩을 **지우지 않고 옆에 붙인다.** 반품했다고 매입이 취소된 게 아니다 —
+                        샀다가 돌려준 것이지 안 산 게 아니라서, 두 사실이 다 남아야 장부와 맞는다.
+                     ⚠️ 작성중(draft)과 확정을 구분한다. "반품" 하나로 뭉치면 아직 확정 안 한 반품이
+                        이미 처리된 것처럼 보여 담당자가 확정을 건너뛴다. *@
+                @if (context.ReturnStatus == "confirmed")
+                {
+                    <MudChip T="string" Size="Size.Small" Color="Color.Error" Variant="Variant.Filled" Class="ml-1">반품</MudChip>
+                }
+                else if (context.ReturnStatus == "draft")
+                {
+                    <MudChip T="string" Size="Size.Small" Color="Color.Warning" Variant="Variant.Outlined" Class="ml-1">반품작성중</MudChip>
+                }
             </MudTd>
             <MudTd Class="text-right" @ondblclick="@(() => SelectRowAsync(context))" style="cursor:pointer">@context.TotalAmount.ToString("N0")</MudTd>
             <MudTd>
