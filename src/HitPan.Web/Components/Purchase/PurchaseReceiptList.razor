@@ -25,6 +25,15 @@
                 <MudSelectItem T="string" Value="@("cancelled")">취소</MudSelectItem>
             </MudSelect>
 
+            @* 🔴 20260827작1 §8-B (사장님 결재) — 「반품포함」.
+                 매입목록은 **매입일**, 반품목록은 **반품일** 로 각각 날짜를 자른다.
+                 7월 매입을 8월에 반품하면 매입 행이 창 밖이라 「반품」 표기가 나타날 자리가 없어,
+                 두 화면 숫자가 어긋나 보인다.
+                 이걸 켜면 **기간 안에 반품이 일어난 매입**을 매입일이 창 밖이어도 함께 보여준다.
+                 ⚠️ 기본은 꺼짐 — "최근 30일" 이라는 화면 약속을 담당자가 켤 때만 넓힌다. *@
+            <MudCheckBox T="bool" Value="_includeReturns" ValueChanged="OnIncludeReturnsChangedAsync"
+                         Dense="true" Color="Color.Primary">반품포함</MudCheckBox>
+
             @* LoadAsync 가 CancellationToken 을 받으면 메서드 그룹을 OnClick 에 직접 넘길 수 없다. *@
             <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="@(() => LoadAsync())">조회</MudButton>
             <MudButton Variant="Variant.Outlined" Color="Color.Success" OnClick="BulkConfirmAsync" Disabled="@(!_selectedRows.Any())">

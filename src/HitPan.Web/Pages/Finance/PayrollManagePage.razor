@@ -826,7 +826,10 @@ else
         if (_sendRequested)
         {
             _sendRequested = false;
-            Nav.NavigateTo("/hr/payroll", replace: true);
+            // 🔴 20260827작2 — 종전엔 `/hr/payroll`(그룹웨어)로 보냈다.
+            //   그 화면은 이제 **조회 전용**이라, 발송을 끝낸 담당자가 이어서 할 일이 없는
+            //   자리에 떨어진다. `?send=1` 만 떼고 **이 화면(회계 급여관리)에 남는다.**
+            Nav.NavigateTo("/accounting/payroll", replace: true);
         }
 
         await Task.CompletedTask;

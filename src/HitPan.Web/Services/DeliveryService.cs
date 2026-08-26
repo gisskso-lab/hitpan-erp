@@ -467,7 +467,8 @@ public sealed class DeliveryService(HttpClient http)
 
     /// <summary>매입명세서 목록 조회 (매입명세 전용 API 호출).</summary>
     public async Task<List<PurchaseReceiptListItem>> GetPurchaseReceiptListAsync(
-        DateTime? from = null, DateTime? to = null, string? status = null, CancellationToken ct = default)
+        DateTime? from = null, DateTime? to = null, string? status = null, CancellationToken ct = default,
+        bool includeReturns = false)
     {
         try
         {
@@ -475,6 +476,8 @@ public sealed class DeliveryService(HttpClient http)
             if (from.HasValue) qs.Add($"from={from:yyyy-MM-dd}");
             if (to.HasValue) qs.Add($"to={to:yyyy-MM-dd}");
             if (!string.IsNullOrEmpty(status)) qs.Add($"status={Uri.EscapeDataString(status)}");
+            // 🔴 20260827작1 §8-B — 켰을 때만 보낸다. 안 보내면 서버 기본값(false)이라 종전과 같다.
+            if (includeReturns) qs.Add("includeReturns=true");
             var path = "api/purchase/receipts" + (qs.Count > 0 ? "?" + string.Join("&", qs) : "");
 
             var list = await http.GetFromJsonAsync<List<PurchaseReceiptListItem>>(path, JsonOptions, ct)
