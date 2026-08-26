@@ -102,10 +102,25 @@ public class PurchaseReturnListSqlGateTests
         // ④ 실제 조립 결과를 만들어 토큰 융합을 확인한다.
         var assembled = baseSql + (separated ? " " : string.Empty) + string.Join(" ", conds);
 
+        // 🔴 20260827작1 — SQL 주석(`--`)은 검사에서 제외한다.
+        //   이 게이트는 조립 결과를 **한 줄로 눌러** `[0-9A-Za-z_]AND` 를 찾는다. 그런데
+        //   base SQL 안의 `--` 주석에 20260826작2 사고를 설명하느라 `0AND` 라는 **글자**를
+        //   적어두면, 주석이 눌리면서 그 글자가 그대로 걸려 **정상 SQL 을 FAIL** 시킨다.
+        //   실제로 작1 봉합(`AND r.status <> 'canceled'`)을 넣자 이 오탐이 터졌고,
+        //   같은 SQL 을 MariaDB 에 직접 돌려 3행이 정상 반환되는 것을 확인했다.
+        //   ⇒ 주석은 파서가 버리는 것이니 검사도 버려야 한다. **코드만 검사한다.**
+        var codeOnly = string.Join("\n", assembled
+            .Split('\n')
+            .Select(line =>
+            {
+                var idx = line.IndexOf("--", StringComparison.Ordinal);
+                return idx >= 0 ? line[..idx] : line;
+            }));
+
         Assert.False(
-            Regex.IsMatch(assembled, @"[0-9A-Za-z_]AND\b"),
+            Regex.IsMatch(codeOnly, @"[0-9A-Za-z_]AND\b"),
             "조립된 SQL 에 토큰이 붙었다 — MariaDB 파싱 실패(500).\n실제 조립 결과 꼬리:\n"
-            + assembled[Math.Max(0, assembled.Length - 200)..]);
+            + codeOnly[Math.Max(0, codeOnly.Length - 200)..]);
     }
 
     /// <summary>

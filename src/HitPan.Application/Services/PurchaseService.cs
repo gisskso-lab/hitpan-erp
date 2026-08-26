@@ -571,7 +571,8 @@ public class PurchaseService : IPurchaseService
         DateTime? from = null,
         DateTime? to = null,
         string? status = null,
-        CancellationToken ct = default)
+        CancellationToken ct = default,
+        bool includeReturns = false)
     {
         const string sql = """
                            SELECT
@@ -616,8 +617,34 @@ public class PurchaseService : IPurchaseService
                                   AND p.tenant_id = pr.tenant_id
                            WHERE pr.tenant_id = @TenantId
                              AND pr.status <> 'cancelled'
-                             AND (@From IS NULL OR pr.receipt_date >= @From)
-                             AND (@To IS NULL OR pr.receipt_date <= @To)
+                             -- 🔴 20260827작1 §8-B (사장님 결재) — 「반품포함」 조회.
+                             --   @IncludeReturns = 0 이면 종전과 **완전히 같다**(매입일로만 자른다).
+                             --   1 이면 매입일이 창 밖이어도 **그 기간에 반품이 일어난 매입**을 함께 준다.
+                             --
+                             --   왜 필요한가: 매입목록은 매입일, 반품목록은 반품일로 창을 자른다.
+                             --   7월 매입을 8월에 반품하면 매입 행이 창 밖이라 「반품」 표기가
+                             --   나타날 자리가 없다 — 두 화면 숫자가 어긋나 보이는 원인이다.
+                             --
+                             --   ⚠️ 문자열로 SQL 을 조립하지 않는다. 파라미터 하나로 분기해
+                             --     20260826작2 의 `0AND` 재발 여지를 아예 만들지 않는다.
+                             AND (
+                                   (
+                                     (@From IS NULL OR pr.receipt_date >= @From)
+                                     AND (@To IS NULL OR pr.receipt_date <= @To)
+                                   )
+                                   OR (
+                                     @IncludeReturns = 1
+                                     AND EXISTS (
+                                       SELECT 1 FROM purchase_returns r2
+                                        WHERE r2.receipt_id = pr.receipt_id
+                                          AND r2.tenant_id  = pr.tenant_id
+                                          AND r2.is_deleted = 0
+                                          AND r2.status <> 'canceled'
+                                          AND (@From IS NULL OR r2.return_date >= @From)
+                                          AND (@To IS NULL OR r2.return_date <= @To)
+                                     )
+                                   )
+                                 )
                              AND (@Status IS NULL OR pr.status = @Status)
                            ORDER BY pr.receipt_date DESC,
                                     pr.receipt_no DESC
@@ -632,7 +659,8 @@ public class PurchaseService : IPurchaseService
                     TenantId = tenantId,
                     From = from?.Date,
                     To = to?.Date,
-                    Status = string.IsNullOrWhiteSpace(status) ? null : status
+                    Status = string.IsNullOrWhiteSpace(status) ? null : status,
+                    IncludeReturns = includeReturns ? 1 : 0
                 },
                 cancellationToken: ct));
 
@@ -797,6 +825,25 @@ public class PurchaseService : IPurchaseService
             LEFT JOIN partners p ON p.partner_id = r.partner_id AND p.tenant_id = r.tenant_id
             LEFT JOIN employees ec ON ec.user_id = r.created_by AND ec.tenant_id = r.tenant_id
             WHERE r.tenant_id = @Tid AND r.is_deleted = 0
+              -- 🔴 20260827작1 W1 — 취소분을 뺀다.
+              --   종전엔 상태 필터가 **아예 없어서** canceled 반품이 살아있는 반품과
+              --   똑같은 모양으로 목록에 떴다. 이 화면은 status 를 아예 렌더하지 않아
+              --   담당자가 눈으로도 구분할 수 없었다(이미 되돌린 건을 또 처리할 위험).
+              --
+              --   실측(hitpan_e2e, confirmed2·canceled1·draft1 · 동일 30일):
+              --     반품현황(집계) status='confirmed'  → 2건 120,000
+              --     반품목록(여기) 필터없음            → 4건 260,000   ← 이 자리
+              --     매입목록 「반품」 status<>'canceled' → 3건 200,000
+              --   같은 데이터인데 화면마다 2/4/3 건이었다. 이 줄로 목록을 매입목록과 맞춘다.
+              --
+              --   ⚠️ draft 는 **남긴다** — 작성중 반품은 담당자가 이어서 고쳐야 하므로
+              --     목록에서 사라지면 안 된다. 현황집계(confirmed only)와는 여전히 다르며
+              --     그 통일은 20260827작1 §8 사장님 결재사항이다.
+              --
+              --   ⚠️ 이 조건은 반드시 **raw string 안**에 둔다. 아래 conditions 처럼
+              --     `sql +=` 로 이어붙이면 raw string 이 닫는 따옴표 앞 줄바꿈을 버려
+              --     `0AND ...` 가 된다 — 20260826작2 의 500 이 정확히 그 자리였다.
+              AND r.status <> 'canceled'
             """;
         var conditions = new List<string>();
         if (from.HasValue) conditions.Add("AND r.return_date >= @From");

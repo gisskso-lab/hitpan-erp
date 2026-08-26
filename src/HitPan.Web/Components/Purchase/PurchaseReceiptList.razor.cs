@@ -24,6 +24,11 @@ public partial class PurchaseReceiptList : ComponentBase
     // 상태 필터 (기본값: 전체)
     private string _status = "";
 
+    /// <summary>
+    /// 🔴 20260827작1 §8-B — 「반품포함」. 기본 <c>false</c> = 종전 동작 그대로.
+    /// </summary>
+    private bool _includeReturns;
+
     // 목록 행
     private List<PurchaseReceiptListItem> _rows = new();
 
@@ -133,6 +138,20 @@ public partial class PurchaseReceiptList : ComponentBase
     }
 
     /// <summary>
+    /// 🔴 20260827작1 §8-B — 「반품포함」 켜고 끄기.
+    /// </summary>
+    /// <remarks>
+    /// ⚠️ <c>@bind-Value</c> 를 쓰지 않는다. 그건 값만 담고 <b>서버를 다시 부르지 않아</b>
+    /// 체크만 되고 목록은 그대로인 화면이 된다(20260825작16 에서 같은 자리를 틀렸다).
+    /// 값을 넣고 <b>곧바로 다시 조회</b>한다.
+    /// </remarks>
+    private async Task OnIncludeReturnsChangedAsync(bool value)
+    {
+        _includeReturns = value;
+        await LoadAsync(CancellationToken.None);
+    }
+
+    /// <summary>
     /// 거래처 자동완성 검색.
     /// </summary>
     /// <param name="keyword">검색어</param>
@@ -159,7 +178,8 @@ public partial class PurchaseReceiptList : ComponentBase
             from: _startDate,
             to: _endDate,
             status: _status,
-            ct: ct);
+            ct: ct,
+            includeReturns: _includeReturns);
 
         foreach (var row in _rows)
         {

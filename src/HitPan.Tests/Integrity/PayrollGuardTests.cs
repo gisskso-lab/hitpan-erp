@@ -363,12 +363,22 @@ public sealed class PayrollGuardTests
         Assert.Contains("a.pay_amount   AS AbsencePayAmount", svc);
 
         // 🔴 자동으로 급여 항목에 넣으면 안 된다. 담당자가 눌러야 들어간다.
-        var page = ReadSource("src", "HitPan.Web", "Pages", "HR", "PayrollPage.razor");
+        //
+        // 🔴 20260827작2 — 보는 화면을 **회계 「급여관리」로 옮겼다.**
+        //   급여를 만들고 고치는 일이 `/accounting/payroll` 한 곳으로 모였고(사장님 결재),
+        //   그룹웨어 `/hr/payroll` 은 **조회 전용**이 되어 편집기를 갖고 있지 않다.
+        //   ⚠️ 규칙이 약해진 게 아니다 — **같은 3가지를 편집기가 실제로 있는 화면에서** 본다.
+        var page = ReadSource("src", "HitPan.Web", "Pages", "Finance", "PayrollManagePage.razor");
         Assert.Contains("ApplyAbsencePay", page);
         Assert.Contains("OnClick=\"ApplyAbsencePay\"", page);
 
         // 화면이 휴직 사실을 표시해야 한다 — 담당자가 지나치면 안 된다.
         Assert.Contains("이 달에 휴직이 있습니다", page);
+
+        // 🔴 그룹웨어 급여조회는 **편집기를 되살리면 안 된다**(조회 전용).
+        //   이 줄이 없으면 "옮겼다" 가 아니라 "양쪽에 다 있다" 로 조용히 되돌아갈 수 있다.
+        var hrPage = ReadSource("src", "HitPan.Web", "Pages", "HR", "PayrollPage.razor");
+        Assert.DoesNotContain("OnClick=\"ApplyAbsencePay\"", hrPage);
     }
 
     // ───────────────────────────────────────────────────────────────

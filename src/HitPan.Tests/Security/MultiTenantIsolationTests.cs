@@ -52,14 +52,17 @@ public class MultiTenantIsolationTests
     {
         var tenantId = "tenant-001";
 
-        _purchaseSvc.Setup(s => s.GetReceiptsAsync(tenantId, null, null, null, It.IsAny<CancellationToken>()))
+        // 🔴 20260827작1 §8-B — `includeReturns` 가 붙으면서 **식 트리에는 선택적 인수를 못 쓴다**
+        //   (CS0854). 값을 손으로 적어 넘긴다. 판정 내용은 종전과 **한 글자도 다르지 않다** —
+        //   이 시험이 보는 것은 여전히 "tenantId 가 그대로 전달되는가"(헌법 #2) 뿐이다.
+        _purchaseSvc.Setup(s => s.GetReceiptsAsync(tenantId, null, null, null, It.IsAny<CancellationToken>(), false))
             .ReturnsAsync(new List<HitPan.Application.DTOs.Purchase.PurchaseReceiptListDto>());
 
         var result = await _purchaseSvc.Object.GetReceiptsAsync(tenantId, null, null, null, CancellationToken.None);
 
         Assert.NotNull(result);
         // 다른 tenant로는 단 한 번도 호출되지 않아야 함
-        _purchaseSvc.Verify(s => s.GetReceiptsAsync("tenant-999", null, null, null, It.IsAny<CancellationToken>()), Times.Never);
+        _purchaseSvc.Verify(s => s.GetReceiptsAsync("tenant-999", null, null, null, It.IsAny<CancellationToken>(), It.IsAny<bool>()), Times.Never);
     }
 
     [Fact(DisplayName = "T-ISO04: 매입 상세 조회 시 잘못된 tenantId로 null 반환 (접근 차단)")]

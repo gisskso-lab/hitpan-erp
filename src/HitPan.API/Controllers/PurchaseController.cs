@@ -119,12 +119,16 @@ public class PurchaseController : ControllerBase
         [FromQuery] DateTime? from,
         [FromQuery] DateTime? to,
         [FromQuery] string? status,
-        CancellationToken ct)
+        CancellationToken ct,
+        // 🔴 20260827작1 §8-B (사장님 결재) — 「반품포함」 조회.
+        //   기본 false ⇒ 이 파라미터를 안 보내는 기존 호출은 종전과 완전히 같다.
+        [FromQuery] bool includeReturns = false)
     {
         var tenantId = HttpContext.Items["TenantId"]?.ToString();
         if (string.IsNullOrEmpty(tenantId)) return Forbid();
 
-        var result = await _purchaseService.GetReceiptsAsync(tenantId, from, to, status, ct);
+        var result = await _purchaseService.GetReceiptsAsync(
+            tenantId, from, to, status, ct, includeReturns);
         return Ok(result);
     }
 
