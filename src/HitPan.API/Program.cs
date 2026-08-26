@@ -118,6 +118,7 @@ builder.Services.AddScoped<IAbsenceService, AbsenceService>();
 // (사장님: "급여는 자동계산하지 말고 수동으로 int값 직접 받아서 입력하는게 가장 깔끔함").
 // 보호는 권한 계층(menu_code='PAYROLL')이 한다 — 컬럼 암호화는 내부자 열람을 못 막는다.
 builder.Services.AddScoped<IPayrollService, PayrollService>();
+builder.Services.AddScoped<IPayslipMailService, PayslipMailService>();
 // 작(2026-08-13) 단계9: 사내 메신저. 🔴 문서를 만들거나 결재하지 않는다 — 연결만 한다
 // (사장님: "연결까지만 해도 충분함" / "있는 기능 연결해서 사용하는게 훨씬 효율적임").
 // 열람은 방 참여 여부로 판정한다 — 부모계정도 남의 1:1 은 못 본다("본인 대화만 열람").

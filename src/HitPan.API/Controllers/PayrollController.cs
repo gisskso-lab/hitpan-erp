@@ -36,12 +36,16 @@ public sealed class PayrollController : ControllerBase
     private readonly IPermissionService _permission;
     private readonly ICurrentTenant _currentTenant;
 
+    /// <summary>급여명세서 일괄 메일발송 — 20260826작6 W4.</summary>
+    private readonly IPayslipMailService _payslipMail;
+
     public PayrollController(IPayrollService service, IPermissionService permission,
-        ICurrentTenant currentTenant)
+        ICurrentTenant currentTenant, IPayslipMailService payslipMail)
     {
         _service = service;
         _permission = permission;
         _currentTenant = currentTenant;
+        _payslipMail = payslipMail;
     }
 
     /// <summary>
@@ -338,6 +342,66 @@ public sealed class PayrollController : ControllerBase
     public sealed class PayBody
     {
         public DateTime? PayDate { get; set; }
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    //  급여명세서 일괄 메일발송 — 20260826작6 W4
+    // ═══════════════════════════════════════════════════════════════
+
+    /// <summary>
+    /// 발송 전 확인 명단 — <b>누가 받고 누가 못 받는지</b>.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// 🔴 <b>되돌릴 수 없는 발송</b>이라 경리가 <b>보고 나서</b> 누른다(사장님 반자동 원칙).
+    /// 이름·수신주소·불가사유를 <b>전부</b> 준다 — 숫자만 주면 무엇을 고칠지 알 수 없다.
+    /// </para>
+    /// <para>
+    /// ⚠️ 권한은 <c>update</c> 다. <b>조회 권한만 가진 사람에게 전 직원 급여 명단과
+    /// 이메일 주소가 나가면 안 된다</b> — 이 화면은 발송 준비 화면이다.
+    /// </para>
+    /// </remarks>
+    [HttpGet("slips/send-mail/preview")]
+    [RequirePermission(Menu, "update")]
+    public async Task<IActionResult> GetSendMailPreview([FromQuery] int year, [FromQuery] int month,
+        CancellationToken ct)
+    {
+        var tenantId = HttpContext.Items["TenantId"]?.ToString();
+        if (string.IsNullOrEmpty(tenantId)) return Forbid();
+
+        var (y, m) = Normalize(year, month);
+        return Ok(await _payslipMail.GetSendPreviewAsync(tenantId, y, m, ct));
+    }
+
+    /// <summary>
+    /// 급여명세서 <b>일괄 발송</b>. 건별로 보내고 건별로 결과를 돌려준다.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// 🔴 <b>화면이 보낸 목록을 그대로 믿지 않는다</b> — 서비스가 각 건을 다시 판정해서
+    /// 못 보낼 것이면 안 보낸다. 화면을 우회한 요청으로 <b>미결재 명세서가 나가면 안 된다</b>(⑤결재).
+    /// </para>
+    /// <para>
+    /// 🔴 <b>뭉뚱그린 "발송 완료" 를 주지 않는다</b> — 성공·실패를 사람별로 돌려준다.
+    /// 실패분만 다시 넘기면 그대로 재발송이 된다(별도 API 가 필요 없다).
+    /// </para>
+    /// </remarks>
+    [HttpPost("slips/send-mail")]
+    [RequirePermission(Menu, "update")]
+    public async Task<IActionResult> SendMail([FromBody] SendPayslipMailRequest request,
+        CancellationToken ct)
+    {
+        var tenantId = HttpContext.Items["TenantId"]?.ToString();
+        if (string.IsNullOrEmpty(tenantId)) return Forbid();
+
+        if (request?.SlipIds is null || request.SlipIds.Count == 0)
+            return BadRequest(new { message = "발송할 명세서를 하나 이상 골라주세요." });
+
+        var (y, m) = Normalize(request.Year, request.Month);
+        request.Year = y;
+        request.Month = m;
+
+        return Ok(await _payslipMail.SendAsync(tenantId, Actor(), request, ct));
     }
 
     private string Actor() => CurrentEmployeeId() ?? "unknown";

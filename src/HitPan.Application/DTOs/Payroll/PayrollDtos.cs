@@ -257,3 +257,108 @@ public static class PayrollLineTypeLabels
     public static string Of(string? code)
         => string.IsNullOrWhiteSpace(code) ? "" : (Map.TryGetValue(code, out var v) ? v : code);
 }
+
+// ══════════════════════════════════════════════════════════════════════
+//  급여명세서 일괄 메일발송 — 20260826작6 W4
+// ══════════════════════════════════════════════════════════════════════
+
+/// <summary>발송 불가 사유. 🔴 <b>하나로 뭉치지 않는다</b> — 경리가 무엇을 고칠지 알아야 한다.</summary>
+public static class PayslipSendBlockReasons
+{
+    /// <summary>직원 이메일이 비어 있다 ⇒ 사원관리에서 입력.</summary>
+    public const string NoEmail = "no_email";
+
+    /// <summary>결재가 아직 승인되지 않았다 ⇒ 대표이사 결재 대기.</summary>
+    public const string NotApproved = "not_approved";
+
+    /// <summary>명세서가 확정되지 않았다 ⇒ 급여 확정 먼저.</summary>
+    public const string NotConfirmed = "not_confirmed";
+
+    private static readonly Dictionary<string, string> Map = new(StringComparer.OrdinalIgnoreCase)
+    {
+        [NoEmail] = "이메일 없음",
+        [NotApproved] = "결재 미승인",
+        [NotConfirmed] = "미확정",
+    };
+
+    public static string Of(string? code)
+        => string.IsNullOrWhiteSpace(code) ? "" : (Map.TryGetValue(code, out var v) ? v : code);
+}
+
+/// <summary>
+/// 발송 대상 한 사람. <b>보낼 수 있는지</b> 와 <b>못 보내면 왜인지</b> 를 함께 담는다.
+/// </summary>
+/// <remarks>
+/// 🔴 <c>RecipientEmail</c> 을 <b>그대로 노출</b>한다 — 경리가 눈으로 보고 오입력을 잡는다.
+/// 오입력이면 <b>남의 메일함에 그 직원 연봉</b>이 간다(§4).
+/// </remarks>
+public sealed class PayslipSendTargetDto
+{
+    public string SlipId { get; set; } = string.Empty;
+    public string EmployeeId { get; set; } = string.Empty;
+    public string EmployeeName { get; set; } = string.Empty;
+    public string? DeptName { get; set; }
+    public string? RecipientEmail { get; set; }
+
+    /// <summary>보낼 수 있는가.</summary>
+    public bool CanSend { get; set; }
+
+    /// <summary>못 보내는 사유 코드. 보낼 수 있으면 <c>null</c>.</summary>
+    public string? BlockReason { get; set; }
+
+    /// <summary>사유 한글 이름표.</summary>
+    public string BlockReasonLabel => PayslipSendBlockReasons.Of(BlockReason);
+}
+
+/// <summary>
+/// 발송 전 확인 화면이 받는 것. 🔴 <b>숫자만 주지 않는다</b> — 이름·주소·사유를 함께 준다(§4).
+/// </summary>
+public sealed class PayslipSendPreviewDto
+{
+    public int Year { get; set; }
+    public int Month { get; set; }
+
+    /// <summary>결재 기능이 켜져 있는가. 꺼져 있으면 확정만으로 발송 가능하다.</summary>
+    public bool ApprovalRequired { get; set; }
+
+    public List<PayslipSendTargetDto> Targets { get; set; } = new();
+
+    public int SendableCount => Targets.Count(t => t.CanSend);
+    public int BlockedCount => Targets.Count(t => !t.CanSend);
+}
+
+/// <summary>일괄 발송 요청. 🔴 화면이 고른 <b>명세서 id 목록</b>을 받는다.</summary>
+/// <remarks>
+/// ⚠️ 서버는 이 목록을 <b>그대로 믿지 않는다</b> — 각 건을 다시 판정해서
+/// 못 보낼 것이면 <b>안 보낸다</b>. 화면을 우회한 요청으로 미결재 명세서가 나가면 안 된다.
+/// </remarks>
+public sealed class SendPayslipMailRequest
+{
+    public int Year { get; set; }
+    public int Month { get; set; }
+    public List<string> SlipIds { get; set; } = new();
+}
+
+/// <summary>발송 결과 한 건.</summary>
+public sealed class PayslipSendResultItemDto
+{
+    public string SlipId { get; set; } = string.Empty;
+    public string EmployeeName { get; set; } = string.Empty;
+    public string? RecipientEmail { get; set; }
+    public bool Success { get; set; }
+
+    /// <summary>실패 사유(사람이 읽는 문장). 성공이면 <c>null</c>.</summary>
+    public string? Error { get; set; }
+}
+
+/// <summary>일괄 발송 결과. 🔴 <b>뭉뚱그린 "발송 완료" 를 주지 않는다</b>(§4).</summary>
+public sealed class SendPayslipMailResponse
+{
+    public List<PayslipSendResultItemDto> Items { get; set; } = new();
+
+    public int SuccessCount => Items.Count(i => i.Success);
+    public int FailedCount => Items.Count(i => !i.Success);
+
+    /// <summary>실패한 명세서 id — 화면이 <b>실패분만 재발송</b>할 때 그대로 다시 넘긴다.</summary>
+    public List<string> FailedSlipIds => Items.Where(i => !i.Success).Select(i => i.SlipId).ToList();
+}
