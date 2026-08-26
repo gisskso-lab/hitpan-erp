@@ -135,13 +135,47 @@ public class HrController : ControllerBase
 
     // ── HR 경비신청 ──
 
+    /// <summary>
+    /// 내가 올린 경비 목록. 🔴 <b>본인 것만 나온다 — 예외 없다.</b>
+    /// </summary>
+    /// <remarks>
+    /// 🔴 <b>사장님 결재 (2026-08-26)</b>:
+    /// <i>"그룹웨어에서의 경비는 직원들이 경비처리 결재올리는 칸이야."</i> ·
+    /// <i>"그룹웨어 화면은 경리든 직원이든 본인 것만으로 막는 게 깔끔합니다 — 이게 맞음."</i>
+    ///
+    /// <para>
+    /// [무엇이 문제였나] 종전엔 화면이 보내온 <c>employeeId</c> 를 <b>그대로 서비스에 넘겼다.</b>
+    /// 안 보내면 <c>WHERE</c> 에 조건이 안 붙어 <b>전 직원 경비가 다 나왔다</b>
+    /// (<c>HrService.GetHrExpensesAsync</c> 는 <c>employeeId</c> 가 비면 필터를 안 건다).
+    /// </para>
+    /// <para>
+    /// <c>[RequirePermission("HR","view")]</c> 하나로는 못 막는다 — 그건 <b>"HR 화면을 볼 수 있나"</b> 이지
+    /// <b>"누구 것을 볼 수 있나"</b> 가 아니다. 경비를 올리는 직원은 <b>당연히 이 권한이 있어야</b> 하므로,
+    /// 그 직원이 <c>employeeId</c> 없이 부르면 남의 경비가 그대로 보였다.
+    /// </para>
+    /// <para>
+    /// 🔴 <b>급여는 진작 막고 있었다</b>(<c>PayrollController.ResolveScopeAsync</c>, 8/13 사장님 지시
+    /// <i>"a직원 급여를 b직원이 볼수 없어야해"</i>). <b>같은 회사에서 급여는 막고 경비는 뚫린 비대칭</b>이었다.
+    /// </para>
+    /// <para>
+    /// ⚠️ 급여와 <b>다른 점</b>: 급여는 경리(<c>PAYROLL</c> 권한)가 전 직원을 봐야 해서 세 갈래로 갈랐지만,
+    /// 여기는 <b>가르지 않는다.</b> 경리가 전건을 보는 자리는 <b>회계 「경비 처리」 화면</b>이다
+    /// (<c>FinanceService.GetExpensesAsync</c> 가 두 표를 <c>UNION ALL</c> 로 합쳐 보여준다 — 그건 그대로 둔다).
+    /// ⇒ <b>권한을 보지 않는다. 무조건 본인이다.</b>
+    /// </para>
+    /// </remarks>
     [HttpGet("expense-requests")]
     [RequirePermission("HR", "view")]
-    public async Task<IActionResult> GetHrExpenses([FromQuery] string? employeeId, CancellationToken ct)
+    public async Task<IActionResult> GetHrExpenses(CancellationToken ct)
     {
         var tid = HttpContext.Items["TenantId"]?.ToString();
-        if (string.IsNullOrEmpty(tid)) return Forbid();
-        return Ok(await _svc.GetHrExpensesAsync(tid, employeeId, ct));
+        var eid = HttpContext.Items["EmployeeId"]?.ToString();
+        if (string.IsNullOrEmpty(tid) || string.IsNullOrEmpty(eid)) return Forbid();
+
+        // 🔴 화면이 보내온 값을 아예 받지 않는다. 파라미터 자체를 없앴다 —
+        //   받아서 무시하면 다음 사람이 "왜 안 먹지" 하고 되살릴 수 있다.
+        //   주소창에 남의 id 를 넣을 자리를 남기지 않는 것이 요점이다.
+        return Ok(await _svc.GetHrExpensesAsync(tid, eid, ct));
     }
 
     /// <summary>
