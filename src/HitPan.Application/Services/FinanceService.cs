@@ -305,6 +305,30 @@ public class FinanceService : IFinanceService
         return id;
     }
 
+    /// <summary>
+    /// 경비 분류(한글) → 계정과목 코드. 못 찾으면 잡비로 떨어뜨린다.
+    /// </summary>
+    /// <remarks>
+    /// 🔴 20260827작4 — 화면 분류는 한글 6종(교통비·식대·소모품비·접대비·통신비·기타)인데
+    ///   회계 계정과목은 코드다. 그 사이를 여기서 잇는다.
+    ///
+    /// ⚠️ **모르는 분류는 추측하지 않고 잡비(84100)로 보낸다.**
+    ///   틀린 계정에 넣는 것보다 잡비에 모아두고 사람이 재분류하는 편이 안전하다 —
+    ///   접대비는 세무상 한도가 따로 있어서, 다른 계정에 잘못 넣으면 신고가 틀어진다.
+    ///
+    /// ⚠️ 「식대」는 복리후생비로 본다(직원 식대 기준). 거래처 식사면 접대비가 맞지만
+    ///   화면이 그 둘을 구분해 받지 않는다 — 구분이 필요해지면 사장님 결재로 분류를 늘린다.
+    /// </remarks>
+    private static string ResolveExpenseAccount(string? category) => category switch
+    {
+        "교통비" => AutoJournalHelper.TravelExpense,
+        "식대" => AutoJournalHelper.WelfareExpense,
+        "소모품비" => AutoJournalHelper.SuppliesExpense,
+        "접대비" => AutoJournalHelper.EntertainmentExpense,
+        "통신비" => AutoJournalHelper.CommunicationExpense,
+        _ => AutoJournalHelper.MiscExpense,
+    };
+
     public async Task ApproveExpenseAsync(string expenseId, string tenantId, string action, CancellationToken ct = default)
     {
         await EnsureOpenAsync(ct);
@@ -321,9 +345,74 @@ public class FinanceService : IFinanceService
                 new { Id = expenseId, TenantId = tenantId, Action = action }, cancellationToken: ct));
         }
 
+        // 🔴 20260827작4 (사장님 오더 "모든 돈의 흐름을 회계장부 하나로") — 경비 자동기표.
+        //
+        //   🔴 **왜 승인 시점인가** — 매입·판매가 「확정」에서만 기표하는 것과 같은 축이다.
+        //     대기(pending) 중인 경비를 장부에 올리면, 반려된 경비가 비용으로 남는다.
+        //     승인된 것만 회계로 넘어간다.
+        //
+        //   ⚠️ 승인(approved)일 때만 기표한다. 반려·취소는 기표하지 않는다.
+        //   ⚠️ 멱등 — 이미 기표된 경비는 journal_entries 에 source_id 가 있으므로 건너뛴다.
+        //     (두 번 승인 눌러도 비용이 두 배로 잡히면 안 된다.)
+        if (string.Equals(action, "approved", StringComparison.OrdinalIgnoreCase))
+        {
+            await PostExpenseJournalAsync(expenseId, tenantId, ct);
+        }
+
         // 감사로그 — 경비 승인/반려 (action 값: approved/rejected 등)
         var afterJson = $"{{\"action\":\"{action}\"}}";
         await _audit.LogAsync("approve", "expense", expenseId, afterJson: afterJson, ct: ct);
+    }
+
+    /// <summary>
+    /// 승인된 경비 1건을 분개로 옮긴다. 이미 기표됐으면 아무 일도 하지 않는다(멱등).
+    /// </summary>
+    private async Task PostExpenseJournalAsync(string expenseId, string tenantId, CancellationToken ct)
+    {
+        // 이미 기표됐나 — 중복 비용 계상 차단
+        var already = await _db.ExecuteScalarAsync<int>(new CommandDefinition(
+            "SELECT COUNT(*) FROM journal_entries WHERE tenant_id=@TenantId AND source_type='expense' AND source_id=@Id",
+            new { TenantId = tenantId, Id = expenseId }, cancellationToken: ct));
+        if (already > 0) return;
+
+        var row = await _db.QueryFirstOrDefaultAsync<dynamic>(new CommandDefinition(
+            """
+            SELECT expense_date, amount, vat_amount, category, payment_method, description, employee_id
+              FROM expenses
+             WHERE expense_id=@Id AND tenant_id=@TenantId
+            """,
+            new { Id = expenseId, TenantId = tenantId }, cancellationToken: ct));
+        if (row is null) return;
+
+        // ⚠️ decimal·날짜는 드라이버에 따라 타입이 달리 온다 — Convert 로 전 타입을 받는다.
+        //   (dynamic 에 직접 캐스팅하면 RuntimeBinderException 으로 500. 8/25 사고 자리.)
+        var amount = Convert.ToDecimal(row.amount);
+        var vat = row.vat_amount is null ? 0m : Convert.ToDecimal(row.vat_amount);
+        var expenseDate = Convert.ToDateTime(row.expense_date);
+        var category = row.category as string;
+        var method = row.payment_method as string;
+        var memo = row.description as string;
+        var empId = row.employee_id as string;
+
+        // 경비 총액 = 공급가 + 부가세. 부가세를 따로 안 뽑는 이유는, 경비는 매입세액
+        // 공제 대상이 아닌 건(접대비 등)이 섞여 있어 일괄로 대급금 처리하면 신고가 틀어진다.
+        // 세액공제 분리는 부가세 신고 화면에서 별도로 다룬다.
+        var total = amount + vat;
+
+        using var tx = _db.BeginTransaction();
+        try
+        {
+            await AutoJournalHelper.RecordExpenseAsync(
+                _db, tx, tenantId, expenseId, expenseDate, total,
+                ResolveExpenseAccount(category), method, empId, memo, ct);
+            tx.Commit();
+        }
+        catch (Exception)
+        {
+            try { tx.Rollback(); }
+            catch (Exception rbex) { System.Diagnostics.Trace.TraceWarning($"[FinanceService] 경비 기표 롤백 실패: {rbex.Message}"); }
+            throw;
+        }
     }
 
     // ═══════════════════════════════════════
@@ -769,6 +858,13 @@ public class FinanceService : IFinanceService
     /// <remarks>
     /// 🔴 이 메서드는 <b>한시적</b>이다. 수금·지급·경비·급여 기표가 붙으면(3·4차)
     /// 건수가 0 이 되어 안내문이 저절로 사라진다. 그때 이 코드를 지운다.
+    ///
+    /// 🔴 <b>20260827작4 — 기표 배선 후 판정 방식을 바꿨다.</b>
+    /// 종전엔 <c>collections/payments/expenses</c> 행을 <b>그냥 다 셌다</b>. 그땐 기표가
+    /// 아예 0건이라 "행이 있다 = 미기표"가 참이었다. 이제 기표가 붙었으므로 그 셈법은
+    /// <b>이미 장부에 올라간 건까지 미기표로 세는 거짓 경고</b>가 된다.
+    /// ⇒ <c>journal_entries</c> 에 그 <c>source_id</c> 가 있는지로 판정한다.
+    /// 옛 데이터(배선 전에 쌓인 건)는 분개가 없으므로 그대로 잡힌다 — 그게 맞는 동작이다.
     /// </remarks>
     private async Task AppendUnpostedNoticeAsync(
         TrialBalanceDto dto, string tenantId, DateTime? from, DateTime? to, CancellationToken ct)
@@ -776,20 +872,43 @@ public class FinanceService : IFinanceService
         // ⚠️ 표가 없는 고객 DB 도 있을 수 있다(마이그 시점 차이) — 실패해도 시산표 본안은 살린다.
         try
         {
+            // ⚠️ 판정 기준 = "분개가 있느냐"이지 "행이 있느냐"가 아니다.
+            //   NOT EXISTS 서브쿼리가 journal_entries 를 source_type+source_id 로 되짚는다.
             const string sql = """
                 SELECT
-                  (SELECT COUNT(*) FROM collections
-                    WHERE tenant_id=@TenantId
-                      AND (@From IS NULL OR collection_date >= @From)
-                      AND (@To   IS NULL OR collection_date <= @To))  AS c1,
-                  (SELECT COUNT(*) FROM payments
-                    WHERE tenant_id=@TenantId
-                      AND (@From IS NULL OR payment_date >= @From)
-                      AND (@To   IS NULL OR payment_date <= @To))     AS c2,
-                  (SELECT COUNT(*) FROM expenses
-                    WHERE tenant_id=@TenantId
-                      AND (@From IS NULL OR expense_date >= @From)
-                      AND (@To   IS NULL OR expense_date <= @To))     AS c3
+                  (SELECT COUNT(*) FROM collections c
+                    WHERE c.tenant_id=@TenantId
+                      AND (@From IS NULL OR c.collection_date >= @From)
+                      AND (@To   IS NULL OR c.collection_date <= @To)
+                      AND NOT EXISTS (SELECT 1 FROM journal_entries j
+                                       WHERE j.tenant_id=c.tenant_id
+                                         AND j.source_type='collection'
+                                         AND j.source_id=c.collection_id))  AS c1,
+                  (SELECT COUNT(*) FROM payments p
+                    WHERE p.tenant_id=@TenantId
+                      AND (@From IS NULL OR p.payment_date >= @From)
+                      AND (@To   IS NULL OR p.payment_date <= @To)
+                      AND NOT EXISTS (SELECT 1 FROM journal_entries j
+                                       WHERE j.tenant_id=p.tenant_id
+                                         AND j.source_type='payment'
+                                         AND j.source_id=p.payment_id))     AS c2,
+                  (SELECT COUNT(*) FROM expenses e
+                    WHERE e.tenant_id=@TenantId
+                      AND (@From IS NULL OR e.expense_date >= @From)
+                      AND (@To   IS NULL OR e.expense_date <= @To)
+                      AND NOT EXISTS (SELECT 1 FROM journal_entries j
+                                       WHERE j.tenant_id=e.tenant_id
+                                         AND j.source_type='expense'
+                                         AND j.source_id=e.expense_id))     AS c3,
+                  -- 🔴 20260827작4 — 급여가 빠져 있었다(PM 누락). 수금·지급·경비만 세고 있었다.
+                  (SELECT COUNT(*) FROM payroll_slips s
+                    WHERE s.tenant_id=@TenantId
+                      AND (@From IS NULL OR s.pay_date >= @From)
+                      AND (@To   IS NULL OR s.pay_date <= @To)
+                      AND NOT EXISTS (SELECT 1 FROM journal_entries j
+                                       WHERE j.tenant_id=s.tenant_id
+                                         AND j.source_type='payroll'
+                                         AND j.source_id=s.slip_id))        AS c4
                 """;
 
             var r = await _db.QueryFirstOrDefaultAsync<dynamic>(new CommandDefinition(
@@ -802,11 +921,13 @@ public class FinanceService : IFinanceService
             var c1 = Convert.ToInt32(r.c1);
             var c2 = Convert.ToInt32(r.c2);
             var c3 = Convert.ToInt32(r.c3);
+            var c4 = Convert.ToInt32(r.c4);
 
             if (c1 > 0) dto.UnpostedSources.Add($"수금 {c1:N0}건");
             if (c2 > 0) dto.UnpostedSources.Add($"지급 {c2:N0}건");
             if (c3 > 0) dto.UnpostedSources.Add($"경비 {c3:N0}건");
-            dto.UnpostedCount = c1 + c2 + c3;
+            if (c4 > 0) dto.UnpostedSources.Add($"급여 {c4:N0}건");
+            dto.UnpostedCount = c1 + c2 + c3 + c4;
         }
         catch (Exception ex)
         {

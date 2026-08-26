@@ -528,6 +528,72 @@ public sealed class PayrollService : IPayrollService
             await _audit.LogAsync("pay", "payroll_slip", slipId,
                 afterJson: $"{{\"pay_date\":\"{payDate:yyyy-MM-dd}\"}}", ct: ct).ConfigureAwait(false);
         }
+
+        // 🔴 20260827작4 (사장님 오더 "모든 돈의 흐름을 회계장부 하나로") — 급여 자동기표.
+        //
+        //   🔴 **왜 확정(confirmed)이 아니라 지급(paid) 시점인가**
+        //     확정은 "명세를 잠갔다"이고, 지급이 "돈이 실제로 나갔다"이다.
+        //     회계는 돈이 나간 시점을 잡아야 한다. 확정에서 기표하면, 확정만 하고
+        //     지급을 안 한 달에도 현금이 빠져나간 것으로 장부에 남는다.
+        //     매입·판매가 「확정」에서 기표하는 것과 시점 이름은 다르지만 축은 같다 —
+        //     **거래가 실제로 성립한 순간**에 기표한다.
+        //
+        //   ⚠️ 사장님 헌법 "급여는 수동입력 원칙" — 금액을 시스템이 계산하지 않는다.
+        //     여기서는 **이미 사람이 넣어 확정한 숫자를 그대로 회계로 옮길 뿐**이다.
+        await PostPayrollJournalAsync(tenantId, actorId, slipId, payDate, ct).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// 지급 처리된 급여명세 1건을 분개로 옮긴다. 이미 기표됐으면 아무 일도 하지 않는다(멱등).
+    /// </summary>
+    /// <remarks>
+    /// 차변 급여(총지급액) / 대변 예수금(공제액) + 현금·예금(실지급액) — 3줄 분개다.
+    /// 총지급액과 실수령액의 차액(원천징수분)은 회사가 대신 보관했다 나라에 내는 돈이라
+    /// 부채(예수금)로 잡는다. 자세한 근거는 AutoJournalHelper.RecordPayrollAsync 주석 참조.
+    /// </remarks>
+    private async Task PostPayrollJournalAsync(string tenantId, string actorId, string slipId,
+        DateTime payDate, CancellationToken ct)
+    {
+        // 이미 기표됐나 — 두 번 지급 처리해도 인건비가 두 배로 잡히면 안 된다.
+        var already = await _db.ExecuteScalarAsync<int>(new CommandDefinition(
+            "SELECT COUNT(*) FROM journal_entries WHERE tenant_id=@TenantId AND source_type='payroll' AND source_id=@Id",
+            new { TenantId = tenantId, Id = slipId }, cancellationToken: ct)).ConfigureAwait(false);
+        if (already > 0) return;
+
+        var row = await _db.QueryFirstOrDefaultAsync<dynamic>(new CommandDefinition(
+            """
+            SELECT s.total_payment, s.total_deduct, s.pay_year, s.pay_month,
+                   COALESCE(e.emp_name, '') AS emp_name
+              FROM payroll_slips s
+              LEFT JOIN employees e ON e.employee_id = s.employee_id AND e.tenant_id = s.tenant_id
+             WHERE s.tenant_id=@TenantId AND s.slip_id=@Id
+            """,
+            new { TenantId = tenantId, Id = slipId }, cancellationToken: ct)).ConfigureAwait(false);
+        if (row is null) return;
+
+        // ⚠️ decimal 은 드라이버에 따라 타입이 달리 온다 — Convert 로 전 타입을 받는다
+        //   (dynamic 에 직접 캐스팅하면 RuntimeBinderException 으로 500. 8/25 사고 자리).
+        var gross = Convert.ToDecimal(row.total_payment);
+        var deduct = Convert.ToDecimal(row.total_deduct);
+        var empName = row.emp_name as string ?? string.Empty;
+        var memo = $"{Convert.ToInt32(row.pay_year)}년 {Convert.ToInt32(row.pay_month)}월 {empName}".Trim();
+
+        // 급여 지급수단은 명세에 없다 — 계좌이체가 통상이므로 보통예금으로 본다.
+        //   현금 지급이면 사장님이 수기로 대체분개한다("현금은 수기로").
+        using var tx = _db.BeginTransaction();
+        try
+        {
+            await AutoJournalHelper.RecordPayrollAsync(
+                _db, tx, tenantId, slipId, payDate.Date, gross, deduct,
+                "bank_transfer", actorId, memo, ct).ConfigureAwait(false);
+            tx.Commit();
+        }
+        catch (Exception)
+        {
+            try { tx.Rollback(); }
+            catch (Exception rbex) { System.Diagnostics.Trace.TraceWarning($"[PayrollService] 급여 기표 롤백 실패: {rbex.Message}"); }
+            throw;
+        }
     }
 
     public async Task CancelSlipAsync(string tenantId, string actorId, string slipId,

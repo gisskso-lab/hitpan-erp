@@ -391,17 +391,54 @@ public sealed class CompanyBootstrapProvisioner
                     transaction: tx, cancellationToken: ct));
             }
 
-            // 표준 8계정 시드 (12차 ACCOUNTS-SEED P0) — AutoJournalHelper 상수와 1:1. NOT EXISTS 로 재실행·마이그 보호.
+            // 표준 계정 시드 (12차 ACCOUNTS-SEED P0) — AutoJournalHelper 상수와 1:1. NOT EXISTS 로 재실행·마이그 보호.
+            //
+            // 🔴 20260827작4 (사장님 오더 "모든 돈의 흐름을 회계장부 하나로") — 8개 → 27개로 확장.
+            //   수금·지급·경비·급여를 기표하려면 그 상대계정이 accounts 에 **먼저 있어야** 한다.
+            //   journal_lines → accounts FK(fk_jl_account) 때문에, 없는 계정에 기표하면 FK 1452 로 죽는다.
+            //
+            //   ⚠️ 이 목록은 DB-111_chart_of_accounts_expand.sql 과 **반드시 같아야 한다.**
+            //   두 경로(신규 프로비저닝 / 기존 테넌트 마이그)가 갈리면, 한쪽 경로로 만들어진
+            //   고객만 특정 기표에서 FK 1452 로 죽는다 — 실제로 그 사고가 잠복해 있었다:
+            //   종전 프로비저너는 8개인데 DB-32 는 6개(14600·16900 없음)라, 마이그 경로 테넌트는
+            //   BOM 생산 확정이 죽는 상태였다. DB-111 이 그 둘도 같이 심어 일치시켰다.
+            //
+            // 🔴 현금(10100)은 **수기 입력** — 사장님 지시("현금은 수기로"). 자동 시재계산 없음.
+            //   복식부기 차·대 짝을 맞추기 위한 그릇으로만 존재한다.
             var stdAccounts = new (string Code, string Name, string Type)[]
             {
+                // 자산
+                ("10100", "현금", "asset"),
+                ("10300", "보통예금", "asset"),
                 ("10800", "외상매출금", "asset"),
-                ("17600", "부가세대급금", "asset"),
                 ("14600", "원재료", "asset"),
                 ("16900", "재공품", "asset"),
+                ("17600", "부가세대급금", "asset"),
+                // 부채
                 ("23200", "외상매입금", "liability"),
+                ("25300", "미지급금", "liability"),
+                ("25400", "예수금", "liability"),
                 ("25500", "부가세예수금", "liability"),
+                // 수익
                 ("40100", "상품매출", "revenue"),
+                // 비용 — 매출원가
                 ("50100", "상품매입", "expense"),
+                // 비용 — 판매비와관리비
+                ("80100", "급여", "expense"),
+                ("81100", "복리후생비", "expense"),
+                ("81200", "여비교통비", "expense"),
+                ("81300", "접대비", "expense"),
+                ("81400", "통신비", "expense"),
+                ("81500", "수도광열비", "expense"),
+                ("81700", "세금과공과", "expense"),
+                ("81900", "감가상각비", "expense"),
+                ("82100", "보험료", "expense"),
+                ("82200", "차량유지비", "expense"),
+                ("82500", "소모품비", "expense"),
+                ("82600", "지급수수료", "expense"),
+                ("82700", "광고선전비", "expense"),
+                ("83100", "지급임차료", "expense"),
+                ("84100", "잡비", "expense"),
             };
             foreach (var (code, name, type) in stdAccounts)
             {

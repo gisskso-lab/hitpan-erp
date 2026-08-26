@@ -163,6 +163,14 @@ public class CollectionService : ICollectionService
                 """,
                 new { TenantId = tenantId, request.PartnerId, request.Amount }, transaction: tx, cancellationToken: ct));
 
+            // 🔴 20260827작4 (사장님 오더 "모든 돈의 흐름을 회계장부 하나로") — 수금 자동기표.
+            //   차변 현금·보통예금 / 대변 외상매출금.
+            //   ⚠️ **같은 트랜잭션 안**이다 — 수금은 저장됐는데 분개만 빠지는 일이 없어야 한다.
+            //     기표가 실패하면 수금 저장도 함께 롤백된다(정합성 우선, 헌법 #20 아래 #42).
+            await AutoJournalHelper.RecordCollectionAsync(
+                _db, tx, tenantId, id, request.CollectionDate,
+                request.PartnerId, request.Amount, request.CollectionMethod, userId, ct);
+
             tx.Commit();
 
             // 감사로그 — 수금 생성
@@ -293,6 +301,12 @@ public class CollectionService : ICollectionService
                   last_updated_at = NOW(6)
                 """,
                 new { TenantId = tenantId, request.PartnerId, request.Amount }, transaction: tx, cancellationToken: ct));
+
+            // 🔴 20260827작4 — 지급 자동기표. 차변 외상매입금 / 대변 현금·보통예금.
+            //   수금(RecordCollectionAsync)의 정확한 반대. 같은 트랜잭션 안이다.
+            await AutoJournalHelper.RecordPaymentAsync(
+                _db, tx, tenantId, id, request.PaymentDate,
+                request.PartnerId, request.Amount, request.PaymentMethod, userId, ct);
 
             tx.Commit();
 
