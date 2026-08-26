@@ -137,7 +137,7 @@
            급여 담당자는 부모계정이 아닐 수 있고(경리 직원), 권한은 서버가 menu_code='PAYROLL'
            로 판정한다. 권한 없이 열면 목록 자리에 "볼 권한이 없습니다" 가 뜬다 —
            메뉴를 숨기는 것은 차단이 아니므로 서버가 진짜 관문이다. *@
-        <MudNavLink Href="/hr/payroll" Icon="@Icons.Material.Filled.Payments">급여 관리</MudNavLink>
+        <MudNavLink Href="/hr/payroll" Icon="@Icons.Material.Filled.Payments">급여 조회</MudNavLink>
 
         @* 근태 — 옛 [근태 달력]을 기간 버튼으로 흡수했다(같은 API·같은 7컬럼이었다). *@
         <MudNavLink Href="/hr/attendance" Icon="@Icons.Material.Filled.AccessTime">근태 관리</MudNavLink>
@@ -293,6 +293,7 @@
         <MudNavLink Href="/accounting/cashbook" Icon="@Icons.Material.Filled.AccountBalanceWallet">현금출납장</MudNavLink>
         <MudNavLink Href="/accounting/purchase-sales" Icon="@Icons.Material.Filled.MenuBook">매입매출장</MudNavLink>
         <MudNavLink Href="/accounting/vat" Icon="@Icons.Material.Filled.RequestPage">부가세 신고자료</MudNavLink>
+        <MudNavLink Href="/accounting/payroll" Icon="@Icons.Material.Filled.Payments">급여 관리</MudNavLink>
         <MudNavLink Href="/accounting/expenses" Icon="@Icons.Material.Filled.Receipt">경비 처리</MudNavLink>
         <MudNavLink Href="/accounting/profit" Icon="@Icons.Material.Filled.TrendingUp">손익 현황</MudNavLink>
         <MudNavLink Href="/accounting/bills" Icon="@Icons.Material.Filled.Receipt">어음 관리</MudNavLink>

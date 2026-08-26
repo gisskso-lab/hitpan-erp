@@ -361,7 +361,7 @@ else
         if (go != true) return;
 
         // 발송이 아니라 ★발송 확인 화면으로 이동★ 이다.
-        var target = "/hr/payroll?send=1";
+        var target = "/accounting/payroll?send=1";
         if (!string.IsNullOrEmpty(res.RefId))
             target += $"&slip={Uri.EscapeDataString(res.RefId)}";
         Nav.NavigateTo(target);

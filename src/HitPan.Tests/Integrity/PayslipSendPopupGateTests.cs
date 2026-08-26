@@ -148,7 +148,7 @@ public sealed class PayslipSendPopupGateTests
     {
         var page = CodeLines(ReadSource("src", "HitPan.Web", "Pages", "Approval", "ApprovalManagePage.razor"));
 
-        Assert.Contains("/hr/payroll", page);
+        Assert.Contains("/accounting/payroll", page);
 
         // 이 화면에서 메일을 직접 보내면 안 된다.
         Assert.DoesNotContain("send-mail", page);
@@ -173,7 +173,7 @@ public sealed class PayslipSendPopupGateTests
     [Fact]
     public void 급여화면이_발송요청과_명세서id를_받는다()
     {
-        var page = CodeLines(ReadSource("src", "HitPan.Web", "Pages", "HR", "PayrollPage.razor"));
+        var page = CodeLines(ReadSource("src", "HitPan.Web", "Pages", "Finance", "PayrollManagePage.razor"));
 
         Assert.Contains("SupplyParameterFromQuery(Name = \"send\")", page);
         Assert.Contains("SupplyParameterFromQuery(Name = \"slip\")", page);
