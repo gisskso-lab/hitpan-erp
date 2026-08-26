@@ -1,0 +1,184 @@
+@page "/accounting/ledger"
+@namespace HitPan.Web.Pages.FinanceUi
+@attribute [Authorize]
+@using HitPan.Web.Models
+@using HitPan.Web.Services
+@inject AccountService AccSvc
+
+@* 🔴 20260827작4 — 회계장부 1차: 합계잔액시산표
+     ─────────────────────────────────────────────────────────────────────
+     사장님 오더(2026-08-27):
+       "매입매출, 그밖에 모든 돈의 흐름을 한번에, 전체 돈 숫자가 모이는 곳 : 회계장부"
+       "13개의 모든 돈 흐름이 모이는 회계장부가 필요한데, 회계에선 이게 핵심인데,
+        이 기능이 빠졌네"
+
+     🔴 왜 이게 없었나 — journal_entries/journal_lines 를 **읽는 화면이 0건**이었다.
+       13개 회계 화면이 전부 원본 테이블을 각자 직독한다.
+       분개를 쌓기만 하고 여는 문이 없었다. 이 화면이 그 첫 문이다.
+
+     결재 = 「한 화면씩 탄탄하게」(사장님) ⇒ 4탭을 한꺼번에 만들지 않고
+       **시산표 하나부터**. 분개장·총계정원장·거래처원장은 다음 차수. *@
+
+<PageTitle>회계장부</PageTitle>
+<PageHeader Title="회계장부"
+            Subtitle="합계잔액시산표 · 모든 돈의 흐름이 모이는 곳" />
+
+<MudPaper Elevation="0" Class="pa-3 mb-3 hitpan-card">
+    <div class="hitpan-filter-bar">
+        <div class="hitpan-filter-field hitpan-filter-field--sm">
+            <MudDatePicker @bind-Date="_from" Label="시작일" Variant="Variant.Outlined"
+                           Margin="Margin.Dense" DateFormat="yyyy-MM-dd" />
+        </div>
+        <div class="hitpan-filter-field hitpan-filter-field--sm">
+            <MudDatePicker @bind-Date="_to" Label="종료일" Variant="Variant.Outlined"
+                           Margin="Margin.Dense" DateFormat="yyyy-MM-dd" />
+        </div>
+        <div class="hitpan-filter-actions">
+            <MudButton Variant="Variant.Filled" Color="Color.Primary"
+                       Disabled="@_loading" OnClick="LoadAsync">조회</MudButton>
+        </div>
+    </div>
+</MudPaper>
+
+@if (_loading)
+{
+    <MudProgressLinear Indeterminate="true" Color="Color.Primary" />
+}
+else if (_data is null)
+{
+    @* 🔴 실패와 「0건」을 구분한다. 이게 없으면 고장이 빈 화면으로 위장된다.
+         회계는 숫자가 근거라 "비었나 고장났나" 를 모르면 담당자가 판단을 못 한다. *@
+    <MudAlert Severity="Severity.Error" Class="ma-2">
+        회계장부를 불러오지 못했습니다. 권한이 없거나 연결에 문제가 있을 수 있습니다.
+        <MudButton Variant="Variant.Text" Color="Color.Inherit" OnClick="LoadAsync">다시 시도</MudButton>
+    </MudAlert>
+}
+else
+{
+    @* ── 검산 결과 — 경리가 가장 먼저 보는 한 줄 ────────────────────────
+         🔴 시산표의 존재 이유가 이것이다. 좌우가 안 맞으면 장부가 틀렸다는 뜻. *@
+    @if (_data.Rows.Count == 0)
+    {
+        <MudAlert Severity="Severity.Info" Class="mb-3">
+            이 기간에 기록된 회계 전표가 없습니다.
+        </MudAlert>
+    }
+    else if (_data.IsBalanced)
+    {
+        <MudAlert Severity="Severity.Success" Dense="true" Class="mb-3">
+            <b>차변과 대변이 맞습니다.</b> (양쪽 모두 @_data.TotalDebit.ToString("N0") 원)
+        </MudAlert>
+    }
+    else
+    {
+        @* 실무에서 이건 즉시 조치 대상이다 — 그래서 Error 로 크게 띄운다. *@
+        <MudAlert Severity="Severity.Error" Dense="true" Class="mb-3">
+            <b>차변과 대변이 맞지 않습니다.</b>
+            차변 @_data.TotalDebit.ToString("N0") · 대변 @_data.TotalCredit.ToString("N0") ·
+            차이 <b>@((_data.TotalDebit - _data.TotalCredit).ToString("N0"))</b> 원.
+            회계 담당자 확인이 필요합니다.
+        </MudAlert>
+    }
+
+    @* ── 아직 장부에 안 들어오는 업무 안내 ──────────────────────────────
+         🔴 이게 없으면 담당자가 "수금 100건인데 장부엔 0건" 을 보고 고장으로 오해한다.
+           없는 것을 없다고 말해주는 것도 기능이다(히트판 정신 — 쉬움).
+         ⚠️ 3·4차에서 기표가 붙으면 이 안내는 저절로 사라진다. *@
+    @if (_data.UnpostedCount > 0)
+    {
+        <MudAlert Severity="Severity.Warning" Dense="true" Class="mb-3">
+            아래 업무는 <b>아직 회계장부에 반영되지 않습니다</b> —
+            @string.Join(" · ", _data.UnpostedSources).
+            현재 장부에는 <b>매입·판매·생산·계산서</b>만 모입니다.
+            (수금·지급·경비 연결은 준비 중입니다)
+        </MudAlert>
+    }
+
+    <MudPaper Elevation="0" Class="hitpan-card" Style="overflow:hidden">
+        <MudTable T="TrialBalanceRowModel" Items="_data.Rows" Dense="true" Hover="true"
+                  Striped="true" FixedHeader="true" Height="calc(100vh - 400px)">
+            <HeaderContent>
+                <MudTh Style="width:110px">계정코드</MudTh>
+                <MudTh>계정과목</MudTh>
+                <MudTh Style="width:90px">구분</MudTh>
+                <MudTh Style="text-align:right;width:150px">차변</MudTh>
+                <MudTh Style="text-align:right;width:150px">대변</MudTh>
+                <MudTh Style="text-align:right;width:160px">잔액</MudTh>
+            </HeaderContent>
+            <RowTemplate>
+                <MudTd>@context.AccountCode</MudTd>
+                <MudTd>@context.AccountName</MudTd>
+                <MudTd>
+                    <MudChip T="string" Size="Size.Small" Variant="Variant.Text"
+                             Color="@TypeColor(context.AccountType)">@context.AccountTypeLabel</MudChip>
+                </MudTd>
+                <MudTd Style="text-align:right">@Money(context.DebitTotal)</MudTd>
+                <MudTd Style="text-align:right">@Money(context.CreditTotal)</MudTd>
+                <MudTd Style="text-align:right;font-weight:500">@Money(context.Balance)</MudTd>
+            </RowTemplate>
+            <FooterContent>
+                <MudTFootRow>
+                    <MudTh colspan="3" Style="text-align:right;font-weight:600">합계</MudTh>
+                    <MudTh Style="text-align:right;font-weight:600">@Money(_data.TotalDebit)</MudTh>
+                    <MudTh Style="text-align:right;font-weight:600">@Money(_data.TotalCredit)</MudTh>
+                    <MudTh Style="text-align:right;font-weight:600">
+                        @if (_data.IsBalanced)
+                        {
+                            <MudText Typo="Typo.body2" Color="Color.Success">일치</MudText>
+                        }
+                        else
+                        {
+                            <MudText Typo="Typo.body2" Color="Color.Error">불일치</MudText>
+                        }
+                    </MudTh>
+                </MudTFootRow>
+            </FooterContent>
+            <NoRecordsContent>
+                <MudText Class="pa-4" Style="color:var(--hitpan-text-faint)">
+                    이 기간에 기록된 회계 전표가 없습니다.
+                </MudText>
+            </NoRecordsContent>
+        </MudTable>
+    </MudPaper>
+}
+
+@code {
+    // 🔴 기본 = 당월. 무기한 조회를 허용하면 전표 수만 건에서 화면이 죽는다.
+    private DateTime? _from = new DateTime(DateTime.Today.Year, DateTime.Today.Month, 1);
+    private DateTime? _to = DateTime.Today;
+
+    private bool _loading;
+
+    /// <summary>🔴 null = <b>조회 실패</b>. 빈 목록(0건)과 구분한다.</summary>
+    private TrialBalanceModel? _data;
+
+    protected override async Task OnInitializedAsync() => await LoadAsync();
+
+    private async Task LoadAsync()
+    {
+        _loading = true;
+        StateHasChanged();
+        try
+        {
+            _data = await AccSvc.GetTrialBalanceAsync(_from, _to);
+        }
+        finally
+        {
+            _loading = false;
+            StateHasChanged();
+        }
+    }
+
+    /// <summary>0 원은 흐리게 — 숫자가 빽빽하면 현장에서 안 읽힌다.</summary>
+    private static string Money(decimal v) => v == 0 ? "-" : v.ToString("N0");
+
+    private static Color TypeColor(string type) => type switch
+    {
+        "asset" => Color.Info,
+        "liability" => Color.Warning,
+        "equity" => Color.Secondary,
+        "revenue" => Color.Success,
+        "expense" => Color.Error,
+        _ => Color.Default
+    };
+}
