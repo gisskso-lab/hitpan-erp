@@ -65,10 +65,40 @@ public sealed class EmailController : HitPanControllerBase
         return Ok(rows);
     }
 
+    /// <summary>
+    /// 문서 PDF 미리보기. <b>거래문서 전용</b>이다.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// 🔴 <b>20260826작6 W5 봉합 — 급여명세서를 여기서 막는다.</b>
+    /// </para>
+    /// <para>
+    /// 이 API 는 <c>[Authorize(TenantOnly)]</c> 뿐이라 <b>같은 회사 직원이면 누구나</b> 부를 수 있고,
+    /// <c>documentType</c>·<c>documentId</c> 를 <b>그대로 받아</b> 렌더로 넘긴다.
+    /// <c>RenderDocumentAsync</c> 는 <c>tenant_id</c> 만 보고 <b>사원 확인을 하지 않는다</b>.
+    /// </para>
+    /// <para>
+    /// ⇒ W1 에서 <c>payslip</c> 을 문서타입으로 등록하는 순간 <b>이 길로 남의 급여명세서가 나갔다.</b>
+    /// 실측으로 확인했다 — 평직원이 사장님 명세서 id 로 불러 <b>PDF 27KB 가 그대로 나왔다</b>
+    /// (<i>급여명세서_사장님_2026-08.pdf</i>).
+    /// </para>
+    /// <para>
+    /// 🔴 급여명세서는 <c>GET /api/payroll/slips/{{slipId}}/pdf</c> 로만 받는다 —
+    /// 거기서 <b>본인 것인지</b> 를 확인한다. 거래문서 흐름은 <b>한 줄도 건드리지 않았다</b>(헌법 #1).
+    /// </para>
+    /// </remarks>
     [HttpGet("preview-pdf")]
     public async Task<IActionResult> PreviewPdf([FromQuery] string documentType, [FromQuery] string documentId, CancellationToken ct)
     {
         if (EnsureTenant() is { } err) return err;
+
+        // 🔴 급여명세서는 이 문으로 못 나간다. 여기엔 사원 확인이 없다.
+        if (string.Equals(documentType, HitPan.Application.Services.PdfRenderService.PayslipDocType,
+                StringComparison.OrdinalIgnoreCase))
+        {
+            return Forbid();
+        }
+
         var (bytes, fname) = await _pdf.RenderDocumentAsync(TenantId!, documentType, documentId, ct).ConfigureAwait(false);
         return File(bytes, "application/pdf", fname);
     }

@@ -37,4 +37,26 @@ public interface IPayslipMailService
     /// </remarks>
     Task<SendPayslipMailResponse> SendAsync(string tenantId, string? actorUserId,
         SendPayslipMailRequest request, CancellationToken ct = default);
+
+    /// <summary>
+    /// 이 명세서를 <b>직원에게 내보내도 되는가</b> — 메일·그룹웨어 <b>공통 관문</b>. 20260826작6 W5.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// 🔴 <b>메일과 그룹웨어가 같은 기준이어야 한다</b>(§6①). 한쪽만 열면 축이 갈린다 —
+    /// 메일은 안 갔는데 그룹웨어에서는 받아지는 상태가 되고, <b>금액이 바뀔 수 있는 명세서</b>가
+    /// 직원에게 간다.
+    /// </para>
+    /// <para>
+    /// ⚠️ 그래서 판정을 <b>따로 적지 않는다</b> — 발송이 쓰는 그 판정을 그대로 부른다.
+    /// 두 곳에 같은 규칙을 적으면 언젠가 한쪽만 고쳐진다.
+    /// </para>
+    /// <para>
+    /// 🔴 <b>본인 것인지</b> 는 여기서 보지 않는다. 그건 컨트롤러가 <c>employee_id</c> 로 본다 —
+    /// 이 판정은 <i>"이 명세서가 나가도 되는 상태인가"</i> 만 답한다.
+    /// </para>
+    /// </remarks>
+    /// <returns>내보내도 되면 <c>(true, null)</c>, 아니면 <c>(false, 사유 이름표)</c>.</returns>
+    Task<(bool CanDeliver, string? Reason)> CanDeliverAsync(string tenantId, string slipId,
+        CancellationToken ct = default);
 }

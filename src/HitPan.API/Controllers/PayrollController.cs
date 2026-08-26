@@ -345,6 +345,66 @@ public sealed class PayrollController : ControllerBase
     }
 
     // ═══════════════════════════════════════════════════════════════
+    //  급여명세서 PDF 내려받기 — 20260826작6 W5 (그룹웨어 게시 ⑥)
+    // ═══════════════════════════════════════════════════════════════
+
+    /// <summary>
+    /// 급여명세서 PDF. 🔴 <b>본인 것만</b> 받는다.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// 사장님 ⑥결재(2026-08-26): <i>"급여명세서는 이메일로도 받고,
+    /// <b>본인것만 그룹웨어에서도 확인, 다운로드 가능</b>함."</i>
+    /// </para>
+    /// <para>
+    /// 🔴 <b>이 문이 왜 따로 필요한가</b> — <c>/api/email/preview-pdf</c> 는 문서종류·id 를
+    /// 그대로 받아 렌더로 넘기고 <b>사원 확인을 하지 않는다</b>. W1 에서 <c>payslip</c> 을
+    /// 문서타입으로 등록하는 순간 그 길로 <b>남의 급여명세서가 나갔다</b>(실측 확인).
+    /// 그쪽은 막고, 급여명세서는 <b>여기로만</b> 받게 한다.
+    /// </para>
+    /// <para>
+    /// ⚠️ <c>[RequirePermission]</c> 을 <b>일부러 안 걸었다</b> — 걸면 일반 직원이
+    /// <b>자기 명세서도 못 받는다</b>. 조회(<c>GetSlip</c>)와 <b>같은 방식</b>으로 범위를 좁힌다.
+    /// </para>
+    /// <para>
+    /// 🔴 <b>결재 승인 전에는 못 받는다</b> — 메일과 <b>같은 기준</b>이다(§6①).
+    /// 한쪽만 열면 축이 갈린다: 메일은 안 갔는데 그룹웨어에서는 받아지는 상태가 된다.
+    /// 금액이 바뀔 수 있는 명세서가 나가면 <b>직원이 틀린 금액을 받는다</b>.
+    /// </para>
+    /// </remarks>
+    [HttpGet("slips/{slipId}/pdf")]
+    public async Task<IActionResult> GetSlipPdf(string slipId,
+        [FromServices] IPdfRenderService pdf, CancellationToken ct)
+    {
+        var tenantId = HttpContext.Items["TenantId"]?.ToString();
+        if (string.IsNullOrEmpty(tenantId)) return Forbid();
+
+        var dto = await _service.GetSlipAsync(tenantId, slipId, ct).ConfigureAwait(false);
+        if (dto is null) return NotFound();
+
+        // 🔴 남의 급여면 막는다. GetSlip 과 같은 판정이다 —
+        //    조회만 막고 PDF 를 열어두면 막은 것이 아니다.
+        if (!await CanSeeOthersAsync().ConfigureAwait(false)
+            && dto.EmployeeId != CurrentEmployeeId())
+        {
+            return Forbid();
+        }
+
+        // 🔴 발송 기준과 같은 관문을 통과해야 받을 수 있다(확정 + 필요 시 결재 승인).
+        var (canGet, reason) = await _payslipMail
+            .CanDeliverAsync(tenantId, slipId, ct).ConfigureAwait(false);
+
+        if (!canGet)
+            return BadRequest(new { message = $"아직 받을 수 없는 명세서입니다. ({reason})" });
+
+        var (bytes, fileName) = await pdf
+            .RenderDocumentAsync(tenantId, HitPan.Application.Services.PdfRenderService.PayslipDocType, slipId, ct)
+            .ConfigureAwait(false);
+
+        return File(bytes, "application/pdf", fileName);
+    }
+
+    // ═══════════════════════════════════════════════════════════════
     //  급여명세서 일괄 메일발송 — 20260826작6 W4
     // ═══════════════════════════════════════════════════════════════
 

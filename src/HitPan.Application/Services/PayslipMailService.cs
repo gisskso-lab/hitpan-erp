@@ -198,6 +198,66 @@ public sealed class PayslipMailService : IPayslipMailService
     }
 
     // ═══════════════════════════════════════════════════════════════
+    //  공통 관문 — 메일·그룹웨어가 같은 기준을 쓴다 (W5)
+    // ═══════════════════════════════════════════════════════════════
+
+    /// <summary>
+    /// 이 명세서를 직원에게 <b>내보내도 되는가</b>. 메일·그룹웨어 <b>공통</b>.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// 🔴 판정을 <b>다시 적지 않는다</b> — 발송이 쓰는 <see cref="ToTarget"/> 를 그대로 부른다.
+    /// 두 곳에 같은 규칙을 적으면 언젠가 한쪽만 고쳐져서, <b>메일은 안 갔는데 그룹웨어에서는
+    /// 받아지는</b> 상태가 된다(§6① — 한쪽만 열면 축이 갈린다).
+    /// </para>
+    /// <para>
+    /// ⚠️ <b>이메일 없음은 여기서 막지 않는다.</b> 그건 <i>메일을 못 보내는</i> 사유일 뿐,
+    /// <i>그룹웨어에서 못 받을</i> 사유가 아니다. 이메일이 없는 직원도 <b>그룹웨어에서는
+    /// 자기 명세서를 받아야 한다</b> — 여기서 막으면 그 직원만 영영 못 본다(#20).
+    /// </para>
+    /// </remarks>
+    public async Task<(bool CanDeliver, string? Reason)> CanDeliverAsync(string tenantId, string slipId,
+        CancellationToken ct = default)
+    {
+        await EnsureOpenAsync(ct).ConfigureAwait(false);
+
+        var row = await _db.QueryFirstOrDefaultAsync<SlipRow>(new CommandDefinition(
+            """
+            SELECT
+              s.slip_id     AS SlipId,
+              s.employee_id AS EmployeeId,
+              s.status      AS Status,
+              EXISTS (
+                SELECT 1 FROM approval_documents a
+                 WHERE a.tenant_id = s.tenant_id
+                   AND a.doc_type  = @DocType
+                   AND a.ref_id    = s.slip_id
+                   AND a.status    = 'approved'
+              ) AS IsApproved
+            FROM payroll_slips s
+            WHERE s.tenant_id = @TenantId AND s.slip_id = @SlipId
+            """,
+            new { TenantId = tenantId, SlipId = slipId, DocType = PayslipDocType },
+            cancellationToken: ct)).ConfigureAwait(false);
+
+        if (row is null) return (false, "명세서를 찾을 수 없습니다");
+
+        var approvalRequired = await IsApprovalRequiredAsync(tenantId, ct).ConfigureAwait(false);
+
+        // 🔴 발송과 ★같은 판정★. 여기에 규칙을 새로 적지 않는다.
+        var target = ToTarget(row, approvalRequired);
+
+        // 이메일 없음은 그룹웨어 다운로드를 막을 사유가 아니다 — 메일만의 사정이다.
+        if (!target.CanSend
+            && !string.Equals(target.BlockReason, PayslipSendBlockReasons.NoEmail, StringComparison.Ordinal))
+        {
+            return (false, target.BlockReasonLabel);
+        }
+
+        return (true, null);
+    }
+
+    // ═══════════════════════════════════════════════════════════════
     //  판정
     // ═══════════════════════════════════════════════════════════════
 
