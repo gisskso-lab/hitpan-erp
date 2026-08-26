@@ -22,6 +22,10 @@
             </MudTh>
             <MudTh>일자</MudTh>
             <MudTh>전표번호</MudTh>
+            @* 🔴 20260827작3 — 사장님 실측 반려: "반품과 매입 연결에 대한 반품목록 그리드,
+                 매입전표목록 그리드에 표기를 정확하게 해".
+                 종전엔 이 칸이 없어, 담당자가 반품목록만 보고는 **어느 매입 건인지 알 수 없었다.** *@
+            <MudTh>원 매입전표</MudTh>
             <MudTh>업체</MudTh>
             @* 20260825작16 — 사장님 지시: 판매관리 전표 목록과 마찬가지로 작성자를 보인다 *@
             <MudTh>작성자</MudTh>
@@ -39,6 +43,19 @@
             </MudTd>
             <MudTd @ondblclick="@(() => SelectRowAsync(context))" style="cursor:pointer">@context.ReturnDate.ToString("yyyy-MM-dd")</MudTd>
             <MudTd @ondblclick="@(() => SelectRowAsync(context))" style="cursor:pointer">@context.ReturnNo</MudTd>
+            @* 🔴 20260827작3 — 어느 매입에서 나온 반품인가.
+                 ⚠️ 빈칸으로 두지 않는다 — 값이 없는 것과 화면이 빠뜨린 것을 구분 못 하면
+                   담당자가 "누락됐나" 하고 다시 확인해야 한다. 없으면 「직접작성」이라고 말해준다. *@
+            <MudTd @ondblclick="@(() => SelectRowAsync(context))" style="cursor:pointer">
+                @if (!string.IsNullOrWhiteSpace(context.ReceiptNo))
+                {
+                    <span>@context.ReceiptNo</span>
+                }
+                else
+                {
+                    <MudText Typo="Typo.caption" Color="Color.Secondary">직접작성</MudText>
+                }
+            </MudTd>
             <MudTd @ondblclick="@(() => SelectRowAsync(context))" style="cursor:pointer">@context.PartnerName</MudTd>
             <MudTd @ondblclick="@(() => SelectRowAsync(context))" style="cursor:pointer">@(context.CreatedByName ?? "")</MudTd>
             <MudTd @ondblclick="@(() => SelectRowAsync(context))" style="cursor:pointer">@HitPan.Web.Helpers.StatusLabel.Document(context.Status)</MudTd>

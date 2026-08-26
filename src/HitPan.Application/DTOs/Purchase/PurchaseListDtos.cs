@@ -61,6 +61,22 @@ public class PurchaseReceiptListDto
     /// </remarks>
     public string? ReturnStatus { get; set; }
 
+    /// <summary>
+    /// 🔴 20260827작3 (사장님 실측 반려) — <b>이 매입이 어느 반품전표로 나갔는가.</b>
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// 종전엔 <see cref="ReturnStatus"/> 로 「반품」 <b>글자만</b> 보여줬다. 담당자는
+    /// <b>반품이 있다는 사실</b>만 알 뿐 <b>어느 반품전표인지</b> 알 수 없어,
+    /// 반품목록에서 눈으로 찾아 맞춰야 했다 — 그게 사장님이 말씀하신 정합성 불일치다.
+    /// </para>
+    /// <para>
+    /// ⚠️ 반품이 <b>둘 이상</b>일 수 있다(부분반품을 나눠서 한 경우). 그래서 하나가 아니라
+    /// <c>GROUP_CONCAT</c> 으로 <b>전부</b> 보여준다. 하나만 보여주면 나머지가 숨는다.
+    /// </para>
+    /// </remarks>
+    public string? ReturnNos { get; set; }
+
     /// <summary>작성자 이름 — employees.user_id = created_by 조인 (20260825작16).
     /// 판매 전표의 「작성자」와 같은 축이다. 담당사원(EmployeeId)과는 다른 값 —
     /// 담당자는 지정하는 사람, 작성자는 실제로 전표를 친 사람이다.
@@ -183,4 +199,27 @@ public class PurchaseReturnListDto
     /// 담당자는 지정하는 사람, 작성자는 실제로 전표를 친 사람이다.
     /// ⚠️ 과거 전표는 비어 있다. 매입 경로가 created_by 를 쓰기 시작한 게 이번이라서다.</summary>
     public string? CreatedByName { get; set; }
+
+    /// <summary>
+    /// 🔴 20260827작3 (사장님 실측 반려) — <b>이 반품이 어느 매입전표에서 나왔는가.</b>
+    /// </summary>
+    /// <remarks>
+    /// 사장님 지시: <i>"반품시 매입전표 어떤항목을 불러와서 반품을 했는지, 반품과 매입 연결에 대한
+    /// 반품목록 그리드, 매입전표목록 그리드에 표기를 정확하게 해"</i>
+    ///
+    /// <para>
+    /// ⚠️ <c>purchase_returns.receipt_id</c> 는 <b>진작부터 DB 에 있었다.</b> 그런데
+    /// DTO 에도 SELECT 에도 없어서 <b>화면에 표기할 값 자체가 안 내려왔다.</b>
+    /// 담당자가 반품목록만 보고는 어느 매입 건인지 알 방법이 없었다.
+    /// </para>
+    ///
+    /// <para>
+    /// ⚠️ <b>비어 있을 수 있다</b> — 매입명세서 없이 직접 작성한 반품은 NULL 이다.
+    /// 화면은 그 경우 「직접작성」으로 보여준다(빈칸이면 누락처럼 보인다).
+    /// </para>
+    /// </remarks>
+    public string? ReceiptId { get; set; }
+
+    /// <summary>원 매입전표 번호(사람이 읽는 값). <see cref="ReceiptId"/> 참조.</summary>
+    public string? ReceiptNo { get; set; }
 }

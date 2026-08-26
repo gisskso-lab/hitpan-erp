@@ -70,6 +70,9 @@
             @* 20260825작16 — 사장님 지시: 판매관리 전표 목록과 마찬가지로 작성자를 보인다 *@
             <MudTh>작성자</MudTh>
             <MudTh>상태</MudTh>
+            @* 🔴 20260827작3 — 사장님 실측 반려: "반품과 매입 연결에 대한 ... 매입전표목록 그리드에
+                 표기를 정확하게 해". 종전엔 「반품」 칩만 있어 **어느 반품전표인지** 알 수 없었다. *@
+            <MudTh>반품전표</MudTh>
             <MudTh Class="text-right">합계</MudTh>
             <MudTh Style="width:56px"></MudTh>
         </HeaderContent>
@@ -113,6 +116,19 @@
                 else
                 {
                     <MudChip T="string" Size="Size.Small" Color="Color.Default" Variant="Variant.Outlined">@HitPan.Web.Helpers.StatusLabel.PurchaseReceipt(context.Status)</MudChip>
+                }
+            </MudTd>
+            @* 🔴 20260827작3 — 이 매입이 어느 반품전표로 나갔는가.
+                 ⚠️ 부분반품을 나눠서 하면 둘 이상이라 쉼표로 전부 온다(ReturnNos).
+                 ⚠️ 반품이 없으면 「-」 — 빈칸이면 "표기를 빠뜨렸나" 로 읽힌다. *@
+            <MudTd @ondblclick="@(() => SelectRowAsync(context))" style="cursor:pointer">
+                @if (!string.IsNullOrWhiteSpace(context.ReturnNos))
+                {
+                    <MudText Typo="Typo.body2" Color="Color.Error">@context.ReturnNos</MudText>
+                }
+                else
+                {
+                    <MudText Typo="Typo.caption" Color="Color.Secondary">-</MudText>
                 }
             </MudTd>
             <MudTd Class="text-right" @ondblclick="@(() => SelectRowAsync(context))" style="cursor:pointer">@context.TotalAmount.ToString("N0")</MudTd>
