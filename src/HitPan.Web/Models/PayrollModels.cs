@@ -206,3 +206,58 @@ public static class SeverancePayTypeLabels
     public static string Of(string? code)
         => string.IsNullOrWhiteSpace(code) ? "" : (Map.TryGetValue(code, out var v) ? v : code);
 }
+
+// ══════════════════════════════════════════════════════════════════════
+//  급여명세서 일괄 메일발송 — 20260826작6 W6
+// ══════════════════════════════════════════════════════════════════════
+
+/// <summary>발송 대상 한 사람 — <b>보낼 수 있는지</b>와 <b>못 보내면 왜인지</b>.</summary>
+/// <remarks>
+/// 🔴 <c>RecipientEmail</c> 을 <b>그대로 보여준다</b> — 경리가 눈으로 오입력을 잡는다.
+/// 오입력이면 <b>남의 메일함에 그 직원 연봉</b>이 간다.
+/// </remarks>
+public class PayslipSendTargetModel
+{
+    public string SlipId { get; set; } = string.Empty;
+    public string EmployeeId { get; set; } = string.Empty;
+    public string EmployeeName { get; set; } = string.Empty;
+    public string? DeptName { get; set; }
+    public string? RecipientEmail { get; set; }
+    public bool CanSend { get; set; }
+    public string? BlockReason { get; set; }
+    public string BlockReasonLabel { get; set; } = string.Empty;
+}
+
+/// <summary>발송 전 확인 화면이 받는 것.</summary>
+public class PayslipSendPreviewModel
+{
+    public int Year { get; set; }
+    public int Month { get; set; }
+    public bool ApprovalRequired { get; set; }
+    public List<PayslipSendTargetModel> Targets { get; set; } = new();
+
+    public int SendableCount => Targets.Count(t => t.CanSend);
+    public int BlockedCount => Targets.Count(t => !t.CanSend);
+}
+
+/// <summary>발송 결과 한 건.</summary>
+public class PayslipSendResultItemModel
+{
+    public string SlipId { get; set; } = string.Empty;
+    public string EmployeeName { get; set; } = string.Empty;
+    public string? RecipientEmail { get; set; }
+    public bool Success { get; set; }
+    public string? Error { get; set; }
+}
+
+/// <summary>일괄 발송 결과. 🔴 <b>뭉뚱그린 "발송 완료" 가 아니다</b>.</summary>
+public class SendPayslipMailResultModel
+{
+    public List<PayslipSendResultItemModel> Items { get; set; } = new();
+
+    public int SuccessCount => Items.Count(i => i.Success);
+    public int FailedCount => Items.Count(i => !i.Success);
+
+    /// <summary>실패한 명세서 id — <b>실패분만 재발송</b>할 때 그대로 다시 넘긴다.</summary>
+    public List<string> FailedSlipIds => Items.Where(i => !i.Success).Select(i => i.SlipId).ToList();
+}
