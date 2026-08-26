@@ -80,28 +80,30 @@
             <MudTd @ondblclick="@(() => SelectRowAsync(context))" style="cursor:pointer">@context.PartnerName</MudTd>
             <MudTd @ondblclick="@(() => SelectRowAsync(context))" style="cursor:pointer">@(context.CreatedByName ?? "")</MudTd>
             <MudTd @ondblclick="@(() => SelectRowAsync(context))" style="cursor:pointer">
-                @if (IsConfirmed(context))
+                @* 🔴 20260826작5 — 사장님 지시: "반품처리된 전표는 상태처리를 「반품」이라고 표기할것.
+                     전표에 전부 매입확정이라고만 나옴" ·
+                     "반품 했다고 매입이 지워지는게 아니라, **전표 상태가 변경되면 됨. 이 방법이 가장 쉬움**"
+
+                     🔴 "매입확정이던 임시저장상태이던, **최종 상태는 반품**이잖아.
+                        그럼 반품으로 상태변경이 맞지." (사장님)
+                     ⇒ 반품이 있으면 **직전 상태가 무엇이든 「반품」**이다. 반품이 최종 상태다.
+
+                     ⇒ 상태 칸은 **하나**다. 칩을 나란히 두지 않는다 — 화면이 복잡해지면
+                       현장에서 한눈에 안 읽힌다(히트판은 쉬움으로 이겼다).
+
+                     ⚠️ 바뀌는 것은 **보이는 상태뿐**이다. DB 의 status 는 그대로 둔다 —
+                       매입확정 사실이 지워지면 원장·부가세가 어긋난다. *@
+                @if (context.ReturnStatus == "confirmed")
+                {
+                    <MudChip T="string" Size="Size.Small" Color="Color.Error" Variant="Variant.Filled">반품</MudChip>
+                }
+                else if (IsConfirmed(context))
                 {
                     <MudChip T="string" Size="Size.Small" Color="Color.Success" Variant="Variant.Filled">매입확정</MudChip>
                 }
                 else
                 {
                     <MudChip T="string" Size="Size.Small" Color="Color.Default" Variant="Variant.Outlined">@HitPan.Web.Helpers.StatusLabel.PurchaseReceipt(context.Status)</MudChip>
-                }
-                @* 🔴 20260826작5 — 사장님 지시: "반품처리된 전표는 상태처리를 「반품」이라고 표기할것.
-                     전표에 전부 매입확정이라고만 나옴".
-
-                     ⚠️ 매입확정 칩을 **지우지 않고 옆에 붙인다.** 반품했다고 매입이 취소된 게 아니다 —
-                        샀다가 돌려준 것이지 안 산 게 아니라서, 두 사실이 다 남아야 장부와 맞는다.
-                     ⚠️ 작성중(draft)과 확정을 구분한다. "반품" 하나로 뭉치면 아직 확정 안 한 반품이
-                        이미 처리된 것처럼 보여 담당자가 확정을 건너뛴다. *@
-                @if (context.ReturnStatus == "confirmed")
-                {
-                    <MudChip T="string" Size="Size.Small" Color="Color.Error" Variant="Variant.Filled" Class="ml-1">반품</MudChip>
-                }
-                else if (context.ReturnStatus == "draft")
-                {
-                    <MudChip T="string" Size="Size.Small" Color="Color.Warning" Variant="Variant.Outlined" Class="ml-1">반품작성중</MudChip>
                 }
             </MudTd>
             <MudTd Class="text-right" @ondblclick="@(() => SelectRowAsync(context))" style="cursor:pointer">@context.TotalAmount.ToString("N0")</MudTd>
