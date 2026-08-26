@@ -301,7 +301,43 @@ else
         CloseOnEscapeKey = true
     };
 
-    protected override async Task OnInitializedAsync() => await LoadAsync();
+    /// <summary>결재 승인 팝업에서 넘어왔는가 — <c>?send=1</c>. 20260826작6 W3.</summary>
+    [Parameter, SupplyParameterFromQuery(Name = "send")] public string? SendQuery { get; set; }
+
+    /// <summary>발송 대상 명세서 id — <c>?slip=</c>. 이 명세서의 귀속 연·월로 화면을 연다.</summary>
+    [Parameter, SupplyParameterFromQuery(Name = "slip")] public string? SlipQuery { get; set; }
+
+    protected override async Task OnInitializedAsync()
+    {
+        // 🔴 승인된 명세서의 귀속 연·월로 맞춰서 연다.
+        //    맞추지 않으면 빈 화면이 열린다 — 이 화면 기본값은 ★이번 달★ 인데 승인된 명세서는
+        //    ★지난달분★ 인 경우가 흔하다(8월에 7월분 급여를 승인). 그대로 열면 "발송하러 왔는데
+        //    명세가 없습니다" 가 되어 사장님이 누른 Y 가 막다른 길이 된다(헌법 #20).
+        //
+        // ⚠️ 명세서를 못 읽어도 ★화면은 연다★. 연·월이 기본값으로 남을 뿐이고 직접 골라
+        //    발송할 수 있다. 여기서 막으면 그게 또 막다른 길이다.
+        if (!string.IsNullOrWhiteSpace(SlipQuery))
+        {
+            var slip = await PayrollSvc.GetSlipAsync(SlipQuery);
+            if (slip is not null && slip.PayYear > 0 && slip.PayMonth is >= 1 and <= 12)
+            {
+                _year = slip.PayYear;
+                _month = slip.PayMonth;
+            }
+        }
+
+        // ⚠️ send=1 은 ★발송하라★ 가 아니라 ★발송 확인 화면을 열라★ 는 뜻이다.
+        //    실제 발송은 W4·W6 의 확인 화면에서 사람이 눈으로 보고 확정한다(반자동 원칙).
+        _sendRequested = string.Equals(SendQuery, "1", StringComparison.Ordinal);
+
+        await LoadAsync();
+    }
+
+    /// <summary>
+    /// 결재 승인 팝업에서 「예」 로 넘어왔는가. W6 의 발송 확인 화면이 이 값을 보고 열린다.
+    /// </summary>
+    /// <remarks>🔴 <c>true</c> 라도 <b>발송하지 않는다</b>. 확인 화면을 여는 것뿐이다.</remarks>
+    private bool _sendRequested;
 
     private async Task LoadAsync()
     {

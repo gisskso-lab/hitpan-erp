@@ -698,7 +698,7 @@ public class ApprovalService : IApprovalService
         return new ApprovalDetailDto { Document = doc, History = history, Lines = lines };
     }
 
-    public async Task ProcessAsync(string approvalId, ProcessApprovalRequest request, string tenantId,
+    public async Task<ProcessApprovalResult> ProcessAsync(string approvalId, ProcessApprovalRequest request, string tenantId,
         string employeeId, string employeeName, CancellationToken ct = default)
     {
         await EnsureOpenAsync(ct);
@@ -1059,6 +1059,22 @@ public class ApprovalService : IApprovalService
                     _db, doc.DocType, tenantId, doc.Title ?? string.Empty,
                     seqNo: doc.CurrentSeq + 1, _notifier, ct).ConfigureAwait(false);
             }
+
+            // 🔴 20260826작6 W3 — 이 처리로 문서가 **최종 승인까지 갔는지** 를 화면에 알려준다.
+            //
+            //    판정은 위 leave·absence·overtime 블록이 쓰는 조건과 ★똑같다★.
+            //    새 규칙을 만들면 두 판정이 갈려서, 원본은 반영됐는데 화면은 모르는(또는 그 반대)
+            //    상태가 생긴다. 조건을 바꿀 일이 있으면 여기와 위 블록들을 ★같이★ 바꿔야 한다.
+            //
+            //    ⚠️ doc.CurrentSeq 는 승인 전 값이다(위 UPDATE 는 DB 의 current_seq 만 올렸고
+            //       이 지역변수는 그대로다). 그래서 ">= TotalLines" 가 "내가 마지막 단계였나" 를
+            //       뜻한다 — 위 블록들이 같은 변수를 같은 뜻으로 쓴다.
+            return new ProcessApprovalResult
+            {
+                IsFinalApproved = request.Action == "approved" && doc.CurrentSeq >= doc.TotalLines,
+                DocType = doc.DocType ?? string.Empty,
+                RefId = doc.RefId ?? string.Empty
+            };
         }
         catch (Exception)
         {

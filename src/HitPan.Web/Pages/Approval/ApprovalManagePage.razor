@@ -6,6 +6,7 @@
 @inject ApprovalService ApprovalSvc
 @inject ISnackbar Snackbar
 @inject NavigationManager Nav
+@inject IDialogService DialogService
 
 @*
     결재관리 — 작20260824작1 ②
@@ -318,14 +319,56 @@ else
 
     private async Task ProcessAsync(string approvalId, string action, string? comment = null)
     {
-        var ok = await ApprovalSvc.ProcessAsync(approvalId, action, comment);
-        if (ok)
-        {
-            Snackbar.Add(action == "approved" ? "승인 완료" : "반려 완료", Severity.Success);
-            await LoadAsync();
-        }
-        else Snackbar.Add("처리 실패", Severity.Error);
+        // 🔴 20260826작6 W3 — 본문까지 읽는 ProcessDetailedAsync 를 쓴다.
+        //    종전 ProcessAsync(bool) 은 응답을 버려서 "1단 승인" 과 "최종 승인" 을 구분 못 했다.
+        var res = await ApprovalSvc.ProcessDetailedAsync(approvalId, action, comment);
+        if (!res.Ok) { Snackbar.Add("처리 실패", Severity.Error); return; }
+
+        Snackbar.Add(action == "approved" ? "승인 완료" : "반려 완료", Severity.Success);
+        await LoadAsync();
+
+        await MaybeOfferPayslipSendAsync(res);
     }
+
+    /// <summary>
+    /// 급여명세서가 <b>최종 승인</b>되면 발송 여부를 묻는다. 20260826작6 W3.
+    /// </summary>
+    /// <remarks>
+    /// 🔴 사장님(2026-08-26): <i>"대표이사 결재가 승인되면 '급여명세서 결재가 승인되었습니다.'
+    /// 급여명세서를 발송하시겠습니까? Y/N"</i>
+    ///
+    /// 🔴 <b>Y 를 눌러도 여기서 발송하지 않는다.</b> 급여 화면의 발송 확인 화면으로 보낼 뿐이다 —
+    ///    누가 받고 누가 못 받는지(이메일 없는 직원) 를 <b>보고 나서</b> 확정한다. 되돌릴 수 없는
+    ///    발송이라 Y 한 번으로 나가게 하지 않는다(사장님 반자동 원칙).
+    ///
+    /// 🔴 <b>N 은 아무것도 기록하지 않는다.</b> 어떤 표에도 "거절함" 을 적지 않는다. 적으면 그게
+    ///    막다른 길이 된다 — 나중에 급여 화면 버튼으로 언제든 보낼 수 있어야 한다(헌법 #20).
+    ///
+    /// ⚠️ 두 조건을 <b>둘 다</b> 본다. IsFinalApproved 만 보면 연차·경비 승인에도 팝업이 뜨고,
+    ///    DocType 만 보면 <b>부장이 1단 승인한 순간</b> 팝업이 떠서 대표이사 결재 전에 나간다.
+    /// </remarks>
+    private async Task MaybeOfferPayslipSendAsync(ProcessApprovalResultModel res)
+    {
+        if (!res.IsFinalApproved) return;
+        if (!string.Equals(res.DocType, PayslipDocType, StringComparison.Ordinal)) return;
+
+        var go = await DialogService.ShowMessageBoxAsync(
+            "급여명세서 결재가 승인되었습니다.",
+            "급여명세서를 발송하시겠습니까?",
+            yesText: "예", cancelText: "아니오");
+
+        // 아니오 = 아무 일도 일어나지 않는다. 급여 화면에서 언제든 발송할 수 있다.
+        if (go != true) return;
+
+        // 발송이 아니라 ★발송 확인 화면으로 이동★ 이다.
+        var target = "/hr/payroll?send=1";
+        if (!string.IsNullOrEmpty(res.RefId))
+            target += $"&slip={Uri.EscapeDataString(res.RefId)}";
+        Nav.NavigateTo(target);
+    }
+
+    /// <summary>결재 문서타입 — 급여명세서. 서버 <c>PdfRenderService.PayslipDocType</c> 과 같은 값이다.</summary>
+    private const string PayslipDocType = "payslip";
 
     private void OpenRejectDialog(string approvalId)
     {
