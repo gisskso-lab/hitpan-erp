@@ -28,5 +28,5 @@ public interface IApprovalService
     List<ApprovalDocTypeDto> GetFilterDocTypes();
 
     Task<ApprovalDetailDto?> GetDetailAsync(string approvalId, string tenantId, CancellationToken ct = default);
-    Task ProcessAsync(string approvalId, ProcessApprovalRequest request, string tenantId, string employeeId, string employeeName, CancellationToken ct = default);
+    Task<ProcessApprovalResult> ProcessAsync(string approvalId, ProcessApprovalRequest request, string tenantId, string employeeId, string employeeName, CancellationToken ct = default);
 }

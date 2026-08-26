@@ -291,6 +291,10 @@ public static class ApprovalTriggerHelper
         //   🔴 빠뜨리면 알림에 영문 코드가 그대로 나간다(가드시험이 잡는 자리).
         "resignation"     => "사직서",
         "labor_contract"  => "전자근로계약서",
+        // 🔴 20260826작6 — 급여명세서. 위 absence 사고와 같은 자리다:
+        //   ApprovalService.DocTypeLabels 와 **두 곳을 함께** 고쳐야 한다.
+        //   빠뜨리면 알림이 "결재 문서" 로 뭉개진다(고객 노출 — 헌법 #23).
+        "payslip"         => "급여명세서",
         _                 => "결재 문서"
     };
 }

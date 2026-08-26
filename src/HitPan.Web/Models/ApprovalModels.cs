@@ -243,3 +243,18 @@ public class ApprovalDocTypeModel
     /// <summary>화면에 보이는 한글 이름. 🔴 고객 노출 — 영문 코드가 뜨면 안 된다.</summary>
     public string DocTypeName { get; set; } = string.Empty;
 }
+
+/// <summary>
+/// 결재 처리 결과 — <b>이 건으로 최종 승인까지 갔는지</b>. 20260826작6 W3.
+/// </summary>
+/// <remarks>
+/// 🔴 결재선이 2단이면 <b>1단 승인은 아직 승인이 아니다</b>. 이 값 없이 발송 팝업을 붙이면
+/// 부장이 승인한 순간에도 팝업이 떠서, <b>대표이사 결재 전에 급여명세서가 나간다</b>.
+/// </remarks>
+public class ProcessApprovalResultModel
+{
+    public bool Ok { get; set; }
+    public bool IsFinalApproved { get; set; }
+    public string DocType { get; set; } = string.Empty;
+    public string RefId { get; set; } = string.Empty;
+}

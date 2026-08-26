@@ -31,6 +31,16 @@ public sealed class PdfRenderService : IPdfRenderService
     {
         await EnsureOpenAsync(ct).ConfigureAwait(false);
 
+        // 🔴 20260826작6 — 급여명세서는 거래문서와 **구조가 아예 다르다.**
+        //   DocumentSnapshot 은 거래처·품목·수량·단가·부가세 축인데, 급여명세서는
+        //   지급항목·공제항목·실수령액 축이다. 억지로 끼우면 모든 칸이 뜻과 어긋난다
+        //   (거래처 칸에 사원명, 단가 칸에 공제액이 들어가는 식).
+        //   ⇒ **전용 경로로 가른다.** 아래 거래문서 흐름은 한 줄도 건드리지 않는다(#1).
+        if (string.Equals(documentType, PayslipDocType, StringComparison.Ordinal))
+        {
+            return await RenderPayslipAsync(tenantId, documentId, ct).ConfigureAwait(false);
+        }
+
         var data = await LoadDocumentAsync(tenantId, documentType, documentId, ct).ConfigureAwait(false);
         var company = await LoadCompanyAsync(tenantId, ct).ConfigureAwait(false);
 
@@ -499,6 +509,208 @@ public sealed class PdfRenderService : IPdfRenderService
         public string? Phone { get; set; }
     }
 
+    // ═══════════════════════════════════════════════════════════════════
+    // 급여명세서 (20260826작6)
+    // ═══════════════════════════════════════════════════════════════════
+
+    /// <summary>급여명세서 문서타입. 거래문서 8종과 <b>구조가 달라</b> 전용 경로로 간다.</summary>
+    public const string PayslipDocType = "payslip";
+
+    private sealed class PayslipSnapshot
+    {
+        public string SlipId { get; set; } = "";
+        public string EmpName { get; set; } = "";
+        public string? EmpNo { get; set; }
+        public string? DeptName { get; set; }
+        public int PayYear { get; set; }
+        public int PayMonth { get; set; }
+        public DateTime? PayDate { get; set; }
+        public decimal TotalPayment { get; set; }
+        public decimal TotalDeduct { get; set; }
+        public decimal NetPayment { get; set; }
+        public string? Memo { get; set; }
+        public List<PayslipLine> Payments { get; set; } = new();
+        public List<PayslipLine> Deducts { get; set; } = new();
+    }
+
+    private sealed class PayslipLine
+    {
+        public string ItemName { get; set; } = "";
+        public decimal Amount { get; set; }
+    }
+
+    /// <summary>
+    /// 급여명세서 PDF. <b>금액은 저장된 값을 그대로 찍는다 — 계산하지 않는다.</b>
+    /// </summary>
+    /// <remarks>
+    /// 🔴 사장님 수동입력 원칙(2026-08-13): <i>"급여는 자동계산하지 말고 수동으로 int값 직접
+    /// 받아서 입력하는게 가장 깔끔함"</i>. 여기서도 <b>합계를 다시 구하지 않는다</b> —
+    /// 화면에서 본 숫자와 종이의 숫자가 다르면 그 자체로 사고다.
+    /// </remarks>
+    private async Task<(byte[] Bytes, string FileName)> RenderPayslipAsync(
+        string tenantId, string slipId, CancellationToken ct)
+    {
+        var data = await LoadPayslipAsync(tenantId, slipId, ct).ConfigureAwait(false);
+        var company = await LoadCompanyAsync(tenantId, ct).ConfigureAwait(false);
+
+        // ① 결재 — 양식을 자유롭게 붙일 수 있게 한다. 미설정 고객은 기본 모양으로 나온다.
+        //   ⚠️ TryLoadTemplateAsync 의 documentType→form_type 표에 payslip 을 넣어야
+        //     고객이 설정한 양식이 실제로 먹는다(안 넣으면 조용히 기본 모양 — 8/12 적발 사례).
+        var template = await TryLoadTemplateAsync(tenantId, PayslipDocType, ct).ConfigureAwait(false);
+        var showHeader = template?.ShowCompanyLogo ?? true;
+        var showBorder = template?.ShowBorder ?? true;
+        var marginTop = (float)(template?.MarginTopMm ?? 20);
+        var marginLeft = (float)(template?.MarginLeftMm ?? 20);
+        var marginRight = (float)(template?.MarginRightMm ?? 20);
+        var marginBottom = (float)(template?.MarginBottomMm ?? 20);
+
+        var bytes = Document.Create(c =>
+        {
+            c.Page(page =>
+            {
+                page.Size(PageSizes.A4);
+                page.MarginTop(marginTop, Unit.Millimetre);
+                page.MarginLeft(marginLeft, Unit.Millimetre);
+                page.MarginRight(marginRight, Unit.Millimetre);
+                page.MarginBottom(marginBottom, Unit.Millimetre);
+                page.DefaultTextStyle(t => t.FontFamily("Malgun Gothic").FontSize(10));
+                page.PageColor(Colors.White);
+
+                if (showHeader)
+                {
+                    page.Header().Element(e => ComposePayslipHeader(e, data, company));
+                }
+                page.Content().Element(e => ComposePayslipBody(e, data, showBorder));
+            });
+        }).GeneratePdf();
+
+        var fileName = $"급여명세서_{data.EmpName}_{data.PayYear}-{data.PayMonth:00}.pdf";
+        return (bytes, fileName);
+    }
+
+    private async Task<PayslipSnapshot> LoadPayslipAsync(string tenantId, string slipId, CancellationToken ct)
+    {
+        var head = await _db.QueryFirstOrDefaultAsync<PayslipSnapshot>(new CommandDefinition(
+            """
+            SELECT s.slip_id       AS SlipId,
+                   e.emp_name      AS EmpName,
+                   e.emp_no        AS EmpNo,
+                   d.dept_name     AS DeptName,
+                   s.pay_year      AS PayYear,
+                   s.pay_month     AS PayMonth,
+                   s.pay_date      AS PayDate,
+                   s.total_payment AS TotalPayment,
+                   s.total_deduct  AS TotalDeduct,
+                   s.net_payment   AS NetPayment,
+                   s.memo          AS Memo
+            FROM payroll_slips s
+            LEFT JOIN employees   e ON e.employee_id = s.employee_id AND e.tenant_id = s.tenant_id
+            LEFT JOIN departments d ON d.dept_id     = e.dept_id     AND d.tenant_id = s.tenant_id
+            WHERE s.tenant_id = @TenantId AND s.slip_id = @SlipId
+            """,
+            new { TenantId = tenantId, SlipId = slipId }, cancellationToken: ct)).ConfigureAwait(false)
+            ?? throw new InvalidOperationException("급여명세서를 찾을 수 없습니다.");
+
+        var lines = (await _db.QueryAsync<(string LineType, string ItemName, decimal Amount)>(new CommandDefinition(
+            """
+            SELECT line_type AS LineType, item_name AS ItemName, amount AS Amount
+            FROM payroll_slip_lines
+            WHERE tenant_id = @TenantId AND slip_id = @SlipId
+            ORDER BY sort_order, item_name
+            """,
+            new { TenantId = tenantId, SlipId = slipId }, cancellationToken: ct)).ConfigureAwait(false)).ToList();
+
+        foreach (var (lineType, itemName, amount) in lines)
+        {
+            var row = new PayslipLine { ItemName = itemName, Amount = amount };
+            // 공제(deduct) 외에는 전부 지급으로 본다 — 새 line_type 이 생겨도 항목이 사라지지 않게.
+            if (string.Equals(lineType, "deduct", StringComparison.OrdinalIgnoreCase))
+                head.Deducts.Add(row);
+            else
+                head.Payments.Add(row);
+        }
+
+        return head;
+    }
+
+    private static void ComposePayslipHeader(IContainer e, PayslipSnapshot d, CompanyInfo c)
+    {
+        e.Column(col =>
+        {
+            col.Item().AlignCenter().Text($"{d.PayYear}년 {d.PayMonth}월 급여명세서")
+                .FontSize(16).Bold();
+            col.Item().PaddingTop(4).AlignCenter().Text(c.CompanyName).FontSize(10);
+            col.Item().PaddingBottom(6);
+        });
+    }
+
+    private static void ComposePayslipBody(IContainer e, PayslipSnapshot d, bool showBorder)
+    {
+        e.Column(col =>
+        {
+            // ── 사원 정보 ──
+            col.Item().PaddingBottom(8).Row(r =>
+            {
+                r.RelativeItem().Text($"성명: {d.EmpName}");
+                r.RelativeItem().Text($"사번: {d.EmpNo ?? "-"}");
+                r.RelativeItem().Text($"부서: {d.DeptName ?? "-"}");
+                r.RelativeItem().Text($"지급일: {(d.PayDate.HasValue ? d.PayDate.Value.ToString("yyyy-MM-dd") : "-")}");
+            });
+
+            // ── 지급 / 공제 2단 ──
+            col.Item().Row(r =>
+            {
+                r.RelativeItem().Element(x => ComposePayslipSection(x, "지급 내역", d.Payments, d.TotalPayment, showBorder));
+                r.ConstantItem(12);
+                r.RelativeItem().Element(x => ComposePayslipSection(x, "공제 내역", d.Deducts, d.TotalDeduct, showBorder));
+            });
+
+            // ── 실수령액 ──
+            col.Item().PaddingTop(12).Background(Colors.Grey.Lighten3).Padding(8).Row(r =>
+            {
+                r.RelativeItem().Text("실수령액").FontSize(12).Bold();
+                r.ConstantItem(160).AlignRight().Text($"{d.NetPayment:N0} 원").FontSize(14).Bold();
+            });
+
+            if (!string.IsNullOrWhiteSpace(d.Memo))
+            {
+                col.Item().PaddingTop(8).Text($"비고: {d.Memo}").FontSize(9);
+            }
+        });
+    }
+
+    private static void ComposePayslipSection(
+        IContainer e, string title, List<PayslipLine> lines, decimal total, bool showBorder)
+    {
+        e.Column(col =>
+        {
+            col.Item().Background(Colors.Grey.Lighten2).Padding(4).Text(title).Bold();
+
+            col.Item().Table(t =>
+            {
+                t.ColumnsDefinition(cd => { cd.RelativeColumn(); cd.ConstantColumn(90); });
+
+                foreach (var line in lines)
+                {
+                    t.Cell().Element(x => PayslipCell(x, showBorder)).Text(line.ItemName);
+                    t.Cell().Element(x => PayslipCell(x, showBorder)).AlignRight().Text($"{line.Amount:N0}");
+                }
+
+                if (lines.Count == 0)
+                {
+                    t.Cell().ColumnSpan(2).Element(x => PayslipCell(x, showBorder))
+                        .AlignCenter().Text("-").FontSize(9);
+                }
+
+                t.Cell().Element(x => PayslipCell(x, showBorder)).Text("합계").Bold();
+                t.Cell().Element(x => PayslipCell(x, showBorder)).AlignRight().Text($"{total:N0}").Bold();
+            });
+        });
+    }
+
+    private static IContainer PayslipCell(IContainer c, bool showBorder) =>
+        showBorder ? c.Border(0.5f).BorderColor(Colors.Grey.Lighten1).Padding(4) : c.Padding(4);
+
     /// <summary>
     /// 고객이 맞춘 좌표대로 양식용지에 값만 얹는다 (사장님 지시 2026-08-12 "양식용지만 해").
     /// </summary>
@@ -755,6 +967,10 @@ public sealed class PdfRenderService : IPdfRenderService
             // 사장님 결재 2026-08-11 (10종 확장) — 계산서·입금표
             "invoice_exempt" => "invoice_exempt",
             "payment_receipt" => "payment_receipt",
+            // 🔴 20260826작6 — 급여명세서. 사장님 결재: "양식은 자유롭게 붙일 수 있도록 하되,
+            //   기본 템플릿 제공". 이 표에 안 넣으면 고객이 양식을 설정해도 **안 먹는다**
+            //   (위 주석의 8/12 적발 사례와 같은 자리 — 오류가 안 나서 더 위험하다).
+            PayslipDocType => PayslipDocType,
             _ => null
         };
         if (formType is null) return null;

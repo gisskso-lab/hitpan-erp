@@ -220,12 +220,23 @@ public class ApprovalController : ControllerBase
         var employeeId = HttpContext.Items["EmployeeId"]?.ToString();
         var employeeName = HttpContext.Items["UserName"]?.ToString() ?? "Unknown";
         if (string.IsNullOrEmpty(tenantId) || string.IsNullOrEmpty(employeeId)) return Forbid();
-        await _approvalService.ProcessAsync(approvalId, request, tenantId, employeeId, employeeName, ct);
+        var result = await _approvalService.ProcessAsync(approvalId, request, tenantId, employeeId, employeeName, ct);
 
         // 작(2026-08-13) 단계9 — 결재 결과를 신청자에게 메시지로 보낸다.
         await NotifyRequesterAsync(approvalId, tenantId, employeeId, request.Action, ct);
 
-        return Ok(new { message = request.Action == "approved" ? "승인되었습니다." : "반려되었습니다." });
+        // 🔴 20260826작6 W3 — message 는 ★그대로 둔다★. 다른 화면이 이 문장을 쓰고 있다.
+        //    뒤에 세 칸을 ★더할 뿐★ 이다(헌법 #1 — 덮어쓰지 않고 추가만).
+        //
+        //    isFinalApproved 가 없으면 화면은 "부장이 1단 승인" 과 "대표이사가 최종 승인" 을
+        //    구분할 수 없다. 급여명세서 발송 팝업이 이 값 위에 선다.
+        return Ok(new
+        {
+            message = request.Action == "approved" ? "승인되었습니다." : "반려되었습니다.",
+            isFinalApproved = result.IsFinalApproved,
+            docType = result.DocType,
+            refId = result.RefId
+        });
     }
 
     /// <summary>

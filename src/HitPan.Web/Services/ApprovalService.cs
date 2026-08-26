@@ -122,4 +122,50 @@ public sealed class ApprovalService(HttpClient http, ILogger<ApprovalService> lo
         }
         catch (Exception ex) { logger.LogWarning(ex, "ProcessAsync failed approvalId={ApprovalId} action={Action}", approvalId, action); return false; }
     }
+
+    /// <summary>
+    /// 결재를 처리하고 <b>최종 승인 여부까지</b> 돌려준다. 20260826작6 W3.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// 🔴 위 <see cref="ProcessAsync(string,string,string?,CancellationToken)"/> 는 <c>bool</c> 만
+    /// 돌려주고 <b>응답 본문을 버린다</b>. 그래서 화면은 "부장이 1단 승인" 과 "대표이사가 최종
+    /// 승인" 을 <b>구분할 수 없었다</b>. 급여명세서 발송 팝업이 그 구분 위에 서므로 여기서 읽는다.
+    /// </para>
+    /// <para>
+    /// 기존 <c>bool</c> 메서드는 <b>그대로 둔다</b> — 다른 호출부가 쓰고 있다(헌법 #1).
+    /// </para>
+    /// <para>
+    /// ⚠️ 본문 파싱이 실패해도 <b>결재 자체는 이미 성공</b>했다. 그래서 <c>Ok=true</c> 는 유지하고
+    /// <c>IsFinalApproved=false</c> 로 둔다 — 팝업이 안 뜰 뿐, 발송은 급여 화면 버튼으로 가능하다.
+    /// 여기서 <c>Ok=false</c> 로 만들면 <b>승인됐는데 "처리 실패" 라고 뜬다</b>.
+    /// </para>
+    /// </remarks>
+    public async Task<ProcessApprovalResultModel> ProcessDetailedAsync(string approvalId, string action, string? comment = null, CancellationToken ct = default)
+    {
+        try
+        {
+            using var r = await http.PostAsJsonAsync($"api/approval/documents/{Uri.EscapeDataString(approvalId)}/process",
+                new { action, comment }, ct);
+
+            if (!r.IsSuccessStatusCode) return new ProcessApprovalResultModel { Ok = false };
+
+            try
+            {
+                var body = await r.Content.ReadFromJsonAsync<ProcessApprovalResultModel>(cancellationToken: ct);
+                if (body is not null) { body.Ok = true; return body; }
+            }
+            catch (Exception ex)
+            {
+                logger.LogWarning(ex, "ProcessDetailedAsync body parse failed approvalId={ApprovalId}", approvalId);
+            }
+
+            return new ProcessApprovalResultModel { Ok = true };
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "ProcessDetailedAsync failed approvalId={ApprovalId} action={Action}", approvalId, action);
+            return new ProcessApprovalResultModel { Ok = false };
+        }
+    }
 }

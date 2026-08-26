@@ -36,12 +36,16 @@ public sealed class PayrollController : ControllerBase
     private readonly IPermissionService _permission;
     private readonly ICurrentTenant _currentTenant;
 
+    /// <summary>급여명세서 일괄 메일발송 — 20260826작6 W4.</summary>
+    private readonly IPayslipMailService _payslipMail;
+
     public PayrollController(IPayrollService service, IPermissionService permission,
-        ICurrentTenant currentTenant)
+        ICurrentTenant currentTenant, IPayslipMailService payslipMail)
     {
         _service = service;
         _permission = permission;
         _currentTenant = currentTenant;
+        _payslipMail = payslipMail;
     }
 
     /// <summary>
@@ -338,6 +342,126 @@ public sealed class PayrollController : ControllerBase
     public sealed class PayBody
     {
         public DateTime? PayDate { get; set; }
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    //  급여명세서 PDF 내려받기 — 20260826작6 W5 (그룹웨어 게시 ⑥)
+    // ═══════════════════════════════════════════════════════════════
+
+    /// <summary>
+    /// 급여명세서 PDF. 🔴 <b>본인 것만</b> 받는다.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// 사장님 ⑥결재(2026-08-26): <i>"급여명세서는 이메일로도 받고,
+    /// <b>본인것만 그룹웨어에서도 확인, 다운로드 가능</b>함."</i>
+    /// </para>
+    /// <para>
+    /// 🔴 <b>이 문이 왜 따로 필요한가</b> — <c>/api/email/preview-pdf</c> 는 문서종류·id 를
+    /// 그대로 받아 렌더로 넘기고 <b>사원 확인을 하지 않는다</b>. W1 에서 <c>payslip</c> 을
+    /// 문서타입으로 등록하는 순간 그 길로 <b>남의 급여명세서가 나갔다</b>(실측 확인).
+    /// 그쪽은 막고, 급여명세서는 <b>여기로만</b> 받게 한다.
+    /// </para>
+    /// <para>
+    /// ⚠️ <c>[RequirePermission]</c> 을 <b>일부러 안 걸었다</b> — 걸면 일반 직원이
+    /// <b>자기 명세서도 못 받는다</b>. 조회(<c>GetSlip</c>)와 <b>같은 방식</b>으로 범위를 좁힌다.
+    /// </para>
+    /// <para>
+    /// 🔴 <b>결재 승인 전에는 못 받는다</b> — 메일과 <b>같은 기준</b>이다(§6①).
+    /// 한쪽만 열면 축이 갈린다: 메일은 안 갔는데 그룹웨어에서는 받아지는 상태가 된다.
+    /// 금액이 바뀔 수 있는 명세서가 나가면 <b>직원이 틀린 금액을 받는다</b>.
+    /// </para>
+    /// </remarks>
+    [HttpGet("slips/{slipId}/pdf")]
+    public async Task<IActionResult> GetSlipPdf(string slipId,
+        [FromServices] IPdfRenderService pdf, CancellationToken ct)
+    {
+        var tenantId = HttpContext.Items["TenantId"]?.ToString();
+        if (string.IsNullOrEmpty(tenantId)) return Forbid();
+
+        var dto = await _service.GetSlipAsync(tenantId, slipId, ct).ConfigureAwait(false);
+        if (dto is null) return NotFound();
+
+        // 🔴 남의 급여면 막는다. GetSlip 과 같은 판정이다 —
+        //    조회만 막고 PDF 를 열어두면 막은 것이 아니다.
+        if (!await CanSeeOthersAsync().ConfigureAwait(false)
+            && dto.EmployeeId != CurrentEmployeeId())
+        {
+            return Forbid();
+        }
+
+        // 🔴 발송 기준과 같은 관문을 통과해야 받을 수 있다(확정 + 필요 시 결재 승인).
+        var (canGet, reason) = await _payslipMail
+            .CanDeliverAsync(tenantId, slipId, ct).ConfigureAwait(false);
+
+        if (!canGet)
+            return BadRequest(new { message = $"아직 받을 수 없는 명세서입니다. ({reason})" });
+
+        var (bytes, fileName) = await pdf
+            .RenderDocumentAsync(tenantId, HitPan.Application.Services.PdfRenderService.PayslipDocType, slipId, ct)
+            .ConfigureAwait(false);
+
+        return File(bytes, "application/pdf", fileName);
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    //  급여명세서 일괄 메일발송 — 20260826작6 W4
+    // ═══════════════════════════════════════════════════════════════
+
+    /// <summary>
+    /// 발송 전 확인 명단 — <b>누가 받고 누가 못 받는지</b>.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// 🔴 <b>되돌릴 수 없는 발송</b>이라 경리가 <b>보고 나서</b> 누른다(사장님 반자동 원칙).
+    /// 이름·수신주소·불가사유를 <b>전부</b> 준다 — 숫자만 주면 무엇을 고칠지 알 수 없다.
+    /// </para>
+    /// <para>
+    /// ⚠️ 권한은 <c>update</c> 다. <b>조회 권한만 가진 사람에게 전 직원 급여 명단과
+    /// 이메일 주소가 나가면 안 된다</b> — 이 화면은 발송 준비 화면이다.
+    /// </para>
+    /// </remarks>
+    [HttpGet("slips/send-mail/preview")]
+    [RequirePermission(Menu, "update")]
+    public async Task<IActionResult> GetSendMailPreview([FromQuery] int year, [FromQuery] int month,
+        CancellationToken ct)
+    {
+        var tenantId = HttpContext.Items["TenantId"]?.ToString();
+        if (string.IsNullOrEmpty(tenantId)) return Forbid();
+
+        var (y, m) = Normalize(year, month);
+        return Ok(await _payslipMail.GetSendPreviewAsync(tenantId, y, m, ct));
+    }
+
+    /// <summary>
+    /// 급여명세서 <b>일괄 발송</b>. 건별로 보내고 건별로 결과를 돌려준다.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// 🔴 <b>화면이 보낸 목록을 그대로 믿지 않는다</b> — 서비스가 각 건을 다시 판정해서
+    /// 못 보낼 것이면 안 보낸다. 화면을 우회한 요청으로 <b>미결재 명세서가 나가면 안 된다</b>(⑤결재).
+    /// </para>
+    /// <para>
+    /// 🔴 <b>뭉뚱그린 "발송 완료" 를 주지 않는다</b> — 성공·실패를 사람별로 돌려준다.
+    /// 실패분만 다시 넘기면 그대로 재발송이 된다(별도 API 가 필요 없다).
+    /// </para>
+    /// </remarks>
+    [HttpPost("slips/send-mail")]
+    [RequirePermission(Menu, "update")]
+    public async Task<IActionResult> SendMail([FromBody] SendPayslipMailRequest request,
+        CancellationToken ct)
+    {
+        var tenantId = HttpContext.Items["TenantId"]?.ToString();
+        if (string.IsNullOrEmpty(tenantId)) return Forbid();
+
+        if (request?.SlipIds is null || request.SlipIds.Count == 0)
+            return BadRequest(new { message = "발송할 명세서를 하나 이상 골라주세요." });
+
+        var (y, m) = Normalize(request.Year, request.Month);
+        request.Year = y;
+        request.Month = m;
+
+        return Ok(await _payslipMail.SendAsync(tenantId, Actor(), request, ct));
     }
 
     private string Actor() => CurrentEmployeeId() ?? "unknown";

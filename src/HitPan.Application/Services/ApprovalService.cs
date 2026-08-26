@@ -56,6 +56,14 @@ public class ApprovalService : IApprovalService
     //                   신규가 아니라 배선이다 — 결재로 넘기는 연결만 없다.
     ["resignation"]      = "사직서",
     ["labor_contract"]   = "전자근로계약서",
+    // 🔴 20260826작6 — 급여명세서. 사장님: "급여명세는 **대표이사 결재**로 넘길거임."
+    //   ⚠️ 이 표에 없으면 결재선 설정 화면에 「급여명세서」 행이 안 뜬다 ⇒ is_enabled 를
+    //     켤 수 없고 ⇒ 트리거가 'if (!setting.IsEnabled) return;' 로 조용히 끝난다.
+    //     화면은 상신 버튼을 보여주는데 눌러도 아무 일이 안 일어난다(바로 아래 absence 사고와 같은 자리).
+    //   ⚠️ **결재자를 코드로 정하지 않는다** — 사장님(2026-08-26): "회사마다 조직구조가 다르기
+    //     때문에 자동으로 정의하지 말것". 대표이사가 결재하는 회사도, 관리이사가 하는 회사도
+    //     있다. 누가 결재하는지는 고객이 결재선 설정에서 정한다(헌법 #11).
+    ["payslip"]          = "급여명세서",
     // 작(2026-08-21) P0 봉합: 휴직(absence) 이 여기 없어서 결재가 구조적으로 불가능했다.
         // 🔴 AbsenceService 는 처음부터 "absence" 로 상신을 불렀는데, 설정 행은 이 사전을
         //    순회해(GetSettingsAsync) 만들어지므로 화면에 "휴직" 행이 아예 뜨지 않았다
@@ -690,7 +698,7 @@ public class ApprovalService : IApprovalService
         return new ApprovalDetailDto { Document = doc, History = history, Lines = lines };
     }
 
-    public async Task ProcessAsync(string approvalId, ProcessApprovalRequest request, string tenantId,
+    public async Task<ProcessApprovalResult> ProcessAsync(string approvalId, ProcessApprovalRequest request, string tenantId,
         string employeeId, string employeeName, CancellationToken ct = default)
     {
         await EnsureOpenAsync(ct);
@@ -1051,6 +1059,22 @@ public class ApprovalService : IApprovalService
                     _db, doc.DocType, tenantId, doc.Title ?? string.Empty,
                     seqNo: doc.CurrentSeq + 1, _notifier, ct).ConfigureAwait(false);
             }
+
+            // 🔴 20260826작6 W3 — 이 처리로 문서가 **최종 승인까지 갔는지** 를 화면에 알려준다.
+            //
+            //    판정은 위 leave·absence·overtime 블록이 쓰는 조건과 ★똑같다★.
+            //    새 규칙을 만들면 두 판정이 갈려서, 원본은 반영됐는데 화면은 모르는(또는 그 반대)
+            //    상태가 생긴다. 조건을 바꿀 일이 있으면 여기와 위 블록들을 ★같이★ 바꿔야 한다.
+            //
+            //    ⚠️ doc.CurrentSeq 는 승인 전 값이다(위 UPDATE 는 DB 의 current_seq 만 올렸고
+            //       이 지역변수는 그대로다). 그래서 ">= TotalLines" 가 "내가 마지막 단계였나" 를
+            //       뜻한다 — 위 블록들이 같은 변수를 같은 뜻으로 쓴다.
+            return new ProcessApprovalResult
+            {
+                IsFinalApproved = request.Action == "approved" && doc.CurrentSeq >= doc.TotalLines,
+                DocType = doc.DocType ?? string.Empty,
+                RefId = doc.RefId ?? string.Empty
+            };
         }
         catch (Exception)
         {

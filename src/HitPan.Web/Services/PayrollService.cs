@@ -207,6 +207,123 @@ public sealed class PayrollService(HttpClient http, ILogger<PayrollService> logg
         _ => "처리하지 못했습니다.",
     };
 
+    // ═══════════════════════════════════════════════════════════════
+    //  급여명세서 일괄 메일발송 — 20260826작6 W6
+    // ═══════════════════════════════════════════════════════════════
+
+    /// <summary>
+    /// 발송 전 확인 명단. 🔴 실패는 <c>null</c> — <b>빈 목록이 아니다</b>.
+    /// </summary>
+    /// <remarks>
+    /// 실패를 빈 목록으로 뭉개면 화면이 <i>"보낼 사람이 없습니다"</i> 로 보여준다.
+    /// 경리는 <b>다 보냈다고 알거나, 아무도 못 받는다고 오해</b>한다. 둘 다 사고다.
+    /// </remarks>
+    public async Task<PayslipSendPreviewModel?> GetSendPreviewAsync(int year, int month,
+        CancellationToken ct = default)
+    {
+        try
+        {
+            return await http.GetFromJsonAsync<PayslipSendPreviewModel>(
+                $"api/payroll/slips/send-mail/preview?year={year}&month={month}", ct);
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "GetSendPreviewAsync failed {Year}-{Month}", year, month);
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// 급여명세서를 <b>일괄 발송</b>한다.
+    /// </summary>
+    /// <remarks>
+    /// 🔴 <b>되돌릴 수 없다</b> — 화면은 반드시 사람에게 확인을 받고 부른다.
+    /// ⚠️ 서버가 각 건을 <b>다시 판정</b>하므로, 여기서 보낸 목록이 그대로 나가는 것이 아니다.
+    /// </remarks>
+    public async Task<SendPayslipMailResultModel?> SendMailAsync(int year, int month,
+        List<string> slipIds, CancellationToken ct = default)
+    {
+        try
+        {
+            using var res = await http.PostAsJsonAsync("api/payroll/slips/send-mail",
+                new { year, month, slipIds }, ct);
+
+            if (!res.IsSuccessStatusCode)
+            {
+                logger.LogWarning("SendMailAsync failed status={Status}", (int)res.StatusCode);
+                return null;
+            }
+
+            return await res.Content.ReadFromJsonAsync<SendPayslipMailResultModel>(cancellationToken: ct);
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "SendMailAsync failed {Year}-{Month}", year, month);
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// 급여명세서 PDF 를 받아온다. 🔴 <b>본인 것만</b> 열린다(서버가 판정).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// ⚠️ <c>/api/email/preview-pdf</c> 를 쓰면 <b>안 된다</b> — 거기엔 사원 확인이 없어
+    /// 남의 명세서가 나간다(W5 봉합). 급여명세서는 <b>이 길로만</b> 받는다.
+    /// </para>
+    /// <para>
+    /// 🔴 <b><c>&lt;a href&gt;</c> 로 걸면 안 된다.</b> 브라우저가 그 주소를 직접 부르면
+    /// <b>로그인 토큰이 안 실려</b> 401 이 온다. 이 레포가 PDF 를 받는 방식은
+    /// <b>인증된 HttpClient 로 바이트를 받아</b> 브라우저에 넘기는 것이다
+    /// (<c>EmailClientService.DownloadPdfAsync</c> 와 같은 방식).
+    /// </para>
+    /// <para>
+    /// 실패는 <c>null</c> — 화면이 사유를 보여준다. 🔴 결재 전이면 서버가 400 과 사유를 준다.
+    /// </para>
+    /// </remarks>
+    public async Task<(byte[]? Bytes, string? Error)> DownloadSlipPdfAsync(string slipId,
+        CancellationToken ct = default)
+    {
+        try
+        {
+            using var res = await http.GetAsync(
+                $"api/payroll/slips/{Uri.EscapeDataString(slipId)}/pdf", ct);
+
+            if (res.IsSuccessStatusCode)
+                return (await res.Content.ReadAsByteArrayAsync(ct), null);
+
+            // 🔴 서버가 준 사유를 그대로 전한다 — "받지 못했습니다" 로 뭉개면
+            //    직원은 결재 대기 중인지 권한이 없는지 알 수 없다.
+            var body = await TryReadMessageAsync(res, ct);
+            return (null, body ?? Describe(res));
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "DownloadSlipPdfAsync failed slipId={SlipId}", slipId);
+            return (null, "명세서를 받지 못했습니다.");
+        }
+    }
+
+    /// <summary>응답 본문의 <c>message</c> 를 읽는다. 없으면 <c>null</c>.</summary>
+    /// <remarks>
+    /// ⚠️ 본문이 JSON 이 아닐 수 있다(빈 응답·HTML 오류 쪽). 그건 <b>정상 경로</b>라
+    /// 삼키되, 빈 catch 로 두지 않는다 — 왜 사유를 못 읽었는지 남긴다(헌법 #15).
+    /// </remarks>
+    private async Task<string?> TryReadMessageAsync(HttpResponseMessage res, CancellationToken ct)
+    {
+        try
+        {
+            var body = await res.Content.ReadFromJsonAsync<MessageBody>(cancellationToken: ct);
+            return string.IsNullOrWhiteSpace(body?.Message) ? null : body!.Message;
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "TryReadMessageAsync: 본문에서 사유를 읽지 못했다 status={Status}",
+                (int)res.StatusCode);
+            return null;
+        }
+    }
+
     private sealed class MessageBody
     {
         public string? Message { get; set; }
