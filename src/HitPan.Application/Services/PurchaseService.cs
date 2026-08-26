@@ -780,7 +780,16 @@ public class PurchaseService : IPurchaseService
         var conditions = new List<string>();
         if (from.HasValue) conditions.Add("AND r.return_date >= @From");
         if (to.HasValue) conditions.Add("AND r.return_date <= @To");
-        sql += string.Join(" ", conditions) + " ORDER BY r.return_date DESC, r.return_no DESC";
+        // 🔴 20260826작2 — 여기서 500 이 났다. 종전엔 `sql +=` 로 **바로 이어붙였다.**
+        //   위 raw string 은 `... r.is_deleted = 0` 에서 끝난다(C# raw string 은 닫는 따옴표
+        //   앞 줄바꿈을 버린다). 그 뒤에 "AND r.return_date >= @From" 이 공백 없이 붙어
+        //     `... r.is_deleted = 0AND r.return_date >= @From`
+        //   이 되어 MariaDB 가 `0AND` 를 파싱하다 죽었다.
+        //   ⚠️ 날짜가 **하나라도 있을 때만** 터진다 — 날짜 0개면 conditions 가 비어
+        //     이어붙일 것이 없으므로 정상적으로 200 이 나온다. 화면은 항상 최근 30일을
+        //     기본으로 보내므로 **고객은 100% 500**, 그런데 날짜 없이 부르는 시험은 통과한다.
+        //     그래서 빌드·단위시험·빈 DB 실측이 전부 이걸 못 봤다.
+        sql += " " + string.Join(" ", conditions) + " ORDER BY r.return_date DESC, r.return_no DESC";
 
         var rows = await _db.QueryAsync<PurchaseReturnListDto>(new CommandDefinition(
             sql, new { Tid = tenantId, From = from, To = to }, cancellationToken: ct));
