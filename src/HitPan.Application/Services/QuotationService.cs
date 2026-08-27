@@ -1,5 +1,6 @@
 using System.Data;
 using Dapper;
+using HitPan.Application.Common;
 using HitPan.Application.DTOs.Sales;
 using HitPan.Application.Interfaces;
 
@@ -302,12 +303,14 @@ public class QuotationService : IQuotationService
         }
 
         // 수주 문서번호 채번 — WO-11 한글 prefix
-        var today = DateTime.UtcNow.Date;
+        // 🔴 20260827작9 W2 — COUNT+1 → MAX+1 (위 GenerateQuoteNoAsync 와 같은 이유).
+        // 🔴 W2-b — DateTime.UtcNow → BusinessDate.Today. KST 09시 이전에는 UTC 가 전날이라
+        //   8/27 오전에 전환하면 '수-20260826-…' 이 나와 전표 일자와 번호 날짜가 어긋났다.
+        //   매입은 이미 BusinessDate 를 쓴다(작18 W4). 매출만 UtcNow 로 남아 있었다.
+        var today = BusinessDate.Today;
         var prefix = $"수-{today:yyyyMMdd}-";
-        var cnt = await _db.QueryFirstOrDefaultAsync<int>(new CommandDefinition(
-            "SELECT COUNT(*) FROM sales_orders WHERE tenant_id=@TenantId AND order_no LIKE CONCAT(@Prefix,'%')",
-            new { TenantId = tenantId, Prefix = prefix }, cancellationToken: ct));
-        var orderNo = $"{prefix}{cnt + 1:000}";
+        var orderNo = await DocumentNumberHelper.NextNumberAsync(
+            _db, tenantId, "sales_orders", "order_no", prefix, ct);
         var orderId = Guid.NewGuid().ToString();
 
         // 수주 헤더 생성
@@ -401,16 +404,15 @@ public class QuotationService : IQuotationService
     private async Task<string> GenerateQuoteNoAsync(string tenantId, DateTime quoteDate, CancellationToken ct)
     {
         // WO-11: 한글 prefix 통일 (견적서 = 견-)
+        // 🔴 20260827작9 W2 — COUNT+1 → MAX+1(DocumentNumberHelper).
+        //   DocumentNumberHelper 주석이 COUNT+1 을 "진범"으로 지목했다
+        //   (동시 호출 시 같은 번호 → UNIQUE 충돌 → 4/28 자동사슬 174건 중 71건 원장누락).
+        //   여기서 더 큰 위험은 소프트삭제다 — COUNT 는 지워진 행만큼 줄어서
+        //   '견-20260827-003' 을 지우면 다음 채번이 -003 을 다시 낸다.
+        //   MAX+1 은 지워진 번호를 건너뛴다. 사장님: "사슬동작중 중복생성 절대금지".
         var prefix = $"견-{quoteDate:yyyyMMdd}-";
-        const string sql = """
-                           SELECT COUNT(1)
-                           FROM quotations
-                           WHERE tenant_id = @TenantId
-                             AND quote_no LIKE CONCAT(@Prefix, '%')
-                           """;
-        var count = await _db.QuerySingleAsync<int>(
-            new CommandDefinition(sql, new { TenantId = tenantId, Prefix = prefix }, cancellationToken: ct));
-        return $"{prefix}{count + 1:000}";
+        return await DocumentNumberHelper.NextNumberAsync(
+            _db, tenantId, "quotations", "quote_no", prefix, ct);
     }
 
     /// <summary>

@@ -1,5 +1,6 @@
 using System.Data;
 using Dapper;
+using HitPan.Application.Common;
 using HitPan.Application.Interfaces;
 using HitPan.Contracts.Sales;
 
@@ -81,14 +82,17 @@ public sealed class TaxInvoiceService : ITaxInvoiceService
         }
 
         // 3) 계산서 번호 생성 (세-yyyyMMdd-NNN 패턴, 테넌트 일자별 순번) — WO-11
+        // 🔴 20260827작9 W2 — COUNT+1 → MAX+1(DocumentNumberHelper).
+        //   COUNT+1 은 동시 발행 시 같은 번호를 내고(uk_tax_invoices_invoice_no 충돌),
+        //   취소·삭제분이 생기면 이미 쓴 번호를 재발급한다.
+        //   세금계산서는 국세청에 나가는 번호라 중복이 특히 위험하다.
+        // 🔴 W2-b — 채번 날짜만 업무일(KST). KST 09시 이전 발행이 전날 번호를 받았다.
+        //   ⚠️ 저장 시각(issued_at)은 UTC 그대로 둔다 — 시각은 UTC 로 쌓는 것이 맞고,
+        //      여기서 같이 바꾸면 DB 에 +9h 틀어진 시각이 들어간다. 날짜와 시각은 다른 축이다.
         var now = DateTime.UtcNow;
-        var prefix = $"세-{now:yyyyMMdd}-";
-        var todayCount = await _db.ExecuteScalarAsync<int>(
-            new CommandDefinition(
-                "SELECT COUNT(*) FROM tax_invoices WHERE tenant_id = @TenantId AND invoice_no LIKE @Prefix",
-                new { TenantId = tenantId, Prefix = prefix + "%" },
-                cancellationToken: ct));
-        var invoiceNo = $"{prefix}{todayCount + 1:D3}";
+        var prefix = $"세-{BusinessDate.Today:yyyyMMdd}-";
+        var invoiceNo = await DocumentNumberHelper.NextNumberAsync(
+            _db, tenantId, "tax_invoices", "invoice_no", prefix, ct);
 
         // 4) UoW 트랜잭션 (작5 — INSERT tax_invoices + UPDATE sales_deliveries.tax_invoice_id 동일 tx)
         //    검증팀 BK #1: 역참조가 없으면 거래명세서 화면에서 발행 여부 표시 불가.

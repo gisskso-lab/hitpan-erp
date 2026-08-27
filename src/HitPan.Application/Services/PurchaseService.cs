@@ -978,11 +978,14 @@ public class PurchaseService : IPurchaseService
 
         // 반품 문서번호 채번 — WO-11 한글 prefix
         var today = BusinessDate.Today;   // 20260825작18 W4 — 반품일자·채번 prefix 가 하루 어긋나던 자리
+        // 🔴 20260827작9 W2 — COUNT+1 → MAX+1(DocumentNumberHelper).
+        //   COUNT 는 소프트삭제·취소분만큼 줄어서 이미 쓴 번호를 재발급한다.
+        //   purchase_returns.return_no 에는 UNIQUE 도 없어(W3 에서 신설) 조용히 중복된다.
+        //   ⚠️ 이 경로는 트랜잭션 안이라 transaction 을 넘긴다 — 직전 INSERT 가 같은 tx
+        //      가시성으로 보여야 MAX 가 정확하다.
         var prefix = $"매반-{today:yyyyMMdd}-";
-        var cnt = await conn.QueryFirstOrDefaultAsync<int>(new CommandDefinition(
-            "SELECT COUNT(*) FROM purchase_returns WHERE tenant_id=@Tid AND return_no LIKE CONCAT(@Pfx,'%')",
-            new { Tid = tenantId, Pfx = prefix }, transaction: dbTx, cancellationToken: ct));
-        var returnNo = $"{prefix}{cnt + 1:000}";
+        var returnNo = await DocumentNumberHelper.NextNumberAsync(
+            conn, tenantId, "purchase_returns", "return_no", prefix, ct, dbTx);
         var returnId = Guid.NewGuid().ToString();
 
         decimal totalAmount = 0, totalVat = 0;
@@ -1106,11 +1109,10 @@ public class PurchaseService : IPurchaseService
         }
 
         var returnDate = request.ReturnDate == default ? BusinessDate.Today : request.ReturnDate.Date;   // 20260825작18 W4
+        // 🔴 20260827작9 W2 — COUNT+1 → MAX+1 (위 전환 경로와 같은 이유).
         var prefix = $"매반-{returnDate:yyyyMMdd}-";
-        var cnt = await _db.QueryFirstOrDefaultAsync<int>(new CommandDefinition(
-            "SELECT COUNT(*) FROM purchase_returns WHERE tenant_id=@Tid AND return_no LIKE CONCAT(@Pfx,'%')",
-            new { Tid = tenantId, Pfx = prefix }, cancellationToken: ct));
-        var returnNo = $"{prefix}{cnt + 1:000}";
+        var returnNo = await DocumentNumberHelper.NextNumberAsync(
+            _db, tenantId, "purchase_returns", "return_no", prefix, ct);
         var returnId = Guid.NewGuid().ToString();
 
         decimal totalAmount = 0, totalVat = 0;

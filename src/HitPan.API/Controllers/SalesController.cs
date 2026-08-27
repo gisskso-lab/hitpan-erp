@@ -126,7 +126,13 @@ public class SalesController : ControllerBase
         return Ok(new { deliveryId, documentNumber });
     }
 
+    // 🔴 20260827작9 W4 — 확정(confirm)에는 있고 생성에는 없던 멱등 키를 대칭으로 붙인다.
+    //   생성이 두 번 타면 거래명세서만 두 장 나는 게 아니라, 수주 없이 들어온 경우
+    //   **수주서까지 두 장** 생긴다. 사장님: "사슬동작중 중복생성 절대금지".
+    //   서비스 계층 가드(SalesService W4)와 2중이다 — 헤더가 없는 호출도 있기 때문에
+    //   미들웨어 하나만으로는 막히지 않는다.
     [HttpPost("deliveries")]
+    [IdempotencyKey]
     public async Task<IActionResult> CreateDelivery([FromBody] CreateDeliveryRequest request, CancellationToken ct)
     {
         var tenantId = HttpContext.Items["TenantId"]?.ToString();
