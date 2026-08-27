@@ -34,6 +34,9 @@ public sealed class TaxInvoiceService : ITaxInvoiceService
     private readonly IDbConnection _db;
     private readonly IUnitOfWork _unitOfWork;
 
+    /// <summary>마이너스 계산서 사슬 축 값 — sales_returns 를 가리킨다 (20260828작13).</summary>
+    private const string CreditNoteSourceType = "sales_return";
+
     public TaxInvoiceService(IDbConnection db, IUnitOfWork unitOfWork)
     {
         _db = db;
@@ -258,6 +261,163 @@ public sealed class TaxInvoiceService : ITaxInvoiceService
         return result.AsList();
     }
 
+    /// <summary>
+    /// 마이너스 계산서(매출반품) 발행 — 20260828작13.
+    /// </summary>
+    /// <remarks>
+    /// 🔴 사장님 오더: <i>"매출반품은 마이너스 전표 끊으면 해결되잖아. 전자세금계산서 국세청
+    /// 전송건도 마이너스 계산서. 단, 마이너스 계산서 끊을시 <b>반드시 해당 반품의 연결사슬을
+    /// 표기할것!!(사슬연결도)</b>"</i> · 비고 형식 「반품전표 : 반-(전표번호)」
+    /// <para>
+    /// 🟢 결재 2026-08-28 — ②«음수 금액 새 행»(원본 보존·국세청 이력 유지) ·
+    /// ③사슬은 <c>source_type</c>/<c>source_id</c> 축(이미 있는 컬럼. <c>return_id</c> 신설 안 함).
+    /// </para>
+    /// <para>
+    /// ⚠️ <b>중복발행 가드를 우회하지 않는다</b> — 그 가드는 issued 상태의 «양수» 계산서를 막는 것이고,
+    /// 여기서는 <b>같은 반품에 대한 마이너스 계산서</b>가 이미 있는지를 사슬 축으로 따로 본다.
+    /// </para>
+    /// <para>
+    /// ⚠️ <b>회계는 여기서 기표하지 않는다.</b> 매출반품 분개는 반품 «확정» 시점에 이미
+    /// <c>sales_return</c> 키로 들어간다(20260828작12). 계산서가 또 기표하면 이중계상이다
+    /// (헌법 #6 — 원장 반영은 confirmed 시점에만).
+    /// </para>
+    /// </remarks>
+    public async Task<CreditNoteResponse> IssueCreditNoteAsync(
+        IssueCreditNoteRequest request,
+        string tenantId,
+        string userId,
+        string? idempotencyKey,
+        CancellationToken ct = default)
+    {
+        // 1) 반품 검증 — 존재 + 동일 테넌트 + confirmed
+        //    🔴 confirmed 가 아닌 반품에 계산서를 끊으면 국세청에 나간 뒤 반품이 바뀔 수 있다.
+        var ret = await _db.QueryFirstOrDefaultAsync<CreditNoteReturnRow>(
+            new CommandDefinition(
+                """
+                SELECT return_id AS ReturnId, return_no AS ReturnNo, status AS Status,
+                       partner_id AS PartnerId, total_amount AS TotalAmount,
+                       vat_amount AS VatAmount, delivery_id AS DeliveryId
+                  FROM sales_returns
+                 WHERE return_id = @ReturnId AND tenant_id = @TenantId AND is_deleted = 0
+                """,
+                new { ReturnId = request.ReturnId, TenantId = tenantId },
+                cancellationToken: ct));
+
+        if (ret is null)
+        {
+            throw new TaxInvoiceException("return_not_found", "반품을 찾을 수 없습니다.");
+        }
+        if (!string.Equals(ret.Status, "confirmed", StringComparison.OrdinalIgnoreCase))
+        {
+            throw new TaxInvoiceException("return_not_confirmed",
+                "확정된 반품만 마이너스 계산서를 발행할 수 있습니다. 반품을 먼저 확정해주세요.");
+        }
+
+        // 2) 같은 반품에 이미 마이너스 계산서가 있나 (중복발행 차단)
+        //    🔴 국세청에 두 번 나가면 되돌릴 수 없다. 사슬 축으로 본다.
+        var dup = await _db.QueryFirstOrDefaultAsync<string?>(
+            new CommandDefinition(
+                """
+                SELECT invoice_no FROM tax_invoices
+                 WHERE tenant_id = @TenantId AND source_type = @SourceType
+                   AND source_id = @ReturnId AND status = @Issued
+                 ORDER BY invoice_no LIMIT 1
+                """,
+                new
+                {
+                    ReturnId = request.ReturnId,
+                    TenantId = tenantId,
+                    SourceType = CreditNoteSourceType,
+                    Issued = "issued"
+                },
+                cancellationToken: ct));
+
+        if (dup is not null)
+        {
+            throw new TaxInvoiceException("already_issued",
+                $"이미 마이너스 계산서({dup})가 발행된 반품입니다.");
+        }
+
+        // 3) 원 계산서 번호 — 사슬연결도 표기용. 없어도 발행은 진행한다(흐름 안 끊는다).
+        string? originalInvoiceNo = null;
+        if (!string.IsNullOrEmpty(ret.DeliveryId))
+        {
+            originalInvoiceNo = await _db.QueryFirstOrDefaultAsync<string?>(
+                new CommandDefinition(
+                    """
+                    SELECT invoice_no FROM tax_invoices
+                     WHERE tenant_id = @TenantId AND delivery_id = @DeliveryId
+                       AND (source_type IS NULL OR source_type <> @SourceType)
+                     ORDER BY invoice_no LIMIT 1
+                    """,
+                    new { DeliveryId = ret.DeliveryId, TenantId = tenantId, SourceType = CreditNoteSourceType },
+                    cancellationToken: ct));
+        }
+
+        // 4) 번호 채번 — 양수 계산서와 같은 통. 국세청 번호 체계는 하나다.
+        var now = DateTime.UtcNow;
+        var prefix = $"세-{BusinessDate.Today:yyyyMMdd}-";
+        var invoiceNo = await DocumentNumberHelper.NextNumberAsync(
+            _db, tenantId, "tax_invoices", "invoice_no", prefix, ct);
+
+        // 5) 🔴 음수로 뒤집는다. sales_returns 금액은 양수로 저장돼 있다.
+        var negAmount = -Math.Abs(ret.TotalAmount);
+        var negVat = -Math.Abs(ret.VatAmount);
+
+        var invoiceId = Guid.NewGuid().ToString();
+        using var tx = await _unitOfWork.BeginTransactionAsync(ct);
+        try
+        {
+            var conn = _unitOfWork.GetDbConnection();
+            var dbTx = tx.DbTransaction;
+
+            // 🔴 사슬연결도 — source_type/source_id 에 반품을 건다.
+            //    delivery_id 도 함께 넣어 원 명세서까지 사슬이 이어진다.
+            await conn.ExecuteAsync(
+                new CommandDefinition(
+                    """
+                    INSERT INTO tax_invoices
+                      (invoice_id, tenant_id, delivery_id, invoice_no,
+                       issued_at, issued_by, amount_total, vat_total,
+                       status, etax_status, idempotency_key,
+                       source_type, source_id)
+                    VALUES
+                      (@InvoiceId, @TenantId, @DeliveryId, @InvoiceNo,
+                       NOW(6), @IssuedBy, @Amount, @Vat,
+                       @Issued, @Pending, @IdempotencyKey,
+                       @SourceType, @ReturnId)
+                    """,
+                    new
+                    {
+                        InvoiceId = invoiceId,
+                        TenantId = tenantId,
+                        DeliveryId = ret.DeliveryId,
+                        InvoiceNo = invoiceNo,
+                        IssuedBy = userId,
+                        Amount = negAmount,
+                        Vat = negVat,
+                        Issued = "issued",
+                        Pending = "pending",
+                        IdempotencyKey = idempotencyKey,
+                        SourceType = CreditNoteSourceType,
+                        ReturnId = request.ReturnId
+                    },
+                    transaction: dbTx,
+                    cancellationToken: ct));
+
+            await tx.CommitAsync(ct);
+
+            return new CreditNoteResponse(
+                invoiceId, invoiceNo, request.ReturnId, ret.ReturnNo ?? string.Empty,
+                originalInvoiceNo, negAmount, negVat, negAmount + negVat, now, "issued");
+        }
+        catch
+        {
+            await tx.RollbackAsync(ct);
+            throw;
+        }
+    }
+
     public async Task<CancelTaxInvoiceResponse> CancelAsync(
         string invoiceId,
         CancelTaxInvoiceRequest request,
@@ -314,10 +474,38 @@ public sealed class TaxInvoiceService : ITaxInvoiceService
                     transaction: dbTx,
                     cancellationToken: ct));
 
-            // 역분개 — IssueAsync 기표의 차/대변 반전 (INSERT ONLY 원칙)
+            // 🔴 P0 봉합 (20260828작13) — 종전 주석이 틀렸다.
+            //   종전: "역분개 — IssueAsync 기표의 차/대변 반전"
+            //   그런데 IssueAsync(43~188)에는 AutoJournalHelper 호출이 한 건도 없다.
+            //   매출 기표는 「계산서 발행」이 아니라 「거래명세서 확정」에서 일어난다
+            //   (SalesService.cs:581 RecordSalesConfirmAsync). 헌법 #6 — 원장 반영은 confirmed 시점에만.
+            //   ⇒ 발행이 기표를 안 하는 것은 정상이다. 계산서가 또 기표하면 이중계상이다.
+            //
+            //   🔴 문제는 취소였다. 발행이 안 만든 분개를 취소가 «되돌렸다».
+            //   실측(2026-08-28): 명세서 확정 1건 + 계산서 취소 1건을 넣으면
+            //     외상매출금 0 / 매출 0 / 부가세예수금 0 ← 매출이 장부에서 통째로 사라진다.
+            //   거래명세서는 여전히 confirmed 이고 재고도 나갔는데 회계만 0 이 된다.
+            //   ⇒ 재고↔회계 분리(헌법 #20 위반) + 부가세 매출세액 «과소»신고.
+            //   FinanceService 에 sales_cancel 낱말 0건이라 정합성 검사도 못 잡는다
+            //   (그 검사는 "확정인데 기표 없음"을 보지, "있다가 사라진 것"은 안 본다).
+            //
+            //   [봉합] 이 계산서 자신이 만든 분개가 «실재할 때만» 되돌린다.
+            //   흐름은 안 끊는다 — 분개가 없으면 취소는 그대로 진행된다(헌법 #20: 좁게 막는다).
+            var hasOwnEntry = await conn.ExecuteScalarAsync<int>(
+                new CommandDefinition(
+                    """
+                    SELECT COUNT(*) FROM journal_entries
+                     WHERE tenant_id = @TenantId AND source_id = @InvoiceId
+                       AND source_type IN ('tax_invoice', 'sales_cancel')
+                    """,
+                    new { InvoiceId = invoiceId, TenantId = tenantId },
+                    transaction: dbTx,
+                    cancellationToken: ct)).ConfigureAwait(false);
+
+            // 역분개 (INSERT ONLY 원칙) — 위 hasOwnEntry 가 참일 때만 도달한다
             // 원분개: 차변 외상매출금(total) / 대변 매출(supply) + 부가세예수금(vat)
             // 역분개: 차변 매출(supply) + 부가세예수금(vat) / 대변 외상매출금(total)
-            if (invoiceRow.AmountTotal != 0m || invoiceRow.VatTotal != 0m)
+            if (hasOwnEntry > 0 && (invoiceRow.AmountTotal != 0m || invoiceRow.VatTotal != 0m))
             {
                 await AutoJournalHelper.RecordSalesCancelAsync(
                     conn, dbTx!,
@@ -359,6 +547,16 @@ public sealed class TaxInvoiceService : ITaxInvoiceService
             EtaxIssuedAt: r.EtaxIssuedAt);
 
     // === 내부 row 모델 ==========================================
+    /// <summary>마이너스 계산서 발행용 반품 행 (20260828작13).</summary>
+    private sealed record CreditNoteReturnRow(
+        string ReturnId,
+        string? ReturnNo,
+        string? Status,
+        string? PartnerId,
+        decimal TotalAmount,
+        decimal VatAmount,
+        string? DeliveryId);
+
     private sealed record DeliveryRow(
         string DeliveryId,
         string TenantId,

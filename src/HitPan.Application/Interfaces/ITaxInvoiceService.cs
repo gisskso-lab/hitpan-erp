@@ -27,6 +27,14 @@ public interface ITaxInvoiceService
         string? partnerId,
         CancellationToken ct = default);
 
+    /// <summary>마이너스 계산서(매출반품) 발행 — 20260828작13. 사슬은 source_type/source_id 축.</summary>
+    Task<CreditNoteResponse> IssueCreditNoteAsync(
+        IssueCreditNoteRequest request,
+        string tenantId,
+        string userId,
+        string? idempotencyKey,
+        CancellationToken ct = default);
+
     /// <summary>계산서 취소. 역분개·monthly_summary 차감 별도 작업 (본 라운드 비범위 — 작2 §3).</summary>
     Task<CancelTaxInvoiceResponse> CancelAsync(
         string invoiceId,

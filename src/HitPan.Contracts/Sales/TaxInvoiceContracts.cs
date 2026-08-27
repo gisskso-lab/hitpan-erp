@@ -29,6 +29,30 @@ public sealed record TaxInvoiceResponse(
     string EtaxStatus,           // pending | issued | failed (2/3계층 placeholder)
     DateTime? EtaxIssuedAt);
 
+// === 마이너스 계산서 (매출반품) ======================================
+// 사장님 오더: "매출반품은 마이너스 전표 끊으면 해결되잖아. 전자세금계산서 국세청 전송건도
+//   마이너스 계산서. 단, 마이너스 계산서 끊을시 반드시 해당 반품의 연결사슬을 표기할것!!(사슬연결도)"
+//   비고 형식: 「반품전표 : 반-(전표번호)」
+//
+// 🟢 사장님 결재 2026-08-28:
+//   ② 방식 = «음수 금액 새 행» (원본 계산서 보존 · 국세청 전송 이력 유지)
+//   ③ 사슬 = tax_invoices.source_type/source_id 축 (이미 있는 컬럼, return_id 신설 안 함)
+public sealed record IssueCreditNoteRequest(
+    string ReturnId,             // 매출반품 ID — 이 계산서가 어느 반품의 것인지 (사슬연결도)
+    string? Memo);               // 발행 메모 (선택)
+
+public sealed record CreditNoteResponse(
+    string InvoiceId,
+    string InvoiceNo,            // 마이너스 계산서 번호
+    string ReturnId,             // 원 반품 ID
+    string ReturnNo,             // 원 반품 번호 — 화면 「반품전표 : 반-...」 표기용
+    string? OriginalInvoiceNo,   // 원 계산서 번호 (있으면)
+    decimal AmountTotal,         // 🔴 음수
+    decimal VatTotal,            // 🔴 음수
+    decimal GrandTotal,          // 🔴 음수
+    DateTime IssuedAt,
+    string Status);
+
 // === 취소 ===========================================================
 public sealed record CancelTaxInvoiceRequest(
     string Reason);              // 취소 사유 (감사 추적)
