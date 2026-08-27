@@ -3053,7 +3053,10 @@ CREATE TABLE `purchase_returns` (
   KEY `idx_tenant` (`tenant_id`),
   KEY `idx_partner` (`partner_id`),
   KEY `idx_rt_tenant_date` (`tenant_id`,`return_date`),
-  KEY `idx_purchase_returns_reason` (`tenant_id`,`return_reason`,`return_date`)
+  KEY `idx_purchase_returns_reason` (`tenant_id`,`return_reason`,`return_date`),
+  -- 20260827작9 W3: 매입반품번호 UNIQUE. sales_returns 엔 uq_sret_tenant_returnno 가 있는데
+  --   매입반품에만 없던 비대칭. COUNT+1 채번과 겹치면 조용히 중복됐다.
+  UNIQUE KEY `uq_pret_return_no` (`tenant_id`,`return_no`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
@@ -3119,7 +3122,10 @@ CREATE TABLE `quotations` (
   KEY `idx_tenant_date` (`tenant_id`,`quote_date`),
   KEY `idx_tenant_partner` (`tenant_id`,`partner_id`),
   KEY `idx_tenant_status` (`tenant_id`,`status`),
-  KEY `idx_q_tenant_date` (`tenant_id`,`quote_date`)
+  KEY `idx_q_tenant_date` (`tenant_id`,`quote_date`),
+  -- 20260827작9 W3: 견적번호 UNIQUE. 다른 전표(수주·명세서·매출반품·계산서)엔 전부 있는데
+  --   견적만 없어서, COUNT+1 채번과 겹치면 중복 견적번호가 에러 없이 저장됐다.
+  UNIQUE KEY `uq_quote_no` (`tenant_id`,`quote_no`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
@@ -3481,7 +3487,7 @@ INSERT INTO `schema_migrations` (`migration_id`, `app_version`, `success`) VALUE
 ('DB-74','clean-ddl',1),('DB-75','clean-ddl',1),('DB-76','clean-ddl',1),('DB-77','clean-ddl',1),
 ('DB-78','clean-ddl',1),('DB-79','clean-ddl',1),('DB-80','clean-ddl',1),('DB-81','clean-ddl',1),
 ('DB-82','clean-ddl',1),('DB-83','clean-ddl',1),('DB-84','clean-ddl',1),('DB-85','clean-ddl',1),
-('DB-86','clean-ddl',1),('DB-87','clean-ddl',1),('DB-88','clean-ddl',1),('DB-89','clean-ddl',1),('DB-90','clean-ddl',1),('DB-91','clean-ddl',1),('DB-92','clean-ddl',1),('DB-93','clean-ddl',1),('DB-94','clean-ddl',1),('DB-95','clean-ddl',1),('DB-96','clean-ddl',1),('DB-97','clean-ddl',1),('DB-98','clean-ddl',1),('DB-99','clean-ddl',1),('DB-100','clean-ddl',1),('DB-101','clean-ddl',1),('DB-102','clean-ddl',1),('DB-103','clean-ddl',1),('DB-104','clean-ddl',1),('DB-105','clean-ddl',1),('DB-106','clean-ddl',1),('DB-107','clean-ddl',1),('DB-108','clean-ddl',1),('DB-109','clean-ddl',1),('DB-110','clean-ddl',1),('DB-111','clean-ddl',1),('DB-112','clean-ddl',1);
+('DB-86','clean-ddl',1),('DB-87','clean-ddl',1),('DB-88','clean-ddl',1),('DB-89','clean-ddl',1),('DB-90','clean-ddl',1),('DB-91','clean-ddl',1),('DB-92','clean-ddl',1),('DB-93','clean-ddl',1),('DB-94','clean-ddl',1),('DB-95','clean-ddl',1),('DB-96','clean-ddl',1),('DB-97','clean-ddl',1),('DB-98','clean-ddl',1),('DB-99','clean-ddl',1),('DB-100','clean-ddl',1),('DB-101','clean-ddl',1),('DB-102','clean-ddl',1),('DB-103','clean-ddl',1),('DB-104','clean-ddl',1),('DB-105','clean-ddl',1),('DB-106','clean-ddl',1),('DB-107','clean-ddl',1),('DB-108','clean-ddl',1),('DB-109','clean-ddl',1),('DB-110','clean-ddl',1),('DB-111','clean-ddl',1),('DB-112','clean-ddl',1),('DB-113','clean-ddl',1);
 
 --
 -- Table structure for table `service_tickets`

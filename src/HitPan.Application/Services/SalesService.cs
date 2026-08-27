@@ -161,6 +161,47 @@ public class SalesService : ISalesService
         var linkedOrderId = request.OrderId;
         if (string.IsNullOrWhiteSpace(linkedOrderId))
         {
+            // 🔴 20260827작9 W4 — 자동생성 멱등 가드. 사장님: "사슬동작중 중복생성 절대금지".
+            //   종전에는 OrderId 가 비었는지"만" 보고 곧바로 수주서를 만들었다.
+            //   같은 거래명세서 저장이 두 번 타면(재시도·더블클릭·네트워크 반복) 수주서가 두 장 생겼다.
+            //
+            //   🔴 이건 자동발주에서 이미 한 번 난 사고와 같은 모양이다 —
+            //      "is_auto=1 은 쓰기만 하고 읽지 않았다"(20260825작1 W2-0-B).
+            //      표식을 남기기만 하고 되읽지 않으면 멱등이 성립하지 않는다.
+            //      그래서 여기서는 is_auto=1 을 **읽어서** 재사용한다.
+            //
+            //   ⚠️ 재사용 조건을 좁게 잡는다 — 같은 테넌트·거래처·일자의 "자동생성분이면서
+            //      아직 거래명세서가 붙지 않은" 수주서만. 이미 다른 명세서가 물린 수주서를
+            //      재사용하면 서로 다른 거래가 한 수주서에 얽힌다(그게 더 큰 사고다).
+            var reusableOrderId = await _db.QueryFirstOrDefaultAsync<string?>(new CommandDefinition(
+                """
+                SELECT o.order_id
+                  FROM sales_orders o
+                 WHERE o.tenant_id  = @Tid
+                   AND o.partner_id = @Pid
+                   AND o.order_date = @Date
+                   AND o.is_auto    = 1
+                   AND o.is_deleted = 0
+                   AND NOT EXISTS (SELECT 1 FROM sales_deliveries d
+                                    WHERE d.order_id  = o.order_id
+                                      AND d.tenant_id = o.tenant_id)
+                 LIMIT 1
+                """,
+                new { Tid = _currentTenant.TenantId, Pid = request.PartnerId, Date = date },
+                cancellationToken: ct));
+
+            if (reusableOrderId is not null)
+            {
+                // 이미 만들어 둔 고아 자동수주서가 있다 — 새로 만들지 않고 그것에 붙인다.
+                linkedOrderId = reusableOrderId;
+                autoCreatedOrderNo = await _db.QueryFirstOrDefaultAsync<string?>(new CommandDefinition(
+                    "SELECT order_no FROM sales_orders WHERE order_id=@Oid AND tenant_id=@Tid",
+                    new { Oid = reusableOrderId, Tid = _currentTenant.TenantId },
+                    cancellationToken: ct));
+            }
+            else
+            {
+
             var orderRepo2 = _unitOfWork.Repository<SalesOrder>();
             var orderItemRepo2 = _unitOfWork.Repository<SalesOrderItem>();
 
@@ -208,6 +249,7 @@ public class SalesService : ISalesService
                     ItemStatus = "closed"
                 });
             }
+            } // else — 재사용할 자동수주서가 없어 새로 만든 경우 (W4)
         }
 
         var deliveryId = Guid.NewGuid().ToString();
@@ -1954,12 +1996,45 @@ public class SalesService : ISalesService
             else _db.Open();
         }
 
-        var returnDate = request.ReturnDate == default ? DateTime.UtcNow.Date : request.ReturnDate.Date;
-        var prefix = $"매출반품-{returnDate:yyyyMMdd}-";
-        var cnt = await _db.QueryFirstOrDefaultAsync<int>(new CommandDefinition(
-            "SELECT COUNT(*) FROM sales_returns WHERE tenant_id=@Tid AND return_no LIKE CONCAT(@Pfx,'%')",
-            new { Tid = tenantId, Pfx = prefix }, cancellationToken: ct));
-        var returnNo = $"{prefix}{cnt + 1:000}";
+        // 🔴 20260827작9 W5 — 같은 거래명세서에 살아있는 반품이 이미 있나.
+        //   매입(PurchaseService.CreatePurchaseReturnAsync)에는 진작 있던 가드인데 매출만 없었다.
+        //   취소분은 다시 만들 수 있어야 하므로 제외한다(매입과 동일 정책).
+        //   ⚠️ 철자 주의 — sales_returns 는 'canceled'(l 하나)로 저장한다(:2508).
+        //      같은 파일의 sales_deliveries 는 'cancelled'(l 둘)라 옆줄을 보고 복사하면
+        //      이 가드가 영원히 안 걸린다. 막는 척하면서 아무것도 안 막는다.
+        if (!string.IsNullOrWhiteSpace(request.DeliveryId))
+        {
+            var dupNo = await _db.QueryFirstOrDefaultAsync<string?>(new CommandDefinition(
+                """
+                SELECT return_no FROM sales_returns
+                 WHERE delivery_id=@Did AND tenant_id=@Tid
+                   AND is_deleted=0 AND status <> 'canceled'
+                 LIMIT 1
+                """,
+                new { Did = request.DeliveryId, Tid = tenantId }, cancellationToken: ct));
+
+            if (dupNo is not null)
+            {
+                // 🔴 작8 교훈: 막는 것 ≠ 알려주는 것. 기존 반품번호를 반드시 담는다.
+                throw new InvalidOperationException(
+                    $"이미 반품전표({dupNo})가 발행된 거래명세서입니다. 기존 반품전표를 수정하세요.");
+            }
+        }
+
+        // 20260827작9 W2-b — 채번 일자는 업무일(KST). 종전 DateTime.UtcNow 는 KST 09시 이전에
+        //   전날 날짜로 채번해 전표 일자와 번호의 날짜가 하루 어긋났다. 매입은 이미 BusinessDate(작18 W4).
+        var returnDate = request.ReturnDate == default ? BusinessDate.Today : request.ReturnDate.Date;
+
+        // 🔴 20260827작9 W1 — prefix 를 '반-' 으로 바꾼다(사장님 지시: "반품전표 : 반-(전표번호)").
+        //   종전 '매출반품-20260827-001' 은 25자인데 sales_returns.return_no 는 varchar(20) 이고
+        //   이 배포는 STRICT_TRANS_TABLES 라(ApprovalService.cs:118) ERROR 1406 으로 저장이 터졌다.
+        //   '반-20260827-001' = 18자. 매입 '매반-'(19자)과 나란하다.
+        // 🔴 W2 — COUNT+1 → MAX+1. DocumentNumberHelper 주석이 COUNT+1 을 "진범"으로 지목했다
+        //   (4/28 자동사슬 174건 중 71건 원장누락). 소프트삭제 시 COUNT 가 줄어 이미 쓴 번호를
+        //   재발급하는 것이 더 큰 위험이다 — 사장님: "사슬동작중 중복생성 절대금지".
+        var prefix = $"반-{returnDate:yyyyMMdd}-";
+        var returnNo = await DocumentNumberHelper.NextNumberAsync(
+            _db, tenantId, "sales_returns", "return_no", prefix, ct);
         var returnId = Guid.NewGuid().ToString();
 
         decimal totalAmount = 0, totalVat = 0;
