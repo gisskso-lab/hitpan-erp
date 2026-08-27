@@ -2481,10 +2481,10 @@ public class SalesService : ISalesService
                 new { TenantId = tenantId, PartnerId = partnerId, Amount = totalAmount },
                 transaction: dbTx, cancellationToken: ct));
 
-            // 5) 회계 역분개 — 매출취소 역분개 재사용 (차변 매출+부가세예수금 / 대변 외상매출금)
+            // 5) 회계 역분개 — 매출반품 전용 키(sales_return). 2026-08-28 작12: 종전 sales_delivery_cancel 차용 해소
             if (totalAmount != 0m || vatAmount != 0m)
             {
-                await AutoJournalHelper.RecordSalesDeliveryCancelAsync(
+                await AutoJournalHelper.RecordSalesReturnAsync(
                     conn, dbTx!, tenantId, returnId, returnNo, rd, partnerId, totalAmount, vatAmount, employeeId, ct);
             }
 
