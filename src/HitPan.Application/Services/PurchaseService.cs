@@ -612,13 +612,30 @@ public class PurchaseService : IPurchaseService
                                --   찾아 맞춰야 했다. 그게 정합성이 안 맞아 보이던 자리다.
                                --   ⚠️ 부분반품을 나눠서 하면 반품전표가 둘 이상이다 ⇒ 전부 보여준다.
                                --     하나만 보여주면 나머지가 숨는다(상관 서브쿼리라 행은 안 늘어난다).
-                               (SELECT GROUP_CONCAT(r2.return_no ORDER BY r2.return_date, r2.return_no
-                                                    SEPARATOR ', ')
+                               --
+                               -- 🔴🔴 20260827작6 (사장님 지시) — **취소분도 보여준다.**
+                               --   사장님: *"매입과 반품, 반품과 매입, 매입과 발주 전표번호를
+                               --   대조해 볼 수 있도록 한거고"*
+                               --   ⇒ 이 칸은 표기가 아니라 **대조 도구**다.
+                               --
+                               --   종전엔 `status <> 'canceled'` 로 취소분을 **숨겼다.**
+                               --   "되돌린 반품을 살아있는 것처럼 보이면 안 된다" 는 이유였는데,
+                               --   **대조 도구에서 데이터를 빼면 도구가 죽는다.**
+                               --   반품서를 만들었다 취소하면 매입목록에서 흔적이 통째로 사라져
+                               --   *"반품했는데 왜 안 뜨지"* 가 된다 — 그게 반려 원인이었다.
+                               --
+                               --   ⇒ 전부 보여주되 **취소분은 「(취소)」 를 붙여** 구분한다.
+                               --     숨기지 않으면서 오인도 막는다.
+                               (SELECT GROUP_CONCAT(
+                                          CASE WHEN r2.status = 'canceled'
+                                               THEN CONCAT(r2.return_no, '(취소)')
+                                               ELSE r2.return_no END
+                                          ORDER BY r2.return_date, r2.return_no
+                                          SEPARATOR ', ')
                                   FROM purchase_returns r2
                                  WHERE r2.receipt_id = pr.receipt_id
                                    AND r2.tenant_id  = pr.tenant_id
-                                   AND r2.is_deleted = 0
-                                   AND r2.status <> 'canceled') AS ReturnNos,
+                                   AND r2.is_deleted = 0) AS ReturnNos,
                                ec.emp_name AS CreatedByName
                            FROM purchase_receipts pr
                            LEFT JOIN employees ec
@@ -695,19 +712,38 @@ public class PurchaseService : IPurchaseService
             throw new InvalidOperationException("발주서를 찾을 수 없습니다.");
         }
 
-        // 이 발주를 참조하는 미확정(draft) 매입명세가 이미 있으면 중복 전환 차단
-        var draftExists = await _db.ExecuteScalarAsync<int>(new CommandDefinition(
+        // 🔴🔴 20260827작7 W2-2 (사장님 지시 "당장 봉합") — 중복 전환 가드 정정.
+        //
+        //   종전: `WHERE po_id=@PoId AND status != 'Confirmed'`  ← 두 가지가 틀렸다.
+        //
+        //   ① **대문자 'Confirmed'** — 저장값은 소문자 `'confirmed'` 다
+        //      (PurchaseReceiptConfiguration 이 ToLowerInvariant 로 쓴다).
+        //      지금은 collation 이 대소문자를 무시해 우연히 동작하지만,
+        //      `_bin`/`_cs` 로 바뀌는 순간 **가드가 조용히 무력화**된다.
+        //
+        //   ② 🔴 **방향이 틀렸다** — `!= 'confirmed'` 인 것만 세므로
+        //      **이미 확정된 매입명세서가 있어도 다시 전환됐다.**
+        //      즉 발주 1건으로 매입 2장을 만들 수 있었다(재고 2배 입고).
+        //      남은 방어는 `receiptItems.Count == 0` 뿐인데 그건 received_qty 가
+        //      제대로 올라갔을 때만 듣는다.
+        //
+        //   ⇒ **취소분만 빼고 전부 센다.** 살아있는 매입명세서가 하나라도 있으면 막는다.
+        //     번호를 알려준다 — 담당자가 무엇을 정리할지 알아야 한다(사장님 지시).
+        var existingReceiptNo = await _db.QueryFirstOrDefaultAsync<string?>(new CommandDefinition(
             """
-            SELECT COUNT(1) FROM purchase_receipts
-            WHERE po_id = @PoId AND tenant_id = @TenantId AND status != 'Confirmed'
+            SELECT receipt_no FROM purchase_receipts
+             WHERE po_id = @PoId AND tenant_id = @TenantId
+               AND status <> 'cancelled'
+             ORDER BY receipt_no
+             LIMIT 1
             """,
             new { PoId = poId, TenantId = tenantId },
             cancellationToken: ct));
-        if (draftExists > 0)
+        if (existingReceiptNo is not null)
         {
             throw new InvalidOperationException(
-                "이 발주에 대한 매입명세(미확정)가 이미 존재합니다. " +
-                "기존 매입명세서를 확정하거나 삭제한 후 다시 전환해주세요.");
+                $"이미 매입명세서({existingReceiptNo})가 발행된 발주서입니다. " +
+                "기존 매입명세서를 확인하세요.");
         }
 
         var items = await poItemRepo.FindAsync(x => x.PoId == poId);
@@ -1024,6 +1060,51 @@ public class PurchaseService : IPurchaseService
                 _db.Open();
         }
 
+        // 🔴🔴 20260827작7 W2-1 (사장님 지시 "당장 봉합") — **중복 발행 차단 + 상태 가드.**
+        //
+        //   [무엇을 겪고서] 전환 경로(ConvertReceiptToReturnAsync)에는 `FOR UPDATE` 중복가드와
+        //     매입 confirmed 검사가 제대로 있는데, **이 직접작성 경로에는 셋 다 없었다.**
+        //     ⇒ `POST /api/purchases/returns` 로는 같은 매입에 반품을 **무한히** 만들 수 있었고,
+        //       draft 매입에도 반품이 붙었다(그 상태로 매입을 지우면 **부모 없는 반품**이 남는다).
+        //     즉 전환 경로의 가드를 이 경로가 통째로 **우회**하고 있었다.
+        //
+        //   사장님: *"사슬로 이어진 건이 중복으로 발행되거나 사슬에 영향을 주는,
+        //            즉 정합성에 영향을 주는 것들을 모두 차단하자는거야."*
+        //
+        //   ⚠️ `receipt_id` 없는 반품(전표 없이 직접 반품)은 종전대로 허용한다 —
+        //     사슬이 없으므로 중복 판정 대상이 아니다(#20 흐름을 끊지 않는다).
+        if (!string.IsNullOrWhiteSpace(request.ReceiptId))
+        {
+            var receiptStatus = await _db.QueryFirstOrDefaultAsync<string?>(new CommandDefinition(
+                "SELECT status FROM purchase_receipts WHERE receipt_id=@Rid AND tenant_id=@Tid",
+                new { Rid = request.ReceiptId, Tid = tenantId }, cancellationToken: ct))
+                ?? throw new InvalidOperationException("원 매입명세서를 찾을 수 없습니다.");
+
+            // 확정된 매입만 반품할 수 있다 — 입고되지 않은 물건은 되돌릴 수 없다.
+            if (!string.Equals(receiptStatus, "confirmed", StringComparison.OrdinalIgnoreCase))
+            {
+                throw new InvalidOperationException(
+                    $"「{PurchaseStatusLabels.Receipt(receiptStatus)}」 상태의 매입명세서는 반품할 수 없습니다. " +
+                    "매입확정 후 반품하세요.");
+            }
+
+            // 같은 매입에 살아있는 반품이 이미 있나 — 취소분은 다시 만들 수 있어야 하므로 제외.
+            var dupNo = await _db.QueryFirstOrDefaultAsync<string?>(new CommandDefinition(
+                """
+                SELECT return_no FROM purchase_returns
+                 WHERE receipt_id=@Rid AND tenant_id=@Tid
+                   AND is_deleted=0 AND status <> 'canceled'
+                 LIMIT 1
+                """,
+                new { Rid = request.ReceiptId, Tid = tenantId }, cancellationToken: ct));
+
+            if (dupNo is not null)
+            {
+                throw new InvalidOperationException(
+                    $"이미 반품전표({dupNo})가 발행된 매입명세서입니다. 기존 반품전표를 수정하세요.");
+            }
+        }
+
         var returnDate = request.ReturnDate == default ? BusinessDate.Today : request.ReturnDate.Date;   // 20260825작18 W4
         var prefix = $"매반-{returnDate:yyyyMMdd}-";
         var cnt = await _db.QueryFirstOrDefaultAsync<int>(new CommandDefinition(
@@ -1042,38 +1123,57 @@ public class PurchaseService : IPurchaseService
         // 봉합 (2026-06-22, 11차전 반품사유 거짓봉합 교차검증): 종전 INSERT 가 memo 만 저장하고
         //   return_reason·return_reason_memo 컬럼을 빠뜨려, 프론트가 사유를 보내도 DB 에 영구 유실됐다
         //   (clean DDL 2566-2567 에 컬럼·인덱스 존재하나 SQL 미반영). 화면 입력 사유를 정확히 저장한다.
-        await _db.ExecuteAsync(new CommandDefinition(
-            @"INSERT INTO purchase_returns (return_id, tenant_id, return_no, receipt_id, partner_id,
-                return_date, return_type, status, total_amount, vat_amount, memo,
-                return_reason, return_reason_memo, created_by, created_at, updated_at)
-              VALUES (@ReturnId, @Tid, @ReturnNo, @ReceiptId, @PartnerId,
-                @ReturnDate, 'purchase_return', 'draft', @Total, @Vat, @Memo,
-                @ReturnReason, @ReturnReasonMemo, @CreatedBy, NOW(6), NOW(6))",
-            new
-            {
-                ReturnId = returnId, Tid = tenantId, ReturnNo = returnNo,
-                ReceiptId = request.ReceiptId,
-                PartnerId = request.PartnerId,
-                ReturnDate = returnDate, Total = totalAmount, Vat = totalVat,
-                Memo = request.Memo,
-                ReturnReason = request.ReturnReason,
-                ReturnReasonMemo = request.ReturnReasonMemo,
-                CreatedBy = _currentTenant.UserId
-            }, cancellationToken: ct));
-
-        foreach (var it in request.Items)
+        // 🔴 20260827작7 W2-1 — **헤더·라인을 한 트랜잭션으로 묶는다.**
+        //   종전엔 헤더 INSERT 와 라인 루프가 **각각 독립 커밋**이라, 라인 저장 중 실패하면
+        //   **품목 없는 유령 반품 헤더**가 남았다. 전환 경로 주석이 이미 경고한 구조인데
+        //   이 경로만 그대로였다. 유령 헤더는 목록에 뜨고 금액은 0 이라 정합성이 깨져 보인다.
+        using var tx = _db.BeginTransaction();
+        try
         {
             await _db.ExecuteAsync(new CommandDefinition(
-                @"INSERT INTO purchase_return_items (return_item_id, return_id, tenant_id,
-                    item_id, qty, unit_price, supply_amount, vat_amount, warehouse_id)
-                  VALUES (UUID(), @ReturnId, @Tid, @ItemId, @Qty, @Price, @Supply, @Vat, @Wh)",
+                @"INSERT INTO purchase_returns (return_id, tenant_id, return_no, receipt_id, partner_id,
+                    return_date, return_type, status, total_amount, vat_amount, memo,
+                    return_reason, return_reason_memo, created_by, created_at, updated_at)
+                  VALUES (@ReturnId, @Tid, @ReturnNo, @ReceiptId, @PartnerId,
+                    @ReturnDate, 'purchase_return', 'draft', @Total, @Vat, @Memo,
+                    @ReturnReason, @ReturnReasonMemo, @CreatedBy, NOW(6), NOW(6))",
                 new
                 {
-                    ReturnId = returnId, Tid = tenantId,
-                    ItemId = it.ItemId, Qty = it.Qty,
-                    Price = it.UnitPrice, Supply = it.SupplyAmount,
-                    Vat = it.VatAmount, Wh = it.WarehouseId
-                }, cancellationToken: ct));
+                    ReturnId = returnId, Tid = tenantId, ReturnNo = returnNo,
+                    ReceiptId = request.ReceiptId,
+                    PartnerId = request.PartnerId,
+                    ReturnDate = returnDate, Total = totalAmount, Vat = totalVat,
+                    Memo = request.Memo,
+                    ReturnReason = request.ReturnReason,
+                    ReturnReasonMemo = request.ReturnReasonMemo,
+                    CreatedBy = _currentTenant.UserId
+                }, transaction: tx, cancellationToken: ct));
+
+            foreach (var it in request.Items)
+            {
+                await _db.ExecuteAsync(new CommandDefinition(
+                    @"INSERT INTO purchase_return_items (return_item_id, return_id, tenant_id,
+                        item_id, qty, unit_price, supply_amount, vat_amount, warehouse_id)
+                      VALUES (UUID(), @ReturnId, @Tid, @ItemId, @Qty, @Price, @Supply, @Vat, @Wh)",
+                    new
+                    {
+                        ReturnId = returnId, Tid = tenantId,
+                        ItemId = it.ItemId, Qty = it.Qty,
+                        Price = it.UnitPrice, Supply = it.SupplyAmount,
+                        Vat = it.VatAmount, Wh = it.WarehouseId
+                    }, transaction: tx, cancellationToken: ct));
+            }
+
+            tx.Commit();
+        }
+        catch (Exception)
+        {
+            try { tx.Rollback(); }
+            catch (Exception rbex)
+            {
+                System.Diagnostics.Trace.TraceWarning($"[PurchaseService] 반품 생성 롤백 실패: {rbex.Message}");
+            }
+            throw;
         }
 
         return (returnId, returnNo);
@@ -1512,14 +1612,42 @@ public class PurchaseService : IPurchaseService
     // ─────────────────────────────────────────────────────────────────────
     public async Task DeletePurchaseReturnAsync(string returnId, string tenantId, CancellationToken ct = default)
     {
+        // 🔴 20260827작7 W1-4 — `is_deleted=0` 조건 보강.
+        //   매출쪽 대칭 메서드(DeleteSalesReturnAsync)엔 이 조건이 있는데 **매입쪽만 빠져 있었다.**
+        //   이미 지운 반품을 또 지우면 "찾을 수 없습니다" 대신 조용히 재삭제된다.
         var status = await _db.QueryFirstOrDefaultAsync<string?>(new CommandDefinition(
-            "SELECT status FROM purchase_returns WHERE return_id=@Id AND tenant_id=@Tid",
+            "SELECT status FROM purchase_returns WHERE return_id=@Id AND tenant_id=@Tid AND is_deleted=0",
             new { Id = returnId, Tid = tenantId }, cancellationToken: ct))
             ?? throw new InvalidOperationException("반품 문서를 찾을 수 없습니다.");
 
-        if (status != "draft")
+        // 🔴 사장님이 정한 기준: *"반품이 임시확정된 건을 삭제하면?? 그건 반품전표만 삭제지"*
+        //   ⇒ 임시저장(draft)만 지울 수 있다. 확정분은 원장이 움직였으므로 「확정취소」가 정답이다.
+        if (!string.Equals(status, "draft", StringComparison.OrdinalIgnoreCase))
         {
-            throw new InvalidOperationException("draft 상태만 삭제할 수 있습니다. 확정된 반품은 취소 처리가 필요합니다.");
+            throw new InvalidOperationException(
+                $"「{PurchaseStatusLabels.Return(status)}」 상태의 반품전표는 삭제할 수 없습니다. " +
+                "「확정취소」로 되돌린 뒤 삭제하세요.");
+        }
+
+        // 🔴 W1-4 — 원장 가드. 판정 기준은 **원장이 움직였느냐**(사장님).
+        //   draft 인데 원장이 있으면 그 자체가 이상 상태다 — 지우면 재고·회계가 장부와 갈린다.
+        var ledgerRows = await _db.ExecuteScalarAsync<int>(new CommandDefinition(
+            """
+            SELECT
+              (SELECT COUNT(*) FROM stock_ledger
+                WHERE tenant_id=@Tid AND source_id=@Id
+                  AND source_type IN ('purchase_return','purchase_return_cancel'))
+            + (SELECT COUNT(*) FROM journal_entries
+                WHERE tenant_id=@Tid AND source_id=@Id
+                  AND source_type IN ('purchase_return','purchase_return_cancel'))
+            """,
+            new { Id = returnId, Tid = tenantId }, cancellationToken: ct));
+
+        if (ledgerRows > 0)
+        {
+            throw new InvalidOperationException(
+                "재고·회계에 이미 반영된 반품전표라 삭제할 수 없습니다. " +
+                "「확정취소」로 되돌린 뒤 삭제하세요.");
         }
 
         using var tx = await _unitOfWork.BeginTransactionAsync(ct);
@@ -1683,12 +1811,29 @@ public class PurchaseService : IPurchaseService
             throw new InvalidOperationException("이미 삭제된 발주서입니다.");
         }
 
+        // 🔴 20260827작7 W1-3 (사장님 지시) — **상태 가드.**
+        //   종전엔 `is_deleted` 만 보고 **status 를 안 봤다.** 바로 위 메서드 주석은
+        //   *"발주서 draft 삭제"* 라고 쓰여 있는데 **코드가 draft 를 강제하지 않아**,
+        //   `received`(입고완료)·`partial`(부분입고) 상태여도 아래 자식검사만 통과하면 지워졌다.
+        //   ⚠️ DB enum 은 draft/ordered/partial/received/cancelled 다
+        //     (C# enum 의 Confirmed·Closed 는 DB 에 없는 값 — 별건, 작지서 §6-7).
+        if (!string.Equals(row.Status, "draft", StringComparison.OrdinalIgnoreCase)
+            && !string.Equals(row.Status, "cancelled", StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidOperationException(
+                $"「{PurchaseStatusLabels.Order(row.Status)}」 상태의 발주서는 삭제할 수 없습니다. " +
+                "임시저장 상태에서만 삭제할 수 있습니다.");
+        }
+
         // 매입전환된 라인 차단 — 단, 그 매입명세서가 cancelled 상태면 살아있는 입고가
         // 아니므로 차단 대상에서 제외 (사장님 보고 2026-04-26: 매입 삭제 후에도 발주 못 지움).
         // active(=non-cancelled) 매입명세서에 연결된 라인이 received_qty>0 일 때만 차단.
-        var activeReceived = await _db.QueryFirstOrDefaultAsync<long>(new CommandDefinition(
+        //
+        // 🔴 W1-3 — **어느 전표 때문인지 번호를 알려준다**(사장님 지시).
+        //   종전엔 "매입전환된 라인이 있어" 라고만 해서 담당자가 무엇을 정리해야 할지 몰랐다.
+        var blockingReceipts = (await _db.QueryAsync<string>(new CommandDefinition(
             """
-            SELECT COUNT(*)
+            SELECT DISTINCT pr.receipt_no
               FROM purchase_receipt_items pri
               JOIN purchase_receipts pr ON pr.receipt_id = pri.receipt_id AND pr.tenant_id = pri.tenant_id
              WHERE pri.po_item_id IN (
@@ -1697,11 +1842,14 @@ public class PurchaseService : IPurchaseService
                    )
                AND pri.tenant_id = @Tid
                AND pr.status <> 'cancelled'
+             ORDER BY pr.receipt_no
             """,
-            new { Id = poId, Tid = tenantId }, cancellationToken: ct));
-        if (activeReceived > 0)
+            new { Id = poId, Tid = tenantId }, cancellationToken: ct))).ToList();
+        if (blockingReceipts.Count > 0)
         {
-            throw new InvalidOperationException("이미 매입전환(입고)된 라인이 있어 삭제할 수 없습니다. 매입명세서를 먼저 취소하거나 반품해주세요.");
+            throw new InvalidOperationException(
+                $"매입명세서({string.Join(", ", blockingReceipts)})로 입고된 발주서라 삭제할 수 없습니다. " +
+                "매입명세서를 먼저 취소하거나 반품하세요.");
         }
 
         await _db.ExecuteAsync(new CommandDefinition(
@@ -1776,7 +1924,55 @@ public class PurchaseService : IPurchaseService
 
         if (!string.Equals(status, "draft", StringComparison.OrdinalIgnoreCase))
         {
-            throw new InvalidOperationException("draft 상태만 삭제할 수 있습니다. 확정된 매입은 취소 처리가 필요합니다.");
+            throw new InvalidOperationException("확정된 매입명세서는 삭제할 수 없습니다. 「확정취소」 후 삭제하세요.");
+        }
+
+        // 🔴 20260827작7 W1-1 (사장님 지시) — **사슬 가드.**
+        //   사장님: *"삭제된 건은 해당 사슬에서 같이 삭제되던가, 아니면 **해당 사슬로 인해
+        //   삭제가 불가하다고 메시지를 띄우면 되**."*
+        //
+        //   🔴 종전엔 draft 만 보고 **자식 반품을 안 봤다.**
+        //     반품은 매입이 draft 여도 붙을 수 있다(직접작성 경로가 매입 상태를 안 본다, W2-1 자리).
+        //     ⇒ draft 매입에 반품을 붙인 뒤 매입을 hard DELETE 하면 **부모 없는 반품**이 남는다.
+        //     사장님 표현으로 *"몇십만 건에서 AI도 못 찾는"* 상태다.
+        //
+        //   ⚠️ **어느 전표 때문인지 번호를 알려준다** — "삭제할 수 없습니다" 만으로는
+        //     담당자가 무엇을 정리해야 하는지 모른다.
+        var blockingReturns = (await _db.QueryAsync<string>(new CommandDefinition(
+            """
+            SELECT return_no FROM purchase_returns
+             WHERE receipt_id = @Id AND tenant_id = @Tid
+               AND is_deleted = 0 AND status <> 'canceled'
+             ORDER BY return_date, return_no
+            """,
+            new { Id = receiptId, Tid = tenantId }, cancellationToken: ct))).ToList();
+
+        if (blockingReturns.Count > 0)
+        {
+            throw new InvalidOperationException(
+                $"반품전표({string.Join(", ", blockingReturns)})가 연결되어 있어 삭제할 수 없습니다. " +
+                "반품전표를 먼저 정리하세요.");
+        }
+
+        // 🔴 W1-2 — 원장 가드. draft 인데 원장이 있으면 **그 자체가 이상 상태**다.
+        //   판정 기준은 사장님이 정하셨다: **원장이 움직였느냐.**
+        //   움직였으면 지우는 순간 재고·회계가 장부와 갈린다.
+        var ledgerRows = await _db.ExecuteScalarAsync<int>(new CommandDefinition(
+            """
+            SELECT
+              (SELECT COUNT(*) FROM stock_ledger
+                WHERE tenant_id=@Tid AND source_id=@Id
+                  AND source_type IN ('purchase_receipt','direct_purchase'))
+            + (SELECT COUNT(*) FROM journal_entries
+                WHERE tenant_id=@Tid AND source_id=@Id AND source_type='purchase')
+            """,
+            new { Id = receiptId, Tid = tenantId }, cancellationToken: ct));
+
+        if (ledgerRows > 0)
+        {
+            throw new InvalidOperationException(
+                "재고·회계에 이미 반영된 매입명세서라 삭제할 수 없습니다. " +
+                "「확정취소」로 되돌린 뒤 삭제하세요.");
         }
 
         using var tx = await _unitOfWork.BeginTransactionAsync(ct);

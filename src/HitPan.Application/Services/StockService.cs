@@ -38,7 +38,13 @@ public class StockService : IStockService
                    s.avg_cost AS AvgCost,
                    COALESCE(i.safety_stock, i.safe_stock, 0) AS SafetyStock
             FROM item_stock s
-            JOIN items i ON i.item_id = s.item_id AND i.is_deleted = 0
+            -- 🔴🔴 20260827작7 W5-1 — **테넌트 조인 누락 봉합 (헌법 #2).**
+            --   종전: `JOIN items i ON i.item_id = s.item_id AND i.is_deleted = 0`
+            --   ⇒ `tenant_id` 가 없어 **다른 회사의 같은 item_id 행과 교차 조인**됐다.
+            --     남의 품명·규격이 노출되거나, 여러 테넌트에 같은 id 가 있으면 **행이 곱해져
+            --     재고 건수 자체가 틀어진다.** 매입쪽 partners 조인에서 같은 결함을 봉합한
+            --     전례가 있는데(20260827작1) 여기는 남아 있었다.
+            JOIN items i ON i.item_id = s.item_id AND i.tenant_id = s.tenant_id AND i.is_deleted = 0
             LEFT JOIN warehouses w ON w.warehouse_id = s.warehouse_id AND w.tenant_id = s.tenant_id
             WHERE s.tenant_id = @TenantId
             ORDER BY i.item_group, i.item_code
