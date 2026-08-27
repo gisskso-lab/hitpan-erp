@@ -84,13 +84,27 @@ public class OrderAutoCreateAndCreatedByGateTests
     /// <summary>
     /// 🔴 <b>사장님 문구 그대로 안내하는가.</b> 저장 전에 알려야 사용자가 멈출 기회를 갖는다.
     /// </summary>
+    /// <remarks>
+    /// 🔴 <b>문구가 갱신됐다 (20260827작10 W3).</b> 같은 화면에 사장님 문구가 두 번 내려왔다:
+    /// <list type="bullet">
+    /// <item>8/25(작5): <i>"이 판매거래의 수주서가 없습니다. 수주서는 자동으로 생성됩니다"</i></item>
+    /// <item>8/27(작10): <i>"수주서가 없는 거래입니다. 수주서를 자동 생성합니다"</i> ← <b>현행</b></item>
+    /// </list>
+    /// <b>나중 지시를 따른다.</b> 이 시험을 지우지 않고 문구만 갱신하는 이유는,
+    /// 이 게이트가 지키던 것이 문구가 아니라 <b>"저장 전에 멈출 기회를 준다"</b> 이기 때문이다.
+    /// 그 축은 그대로 살린다(아래 취소 검사).
+    /// </remarks>
     [Fact]
     public void 수주_없이_저장하면_저장_전에_안내해야_한다()
     {
         var code = DeliveryPage();
 
-        Assert.Contains("이 판매거래의 수주서가 없습니다. 수주서는 자동으로 생성됩니다.",
+        Assert.Contains("수주서가 없는 거래입니다. 수주서를 자동 생성합니다.",
             code, StringComparison.Ordinal);
+
+        // 🔴 이 게이트의 본체 — 알림이 아니라 **확인**이라야 한다.
+        //   취소하면 저장이 멈춰야 사용자가 수주를 먼저 만들 수 있다(반자동 원칙).
+        Assert.Contains("proceed != true", code, StringComparison.Ordinal);
     }
 
     /// <summary>

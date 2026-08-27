@@ -322,9 +322,11 @@
         // 자동생성 자체는 서버가 이미 하고 있었다(SalesService) — 없던 것은 이 안내다.
         if (_isNew && string.IsNullOrWhiteSpace(_draft.LinkedSalesOrderDocumentNo))
         {
+            // 🔴 20260827작10 W3 — 문구를 사장님 지시 그대로 맞춘다.
+            //   사장님: *"수주서가 없는 거래입니다. 수주서를 자동 생성합니다" 메시지 띄우고*
             var proceed = await DialogService.ShowMessageBoxAsync(
                 "수주서 자동 생성",
-                "이 판매거래의 수주서가 없습니다. 수주서는 자동으로 생성됩니다.",
+                "수주서가 없는 거래입니다. 수주서를 자동 생성합니다.",
                 yesText: "저장",
                 noText: "취소");
             if (proceed != true)

@@ -199,6 +199,46 @@ public sealed class SalesChainLinkGateTests
         Assert.Contains("이미 수주로 전환된 견적서입니다", body);
     }
 
+    // ─────────────────────────────────────────────────────────────────────
+    // G-7 — 수주 자동생성 Y/N 이 **사장님 지시 문구 그대로** 뜨고, 취소하면 저장이 멈춘다
+    //   🔴 PM 정정: 작10 착수 시 "묻지 않고 조용히 만든다" 고 적었는데 틀렸다.
+    //      Y/N 은 20260825작5 에 이미 있었다 — 서버만 보고 화면을 안 봤다.
+    //      남은 것은 문구 하나였다.
+    // ─────────────────────────────────────────────────────────────────────
+    [Fact]
+    public void G7_수주자동생성_확인문구가_지시대로이고_취소하면_멈춘다()
+    {
+        var src = File.ReadAllText(Path.Combine(RepoRoot(),
+            "src", "HitPan.Web", "Pages", "Sales", "DeliveryPage.razor"));
+
+        var body = Slice(src, "수주서 자동 생성", "try");
+
+        // 사장님 지시 문구 그대로
+        Assert.Contains("수주서가 없는 거래입니다. 수주서를 자동 생성합니다.", body);
+
+        // 🔴 알림이 아니라 **확인**이다 — 취소하면 저장이 멈춘다(헌법: 100% 자동은 없다)
+        Assert.Contains("proceed != true", body);
+        Assert.Contains("return;", body);
+    }
+
+    // ─────────────────────────────────────────────────────────────────────
+    // G-8 — 자동생성 수주서에 is_auto 표식이 남는다 (사장님 "중요함")
+    //   레거시 실데이터와 반드시 구분돼야 한다.
+    // ─────────────────────────────────────────────────────────────────────
+    [Fact]
+    public void G8_자동생성_수주서에_is_auto_표식이_남는다()
+    {
+        var src = File.ReadAllText(Path.Combine(RepoRoot(),
+            "src", "HitPan.Application", "Services", "SalesService.cs"));
+
+        // 앵커는 정의 서명으로 잡는다(호출부가 아니라) — 게이트 교훈 ⑪
+        var body = Slice(src,
+            "public async Task<(string Id, string DocumentNumber, string? AutoCreatedOrderNo)> CreateDeliveryAsync",
+            "public async Task ConfirmDeliveryAsync");
+
+        Assert.Contains("IsAuto = true", body);
+    }
+
     // ───────────────────────── helpers ─────────────────────────
 
     /// <summary>수주 1건 + 명세서 1건 + 링크된 라인 1건. TEMPORARY 라 커넥션이 닫히면 사라진다.</summary>
