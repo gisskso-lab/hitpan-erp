@@ -112,7 +112,9 @@ public partial class PurchaseReturnList : ComponentBase
         }
         else
         {
-            Snackbar.Add($"삭제 실패: {error}", Severity.Error);
+            // 🔴 20260827작8 W2 — 서버 문장 그대로(확정 반품이면 그 사유가 실려 온다).
+            Snackbar.Add($"삭제 불가 — {ApiErrorText.Extract(error)}", Severity.Error,
+                cfg => { cfg.RequireInteraction = true; cfg.ShowCloseIcon = true; });
         }
     }
 
@@ -163,55 +165,39 @@ public partial class PurchaseReturnList : ComponentBase
             return;
         }
 
-        Snackbar.Add($"반품확정 실패: {ExtractMessage(error)}", Severity.Error);
+        Snackbar.Add($"반품확정 실패: {ApiErrorText.Extract(error)}", Severity.Error);
     }
 
-    /// <summary>
-    /// 서버 응답에서 사람이 읽을 문장만 꺼낸다 (20260825작10).
-    /// </summary>
+    // 🔴 20260827작8 W3 — private ExtractMessage 는 ApiErrorText 로 승격했다.
+    //    한 화면에만 있으니 나머지 화면이 각자 다르게 처리했고, 그게 1.3.28 반려의 원인이다.
+
+    /// <summary>선택 행 일괄 삭제.</summary>
     /// <remarks>
-    /// 서버는 <c>{"message":"…"}</c> 또는 <c>{"error":"…"}</c> 로 준다.
-    /// 파싱에 실패하면 원문을 짧게 자른다 — 아무것도 안 보여주는 것보다 낫다(헌법 #15).
+    /// 🔴 <b>20260827작8 W1 — <c>draft</c> 사전필터를 걷어냈다.</b>
+    /// 사장님 지시: <i>"반품확정되서 이미 반품을 보낸 건에 대해선 반품전표에도 …
+    /// 삭제가 안되는 거지"</i> — <b>막되, 왜 막혔는지는 알려야 한다.</b>
+    /// 화면이 먼저 걸러내면 <b>"없다"</b> 는 엉뚱한 답이 나가고 사유가 사라진다.
+    /// <para>
+    /// ⚠️ 반품 <b>임시저장</b> 건은 원장이 안 움직였으므로 그대로 삭제된다
+    /// (사장님: <i>"반품이 임시확정된 건을 삭제하면?? 그건 반품전표만 삭제지"</i>).
+    /// 그 판정도 서버가 한다.
+    /// </para>
     /// </remarks>
-    private static string ExtractMessage(string? body)
-    {
-        if (string.IsNullOrWhiteSpace(body)) return "알 수 없는 오류";
-        try
-        {
-            using var doc = System.Text.Json.JsonDocument.Parse(body);
-            foreach (var key in new[] { "message", "error" })
-            {
-                if (doc.RootElement.TryGetProperty(key, out var v)
-                    && v.ValueKind == System.Text.Json.JsonValueKind.String)
-                {
-                    var s = v.GetString();
-                    if (!string.IsNullOrWhiteSpace(s)) return s!;
-                }
-            }
-        }
-        catch (System.Text.Json.JsonException)
-        {
-            // JSON 이 아니면 원문을 쓴다.
-        }
-        return body.Length > 200 ? body[..200] : body;
-    }
-
     private async Task BulkDeleteAsync()
     {
         var targets = _selectedRows
-            .Where(x => !string.IsNullOrWhiteSpace(x.ReturnId)
-                        && string.Equals(x.Status, "draft", StringComparison.OrdinalIgnoreCase))
+            .Where(x => !string.IsNullOrWhiteSpace(x.ReturnId))
             .ToList();
 
         if (targets.Count == 0)
         {
-            Snackbar.Add("삭제 가능한 draft 상태 반품이 없습니다.", Severity.Warning);
+            Snackbar.Add("삭제할 반품을 선택해 주세요.", Severity.Warning);
             return;
         }
 
         var confirm = await DialogService.ShowMessageBoxAsync(
             "반품 일괄 삭제",
-            $"선택한 draft 상태 {targets.Count}건을 삭제하시겠습니까?",
+            $"선택한 {targets.Count}건을 삭제하시겠습니까? 확정된 반품은 삭제되지 않습니다.",
             yesText: "삭제", cancelText: "취소");
         if (confirm != true) return;
 
@@ -223,7 +209,7 @@ public partial class PurchaseReturnList : ComponentBase
                 ? await DeliveryService.DeleteSalesReturnAsync(row.ReturnId)
                 : await DeliveryService.DeletePurchaseReturnAsync(row.ReturnId);
             if (ok) success++;
-            else failed.Add((row.ReturnNo, error ?? "unknown"));
+            else failed.Add((row.ReturnNo, ApiErrorText.Extract(error)));
         }
 
         if (failed.Count == 0)
@@ -232,7 +218,10 @@ public partial class PurchaseReturnList : ComponentBase
         }
         else
         {
-            Snackbar.Add($"성공 {success}건 / 실패 {failed.Count}건. 첫 실패: {failed[0].No} — {failed[0].Reason[..Math.Min(150, failed[0].Reason.Length)]}", Severity.Warning);
+            var head = success > 0 ? $"{success}건 삭제 · " : string.Empty;
+            var lines = string.Join(" / ", failed.Select(f => $"[{f.No}] {f.Reason}"));
+            Snackbar.Add($"{head}{failed.Count}건 삭제 불가 — {lines}", Severity.Warning,
+                cfg => { cfg.RequireInteraction = true; cfg.ShowCloseIcon = true; });
         }
 
         await LoadAsync();

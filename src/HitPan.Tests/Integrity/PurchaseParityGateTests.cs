@@ -88,23 +88,43 @@ public class PurchaseParityGateTests
 
     /// <summary>
     /// 🔴 <b>선택을 열었으니 위험한 동작은 여전히 막혀야 한다.</b>
-    /// 일괄확정·일괄삭제가 <c>draft</c> 로 거르지 않으면 확정 행이 섞여 들어간다.
-    /// <b>확정 행이 타도 되는 길은 반품 전환뿐이다.</b>
     /// </summary>
+    /// <remarks>
+    /// 🔴 <b>20260827작8 — 일괄삭제를 이 시험에서 뺐다.</b> 지우는 게 아니라 <b>막는 자리를 옮겼다.</b>
+    ///
+    /// <para>
+    /// 종전엔 <c>BulkDeleteAsync</c> 도 화면에서 <c>draft</c> 로 걸러 확정 행을 막았다.
+    /// 그런데 그러면 확정 건은 <b>DELETE 요청 자체가 안 나가</b> 서버 삭제가드(작7)가
+    /// 실행되지 못했고, 화면이 자기 혼자 만든 <i>"삭제 가능한 draft 상태 매입명세가 없습니다"</i>
+    /// 를 뿌렸다 — <b>1.3.28 사장님 실측 반려의 원인이 바로 이 필터다.</b>
+    /// 사장님이 요구한 건 <i>"해당 사슬로 인해 삭제가 불가하다고 <b>메시지를 띄우면</b> 되"</i> 이고,
+    /// 막기만 하고 <b>이유를 못 알려주면 요구를 못 지킨 것</b>이다.
+    /// </para>
+    ///
+    /// <para>
+    /// ⚠️ <b>보호가 사라진 게 아니다.</b> 확정 매입 삭제는 이제 서버
+    /// <c>DeletePurchaseReceiptAsync</c> 가 막는다(원장·자식반품 검사).
+    /// 화면 필터보다 <b>강한 자리</b>다 — API 를 직접 부르는 경로도 함께 막히기 때문이다.
+    /// 그 보호는 <c>PurchaseChainGuardGateTests</c> 가, 메시지 도달은
+    /// <c>ErrorMessageDeliveryGateTests.G1</c> 이 각각 지킨다.
+    /// </para>
+    ///
+    /// <para>
+    /// <b>일괄확정(<c>BulkConfirmAsync</c>)은 그대로 둔다.</b> 이건 되돌릴 수 없는 원장 기표를
+    /// 일으키는 동작이라 확정 행이 섞이면 <b>이중 기표</b>가 된다. 삭제와 성격이 다르다.
+    /// </para>
+    /// </remarks>
     [Fact]
-    public void 일괄확정과_일괄삭제는_draft_만_대상이어야_한다()
+    public void 일괄확정은_draft_만_대상이어야_한다()
     {
         var code = CodeLines(Read("src", "HitPan.Web", "Components", "Purchase",
             "PurchaseReceiptList.razor.cs"));
 
-        foreach (var method in new[] { "BulkConfirmAsync", "BulkDeleteAsync" })
-        {
-            var at = code.IndexOf($"private async Task {method}()", StringComparison.Ordinal);
-            Assert.True(at >= 0, $"{method} 가 있어야 한다");
+        var at = code.IndexOf("private async Task BulkConfirmAsync()", StringComparison.Ordinal);
+        Assert.True(at >= 0, "BulkConfirmAsync 가 있어야 한다");
 
-            var body = code[at..Math.Min(code.Length, at + 900)];
-            Assert.Contains("\"draft\"", body);
-        }
+        var body = code[at..Math.Min(code.Length, at + 900)];
+        Assert.Contains("\"draft\"", body);
     }
 
     /// <summary>

@@ -1817,13 +1817,12 @@ public class PurchaseService : IPurchaseService
         //   `received`(입고완료)·`partial`(부분입고) 상태여도 아래 자식검사만 통과하면 지워졌다.
         //   ⚠️ DB enum 은 draft/ordered/partial/received/cancelled 다
         //     (C# enum 의 Confirmed·Closed 는 DB 에 없는 값 — 별건, 작지서 §6-7).
-        if (!string.Equals(row.Status, "draft", StringComparison.OrdinalIgnoreCase)
-            && !string.Equals(row.Status, "cancelled", StringComparison.OrdinalIgnoreCase))
-        {
-            throw new InvalidOperationException(
-                $"「{PurchaseStatusLabels.Order(row.Status)}」 상태의 발주서는 삭제할 수 없습니다. " +
-                "임시저장 상태에서만 삭제할 수 있습니다.");
-        }
+        // 🔴 20260827작8 — **상태 가드를 자식(매입) 검사 뒤로 옮겼다.**
+        //   입고된 발주는 status 가 received·partial 이라 여기서 먼저 걸려
+        //   *"「입고완료」 상태의 발주서는 삭제할 수 없습니다"* 만 나가고,
+        //   **어느 매입명세서 때문인지 번호를 못 알려줬다**(1.3.28 반려 1-2).
+        //   ⇒ 매입명세서 자체가 원인이므로 **그 번호를 먼저** 말해준다.
+        //   (아래 blockingReceipts 검사 → 그 다음 상태 검사)
 
         // 매입전환된 라인 차단 — 단, 그 매입명세서가 cancelled 상태면 살아있는 입고가
         // 아니므로 차단 대상에서 제외 (사장님 보고 2026-04-26: 매입 삭제 후에도 발주 못 지움).
@@ -1850,6 +1849,17 @@ public class PurchaseService : IPurchaseService
             throw new InvalidOperationException(
                 $"매입명세서({string.Join(", ", blockingReceipts)})로 입고된 발주서라 삭제할 수 없습니다. " +
                 "매입명세서를 먼저 취소하거나 반품하세요.");
+        }
+
+        // 사슬이 깨끗할 때에만 상태를 따진다 (위 주석 — 순서가 뒤바뀌면 전표번호가 가려진다).
+        // ⚠️ DB enum 은 draft/ordered/partial/received/cancelled 다
+        //   (C# enum 의 Confirmed·Closed 는 DB 에 없는 값 — 별건, 작지서 §6-7).
+        if (!string.Equals(row.Status, "draft", StringComparison.OrdinalIgnoreCase)
+            && !string.Equals(row.Status, "cancelled", StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidOperationException(
+                $"「{PurchaseStatusLabels.Order(row.Status)}」 상태의 발주서는 삭제할 수 없습니다. " +
+                "임시저장 상태에서만 삭제할 수 있습니다.");
         }
 
         await _db.ExecuteAsync(new CommandDefinition(
@@ -1922,10 +1932,17 @@ public class PurchaseService : IPurchaseService
             new { Id = receiptId, Tid = tenantId }, cancellationToken: ct))
             ?? throw new InvalidOperationException("매입명세서를 찾을 수 없습니다.");
 
-        if (!string.Equals(status, "draft", StringComparison.OrdinalIgnoreCase))
-        {
-            throw new InvalidOperationException("확정된 매입명세서는 삭제할 수 없습니다. 「확정취소」 후 삭제하세요.");
-        }
+        // 🔴 20260827작8 — **사슬 검사를 상태 검사보다 먼저** 한다.
+        //
+        //   종전엔 여기서 곧바로 "확정된 매입명세서는 삭제할 수 없습니다" 를 던져
+        //   **아래 반품 사슬 검사까지 가지 못했다.** 사장님이 실측하신 건이 정확히
+        //   *확정 매입 + 확정 반품 연결* 이라 **반품번호를 못 받으셨다**(1.3.28 반려 1-1).
+        //
+        //   사장님 요구: *"해당 사슬로 인해 삭제가 불가하다고 **메시지를 띄우면** 되"*
+        //   ⇒ 둘 다 삭제를 막지만, **알려줘야 할 정보량이 다르다.**
+        //     · "확정이라 안 된다"      → 확정취소만 하면 지울 수 있다
+        //     · "반품 매반-…가 걸렸다" → 그 반품을 먼저 정리해야 한다 (더 무거운 사실)
+        //   담당자가 무엇을 해야 하는지 알려면 **사슬 쪽이 먼저** 나와야 한다.
 
         // 🔴 20260827작7 W1-1 (사장님 지시) — **사슬 가드.**
         //   사장님: *"삭제된 건은 해당 사슬에서 같이 삭제되던가, 아니면 **해당 사슬로 인해
@@ -1952,6 +1969,12 @@ public class PurchaseService : IPurchaseService
             throw new InvalidOperationException(
                 $"반품전표({string.Join(", ", blockingReturns)})가 연결되어 있어 삭제할 수 없습니다. " +
                 "반품전표를 먼저 정리하세요.");
+        }
+
+        // 사슬이 깨끗할 때에만 상태를 따진다 (위 주석 참조 — 순서가 뒤바뀌면 사유가 가려진다).
+        if (!string.Equals(status, "draft", StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidOperationException("확정된 매입명세서는 삭제할 수 없습니다. 「확정취소」 후 삭제하세요.");
         }
 
         // 🔴 W1-2 — 원장 가드. draft 인데 원장이 있으면 **그 자체가 이상 상태**다.
