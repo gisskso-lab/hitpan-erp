@@ -921,6 +921,32 @@ public class SalesService : ISalesService
                 },
                 transaction: tx, cancellationToken: ct));
 
+            // 🔴 20260827작10 W1 — 지우기 전에 수주라인 링크를 읽어둔다.
+            //   종전엔 라인을 전량 DELETE 하고 order_item_id 에 NULL 을 하드코딩해 다시 넣었다.
+            //   ⇒ draft 거래명세서를 한 번만 수정 저장하면 수주라인 링크가 영구히 끊겼다.
+            //
+            //   🔴 이건 단순 데이터 손실이 아니다 — **가드가 뚫린다.**
+            //      DeleteSalesOrderAsync 의 "판매전환된 라인 차단" 가드가 order_item_id 로 판정한다.
+            //      링크가 NULL 이 되면 그 COUNT 가 0 이라 **이미 출고된 수주서가 삭제 가능해진다.**
+            //
+            //   🔴 화면이 다시 보내주는 방식으로는 못 고친다 —
+            //      UpdateDeliveryAsync 가 받는 DeliveryItemDto 에는 OrderItemId 가 없고,
+            //      조회 SQL 도 order_item_id 를 한 번도 읽지 않는다(실측).
+            //      **화면은 받은 적 없는 값을 되돌려줄 수 없다.**
+            //      작7 이 delivery_item_id 로 똑같이 겪은 사고다 — 한 계층 위에서 반복됐다.
+            //      ⇒ 그래서 **서버가 보존한다.** 화면에 의존하지 않는다.
+            var keepOrderItemIds = (await _db.QueryAsync<(string DeliveryItemId, string? OrderItemId)>(
+                new CommandDefinition(
+                    """
+                    SELECT delivery_item_id, order_item_id
+                      FROM sales_delivery_items
+                     WHERE delivery_id = @DeliveryId AND tenant_id = @TenantId
+                       AND order_item_id IS NOT NULL
+                    """,
+                    new { DeliveryId = deliveryId, TenantId = tenantId },
+                    transaction: tx, cancellationToken: ct)))
+                .ToDictionary(r => r.DeliveryItemId, r => r.OrderItemId);
+
             await _db.ExecuteAsync(new CommandDefinition(
                 "DELETE FROM sales_delivery_items WHERE delivery_id = @DeliveryId AND tenant_id = @TenantId",
                 new { DeliveryId = deliveryId, TenantId = tenantId },
@@ -928,13 +954,23 @@ public class SalesService : ISalesService
 
             foreach (var item in dto.Items)
             {
+                // 🔴 W1 — 원래 이 줄이 물고 있던 수주라인을 되붙인다.
+                //   화면이 보내온 delivery_item_id 로 되짚는다(그 값은 DTO 에 있다 — 작7 이 뚫어놨다).
+                //   ⚠️ 새로 추가된 줄은 delivery_item_id 가 없거나 사전에 없던 값이다 ⇒ NULL 이 정상.
+                //      여기서 억지로 채우면 없던 사슬을 지어내는 것이라 더 나쁘다.
+                string? keptOrderItemId = null;
+                if (!string.IsNullOrWhiteSpace(item.DeliveryItemId))
+                {
+                    keepOrderItemIds.TryGetValue(item.DeliveryItemId!, out keptOrderItemId);
+                }
+
                 await _db.ExecuteAsync(new CommandDefinition(
                     """
                     INSERT INTO sales_delivery_items
                         (delivery_item_id, delivery_id, tenant_id, order_item_id, item_id, warehouse_id,
                          qty, unit_price, supply_amount, vat_amount)
                     VALUES
-                        (@DeliveryItemId, @DeliveryId, @TenantId, NULL, @ItemId, @WarehouseId,
+                        (@DeliveryItemId, @DeliveryId, @TenantId, @OrderItemId, @ItemId, @WarehouseId,
                          @Qty, @UnitPrice, @SupplyAmount, @VatAmount)
                     """,
                     new
@@ -942,6 +978,7 @@ public class SalesService : ISalesService
                         DeliveryItemId = Guid.NewGuid().ToString(),
                         DeliveryId = deliveryId,
                         TenantId = tenantId,
+                        OrderItemId = keptOrderItemId,
                         item.ItemId,
                         WarehouseId = defaultWarehouseId,
                         item.Qty,

@@ -3300,8 +3300,12 @@ CREATE TABLE `sales_orders` (
   `is_deleted` tinyint(1) NOT NULL DEFAULT 0,
   `deleted_at` datetime(6) DEFAULT NULL,
   `is_auto` tinyint(1) NOT NULL DEFAULT 0 COMMENT '???̷?Ʈ ?Ǹ? ?? ?ڵ????? ???? (???? ǥ?? ????)',
+  -- 20260827작10 W2 (DB-114): 견적→수주 사슬 링크. 종전엔 memo 자유텍스트가 유일한 연결이라
+  --   수주서를 수정하면 화면 값에 덮어써져 연결이 조용히 소멸했다. 견적 없이 만든 수주는 NULL.
+  `quotation_id` varchar(36) DEFAULT NULL COMMENT '원 견적서 quote_id (20260827작10)',
   PRIMARY KEY (`order_id`),
   UNIQUE KEY `uq_order_no` (`tenant_id`,`order_no`),
+  KEY `idx_so_quotation` (`tenant_id`,`quotation_id`),
   KEY `idx_so_status` (`status`),
   KEY `idx_so_partner_status` (`partner_id`,`status`),
   KEY `idx_tenant_date` (`tenant_id`,`order_date`),
@@ -3487,7 +3491,7 @@ INSERT INTO `schema_migrations` (`migration_id`, `app_version`, `success`) VALUE
 ('DB-74','clean-ddl',1),('DB-75','clean-ddl',1),('DB-76','clean-ddl',1),('DB-77','clean-ddl',1),
 ('DB-78','clean-ddl',1),('DB-79','clean-ddl',1),('DB-80','clean-ddl',1),('DB-81','clean-ddl',1),
 ('DB-82','clean-ddl',1),('DB-83','clean-ddl',1),('DB-84','clean-ddl',1),('DB-85','clean-ddl',1),
-('DB-86','clean-ddl',1),('DB-87','clean-ddl',1),('DB-88','clean-ddl',1),('DB-89','clean-ddl',1),('DB-90','clean-ddl',1),('DB-91','clean-ddl',1),('DB-92','clean-ddl',1),('DB-93','clean-ddl',1),('DB-94','clean-ddl',1),('DB-95','clean-ddl',1),('DB-96','clean-ddl',1),('DB-97','clean-ddl',1),('DB-98','clean-ddl',1),('DB-99','clean-ddl',1),('DB-100','clean-ddl',1),('DB-101','clean-ddl',1),('DB-102','clean-ddl',1),('DB-103','clean-ddl',1),('DB-104','clean-ddl',1),('DB-105','clean-ddl',1),('DB-106','clean-ddl',1),('DB-107','clean-ddl',1),('DB-108','clean-ddl',1),('DB-109','clean-ddl',1),('DB-110','clean-ddl',1),('DB-111','clean-ddl',1),('DB-112','clean-ddl',1),('DB-113','clean-ddl',1);
+('DB-86','clean-ddl',1),('DB-87','clean-ddl',1),('DB-88','clean-ddl',1),('DB-89','clean-ddl',1),('DB-90','clean-ddl',1),('DB-91','clean-ddl',1),('DB-92','clean-ddl',1),('DB-93','clean-ddl',1),('DB-94','clean-ddl',1),('DB-95','clean-ddl',1),('DB-96','clean-ddl',1),('DB-97','clean-ddl',1),('DB-98','clean-ddl',1),('DB-99','clean-ddl',1),('DB-100','clean-ddl',1),('DB-101','clean-ddl',1),('DB-102','clean-ddl',1),('DB-103','clean-ddl',1),('DB-104','clean-ddl',1),('DB-105','clean-ddl',1),('DB-106','clean-ddl',1),('DB-107','clean-ddl',1),('DB-108','clean-ddl',1),('DB-109','clean-ddl',1),('DB-110','clean-ddl',1),('DB-111','clean-ddl',1),('DB-112','clean-ddl',1),('DB-113','clean-ddl',1),('DB-114','clean-ddl',1);
 
 --
 -- Table structure for table `service_tickets`
