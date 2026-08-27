@@ -174,3 +174,26 @@ public class UpdateAccountModel
     public bool IsActive { get; set; } = true;
     public int SortOrder { get; set; }
 }
+
+// ── 정합성 검사 (20260827작8 W4) ──
+// 🔴 서버 DataIntegrityReport 수신용. Score 는 의도적으로 담지 않는다 —
+//    화면에 점수를 띄우면 "92점" 이 "8건 틀림" 을 가린다(헌법 #32).
+public class IntegrityReportModel
+{
+    public DateTime CheckedAt { get; set; }
+    public List<IntegrityItemModel> Items { get; set; } = new();
+    public int TotalChecks { get; set; }
+    public int PassCount { get; set; }
+    public int FailCount { get; set; }
+}
+
+public class IntegrityItemModel
+{
+    /// <summary>재고 · 매입 · 매출 · 마스터 · BOM · 결재 · 회계</summary>
+    public string Category { get; set; } = string.Empty;
+    public string CheckName { get; set; } = string.Empty;
+    /// <summary>OK · WARN · FAIL — 화면에는 한글로 바꿔 표시한다.</summary>
+    public string Status { get; set; } = "OK";
+    /// <summary>이상일 때 "3건 음수" 처럼 무엇이 몇 건인지.</summary>
+    public string? Detail { get; set; }
+}

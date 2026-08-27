@@ -337,7 +337,11 @@ public partial class ReturnPage : ComponentBase
                 if (!resp.IsSuccessStatusCode)
                 {
                     var body = await resp.Content.ReadAsStringAsync();
-                    Snackbar.Add($"삭제 실패: {(string.IsNullOrWhiteSpace(body) ? $"HTTP {(int)resp.StatusCode}" : body)}", Severity.Error);
+                    // 🔴 20260827작8 W3 — 표시 방식을 5개 화면 공용 헬퍼로 통일.
+                    //    (여기가 원래 유일하게 body 를 읽던 자리 = 1-3 만 통과한 이유)
+                    Snackbar.Add($"삭제 불가 — {ApiErrorText.Extract(body, (int)resp.StatusCode)}",
+                        Severity.Error,
+                        cfg => { cfg.RequireInteraction = true; cfg.ShowCloseIcon = true; });
                     return;
                 }
                 Snackbar.Add("반품 문서가 삭제되었습니다.", Severity.Success);

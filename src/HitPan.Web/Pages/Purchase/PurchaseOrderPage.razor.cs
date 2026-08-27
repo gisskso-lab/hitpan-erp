@@ -465,7 +465,13 @@ public partial class PurchaseOrderPage : ComponentBase
                 using var resp = await Http.DeleteAsync($"api/purchase/orders/{Uri.EscapeDataString(_draft.Id)}");
                 if (!resp.IsSuccessStatusCode)
                 {
-                    Snackbar.Add("삭제에 실패했습니다.", Severity.Error);
+                    // 🔴 20260827작8 W2 — 종전엔 본문을 버리고 "삭제에 실패했습니다" 로 덮어썼다.
+                    //    서버는 어느 매입전표 때문에 막혔는지 번호까지 담아 보내는데
+                    //    그게 사장님께 도달하지 못했다 (1.3.28 실측 반려).
+                    var body = await resp.Content.ReadAsStringAsync();
+                    Snackbar.Add($"삭제 불가 — {ApiErrorText.Extract(body, (int)resp.StatusCode)}",
+                        Severity.Error,
+                        cfg => { cfg.RequireInteraction = true; cfg.ShowCloseIcon = true; });
                     return;
                 }
             }

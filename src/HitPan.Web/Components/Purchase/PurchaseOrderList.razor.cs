@@ -322,27 +322,35 @@ public partial class PurchaseOrderList : ComponentBase
         }
         else
         {
-            Snackbar.Add($"삭제 실패: {error}", Severity.Error);
+            // 🔴 20260827작8 W2 — 서버 문장 그대로(연결된 매입전표 번호가 실려 온다).
+            Snackbar.Add($"삭제 불가 — {ApiErrorText.Extract(error)}", Severity.Error,
+                cfg => { cfg.RequireInteraction = true; cfg.ShowCloseIcon = true; });
         }
     }
 
-    /// <summary>선택 행 일괄 삭제 — draft만 대상.</summary>
+    /// <summary>선택 행 일괄 삭제.</summary>
+    /// <remarks>
+    /// 🔴 <b>20260827작8 W1 — <c>draft</c> 사전필터를 걷어냈다.</b>
+    /// 종전엔 화면이 먼저 걸러 <b>입고된 발주는 DELETE 요청조차 안 나갔고</b>,
+    /// 서버 삭제가드(연결된 매입전표 번호를 알려주는)가 실행되지 못했다
+    /// (1.3.28 실측 반려 — <i>"삭제에 실패했습니다"</i> 만 떴다).
+    /// <b>판정은 서버가 한다.</b>
+    /// </remarks>
     private async Task BulkDeleteAsync()
     {
         var targets = _selectedRows
-            .Where(x => !string.IsNullOrWhiteSpace(x.PoId)
-                        && string.Equals(x.Status, "draft", StringComparison.OrdinalIgnoreCase))
+            .Where(x => !string.IsNullOrWhiteSpace(x.PoId))
             .ToList();
 
         if (targets.Count == 0)
         {
-            Snackbar.Add("삭제 가능한 draft 상태 발주서가 없습니다.", Severity.Warning);
+            Snackbar.Add("삭제할 발주서를 선택해 주세요.", Severity.Warning);
             return;
         }
 
         var confirm = await DialogService.ShowMessageBoxAsync(
             "발주서 일괄 삭제",
-            $"선택한 draft 상태 {targets.Count}건을 삭제하시겠습니까?",
+            $"선택한 {targets.Count}건을 삭제하시겠습니까? 매입·원장에 연결된 건은 삭제되지 않습니다.",
             yesText: "삭제", cancelText: "취소");
         if (confirm != true) return;
 
@@ -352,7 +360,7 @@ public partial class PurchaseOrderList : ComponentBase
         {
             var (ok, error) = await DeliveryService.DeletePurchaseOrderAsync(row.PoId);
             if (ok) success++;
-            else failed.Add((row.PoNo, error ?? "unknown"));
+            else failed.Add((row.PoNo, ApiErrorText.Extract(error)));
         }
 
         if (failed.Count == 0)
@@ -361,7 +369,10 @@ public partial class PurchaseOrderList : ComponentBase
         }
         else
         {
-            Snackbar.Add($"성공 {success}건 / 실패 {failed.Count}건. 첫 실패: {failed[0].No} — {failed[0].Reason[..Math.Min(150, failed[0].Reason.Length)]}", Severity.Warning);
+            var head = success > 0 ? $"{success}건 삭제 · " : string.Empty;
+            var lines = string.Join(" / ", failed.Select(f => $"[{f.No}] {f.Reason}"));
+            Snackbar.Add($"{head}{failed.Count}건 삭제 불가 — {lines}", Severity.Warning,
+                cfg => { cfg.RequireInteraction = true; cfg.ShowCloseIcon = true; });
         }
 
         await LoadAsync();

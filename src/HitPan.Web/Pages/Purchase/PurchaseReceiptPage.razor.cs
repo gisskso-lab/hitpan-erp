@@ -533,7 +533,11 @@ public partial class PurchaseReceiptPage : ComponentBase
                 using var resp = await Http.DeleteAsync($"api/purchase/receipts/{Uri.EscapeDataString(_draft.Id)}");
                 if (!resp.IsSuccessStatusCode)
                 {
-                    Snackbar.Add("삭제에 실패했습니다.", Severity.Error);
+                    // 🔴 20260827작8 W2 — 본문에 연결된 반품전표 번호가 실려 온다. 버리지 않는다.
+                    var body = await resp.Content.ReadAsStringAsync();
+                    Snackbar.Add($"삭제 불가 — {ApiErrorText.Extract(body, (int)resp.StatusCode)}",
+                        Severity.Error,
+                        cfg => { cfg.RequireInteraction = true; cfg.ShowCloseIcon = true; });
                     return;
                 }
             }

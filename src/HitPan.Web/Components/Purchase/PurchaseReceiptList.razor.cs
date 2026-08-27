@@ -231,9 +231,15 @@ public partial class PurchaseReceiptList : ComponentBase
     /// 그 결과 <b>확정된 매입은 반품으로 전환할 길이 없었다</b> — 정작 반품이 필요한 건은
     /// 확정된 건이다(확정 전이면 그냥 고치면 된다).
     /// <para>
-    /// ⚠️ 선택만 열고 위험한 동작은 그대로 막힌다. 일괄확정·일괄삭제는 각자
-    /// <c>Status=="draft"</c> 로 거르므로(<c>BulkConfirmAsync</c>·<c>BulkDeleteAsync</c>)
-    /// 확정 행이 섞여도 대상이 되지 않는다. <b>확정 행이 실제로 타는 길은 반품 전환뿐이다.</b>
+    /// ⚠️ 선택만 열고 위험한 동작은 그대로 막힌다. 일괄확정은 <c>Status=="draft"</c> 로 거른다.
+    /// </para>
+    /// <para>
+    /// 🔴 <b>20260827작8 — 일괄삭제의 사전필터는 걷어냈다.</b> 종전엔 여기서도
+    /// <c>draft</c> 만 남겨 <b>확정 건은 DELETE 요청조차 나가지 않았다.</b> 그 결과
+    /// 서버의 삭제가드(연결된 반품전표 번호를 알려주는)가 <b>실행될 기회가 없어</b>
+    /// 화면이 <i>"삭제 가능한 draft 상태 매입명세가 없습니다"</i> 라는 엉뚱한 답을 냈다
+    /// (1.3.28 사장님 실측 반려). <b>막을지 말지는 서버가 정한다</b> — 화면이 따로
+    /// 판정하면 두 기준이 갈리고, 갈린 순간 사고는 조용히 숨는다.
     /// </para>
     /// </remarks>
     /// <param name="row">행</param>
@@ -496,7 +502,9 @@ public partial class PurchaseReceiptList : ComponentBase
         }
         else
         {
-            Snackbar.Add($"삭제 실패: {error}", Severity.Error);
+            // 🔴 20260827작8 W2 — 서버 문장을 그대로 보여준다(연결된 반품전표 번호가 여기 실려 온다).
+            Snackbar.Add($"삭제 불가 — {ApiErrorText.Extract(error)}", Severity.Error,
+                cfg => { cfg.RequireInteraction = true; cfg.ShowCloseIcon = true; });
         }
     }
 
@@ -505,30 +513,29 @@ public partial class PurchaseReceiptList : ComponentBase
     /// </summary>
     private async Task BulkDeleteAsync()
     {
-        var draftTargets = _selectedRows
-            .Where(x => !string.IsNullOrWhiteSpace(x.ReceiptId)
-                        && string.Equals(x.Status, "draft", StringComparison.OrdinalIgnoreCase))
+        var targets = _selectedRows
+            .Where(x => !string.IsNullOrWhiteSpace(x.ReceiptId))
             .ToList();
 
-        if (draftTargets.Count == 0)
+        if (targets.Count == 0)
         {
-            Snackbar.Add("삭제 가능한 draft 상태 매입명세가 없습니다.", Severity.Warning);
+            Snackbar.Add("삭제할 매입명세서를 선택해 주세요.", Severity.Warning);
             return;
         }
 
         var confirm = await DialogService.ShowMessageBoxAsync(
             "매입명세서 일괄 삭제",
-            $"선택한 draft 상태 {draftTargets.Count}건을 삭제하시겠습니까?",
+            $"선택한 {targets.Count}건을 삭제하시겠습니까? 반품·원장에 연결된 건은 삭제되지 않습니다.",
             yesText: "삭제", cancelText: "취소");
         if (confirm != true) return;
 
         var success = 0;
         var failed = new List<(string No, string Reason)>();
-        foreach (var row in draftTargets)
+        foreach (var row in targets)
         {
             var (ok, error) = await DeleteReceiptAsync(row.ReceiptId);
             if (ok) success++;
-            else failed.Add((row.ReceiptNo, error ?? "unknown"));
+            else failed.Add((row.ReceiptNo, ApiErrorText.Extract(error)));
         }
 
         if (failed.Count == 0)
@@ -537,10 +544,26 @@ public partial class PurchaseReceiptList : ComponentBase
         }
         else
         {
-            Snackbar.Add($"성공 {success}건 / 실패 {failed.Count}건. 첫 실패: {failed[0].No} — {failed[0].Reason[..Math.Min(150, failed[0].Reason.Length)]}", Severity.Warning);
+            ShowBlockedAsync(success, failed);
         }
 
         await LoadAsync();
+    }
+
+    /// <summary>
+    /// 🔴 20260827작8 W1 — 막힌 건을 <b>전표번호와 사유까지</b> 보여준다.
+    /// </summary>
+    /// <remarks>
+    /// 스낵바 한 줄에 첫 건만 잘라 넣으면 <b>나머지가 사라진다.</b>
+    /// 사장님이 요구한 건 <i>"몇십만 건에서 틀린 데이터를 빠르게 발견"</i> 이므로
+    /// <b>막힌 전표를 전부</b> 나열한다.
+    /// </remarks>
+    private void ShowBlockedAsync(int success, List<(string No, string Reason)> failed)
+    {
+        var head = success > 0 ? $"{success}건 삭제 · " : string.Empty;
+        var lines = string.Join(" / ", failed.Select(f => $"[{f.No}] {f.Reason}"));
+        Snackbar.Add($"{head}{failed.Count}건 삭제 불가 — {lines}", Severity.Warning,
+            cfg => { cfg.RequireInteraction = true; cfg.ShowCloseIcon = true; });
     }
 
     /// <summary>

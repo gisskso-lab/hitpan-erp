@@ -26,6 +26,16 @@
   </ItemGroup>
 
   <ItemGroup>
+    <!-- 🔴 20260827작8 G4 — ApiErrorText 를 **실제로 불러** 판정하기 위해 링크한다.
+         HitPan.Web 은 BlazorWebAssembly SDK 라 시험 프로젝트가 통째로 참조하면
+         WASM 자산까지 딸려 온다. 이 파일은 Blazor 의존이 없는 순수 C# 이므로
+         소스만 링크한다.
+         ⚠️ 이렇게 하는 이유: 1.3.28 반려는 "글자는 맞는데 화면에 안 갔다" 였다.
+            글자검사만으로는 또 놓친다 — **불러서 결과를 본다.** -->
+    <Compile Include="..\HitPan.Web\Services\ApiErrorText.cs" Link="Linked\ApiErrorText.cs" />
+  </ItemGroup>
+
+  <ItemGroup>
     <Using Include="Xunit" />
   </ItemGroup>
 
