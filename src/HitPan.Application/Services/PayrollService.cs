@@ -316,11 +316,17 @@ public sealed class PayrollService : IPayrollService
             if (isNew)
             {
                 // 같은 사람의 같은 달 명세는 하나뿐이다. 두 장이면 어느 것이 진짜인지 모른다.
+                //
+                // 🔴 20260827작5 (사장님 실측 반려) — **취소분은 세지 않는다.**
+                //   종전엔 status 를 안 봐서 `cancelled` 명세가 그 달 자리를 계속 차지했다
+                //   ⇒ 사장님 증상: *"해당월 급여명세서 올라가서 등록도 안됨"*.
+                //   취소한 명세는 **없는 것으로 봐야** 그 달을 다시 만들 수 있다.
                 var dup = await _db.ExecuteScalarAsync<int>(new CommandDefinition(
                     """
                     SELECT COUNT(*) FROM payroll_slips
                     WHERE tenant_id = @TenantId AND employee_id = @EmpId
                       AND pay_year = @Year AND pay_month = @Month
+                      AND status <> 'cancelled'
                     """,
                     new { TenantId = tenantId, EmpId = request.EmployeeId, Year = request.PayYear, Month = request.PayMonth },
                     transaction: tx, cancellationToken: ct)).ConfigureAwait(false);
@@ -329,6 +335,59 @@ public sealed class PayrollService : IPayrollService
                 {
                     throw new InvalidOperationException(
                         $"{request.PayYear}년 {request.PayMonth}월 명세가 이미 있습니다. 그 명세를 고치세요.");
+                }
+
+                // ⚠️ 취소분이 그 달에 남아 있으면 UNIQUE 키(uk_payroll_emp_month =
+                //   tenant+employee+year+month, **status 를 안 본다**)에 걸려 INSERT 가 죽는다.
+                //   위 dup 검사를 통과했다는 건 **살아있는 명세는 없다**는 뜻이다.
+                //
+                //   🔴 그래서 **새로 만들지 않고 취소분을 되살린다**(재사용).
+                //     취소 이력을 지우지 않으면서 UNIQUE 키도 안 건드리는 유일한 길이다.
+                //     (pay_year 를 음수로 돌리는 우회는 쓰지 않는다 — ChatService·PayslipMail·
+                //      PdfRender 가 pay_year 를 그대로 화면·제목에 쓰므로 "-2026년" 이 된다.)
+                //   ⚠️ 되살릴 행의 **원래 slip_id 를 그대로 쓴다.** 새로 만든 GUID 를 돌려주면
+                //     화면이 없는 명세를 열게 된다(결재·메일 이력도 그 id 로 걸려 있다).
+                var cancelledId = await _db.QueryFirstOrDefaultAsync<string>(new CommandDefinition(
+                    """
+                    SELECT slip_id FROM payroll_slips
+                     WHERE tenant_id = @TenantId AND employee_id = @EmpId
+                       AND pay_year = @Year AND pay_month = @Month
+                       AND status = 'cancelled'
+                     LIMIT 1
+                    """,
+                    new { TenantId = tenantId, EmpId = request.EmployeeId, Year = request.PayYear, Month = request.PayMonth },
+                    transaction: tx, cancellationToken: ct)).ConfigureAwait(false);
+
+                if (cancelledId is not null)
+                {
+                    await _db.ExecuteAsync(new CommandDefinition(
+                        """
+                        UPDATE payroll_slips
+                           SET status        = 'draft',
+                               pay_date      = @PayDate,
+                               total_payment = @TotalPayment,
+                               total_deduct  = @TotalDeduct,
+                               net_payment   = @NetPayment,
+                               absence_id    = @AbsenceId,
+                               memo          = @Memo,
+                               confirmed_by  = NULL,
+                               confirmed_at  = NULL,
+                               updated_at    = NOW(6)
+                         WHERE tenant_id = @TenantId AND slip_id = @SlipId
+                        """,
+                        new
+                        {
+                            TenantId = tenantId, SlipId = cancelledId,
+                            PayDate = request.PayDate?.Date,
+                            TotalPayment = totalPayment, TotalDeduct = totalDeduct, NetPayment = netPayment,
+                            AbsenceId = absenceId, Memo = request.Memo
+                        },
+                        transaction: tx, cancellationToken: ct)).ConfigureAwait(false);
+
+                    tx.Commit();
+                    if (_audit is not null)
+                        await _audit.LogAsync("revive", "payroll_slip", cancelledId, ct: ct).ConfigureAwait(false);
+                    return cancelledId;
                 }
 
                 await _db.ExecuteAsync(new CommandDefinition(
@@ -360,7 +419,13 @@ public sealed class PayrollService : IPayrollService
                 if (status is null)
                     throw new InvalidOperationException("급여 명세를 찾을 수 없습니다.");
 
-                if (status is not "draft")
+                // 🔴 20260827작5 (사장님 실측 반려) — **취소분은 고칠 수 있다.**
+                //   사장님 증상: *"급여명세 올리고 취소시 수정을 못함."*
+                //   종전엔 draft 만 허용해 `cancelled` 이 잠겼다. 취소한 명세를 못 고치고
+                //   그 달을 새로 만들 수도 없으면(UNIQUE 키) **그 달이 영영 막힌다.**
+                //   ⇒ 취소분을 고치면 draft 로 되살아난다(아래 UPDATE 가 status 를 되돌린다).
+                //   확정·지급된 명세는 여전히 못 고친다 — 그건 이미 나간 돈이다.
+                if (status is not "draft" and not "cancelled")
                     throw new InvalidOperationException(
                         $"이미 {PayrollStatusLabels.Of(status)} 상태라 고칠 수 없습니다.");
 
@@ -373,6 +438,11 @@ public sealed class PayrollService : IPayrollService
                         net_payment   = @NetPayment,
                         absence_id    = @AbsenceId,
                         memo          = @Memo,
+                        -- 🔴 작5 — 취소분을 고치면 draft 로 되살아난다.
+                        --   draft 를 고칠 땐 그대로 draft 라 값이 안 바뀐다.
+                        status        = 'draft',
+                        confirmed_by  = NULL,
+                        confirmed_at  = NULL,
                         updated_at    = NOW(6)
                     WHERE tenant_id = @TenantId AND slip_id = @SlipId
                     """,
