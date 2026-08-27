@@ -294,6 +294,56 @@ internal static class AutoJournalHelper
     }
 
     /// <summary>
+    /// 매출반품 확정 기표 — 자기 이름표(source_type='sales_return') 로 기록한다. (2026-08-28 작12)
+    /// 🔴 종전엔 RecordSalesDeliveryCancelAsync('sales_delivery_cancel') 를 빌려 썼다. 분개 금액은
+    /// 맞았으나 장부에서 «반품»과 «명세서 취소»가 같은 키로 섞여 식별이 불가능했고, 그 결과
+    /// FinanceService 기표누락 검사가 매출반품을 세지 못했다 (매입은 purchase_return 키로 세고 있었다).
+    /// 분개 방향은 종전과 동일: 차변 매출(supply) + 부가세예수금(vat) / 대변 외상매출금(total).
+    /// ⚠️ 매입반품(대변 매입채무)과 대칭이지만 계정이 다르다 — 복사하지 말 것.
+    /// </summary>
+    public static async Task RecordSalesReturnAsync(
+        IDbConnection conn,
+        IDbTransaction tx,
+        string tenantId,
+        string sourceId,
+        string documentNo,
+        DateTime entryDate,
+        string? partnerId,
+        decimal supplyAmount,
+        decimal vatAmount,
+        string? employeeId,
+        CancellationToken ct)
+    {
+        var entryId = Guid.NewGuid().ToString();
+        var entryNo = $"JE-{entryDate:yyyyMMdd}-{Guid.NewGuid().ToString()[..8].ToUpperInvariant()}";
+        var total = supplyAmount + vatAmount;
+
+        await InsertEntryAsync(conn, tx, entryId, tenantId, entryNo, entryDate,
+            "sales_return", sourceId, employeeId, $"매출반품 역분개: {documentNo}", ct);
+
+        // 차변 매출 역산
+        if (supplyAmount != 0m)
+        {
+            await InsertLineAsync(conn, tx, entryId, tenantId, SalesRevenue, "debit",
+                supplyAmount, partnerId, $"매출반품 {documentNo}", ct);
+        }
+
+        // 차변 부가세예수금 역산
+        if (vatAmount != 0m)
+        {
+            await InsertLineAsync(conn, tx, entryId, tenantId, VatPayable, "debit",
+                vatAmount, partnerId, $"부가세예수금반품 {documentNo}", ct);
+        }
+
+        // 대변 외상매출금 역산
+        if (total != 0m)
+        {
+            await InsertLineAsync(conn, tx, entryId, tenantId, AccountsReceivable, "credit",
+                total, partnerId, $"매출채권반품 {documentNo}", ct);
+        }
+    }
+
+    /// <summary>
     /// 매출반품 취소(확정 되돌리기) 기표 — 봉합 (2026-06-23, 15차 적대검증 15-P1).
     /// 매출반품 확정은 RecordSalesDeliveryCancelAsync(역분개: 차변 매출+부가세예수금 / 대변 외상매출금)로
     /// 기표된다. 그 반품을 취소하면 역분개를 되돌려 원래 매출 상태로 복원해야 하므로, 정상 매출확정 분개

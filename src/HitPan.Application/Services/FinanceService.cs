@@ -643,6 +643,11 @@ public class FinanceService : IFinanceService
                   AND NOT EXISTS (SELECT 1 FROM journal_entries j
                                    WHERE j.tenant_id=r.tenant_id AND j.source_type='purchase_return'
                                      AND j.source_id=r.return_id))
+            + (SELECT COUNT(*) FROM sales_returns sr
+                WHERE sr.tenant_id=@T AND sr.status='confirmed' AND sr.is_deleted=0
+                  AND NOT EXISTS (SELECT 1 FROM journal_entries j
+                                   WHERE j.tenant_id=sr.tenant_id AND j.source_type='sales_return'
+                                     AND j.source_id=sr.return_id))
             """, new { T = tenantId }, cancellationToken: ct));
         items.Add(new IntegrityItem
         {
