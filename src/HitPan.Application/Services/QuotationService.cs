@@ -296,10 +296,19 @@ public class QuotationService : IQuotationService
         var quote = await GetAsync(tenantId, quoteId, ct)
                     ?? throw new InvalidOperationException("견적서를 찾을 수 없습니다.");
 
-        // 이미 전환된 견적서는 중복 전환 차단
+        // 이미 전환된 견적서는 중복 전환 차단 (사장님: "사슬동작중 중복생성 절대금지")
         if (quote.Status == "converted")
         {
-            throw new InvalidOperationException($"이미 수주로 전환된 견적서입니다. (전환번호: {quote.ConvertedOrderId})");
+            // 🔴 20260827작10 W2 — converted_order_id 가 이제 order_id(UUID)라
+            //   그대로 보여주면 사장님이 UUID 를 받는다. **번호로 되짚어 보여준다.**
+            //   작8 교훈: 막는 것 ≠ 알려주는 것. 막으면서 "어느 수주로 갔는지" 를 줘야 한다.
+            var convertedNo = await _db.QueryFirstOrDefaultAsync<string?>(new CommandDefinition(
+                "SELECT order_no FROM sales_orders WHERE order_id=@Oid AND tenant_id=@Tid",
+                new { Oid = quote.ConvertedOrderId, Tid = tenantId }, cancellationToken: ct));
+
+            // 못 찾으면(구 데이터라 번호가 그대로 들어있는 경우) 있는 값을 보여준다 — 빈 손으로 돌려보내지 않는다.
+            throw new InvalidOperationException(
+                $"이미 수주로 전환된 견적서입니다. (전환번호: {convertedNo ?? quote.ConvertedOrderId})");
         }
 
         // 수주 문서번호 채번 — WO-11 한글 prefix
@@ -317,16 +326,24 @@ public class QuotationService : IQuotationService
         await _db.ExecuteAsync(new CommandDefinition(
             """
             INSERT INTO sales_orders (order_id, tenant_id, order_no, partner_id, employee_id,
-              order_date, delivery_date, status, total_amount, vat_amount, memo, created_at, updated_at)
+              order_date, delivery_date, status, total_amount, vat_amount, memo,
+              quotation_id, created_at, updated_at)
             VALUES (@Id, @TenantId, @OrderNo, @PartnerId, NULL,
-              @OrderDate, NULL, 'draft', @TotalAmount, @VatAmount, @Memo, NOW(6), NOW(6))
+              @OrderDate, NULL, 'draft', @TotalAmount, @VatAmount, @Memo,
+              @QuotationId, NOW(6), NOW(6))
             """,
             new
             {
                 Id = orderId, TenantId = tenantId, OrderNo = orderNo,
                 PartnerId = quote.PartnerId, OrderDate = today,
                 TotalAmount = quote.TotalAmount, VatAmount = quote.VatAmount,
-                Memo = $"견적서 전환: {quote.QuoteNo}"
+
+                // 🔴 20260827작10 W2 — memo 는 사람이 읽는 흔적으로 그대로 두고,
+                //   기계가 되짚는 축은 quotation_id 컬럼으로 따로 둔다(DB-114).
+                //   종전엔 이 memo 가 유일한 연결이었는데, 수주서를 수정하면 화면 값으로
+                //   덮어써져 **연결이 조용히 소멸**했다.
+                Memo = $"견적서 전환: {quote.QuoteNo}",
+                QuotationId = quoteId
             }, cancellationToken: ct));
 
         // 수주 품목 생성
@@ -350,10 +367,13 @@ public class QuotationService : IQuotationService
         // 견적서 상태 업데이트
         await _db.ExecuteAsync(new CommandDefinition(
             """
-            UPDATE quotations SET status = 'converted', converted_order_id = @OrderNo, updated_at = NOW(6)
+            UPDATE quotations SET status = 'converted', converted_order_id = @OrderId, updated_at = NOW(6)
             WHERE tenant_id = @TenantId AND quote_id = @QuoteId AND is_deleted = 0
             """,
-            new { TenantId = tenantId, QuoteId = quoteId, OrderNo = orderNo },
+            // 🔴 20260827작10 W2 — 컬럼명이 converted_order_**id** 인데 종전엔 order_**no**(번호)를 넣었다.
+            //   varchar(36) 이라 문자열이 그냥 들어가 에러가 안 났고, 이 값으로 JOIN 하는 코드도 없어
+            //   아무도 못 봤다. 이제 id 를 넣는다 — 기존 행은 DB-114 가 되짚어 치환한다.
+            new { TenantId = tenantId, QuoteId = quoteId, OrderId = orderId },
             cancellationToken: ct));
 
         return orderNo;

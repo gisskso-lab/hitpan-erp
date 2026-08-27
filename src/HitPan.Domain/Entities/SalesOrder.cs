@@ -17,5 +17,9 @@ public class SalesOrder : BaseEntity, ITenantEntity
     public decimal TotalAmount { get; set; }
     public decimal VatAmount { get; set; }
     public string? Memo { get; set; }
+
+    /// <summary>원 견적서 quote_id (20260827작10 W2 · DB-114). 견적 없이 만든 수주는 NULL 이다.</summary>
+    public string? QuotationId { get; set; }
+
     public bool IsAuto { get; set; } = false;
 }

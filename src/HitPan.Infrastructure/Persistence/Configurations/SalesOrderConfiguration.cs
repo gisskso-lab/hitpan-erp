@@ -25,6 +25,8 @@ public sealed class SalesOrderConfiguration : IEntityTypeConfiguration<SalesOrde
         builder.Property(e => e.TotalAmount).HasColumnName("total_amount").HasColumnType("decimal(15,2)").IsRequired();
         builder.Property(e => e.VatAmount).HasColumnName("vat_amount").HasColumnType("decimal(15,2)").IsRequired();
         builder.Property(e => e.Memo).HasColumnName("memo").HasMaxLength(500);
+        // 20260827작10 W2 (DB-114): 견적→수주 사슬 링크. 견적 없이 만든 수주는 NULL.
+        builder.Property(e => e.QuotationId).HasColumnName("quotation_id").HasMaxLength(36);
         builder.Property(e => e.IsAuto).HasColumnName("is_auto").IsRequired();
         builder.Property(e => e.CreatedAt).HasColumnName("created_at").IsRequired();
         builder.Property(e => e.CreatedBy).HasColumnName("created_by").HasMaxLength(36);
