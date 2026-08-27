@@ -1319,6 +1319,41 @@ public class SalesService : ISalesService
             throw new InvalidOperationException("수주서를 찾을 수 없습니다.");
         }
 
+        // 🔴 20260827작11 W1 — 같은 수주로 거래명세서를 두 번 뽑는 것을 막는다.
+        //   사장님: "사슬동작중 중복생성 절대금지".
+        //
+        //   🔴 왜 아래 `deliveryItems.Count == 0` 만으로는 안 되나 —
+        //      그 방어는 delivered_qty 가 올라간 뒤에만 듣는다.
+        //      그런데 delivered_qty 는 **확정(ConfirmDeliveryAsync :459)** 에서만 증가한다.
+        //      ⇒ 명세서를 만들고 **확정하기 전(draft)** 에 다시 전환하면
+        //         delivered_qty 가 아직 0 이라 가드를 그대로 통과한다.
+        //         수주 1건으로 명세서 2장이 나오고, 둘 다 확정하면 **재고가 2배 출고**된다.
+        //
+        //   🔴 매입은 이 사고를 이미 겪고 봉합했다(PurchaseService.cs:726-747):
+        //      *"발주 1건으로 매입 2장을 만들 수 있었다(재고 2배 입고)"*.
+        //      매출만 그 봉합을 안 받았다 — 같은 구멍이 그대로 남아 있었다.
+        //
+        //   ⇒ 매입과 대칭으로, **취소분만 빼고 살아있는 명세서가 하나라도 있으면 막는다.**
+        //     번호를 알려준다 — 담당자가 무엇을 정리할지 알아야 한다(작8: 막는 것 ≠ 알려주는 것).
+        //   ⚠️ 철자 — sales_deliveries 는 'cancelled'(l 둘)다. sales_returns('canceled')와 다르다.
+        var existingDeliveryNo = await _db.QueryFirstOrDefaultAsync<string?>(new CommandDefinition(
+            """
+            SELECT delivery_no FROM sales_deliveries
+             WHERE order_id = @OrderId AND tenant_id = @TenantId
+               AND status <> 'cancelled'
+               AND is_deleted = 0
+             ORDER BY delivery_no
+             LIMIT 1
+            """,
+            new { OrderId = orderId, TenantId = tenantId },
+            cancellationToken: ct));
+        if (existingDeliveryNo is not null)
+        {
+            throw new InvalidOperationException(
+                $"이미 거래명세서({existingDeliveryNo})가 발행된 수주서입니다. " +
+                "기존 거래명세서를 확인하세요.");
+        }
+
         var items = await orderItemRepo.FindAsync(x => x.OrderId == orderId);
         var deliveryItems = items
             .Where(x => x.OrderedQty - x.DeliveredQty > 0)
@@ -1334,7 +1369,13 @@ public class SalesService : ISalesService
 
         if (deliveryItems.Count == 0)
         {
-            throw new InvalidOperationException("전환 가능한 미출고 품목이 없습니다.");
+            // 20260827작11 W1 — 매입(PurchaseService.cs:764-771)과 대칭.
+            //   전 라인이 이미 출고 완료면 "품목이 없다" 보다 "이미 끝났다" 가 정확하다.
+            //   담당자가 뭘 해야 하는지 알려준다.
+            var allClosed = items.Any() && items.All(x => x.OrderedQty - x.DeliveredQty <= 0);
+            throw new InvalidOperationException(allClosed
+                ? "이미 출고가 완료된 수주서입니다. 거래명세서 목록에서 확인해 주세요."
+                : "전환 가능한 미출고 품목이 없습니다.");
         }
 
         var request = new CreateDeliveryRequest

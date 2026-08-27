@@ -19,9 +19,15 @@ namespace HitPan.Application.Services;
 ///   - 취소 시 자동 분개 / monthly_summary 차감
 ///   - PDF 양식 변경 (기존 PdfExportService 활용)
 ///
-/// 멱등성 2층:
+/// 멱등성:
 ///   1) HTTP 미들웨어 (작4 IdempotencyMiddleware) — Idempotency-Key 헤더 캐싱
-///   2) DB UNIQUE (uk_tax_invoices_delivery) — 같은 delivery_id에 두 번 발행 차단
+///   2) IssueAsync 의 SELECT 체크 — 같은 delivery_id 에 두 번 발행 차단
+///
+/// 🔴 정정 (20260827작11): 종전 주석은 "DB UNIQUE (uk_tax_invoices_delivery)" 가
+///   2층을 맡는다고 적었으나 **DDL 에 그런 UNIQUE 는 없다.** 16차에 넣으려다
+///   MariaDB 가 FK 컬럼 참조 STORED generated 표현식을 금지해 ERROR 1901 로 회수됐다
+///   (installer/hitpan_db_clean.sql 의 tax_invoices 주석에 사고 이력 기록).
+///   ⇒ **실제 방어는 SELECT 체크 하나뿐이다.** 없는 UNIQUE 를 믿고 약하게 두면 안 된다.
 /// </summary>
 public sealed class TaxInvoiceService : ITaxInvoiceService
 {
@@ -69,16 +75,34 @@ public sealed class TaxInvoiceService : ITaxInvoiceService
             throw new TaxInvoiceException("delivery_not_confirmed", "확정된 거래명세서만 계산서 발행이 가능합니다.");
         }
 
-        // 2) 중복 발행 차단 — DB UNIQUE 보강 (uk_tax_invoices_delivery)
+        // 2) 중복 발행 차단 (사장님: "사슬동작중 중복생성 절대금지")
+        //
+        // 🔴 20260827작11 W2 — 이 가드에 결함이 세 개 있었다.
+        //
+        //   ① tenant_id 조건이 없었다. 남의 회사 계산서가 걸려 우리 발행이 막히거나,
+        //      반대로 우리 것이 안 걸릴 수 있었다(헌법 #2 테넌트 격리).
+        //   ② 번호를 안 알려줬다 — "이미 발행됨" 만 말하니 담당자가 계산서 목록에서
+        //      눈으로 찾아야 했다(작8 교훈: 막는 것 ≠ 알려주는 것).
+        //   ③ 위 주석이 DB UNIQUE(uk_tax_invoices_delivery)가 있다고 적어놨는데
+        //      **DDL 에 그런 UNIQUE 는 없다.** 16차에 넣으려다 MariaDB 가 FK 컬럼 참조
+        //      STORED generated 를 금지해 ERROR 1901 로 회수됐다(clean DDL 주석에 기록).
+        //      ⇒ 실제 방어는 이 SELECT 하나뿐이다. 주석을 믿고 약하게 두면 안 된다.
         var existing = await _db.QueryFirstOrDefaultAsync<string?>(
             new CommandDefinition(
-                "SELECT invoice_id FROM tax_invoices WHERE delivery_id = @DeliveryId AND status = 'issued' LIMIT 1",
-                new { DeliveryId = request.DeliveryId },
+                """
+                SELECT invoice_no FROM tax_invoices
+                 WHERE delivery_id = @DeliveryId AND tenant_id = @TenantId
+                   AND status = 'issued'
+                 ORDER BY invoice_no
+                 LIMIT 1
+                """,
+                new { DeliveryId = request.DeliveryId, TenantId = tenantId },
                 cancellationToken: ct));
 
         if (existing is not null)
         {
-            throw new TaxInvoiceException("already_issued", "이미 계산서가 발행된 거래명세서입니다.");
+            throw new TaxInvoiceException("already_issued",
+                $"이미 계산서({existing})가 발행된 거래명세서입니다.");
         }
 
         // 3) 계산서 번호 생성 (세-yyyyMMdd-NNN 패턴, 테넌트 일자별 순번) — WO-11
