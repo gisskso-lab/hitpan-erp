@@ -566,6 +566,152 @@ public class FinanceService : IFinanceService
             new { T = tenantId }, cancellationToken: ct));
         items.Add(new IntegrityItem { Category = "결재", CheckName = "결재자 사원 참조", Status = orphanApprover == 0 ? "OK" : "WARN", Detail = orphanApprover > 0 ? $"{orphanApprover}건" : null });
 
+        // ═══════════════════════════════════════════════════════════════════
+        // 🔴 20260827작6 — 사슬 정합성 검사 (사장님 지시)
+        //
+        //   *"ERP의 핵심인 입력과, 입력이 연결된 각 도구의 사슬과 조회의 사슬들의
+        //     정합성에 집중해. 데이터가 맞아야 하고, 혹시나 데이터가 틀릴 경우,
+        //     빠르게 틀린 데이터를 발견할 수 있어야 해"*
+        //
+        //   종전 8항목은 **재고·마스터**만 봤다. 회계 장부와 매입↔반품 사슬은
+        //   **한 건도 안 봤다**(실측: journal_entries·purchase_returns 참조 0건).
+        //   ⇒ 장부가 틀어져도, 사슬이 끊겨도 이 화면은 계속 초록불이었다.
+        //
+        //   아래는 **틀린 데이터를 빨리 찾는** 검사다. 고치는 건 사람이 한다.
+        // ═══════════════════════════════════════════════════════════════════
+
+        // ① 복식부기 검산 — 차변합 = 대변합. 이게 깨지면 장부 전체를 못 믿는다.
+        var jeImbalance = await _db.QueryFirstOrDefaultAsync<decimal?>(new CommandDefinition(
+            """
+            SELECT COALESCE(SUM(debit_amount) - SUM(credit_amount), 0)
+              FROM journal_lines WHERE tenant_id = @T
+            """, new { T = tenantId }, cancellationToken: ct));
+        var imbal = jeImbalance ?? 0m;
+        items.Add(new IntegrityItem
+        {
+            Category = "회계",
+            CheckName = "차변합 = 대변합",
+            Status = imbal == 0m ? "OK" : "FAIL",
+            Detail = imbal == 0m ? null : $"{imbal:N0}원 차이"
+        });
+
+        // ② 전표 단위 불균형 — 총합은 맞아도 개별 전표가 틀어질 수 있다.
+        //   ①만 있으면 +100/-100 두 전표가 서로 상쇄해 안 보인다.
+        var jeBadEntries = await _db.QueryFirstOrDefaultAsync<int>(new CommandDefinition(
+            """
+            SELECT COUNT(*) FROM (
+              SELECT entry_id FROM journal_lines WHERE tenant_id = @T
+               GROUP BY entry_id
+              HAVING SUM(debit_amount) <> SUM(credit_amount)
+            ) x
+            """, new { T = tenantId }, cancellationToken: ct));
+        items.Add(new IntegrityItem
+        {
+            Category = "회계",
+            CheckName = "전표별 차·대 균형",
+            Status = jeBadEntries == 0 ? "OK" : "FAIL",
+            Detail = jeBadEntries > 0 ? $"{jeBadEntries}건 불균형" : null
+        });
+
+        // ③ 계정과목 없는 분개 — FK 가 막아주지만, 마이그로 들어온 건은 뚫릴 수 있다.
+        var jeOrphanAcct = await _db.QueryFirstOrDefaultAsync<int>(new CommandDefinition(
+            """
+            SELECT COUNT(*) FROM journal_lines l
+             LEFT JOIN accounts a ON a.tenant_id = l.tenant_id AND a.account_code = l.account_code
+             WHERE l.tenant_id = @T AND a.account_code IS NULL
+            """, new { T = tenantId }, cancellationToken: ct));
+        items.Add(new IntegrityItem
+        {
+            Category = "회계",
+            CheckName = "계정과목 참조",
+            Status = jeOrphanAcct == 0 ? "OK" : "FAIL",
+            Detail = jeOrphanAcct > 0 ? $"{jeOrphanAcct}건 미등록 계정" : null
+        });
+
+        // ④ 확정인데 기표 안 된 전표 — 재고는 움직였는데 장부에 없는 상태.
+        //   🔴 이게 "숫자가 안 맞는" 대표 원인이다. 재고와 회계가 갈린다.
+        var unpostedConfirmed = await _db.QueryFirstOrDefaultAsync<int>(new CommandDefinition(
+            """
+            SELECT
+              (SELECT COUNT(*) FROM purchase_receipts pr
+                WHERE pr.tenant_id=@T AND pr.status='confirmed'
+                  AND NOT EXISTS (SELECT 1 FROM journal_entries j
+                                   WHERE j.tenant_id=pr.tenant_id AND j.source_type='purchase'
+                                     AND j.source_id=pr.receipt_id))
+            + (SELECT COUNT(*) FROM purchase_returns r
+                WHERE r.tenant_id=@T AND r.status='confirmed' AND r.is_deleted=0
+                  AND NOT EXISTS (SELECT 1 FROM journal_entries j
+                                   WHERE j.tenant_id=r.tenant_id AND j.source_type='purchase_return'
+                                     AND j.source_id=r.return_id))
+            """, new { T = tenantId }, cancellationToken: ct));
+        items.Add(new IntegrityItem
+        {
+            Category = "회계",
+            CheckName = "확정전표 기표 누락",
+            Status = unpostedConfirmed == 0 ? "OK" : "FAIL",
+            Detail = unpostedConfirmed > 0 ? $"{unpostedConfirmed}건 미기표" : null
+        });
+
+        // ⑤ 원 매입이 사라진 반품 — 사슬이 끊긴 상태.
+        //   반품은 있는데 그 매입전표가 없으면 「반품전표」 대조가 불가능하다.
+        var orphanReturn = await _db.QueryFirstOrDefaultAsync<int>(new CommandDefinition(
+            """
+            SELECT COUNT(*) FROM purchase_returns r
+             WHERE r.tenant_id=@T AND r.is_deleted=0
+               AND r.receipt_id IS NOT NULL AND r.receipt_id <> ''
+               AND NOT EXISTS (SELECT 1 FROM purchase_receipts pr
+                                WHERE pr.tenant_id=r.tenant_id AND pr.receipt_id=r.receipt_id)
+            """, new { T = tenantId }, cancellationToken: ct));
+        items.Add(new IntegrityItem
+        {
+            Category = "매입",
+            CheckName = "반품↔매입 사슬",
+            Status = orphanReturn == 0 ? "OK" : "FAIL",
+            Detail = orphanReturn > 0 ? $"{orphanReturn}건 원전표 없음" : null
+        });
+
+        // ⑥ 원 발주가 사라진 매입 — 같은 축(발주↔매입 대조).
+        var orphanReceipt = await _db.QueryFirstOrDefaultAsync<int>(new CommandDefinition(
+            """
+            SELECT COUNT(*) FROM purchase_receipts pr
+             WHERE pr.tenant_id=@T
+               AND pr.po_id IS NOT NULL AND pr.po_id <> ''
+               AND NOT EXISTS (SELECT 1 FROM purchase_orders po
+                                WHERE po.tenant_id=pr.tenant_id AND po.po_id=pr.po_id)
+            """, new { T = tenantId }, cancellationToken: ct));
+        items.Add(new IntegrityItem
+        {
+            Category = "매입",
+            CheckName = "매입↔발주 사슬",
+            Status = orphanReceipt == 0 ? "OK" : "FAIL",
+            Detail = orphanReceipt > 0 ? $"{orphanReceipt}건 원전표 없음" : null
+        });
+
+        // ⑦ 반품 수량이 매입 수량을 넘는 건 — 100개 받아 120개 반품은 있을 수 없다.
+        //   🔴 넘으면 재고가 음수로 가거나 매입액이 마이너스가 된다.
+        var overReturn = await _db.QueryFirstOrDefaultAsync<int>(new CommandDefinition(
+            """
+            SELECT COUNT(*) FROM (
+              SELECT r.receipt_id, ri.item_id,
+                     SUM(ri.qty) AS ret_qty,
+                     (SELECT COALESCE(SUM(pi.qty),0) FROM purchase_receipt_items pi
+                       WHERE pi.receipt_id=r.receipt_id AND pi.item_id=ri.item_id) AS buy_qty
+                FROM purchase_returns r
+                JOIN purchase_return_items ri ON ri.return_id=r.return_id
+               WHERE r.tenant_id=@T AND r.is_deleted=0 AND r.status<>'canceled'
+                 AND r.receipt_id IS NOT NULL AND r.receipt_id <> ''
+               GROUP BY r.receipt_id, ri.item_id
+              HAVING ret_qty > buy_qty
+            ) x
+            """, new { T = tenantId }, cancellationToken: ct));
+        items.Add(new IntegrityItem
+        {
+            Category = "매입",
+            CheckName = "반품수량 ≤ 매입수량",
+            Status = overReturn == 0 ? "OK" : "FAIL",
+            Detail = overReturn > 0 ? $"{overReturn}건 초과반품" : null
+        });
+
         var pass = items.Count(x => x.Status == "OK");
         var fail = items.Count(x => x.Status == "FAIL");
 

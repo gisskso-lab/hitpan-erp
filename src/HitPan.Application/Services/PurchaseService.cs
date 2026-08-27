@@ -612,13 +612,30 @@ public class PurchaseService : IPurchaseService
                                --   찾아 맞춰야 했다. 그게 정합성이 안 맞아 보이던 자리다.
                                --   ⚠️ 부분반품을 나눠서 하면 반품전표가 둘 이상이다 ⇒ 전부 보여준다.
                                --     하나만 보여주면 나머지가 숨는다(상관 서브쿼리라 행은 안 늘어난다).
-                               (SELECT GROUP_CONCAT(r2.return_no ORDER BY r2.return_date, r2.return_no
-                                                    SEPARATOR ', ')
+                               --
+                               -- 🔴🔴 20260827작6 (사장님 지시) — **취소분도 보여준다.**
+                               --   사장님: *"매입과 반품, 반품과 매입, 매입과 발주 전표번호를
+                               --   대조해 볼 수 있도록 한거고"*
+                               --   ⇒ 이 칸은 표기가 아니라 **대조 도구**다.
+                               --
+                               --   종전엔 `status <> 'canceled'` 로 취소분을 **숨겼다.**
+                               --   "되돌린 반품을 살아있는 것처럼 보이면 안 된다" 는 이유였는데,
+                               --   **대조 도구에서 데이터를 빼면 도구가 죽는다.**
+                               --   반품서를 만들었다 취소하면 매입목록에서 흔적이 통째로 사라져
+                               --   *"반품했는데 왜 안 뜨지"* 가 된다 — 그게 반려 원인이었다.
+                               --
+                               --   ⇒ 전부 보여주되 **취소분은 「(취소)」 를 붙여** 구분한다.
+                               --     숨기지 않으면서 오인도 막는다.
+                               (SELECT GROUP_CONCAT(
+                                          CASE WHEN r2.status = 'canceled'
+                                               THEN CONCAT(r2.return_no, '(취소)')
+                                               ELSE r2.return_no END
+                                          ORDER BY r2.return_date, r2.return_no
+                                          SEPARATOR ', ')
                                   FROM purchase_returns r2
                                  WHERE r2.receipt_id = pr.receipt_id
                                    AND r2.tenant_id  = pr.tenant_id
-                                   AND r2.is_deleted = 0
-                                   AND r2.status <> 'canceled') AS ReturnNos,
+                                   AND r2.is_deleted = 0) AS ReturnNos,
                                ec.emp_name AS CreatedByName
                            FROM purchase_receipts pr
                            LEFT JOIN employees ec
