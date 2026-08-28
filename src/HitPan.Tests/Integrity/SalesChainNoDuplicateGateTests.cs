@@ -148,8 +148,15 @@ public sealed class SalesChainNoDuplicateGateTests
         Assert.Contains("FROM sales_deliveries", body);
         Assert.Contains("order_id = @OrderId", body);
         Assert.Contains("tenant_id = @TenantId", body);      // 헌법 #2
-        Assert.Contains("status <> 'cancelled'", body);      // 철자: deliveries 는 l 둘
-        Assert.Contains("{existingDeliveryNo}", body);       // 번호를 담아 알려준다
+
+        // 🔴 20260828작14 W5 로 판정 축이 바뀌었다 — 「살아있는 명세서가 있으면 차단」 →
+        //   「미확정(draft) 명세서만 차단 + 나머지는 잔량으로 판정」.
+        //   종전 가드는 중복은 막았지만 **정상 분할출고까지 막았다**(헌법 #20).
+        //   확정분은 delivered_qty 에 반영되어 잔량이 알아서 줄어들므로 여기서 막을 이유가 없다.
+        //   ⇒ 이 게이트가 지키려던 것(가드가 실재 · 테넌트 조건 · 번호를 알려줌)은 그대로 두고
+        //     판정 대상만 draft 로 좁힌다. 잔량 본안은 SalesRemainingQtyGateTests 가 **실제 DB 로** 잰다.
+        Assert.Contains("status = 'draft'", body);
+        Assert.Contains("{pendingDeliveryNo}", body);        // 번호를 담아 알려준다
 
         // 🔴🔴 이 검사가 처음엔 **가짜였다.** 가드를 `if (false && ...)` 로 죽였는데도 통과했다 —
         //   문자열이 파일에 그대로 남아 있기 때문이다(게이트 체크리스트 ⑧).
@@ -158,7 +165,7 @@ public sealed class SalesChainNoDuplicateGateTests
         Assert.DoesNotContain("if (false", body);
 
         // 가드가 SELECT 결과로 판정하는지 — 상수로 바뀌면 잡힌다
-        Assert.Contains("if (existingDeliveryNo is not null)", body);
+        Assert.Contains("if (pendingDeliveryNo is not null)", body);
     }
 
     // ─────────────────────────────────────────────────────────────────────

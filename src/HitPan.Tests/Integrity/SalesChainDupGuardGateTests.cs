@@ -220,14 +220,24 @@ public sealed class SalesChainDupGuardGateTests
 
         // 가드가 있다
         Assert.Contains("FROM sales_returns", body);
-        Assert.Contains("delivery_id=@Did", body);
+        Assert.Contains("sr.delivery_id=@Did", body);
 
         // 🔴 철자 — canceled(l 하나). cancelled 면 가드가 안 걸린다.
         Assert.Contains("status <> 'canceled'", body);
         Assert.DoesNotContain("status <> 'cancelled'", body);
 
-        // 🔴 메시지에 번호가 실려 나간다 — 고정문구면 실패
-        Assert.Contains("{dupNo}", body);
+        // 🔴 20260828작14 W5 — 「명세서에 반품이 하나라도 있으면 차단」 → **품목별 잔량 기준**.
+        //   종전 가드는 중복은 막았지만 **정상 분할반품까지 막았고**, 첫 반품에는 상한이 없어
+        //   납품 1개에 99개가 통과했다(P0-2). 사장님 결재 4·6: 잔량 = 판매 − 기반품, 누적은 품목 단위.
+        //   ⇒ 「번호를 알려준다」는 「잔량을 알려준다」로 바뀐다 — 담당자가 알아야 할 값이 그것이다.
+        //     잔량 본안은 SalesRemainingQtyGateTests 가 **실제 DB 로** 잰다(글자검사 아님).
+        Assert.Contains("잔량", body);
+        Assert.Contains("{remain:0.##}", body);       // 남은 수량을 실제로 담아 알려준다
+        Assert.Contains("sales_delivery_items", body); // 판매수량을 실제로 읽는다
+        Assert.Contains("sales_return_items", body);   // 기반품수량을 실제로 읽는다
+
+        // 죽은 조건이면 잡는다 (게이트 체크리스트 ⑧)
+        Assert.DoesNotContain("false &&", body);
     }
 
     // ─────────────────────────────────────────────────────────────────────
