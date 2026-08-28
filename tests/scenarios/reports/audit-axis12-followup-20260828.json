@@ -1,0 +1,60 @@
+{
+  "ranAt": "2026-08-28T08:10:00Z",
+  "base": "https://test1234.hitpan.kr",
+  "tag": "ZZTEST-0828-",
+  "note": "1차 자동판정(audit-axis12-2026-08-28T07-54-30-879Z.json) 이후 수동 추가검증. 스크립트가 PASS 로 넘긴 항목을 육안 대조하다 발견한 건 포함.",
+  "followups": [
+    {
+      "id": "F-1",
+      "name": "/api/stock/ledger — 7개 원장유형 전부 500",
+      "verdict": "FAIL",
+      "severity": "P1",
+      "evidence": "ledgerType=item/partner/warehouse/employee/cross/period/adjust 7종 모두 HTTP 500. 신규품목(ZZTEST-0828-상품A)·기존품목(볼트너트 05a9935d) 둘 다 500 ⇒ 데이터 특정 아님, 100% 고장.",
+      "rootCause": "StockService.cs:107-118 — 바깥 SELECT 가 SUM(x.qty_in)/SUM(x.qty_out) 으로 snake_case 를 부르는데, 안쪽 파생테이블(BuildLedgerSql:147-157)은 l.qty_in AS QtyIn 으로 PascalCase 별칭만 내보낸다. 파생테이블 x 에 qty_in 컬럼이 존재하지 않음 ⇒ Unknown column.",
+      "customerImpact": "화면 영향 0. 「각종 수불부」(/stock/ledger) 는 Blazor 페이지 라우트이고 실제 호출은 GET /api/reports/stock-ledger (StockLedgerPage.razor:148) 로 정상 200. 이 API 를 부르는 화면·테스트 0건.",
+      "whyNotP0": "고객 도달 경로 없음. 단 라우트명이 화면 경로와 똑같아 살아있는 것처럼 보이는 함정."
+    },
+    {
+      "id": "F-2",
+      "name": "안전재고 경계 — 정확히 채우면 유령 pending 이 즉시 되살아난다",
+      "verdict": "FAIL",
+      "severity": "P1",
+      "evidence": "대조실험 2건, 단일변수(발주량)만 변경. EQ: 안전재고40·발주40 → 입고후 재고40, 알림 ['pending','received'] 2건(유령 발생). GT: 안전재고40·발주60 → 입고후 재고60, 알림 ['received'] 1건(정상). 실사고 사례: ZZTEST-0828-사슬대조M — received(16:54:28.898) 12ms 뒤 pending(16:54:28.910) 재생성.",
+      "rootCause": "BomService.cs:965 경계연산자 — AND COALESCE(s.current_qty,0) <= COALESCE(i.safety_stock,i.safe_stock,0). 자동발주 기본값이 안전재고와 같은 수량을 채우므로 '정상 보충 완료' 상태가 여전히 미달조건(40<=40)을 만족. 동시에 재삽입 가드는 status IN ('pending','ordered') 만 보고 'received' 는 제외(BomService.cs:975-980, 주석상 의도적) ⇒ 가드를 그냥 통과.",
+      "distinctFrom": "8/25 사고(조회 반복마다 무한 증식)와 다른 건이다. 이건 조회를 5회 반복해도 9건→9건으로 늘지 않는다(증식 없음). 정확히 1건만, 매입확정 시점에 생긴다.",
+      "customerImpact": "매입확정까지 정상 완료했는데 같은 품목에 빨간 미달경고가 계속 남는다. 사장님이 8/25 지적하신 '발주해도 경고가 안 사라진다' 와 증상이 같아 보이나 원인이 다르다.",
+      "notFixed": "소스 수정 금지 지시에 따라 미수정. 판정만 보고."
+    },
+    {
+      "id": "F-3",
+      "name": "BOM 생산 — 자재 부족 시 마이너스 재고 차단",
+      "verdict": "PASS",
+      "evidence": "자재 재고 X=80/Y=70 상태에서 100,000개 생산 시도 → HTTP 400 + 부족내역 명시('자재X 199920 부족 (필요 200000, 현재 80)'). 시도 후 재고 X=80 Y=70 P=10 전부 불변(부분반영 0). 안내문에 개발용어 없음."
+    },
+    {
+      "id": "F-4",
+      "name": "stock_ledger 기록 정합 — 읽는 쪽(리포트)으로 교차검증",
+      "verdict": "PASS",
+      "evidence": "GET /api/reports/stock-ledger 실측값이 내가 잰 전/후 delta 와 전부 일치. 상품A qtyIn=10 balance=10 (매입확정 +10) · 자재X qtyIn=100 qtyOut=20 balance=80 (BOM 이 정확히 20 소비) · 완제품P qtyIn=10 (생산 +10). 만드는 쪽만 본 게 아니라 읽는 쪽 값으로 대조."
+    }
+  ],
+  "speedRemeasure": {
+    "method": "n=8 반복, 중앙값(터널 경유 실측)",
+    "GET /api/stock/balance": { "median": 113, "min": 98, "max": 306 },
+    "GET /api/bom/alerts": { "median": 104, "min": 99, "max": 110 },
+    "GET /api/purchase/orders": { "median": 101, "min": 95, "max": 105 },
+    "GET /api/items": { "median": 104, "min": 97, "max": 115 },
+    "GET /api/bom": { "median": 103, "min": 100, "max": 111 }
+  },
+  "finalStock": {
+    "ZZTEST-0828-상품A": 10,
+    "ZZTEST-0828-자동발주B": 0,
+    "ZZTEST-0828-자재X": 80,
+    "ZZTEST-0828-자재Y": 70,
+    "ZZTEST-0828-완제품P": 10,
+    "ZZTEST-0828-반제품S": 0,
+    "ZZTEST-0828-사슬대조M": 40,
+    "ZZTEST-0828-EQ": 40,
+    "ZZTEST-0828-GT": 60
+  }
+}
