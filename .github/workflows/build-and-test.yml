@@ -128,12 +128,20 @@ jobs:
           done
           echo "::error::MariaDB 서비스 컨테이너 기동 실패"; exit 1
 
-      - name: Create gate database
+      - name: Create gate database (출하 DDL 적재)
         # 일부 게이트는 자기 DB 를 스스로 만들지만(CREATE DATABASE),
         # TrialBalance 처럼 HITPAN_TEST_DB 가 이미 있다고 보고 붙는 게이트가 있다.
+        # 🔴 빈 DB 로는 부족하다 — 게이트가 TEMPORARY 표로 가리지 않는 실제 표(collections 등)를 읽는다.
+        #    출하 DDL(hitpan_db_clean.sql)이 신규설치 단일 진실원이므로(헌법 #36) 그대로 적재한다.
+        #    ⚠️ --default-character-set=utf8mb4 필수 — 없으면 한글이 CP949 로 재져 길이가 틀리게 나온다.
         run: |
           mysql -h 127.0.0.1 -P 3306 -u root -pdbgate_ci --default-character-set=utf8mb4 \
             -e "CREATE DATABASE IF NOT EXISTS hitpan_e2e CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;"
+          mysql -h 127.0.0.1 -P 3306 -u root -pdbgate_ci --default-character-set=utf8mb4 \
+            hitpan_e2e < installer/hitpan_db_clean.sql
+          echo "적재된 표 개수:"
+          mysql -h 127.0.0.1 -P 3306 -u root -pdbgate_ci --default-character-set=utf8mb4 \
+            -N -e "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema='hitpan_e2e';"
 
       - name: Restore & Build
         run: |
@@ -152,11 +160,26 @@ jobs:
           HITPAN_DB_USER: 'root'
           HITPAN_DB_PASS: 'dbgate_ci'
           HITPAN_TEST_DB: 'hitpan_e2e'
+        #
+        # 🔴 범위를 밝힌다 (조용한 축소 금지) — 이번에 무는 것은 **업무 로직 게이트 12종**이다.
+        #    기기·승인 계열(DeviceAndKey·DeviceSlotSeed·ApproverCandidate 등)은 시험마다
+        #    `CREATE DATABASE` 로 임시 DB 를 만들어 쓴다. 그 권한 축은 이번 봉합 범위 밖이라
+        #    여기 안 넣는다. **안 넣었다는 사실을 로그에 남긴다** — 넣은 척하면 이번에 봉합한
+        #    "안 돈 게이트를 통과로 세는" 사고를 형태만 바꿔 반복하는 것이다.
         run: |
           set -o pipefail
+          GATES="SalesRemainingQtyGate|TrialBalanceGate|MoneyFlowJournalGate|ChainIntegrityCheckGate"
+          GATES="$GATES|SalesChainNoDuplicateGate|SalesChainDupGuardGate|SalesChainLinkGate"
+          GATES="$GATES|StockAlertIdempotencyGate|PurchaseReturnListParityGate"
+          GATES="$GATES|PurchaseReturnLinkDisplayGate|AutoChainPolicyGate|BomLevelProducibleGate"
+
+          echo "▶ 이 잡이 무는 게이트: $GATES"
+          echo "▶ 이 잡이 물지 않는 것: 기기·승인 계열(CREATE DATABASE 권한 축 — 범위 밖)"
+
+          FILTER=$(echo "$GATES" | sed 's/|/|FullyQualifiedName~/g')
           dotnet test src/HitPan.Tests/HitPan.Tests.csproj \
             --configuration Release --no-build --nologo --verbosity normal \
-            --filter "FullyQualifiedName~Integrity" \
+            --filter "FullyQualifiedName~$FILTER" \
             --logger "trx;LogFileName=db-gate-results.trx" 2>&1 | tee "$RUNNER_TEMP/dbgate.log"
 
       - name: Gate — SKIP 이 한 건도 없어야 한다

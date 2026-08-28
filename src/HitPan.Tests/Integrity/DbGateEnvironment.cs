@@ -20,12 +20,17 @@ namespace HitPan.Tests.Integrity;
 internal static class DbGateEnvironment
 {
     /// <summary>
-    /// CI 에서 도는 중인가. GitHub Actions 는 <c>CI=true</c> 를 항상 주입한다.
-    /// 자체 러너·로컬 재현용으로 <c>HITPAN_REQUIRE_DB</c> 도 함께 본다.
+    /// <b>DB 가 반드시 있어야 하는 자리인가.</b>
+    ///
+    /// 🔴 <c>CI</c> 환경변수로 판정하면 안 된다 — GitHub Actions 는 <b>모든 잡</b>에 <c>CI=true</c> 를 준다.
+    ///   그러면 DB 를 안 띄우는 <c>build</c> 잡까지 DB 를 요구해 애먼 곳이 빨간불이 된다
+    ///   (실제로 이 봉합의 1차 시도가 그렇게 깨졌다).
+    ///
+    /// ⇒ 판정 기준은 <b>"DB 를 주기로 한 잡인가"</b> 다. 그 약속이 <c>HITPAN_REQUIRE_DB</c> 이고,
+    ///   <c>db-gate</c> 잡만 이 값을 주입한다. 약속한 잡에서 못 붙으면 그것은 실패다.
     /// </summary>
     public static bool IsCi =>
-        IsTruthy(Environment.GetEnvironmentVariable("CI"))
-        || IsTruthy(Environment.GetEnvironmentVariable("HITPAN_REQUIRE_DB"));
+        IsTruthy(Environment.GetEnvironmentVariable("HITPAN_REQUIRE_DB"));
 
     /// <summary>
     /// DB 가 없어 게이트를 건너뛰려 할 때 호출한다.
