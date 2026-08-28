@@ -172,6 +172,7 @@ jobs:
           GATES="$GATES|SalesChainNoDuplicateGate|SalesChainDupGuardGate|SalesChainLinkGate"
           GATES="$GATES|StockAlertIdempotencyGate|PurchaseReturnListParityGate"
           GATES="$GATES|PurchaseReturnLinkDisplayGate|AutoChainPolicyGate|BomLevelProducibleGate"
+          GATES="$GATES|SalesStatusVocabularyGate"
 
           echo "▶ 이 잡이 무는 게이트: $GATES"
           echo "▶ 이 잡이 물지 않는 것: 기기·승인 계열(CREATE DATABASE 권한 축 — 범위 밖)"

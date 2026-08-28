@@ -144,6 +144,14 @@ public class SalesController : ControllerBase
         return Created($"/api/sales/deliveries/{id}", new { id, documentNumber, autoCreatedOrderNo });
     }
 
+    // ⚠️ 20260828작14 W7 실측 기록 — 이 엔드포인트에는 개별 권한 검사가 없다.
+    //   클래스 정책 SalesOnly 는 *판매 모듈에 들어올 수 있나* 를 가르는 부서 칸막이지
+    //   *확정할 수 있나* 를 가르지 않는다(8/21 실측 결론 그대로 살아 있음).
+    //   삭제·취소에는 [Authorize(Policy="SalesManager")] 가 있는데 확정에는 없다 — 비대칭이다.
+    //
+    //   🔴 이번 작업 범위(작14)는 「확정된 건을 되돌릴 때의 2단 통제」이지 「확정 권한」이 아니다.
+    //      사장님 오더에 없는 것을 여기서 조용히 바꾸면 월권이다(#33).
+    //      ⇒ 고치지 않고 **적어 둔다**. 착수하려면 별도 결재가 필요하다.
     [HttpPost("deliveries/{id}/confirm")]
     [IdempotencyKey]
     public async Task<IActionResult> ConfirmDelivery(string id, [FromBody] ConfirmDeliveryRequest request, CancellationToken ct)
