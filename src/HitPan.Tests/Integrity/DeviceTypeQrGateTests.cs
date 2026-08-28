@@ -89,6 +89,7 @@ public sealed class DeviceTypeQrGateTests : IDisposable
     /// <summary>MariaDB 서버 + <c>mysql</c> 실행파일이 다 있는가. 없으면 건너뛴다(거짓 실패 금지).</summary>
     private static bool ServerAvailable()
     {
+        if (DbGateEnvironment.IsCi) return true;   // CI 는 DB 필수 — 못 붙으면 아래에서 실패로 드러난다 (작14 W1)
         if (!File.Exists(MysqlExe())) return false;
         try
         {

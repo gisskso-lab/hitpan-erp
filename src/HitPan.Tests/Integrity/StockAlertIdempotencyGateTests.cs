@@ -235,6 +235,7 @@ public sealed class StockAlertIdempotencyGateTests
     /// <summary>시험용 DB 에 실제로 붙을 수 있는지. 못 붙으면 이 게이트는 <b>안 돈다</b>.</summary>
     private static bool ServerAvailable()
     {
+        if (DbGateEnvironment.IsCi) return true;   // CI 는 DB 필수 — 못 붙으면 아래에서 실패로 드러난다 (작14 W1)
         try
         {
             using var c = new MySqlConnection(

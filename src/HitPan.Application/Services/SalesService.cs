@@ -113,6 +113,56 @@ public class SalesService : ISalesService
             throw new InvalidOperationException("품목이 한 줄 이상 필요합니다.");
         }
 
+        // 🔴 20260828작14 W5 — P0-1 봉합: **화면이 지나가는 경로에 잔량 검사를 둔다.**
+        //
+        //   사고: 중복 가드는 ConvertOrderToDeliveryAsync 한 곳에만 있었고,
+        //        화면은 POST /api/sales/deliveries → 이 메서드를 부른다. 가드가 없는 길이었다.
+        //        ⇒ 수주 1건으로 거래명세서 3장이 나왔고 **재고가 실제로 출고**됐다.
+        //        2차 방어선(초과출고 검사 :367)은 OrderItemId 있는 줄만 보므로 빼고 보내면 우회되고,
+        //        3차(정합성 검사 「초과 납품」)는 delivered_qty 가 안 올라 OK 로 통과했다 — 3겹이 다 뚫렸다.
+        //
+        //   🔴 교훈: 가드를 **넣었나** 가 아니라 **그 경로에 넣었나** 를 물어야 한다.
+        //      1차 가드는 실재했는데 고객이 지나가는 길에는 없었다.
+        //
+        //   사장님 결재 4 — 잔량 기준. 주문수량 − 기출고수량 을 넘으면 막는다.
+        //   분할출고는 정상이므로 **넘는 만큼만** 막는다(헌법 #20 — 흐름을 끊지 않는다).
+        if (!string.IsNullOrWhiteSpace(request.OrderId))
+        {
+            var orderedRows = await _db.QueryAsync<(string ItemId, decimal OrderedQty, decimal DeliveredQty)>(
+                new CommandDefinition(
+                    """
+                    SELECT item_id AS ItemId,
+                           COALESCE(SUM(ordered_qty),0)            AS OrderedQty,
+                           COALESCE(SUM(delivered_qty),0)  AS DeliveredQty
+                      FROM sales_order_items
+                     WHERE order_id=@Oid AND tenant_id=@Tid
+                     GROUP BY item_id
+                    """,
+                    new { Oid = request.OrderId, Tid = _currentTenant.TenantId },
+                    cancellationToken: ct));
+            var ordered = orderedRows.ToDictionary(r => r.ItemId, r => (r.OrderedQty, r.DeliveredQty));
+
+            foreach (var line in request.Items)
+            {
+                if (string.IsNullOrWhiteSpace(line.ItemId)) continue;
+                if (!ordered.TryGetValue(line.ItemId, out var o)) continue;   // 수주에 없던 품목은 이 검사 대상이 아니다
+
+                var remain = o.OrderedQty - o.DeliveredQty;
+                if (line.Qty > remain)
+                {
+                    var itemName = await _db.QueryFirstOrDefaultAsync<string?>(new CommandDefinition(
+                        "SELECT item_name FROM items WHERE item_id=@Iid AND tenant_id=@Tid",
+                        new { Iid = line.ItemId, Tid = _currentTenant.TenantId },
+                        cancellationToken: ct)) ?? line.ItemId;
+
+                    throw new InvalidOperationException(
+                        remain <= 0
+                            ? $"[{itemName}] 은(는) 이미 전량 출고되었습니다(주문 {o.OrderedQty:0.##} · 출고 {o.DeliveredQty:0.##})."
+                            : $"[{itemName}] 출고 가능 수량을 넘었습니다. 주문 {o.OrderedQty:0.##} · 기출고 {o.DeliveredQty:0.##} · 잔량 {remain:0.##} (요청 {line.Qty:0.##})");
+                }
+            }
+        }
+
         // 폐기 (2026-08-25, 20260825작1, 사장님 결재): 1+1 기획상품(promo) 자동 2배 처리 제거.
         //   사장님 원문: "1+1기획은 할인프로모션인데, 두배가격으로 자동조정된다면
         //   고객사의고객사 입장에서 두개주문하지. 1+1을 구매할 이유가 없고,
@@ -1177,10 +1227,21 @@ public class SalesService : ISalesService
                 transaction: tx, cancellationToken: ct));
 
             // 5) partner_balance 재계산 (매출 차감 + 수금 역산)
+            //
+            // 🔴 20260828작14 W7 — P0-3 봉합: 반품을 반드시 뺀다.
+            //   사고: 종전엔 total_sales 를 sales_deliveries 합계로만 통째로 다시 썼다.
+            //        확정 시엔 `+ @Amount`, 반품 시엔 `- @Amount` 로 증감해 쌓아온 값인데,
+            //        명세서 하나를 취소하는 순간 그 누적이 통째로 덮여 **과거 반품이 증발**했다.
+            //   증상: 4월에 200만원 반품 처리 → 5월에 전혀 무관한 오타 명세서 1장 취소
+            //        → 4월 반품이 사라지고 미수가 부활한다. 오류도 경고도 없이 조용하다.
+            //   ⚠️ 매입에는 이 코드가 없다 — 복붙할 원본이 없어 신규 설계다.
+            //      (매입채무 ≠ 외상매출금 이므로 매입 코드를 그대로 가져오면 안 된다)
             await _db.ExecuteAsync(new CommandDefinition(
                 """
                 UPDATE partner_balance pb
                 SET total_sales = COALESCE((SELECT SUM(total_amount) FROM sales_deliveries
+                                            WHERE tenant_id=@Tid AND partner_id=@Pid AND status='confirmed'), 0)
+                                - COALESCE((SELECT SUM(total_amount) FROM sales_returns
                                             WHERE tenant_id=@Tid AND partner_id=@Pid AND status='confirmed'), 0),
                     total_receipt = COALESCE((SELECT SUM(amount) FROM collections
                                               WHERE tenant_id=@Tid AND partner_id=@Pid AND is_active=1
@@ -1333,25 +1394,33 @@ public class SalesService : ISalesService
         //      *"발주 1건으로 매입 2장을 만들 수 있었다(재고 2배 입고)"*.
         //      매출만 그 봉합을 안 받았다 — 같은 구멍이 그대로 남아 있었다.
         //
-        //   ⇒ 매입과 대칭으로, **취소분만 빼고 살아있는 명세서가 하나라도 있으면 막는다.**
-        //     번호를 알려준다 — 담당자가 무엇을 정리할지 알아야 한다(작8: 막는 것 ≠ 알려주는 것).
+        //   🔴 20260828작14 W5 — 「살아있는 명세서가 하나라도 있으면 차단」 을 **잔량 기준으로 교체**한다.
+        //      작11 가드는 중복생성은 막았지만 **정상 분할출고까지 막았다**(헌법 #20 — 흐름을 끊었다).
+        //      사장님 결재 4: 「출고 잔량 = 주문수량 − 기출고수량, 잔량 0 이면 차단」.
+        //      ⇒ 가드를 지우는 게 아니라 **원래 있던 잔량 로직으로 되돌린다**(아래 Where 절).
+        //        잔량이 0 이면 만들 수 있는 줄이 0 이라 **넘을 경로 자체가 사라진다.**
+        //
+        //   🔴 단 draft 구멍은 잔량만으로 못 막는다 — delivered_qty 는 확정에서만 오르기 때문이다.
+        //      그래서 **미확정(draft) 명세서가 이미 있으면 그것만 막는다.**
+        //      확정된 것은 delivered_qty 에 이미 반영되어 잔량이 알아서 줄어든다.
         //   ⚠️ 철자 — sales_deliveries 는 'cancelled'(l 둘)다. sales_returns('canceled')와 다르다.
-        var existingDeliveryNo = await _db.QueryFirstOrDefaultAsync<string?>(new CommandDefinition(
+        var pendingDeliveryNo = await _db.QueryFirstOrDefaultAsync<string?>(new CommandDefinition(
             """
             SELECT delivery_no FROM sales_deliveries
              WHERE order_id = @OrderId AND tenant_id = @TenantId
-               AND status <> 'cancelled'
+               AND status = 'draft'
                AND is_deleted = 0
              ORDER BY delivery_no
              LIMIT 1
             """,
             new { OrderId = orderId, TenantId = tenantId },
             cancellationToken: ct));
-        if (existingDeliveryNo is not null)
+        if (pendingDeliveryNo is not null)
         {
+            // 작8 교훈: 막는 것 ≠ 알려주는 것. 무엇을 정리해야 하는지 번호로 알려준다.
             throw new InvalidOperationException(
-                $"이미 거래명세서({existingDeliveryNo})가 발행된 수주서입니다. " +
-                "기존 거래명세서를 확인하세요.");
+                $"확정하지 않은 거래명세서({pendingDeliveryNo})가 있습니다. " +
+                "먼저 확정하거나 삭제한 뒤 다시 전환하세요.");
         }
 
         var items = await orderItemRepo.FindAsync(x => x.OrderId == orderId);
@@ -2074,28 +2143,66 @@ public class SalesService : ISalesService
             else _db.Open();
         }
 
-        // 🔴 20260827작9 W5 — 같은 거래명세서에 살아있는 반품이 이미 있나.
-        //   매입(PurchaseService.CreatePurchaseReturnAsync)에는 진작 있던 가드인데 매출만 없었다.
-        //   취소분은 다시 만들 수 있어야 하므로 제외한다(매입과 동일 정책).
+        // 🔴 20260828작14 W5 — 잔량 기준 (사장님 결재 4·6).
+        //
+        //   종전(20260827작9 W5)은 "같은 명세서에 살아있는 반품이 하나라도 있으면 차단" 이었다.
+        //   그 가드는 중복생성은 막았지만 **정상 분할반품까지 막았다**(헌법 #20 — 흐름을 끊었다).
+        //   반대로 첫 반품에는 상한이 없어 **납품 1개에 99개 반품이 통과**했다(P0-2).
+        //   ⇒ 사장님 결재: 「반품 잔량 = 판매수량 − 기반품수량, 잔량 0 이면 차단」.
+        //     막는 것이 아니라 **넘을 수 있는 범위 자체를 없앤다.**
+        //
+        //   결재 6 — 누적은 **품목 단위**다. A 가 소진돼도 B 는 무관하다.
         //   ⚠️ 철자 주의 — sales_returns 는 'canceled'(l 하나)로 저장한다(:2508).
         //      같은 파일의 sales_deliveries 는 'cancelled'(l 둘)라 옆줄을 보고 복사하면
-        //      이 가드가 영원히 안 걸린다. 막는 척하면서 아무것도 안 막는다.
+        //      이 검사가 영원히 안 걸린다. 막는 척하면서 아무것도 안 막는다.
         if (!string.IsNullOrWhiteSpace(request.DeliveryId))
         {
-            var dupNo = await _db.QueryFirstOrDefaultAsync<string?>(new CommandDefinition(
+            // 판매수량(품목별) — 원 거래명세서가 실제로 나간 양
+            var soldRows = await _db.QueryAsync<(string ItemId, decimal Qty)>(new CommandDefinition(
                 """
-                SELECT return_no FROM sales_returns
-                 WHERE delivery_id=@Did AND tenant_id=@Tid
-                   AND is_deleted=0 AND status <> 'canceled'
-                 LIMIT 1
+                SELECT sdi.item_id AS ItemId, COALESCE(SUM(sdi.qty),0) AS Qty
+                  FROM sales_delivery_items sdi
+                 WHERE sdi.delivery_id=@Did AND sdi.tenant_id=@Tid
+                 GROUP BY sdi.item_id
                 """,
                 new { Did = request.DeliveryId, Tid = tenantId }, cancellationToken: ct));
 
-            if (dupNo is not null)
+            // 기반품수량(품목별) — 취소·삭제분은 다시 반품할 수 있어야 하므로 뺀다
+            var returnedRows = await _db.QueryAsync<(string ItemId, decimal Qty)>(new CommandDefinition(
+                """
+                SELECT sri.item_id AS ItemId, COALESCE(SUM(sri.qty),0) AS Qty
+                  FROM sales_return_items sri
+                  JOIN sales_returns sr ON sr.return_id = sri.return_id AND sr.tenant_id = sri.tenant_id
+                 WHERE sr.delivery_id=@Did AND sr.tenant_id=@Tid
+                   AND sr.is_deleted=0 AND sr.status <> 'canceled'
+                 GROUP BY sri.item_id
+                """,
+                new { Did = request.DeliveryId, Tid = tenantId }, cancellationToken: ct));
+
+            var sold = soldRows.ToDictionary(r => r.ItemId, r => r.Qty);
+            var returned = returnedRows.ToDictionary(r => r.ItemId, r => r.Qty);
+
+            foreach (var line in request.Items)
             {
-                // 🔴 작8 교훈: 막는 것 ≠ 알려주는 것. 기존 반품번호를 반드시 담는다.
-                throw new InvalidOperationException(
-                    $"이미 반품전표({dupNo})가 발행된 거래명세서입니다. 기존 반품전표를 수정하세요.");
+                if (string.IsNullOrWhiteSpace(line.ItemId)) continue;
+
+                var soldQty = sold.TryGetValue(line.ItemId, out var s) ? s : 0m;
+                var doneQty = returned.TryGetValue(line.ItemId, out var d) ? d : 0m;
+                var remain = soldQty - doneQty;
+
+                if (line.Qty > remain)
+                {
+                    // 🔴 작8 교훈: 막는 것 ≠ 알려주는 것.
+                    //   얼마가 남았는지 말해주지 않으면 담당자는 몇 번이고 다시 시도한다.
+                    var itemName = await _db.QueryFirstOrDefaultAsync<string?>(new CommandDefinition(
+                        "SELECT item_name FROM items WHERE item_id=@Iid AND tenant_id=@Tid",
+                        new { Iid = line.ItemId, Tid = tenantId }, cancellationToken: ct)) ?? line.ItemId;
+
+                    throw new InvalidOperationException(
+                        remain <= 0
+                            ? $"[{itemName}] 은(는) 이미 전량 반품되었습니다(판매 {soldQty:0.##} · 반품 {doneQty:0.##})."
+                            : $"[{itemName}] 반품 가능 수량을 넘었습니다. 판매 {soldQty:0.##} · 기반품 {doneQty:0.##} · 잔량 {remain:0.##} (요청 {line.Qty:0.##})");
+                }
             }
         }
 
