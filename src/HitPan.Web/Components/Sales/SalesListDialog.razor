@@ -417,13 +417,20 @@
         _ => Color.Default
     };
 
+    // 🔴 20260828작14 W4 (사장님 결재 7) — 판매라인 어휘 통일.
+    //   수주완료 → 판매완료 → 판매확정 → 계산서발행 → 전자발행
+    //   draft 는 "임시" 가 아니라 "판매완료" 다 — 거래명세서를 작성·저장한 상태이고
+    //   원장에는 아직 아무것도 안 갔다. 그 차이가 곧 되돌리기 방법의 차이(삭제 / 취소)다.
+    //   ⚠️ 이 화면은 목록 전용 코드값(quotation·order)을 함께 쓰므로 공용 헬퍼로 통째 위임하지 않고
+    //      여기서 가른다. DB enum 은 한 글자도 안 바꾼다(마이그 0).
     private string GetStatusLabel(string status) => status switch
     {
         "confirmed" => "판매확정",
-        "invoiced" => "계산서발행",
-        "draft" => "임시",
+        "invoiced"  => "계산서발행",
+        "etax"      => "전자발행",
+        "draft"     => "판매완료",
         "quotation" => "견적",
-        "order" => "수주",
+        "order"     => "수주완료",
         "cancelled" => "취소",
         _ => status
     };

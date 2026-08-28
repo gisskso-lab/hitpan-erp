@@ -17,6 +17,7 @@
 @inject PartnerMasterService PartnersApi
 @inject ItemMasterService ItemsApi
 @inject NavigationManager Nav
+@inject ILogger<DeliveryPage> Logger
 
 <NavigationLock ConfirmExternalNavigation="@_hasUnsavedChanges" OnBeforeInternalNavigation="OnBeforeInternalNavigation" />
 
@@ -28,6 +29,17 @@
     else
     {
         <WorkflowBreadcrumb Steps="_workflowSteps" />
+
+        @* 🔴 20260828작14 W6 — 반품 전표임을 화면에 못박는다.
+           같은 화면을 재사용하는 설계라(결재 5) 여기서 알려주지 않으면
+           담당자가 자기가 무엇을 작성 중인지 모른 채 (−) 숫자만 보게 된다. *@
+        @if (_isReturnMode)
+        {
+            <MudAlert Severity="Severity.Warning" Dense="true" Class="mb-2">
+                <b>반품 전표</b> — 거래명세서 @_returnSourceNo 에 대한 마이너스 전표입니다.
+                반품하지 않을 품목은 줄을 지우고, 수량은 잔량까지만 입력하세요.
+            </MudAlert>
+        }
 
         <MudPaper Class="pa-3 mb-2">
             <MudGrid>
@@ -68,6 +80,11 @@
             <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.PictureAsPdf" OnClick="DownloadPdf">PDF</MudButton>
             <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Email" OnClick="EmailAsync">이메일</MudButton>
             <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Receipt" OnClick="OpenTaxInvoice">세금</MudButton>
+            @* 🔴 20260828작14 W6 (사장님 결재 5) — 반품하기.
+               화면을 새로 만들지 않는다. 이 화면(거래명세서)으로 되돌아오되 수량·금액이 (−)로 채워진다.
+               담당자가 이미 아는 화면이라 교육이 필요 없고, 원전표에서 눌러 들어오므로 사슬 근거가 자동으로 걸린다. *@
+            <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.AssignmentReturn"
+                       OnClick="OpenReturn" Disabled="@(_isNew || _draft?.Status != "confirmed")">반품하기</MudButton>
             <MudSpacer />
             <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.FormatListBulleted" OnClick="OpenListPopup">목록</MudButton>
         </MudToolBar>
@@ -126,9 +143,94 @@
         // 새 문서는 수주가 아직 없다 — 비워 두고, 저장 후 서버가 준 실제 번호로 채운다.
         _draft.LinkedSalesOrderDocumentNo = null;
         _itemCache = await ItemsApi.GetListAsync() ?? new();
+
+        // 🔴 20260828작14 W6 — 반품하기로 들어온 경우(?returnOf=...) 원전표를 (−)로 채운다.
+        //   결재 5: 화면을 새로 만들지 않는다. 같은 화면에 부호만 반대로 채워 돌려준다.
+        await TryLoadReturnSourceAsync();
+
         RefreshWorkflow();
         RecalculateSummary();
     }
+
+    /// <summary>
+    /// 🔴 20260828작14 W6 — 반품 원전표 적재 (사장님 결재 2·3·5).
+    ///
+    /// <para>
+    /// <c>?returnOf={deliveryId}</c> 로 들어오면 그 거래명세서를 읽어
+    /// <b>수량·금액을 (−)로 전량 채운 상태</b>로 화면을 연다.
+    /// </para>
+    ///
+    /// <para>
+    /// 🔴 <b>사슬 근거가 여기서 걸린다.</b> 담당자가 거래처·품목을 다시 고르는 것이 아니라
+    /// <b>원전표에서 눌러 들어오므로</b> 무엇에 대한 마이너스인지가 저절로 정해진다.
+    /// 사장님: <i>"이 마이너스 전표의 근거가 뭔지는 분명하게 사슬로 연결을 시켜야해."</i>
+    /// </para>
+    ///
+    /// <para>
+    /// ⚠️ 잔량 상한은 <b>서버가 최종 판정</b>한다(SalesService 잔량 검사).
+    /// 화면이 채워주는 값은 편의이지 방어가 아니다 — 화면만 믿으면 API 직접 호출로 뚫린다(P0-1 이 그 사고).
+    /// </para>
+    /// </summary>
+    private async Task TryLoadReturnSourceAsync()
+    {
+        var srcId = ReturnOfQuery;
+        if (string.IsNullOrWhiteSpace(srcId) || _draft is null) return;
+
+        try
+        {
+            var src = await DeliveryService.GetAsync(srcId);
+            if (src is null)
+            {
+                Snackbar.Add("원 거래명세서를 찾지 못했습니다.", Severity.Warning);
+                return;
+            }
+
+            _isReturnMode = true;
+            _returnSourceNo = src.DeliveryNo;
+
+            _draft.PartnerId = src.PartnerId;
+            _draft.SalesCompany = src.PartnerName;
+            _draft.SalesDate = DateTime.Today;
+            // 🔴 사슬 표기 — 원전표 번호를 비고에 남긴다(사장님: "반품전표 : 반-(전표번호)").
+            _draft.Memo = $"반품 : {src.DeliveryNo}";
+
+            _draft.Lines.Clear();
+            foreach (var it in src.Items)
+            {
+                // 금액(Amount·VatAmount)은 수량×단가로 파생되는 계산 속성이다 —
+                // 수량을 (−)로 넣으면 금액도 저절로 (−)가 된다. 따로 대입하지 않는다.
+                _draft.Lines.Add(new DeliveryLineModel
+                {
+                    ItemId = it.ItemId,
+                    ItemName = it.ItemName,
+                    Spec = it.Spec ?? string.Empty,
+                    Unit = it.Unit ?? "EA",
+                    Quantity = -it.Qty,                  // (−) 전량. 담당자가 줄을 지우거나 수량을 줄인다.
+                    UnitPrice = it.UnitPrice,
+                    Warehouse = it.WarehouseId ?? string.Empty,   // 반품은 나간 창고로 되돌아온다
+                    // 🔴 줄 단위 사슬 링크 — 어느 판매 줄에서 왔는지. 원단가 추적의 근거다.
+                    //   20260825작7 에서 "컬럼·FK·DTO 는 다 있는데 화면에 값이 안 와서 못 채우던" 자리다.
+                    DeliveryItemId = it.DeliveryItemId
+                });
+            }
+
+            Snackbar.Add($"거래명세서 {src.DeliveryNo} 의 반품 전표입니다. 반품하지 않을 품목은 줄을 지우세요.",
+                         Severity.Info);
+        }
+        catch (Exception ex)
+        {
+            // 헌법 #15 — 빈 catch 금지.
+            Logger.LogWarning(ex, "반품 원전표 적재 실패 deliveryId={DeliveryId}", srcId);
+            Snackbar.Add($"원 거래명세서를 불러오지 못했습니다: {ex.Message}", Severity.Error);
+        }
+    }
+
+    /// <summary>반품하기로 들어온 원 거래명세서 id (20260828작14 W6). 없으면 평소의 새 전표다.</summary>
+    [Parameter, SupplyParameterFromQuery(Name = "returnOf")]
+    public string? ReturnOfQuery { get; set; }
+
+    private bool _isReturnMode;
+    private string? _returnSourceNo;
 
     private async Task<IEnumerable<string>> SearchPartnerAsync(string value, CancellationToken ct)
     {
@@ -879,6 +981,41 @@
         var from = _draft.SalesDate.ToString("yyyy-MM-dd");
         var to = _draft.SalesDate.ToString("yyyy-MM-dd");
         Nav.NavigateTo($"/tax-invoice?partner={partner}&from={from}&to={to}");
+    }
+
+    /// <summary>
+    /// 🔴 20260828작14 W6 — 반품하기 (사장님 결재 2·3·5).
+    ///
+    /// <para>
+    /// 반품 <b>메뉴를 만들지 않는다.</b> 전자발행이 끝나 손대지 못하는 건은
+    /// <b>마이너스 전표</b>로 상계하는 것이 가장 깔끔하고(국세청 이세로가 이미 그 방식),
+    /// 그 마이너스의 <b>근거가 무엇인지 사슬로 연결</b>되어야 한다.
+    /// </para>
+    ///
+    /// <para>
+    /// ⇒ <b>원전표에서 눌러 들어온다.</b> 그래서 사슬 근거가 사람 손을 타지 않고 자동으로 걸린다.
+    /// 도착 화면은 <b>같은 거래명세서 화면</b>이고 수량·금액이 (−)로 전량 채워진다.
+    /// 반품 안 할 품목은 줄을 지우고, 이미 반품된 품목은 잔량만큼만 채워진다
+    /// ⇒ <b>가드로 막는 게 아니라 넘을 경로 자체가 사라진다.</b>
+    /// </para>
+    /// </summary>
+    private async Task OpenReturn()
+    {
+        if (_draft is null || string.IsNullOrWhiteSpace(_draft.Id))
+        {
+            Snackbar.Add("먼저 거래명세서를 저장해주세요.", Severity.Warning);
+            return;
+        }
+
+        // 판매확정 이후에만 반품이 성립한다 — 확정 전에는 재고도 미수금도 아직 안 움직였으므로
+        // 되돌릴 것이 없다. 그 자리는 반품이 아니라 삭제다(결재 7 — 되돌리기 3단).
+        if (_draft.Status != "confirmed")
+        {
+            Snackbar.Add("판매확정된 거래명세서만 반품할 수 있습니다. 확정 전이면 삭제하세요.", Severity.Warning);
+            return;
+        }
+
+        Nav.NavigateTo($"/deliveries?returnOf={Uri.EscapeDataString(_draft.Id)}", forceLoad: true);
     }
 
     private Task OpenPartnerList() => Task.CompletedTask;
