@@ -782,10 +782,20 @@
             "선택한 거래명세서를 삭제하시겠습니까?",
             yesText: "삭제",
             cancelText: "취소");
-        if (result == true)
+        if (result != true) return;
+
+        // 🔴 20260828작14 W7 — 확정 건은 2단 통제 (사장님 결재 8).
+        //   결재 7 되돌리기 3단: 판매완료(원장 무접촉)는 그냥 **삭제**해도 되지만,
+        //   판매확정 이후는 이미 재고가 나가고 미수가 잡혔다 ⇒ 패스워드를 한 번 더 받는다.
+        //   ⚠️ 확정 전 문서까지 물으면 일상 업무가 번거로워진다 — 원장이 움직인 건만 막는다.
+        if (_draft?.Status == "confirmed"
+            && !await StepUpDialog.RequestAsync(DialogService,
+                   "확정된 거래 입니다. 취소하시려면 패스워드 입력이 필요합니다"))
         {
-            await DeleteOrder();
+            return;
         }
+
+        await DeleteOrder();
     }
 
     private async Task DeleteOrder()
@@ -840,6 +850,17 @@
             $"이 작업은 되돌릴 수 없습니다. 진행하시겠습니까?",
             yesText: "매출취소 진행", cancelText: "닫기");
         if (confirm != true) return;
+
+        // 🔴 20260828작14 W7 — 2단 통제 (사장님 결재 8).
+        //   1단 권한 검사는 서버에 이미 있다([Authorize(Policy="SalesManager")]).
+        //   2단이 이번에 신설하는 것 — 권한 가진 사람이 맞는지 **본인 비밀번호**로 한 번 더 확인한다.
+        //   사장님: "권한가진자 패스워드 한번 더 입력." · 방식 확정: 로그인한 본인(권한가진자) 비밀번호.
+        //   ⚠️ 이 확인은 편의가 아니라 통제다 — 판매확정 시점에 이미 재고가 나가고 미수가 잡혔다.
+        if (!await StepUpDialog.RequestAsync(DialogService,
+                "확정된 거래 입니다. 취소하시려면 패스워드 입력이 필요합니다"))
+        {
+            return;
+        }
 
         var (ok, err) = await DeliveryService.CancelConfirmedAsync(_draft.Id);
         if (ok)

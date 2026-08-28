@@ -189,6 +189,58 @@ public sealed class SalesStatusVocabularyGateTests
     }
 
     // ─────────────────────────────────────────────────────────────────────
+    // W7 — 확정 건 2단 통제 (결재 8)
+    // ─────────────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// 🔴 G-9 — <b>확정 건 되돌리기에 패스워드 2단이 걸린다</b>(사장님 결재 8).
+    ///
+    /// <para>
+    /// 1단(권한 검사)은 서버에 이미 있다 — <c>[Authorize(Policy="SalesManager")]</c>.
+    /// 2단이 이번에 신설한 것이다. 방식은 사장님 확정: <b>로그인한 본인(권한가진자) 비밀번호</b>.
+    /// </para>
+    ///
+    /// <para>
+    /// 문구는 사장님이 지정하셨다 — <b>그대로 써야 한다.</b> 임의로 다듬으면 받아쓰기의 반대편이다.
+    /// </para>
+    /// </summary>
+    [Fact]
+    public void G9_확정건_되돌리기에_패스워드_2단이_걸린다()
+    {
+        var src = Read("src", "HitPan.Web", "Pages", "Sales", "DeliveryPage.razor");
+
+        // 사장님 지정 문구 — 한 글자도 바꾸지 않는다
+        Assert.Contains("확정된 거래 입니다. 취소하시려면 패스워드 입력이 필요합니다", src);
+
+        // 매출취소·삭제 두 자리 모두 — 결재 8: "삭제뿐 아니라 수정도" 대상
+        var hits = src.Split("StepUpDialog.RequestAsync").Length - 1;
+        Assert.True(hits >= 2,
+            $"확정 건 되돌리기 2단이 {hits} 곳뿐이다 — 매출취소·삭제 양쪽에 있어야 한다.");
+
+        // 🔴 확정 건에만 묻는다 — 확정 전까지 물으면 일상 업무가 번거로워진다.
+        //   원장이 움직인 건만 막는다(결재 7 되돌리기 3단).
+        Assert.Contains("_draft?.Status == \"confirmed\"", src);
+    }
+
+    /// <summary>
+    /// 🔴 G-10 — <b>본인 비밀번호로 검증한다</b>(사장님 결재 확정).
+    /// 남의 비밀번호나 고정 비밀번호를 받으면 통제가 아니라 형식이 된다.
+    /// 서버가 JWT 의 userId 로 본인을 찾아 대조하는지까지 본다.
+    /// </summary>
+    [Fact]
+    public void G10_본인_비밀번호로_검증한다()
+    {
+        var svc = Read("src", "HitPan.Application", "Services", "AuthService.cs");
+        Assert.Contains("VerifyOwnPasswordAsync", svc);
+        Assert.Contains("BCrypt.Net.BCrypt.Verify(password, user.PasswordHash)", svc);
+
+        var ctrl = Read("src", "HitPan.API", "Controllers", "AuthController.cs");
+        // 🔴 userId 는 JWT 에서 온다 — 파라미터로 받으면 남의 계정으로 통과시킬 수 있다(헌법 #2 정신).
+        Assert.Contains("HttpContext.Items[\"UserId\"]", ctrl);
+        Assert.Contains("VerifyOwnPasswordAsync", ctrl);
+    }
+
+    // ─────────────────────────────────────────────────────────────────────
 
     private static string Read(params string[] parts) =>
         File.ReadAllText(Path.Combine(new[] { RepoRoot() }.Concat(parts).ToArray()));
