@@ -246,9 +246,26 @@ public class PurchaseReturnInReportsGateTests
         var at = fin.IndexOf("GetVatSummaryAsync", StringComparison.Ordinal);
         Assert.True(at >= 0, "GetVatSummaryAsync 가 있어야 한다");
 
-        var body = fin[at..Math.Min(fin.Length, at + 2600)];
+        // 🔴 20260831작15 — 고정 창(2600자)을 **메서드 끝까지**로 바꾼다.
+        //
+        //   종전에는 앵커에서 2600자만 잘라 봤다. 여유가 745자뿐이라
+        //   같은 메서드에 **매출반품 차감(FR-9)을 넣자 앵커가 창 밖으로 밀려 FAIL** 했다.
+        //   🔴 봉합이 틀린 게 아니라 **자가 짧았다** — 게이트 체크리스트 ⑦
+        //   *"구간을 자르면 자른 밖도 못 본다"* 가 그대로 재발한 것이다.
+        //   ⇒ 다음 메서드 선언 전까지를 본문으로 삼아 **길이에 의존하지 않게** 한다.
+        var rest = fin[at..];
+        var nextMethod = rest.IndexOf("\n    public ", StringComparison.Ordinal);
+        var body = nextMethod > 0 ? rest[..nextMethod] : rest;
+
+        // 매입반품 차감 (종전 검사 — 그대로 둔다)
         Assert.Contains("purchase_returns", body, StringComparison.Ordinal);
         Assert.Contains("rt.status = 'confirmed'", body, StringComparison.Ordinal);
+
+        // 🔴 매출반품 차감 (20260831작15 FR-9 — 사장님 전결).
+        //   안 빼면 **판 적 없는 물건의 매출세액을 국세청에 신고**하게 된다(과대 납부).
+        //   매입만 빼고 매출을 안 빼던 비대칭이 이 자리에 있었다.
+        Assert.Contains("sales_returns", body, StringComparison.Ordinal);
+        Assert.Contains("sr.status = 'confirmed'", body, StringComparison.Ordinal);
     }
 
     /// <summary>

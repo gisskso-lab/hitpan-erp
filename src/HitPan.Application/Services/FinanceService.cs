@@ -157,7 +157,36 @@ public class FinanceService : IFinanceService
         if (to.HasValue) returnSql += " AND rt.return_date <= @To";
         returnSql += " GROUP BY rt.return_id, rt.return_date, rt.return_no, p.partner_name, rt.memo";
 
-        var sql = $"({salesSql}) UNION ALL ({purchaseSql}) UNION ALL ({returnSql}) ORDER BY TxDate DESC";
+        // 🔴 20260831작15 — 매출반품도 장부에 뜬다 (사장님 전결 · PRD FR-10).
+        //   매입은 20260825작17 에 이 행이 생겼는데 **매출만 없었다.**
+        //   세무사가 "반품 건만 뽑아 주세요" 할 때 매출은 못 뽑던 자리다.
+        //
+        //   ⚠️ 매입 코드(위 returnSql) 복붙이 아니다 — 표·컬럼·철자가 다르다.
+        //     · sales_return_items(sri) ← purchase_return_items(rti)
+        //     · sales_returns 는 delivery_id(원 거래명세서) 를 갖는다
+        //   🔴 status 는 **양성 비교(= 'confirmed')만** 쓴다.
+        //     sales_returns 는 취소를 'canceled'(l 하나)로 쓰고 sales_deliveries 는 'cancelled'(l 둘)이라
+        //     `<> 'canceled'` 같은 부정 비교를 쓰면 철자 하나로 조용히 통과한다.
+        //   🔴 GROUP BY 필수 — LEFT JOIN 이 헤더를 라인 수만큼 뻥튀기한다.
+        //   🔴 금액은 **라인(sri) 기준** — 매입반품이 rti 기준이라 대칭을 맞춘다.
+        //     (헤더 sales_returns.total_amount 는 공급가 합계라 VAT 축이 어긋난다)
+        var salesReturnSql = """
+            SELECT sr.return_date AS TxDate, '매출반품' AS DocType, sr.return_no AS DocNo,
+                   p.partner_name AS PartnerName,
+                   -COALESCE(SUM(sri.supply_amount), 0) AS SupplyAmount,
+                   -COALESCE(SUM(sri.vat_amount), 0) AS VatAmount,
+                   -COALESCE(SUM(sri.supply_amount + sri.vat_amount), 0) AS TotalAmount,
+                   sr.memo AS Memo
+            FROM sales_returns sr
+            LEFT JOIN sales_return_items sri ON sri.return_id = sr.return_id AND sri.tenant_id = sr.tenant_id
+            LEFT JOIN partners p ON p.partner_id = sr.partner_id AND p.tenant_id = sr.tenant_id
+            WHERE sr.tenant_id = @TenantId AND sr.is_deleted = 0 AND sr.status = 'confirmed'
+            """;
+        if (from.HasValue) salesReturnSql += " AND sr.return_date >= @From";
+        if (to.HasValue) salesReturnSql += " AND sr.return_date <= @To";
+        salesReturnSql += " GROUP BY sr.return_id, sr.return_date, sr.return_no, p.partner_name, sr.memo";
+
+        var sql = $"({salesSql}) UNION ALL ({purchaseSql}) UNION ALL ({returnSql}) UNION ALL ({salesReturnSql}) ORDER BY TxDate DESC";
 
         return (await _db.QueryAsync<PurchaseSalesLedgerDto>(new CommandDefinition(
             sql, new { TenantId = tenantId, From = from, To = to }, cancellationToken: ct))).ToList();
@@ -174,13 +203,25 @@ public class FinanceService : IFinanceService
         var fromDate = new DateTime(year, half == 1 ? 1 : 7, 1);
         var toDate = new DateTime(year, half == 1 ? 6 : 12, DateTime.DaysInMonth(year, half == 1 ? 6 : 12));
 
-        // 매출 집계
+        // 매출 집계 — 🔴 20260831작15: 매출반품을 뺀다 (사장님 전결 · PRD FR-9).
+        //   종전에는 안 뺐다 ⇒ **매출세액 과대계상 = 국세청에 더 냈다.**
+        //   매입은 아래에서 purchase_returns 를 이미 빼고 있었다(20260825작17). 매출만 빠져 있었다.
+        //   ⚠️ 라인(sri) 기준 · 양성 비교(= 'confirmed') · GROUP BY 없이 전체 SUM — 위 매입반품과 같은 규칙.
         var sales = await _db.QueryFirstOrDefaultAsync<(decimal Supply, decimal Vat, int Cnt)>(new CommandDefinition(
             """
-            SELECT COALESCE(SUM(total_amount),0) AS Supply, COALESCE(SUM(vat_amount),0) AS Vat, COUNT(*) AS Cnt
-            FROM sales_deliveries
-            WHERE tenant_id = @TenantId AND status IN ('confirmed','invoiced') AND is_deleted = 0
-              AND delivery_date BETWEEN @From AND @To
+            SELECT COALESCE(SUM(Supply),0) AS Supply, COALESCE(SUM(Vat),0) AS Vat, COALESCE(SUM(Cnt),0) AS Cnt
+            FROM (
+              SELECT COALESCE(SUM(total_amount),0) AS Supply, COALESCE(SUM(vat_amount),0) AS Vat, COUNT(*) AS Cnt
+              FROM sales_deliveries
+              WHERE tenant_id = @TenantId AND status IN ('confirmed','invoiced') AND is_deleted = 0
+                AND delivery_date BETWEEN @From AND @To
+              UNION ALL
+              SELECT -COALESCE(SUM(sri.supply_amount),0), -COALESCE(SUM(sri.vat_amount),0), -COUNT(DISTINCT sr.return_id)
+              FROM sales_returns sr
+              LEFT JOIN sales_return_items sri ON sri.return_id = sr.return_id AND sri.tenant_id = sr.tenant_id
+              WHERE sr.tenant_id = @TenantId AND sr.is_deleted = 0 AND sr.status = 'confirmed'
+                AND sr.return_date BETWEEN @From AND @To
+            ) t
             """,
             new { TenantId = tenantId, From = fromDate, To = toDate }, cancellationToken: ct));
 

@@ -255,6 +255,17 @@ public sealed class DeliverySaveApiResponse
     public string? AutoCreatedOrderNo { get; set; }
 }
 
+/// <summary>
+/// 매출반품 생성 응답 — 서버 <c>SalesController.CreateSalesReturn</c> 이 주는 모양 (20260831작15).
+/// ⚠️ 거래명세서와 필드명이 다르다(<c>documentNumber</c> 가 아니라 <c>returnNo</c>) —
+/// <see cref="DeliverySaveApiResponse"/> 로 받으면 번호가 null 이 되어 "번호가 없습니다" 로 오인한다.
+/// </summary>
+public sealed class SalesReturnCreateApiResponse
+{
+    public string? ReturnId { get; set; }
+    public string? ReturnNo { get; set; }
+}
+
 /// <summary>거래명세서 저장 결과. 실패 시 Error에 서버 응답 본문을 담아 UI에서 원인 표시.</summary>
 public sealed record DeliverySaveResult(bool Success, string? DocumentNumber, string? Error, string? AutoCreatedOrderNo = null);
 
@@ -279,6 +290,62 @@ public sealed class CreateDeliveryItemPayload
     public decimal UnitPrice { get; set; }
     public decimal SupplyAmount { get; set; }
     public decimal VatAmount { get; set; }
+}
+
+/// <summary>
+/// 🔴 매출반품 생성 페이로드 — 서버 <c>CreateSalesReturnRequest</c> 와 1:1 (20260831작15).
+/// </summary>
+/// <remarks>
+/// <para>
+/// <b>왜 생겼나</b>: 20260828작14 의 [반품하기] 는 (−) 수량을 <see cref="CreateDeliveryPayload"/> 에
+/// 담아 <c>POST api/sales/deliveries</c> — <b>판매를 만드는 문</b>으로 보냈다.
+/// 사장님 실측(8/31): <i>"반품이 아니라 추가로 수량 90개가 주문이 된 셈"</i>.
+/// </para>
+/// <para>
+/// 🔴 <b>수량은 양수다.</b> 화면은 (−)로 보여주지만 저장은 양수로 보낸다 —
+/// 부호는 원장 계층이 붙인다(<c>stock_ledger.qty_in</c> · 차·대 반대편 양수 역분개).
+/// 서버 DTO 가 <c>[Range(0.0001,…)]</c> 이라 음수를 보내면 400 이다.
+/// 근거: <c>docs/설계/erp/20260831_아키텍처명세서_매출반품_저장축_역기록계층.md</c> §7.
+/// </para>
+/// <para>
+/// ⚠️ <see cref="CreateDeliveryItemPayload"/> 와 달리 <b>DeliveryItemId 칸이 있다</b> —
+/// 작14 가 주석으로 "줄 단위 사슬 링크"라 써놓고 담을 칸이 없어 버리던 자리다(사장님 결재 3).
+/// </para>
+/// </remarks>
+public sealed class CreateSalesReturnPayload
+{
+    /// <summary>원 거래명세서 FK — 사슬 근거. 단독 반품이면 null.</summary>
+    public string? DeliveryId { get; set; }
+
+    public string PartnerId { get; set; } = string.Empty;
+    public DateTime ReturnDate { get; set; }
+    public string? Memo { get; set; }
+
+    /// <summary>반품 사유 — customer_return / defect / exchange. 창고가 양품·폐기를 가르는 근거.</summary>
+    public string? ReturnReason { get; set; }
+    public string? ReturnReasonMemo { get; set; }
+
+    public List<CreateSalesReturnItemPayload> Items { get; set; } = new();
+}
+
+public sealed class CreateSalesReturnItemPayload
+{
+    public string ItemId { get; set; } = string.Empty;
+
+    /// <summary>🔴 원 거래명세서 <b>라인</b> FK — 원단가 추적의 근거.</summary>
+    public string? DeliveryItemId { get; set; }
+
+    public string? WarehouseId { get; set; }
+
+    /// <summary>🔴 <b>양수</b>. 화면의 (−)를 절대값으로 바꿔 담는다.</summary>
+    public decimal Qty { get; set; }
+    public decimal UnitPrice { get; set; }
+    public decimal? OriginalUnitPrice { get; set; }
+    public decimal SupplyAmount { get; set; }
+    public decimal VatAmount { get; set; }
+
+    /// <summary>파손 로스 — 1이면 재고에 안 넣는다(팔 수 없는 물건). 매출·미수 차감은 그대로.</summary>
+    public bool IsLoss { get; set; }
 }
 
 /// <summary>

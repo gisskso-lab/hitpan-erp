@@ -39,6 +39,27 @@
                 <b>반품 전표</b> — 거래명세서 @_returnSourceNo 에 대한 마이너스 전표입니다.
                 반품하지 않을 품목은 줄을 지우고, 수량은 잔량까지만 입력하세요.
             </MudAlert>
+
+            @* 🔴 20260831작15 (PRD FR-5) — 반품 사유는 필수다.
+               창고가 **양품과 폐기를 갈라야** 한다. 불량이면 재고에 안 넣는다
+               (사장님 정의: "파손이면 로스로 정의, 파손이 아니면 재입고").
+               이 칸이 없으면 창고담당이 폐기품을 재고에 넣는다. *@
+            <MudPaper Class="pa-3 mb-2">
+                <MudGrid>
+                    <MudItem xs="12" md="4">
+                        <MudSelect T="string" @bind-Value="_returnReason" Label="반품 사유 (필수)"
+                                   Dense="true" Margin="Margin.Dense" Required="true">
+                            <MudSelectItem T="string" Value="@("customer_return")">고객 단순 반품</MudSelectItem>
+                            <MudSelectItem T="string" Value="@("defect")">불량 · 파손 (재고에 넣지 않음)</MudSelectItem>
+                            <MudSelectItem T="string" Value="@("exchange")">교환</MudSelectItem>
+                        </MudSelect>
+                    </MudItem>
+                    <MudItem xs="12" md="8">
+                        <MudTextField T="string" @bind-Value="_returnReasonMemo" Label="사유 상세 (선택)"
+                                      Dense="true" Margin="Margin.Dense" MaxLength="500" />
+                    </MudItem>
+                </MudGrid>
+            </MudPaper>
         }
 
         <MudPaper Class="pa-3 mb-2">
@@ -225,12 +246,84 @@
         }
     }
 
+    /// <summary>
+    /// 🔴 <b>반품 저장 — 20260831작15</b>. 화면의 (−) 를 <b>양수</b>로 바꿔 반품 문으로 보낸다.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// 🔴 <b>부호를 여기서 뒤집는 이유</b> — 원장이 음수를 안 받는다.
+    /// <c>journal_lines</c> 에 <c>chk_jl_debit_or_credit</c> CHECK 가 걸려 있어
+    /// 음수 분개는 <b>DB 가 거부</b>하고, <c>stock_ledger</c> 는 부호 대신
+    /// <c>qty_in</c>/<c>qty_out</c> 두 칸으로 방향을 표현한다.
+    /// ⇒ 담당자는 (−) 를 보지만 저장은 양수, 부호는 원장 계층이 붙인다.
+    /// </para>
+    /// <para>
+    /// ⚠️ 잔량 상한·중복은 <b>서버가 최종 판정</b>한다(<c>CreateSalesReturnAsync</c> 잔량 검사).
+    /// 화면 값은 편의이지 방어가 아니다 — 화면만 믿으면 API 직접 호출로 뚫린다.
+    /// </para>
+    /// </remarks>
+    private async Task SaveReturnAsync(List<DeliveryLineModel> realLines)
+    {
+        if (_draft is null) return;
+
+        // 🔴 PRD FR-5 — 사유는 필수다. 창고가 양품·폐기를 갈라야 한다.
+        //   불량(defect)이면 서버가 is_loss 로 재고에 안 넣는다.
+        if (string.IsNullOrWhiteSpace(_returnReason))
+        {
+            Snackbar.Add("반품 사유를 선택해주세요.", Severity.Warning);
+            return;
+        }
+
+        var payload = new CreateSalesReturnPayload
+        {
+            // 🔴 사슬 근거 — 원전표 FK. 결재 3: "마이너스 전표의 근거를 분명하게 사슬로 연결"
+            //   20260828작14 는 이 값을 담을 칸이 payload 에 없어 **메모 글자만 남았다.**
+            DeliveryId = ReturnOfQuery,
+            PartnerId = _draft.PartnerId ?? string.Empty,
+            ReturnDate = _draft.SalesDate,
+            Memo = _draft.Memo,
+            ReturnReason = _returnReason,
+            ReturnReasonMemo = _returnReasonMemo,
+            Items = realLines.Select(x => new CreateSalesReturnItemPayload
+            {
+                ItemId = x.ItemId,
+                // 🔴 줄 단위 사슬 — 어느 판매 줄에서 왔는지. 원단가 추적의 근거.
+                DeliveryItemId = x.DeliveryItemId,
+                WarehouseId = string.IsNullOrWhiteSpace(x.Warehouse) ? null : x.Warehouse,
+                // 🔴 화면은 (−), 저장은 양수. 서버 [Range(0.0001,…)] 이 음수를 거부한다.
+                Qty = Math.Abs(x.Qty),
+                UnitPrice = Math.Abs(x.UnitPrice),
+                OriginalUnitPrice = Math.Abs(x.UnitPrice),
+                SupplyAmount = Math.Abs(x.Amount),
+                VatAmount = Math.Abs(x.VatAmount),
+                // 파손이면 재고에 안 넣는다 (사장님 정의: "파손이면 로스, 아니면 재입고")
+                IsLoss = string.Equals(_returnReason, "defect", StringComparison.Ordinal)
+            }).ToList()
+        };
+
+        var result = await DeliveryService.CreateSalesReturnAsync(payload);
+        if (!result.Success || string.IsNullOrWhiteSpace(result.DocumentNumber))
+        {
+            // 서버 응답 본문을 그대로 보여준다 — 잔량 초과 안내가 여기 담겨 온다.
+            Snackbar.Add($"반품 저장 실패: {result.Error ?? "알 수 없는 오류"}", Severity.Error);
+            return;
+        }
+
+        _isNew = false;
+        Snackbar.Add($"반품 저장 완료: {result.DocumentNumber}", Severity.Success);
+        Nav.NavigateTo("/deliveries", forceLoad: true);
+    }
+
     /// <summary>반품하기로 들어온 원 거래명세서 id (20260828작14 W6). 없으면 평소의 새 전표다.</summary>
     [Parameter, SupplyParameterFromQuery(Name = "returnOf")]
     public string? ReturnOfQuery { get; set; }
 
     private bool _isReturnMode;
     private string? _returnSourceNo;
+
+    /// <summary>반품 사유 — customer_return / defect / exchange. PRD FR-5 로 필수.</summary>
+    private string? _returnReason;
+    private string? _returnReasonMemo;
 
     private async Task<IEnumerable<string>> SearchPartnerAsync(string value, CancellationToken ct)
     {
@@ -416,6 +509,27 @@
         if (unresolved.Count > 0)
         {
             Snackbar.Add($"등록되지 않은 품목입니다: {string.Join(", ", unresolved)} — 품목 마스터에서 먼저 등록하거나 자동완성 목록에서 선택해주세요.", Severity.Warning);
+            return;
+        }
+
+        // ─────────────────────────────────────────────────────────────────
+        // 🔴 20260831작15 — 반품 모드는 **반품 문으로 보낸다** (사장님 실측 반려 1 봉합).
+        //
+        //   20260828작14 사고: [반품하기] 가 (−) 로 채운 뒤 아래 SaveAsync 로 그냥 흘렀다.
+        //   그 문은 **판매를 만드는 문**(POST api/sales/deliveries)이라
+        //   반품 의도가 **추가 판매 한 장**으로 저장됐다.
+        //   사장님: *"반품이 아니라, 명-…-001 전표에 추가로 수량 90개가 주문이 된 셈"*.
+        //
+        //   🔴 그때 _isReturnMode 는 **배너에서만** 쓰였다. 저장은 그것을 몰랐다.
+        //      게이트도 Assert.Contains("반품하기") 로 **글자만 세서** 통과시켰다.
+        //      ⇒ 여기가 「고쳤나」가 아니라 「갔나」를 가르는 자리다.
+        //
+        //   근거: docs/설계/erp/20260831_아키텍처명세서_매출반품_저장축_역기록계층.md §7
+        //         docs/설계/erp/20260831_PRD_매출반품_화면B_저장A.md FR-1·2·3
+        // ─────────────────────────────────────────────────────────────────
+        if (_isReturnMode)
+        {
+            await SaveReturnAsync(realLines);
             return;
         }
 
