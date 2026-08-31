@@ -829,6 +829,61 @@ public sealed class DeliveryService(HttpClient http)
         catch { return new(); }
     }
 
+    /// <summary>
+    /// 🔴 <b>매출반품 생성</b> — 20260831작15 (사장님 실측 반려 1 봉합).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>없던 것이 이것 하나였다.</b> 목록(:817)·상세·확정·취소·삭제는 14차에 다 배선됐는데
+    /// <b>생성만 없었다.</b> 그래서 20260828작14 의 [반품하기] 는 갈 곳이 없어
+    /// <c>SaveAsync</c>(판매 생성)로 갔고, 사장님이 실측에서 잡으셨다 —
+    /// <i>"반품이 아니라 추가로 수량 90개가 주문이 된 셈"</i>.
+    /// </para>
+    /// <para>
+    /// 🔴 <b>수량은 양수로 보낸다.</b> 화면이 (−)로 들고 있는 값을 호출부에서 절대값으로 바꿔 담는다.
+    /// 부호는 원장이 붙인다(<c>qty_in</c> · 역분개). 서버 DTO 가 <c>[Range(0.0001,…)]</c> 이라
+    /// 음수를 보내면 400 이다.
+    /// </para>
+    /// <para>
+    /// ⚠️ 멱등 헤더를 붙인다 — 생성 경로이므로 두 번 눌리면 반품이 두 장 난다.
+    /// 20260827작9 가 판매 생성에서 겪은 사고와 같은 자리다.
+    /// </para>
+    /// </remarks>
+    public async Task<DeliverySaveResult> CreateSalesReturnAsync(
+        CreateSalesReturnPayload payload, CancellationToken ct = default)
+    {
+        try
+        {
+            using var content = JsonContent.Create(payload, options: PostJsonOptions);
+            using var req = new HttpRequestMessage(HttpMethod.Post, "api/sales/returns") { Content = content };
+            req.Headers.TryAddWithoutValidation("Idempotency-Key", Guid.NewGuid().ToString("N"));
+
+            using var resp = await http.SendAsync(req, ct);
+            if (resp.IsSuccessStatusCode)
+            {
+                var body = await resp.Content.ReadFromJsonAsync<SalesReturnCreateApiResponse>(JsonOptions, ct);
+                if (!string.IsNullOrWhiteSpace(body?.ReturnNo))
+                {
+                    return new DeliverySaveResult(true, body.ReturnNo, null);
+                }
+                if (!string.IsNullOrWhiteSpace(body?.ReturnId))
+                {
+                    return new DeliverySaveResult(true, body.ReturnId, null);
+                }
+                return new DeliverySaveResult(false, null, "서버 응답에 반품번호가 없습니다.");
+            }
+
+            var err = await resp.Content.ReadAsStringAsync(ct);
+            return new DeliverySaveResult(false, null,
+                string.IsNullOrWhiteSpace(err) ? $"HTTP {(int)resp.StatusCode}" : err);
+        }
+        catch (Exception ex)
+        {
+            // 헌법 #15 — 빈 catch 금지.
+            return new DeliverySaveResult(false, null, ex.Message);
+        }
+    }
+
     /// <summary>매출반품 단건 상세 — 편집 화면 로드용.</summary>
     public async Task<PurchaseReturnDetailModel?> GetSalesReturnDetailAsync(string returnId, CancellationToken ct = default)
     {
