@@ -62,7 +62,26 @@ public sealed class DeliveryService(HttpClient http)
                 }).ToList()
         };
 
-        using var resp = await http.PostAsJsonAsync("api/sales/deliveries", payload, PostJsonOptions, ct);
+        // 🔴 20260831 — P0: 거래명세서 신규저장이 400 으로 죽어 있었다.
+        //
+        //   서버 POST /api/sales/deliveries 에 20260827작9 에서 [IdempotencyKey] 가 붙었는데
+        //   (중복생성 절대금지 오더 — 생성이 두 번 타면 수주서까지 두 장 난다)
+        //   **화면 저장 경로만 그 헤더를 안 보냈다.**
+        //   같은 파일의 ConfirmAsync(:186) 는 진작 붙이고 있었다 — 생성만 빠진 비대칭이다.
+        //
+        //   증상: "거래명세서 저장 실패: idempotency_key_required" ⇒ 저장 자체가 불가.
+        //   ⚠️ 서버가 잘못한 게 아니다. 헤더를 요구하는 게 맞고, 안 보내던 쪽이 틀렸다.
+        //
+        //   키는 draft.Id 를 쓴다(ConfirmAsync 와 동일 규칙) — 같은 초안을 두 번 눌러도
+        //   서버가 같은 키로 보고 한 번만 반영한다. 신규(Id 없음)면 새 GUID 를 만든다.
+        //   🔴 GUID 를 매번 새로 만들면 멱등이 성립하지 않지만, 신규 저장은 아직 식별자가
+        //      없으므로 이 경로에선 서버 잔량 가드(SalesService W5)가 2차 방어를 맡는다.
+        var idemKey = string.IsNullOrWhiteSpace(draft.Id) ? Guid.NewGuid().ToString("N") : draft.Id;
+
+        using var content = JsonContent.Create(payload, options: PostJsonOptions);
+        using var req = new HttpRequestMessage(HttpMethod.Post, "api/sales/deliveries") { Content = content };
+        req.Headers.TryAddWithoutValidation("Idempotency-Key", idemKey);
+        using var resp = await http.SendAsync(req, ct);
 
         if (resp.IsSuccessStatusCode)
         {

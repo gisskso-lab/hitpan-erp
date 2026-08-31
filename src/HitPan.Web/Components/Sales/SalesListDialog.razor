@@ -4,6 +4,7 @@
 @inject IDialogService DialogService
 @inject DeliveryService DeliveryService
 @inject ISnackbar Snackbar
+@inject NavigationManager Nav
 
 <MudDialog Style="min-width:900px;max-width:1100px">
     <TitleContent>
@@ -87,12 +88,26 @@
                    Style="font-size:12px"
                    StartIcon="@Icons.Material.Filled.Check"
                    Disabled="!CanSelectOne">선택</MudButton>
+        @* 🔴 20260831 (사장님 실측 반려 1) — 버튼 이름을 「하는 일」이 아니라
+           「누르면 되는 상태」로 맞춘다. 결재 7 사슬과 같은 어휘를 쓴다.
+
+             판매완료 → [판매확정] → 판매확정 → [계산서 발행] → 계산서발행 → 전자발행
+
+           🔴 종전 이름이 실제 동작과 달랐다 — 「계산서 발행」 버튼이 부르는 것은
+              BulkConfirmAsync(판매확정)이지 계산서 발행이 아니었다.
+              담당자는 계산서가 나가는 줄 알고 눌렀을 것이다. 이름이 거짓말을 하고 있었다. *@
         <MudButton OnClick="IssueInvoiceAsync"
                    Variant="Variant.Outlined"
                    Size="Size.Small"
                    Style="font-size:12px"
-                   Disabled="!HasDraftChecked">계산서 발행</MudButton>
+                   Disabled="!HasDraftChecked">판매확정</MudButton>
         <MudButton OnClick="IssueElectronic"
+                   Variant="Variant.Outlined"
+                   Size="Size.Small"
+                   Style="font-size:12px"
+                   Disabled="!HasConfirmedChecked">계산서 발행</MudButton>
+        @* 전자발행 — 계산서발행(invoiced) 건만. 국세청에 나가면 되돌릴 수 없다. *@
+        <MudButton OnClick="IssueElectronicTaxAsync"
                    Variant="Variant.Outlined"
                    Size="Size.Small"
                    Style="font-size:12px"
@@ -127,6 +142,15 @@
     private bool AllChecked;
     private bool HasChecked => Items.Any(x => x.IsChecked);
     private bool HasDraftChecked => Items.Any(x => x.IsChecked && x.Status == "draft");
+
+    /// <summary>
+    /// 🔴 20260831 (사장님 실측 반려 1) — 계산서 발행 대상 = <b>판매확정(confirmed)</b> 건.
+    /// 결재 7 사슬: 판매완료 → <b>판매확정</b> → 계산서발행 → 전자발행.
+    /// 확정되지 않은 건에는 계산서를 끊을 수 없다(원장이 아직 안 움직였다).
+    /// </summary>
+    private bool HasConfirmedChecked => Items.Any(x => x.IsChecked && x.Status == "confirmed");
+
+    /// <summary>전자발행 대상 = 계산서발행(invoiced) 건. 국세청에 나가면 되돌릴 수 없다.</summary>
     private bool HasInvoicedChecked => Items.Any(x => x.IsChecked && x.Status == "invoiced");
     /// <summary>삭제 가능 = 선택됨 AND 계산서 발행 전(invoiced 아님). 권한은 AuthorizeView에서.</summary>
     private bool HasDeletableChecked => Items.Any(x => x.IsChecked && x.Status != "invoiced");
@@ -221,10 +245,13 @@
         var checkedItems = Items.Where(x => x.IsChecked && x.Status == "draft").ToList();
         if (checkedItems.Count == 0) return;
 
+        // 🔴 20260831 — 제목이 「계산서 발행」이었는데 실제 동작은 BulkConfirmAsync(판매확정)였다.
+        //   이름이 거짓말을 하고 있었다(사장님 실측 반려 1). 하는 일 그대로 부른다.
         var result = await DialogService.ShowMessageBoxAsync(
-            "계산서 발행",
-            $"선택한 {checkedItems.Count}건을 확정 처리하시겠습니까?",
-            yesText: "확정",
+            "판매확정",
+            $"선택한 {checkedItems.Count}건을 판매확정 처리하시겠습니까?\n"
+            + "확정하면 재고가 나가고 미수금이 잡힙니다.",
+            yesText: "판매확정",
             cancelText: "취소");
         if (result != true) return;
 
@@ -384,20 +411,59 @@
         }
     }
 
+    /// <summary>
+    /// 🔴 20260831 (사장님 실측 반려 1) — <b>계산서 발행</b>.
+    /// 판매확정(confirmed) 건을 골라 세금계산서 화면으로 넘긴다.
+    ///
+    /// <para>
+    /// ⚠️ 여기서 계산서를 <b>끊지 않는다</b> — 발행은 세금계산서 화면의 일이다.
+    /// 이 버튼은 <b>그 화면으로 데려다주는 것</b>까지만 한다. 할 수 있는 것만 한다고 말한다.
+    /// </para>
+    /// </summary>
     private async Task IssueElectronic()
     {
-        var checkedItems = Items.Where(x => x.IsChecked).ToList();
-        var result = await DialogService.ShowMessageBoxAsync(
-            "전자발행",
-            $"선택한 {checkedItems.Count}건을 전자발행 처리하시겠습니까?",
-            yesText: "발행",
-            cancelText: "취소");
-        if (result != true)
+        var checkedItems = Items.Where(x => x.IsChecked && x.Status == "confirmed").ToList();
+        if (checkedItems.Count == 0)
         {
+            Snackbar.Add("판매확정된 건만 계산서를 발행할 수 있습니다.", Severity.Warning);
             return;
         }
 
-        await Search();
+        var result = await DialogService.ShowMessageBoxAsync(
+            "계산서 발행",
+            $"선택한 {checkedItems.Count}건을 세금계산서 화면에서 발행합니다. 이동하시겠습니까?",
+            yesText: "이동",
+            cancelText: "취소");
+        if (result != true) return;
+
+        // 거래처·기간을 프리셋해 담당자가 다시 찾지 않게 한다.
+        var partner = Uri.EscapeDataString(checkedItems[0].PartnerName ?? string.Empty);
+        var from = checkedItems.Min(x => x.OrderDate).ToString("yyyy-MM-dd");
+        var to = checkedItems.Max(x => x.OrderDate).ToString("yyyy-MM-dd");
+
+        MudDialog.Close(DialogResult.Ok(true));
+        Nav.NavigateTo($"/tax-invoice?partner={partner}&from={from}&to={to}");
+    }
+
+    /// <summary>
+    /// 🔴 20260831 — <b>전자발행</b> (국세청 전송).
+    ///
+    /// <para>
+    /// 🔴 <b>아직 배선이 없다.</b> 5축 전수조사 실측 — <c>etax_status</c> 를 움직이는 코드가 0건이다.
+    /// 종전 버튼은 <i>"전자발행 처리하시겠습니까"</i> 라고 묻고 <b>[예] 를 눌러도 아무 일도 하지 않았다</b>
+    /// (목록만 새로고침). 담당자는 국세청에 나간 줄 안다 — 그게 더 위험하다.
+    /// </para>
+    ///
+    /// <para>
+    /// ⇒ <b>안 되는 것을 안 된다고 말한다.</b> 되는 척하지 않는다.
+    /// 국세청 전송 배선은 계산서 파트(다음 차례)에서 한다.
+    /// </para>
+    /// </summary>
+    private Task IssueElectronicTaxAsync()
+    {
+        Snackbar.Add("전자발행(국세청 전송)은 아직 준비 중입니다. 계산서 발행까지 진행해 주세요.",
+                     Severity.Info);
+        return Task.CompletedTask;
     }
 
 

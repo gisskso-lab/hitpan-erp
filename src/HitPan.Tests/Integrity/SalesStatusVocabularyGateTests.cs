@@ -242,6 +242,73 @@ public sealed class SalesStatusVocabularyGateTests
 
     // ─────────────────────────────────────────────────────────────────────
 
+    // ─────────────────────────────────────────────────────────────────────
+    // 8/31 사장님 실측 반려 2건 — 재발 방지
+    // ─────────────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// 🔴 G-11 — <b>거래명세서 신규저장이 멱등 헤더를 보낸다</b> (8/31 실측 반려 7).
+    ///
+    /// <para>
+    /// 사고: 서버 <c>POST /deliveries</c> 에 20260827작9 에서 <c>[IdempotencyKey]</c> 가 붙었는데
+    /// <b>화면 저장 경로만 그 헤더를 안 보냈다.</b> ⇒ <i>"거래명세서 저장 실패: idempotency_key_required"</i>
+    /// 로 <b>신규 저장 자체가 불가</b>했다. 같은 파일 <c>ConfirmAsync</c> 는 진작 붙이고 있었다 —
+    /// <b>생성만 빠진 비대칭</b>이다.
+    /// </para>
+    ///
+    /// <para>
+    /// 🔴 이건 서버가 아니라 <b>보내는 쪽</b>이 틀린 것이다. 요구하는 게 맞다.
+    /// </para>
+    /// </summary>
+    [Fact]
+    public void G11_거래명세서_신규저장이_멱등헤더를_보낸다()
+    {
+        var svc = Read("src", "HitPan.Web", "Services", "DeliveryService.cs");
+
+        var body = Slice(svc, "public async Task<DeliverySaveResult> SaveAsync(",
+                              "public async Task<DeliverySaveResult> CreateOrderAsync(");
+
+        Assert.Contains("Idempotency-Key", body);
+
+        // 🔴 헤더를 붙이려면 PostAsJsonAsync 로는 안 된다 — 요청 객체를 만들어야 한다.
+        //   종전 코드가 PostAsJsonAsync 였고 그래서 헤더를 못 붙였다.
+        Assert.Contains("SendAsync", body);
+        Assert.DoesNotContain("PostAsJsonAsync(\"api/sales/deliveries\"", body);
+    }
+
+    /// <summary>
+    /// 🔴 G-12 — <b>버튼 이름이 하는 일과 맞는다</b> (8/31 실측 반려 1).
+    ///
+    /// <para>
+    /// 사고: 「계산서 발행」 버튼이 부르는 것은 <c>BulkConfirmAsync</c>(판매확정)였다.
+    /// <b>이름이 거짓말을 하고 있었다</b> — 담당자는 계산서가 나가는 줄 알고 눌렀을 것이다.
+    /// </para>
+    ///
+    /// <para>
+    /// 결재 7 사슬대로: 판매완료 → <b>[판매확정]</b> → 판매확정 → <b>[계산서 발행]</b> → 계산서발행 → 전자발행
+    /// </para>
+    /// </summary>
+    [Fact]
+    public void G12_판매목록_버튼이름이_하는일과_맞는다()
+    {
+        var src = Read("src", "HitPan.Web", "Components", "Sales", "SalesListDialog.razor");
+
+        // 확정을 부르는 버튼은 「판매확정」이라고 불린다
+        var confirmBtn = Slice(src, "OnClick=\"IssueInvoiceAsync\"", "</MudButton>");
+        Assert.Contains("판매확정", confirmBtn);
+        Assert.DoesNotContain("계산서 발행", confirmBtn);
+
+        // 계산서 발행 버튼은 판매확정(confirmed) 건에만 열린다
+        Assert.Contains("HasConfirmedChecked", src);
+
+        // 🔴 전자발행은 아직 배선이 없다 — 되는 척하면 안 된다.
+        //   종전 버튼은 "발행하시겠습니까" 묻고 [예] 를 눌러도 아무 일도 안 했다(목록 새로고침만).
+        //   담당자가 국세청에 나간 줄 아는 것이 더 위험하다.
+        Assert.Contains("아직 준비 중", src);
+    }
+
+    // ─────────────────────────────────────────────────────────────────────
+
     private static string Read(params string[] parts) =>
         File.ReadAllText(Path.Combine(new[] { RepoRoot() }.Concat(parts).ToArray()));
 
