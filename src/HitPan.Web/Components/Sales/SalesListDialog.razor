@@ -58,12 +58,33 @@
             <RowTemplate>
                 <MudTd><MudCheckBox T="bool" Value="context.IsChecked" ValueChanged="@(v => OnCheck(context, v))" Disabled="context.IsProcessed" Size="Size.Small" /></MudTd>
                 <MudTd @ondblclick="@(() => SelectRow(context))">@context.OrderDate.ToString("yyyy-MM-dd")</MudTd>
-                <MudTd @ondblclick="@(() => SelectRow(context))"><MudText Style="font-weight:500">@context.OrderNo</MudText></MudTd>
+                @* 🔴 20260903작16 — 사슬을 눈으로 읽히게 붙인다 (사장님 결재).
+                   반품 줄은 ①들여쓰고 ②└ 로 원전표에 매달고 ③번호 옆에 원전표 번호를 적고
+                   ④금액을 (−) 빨강으로 낸다. 별도 메뉴 없이 이 목록이 곧 대사 화면이 된다. *@
+                <MudTd @ondblclick="@(() => SelectRow(context))">
+                    @if (context.IsReturn)
+                    {
+                        <span style="display:inline-flex;align-items:center;gap:6px;padding-left:18px">
+                            <span style="color:#9CA3AF">└</span>
+                            <MudText Style="font-weight:600;color:#B91C1C">@context.OrderNo</MudText>
+                            @if (!string.IsNullOrWhiteSpace(context.SourceDeliveryNo))
+                            {
+                                <MudText Typo="Typo.caption" Style="color:#6B7280">
+                                    @context.SourceDeliveryNo 의 반품
+                                </MudText>
+                            }
+                        </span>
+                    }
+                    else
+                    {
+                        <MudText Style="font-weight:500">@context.OrderNo</MudText>
+                    }
+                </MudTd>
                 <MudTd @ondblclick="@(() => SelectRow(context))">@context.PartnerName</MudTd>
                 <MudTd @ondblclick="@(() => SelectRow(context))">@(context.CreatedByName ?? "")</MudTd>
-                <MudTd><MudChip T="string" Size="Size.Small" Color="@GetStatusColor(context.Status)" Variant="Variant.Text">@GetStatusLabel(context.Status)</MudChip></MudTd>
-                <MudTd Style="text-align:right">@context.TotalAmount.ToString("N0")</MudTd>
-                <MudTd Style="text-align:right">@context.VatAmount.ToString("N0")</MudTd>
+                <MudTd><MudChip T="string" Size="Size.Small" Color="@GetStatusColor(context.Status)" Variant="Variant.Text">@GetRowStatusLabel(context)</MudChip></MudTd>
+                <MudTd Style="@AmountStyle(context)">@context.TotalAmount.ToString("N0")</MudTd>
+                <MudTd Style="@AmountStyle(context)">@context.VatAmount.ToString("N0")</MudTd>
             </RowTemplate>
             <NoRecordsContent><MudText Class="pa-4" Style="color:#9CA3AF">조회된 거래명세서가 없습니다.</MudText></NoRecordsContent>
         </MudTable>
@@ -141,19 +162,19 @@
     private List<SalesListItem> Items = new();
     private bool AllChecked;
     private bool HasChecked => Items.Any(x => x.IsChecked);
-    private bool HasDraftChecked => Items.Any(x => x.IsChecked && x.Status == "draft");
+    private bool HasDraftChecked => Items.Any(x => x.IsChecked && !x.IsReturn && x.Status == "draft");
 
     /// <summary>
     /// 🔴 20260831 (사장님 실측 반려 1) — 계산서 발행 대상 = <b>판매확정(confirmed)</b> 건.
     /// 결재 7 사슬: 판매완료 → <b>판매확정</b> → 계산서발행 → 전자발행.
     /// 확정되지 않은 건에는 계산서를 끊을 수 없다(원장이 아직 안 움직였다).
     /// </summary>
-    private bool HasConfirmedChecked => Items.Any(x => x.IsChecked && x.Status == "confirmed");
+    private bool HasConfirmedChecked => Items.Any(x => x.IsChecked && !x.IsReturn && x.Status == "confirmed");
 
     /// <summary>전자발행 대상 = 계산서발행(invoiced) 건. 국세청에 나가면 되돌릴 수 없다.</summary>
-    private bool HasInvoicedChecked => Items.Any(x => x.IsChecked && x.Status == "invoiced");
+    private bool HasInvoicedChecked => Items.Any(x => x.IsChecked && !x.IsReturn && x.Status == "invoiced");
     /// <summary>삭제 가능 = 선택됨 AND 계산서 발행 전(invoiced 아님). 권한은 AuthorizeView에서.</summary>
-    private bool HasDeletableChecked => Items.Any(x => x.IsChecked && x.Status != "invoiced");
+    private bool HasDeletableChecked => Items.Any(x => x.IsChecked && !x.IsReturn && x.Status != "invoiced");
 
     // 🔴 20260825작15 — CanCreateReturn 제거 (사장님 결재: 반품확인 메뉴 전부 제거).
     //   판매목록에서 반품으로 전환하는 경로 자체를 없앤다.
@@ -169,7 +190,7 @@
         var fromStr = FilterFrom?.ToString("yyyy-MM-dd") ?? "";
         var toStr = FilterTo?.ToString("yyyy-MM-dd") ?? "";
         var list = await DeliveryService.GetListAsync(fromStr, toStr, FilterPartner, "", CancellationToken.None);
-        Items = list.Select(d => new SalesListItem
+        var sales = list.Select(d => new SalesListItem
         {
             OrderId = d.DeliveryId,
             OrderDate = d.OrderDate,
@@ -183,6 +204,96 @@
             // 20260825작5: 작성자를 목록까지 실어 보낸다 — 여기서 빠뜨리면 그리드가 항상 공란이다.
             CreatedByName = d.CreatedByName
         }).ToList();
+
+        // ─────────────────────────────────────────────────────────────────
+        // 🔴 20260903작16 — 마이너스 전표(반품)를 원전표 아래에 붙인다.
+        //
+        //   사장님: *"매출반품 메뉴를 없애고, 마이너스 전표(반품)과 그 마이너스 전표와
+        //            연결되는 원 전표의 사슬을 **가독성 있게 붙여 놓으라**고 했잖아."*
+        //
+        //   🔴 작15 는 **저장만 고치고 목록을 안 고쳤다.** 반품이 sales_returns 에
+        //      정상 저장됐는데 이 목록은 sales_deliveries 만 읽어서 **아무 데도 안 보였다.**
+        //      매출반품 화면은 8/25 결재로 @page 가 주석 처리돼 있어 열 문이 하나도 없었다.
+        //      ⇒ 「고쳤나」만 보고 「보이나」를 안 본 자리(fixed≠delivered 9차).
+        //
+        //   설계 근거: 20260828 설계서 §3-4 — 원전표 바로 아래 배치가 그대로
+        //             **경리의 대사 화면**이 된다.
+        // ─────────────────────────────────────────────────────────────────
+        var returns = await DeliveryService.GetSalesReturnListAsync(FilterFrom, FilterTo, CancellationToken.None);
+
+        // 거래처 필터는 판매쪽과 같은 기준으로 건다(서버가 반품에는 거래처 필터를 안 받는다).
+        if (!string.IsNullOrWhiteSpace(FilterPartner))
+        {
+            returns = returns
+                .Where(r => (r.PartnerName ?? "").Contains(FilterPartner, StringComparison.OrdinalIgnoreCase))
+                .ToList();
+        }
+
+        var noByDeliveryId = sales.ToDictionary(x => x.OrderId, x => x.OrderNo);
+
+        var returnRows = returns.Select(r => new SalesListItem
+        {
+            OrderId = r.ReturnId,
+            OrderDate = r.ReturnDate,
+            OrderNo = r.ReturnNo,
+            PartnerId = r.PartnerId,
+            PartnerName = r.PartnerName,
+            // 🔴 화면에는 (−)로 보인다. 저장은 양수다(원장이 음수를 안 받는다) —
+            //   부호를 여기 표시 계층에서 붙이는 것이 20260831 아키텍처 판정이다.
+            TotalAmount = -Math.Abs(r.TotalAmount),
+            VatAmount = -Math.Abs(r.VatAmount),
+            Status = r.Status,
+            CreatedByName = r.CreatedByName,
+            IsReturn = true,
+            SourceDeliveryId = r.DeliveryId,
+            SourceDeliveryNo = !string.IsNullOrWhiteSpace(r.DeliveryId)
+                               && noByDeliveryId.TryGetValue(r.DeliveryId!, out var srcNo)
+                               ? srcNo
+                               : null
+        }).ToList();
+
+        // 사슬 배치 — 원전표 바로 다음 줄에 그 반품들을 끼워 넣는다.
+        var bySource = returnRows
+            .Where(r => !string.IsNullOrWhiteSpace(r.SourceDeliveryId))
+            .GroupBy(r => r.SourceDeliveryId!)
+            .ToDictionary(g => g.Key, g => g.OrderBy(x => x.OrderNo).ToList());
+
+        var merged = new List<SalesListItem>();
+        foreach (var s in sales)
+        {
+            merged.Add(s);
+            if (bySource.TryGetValue(s.OrderId, out var children))
+            {
+                merged.AddRange(children);   // ← 원전표 바로 아래
+            }
+        }
+
+        // 원전표를 못 찾은 반품(기간 밖·직접작성)은 사라지면 안 된다 — 제 날짜 자리에 둔다.
+        var orphans = returnRows
+            .Where(r => string.IsNullOrWhiteSpace(r.SourceDeliveryId)
+                        || !bySource.ContainsKey(r.SourceDeliveryId!)
+                        || !noByDeliveryId.ContainsKey(r.SourceDeliveryId!))
+            .ToList();
+        if (orphans.Count > 0)
+        {
+            merged.AddRange(orphans);
+            merged = merged.OrderByDescending(x => x.OrderDate).ToList();
+
+            // 날짜 정렬 후에도 사슬은 유지한다 — 다시 붙인다.
+            var rebuilt = new List<SalesListItem>();
+            foreach (var row in merged.Where(x => !x.IsReturn))
+            {
+                rebuilt.Add(row);
+                if (bySource.TryGetValue(row.OrderId, out var kids))
+                {
+                    rebuilt.AddRange(kids);
+                }
+            }
+            rebuilt.AddRange(orphans.Where(o => !rebuilt.Contains(o)));
+            merged = rebuilt;
+        }
+
+        Items = merged;
         AllChecked = false;
     }
 
@@ -242,7 +353,7 @@
 
     private async Task IssueInvoiceAsync()
     {
-        var checkedItems = Items.Where(x => x.IsChecked && x.Status == "draft").ToList();
+        var checkedItems = Items.Where(x => x.IsChecked && !x.IsReturn && x.Status == "draft").ToList();
         if (checkedItems.Count == 0) return;
 
         // 🔴 20260831 — 제목이 「계산서 발행」이었는데 실제 동작은 BulkConfirmAsync(판매확정)였다.
@@ -316,7 +427,7 @@
     /// </summary>
     private async Task BulkDeleteAsync()
     {
-        var targets = Items.Where(x => x.IsChecked && x.Status != "invoiced").ToList();
+        var targets = Items.Where(x => x.IsChecked && !x.IsReturn && x.Status != "invoiced").ToList();
         if (targets.Count == 0) return;
 
         // 사장님 지시 (2026-04-26): "취소가 곧 삭제고, 삭제가 곧 취소".
@@ -422,7 +533,7 @@
     /// </summary>
     private async Task IssueElectronic()
     {
-        var checkedItems = Items.Where(x => x.IsChecked && x.Status == "confirmed").ToList();
+        var checkedItems = Items.Where(x => x.IsChecked && !x.IsReturn && x.Status == "confirmed").ToList();
         if (checkedItems.Count == 0)
         {
             Snackbar.Add("판매확정된 건만 계산서를 발행할 수 있습니다.", Severity.Warning);
@@ -500,6 +611,31 @@
         "cancelled" => "취소",
         _ => status
     };
+
+    /// <summary>
+    /// 🔴 20260903작16 — <b>반품 줄은 어휘가 다르다.</b>
+    /// </summary>
+    /// <remarks>
+    /// 같은 <c>draft</c>·<c>confirmed</c> 라도 판매에서는 「판매완료·판매확정」이지만
+    /// 반품에서는 <b>「반품완료·반품확정」</b>이다. 한 사전으로 처리하면
+    /// 반품 줄에 <i>"판매완료"</i> 가 떠서 <b>정반대로 읽힌다.</b>
+    /// ⚠️ 철자 주의 — <c>sales_returns</c> 는 취소를 <c>canceled</c>(l 하나)로 쓰고
+    /// <c>sales_deliveries</c> 는 <c>cancelled</c>(l 둘)라 둘 다 받는다.
+    /// </remarks>
+    private string GetRowStatusLabel(SalesListItem item)
+        => item.IsReturn
+            ? item.Status switch
+            {
+                "draft"                   => "반품완료",
+                "confirmed"               => "반품확정",
+                "canceled" or "cancelled" => "반품취소",
+                _ => GetStatusLabel(item.Status)
+            }
+            : GetStatusLabel(item.Status);
+
+    /// <summary>금액 칸 — 마이너스 전표는 (−) 빨강으로 낸다. 눈으로 즉시 갈린다.</summary>
+    private static string AmountStyle(SalesListItem item)
+        => "text-align:right;" + (item.IsReturn ? "color:#B91C1C;font-weight:600;" : string.Empty);
 
     private string RowStyle(SalesListItem item, int index)
         => "height:36px;font-size:13px;" + (item.IsProcessed ? "color:#9CA3AF;" : string.Empty);

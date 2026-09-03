@@ -142,6 +142,22 @@ public sealed class SalesListItem
     public string Status { get; set; } = string.Empty;
     public bool IsAuto { get; set; }
 
+    /// <summary>
+    /// 🔴 이 줄이 <b>마이너스 전표(반품)</b>인가 — 20260903작16.
+    /// </summary>
+    /// <remarks>
+    /// 사장님 결재(8/25·8/28): <i>"매출반품 메뉴를 없애고, 마이너스 전표(반품)와
+    /// 그 마이너스 전표와 연결되는 원 전표의 사슬을 <b>가독성 있게 붙여 놓으라</b>"</i>.
+    /// ⇒ 별도 메뉴를 만들지 않고 <b>판매 목록 안에서</b> 원전표 바로 아래에 붙인다.
+    /// </remarks>
+    public bool IsReturn { get; set; }
+
+    /// <summary>반품이면 원 거래명세서 id — 이 값으로 원전표 아래에 붙는다. 없으면 단독 반품.</summary>
+    public string? SourceDeliveryId { get; set; }
+
+    /// <summary>반품이 매달린 원전표 번호 — 화면에 <c>└ 명-… 의 반품</c> 으로 보여준다.</summary>
+    public string? SourceDeliveryNo { get; set; }
+
     // UI only
     public bool IsChecked { get; set; }
     public bool IsProcessed =>
@@ -805,6 +821,17 @@ public sealed class PurchaseReturnListItem
     public decimal VatAmount { get; set; }
     public string Status { get; set; } = string.Empty;
     public string? Memo { get; set; }
+
+    /// <summary>
+    /// 🔴 20260903작16 — <b>매출</b>반품이 나온 원 <b>거래명세서</b> id.
+    /// </summary>
+    /// <remarks>
+    /// ⚠️ 이 모델은 매입·매출 반품이 <b>공용</b>이라(14차 재사용) 링크 칸이 둘이다.
+    /// 매입은 <see cref="ReceiptId"/>(<c>receipt_id</c>), 매출은 이 칸(<c>delivery_id</c>) —
+    /// <b>서버 JSON 필드명이 서로 다르므로 한 칸으로 합치면 한쪽이 항상 null 이 된다.</b>
+    /// (매출반품을 <c>ReceiptId</c> 로 읽으려다 사슬이 통째로 끊길 뻔한 자리다.)
+    /// </remarks>
+    public string? DeliveryId { get; set; }
 
     /// <summary>
     /// 🔴 20260827작3 — 이 반품이 나온 <b>원 매입전표</b>. 서버 <c>PurchaseReturnListDto</c> 와 짝.
