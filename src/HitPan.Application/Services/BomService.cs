@@ -219,7 +219,16 @@ public class BomService : IBomService
               ) THEN 1 ELSE 0 END AS HasChildBom
             FROM bom_items bi
             LEFT JOIN items i ON i.item_id = bi.material_item_id
-            LEFT JOIN item_stock s ON s.tenant_id = bi.tenant_id AND s.item_id = bi.material_item_id
+            -- 🔴 창고합산 서브쿼리 (20260904작20 G-B4) — item_stock 은 (item_id, warehouse_id) 단위라
+            --    단순 JOIN 하면 창고가 여럿일 때 같은 자재가 여러 줄로 붙는다.
+            --    AssembleAsync 가 이 목록을 그대로 돌며 차감하므로(:565) 자재가 창고 수만큼
+            --    과차감됐다 — 2창고면 10개 생산에 20개가 빠졌다(실측). 원장·원가·분개도 같이 부푼다.
+            --    같은 파일의 GetListAsync(:73-76)·GetAssembleAutoOrderCandidatesAsync 는 이미
+            --    이 방식이었는데 GetAsync 만 빠져 있었다.
+            LEFT JOIN (
+                 SELECT tenant_id, item_id, SUM(current_qty) AS current_qty
+                   FROM item_stock GROUP BY tenant_id, item_id
+            ) s ON s.tenant_id = bi.tenant_id AND s.item_id = bi.material_item_id
             WHERE bi.bom_id = @BomId
               AND bi.tenant_id = @TenantId
             ORDER BY bi.seq_no
@@ -525,15 +534,29 @@ public class BomService : IBomService
 
         // 기본 창고 ID 확보 ("default" 하드코딩 제거 — fk_sal_warehouse FK 위반 방지).
         // 테넌트의 활성 창고 중 wh_code='MAIN'(또는 'WH-MAIN') 우선, 없으면 첫 활성 창고.
-        var defaultWarehouseId = await _db.QueryFirstOrDefaultAsync<string>(new CommandDefinition(
-            """
-            SELECT warehouse_id FROM warehouses
-             WHERE tenant_id=@TenantId AND is_active=1
-             ORDER BY (CASE WHEN wh_code IN ('MAIN','WH-MAIN') THEN 0 ELSE 1 END), wh_code
-             LIMIT 1
-            """,
-            new { TenantId = tenantId }, cancellationToken: ct)).ConfigureAwait(false)
+        // 🔴 이것은 창고결정 3단의 ③(최후 폴백)이다. ②는 아래 사전이 받는다.
+        var defaultWarehouseId = await WarehouseLookup
+            .ResolveTenantDefaultWarehouseAsync(_db, tenantId, ct: ct).ConfigureAwait(false)
             ?? throw new InvalidOperationException("활성 창고가 없습니다. 창고 마스터에 기본 창고를 등록하세요.");
+
+        // 🔴 20260904작20 — 상품마스터 기본창고(②단) 적재.
+        //    종전 BOM 생산은 위 ③단 하나뿐이라, 상품마스터에 A창고를 지정해도
+        //    자재를 MAIN 에서 빼려다 "자재 재고 부족" 으로 생산이 통째로 막혔다(실측 G-B1).
+        //    매출(작19)·매입은 이미 이 단계를 쓰고 있었고 BOM 만 빠져 있었다.
+        //
+        //    ⚠️ 자재와 완제품을 함께 담는다 — 자재는 "어디서 뺄까", 완제품은 "어디에 넣을까"로
+        //       쓰임이 다르지만, 읽어야 할 값은 같은 items.default_warehouse_id 하나다.
+        var warehouseItemIds = check.Materials.Select(m => m.ItemId).ToList();
+        warehouseItemIds.Add(bom.ProductItemId);
+        var itemDefaultWarehouses = await WarehouseLookup
+            .LoadItemDefaultWarehousesAsync(_db, tenantId, warehouseItemIds, ct: ct).ConfigureAwait(false);
+
+        // 완제품이 들어갈 창고 — 마스터에 지정돼 있으면 그곳, 없으면 테넌트 기본창고.
+        var productWarehouseId = WarehouseResolver.Resolve(
+            userSpecifiedWarehouseId: null,
+            itemId: bom.ProductItemId,
+            itemDefaultWarehouses: itemDefaultWarehouses,
+            tenantDefaultWarehouseId: defaultWarehouseId);
 
         // ── 트랜잭션 감싸기 (자재차감 + 완성품증가 + stock_ledger 일괄 atomicity 보장) ──
         // 이전 버그: 중간 실패 시 자재는 차감됐는데 완성품 안 올라가거나, 이중 처리되는 현상
@@ -563,6 +586,8 @@ public class BomService : IBomService
 
             decimal productionCost = 0;
             var materials = new List<BomMaterialUsedEvent>();
+            // 🔴 자재별로 실제 뺀 창고 — 원장(stock_ledger)이 같은 창고를 써야 한다(작20).
+            var materialWarehouses = new Dictionary<string, string>();
             foreach (var mat in check.Materials)
             {
                 var unitCost = await _db.QueryFirstOrDefaultAsync<decimal>(new CommandDefinition(
@@ -571,7 +596,19 @@ public class BomService : IBomService
                 productionCost += unitCost * mat.RequiredQty;
                 materials.Add(new BomMaterialUsedEvent(mat.ItemId, mat.RequiredQty, unitCost));
 
+                // 🔴 20260904작20 — 자재별 창고결정. ② 상품마스터 기본창고 → ③ 테넌트 기본창고.
+                //    종전에는 모든 자재를 defaultWarehouseId(③) 하나로 몰았다.
+                //    ①(사용자 지정)은 BOM 생산에 없다 — 생산 화면에 창고 칸이 없고,
+                //    사장님 지시 4번의 "사용자 지정" 은 매출·매입 라인 이야기다. 없는 칸을 만들지 않는다.
+                var matWarehouseId = WarehouseResolver.Resolve(
+                    userSpecifiedWarehouseId: null,
+                    itemId: mat.ItemId,
+                    itemDefaultWarehouses: itemDefaultWarehouses,
+                    tenantDefaultWarehouseId: defaultWarehouseId);
+
                 // 자재 재고 차감 로그
+                // 🔴 warehouse_id 필터 추가 (작20) — 없으면 before/after 를 다른 창고 행에서 읽어
+                //    로그가 실제로 뺀 창고와 어긋나고, 다창고면 여러 행이 INSERT 된다.
                 await _db.ExecuteAsync(new CommandDefinition(
                     """
                     INSERT INTO stock_adjust_logs (
@@ -582,13 +619,13 @@ public class BomService : IBomService
                       COALESCE(current_qty, 0), COALESCE(current_qty, 0) - @Qty, @Qty * -1,
                       COALESCE(avg_cost, 0), COALESCE(avg_cost, 0), @Reason, @UserId, NOW(6)
                     FROM item_stock
-                    WHERE tenant_id=@TenantId AND item_id=@ItemId
+                    WHERE tenant_id=@TenantId AND item_id=@ItemId AND warehouse_id=@WarehouseId
                     """,
                     new
                     {
                         TenantId = tenantId,
                         ItemId = mat.ItemId,
-                        WarehouseId = defaultWarehouseId,
+                        WarehouseId = matWarehouseId,
                         Qty = mat.RequiredQty,
                         Reason = $"BOM생산:{bom.BomName} {dto.ProduceQty}개",
                         UserId = userId
@@ -596,9 +633,9 @@ public class BomService : IBomService
 
                 // 자재 재고 차감 — 재고 부족 시 음수 방지를 위해 조건부 UPDATE 후 0행이면 예외
                 // 봉합 (2026-06-22, 10차 BOM-WH-01 P1): warehouse_id 필터 없으면 자재가 2창고 분산 시
-                //   두 행 모두 차감(과차감)되고, stock_adjust_logs·ledger는 defaultWarehouseId 단일창고라
-                //   불일치. 차감 창고를 ledger 기록 창고(defaultWarehouseId)와 일치시켜 정합 확보.
-                //   단일창고 고객은 동작 불변, 다창고만 정상화.
+                //   두 행 모두 차감(과차감)되고, stock_adjust_logs·ledger는 단일창고라 불일치.
+                //   차감 창고를 ledger 기록 창고와 일치시켜 정합 확보.
+                // 🔴 작20: 그 "일치시킬 창고" 가 종전에는 항상 MAIN 이었다. 이제 자재별 결정값을 쓴다.
                 var matUpdated = await _db.ExecuteAsync(new CommandDefinition(
                     """
                     UPDATE item_stock
@@ -606,11 +643,14 @@ public class BomService : IBomService
                     WHERE tenant_id = @TenantId AND item_id = @ItemId
                       AND warehouse_id = @WarehouseId AND current_qty >= @Qty
                     """,
-                    new { TenantId = tenantId, ItemId = mat.ItemId, WarehouseId = defaultWarehouseId, Qty = mat.RequiredQty },
+                    new { TenantId = tenantId, ItemId = mat.ItemId, WarehouseId = matWarehouseId, Qty = mat.RequiredQty },
                     transaction: tx, cancellationToken: ct)).ConfigureAwait(false);
                 if (matUpdated == 0)
                     throw new InvalidOperationException(
                         $"자재 재고 부족: 품목 {mat.ItemId}, 필요 수량 {mat.RequiredQty}. BOM 생산을 중단합니다.");
+
+                // 원장에 남길 창고 — 실제로 뺀 창고와 같아야 한다.
+                materialWarehouses[mat.ItemId] = matWarehouseId;
             }
 
             // 완성품 재고 증가 로그
@@ -625,13 +665,13 @@ public class BomService : IBomService
                   COALESCE(current_qty, 0), COALESCE(current_qty, 0) + @Qty, @Qty,
                   COALESCE(avg_cost, 0), @UnitCost, @Reason, @UserId, NOW(6)
                 FROM item_stock
-                WHERE tenant_id=@TenantId AND item_id=@ItemId
+                WHERE tenant_id=@TenantId AND item_id=@ItemId AND warehouse_id=@WarehouseId
                 """,
                 new
                 {
                     TenantId = tenantId,
                     ItemId = bom.ProductItemId,
-                    WarehouseId = defaultWarehouseId,
+                    WarehouseId = productWarehouseId,
                     Qty = dto.ProduceQty,
                     UnitCost = unitProductionCost,
                     Reason = $"BOM생산:{bom.BomName} {dto.ProduceQty}개 완성",
@@ -648,7 +688,7 @@ public class BomService : IBomService
                   avg_cost = @UnitCost,
                   last_updated_at = NOW(6)
                 """,
-                new { TenantId = tenantId, ItemId = bom.ProductItemId, WarehouseId = defaultWarehouseId,
+                new { TenantId = tenantId, ItemId = bom.ProductItemId, WarehouseId = productWarehouseId,
                       Qty = dto.ProduceQty, UnitCost = unitProductionCost },
                 transaction: tx, cancellationToken: ct)).ConfigureAwait(false);
 
@@ -669,7 +709,10 @@ public class BomService : IBomService
                     VALUES (@TenantId, @ItemId, @WarehouseId, CURDATE(), DATE_FORMAT(CURDATE(),'%Y-%m'),
                       'out', 'bom_production', @BomId, @DocNo, 0, @Qty, @Cost, @Supply)
                     """,
-                    new { TenantId = tenantId, ItemId = matGrp.Key, WarehouseId = defaultWarehouseId,
+                    new { TenantId = tenantId, ItemId = matGrp.Key,
+                          // 🔴 실제로 뺀 창고를 그대로 남긴다(작20) — 원장과 재고가 다른 창고를
+                          //    가리키면 재고 정합성 검사가 거짓 경보를 낸다(9/3 작18 에서 겪은 자리).
+                          WarehouseId = materialWarehouses.TryGetValue(matGrp.Key, out var mw) ? mw : defaultWarehouseId,
                           BomId = productionRunId, DocNo = ledgerDocNo, Qty = qtySum, Cost = avgCost, Supply = costSum },
                     transaction: tx, cancellationToken: ct)).ConfigureAwait(false);
             }
@@ -681,7 +724,7 @@ public class BomService : IBomService
                 VALUES (@TenantId, @ItemId, @WarehouseId, CURDATE(), DATE_FORMAT(CURDATE(),'%Y-%m'),
                   'in', 'bom_production', @BomId, @DocNo, @Qty, 0, @Cost, @Qty * @Cost)
                 """,
-                new { TenantId = tenantId, ItemId = bom.ProductItemId, WarehouseId = defaultWarehouseId,
+                new { TenantId = tenantId, ItemId = bom.ProductItemId, WarehouseId = productWarehouseId,
                       BomId = productionRunId, DocNo = ledgerDocNo, Qty = dto.ProduceQty, Cost = unitProductionCost },
                 transaction: tx, cancellationToken: ct)).ConfigureAwait(false);
 
@@ -748,20 +791,29 @@ public class BomService : IBomService
         var bom = await GetAsync(dto.BomId, tenantId, ct).ConfigureAwait(false)
             ?? throw new InvalidOperationException("BOM을 찾을 수 없습니다.");
 
-        var defaultWarehouseId = await _db.QueryFirstOrDefaultAsync<string>(new CommandDefinition(
-            """
-            SELECT warehouse_id FROM warehouses
-             WHERE tenant_id=@TenantId AND is_active=1
-             ORDER BY (CASE WHEN wh_code IN ('MAIN','WH-MAIN') THEN 0 ELSE 1 END), wh_code
-             LIMIT 1
-            """,
-            new { TenantId = tenantId }, cancellationToken: ct)).ConfigureAwait(false)
+        var defaultWarehouseId = await WarehouseLookup
+            .ResolveTenantDefaultWarehouseAsync(_db, tenantId, ct: ct).ConfigureAwait(false)
             ?? throw new InvalidOperationException("활성 창고가 없습니다.");
+
+        // 🔴 20260904작20 — 해체도 생산과 같은 창고결정을 쓴다.
+        //    생산만 고치면 완제품은 A창고에 쌓이는데 해체는 MAIN 을 뒤져 "재고 부족" 이 난다
+        //    (한쪽만 고쳐 비대칭을 만드는 사고 — 히트판이 여러 번 겪었다).
+        //    해체는 생산의 정확한 역방향이므로 같은 창고를 봐야 짝이 맞는다.
+        var disassembleItemIds = bom.Items.Select(x => x.MaterialItemId).ToList();
+        disassembleItemIds.Add(bom.ProductItemId);
+        var itemDefaultWarehouses = await WarehouseLookup
+            .LoadItemDefaultWarehousesAsync(_db, tenantId, disassembleItemIds, ct: ct).ConfigureAwait(false);
+
+        var productWarehouseId = WarehouseResolver.Resolve(
+            userSpecifiedWarehouseId: null,
+            itemId: bom.ProductItemId,
+            itemDefaultWarehouses: itemDefaultWarehouses,
+            tenantDefaultWarehouseId: defaultWarehouseId);
 
         // 완제품 재고 ≥ 해체 수량 검증
         var productStock = await _db.QueryFirstOrDefaultAsync<decimal>(new CommandDefinition(
             "SELECT COALESCE(current_qty, 0) FROM item_stock WHERE tenant_id=@Tid AND item_id=@Pid AND warehouse_id=@Wh",
-            new { Tid = tenantId, Pid = bom.ProductItemId, Wh = defaultWarehouseId },
+            new { Tid = tenantId, Pid = bom.ProductItemId, Wh = productWarehouseId },
             cancellationToken: ct)).ConfigureAwait(false);
         if (productStock < dto.ProduceQty)
         {
@@ -803,7 +855,7 @@ public class BomService : IBomService
                 """,
                 new
                 {
-                    TenantId = tenantId, ItemId = bom.ProductItemId, WarehouseId = defaultWarehouseId,
+                    TenantId = tenantId, ItemId = bom.ProductItemId, WarehouseId = productWarehouseId,
                     Qty = dto.ProduceQty, Reason = $"BOM해체:{bom.BomName} {dto.ProduceQty}개",
                     UserId = userId
                 }, transaction: tx, cancellationToken: ct)).ConfigureAwait(false);
@@ -815,7 +867,7 @@ public class BomService : IBomService
                 SET current_qty = current_qty - @Qty, last_updated_at = NOW(6)
                 WHERE tenant_id=@TenantId AND item_id=@ItemId AND warehouse_id=@WarehouseId AND current_qty >= @Qty
                 """,
-                new { TenantId = tenantId, ItemId = bom.ProductItemId, WarehouseId = defaultWarehouseId, Qty = dto.ProduceQty },
+                new { TenantId = tenantId, ItemId = bom.ProductItemId, WarehouseId = productWarehouseId, Qty = dto.ProduceQty },
                 transaction: tx, cancellationToken: ct)).ConfigureAwait(false);
             if (disassembleUpdated == 0)
                 throw new InvalidOperationException(
@@ -829,7 +881,7 @@ public class BomService : IBomService
                 VALUES (@TenantId, @ItemId, @WarehouseId, CURDATE(), DATE_FORMAT(CURDATE(),'%Y-%m'),
                   'out', 'bom_disassemble', @BomId, @DocNo, 0, @Qty, @Cost, @Qty * @Cost, 'BOM 해체 (Reverse IN)')
                 """,
-                new { TenantId = tenantId, ItemId = bom.ProductItemId, WarehouseId = defaultWarehouseId,
+                new { TenantId = tenantId, ItemId = bom.ProductItemId, WarehouseId = productWarehouseId,
                       BomId = disassembleRunId, DocNo = ledgerDocNo, Qty = dto.ProduceQty, Cost = unitProductionCost },
                 transaction: tx, cancellationToken: ct)).ConfigureAwait(false);
 
@@ -853,6 +905,14 @@ public class BomService : IBomService
                     "SELECT COALESCE(purchase_price, cost_price, 0) FROM items WHERE item_id=@ItemId",
                     new { ItemId = item.MaterialItemId }, transaction: tx, cancellationToken: ct)).ConfigureAwait(false);
 
+                // 🔴 자재가 돌아갈 창고 — 생산 때 뺀 곳과 같은 규칙으로 정한다(작20).
+                //    ② 상품마스터 기본창고 → ③ 테넌트 기본창고.
+                var matWarehouseId = WarehouseResolver.Resolve(
+                    userSpecifiedWarehouseId: null,
+                    itemId: item.MaterialItemId,
+                    itemDefaultWarehouses: itemDefaultWarehouses,
+                    tenantDefaultWarehouseId: defaultWarehouseId);
+
                 // 자재 재고 복귀 로그
                 await _db.ExecuteAsync(new CommandDefinition(
                     """
@@ -864,11 +924,11 @@ public class BomService : IBomService
                       COALESCE(current_qty, 0), COALESCE(current_qty, 0) + @Qty, @Qty,
                       COALESCE(avg_cost, 0), COALESCE(avg_cost, 0), @Reason, @UserId, NOW(6)
                     FROM item_stock
-                    WHERE tenant_id=@TenantId AND item_id=@ItemId
+                    WHERE tenant_id=@TenantId AND item_id=@ItemId AND warehouse_id=@WarehouseId
                     """,
                     new
                     {
-                        TenantId = tenantId, ItemId = item.MaterialItemId, WarehouseId = defaultWarehouseId,
+                        TenantId = tenantId, ItemId = item.MaterialItemId, WarehouseId = matWarehouseId,
                         Qty = requiredQty, Reason = $"BOM해체:{bom.BomName} {dto.ProduceQty}개 자재복귀",
                         UserId = userId
                     }, transaction: tx, cancellationToken: ct)).ConfigureAwait(false);
@@ -882,7 +942,7 @@ public class BomService : IBomService
                       current_qty = current_qty + @Qty,
                       last_updated_at = NOW(6)
                     """,
-                    new { TenantId = tenantId, ItemId = item.MaterialItemId, WarehouseId = defaultWarehouseId,
+                    new { TenantId = tenantId, ItemId = item.MaterialItemId, WarehouseId = matWarehouseId,
                           Qty = requiredQty, UnitCost = matUnitCost },
                     transaction: tx, cancellationToken: ct)).ConfigureAwait(false);
 
@@ -894,7 +954,7 @@ public class BomService : IBomService
                     VALUES (@TenantId, @ItemId, @WarehouseId, CURDATE(), DATE_FORMAT(CURDATE(),'%Y-%m'),
                       'in', 'bom_disassemble', @BomId, @DocNo, @Qty, 0, @Cost, @Qty * @Cost, 'BOM 해체 자재복귀 (Reverse OUT)')
                     """,
-                    new { TenantId = tenantId, ItemId = item.MaterialItemId, WarehouseId = defaultWarehouseId,
+                    new { TenantId = tenantId, ItemId = item.MaterialItemId, WarehouseId = matWarehouseId,
                           BomId = disassembleRunId, DocNo = ledgerDocNo, Qty = requiredQty, Cost = matUnitCost },
                     transaction: tx, cancellationToken: ct)).ConfigureAwait(false);
             }
