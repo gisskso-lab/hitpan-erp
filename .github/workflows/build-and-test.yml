@@ -173,6 +173,13 @@ jobs:
           GATES="$GATES|StockAlertIdempotencyGate|PurchaseReturnListParityGate"
           GATES="$GATES|PurchaseReturnLinkDisplayGate|AutoChainPolicyGate|BomLevelProducibleGate"
           GATES="$GATES|SalesStatusVocabularyGate"
+          # 20260903작18 — 재고 정합성 검사식 창고축. 봉합 완료분이라 지금 문다.
+          GATES="$GATES|StockWarehouseIntegrityGate"
+          # 🔴 20260903작19 WarehousePickingGate 는 아직 안 문다.
+          #    G-P1 이 **의도적으로 빨간불**이다(배분 로직 W4 미착수 — 사장님 배분규칙 결재 대기).
+          #    지금 넣으면 CI 가 상시 빨간불이 되어 "빨간불에 익숙해지는" 더 나쁜 상태가 된다.
+          #    ⇒ W4 완료 시 이 줄의 주석을 풀어 등록한다. 등록이 곧 완료 판정이다.
+          # GATES="$GATES|WarehousePickingGate"
 
           echo "▶ 이 잡이 무는 게이트: $GATES"
           echo "▶ 이 잡이 물지 않는 것: 기기·승인 계열(CREATE DATABASE 권한 축 — 범위 밖)"

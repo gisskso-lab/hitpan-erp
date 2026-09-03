@@ -38,12 +38,23 @@
                     <MudDatePicker Label="입고일" Date="_receiptDate" DateChanged="OnReceiptDateChangedAsync" />
                 </MudItem>
                 <MudItem xs="12" md="3">
-                    <MudTextField T="string"
-                                  Label="입고창고 Id(기본)"
-                                  Value="_headerWarehouseId"
-                                  ValueChanged="OnHeaderWarehouseChangedAsync"
-                                  Margin="Margin.Dense"
-                                  HelperText="라인별 창고가 비어 있을 때 적용" />
+                    @* 🔴 20260903작19 — 창고는 등록된 목록에서 고른다.
+                         사장님 오더: "텍스트박스로 입력하면 유령창고가 수백가지 생김"
+                         종전엔 자유입력이었고 라벨도 "입고창고 Id(기본)" 로 개발용어(Id)가
+                         고객에게 그대로 보였다(헌법 #25 쉽게 · 고객 노출 개발용어 금지).
+                         목록은 이미 불러오고 있었는데(_warehouses) 쓰지 않고 있었다. *@
+                    <MudSelect T="string"
+                               Label="입고창고 (기본)"
+                               Value="_headerWarehouseId"
+                               ValueChanged="OnHeaderWarehouseChangedAsync"
+                               Margin="Margin.Dense" Dense="true"
+                               AnchorOrigin="Origin.BottomCenter"
+                               HelperText="라인별 창고가 비어 있을 때 적용">
+                        @foreach (var w in _warehouses.Where(x => x.IsActive))
+                        {
+                            <MudSelectItem T="string" Value="@w.WarehouseId">@w.WhName (@w.WhCode)</MudSelectItem>
+                        }
+                    </MudSelect>
                 </MudItem>
                 <MudItem xs="12" md="3">
                     <MudAutocomplete T="string" Label="공급처" Value="_draft.SalesCompany"

@@ -326,9 +326,17 @@ public class SalesService : ISalesService
         };
         await deliveryRepo.AddAsync(delivery);
 
+        // 🔴 20260903작19 W4 — 사장님 오더: "매출도 매입과 동일하게 디폴트값(창고)에서 재고를 빼야지"
+        //   종전엔 라인이 비면 **곧바로 테넌트 기본창고(MAIN)** 로 갔다. 상품마스터에 A창고를
+        //   지정해 놔도 매출은 MAIN 으로 나가, A창고에 재고가 있어도 MAIN 이 음수가 됐다.
+        //   매입(PurchaseService:2036)은 이미 상품마스터 단계를 보고 있었다 — 매출만 빠져 있었다.
+        var itemDefaultWarehouses = await LoadItemDefaultWarehousesAsync(
+            _currentTenant.TenantId!, request.Items.Select(x => x.ItemId ?? string.Empty), ct);
+
         foreach (var line in request.Items)
         {
-            var warehouseId = string.IsNullOrWhiteSpace(line.WarehouseId) ? defaultWarehouseId : line.WarehouseId;
+            var warehouseId = ResolveLineWarehouse(
+                line.WarehouseId, line.ItemId?.Trim() ?? string.Empty, itemDefaultWarehouses, defaultWarehouseId);
 
             var itemId = line.ItemId?.Trim() ?? string.Empty;
             if (string.IsNullOrEmpty(itemId))
@@ -454,6 +462,32 @@ public class SalesService : ISalesService
                 if (currentBalance - line.Qty < 0m)
                 {
                     throw new InvalidOperationException("재고가 부족합니다.");
+                }
+
+                // 🔴 20260903작19 — 회사엔 있는데 **그 창고엔** 없는 경우를 알린다.
+                //
+                //   사장님 오더: 창고 간 이동은 재고이송으로 사람이 한다(자동 배분 안 함).
+                //   ⇒ 그렇다면 "이 창고엔 없다" 는 사실을 **사용자가 알아야** 재고이송을 할 수 있다.
+                //     모르면 그냥 확정돼 그 창고가 음수가 된다 — 사장님이 겪으신 -15 가 그것이다.
+                //
+                //   🔴 **막지 않는다.** 회사 합산이 통과했으면 판매는 나간다(4/26 헌법 #20).
+                //     막는 것과 알려주는 것은 다르다 — 8/27 작7 에서 이 둘을 혼동해 반려났다.
+                //     여기서는 경고만 남기고 흐름은 그대로 둔다.
+                var warehouseBalance = await _db.ExecuteScalarAsync<decimal>(new CommandDefinition(
+                    """
+                    SELECT COALESCE(SUM(qty_in) - SUM(qty_out), 0) FROM stock_ledger
+                     WHERE tenant_id = @TenantId AND item_id = @ItemId AND warehouse_id = @WarehouseId
+                    """,
+                    new { TenantId = delivery.TenantId, ItemId = line.ItemId, WarehouseId = line.WarehouseId },
+                    cancellationToken: ct));
+
+                if (warehouseBalance - line.Qty < 0m)
+                {
+                    // 헌법 #15 — 조용히 넘기지 않는다. 운영자가 뒤늦게라도 추적할 수 있어야 한다.
+                    Console.Error.WriteLine(
+                        $"[SalesService] 창고 재고 부족(경고·차단 아님): 전표={delivery.DeliveryNo} "
+                      + $"품목={line.ItemId} 창고={line.WarehouseId} 창고잔량={warehouseBalance} 출고={line.Qty} "
+                      + $"회사잔량={currentBalance} ⇒ 재고이송이 필요한 상태다.");
                 }
             }
         }
@@ -1002,6 +1036,12 @@ public class SalesService : ISalesService
                 new { DeliveryId = deliveryId, TenantId = tenantId },
                 transaction: tx, cancellationToken: ct));
 
+            // 🔴 20260903작19 W4 — 사장님 오더: 매출도 상품등록 시 지정한 창고에서 뺀다.
+            //   이 경로(수정 저장)는 신규 저장보다 더 나빴다 — 라인 창고를 **보지도 않고**
+            //   무조건 테넌트 기본창고를 박았다. 화면에서 창고를 골라도 수정 한 번에 날아갔다.
+            var itemDefaultWarehouses = await LoadItemDefaultWarehousesAsync(
+                tenantId, dto.Items.Select(x => x.ItemId ?? string.Empty), ct);
+
             foreach (var item in dto.Items)
             {
                 // 🔴 W1 — 원래 이 줄이 물고 있던 수주라인을 되붙인다.
@@ -1030,7 +1070,10 @@ public class SalesService : ISalesService
                         TenantId = tenantId,
                         OrderItemId = keptOrderItemId,
                         item.ItemId,
-                        WarehouseId = defaultWarehouseId,
+                        // 🔴 라인 지정 → 상품마스터 기본창고 → 테넌트 기본창고 (사장님 오더 1·3번)
+                        WarehouseId = ResolveLineWarehouse(
+                            item.WarehouseId, item.ItemId?.Trim() ?? string.Empty,
+                            itemDefaultWarehouses, defaultWarehouseId),
                         item.Qty,
                         item.UnitPrice,
                         SupplyAmount = item.Amount,
@@ -2815,4 +2858,69 @@ public class SalesService : ISalesService
             throw;
         }
     }
+
+    // ─────────────────────────────────────────────────────────────────────
+    // 🔴 창고 결정 — 20260903작19 W4 (사장님 오더 2026-09-03)
+    //
+    //   사장님 지시 3줄:
+    //     1. 디폴트 값으로, 상품등록시 지정한 A창고
+    //     2. 고객사가 a품목을 a->b창고로 분산하고 싶을때는 재고이송으로 수동변경
+    //     3. 매출매입이 이뤄지는 디폴트 값은 상품등록시 지정한 A창고
+    //
+    //   ⇒ 여러 창고에서 자동으로 긁어모으지 않는다. **상품마스터 창고 하나로 나간다.**
+    //     창고 간 이동은 사람이 재고이송으로 한다(2번). 자동 분산은 사장님이 원하는 바가 아니다.
+    //
+    // 🔴 왜 이 봉합이 필요했나 — 매출만 이 단계가 없었다
+    //   매입(PurchaseService:2036)은 이미 「라인 → 상품마스터 → 테넌트 기본창고」 3단이었는데,
+    //   매출은 **상품마스터 단계를 통째로 건너뛰고** 테넌트 기본창고(MAIN)로 바로 갔다.
+    //   그래서 상품마스터에 A창고를 지정해도 매출은 MAIN 으로 나갔고, A창고에 재고가 있어도
+    //   MAIN 이 음수가 됐다(실측: 테스트1창고 -15). 3번 지시가 매출에서만 안 지켜지던 것이다.
+    //
+    // ⚠️ 매입 코드를 복붙한 게 아니라 **같은 결정 순서를 매출에 세운 것**이다.
+    //    매입은 입고, 매출은 출고라 이후 처리가 다르다.
+    // ─────────────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// 품목별 기본창고를 한 번에 조회한다 (N+1 방지).
+    /// 🔴 warehouses 와 조인해 <b>실재하고 활성인 창고만</b> 돌려준다.
+    ///    창고가 지워지거나 비활성화된 뒤 items 에 남은 낡은 id 를 그대로 쓰면
+    ///    item_stock·stock_ledger 가 유령 창고에 쌓인다(10차 P0-4 가 막았던 사고).
+    ///    유효하지 않으면 이 사전에서 빠지고 테넌트 폴백이 받는다.
+    /// </summary>
+    private async Task<Dictionary<string, string>> LoadItemDefaultWarehousesAsync(
+        string tenantId, IEnumerable<string> itemIds, CancellationToken ct)
+    {
+        var ids = itemIds.Where(x => !string.IsNullOrWhiteSpace(x)).Distinct().ToList();
+        if (ids.Count == 0) return new Dictionary<string, string>();
+
+        var rows = await _db.QueryAsync<(string ItemId, string WarehouseId)>(
+            new CommandDefinition(
+                """
+                SELECT i.item_id, i.default_warehouse_id
+                  FROM items i
+                  JOIN warehouses w
+                    ON w.warehouse_id = i.default_warehouse_id
+                   AND w.tenant_id    = i.tenant_id
+                   AND w.is_active    = 1
+                 WHERE i.tenant_id = @TenantId
+                   AND i.item_id IN @Ids
+                   AND i.default_warehouse_id IS NOT NULL
+                   AND i.default_warehouse_id <> ''
+                """,
+                new { TenantId = tenantId, Ids = ids },
+                cancellationToken: ct)).ConfigureAwait(false);
+
+        return rows.ToDictionary(r => r.ItemId, r => r.WarehouseId);
+    }
+
+    /// <summary>
+    /// 창고 결정 — <b>공용 <see cref="WarehouseResolver"/> 에 위임한다.</b>
+    /// 🔴 매입과 <b>같은 규칙</b>을 써야 해서 한 곳에 두었다. 각자 갖고 있으면 또 한쪽만 고쳐진다.
+    /// </summary>
+    private static string ResolveLineWarehouse(
+        string? lineWarehouseId,
+        string itemId,
+        IReadOnlyDictionary<string, string> itemDefaults,
+        string tenantDefaultWarehouseId)
+        => WarehouseResolver.Resolve(lineWarehouseId, itemId, itemDefaults, tenantDefaultWarehouseId);
 }

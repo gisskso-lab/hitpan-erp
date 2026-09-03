@@ -3491,7 +3491,7 @@ INSERT INTO `schema_migrations` (`migration_id`, `app_version`, `success`) VALUE
 ('DB-74','clean-ddl',1),('DB-75','clean-ddl',1),('DB-76','clean-ddl',1),('DB-77','clean-ddl',1),
 ('DB-78','clean-ddl',1),('DB-79','clean-ddl',1),('DB-80','clean-ddl',1),('DB-81','clean-ddl',1),
 ('DB-82','clean-ddl',1),('DB-83','clean-ddl',1),('DB-84','clean-ddl',1),('DB-85','clean-ddl',1),
-('DB-86','clean-ddl',1),('DB-87','clean-ddl',1),('DB-88','clean-ddl',1),('DB-89','clean-ddl',1),('DB-90','clean-ddl',1),('DB-91','clean-ddl',1),('DB-92','clean-ddl',1),('DB-93','clean-ddl',1),('DB-94','clean-ddl',1),('DB-95','clean-ddl',1),('DB-96','clean-ddl',1),('DB-97','clean-ddl',1),('DB-98','clean-ddl',1),('DB-99','clean-ddl',1),('DB-100','clean-ddl',1),('DB-101','clean-ddl',1),('DB-102','clean-ddl',1),('DB-103','clean-ddl',1),('DB-104','clean-ddl',1),('DB-105','clean-ddl',1),('DB-106','clean-ddl',1),('DB-107','clean-ddl',1),('DB-108','clean-ddl',1),('DB-109','clean-ddl',1),('DB-110','clean-ddl',1),('DB-111','clean-ddl',1),('DB-112','clean-ddl',1),('DB-113','clean-ddl',1),('DB-114','clean-ddl',1),('DB-115','clean-ddl',1),('DB-116','clean-ddl',1);
+('DB-86','clean-ddl',1),('DB-87','clean-ddl',1),('DB-88','clean-ddl',1),('DB-89','clean-ddl',1),('DB-90','clean-ddl',1),('DB-91','clean-ddl',1),('DB-92','clean-ddl',1),('DB-93','clean-ddl',1),('DB-94','clean-ddl',1),('DB-95','clean-ddl',1),('DB-96','clean-ddl',1),('DB-97','clean-ddl',1),('DB-98','clean-ddl',1),('DB-99','clean-ddl',1),('DB-100','clean-ddl',1),('DB-101','clean-ddl',1),('DB-102','clean-ddl',1),('DB-103','clean-ddl',1),('DB-104','clean-ddl',1),('DB-105','clean-ddl',1),('DB-106','clean-ddl',1),('DB-107','clean-ddl',1),('DB-108','clean-ddl',1),('DB-109','clean-ddl',1),('DB-110','clean-ddl',1),('DB-111','clean-ddl',1),('DB-112','clean-ddl',1),('DB-113','clean-ddl',1),('DB-114','clean-ddl',1),('DB-115','clean-ddl',1),('DB-116','clean-ddl',1),('DB-117','clean-ddl',1);
 
 --
 -- Table structure for table `service_tickets`
@@ -3631,7 +3631,7 @@ CREATE TABLE `stock_ledger` (
   `created_by` varchar(36) DEFAULT NULL COMMENT '봉합 2026-06-22 8차 DB-P0-01-REGRESS: 실사조정·이송 추적자(StockService AdjustStock/Transfer INSERT). 헌법 #36 코드↔출하DDL 정합',
   `created_at` datetime(6) NOT NULL DEFAULT current_timestamp(6) COMMENT '봉합 2026-06-22 8차 DB-P0-01-REGRESS: 원장 기록 시각. 재고원장 조회 SELECT(StockService:146)·조정·이송 INSERT 정합',
   PRIMARY KEY (`ledger_id`),
-  UNIQUE KEY `uq_stock_ledger_source` (`tenant_id`,`source_type`,`source_id`,`item_id`,`move_type`),
+  UNIQUE KEY `uq_stock_ledger_source` (`tenant_id`,`source_type`,`source_id`,`item_id`,`move_type`,`warehouse_id`),
   UNIQUE KEY `uq_stock_ledger_source_hash` (`tenant_id`,`migrated_source_hash`),
   KEY `idx_tenant_item_date` (`tenant_id`,`item_id`,`ledger_date`),
   KEY `idx_tenant_date` (`tenant_id`,`ledger_date`)
