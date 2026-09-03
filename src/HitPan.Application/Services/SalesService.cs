@@ -2068,6 +2068,9 @@ public class SalesService : ISalesService
                    sr.partner_id AS PartnerId, COALESCE(p.partner_name,'') AS PartnerName,
                    COALESCE(sr.total_amount,0) AS TotalAmount, COALESCE(sr.vat_amount,0) AS VatAmount,
                    sr.status AS Status, sr.memo AS Memo,
+                   -- 🔴 20260903작16 — 목록에서 원전표 아래에 붙이려면 이 링크가 필요하다(결재 3-4).
+                   --   상세(:2092)는 진작 이걸 주고 있었는데 **목록만 빠져 있었다.**
+                   sr.delivery_id AS DeliveryId,
                    ec.emp_name AS CreatedByName
             FROM sales_returns sr
             LEFT JOIN partners p ON p.partner_id = sr.partner_id AND p.tenant_id = sr.tenant_id

@@ -17,6 +17,16 @@ public class SalesReturnListDto
     public decimal VatAmount { get; set; }
     public string Status { get; set; } = string.Empty;
     public string? Memo { get; set; }
+
+    /// <summary>
+    /// 🔴 원 거래명세서 FK — 20260903작16. <b>목록에서 원전표 아래에 붙이는 근거</b>.
+    /// </summary>
+    /// <remarks>
+    /// 사장님 결재 3-4(20260828): <i>목록 조회에서 원전표 바로 아래에 (−) 반품이 보여야 한다</i>
+    /// — 그 배치가 그대로 <b>경리의 대사 화면</b>이 된다.
+    /// ⚠️ NULL 가능(원 명세서 없이 직접 작성한 반품) ⇒ 화면은 그냥 제 날짜 자리에 둔다.
+    /// </remarks>
+    public string? DeliveryId { get; set; }
 }
 
 public class SalesReturnDetailDto
