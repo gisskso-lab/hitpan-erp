@@ -558,14 +558,30 @@ public class FinanceService : IFinanceService
         items.Add(new IntegrityItem { Category = "재고", CheckName = "item_stock 누락", Status = noStock == 0 ? "OK" : "FAIL", Detail = noStock > 0 ? $"{noStock}건 누락" : null });
 
         // 3. item_stock vs stock_ledger 불일치 (직접 쿼리 — collation 안전)
+        //
+        // 🔴 20260903작18 — <b>창고축 봉합.</b>
+        //   사장님 오더: "마스타에서 창고1 = 재고 몆개, 창고2 = 재고 몆개 이렇게 관리하면 되잖아"
+        //             → "그럼 수불부와, 마스터 재고가 안맞을 일이 없을거 같은데???"
+        //
+        //   사장님 말씀이 맞았다. 구조는 이미 창고별이다
+        //   (item_stock UNIQUE (tenant_id,item_id,warehouse_id) · stock_ledger.warehouse_id NOT NULL).
+        //   틀린 것은 데이터가 아니라 이 검사식이었다 — JOIN 에 warehouse_id 가 없어
+        //   <b>창고 1곳의 재고를 원장 전체합과 비교</b>했다.
+        //   예) 볼트너트 본창고 14 vs 원장전체 15 · 부창고 1 vs 원장전체 15 ⇒ 멀쩡한데 2건 불일치.
+        //   실측(test1234): 거짓 경보 3건 — 창고를 합산하면 전 품목 차이 0 이었다.
+        //
+        //   ⚠️ GROUP BY 에도 warehouse_id 를 넣어야 창고별로 갈린다. JOIN 만 고치면
+        //      같은 품목의 여러 창고 행이 한 줄로 뭉쳐 여전히 틀린다.
         var mismatch = await _db.QueryFirstOrDefaultAsync<int>(new CommandDefinition(
             """
             SELECT COUNT(*) FROM (
-              SELECT s.item_id, s.current_qty, COALESCE(SUM(l.qty_in)-SUM(l.qty_out),0) AS lq
+              SELECT s.item_id, s.warehouse_id, s.current_qty,
+                     COALESCE(SUM(l.qty_in)-SUM(l.qty_out),0) AS lq
               FROM item_stock s
               LEFT JOIN stock_ledger l ON l.item_id = s.item_id AND l.tenant_id = s.tenant_id
+                                      AND l.warehouse_id = s.warehouse_id
               WHERE s.tenant_id = @T
-              GROUP BY s.item_id, s.current_qty
+              GROUP BY s.item_id, s.warehouse_id, s.current_qty
               HAVING ABS(s.current_qty - COALESCE(SUM(l.qty_in)-SUM(l.qty_out),0)) > 0.01
             ) t
             """,
