@@ -1,4 +1,6 @@
 @using MudBlazor
+@using System.Text.Json.Serialization
+@inject HttpClient Http
 
 <MudDialog>
     <DialogContent>
@@ -12,12 +14,33 @@
         }
         else
         {
-            <MudTextField T="string" @bind-Value="_warehouse" Label="창고" Variant="Variant.Outlined" />
+            @* 🔴 20260903작19 — 창고는 「목록에서 고르기」다. 손으로 치는 칸이 아니다.
+                 사장님 오더: "재고가 분산되어 있을경우, 창고를 사용자가 지정할수 있도록 함"
+                 종전엔 MudTextField 자유입력이라 창고명을 쳐도 창고 ID 가 아니었다.
+                 ⇒ 저장돼도 그 창고를 못 찾거나, 없는 창고에 재고가 쌓였다(유령 창고).
+                 매입(PurchaseReceiptPage)은 이미 목록에서 고르고 있었다 — 매출만 빠져 있었다. *@
+            <MudSelect T="string" @bind-Value="_warehouse" Label="창고"
+                       Variant="Variant.Outlined" Dense="true" AnchorOrigin="Origin.BottomCenter">
+                @foreach (var w in _warehouses)
+                {
+                    <MudSelectItem T="string" Value="@w.WarehouseId">@w.WhName (@w.WhCode)</MudSelectItem>
+                }
+            </MudSelect>
+
+            @if (_warehouses.Count == 0)
+            {
+                @* 🔴 목록이 비면 왜 비었는지 말해준다. 빈 드롭다운만 보여주면
+                     사용자는 "고장났나" 로 읽는다 — 히트판 정신: 물어보지 않고 해결되어야 한다. *@
+                <MudText Typo="Typo.caption" Class="mt-2" Color="Color.Warning">
+                    등록된 창고가 없습니다. 재고관리 → 창고관리에서 먼저 등록해 주세요.
+                </MudText>
+            }
         }
     </DialogContent>
     <DialogActions>
         <MudButton OnClick="Cancel">취소</MudButton>
-        <MudButton Color="Color.Primary" Variant="Variant.Filled" OnClick="Ok">적용</MudButton>
+        <MudButton Color="Color.Primary" Variant="Variant.Filled" OnClick="Ok"
+                   Disabled="@(Kind == BulkEditKind.Warehouse && string.IsNullOrWhiteSpace(_warehouse))">적용</MudButton>
     </DialogActions>
 </MudDialog>
 
@@ -36,6 +59,32 @@
     private decimal _unitPrice;
     private string _assignee = string.Empty;
     private string _warehouse = string.Empty;
+    private List<WarehouseSimple> _warehouses = new();
+
+    private sealed class WarehouseSimple
+    {
+        [JsonPropertyName("warehouseId")] public string WarehouseId { get; set; } = string.Empty;
+        [JsonPropertyName("whCode")] public string WhCode { get; set; } = string.Empty;
+        [JsonPropertyName("whName")] public string WhName { get; set; } = string.Empty;
+        [JsonPropertyName("isActive")] public bool IsActive { get; set; }
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (Kind != BulkEditKind.Warehouse) return;
+
+        try
+        {
+            var all = await Http.GetFromJsonAsync<List<WarehouseSimple>>("api/warehouses") ?? new();
+            // 🔴 비활성 창고는 빼고 보여준다. 고를 수 있게 두면 그 창고에 재고가 쌓인다.
+            _warehouses = all.Where(w => w.IsActive).ToList();
+        }
+        catch (Exception)
+        {
+            // 헌법 #15 — 빈 catch 금지. 화면은 위 안내문으로 상태를 말한다.
+            _warehouses = new();
+        }
+    }
 
     private void Ok()
     {

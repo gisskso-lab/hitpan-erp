@@ -9,22 +9,40 @@ using Xunit;
 namespace HitPan.Tests.Integrity;
 
 /// <summary>
-/// 🔴 20260903작19 W1 — <b>창고 자동배분(피킹) 게이트.</b>
+/// 🔴 20260903작19 — <b>창고 결정 게이트.</b>
 ///
 /// <para>
-/// 사장님 오더: <i>"재고가 없으면 출고를 막아야 정상이지"</i> → <b>C안 확정</b><br/>
-/// C = 회사 합산으로 판매는 허용하되(4/26 헌법), <b>있는 창고에서 자동 배분</b>해 창고별 음수를 없앤다.
+/// <b>사장님 오더 (2026-09-03, 최종)</b>
+/// <list type="number">
+///   <item>디폴트 값으로, 상품등록시 지정한 A창고</item>
+///   <item>고객사가 a품목을 a→b창고로 분산하고 싶을때는 <b>재고이송으로 수동변경</b></item>
+///   <item>매출매입이 이뤄지는 디폴트 값은 상품등록시 지정한 A창고</item>
+///   <item>디폴트값으로 지정되어 있지만, 재고가 분산되어 있을경우 <b>창고를 사용자가 지정</b>할 수 있도록</item>
+/// </list>
 /// </para>
 ///
 /// <para>
-/// 🔴 <b>두 지시가 충돌한 자리다.</b> 4/26 헌법은 <i>"재고로 판매 흐름이 막히면 안 된다"</i> 이고
-/// 9/3 지시는 <i>"재고 없으면 막아야 한다"</i> 다. C만 둘을 다 지킨다.
-/// ⇒ 이 게이트는 <b>양쪽을 다 잰다.</b> 한쪽만 재면 다른 쪽을 어긴 채 초록불이 된다.
+/// 🔴 <b>「자동 배분」이 아니다.</b> 초안에서 PM 이 여러 창고에서 자동으로 긁어모으는 안(C안)을
+/// 준비했으나, 사장님 지시 2번이 그것을 부정한다 — <b>창고 간 이동은 사람이 재고이송으로 한다.</b>
+/// 시스템이 임의로 창고를 넘나들며 빼면 현장 재고와 장부가 어긋난다.
+/// ⇒ <b>한 창고에서 나간다.</b> 어느 창고냐를 정하는 것이 이 게이트의 대상이다.
 /// </para>
 ///
 /// <para>
-/// 🔴 <b>이 게이트는 봉합보다 먼저 작성됐다</b>(SoD — 봉합자가 짜지 않는다).
-/// 봉합 전에는 <b>G-P1 이 FAIL 이어야 정상</b>이다. 이 시점에 전부 초록이면 그 게이트는 가짜다.
+/// <b>창고 결정 순서</b> (매입이 이미 쓰던 것 — 매출에만 없었다)<br/>
+/// ① 사용자가 라인/화면에서 지정한 창고 → ② <b>상품마스터 기본창고</b> → ③ 테넌트 기본창고
+/// </para>
+///
+/// <para>
+/// 🔴 <b>실측으로 확인한 결함</b>: 매출은 ②를 <b>통째로 건너뛰고</b> ①이 비면 곧장 ③으로 갔다
+/// (<c>SalesService</c> 에 <c>default_warehouse</c> 참조 <b>0건</b> · 매입은 <c>PurchaseService:2036</c> 에 있었다).
+/// 그래서 상품마스터에 A창고를 지정해도 매출은 MAIN 으로 나갔고, A창고에 재고가 있어도
+/// MAIN 이 음수가 됐다(실측: 테스트1창고 <b>−15</b>).
+/// </para>
+///
+/// <para>
+/// 🔴 4/26 헌법 <i>"재고로 판매 흐름이 막히면 안 된다"</i> 은 그대로 지킨다 —
+/// 회사 합산 검사는 <b>손대지 않는다.</b> 창고를 바르게 고르는 것과 판매를 막는 것은 다른 문제다.
 /// </para>
 ///
 /// <para>⚠️ TEMPORARY 표만 쓴다 — 실제 표는 가리기만 하고 안 건드린다(헌법 #39).</para>
@@ -42,31 +60,184 @@ public sealed class WarehousePickingGateTests
         Environment.GetEnvironmentVariable("HITPAN_TEST_DB") ?? "hitpan_e2e";
 
     /// <summary>
-    /// 🔴 G-P1 — <b>재고 없는 창고로 출고해도 창고별 음수가 생기지 않는다.</b>
+    /// 🔴 G-P1 — <b>매출도 상품마스터 기본창고에서 뺀다.</b>
     ///
     /// <para>
-    /// 이 게이트가 작19 의 존재 이유다. 실측에서 이렇게 깨졌다:
-    /// 회사 합산 11개가 있어 검사를 통과했고, 출고 창고(테스트1창고)엔 0개였으니
-    /// 그 창고만 <b>−15</b> 가 됐다.
+    /// 사장님 오더: <i>"매출도 매입과 동일하게 디폴트값(창고)에서 재고를 빼야지"</i><br/>
+    /// 지시 1·3번 — <i>"디폴트 값으로, 상품등록시 지정한 A창고"</i>
     /// </para>
-    /// <para>씨앗: A창고 10개 · B창고 0개 → <b>B창고로 5개 출고</b>.</para>
     /// <para>
-    /// 봉합 전: B창고가 −5 가 된다 ⇒ FAIL<br/>
-    /// 봉합 후: A창고에서 배분되어 어느 창고도 음수가 아니다 ⇒ PASS
+    /// <b>실측한 결함</b>: 매출은 사용자가 창고를 안 고르면 상품마스터를 <b>보지도 않고</b>
+    /// 테넌트 기본창고(MAIN)로 갔다. 상품마스터에 A창고를 지정해도 소용이 없었고,
+    /// A창고에 재고가 있는데 MAIN 이 음수가 됐다(실측: 테스트1창고 −15).
+    /// </para>
+    /// <para>
+    /// 봉합 전: MAIN 이 나온다 ⇒ FAIL<br/>
+    /// 봉합 후: 상품마스터의 A창고가 나온다 ⇒ PASS
+    /// </para>
+    /// <para>
+    /// 🔴 이 게이트는 <b>실제 결정 함수를 부른다</b>(글자검사 아님).
+    /// 봉합을 지우면 <c>WarehouseResolver</c> 가 사라져 <b>컴파일이 깨진다</b> — 조용히 통과할 수 없다.
     /// </para>
     /// </summary>
     [Fact]
-    public async Task GP1_재고없는창고로_출고해도_음수가_없다()
+    public void GP1_매출도_상품마스터_기본창고에서_뺀다()
     {
-        if (!ServerAvailable()) { Skipped(nameof(GP1_재고없는창고로_출고해도_음수가_없다)); return; }
-        using var db = FreshDb();
-        SeedStockOnlyInWarehouseA(db);
-        SimulateOutbound(db, WhB, 5m);      // 재고 0인 B창고로 출고
+        const string itemDefaultWh = "WH-ITEM-DEFAULT";
+        const string tenantMainWh  = "WH-MAIN";
 
-        var negatives = NegativeStockRows(db);
+        var itemDefaults = new Dictionary<string, string> { [Item] = itemDefaultWh };
 
-        Assert.True(negatives.Count == 0,
-            "창고별 음수 재고가 생겼다: " + string.Join(", ", negatives));
+        // 사용자가 창고를 안 골랐다 ⇒ 상품마스터 기본창고가 나와야 한다
+        var resolved = WarehouseResolver.Resolve(
+            userSpecifiedWarehouseId: null,
+            itemId: Item,
+            itemDefaultWarehouses: itemDefaults,
+            tenantDefaultWarehouseId: tenantMainWh);
+
+        Assert.True(resolved == itemDefaultWh,
+            $"매출이 상품마스터 기본창고를 안 쓴다 — 기대 '{itemDefaultWh}' 인데 '{resolved}' 가 나왔다. "
+          + "사장님 오더: 디폴트 값은 상품등록시 지정한 창고다.");
+    }
+
+    /// <summary>
+    /// 🔴 G-P1b — <b>재고가 분산돼 있으면 사용자가 고른 창고가 이긴다.</b>
+    ///
+    /// <para>
+    /// 사장님 오더 4번: <i>"디폴트값으로 지정되어 있지만, 매출매입시 재고가 분산되어 있을경우,
+    /// 창고를 사용자가 지정할수 있도록 함"</i>
+    /// </para>
+    /// <para>
+    /// 🔴 <b>대조군 성격</b> — G-P1 만 있으면 "무조건 마스터 창고"로 굳혀도 통과한다.
+    /// 그러면 지시 4번이 죽는다. 둘을 같이 재야 규칙이 온전히 선다.
+    /// </para>
+    /// </summary>
+    [Fact]
+    public void GP1b_사용자가_고른_창고가_마스터보다_우선한다()
+    {
+        const string itemDefaultWh = "WH-ITEM-DEFAULT";
+        const string userPicked    = "WH-USER-PICKED";
+        const string tenantMainWh  = "WH-MAIN";
+
+        var itemDefaults = new Dictionary<string, string> { [Item] = itemDefaultWh };
+
+        var resolved = WarehouseResolver.Resolve(
+            userSpecifiedWarehouseId: userPicked,
+            itemId: Item,
+            itemDefaultWarehouses: itemDefaults,
+            tenantDefaultWarehouseId: tenantMainWh);
+
+        Assert.True(resolved == userPicked,
+            $"사용자가 고른 창고를 무시했다 — 기대 '{userPicked}' 인데 '{resolved}' 가 나왔다. "
+          + "재고가 분산됐을 때 사용자가 창고를 지정할 수 있어야 한다.");
+    }
+
+    /// <summary>
+    /// 🔴 G-P1d — <b>매출 코드가 그 결정을 실제로 부르는가</b> ("고쳤나" 가 아니라 "갔나").
+    ///
+    /// <para>
+    /// 🔴 <b>이 게이트가 없으면 G-P1 은 헛돈다.</b> 결정 함수가 아무리 옳아도
+    /// <c>SalesService</c> 가 안 부르면 화면 동작은 그대로다 —
+    /// 히트판이 <b>7번</b> 겪은 <i>"고쳤는데 안 갔다"</i> 사고다.
+    /// </para>
+    /// <para>
+    /// 매출의 창고 결정 경로는 <b>두 곳</b>이다 — 신규 저장과 <b>수정 저장</b>.
+    /// 수정 저장이 특히 나빴다: 라인 창고를 <b>보지도 않고</b> 테넌트 기본창고를 박아,
+    /// 화면에서 창고를 골라도 한 번 수정하면 날아갔다. <b>두 곳 다</b> 재야 한다.
+    /// </para>
+    /// <para>
+    /// ⚠️ 낱말 하나로 검사하지 않는다(가짜 게이트 규칙 ⑥) —
+    /// <b>품목별 기본창고 조회</b>와 <b>결정 호출</b>이 <b>둘 다</b> 있는지 본다.
+    /// </para>
+    /// </summary>
+    [Fact]
+    public void GP1d_매출이_창고결정을_실제로_부른다()
+    {
+        var src = ReadSalesServiceSource();
+
+        // ① 품목별 기본창고를 조회하는가 (이게 없으면 마스터 창고를 알 수가 없다)
+        var loadCalls = CountOccurrences(src, "LoadItemDefaultWarehousesAsync(");
+        // ② 결정 함수를 부르는가
+        var resolveCalls = CountOccurrences(src, "ResolveLineWarehouse(");
+
+        // 정의 1 + 신규저장 1 + 수정저장 1 = 최소 3 (정의 포함)
+        Assert.True(loadCalls >= 3,
+            $"매출이 품목별 기본창고를 충분히 조회하지 않는다(발견 {loadCalls}회). "
+          + "신규 저장·수정 저장 두 경로 모두에 있어야 한다.");
+
+        Assert.True(resolveCalls >= 3,
+            $"매출이 창고 결정을 충분히 부르지 않는다(발견 {resolveCalls}회). "
+          + "신규 저장·수정 저장 두 경로 모두에서 불러야 한다 — 한쪽만 고치면 수정 시 창고가 날아간다.");
+
+        // ③ 🔴 옛 결함의 흔적 — 라인 창고를 무시하고 테넌트 기본창고를 그대로 박던 자리
+        Assert.False(src.Contains("WarehouseId = defaultWarehouseId,"),
+            "수정 저장이 아직 테넌트 기본창고를 그대로 박고 있다 — 사용자가 고른 창고가 날아간다.");
+    }
+
+    /// <summary>
+    /// 🔴 G-P1e — <b>창고를 고르는 화면이 자유입력이 아니다.</b>
+    ///
+    /// <para>
+    /// 사장님 오더: <i>"텍스트박스로 입력하면 유령창고가 수백가지 생김"</i> ·
+    /// <i>"등록된 창고에서 선택될 수 있도록 콤보박스로 제어"</i>
+    /// </para>
+    /// <para>
+    /// 🔴 서버가 아무리 옳게 정해도 <b>화면이 없는 창고 id 를 만들어 보내면</b> 소용없다.
+    /// 자유입력은 오타 한 번에 유령 창고를 만든다 — 되돌릴 수 없다(원장은 INSERT ONLY, 헌법 #3).
+    /// </para>
+    /// </summary>
+    [Theory]
+    [InlineData("Components/Sales/DeliveryBulkEditDialog.razor")]
+    [InlineData("Pages/Purchase/PurchaseReceiptPage.razor")]
+    public void GP1e_창고_선택은_콤보박스여야_한다(string relativePath)
+    {
+        var src = ReadWebSource(relativePath);
+
+        // 창고를 고르는 자리에 MudSelect 가 있어야 한다
+        Assert.True(src.Contains("MudSelect"),
+            $"{relativePath} 에 창고 선택 콤보박스가 없다 — 자유입력이면 유령 창고가 생긴다.");
+
+        // 🔴 대조군: '창고' 라벨이 붙은 MudTextField 가 남아 있으면 안 된다.
+        //
+        // ⚠️ 주석은 빼고 본다. 이 게이트의 1차 판은 Singleline 정규식이라 '.' 이 줄바꿈을 넘어
+        //    **담당자 MudTextField 부터 아래 주석의 「창고」까지** 한 덩어리로 잡아 오탐이 났다.
+        //    (게이트가 내 코드를 잡은 게 아니라 내 게이트가 틀렸던 경우다 — 규칙 ⑯ 그대로)
+        //    ⇒ 한 태그 안에서만 찾고, 주석(@* … *@ · <!-- … -->)은 제거한 뒤 본다.
+        var code = System.Text.RegularExpressions.Regex.Replace(src, @"@\*.*?\*@", " ",
+                       System.Text.RegularExpressions.RegexOptions.Singleline);
+        code = System.Text.RegularExpressions.Regex.Replace(code, @"<!--.*?-->", " ",
+                   System.Text.RegularExpressions.RegexOptions.Singleline);
+
+        var hasWarehouseTextField =
+            System.Text.RegularExpressions.Regex.IsMatch(
+                code, @"<MudTextField(?:(?!/>|</MudTextField>).)*?Label\s*=\s*""[^""]*창고[^""]*""",
+                System.Text.RegularExpressions.RegexOptions.Singleline);
+
+        Assert.False(hasWarehouseTextField,
+            $"{relativePath} 에 창고를 손으로 치는 칸이 남아 있다 — 사장님 지적 그대로 유령 창고가 생긴다.");
+    }
+
+    /// <summary>
+    /// 🔴 G-P1c — <b>상품마스터에 기본창고가 없으면 흐름이 끊기지 않는다</b> (헌법 #20).
+    ///
+    /// <para>
+    /// 기본창고를 안 정해둔 고객도 판매가 나가야 한다. 테넌트 기본창고가 받는다.
+    /// 🔴 이게 없으면 봉합이 <b>애먼 것을 막는</b> 것이 된다 — 4/26 헌법 위반.
+    /// </para>
+    /// </summary>
+    [Fact]
+    public void GP1c_마스터_기본창고가_없어도_흐름이_안_끊긴다()
+    {
+        const string tenantMainWh = "WH-MAIN";
+
+        var resolved = WarehouseResolver.Resolve(
+            userSpecifiedWarehouseId: null,
+            itemId: Item,
+            itemDefaultWarehouses: new Dictionary<string, string>(),   // 마스터 지정 없음
+            tenantDefaultWarehouseId: tenantMainWh);
+
+        Assert.True(resolved == tenantMainWh,
+            $"기본창고가 없을 때 폴백이 깨졌다 — '{resolved}'. 판매 흐름은 끊기면 안 된다(헌법 #20).");
     }
 
     /// <summary>
@@ -179,6 +350,43 @@ public sealed class WarehousePickingGateTests
 
     // ────────────────────────────────────────────────────────────
     // 헬퍼
+
+    /// <summary>
+    /// 🔴 소스를 <b>레포에서 직접</b> 읽는다. 빌드 산출물이 아니라 원본을 본다.
+    /// 경로가 틀리면 <b>조용히 통과하지 않고 실패</b>시킨다 — 못 읽은 것을 통과로 세면 가짜 게이트다.
+    /// </summary>
+    private static string ReadRepoFile(params string[] relativeParts)
+    {
+        var dir = AppContext.BaseDirectory;
+        for (var up = 0; up < 10 && dir is not null; up++)
+        {
+            var candidate = System.IO.Path.Combine(new[] { dir }.Concat(relativeParts).ToArray());
+            if (System.IO.File.Exists(candidate)) return System.IO.File.ReadAllText(candidate);
+            dir = System.IO.Directory.GetParent(dir)?.FullName;
+        }
+
+        throw new Xunit.Sdk.XunitException(
+            $"[게이트 미실행] 소스를 못 찾았다: {string.Join("/", relativeParts)}\n"
+          + "  파일이 옮겨졌다면 이 게이트의 경로를 함께 고쳐라. 못 읽은 것은 통과가 아니다.");
+    }
+
+    private static string ReadSalesServiceSource()
+        => ReadRepoFile("src", "HitPan.Application", "Services", "SalesService.cs");
+
+    private static string ReadWebSource(string relativePath)
+        => ReadRepoFile(new[] { "src", "HitPan.Web" }.Concat(relativePath.Split('/')).ToArray());
+
+    private static int CountOccurrences(string haystack, string needle)
+    {
+        var n = 0;
+        var i = haystack.IndexOf(needle, StringComparison.Ordinal);
+        while (i >= 0)
+        {
+            n++;
+            i = haystack.IndexOf(needle, i + needle.Length, StringComparison.Ordinal);
+        }
+        return n;
+    }
     // ────────────────────────────────────────────────────────────
 
     /// <summary>
