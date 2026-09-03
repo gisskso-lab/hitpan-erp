@@ -234,6 +234,86 @@ public sealed class BomWarehouseResolutionGateTests
     }
 
     // ────────────────────────────────────────────────────────────────────────────
+    //  G-B5 — 창고를 안 쓰는 고객 (대다수) — 사장님 지시 2026-09-04
+    // ────────────────────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// 🔴 G-B5 — <b>창고를 안 쓰는 고객도 재고가 정상으로 돌아간다.</b>
+    ///
+    /// <para>
+    /// <b>사장님 지시 (2026-09-04)</b><br/>
+    /// <i>"창고를 별도로 선택하지 않을시는 사용하지 않고도 재고가 정상적으로 돌아가도록"</i><br/>
+    /// <i>"사실 대부분 고객사들은 창고를 사용하지 않을거야. 도소매 업체들은 대부분
+    /// 사업장에서 상품을 보관하고 출고하기 때문이야."</i><br/>
+    /// <i>"미지정 그게 상품마스터의 기본 디폴트 값이야. 창고는 물류까지 돌리는
+    /// 중형이상의 유통업장을 운영하는 사장들에게 필요한 <b>기능</b>이야."</i>
+    /// </para>
+    ///
+    /// <para>
+    /// 🔴 <b>창고는 「옵션」이 아니라 「기능」이다</b> (사장님 정정).<br/>
+    /// 옵션이라 부르면 <b>부가물로 취급해 대충 다뤄도 된다</b>고 읽힌다. 기능이므로
+    /// 중형 이상 유통업장에서 <b>제대로 서 있어야</b> 하고(G-B1·G-B2·G-B4),
+    /// <b>동시에</b> 안 쓰는 다수는 그 존재를 몰라도 재고가 정상으로 돌아야 한다(이 게이트).
+    /// 둘 중 하나만 만족하면 실패다.
+    /// </para>
+    ///
+    /// <para>
+    /// 🔴 <b>이것이 다수 경로다.</b> G-B1·G-B2·G-B4 가 재는 다창고는 <b>중형 이상 소수</b>고,
+    /// 이 시험이 재는 모양이 <b>대다수 도소매 고객</b>이다. 다수가 깨지면 소수를 고친 의미가 없다.
+    /// </para>
+    ///
+    /// <para>
+    /// <b>실제 고객 모양</b> — 창고가 "0개" 가 아니다. 회사 생성 시
+    /// <c>CompanyBootstrapProvisioner</c> 가 <c>MAIN</c> 기본창고 1행을 만든다(:280-287).
+    /// 사용자는 그 존재를 모르고, 상품등록 화면의 「기본 창고」 는 <b>「미지정」</b> 으로 둔다
+    /// (<c>ItemDetail.razor:103</c> — 안내문 <i>"비워두면 회사 기본창고로 입고됩니다"</i>).
+    /// ⇒ <b>창고 1개 + 마스터 기본창고 전부 NULL</b> 이 다수 고객의 상태다.
+    /// </para>
+    ///
+    /// <para>
+    /// 🔴 <b>G-B3 과 무엇이 다른가</b>: G-B3 은 창고가 <b>2개</b> 있는 상태에서 미지정을 잰다.
+    /// 이 시험은 창고가 <b>MAIN 하나뿐</b>이다 — 다수 고객의 실제 조건이고,
+    /// 폴백이 "고를 게 없을 때" 도 옳게 도는지는 따로 재야 한다.
+    /// </para>
+    ///
+    /// <para>
+    /// 🔴 <b>생산됐다로 끝내지 않는다</b> — 자재가 빠지고, 완제품이 들어오고,
+    /// <b>원장(<c>stock_ledger</c>)이 그 창고로 남는지</b>까지 본다.
+    /// 원장과 재고가 다른 창고를 가리키면 재고 정합성 검사가 거짓 경보를 낸다(9/3 작18 자리).
+    /// </para>
+    /// </summary>
+    [Fact]
+    public async Task GB5_창고를_안_쓰는_고객도_재고가_정상으로_돈다()
+    {
+        if (!ServerAvailable()) { Skipped(nameof(GB5_창고를_안_쓰는_고객도_재고가_정상으로_돈다)); return; }
+
+        using var db = FreshDb();
+        SeedSingleWarehouseMasters(db);          // 창고는 MAIN 하나뿐
+        SeedStock(db, Material, WhMain, 100m);   // 자재 100 (마스터 기본창고는 NULL = 「미지정」)
+
+        var svc = NewService(db);
+        var ex = await Record.ExceptionAsync(() => svc.AssembleAsync(
+            new BomAssembleDto { BomId = BomId, ProduceQty = 10m, Memo = "G-B5" },
+            Tid, Uid));
+
+        Assert.True(ex is null,
+            "창고를 안 쓰는 고객(대다수)의 BOM 생산이 끊겼다 — "
+          + $"창고 기능을 안 건드린 고객이 피해를 봤다. 실제 예외: {ex?.Message}");
+
+        // ① 자재가 빠졌나
+        var matQty = QtyOf(db, Material, WhMain);
+        // ② 완제품이 들어왔나
+        var prodQty = QtyOf(db, Product, WhMain);
+        // ③ 원장이 같은 창고로 남았나 (재고와 원장이 갈리면 정합성 검사가 거짓 경보)
+        var ledgerOther = LedgerRowsNotIn(db, WhMain);
+
+        Assert.True(matQty == 90m && prodQty == 10m && ledgerOther == 0,
+            $"창고 미사용 고객의 재고가 정상으로 안 돈다 — "
+          + $"자재 기대 90/실제 {matQty}, 완제품 기대 10/실제 {prodQty}, "
+          + $"MAIN 아닌 창고의 원장 줄 기대 0/실제 {ledgerOther}.");
+    }
+
+    // ────────────────────────────────────────────────────────────────────────────
     //  받침
     // ────────────────────────────────────────────────────────────────────────────
 
@@ -278,6 +358,48 @@ public sealed class BomWarehouseResolutionGateTests
         cmd.Parameters.AddWithValue("@i", itemId);
         cmd.Parameters.AddWithValue("@w", warehouseId);
         return Convert.ToDecimal(cmd.ExecuteScalar());
+    }
+
+    /// <summary>
+    /// MAIN 창고가 아닌 곳에 남은 원장 줄 수. 창고 미사용 고객이라면 <b>0</b> 이어야 한다.
+    /// </summary>
+    private static int LedgerRowsNotIn(MySqlConnection db, string warehouseId)
+    {
+        using var cmd = new MySqlCommand(
+            "SELECT COUNT(*) FROM stock_ledger WHERE tenant_id=@t AND warehouse_id <> @w", db);
+        cmd.Parameters.AddWithValue("@t", Tid);
+        cmd.Parameters.AddWithValue("@w", warehouseId);
+        return Convert.ToInt32(cmd.ExecuteScalar());
+    }
+
+    /// <summary>
+    /// 🔴 <b>창고를 안 쓰는 고객</b> — 회사 생성 시 자동으로 만들어지는 <c>MAIN</c> 1개뿐이고
+    /// 상품마스터의 기본창고는 <b>「미지정」(NULL)</b> 이다.
+    /// <c>CompanyBootstrapProvisioner:280-287</c> 이 실제로 만드는 모양 그대로다.
+    /// </summary>
+    private static void SeedSingleWarehouseMasters(MySqlConnection db)
+    {
+        Exec(db, $"""
+            INSERT INTO warehouses (warehouse_id, tenant_id, wh_code, wh_name, wh_type, is_active, created_at, updated_at)
+            VALUES ('{WhMain}','{Tid}','MAIN','기본창고','normal',1, NOW(6), NOW(6));
+            """);
+
+        Exec(db, $"""
+            INSERT INTO items (item_id, tenant_id, item_code, item_name, item_type, unit,
+                               purchase_price, sale_price, is_deleted, is_active, created_at, updated_at)
+            VALUES ('{Product}','{Tid}','BOMWH-P','생산완제품','finished','EA', 0, 5000, 0, 1, NOW(6), NOW(6)),
+                   ('{Material}','{Tid}','BOMWH-M','생산자재','material','EA', 100, 0, 0, 1, NOW(6), NOW(6));
+            """);
+
+        Exec(db, $"""
+            INSERT INTO bom_headers (bom_id, tenant_id, product_item_id, bom_name, bom_version, is_default, is_active)
+            VALUES ('{BomId}','{Tid}','{Product}','생산완제품 BOM', 1, 1, 1);
+            """);
+
+        Exec(db, $"""
+            INSERT INTO bom_items (bom_item_id, bom_id, tenant_id, seq_no, material_item_id, qty, unit, loss_rate)
+            VALUES (UUID(),'{BomId}','{Tid}', 1, '{Material}', 1, 'EA', 0);
+            """);
     }
 
     private static void SetItemDefaultWarehouse(MySqlConnection db, string itemId, string warehouseId) =>
