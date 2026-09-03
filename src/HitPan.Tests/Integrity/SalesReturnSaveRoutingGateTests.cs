@@ -228,13 +228,23 @@ public sealed class SalesReturnSaveRoutingGateTests
         }
 
         // ② 분기 조건에 _isReturnMode 가 있고, 그 안에서 반품 저장을 부르는가
-        var branch = Regex.Match(
-            strippedSrc,
-            @"if\s*\(\s*_isReturnMode\s*\)\s*\{(?<body>[^}]{0,400})\}",
-            RegexOptions.Singleline);
+        //
+        //   ⚠️ 20260903 — 종전엔 본문을 `[^}]{0,400}` 으로 잘라 봤다. 분기 안에 중첩 if 를
+        //     넣자(이미 저장된 반품 재저장 차단) **첫 `}` 에서 끊겨 FAIL** 했다.
+        //     🔴 봉합이 틀린 게 아니라 **자가 짧았다** — 같은 함정을 8/31 에도 겪었다(⑦).
+        //     ⇒ 분기 시작점부터 넉넉히 잡고, 그 안에 살아있는 호출이 있는지만 본다.
+        //   ⚠️ 화면 markup 의 `@if (_isReturnMode)`(배너) 와 저장부의 `if (_isReturnMode)` 가
+        //     둘 다 잡힌다. **마지막 것**(저장부)을 기준으로 본다 — 배너가 먼저 나오기 때문이다.
+        var hits = Regex.Matches(strippedSrc, @"(?<!@)if\s*\(\s*_isReturnMode\s*\)");
+        if (hits.Count == 0) return false;
 
-        return branch.Success
-               && Regex.IsMatch(branch.Groups["body"].Value, @"SaveReturnAsync\s*\(");
+        foreach (Match h in hits)
+        {
+            var window = strippedSrc.Substring(
+                h.Index, Math.Min(1200, strippedSrc.Length - h.Index));
+            if (Regex.IsMatch(window, @"SaveReturnAsync\s*\(")) return true;
+        }
+        return false;
     }
 
     private static string RepoRoot()
