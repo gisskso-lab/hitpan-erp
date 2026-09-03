@@ -73,7 +73,7 @@ jobs:
         run: dotnet publish src/HitPan.Landing/HitPan.Landing.csproj -c Release -o publish/landing --no-build
 
       - name: Upload publish artifacts
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v7
         with:
           name: ncp-publish
           path: publish/
