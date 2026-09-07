@@ -27,19 +27,22 @@ public sealed class MigrationController : ControllerBase
     private readonly MigrationJobStore _jobStore;
     private readonly IServiceScopeFactory _scopeFactory;
     private readonly IMigrationProgressService _progress;
+    private readonly MdbReconciliationService _reconciliation;
 
     public MigrationController(
         MdbMigrationService migrationService,
         ILogger<MigrationController> logger,
         MigrationJobStore jobStore,
         IServiceScopeFactory scopeFactory,
-        IMigrationProgressService progress)
+        IMigrationProgressService progress,
+        MdbReconciliationService reconciliation)
     {
         _migrationService = migrationService;
         _logger = logger;
         _jobStore = jobStore;
         _scopeFactory = scopeFactory;
         _progress = progress;
+        _reconciliation = reconciliation;
     }
 
     /// <summary>
@@ -110,6 +113,81 @@ public sealed class MigrationController : ControllerBase
             // 봉합: 미처리 예외도 사용자에게 의미있는 메시지로 (silent swallow 금지 - 헌법 #15)
             _logger.LogError(ex, "[Preview] 미처리 예외 folder={Folder}", folderPath);
             return StatusCode(500, new { message = $"미리보기 실행 중 오류가 발생했습니다: {ex.GetType().Name} - {ex.Message}" });
+        }
+    }
+
+    /// <summary>
+    /// 레거시 MDB ↔ 히트판 대사표 (20260904작21 갈래 B2).
+    /// - 레거시 쪽은 MDB 를 읽기 전용으로 직접 집계, 히트판 쪽은 현재 테넌트의 이관 결과를 집계해 나란히 놓는다.
+    /// - 이관 전에 부르면 레거시 열만 의미가 있다(히트판 열은 0 → DIFF). 이관 후 다시 부르면 판정이 선다.
+    /// - 예외 처리는 PreviewLegacyMdb 와 같은 사다리 (비번 힌트 · 엔진 미설치 · 폴더 오류).
+    /// </summary>
+    [HttpGet("legacy-mdb/reconcile")]
+    public async Task<IActionResult> ReconcileLegacyMdb(
+        [FromQuery] string folderPath,
+        [FromQuery] string? mdbPassword,
+        CancellationToken ct)
+    {
+        // tenant_id는 JWT 클레임 기반 TenantMiddleware에서 설정 (헌법 #2 — 파라미터로 받지 않는다)
+        var tenantId = HttpContext.Items["TenantId"]?.ToString();
+        if (string.IsNullOrEmpty(tenantId))
+        {
+            return Forbid();
+        }
+
+        if (string.IsNullOrWhiteSpace(folderPath))
+        {
+            return BadRequest(new { message = "MDB 폴더 경로를 입력해주세요." });
+        }
+
+        try
+        {
+            var report = await _reconciliation.BuildAsync(folderPath, mdbPassword, tenantId, ct).ConfigureAwait(false);
+            return Ok(report);
+        }
+        catch (FileNotFoundException ex)
+        {
+            _logger.LogWarning(ex, "[Reconcile] MDB 파일 미발견 folder={Folder}", folderPath);
+            return NotFound(new { message = $"MDB 파일을 찾을 수 없습니다. 폴더 경로를 확인해주세요. ({ex.Message})" });
+        }
+        catch (DirectoryNotFoundException ex)
+        {
+            _logger.LogWarning(ex, "[Reconcile] 폴더 미존재 folder={Folder}", folderPath);
+            return NotFound(new { message = $"폴더가 존재하지 않습니다: {folderPath}" });
+        }
+        catch (UnauthorizedAccessException ex)
+        {
+            _logger.LogWarning(ex, "[Reconcile] 폴더 접근 권한 없음 folder={Folder}", folderPath);
+            return StatusCode(403, new { message = $"폴더 접근 권한이 없습니다: {folderPath}" });
+        }
+        catch (InvalidOperationException ex)
+        {
+            _logger.LogWarning(ex, "[Reconcile] 데이터 무결성·형식 오류 folder={Folder}", folderPath);
+            return BadRequest(new { message = ex.Message });
+        }
+        catch (System.Data.OleDb.OleDbException ex)
+        {
+            _logger.LogWarning(ex, "[Reconcile] OLEDB 오류 folder={Folder} hresult={HResult}", folderPath, ex.HResult);
+            var hint = ex.Message.Contains("password", StringComparison.OrdinalIgnoreCase) || ex.Message.Contains("암호")
+                ? "MDB 비밀번호가 틀렸거나 비번이 걸려있습니다. 비밀번호 칸을 확인해주세요."
+                : "MDB 파일을 열 수 없습니다. ACE OLEDB Provider 설치 여부 + 파일 손상 여부를 확인해주세요.";
+            return BadRequest(new { message = $"{hint} (상세: {ex.Message})" });
+        }
+        catch (System.ComponentModel.Win32Exception ex)
+        {
+            _logger.LogError(ex, "[Reconcile] ACE Provider 미설치 가능성 folder={Folder}", folderPath);
+            return StatusCode(500, new { message = "MDB 처리 엔진(Microsoft.ACE.OLEDB.12.0)이 설치되지 않았을 가능성이 있습니다. 서버 설정을 확인해주세요." });
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            _logger.LogInformation("[Reconcile] 요청 취소 folder={Folder}", folderPath);
+            return StatusCode(499, new { message = "대사 요청이 취소되었습니다." });
+        }
+        catch (Exception ex)
+        {
+            // 미처리 예외도 사용자에게 의미있는 메시지로 (silent swallow 금지 - 헌법 #15)
+            _logger.LogError(ex, "[Reconcile] 미처리 예외 folder={Folder}", folderPath);
+            return StatusCode(500, new { message = $"대사표 작성 중 오류가 발생했습니다: {ex.GetType().Name} - {ex.Message}" });
         }
     }
 
@@ -245,7 +323,7 @@ public sealed class MigrationController : ControllerBase
                     {
                         Partners = result.Partners, Items = result.Items, BomHeaders = result.BomHeaders,
                         Employees = result.Employees, SalesOrders = result.SalesOrders, PurchaseOrders = result.PurchaseOrders,
-                        StockLedger = result.StockLedger, Collections = result.Collections, Cashbook = result.Cashbook,
+                        StockLedger = result.StockLedger, Collections = result.Collections, Payments = result.Payments, Cashbook = result.Cashbook,
                         Expenses = result.Expenses, PurchaseOrdersFromIU = result.PurchaseOrdersFromIU,
                         SalesOrdersFromIO = result.SalesOrdersFromIO, TaxInvoices = result.TaxInvoices,
                         Bills = result.Bills, CardPayments = result.CardPayments, BankTransactions = result.BankTransactions

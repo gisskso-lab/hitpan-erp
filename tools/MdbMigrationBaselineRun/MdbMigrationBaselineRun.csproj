@@ -1,0 +1,38 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    MDB 마이그 베이스라인 실측 도구 (20260904작21 · W1).
+    MdbMigrationService 를 DI 없이 직접 구성해 테스트 DB(hitpan_e2e)에 레거시 MDB 3개를 이관하고
+    표별 소요(ms)·행수를 기록한다. 봉합 전/후를 같은 MDB 로 재서 숫자로 비교하기 위한 것.
+
+    ★ 운영 DB 무접촉 — DB_NAME 이 hitpan_e2e / hitpan_trgtest 가 아니면 한 줄도 안 돌고 멈춘다(헌법 #39).
+    ★ 솔루션 빌드 제외(tools/ 일회용). MigrationIdempotencyCheck 와 같은 구조.
+  -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <IsPackable>false</IsPackable>
+    <SupportedOSPlatform>windows</SupportedOSPlatform>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\HitPan.Application\HitPan.Application.csproj" />
+    <ProjectReference Include="..\..\src\HitPan.Infrastructure\HitPan.Infrastructure.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="MySqlConnector" Version="2.5.0" />
+    <PackageReference Include="Microsoft.Extensions.Logging.Console" Version="8.0.0" />
+  </ItemGroup>
+
+  <!-- DB-*.sql 을 bin 옆 Migrations/SQL 로 — MigrationRunner 가 스키마를 최신으로 올릴 수 있게(무수정 #1). -->
+  <ItemGroup>
+    <None Include="..\..\src\HitPan.API\Migrations\SQL\DB-*.sql"
+          Link="Migrations\SQL\%(Filename)%(Extension)"
+          CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+</Project>

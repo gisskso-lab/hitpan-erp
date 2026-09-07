@@ -292,6 +292,8 @@ builder.Services.AddScoped<ExcelImportService>();
 // MdbMigrationService는 Windows 전용 (Jet OLEDB). 헌법 #19 warnings 0 준수: 호출 사이트만 pragma로 억제.
 #pragma warning disable CA1416  // Windows 전용 — Linux 컨테이너 배포 시 호출 안 됨 (MigrationController가 [SupportedOSPlatform("windows")])
 builder.Services.AddScoped<MdbMigrationService>();
+// 20260904작21 갈래 B2: 레거시 MDB ↔ ERP 대사표 서비스 (읽기 전용 OLEDB, Windows 전용 — 같은 pragma 블록).
+builder.Services.AddScoped<MdbReconciliationService>();
 // 2026-05-14: 마이그 백그라운드 잡 진행률 저장소 (524 회피용 폴링 패턴).
 // CODE-01 봉합 (2026-05-14 18:50): IDbConnection Scoped 의존성 → store도 Scoped.
 // jobId 진행 상태는 static ConcurrentDictionary로 모든 요청 공유 (MigrationJobStore 내부).
