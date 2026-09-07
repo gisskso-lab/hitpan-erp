@@ -223,7 +223,11 @@ public sealed class MdbMigrationService
         var partnerMap = new Dictionary<int, string>();
         var itemMap = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         var employeeMap = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-        var defaultWarehouseId = "wh-migration";
+        // 작21 (2026-09-04) A6 · 전결1 Q9: 이관 원장 창고 = 테넌트 기본창고(MAIN).
+        //   종전 상수 "wh-migration"('WH-MIG' 이관창고)은 폐기 — 9/4 사장님 정의 "미지정 = MAIN" 과 충돌해
+        //   이관 재고는 「이관창고」, 신규 거래는 MAIN 으로 재고가 두 창고로 갈렸다.
+        //   0단계(warehouse_migration)에서 실제 warehouse_id 를 받아 채우고, 그 뒤로는 read-only 로만 공유한다.
+        var defaultWarehouseId = string.Empty;
 
         // 정공법(축 3): factory가 있으면 잡-local 세션 튜닝(RunTableStepAsync 내부)으로 처리하므로
         // 글로벌 _db에 튜닝 적용할 필요 없음. legacy 모드일 때만 기존 봉합 경로 유지.
@@ -238,11 +242,12 @@ public sealed class MdbMigrationService
         try
         {
             // ──────────────────────────────────────
-            // 0. 마이그레이션 전용 기본 창고 (단독 tx) — 실패 시 throw (마스터 필수)
+            // 0. 이관 원장이 들어갈 기본창고(MAIN) 확보 (단독 tx) — 실패 시 throw (마스터 필수)
+            //    작21 (2026-09-04) A6: 있으면 찾고, 없을 때만 'MAIN' 을 만든다. 반환값이 이후 전 원장의 warehouse_id.
             // ──────────────────────────────────────
             await RunTableStepAsync("warehouse_migration", async tx =>
             {
-                await EnsureMigrationWarehouseAsync(tenantId, defaultWarehouseId, now, tx, ct).ConfigureAwait(false);
+                defaultWarehouseId = await EnsureMigrationWarehouseAsync(tenantId, now, tx, ct).ConfigureAwait(false);
                 return 0;
             }, ct, continueOnFail: false, mdbFile: "(infra)").ConfigureAwait(false);
 
@@ -260,11 +265,15 @@ public sealed class MdbMigrationService
                 result.Partners = await MigratePartnersAsync(oleConn, tenantId, now, partnerMap, tx, ct).ConfigureAwait(false);
                 result.Items = await MigrateItemsAsync(oleConn, tenantId, now, itemMap, tx, ct).ConfigureAwait(false);
                 result.BomHeaders = await MigrateBomAsync(oleConn, tenantId, now, itemMap, tx, ct).ConfigureAwait(false);
+                // 작21 (2026-09-04) A3 · 전결1 D1: DOCFB 에만 있는 품목(실측 7,732행·18.4억)을 여기서 전수 등록한다.
+                //   2단계 병렬 잡이 공유 itemMap 을 읽기만 하도록 **병렬 전(1단계)** 에 끝낸다 (헌법 #16).
+                //   PANDATA 파일이 없으면 건너뛴다.
+                var unlistedItems = await RegisterUnlistedDocfbItemsAsync(pandataPath, tenantId, now, itemMap, tx, ct).ConfigureAwait(false);
                 result.Employees = await MigrateEmployeesAsync(oleConn, tenantId, now, employeeMap, tx, ct).ConfigureAwait(false);
                 // WS-D-2 후속 (2026-05-18): PYOJUN.COSTNO → accounts 마스터 시드 (99건).
                 // ERP 매니저 추후 한국 표준 5자리 매핑 UPDATE 전 자동 시드.
                 await MigrateAccountsFromCOSTNOAsync(oleConn, tenantId, now, tx, ct).ConfigureAwait(false);
-                return result.Partners + result.Items + result.BomHeaders + result.Employees;
+                return result.Partners + result.Items + result.BomHeaders + result.Employees + unlistedItems;
             }, ct, continueOnFail: false, mdbFile: "PYOJUN").ConfigureAwait(false);
 
             // ──────────────────────────────────────
@@ -302,6 +311,16 @@ public sealed class MdbMigrationService
                     result.Collections = await MigrateCollectionsAsync(
                         oleConn, tenantId, now, partnerMap, tx, ct).ConfigureAwait(false);
                     return result.Collections;
+                }, ct),
+                // 작21 (2026-09-04) A5 · 전결1 Q2: DOCF5 지급 계열(S_GU B·C·D·E·F) → payments. 수금 잡과 별도 잡.
+                //   종전에는 S_GU 를 가르지 않아 전 코드가 수금으로 들어갔고 payments 는 0건이었다(P0-E).
+                //   UI 카드 키 "payments" 는 갈래 C(MdbMigration.razor)가 받는다.
+                () => RunTableStepAsync("payments", async tx =>
+                {
+                    using var oleConn = OpenOleDb(pandataPath);
+                    result.Payments = await MigratePaymentsAsync(
+                        oleConn, tenantId, now, partnerMap, tx, ct).ConfigureAwait(false);
+                    return result.Payments;
                 }, ct),
                 () => RunTableStepAsync("cashbook", async tx =>
                 {
@@ -537,24 +556,27 @@ public sealed class MdbMigrationService
 
         // 정공법(축 3): 마이그 factory가 있으면 잡 전용 conn을 발급해 일반 컨트롤러 풀과 0 공유.
         // factory가 없으면(legacy 호환 — 단위 테스트 등) 기존 _db로 fallback.
+        // [3-V] 2026-09-07 (병렬이슈 12): conn 발급을 try **안**으로 옮기고 재시도를 붙였다.
+        //   종전엔 try 밖이라 발급 타임아웃 1건이 continueOnFail 과 무관하게 Task.WhenAll 을 통째로 죽였다
+        //   (봉합 후 실측: 15잡 중 sales_returns 1건 15초 타임아웃 → 나머지 14잡이 다 끝난 뒤 이관 전체 사망, POTHER·재고 리빌드 미실행).
         System.Data.Common.DbConnection? jobConn = null;
-        IDbConnection effectiveConn;
-        if (_migrationFactory is not null)
-        {
-            jobConn = await _migrationFactory.CreateOpenAsync(ct).ConfigureAwait(false);
-            effectiveConn = jobConn;
-            _jobConnection.Value = jobConn;
-            // 잡 전용 세션 튜닝: pool 반환 시 ConnectionReset으로 자동 원복되므로 안전.
-            await ApplyJobSessionTuningAsync(effectiveConn, ct).ConfigureAwait(false);
-        }
-        else
-        {
-            effectiveConn = _db;
-        }
-
+        IDbConnection? effectiveConn = null;
         IDbTransaction? tx = null;
         try
         {
+            if (_migrationFactory is not null)
+            {
+                jobConn = await OpenJobConnectionWithRetryAsync(tableName, ct).ConfigureAwait(false);
+                effectiveConn = jobConn;
+                _jobConnection.Value = jobConn;
+                // 잡 전용 세션 튜닝: pool 반환 시 ConnectionReset으로 자동 원복되므로 안전.
+                await ApplyJobSessionTuningAsync(effectiveConn, ct).ConfigureAwait(false);
+            }
+            else
+            {
+                effectiveConn = _db;
+            }
+
             tx = effectiveConn.BeginTransaction();
             _jobTransaction.Value = tx;
             var rows = await work(tx).ConfigureAwait(false);
@@ -610,6 +632,30 @@ public sealed class MdbMigrationService
                     _logger.LogWarning(dex,
                         "[MDB마이그레이션] {Table} 잡 conn Dispose 실패 (pool에 비정상 반환 가능)", tableName);
                 }
+            }
+        }
+    }
+
+    /// <summary>
+    /// 잡 전용 conn 발급 + 재시도 ([3-V] 2026-09-07 병렬이슈 12).
+    /// 15잡이 동시에 열 때 MariaDB 가 핸드셰이크를 늦게 받아 기본 15초를 넘긴 잡이 있었다(sales_returns).
+    /// 2·4·8초 뒤 3회 더 시도하고 그래도 안 되면 마지막 예외를 던진다 — 호출자(RunTableStepAsync)가 잡 단위 failed 로 처리한다.
+    /// </summary>
+    private async Task<System.Data.Common.DbConnection> OpenJobConnectionWithRetryAsync(string tableName, CancellationToken ct)
+    {
+        var delays = new[] { 2000, 4000, 8000 };
+        for (var attempt = 0; ; attempt++)
+        {
+            try
+            {
+                return await _migrationFactory!.CreateOpenAsync(ct).ConfigureAwait(false);
+            }
+            catch (Exception ex) when (attempt < delays.Length && !ct.IsCancellationRequested)
+            {
+                _logger.LogWarning(ex,
+                    "[MDB마이그레이션] {Table} 잡 conn 발급 실패 — {Delay}ms 뒤 재시도 ({Attempt}/{Max})",
+                    tableName, delays[attempt], attempt + 1, delays.Length);
+                await Task.Delay(delays[attempt], ct).ConfigureAwait(false);
             }
         }
     }
@@ -817,27 +863,51 @@ public sealed class MdbMigrationService
     }
 
     // ────────────────────────────────────────────────────────────────
-    // 마이그레이션 전용 기본 창고 생성
+    // 이관 원장이 들어갈 기본창고(MAIN) 확보 — 작21 (2026-09-04) A6 · 전결1 Q9
     // ────────────────────────────────────────────────────────────────
 
-    /// <summary>마이그레이션 데이터가 들어갈 기본 창고가 없으면 생성한다.</summary>
-    private async Task EnsureMigrationWarehouseAsync(
-        string tenantId, string warehouseId, DateTime now, IDbTransaction tx, CancellationToken ct)
+    /// <summary>
+    /// 이관 데이터가 들어갈 <b>테넌트 기본창고</b>의 warehouse_id 를 돌려준다.
+    /// <see cref="WarehouseLookup.ResolveTenantDefaultWarehouseAsync"/>(MAIN/WH-MAIN 우선)로 찾고,
+    /// 활성 창고가 하나도 없을 때만 <c>wh_code='MAIN', wh_name='기본창고'</c> 를 만든다
+    /// (회사 생성 시드 CompanyBootstrapProvisioner 와 같은 값 — 다수 고객은 창고를 모른 채 MAIN 하나로 돈다).
+    ///
+    /// 종전 코드는 <c>'WH-MIG' 마이그레이션창고</c>를 따로 만들어 전 원장에 넣었다 — 9/4 사장님 정의 "미지정 = MAIN" 과
+    /// 충돌해 이관 재고와 신규 거래 재고가 두 창고로 갈렸다. 그 상수·생성은 폐기한다.
+    /// </summary>
+    private async Task<string> EnsureMigrationWarehouseAsync(
+        string tenantId, DateTime now, IDbTransaction tx, CancellationToken ct)
     {
-        const string checkSql = "SELECT COUNT(*) FROM warehouses WHERE warehouse_id = @Id AND tenant_id = @TenantId";
-        var exists = await Db.ExecuteScalarAsync<int>(
-            new CommandDefinition(checkSql, new { Id = warehouseId, TenantId = tenantId },
-                transaction: tx, cancellationToken: ct)).ConfigureAwait(false);
+        var existing = await WarehouseLookup.ResolveTenantDefaultWarehouseAsync(Db, tenantId, tx, ct).ConfigureAwait(false);
+        if (!string.IsNullOrEmpty(existing))
+        {
+            _logger.LogInformation("[MDB마이그레이션] 이관 원장 창고 = 테넌트 기본창고 {WarehouseId}", existing);
+            return existing;
+        }
 
-        if (exists > 0) return;
-
+        // 활성 창고가 0개 — MAIN 을 만든다. uq_tenant_code(tenant_id, wh_code) 충돌 시(비활성 MAIN 잔존) IGNORE 후 재조회.
+        var id = Guid.NewGuid().ToString();
         const string sql = """
-            INSERT INTO warehouses (warehouse_id, tenant_id, wh_code, wh_name, wh_type, location, is_active, created_at, updated_at)
-            VALUES (@Id, @TenantId, 'WH-MIG', '마이그레이션창고', 'normal', '레거시 데이터 이관용', 1, @Now, @Now)
+            INSERT IGNORE INTO warehouses (warehouse_id, tenant_id, wh_code, wh_name, wh_type, is_active, created_at, updated_at)
+            VALUES (@Id, @TenantId, 'MAIN', '기본창고', 'normal', 1, @Now, @Now)
             """;
         await Db.ExecuteAsync(new CommandDefinition(sql,
-            new { Id = warehouseId, TenantId = tenantId, Now = now },
+            new { Id = id, TenantId = tenantId, Now = now },
             transaction: tx, cancellationToken: ct)).ConfigureAwait(false);
+
+        var resolved = await Db.ExecuteScalarAsync<string?>(new CommandDefinition(
+            "SELECT warehouse_id FROM warehouses WHERE tenant_id = @TenantId AND wh_code = 'MAIN' LIMIT 1",
+            new { TenantId = tenantId }, transaction: tx, cancellationToken: ct)).ConfigureAwait(false);
+        var finalId = string.IsNullOrEmpty(resolved) ? id : resolved!;
+        if (finalId != id)
+        {
+            _logger.LogWarning("[MDB마이그레이션] 활성 기본창고가 없어 MAIN 생성을 시도했으나 기존 MAIN(비활성 추정) {WarehouseId} 을 쓴다 — 창고 화면에서 활성 여부를 확인할 것", finalId);
+        }
+        else
+        {
+            _logger.LogInformation("[MDB마이그레이션] 활성 창고가 없어 기본창고 MAIN 생성: {WarehouseId}", finalId);
+        }
+        return finalId;
     }
 
     // ────────────────────────────────────────────────────────────────
@@ -1132,7 +1202,9 @@ public sealed class MdbMigrationService
                 TaxType = taxType,
                 Barcode = GetStr(row, "S_BARCODE"),
                 ItemGroup = GetStr(row, "S_CCODE"),   // 분류코드 → item_group
-                Memo = GetStr(row, "S_DESC"),          // 설명 → memo
+                // 작21 (2026-09-04) A8 · 전결1 Q12: S_SET 1·2(셋트 완제품)·3(셋트 자재)은 memo 앞에 [셋트:N] 로 보존.
+                //   item_type 은 건드리지 않는다(ERP 어휘가 화면 필터에 흩어져 있어 값을 바꾸면 화면이 깨질 수 있다).
+                Memo = LegacyMdbMapping.ItemMemoWithSet(GetStr(row, "S_SET"), GetStr(row, "S_DESC")),   // 설명 → memo
                 Now = now,
                 // 신규 4개 컬럼 (작10, 2026-05-12 결재). safety_stock은 기존 컬럼 유지(0).
                 // S_SPEC·S_UNIT2·S_SAFE·S_REORD·S_VENDOR는 사장님 실 데이터 분포 확인 후 매핑 (W3).
@@ -1253,7 +1325,8 @@ public sealed class MdbMigrationService
                     MaterialItemId = materialItemId,
                     Qty = GetDec(detail, "RT_UNIT"),       // 소요량
                     LossRate = GetDec(detail, "RT_ABS"),    // 로스율
-                    Memo = GetStr(detail, "RT_GU")
+                    // 작21 (2026-09-04) A8 · 전결1 Q12: RT_SON(원가)/RT_KUM(금액)은 bom_items 에 자리가 없어 memo 에 덧붙여 보존.
+                    Memo = LegacyMdbMapping.BomItemMemo(GetStr(detail, "RT_GU"), GetDec(detail, "RT_SON"), GetDec(detail, "RT_KUM"))
                 }, transaction: tx, cancellationToken: ct)).ConfigureAwait(false);
             }
 
@@ -1772,6 +1845,59 @@ public sealed class MdbMigrationService
         return id;
     }
 
+    /// <summary>
+    /// 작21 (2026-09-04) A3 · 전결1 D1: DOCFB 에만 있고 DOCFS(상품마스터)에 없는 품목을 <b>1단계에서 전수 등록</b>한다.
+    ///
+    /// 왜 여기(1단계)인가 — 2단계 PANDATA 잡은 Task.WhenAll 병렬이고 itemMap 을 읽기 전용으로 공유한다(헌법 #16).
+    /// 병렬 잡 안에서 딕셔너리를 바꾸면 경쟁이 생기므로, 병렬이 시작되기 전에 등록을 끝내고 그 뒤로는 읽기만 한다.
+    ///
+    /// 종전 원장 경로는 미등록 품목 라인을 조용히 버렸다(실측 7,732행·18.4억) — 명세서 경로는 폴백 품목을 쓰는데
+    /// 원장만 버려 "버린 뒤 남은 것끼리 맞춘 100%" 가 됐다. 품목별로 MIG-AUTO-ITEM 을 등록하면 품목별 재고·판매현황이 맞는다
+    /// (BOM #78 H-1 이 이미 같은 방식 — 같은 키면 같은 item_code 해시라 BOM 이 먼저 만든 것을 그대로 재사용한다).
+    /// 품명·규격이 둘 다 빈 라인은 이름이 없어 품목별 등록이 무의미하므로 LEGACY_UNKNOWN_ITEM 폴백 하나로 잇는다.
+    /// PANDATA 파일이 없으면 건너뛴다.
+    /// </summary>
+    private async Task<int> RegisterUnlistedDocfbItemsAsync(
+        string pandataPath, string tenantId, DateTime now,
+        Dictionary<string, string> itemMap, IDbTransaction tx, CancellationToken ct)
+    {
+        if (!File.Exists(pandataPath))
+        {
+            _logger.LogInformation("[MDB마이그레이션] PANDATA.mdb 없음 — DOCFB 미등록 품목 전수 등록 skip");
+            return 0;
+        }
+
+        using var oleConn = OpenOleDb(pandataPath);
+        var dt = ReadMdbTable(oleConn, "SELECT DISTINCT IJ_PUM, IJ_KU FROM DOCFB");
+        int registered = 0, emptyKey = 0;
+        foreach (DataRow row in dt.Rows)
+        {
+            ct.ThrowIfCancellationRequested();
+            var key = BuildItemKey(GetStr(row, "IJ_PUM"), GetStr(row, "IJ_KU"));
+            if (string.IsNullOrWhiteSpace(key))
+            {
+                emptyKey++;
+                continue;
+            }
+            if (itemMap.ContainsKey(key)) continue;
+
+            var itemId = await EnsureMigAutoItemAsync(tenantId, key, now, tx, ct).ConfigureAwait(false);
+            itemMap[key] = itemId;
+            registered++;
+        }
+
+        if (emptyKey > 0 && !itemMap.ContainsKey(string.Empty))
+        {
+            var fallbackId = await EnsureLegacyFallbackItemAsync(tenantId, now, tx, ct).ConfigureAwait(false);
+            itemMap[string.Empty] = fallbackId;
+        }
+
+        _logger.LogInformation(
+            "[MDB마이그레이션] DOCFB 미등록 품목 전수 등록 — DISTINCT {Distinct}키 중 신규 MIG-AUTO-ITEM {Registered}건, 빈 품명 키 {Empty}건(폴백 품목)",
+            dt.Rows.Count, registered, emptyKey);
+        return registered;
+    }
+
     // ────────────────────────────────────────────────────────────────
     // 2-2. 매입매출 입출고 (DOCFB → stock_ledger)
     // ────────────────────────────────────────────────────────────────
@@ -1805,24 +1931,56 @@ public sealed class MdbMigrationService
         var dt = ReadMdbTable(oleConn, "SELECT * FROM DOCFB ORDER BY IJ_DT, IJ_SEQ");
         if (dt.Rows.Count == 0) return 0;
 
-        // 1단계: in-memory에서 모든 row 변환·필터 (item 매핑 없으면 skip).
+        // 1단계: in-memory에서 모든 row 변환.
+        // 작21 (2026-09-04) A2·A3 · 선행검증 P0-B/P0-C:
+        //   · IJ_IO 는 MDB 실측상 "1"(매입=입고) / "2"(매출=출고) 뿐이다. 종전 "I"/"O" 비교는 한 행도 안 맞아
+        //     qty_in = qty_out = 0 이 전 행에 들어갔다 → LegacyMdbMapping.LedgerMove (음수는 반대 칸 절대값, Q5).
+        //   · source_id 는 5키 mb-{DT}-{IO}-{SEQ}-{BUY}-{SUN} (D3). 종전 2키 mig-{DT}-{SEQ} 는 8,432행이 UNIQUE 에 IGNORE 됐다.
+        //   · 품목 미등록은 1단계 RegisterUnlistedDocfbItemsAsync 가 전수 등록했으므로 원리상 0건 — 남는 건
+        //     조용히 버리지 않고 카운트해 경고로 남긴다(D1).
         var rows = new List<StockLedgerRow>(dt.Rows.Count);
+        int unmappedItem = 0, unknownIo = 0, sourceIdTooLong = 0;
+        var unmappedSamples = new List<string>();
         foreach (DataRow row in dt.Rows)
         {
             var itemKey = BuildItemKey(GetStr(row, "IJ_PUM"), GetStr(row, "IJ_KU"));
-            if (!itemMap.TryGetValue(itemKey, out var itemId)) continue;
+            if (!itemMap.TryGetValue(itemKey, out var itemId))
+            {
+                unmappedItem++;
+                if (unmappedSamples.Count < 5) unmappedSamples.Add(itemKey);
+                continue;
+            }
 
             var buyCode = GetInt(row, "IJ_BUY");
             partnerMap.TryGetValue(buyCode, out var partnerId);
 
             var dtStr = GetStr(row, "IJ_DT");
             var ledgerDate = ParseLegacyDate(dtStr) ?? now;
-            var io = GetStr(row, "IJ_IO").ToUpperInvariant();
-            var moveType = io == "I" ? "in" : "out";
+            var io = GetStr(row, "IJ_IO").Trim();
+            if (io != "1" && io != "2")
+            {
+                unknownIo++; // 실측상 없다 — 나오면 그 행만 제외하고 경고로 남긴다
+                continue;
+            }
             var qty = GetDec(row, "IJ_QTY");
             var amt = GetDec(row, "IJ_AMT");
+            var (moveType, qtyIn, qtyOut) = LegacyMdbMapping.LedgerMove(io, qty);
+            var absQty = Math.Abs(qty);
 
-            var sourceId = $"mig-{dtStr}-{GetShort(row, "IJ_SEQ")}";
+            string sourceId;
+            try
+            {
+                sourceId = LegacyMdbMapping.LedgerSourceId(
+                    dtStr, io, GetInt(row, "IJ_SEQ"), buyCode, GetInt(row, "IJ_SUN"));
+            }
+            catch (ArgumentException ex)
+            {
+                // varchar(36) 초과 — 잘라 넣으면 멱등키가 깨지므로 그 행만 제외하고 경고로 남긴다 (실측 최대 34자).
+                sourceIdTooLong++;
+                _logger.LogWarning(ex,
+                    "[MDB마이그레이션] stock_ledger source_id 길이 초과 — 행 제외 (DT={Dt} IO={Io} BUY={Buy})", dtStr, io, buyCode);
+                continue;
+            }
             rows.Add(new StockLedgerRow
             {
                 TenantId = tenantId,
@@ -1834,15 +1992,22 @@ public sealed class MdbMigrationService
                 MoveType = moveType,
                 SourceId = sourceId,
                 DocNo = GetStr(row, "IJ_TAXNO"),
-                QtyIn = io == "I" ? qty : 0m,
-                QtyOut = io == "O" ? qty : 0m,
-                UnitCost = qty != 0 ? amt / qty : 0m,
+                QtyIn = qtyIn,
+                QtyOut = qtyOut,
+                UnitCost = absQty != 0 ? Math.Abs(amt) / absQty : 0m,   // 반품(음수)도 단가는 양수
                 SupplyAmount = amt,
                 Memo = GetStr(row, "IJ_REM"),
                 // WS-11 정공법 축 2 (2026-05-14): 자연키(source_id+item+move_type+qty) SHA256
                 MigratedSourceHash = ComputeSourceHash(
                     $"stock_ledger:{sourceId}:{itemId}:{moveType}:{qty}:{amt}"),
             });
+        }
+
+        if (unmappedItem > 0 || unknownIo > 0 || sourceIdTooLong > 0)
+        {
+            _logger.LogWarning(
+                "[MDB마이그레이션] DOCFB 원장 변환 제외 — 품목 미매핑={Unmapped}(샘플 {Samples}) IJ_IO 미지값={UnknownIo} source_id 초과={TooLong} / 후보 {Rows}행",
+                unmappedItem, string.Join(",", unmappedSamples), unknownIo, sourceIdTooLong, rows.Count);
         }
 
         if (rows.Count == 0) return 0;
@@ -2127,26 +2292,32 @@ public sealed class MdbMigrationService
         if (dt.Rows.Count == 0) return 0;
 
         // 1단계: in-memory row 변환 (partner 매핑 없으면 skip — 진범 #2와 별개).
+        // 작21 (2026-09-04) A5 · 전결1 Q2: S_GU 로 계열을 가른다 — 수금(1~5, 금액 = S_SUK)만 여기,
+        //   지급(B~F, 금액 = S_BAL)은 MigratePaymentsAsync(별도 잡), 0(채권 발생)·A(매입 발생)·그 외는 카운트만 남기고 이관하지 않는다.
+        //   종전 `S_SUK == 0 이면 S_BAL` 대체는 삭제 — 그게 전 코드를 수금에 밀어 넣던 자리다(P0-E).
         var rows = new List<CollectionRow>(dt.Rows.Count);
+        int skipPayment = 0, skipOther = 0, skipPartner = 0;
         foreach (DataRow row in dt.Rows)
         {
+            var gu = GetStr(row, "S_GU").Trim();
+            var (kind, method) = LegacyMdbMapping.PartnerLedgerKind(gu);
+            if (kind != "collection")
+            {
+                if (kind == "payment") skipPayment++; else skipOther++;
+                continue;
+            }
+
             var buyCode = GetInt(row, "S_BUY");
-            if (!partnerMap.TryGetValue(buyCode, out var partnerId)) continue;
+            if (!partnerMap.TryGetValue(buyCode, out var partnerId))
+            {
+                skipPartner++;
+                continue;
+            }
 
             var ymd = GetStr(row, "S_YMD");
             var collDate = ParseLegacyDate(ymd) ?? now;
-            var gu = GetStr(row, "S_GU");
             var sSun = GetInt(row, "S_SUN");
-            var method = gu switch
-            {
-                "현금" or "1" => "cash",
-                "카드" or "2" => "card",
-                "어음" or "3" => "note",
-                "수표" or "4" => "check",
-                _ => "bank_transfer"
-            };
             var amount = GetDec(row, "S_SUK");
-            if (amount == 0) amount = GetDec(row, "S_BAL");
 
             // 공식 멱등 키: S_BUY + S_YMD + S_SUN + S_GU (인위적 rowIdx 폐기).
             var sourceId = $"mig-{buyCode}-{ymd}-{sSun:D5}-{(string.IsNullOrEmpty(gu) ? "_" : gu)}";
@@ -2165,6 +2336,10 @@ public sealed class MdbMigrationService
             });
         }
 
+        _logger.LogInformation(
+            "[MDB마이그레이션] DOCF5 수금 후보 {Rows}행 — 제외: 지급계열(payments 잡)={SkipPay} 발생·기타(0·A·그 외)={SkipOther} 거래처 미매핑={SkipPartner}",
+            rows.Count, skipPayment, skipOther, skipPartner);
+
         if (rows.Count == 0) return 0;
 
         // 정공법 BulkCopy 경로: 잡 conn이 MySqlConnection일 때 활성화 (헌법 #26 1분 절대).
@@ -2177,11 +2352,11 @@ public sealed class MdbMigrationService
         const string sql = """
             INSERT IGNORE INTO collections
               (collection_id, tenant_id, partner_id, collection_date, amount,
-               collection_method, memo, is_active, created_at, updated_at,
+               collection_method, ref_doc_type, memo, is_active, created_at, updated_at,
                source_type, source_id, migrated_source_hash)
             VALUES
               (@CollectionId, @TenantId, @PartnerId, @CollectionDate, @Amount,
-               @Method, @Memo, 1, @Now, @Now,
+               @Method, 'sales_delivery', @Memo, 1, @Now, @Now,
                'migration', @SourceId, @MigratedSourceHash)
             """;
         int count = 0;
@@ -2245,7 +2420,7 @@ public sealed class MdbMigrationService
             var cols = new[]
             {
                 "collection_id", "tenant_id", "partner_id", "collection_date", "amount",
-                "collection_method", "memo", "is_active", "created_at", "updated_at",
+                "collection_method", "ref_doc_type", "memo", "is_active", "created_at", "updated_at",
                 "source_type", "source_id", "migrated_source_hash",
             };
             for (int i = 0; i < cols.Length; i++)
@@ -2261,11 +2436,11 @@ public sealed class MdbMigrationService
             var insertSql = $"""
                 INSERT IGNORE INTO collections
                   (collection_id, tenant_id, partner_id, collection_date, amount,
-                   collection_method, memo, is_active, created_at, updated_at,
+                   collection_method, ref_doc_type, memo, is_active, created_at, updated_at,
                    source_type, source_id, migrated_source_hash)
                 SELECT
                    collection_id, tenant_id, partner_id, collection_date, amount,
-                   collection_method, memo, is_active, created_at, updated_at,
+                   collection_method, ref_doc_type, memo, is_active, created_at, updated_at,
                    source_type, source_id, migrated_source_hash
                 FROM `{stageTable}`
                 """;
@@ -2310,6 +2485,10 @@ public sealed class MdbMigrationService
         dt.Columns.Add("collection_date", typeof(DateTime));
         dt.Columns.Add("amount", typeof(decimal));
         dt.Columns.Add("collection_method", typeof(string));
+        // [3-V] 2026-09-07 (갈래 B 적발): ERP 미수 식은 ref_doc_type='sales_delivery' 인 수금만 차감한다
+        //   (FinanceService:834 · CollectionService:396 · SalesService:1291). 수금 화면(CollectionPage.razor:495)도 항상 이 값으로 저장한다.
+        //   이관 수금은 특정 명세서에 안 묶이므로 ref_doc_id 는 NULL, ref_doc_type 만 채운다 — 안 채우면 미수가 영구 과대 계상된다(#20).
+        dt.Columns.Add("ref_doc_type", typeof(string));
         dt.Columns.Add("memo", typeof(string));
         dt.Columns.Add("is_active", typeof(byte));
         dt.Columns.Add("created_at", typeof(DateTime));
@@ -2322,7 +2501,7 @@ public sealed class MdbMigrationService
         {
             dt.Rows.Add(
                 r.CollectionId, r.TenantId, r.PartnerId, r.CollectionDate, r.Amount,
-                r.Method, (object?)r.Memo ?? DBNull.Value, (byte)1, r.Now, r.Now,
+                r.Method, "sales_delivery", (object?)r.Memo ?? DBNull.Value, (byte)1, r.Now, r.Now,
                 "migration", r.SourceId, (object?)r.MigratedSourceHash ?? DBNull.Value);
         }
         return dt;
@@ -2337,6 +2516,136 @@ public sealed class MdbMigrationService
         public DateTime CollectionDate { get; set; }
         public decimal Amount { get; set; }
         public string Method { get; set; } = "bank_transfer";
+        public string? Memo { get; set; }
+        public DateTime Now { get; set; }
+        public string SourceId { get; set; } = string.Empty;
+        public string? MigratedSourceHash { get; set; }
+    }
+
+    // ────────────────────────────────────────────────────────────────
+    // 2-3b. 지급 마이그레이션 (DOCF5 S_GU B·C·D·E·F → payments) — 작21 (2026-09-04) A5
+    // ────────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// DOCF5 지급 계열(S_GU B·C·D·E·F, 금액 = S_BAL)을 payments 에 INSERT 한다 (전결1 Q2).
+    /// payment_type 은 <c>'purchase'</c> — ERP 지급 화면(PaymentPage.razor)·미지급 KPI(FinanceService)·지급 목록(CollectionService.GetPayablesAsync)이
+    /// 전부 그 값을 읽는다. 작지서 A5 의 'payment' 는 DDL 주석을 코드로 믿은 오기였다([3-V] 갈래 B 적발, 2026-09-07).
+    /// 종전에는 지급이 0건이었다 — S_GU 를 안 갈라 전 코드가 수금으로 들어갔다(P0-E).
+    /// 실측 2,228행이라 BulkCopy 대신 1,000행 multi-row INSERT IGNORE 로 넣는다(행마다 왕복하지 않는다).
+    /// 멱등: DB-118 UNIQUE uq_payments_source(tenant_id, source_type, source_id) + INSERT IGNORE.
+    /// partner_balance·자동분개는 수금 이관과 같은 이유로 건드리지 않는다(이관분은 source_type='migration' 으로 격리).
+    /// </summary>
+    private async Task<int> MigratePaymentsAsync(
+        OleDbConnection oleConn, string tenantId, DateTime now,
+        Dictionary<int, string> partnerMap,
+        IDbTransaction tx, CancellationToken ct)
+    {
+        // Access 쪽에서 지급 계열만 걸러 읽는다 — DOCF5 61만행을 수금 잡과 동시에 통째로 두 번 올리지 않기 위해서다.
+        // 판정은 그래도 LegacyMdbMapping.PartnerLedgerKind 로 한 번 더 한다(대소문자·공백 방어).
+        var dt = ReadMdbTable(oleConn,
+            "SELECT * FROM DOCF5 WHERE S_GU IN ('B','C','D','E','F') ORDER BY S_BUY, S_YMD, S_SUN");
+        if (dt.Rows.Count == 0) return 0;
+
+        var rows = new List<PaymentRow>(dt.Rows.Count);
+        int skipKind = 0, skipPartner = 0;
+        foreach (DataRow row in dt.Rows)
+        {
+            var gu = GetStr(row, "S_GU").Trim();
+            var (kind, method) = LegacyMdbMapping.PartnerLedgerKind(gu);
+            if (kind != "payment")
+            {
+                skipKind++;
+                continue;
+            }
+
+            var buyCode = GetInt(row, "S_BUY");
+            if (!partnerMap.TryGetValue(buyCode, out var partnerId))
+            {
+                skipPartner++;
+                continue;
+            }
+
+            var ymd = GetStr(row, "S_YMD");
+            var payDate = ParseLegacyDate(ymd) ?? now;
+            var sSun = GetInt(row, "S_SUN");
+            var amount = GetDec(row, "S_BAL");
+            var memo = $"[레거시 S_GU={gu}] {GetStr(row, "S_REM")}".TrimEnd();
+            if (memo.Length > 500) memo = memo[..500];   // payments.memo varchar(500)
+
+            // 멱등 키: 수금과 같은 모양(S_BUY + S_YMD + S_SUN + S_GU). 계열이 달라 표가 다르니 충돌하지 않는다.
+            var sourceId = $"mig-{buyCode}-{ymd}-{sSun:D5}-{gu}";
+            rows.Add(new PaymentRow
+            {
+                PaymentId = Guid.NewGuid().ToString(),
+                TenantId = tenantId,
+                PartnerId = partnerId,
+                PaymentDate = payDate,
+                Amount = amount,
+                Method = method,
+                Memo = memo,
+                Now = now,
+                SourceId = sourceId,
+                MigratedSourceHash = ComputeSourceHash($"payments:{sourceId}:{amount}"),
+            });
+        }
+
+        _logger.LogInformation(
+            "[MDB마이그레이션] DOCF5 지급 후보 {Rows}행 — 제외: 계열 불일치={SkipKind} 거래처 미매핑={SkipPartner}",
+            rows.Count, skipKind, skipPartner);
+        if (rows.Count == 0) return 0;
+
+        const int ChunkSize = 1000;
+        const string ColumnList =
+            "(payment_id, tenant_id, partner_id, payment_type, amount, payment_date, payment_method, " +
+            "memo, is_active, created_at, created_by, updated_at, source_type, source_id, migrated_source_hash)";
+        int inserted = 0;
+        for (int offset = 0; offset < rows.Count; offset += ChunkSize)
+        {
+            ct.ThrowIfCancellationRequested();
+            var chunk = rows.GetRange(offset, Math.Min(ChunkSize, rows.Count - offset));
+            var sb = new StringBuilder();
+            sb.Append("INSERT IGNORE INTO payments ").Append(ColumnList).Append(" VALUES ");
+            var dyn = new DynamicParameters();
+            for (int i = 0; i < chunk.Count; i++)
+            {
+                if (i > 0) sb.Append(',');
+                sb.Append("(@ID").Append(i).Append(",@T").Append(i).Append(",@P").Append(i)
+                  .Append(",'purchase',@A").Append(i).Append(",@D").Append(i).Append(",@M").Append(i)
+                  .Append(",@ME").Append(i).Append(",1,@N").Append(i).Append(",NULL,@N").Append(i)
+                  .Append(",'migration',@SI").Append(i).Append(",@H").Append(i).Append(')');
+
+                var r = chunk[i];
+                dyn.Add("ID" + i, r.PaymentId);
+                dyn.Add("T" + i, r.TenantId);
+                dyn.Add("P" + i, r.PartnerId);
+                dyn.Add("A" + i, r.Amount);
+                dyn.Add("D" + i, r.PaymentDate);
+                dyn.Add("M" + i, r.Method);
+                dyn.Add("ME" + i, r.Memo);
+                dyn.Add("N" + i, r.Now);
+                dyn.Add("SI" + i, r.SourceId);
+                dyn.Add("H" + i, r.MigratedSourceHash);
+            }
+            inserted += await Db.ExecuteAsync(new CommandDefinition(sb.ToString(), dyn,
+                transaction: tx, cancellationToken: ct)).ConfigureAwait(false);
+        }
+
+        _logger.LogInformation(
+            "[MDB마이그레이션] payments 이관 완료: 후보 {Total}행 → INSERT {Inserted}행 (중복 IGNORE={Skipped})",
+            rows.Count, inserted, rows.Count - inserted);
+        // UI 카운트는 수금과 같이 후보 행수로 정직 표기(진범 #6 봉합과 동형).
+        return rows.Count;
+    }
+
+    /// <summary>payments 마이그 임시 row DTO (작21 A5).</summary>
+    private sealed class PaymentRow
+    {
+        public string PaymentId { get; set; } = string.Empty;
+        public string TenantId { get; set; } = string.Empty;
+        public string PartnerId { get; set; } = string.Empty;
+        public DateTime PaymentDate { get; set; }
+        public decimal Amount { get; set; }
+        public string Method { get; set; } = "cash";
         public string? Memo { get; set; }
         public DateTime Now { get; set; }
         public string SourceId { get; set; } = string.Empty;
@@ -2362,25 +2671,33 @@ public sealed class MdbMigrationService
         if (dt.Rows.Count == 0) return 0;
 
         var rows = new List<CashbookRow>(dt.Rows.Count);
+        int skipMonthly = 0, incomeCount = 0;
         foreach (DataRow row in dt.Rows)
         {
             var ymd = GetStr(row, "AC_YMD");
             var acJwasu = GetInt(row, "AC_JWASU");
-            var acJen = GetStr(row, "AC_JEN");           // 적요차
+            var acJen = GetStr(row, "AC_JEN");           // 입출 구분 (전결1 Q3: 0 월계 · 1·3 입금 · 2·4 출금)
             var txDate = ParseLegacyDate(ymd) ?? now;
             var amt = GetDec(row, "AC_AMT");
 
             var buyCode = GetInt(row, "AC_SBUY");
             partnerMap.TryGetValue(buyCode, out var partnerId);
 
-            // AC_SGU(구분)에 따라 입출금 판단 — 기존 로직 유지
-            var gu = GetStr(row, "AC_SGU");
-            var isExpense = true; // 기본적으로 경비(지출)로 처리
+            // 작21 (2026-09-04) A7 · 전결1 Q3: AC_JEN 으로 방향을 가른다.
+            //   0 = 월계(이월 집계행 · AC_JWASU=0 · YYYYMM00 · 거래처 0) → 이관 안 함 / 1·3 = 입금 / 2·4 = 출금.
+            //   종전에는 isExpense = true 고정이라 입금 2,765행+은행입금이 전부 지출로 들어갔다.
+            var direction = LegacyMdbMapping.CashbookDirection(acJen);
+            if (direction == "skip")
+            {
+                skipMonthly++;
+                continue;
+            }
+            var isExpense = direction == "expense";
+            if (!isExpense) incomeCount++;
 
-            // 적요(차/대) 합쳐서 description
-            var jekDae = GetStr(row, "AC_JEK");          // 적요대
-            var description = $"{acJen} {jekDae}".Trim();
-            if (string.IsNullOrWhiteSpace(description)) description = "레거시 경비 이관";
+            // description = 적요(AC_JEK) · memo = 처리구분(AC_cheri). 종전엔 방향코드 AC_JEN 이 적요 앞에 붙어 있었다.
+            var description = GetStr(row, "AC_JEK").Trim();
+            if (string.IsNullOrWhiteSpace(description)) description = isExpense ? "레거시 출금 이관" : "레거시 입금 이관";
 
             // 공식 멱등 키: AC_YMD + AC_JWASU + AC_JEN
             var sourceId = $"mig-{ymd}-{acJwasu:D5}-{(string.IsNullOrEmpty(acJen) ? "_" : acJen)}";
@@ -2390,6 +2707,7 @@ public sealed class MdbMigrationService
                 TenantId = tenantId,
                 TxDate = txDate,
                 TxType = isExpense ? "expense" : "income",
+                Category = isExpense ? "경비" : "입금",   // 입금 행에 '경비' 라벨이 붙지 않게
                 PartnerId = partnerId,
                 Description = description.Length > 200 ? description[..200] : description,
                 IncomeAmount = isExpense ? 0m : amt,
@@ -2400,6 +2718,10 @@ public sealed class MdbMigrationService
                 MigratedSourceHash = ComputeSourceHash($"cashbook:{sourceId}:{amt}"),
             });
         }
+
+        _logger.LogInformation(
+            "[MDB마이그레이션] DOCF6 현금출납 후보 {Rows}행 (입금 {Income} · 출금 {Expense}) — 월계(AC_JEN=0) 제외 {Skip}행",
+            rows.Count, incomeCount, rows.Count - incomeCount, skipMonthly);
 
         if (rows.Count == 0) return 0;
 
@@ -2417,7 +2739,7 @@ public sealed class MdbMigrationService
                payment_method, memo, is_active, created_at,
                source_type, source_id, migrated_source_hash)
             VALUES
-              (@CashbookId, @TenantId, @TxDate, @TxType, '경비', @PartnerId,
+              (@CashbookId, @TenantId, @TxDate, @TxType, @Category, @PartnerId,
                @Description, @IncomeAmount, @ExpenseAmount, 0,
                'cash', @Memo, 1, @Now,
                'migration', @SourceId, @MigratedSourceHash)
@@ -2565,7 +2887,7 @@ public sealed class MdbMigrationService
         foreach (var r in rows)
         {
             dt.Rows.Add(
-                r.CashbookId, r.TenantId, r.TxDate, r.TxType, "경비",
+                r.CashbookId, r.TenantId, r.TxDate, r.TxType, r.Category,
                 (object?)r.PartnerId ?? DBNull.Value, r.Description,
                 r.IncomeAmount, r.ExpenseAmount, 0m,
                 "cash", (object?)r.Memo ?? DBNull.Value, (byte)1, r.Now,
@@ -2580,6 +2902,8 @@ public sealed class MdbMigrationService
         public string TenantId { get; set; } = string.Empty;
         public DateTime TxDate { get; set; }
         public string TxType { get; set; } = "expense";
+        /// <summary>작21 (2026-09-04) A7: 출금 '경비' · 입금 '입금'. 종전엔 '경비' 리터럴 고정이었다.</summary>
+        public string Category { get; set; } = "경비";
         public string? PartnerId { get; set; }
         public string Description { get; set; } = string.Empty;
         public decimal IncomeAmount { get; set; }
@@ -3147,11 +3471,12 @@ public sealed class MdbMigrationService
             var txNo = GetStr(r, "TX_NO");
             if (string.IsNullOrWhiteSpace(txNo)) continue;
 
-            if (string.IsNullOrWhiteSpace(io))
-            {
-                var gu = GetStr(r, "TX_GU");
-                io = gu == "2" ? "B" : "S";
-            }
+            // 작21 (2026-09-04) A1 · 전결1 Q1/D2: direction = "1"→"B"(매입) · "2"→"S"(매출) — DDL 주석 'S=매출, B=매입' 과 맞춘다.
+            //   종전에는 TX_IO 원값 1/2 를 direction 에 그대로 넣었고, 빈값 폴백(gu=="2"?"B":"S")은 방향이 반대였다.
+            //   source_id 토큰(io)은 종전 형식(원값)을 유지한다 — 같은 source_id 로 UPSERT 돼야 재이관 때
+            //   기존 행의 direction 이 제자리에서 고쳐진다(C-2 PK 재사용). 빈값(실측 0행)일 때만 direction 으로 채운다.
+            var direction = LegacyMdbMapping.TaxDirection(io, GetStr(r, "TX_GU"));
+            if (string.IsNullOrWhiteSpace(io)) io = direction;
 
             var partnerCode = GetInt(r, "TX_BUY");
             var issueDateStr = GetStr(r, "TX_PDT");
@@ -3189,7 +3514,7 @@ public sealed class MdbMigrationService
                 IssuedBy = tenantId,
                 AmountTotal = supply,
                 VatTotal = vat,
-                Direction = io,
+                Direction = direction,
                 TaxNo = txNo,
                 IssueDate = issueDateStr,
                 PartnerCode = partnerCode == 0 ? (int?)null : partnerCode,
@@ -4183,7 +4508,8 @@ public sealed class MdbMigrationService
     // ════════════════════════════════════════════════════════════════
 
     /// <summary>
-    /// DOCFB(IJ_*) 거래명세서를 읽어 sales_deliveries(IJ_IO=1) + purchase_receipts(IJ_IO=2) 로 이관한다.
+    /// DOCFB(IJ_*) 거래명세서를 읽어 purchase_receipts(IJ_IO=1 매입) + sales_deliveries(IJ_IO=2 매출) 로 이관한다.
+    /// 작21 (2026-09-04) A1 · 전결1 Q1: 종전 주석·코드는 IO=1 을 매출로 봤다 — 반대였다(선행검증 P0-A).
     /// 사장님 결재 (2026-05-18):
     /// - Q4: IJ_BUY 음수값(주민번호 추정) 그대로 이관 (legacy_buy_code)
     /// - IJ_TAXNO → legacy_tax_no 보존, 추후 tax_invoices.tax_no 연결 UPDATE로 정합성 복구
@@ -4231,11 +4557,13 @@ public sealed class MdbMigrationService
             Buy = GetInt(r, "IJ_BUY"),
         }).ToList();
 
-        int skipEmptyDt = 0, skipPartner = 0, skipItem = 0;
+        int skipEmptyDt = 0, skipPartner = 0, skipItem = 0, skipUnknownIo = 0;
         var partnerMissSamples = new List<int>();
         var itemMissSamples = new List<string>();
         // 진범 #34 봉합 (2026-05-20, 자문 #5 옵션 A): fallback item lazy 초기화.
         string? fallbackItemIdLazy = null;
+        // 작21 (2026-09-04) A3: fallback partner lazy 초기화 — 종전엔 주석만 "fallback" 이고 코드는 continue 였다(실측 650행 유실).
+        string? fallbackPartnerIdLazy = null;
 
         foreach (var g in groups)
         {
@@ -4252,13 +4580,25 @@ public sealed class MdbMigrationService
             }
             var docDate = ParseLegacyDate(dtStr) ?? now;
 
+            // 작21 (2026-09-04) A1 · 전결1 Q1: IO=1 매입(purchase_receipts) · IO=2 매출(sales_deliveries).
+            //   종전 `io == 1 → sales` 는 반대였다 — sales_deliveries 1,962건이 매입이고 purchase_receipts 115,147건이 매출이었다(P0-A).
+            //   1·2 밖의 값은 실측상 없다 — 나오면 카운트하고 그 그룹만 건너뛴다(잡 전체를 죽이지 않는다).
+            if (io != 1 && io != 2)
+            {
+                skipUnknownIo++;
+                continue;
+            }
+            var isSales = LegacyMdbMapping.DeliveryKind(io) == "sales";
+
             // 헌법 #20: partner 매핑 실패해도 NULL 허용은 sales_deliveries.partner_id가 NOT NULL이라 불가
             // → fallback: 매핑 실패 시 LEGACY_UNKNOWN_PARTNER fallback (transactions 동형)
+            // 작21 (2026-09-04) A3: 주석대로 폴백 거래처로 잇는다 — 종전엔 continue 라 헤더째 버려졌다. skipPartner 는 로그용 카운트.
             if (!partnerMap.TryGetValue(buyCode, out var partnerId))
             {
                 skipPartner++;
                 if (partnerMissSamples.Count < 5) partnerMissSamples.Add(buyCode);
-                continue;
+                fallbackPartnerIdLazy ??= await EnsureLegacyFallbackPartnerAsync(tenantId, now, tx, ct).ConfigureAwait(false);
+                partnerId = fallbackPartnerIdLazy;
             }
 
             // 라인 4품목 합산
@@ -4270,9 +4610,9 @@ public sealed class MdbMigrationService
             }
 
             var sourceId = $"mig-docfb-{dtStr}-{io}-{seq}-{buyCode}";
-            // C-2 봉합: 기존 PK 재사용 (sales=io1, purchase=io2)
+            // C-2 봉합: 기존 PK 재사용 (sales=io2, purchase=io1)
             string headerId;
-            if (io == 1)
+            if (isSales)
                 headerId = existingDeliveryMap.TryGetValue(sourceId, out var ed) ? ed : Guid.NewGuid().ToString();
             else
                 headerId = existingReceiptMap.TryGetValue(sourceId, out var er) ? er : Guid.NewGuid().ToString();
@@ -4284,7 +4624,7 @@ public sealed class MdbMigrationService
             // 사장님 자문 #6 옵션 A 결재: 레거시 패턴 그대로 + legacy_buy_code 별도 보존.
             var docNo = $"DOCFB-{dtStr}-{io}-{seq:D4}-{buyCode}";
 
-            if (io == 1) // 매출 → sales_deliveries
+            if (isSales) // IO=2 매출 → sales_deliveries (작21 A1)
             {
                 salesHeaders.Add(new DeliveryHeaderRow
                 {
@@ -4298,7 +4638,9 @@ public sealed class MdbMigrationService
                     LegacyTaxNo = taxNo == 99999999 ? (int?)null : taxNo,
                     LegacyBuyCode = buyCode,
                     Status = "confirmed",
-                    TotalAmount = supplyTotal + vatTotal,
+                    // [3-V] 2026-09-07 (병렬이슈 13): ERP total_amount = 공급가 합계(SalesService:68 Items.Sum(SupplyAmount) · FinanceService 는 total_amount+vat_amount 로 합계).
+                    //   종전 supplyTotal + vatTotal 은 부가세 이중 계상 — 대사표 ①② 가 레거시 공급가(DOCFE AMT1)와 부가세만큼 어긋나 드러났다.
+                    TotalAmount = supplyTotal,
                     VatAmount = vatTotal,
                     Memo = string.IsNullOrWhiteSpace(memo) ? null : memo,
                     Now = now,
@@ -4344,7 +4686,7 @@ public sealed class MdbMigrationService
                     });
                 }
             }
-            else // io == 2 → 매입 = purchase_receipts
+            else // IO=1 매입 → purchase_receipts (작21 A1)
             {
                 purchaseHeaders.Add(new ReceiptHeaderRow
                 {
@@ -4358,7 +4700,9 @@ public sealed class MdbMigrationService
                     LegacyTaxNo = taxNo == 99999999 ? (int?)null : taxNo,
                     LegacyBuyCode = buyCode,
                     Status = "confirmed",
-                    TotalAmount = supplyTotal + vatTotal,
+                    // [3-V] 2026-09-07 (병렬이슈 13): ERP total_amount = 공급가 합계(SalesService:68 Items.Sum(SupplyAmount) · FinanceService 는 total_amount+vat_amount 로 합계).
+                    //   종전 supplyTotal + vatTotal 은 부가세 이중 계상 — 대사표 ①② 가 레거시 공급가(DOCFE AMT1)와 부가세만큼 어긋나 드러났다.
+                    TotalAmount = supplyTotal,
                     VatAmount = vatTotal,
                     Memo = string.IsNullOrWhiteSpace(memo) ? null : memo,
                     Now = now,
@@ -4406,9 +4750,9 @@ public sealed class MdbMigrationService
         }
 
         _logger.LogInformation(
-            "[MDB마이그레이션] DOCFB 그룹화 — 매출헤더={SH} 매출라인={SI} 매입헤더={PH} 매입라인={PI} | skip 빈DT={SkipDt} skip 파트너={SkipP} skip 품목={SkipI} | partner샘플={PS} item샘플={IS}",
+            "[MDB마이그레이션] DOCFB 그룹화 — 매출헤더={SH} 매출라인={SI} 매입헤더={PH} 매입라인={PI} | skip 빈DT={SkipDt} skip IO미지값={SkipIo} 폴백 파트너={SkipP} 폴백 품목={SkipI} | partner샘플={PS} item샘플={IS}",
             salesHeaders.Count, salesItems.Count, purchaseHeaders.Count, purchaseItems.Count,
-            skipEmptyDt, skipPartner, skipItem,
+            skipEmptyDt, skipUnknownIo, skipPartner, skipItem,
             string.Join(",", partnerMissSamples), string.Join(",", itemMissSamples));
 
         if (salesHeaders.Count == 0 && purchaseHeaders.Count == 0) return (0, 0);
@@ -4921,6 +5265,7 @@ public sealed class MdbMigrationService
 
         int skipEmptyDt = 0, lineSeq = 0;
         int unbalancedCount = 0;
+        int zeroBothCount = 0, negativeFlipped = 0;   // 작21 (2026-09-04) A4 카운트
 
         foreach (var g in groups)
         {
@@ -4972,11 +5317,17 @@ public sealed class MdbMigrationService
                 // 봉합: SC_CR → debit, SC_DR → credit (1줄 swap).
                 var rawCr = GetDec(r, "SC_CR");
                 var rawDr = GetDec(r, "SC_DR");
-                if (rawCr == 0 && rawDr == 0) continue; // 빈 라인 skip (헌법 chk_jl_debit_or_credit 정합)
+                if (rawCr == 0 && rawDr == 0)
+                {
+                    zeroBothCount++; // 빈 라인(실측 3행) — 카운트 후 제외 (헌법 chk_jl_debit_or_credit 정합)
+                    continue;
+                }
 
-                // 라벨 정정: 레거시 명명 → ERP 표준 매핑
-                var dr = rawCr;  // SC_CR (레거시) = 실제 차변
-                var cr = rawDr;  // SC_DR (레거시) = 실제 대변
+                // 작21 (2026-09-04) A4 · 전결1 Q4: SC_CR=차변·SC_DR=대변(swap 유지) + 음수는 반대편 양수.
+                //   종전에는 음수 3,667행을 그대로 던져 CHECK 에서 죽었다 — "30년 누적 결함"이 아니라 역분개였다(P0-D).
+                //   drCr 라벨은 전환 후 값으로 정한다(아래 `dr != 0`).
+                var (dr, cr) = LegacyMdbMapping.JournalSides(rawCr, rawDr);
+                if (rawCr < 0 || rawDr < 0) negativeFlipped++;
 
                 var jek = GetStr(r, "SC_JEK");
                 var memo = string.IsNullOrWhiteSpace(jek) ? null : (jek.Length > 200 ? jek[..200] : jek);
@@ -5010,8 +5361,8 @@ public sealed class MdbMigrationService
         }
 
         _logger.LogInformation(
-            "[MDB마이그레이션] DOCF7 그룹화 — 엔트리={E} 라인={L} 미사용 KCODE={K} | skip 빈DT={SkipDt} 차/대변 불균형={Unb} (헌법 §회계 — 마이그 예외 허용)",
-            entries.Count, lines.Count, seenKcodes.Count, skipEmptyDt, unbalancedCount);
+            "[MDB마이그레이션] DOCF7 그룹화 — 엔트리={E} 라인={L} 미사용 KCODE={K} | skip 빈DT={SkipDt} 양쪽0 제외={Zero} 음수→반대편 전환={Neg} 차/대변 불균형={Unb} (헌법 §회계 — 마이그 예외 허용)",
+            entries.Count, lines.Count, seenKcodes.Count, skipEmptyDt, zeroBothCount, negativeFlipped, unbalancedCount);
 
         if (entries.Count == 0) return (0, 0);
 
@@ -6012,8 +6363,11 @@ public sealed class MdbMigrationResult
     /// <summary>입출고(stock_ledger) 이관 건수</summary>
     public int StockLedger { get; set; }
 
-    /// <summary>수금(collections) 이관 건수</summary>
+    /// <summary>수금(collections, DOCF5 S_GU 1~5) 이관 건수</summary>
     public int Collections { get; set; }
+
+    /// <summary>지급(payments, DOCF5 S_GU B~F) 이관 건수 — 작21 (2026-09-04) A9</summary>
+    public int Payments { get; set; }
 
     /// <summary>경비(cashbook) 이관 건수</summary>
     public int Cashbook { get; set; }
@@ -6040,10 +6394,10 @@ public sealed class MdbMigrationResult
     public int BankTransactions { get; set; }
 
     // WS-F (2026-05-18): 진범 #9 봉합 — DOCFB 거래명세서.
-    /// <summary>거래명세서 매출(sales_deliveries, DOCFB IJ_IO=1) 이관 건수</summary>
+    /// <summary>거래명세서 매출(sales_deliveries, DOCFB IJ_IO=2) 이관 건수 — 작21 (2026-09-04) A1 로 방향 정정</summary>
     public int SalesDeliveries { get; set; }
 
-    /// <summary>거래명세서 매입(purchase_receipts, DOCFB IJ_IO=2) 이관 건수</summary>
+    /// <summary>거래명세서 매입(purchase_receipts, DOCFB IJ_IO=1) 이관 건수 — 작21 (2026-09-04) A1 로 방향 정정</summary>
     public int PurchaseReceipts { get; set; }
 
     // WS-F (2026-05-18): 진범 #12 봉합 — DOCF7 회계 분개.
@@ -6079,7 +6433,7 @@ public sealed class MdbMigrationResult
     /// <summary>전체 이관 건수 합계</summary>
     public int Total => Partners + Items + BomHeaders + Employees
                         + SalesOrders + PurchaseOrders + StockLedger
-                        + Collections + Cashbook + Expenses
+                        + Collections + Payments + Cashbook + Expenses
                         + PurchaseOrdersFromIU + SalesOrdersFromIO + TaxInvoices
                         + Bills + CardPayments + BankTransactions
                         + BusinessCards + ServiceTickets + DeliveryTracking + Events
@@ -6090,7 +6444,7 @@ public sealed class MdbMigrationResult
     {
         return $"업체:{Partners}, 상품:{Items}, BOM:{BomHeaders}, 사원:{Employees}, " +
                $"판매:{SalesOrders}, 매입:{PurchaseOrders}, 입출고:{StockLedger}, " +
-               $"수금:{Collections}, 경비:{Cashbook}, 전표:{Expenses}, " +
+               $"수금:{Collections}, 지급:{Payments}, 경비:{Cashbook}, 전표:{Expenses}, " +
                $"매입(IU):{PurchaseOrdersFromIU}, 매출(IO):{SalesOrdersFromIO}, " +
                $"세금계산서:{TaxInvoices}, 어음:{Bills}, 카드:{CardPayments}, 은행:{BankTransactions}, " +
                $"명함:{BusinessCards}, AS:{ServiceTickets}, 배송:{DeliveryTracking}, 일정:{Events} " +

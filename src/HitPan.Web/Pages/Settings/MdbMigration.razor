@@ -46,7 +46,7 @@
             <MudButton Variant="Variant.Outlined" Color="Color.Primary"
                        StartIcon="@Icons.Material.Filled.Search"
                        OnClick="PreviewAsync"
-                       Disabled="@(_loading || string.IsNullOrWhiteSpace(_folderPath))"
+                       Disabled="@(_loading || _reconLoading || string.IsNullOrWhiteSpace(_folderPath))"
                        Style="height:40px;margin-top:4px;width:100%">
                 미리보기
             </MudButton>
@@ -55,7 +55,7 @@
             <MudButton Variant="Variant.Filled" Color="Color.Primary"
                        StartIcon="@Icons.Material.Filled.PlayArrow"
                        OnClick="StartMigrationAsync"
-                       Disabled="@(_loading || _previewResult == null)"
+                       Disabled="@(_loading || _reconLoading || _previewResult == null)"
                        Style="height:40px;margin-top:4px;width:100%">
                 이관 시작
             </MudButton>
@@ -70,7 +70,8 @@
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
             <MudText Typo="Typo.subtitle2">
                 <MudIcon Icon="@Icons.Material.Filled.Sync" Size="Size.Small" Class="mr-1" Style="animation:spin 2s linear infinite" />
-                마이그레이션 진행 중
+                @* 작21 C4 (2026-09-04): 화면 문구 개발용어 0 — "마이그레이션" → "이관" *@
+                이관 진행 중
             </MudText>
             <MudText Typo="Typo.body2" Style="color:var(--mud-palette-text-secondary)">
                 @_completedTables / @_totalTables 완료 · 경과 @(_elapsedSeconds)초
@@ -88,7 +89,7 @@
         }
     </div>
 
-    @* 테이블별 카드 그리드 — 16개 테이블 진행 상태 *@
+    @* 테이블별 카드 그리드 — 17개 테이블 진행 상태 (작21: 지급 카드 추가로 16→17) *@
     <MudGrid Spacing="2" Class="mb-4">
         @foreach (var t in _tableCards)
         {
@@ -229,6 +230,189 @@
             </MudPaper>
         </MudItem>
     </MudGrid>
+
+    @* 작21 (2026-09-04): 결과 카드 아래 전폭 — 이관 완료 후 「레거시와 숫자 맞춰보기」 / 미리보기 후 「가져올 자료 요약」 *@
+    @if (_migrationResult != null || _reconLoading || _recon != null || _reconError != null)
+    {
+        <MudPaper Elevation="0" Class="pa-4 mt-4" Style="border:0.5px solid var(--mud-palette-lines-default);border-radius:12px">
+            @if (_migrationResult != null)
+            {
+                @* C1: 이관 완료 — 레거시 ↔ 히트판 숫자 맞춰보기 *@
+                <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+                    <MudText Typo="Typo.subtitle2">
+                        <MudIcon Icon="@Icons.Material.Filled.FactCheck" Size="Size.Small" Class="mr-1" />
+                        레거시와 숫자 맞춰보기
+                    </MudText>
+                    <MudButton Variant="Variant.Outlined" Color="Color.Primary" Size="Size.Small"
+                               StartIcon="@Icons.Material.Filled.Refresh"
+                               OnClick="ReloadReconAsync"
+                               Disabled="@(_reconLoading || _loading)">
+                        다시 맞춰보기
+                    </MudButton>
+                </div>
+
+                @if (_reconLoading)
+                {
+                    <div style="display:flex;align-items:center;gap:8px">
+                        <MudProgressCircular Color="Color.Primary" Size="Size.Small" Indeterminate="true" />
+                        <MudText Typo="Typo.body2" Style="color:var(--mud-palette-text-secondary)">레거시 숫자를 읽어 맞춰보는 중...</MudText>
+                    </div>
+                }
+                else if (_reconError != null)
+                {
+                    <MudText Typo="Typo.body2" Color="Color.Error">숫자를 맞춰보지 못했습니다: @_reconError</MudText>
+                }
+                else if (_recon is { } recon)
+                {
+                    @if (recon.DiffCount == 0)
+                    {
+                        <MudAlert Severity="Severity.Success" Dense="true" Class="mb-3">
+                            @($"{recon.OkCount}/{recon.Items.Count} 항목 일치")
+                        </MudAlert>
+                    }
+                    else
+                    {
+                        <MudAlert Severity="Severity.Warning" Dense="true" Class="mb-3">
+                            @($"차이 {recon.DiffCount}건 — 아래 목록을 확인하세요 ({recon.OkCount}/{recon.Items.Count} 항목 일치)")
+                        </MudAlert>
+                    }
+
+                    <MudTable Items="recon.Items" Dense="true" Hover="true" Elevation="0"
+                              Style="border:0.5px solid var(--mud-palette-lines-default);border-radius:8px">
+                        <HeaderContent>
+                            <MudTh>구분</MudTh>
+                            <MudTh>항목</MudTh>
+                            <MudTh Style="text-align:right">레거시</MudTh>
+                            <MudTh Style="text-align:right">히트판</MudTh>
+                            <MudTh Style="text-align:right">차이</MudTh>
+                            <MudTh Style="text-align:center;width:72px">판정</MudTh>
+                        </HeaderContent>
+                        <RowTemplate>
+                            <MudTd DataLabel="구분">@context.Category</MudTd>
+                            <MudTd DataLabel="항목">
+                                <div>@context.Label</div>
+                                @if (!string.IsNullOrEmpty(context.Detail))
+                                {
+                                    <div style="font-size:11px;color:var(--mud-palette-text-secondary)">@context.Detail</div>
+                                }
+                            </MudTd>
+                            <MudTd DataLabel="레거시" Style="text-align:right">@FormatNumber(context.Legacy)</MudTd>
+                            <MudTd DataLabel="히트판" Style="text-align:right">@FormatNumber(context.Erp)</MudTd>
+                            <MudTd DataLabel="차이" Style="@($"text-align:right;{(context.Status == "DIFF" ? "color:var(--mud-palette-error);font-weight:500" : "")}")">
+                                @FormatNumber(context.Diff)
+                            </MudTd>
+                            <MudTd DataLabel="판정" Style="text-align:center;white-space:nowrap">
+                                <MudIcon Icon="@GetReconIcon(context.Status)" Color="@GetReconColor(context.Status)" Size="Size.Small" Style="vertical-align:middle" />
+                                <span style="font-size:12px;margin-left:2px">@GetReconLabel(context.Status)</span>
+                            </MudTd>
+                        </RowTemplate>
+                    </MudTable>
+
+                    @* 거래처·품목 차이 상위 20 — 접이식 *@
+                    <MudExpansionPanels Dense="true" Elevation="0" Outlined="true" Class="mt-3">
+                        <MudExpansionPanel Text="@($"거래처별 차이 (상위 {recon.PartnerDiffs.Count}건)")">
+                            @if (recon.PartnerDiffs.Count == 0)
+                            {
+                                <MudText Typo="Typo.body2" Style="color:var(--mud-palette-text-secondary)">거래처별 차이가 없습니다.</MudText>
+                            }
+                            else
+                            {
+                                <MudTable Items="recon.PartnerDiffs" Dense="true" Hover="true" Elevation="0">
+                                    <HeaderContent>
+                                        <MudTh>거래처</MudTh>
+                                        <MudTh Style="text-align:right">레거시</MudTh>
+                                        <MudTh Style="text-align:right">히트판</MudTh>
+                                        <MudTh Style="text-align:right">차이</MudTh>
+                                    </HeaderContent>
+                                    <RowTemplate>
+                                        <MudTd DataLabel="거래처">@context.Name</MudTd>
+                                        <MudTd DataLabel="레거시" Style="text-align:right">@FormatNumber(context.Legacy)</MudTd>
+                                        <MudTd DataLabel="히트판" Style="text-align:right">@FormatNumber(context.Erp)</MudTd>
+                                        <MudTd DataLabel="차이" Style="text-align:right;color:var(--mud-palette-error);font-weight:500">@FormatNumber(context.Diff)</MudTd>
+                                    </RowTemplate>
+                                </MudTable>
+                            }
+                        </MudExpansionPanel>
+                        <MudExpansionPanel Text="@($"품목별 차이 (상위 {recon.ItemDiffs.Count}건)")">
+                            @if (recon.ItemDiffs.Count == 0)
+                            {
+                                <MudText Typo="Typo.body2" Style="color:var(--mud-palette-text-secondary)">품목별 차이가 없습니다.</MudText>
+                            }
+                            else
+                            {
+                                <MudTable Items="recon.ItemDiffs" Dense="true" Hover="true" Elevation="0">
+                                    <HeaderContent>
+                                        <MudTh>품목 (품명|규격)</MudTh>
+                                        <MudTh Style="text-align:right">레거시</MudTh>
+                                        <MudTh Style="text-align:right">히트판</MudTh>
+                                        <MudTh Style="text-align:right">차이</MudTh>
+                                    </HeaderContent>
+                                    <RowTemplate>
+                                        <MudTd DataLabel="품목">@context.Name</MudTd>
+                                        <MudTd DataLabel="레거시" Style="text-align:right">@FormatNumber(context.Legacy)</MudTd>
+                                        <MudTd DataLabel="히트판" Style="text-align:right">@FormatNumber(context.Erp)</MudTd>
+                                        <MudTd DataLabel="차이" Style="text-align:right;color:var(--mud-palette-error);font-weight:500">@FormatNumber(context.Diff)</MudTd>
+                                    </RowTemplate>
+                                </MudTable>
+                            }
+                        </MudExpansionPanel>
+                    </MudExpansionPanels>
+
+                    <MudText Typo="Typo.caption" Class="mt-2" Style="color:var(--mud-palette-text-secondary)">
+                        @($"기준 시각 {recon.GeneratedAt:yyyy-MM-dd HH:mm:ss}")
+                    </MudText>
+                }
+            }
+            else
+            {
+                @* C2: 미리보기 성공 — 가져올 자료 요약 (레거시 열만 · 히트판 열은 "이관 전") *@
+                <MudText Typo="Typo.subtitle2" Class="mb-3">
+                    <MudIcon Icon="@Icons.Material.Filled.ListAlt" Size="Size.Small" Class="mr-1" />
+                    가져올 자료 요약
+                </MudText>
+
+                @if (_reconLoading)
+                {
+                    <div style="display:flex;align-items:center;gap:8px">
+                        <MudProgressCircular Color="Color.Primary" Size="Size.Small" Indeterminate="true" />
+                        <MudText Typo="Typo.body2" Style="color:var(--mud-palette-text-secondary)">가져올 자료를 세는 중...</MudText>
+                    </div>
+                }
+                else if (_reconError != null)
+                {
+                    <MudText Typo="Typo.body2" Color="Color.Error">가져올 자료 요약을 불러오지 못했습니다: @_reconError</MudText>
+                }
+                else if (_recon is { } recon)
+                {
+                    <MudTable Items="recon.Items" Dense="true" Hover="true" Elevation="0"
+                              Style="border:0.5px solid var(--mud-palette-lines-default);border-radius:8px">
+                        <HeaderContent>
+                            <MudTh>구분</MudTh>
+                            <MudTh>항목</MudTh>
+                            <MudTh Style="text-align:right">레거시</MudTh>
+                            <MudTh Style="text-align:right">히트판</MudTh>
+                        </HeaderContent>
+                        <RowTemplate>
+                            <MudTd DataLabel="구분">@context.Category</MudTd>
+                            <MudTd DataLabel="항목">
+                                <div>@context.Label</div>
+                                @if (!string.IsNullOrEmpty(context.Detail))
+                                {
+                                    <div style="font-size:11px;color:var(--mud-palette-text-secondary)">@context.Detail</div>
+                                }
+                            </MudTd>
+                            <MudTd DataLabel="레거시" Style="text-align:right">@FormatNumber(context.Legacy)</MudTd>
+                            <MudTd DataLabel="히트판" Style="text-align:right;color:var(--mud-palette-text-secondary)">이관 전</MudTd>
+                        </RowTemplate>
+                    </MudTable>
+
+                    <MudText Typo="Typo.caption" Class="mt-2" Style="color:var(--mud-palette-text-secondary)">
+                        이관을 시작하면 히트판 열에 실제 가져온 숫자가 채워지고, 레거시와 맞는지 자동으로 확인합니다.
+                    </MudText>
+                }
+            }
+        </MudPaper>
+    }
 }
 
 @code {
@@ -247,7 +431,8 @@
     // 진범 #20 봉합 (2026-05-18): WS-D-1·D-2 신규 잡 2개 추가 (sales_deliveries·journal_entries).
     // 진범 #23 봉합 (2026-05-18): 견적·반품 잡 2개 추가 (quotations·sales_returns).
     // 진범 #24 봉합 (2026-05-20, 사장님 자문 #3 옵션 A): DOCF1/F2 transactions 잡 제거 (17→16).
-    private int _totalTables = 16;
+    // 작21 (2026-09-04): 지급(payments) 잡 신설 (16→17).
+    private int _totalTables = 17;
     private int _elapsedSeconds;
     private double _progressPercent => _totalTables == 0 ? 0 : (double)_completedTables / _totalTables * 100.0;
 
@@ -264,6 +449,8 @@
         // 진범 #24 봉합 (2026-05-20, 자문 #3 옵션 A): transactions 카드 제거.
         new("stock_ledger", "재고원장(입출고)"),
         new("collections", "수금"),
+        // 작21 (2026-09-04): 지급(payments) 잡 신설 — DOCF5 S_GU B~F 를 수금이 아닌 지급으로 분리 (갈래 A5).
+        new("payments", "지급"),
         new("cashbook", "경비(현금출납)"),
         new("expenses", "전표(비용처리)"),
         new("purchase_orders", "매입발주"),
@@ -321,6 +508,9 @@
             _statusMessage = "기존 데이터를 분석하는 중...";
             _migrationResult = null;
             _migrationRows.Clear();
+            // 작21 (2026-09-04): 이전 맞춰보기·요약 잔재 제거.
+            _recon = null;
+            _reconError = null;
             StateHasChanged();
 
             // 핫픽스 2026-05-13: 비번 파라미터 추가
@@ -338,6 +528,11 @@
             else
             {
                 Snackbar.Add($"총 {_previewResult.Values.Sum():N0}건 발견", Severity.Success);
+
+                // 작21 C2 (2026-09-04): 미리보기 성공 직후 「가져올 자료 요약」(레거시 열만).
+                // 요약이 실패해도 미리보기 자체는 성공으로 둔다 — LoadReconAsync 는 예외를 밖으로 내지 않는다.
+                _statusMessage = "가져올 자료를 세는 중...";
+                await LoadReconAsync(afterMigration: false);
             }
         }
         catch (Exception ex)
@@ -363,7 +558,7 @@
         try
         {
             _loading = true;
-            _statusMessage = "마이그레이션 시작 중...";
+            _statusMessage = "이관 시작 중..."; // 작21 C4: 화면 문구 개발용어 0
             // P0 #6 (2026-05-14): 카드 초기화 (이전 잡 상태 잔재 제거).
             _tableCards = BuildInitialCards();
             _completedTables = 0;
@@ -484,6 +679,7 @@
                     Partners = finalStatus.Result.Partners, Items = finalStatus.Result.Items, BomHeaders = finalStatus.Result.BomHeaders,
                     Employees = finalStatus.Result.Employees, PurchaseOrders = finalStatus.Result.PurchaseOrders, SalesOrders = finalStatus.Result.SalesOrders,
                     StockLedger = finalStatus.Result.StockLedger, Collections = finalStatus.Result.Collections, Cashbook = finalStatus.Result.Cashbook,
+                    Payments = finalStatus.Result.Payments, // 작21: 지급 잡 신설 (갈래 A9)
                     Expenses = finalStatus.Result.Expenses, PurchaseOrdersFromIU = finalStatus.Result.PurchaseOrdersFromIU,
                     SalesOrdersFromIO = finalStatus.Result.SalesOrdersFromIO, TaxInvoices = finalStatus.Result.TaxInvoices,
                     Bills = finalStatus.Result.Bills, CardPayments = finalStatus.Result.CardPayments, BankTransactions = finalStatus.Result.BankTransactions
@@ -501,6 +697,7 @@
                     new("세금계산서(TX)", _migrationResult.TaxInvoices),
                     new("재고원장(입출고)", _migrationResult.StockLedger),
                     new("수금", _migrationResult.Collections),
+                    new("지급", _migrationResult.Payments), // 작21
                     new("경비(현금출납)", _migrationResult.Cashbook),
                     new("전표(비용처리)", _migrationResult.Expenses),
                     new("어음(EU+EQ)", _migrationResult.Bills),
@@ -537,7 +734,115 @@
             _loading = false;
             _statusMessage = "";
         }
+
+        // 작21 C1 (2026-09-04): 이관 완료(_migrationResult 세팅) 직후 레거시와 숫자 맞춰보기.
+        // 진행 헤더(_loading)를 내린 뒤에 부른다 — 이관 자체는 이미 끝났고, 맞춰보기 카드가 자체 진행 표시를 가진다.
+        // 위 try 안의 return 경로(시작 실패·타임아웃·결과 없음)는 여기 오지 않는다.
+        if (_migrationResult is not null)
+        {
+            await LoadReconAsync(afterMigration: true);
+        }
     }
+
+    /* ── 작21 (2026-09-04): 레거시와 숫자 맞춰보기 — 갈래 B API `GET legacy-mdb/reconcile` ── */
+    private ReconReport? _recon;
+    private string? _reconError;
+    private bool _reconLoading;
+
+    private string BuildReconUrl()
+    {
+        var url = $"api/migration/legacy-mdb/reconcile?folderPath={Uri.EscapeDataString(_folderPath)}";
+        if (!string.IsNullOrEmpty(_mdbPassword))
+        {
+            url += $"&mdbPassword={Uri.EscapeDataString(_mdbPassword)}";
+        }
+        return url;
+    }
+
+    /// <summary>
+    /// 작21 C1·C2: 레거시 MDB 숫자와 히트판 숫자를 받아 _recon 에 담는다.
+    /// 실패는 Snackbar 경고 + 카드 사유 한 줄(_reconError)로 알리고 예외를 밖으로 내지 않는다 —
+    /// 미리보기·이관 자체의 성공 상태를 지키기 위해(헌법 #15 빈 catch 금지 · 사유는 반드시 남긴다).
+    /// </summary>
+    private async Task LoadReconAsync(bool afterMigration)
+    {
+        var what = afterMigration ? "레거시와 숫자 맞춰보기" : "가져올 자료 요약";
+        _recon = null;
+        _reconError = null;
+        _reconLoading = true;
+        StateHasChanged();
+        try
+        {
+            // 진범 #22 와 같은 자리: 장시간 이관 뒤 JWT 만료 → 401 이면 RefreshAsync 후 1회 재시도.
+            var resp = await Http.GetAsync(BuildReconUrl());
+            if (resp.StatusCode == System.Net.HttpStatusCode.Unauthorized)
+            {
+                var refreshed = await Auth.RefreshAsync();
+                if (refreshed)
+                {
+                    resp = await Http.GetAsync(BuildReconUrl());
+                }
+            }
+            if (!resp.IsSuccessStatusCode)
+            {
+                var err = await resp.Content.ReadAsStringAsync();
+                if (err.Length > 200) { err = err.Substring(0, 200) + "…"; }
+                _reconError = $"({(int)resp.StatusCode}) {err}";
+                Snackbar.Add($"{what} 실패 ({(int)resp.StatusCode})", Severity.Warning);
+                return;
+            }
+            var report = await resp.Content.ReadFromJsonAsync<ReconReport>();
+            if (report is null)
+            {
+                _reconError = "응답이 비어 있습니다.";
+                Snackbar.Add($"{what} 실패: 응답이 비어 있습니다.", Severity.Warning);
+                return;
+            }
+            _recon = report;
+        }
+        catch (Exception ex)
+        {
+            _reconError = ex.Message;
+            Snackbar.Add($"{what} 실패: {ex.Message}", Severity.Warning);
+        }
+        finally
+        {
+            _reconLoading = false;
+            StateHasChanged();
+        }
+    }
+
+    /// <summary>「다시 맞춰보기」 버튼 — 같은 API 재호출.</summary>
+    private Task ReloadReconAsync() => LoadReconAsync(afterMigration: true);
+
+    /// <summary>숫자 표시 — 정수면 N0, 소수가 있으면 N2, 없으면 "—".</summary>
+    private static string FormatNumber(decimal? value)
+    {
+        if (value is null) { return "—"; }
+        var v = value.Value;
+        return v == decimal.Truncate(v) ? v.ToString("N0") : v.ToString("N2");
+    }
+
+    private static string GetReconIcon(string status) => status switch
+    {
+        "OK"   => Icons.Material.Filled.CheckCircle,
+        "DIFF" => Icons.Material.Filled.Cancel,
+        _      => Icons.Material.Filled.Remove,
+    };
+
+    private static Color GetReconColor(string status) => status switch
+    {
+        "OK"   => Color.Success,
+        "DIFF" => Color.Error,
+        _      => Color.Default,
+    };
+
+    private static string GetReconLabel(string status) => status switch
+    {
+        "OK"   => "일치",
+        "DIFF" => "차이",
+        _      => "—",
+    };
 
     /// <summary>경과 초 1초 tick — Sticky 헤더 표시용 + 헌법 #26 v3 Y/n 다이얼로그.</summary>
     private async Task TickElapsedAsync(System.Threading.CancellationToken ct)
@@ -582,7 +887,8 @@
             ["Color"] = Color.Primary,
         };
         var options = new DialogOptions { CloseButton = false, BackdropClick = false };
-        var dialog = await DialogService.ShowAsync<MudMessageBox>($"마이그 진행 확인 ({minutes}분 경과)", parameters, options);
+        // 작21 C4 (2026-09-04): 화면 문구 개발용어 0 — "마이그" → "이관"
+        var dialog = await DialogService.ShowAsync<MudMessageBox>($"이관 진행 확인 ({minutes}분 경과)", parameters, options);
         var result = await dialog.Result;
         if (result is not null && !result.Canceled && result.Data is bool ok && !ok)
         {
@@ -681,6 +987,7 @@
         public int SalesOrders { get; set; }
         public int StockLedger { get; set; }
         public int Collections { get; set; }
+        public int Payments { get; set; } // 작21 (2026-09-04): 지급 잡 신설 — 갈래 A9 MdbMigrationResult.Payments 대응
         public int Cashbook { get; set; }
         public int Expenses { get; set; }
         public int PurchaseOrdersFromIU { get; set; }
@@ -694,5 +1001,36 @@
 
     /* ── 테이블 행 표시용 레코드 ── */
     private record MigrationRow(string Name, int Count);
+
+    /* ── 작21 (2026-09-04): 레거시와 숫자 맞춰보기 DTO — 갈래 B MdbReconciliationReport 와 1:1 (camelCase JSON ↔ PascalCase) ── */
+    private class ReconReport
+    {
+        public DateTime GeneratedAt { get; set; }
+        public List<ReconItem> Items { get; set; } = new();
+        public List<ReconDiffRow> PartnerDiffs { get; set; } = new();
+        public List<ReconDiffRow> ItemDiffs { get; set; } = new();
+        public int OkCount { get; set; }
+        public int DiffCount { get; set; }
+    }
+
+    private class ReconItem
+    {
+        public string Key { get; set; } = "";
+        public string Category { get; set; } = "";
+        public string Label { get; set; } = "";
+        public decimal? Legacy { get; set; }
+        public decimal? Erp { get; set; }
+        public decimal? Diff { get; set; }
+        public string Status { get; set; } = "NA"; // OK | DIFF | NA
+        public string? Detail { get; set; }
+    }
+
+    private class ReconDiffRow
+    {
+        public string Name { get; set; } = "";
+        public decimal Legacy { get; set; }
+        public decimal Erp { get; set; }
+        public decimal Diff { get; set; }
+    }
 
 }

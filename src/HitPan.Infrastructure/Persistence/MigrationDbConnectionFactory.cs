@@ -36,7 +36,9 @@ public sealed class MigrationDbConnectionFactory : IMigrationDbConnectionFactory
         var pwd = TenantConfigReader.GetRequired("DB_PASSWORD");
 
         // ApplicationName이 일반 풀과 다르므로 MySqlConnector가 별도 pool 인스턴스 유지.
-        // MaximumPoolSize=20 : 11개 PANDATA 병렬 + 여유 9개 (헌법 #16 안전 마진).
+        // MaximumPoolSize=20 : 11개 PANDATA 병렬 + 여유 9개 (헌법 #16 안전 마진). 작21(9/4)로 병렬 잡 15개 — 여유 5개.
+        // ConnectionTimeout=60 ([3-V] 2026-09-07 병렬이슈 12): 15잡이 동시에 열 때 MariaDB 핸드셰이크가 24초에 걸쳐 늦게
+        //   돌아와 기본 15초를 넘긴 잡이 생겼다(봉합 후 실측 sales_returns). 핸드셰이크·풀 대기 상한을 60초로.
         // 🔴 AllowUserVariables=true (봉합 2026-08-12, 실측 적발)
         //   이 팩토리는 MDB 마이그 전용이 아니다 — **MigrationRunner(DB 스키마 마이그)도 쓴다.**
         //   DB-NN 멱등 마이그는 'SET @col_exists := (SELECT ...)' + PREPARE/EXECUTE 관용구를 쓰는데,
@@ -54,7 +56,7 @@ public sealed class MigrationDbConnectionFactory : IMigrationDbConnectionFactory
             $"Server={host};Port={port};Database={db};User={user};Password={pwd};" +
             // GuidFormat=None — char(36) 을 Guid 로 돌려주면 string DTO 매핑이 터진다 (봉합 2026-08-12, PI-07).
             "DefaultCommandTimeout=600;AllowLoadLocalInfile=true;AllowUserVariables=true;GuidFormat=None;" +
-            "Pooling=true;MinimumPoolSize=0;MaximumPoolSize=20;" +
+            "Pooling=true;MinimumPoolSize=0;MaximumPoolSize=20;ConnectionTimeout=60;" +
             "ApplicationName=hitpan-migration;";
     }
 
