@@ -117,6 +117,13 @@ public sealed class MigrationController : ControllerBase
     }
 
     /// <summary>
+    /// 로그에 넣는 사용자 입력에서 줄바꿈·탭을 제거한다 ([3-V] 2026-09-08 · CodeQL cs/log-forging · 병렬이슈 14).
+    /// 폴더 경로는 사용자가 치는 값이라 개행을 섞으면 가짜 로그 줄을 만들 수 있다.
+    /// </summary>
+    private static string ForLog(string? value)
+        => System.Text.RegularExpressions.Regex.Replace(value ?? string.Empty, @"[\r\n\t]+", " ").Trim();
+
+    /// <summary>
     /// 레거시 MDB ↔ 히트판 대사표 (20260904작21 갈래 B2).
     /// - 레거시 쪽은 MDB 를 읽기 전용으로 직접 집계, 히트판 쪽은 현재 테넌트의 이관 결과를 집계해 나란히 놓는다.
     /// - 이관 전에 부르면 레거시 열만 의미가 있다(히트판 열은 0 → DIFF). 이관 후 다시 부르면 판정이 선다.
@@ -147,27 +154,27 @@ public sealed class MigrationController : ControllerBase
         }
         catch (FileNotFoundException ex)
         {
-            _logger.LogWarning(ex, "[Reconcile] MDB 파일 미발견 folder={Folder}", folderPath);
+            _logger.LogWarning(ex, "[Reconcile] MDB 파일 미발견 folder={Folder}", ForLog(folderPath));
             return NotFound(new { message = $"MDB 파일을 찾을 수 없습니다. 폴더 경로를 확인해주세요. ({ex.Message})" });
         }
         catch (DirectoryNotFoundException ex)
         {
-            _logger.LogWarning(ex, "[Reconcile] 폴더 미존재 folder={Folder}", folderPath);
+            _logger.LogWarning(ex, "[Reconcile] 폴더 미존재 folder={Folder}", ForLog(folderPath));
             return NotFound(new { message = $"폴더가 존재하지 않습니다: {folderPath}" });
         }
         catch (UnauthorizedAccessException ex)
         {
-            _logger.LogWarning(ex, "[Reconcile] 폴더 접근 권한 없음 folder={Folder}", folderPath);
+            _logger.LogWarning(ex, "[Reconcile] 폴더 접근 권한 없음 folder={Folder}", ForLog(folderPath));
             return StatusCode(403, new { message = $"폴더 접근 권한이 없습니다: {folderPath}" });
         }
         catch (InvalidOperationException ex)
         {
-            _logger.LogWarning(ex, "[Reconcile] 데이터 무결성·형식 오류 folder={Folder}", folderPath);
+            _logger.LogWarning(ex, "[Reconcile] 데이터 무결성·형식 오류 folder={Folder}", ForLog(folderPath));
             return BadRequest(new { message = ex.Message });
         }
         catch (System.Data.OleDb.OleDbException ex)
         {
-            _logger.LogWarning(ex, "[Reconcile] OLEDB 오류 folder={Folder} hresult={HResult}", folderPath, ex.HResult);
+            _logger.LogWarning(ex, "[Reconcile] OLEDB 오류 folder={Folder} hresult={HResult}", ForLog(folderPath), ex.HResult);
             var hint = ex.Message.Contains("password", StringComparison.OrdinalIgnoreCase) || ex.Message.Contains("암호")
                 ? "MDB 비밀번호가 틀렸거나 비번이 걸려있습니다. 비밀번호 칸을 확인해주세요."
                 : "MDB 파일을 열 수 없습니다. ACE OLEDB Provider 설치 여부 + 파일 손상 여부를 확인해주세요.";
@@ -175,18 +182,18 @@ public sealed class MigrationController : ControllerBase
         }
         catch (System.ComponentModel.Win32Exception ex)
         {
-            _logger.LogError(ex, "[Reconcile] ACE Provider 미설치 가능성 folder={Folder}", folderPath);
+            _logger.LogError(ex, "[Reconcile] ACE Provider 미설치 가능성 folder={Folder}", ForLog(folderPath));
             return StatusCode(500, new { message = "MDB 처리 엔진(Microsoft.ACE.OLEDB.12.0)이 설치되지 않았을 가능성이 있습니다. 서버 설정을 확인해주세요." });
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
-            _logger.LogInformation("[Reconcile] 요청 취소 folder={Folder}", folderPath);
+            _logger.LogInformation("[Reconcile] 요청 취소 folder={Folder}", ForLog(folderPath));
             return StatusCode(499, new { message = "대사 요청이 취소되었습니다." });
         }
         catch (Exception ex)
         {
             // 미처리 예외도 사용자에게 의미있는 메시지로 (silent swallow 금지 - 헌법 #15)
-            _logger.LogError(ex, "[Reconcile] 미처리 예외 folder={Folder}", folderPath);
+            _logger.LogError(ex, "[Reconcile] 미처리 예외 folder={Folder}", ForLog(folderPath));
             return StatusCode(500, new { message = $"대사표 작성 중 오류가 발생했습니다: {ex.GetType().Name} - {ex.Message}" });
         }
     }

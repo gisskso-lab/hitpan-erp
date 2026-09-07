@@ -32,11 +32,22 @@ public sealed class MdbReconciliationService
     private readonly IDbConnection _db;
     private readonly ILogger<MdbReconciliationService> _logger;
 
-    /// <summary>OLEDB 커넥션 문자열 (읽기 전용). 12.0 이 없으면 16.0 으로 한 번 더 시도한다.</summary>
-    private const string OleDbConnTemplate12 =
-        "Provider=Microsoft.ACE.OLEDB.12.0;Data Source={0};Jet OLEDB:Database Password={1};Mode=Read;";
-    private const string OleDbConnTemplate16 =
-        "Provider=Microsoft.ACE.OLEDB.16.0;Data Source={0};Jet OLEDB:Database Password={1};Mode=Read;";
+    /// <summary>OLEDB Provider 이름 (읽기 전용으로 연다). 12.0 이 없으면 16.0 으로 한 번 더 시도한다.</summary>
+    private const string OleDbProvider12 = "Microsoft.ACE.OLEDB.12.0";
+    private const string OleDbProvider16 = "Microsoft.ACE.OLEDB.16.0";
+
+    /// <summary>
+    /// 연결문자열은 <see cref="OleDbConnectionStringBuilder"/> 로만 조립한다 ([3-V] 2026-09-08 · CodeQL cs/resource-injection · 병렬이슈 14).
+    /// 경로·비번은 사용자 입력이라 문자열 포맷으로 이으면 <c>;</c> 로 키(Mode 등)를 덧붙일 수 있다 — 빌더가 값을 따옴표로 감싼다.
+    /// 경로는 <see cref="ResolveMdbPaths"/> 가 절대경로·<c>..</c> 차단·존재 확인·고정 파일명으로 이미 좁혔다.
+    /// </summary>
+    private static string BuildConnectionString(string provider, string mdbPath, string password)
+    {
+        var b = new OleDbConnectionStringBuilder { Provider = provider, DataSource = mdbPath };
+        b["Mode"] = "Read";
+        if (!string.IsNullOrEmpty(password)) b["Jet OLEDB:Database Password"] = password;
+        return b.ConnectionString;
+    }
 
     /// <summary>거래처·품목 차이 목록 상위 N.</summary>
     private const int TopDiffRows = 20;
@@ -873,14 +884,14 @@ public sealed class MdbReconciliationService
         var pwd = password ?? string.Empty;
         try
         {
-            return OpenWith(string.Format(CultureInfo.InvariantCulture, OleDbConnTemplate12, mdbPath, pwd));
+            return OpenWith(BuildConnectionString(OleDbProvider12, mdbPath, pwd));
         }
         catch (InvalidOperationException ex12) when (IsProviderMissing(ex12))
         {
             _logger.LogInformation("[MDB대사] ACE OLEDB 12.0 없음 — 16.0 으로 재시도 file={File}", Path.GetFileName(mdbPath));
             try
             {
-                return OpenWith(string.Format(CultureInfo.InvariantCulture, OleDbConnTemplate16, mdbPath, pwd));
+                return OpenWith(BuildConnectionString(OleDbProvider16, mdbPath, pwd));
             }
             catch (InvalidOperationException ex16) when (IsProviderMissing(ex16))
             {
