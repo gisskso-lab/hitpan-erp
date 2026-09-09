@@ -71,7 +71,64 @@ public sealed class MigrationJobStore
             update(job);
     }
 
-    /// <summary>잡 상태 DB 동기화 (status enum + 카운터). best-effort, 실패 시 in-memory 유지.</summary>
+    /// <summary>
+    /// 작22 (2026-09-09) A3: DB 에서 읽어 온 잡을 in-memory 에 되살린다 — API 재시작 뒤 <c>continue</c> 가 같은 jobId 로 이어갈 때.
+    /// 이미 메모리에 있으면 그것을 돌려준다(진행 중 상태를 덮지 않는다).
+    /// </summary>
+    public MigrationJob Restore(MigrationJob job) => _jobs.GetOrAdd(job.JobId, job);
+
+    /// <summary>
+    /// 작22 (2026-09-09) A3: 잡 1건을 <b>DB 기준</b>으로 읽는다(<c>_jobs</c> 메모리 아님 — API 재시작 대비).
+    /// tenant 대조(헌법 #2)는 부르는 쪽이 한다.
+    /// </summary>
+    public async Task<MigrationJobDbRow?> GetFromDbAsync(string jobId)
+    {
+        const string sql = """
+            SELECT job_id AS JobId, tenant_id AS TenantId, status AS Status, source_folder AS SourceFolder,
+                   started_at AS StartedAt, paused_at AS PausedAt, completed_at AS CompletedAt, created_at AS CreatedAt
+              FROM migration_jobs
+             WHERE job_id = @JobId
+             LIMIT 1
+            """;
+        return await _db.QueryFirstOrDefaultAsync<MigrationJobDbRow>(new CommandDefinition(sql, new { JobId = jobId })).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// 작22 (2026-09-09) A3: 테넌트의 최신 잡 1건(<c>created_at DESC</c> · idx_tenant_created). 화면 진입 시 재접속·「이어서 가져오기」 판단용.
+    /// </summary>
+    public async Task<MigrationJobDbRow?> GetLatestByTenantAsync(string tenantId)
+    {
+        const string sql = """
+            SELECT job_id AS JobId, tenant_id AS TenantId, status AS Status, source_folder AS SourceFolder,
+                   started_at AS StartedAt, paused_at AS PausedAt, completed_at AS CompletedAt, created_at AS CreatedAt
+              FROM migration_jobs
+             WHERE tenant_id = @TenantId
+             ORDER BY created_at DESC
+             LIMIT 1
+            """;
+        return await _db.QueryFirstOrDefaultAsync<MigrationJobDbRow>(new CommandDefinition(sql, new { TenantId = tenantId })).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// 작22 (2026-09-09) A3: 잡의 표별 체크포인트(<c>migration_checkpoints</c> · DESCRIBE hitpan_e2e 2026-09-09:
+    /// status enum(pending,running,done,failed,skipped) · processed_count int unsigned → SIGNED 로 캐스팅해 long 으로 받는다).
+    /// </summary>
+    public async Task<IReadOnlyList<MigrationCheckpointRow>> GetCheckpointsAsync(string jobId)
+    {
+        const string sql = """
+            SELECT table_name AS TableName, mdb_file AS MdbFile, status AS Status,
+                   CAST(processed_count AS SIGNED) AS ProcessedCount,
+                   started_at AS StartedAt, completed_at AS CompletedAt, last_error AS LastError
+              FROM migration_checkpoints
+             WHERE job_id = @JobId
+             ORDER BY table_order, table_name
+            """;
+        var rows = await _db.QueryAsync<MigrationCheckpointRow>(new CommandDefinition(sql, new { JobId = jobId })).ConfigureAwait(false);
+        return rows.ToList();
+    }
+
+    /// <summary>잡 상태 DB 동기화 (status enum + 카운터). best-effort, 실패 시 in-memory 유지.
+    /// 작22 (2026-09-09) A3: <c>paused</c> 는 <c>paused_at</c> 을 찍는다(migration_jobs.status enum 에 paused 실재 · DESCRIBE 2026-09-09).</summary>
     public async Task SyncToDbAsync(string jobId, string status, DateTime? finishedAt = null)
     {
         try
@@ -80,6 +137,7 @@ public sealed class MigrationJobStore
                 UPDATE migration_jobs
                    SET status = @Status,
                        completed_at = CASE WHEN @Status IN ('completed','failed','canceled') THEN @Finished ELSE completed_at END,
+                       paused_at = CASE WHEN @Status = 'paused' THEN @Now ELSE paused_at END,
                        updated_at = @Now
                  WHERE job_id = @JobId
                 """;
@@ -96,11 +154,38 @@ public sealed class MigrationJobStore
     }
 }
 
+/// <summary>작22 (2026-09-09) A3: <c>migration_jobs</c> 한 행 — DB 기준 잡 조회 결과(메모리 잡과 별개).</summary>
+public sealed class MigrationJobDbRow
+{
+    public string JobId { get; set; } = "";
+    public string TenantId { get; set; } = "";
+    /// <summary>pending | preview | running | paused | completed | failed | canceled (DB enum)</summary>
+    public string Status { get; set; } = "";
+    public string SourceFolder { get; set; } = "";
+    public DateTime? StartedAt { get; set; }
+    public DateTime? PausedAt { get; set; }
+    public DateTime? CompletedAt { get; set; }
+    public DateTime CreatedAt { get; set; }
+}
+
+/// <summary>작22 (2026-09-09) A3: <c>migration_checkpoints</c> 한 행(표 단위 진행).</summary>
+public sealed class MigrationCheckpointRow
+{
+    public string TableName { get; set; } = "";
+    public string MdbFile { get; set; } = "";
+    /// <summary>pending | running | done | failed | skipped</summary>
+    public string Status { get; set; } = "";
+    public long ProcessedCount { get; set; }
+    public DateTime? StartedAt { get; set; }
+    public DateTime? CompletedAt { get; set; }
+    public string? LastError { get; set; }
+}
+
 public sealed class MigrationJob
 {
     public string JobId { get; set; } = "";
     public string TenantId { get; set; } = "";
-    /// <summary>queued | running | completed | failed</summary>
+    /// <summary>queued | running | paused | completed | failed — 작22 (2026-09-09): paused = 1단계만 끝남</summary>
     public string Status { get; set; } = "queued";
     public string CurrentStep { get; set; } = "";
     public DateTime StartedAt { get; set; }

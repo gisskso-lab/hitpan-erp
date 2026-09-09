@@ -87,6 +87,28 @@ public sealed class MigrationProgressService : IMigrationProgressService
         });
     }
 
+    /// <summary>
+    /// 작22 (2026-09-09) A3: 1단계 완료 push — 스냅샷은 지우지 않는다(같은 jobId 로 2단계가 이어진다).
+    /// </summary>
+    public async Task PhaseCompletedAsync(string jobId, int phase)
+    {
+        if (string.IsNullOrEmpty(jobId)) return;
+
+        try
+        {
+            await _hub.Clients.Group(jobId).SendAsync("PhaseCompleted", new
+            {
+                jobId,
+                phase,
+            });
+        }
+        catch (Exception ex)
+        {
+            // 헌법 #15 빈 catch 금지 — push 실패해도 잡 상태(paused)는 DB 에 있어 화면이 current 로 다시 붙을 수 있다.
+            _logger.LogWarning(ex, "[MigrationProgressService] PhaseCompleted push 실패 jobId={JobId} phase={Phase}", jobId, phase);
+        }
+    }
+
     public IReadOnlyDictionary<string, MigrationProgressSnapshot> GetSnapshot(string jobId)
     {
         if (_store.TryGetValue(jobId, out var snap))

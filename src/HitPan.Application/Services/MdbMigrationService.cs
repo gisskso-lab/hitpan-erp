@@ -67,6 +67,18 @@ public sealed class MdbMigrationService
     /// (tableName, status, rows, elapsedMs, errorMsg) — controller에서 jobStore 업데이트로 연결.</summary>
     private static readonly AsyncLocal<Action<string, string, int, long, string?>?> _progressCallback = new();
 
+    /// <summary>작22 (2026-09-09) A3: 현재 이관 호출의 tenant_id — 체크포인트 행의 tenant_id 에 쓴다(RunTableStepAsync 는 tenantId 를 안 받는다).</summary>
+    private static readonly AsyncLocal<string?> _tenantIdContext = new();
+
+    /// <summary>작22 (2026-09-09) A2: 이관 모드 — null = 미지정(종전 동작) · "merge" · "overwrite". 마스터 UPSERT 절과 세션 unique_checks 가 읽는다.</summary>
+    private static readonly AsyncLocal<string?> _modeContext = new();
+
+    /// <summary>작22 (2026-09-09) A3: 이관 단계. TransactionsOnly 면 마스터 메서드가 쓰지 않고 매핑만 되살린다(map-only).</summary>
+    private static readonly AsyncLocal<MdbMigrationPhase> _phaseContext = new();
+
+    /// <summary>작22 (2026-09-09) A3: 체크포인트 table_order — 잡 안에서 스텝이 지나간 순서. 서비스는 스코프당 한 인스턴스라 병렬 잡도 Interlocked 로 안전하게 센다.</summary>
+    private int _checkpointOrder;
+
     public MdbMigrationService(
         IDbConnection db,
         ILogger<MdbMigrationService> logger,
@@ -109,25 +121,48 @@ public sealed class MdbMigrationService
     /// <summary>
     /// 진행 상태 콜백까지 받는 정식 overload (P0 #6, 2026-05-14).
     /// progressCallback(tableName, status, rows, elapsedMs, errorMsg) — UI 가시화용.
+    /// 작22 (2026-09-09): 모드 미지정 · 단계 All 로 아래 overload 에 위임 — baseline 도구가 이 시그니처를 부른다(종전 동작 그대로).
+    /// </summary>
+    public Task<MdbMigrationResult> MigrateAsync(
+        string folderPath, string tenantId, string? mdbPassword, string? jobId,
+        Action<string, string, int, long, string?>? progressCallback, CancellationToken ct = default)
+        => MigrateAsync(folderPath, tenantId, mdbPassword, jobId, progressCallback, mode: null, phase: MdbMigrationPhase.All, ct);
+
+    /// <summary>
+    /// 작22 (2026-09-09) A2·A3: 모드·단계까지 받는 overload.
+    /// <paramref name="mode"/> — null = 미지정(종전 동작) · "merge"(마스터 빈칸만 채움 · unique_checks=1) · "overwrite"(종전 절 · ⛔본체는 Q1 후, 컨트롤러가 400).
+    /// <paramref name="phase"/> — All(종전) · MasterOnly(1단계 뒤 멈춤) · TransactionsOnly(마스터는 map-only 로 지나고 거래만).
     /// </summary>
     public async Task<MdbMigrationResult> MigrateAsync(
         string folderPath, string tenantId, string? mdbPassword, string? jobId,
-        Action<string, string, int, long, string?>? progressCallback, CancellationToken ct = default)
+        Action<string, string, int, long, string?>? progressCallback,
+        string? mode, MdbMigrationPhase phase, CancellationToken ct = default)
     {
+        if (!MdbMigrationModes.IsValid(mode))
+        {
+            throw new ArgumentOutOfRangeException(nameof(mode), mode, "이관 모드는 merge · overwrite · 미지정 중 하나다.");
+        }
+
         // WS-11 정공법 축 5 (2026-05-14): POTHER.mdb 경로도 받아서 4 테이블 마이그.
         var (pyojunPath, pandataPath, potherPath) = ResolveMdbPaths(folderPath);
         _mdbPasswordContext.Value = mdbPassword;
         _jobIdContext.Value = jobId;
         _progressCallback.Value = progressCallback;
+        _tenantIdContext.Value = tenantId;
+        _modeContext.Value = string.IsNullOrWhiteSpace(mode) ? null : mode.Trim().ToLowerInvariant();
+        _phaseContext.Value = phase;
         try
         {
-            return await MigrateCoreAsync(pyojunPath, pandataPath, potherPath, tenantId, ct).ConfigureAwait(false);
+            return await MigrateCoreAsync(pyojunPath, pandataPath, potherPath, tenantId, phase, ct).ConfigureAwait(false);
         }
         finally
         {
             _mdbPasswordContext.Value = null;
             _jobIdContext.Value = null;
             _progressCallback.Value = null;
+            _tenantIdContext.Value = null;
+            _modeContext.Value = null;
+            _phaseContext.Value = MdbMigrationPhase.All;
         }
     }
 
@@ -209,6 +244,7 @@ public sealed class MdbMigrationService
         string pandataPath,
         string potherPath,
         string tenantId,
+        MdbMigrationPhase phase,
         CancellationToken ct = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(pyojunPath);
@@ -259,22 +295,48 @@ public sealed class MdbMigrationService
             _logger.LogInformation("[MDB마이그레이션] PYOJUN.MDB 읽기 시작: {Path}", pyojunPath);
 
             // PYOJUN(마스터)는 실패 시 throw — partnerMap/itemMap 못 채우면 PANDATA가 무의미.
+            // 작22 (2026-09-09) A3: 2단계(TransactionsOnly)도 이 스텝을 지난다 — 거래 잡이 읽는 partnerMap/itemMap/employeeMap 은
+            //   메모리 값이라 1단계가 끝난 뒤(다른 요청 · API 재시작 뒤) 다시 채워야 한다. 그때 업체·상품·사원은 **쓰지 않고**
+            //   1단계가 남긴 행을 읽어 매핑만 되살리고(map-only · 각 메서드 안에서 분기), BOM·계정과목은 매핑에 기여하지 않으므로 건너뛴다.
+            var mapOnly = phase == MdbMigrationPhase.TransactionsOnly;
             await RunTableStepAsync("pyojun_master", async tx =>
             {
                 using var oleConn = OpenOleDb(pyojunPath);
                 result.Partners = await MigratePartnersAsync(oleConn, tenantId, now, partnerMap, tx, ct).ConfigureAwait(false);
                 result.Items = await MigrateItemsAsync(oleConn, tenantId, now, itemMap, tx, ct).ConfigureAwait(false);
-                result.BomHeaders = await MigrateBomAsync(oleConn, tenantId, now, itemMap, tx, ct).ConfigureAwait(false);
+                if (!mapOnly)
+                {
+                    result.BomHeaders = await MigrateBomAsync(oleConn, tenantId, now, itemMap, tx, ct).ConfigureAwait(false);
+                }
+                else
+                {
+                    // 2단계에선 BOM 을 다시 쓰지 않는다(1단계 뒤 사람이 고쳤을 수 있다). 다만 결과 표에 0 으로 보이면
+                    // 「BOM 이 안 들어왔다」로 읽히므로, 1단계가 넣어 둔 건수를 세어 그대로 보여준다.
+                    result.BomHeaders = await Db.ExecuteScalarAsync<int>(new CommandDefinition(
+                        "SELECT COUNT(*) FROM bom_headers WHERE tenant_id = @TenantId AND source_id LIKE 'DOCRT-%'",
+                        new { TenantId = tenantId }, transaction: tx, cancellationToken: ct)).ConfigureAwait(false);
+                }
                 // 작21 (2026-09-04) A3 · 전결1 D1: DOCFB 에만 있는 품목(실측 7,732행·18.4억)을 여기서 전수 등록한다.
                 //   2단계 병렬 잡이 공유 itemMap 을 읽기만 하도록 **병렬 전(1단계)** 에 끝낸다 (헌법 #16).
-                //   PANDATA 파일이 없으면 건너뛴다.
+                //   PANDATA 파일이 없으면 건너뛴다. (map-only 땐 이미 등록된 MIG-AUTO 행을 찾기만 한다 — EnsureMigAutoItemAsync 가 있으면 SELECT 로 끝난다)
                 var unlistedItems = await RegisterUnlistedDocfbItemsAsync(pandataPath, tenantId, now, itemMap, tx, ct).ConfigureAwait(false);
                 result.Employees = await MigrateEmployeesAsync(oleConn, tenantId, now, employeeMap, tx, ct).ConfigureAwait(false);
                 // WS-D-2 후속 (2026-05-18): PYOJUN.COSTNO → accounts 마스터 시드 (99건).
                 // ERP 매니저 추후 한국 표준 5자리 매핑 UPDATE 전 자동 시드.
-                await MigrateAccountsFromCOSTNOAsync(oleConn, tenantId, now, tx, ct).ConfigureAwait(false);
+                if (!mapOnly)
+                {
+                    await MigrateAccountsFromCOSTNOAsync(oleConn, tenantId, now, tx, ct).ConfigureAwait(false);
+                }
                 return result.Partners + result.Items + result.BomHeaders + result.Employees + unlistedItems;
             }, ct, continueOnFail: false, mdbFile: "PYOJUN").ConfigureAwait(false);
+
+            // 작22 (2026-09-09) A3 · 별지 §1-3: 1단계만 요청이면 여기서 멈춘다 — 컨트롤러가 잡을 paused 로 두고 PhaseCompleted(1) 을 보내면
+            //   화면이 5/16 사장님 문안 다이얼로그를 띄운다. ERP 는 마스터만으로 바로 쓸 수 있다(헌법 #20 — 잠그지 않는다).
+            if (phase == MdbMigrationPhase.MasterOnly)
+            {
+                _logger.LogInformation("[MDB마이그레이션] 1단계(마스터) 완료 — 2단계는 이어서 가져오기로. 결과: {@Result}", result);
+                return result;
+            }
 
             // ──────────────────────────────────────
             // 2단계: PANDATA.mdb (거래 — 테이블별 독립 tx)
@@ -529,7 +591,13 @@ public sealed class MdbMigrationService
                     "item_stock 리빌드: 트랜잭션 연결이 유효하지 않습니다.");
                 var rows = await conn.ExecuteAsync(new CommandDefinition(
                     rebuildSql, new { TenantId = tenantId }, transaction: tx, cancellationToken: ct)).ConfigureAwait(false);
-                return rows;
+                // 작22 (2026-09-09) A5 · 별지 §1-6: ON DUPLICATE KEY UPDATE 의 affected-rows 는 갱신 1행을 2로 센다(재이관이면 2배 · 선행검증 §2-8 2,142).
+                //   카드·결과엔 실제 (품목, 창고) 행수를 돌려준다 — 원장을 같은 키로 묶어 센 값이 위 INSERT 가 만든 행수와 같다.
+                var stockRows = await conn.ExecuteScalarAsync<int>(new CommandDefinition(
+                    "SELECT COUNT(*) FROM (SELECT 1 FROM stock_ledger WHERE tenant_id = @TenantId GROUP BY tenant_id, item_id, warehouse_id) x",
+                    new { TenantId = tenantId }, transaction: tx, cancellationToken: ct)).ConfigureAwait(false);
+                _logger.LogInformation("[MDB마이그레이션] item_stock 리빌드 affected={Affected} · 품목·창고 {Rows}행", rows, stockRows);
+                return stockRows;
             }, ct, continueOnFail: false, mdbFile: "REBUILD").ConfigureAwait(false);
 
             _logger.LogInformation("[MDB마이그레이션] 완료. 결과: {@Result}", result);
@@ -588,11 +656,26 @@ public sealed class MdbMigrationService
                 effectiveConn = _db;
             }
 
+            // 작22 (2026-09-09) A3 · 별지 §1-4: 체크포인트 — jobId 있을 때만 · 이미 done 이면 skipped 콜백 후 return(항상재실행 표는 예외) ·
+            //   표 트랜잭션 **밖**(autocommit)에서 쓴다. ⚠️ tx 가 열린 동안 같은 conn 에 tx 없는 명령을 보내면 MySqlConnector 가 던지므로
+            //   BeginTransaction 앞 · Commit/Rollback 뒤에서만 쓴다. 15잡 병렬은 각자 자기 jobConn 을 쓴다(헌법 #16).
+            var checkpoint = await TryBeginCheckpointAsync(effectiveConn, tableName, mdbFile, ct).ConfigureAwait(false);
+            if (checkpoint.Skip)
+            {
+                sw.Stop();
+                _logger.LogInformation(
+                    "[MDB마이그레이션] {Table} 이미 완료(체크포인트 done) — 건너뜀 ({Rows}행)", tableName, checkpoint.PreviousRows);
+                cb?.Invoke(tableName, "skipped", checkpoint.PreviousRows, sw.ElapsedMilliseconds, null);
+                return;
+            }
+
             tx = effectiveConn.BeginTransaction();
             _jobTransaction.Value = tx;
             var rows = await work(tx).ConfigureAwait(false);
             tx.Commit();
             sw.Stop();
+            // 체크포인트 done — commit 뒤(tx 가 닫힌 뒤) 같은 conn 으로 autocommit. 콜백보다 먼저 남겨 도중에 끊겨도 DB 가 진실이 되게.
+            await TryCompleteCheckpointAsync(effectiveConn, tableName, rows, ct).ConfigureAwait(false);
             _logger.LogInformation(
                 "[MDB마이그레이션] {Table} 완료: {Rows}행, {Elapsed}ms",
                 tableName, rows, sw.ElapsedMilliseconds);
@@ -609,6 +692,11 @@ public sealed class MdbMigrationService
                 _logger.LogWarning(rbex,
                     "[MDB마이그레이션] {Table} 취소 중 롤백 실패 (무시하고 cancel 전파)", tableName);
             }
+            // 작22 (2026-09-09) A3: 롤백된 표는 running 으로 남기지 않는다 — failed 로 적어 두면 continue 가 다시 돈다. ct 는 이미 취소라 None 으로 쓴다.
+            if (effectiveConn is not null)
+            {
+                await TryFailCheckpointAsync(effectiveConn, tableName, "취소됨", CancellationToken.None).ConfigureAwait(false);
+            }
             cb?.Invoke(tableName, "failed", 0, sw.ElapsedMilliseconds, "취소됨");
             throw;
         }
@@ -622,6 +710,13 @@ public sealed class MdbMigrationService
                 tableName, sw.ElapsedMilliseconds, continueOnFail);
             cb?.Invoke(tableName, "failed", 0, sw.ElapsedMilliseconds,
                 $"{ex.GetType().Name}: {Truncate(ex.Message, 200)}");
+
+            // 작22 (2026-09-09) A3: 체크포인트 failed(last_error 200자 · retry_count+1) — 롤백 뒤라 tx 밖.
+            if (effectiveConn is not null)
+            {
+                await TryFailCheckpointAsync(effectiveConn, tableName,
+                    $"{ex.GetType().Name}: {Truncate(ex.Message, 200)}", ct).ConfigureAwait(false);
+            }
 
             // migration_errors에 AES 암호화 raw_data 저장 (jobId 있을 때만, 헌법 #5).
             await TryInsertMigrationErrorAsync(tableName, mdbFile, ex, ct).ConfigureAwait(false);
@@ -683,13 +778,130 @@ public sealed class MdbMigrationService
                 "SET SESSION innodb_flush_log_at_trx_commit = 2", cancellationToken: ct)).ConfigureAwait(false);
             await conn.ExecuteAsync(new CommandDefinition(
                 "SET SESSION foreign_key_checks = 0", cancellationToken: ct)).ConfigureAwait(false);
+            // 작22 (2026-09-09) A2 · 선행검증 §2-8: unique_checks=0 은 InnoDB 가 보조 UNIQUE 검사를 미룰 수 있어 INSERT IGNORE 멱등과 이론상 충돌한다.
+            //   기존 자료 위에 얹는 병합 모드만 1, 덮어쓰기(빈 표)·미지정(종전)은 0 유지. 속도 차는 W5 실측에서 기록한다.
+            var uniqueChecks = MdbMigrationModes.UniqueChecksFor(_modeContext.Value);
             await conn.ExecuteAsync(new CommandDefinition(
-                "SET SESSION unique_checks = 0", cancellationToken: ct)).ConfigureAwait(false);
+                uniqueChecks == 1 ? "SET SESSION unique_checks = 1" : "SET SESSION unique_checks = 0",
+                cancellationToken: ct)).ConfigureAwait(false);
+            _logger.LogDebug("[MDB마이그레이션] 잡 세션 튜닝 적용 (innodb_flush=2, fk=0, unique={Unique}, mode={Mode})",
+                uniqueChecks, _modeContext.Value ?? "(미지정)");
         }
         catch (Exception ex)
         {
             // 튜닝 실패해도 잡은 계속 (속도만 손해, 안전성 OK).
             _logger.LogWarning(ex, "[MDB마이그레이션] 잡 세션 튜닝 적용 실패 — 기본값으로 진행");
+        }
+    }
+
+    // ────────────────────────────────────────────────────────────────
+    // 작22 (2026-09-09) A3 · 별지 §1-4: 표 단위 체크포인트 (migration_checkpoints)
+    //   DESCRIBE migration_checkpoints (hitpan_e2e · 2026-09-09 · 헌법 #13):
+    //     checkpoint_id char(36) PK · job_id char(36) FK→migration_jobs ON DELETE CASCADE · tenant_id char(36) NOT NULL ·
+    //     mdb_file varchar(50) NOT NULL · table_name varchar(50) NOT NULL · table_order smallint unsigned NOT NULL ·
+    //     status enum('pending','running','done','failed','skipped') · total_rows/processed_count int unsigned DEFAULT 0 ·
+    //     last_pk_value longtext CHECK json_valid (이번엔 안 씀 — 행 단위 재개는 W4) · started_at/completed_at datetime ·
+    //     last_error text · retry_count tinyint unsigned DEFAULT 0 · UNIQUE uk_job_table(job_id, table_name)
+    //   규칙: jobId 없으면(baseline 도구 · legacy overload) 아무것도 안 한다 · 기록 실패는 경고만 남기고 본 이관은 계속
+    //   (TryInsertMigrationErrorAsync 와 같은 자세 · 헌법 #15).
+    // ────────────────────────────────────────────────────────────────
+
+    private readonly record struct CheckpointStart(bool Skip, int PreviousRows);
+
+    /// <summary>
+    /// 스텝 시작 — 이미 <c>done</c> 이고 항상재실행 표가 아니면 <c>Skip=true</c>(이전 처리 행수 동봉). 아니면 <c>running</c> 으로 UPSERT.
+    /// 표 tx 가 열리기 **전**에 부른다(autocommit).
+    /// </summary>
+    private async Task<CheckpointStart> TryBeginCheckpointAsync(IDbConnection conn, string tableName, string mdbFile, CancellationToken ct)
+    {
+        var jobId = _jobIdContext.Value;
+        if (string.IsNullOrWhiteSpace(jobId)) return new CheckpointStart(false, 0);
+
+        try
+        {
+            var prev = await conn.QueryFirstOrDefaultAsync<(string? Status, long Processed)>(new CommandDefinition(
+                "SELECT status, CAST(processed_count AS SIGNED) FROM migration_checkpoints WHERE job_id = @JobId AND table_name = @Table LIMIT 1",
+                new { JobId = jobId, Table = tableName }, cancellationToken: ct)).ConfigureAwait(false);
+
+            if (string.Equals(prev.Status, "done", StringComparison.Ordinal) && !MdbMigrationCheckpointPolicy.AlwaysRerun(tableName))
+            {
+                return new CheckpointStart(true, (int)Math.Clamp(prev.Processed, 0, int.MaxValue));
+            }
+
+            var order = Math.Min(Interlocked.Increment(ref _checkpointOrder), (int)ushort.MaxValue);
+            const string upsert = """
+                INSERT INTO migration_checkpoints
+                  (checkpoint_id, job_id, tenant_id, mdb_file, table_name, table_order, status, started_at, completed_at, created_at, updated_at)
+                VALUES
+                  (@Id, @JobId, @TenantId, @MdbFile, @Table, @Order, 'running', @Now, NULL, @Now, @Now)
+                ON DUPLICATE KEY UPDATE
+                  status = 'running', mdb_file = VALUES(mdb_file), table_order = VALUES(table_order),
+                  started_at = VALUES(started_at), completed_at = NULL, updated_at = VALUES(updated_at)
+                """;
+            await conn.ExecuteAsync(new CommandDefinition(upsert, new
+            {
+                Id = Guid.NewGuid().ToString(),
+                JobId = jobId,
+                TenantId = _tenantIdContext.Value ?? "unknown",
+                MdbFile = Truncate(mdbFile, 50),
+                Table = Truncate(tableName, 50),
+                Order = order,
+                Now = DateTime.UtcNow,
+            }, cancellationToken: ct)).ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "[MDB마이그레이션] {Table} 체크포인트 시작 기록 실패 — 본 이관은 계속", tableName);
+        }
+        return new CheckpointStart(false, 0);
+    }
+
+    /// <summary>스텝 성공 — <c>done</c> + processed_count + completed_at. commit 뒤(tx 밖)에 부른다.</summary>
+    private async Task TryCompleteCheckpointAsync(IDbConnection conn, string tableName, int rows, CancellationToken ct)
+    {
+        var jobId = _jobIdContext.Value;
+        if (string.IsNullOrWhiteSpace(jobId)) return;
+
+        try
+        {
+            const string sql = """
+                UPDATE migration_checkpoints
+                   SET status = 'done', processed_count = @Rows, completed_at = @Now, last_error = NULL, updated_at = @Now
+                 WHERE job_id = @JobId AND table_name = @Table
+                """;
+            await conn.ExecuteAsync(new CommandDefinition(sql, new
+            {
+                Rows = Math.Max(rows, 0), Now = DateTime.UtcNow, JobId = jobId, Table = tableName,
+            }, cancellationToken: ct)).ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "[MDB마이그레이션] {Table} 체크포인트 완료 기록 실패 — 본 이관은 계속", tableName);
+        }
+    }
+
+    /// <summary>스텝 실패 — <c>failed</c> + last_error(200자) + retry_count+1(tinyint 상한 255). rollback 뒤(tx 밖)에 부른다.</summary>
+    private async Task TryFailCheckpointAsync(IDbConnection conn, string tableName, string error, CancellationToken ct)
+    {
+        var jobId = _jobIdContext.Value;
+        if (string.IsNullOrWhiteSpace(jobId)) return;
+
+        try
+        {
+            const string sql = """
+                UPDATE migration_checkpoints
+                   SET status = 'failed', last_error = @Err, retry_count = LEAST(COALESCE(retry_count, 0) + 1, 255),
+                       completed_at = @Now, updated_at = @Now
+                 WHERE job_id = @JobId AND table_name = @Table
+                """;
+            await conn.ExecuteAsync(new CommandDefinition(sql, new
+            {
+                Err = Truncate(error, 200), Now = DateTime.UtcNow, JobId = jobId, Table = tableName,
+            }, cancellationToken: ct)).ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "[MDB마이그레이션] {Table} 체크포인트 실패 기록 실패 — 본 이관은 계속", tableName);
         }
     }
 
@@ -816,9 +1028,13 @@ public sealed class MdbMigrationService
             // 마이그 데이터는 외부 MDB 원천이므로 FK·UNIQUE 사전 검증 완료 전제.
             await Db.ExecuteAsync(new CommandDefinition(
                 "SET SESSION foreign_key_checks = 0", cancellationToken: ct)).ConfigureAwait(false);
+            // 작22 (2026-09-09) A2: 병합 모드만 unique_checks=1 (잡 세션 튜닝 ApplyJobSessionTuningAsync 와 같은 규칙 · 선행검증 §2-8).
+            var uniqueChecks = MdbMigrationModes.UniqueChecksFor(_modeContext.Value);
             await Db.ExecuteAsync(new CommandDefinition(
-                "SET SESSION unique_checks = 0", cancellationToken: ct)).ConfigureAwait(false);
-            _logger.LogInformation("[MDB마이그레이션] 세션 튜닝 적용 (innodb_flush=2, fk=0, unique=0)");
+                uniqueChecks == 1 ? "SET SESSION unique_checks = 1" : "SET SESSION unique_checks = 0",
+                cancellationToken: ct)).ConfigureAwait(false);
+            _logger.LogInformation("[MDB마이그레이션] 세션 튜닝 적용 (innodb_flush=2, fk=0, unique={Unique}, mode={Mode})",
+                uniqueChecks, _modeContext.Value ?? "(미지정)");
         }
         catch (Exception ex)
         {
@@ -896,6 +1112,22 @@ public sealed class MdbMigrationService
             return existing;
         }
 
+        // 작22 (2026-09-09) A5 · 별지 §1-6: ResolveTenantDefaultWarehouseAsync 는 is_active=1 만 본다. 활성 창고가 0 이고 비활성 MAIN 만
+        //   남아 있으면(창고 화면에서 껐거나 초기화 잔재) 새 창고를 만들지 않고 **그 MAIN 을 되살려** 쓴다 — 9/4 창고 정의 "MAIN 하나 = 미사용과 같다".
+        //   종전엔 아래 INSERT IGNORE 가 uq_tenant_code 에 막혀 비활성 행을 조용히 쓰고 경고만 남겼다(선행검증 §2-8 · :895-905).
+        //   DESCRIBE warehouses (hitpan_e2e · 2026-09-09): is_active tinyint(1) NOT NULL · updated_at datetime(6) NOT NULL.
+        var inactiveMain = await Db.ExecuteScalarAsync<string?>(new CommandDefinition(
+            "SELECT warehouse_id FROM warehouses WHERE tenant_id = @TenantId AND wh_code = 'MAIN' AND is_active = 0 LIMIT 1",
+            new { TenantId = tenantId }, transaction: tx, cancellationToken: ct)).ConfigureAwait(false);
+        if (!string.IsNullOrEmpty(inactiveMain))
+        {
+            await Db.ExecuteAsync(new CommandDefinition(
+                "UPDATE warehouses SET is_active = 1, updated_at = @Now WHERE tenant_id = @TenantId AND warehouse_id = @Id",
+                new { Id = inactiveMain, TenantId = tenantId, Now = now }, transaction: tx, cancellationToken: ct)).ConfigureAwait(false);
+            _logger.LogInformation("[MDB마이그레이션] 활성 창고가 없어 비활성 기본창고 MAIN {WarehouseId} 을 되살려 이관 원장 창고로 쓴다", inactiveMain);
+            return inactiveMain;
+        }
+
         // 활성 창고가 0개 — MAIN 을 만든다. uq_tenant_code(tenant_id, wh_code) 충돌 시(비활성 MAIN 잔존) IGNORE 후 재조회.
         var id = Guid.NewGuid().ToString();
         const string sql = """
@@ -945,7 +1177,18 @@ public sealed class MdbMigrationService
         //   ceo_resident_no_encrypted (VARBINARY AES-256, 결재 #4 정책)
         // 봉합 2026-05-14 (사장님 지시): 같은 MDB 재마이그 시 덮어쓰기 — ON DUPLICATE KEY UPDATE.
         // uq_tenant_code(tenant_id, partner_code) 충돌 시 최신 데이터로 갱신. partner_id는 기존 보존(FK 무결성).
-        const string sql = """
+        // 작22 (2026-09-09) A2 · 별지 §1-2: 갱신 절은 모드에 따라 조립한다 — 병합 = 빈칸만 채움(ERP 값 보존 · G-MH) · 덮어쓰기/미지정 = 종전 절 그대로.
+        //   SQL 을 두 벌 복사하지 않는다 — INSERT 부분은 그대로 두고 ON DUPLICATE KEY UPDATE 절만 MdbMasterMergeClause 가 낸다.
+        //   DESCRIBE partners (hitpan_e2e · 2026-09-09 · 헌법 #13) 근거:
+        //     · varchar/char/longtext 컬럼 → Text (NULL 또는 '' 가 빈칸)
+        //     · credit_limit decimal(15,2) NULL · card_commission_rate/discount_rate/margin_rate decimal(5,2) DEFAULT 0.00 → Number (0 = 안 정함)
+        //     · trade_start_date/business_registration_date date · ceo_resident_no_encrypted varbinary(255) → NullOnly ('' 비교가 무의미)
+        //     · 키(partner_id·tenant_id·partner_code)·is_active·is_deleted·created_at·row_version 은 종전에도 갱신 안 함
+        //     · updated_at·migrated_source_hash 는 모드와 무관하게 항상 갱신(종전과 동일)
+        // 작22 (2026-09-09) A3: 2단계(TransactionsOnly)는 map-only — 1단계가 이미 쓴 행을 읽어 partnerMap 만 되살리고 UPSERT 는 보내지 않는다.
+        var mapOnly = _phaseContext.Value == MdbMigrationPhase.TransactionsOnly;
+        var mapOnlyMissing = 0;
+        const string insertSql = """
             INSERT INTO partners
               (partner_id, tenant_id, partner_code, partner_name, partner_type,
                biz_no, ceo_name, biz_type, biz_item,
@@ -972,32 +1215,33 @@ public sealed class MdbMigrationService
                @MarginRate, @SalesEmployee, @TradeStartDate,
                @BusinessRegistrationDate, @TelSecondary, @TaxClassification,
                @CeoResidentNoEncrypted, @MigratedSourceHash)
-            ON DUPLICATE KEY UPDATE
-              partner_name = VALUES(partner_name),
-              partner_type = VALUES(partner_type),
-              biz_no = VALUES(biz_no), ceo_name = VALUES(ceo_name),
-              biz_type = VALUES(biz_type), biz_item = VALUES(biz_item),
-              tel = VALUES(tel), fax = VALUES(fax),
-              address = VALUES(address), address_detail = VALUES(address_detail), zip_code = VALUES(zip_code),
-              credit_limit = VALUES(credit_limit),
-              bank_name = VALUES(bank_name), bank_account = VALUES(bank_account), account_holder = VALUES(account_holder),
-              manager_name = VALUES(manager_name), manager_tel = VALUES(manager_tel),
-              tax_type = VALUES(tax_type), memo = VALUES(memo),
-              updated_at = VALUES(updated_at), price_grade = VALUES(price_grade),
-              card_commission_rate = VALUES(card_commission_rate),
-              classification_code = VALUES(classification_code),
-              manager_department = VALUES(manager_department),
-              price_grade_code = VALUES(price_grade_code),
-              legacy_extra = VALUES(legacy_extra),
-              discount_rate = VALUES(discount_rate),
-              keyman_birth = VALUES(keyman_birth), keyman_name = VALUES(keyman_name), keyman_phone = VALUES(keyman_phone),
-              margin_rate = VALUES(margin_rate), sales_employee = VALUES(sales_employee),
-              trade_start_date = VALUES(trade_start_date),
-              business_registration_date = VALUES(business_registration_date),
-              tel_secondary = VALUES(tel_secondary), tax_classification = VALUES(tax_classification),
-              ceo_resident_no_encrypted = VALUES(ceo_resident_no_encrypted),
-              migrated_source_hash = VALUES(migrated_source_hash)
             """;
+        var sql = insertSql + "\n            ON DUPLICATE KEY UPDATE\n              " + MdbMasterMergeClause.Build(_modeContext.Value, new[]
+        {
+            new MdbMergeColumn("partner_name", MdbMergeBlank.Text),
+            new MdbMergeColumn("partner_type", MdbMergeBlank.Text),
+            new MdbMergeColumn("biz_no", MdbMergeBlank.Text), new MdbMergeColumn("ceo_name", MdbMergeBlank.Text),
+            new MdbMergeColumn("biz_type", MdbMergeBlank.Text), new MdbMergeColumn("biz_item", MdbMergeBlank.Text),
+            new MdbMergeColumn("tel", MdbMergeBlank.Text), new MdbMergeColumn("fax", MdbMergeBlank.Text),
+            new MdbMergeColumn("address", MdbMergeBlank.Text), new MdbMergeColumn("address_detail", MdbMergeBlank.Text), new MdbMergeColumn("zip_code", MdbMergeBlank.Text),
+            new MdbMergeColumn("credit_limit", MdbMergeBlank.Number),
+            new MdbMergeColumn("bank_name", MdbMergeBlank.Text), new MdbMergeColumn("bank_account", MdbMergeBlank.Text), new MdbMergeColumn("account_holder", MdbMergeBlank.Text),
+            new MdbMergeColumn("manager_name", MdbMergeBlank.Text), new MdbMergeColumn("manager_tel", MdbMergeBlank.Text),
+            new MdbMergeColumn("tax_type", MdbMergeBlank.Text), new MdbMergeColumn("memo", MdbMergeBlank.Text),
+            new MdbMergeColumn("price_grade", MdbMergeBlank.Text),
+            new MdbMergeColumn("card_commission_rate", MdbMergeBlank.Number),
+            new MdbMergeColumn("classification_code", MdbMergeBlank.Text),
+            new MdbMergeColumn("manager_department", MdbMergeBlank.Text),
+            new MdbMergeColumn("price_grade_code", MdbMergeBlank.Text),
+            new MdbMergeColumn("legacy_extra", MdbMergeBlank.Text),
+            new MdbMergeColumn("discount_rate", MdbMergeBlank.Number),
+            new MdbMergeColumn("keyman_birth", MdbMergeBlank.Text), new MdbMergeColumn("keyman_name", MdbMergeBlank.Text), new MdbMergeColumn("keyman_phone", MdbMergeBlank.Text),
+            new MdbMergeColumn("margin_rate", MdbMergeBlank.Number), new MdbMergeColumn("sales_employee", MdbMergeBlank.Text),
+            new MdbMergeColumn("trade_start_date", MdbMergeBlank.NullOnly),
+            new MdbMergeColumn("business_registration_date", MdbMergeBlank.NullOnly),
+            new MdbMergeColumn("tel_secondary", MdbMergeBlank.Text), new MdbMergeColumn("tax_classification", MdbMergeBlank.Text),
+            new MdbMergeColumn("ceo_resident_no_encrypted", MdbMergeBlank.NullOnly),
+        }, new[] { "updated_at", "migrated_source_hash" });
 
         int count = 0;
         foreach (DataRow row in dt.Rows)
@@ -1016,6 +1260,14 @@ public sealed class MdbMigrationService
 
             // buy_code → partner_id 매핑 저장 (이후 거래 FK 참조용)
             partnerMap[buyCode] = partnerId;
+
+            // 작22 (2026-09-09) A3: 2단계(map-only) — 매핑만 되살리고 쓰지 않는다. 1단계가 남긴 행이 없으면 세어 두고 경고로 남긴다.
+            if (mapOnly)
+            {
+                if (string.IsNullOrEmpty(existingId)) mapOnlyMissing++;
+                count++;
+                continue;
+            }
 
             // buy_gu(구분): "1"=매입처, "2"=매출처, 그 외=양쪽
             var buyGu = GetStr(row, "buy_gu");
@@ -1105,7 +1357,18 @@ public sealed class MdbMigrationService
             count++;
         }
 
-        _logger.LogInformation("[MDB마이그레이션] 업체 {Count}건 이관 완료", count);
+        if (mapOnly)
+        {
+            _logger.LogInformation("[MDB마이그레이션] 업체 매핑 복원(2단계 · 쓰기 없음) {Count}건 · 1단계 행이 없던 코드 {Missing}건", count, mapOnlyMissing);
+            if (mapOnlyMissing > 0)
+            {
+                _logger.LogWarning("[MDB마이그레이션] 업체 map-only 에서 DB 에 없는 코드 {Missing}건 — 1단계가 끝나지 않은 잡을 2단계로 이었는지 확인할 것", mapOnlyMissing);
+            }
+        }
+        else
+        {
+            _logger.LogInformation("[MDB마이그레이션] 업체 {Count}건 이관 완료", count);
+        }
         return count;
     }
 
@@ -1128,7 +1391,17 @@ public sealed class MdbMigrationService
         // W2 D3 (2026-05-12): items 4개 보강 컬럼 추가 (safety_stock 기존, 신규 4개)
         // 작10: spec_detail, unit_secondary, reorder_point, supplier_default_id
         // 봉합 2026-05-14: 사장님 정공법 — 같은 MDB 재마이그 시 덮어쓰기 (uq_tenant_code 충돌 방지)
-        const string sql = """
+        // 작22 (2026-09-09) A2 · 별지 §1-2: 갱신 절은 모드에 따라 조립(업체와 같은 규칙 · MdbMasterMergeClause).
+        //   DESCRIBE items (hitpan_e2e · 2026-09-09 · 헌법 #13) 근거:
+        //     · item_name varchar(100) · unit varchar(10) · spec varchar(100) · tax_type varchar(20) · barcode/item_group varchar · memo varchar(500) ·
+        //       spec_detail varchar(80) · unit_secondary varchar(10) · supplier_default_id char(36) → Text
+        //     · purchase_price/sale_price/standard_price decimal(15,2) NOT NULL DEFAULT 0.00 · cost_price/std_price/price_a~e decimal(15,2) NULL ·
+        //       reorder_point decimal(15,3) DEFAULT 0.000 → Number (0 = 단가를 안 정한 상태 — 화면 기본값이 0 이라 NULL 만 보면 빈칸을 못 가른다)
+        //     · 키(item_id·tenant_id·item_code)·item_type·is_active·is_deleted·safety_stock·created_at·row_version 은 종전에도 갱신 안 함 · updated_at 항상
+        // 작22 (2026-09-09) A3: 2단계(TransactionsOnly)는 map-only — itemMap 만 되살리고 UPSERT 는 보내지 않는다.
+        var mapOnly = _phaseContext.Value == MdbMigrationPhase.TransactionsOnly;
+        var mapOnlyMissing = 0;
+        const string insertSql = """
             INSERT INTO items
               (item_id, tenant_id, item_code, item_name, item_type, unit, spec,
                purchase_price, sale_price, standard_price, cost_price, std_price,
@@ -1143,17 +1416,19 @@ public sealed class MdbMigrationService
                @TaxType, @Barcode, @ItemGroup, @Memo,
                1, 0, 0, @Now, @Now, 0,
                @SpecDetail, @UnitSecondary, @ReorderPoint, @SupplierDefaultId)
-            ON DUPLICATE KEY UPDATE
-              item_name = VALUES(item_name), unit = VALUES(unit), spec = VALUES(spec),
-              purchase_price = VALUES(purchase_price), sale_price = VALUES(sale_price),
-              standard_price = VALUES(standard_price), cost_price = VALUES(cost_price), std_price = VALUES(std_price),
-              price_a = VALUES(price_a), price_b = VALUES(price_b), price_c = VALUES(price_c),
-              price_d = VALUES(price_d), price_e = VALUES(price_e),
-              tax_type = VALUES(tax_type), barcode = VALUES(barcode), item_group = VALUES(item_group),
-              memo = VALUES(memo), updated_at = VALUES(updated_at),
-              spec_detail = VALUES(spec_detail), unit_secondary = VALUES(unit_secondary),
-              reorder_point = VALUES(reorder_point), supplier_default_id = VALUES(supplier_default_id)
             """;
+        var sql = insertSql + "\n            ON DUPLICATE KEY UPDATE\n              " + MdbMasterMergeClause.Build(_modeContext.Value, new[]
+        {
+            new MdbMergeColumn("item_name", MdbMergeBlank.Text), new MdbMergeColumn("unit", MdbMergeBlank.Text), new MdbMergeColumn("spec", MdbMergeBlank.Text),
+            new MdbMergeColumn("purchase_price", MdbMergeBlank.Number), new MdbMergeColumn("sale_price", MdbMergeBlank.Number),
+            new MdbMergeColumn("standard_price", MdbMergeBlank.Number), new MdbMergeColumn("cost_price", MdbMergeBlank.Number), new MdbMergeColumn("std_price", MdbMergeBlank.Number),
+            new MdbMergeColumn("price_a", MdbMergeBlank.Number), new MdbMergeColumn("price_b", MdbMergeBlank.Number), new MdbMergeColumn("price_c", MdbMergeBlank.Number),
+            new MdbMergeColumn("price_d", MdbMergeBlank.Number), new MdbMergeColumn("price_e", MdbMergeBlank.Number),
+            new MdbMergeColumn("tax_type", MdbMergeBlank.Text), new MdbMergeColumn("barcode", MdbMergeBlank.Text), new MdbMergeColumn("item_group", MdbMergeBlank.Text),
+            new MdbMergeColumn("memo", MdbMergeBlank.Text),
+            new MdbMergeColumn("spec_detail", MdbMergeBlank.Text), new MdbMergeColumn("unit_secondary", MdbMergeBlank.Text),
+            new MdbMergeColumn("reorder_point", MdbMergeBlank.Number), new MdbMergeColumn("supplier_default_id", MdbMergeBlank.Text),
+        }, new[] { "updated_at" });
 
         int count = 0;
         int seq = 1;
@@ -1177,6 +1452,15 @@ public sealed class MdbMigrationService
 
             // 동일 품명+규격 중복 시 첫 번째만 사용
             if (!itemMap.TryAdd(itemKey, itemId)) continue;
+
+            // 작22 (2026-09-09) A3: 2단계(map-only) — 매핑만 되살린다. item_code 순번(seq)은 1단계와 같은 규칙으로 올려 코드가 어긋나지 않게 한다.
+            if (mapOnly)
+            {
+                if (string.IsNullOrEmpty(existingId)) mapOnlyMissing++;
+                count++;
+                seq++;
+                continue;
+            }
 
             // S_TAX(과세구분) 변환
             var sTax = GetStr(row, "S_TAX");
@@ -1230,7 +1514,18 @@ public sealed class MdbMigrationService
             seq++;
         }
 
-        _logger.LogInformation("[MDB마이그레이션] 상품 {Count}건 이관 완료", count);
+        if (mapOnly)
+        {
+            _logger.LogInformation("[MDB마이그레이션] 상품 매핑 복원(2단계 · 쓰기 없음) {Count}건 · 1단계 행이 없던 코드 {Missing}건", count, mapOnlyMissing);
+            if (mapOnlyMissing > 0)
+            {
+                _logger.LogWarning("[MDB마이그레이션] 상품 map-only 에서 DB 에 없는 코드 {Missing}건 — 1단계가 끝나지 않은 잡을 2단계로 이었는지 확인할 것", mapOnlyMissing);
+            }
+        }
+        else
+        {
+            _logger.LogInformation("[MDB마이그레이션] 상품 {Count}건 이관 완료", count);
+        }
         return count;
     }
 
@@ -1367,7 +1662,18 @@ public sealed class MdbMigrationService
         // W2 D3 (2026-05-12): employees 31개 보강 컬럼 (작11 결재, A안)
         // A. 기본 8 / B. 형사 5 (AES-256) / C. 직장 7 / D. 레거시잔액 10 / E. 해외 1
         // 형사영역(헌법 #5): SW_JUMIN·SW_PAY·SW_PAYoth → VARBINARY AES-256
-        const string sql = """
+        // 작22 (2026-09-09) A2 · 별지 §1-2: 갱신 절은 모드에 따라 조립(업체·상품과 같은 규칙 · MdbMasterMergeClause).
+        //   DESCRIBE employees (hitpan_e2e · 2026-09-09 · 헌법 #13) 근거:
+        //     · emp_name/position/job_title/phone/address/zip_code/home_phone/emergency_contact/department/marriage_status/business_type/
+        //       resign_reason/nationality varchar · birth_date varchar(200) · memo text · legacy_bal1~10 varchar(150) → Text
+        //     · join_date datetime(6) NOT NULL · resign_date datetime(6) NULL → NullOnly (날짜와 '' 비교는 무의미 · join_date 는 NOT NULL 이라 병합에선 ERP 값 유지)
+        //     · birth_calendar/birth_lunar_converted/is_resigned tinyint DEFAULT → NullOnly (0 이 유효값 — 퇴사 아님·양력 — 이라 빈칸으로 못 본다)
+        //     · salary_type/salary_category/salary_country tinyint NULL → NullOnly · resident_no/salary/salary_extra _encrypted varbinary → NullOnly
+        //     · 키(employee_id·tenant_id·emp_no)·emp_type·email·is_active·role·created_at 은 종전에도 갱신 안 함 · updated_at 항상
+        // 작22 (2026-09-09) A3: 2단계(TransactionsOnly)는 map-only — employeeMap 만 되살리고 UPSERT 는 보내지 않는다.
+        var mapOnly = _phaseContext.Value == MdbMigrationPhase.TransactionsOnly;
+        var mapOnlyMissing = 0;
+        const string insertSql = """
             INSERT INTO employees
               (employee_id, tenant_id, emp_no, emp_name, position, job_title, emp_type,
                join_date, phone, email, is_active, created_at, updated_at, role,
@@ -1388,28 +1694,30 @@ public sealed class MdbMigrationService
                @LegacyBal1, @LegacyBal2, @LegacyBal3, @LegacyBal4, @LegacyBal5,
                @LegacyBal6, @LegacyBal7, @LegacyBal8, @LegacyBal9, @LegacyBal10,
                @SalaryCountry)
-            ON DUPLICATE KEY UPDATE
-              emp_name = VALUES(emp_name), position = VALUES(position), job_title = VALUES(job_title),
-              join_date = VALUES(join_date), phone = VALUES(phone),
-              updated_at = VALUES(updated_at), address = VALUES(address), zip_code = VALUES(zip_code),
-              birth_date = VALUES(birth_date), birth_calendar = VALUES(birth_calendar),
-              birth_lunar_converted = VALUES(birth_lunar_converted),
-              home_phone = VALUES(home_phone), emergency_contact = VALUES(emergency_contact), memo = VALUES(memo),
-              resident_no_encrypted = VALUES(resident_no_encrypted),
-              salary_encrypted = VALUES(salary_encrypted),
-              salary_type = VALUES(salary_type), salary_category = VALUES(salary_category),
-              salary_extra_encrypted = VALUES(salary_extra_encrypted),
-              department = VALUES(department), marriage_status = VALUES(marriage_status),
-              business_type = VALUES(business_type), is_resigned = VALUES(is_resigned),
-              resign_date = VALUES(resign_date), resign_reason = VALUES(resign_reason),
-              nationality = VALUES(nationality),
-              legacy_bal1 = VALUES(legacy_bal1), legacy_bal2 = VALUES(legacy_bal2),
-              legacy_bal3 = VALUES(legacy_bal3), legacy_bal4 = VALUES(legacy_bal4),
-              legacy_bal5 = VALUES(legacy_bal5), legacy_bal6 = VALUES(legacy_bal6),
-              legacy_bal7 = VALUES(legacy_bal7), legacy_bal8 = VALUES(legacy_bal8),
-              legacy_bal9 = VALUES(legacy_bal9), legacy_bal10 = VALUES(legacy_bal10),
-              salary_country = VALUES(salary_country)
             """;
+        var sql = insertSql + "\n            ON DUPLICATE KEY UPDATE\n              " + MdbMasterMergeClause.Build(_modeContext.Value, new[]
+        {
+            new MdbMergeColumn("emp_name", MdbMergeBlank.Text), new MdbMergeColumn("position", MdbMergeBlank.Text), new MdbMergeColumn("job_title", MdbMergeBlank.Text),
+            new MdbMergeColumn("join_date", MdbMergeBlank.NullOnly), new MdbMergeColumn("phone", MdbMergeBlank.Text),
+            new MdbMergeColumn("address", MdbMergeBlank.Text), new MdbMergeColumn("zip_code", MdbMergeBlank.Text),
+            new MdbMergeColumn("birth_date", MdbMergeBlank.Text), new MdbMergeColumn("birth_calendar", MdbMergeBlank.NullOnly),
+            new MdbMergeColumn("birth_lunar_converted", MdbMergeBlank.NullOnly),
+            new MdbMergeColumn("home_phone", MdbMergeBlank.Text), new MdbMergeColumn("emergency_contact", MdbMergeBlank.Text), new MdbMergeColumn("memo", MdbMergeBlank.Text),
+            new MdbMergeColumn("resident_no_encrypted", MdbMergeBlank.NullOnly),
+            new MdbMergeColumn("salary_encrypted", MdbMergeBlank.NullOnly),
+            new MdbMergeColumn("salary_type", MdbMergeBlank.NullOnly), new MdbMergeColumn("salary_category", MdbMergeBlank.NullOnly),
+            new MdbMergeColumn("salary_extra_encrypted", MdbMergeBlank.NullOnly),
+            new MdbMergeColumn("department", MdbMergeBlank.Text), new MdbMergeColumn("marriage_status", MdbMergeBlank.Text),
+            new MdbMergeColumn("business_type", MdbMergeBlank.Text), new MdbMergeColumn("is_resigned", MdbMergeBlank.NullOnly),
+            new MdbMergeColumn("resign_date", MdbMergeBlank.NullOnly), new MdbMergeColumn("resign_reason", MdbMergeBlank.Text),
+            new MdbMergeColumn("nationality", MdbMergeBlank.Text),
+            new MdbMergeColumn("legacy_bal1", MdbMergeBlank.Text), new MdbMergeColumn("legacy_bal2", MdbMergeBlank.Text),
+            new MdbMergeColumn("legacy_bal3", MdbMergeBlank.Text), new MdbMergeColumn("legacy_bal4", MdbMergeBlank.Text),
+            new MdbMergeColumn("legacy_bal5", MdbMergeBlank.Text), new MdbMergeColumn("legacy_bal6", MdbMergeBlank.Text),
+            new MdbMergeColumn("legacy_bal7", MdbMergeBlank.Text), new MdbMergeColumn("legacy_bal8", MdbMergeBlank.Text),
+            new MdbMergeColumn("legacy_bal9", MdbMergeBlank.Text), new MdbMergeColumn("legacy_bal10", MdbMergeBlank.Text),
+            new MdbMergeColumn("salary_country", MdbMergeBlank.NullOnly),
+        }, new[] { "updated_at" });
 
         int count = 0;
         int seq = 1;
@@ -1429,6 +1737,15 @@ public sealed class MdbMigrationService
 
             // 동일 이름 중복 시 첫 번째만 사용 (레거시는 이름 기반 참조)
             employeeMap.TryAdd(name, employeeId);
+
+            // 작22 (2026-09-09) A3: 2단계(map-only) — 매핑만 되살린다. emp_no 순번(seq)은 1단계와 같은 규칙으로 올린다.
+            if (mapOnly)
+            {
+                if (string.IsNullOrEmpty(existingEmpId)) mapOnlyMissing++;
+                count++;
+                seq++;
+                continue;
+            }
 
             var joinDate = ParseLegacyDate(GetStr(row, "SW_IBSAIL")) ?? now;
 
@@ -1490,7 +1807,18 @@ public sealed class MdbMigrationService
             seq++;
         }
 
-        _logger.LogInformation("[MDB마이그레이션] 사원 {Count}건 이관 완료", count);
+        if (mapOnly)
+        {
+            _logger.LogInformation("[MDB마이그레이션] 사원 매핑 복원(2단계 · 쓰기 없음) {Count}건 · 1단계 행이 없던 사번 {Missing}건", count, mapOnlyMissing);
+            if (mapOnlyMissing > 0)
+            {
+                _logger.LogWarning("[MDB마이그레이션] 사원 map-only 에서 DB 에 없는 사번 {Missing}건 — 1단계가 끝나지 않은 잡을 2단계로 이었는지 확인할 것", mapOnlyMissing);
+            }
+        }
+        else
+        {
+            _logger.LogInformation("[MDB마이그레이션] 사원 {Count}건 이관 완료", count);
+        }
         return count;
     }
 
@@ -4937,7 +5265,9 @@ public sealed class MdbMigrationService
             sw.Stop();
             _logger.LogInformation("[MDB마이그레이션] sales_deliveries 정공법 완료: 후보 {H}행 → INSERT {Ins}행 / items {Ic}→{Ii}행 총 {Ms}ms",
                 headers.Count, insertedHeaders, items.Count, insertedItems, sw.ElapsedMilliseconds);
-            return insertedHeaders;
+            // 작22 (2026-09-09) A5 · 별지 §1-6: 돌려주는 값은 후보(staging) 행수 — ON DUPLICATE KEY UPDATE 의 affected-rows 는 갱신 1행을 2로 세어
+            //   재이관 카드가 233,177 처럼 2배로 보였다(선행검증 §2-8). INSERT 실적은 위 로그에 그대로 남는다.
+            return headers.Count;
         }
         finally
         {
@@ -5066,7 +5396,8 @@ public sealed class MdbMigrationService
             sw.Stop();
             _logger.LogInformation("[MDB마이그레이션] purchase_receipts 정공법 완료: 후보 {H}행 → INSERT {Ins}행 / items {Ic}→{Ii}행 총 {Ms}ms",
                 headers.Count, insertedHeaders, items.Count, insertedItems, sw.ElapsedMilliseconds);
-            return insertedHeaders;
+            // 작22 (2026-09-09) A5 · 별지 §1-6: 후보(staging) 행수를 돌려준다 — sales_deliveries 와 같은 이유(affected-rows 2배 금지).
+            return headers.Count;
         }
         finally
         {
