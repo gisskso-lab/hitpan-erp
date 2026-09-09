@@ -536,6 +536,9 @@ public sealed class MdbMigrationV2MappingGateTests
         Assert.NotNull(t.GetMethod("JournalSides", new[] { typeof(decimal), typeof(decimal) }));
         Assert.NotNull(t.GetMethod("PartnerLedgerKind", new[] { typeof(string) }));
         Assert.NotNull(t.GetMethod("CashbookDirection", new[] { typeof(string) }));
+        // 작22 (2026-09-09) C1 — 8번째. 계산서 invoice_no 방향 토큰 (direction, txNo, seq, pdt, remHash8) → string. 값 검사는 MdbMigrationV2ReconGateTests G9.
+        Assert.NotNull(t.GetMethod("TaxInvoiceNo", new[] { typeof(string), typeof(string), typeof(string), typeof(string), typeof(string) }));
+        Assert.Equal(typeof(string), t.GetMethod("TaxInvoiceNo", new[] { typeof(string), typeof(string), typeof(string), typeof(string), typeof(string) })!.ReturnType);
         Assert.Equal(typeof(string), t.GetMethod("DeliveryKind", new[] { typeof(int) })!.ReturnType);
         Assert.Equal(typeof((string, decimal, decimal)), t.GetMethod("LedgerMove", new[] { typeof(string), typeof(decimal) })!.ReturnType);
         Assert.Equal(typeof((decimal, decimal)), t.GetMethod("JournalSides", new[] { typeof(decimal), typeof(decimal) })!.ReturnType);

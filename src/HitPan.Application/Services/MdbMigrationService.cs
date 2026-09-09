@@ -1826,22 +1826,32 @@ public sealed class MdbMigrationService
         if (!string.IsNullOrEmpty(existing)) return existing;
 
         var id = Guid.NewGuid().ToString();
-        var itemName = legacyKey.Length > 50 ? legacyKey[..50] : legacyKey;
+        // 작22 (2026-09-09) C2 ⑤ 품목 키: legacyKey 는 BuildItemKey 의 "품명|규격"(규격이 비면 "품명") 이다.
+        //   종전엔 키 전체를 item_name 에 넣고 spec 을 비워 441건이 item_name="품명|규격" · spec NULL 로 서 있었다(선행검증 20260909검1 §2-6)
+        //   ⇒ 화면에 '|' 가 보이고 대사 키(품명|규격)와도 어긋났다. 첫 '|' 앞 = 품명(item_name) · 뒤 = 규격(spec) 으로 나눠 넣는다.
+        //   item_code 해시는 **키 전체** 그대로 — 같은 키면 같은 코드라 BOM(#78 H-1)이 먼저 만든 품목을 그대로 재사용한다(바꾸면 그 재사용이 깨진다).
+        //   기존 등록분 441건은 여기서 고치지 않는다 — 재이관은 위 SELECT 가 먼저 잡아 INSERT 를 건너뛰고(그대로 남는다), 대사는 ItemKey 가 끝의 '|' 를 걷어 맞춘다.
+        //   품명 50자 자름은 종전 그대로. DESCRIBE items (hitpan_e2e 2026-09-09): item_name varchar(100) NOT NULL · spec varchar(100) NULL.
+        var sep = legacyKey.IndexOf('|');
+        var namePart = sep < 0 ? legacyKey : legacyKey[..sep];
+        var specPart = sep < 0 ? string.Empty : legacyKey[(sep + 1)..];
+        var itemName = namePart.Length > 50 ? namePart[..50] : namePart;
+        var itemSpec = specPart.Length == 0 ? null : (specPart.Length > 100 ? specPart[..100] : specPart);
         await Db.ExecuteAsync(new CommandDefinition("""
             INSERT INTO items
-              (item_id, tenant_id, item_code, item_name, item_type, unit,
+              (item_id, tenant_id, item_code, item_name, spec, item_type, unit,
                tax_type, is_active, is_deleted, memo,
                purchase_price, sale_price, standard_price, safety_stock,
                created_at, updated_at, row_version)
             VALUES
-              (@Id, @TenantId, @Code, @Name, 'product', 'EA',
+              (@Id, @TenantId, @Code, @Name, @Spec, 'product', 'EA',
                'taxable', 1, 0, '진범 #78 옵션 H-1 봉합 — BOM 완제품·자재 자동 등록. 사장님 검토 후 정리.',
                0, 0, 0, 0,
                @Now, @Now, 0)
             """,
-            new { Id = id, TenantId = tenantId, Code = itemCode, Name = itemName, Now = now },
+            new { Id = id, TenantId = tenantId, Code = itemCode, Name = itemName, Spec = itemSpec, Now = now },
             transaction: tx, cancellationToken: ct)).ConfigureAwait(false);
-        _logger.LogWarning("[#78 H-1] MIG-AUTO-ITEM 자동 등록: code={Code} name={Name}", itemCode, itemName);
+        _logger.LogWarning("[#78 H-1] MIG-AUTO-ITEM 자동 등록: code={Code} name={Name} spec={Spec}", itemCode, itemName, itemSpec);
         return id;
     }
 
@@ -3499,7 +3509,12 @@ public sealed class MdbMigrationService
             var txRem = GetStr(r, "TX_REM") ?? string.Empty;
             var txRemHash = ComputeSourceHash($"tx_rem:{txRem}").Substring(0, 8);
             var sourceId = $"mig-{(string.IsNullOrEmpty(io) ? "_" : io)}-{txNo}-{sourceIdSeq}-{issueDateStr}-{txRemHash}";
-            var invoiceNoUnique = $"{txNo}-{sourceIdSeq}-{(string.IsNullOrEmpty(issueDateStr) ? "0" : issueDateStr)}-{txRemHash}";
+            // 작22 (2026-09-09) C1: invoice_no 에 방향 토큰을 앞세운다 — {S|B}-{TX_NO}-{SEQ}-{PDT}-{HASH8} (30자 ≤ varchar(32)).
+            //   선행검증 20260909검1 §2-4: (TX_NO,TX_SEQ,TX_PDT,TX_REM) 중복 그룹 21 · 같은 키 + TX_IO 중복 그룹 0 ⇒ 방향만 넣으면 21쌍이 전부 갈린다.
+            //   종전 형식(위 옵션 A/F)은 방향이 없어 uk_tax_invoices_invoice_no 가 먼저 걸리고 ON DUPLICATE 로 한쪽이 덮여 승자가 실행마다 바뀌었다
+            //   (e2e 실측 direction≠source_id 토큰 14행). source_id 는 그대로 둔다 — 재이관 때 옛 행을 같은 자리에서 정정하는 열쇠다.
+            var invoiceNoUnique = LegacyMdbMapping.TaxInvoiceNo(
+                direction, txNo, sourceIdSeq, string.IsNullOrEmpty(issueDateStr) ? "0" : issueDateStr, txRemHash);
             // C-2 봉합: 기존 PK 재사용
             var invoiceId = existingInvoiceMap.TryGetValue(sourceId, out var existingInvId)
                 ? existingInvId
@@ -3796,6 +3811,12 @@ public sealed class MdbMigrationService
             }
 
             // C안 UPSERT 봉합 (2026-05-21, 사장님 결재)
+            // 작22 (2026-09-09) C1:
+            //   ① ORDER BY source_id — 후보가 UNIQUE 키 어느 하나로 기존 행과 만날 때 어느 행이 먼저 닿는지를 고정한다(승자 결정성).
+            //   ② invoice_no = VALUES(invoice_no) — 1.3.38 로 이미 이관한 DB(옛 형식 invoice_no) 위에서 병합 재이관하면 source_id 로 같은 행을 잡아
+            //      invoice_no 를 새 형식으로 제자리 정정한다. 이게 없으면 옛 형식 행이 남고 새 형식 행이 옆에 서서 이중 행이 된다(작지서 §6 리스크).
+            //   ⚠️ 옛 DB 에 남은 "direction ≠ source_id 토큰" 행(e2e 실측 14행 · 그중 토큰 2 인데 B 인 8행)은 uq_tax_invoices_io_no 로 먼저 잡혀
+            //      짝의 한쪽이 흡수될 수 있다 — 빈 DB 에선 생기지 않는다. G-MF(66,631 · 2회 Σ 동일)로 확인한다.
             var headerInsertSql = $"""
                 INSERT INTO tax_invoices
                   (invoice_id, tenant_id, invoice_no, issued_at, issued_by,
@@ -3814,7 +3835,9 @@ public sealed class MdbMigrationService
                    source_type, source_id, migrated_source_hash,
                    created_at, updated_at
                 FROM `{headerStage}`
+                ORDER BY source_id
                 ON DUPLICATE KEY UPDATE
+                  invoice_no = VALUES(invoice_no),
                   issued_at = VALUES(issued_at), issued_by = VALUES(issued_by),
                   amount_total = VALUES(amount_total), vat_total = VALUES(vat_total),
                   status = VALUES(status),

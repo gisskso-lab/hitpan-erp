@@ -102,6 +102,35 @@ public static class LegacyMdbMapping
         };
     }
 
+    /// <summary>세금계산서 <c>invoice_no</c> 컬럼 길이 — <c>tax_invoices.invoice_no varchar(32) NOT NULL</c> (DESCRIBE 확인 2026-09-09 hitpan_e2e).</summary>
+    public const int TaxInvoiceNoMaxLength = 32;
+
+    /// <summary>
+    /// 이관 세금계산서 <c>invoice_no</c> = <c>{direction}-{TX_NO}-{SEQ}-{PDT}-{REM해시8}</c> — 작22 (2026-09-09) C1.
+    /// <list type="bullet">
+    ///   <item>종전(5월 #71 옵션 A/F)은 <c>{TX_NO}-{SEQ}-{PDT}-{HASH8}</c> 로 <b>방향이 없었다.</b> DOCF4 에는 그 4키가 같은 행이
+    ///   <b>21쌍</b>(TX_IO 1 과 2) 있어 <c>uk_tax_invoices_invoice_no</c> 가 먼저 걸려 ON DUPLICATE 로 한쪽이 덮였고, 실행마다 승자가 바뀌었다.
+    ///   선행검증 20260909검1 §2-4: 같은 4키 + <c>TX_IO</c> 중복 그룹 <b>0</b> ⇒ 방향만 앞세우면 21쌍이 전부 갈린다.</item>
+    ///   <item><paramref name="direction"/> 은 <see cref="TaxDirection"/> 이 돌려준 "S"/"B" 만 받는다 — 그 외는 throw(원값 1/2 를 넣으면 옛 사고 모양이 된다).</item>
+    ///   <item>실측 TX_NO 8자 · SEQ ≤ 9 · PDT 8자 · 해시 8자 ⇒ <b>30자</b>. 컬럼은 varchar(32) — 넘으면 throw(잘라 넣으면 UNIQUE 의 뜻이 깨진다).</item>
+    ///   <item>빈 PDT 는 호출부가 종전처럼 "0" 을 넘긴다. <c>source_id</c>(<c>mig-{io}-…</c>) 형식은 이 함수와 무관하게 <b>불변</b> — 재이관 때 같은 행을 잡는 열쇠다.</item>
+    /// </list>
+    /// </summary>
+    public static string TaxInvoiceNo(string direction, string txNo, string seq, string pdt, string remHash8)
+    {
+        if (direction is not ("S" or "B"))
+        {
+            throw new ArgumentOutOfRangeException(nameof(direction), direction, "세금계산서 direction 은 \"S\"(매출) 또는 \"B\"(매입)만 허용한다.");
+        }
+        var no = $"{direction}-{txNo}-{seq}-{pdt}-{remHash8}";
+        if (no.Length > TaxInvoiceNoMaxLength)
+        {
+            throw new ArgumentException(
+                $"tax_invoices.invoice_no 는 {TaxInvoiceNoMaxLength}자 이하여야 한다: '{no}' ({no.Length}자)");
+        }
+        return no;
+    }
+
     /// <summary>
     /// DOCF7 <c>SC_CR / SC_DR</c> → 분개 <c>(차변, 대변)</c>.
     /// 레거시 명명은 뒤집혀 있다 — <b><c>SC_CR</c> = 차변 · <c>SC_DR</c> = 대변</b>(진범 #76 swap 유지).
@@ -200,4 +229,14 @@ public static class LegacyMdbMapping
         }
         return memo.Length > BomItemMemoMaxLength ? memo[..BomItemMemoMaxLength] : memo;
     }
+
+    /// <summary>
+    /// 대사표 품목 키 = <c>품명|규격</c> — 공백 trim · 대소문자 무시 · <b>끝의 <c>|</c> 는 걷어낸다</b> (작22 (2026-09-09) C2 ⑤).
+    /// 규격이 비면 <c>"품명|"</c> 이 아니라 <c>"품명"</c> 이다. 그래야 <c>EnsureMigAutoItemAsync</c> 가 종전에
+    /// <c>item_name="품명|규격" · spec NULL</c> 로 등록한 441건(선행검증 20260909검1 §2-6)이 레거시 <c>(IJ_PUM, IJ_KU)</c> 키와
+    /// 같은 글자가 된다 — 옛 등록분을 고치지 않고도 대사가 맞는다.
+    /// <see cref="MdbReconciliationService"/> 는 이 함수만 부른다(규칙은 한 군데). 이관 쪽 <c>BuildItemKey</c>(대소문자 보존 · 매핑용)와는 용도가 다르다.
+    /// </summary>
+    public static string ItemKey(string? name, string? spec)
+        => $"{(name ?? string.Empty).Trim()}|{(spec ?? string.Empty).Trim()}".TrimEnd('|').ToUpperInvariant();
 }

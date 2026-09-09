@@ -153,6 +153,13 @@ await using (var db2 = new MySqlConnection(connStr))
         ("cashbook 행수", "SELECT COUNT(*) FROM cashbook WHERE tenant_id=@T"),
         ("expenses 행수", "SELECT COUNT(*) FROM expenses WHERE tenant_id=@T"),
         ("bank_transactions 행수", "SELECT COUNT(*) FROM bank_transactions WHERE tenant_id=@T"),
+        // 작22 (2026-09-09) C4 — 계산서 21쌍(C1)·품목 키(C2)·일일보고서(갈래 D) 판정기. 기대값은 이 MDB 기준(선행검증 20260909검1).
+        //   DESCRIBE 확인(hitpan_e2e): tax_invoices(direction char(1) · source_id varchar(80) · invoice_no varchar(32)) · items(item_name · spec) · hr_reports(source_type 은 DB-119 전엔 없음).
+        ("tax_invoices 행수(migration) [기대 66,631]", "SELECT COUNT(*) FROM tax_invoices WHERE tenant_id=@T AND source_type='migration'"),
+        ("tax_invoices direction≠source_id 토큰 [기대 0]", "SELECT COUNT(*) FROM tax_invoices WHERE tenant_id=@T AND source_type='migration' AND SUBSTRING_INDEX(SUBSTRING_INDEX(source_id,'-',2),'-',-1) <> CASE direction WHEN 'S' THEN '2' WHEN 'B' THEN '1' ELSE '?' END"),
+        ("tax_invoices invoice_no 최대 길이 [기대 ≤32 · 새 형식 30]", "SELECT COALESCE(MAX(CHAR_LENGTH(invoice_no)),0) FROM tax_invoices WHERE tenant_id=@T AND source_type='migration'"),
+        ("MIG-AUTO 품목 item_name 에 '|' 있고 spec NULL [신규 이관 기대 0]", "SELECT COUNT(*) FROM items WHERE tenant_id=@T AND item_code LIKE 'MIG-AUTO-%' AND item_name LIKE '%|%' AND spec IS NULL"),
+        ("hr_reports migration 행수 [기대 9,167 · DB-119 전엔 NA]", "SELECT COUNT(*) FROM hr_reports WHERE tenant_id=@T AND source_type='migration'"),
     };
     report.AppendLine("## 판정 SQL");
     report.AppendLine();
@@ -165,6 +172,11 @@ await using (var db2 = new MySqlConnection(connStr))
         {
             var o = await db2.ExecuteScalarAsync<object?>(sql, new { T = tenantId });
             val = o switch { null => "NULL", decimal d => d.ToString("N2"), double f => f.ToString("N2"), long l => l.ToString("N0"), int i => i.ToString("N0"), _ => o.ToString() ?? "" };
+        }
+        catch (MySqlException ex) when (ex.ErrorCode == MySqlErrorCode.BadFieldError)
+        {
+            // 작22 (2026-09-09) C4: 컬럼이 아직 없는 표(hr_reports.source_type 은 갈래 D 의 DB-119 가 만든다)는 그 행만 NA — 도구는 계속 돈다.
+            val = $"NA(컬럼 없음) {ex.Message}";
         }
         catch (Exception ex)
         {
