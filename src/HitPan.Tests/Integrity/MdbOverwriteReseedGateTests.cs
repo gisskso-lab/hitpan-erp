@@ -261,6 +261,56 @@ public sealed class MdbOverwriteReseedGateTests
     }
 
     /// <summary>
+    /// 🔴 G-OW8 — 지우기는 <b>자료가 들어 있는 컴퓨터에서만</b> 된다(2026-08-11 사장님 지시 · 초기화 화면과 같은 규칙).
+    /// <para>
+    /// 초기화 화면은 컨트롤러 전체가 <c>MainPcOnly</c> 인데, 덮어쓰기는 <c>/start</c> 안의 분기라
+    /// 같은 가드를 <b>따로 물어야</b> 한다. 안 물면 밖에서 주소만 알면 회사 장부를 통째로 지울 수 있다.
+    /// </para>
+    /// <para>무력화: <c>PrepareOverwriteAsync</c> 의 메인PC 검사를 빼면 지우기가 불려 빨간불.</para>
+    /// </summary>
+    [Fact]
+    public async Task G_OW8_지우기는_자료가_있는_컴퓨터에서만_된다()
+    {
+        var spy = new SpyDataResetService();
+        var controller = NewController(spy, fromOtherPc: true);
+
+        var result = await controller.StartMigrationJob(new MdbMigrationRequest
+        {
+            FolderPath = @"C:\HITWIN",
+            Mode = "overwrite",
+            ConfirmText = "덮어쓰기",
+            Password = "비밀번호있음",
+        }, default);
+
+        var obj = Assert.IsType<ObjectResult>(result);
+        Assert.Equal(403, obj.StatusCode);
+        Assert.False(spy.Called, "다른 컴퓨터에서 온 요청인데 지우기가 불렸다 — 주소만 알면 장부가 사라진다.");
+    }
+
+    /// <summary>
+    /// 🔴 G-OW9 — 「없는 것만 보태기」는 <b>막지 않는다</b>. 지우는 쪽만 컴퓨터를 가린다.
+    /// <para>이 대조가 없으면 위 가드가 정상 업무까지 막아 놓고 초록불일 수 있다(헌법 #20 — 흐름을 끊지 않는다).</para>
+    /// </summary>
+    [Fact]
+    public async Task G_OW9_보태기는_다른_컴퓨터에서도_막히지_않는다()
+    {
+        var spy = new SpyDataResetService();
+        var controller = NewController(spy, fromOtherPc: true);
+
+        // 보태기는 지우기 분기를 타지 않으므로 메인PC 검사에 걸리지 않는다.
+        // (그 뒤 잡 생성에서 의존이 없어 터지는데, 그것이 곧 "403 으로 끊기지 않았다" 는 증거다.)
+        var ex = await Record.ExceptionAsync(() => controller.StartMigrationJob(new MdbMigrationRequest
+        {
+            FolderPath = @"C:\HITWIN",
+            Mode = "merge",
+        }, default));
+
+        Assert.NotNull(ex);                 // 잡 저장소가 없어서 터진다 = 403 으로 걸러지지 않았다
+        Assert.IsNotType<ObjectResult>(ex); // 403 을 돌려준 게 아니다
+        Assert.False(spy.Called, "보태기인데 지우기가 불렸다.");
+    }
+
+    /// <summary>
     /// 🔴 G-OW7 — 초기화 화면과 덮어쓰기가 <b>같은 재시드</b>를 탄다.
     /// <para>
     /// 두 컨트롤러가 모두 <see cref="CompanyBootstrapProvisioner"/> 를 받아야 하고,
@@ -326,7 +376,8 @@ public sealed class MdbOverwriteReseedGateTests
     }
 
     /// <summary>모드 검사·확인 검사만 타는 자리라 나머지 의존은 넣지 않는다 — 만지면 그 자리에서 터진다(그게 증명이다).</summary>
-    private static MigrationController NewController(IDataResetService dataReset)
+    /// <param name="fromOtherPc">참이면 터널을 지나온 요청처럼 꾸민다(= 자료 보관 컴퓨터가 아니다).</param>
+    private static MigrationController NewController(IDataResetService dataReset, bool fromOtherPc = false)
     {
         var c = new MigrationController(
             migrationService: null!, logger: NullLogger<MigrationController>.Instance,
@@ -336,6 +387,8 @@ public sealed class MdbOverwriteReseedGateTests
         var http = new DefaultHttpContext();
         http.Items["TenantId"] = "gate-tenant";
         http.Items["UserId"] = "gate-user";
+        http.Connection.RemoteIpAddress = System.Net.IPAddress.Loopback;
+        if (fromOtherPc) { http.Request.Headers["CF-Connecting-IP"] = "203.0.113.9"; }
         c.ControllerContext = new ControllerContext { HttpContext = http };
         return c;
     }

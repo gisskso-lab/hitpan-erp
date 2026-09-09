@@ -662,6 +662,19 @@ public sealed class MigrationController : ControllerBase
         var userId = HttpContext.Items["UserId"]?.ToString();
         if (string.IsNullOrEmpty(userId)) return Forbid();
 
+        // 🔴 지우는 일은 **자료가 들어 있는 그 컴퓨터에서만** (2026-08-11 사장님 지시 — 초기화 화면과 같은 규칙).
+        //   「없는 것만 보태기」는 어디서든 되지만, 덮어쓰기는 초기화와 같은 무게라 같은 자리로 묶는다.
+        //   화면을 감추는 것으로는 막은 것이 아니다 — 주소를 알면 직접 부를 수 있다.
+        if (!HitPan.API.Security.MainPcOnlyAttribute.IsMainPc(HttpContext))
+        {
+            _logger.LogWarning("[Migrate-Overwrite] 자료 보관 컴퓨터가 아닌 곳에서의 지우기 요청 차단 tenant={Tenant}", ForLog(tenantId));
+            return StatusCode(403, new
+            {
+                error = "main_pc_only",
+                message = "기존 자료를 모두 지우고 새로 가져오기는 회사 자료가 들어 있는 컴퓨터에서만 할 수 있습니다.",
+            });
+        }
+
         // 2단 확인 — 초기화 화면과 같은 방식(비번은 ResetAllAsync 가 대조한다).
         if (!string.Equals((request.ConfirmText ?? string.Empty).Trim(), OverwriteConfirmText, StringComparison.Ordinal))
         {

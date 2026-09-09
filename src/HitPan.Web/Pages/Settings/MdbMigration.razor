@@ -87,10 +87,18 @@
                 히트판에 이미 있는 자료는 그대로 두고, 예전 히트판에만 있는 자료를 채웁니다. 여러 번 해도 안전합니다.
             </MudText>
         </MudRadio>
-        <MudRadio T="string" Value="@("overwrite")" Color="Color.Error" Dense="true">
+        <MudRadio T="string" Value="@("overwrite")" Color="Color.Error" Dense="true" Disabled="@(!_isMainPc)">
             기존 자료를 <b>모두 지우고 새로 가져오기</b>
             <MudText Typo="Typo.caption" Class="d-block mud-text-secondary">
-                히트판의 업무 자료를 모두 지운 뒤 예전 히트판을 처음부터 다시 읽습니다. 지우기 전에 자동으로 백업합니다.
+                @if (_isMainPc)
+                {
+                    <text>히트판의 업무 자료를 모두 지운 뒤 예전 히트판을 처음부터 다시 읽습니다. 지우기 전에 자동으로 백업합니다.</text>
+                }
+                else
+                {
+                    @* 서버도 같은 규칙으로 막는다 — 화면을 잠그는 것만으로는 막은 게 아니다(2026-08-11 사장님 지시). *@
+                    <text>이 방식은 <b>회사 자료가 들어 있는 컴퓨터</b>에서만 고를 수 있습니다. 히트판이 설치된 그 컴퓨터에서 열어 주세요.</text>
+                }
             </MudText>
         </MudRadio>
     </MudRadioGroup>
@@ -510,6 +518,10 @@
     private string _overwriteConfirm = "";
     private int? _overwriteImpactTotal;
     private string _overwriteImpactDetail = "";
+
+    /// 지우는 방식은 자료가 들어 있는 컴퓨터에서만 고를 수 있다(2026-08-11 사장님 지시 · 초기화·백업 화면과 같은 규칙).
+    /// 못 물어봤으면 <b>잠근 채로 둔다</b> — 확인이 안 된 상태에서 열어주면 막은 적이 없는 것과 같다.
+    private bool _isMainPc;
     private bool _loading;
     private string _statusMessage = "";
     private Dictionary<string, int>? _previewResult;
@@ -611,6 +623,20 @@
     /// </summary>
     protected override async Task OnInitializedAsync()
     {
+        // 🔴 20260910작1 A1: 지우는 방식을 고를 수 있는 자리인지 먼저 묻는다.
+        //   초기화·백업 화면(MainPcOnly.razor)이 쓰는 **같은 주소**다 — 규칙을 여기 다시 적지 않는다.
+        try
+        {
+            var mainPc = await Http.GetFromJsonAsync<MainPcResult>("api/devices/is-main-pc");
+            _isMainPc = mainPc?.IsMainPc ?? false;
+        }
+        catch (Exception ex)
+        {
+            // 못 물어봤으면 잠근 채로 둔다(헌법 #15 — 삼키지 않는다).
+            Console.Error.WriteLine($"[MdbMigration] 자료보관 컴퓨터 여부 확인 실패: {ex.GetType().Name}: {ex.Message}");
+            _isMainPc = false;
+        }
+
         try
         {
             var resp = await Http.GetAsync("api/migration/legacy-mdb/current");
@@ -882,6 +908,12 @@
     {
         public string Label { get; set; } = "";
         public int Cnt { get; set; }
+    }
+
+    /// <summary>자료보관 컴퓨터 여부 응답 — <c>MainPcOnly.razor</c> 와 같은 모양.</summary>
+    private sealed class MainPcResult
+    {
+        public bool IsMainPc { get; set; }
     }
 
     /// <summary>
