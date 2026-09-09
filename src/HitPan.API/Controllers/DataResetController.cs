@@ -69,13 +69,20 @@ public sealed class DataResetController : HitPanControllerBase
         }
         catch (Exception ex)
         {
+            // 🔴 [3-V] 2026-09-10: 이 실패는 **반드시 화면까지 가야 한다.**
+            //   자료는 지워졌으니 Success 는 참이다. 그런데 그것만 보고 초록 알림을 띄우면
+            //   사장님은 정상인 줄 알고 첫 판매확정을 치시고, 거기서 회계 기표가 죽는다 —
+            //   이 작업이 막으려던 바로 그 증상이 조용히 되살아난다("고쳤다 ≠ 갔다").
+            //   그래서 별도 칸(warning)으로 올리고 화면이 그것을 읽는다.
             _logger.LogError(ex, "[DataReset] 초기화는 끝났으나 회사 기본 자료 다시 깔기에 실패했다");
             return Ok(new
             {
                 result.Success,
                 result.BackupId,
                 result.ClearedTableCount,
-                error = "자료는 모두 지웠으나 회사 기본 자료(계정과목·대표 사원 등)를 다시 만들지 못했습니다. 히트판을 다시 시작한 뒤에도 같으면 알려주세요.",
+                result.Error,
+                warning = "자료는 모두 지웠으나 회사 기본 자료(계정과목·대표 사원 등)를 다시 만들지 못했습니다. "
+                        + "이 상태로는 판매확정·수금이 회계에 기록되지 않습니다. 히트판을 다시 시작한 뒤에도 같으면 알려주세요.",
             });
         }
     }

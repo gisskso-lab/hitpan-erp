@@ -73,6 +73,10 @@ public sealed class MdbOverwriteReseedGateTests
             Assert.Equal(ExpectedLaborPolicies, CountOf(db, "labor_policy_settings", tenantId));
             Assert.Equal(1, CountOf(db, "warehouses", tenantId));
             Assert.Equal(1, CountOf(db, "employees", tenantId));
+            // 🔴 [3-V] 2026-09-10: 회사 생성 때 깔리는 것은 **여섯**이다 — 기기 슬롯 기준값까지 되살아나야 한다.
+            //   안 깔면 그 회사는 20260816작1 이 봉합한 상태로 되돌아간다(요금 한도가 설정표가 아니라 코드로 돈다).
+            Assert.True(CountOf(db, "device_slot_policy_settings", tenantId) > 0,
+                "기기 슬롯 기준값이 안 깔렸다 — 초기화가 지운 것을 다섯만 되살리고 있다.");
 
             // 대표 사원이 **결재선에서 고를 수 있는 모습**으로 서 있나 (직급이 마스터에 있는 이름이어야 한다).
             var owner = db.QueryFirst<(string EmpNo, string Position)>(
@@ -237,12 +241,18 @@ public sealed class MdbOverwriteReseedGateTests
     /// <c>continue</c> 가 받으면 1단계에 이미 들어온 자료를 지우고 2단계를 얹는다.
     /// 동기 경로는 화면의 2단 확인을 거치지 않는다.
     /// </para>
-    /// <para>무력화: <c>RejectOverwriteHere</c> 호출을 빼면 지우기가 불려 빨간불.</para>
+    /// <para>
+    /// 무력화: <c>RejectOverwriteHere</c> 호출을 빼면 두 액션이 <b>400 을 돌려주지 않고</b> 그 다음 단계로 넘어가 빨간불.
+    /// </para>
+    /// <para>
+    /// ⚠️ [3-V] 2026-09-10 정정: 여기서 <b>지우기 서비스가 안 불린다는 것은 증거가 못 된다</b> —
+    /// 이 두 액션은 애초에 지우기를 부르는 코드가 없다(전수 확인: <c>ResetAllAsync</c> 호출자는 <c>/start</c> 계열 둘뿐).
+    /// 그래서 <b>400 이 나온다는 것 자체</b>를 판정 근거로 삼는다. 종전 주석은 없는 증언을 있다고 적고 있었다.
+    /// </para>
     /// </summary>
     [Fact]
     public async Task G_OW6_이어서가져오기와_옛경로는_덮어쓰기를_안_받는다()
     {
-        var spy = new SpyDataResetService();
         var req = new MdbMigrationRequest
         {
             FolderPath = @"C:\HITWIN",
@@ -251,13 +261,13 @@ public sealed class MdbOverwriteReseedGateTests
             Password = "비밀번호있음",
         };
 
-        var c1 = NewController(spy);
-        Assert.IsType<BadRequestObjectResult>(await c1.ContinueMigrationJob("job-1", req));
+        var c1 = NewController(new SpyDataResetService());
+        var r1 = Assert.IsType<BadRequestObjectResult>(await c1.ContinueMigrationJob("job-1", req));
+        Assert.Contains("처음 시작할 때만", r1.Value!.ToString() ?? string.Empty, StringComparison.Ordinal);
 
-        var c2 = NewController(spy);
-        Assert.IsType<BadRequestObjectResult>(await c2.MigrateLegacyMdb(req, default));
-
-        Assert.False(spy.Called, "시작 지점이 아닌 곳에서 지우기가 불렸다.");
+        var c2 = NewController(new SpyDataResetService());
+        var r2 = Assert.IsType<BadRequestObjectResult>(await c2.MigrateLegacyMdb(req, default));
+        Assert.Contains("처음 시작할 때만", r2.Value!.ToString() ?? string.Empty, StringComparison.Ordinal);
     }
 
     /// <summary>
@@ -298,15 +308,17 @@ public sealed class MdbOverwriteReseedGateTests
         var controller = NewController(spy, fromOtherPc: true);
 
         // 보태기는 지우기 분기를 타지 않으므로 메인PC 검사에 걸리지 않는다.
-        // (그 뒤 잡 생성에서 의존이 없어 터지는데, 그것이 곧 "403 으로 끊기지 않았다" 는 증거다.)
+        // 통과했다는 증거 = **잡을 만드는 자리까지 갔다**는 것이다. 이 시험은 잡 저장소를 안 넣었으므로
+        // 거기서 NullReference 로 터진다 — 즉 403 으로 되돌려보내진 것이 아니다.
+        // ([3-V] 2026-09-10 정정: 종전의 `Assert.IsNotType<ObjectResult>(ex)` 는 예외가 ObjectResult 일 수 없어
+        //  언제나 참이었다 — 아무것도 재지 않는 단언이었다.)
         var ex = await Record.ExceptionAsync(() => controller.StartMigrationJob(new MdbMigrationRequest
         {
             FolderPath = @"C:\HITWIN",
             Mode = "merge",
         }, default));
 
-        Assert.NotNull(ex);                 // 잡 저장소가 없어서 터진다 = 403 으로 걸러지지 않았다
-        Assert.IsNotType<ObjectResult>(ex); // 403 을 돌려준 게 아니다
+        Assert.IsType<NullReferenceException>(ex);
         Assert.False(spy.Called, "보태기인데 지우기가 불렸다.");
     }
 
@@ -332,6 +344,47 @@ public sealed class MdbOverwriteReseedGateTests
             .ToList();
         Assert.Single(entries);
         Assert.Equal(nameof(CompanyBootstrapProvisioner.ReseedCompanySkeletonAsync), entries[0].Name);
+    }
+
+    /// <summary>
+    /// 🔴 G-OW10 — 초기화 화면이 <b>정말로 뼈대를 다시 깐다</b>(구조가 아니라 결과로 잰다).
+    /// <para>
+    /// G-OW7 은 "생성자에 들어 있나 · 이름이 하나인가" 만 봤다. 그것만으로는
+    /// <b>부르는 코드가 빠져도 초록</b>이다 — 이 프로젝트가 반복해 온 *"고쳤다 ≠ 갔다"* 자리다.
+    /// 그래서 지우기를 흉내만 내는 가짜를 넣고 <c>ResetAll</c> 을 실제로 불러, 그 뒤 <b>표에 행이 섰는지</b> 센다.
+    /// </para>
+    /// <para>무력화: <c>DataResetController</c> 의 재시드 호출을 빼면 계정과목이 0 이라 빨간불.</para>
+    /// </summary>
+    [Fact]
+    public async Task G_OW10_초기화화면이_정말로_뼈대를_다시_깐다()
+    {
+        if (!ServerAvailable()) { Skipped(nameof(G_OW10_초기화화면이_정말로_뼈대를_다시_깐다)); return; }
+
+        var tenantId = NewTenantId();
+        using var db = Open();
+        try
+        {
+            SeedParentUser(db, tenantId);
+
+            var controller = new DataResetController(
+                new SucceedingDataResetService(),
+                NewProvisioner(),
+                NullLogger<DataResetController>.Instance);
+
+            var http = new DefaultHttpContext();
+            http.Items["TenantId"] = tenantId;
+            http.Items["UserId"] = "u-" + tenantId;
+            controller.ControllerContext = new ControllerContext { HttpContext = http };
+
+            var result = await controller.ResetAll(
+                new DataResetRequest { Password = "x", ConfirmText = "초기화" }, default);
+
+            Assert.IsType<OkObjectResult>(result);
+            Assert.Equal(ExpectedAccounts, CountOf(db, "accounts", tenantId));
+            Assert.Equal(1, CountOf(db, "employees", tenantId));
+            Assert.Equal(ExpectedLaborPolicies, CountOf(db, "labor_policy_settings", tenantId));
+        }
+        finally { CleanupTenant(db, tenantId); }
     }
 
     // ────────────────────────────────────────────────────────────────────────
@@ -373,6 +426,17 @@ public sealed class MdbOverwriteReseedGateTests
             Called = true;
             return Task.FromResult(new DataResetResponse { Success = false, Error = "게이트용 가짜" });
         }
+    }
+
+    /// <summary>
+    /// 지우기가 <b>끝난 척</b>만 한다 — 아무것도 지우지 않는다.
+    /// 초기화 화면이 그 뒤에 재시드를 타는지만 보려는 것이라, 진짜 삭제는 필요 없다(헌법 #39).
+    /// </summary>
+    private sealed class SucceedingDataResetService : IDataResetService
+    {
+        public Task<DataResetResponse> ResetAllAsync(
+            DataResetRequest request, string tenantId, string userId, CancellationToken ct = default)
+            => Task.FromResult(new DataResetResponse { Success = true, BackupId = "gate", ClearedTableCount = 0 });
     }
 
     /// <summary>모드 검사·확인 검사만 타는 자리라 나머지 의존은 넣지 않는다 — 만지면 그 자리에서 터진다(그게 증명이다).</summary>
@@ -426,7 +490,7 @@ public sealed class MdbOverwriteReseedGateTests
     /// <summary>자기가 만든 회사만 지운다 — 다른 회사는 건드리지 않는다(헌법 #2·#39).</summary>
     private static void CleanupTenant(MySqlConnection db, string tenantId)
     {
-        foreach (var t in new[] { "employees", "positions", "labor_policy_settings", "warehouses", "accounts", "users" })
+        foreach (var t in new[] { "employees", "positions", "labor_policy_settings", "warehouses", "accounts", "device_slot_policy_settings", "users" })
         {
             try { db.Execute($"DELETE FROM `{t}` WHERE tenant_id = @T", new { T = tenantId }); }
             catch (MySqlException ex)

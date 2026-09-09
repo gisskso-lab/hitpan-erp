@@ -251,27 +251,27 @@ public sealed class MigrationController : ControllerBase
         }
         catch (FileNotFoundException ex)
         {
-            _logger.LogWarning(ex, "[Migrate] MDB 파일 미발견 folder={Folder}", request.FolderPath);
+            _logger.LogWarning(ex, "[Migrate] MDB 파일 미발견 folder={Folder}", ForLog(request.FolderPath));
             return NotFound(new { message = $"MDB 파일을 찾을 수 없습니다: {ex.Message}" });
         }
         catch (DirectoryNotFoundException ex)
         {
-            _logger.LogWarning(ex, "[Migrate] 폴더 미존재 folder={Folder}", request.FolderPath);
+            _logger.LogWarning(ex, "[Migrate] 폴더 미존재 folder={Folder}", ForLog(request.FolderPath));
             return NotFound(new { message = $"폴더가 존재하지 않습니다: {request.FolderPath}" });
         }
         catch (UnauthorizedAccessException ex)
         {
-            _logger.LogWarning(ex, "[Migrate] 폴더 접근 권한 없음 folder={Folder}", request.FolderPath);
+            _logger.LogWarning(ex, "[Migrate] 폴더 접근 권한 없음 folder={Folder}", ForLog(request.FolderPath));
             return StatusCode(403, new { message = $"폴더 접근 권한이 없습니다: {request.FolderPath}" });
         }
         catch (InvalidOperationException ex)
         {
-            _logger.LogWarning(ex, "[Migrate] 데이터 무결성·형식 오류 folder={Folder}", request.FolderPath);
+            _logger.LogWarning(ex, "[Migrate] 데이터 무결성·형식 오류 folder={Folder}", ForLog(request.FolderPath));
             return BadRequest(new { message = ex.Message });
         }
         catch (System.Data.OleDb.OleDbException ex)
         {
-            _logger.LogWarning(ex, "[Migrate] OLEDB 오류 folder={Folder} hresult={HResult}", request.FolderPath, ex.HResult);
+            _logger.LogWarning(ex, "[Migrate] OLEDB 오류 folder={Folder} hresult={HResult}", ForLog(request.FolderPath), ex.HResult);
             var hint = ex.Message.Contains("password", StringComparison.OrdinalIgnoreCase) || ex.Message.Contains("암호")
                 ? "MDB 비밀번호가 틀렸거나 비번이 걸려있습니다. 비밀번호 칸을 확인해주세요."
                 : "MDB 파일을 열 수 없습니다. ACE OLEDB Provider 설치 여부 + 파일 손상 여부를 확인해주세요.";
@@ -279,12 +279,12 @@ public sealed class MigrationController : ControllerBase
         }
         catch (System.ComponentModel.Win32Exception ex)
         {
-            _logger.LogError(ex, "[Migrate] ACE Provider 미설치 가능성 folder={Folder}", request.FolderPath);
+            _logger.LogError(ex, "[Migrate] ACE Provider 미설치 가능성 folder={Folder}", ForLog(request.FolderPath));
             return StatusCode(500, new { message = "MDB 처리 엔진(Microsoft.ACE.OLEDB.12.0)이 설치되지 않았을 가능성이 있습니다." });
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "[Migrate] 미처리 예외 folder={Folder}", request.FolderPath);
+            _logger.LogError(ex, "[Migrate] 미처리 예외 folder={Folder}", ForLog(request.FolderPath));
             return StatusCode(500, new { message = $"마이그레이션 실행 중 오류: {ex.GetType().Name} - {ex.Message}" });
         }
     }
@@ -597,6 +597,10 @@ public sealed class MigrationController : ControllerBase
         if (string.IsNullOrEmpty(tenantId)) return Forbid();
 
         // 헌법 #16: 커넥션 하나에 UNION ALL — Task.WhenAll 로 나누지 않는다.
+        // 🔴 [3-V] 2026-09-10: 4종 → 8종으로 넓혔다. 종전엔 명세서·매입·수금·지급만 세서,
+        //   계산서·경비를 수백 건 치고도 화면이 「없습니다」 라고 말할 수 있었다.
+        //   ⚠️ 견적·수주·발주·반품은 `source_type` 칸이 없어 **가져온 것과 직접 친 것을 가릴 수 없다**(DESCRIBE 실측).
+        //     그래서 세지 않고, 대신 화면 문구가 「이 숫자가 전부는 아니다」 라고 말한다 — 숫자를 부풀리지도, 없다고 말하지도 않는다.
         const string sql = @"
             SELECT '명세서' AS Label, COUNT(*) AS Cnt FROM sales_deliveries
               WHERE tenant_id = @TenantId AND (source_type IS NULL OR source_type <> 'migration')
@@ -608,6 +612,18 @@ public sealed class MigrationController : ControllerBase
               WHERE tenant_id = @TenantId AND (source_type IS NULL OR source_type <> 'migration')
             UNION ALL
             SELECT '지급', COUNT(*) FROM payments
+              WHERE tenant_id = @TenantId AND (source_type IS NULL OR source_type <> 'migration')
+            UNION ALL
+            SELECT '세금계산서', COUNT(*) FROM tax_invoices
+              WHERE tenant_id = @TenantId AND (source_type IS NULL OR source_type <> 'migration')
+            UNION ALL
+            SELECT '경비', COUNT(*) FROM expenses
+              WHERE tenant_id = @TenantId AND (source_type IS NULL OR source_type <> 'migration')
+            UNION ALL
+            SELECT '현금출납', COUNT(*) FROM cashbook
+              WHERE tenant_id = @TenantId AND (source_type IS NULL OR source_type <> 'migration')
+            UNION ALL
+            SELECT '은행거래', COUNT(*) FROM bank_transactions
               WHERE tenant_id = @TenantId AND (source_type IS NULL OR source_type <> 'migration')";
 
         try

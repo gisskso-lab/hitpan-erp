@@ -346,6 +346,9 @@ public sealed class CompanyBootstrapProvisioner
     ///      (사장님 결재 2026-08-14). 마스터 시드는 <see cref="SeedStandardPositionsAsync"/> 에 있다.
     /// 🔴 20260910작1: <c>NOT EXISTS</c> 를 더했다 — 재시드가 **되살리기만 하고 덮어쓰지 않게** 하려는 것이다.
     ///    신규 생성 시점엔 이 회사에 사원이 0명이라 조건이 언제나 참 ⇒ 종전 동작 무변경.
+    /// 🔴 [3-V] 2026-09-10: 가드를 <c>user_id</c> <b>또는 <c>emp_no='0001'</c></b> 로 넓혔다.
+    ///    실제로 터지는 제약은 <c>uq_tenant_empno(tenant_id, emp_no)</c> 인데(DB 실측) 가드가 다른 열쇠를 보고 있었다 —
+    ///    가드와 제약의 열쇠가 다르면 "막았다고 믿는데 1062 로 죽는" 자리가 된다.
     /// </remarks>
     private static Task SeedOwnerEmployeeAsync(
         MySqlConnection db, IDbTransaction? tx, string tenantId, string userId, string employeeId,
@@ -357,7 +360,8 @@ public sealed class CompanyBootstrapProvisioner
                 SELECT @EmployeeId, @TenantId, @UserId, '0001', @Name,
                    @Position, 'regular', UTC_TIMESTAMP(6), 1, UTC_TIMESTAMP(6), UTC_TIMESTAMP(6), 'tenant_admin', @Email
                 WHERE NOT EXISTS (
-                    SELECT 1 FROM employees WHERE tenant_id = @TenantId AND user_id = @UserId
+                    SELECT 1 FROM employees
+                    WHERE tenant_id = @TenantId AND (user_id = @UserId OR emp_no = '0001')
                 )",
             new { EmployeeId = employeeId, TenantId = tenantId, UserId = userId, Name = name,
                   Position = OwnerPositionName, Email = loginId },
@@ -621,6 +625,16 @@ public sealed class CompanyBootstrapProvisioner
             throw;
         }
 
+        // 🔴 [3-V] 2026-09-10: 기기 슬롯 기준값도 되살린다 — 회사 생성 때 깔리는 것은 **여섯**인데
+        //   재시드가 다섯만 깔면, 초기화한 회사는 20260816작1 이 봉합한 R-1 상태로 되돌아간다
+        //   (요금 한도가 설정표가 아니라 코드 안전망으로 돌고, 대표가 화면에서 고쳐도 반영될 표가 없다).
+        //   `device_slot_policy_settings` 는 tenant_id 가 있고 보존 목록에 없어 초기화가 지운다(실측).
+        //   ⚠️ 이 시드는 회사 생성 때도 **트랜잭션 밖**이다 — 그 자리를 그대로 따른다.
+        var tenantCode = await db.QueryFirstOrDefaultAsync<string>(new CommandDefinition(
+            "SELECT tenant_code FROM tenants WHERE tenant_id = @TenantId LIMIT 1",
+            new { TenantId = tenantId }, cancellationToken: ct)) ?? tenantId;
+        await SeedDeviceSlotPolicyAsync(db, tenantId, tenantCode, ct);
+
         // 실제로 무엇이 서 있는지 **세어서** 돌려준다 — 게이트가 반환값이 아니라 이 숫자를 본다.
         var counts = await db.QueryFirstAsync<CompanySkeletonReseedResult>(new CommandDefinition(@"
             SELECT
@@ -628,12 +642,14 @@ public sealed class CompanyBootstrapProvisioner
               (SELECT COUNT(*) FROM employees              WHERE tenant_id = @TenantId) AS Employees,
               (SELECT COUNT(*) FROM positions              WHERE tenant_id = @TenantId) AS Positions,
               (SELECT COUNT(*) FROM labor_policy_settings  WHERE tenant_id = @TenantId) AS LaborPolicies,
-              (SELECT COUNT(*) FROM warehouses             WHERE tenant_id = @TenantId) AS Warehouses",
+              (SELECT COUNT(*) FROM warehouses             WHERE tenant_id = @TenantId) AS Warehouses,
+              (SELECT COUNT(*) FROM device_slot_policy_settings WHERE tenant_id = @TenantId) AS DeviceSlotPolicies",
             new { TenantId = tenantId }, cancellationToken: ct));
 
         _logger.LogInformation(
-            "[CompanyBootstrap] 회사 뼈대 재시드 완료 accounts={Accounts} employees={Employees} positions={Positions} labor={Labor} warehouses={Warehouses}",
-            counts.Accounts, counts.Employees, counts.Positions, counts.LaborPolicies, counts.Warehouses);
+            "[CompanyBootstrap] 회사 뼈대 재시드 완료 accounts={Accounts} employees={Employees} positions={Positions} labor={Labor} warehouses={Warehouses} deviceSlot={DeviceSlot}",
+            counts.Accounts, counts.Employees, counts.Positions, counts.LaborPolicies, counts.Warehouses,
+            counts.DeviceSlotPolicies);
 
         return counts;
     }
@@ -811,4 +827,6 @@ public sealed class CompanySkeletonReseedResult
     public int LaborPolicies { get; set; }
     /// <summary>창고 (기본창고 MAIN 1).</summary>
     public int Warehouses { get; set; }
+    /// <summary>기기 슬롯 기준값 ([3-V] 2026-09-10 — 이것도 초기화가 지운다).</summary>
+    public int DeviceSlotPolicies { get; set; }
 }

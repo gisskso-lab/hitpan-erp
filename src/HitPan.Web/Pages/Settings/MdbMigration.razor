@@ -113,8 +113,11 @@
             }
             else if (_overwriteImpactTotal == 0)
             {
-                <span> 히트판에서 직접 입력하신 거래는 없습니다.</span>
+                <span> 명세서·매입·수금·지급·계산서·경비·현금출납·은행거래에는 직접 입력하신 것이 없습니다.</span>
             }
+            @* 🔴 [3-V] 2026-09-10: 이 숫자가 전부라고 말하지 않는다 — 견적·수주·발주·반품은
+               가져온 것과 직접 친 것을 가릴 수 없어 세지 못한다. "없다"고 말하는 것이 안 세는 것보다 나쁘다. *@
+            <span> 견적·수주·발주·반품 등 나머지 업무 자료도 함께 지워집니다.</span>
             <span> 로그인 정보와 회사 정보는 그대로 남습니다.</span>
         </MudAlert>
         <MudGrid Spacing="2">
@@ -731,7 +734,7 @@
 
             // 핫픽스 2026-05-13: 비번 전달.
             // 작22 (2026-09-09) A4 · 병렬이슈 11: 주소줄(GET) → 본문(POST). 비번이 주소·서버 기록에 남지 않게 옮겼다.
-            var previewResp = await Http.PostAsJsonAsync("api/migration/legacy-mdb/preview", BuildMdbRequest());
+            var previewResp = await Http.PostAsJsonAsync("api/migration/legacy-mdb/preview", BuildReadOnlyMdbRequest());
             if (!previewResp.IsSuccessStatusCode)
             {
                 var err = await previewResp.Content.ReadAsStringAsync();
@@ -804,20 +807,46 @@
             if (ok != true) { return; }
         }
 
-        // 1) Start — 즉시 JobId 반환 (1초 내, 524 안 걸림)
-        var startResp = await Http.PostAsJsonAsync("api/migration/legacy-mdb/start", BuildMdbRequest());
-        if (!startResp.IsSuccessStatusCode)
+        // 🔴 [3-V] 2026-09-10 P0: **여기서부터 화면을 잠근다.**
+        //   「없는 것만 보태기」는 이 호출이 1초 안에 돌아오지만, 「모두 지우고 새로 가져오기」는
+        //   이 한 번의 호출 안에서 **전체 백업 + 전 자료 삭제 + 회사 기본자료 다시 깔기**를 끝내고 돌아온다.
+        //   그동안 아무 표시가 없으면 사장님은 안 눌린 줄 알고 한 번 더 누르신다 —
+        //   그러면 **첫 이관이 자료를 넣고 있는 중에 두 번째 지우기가 돈다.**
+        _loading = true;
+        _statusMessage = _mode == "overwrite"
+            ? "기존 자료를 백업하고 정리하는 중입니다. 시간이 걸릴 수 있으니 이 화면을 닫지 마세요..."
+            : "이관 시작 중...";
+        StateHasChanged();
+
+        string? jobId;
+        try
         {
-            var err = await startResp.Content.ReadAsStringAsync();
-            if (err.Length > 200) { err = err.Substring(0, 200) + "…"; }
-            Snackbar.Add($"시작 실패 ({(int)startResp.StatusCode}): {err}", Severity.Error);
+            var startResp = await Http.PostAsJsonAsync("api/migration/legacy-mdb/start", BuildMdbRequest());
+            if (!startResp.IsSuccessStatusCode)
+            {
+                var err = await startResp.Content.ReadAsStringAsync();
+                if (err.Length > 200) { err = err.Substring(0, 200) + "…"; }
+                Snackbar.Add($"시작 실패 ({(int)startResp.StatusCode}): {err}", Severity.Error);
+                _loading = false;
+                return;
+            }
+            var startBody = await startResp.Content.ReadFromJsonAsync<StartResponse>();
+            jobId = startBody?.JobId;
+        }
+        catch (Exception ex)
+        {
+            // 🔴 응답을 못 받았다고 서버가 멈춘 것이 아니다 — 지우기·가져오기는 계속 돌고 있을 수 있다.
+            //   그러니 "다시 누르세요" 라고 하지 않는다. 화면을 새로 열어 상태를 다시 붙으라고 안내한다.
+            Console.Error.WriteLine($"[MdbMigration.StartMigrationAsync] {ex.GetType().Name}: {ex.Message}");
+            Snackbar.Add("응답을 받지 못했습니다. 작업은 계속 진행 중일 수 있으니, 이 화면을 다시 열어 진행 상태를 확인해 주세요. 다시 누르지 마세요.", Severity.Error);
+            _loading = false;
             return;
         }
-        var startBody = await startResp.Content.ReadFromJsonAsync<StartResponse>();
-        var jobId = startBody?.JobId;
+
         if (string.IsNullOrEmpty(jobId))
         {
             Snackbar.Add("가져오기 작업 번호를 받지 못했습니다.", Severity.Error);
+            _loading = false;
             return;
         }
 
@@ -841,7 +870,7 @@
     /// <summary>2단계 이어가기 요청. 실패하면 사유를 알리고 false — 작업은 멈춘 채로 남는다.</summary>
     private async Task<bool> SendContinueAsync(string jobId)
     {
-        var resp = await Http.PostAsJsonAsync($"api/migration/legacy-mdb/{jobId}/continue", BuildMdbRequest());
+        var resp = await Http.PostAsJsonAsync($"api/migration/legacy-mdb/{jobId}/continue", BuildReadOnlyMdbRequest());
         if (resp.IsSuccessStatusCode) { return true; }
 
         var err = await resp.Content.ReadAsStringAsync();
@@ -862,6 +891,21 @@
         mode = _mode,
         password = _mode == "overwrite" && !string.IsNullOrEmpty(_ownerPassword) ? _ownerPassword : null,
         confirmText = _mode == "overwrite" ? _overwriteConfirm : null,
+    };
+
+    /// <summary>
+    /// 🔴 [3-V] 2026-09-10: 읽기만 하는 호출(미리보기·맞춰보기·이어서 가져오기)에 쓰는 요청.
+    /// <para>
+    /// 이 셋은 <b>아무것도 지우지 않는다</b>. 그런데 위 요청을 그대로 쓰면 지우는 방식을 골라 둔 동안
+    /// <b>대표 계정 비밀번호가 이 세 곳에도 실려 나간다</b> — 필요 없는 곳에 비밀번호를 보내지 않는다.
+    /// 방식도 <c>merge</c> 로 고정한다: 「이어서 가져오기」는 이미 들어온 자료를 잇는 것이라 지우면 안 된다.
+    /// </para>
+    /// </summary>
+    private object BuildReadOnlyMdbRequest() => new
+    {
+        folderPath = _folderPath,
+        mdbPassword = string.IsNullOrEmpty(_mdbPassword) ? null : _mdbPassword,
+        mode = "merge",
     };
 
     /// <summary>
@@ -1153,7 +1197,7 @@
     /// 작22 (2026-09-09) A4 · 병렬이슈 11: 대사 호출도 주소줄(GET) → 본문(POST). 비번이 주소에 실리지 않는다.
     /// </summary>
     private Task<HttpResponseMessage> PostReconAsync()
-        => Http.PostAsJsonAsync("api/migration/legacy-mdb/reconcile", BuildMdbRequest());
+        => Http.PostAsJsonAsync("api/migration/legacy-mdb/reconcile", BuildReadOnlyMdbRequest());
 
     /// <summary>
     /// 작21 C1·C2: 레거시 MDB 숫자와 히트판 숫자를 받아 _recon 에 담는다.
