@@ -53,6 +53,13 @@ public sealed class MdbReconciliationService
         return b.ConnectionString;
     }
 
+    /// <summary>
+    /// 로그에 넣는 사용자 입력에서 줄바꿈·탭을 제거한다 ([3-V] 2026-09-10 · CodeQL cs/log-forging).
+    /// MDB 경로는 사장님이 화면에서 치는 값이라 개행을 섞으면 가짜 로그 줄을 만들 수 있다.
+    /// </summary>
+    private static string ForLog(string? value)
+        => System.Text.RegularExpressions.Regex.Replace(value ?? string.Empty, @"[\r\n\t]+", " ").Trim();
+
     /// <summary>거래처·품목 차이 목록 상위 N.</summary>
     private const int TopDiffRows = 20;
 
@@ -860,7 +867,7 @@ public sealed class MdbReconciliationService
         public long Items { get; set; }
         public long AutoItems { get; set; }
         public long Employees { get; set; }
-        public long FallbackEmployees { get; set; }   // 작22 ⑩ — emp_no='LEGACY_FALLBACK' 자리표시 사원(레거시에 없는 행 · 건수에서 뺀다)
+        public long FallbackEmployees { get; set; }   // 작22 ⑩ · 20260910작1 — 이관분이 아닌 사원(대표 1행 · LEGACY_FALLBACK 자리표시). 건수에서 뺀다
         public long BomHeaders { get; set; }
         public long BomLines { get; set; }
     }
@@ -883,6 +890,13 @@ public sealed class MdbReconciliationService
         // DESCRIBE 확인: partners.is_deleted · items.is_deleted/item_code · employees(tenant_id · emp_no varchar(20) NOT NULL — 2026-09-09 재확인) · bom_headers/bom_items(tenant_id).
         // 작22 (2026-09-09) C2 ⑩: 사원 건수에서 자리표시 사원(emp_no='LEGACY_FALLBACK' · MigrateExpensesAsync 가 매핑 안 되는 사원용으로 만든 1행)을 뺀다 —
         //   레거시 DOCSW 에 없는 행이라 ERP 11 = MIG 10 + 1 로 늘 DIFF 였다(선행검증 §2-6).
+        //
+        // 🔴 20260910작1 A1: 이제 <b>이관해 온 사원만</b> 센다(emp_no LIKE 'MIG-%').
+        //   덮어쓰기가 회사 뼈대를 다시 깔면 **대표 사원 1행(emp_no '0001')** 이 늘 있다. 실제 고객 설치도 마찬가지다
+        //   (신규 설치가 부모계정과 함께 만든다). 그 1행 때문에 이 항목은 언제나 레거시보다 1 많아진다.
+        //   ⚠️ e2e 테스트 DB 는 부트스트랩을 안 태워 대표가 없었기 때문에 지금까지 이 차이가 안 보였다 —
+        //     "테스트에서 안 보인다 ≠ 고객에게 안 보인다"(DB-100 사고 계통).
+        //   이 항목이 묻는 것은 "레거시 사원이 다 들어왔나" 이므로, 히트판에서 따로 만든 사원은 세지 않는 것이 맞다.
         var (erp, erpErr) = await GuardAsync("마스터(ERP)", () =>
             _db.QuerySingleAsync<MasterCounts>(new CommandDefinition(
                 """
@@ -890,8 +904,8 @@ public sealed class MdbReconciliationService
                   (SELECT COUNT(*) FROM partners  WHERE tenant_id=@T AND is_deleted=0) AS Partners,
                   (SELECT COUNT(*) FROM items     WHERE tenant_id=@T AND is_deleted=0) AS Items,
                   (SELECT COUNT(*) FROM items     WHERE tenant_id=@T AND is_deleted=0 AND item_code LIKE 'MIG-AUTO-%') AS AutoItems,
-                  (SELECT COUNT(*) FROM employees WHERE tenant_id=@T AND emp_no <> 'LEGACY_FALLBACK') AS Employees,
-                  (SELECT COUNT(*) FROM employees WHERE tenant_id=@T AND emp_no = 'LEGACY_FALLBACK') AS FallbackEmployees,
+                  (SELECT COUNT(*) FROM employees WHERE tenant_id=@T AND emp_no LIKE 'MIG-%') AS Employees,
+                  (SELECT COUNT(*) FROM employees WHERE tenant_id=@T AND emp_no NOT LIKE 'MIG-%') AS FallbackEmployees,
                   (SELECT COUNT(*) FROM bom_headers WHERE tenant_id=@T) AS BomHeaders,
                   (SELECT COUNT(*) FROM bom_items   WHERE tenant_id=@T) AS BomLines
                 """, new { T = tenantId }, commandTimeout: ErpCommandTimeoutSec, cancellationToken: ct))).ConfigureAwait(false);
@@ -901,7 +915,7 @@ public sealed class MdbReconciliationService
         items.Add(Make("master_items", "마스터", "상품", legacy?.Items, erp?.Items,
             JoinDetail(erp is null ? null : $"히트판 자동등록 품목 {erp.AutoItems:N0}건 포함", err)));
         items.Add(Make("master_employees", "마스터", "사원", legacy?.Employees, erp?.Employees,
-            JoinDetail(erp is null || erp.FallbackEmployees == 0 ? null : $"자리표시 사원 {erp.FallbackEmployees:N0} 제외", err)));
+            JoinDetail(erp is null || erp.FallbackEmployees == 0 ? null : $"히트판에서 따로 만든 사원 {erp.FallbackEmployees:N0}명 제외(대표·자리표시)", err)));
         items.Add(Make("master_bom", "마스터", "BOM", legacy?.BomHeaders, erp?.BomHeaders,
             JoinDetail(
                 legacy is null ? null : $"레거시 자재 라인 {legacy.BomLines:N0}",
@@ -1173,7 +1187,7 @@ public sealed class MdbReconciliationService
         }
         catch (InvalidOperationException ex12) when (IsProviderMissing(ex12))
         {
-            _logger.LogInformation("[MDB대사] ACE OLEDB 12.0 없음 — 16.0 으로 재시도 file={File}", Path.GetFileName(mdbPath));
+            _logger.LogInformation("[MDB대사] ACE OLEDB 12.0 없음 — 16.0 으로 재시도 file={File}", ForLog(Path.GetFileName(mdbPath)));
             try
             {
                 return OpenWith(BuildConnectionString(OleDbProvider16, mdbPath, pwd));
@@ -1210,7 +1224,7 @@ public sealed class MdbReconciliationService
         if (!File.Exists(potherPath))
         {
             error = "POTHER.mdb 없음 — 일일보고서 대사 생략";
-            _logger.LogInformation("[MDB대사] POTHER.mdb 없음 — ⑪ 일일보고서 항목은 NA path={Path}", potherPath);
+            _logger.LogInformation("[MDB대사] POTHER.mdb 없음 — ⑪ 일일보고서 항목은 NA path={Path}", ForLog(potherPath));
             return null;
         }
         try

@@ -186,7 +186,11 @@ public sealed class MdbMigrationV2ReconGateTests
         Assert.Contains("GROUP BY IJ_PUM, IJ_KU, IJ_IO", src);
         Assert.Contains("GROUP BY IJA_IO, IJA_BUY", src);
         Assert.Contains("GROUP BY S_BUY, S_GU", src);
-        Assert.Contains("emp_no <> 'LEGACY_FALLBACK'", src);
+        // 🔴 20260910작1 A1: ⑩ 은 이제 **이관해 온 사원만** 센다.
+        //   덮어쓰기가 회사 뼈대를 다시 깔면 대표 사원 1행이 늘 있고(실제 고객 설치도 그렇다),
+        //   그것까지 세면 이 항목은 언제나 레거시보다 1 많아진다 — 실측으로 확인한 자리다(2026-09-10 e2e).
+        Assert.Contains("emp_no LIKE 'MIG-%'", src);
+        Assert.DoesNotContain("emp_no <> 'LEGACY_FALLBACK'", src);
         Assert.Contains("FROM DOCME", src);
         Assert.Contains("FROM hr_reports WHERE tenant_id=@T AND source_type='migration'", src);
         Assert.Contains("FROM DOCF6 WHERE AC_JEN IS NULL OR TRIM(AC_JEN) <> '0'", src);

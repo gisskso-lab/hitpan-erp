@@ -51,10 +51,9 @@ public sealed class MdbMigrationService
     /// </summary>
     private IDbConnection Db => _jobConnection.Value ?? _db;
 
-    /// <summary>OLEDB 커넥션 문자열 템플릿 (MDB 경로 + 선택적 비번)</summary>
+    /// <summary>OLEDB Provider 이름 (MDB 경로 + 선택적 비번으로 연다)</summary>
     /// 핫픽스 2026-05-13: 사장님 MDB(비번 7618968) 지원 — 결재 #13.
-    private const string OleDbConnTemplate =
-        "Provider=Microsoft.ACE.OLEDB.12.0;Data Source={0};Jet OLEDB:Database Password={1};";
+    private const string OleDbProvider = "Microsoft.ACE.OLEDB.12.0";
 
     /// <summary>현재 마이그 호출의 MDB 비번 (AsyncLocal 컨텍스트 — overload 시그니처 보존하면서 비번 전달).</summary>
     private static readonly AsyncLocal<string?> _mdbPasswordContext = new();
@@ -785,7 +784,7 @@ public sealed class MdbMigrationService
                 uniqueChecks == 1 ? "SET SESSION unique_checks = 1" : "SET SESSION unique_checks = 0",
                 cancellationToken: ct)).ConfigureAwait(false);
             _logger.LogDebug("[MDB마이그레이션] 잡 세션 튜닝 적용 (innodb_flush=2, fk=0, unique={Unique}, mode={Mode})",
-                uniqueChecks, _modeContext.Value ?? "(미지정)");
+                uniqueChecks, ForLog(_modeContext.Value ?? "(미지정)"));
         }
         catch (Exception ex)
         {
@@ -1034,7 +1033,7 @@ public sealed class MdbMigrationService
                 uniqueChecks == 1 ? "SET SESSION unique_checks = 1" : "SET SESSION unique_checks = 0",
                 cancellationToken: ct)).ConfigureAwait(false);
             _logger.LogInformation("[MDB마이그레이션] 세션 튜닝 적용 (innodb_flush=2, fk=0, unique={Unique}, mode={Mode})",
-                uniqueChecks, _modeContext.Value ?? "(미지정)");
+                uniqueChecks, ForLog(_modeContext.Value ?? "(미지정)"));
         }
         catch (Exception ex)
         {
@@ -6725,11 +6724,31 @@ public sealed class MdbMigrationService
     private static OleDbConnection OpenOleDb(string mdbPath)
     {
         var password = _mdbPasswordContext.Value ?? string.Empty;
-        var connStr = string.Format(OleDbConnTemplate, mdbPath, password);
-        var conn = new OleDbConnection(connStr);
+        var conn = new OleDbConnection(BuildConnectionString(mdbPath, password));
         conn.Open();
         return conn;
     }
+
+    /// <summary>
+    /// 연결문자열은 <see cref="OleDbConnectionStringBuilder"/> 로만 조립한다
+    /// ([3-V] 2026-09-10 · CodeQL cs/resource-injection critical · 대사 서비스가 2026-09-08 에 먼저 고친 것과 같은 형태).
+    /// 폴더 경로·비번은 사장님이 화면에서 치는 값이라 문자열을 이어 붙이면 값 안의 <c>;</c> 가
+    /// 다음 연결 속성으로 읽힌다 — 빌더는 값을 따옴표로 감싸 한 속성 안에 가둔다.
+    /// 키 구성(Provider · Data Source · Jet OLEDB:Database Password)은 종전 템플릿과 같다.
+    /// </summary>
+    private static string BuildConnectionString(string mdbPath, string password)
+    {
+        var b = new OleDbConnectionStringBuilder { Provider = OleDbProvider, DataSource = mdbPath };
+        b["Jet OLEDB:Database Password"] = password;
+        return b.ConnectionString;
+    }
+
+    /// <summary>
+    /// 로그에 넣는 사용자 입력에서 줄바꿈·탭을 제거한다 ([3-V] 2026-09-10 · CodeQL cs/log-forging).
+    /// 모드 값은 화면 요청 바디에서 온다 — 개행을 섞으면 가짜 로그 줄을 만들 수 있다.
+    /// </summary>
+    private static string ForLog(string? value)
+        => System.Text.RegularExpressions.Regex.Replace(value ?? string.Empty, @"[\r\n\t]+", " ").Trim();
 
     /// <summary>MDB 테이블을 SELECT하여 DataTable로 반환한다. 한글 인코딩을 보장한다.</summary>
     private static DataTable ReadMdbTable(OleDbConnection conn, string sql)

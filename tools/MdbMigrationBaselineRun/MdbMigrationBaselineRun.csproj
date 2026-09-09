@@ -21,11 +21,15 @@
   <ItemGroup>
     <ProjectReference Include="..\..\src\HitPan.Application\HitPan.Application.csproj" />
     <ProjectReference Include="..\..\src\HitPan.Infrastructure\HitPan.Infrastructure.csproj" />
+    <!-- 20260910작1 A1: 덮어쓰기 순서(초기화 → 회사 뼈대 재시드 → 이관)를 실측하려면
+         재시드를 **화면과 같은 메서드**로 불러야 한다(복붙 금지 · CompanyBootstrapProvisioner 는 HitPan.API 에 산다). -->
+    <ProjectReference Include="..\..\src\HitPan.API\HitPan.API.csproj" />
   </ItemGroup>
 
   <ItemGroup>
     <PackageReference Include="MySqlConnector" Version="2.5.0" />
-    <PackageReference Include="Microsoft.Extensions.Logging.Console" Version="8.0.0" />
+    <!-- 20260910작1: HitPan.API 를 물면서 Hosting 10.0.7 이 따라온다 — 로깅도 같은 줄로 맞춘다(다운그레이드 금지). -->
+    <PackageReference Include="Microsoft.Extensions.Logging.Console" Version="10.0.7" />
   </ItemGroup>
 
   <!-- DB-*.sql 을 bin 옆 Migrations/SQL 로 — MigrationRunner 가 스키마를 최신으로 올릴 수 있게(무수정 #1). -->

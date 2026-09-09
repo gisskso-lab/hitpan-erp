@@ -73,6 +73,58 @@
     </MudGrid>
 </MudPaper>
 
+@* 🔴 20260910작1 A1 — 가져오기 방식 (사장님 결재 2026-09-10 "넣어").
+   9/4 사장님 오더 6: "마이그레이션 옵션이 두개가 되어야 함. 1덮어쓰기, 2병합".
+   화면 문구에 개발용어 0 — "병합"·"덮어쓰기"·"초기화" 대신 하는 일을 그대로 적는다. *@
+@if (!_loading)
+{
+<MudPaper Elevation="0" Class="pa-4 mb-4" Style="border:0.5px solid var(--mud-palette-lines-default);border-radius:12px">
+    <MudText Typo="Typo.subtitle2" Class="mb-3">가져오는 방식</MudText>
+    <MudRadioGroup T="string" Value="@_mode" ValueChanged="OnModeChangedAsync">
+        <MudRadio T="string" Value="@("merge")" Color="Color.Primary" Dense="true">
+            기존 자료는 두고 <b>없는 것만 보태기</b>
+            <MudText Typo="Typo.caption" Class="d-block mud-text-secondary">
+                히트판에 이미 있는 자료는 그대로 두고, 예전 히트판에만 있는 자료를 채웁니다. 여러 번 해도 안전합니다.
+            </MudText>
+        </MudRadio>
+        <MudRadio T="string" Value="@("overwrite")" Color="Color.Error" Dense="true">
+            기존 자료를 <b>모두 지우고 새로 가져오기</b>
+            <MudText Typo="Typo.caption" Class="d-block mud-text-secondary">
+                히트판의 업무 자료를 모두 지운 뒤 예전 히트판을 처음부터 다시 읽습니다. 지우기 전에 자동으로 백업합니다.
+            </MudText>
+        </MudRadio>
+    </MudRadioGroup>
+
+    @if (_mode == "overwrite")
+    {
+        <MudAlert Severity="Severity.Error" Dense="true" Class="mt-3 mb-3">
+            <b>히트판에서 직접 입력하신 자료는 되돌아오지 않습니다.</b>
+            @if (_overwriteImpactTotal is int n && n > 0)
+            {
+                <span> 지금 지워지는 거래가 <b>@n.ToString("N0")건</b> 있습니다@(string.IsNullOrEmpty(_overwriteImpactDetail) ? "" : $" ({_overwriteImpactDetail})").</span>
+            }
+            else if (_overwriteImpactTotal == 0)
+            {
+                <span> 히트판에서 직접 입력하신 거래는 없습니다.</span>
+            }
+            <span> 로그인 정보와 회사 정보는 그대로 남습니다.</span>
+        </MudAlert>
+        <MudGrid Spacing="2">
+            <MudItem xs="12" md="6">
+                <MudTextField T="string" Label="대표 계정 비밀번호" @bind-Value="_ownerPassword"
+                              Variant="Variant.Outlined" Margin="Margin.Dense" InputType="InputType.Password"
+                              HelperText="본인 확인을 위해 로그인 비밀번호를 한 번 더 입력하세요" />
+            </MudItem>
+            <MudItem xs="12" md="6">
+                <MudTextField T="string" Label="확인 문구" @bind-Value="_overwriteConfirm"
+                              Variant="Variant.Outlined" Margin="Margin.Dense"
+                              HelperText="확인을 위해 「덮어쓰기」 라고 입력하세요" />
+            </MudItem>
+        </MudGrid>
+    }
+</MudPaper>
+}
+
 @* 작22 (2026-09-09) A3 · 5/16 사장님 UX: 1단계만 끝나 멈춰 있는 가져오기가 있으면 여기서 이어받는다.
    화면에 다시 들어와도(새로고침·다음 날) 이 자리에 남아 있다 — 진행 상태는 서버에 적혀 있다. *@
 @if (_pausedJobId is not null && !_loading)
@@ -450,6 +502,14 @@
     /* ── 상태 변수 ── */
     private string _folderPath = @"C:\HITWIN";
     private string _mdbPassword = ""; // 핫픽스 2026-05-13: 레거시 MDB 비번
+
+    /* ── 🔴 20260910작1 A1: 가져오기 방식 (사장님 결재 2026-09-10) ──
+       기본은 "보태기". 지우는 쪽은 사장님이 일부러 골라야 하고, 고른 뒤에도 2단 확인을 거친다. */
+    private string _mode = "merge";
+    private string _ownerPassword = "";
+    private string _overwriteConfirm = "";
+    private int? _overwriteImpactTotal;
+    private string _overwriteImpactDetail = "";
     private bool _loading;
     private string _statusMessage = "";
     private Dictionary<string, int>? _previewResult;
@@ -694,6 +754,30 @@
     {
         _pausedJobId = null;
 
+        // 🔴 20260910작1 A1: 지우는 방식은 마지막으로 한 번 더 여쭙는다 (칸을 채웠다고 바로 지우지 않는다).
+        if (_mode == "overwrite")
+        {
+            if (string.IsNullOrEmpty(_ownerPassword))
+            {
+                Snackbar.Add("대표 계정 비밀번호를 입력해 주세요.", Severity.Warning);
+                return;
+            }
+            if (_overwriteConfirm?.Trim() != "덮어쓰기")
+            {
+                Snackbar.Add("확인을 위해 「덮어쓰기」 라고 입력해 주세요.", Severity.Warning);
+                return;
+            }
+
+            var countText = _overwriteImpactTotal is int n && n > 0
+                ? $" 히트판에서 직접 입력하신 거래 {n:N0}건이 없어집니다."
+                : "";
+            var ok = await DialogService.ShowMessageBoxAsync(
+                "기존 자료를 모두 지우고 새로 가져옵니다",
+                $"지우기 전에 자동으로 백업합니다.{countText} 계속하시겠습니까?",
+                yesText: "지우고 가져오기", cancelText: "취소");
+            if (ok != true) { return; }
+        }
+
         // 1) Start — 즉시 JobId 반환 (1초 내, 524 안 걸림)
         var startResp = await Http.PostAsJsonAsync("api/migration/legacy-mdb/start", BuildMdbRequest());
         if (!startResp.IsSuccessStatusCode)
@@ -742,15 +826,63 @@
 
     /// <summary>
     /// 서버로 보내는 요청 본문 — 폴더·비번·가져오기 방식.
-    /// 작22 A2: 방식은 <b>병합</b>(있는 자료는 두고 빈칸만 채움)이 기본이다.
-    /// ⛔ 덮어쓰기는 준비 중이라(사장님 Q1) 화면에서 고르게 하지 않는다 — 고르게 해 두면 누를 때마다 막히는 버튼이 된다.
+    /// 작22 A2 · 🔴 20260910작1 A1: 방식은 <b>보태기</b>가 기본이고, 지우는 쪽은 사장님이 골라야 간다.
+    /// 대표 비번·확인 문구는 <b>지우는 방식일 때만</b> 싣는다 — 보태기 요청에 비번을 실어 보내지 않는다.
     /// </summary>
     private object BuildMdbRequest() => new
     {
         folderPath = _folderPath,
         mdbPassword = string.IsNullOrEmpty(_mdbPassword) ? null : _mdbPassword,
-        mode = "merge",
+        mode = _mode,
+        password = _mode == "overwrite" && !string.IsNullOrEmpty(_ownerPassword) ? _ownerPassword : null,
+        confirmText = _mode == "overwrite" ? _overwriteConfirm : null,
     };
+
+    /// <summary>
+    /// 🔴 20260910작1 A1 §3-5 — 지우는 방식을 고르는 순간 <b>무엇이 없어지는지 숫자로</b> 보여준다.
+    /// 세지 못해도 방식 선택을 막지는 않는다(경고문만 건수 없이 뜬다).
+    /// </summary>
+    private async Task OnModeChangedAsync(string mode)
+    {
+        _mode = mode;
+        if (mode != "overwrite")
+        {
+            _ownerPassword = "";
+            _overwriteConfirm = "";
+            _overwriteImpactTotal = null;
+            _overwriteImpactDetail = "";
+            return;
+        }
+
+        try
+        {
+            var impact = await Http.GetFromJsonAsync<OverwriteImpact>("api/migration/legacy-mdb/overwrite-impact");
+            _overwriteImpactTotal = impact?.Total;
+            _overwriteImpactDetail = impact?.Details is { Count: > 0 } d
+                ? string.Join(" · ", d.Select(x => $"{x.Label} {x.Cnt:N0}건"))
+                : "";
+        }
+        catch (Exception ex)
+        {
+            // 헌법 #15 — 삼키지 않는다. 다만 이 실패가 사장님 작업을 막지는 않는다.
+            Console.Error.WriteLine($"[MdbMigration.OnModeChangedAsync] {ex.GetType().Name}: {ex.Message}");
+            _overwriteImpactTotal = null;
+            _overwriteImpactDetail = "";
+        }
+    }
+
+    /// <summary>덮어쓰기로 없어질 「사람이 직접 입력한 거래」 건수.</summary>
+    private sealed class OverwriteImpact
+    {
+        public int? Total { get; set; }
+        public List<OverwriteImpactDetail> Details { get; set; } = new();
+    }
+
+    private sealed class OverwriteImpactDetail
+    {
+        public string Label { get; set; } = "";
+        public int Cnt { get; set; }
+    }
 
     /// <summary>
     /// 작22 (2026-09-09) A3: 진행 화면 + 서버 신호 대기 — 처음 시작·이어서 가져오기·화면 재접속이 <b>같은 코드</b>를 탄다.

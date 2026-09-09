@@ -78,6 +78,22 @@ if (applySchema)
     if (!r.Success) return 1;
 }
 
+// ── [1-b] 회사 뼈대 재시드 (20260910작1 A1 · --reseed) ─────────────────────────
+//   덮어쓰기 순서의 ③ 단계다. 화면(초기화·덮어쓰기)이 부르는 **같은 메서드**를 부른다.
+//   초기화가 지운 표준 계정과목 27 · 대표 사원 · 직급 6 · 근로 기준값 16 · 기본창고를 되살린다.
+if (args.Contains("--reseed", StringComparer.OrdinalIgnoreCase))
+{
+    // 빈 설정을 준다 — 그러면 ResolveConnectionString 이 설치 PC 와 같은 경로(db.conf)로 붙는다.
+    // 이 도구는 HITPAN_DB_CONF 로 e2e 용 db.conf 를 가리키고 있고, DB_NAME 이 테스트 DB 가 아니면 위에서 이미 멈춘다(헌법 #39).
+    var cfg = new Microsoft.Extensions.Configuration.ConfigurationBuilder().Build();
+    var provisioner = new HitPan.API.Services.CompanyBootstrapProvisioner(
+        cfg, loggerFactory.CreateLogger<HitPan.API.Services.CompanyBootstrapProvisioner>());
+    var skeleton = await provisioner.ReseedCompanySkeletonAsync(tenantId, default);
+    log.LogInformation(
+        "뼈대 재시드: 계정과목={A} 사원={E} 직급={P} 근로기준={L} 창고={W}",
+        skeleton.Accounts, skeleton.Employees, skeleton.Positions, skeleton.LaborPolicies, skeleton.Warehouses);
+}
+
 // ── [2] 이관 실행 + 표별 소요 ─────────────────────────────────────────────────
 var host = TenantConfigReader.Get("DB_HOST") ?? "localhost";
 var port = TenantConfigReader.Get("DB_PORT") ?? "3306";

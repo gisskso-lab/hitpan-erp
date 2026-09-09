@@ -29,20 +29,32 @@ public sealed class MigrationController : ControllerBase
     private readonly IMigrationProgressService _progress;
     private readonly MdbReconciliationService _reconciliation;
 
+    /// 🔴 20260910작1 A1 — 덮어쓰기(모두 지우고 새로 가져오기)가 쓰는 둘.
+    ///   초기화는 <b>이미 있는 서비스</b>를 그대로 부른다(비번확인·강제백업·삭제·감사기록을 한 몸으로 한다).
+    private readonly IDataResetService _dataReset;
+    private readonly HitPan.API.Services.CompanyBootstrapProvisioner _provisioner;
+    private readonly System.Data.IDbConnection _db;
+
     public MigrationController(
         MdbMigrationService migrationService,
         ILogger<MigrationController> logger,
         MigrationJobStore jobStore,
         IServiceScopeFactory scopeFactory,
         IMigrationProgressService progress,
-        MdbReconciliationService reconciliation)
+        MdbReconciliationService reconciliation,
+        IDataResetService dataReset,
+        HitPan.API.Services.CompanyBootstrapProvisioner provisioner,
+        System.Data.IDbConnection db)
     {
+        _db = db;
         _migrationService = migrationService;
         _logger = logger;
         _jobStore = jobStore;
         _scopeFactory = scopeFactory;
         _progress = progress;
         _reconciliation = reconciliation;
+        _dataReset = dataReset;
+        _provisioner = provisioner;
     }
 
     /// <summary>
@@ -82,27 +94,27 @@ public sealed class MigrationController : ControllerBase
         }
         catch (FileNotFoundException ex)
         {
-            _logger.LogWarning(ex, "[Preview] MDB 파일 미발견 folder={Folder}", folderPath);
+            _logger.LogWarning(ex, "[Preview] MDB 파일 미발견 folder={Folder}", ForLog(folderPath));
             return NotFound(new { message = $"MDB 파일을 찾을 수 없습니다. 폴더 경로를 확인해주세요. ({ex.Message})" });
         }
         catch (DirectoryNotFoundException ex)
         {
-            _logger.LogWarning(ex, "[Preview] 폴더 미존재 folder={Folder}", folderPath);
+            _logger.LogWarning(ex, "[Preview] 폴더 미존재 folder={Folder}", ForLog(folderPath));
             return NotFound(new { message = $"폴더가 존재하지 않습니다: {folderPath}" });
         }
         catch (UnauthorizedAccessException ex)
         {
-            _logger.LogWarning(ex, "[Preview] 폴더 접근 권한 없음 folder={Folder}", folderPath);
+            _logger.LogWarning(ex, "[Preview] 폴더 접근 권한 없음 folder={Folder}", ForLog(folderPath));
             return StatusCode(403, new { message = $"폴더 접근 권한이 없습니다: {folderPath}" });
         }
         catch (InvalidOperationException ex)
         {
-            _logger.LogWarning(ex, "[Preview] 데이터 무결성·형식 오류 folder={Folder}", folderPath);
+            _logger.LogWarning(ex, "[Preview] 데이터 무결성·형식 오류 folder={Folder}", ForLog(folderPath));
             return BadRequest(new { message = ex.Message });
         }
         catch (System.Data.OleDb.OleDbException ex)
         {
-            _logger.LogWarning(ex, "[Preview] OLEDB 오류 folder={Folder} hresult={HResult}", folderPath, ex.HResult);
+            _logger.LogWarning(ex, "[Preview] OLEDB 오류 folder={Folder} hresult={HResult}", ForLog(folderPath), ex.HResult);
             var hint = ex.Message.Contains("password", StringComparison.OrdinalIgnoreCase) || ex.Message.Contains("암호")
                 ? "MDB 비밀번호가 틀렸거나 비번이 걸려있습니다. 비밀번호 칸을 확인해주세요."
                 : "MDB 파일을 열 수 없습니다. ACE OLEDB Provider 설치 여부 + 파일 손상 여부를 확인해주세요.";
@@ -110,13 +122,13 @@ public sealed class MigrationController : ControllerBase
         }
         catch (System.ComponentModel.Win32Exception ex)
         {
-            _logger.LogError(ex, "[Preview] ACE Provider 미설치 가능성 folder={Folder}", folderPath);
+            _logger.LogError(ex, "[Preview] ACE Provider 미설치 가능성 folder={Folder}", ForLog(folderPath));
             return StatusCode(500, new { message = "MDB 처리 엔진(Microsoft.ACE.OLEDB.12.0)이 설치되지 않았을 가능성이 있습니다. 서버 설정을 확인해주세요." });
         }
         catch (Exception ex)
         {
             // 봉합: 미처리 예외도 사용자에게 의미있는 메시지로 (silent swallow 금지 - 헌법 #15)
-            _logger.LogError(ex, "[Preview] 미처리 예외 folder={Folder}", folderPath);
+            _logger.LogError(ex, "[Preview] 미처리 예외 folder={Folder}", ForLog(folderPath));
             return StatusCode(500, new { message = $"미리보기 실행 중 오류가 발생했습니다: {ex.GetType().Name} - {ex.Message}" });
         }
     }
@@ -226,9 +238,10 @@ public sealed class MigrationController : ControllerBase
             return BadRequest(new { message = "MDB 폴더 경로를 입력해주세요." });
         }
 
-        // 작22 (2026-09-09) A2: 덮어쓰기는 아직 못 받는다 (⛔ 본체는 사장님 Q1 답 후 · 헌법 #33).
-        //   이 동기 엔드포인트는 종전 그대로 — 모드를 서비스에 넘기지 않는다(baseline·기존 호출자 동작 불변).
+        // 작22 (2026-09-09) A2 · 20260910작1 A1: 이 동기 엔드포인트는 종전 그대로 —
+        //   모드를 서비스에 넘기지 않고, 지우는 방식(덮어쓰기)도 여기서는 받지 않는다.
         if (RejectUnsupportedMode(request) is { } modeError) return modeError;
+        if (RejectOverwriteHere(request) is { } overwriteError) return overwriteError;
 
         try
         {
@@ -285,15 +298,23 @@ public sealed class MigrationController : ControllerBase
     ///   「예」면 <c>legacy-mdb/{jobId}/continue</c> 가 같은 잡으로 2단계를 잇는다. 「아니오」여도 ERP 는 기초자료만으로 바로 쓸 수 있다(헌법 #20).
     /// </summary>
     [HttpPost("legacy-mdb/start")]
-    public async Task<IActionResult> StartMigrationJob([FromBody] MdbMigrationRequest request)
+    public async Task<IActionResult> StartMigrationJob([FromBody] MdbMigrationRequest request, CancellationToken ct)
     {
         var tenantId = HttpContext.Items["TenantId"]?.ToString();
         if (string.IsNullOrEmpty(tenantId)) return Forbid();
         if (string.IsNullOrWhiteSpace(request.FolderPath))
             return BadRequest(new { message = "MDB 폴더 경로를 입력해주세요." });
 
-        // 작22 (2026-09-09) A2: 덮어쓰기 요청은 여기서 막는다 (⛔ 본체는 사장님 Q1 답 후 · 헌법 #33 — 그 자리 코드 0).
         if (RejectUnsupportedMode(request) is { } modeError) return modeError;
+
+        // 🔴 20260910작1 A1 — 「모두 지우고 새로 가져오기」.
+        //   순서가 곧 설계다(설계 별지 §1-1): 백업·초기화 → 회사 뼈대 재시드 → 잡 생성 → 이관.
+        //   잡을 **초기화 뒤에** 만드는 이유: migration_jobs 도 초기화 대상이라 먼저 만들면 그 자리에서 지워진다.
+        if (MdbMigrationModes.IsOverwrite(request.Mode))
+        {
+            var overwriteError = await PrepareOverwriteAsync(tenantId, request, ct).ConfigureAwait(false);
+            if (overwriteError is not null) return overwriteError;
+        }
 
         // P0 #5 (2026-05-14): migration_jobs DB INSERT — migration_errors FK 충족.
         var userId = HttpContext.Items["UserId"]?.ToString() ?? tenantId;
@@ -327,6 +348,7 @@ public sealed class MigrationController : ControllerBase
         if (string.IsNullOrEmpty(tenantId)) return Forbid();
 
         if (RejectUnsupportedMode(request) is { } modeError) return modeError;
+        if (RejectOverwriteHere(request) is { } overwriteError) return overwriteError;
 
         var row = await _jobStore.GetFromDbAsync(jobId);
         if (row is null) return NotFound(new { message = "이어서 가져올 자료를 찾을 수 없습니다." });
@@ -527,9 +549,9 @@ public sealed class MigrationController : ControllerBase
     }
 
     /// <summary>
-    /// 작22 (2026-09-09) A2: 아직 못 받는 방식을 거른다.
-    /// ⛔ 덮어쓰기(초기화 → 가져오기) 본체는 <b>사장님 Q1 답 후</b>다(선행검증 §2-1: 초기화가 회사 뼈대까지 지우는데 되살리는 코드가 0건).
-    /// DTO 필드(<c>Mode</c>·<c>Password</c>·<c>ConfirmText</c>)는 화면·API 계약을 먼저 세우려고 받아 두되, 여기서 분기만 하고 아무 일도 하지 않는다(헌법 #33).
+    /// 작22 (2026-09-09) A2: 화면이 보낼 수 있는 방식인지만 본다.
+    /// 🔴 20260910작1 A1 (사장님 결재 2026-09-10 *"넣어"*): 덮어쓰기 400 을 걷어냈다.
+    /// 덮어쓰기를 **받는 곳은 <c>/start</c> 하나**이고, 그쪽은 <see cref="RejectOverwriteHere"/> 를 부르지 않는다.
     /// </summary>
     private IActionResult? RejectUnsupportedMode(MdbMigrationRequest request)
     {
@@ -537,10 +559,154 @@ public sealed class MigrationController : ControllerBase
         {
             return BadRequest(new { message = "가져오기 방식을 알 수 없습니다. 화면에서 다시 선택해 주세요." });
         }
+        return null;
+    }
+
+    /// <summary>
+    /// 🔴 20260910작1 A1 — <b>여기서는 덮어쓰기를 받지 않는다</b>.
+    /// <para>
+    /// 「모두 지우고 새로 가져오기」는 <b>지우는 일</b>이라 시작 지점 하나에서만 일어나야 한다.
+    /// · <c>continue</c>(이어서 가져오기)에서 받으면 <b>1단계에 이미 들어온 자료를 지우고</b> 2단계를 얹는다.
+    /// · 동기 <c>legacy-mdb</c> 는 화면의 2단 확인(비번·확인문구)을 거치지 않는 옛 호출 경로다.
+    /// </para>
+    /// </summary>
+    private IActionResult? RejectOverwriteHere(MdbMigrationRequest request)
+    {
         if (MdbMigrationModes.IsOverwrite(request.Mode))
         {
-            return BadRequest(new { message = "덮어쓰기는 준비 중입니다." });
+            return BadRequest(new { message = "모두 지우고 새로 가져오기는 처음 시작할 때만 고를 수 있습니다." });
         }
+        return null;
+    }
+
+    /// <summary>덮어쓰기 확인 문구 — 초기화 화면의 "초기화" 자리에 해당한다(20260910작1 A1 §3-4).</summary>
+    private const string OverwriteConfirmText = "덮어쓰기";
+
+    /// <summary>
+    /// 🔴 20260910작1 A1 §3-5 — <b>「모두 지우고 새로 가져오기」를 누르기 전에 무엇이 없어지는지 숫자로 보여준다.</b>
+    /// <para>
+    /// 레거시에서 가져온 것(<c>source_type='migration'</c>)은 다시 가져오면 그대로 돌아온다.
+    /// 되돌아오지 않는 것은 <b>히트판에서 사람이 직접 입력한 거래</b>다 — 그 건수만 센다.
+    /// 읽기 전용이고 테넌트 범위다(헌법 #2).
+    /// </para>
+    /// </summary>
+    [HttpGet("legacy-mdb/overwrite-impact")]
+    public async Task<IActionResult> GetOverwriteImpact(CancellationToken ct)
+    {
+        var tenantId = HttpContext.Items["TenantId"]?.ToString();
+        if (string.IsNullOrEmpty(tenantId)) return Forbid();
+
+        // 헌법 #16: 커넥션 하나에 UNION ALL — Task.WhenAll 로 나누지 않는다.
+        const string sql = @"
+            SELECT '명세서' AS Label, COUNT(*) AS Cnt FROM sales_deliveries
+              WHERE tenant_id = @TenantId AND (source_type IS NULL OR source_type <> 'migration')
+            UNION ALL
+            SELECT '매입', COUNT(*) FROM purchase_receipts
+              WHERE tenant_id = @TenantId AND (source_type IS NULL OR source_type <> 'migration')
+            UNION ALL
+            SELECT '수금', COUNT(*) FROM collections
+              WHERE tenant_id = @TenantId AND (source_type IS NULL OR source_type <> 'migration')
+            UNION ALL
+            SELECT '지급', COUNT(*) FROM payments
+              WHERE tenant_id = @TenantId AND (source_type IS NULL OR source_type <> 'migration')";
+
+        try
+        {
+            var rows = (await Dapper.SqlMapper.QueryAsync<OverwriteImpactRow>(
+                _db, new Dapper.CommandDefinition(sql, new { TenantId = tenantId }, cancellationToken: ct))
+                .ConfigureAwait(false)).ToList();
+
+            return Ok(new
+            {
+                total = rows.Sum(r => r.Cnt),
+                details = rows.Where(r => r.Cnt > 0).Select(r => new { r.Label, r.Cnt }),
+            });
+        }
+        catch (Exception ex)
+        {
+            // 숫자를 못 세는 것이 지우기를 막을 이유는 아니다 — 화면은 건수 없이 경고만 보여준다(헌법 #15).
+            _logger.LogWarning(ex, "[Migrate-Overwrite] 지워질 자료 건수 세기 실패 tenant={Tenant}", ForLog(tenantId));
+            return Ok(new { total = (int?)null, details = Array.Empty<object>() });
+        }
+    }
+
+    /// <summary>덮어쓰기로 없어질 「사람이 직접 입력한 거래」 한 줄.</summary>
+    private sealed class OverwriteImpactRow
+    {
+        public string Label { get; set; } = "";
+        public int Cnt { get; set; }
+    }
+
+    /// <summary>
+    /// 🔴 <b>「모두 지우고 새로 가져오기」의 앞 절반</b> — 20260910작1 A1 (사장님 결재 2026-09-10 *"넣어"*).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// 설계 별지 §1-1 의 ①백업 ②초기화 ③뼈대 재시드 를 여기서 끝내고, 성공하면 <c>null</c> 을 돌려
+    /// 호출자가 잡을 만들고 이관을 시작한다. <b>실패하면 잡을 만들지 않는다</b> — 지우지도 못했는데
+    /// 「가져오는 중」 잡만 남으면 화면이 거짓말을 하게 된다.
+    /// </para>
+    /// <para>
+    /// 🔴 <b>①과 ②를 따로 부르지 않는다</b>(설계 대비 PM 전결 정정 · 작지서 §2):
+    /// <c>ResetAllAsync</c> 가 이미 <b>대표계정 비번 재검증 → 강제 백업(실패 시 중단) → 삭제 → 감사기록</b>을
+    /// 한 몸으로 한다. 백업을 따로 부르면 <b>큰 DB 에서 백업이 두 번</b> 돈다.
+    /// </para>
+    /// <para>
+    /// 🔴 <b>뼈대 재시드는 초기화 화면과 같은 메서드</b>(<c>ReseedCompanySkeletonAsync</c>)를 부른다 —
+    /// 한쪽 경로만 고치는 것이 이 프로젝트의 반복 사고다.
+    /// </para>
+    /// </remarks>
+    private async Task<IActionResult?> PrepareOverwriteAsync(
+        string tenantId, MdbMigrationRequest request, CancellationToken ct)
+    {
+        var userId = HttpContext.Items["UserId"]?.ToString();
+        if (string.IsNullOrEmpty(userId)) return Forbid();
+
+        // 2단 확인 — 초기화 화면과 같은 방식(비번은 ResetAllAsync 가 대조한다).
+        if (!string.Equals((request.ConfirmText ?? string.Empty).Trim(), OverwriteConfirmText, StringComparison.Ordinal))
+        {
+            return BadRequest(new { message = $"확인을 위해 「{OverwriteConfirmText}」 라고 입력해 주세요." });
+        }
+        if (string.IsNullOrEmpty(request.Password))
+        {
+            return BadRequest(new { message = "대표 계정 비밀번호를 입력해 주세요." });
+        }
+
+        // ①② 백업 + 초기화 (실패하면 아무것도 지워지지 않은 채 여기서 끝난다)
+        var reset = await _dataReset.ResetAllAsync(
+            new HitPan.Application.DTOs.DataReset.DataResetRequest
+            {
+                Password = request.Password,
+                ConfirmText = OverwriteConfirmText,
+            },
+            tenantId, userId, ct).ConfigureAwait(false);
+
+        if (!reset.Success)
+        {
+            _logger.LogWarning("[Migrate-Overwrite] 기존 자료 지우기 실패로 중단 tenant={Tenant}", ForLog(tenantId));
+            return BadRequest(new { message = reset.Error ?? "기존 자료를 지우지 못해 중단했습니다." });
+        }
+
+        // ③ 회사 뼈대 재시드 — 이게 없으면 이관 뒤 첫 판매확정·수금이 회계에 남지 못한다.
+        try
+        {
+            var skeleton = await _provisioner.ReseedCompanySkeletonAsync(tenantId, ct).ConfigureAwait(false);
+            _logger.LogInformation(
+                "[Migrate-Overwrite] 기존 자료 정리 완료 backup={BackupId} 표={Cleared} · 회사 기본자료 계정과목={Accounts} 사원={Employees} 직급={Positions} 근로기준={Labor} 창고={Warehouses}",
+                ForLog(reset.BackupId), reset.ClearedTableCount,
+                skeleton.Accounts, skeleton.Employees, skeleton.Positions, skeleton.LaborPolicies, skeleton.Warehouses);
+        }
+        catch (Exception ex)
+        {
+            // 삼키지 않는다(헌법 #15). 뼈대가 없는 채로 이관하면 회계가 통째로 비므로 여기서 멈춘다.
+            _logger.LogError(ex, "[Migrate-Overwrite] 회사 기본 자료 다시 만들기 실패 — 가져오기를 시작하지 않는다");
+            return StatusCode(500, new
+            {
+                message = "기존 자료는 지웠으나 회사 기본 자료(계정과목·대표 사원 등)를 다시 만들지 못해 가져오기를 시작하지 않았습니다. 백업으로 되돌린 뒤 다시 시도해 주세요.",
+                backupId = reset.BackupId,
+            });
+        }
+
         return null;
     }
 
