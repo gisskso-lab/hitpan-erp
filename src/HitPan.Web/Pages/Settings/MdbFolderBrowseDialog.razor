@@ -1,0 +1,225 @@
+@namespace HitPan.Web.Pages.SettingsUi
+@inject HttpClient Http
+
+@* 작22 (2026-09-09) B2 · 별지 §2 — 「찾아보기」 폴더 고르기.
+
+   9/4 사장님 오더 7: *"편리해야함. 폴더경로의 주소를 붙여넣기도 할수있게, 파일경로를 직접 찾을 수 있게."*
+
+   [왜 서버에 묻나] 브라우저는 보안상 이 컴퓨터의 폴더를 읽지 못한다. 그래서 히트판 본체(서버)가
+     폴더 목록을 대신 만들어 준다. 자료가 든 그 컴퓨터에서만 열린다(서버에서도 같은 판정).
+
+   [★ 는 무슨 뜻인가] 기존 히트판 자료 파일 3개가 다 들어 있는 폴더다. 사용자는 폴더 이름을 몰라도
+     ★ 만 따라가면 된다 — 처음 쓰는 사람이 물어보지 않고 고를 수 있어야 한다.
+
+   ⛔ 업로드는 이번에 넣지 않는다(사장님 Q2). 다른 컴퓨터 자료는 그 컴퓨터의 폴더를 이 컴퓨터로
+     복사한 뒤 여기서 고른다 — 아래 안내 문구가 그 말을 한다. *@
+
+<MudDialog>
+    <TitleContent>
+        <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="2">
+            <MudIcon Icon="@Icons.Material.Filled.FolderOpen" Color="Color.Primary" />
+            <MudText Typo="Typo.h6">폴더 찾아보기</MudText>
+        </MudStack>
+    </TitleContent>
+
+    <DialogContent>
+        @* 지금 보고 있는 자리 *@
+        <MudPaper Elevation="0" Class="pa-2 mb-2" Style="border:0.5px solid var(--mud-palette-lines-default);border-radius:8px">
+            <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="2">
+                <MudButton Size="Size.Small" Variant="Variant.Text"
+                           StartIcon="@Icons.Material.Filled.ArrowUpward"
+                           Disabled="@(_loading || string.IsNullOrEmpty(_path))"
+                           OnClick="GoUpAsync">위로</MudButton>
+                <MudText Typo="Typo.body2" Style="word-break:break-all">
+                    @(string.IsNullOrEmpty(_path) ? "컴퓨터 (드라이브를 고르세요)" : _path)
+                </MudText>
+                @if (_hasMdb)
+                {
+                    <MudTooltip Text="이 폴더에 기존 히트판 자료가 있습니다">
+                        <MudIcon Icon="@Icons.Material.Filled.Star" Color="Color.Warning" Size="Size.Small" />
+                    </MudTooltip>
+                }
+            </MudStack>
+        </MudPaper>
+
+        @* 드라이브 — 어디서 시작할지 *@
+        @if (_drives.Count > 0)
+        {
+            <MudStack Row="true" Spacing="1" Class="mb-2" Wrap="Wrap.Wrap">
+                @foreach (var drive in _drives)
+                {
+                    <MudButton Size="Size.Small" Variant="Variant.Outlined"
+                               StartIcon="@Icons.Material.Filled.Storage"
+                               Disabled="_loading"
+                               OnClick="@(() => LoadAsync(drive))">@drive</MudButton>
+                }
+            </MudStack>
+        }
+
+        @if (_loading)
+        {
+            <div style="display:flex;align-items:center;gap:8px;padding:12px 0">
+                <MudProgressCircular Color="Color.Primary" Size="Size.Small" Indeterminate="true" />
+                <MudText Typo="Typo.body2" Style="color:var(--mud-palette-text-secondary)">폴더를 읽는 중...</MudText>
+            </div>
+        }
+        else if (_error is not null)
+        {
+            <MudAlert Severity="Severity.Warning" Dense="true" Class="mb-2">@_error</MudAlert>
+        }
+
+        @* 하위 폴더 목록 *@
+        <div style="max-height:320px;overflow-y:auto;border:0.5px solid var(--mud-palette-lines-default);border-radius:8px">
+            @if (!_loading && _folders.Count == 0 && !string.IsNullOrEmpty(_path))
+            {
+                <MudText Typo="Typo.body2" Class="pa-3" Style="color:var(--mud-palette-text-secondary)">
+                    이 폴더 안에는 하위 폴더가 없습니다. 여기가 찾던 폴더라면 아래 [이 폴더 선택] 을 누르세요.
+                </MudText>
+            }
+            @foreach (var folder in _folders)
+            {
+                <div style="display:flex;align-items:center;gap:4px;padding:2px 8px">
+                    <MudButton Variant="Variant.Text" Size="Size.Small"
+                               StartIcon="@Icons.Material.Filled.Folder"
+                               Disabled="_loading"
+                               Style="justify-content:flex-start;flex:1;text-align:left"
+                               OnClick="@(() => LoadAsync(folder.FullPath))">
+                        @folder.Name
+                    </MudButton>
+                    @if (folder.HasMdb)
+                    {
+                        <MudTooltip Text="기존 히트판 자료가 들어 있는 폴더">
+                            <MudIcon Icon="@Icons.Material.Filled.Star" Color="Color.Warning" Size="Size.Small" />
+                        </MudTooltip>
+                    }
+                </div>
+            }
+        </div>
+
+        <MudText Typo="Typo.caption" Class="mt-2" Style="color:var(--mud-palette-text-secondary)">
+            ★ 표시는 기존 히트판 자료가 들어 있는 폴더입니다.
+            다른 컴퓨터의 자료는 그 컴퓨터의 HITWIN 폴더를 이 컴퓨터로 복사한 뒤 골라 주세요.
+        </MudText>
+    </DialogContent>
+
+    <DialogActions>
+        <MudButton OnClick="Cancel" Variant="Variant.Text">취소</MudButton>
+        <MudButton Variant="Variant.Filled" Color="Color.Primary"
+                   StartIcon="@Icons.Material.Filled.Check"
+                   Disabled="@(_loading || string.IsNullOrEmpty(_path))"
+                   OnClick="Choose">이 폴더 선택</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private IMudDialogInstance MudDialog { get; set; } = default!;
+
+    /// <summary>처음 열 때 보여줄 폴더. 없거나 못 열면 드라이브 목록부터 보여준다.</summary>
+    [Parameter] public string? StartPath { get; set; }
+
+    private string? _path;
+    private string? _parent;
+    private bool _hasMdb;
+    private bool _loading = true;
+    private string? _error;
+    private List<FolderRow> _folders = new();
+    private List<string> _drives = new();
+
+    protected override async Task OnInitializedAsync()
+    {
+        // 기본 진입 = 지금 경로 칸에 적힌 폴더(보통 C:\HITWIN). 그 폴더가 없으면 드라이브 목록으로 떨어진다.
+        await LoadAsync(StartPath, fallbackToDrives: true);
+    }
+
+    private Task GoUpAsync() => LoadAsync(_parent);
+
+    private async Task LoadAsync(string? path, bool fallbackToDrives = false)
+    {
+        _loading = true;
+        _error = null;
+        StateHasChanged();
+        try
+        {
+            var url = "api/migration/legacy-mdb/browse";
+            if (!string.IsNullOrWhiteSpace(path))
+            {
+                url += $"?path={Uri.EscapeDataString(path)}";
+            }
+
+            var resp = await Http.GetAsync(url);
+            if (!resp.IsSuccessStatusCode)
+            {
+                var message = await ReadMessageAsync(resp);
+                if (fallbackToDrives && !string.IsNullOrWhiteSpace(path))
+                {
+                    // 처음 열 때 그 폴더가 없으면 조용히 드라이브 목록으로 — 없는 폴더 이름으로 사용자를 놀래지 않는다.
+                    await LoadAsync(null);
+                    return;
+                }
+                _error = message;
+                return;
+            }
+
+            var body = await resp.Content.ReadFromJsonAsync<BrowseResponse>();
+            if (body is null)
+            {
+                _error = "폴더 목록을 받지 못했습니다.";
+                return;
+            }
+
+            _path = body.Path;
+            _parent = body.Parent;
+            _hasMdb = body.HasMdb;
+            _folders = body.Folders ?? new List<FolderRow>();
+            _drives = body.Drives ?? new List<string>();
+        }
+        catch (Exception ex)
+        {
+            // 헌법 #15: 삼키지 않는다 — 사유를 화면에 한 줄로 남긴다(다이얼로그는 열린 채 유지).
+            _error = $"폴더를 읽지 못했습니다: {ex.Message}";
+        }
+        finally
+        {
+            _loading = false;
+            StateHasChanged();
+        }
+    }
+
+    /// <summary>서버가 준 안내 문구를 꺼낸다(개발용어 없는 문장). 못 꺼내면 상태코드만 알린다.</summary>
+    private static async Task<string> ReadMessageAsync(HttpResponseMessage resp)
+    {
+        try
+        {
+            var raw = await resp.Content.ReadAsStringAsync();
+            using var doc = System.Text.Json.JsonDocument.Parse(raw);
+            if (doc.RootElement.TryGetProperty("message", out var m) && m.GetString() is { Length: > 0 } text)
+            {
+                return text;
+            }
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine($"[MdbFolderBrowseDialog] 응답 해석 실패: {ex.Message}");
+        }
+        return $"폴더를 열지 못했습니다. ({(int)resp.StatusCode})";
+    }
+
+    private void Choose() => MudDialog.Close(DialogResult.Ok(_path ?? string.Empty));
+    private void Cancel() => MudDialog.Cancel();
+
+    private sealed class BrowseResponse
+    {
+        public string? Path { get; set; }
+        public string? Parent { get; set; }
+        public bool HasMdb { get; set; }
+        public List<FolderRow>? Folders { get; set; }
+        public List<string>? Drives { get; set; }
+    }
+
+    private sealed class FolderRow
+    {
+        public string Name { get; set; } = "";
+        public string FullPath { get; set; } = "";
+        public bool HasMdb { get; set; }
+    }
+}

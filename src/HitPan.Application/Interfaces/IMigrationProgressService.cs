@@ -31,6 +31,14 @@ public interface IMigrationProgressService
     Task CompleteJobAsync(string jobId, string finalStatus, string? errorMessage = null);
 
     /// <summary>
+    /// 작22 (2026-09-09) A3: 단계 완료 신호 — 1단계(마스터)가 끝나면 <c>phase=1</c> 로 push 하고 잡은 <c>paused</c> 로 남는다.
+    /// 화면은 이 신호로 5/16 사장님 문안 다이얼로그("1단계자료 이관완료. 2단계 자료 이관 계속 하시겠습니까?")를 띄운다.
+    /// 잡을 끝내는 것이 아니므로 in-memory 스냅샷은 지우지 않는다(2단계가 같은 jobId 로 이어진다).
+    /// 헌법 #12: 구현체는 MigrationProgressService 하나(grep 2026-09-09 — 테스트 mock 0건).
+    /// </summary>
+    Task PhaseCompletedAsync(string jobId, int phase);
+
+    /// <summary>
     /// 클라이언트 재접속 시 현재 진행 상태 스냅샷 반환 (선택).
     /// </summary>
     IReadOnlyDictionary<string, MigrationProgressSnapshot> GetSnapshot(string jobId);
