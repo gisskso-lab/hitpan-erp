@@ -333,7 +333,8 @@ public sealed class MigrationController : ControllerBase
                         StockLedger = result.StockLedger, Collections = result.Collections, Payments = result.Payments, Cashbook = result.Cashbook,
                         Expenses = result.Expenses, PurchaseOrdersFromIU = result.PurchaseOrdersFromIU,
                         SalesOrdersFromIO = result.SalesOrdersFromIO, TaxInvoices = result.TaxInvoices,
-                        Bills = result.Bills, CardPayments = result.CardPayments, BankTransactions = result.BankTransactions
+                        Bills = result.Bills, CardPayments = result.CardPayments, BankTransactions = result.BankTransactions,
+                        DailyReports = result.DailyReports // 작22 (2026-09-09) D: 일일보고서(hr_reports) 잡 신설
                     };
                 });
                 await storeBg.SyncToDbAsync(job.JobId, "completed", DateTime.UtcNow);

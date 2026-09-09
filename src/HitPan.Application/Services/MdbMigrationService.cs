@@ -481,6 +481,17 @@ public sealed class MdbMigrationService
                         oleConn, tenantId, now, tx, ct).ConfigureAwait(false);
                     return result.Events;
                 }, ct, continueOnFail: true, mdbFile: "POTHER").ConfigureAwait(false);
+
+                // 작22 (2026-09-09) D: 레거시 메모(DOCME 242,106행) → 일일보고서(hr_reports) — 사장님 9/8 ③
+                //   "상담이력, 메모이력은 일일보고서에 작성자, 내용만 살려서 이관 … 결재 완료된 건으로 보관" · 새 표·메뉴 없이 hr_reports 에.
+                //   events 잡 뒤에 둔다(설계 별지 §4-2). 실패해도 다른 표는 계속(continueOnFail) — 메모가 없다고 이관 전체가 죽을 이유는 없다.
+                await RunTableStepAsync("hr_reports", async tx =>
+                {
+                    using var oleConn = OpenOleDb(potherPath);
+                    result.DailyReports = await MigrateDailyReportsAsync(
+                        oleConn, tenantId, now, tx, ct).ConfigureAwait(false);
+                    return result.DailyReports;
+                }, ct, continueOnFail: true, mdbFile: "POTHER").ConfigureAwait(false);
             }
             else
             {
@@ -6097,6 +6108,210 @@ public sealed class MdbMigrationService
         return count;
     }
 
+    // ────────────────────────────────────────────────────────────────
+    // 작22 (2026-09-09) D: 레거시 메모(POTHER.DOCME) → 일일보고서(hr_reports)
+    // ────────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// POTHER.DOCME(상담·메모 이력, 실측 242,106행)를 <b>(사원, 날짜) 한 묶음 = 일일보고서 한 장</b>으로 hr_reports 에 INSERT 한다 — 작22 (2026-09-09) D2.
+    /// 사장님 9/8 ③ "상담이력, 메모이력은 일일보고서에 작성자, 내용만 살려서 이관하고 … 결재 완료된 건으로 보관" · "표를 따로 만들면 메뉴도 생겨야 하고 구도가 바뀐다"
+    /// ⇒ 새 표·메뉴 없이 기존 hr_reports(report_type='daily', status='approved') 에 넣는다. 9/9 확인: 구분(상담 외 기타·재고변경·수금 등)도 전부 포함.
+    /// 묶음 키·줄 모양·멱등 키·제목 판정은 <see cref="LegacyDocmeMapping"/> 순수함수(게이트 G10 이 값으로 부른다).
+    /// 사원: employees.emp_name = TRIM(ME_SAWON)(동명이면 emp_no 오름차순 첫 사람) · 없거나 빈값 → LEGACY_FALLBACK + 본문 첫 줄 "원작성자: …"(실측 미매칭 358행·빈값 135행).
+    /// 멱등: DB-119 UNIQUE uq_hr_reports_source(tenant_id, source_type, source_id) + 1,000행 multi-row INSERT IGNORE — source_id = docme-{ME_DATE}-{sha8(TRIM(ME_SAWON))}.
+    /// WorkReportService.CreateAsync 를 거치지 않는다(활성 사원 검사·NOW(6) 가 이관에 안 맞다 — 마이그 예외 원칙, 선행검증 §2-3).
+    /// 🔴 본문(content)·사원명은 로그에 찍지 않는다 — 고객명·전화가 들어 있다(헌법 #5). 건수만 남긴다.
+    ///
+    /// DESCRIBE hr_reports (hitpan_e2e · 2026-09-09 · 헌법 #13):
+    ///   report_id varchar(36) NOT NULL PK · tenant_id varchar(36) NOT NULL · employee_id varchar(36) NOT NULL
+    ///   report_type varchar(20) NOT NULL · period_start date NOT NULL · period_end date NOT NULL
+    ///   title varchar(200) NOT NULL · content text NOT NULL · cause text NULL · action_plan text NULL
+    ///   status varchar(20) NOT NULL DEFAULT 'draft' · submitted_at datetime(6) NULL · approved_by varchar(36) NULL
+    ///   approved_at datetime(6) NULL · reject_reason varchar(200) NULL
+    ///   created_at datetime(6) NOT NULL DEFAULT current_timestamp(6) · updated_at datetime(6) NOT NULL DEFAULT current_timestamp(6) ON UPDATE
+    ///   (+DB-119) source_type varchar(30) NULL · source_id varchar(80) NULL · migrated_source_hash char(64) NULL
+    /// DESCRIBE employees (발췌): employee_id varchar(36) PK · tenant_id varchar(36) · emp_no varchar(20) NOT NULL · emp_name varchar(50) NOT NULL · is_active tinyint(1)
+    /// </summary>
+    private async Task<int> MigrateDailyReportsAsync(
+        OleDbConnection oleConn, string tenantId, DateTime now,
+        IDbTransaction tx, CancellationToken ct)
+    {
+        DataTable dt;
+        try { dt = ReadMdbTable(oleConn, "SELECT * FROM DOCME ORDER BY ME_SAWON, ME_DATE, ME_TIME"); }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "[MDB마이그레이션] DOCME 테이블 읽기 실패 — POTHER에 없음 가능, skip");
+            return 0;
+        }
+        if (dt.Rows.Count == 0) return 0;
+
+        // 사원 사전: TRIM(emp_name) → 사원. 동명이면 emp_no 오름차순 첫 사람(설계 별지 §4-2).
+        // is_active 는 보지 않는다 — 레거시 메모의 작성자는 지금은 퇴사한 사람일 수 있고, 그래도 그 사람 앞으로 남는 게 "작성자를 살리는" 것이다.
+        var empRows = await Db.QueryAsync<DocmeEmployeeRow>(new CommandDefinition(
+            "SELECT employee_id AS EmployeeId, emp_no AS EmpNo, emp_name AS EmpName FROM employees WHERE tenant_id = @TenantId ORDER BY emp_no",
+            new { TenantId = tenantId }, transaction: tx, cancellationToken: ct)).ConfigureAwait(false);
+        var empByName = new Dictionary<string, DocmeEmployeeRow>(StringComparer.Ordinal);
+        foreach (var e in empRows.OrderBy(e => e.EmpNo, StringComparer.Ordinal))
+        {
+            var key = (e.EmpName ?? string.Empty).Trim();
+            if (key.Length == 0 || empByName.ContainsKey(key)) continue;
+            empByName[key] = e;
+        }
+
+        // 1) 행 → (사원, 날짜) 묶음. 날짜 무효(연도 0000 3행·형식 불량)는 카운트만 하고 뺀다.
+        int invalidDate = 0;
+        var groups = new Dictionary<(string Sawon, string Date), List<DocmeLine>>();
+        foreach (DataRow row in dt.Rows)
+        {
+            var meDate = GetStr(row, "ME_DATE");
+            if (!LegacyDocmeMapping.TryParseDate(meDate, out _))
+            {
+                invalidDate++;
+                continue;
+            }
+            var key = LegacyDocmeMapping.ReportKey(GetStr(row, "ME_SAWON"), meDate);
+            if (!groups.TryGetValue(key, out var lines))
+            {
+                lines = new List<DocmeLine>();
+                groups[key] = lines;
+            }
+            var meTime = GetStr(row, "ME_TIME");
+            lines.Add(new DocmeLine(meTime.Trim(), LegacyDocmeMapping.Line(
+                meTime, GetStr(row, "ME_GUBUN"),
+                GetStr(row, "ME_DESC1"), GetStr(row, "ME_DESC2"), GetStr(row, "ME_DESC3"),
+                GetStr(row, "ME_DESC4"), GetStr(row, "ME_DESC5"),
+                GetInt(row, "ME_NOTICE"))));
+        }
+
+        // 2) 묶음 → 보고서 한 장. 본문 = ME_TIME 오름차순 줄 나열. 미매칭 사원은 LEGACY_FALLBACK(필요할 때 한 번만 확보) + 첫 줄 원작성자.
+        var reports = new List<DailyReportRow>(groups.Count);
+        int unmatched = 0;
+        string? fallbackId = null;
+        string? fallbackName = null;
+        foreach (var kv in groups)
+        {
+            ct.ThrowIfCancellationRequested();
+            var (sawon, meDate) = kv.Key;
+            LegacyDocmeMapping.TryParseDate(meDate, out var reportDate);
+
+            string employeeId;
+            string employeeName;
+            string? header = null;
+            if (sawon.Length > 0 && empByName.TryGetValue(sawon, out var matched))
+            {
+                employeeId = matched.EmployeeId;
+                employeeName = (matched.EmpName ?? string.Empty).Trim();
+            }
+            else
+            {
+                unmatched++;
+                if (fallbackId is null)
+                {
+                    fallbackId = await EnsureLegacyFallbackEmployeeAsync(tenantId, now, tx, ct).ConfigureAwait(false);
+                    // 제목에 쓸 이름은 그 사원 행에서 읽는다 — '레거시이관' 글자를 여기 또 적지 않는다(한 곳만 진실).
+                    fallbackName = await Db.ExecuteScalarAsync<string?>(new CommandDefinition(
+                        "SELECT emp_name FROM employees WHERE tenant_id = @TenantId AND employee_id = @Id LIMIT 1",
+                        new { TenantId = tenantId, Id = fallbackId }, transaction: tx, cancellationToken: ct)).ConfigureAwait(false);
+                }
+                employeeId = fallbackId;
+                employeeName = (fallbackName ?? string.Empty).Trim();
+                header = LegacyDocmeMapping.OriginalAuthorLine(sawon);
+            }
+
+            var body = string.Join('\n', kv.Value.OrderBy(l => l.Time, StringComparer.Ordinal).Select(l => l.Text));
+            var content = header is null ? body : header + "\n" + body;
+            reports.Add(new DailyReportRow
+            {
+                ReportId = Guid.NewGuid().ToString(),
+                EmployeeId = employeeId,
+                ReportDate = reportDate,
+                Title = LegacyDocmeMapping.Title(reportDate, employeeName),
+                Content = content,
+                SourceId = LegacyDocmeMapping.SourceId(meDate, sawon, ComputeSourceHash),
+                MigratedSourceHash = ComputeSourceHash(content),
+            });
+        }
+
+        if (reports.Count == 0)
+        {
+            _logger.LogInformation("[MDB마이그레이션] 일일보고서 — DOCME {Rows}행 → 묶음 0장 (날짜 무효 제외 {Invalid}행)",
+                dt.Rows.Count, invalidDate);
+            return 0;
+        }
+
+        // 3) 1,000행 multi-row INSERT IGNORE (작21 payments 와 같은 모양). 본문이 text 라 한 덩어리의 글자 수도 함께 본다(max_allowed_packet 방어).
+        //    submitted_at = approved_at = 그 날짜 00:00 · approved_by NULL · cause/action_plan NULL · created/updated = @Now.
+        const int ChunkSize = 1000;
+        const int ChunkCharBudget = 4_000_000;
+        const string ColumnList =
+            "(report_id, tenant_id, employee_id, report_type, period_start, period_end, title, content, cause, action_plan, " +
+            "status, submitted_at, approved_by, approved_at, created_at, updated_at, source_type, source_id, migrated_source_hash)";
+        int inserted = 0;
+        int offset = 0;
+        while (offset < reports.Count)
+        {
+            ct.ThrowIfCancellationRequested();
+            var sb = new StringBuilder();
+            sb.Append("INSERT IGNORE INTO hr_reports ").Append(ColumnList).Append(" VALUES ");
+            var dyn = new DynamicParameters();
+            dyn.Add("T", tenantId);
+            dyn.Add("RT", HitPan.Application.DTOs.WorkReport.WorkReportTypes.Daily);
+            dyn.Add("ST", HitPan.Application.DTOs.WorkReport.WorkReportStatuses.Approved);
+            dyn.Add("SRC", "migration");
+            dyn.Add("N", now);
+            int i = 0;
+            long chars = 0;
+            for (; offset < reports.Count && i < ChunkSize; i++, offset++)
+            {
+                var r = reports[offset];
+                if (i > 0 && chars + r.Content.Length > ChunkCharBudget) break;
+                chars += r.Content.Length;
+                if (i > 0) sb.Append(',');
+                sb.Append("(@ID").Append(i).Append(",@T,@E").Append(i).Append(",@RT,@D").Append(i).Append(",@D").Append(i)
+                  .Append(",@TI").Append(i).Append(",@C").Append(i).Append(",NULL,NULL,@ST,@D").Append(i).Append(",NULL,@D").Append(i)
+                  .Append(",@N,@N,@SRC,@SI").Append(i).Append(",@H").Append(i).Append(')');
+                dyn.Add("ID" + i, r.ReportId);
+                dyn.Add("E" + i, r.EmployeeId);
+                dyn.Add("D" + i, r.ReportDate);
+                dyn.Add("TI" + i, r.Title);
+                dyn.Add("C" + i, r.Content);
+                dyn.Add("SI" + i, r.SourceId);
+                dyn.Add("H" + i, r.MigratedSourceHash);
+            }
+            inserted += await Db.ExecuteAsync(new CommandDefinition(sb.ToString(), dyn,
+                transaction: tx, cancellationToken: ct)).ConfigureAwait(false);
+        }
+
+        _logger.LogInformation(
+            "[MDB마이그레이션] 일일보고서 — DOCME {Rows}행 → 묶음 {Groups}장 (날짜 무효(연도0000 등) 제외 {Invalid}행 · 사원 미매칭 {Unmatched}장 → 자리표시) · INSERT {Inserted} (중복 IGNORE={Dup})",
+            dt.Rows.Count, reports.Count, invalidDate, unmatched, inserted, reports.Count - inserted);
+        // UI 카운트는 지급·수금과 같이 후보(묶음) 수로 정직 표기 — 대사표 ⑪(갈래 C)이 hr_reports source_type='migration' 건수와 맞춰 본다.
+        return reports.Count;
+    }
+
+    /// <summary>DOCME 한 행이 만든 본문 한 줄 + 정렬용 시각 (작22 D).</summary>
+    private readonly record struct DocmeLine(string Time, string Text);
+
+    /// <summary>employees 이름 사전용 행 (작22 D).</summary>
+    private sealed class DocmeEmployeeRow
+    {
+        public string EmployeeId { get; set; } = string.Empty;
+        public string EmpNo { get; set; } = string.Empty;
+        public string? EmpName { get; set; }
+    }
+
+    /// <summary>hr_reports 마이그 임시 row DTO (작22 D).</summary>
+    private sealed class DailyReportRow
+    {
+        public string ReportId { get; set; } = string.Empty;
+        public string EmployeeId { get; set; } = string.Empty;
+        public DateTime ReportDate { get; set; }
+        public string Title { get; set; } = string.Empty;
+        public string Content { get; set; } = string.Empty;
+        public string SourceId { get; set; } = string.Empty;
+        public string MigratedSourceHash { get; set; } = string.Empty;
+    }
+
     /// <summary>
     /// WS-11 정공법 축 2 (사장님 명령 2026-05-14): SHA256 멱등 키 생성.
     /// 자연키 문자열 → SHA256 → uppercase hex 64자.
@@ -6453,13 +6668,16 @@ public sealed class MdbMigrationResult
     /// <summary>일정/달력 (CALENDAR → events) 이관 건수</summary>
     public int Events { get; set; }
 
+    /// <summary>일일보고서 (DOCME → hr_reports, (사원,날짜) 묶음 수) 이관 건수 — 작22 (2026-09-09) D</summary>
+    public int DailyReports { get; set; }
+
     /// <summary>전체 이관 건수 합계</summary>
     public int Total => Partners + Items + BomHeaders + Employees
                         + SalesOrders + PurchaseOrders + StockLedger
                         + Collections + Payments + Cashbook + Expenses
                         + PurchaseOrdersFromIU + SalesOrdersFromIO + TaxInvoices
                         + Bills + CardPayments + BankTransactions
-                        + BusinessCards + ServiceTickets + DeliveryTracking + Events
+                        + BusinessCards + ServiceTickets + DeliveryTracking + Events + DailyReports
                         + SalesDeliveries + PurchaseReceipts
                         + JournalEntries + JournalLines;
 
@@ -6470,7 +6688,7 @@ public sealed class MdbMigrationResult
                $"수금:{Collections}, 지급:{Payments}, 경비:{Cashbook}, 전표:{Expenses}, " +
                $"매입(IU):{PurchaseOrdersFromIU}, 매출(IO):{SalesOrdersFromIO}, " +
                $"세금계산서:{TaxInvoices}, 어음:{Bills}, 카드:{CardPayments}, 은행:{BankTransactions}, " +
-               $"명함:{BusinessCards}, AS:{ServiceTickets}, 배송:{DeliveryTracking}, 일정:{Events} " +
+               $"명함:{BusinessCards}, AS:{ServiceTickets}, 배송:{DeliveryTracking}, 일정:{Events}, 일일보고서:{DailyReports} " +
                $"[합계:{Total}]";
     }
 }
