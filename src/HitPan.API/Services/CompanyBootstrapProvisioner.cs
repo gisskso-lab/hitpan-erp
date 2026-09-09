@@ -1,3 +1,4 @@
+using System.Data;
 using Dapper;
 using HitPan.Infrastructure.Configuration;
 using MySqlConnector;
@@ -264,27 +265,10 @@ public sealed class CompanyBootstrapProvisioner
             //    ⚠️ 이름은 직급 마스터에 이미 있는 "대표이사"(CEO, sort_order 100)를 그대로 쓴다.
             //      새 이름("대표")을 만들면 "대표"와 "대표이사"가 둘 다 생겨 목록이 헷갈린다
             //      (사장님 결재 2026-08-14). 마스터 시드는 아래 stdPositions 에 있다.
-            await db.ExecuteAsync(new CommandDefinition(@"
-                INSERT INTO employees
-                  (employee_id, tenant_id, user_id, emp_no, emp_name,
-                   position, emp_type, join_date, is_active, created_at, updated_at, role, email)
-                VALUES
-                  (@EmployeeId, @TenantId, @UserId, '0001', @Name,
-                   @Position, 'regular', UTC_TIMESTAMP(6), 1, UTC_TIMESTAMP(6), UTC_TIMESTAMP(6), 'tenant_admin', @Email)",
-                new { EmployeeId = employeeId, TenantId = tenantId, UserId = userId, input.Name,
-                      Position = OwnerPositionName, Email = loginId },
-                transaction: tx, cancellationToken: ct));
+            await SeedOwnerEmployeeAsync(db, tx, tenantId, userId, employeeId, input.Name, loginId, ct);
 
             // 기본 창고 1행 (10차 P0-4) — NOT EXISTS 로 마이그 고객 보호.
-            await db.ExecuteAsync(new CommandDefinition(@"
-                INSERT INTO warehouses
-                  (warehouse_id, tenant_id, wh_code, wh_name, wh_type, is_active, created_at, updated_at)
-                SELECT @WarehouseId, @TenantId, 'MAIN', '기본창고', 'normal', 1, NOW(6), NOW(6)
-                WHERE NOT EXISTS (
-                    SELECT 1 FROM warehouses WHERE tenant_id = @TenantId
-                )",
-                new { WarehouseId = Guid.NewGuid().ToString(), TenantId = tenantId },
-                transaction: tx, cancellationToken: ct));
+            await SeedDefaultWarehouseAsync(db, tx, tenantId, ct);
 
             // 기본 직급 6개 시드 (작 2026-08-13, 그룹웨어 단계4 토대) — 창고와 같은 패턴.
             //
@@ -297,34 +281,7 @@ public sealed class CompanyBootstrapProvisioner
             //
             // ⚠️ 출발점이지 정답이 아니다. 회사마다 직급 체계가 다르므로 관리자가
             //    설정 → 직급 관리에서 고치고 지운다(헌법 #11 — 우리가 템플릿을 주지 않는다).
-            var stdPositions = new (string Code, string Name, int Sort)[]
-            {
-                ("CEO", "대표이사", 100),
-                ("DIRECTOR", "부장", 80),
-                ("DEPUTY", "차장", 70),
-                ("MANAGER", "과장", 60),
-                ("ASSISTANT_MANAGER", "대리", 50),
-                ("STAFF", "사원", 10),
-            };
-            foreach (var (code, name, sort) in stdPositions)
-            {
-                await db.ExecuteAsync(new CommandDefinition(@"
-                    INSERT INTO positions
-                      (position_id, tenant_id, code, name, sort_order, is_active)
-                    SELECT @PositionId, @TenantId, @Code, @Name, @Sort, 1
-                    WHERE NOT EXISTS (
-                        SELECT 1 FROM positions WHERE tenant_id = @TenantId AND code = @Code
-                    )",
-                    new
-                    {
-                        PositionId = Guid.NewGuid().ToString(),
-                        TenantId = tenantId,
-                        Code = code,
-                        Name = name,
-                        Sort = sort
-                    },
-                    transaction: tx, cancellationToken: ct));
-            }
+            await SeedStandardPositionsAsync(db, tx, tenantId, ct);
 
             // ─────────────────────────────────────────────────────────────
             // 노무 기준값 시드 (작 2026-08-13, 단계6 실측 P0)
@@ -343,9 +300,157 @@ public sealed class CompanyBootstrapProvisioner
             // ⚠️ 여기 숫자는 **2026-08 시점의 법정 최소**다. 법이 바뀌면 관리자가
             //    설정에서 **새 시행일로 행을 추가**한다(기존 행을 고치지 않는다 — 과거분이 틀어진다).
             //    마이그 파일과 이 목록이 갈라지면 안 된다(게이트: AbsenceGuardTests).
-            var stdPolicies = new (string Key, decimal Value, string Unit, string From,
-                string Label, bool Statutory)[]
-            {
+            await SeedLaborPolicyAsync(db, tx, tenantId, ct);
+
+            await SeedStandardAccountsAsync(db, tx, tenantId, ct);
+
+            await tx.CommitAsync(ct);
+        }
+        catch
+        {
+            await tx.RollbackAsync(ct);
+            throw;
+        }
+
+        // 🔴 기기 슬롯 기준값 시드 (20260816작1 R-1 봉합) — 트랜잭션 **밖**이다. 아래 사유 참조.
+        await SeedDeviceSlotPolicyAsync(db, tenantId, tenantCode, ct);
+
+        _logger.LogInformation("[CompanyBootstrap] 부모계정+사원+기본창고 생성 완료 tenant={Code} loginId={LoginId}",
+            tenantCode, loginId);
+        return (CreateParentOutcome.Ok, null, userId);
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // 회사 뼈대 시드 5종 — 20260910작1 A1.
+    //
+    // 🔴 새로 고안한 것이 하나도 없다. 바로 위 CreateParentAsync 안에 있던 블록을
+    //    **본문 그대로** 메서드 경계로만 잘라낸 것이다(헌법 #1 추가만).
+    //    잘라낸 이유: 「모든데이터 초기화」가 이 5종을 전부 지우는데 되살리는 코드가 0건이었고
+    //    (선행검증 20260909검1 §2-1), 사장님이 2026-09-10 재시드를 허락하셨다.
+    //    ⇒ 신규 설치와 초기화·덮어쓰기가 **같은 시드**를 타야 두 경로가 갈리지 않는다.
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// 대표 사원 1행. <c>emp_no '0001'</c> · 직급 「대표이사」 · 부모계정(<c>users</c>)에 연결.
+    /// </summary>
+    /// <remarks>
+    /// employees.role = 'tenant_admin' 유지 (W1-2 구분 사유): employees.role은 EF enum 매핑이 아니라
+    ///   문자열 컬럼이며, 로그인 시 employeeRole claim(ClaimTypes.Role)으로 그대로 실려 Authorization
+    ///   정책(snake_case 어휘)과 짝을 이룬다 — users.role(enum 사전)과 다른 사전이므로 바꾸면 안 된다.
+    /// 🔴 작(2026-08-14) 사장님 지시: "부모계정 = 직급은 자동으로 대표.등록"
+    ///    종전엔 position 을 안 넣어 부모계정 직급이 NULL 이었다(실측 확인).
+    ///    ⇒ 사원관리·직원현황에서 대표의 직급이 빈칸이고, 직급으로 짜는
+    ///      결재선에서도 대표를 고를 수 없었다.
+    ///    ⚠️ 이름은 직급 마스터에 이미 있는 "대표이사"(CEO, sort_order 100)를 그대로 쓴다.
+    ///      새 이름("대표")을 만들면 "대표"와 "대표이사"가 둘 다 생겨 목록이 헷갈린다
+    ///      (사장님 결재 2026-08-14). 마스터 시드는 <see cref="SeedStandardPositionsAsync"/> 에 있다.
+    /// 🔴 20260910작1: <c>NOT EXISTS</c> 를 더했다 — 재시드가 **되살리기만 하고 덮어쓰지 않게** 하려는 것이다.
+    ///    신규 생성 시점엔 이 회사에 사원이 0명이라 조건이 언제나 참 ⇒ 종전 동작 무변경.
+    /// 🔴 [3-V] 2026-09-10: 가드를 <c>user_id</c> <b>또는 <c>emp_no='0001'</c></b> 로 넓혔다.
+    ///    실제로 터지는 제약은 <c>uq_tenant_empno(tenant_id, emp_no)</c> 인데(DB 실측) 가드가 다른 열쇠를 보고 있었다 —
+    ///    가드와 제약의 열쇠가 다르면 "막았다고 믿는데 1062 로 죽는" 자리가 된다.
+    /// </remarks>
+    private static Task SeedOwnerEmployeeAsync(
+        MySqlConnection db, IDbTransaction? tx, string tenantId, string userId, string employeeId,
+        string name, string loginId, CancellationToken ct)
+        => db.ExecuteAsync(new CommandDefinition(@"
+                INSERT INTO employees
+                  (employee_id, tenant_id, user_id, emp_no, emp_name,
+                   position, emp_type, join_date, is_active, created_at, updated_at, role, email)
+                SELECT @EmployeeId, @TenantId, @UserId, '0001', @Name,
+                   @Position, 'regular', UTC_TIMESTAMP(6), 1, UTC_TIMESTAMP(6), UTC_TIMESTAMP(6), 'tenant_admin', @Email
+                WHERE NOT EXISTS (
+                    SELECT 1 FROM employees
+                    WHERE tenant_id = @TenantId AND (user_id = @UserId OR emp_no = '0001')
+                )",
+            new { EmployeeId = employeeId, TenantId = tenantId, UserId = userId, Name = name,
+                  Position = OwnerPositionName, Email = loginId },
+            transaction: tx, cancellationToken: ct));
+
+    /// <summary>기본 창고 1행 (10차 P0-4) — NOT EXISTS 로 마이그 고객 보호.</summary>
+    private static Task SeedDefaultWarehouseAsync(
+        MySqlConnection db, IDbTransaction? tx, string tenantId, CancellationToken ct)
+        => db.ExecuteAsync(new CommandDefinition(@"
+                INSERT INTO warehouses
+                  (warehouse_id, tenant_id, wh_code, wh_name, wh_type, is_active, created_at, updated_at)
+                SELECT @WarehouseId, @TenantId, 'MAIN', '기본창고', 'normal', 1, NOW(6), NOW(6)
+                WHERE NOT EXISTS (
+                    SELECT 1 FROM warehouses WHERE tenant_id = @TenantId
+                )",
+            new { WarehouseId = Guid.NewGuid().ToString(), TenantId = tenantId },
+            transaction: tx, cancellationToken: ct));
+
+    /// <summary>
+    /// 기본 직급 6개 시드 (작 2026-08-13, 그룹웨어 단계4 토대) — 창고와 같은 패턴.
+    /// </summary>
+    /// <remarks>
+    /// 🔴 왜 여기인가: DB-22 가 직급을 시드했으나 <c>tenant_id='tenant-001'</c> 하드코딩이라
+    ///    실제 고객에게 안 갔고(실측: positions 0행), 그 주석이 말한
+    ///    "가입 프로비저닝에서 동일 시드" 는 구현되지 않았다. 그래서
+    ///    ①사원 등록의 직급이 자유 텍스트로 남았고 ②12명 중 8명이 직급 없음이 됐다.
+    ///    DB-93 이 기존 고객을 메우지만, 신규 설치는 사원이 생기기 전에 마이그가 돌아
+    ///    거기서 안 걸린다 — 신규 고객사는 여기서 깔아야 한다.
+    ///
+    /// ⚠️ 출발점이지 정답이 아니다. 회사마다 직급 체계가 다르므로 관리자가
+    ///    설정 → 직급 관리에서 고치고 지운다(헌법 #11 — 우리가 템플릿을 주지 않는다).
+    /// </remarks>
+    private static async Task SeedStandardPositionsAsync(
+        MySqlConnection db, IDbTransaction? tx, string tenantId, CancellationToken ct)
+    {
+        var stdPositions = new (string Code, string Name, int Sort)[]
+        {
+            ("CEO", "대표이사", 100),
+            ("DIRECTOR", "부장", 80),
+            ("DEPUTY", "차장", 70),
+            ("MANAGER", "과장", 60),
+            ("ASSISTANT_MANAGER", "대리", 50),
+            ("STAFF", "사원", 10),
+        };
+        foreach (var (code, name, sort) in stdPositions)
+        {
+            await db.ExecuteAsync(new CommandDefinition(@"
+                    INSERT INTO positions
+                      (position_id, tenant_id, code, name, sort_order, is_active)
+                    SELECT @PositionId, @TenantId, @Code, @Name, @Sort, 1
+                    WHERE NOT EXISTS (
+                        SELECT 1 FROM positions WHERE tenant_id = @TenantId AND code = @Code
+                    )",
+                new
+                {
+                    PositionId = Guid.NewGuid().ToString(),
+                    TenantId = tenantId,
+                    Code = code,
+                    Name = name,
+                    Sort = sort
+                },
+                transaction: tx, cancellationToken: ct));
+        }
+    }
+
+    /// <summary>
+    /// 노무 기준값 시드 (작 2026-08-13, 단계6 실측 P0).
+    /// </summary>
+    /// <remarks>
+    /// 🔴 실측으로 잡은 결함이다. DB-96·DB-98 의 시드는
+    ///      SELECT DISTINCT tenant_id FROM employees
+    ///    로 회사를 고른다. 그런데 **신규 설치는 이 시점에 직원이 0명**이라
+    ///    어느 회사에도 안 깔린다. 직급(DB-93)이 같은 이유로 안 깔렸던 것과 같은 자리다.
+    ///
+    ///    그대로 뒀으면 신규 고객사에서:
+    ///      · 연차 계산이 15일이 아니라 **0일** 로 나오고(기준값이 없으면 0 — 폴백을 안 두므로)
+    ///      · 휴직은 "기준이 정해져 있지 않습니다" 만 뜬다
+    ///    둘 다 화면은 열리는데 값이 안 나오는, 고객이 열어봐야 아는 종류다.
+    ///
+    /// ⚠️ 여기 숫자는 **2026-08 시점의 법정 최소**다. 법이 바뀌면 관리자가
+    ///    설정에서 **새 시행일로 행을 추가**한다(기존 행을 고치지 않는다 — 과거분이 틀어진다).
+    ///    마이그 파일과 이 목록이 갈라지면 안 된다(게이트: AbsenceGuardTests).
+    /// </remarks>
+    private static async Task SeedLaborPolicyAsync(
+        MySqlConnection db, IDbTransaction? tx, string tenantId, CancellationToken ct)
+    {
+        var stdPolicies = new (string Key, decimal Value, string Unit, string From,
+            string Label, bool Statutory)[]
+        {
                 // 연차 (DB-96)
                 ("annual_leave_base_days", 15.0m, "day", "2018-05-29", "기본 연차 일수", true),
                 ("annual_leave_extra_per_years", 1.0m, "day", "2018-05-29", "가산 연차 일수", true),
@@ -390,21 +495,28 @@ public sealed class CompanyBootstrapProvisioner
                     },
                     transaction: tx, cancellationToken: ct));
             }
+    }
 
-            // 표준 계정 시드 (12차 ACCOUNTS-SEED P0) — AutoJournalHelper 상수와 1:1. NOT EXISTS 로 재실행·마이그 보호.
-            //
-            // 🔴 20260827작4 (사장님 오더 "모든 돈의 흐름을 회계장부 하나로") — 8개 → 27개로 확장.
-            //   수금·지급·경비·급여를 기표하려면 그 상대계정이 accounts 에 **먼저 있어야** 한다.
-            //   journal_lines → accounts FK(fk_jl_account) 때문에, 없는 계정에 기표하면 FK 1452 로 죽는다.
-            //
-            //   ⚠️ 이 목록은 DB-111_chart_of_accounts_expand.sql 과 **반드시 같아야 한다.**
-            //   두 경로(신규 프로비저닝 / 기존 테넌트 마이그)가 갈리면, 한쪽 경로로 만들어진
-            //   고객만 특정 기표에서 FK 1452 로 죽는다 — 실제로 그 사고가 잠복해 있었다:
-            //   종전 프로비저너는 8개인데 DB-32 는 6개(14600·16900 없음)라, 마이그 경로 테넌트는
-            //   BOM 생산 확정이 죽는 상태였다. DB-111 이 그 둘도 같이 심어 일치시켰다.
-            //
-            // 🔴 현금(10100)은 **수기 입력** — 사장님 지시("현금은 수기로"). 자동 시재계산 없음.
-            //   복식부기 차·대 짝을 맞추기 위한 그릇으로만 존재한다.
+    /// <summary>
+    /// 표준 계정 시드 (12차 ACCOUNTS-SEED P0) — AutoJournalHelper 상수와 1:1. NOT EXISTS 로 재실행·마이그 보호.
+    /// </summary>
+    /// <remarks>
+    /// 🔴 20260827작4 (사장님 오더 "모든 돈의 흐름을 회계장부 하나로") — 8개 → 27개로 확장.
+    ///   수금·지급·경비·급여를 기표하려면 그 상대계정이 accounts 에 **먼저 있어야** 한다.
+    ///   journal_lines → accounts FK(fk_jl_account) 때문에, 없는 계정에 기표하면 FK 1452 로 죽는다.
+    ///
+    ///   ⚠️ 이 목록은 DB-111_chart_of_accounts_expand.sql 과 **반드시 같아야 한다.**
+    ///   두 경로(신규 프로비저닝 / 기존 테넌트 마이그)가 갈리면, 한쪽 경로로 만들어진
+    ///   고객만 특정 기표에서 FK 1452 로 죽는다 — 실제로 그 사고가 잠복해 있었다:
+    ///   종전 프로비저너는 8개인데 DB-32 는 6개(14600·16900 없음)라, 마이그 경로 테넌트는
+    ///   BOM 생산 확정이 죽는 상태였다. DB-111 이 그 둘도 같이 심어 일치시켰다.
+    ///
+    /// 🔴 현금(10100)은 **수기 입력** — 사장님 지시("현금은 수기로"). 자동 시재계산 없음.
+    ///   복식부기 차·대 짝을 맞추기 위한 그릇으로만 존재한다.
+    /// </remarks>
+    private static async Task SeedStandardAccountsAsync(
+        MySqlConnection db, IDbTransaction? tx, string tenantId, CancellationToken ct)
+    {
             var stdAccounts = new (string Code, string Name, string Type)[]
             {
                 // 자산
@@ -452,6 +564,58 @@ public sealed class CompanyBootstrapProvisioner
                     new { Code = code, TenantId = tenantId, Name = name, Type = type },
                     transaction: tx, cancellationToken: ct));
             }
+    }
+
+    /// <summary>
+    /// 「모든데이터 초기화」가 지운 <b>회사 뼈대를 다시 깐다</b> — 20260910작1 A1 (사장님 결재 2026-09-10 *"넣어"*).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// 🔴 <b>왜 필요한가</b> — 초기화는 보존 목록(6/23 사장님 결재) 밖의 모든 표를 비운다. 부모계정은 남지만
+    /// 신규 설치 때 <see cref="CreateParentAsync"/> 가 같은 트랜잭션에서 깔아 주던 <b>5종은 전부 지워지고,
+    /// 되살리는 코드가 한 줄도 없었다</b>(선행검증 20260909검1 §2-1 실측). 그 상태로 레거시를 가져오면
+    /// 첫 판매확정·수금이 <c>journal_lines → accounts</c> FK 로 죽고, 대표가 결재선에서 사라진다.
+    /// </para>
+    /// <para>
+    /// 🔴 <b>되살리는 것이지 덮어쓰는 게 아니다</b> — 5종 전부 <c>NOT EXISTS</c> 다. 이미 있으면 손대지 않는다.
+    /// 대표가 계정과목 이름을 고쳤거나 직급을 지웠다면 <b>그것도 대표의 설정</b>이라 우리가 되돌리지 않는다
+    /// (<see cref="SeedDeviceSlotPolicyAsync"/> 가 세운 원칙과 같다).
+    /// </para>
+    /// <para>
+    /// 🔴 <b>두 경로가 같은 시드를 탄다</b> — 초기화 화면(<c>DataResetController</c>)과 덮어쓰기 가져오기
+    /// (<c>MigrationController</c>)가 <b>이 메서드 하나</b>를 부른다. 한쪽만 고치면 그게 다음 사고다.
+    /// </para>
+    /// <para>
+    /// 대표 사원은 <b>부모계정에서 이름·아이디를 읽어</b> 만든다. 부모계정이 없으면(있을 수 없으나 방어)
+    /// 사원만 건너뛰고 나머지를 깐다 — 뼈대의 나머지까지 놓치는 것이 더 나쁘다.
+    /// </para>
+    /// </remarks>
+    public async Task<CompanySkeletonReseedResult> ReseedCompanySkeletonAsync(string tenantId, CancellationToken ct)
+    {
+        await using var db = new MySqlConnection(ResolveConnectionString());
+        await db.OpenAsync(ct);
+
+        // 부모계정 — 초기화가 보존하므로 정상 경로에선 항상 있다.
+        var parent = await db.QueryFirstOrDefaultAsync<ParentAccountRow>(new CommandDefinition(@"
+            SELECT user_id AS UserId, email AS Email, user_name AS UserName
+            FROM users
+            WHERE tenant_id = @TenantId AND is_parent = 1 AND is_deleted = 0
+            ORDER BY created_at
+            LIMIT 1",
+            new { TenantId = tenantId }, cancellationToken: ct));
+
+        await using var tx = await db.BeginTransactionAsync(ct);
+        try
+        {
+            if (parent is not null)
+            {
+                await SeedOwnerEmployeeAsync(db, tx, tenantId, parent.UserId, Guid.NewGuid().ToString(),
+                    parent.UserName, parent.Email, ct);
+            }
+            await SeedDefaultWarehouseAsync(db, tx, tenantId, ct);
+            await SeedStandardPositionsAsync(db, tx, tenantId, ct);
+            await SeedLaborPolicyAsync(db, tx, tenantId, ct);
+            await SeedStandardAccountsAsync(db, tx, tenantId, ct);
 
             await tx.CommitAsync(ct);
         }
@@ -461,12 +625,33 @@ public sealed class CompanyBootstrapProvisioner
             throw;
         }
 
-        // 🔴 기기 슬롯 기준값 시드 (20260816작1 R-1 봉합) — 트랜잭션 **밖**이다. 아래 사유 참조.
+        // 🔴 [3-V] 2026-09-10: 기기 슬롯 기준값도 되살린다 — 회사 생성 때 깔리는 것은 **여섯**인데
+        //   재시드가 다섯만 깔면, 초기화한 회사는 20260816작1 이 봉합한 R-1 상태로 되돌아간다
+        //   (요금 한도가 설정표가 아니라 코드 안전망으로 돌고, 대표가 화면에서 고쳐도 반영될 표가 없다).
+        //   `device_slot_policy_settings` 는 tenant_id 가 있고 보존 목록에 없어 초기화가 지운다(실측).
+        //   ⚠️ 이 시드는 회사 생성 때도 **트랜잭션 밖**이다 — 그 자리를 그대로 따른다.
+        var tenantCode = await db.QueryFirstOrDefaultAsync<string>(new CommandDefinition(
+            "SELECT tenant_code FROM tenants WHERE tenant_id = @TenantId LIMIT 1",
+            new { TenantId = tenantId }, cancellationToken: ct)) ?? tenantId;
         await SeedDeviceSlotPolicyAsync(db, tenantId, tenantCode, ct);
 
-        _logger.LogInformation("[CompanyBootstrap] 부모계정+사원+기본창고 생성 완료 tenant={Code} loginId={LoginId}",
-            tenantCode, loginId);
-        return (CreateParentOutcome.Ok, null, userId);
+        // 실제로 무엇이 서 있는지 **세어서** 돌려준다 — 게이트가 반환값이 아니라 이 숫자를 본다.
+        var counts = await db.QueryFirstAsync<CompanySkeletonReseedResult>(new CommandDefinition(@"
+            SELECT
+              (SELECT COUNT(*) FROM accounts               WHERE tenant_id = @TenantId) AS Accounts,
+              (SELECT COUNT(*) FROM employees              WHERE tenant_id = @TenantId) AS Employees,
+              (SELECT COUNT(*) FROM positions              WHERE tenant_id = @TenantId) AS Positions,
+              (SELECT COUNT(*) FROM labor_policy_settings  WHERE tenant_id = @TenantId) AS LaborPolicies,
+              (SELECT COUNT(*) FROM warehouses             WHERE tenant_id = @TenantId) AS Warehouses,
+              (SELECT COUNT(*) FROM device_slot_policy_settings WHERE tenant_id = @TenantId) AS DeviceSlotPolicies",
+            new { TenantId = tenantId }, cancellationToken: ct));
+
+        _logger.LogInformation(
+            "[CompanyBootstrap] 회사 뼈대 재시드 완료 accounts={Accounts} employees={Employees} positions={Positions} labor={Labor} warehouses={Warehouses} deviceSlot={DeviceSlot}",
+            counts.Accounts, counts.Employees, counts.Positions, counts.LaborPolicies, counts.Warehouses,
+            counts.DeviceSlotPolicies);
+
+        return counts;
     }
 
     /// <summary>
@@ -616,4 +801,32 @@ public sealed class CreateParentInput
     public string LoginId { get; set; } = "";
     public string Password { get; set; } = "";
     public string Name { get; set; } = "";
+}
+
+/// <summary>재시드가 대표 사원을 만들 때 쓰는 부모계정 한 줄 (20260910작1 A1).</summary>
+internal sealed class ParentAccountRow
+{
+    public string UserId { get; set; } = "";
+    public string Email { get; set; } = "";
+    public string UserName { get; set; } = "";
+}
+
+/// <summary>
+/// 회사 뼈대 재시드 뒤 <b>실제로 서 있는 행수</b> (20260910작1 A1).
+/// 반환값이 아니라 이 숫자가 게이트의 판정 근거다 — "불렀다" 와 "깔렸다" 는 다르다.
+/// </summary>
+public sealed class CompanySkeletonReseedResult
+{
+    /// <summary>표준 계정과목 (신규 설치 기준 27).</summary>
+    public int Accounts { get; set; }
+    /// <summary>사원 (재시드 직후 = 대표 1명).</summary>
+    public int Employees { get; set; }
+    /// <summary>직급 (신규 설치 기준 6).</summary>
+    public int Positions { get; set; }
+    /// <summary>근로 기준값 (신규 설치 기준 16).</summary>
+    public int LaborPolicies { get; set; }
+    /// <summary>창고 (기본창고 MAIN 1).</summary>
+    public int Warehouses { get; set; }
+    /// <summary>기기 슬롯 기준값 ([3-V] 2026-09-10 — 이것도 초기화가 지운다).</summary>
+    public int DeviceSlotPolicies { get; set; }
 }

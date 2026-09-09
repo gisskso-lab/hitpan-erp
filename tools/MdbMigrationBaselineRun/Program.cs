@@ -43,6 +43,22 @@ var outPath = Environment.GetEnvironmentVariable("HITPAN_BASELINE_OUT");
 var applySchema = args.Contains("--apply-schema", StringComparer.OrdinalIgnoreCase);
 var skipMigrate = args.Contains("--skip-migrate", StringComparer.OrdinalIgnoreCase);
 
+// 작22 (2026-09-10) [4] 검증용 인자 — 없으면 종전 동작 그대로다.
+//   --mode merge|overwrite  --phase master|transactions|all  --job <잡ID>(체크포인트가 이 잡으로 기록·재개)
+static string? ArgValue(string[] a, string name)
+{
+    var i = Array.FindIndex(a, x => string.Equals(x, name, StringComparison.OrdinalIgnoreCase));
+    return i >= 0 && i + 1 < a.Length ? a[i + 1] : null;
+}
+var runMode = ArgValue(args, "--mode");
+var runJobId = ArgValue(args, "--job");
+var runPhase = (ArgValue(args, "--phase") ?? "all").ToLowerInvariant() switch
+{
+    "master" => MdbMigrationPhase.MasterOnly,
+    "transactions" => MdbMigrationPhase.TransactionsOnly,
+    _ => MdbMigrationPhase.All,
+};
+
 using var loggerFactory = LoggerFactory.Create(b => b
     .AddSimpleConsole(o => { o.SingleLine = true; o.TimestampFormat = "HH:mm:ss "; })
     .SetMinimumLevel(LogLevel.Information));
@@ -60,6 +76,22 @@ if (applySchema)
     log.LogInformation("스키마: success={S} applied={A} skipped={K} failed={F} {Msg}",
         r.Success, r.AppliedMigrationIds.Count, r.SkippedCount, r.FailedMigrationId, r.FailureMessage);
     if (!r.Success) return 1;
+}
+
+// ── [1-b] 회사 뼈대 재시드 (20260910작1 A1 · --reseed) ─────────────────────────
+//   덮어쓰기 순서의 ③ 단계다. 화면(초기화·덮어쓰기)이 부르는 **같은 메서드**를 부른다.
+//   초기화가 지운 표준 계정과목 27 · 대표 사원 · 직급 6 · 근로 기준값 16 · 기본창고를 되살린다.
+if (args.Contains("--reseed", StringComparer.OrdinalIgnoreCase))
+{
+    // 빈 설정을 준다 — 그러면 ResolveConnectionString 이 설치 PC 와 같은 경로(db.conf)로 붙는다.
+    // 이 도구는 HITPAN_DB_CONF 로 e2e 용 db.conf 를 가리키고 있고, DB_NAME 이 테스트 DB 가 아니면 위에서 이미 멈춘다(헌법 #39).
+    var cfg = new Microsoft.Extensions.Configuration.ConfigurationBuilder().Build();
+    var provisioner = new HitPan.API.Services.CompanyBootstrapProvisioner(
+        cfg, loggerFactory.CreateLogger<HitPan.API.Services.CompanyBootstrapProvisioner>());
+    var skeleton = await provisioner.ReseedCompanySkeletonAsync(tenantId, default);
+    log.LogInformation(
+        "뼈대 재시드: 계정과목={A} 사원={E} 직급={P} 근로기준={L} 창고={W}",
+        skeleton.Accounts, skeleton.Employees, skeleton.Positions, skeleton.LaborPolicies, skeleton.Warehouses);
 }
 
 // ── [2] 이관 실행 + 표별 소요 ─────────────────────────────────────────────────
@@ -96,9 +128,10 @@ if (!skipMigrate)
                 perTable.AddOrUpdate(table,
                     _ => (status, rows, ms, err, Interlocked.Increment(ref order)),
                     (_, old) => (status, rows, ms, err, old.Order));
-                if (status is "completed" or "failed")
+                if (status is "completed" or "failed" or "skipped")
                     Console.WriteLine($"  [{status,-9}] {table,-22} rows={rows,9:N0}  {ms / 1000.0,8:F1}s {err}");
-            });
+            },
+            runMode, runPhase, runJobId);
     }
     catch (Exception ex)
     {
@@ -153,6 +186,13 @@ await using (var db2 = new MySqlConnection(connStr))
         ("cashbook 행수", "SELECT COUNT(*) FROM cashbook WHERE tenant_id=@T"),
         ("expenses 행수", "SELECT COUNT(*) FROM expenses WHERE tenant_id=@T"),
         ("bank_transactions 행수", "SELECT COUNT(*) FROM bank_transactions WHERE tenant_id=@T"),
+        // 작22 (2026-09-09) C4 — 계산서 21쌍(C1)·품목 키(C2)·일일보고서(갈래 D) 판정기. 기대값은 이 MDB 기준(선행검증 20260909검1).
+        //   DESCRIBE 확인(hitpan_e2e): tax_invoices(direction char(1) · source_id varchar(80) · invoice_no varchar(32)) · items(item_name · spec) · hr_reports(source_type 은 DB-119 전엔 없음).
+        ("tax_invoices 행수(migration) [기대 66,631]", "SELECT COUNT(*) FROM tax_invoices WHERE tenant_id=@T AND source_type='migration'"),
+        ("tax_invoices direction≠source_id 토큰 [기대 0]", "SELECT COUNT(*) FROM tax_invoices WHERE tenant_id=@T AND source_type='migration' AND SUBSTRING_INDEX(SUBSTRING_INDEX(source_id,'-',2),'-',-1) <> CASE direction WHEN 'S' THEN '2' WHEN 'B' THEN '1' ELSE '?' END"),
+        ("tax_invoices invoice_no 최대 길이 [기대 ≤32 · 새 형식 30]", "SELECT COALESCE(MAX(CHAR_LENGTH(invoice_no)),0) FROM tax_invoices WHERE tenant_id=@T AND source_type='migration'"),
+        ("MIG-AUTO 품목 item_name 에 '|' 있고 spec NULL [신규 이관 기대 0]", "SELECT COUNT(*) FROM items WHERE tenant_id=@T AND item_code LIKE 'MIG-AUTO-%' AND item_name LIKE '%|%' AND spec IS NULL"),
+        ("hr_reports migration 행수 [기대 9,167 · DB-119 전엔 NA]", "SELECT COUNT(*) FROM hr_reports WHERE tenant_id=@T AND source_type='migration'"),
     };
     report.AppendLine("## 판정 SQL");
     report.AppendLine();
@@ -165,6 +205,11 @@ await using (var db2 = new MySqlConnection(connStr))
         {
             var o = await db2.ExecuteScalarAsync<object?>(sql, new { T = tenantId });
             val = o switch { null => "NULL", decimal d => d.ToString("N2"), double f => f.ToString("N2"), long l => l.ToString("N0"), int i => i.ToString("N0"), _ => o.ToString() ?? "" };
+        }
+        catch (MySqlException ex) when (ex.ErrorCode == MySqlErrorCode.BadFieldError)
+        {
+            // 작22 (2026-09-09) C4: 컬럼이 아직 없는 표(hr_reports.source_type 은 갈래 D 의 DB-119 가 만든다)는 그 행만 NA — 도구는 계속 돈다.
+            val = $"NA(컬럼 없음) {ex.Message}";
         }
         catch (Exception ex)
         {
@@ -226,9 +271,12 @@ static Task<MdbReconciliationReport> RunReconcileAsync(
 static Task<MdbMigrationResult> RunMigrateAsync(
     MySqlConnection db, ILoggerFactory lf, MigrationDbConnectionFactory f,
     string folder, string tenantId, string? mdbPassword,
-    Action<string, string, int, long, string?> progress)
+    Action<string, string, int, long, string?> progress,
+    string? mode = null, MdbMigrationPhase phase = MdbMigrationPhase.All, string? jobId = null)
 {
     var crypto = new BinaryCryptoServiceAdapter(new EncryptionService());
     var svc = new MdbMigrationService(db, lf.CreateLogger<MdbMigrationService>(), crypto, f);
-    return svc.MigrateAsync(folder, tenantId, mdbPassword, jobId: null, progressCallback: progress, CancellationToken.None);
+    // 작22 (2026-09-10) [4] 검증: 모드·단계·잡ID 를 그대로 태워 G-CK(체크포인트 재개)·G-MH(병합 보존)를 실측한다.
+    //   기본값은 종전 그대로(mode 미지정 · All · jobId null) — 기존 실행 결과가 달라지지 않는다.
+    return svc.MigrateAsync(folder, tenantId, mdbPassword, jobId, progress, mode, phase, CancellationToken.None);
 }

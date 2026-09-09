@@ -20,6 +20,12 @@ public sealed class DataResetService(HttpClient http)
         public string? BackupId { get; set; }
         public int ClearedTableCount { get; set; }
         public string? Error { get; set; }
+
+        /// <summary>
+        /// 🔴 [3-V] 2026-09-10: <b>지우기는 됐는데 회사 기본 자료를 다시 못 깐</b> 경우.
+        /// 성공이지만 그대로 쓰면 안 되는 상태라, 초록 알림에 묻히지 않게 따로 받는다.
+        /// </summary>
+        public string? Warning { get; set; }
     }
 
     public async Task<DataResetResultModel> ResetAllAsync(DataResetRequestModel req, CancellationToken ct = default)

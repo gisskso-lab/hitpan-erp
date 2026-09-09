@@ -25,18 +25,32 @@ namespace HitPan.API.Security;
 [AttributeUsage(AttributeTargets.Class | AttributeTargets.Method)]
 public sealed class MainPcOnlyAttribute : ActionFilterAttribute
 {
-    public override void OnActionExecuting(ActionExecutingContext context)
+    /// <summary>
+    /// 이 요청이 <b>자료가 들어 있는 그 컴퓨터</b>에서 온 것인가.
+    /// </summary>
+    /// <remarks>
+    /// 🔴 20260910작1 A1: 판정을 이 한 곳으로 뺐다(본문 무변경 · 헌법 #1).
+    /// 「모두 지우고 새로 가져오기」는 어트리뷰트가 아니라 <b>요청 안에서</b> 이 규칙을 물어야 하기 때문이다 —
+    /// 같은 <c>/start</c> 라도 「없는 것만 보태기」는 어디서든 되고, <b>지우는 쪽만</b> 메인PC 로 묶는다.
+    /// 규칙을 복붙하면 한쪽만 고쳐지는 날이 온다.
+    /// </remarks>
+    public static bool IsMainPc(HttpContext http)
     {
-        var req = context.HttpContext.Request;
+        var req = http.Request;
 
         var viaTunnel =
             req.Headers.ContainsKey("CF-Connecting-IP") ||
             req.Headers.ContainsKey("X-Forwarded-For");
 
-        var remote = context.HttpContext.Connection.RemoteIpAddress;
+        var remote = http.Connection.RemoteIpAddress;
         var isLoopback = remote is not null && System.Net.IPAddress.IsLoopback(remote);
 
-        if (viaTunnel || !isLoopback)
+        return !viaTunnel && isLoopback;
+    }
+
+    public override void OnActionExecuting(ActionExecutingContext context)
+    {
+        if (!IsMainPc(context.HttpContext))
         {
             context.Result = new ObjectResult(new
             {

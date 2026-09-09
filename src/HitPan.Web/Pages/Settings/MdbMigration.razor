@@ -29,11 +29,21 @@
 <MudPaper Elevation="0" Class="pa-4 mb-4" Style="border:0.5px solid var(--mud-palette-lines-default);border-radius:12px">
     <MudText Typo="Typo.subtitle2" Class="mb-3">기존 히트판 설치 폴더</MudText>
     <MudGrid Spacing="2">
-        <MudItem xs="12" md="6">
+        <MudItem xs="12" md="4">
             <MudTextField T="string" Label="MDB 폴더 경로" @bind-Value="_folderPath"
                           Variant="Variant.Outlined" Margin="Margin.Dense"
                           Placeholder="예: C:\HITWIN"
-                          HelperText="기존 히트판이 설치된 폴더 경로를 입력하세요 (보통 C:\HITWIN)" />
+                          HelperText="경로를 붙여넣거나 [찾아보기]로 고르세요 (보통 C:\HITWIN)" />
+        </MudItem>
+        <MudItem xs="12" md="2">
+            @* 작22 (2026-09-09) B2: 9/4 사장님 오더 7 — 경로를 직접 찾을 수 있게. *@
+            <MudButton Variant="Variant.Outlined" Color="Color.Primary"
+                       StartIcon="@Icons.Material.Filled.FolderOpen"
+                       OnClick="OpenBrowseAsync"
+                       Disabled="@(_loading || _reconLoading)"
+                       Style="height:40px;margin-top:4px;width:100%">
+                찾아보기
+            </MudButton>
         </MudItem>
         <MudItem xs="12" md="2">
             @* 핫픽스 2026-05-13: 레거시 MDB 비번 입력 칸 (예: 7618968) *@
@@ -62,6 +72,85 @@
         </MudItem>
     </MudGrid>
 </MudPaper>
+
+@* 🔴 20260910작1 A1 — 가져오기 방식 (사장님 결재 2026-09-10 "넣어").
+   9/4 사장님 오더 6: "마이그레이션 옵션이 두개가 되어야 함. 1덮어쓰기, 2병합".
+   화면 문구에 개발용어 0 — "병합"·"덮어쓰기"·"초기화" 대신 하는 일을 그대로 적는다. *@
+@if (!_loading)
+{
+<MudPaper Elevation="0" Class="pa-4 mb-4" Style="border:0.5px solid var(--mud-palette-lines-default);border-radius:12px">
+    <MudText Typo="Typo.subtitle2" Class="mb-3">가져오는 방식</MudText>
+    <MudRadioGroup T="string" Value="@_mode" ValueChanged="OnModeChangedAsync">
+        <MudRadio T="string" Value="@("merge")" Color="Color.Primary" Dense="true">
+            기존 자료는 두고 <b>없는 것만 보태기</b>
+            <MudText Typo="Typo.caption" Class="d-block mud-text-secondary">
+                히트판에 이미 있는 자료는 그대로 두고, 예전 히트판에만 있는 자료를 채웁니다. 여러 번 해도 안전합니다.
+            </MudText>
+        </MudRadio>
+        <MudRadio T="string" Value="@("overwrite")" Color="Color.Error" Dense="true" Disabled="@(!_isMainPc)">
+            기존 자료를 <b>모두 지우고 새로 가져오기</b>
+            <MudText Typo="Typo.caption" Class="d-block mud-text-secondary">
+                @if (_isMainPc)
+                {
+                    <text>히트판의 업무 자료를 모두 지운 뒤 예전 히트판을 처음부터 다시 읽습니다. 지우기 전에 자동으로 백업합니다.</text>
+                }
+                else
+                {
+                    @* 서버도 같은 규칙으로 막는다 — 화면을 잠그는 것만으로는 막은 게 아니다(2026-08-11 사장님 지시). *@
+                    <text>이 방식은 <b>회사 자료가 들어 있는 컴퓨터</b>에서만 고를 수 있습니다. 히트판이 설치된 그 컴퓨터에서 열어 주세요.</text>
+                }
+            </MudText>
+        </MudRadio>
+    </MudRadioGroup>
+
+    @if (_mode == "overwrite")
+    {
+        <MudAlert Severity="Severity.Error" Dense="true" Class="mt-3 mb-3">
+            <b>히트판에서 직접 입력하신 자료는 되돌아오지 않습니다.</b>
+            @if (_overwriteImpactTotal is int n && n > 0)
+            {
+                <span> 지금 지워지는 거래가 <b>@n.ToString("N0")건</b> 있습니다@(string.IsNullOrEmpty(_overwriteImpactDetail) ? "" : $" ({_overwriteImpactDetail})").</span>
+            }
+            else if (_overwriteImpactTotal == 0)
+            {
+                <span> 명세서·매입·수금·지급·계산서·경비·현금출납·은행거래에는 직접 입력하신 것이 없습니다.</span>
+            }
+            @* 🔴 [3-V] 2026-09-10: 이 숫자가 전부라고 말하지 않는다 — 견적·수주·발주·반품은
+               가져온 것과 직접 친 것을 가릴 수 없어 세지 못한다. "없다"고 말하는 것이 안 세는 것보다 나쁘다. *@
+            <span> 견적·수주·발주·반품 등 나머지 업무 자료도 함께 지워집니다.</span>
+            <span> 로그인 정보와 회사 정보는 그대로 남습니다.</span>
+        </MudAlert>
+        <MudGrid Spacing="2">
+            <MudItem xs="12" md="6">
+                <MudTextField T="string" Label="대표 계정 비밀번호" @bind-Value="_ownerPassword"
+                              Variant="Variant.Outlined" Margin="Margin.Dense" InputType="InputType.Password"
+                              HelperText="본인 확인을 위해 로그인 비밀번호를 한 번 더 입력하세요" />
+            </MudItem>
+            <MudItem xs="12" md="6">
+                <MudTextField T="string" Label="확인 문구" @bind-Value="_overwriteConfirm"
+                              Variant="Variant.Outlined" Margin="Margin.Dense"
+                              HelperText="확인을 위해 「덮어쓰기」 라고 입력하세요" />
+            </MudItem>
+        </MudGrid>
+    }
+</MudPaper>
+}
+
+@* 작22 (2026-09-09) A3 · 5/16 사장님 UX: 1단계만 끝나 멈춰 있는 가져오기가 있으면 여기서 이어받는다.
+   화면에 다시 들어와도(새로고침·다음 날) 이 자리에 남아 있다 — 진행 상태는 서버에 적혀 있다. *@
+@if (_pausedJobId is not null && !_loading)
+{
+    <MudAlert Severity="Severity.Info" Class="mb-4" Dense="true">
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap">
+            <span>1단계(마스터) 이관이 끝났습니다. 히트판을 바로 쓰실 수 있고, 거래 자료는 이어서 가져올 수 있습니다.</span>
+            <MudButton Variant="Variant.Filled" Color="Color.Primary" Size="Size.Small"
+                       StartIcon="@Icons.Material.Filled.PlayArrow"
+                       OnClick="ContinueMigrationAsync">
+                이어서 가져오기
+            </MudButton>
+        </div>
+    </MudAlert>
+}
 
 @* P0 #6 (2026-05-14): Sticky 헤더 — 마이그 진행 중 항상 상단 고정 가시화 *@
 @if (_loading)
@@ -127,6 +216,11 @@
                         else if (t.Status == "running")
                         {
                             <span>진행 중...</span>
+                        }
+                        else if (t.Status == "skipped")
+                        {
+                            @* 작22 (2026-09-09) A3: 이어서 가져올 때 이미 끝난 표는 다시 돌리지 않는다 — 빠뜨린 게 아니라 이미 들어와 있다. *@
+                            <span>@($"이미 가져옴 · {t.Rows:N0}행")</span>
                         }
                         else if (t.Status == "failed")
                         {
@@ -419,6 +513,18 @@
     /* ── 상태 변수 ── */
     private string _folderPath = @"C:\HITWIN";
     private string _mdbPassword = ""; // 핫픽스 2026-05-13: 레거시 MDB 비번
+
+    /* ── 🔴 20260910작1 A1: 가져오기 방식 (사장님 결재 2026-09-10) ──
+       기본은 "보태기". 지우는 쪽은 사장님이 일부러 골라야 하고, 고른 뒤에도 2단 확인을 거친다. */
+    private string _mode = "merge";
+    private string _ownerPassword = "";
+    private string _overwriteConfirm = "";
+    private int? _overwriteImpactTotal;
+    private string _overwriteImpactDetail = "";
+
+    /// 지우는 방식은 자료가 들어 있는 컴퓨터에서만 고를 수 있다(2026-08-11 사장님 지시 · 초기화·백업 화면과 같은 규칙).
+    /// 못 물어봤으면 <b>잠근 채로 둔다</b> — 확인이 안 된 상태에서 열어주면 막은 적이 없는 것과 같다.
+    private bool _isMainPc;
     private bool _loading;
     private string _statusMessage = "";
     private Dictionary<string, int>? _previewResult;
@@ -432,7 +538,8 @@
     // 진범 #23 봉합 (2026-05-18): 견적·반품 잡 2개 추가 (quotations·sales_returns).
     // 진범 #24 봉합 (2026-05-20, 사장님 자문 #3 옵션 A): DOCF1/F2 transactions 잡 제거 (17→16).
     // 작21 (2026-09-04): 지급(payments) 잡 신설 (16→17).
-    private int _totalTables = 17;
+    // 작22 (2026-09-09) D: 일일보고서(hr_reports — 레거시 메모) 잡 신설 (17→18).
+    private int _totalTables = 18;
     private int _elapsedSeconds;
     private double _progressPercent => _totalTables == 0 ? 0 : (double)_completedTables / _totalTables * 100.0;
 
@@ -465,11 +572,16 @@
         // 진범 #23 봉합 (2026-05-18): 견적·반품 — ERP 매니저 자문 후 본구현.
         new("quotations", "견적서(자문대기)"),
         new("sales_returns", "반품(자문대기)"),
+        // 작22 (2026-09-09) D: 레거시 메모(DOCME) → 일일보고서. 서비스에서는 POTHER events 잡 뒤에 도는데 POTHER 잡(명함·AS·배송·일정)은 카드가 없어 목록 끝에 둔다.
+        new("hr_reports", "일일보고서(레거시 메모)"),
     };
 
+    // 작22 (2026-09-09) A3: "skipped" 는 이어서 가져오기에서 **이미 끝난 표**다. 아래 넷이 이 상태를 모르면
+    //   카드가 「대기」로 보여 아직 안 한 것처럼 읽힌다 — 완료와 같은 모양으로 두되 아이콘만 달리해 구분한다.
     private static string GetStatusIcon(string status) => status switch
     {
         "completed" => Icons.Material.Filled.CheckCircle,
+        "skipped"   => Icons.Material.Filled.DoneAll,
         "running"   => Icons.Material.Filled.Sync,
         "failed"    => Icons.Material.Filled.Error,
         _           => Icons.Material.Outlined.RadioButtonUnchecked,
@@ -478,6 +590,7 @@
     private static Color GetStatusColor(string status) => status switch
     {
         "completed" => Color.Success,
+        "skipped"   => Color.Success,
         "running"   => Color.Primary,
         "failed"    => Color.Error,
         _           => Color.Default,
@@ -486,6 +599,7 @@
     private static string GetCardBorder(string status) => status switch
     {
         "completed" => "var(--mud-palette-success)",
+        "skipped"   => "var(--mud-palette-success)",
         "running"   => "var(--mud-palette-primary)",
         "failed"    => "var(--mud-palette-error)",
         _           => "var(--mud-palette-lines-default)",
@@ -494,10 +608,115 @@
     private static string GetCardBg(string status) => status switch
     {
         "completed" => "rgba(76,175,80,0.06)",
+        "skipped"   => "rgba(76,175,80,0.06)",
         "running"   => "rgba(33,150,243,0.08)",
         "failed"    => "rgba(244,67,54,0.06)",
         _           => "transparent",
     };
+
+    /* ── 작22 (2026-09-09) A3 · B2: 화면 진입 시 재접속 + 찾아보기 ── */
+
+    /// <summary>1단계까지만 끝나 멈춰 있는 가져오기 작업(있으면). 「이어서 가져오기」 버튼이 이 값으로 뜬다.</summary>
+    private string? _pausedJobId;
+
+    /// <summary>
+    /// 작22 (2026-09-09) A3 · 별지 §1-3: 화면에 들어오면 <b>서버에 물어 다시 붙는다.</b>
+    /// 선행검증 §2-5 — 종전엔 진행 중이던 작업에 재접속하는 길이 0 이라, 새로고침 한 번이면 진행 화면이 사라졌다
+    /// (작업은 서버에서 계속 돌고 있는데 사용자는 그것을 볼 방법이 없었다).
+    /// </summary>
+    protected override async Task OnInitializedAsync()
+    {
+        // 🔴 20260910작1 A1: 지우는 방식을 고를 수 있는 자리인지 먼저 묻는다.
+        //   초기화·백업 화면(MainPcOnly.razor)이 쓰는 **같은 주소**다 — 규칙을 여기 다시 적지 않는다.
+        try
+        {
+            var mainPc = await Http.GetFromJsonAsync<MainPcResult>("api/devices/is-main-pc");
+            _isMainPc = mainPc?.IsMainPc ?? false;
+        }
+        catch (Exception ex)
+        {
+            // 못 물어봤으면 잠근 채로 둔다(헌법 #15 — 삼키지 않는다).
+            Console.Error.WriteLine($"[MdbMigration] 자료보관 컴퓨터 여부 확인 실패: {ex.GetType().Name}: {ex.Message}");
+            _isMainPc = false;
+        }
+
+        try
+        {
+            var resp = await Http.GetAsync("api/migration/legacy-mdb/current");
+            if (!resp.IsSuccessStatusCode) { return; }
+
+            var body = await resp.Content.ReadFromJsonAsync<CurrentJobResponse>();
+            var job = body?.Job;
+            if (job is null || string.IsNullOrEmpty(job.JobId)) { return; }
+
+            // 그때 쓴 폴더 경로를 되살린다 — 이어서 가져오기·맞춰보기가 같은 자료를 봐야 한다.
+            if (!string.IsNullOrWhiteSpace(job.SourceFolder)) { _folderPath = job.SourceFolder; }
+
+            if (job.Status == "paused")
+            {
+                _pausedJobId = job.JobId;
+                RestoreCards(body!.Tables);
+                return;
+            }
+
+            if (job.Status == "running")
+            {
+                // 아직 도는 중 — 진행 화면을 다시 세우고 남은 과정을 이어서 지켜본다.
+                RestoreCards(body!.Tables);
+                _ = RunJobFlowAsync(job.JobId, freshStart: false);
+            }
+        }
+        catch (Exception ex)
+        {
+            // 헌법 #15: 삼키지 않는다. 다만 이 조회가 실패해도 화면은 평소처럼 쓸 수 있어야 하므로 막지 않는다.
+            Console.Error.WriteLine($"[MdbMigration] 진행 중 작업 조회 실패: {ex.Message}");
+        }
+    }
+
+    /// <summary>서버에 적힌 표별 진행 상태로 카드를 되살린다(재접속·이어서 가져오기 화면).</summary>
+    private void RestoreCards(List<CurrentTableRow>? tables)
+    {
+        if (tables is null) { return; }
+        foreach (var t in tables)
+        {
+            var card = _tableCards.FirstOrDefault(c => c.Key == t.TableName);
+            if (card is null) { continue; }
+            card.Status = t.Status switch
+            {
+                "done" => "completed",
+                "skipped" => "skipped",
+                "running" => "running",
+                "failed" => "failed",
+                _ => "pending",
+            };
+            card.Rows = (int)Math.Clamp(t.Rows, 0, int.MaxValue);
+            card.ErrorMessage = t.ErrorMessage;
+        }
+        _completedTables = _tableCards.Count(c => c.Status is "completed" or "failed" or "skipped");
+    }
+
+    /// <summary>
+    /// 작22 (2026-09-09) B2: 「찾아보기」 — 서버가 만든 폴더 목록에서 고른다. 고르면 곧바로 미리보기까지 돌려
+    /// "이 폴더가 맞나" 를 그 자리에서 보여준다(처음 쓰는 사람이 물어보지 않고 확인할 수 있게).
+    /// </summary>
+    private async Task OpenBrowseAsync()
+    {
+        var parameters = new DialogParameters
+        {
+            ["StartPath"] = string.IsNullOrWhiteSpace(_folderPath) ? null : _folderPath,
+        };
+        var options = new DialogOptions { MaxWidth = MaxWidth.Small, FullWidth = true, BackdropClick = false };
+        var dialog = await DialogService.ShowAsync<MdbFolderBrowseDialog>("폴더 찾아보기", parameters, options);
+        var result = await dialog.Result;
+        if (result is null || result.Canceled || result.Data is not string chosen || string.IsNullOrWhiteSpace(chosen))
+        {
+            return;
+        }
+
+        _folderPath = chosen;
+        StateHasChanged();
+        await PreviewAsync();
+    }
 
     /* ── 미리보기 ── */
     private async Task PreviewAsync()
@@ -513,13 +732,18 @@
             _reconError = null;
             StateHasChanged();
 
-            // 핫픽스 2026-05-13: 비번 파라미터 추가
-            var url = $"api/migration/legacy-mdb/preview?folderPath={Uri.EscapeDataString(_folderPath)}";
-            if (!string.IsNullOrEmpty(_mdbPassword))
+            // 핫픽스 2026-05-13: 비번 전달.
+            // 작22 (2026-09-09) A4 · 병렬이슈 11: 주소줄(GET) → 본문(POST). 비번이 주소·서버 기록에 남지 않게 옮겼다.
+            var previewResp = await Http.PostAsJsonAsync("api/migration/legacy-mdb/preview", BuildReadOnlyMdbRequest());
+            if (!previewResp.IsSuccessStatusCode)
             {
-                url += $"&mdbPassword={Uri.EscapeDataString(_mdbPassword)}";
+                var err = await previewResp.Content.ReadAsStringAsync();
+                if (err.Length > 200) { err = err.Substring(0, 200) + "…"; }
+                Snackbar.Add($"미리보기 실패 ({(int)previewResp.StatusCode}): {err}", Severity.Error);
+                _previewResult = null;
+                return;
             }
-            _previewResult = await Http.GetFromJsonAsync<Dictionary<string, int>>(url);
+            _previewResult = await previewResp.Content.ReadFromJsonAsync<Dictionary<string, int>>();
 
             if (_previewResult == null || _previewResult.Count == 0)
             {
@@ -552,35 +776,208 @@
     private string? _currentJobId;
     private System.Threading.CancellationTokenSource? _elapsedCts;
 
-    /* ── 마이그레이션 시작 — 정공법 CODE-01 (2026-05-14): SignalR push (폴링 폐기) ── */
+    /* ── 가져오기 시작 — 정공법 CODE-01 (2026-05-14): SignalR push (폴링 폐기) ──
+       작22 (2026-09-09) A3 · 5/16 사장님 UX: /start 는 **1단계(기초자료)만** 돌린다.
+       끝나면 서버가 1단계 완료 신호를 보내고, 아래 흐름이 사장님 문안 그대로 물어본다. */
     private async Task StartMigrationAsync()
+    {
+        _pausedJobId = null;
+
+        // 🔴 20260910작1 A1: 지우는 방식은 마지막으로 한 번 더 여쭙는다 (칸을 채웠다고 바로 지우지 않는다).
+        if (_mode == "overwrite")
+        {
+            if (string.IsNullOrEmpty(_ownerPassword))
+            {
+                Snackbar.Add("대표 계정 비밀번호를 입력해 주세요.", Severity.Warning);
+                return;
+            }
+            if (_overwriteConfirm?.Trim() != "덮어쓰기")
+            {
+                Snackbar.Add("확인을 위해 「덮어쓰기」 라고 입력해 주세요.", Severity.Warning);
+                return;
+            }
+
+            var countText = _overwriteImpactTotal is int n && n > 0
+                ? $" 히트판에서 직접 입력하신 거래 {n:N0}건이 없어집니다."
+                : "";
+            var ok = await DialogService.ShowMessageBoxAsync(
+                "기존 자료를 모두 지우고 새로 가져옵니다",
+                $"지우기 전에 자동으로 백업합니다.{countText} 계속하시겠습니까?",
+                yesText: "지우고 가져오기", cancelText: "취소");
+            if (ok != true) { return; }
+        }
+
+        // 🔴 [3-V] 2026-09-10 P0: **여기서부터 화면을 잠근다.**
+        //   「없는 것만 보태기」는 이 호출이 1초 안에 돌아오지만, 「모두 지우고 새로 가져오기」는
+        //   이 한 번의 호출 안에서 **전체 백업 + 전 자료 삭제 + 회사 기본자료 다시 깔기**를 끝내고 돌아온다.
+        //   그동안 아무 표시가 없으면 사장님은 안 눌린 줄 알고 한 번 더 누르신다 —
+        //   그러면 **첫 이관이 자료를 넣고 있는 중에 두 번째 지우기가 돈다.**
+        _loading = true;
+        _statusMessage = _mode == "overwrite"
+            ? "기존 자료를 백업하고 정리하는 중입니다. 시간이 걸릴 수 있으니 이 화면을 닫지 마세요..."
+            : "이관 시작 중...";
+        StateHasChanged();
+
+        string? jobId;
+        try
+        {
+            var startResp = await Http.PostAsJsonAsync("api/migration/legacy-mdb/start", BuildMdbRequest());
+            if (!startResp.IsSuccessStatusCode)
+            {
+                var err = await startResp.Content.ReadAsStringAsync();
+                if (err.Length > 200) { err = err.Substring(0, 200) + "…"; }
+                Snackbar.Add($"시작 실패 ({(int)startResp.StatusCode}): {err}", Severity.Error);
+                _loading = false;
+                return;
+            }
+            var startBody = await startResp.Content.ReadFromJsonAsync<StartResponse>();
+            jobId = startBody?.JobId;
+        }
+        catch (Exception ex)
+        {
+            // 🔴 응답을 못 받았다고 서버가 멈춘 것이 아니다 — 지우기·가져오기는 계속 돌고 있을 수 있다.
+            //   그러니 "다시 누르세요" 라고 하지 않는다. 화면을 새로 열어 상태를 다시 붙으라고 안내한다.
+            Console.Error.WriteLine($"[MdbMigration.StartMigrationAsync] {ex.GetType().Name}: {ex.Message}");
+            Snackbar.Add("응답을 받지 못했습니다. 작업은 계속 진행 중일 수 있으니, 이 화면을 다시 열어 진행 상태를 확인해 주세요. 다시 누르지 마세요.", Severity.Error);
+            _loading = false;
+            return;
+        }
+
+        if (string.IsNullOrEmpty(jobId))
+        {
+            Snackbar.Add("가져오기 작업 번호를 받지 못했습니다.", Severity.Error);
+            _loading = false;
+            return;
+        }
+
+        await RunJobFlowAsync(jobId, freshStart: true);
+    }
+
+    /// <summary>
+    /// 작22 (2026-09-09) A3: 「이어서 가져오기」 — 1단계에서 멈춘 작업을 2단계(거래 자료)로 잇는다.
+    /// 비번은 아무도 저장하지 않으므로 화면 비번 칸 값을 다시 보낸다.
+    /// </summary>
+    private async Task ContinueMigrationAsync()
+    {
+        var jobId = _pausedJobId;
+        if (string.IsNullOrEmpty(jobId)) { return; }
+        if (!await SendContinueAsync(jobId)) { return; }
+
+        _pausedJobId = null;
+        await RunJobFlowAsync(jobId, freshStart: false);
+    }
+
+    /// <summary>2단계 이어가기 요청. 실패하면 사유를 알리고 false — 작업은 멈춘 채로 남는다.</summary>
+    private async Task<bool> SendContinueAsync(string jobId)
+    {
+        var resp = await Http.PostAsJsonAsync($"api/migration/legacy-mdb/{jobId}/continue", BuildReadOnlyMdbRequest());
+        if (resp.IsSuccessStatusCode) { return true; }
+
+        var err = await resp.Content.ReadAsStringAsync();
+        if (err.Length > 200) { err = err.Substring(0, 200) + "…"; }
+        Snackbar.Add($"이어서 가져오지 못했습니다 ({(int)resp.StatusCode}): {err}", Severity.Error);
+        return false;
+    }
+
+    /// <summary>
+    /// 서버로 보내는 요청 본문 — 폴더·비번·가져오기 방식.
+    /// 작22 A2 · 🔴 20260910작1 A1: 방식은 <b>보태기</b>가 기본이고, 지우는 쪽은 사장님이 골라야 간다.
+    /// 대표 비번·확인 문구는 <b>지우는 방식일 때만</b> 싣는다 — 보태기 요청에 비번을 실어 보내지 않는다.
+    /// </summary>
+    private object BuildMdbRequest() => new
+    {
+        folderPath = _folderPath,
+        mdbPassword = string.IsNullOrEmpty(_mdbPassword) ? null : _mdbPassword,
+        mode = _mode,
+        password = _mode == "overwrite" && !string.IsNullOrEmpty(_ownerPassword) ? _ownerPassword : null,
+        confirmText = _mode == "overwrite" ? _overwriteConfirm : null,
+    };
+
+    /// <summary>
+    /// 🔴 [3-V] 2026-09-10: 읽기만 하는 호출(미리보기·맞춰보기·이어서 가져오기)에 쓰는 요청.
+    /// <para>
+    /// 이 셋은 <b>아무것도 지우지 않는다</b>. 그런데 위 요청을 그대로 쓰면 지우는 방식을 골라 둔 동안
+    /// <b>대표 계정 비밀번호가 이 세 곳에도 실려 나간다</b> — 필요 없는 곳에 비밀번호를 보내지 않는다.
+    /// 방식도 <c>merge</c> 로 고정한다: 「이어서 가져오기」는 이미 들어온 자료를 잇는 것이라 지우면 안 된다.
+    /// </para>
+    /// </summary>
+    private object BuildReadOnlyMdbRequest() => new
+    {
+        folderPath = _folderPath,
+        mdbPassword = string.IsNullOrEmpty(_mdbPassword) ? null : _mdbPassword,
+        mode = "merge",
+    };
+
+    /// <summary>
+    /// 🔴 20260910작1 A1 §3-5 — 지우는 방식을 고르는 순간 <b>무엇이 없어지는지 숫자로</b> 보여준다.
+    /// 세지 못해도 방식 선택을 막지는 않는다(경고문만 건수 없이 뜬다).
+    /// </summary>
+    private async Task OnModeChangedAsync(string mode)
+    {
+        _mode = mode;
+        if (mode != "overwrite")
+        {
+            _ownerPassword = "";
+            _overwriteConfirm = "";
+            _overwriteImpactTotal = null;
+            _overwriteImpactDetail = "";
+            return;
+        }
+
+        try
+        {
+            var impact = await Http.GetFromJsonAsync<OverwriteImpact>("api/migration/legacy-mdb/overwrite-impact");
+            _overwriteImpactTotal = impact?.Total;
+            _overwriteImpactDetail = impact?.Details is { Count: > 0 } d
+                ? string.Join(" · ", d.Select(x => $"{x.Label} {x.Cnt:N0}건"))
+                : "";
+        }
+        catch (Exception ex)
+        {
+            // 헌법 #15 — 삼키지 않는다. 다만 이 실패가 사장님 작업을 막지는 않는다.
+            Console.Error.WriteLine($"[MdbMigration.OnModeChangedAsync] {ex.GetType().Name}: {ex.Message}");
+            _overwriteImpactTotal = null;
+            _overwriteImpactDetail = "";
+        }
+    }
+
+    /// <summary>덮어쓰기로 없어질 「사람이 직접 입력한 거래」 건수.</summary>
+    private sealed class OverwriteImpact
+    {
+        public int? Total { get; set; }
+        public List<OverwriteImpactDetail> Details { get; set; } = new();
+    }
+
+    private sealed class OverwriteImpactDetail
+    {
+        public string Label { get; set; } = "";
+        public int Cnt { get; set; }
+    }
+
+    /// <summary>자료보관 컴퓨터 여부 응답 — <c>MainPcOnly.razor</c> 와 같은 모양.</summary>
+    private sealed class MainPcResult
+    {
+        public bool IsMainPc { get; set; }
+    }
+
+    /// <summary>
+    /// 작22 (2026-09-09) A3: 진행 화면 + 서버 신호 대기 — 처음 시작·이어서 가져오기·화면 재접속이 <b>같은 코드</b>를 탄다.
+    /// </summary>
+    private async Task RunJobFlowAsync(string jobId, bool freshStart)
     {
         try
         {
             _loading = true;
-            _statusMessage = "이관 시작 중..."; // 작21 C4: 화면 문구 개발용어 0
-            // P0 #6 (2026-05-14): 카드 초기화 (이전 잡 상태 잔재 제거).
-            _tableCards = BuildInitialCards();
-            _completedTables = 0;
-            _elapsedSeconds = 0;
+            _statusMessage = freshStart ? "이관 시작 중..." : "진행 상태를 다시 불러오는 중..."; // 작21 C4: 화면 문구 개발용어 0
+            if (freshStart)
+            {
+                // P0 #6 (2026-05-14): 카드 초기화 (이전 잡 상태 잔재 제거).
+                _tableCards = BuildInitialCards();
+                _completedTables = 0;
+                _elapsedSeconds = 0;
+            }
             StateHasChanged();
 
-            // 1) Start — 즉시 JobId 반환 (1초 내, 524 안 걸림)
-            var payload = new { folderPath = _folderPath, mdbPassword = string.IsNullOrEmpty(_mdbPassword) ? null : _mdbPassword };
-            var startResp = await Http.PostAsJsonAsync("api/migration/legacy-mdb/start", payload);
-            if (!startResp.IsSuccessStatusCode)
-            {
-                var err = await startResp.Content.ReadAsStringAsync();
-                Snackbar.Add($"시작 실패 ({(int)startResp.StatusCode}): {err}", Severity.Error);
-                return;
-            }
-            var startBody = await startResp.Content.ReadFromJsonAsync<StartResponse>();
-            var jobId = startBody?.JobId;
-            if (string.IsNullOrEmpty(jobId))
-            {
-                Snackbar.Add("잡 ID를 받지 못했습니다.", Severity.Error);
-                return;
-            }
             _currentJobId = jobId;
 
             // 2) SignalR Hub 연결 — 폴링 폐기, 서버 push로 즉시 갱신.
@@ -608,11 +1005,19 @@
                     card.ElapsedMs = payload.ElapsedMs;
                     card.ErrorMessage = payload.ErrorMessage;
                 }
-                _completedTables = _tableCards.Count(c => c.Status is "completed" or "failed");
+                // 작22 (2026-09-09) A3: 이어서 가져오기에서 이미 끝난 표는 "skipped" 로 온다 — 완료와 같이 센다(안 그러면 진행률이 영영 안 찬다).
+                _completedTables = _tableCards.Count(c => c.Status is "completed" or "failed" or "skipped");
                 _statusMessage = payload.Status == "running"
                     ? $"진행 중: {payload.TableName}"
                     : $"{payload.TableName} {payload.Status}";
                 InvokeAsync(StateHasChanged);
+            });
+
+            // 작22 (2026-09-09) A3: 1단계 완료 신호 — 잡이 끝난 게 아니라 **멈춘** 것이다. 아래 대기 흐름이 사람에게 묻는다.
+            _phaseSignal = new TaskCompletionSource<int>();
+            _hub.On<PhaseCompletedPayload>("PhaseCompleted", phasePayload =>
+            {
+                _phaseSignal?.TrySetResult(phasePayload.Phase);
             });
 
             // 잡 종료 수신 — 최종 result는 별도 GET 1회로 가져옴 (Hub payload 크기 최소화).
@@ -657,11 +1062,45 @@
             _ = TickElapsedAsync(_elapsedCts.Token);
 
             // 잡 종료 대기 (최대 60분 — Hub disconnect 대비 안전망).
+            // 작22 (2026-09-09) A3: 종료보다 **1단계 완료 신호**가 먼저 올 수 있다. 그때는 5/16 사장님 문안 그대로 묻고,
+            //   [예] 면 같은 연결에서 2단계를 이어 본다. [아니오] 면 멈춘 채로 남기고 나중에 「이어서 가져오기」로 잇는다.
             var timeout = Task.Delay(TimeSpan.FromMinutes(60));
-            var finished = await Task.WhenAny(completionTcs.Task, timeout);
-            if (finished == timeout)
+            var phaseTask = _phaseSignal!.Task;
+            while (true)
             {
-                Snackbar.Add("이관 타임아웃 (60분). 백엔드 로그를 확인하세요.", Severity.Warning);
+                var finished = await Task.WhenAny(completionTcs.Task, phaseTask, timeout);
+                if (finished == timeout)
+                {
+                    // 작22 (2026-09-09) A3: 60분은 **화면이 기다리는 한도**일 뿐 작업은 서버에서 계속 돈다.
+                    //   이제 화면을 다시 열면 진행 중인 작업에 다시 붙으므로(재접속) 그렇게 안내한다.
+                    Snackbar.Add("가져오기가 60분을 넘겨 화면 대기를 멈춥니다. 작업은 계속 진행 중일 수 있으니 잠시 뒤 이 화면을 다시 열어 확인해 주세요.", Severity.Warning);
+                    return;
+                }
+                if (finished == completionTcs.Task) { break; }
+
+                _statusMessage = "1단계(기초자료) 이관 완료";
+                StateHasChanged();
+
+                // 사장님 문안 그대로 (5/16 결재안 §5) — 한 글자도 바꾸지 않는다.
+                var go = await DialogService.ShowMessageBoxAsync(
+                    "1단계 이관 완료",
+                    "1단계자료 이관완료. 2단계 자료 이관 계속 하시겠습니까?",
+                    yesText: "예", cancelText: "아니오");
+
+                // 이미 받은 신호가 다시 잡히지 않게 자리를 새로 만든다(2단계는 종료 신호로 끝난다).
+                _phaseSignal = new TaskCompletionSource<int>();
+                phaseTask = _phaseSignal.Task;
+
+                if (go == true && await SendContinueAsync(jobId))
+                {
+                    _statusMessage = "2단계 자료를 가져오는 중...";
+                    StateHasChanged();
+                    continue;
+                }
+
+                // [아니오] 또는 이어가기 실패 — 작업은 살아 있고 언제든 이어받을 수 있다(헌법 #20: 흐름을 끊지 않는다).
+                _pausedJobId = jobId;
+                Snackbar.Add("1단계 자료까지 가져왔습니다. 거래 자료는 [이어서 가져오기]로 계속할 수 있습니다.", Severity.Success);
                 return;
             }
 
@@ -680,6 +1119,7 @@
                     Employees = finalStatus.Result.Employees, PurchaseOrders = finalStatus.Result.PurchaseOrders, SalesOrders = finalStatus.Result.SalesOrders,
                     StockLedger = finalStatus.Result.StockLedger, Collections = finalStatus.Result.Collections, Cashbook = finalStatus.Result.Cashbook,
                     Payments = finalStatus.Result.Payments, // 작21: 지급 잡 신설 (갈래 A9)
+                    DailyReports = finalStatus.Result.DailyReports, // 작22 D: 일일보고서(레거시 메모) 잡 신설
                     Expenses = finalStatus.Result.Expenses, PurchaseOrdersFromIU = finalStatus.Result.PurchaseOrdersFromIU,
                     SalesOrdersFromIO = finalStatus.Result.SalesOrdersFromIO, TaxInvoices = finalStatus.Result.TaxInvoices,
                     Bills = finalStatus.Result.Bills, CardPayments = finalStatus.Result.CardPayments, BankTransactions = finalStatus.Result.BankTransactions
@@ -703,6 +1143,7 @@
                     new("어음(EU+EQ)", _migrationResult.Bills),
                     new("카드결제(CD)", _migrationResult.CardPayments),
                     new("은행거래(BANKF)", _migrationResult.BankTransactions),
+                    new("일일보고서(레거시 메모)", _migrationResult.DailyReports), // 작22 D
                 };
                 var total = _migrationRows.Sum(r => r.Count);
                 Snackbar.Add($"이관 완료! 총 {total:N0}건 (경과 {_elapsedSeconds}초)", Severity.Success);
@@ -733,6 +1174,9 @@
             }
             _loading = false;
             _statusMessage = "";
+            // 작22 (2026-09-09) A3: 화면 진입 시 재접속은 버튼이 아니라 코드가 부른다 — 그 경로는 자동 갱신이 없어
+            //   여기서 직접 그려 주지 않으면 진행 헤더가 내려가지 않고 「이어서 가져오기」 버튼도 안 나타난다.
+            await InvokeAsync(StateHasChanged);
         }
 
         // 작21 C1 (2026-09-04): 이관 완료(_migrationResult 세팅) 직후 레거시와 숫자 맞춰보기.
@@ -749,15 +1193,11 @@
     private string? _reconError;
     private bool _reconLoading;
 
-    private string BuildReconUrl()
-    {
-        var url = $"api/migration/legacy-mdb/reconcile?folderPath={Uri.EscapeDataString(_folderPath)}";
-        if (!string.IsNullOrEmpty(_mdbPassword))
-        {
-            url += $"&mdbPassword={Uri.EscapeDataString(_mdbPassword)}";
-        }
-        return url;
-    }
+    /// <summary>
+    /// 작22 (2026-09-09) A4 · 병렬이슈 11: 대사 호출도 주소줄(GET) → 본문(POST). 비번이 주소에 실리지 않는다.
+    /// </summary>
+    private Task<HttpResponseMessage> PostReconAsync()
+        => Http.PostAsJsonAsync("api/migration/legacy-mdb/reconcile", BuildReadOnlyMdbRequest());
 
     /// <summary>
     /// 작21 C1·C2: 레거시 MDB 숫자와 히트판 숫자를 받아 _recon 에 담는다.
@@ -774,13 +1214,13 @@
         try
         {
             // 진범 #22 와 같은 자리: 장시간 이관 뒤 JWT 만료 → 401 이면 RefreshAsync 후 1회 재시도.
-            var resp = await Http.GetAsync(BuildReconUrl());
+            var resp = await PostReconAsync();
             if (resp.StatusCode == System.Net.HttpStatusCode.Unauthorized)
             {
                 var refreshed = await Auth.RefreshAsync();
                 if (refreshed)
                 {
-                    resp = await Http.GetAsync(BuildReconUrl());
+                    resp = await PostReconAsync();
                 }
             }
             if (!resp.IsSuccessStatusCode)
@@ -930,6 +1370,42 @@
         public string? ErrorMessage { get; set; }
     }
 
+    /// <summary>작22 (2026-09-09) A3: 1단계 완료 신호 페이로드 — 서버 MigrationProgressService.PhaseCompletedAsync 와 짝.</summary>
+    private class PhaseCompletedPayload
+    {
+        public string JobId { get; set; } = "";
+        public int Phase { get; set; }
+    }
+
+    /// <summary>작22 (2026-09-09) A3: 1단계 완료 신호를 기다리는 자리. 신호가 오면 다이얼로그로 사람에게 묻는다.</summary>
+    private TaskCompletionSource<int>? _phaseSignal;
+
+    /// <summary>작22 (2026-09-09) A3: `GET legacy-mdb/current` 응답 — 화면이 다시 붙을 때 쓴다.</summary>
+    private class CurrentJobResponse
+    {
+        public CurrentJobRow? Job { get; set; }
+        public List<CurrentTableRow>? Tables { get; set; }
+    }
+
+    private class CurrentJobRow
+    {
+        public string JobId { get; set; } = "";
+        public string Status { get; set; } = "";
+        public string StatusText { get; set; } = "";
+        public string? SourceFolder { get; set; }
+        public DateTime? StartedAt { get; set; }
+        public DateTime? PausedAt { get; set; }
+        public DateTime? CompletedAt { get; set; }
+    }
+
+    private class CurrentTableRow
+    {
+        public string TableName { get; set; } = "";
+        public string Status { get; set; } = "";
+        public long Rows { get; set; }
+        public string? ErrorMessage { get; set; }
+    }
+
     private class StartResponse
     {
         public string JobId { get; set; } = "";
@@ -988,6 +1464,7 @@
         public int StockLedger { get; set; }
         public int Collections { get; set; }
         public int Payments { get; set; } // 작21 (2026-09-04): 지급 잡 신설 — 갈래 A9 MdbMigrationResult.Payments 대응
+        public int DailyReports { get; set; } // 작22 (2026-09-09) D: 일일보고서(레거시 메모) — MdbMigrationResult.DailyReports 대응
         public int Cashbook { get; set; }
         public int Expenses { get; set; }
         public int PurchaseOrdersFromIU { get; set; }
