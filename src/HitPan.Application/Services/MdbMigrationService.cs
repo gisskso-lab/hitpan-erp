@@ -291,7 +291,7 @@ public sealed class MdbMigrationService
             // 4개 메서드가 partnerMap/itemMap/employeeMap 채우는 단계이므로
             // 동일 tx 안에서 처리해 매핑 일관성 보장. 이 단계는 거래 데이터에 비해 매우 가벼움(수만 행).
             // ──────────────────────────────────────
-            _logger.LogInformation("[MDB마이그레이션] PYOJUN.MDB 읽기 시작: {Path}", pyojunPath);
+            _logger.LogInformation("[MDB마이그레이션] PYOJUN.MDB 읽기 시작: {Path}", ForLog(pyojunPath));
 
             // PYOJUN(마스터)는 실패 시 throw — partnerMap/itemMap 못 채우면 PANDATA가 무의미.
             // 작22 (2026-09-09) A3: 2단계(TransactionsOnly)도 이 스텝을 지난다 — 거래 잡이 읽는 partnerMap/itemMap/employeeMap 은
@@ -342,7 +342,7 @@ public sealed class MdbMigrationService
             // 각 테이블 commit 단위 ~수초~수십초. 한 테이블 실패 시 다른 테이블 보존.
             // partnerMap/itemMap/employeeMap은 in-memory 이므로 FK 무관.
             // ──────────────────────────────────────
-            _logger.LogInformation("[MDB마이그레이션] PANDATA.mdb 읽기 시작: {Path}", pandataPath);
+            _logger.LogInformation("[MDB마이그레이션] PANDATA.mdb 읽기 시작: {Path}", ForLog(pandataPath));
 
             // ──────────────────────────────────────
             // 정공법(축 1) 사장님 6축 명령 2026-05-14:
@@ -509,7 +509,7 @@ public sealed class MdbMigrationService
             // ──────────────────────────────────────
             if (File.Exists(potherPath))
             {
-                _logger.LogInformation("[MDB마이그레이션] POTHER.mdb 읽기 시작: {Path}", potherPath);
+                _logger.LogInformation("[MDB마이그레이션] POTHER.mdb 읽기 시작: {Path}", ForLog(potherPath));
 
                 await RunTableStepAsync("partner_contacts", async tx =>
                 {
