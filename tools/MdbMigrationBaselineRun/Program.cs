@@ -43,6 +43,22 @@ var outPath = Environment.GetEnvironmentVariable("HITPAN_BASELINE_OUT");
 var applySchema = args.Contains("--apply-schema", StringComparer.OrdinalIgnoreCase);
 var skipMigrate = args.Contains("--skip-migrate", StringComparer.OrdinalIgnoreCase);
 
+// 작22 (2026-09-10) [4] 검증용 인자 — 없으면 종전 동작 그대로다.
+//   --mode merge|overwrite  --phase master|transactions|all  --job <잡ID>(체크포인트가 이 잡으로 기록·재개)
+static string? ArgValue(string[] a, string name)
+{
+    var i = Array.FindIndex(a, x => string.Equals(x, name, StringComparison.OrdinalIgnoreCase));
+    return i >= 0 && i + 1 < a.Length ? a[i + 1] : null;
+}
+var runMode = ArgValue(args, "--mode");
+var runJobId = ArgValue(args, "--job");
+var runPhase = (ArgValue(args, "--phase") ?? "all").ToLowerInvariant() switch
+{
+    "master" => MdbMigrationPhase.MasterOnly,
+    "transactions" => MdbMigrationPhase.TransactionsOnly,
+    _ => MdbMigrationPhase.All,
+};
+
 using var loggerFactory = LoggerFactory.Create(b => b
     .AddSimpleConsole(o => { o.SingleLine = true; o.TimestampFormat = "HH:mm:ss "; })
     .SetMinimumLevel(LogLevel.Information));
@@ -96,9 +112,10 @@ if (!skipMigrate)
                 perTable.AddOrUpdate(table,
                     _ => (status, rows, ms, err, Interlocked.Increment(ref order)),
                     (_, old) => (status, rows, ms, err, old.Order));
-                if (status is "completed" or "failed")
+                if (status is "completed" or "failed" or "skipped")
                     Console.WriteLine($"  [{status,-9}] {table,-22} rows={rows,9:N0}  {ms / 1000.0,8:F1}s {err}");
-            });
+            },
+            runMode, runPhase, runJobId);
     }
     catch (Exception ex)
     {
@@ -238,9 +255,12 @@ static Task<MdbReconciliationReport> RunReconcileAsync(
 static Task<MdbMigrationResult> RunMigrateAsync(
     MySqlConnection db, ILoggerFactory lf, MigrationDbConnectionFactory f,
     string folder, string tenantId, string? mdbPassword,
-    Action<string, string, int, long, string?> progress)
+    Action<string, string, int, long, string?> progress,
+    string? mode = null, MdbMigrationPhase phase = MdbMigrationPhase.All, string? jobId = null)
 {
     var crypto = new BinaryCryptoServiceAdapter(new EncryptionService());
     var svc = new MdbMigrationService(db, lf.CreateLogger<MdbMigrationService>(), crypto, f);
-    return svc.MigrateAsync(folder, tenantId, mdbPassword, jobId: null, progressCallback: progress, CancellationToken.None);
+    // 작22 (2026-09-10) [4] 검증: 모드·단계·잡ID 를 그대로 태워 G-CK(체크포인트 재개)·G-MH(병합 보존)를 실측한다.
+    //   기본값은 종전 그대로(mode 미지정 · All · jobId null) — 기존 실행 결과가 달라지지 않는다.
+    return svc.MigrateAsync(folder, tenantId, mdbPassword, jobId, progress, mode, phase, CancellationToken.None);
 }
