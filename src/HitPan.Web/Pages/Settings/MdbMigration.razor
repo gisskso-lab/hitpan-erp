@@ -432,7 +432,8 @@
     // 진범 #23 봉합 (2026-05-18): 견적·반품 잡 2개 추가 (quotations·sales_returns).
     // 진범 #24 봉합 (2026-05-20, 사장님 자문 #3 옵션 A): DOCF1/F2 transactions 잡 제거 (17→16).
     // 작21 (2026-09-04): 지급(payments) 잡 신설 (16→17).
-    private int _totalTables = 17;
+    // 작22 (2026-09-09) D: 일일보고서(hr_reports — 레거시 메모) 잡 신설 (17→18).
+    private int _totalTables = 18;
     private int _elapsedSeconds;
     private double _progressPercent => _totalTables == 0 ? 0 : (double)_completedTables / _totalTables * 100.0;
 
@@ -465,6 +466,8 @@
         // 진범 #23 봉합 (2026-05-18): 견적·반품 — ERP 매니저 자문 후 본구현.
         new("quotations", "견적서(자문대기)"),
         new("sales_returns", "반품(자문대기)"),
+        // 작22 (2026-09-09) D: 레거시 메모(DOCME) → 일일보고서. 서비스에서는 POTHER events 잡 뒤에 도는데 POTHER 잡(명함·AS·배송·일정)은 카드가 없어 목록 끝에 둔다.
+        new("hr_reports", "일일보고서(레거시 메모)"),
     };
 
     private static string GetStatusIcon(string status) => status switch
@@ -680,6 +683,7 @@
                     Employees = finalStatus.Result.Employees, PurchaseOrders = finalStatus.Result.PurchaseOrders, SalesOrders = finalStatus.Result.SalesOrders,
                     StockLedger = finalStatus.Result.StockLedger, Collections = finalStatus.Result.Collections, Cashbook = finalStatus.Result.Cashbook,
                     Payments = finalStatus.Result.Payments, // 작21: 지급 잡 신설 (갈래 A9)
+                    DailyReports = finalStatus.Result.DailyReports, // 작22 D: 일일보고서(레거시 메모) 잡 신설
                     Expenses = finalStatus.Result.Expenses, PurchaseOrdersFromIU = finalStatus.Result.PurchaseOrdersFromIU,
                     SalesOrdersFromIO = finalStatus.Result.SalesOrdersFromIO, TaxInvoices = finalStatus.Result.TaxInvoices,
                     Bills = finalStatus.Result.Bills, CardPayments = finalStatus.Result.CardPayments, BankTransactions = finalStatus.Result.BankTransactions
@@ -703,6 +707,7 @@
                     new("어음(EU+EQ)", _migrationResult.Bills),
                     new("카드결제(CD)", _migrationResult.CardPayments),
                     new("은행거래(BANKF)", _migrationResult.BankTransactions),
+                    new("일일보고서(레거시 메모)", _migrationResult.DailyReports), // 작22 D
                 };
                 var total = _migrationRows.Sum(r => r.Count);
                 Snackbar.Add($"이관 완료! 총 {total:N0}건 (경과 {_elapsedSeconds}초)", Severity.Success);
@@ -988,6 +993,7 @@
         public int StockLedger { get; set; }
         public int Collections { get; set; }
         public int Payments { get; set; } // 작21 (2026-09-04): 지급 잡 신설 — 갈래 A9 MdbMigrationResult.Payments 대응
+        public int DailyReports { get; set; } // 작22 (2026-09-09) D: 일일보고서(레거시 메모) — MdbMigrationResult.DailyReports 대응
         public int Cashbook { get; set; }
         public int Expenses { get; set; }
         public int PurchaseOrdersFromIU { get; set; }

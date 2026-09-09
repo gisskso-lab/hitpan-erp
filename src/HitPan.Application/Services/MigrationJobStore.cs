@@ -137,6 +137,8 @@ public sealed class MigrationJobResult
     public int Collections { get; set; }
     /// <summary>작21 (2026-09-04) A9: 지급(payments) 이관 건수. 컨트롤러 매핑(갈래 B)에서 result.Payments 를 채운다.</summary>
     public int Payments { get; set; }
+    /// <summary>작22 (2026-09-09) D: 일일보고서(hr_reports, DOCME (사원,날짜) 묶음) 이관 건수. 컨트롤러 매핑에서 result.DailyReports 를 채운다.</summary>
+    public int DailyReports { get; set; }
     public int Cashbook { get; set; }
     public int Expenses { get; set; }
     public int PurchaseOrdersFromIU { get; set; }
