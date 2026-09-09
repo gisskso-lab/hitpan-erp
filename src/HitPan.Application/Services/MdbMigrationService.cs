@@ -2317,7 +2317,8 @@ public sealed class MdbMigrationService
         //   지급(B~F, 금액 = S_BAL)은 MigratePaymentsAsync(별도 잡), 0(채권 발생)·A(매입 발생)·그 외는 카운트만 남기고 이관하지 않는다.
         //   종전 `S_SUK == 0 이면 S_BAL` 대체는 삭제 — 그게 전 코드를 수금에 밀어 넣던 자리다(P0-E).
         var rows = new List<CollectionRow>(dt.Rows.Count);
-        int skipPayment = 0, skipOther = 0, skipPartner = 0;
+        int skipPayment = 0, skipOther = 0, fallbackPartner = 0;
+        string? fallbackPartnerIdLazy = null;
         foreach (DataRow row in dt.Rows)
         {
             var gu = GetStr(row, "S_GU").Trim();
@@ -2329,10 +2330,16 @@ public sealed class MdbMigrationService
             }
 
             var buyCode = GetInt(row, "S_BUY");
+            // 작22 (2026-09-10) [3-V] 병렬이슈 16: 거래처가 DOCF8 에 없다고 **수금을 버리지 않는다**.
+            //   종전엔 `skipPartner++; continue;` 라 4행 1,450,000원이 조용히 사라졌고, 그만큼 미수가 영구 과대였다
+            //   (대사표 실측: 레거시 수금 109,822 vs 히트판 109,818). 명세서 경로는 작21 A3 에서 이미 폴백을 쓰는데(:4634)
+            //   수금·지급만 그 전 상태였다 — 같은 사고를 한쪽만 고친 자리다.
+            //   폴백 거래처(LEGACY_UNKNOWN_PTNR)는 5/16 부터 있는 것을 그대로 쓴다(D1 결재 "버리지 않는다" 와 같은 규칙).
             if (!partnerMap.TryGetValue(buyCode, out var partnerId))
             {
-                skipPartner++;
-                continue;
+                fallbackPartnerIdLazy ??= await EnsureLegacyFallbackPartnerAsync(tenantId, now, tx, ct).ConfigureAwait(false);
+                partnerId = fallbackPartnerIdLazy;
+                fallbackPartner++;
             }
 
             var ymd = GetStr(row, "S_YMD");
@@ -2358,8 +2365,8 @@ public sealed class MdbMigrationService
         }
 
         _logger.LogInformation(
-            "[MDB마이그레이션] DOCF5 수금 후보 {Rows}행 — 제외: 지급계열(payments 잡)={SkipPay} 발생·기타(0·A·그 외)={SkipOther} 거래처 미매핑={SkipPartner}",
-            rows.Count, skipPayment, skipOther, skipPartner);
+            "[MDB마이그레이션] DOCF5 수금 후보 {Rows}행 — 제외: 지급계열(payments 잡)={SkipPay} 발생·기타(0·A·그 외)={SkipOther} · 거래처 폴백={FallbackPartner}",
+            rows.Count, skipPayment, skipOther, fallbackPartner);
 
         if (rows.Count == 0) return 0;
 
@@ -2568,7 +2575,8 @@ public sealed class MdbMigrationService
         if (dt.Rows.Count == 0) return 0;
 
         var rows = new List<PaymentRow>(dt.Rows.Count);
-        int skipKind = 0, skipPartner = 0;
+        int skipKind = 0, fallbackPartner = 0;
+        string? fallbackPartnerIdLazy = null;
         foreach (DataRow row in dt.Rows)
         {
             var gu = GetStr(row, "S_GU").Trim();
@@ -2580,10 +2588,13 @@ public sealed class MdbMigrationService
             }
 
             var buyCode = GetInt(row, "S_BUY");
+            // 작22 (2026-09-10) [3-V] 병렬이슈 16: 수금과 같은 규칙 — 거래처 미등록이라고 지급을 버리지 않는다.
+            //   종전 `skipPartner++; continue;` 로 1행 50,000원이 사라져 미지급이 그만큼 과대였다(레거시 2,228 vs 히트판 2,227).
             if (!partnerMap.TryGetValue(buyCode, out var partnerId))
             {
-                skipPartner++;
-                continue;
+                fallbackPartnerIdLazy ??= await EnsureLegacyFallbackPartnerAsync(tenantId, now, tx, ct).ConfigureAwait(false);
+                partnerId = fallbackPartnerIdLazy;
+                fallbackPartner++;
             }
 
             var ymd = GetStr(row, "S_YMD");
@@ -2611,8 +2622,8 @@ public sealed class MdbMigrationService
         }
 
         _logger.LogInformation(
-            "[MDB마이그레이션] DOCF5 지급 후보 {Rows}행 — 제외: 계열 불일치={SkipKind} 거래처 미매핑={SkipPartner}",
-            rows.Count, skipKind, skipPartner);
+            "[MDB마이그레이션] DOCF5 지급 후보 {Rows}행 — 제외: 계열 불일치={SkipKind} · 거래처 폴백={FallbackPartner}",
+            rows.Count, skipKind, fallbackPartner);
         if (rows.Count == 0) return 0;
 
         const int ChunkSize = 1000;
