@@ -105,7 +105,9 @@ $queries = @(
   @{ title = 'Q2) 슬롯 계수 (히트판 본체와 같은 축)';
      sql   = "SELECT device_type, status, COUNT(*) AS n FROM tenant_devices GROUP BY device_type, status;" },
 
-  @{ title = 'Q3) 표식 이동 감사 기록 (한 번이라도 옮겨졌나 / 합류했나)';
+  # 정정(2026-09-10 병렬이슈20): 옛 제목 「표식 이동 감사 기록 (한 번이라도 옮겨졌나 / 합류했나)」는 오해를 부른다 —
+  #   로그인 안에서 쓰는 감사는 실물에서 0행이라(AuditService.cs:37) 표식 이동이 돌았어도 여기 안 남는다. 판정은 Q1 줄 상태로.
+  @{ title = 'Q3) 기기 감사 기록 — 참고용 · 로그인 중 일어난 일(표식 이동 등)은 여기 안 남음 · 판정은 Q1';
      sql   = "SELECT created_at, action_type, entity_id, reason FROM audit_trail WHERE entity_type = 'device' AND action_type LIKE 'device_%' ORDER BY created_at;" },
 
   @{ title = 'Q4) 이관 이력 - 실물이 이미 이관된 DB 인가 (빈 DB 면 전부 0)';
