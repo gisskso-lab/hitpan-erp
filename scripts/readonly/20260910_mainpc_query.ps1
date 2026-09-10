@@ -12,7 +12,10 @@
 #  PowerShell 5.1 호환.
 # =====================================================================
 
-$ErrorActionPreference = 'Stop'
+# 🔴 R-1: 'Stop' 로 두지 않는다. PowerShell 5.1 에서 네이티브 stderr 를 2>&1 로 합치면
+#   그 한 줄이 ErrorRecord 가 되고, Stop 이면 문항 하나만 실패해도 그 자리에서 멈춰
+#   뒤 문항이 전부 안 돈다(사장님이 다시 돌리셔야 함). 조회 루프는 계속 돌게 둔다.
+$ErrorActionPreference = 'Continue'
 
 function Read-ConfFile {
     # db.conf 를 히트판 본체(TenantConfigReader)와 같은 방식으로 읽는다:
@@ -138,8 +141,13 @@ $env:MYSQL_PWD = $dbPass    # 비밀번호는 명령줄 인자로 넘기지 않�
 try {
     foreach ($q in $queries) {
         ("`r`n==== " + $q.title + " ====") | Out-File -LiteralPath $outFile -Encoding utf8 -Append
-        $args = @('-h', $dbHost, '-P', $dbPort, '-u', $dbUser, '--default-character-set=utf8mb4', '-t', $dbName, '-e', $q.sql)
-        $result = & $mysql @args 2>&1 | Out-String
+        # 🔴 R-2: $args 는 PowerShell 자동 변수라 이름을 바꾼다.
+        $mysqlArgs = @('-h', $dbHost, '-P', $dbPort, '-u', $dbUser, '--default-character-set=utf8mb4', '-t', $dbName, '-e', $q.sql)
+        $result = & $mysql @mysqlArgs 2>&1 | Out-String
+        $code = $LASTEXITCODE   # 이 문항이 실패했는지 파일에 남긴다(다음 문항은 계속 돈다 · R-1)
+        if ($code -ne 0) {
+            ("[이 문항 실패 exit=" + $code + " — 아래 메시지 확인 · 나머지 문항은 계속 진행됩니다]") | Out-File -LiteralPath $outFile -Encoding utf8 -Append
+        }
         $result | Out-File -LiteralPath $outFile -Encoding utf8 -Append
     }
 }
