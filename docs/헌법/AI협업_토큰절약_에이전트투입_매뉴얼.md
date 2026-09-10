@@ -218,6 +218,7 @@ R3 결론    결론 카드 → 사장님 결재                                 
 | P9 | 상태줄 — 컨텍스트 · 5시간 한도 · 캐시 남은 시간 · 생각량 표시 (컨텍스트 계산 훅 해제) | 도구 호출마다 기록 전체 (최대 11MB) 파싱 · 한도·캐시 경고 없음 | `~/.claude/statusline.js` | 작1 |
 | P10 | MCP 정리 | 호출 0건인 openai · gemini 서버가 창마다 2벌 · `npx …@latest` 매 시작 조회 · 키 평문 | `claude mcp remove` | 작1 |
 | P11 | 문서 다이어트 1회 | CLAUDE.md 525줄 · MEMORY.md 30KB · 운영기록 INDEX 217KB | 옮기고 ⬛흡수·이력 보존 (CATEGORIES §6) | 작1 |
+| P11-2 | INDEX 설명 줄이기 2차 | 10KB 넘는 INDEX 5개 (설계/erp · 병렬이슈 · 검증/erp · 검증 · 개발/erp) 합계 153KB | 설명 칸 60자 · 폴더마다 `INDEX_원본상세_20260911_이력.md` → 41KB | 작2 |
 
 ---
 
