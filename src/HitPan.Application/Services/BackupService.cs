@@ -1,11 +1,17 @@
 using System.Data;
 using System.Data.Common;
 using System.Diagnostics;
+using System.Runtime.InteropServices;
+using System.Runtime.Versioning;
+using System.Security.AccessControl;
+using System.Security.Principal;
 using System.Text;
 using Dapper;
+using HitPan.Application.Common;
 using HitPan.Application.DTOs.Backup;
 using HitPan.Application.Interfaces;
 using Microsoft.Extensions.Logging;
+using Microsoft.Win32.SafeHandles;
 
 namespace HitPan.Application.Services;
 
@@ -48,9 +54,10 @@ public sealed class BackupService : IBackupService
                 INSERT INTO backup_settings (tenant_id, primary_path, mirror_path, schedule_mode, retention_count)
                 VALUES (@TenantId, @PrimaryPath, NULL, 'manual', 30)
                 """;
-            var defaultPath = Path.Combine(
-                Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments),
-                "HitpanBackup");
+            // 20260911작5 ③ — 서비스 계정은 문서 폴더가 빈 값이라 Path.Combine("", "HitpanBackup") = 상대 경로가 저장되고
+            //   작업 폴더(C:\Windows\System32) 아래에 백업이 생겼다(선행검증 20260911 격리재현 §6 P2).
+            //   문서 폴더가 비었거나 절대 경로가 아니거나 Windows 폴더 하위면 %ProgramData%\HitPan\Backup (K2).
+            var defaultPath = ResolveBackupFolder(null);
             await _db.ExecuteAsync(new CommandDefinition(insertSql,
                 new { TenantId = tenantId, PrimaryPath = defaultPath }, cancellationToken: ct))
                 .ConfigureAwait(false);
@@ -61,6 +68,20 @@ public sealed class BackupService : IBackupService
                 ScheduleMode = "manual",
                 RetentionCount = 30
             };
+        }
+
+        // 20260911작5 ③ K3 — 이미 저장된 쓸 수 없는 경로(빈 값 · 상대 경로 · Windows 폴더 하위)는
+        //   실행 시 교정하고 설정 행도 교정해 저장한다. 쓸 수 있는 경로(사용자가 고른 값)는 그대로 둔다.
+        var resolvedPrimary = ResolveBackupFolder(row.PrimaryPath);
+        if (!string.Equals(resolvedPrimary, row.PrimaryPath, StringComparison.Ordinal))
+        {
+            _logger.LogWarning("백업 1차 폴더 설정이 쓸 수 없는 경로라 교정합니다 tenantId={TenantId} 저장값={Stored} 교정={Resolved}",
+                tenantId, row.PrimaryPath, resolvedPrimary);
+            const string fixSql = "UPDATE backup_settings SET primary_path = @PrimaryPath WHERE tenant_id = @TenantId";
+            await _db.ExecuteAsync(new CommandDefinition(fixSql,
+                new { PrimaryPath = resolvedPrimary, TenantId = tenantId }, cancellationToken: ct))
+                .ConfigureAwait(false);
+            row.PrimaryPath = resolvedPrimary;
         }
         return row;
     }
@@ -151,7 +172,8 @@ public sealed class BackupService : IBackupService
         try
         {
             // 2) 1차 폴더 보장
-            Directory.CreateDirectory(settings.PrimaryPath);
+            //    20260911작5 C-8 — 코드가 정한 기본 폴더(%ProgramData%\HitPan\Backup)만 제한 권한으로 만들고 검사한다.
+            EnsureBackupFolder(settings.PrimaryPath);
             var primaryFile = Path.Combine(settings.PrimaryPath, fileName);
 
             // 3) mysqldump 실행
@@ -159,7 +181,11 @@ public sealed class BackupService : IBackupService
 
             var fileInfo = new FileInfo(primaryFile);
             if (!fileInfo.Exists || fileInfo.Length == 0)
+            {
+                // 20260911작5 C-16 ① — 정상 종료인데 출력이 비었으면 그 0B 파일도 남기지 않는다(보관 개수를 차지한다 · 병렬이슈30).
+                if (fileInfo.Exists) RemoveFailedDumpOutput(primaryFile);
                 throw new InvalidOperationException("백업 파일 생성 실패 (mysqldump 출력 없음).");
+            }
 
             // 4) 2차 미러 복사 (선택)
             string? mirrorFile = null;
@@ -170,10 +196,7 @@ public sealed class BackupService : IBackupService
                 File.Copy(primaryFile, mirrorFile, overwrite: true);
             }
 
-            // 5) 보관정책 — 일반 백업만 (pre_restore 는 제외)
-            ApplyRetention(settings.PrimaryPath, settings.RetentionCount);
-            if (!string.IsNullOrWhiteSpace(settings.MirrorPath))
-                ApplyRetention(settings.MirrorPath!, settings.RetentionCount);
+            // 5) 보관정책 — 20260911작5 C-9: 성공 기록(6·7) 뒤로 옮겼다. 끝난 백업을 먼저 지우지 않는다.
 
             // 6) 이력 UPDATE (success)
             const string okSql = """
@@ -200,6 +223,23 @@ public sealed class BackupService : IBackupService
                 new { Now = DateTime.Now, TenantId = tenantId }, cancellationToken: ct))
                 .ConfigureAwait(false);
 
+            // 8) 보관정책 — 일반 백업만 (pre_restore 는 제외) · 성공 기록 뒤 (C-9)
+            //    정리 실패는 이미 끝난 백업을 실패로 바꾸지 않는다(다음 회차에 다시 정리).
+            try
+            {
+                ApplyRetention(settings.PrimaryPath, settings.RetentionCount);
+                if (!string.IsNullOrWhiteSpace(settings.MirrorPath))
+                    ApplyRetention(settings.MirrorPath!, settings.RetentionCount);
+            }
+            catch (IOException retEx)
+            {
+                _logger.LogWarning(retEx, "보관정책 정리 실패(백업은 성공) tenantId={TenantId} backupId={BackupId}", tenantId, backupId);
+            }
+            catch (UnauthorizedAccessException retEx)
+            {
+                _logger.LogWarning(retEx, "보관정책 정리 실패(백업은 성공) tenantId={TenantId} backupId={BackupId}", tenantId, backupId);
+            }
+
             return new RunBackupResponse
             {
                 Success = true,
@@ -211,31 +251,64 @@ public sealed class BackupService : IBackupService
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "백업 실패 tenantId={TenantId} backupId={BackupId}", tenantId, backupId);
-            const string failSql = """
-                UPDATE backup_history
-                SET finished_at = @FinishedAt, status = 'failed', error_message = @Err
-                WHERE backup_id = @BackupId
-                """;
-            await _db.ExecuteAsync(new CommandDefinition(failSql,
-                new { FinishedAt = DateTime.Now, Err = ex.Message, BackupId = backupId },
-                cancellationToken: ct)).ConfigureAwait(false);
+            // 20260911작5 ④ — 요청이 끊기면(ct 취소) 실패 UPDATE 도 같은 ct 로 돌아 다시 예외 → 이력이 'running' 에 고정됐다
+            //   (선행검증 20260911 격리재현 §4 X3). 기록은 취소되지 않은 토큰으로 · 연결이 닫혔으면 다시 열고 ·
+            //   기록 자체가 실패해도 원래 실패 결과를 돌려준다. 취소면 이유를 「요청이 끊겨」로 구분한다.
+            var canceled = ex is OperationCanceledException && ct.IsCancellationRequested;
+            var reason = canceled ? BackupCanceledReason : ex.Message;
+            if (canceled)
+                _logger.LogWarning(ex, "백업 중단 — 요청이 끊김 tenantId={TenantId} backupId={BackupId}", tenantId, backupId);
+            else
+                _logger.LogError(ex, "백업 실패 tenantId={TenantId} backupId={BackupId}", tenantId, backupId);
 
-            const string lastFailSql = """
-                UPDATE backup_settings SET last_run_at = @Now, last_status = 'failed', last_error = @Err
-                WHERE tenant_id = @TenantId
-                """;
-            await _db.ExecuteAsync(new CommandDefinition(lastFailSql,
-                new { Now = DateTime.Now, Err = ex.Message, TenantId = tenantId },
-                cancellationToken: ct)).ConfigureAwait(false);
+            try
+            {
+                await EnsureOpenForRecordAsync().ConfigureAwait(false);
 
-            return new RunBackupResponse { Success = false, BackupId = backupId, Error = ex.Message };
+                // C-9 — 이미 끝난(success) 기록을 'failed' 로 덮지 않는다.
+                const string failSql = """
+                    UPDATE backup_history
+                    SET finished_at = @FinishedAt, status = 'failed', error_message = @Err
+                    WHERE backup_id = @BackupId AND status = 'running'
+                    """;
+                var marked = await _db.ExecuteAsync(new CommandDefinition(failSql,
+                    new { FinishedAt = DateTime.Now, Err = reason, BackupId = backupId },
+                    cancellationToken: CancellationToken.None)).ConfigureAwait(false);
+
+                if (marked > 0)
+                {
+                    const string lastFailSql = """
+                        UPDATE backup_settings SET last_run_at = @Now, last_status = 'failed', last_error = @Err
+                        WHERE tenant_id = @TenantId
+                        """;
+                    await _db.ExecuteAsync(new CommandDefinition(lastFailSql,
+                        new { Now = DateTime.Now, Err = reason, TenantId = tenantId },
+                        cancellationToken: CancellationToken.None)).ConfigureAwait(false);
+                }
+            }
+            catch (Exception recordEx)
+            {
+                // #15 — 실패 기록을 못 남겨도 호출자에게는 원래 실패를 돌려준다.
+                _logger.LogWarning(recordEx, "백업 실패 기록을 남기지 못했습니다 tenantId={TenantId} backupId={BackupId}", tenantId, backupId);
+            }
+
+            return new RunBackupResponse { Success = false, BackupId = backupId, Error = reason };
         }
     }
 
     // ─── 복원 실행 ───────────────────────────────────────
     public async Task<RestoreResponse> RestoreAsync(string tenantId, string? userId, RestoreRequest req, CancellationToken ct = default)
     {
+        // 🔴 20260911작5 C-11 사장님 결정 (가) 2026-09-11 — 1.3.40 에서 복원은 잠시 막는다.
+        //   비번을 고치면 복원이 처음으로 실제로 돈다. 트랜잭션 없는 가져넣기가 요청 100초에 끊기면 DB 가 반쪽이 된다(병렬이슈26).
+        //   비번 확인·파일 확인·복원 이력 INSERT·사전 백업·가져넣기 **모두보다 먼저** 막는다.
+        //   아래 옛 복원 코드는 지우지 않는다(#1) — 안전장치를 보강하는 다음 업데이트에서 이 차단만 걷는다.
+        if (RestoreTemporarilyClosed)
+        {
+            _logger.LogWarning("복원 요청을 막았습니다(1.3.40 잠시 막기) tenantId={TenantId} userId={UserId}", tenantId, userId);
+            return new RestoreResponse { Success = false, Error = RestoreClosedNotice };
+        }
+
         var restoreId = Guid.NewGuid().ToString();
         var startedAt = DateTime.Now;
 
@@ -330,10 +403,16 @@ public sealed class BackupService : IBackupService
     // ─── 외부 프로세스 헬퍼 ─────────────────────────────
     private async Task RunMysqldumpAsync(string outFile, CancellationToken ct)
     {
-        var (host, port, db, user, pass) = ResolveDbCredentials();
-        var dumpExe = ResolveMariadbBinary("mysqldump.exe", "mariadb-dump.exe");
-        var args = $"-h {host} -P {port} -u {user} \"-p{pass}\" --single-transaction --routines --triggers --default-character-set=utf8mb4 {db}";
-        await RunProcessRedirectedAsync(dumpExe, args, outFile, ct).ConfigureAwait(false);
+        // 20260911작5 ① — 자격증명은 연결 문자열이 아니라 설정 원본(TenantConfigReader)에서 읽는다.
+        //   열린 연결의 ConnectionString 은 드라이버가 Password 를 빼고 돌려주고, 열기 전 문자열은 키가 User= 라
+        //   옛 파서(Uid/User Id)로는 사용자명이 빈 값이다 — 어느 시점에 읽어도 하나가 빠진다(선행검증 §2).
+        // 20260911작5 ② K1 — 비번은 명령줄 "-p…" 가 아니라 자식 환경변수 MYSQL_PWD 로만 넘긴다.
+        //   "-p" 가 없으면 빈 비번이 와도 입력 요청이 구조적으로 불가(선행검증 §5 K1-3: 2초 안에 1045).
+        var (host, port, db, user, pass) = ResolveDbCredentialsFromConfig();
+        var dumpExe = ResolveDumpBinary();
+        _logger.LogInformation("백업 덤프 실행파일: {DumpExe}", dumpExe);
+        var args = $"-h {host} -P {port} -u {user} --single-transaction --routines --triggers --default-character-set=utf8mb4 {db}";
+        await RunProcessRedirectedAsync(dumpExe, args, pass, outFile, ct).ConfigureAwait(false);
     }
 
     private async Task RunMysqlImportAsync(string sqlFile, CancellationToken ct)
@@ -344,30 +423,79 @@ public sealed class BackupService : IBackupService
         await RunProcessRedirectedFromFileAsync(mysqlExe, args, sqlFile, ct).ConfigureAwait(false);
     }
 
-    private static async Task RunProcessRedirectedAsync(string exe, string args, string outFile, CancellationToken ct)
+    private async Task RunProcessRedirectedAsync(string exe, string args, string password, string outFile, CancellationToken ct)
     {
         var psi = new ProcessStartInfo
         {
             FileName = exe,
             Arguments = args,
             UseShellExecute = false,
+            // 20260911작5 ② — 표준입력을 연결하고 곧바로 닫는다: 입력을 기다릴 곳을 남기지 않는다.
+            RedirectStandardInput = true,
             RedirectStandardOutput = true,
             RedirectStandardError = true,
             CreateNoWindow = true,
             StandardOutputEncoding = Encoding.UTF8
         };
+        // K1 — 이 자식 프로세스의 환경에만 넣는다. 부모(API) 프로세스 환경변수는 건드리지 않는다.
+        psi.Environment["MYSQL_PWD"] = password;
+
         using var proc = Process.Start(psi) ?? throw new InvalidOperationException($"{exe} 실행 실패");
-        var errTask = proc.StandardError.ReadToEndAsync(ct);
-
-        await using (var fs = new FileStream(outFile, FileMode.Create, FileAccess.Write, FileShare.None))
+        try
         {
-            await proc.StandardOutput.BaseStream.CopyToAsync(fs, ct).ConfigureAwait(false);
-        }
+            proc.StandardInput.Close();
+            var errTask = proc.StandardError.ReadToEndAsync(ct);
 
-        await proc.WaitForExitAsync(ct).ConfigureAwait(false);
-        var err = await errTask.ConfigureAwait(false);
-        if (proc.ExitCode != 0)
-            throw new InvalidOperationException($"{Path.GetFileName(exe)} 실패 (exit={proc.ExitCode}): {err}");
+            // 20260911작5 C-12 정정 — 출력 파일은 새로 만들기만 한다(이미 있으면 실패).
+            //   연결 너머에 있던 기존 파일을 잘라 쓰지 않고, 아래 ②에서 지우는 파일이 반드시 이번에 만든 파일이 되게 한다.
+            FileStream fs;
+            try
+            {
+                fs = new FileStream(outFile, FileMode.CreateNew, FileAccess.Write, FileShare.None);
+            }
+            catch (IOException ex) when (File.Exists(outFile))
+            {
+                throw new InvalidOperationException("같은 이름의 백업 파일이 이미 있어 덮어쓰지 않았습니다. 잠시 뒤 다시 실행하세요.", ex);
+            }
+
+            var outputKept = false;
+            var outputCleanedByPathCheck = false;
+            try
+            {
+                await using (fs)
+                {
+                    // C-12 ② — 기본 백업 폴더면, 연 파일의 실제 위치가 기대 위치와 같을 때만 쓴다(검사와 쓰기 사이 바꿔치기 차단).
+                    //   사용자가 고른 경로(네트워크 드라이브·SUBST 등은 실제 위치 표기가 달라진다)는 C-8 원칙대로 손대지 않는다.
+                    if (OperatingSystem.IsWindows() && IsRestrictedDefaultBackupFolder(Path.GetDirectoryName(outFile)))
+                    {
+                        outputCleanedByPathCheck = true;   // 어긋나면 ②가 실제 위치의 파일을 직접 정리한다 — 경로로 한 번 더 지우지 않는다
+                        EnsureOpenedDumpFileIsExpectedWindows(fs, outFile);
+                        outputCleanedByPathCheck = false;
+                    }
+                    await proc.StandardOutput.BaseStream.CopyToAsync(fs, ct).ConfigureAwait(false);
+                }
+
+                await proc.WaitForExitAsync(ct).ConfigureAwait(false);
+                var err = await errTask.ConfigureAwait(false);
+                // 병렬이슈28 C28-1 — 성공·실패는 exit 코드로만 가른다. MariaDB 클라이언트의
+                //   「ssl-verify-server-cert is disabled … passwordless login」 경고 줄은 실패 이유에 섞지 않는다.
+                if (proc.ExitCode != 0)
+                    throw new InvalidOperationException($"{Path.GetFileName(exe)} 실패 (exit={proc.ExitCode}): {WithoutPasswordlessTlsWarning(err)}");
+                outputKept = true;
+            }
+            finally
+            {
+                // 20260911작5 C-16 ① — 덤프가 실패(비정상 종료·취소·쓰기 예외)하면 방금 새로 만든 출력 파일(부분·0B)을 남기지 않는다.
+                //   남은 0B 파일이 보관 개수를 차지해 진짜 백업이 지워졌다(병렬이슈30).
+                if (!outputKept && !outputCleanedByPathCheck) RemoveFailedDumpOutput(outFile);
+            }
+        }
+        finally
+        {
+            // 20260911작5 ② — 취소·예외로 빠질 때 덤프가 살아 있으면 자식(숨은 콘솔)까지 끝낸다.
+            //   `using var proc` 은 프로세스를 죽이지 않는다 → 고아 덤프가 부모 핸들을 쥔 채 남았다(선행검증 §4 X1·X4).
+            StopProcessTree(proc, exe);
+        }
     }
 
     private static async Task RunProcessRedirectedFromFileAsync(string exe, string args, string inFile, CancellationToken ct)
@@ -461,18 +589,447 @@ public sealed class BackupService : IBackupService
             $"MariaDB 클라이언트 실행파일을 찾을 수 없습니다 ({string.Join("/", candidates)}). MariaDB가 설치되어 있고 PATH에 등록되었는지 확인하세요.");
     }
 
-    private static void ApplyRetention(string folder, int keep)
+    private void ApplyRetention(string folder, int keep)
     {
         if (!Directory.Exists(folder) || keep <= 0) return;
         // 일반 백업만 대상 — pre_restore_*.sql 은 제외
+        // 20260911작5 C-16 ② — 0바이트 파일(실패한 덤프의 흔적)은 보관 개수에 세지도, 삭제 대상에 넣지도 않는다.
+        //   세면 0B 파일이 자리를 차지해 진짜 백업이 지워졌다(병렬이슈30 · C-13 실측).
         var files = Directory.GetFiles(folder, "hitpan_backup_*.sql")
             .Select(f => new FileInfo(f))
+            .Where(f => f.Length > 0)
             .OrderByDescending(f => f.CreationTime)
             .ToList();
         foreach (var old in files.Skip(keep))
         {
             try { old.Delete(); }
-            catch (IOException ex) { /* 사용 중이면 다음 회차에 정리 */ _ = ex; }
+            catch (IOException ex)
+            {
+                // C-16 ③ (#15) — 사용 중이면 다음 회차에 정리. 빈 catch 대신 기록을 남긴다.
+                _logger.LogWarning(ex, "보관정책: 오래된 백업 파일을 지우지 못함 — 다음 회차에 다시 정리 {File}", old.FullName);
+            }
+        }
+    }
+
+    /// <summary>C-16 ① — 실패한 덤프가 방금 새로 만든 출력 파일을 지운다. 지우지 못하면 기록만 남긴다(원래 실패를 가리지 않는다).</summary>
+    private void RemoveFailedDumpOutput(string outFile)
+    {
+        try
+        {
+            if (File.Exists(outFile)) File.Delete(outFile);
+        }
+        catch (IOException ex)
+        {
+            _logger.LogWarning(ex, "실패한 덤프의 출력 파일을 지우지 못함 {File}", outFile);
+        }
+        catch (UnauthorizedAccessException ex)
+        {
+            _logger.LogWarning(ex, "실패한 덤프의 출력 파일을 지우지 못함 {File}", outFile);
+        }
+    }
+
+    // ─── 20260911작5 백업 비밀번호 결함 핫픽스 (1.3.40) ─────────────
+    //   근거: 작업지시서 docs/운영기록/20260911작5_백업비번결함_핫픽스_작업지시서.md §3 · §11-1 · §11-2
+    //   게이트: HitPan.Tests/Integrity/BackupCredentialGateTests.cs (G-BK1~6)
+
+    private const string BackupCanceledReason = "요청이 끊겨 백업을 중단했습니다. 다시 시도해 주세요.";
+    private const string RestoreClosedNotice = "복원은 안전장치를 보강한 다음 업데이트에서 열립니다.";
+
+    /// <summary>C-11 (가) — 1.3.40 복원 잠시 막기. 상수가 아닌 필드로 두는 이유: 아래 옛 복원 코드가 도달 불가 경고(#19)로 잡히지 않게.</summary>
+    private static readonly bool RestoreTemporarilyClosed = true;
+
+    /// <summary>
+    /// ① 덤프 자격증명 — 설정 원본(<c>TenantConfigReader</c>: 연결 문자열을 조립하는 것과 같은 키
+    /// <c>DB_HOST·DB_PORT·DB_NAME·DB_USER·DB_PASSWORD</c>, InfrastructureExtensions.cs:20-24).
+    /// 비면 프로세스를 띄우기 전에 실패하고, 값은 이유에 절대 넣지 않는다.
+    /// </summary>
+    private (string host, int port, string db, string user, string pass) ResolveDbCredentialsFromConfig()
+    {
+        var db = TenantConfigReader.Get("DB_NAME");
+        if (string.IsNullOrWhiteSpace(db))
+            throw new InvalidOperationException("DB 이름 설정을 읽지 못했습니다. 백업을 시작하지 않았습니다.");
+        var user = TenantConfigReader.Get("DB_USER");
+        if (string.IsNullOrWhiteSpace(user))
+            throw new InvalidOperationException("DB 사용자 설정을 읽지 못했습니다. 백업을 시작하지 않았습니다.");
+        var pass = TenantConfigReader.Get("DB_PASSWORD");
+        if (string.IsNullOrWhiteSpace(pass))
+            throw new InvalidOperationException("DB 비밀번호 설정을 읽지 못했습니다. 백업을 시작하지 않았습니다.");
+
+        var host = TenantConfigReader.Get("DB_HOST") ?? "localhost";
+        var portText = TenantConfigReader.Get("DB_PORT") ?? "3306";
+        if (!int.TryParse(portText, out var port) || port <= 0)
+            throw new InvalidOperationException("DB 포트 설정이 올바르지 않습니다. 백업을 시작하지 않았습니다.");
+
+        // 읽는 곳을 바꾸는 데 따른 안전장치 — 설정이 가리키는 DB 와 지금 열린 연결의 DB 가 다르면 다른 DB 를 뜨는 사고다.
+        var openDb = _db.Database;
+        if (!string.IsNullOrEmpty(openDb) && !string.Equals(openDb, db, StringComparison.OrdinalIgnoreCase))
+            throw new InvalidOperationException("설정의 DB 이름과 지금 연결된 DB 이름이 달라 백업을 멈췄습니다(다른 DB 를 백업하지 않기 위해).");
+
+        return (host, port, db, user, pass);
+    }
+
+    /// <summary>
+    /// ③ 덤프 실행파일 — ⓐ MariaDB 11.4 설치 폴더의 <c>mariadb-dump</c> → 같은 폴더 <c>mysqldump</c>
+    /// → ⓑ PATH 에서 <c>mariadb-dump</c> 이름만(PATH 의 Oracle MySQL <c>mysqldump</c> 배제 — 선행검증 §5 K1-2 COLUMN_STATISTICS 실패)
+    /// → 없으면 이유와 함께 실패. PATH 는 <c>where</c> 프로세스 대신 폴더를 직접 확인한다(OS 무관).
+    /// </summary>
+    private static string ResolveDumpBinary()
+    {
+        var ext = OperatingSystem.IsWindows() ? ".exe" : "";
+        foreach (var dir in MariaDbInstallBinDirs())
+        {
+            foreach (var name in new[] { "mariadb-dump", "mysqldump" })
+            {
+                var candidate = Path.Combine(dir, name + ext);
+                if (File.Exists(candidate)) return candidate;
+            }
+        }
+
+        var fromPath = FindOnPath("mariadb-dump" + ext);
+        if (fromPath is not null) return fromPath;
+
+        throw new InvalidOperationException(
+            "MariaDB 백업 도구(mariadb-dump)를 찾을 수 없습니다. MariaDB 11.4 설치 폴더(bin)를 확인하세요. (PATH 에 있는 다른 제품의 mysqldump 는 쓰지 않습니다)");
+    }
+
+    private static IEnumerable<string> MariaDbInstallBinDirs()
+    {
+        if (!OperatingSystem.IsWindows()) yield break;
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var programFiles = Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles);
+        if (!string.IsNullOrWhiteSpace(programFiles))
+        {
+            var dir = Path.Combine(programFiles, "MariaDB 11.4", "bin");
+            if (seen.Add(dir)) yield return dir;
+        }
+        const string fixedDir = @"C:\Program Files\MariaDB 11.4\bin";
+        if (seen.Add(fixedDir)) yield return fixedDir;
+    }
+
+    private static string? FindOnPath(string fileName)
+    {
+        var pathVar = Environment.GetEnvironmentVariable("PATH");
+        if (string.IsNullOrWhiteSpace(pathVar)) return null;
+        foreach (var raw in pathVar.Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+        {
+            var dir = raw.Trim('"');
+            // 상대 경로 PATH 항목은 작업 폴더에 따라 뜻이 바뀐다 — 보지 않는다.
+            if (dir.Length == 0 || dir.IndexOfAny(Path.GetInvalidPathChars()) >= 0 || !Path.IsPathFullyQualified(dir)) continue;
+            var candidate = Path.Combine(dir, fileName);
+            if (File.Exists(candidate)) return candidate;
+        }
+        return null;
+    }
+
+    /// <summary>③ 백업 1차 폴더 결정 — 실제 폴더 값으로 <see cref="ResolveBackupFolderCore"/> 를 부른다.</summary>
+    private static string ResolveBackupFolder(string? stored) =>
+        ResolveBackupFolderCore(stored,
+            Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments),
+            Environment.GetFolderPath(Environment.SpecialFolder.Windows),
+            Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData));
+
+    /// <summary>
+    /// ③ 저장값이 쓸 수 있으면 그대로 → 아니면 문서 폴더\HitpanBackup → 그것도 못 쓰면 %ProgramData%\HitPan\Backup (K2).
+    /// 「쓸 수 있다」 = 절대 경로 · Windows 폴더 밖. (입력 주입 가능 — G-BK4)
+    /// </summary>
+    private static string ResolveBackupFolderCore(string? stored, string? documentsFolder, string? windowsFolder, string? programDataFolder)
+    {
+        if (!string.IsNullOrWhiteSpace(stored) && IsUsableBackupFolder(stored, windowsFolder)) return stored;
+
+        if (!string.IsNullOrWhiteSpace(documentsFolder))
+        {
+            var fromDocuments = Path.Combine(documentsFolder, "HitpanBackup");
+            if (IsUsableBackupFolder(fromDocuments, windowsFolder)) return fromDocuments;
+        }
+
+        if (!string.IsNullOrWhiteSpace(programDataFolder))
+        {
+            var k2 = Path.Combine(programDataFolder, "HitPan", "Backup");
+            if (IsUsableBackupFolder(k2, windowsFolder)) return k2;
+        }
+
+        // 마지막 안전망 — 실행파일 폴더 기준 절대 경로(상대 경로를 절대 돌려주지 않는다).
+        return Path.Combine(AppContext.BaseDirectory, "HitpanBackup");
+    }
+
+    private static bool IsUsableBackupFolder(string path, string? windowsFolder)
+    {
+        try
+        {
+            if (path.IndexOfAny(Path.GetInvalidPathChars()) >= 0 || !Path.IsPathFullyQualified(path)) return false;
+            if (string.IsNullOrWhiteSpace(windowsFolder) || !Path.IsPathFullyQualified(windowsFolder)) return true;
+            return !IsSameOrUnder(path, windowsFolder);
+        }
+        catch (ArgumentException) { return false; }        // 경로로 해석할 수 없는 값 = 쓸 수 없는 경로
+        catch (NotSupportedException) { return false; }
+        catch (PathTooLongException) { return false; }
+    }
+
+    private static bool IsSameOrUnder(string path, string root)
+    {
+        var p = Path.GetFullPath(path).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) + Path.DirectorySeparatorChar;
+        var r = Path.GetFullPath(root).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) + Path.DirectorySeparatorChar;
+        return p.StartsWith(r, StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>
+    /// C-8 — 백업 폴더 보장. 코드가 정한 기본 폴더(%ProgramData%\HitPan\Backup)일 때만 제한 권한으로 만들고 검사한다.
+    /// 사용자가 화면에서 고른 다른 경로는 종전대로 만들기만 한다(권한 손대지 않음).
+    /// </summary>
+    private static void EnsureBackupFolder(string path)
+    {
+        if (IsRestrictedDefaultBackupFolder(path))
+        {
+            EnsureRestrictedBackupFolder(path);
+            return;
+        }
+        Directory.CreateDirectory(path);
+    }
+
+    /// <summary>C-8 · C-12 — 이 폴더가 코드가 정한 기본 백업 폴더(%ProgramData%\HitPan\Backup)인가. 폴더 검사와 출력 파일 확인이 같은 조건을 쓴다.</summary>
+    private static bool IsRestrictedDefaultBackupFolder(string? folder)
+    {
+        if (string.IsNullOrWhiteSpace(folder)) return false;
+        var programData = Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData);
+        return !string.IsNullOrWhiteSpace(programData)
+            && IsUsableBackupFolder(folder, null)
+            && string.Equals(Path.GetFullPath(folder).TrimEnd(Path.DirectorySeparatorChar),
+                             Path.GetFullPath(Path.Combine(programData, "HitPan", "Backup")),
+                             StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>
+    /// C-8 — 없으면 상속을 끊고 SYSTEM · Administrators · 현재 실행 계정만 모든 권한으로 만든다.
+    /// 이미 있으면 소유자·쓰기 권한자가 그 셋 밖일 때 덤프를 쓰지 않고 이유와 함께 실패한다.
+    /// (%ProgramData%\HitPan 은 Users 가 하위 폴더를 만들 수 있다 — 먼저 만들어 가지는 길을 막는다. 병렬이슈25)
+    /// 20260911작5 C-12 정정 — 판정을 ⓐ 소유자 ∈ {SYSTEM·Administrators·실행 계정} · ⓑ 권한 줄 주체 허용 목록
+    /// (위 셋 + 개별 사용자 계정 · 그룹·별칭·잘 알려진 그룹은 거부 · 판정 못 하면 거부) · ⓒ 폴더와 상위 경로에 재분석 지점 0 으로 바꿨다.
+    /// (「셋 밖 쓰기 권한자 = 거부」 는 관리자가 탐색기 「계속」 으로 붙인 사용자 줄에 백업을 영구히 막았다 · 병렬이슈29 교차점 우회)
+    /// Windows 밖에서는 권한 모델이 달라 만들기만 한다(리눅스 CI 한계 — 개발명세서).
+    /// </summary>
+    private static void EnsureRestrictedBackupFolder(string path)
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            EnsureRestrictedBackupFolderWindows(path);
+            return;
+        }
+        Directory.CreateDirectory(path);
+    }
+
+    [SupportedOSPlatform("windows")]
+    private static void EnsureRestrictedBackupFolderWindows(string path)
+    {
+        var allowed = AllowedBackupFolderPrincipals();
+        var dir = new DirectoryInfo(Path.GetFullPath(path));
+
+        // C-12 ⓒ — 경로로 읽는 존재·소유자·권한은 연결 대상의 것이다. 폴더와 그 위 폴더에 재분석 지점이 있으면 먼저 거부한다(병렬이슈29).
+        ThrowIfReparsePointOnPathWindows(dir.FullName);
+
+        if (!dir.Exists)
+        {
+            // 상위(%ProgramData%\HitPan)는 다른 기능(워치독)도 쓰므로 종전 상속대로 두고, Backup 한 칸만 제한한다.
+            if (dir.Parent is { Exists: false } parent) Directory.CreateDirectory(parent.FullName);
+            var security = new DirectorySecurity();
+            security.SetAccessRuleProtection(isProtected: true, preserveInheritance: false);
+            foreach (var sid in allowed)
+            {
+                security.AddAccessRule(new FileSystemAccessRule(sid, FileSystemRights.FullControl,
+                    InheritanceFlags.ContainerInherit | InheritanceFlags.ObjectInherit,
+                    PropagationFlags.None, AccessControlType.Allow));
+            }
+            dir.Create(security);
+            dir.Refresh();
+        }
+
+        // 만든 직후에도 검사한다 — 확인과 생성 사이에 남이 먼저 만든(또는 연결로 바꿔치기한) 경우까지 같은 판정을 받는다.
+        ThrowIfReparsePointOnPathWindows(dir.FullName);
+
+        // C-12 ⓐ 소유자 — 먼저 만들어 가진 폴더는 여기서 걸린다. (고객 문구에 경로 값을 넣지 않는다)
+        var acl = dir.GetAccessControl(AccessControlSections.Access | AccessControlSections.Owner);
+        if (acl.GetOwner(typeof(SecurityIdentifier)) is not SecurityIdentifier owner || !allowed.Contains(owner))
+            throw new InvalidOperationException(
+                "기본 백업 폴더의 소유자가 허용된 계정(SYSTEM·Administrators·실행 계정)이 아니라 백업 파일을 쓰지 않았습니다. 폴더 권한을 확인하세요.");
+
+        // C-12 ⓑ 권한 줄 주체 허용 목록 — 위 셋 + 개별 사용자 계정만. 그룹·별칭·잘 알려진 그룹(Everyone·Users·
+        //   Authenticated Users·INTERACTIVE·Guests·Domain Users·LOCAL·NETWORK·CREATOR OWNER …)은 권한 종류와 무관하게 거부.
+        //   보호 ACL 로 만든 폴더에 개별 사용자 줄을 붙일 수 있는 것은 관리자뿐이므로 신뢰한다(탐색기 「계속」).
+        foreach (FileSystemAccessRule rule in acl.GetAccessRules(true, true, typeof(SecurityIdentifier)))
+        {
+            if (rule.AccessControlType != AccessControlType.Allow) continue;
+            if (rule.IdentityReference is not SecurityIdentifier sid || allowed.Contains(sid)) continue;
+            if (!IsIndividualUserAccountWindows(sid))
+                throw new InvalidOperationException(
+                    "기본 백업 폴더에 개별 사용자가 아닌 그룹(모든 사용자·Users 등)의 권한이 있어 백업 파일을 쓰지 않았습니다. 폴더 권한을 확인하세요.");
+        }
+    }
+
+    /// <summary>
+    /// C-12 ⓒ — 폴더와 그 위 폴더(드라이브 루트까지) 가운데 재분석 지점(교차점·심볼릭 링크·마운트 등)이 하나라도 있으면 실패.
+    /// 아직 없는 칸은 이 코드가 만들 칸이라 건너뛴다 — 호출부가 만든 뒤 다시 부른다.
+    /// </summary>
+    [SupportedOSPlatform("windows")]
+    private static void ThrowIfReparsePointOnPathWindows(string fullPath)
+    {
+        for (var current = new DirectoryInfo(fullPath); current is not null; current = current.Parent)
+        {
+            if (!current.Exists) continue;
+            if ((current.Attributes & FileAttributes.ReparsePoint) != 0)
+                throw new InvalidOperationException(
+                    "기본 백업 폴더나 그 위 폴더가 다른 위치로 이어진 연결 폴더라서 백업 파일을 쓰지 않았습니다. 관리자에게 백업 폴더 확인을 요청하세요.");
+        }
+    }
+
+    /// <summary>C-12 정정 ⓑ — 이 SID 가 개별 사용자 계정인가(LookupAccountSid 의 SidTypeUser). 판정하지 못하면 false(=거부).</summary>
+    [SupportedOSPlatform("windows")]
+    private static bool IsIndividualUserAccountWindows(SecurityIdentifier sid)
+    {
+        const int SidTypeUser = 1;
+        const int ErrorInsufficientBuffer = 122;
+        var bytes = new byte[sid.BinaryLength];
+        sid.GetBinaryForm(bytes, 0);
+        uint nameLength = 256, domainLength = 256;
+        for (var attempt = 0; attempt < 2; attempt++)
+        {
+            var name = new char[nameLength];
+            var domain = new char[domainLength];
+            if (LookupAccountSidW(null, bytes, name, ref nameLength, domain, ref domainLength, out var use))
+                return use == SidTypeUser;
+            if (Marshal.GetLastPInvokeError() != ErrorInsufficientBuffer) return false;
+        }
+        return false;
+    }
+
+    /// <summary>
+    /// C-12 ② — 연 파일 핸들의 실제 위치가 기대 위치와 다르면(연결로 바꿔치기) 한 바이트도 쓰지 않고 핸들을 닫은 뒤
+    /// 이번에 새로 만든 그 파일을 지우고 실패한다.
+    /// </summary>
+    [SupportedOSPlatform("windows")]
+    private void EnsureOpenedDumpFileIsExpectedWindows(FileStream fs, string expectedPath)
+    {
+        if (IsHandleAtExpectedPathWindows(fs.SafeFileHandle, expectedPath, out var actualPath)) return;
+
+        fs.Dispose();
+        _logger.LogWarning("백업 파일의 실제 위치가 기대 위치와 달라 쓰기를 멈춤 expected={Expected} actual={Actual}",
+            expectedPath, actualPath ?? "(확인 불가)");
+        var target = actualPath ?? expectedPath;   // CreateNew 로 연 파일 = 이번에 만든 파일
+        try
+        {
+            File.Delete(target);
+        }
+        catch (IOException ex)
+        {
+            _logger.LogWarning(ex, "위치가 어긋난 백업 파일 정리 실패 {Target}", target);
+        }
+        catch (UnauthorizedAccessException ex)
+        {
+            _logger.LogWarning(ex, "위치가 어긋난 백업 파일 정리 실패 {Target}", target);
+        }
+        throw new InvalidOperationException(
+            "백업 파일이 기본 백업 폴더 안에 만들어졌는지 확인되지 않아 쓰기를 멈췄습니다. 관리자에게 백업 폴더 확인을 요청하세요.");
+    }
+
+    /// <summary>C-12 ② — 핸들의 최종 경로(GetFinalPathNameByHandle) = 기대 경로의 긴 이름(GetLongPathName)인가. 확인 못 하면 false.</summary>
+    [SupportedOSPlatform("windows")]
+    private static bool IsHandleAtExpectedPathWindows(SafeFileHandle handle, string expectedPath, out string? actualPath)
+    {
+        actualPath = FinalPathOfHandleWindows(handle);
+        if (actualPath is null) return false;
+        var expected = LongPathWindows(Path.GetFullPath(expectedPath));
+        return string.Equals(actualPath, expected, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [SupportedOSPlatform("windows")]
+    private static string? FinalPathOfHandleWindows(SafeFileHandle handle)
+    {
+        var buffer = new char[512];
+        for (var attempt = 0; attempt < 2; attempt++)
+        {
+            var length = GetFinalPathNameByHandleW(handle, buffer, (uint)buffer.Length, 0);   // FILE_NAME_NORMALIZED · VOLUME_NAME_DOS
+            if (length == 0) return null;
+            if (length < buffer.Length) return StripExtendedPathPrefix(new string(buffer, 0, (int)length));
+            buffer = new char[length + 1];
+        }
+        return null;
+    }
+
+    [SupportedOSPlatform("windows")]
+    private static string LongPathWindows(string path)
+    {
+        var buffer = new char[512];
+        for (var attempt = 0; attempt < 2; attempt++)
+        {
+            var length = GetLongPathNameW(path, buffer, (uint)buffer.Length);
+            if (length == 0) return path;
+            if (length < buffer.Length) return new string(buffer, 0, (int)length);
+            buffer = new char[length + 1];
+        }
+        return path;
+    }
+
+    private static string StripExtendedPathPrefix(string path)
+    {
+        if (path.StartsWith(@"\\?\UNC\", StringComparison.OrdinalIgnoreCase)) return @"\\" + path[8..];
+        if (path.StartsWith(@"\\?\", StringComparison.Ordinal)) return path[4..];
+        return path;
+    }
+
+    [DllImport("kernel32.dll", CharSet = CharSet.Unicode, ExactSpelling = true, SetLastError = true)]
+    private static extern uint GetFinalPathNameByHandleW(SafeFileHandle hFile, [Out] char[] lpszFilePath, uint cchFilePath, uint dwFlags);
+
+    [DllImport("kernel32.dll", CharSet = CharSet.Unicode, ExactSpelling = true, SetLastError = true)]
+    private static extern uint GetLongPathNameW(string lpszShortPath, [Out] char[] lpszLongPath, uint cchBuffer);
+
+    [DllImport("advapi32.dll", CharSet = CharSet.Unicode, ExactSpelling = true, SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool LookupAccountSidW(string? lpSystemName, byte[] sid, [Out] char[] name, ref uint cchName,
+        [Out] char[] referencedDomainName, ref uint cchReferencedDomainName, out int peUse);
+
+    [SupportedOSPlatform("windows")]
+    private static HashSet<SecurityIdentifier> AllowedBackupFolderPrincipals()
+    {
+        var set = new HashSet<SecurityIdentifier>
+        {
+            new(WellKnownSidType.LocalSystemSid, null),
+            new(WellKnownSidType.BuiltinAdministratorsSid, null),
+        };
+        using var identity = WindowsIdentity.GetCurrent();
+        if (identity.User is { } current) set.Add(current);
+        return set;
+    }
+
+    /// <summary>② 살아 있는 덤프를 자식까지 끝낸다 · 종료 확인은 취소되지 않은 짧은 대기.</summary>
+    private void StopProcessTree(Process proc, string exe)
+    {
+        var name = Path.GetFileName(exe);
+        try
+        {
+            if (proc.HasExited) return;
+            proc.Kill(entireProcessTree: true);
+            if (proc.WaitForExit(5000))
+                _logger.LogWarning("덤프 프로세스를 끝냈습니다(취소 또는 실패) {Exe}", name);
+            else
+                _logger.LogWarning("덤프 프로세스가 종료 요청 뒤 5초 안에 끝나지 않았습니다 {Exe}", name);
+        }
+        catch (InvalidOperationException ex) { _logger.LogWarning(ex, "덤프 프로세스가 이미 끝났습니다 {Exe}", name); }
+        catch (System.ComponentModel.Win32Exception ex) { _logger.LogWarning(ex, "덤프 프로세스 종료 실패 {Exe}", name); }
+        catch (AggregateException ex) { _logger.LogWarning(ex, "덤프 자식 프로세스 일부 종료 실패 {Exe}", name); }
+    }
+
+    /// <summary>C28-1 — MariaDB 클라이언트가 MYSQL_PWD 로 로그인할 때 내는 인증서 검증 끔 경고 줄을 실패 이유에서 뺀다.</summary>
+    private static string WithoutPasswordlessTlsWarning(string stderr) =>
+        string.Join('\n', stderr.Split('\n')
+            .Where(line => !line.Contains("ssl-verify-server-cert is disabled", StringComparison.OrdinalIgnoreCase)))
+            .Trim();
+
+    /// <summary>④ 실패 기록용 연결 보장 — 취소되지 않은 토큰으로 · 끊긴 연결은 닫고 다시 연다.</summary>
+    private async Task EnsureOpenForRecordAsync()
+    {
+        if (_db.State == ConnectionState.Broken) _db.Close();
+        if (_db.State != ConnectionState.Open)
+        {
+            if (_db is DbConnection dc) await dc.OpenAsync(CancellationToken.None).ConfigureAwait(false);
+            else _db.Open();
         }
     }
 
