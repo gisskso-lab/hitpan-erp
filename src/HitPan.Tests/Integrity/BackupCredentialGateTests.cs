@@ -451,6 +451,49 @@ public sealed class BackupCredentialGateTests
         if (v.Count > 0) Assert.Fail("G-BK4 위반:\n  · " + string.Join("\n  · ", v));
     }
 
+    private static readonly int[] ContrastRids = { 500, 501, 503 };
+    private const int SidTypeUser = 1;
+    private const int ErrorInsufficientBuffer = 122;
+
+    /// <summary>
+    /// C-17 — ⓔ 대조 계정 고르기. 기본 Administrator(RID 500) → Guest(RID 501) → DefaultAccount(RID 503) 순서로,
+    /// 허용 목록(시험 계정 자신 포함)에 없고 <c>LookupAccountSid</c> 가 사용자로 판정하는 첫 계정. 못 고르면 null.
+    /// 판정은 시험 쪽 호출로 따로 한다 — 제품 판정 함수를 쓰면 제품의 개별 사용자 허용을 끄는 무력화가 「준비 실패」 로 가려진다.
+    /// </summary>
+    [SupportedOSPlatform("windows")]
+    private static (SecurityIdentifier Sid, int Rid)? PickIndividualUserContrast(SecurityIdentifier accountDomain, HashSet<SecurityIdentifier> allowed)
+    {
+        foreach (var rid in ContrastRids)
+        {
+            var sid = new SecurityIdentifier(accountDomain.Value + "-" + rid.ToString(System.Globalization.CultureInfo.InvariantCulture));
+            if (allowed.Contains(sid)) continue;
+            if (LookupSidType(sid) == SidTypeUser) return (sid, rid);
+        }
+        return null;
+    }
+
+    /// <summary>C-17 — <c>LookupAccountSid</c> 의 SID 종류(1 = 사용자). 판정하지 못하면 0.</summary>
+    [SupportedOSPlatform("windows")]
+    private static int LookupSidType(SecurityIdentifier sid)
+    {
+        var bytes = new byte[sid.BinaryLength];
+        sid.GetBinaryForm(bytes, 0);
+        uint nameLength = 256, domainLength = 256;
+        for (var attempt = 0; attempt < 2; attempt++)
+        {
+            var name = new char[nameLength];
+            var domain = new char[domainLength];
+            if (LookupAccountSidW(null, bytes, name, ref nameLength, domain, ref domainLength, out var use)) return use;
+            if (Marshal.GetLastPInvokeError() != ErrorInsufficientBuffer) return 0;
+        }
+        return 0;
+    }
+
+    [DllImport("advapi32.dll", CharSet = CharSet.Unicode, ExactSpelling = true, SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool LookupAccountSidW(string? lpSystemName, byte[] sid, [Out] char[] name, ref uint cchName,
+        [Out] char[] referencedDomainName, ref uint cchReferencedDomainName, out int peUse);
+
     [SupportedOSPlatform("windows")]
     private static void CheckRestrictedFolderWindows(MethodInfo secure, string root, List<string> v)
     {
@@ -524,22 +567,23 @@ public sealed class BackupCredentialGateTests
             if (okL) v.Add("C-12 ⓓ' LOCAL 그룹 줄(폴더 탐색만)이 붙은 기본 폴더를 받아들였다 — 권한 줄 주체 허용 목록이 아니다");
         }
 
-        // ⓔ 개별 관리자 사용자 줄(이 PC 의 기본 Administrator 계정 · RID 500) — 허용 (탐색기 「계속」 이 붙이는 줄과 같은 모양)
+        // ⓔ 개별 사용자 줄 — 허용 (탐색기 「계속」 이 붙이는 줄과 같은 모양)
+        //   C-17: 대조 계정 = 기본 Administrator(RID 500) 우선 · 시험 계정이 그 자신이면(CI 러너) 같은 계정 도메인의
+        //   Guest(RID 501) → DefaultAccount(RID 503) 가운데 사용자로 판정되는 계정. 고른 RID 를 표준오류 한 줄로 남긴다
+        //   (CI 원문에서 ⓔ 를 실제로 잰 증거). 못 고르면 실패 — 건너뛰기 금지.
         var named = Path.Combine(root, "pd4", "HitPan", "Backup");
         var (okN0, errN0) = InvokeSecure(secure, named);
         var accountDomain = WindowsIdentity.GetCurrent().User?.AccountDomainSid;
         if (!okN0) v.Add($"C-12 ⓔ 준비: 기본 폴더를 못 만들었다: {errN0}");
         else if (accountDomain is null) v.Add("C-12 ⓔ 준비: 시험 계정의 계정 도메인 SID 가 없어 개별 사용자 SID 를 정하지 못했다 — 이 단언은 재지 못했다");
+        else if (PickIndividualUserContrast(accountDomain, allowed) is not { } picked)
+            v.Add("C-12 ⓔ 준비: 대조할 개별 사용자 계정을 고르지 못했다(RID 500 은 시험 계정 자신이거나 사용자 판정 실패 · RID 501·503 도 사용자 판정 실패) — 이 단언은 재지 못했다");
         else
         {
-            var adminUser = new SecurityIdentifier(WellKnownSidType.AccountAdministratorSid, accountDomain);
-            if (allowed.Contains(adminUser)) v.Add("C-12 ⓔ 준비: 시험 계정이 기본 Administrator 자신이라 대조가 되지 않는다 — 이 단언은 재지 못했다");
-            else
-            {
-                AddAllowRule(named, adminUser, FileSystemRights.Modify);
-                var (okN, errN) = InvokeSecure(secure, named);
-                if (!okN) v.Add($"C-12 ⓔ 개별 사용자(관리자 계정) 권한 줄이 붙은 기본 폴더를 거부했다: {errN}");
-            }
+            Console.Error.WriteLine($"[BackupCredentialGate] G-BK4 ⓔ 대조 계정 RID {picked.Rid}");
+            AddAllowRule(named, picked.Sid, FileSystemRights.Modify);
+            var (okN, errN) = InvokeSecure(secure, named);
+            if (!okN) v.Add($"C-12 ⓔ 개별 사용자(RID {picked.Rid}) 권한 줄이 붙은 기본 폴더를 거부했다: {errN}");
         }
 
         // ⓕ Backup 자체가 교차점 — 대상은 권한이 바른 폴더(대조로 먼저 통과 확인 · 교차점만 다르다)
