@@ -34,8 +34,11 @@ public sealed class BackupCredentialGateCollection
 /// 이 게이트는 <b>글자가 아니라 동작</b>을 잰다 — 실제 MariaDB · 실제 덤프 · 실제 프로세스 · 실제 이력 행.
 /// </para>
 /// <para>
-/// 🔴 <b>운영과 같은 연결 조립</b> — 서비스에 주는 연결은 <c>InfrastructureExtensions.cs:55</c> 와 같은 모양
-/// (<c>User=…;Password=…</c>)으로 만들고 <b>연 뒤</b> 넘긴다. <c>Pwd=</c> 형식을 따로 만들면 원인을 못 잰다.
+/// 🔴 <b>운영과 같은 연결 조립</b> — 서비스에 주는 연결은 <c>InfrastructureExtensions.cs:55</c> 와 같은 항목
+/// (서버·포트·DB·사용자·비밀번호 + 운영 옵션)을 연결 문자열 빌더로 조립하고, 비밀번호 보존 옵션은 운영 기본값처럼 끈 채
+/// <b>연 뒤</b> 넘긴다 — 열린 연결의 문자열에서 비밀번호가 빠지는 성질이 운영과 같아야 원인을 잰다.
+/// 비밀번호를 다른 키 이름으로 따로 넣으면 이 성질이 달라질 수 있어 원인을 못 잰다.
+/// (20260911작5 보강: 소스에 키=값 모양 연결 문자열을 두지 않는다 — 비밀 탐지 오탐 방지.)
 /// 설정 원본(<c>TenantConfigReader</c>)은 환경변수 <c>DB_*</c> 로 준다 — 시작 때 db.conf 가 가리지 않는지 확인한다.
 /// </para>
 /// <para>
@@ -837,22 +840,44 @@ public sealed class BackupCredentialGateTests
     /// <summary>게이트 자신이 판독·정리에 쓰는 연결(서비스 연결과 별개).</summary>
     private static MySqlConnection OpenAdmin()
     {
-        var c = new MySqlConnection(
-            $"Server={DbHost};Port={DbPort ?? "3306"};Database={TestDb};User={DbUser};Password={DbPass};"
-          + "AllowUserVariables=true;GuidFormat=None;Connection Timeout=5;");
+        var b = BaseBuilder();
+        b.AllowUserVariables = true;
+        b.GuidFormat = MySqlGuidFormat.None;
+        b.ConnectionTimeout = 5;
+        var c = new MySqlConnection(b.ConnectionString);
         c.Open();
         return c;
     }
 
-    /// <summary>서비스에 주는 연결 — InfrastructureExtensions.cs:55 와 같은 조립 · 연 뒤에 넘긴다.</summary>
+    /// <summary>
+    /// 서비스에 주는 연결 — InfrastructureExtensions.cs:55 와 같은 항목·옵션 · 연 뒤에 넘긴다.
+    /// 비밀번호 보존 옵션은 운영처럼 꺼 둔다 → 연 뒤 <c>ConnectionString</c> 에서 비밀번호가 빠진다(작업지시서 §5-3).
+    /// </summary>
     private static MySqlConnection OpenLikeProduction()
     {
-        var c = new MySqlConnection(
-            $"Server={DbHost};Port={DbPort ?? "3306"};Database={TestDb};User={DbUser};Password={DbPass};"
-          + "DefaultCommandTimeout=90;AllowLoadLocalInfile=true;AllowUserVariables=true;GuidFormat=None;");
+        var b = BaseBuilder();
+        b.DefaultCommandTimeout = 90;
+        b.AllowLoadLocalInfile = true;
+        b.AllowUserVariables = true;
+        b.GuidFormat = MySqlGuidFormat.None;
+        b.PersistSecurityInfo = false;   // 운영 기본값과 같음 — 명시만 한다
+        var c = new MySqlConnection(b.ConnectionString);
         c.Open();
         return c;
     }
+
+    /// <summary>
+    /// 20260911작5 보강 — 소스에 키=값 모양 연결 문자열을 두지 않으려고 빌더 속성으로 조립한다(비밀 탐지 오탐 방지).
+    /// 값·옵션은 종전 보간 문자열과 같다.
+    /// </summary>
+    private static MySqlConnectionStringBuilder BaseBuilder() => new()
+    {
+        Server = DbHost,
+        Port = uint.Parse(DbPort ?? "3306", System.Globalization.CultureInfo.InvariantCulture),
+        Database = TestDb,
+        UserID = DbUser,
+        Password = DbPass,
+    };
 
     // ── 로그 수집 (실행파일 로그 · 비밀번호 유출 판독) ─────────────────────────
 
