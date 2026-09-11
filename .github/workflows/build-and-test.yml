@@ -207,6 +207,22 @@ jobs:
           #    G-OW4 는 **대조군**이다 — 재시드를 안 한 회사는 같은 자리가 0 이어야 한다.
           #    (재시드 없이도 27 이 나오면 이 게이트들은 다른 것을 재고 있는 것이다.)
           GATES="$GATES|MdbOverwriteReseedGate"
+          # 🔴 20260911작5 BackupCredentialGate — 백업 비밀번호 결함 핫픽스(1.3.40).
+          #    열린 연결의 ConnectionString 에서 비번이 빠져 덤프가 "-p" 빈 값으로 떠 숨은 콘솔에서 멈췄다
+          #    (선행검증 20260911 격리재현). G-BK1 실제 덤프 · G-BK2 빈 비번 즉시 실패 · G-BK3 취소 시 덤프 종료+failed
+          #    (+대조군) · G-BK4 기본 폴더 · G-BK5 덤프 실행파일 · G-BK6 복원 잠시 막기(C-11 사장님 결정).
+          #
+          #    등록 근거는 "초록불이라서" 가 아니라 **무력화 시험**이다 (20260911 Windows 격리 MariaDB 11.4 실측):
+          #      · 수정 전 코드(2bee68f0)          → 7/7 FAIL (덤프 60초 멈춤 · 취소 뒤 mysqldump 생존 · 이력 running)
+          #      · 자격증명을 다시 ConnectionString → G-BK1 빨간불 (1045 using password: NO)
+          #      · 빈 비번 사전 차단 제거          → G-BK2 · 기본 폴더 결정 되돌림 → G-BK4 · 복원 차단 제거 → G-BK6 (나머지 초록)
+          #      · 취소 시 프로세스 종료 제거      → G-BK3 만 빨간불 (덤프 생존)
+          #      · 실패 UPDATE 를 다시 ct 로       → G-BK3 만 빨간불 (running)
+          #      · 실행파일 순서 되돌림            → G-BK5 빨간불 (+ PATH 에 MySQL 8.4 가 있는 PC 는 G-BK1·3 도 COLUMN_STATISTICS 로)
+          #    G-BK3 대조군 — 잠금을 걸지 않으면 같은 덤프가 끝나 success 여야 한다.
+          #    ⚠️ 리눅스 한계(조용한 축소 금지): 숨은 콘솔 입력 대기 · System32 경로 · 폴더 권한(C-8)은 이 러너에서 재현되지 않는다.
+          #       원인 대조는 Windows 격리 실측이 근거다 — docs/개발/erp/20260911_개발명세서_백업비번결함_핫픽스.md
+          GATES="$GATES|BackupCredentialGate"
 
           echo "▶ 이 잡이 무는 게이트: $GATES"
           echo "▶ 이 잡이 물지 않는 것: 기기·승인 계열(CREATE DATABASE 권한 축 — 범위 밖)"
