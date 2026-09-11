@@ -300,6 +300,86 @@ public sealed class BackupCredentialGateTests
     }
 
     // ────────────────────────────────────────────────────────────────────────
+    //  G-BK7 — 실패한 덤프의 0바이트 파일이 보관 개수를 먹어 진짜 백업을 지우지 않는다 (C-16 · 병렬이슈30)
+    // ────────────────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// 🔴 G-BK7 — 보관 3 · 이전 성공 백업 3개 + 옛 버전이 남긴 0B 파일 3개(성공 백업보다 새것) →
+    /// 틀린 비번으로 덤프 실패 3회 → 맞는 비번으로 성공 1회.
+    /// 기대: 성공 · 이번 실패들이 남긴 파일 0 (C-16 ①) · 이전 성공 백업 중 새것 2개는 남는다 (②) ·
+    /// 가장 오래된 1개만 지워진다(대조: 보관 개수는 여전히 지킨다) · 옛 0B 파일은 세지도 지우지도 않는다 (②).
+    /// <para>무력화: 보관 계산의 0바이트 제외를 빼면 빨간불(0B 파일이 자리를 차지해 이전 성공 백업이 지워진다) ·
+    /// 실패 경로의 출력 파일 삭제를 빼면 빨간불(이번 실패의 0B 파일이 남는다).</para>
+    /// </summary>
+    [Fact]
+    public async Task G_BK7_실패한_덤프의_0바이트_파일이_보관개수를_먹지_않는다()
+    {
+        if (!ServerAvailable()) { Skipped(nameof(G_BK7_실패한_덤프의_0바이트_파일이_보관개수를_먹지_않는다)); return; }
+        AssertNoDbConfShadow();
+
+        const int keep = 3;
+        using var fx = GateFixture.Create(passwordOverride: null);
+        fx.SetRetention(keep);
+
+        // 준비 — 만든 순서 = 이전 성공 3개(오래된 순) → 옛 0B 3개. 파일 이름은 초 단위라 실제 회차와 겹치지 않는 날짜로.
+        var baseTime = DateTime.Now.AddDays(-10);
+        var previous = new List<string>();
+        var legacyEmpty = new List<string>();
+        for (var i = 1; i <= keep; i++)
+        {
+            var f = Path.Combine(fx.Folder, $"hitpan_backup_20000101_00000{i}.sql");
+            File.WriteAllText(f, $"-- gate previous successful backup {i}\nCREATE TABLE gate_prev_{i} (id INT);\n");
+            File.SetCreationTime(f, baseTime.AddHours(i));
+            previous.Add(f);
+            await Task.Delay(20);
+        }
+        for (var i = 1; i <= keep; i++)
+        {
+            var f = Path.Combine(fx.Folder, $"hitpan_backup_20000102_00000{i}.sql");
+            File.WriteAllBytes(f, Array.Empty<byte>());
+            File.SetCreationTime(f, baseTime.AddDays(1).AddHours(i));
+            legacyEmpty.Add(f);
+            await Task.Delay(20);
+        }
+        var seeded = previous.Concat(legacyEmpty).ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        var v = new List<string>();
+        fx.SetConfigPassword("gate-wrong-" + Guid.NewGuid().ToString("N")[..12]);
+        for (var i = 1; i <= keep; i++)
+        {
+            await Task.Delay(1100);   // 백업 파일 이름이 초 단위 — 회차마다 다른 이름
+            var failed = await RunBoundedAsync(
+                () => fx.Service.RunBackupAsync(fx.TenantId, "gate", CancellationToken.None), TimeSpan.FromSeconds(30));
+            if (!failed.Finished) { fx.KillNewDumps(); await SettleAsync(failed.Task); v.Add($"실패 회차 {i}: 30초 안에 안 끝났다"); }
+            else if (failed.Thrown is not null) v.Add($"실패 회차 {i}: 예외로 빠졌다 {failed.Thrown.GetType().Name}");
+            else if (failed.Response is { Success: true }) v.Add($"실패 회차 {i}: 틀린 비번인데 Success=true");
+        }
+
+        fx.SetConfigPassword(null);
+        await Task.Delay(1100);
+        var ok = await RunBoundedAsync(
+            () => fx.Service.RunBackupAsync(fx.TenantId, "gate", CancellationToken.None), TimeSpan.FromSeconds(60));
+        if (!ok.Finished) { fx.KillNewDumps(); await SettleAsync(ok.Task); v.Add("성공 회차: 60초 안에 안 끝났다"); }
+        if (ok.Thrown is not null) v.Add($"성공 회차: 예외로 빠졌다 {ok.Thrown.GetType().Name}: {ok.Thrown.Message}");
+        if (ok.Response is { Success: false } bad) v.Add($"성공 회차가 실패했다: {bad.Error}");
+
+        var files = Directory.GetFiles(fx.Folder, "hitpan_backup_*.sql");
+        var leftoverEmpty = files.Where(f => !seeded.Contains(f) && new FileInfo(f).Length == 0).Select(Path.GetFileName).ToList();
+        if (leftoverEmpty.Count > 0) v.Add($"C-16 ① 이번 실패가 남긴 0바이트 파일 {leftoverEmpty.Count}개: {string.Join(",", leftoverEmpty)}");
+        for (var i = 1; i < keep; i++)
+            if (!File.Exists(previous[i])) v.Add($"C-16 ② 지워지면 안 되는 이전 성공 백업이 지워졌다: {Path.GetFileName(previous[i])}");
+        if (File.Exists(previous[0]))
+            v.Add($"대조: 보관 {keep} 인데 가장 오래된 성공 백업이 남았다(보관정책이 돌지 않았다): {Path.GetFileName(previous[0])}");
+        var removedLegacy = legacyEmpty.Where(f => !File.Exists(f)).Select(Path.GetFileName).ToList();
+        if (removedLegacy.Count > 0) v.Add($"C-16 ② 옛 0바이트 파일을 보관정책이 지웠다(세지도 지우지도 않아야 한다): {string.Join(",", removedLegacy)}");
+        var newSuccess = files.Where(f => !seeded.Contains(f) && new FileInfo(f).Length > 0).ToList();
+        if (newSuccess.Count != 1) v.Add($"이번 성공 백업 파일이 1개가 아니다: {newSuccess.Count}개");
+        fx.CheckNoSecretLeak(v, ok.Response, fx.LatestHistory().Error);
+
+        AssertNoViolations("G-BK7", v, ok);
+    }
+
+    // ────────────────────────────────────────────────────────────────────────
     //  G-BK4 — 기본 백업 폴더는 절대 경로 · Windows 폴더 밖 · 제한 권한 (DB 없음 · 입력 주입)
     // ────────────────────────────────────────────────────────────────────────
 
@@ -308,7 +388,10 @@ public sealed class BackupCredentialGateTests
     /// 대조: 쓸 수 있는 저장 경로는 그대로 돌려준다.
     /// C-8(Windows): 코드가 만드는 기본 폴더는 상속을 끊고 SYSTEM·Administrators·실행 계정만 모든 권한 ·
     /// 이미 있는 폴더에 그 셋 밖의 쓰기 권한자가 있으면 이유와 함께 실패 · 셋만 있으면 통과(대조).
-    /// <para>무력화: 기본 폴더 결정을 <c>Path.Combine(문서폴더, "HitpanBackup")</c> 로 되돌리면 빨간불.</para>
+    /// C-12(Windows · 병렬이슈29 · C-12 정정): Users 읽기 줄 거부 · 잘 알려진 그룹(LOCAL) 줄은 권한 종류와 무관하게 거부 ·
+    /// 개별 관리자 사용자 줄 허용 · Backup 교차점 거부 · 상위 HitPan 교차점 거부 · 교차점 너머로 연 파일의 실제 위치는 기대 위치와 다르다(대조: 곧바로 연 파일은 같다).
+    /// <para>무력화: 기본 폴더 결정을 <c>Path.Combine(문서폴더, "HitpanBackup")</c> 로 되돌리면 빨간불.
+    /// 재분석 지점 검사(<c>ThrowIfReparsePointOnPathWindows</c>)를 건너뛰게 하면 ⓕ·ⓖ 빨간불.</para>
     /// </summary>
     [Fact]
     public void G_BK4_기본_백업_폴더는_절대경로이고_Windows_폴더_밖이다()
@@ -358,7 +441,7 @@ public sealed class BackupCredentialGateTests
                 BindingFlags.NonPublic | BindingFlags.Static, null, new[] { typeof(string) }, null);
             if (secure is null) v.Add("C-8: 기본 폴더를 제한 권한으로 만드는 함수 EnsureRestrictedBackupFolder(path) 가 없다");
             else if (OperatingSystem.IsWindows()) CheckRestrictedFolderWindows(secure, root, v);
-            else Console.Error.WriteLine("[BackupCredentialGate] G-BK4 C-8 권한 단언은 Windows 전용 — 이 OS 에서는 재지 않았다.");
+            else Console.Error.WriteLine("[BackupCredentialGate] G-BK4 C-8 권한 · C-12 ⓓ~ⓖ(넓은 그룹·잘 알려진 그룹·개별 사용자 줄·교차점) · C-12 ②(연 파일 실제 위치) 단언은 Windows 전용 — 이 OS 에서는 재지 않았다.");
         }
         finally { TryDeleteDir(root); }
 
@@ -414,6 +497,93 @@ public sealed class BackupCredentialGateTests
         if (ok2) v.Add("C-8 ⓑ Users 쓰기 권한이 있는 기존 폴더를 받아들였다");
         else if (err2 is null || !err2.Contains("권한", StringComparison.Ordinal)) v.Add($"C-8 ⓑ 거부 이유에 권한 문구가 없다: {err2}");
 
+        // ── C-12 (병렬이슈29 · 작업지시서 §11-3 C-12 · C-12 정정) ─────────────────────────
+        // ⓓ Users 읽기 줄 — 코드가 보호 권한으로 만든 기본 폴더에 넓은 그룹의 읽기 줄이 붙으면 거부
+        var readable = Path.Combine(root, "pd3", "HitPan", "Backup");
+        var (okR0, errR0) = InvokeSecure(secure, readable);
+        if (!okR0) v.Add($"C-12 ⓓ 준비: 기본 폴더를 못 만들었다: {errR0}");
+        else
+        {
+            AddAllowRule(readable, users, FileSystemRights.ReadAndExecute);
+            var (okR, errR) = InvokeSecure(secure, readable);
+            if (okR) v.Add("C-12 ⓓ Users 읽기 권한 줄이 붙은 기본 폴더를 받아들였다");
+            else if (errR is null || !errR.Contains("권한", StringComparison.Ordinal)) v.Add($"C-12 ⓓ 거부 이유에 권한 문구가 없다: {errR}");
+        }
+
+        // ⓓ' 잘 알려진 그룹(LOCAL · S-1-2-0) 의 폴더 탐색 줄 — 권한 줄 주체 허용 목록이라 권한 종류와 무관하게 거부
+        var localGroup = Path.Combine(root, "pd3b", "HitPan", "Backup");
+        var (okL0, errL0) = InvokeSecure(secure, localGroup);
+        if (!okL0) v.Add($"C-12 ⓓ' 준비: 기본 폴더를 못 만들었다: {errL0}");
+        else
+        {
+            AddAllowRule(localGroup, new SecurityIdentifier(WellKnownSidType.LocalSid, null), FileSystemRights.Traverse);
+            var (okL, _) = InvokeSecure(secure, localGroup);
+            if (okL) v.Add("C-12 ⓓ' LOCAL 그룹 줄(폴더 탐색만)이 붙은 기본 폴더를 받아들였다 — 권한 줄 주체 허용 목록이 아니다");
+        }
+
+        // ⓔ 개별 관리자 사용자 줄(이 PC 의 기본 Administrator 계정 · RID 500) — 허용 (탐색기 「계속」 이 붙이는 줄과 같은 모양)
+        var named = Path.Combine(root, "pd4", "HitPan", "Backup");
+        var (okN0, errN0) = InvokeSecure(secure, named);
+        var accountDomain = WindowsIdentity.GetCurrent().User?.AccountDomainSid;
+        if (!okN0) v.Add($"C-12 ⓔ 준비: 기본 폴더를 못 만들었다: {errN0}");
+        else if (accountDomain is null) v.Add("C-12 ⓔ 준비: 시험 계정의 계정 도메인 SID 가 없어 개별 사용자 SID 를 정하지 못했다 — 이 단언은 재지 못했다");
+        else
+        {
+            var adminUser = new SecurityIdentifier(WellKnownSidType.AccountAdministratorSid, accountDomain);
+            if (allowed.Contains(adminUser)) v.Add("C-12 ⓔ 준비: 시험 계정이 기본 Administrator 자신이라 대조가 되지 않는다 — 이 단언은 재지 못했다");
+            else
+            {
+                AddAllowRule(named, adminUser, FileSystemRights.Modify);
+                var (okN, errN) = InvokeSecure(secure, named);
+                if (!okN) v.Add($"C-12 ⓔ 개별 사용자(관리자 계정) 권한 줄이 붙은 기본 폴더를 거부했다: {errN}");
+            }
+        }
+
+        // ⓕ Backup 자체가 교차점 — 대상은 권한이 바른 폴더(대조로 먼저 통과 확인 · 교차점만 다르다)
+        var target = Path.Combine(root, "jt", "Target");
+        var junctionBackup = Path.Combine(root, "pd5", "HitPan", "Backup");
+        var targetHitPan = Path.Combine(root, "jt2", "HitPan");
+        var junctionHitPan = Path.Combine(root, "pd6", "HitPan");
+        try
+        {
+            var (okT, errT) = InvokeSecure(secure, target);
+            if (!okT) v.Add($"C-12 ⓕ 대조: 권한이 바른 대상 폴더를 거부했다: {errT}");
+            var junctionOk = MakeJunction(junctionBackup, target, v, "ⓕ");
+            if (junctionOk)
+            {
+                var (okJ, errJ) = InvokeSecure(secure, junctionBackup);
+                if (okJ) v.Add("C-12 ⓕ Backup 이 교차점인데 받아들였다");
+                else if (errJ is null || !errJ.Contains("연결", StringComparison.Ordinal)) v.Add($"C-12 ⓕ 거부 이유에 연결 문구가 없다: {errJ}");
+            }
+
+            // ⓖ 상위 HitPan 이 교차점 — 그 안 Backup 은 권한이 바른 폴더
+            var (okT2, errT2) = InvokeSecure(secure, Path.Combine(targetHitPan, "Backup"));
+            if (!okT2) v.Add($"C-12 ⓖ 대조: 권한이 바른 대상 폴더를 거부했다: {errT2}");
+            if (MakeJunction(junctionHitPan, targetHitPan, v, "ⓖ"))
+            {
+                var (okP, errP) = InvokeSecure(secure, Path.Combine(junctionHitPan, "Backup"));
+                if (okP) v.Add("C-12 ⓖ 상위 HitPan 이 교차점인데 받아들였다");
+                else if (errP is null || !errP.Contains("연결", StringComparison.Ordinal)) v.Add($"C-12 ⓖ 거부 이유에 연결 문구가 없다: {errP}");
+            }
+
+            // ② 연 파일 핸들의 실제 위치 — 곧바로 연 파일은 기대 위치와 같다(대조) · 교차점 너머로 연 파일은 다르다
+            var handleCheck = typeof(BackupService).GetMethod("IsHandleAtExpectedPathWindows", BindingFlags.NonPublic | BindingFlags.Static);
+            if (handleCheck is null) v.Add("C-12 ②: 연 파일의 실제 위치를 확인하는 함수 IsHandleAtExpectedPathWindows 가 없다");
+            else if (okT)
+            {
+                if (!HandleAtExpectedPath(handleCheck, Path.Combine(target, "direct.sql")))
+                    v.Add("C-12 ② 대조: 곧바로 연 파일의 실제 위치를 기대 위치와 다르다고 했다");
+                if (junctionOk && HandleAtExpectedPath(handleCheck, Path.Combine(junctionBackup, "via-junction.sql")))
+                    v.Add("C-12 ② 교차점 너머로 연 파일의 실제 위치를 기대 위치와 같다고 했다");
+            }
+        }
+        finally
+        {
+            // 교차점은 링크만 지운다 — 폴더 통째 삭제는 교차점에서 접근 거부로 멈춰 임시 폴더가 남았다(자체 실측).
+            RemoveJunction(junctionBackup);
+            RemoveJunction(junctionHitPan);
+        }
+
         static (bool Ok, string? Error) InvokeSecure(MethodInfo m, string path)
         {
             try { m.Invoke(null, new object?[] { path }); return (true, null); }
@@ -422,6 +592,77 @@ public sealed class BackupCredentialGateTests
                 return (false, $"{tie.InnerException.GetType().Name}: {tie.InnerException.Message}");
             }
         }
+    }
+
+    /// <summary>C-12 시험 준비 — 폴더에 허용 권한 줄 하나를 붙인다(게이트 임시 폴더에만).</summary>
+    [SupportedOSPlatform("windows")]
+    private static void AddAllowRule(string dir, SecurityIdentifier sid, FileSystemRights rights)
+    {
+        var info = new DirectoryInfo(dir);
+        var security = info.GetAccessControl();
+        security.AddAccessRule(new FileSystemAccessRule(sid, rights,
+            InheritanceFlags.ContainerInherit | InheritanceFlags.ObjectInherit, PropagationFlags.None, AccessControlType.Allow));
+        info.SetAccessControl(security);
+    }
+
+    /// <summary>
+    /// C-12 시험 준비 — 관리자 권한 없이 만들 수 있는 디렉터리 교차점(<c>mklink /J</c>). 게이트 임시 폴더 안에서만 만든다.
+    /// 못 만들면 위반으로 남긴다(조용히 건너뛰지 않는다).
+    /// </summary>
+    [SupportedOSPlatform("windows")]
+    private static bool MakeJunction(string link, string target, List<string> v, string label)
+    {
+        Directory.CreateDirectory(Path.GetDirectoryName(link)!);
+        var psi = new ProcessStartInfo("cmd.exe")
+        {
+            UseShellExecute = false,
+            CreateNoWindow = true,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true
+        };
+        foreach (var a in new[] { "/c", "mklink", "/J", link, target }) psi.ArgumentList.Add(a);
+        using var p = Process.Start(psi);
+        if (p is null) { v.Add($"C-12 {label} 준비: 교차점을 만들 cmd 를 띄우지 못했다 — 이 단언은 재지 못했다"); return false; }
+        _ = p.StandardOutput.ReadToEndAsync();
+        _ = p.StandardError.ReadToEndAsync();
+        if (!p.WaitForExit(15000))
+        {
+            p.Kill(entireProcessTree: true);
+            v.Add($"C-12 {label} 준비: 교차점 만들기가 15초 안에 끝나지 않았다 — 이 단언은 재지 못했다");
+            return false;
+        }
+        var info = new DirectoryInfo(link);
+        if (p.ExitCode != 0 || !info.Exists || (info.Attributes & FileAttributes.ReparsePoint) == 0)
+        {
+            v.Add($"C-12 {label} 준비: 교차점을 만들지 못했다 (exit={p.ExitCode}) — 이 단언은 재지 못했다");
+            return false;
+        }
+        return true;
+    }
+
+    /// <summary>
+    /// C-12 시험 정리 — 교차점 링크만 지운다(대상 폴더는 건드리지 않는다).
+    /// 폴더 통째 재귀 삭제는 교차점에서 접근 거부로 멈춰 부모 폴더가 남는다(자체 실측 — 게이트 6회 모두 임시 폴더 잔존).
+    /// </summary>
+    [SupportedOSPlatform("windows")]
+    private static void RemoveJunction(string link)
+    {
+        try
+        {
+            var info = new DirectoryInfo(link);
+            if (info.Exists && (info.Attributes & FileAttributes.ReparsePoint) != 0) Directory.Delete(link, recursive: false);
+        }
+        catch (IOException ex) { Console.Error.WriteLine($"[BackupCredentialGate] 교차점 정리 실패 {link}: {ex.Message}"); }
+        catch (UnauthorizedAccessException ex) { Console.Error.WriteLine($"[BackupCredentialGate] 교차점 정리 실패 {link}: {ex.Message}"); }
+    }
+
+    /// <summary>C-12 ② 시험 — 파일을 새로 열고 그 핸들로 실제 위치 확인 함수를 부른다.</summary>
+    [SupportedOSPlatform("windows")]
+    private static bool HandleAtExpectedPath(MethodInfo check, string file)
+    {
+        using var fs = new FileStream(file, FileMode.CreateNew, FileAccess.Write, FileShare.None);
+        var args = new object?[] { fs.SafeFileHandle, file, null };
+        return (bool)check.Invoke(null, args)!;
     }
 
     // ────────────────────────────────────────────────────────────────────────
@@ -664,6 +905,14 @@ public sealed class BackupCredentialGateTests
         }
 
         public static GateFixture Create(string? passwordOverride) => new(passwordOverride);
+
+        /// <summary>G-BK7 — 이 게이트 행의 보관 개수.</summary>
+        public void SetRetention(int keep) =>
+            _admin.Execute("UPDATE backup_settings SET retention_count = @K WHERE tenant_id = @T", new { K = keep, T = TenantId });
+
+        /// <summary>G-BK7 — 설정 원본(환경변수 DB_PASSWORD)만 바꾼다. null = 게이트 비번으로 되돌림. 값은 출력하지 않는다(Dispose 가 원래 값 복원).</summary>
+        public void SetConfigPassword(string? password) =>
+            Environment.SetEnvironmentVariable("DB_PASSWORD", password ?? DbPass);
 
         /// <summary>복원 안전 확인(회사명)을 통과할 이 게이트 전용 회사 행.</summary>
         public string CreateCompany()
