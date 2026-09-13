@@ -1,9 +1,12 @@
 # INDEX — docs/헌법 (전체)
 
-> 전체 15건 목록. 야은 문서를 찾을 때만 열고, 평소엔 [INDEX.md](INDEX.md) 를 본다.
+> 전체 18건 목록. 야은 문서를 찾을 때만 열고, 평소엔 [INDEX.md](INDEX.md) 를 본다.
 
 | 문서 | 제목 | 최종수정 |
 |---|---|---|
+| [AI협업_토큰절약_에이전트투입_매뉴얼.md](AI협업_토큰절약_에이전트투입_매뉴얼.md) | 🟢 AI 협업 토큰 절약 · 에이전트 투입 · 바이브코딩 매뉴얼 | 2026-09-11 |
+| [TEAM_DEFINITION.md](TEAM_DEFINITION.md) | 🟢 히트판 팀 정의 전문 (CLAUDE.md 에서 옮김) | 2026-09-11 |
+| [20260911_CLAUDE_md_원본상세_이력.md](20260911_CLAUDE_md_원본상세_이력.md) | ⬛ CLAUDE.md 원본 전문 (다이어트 이전) | 2026-09-11 |
 | [헌법원문_1-43.md](헌법원문_1-43.md) | 히트판 헌법 원문 (#1~#41) — 무손상 보존본 | 2026-07-28 |
 | [MANAGER_5VERIFY_CHECKLIST_20260531.md](MANAGER_5VERIFY_CHECKLIST_20260531.md) | 매니저 5중 검증 체크리스트 (헌법 #23) | 2026-07-23 |
 | [HITPAN_CONSTITUTION.md](HITPAN_CONSTITUTION.md) | 히트판 헌법 통합본 (계열별) | 2026-07-28 |
