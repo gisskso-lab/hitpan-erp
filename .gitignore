@@ -88,3 +88,7 @@ src/HitPan.API/wwwroot/
 installer/api-backup-*/
 installer/api-wwwroot-backup-*/
 hitpan-apiwwwroot/
+
+# Claude Code — 로컬 전용(worktrees · 개인 설정). 표준 에이전트 정의만 추적 (20260911작1)
+.claude/*
+!.claude/agents/
