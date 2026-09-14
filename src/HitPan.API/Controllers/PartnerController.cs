@@ -193,15 +193,46 @@ public class PartnerController : ControllerBase
         var tenantId = HttpContext.Items["TenantId"]?.ToString();
         if (string.IsNullOrEmpty(tenantId)) return Forbid();
 
+        // 🔴 20260915작1 갈래 E (설계 §17 · R-A2 (나)) — 종전 v_partner_aging_buckets 뷰 조회를 같은 식의 인라인 SQL 로 옮기고
+        //   ① 이월잔액 행이 있는 회사는 이관 명세서(source_type='migration')를 빼고 ② 「이전 프로그램 이월」 미수(+ 잔액)를 기준일 나이로 한 번 더한다.
+        //   뷰는 source_type 을 내놓지 않아 뷰 밖에서 이관 행을 뺄 수 없다(뷰 DDL 은 이 갈래 파일 밖 · 뷰 자체는 무수정).
+        //   이월잔액 행이 없는 회사는 종전 뷰와 결과가 같다(뷰 식: 확정 명세서 중 연결된 활성 수금이 하나도 없는 것).
         const string sql = """
-            SELECT partner_id AS PartnerId, partner_name AS PartnerName,
-                   open_invoices AS OpenInvoices,
-                   bucket_0_30 AS Bucket0_30, bucket_31_60 AS Bucket31_60,
-                   bucket_61_90 AS Bucket61_90, bucket_90_plus AS Bucket90Plus,
-                   total_unpaid AS TotalUnpaid
-            FROM v_partner_aging_buckets
-            WHERE tenant_id = @TenantId
-            ORDER BY total_unpaid DESC
+            SELECT x.partner_id AS PartnerId, p.partner_name AS PartnerName,
+                   SUM(x.cnt) AS OpenInvoices,
+                   SUM(CASE WHEN x.age <= 30 THEN x.amt ELSE 0 END) AS Bucket0_30,
+                   SUM(CASE WHEN x.age BETWEEN 31 AND 60 THEN x.amt ELSE 0 END) AS Bucket31_60,
+                   SUM(CASE WHEN x.age BETWEEN 61 AND 90 THEN x.amt ELSE 0 END) AS Bucket61_90,
+                   SUM(CASE WHEN x.age > 90 THEN x.amt ELSE 0 END) AS Bucket90Plus,
+                   SUM(x.amt) AS TotalUnpaid
+            FROM (
+                SELECT sd.partner_id, 1 AS cnt, TO_DAYS(CURDATE()) - TO_DAYS(sd.delivery_date) AS age,
+                       sd.total_amount + sd.vat_amount AS amt
+                  FROM sales_deliveries sd
+                 WHERE sd.tenant_id = @TenantId AND sd.status = 'confirmed'
+                   AND NOT EXISTS (SELECT 1 FROM collections c
+                                    WHERE c.tenant_id = sd.tenant_id AND c.ref_doc_type = 'sales_delivery'
+                                      AND c.ref_doc_id = sd.delivery_id AND c.is_active = 1 LIMIT 1)
+                   AND NOT (COALESCE(sd.source_type, '') = 'migration'
+                            AND EXISTS (SELECT 1 FROM partner_legacy_balances plb_x WHERE plb_x.tenant_id = @TenantId))
+                UNION ALL
+                SELECT plb.partner_id, 1 AS cnt, TO_DAYS(CURDATE()) - TO_DAYS(plb.base_date) AS age,
+                       GREATEST(plb.balance_amount, 0) - IFNULL(hc.amt, 0) AS amt
+                  FROM partner_legacy_balances plb
+                  LEFT JOIN (
+                    SELECT sd2.partner_id, SUM(c2.amount) AS amt
+                      FROM collections c2
+                      JOIN sales_deliveries sd2 ON sd2.delivery_id = c2.ref_doc_id AND sd2.tenant_id = c2.tenant_id
+                     WHERE c2.tenant_id = @TenantId AND c2.is_active = 1 AND c2.ref_doc_type = 'sales_delivery'
+                       AND COALESCE(c2.source_type, '') <> 'migration' AND COALESCE(sd2.source_type, '') = 'migration'
+                     GROUP BY sd2.partner_id
+                  ) hc ON hc.partner_id = plb.partner_id
+                 WHERE plb.tenant_id = @TenantId
+                   AND GREATEST(plb.balance_amount, 0) - IFNULL(hc.amt, 0) > 0
+            ) x
+            JOIN partners p ON p.tenant_id = @TenantId AND p.partner_id = x.partner_id
+            GROUP BY x.partner_id, p.partner_name
+            ORDER BY TotalUnpaid DESC
             """;
 
         var rows = await Dapper.SqlMapper.QueryAsync(db, new Dapper.CommandDefinition(sql, new { TenantId = tenantId }, cancellationToken: ct));

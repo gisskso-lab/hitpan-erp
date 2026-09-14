@@ -233,13 +233,16 @@ public sealed class PartnerService : IPartnerService
                              p.manager_name AS ManagerName,
                              IFNULL(p.price_grade, 'A') AS PriceGrade,
                              IFNULL(p.credit_limit, 0) AS CreditLimit,
-                             COALESCE(pb.balance, 0) AS Balance,
+                             COALESCE(pb.balance, 0) + GREATEST(COALESCE(plb.balance_amount, 0), 0) AS Balance, -- 20260915작1 갈래 E: + 이전 프로그램 이월 미수(partner_balance 는 이관분을 안 담는다)
                              p.is_active AS IsActive,
                              p.created_at AS CreatedAt
                            FROM partners p
                            LEFT JOIN partner_balance pb
                              ON pb.tenant_id = p.tenant_id
                             AND pb.partner_id = p.partner_id
+                           LEFT JOIN partner_legacy_balances plb
+                             ON plb.tenant_id = p.tenant_id
+                            AND plb.partner_id = p.partner_id
                            WHERE p.tenant_id = @TenantId
                              AND (p.is_deleted = 0 OR p.is_deleted IS NULL)
                              AND (@Search IS NULL OR @Search = '' OR
@@ -275,6 +278,9 @@ public sealed class PartnerService : IPartnerService
                                 LEFT JOIN partner_balance pb
                                   ON pb.tenant_id = p.tenant_id
                                  AND pb.partner_id = p.partner_id
+                                LEFT JOIN partner_legacy_balances plb
+                                  ON plb.tenant_id = p.tenant_id
+                                 AND plb.partner_id = p.partner_id
                                 WHERE p.tenant_id = @TenantId
                                   AND (p.is_deleted = 0 OR p.is_deleted IS NULL)
                                   AND (@Search IS NULL OR @Search = '' OR
@@ -300,7 +306,7 @@ public sealed class PartnerService : IPartnerService
                          p.manager_name AS ManagerName,
                          IFNULL(p.price_grade, 'A') AS PriceGrade,
                          IFNULL(p.credit_limit, 0) AS CreditLimit,
-                         COALESCE(pb.balance, 0) AS Balance,
+                         COALESCE(pb.balance, 0) + GREATEST(COALESCE(plb.balance_amount, 0), 0) AS Balance, -- 20260915작1 갈래 E: + 이전 프로그램 이월 미수(partner_balance 는 이관분을 안 담는다)
                          p.is_active AS IsActive,
                          p.created_at AS CreatedAt
                        {whereSql}
@@ -364,13 +370,16 @@ public sealed class PartnerService : IPartnerService
                              IFNULL(p.payment_terms, 30) AS PaymentTerms,
                              p.memo AS Memo,
                              IFNULL(p.row_version, 0) AS RowVersion,
-                             COALESCE(pb.balance, 0) AS Balance,
+                             COALESCE(pb.balance, 0) + GREATEST(COALESCE(plb.balance_amount, 0), 0) AS Balance, -- 20260915작1 갈래 E: + 이전 프로그램 이월 미수(partner_balance 는 이관분을 안 담는다)
                              p.is_active AS IsActive,
                              p.created_at AS CreatedAt
                            FROM partners p
                            LEFT JOIN partner_balance pb
                              ON pb.tenant_id = p.tenant_id
                             AND pb.partner_id = p.partner_id
+                           LEFT JOIN partner_legacy_balances plb
+                             ON plb.tenant_id = p.tenant_id
+                            AND plb.partner_id = p.partner_id
                            WHERE p.partner_id = @PartnerId
                              AND p.tenant_id = @TenantId
                              AND (p.is_deleted = 0 OR p.is_deleted IS NULL)
