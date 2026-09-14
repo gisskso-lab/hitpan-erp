@@ -42,6 +42,8 @@ public sealed class TaxInvoiceMigratedLockGateTests
     private const string MigDelivery = "D-MIG-1";
     private const string MigDraftDelivery = "D-MIG-DRAFT";
     private const string MigUnissuedDelivery = "D-MIG-NOTAX";
+    private const string HumanInvoicedDelivery = "D-HUMAN-TAX";
+    private const string HumanInvoice = "TI-HUMAN-1";
     private const string HumanDelivery = "D-HUMAN-1";
     private const string HumanDraftDelivery = "D-HUMAN-DRAFT";
     private const string MigInvoice = "TI-MIG-1";
@@ -279,9 +281,6 @@ public sealed class TaxInvoiceMigratedLockGateTests
     {
         if (!ServerAvailable()) { Skipped(nameof(G5_11_이관명세서_반품의_마이너스계산서_발행_대조군)); return; }
         using var db = FreshDb();
-        Exec(db, "DROP TEMPORARY TABLE IF EXISTS g5tmp_sales_returns");
-        Exec(db, $"CREATE TEMPORARY TABLE g5tmp_sales_returns LIKE `{TestDb}`.sales_returns");
-        Exec(db, "ALTER TABLE g5tmp_sales_returns RENAME TO sales_returns");
         Exec(db, $"""
             INSERT INTO sales_returns (return_id, tenant_id, return_no, delivery_id, partner_id, return_date, status,
                                        total_amount, vat_amount, is_deleted, created_at)
@@ -297,10 +296,119 @@ public sealed class TaxInvoiceMigratedLockGateTests
     }
 
     // ────────────────────────────────────────────────────────────
+    // 후속 — #20 흐름 대조군 (잠금이 「새 전표로 정정」 길을 막으면 안 된다)
+
+    /// <summary>G5-13 대조군 — 이관 명세서를 원전표로 한 매출반품 등록이 된다.</summary>
+    [Fact]
+    public async Task G5_13_이관명세서_반품등록_성공_대조군()
+    {
+        if (!ServerAvailable()) { Skipped(nameof(G5_13_이관명세서_반품등록_성공_대조군)); return; }
+        using var db = FreshDb();
+
+        var (returnId, _) = await Sales(db).CreateSalesReturnAsync(new CreateSalesReturnRequest
+        {
+            DeliveryId = MigDelivery,
+            PartnerId = Partner,
+            ReturnDate = new DateTime(2026, 9, 15),
+            ReturnReason = "기타",
+            Items = new List<CreateSalesReturnItemRequest>
+            {
+                new() { ItemId = Item, DeliveryItemId = "DI-MIG-1", WarehouseId = Wh, Qty = 1m }
+            }
+        }, Tid);
+
+        Assert.Equal(1, Count(db, $"SELECT COUNT(*) FROM sales_returns WHERE return_id='{returnId}' AND delivery_id='{MigDelivery}'"));
+    }
+
+    /// <summary>G5-14 대조군 — 이관 명세서를 참조한 수금 등록이 된다.</summary>
+    [Fact]
+    public async Task G5_14_이관명세서_수금등록_성공_대조군()
+    {
+        if (!ServerAvailable()) { Skipped(nameof(G5_14_이관명세서_수금등록_성공_대조군)); return; }
+        using var db = FreshDb();
+
+        var id = await new CollectionService(db, new Mock<IAuditService>().Object).CreateCollectionAsync(
+            new HitPan.Application.DTOs.Approval.CreateCollectionRequest
+            {
+                PartnerId = Partner,
+                CollectionDate = new DateTime(2026, 9, 15),
+                Amount = 1100m,
+                CollectionMethod = "cash",
+                RefDocType = "sales_delivery",
+                RefDocId = MigDelivery
+            }, Tid, "gate-user");
+
+        Assert.Equal(1, Count(db, $"SELECT COUNT(*) FROM collections WHERE collection_id='{id}' AND ref_doc_id='{MigDelivery}'"));
+    }
+
+    /// <summary>G5-15 대조군 — 사람 확정 명세서의 확정취소가 된다(역행 원장 기록 · 상태 cancelled).</summary>
+    [Fact]
+    public async Task G5_15_사람명세서_확정취소_성공_대조군()
+    {
+        if (!ServerAvailable()) { Skipped(nameof(G5_15_사람명세서_확정취소_성공_대조군)); return; }
+        using var db = FreshDb();
+
+        await Sales(db).CancelConfirmedDeliveryAsync(HumanDelivery, Tid, null);
+
+        Assert.Equal(1, Count(db, $"SELECT COUNT(*) FROM sales_deliveries WHERE delivery_id='{HumanDelivery}' AND status='cancelled'"));
+        Assert.Equal(1, Count(db, $"SELECT COUNT(*) FROM stock_ledger WHERE source_id='{HumanDelivery}' AND source_type='sales_cancel'"));
+    }
+
+    /// <summary>G5-16 대조군 — 사람이 끊은 계산서의 취소가 된다.</summary>
+    [Fact]
+    public async Task G5_16_사람계산서_취소_성공_대조군()
+    {
+        if (!ServerAvailable()) { Skipped(nameof(G5_16_사람계산서_취소_성공_대조군)); return; }
+        using var db = FreshDb();
+
+        await new TaxInvoiceService(db, UnitOfWork(db))
+            .CancelAsync(HumanInvoice, new CancelTaxInvoiceRequest("게이트"), Tid, "gate-user");
+
+        Assert.Equal(1, Count(db, $"SELECT COUNT(*) FROM tax_invoices WHERE invoice_id='{HumanInvoice}' AND status='canceled'"));
+    }
+
+    /// <summary>
+    /// G5-17 (발견3) — <b>발행 잠금 함수와 목록 SQL 이 같은 답을 낸다.</b>
+    /// 규칙이 <c>MigratedDocumentLock.IsIssueLocked</c> 와 <c>SalesService.GetDeliveriesAsync</c> SQL 두 곳에 있어
+    /// 한쪽만 바꾸면 화면(목록)과 서버(발행)가 갈린다 → 번호 칸 경우를 전부 깔고 둘을 맞대 본다.
+    /// </summary>
+    [Fact]
+    public async Task G5_17_발행잠금_함수와_목록SQL이_같다()
+    {
+        if (!ServerAvailable()) { Skipped(nameof(G5_17_발행잠금_함수와_목록SQL이_같다)); return; }
+        using var db = FreshDb();
+
+        var cases = new (string Id, string Source, string TaxNo, int? TaxNoValue)[]
+        {
+            ("D-CMP-M-NULL", "migration", "NULL", null),
+            ("D-CMP-M-0", "migration", "0", 0),
+            ("D-CMP-M-NO", "migration", "20260228", 20260228),
+            ("D-CMP-M-9", "migration", "99999999", 99999999),
+            ("D-CMP-H-NO", "direct", "20260228", 20260228),
+            ("D-CMP-H-NULL", "direct", "NULL", null),
+        };
+        foreach (var c in cases) InsertDelivery(db, c.Id, c.Source, "confirmed", c.TaxNo);
+
+        var list = await Sales(db).GetDeliveriesAsync(Tid);
+        foreach (var c in cases)
+        {
+            var row = list.Find(x => x.DeliveryId == c.Id);
+            Assert.NotNull(row);
+            Assert.True(MigratedDocumentLock.IsIssueLocked(c.Source, c.TaxNoValue) == row!.IsIssueLocked,
+                $"{c.Id}: 함수={MigratedDocumentLock.IsIssueLocked(c.Source, c.TaxNoValue)} 목록SQL={row.IsIssueLocked} — 규칙이 한쪽만 바뀌었다.");
+        }
+    }
+
+    // ────────────────────────────────────────────────────────────
     // 헬퍼
 
-    private static SalesService Sales(MySqlConnection db) =>
-        new(UnitOfWork(db), null!, db, null!, new Mock<IAuditService>().Object, null!);
+    private static SalesService Sales(MySqlConnection db)
+    {
+        var tenant = new Mock<ICurrentTenant>();
+        tenant.SetupGet(t => t.TenantId).Returns(Tid);
+        tenant.SetupGet(t => t.UserId).Returns("gate-user");
+        return new(UnitOfWork(db), tenant.Object, db, null!, new Mock<IAuditService>().Object, null!);
+    }
 
     private static PurchaseService Purchase(MySqlConnection db) =>
         new(UnitOfWork(db), null!, db, new Mock<IAuditService>().Object);
@@ -351,6 +459,29 @@ public sealed class TaxInvoiceMigratedLockGateTests
         var db = new MySqlConnection(ConnString());
         db.Open();
 
+        // 후속(#20 대조군) — 반품·수금·확정취소·계산서취소는 재고·회계·잔액 표를 두루 쓴다.
+        //   필요한 표를 손으로 고르면 빠진 표가 실제 표에 쓰게 된다 → 기본 표를 전부 임시 표로 가린다.
+        var allTables = new List<string>();
+        using (var cmd = new MySqlCommand(
+            // FULLTEXT 색인 표는 임시 표로 못 만든다(MariaDB) — 이 흐름들이 안 쓰는 표라 뺀다(목록은 로그로 남긴다).
+            $"""
+            SELECT t.TABLE_NAME FROM information_schema.TABLES t
+             WHERE t.TABLE_SCHEMA='{TestDb}' AND t.TABLE_TYPE='BASE TABLE'
+               AND NOT EXISTS (SELECT 1 FROM information_schema.STATISTICS s
+                                WHERE s.TABLE_SCHEMA=t.TABLE_SCHEMA AND s.TABLE_NAME=t.TABLE_NAME AND s.INDEX_TYPE='FULLTEXT')
+            """, db))
+        using (var r = cmd.ExecuteReader())
+        {
+            while (r.Read()) allTables.Add(r.GetString(0));
+        }
+        foreach (var t in allTables)
+        {
+            if (Array.IndexOf(Tables, t) >= 0) continue;
+            Exec(db, $"DROP TEMPORARY TABLE IF EXISTS g5tmp_{t}");
+            Exec(db, $"CREATE TEMPORARY TABLE g5tmp_{t} LIKE `{TestDb}`.`{t}`");
+            Exec(db, $"ALTER TABLE g5tmp_{t} RENAME TO `{t}`");
+        }
+
         foreach (var t in Tables)
         {
             Exec(db, $"DROP TEMPORARY TABLE IF EXISTS {t}");
@@ -373,6 +504,20 @@ public sealed class TaxInvoiceMigratedLockGateTests
         InsertDelivery(db, HumanDraftDelivery, "direct", "draft");
         InsertDeliveryItem(db, MigDraftDelivery);
         InsertDeliveryItem(db, HumanDraftDelivery);
+        InsertDeliveryItem(db, MigDelivery, "DI-MIG-1");
+        InsertDeliveryItem(db, HumanDelivery);
+        InsertDelivery(db, HumanInvoicedDelivery, "direct", "confirmed");
+        Exec(db, $"""
+            INSERT INTO items (item_id, tenant_id, item_code, item_name, item_type, unit, is_active, created_at, updated_at)
+            VALUES ('{Item}', '{Tid}', 'MIGLOCK', '잠금시험품목', 'goods', 'EA', 1, NOW(6), NOW(6))
+            """);
+        Exec(db, $"""
+            INSERT INTO tax_invoices
+              (invoice_id, tenant_id, delivery_id, invoice_no, issued_at, issued_by, amount_total, vat_total, status, etax_status)
+            VALUES
+              ('{HumanInvoice}', '{Tid}', '{HumanInvoicedDelivery}', 'HUMAN-TAX-0001', NOW(6), 'gate-user', 1000, 100, 'issued', 'pending')
+            """);
+        Exec(db, $"UPDATE sales_deliveries SET tax_invoice_id='{HumanInvoice}' WHERE delivery_id='{HumanInvoicedDelivery}'");
 
         Exec(db, $"""
             INSERT INTO tax_invoices
@@ -405,10 +550,10 @@ public sealed class TaxInvoiceMigratedLockGateTests
            1000, 100, '원본', NOW(6), NOW(6), {legacyTaxNo})
         """);
 
-    private static void InsertDeliveryItem(MySqlConnection db, string deliveryId) => Exec(db, $"""
+    private static void InsertDeliveryItem(MySqlConnection db, string deliveryId, string? itemRowId = null) => Exec(db, $"""
         INSERT INTO sales_delivery_items
           (delivery_item_id, delivery_id, tenant_id, item_id, warehouse_id, qty, unit_price, supply_amount, vat_amount)
-        VALUES (UUID(), '{deliveryId}', '{Tid}', '{Item}', '{Wh}', 1, 1000, 1000, 100)
+        VALUES ({(itemRowId is null ? "UUID()" : $"'{itemRowId}'")}, '{deliveryId}', '{Tid}', '{Item}', '{Wh}', 1, 1000, 1000, 100)
         """);
 
     private static void InsertReceipt(MySqlConnection db, string id, string sourceType, string status) => Exec(db, $"""

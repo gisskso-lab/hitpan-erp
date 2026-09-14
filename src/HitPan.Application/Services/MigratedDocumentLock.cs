@@ -53,7 +53,17 @@ public static class MigratedDocumentLock
     ///   → 「묶음 안 한 줄이라도 번호 있으면」 과 99999999 판정은 갈래 B 저장 보강 뒤에 정확해진다.
     /// </summary>
     public static bool IsIssueLocked(string? deliverySourceType, int? legacyTaxNo) =>
-        IsMigrated(deliverySourceType) && legacyTaxNo is int no && no != 0;
+        IsMigrated(deliverySourceType)
+        && (legacyTaxNo is int no ? no != 0 : LockWhenLegacyTaxNoMissing);
+
+    /// <summary>
+    /// R-B4(사장님 재결재 대기) — 번호 칸이 비어 있는 이관분(이관이 99999999 를 NULL 로 넣는다)을 잠그나.
+    /// 지금 = 잠그지 않음. 결재가 「잠금」이면 이 한 줄을 true 로 — ⚠️ 목록 SQL(<c>SalesService.GetDeliveriesAsync</c>
+    /// IsIssueLocked 식)도 함께 바꿔야 하고, 안 바꾸면 게이트 G5-17 이 빨간불이 된다.
+    /// 근거: 이관 코드는 IJ_TAXNO 빈값(DBNull)을 0 으로(<c>GetInt</c>), 99999999 만 NULL 로 넣는다 → 이관분 NULL = 99999999.
+    ///   ⚠️ 단 묶음 <b>첫 줄</b> 번호만 저장한다(갈래 B 보강 대상).
+    /// </summary>
+    public static readonly bool LockWhenLegacyTaxNoMissing = false;
 
     /// <summary>판매 거래명세서가 이관분이면 <see cref="InvalidOperationException"/> 을 던진다.</summary>
     public static async Task EnsureDeliveryEditableAsync(

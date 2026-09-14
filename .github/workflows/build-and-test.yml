@@ -276,9 +276,10 @@ jobs:
           # 🔴 20260915작1 갈래 G TaxInvoiceMigratedLockGate (G5) — 이관 명세서·계산서 잠금(설계 §17 R-B · 결재 R-B2).
           #    실제 서비스(TaxInvoiceService·SalesService·PurchaseService)를 임시 표(LIKE 출하 DDL)에 물려 부른다.
           #    무력화 시험 (20260915 로컬 MariaDB hitpan_e2e · MigratedDocumentLock.IsMigrated 를 항상 false):
-          #      · 12개 중 6 FAIL — G5-1 레거시발행 이관 발행 · G5-3 계산서 취소 · G5-5 수정 · G5-6 확정취소 · G5-7 판매 삭제 · G5-9 매입 삭제
-          #      · 초록 6 — 대조군 G5-2(사람 발행) · G5-8(사람 수정) · G5-10(사람 매입 삭제) · G5-11(이관 반품 마이너스계산서)
-          #        · G5-12(레거시 미발행 이관 발행 R-B3) + G5-4(목록 표시 — SQL 판정이라 이 무력화로는 안 걸린다 ⚠️)
+          #      · 17개 중 7 FAIL — G5-1 레거시발행 이관 발행 · G5-3 계산서 취소 · G5-5 수정 · G5-6 확정취소 · G5-7 판매 삭제
+          #        · G5-9 매입 삭제 · G5-17 함수↔목록SQL 불일치
+          #      · 초록 10 — 대조군 G5-2 · 8 · 10 · 11 · 12 · 13(이관 반품 등록) · 14(이관 수금 등록) · 15(사람 확정취소) · 16(사람 계산서 취소) + G5-4
+          #    무력화 (b) R-B4 상수 LockWhenLegacyTaxNoMissing 만 true(목록 SQL 은 그대로) → G5-17 만 빨간불
           #    근거: docs/개발/erp/20260915작1_갈래G_잠금_개발명세서.md
           GATES="$GATES|TaxInvoiceMigratedLockGate"
 
