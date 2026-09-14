@@ -46,8 +46,23 @@ public static class MdbLegacyPartnerBalance
     /// <para>⚠️ 트랜잭션을 받지 않는다(계약 시그니처). 호출자는 이 연결에 열린 트랜잭션이 없을 때 부른다.
     /// 중간에 실패해도 UPSERT 라 다시 부르면 같은 결과가 된다.</para>
     /// </summary>
+    public static Task<int> ApplyAsync(
+        IDbConnection db,
+        string tenantId,
+        DataTable? docf5,
+        IReadOnlyDictionary<int, string> partnerMap,
+        DateTime baseDate,
+        CancellationToken ct)
+        => ApplyAsync(db, null, tenantId, docf5, partnerMap, baseDate, ct);
+
+    /// <summary>
+    /// 20260915작1 갈래 I — 트랜잭션을 받는 오버로드(갈래 B 발견1 · 작업지시서 §14-7 통합 과제 2).
+    /// <paramref name="tx"/> 가 있으면 <b>모든 SQL 을 그 트랜잭션으로</b> 보낸다(커밋·롤백은 호출자 — 이관 서비스 <c>RunTableStepAsync</c>).
+    /// null 이면 종전 계약 그대로(열린 트랜잭션 없는 연결 · 자동 커밋).
+    /// </summary>
     public static async Task<int> ApplyAsync(
         IDbConnection db,
+        IDbTransaction? tx,
         string tenantId,
         DataTable? docf5,
         IReadOnlyDictionary<int, string> partnerMap,
@@ -62,7 +77,7 @@ public static class MdbLegacyPartnerBalance
         var balances = LegacyMdbMapping.PartnerLegacyBalances(LegacyMdbMapping.ReadPartnerLedgerRows(docf5));
         if (balances.Count == 0) return 0;
 
-        if (db.State != ConnectionState.Open)
+        if (tx is null && db.State != ConnectionState.Open)
         {
             if (db is DbConnection dc) await dc.OpenAsync(ct).ConfigureAwait(false);
             else db.Open();
@@ -80,7 +95,7 @@ public static class MdbLegacyPartnerBalance
             }
             else
             {
-                fallbackPartnerId ??= await EnsureFallbackPartnerAsync(db, tenantId, ct).ConfigureAwait(false);
+                fallbackPartnerId ??= await EnsureFallbackPartnerAsync(db, tx, tenantId, ct).ConfigureAwait(false);
                 partnerId = fallbackPartnerId;
             }
 
@@ -132,7 +147,7 @@ public static class MdbLegacyPartnerBalance
         {
             ct.ThrowIfCancellationRequested();
             var part = rows.Skip(i).Take(chunk).ToList();
-            await db.ExecuteAsync(new CommandDefinition(upsertSql, part, cancellationToken: ct)).ConfigureAwait(false);
+            await db.ExecuteAsync(new CommandDefinition(upsertSql, part, transaction: tx, cancellationToken: ct)).ConfigureAwait(false);
             written += part.Count;
         }
         return written;
@@ -142,11 +157,11 @@ public static class MdbLegacyPartnerBalance
     /// 폴백 거래처 확보 — 수금·명세서 이관이 매핑 실패 코드에 쓰는 거래처와 <b>같은 행</b>(partner_code 로 찾는다).
     /// 없으면 같은 모양으로 INSERT IGNORE 후 재조회(멱등 · <c>MdbMigrationService.cs:2071</c> 관용구).
     /// </summary>
-    private static async Task<string> EnsureFallbackPartnerAsync(IDbConnection db, string tenantId, CancellationToken ct)
+    private static async Task<string> EnsureFallbackPartnerAsync(IDbConnection db, IDbTransaction? tx, string tenantId, CancellationToken ct)
     {
         const string findSql = "SELECT partner_id FROM partners WHERE tenant_id = @TenantId AND partner_code = @Code LIMIT 1";
         var existing = await db.ExecuteScalarAsync<string?>(new CommandDefinition(
-            findSql, new { TenantId = tenantId, Code = FallbackPartnerCode }, cancellationToken: ct)).ConfigureAwait(false);
+            findSql, new { TenantId = tenantId, Code = FallbackPartnerCode }, transaction: tx, cancellationToken: ct)).ConfigureAwait(false);
         if (!string.IsNullOrEmpty(existing)) return existing;
 
         var now = DateTime.Now;
@@ -159,10 +174,10 @@ public static class MdbLegacyPartnerBalance
                1, 0, @Now, @Now, '진범 #2 봉합 — K2_BUYC 매핑 실패 거래의 fallback 거래처')
             """,
             new { Id = Guid.NewGuid().ToString(), TenantId = tenantId, Code = FallbackPartnerCode, Now = now },
-            cancellationToken: ct)).ConfigureAwait(false);
+            transaction: tx, cancellationToken: ct)).ConfigureAwait(false);
 
         var resolved = await db.ExecuteScalarAsync<string?>(new CommandDefinition(
-            findSql, new { TenantId = tenantId, Code = FallbackPartnerCode }, cancellationToken: ct)).ConfigureAwait(false);
+            findSql, new { TenantId = tenantId, Code = FallbackPartnerCode }, transaction: tx, cancellationToken: ct)).ConfigureAwait(false);
         return !string.IsNullOrEmpty(resolved)
             ? resolved
             : throw new InvalidOperationException("폴백 거래처(LEGACY_UNKNOWN_PTNR)를 만들지 못했다 — 이월잔액을 적을 거래처가 없다.");

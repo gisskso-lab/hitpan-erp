@@ -86,7 +86,8 @@ public sealed class TaxInvoiceService : ITaxInvoiceService
         //   ⚠️ 화면 목록에서 빼는 것만으로는 차단이 아니다 — 일괄 발행도 이 메서드를 건별로 부른다.
         if (MigratedDocumentLock.IsIssueLocked(delivery.SourceType, delivery.LegacyTaxNo))
         {
-            throw new TaxInvoiceException(MigratedDocumentLock.LockedErrorCode, MigratedDocumentLock.IssueBlockedMessage);
+            // 20260915작1 갈래 I · R-B4: 99999999(레거시 「발행 안 함」 확정)는 사장님 결재 문구로 알린다.
+            throw new TaxInvoiceException(MigratedDocumentLock.LockedErrorCode, MigratedDocumentLock.IssueBlockedMessageFor(delivery.LegacyTaxNo));
         }
 
         // 2) 중복 발행 차단 (사장님: "사슬동작중 중복생성 절대금지")

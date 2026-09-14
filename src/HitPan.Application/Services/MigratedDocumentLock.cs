@@ -53,15 +53,46 @@ public static class MigratedDocumentLock
     ///   → 「묶음 안 한 줄이라도 번호 있으면」 과 99999999 판정은 갈래 B 저장 보강 뒤에 정확해진다.
     /// </summary>
     public static bool IsIssueLocked(string? deliverySourceType, int? legacyTaxNo) =>
-        IsMigrated(deliverySourceType)
-        && (legacyTaxNo is int no ? no != 0 : LockWhenLegacyTaxNoMissing);
+        IssueLockReason(deliverySourceType, legacyTaxNo) is not null;
+
+    // ── 🆕 20260915작1 갈래 I · R-B4 (사장님 결재 §14-5 (가) 잠금) ──
+
+    /// <summary>레거시가 「계산서 발행 안 함」으로 닫은 표시 번호 — 레거시 계산서표(DOCF4)에 없다(§14-3 실측 판매 313줄).</summary>
+    public const int LegacyTaxNoNotIssued = 99999999;
+
+    /// <summary>발행 잠금 사유 — 레거시에서 계산서를 발행한 이관 명세서(R-B3).</summary>
+    public const string IssueLockReasonIssued = "레거시 발행";
+
+    /// <summary>발행 잠금 사유 — 레거시에서 「발행 안 함」으로 닫은 이관 명세서(R-B4 · <see cref="LegacyTaxNoNotIssued"/>).</summary>
+    public const string IssueLockReasonNotIssued = "발행 안 함 확정";
+
+    /// <summary>R-B4 거부 문구 (사장님 결재 문구 그대로).</summary>
+    public const string IssueNotIssuedMessage = "이전 프로그램에서 계산서 발행 안 함으로 처리된 거래입니다";
 
     /// <summary>
-    /// R-B4(사장님 재결재 대기) — 번호 칸이 비어 있는 이관분(이관이 99999999 를 NULL 로 넣는다)을 잠그나.
-    /// 지금 = 잠그지 않음. 결재가 「잠금」이면 이 한 줄을 true 로 — ⚠️ 목록 SQL(<c>SalesService.GetDeliveriesAsync</c>
-    /// IsIssueLocked 식)도 함께 바꿔야 하고, 안 바꾸면 게이트 G5-17 이 빨간불이 된다.
-    /// 근거: 이관 코드는 IJ_TAXNO 빈값(DBNull)을 0 으로(<c>GetInt</c>), 99999999 만 NULL 로 넣는다 → 이관분 NULL = 99999999.
-    ///   ⚠️ 단 묶음 <b>첫 줄</b> 번호만 저장한다(갈래 B 보강 대상).
+    /// 발행 잠금 사유 — null = 발행 허용. 판정 순서(명시 분기 · 암묵 동작 금지):
+    /// ① 이관분 아님 → null ② 번호 = <see cref="LegacyTaxNoNotIssued"/> → 「발행 안 함 확정」
+    /// ③ 번호 ≠ 0 → 「레거시 발행」 ④ 번호 0('00000000'·빈값) → null ⑤ 번호 칸 NULL → <see cref="LockWhenLegacyTaxNoMissing"/>.
+    /// ⚠️ 목록 SQL(<c>SalesService.GetDeliveriesAsync</c> IsIssueLocked 식)과 함께 바꾼다 — 게이트 G5-17.
+    /// </summary>
+    public static string? IssueLockReason(string? deliverySourceType, int? legacyTaxNo)
+    {
+        if (!IsMigrated(deliverySourceType)) return null;
+        if (legacyTaxNo is null) return LockWhenLegacyTaxNoMissing ? IssueLockReasonIssued : null;
+        if (legacyTaxNo.Value == LegacyTaxNoNotIssued) return IssueLockReasonNotIssued;
+        return legacyTaxNo.Value != 0 ? IssueLockReasonIssued : null;
+    }
+
+    /// <summary>발행 거부 문구 — 「발행 안 함 확정」이면 R-B4 문구, 아니면 종전 <see cref="IssueBlockedMessage"/>.</summary>
+    public static string IssueBlockedMessageFor(int? legacyTaxNo) =>
+        legacyTaxNo == LegacyTaxNoNotIssued ? IssueNotIssuedMessage : IssueBlockedMessage;
+
+    /// <summary>
+    /// 번호 칸이 NULL 인 이관분을 잠그나 — 지금 = 잠그지 않음.
+    /// 🔴 의미 정리(갈래 I): 갈래 B 머지 뒤 이관은 <c>legacy_tax_no</c> 에 NULL 을 <b>쓰지 않는다</b>
+    /// (묶음 안 첫 비0 번호 · 99999999 원값 · 전부 0/빈값이면 0 — <c>MdbLegacyUnpostedArchive.LegacyTaxNo</c>).
+    /// 99999999 는 이 상수가 아니라 <see cref="LegacyTaxNoNotIssued"/> 명시 분기로 잠근다.
+    /// NULL 은 봉합 <b>전</b> 이관분(종전 코드가 99999999 → NULL)에만 남는다 → 덮어쓰기 재이관 전까지 발행 허용(종전 동작 유지 · 개발명세서 §5).
     /// </summary>
     public static readonly bool LockWhenLegacyTaxNoMissing = false;
 

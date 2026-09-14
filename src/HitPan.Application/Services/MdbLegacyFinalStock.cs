@@ -186,6 +186,51 @@ public static class MdbLegacyFinalStock
         => qty == 0m ? null : Math.Round(amount / qty, 6, MidpointRounding.AwayFromZero);
 
     // ══════════════════════════════════════════════════════════════
+    // 🆕 20260915작1 갈래 I — DOCFC 신선도 가드 (작업지시서 §14-8 PM 반증)
+    // ══════════════════════════════════════════════════════════════
+
+    /// <summary>
+    /// 신선도 가드 사유 문구(대사표·결과 표가 그대로 읽는다 · 고객 화면 노출 가능 · 개발용어 금지).
+    /// 이 문구가 결과에 있으면 최종재고 맞춤·끝전을 <b>하지 않았다</b> — 재고는 이력(DOCFB) 누계 그대로다.
+    /// </summary>
+    public const string StaleFinalStockReason = "최종재고 표가 최신이 아님";
+
+    /// <summary>
+    /// 표의 날짜 칸에서 <c>yyyyMMdd</c> 로 읽히는 가장 늦은 날짜(<paramref name="notAfter"/> 이하만). 표·칸 없음 / 유효 날짜 0 → null.
+    /// <paramref name="notAfter"/> 뒤 날짜(잘못 친 미래 날짜)는 뺀다 — 하나만 있어도 가드가 늘 skip 되는 것을 막는다.
+    /// </summary>
+    public static DateTime? LastValidLegacyDate(DataTable? table, string column, DateTime notAfter)
+    {
+        if (table is null || !table.Columns.Contains(column)) return null;
+        DateTime? max = null;
+        foreach (DataRow row in table.Rows)
+        {
+            if (LegacyMdbMapping.TryParseLegacyDate(Str(row, column), out var d)
+                && d.Date <= notAfter.Date
+                && (max is null || d > max))
+            {
+                max = d;
+            }
+        }
+        return max;
+    }
+
+    /// <summary>
+    /// DOCFC 마지막 달(MAX IM_YM) 이 DOCFB 마지막 유효 날짜의 달보다 앞이면(월마감을 안 돌린 MDB) 사유를, 아니면 null.
+    /// DOCFC 계산 없음(null) · DOCFB 날짜 없음(null) → null (가드할 근거가 없다 — DOCFC 없음 skip 은 맞춤 단계가 따로 한다).
+    /// </summary>
+    public static string? StaleReason(string? docfcMaxYm, DateTime? docfbLastDate)
+    {
+        if (string.IsNullOrEmpty(docfcMaxYm) || docfbLastDate is null) return null;
+        var docfbYm = docfbLastDate.Value.ToString("yyyyMM", CultureInfo.InvariantCulture);
+        return string.CompareOrdinal(docfcMaxYm, docfbYm) < 0 ? StaleFinalStockReason : null;
+    }
+
+    /// <summary><see cref="StaleReason(string?, DateTime?)"/> 의 DOCFC 표 판 — <see cref="ComputeFinalStock"/> 의 MaxYm 으로 가른다.</summary>
+    public static string? StaleReason(DataTable? docfc, DateTime? docfbLastDate)
+        => StaleReason(ComputeFinalStock(docfc)?.MaxYm, docfbLastDate);
+
+    // ══════════════════════════════════════════════════════════════
     // ① 맞춤 줄 — item_stock_rebuild 앞
     // ══════════════════════════════════════════════════════════════
 
