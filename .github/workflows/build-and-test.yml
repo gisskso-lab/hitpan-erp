@@ -318,6 +318,10 @@ jobs:
           #      D2 순서 대조군(끝전 뒤에 리빌드가 돌면 금액이 틀어짐 · 병렬이슈37) · D3 끝전 폴백
           #    등록 근거는 무력화 시험 12종 중 11종 빨간불(M10 동등 변이 초록 · 명세서 §4·§5) — docs/개발/erp/20260915작1_갈래D_재고맞춤_개발명세서.md §4
           GATES="$GATES|MdbLegacyFinalStockGate"
+          # 🔴 20260915작1 갈래 H LegacyUnpostedViewTenantGate — 장부 미반영 명세서 조회(읽기 전용) 회사 격리.
+          #    무력화 시험(20260915 격리 33306): 목록 WHERE tenant 조건 제거 → H1·H3 FAIL · 거래처 조인 tenant 조건 제거 → H1(H2 함정) FAIL.
+          #    근거: docs/개발/erp/20260915작1_갈래HC_보관화면_대사표_개발명세서.md
+          GATES="$GATES|LegacyUnpostedViewTenantGate"
 
           echo "▶ 이 잡이 무는 게이트: $GATES"
           # 🔴 20260913작2 정정 — 이제 기기 계열 중 **MainPcRestartMarkGate 는 문다**(임시 DB 권한 실측 · C-3).

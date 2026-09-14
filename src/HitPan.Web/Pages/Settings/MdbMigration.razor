@@ -19,6 +19,13 @@
         기존 히트판의 데이터를 새 히트판으로 간편하게 가져옵니다
     </MudText>
 </div>
+@* 🔴 20260915작1 갈래 H — 입구 버튼 1개 (Sidebar 무수정 · 결재 §13 화면위치) *@
+<div style="display:flex;justify-content:flex-end;margin:-8px 0 8px 0">
+    <MudButton Variant="Variant.Text" Color="Color.Primary" Size="Size.Small" Href="/settings/mdb-migration/unposted"
+               StartIcon="@Icons.Material.Filled.Inventory2">
+        이전 프로그램 장부에 반영되지 않은 명세서 보기
+    </MudButton>
+</div>
 
 @* 경고 알림 *@
 <MudAlert Severity="Severity.Warning" Class="mb-4" Dense="true" Icon="@Icons.Material.Filled.Warning">
