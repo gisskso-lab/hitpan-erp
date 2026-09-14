@@ -810,7 +810,11 @@ public class FinanceService : IFinanceService
         // ── 7개 KPI를 UNION ALL 단일 쿼리로 통합 (네트워크 왕복 1회) ──
         // 주의: MySqlConnection은 thread-safe 아니므로 Task.WhenAll 병렬 금지 ("conn in use" 에러)
         // 대신 모든 KPI를 한 번의 쿼리에 합쳐서 성능 확보
-        const string kpiSql = """
+        // 🔴 20260915작1 갈래 E (설계 §17 · R-A2 (나)) — 미수·미지급에 「이전 프로그램 최종잔액」(partner_legacy_balances)을 한 번 더한다.
+        //   F3 는 이관한 명세서·수금·지급 이력을 이미 품은 최종값 → 이월잔액 행이 있는 회사는 source_type='migration' 행을 뺀다(두 번 세지 않음).
+        //   부호: + 는 미수 칸 · − 는 미지급 칸(병렬이슈40 PM 결정). 사람이 입력한 명세서·수금·지급·반품은 그대로 쌓인다.
+        //   이월잔액 행이 없는 회사(이관 안 함 · DOCF5 없음)는 종전 식과 결과가 같다.
+        const string kpiSql = $$"""
             SELECT 'today_sales' AS k, COALESCE(SUM(total_amount + vat_amount), 0) AS v
               FROM sales_deliveries WHERE tenant_id=@TenantId AND status IN ('confirmed','invoiced') AND is_deleted=0 AND delivery_date=@Today
             UNION ALL
@@ -830,17 +834,23 @@ public class FinanceService : IFinanceService
             --   종전 IN('sales_delivery','sales_order')은 다른 집계(CollectionService:382·SALES-01)와 불일치이고,
             --   collections 에 sales_order 는 들어가지 않아(UI·마이그 전수 0건) 미래 잠복 결함이었다.
             SELECT 'receivable',
-              COALESCE((SELECT SUM(total_amount + vat_amount) FROM sales_deliveries WHERE tenant_id=@TenantId AND status IN ('confirmed','invoiced') AND is_deleted=0), 0)
-              - COALESCE((SELECT SUM(amount) FROM collections WHERE tenant_id=@TenantId AND ref_doc_type = 'sales_delivery'), 0)
+              COALESCE((SELECT SUM(total_amount + vat_amount) FROM sales_deliveries WHERE tenant_id=@TenantId AND status IN ('confirmed','invoiced') AND is_deleted=0
+                AND NOT (COALESCE(source_type,'') = 'migration' AND {{MdbLegacyPartnerBalance.HasLegacyBalanceSql}})), 0)
+              - COALESCE((SELECT SUM(amount) FROM collections WHERE tenant_id=@TenantId AND ref_doc_type = 'sales_delivery'
+                AND NOT (COALESCE(source_type,'') = 'migration' AND {{MdbLegacyPartnerBalance.HasLegacyBalanceSql}})), 0)
+              + COALESCE((SELECT SUM(GREATEST(balance_amount, 0)) FROM partner_legacy_balances WHERE tenant_id=@TenantId), 0)
             UNION ALL
             -- 봉합 (2026-06-23, 6차 전수조사 C2 P1): 미지급 지급 차감을 collections → payments 로 정정.
             --   매입 지급은 collections 가 아니라 payments(payment_type='purchase')에 기록된다(GetPayablesAsync:439 정식 기준).
             --   종전엔 collections 의 'purchase_receipt'/'purchase_order' 를 봤는데 거기엔 0건이라 차감이 항상 0 →
             --   미지급이 지급해도 안 줄어 영구 과대 계상됐다(헌법 #20). payments 기준으로 GetPayablesAsync 와 일관화.
             SELECT 'payable',
-              COALESCE((SELECT SUM(total_amount + vat_amount) FROM purchase_receipts WHERE tenant_id=@TenantId AND status='confirmed'), 0)
+              COALESCE((SELECT SUM(total_amount + vat_amount) FROM purchase_receipts WHERE tenant_id=@TenantId AND status='confirmed'
+                AND NOT (COALESCE(source_type,'') = 'migration' AND {{MdbLegacyPartnerBalance.HasLegacyBalanceSql}})), 0)
               - COALESCE((SELECT COALESCE(SUM(rti.supply_amount + rti.vat_amount),0) FROM purchase_returns rt LEFT JOIN purchase_return_items rti ON rti.return_id=rt.return_id AND rti.tenant_id=rt.tenant_id WHERE rt.tenant_id=@TenantId AND rt.is_deleted=0 AND rt.status='confirmed'), 0)
-              - COALESCE((SELECT SUM(amount) FROM payments WHERE tenant_id=@TenantId AND is_active=1 AND payment_type='purchase'), 0)
+              - COALESCE((SELECT SUM(amount) FROM payments WHERE tenant_id=@TenantId AND is_active=1 AND payment_type='purchase'
+                AND NOT (COALESCE(source_type,'') = 'migration' AND {{MdbLegacyPartnerBalance.HasLegacyBalanceSql}})), 0)
+              + COALESCE((SELECT SUM(GREATEST(-balance_amount, 0)) FROM partner_legacy_balances WHERE tenant_id=@TenantId), 0)
             UNION ALL
             SELECT 'low_stock',
               (SELECT COUNT(*) FROM item_stock s INNER JOIN items i ON i.item_id=s.item_id AND i.tenant_id=s.tenant_id

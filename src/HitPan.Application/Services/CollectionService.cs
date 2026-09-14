@@ -400,6 +400,8 @@ public class CollectionService : ICollectionService
               AND sd.status = 'confirmed'
               AND sd.is_deleted = 0
               AND (sd.total_amount + sd.vat_amount) - IFNULL(c.collected, 0) > 0
+              -- 🔴 20260915작1 갈래 E: 이월잔액 행이 있는 회사는 이관 명세서를 명세서별로 보이지 않는다 — 아래 「이전 프로그램 이월」 요약 1줄이 대신한다.
+              AND NOT (COALESCE(sd.source_type, '') = 'migration' AND " + MdbLegacyPartnerBalance.HasLegacyBalanceSql + @")
             ORDER BY sd.delivery_date ASC";
 
         var docs = (await _db.QueryAsync<ReceivableDocumentDto>(new CommandDefinition(
@@ -425,7 +427,28 @@ public class CollectionService : ICollectionService
             Aging90Plus = g.Where(d => d.AgingBucket == "90_plus").Sum(d => d.Outstanding),
             IsOverdue = g.Any(d => d.AgingBucket == "61_90" || d.AgingBucket == "90_plus"),
             DocumentCount = g.Count()
-        }).OrderByDescending(s => s.Outstanding).ToList();
+        }).ToList();
+
+        // 🔴 20260915작1 갈래 E (설계 §17 · R-A2 (나)) — 「이전 프로그램 이월」 미수(partner_legacy_balances 의 + 잔액)를 거래처 요약에 한 번 더한다.
+        //   명세서 목록(Documents)에는 넣지 않는다: 이 화면의 명세서 줄은 수금 등록 때 ref_doc_id 로 쓰인다(CollectionPage.razor:496) — 가짜 명세서 id 금지.
+        //   사람이 이관 명세서에 붙여 넣은 수금(ref_doc_id → 이관 명세서)은 이월잔액에서 뺀다(대시보드 미수 식과 같은 기준).
+        var legacyRows = await GetLegacyOutstandingAsync(tenantId, receivable: true, ct);
+        MergeLegacyIntoSummary(summary, legacyRows, partnerNames,
+            () => new ReceivableSummaryDto(),
+            s => s.PartnerId,
+            (s, amt, bucket) =>
+            {
+                s.Outstanding += amt;
+                switch (bucket)
+                {
+                    case "0_30": s.Aging0_30 += amt; break;
+                    case "31_60": s.Aging31_60 += amt; break;
+                    case "61_90": s.Aging61_90 += amt; s.IsOverdue = true; break;
+                    default: s.Aging90Plus += amt; s.IsOverdue = true; break;
+                }
+            },
+            (s, id, name) => { s.PartnerId = id; s.PartnerName = name; });
+        summary = summary.OrderByDescending(s => s.Outstanding).ToList();
 
         return new ReceivablesResponseDto { Summary = summary, Documents = docs };
     }
@@ -469,6 +492,8 @@ public class CollectionService : ICollectionService
             WHERE pr.tenant_id = @TenantId
               AND pr.status = 'confirmed'
               AND (pr.total_amount + pr.vat_amount) - IFNULL(ret.returned, 0) - IFNULL(pay.paid, 0) > 0
+              -- 🔴 20260915작1 갈래 E: 이월잔액 행이 있는 회사는 이관 매입을 명세서별로 보이지 않는다 — 「이전 프로그램 이월」 요약 1줄이 대신한다.
+              AND NOT (COALESCE(pr.source_type, '') = 'migration' AND " + MdbLegacyPartnerBalance.HasLegacyBalanceSql + @")
             ORDER BY pr.receipt_date ASC";
 
         var docs = (await _db.QueryAsync<PayableDocumentDto>(new CommandDefinition(
@@ -493,9 +518,115 @@ public class CollectionService : ICollectionService
             Aging90Plus = g.Where(d => d.AgingBucket == "90_plus").Sum(d => d.Outstanding),
             IsOverdue = g.Any(d => d.AgingBucket == "61_90" || d.AgingBucket == "90_plus"),
             DocumentCount = g.Count()
-        }).OrderByDescending(s => s.Outstanding).ToList();
+        }).ToList();
+
+        // 🔴 20260915작1 갈래 E — 「이전 프로그램 이월」 미지급(partner_legacy_balances 의 − 잔액 절대값)을 거래처 요약에 한 번 더한다. 명세서 목록에는 넣지 않는다.
+        var legacyRows = await GetLegacyOutstandingAsync(tenantId, receivable: false, ct);
+        MergeLegacyIntoSummary(summary, legacyRows, partnerNames,
+            () => new PayableSummaryDto(),
+            s => s.PartnerId,
+            (s, amt, bucket) =>
+            {
+                s.Outstanding += amt;
+                switch (bucket)
+                {
+                    case "0_30": s.Aging0_30 += amt; break;
+                    case "31_60": s.Aging31_60 += amt; break;
+                    case "61_90": s.Aging61_90 += amt; s.IsOverdue = true; break;
+                    default: s.Aging90Plus += amt; s.IsOverdue = true; break;
+                }
+            },
+            (s, id, name) => { s.PartnerId = id; s.PartnerName = name; });
+        summary = summary.OrderByDescending(s => s.Outstanding).ToList();
 
         return new PayablesResponseDto { Summary = summary, Documents = docs };
+    }
+
+    /// <summary>
+    /// 20260915작1 갈래 E — 거래처별 「이전 프로그램 이월」 남은 금액.
+    /// 미수: + 잔액 − 사람이 이관 명세서에 붙인 수금 · 미지급: − 잔액 절대값 − 사람이 이관 매입에 붙인 지급·반품. 0 이하 거래처는 뺀다.
+    /// </summary>
+    private async Task<List<LegacyOutstandingRow>> GetLegacyOutstandingAsync(string tenantId, bool receivable, CancellationToken ct)
+    {
+        const string receivableSql = """
+            SELECT plb.partner_id AS PartnerId,
+                   GREATEST(plb.balance_amount, 0) - IFNULL(c.amt, 0) AS Amount,
+                   plb.base_date AS BaseDate
+              FROM partner_legacy_balances plb
+              LEFT JOIN (
+                SELECT sd.partner_id, SUM(c.amount) AS amt
+                  FROM collections c
+                  JOIN sales_deliveries sd ON sd.delivery_id = c.ref_doc_id AND sd.tenant_id = c.tenant_id
+                 WHERE c.tenant_id = @TenantId AND c.is_active = 1 AND c.ref_doc_type = 'sales_delivery'
+                   AND COALESCE(c.source_type, '') <> 'migration'
+                   AND COALESCE(sd.source_type, '') = 'migration'
+                 GROUP BY sd.partner_id
+              ) c ON c.partner_id = plb.partner_id
+             WHERE plb.tenant_id = @TenantId
+               AND GREATEST(plb.balance_amount, 0) - IFNULL(c.amt, 0) > 0
+            """;
+        const string payableSql = """
+            SELECT plb.partner_id AS PartnerId,
+                   GREATEST(-plb.balance_amount, 0) - IFNULL(pay.amt, 0) - IFNULL(ret.amt, 0) AS Amount,
+                   plb.base_date AS BaseDate
+              FROM partner_legacy_balances plb
+              LEFT JOIN (
+                SELECT pr.partner_id, SUM(p.amount) AS amt
+                  FROM payments p
+                  JOIN purchase_receipts pr ON pr.receipt_id = p.ref_order_id AND pr.tenant_id = p.tenant_id
+                 WHERE p.tenant_id = @TenantId AND p.is_active = 1 AND p.payment_type = 'purchase'
+                   AND COALESCE(p.source_type, '') <> 'migration'
+                   AND COALESCE(pr.source_type, '') = 'migration'
+                 GROUP BY pr.partner_id
+              ) pay ON pay.partner_id = plb.partner_id
+              LEFT JOIN (
+                SELECT pr.partner_id, SUM(rti.supply_amount + rti.vat_amount) AS amt
+                  FROM purchase_returns rt
+                  JOIN purchase_return_items rti ON rti.return_id = rt.return_id AND rti.tenant_id = rt.tenant_id
+                  JOIN purchase_receipts pr ON pr.receipt_id = rt.receipt_id AND pr.tenant_id = rt.tenant_id
+                 WHERE rt.tenant_id = @TenantId AND rt.is_deleted = 0 AND rt.status = 'confirmed'
+                   AND COALESCE(pr.source_type, '') = 'migration'
+                 GROUP BY pr.partner_id
+              ) ret ON ret.partner_id = plb.partner_id
+             WHERE plb.tenant_id = @TenantId
+               AND GREATEST(-plb.balance_amount, 0) - IFNULL(pay.amt, 0) - IFNULL(ret.amt, 0) > 0
+            """;
+
+        return (await _db.QueryAsync<LegacyOutstandingRow>(new CommandDefinition(
+            receivable ? receivableSql : payableSql, new { TenantId = tenantId }, cancellationToken: ct))).ToList();
+    }
+
+    private static void MergeLegacyIntoSummary<TSummary>(
+        List<TSummary> summary,
+        List<LegacyOutstandingRow> legacyRows,
+        IReadOnlyDictionary<string, string> partnerNames,
+        Func<TSummary> create,
+        Func<TSummary, string> keyOf,
+        Action<TSummary, decimal, string> add,
+        Action<TSummary, string, string> init)
+    {
+        if (legacyRows.Count == 0) return;
+        var byPartner = summary.ToDictionary(keyOf, s => s, StringComparer.Ordinal);
+        foreach (var row in legacyRows)
+        {
+            if (!byPartner.TryGetValue(row.PartnerId, out var s))
+            {
+                s = create();
+                init(s, row.PartnerId, partnerNames.GetValueOrDefault(row.PartnerId, ""));
+                summary.Add(s);
+                byPartner[row.PartnerId] = s;
+            }
+            var days = (DateTime.Today - row.BaseDate.Date).Days;
+            var bucket = days <= 30 ? "0_30" : days <= 60 ? "31_60" : days <= 90 ? "61_90" : "90_plus";
+            add(s, row.Amount, bucket);
+        }
+    }
+
+    private sealed class LegacyOutstandingRow
+    {
+        public string PartnerId { get; set; } = string.Empty;
+        public decimal Amount { get; set; }
+        public DateTime BaseDate { get; set; }
     }
 
     private async Task EnsureOpenAsync(CancellationToken ct)
