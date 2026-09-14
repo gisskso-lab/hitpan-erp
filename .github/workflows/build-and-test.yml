@@ -284,6 +284,14 @@ jobs:
           #      · partner UNIQUE 를 일반 KEY 로(두 파일)     → G7-1 · G7-2 (병렬이슈39)
           #    근거: docs/개발/erp/20260915작1_갈래F_DDL_개발명세서.md
           GATES="$GATES|LegacyUnpostedDdlGate"
+          # 🔴 20260915작1 갈래 A MdbPostingClassifyGate (G1) — 자료이관 장부 반영 판정 · F3 잔액 · 기준일 · 재고 품목 키.
+          #    순수 함수(DB 없음 · SKIP 없음). 무력화 시험 14종 전부 빨간불 · 원본 14/14 초록:
+          #      종류 안 가림 · 판매/매입 집합 뒤바꿈 · 연결 키에 거래처 코드 · 머리O연결X→미반영 · DOCFE 없음→미반영 ·
+          #      F3 마지막 이월만 · F1 전 줄 합 · 기준일 DOCF5 폴백 끊음 · 잘못된 날짜→기준일 아님 ·
+          #      품목 키 대소문자 구분 · 품목 키 Trim 안 함 · 이월행도 연결 키 ·
+          #      순번 0 가드 제거(집합 쪽 · 판정 쪽 각각 — 병렬이슈36)
+          #    근거: docs/개발/erp/20260915작1_갈래A_판정_개발명세서.md
+          GATES="$GATES|MdbPostingClassifyGate"
 
           echo "▶ 이 잡이 무는 게이트: $GATES"
           # 🔴 20260913작2 정정 — 이제 기기 계열 중 **MainPcRestartMarkGate 는 문다**(임시 DB 권한 실측 · C-3).
