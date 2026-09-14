@@ -292,6 +292,10 @@ jobs:
           #      순번 0 가드 제거(집합 쪽 · 판정 쪽 각각 — 병렬이슈36)
           #    근거: docs/개발/erp/20260915작1_갈래A_판정_개발명세서.md
           GATES="$GATES|MdbPostingClassifyGate"
+          # 🔴 20260915작1 갈래 E MdbLegacyBalanceGate (G4) — 이전 프로그램 최종잔액 맞춤(partner_legacy_balances) · 미수·미지급 식.
+          #    격리 DB · HITPAN_REQUIRE_DB(SKIP=FAIL). 무력화 시험(봉합 빼고 FAIL)은 개발명세서 §4 표.
+          #    근거: docs/개발/erp/20260915작1_갈래E_잔액맞춤_개발명세서.md
+          GATES="$GATES|MdbLegacyBalanceGate"
 
           echo "▶ 이 잡이 무는 게이트: $GATES"
           # 🔴 20260913작2 정정 — 이제 기기 계열 중 **MainPcRestartMarkGate 는 문다**(임시 DB 권한 실측 · C-3).
