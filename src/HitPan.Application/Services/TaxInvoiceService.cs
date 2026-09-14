@@ -61,7 +61,9 @@ public sealed class TaxInvoiceService : ITaxInvoiceService
                        delivery_date  AS DeliveryDate,
                        status         AS Status,
                        total_amount   AS TotalAmount,
-                       vat_amount     AS VatAmount
+                       vat_amount     AS VatAmount,
+                       source_type    AS SourceType,
+                       legacy_tax_no  AS LegacyTaxNo
                   FROM sales_deliveries
                  WHERE delivery_id = @DeliveryId AND tenant_id = @TenantId
                 """,
@@ -76,6 +78,15 @@ public sealed class TaxInvoiceService : ITaxInvoiceService
         if (!string.Equals(delivery.Status, "confirmed", StringComparison.OrdinalIgnoreCase))
         {
             throw new TaxInvoiceException("delivery_not_confirmed", "확정된 거래명세서만 계산서 발행이 가능합니다.");
+        }
+
+        // 🔴 20260915작1 갈래 G (설계 §17 R-B) — 이관 거래명세서는 계산서를 새로 발행하지 않는다.
+        //   선행검증 ④: 이관 판매 명세서 115,150건이 전부 confirmed 라 발행 대상에 잡혔다(차단 코드 0).
+        //   레거시에서 이미 계산서가 끊긴 거래라 여기서 또 끊으면 국세청 이중 발행이다.
+        //   ⚠️ 화면 목록에서 빼는 것만으로는 차단이 아니다 — 일괄 발행도 이 메서드를 건별로 부른다.
+        if (MigratedDocumentLock.IsIssueLocked(delivery.SourceType, delivery.LegacyTaxNo))
+        {
+            throw new TaxInvoiceException(MigratedDocumentLock.LockedErrorCode, MigratedDocumentLock.IssueBlockedMessage);
         }
 
         // 2) 중복 발행 차단 (사장님: "사슬동작중 중복생성 절대금지")
@@ -430,11 +441,12 @@ public sealed class TaxInvoiceService : ITaxInvoiceService
         //   'partner_id'" 500 으로 취소 기능 전체가 마비됐다(헌법 #20·#36). partner_id 는 발행(IssueAsync:50)이
         //   sales_deliveries 에서 읽어 기표하던 것과 동일하게, tax_invoices.delivery_id → sales_deliveries JOIN
         //   으로 얻는다(DDL 무변경, FK fk_tax_invoices_delivery 이미 존재). 역분개의 partner 라인 정합 유지.
-        var invoiceRow = await _db.QueryFirstOrDefaultAsync<(string? Status, string? InvoiceNo, string? PartnerId, DateTime IssuedAt, decimal AmountTotal, decimal VatTotal)>(
+        var invoiceRow = await _db.QueryFirstOrDefaultAsync<(string? Status, string? InvoiceNo, string? PartnerId, DateTime IssuedAt, decimal AmountTotal, decimal VatTotal, string? SourceType)>(
             new CommandDefinition(
                 """
                 SELECT ti.status AS Status, ti.invoice_no AS InvoiceNo, sd.partner_id AS PartnerId,
-                       ti.issued_at AS IssuedAt, ti.amount_total AS AmountTotal, ti.vat_total AS VatTotal
+                       ti.issued_at AS IssuedAt, ti.amount_total AS AmountTotal, ti.vat_total AS VatTotal,
+                       ti.source_type AS SourceType
                   FROM tax_invoices ti
                   LEFT JOIN sales_deliveries sd
                     ON sd.delivery_id = ti.delivery_id AND sd.tenant_id = ti.tenant_id
@@ -450,6 +462,14 @@ public sealed class TaxInvoiceService : ITaxInvoiceService
         if (string.Equals(invoiceRow.Status, "canceled", StringComparison.OrdinalIgnoreCase))
         {
             throw new TaxInvoiceException("already_canceled", "이미 취소된 계산서입니다.");
+        }
+
+        // 🔴 20260915작1 갈래 G (설계 §17 R-B) — 이전 프로그램에서 가져온 계산서(tax_invoices.source_type='migration')는
+        //   취소하지 않는다. 레거시에서 국세청에 나간 계산서라 여기서 status 만 바꾸고 역분개하면 대사표와 어긋난다.
+        //   ⚠️ 판정은 계산서 자신의 source_type 이다 — 이관 명세서에 사람이 새로 끊은 계산서는 대상이 아니다.
+        if (MigratedDocumentLock.IsMigrated(invoiceRow.SourceType))
+        {
+            throw new TaxInvoiceException(MigratedDocumentLock.LockedErrorCode, MigratedDocumentLock.CancelInvoiceBlockedMessage);
         }
 
         var now = DateTime.UtcNow;
@@ -565,7 +585,9 @@ public sealed class TaxInvoiceService : ITaxInvoiceService
         DateTime DeliveryDate,
         string Status,
         decimal TotalAmount,
-        decimal VatAmount);
+        decimal VatAmount,
+        string? SourceType,
+        int? LegacyTaxNo);
 
     private sealed record TaxInvoiceRow(
         string InvoiceId,

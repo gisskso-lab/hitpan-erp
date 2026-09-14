@@ -191,8 +191,10 @@
         var list = await DeliveryService.GetListAsync(fromStr, toStr, _partnerFilter, "", CancellationToken.None);
 
         // invoiced 또는 e-issued 상태만 계산서 목록에 표시
+        // 20260915작1 갈래 G (R-B3) — 이전 프로그램에서 계산서를 이미 끊은 명세서는 발행 대상이 아니다(서버 IssueAsync 도 거부).
         _items = list
             .Where(d => d.Status is "invoiced" or "confirmed" or "e-issued")
+            .Where(d => !d.IsIssueLocked)
             .Select(d => new TaxInvoiceItem
             {
                 DeliveryId = d.DeliveryId,

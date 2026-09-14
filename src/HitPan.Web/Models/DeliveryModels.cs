@@ -180,6 +180,12 @@ public class DeliveryListDto
     public string Status { get; set; } = "";
     public string? Memo { get; set; }
 
+    /// <summary>이전 프로그램에서 가져온 명세서 — 계산서 발행 대상에서 뺀다 (20260915작1 갈래 G). 서버도 따로 막는다.</summary>
+    public bool IsMigrated { get; set; }
+
+    /// <summary>레거시에서 계산서를 이미 끊은 이관 명세서 — 발행 대상에서 뺀다 (R-B3). 서버도 따로 막는다.</summary>
+    public bool IsIssueLocked { get; set; }
+
     public bool IsChecked { get; set; }
     public bool IsProcessed =>
         Status == "cancelled";
