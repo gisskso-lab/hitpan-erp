@@ -273,6 +273,17 @@ jobs:
           #      · ④단 HAVING >= 1 (정상 회사 거짓 기록) → V5 · G-M3     대조군 G-M8a·G-M8d 초록 유지
           #    근거: docs/개발/erp/20260913_개발명세서_메인PC표식_2줄_봉합.md
           GATES="$GATES|MainPcRestartMarkGate"
+          # 🔴 20260915작1 갈래 F LegacyUnpostedDdlGate(G7) — DB-121 보관 표 2 · partner_legacy_balances · avg_cost (19,6).
+          #    G7-1 출하 DDL 표 모양 · G7-2 기존 고객 + 실제 DB-121 두 번 = 출하 DDL(information_schema 대조) ·
+          #    G7-3 avg_cost 값 보존·6자리 · G7-4 실제 DataResetService 뒤 0행(다른 회사 대조군).
+          #    등록 근거는 무력화 시험이다 (20260915 Windows 격리 MariaDB 11.4.10 · 포트 33306):
+          #      · 봉합 전(출하 DDL 되돌림 + DB-121 없음)      → 4/4 FAIL
+          #      · DB-121 칼럼 1개 형 다름(source_id 64)      → G7-2 만
+          #      · DB-121 에서 avg_cost 단 제거               → G7-2 · G7-3
+          #      · CREATE TABLE IF NOT EXISTS 제거            → G7-2 (재실행 already exists)
+          #      · partner UNIQUE 를 일반 KEY 로(두 파일)     → G7-1 · G7-2 (병렬이슈39)
+          #    근거: docs/개발/erp/20260915작1_갈래F_DDL_개발명세서.md
+          GATES="$GATES|LegacyUnpostedDdlGate"
 
           echo "▶ 이 잡이 무는 게이트: $GATES"
           # 🔴 20260913작2 정정 — 이제 기기 계열 중 **MainPcRestartMarkGate 는 문다**(임시 DB 권한 실측 · C-3).

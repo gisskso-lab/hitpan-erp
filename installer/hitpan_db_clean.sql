@@ -1793,7 +1793,7 @@ CREATE TABLE `item_stock` (
   `item_id` varchar(36) NOT NULL,
   `warehouse_id` varchar(36) NOT NULL DEFAULT 'default',
   `current_qty` decimal(10,2) NOT NULL DEFAULT 0.00,
-  `avg_cost` decimal(15,2) NOT NULL DEFAULT 0.00,
+  `avg_cost` decimal(19,6) NOT NULL DEFAULT 0.000000,
   `last_updated_at` datetime(6) NOT NULL DEFAULT current_timestamp(6),
   PRIMARY KEY (`stock_id`),
   UNIQUE KEY `uk_tenant_item_wh` (`tenant_id`,`item_id`,`warehouse_id`),
@@ -2049,6 +2049,70 @@ CREATE TABLE `ledger_balance_snapshot` (
   KEY `idx_tenant` (`tenant_id`),
   KEY `idx_year_month` (`tenant_id`,`year_month`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
+
+--
+-- Table structure for table `legacy_unposted_document_lines`
+-- 🔴 DB-121 (20260915작1 갈래 F) — 이전 프로그램 장부 미반영 명세서 줄 · 이관 보관·읽기 전용.
+--    칼럼·키는 src/HitPan.API/Migrations/SQL/DB-121_legacy_unposted_documents.sql 과 한 글자도 다르지 않다 (G7 이 대조).
+--
+
+DROP TABLE IF EXISTS `legacy_unposted_document_lines`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!40101 SET character_set_client = utf8mb4 */;
+CREATE TABLE `legacy_unposted_document_lines` (
+  `line_id` varchar(36) NOT NULL,
+  `tenant_id` varchar(36) NOT NULL,
+  `doc_id` varchar(36) NOT NULL COMMENT 'legacy_unposted_documents.doc_id · FK 없음',
+  `line_no` int(11) NOT NULL DEFAULT 0,
+  `item_id` varchar(36) DEFAULT NULL COMMENT '히트판 상품 — 품명 없는 줄은 NULL · FK 없음',
+  `item_name` varchar(200) DEFAULT NULL,
+  `spec` varchar(200) DEFAULT NULL,
+  `qty` decimal(15,3) NOT NULL DEFAULT 0.000,
+  `unit_price` decimal(15,4) NOT NULL DEFAULT 0.0000,
+  `supply_amount` decimal(15,2) NOT NULL DEFAULT 0.00,
+  `vat_amount` decimal(15,2) NOT NULL DEFAULT 0.00,
+  `memo` varchar(500) DEFAULT NULL,
+  `stock_source_id` varchar(80) DEFAULT NULL COMMENT '재고원장 stock_ledger 연결 키 (mb-…)',
+  `migrated_source_hash` char(64) NOT NULL COMMENT 'SHA256 줄 해시 — 멱등 키 (DB-121)',
+  `created_at` datetime(6) NOT NULL DEFAULT current_timestamp(6),
+  PRIMARY KEY (`line_id`),
+  UNIQUE KEY `uq_legacy_unposted_lines_hash` (`tenant_id`,`migrated_source_hash`),
+  KEY `idx_legacy_unposted_lines_doc` (`tenant_id`,`doc_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='이전 프로그램 장부 미반영 명세서 줄 — 이관 보관·읽기 전용 (DB-121)';
+/*!40101 SET character_set_client = @saved_cs_client */;
+
+--
+-- Table structure for table `legacy_unposted_documents`
+-- 🔴 DB-121 (20260915작1 갈래 F) — 이전 프로그램 장부 미반영 명세서 머리 · 매출·미수·계산서 합계에 안 들어간다.
+--
+
+DROP TABLE IF EXISTS `legacy_unposted_documents`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!40101 SET character_set_client = utf8mb4 */;
+CREATE TABLE `legacy_unposted_documents` (
+  `doc_id` varchar(36) NOT NULL,
+  `tenant_id` varchar(36) NOT NULL,
+  `io_type` varchar(10) NOT NULL COMMENT 'sales / purchase',
+  `doc_date` date NOT NULL COMMENT '명세서 날짜 — 날짜 없는 묶음은 기준일 (설계 §14)',
+  `legacy_dt` varchar(8) DEFAULT NULL COMMENT '레거시 IJ_DT 원문 (00000000 포함)',
+  `legacy_seq` int(11) DEFAULT NULL COMMENT '레거시 IJ_SEQ',
+  `legacy_buy_code` bigint(20) DEFAULT NULL COMMENT '레거시 거래처 코드 IJ_BUY — 표시·추적용',
+  `partner_id` varchar(36) DEFAULT NULL COMMENT '히트판 거래처 — 못 찾으면 NULL · FK 없음',
+  `reason` varchar(30) DEFAULT NULL COMMENT '보관 사유 (갈래 A 판정 결과)',
+  `supply_amount` decimal(15,2) NOT NULL DEFAULT 0.00,
+  `vat_amount` decimal(15,2) NOT NULL DEFAULT 0.00,
+  `line_count` int(11) NOT NULL DEFAULT 0,
+  `memo` varchar(500) DEFAULT NULL,
+  `source_type` varchar(20) NOT NULL DEFAULT 'migration',
+  `source_id` varchar(80) NOT NULL COMMENT '멱등 키 mig-docfb-{dt}-{io}-{seq}-{buy} (DB-121)',
+  `migrated_source_hash` char(64) DEFAULT NULL COMMENT 'SHA256 본문 해시 (DB-121)',
+  `created_at` datetime(6) NOT NULL DEFAULT current_timestamp(6),
+  PRIMARY KEY (`doc_id`),
+  UNIQUE KEY `uq_legacy_unposted_docs_source` (`tenant_id`,`source_id`),
+  KEY `idx_legacy_unposted_docs_date` (`tenant_id`,`doc_date`),
+  KEY `idx_legacy_unposted_docs_partner` (`tenant_id`,`partner_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='이전 프로그램 장부 미반영 명세서 — 이관 보관·읽기 전용 (DB-121)';
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -2576,6 +2640,32 @@ CREATE TABLE `partner_contacts` (
   KEY `idx_pc_tenant_partner` (`tenant_id`,`partner_id`),
   KEY `idx_pc_tenant_name` (`tenant_id`,`contact_name`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='POTHER.DOCNM 명함/연락처 (WS-11 축 5)';
+/*!40101 SET character_set_client = @saved_cs_client */;
+
+--
+-- Table structure for table `partner_legacy_balances`
+-- 🔴 DB-121 (20260915작1 갈래 F · 사장님 결재 R-A2 (나)) — 거래처 이전 프로그램 이월잔액.
+--    balance_amount 부호: + 미수 · − 미지급. 칼럼·키는 DB-121 파일과 같다 (G7 이 대조).
+--
+
+DROP TABLE IF EXISTS `partner_legacy_balances`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!40101 SET character_set_client = utf8mb4 */;
+CREATE TABLE `partner_legacy_balances` (
+  `balance_id` varchar(36) NOT NULL,
+  `tenant_id` varchar(36) NOT NULL,
+  `partner_id` varchar(36) NOT NULL COMMENT '히트판 거래처 · FK 없음',
+  `legacy_buy_code` bigint(20) DEFAULT NULL COMMENT '레거시 거래처 코드 S_BUY — 표시·추적용',
+  `base_date` date NOT NULL COMMENT '기준일 (설계 §14)',
+  `balance_amount` decimal(15,2) NOT NULL DEFAULT 0.00 COMMENT '+ 미수 / - 미지급 (F3)',
+  `source_type` varchar(20) NOT NULL DEFAULT 'migration',
+  `source_id` varchar(80) NOT NULL COMMENT '멱등 키 (DB-121)',
+  `migrated_source_hash` char(64) DEFAULT NULL COMMENT 'SHA256 (DB-121)',
+  `created_at` datetime(6) NOT NULL DEFAULT current_timestamp(6),
+  PRIMARY KEY (`balance_id`),
+  UNIQUE KEY `uq_partner_legacy_balances_source` (`tenant_id`,`source_id`),
+  UNIQUE KEY `uq_partner_legacy_balances_partner` (`tenant_id`,`partner_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='거래처 이전 프로그램 이월잔액 — 이관만 INSERT (DB-121)';
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -3499,7 +3589,7 @@ INSERT INTO `schema_migrations` (`migration_id`, `app_version`, `success`) VALUE
 ('DB-74','clean-ddl',1),('DB-75','clean-ddl',1),('DB-76','clean-ddl',1),('DB-77','clean-ddl',1),
 ('DB-78','clean-ddl',1),('DB-79','clean-ddl',1),('DB-80','clean-ddl',1),('DB-81','clean-ddl',1),
 ('DB-82','clean-ddl',1),('DB-83','clean-ddl',1),('DB-84','clean-ddl',1),('DB-85','clean-ddl',1),
-('DB-86','clean-ddl',1),('DB-87','clean-ddl',1),('DB-88','clean-ddl',1),('DB-89','clean-ddl',1),('DB-90','clean-ddl',1),('DB-91','clean-ddl',1),('DB-92','clean-ddl',1),('DB-93','clean-ddl',1),('DB-94','clean-ddl',1),('DB-95','clean-ddl',1),('DB-96','clean-ddl',1),('DB-97','clean-ddl',1),('DB-98','clean-ddl',1),('DB-99','clean-ddl',1),('DB-100','clean-ddl',1),('DB-101','clean-ddl',1),('DB-102','clean-ddl',1),('DB-103','clean-ddl',1),('DB-104','clean-ddl',1),('DB-105','clean-ddl',1),('DB-106','clean-ddl',1),('DB-107','clean-ddl',1),('DB-108','clean-ddl',1),('DB-109','clean-ddl',1),('DB-110','clean-ddl',1),('DB-111','clean-ddl',1),('DB-112','clean-ddl',1),('DB-113','clean-ddl',1),('DB-114','clean-ddl',1),('DB-115','clean-ddl',1),('DB-116','clean-ddl',1),('DB-117','clean-ddl',1),('DB-118','clean-ddl',1),('DB-119','clean-ddl',1),('DB-120','clean-ddl',1);
+('DB-86','clean-ddl',1),('DB-87','clean-ddl',1),('DB-88','clean-ddl',1),('DB-89','clean-ddl',1),('DB-90','clean-ddl',1),('DB-91','clean-ddl',1),('DB-92','clean-ddl',1),('DB-93','clean-ddl',1),('DB-94','clean-ddl',1),('DB-95','clean-ddl',1),('DB-96','clean-ddl',1),('DB-97','clean-ddl',1),('DB-98','clean-ddl',1),('DB-99','clean-ddl',1),('DB-100','clean-ddl',1),('DB-101','clean-ddl',1),('DB-102','clean-ddl',1),('DB-103','clean-ddl',1),('DB-104','clean-ddl',1),('DB-105','clean-ddl',1),('DB-106','clean-ddl',1),('DB-107','clean-ddl',1),('DB-108','clean-ddl',1),('DB-109','clean-ddl',1),('DB-110','clean-ddl',1),('DB-111','clean-ddl',1),('DB-112','clean-ddl',1),('DB-113','clean-ddl',1),('DB-114','clean-ddl',1),('DB-115','clean-ddl',1),('DB-116','clean-ddl',1),('DB-117','clean-ddl',1),('DB-118','clean-ddl',1),('DB-119','clean-ddl',1),('DB-120','clean-ddl',1),('DB-121','clean-ddl',1);
 
 --
 -- Table structure for table `service_tickets`
