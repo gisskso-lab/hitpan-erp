@@ -10,13 +10,13 @@ using Xunit;
 namespace HitPan.Tests.Integrity;
 
 /// <summary>
-/// 🔴 <b>G7 LegacyUnpostedDdlGate</b> — 20260915작1 갈래 F (DB-121 + 출하 DDL).
+/// 🔴 <b>G7 LegacyUnpostedDdlGate</b> — 20260915작1 갈래 F (DB-123 + 출하 DDL).
 /// </summary>
 /// <remarks>
 /// <para>
 /// 🔴 <b>무엇을 재나</b>
 /// ⓐ 신규 설치(출하 DDL 한 방)에 보관 표 2개 · 거래처 이월잔액 표 1개가 <b>InnoDB · utf8mb4_unicode_ci · tenant_id NOT NULL</b> 로 있다.
-/// ⓑ <b>이미 설치된 고객</b>(DB-121 이전 모양)에 <b>실제 <c>DB-121</c> 파일</b>을 두 번 돌리면
+/// ⓑ <b>이미 설치된 고객</b>(DB-123 이전 모양)에 <b>실제 <c>DB-123</c> 파일</b>을 두 번 돌리면
 ///    칼럼·키·표 속성이 신규 설치와 <b>한 글자도 다르지 않다</b>(헌법 #36) — 두 번째는 무변화(멱등).
 /// ⓒ <c>item_stock.avg_cost</c> = decimal(19,6) · 넓힐 때 기존 값 손실 0 · 끝전 6자리가 실제로 저장된다(설계 §16).
 /// ⓓ <b>실제 <c>DataResetService.ResetAllAsync</c></b> 뒤 이 회사의 세 표가 0행 · 다른 회사 줄은 남는다(대조군).
@@ -136,16 +136,16 @@ public sealed class LegacyUnpostedDdlGateTests : IDisposable
             $"출하 DDL import 가 실패했다 — 신규 설치가 같은 자리에서 죽는다:\n{err}");
     }
 
-    private static string Db121Path() =>
+    private static string Db123Path() =>
         Path.Combine(RepoRoot(), "src", "HitPan.API", "Migrations", "SQL",
-                     "DB-121_legacy_unposted_documents.sql");
+                     "DB-123_legacy_unposted_documents.sql");
 
     /// <summary>🔴 <b>파일을 실제로 읽는다.</b> 글자검사가 아니라 <b>실행</b>이 판정이다.</summary>
-    private static string Db121Sql()
+    private static string Db123Sql()
     {
-        var path = Db121Path();
+        var path = Db123Path();
         Assert.True(File.Exists(path),
-            $"🔴 DB-121 마이그 파일이 없다: {path}\n"
+            $"🔴 DB-123 마이그 파일이 없다: {path}\n"
           + "  ⇒ 이미 설치된 고객 DB 에는 보관 표·이월잔액 표가 안 생기고 avg_cost 도 2자리로 남는다(이관 500 · 끝전 불일치).");
         return File.ReadAllText(path);
     }
@@ -159,10 +159,10 @@ public sealed class LegacyUnpostedDdlGateTests : IDisposable
     }
 
     /// <summary>
-    /// 🔴 <b>DB-121 이전(이미 설치된 고객) 모양</b> — 새 표 3개 없음 · avg_cost decimal(15,2).
+    /// 🔴 <b>DB-123 이전(이미 설치된 고객) 모양</b> — 새 표 3개 없음 · avg_cost decimal(15,2).
     /// <c>IF EXISTS</c> 라서 봉합 전(출하 DDL 에 아직 표가 없을 때)에도 그대로 돈다.
     /// </summary>
-    private static async Task MakePreDb121ShapeAsync(MySqlConnection db)
+    private static async Task MakePreDb123ShapeAsync(MySqlConnection db)
     {
         foreach (var t in NewTables)
             await db.ExecuteAsync($"DROP TABLE IF EXISTS `{t}`;");
@@ -245,7 +245,7 @@ public sealed class LegacyUnpostedDdlGateTests : IDisposable
     // G7-1 — 신규 설치
     // ══════════════════════════════════════════════════════════════
 
-    [Fact(DisplayName = "G7-1 🔴 출하 DDL 신규 설치 — 새 표 3개 InnoDB·utf8mb4_unicode_ci·tenant_id NOT NULL · avg_cost (19,6) · DB-121 시드")]
+    [Fact(DisplayName = "G7-1 🔴 출하 DDL 신규 설치 — 새 표 3개 InnoDB·utf8mb4_unicode_ci·tenant_id NOT NULL · avg_cost (19,6) · DB-123 시드")]
     public async Task G7_1_출하DDL_신규설치()
     {
         if (!ServerAvailable()) { DbGateEnvironment.SkipOrFail(nameof(G7_1_출하DDL_신규설치)); return; }
@@ -257,15 +257,15 @@ public sealed class LegacyUnpostedDdlGateTests : IDisposable
         await AssertTableShapeAsync(db, "출하 DDL");
 
         var seed = await db.ExecuteScalarAsync<long>(
-            "SELECT COUNT(*) FROM schema_migrations WHERE migration_id = 'DB-121' AND app_version = 'clean-ddl' AND success = 1");
+            "SELECT COUNT(*) FROM schema_migrations WHERE migration_id = 'DB-123' AND app_version = 'clean-ddl' AND success = 1");
         Assert.True(seed == 1,
-            "🔴 출하 DDL 시드에 ('DB-121','clean-ddl',1) 이 없다 — 신규 설치에서 DB-121 이 한 번 더 돌고, "
+            "🔴 출하 DDL 시드에 ('DB-123','clean-ddl',1) 이 없다 — 신규 설치에서 DB-123 이 한 번 더 돌고, "
           + "ddl-smoke 5단계(파일 수 == 시드 수)가 빨간불이 된다.");
     }
 
     /// <summary>
     /// 🔴 새 표 3개 ENGINE·collation·tenant_id NOT NULL·UNIQUE + avg_cost (19,6).
-    /// 출하 DDL(G7-1)과 DB-121 적용 뒤(G7-2) <b>둘 다</b> 이 함수로 잰다(병렬이슈39 ②).
+    /// 출하 DDL(G7-1)과 DB-123 적용 뒤(G7-2) <b>둘 다</b> 이 함수로 잰다(병렬이슈39 ②).
     /// </summary>
     private static async Task AssertTableShapeAsync(MySqlConnection db, string origin)
     {
@@ -316,10 +316,10 @@ public sealed class LegacyUnpostedDdlGateTests : IDisposable
     }
 
     // ══════════════════════════════════════════════════════════════
-    // G7-2 — 이미 설치된 고객 + 실제 DB-121 파일 = 신규 설치
+    // G7-2 — 이미 설치된 고객 + 실제 DB-123 파일 = 신규 설치
     // ══════════════════════════════════════════════════════════════
 
-    [Fact(DisplayName = "G7-2 🔴 기존 고객에 DB-121 두 번 — 칼럼·키·표 속성이 출하 DDL 과 같고 두 번째는 무변화")]
+    [Fact(DisplayName = "G7-2 🔴 기존 고객에 DB-123 두 번 — 칼럼·키·표 속성이 출하 DDL 과 같고 두 번째는 무변화")]
     public async Task G7_2_DB121_칼럼_출하DDL과_같다_멱등()
     {
         if (!ServerAvailable()) { DbGateEnvironment.SkipOrFail(nameof(G7_2_DB121_칼럼_출하DDL과_같다_멱등)); return; }
@@ -330,11 +330,11 @@ public sealed class LegacyUnpostedDdlGateTests : IDisposable
 
         var fresh = await SchemaSnapshotAsync(db);
 
-        await MakePreDb121ShapeAsync(db);
-        var sql = Db121Sql();
+        await MakePreDb123ShapeAsync(db);
+        var sql = Db123Sql();
 
         await RunMigrationSqlAsync(sql);
-        await AssertTableShapeAsync(db, "DB-121");
+        await AssertTableShapeAsync(db, "DB-123");
         var once = await SchemaSnapshotAsync(db);
 
         await RunMigrationSqlAsync(sql);   // 🔴 재실행 — 마이그 러너가 실패 기록 뒤 다시 돌 수 있다
@@ -343,12 +343,12 @@ public sealed class LegacyUnpostedDdlGateTests : IDisposable
         var onlyFresh = fresh.Except(once).ToList();
         var onlyMig = once.Except(fresh).ToList();
         Assert.True(onlyFresh.Count == 0 && onlyMig.Count == 0,
-            "🔴 DB-121 로 만든 표가 출하 DDL 로 만든 표와 다르다(헌법 #36 — 신규 고객과 기존 고객의 DB 가 갈라진다).\n"
+            "🔴 DB-123 로 만든 표가 출하 DDL 로 만든 표와 다르다(헌법 #36 — 신규 고객과 기존 고객의 DB 가 갈라진다).\n"
           + $"  출하 DDL 에만: {string.Join(" ;; ", onlyFresh)}\n"
-          + $"  DB-121 에만:   {string.Join(" ;; ", onlyMig)}");
+          + $"  DB-123 에만:   {string.Join(" ;; ", onlyMig)}");
 
         Assert.True(once.SequenceEqual(twice),
-            "🔴 DB-121 두 번째 실행이 스키마를 바꿨다 — 멱등이 아니다.\n"
+            "🔴 DB-123 두 번째 실행이 스키마를 바꿨다 — 멱등이 아니다.\n"
           + $"  달라진 줄: {string.Join(" ;; ", once.Except(twice).Concat(twice.Except(once)))}");
     }
 
@@ -364,16 +364,16 @@ public sealed class LegacyUnpostedDdlGateTests : IDisposable
 
         await using var db = new MySqlConnection(DbConnString());
         await db.OpenAsync();
-        await MakePreDb121ShapeAsync(db);
+        await MakePreDb123ShapeAsync(db);
 
         await db.ExecuteAsync(
             "INSERT INTO item_stock (stock_id, tenant_id, item_id, warehouse_id, current_qty, avg_cost) VALUES ('st-old', @T, 'item-old', 'default', 6, 3083.33)",
             new { T = TenantId });
 
-        await RunMigrationSqlAsync(Db121Sql());
+        await RunMigrationSqlAsync(Db123Sql());
 
         var old = await db.ExecuteScalarAsync<decimal>("SELECT avg_cost FROM item_stock WHERE stock_id = 'st-old'");
-        Assert.True(old == 3083.33m, $"🔴 DB-121 이 기존 avg_cost 를 바꿨다: 3083.33 → {old} (넓히기만 해야 한다).");
+        Assert.True(old == 3083.33m, $"🔴 DB-123 이 기존 avg_cost 를 바꿨다: 3083.33 → {old} (넓히기만 해야 한다).");
 
         // 설계 §16 — HTP21C|표준형-L : −51 · 금액 −15,599,500 · 단가 305,872.549020
         await db.ExecuteAsync(

@@ -1,5 +1,5 @@
 -- ═══════════════════════════════════════════════════════════════════════════
--- DB-121 · 이전 프로그램 장부 미반영 명세서 보관 표 2개 + 거래처 이월잔액 표 1개
+-- DB-123 · 이전 프로그램 장부 미반영 명세서 보관 표 2개 + 거래처 이월잔액 표 1개
 --          + item_stock.avg_cost 소수 6자리 (20260915작1 갈래 F)
 -- ═══════════════════════════════════════════════════════════════════════════
 --
@@ -51,14 +51,14 @@ CREATE TABLE IF NOT EXISTS `legacy_unposted_documents` (
   `line_count` int(11) NOT NULL DEFAULT 0,
   `memo` varchar(500) DEFAULT NULL,
   `source_type` varchar(20) NOT NULL DEFAULT 'migration',
-  `source_id` varchar(80) NOT NULL COMMENT '멱등 키 mig-docfb-{dt}-{io}-{seq}-{buy} (DB-121)',
-  `migrated_source_hash` char(64) DEFAULT NULL COMMENT 'SHA256 본문 해시 (DB-121)',
+  `source_id` varchar(80) NOT NULL COMMENT '멱등 키 mig-docfb-{dt}-{io}-{seq}-{buy} (DB-123)',
+  `migrated_source_hash` char(64) DEFAULT NULL COMMENT 'SHA256 본문 해시 (DB-123)',
   `created_at` datetime(6) NOT NULL DEFAULT current_timestamp(6),
   PRIMARY KEY (`doc_id`),
   UNIQUE KEY `uq_legacy_unposted_docs_source` (`tenant_id`,`source_id`),
   KEY `idx_legacy_unposted_docs_date` (`tenant_id`,`doc_date`),
   KEY `idx_legacy_unposted_docs_partner` (`tenant_id`,`partner_id`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='이전 프로그램 장부 미반영 명세서 — 이관 보관·읽기 전용 (DB-121)';
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='이전 프로그램 장부 미반영 명세서 — 이관 보관·읽기 전용 (DB-123)';
 
 -- ── 2) legacy_unposted_document_lines — 미반영 명세서 줄 (DOCFB 줄 1개 = 1행) ──
 --    qty decimal(15,3) = sales_delivery_items.qty · stock_ledger.qty_in 과 같은 형(같은 원본 줄이 재고원장에도 들어간다).
@@ -77,12 +77,12 @@ CREATE TABLE IF NOT EXISTS `legacy_unposted_document_lines` (
   `vat_amount` decimal(15,2) NOT NULL DEFAULT 0.00,
   `memo` varchar(500) DEFAULT NULL,
   `stock_source_id` varchar(80) DEFAULT NULL COMMENT '재고원장 stock_ledger 연결 키 (mb-…)',
-  `migrated_source_hash` char(64) NOT NULL COMMENT 'SHA256 줄 해시 — 멱등 키 (DB-121)',
+  `migrated_source_hash` char(64) NOT NULL COMMENT 'SHA256 줄 해시 — 멱등 키 (DB-123)',
   `created_at` datetime(6) NOT NULL DEFAULT current_timestamp(6),
   PRIMARY KEY (`line_id`),
   UNIQUE KEY `uq_legacy_unposted_lines_hash` (`tenant_id`,`migrated_source_hash`),
   KEY `idx_legacy_unposted_lines_doc` (`tenant_id`,`doc_id`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='이전 프로그램 장부 미반영 명세서 줄 — 이관 보관·읽기 전용 (DB-121)';
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='이전 프로그램 장부 미반영 명세서 줄 — 이관 보관·읽기 전용 (DB-123)';
 
 -- ── 3) partner_legacy_balances — 거래처 이월잔액 (사장님 결재 R-A2 (나)) ──
 --    balance_amount 부호: + = 받을 돈(미수) · − = 줄 돈(미지급). 레거시 거래처원장 S_BAL 과 같은 부호(설계 §17 F3).
@@ -96,13 +96,13 @@ CREATE TABLE IF NOT EXISTS `partner_legacy_balances` (
   `base_date` date NOT NULL COMMENT '기준일 (설계 §14)',
   `balance_amount` decimal(15,2) NOT NULL DEFAULT 0.00 COMMENT '+ 미수 / - 미지급 (F3)',
   `source_type` varchar(20) NOT NULL DEFAULT 'migration',
-  `source_id` varchar(80) NOT NULL COMMENT '멱등 키 (DB-121)',
-  `migrated_source_hash` char(64) DEFAULT NULL COMMENT 'SHA256 (DB-121)',
+  `source_id` varchar(80) NOT NULL COMMENT '멱등 키 (DB-123)',
+  `migrated_source_hash` char(64) DEFAULT NULL COMMENT 'SHA256 (DB-123)',
   `created_at` datetime(6) NOT NULL DEFAULT current_timestamp(6),
   PRIMARY KEY (`balance_id`),
   UNIQUE KEY `uq_partner_legacy_balances_source` (`tenant_id`,`source_id`),
   UNIQUE KEY `uq_partner_legacy_balances_partner` (`tenant_id`,`partner_id`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='거래처 이전 프로그램 이월잔액 — 이관만 INSERT (DB-121)';
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='거래처 이전 프로그램 이월잔액 — 이관만 INSERT (DB-123)';
 
 -- ── 4) item_stock.avg_cost decimal(15,2) → decimal(19,6) (사장님 결재 R6-2 (가)) ──
 --    넓히기만 한다: 정수부 13 → 13자리 · 소수 2 → 6자리. 기존 값 손실 0.
@@ -118,7 +118,7 @@ SET @cost_ok := (
 SET @ddl := IF(@cost_ok = 0,
     'ALTER TABLE item_stock
        MODIFY COLUMN avg_cost decimal(19,6) NOT NULL DEFAULT 0.000000',
-    'SELECT ''DB-121: item_stock.avg_cost already decimal(19,6)'' AS skipped');
+    'SELECT ''DB-123: item_stock.avg_cost already decimal(19,6)'' AS skipped');
 
 PREPARE stmt FROM @ddl;
 EXECUTE stmt;

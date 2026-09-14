@@ -2053,8 +2053,8 @@ CREATE TABLE `ledger_balance_snapshot` (
 
 --
 -- Table structure for table `legacy_unposted_document_lines`
--- 🔴 DB-121 (20260915작1 갈래 F) — 이전 프로그램 장부 미반영 명세서 줄 · 이관 보관·읽기 전용.
---    칼럼·키는 src/HitPan.API/Migrations/SQL/DB-121_legacy_unposted_documents.sql 과 한 글자도 다르지 않다 (G7 이 대조).
+-- 🔴 DB-123 (20260915작1 갈래 F) — 이전 프로그램 장부 미반영 명세서 줄 · 이관 보관·읽기 전용.
+--    칼럼·키는 src/HitPan.API/Migrations/SQL/DB-123_legacy_unposted_documents.sql 과 한 글자도 다르지 않다 (G7 이 대조).
 --
 
 DROP TABLE IF EXISTS `legacy_unposted_document_lines`;
@@ -2074,17 +2074,17 @@ CREATE TABLE `legacy_unposted_document_lines` (
   `vat_amount` decimal(15,2) NOT NULL DEFAULT 0.00,
   `memo` varchar(500) DEFAULT NULL,
   `stock_source_id` varchar(80) DEFAULT NULL COMMENT '재고원장 stock_ledger 연결 키 (mb-…)',
-  `migrated_source_hash` char(64) NOT NULL COMMENT 'SHA256 줄 해시 — 멱등 키 (DB-121)',
+  `migrated_source_hash` char(64) NOT NULL COMMENT 'SHA256 줄 해시 — 멱등 키 (DB-123)',
   `created_at` datetime(6) NOT NULL DEFAULT current_timestamp(6),
   PRIMARY KEY (`line_id`),
   UNIQUE KEY `uq_legacy_unposted_lines_hash` (`tenant_id`,`migrated_source_hash`),
   KEY `idx_legacy_unposted_lines_doc` (`tenant_id`,`doc_id`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='이전 프로그램 장부 미반영 명세서 줄 — 이관 보관·읽기 전용 (DB-121)';
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='이전 프로그램 장부 미반영 명세서 줄 — 이관 보관·읽기 전용 (DB-123)';
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
 -- Table structure for table `legacy_unposted_documents`
--- 🔴 DB-121 (20260915작1 갈래 F) — 이전 프로그램 장부 미반영 명세서 머리 · 매출·미수·계산서 합계에 안 들어간다.
+-- 🔴 DB-123 (20260915작1 갈래 F) — 이전 프로그램 장부 미반영 명세서 머리 · 매출·미수·계산서 합계에 안 들어간다.
 --
 
 DROP TABLE IF EXISTS `legacy_unposted_documents`;
@@ -2105,14 +2105,14 @@ CREATE TABLE `legacy_unposted_documents` (
   `line_count` int(11) NOT NULL DEFAULT 0,
   `memo` varchar(500) DEFAULT NULL,
   `source_type` varchar(20) NOT NULL DEFAULT 'migration',
-  `source_id` varchar(80) NOT NULL COMMENT '멱등 키 mig-docfb-{dt}-{io}-{seq}-{buy} (DB-121)',
-  `migrated_source_hash` char(64) DEFAULT NULL COMMENT 'SHA256 본문 해시 (DB-121)',
+  `source_id` varchar(80) NOT NULL COMMENT '멱등 키 mig-docfb-{dt}-{io}-{seq}-{buy} (DB-123)',
+  `migrated_source_hash` char(64) DEFAULT NULL COMMENT 'SHA256 본문 해시 (DB-123)',
   `created_at` datetime(6) NOT NULL DEFAULT current_timestamp(6),
   PRIMARY KEY (`doc_id`),
   UNIQUE KEY `uq_legacy_unposted_docs_source` (`tenant_id`,`source_id`),
   KEY `idx_legacy_unposted_docs_date` (`tenant_id`,`doc_date`),
   KEY `idx_legacy_unposted_docs_partner` (`tenant_id`,`partner_id`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='이전 프로그램 장부 미반영 명세서 — 이관 보관·읽기 전용 (DB-121)';
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='이전 프로그램 장부 미반영 명세서 — 이관 보관·읽기 전용 (DB-123)';
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -2644,8 +2644,8 @@ CREATE TABLE `partner_contacts` (
 
 --
 -- Table structure for table `partner_legacy_balances`
--- 🔴 DB-121 (20260915작1 갈래 F · 사장님 결재 R-A2 (나)) — 거래처 이전 프로그램 이월잔액.
---    balance_amount 부호: + 미수 · − 미지급. 칼럼·키는 DB-121 파일과 같다 (G7 이 대조).
+-- 🔴 DB-123 (20260915작1 갈래 F · 사장님 결재 R-A2 (나)) — 거래처 이전 프로그램 이월잔액.
+--    balance_amount 부호: + 미수 · − 미지급. 칼럼·키는 DB-123 파일과 같다 (G7 이 대조).
 --
 
 DROP TABLE IF EXISTS `partner_legacy_balances`;
@@ -2659,13 +2659,13 @@ CREATE TABLE `partner_legacy_balances` (
   `base_date` date NOT NULL COMMENT '기준일 (설계 §14)',
   `balance_amount` decimal(15,2) NOT NULL DEFAULT 0.00 COMMENT '+ 미수 / - 미지급 (F3)',
   `source_type` varchar(20) NOT NULL DEFAULT 'migration',
-  `source_id` varchar(80) NOT NULL COMMENT '멱등 키 (DB-121)',
-  `migrated_source_hash` char(64) DEFAULT NULL COMMENT 'SHA256 (DB-121)',
+  `source_id` varchar(80) NOT NULL COMMENT '멱등 키 (DB-123)',
+  `migrated_source_hash` char(64) DEFAULT NULL COMMENT 'SHA256 (DB-123)',
   `created_at` datetime(6) NOT NULL DEFAULT current_timestamp(6),
   PRIMARY KEY (`balance_id`),
   UNIQUE KEY `uq_partner_legacy_balances_source` (`tenant_id`,`source_id`),
   UNIQUE KEY `uq_partner_legacy_balances_partner` (`tenant_id`,`partner_id`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='거래처 이전 프로그램 이월잔액 — 이관만 INSERT (DB-121)';
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='거래처 이전 프로그램 이월잔액 — 이관만 INSERT (DB-123)';
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -3589,7 +3589,7 @@ INSERT INTO `schema_migrations` (`migration_id`, `app_version`, `success`) VALUE
 ('DB-74','clean-ddl',1),('DB-75','clean-ddl',1),('DB-76','clean-ddl',1),('DB-77','clean-ddl',1),
 ('DB-78','clean-ddl',1),('DB-79','clean-ddl',1),('DB-80','clean-ddl',1),('DB-81','clean-ddl',1),
 ('DB-82','clean-ddl',1),('DB-83','clean-ddl',1),('DB-84','clean-ddl',1),('DB-85','clean-ddl',1),
-('DB-86','clean-ddl',1),('DB-87','clean-ddl',1),('DB-88','clean-ddl',1),('DB-89','clean-ddl',1),('DB-90','clean-ddl',1),('DB-91','clean-ddl',1),('DB-92','clean-ddl',1),('DB-93','clean-ddl',1),('DB-94','clean-ddl',1),('DB-95','clean-ddl',1),('DB-96','clean-ddl',1),('DB-97','clean-ddl',1),('DB-98','clean-ddl',1),('DB-99','clean-ddl',1),('DB-100','clean-ddl',1),('DB-101','clean-ddl',1),('DB-102','clean-ddl',1),('DB-103','clean-ddl',1),('DB-104','clean-ddl',1),('DB-105','clean-ddl',1),('DB-106','clean-ddl',1),('DB-107','clean-ddl',1),('DB-108','clean-ddl',1),('DB-109','clean-ddl',1),('DB-110','clean-ddl',1),('DB-111','clean-ddl',1),('DB-112','clean-ddl',1),('DB-113','clean-ddl',1),('DB-114','clean-ddl',1),('DB-115','clean-ddl',1),('DB-116','clean-ddl',1),('DB-117','clean-ddl',1),('DB-118','clean-ddl',1),('DB-119','clean-ddl',1),('DB-120','clean-ddl',1),('DB-121','clean-ddl',1);
+('DB-86','clean-ddl',1),('DB-87','clean-ddl',1),('DB-88','clean-ddl',1),('DB-89','clean-ddl',1),('DB-90','clean-ddl',1),('DB-91','clean-ddl',1),('DB-92','clean-ddl',1),('DB-93','clean-ddl',1),('DB-94','clean-ddl',1),('DB-95','clean-ddl',1),('DB-96','clean-ddl',1),('DB-97','clean-ddl',1),('DB-98','clean-ddl',1),('DB-99','clean-ddl',1),('DB-100','clean-ddl',1),('DB-101','clean-ddl',1),('DB-102','clean-ddl',1),('DB-103','clean-ddl',1),('DB-104','clean-ddl',1),('DB-105','clean-ddl',1),('DB-106','clean-ddl',1),('DB-107','clean-ddl',1),('DB-108','clean-ddl',1),('DB-109','clean-ddl',1),('DB-110','clean-ddl',1),('DB-111','clean-ddl',1),('DB-112','clean-ddl',1),('DB-113','clean-ddl',1),('DB-114','clean-ddl',1),('DB-115','clean-ddl',1),('DB-116','clean-ddl',1),('DB-117','clean-ddl',1),('DB-118','clean-ddl',1),('DB-119','clean-ddl',1),('DB-120','clean-ddl',1),('DB-123','clean-ddl',1);
 
 --
 -- Table structure for table `service_tickets`
