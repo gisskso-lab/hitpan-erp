@@ -292,6 +292,12 @@ jobs:
           #      순번 0 가드 제거(집합 쪽 · 판정 쪽 각각 — 병렬이슈36)
           #    근거: docs/개발/erp/20260915작1_갈래A_판정_개발명세서.md
           GATES="$GATES|MdbPostingClassifyGate"
+          # 🔴 20260915작1 갈래 B MdbPostingAllPathsGate (G2) — DOCFB 줄이 명세서·보관 표·재고원장에서 한 줄도 안 빠진다.
+          #    G2a~f 순수(합성 DOCFB) · G2g DB(보관 표 멱등 적재 · SKIP=FAIL). 무력화 7종 전부 빨간불 · 원본 7/7 초록:
+          #      판정 무시(Unposted→명세서) · 날짜 없는 묶음→명세서 · 줄 해시 같은내용 순번 제거 · 원장 날짜 폴백 now ·
+          #      계산서번호 첫 줄만 · 99999999→0 · 보관 날짜 폴백 오늘
+          #    근거: docs/개발/erp/20260915작1_갈래B_이관연결_개발명세서.md
+          GATES="$GATES|MdbPostingAllPathsGate"
 
           echo "▶ 이 잡이 무는 게이트: $GATES"
           # 🔴 20260913작2 정정 — 이제 기기 계열 중 **MainPcRestartMarkGate 는 문다**(임시 DB 권한 실측 · C-3).
