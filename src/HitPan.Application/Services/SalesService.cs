@@ -838,6 +838,32 @@ public class SalesService : ISalesService
         delivery.PrevReceivable = await _db.QueryFirstOrDefaultAsync<decimal>(
             new CommandDefinition(balanceSql, new { delivery.PartnerId, TenantId = tenantId }, cancellationToken: ct));
 
+        // 🔴 20260915작1 갈래 I (§14-6 E 미반영분) — 이월잔액(partner_legacy_balances) 행이 있는 회사는 E 규칙으로 전잔액을 다시 잰다:
+        //   이관 명세서·이관 수금 제외 + 이 거래처 이월잔액(+ 미수 칸) 한 번. 대시보드 미수(FinanceService receivable)와 같은 식을 거래처 하나로.
+        //   이월잔액 행이 없는 회사는 NULL → 위 v_partner_balance 값 그대로(종전 동작 · #1).
+        //   ⚠️ 뷰는 수주 기준 · 이 식은 명세서 기준 — 뷰가 이관 수주를 가를 칸(source_type)이 없어 같은 기준으로 못 뺀다(개발명세서 §5).
+        //   DESCRIBE(#13 · 격리 33306 출하 DDL): sales_deliveries source_type varchar(20)·status·is_deleted · collections source_type varchar(30)·ref_doc_type · partner_legacy_balances balance_amount decimal(15,2).
+        var legacyPrevSql = $$"""
+                              SELECT CASE WHEN {{MdbLegacyPartnerBalance.HasLegacyBalanceSql}} THEN
+                                  COALESCE((SELECT SUM(sd.total_amount + sd.vat_amount) FROM sales_deliveries sd
+                                             WHERE sd.tenant_id = @TenantId AND sd.partner_id = @PartnerId
+                                               AND sd.status IN ('confirmed','invoiced') AND sd.is_deleted = 0
+                                               AND COALESCE(sd.source_type,'') <> 'migration'), 0)
+                                - COALESCE((SELECT SUM(c.amount) FROM collections c
+                                             WHERE c.tenant_id = @TenantId AND c.partner_id = @PartnerId
+                                               AND c.ref_doc_type = 'sales_delivery'
+                                               AND COALESCE(c.source_type,'') <> 'migration'), 0)
+                                + COALESCE((SELECT GREATEST(plb.balance_amount, 0) FROM partner_legacy_balances plb
+                                             WHERE plb.tenant_id = @TenantId AND plb.partner_id = @PartnerId), 0)
+                              END
+                              """;
+        var legacyPrev = await _db.QueryFirstOrDefaultAsync<decimal?>(
+            new CommandDefinition(legacyPrevSql, new { delivery.PartnerId, TenantId = tenantId }, cancellationToken: ct));
+        if (legacyPrev.HasValue)
+        {
+            delivery.PrevReceivable = legacyPrev.Value;
+        }
+
         const string todaySql = """
                                 SELECT COALESCE(SUM(d.total_amount + d.vat_amount), 0)
                                 FROM sales_deliveries d
@@ -877,7 +903,8 @@ public class SalesService : ISalesService
                                ec.emp_name AS CreatedByName,
                                (d.source_type = 'migration') AS IsMigrated,
                                -- R-B3: MigratedDocumentLock.IsIssueLocked 와 같은 판정(이관 AND 레거시 계산서 번호 0 아님)
-                               (d.source_type = 'migration' AND COALESCE(d.legacy_tax_no, 0) <> 0) AS IsIssueLocked
+                               -- R-B4(20260915작1 갈래 I): 99999999 = 레거시 「발행 안 함」 확정 → 명시 분기로 잠금
+                               (d.source_type = 'migration' AND (d.legacy_tax_no = 99999999 OR COALESCE(d.legacy_tax_no, 0) <> 0)) AS IsIssueLocked
                            FROM sales_deliveries d
                            LEFT JOIN partners p
                                ON p.partner_id = d.partner_id

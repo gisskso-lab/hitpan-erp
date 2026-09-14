@@ -386,7 +386,13 @@ public sealed class TaxInvoiceMigratedLockGateTests
             ("D-CMP-M-9", "migration", "99999999", 99999999),
             ("D-CMP-H-NO", "direct", "20260228", 20260228),
             ("D-CMP-H-NULL", "direct", "NULL", null),
+            // 20260915작1 갈래 I · R-B4 — 사람 전표에 99999999 가 들어 있어도 잠그지 않는다(이관분만 명시 분기)
+            ("D-CMP-H-9", "direct", "99999999", 99999999),
         };
+        Assert.Equal(MigratedDocumentLock.IssueLockReasonNotIssued, MigratedDocumentLock.IssueLockReason("migration", 99999999));
+        Assert.Equal(MigratedDocumentLock.IssueLockReasonIssued, MigratedDocumentLock.IssueLockReason("migration", 20260228));
+        Assert.Null(MigratedDocumentLock.IssueLockReason("migration", 0));
+        Assert.Null(MigratedDocumentLock.IssueLockReason("direct", 99999999));
         foreach (var c in cases) InsertDelivery(db, c.Id, c.Source, "confirmed", c.TaxNo);
 
         var list = await Sales(db).GetDeliveriesAsync(Tid);
@@ -397,6 +403,67 @@ public sealed class TaxInvoiceMigratedLockGateTests
             Assert.True(MigratedDocumentLock.IsIssueLocked(c.Source, c.TaxNoValue) == row!.IsIssueLocked,
                 $"{c.Id}: 함수={MigratedDocumentLock.IsIssueLocked(c.Source, c.TaxNoValue)} 목록SQL={row.IsIssueLocked} — 규칙이 한쪽만 바뀌었다.");
         }
+    }
+
+    /// <summary>
+    /// G5-18 (20260915작1 갈래 I · R-B4 사장님 결재 §14-5) — 이관 명세서 계산서 번호별 발행:
+    /// 99999999 → 거부(「발행 안 함」 문구) · 실제 번호 → 거부(종전 문구) · 00000000(0)·빈값(NULL) → 발행 성공.
+    /// </summary>
+    [Fact]
+    public async Task G5_18_RB4_99999999_거부_0과빈값_발행()
+    {
+        if (!ServerAvailable()) { Skipped(nameof(G5_18_RB4_99999999_거부_0과빈값_발행)); return; }
+        using var db = FreshDb();
+        InsertDelivery(db, "D-MIG-9", "migration", "confirmed", legacyTaxNo: "99999999");
+        InsertDelivery(db, "D-MIG-NULLTAX", "migration", "confirmed", legacyTaxNo: "NULL");
+        var svc = new TaxInvoiceService(db, UnitOfWork(db));
+
+        var ex9 = await Assert.ThrowsAsync<TaxInvoiceException>(() =>
+            svc.IssueAsync(new IssueTaxInvoiceRequest("D-MIG-9", null), Tid, "gate-user", null));
+        Assert.Equal(MigratedDocumentLock.LockedErrorCode, ex9.ErrorCode);
+        Assert.Equal(MigratedDocumentLock.IssueNotIssuedMessage, ex9.Message);
+        Assert.Equal(0, Count(db, "SELECT COUNT(*) FROM tax_invoices WHERE delivery_id='D-MIG-9'"));
+
+        var exNo = await Assert.ThrowsAsync<TaxInvoiceException>(() =>
+            svc.IssueAsync(new IssueTaxInvoiceRequest(MigDelivery, null), Tid, "gate-user", null));
+        Assert.Equal(MigratedDocumentLock.IssueBlockedMessage, exNo.Message);
+
+        var r0 = await svc.IssueAsync(new IssueTaxInvoiceRequest(MigUnissuedDelivery, null), Tid, "gate-user", null);
+        Assert.Equal("issued", r0.Status);
+        var rNull = await svc.IssueAsync(new IssueTaxInvoiceRequest("D-MIG-NULLTAX", null), Tid, "gate-user", null);
+        Assert.Equal("issued", rNull.Status);
+
+        var list = await Sales(db).GetDeliveriesAsync(Tid);
+        Assert.True(list.Find(x => x.DeliveryId == "D-MIG-9")!.IsIssueLocked, "🔴 99999999 이관 명세서가 발행 목록에서 안 빠진다.");
+    }
+
+    /// <summary>
+    /// G5-19 (20260915작1 갈래 I · §14-6 E 미반영분) — 거래명세서 「전잔액」: 이월잔액 행이 있는 회사는
+    /// 이관 명세서·이관 수금을 빼고 거래처 이월잔액을 한 번 더한다. 행이 없는 회사(대조군)는 종전 뷰 값 그대로.
+    /// </summary>
+    [Fact]
+    public async Task G5_19_거래명세서_전잔액_이월잔액()
+    {
+        if (!ServerAvailable()) { Skipped(nameof(G5_19_거래명세서_전잔액_이월잔액)); return; }
+        using var db = FreshDb();
+        Exec(db, $"""
+            INSERT INTO collections (collection_id, tenant_id, partner_id, collection_date, amount, ref_doc_type, ref_doc_id, is_active, source_type, source_id)
+            VALUES (UUID(), '{Tid}', '{Partner}', '2026-01-20', 500, 'sales_delivery', '{MigDelivery}', 1, 'migration', 'mig-c-g519'),
+                   (UUID(), '{Tid}', '{Partner}', '2026-09-15', 100, 'sales_delivery', '{HumanDelivery}', 1, NULL, NULL)
+            """);
+
+        // 대조군 — 이월잔액 행 없음: 종전 v_partner_balance(수주 − 입금) 값 = 0
+        var before = await Sales(db).GetDeliveryAsync(HumanDelivery, Tid);
+        Assert.Equal(0m, before!.PrevReceivable);
+
+        Exec(db, $"""
+            INSERT INTO partner_legacy_balances (balance_id, tenant_id, partner_id, legacy_buy_code, base_date, balance_amount, source_type, source_id, migrated_source_hash)
+            VALUES (UUID(), '{Tid}', '{Partner}', 1, '2026-02-28', 7000, 'migration', 'mig-legacybal-g519', REPEAT('a', 64))
+            """);
+        var after = await Sales(db).GetDeliveryAsync(HumanDelivery, Tid);
+        // 사람 확정 명세서 2건(D-HUMAN-1 · D-HUMAN-TAX) 1,100 × 2 − 사람 수금 100 + 이월 7,000 = 9,100 (이관 명세서 2건·이관 수금 500 제외)
+        Assert.True(after!.PrevReceivable == 9_100m,
+            $"🔴 전잔액 {after.PrevReceivable} ≠ 9,100 — 이관 행을 빼고 이월잔액을 한 번 더해야 한다(E 규칙).");
     }
 
     // ────────────────────────────────────────────────────────────
