@@ -50,16 +50,33 @@ function Download-IfMissing {
         Write-Host "  ⚠ $Label : 크기 이상 (${sizeMB} MB < ${ExpectedMinMB} MB), 재다운로드"
     }
 
-    Write-Host "  → $Label 다운로드 중..." -NoNewline
-    try {
-        Invoke-WebRequest -Uri $Url -OutFile $Path -UseBasicParsing
-        $sizeMB = [Math]::Round((Get-Item $Path).Length / 1MB, 1)
-        Write-Host " OK (${sizeMB} MB)" -ForegroundColor Green
-    } catch {
-        Write-Host " 실패" -ForegroundColor Red
-        Write-Error "다운로드 실패: $Url`n  $_"
-        exit 1
+    # 🔴 2026-09-14 1.3.41 게시 실패 — archive.mariadb.org 가 504 Gateway Time-out 을 한 번 냈고
+    #   3분 뒤엔 200 이었다. 한 번 실패로 게시 전체가 멈췄다(서명·NCP 게시 skipped · 고객 영향 0).
+    #   ⇒ 외부 서버의 일시 장애는 **간격을 두고 다시 받는다**(최대 4회: 즉시 · 15초 · 45초 · 90초 뒤).
+    #   ⚠️ 받다 끊긴 반쪽 파일은 지우고 다시 받는다 — 크기 검사로 손상 파일을 걸러 캐시로 쓰지 않는다.
+    #   ⚠️ 끝내 실패하면 종전대로 exit 1 — 빠진 채로 설치 EXE 를 만들지 않는다.
+    $delays = @(0, 15, 45, 90)
+    for ($i = 0; $i -lt $delays.Count; $i++) {
+        if ($delays[$i] -gt 0) {
+            Write-Host "  ↻ $Label 재시도 $($i + 1)/$($delays.Count) — $($delays[$i])초 대기" -ForegroundColor Yellow
+            Start-Sleep -Seconds $delays[$i]
+        }
+        Write-Host "  → $Label 다운로드 중..." -NoNewline
+        try {
+            Invoke-WebRequest -Uri $Url -OutFile $Path -UseBasicParsing -TimeoutSec 600
+            $sizeMB = [Math]::Round((Get-Item $Path).Length / 1MB, 1)
+            if ($sizeMB -lt $ExpectedMinMB) {
+                throw "크기 이상 (${sizeMB} MB < ${ExpectedMinMB} MB)"
+            }
+            Write-Host " OK (${sizeMB} MB)" -ForegroundColor Green
+            return
+        } catch {
+            Write-Host " 실패: $($_.Exception.Message)" -ForegroundColor Red
+            if (Test-Path $Path) { Remove-Item $Path -Force -ErrorAction SilentlyContinue }
+        }
     }
+    Write-Error "다운로드 실패 ($($delays.Count)회 시도): $Url"
+    exit 1
 }
 
 # 1. .NET 8 ASP.NET Core Hosting Bundle
