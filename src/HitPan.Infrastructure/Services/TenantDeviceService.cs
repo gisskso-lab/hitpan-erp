@@ -237,6 +237,44 @@ public sealed class TenantDeviceService : ITenantDeviceService
             var (id, status, isMainPc, curType) = existing.Value;
 
             // ══════════════════════════════════════════════════════════════
+            // 🔴 2026-09-14 20260913작2 §9-4 (병렬이슈33 · 사장님 결재 (a)) —
+            //   **서버가 만든 줄(지문 `MAINPC-`)은 브라우저 로그인으로 표식·상태가 바뀌지 않는다.**
+            //
+            //   [무엇이 났나] [회사서버 컴퓨터] 합류(20260820작2 2-1 · DeviceAuthGate)는 브라우저에
+            //     **서버줄의 장비넘버**를 준다. 그 서버줄이 표식을 잃고(8/18작4 이전 · DB-120 ①단 정리)
+            //     폐기·반려 상태가 되면, 합류 화면의 로그인이 아래 갈래를 탄다:
+            //       · localhost — `:269` 표식 이전 ⇒ 서버줄 **부활**(결재 5 위반) · 사장님 줄 **폐기** · 다음 로그인에 되뒤집힘(핑퐁)
+            //       · 원격     — `:366` 대기 전환 ⇒ 폐기 사유 원문 **소거** · 승인하면 슬롯 +1
+            //     9/11 되올림 사고가 표식을 1 로 올려 **우연히 닫혀 있던** 입구다(격리 실측 · 대조군 무변화).
+            //
+            //   [고침] 입구에서 **가드만 더한다**(#1 — 아래 갈래는 한 글자도 안 고친다).
+            //     ① 서버줄 ∧ 표식 0 ∧ 폐기/반려 → **표에 아무것도 쓰지 않고 거부**.
+            //     ② 서버줄 ∧ 표식 0 ∧ 승인 → **표식 이전(`:269`)만 건너뛴다**. 로그인은 종전대로.
+            //
+            //   ⚠️ 표식 든 서버줄(`isMainPc`)은 여기 안 걸린다 — 8/11 폐기 구제 · DP-2 반려 자가회복 그대로.
+            //   ⚠️ 서버줄의 신분은 `MainPcRegistrationService` 가 기동 때 정한다. 브라우저 로그인이 정하지 않는다.
+            // ══════════════════════════════════════════════════════════════
+            var isServerRowWithoutMark = false;
+            if (!isMainPc)
+            {
+                isServerRowWithoutMark = await IsServerRowWithoutMarkAsync(id, tenantId, ct);
+            }
+
+            if (isServerRowWithoutMark && status != "approved")   // 폐기·반려·대기 — §9-5 병렬이슈35: 대기도 막아야 대표 알림이 멈춘다
+            {
+                _logger.LogWarning(
+                    "[TenantDeviceService] 표식 없는 서버줄로 브라우저 로그인 시도 — 거부했다(표 무변경). "
+                    + "합류 화면이 옛 서버줄 장비넘버를 들고 있다는 뜻이다. "
+                    + "device={DeviceId} tenant={TenantId} status={Status} local={Local}",
+                    id, tenantId, status, req.IsLocalConsole);
+
+                // ⚠️ 장비넘버를 **돌려준다**(null 이면 AuthController 가 401 — 그 화면이 관문에도 못 가 갇힌다 · 8/20작3 계통).
+                //   관문에서 [회사서버 컴퓨터] 합류를 다시 누르면 **지금 표식 든 줄**로 옮겨 탄다.
+                //   폐기 줄은 승인 API 가 막는다(`ApproveAsync` — "폐기된 기기는 승인할 수 없습니다").
+                return (false, DeviceMessages.StaleServerRow, id, false);
+            }
+
+            // ══════════════════════════════════════════════════════════════
             // 🔴 2026-08-18 20260818작4 — **서버가 도는 그 컴퓨터의 화면은 메인PC 다.**
             //   (사장님 실측: *"모바일·외부 클라이언트는 봉합됨. 하지만 메인pc도 막힘"*)
             //
@@ -266,7 +304,7 @@ public sealed class TenantDeviceService : ITenantDeviceService
             //     터널을 지나온 접속은 헤더로 배제되므로 **바깥에서는 절대 참이 될 수 없다.**
             //     ⚠️ 이 조건을 `req` 가 아닌 다른 데서 받게 바꾸면 **아무나 메인PC 를 자칭한다.**
             // ══════════════════════════════════════════════════════════════
-            if (req.IsLocalConsole && !isMainPc)
+            if (req.IsLocalConsole && !isMainPc && !isServerRowWithoutMark)   // 🔴 §9-4 가드 ② — 서버줄로는 표식을 옮기지 않는다
             {
                 // ① 옛 서버 줄을 내린다 — 표식도, 슬롯도 한 줄만 남긴다.
                 //   ⚠️ `revoked` 로 두는 이유: 지우면 감사 기록이 사라진다(헌법 #1 — 덮어쓰기 금지).
@@ -838,6 +876,13 @@ public sealed class TenantDeviceService : ITenantDeviceService
         if (curStatus == "revoked")
             throw new InvalidOperationException("폐기된 기기는 승인할 수 없습니다. 그 기기에서 다시 접속해 주세요.");
 
+        // 🔴 20260913작2 §9-5 (병렬이슈34 ③) — **표식 없는 서버줄은 승인하지 않는다.**
+        //   서버줄(MAINPC-)은 MainPcRegistrationService 가 기동 때 신분을 정한다. 대기·반려로 남은 옛 서버줄을
+        //   승인하면 같은 컴퓨터가 슬롯을 하나 더 먹는다(검증자 실측 승인 PC 1→2 · 요금 이동).
+        //   ⚠️ 표식 든 서버줄은 여기 안 걸린다 — 8/11 구제·DP-2 자가회복 축 그대로.
+        if (await IsServerRowWithoutMarkAsync(deviceId, tenantId, ct))
+            throw new InvalidOperationException(DeviceMessages.StaleServerRowApprove);
+
         // 🔴 승인 시점에 한도를 **다시** 본다.
         //   대기 목록에 3대가 쌓여 있고 남은 슬롯이 1대라면, 첫 승인은 되고 나머지는 막혀야 한다.
         //   등록 시점에만 검사하면 대기분이 한도를 넘겨 통과한다(슬롯 과금이 무너지는 자리).
@@ -1013,6 +1058,10 @@ public sealed class TenantDeviceService : ITenantDeviceService
         // 폐기된 기기는 옛 키가 남아 있어도 되살아나지 않는다.
         if (status == "revoked") return null;
 
+        // 🔴 20260913작2 §9-5 (병렬이슈35) — 표식 없는 서버줄에는 키 대조로도 승인·비밀을 주지 않는다.
+        //   승인 거부(ApproveAsync)를 재발급→키 대조로 돌아 들어오면 승인 PC 가 1→2 가 됐다(검증자 탐침).
+        if (await IsServerRowWithoutMarkAsync(sessionDeviceId, tenantId, ct)) return null;
+
         // 아직 키를 못 받은 줄(대표가 승인을 안 눌렀다) — 대조할 것이 없다.
         if (string.IsNullOrWhiteSpace(storedHash)) return null;
 
@@ -1111,6 +1160,11 @@ public sealed class TenantDeviceService : ITenantDeviceService
 
         if (status == "revoked")
             throw new InvalidOperationException("폐기된 기기는 인증키를 재발급할 수 없습니다.");
+
+        // 🔴 20260913작2 §9-5 (병렬이슈35) — 표식 없는 서버줄은 인증키를 재발급하지 않는다(승인 거부 우회로 차단).
+        //   ⚠️ 합류(JoinServerRowAsync)가 쓰는 **표식 든** 서버줄은 여기 안 걸린다.
+        if (await IsServerRowWithoutMarkAsync(deviceId, tenantId, ct))
+            throw new InvalidOperationException(DeviceMessages.StaleServerRowApprove);
 
         var authKey = Guid.NewGuid().ToString("N") + Guid.NewGuid().ToString("N");
 
@@ -1657,6 +1711,21 @@ public sealed class TenantDeviceService : ITenantDeviceService
             SELECT COUNT(*) FROM audit_trail
             WHERE tenant_id = @TenantId AND entity_type = 'device' AND entity_id = @Id
               AND action_type = 'device_reapply_after_revoke'
+            """,
+            new { Id = deviceId, TenantId = tenantId }, cancellationToken: ct))) > 0;
+    }
+
+    /// <inheritdoc />
+    public async Task<bool> IsServerRowWithoutMarkAsync(string deviceId, string tenantId, CancellationToken ct = default)
+    {
+        if (string.IsNullOrEmpty(deviceId)) return false;
+        await EnsureOpenAsync(ct);
+
+        return (await _db.ExecuteScalarAsync<int>(new CommandDefinition(
+            """
+            SELECT COUNT(*) FROM tenant_devices
+            WHERE tenant_id = @TenantId AND device_id = @Id
+              AND fingerprint LIKE 'MAINPC-%' AND COALESCE(is_main_pc, 0) = 0
             """,
             new { Id = deviceId, TenantId = tenantId }, cancellationToken: ct))) > 0;
     }

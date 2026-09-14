@@ -147,6 +147,12 @@ public interface ITenantDeviceService
     Task<bool> WasRevokedBeforeAsync(string deviceId, string tenantId, CancellationToken ct = default);
 
     /// <summary>
+    /// 🔴 이 장비넘버가 <b>표식 없는 서버줄</b>(지문 <c>MAINPC-</c> ∧ <c>is_main_pc=0</c>)인가 (20260913작2 §9-4·§9-5).
+    /// <para>로그인·승인 가드와 관문 안내가 같은 판정을 쓴다. 판정은 요청값이 아니라 <b>DB 에 저장된 지문</b>으로 한다.</para>
+    /// </summary>
+    Task<bool> IsServerRowWithoutMarkAsync(string deviceId, string tenantId, CancellationToken ct = default);
+
+    /// <summary>
     /// 🔴 <b>대표에게 연락할 곳</b> — 직원이 관문 앞에서 <b>누구에게 전화할지</b> 알기 위한 값 (20260818작2).
     /// </summary>
     /// <remarks>

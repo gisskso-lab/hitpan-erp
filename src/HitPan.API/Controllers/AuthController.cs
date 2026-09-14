@@ -194,6 +194,11 @@ public class AuthController : ControllerBase
                             //   ⚠️ 알림이 실패해도 **로그인은 그대로 간다** — 부수 기능이 본 기능을 죽이지 않는다.
                             //     확인번호는 알림에 싣지 않는다(사장님 8/16 오더 — 옆에서 보면 샌다).
                             // ══════════════════════════════════════════════════════════════
+                            // 🔴 20260913작2 §9-5 (병렬이슈34 ②) — **옛 서버줄로 들어온 합류 화면은 대표에게 알리지 않는다.**
+                            //   그 화면은 승인 대상이 아니다(승인 API 가 거부) — 알리면 로그인할 때마다 대표가
+                            //   승인할 수 없는 요청을 받는다. 그 화면은 관문에서 [회사서버] 버튼으로 스스로 잇는다.
+                            if (reason != DeviceMessages.StaleServerRow)
+                            {
                             try
                             {
                                 var adminEmpId = await _deviceService
@@ -220,6 +225,7 @@ public class AuthController : ControllerBase
                                 _logger.LogWarning(nex,
                                     "기기 승인 요청 알림 실패 — 로그인은 그대로 진행한다. TenantId: {TenantId}",
                                     response.TenantId);
+                            }
                             }
                         }
                         else if (newlyRegistered)

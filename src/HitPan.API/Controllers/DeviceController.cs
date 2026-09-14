@@ -160,13 +160,18 @@ public sealed class DeviceController : ControllerBase
         //   ⚠️ 화면 문구용 값 하나뿐이다 — 통행 판정에는 쓰지 않는다(문은 여전히 대표가 연다).
         var reapplied = !approved && await _svc.WasRevokedBeforeAsync(deviceId, tid, ct);
 
+        // 🔴 20260913작2 §9-5 (병렬이슈34 ②) — 이 화면이 **옛 서버줄 장비넘버**를 들고 있는가.
+        //   화면 문구·버튼용 값이다. 통행 판정에 쓰지 않는다(로그인·승인 가드가 서버에서 막는다).
+        var staleServerRow = !approved && await _svc.IsServerRowWithoutMarkAsync(deviceId, tid, ct);
+
         return Ok(new
         {
             approved,
             // 대표 화면과 **같은 번호**를 보여준다 — 대표가 눈으로 대조한다(사장님 결재).
             //   승인이 난 뒤에는 보여줄 이유가 없다.
             confirmCode = approved ? null : DeviceConfirmCode.From(deviceId),
-            reapplied
+            reapplied,
+            staleServerRow
         });
     }
 

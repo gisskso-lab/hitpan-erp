@@ -153,19 +153,89 @@ public sealed class MainPcRegistrationService : BackgroundService
         if (existingId is not null)
         {
             // 이미 있다 — 표식만 확실히 해 둔다(업데이트로 컬럼이 새로 생긴 기존 고객 대응).
+            //
+            // ══════════════════════════════════════════════════════════════
+            // 🔴 2026-09-13 20260913작2 — **재기동이 표식을 되올리는 것**을 막는다.
+            //
+            //   [무엇이 났나] 사장님 실측 2026-09-13 *"수정안됨. 반려"* — 실물에 `is_main_pc=1` 이 **2줄**.
+            //     ⓐ `HFPv2-a341d087`(승인 · 사장님이 쓰는 줄) · ⓑ `MAINPC-9c1163c`(폐기 · 사유 「…(20260818작4)」).
+            //
+            //   [진범이 여기다] 종전 조건은 `WHERE device_id=@Id AND is_main_pc=0` 뿐이라
+            //     **`status` 를 보지 않았다** ⇒ 8/18 에 표식을 ⓐ 로 옮기며 `revoked` 로 내려둔 서버 줄을
+            //     그대로 **되올렸다.** `BackgroundService` 라 API 기동마다 1회 도므로
+            //     **업데이트마다 재발**했다(9/11 23:02~23:05 1.3.40 재현 · 폐기 줄의
+            //     `last_seen_at 9/11 23:05` 이 이 UPDATE 의 `NOW()` 흔적이다).
+            //     아래 ② `alreadyHasMain` 검사는 **신규 INSERT 경로에만** 있어 이 경로를 지켜주지 못했다.
+            //
+            //   [고침] 두 조건을 더한다 — **되올림을 없애는 것이 아니라 「표식이 비어 있을 때만 채운다」로 좁힌다.**
+            //     (A) `d.status = 'approved'`  — 폐기·대기·반려 줄을 되올리지 않는다.
+            //     (B) 회사에 `is_main_pc=1` 인 줄이 **0개**  — 표식이 이미 ⓐ 에 있으면 서버 줄을 세우지 않는다.
+            //
+            //   🔴 [왜 한 문장인가] (B) 를 **앞선 별도 `SELECT`** 로 확인하면 검사와 쓰기 사이에
+            //     로그인 경로(`TenantDeviceService`)가 끼어들어 그 틈에 표식이 옮겨질 수 있다(TOCTOU).
+            //     ⇒ **한 UPDATE 안에서** 판정한다. MariaDB 는 UPDATE 대상 표를 직접 서브쿼리로 못 읽으므로
+            //       **파생표로 감싸** 읽는다(2겹 — 안쪽이 먼저 실체화된다).
+            //
+            //   ⚠️ 정당한 목적은 살아 있다(위 주석 「업데이트로 컬럼이 새로 생긴 기존 고객 대응」) —
+            //     서버 줄이 승인이고 회사에 표식이 0줄이면 **종전대로 돈다.** 게이트 G-M2 가 그 대조군이다.
+            //   ⚠️ 표식이 0줄로 남는 경우는 **의도**다 — 사람이 목록에서 옛 기기를 폐기하면
+            //     다음 기동에 아래 ③ 신규 INSERT 경로가 새 줄을 만든다(`:176-178` 기존 약속 그대로).
+            //     폐기된 옛 메인 줄을 **자동 부활시키지 않는다**(사장님 결재 5).
+            //
+            //   근거: docs/운영기록/20260913작2_메인PC표식_2줄_봉합_작업지시서.md §3-1 ①②
+            //        docs/설계/erp/20260913_설계_메인PC표식_재기동_되올림_차단.md §2
+            //   게이트: MainPcRestartMarkGateTests (G-M1 본체 · G-M2 대조군)
+            // ══════════════════════════════════════════════════════════════
             var updated = await conn.ExecuteAsync(new CommandDefinition(
                 """
-                UPDATE tenant_devices
-                SET is_main_pc   = 1,
-                    device_name  = COALESCE(device_name, @Name),
-                    last_seen_at = NOW()
-                WHERE device_id = @Id AND is_main_pc = 0
+                UPDATE tenant_devices AS d
+                  JOIN (
+                    SELECT * FROM (
+                      SELECT COUNT(*) AS mark_rows
+                        FROM tenant_devices
+                       WHERE tenant_id = @TenantId AND is_main_pc = 1
+                    ) AS c
+                  ) AS t
+                SET d.is_main_pc   = 1,
+                    d.device_name  = COALESCE(d.device_name, @Name),
+                    d.last_seen_at = NOW()
+                WHERE d.device_id  = @Id
+                  AND d.is_main_pc = 0
+                  AND d.status     = 'approved'
+                  AND t.mark_rows  = 0
                 """,
-                new { Id = existingId, Name = MainPcDeviceName }, cancellationToken: ct));
+                new { Id = existingId, TenantId = tenantId, Name = MainPcDeviceName },
+                cancellationToken: ct));
 
             if (updated > 0)
             {
                 _logger.LogWarning("[MainPc] 기존 기기를 메인PC 로 표시했다 (device_id={Id}).", existingId);
+            }
+            else
+            {
+                // 🔴 되올리지 않았을 때 **왜 안 했는지 남긴다**(헌법 #15 — 조용히 넘기지 않는다).
+                //   ⚠️ 이 조회는 **판정에 쓰지 않는다** — 판정은 위 한 문장이 이미 끝냈다(TOCTOU 없음).
+                //     사람이 읽을 사유일 뿐이다.
+                //   ⚠️ 이미 표식을 들고 있는 정상 상태(is_main_pc=1)는 **로그를 남기지 않는다** —
+                //     기동마다 찍히면 진짜 신호가 묻힌다.
+                var diag = await conn.QueryFirstOrDefaultAsync<MarkSkipDiagnostics>(new CommandDefinition(
+                    """
+                    SELECT (SELECT status FROM tenant_devices WHERE device_id = @Id) AS Status,
+                           (SELECT COALESCE(is_main_pc, 0) FROM tenant_devices WHERE device_id = @Id) AS IsMainPc,
+                           (SELECT COUNT(*) FROM tenant_devices
+                             WHERE tenant_id = @TenantId AND is_main_pc = 1) AS MarkRows
+                    """,
+                    new { Id = existingId, TenantId = tenantId }, cancellationToken: ct));
+
+                if (diag is not null && !diag.IsMainPc)
+                {
+                    _logger.LogWarning(
+                        "[MainPc] 메인PC 표식을 되올리지 않았다 — 이 줄의 상태={Status}, " +
+                        "회사에 이미 표식을 든 줄={MarkRows}개 (device_id={Id}). " +
+                        "승인 상태가 아니거나 표식이 이미 다른 줄에 있다. " +
+                        "폐기된 옛 메인PC 줄은 자동으로 되살리지 않는다 — 목록에서 옛 기기를 폐기하면 다음 기동에 새로 잡힌다.",
+                        diag.Status, diag.MarkRows, existingId);
+                }
             }
             return;
         }
@@ -236,6 +306,33 @@ public sealed class MainPcRegistrationService : BackgroundService
 
         var hash = SHA256.HashData(Encoding.UTF8.GetBytes(seed));
         return "MAINPC-" + Convert.ToHexString(hash)[..16].ToLowerInvariant();
+    }
+
+    /// <summary>
+    /// 🔴 되올리지 <b>않은</b> 이유를 로그에 적기 위한 값 묶음 (20260913작2).
+    ///
+    /// <para>
+    /// ⚠️ <b>판정에는 쓰지 않는다.</b> 판정은 되올림 UPDATE <b>한 문장</b>이 이미 끝냈다 —
+    /// 여기서 다시 판정하면 검사와 쓰기가 갈라져 TOCTOU 가 생긴다.
+    /// 이 값들은 <b>사람이 읽을 사유</b>일 뿐이다(헌법 #15 — 조용히 넘기지 않는다).
+    /// </para>
+    /// </summary>
+    private sealed class MarkSkipDiagnostics
+    {
+        /// <summary>그 줄의 상태 — <c>revoked</c>·<c>pending</c>·<c>rejected</c> 면 되올리지 않는다.</summary>
+        public string? Status { get; set; }
+
+        /// <summary>
+        /// 그 줄이 <b>이미</b> 표식을 들고 있나 — 참이면 정상 상태이므로 로그를 남기지 않는다.
+        /// (기동마다 찍히면 진짜 신호가 묻힌다.)
+        /// </summary>
+        public bool IsMainPc { get; set; }
+
+        /// <summary>
+        /// 회사에서 표식을 들고 있는 줄 수 — 1 이상이면 표식이 이미 다른 줄
+        /// (보통 사장님이 실제로 쓰는 화면 줄)에 있다는 뜻이다.
+        /// </summary>
+        public long MarkRows { get; set; }
     }
 
     private static string BuildConnectionString()

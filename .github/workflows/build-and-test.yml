@@ -233,9 +233,52 @@ jobs:
           #    ⚠️ 리눅스 한계(조용한 축소 금지): 숨은 콘솔 입력 대기 · System32 경로 · 폴더 권한(C-8)은 이 러너에서 재현되지 않는다.
           #       원인 대조는 Windows 격리 실측이 근거다 — docs/개발/erp/20260911_개발명세서_백업비번결함_핫픽스.md
           GATES="$GATES|BackupCredentialGate"
+          # 🔴 20260913작2 MainPcRestartMarkGate — 메인PC 표식 2줄 봉합
+          #    (축1 재기동 되올림 차단 · 축2 DB-120 ①단 정리 · 축3 UNIQUE 방어선 + 출하 DDL 본문).
+          #    사장님 실측 2026-09-13 "수정안됨. 반려" — 실물에 is_main_pc=1 이 2줄이었다.
+          #
+          #    🔴 이 잡이 기기 계열을 처음으로 문다 — 근거는 임시 DB 권한 **실측**이다(PM 조건 C-3):
+          #      MariaDB 11.4.10 root 로 `SHOW GRANTS` = "GRANT ALL PRIVILEGES ON *.* … WITH GRANT OPTION",
+          #      `CREATE DATABASE` exit=0 · `DROP DATABASE` exit=0 (격리 인스턴스 실측).
+          #      ⚠️ 이 실측은 **같은 판(MariaDB 11.4 root)에서 잰 것**이고 이 잡의 서비스 컨테이너
+          #        안에서 직접 잰 것이 아니다 — 첫 CI 실행이 최종 확인이다(개발명세서 §4 에 명시).
+          #
+          #    등록 근거는 "초록불이라서" 가 아니라 **무력화 시험**이다 (20260913 Windows 격리 MariaDB 11.4.10 · 포트 33306):
+          #      · 봉합 전(원본 코드 + DB-120 파일 없음)        → 12개 중 **11 FAIL**.
+          #        G-M1 이 「폐기된 서버줄이 되올려져 표식 2줄」을 **실제로 재현**했다(= 실물 증상 모양).
+          #      · 되올림 (A) status='approved' 제거            → **G-M1a** 빨간불
+          #      · 되올림 (B) 「회사에 표식 0줄」 제거            → **G-M1b** 빨간불
+          #        🔴 G-M1 은 (A)(B) 가 **겹쳐 막는** 모양이라 하나만 지워도 초록이다(실측).
+          #           그래서 조건 하나만이 유일한 방어선인 모양을 G-M1a·G-M1b 로 **따로** 뒀다.
+          #           — 무력화 시험을 안 돌렸으면 "G-M1 초록"을 보고 조건이 산다고 착각했을 자리다.
+          #      · DB-120 ①단(정리) 제거                        → G-M3 · V1 · V2 · V3   (1차 기록 「G-M3 · G-M4」 → (가) 뒤 재실측)
+          #      · DB-120 ③단(UNIQUE) 제거                      → G-M5 · G-M3
+          #      · 출하 DDL 본문 되돌림(시드만 = DB-89 와 같은 모양) → G-M6
+          #      · DB-89 꼬리 UPDATE(부활)를 ①단 **앞**에 넣음   → G-M3 · G-M7(요금 4→5)
+          #        (맨 **뒤**에 넣으면 ①단이 먼저 표식을 내려 매칭 0건 = 무영향 — 순서가 판정을 가른다)
+          #    대조군 2개는 전 무력화에서 초록 유지 — G-M2(정당한 목적 생존) · G-M7(요금 무이동 4→4).
+          #
+          #    🔴 (1차 기록) V4 빨간불 — `approved` 표식 0줄 회사에서 ③단 무조건 UNIQUE 가 `Duplicate entry` 로 실패
+          #      (MigrationRunner.cs:143-162 실패 시 return = 이후 마이그 전부 중단). 필터로 빼지 않고 결재에 올렸다.
+          #    ✅ 2026-09-13 해소 — CTO 결재 20260913결1 · 사장님 (가) 채택: ③단을 「중복 0 일 때만」 · ④단 감사기록 1줄.
+          #      V4 는 **단언 무수정**으로 초록. G-M4 는 전제가 바뀌어 사장님 결재(작업지시서 §9-3)로 기대값 교체:
+          #      「①단을 건너뛰어 중복이 남아도 ⓐ마이그 실패 없음 ⓑUNIQUE 안 생김 ⓒ감사 1줄」 — 셋을 한 시험에.
+          #      무력화 (20260913 격리 33306 재실측 · 매번 원복 sha256 685220860c49… 바이트 동일):
+          #      · ③단 조건 `AND @dup_tenants = 0` 제거  → G-M4 ⓐ (Duplicate entry) · V4
+          #      · ④단 감사기록 INSERT 제거              → G-M4 ⓒ (0줄) · V4
+          #    🔴 2026-09-14 병렬이슈33 봉합(작업지시서 §9-4 · 사장님 결재 (a)) — G-M8 계열 추가:
+          #      표식 내린 서버줄(MAINPC-)로 합류 화면이 로그인해도 표가 안 바뀐다(부활·사장님 줄 폐기·핑퐁 0).
+          #      · TenantDeviceService 가드 ① 무력화 → G-M8b (local·원격)   · 가드 ② 제거 → G-M8c
+          #      · 둘 다 제거(=봉합 전 코드) → G-M8b 표 원문이 병렬이슈33 실측 모양 그대로 재현
+          #      · ④단 HAVING >= 1 (정상 회사 거짓 기록) → V5 · G-M3     대조군 G-M8a·G-M8d 초록 유지
+          #    근거: docs/개발/erp/20260913_개발명세서_메인PC표식_2줄_봉합.md
+          GATES="$GATES|MainPcRestartMarkGate"
 
           echo "▶ 이 잡이 무는 게이트: $GATES"
-          echo "▶ 이 잡이 물지 않는 것: 기기·승인 계열(CREATE DATABASE 권한 축 — 범위 밖)"
+          # 🔴 20260913작2 정정 — 이제 기기 계열 중 **MainPcRestartMarkGate 는 문다**(임시 DB 권한 실측 · C-3).
+          #    나머지 기기·승인 계열은 여전히 안 문다. "안 넣었다는 사실을 로그에 남긴다" 는 원칙 그대로다.
+          echo "▶ 이 잡이 물지 않는 것: 기기·승인 계열 중 DeviceAndKey·DeviceSlotSeed·ApproverCandidate 등(범위 밖)"
+          echo "▶ 기기 계열 중 무는 것: MainPcRestartMarkGate (임시 DB CREATE DATABASE 권한 실측 후 등록 — 20260913작2)"
 
           FILTER=$(echo "$GATES" | sed 's/|/|FullyQualifiedName~/g')
           dotnet test src/HitPan.Tests/HitPan.Tests.csproj \

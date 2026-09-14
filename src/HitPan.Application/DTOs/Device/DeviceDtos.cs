@@ -1,6 +1,21 @@
 namespace HitPan.Application.DTOs.Device;
 
 /// <summary>
+/// 🔴 기기 판정이 돌려주는 사유 중 <b>다른 자리가 글자로 알아봐야 하는 것</b> (20260913작2 §9-5).
+/// <para>한 곳에만 둔다 — 서비스·컨트롤러·시험이 각자 글자를 베끼면 하나만 바뀌어도 조용히 어긋난다.</para>
+/// </summary>
+public static class DeviceMessages
+{
+    /// <summary>표식 없는 서버줄(지문 <c>MAINPC-</c>)로 들어온 합류 화면 — 거부 사유. 대표 알림을 보내지 않는 표지이기도 하다.</summary>
+    public const string StaleServerRow =
+        "이 화면이 쓰던 기기 정보가 더는 쓰이지 않습니다. [이 컴퓨터는 회사서버(자료 보관) 컴퓨터입니다]를 눌러 다시 연결해 주세요.";
+
+    /// <summary>표식 없는 서버줄은 승인할 수 없다 — 승인하면 같은 컴퓨터가 슬롯을 하나 더 먹는다.</summary>
+    public const string StaleServerRowApprove =
+        "회사 서버의 옛 기록은 승인할 수 없습니다. 그 화면에서 [이 컴퓨터는 회사서버(자료 보관) 컴퓨터입니다]를 눌러 연결해 주세요.";
+}
+
+/// <summary>
 /// 등록 기기 목록 DTO — 설정·등록기기관리 화면에서 사용.
 /// </summary>
 public class DeviceListDto
