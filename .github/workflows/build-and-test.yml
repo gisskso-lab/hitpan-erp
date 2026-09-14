@@ -292,6 +292,13 @@ jobs:
           #      순번 0 가드 제거(집합 쪽 · 판정 쪽 각각 — 병렬이슈36)
           #    근거: docs/개발/erp/20260915작1_갈래A_판정_개발명세서.md
           GATES="$GATES|MdbPostingClassifyGate"
+          # 🔴 20260915작1 갈래 D MdbLegacyFinalStockGate (G3) — 이전 프로그램 최종재고 맞춤 · 끝전 avg_cost.
+          #    순수 8(마지막 달 · 창고 합산 · 대소문자/공백 한 품목 · 원장에만 있는 품목 목표 0 · 결정적 품목 선택 · 6자리 끝전 · DOCFC 없음 skip)
+          #    + DB 3(HITPAN_REQUIRE_DB · 격리 임시 DB · 리빌드 SQL 은 MdbMigrationService.cs 원문을 읽어 실행):
+          #      D1 맞춤→리빌드→끝전 종단 · 사람 입력 원장 대조군 · 멱등 · ROUND(Σ current_qty×avg_cost,2) 일치
+          #      D2 순서 대조군(끝전 뒤에 리빌드가 돌면 금액이 틀어짐 · 병렬이슈37) · D3 끝전 폴백
+          #    등록 근거는 무력화 시험 12종 중 11종 빨간불(M10 동등 변이 초록 · 명세서 §4·§5) — docs/개발/erp/20260915작1_갈래D_재고맞춤_개발명세서.md §4
+          GATES="$GATES|MdbLegacyFinalStockGate"
 
           echo "▶ 이 잡이 무는 게이트: $GATES"
           # 🔴 20260913작2 정정 — 이제 기기 계열 중 **MainPcRestartMarkGate 는 문다**(임시 DB 권한 실측 · C-3).
