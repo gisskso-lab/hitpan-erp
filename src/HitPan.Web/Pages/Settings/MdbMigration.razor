@@ -1,4 +1,4 @@
-@page "/settings/mdb-migration"
+﻿@page "/settings/mdb-migration"
 @namespace HitPan.Web.Pages.SettingsUi
 @attribute [Authorize]
 @using Microsoft.AspNetCore.SignalR.Client
@@ -378,6 +378,11 @@
                         </MudAlert>
                     }
 
+                    @* 20260915작1 갈래 C — 알림(덮어쓰기로 다시 가져오기 필요 등) · 장부 미반영 보관 화면 링크 *@
+                    @foreach (var w in recon.Warnings)
+                    {
+                        <MudAlert Severity="Severity.Warning" Dense="true" Class="mb-2">@w</MudAlert>
+                    }
                     <MudTable Items="recon.Items" Dense="true" Hover="true" Elevation="0"
                               Style="border:0.5px solid var(--mud-palette-lines-default);border-radius:8px">
                         <HeaderContent>
@@ -1495,6 +1500,8 @@
         public List<ReconDiffRow> ItemDiffs { get; set; } = new();
         public int OkCount { get; set; }
         public int DiffCount { get; set; }
+        /// <summary>20260915작1 갈래 C — 표로 못 담는 알림(덮어쓰기 필요 · 분류 못 함 · 최종재고 표 최신 아님 등).</summary>
+        public List<string> Warnings { get; set; } = new();
     }
 
     private class ReconItem

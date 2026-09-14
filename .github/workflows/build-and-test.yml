@@ -322,6 +322,11 @@ jobs:
           #    무력화 시험(20260915 격리 33306): 목록 WHERE tenant 조건 제거 → H1·H3 FAIL · 거래처 조인 tenant 조건 제거 → H1(H2 함정) FAIL.
           #    근거: docs/개발/erp/20260915작1_갈래HC_보관화면_대사표_개발명세서.md
           GATES="$GATES|LegacyUnpostedViewTenantGate"
+          # 🔴 20260915작1 갈래 C MdbReconPostingGate (G6) — 대사표 보관 행 · 미수 F3 열 · 재고 DOCFC 열 · leftover 경고.
+          #    순수 4(합성 DOCFB·DOCFE·DOCF5·DOCFC) + DB 1(HITPAN_REQUIRE_DB · 격리 임시 DB · 다른 회사 같은 모양 시드).
+          #    무력화 5종 전부 빨간불(20260915 격리 33306): leftover IN 무력 · 보관 표 tenant 조건 제거 · 맞춤 줄을 이력에 섞음 ·
+          #      미수 식 이관 제외 제거(이중 계상) · 판정에서 거래처원장 연결 무시(G6a·G6e).
+          GATES="$GATES|MdbReconPostingGate"
 
           echo "▶ 이 잡이 무는 게이트: $GATES"
           # 🔴 20260913작2 정정 — 이제 기기 계열 중 **MainPcRestartMarkGate 는 문다**(임시 DB 권한 실측 · C-3).

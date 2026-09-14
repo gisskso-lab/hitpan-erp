@@ -115,17 +115,21 @@ public sealed class MdbReconciliationService
         // ③ 세금계산서 (DOCF4 ↔ tax_invoices)
         await AddTaxInvoiceItemsAsync(pandata, tenantId, items, ct).ConfigureAwait(false);
 
-        // ④ 재고원장 (DOCFB ↔ stock_ledger)
-        await AddLedgerItemsAsync(pandata, tenantId, items, ct).ConfigureAwait(false);
+        // 🔴 20260915작1 갈래 C — 분류·재고·잔액에 쓰는 레거시 표를 한 번만 읽는다(이관 LoadLegacyPostingContext 와 같은 칼럼).
+        var (tables, tablesErr) = await GuardAsync("DOCFB·DOCFE·DOCF5·DOCFC", () => LoadPostingTablesAsync(pandata, ct)).ConfigureAwait(false);
 
-        // ⑤ 재고 기말수량 (작22: DOCFB 품목별 Σ입고−Σ출고 ↔ item_stock · DOCFC 최신월은 Detail 참고) + 품목별 차이 상위 20
-        await AddStockItemsAsync(pandata, tenantId, items, report.ItemDiffs, ct).ConfigureAwait(false);
+        // ②③⑧ 장부 미반영 보관 · 명세서 줄 = 반영 줄 + 보관 줄 · 봉합 전 옛 명세서 (갈래 C)
+        // ④⑤ 재고 기말 = DOCFC 최종 · 원장 이력 입·출(LedgerMove) · 맞춤 줄 (갈래 C — 종전 ④ DOCFB 순수량 · ⑤ DOCFB 품목별 = 자기 자신과 비교 → 제거 ⑨)
+        await AddPostingAndStockItemsAsync(tables, tablesErr, tenantId, report, ct).ConfigureAwait(false);
 
         // ⑥ 회계 분개 (DOCF7 ↔ journal_lines)
         await AddJournalItemsAsync(pandata, tenantId, items, ct).ConfigureAwait(false);
 
         // ⑦ 수금 · ⑧ 미수금 · ⑨ 미지급금 (DOCF5·DOCFE ↔ collections / 화면 식 — 작22 새 식) + 거래처별 차이 상위 20
-        await AddPartnerLedgerItemsAsync(pandata, pyojun, tenantId, items, report.PartnerDiffs, ct).ConfigureAwait(false);
+        await AddPartnerLedgerItemsAsync(pandata, tenantId, items, ct).ConfigureAwait(false);
+
+        // ⑥ 미수·미지급 = F3(거래처별 마지막 이월 + 그 뒤) ↔ 히트판 KPI 식(갈래 E) + 거래처별 차이 (갈래 C — 종전 DOCFE−DOCF5 새 식 대체)
+        await AddBalanceItemsAsync(pyojun, tables, tablesErr, tenantId, report, ct).ConfigureAwait(false);
 
         // ⑩ 마스터 4종 건수
         await AddMasterItemsAsync(pyojun, tenantId, items, ct).ConfigureAwait(false);
@@ -315,209 +319,164 @@ public sealed class MdbReconciliationService
     }
 
     // ────────────────────────────────────────────────────────────────
-    // ④ 재고원장
+    // ②③④⑤⑧ 장부 반영 분류 · 재고 · 원장 — 20260915작1 갈래 C (계산은 MdbReconPosting)
     // ────────────────────────────────────────────────────────────────
 
-    private sealed class LedgerAgg
+    /// <summary>레거시 표 묶음 — 없는 표는 null + Has* false.</summary>
+    private sealed class PostingTables
     {
-        public long RowCount;
-        public decimal QtyIn;   // IO=1 (매입) Σ
-        public decimal QtyOut;  // IO=2 (매출) Σ
-        public decimal Amount;
+        public DataTable? Docfb;
+        public DataTable? Docfe;
+        public DataTable? Docf5;
+        public DataTable? Docfc;
     }
 
-    private sealed class LedgerErpAgg
+    /// <summary>
+    /// 표 목록을 직접 읽고(목록 예외를 삼키지 않는다) 있는 표만 읽는다. 칼럼은 이관 <c>MdbMigrationService.LoadLegacyPostingContext</c> 와 같다
+    /// (DOCFE 머리 키 · DOCF5 6칸 · DOCFC 전체) + DOCFB 분류·원장 7칸. 61만행 DOCF5 를 올리는 것도 이관과 같다(⚠️ 부하 [4]).
+    /// </summary>
+    private static Task<PostingTables> LoadPostingTablesAsync(OleDbConnection pandata, CancellationToken ct)
     {
-        public long RowCount { get; set; }
-        public decimal QtyIn { get; set; }
-        public decimal QtyOut { get; set; }
-        public decimal Amount { get; set; }
-    }
-
-    private async Task AddLedgerItemsAsync(
-        OleDbConnection pandata, string tenantId, List<ReconItem> items, CancellationToken ct)
-    {
-        var (legacy, legacyErr) = await GuardAsync("DOCFB", async () =>
+        var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (DataRow t in pandata.GetSchema("Tables").Rows)
         {
-            var agg = new LedgerAgg();
-            await ReadMdbAsync(pandata,
-                "SELECT IJ_IO, COUNT(*) AS n, SUM(IJ_QTY) AS qty, SUM(IJ_AMT) AS amt FROM DOCFB GROUP BY IJ_IO",
-                r =>
-                {
-                    var io = ReadStr(r, 0);
-                    agg.RowCount += ReadLong(r, 1);
-                    agg.Amount += ReadDec(r, 3);
-                    if (io == "1") agg.QtyIn += ReadDec(r, 2);
-                    else if (io == "2") agg.QtyOut += ReadDec(r, 2);
-                }, ct).ConfigureAwait(false);
-            return agg;
-        }).ConfigureAwait(false);
-
-        // DESCRIBE stock_ledger: qty_in·qty_out decimal(15,3) · supply_amount decimal(15,2) NULL 허용 · source_type.
-        var (erp, erpErr) = await GuardAsync("stock_ledger", () =>
-            _db.QuerySingleAsync<LedgerErpAgg>(new CommandDefinition(
-                """
-                SELECT COUNT(*) AS RowCount,
-                       COALESCE(SUM(qty_in), 0)        AS QtyIn,
-                       COALESCE(SUM(qty_out), 0)       AS QtyOut,
-                       COALESCE(SUM(supply_amount), 0) AS Amount
-                  FROM stock_ledger
-                 WHERE tenant_id = @T AND source_type = 'migration'
-                """, new { T = tenantId }, commandTimeout: ErpCommandTimeoutSec, cancellationToken: ct))).ConfigureAwait(false);
-
-        var err = ErrOnly(legacyErr, erpErr);
-        var qtyDetail = JoinDetail(
-            legacy is null ? null : $"레거시 입고 {legacy.QtyIn:N3} · 출고 {legacy.QtyOut:N3}",
-            erp is null ? null : $"히트판 입고 {erp.QtyIn:N3} · 출고 {erp.QtyOut:N3}",
-            err);
-        items.Add(Make("ledger_rows", "원장", "재고원장 행수", legacy?.RowCount, erp?.RowCount, err));
-        items.Add(Make("ledger_net_qty", "원장", "재고원장 순수량(입고−출고)",
-            legacy is null ? null : legacy.QtyIn - legacy.QtyOut,
-            erp is null ? null : erp.QtyIn - erp.QtyOut, qtyDetail));
-        items.Add(Make("ledger_amount", "원장", "재고원장 공급가액", legacy?.Amount, erp?.Amount, err));
-    }
-
-    // ────────────────────────────────────────────────────────────────
-    // ⑤ 재고 기말수량 + 품목별 차이
-    // ────────────────────────────────────────────────────────────────
-
-    private sealed class StockLegacyAgg
-    {
-        public decimal QtyIn;      // DOCFB IO=1 ΣIJ_QTY (음수 포함 — 반품은 부호째 빠진다)
-        public decimal QtyOut;     // DOCFB IO=2 ΣIJ_QTY
-        public long OtherIoRows;   // IO 가 1·2 가 아닌 그룹(실측 0)
-        public decimal Qty => QtyIn - QtyOut;
-        public Dictionary<string, (string Name, decimal Qty)> ByItem = new(StringComparer.Ordinal);
-    }
-
-    /// <summary>종전(작21) 정답 칸 — DOCFC 최신월 SUM(IM_CQTY). 작22 부터는 Detail 참고값(레거시가 세는 74품목이 왜 다른지 사장님이 보실 수 있게 남긴다).</summary>
-    private sealed class StockMonthlyRef
-    {
-        public string Month = string.Empty;
-        public decimal Qty;
-        public decimal Amount;
-        public long ItemCount;
-    }
-
-    private sealed class StockErpRow
-    {
-        public string? ItemName { get; set; }
-        public string? Spec { get; set; }
-        public decimal Qty { get; set; }
-    }
-
-    private async Task AddStockItemsAsync(
-        OleDbConnection pandata, string tenantId, List<ReconItem> items, List<ReconDiffRow> itemDiffs, CancellationToken ct)
-    {
-        // 작22 (2026-09-09) C2 ⑤ — 레거시 열 = 히트판 화면 식(재고현황 = 입고 − 출고)을 레거시 원장(DOCFB)에 적용한 값.
-        //   품목별 GROUP BY (IJ_PUM, IJ_KU, IJ_IO) 의 ΣIJ_QTY 로 Σ(IO=1) − Σ(IO=2). IJ_IO 는 Text(1) 이라 문자열 "1"/"2" 로 가른다(mdb-schema-dump).
-        //   음수 수량(반품)은 부호째 더한다 — 이관 LedgerMove 가 반대 칸 절대값으로 넣어도 순수량은 같다(Q5).
-        //   선행검증 20260909검1 §2-6 실측: 128,925,885.05 − 100,542,248 = 28,383,637.05 = ERP item_stock 합(0 차).
-        var (legacy, legacyErr) = await GuardAsync("DOCFB(품목별)", async () =>
+            var name = t["TABLE_NAME"]?.ToString();
+            if (!string.IsNullOrEmpty(name)) names.Add(name);
+        }
+        ct.ThrowIfCancellationRequested();
+        var tables = new PostingTables
         {
-            var agg = new StockLegacyAgg();
-            await ReadMdbAsync(pandata,
-                "SELECT IJ_PUM, IJ_KU, IJ_IO, SUM(IJ_QTY) AS qty FROM DOCFB GROUP BY IJ_PUM, IJ_KU, IJ_IO",
-                r =>
-                {
-                    var pum = ReadStr(r, 0);
-                    var ku = ReadStr(r, 1);
-                    var io = ReadStr(r, 2);
-                    var qty = ReadDec(r, 3);
-                    decimal signed;
-                    if (io == "1") { agg.QtyIn += qty; signed = qty; }
-                    else if (io == "2") { agg.QtyOut += qty; signed = -qty; }
-                    else { agg.OtherIoRows++; return; }
+            Docfb = names.Contains("DOCFB") ? ReadMdbTable(pandata, "SELECT IJ_DT, IJ_IO, IJ_SEQ, IJ_BUY, IJ_QTY, IJ_AMT, IJ_VAT FROM DOCFB") : null,
+            Docfe = names.Contains("DOCFE") ? ReadMdbTable(pandata, "SELECT IJA_DT, IJA_IO, IJA_SEQ, IJA_BUY FROM DOCFE") : null,
+            Docf5 = names.Contains("DOCF5") ? ReadMdbTable(pandata, "SELECT S_BUY, S_YMD, S_GU, S_BAL, S_SUK, S_SSUN FROM DOCF5") : null,
+            Docfc = names.Contains("DOCFC") ? ReadMdbTable(pandata, "SELECT * FROM DOCFC") : null,
+        };
+        return Task.FromResult(tables);
+    }
 
-                    var key = ItemKey(pum, ku);
-                    var display = string.IsNullOrEmpty(ku) ? pum : $"{pum} {ku}";
-                    if (agg.ByItem.TryGetValue(key, out var cur))
-                        agg.ByItem[key] = (cur.Name, cur.Qty + signed);
-                    else
-                        agg.ByItem[key] = (display, signed);
-                }, ct).ConfigureAwait(false);
-            return agg;
-        }).ConfigureAwait(false);
+    private static DataTable ReadMdbTable(OleDbConnection conn, string sql)
+    {
+        using var cmd = new OleDbCommand(sql, conn);
+        using var reader = cmd.ExecuteReader();
+        var dt = new DataTable();
+        dt.Load(reader);
+        return dt;
+    }
 
-        // 종전 정답 칸(DOCFC 최신월)은 참고값으로 따로 읽는다 — 실패해도 ⑤ 판정엔 영향 없이 Detail 에서만 빠진다.
-        var (monthly, monthlyErr) = await GuardAsync("DOCFC(참고)", async () =>
+    private async Task AddPostingAndStockItemsAsync(
+        PostingTables? tables, string? tablesErr, string tenantId, MdbReconciliationReport report, CancellationToken ct)
+    {
+        var items = report.Items;
+
+        // ②③⑧ — 레거시 분류(DOCFB 없으면 NA)
+        MdbReconPosting.PostingLegacy? posting = null;
+        string? postingErr = tablesErr;
+        if (tables?.Docfb is not null)
         {
-            var m = new StockMonthlyRef();
-            await ReadMdbAsync(pandata, "SELECT MAX(IM_YM) AS ym FROM DOCFC",
-                r => m.Month = ReadStr(r, 0), ct).ConfigureAwait(false);
-            if (string.IsNullOrEmpty(m.Month))
-                throw new InvalidOperationException("DOCFC 에 월별 재고 기록이 없습니다.");
-
-            await ReadMdbAsync(pandata,
-                "SELECT COUNT(*) AS n, SUM(x.cq) AS cq, SUM(x.ca) AS ca FROM (SELECT IM_PUM, IM_KU, SUM(IM_CQTY) AS cq, SUM(IM_CAMT) AS ca FROM DOCFC WHERE IM_YM = ? GROUP BY IM_PUM, IM_KU) AS x",
-                r => { m.ItemCount = ReadLong(r, 0); m.Qty = ReadDec(r, 1); m.Amount = ReadDec(r, 2); },
-                ct, ("ym", m.Month)).ConfigureAwait(false);
-            return m;
-        }).ConfigureAwait(false);
-        if (monthlyErr is not null)
-            _logger.LogWarning("[MDB대사] DOCFC 참고값 읽기 실패 — ⑤ 판정은 DOCFB 로 계속: {Err}", monthlyErr);
-
-        // DESCRIBE item_stock: current_qty decimal(10,2) · items: item_name varchar(100) · spec varchar(100) · is_deleted. (2026-09-09 hitpan_e2e 재확인)
-        var (erpRows, erpErr) = await GuardAsync("item_stock", async () =>
-            (await _db.QueryAsync<StockErpRow>(new CommandDefinition(
-                """
-                SELECT i.item_name AS ItemName, i.spec AS Spec, SUM(s.current_qty) AS Qty
-                  FROM item_stock s
-                  JOIN items i ON i.item_id = s.item_id AND i.tenant_id = s.tenant_id
-                 WHERE s.tenant_id = @T AND i.is_deleted = 0
-                 GROUP BY i.item_name, i.spec
-                """, new { T = tenantId }, commandTimeout: ErpCommandTimeoutSec, cancellationToken: ct)).ConfigureAwait(false)).ToList()).ConfigureAwait(false);
-
-        decimal? erpTotal = null;
-        if (erpRows is not null)
+            (posting, postingErr) = await GuardAsync("장부 반영 분류", () => Task.FromResult(
+                MdbReconPosting.ComputePosting(tables.Docfb, tables.Docfe, tables.Docf5))).ConfigureAwait(false);
+        }
+        else if (tables is not null)
         {
-            erpTotal = erpRows.Sum(x => x.Qty);
-
-            if (legacy is not null)
-            {
-                // 품목별 차이: 키 = LegacyMdbMapping.ItemKey (품명|규격 · trim · 대소문자 무시 · 끝 '|' 제거 — 작22 ⑤ 키). 양쪽 합집합, 없는 쪽은 0.
-                var erpByKey = new Dictionary<string, (string Name, decimal Qty)>(StringComparer.Ordinal);
-                foreach (var row in erpRows)
-                {
-                    var name = row.ItemName ?? string.Empty;
-                    var spec = row.Spec ?? string.Empty;
-                    var key = ItemKey(name, spec);
-                    var display = string.IsNullOrWhiteSpace(spec) ? name.Trim() : $"{name.Trim()} {spec.Trim()}";
-                    if (erpByKey.TryGetValue(key, out var cur))
-                        erpByKey[key] = (cur.Name, cur.Qty + row.Qty);
-                    else
-                        erpByKey[key] = (display, row.Qty);
-                }
-
-                var diffs = new List<ReconDiffRow>();
-                foreach (var key in legacy.ByItem.Keys.Union(erpByKey.Keys, StringComparer.Ordinal))
-                {
-                    var l = legacy.ByItem.TryGetValue(key, out var lv) ? lv : (Name: string.Empty, Qty: 0m);
-                    var e = erpByKey.TryGetValue(key, out var ev) ? ev : (Name: string.Empty, Qty: 0m);
-                    var diff = e.Qty - l.Qty;
-                    if (diff == 0m) continue;
-                    diffs.Add(new ReconDiffRow
-                    {
-                        Name = string.IsNullOrEmpty(l.Name) ? e.Name : l.Name,
-                        Legacy = l.Qty,
-                        Erp = e.Qty,
-                        Diff = diff
-                    });
-                }
-                itemDiffs.AddRange(diffs.OrderByDescending(d => Math.Abs(d.Diff)).ThenBy(d => d.Name, StringComparer.Ordinal).Take(TopDiffRows));
-            }
+            postingErr = "DOCFB 표 없음";
         }
 
-        var detail = JoinDetail(
-            "레거시 식 = 히트판 화면 식(사장님 9/9)",
-            legacy is null ? null : $"DOCFB 입고 Σ{legacy.QtyIn:N2} − 출고 Σ{legacy.QtyOut:N2} · 품목 {legacy.ByItem.Count:N0}"
-                + (legacy.OtherIoRows > 0 ? $" · 입출 구분 불명 그룹 {legacy.OtherIoRows:N0}" : string.Empty),
-            monthly is null ? null : $"레거시 월별집계(DOCFC {monthly.Month}) 참고: 기말수량 {monthly.Qty:N2} · 기말금액 {monthly.Amount:N0} · 품목 {monthly.ItemCount:N0}",
-            erpRows is null ? null : $"히트판 품목 {erpRows.Count:N0}",
-            ErrOnly(legacyErr, erpErr));
-        items.Add(Make("stock_qty", "재고", "재고(기말수량)", legacy?.Qty, erpTotal, detail));
+        var (archive, archiveErr) = await GuardAsync("보관 표(ERP)", () => MdbReconPosting.ReadArchiveAsync(_db, tenantId, ct)).ConfigureAwait(false);
+        var (stmtLines, stmtErr) = await GuardAsync("명세서 줄(ERP)", async () =>
+            new ScalarBox { Value = await MdbReconPosting.CountStatementLinesAsync(_db, tenantId, ct).ConfigureAwait(false) }).ConfigureAwait(false);
+        ScalarBox? leftover = null;
+        string? leftoverErr = null;
+        if (posting is not null)
+        {
+            (leftover, leftoverErr) = await GuardAsync("봉합 전 옛 명세서(ERP)", async () =>
+                new ScalarBox { Value = await MdbReconPosting.CountLeftoverAsync(_db, tenantId, posting.ArchivedSourceIds, ct).ConfigureAwait(false) }).ConfigureAwait(false);
+        }
+
+        MdbReconPosting.AddPostingItems(items, report.Warnings, posting, archive,
+            stmtLines is null ? null : (long)stmtLines.Value, leftover is null ? null : (long)leftover.Value,
+            ErrOnly(postingErr, archiveErr, stmtErr, leftoverErr));
+
+        // ④⑤ — DOCFC 최종 · 원장 입·출
+        MdbLegacyFinalStock.FinalStockResult? final = null;
+        string? finalErr = tablesErr;
+        if (tables?.Docfc is not null)
+            (final, finalErr) = await GuardAsync("DOCFC 최종재고", () => Task.FromResult(MdbLegacyFinalStock.ComputeFinalStock(tables.Docfc)!)).ConfigureAwait(false);
+
+        MdbReconPosting.LedgerLegacy? ledgerLegacy = null;
+        if (tables?.Docfb is not null)
+            (ledgerLegacy, _) = await GuardAsync("DOCFB 원장", () => Task.FromResult(MdbReconPosting.ComputeLedgerLegacy(tables.Docfb))).ConfigureAwait(false);
+
+        var (ledgerErp, ledgerErpErr) = await GuardAsync("stock_ledger", () => MdbReconPosting.ReadLedgerErpAsync(_db, tenantId, ct)).ConfigureAwait(false);
+        var (stockErp, stockErpErr) = await GuardAsync("item_stock", () => MdbReconPosting.ReadStockErpAsync(_db, tenantId, ct)).ConfigureAwait(false);
+
+        MdbReconPosting.AddStockItems(items, report.ItemDiffs, report.Warnings,
+            final, tables is not null && tables.Docfc is null, stockErp, ledgerLegacy, ledgerErp, posting?.LastValidDate,
+            ErrOnly(finalErr, ledgerErpErr, stockErpErr), TopDiffRows);
+
+        _logger.LogInformation(
+            "[MDB대사] 장부분류 tenant={Tenant} 보관판매={ArchS} 보관매입={ArchP} 옛명세서={Leftover} 분류못함={Unclassified} 최종재고달={FinalYm}",
+            tenantId, posting?.ArchiveSales.Groups, posting?.ArchivePurchase.Groups, leftover?.Value, posting?.Unclassified, final?.MaxYm);
     }
 
+    private async Task AddBalanceItemsAsync(
+        OleDbConnection pyojun, PostingTables? tables, string? tablesErr, string tenantId, MdbReconciliationReport report, CancellationToken ct)
+    {
+        MdbReconPosting.BalanceLegacy? legacy = null;
+        string? legacyErr = tablesErr;
+        var docf5Missing = tables is not null && (tables.Docf5 is null || tables.Docf5.Rows.Count == 0);
+        if (tables?.Docf5 is { Rows.Count: > 0 })
+            (legacy, legacyErr) = await GuardAsync("F3 잔액", () => Task.FromResult(MdbReconPosting.ComputeBalanceLegacy(tables.Docf5)!)).ConfigureAwait(false);
+
+        var (erp, erpErr) = await GuardAsync("미수·미지급(ERP)", () => MdbReconPosting.ReadBalanceErpAsync(_db, tenantId, ct)).ConfigureAwait(false);
+        MdbReconPosting.AddBalanceItems(report.Items, report.Warnings, legacy, docf5Missing, erp, ErrOnly(legacyErr, erpErr));
+
+        if (legacy is null) return;
+
+        // 거래처별 차이 — F3(코드별)를 히트판 거래처로 모아(옛 코드 여러 개 → 한 거래처) 히트판 거래처 잔액과 비교.
+        var (legacyNames, namesErr) = await GuardAsync("DOCF8", async () =>
+        {
+            var names = new Dictionary<int, string>();
+            await ReadMdbAsync(pyojun, "SELECT buy_code, buy_name FROM DOCF8",
+                r => names[ReadInt(r, 0)] = ReadStr(r, 1), ct).ConfigureAwait(false);
+            return names;
+        }).ConfigureAwait(false);
+        if (namesErr is not null)
+            _logger.LogWarning("[MDB대사] DOCF8 거래처명 읽기 실패 — 거래처 차이 목록은 코드로 표시: {Err}", namesErr);
+
+        var (erpRows, rowsErr) = await GuardAsync("거래처별 잔액(ERP)", async () =>
+            (await _db.QueryAsync<PartnerErpRow>(new CommandDefinition(
+                $$"""
+                SELECT p.partner_id AS PartnerId, p.partner_name AS PartnerName, p.partner_code AS PartnerCode,
+                       p.migrated_source_hash AS MigratedSourceHash,
+                       COALESCE(sd.amt, 0) - COALESCE(c.amt, 0) + GREATEST(COALESCE(plb.bal, 0), 0) AS Receivable,
+                       COALESCE(pr.amt, 0) - COALESCE(rt.amt, 0) - COALESCE(pay.amt, 0) + GREATEST(-COALESCE(plb.bal, 0), 0) AS Payable
+                  FROM partners p
+                  LEFT JOIN (SELECT partner_id, SUM(total_amount + vat_amount) AS amt FROM sales_deliveries
+                              WHERE tenant_id=@TenantId AND status IN ('confirmed','invoiced') AND is_deleted=0
+                                AND NOT (COALESCE(source_type,'') = 'migration' AND {{MdbLegacyPartnerBalance.HasLegacyBalanceSql}}) GROUP BY partner_id) sd ON sd.partner_id = p.partner_id
+                  LEFT JOIN (SELECT partner_id, SUM(amount) AS amt FROM collections
+                              WHERE tenant_id=@TenantId AND ref_doc_type = 'sales_delivery'
+                                AND NOT (COALESCE(source_type,'') = 'migration' AND {{MdbLegacyPartnerBalance.HasLegacyBalanceSql}}) GROUP BY partner_id) c ON c.partner_id = p.partner_id
+                  LEFT JOIN (SELECT partner_id, SUM(total_amount + vat_amount) AS amt FROM purchase_receipts
+                              WHERE tenant_id=@TenantId AND status='confirmed'
+                                AND NOT (COALESCE(source_type,'') = 'migration' AND {{MdbLegacyPartnerBalance.HasLegacyBalanceSql}}) GROUP BY partner_id) pr ON pr.partner_id = p.partner_id
+                  LEFT JOIN (SELECT rt.partner_id, COALESCE(SUM(rti.supply_amount + rti.vat_amount),0) AS amt FROM purchase_returns rt
+                              LEFT JOIN purchase_return_items rti ON rti.return_id=rt.return_id AND rti.tenant_id=rt.tenant_id
+                              WHERE rt.tenant_id=@TenantId AND rt.is_deleted=0 AND rt.status='confirmed' GROUP BY rt.partner_id) rt ON rt.partner_id = p.partner_id
+                  LEFT JOIN (SELECT partner_id, SUM(amount) AS amt FROM payments
+                              WHERE tenant_id=@TenantId AND is_active=1 AND payment_type='purchase'
+                                AND NOT (COALESCE(source_type,'') = 'migration' AND {{MdbLegacyPartnerBalance.HasLegacyBalanceSql}}) GROUP BY partner_id) pay ON pay.partner_id = p.partner_id
+                  LEFT JOIN (SELECT partner_id, SUM(balance_amount) AS bal FROM partner_legacy_balances
+                              WHERE tenant_id=@TenantId GROUP BY partner_id) plb ON plb.partner_id = p.partner_id
+                 WHERE p.tenant_id = @TenantId
+                """, new { TenantId = tenantId }, commandTimeout: ErpCommandTimeoutSec, cancellationToken: ct)).ConfigureAwait(false)).ToList()).ConfigureAwait(false);
+        if (rowsErr is not null)
+        {
+            _logger.LogWarning("[MDB대사] 거래처별 ERP 잔액 읽기 실패 — 거래처 차이 목록 생략: {Err}", rowsErr);
+            return;
+        }
+        BuildPartnerDiffs(new Dictionary<int, decimal>(legacy.ByCode), legacyNames, erpRows!, report.PartnerDiffs);
+    }
     // ────────────────────────────────────────────────────────────────
     // ⑥ 회계 분개
     // ────────────────────────────────────────────────────────────────
@@ -573,22 +532,7 @@ public sealed class MdbReconciliationService
         public long CollectionRows;
         public decimal PaymentSum;      // S_GU B~F ΣS_BAL
         public long PaymentRows;
-        // 종전 식(작21) — 거래처별 (ΣS_BAL−ΣS_SUK) 양수 합 = Receivable · 음수 합의 절대값 = Payable. 작22 부터 Detail 참고값.
-        public decimal Receivable;
-        public decimal Payable;
-        public Dictionary<int, decimal> NetByPartner = new();
-        // 작22 (2026-09-09) C2 — 거래처별 수금(S_GU 1~5 ΣS_SUK) · 지급(S_GU B~F ΣS_BAL). 새 식의 빼는 쪽.
-        public Dictionary<int, decimal> CollByPartner = new();
-        public Dictionary<int, decimal> PayByPartner = new();
-    }
-
-    /// <summary>작22 C2 — DOCFE 거래처별 매출(IO=2)·매입(IO=1) 합계 Σ(IJA_AMT1+IJA_AMT2) = 공급가+부가세. 새 식의 더하는 쪽.</summary>
-    private sealed class DocfeByPartnerAgg
-    {
-        public Dictionary<int, decimal> SalesByPartner = new();
-        public Dictionary<int, decimal> PurchaseByPartner = new();
-        public decimal SalesTotal;
-        public decimal PurchaseTotal;
+        // 20260915작1 갈래 C: 종전 거래처별 사전(작21 순잔액 · 작22 DOCFE−DOCF5)은 F3(AddBalanceItemsAsync)로 대체돼 뺐다.
     }
 
     private sealed class PartnerErpRow
@@ -617,9 +561,11 @@ public sealed class MdbReconciliationService
     private static readonly string[] PaymentCodes = { "B", "C", "D", "E", "F" };
 
     private async Task AddPartnerLedgerItemsAsync(
-        OleDbConnection pandata, OleDbConnection pyojun, string tenantId,
-        List<ReconItem> items, List<ReconDiffRow> partnerDiffs, CancellationToken ct)
+        OleDbConnection pandata, string tenantId, List<ReconItem> items, CancellationToken ct)
     {
+        // 🔴 20260915작1 갈래 C: ⑧⑨ 미수·미지급과 거래처별 차이는 AddBalanceItemsAsync(F3 ↔ 갈래 E 식)로 옮겼다.
+        //   종전 작22 새 식(DOCFE 매출 − DOCF5 수금)은 레거시 이월잔액을 모르는 식이라 F3 와 다른 숫자를 냈다(설계 §17).
+        //   여기엔 ⑦ 수금(계열 합)만 남는다.
         var (legacy, legacyErr) = await GuardAsync("DOCF5", async () =>
         {
             var agg = new PartnerLedgerLegacyAgg();
@@ -632,89 +578,10 @@ public sealed class MdbReconciliationService
                     if (CollectionCodes.Contains(gu)) { agg.CollectionRows += ReadLong(r, 1); agg.CollectionSum += ReadDec(r, 2); }
                     else if (PaymentCodes.Contains(gu)) { agg.PaymentRows += ReadLong(r, 1); agg.PaymentSum += ReadDec(r, 3); }
                 }, ct).ConfigureAwait(false);
-
-            // 거래처별 — (S_BUY, S_GU) 로 묶어 한 번에 받는다(11,813 거래처 × 코드 ≤ 12).
-            //   종전 식(참고): 잔액 = ΣS_BAL − ΣS_SUK (전 코드). 작22 새 식: 수금 = 1~5 의 ΣS_SUK · 지급 = B~F 의 ΣS_BAL 을 거래처별로 따로 둔다.
-            await ReadMdbAsync(pandata,
-                "SELECT S_BUY, S_GU, SUM(S_BAL) AS bal, SUM(S_SUK) AS suk FROM DOCF5 GROUP BY S_BUY, S_GU",
-                r =>
-                {
-                    var buy = ReadInt(r, 0);
-                    var gu = ReadStr(r, 1).ToUpperInvariant();
-                    var bal = ReadDec(r, 2);
-                    var suk = ReadDec(r, 3);
-                    var net = bal - suk;
-                    agg.NetByPartner[buy] = agg.NetByPartner.TryGetValue(buy, out var cur) ? cur + net : net;
-                    if (CollectionCodes.Contains(gu))
-                        agg.CollByPartner[buy] = agg.CollByPartner.TryGetValue(buy, out var c) ? c + suk : suk;
-                    else if (PaymentCodes.Contains(gu))
-                        agg.PayByPartner[buy] = agg.PayByPartner.TryGetValue(buy, out var p) ? p + bal : bal;
-                }, ct).ConfigureAwait(false);
-
-            foreach (var net in agg.NetByPartner.Values)
-            {
-                if (net > 0) agg.Receivable += net;
-                else if (net < 0) agg.Payable += -net;
-            }
             return agg;
         }).ConfigureAwait(false);
 
-        // 작22 (2026-09-09) C2 ⑧⑨ — 새 식의 더하는 쪽: DOCFE 거래처별 Σ(IJA_AMT1+IJA_AMT2) (IO=2 매출 · IO=1 매입).
-        //   두 컬럼을 따로 SUM 해 C# 에서 더한다 — 한 식으로 더하면 한쪽이 NULL 인 행이 통째로 빠진다(AddTaxInvoiceItemsAsync 의 IIF 와 같은 이유).
-        //   실측(선행검증 §2-6): IO=2 12,103,495,364 · IO=1 1,807,039,442. DOCF5 와 별도 guard — DOCFE 가 실패해도 ⑦ 수금은 산다.
-        var (docfe, docfeErr) = await GuardAsync("DOCFE(거래처별)", async () =>
-        {
-            var d = new DocfeByPartnerAgg();
-            await ReadMdbAsync(pandata,
-                "SELECT IJA_IO, IJA_BUY, SUM(IJA_AMT1) AS a1, SUM(IJA_AMT2) AS a2 FROM DOCFE GROUP BY IJA_IO, IJA_BUY",
-                r =>
-                {
-                    var io = ReadStr(r, 0);
-                    var buy = ReadInt(r, 1);
-                    var amt = ReadDec(r, 2) + ReadDec(r, 3);
-                    if (io == "2") { d.SalesTotal += amt; d.SalesByPartner[buy] = d.SalesByPartner.TryGetValue(buy, out var s) ? s + amt : amt; }
-                    else if (io == "1") { d.PurchaseTotal += amt; d.PurchaseByPartner[buy] = d.PurchaseByPartner.TryGetValue(buy, out var p) ? p + amt : amt; }
-                }, ct).ConfigureAwait(false);
-            return d;
-        }).ConfigureAwait(false);
-
-        // 새 식 합계 — 미수 = 매출 − 수금 · 미지급 = 매입 − 지급 (FinanceService kpiSql 과 같은 모양을 레거시에). 거래처별 = 같은 식을 IJA_BUY/S_BUY 로 나눈 것.
-        //   기대값(이 MDB): 미수 5,565,664 (ERP 7,048,718.20 → 차 +1,483,054) · 미지급 −82,606,946 (ERP −82,556,945 → 차 +50,001).
-        decimal? receivableNew = null, payableNew = null;
-        Dictionary<int, decimal>? newNetByPartner = null;
-        if (legacy is not null && docfe is not null)
-        {
-            receivableNew = docfe.SalesTotal - legacy.CollectionSum;
-            payableNew = docfe.PurchaseTotal - legacy.PaymentSum;
-            newNetByPartner = new Dictionary<int, decimal>();
-            var partnerCodes = docfe.SalesByPartner.Keys
-                .Concat(docfe.PurchaseByPartner.Keys)
-                .Concat(legacy.CollByPartner.Keys)
-                .Concat(legacy.PayByPartner.Keys)
-                .Distinct();
-            foreach (var buy in partnerCodes)
-            {
-                var recv = (docfe.SalesByPartner.TryGetValue(buy, out var s) ? s : 0m) - (legacy.CollByPartner.TryGetValue(buy, out var c) ? c : 0m);
-                var pay = (docfe.PurchaseByPartner.TryGetValue(buy, out var p) ? p : 0m) - (legacy.PayByPartner.TryGetValue(buy, out var q) ? q : 0m);
-                newNetByPartner[buy] = recv - pay;
-            }
-        }
-
-        // 레거시 거래처명 (DOCF8.buy_name) — PII 컬럼(buy_topjumin 등)은 읽지 않는다.
-        var (legacyNames, namesErr) = await GuardAsync("DOCF8", async () =>
-        {
-            var names = new Dictionary<int, string>();
-            await ReadMdbAsync(pyojun, "SELECT buy_code, buy_name FROM DOCF8",
-                r => names[ReadInt(r, 0)] = ReadStr(r, 1), ct).ConfigureAwait(false);
-            return names;
-        }).ConfigureAwait(false);
-        if (namesErr is not null)
-            _logger.LogWarning("[MDB대사] DOCF8 거래처명 읽기 실패 — 거래처 차이 목록은 코드로 표시: {Err}", namesErr);
-
-        // ERP 합계 — 항목별로 따로 묻는다 (한 문장에 묶으면 61만행 수금 합계가 타임아웃을 끌고 가 셋이 같이 NA 가 됐다).
-        // DESCRIBE 확인: sales_deliveries(status,is_deleted,total_amount,vat_amount) · collections(amount,ref_doc_type,source_type,is_active)
-        //   · purchase_receipts(status,total_amount,vat_amount) · purchase_returns(is_deleted,status) · purchase_return_items(supply_amount,vat_amount,return_id,tenant_id)
-        //   · payments(amount,is_active,payment_type).
+        // DESCRIBE 확인: collections(amount,source_type,is_active).
         var (erpColl, collErr) = await GuardAsync("수금(ERP)", () =>
             _db.QuerySingleAsync<CollectionErpAgg>(new CommandDefinition(
                 """
@@ -723,92 +590,23 @@ public sealed class MdbReconciliationService
                  WHERE tenant_id=@T AND source_type='migration' AND is_active=1
                 """, new { T = tenantId }, commandTimeout: ErpCommandTimeoutSec, cancellationToken: ct))).ConfigureAwait(false);
 
-        var (erpPaySum, paySumErr) = await GuardAsync("지급(ERP)", () =>
-            _db.QuerySingleAsync<ScalarBox>(new CommandDefinition(
-                """
-                SELECT COALESCE(SUM(amount), 0) AS Value
-                  FROM payments
-                 WHERE tenant_id=@T AND is_active=1 AND payment_type='purchase'
-                """, new { T = tenantId }, commandTimeout: ErpCommandTimeoutSec, cancellationToken: ct))).ConfigureAwait(false);
-
-        // 미수 식 = FinanceService.GetDashboardAsync kpiSql 'receivable' 그대로.
-        var (erpRecv, recvErr) = await GuardAsync("미수금(ERP)", () =>
-            _db.QuerySingleAsync<ScalarBox>(new CommandDefinition(
-                """
-                SELECT
-                  COALESCE((SELECT SUM(total_amount + vat_amount) FROM sales_deliveries WHERE tenant_id=@T AND status IN ('confirmed','invoiced') AND is_deleted=0), 0)
-                  - COALESCE((SELECT SUM(amount) FROM collections WHERE tenant_id=@T AND ref_doc_type = 'sales_delivery'), 0) AS Value
-                """, new { T = tenantId }, commandTimeout: ErpCommandTimeoutSec, cancellationToken: ct))).ConfigureAwait(false);
-
-        // 미지급 식 = 같은 kpiSql 'payable' 그대로 (매입 − 매입반품 − 지급).
-        var (erpPay, payErr) = await GuardAsync("미지급금(ERP)", () =>
-            _db.QuerySingleAsync<ScalarBox>(new CommandDefinition(
-                """
-                SELECT
-                  COALESCE((SELECT SUM(total_amount + vat_amount) FROM purchase_receipts WHERE tenant_id=@T AND status='confirmed'), 0)
-                  - COALESCE((SELECT COALESCE(SUM(rti.supply_amount + rti.vat_amount),0) FROM purchase_returns rt LEFT JOIN purchase_return_items rti ON rti.return_id=rt.return_id AND rti.tenant_id=rt.tenant_id WHERE rt.tenant_id=@T AND rt.is_deleted=0 AND rt.status='confirmed'), 0)
-                  - COALESCE((SELECT SUM(amount) FROM payments WHERE tenant_id=@T AND is_active=1 AND payment_type='purchase'), 0) AS Value
-                """, new { T = tenantId }, commandTimeout: ErpCommandTimeoutSec, cancellationToken: ct))).ConfigureAwait(false);
-
-        // 거래처별 (같은 식을 partner_id 로 나눈 것). DESCRIBE partners: 레거시 코드 컬럼 없음 → migrated_source_hash 로 짝짓는다.
-        var (erpRows, rowsErr) = await GuardAsync("업체별원장(거래처별)", async () =>
-            (await _db.QueryAsync<PartnerErpRow>(new CommandDefinition(
-                """
-                SELECT p.partner_id AS PartnerId, p.partner_name AS PartnerName, p.partner_code AS PartnerCode,
-                       p.migrated_source_hash AS MigratedSourceHash,
-                       COALESCE(sd.amt, 0) - COALESCE(c.amt, 0) AS Receivable,
-                       COALESCE(pr.amt, 0) - COALESCE(rt.amt, 0) - COALESCE(pay.amt, 0) AS Payable
-                  FROM partners p
-                  LEFT JOIN (SELECT partner_id, SUM(total_amount + vat_amount) AS amt FROM sales_deliveries
-                              WHERE tenant_id=@T AND status IN ('confirmed','invoiced') AND is_deleted=0 GROUP BY partner_id) sd ON sd.partner_id = p.partner_id
-                  LEFT JOIN (SELECT partner_id, SUM(amount) AS amt FROM collections
-                              WHERE tenant_id=@T AND ref_doc_type = 'sales_delivery' GROUP BY partner_id) c ON c.partner_id = p.partner_id
-                  LEFT JOIN (SELECT partner_id, SUM(total_amount + vat_amount) AS amt FROM purchase_receipts
-                              WHERE tenant_id=@T AND status='confirmed' GROUP BY partner_id) pr ON pr.partner_id = p.partner_id
-                  LEFT JOIN (SELECT rt.partner_id, COALESCE(SUM(rti.supply_amount + rti.vat_amount),0) AS amt FROM purchase_returns rt
-                              LEFT JOIN purchase_return_items rti ON rti.return_id=rt.return_id AND rti.tenant_id=rt.tenant_id
-                              WHERE rt.tenant_id=@T AND rt.is_deleted=0 AND rt.status='confirmed' GROUP BY rt.partner_id) rt ON rt.partner_id = p.partner_id
-                  LEFT JOIN (SELECT partner_id, SUM(amount) AS amt FROM payments
-                              WHERE tenant_id=@T AND is_active=1 AND payment_type='purchase' GROUP BY partner_id) pay ON pay.partner_id = p.partner_id
-                 WHERE p.tenant_id = @T
-                """, new { T = tenantId }, commandTimeout: ErpCommandTimeoutSec, cancellationToken: ct)).ConfigureAwait(false)).ToList()).ConfigureAwait(false);
-        if (rowsErr is not null)
-            _logger.LogWarning("[MDB대사] 거래처별 ERP 잔액 읽기 실패 — 거래처 차이 목록 생략: {Err}", rowsErr);
-
-        // 거래처별 차이 상위 20 — 작22 부터 새 식((매출−수금)−(매입−지급)) 기준. ERP 쪽(Receivable−Payable)도 같은 모양이다.
-        if (newNetByPartner is not null && erpRows is not null)
-            BuildPartnerDiffs(newNetByPartner, legacyNames, erpRows, partnerDiffs);
-
         items.Add(Make("collections", "수금", "수금", legacy?.CollectionSum, erpColl?.AmountSum,
             JoinDetail(
                 legacy is null ? null : $"레거시 수금 {legacy.CollectionRows:N0}건",
                 erpColl is null ? null : $"히트판 수금 {erpColl.Cnt:N0}건",
                 ErrOnly(legacyErr, collErr))));
-
-        // 종전 식은 버리지 않고 참고값으로 남긴다 — 레거시 화면이 왜 다른 숫자를 보였는지 사장님이 보실 수 있게.
-        var oldFormula = legacy is null ? null
-            : $"종전 식(거래처별 ΣS_BAL−ΣS_SUK) 참고: 미수 {legacy.Receivable:N0}({legacy.NetByPartner.Values.Count(v => v > 0):N0}곳) · 미지급 {legacy.Payable:N0}({legacy.NetByPartner.Values.Count(v => v < 0):N0}곳) · 거래처 {legacy.NetByPartner.Count:N0}곳";
-        items.Add(Make("receivable", "미수", "미수금", receivableNew, erpRecv?.Value,
-            JoinDetail(
-                "레거시 식 = 히트판 화면 식(사장님 9/9)",
-                legacy is null || docfe is null ? null : $"매출(DOCFE IO=2) {docfe.SalesTotal:N0} − 수금(DOCF5 S_GU 1~5) {legacy.CollectionSum:N0}",
-                oldFormula,
-                ErrOnly(legacyErr, docfeErr, recvErr))));
-        items.Add(Make("payable", "미지급", "미지급금", payableNew, erpPay?.Value,
-            JoinDetail(
-                "레거시 식 = 히트판 화면 식(사장님 9/9)",
-                legacy is null || docfe is null ? null : $"매입(DOCFE IO=1) {docfe.PurchaseTotal:N0} − 지급(DOCF5 S_GU B~F) {legacy.PaymentSum:N0} ({legacy.PaymentRows:N0}건)",
-                oldFormula,
-                erpPaySum is null ? null : $"히트판 지급 {erpPaySum.Value:N0}",
-                ErrOnly(legacyErr, docfeErr, payErr, paySumErr))));
     }
 
-    /// <param name="legacyNetByPartner">거래처코드 → 레거시 순잔액. 작22 부터 새 식((매출−수금)−(매입−지급)) 으로 만든 사전이 들어온다.</param>
+    /// <summary>
+    /// 거래처별 잔액 차이 상위 20 — 🔴 20260915작1 갈래 C: 레거시 코드별 F3 를 <b>히트판 거래처로 먼저 모은다</b>
+    /// (옛 코드 여러 개가 한 거래처로 합쳐지고 · 못 찾은 코드는 이관과 같이 폴백 거래처 <see cref="MdbLegacyPartnerBalance.FallbackPartnerCode"/> 로 간다).
+    /// 종전엔 코드마다 거래처 전체 잔액과 비교해 합쳐진 거래처가 늘 차이로 보였다.
+    /// </summary>
+    /// <param name="legacyNetByPartner">거래처코드 → 레거시 F3 잔액(+ 미수 · − 미지급).</param>
     private void BuildPartnerDiffs(
         Dictionary<int, decimal> legacyNetByPartner, Dictionary<int, string>? legacyNames,
         List<PartnerErpRow> erpRows, List<ReconDiffRow> partnerDiffs)
     {
-        // ERP 거래처를 해시(1순위)·partner_code "MIG-{code:D5}"(2순위) 로 찾을 수 있게 색인.
         var byHash = new Dictionary<string, PartnerErpRow>(StringComparer.OrdinalIgnoreCase);
         var byCode = new Dictionary<string, PartnerErpRow>(StringComparer.OrdinalIgnoreCase);
         foreach (var row in erpRows)
@@ -816,47 +614,45 @@ public sealed class MdbReconciliationService
             if (!string.IsNullOrEmpty(row.MigratedSourceHash)) byHash.TryAdd(row.MigratedSourceHash, row);
             if (!string.IsNullOrEmpty(row.PartnerCode)) byCode.TryAdd(row.PartnerCode, row);
         }
+        byCode.TryGetValue(MdbLegacyPartnerBalance.FallbackPartnerCode, out var fallback);
 
-        var matched = new HashSet<string>(StringComparer.Ordinal);
-        var diffs = new List<ReconDiffRow>();
+        var legacyByPartner = new Dictionary<string, decimal>(StringComparer.Ordinal);
+        var unmatched = new List<ReconDiffRow>();
         foreach (var (buyCode, legacyNet) in legacyNetByPartner)
         {
+            if (legacyNet == 0m) continue;
             var hash = ComputeSourceHash($"partners:buy_code:{buyCode}");
-            if (!byHash.TryGetValue(hash, out var erp))
-                byCode.TryGetValue($"MIG-{buyCode:D5}", out erp);
-
-            var erpNet = erp is null ? 0m : erp.Receivable - erp.Payable;
-            if (erp?.PartnerId is not null) matched.Add(erp.PartnerId);
-
-            var diff = erpNet - legacyNet;
-            if (diff == 0m) continue;
-
-            string? name = erp?.PartnerName;
-            if (string.IsNullOrWhiteSpace(name) && legacyNames is not null && legacyNames.TryGetValue(buyCode, out var ln))
-                name = ln;
-            if (string.IsNullOrWhiteSpace(name)) name = $"거래처코드 {buyCode}";
-            diffs.Add(new ReconDiffRow { Name = name.Trim(), Legacy = legacyNet, Erp = erpNet, Diff = diff });
+            if (!byHash.TryGetValue(hash, out var erp) && !byCode.TryGetValue($"MIG-{buyCode:D5}", out erp))
+                erp = fallback;
+            if (erp?.PartnerId is null)
+            {
+                var name = legacyNames is not null && legacyNames.TryGetValue(buyCode, out var ln) && !string.IsNullOrWhiteSpace(ln) ? ln.Trim() : $"거래처코드 {buyCode}";
+                unmatched.Add(new ReconDiffRow { Name = name, Legacy = legacyNet, Erp = 0m, Diff = -legacyNet });
+                continue;
+            }
+            legacyByPartner[erp.PartnerId] = (legacyByPartner.TryGetValue(erp.PartnerId, out var cur) ? cur : 0m) + legacyNet;
         }
 
-        // 레거시에 짝이 없는 ERP 거래처 — 잔액이 있으면 그것도 차이다.
+        var diffs = new List<ReconDiffRow>(unmatched);
         foreach (var row in erpRows)
         {
-            if (row.PartnerId is null || matched.Contains(row.PartnerId)) continue;
+            if (row.PartnerId is null) continue;
             var erpNet = row.Receivable - row.Payable;
-            if (erpNet == 0m) continue;
+            var legacyNet = legacyByPartner.TryGetValue(row.PartnerId, out var l) ? l : 0m;
+            var diff = erpNet - legacyNet;
+            if (diff == 0m) continue;
             diffs.Add(new ReconDiffRow
             {
                 Name = string.IsNullOrWhiteSpace(row.PartnerName) ? (row.PartnerCode ?? row.PartnerId) : row.PartnerName.Trim(),
-                Legacy = 0m,
+                Legacy = legacyNet,
                 Erp = erpNet,
-                Diff = erpNet
+                Diff = diff
             });
         }
 
         partnerDiffs.AddRange(diffs.OrderByDescending(d => Math.Abs(d.Diff)).ThenBy(d => d.Name, StringComparer.Ordinal).Take(TopDiffRows));
         _logger.LogDebug("[MDB대사] 거래처 차이 {Count}건 중 상위 {Top} 보고", diffs.Count, TopDiffRows);
     }
-
     // ────────────────────────────────────────────────────────────────
     // ⑩ 마스터 4종
     // ────────────────────────────────────────────────────────────────
@@ -1298,6 +1094,11 @@ public sealed class MdbReconciliationReport
     public List<ReconDiffRow> ItemDiffs { get; set; } = new();
     public int OkCount { get; set; }
     public int DiffCount { get; set; }
+    /// <summary>
+    /// 🆕 20260915작1 갈래 C — 표로 못 담는 알림(사람 말). 예: 「덮어쓰기로 다시 가져오기가 필요합니다」 · 머리표 없음 — 분류 못 함 ·
+    /// 거래처원장 표 없음 · 최종재고 표가 최신이 아님.
+    /// </summary>
+    public List<string> Warnings { get; set; } = new();
 }
 
 /// <summary>대사 항목 하나. Status ∈ OK | DIFF | NA · Diff = 히트판 − 레거시.</summary>
@@ -1320,4 +1121,458 @@ public sealed class ReconDiffRow
     public decimal Legacy { get; set; }
     public decimal Erp { get; set; }
     public decimal Diff { get; set; }
+}
+
+/// <summary>
+/// 🔴 20260915작1 갈래 C — 대사표 「장부 반영 분류」 계산 (설계 §7 · §14 · §16 · §17 · 작업지시서 §11-2 C).
+/// <para>MDB(OLEDB)를 모르는 부분만 모았다 — 입력은 DataTable(레거시 표) 과 IDbConnection(히트판). OS 무관이라 G6 게이트가 합성 표로 부른다.</para>
+/// <para>🔴 규칙을 새로 짓지 않는다: 판정 = <see cref="MdbLegacyUnpostedArchive.Partition"/>(이관과 같은 함수) · F3 = <see cref="LegacyMdbMapping.PartnerLegacyBalances"/> ·
+/// 재고 최종 = <see cref="MdbLegacyFinalStock.ComputeFinalStock"/> · 원장 입·출 = <see cref="LegacyMdbMapping.LedgerMove"/> ·
+/// 히트판 미수·미지급 = <c>FinanceService</c> KPI 식(갈래 E 규칙 · <see cref="MdbLegacyPartnerBalance.HasLegacyBalanceSql"/>).</para>
+/// DESCRIBE (#13 · 2026-09-15 격리 33306 f_new): legacy_unposted_documents(io_type · supply_amount · vat_amount · line_count · tenant_id) ·
+/// legacy_unposted_document_lines(doc_id · tenant_id) · sales_deliveries(source_id varchar(80) · source_type · is_deleted) ·
+/// purchase_receipts(source_id varchar(80) · source_type) · stock_ledger(source_type varchar(30) · source_id varchar(36) · qty_in · qty_out decimal(15,3) · supply_amount) ·
+/// item_stock(current_qty decimal(10,2) · avg_cost decimal(19,6)) · partner_legacy_balances(partner_id · balance_amount decimal(15,2)) · partners(partner_code · migrated_source_hash).
+/// </summary>
+public static class MdbReconPosting
+{
+    public const string StatusOk = "OK";
+    public const string StatusDiff = "DIFF";
+    public const string StatusNa = "NA";
+
+    /// <summary>화면 알림 — 덮어쓰기 필요.</summary>
+    public const string WarnLeftover = "봉합 전에 가져온 명세서 중 지금은 「장부 미반영 보관」 대상인 것이 남아 있습니다. 덮어쓰기로 다시 가져오기가 필요합니다.";
+    public const string WarnUnclassified = "이전 프로그램에 명세서 머리표가 없어 장부 반영 여부를 분류하지 못했습니다 — 모든 명세서를 장부에 반영했습니다.";
+    public const string WarnNoLedgerTable = "이전 프로그램에 거래처원장 표가 없어 명세서 머리표로만 분류했습니다 — 미수·미지급 대사는 할 수 없습니다.";
+    public const string WarnNoFinalStock = "이전 프로그램에 최종재고 표가 없어 재고 기말을 대사할 수 없습니다.";
+
+    private const int CommandTimeoutSec = 180;
+
+    /// <summary>항목 하나 — 한쪽 null 이면 NA · 차 0 이면 OK · 그 외 DIFF · 차 = 히트판 − 레거시 (대사 서비스 Make 와 같은 규칙).</summary>
+    public static ReconItem Item(string key, string category, string label, decimal? legacy, decimal? erp, string? detail)
+    {
+        var item = new ReconItem { Key = key, Category = category, Label = label, Legacy = legacy, Erp = erp, Detail = detail };
+        if (legacy is null || erp is null) { item.Status = StatusNa; return item; }
+        item.Diff = erp.Value - legacy.Value;
+        item.Status = item.Diff == 0m ? StatusOk : StatusDiff;
+        return item;
+    }
+
+    private static string? Join(params string?[] parts)
+    {
+        var list = parts.Where(p => !string.IsNullOrWhiteSpace(p)).ToList();
+        return list.Count == 0 ? null : string.Join(" · ", list);
+    }
+
+    // ════════════════════════════════════════════════════════════════
+    // ② ③ ⑧ 장부 반영 분류 (레거시)
+    // ════════════════════════════════════════════════════════════════
+
+    /// <summary>한 종류(판매·매입) 합계.</summary>
+    public sealed class SideAgg
+    {
+        public long Groups { get; set; }
+        public long Lines { get; set; }
+        public decimal Supply { get; set; }
+        public decimal Vat { get; set; }
+    }
+
+    /// <summary>DOCFB 분류 결과 (레거시 열).</summary>
+    public sealed class PostingLegacy
+    {
+        /// <summary>DOCFE 없음/0행 → 분류 못 함(R5).</summary>
+        public bool Unclassified { get; set; }
+        /// <summary>DOCF5 없음/0행 → 머리표로만 분류.</summary>
+        public bool NoLedgerTable { get; set; }
+        public int InputLines { get; set; }
+        public int StatementLines { get; set; }
+        public int ArchivedLines { get; set; }
+        public int UnknownIoLines { get; set; }
+        public SideAgg ArchiveSales { get; } = new();
+        public SideAgg ArchivePurchase { get; } = new();
+        /// <summary>보관 묶음의 명세서 source_id(<c>mig-docfb-{dt}-{io}-{seq}-{buy}</c> · 이관 명세서·보관 표와 같은 글자) — excluded_leftover 용.</summary>
+        public List<string> ArchivedSourceIds { get; } = new();
+        /// <summary>DOCFB 마지막 유효 날짜(yyyyMMdd) — 최종재고 표 신선도 비교용.</summary>
+        public string? LastValidDate { get; set; }
+    }
+
+    /// <summary>
+    /// DOCFB(IJ_DT·IJ_IO·IJ_SEQ·IJ_BUY·IJ_AMT·IJ_VAT) + DOCFE(IJA_DT·IJA_IO·IJA_SEQ·IJA_BUY) + DOCF5(S_BUY·S_YMD·S_GU·S_BAL·S_SUK·S_SSUN) → 분류.
+    /// 판정은 이관과 같은 <see cref="MdbLegacyUnpostedArchive.Partition"/> — 보관 = 미반영 또는 날짜 없음.
+    /// </summary>
+    public static PostingLegacy ComputePosting(DataTable docfb, DataTable? docfe, DataTable? docf5)
+    {
+        ArgumentNullException.ThrowIfNull(docfb);
+        var headerKeys = LegacyMdbMapping.BuildHeaderKeySet(docfe);
+        var (salesLinks, purchaseLinks) = LegacyMdbMapping.BuildLedgerLinkKeySets(docf5);
+        var p = MdbLegacyUnpostedArchive.Partition(docfb, headerKeys, salesLinks, purchaseLinks);
+
+        var result = new PostingLegacy
+        {
+            Unclassified = p.Unclassified,
+            NoLedgerTable = salesLinks is null,
+            InputLines = p.InputLines,
+            StatementLines = p.StatementLines,
+            ArchivedLines = p.ArchivedLines,
+            UnknownIoLines = p.UnknownIoLines,
+        };
+        foreach (var g in p.Archived)
+        {
+            var side = g.Key.Io == 2 ? result.ArchiveSales : result.ArchivePurchase;
+            side.Groups++;
+            side.Lines += g.Rows.Count;
+            foreach (DataRow r in g.Rows)
+            {
+                side.Supply += RowDec(r, "IJ_AMT");
+                side.Vat += RowDec(r, "IJ_VAT");
+            }
+            result.ArchivedSourceIds.Add($"mig-docfb-{g.Key.Dt}-{g.Key.Io}-{g.Key.Seq}-{g.Key.Buy}");
+        }
+        foreach (DataRow r in docfb.Rows)
+        {
+            var dt = RowStr(r, "IJ_DT").Trim();
+            if (LegacyMdbMapping.TryParseLegacyDate(dt, out _) && (result.LastValidDate is null || string.CompareOrdinal(dt, result.LastValidDate) > 0))
+                result.LastValidDate = dt;
+        }
+        return result;
+    }
+
+    /// <summary>히트판 보관 표 합계.</summary>
+    public sealed class ArchiveErp
+    {
+        public SideAgg Sales { get; } = new();
+        public SideAgg Purchase { get; } = new();
+    }
+
+    private sealed class ArchiveRow
+    {
+        public string? IoType { get; set; }
+        public long Docs { get; set; }
+        public long LineCnt { get; set; }
+        public decimal Supply { get; set; }
+        public decimal Vat { get; set; }
+    }
+
+    /// <summary>legacy_unposted_documents/_lines 종류별 건·줄(실제 줄 표)·공급가·부가세.</summary>
+    public static async Task<ArchiveErp> ReadArchiveAsync(IDbConnection db, string tenantId, CancellationToken ct)
+    {
+        var rows = await db.QueryAsync<ArchiveRow>(new CommandDefinition(
+            """
+            SELECT d.io_type AS IoType, COUNT(*) AS Docs,
+                   COALESCE(SUM((SELECT COUNT(*) FROM legacy_unposted_document_lines l WHERE l.tenant_id = d.tenant_id AND l.doc_id = d.doc_id)), 0) AS LineCnt,
+                   COALESCE(SUM(d.supply_amount), 0) AS Supply, COALESCE(SUM(d.vat_amount), 0) AS Vat
+              FROM legacy_unposted_documents d
+             WHERE d.tenant_id = @T
+             GROUP BY d.io_type
+            """, new { T = tenantId }, commandTimeout: CommandTimeoutSec, cancellationToken: ct)).ConfigureAwait(false);
+        var e = new ArchiveErp();
+        foreach (var r in rows)
+        {
+            var side = r.IoType == "sales" ? e.Sales : r.IoType == "purchase" ? e.Purchase : null;
+            if (side is null) continue;
+            side.Groups += r.Docs; side.Lines += r.LineCnt; side.Supply += r.Supply; side.Vat += r.Vat;
+        }
+        return e;
+    }
+
+    /// <summary>이관 명세서 줄(판매 줄 + 매입 줄 · source_type='migration').</summary>
+    public static Task<long> CountStatementLinesAsync(IDbConnection db, string tenantId, CancellationToken ct)
+        => db.ExecuteScalarAsync<long>(new CommandDefinition(
+            """
+            SELECT
+              (SELECT COUNT(*) FROM sales_delivery_items i JOIN sales_deliveries d ON d.delivery_id = i.delivery_id AND d.tenant_id = i.tenant_id
+                WHERE d.tenant_id = @T AND d.source_type = 'migration' AND d.is_deleted = 0)
+            + (SELECT COUNT(*) FROM purchase_receipt_items i JOIN purchase_receipts r ON r.receipt_id = i.receipt_id AND r.tenant_id = i.tenant_id
+                WHERE r.tenant_id = @T AND r.source_type = 'migration')
+            """, new { T = tenantId }, commandTimeout: CommandTimeoutSec, cancellationToken: ct));
+
+    /// <summary>
+    /// ⑧ excluded_leftover — 지금 판정으로는 보관 대상인데 히트판에 명세서(이관)로 남은 행 수. 봉합 전 이관 뒤 「보태기」로 다시 가져온 DB 에서 생긴다.
+    /// source_id 는 이관 명세서·보관 표가 같은 글자라 그대로 맞춘다. 1,000개씩 끊는다.
+    /// </summary>
+    public static async Task<long> CountLeftoverAsync(IDbConnection db, string tenantId, IReadOnlyList<string> archivedSourceIds, CancellationToken ct)
+    {
+        long total = 0;
+        for (var i = 0; i < archivedSourceIds.Count; i += 1000)
+        {
+            var chunk = archivedSourceIds.Skip(i).Take(1000).ToList();
+            total += await db.ExecuteScalarAsync<long>(new CommandDefinition(
+                """
+                SELECT
+                  (SELECT COUNT(*) FROM sales_deliveries WHERE tenant_id = @T AND source_type = 'migration' AND is_deleted = 0 AND source_id IN @Ids)
+                + (SELECT COUNT(*) FROM purchase_receipts WHERE tenant_id = @T AND source_type = 'migration' AND source_id IN @Ids)
+                """, new { T = tenantId, Ids = chunk }, commandTimeout: CommandTimeoutSec, cancellationToken: ct)).ConfigureAwait(false);
+        }
+        return total;
+    }
+
+    /// <summary>② ③ ⑦ ⑧ 항목 + 알림.</summary>
+    public static void AddPostingItems(List<ReconItem> items, List<string> warnings,
+        PostingLegacy? legacy, ArchiveErp? erp, long? statementLines, long? leftover, string? err)
+    {
+        if (legacy is not null)
+        {
+            if (legacy.Unclassified) warnings.Add(WarnUnclassified);
+            else if (legacy.NoLedgerTable) warnings.Add(WarnNoLedgerTable);
+        }
+        var cls = legacy is null ? null : legacy.Unclassified ? "머리표 없음 — 분류 못 함" : legacy.NoLedgerTable ? "거래처원장 표 없음 — 머리표로만 분류" : null;
+        void Side(string io, string text, SideAgg? l, SideAgg? e)
+        {
+            items.Add(Item($"archive_{io}_count", "보관", $"장부 미반영 보관({text}) 건수", l?.Groups, e?.Groups,
+                Join("레거시 = 머리표도 거래처원장 연결도 없는 묶음(날짜 없는 묶음 포함)", cls, err)));
+            items.Add(Item($"archive_{io}_lines", "보관", $"장부 미반영 보관({text}) 줄", l?.Lines, e?.Lines, err));
+            items.Add(Item($"archive_{io}_supply", "보관", $"장부 미반영 보관({text}) 공급가액", l?.Supply, e?.Supply, err));
+            items.Add(Item($"archive_{io}_vat", "보관", $"장부 미반영 보관({text}) 부가세", l?.Vat, e?.Vat, err));
+        }
+        Side("sales", "판매", legacy?.ArchiveSales, erp?.Sales);
+        Side("purchase", "매입", legacy?.ArchivePurchase, erp?.Purchase);
+
+        decimal? erpLines = erp is null || statementLines is null ? null : statementLines.Value + erp.Sales.Lines + erp.Purchase.Lines;
+        items.Add(Item("docfb_lines", "보관", "명세서 줄 = 장부 반영 줄 + 보관 줄", legacy?.InputLines - legacy?.UnknownIoLines, erpLines,
+            Join(legacy is null ? null : $"레거시 전체 줄 {legacy.InputLines:N0} = 반영 {legacy.StatementLines:N0} + 보관 {legacy.ArchivedLines:N0}"
+                    + (legacy.UnknownIoLines > 0 ? $" + 판매/매입 구분 없는 줄 {legacy.UnknownIoLines:N0}(가져오지 않음)" : string.Empty),
+                 erp is null || statementLines is null ? null : $"히트판 명세서 줄 {statementLines:N0} + 보관 줄 {erp.Sales.Lines + erp.Purchase.Lines:N0}",
+                 err)));
+
+        items.Add(Item("excluded_leftover", "보관", "보관 대상인데 명세서로 남은 옛 자료", legacy is null ? null : 0m, leftover,
+            Join("0 이어야 합니다 — 남아 있으면 매출·미수가 부풉니다", err)));
+        if (leftover is > 0) warnings.Add(WarnLeftover + $" (남은 명세서 {leftover:N0}건)");
+    }
+
+    // ════════════════════════════════════════════════════════════════
+    // ⑤ 재고원장 입·출 (LedgerMove) · 맞춤 줄
+    // ════════════════════════════════════════════════════════════════
+
+    /// <summary>레거시 재고원장 열.</summary>
+    public sealed class LedgerLegacy
+    {
+        public long Rows { get; set; }
+        public decimal QtyIn { get; set; }
+        public decimal QtyOut { get; set; }
+        public decimal Amount { get; set; }
+    }
+
+    /// <summary>DOCFB(IJ_IO·IJ_QTY·IJ_AMT) 줄마다 <see cref="LegacyMdbMapping.LedgerMove"/> — 판매/매입 아닌 줄은 이관도 안 넣으므로 뺀다.</summary>
+    public static LedgerLegacy ComputeLedgerLegacy(DataTable docfb)
+    {
+        ArgumentNullException.ThrowIfNull(docfb);
+        var l = new LedgerLegacy();
+        foreach (DataRow r in docfb.Rows)
+        {
+            var io = RowStr(r, "IJ_IO").Trim();
+            if (io is not ("1" or "2")) continue;
+            var (_, qin, qout) = LegacyMdbMapping.LedgerMove(io, RowDec(r, "IJ_QTY"));
+            l.Rows++; l.QtyIn += qin; l.QtyOut += qout; l.Amount += RowDec(r, "IJ_AMT");
+        }
+        return l;
+    }
+
+    /// <summary>히트판 이관 원장 — 이력 줄(맞춤 줄 제외)과 맞춤 줄(<c>mb-adj-</c>)을 나눠 센다.</summary>
+    public sealed class LedgerErp
+    {
+        public long HistRows { get; set; }
+        public decimal HistIn { get; set; }
+        public decimal HistOut { get; set; }
+        public decimal HistAmount { get; set; }
+        public long AdjRows { get; set; }
+        public decimal AdjIn { get; set; }
+        public decimal AdjOut { get; set; }
+    }
+
+    public static Task<LedgerErp> ReadLedgerErpAsync(IDbConnection db, string tenantId, CancellationToken ct)
+        => db.QuerySingleAsync<LedgerErp>(new CommandDefinition(
+            """
+            SELECT
+              COALESCE(SUM(CASE WHEN source_id NOT LIKE @Adj THEN 1 ELSE 0 END), 0) AS HistRows,
+              COALESCE(SUM(CASE WHEN source_id NOT LIKE @Adj THEN qty_in ELSE 0 END), 0) AS HistIn,
+              COALESCE(SUM(CASE WHEN source_id NOT LIKE @Adj THEN qty_out ELSE 0 END), 0) AS HistOut,
+              COALESCE(SUM(CASE WHEN source_id NOT LIKE @Adj THEN COALESCE(supply_amount, 0) ELSE 0 END), 0) AS HistAmount,
+              COALESCE(SUM(CASE WHEN source_id LIKE @Adj THEN 1 ELSE 0 END), 0) AS AdjRows,
+              COALESCE(SUM(CASE WHEN source_id LIKE @Adj THEN qty_in ELSE 0 END), 0) AS AdjIn,
+              COALESCE(SUM(CASE WHEN source_id LIKE @Adj THEN qty_out ELSE 0 END), 0) AS AdjOut
+              FROM stock_ledger
+             WHERE tenant_id = @T AND source_type = 'migration'
+            """, new { T = tenantId, Adj = MdbLegacyFinalStock.AdjustmentSourceIdPrefix + "%" }, commandTimeout: CommandTimeoutSec, cancellationToken: ct));
+
+    // ════════════════════════════════════════════════════════════════
+    // ④ 재고 기말 = DOCFC 최종
+    // ════════════════════════════════════════════════════════════════
+
+    /// <summary>히트판 품목(재고 키) 합.</summary>
+    public sealed class StockErpRow
+    {
+        public string? ItemName { get; set; }
+        public string? Spec { get; set; }
+        public decimal Qty { get; set; }
+        public decimal Amount { get; set; }
+    }
+
+    /// <summary>item_stock 품목별 Σ current_qty · Σ current_qty×avg_cost (<c>StockService.cs:486</c> 식) · 삭제 품목 제외.</summary>
+    public static async Task<List<StockErpRow>> ReadStockErpAsync(IDbConnection db, string tenantId, CancellationToken ct)
+        => (await db.QueryAsync<StockErpRow>(new CommandDefinition(
+            """
+            SELECT i.item_name AS ItemName, i.spec AS Spec, COALESCE(SUM(s.current_qty), 0) AS Qty, COALESCE(SUM(s.current_qty * s.avg_cost), 0) AS Amount
+              FROM item_stock s
+              JOIN items i ON i.item_id = s.item_id AND i.tenant_id = s.tenant_id
+             WHERE s.tenant_id = @T AND i.is_deleted = 0
+             GROUP BY i.item_id, i.item_name, i.spec
+            """, new { T = tenantId }, commandTimeout: CommandTimeoutSec, cancellationToken: ct)).ConfigureAwait(false)).ToList();
+
+    /// <summary>
+    /// 최종재고 표 신선도 — DOCFC 마지막 달이 DOCFB 마지막 날짜의 달보다 앞이면 사유 글자. 같거나 뒤면 null.
+    /// (갈래 I 가 남기는 사유 키가 아직 없어 두 표를 직접 비교한다 — 작업지시서 §11-2 C ④.)
+    /// </summary>
+    public static string? FinalStockStaleReason(string? docfcMaxYm, string? docfbLastDate)
+    {
+        if (string.IsNullOrEmpty(docfcMaxYm) || string.IsNullOrEmpty(docfbLastDate) || docfbLastDate.Length < 6) return null;
+        var lastYm = docfbLastDate[..6];
+        return string.CompareOrdinal(docfcMaxYm, lastYm) < 0
+            ? $"최종재고 표가 최신이 아닙니다 — 최종재고 표 마지막 달 {Ym(docfcMaxYm)} · 명세서 마지막 달 {Ym(lastYm)} (이전 프로그램에서 월마감을 안 돌린 달의 거래가 재고에 빠질 수 있습니다)"
+            : null;
+        static string Ym(string s) => s.Length >= 6 ? $"{s[..4]}-{s.Substring(4, 2)}" : s;
+    }
+
+    /// <summary>④ 재고 항목 + 품목 차이 상위 N + 알림. 수량·금액은 ROUND(…, 2).</summary>
+    public static void AddStockItems(List<ReconItem> items, List<ReconDiffRow> itemDiffs, List<string> warnings,
+        MdbLegacyFinalStock.FinalStockResult? final, bool docfcMissing, List<StockErpRow>? erpRows,
+        LedgerLegacy? ledgerLegacy, LedgerErp? ledgerErp, string? docfbLastDate, string? err, int topN = 20)
+    {
+        if (docfcMissing || (final is null && err is null)) warnings.Add(WarnNoFinalStock);
+        var stale = final is null ? null : FinalStockStaleReason(final.MaxYm, docfbLastDate);
+        if (stale is not null) warnings.Add(stale);
+
+        decimal? legacyQty = final is null ? null : Math.Round(final.Lines.Sum(l => l.Qty), 2, MidpointRounding.AwayFromZero);
+        decimal? legacyAmt = final is null ? null : Math.Round(final.Lines.Sum(l => l.Amount), 2, MidpointRounding.AwayFromZero);
+        decimal? erpQty = erpRows is null ? null : Math.Round(erpRows.Sum(r => r.Qty), 2, MidpointRounding.AwayFromZero);
+        decimal? erpAmt = erpRows is null ? null : Math.Round(erpRows.Sum(r => r.Amount), 2, MidpointRounding.AwayFromZero);
+
+        long? mismatch = null;
+        if (final is not null && erpRows is not null)
+        {
+            var erpByKey = new Dictionary<string, (string Name, decimal Qty)>(StringComparer.Ordinal);
+            foreach (var r in erpRows)
+            {
+                var key = MdbLegacyFinalStock.ItemNameKey(r.ItemName, r.Spec);
+                var name = string.IsNullOrWhiteSpace(r.Spec) ? (r.ItemName ?? string.Empty).Trim() : $"{(r.ItemName ?? string.Empty).Trim()} {r.Spec.Trim()}";
+                erpByKey[key] = erpByKey.TryGetValue(key, out var cur) ? (cur.Name, cur.Qty + r.Qty) : (name, r.Qty);
+            }
+            var legacyByKey = final.Lines.ToDictionary(l => l.Key, l => l, StringComparer.Ordinal);
+            var diffs = new List<ReconDiffRow>();
+            foreach (var key in legacyByKey.Keys.Union(erpByKey.Keys, StringComparer.Ordinal))
+            {
+                var lq = legacyByKey.TryGetValue(key, out var lv) ? Math.Round(lv.Qty, 2, MidpointRounding.AwayFromZero) : 0m;
+                var eq = erpByKey.TryGetValue(key, out var ev) ? Math.Round(ev.Qty, 2, MidpointRounding.AwayFromZero) : 0m;
+                if (lq == eq) continue;
+                var name = lv is not null && lv.Variants.Count > 0
+                    ? (string.IsNullOrEmpty(lv.Variants[0].Ku) ? lv.Variants[0].Pum : $"{lv.Variants[0].Pum} {lv.Variants[0].Ku}")
+                    : ev.Name;
+                diffs.Add(new ReconDiffRow { Name = name, Legacy = lq, Erp = eq, Diff = eq - lq });
+            }
+            mismatch = diffs.Count;
+            itemDiffs.AddRange(diffs.OrderByDescending(d => Math.Abs(d.Diff)).ThenBy(d => d.Name, StringComparer.Ordinal).Take(topN));
+        }
+
+        var finalDetail = final is null ? null
+            : $"레거시 = 최종재고 표(품목별 마지막 달 · 창고 합산) 마지막 달 {final.MaxYm} · 품목 {final.Lines.Count:N0}"
+              + (final.NonDefaultWarehouseLines > 0 ? $" · 기본창고 외 {final.NonDefaultWarehouseLines:N0}줄 합침" : string.Empty);
+        items.Add(Item("stock_qty", "재고", "재고(기말수량)", legacyQty, erpQty, Join(finalDetail, stale, err)));
+        items.Add(Item("stock_amount", "재고", "재고(기말금액)", legacyAmt, erpAmt, Join("히트판 = 수량 × 평균단가", err)));
+        items.Add(Item("stock_item_mismatch", "재고", "재고 품목별 수량 불일치 품목 수", final is null ? null : 0m, mismatch,
+            Join("합만 맞고 품목이 틀린 것을 잡습니다", err)));
+
+        // ⑤ 원장 이력 입·출 · 맞춤 줄
+        items.Add(Item("ledger_rows", "원장", "재고원장 이력 행수", ledgerLegacy?.Rows, ledgerErp?.HistRows,
+            Join("맞춤 줄 제외", err)));
+        items.Add(Item("ledger_qty_in", "원장", "재고원장 이력 입고", ledgerLegacy?.QtyIn, ledgerErp?.HistIn,
+            Join("음수 수량은 반대 칸 절대값(이관과 같은 규칙)", err)));
+        items.Add(Item("ledger_qty_out", "원장", "재고원장 이력 출고", ledgerLegacy?.QtyOut, ledgerErp?.HistOut, err));
+        items.Add(Item("ledger_amount", "원장", "재고원장 이력 공급가액", ledgerLegacy?.Amount, ledgerErp?.HistAmount, err));
+
+        decimal? legacyAdj = final is null || ledgerLegacy is null || stale is not null
+            ? null
+            : Math.Round(final.Lines.Sum(l => l.Qty), 2, MidpointRounding.AwayFromZero) - (ledgerLegacy.QtyIn - ledgerLegacy.QtyOut);
+        items.Add(Item("stock_adjust_net", "원장", "최종재고 맞춤 줄 순수량", legacyAdj, ledgerErp is null ? null : ledgerErp.AdjIn - ledgerErp.AdjOut,
+            Join("레거시 = 최종재고 수량 − 이력 순수량",
+                 ledgerErp is null ? null : $"히트판 맞춤 줄 {ledgerErp.AdjRows:N0}행 · 입고 {ledgerErp.AdjIn:N2} · 출고 {ledgerErp.AdjOut:N2}",
+                 stale is null ? null : "최종재고 표가 최신이 아니라 맞춤을 하지 않습니다",
+                 err)));
+    }
+
+    // ════════════════════════════════════════════════════════════════
+    // ⑥ 미수·미지급 = F3 ↔ 갈래 E 식
+    // ════════════════════════════════════════════════════════════════
+
+    /// <summary>레거시 F3 합계 + 거래처 코드별 잔액. DOCF5 null/0행 → null(거래처원장 표 없음).</summary>
+    public sealed record BalanceLegacy(decimal Receivable, int ReceivableCount, decimal Payable, int PayableCount, IReadOnlyDictionary<int, decimal> ByCode);
+
+    public static BalanceLegacy? ComputeBalanceLegacy(DataTable? docf5)
+    {
+        if (docf5 is null || docf5.Rows.Count == 0) return null;
+        var byCode = LegacyMdbMapping.PartnerLegacyBalances(LegacyMdbMapping.ReadPartnerLedgerRows(docf5));
+        var (rec, rc, pay, pc) = LegacyMdbMapping.SummarizeBalances(byCode);
+        return new BalanceLegacy(rec, rc, pay, pc, byCode);
+    }
+
+    public sealed class BalanceErp
+    {
+        public decimal Receivable { get; set; }
+        public decimal Payable { get; set; }
+        public long LegacyReceivableCount { get; set; }
+        public long LegacyPayableCount { get; set; }
+    }
+
+    /// <summary>히트판 미수·미지급 — <c>FinanceService.GetDashboardAsync</c> kpiSql 'receivable'·'payable' 와 같은 식(갈래 E 규칙).</summary>
+    public static Task<BalanceErp> ReadBalanceErpAsync(IDbConnection db, string tenantId, CancellationToken ct)
+        => db.QuerySingleAsync<BalanceErp>(new CommandDefinition(
+            $$"""
+            SELECT
+              COALESCE((SELECT SUM(total_amount + vat_amount) FROM sales_deliveries WHERE tenant_id=@TenantId AND status IN ('confirmed','invoiced') AND is_deleted=0
+                AND NOT (COALESCE(source_type,'') = 'migration' AND {{MdbLegacyPartnerBalance.HasLegacyBalanceSql}})), 0)
+              - COALESCE((SELECT SUM(amount) FROM collections WHERE tenant_id=@TenantId AND ref_doc_type = 'sales_delivery'
+                AND NOT (COALESCE(source_type,'') = 'migration' AND {{MdbLegacyPartnerBalance.HasLegacyBalanceSql}})), 0)
+              + COALESCE((SELECT SUM(GREATEST(balance_amount, 0)) FROM partner_legacy_balances WHERE tenant_id=@TenantId), 0) AS Receivable,
+              COALESCE((SELECT SUM(total_amount + vat_amount) FROM purchase_receipts WHERE tenant_id=@TenantId AND status='confirmed'
+                AND NOT (COALESCE(source_type,'') = 'migration' AND {{MdbLegacyPartnerBalance.HasLegacyBalanceSql}})), 0)
+              - COALESCE((SELECT COALESCE(SUM(rti.supply_amount + rti.vat_amount),0) FROM purchase_returns rt LEFT JOIN purchase_return_items rti ON rti.return_id=rt.return_id AND rti.tenant_id=rt.tenant_id WHERE rt.tenant_id=@TenantId AND rt.is_deleted=0 AND rt.status='confirmed'), 0)
+              - COALESCE((SELECT SUM(amount) FROM payments WHERE tenant_id=@TenantId AND is_active=1 AND payment_type='purchase'
+                AND NOT (COALESCE(source_type,'') = 'migration' AND {{MdbLegacyPartnerBalance.HasLegacyBalanceSql}})), 0)
+              + COALESCE((SELECT SUM(GREATEST(-balance_amount, 0)) FROM partner_legacy_balances WHERE tenant_id=@TenantId), 0) AS Payable,
+              (SELECT COUNT(*) FROM partner_legacy_balances WHERE tenant_id=@TenantId AND balance_amount > 0) AS LegacyReceivableCount,
+              (SELECT COUNT(*) FROM partner_legacy_balances WHERE tenant_id=@TenantId AND balance_amount < 0) AS LegacyPayableCount
+            """, new { TenantId = tenantId }, commandTimeout: CommandTimeoutSec, cancellationToken: ct));
+
+    /// <summary>⑥ 미수·미지급 항목.</summary>
+    public static void AddBalanceItems(List<ReconItem> items, List<string> warnings, BalanceLegacy? legacy, bool docf5Missing, BalanceErp? erp, string? err)
+    {
+        if (docf5Missing && !warnings.Contains(WarnNoLedgerTable)) warnings.Add(WarnNoLedgerTable);
+        var legacyRule = "레거시 = 거래처별 마지막 이월 잔액 + 그 뒤 거래 (+ 미수 · − 미지급)";
+        items.Add(Item("receivable", "미수", "미수금", legacy?.Receivable, erp?.Receivable,
+            Join(legacyRule,
+                 legacy is null ? null : $"레거시 {legacy.ReceivableCount:N0}곳",
+                 erp is null ? null : $"히트판 이월잔액 {erp.LegacyReceivableCount:N0}곳 (옛 거래처 여러 코드가 한 거래처로 합쳐지면 곳 수가 줄 수 있습니다)",
+                 docf5Missing ? "거래처원장 표 없음" : null, err)));
+        items.Add(Item("payable", "미지급", "미지급금", legacy?.Payable, erp?.Payable,
+            Join(legacyRule,
+                 legacy is null ? null : $"레거시 {legacy.PayableCount:N0}곳",
+                 erp is null ? null : $"히트판 이월잔액 {erp.LegacyPayableCount:N0}곳",
+                 docf5Missing ? "거래처원장 표 없음" : null, err)));
+    }
+
+    // ── DataRow 안전 읽기 ──
+    private static string RowStr(DataRow r, string c)
+    {
+        if (!r.Table.Columns.Contains(c)) return string.Empty;
+        var v = r[c];
+        return v == DBNull.Value ? string.Empty : Convert.ToString(v, CultureInfo.InvariantCulture) ?? string.Empty;
+    }
+
+    private static decimal RowDec(DataRow r, string c)
+    {
+        if (!r.Table.Columns.Contains(c)) return 0m;
+        var v = r[c];
+        if (v == DBNull.Value) return 0m;
+        return v is string s
+            ? (decimal.TryParse(s.Trim(), NumberStyles.Number, CultureInfo.InvariantCulture, out var d) ? d : 0m)
+            : Convert.ToDecimal(v, CultureInfo.InvariantCulture);
+    }
 }
