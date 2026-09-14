@@ -874,7 +874,10 @@ public class SalesService : ISalesService
                                d.total_amount AS SupplyAmount,
                                d.status AS Status,
                                d.memo AS Memo,
-                               ec.emp_name AS CreatedByName
+                               ec.emp_name AS CreatedByName,
+                               (d.source_type = 'migration') AS IsMigrated,
+                               -- R-B3: MigratedDocumentLock.IsIssueLocked 와 같은 판정(이관 AND 레거시 계산서 번호 0 아님)
+                               (d.source_type = 'migration' AND COALESCE(d.legacy_tax_no, 0) <> 0) AS IsIssueLocked
                            FROM sales_deliveries d
                            LEFT JOIN partners p
                                ON p.partner_id = d.partner_id
@@ -931,6 +934,11 @@ public class SalesService : ISalesService
         {
             throw new InvalidOperationException("거래명세서를 찾을 수 없습니다.");
         }
+
+        // 🔴 20260915작1 갈래 G (R-B2 결재 「잠금」) — 이전 프로그램에서 가져온 거래명세서는 고치지 않는다.
+        //   상태 검사보다 먼저 본다 — "draft 만 수정" 안내는 확정취소하면 고칠 수 있다고 읽히는데
+        //   이관분은 확정취소도 막혀 있어 담당자가 막다른 길로 간다. 정정은 새 전표로.
+        await MigratedDocumentLock.EnsureDeliveryEditableAsync(_db, deliveryId, tenantId, ct);
 
         if (!string.Equals(status, "draft", StringComparison.OrdinalIgnoreCase))
         {
@@ -1100,6 +1108,10 @@ public class SalesService : ISalesService
         //   - status='confirmed' → CancelConfirmedDeliveryAsync 로 Reverse 원장 발행
         //     (재고·원장·회계 모두 복귀, INSERT ONLY 원칙 유지).
 
+        // 🔴 20260915작1 갈래 G (R-B2) — 이관 거래명세서는 삭제하지 않는다(확정분은 아래에서 확정취소로 넘어가므로
+        //   거기서도 막히지만, 계산서·상태 안내보다 먼저 「가져온 자료」라고 알려준다).
+        await MigratedDocumentLock.EnsureDeliveryEditableAsync(_db, deliveryId, tenantId, ct);
+
         var invoiced = await _db.QueryFirstOrDefaultAsync<int>(new CommandDefinition(
             "SELECT COUNT(*) FROM tax_invoices WHERE delivery_id=@Id AND tenant_id=@Tid",
             new { Id = deliveryId, Tid = tenantId }, cancellationToken: ct));
@@ -1147,6 +1159,10 @@ public class SalesService : ISalesService
             "SELECT delivery_id, delivery_no, partner_id, delivery_date, status, total_amount, vat_amount FROM sales_deliveries WHERE delivery_id=@Id AND tenant_id=@Tid",
             new { Id = deliveryId, Tid = tenantId }, cancellationToken: ct))
             ?? throw new InvalidOperationException("거래명세서를 찾을 수 없습니다.");
+
+        // 🔴 20260915작1 갈래 G (R-B2) — 이관 거래명세서는 확정취소하지 않는다.
+        //   확정취소는 재고 역행·매출 역분개를 새로 쓴다 → 레거시 원장·대사표와 어긋난다. 정정은 새 전표로.
+        await MigratedDocumentLock.EnsureDeliveryEditableAsync(_db, deliveryId, tenantId, ct);
 
         if ((string)header.status != "confirmed")
         {

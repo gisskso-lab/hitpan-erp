@@ -1934,6 +1934,12 @@ public class PurchaseService : IPurchaseService
             new { Id = receiptId, Tid = tenantId }, cancellationToken: ct))
             ?? throw new InvalidOperationException("매입명세서를 찾을 수 없습니다.");
 
+        // 🔴 20260915작1 갈래 G (R-B2 · 매입 대응 경로) — 이관 매입명세서는 삭제하지 않는다.
+        //   사슬 검사보다도 먼저 본다 — 이관분은 반품을 정리해도, 확정취소를 해도 지울 수 없으므로
+        //   아래 안내(「반품을 먼저 정리」·「확정취소 후 삭제」)가 막다른 길이 된다. 정정은 새 전표로.
+        //   ⚠️ 매입명세서 수정·확정취소는 서버 경로가 없다(grep 전수 — 개발명세서 §2). 판매만 잠그면 한쪽만 고친 것이다.
+        await MigratedDocumentLock.EnsureReceiptEditableAsync(_db, receiptId, tenantId, ct);
+
         // 🔴 20260827작8 — **사슬 검사를 상태 검사보다 먼저** 한다.
         //
         //   종전엔 여기서 곧바로 "확정된 매입명세서는 삭제할 수 없습니다" 를 던져
