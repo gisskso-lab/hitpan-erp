@@ -318,6 +318,12 @@ jobs:
           #      D2 순서 대조군(끝전 뒤에 리빌드가 돌면 금액이 틀어짐 · 병렬이슈37) · D3 끝전 폴백
           #    등록 근거는 무력화 시험 12종 중 11종 빨간불(M10 동등 변이 초록 · 명세서 §4·§5) — docs/개발/erp/20260915작1_갈래D_재고맞춤_개발명세서.md §4
           GATES="$GATES|MdbLegacyFinalStockGate"
+          # 🔴 20260915작1 갈래 I MdbLegacyWiringGate — 이관 서비스 실제 스텝(RunTableStepAsync 열린 트랜잭션)으로
+          #    이월잔액(E) · 재고 마무리(①맞춤→②리빌드→③끝전) · DOCFC 신선도 가드. 순수 2 + DB 5(SKIP=FAIL).
+          #    대조군: 트랜잭션 없는 계약 시그니처를 같은 스텝에서 부르면 실패(WG-E2·D2) · 끝전 뒤 리빌드면 금액 틀어짐(WG-D1).
+          #    G5(TaxInvoiceMigratedLockGate)에 G5-18 R-B4 99999999 · G5-19 거래명세서 전잔액 추가.
+          #    등록 근거 = 무력화 시험 — docs/개발/erp/20260915작1_갈래I_통합_개발명세서.md §4
+          GATES="$GATES|MdbLegacyWiringGate"
 
           echo "▶ 이 잡이 무는 게이트: $GATES"
           # 🔴 20260913작2 정정 — 이제 기기 계열 중 **MainPcRestartMarkGate 는 문다**(임시 DB 권한 실측 · C-3).
