@@ -3499,7 +3499,7 @@ INSERT INTO `schema_migrations` (`migration_id`, `app_version`, `success`) VALUE
 ('DB-74','clean-ddl',1),('DB-75','clean-ddl',1),('DB-76','clean-ddl',1),('DB-77','clean-ddl',1),
 ('DB-78','clean-ddl',1),('DB-79','clean-ddl',1),('DB-80','clean-ddl',1),('DB-81','clean-ddl',1),
 ('DB-82','clean-ddl',1),('DB-83','clean-ddl',1),('DB-84','clean-ddl',1),('DB-85','clean-ddl',1),
-('DB-86','clean-ddl',1),('DB-87','clean-ddl',1),('DB-88','clean-ddl',1),('DB-89','clean-ddl',1),('DB-90','clean-ddl',1),('DB-91','clean-ddl',1),('DB-92','clean-ddl',1),('DB-93','clean-ddl',1),('DB-94','clean-ddl',1),('DB-95','clean-ddl',1),('DB-96','clean-ddl',1),('DB-97','clean-ddl',1),('DB-98','clean-ddl',1),('DB-99','clean-ddl',1),('DB-100','clean-ddl',1),('DB-101','clean-ddl',1),('DB-102','clean-ddl',1),('DB-103','clean-ddl',1),('DB-104','clean-ddl',1),('DB-105','clean-ddl',1),('DB-106','clean-ddl',1),('DB-107','clean-ddl',1),('DB-108','clean-ddl',1),('DB-109','clean-ddl',1),('DB-110','clean-ddl',1),('DB-111','clean-ddl',1),('DB-112','clean-ddl',1),('DB-113','clean-ddl',1),('DB-114','clean-ddl',1),('DB-115','clean-ddl',1),('DB-116','clean-ddl',1),('DB-117','clean-ddl',1),('DB-118','clean-ddl',1),('DB-119','clean-ddl',1);
+('DB-86','clean-ddl',1),('DB-87','clean-ddl',1),('DB-88','clean-ddl',1),('DB-89','clean-ddl',1),('DB-90','clean-ddl',1),('DB-91','clean-ddl',1),('DB-92','clean-ddl',1),('DB-93','clean-ddl',1),('DB-94','clean-ddl',1),('DB-95','clean-ddl',1),('DB-96','clean-ddl',1),('DB-97','clean-ddl',1),('DB-98','clean-ddl',1),('DB-99','clean-ddl',1),('DB-100','clean-ddl',1),('DB-101','clean-ddl',1),('DB-102','clean-ddl',1),('DB-103','clean-ddl',1),('DB-104','clean-ddl',1),('DB-105','clean-ddl',1),('DB-106','clean-ddl',1),('DB-107','clean-ddl',1),('DB-108','clean-ddl',1),('DB-109','clean-ddl',1),('DB-110','clean-ddl',1),('DB-111','clean-ddl',1),('DB-112','clean-ddl',1),('DB-113','clean-ddl',1),('DB-114','clean-ddl',1),('DB-115','clean-ddl',1),('DB-116','clean-ddl',1),('DB-117','clean-ddl',1),('DB-118','clean-ddl',1),('DB-119','clean-ddl',1),('DB-120','clean-ddl',1);
 
 --
 -- Table structure for table `service_tickets`
@@ -3892,11 +3892,18 @@ CREATE TABLE `tenant_devices` (
   `last_seen_at` datetime(6) DEFAULT NULL,
   `revoked_at` datetime(6) DEFAULT NULL,
   `revoked_reason` varchar(200) DEFAULT NULL,
-  `is_main_pc` tinyint(1) NOT NULL DEFAULT 0 COMMENT '메인PC(히트판 본체·DB 보유) 여부. 테넌트당 1대 — 보장은 애플리케이션에서 한다 (DB-86)',
+  `is_main_pc` tinyint(1) NOT NULL DEFAULT 0 COMMENT '메인PC(히트판 본체·DB 보유) 여부. 회사당 1대 — DB 가 보장한다 (DB-120: main_pc_key + uq_tenant_main_pc). 코드도 함께 막는다',
+  -- 🔴 DB-120: 메인PC 1대 보장. 메인PC 일 때만 tenant_id, 아니면 NULL.
+  --   UNIQUE 는 NULL 을 중복으로 보지 않으므로 일반 기기는 몇 대든 자유롭고 메인PC 만 회사당 1행으로 잠긴다.
+  --   🔴 **본문에 직접 싣는다** — 시드에만 넣으면 신규설치 고객은 그 마이그를 영원히 건너뛰어
+  --     무방비가 된다. 그것이 DB-89 가 죽은 이유 그 자체다(실측 A §8-1 Q6·Q7·Q8 · 게이트 G-M6).
+  `main_pc_key` char(36) GENERATED ALWAYS AS (if(`is_main_pc` = 1,`tenant_id`,NULL)) VIRTUAL COMMENT '메인PC 1대 보장용 (DB-120). 메인PC 일 때만 tenant_id, 아니면 NULL',
   PRIMARY KEY (`device_id`),
   UNIQUE KEY `uq_tenant_fp` (`tenant_id`,`fingerprint`),
   -- DB-103: 장비넘버는 회사 안에서 유일하다. NULL 은 몇 개든 공존한다(옛 기기 보존).
   UNIQUE KEY `uq_tenant_hardware` (`tenant_id`,`hardware_id`),
+  -- 🔴 DB-120: 회사당 메인PC 1대. 조용히 값을 바꾸지 않고 **거부**한다(트리거를 뺀 이유 — PM 결재 K1).
+  UNIQUE KEY `uq_tenant_main_pc` (`main_pc_key`),
   KEY `idx_tenant_type_status` (`tenant_id`,`device_type`,`status`),
   KEY `idx_auth_key_hash` (`auth_key_hash`),
   KEY `idx_user` (`user_id`),
