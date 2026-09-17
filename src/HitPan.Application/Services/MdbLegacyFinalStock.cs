@@ -231,6 +231,211 @@ public static class MdbLegacyFinalStock
         => StaleReason(ComputeFinalStock(docfc)?.MaxYm, docfbLastDate);
 
     // ══════════════════════════════════════════════════════════════
+    // 🆕 20260915작1 개정 3판 갈래 R3 — 재고 이어 계산 (설계 §23 · 작업지시서 §15-2·§15-5 · 선행검증 20260917 B-2)
+    // ══════════════════════════════════════════════════════════════
+
+    /// <summary>
+    /// S1(PM 전결 §15-9) 대사표 안내 1줄 — <c>{0}</c> = 이어 계산한 개월 수. 고객 화면 노출 문구(개발용어 금지).
+    /// 이어 계산 구간은 최종재고 표 행이 없어 특수입출고(창고이동 등)를 알 길이 없다(설계 §23 전제 정정).
+    /// </summary>
+    public const string RollForwardNotice = "최종재고 표 뒤 {0}개월은 거래명세서 입출고로 이어 계산했습니다. 창고이동 등 특수입출고는 반영되지 않았을 수 있습니다";
+
+    /// <summary>DOCFB 한 줄(이어 계산 입력). <paramref name="Io"/> "1" 입고 · "2" 출고 — 나머지는 안 센다.</summary>
+    public sealed record LegacyStockMove(string Pum, string Ku, string Chang, DateTime Date, string Io, decimal Qty, decimal Amount);
+
+    /// <summary>이어 계산 정보(대사표·결과 표시용).</summary>
+    /// <param name="FromYm">DOCFC 마지막 달(시작점).</param>
+    /// <param name="ToYm">기준일 달(끝).</param>
+    /// <param name="CarryMonths">이어 계산한 달 수(FromYm 다음 달 ~ ToYm).</param>
+    /// <param name="MoveLines">계산에 쓴 DOCFB 줄 수(수량 0 줄 · 구간 밖 · 입출 구분 밖 제외).</param>
+    /// <param name="ZeroQtyAmountLines">수량 0 인데 금액만 있어 뺀 줄 수(P/L 등).</param>
+    /// <param name="ZeroQtyAmount">그 줄들의 금액 합.</param>
+    public sealed record RollForwardInfo(string FromYm, string ToYm, int CarryMonths, int MoveLines, int ZeroQtyAmountLines, decimal ZeroQtyAmount);
+
+    /// <summary>이어 계산 결과 — <see cref="FinalStockResult"/> 는 맞춤·끝전 오버로드에 그대로 넘긴다.</summary>
+    public sealed record RollForwardResult(FinalStockResult Final, RollForwardInfo Info);
+
+    /// <summary>
+    /// 이어 계산 기준일 = min(DOCFB 마지막 유효 날짜의 달 말일, 이관일) — 이관일은 <b>로컬 날짜</b>(P6 · 호출자가 넘긴다).
+    /// </summary>
+    public static DateTime CarryBaseDate(DateTime docfbLastDate, DateTime migrationLocalDate)
+    {
+        var d = docfbLastDate.Date;
+        var monthEnd = new DateTime(d.Year, d.Month, DateTime.DaysInMonth(d.Year, d.Month));
+        var m = migrationLocalDate.Date;
+        return monthEnd <= m ? monthEnd : m;
+    }
+
+    /// <summary>
+    /// DOCFC 가 DOCFB 보다 오래됐을 때(월마감 안 돌린 MDB) 레거시 월 총평균을 흉내 내 기준일 달까지 이어 계산한다 — 선행검증 B-2 규칙 ③.
+    /// <para>시작 = (품명·규격·창고) 키별 DOCFC 마지막 달 기말수량·기말금액·IM_DAN. DOCFB 에만 있는 키는 0 에서 시작.</para>
+    /// <para>DOCFC 마지막 달 다음 달 ~ 기준일 달, 달마다 <b>모든 키</b>:
+    /// 입고수량 = Σ IO1 수량(음수 포함) · 입고금액 = Σ IO1 금액 · 출고수량 = Σ IO2 수량(음수 = 반품이 출고를 줄임 · <b>금액에 안 씀</b>) ·
+    /// 입고수량≠0 이고 (기초+입고)수량≠0 → 단가 = (기초금액+입고금액)/(기초수량+입고수량) · 아니면 상품마스터 S_IDAN(0/없으면 직전 단가) ·
+    /// 기말금액 = ROUND(기말수량×단가, 0 · 0 에서 먼 쪽).</para>
+    /// <para>수량 0 줄은 계산에서 빼고 금액이 있으면 건수·금액을 <see cref="RollForwardInfo"/> 에 남긴다. 날짜 &gt; 기준일 · DOCFC 마지막 달 이하 줄 제외.</para>
+    /// DOCFC null/0행/유효 달 0 → null(시작점이 없다).
+    /// </summary>
+    /// <param name="masterIdanByItemKey">키 = <see cref="LegacyMdbMapping.StockItemKey"/>(품명, 규격) · 값 = DOCFS S_IDAN.</param>
+    public static RollForwardResult? RollForward(DataTable? docfc, IEnumerable<LegacyStockMove> movesAfter,
+        IReadOnlyDictionary<string, decimal> masterIdanByItemKey, DateTime baseDate)
+    {
+        ArgumentNullException.ThrowIfNull(movesAfter);
+        ArgumentNullException.ThrowIfNull(masterIdanByItemKey);
+        if (docfc is null || docfc.Rows.Count == 0) return null;
+
+        var state = new Dictionary<string, CarryState>(StringComparer.Ordinal);
+        string? fromYm = null;
+        int skipped = 0;
+        foreach (DataRow row in docfc.Rows)
+        {
+            var ym = Str(row, "IM_YM").Trim();
+            if (!IsYm(ym))
+            {
+                skipped++;
+                continue;
+            }
+            var pum = Str(row, "IM_PUM").Trim();
+            var ku = Str(row, "IM_KU").Trim();
+            var chang = Str(row, "IM_CHANG").Trim();
+            var whKey = LegacyMdbMapping.StockItemKey(pum, ku, chang);
+            if (fromYm is null || string.CompareOrdinal(ym, fromYm) > 0) fromYm = ym;
+
+            var qty = Dec(row, "IM_CQTY");
+            var amt = Dec(row, "IM_CAMT");
+            var dan = Dec(row, "IM_DAN");
+            if (!state.TryGetValue(whKey, out var cur) || string.CompareOrdinal(ym, cur.Ym) > 0)
+            {
+                state[whKey] = new CarryState(ym, LegacyMdbMapping.StockItemKey(pum, ku), !IsDefaultWarehouse(chang))
+                {
+                    Qty = qty, Amt = amt, Dan = dan,
+                };
+                state[whKey].Variants.Add((pum, ku));
+            }
+            else if (string.CompareOrdinal(ym, cur.Ym) == 0)
+            {
+                cur.Qty += qty;
+                cur.Amt += amt;
+                if (cur.Dan == 0m) cur.Dan = dan;
+                if (!cur.Variants.Contains((pum, ku))) cur.Variants.Add((pum, ku));
+            }
+        }
+        if (fromYm is null) return null;
+
+        var toYm = baseDate.ToString("yyyyMM", CultureInfo.InvariantCulture);
+        var months = new List<string>();
+        for (var ym = NextYm(fromYm); string.CompareOrdinal(ym, toYm) <= 0; ym = NextYm(ym)) months.Add(ym);
+
+        // 달 → 키 → (입고수량, 입고금액, 출고수량)
+        var buckets = new Dictionary<string, Dictionary<string, (decimal InQ, decimal InA, decimal OutQ)>>(StringComparer.Ordinal);
+        int moveLines = 0, zeroLines = 0;
+        decimal zeroAmount = 0m;
+        foreach (var mv in movesAfter)
+        {
+            var mYm = mv.Date.ToString("yyyyMM", CultureInfo.InvariantCulture);
+            if (string.CompareOrdinal(mYm, fromYm) <= 0 || mv.Date.Date > baseDate.Date) continue;
+            var io = (mv.Io ?? string.Empty).Trim();
+            if (io is not ("1" or "2")) continue;
+            if (mv.Qty == 0m)
+            {
+                if (mv.Amount != 0m)
+                {
+                    zeroLines++;
+                    zeroAmount += mv.Amount;
+                }
+                continue;
+            }
+            moveLines++;
+
+            var pum = (mv.Pum ?? string.Empty).Trim();
+            var ku = (mv.Ku ?? string.Empty).Trim();
+            var chang = (mv.Chang ?? string.Empty).Trim();
+            var whKey = LegacyMdbMapping.StockItemKey(pum, ku, chang);
+            if (!state.TryGetValue(whKey, out var st))
+            {
+                state[whKey] = st = new CarryState(fromYm, LegacyMdbMapping.StockItemKey(pum, ku), !IsDefaultWarehouse(chang));
+            }
+            if (!st.Variants.Contains((pum, ku))) st.Variants.Add((pum, ku));
+
+            if (!buckets.TryGetValue(mYm, out var perKey))
+                buckets[mYm] = perKey = new Dictionary<string, (decimal, decimal, decimal)>(StringComparer.Ordinal);
+            var b = perKey.TryGetValue(whKey, out var bv) ? bv : (0m, 0m, 0m);
+            perKey[whKey] = io == "1"
+                ? (b.Item1 + mv.Qty, b.Item2 + mv.Amount, b.Item3)
+                : (b.Item1, b.Item2, b.Item3 + mv.Qty);
+        }
+
+        foreach (var ym in months)
+        {
+            buckets.TryGetValue(ym, out var perKey);
+            foreach (var (whKey, st) in state)
+            {
+                if (perKey is null || !perKey.TryGetValue(whKey, out var bv))
+                {
+                    // 그 달 움직임 없는 키 = 레거시도 그 달 DOCFC 행이 없다(선행검증 B-0) → 기말 그대로.
+                    // 단 수량 0 인데 금액만 남은 키(P/L 등)는 0(설계 §23 「이어 계산에선 자동 0」 · 금액 = 수량×단가).
+                    if (st.Qty == 0m) st.Amt = 0m;
+                    continue;
+                }
+                var (inQ, inA, outQ) = bv;
+                decimal dan;
+                if (inQ != 0m && st.Qty + inQ != 0m)
+                    dan = (st.Amt + inA) / (st.Qty + inQ);
+                else if (masterIdanByItemKey.TryGetValue(st.ItemKey, out var idan) && idan != 0m)
+                    dan = idan;
+                else
+                    dan = st.Dan;
+
+                var closing = st.Qty + inQ - outQ;
+                st.Qty = closing;
+                st.Dan = dan;
+                st.Amt = Math.Round(closing * dan, 0, MidpointRounding.AwayFromZero);
+            }
+        }
+
+        var byItem = new Dictionary<string, (decimal Qty, decimal Amt, List<(string Pum, string Ku)> Variants, int Lines)>(StringComparer.Ordinal);
+        int nonDefault = 0;
+        foreach (var st in state.Values)
+        {
+            if (st.NonDefault) nonDefault++;
+            if (!byItem.TryGetValue(st.ItemKey, out var it))
+                it = (0m, 0m, new List<(string, string)>(), 0);
+            foreach (var v in st.Variants)
+                if (!it.Variants.Contains(v)) it.Variants.Add(v);
+            byItem[st.ItemKey] = (it.Qty + st.Qty, it.Amt + st.Amt, it.Variants, it.Lines + 1);
+        }
+
+        var lines = byItem
+            .OrderBy(kv => kv.Key, StringComparer.Ordinal)
+            .Select(kv => new FinalStockLine(kv.Key, kv.Value.Qty, kv.Value.Amt, kv.Value.Variants, kv.Value.Lines))
+            .ToList();
+        var maxYm = months.Count > 0 ? toYm : fromYm;
+        return new RollForwardResult(
+            new FinalStockResult(maxYm, lines, skipped, nonDefault),
+            new RollForwardInfo(fromYm, toYm, months.Count, moveLines, zeroLines, zeroAmount));
+    }
+
+    /// <summary>이어 계산 중 (품명·규격·창고) 키 하나의 기말 상태.</summary>
+    private sealed class CarryState(string ym, string itemKey, bool nonDefault)
+    {
+        public string Ym { get; } = ym;
+        public string ItemKey { get; } = itemKey;
+        public bool NonDefault { get; } = nonDefault;
+        public decimal Qty { get; set; }
+        public decimal Amt { get; set; }
+        public decimal Dan { get; set; }
+        public List<(string Pum, string Ku)> Variants { get; } = new();
+    }
+
+    private static string NextYm(string ym)
+    {
+        var y = int.Parse(ym.AsSpan(0, 4), NumberStyles.None, CultureInfo.InvariantCulture);
+        var m = int.Parse(ym.AsSpan(4, 2), NumberStyles.None, CultureInfo.InvariantCulture);
+        if (++m > 12) { m = 1; y++; }
+        return y.ToString("D4", CultureInfo.InvariantCulture) + m.ToString("D2", CultureInfo.InvariantCulture);
+    }
+
+    // ══════════════════════════════════════════════════════════════
     // ① 맞춤 줄 — item_stock_rebuild 앞
     // ══════════════════════════════════════════════════════════════
 
@@ -266,6 +471,22 @@ public static class MdbLegacyFinalStock
         }
         if (final.SkippedRows > 0)
             logger?.LogWarning("[MDB마이그레이션] DOCFC IM_YM 이 6자리 달이 아닌 {Skipped}행 — 최종재고 계산에서 제외", final.SkippedRows);
+
+        return await AdjustStockAsync(db, tx, tenantId, docfc, final, baseDate, ensureItem, logger, ct).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// 🆕 20260915작1 3판 R3 — 목표 재고를 <paramref name="final"/>(DOCFC 최종 또는 <see cref="RollForward"/> 결과)로 받는 오버로드.
+    /// 맞춤 줄 source_id·해시 달 = <paramref name="final"/>.MaxYm. <paramref name="docfc"/> 는 ③ 끝전에 품목 기록을 넘기는 자리(없으면 null).
+    /// </summary>
+    public static async Task<int> AdjustStockAsync(
+        IDbConnection db, IDbTransaction? tx, string tenantId, DataTable? docfc, FinalStockResult final,
+        DateTime baseDate, Func<string, string, IDbTransaction?, CancellationToken, Task<string>> ensureItem,
+        ILogger? logger, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(db);
+        ArgumentNullException.ThrowIfNull(final);
+        ArgumentNullException.ThrowIfNull(ensureItem);
 
         return await InTransactionAsync(db, tx, async t =>
         {
@@ -413,6 +634,20 @@ public static class MdbLegacyFinalStock
             return 0;
         }
 
+        return await ApplyFinalCostAsync(db, tx, tenantId, docfc, final, logger, ct).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// 🆕 20260915작1 3판 R3 — 끝전 목표를 <paramref name="final"/>(DOCFC 최종 또는 <see cref="RollForward"/> 결과)로 받는 오버로드.
+    /// 품목 기록은 ① 과 같은 <paramref name="docfc"/> 인스턴스에서 읽는다(없으면 품명·규격 폴백).
+    /// </summary>
+    public static async Task<int> ApplyFinalCostAsync(
+        IDbConnection db, IDbTransaction? tx, string tenantId, DataTable? docfc, FinalStockResult final,
+        ILogger? logger, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(db);
+        ArgumentNullException.ThrowIfNull(final);
+
         return await InTransactionAsync(db, tx, async t =>
         {
             var warehouseId = await WarehouseLookup.ResolveTenantDefaultWarehouseAsync(db, tenantId, t, ct).ConfigureAwait(false);
@@ -422,7 +657,7 @@ public static class MdbLegacyFinalStock
                 return 0;
             }
 
-            var itemMap = docfc!.ExtendedProperties[ItemMapPropertyPrefix + tenantId] as IReadOnlyDictionary<string, string>;
+            var itemMap = docfc?.ExtendedProperties[ItemMapPropertyPrefix + tenantId] as IReadOnlyDictionary<string, string>;
             if (itemMap is null)
             {
                 logger?.LogWarning("[MDB마이그레이션] 최종재고 맞춤 품목 기록이 없다(같은 DOCFC 표로 맞춤 단계를 먼저 부르지 않음) — 품명·규격으로 찾는다");
