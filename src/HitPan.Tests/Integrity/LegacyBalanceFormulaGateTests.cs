@@ -316,8 +316,27 @@ public sealed class LegacyBalanceFormulaGateTests : IClassFixture<LegacyBalanceF
         Assert.Equal(60_000m, items.Single(i => i.Key == "receivable_remaining").Erp);
         Assert.Equal(25_000m, items.Single(i => i.Key == "payable_matched").Erp);
         Assert.Equal(55_000m, items.Single(i => i.Key == "payable_remaining").Erp);
-        Assert.Equal("DIFF", items.Single(i => i.Key == "receivable").Status);   // 160,000 ↔ F3 100,000 — 이관 뒤 거래는 차이로 드러낸다
+        Assert.Equal("DIFF", items.Single(i => i.Key == "receivable").Status);   // 160,000 + M 40,000 ↔ F3 100,000 — 이관 뒤 새 거래는 차이로 드러낸다
+        Assert.Equal(200_000m, items.Single(i => i.Key == "receivable").Erp);
         Assert.Empty(warnings);
+    }
+
+    // ── 병렬이슈52 — 이월잔액 매칭만 한 뒤 합계 줄이 거래처별 줄과 같은 말을 한다 (순수) ──
+    [Fact(DisplayName = "G9-52 🔴 이월 매칭만으로는 ⑥ 미수·미지급 합계가 「차이」가 되지 않는다(거래처별 #9 와 같은 규칙)")]
+    public void Matching_only_keeps_balance_totals_ok()
+    {
+        // 레거시 이월 미수 100,000 · 미지급 80,000 → 이관 뒤 이월 수금 10,000 · 이월 지급 10,000 만 한 상태.
+        var erp = new MdbReconPosting.BalanceErp
+        {
+            Receivable = 90_000m, Payable = 70_000m,
+            LegacyReceivable = 100_000m, MatchedReceivable = 10_000m, RemainingReceivable = 90_000m,
+            LegacyPayable = 80_000m, MatchedPayable = 10_000m, RemainingPayable = 70_000m,
+        };
+        var legacy = new MdbReconPosting.BalanceLegacy(100_000m, 1, 80_000m, 1, new Dictionary<int, decimal>());
+        var items = new List<ReconItem>();
+        MdbReconPosting.AddBalanceItems(items, new List<string>(), legacy, false, erp, null);
+        Assert.Equal(MdbReconPosting.StatusOk, items.Single(i => i.Key == "receivable").Status);
+        Assert.Equal(MdbReconPosting.StatusOk, items.Single(i => i.Key == "payable").Status);
     }
 
     // ── R<0 경고 ──

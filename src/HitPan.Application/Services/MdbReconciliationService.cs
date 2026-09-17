@@ -1692,13 +1692,19 @@ public static class MdbReconPosting
     {
         if (docf5Missing && !warnings.Contains(WarnNoLedgerTable)) warnings.Add(WarnNoLedgerTable);
         var legacyRule = "레거시 = 거래처별 마지막 이월 잔액 + 그 뒤 거래 (+ 미수 · − 미지급)";
-        items.Add(Item("receivable", "미수", "미수금", legacy?.Receivable, erp?.Receivable,
-            Join(legacyRule,
+        // 🔴 3판 병렬이슈52 (PM 판정 (가)) — 비교 칸은 거래처별 표(#9)와 같은 규칙: 히트판 = 식 값 + 이관 뒤 이월잔액에 맞춘 금액(M).
+        //   이월잔액에 수금·지급을 맞췄다는 것만으로 레거시와 「차이」가 뜨면 같은 표의 거래처별 줄(차이 없음)과 말이 엇갈린다.
+        //   M 은 바로 아래 「그 뒤 수금·지급」 참고 행에 따로 보인다.
+        decimal? erpReceivable = erp is null ? null : erp.Receivable + (erp.MatchedReceivable ?? 0m);
+        decimal? erpPayable = erp is null ? null : erp.Payable + (erp.MatchedPayable ?? 0m);
+        var matchedNote = "히트판 = 지금 잔액 + 이관 뒤 이월잔액에 맞춘 금액(거래처별 표와 같은 기준)";
+        items.Add(Item("receivable", "미수", "미수금", legacy?.Receivable, erpReceivable,
+            Join(legacyRule, (erp?.MatchedReceivable ?? 0m) != 0m ? matchedNote : null,
                  legacy is null ? null : $"레거시 {legacy.ReceivableCount:N0}곳",
                  erp is null ? null : $"히트판 이월잔액 {erp.LegacyReceivableCount:N0}곳 (옛 거래처 여러 코드가 한 거래처로 합쳐지면 곳 수가 줄 수 있습니다)",
                  docf5Missing ? "거래처원장 표 없음" : null, err)));
-        items.Add(Item("payable", "미지급", "미지급금", legacy?.Payable, erp?.Payable,
-            Join(legacyRule,
+        items.Add(Item("payable", "미지급", "미지급금", legacy?.Payable, erpPayable,
+            Join(legacyRule, (erp?.MatchedPayable ?? 0m) != 0m ? matchedNote : null,
                  legacy is null ? null : $"레거시 {legacy.PayableCount:N0}곳",
                  erp is null ? null : $"히트판 이월잔액 {erp.LegacyPayableCount:N0}곳",
                  docf5Missing ? "거래처원장 표 없음" : null, err)));
