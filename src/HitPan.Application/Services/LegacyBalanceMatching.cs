@@ -180,16 +180,20 @@ public static class LegacyBalanceMatching
     /// </summary>
     public static async Task<Remaining?> GetForUpdateAsync(IDbConnection db, IDbTransaction tx, string tenantId, string partnerId, bool receivable, CancellationToken ct)
     {
+        // 🔴 20260915작1 3판 R1b (병렬이슈44 · PM 후속 2) — R 재계산은 문장마다 최신 커밋을 보는 READ COMMITTED 트랜잭션에서만.
+        //   REPEATABLE READ 면 같은 트랜잭션의 앞선 일반 읽기 스냅숏으로 옛 R 을 판정한다 → 호출자 실수를 조용히 넘기지 않고 막는다.
+        if (tx.IsolationLevel != MatchIsolation)
+            throw new NotSupportedException($"[LegacyBalanceMatching] 이월잔액 매칭 트랜잭션은 {MatchIsolation} 로 열어야 한다(현재 {tx.IsolationLevel}).");
+
         var locked = await db.QueryFirstOrDefaultAsync<string>(new CommandDefinition(
             "SELECT balance_id FROM partner_legacy_balances WHERE tenant_id = @TenantId AND partner_id = @PartnerId FOR UPDATE",
             new { TenantId = tenantId, PartnerId = partnerId }, transaction: tx, cancellationToken: ct)).ConfigureAwait(false);
         if (locked is null) return null;
 
-        // 🔴 20260915작1 3판 R1b (병렬이슈44) — R 재계산은 잠금 읽기(최신 커밋 값). 같은 트랜잭션에 앞선 일반 읽기가 있어도 옛 스냅숏을 안 본다.
         var sql = $"""
             SELECT x.partner_id AS PartnerId, x.base_date AS BaseDate, x.legacy_amount AS LegacyAmount,
                    x.matched_amount AS MatchedAmount, x.remaining_amount AS RemainingAmount
-              FROM ({(receivable ? ReceivableRemainingLockingSql.Value : PayableRemainingLockingSql.Value)}) x
+              FROM ({(receivable ? ReceivableRemainingSql : PayableRemainingSql)}) x
              WHERE x.partner_id = @PartnerId
             """;
         var row = await db.QueryFirstOrDefaultAsync<Row>(new CommandDefinition(
@@ -198,40 +202,11 @@ public static class LegacyBalanceMatching
     }
 
     /// <summary>
-    /// 병렬이슈44 — <see cref="GetForUpdateAsync"/> 전용 잠금 읽기 변형. 공용 식(<see cref="ReceivableRemainingSql"/>·<see cref="PayableRemainingSql"/>)은 그대로 두고 여기서만 만든다.
-    /// MariaDB 11.4 실측: 바깥 SELECT 의 <c>LOCK IN SHARE MODE</c> 는 GROUP BY 파생표(lm·em·rm) 안까지 최신 읽기를 못 한다(옛 값 100,000) →
-    /// 파생표마다 <c>LOCK IN SHARE MODE</c> 를 붙이면 최신 값(40,000). 잠금 범위를 줄이려고 파생표·이월잔액 행을 거래처 하나로 좁힌다(결과는 같다 — 바깥이 그 거래처만 읽는다).
+    /// 병렬이슈44 PM 후속 2 — 이월잔액 매칭 트랜잭션 격리 수준. 거래처 단위 직렬화는 <c>partner_legacy_balances</c> 행 <c>FOR UPDATE</c> 가 맡고,
+    /// R 재계산은 문장마다 최신 커밋을 본다(파생표 <c>LOCK IN SHARE MODE</c> 방식은 다른 거래처 동시 매칭에서 교착 실측 → 폐기 · G8-w).
+    /// ⚠️ 바이너리 로그를 <c>binlog_format=STATEMENT</c> 로 쓰는 서버는 RC 쓰기가 거절된다(MariaDB 11.4 기본값 MIXED).
     /// </summary>
-    internal static readonly Lazy<string> ReceivableRemainingLockingSql = new(() => BuildLockingSql(ReceivableRemainingSql, "lc.partner_id", "sd.partner_id"));
-
-    /// <inheritdoc cref="ReceivableRemainingLockingSql"/>
-    internal static readonly Lazy<string> PayableRemainingLockingSql = new(() => BuildLockingSql(PayableRemainingSql, "lp.partner_id", "pr.partner_id", "pr.partner_id"));
-
-    private static string BuildLockingSql(string baseSql, params string[] groupKeys)
-    {
-        var sql = baseSql;
-        foreach (var key in groupKeys.Distinct())
-        {
-            var from = "GROUP BY " + key;
-            var expected = groupKeys.Count(k => k == key);
-            var found = CountOf(sql, from);
-            if (found != expected)
-                throw new InvalidOperationException($"[LegacyBalanceMatching] 잠금 읽기 식 생성 실패 — '{from}' {expected}곳 기대 · {found}곳");
-            sql = sql.Replace(from, $"AND {key} = @PartnerId {from} LOCK IN SHARE MODE", StringComparison.Ordinal);
-        }
-        const string tail = "WHERE plb.tenant_id = @TenantId";
-        var trimmed = sql.TrimEnd();
-        if (!trimmed.EndsWith(tail, StringComparison.Ordinal))
-            throw new InvalidOperationException("[LegacyBalanceMatching] 잠금 읽기 식 생성 실패 — 끝 WHERE 가 다르다");
-        return trimmed + " AND plb.partner_id = @PartnerId LOCK IN SHARE MODE";
-    }
-
-    private static int CountOf(string text, string part)
-    {
-        var n = 0;
-        for (var i = text.IndexOf(part, StringComparison.Ordinal); i >= 0; i = text.IndexOf(part, i + part.Length, StringComparison.Ordinal)) n++;
-        return n;
-    }
+    public const IsolationLevel MatchIsolation = IsolationLevel.ReadCommitted;
 
     /// <summary>
     /// 이월잔액 매칭 등록 검사 — 호출자 트랜잭션 안 · INSERT 앞에서 부른다.

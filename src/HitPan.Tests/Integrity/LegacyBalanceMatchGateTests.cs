@@ -683,8 +683,9 @@ public sealed class LegacyBalanceMatchGateTests : IClassFixture<LegacyBalanceMat
             await using var c2 = new MySqlConnection(_fx.DbConnString());
             await c1.OpenAsync();
             await c2.OpenAsync();
-            using var tx1 = await c1.BeginTransactionAsync();
-            using var tx2 = await c2.BeginTransactionAsync();
+            // PM 후속 2 — 서비스와 같은 격리 수준(RC). 다른 격리 수준은 계약 가드가 막는다(아래 끝).
+            using var tx1 = await BeginMatchTxAsync(c1);
+            using var tx2 = await BeginMatchTxAsync(c2);
 
             // 이슈44 경우 B — 잠금 전 일반 SELECT 가 스냅숏을 연다(두 연결 모두 옛 R 을 본다)
             var sentinel = receivable ? "SELECT COUNT(*) FROM collections WHERE tenant_id=@T" : "SELECT COUNT(*) FROM payments WHERE tenant_id=@T";
@@ -714,6 +715,103 @@ public sealed class LegacyBalanceMatchGateTests : IClassFixture<LegacyBalanceMat
             Assert.NotNull(rejected);
             Assert.Contains($"{legacy - amount:N0}원 남았습니다", rejected!.Message);
         }
+
+        // 계약 가드 — REPEATABLE READ 트랜잭션으로 부르면 옛 R 로 판정하지 않고 바로 막힌다
+        await using var rr = new MySqlConnection(_fx.DbConnString());
+        await rr.OpenAsync();
+        await using var rrTx = await rr.BeginTransactionAsync(System.Data.IsolationLevel.RepeatableRead);
+        await Assert.ThrowsAsync<NotSupportedException>(() => LegacyBalanceMatching.GetForUpdateAsync(rr, rrTx, t, PA, true, CancellationToken.None));
+    }
+
+    private const System.Data.IsolationLevel MatchIsolation = LegacyBalanceMatching.MatchIsolation;
+
+    /// <summary>매칭 트랜잭션 — 서비스와 같은 격리 수준으로 연다.</summary>
+    private static async Task<MySqlTransaction> BeginMatchTxAsync(MySqlConnection c)
+        => await c.BeginTransactionAsync(MatchIsolation);
+
+    /// <summary>한 연결의 매칭(잠금·검사·INSERT)을 커밋 없이 돌린다. 거절이면 예외를 돌려준다.</summary>
+    private static async Task<Exception?> TryMatchAsync(MySqlConnection c, MySqlTransaction tx, string t, string partner, decimal amount, bool receivable, bool insert)
+    {
+        try
+        {
+            await LegacyBalanceMatching.EnsureMatchAllowedAsync(c, tx, t, partner, partner, amount, After, receivable, null, CancellationToken.None);
+            if (insert) await InsertMatchAsync(c, tx, t, partner, amount, receivable);
+            return null;
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or MySqlException)
+        {
+            return ex;
+        }
+    }
+
+    [Fact(DisplayName = "G8-w 두 연결이 서로 다른 거래처에 동시 이월 매칭 — 둘 다 성공 · 교착 0")]
+    public async Task G8w_다른거래처_동시()
+    {
+        if (Skip(nameof(G8w_다른거래처_동시))) return;
+        var (db, t, _svc) = await NewTenantAsync();
+        await using var _ = db;
+        await db.ExecuteAsync("""
+            INSERT INTO partners (partner_id, tenant_id, partner_code, partner_name, partner_type, is_active, is_deleted, created_at, updated_at)
+            VALUES (@Id, @T, 'C', 'G8거래처C', 'both', 1, 0, NOW(), NOW())
+            """, new { Id = OtherPartner, T = t });
+        await InsertLegacyAsync(db, t, OtherPartner, 50_000m);
+        // 두 거래처 모두 이관 명세서·사람 수금이 있어야 em 파생표가 훑을 줄이 생긴다
+        await InsertDeliveryAsync(db, t, "g8w-d1", PA, 10_000m, "migration");
+        await InsertDeliveryAsync(db, t, "g8w-d2", OtherPartner, 10_000m, "migration");
+
+        await using var c1 = new MySqlConnection(_fx.DbConnString());
+        await using var c2 = new MySqlConnection(_fx.DbConnString());
+        await c1.OpenAsync();
+        await c2.OpenAsync();
+        await using var tx1 = await BeginMatchTxAsync(c1);
+        await using var tx2 = await BeginMatchTxAsync(c2);
+
+        // 둘 다 잠금·검사까지 → 그다음 둘 다 INSERT (서로의 잠금이 겹치면 여기서 교착)
+        Assert.Null(await TryMatchAsync(c1, tx1, t, PA, 10_000m, true, insert: false));
+        Assert.Null(await TryMatchAsync(c2, tx2, t, OtherPartner, 10_000m, true, insert: false));
+        var ins1 = InsertMatchAsync(c1, tx1, t, PA, 10_000m, true);
+        var ins2 = InsertMatchAsync(c2, tx2, t, OtherPartner, 10_000m, true);
+        Exception? e1 = null, e2 = null;
+        try { await ins1; } catch (MySqlException ex) { e1 = ex; }
+        try { await ins2; } catch (MySqlException ex) { e2 = ex; }
+        Assert.True(e1 is null && e2 is null, $"동시 이월 매칭 실패(교착 등): c1={e1?.Message} · c2={e2?.Message}");
+        await tx1.CommitAsync();
+        await tx2.CommitAsync();
+
+        Assert.Equal(90_000m, (await RemainingAsync(db, t, PA, true))!.RemainingAmount);
+        Assert.Equal(40_000m, (await RemainingAsync(db, t, OtherPartner, true))!.RemainingAmount);
+    }
+
+    [Fact(DisplayName = "G8-x 같은 거래처 동시(각 R 이하 · 합 초과) — 뒤 연결은 앞 커밋을 기다렸다 거절 · 최종 R ≥ 0")]
+    public async Task G8x_같은거래처_동시()
+    {
+        if (Skip(nameof(G8x_같은거래처_동시))) return;
+        var (db, t, _svc) = await NewTenantAsync();
+        await using var _ = db;
+
+        await using var c1 = new MySqlConnection(_fx.DbConnString());
+        await using var c2 = new MySqlConnection(_fx.DbConnString());
+        await c1.OpenAsync();
+        await c2.OpenAsync();
+        await using var tx1 = await BeginMatchTxAsync(c1);
+        await using var tx2 = await BeginMatchTxAsync(c2);
+        // 둘 다 잠금 전 일반 읽기(옛 스냅숏을 여는 호출 순서)
+        await c1.ExecuteScalarAsync<int>("SELECT COUNT(*) FROM collections WHERE tenant_id=@T", new { T = t }, tx1);
+        await c2.ExecuteScalarAsync<int>("SELECT COUNT(*) FROM collections WHERE tenant_id=@T", new { T = t }, tx2);
+
+        Assert.Null(await TryMatchAsync(c1, tx1, t, PA, 70_000m, true, insert: true));
+        var second = TryMatchAsync(c2, tx2, t, PA, 70_000m, true, insert: true);   // 거래처 잠금에서 기다린다
+        var waited = await Task.WhenAny(second, Task.Delay(1500)) != second;
+        await tx1.CommitAsync();
+        var e2 = await second;
+        if (e2 is null) await tx2.CommitAsync(); else await tx2.RollbackAsync();
+
+        Assert.True(waited, "뒤 연결이 거래처 잠금을 기다리지 않았다");
+        Assert.IsType<InvalidOperationException>(e2);
+        Assert.Contains("30,000원 남았습니다", e2!.Message);
+        var r = (await RemainingAsync(db, t, PA, true))!;
+        Assert.True(r.RemainingAmount >= 0m, $"최종 R 음수 {r.RemainingAmount}");
+        Assert.Equal(30_000m, r.RemainingAmount);
     }
 
     private static Task InsertMatchAsync(MySqlConnection c, MySqlTransaction tx, string t, string partner, decimal amount, bool receivable)

@@ -128,7 +128,8 @@ public class CollectionService : ICollectionService
         EnsureAmountValid(request.Amount);
         // 월마감 체크
         await ApprovalTriggerHelper.EnsureNotClosedAsync(_db, tenantId, request.CollectionDate, ct);
-        using var tx = _db.BeginTransaction();
+        // 🔴 R1b PM 후속 2 (병렬이슈44) — READ COMMITTED: 거래처 잠금 뒤 R·명세서 남은 금액을 최신 커밋으로 판정 · 다른 거래처와 틈 잠금 교착 없음.
+        using var tx = _db.BeginTransaction(LegacyBalanceMatching.MatchIsolation);
         var id = Guid.NewGuid().ToString();
         try
         {
@@ -296,7 +297,8 @@ public class CollectionService : ICollectionService
         request.PaymentType = NormalizePaymentType(request.PaymentType);
         EnsureAmountValid(request.Amount);
         await ApprovalTriggerHelper.EnsureNotClosedAsync(_db, tenantId, request.PaymentDate, ct);
-        using var tx = _db.BeginTransaction();
+        // 🔴 R1b PM 후속 2 (병렬이슈44) — 수금과 같다.
+        using var tx = _db.BeginTransaction(LegacyBalanceMatching.MatchIsolation);
         var id = Guid.NewGuid().ToString();
         try
         {
