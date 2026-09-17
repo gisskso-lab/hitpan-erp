@@ -193,20 +193,33 @@ public static class MdbLegacyUnpostedArchive
     }
 
     /// <summary>
-    /// 명세서 <c>legacy_tax_no</c> — 묶음 안 <b>한 줄이라도</b> IJ_TAXNO 가 0('00000000')·빈값이 아니면 그 번호(첫 번째 비0).
-    /// 🔴 <c>99999999</c> 는 <b>원값 그대로</b> 돌려준다(R-B4 사장님 재결재 대기 — 판정은 갈래 G <c>MigratedDocumentLock</c> 몫).
+    /// 명세서 <c>legacy_tax_no</c> — 묶음 안 <b>한 줄이라도</b> IJ_TAXNO 가 0('00000000')·빈값·99999999 가 아니면 그 번호(첫 실번호).
+    /// 🔴 실번호가 없고 <c>99999999</c> 가 있으면 <b>원값 그대로</b> 돌려준다(R-B4 · 판정은 <c>MigratedDocumentLock</c> 몫).
     /// 전부 0/빈값이면 0 (종전 첫 줄 0 저장과 같다 · G 판정에서 0 = 미발행).
     /// </summary>
+    /// <remarks>
+    /// 🆕 20260915작1 3판 R3 (설계 §24 · §14-9 ③): 묶음 안 <b>실번호(0·99999999 아님) 먼저</b> → 없으면 99999999 → 없으면 0.
+    /// 종전(첫 비0)은 99999999 줄이 실번호 줄보다 앞에 있으면 실제 발행된 명세서를 「발행 안 함」으로 저장했다.
+    /// </remarks>
     public static int LegacyTaxNo(IEnumerable<DataRow> rows)
     {
         ArgumentNullException.ThrowIfNull(rows);
+        var notIssued = false;
         foreach (var r in rows)
         {
             var no = TaxNo(r);
+            if (no == LegacyTaxNoNotIssuedValue)
+            {
+                notIssued = true;
+                continue;
+            }
             if (no != 0) return no;
         }
-        return 0;
+        return notIssued ? LegacyTaxNoNotIssuedValue : 0;
     }
+
+    /// <summary>레거시 IJ_TAXNO 「발행 안 함」 값 — <see cref="MigratedDocumentLock.LegacyTaxNoNotIssued"/> 와 같은 값.</summary>
+    private const int LegacyTaxNoNotIssuedValue = MigratedDocumentLock.LegacyTaxNoNotIssued;
 
     /// <summary>
     /// 재고원장 경로 한 줄 — <b>판정과 무관</b>(R1·R3). IJ_IO 가 "1"/"2" 면 넣는다(종전 미지값 제외 규칙 그대로).

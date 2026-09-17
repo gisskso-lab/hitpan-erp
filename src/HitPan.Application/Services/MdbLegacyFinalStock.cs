@@ -370,7 +370,14 @@ public static class MdbLegacyFinalStock
             buckets.TryGetValue(ym, out var perKey);
             foreach (var (whKey, st) in state)
             {
-                var (inQ, inA, outQ) = perKey is not null && perKey.TryGetValue(whKey, out var bv) ? bv : (0m, 0m, 0m);
+                if (perKey is null || !perKey.TryGetValue(whKey, out var bv))
+                {
+                    // 그 달 움직임 없는 키 = 레거시도 그 달 DOCFC 행이 없다(선행검증 B-0) → 기말 그대로.
+                    // 단 수량 0 인데 금액만 남은 키(P/L 등)는 0(설계 §23 「이어 계산에선 자동 0」 · 금액 = 수량×단가).
+                    if (st.Qty == 0m) st.Amt = 0m;
+                    continue;
+                }
+                var (inQ, inA, outQ) = bv;
                 decimal dan;
                 if (inQ != 0m && st.Qty + inQ != 0m)
                     dan = (st.Amt + inA) / (st.Qty + inQ);
