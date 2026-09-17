@@ -197,7 +197,9 @@ public class PartnerController : ControllerBase
         //   ① 이월잔액 행이 있는 회사는 이관 명세서(source_type='migration')를 빼고 ② 「이전 프로그램 이월」 미수(+ 잔액)를 기준일 나이로 한 번 더한다.
         //   뷰는 source_type 을 내놓지 않아 뷰 밖에서 이관 행을 뺄 수 없다(뷰 DDL 은 이 갈래 파일 밖 · 뷰 자체는 무수정).
         //   이월잔액 행이 없는 회사는 종전 뷰와 결과가 같다(뷰 식: 확정 명세서 중 연결된 활성 수금이 하나도 없는 것).
-        const string sql = """
+        // 🔴 20260915작1 3판 R2 (설계 §20 #8) — 이월 부분 amt = R(P)>0 · 나이 = base_date. 종전 hc 서브쿼리(사람 수금 → 이관 명세서)는
+        //   공용 파생표 LegacyBalanceMatching.ReceivableRemainingSql 의 M(갈래 E 호환분) 안에 있고, 이월 수금(legacy_balance)도 함께 빠진다.
+        var sql = $$"""
             SELECT x.partner_id AS PartnerId, p.partner_name AS PartnerName,
                    SUM(x.cnt) AS OpenInvoices,
                    SUM(CASE WHEN x.age <= 30 THEN x.amt ELSE 0 END) AS Bucket0_30,
@@ -216,19 +218,10 @@ public class PartnerController : ControllerBase
                    AND NOT (COALESCE(sd.source_type, '') = 'migration'
                             AND EXISTS (SELECT 1 FROM partner_legacy_balances plb_x WHERE plb_x.tenant_id = @TenantId))
                 UNION ALL
-                SELECT plb.partner_id, 1 AS cnt, TO_DAYS(CURDATE()) - TO_DAYS(plb.base_date) AS age,
-                       GREATEST(plb.balance_amount, 0) - IFNULL(hc.amt, 0) AS amt
-                  FROM partner_legacy_balances plb
-                  LEFT JOIN (
-                    SELECT sd2.partner_id, SUM(c2.amount) AS amt
-                      FROM collections c2
-                      JOIN sales_deliveries sd2 ON sd2.delivery_id = c2.ref_doc_id AND sd2.tenant_id = c2.tenant_id
-                     WHERE c2.tenant_id = @TenantId AND c2.is_active = 1 AND c2.ref_doc_type = 'sales_delivery'
-                       AND COALESCE(c2.source_type, '') <> 'migration' AND COALESCE(sd2.source_type, '') = 'migration'
-                     GROUP BY sd2.partner_id
-                  ) hc ON hc.partner_id = plb.partner_id
-                 WHERE plb.tenant_id = @TenantId
-                   AND GREATEST(plb.balance_amount, 0) - IFNULL(hc.amt, 0) > 0
+                SELECT r8.partner_id, 1 AS cnt, TO_DAYS(CURDATE()) - TO_DAYS(r8.base_date) AS age,
+                       r8.remaining_amount AS amt
+                  FROM ({{HitPan.Application.Services.LegacyBalanceMatching.ReceivableRemainingSql}}) r8
+                 WHERE r8.remaining_amount > 0
             ) x
             JOIN partners p ON p.tenant_id = @TenantId AND p.partner_id = x.partner_id
             GROUP BY x.partner_id, p.partner_name
