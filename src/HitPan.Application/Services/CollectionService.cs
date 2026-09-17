@@ -689,9 +689,9 @@ public class CollectionService : ICollectionService
     // 🔴 20260915작1 3판 R1b — 병렬이슈42(유형 값) · 43(금액) · 46(삭제 월마감 트랜잭션 안)
     // ═══════════════════════════════════════════
 
-    internal const string MsgUnknownCollectionType = "수금을 맞출 대상 종류를 알 수 없습니다. 화면을 새로 고친 뒤 다시 입력해 주세요.";
-    internal const string MsgUnknownPaymentType = "지급을 맞출 대상 종류를 알 수 없습니다. 화면을 새로 고친 뒤 다시 입력해 주세요.";
-    internal const string MsgAmountInvalid = "금액은 0원보다 크고, 소수점 아래 둘째 자리까지만 입력할 수 있습니다.";
+    public const string MsgUnknownCollectionType = "수금을 맞출 대상 종류를 알 수 없습니다. 화면을 새로 고친 뒤 다시 입력해 주세요.";
+    public const string MsgUnknownPaymentType = "지급을 맞출 대상 종류를 알 수 없습니다. 화면을 새로 고친 뒤 다시 입력해 주세요.";
+    public const string MsgAmountInvalid = "금액은 0원보다 크고, 소수점 아래 둘째 자리까지만 입력할 수 있습니다.";
 
     /// <summary>
     /// <c>collections.ref_doc_type</c> 에 서버가 받는 값(정규 값 · 소문자). 전수 = 명세서 §7-1.
