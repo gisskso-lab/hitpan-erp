@@ -180,6 +180,11 @@ public static class LegacyBalanceMatching
     /// </summary>
     public static async Task<Remaining?> GetForUpdateAsync(IDbConnection db, IDbTransaction tx, string tenantId, string partnerId, bool receivable, CancellationToken ct)
     {
+        // 🔴 20260915작1 3판 R1b (병렬이슈44 · PM 후속 2) — R 재계산은 문장마다 최신 커밋을 보는 READ COMMITTED 트랜잭션에서만.
+        //   REPEATABLE READ 면 같은 트랜잭션의 앞선 일반 읽기 스냅숏으로 옛 R 을 판정한다 → 호출자 실수를 조용히 넘기지 않고 막는다.
+        if (tx.IsolationLevel != MatchIsolation)
+            throw new NotSupportedException($"[LegacyBalanceMatching] 이월잔액 매칭 트랜잭션은 {MatchIsolation} 로 열어야 한다(현재 {tx.IsolationLevel}).");
+
         var locked = await db.QueryFirstOrDefaultAsync<string>(new CommandDefinition(
             "SELECT balance_id FROM partner_legacy_balances WHERE tenant_id = @TenantId AND partner_id = @PartnerId FOR UPDATE",
             new { TenantId = tenantId, PartnerId = partnerId }, transaction: tx, cancellationToken: ct)).ConfigureAwait(false);
@@ -195,6 +200,13 @@ public static class LegacyBalanceMatching
             sql, new { TenantId = tenantId, PartnerId = partnerId }, transaction: tx, cancellationToken: ct)).ConfigureAwait(false);
         return row?.ToRemaining();
     }
+
+    /// <summary>
+    /// 병렬이슈44 PM 후속 2 — 이월잔액 매칭 트랜잭션 격리 수준. 거래처 단위 직렬화는 <c>partner_legacy_balances</c> 행 <c>FOR UPDATE</c> 가 맡고,
+    /// R 재계산은 문장마다 최신 커밋을 본다(파생표 <c>LOCK IN SHARE MODE</c> 방식은 다른 거래처 동시 매칭에서 교착 실측 → 폐기 · G8-w).
+    /// ⚠️ 바이너리 로그를 <c>binlog_format=STATEMENT</c> 로 쓰는 서버는 RC 쓰기가 거절된다(MariaDB 11.4 기본값 MIXED).
+    /// </summary>
+    public const IsolationLevel MatchIsolation = IsolationLevel.ReadCommitted;
 
     /// <summary>
     /// 이월잔액 매칭 등록 검사 — 호출자 트랜잭션 안 · INSERT 앞에서 부른다.

@@ -123,9 +123,13 @@ public class CollectionService : ICollectionService
     public async Task<string> CreateCollectionAsync(CreateCollectionRequest request, string tenantId, string userId, CancellationToken ct = default)
     {
         await EnsureOpenAsync(ct);
+        // 🔴 20260915작1 3판 R1b (병렬이슈42·43) — 입구 정규화·금액 검사. 이후 검사·저장은 정규 값만 본다.
+        request.RefDocType = NormalizeCollectionRefType(request.RefDocType);
+        EnsureAmountValid(request.Amount);
         // 월마감 체크
         await ApprovalTriggerHelper.EnsureNotClosedAsync(_db, tenantId, request.CollectionDate, ct);
-        using var tx = _db.BeginTransaction();
+        // 🔴 R1b PM 후속 2 (병렬이슈44) — READ COMMITTED: 거래처 잠금 뒤 R·명세서 남은 금액을 최신 커밋으로 판정 · 다른 거래처와 틈 잠금 교착 없음.
+        using var tx = _db.BeginTransaction(LegacyBalanceMatching.MatchIsolation);
         var id = Guid.NewGuid().ToString();
         try
         {
@@ -213,6 +217,9 @@ public class CollectionService : ICollectionService
         using var tx = _db.BeginTransaction();
         try
         {
+            // 🔴 20260915작1 3판 R1b (병렬이슈46) — 같은 검사를 트랜잭션 안에서 잠금 읽기로 한 번 더(위 검사와 마감 처리 사이 경합 창을 닫는다).
+            await EnsureNotClosedInTxAsync(tenantId, col.Date, tx, ct);
+
             var affected = await _db.ExecuteAsync(new CommandDefinition(
                 "UPDATE collections SET is_active = 0, updated_at = NOW(6) WHERE collection_id = @Id AND tenant_id = @TenantId AND is_active = 1",
                 new { Id = collectionId, TenantId = tenantId }, transaction: tx, cancellationToken: ct));
@@ -286,8 +293,12 @@ public class CollectionService : ICollectionService
     public async Task<string> CreatePaymentAsync(CreatePaymentRequest request, string tenantId, string userId, CancellationToken ct = default)
     {
         await EnsureOpenAsync(ct);
+        // 🔴 20260915작1 3판 R1b (병렬이슈42·43) — 수금과 대칭.
+        request.PaymentType = NormalizePaymentType(request.PaymentType);
+        EnsureAmountValid(request.Amount);
         await ApprovalTriggerHelper.EnsureNotClosedAsync(_db, tenantId, request.PaymentDate, ct);
-        using var tx = _db.BeginTransaction();
+        // 🔴 R1b PM 후속 2 (병렬이슈44) — 수금과 같다.
+        using var tx = _db.BeginTransaction(LegacyBalanceMatching.MatchIsolation);
         var id = Guid.NewGuid().ToString();
         try
         {
@@ -371,6 +382,9 @@ public class CollectionService : ICollectionService
         using var tx = _db.BeginTransaction();
         try
         {
+            // 🔴 20260915작1 3판 R1b (병렬이슈46) — 수금 삭제와 같다.
+            await EnsureNotClosedInTxAsync(tenantId, pay.Date, tx, ct);
+
             var affected = await _db.ExecuteAsync(new CommandDefinition(
                 "UPDATE payments SET is_active = 0, updated_at = NOW(6) WHERE payment_id = @Id AND tenant_id = @TenantId AND is_active = 1",
                 new { Id = paymentId, TenantId = tenantId }, transaction: tx, cancellationToken: ct));
@@ -672,6 +686,67 @@ public class CollectionService : ICollectionService
     internal const string MsgMigratedReceipt = "이전 프로그램에서 옮겨온 매입전표입니다. 이 거래처의 줄 돈은 「" + LegacyBalanceMatching.Label + "」으로 맞춰 주세요.";
 
     private static readonly System.Globalization.CultureInfo Ko = System.Globalization.CultureInfo.GetCultureInfo("ko-KR");
+
+    // ═══════════════════════════════════════════
+    // 🔴 20260915작1 3판 R1b — 병렬이슈42(유형 값) · 43(금액) · 46(삭제 월마감 트랜잭션 안)
+    // ═══════════════════════════════════════════
+
+    public const string MsgUnknownCollectionType = "수금을 맞출 대상 종류를 알 수 없습니다. 화면을 새로 고친 뒤 다시 입력해 주세요.";
+    public const string MsgUnknownPaymentType = "지급을 맞출 대상 종류를 알 수 없습니다. 화면을 새로 고친 뒤 다시 입력해 주세요.";
+    public const string MsgAmountInvalid = "금액은 0원보다 크고, 소수점 아래 둘째 자리까지만 입력할 수 있습니다.";
+
+    /// <summary>
+    /// <c>collections.ref_doc_type</c> 에 서버가 받는 값(정규 값 · 소문자). 전수 = 명세서 §7-1.
+    /// 칼럼 콜레이션 <c>utf8mb4_unicode_ci</c> 는 대소문자·끝 공백·전각 글자를 같게 보므로, 목록 밖 값은 저장하지 않는다(병렬이슈42).
+    /// </summary>
+    internal static readonly IReadOnlyList<string> KnownCollectionRefTypes = new[] { "sales_delivery", LegacyBalanceMatching.RefType };
+
+    /// <summary>
+    /// <c>payments.payment_type</c> 에 서버가 받는 값. <c>payment</c>·<c>receipt</c> 는 출하 DDL 뷰(<c>v_partner_payments_total</c>·<c>v_partner_receipts_total</c>)
+    /// 와 MoneyFlowJournal 게이트가 쓰는 값이라 회귀 방지로 남긴다(PM 확인 대상).
+    /// </summary>
+    internal static readonly IReadOnlyList<string> KnownPaymentTypes = new[] { "purchase", LegacyBalanceMatching.RefType, "payment", "receipt" };
+
+    /// <summary>수금 ref 종류 정규화 — 비었으면 null(종전 「ref 없음」) · Trim + 소문자 뒤 목록과 정확 일치 · 목록 밖 = 거절.</summary>
+    internal static string? NormalizeCollectionRefType(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value)) return null;
+        var v = value.Trim().ToLowerInvariant();
+        foreach (var known in KnownCollectionRefTypes)
+            if (string.Equals(v, known, StringComparison.Ordinal)) return known;
+        throw new InvalidOperationException(MsgUnknownCollectionType);
+    }
+
+    /// <summary>지급 종류 정규화 — 칼럼이 NOT NULL 이라 빈 값도 거절 · Trim + 소문자 뒤 목록과 정확 일치.</summary>
+    internal static string NormalizePaymentType(string? value)
+    {
+        var v = (value ?? string.Empty).Trim().ToLowerInvariant();
+        foreach (var known in KnownPaymentTypes)
+            if (string.Equals(v, known, StringComparison.Ordinal)) return known;
+        throw new InvalidOperationException(MsgUnknownPaymentType);
+    }
+
+    /// <summary>수금·지급 금액 — 0 초과 · 소수 둘째 자리까지(칼럼 decimal(15,2) 가 조용히 자르는 것을 막는다 · 병렬이슈43).</summary>
+    internal static void EnsureAmountValid(decimal amount)
+    {
+        if (amount <= 0m || decimal.Round(amount, 2) != amount)
+            throw new InvalidOperationException(MsgAmountInvalid);
+    }
+
+    /// <summary>
+    /// 삭제용 월마감 검사 — 호출자 트랜잭션 안에서 <c>monthly_closing</c> 행을 <c>LOCK IN SHARE MODE</c> 로 읽는다(병렬이슈46).
+    /// 마감 처리(<c>MonthlyClosingService</c> INSERT … ON DUPLICATE KEY UPDATE)와 겹치면 어느 한쪽이 커밋될 때까지 기다린다.
+    /// 문구는 <see cref="ApprovalTriggerHelper.EnsureNotClosedAsync"/> 와 같다(헬퍼 파일은 이 갈래 밖이라 여기 둔다).
+    /// </summary>
+    private async Task EnsureNotClosedInTxAsync(string tenantId, DateTime date, IDbTransaction tx, CancellationToken ct)
+    {
+        var ym = date.ToString("yyyyMM");
+        var status = await _db.QueryFirstOrDefaultAsync<string>(new CommandDefinition(
+            "SELECT status FROM monthly_closing WHERE tenant_id = @TenantId AND `year_month` = @Ym LOCK IN SHARE MODE",
+            new { TenantId = tenantId, Ym = ym }, transaction: tx, cancellationToken: ct));
+        if (status == "closed")
+            throw new InvalidOperationException($"{ym[..4]}년 {ym[4..]}월은 마감된 기간입니다. 전표를 수정할 수 없습니다.");
+    }
 
     /// <summary>
     /// 수금 등록 검사. ref = 이월잔액 → <see cref="LegacyBalanceMatching.EnsureMatchAllowedAsync"/> ·

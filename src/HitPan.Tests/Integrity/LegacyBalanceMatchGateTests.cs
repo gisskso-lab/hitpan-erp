@@ -564,6 +564,302 @@ public sealed class LegacyBalanceMatchGateTests : IClassFixture<LegacyBalanceMat
         Assert.Single(await svc.GetCollectionsAsync(t), c => c.CollectionId == cid);
     }
 
+    // ═══ R1b — [3-V] 병렬이슈 42·43·44·46 (작지 §15-12) ═══
+
+    /// <summary>저장된 글자 그대로(콜레이션 무시) — BINARY 로 읽어 UTF-8 로 되돌린다.</summary>
+    private static async Task<string> StoredBinaryAsync(MySqlConnection db, string sql, string id)
+        => System.Text.Encoding.UTF8.GetString((await db.ExecuteScalarAsync<byte[]>(sql, new { Id = id }))!);
+
+    [Fact(DisplayName = "G8-r 병렬이슈42 수금 유형 표기 변형(대소문자·끝 공백·전각) — 음수·기준일 이전·초과·명세서 초과 전부 거절 · 정상은 정규 값으로 저장")]
+    public async Task G8r_수금유형변형()
+    {
+        if (Skip(nameof(G8r_수금유형변형))) return;
+        var (db, t, svc) = await NewTenantAsync();
+        await using var _ = db;
+        await InsertDeliveryAsync(db, t, "g8r-d", PA, 100_000m, "direct");
+
+        CreateCollectionRequest Req(string type, decimal amount, DateTime? date = null, string? refId = null)
+            => new() { PartnerId = PA, CollectionDate = date ?? After, Amount = amount, CollectionMethod = "cash", RefDocType = type, RefDocId = refId ?? PA };
+
+        await RejectedUnchangedAsync(db, t, () => svc.CreateCollectionAsync(Req("Legacy_Balance", -500_000m, new DateTime(2025, 1, 1)), t, "g8"));
+        var s2 = await RejectedUnchangedAsync(db, t, () => svc.CreateCollectionAsync(Req("legacy_balance ", 70_000m, new DateTime(2025, 1, 1)), t, "g8"));
+        Assert.Contains("기준일(2026-02-28)까지", s2.Message);
+        var over = await RejectedUnchangedAsync(db, t, () => svc.CreateCollectionAsync(Req("LEGACY_BALANCE", 100_001m), t, "g8"));
+        Assert.Contains("100,000원 남았습니다", over.Message);
+        await RejectedUnchangedAsync(db, t, () => svc.CreateCollectionAsync(Req("LEGACY_BALANCE", 1m, refId: PA.ToUpperInvariant()), t, "g8"));
+        var p2 = await RejectedUnchangedAsync(db, t, () => svc.CreateCollectionAsync(Req("Sales_Delivery", 100_001m, refId: "g8r-d"), t, "g8"));
+        Assert.Contains("100,000원입니다", p2.Message);
+        // 전각 ｌ — unicode_ci 는 'legacy_balance' 와 같게 본다 → 목록 밖으로 거절
+        var unk = await RejectedUnchangedAsync(db, t, () => svc.CreateCollectionAsync(Req("ｌegacy_balance", 1_000m), t, "g8"));
+        Assert.Equal(CollectionService.MsgUnknownCollectionType, unk.Message);
+        await RejectedUnchangedAsync(db, t, () => svc.CreateCollectionAsync(Req("delivery", 1_000m, refId: "g8r-d"), t, "g8"));
+
+        var ok = await svc.CreateCollectionAsync(Req(" Legacy_Balance ", 30_000m), t, "g8");
+        const string colSql = "SELECT CAST(ref_doc_type AS BINARY) FROM collections WHERE collection_id=@Id";
+        Assert.Equal("legacy_balance", await StoredBinaryAsync(db, colSql, ok));
+        var okDoc = await svc.CreateCollectionAsync(Req("SALES_DELIVERY", 10_000m, refId: "g8r-d"), t, "g8");
+        Assert.Equal("sales_delivery", await StoredBinaryAsync(db, colSql, okDoc));
+        var noRef = await svc.CreateCollectionAsync(Req("   ", 1_000m, refId: null), t, "g8");
+        Assert.Null(await db.ExecuteScalarAsync<string?>("SELECT ref_doc_type FROM collections WHERE collection_id=@Id", new { Id = noRef }));
+
+        var r = (await RemainingAsync(db, t, PA, true))!;
+        Assert.Equal(30_000m, r.MatchedAmount);
+        Assert.Equal(70_000m, r.RemainingAmount);
+    }
+
+    [Fact(DisplayName = "G8-s 병렬이슈42 지급 유형 표기 변형 — 음수·초과·매입 초과·모르는 값 거절 · 정상은 정규 값으로 저장")]
+    public async Task G8s_지급유형변형()
+    {
+        if (Skip(nameof(G8s_지급유형변형))) return;
+        var (db, t, svc) = await NewTenantAsync();
+        await using var _ = db;
+        await InsertReceiptAsync(db, t, "g8s-r", PB, 55_000m, "direct");
+
+        CreatePaymentRequest Req(string? type, decimal amount, DateTime? date = null, string? refId = null)
+            => new() { PartnerId = PB, PaymentDate = date ?? After, Amount = amount, PaymentMethod = "bank_transfer", PaymentType = type!, RefOrderId = refId ?? PB };
+
+        await RejectedUnchangedAsync(db, t, () => svc.CreatePaymentAsync(Req("Legacy_Balance", -500_000m, new DateTime(2025, 1, 1)), t, "g8"));
+        await RejectedUnchangedAsync(db, t, () => svc.CreatePaymentAsync(Req("legacy_balance ", 70_000m, new DateTime(2025, 1, 1)), t, "g8"));
+        var over = await RejectedUnchangedAsync(db, t, () => svc.CreatePaymentAsync(Req("LEGACY_BALANCE", 80_001m), t, "g8"));
+        Assert.Contains("80,000원 남았습니다", over.Message);
+        var p2 = await RejectedUnchangedAsync(db, t, () => svc.CreatePaymentAsync(Req("PURCHASE ", 55_001m, refId: "g8s-r"), t, "g8"));
+        Assert.Contains("55,000원입니다", p2.Message);
+        var unk = await RejectedUnchangedAsync(db, t, () => svc.CreatePaymentAsync(Req("ｌegacy_balance", 1_000m), t, "g8"));
+        Assert.Equal(CollectionService.MsgUnknownPaymentType, unk.Message);
+        await RejectedUnchangedAsync(db, t, () => svc.CreatePaymentAsync(Req("", 1_000m), t, "g8"));
+        await RejectedUnchangedAsync(db, t, () => svc.CreatePaymentAsync(Req(null, 1_000m), t, "g8"));
+
+        var ok = await svc.CreatePaymentAsync(Req("Legacy_Balance", 30_000m), t, "g8");
+        const string paySql = "SELECT CAST(payment_type AS BINARY) FROM payments WHERE payment_id=@Id";
+        Assert.Equal("legacy_balance", await StoredBinaryAsync(db, paySql, ok));
+        var okDoc = await svc.CreatePaymentAsync(Req(" Purchase", 5_000m, refId: "g8s-r"), t, "g8");
+        Assert.Equal("purchase", await StoredBinaryAsync(db, paySql, okDoc));
+
+        var r = (await RemainingAsync(db, t, PB, false))!;
+        Assert.Equal(30_000m, r.MatchedAmount);
+        Assert.Equal(50_000m, r.RemainingAmount);
+    }
+
+    [Fact(DisplayName = "G8-t 병렬이슈43 수금·지급 금액 0 이하·소수 셋째 자리 거절(ref 없음·명세서·이월 모두) · 둘째 자리는 허용")]
+    public async Task G8t_금액검사()
+    {
+        if (Skip(nameof(G8t_금액검사))) return;
+        var (db, t, svc) = await NewTenantAsync();
+        await using var _ = db;
+        await InsertDeliveryAsync(db, t, "g8t-d", PA, 110_000m, "direct");
+        await InsertReceiptAsync(db, t, "g8t-r", PB, 55_000m, "direct");
+
+        foreach (var amount in new[] { -50_000m, 0m, 0.004m, 1.005m })
+        {
+            var e1 = await RejectedUnchangedAsync(db, t, () => svc.CreateCollectionAsync(new CreateCollectionRequest { PartnerId = PA, CollectionDate = After, Amount = amount, CollectionMethod = "cash" }, t, "g8"));
+            Assert.Equal(CollectionService.MsgAmountInvalid, e1.Message);
+            await RejectedUnchangedAsync(db, t, () => svc.CreateCollectionAsync(new CreateCollectionRequest { PartnerId = PA, CollectionDate = After, Amount = amount, CollectionMethod = "cash", RefDocType = "sales_delivery", RefDocId = "g8t-d" }, t, "g8"));
+            await RejectedUnchangedAsync(db, t, () => svc.CreateCollectionAsync(LegacyCollection(PA, amount), t, "g8"));
+            var e2 = await RejectedUnchangedAsync(db, t, () => svc.CreatePaymentAsync(new CreatePaymentRequest { PartnerId = PB, PaymentDate = After, Amount = amount, PaymentMethod = "cash", PaymentType = "payment" }, t, "g8"));
+            Assert.Equal(CollectionService.MsgAmountInvalid, e2.Message);
+            await RejectedUnchangedAsync(db, t, () => svc.CreatePaymentAsync(new CreatePaymentRequest { PartnerId = PB, PaymentDate = After, Amount = amount, PaymentMethod = "cash", PaymentType = "purchase", RefOrderId = "g8t-r" }, t, "g8"));
+            await RejectedUnchangedAsync(db, t, () => svc.CreatePaymentAsync(LegacyPayment(PB, amount), t, "g8"));
+        }
+
+        // 이슈43 재현 경로: 음수로 명세서 남은 금액을 늘린 뒤 초과 수금 — 음수가 막히니 110,000 까지만 된다
+        await RejectedUnchangedAsync(db, t, () => svc.CreateCollectionAsync(new CreateCollectionRequest { PartnerId = PA, CollectionDate = After, Amount = 160_000m, CollectionMethod = "cash", RefDocType = "sales_delivery", RefDocId = "g8t-d" }, t, "g8"));
+
+        var id = await svc.CreateCollectionAsync(new CreateCollectionRequest { PartnerId = PA, CollectionDate = After, Amount = 1.25m, CollectionMethod = "cash" }, t, "g8");
+        Assert.Equal(1.25m, await db.ExecuteScalarAsync<decimal>("SELECT amount FROM collections WHERE collection_id=@Id", new { Id = id }));
+    }
+
+    [Fact(DisplayName = "G8-u 병렬이슈44 두 연결 — 잠금 전 일반 읽기가 있어도 나중 연결은 최신 R 로 판정 · 최종 R 음수 안 됨(미수·미지급)")]
+    public async Task G8u_잠금읽기_최신R()
+    {
+        if (Skip(nameof(G8u_잠금읽기_최신R))) return;
+        var (db, t, _svc) = await NewTenantAsync();
+        await using var _ = db;
+
+        foreach (var receivable in new[] { true, false })
+        {
+            var partner = receivable ? PA : PB;
+            var legacy = receivable ? 100_000m : 80_000m;
+            await using var c1 = new MySqlConnection(_fx.DbConnString());
+            await using var c2 = new MySqlConnection(_fx.DbConnString());
+            await c1.OpenAsync();
+            await c2.OpenAsync();
+            // PM 후속 2 — 서비스와 같은 격리 수준(RC). 다른 격리 수준은 계약 가드가 막는다(아래 끝).
+            using var tx1 = await BeginMatchTxAsync(c1);
+            using var tx2 = await BeginMatchTxAsync(c2);
+
+            // 이슈44 경우 B — 잠금 전 일반 SELECT 가 스냅숏을 연다(두 연결 모두 옛 R 을 본다)
+            var sentinel = receivable ? "SELECT COUNT(*) FROM collections WHERE tenant_id=@T" : "SELECT COUNT(*) FROM payments WHERE tenant_id=@T";
+            await c1.ExecuteScalarAsync<int>(sentinel, new { T = t }, tx1);
+            await c2.ExecuteScalarAsync<int>(sentinel, new { T = t }, tx2);
+
+            var amount = 60_000m;
+            await LegacyBalanceMatching.EnsureMatchAllowedAsync(c1, tx1, t, partner, partner, amount, After, receivable, null, CancellationToken.None);
+            await InsertMatchAsync(c1, tx1, t, partner, amount, receivable);
+            await tx1.CommitAsync();
+
+            InvalidOperationException? rejected = null;
+            try
+            {
+                await LegacyBalanceMatching.EnsureMatchAllowedAsync(c2, tx2, t, partner, partner, amount, After, receivable, null, CancellationToken.None);
+                await InsertMatchAsync(c2, tx2, t, partner, amount, receivable);
+                await tx2.CommitAsync();
+            }
+            catch (InvalidOperationException ex)
+            {
+                rejected = ex;
+                await tx2.RollbackAsync();
+            }
+
+            var r = (await RemainingAsync(db, t, partner, receivable))!;
+            Assert.True(r.RemainingAmount >= 0m, $"최종 R 음수 {r.RemainingAmount} (receivable={receivable})");
+            Assert.NotNull(rejected);
+            Assert.Contains($"{legacy - amount:N0}원 남았습니다", rejected!.Message);
+        }
+
+        // 계약 가드 — REPEATABLE READ 트랜잭션으로 부르면 옛 R 로 판정하지 않고 바로 막힌다
+        await using var rr = new MySqlConnection(_fx.DbConnString());
+        await rr.OpenAsync();
+        await using var rrTx = await rr.BeginTransactionAsync(System.Data.IsolationLevel.RepeatableRead);
+        await Assert.ThrowsAsync<NotSupportedException>(() => LegacyBalanceMatching.GetForUpdateAsync(rr, rrTx, t, PA, true, CancellationToken.None));
+    }
+
+    private const System.Data.IsolationLevel MatchIsolation = LegacyBalanceMatching.MatchIsolation;
+
+    /// <summary>매칭 트랜잭션 — 서비스와 같은 격리 수준으로 연다.</summary>
+    private static async Task<MySqlTransaction> BeginMatchTxAsync(MySqlConnection c)
+        => await c.BeginTransactionAsync(MatchIsolation);
+
+    /// <summary>한 연결의 매칭(잠금·검사·INSERT)을 커밋 없이 돌린다. 거절이면 예외를 돌려준다.</summary>
+    private static async Task<Exception?> TryMatchAsync(MySqlConnection c, MySqlTransaction tx, string t, string partner, decimal amount, bool receivable, bool insert)
+    {
+        try
+        {
+            await LegacyBalanceMatching.EnsureMatchAllowedAsync(c, tx, t, partner, partner, amount, After, receivable, null, CancellationToken.None);
+            if (insert) await InsertMatchAsync(c, tx, t, partner, amount, receivable);
+            return null;
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or MySqlException)
+        {
+            return ex;
+        }
+    }
+
+    [Fact(DisplayName = "G8-w 두 연결이 서로 다른 거래처에 동시 이월 매칭 — 둘 다 성공 · 교착 0")]
+    public async Task G8w_다른거래처_동시()
+    {
+        if (Skip(nameof(G8w_다른거래처_동시))) return;
+        var (db, t, _svc) = await NewTenantAsync();
+        await using var _ = db;
+        await db.ExecuteAsync("""
+            INSERT INTO partners (partner_id, tenant_id, partner_code, partner_name, partner_type, is_active, is_deleted, created_at, updated_at)
+            VALUES (@Id, @T, 'C', 'G8거래처C', 'both', 1, 0, NOW(), NOW())
+            """, new { Id = OtherPartner, T = t });
+        await InsertLegacyAsync(db, t, OtherPartner, 50_000m);
+        // 두 거래처 모두 이관 명세서·사람 수금이 있어야 em 파생표가 훑을 줄이 생긴다
+        await InsertDeliveryAsync(db, t, "g8w-d1", PA, 10_000m, "migration");
+        await InsertDeliveryAsync(db, t, "g8w-d2", OtherPartner, 10_000m, "migration");
+
+        await using var c1 = new MySqlConnection(_fx.DbConnString());
+        await using var c2 = new MySqlConnection(_fx.DbConnString());
+        await c1.OpenAsync();
+        await c2.OpenAsync();
+        await using var tx1 = await BeginMatchTxAsync(c1);
+        await using var tx2 = await BeginMatchTxAsync(c2);
+
+        // 둘 다 잠금·검사까지 → 그다음 둘 다 INSERT (서로의 잠금이 겹치면 여기서 교착)
+        Assert.Null(await TryMatchAsync(c1, tx1, t, PA, 10_000m, true, insert: false));
+        Assert.Null(await TryMatchAsync(c2, tx2, t, OtherPartner, 10_000m, true, insert: false));
+        var ins1 = InsertMatchAsync(c1, tx1, t, PA, 10_000m, true);
+        var ins2 = InsertMatchAsync(c2, tx2, t, OtherPartner, 10_000m, true);
+        Exception? e1 = null, e2 = null;
+        try { await ins1; } catch (MySqlException ex) { e1 = ex; }
+        try { await ins2; } catch (MySqlException ex) { e2 = ex; }
+        Assert.True(e1 is null && e2 is null, $"동시 이월 매칭 실패(교착 등): c1={e1?.Message} · c2={e2?.Message}");
+        await tx1.CommitAsync();
+        await tx2.CommitAsync();
+
+        Assert.Equal(90_000m, (await RemainingAsync(db, t, PA, true))!.RemainingAmount);
+        Assert.Equal(40_000m, (await RemainingAsync(db, t, OtherPartner, true))!.RemainingAmount);
+    }
+
+    [Fact(DisplayName = "G8-x 같은 거래처 동시(각 R 이하 · 합 초과) — 뒤 연결은 앞 커밋을 기다렸다 거절 · 최종 R ≥ 0")]
+    public async Task G8x_같은거래처_동시()
+    {
+        if (Skip(nameof(G8x_같은거래처_동시))) return;
+        var (db, t, _svc) = await NewTenantAsync();
+        await using var _ = db;
+
+        await using var c1 = new MySqlConnection(_fx.DbConnString());
+        await using var c2 = new MySqlConnection(_fx.DbConnString());
+        await c1.OpenAsync();
+        await c2.OpenAsync();
+        await using var tx1 = await BeginMatchTxAsync(c1);
+        await using var tx2 = await BeginMatchTxAsync(c2);
+        // 둘 다 잠금 전 일반 읽기(옛 스냅숏을 여는 호출 순서)
+        await c1.ExecuteScalarAsync<int>("SELECT COUNT(*) FROM collections WHERE tenant_id=@T", new { T = t }, tx1);
+        await c2.ExecuteScalarAsync<int>("SELECT COUNT(*) FROM collections WHERE tenant_id=@T", new { T = t }, tx2);
+
+        Assert.Null(await TryMatchAsync(c1, tx1, t, PA, 70_000m, true, insert: true));
+        var second = TryMatchAsync(c2, tx2, t, PA, 70_000m, true, insert: true);   // 거래처 잠금에서 기다린다
+        var waited = await Task.WhenAny(second, Task.Delay(1500)) != second;
+        await tx1.CommitAsync();
+        var e2 = await second;
+        if (e2 is null) await tx2.CommitAsync(); else await tx2.RollbackAsync();
+
+        Assert.True(waited, "뒤 연결이 거래처 잠금을 기다리지 않았다");
+        Assert.IsType<InvalidOperationException>(e2);
+        Assert.Contains("30,000원 남았습니다", e2!.Message);
+        var r = (await RemainingAsync(db, t, PA, true))!;
+        Assert.True(r.RemainingAmount >= 0m, $"최종 R 음수 {r.RemainingAmount}");
+        Assert.Equal(30_000m, r.RemainingAmount);
+    }
+
+    private static Task InsertMatchAsync(MySqlConnection c, MySqlTransaction tx, string t, string partner, decimal amount, bool receivable)
+        => receivable
+            ? c.ExecuteAsync("""
+                INSERT INTO collections (collection_id, tenant_id, partner_id, collection_date, amount, ref_doc_type, ref_doc_id, is_active)
+                VALUES (UUID(), @T, @P, '2026-03-10', @A, 'legacy_balance', @P, 1)
+                """, new { T = t, P = partner, A = amount }, tx)
+            : c.ExecuteAsync("""
+                INSERT INTO payments (payment_id, tenant_id, partner_id, payment_type, amount, payment_date, ref_order_id, is_active)
+                VALUES (UUID(), @T, @P, 'legacy_balance', @A, '2026-03-10', @P, 1)
+                """, new { T = t, P = partner, A = amount }, tx);
+
+    [Fact(DisplayName = "G8-v 병렬이슈46 마감 처리가 커밋 전일 때 삭제 — 트랜잭션 안 검사가 기다렸다가 거절 · is_active·역분개 무변화")]
+    public async Task G8v_삭제월마감_트랜잭션안()
+    {
+        if (Skip(nameof(G8v_삭제월마감_트랜잭션안))) return;
+        var (db, t, svc) = await NewTenantAsync();
+        await using var _ = db;
+        var cid = await svc.CreateCollectionAsync(LegacyCollection(PA, 30_000m), t, "g8");
+        var pid = await svc.CreatePaymentAsync(LegacyPayment(PB, 30_000m, new DateTime(2026, 4, 10)), t, "g8");
+
+        foreach (var (ym, act, table, idCol, id, cancelType) in new[]
+                 {
+                     ("202603", (Func<Task>)(() => svc.DeleteCollectionAsync(cid, t)), "collections", "collection_id", cid, "collection_cancel"),
+                     ("202604", (Func<Task>)(() => svc.DeletePaymentAsync(pid, t)), "payments", "payment_id", pid, "payment_cancel"),
+                 })
+        {
+            await using var closer = new MySqlConnection(_fx.DbConnString());
+            await closer.OpenAsync();
+            using var ctx = await closer.BeginTransactionAsync();
+            await closer.ExecuteAsync("""
+                INSERT INTO monthly_closing (closing_id, tenant_id, `year_month`, status, sales_amount, purchase_amount, receipt_amount, payment_amount, created_at, updated_at)
+                VALUES (UUID(), @T, @Ym, 'closed', 0, 0, 0, 0, NOW(6), NOW(6))
+                """, new { T = t, Ym = ym }, ctx);
+
+            var delete = act();
+            var finishedEarly = await Task.WhenAny(delete, Task.Delay(1500)) == delete;
+            await ctx.CommitAsync();
+
+            var ex = await Assert.ThrowsAsync<InvalidOperationException>(() => delete);
+            Assert.Contains("마감된 기간입니다", ex.Message);
+            Assert.False(finishedEarly, "삭제가 마감 커밋을 기다리지 않았다");
+            Assert.Equal(1, await db.ExecuteScalarAsync<int>($"SELECT is_active FROM {table} WHERE {idCol}=@Id", new { Id = id }));
+            Assert.Equal(0, await EntryCountAsync(db, t, cancelType, id));
+        }
+    }
+
     private static Task InsertDeliveryAsync(MySqlConnection db, string t, string id, string partner, decimal total, string source)
         => db.ExecuteAsync("""
             INSERT INTO sales_deliveries (delivery_id, tenant_id, delivery_no, partner_id, delivery_date, source_type, status, total_amount, vat_amount, is_deleted, created_at, updated_at)
