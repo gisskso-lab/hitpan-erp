@@ -133,6 +133,8 @@ public class CollectionModel
     public string? RefDocType { get; set; }
     public string? RefDocId { get; set; }
     public string? Memo { get; set; }
+    /// <summary>20260915작1 3판 R4 — 이관 줄이면 "migration"(칩 「이전 프로그램」). 목록에서 빼지 않는다.</summary>
+    public string? SourceType { get; set; }
 }
 
 public class CreateCollectionModel
@@ -158,6 +160,8 @@ public class PaymentModel
     public string PaymentType { get; set; } = string.Empty;
     public string? RefOrderId { get; set; }
     public string? Memo { get; set; }
+    /// <summary>20260915작1 3판 R4 — 이관 줄이면 "migration"(칩 「이전 프로그램」). 목록에서 빼지 않는다.</summary>
+    public string? SourceType { get; set; }
 }
 
 public class CreatePaymentModel
@@ -202,6 +206,68 @@ public class ReceivablesResponseModel
 {
     public List<ReceivableSummaryModel> Summary { get; set; } = new();
     public List<ReceivableDocumentModel> Documents { get; set; } = new();
+    /// <summary>20260915작1 3판 R4 — 거래처별 「이전 프로그램 이월잔액」 한 줄(서버 R1 · 남은 금액 &gt; 0 만).</summary>
+    public List<LegacyBalanceRowModel> LegacyBalances { get; set; } = new();
+}
+
+/// <summary>20260915작1 3판 R4 — 서버 <c>LegacyBalanceRowDto</c> 대응(기준일 · 이관 이월 · 그 뒤 수금·지급 · 남은 금액).</summary>
+public class LegacyBalanceRowModel
+{
+    public string PartnerId { get; set; } = string.Empty;
+    public string PartnerName { get; set; } = string.Empty;
+    public DateTime BaseDate { get; set; }
+    public decimal LegacyAmount { get; set; }
+    public decimal MatchedAmount { get; set; }
+    public decimal RemainingAmount { get; set; }
+}
+
+/// <summary>20260915작1 3판 R4 — 등록·삭제 결과. 실패하면 서버가 보낸 안내 문구를 그대로 담는다(막는 것 ≠ 알려주는 것).</summary>
+public sealed record SaveResultModel(bool Ok, string? ErrorMessage);
+
+/// <summary>
+/// 20260915작1 3판 R4 — 수금·지급 화면 이름표 <b>한 곳</b>.
+/// 🔴 Web 은 Application 을 참조하지 않는다(HitPan.Web.csproj = Contracts 만) → 서버 <c>LegacyBalanceMatching.RefType/Label</c> 과 같은 값을 여기 둔다.
+/// 영문 코드·원문이 화면·엑셀에 나가면 안 된다(R-A6) — 모르는 값은 「기타」.
+/// </summary>
+public static class CollectionPaymentLabels
+{
+    /// <summary>서버 <c>LegacyBalanceMatching.RefType</c> 와 같은 값.</summary>
+    public const string LegacyBalanceRefType = "legacy_balance";
+    /// <summary>서버 <c>LegacyBalanceMatching.Label</c> 과 같은 값.</summary>
+    public const string LegacyBalanceLabel = "이전 프로그램 이월잔액";
+    public const string MigratedSourceType = "migration";
+    public const string MigratedChip = "이전 프로그램";
+    public const string SalesDeliveryRefType = "sales_delivery";
+    public const string PurchaseType = "purchase";
+    public const string OtherLabel = "기타";
+
+    public static bool IsMigrated(string? sourceType)
+        => string.Equals(sourceType, MigratedSourceType, StringComparison.Ordinal);
+
+    /// <summary>수금 참조 유형 이름 — 거래명세서 / 이전 프로그램 이월잔액 / 기타.</summary>
+    public static string CollectionRefLabel(string? refDocType) => refDocType switch
+    {
+        SalesDeliveryRefType => "거래명세서",
+        LegacyBalanceRefType => LegacyBalanceLabel,
+        _ => OtherLabel
+    };
+
+    /// <summary>지급 유형 이름 — 매입전표 / 이전 프로그램 이월잔액 / 기타.</summary>
+    public static string PaymentRefLabel(string? paymentType) => paymentType switch
+    {
+        PurchaseType => "매입전표",
+        LegacyBalanceRefType => LegacyBalanceLabel,
+        _ => OtherLabel
+    };
+
+    /// <summary>엑셀 「참조 전표」 칸 — 화면 칩과 같은 말(내부 번호·영문 0).</summary>
+    public static string ExportText(bool migrated, bool hasRef, string refLabel)
+    {
+        var parts = new List<string>(2);
+        if (migrated) parts.Add(MigratedChip);
+        if (hasRef) parts.Add(refLabel);
+        return string.Join(" · ", parts);
+    }
 }
 
 public class PayableSummaryModel
@@ -233,6 +299,8 @@ public class PayablesResponseModel
 {
     public List<PayableSummaryModel> Summary { get; set; } = new();
     public List<PayableDocumentModel> Documents { get; set; } = new();
+    /// <summary>20260915작1 3판 R4 — 거래처별 「이전 프로그램 이월잔액」 한 줄(서버 R1 · 남은 금액 &gt; 0 만).</summary>
+    public List<LegacyBalanceRowModel> LegacyBalances { get; set; } = new();
 }
 
 /// <summary>결재관리 <b>필터2</b> 콤보 항목 — 문서종류 하나. 작20260824작1 ②</summary>
