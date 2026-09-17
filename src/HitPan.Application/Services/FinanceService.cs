@@ -792,6 +792,39 @@ public class FinanceService : IFinanceService
     // 대시보드 요약
     // ═══════════════════════════════════════
 
+    /// <summary>
+    /// 🔴 20260915작1 개정 3판 갈래 R2 (설계 §20 #1·#10) — 미수 스칼라 식(파라미터 <c>@TenantId</c>).
+    /// = 명세서 쪽 명세서(이월잔액 회사는 이관 명세서 제외) − 명세서 쪽 수금(<see cref="LegacyBalanceMatching.CollectionDocSideWhere"/> · 활성만)
+    /// + Σ R(<see cref="LegacyBalanceMatching.ReceivableRemainingSql"/> · 클램프 없음).
+    /// 대시보드 KPI 와 대사표 ⑥(<see cref="MdbReconPosting.ReadBalanceErpAsync"/>)가 <b>이 문자열 하나</b>를 쓴다(복사 식 금지).
+    /// 이월잔액 행이 없는 회사 = 종전 식(단 수금 is_active=1 은 의도된 변경 · R-A5②).
+    /// </summary>
+    public static readonly string ReceivableBalanceSql = $$"""
+        (COALESCE((SELECT SUM(sd_k.total_amount + sd_k.vat_amount) FROM sales_deliveries sd_k
+                    WHERE sd_k.tenant_id=@TenantId AND sd_k.status IN ('confirmed','invoiced') AND sd_k.is_deleted=0
+                      AND NOT (COALESCE(sd_k.source_type,'') = 'migration' AND {{MdbLegacyPartnerBalance.HasLegacyBalanceSql}})), 0)
+         - COALESCE((SELECT SUM(c_k.amount) FROM collections c_k
+                    WHERE c_k.tenant_id=@TenantId AND {{LegacyBalanceMatching.CollectionDocSideWhere("c_k")}}), 0)
+         + COALESCE((SELECT SUM(r_k.remaining_amount) FROM ({{LegacyBalanceMatching.ReceivableRemainingSql}}) r_k), 0))
+        """;
+
+    /// <summary>
+    /// 🔴 20260915작1 개정 3판 갈래 R2 (설계 §20 #2·#10) — 미지급 스칼라 식(파라미터 <c>@TenantId</c>).
+    /// = 명세서 쪽 매입 − 명세서 쪽 반품(<see cref="LegacyBalanceMatching.PurchaseReturnDocSideWhere"/>) − 명세서 쪽 지급(<see cref="LegacyBalanceMatching.PaymentDocSideWhere"/>)
+    /// + Σ R(<see cref="LegacyBalanceMatching.PayableRemainingSql"/>). 🔴 두 번 빼기 금지 — 이월 지급은 <c>payment_type='legacy_balance'</c> 라 명세서 쪽에 안 걸린다.
+    /// </summary>
+    public static readonly string PayableBalanceSql = $$"""
+        (COALESCE((SELECT SUM(pr_k.total_amount + pr_k.vat_amount) FROM purchase_receipts pr_k
+                    WHERE pr_k.tenant_id=@TenantId AND pr_k.status='confirmed'
+                      AND NOT (COALESCE(pr_k.source_type,'') = 'migration' AND {{MdbLegacyPartnerBalance.HasLegacyBalanceSql}})), 0)
+         - COALESCE((SELECT SUM(rti_k.supply_amount + rti_k.vat_amount) FROM purchase_returns rt_k
+                      LEFT JOIN purchase_return_items rti_k ON rti_k.return_id=rt_k.return_id AND rti_k.tenant_id=rt_k.tenant_id
+                    WHERE rt_k.tenant_id=@TenantId AND {{LegacyBalanceMatching.PurchaseReturnDocSideWhere("rt_k")}}), 0)
+         - COALESCE((SELECT SUM(p_k.amount) FROM payments p_k
+                    WHERE p_k.tenant_id=@TenantId AND {{LegacyBalanceMatching.PaymentDocSideWhere("p_k")}}), 0)
+         + COALESCE((SELECT SUM(r_k.remaining_amount) FROM ({{LegacyBalanceMatching.PayableRemainingSql}}) r_k), 0))
+        """;
+
     // ── 대시보드 캐시 (30초 TTL) — DB 부하 90% 감소 ──
     private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, (DashboardSummaryDto Data, DateTime ExpiresAt)> _dashCache = new();
 
@@ -810,7 +843,11 @@ public class FinanceService : IFinanceService
         // ── 7개 KPI를 UNION ALL 단일 쿼리로 통합 (네트워크 왕복 1회) ──
         // 주의: MySqlConnection은 thread-safe 아니므로 Task.WhenAll 병렬 금지 ("conn in use" 에러)
         // 대신 모든 KPI를 한 번의 쿼리에 합쳐서 성능 확보
-        const string kpiSql = """
+        // 🔴 20260915작1 갈래 E (설계 §17 · R-A2 (나)) — 미수·미지급에 「이전 프로그램 최종잔액」(partner_legacy_balances)을 한 번 더한다.
+        //   F3 는 이관한 명세서·수금·지급 이력을 이미 품은 최종값 → 이월잔액 행이 있는 회사는 source_type='migration' 행을 뺀다(두 번 세지 않음).
+        //   부호: + 는 미수 칸 · − 는 미지급 칸(병렬이슈40 PM 결정). 사람이 입력한 명세서·수금·지급·반품은 그대로 쌓인다.
+        //   이월잔액 행이 없는 회사(이관 안 함 · DOCF5 없음)는 종전 식과 결과가 같다.
+        var kpiSql = $$"""
             SELECT 'today_sales' AS k, COALESCE(SUM(total_amount + vat_amount), 0) AS v
               FROM sales_deliveries WHERE tenant_id=@TenantId AND status IN ('confirmed','invoiced') AND is_deleted=0 AND delivery_date=@Today
             UNION ALL
@@ -829,18 +866,17 @@ public class FinanceService : IFinanceService
             -- 봉합 (2026-06-23, 6차 전수조사 C2): 미수금 수금 차감을 'sales_delivery' 단일로 좁힘.
             --   종전 IN('sales_delivery','sales_order')은 다른 집계(CollectionService:382·SALES-01)와 불일치이고,
             --   collections 에 sales_order 는 들어가지 않아(UI·마이그 전수 0건) 미래 잠복 결함이었다.
+            -- 🔴 20260915작1 3판 R2 (설계 §20 #1) — 식은 ReceivableBalanceSql 한 곳(대사표 ⑥ #10 과 같은 문자열).
             SELECT 'receivable',
-              COALESCE((SELECT SUM(total_amount + vat_amount) FROM sales_deliveries WHERE tenant_id=@TenantId AND status IN ('confirmed','invoiced') AND is_deleted=0), 0)
-              - COALESCE((SELECT SUM(amount) FROM collections WHERE tenant_id=@TenantId AND ref_doc_type = 'sales_delivery'), 0)
+              {{ReceivableBalanceSql}}
             UNION ALL
             -- 봉합 (2026-06-23, 6차 전수조사 C2 P1): 미지급 지급 차감을 collections → payments 로 정정.
             --   매입 지급은 collections 가 아니라 payments(payment_type='purchase')에 기록된다(GetPayablesAsync:439 정식 기준).
             --   종전엔 collections 의 'purchase_receipt'/'purchase_order' 를 봤는데 거기엔 0건이라 차감이 항상 0 →
             --   미지급이 지급해도 안 줄어 영구 과대 계상됐다(헌법 #20). payments 기준으로 GetPayablesAsync 와 일관화.
+            -- 🔴 20260915작1 3판 R2 (설계 §20 #2) — 식은 PayableBalanceSql 한 곳. 이월 지급(payment_type='legacy_balance')은 명세서 쪽에 안 걸리고 R 에서만 1번.
             SELECT 'payable',
-              COALESCE((SELECT SUM(total_amount + vat_amount) FROM purchase_receipts WHERE tenant_id=@TenantId AND status='confirmed'), 0)
-              - COALESCE((SELECT COALESCE(SUM(rti.supply_amount + rti.vat_amount),0) FROM purchase_returns rt LEFT JOIN purchase_return_items rti ON rti.return_id=rt.return_id AND rti.tenant_id=rt.tenant_id WHERE rt.tenant_id=@TenantId AND rt.is_deleted=0 AND rt.status='confirmed'), 0)
-              - COALESCE((SELECT SUM(amount) FROM payments WHERE tenant_id=@TenantId AND is_active=1 AND payment_type='purchase'), 0)
+              {{PayableBalanceSql}}
             UNION ALL
             SELECT 'low_stock',
               (SELECT COUNT(*) FROM item_stock s INNER JOIN items i ON i.item_id=s.item_id AND i.tenant_id=s.tenant_id

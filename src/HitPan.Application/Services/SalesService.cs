@@ -838,6 +838,33 @@ public class SalesService : ISalesService
         delivery.PrevReceivable = await _db.QueryFirstOrDefaultAsync<decimal>(
             new CommandDefinition(balanceSql, new { delivery.PartnerId, TenantId = tenantId }, cancellationToken: ct));
 
+        // 🔴 20260915작1 갈래 I (§14-6 E 미반영분) — 이월잔액(partner_legacy_balances) 행이 있는 회사는 E 규칙으로 전잔액을 다시 잰다:
+        //   이관 명세서·이관 수금 제외 + 이 거래처 이월잔액(+ 미수 칸) 한 번. 대시보드 미수(FinanceService receivable)와 같은 식을 거래처 하나로.
+        //   이월잔액 행이 없는 회사는 NULL → 위 v_partner_balance 값 그대로(종전 동작 · #1).
+        //   ⚠️ 뷰는 수주 기준 · 이 식은 명세서 기준 — 뷰가 이관 수주를 가를 칸(source_type)이 없어 같은 기준으로 못 뺀다(개발명세서 §5).
+        //   DESCRIBE(#13 · 격리 33306 출하 DDL): sales_deliveries source_type varchar(20)·status·is_deleted · collections source_type varchar(30)·ref_doc_type · partner_legacy_balances balance_amount decimal(15,2).
+        var legacyPrevSql = $$"""
+                              SELECT CASE WHEN {{MdbLegacyPartnerBalance.HasLegacyBalanceSql}} THEN
+                                  COALESCE((SELECT SUM(sd.total_amount + sd.vat_amount) FROM sales_deliveries sd
+                                             WHERE sd.tenant_id = @TenantId AND sd.partner_id = @PartnerId
+                                               AND sd.status IN ('confirmed','invoiced') AND sd.is_deleted = 0
+                                               AND COALESCE(sd.source_type,'') <> 'migration'), 0)
+                                - COALESCE((SELECT SUM(c.amount) FROM collections c
+                                             WHERE c.tenant_id = @TenantId AND c.partner_id = @PartnerId
+                                               AND {{LegacyBalanceMatching.CollectionDocSideWhere("c")}}), 0)
+                                + COALESCE((SELECT r7.remaining_amount FROM ({{LegacyBalanceMatching.ReceivableRemainingSql}}) r7
+                                             WHERE r7.partner_id = @PartnerId), 0)
+                              END
+                              """;
+        // 🔴 20260915작1 3판 R2 (설계 §20 #7) — 위 식을 대시보드 미수(#1)와 같은 조각으로: 명세서 쪽 수금(활성 · M 에 든 것 제외) + 이 거래처 R(P).
+        //   종전 GREATEST(잔액,0) 는 이월 수금(ref_doc_type='legacy_balance')을 못 빼 전잔액이 줄지 않았다. R 은 클램프 없음(설계 §20 합계 클램프 없음).
+        var legacyPrev = await _db.QueryFirstOrDefaultAsync<decimal?>(
+            new CommandDefinition(legacyPrevSql, new { delivery.PartnerId, TenantId = tenantId }, cancellationToken: ct));
+        if (legacyPrev.HasValue)
+        {
+            delivery.PrevReceivable = legacyPrev.Value;
+        }
+
         const string todaySql = """
                                 SELECT COALESCE(SUM(d.total_amount + d.vat_amount), 0)
                                 FROM sales_deliveries d
@@ -874,7 +901,11 @@ public class SalesService : ISalesService
                                d.total_amount AS SupplyAmount,
                                d.status AS Status,
                                d.memo AS Memo,
-                               ec.emp_name AS CreatedByName
+                               ec.emp_name AS CreatedByName,
+                               (d.source_type = 'migration') AS IsMigrated,
+                               -- R-B3: MigratedDocumentLock.IsIssueLocked 와 같은 판정(이관 AND 레거시 계산서 번호 0 아님)
+                               -- R-B4(20260915작1 갈래 I): 99999999 = 레거시 「발행 안 함」 확정 → 명시 분기로 잠금
+                               (d.source_type = 'migration' AND (d.legacy_tax_no = 99999999 OR COALESCE(d.legacy_tax_no, 0) <> 0)) AS IsIssueLocked
                            FROM sales_deliveries d
                            LEFT JOIN partners p
                                ON p.partner_id = d.partner_id
@@ -931,6 +962,11 @@ public class SalesService : ISalesService
         {
             throw new InvalidOperationException("거래명세서를 찾을 수 없습니다.");
         }
+
+        // 🔴 20260915작1 갈래 G (R-B2 결재 「잠금」) — 이전 프로그램에서 가져온 거래명세서는 고치지 않는다.
+        //   상태 검사보다 먼저 본다 — "draft 만 수정" 안내는 확정취소하면 고칠 수 있다고 읽히는데
+        //   이관분은 확정취소도 막혀 있어 담당자가 막다른 길로 간다. 정정은 새 전표로.
+        await MigratedDocumentLock.EnsureDeliveryEditableAsync(_db, deliveryId, tenantId, ct);
 
         if (!string.Equals(status, "draft", StringComparison.OrdinalIgnoreCase))
         {
@@ -1100,6 +1136,10 @@ public class SalesService : ISalesService
         //   - status='confirmed' → CancelConfirmedDeliveryAsync 로 Reverse 원장 발행
         //     (재고·원장·회계 모두 복귀, INSERT ONLY 원칙 유지).
 
+        // 🔴 20260915작1 갈래 G (R-B2) — 이관 거래명세서는 삭제하지 않는다(확정분은 아래에서 확정취소로 넘어가므로
+        //   거기서도 막히지만, 계산서·상태 안내보다 먼저 「가져온 자료」라고 알려준다).
+        await MigratedDocumentLock.EnsureDeliveryEditableAsync(_db, deliveryId, tenantId, ct);
+
         var invoiced = await _db.QueryFirstOrDefaultAsync<int>(new CommandDefinition(
             "SELECT COUNT(*) FROM tax_invoices WHERE delivery_id=@Id AND tenant_id=@Tid",
             new { Id = deliveryId, Tid = tenantId }, cancellationToken: ct));
@@ -1147,6 +1187,10 @@ public class SalesService : ISalesService
             "SELECT delivery_id, delivery_no, partner_id, delivery_date, status, total_amount, vat_amount FROM sales_deliveries WHERE delivery_id=@Id AND tenant_id=@Tid",
             new { Id = deliveryId, Tid = tenantId }, cancellationToken: ct))
             ?? throw new InvalidOperationException("거래명세서를 찾을 수 없습니다.");
+
+        // 🔴 20260915작1 갈래 G (R-B2) — 이관 거래명세서는 확정취소하지 않는다.
+        //   확정취소는 재고 역행·매출 역분개를 새로 쓴다 → 레거시 원장·대사표와 어긋난다. 정정은 새 전표로.
+        await MigratedDocumentLock.EnsureDeliveryEditableAsync(_db, deliveryId, tenantId, ct);
 
         if ((string)header.status != "confirmed")
         {
@@ -1259,6 +1303,17 @@ public class SalesService : ISalesService
                 new { Tid = tenantId, Did = deliveryId },
                 transaction: tx, cancellationToken: ct));
 
+            // 🔴 20260917 [3-V] 병렬이슈45 (PM 추가 지시 · R2) — 끄기 전에 꺼질 수금을 읽어 둔다: 수금마다 취소 역분개(원 수금일 · 원 분개 없으면 역분개 없음 = R1 규칙).
+            //   종전엔 is_active=0 만 하고 역분개를 안 남겨 외상매출금·현금 분개가 살아 있었다(수금 삭제 경로 R1 봉합과 비대칭).
+            var collectionsToVoid = (await _db.QueryAsync<(string CollectionId, string PartnerId, decimal Amount, string? Method, DateTime Date)>(new CommandDefinition(
+                """
+                SELECT collection_id AS CollectionId, partner_id AS PartnerId, amount AS Amount, collection_method AS Method, collection_date AS Date
+                FROM collections
+                WHERE tenant_id=@Tid AND ref_doc_type='sales_delivery' AND ref_doc_id=@Did AND is_active=1
+                """,
+                new { Tid = tenantId, Did = deliveryId },
+                transaction: tx, cancellationToken: ct))).ToList();
+
             // 4) 연결된 수금(collections) 무효화 — ref_doc이 이 명세서인 수금 전부
             var voidedCollections = await _db.ExecuteAsync(new CommandDefinition(
                 """
@@ -1268,6 +1323,14 @@ public class SalesService : ISalesService
                 """,
                 new { Tid = tenantId, Did = deliveryId },
                 transaction: tx, cancellationToken: ct));
+
+            // 4-J) 병렬이슈45 — 꺼진 수금마다 수금 취소 역분개(같은 트랜잭션).
+            foreach (var vc in collectionsToVoid)
+            {
+                await AutoJournalHelper.RecordCollectionCancelAsync(
+                    _db, tx, tenantId, vc.CollectionId, vc.Date,
+                    vc.PartnerId, vc.Amount, vc.Method, employeeId, ct);
+            }
 
             // 5) partner_balance 재계산 (매출 차감 + 수금 역산)
             //
@@ -1279,20 +1342,28 @@ public class SalesService : ISalesService
             //        → 4월 반품이 사라지고 미수가 부활한다. 오류도 경고도 없이 조용하다.
             //   ⚠️ 매입에는 이 코드가 없다 — 복붙할 원본이 없어 신규 설계다.
             //      (매입채무 ≠ 외상매출금 이므로 매입 코드를 그대로 가져오면 안 된다)
+            // 🔴 20260915작1 3판 R2 (설계 §20 #11 · P5) — 재집계를 증분 규칙과 같게:
+            //   증분 = 확정 시 +공급가(`:677-692` · 이관은 partner_balance 무기록 `MdbMigrationService`) · 반품 확정 −공급가(ref 무관) · 수금 +금액(ref 무관 `CollectionService`).
+            //   종전 재집계는 ① 이관 명세서까지 total_sales 에 넣고(이관 이중) ② 수금을 sales_delivery 로만 좁혀 이월 수금(legacy_balance)을 지웠다(이월 수금 소실).
+            //   → total_sales = 확정·invoiced 명세서(이관 제외 · 항상) − 확정 반품(DESCRIBE: sales_returns 에 source_type 없음 · 이관은 반품을 안 만든다)
+            //     total_receipt = 활성 수금 ref 무관(이관 제외). R1 P2 와 같이 invoiced 포함(전이 경로 0건이라도 값이 생기면 빠지지 않게).
             await _db.ExecuteAsync(new CommandDefinition(
                 """
                 UPDATE partner_balance pb
                 SET total_sales = COALESCE((SELECT SUM(total_amount) FROM sales_deliveries
-                                            WHERE tenant_id=@Tid AND partner_id=@Pid AND status='confirmed'), 0)
+                                            WHERE tenant_id=@Tid AND partner_id=@Pid AND status IN ('confirmed','invoiced')
+                                              AND COALESCE(source_type,'') <> 'migration'
+                                              AND delivery_id <> @Did), 0)
                                 - COALESCE((SELECT SUM(total_amount) FROM sales_returns
                                             WHERE tenant_id=@Tid AND partner_id=@Pid AND status='confirmed'), 0),
                     total_receipt = COALESCE((SELECT SUM(amount) FROM collections
                                               WHERE tenant_id=@Tid AND partner_id=@Pid AND is_active=1
-                                                AND ref_doc_type='sales_delivery'), 0),
+                                                AND COALESCE(source_type,'') <> 'migration'), 0),
                     last_updated_at = NOW(6)
                 WHERE tenant_id=@Tid AND partner_id=@Pid
                 """,
-                new { Tid = tenantId, Pid = (string)header.partner_id },
+                // 🔴 3판 R2 — 상태를 'cancelled' 로 바꾸는 UPDATE 는 이 재집계 뒤(`status='cancelled'` 줄)라 지금 취소 중인 명세서를 @Did 로 뺀다(G9-d 실측: 안 빼면 total_sales 가 그대로 남음 · 종전 코드도 같은 결함).
+                new { Tid = tenantId, Pid = (string)header.partner_id, Did = deliveryId },
                 transaction: tx, cancellationToken: ct));
 
             // 6) 회계 역분개 — RecordSalesConfirmAsync 대칭 (차변 매출+부가세예수금 / 대변 외상매출금)

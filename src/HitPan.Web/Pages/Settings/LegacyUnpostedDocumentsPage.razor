@@ -1,0 +1,361 @@
+﻿@page "/settings/mdb-migration/unposted"
+@namespace HitPan.Web.Pages.SettingsUi
+@attribute [Authorize]
+@inject HttpClient Http
+@inject ISnackbar Snackbar
+@inject NavigationManager Nav
+@inject HitPan.Web.Services.IAuthService Auth
+
+@* 🔴 20260915작1 갈래 H — 이전 프로그램 장부에 반영되지 않은 명세서 (읽기 전용).
+   입구 = 설정 > 자료 가져오기(MdbMigration.razor) 버튼 1개 · Sidebar 무수정(결재 §13 화면위치).
+   고치기·지우기 버튼 없음 — 보관 표는 이관만 넣는다(설계 §15). 화면 글자에 영문 코드·개발용어 0. *@
+
+<PageTitle>장부 미반영 명세서</PageTitle>
+
+<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;gap:8px;flex-wrap:wrap">
+    <MudText Typo="Typo.h6">이전 프로그램 장부에 반영되지 않은 명세서</MudText>
+    <MudButton Variant="Variant.Text" Color="Color.Primary" StartIcon="@Icons.Material.Filled.ArrowBack"
+               OnClick="@(() => Nav.NavigateTo("/settings/mdb-migration"))">
+        자료 가져오기로 돌아가기
+    </MudButton>
+</div>
+
+<MudAlert Severity="Severity.Info" Dense="true" Class="mb-3">
+    예전 히트판에서 거래처 장부에 올라가지 않았던 명세서입니다. 보관만 하며 <b>매출·미수금·세금계산서 합계에는 들어가지 않습니다.</b> 이 화면에서는 보기만 할 수 있습니다.
+</MudAlert>
+
+<MudPaper Elevation="0" Class="pa-3 mb-3" Style="border:0.5px solid var(--mud-palette-lines-default);border-radius:12px">
+    <MudGrid Spacing="2">
+        <MudItem xs="6" md="2">
+            <MudDatePicker Label="시작일" @bind-Date="_from" Variant="Variant.Outlined" Margin="Margin.Dense" DateFormat="yyyy-MM-dd" Clearable="true" />
+        </MudItem>
+        <MudItem xs="6" md="2">
+            <MudDatePicker Label="종료일" @bind-Date="_to" Variant="Variant.Outlined" Margin="Margin.Dense" DateFormat="yyyy-MM-dd" Clearable="true" />
+        </MudItem>
+        <MudItem xs="12" md="3">
+            <MudTextField T="string" Label="거래처" @bind-Value="_partner" Variant="Variant.Outlined" Margin="Margin.Dense"
+                          Placeholder="거래처 이름 일부" Clearable="true" OnKeyUp="OnPartnerKeyUp" />
+        </MudItem>
+        <MudItem xs="6" md="2">
+            <MudSelect T="string" Label="구분" @bind-Value="_ioType" Variant="Variant.Outlined" Margin="Margin.Dense" Dense="true">
+                <MudSelectItem T="string" Value="@AllValue">전체</MudSelectItem>
+                <MudSelectItem T="string" Value="@("sales")">판매</MudSelectItem>
+                <MudSelectItem T="string" Value="@("purchase")">매입</MudSelectItem>
+            </MudSelect>
+        </MudItem>
+        <MudItem xs="6" md="2">
+            <MudSelect T="string" Label="보관 사유" @bind-Value="_reason" Variant="Variant.Outlined" Margin="Margin.Dense" Dense="true">
+                <MudSelectItem T="string" Value="@AllValue">전체</MudSelectItem>
+                @foreach (var r in _reasons.Where(x => !string.IsNullOrEmpty(x.Reason)))
+                {
+                    <MudSelectItem T="string" Value="@r.Reason">@($"{r.ReasonText} ({r.Count:N0}건)")</MudSelectItem>
+                }
+            </MudSelect>
+        </MudItem>
+        <MudItem xs="12" md="1">
+            <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Search"
+                       OnClick="SearchAsync" Disabled="_loading" Style="height:40px;margin-top:4px;width:100%">
+                조회
+            </MudButton>
+        </MudItem>
+    </MudGrid>
+</MudPaper>
+
+@if (_error != null)
+{
+    <MudAlert Severity="Severity.Error" Dense="true" Class="mb-3">@_error</MudAlert>
+}
+
+@if (_result is { } res)
+{
+    <div style="display:flex;gap:16px;flex-wrap:wrap;margin-bottom:8px;font-size:13px">
+        <span>명세서 <b>@res.Page.TotalCount.ToString("N0")</b>건</span>
+        <span>줄 <b>@res.TotalLines.ToString("N0")</b>개</span>
+        <span>공급가액 <b>@res.TotalSupply.ToString("#,##0.##")</b>원</span>
+        <span>부가세 <b>@res.TotalVat.ToString("#,##0.##")</b>원</span>
+    </div>
+}
+
+<MudTable Items="@(_result?.Page.Items ?? new List<DocItem>())" Dense="true" Hover="true" Elevation="0" Loading="_loading"
+          Style="border:0.5px solid var(--mud-palette-lines-default);border-radius:8px">
+    <HeaderContent>
+        <MudTh Style="width:36px"></MudTh>
+        <MudTh>날짜</MudTh>
+        <MudTh>구분</MudTh>
+        <MudTh>거래처</MudTh>
+        <MudTh>보관 사유</MudTh>
+        <MudTh Style="text-align:right">줄</MudTh>
+        <MudTh Style="text-align:right">공급가액</MudTh>
+        <MudTh Style="text-align:right">부가세</MudTh>
+        <MudTh>비고</MudTh>
+    </HeaderContent>
+    <RowTemplate>
+        <MudTd>
+            <MudIconButton Size="Size.Small" Icon="@(_openDocId == context.DocId ? Icons.Material.Filled.ExpandLess : Icons.Material.Filled.ExpandMore)"
+                           OnClick="@(() => ToggleAsync(context.DocId))" aria-label="줄 보기" />
+        </MudTd>
+        <MudTd DataLabel="날짜" Style="white-space:nowrap">
+            @context.DocDate.ToString("yyyy-MM-dd")
+            @if (context.DateMissing)
+            {
+                <div style="font-size:11px;color:var(--mud-palette-text-secondary)">날짜 없음 — 기준일로 표시</div>
+            }
+        </MudTd>
+        <MudTd DataLabel="구분">@context.IoTypeText</MudTd>
+        <MudTd DataLabel="거래처">@(string.IsNullOrWhiteSpace(context.PartnerName) ? "등록 안 된 거래처" : context.PartnerName)</MudTd>
+        <MudTd DataLabel="보관 사유">@context.ReasonText</MudTd>
+        <MudTd DataLabel="줄" Style="text-align:right">@context.LineCount.ToString("N0")</MudTd>
+        <MudTd DataLabel="공급가액" Style="text-align:right">@context.SupplyAmount.ToString("#,##0.##")</MudTd>
+        <MudTd DataLabel="부가세" Style="text-align:right">@context.VatAmount.ToString("#,##0.##")</MudTd>
+        <MudTd DataLabel="비고">@context.Memo</MudTd>
+    </RowTemplate>
+    <ChildRowContent>
+        @if (_openDocId == context.DocId)
+        {
+            <MudTr>
+                <td colspan="9" style="background:var(--mud-palette-background-gray);padding:8px 16px">
+                    @if (_detailLoading)
+                    {
+                        <MudProgressLinear Color="Color.Primary" Indeterminate="true" />
+                    }
+                    else if (_detail is { } d && d.Document.DocId == context.DocId)
+                    {
+                        <MudSimpleTable Dense="true" Elevation="0" Style="background:transparent">
+                            <thead>
+                                <tr>
+                                    <th>순번</th><th>품명</th><th>규격</th>
+                                    <th style="text-align:right">수량</th><th style="text-align:right">단가</th>
+                                    <th style="text-align:right">공급가액</th><th style="text-align:right">부가세</th><th>비고</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                @foreach (var l in d.Lines)
+                                {
+                                    <tr>
+                                        <td>@l.LineNo</td>
+                                        <td>@(string.IsNullOrWhiteSpace(l.ItemName) ? "(품명 없음)" : l.ItemName)</td>
+                                        <td>@l.Spec</td>
+                                        <td style="text-align:right">@l.Qty.ToString("#,##0.###")</td>
+                                        <td style="text-align:right">@l.UnitPrice.ToString("#,##0.####")</td>
+                                        <td style="text-align:right">@l.SupplyAmount.ToString("#,##0.##")</td>
+                                        <td style="text-align:right">@l.VatAmount.ToString("#,##0.##")</td>
+                                        <td>@l.Memo</td>
+                                    </tr>
+                                }
+                            </tbody>
+                        </MudSimpleTable>
+                    }
+                </td>
+            </MudTr>
+        }
+    </ChildRowContent>
+    <NoRecordsContent>
+        <MudText Typo="Typo.body2" Style="color:var(--mud-palette-text-secondary)">
+            @(_loading ? "불러오는 중..." : "조건에 맞는 명세서가 없습니다.")
+        </MudText>
+    </NoRecordsContent>
+</MudTable>
+
+@if (_result is { } r2 && r2.Page.TotalPages > 1)
+{
+    <div style="display:flex;justify-content:center;margin-top:12px">
+        <MudPagination Count="@r2.Page.TotalPages" Selected="@_page" SelectedChanged="OnPageChangedAsync" Size="Size.Small" />
+    </div>
+}
+
+@code {
+    private const string AllValue = "";
+    private const int PageSize = 50;
+
+    private DateTime? _from;
+    private DateTime? _to;
+    private string? _partner;
+    private string _ioType = AllValue;
+    private string _reason = AllValue;
+    private int _page = 1;
+
+    private bool _loading;
+    private string? _error;
+    private ListResult? _result;
+    private List<ReasonCount> _reasons = new();
+
+    private string? _openDocId;
+    private bool _detailLoading;
+    private DetailResult? _detail;
+
+    protected override async Task OnInitializedAsync() => await LoadAsync();
+
+    private async Task SearchAsync()
+    {
+        _page = 1;
+        await LoadAsync();
+    }
+
+    private async Task OnPartnerKeyUp(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter") await SearchAsync();
+    }
+
+    private async Task OnPageChangedAsync(int page)
+    {
+        _page = page;
+        await LoadAsync();
+    }
+
+    private string BuildListUrl()
+    {
+        var q = new List<string> { $"page={_page}", $"pageSize={PageSize}" };
+        if (_from is { } f) q.Add("from=" + f.ToString("yyyy-MM-dd"));
+        if (_to is { } t) q.Add("to=" + t.ToString("yyyy-MM-dd"));
+        if (!string.IsNullOrWhiteSpace(_partner)) q.Add("partner=" + Uri.EscapeDataString(_partner.Trim()));
+        if (!string.IsNullOrEmpty(_ioType)) q.Add("ioType=" + Uri.EscapeDataString(_ioType));
+        if (!string.IsNullOrEmpty(_reason)) q.Add("reason=" + Uri.EscapeDataString(_reason));
+        return "api/migration/legacy-unposted?" + string.Join("&", q);
+    }
+
+    /// <summary>401 이면 토큰을 한 번 새로 받아 다시 묻는다(자료 가져오기 화면과 같은 방식).</summary>
+    private async Task<HttpResponseMessage> GetWithRefreshAsync(string url)
+    {
+        var resp = await Http.GetAsync(url);
+        if (resp.StatusCode == System.Net.HttpStatusCode.Unauthorized && await Auth.RefreshAsync())
+        {
+            resp = await Http.GetAsync(url);
+        }
+        return resp;
+    }
+
+    private async Task LoadAsync()
+    {
+        if (_from is { } f && _to is { } t && f.Date > t.Date)
+        {
+            Snackbar.Add("시작일이 종료일보다 늦습니다.", Severity.Warning);
+            return;
+        }
+        _loading = true;
+        _error = null;
+        _openDocId = null;
+        _detail = null;
+        StateHasChanged();
+        try
+        {
+            var resp = await GetWithRefreshAsync(BuildListUrl());
+            if (!resp.IsSuccessStatusCode)
+            {
+                _error = resp.StatusCode == System.Net.HttpStatusCode.Forbidden
+                    ? "이 화면은 회사 관리자만 볼 수 있습니다."
+                    : $"목록을 불러오지 못했습니다. 잠시 뒤 다시 조회해 주세요. (오류 번호 {(int)resp.StatusCode})";
+                return;
+            }
+            _result = await resp.Content.ReadFromJsonAsync<ListResult>();
+            if (_result is null)
+            {
+                _error = "목록을 불러오지 못했습니다. 잠시 뒤 다시 조회해 주세요.";
+                return;
+            }
+            // 사유 목록은 사유 조건을 뺀 건수라, 사유를 골라도 다른 사유가 사라지지 않는다.
+            _reasons = _result.Reasons.ToList();
+        }
+        catch (Exception ex)
+        {
+            _error = "목록을 불러오지 못했습니다. 잠시 뒤 다시 조회해 주세요.";
+            Snackbar.Add($"장부 미반영 명세서 조회 실패: {ex.Message}", Severity.Warning);
+        }
+        finally
+        {
+            _loading = false;
+            StateHasChanged();
+        }
+    }
+
+    private async Task ToggleAsync(string docId)
+    {
+        if (_openDocId == docId)
+        {
+            _openDocId = null;
+            return;
+        }
+        _openDocId = docId;
+        _detail = null;
+        _detailLoading = true;
+        StateHasChanged();
+        try
+        {
+            var resp = await GetWithRefreshAsync($"api/migration/legacy-unposted/{Uri.EscapeDataString(docId)}");
+            if (!resp.IsSuccessStatusCode)
+            {
+                Snackbar.Add("명세서 줄을 불러오지 못했습니다.", Severity.Warning);
+                _openDocId = null;
+                return;
+            }
+            _detail = await resp.Content.ReadFromJsonAsync<DetailResult>();
+        }
+        catch (Exception ex)
+        {
+            _openDocId = null;
+            Snackbar.Add($"명세서 줄을 불러오지 못했습니다: {ex.Message}", Severity.Warning);
+        }
+        finally
+        {
+            _detailLoading = false;
+            StateHasChanged();
+        }
+    }
+
+    /* ── API 응답 (HitPan.Application.Interfaces.LegacyUnposted* 와 1:1 · camelCase JSON) ── */
+    private sealed class ListResult
+    {
+        public PageBox Page { get; set; } = new();
+        public long TotalLines { get; set; }
+        public decimal TotalSupply { get; set; }
+        public decimal TotalVat { get; set; }
+        public List<ReasonCount> Reasons { get; set; } = new();
+    }
+
+    private sealed class PageBox
+    {
+        public int Page { get; set; }
+        public int PageSize { get; set; }
+        public int TotalCount { get; set; }
+        public int TotalPages { get; set; }
+        public List<DocItem> Items { get; set; } = new();
+    }
+
+    private sealed class DocItem
+    {
+        public string DocId { get; set; } = string.Empty;
+        public string IoTypeText { get; set; } = string.Empty;
+        public DateTime DocDate { get; set; }
+        public bool DateMissing { get; set; }
+        public string? PartnerName { get; set; }
+        public string ReasonText { get; set; } = string.Empty;
+        public decimal SupplyAmount { get; set; }
+        public decimal VatAmount { get; set; }
+        public int LineCount { get; set; }
+        public string? Memo { get; set; }
+    }
+
+    private sealed class LineItem
+    {
+        public int LineNo { get; set; }
+        public string? ItemName { get; set; }
+        public string? Spec { get; set; }
+        public decimal Qty { get; set; }
+        public decimal UnitPrice { get; set; }
+        public decimal SupplyAmount { get; set; }
+        public decimal VatAmount { get; set; }
+        public string? Memo { get; set; }
+    }
+
+    private sealed class DetailResult
+    {
+        public DocItem Document { get; set; } = new();
+        public List<LineItem> Lines { get; set; } = new();
+    }
+
+    private sealed class ReasonCount
+    {
+        public string? Reason { get; set; }
+        public string ReasonText { get; set; } = string.Empty;
+        public long Count { get; set; }
+    }
+}

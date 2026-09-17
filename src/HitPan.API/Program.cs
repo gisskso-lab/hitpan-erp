@@ -289,6 +289,8 @@ builder.Services.AddScoped<IChatbotService, ChatbotService>();
 builder.Services.AddScoped<ExcelExportService>();
 builder.Services.AddScoped<PdfExportService>();
 builder.Services.AddScoped<ExcelImportService>();
+// 20260915작1 갈래 H: 이전 프로그램 장부 미반영 명세서 조회 (읽기 전용 · 보관 표 SELECT 만 · OS 무관).
+builder.Services.AddScoped<ILegacyUnpostedDocumentService, LegacyUnpostedDocumentService>();
 // MdbMigrationService는 Windows 전용 (Jet OLEDB). 헌법 #19 warnings 0 준수: 호출 사이트만 pragma로 억제.
 #pragma warning disable CA1416  // Windows 전용 — Linux 컨테이너 배포 시 호출 안 됨 (MigrationController가 [SupportedOSPlatform("windows")])
 builder.Services.AddScoped<MdbMigrationService>();

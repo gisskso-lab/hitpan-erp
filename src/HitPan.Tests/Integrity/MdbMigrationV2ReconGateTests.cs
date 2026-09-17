@@ -183,9 +183,12 @@ public sealed class MdbMigrationV2ReconGateTests
         var src = ServiceSource("MdbReconciliationService.cs");
         Assert.Contains("=> LegacyMdbMapping.ItemKey(name, spec)", src);
         Assert.DoesNotContain(".Trim()}\".ToUpperInvariant()", src);
-        Assert.Contains("GROUP BY IJ_PUM, IJ_KU, IJ_IO", src);
-        Assert.Contains("GROUP BY IJA_IO, IJA_BUY", src);
-        Assert.Contains("GROUP BY S_BUY, S_GU", src);
+        // 🔴 20260915작1 갈래 C (설계 §7 · §17 · 작업지시서 §11-2 C ⑨): ⑤ DOCFB 품목별(자기 자신과 비교) → DOCFC 최종 ·
+        //   ⑧⑨ DOCFE−DOCF5 식 → F3 로 바뀌었다. 옛 질의 모양 대신 새 계산 함수 호출을 문다. 행동 검증은 G6 MdbReconPostingGate.
+        Assert.DoesNotContain("GROUP BY IJ_PUM, IJ_KU, IJ_IO", src);
+        Assert.Contains("MdbLegacyFinalStock.ComputeFinalStock(", src);
+        Assert.Contains("LegacyMdbMapping.PartnerLegacyBalances(", src);
+        Assert.Contains("MdbLegacyUnpostedArchive.Partition(", src);
         // 🔴 20260910작1 A1: ⑩ 은 이제 **이관해 온 사원만** 센다.
         //   덮어쓰기가 회사 뼈대를 다시 깔면 대표 사원 1행이 늘 있고(실제 고객 설치도 그렇다),
         //   그것까지 세면 이 항목은 언제나 레거시보다 1 많아진다 — 실측으로 확인한 자리다(2026-09-10 e2e).
@@ -194,7 +197,7 @@ public sealed class MdbMigrationV2ReconGateTests
         Assert.Contains("FROM DOCME", src);
         Assert.Contains("FROM hr_reports WHERE tenant_id=@T AND source_type='migration'", src);
         Assert.Contains("FROM DOCF6 WHERE AC_JEN IS NULL OR TRIM(AC_JEN) <> '0'", src);
-        Assert.Contains("BuildPartnerDiffs(newNetByPartner,", src);
+        Assert.Contains("BuildPartnerDiffs(new Dictionary<int, decimal>(legacy.ByCode),", src);
     }
 
     // ── 소스 읽기 헬퍼 (MdbMigrationV2MappingGateTests 와 같은 규칙 — 그 파일은 W10 한 줄만 손댈 수 있어 여기 따로 둔다) ──

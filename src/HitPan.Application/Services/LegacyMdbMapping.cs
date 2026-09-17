@@ -1,3 +1,6 @@
+using System.Data;
+using System.Globalization;
+
 namespace HitPan.Application.Services;
 
 /// <summary>
@@ -239,4 +242,351 @@ public static class LegacyMdbMapping
     /// </summary>
     public static string ItemKey(string? name, string? spec)
         => $"{(name ?? string.Empty).Trim()}|{(spec ?? string.Empty).Trim()}".TrimEnd('|').ToUpperInvariant();
+
+    // ════════════════════════════════════════════════════════════════════════════
+    //  20260915작1 갈래 A — 장부 반영 판정 · 기준일 · 재고 품목 키 · F3 잔액
+    //  진실원: 설계 20260915_설계_자료이관_머리없는줄_분류봉합.md §14·§16·§17 · 작업지시서 §11·§13(R5-2)
+    //  🔴 판정은 「머리표(DOCFE) 있음 OR 거래처원장(DOCF5) 연결 있음」 뿐이다.
+    //     거래처 코드를 연결 키에 넣지 않는다(선행 ⑥) · 코드 대역·날짜 모양으로 판정하지 않는다(§1 반증).
+    //     모양(조립·단가행·품명없음·시험)은 보관 표 사유 칸의 **표시**에만 쓴다 — <see cref="UnpostedReason"/>.
+    // ════════════════════════════════════════════════════════════════════════════
+
+    /// <summary>DOCFB 묶음의 장부 반영 판정 결과.</summary>
+    public enum LegacyPostingStatus
+    {
+        /// <summary>머리표 있음 또는 거래처원장 연결 있음 → 명세서(장부 반영).</summary>
+        Posted,
+        /// <summary>둘 다 없음 → 보관 표(<c>legacy_unposted_documents</c>).</summary>
+        Unposted,
+        /// <summary>DOCFE 표가 없거나 0행 → 분류하지 않고 전부 반영(R5 · R5-2). 대사표에 「머리표 없음 — 분류 못 함」.</summary>
+        Unclassified,
+    }
+
+    /// <summary>DOCFB 묶음 = DOCFE 머리 키 <c>(DT, IO, SEQ, BUY)</c> (설계 §1 · DOCFE DISTINCT 키 중복 0). 값은 Trim 한 글자.</summary>
+    public readonly record struct LegacyDocKey(string Dt, string Io, int Seq, int Buy)
+    {
+        /// <summary>Trim 해서 만든다(표 사이 공백 차이로 짝이 안 맞는 일을 막는다).</summary>
+        public static LegacyDocKey Of(string? dt, string? io, int seq, int buy)
+            => new((dt ?? string.Empty).Trim(), (io ?? string.Empty).Trim(), seq, buy);
+    }
+
+    /// <summary>
+    /// 거래처원장 연결 키 = DOCFB <c>(IJ_DT, IJ_SEQ)</c> ↔ DOCF5 <c>(S_YMD, S_SSUN)</c>. 🔴 거래처 코드는 넣지 않는다.
+    /// 종류(판매 S_GU '0' / 매입 S_GU 'A')는 키가 아니라 <b>집합을 따로</b> 둬서 가른다.
+    /// </summary>
+    public readonly record struct LegacyLedgerLinkKey(string Ymd, int Seq)
+    {
+        /// <summary>Trim 해서 만든다.</summary>
+        public static LegacyLedgerLinkKey Of(string? ymd, int seq) => new((ymd ?? string.Empty).Trim(), seq);
+    }
+
+    /// <summary>DOCF5 한 줄 (F3 · 연결 키 계산 입력).</summary>
+    public readonly record struct LegacyPartnerLedgerRow(int Buy, string Ymd, string Gu, decimal Bal, decimal Suk, int SSun);
+
+    /// <summary>
+    /// 설계 §14 판정 원형: <c>!headerTableOk</c> → 반영(R5) · 아니면 <c>hasHeader || hasLedgerLink</c>.
+    /// <paramref name="headerTableOk"/> = DOCFE 표가 있고 1행 이상.
+    /// </summary>
+    public static bool IsPostedToBooks(bool headerTableOk, bool hasHeader, bool hasLedgerLink)
+        => !headerTableOk || hasHeader || hasLedgerLink;
+
+    /// <summary>
+    /// DOCFB 묶음 하나 판정.
+    /// <list type="bullet">
+    ///   <item><paramref name="headerKeys"/> null 또는 0개 = DOCFE 없음 → <see cref="LegacyPostingStatus.Unclassified"/> (전부 반영 · R5-2 는 DOCF5 유무 무관).</item>
+    ///   <item>머리 키가 있으면 Posted.</item>
+    ///   <item>연결 집합은 <b>종류 맞춤</b>: IO "2"(판매) → <paramref name="salesLinks"/> · IO "1"(매입) → <paramref name="purchaseLinks"/>.
+    ///   null/0개 = DOCF5 없음 → 머리표로만 판정(대사표 「거래처원장 표 없음」은 호출자 몫).</item>
+    /// </list>
+    /// </summary>
+    public static LegacyPostingStatus ClassifyPosting(
+        LegacyDocKey doc,
+        IReadOnlySet<LegacyDocKey>? headerKeys,
+        IReadOnlySet<LegacyLedgerLinkKey>? salesLinks,
+        IReadOnlySet<LegacyLedgerLinkKey>? purchaseLinks)
+    {
+        var headerTableOk = headerKeys is { Count: > 0 };
+        if (!headerTableOk) return LegacyPostingStatus.Unclassified;
+
+        var hasHeader = headerKeys!.Contains(doc);
+        var links = doc.Io switch
+        {
+            "2" => salesLinks,
+            "1" => purchaseLinks,
+            _ => null,
+        };
+        // 병렬이슈36: 순번 0 은 연결 키로 쓰지 않는다(DOCFB SEQ 0 묶음 · DOCF5 「매출세액」 메모행 S_SSUN 0 이 날짜만 겹치면 거짓 연결).
+        var hasLink = doc.Seq != 0 && links is { Count: > 0 } && links.Contains(LegacyLedgerLinkKey.Of(doc.Dt, doc.Seq));
+
+        return IsPostedToBooks(headerTableOk, hasHeader, hasLink)
+            ? LegacyPostingStatus.Posted
+            : LegacyPostingStatus.Unposted;
+    }
+
+    /// <summary>
+    /// DOCFE → 머리 키 집합. 표가 null 이거나 0행이면 <b>null</b>(= 표 없음 · R5).
+    /// 칼럼: <c>IJA_DT · IJA_IO · IJA_SEQ · IJA_BUY</c>.
+    /// </summary>
+    public static HashSet<LegacyDocKey>? BuildHeaderKeySet(DataTable? docfe)
+    {
+        if (docfe is null || docfe.Rows.Count == 0) return null;
+        var set = new HashSet<LegacyDocKey>();
+        foreach (DataRow r in docfe.Rows)
+        {
+            set.Add(LegacyDocKey.Of(RowStr(r, "IJA_DT"), RowStr(r, "IJA_IO"), RowInt(r, "IJA_SEQ"), RowInt(r, "IJA_BUY")));
+        }
+        return set;
+    }
+
+    /// <summary>
+    /// DOCF5 줄 → 판매·매입 연결 키 집합. <b>이월행 제외 · S_SSUN 0 제외(병렬이슈36)</b> · S_GU '0' → 판매 · 'A' → 매입 · 그 외(수금·지급) 무시.
+    /// 입력이 null 이거나 0줄이면 둘 다 <b>null</b>(= 거래처원장 표 없음).
+    /// </summary>
+    public static (HashSet<LegacyLedgerLinkKey>? Sales, HashSet<LegacyLedgerLinkKey>? Purchase) BuildLedgerLinkKeySets(
+        IEnumerable<LegacyPartnerLedgerRow>? rows)
+    {
+        if (rows is null) return (null, null);
+        var sales = new HashSet<LegacyLedgerLinkKey>();
+        var purchase = new HashSet<LegacyLedgerLinkKey>();
+        var any = false;
+        foreach (var r in rows)
+        {
+            any = true;
+            if (IsCarryOverRow(r.Gu, r.Ymd)) continue;
+            if (r.SSun == 0) continue; // 병렬이슈36: S_SSUN 0(매출세액 메모행 등)은 연결 키가 아니다
+            var gu = (r.Gu ?? string.Empty).Trim().ToUpperInvariant();
+            if (gu == "0") sales.Add(LegacyLedgerLinkKey.Of(r.Ymd, r.SSun));
+            else if (gu == "A") purchase.Add(LegacyLedgerLinkKey.Of(r.Ymd, r.SSun));
+        }
+        return any ? (sales, purchase) : (null, null);
+    }
+
+    /// <summary><see cref="BuildLedgerLinkKeySets(IEnumerable{LegacyPartnerLedgerRow})"/> 의 DataTable 판. 표 null/0행 → (null, null).</summary>
+    public static (HashSet<LegacyLedgerLinkKey>? Sales, HashSet<LegacyLedgerLinkKey>? Purchase) BuildLedgerLinkKeySets(DataTable? docf5)
+        => docf5 is null || docf5.Rows.Count == 0 ? (null, null) : BuildLedgerLinkKeySets(ReadPartnerLedgerRows(docf5));
+
+    /// <summary>
+    /// DOCF5 DataTable → <see cref="LegacyPartnerLedgerRow"/>. 칼럼: <c>S_BUY · S_YMD · S_GU · S_BAL · S_SUK · S_SSUN</c>. null → 빈 목록.
+    /// </summary>
+    public static List<LegacyPartnerLedgerRow> ReadPartnerLedgerRows(DataTable? docf5)
+    {
+        var list = new List<LegacyPartnerLedgerRow>(docf5?.Rows.Count ?? 0);
+        if (docf5 is null) return list;
+        foreach (DataRow r in docf5.Rows)
+        {
+            list.Add(new LegacyPartnerLedgerRow(
+                RowInt(r, "S_BUY"), RowStr(r, "S_YMD").Trim(), RowStr(r, "S_GU").Trim(),
+                RowDec(r, "S_BAL"), RowDec(r, "S_SUK"), RowInt(r, "S_SSUN")));
+        }
+        return list;
+    }
+
+    /// <summary>DOCF5 이월행 = S_GU '0' AND S_YMD 끝 두 자리 '00' (월 이월 집계행 · 실측 326,194행 전부 S_GU 0).</summary>
+    public static bool IsCarryOverRow(string? sGu, string? sYmd)
+    {
+        var ymd = (sYmd ?? string.Empty).Trim();
+        return (sGu ?? string.Empty).Trim() == "0" && ymd.Length == 8 && ymd.EndsWith("00", StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// 🔴 <b>F3</b> (설계 §17) — 거래처별 <b>마지막 이월행 S_BAL</b>(없으면 0) + <b>그 뒤(S_YMD 가 더 큰) 이월 아닌 줄 Σ(S_BAL − S_SUK)</b>.
+    /// 부호: <b>+ = 미수(받을 돈) · − = 미지급(줄 돈)</b>. 판매 발생 S_GU 0 은 S_BAL(+) · 수금 1~5 는 S_SUK(−) ·
+    /// 매입 발생 A 는 S_SUK(−) · 지급 B~F 는 S_BAL(+).
+    /// <para>「마지막 달 이월행만」(그 뒤 줄 누락 · PM 140,865,113)이나 전 줄 합(F1)이 아니다 — G1 함정.</para>
+    /// 반환: 거래처 코드(S_BUY) → 잔액. 0 인 거래처도 포함한다(개수 셀 때는 0 제외).
+    /// </summary>
+    public static Dictionary<int, decimal> PartnerLegacyBalances(IEnumerable<LegacyPartnerLedgerRow> rows)
+    {
+        var lastCarry = new Dictionary<int, (string Ymd, decimal Bal)>();
+        var all = rows as IList<LegacyPartnerLedgerRow> ?? rows.ToList();
+
+        foreach (var r in all)
+        {
+            if (!IsCarryOverRow(r.Gu, r.Ymd)) continue;
+            var ymd = r.Ymd.Trim();
+            // 같은 날 이월 중복 실측 0 — 있으면 뒤에 읽힌 줄이 아니라 큰 날짜 기준으로만 바꾼다(같은 날은 첫 줄 유지).
+            if (!lastCarry.TryGetValue(r.Buy, out var cur) || string.CompareOrdinal(ymd, cur.Ymd) > 0)
+            {
+                lastCarry[r.Buy] = (ymd, r.Bal);
+            }
+        }
+
+        var result = new Dictionary<int, decimal>();
+        foreach (var (buy, c) in lastCarry) result[buy] = c.Bal;
+
+        foreach (var r in all)
+        {
+            if (IsCarryOverRow(r.Gu, r.Ymd)) continue;
+            var ymd = (r.Ymd ?? string.Empty).Trim();
+            if (lastCarry.TryGetValue(r.Buy, out var c) && string.CompareOrdinal(ymd, c.Ymd) <= 0) continue;
+            result[r.Buy] = (result.TryGetValue(r.Buy, out var acc) ? acc : 0m) + r.Bal - r.Suk;
+        }
+        return result;
+    }
+
+    /// <summary>
+    /// F3 합계 — 미수 = 양수 잔액 합 · 미지급 = 음수 잔액의 <b>절대값</b> 합 · 곳 수는 0 아닌 거래처만.
+    /// 공영정보 MDB 기대: 미수 142,062,113 (1,059곳) / 미지급 51,577,479 (530곳).
+    /// </summary>
+    public static (decimal Receivable, int ReceivableCount, decimal Payable, int PayableCount) SummarizeBalances(
+        IReadOnlyDictionary<int, decimal> balances)
+    {
+        decimal rec = 0m, pay = 0m;
+        int rc = 0, pc = 0;
+        foreach (var v in balances.Values)
+        {
+            if (v > 0) { rec += v; rc++; }
+            else if (v < 0) { pay += -v; pc++; }
+        }
+        return (rec, rc, pay, pc);
+    }
+
+    /// <summary>레거시 8자리 날짜 <c>yyyyMMdd</c> 파싱. <c>00000000</c>·<c>00000001</c>·빈칸 등 → false.</summary>
+    public static bool TryParseLegacyDate(string? yyyymmdd, out DateTime date)
+        => DateTime.TryParseExact((yyyymmdd ?? string.Empty).Trim(), "yyyyMMdd",
+            CultureInfo.InvariantCulture, DateTimeStyles.None, out date);
+
+    /// <summary>
+    /// 🆕 기준일 (설계 §14) = DOCFC MAX(IM_YM) 말일 → 없으면 DOCF5 마지막 이월 달(YYYYMM00) 말일 → 없으면 DOCFB 최대 유효 IJ_DT.
+    /// 셋 다 없으면 null (호출자가 정한다 — 오늘 날짜로 몰래 채우지 않는다).
+    /// </summary>
+    public static DateTime? LegacyBaseDate(
+        IEnumerable<string?>? docfcYm, IEnumerable<string?>? docf5CarryYmd, IEnumerable<string?>? docfbDt)
+    {
+        var fromC = MaxMonthEnd(docfcYm, 6);
+        if (fromC is not null) return fromC;
+
+        var fromF5 = MaxMonthEnd(docf5CarryYmd?.Where(y => IsCarryOverRow("0", y)).Select(y => y!.Trim()[..6]), 6);
+        if (fromF5 is not null) return fromF5;
+
+        DateTime? max = null;
+        if (docfbDt is not null)
+        {
+            foreach (var d in docfbDt)
+            {
+                if (TryParseLegacyDate(d, out var p) && (max is null || p > max)) max = p;
+            }
+        }
+        return max;
+    }
+
+    /// <summary>
+    /// <see cref="LegacyBaseDate(IEnumerable{string?}?, IEnumerable{string?}?, IEnumerable{string?}?)"/> 의 DataTable 판.
+    /// 칼럼: DOCFC <c>IM_YM</c> · DOCF5 <c>S_GU·S_YMD</c>(이월행만) · DOCFB <c>IJ_DT</c>. 표 null 허용.
+    /// </summary>
+    public static DateTime? LegacyBaseDate(DataTable? docfc, DataTable? docf5, DataTable? docfb)
+    {
+        static IEnumerable<string?> Col(DataTable? t, string c)
+            => t is null ? Enumerable.Empty<string?>() : t.Rows.Cast<DataRow>().Select(r => (string?)RowStr(r, c));
+
+        var carry = docf5 is null
+            ? Enumerable.Empty<string?>()
+            : docf5.Rows.Cast<DataRow>()
+                .Where(r => IsCarryOverRow(RowStr(r, "S_GU"), RowStr(r, "S_YMD")))
+                .Select(r => (string?)RowStr(r, "S_YMD"));
+        return LegacyBaseDate(Col(docfc, "IM_YM"), carry, Col(docfb, "IJ_DT"));
+    }
+
+    /// <summary>
+    /// 명세서·보관 표·재고원장 날짜 = IJ_DT 가 유효하면 그 날, 아니면(<c>00000000</c>·<c>00000001</c> 등) <b>기준일</b>.
+    /// 원본 IJ_DT 글자는 호출자가 <c>legacy_dt</c> 에 그대로 남긴다.
+    /// </summary>
+    public static DateTime ResolveLegacyDate(string? ijDt, DateTime baseDate)
+        => TryParseLegacyDate(ijDt, out var d) ? d : baseDate;
+
+    /// <summary><see cref="StockItemKey"/> 구분자 = U+001F (제어문자 · 품명·규격·창고 글자에 안 나온다).</summary>
+    public const char StockKeySeparator = (char)0x1F;
+
+    /// <summary>
+    /// 🆕 재고 품목 키 (설계 §16) = 품명·규격·창고 각각 <b>Trim + 대소문자 무시</b>(Access · utf8mb4_unicode_ci 비교와 같은 방향).
+    /// 구분자는 글자에 안 나오는 U+001F — <see cref="ItemKey"/> 의 <c>|</c> 와 달리 규격·창고 빈칸이 서로 섞이지 않는다.
+    /// 🔴 이관 매핑용 <c>MdbMigrationService.BuildItemKey</c>(대소문자 보존)는 건드리지 않는다 — 이 키는 재고 합산·대사 전용.
+    /// <paramref name="warehouse"/> null = 창고 합산(R7 기본창고).
+    /// </summary>
+    public static string StockItemKey(string? name, string? spec, string? warehouse = null)
+        => string.Join(StockKeySeparator,
+            (name ?? string.Empty).Trim().ToUpperInvariant(),
+            (spec ?? string.Empty).Trim().ToUpperInvariant(),
+            (warehouse ?? string.Empty).Trim().ToUpperInvariant());
+
+    /// <summary>
+    /// 보관 표 사유 칸(<c>reason varchar(30)</c>) <b>표시용</b> 이름표. 🔴 판정에 쓰지 않는다 — 판정은 <see cref="ClassifyPosting"/> 만.
+    /// 우선순위(설계 §1): 단가행(DT 00000000/00000001) → 조립·해체(BUY 2147483500) → 품명 없음(BUY 0 AND SEQ 0) →
+    /// 금액 0 시험(SEQ 31001~31004 · 묶음 금액·부가세 0) → 시험(SEQ 31001~31004) → 기타.
+    /// </summary>
+    public static string UnpostedReason(string? dt, int buy, int seq, decimal groupAbsAmount, decimal groupAbsVat)
+    {
+        var d = (dt ?? string.Empty).Trim();
+        if (d is "00000000" or "00000001") return "danga";
+        if (buy == 2147483500) return "assembly";
+        if (buy == 0 && seq == 0) return "no_name";
+        if (seq is >= 31001 and <= 31004)
+            return groupAbsAmount == 0m && groupAbsVat == 0m ? "test_zero_amount" : "test";
+        return "other";
+    }
+
+    /// <summary><see cref="UnpostedReason"/> 코드 → 화면 글자.</summary>
+    public static string UnpostedReasonText(string? reason) => reason switch
+    {
+        "danga" => "단가 기록 줄",
+        "assembly" => "조립·해체",
+        "no_name" => "품명 없음",
+        "test_zero_amount" => "시험 입력(금액 0)",
+        "test" => "시험 입력",
+        _ => "장부 미반영",
+    };
+
+    // ── DataRow 안전 읽기 (이 클래스 전용 · 칼럼 없음/DBNull → 기본값) ──
+
+    private static DateTime? MaxMonthEnd(IEnumerable<string?>? yms, int len)
+    {
+        if (yms is null) return null;
+        DateTime? max = null;
+        foreach (var raw in yms)
+        {
+            var ym = (raw ?? string.Empty).Trim();
+            if (ym.Length < len) continue;
+            if (!DateTime.TryParseExact(ym[..len] + "01", "yyyyMMdd", CultureInfo.InvariantCulture, DateTimeStyles.None, out var first)) continue;
+            var end = first.AddMonths(1).AddDays(-1);
+            if (max is null || end > max) max = end;
+        }
+        return max;
+    }
+
+    private static string RowStr(DataRow r, string col)
+    {
+        if (!r.Table.Columns.Contains(col)) return string.Empty;
+        var v = r[col];
+        return v is null or DBNull ? string.Empty : Convert.ToString(v, CultureInfo.InvariantCulture) ?? string.Empty;
+    }
+
+    private static int RowInt(DataRow r, string col)
+    {
+        if (!r.Table.Columns.Contains(col)) return 0;
+        var v = r[col];
+        if (v is null or DBNull) return 0;
+        return v switch
+        {
+            int i => i,
+            short s => s,
+            long l => checked((int)l),
+            byte b => b,
+            _ => int.TryParse(Convert.ToString(v, CultureInfo.InvariantCulture)?.Trim(), NumberStyles.Integer, CultureInfo.InvariantCulture, out var p) ? p : 0,
+        };
+    }
+
+    private static decimal RowDec(DataRow r, string col)
+    {
+        if (!r.Table.Columns.Contains(col)) return 0m;
+        var v = r[col];
+        if (v is null or DBNull) return 0m;
+        return v switch
+        {
+            decimal m => m,
+            int i => i,
+            short s => s,
+            long l => l,
+            _ => decimal.TryParse(Convert.ToString(v, CultureInfo.InvariantCulture)?.Trim(), NumberStyles.Number, CultureInfo.InvariantCulture, out var p) ? p : 0m,
+        };
+    }
 }

@@ -263,6 +263,9 @@ public sealed class MdbMigrationService
         //   이관 재고는 「이관창고」, 신규 거래는 MAIN 으로 재고가 두 창고로 갈렸다.
         //   0단계(warehouse_migration)에서 실제 warehouse_id 를 받아 채우고, 그 뒤로는 read-only 로만 공유한다.
         var defaultWarehouseId = string.Empty;
+        // 🆕 20260915작1 3판 R3 (설계 §23): 1단계에서 DOCFS 매입단가(S_IDAN) 사전을 보관 — 재고 이어 계산의 「입고 없는 달」 단가.
+        //   2단계(TransactionsOnly)도 pyojun_master 스텝을 지나므로 매번 채워진다.
+        IReadOnlyDictionary<string, decimal> legacyMasterIdan = new Dictionary<string, decimal>(StringComparer.Ordinal);
 
         // 정공법(축 3): factory가 있으면 잡-local 세션 튜닝(RunTableStepAsync 내부)으로 처리하므로
         // 글로벌 _db에 튜닝 적용할 필요 없음. legacy 모드일 때만 기존 봉합 경로 유지.
@@ -303,6 +306,7 @@ public sealed class MdbMigrationService
                 using var oleConn = OpenOleDb(pyojunPath);
                 result.Partners = await MigratePartnersAsync(oleConn, tenantId, now, partnerMap, tx, ct).ConfigureAwait(false);
                 result.Items = await MigrateItemsAsync(oleConn, tenantId, now, itemMap, tx, ct).ConfigureAwait(false);
+                legacyMasterIdan = ReadLegacyMasterIdan(oleConn);
                 if (!mapOnly)
                 {
                     result.BomHeaders = await MigrateBomAsync(oleConn, tenantId, now, itemMap, tx, ct).ConfigureAwait(false);
@@ -344,6 +348,10 @@ public sealed class MdbMigrationService
             // ──────────────────────────────────────
             _logger.LogInformation("[MDB마이그레이션] PANDATA.mdb 읽기 시작: {Path}", ForLog(pandataPath));
 
+            // 20260915작1 갈래 B · 작업지시서 §11-1: 장부 반영 판정 키(DOCFE 머리 · DOCF5 연결)와 기준일을 **병렬 잡 전에 한 번** 읽는다.
+            //   아래 병렬 잡(명세서·재고원장)과 D·E 호출은 이 값을 읽기만 한다(헌법 #16 — 공유 가변 상태 없음).
+            var posting = ReadLegacyPostingContext(pandataPath, now, legacyMasterIdan);
+
             // ──────────────────────────────────────
             // 정공법(축 1) 사장님 6축 명령 2026-05-14:
             //   PANDATA 11개 테이블 Task.WhenAll 병렬 (factory 모드만).
@@ -363,7 +371,7 @@ public sealed class MdbMigrationService
                 {
                     using var oleConn = OpenOleDb(pandataPath);
                     result.StockLedger = await MigrateStockLedgerAsync(
-                        oleConn, tenantId, now, partnerMap, itemMap, defaultWarehouseId, tx, ct).ConfigureAwait(false);
+                        oleConn, tenantId, now, partnerMap, itemMap, defaultWarehouseId, tx, ct, posting.BaseDate).ConfigureAwait(false);
                     return result.StockLedger;
                 }, ct),
                 () => RunTableStepAsync("collections", async tx =>
@@ -444,7 +452,7 @@ public sealed class MdbMigrationService
                 {
                     using var oleConn = OpenOleDb(pandataPath);
                     var (sd, pr) = await MigrateDeliveriesAndReceiptsAsync(
-                        oleConn, tenantId, now, partnerMap, itemMap, defaultWarehouseId, tx, ct).ConfigureAwait(false);
+                        oleConn, tenantId, now, partnerMap, itemMap, defaultWarehouseId, tx, ct, posting).ConfigureAwait(false);
                     result.SalesDeliveries = sd;
                     result.PurchaseReceipts = pr;
                     return sd + pr;
@@ -501,6 +509,12 @@ public sealed class MdbMigrationService
                     await job().ConfigureAwait(false);
                 }
             }
+
+            // 20260915작1 갈래 E 호출 줄 — 수금·지급 이관(병렬 잡) **뒤** 거래처 이월잔액(F3) 적재 (사장님 결재 R-A2 (나) · PM 결정 병렬이슈40).
+            //   20260915작1 갈래 I (§14-7 통합 과제 1·2): 주석 해제 · RunTableStepAsync 의 열린 트랜잭션을 넘기는 오버로드로 부른다
+            //   (계약 시그니처는 트랜잭션이 없어 열린 트랜잭션 연결에서 MySqlConnector 가 거부한다 — 갈래 B 발견1).
+            //   본문 = RunLegacyPartnerBalanceStepAsync (게이트 MdbLegacyWiringGate 가 이 메서드를 그대로 부른다).
+            await RunLegacyPartnerBalanceStepAsync(tenantId, posting.Docf5, partnerMap, posting.BaseDate, result, ct).ConfigureAwait(false);
 
             // ──────────────────────────────────────
             // 3단계: POTHER.mdb (WS-11 축 5, 2026-05-14)
@@ -568,7 +582,102 @@ public sealed class MdbMigrationService
             //   모든 stock_ledger 적재가 끝난 이 시점에 ledger 를 (tenant,item,warehouse) 합산해 item_stock
             //   개시잔액을 리빌드한다. 멱등(ON DUPLICATE KEY UPDATE)이라 재마이그·부분재개에도 안전.
             //   avg_cost 는 입고분 가중평균 근사(정확한 이동평균은 운영 누적으로 보정, 정식 과제).
-            await RunTableStepAsync("item_stock_rebuild", async tx =>
+            // 20260915작1 갈래 D 호출 줄 ① — 재고 맞춤 줄(레거시 마지막 달 재고 DOCFC)은 리빌드 **앞**(원장에 들어가야 리빌드가 수량을 센다).
+            //   20260915작1 갈래 I (§14-7 통합 과제 1·2 · §14-8 가드): 주석 해제 — ①맞춤 → ②리빌드 → ③끝전 을 한 메서드
+            //   RunLegacyStockFinalizeAsync 에서 이 순서로만 부른다(게이트 MdbLegacyWiringGate 가 이 메서드를 그대로 부른다).
+            //   ⚠️ 종전 주석 줄의 ensureItem 람다 (tid, legacyKey, …) 는 D 계약 (품명, 규격, tx, ct) 과 인자 뜻이 달랐다 — 메서드 안에서 바로잡았다.
+            await RunLegacyStockFinalizeAsync(tenantId, posting, itemMap, now, result, ct).ConfigureAwait(false);
+
+            _logger.LogInformation("[MDB마이그레이션] 완료. 결과: {@Result}", result);
+        }
+        finally
+        {
+            // legacy 모드에서만 글로벌 _db 튜닝 원복 (정공법 모드는 잡 conn DisposeAsync로 자동 처리됨).
+            if (!useMigrationPool)
+            {
+                await RestoreMigrationSessionTuningAsync(ct).ConfigureAwait(false);
+            }
+        }
+
+        return result;
+    }
+
+    /// <summary>
+    /// 🆕 20260915작1 갈래 I — 거래처 이월잔액(갈래 E) 스텝. 수금·지급 이관(병렬 잡) 뒤에 부른다.
+    /// <see cref="RunTableStepAsync"/> 가 연 트랜잭션을 <see cref="MdbLegacyPartnerBalance.ApplyAsync(IDbConnection, IDbTransaction?, string, DataTable?, IReadOnlyDictionary{int, string}, DateTime, CancellationToken)"/> 에 넘긴다.
+    /// </summary>
+    private Task RunLegacyPartnerBalanceStepAsync(
+        string tenantId, DataTable? docf5, IReadOnlyDictionary<int, string> partnerMap, DateTime baseDate,
+        MdbMigrationResult result, CancellationToken ct)
+        => RunTableStepAsync("partner_legacy_balances", async tx =>
+        {
+            var conn = tx.Connection ?? throw new InvalidOperationException("거래처 이월잔액: 트랜잭션 연결이 유효하지 않습니다.");
+            result.PartnerLegacyBalances = await MdbLegacyPartnerBalance.ApplyAsync(
+                conn, tx, tenantId, docf5, partnerMap, baseDate, ct).ConfigureAwait(false);
+            return result.PartnerLegacyBalances;
+        }, ct, continueOnFail: true, mdbFile: "PANDATA");
+
+    /// <summary>
+    /// 🆕 20260915작1 갈래 I — 재고 마무리 3스텝을 <b>이 순서로만</b> 부른다:
+    /// ① <c>legacy_final_stock</c> 맞춤 줄(갈래 D) → ② <c>item_stock_rebuild</c> → ③ <c>legacy_final_cost</c> 끝전(리빌드 뒤 · 병렬이슈37).
+    /// ①·③ 에는 <b>같은 DOCFC 인스턴스</b>(<paramref name="posting"/>.Docfc)와 스텝 트랜잭션·로거를 넘긴다(갈래 D §1-3).
+    /// <para>🔴 DOCFC 신선도 가드(§14-8 PM 반증): DOCFC 마지막 달 &lt; DOCFB 마지막 유효 날짜의 달이면 ①·③ 을 부르지 않는다
+    /// — 결과 <see cref="MdbMigrationResult.LegacyFinalStockSkipReason"/> = <see cref="MdbLegacyFinalStock.StaleFinalStockReason"/> · 경고 로그 · 재고는 이력 누계(②만).</para>
+    /// </summary>
+    private async Task RunLegacyStockFinalizeAsync(
+        string tenantId, LegacyPostingContext posting, IReadOnlyDictionary<string, string> itemMap, DateTime now,
+        MdbMigrationResult result, CancellationToken ct)
+    {
+        var docfcMaxYm = MdbLegacyFinalStock.ComputeFinalStock(posting.Docfc)?.MaxYm;
+        var staleReason = MdbLegacyFinalStock.StaleReason(docfcMaxYm, posting.DocfbLastDate);
+
+        // 🆕 20260915작1 3판 R3 (설계 §23 · R-C2): 가드 발동이면 skip 대신 DOCFB 입출고로 이어 계산 → 같은 맞춤·리빌드·끝전 순서.
+        //   이어 계산 자료(StockMovesAfter)가 없으면(안 읽음) 종전 skip 그대로 — 자료 없이 DOCFC 값으로 맞추면 최신 거래가 덮인다.
+        MdbLegacyFinalStock.FinalStockResult? rolledTarget = null;
+        if (staleReason is not null && posting.StockMovesAfter is not null)
+        {
+            var rolled = MdbLegacyFinalStock.RollForward(
+                posting.Docfc, posting.StockMovesAfter,
+                posting.MasterIdanByItemKey ?? new Dictionary<string, decimal>(StringComparer.Ordinal),
+                posting.BaseDate);
+            if (rolled is not null)
+            {
+                rolledTarget = rolled.Final;
+                result.LegacyFinalStockRollForward = rolled.Info;
+                _logger.LogWarning(
+                    "[MDB마이그레이션] " + MdbLegacyFinalStock.RollForwardNotice + " — DOCFC {FromYm} → 기준일 달 {ToYm} · DOCFB {MoveLines}줄 · 수량 없이 금액만 있던 줄 {ZeroLines}건(금액 {ZeroAmount}) · 기준일 {BaseDate:yyyy-MM-dd} (LegacyFinalStockRollForward)",
+                    rolled.Info.CarryMonths, rolled.Info.FromYm, rolled.Info.ToYm, rolled.Info.MoveLines,
+                    rolled.Info.ZeroQtyAmountLines, rolled.Info.ZeroQtyAmount, posting.BaseDate);
+                staleReason = null;
+            }
+        }
+
+        result.LegacyFinalStockSkipReason = staleReason;
+        if (staleReason is not null)
+        {
+            _logger.LogWarning(
+                "[MDB마이그레이션] {Reason} — DOCFC 마지막 달 {DocfcYm} < DOCFB 마지막 날짜 {DocfbLast:yyyy-MM-dd} · 이전 프로그램 최종재고 맞춤·끝전 skip · 재고는 이력 누계로 이관 (LegacyFinalStockSkipReason)",
+                staleReason, docfcMaxYm, posting.DocfbLastDate);
+        }
+        else
+        {
+            await RunTableStepAsync("legacy_final_stock", async tx =>
+            {
+                var conn = tx.Connection ?? throw new InvalidOperationException("재고 맞춤: 트랜잭션 연결이 유효하지 않습니다.");
+                result.LegacyFinalStockRows = rolledTarget is null
+                    ? await MdbLegacyFinalStock.AdjustStockAsync(
+                        conn, tx, tenantId, posting.Docfc, posting.BaseDate,
+                        (pum, ku, t, c) => EnsureFinalStockItemAsync(tenantId, pum, ku, itemMap, now, t ?? tx, c),
+                        _logger, ct).ConfigureAwait(false)
+                    : await MdbLegacyFinalStock.AdjustStockAsync(
+                        conn, tx, tenantId, posting.Docfc, rolledTarget, posting.BaseDate,
+                        (pum, ku, t, c) => EnsureFinalStockItemAsync(tenantId, pum, ku, itemMap, now, t ?? tx, c),
+                        _logger, ct).ConfigureAwait(false);
+                return result.LegacyFinalStockRows;
+            }, ct, continueOnFail: true, mdbFile: "PANDATA").ConfigureAwait(false);
+        }
+
+        await RunTableStepAsync("item_stock_rebuild", async tx =>
             {
                 const string rebuildSql = """
                     INSERT INTO item_stock (stock_id, tenant_id, item_id, warehouse_id, current_qty, avg_cost, last_updated_at)
@@ -599,18 +708,41 @@ public sealed class MdbMigrationService
                 return stockRows;
             }, ct, continueOnFail: false, mdbFile: "REBUILD").ConfigureAwait(false);
 
-            _logger.LogInformation("[MDB마이그레이션] 완료. 결과: {@Result}", result);
-        }
-        finally
-        {
-            // legacy 모드에서만 글로벌 _db 튜닝 원복 (정공법 모드는 잡 conn DisposeAsync로 자동 처리됨).
-            if (!useMigrationPool)
+            // 20260915작1 갈래 D 호출 줄 ② — 맞춤 금액(avg_cost)은 리빌드 **뒤**에 기록한다(병렬이슈37: 리빌드가 avg_cost 를 덮어쓴다).
+            //   20260915작1 갈래 I: 주석 해제 — 같은 DOCFC 인스턴스 · 스텝 트랜잭션 · 로거 오버로드. 신선도 가드에 걸리면 부르지 않는다.
+            if (staleReason is null)
             {
-                await RestoreMigrationSessionTuningAsync(ct).ConfigureAwait(false);
+                await RunTableStepAsync("legacy_final_cost", async tx =>
+                {
+                    var conn = tx.Connection ?? throw new InvalidOperationException("재고 금액 맞춤: 트랜잭션 연결이 유효하지 않습니다.");
+                    result.LegacyFinalCostRows = rolledTarget is null
+                        ? await MdbLegacyFinalStock.ApplyFinalCostAsync(
+                            conn, tx, tenantId, posting.Docfc, _logger, ct).ConfigureAwait(false)
+                        : await MdbLegacyFinalStock.ApplyFinalCostAsync(
+                            conn, tx, tenantId, posting.Docfc, rolledTarget, _logger, ct).ConfigureAwait(false);
+                    return result.LegacyFinalCostRows;
+                }, ct, continueOnFail: true, mdbFile: "PANDATA").ConfigureAwait(false);
             }
-        }
+    }
 
-        return result;
+    /// <summary>
+    /// 🆕 20260915작1 갈래 I — 최종재고 맞춤(갈래 D)의 품목 등록 델리게이트 본문. D 계약 인자 = (품명, 규격, tx, ct).
+    /// 1단계와 같은 규칙: 이관 매핑 키(<see cref="BuildItemKey"/>)가 비면 폴백 품목 · 매핑(DOCFS 마스터·DOCFB 자동 등록)에 있으면 그 품목 ·
+    /// 없으면(DOCFC 에만 있는 품목 · R8) MIG-AUTO 등록. 매핑을 먼저 보지 않으면 DOCFS 마스터 품목과 같은 이름의 MIG-AUTO 가 새로 생긴다.
+    /// </summary>
+    private async Task<string> EnsureFinalStockItemAsync(
+        string tenantId, string pum, string ku, IReadOnlyDictionary<string, string> itemMap, DateTime now,
+        IDbTransaction tx, CancellationToken ct)
+    {
+        var key = BuildItemKey(pum ?? string.Empty, ku ?? string.Empty);
+        if (string.IsNullOrWhiteSpace(key))
+        {
+            return itemMap.TryGetValue(string.Empty, out var fb) && !string.IsNullOrEmpty(fb)
+                ? fb
+                : await EnsureLegacyFallbackItemAsync(tenantId, now, tx, ct).ConfigureAwait(false);
+        }
+        if (itemMap.TryGetValue(key, out var mapped) && !string.IsNullOrEmpty(mapped)) return mapped;
+        return await EnsureMigAutoItemAsync(tenantId, key, now, tx, ct).ConfigureAwait(false);
     }
 
     /// <summary>
@@ -2122,6 +2254,8 @@ public sealed class MdbMigrationService
         //   직전 단계 롤백 등) 다시 INSERT → uq_tenant_code 유니크 충돌로 purchase_orders 전체 롤백됐다.
         //   해법: INSERT IGNORE(멱등) 후 재조회. 충돌해도 절대 throw 안 하고 항상 유효한 item_id 반환.
         //   헌법 #26 "재개 가능 마이그 = 멱등" 정신 정합. (전엔 기존 DB에 폴백 품목이 이미 있어 충돌이 잠복)
+        // 20260915작1 갈래 B · 지시 5: 빈 품명 줄 폴백 품목의 **신규 등록** 이름 = 「미상」(종전 '레거시 미등록 품목').
+        //   이미 있는 행은 위 SELECT 가 먼저 돌려주므로 이름을 바꾸지 않는다(UPDATE 금지).
         var id = Guid.NewGuid().ToString();
         await Db.ExecuteAsync(new CommandDefinition("""
             INSERT IGNORE INTO items
@@ -2130,7 +2264,7 @@ public sealed class MdbMigrationService
                purchase_price, sale_price, standard_price, safety_stock,
                created_at, updated_at, row_version)
             VALUES
-              (@Id, @TenantId, @Code, '레거시 미등록 품목', 'product', 'EA',
+              (@Id, @TenantId, @Code, '미상', 'product', 'EA',
                'taxable', 1, 0, '진범 #34 봉합 — itemMap 매핑 실패 라인의 fallback item. legacy_pum/legacy_ku로 원본 추적.',
                0, 0, 0, 0,
                @Now, @Now, 0)
@@ -2194,6 +2328,170 @@ public sealed class MdbMigrationService
     }
 
     /// <summary>
+    /// 20260915작1 갈래 B — 장부 반영 판정 키·기준일 묶음. 병렬 잡 전에 한 번 만들고 읽기만 한다(헌법 #16).
+    /// <para><see cref="Docfc"/>·<see cref="Docf5"/> 는 갈래 D·E 호출 줄(주석 · 머지 때 해제)이 그대로 넘겨받는 원본 표다.</para>
+    /// </summary>
+    /// <param name="HeaderKeys">DOCFE 머리 키 — null = DOCFE 없음/0행(R5 분류 못 함 · 전부 반영).</param>
+    /// <param name="SalesLinks">DOCF5 판매(S_GU 0) 연결 키 — null = DOCF5 없음(머리표로만 판정).</param>
+    /// <param name="PurchaseLinks">DOCF5 매입(S_GU A) 연결 키.</param>
+    /// <param name="BaseDate">기준일(설계 §14) — 세 표 모두 날짜 없으면 이관 시각 날짜(경고 로그).</param>
+    /// <param name="Docfc">DOCFC 전체 칼럼(없으면 null) — 갈래 D.</param>
+    /// <param name="Docf5">DOCF5 S_BUY·S_YMD·S_GU·S_BAL·S_SUK·S_SSUN(없으면 null) — 갈래 E.</param>
+    private sealed record LegacyPostingContext(
+        HashSet<LegacyMdbMapping.LegacyDocKey>? HeaderKeys,
+        HashSet<LegacyMdbMapping.LegacyLedgerLinkKey>? SalesLinks,
+        HashSet<LegacyMdbMapping.LegacyLedgerLinkKey>? PurchaseLinks,
+        DateTime BaseDate,
+        DataTable? Docfc,
+        DataTable? Docf5)
+    {
+        /// <summary>20260915작1 갈래 I — DOCFB 마지막 유효 IJ_DT(이관일 이하). 없으면 null → 신선도 가드 안 함.</summary>
+        public DateTime? DocfbLastDate { get; init; }
+
+        /// <summary>
+        /// 🆕 20260915작1 3판 R3 — 신선도 가드 발동 때만 읽은 DOCFB 중 DOCFC 마지막 달 <b>뒤</b> 줄(이어 계산 입력).
+        /// null = 안 읽음 → 이어 계산 못 함(종전 skip 유지 · 자료 없이 DOCFC 값으로 맞추면 최신 거래가 덮인다).
+        /// </summary>
+        public IReadOnlyList<MdbLegacyFinalStock.LegacyStockMove>? StockMovesAfter { get; init; }
+
+        /// <summary>🆕 3판 R3 — 1단계 DOCFS S_IDAN 사전(키 = 품명·규격 재고 키). null = 빈 사전으로 본다(직전 단가).</summary>
+        public IReadOnlyDictionary<string, decimal>? MasterIdanByItemKey { get; init; }
+    }
+
+    /// <summary>
+    /// 20260915작1 갈래 B · 작업지시서 §11-1: PANDATA 에서 DOCFE 머리 키 · DOCF5 연결 키 · 기준일을 <b>한 번</b> 읽는다.
+    /// 표가 없으면 null(갈래 A 규칙 R5·R5-2). 표가 있는데 읽기가 실패하면 <b>던진다</b> —
+    /// 조용히 null 로 두면 「DOCFE 없음 = 전부 반영」으로 읽혀 미반영 353건이 매출로 들어간다.
+    /// </summary>
+    private LegacyPostingContext ReadLegacyPostingContext(string pandataPath, DateTime now)
+        => ReadLegacyPostingContext(pandataPath, now, null);
+
+    /// <summary>
+    /// 🆕 20260915작1 3판 R3 — <paramref name="masterIdan"/>(1단계 DOCFS S_IDAN) 를 받아 가드 발동 시 이어 계산 자료를 같이 읽는다.
+    /// 이관일 = <b>로컬 날짜</b>(P6 · <paramref name="now"/> 는 UTC). 발동 시 기준일 = <see cref="MdbLegacyFinalStock.CarryBaseDate"/>.
+    /// </summary>
+    private LegacyPostingContext ReadLegacyPostingContext(string pandataPath, DateTime now, IReadOnlyDictionary<string, decimal>? masterIdan)
+    {
+        if (!File.Exists(pandataPath))
+        {
+            _logger.LogWarning("[MDB마이그레이션] PANDATA.mdb 없음 — 장부 반영 판정 키 없음 · 기준일 = 이관일 {Now:yyyy-MM-dd}", now);
+            return new LegacyPostingContext(null, null, null, now.Date, null, null);
+        }
+
+        using var oleConn = OpenOleDb(pandataPath);
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+
+        // 표 목록은 여기서 직접 읽는다 — FindMdbTable 은 목록 조회 예외를 삼켜 null(= 표 없음)로 돌려주므로 판정 키에 쓰면 안 된다.
+        var tableNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (DataRow t in oleConn.GetSchema("Tables").Rows)
+        {
+            var name = t["TABLE_NAME"]?.ToString();
+            if (!string.IsNullOrEmpty(name)) tableNames.Add(name);
+        }
+
+        DataTable? docfe = !tableNames.Contains("DOCFE")
+            ? null
+            : ReadMdbTable(oleConn, "SELECT IJA_DT, IJA_IO, IJA_SEQ, IJA_BUY FROM DOCFE");
+        DataTable? docf5 = !tableNames.Contains("DOCF5")
+            ? null
+            : ReadMdbTable(oleConn, "SELECT S_BUY, S_YMD, S_GU, S_BAL, S_SUK, S_SSUN FROM DOCF5");
+        DataTable? docfc = !tableNames.Contains("DOCFC")
+            ? null
+            : ReadMdbTable(oleConn, "SELECT * FROM DOCFC");
+        DataTable? docfbDates = !tableNames.Contains("DOCFB")
+            ? null
+            : ReadMdbTable(oleConn, "SELECT DISTINCT IJ_DT FROM DOCFB");
+
+        var headerKeys = LegacyMdbMapping.BuildHeaderKeySet(docfe);
+        var (salesLinks, purchaseLinks) = LegacyMdbMapping.BuildLedgerLinkKeySets(docf5);
+        var baseDate = LegacyMdbMapping.LegacyBaseDate(docfc, docf5, docfbDates);
+        if (baseDate is null)
+        {
+            _logger.LogWarning("[MDB마이그레이션] 기준일 못 구함(DOCFC·DOCF5 이월·DOCFB 날짜 모두 없음) — 이관일 {Now:yyyy-MM-dd} 사용", now);
+        }
+        if (headerKeys is null)
+        {
+            _logger.LogWarning("[MDB마이그레이션] DOCFE(명세서 머리표) 없음/0행 — 장부 반영 분류 못 함 · DOCFB 전부 명세서로 반영(R5)");
+        }
+        if (salesLinks is null)
+        {
+            _logger.LogWarning("[MDB마이그레이션] DOCF5(거래처원장) 없음/0행 — 머리표로만 판정(R5)");
+        }
+
+        sw.Stop();
+        _logger.LogInformation(
+            "[MDB마이그레이션] 장부 반영 판정 키 읽음 — DOCFE 머리 {Headers}키 · DOCF5 판매연결 {Sales} · 매입연결 {Purchase} · DOCFC {Docfc}행 · 기준일 {BaseDate:yyyy-MM-dd} ({Ms}ms)",
+            headerKeys?.Count ?? 0, salesLinks?.Count ?? 0, purchaseLinks?.Count ?? 0, docfc?.Rows.Count ?? 0,
+            baseDate ?? now.Date, sw.ElapsedMilliseconds);
+
+        // 20260915작1 갈래 I (§14-8 PM 반증) — DOCFC 신선도 가드용 DOCFB 마지막 유효 날짜(이관일 뒤 날짜는 잘못 친 날짜로 보고 뺀다).
+        //   🆕 3판 R3 P6: 이관일 = 로컬 날짜(now 는 UTC → 한국 오전 9시 전엔 하루 앞이 된다).
+        var migrationLocalDate = MigrationLocalDate(now);
+        var docfbLastDate = MdbLegacyFinalStock.LastValidLegacyDate(docfbDates, "IJ_DT", migrationLocalDate);
+
+        // 🆕 3판 R3 (설계 §23): 가드 발동이면 기준일 = min(DOCFB 마지막 달 말일, 이관일) · DOCFC 마지막 달 뒤 DOCFB 줄을 읽어 둔다.
+        //   BaseDate 를 이 값으로 바꿔 날짜 없는 묶음·재고원장·이월잔액 base_date 가 같은 날이 된다(F4).
+        IReadOnlyList<MdbLegacyFinalStock.LegacyStockMove>? movesAfter = null;
+        var effectiveBaseDate = baseDate ?? now.Date;
+        var docfcMaxYm = MdbLegacyFinalStock.ComputeFinalStock(docfc)?.MaxYm;
+        if (docfbLastDate is not null && MdbLegacyFinalStock.StaleReason(docfcMaxYm, docfbLastDate) is not null)
+        {
+            effectiveBaseDate = MdbLegacyFinalStock.CarryBaseDate(docfbLastDate.Value, migrationLocalDate);
+            // docfcMaxYm 은 ComputeFinalStock 이 6자리 숫자로 확인한 값 — 문자열 결합 안전.
+            var after = ReadMdbTable(oleConn, $"SELECT * FROM DOCFB WHERE IJ_DT > '{docfcMaxYm}99'");
+            movesAfter = ToLegacyStockMoves(after, out var badDate);
+            _logger.LogInformation(
+                "[MDB마이그레이션] 최종재고 표가 최신이 아님 — DOCFC 마지막 달 {DocfcYm} 뒤 DOCFB {Lines}줄로 이어 계산 예정 · 기준일 {BaseDate:yyyy-MM-dd}(DOCFB 마지막 {Last:yyyy-MM-dd} · 이관일 {Local:yyyy-MM-dd}) · 날짜 못 읽은 줄 {Bad} · 종전 기준일 {Old:yyyy-MM-dd}",
+                docfcMaxYm, movesAfter.Count, effectiveBaseDate, docfbLastDate, migrationLocalDate, badDate, baseDate ?? now.Date);
+        }
+
+        return new LegacyPostingContext(headerKeys, salesLinks, purchaseLinks, effectiveBaseDate, docfc, docf5)
+        {
+            DocfbLastDate = docfbLastDate,
+            StockMovesAfter = movesAfter,
+            MasterIdanByItemKey = masterIdan,
+        };
+    }
+
+    /// <summary>🆕 3판 R3 P6 — 이관일 = 서버(고객 PC) 로컬 날짜. <paramref name="utcNow"/> Kind 가 Utc 가 아니면 UTC 로 보고 바꾼다.</summary>
+    private static DateTime MigrationLocalDate(DateTime utcNow)
+        => TimeZoneInfo.ConvertTimeFromUtc(DateTime.SpecifyKind(utcNow, DateTimeKind.Utc), TimeZoneInfo.Local).Date;
+
+    /// <summary>🆕 3판 R3 — DOCFB 행 → 이어 계산 입력. IJ_DT 가 yyyyMMdd 로 안 읽히는 줄은 빼고 건수를 돌려준다.</summary>
+    private static List<MdbLegacyFinalStock.LegacyStockMove> ToLegacyStockMoves(DataTable docfb, out int badDate)
+    {
+        var list = new List<MdbLegacyFinalStock.LegacyStockMove>(docfb.Rows.Count);
+        badDate = 0;
+        foreach (DataRow r in docfb.Rows)
+        {
+            if (!LegacyMdbMapping.TryParseLegacyDate(GetStr(r, "IJ_DT"), out var d))
+            {
+                badDate++;
+                continue;
+            }
+            list.Add(new MdbLegacyFinalStock.LegacyStockMove(
+                GetStr(r, "IJ_PUM"), GetStr(r, "IJ_KU"), GetStr(r, "IJ_CHANG"), d, GetStr(r, "IJ_IO"),
+                GetDec(r, "IJ_QTY"), GetDec(r, "IJ_AMT")));
+        }
+        return list;
+    }
+
+    /// <summary>🆕 3판 R3 — DOCFS 매입단가 사전(키 = 품명·규격 재고 키 · 같은 키 여럿이면 첫 행). DOCFS 없으면 빈 사전.</summary>
+    private IReadOnlyDictionary<string, decimal> ReadLegacyMasterIdan(OleDbConnection oleConn)
+    {
+        var map = new Dictionary<string, decimal>(StringComparer.Ordinal);
+        var dt = ReadMdbTable(oleConn, "SELECT * FROM DOCFS");
+        int dup = 0;
+        foreach (DataRow r in dt.Rows)
+        {
+            if (!map.TryAdd(LegacyMdbMapping.StockItemKey(GetStr(r, "S_PUM"), GetStr(r, "S_KU")), GetDec(r, "S_IDAN"))) dup++;
+        }
+        if (dup > 0)
+            _logger.LogWarning("[MDB마이그레이션] 상품마스터 품명·규격이 겹치는 {Dup}행 — 재고 이어 계산 단가는 첫 행 값", dup);
+        return map;
+    }
+
+    /// <summary>
     /// 작21 (2026-09-04) A3 · 전결1 D1: DOCFB 에만 있고 DOCFS(상품마스터)에 없는 품목을 <b>1단계에서 전수 등록</b>한다.
     ///
     /// 왜 여기(1단계)인가 — 2단계 PANDATA 잡은 Task.WhenAll 병렬이고 itemMap 을 읽기 전용으로 공유한다(헌법 #16).
@@ -2204,6 +2502,8 @@ public sealed class MdbMigrationService
     /// (BOM #78 H-1 이 이미 같은 방식 — 같은 키면 같은 item_code 해시라 BOM 이 먼저 만든 것을 그대로 재사용한다).
     /// 품명·규격이 둘 다 빈 라인은 이름이 없어 품목별 등록이 무의미하므로 LEGACY_UNKNOWN_ITEM 폴백 하나로 잇는다.
     /// PANDATA 파일이 없으면 건너뛴다.
+    /// <para>20260915작1 갈래 B · 지시 5: DOCFB <b>전 줄</b>(장부 반영 판정과 무관)에서 품목을 뽑는다 — 보관 표로 가는 줄도 재고원장은 쓰므로 품목이 있어야 한다.
+    /// 빈 품명 폴백 품목의 신규 이름은 「미상」(<see cref="EnsureLegacyFallbackItemAsync"/>).</para>
     /// </summary>
     private async Task<int> RegisterUnlistedDocfbItemsAsync(
         string pandataPath, string tenantId, DateTime now,
@@ -2259,8 +2559,11 @@ public sealed class MdbMigrationService
         Dictionary<int, string> partnerMap,
         Dictionary<string, string> itemMap,
         string defaultWarehouseId,
-        IDbTransaction tx, CancellationToken ct)
+        IDbTransaction tx, CancellationToken ct,
+        DateTime baseDate)
     {
+        // 20260915작1 갈래 B · R1·R3: 재고원장은 장부 반영 판정과 **무관하게** DOCFB 전 줄을 넣는다(보관 표로 가는 줄도 재고는 움직였다).
+        //   날짜 없는 줄(00000000 등)은 기준일(baseDate) — 종전 `?? now` 는 이관한 날로 재고 이력이 찍혔다.
         // 정공법(축 1, 사장님 6축 명령 2026-05-14):
         //   기존 1000행 청크 INSERT IGNORE(수~30분) → MySqlBulkCopy(LOAD DATA LOCAL INFILE) 단일 호출(수초).
         //   멱등성 유지 패턴:
@@ -2303,9 +2606,10 @@ public sealed class MdbMigrationService
             partnerMap.TryGetValue(buyCode, out var partnerId);
 
             var dtStr = GetStr(row, "IJ_DT");
-            var ledgerDate = ParseLegacyDate(dtStr) ?? now;
+            // 20260915작1 갈래 B: 종전 `ParseLegacyDate(dtStr) ?? now` → 기준일. 포함 여부(IO 1·2)와 날짜를 한 함수(G2 가 부른다)로.
+            var (ledgerInclude, ledgerDate) = MdbLegacyUnpostedArchive.LedgerLine(GetStr(row, "IJ_IO"), dtStr, baseDate);
             var io = GetStr(row, "IJ_IO").Trim();
-            if (io != "1" && io != "2")
+            if (!ledgerInclude)
             {
                 unknownIo++; // 실측상 없다 — 나오면 그 행만 제외하고 경고로 남긴다
                 continue;
@@ -4891,7 +5195,8 @@ public sealed class MdbMigrationService
         OleDbConnection oleConn, string tenantId, DateTime now,
         Dictionary<int, string> partnerMap, Dictionary<string, string> itemMap,
         string defaultWarehouseId,
-        IDbTransaction tx, CancellationToken ct)
+        IDbTransaction tx, CancellationToken ct,
+        LegacyPostingContext posting)
     {
         // 헤더 + 라인이 한 테이블 (DOCFB) — 그룹화로 분리.
         // PK 정답 추정: IJ_DT + IJ_IO + IJ_SEQ + IJ_BUY (헤더 식별) + IJ_SUN (라인).
@@ -4921,15 +5226,24 @@ public sealed class MdbMigrationService
         var purchaseItems = new List<ReceiptItemRow>();
 
         // 그룹화: IJ_DT + IJ_IO + IJ_SEQ + IJ_BUY 동일 = 같은 거래명세서
-        var groups = dt.AsEnumerable().GroupBy(r => new
-        {
-            Dt = GetStr(r, "IJ_DT"),
-            Io = GetInt(r, "IJ_IO"),
-            Seq = GetInt(r, "IJ_SEQ"),
-            Buy = GetInt(r, "IJ_BUY"),
-        }).ToList();
+        // 20260915작1 갈래 B · 설계 §14: 묶음을 만든 뒤 장부 반영 판정(LegacyMdbMapping.ClassifyPosting)으로 나눈다.
+        //   Posted/Unclassified(날짜 있음) → 아래 명세서 경로 · Unposted 또는 날짜 없음 → 보관 표(legacy_unposted_documents/_lines) 전 줄.
+        //   묶음 키·순서는 종전 GroupBy 와 같다(MdbLegacyUnpostedArchive.Partition). 뺀 줄 0: 명세서 줄 + 보관 줄 (+ IO 미지값) = 입력 줄.
+        var partition = MdbLegacyUnpostedArchive.Partition(dt, posting.HeaderKeys, posting.SalesLinks, posting.PurchaseLinks);
+        var groups = partition.Statements;
 
-        int skipEmptyDt = 0, skipPartner = 0, skipItem = 0, skipUnknownIo = 0;
+        // 보관 표 적재 — 같은 트랜잭션(명세서와 함께 commit/rollback). 품목 id 는 1단계가 등록한 itemMap(보관 줄 품목 포함 · 빈 품명 = NULL).
+        var archiveDocs = MdbLegacyUnpostedArchive.BuildArchiveRows(
+            tenantId, partition.Archived, posting.BaseDate, partnerMap,
+            (pum, ku) => itemMap.TryGetValue(BuildItemKey(pum, ku), out var aid) && !string.IsNullOrWhiteSpace(aid) ? aid : null);
+        var (archivedDocsInserted, archivedLinesInserted) = await MdbLegacyUnpostedArchive.WriteAsync(
+            Db, tx, archiveDocs, ct).ConfigureAwait(false);
+        var archiveReasonSummary = string.Join(",", archiveDocs
+            .GroupBy(d => $"{d.IoType}:{d.Reason}")
+            .OrderBy(x => x.Key, StringComparer.Ordinal)
+            .Select(x => $"{x.Key}={x.Count()}건/{x.Sum(d => d.LineCount)}줄"));
+
+        int skipEmptyDt = partition.ArchivedUndatedGroups, skipPartner = 0, skipItem = 0, skipUnknownIo = partition.UnknownIo.Count;
         var partnerMissSamples = new List<int>();
         var itemMissSamples = new List<string>();
         // 진범 #34 봉합 (2026-05-20, 자문 #5 옵션 A): fallback item lazy 초기화.
@@ -4945,12 +5259,15 @@ public sealed class MdbMigrationService
             var buyCode = g.Key.Buy;
 
             // IJ_DT = '00000000' 또는 빈값 = skip (마이그 대상 아님, 헌법 #13 정합)
+            // 20260915작1 갈래 B: 이 skip 은 **명세서 경로에만** 남는다 — 그런 묶음은 Partition 이 이미 보관 표(기준일)로 보냈다(뺀 줄 0).
+            //   여기 걸리는 묶음은 원리상 0 이다(방어용으로 그대로 둔다).
             if (string.IsNullOrWhiteSpace(dtStr) || dtStr == "00000000")
             {
                 skipEmptyDt++;
                 continue;
             }
-            var docDate = ParseLegacyDate(dtStr) ?? now;
+            // 20260915작1 갈래 B: 날짜를 못 읽는 묶음(00000001 등)의 폴백 = 기준일 (종전 `?? now` = 이관한 날).
+            var docDate = ParseLegacyDate(dtStr) ?? posting.BaseDate;
 
             // 작21 (2026-09-04) A1 · 전결1 Q1: IO=1 매입(purchase_receipts) · IO=2 매출(sales_deliveries).
             //   종전 `io == 1 → sales` 는 반대였다 — sales_deliveries 1,962건이 매입이고 purchase_receipts 115,147건이 매출이었다(P0-A).
@@ -4989,7 +5306,8 @@ public sealed class MdbMigrationService
             else
                 headerId = existingReceiptMap.TryGetValue(sourceId, out var er) ? er : Guid.NewGuid().ToString();
             var first = g.First();
-            var taxNo = GetInt(first, "IJ_TAXNO");
+            // 20260915작1 갈래 B · §14-1(R-B3)·§14-3 발견1: 종전 첫 줄 IJ_TAXNO 만 → 묶음 안 **한 줄이라도** 번호(첫 비0) · 99999999 는 원값(R-B4 재결재 대기).
+            var taxNo = MdbLegacyUnpostedArchive.LegacyTaxNo(g);
             var memo = GetStr(first, "IJ_REM");
             // 진범 #21 봉합 (2026-05-20): buyCode 누락 → uq_delivery_no/uq_receipt_no 99,450건 충돌.
             // sourceId 패턴($"mig-docfb-{dtStr}-{io}-{seq}-{buyCode}")과 동일하게 buyCode 포함.
@@ -5007,7 +5325,7 @@ public sealed class MdbMigrationService
                     DeliveryDate = docDate,
                     SourceType = "migration",
                     SourceId = sourceId,
-                    LegacyTaxNo = taxNo == 99999999 ? (int?)null : taxNo,
+                    LegacyTaxNo = taxNo,   // 20260915작1 갈래 B: 99999999 → NULL 변환 제거(원값 저장 · R-B4 판정은 갈래 G)
                     LegacyBuyCode = buyCode,
                     Status = "confirmed",
                     // [3-V] 2026-09-07 (병렬이슈 13): ERP total_amount = 공급가 합계(SalesService:68 Items.Sum(SupplyAmount) · FinanceService 는 total_amount+vat_amount 로 합계).
@@ -5069,7 +5387,7 @@ public sealed class MdbMigrationService
                     ReceiptDate = docDate,
                     SourceType = "migration",
                     SourceId = sourceId,
-                    LegacyTaxNo = taxNo == 99999999 ? (int?)null : taxNo,
+                    LegacyTaxNo = taxNo,   // 20260915작1 갈래 B: 99999999 → NULL 변환 제거(원값 저장 · R-B4 판정은 갈래 G)
                     LegacyBuyCode = buyCode,
                     Status = "confirmed",
                     // [3-V] 2026-09-07 (병렬이슈 13): ERP total_amount = 공급가 합계(SalesService:68 Items.Sum(SupplyAmount) · FinanceService 는 total_amount+vat_amount 로 합계).
@@ -5126,6 +5444,19 @@ public sealed class MdbMigrationService
             salesHeaders.Count, salesItems.Count, purchaseHeaders.Count, purchaseItems.Count,
             skipEmptyDt, skipUnknownIo, skipPartner, skipItem,
             string.Join(",", partnerMissSamples), string.Join(",", itemMissSamples));
+        // 20260915작1 갈래 B · 지시 7: 사유별 제외·보관 카운트. 🔴 불변식 명세서 줄 + 보관 줄 + IO미지값 줄 = 입력 줄.
+        _logger.LogInformation(
+            "[MDB마이그레이션] DOCFB 장부 반영 판정 — 입력 {Input}줄 = 명세서 {StmtG}건/{StmtL}줄 + 보관 {ArcG}건/{ArcL}줄(판정 미반영 {ArcUnposted}건 · 날짜 없음 {ArcUndated}건 → 기준일 {BaseDate:yyyy-MM-dd}) + IO미지값 {UnkG}건/{UnkL}줄 | 분류못함(DOCFE 없음)={Unclassified} 거래처원장표없음={NoLedger} | 보관 사유 {Reasons} | 보관 INSERT 머리 {DocIns} · 줄 {LineIns} (나머지는 재이관 IGNORE)",
+            partition.InputLines, partition.Statements.Count, partition.StatementLines,
+            partition.Archived.Count, partition.ArchivedLines, partition.ArchivedUnpostedGroups, partition.ArchivedUndatedGroups, posting.BaseDate,
+            partition.UnknownIo.Count, partition.UnknownIoLines, partition.Unclassified, posting.SalesLinks is null,
+            archiveReasonSummary, archivedDocsInserted, archivedLinesInserted);
+        if (partition.StatementLines + partition.ArchivedLines + partition.UnknownIoLines != partition.InputLines)
+        {
+            // 원리상 불가 — 나오면 이관을 멈춘다(뺀 줄이 조용히 생기지 않게).
+            throw new InvalidOperationException(
+                $"DOCFB 줄 수 불일치: 명세서 {partition.StatementLines} + 보관 {partition.ArchivedLines} + IO미지값 {partition.UnknownIoLines} ≠ 입력 {partition.InputLines}");
+        }
 
         if (salesHeaders.Count == 0 && purchaseHeaders.Count == 0) return (0, 0);
 
@@ -7031,6 +7362,28 @@ public sealed class MdbMigrationResult
 
     /// <summary>일일보고서 (DOCME → hr_reports, (사원,날짜) 묶음 수) 이관 건수 — 작22 (2026-09-09) D</summary>
     public int DailyReports { get; set; }
+
+    // 🆕 20260915작1 갈래 I — 이전 프로그램 최종값 맞춤(갈래 D·E). 건수가 아니라 「맞춘 행」이라 Total 에 넣지 않는다.
+    /// <summary>거래처 이월잔액(partner_legacy_balances) 적은 거래처 행 수 — 갈래 E</summary>
+    public int PartnerLegacyBalances { get; set; }
+
+    /// <summary>이전 프로그램 최종재고 맞춤 줄(stock_ledger mb-adj-*) 새로 넣은 행 수 — 갈래 D ① (재실행 0)</summary>
+    public int LegacyFinalStockRows { get; set; }
+
+    /// <summary>재고 금액 끝전(item_stock.avg_cost) 고친 행 수 — 갈래 D ③</summary>
+    public int LegacyFinalCostRows { get; set; }
+
+    /// <summary>
+    /// 최종재고 맞춤·끝전을 <b>안 한</b> 사유 — null = 가드 통과(맞춤 단계가 돌았다 · DOCFC 없음 skip 은 로그로만).
+    /// 값 = <see cref="MdbLegacyFinalStock.StaleFinalStockReason"/>(「최종재고 표가 최신이 아님」) → 대사표가 그대로 표시한다.
+    /// </summary>
+    public string? LegacyFinalStockSkipReason { get; set; }
+
+    /// <summary>
+    /// 🆕 20260915작1 3판 R3 — DOCFC 가 오래돼 맞춤·끝전 목표를 DOCFB 입출고로 <b>이어 계산</b>했으면 그 정보(아니면 null).
+    /// 대사표는 <see cref="MdbLegacyFinalStock.RollForwardNotice"/>(개월 수) 와 수량 0 금액 줄 건수를 함께 보여준다(S1).
+    /// </summary>
+    public MdbLegacyFinalStock.RollForwardInfo? LegacyFinalStockRollForward { get; set; }
 
     /// <summary>전체 이관 건수 합계</summary>
     public int Total => Partners + Items + BomHeaders + Employees

@@ -626,6 +626,90 @@ internal static class AutoJournalHelper
     }
 
     /// <summary>
+    /// 🔴 20260915작1 3판 R1 (R-A5①) — 수금 취소 역분개. 차변: 외상매출금 / 대변: 현금·보통예금.
+    /// <see cref="RecordCollectionAsync"/> 의 정확한 반대. <c>source_type='collection_cancel'</c> · <c>source_id</c> = 원 수금 id.
+    /// </summary>
+    /// <remarks>
+    /// 원 수금 분개(<c>source_type='collection'</c>)가 <b>있을 때만</b> 뒤집는다 — 없는 분개를 뒤집으면 한쪽만 남는다
+    /// (이관 수금 · 20260827작4 이전 수금은 이 경로의 분개가 없다). 날짜 = 원 수금일(매출 확정취소와 같은 규칙).
+    /// 같은 수금의 두 번째 취소는 <c>uq_je_source</c> 에 걸리기 전에 여기서 0건 처리한다.
+    /// </remarks>
+    public static async Task RecordCollectionCancelAsync(
+        IDbConnection conn,
+        IDbTransaction tx,
+        string tenantId,
+        string sourceId,
+        DateTime entryDate,
+        string? partnerId,
+        decimal amount,
+        string? method,
+        string? employeeId,
+        CancellationToken ct)
+    {
+        if (amount == 0m) return;
+        if (!await ShouldReverseAsync(conn, tx, tenantId, "collection", "collection_cancel", sourceId, ct).ConfigureAwait(false)) return;
+
+        var entryId = Guid.NewGuid().ToString();
+        var entryNo = $"JE-{entryDate:yyyyMMdd}-{Guid.NewGuid().ToString()[..8].ToUpperInvariant()}";
+
+        await InsertEntryAsync(conn, tx, entryId, tenantId, entryNo, entryDate,
+            "collection_cancel", sourceId, employeeId, "수금 취소 역분개", ct);
+
+        await InsertLineAsync(conn, tx, entryId, tenantId, AccountsReceivable, "debit",
+            amount, partnerId, "수금 취소 — 외상매출금 복원", ct);
+
+        await InsertLineAsync(conn, tx, entryId, tenantId, ResolveCashAccount(method), "credit",
+            amount, partnerId, "수금 취소", ct);
+    }
+
+    /// <summary>
+    /// 🔴 20260915작1 3판 R1 (R-A5①) — 지급 취소 역분개. 차변: 현금·보통예금 / 대변: 외상매입금.
+    /// <see cref="RecordPaymentAsync"/> 의 정확한 반대. <c>source_type='payment_cancel'</c>. 규칙은 <see cref="RecordCollectionCancelAsync"/> 와 같다.
+    /// </summary>
+    public static async Task RecordPaymentCancelAsync(
+        IDbConnection conn,
+        IDbTransaction tx,
+        string tenantId,
+        string sourceId,
+        DateTime entryDate,
+        string? partnerId,
+        decimal amount,
+        string? method,
+        string? employeeId,
+        CancellationToken ct)
+    {
+        if (amount == 0m) return;
+        if (!await ShouldReverseAsync(conn, tx, tenantId, "payment", "payment_cancel", sourceId, ct).ConfigureAwait(false)) return;
+
+        var entryId = Guid.NewGuid().ToString();
+        var entryNo = $"JE-{entryDate:yyyyMMdd}-{Guid.NewGuid().ToString()[..8].ToUpperInvariant()}";
+
+        await InsertEntryAsync(conn, tx, entryId, tenantId, entryNo, entryDate,
+            "payment_cancel", sourceId, employeeId, "지급 취소 역분개", ct);
+
+        await InsertLineAsync(conn, tx, entryId, tenantId, ResolveCashAccount(method), "debit",
+            amount, partnerId, "지급 취소", ct);
+
+        await InsertLineAsync(conn, tx, entryId, tenantId, AccountsPayable, "credit",
+            amount, partnerId, "지급 취소 — 외상매입금 복원", ct);
+    }
+
+    /// <summary>원 분개가 있고 취소 분개는 아직 없을 때만 true.</summary>
+    private static async Task<bool> ShouldReverseAsync(
+        IDbConnection conn, IDbTransaction tx, string tenantId,
+        string originalType, string cancelType, string sourceId, CancellationToken ct)
+    {
+        var n = await conn.ExecuteScalarAsync<int>(new CommandDefinition(
+            """
+            SELECT (SELECT COUNT(*) FROM journal_entries WHERE tenant_id = @TenantId AND source_type = @Orig AND source_id = @SourceId)
+                 * (1 - LEAST(1, (SELECT COUNT(*) FROM journal_entries WHERE tenant_id = @TenantId AND source_type = @Cancel AND source_id = @SourceId)))
+            """,
+            new { TenantId = tenantId, Orig = originalType, Cancel = cancelType, SourceId = sourceId },
+            transaction: tx, cancellationToken: ct)).ConfigureAwait(false);
+        return n > 0;
+    }
+
+    /// <summary>
     /// 경비 기표. 차변: 경비계정 / 대변: 현금·보통예금·미지급금.
     /// </summary>
     /// <remarks>

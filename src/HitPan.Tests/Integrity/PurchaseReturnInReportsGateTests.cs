@@ -282,6 +282,14 @@ public class PurchaseReturnInReportsGateTests
         Assert.True(at >= 0, "payable KPI 가 있어야 한다");
 
         var body = fin[at..Math.Min(fin.Length, at + 1200)];
+        // 20260915작1 3판 R2 — payable 식이 공용 상수 PayableBalanceSql 한 곳으로 옮겨졌다(대사표 #10 과 같은 문자열).
+        //   KPI 가 그 상수를 부르면 상수 정의 안에서 반품 차감을 확인한다(식이 옮겨졌다고 이 게이트가 헛실패·헛통과하지 않게).
+        if (body.Contains("{{PayableBalanceSql}}", StringComparison.Ordinal))
+        {
+            var def = fin.IndexOf("PayableBalanceSql = ", StringComparison.Ordinal);
+            Assert.True(def >= 0, "PayableBalanceSql 정의가 있어야 한다");
+            body = fin[def..Math.Min(fin.Length, def + 1200)];
+        }
         Assert.Contains("purchase_returns", body, StringComparison.Ordinal);
     }
 
