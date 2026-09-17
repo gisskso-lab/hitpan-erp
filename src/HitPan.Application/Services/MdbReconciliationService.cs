@@ -120,7 +120,7 @@ public sealed class MdbReconciliationService
 
         // ②③⑧ 장부 미반영 보관 · 명세서 줄 = 반영 줄 + 보관 줄 · 봉합 전 옛 명세서 (갈래 C)
         // ④⑤ 재고 기말 = DOCFC 최종 · 원장 이력 입·출(LedgerMove) · 맞춤 줄 (갈래 C — 종전 ④ DOCFB 순수량 · ⑤ DOCFB 품목별 = 자기 자신과 비교 → 제거 ⑨)
-        await AddPostingAndStockItemsAsync(tables, tablesErr, tenantId, report, ct).ConfigureAwait(false);
+        await AddPostingAndStockItemsAsync(pandata, pyojun, tables, tablesErr, tenantId, report, ct).ConfigureAwait(false);
 
         // ⑥ 회계 분개 (DOCF7 ↔ journal_lines)
         await AddJournalItemsAsync(pandata, tenantId, items, ct).ConfigureAwait(false);
@@ -363,7 +363,49 @@ public sealed class MdbReconciliationService
         return dt;
     }
 
+    /// <summary>
+    /// 🆕 3판 R2 — 대사표용 재고 이어 계산. 이관 <c>MdbMigrationService.ReadLegacyPostingContext</c> 와 같은 입력:
+    /// DOCFB 중 DOCFC 마지막 달 뒤 줄(품명·규격·창고·날짜·입출·수량·금액) · PYOJUN DOCFS S_IDAN 사전(키 = <see cref="LegacyMdbMapping.StockItemKey"/>) ·
+    /// 기준일 = <see cref="MdbLegacyFinalStock.CarryBaseDate"/>(DOCFB 마지막 날짜, 이관일). 이관일은 대사표에 없으므로 이월잔액 <c>base_date</c>(F4 — 가드 발동 시 같은 날)
+    /// → 없으면 오늘 로컬 날짜.
+    /// </summary>
+    private async Task<MdbLegacyFinalStock.RollForwardResult> RollForwardForReconAsync(
+        OleDbConnection pandata, OleDbConnection? pyojun, DataTable? docfc, string docfcMaxYm, string docfbLastDate, string tenantId, CancellationToken ct)
+    {
+        if (!LegacyMdbMapping.TryParseLegacyDate(docfbLastDate, out var lastDate))
+            throw new InvalidOperationException($"명세서 마지막 날짜를 읽지 못했습니다({docfbLastDate})");
+        if (docfcMaxYm.Length != 6 || !docfcMaxYm.All(char.IsAsciiDigit))
+            throw new InvalidOperationException($"최종재고 표 마지막 달을 읽지 못했습니다({docfcMaxYm})");
+
+        // docfcMaxYm 은 6자리 숫자 확인 뒤 결합(주입 불가).
+        var after = ReadMdbTable(pandata, $"SELECT * FROM DOCFB WHERE IJ_DT > '{docfcMaxYm}99'");
+        var moves = new List<MdbLegacyFinalStock.LegacyStockMove>(after.Rows.Count);
+        foreach (DataRow r in after.Rows)
+        {
+            if (!LegacyMdbMapping.TryParseLegacyDate(MdbReconPosting.CellStr(r, "IJ_DT"), out var d)) continue;
+            moves.Add(new MdbLegacyFinalStock.LegacyStockMove(
+                MdbReconPosting.CellStr(r, "IJ_PUM"), MdbReconPosting.CellStr(r, "IJ_KU"), MdbReconPosting.CellStr(r, "IJ_CHANG"), d, MdbReconPosting.CellStr(r, "IJ_IO"), MdbReconPosting.CellDec(r, "IJ_QTY"), MdbReconPosting.CellDec(r, "IJ_AMT")));
+        }
+
+        var idan = new Dictionary<string, decimal>(StringComparer.Ordinal);
+        if (pyojun is not null)
+        {
+            var docfs = ReadMdbTable(pyojun, "SELECT * FROM DOCFS");
+            foreach (DataRow r in docfs.Rows)
+                idan.TryAdd(LegacyMdbMapping.StockItemKey(MdbReconPosting.CellStr(r, "S_PUM"), MdbReconPosting.CellStr(r, "S_KU")), MdbReconPosting.CellDec(r, "S_IDAN"));
+        }
+
+        var migrationDate = await _db.QueryFirstOrDefaultAsync<DateTime?>(new CommandDefinition(
+            "SELECT MAX(base_date) FROM partner_legacy_balances WHERE tenant_id = @T",
+            new { T = tenantId }, commandTimeout: ErpCommandTimeoutSec, cancellationToken: ct)).ConfigureAwait(false);
+        var baseDate = MdbLegacyFinalStock.CarryBaseDate(lastDate, migrationDate ?? DateTime.Now.Date);
+
+        return MdbLegacyFinalStock.RollForward(docfc, moves, idan, baseDate)
+            ?? throw new InvalidOperationException("최종재고 표에 시작점이 없어 이어 계산을 못 했습니다");
+    }
+
     private async Task AddPostingAndStockItemsAsync(
+        OleDbConnection? pandata, OleDbConnection? pyojun,
         PostingTables? tables, string? tablesErr, string tenantId, MdbReconciliationReport report, CancellationToken ct)
     {
         var items = report.Items;
@@ -409,9 +451,24 @@ public sealed class MdbReconciliationService
         var (ledgerErp, ledgerErpErr) = await GuardAsync("stock_ledger", () => MdbReconPosting.ReadLedgerErpAsync(_db, tenantId, ct)).ConfigureAwait(false);
         var (stockErp, stockErpErr) = await GuardAsync("item_stock", () => MdbReconPosting.ReadStockErpAsync(_db, tenantId, ct)).ConfigureAwait(false);
 
+        // 🆕 3판 R2 (설계 §24 ④⑤) — DOCFC 가 DOCFB 보다 오래됐으면(가드 발동) 레거시 열 = 이관과 같은 MdbLegacyFinalStock.RollForward 결과.
+        MdbLegacyFinalStock.RollForwardInfo? rollInfo = null;
+        string? rollErr = null;
+        if (final is not null && pandata is not null && posting?.LastValidDate is not null
+            && MdbReconPosting.FinalStockStaleReason(final.MaxYm, posting.LastValidDate) is not null)
+        {
+            var (rolled, err) = await GuardAsync("재고 이어 계산", () => RollForwardForReconAsync(pandata, pyojun, tables!.Docfc, final.MaxYm, posting.LastValidDate, tenantId, ct)).ConfigureAwait(false);
+            rollErr = err;
+            if (rolled is not null)
+            {
+                final = rolled.Final;
+                rollInfo = rolled.Info;
+            }
+        }
+
         MdbReconPosting.AddStockItems(items, report.ItemDiffs, report.Warnings,
             final, tables is not null && tables.Docfc is null, stockErp, ledgerLegacy, ledgerErp, posting?.LastValidDate,
-            ErrOnly(finalErr, ledgerErpErr, stockErpErr), TopDiffRows);
+            ErrOnly(finalErr, ledgerErpErr, stockErpErr, rollErr), rollInfo, TopDiffRows);
 
         _logger.LogInformation(
             "[MDB대사] 장부분류 tenant={Tenant} 보관판매={ArchS} 보관매입={ArchP} 옛명세서={Leftover} 분류못함={Unclassified} 최종재고달={FinalYm}",
@@ -445,31 +502,8 @@ public sealed class MdbReconciliationService
 
         var (erpRows, rowsErr) = await GuardAsync("거래처별 잔액(ERP)", async () =>
             (await _db.QueryAsync<PartnerErpRow>(new CommandDefinition(
-                $$"""
-                SELECT p.partner_id AS PartnerId, p.partner_name AS PartnerName, p.partner_code AS PartnerCode,
-                       p.migrated_source_hash AS MigratedSourceHash,
-                       COALESCE(sd.amt, 0) - COALESCE(c.amt, 0) + GREATEST(COALESCE(plb.bal, 0), 0) AS Receivable,
-                       COALESCE(pr.amt, 0) - COALESCE(rt.amt, 0) - COALESCE(pay.amt, 0) + GREATEST(-COALESCE(plb.bal, 0), 0) AS Payable
-                  FROM partners p
-                  LEFT JOIN (SELECT partner_id, SUM(total_amount + vat_amount) AS amt FROM sales_deliveries
-                              WHERE tenant_id=@TenantId AND status IN ('confirmed','invoiced') AND is_deleted=0
-                                AND NOT (COALESCE(source_type,'') = 'migration' AND {{MdbLegacyPartnerBalance.HasLegacyBalanceSql}}) GROUP BY partner_id) sd ON sd.partner_id = p.partner_id
-                  LEFT JOIN (SELECT partner_id, SUM(amount) AS amt FROM collections
-                              WHERE tenant_id=@TenantId AND ref_doc_type = 'sales_delivery'
-                                AND NOT (COALESCE(source_type,'') = 'migration' AND {{MdbLegacyPartnerBalance.HasLegacyBalanceSql}}) GROUP BY partner_id) c ON c.partner_id = p.partner_id
-                  LEFT JOIN (SELECT partner_id, SUM(total_amount + vat_amount) AS amt FROM purchase_receipts
-                              WHERE tenant_id=@TenantId AND status='confirmed'
-                                AND NOT (COALESCE(source_type,'') = 'migration' AND {{MdbLegacyPartnerBalance.HasLegacyBalanceSql}}) GROUP BY partner_id) pr ON pr.partner_id = p.partner_id
-                  LEFT JOIN (SELECT rt.partner_id, COALESCE(SUM(rti.supply_amount + rti.vat_amount),0) AS amt FROM purchase_returns rt
-                              LEFT JOIN purchase_return_items rti ON rti.return_id=rt.return_id AND rti.tenant_id=rt.tenant_id
-                              WHERE rt.tenant_id=@TenantId AND rt.is_deleted=0 AND rt.status='confirmed' GROUP BY rt.partner_id) rt ON rt.partner_id = p.partner_id
-                  LEFT JOIN (SELECT partner_id, SUM(amount) AS amt FROM payments
-                              WHERE tenant_id=@TenantId AND is_active=1 AND payment_type='purchase'
-                                AND NOT (COALESCE(source_type,'') = 'migration' AND {{MdbLegacyPartnerBalance.HasLegacyBalanceSql}}) GROUP BY partner_id) pay ON pay.partner_id = p.partner_id
-                  LEFT JOIN (SELECT partner_id, SUM(balance_amount) AS bal FROM partner_legacy_balances
-                              WHERE tenant_id=@TenantId GROUP BY partner_id) plb ON plb.partner_id = p.partner_id
-                 WHERE p.tenant_id = @TenantId
-                """, new { TenantId = tenantId }, commandTimeout: ErpCommandTimeoutSec, cancellationToken: ct)).ConfigureAwait(false)).ToList()).ConfigureAwait(false);
+                MdbReconPosting.PartnerBalanceErpSql,
+                new { TenantId = tenantId }, commandTimeout: ErpCommandTimeoutSec, cancellationToken: ct)).ConfigureAwait(false)).ToList()).ConfigureAwait(false);
         if (rowsErr is not null)
         {
             _logger.LogWarning("[MDB대사] 거래처별 ERP 잔액 읽기 실패 — 거래처 차이 목록 생략: {Err}", rowsErr);
@@ -666,7 +700,12 @@ public sealed class MdbReconciliationService
         public long FallbackEmployees { get; set; }   // 작22 ⑩ · 20260910작1 — 이관분이 아닌 사원(대표 1행 · LEGACY_FALLBACK 자리표시). 건수에서 뺀다
         public long BomHeaders { get; set; }
         public long BomLines { get; set; }
+        public long FallbackPartners { get; set; }   // 🆕 3판 R2 F2 — 받이 거래처(LEGACY_UNKNOWN_PTNR)
+        public long FallbackItems { get; set; }      // 🆕 3판 R2 F2 — 받이 품목(LEGACY_UNKNOWN_ITEM)
     }
+
+    /// <summary>받이 품목 코드 — <c>MdbMigrationService.EnsureLegacyFallbackItemAsync</c> 의 <c>itemCode</c> 와 같은 값(그 파일은 R2 범위 밖이라 값만 맞춘다).</summary>
+    private const string FallbackItemCode = "LEGACY_UNKNOWN_ITEM";
 
     private async Task AddMasterItemsAsync(
         OleDbConnection pyojun, string tenantId, List<ReconItem> items, CancellationToken ct)
@@ -703,13 +742,22 @@ public sealed class MdbReconciliationService
                   (SELECT COUNT(*) FROM employees WHERE tenant_id=@T AND emp_no LIKE 'MIG-%') AS Employees,
                   (SELECT COUNT(*) FROM employees WHERE tenant_id=@T AND emp_no NOT LIKE 'MIG-%') AS FallbackEmployees,
                   (SELECT COUNT(*) FROM bom_headers WHERE tenant_id=@T) AS BomHeaders,
-                  (SELECT COUNT(*) FROM bom_items   WHERE tenant_id=@T) AS BomLines
-                """, new { T = tenantId }, commandTimeout: ErpCommandTimeoutSec, cancellationToken: ct))).ConfigureAwait(false);
+                  (SELECT COUNT(*) FROM bom_items   WHERE tenant_id=@T) AS BomLines,
+                  (SELECT COUNT(*) FROM partners  WHERE tenant_id=@T AND is_deleted=0 AND partner_code=@FallbackPartner) AS FallbackPartners,
+                  (SELECT COUNT(*) FROM items     WHERE tenant_id=@T AND is_deleted=0 AND item_code=@FallbackItem) AS FallbackItems
+                """, new { T = tenantId, FallbackPartner = MdbLegacyPartnerBalance.FallbackPartnerCode, FallbackItem = FallbackItemCode },
+                commandTimeout: ErpCommandTimeoutSec, cancellationToken: ct))).ConfigureAwait(false);
 
         var err = ErrOnly(legacyErr, erpErr);
-        items.Add(Make("master_partners", "마스터", "업체", legacy?.Partners, erp?.Partners, err));
-        items.Add(Make("master_items", "마스터", "상품", legacy?.Items, erp?.Items,
-            JoinDetail(erp is null ? null : $"히트판 자동등록 품목 {erp.AutoItems:N0}건 포함", err)));
+        // 🆕 3판 R2 (설계 §24 F2) — 설명된 차이(받이 거래처 · 자동등록 품목 + 받이 품목)는 「사유 확인됨」, 나머지만 차이.
+        items.Add(MdbReconPosting.ApplyExplained(
+            Make("master_partners", "마스터", "업체", legacy?.Partners, erp?.Partners, err),
+            erp?.FallbackPartners ?? 0, "받이 거래처"));
+        items.Add(MdbReconPosting.ApplyExplained(
+            Make("master_items", "마스터", "상품", legacy?.Items, erp?.Items,
+                JoinDetail(erp is null ? null : $"히트판 자동등록 품목 {erp.AutoItems:N0}건 포함", err)),
+            (erp?.AutoItems ?? 0) + (erp?.FallbackItems ?? 0),
+            erp is null ? "자동등록·받이 품목" : $"자동등록 {erp.AutoItems:N0} · 받이 품목 {erp.FallbackItems:N0} ="));
         items.Add(Make("master_employees", "마스터", "사원", legacy?.Employees, erp?.Employees,
             JoinDetail(erp is null || erp.FallbackEmployees == 0 ? null : $"히트판에서 따로 만든 사원 {erp.FallbackEmployees:N0}명 제외(대표·자리표시)", err)));
         items.Add(Make("master_bom", "마스터", "BOM", legacy?.BomHeaders, erp?.BomHeaders,
@@ -1139,6 +1187,8 @@ public static class MdbReconPosting
     public const string StatusOk = "OK";
     public const string StatusDiff = "DIFF";
     public const string StatusNa = "NA";
+    /// <summary>🆕 3판 R2 (작지 §15-2 계약) — 차이 = 설명 수(받이 거래처·자동등록 품목)와 정확히 같음. 화면 문구 「사유 확인됨」(R4).</summary>
+    public const string StatusExplained = "EXPLAINED";
 
     /// <summary>화면 알림 — 덮어쓰기 필요.</summary>
     public const string WarnLeftover = "봉합 전에 가져온 명세서 중 지금은 「장부 미반영 보관」 대상인 것이 남아 있습니다. 덮어쓰기로 다시 가져오기가 필요합니다.";
@@ -1432,6 +1482,41 @@ public static class MdbReconPosting
         static string Ym(string s) => s.Length >= 6 ? $"{s[..4]}-{s.Substring(4, 2)}" : s;
     }
 
+    /// <summary>
+    /// 🆕 3판 R2 (설계 §24 ④⑤) — <paramref name="final"/> 이 <see cref="MdbLegacyFinalStock.RollForward"/> 결과일 때(<paramref name="rollInfo"/> ≠ null)
+    /// 안내 1줄(<see cref="MdbLegacyFinalStock.RollForwardNotice"/> · S1) + 수량 없이 금액만 있던 줄 건수·금액을 알림과 재고 항목 설명에 붙인다.
+    /// <paramref name="rollInfo"/> null 이면 종전과 같다.
+    /// </summary>
+    public static void AddStockItems(List<ReconItem> items, List<ReconDiffRow> itemDiffs, List<string> warnings,
+        MdbLegacyFinalStock.FinalStockResult? final, bool docfcMissing, List<StockErpRow>? erpRows,
+        LedgerLegacy? ledgerLegacy, LedgerErp? ledgerErp, string? docfbLastDate, string? err,
+        MdbLegacyFinalStock.RollForwardInfo? rollInfo, int topN = 20)
+    {
+        var start = items.Count;
+        AddStockItems(items, itemDiffs, warnings, final, docfcMissing, erpRows, ledgerLegacy, ledgerErp, docfbLastDate, err, topN);
+        if (rollInfo is null) return;
+
+        var ko = CultureInfo.GetCultureInfo("ko-KR");
+        var notice = string.Format(ko, MdbLegacyFinalStock.RollForwardNotice, rollInfo.CarryMonths);
+        var zero = RollForwardZeroLine(rollInfo);
+        warnings.Add(notice);
+        if (zero is not null) warnings.Add(zero);
+        for (var i = start; i < items.Count; i++)
+        {
+            if (items[i].Key is "stock_qty" or "stock_amount")
+                items[i].Detail = Join($"레거시 = 최종재고 표 {rollInfo.FromYm} 뒤 {rollInfo.ToYm} 까지 이어 계산", notice, zero, items[i].Detail);
+        }
+    }
+
+    /// <summary>수량 0 금액 줄 문구 — 0건이면 null.</summary>
+    public static string? RollForwardZeroLine(MdbLegacyFinalStock.RollForwardInfo info)
+    {
+        ArgumentNullException.ThrowIfNull(info);
+        return info.ZeroQtyAmountLines == 0
+            ? null
+            : string.Format(CultureInfo.GetCultureInfo("ko-KR"), "수량 없이 금액만 있던 줄 {0:N0}건 · 금액 {1:N0}원은 재고 계산에서 뺐습니다", info.ZeroQtyAmountLines, info.ZeroQtyAmount);
+    }
+
     /// <summary>④ 재고 항목 + 품목 차이 상위 N + 알림. 수량·금액은 ROUND(…, 2).</summary>
     public static void AddStockItems(List<ReconItem> items, List<ReconDiffRow> itemDiffs, List<string> warnings,
         MdbLegacyFinalStock.FinalStockResult? final, bool docfcMissing, List<StockErpRow>? erpRows,
@@ -1519,27 +1604,76 @@ public static class MdbReconPosting
         public decimal Payable { get; set; }
         public long LegacyReceivableCount { get; set; }
         public long LegacyPayableCount { get; set; }
+
+        // 🆕 3판 R2 (설계 §24 ⑥ 3행) — null = 안 읽음(종전 호출자 호환: 3행을 만들지 않는다).
+        /// <summary>Σ L0 미수(이관 이월잔액 + 쪽).</summary>
+        public decimal? LegacyReceivable { get; set; }
+        /// <summary>Σ M 미수(이관 뒤 이월 쪽에 맞춘 수금).</summary>
+        public decimal? MatchedReceivable { get; set; }
+        /// <summary>Σ R 미수(남은 금액 · 클램프 없음).</summary>
+        public decimal? RemainingReceivable { get; set; }
+        /// <summary>R&lt;0 미수 거래처 수.</summary>
+        public long NegativeReceivableCount { get; set; }
+        public decimal? LegacyPayable { get; set; }
+        public decimal? MatchedPayable { get; set; }
+        public decimal? RemainingPayable { get; set; }
+        public long NegativePayableCount { get; set; }
     }
 
-    /// <summary>히트판 미수·미지급 — <c>FinanceService.GetDashboardAsync</c> kpiSql 'receivable'·'payable' 와 같은 식(갈래 E 규칙).</summary>
+    /// <summary>
+    /// 히트판 미수·미지급 — 🔴 3판 R2 (설계 §20 #10): <c>FinanceService.GetDashboardAsync</c> 와 <b>같은 문자열</b>
+    /// <see cref="FinanceService.ReceivableBalanceSql"/>·<see cref="FinanceService.PayableBalanceSql"/>(복사 식 제거) + ⑥ 3행용 ΣL0·ΣM·ΣR·R&lt;0 곳 수.
+    /// </summary>
     public static Task<BalanceErp> ReadBalanceErpAsync(IDbConnection db, string tenantId, CancellationToken ct)
         => db.QuerySingleAsync<BalanceErp>(new CommandDefinition(
             $$"""
             SELECT
-              COALESCE((SELECT SUM(total_amount + vat_amount) FROM sales_deliveries WHERE tenant_id=@TenantId AND status IN ('confirmed','invoiced') AND is_deleted=0
-                AND NOT (COALESCE(source_type,'') = 'migration' AND {{MdbLegacyPartnerBalance.HasLegacyBalanceSql}})), 0)
-              - COALESCE((SELECT SUM(amount) FROM collections WHERE tenant_id=@TenantId AND ref_doc_type = 'sales_delivery'
-                AND NOT (COALESCE(source_type,'') = 'migration' AND {{MdbLegacyPartnerBalance.HasLegacyBalanceSql}})), 0)
-              + COALESCE((SELECT SUM(GREATEST(balance_amount, 0)) FROM partner_legacy_balances WHERE tenant_id=@TenantId), 0) AS Receivable,
-              COALESCE((SELECT SUM(total_amount + vat_amount) FROM purchase_receipts WHERE tenant_id=@TenantId AND status='confirmed'
-                AND NOT (COALESCE(source_type,'') = 'migration' AND {{MdbLegacyPartnerBalance.HasLegacyBalanceSql}})), 0)
-              - COALESCE((SELECT COALESCE(SUM(rti.supply_amount + rti.vat_amount),0) FROM purchase_returns rt LEFT JOIN purchase_return_items rti ON rti.return_id=rt.return_id AND rti.tenant_id=rt.tenant_id WHERE rt.tenant_id=@TenantId AND rt.is_deleted=0 AND rt.status='confirmed'), 0)
-              - COALESCE((SELECT SUM(amount) FROM payments WHERE tenant_id=@TenantId AND is_active=1 AND payment_type='purchase'
-                AND NOT (COALESCE(source_type,'') = 'migration' AND {{MdbLegacyPartnerBalance.HasLegacyBalanceSql}})), 0)
-              + COALESCE((SELECT SUM(GREATEST(-balance_amount, 0)) FROM partner_legacy_balances WHERE tenant_id=@TenantId), 0) AS Payable,
+              {{FinanceService.ReceivableBalanceSql}} AS Receivable,
+              {{FinanceService.PayableBalanceSql}} AS Payable,
               (SELECT COUNT(*) FROM partner_legacy_balances WHERE tenant_id=@TenantId AND balance_amount > 0) AS LegacyReceivableCount,
-              (SELECT COUNT(*) FROM partner_legacy_balances WHERE tenant_id=@TenantId AND balance_amount < 0) AS LegacyPayableCount
+              (SELECT COUNT(*) FROM partner_legacy_balances WHERE tenant_id=@TenantId AND balance_amount < 0) AS LegacyPayableCount,
+              (SELECT COALESCE(SUM(r.legacy_amount), 0) FROM ({{LegacyBalanceMatching.ReceivableRemainingSql}}) r) AS LegacyReceivable,
+              (SELECT COALESCE(SUM(r.matched_amount), 0) FROM ({{LegacyBalanceMatching.ReceivableRemainingSql}}) r) AS MatchedReceivable,
+              (SELECT COALESCE(SUM(r.remaining_amount), 0) FROM ({{LegacyBalanceMatching.ReceivableRemainingSql}}) r) AS RemainingReceivable,
+              (SELECT COUNT(*) FROM ({{LegacyBalanceMatching.ReceivableRemainingSql}}) r WHERE r.remaining_amount < 0) AS NegativeReceivableCount,
+              (SELECT COALESCE(SUM(r.legacy_amount), 0) FROM ({{LegacyBalanceMatching.PayableRemainingSql}}) r) AS LegacyPayable,
+              (SELECT COALESCE(SUM(r.matched_amount), 0) FROM ({{LegacyBalanceMatching.PayableRemainingSql}}) r) AS MatchedPayable,
+              (SELECT COALESCE(SUM(r.remaining_amount), 0) FROM ({{LegacyBalanceMatching.PayableRemainingSql}}) r) AS RemainingPayable,
+              (SELECT COUNT(*) FROM ({{LegacyBalanceMatching.PayableRemainingSql}}) r WHERE r.remaining_amount < 0) AS NegativePayableCount
             """, new { TenantId = tenantId }, commandTimeout: CommandTimeoutSec, cancellationToken: ct));
+
+    /// <summary>
+    /// 🔴 3판 R2 (설계 §20 #9) — 대사표 거래처별 히트판 잔액. #1·#2 를 거래처별로(같은 공용 조건) · 히트판 열 = 식 값 <b>+ M(P)</b>
+    /// (이관 뒤 이월 매칭만으로 레거시 F3 와 차이가 생기지 않게). 열: PartnerId·PartnerName·PartnerCode·MigratedSourceHash·Receivable·Payable·ReceivableMatched·PayableMatched.
+    /// 교차: Σ(Receivable − ReceivableMatched) = <see cref="FinanceService.ReceivableBalanceSql"/> (거래처 행이 있는 몫).
+    /// </summary>
+    public static readonly string PartnerBalanceErpSql = $$"""
+        SELECT p.partner_id AS PartnerId, p.partner_name AS PartnerName, p.partner_code AS PartnerCode,
+               p.migrated_source_hash AS MigratedSourceHash,
+               COALESCE(sd.amt, 0) - COALESCE(c.amt, 0) + COALESCE(rr.rem, 0) + COALESCE(rr.m, 0) AS Receivable,
+               COALESCE(pr.amt, 0) - COALESCE(rt.amt, 0) - COALESCE(pay.amt, 0) + COALESCE(rp.rem, 0) + COALESCE(rp.m, 0) AS Payable,
+               COALESCE(rr.m, 0) AS ReceivableMatched,
+               COALESCE(rp.m, 0) AS PayableMatched
+          FROM partners p
+          LEFT JOIN (SELECT partner_id, SUM(total_amount + vat_amount) AS amt FROM sales_deliveries
+                      WHERE tenant_id=@TenantId AND status IN ('confirmed','invoiced') AND is_deleted=0
+                        AND NOT (COALESCE(source_type,'') = 'migration' AND {{MdbLegacyPartnerBalance.HasLegacyBalanceSql}}) GROUP BY partner_id) sd ON sd.partner_id = p.partner_id
+          LEFT JOIN (SELECT c9.partner_id, SUM(c9.amount) AS amt FROM collections c9
+                      WHERE c9.tenant_id=@TenantId AND {{LegacyBalanceMatching.CollectionDocSideWhere("c9")}} GROUP BY c9.partner_id) c ON c.partner_id = p.partner_id
+          LEFT JOIN (SELECT partner_id, SUM(total_amount + vat_amount) AS amt FROM purchase_receipts
+                      WHERE tenant_id=@TenantId AND status='confirmed'
+                        AND NOT (COALESCE(source_type,'') = 'migration' AND {{MdbLegacyPartnerBalance.HasLegacyBalanceSql}}) GROUP BY partner_id) pr ON pr.partner_id = p.partner_id
+          LEFT JOIN (SELECT rt9.partner_id, COALESCE(SUM(rti9.supply_amount + rti9.vat_amount),0) AS amt FROM purchase_returns rt9
+                      LEFT JOIN purchase_return_items rti9 ON rti9.return_id=rt9.return_id AND rti9.tenant_id=rt9.tenant_id
+                      WHERE rt9.tenant_id=@TenantId AND {{LegacyBalanceMatching.PurchaseReturnDocSideWhere("rt9")}} GROUP BY rt9.partner_id) rt ON rt.partner_id = p.partner_id
+          LEFT JOIN (SELECT p9.partner_id, SUM(p9.amount) AS amt FROM payments p9
+                      WHERE p9.tenant_id=@TenantId AND {{LegacyBalanceMatching.PaymentDocSideWhere("p9")}} GROUP BY p9.partner_id) pay ON pay.partner_id = p.partner_id
+          LEFT JOIN (SELECT x.partner_id, SUM(x.remaining_amount) AS rem, SUM(x.matched_amount) AS m
+                       FROM ({{LegacyBalanceMatching.ReceivableRemainingSql}}) x GROUP BY x.partner_id) rr ON rr.partner_id = p.partner_id
+          LEFT JOIN (SELECT x.partner_id, SUM(x.remaining_amount) AS rem, SUM(x.matched_amount) AS m
+                       FROM ({{LegacyBalanceMatching.PayableRemainingSql}}) x GROUP BY x.partner_id) rp ON rp.partner_id = p.partner_id
+         WHERE p.tenant_id = @TenantId
+        """;
 
     /// <summary>⑥ 미수·미지급 항목.</summary>
     public static void AddBalanceItems(List<ReconItem> items, List<string> warnings, BalanceLegacy? legacy, bool docf5Missing, BalanceErp? erp, string? err)
@@ -1556,7 +1690,67 @@ public static class MdbReconPosting
                  legacy is null ? null : $"레거시 {legacy.PayableCount:N0}곳",
                  erp is null ? null : $"히트판 이월잔액 {erp.LegacyPayableCount:N0}곳",
                  docf5Missing ? "거래처원장 표 없음" : null, err)));
+
+        AddLegacyBalanceRows(items, warnings, legacy, erp, err);
     }
+
+    /// <summary>R&lt;0 거래처 경고 문구(미수/미지급 · 곳 수).</summary>
+    public const string WarnNegativeRemaining = "이전 프로그램 이월잔액보다 더 많이 맞춘 거래처가 {0} {1:N0}곳 있습니다(남은 금액이 0보다 작음). 수금·지급 내역을 확인해 주세요.";
+
+    /// <summary>
+    /// 🆕 3판 R2 (설계 §24) — ⑥ 미수·미지급 각 3행: 「레거시 이월」(Σ L0 ↔ F3 · OK/DIFF) · 「그 뒤 수금·지급」(Σ M · 정보 = 레거시 칸 비움 → NA)
+    /// · 「남은 금액」(Σ R · 정보 · R&lt;0 거래처 수 경고). ERP 쪽 값이 안 읽혔으면(null) 3행을 만들지 않는다.
+    /// </summary>
+    public static void AddLegacyBalanceRows(List<ReconItem> items, List<string> warnings, BalanceLegacy? legacy, BalanceErp? erp, string? err)
+    {
+        if (erp?.LegacyReceivable is null && erp?.LegacyPayable is null) return;
+        const string info = "정보 — 비교할 레거시 값이 없습니다";
+
+        items.Add(Item("receivable_legacy", "미수", "미수금 · 레거시 이월", legacy?.Receivable, erp.LegacyReceivable,
+            Join("히트판 = 이관한 이전 프로그램 이월잔액(받을 돈) 합", err)));
+        items.Add(Item("receivable_matched", "미수", "미수금 · 그 뒤 수금", null, erp.MatchedReceivable,
+            Join(info, "이관 뒤 이월잔액에 맞춘 수금 합", err)));
+        items.Add(Item("receivable_remaining", "미수", "미수금 · 남은 금액", null, erp.RemainingReceivable,
+            Join(info, erp.NegativeReceivableCount > 0 ? $"남은 금액이 0보다 작은 거래처 {erp.NegativeReceivableCount:N0}곳" : null, err)));
+        if (erp.NegativeReceivableCount > 0)
+            warnings.Add(string.Format(CultureInfo.GetCultureInfo("ko-KR"), WarnNegativeRemaining, "미수금", erp.NegativeReceivableCount));
+
+        items.Add(Item("payable_legacy", "미지급", "미지급금 · 레거시 이월", legacy?.Payable, erp.LegacyPayable,
+            Join("히트판 = 이관한 이전 프로그램 이월잔액(줄 돈) 합", err)));
+        items.Add(Item("payable_matched", "미지급", "미지급금 · 그 뒤 지급", null, erp.MatchedPayable,
+            Join(info, "이관 뒤 이월잔액에 맞춘 지급 · 이관 매입 반품 합", err)));
+        items.Add(Item("payable_remaining", "미지급", "미지급금 · 남은 금액", null, erp.RemainingPayable,
+            Join(info, erp.NegativePayableCount > 0 ? $"남은 금액이 0보다 작은 거래처 {erp.NegativePayableCount:N0}곳" : null, err)));
+        if (erp.NegativePayableCount > 0)
+            warnings.Add(string.Format(CultureInfo.GetCultureInfo("ko-KR"), WarnNegativeRemaining, "미지급금", erp.NegativePayableCount));
+    }
+
+    /// <summary>
+    /// 🆕 3판 R2 (설계 §24 F2) — 마스터 건수 차이가 <b>설명 수와 정확히 같으면</b> Status <c>EXPLAINED</c>(「사유 확인됨」 · Detail 에 건수·사유).
+    /// 다르면 DIFF 그대로 + Detail 「설명된 n · 설명 안 되는 m」. 숨기지 않는다. 설명 수 0 이면 손대지 않는다(OK/DIFF/NA 종전).
+    /// </summary>
+    public static ReconItem ApplyExplained(ReconItem item, long explained, string reason)
+    {
+        ArgumentNullException.ThrowIfNull(item);
+        if (explained == 0 || item.Legacy is null || item.Erp is null) return item;
+        var diff = item.Erp.Value - item.Legacy.Value;
+        if (diff == explained)
+        {
+            item.Status = StatusExplained;
+            item.Detail = Join($"사유 확인됨 · {reason} {explained:N0}", item.Detail);
+        }
+        else
+        {
+            // 차이 0 인데 설명 수가 있어도 DIFF — 무언가가 상쇄된 것이므로 숨기지 않는다.
+            item.Status = StatusDiff;
+            item.Detail = Join($"설명된 {explained:N0}({reason}) · 설명 안 되는 {diff - explained:N0}", item.Detail);
+        }
+        return item;
+    }
+
+    // 🆕 3판 R2 — 대사 서비스(이어 계산 입력 읽기)가 같은 안전 읽기를 쓰도록 노출.
+    internal static string CellStr(DataRow r, string c) => RowStr(r, c);
+    internal static decimal CellDec(DataRow r, string c) => RowDec(r, c);
 
     // ── DataRow 안전 읽기 ──
     private static string RowStr(DataRow r, string c)
