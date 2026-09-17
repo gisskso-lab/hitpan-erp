@@ -7271,6 +7271,12 @@ public sealed class MdbMigrationResult
     /// </summary>
     public string? LegacyFinalStockSkipReason { get; set; }
 
+    /// <summary>
+    /// 🆕 20260915작1 3판 R3 — DOCFC 가 오래돼 맞춤·끝전 목표를 DOCFB 입출고로 <b>이어 계산</b>했으면 그 정보(아니면 null).
+    /// 대사표는 <see cref="MdbLegacyFinalStock.RollForwardNotice"/>(개월 수) 와 수량 0 금액 줄 건수를 함께 보여준다(S1).
+    /// </summary>
+    public MdbLegacyFinalStock.RollForwardInfo? LegacyFinalStockRollForward { get; set; }
+
     /// <summary>전체 이관 건수 합계</summary>
     public int Total => Partners + Items + BomHeaders + Employees
                         + SalesOrders + PurchaseOrders + StockLedger
