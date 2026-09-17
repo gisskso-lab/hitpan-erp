@@ -486,6 +486,8 @@ public sealed class MdbReconciliationService
 
         var (erp, erpErr) = await GuardAsync("미수·미지급(ERP)", () => MdbReconPosting.ReadBalanceErpAsync(_db, tenantId, ct)).ConfigureAwait(false);
         MdbReconPosting.AddBalanceItems(report.Items, report.Warnings, legacy, docf5Missing, erp, ErrOnly(legacyErr, erpErr));
+        // 🆕 3판 R2 (설계 §24) — ⑥ 3행은 기존 두 항목 뒤에 따로 붙인다(AddBalanceItems 동작은 종전 그대로 · #1).
+        MdbReconPosting.AddLegacyBalanceRows(report.Items, report.Warnings, legacy, erp, ErrOnly(legacyErr, erpErr));
 
         if (legacy is null) return;
 
@@ -1690,8 +1692,6 @@ public static class MdbReconPosting
                  legacy is null ? null : $"레거시 {legacy.PayableCount:N0}곳",
                  erp is null ? null : $"히트판 이월잔액 {erp.LegacyPayableCount:N0}곳",
                  docf5Missing ? "거래처원장 표 없음" : null, err)));
-
-        AddLegacyBalanceRows(items, warnings, legacy, erp, err);
     }
 
     /// <summary>R&lt;0 거래처 경고 문구(미수/미지급 · 곳 수).</summary>

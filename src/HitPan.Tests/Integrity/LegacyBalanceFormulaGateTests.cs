@@ -306,6 +306,7 @@ public sealed class LegacyBalanceFormulaGateTests : IClassFixture<LegacyBalanceF
         var warnings = new List<string>();
         var legacy = new MdbReconPosting.BalanceLegacy(100_000m, 1, 80_000m, 1, new Dictionary<int, decimal>());
         MdbReconPosting.AddBalanceItems(items, warnings, legacy, false, erp, null);
+        MdbReconPosting.AddLegacyBalanceRows(items, warnings, legacy, erp, null);
         Assert.Equal("OK", items.Single(i => i.Key == "receivable_legacy").Status);
         Assert.Equal("OK", items.Single(i => i.Key == "payable_legacy").Status);
         Assert.Equal("NA", items.Single(i => i.Key == "receivable_matched").Status);
@@ -333,7 +334,7 @@ public sealed class LegacyBalanceFormulaGateTests : IClassFixture<LegacyBalanceF
         Assert.Equal(1, erp.NegativeReceivableCount);
         var items = new List<ReconItem>();
         var warnings = new List<string>();
-        MdbReconPosting.AddBalanceItems(items, warnings, null, false, erp, null);
+        MdbReconPosting.AddLegacyBalanceRows(items, warnings, null, erp, null);
         Assert.Single(warnings, w => w.Contains("미수금 1곳"));
         Assert.Contains("0보다 작은 거래처 1곳", items.Single(i => i.Key == "receivable_remaining").Detail);
 
