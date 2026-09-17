@@ -1352,7 +1352,8 @@ public class SalesService : ISalesService
                 UPDATE partner_balance pb
                 SET total_sales = COALESCE((SELECT SUM(total_amount) FROM sales_deliveries
                                             WHERE tenant_id=@Tid AND partner_id=@Pid AND status IN ('confirmed','invoiced')
-                                              AND COALESCE(source_type,'') <> 'migration'), 0)
+                                              AND COALESCE(source_type,'') <> 'migration'
+                                              AND delivery_id <> @Did), 0)
                                 - COALESCE((SELECT SUM(total_amount) FROM sales_returns
                                             WHERE tenant_id=@Tid AND partner_id=@Pid AND status='confirmed'), 0),
                     total_receipt = COALESCE((SELECT SUM(amount) FROM collections
@@ -1361,7 +1362,8 @@ public class SalesService : ISalesService
                     last_updated_at = NOW(6)
                 WHERE tenant_id=@Tid AND partner_id=@Pid
                 """,
-                new { Tid = tenantId, Pid = (string)header.partner_id },
+                // 🔴 3판 R2 — 상태를 'cancelled' 로 바꾸는 UPDATE 는 이 재집계 뒤(`status='cancelled'` 줄)라 지금 취소 중인 명세서를 @Did 로 뺀다(G9-d 실측: 안 빼면 total_sales 가 그대로 남음 · 종전 코드도 같은 결함).
+                new { Tid = tenantId, Pid = (string)header.partner_id, Did = deliveryId },
                 transaction: tx, cancellationToken: ct));
 
             // 6) 회계 역분개 — RecordSalesConfirmAsync 대칭 (차변 매출+부가세예수금 / 대변 외상매출금)
