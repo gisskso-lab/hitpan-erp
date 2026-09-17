@@ -445,8 +445,9 @@ public sealed class LegacyBalanceMatchGateTests : IClassFixture<LegacyBalanceMat
 
         Assert.True(LegacyBalanceMatching.RejectBeforeBaseDate);
         var ex = await RejectedUnchangedAsync(db, t, () => svc.CreateCollectionAsync(LegacyCollection(PA, 1_000m, BaseDate), t, "g8"));
-        Assert.Contains("기준일(2026-02-28)", ex.Message);
-        await RejectedUnchangedAsync(db, t, () => svc.CreatePaymentAsync(LegacyPayment(PB, 1_000m, new DateTime(2026, 2, 20)), t, "g8"));
+        Assert.Contains("기준일(2026-02-28)까지의 수금은 이미 이월잔액에 들어 있어", ex.Message);
+        var exP = await RejectedUnchangedAsync(db, t, () => svc.CreatePaymentAsync(LegacyPayment(PB, 1_000m, new DateTime(2026, 2, 20)), t, "g8"));
+        Assert.Contains("까지의 지급은", exP.Message);
         await svc.CreateCollectionAsync(LegacyCollection(PA, 1_000m, BaseDate.AddDays(1)), t, "g8");
     }
 
@@ -530,6 +531,37 @@ public sealed class LegacyBalanceMatchGateTests : IClassFixture<LegacyBalanceMat
         Assert.Equal(7_000m, docSide);
         var paySide = await db.ExecuteScalarAsync<decimal>($"SELECT COALESCE(SUM(amount),0) FROM payments p WHERE p.tenant_id=@TenantId AND {LegacyBalanceMatching.PaymentDocSideWhere("p")}", new { TenantId = t });
         Assert.Equal(0m, paySide);
+    }
+
+    [Fact(DisplayName = "G8-q 이관 수금·지급 삭제 거절 — 잔액·is_active·분개 무변화 (PM 후속 1)")]
+    public async Task G8q_이관삭제거절()
+    {
+        if (Skip(nameof(G8q_이관삭제거절))) return;
+        var (db, t, svc) = await NewTenantAsync();
+        await using var _ = db;
+        var cid = Guid.NewGuid().ToString();
+        var pid = Guid.NewGuid().ToString();
+        await db.ExecuteAsync("""
+            INSERT INTO collections (collection_id, tenant_id, partner_id, collection_date, amount, ref_doc_type, ref_doc_id, is_active, source_type, source_id)
+            VALUES (@Id, @T, @P, '2026-01-20', 40000, 'sales_delivery', 'mig-q', 1, 'migration', 'mig-g8-q')
+            """, new { Id = cid, T = t, P = PA });
+        await db.ExecuteAsync("""
+            INSERT INTO payments (payment_id, tenant_id, partner_id, payment_type, amount, payment_date, ref_order_id, is_active, source_type, source_id)
+            VALUES (@Id, @T, @P, 'purchase', 20000, '2026-01-20', 'mig-q', 1, 'migration', 'mig-g8-q')
+            """, new { Id = pid, T = t, P = PB });
+        // 사람 입력으로 잔액 칸이 있는 상태에서 — 이관 삭제가 이 값을 깎으면 FAIL
+        await svc.CreateCollectionAsync(LegacyCollection(PA, 30_000m), t, "g8");
+        await svc.CreatePaymentAsync(LegacyPayment(PB, 30_000m), t, "g8");
+
+        var ex1 = await RejectedUnchangedAsync(db, t, () => svc.DeleteCollectionAsync(cid, t));
+        Assert.Equal("이전 프로그램에서 옮겨 온 수금은 삭제할 수 없습니다.", ex1.Message);
+        var ex2 = await RejectedUnchangedAsync(db, t, () => svc.DeletePaymentAsync(pid, t));
+        Assert.Equal("이전 프로그램에서 옮겨 온 지급은 삭제할 수 없습니다.", ex2.Message);
+
+        Assert.Equal(1, await db.ExecuteScalarAsync<int>("SELECT is_active FROM collections WHERE collection_id=@Id", new { Id = cid }));
+        Assert.Equal(1, await db.ExecuteScalarAsync<int>("SELECT is_active FROM payments WHERE payment_id=@Id", new { Id = pid }));
+        Assert.Equal(0, await db.ExecuteScalarAsync<int>("SELECT COUNT(*) FROM journal_entries WHERE tenant_id=@T AND source_id IN (@C, @P)", new { T = t, C = cid, P = pid }));
+        Assert.Single(await svc.GetCollectionsAsync(t), c => c.CollectionId == cid);
     }
 
     private static Task InsertDeliveryAsync(MySqlConnection db, string t, string id, string partner, decimal total, string source)

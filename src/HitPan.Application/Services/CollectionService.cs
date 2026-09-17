@@ -196,11 +196,15 @@ public class CollectionService : ICollectionService
         await EnsureOpenAsync(ct);
         // 금액 조회 후 partner_balance 차감
         // 20260915작1 3판 R1 — 역분개(날짜·결제수단)와 월마감(P4) 판정에 원 수금일·수단이 필요하다.
-        var col = await _db.QueryFirstOrDefaultAsync<(string PartnerId, decimal Amount, string Method, DateTime Date)>(new CommandDefinition(
-            "SELECT partner_id AS PartnerId, amount AS Amount, collection_method AS Method, collection_date AS Date FROM collections WHERE collection_id = @Id AND tenant_id = @TenantId AND is_active = 1",
+        var col = await _db.QueryFirstOrDefaultAsync<(string PartnerId, decimal Amount, string Method, DateTime Date, string? SourceType)>(new CommandDefinition(
+            "SELECT partner_id AS PartnerId, amount AS Amount, collection_method AS Method, collection_date AS Date, source_type AS SourceType FROM collections WHERE collection_id = @Id AND tenant_id = @TenantId AND is_active = 1",
             new { Id = collectionId, TenantId = tenantId }, cancellationToken: ct));
 
         if (string.IsNullOrEmpty(col.PartnerId)) return;
+
+        // 🔴 20260915작1 3판 R1 (PM 후속 1) — 이관 수금은 partner_balance 에 기록되지 않았고(MdbMigrationService 이관) 레거시 줄은 빼지 않는다 → 삭제 거절.
+        if (string.Equals(col.SourceType, "migration", StringComparison.Ordinal))
+            throw new InvalidOperationException(MsgMigratedCollectionDelete);
 
         // 🔴 P4 — 역분개 날짜 = 원 수금일. 그 달이 마감됐으면 삭제를 막는다(등록과 같은 문구).
         await ApprovalTriggerHelper.EnsureNotClosedAsync(_db, tenantId, col.Date, ct);
@@ -351,11 +355,15 @@ public class CollectionService : ICollectionService
     {
         await EnsureOpenAsync(ct);
         // 20260915작1 3판 R1 — 역분개·월마감(P4)용 원 지급일·수단.
-        var pay = await _db.QueryFirstOrDefaultAsync<(string PartnerId, decimal Amount, string Method, DateTime Date)>(new CommandDefinition(
-            "SELECT partner_id AS PartnerId, amount AS Amount, payment_method AS Method, payment_date AS Date FROM payments WHERE payment_id = @Id AND tenant_id = @TenantId AND is_active = 1",
+        var pay = await _db.QueryFirstOrDefaultAsync<(string PartnerId, decimal Amount, string Method, DateTime Date, string? SourceType)>(new CommandDefinition(
+            "SELECT partner_id AS PartnerId, amount AS Amount, payment_method AS Method, payment_date AS Date, source_type AS SourceType FROM payments WHERE payment_id = @Id AND tenant_id = @TenantId AND is_active = 1",
             new { Id = paymentId, TenantId = tenantId }, cancellationToken: ct));
 
         if (string.IsNullOrEmpty(pay.PartnerId)) return;
+
+        // 🔴 20260915작1 3판 R1 (PM 후속 1) — 이관 지급 삭제 거절(수금과 같은 이유).
+        if (string.Equals(pay.SourceType, "migration", StringComparison.Ordinal))
+            throw new InvalidOperationException(MsgMigratedPaymentDelete);
 
         // 🔴 P4 — 원 지급일의 달이 마감됐으면 삭제를 막는다.
         await ApprovalTriggerHelper.EnsureNotClosedAsync(_db, tenantId, pay.Date, ct);
@@ -654,6 +662,8 @@ public class CollectionService : ICollectionService
     // 🔴 20260915작1 3판 R1 — 맞출 대상 서버 검사 (설계 §22 · §27 P2·P3)
     // ═══════════════════════════════════════════
 
+    internal const string MsgMigratedCollectionDelete = "이전 프로그램에서 옮겨 온 수금은 삭제할 수 없습니다.";
+    internal const string MsgMigratedPaymentDelete = "이전 프로그램에서 옮겨 온 지급은 삭제할 수 없습니다.";
     internal const string MsgNoDelivery = "맞출 거래명세서가 없습니다.";
     internal const string MsgNoReceipt = "맞출 매입전표가 없습니다.";
     internal const string MsgDeliveryOver = "이 거래명세서에 남은 받을 돈은 {0:N0}원입니다. 그보다 큰 금액은 맞출 수 없습니다.";

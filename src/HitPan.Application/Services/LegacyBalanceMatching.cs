@@ -39,7 +39,7 @@ public static class LegacyBalanceMatching
     internal const string MsgOverRemaining =
         "이전 프로그램 이월잔액이 {0:N0}원 남았습니다. 그보다 큰 금액은 남은 금액까지만 이월잔액으로 처리하고, 나머지는 거래명세서에 맞춰 주세요.";
     internal const string MsgBeforeBaseDate =
-        "이전 프로그램 기준일({0:yyyy-MM-dd}) 이전 날짜는 이월잔액에 맞출 수 없습니다.";
+        "이전 프로그램 기준일({0:yyyy-MM-dd})까지의 {1}은 이미 이월잔액에 들어 있어 맞출 수 없습니다. 그 뒤에 {2} 돈이면 {2} 날짜로 입력해 주세요.";
     internal const string MsgWrongPartner =
         "이전 프로그램 이월잔액은 같은 거래처에만 맞출 수 있습니다.";
     internal const string MsgNoReceivable =
@@ -215,7 +215,7 @@ public static class LegacyBalanceMatching
             Reject(logger, tenantId, partnerId, receivable ? MsgNoReceivable : MsgNoPayable);
 
         if (IsBlockedByBaseDate(date, row.BaseDate))
-            Reject(logger, tenantId, partnerId, string.Format(System.Globalization.CultureInfo.GetCultureInfo("ko-KR"), MsgBeforeBaseDate, row.BaseDate));
+            Reject(logger, tenantId, partnerId, string.Format(System.Globalization.CultureInfo.GetCultureInfo("ko-KR"), MsgBeforeBaseDate, row.BaseDate, receivable ? "수금" : "지급", receivable ? "받은" : "준"));
 
         if (amount > row.RemainingAmount)
             Reject(logger, tenantId, partnerId,
