@@ -333,6 +333,13 @@ jobs:
           #    G5(TaxInvoiceMigratedLockGate)에 G5-18 R-B4 99999999 · G5-19 거래명세서 전잔액 추가.
           #    등록 근거 = 무력화 시험 — docs/개발/erp/20260915작1_갈래I_통합_개발명세서.md §4
           GATES="$GATES|MdbLegacyWiringGate"
+          # 🔴 20260915작1 3판 — 이전 프로그램 이월잔액 매칭(R-A3·R-A4) · 11곳 공용 식 · 재고 이어 계산(R-C2·R-C3).
+          #    G8 LegacyBalanceMatchGate(DB 24) — 초과·방향·기준일·유형값 우회(병렬이슈42)·금액 하한(43)·READ COMMITTED 동시 매칭(44 · 교착 0)·
+          #      삭제 역분개·이관 줄 삭제 거절·월마감(46). 봉합 빼고 FAIL: docs/개발/erp/20260917작1_갈래R1_공용식_수금지급서버_개발명세서.md §5·§6·§7
+          #    G9 LegacyBalanceFormulaGate(DB 5) — #2 두 번 빼기·is_active·#11 재집계·확정취소 역분개(45)·F2 사유 확인됨. 근거: …갈래R2_11곳소비자_대사표_개발명세서.md
+          #    G10 MdbLegacyStockRollForwardGate(순수 9 + DB 2) — 규칙③·반품 금액 무관·기준일 min·99999999 실번호 우선. 근거: …갈래R3_재고이어계산_기준일_개발명세서.md
+          #    LegacyBalanceLabelParityGate(순수 2) — Web 복사 이름표·상태값·안내 문구 ↔ 서버 상수(갈래 Z · 작지 §15-13).
+          GATES="$GATES|LegacyBalanceMatchGate|LegacyBalanceFormulaGate|MdbLegacyStockRollForwardGate|LegacyBalanceLabelParityGate"
 
           echo "▶ 이 잡이 무는 게이트: $GATES"
           # 🔴 20260913작2 정정 — 이제 기기 계열 중 **MainPcRestartMarkGate 는 문다**(임시 DB 권한 실측 · C-3).

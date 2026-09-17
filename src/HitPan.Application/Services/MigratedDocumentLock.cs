@@ -90,7 +90,7 @@ public static class MigratedDocumentLock
     /// <summary>
     /// 번호 칸이 NULL 인 이관분을 잠그나 — 지금 = 잠그지 않음.
     /// 🔴 의미 정리(갈래 I): 갈래 B 머지 뒤 이관은 <c>legacy_tax_no</c> 에 NULL 을 <b>쓰지 않는다</b>
-    /// (묶음 안 첫 비0 번호 · 99999999 원값 · 전부 0/빈값이면 0 — <c>MdbLegacyUnpostedArchive.LegacyTaxNo</c>).
+    /// (3판 R3: 묶음 안 실번호(0·99999999 아님) 먼저 → 없으면 99999999 → 전부 0/빈값이면 0 — <c>MdbLegacyUnpostedArchive.LegacyTaxNo</c>).
     /// 99999999 는 이 상수가 아니라 <see cref="LegacyTaxNoNotIssued"/> 명시 분기로 잠근다.
     /// NULL 은 봉합 <b>전</b> 이관분(종전 코드가 99999999 → NULL)에만 남는다 → 덮어쓰기 재이관 전까지 발행 허용(종전 동작 유지 · 개발명세서 §5).
     /// </summary>

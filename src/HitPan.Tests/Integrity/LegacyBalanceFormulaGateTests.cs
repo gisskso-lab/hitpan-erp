@@ -309,7 +309,9 @@ public sealed class LegacyBalanceFormulaGateTests : IClassFixture<LegacyBalanceF
         MdbReconPosting.AddLegacyBalanceRows(items, warnings, legacy, erp, null);
         Assert.Equal("OK", items.Single(i => i.Key == "receivable_legacy").Status);
         Assert.Equal("OK", items.Single(i => i.Key == "payable_legacy").Status);
-        Assert.Equal("NA", items.Single(i => i.Key == "receivable_matched").Status);
+        // 3판 Z (작지 §15-13) — 정보 행은 INFO(화면 「참고」) · 「—」(NA)로 빈칸처럼 보이면 안 된다.
+        Assert.All(items.Where(i => i.Key is "receivable_matched" or "receivable_remaining" or "payable_matched" or "payable_remaining"),
+            i => Assert.Equal(MdbReconPosting.StatusInfo, i.Status));
         Assert.Equal(40_000m, items.Single(i => i.Key == "receivable_matched").Erp);
         Assert.Equal(60_000m, items.Single(i => i.Key == "receivable_remaining").Erp);
         Assert.Equal(25_000m, items.Single(i => i.Key == "payable_matched").Erp);

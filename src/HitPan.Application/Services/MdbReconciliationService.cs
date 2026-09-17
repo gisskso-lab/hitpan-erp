@@ -1189,6 +1189,8 @@ public static class MdbReconPosting
     public const string StatusOk = "OK";
     public const string StatusDiff = "DIFF";
     public const string StatusNa = "NA";
+    /// <summary>🆕 3판 Z (작지 §15-13 PM 판정) — 비교할 레거시 값이 없는 정보 행. 화면 문구 「참고」(「—」는 빈칸으로 읽힌다).</summary>
+    public const string StatusInfo = "INFO";
     /// <summary>🆕 3판 R2 (작지 §15-2 계약) — 차이 = 설명 수(받이 거래처·자동등록 품목)와 정확히 같음. 화면 문구 「사유 확인됨」(R4).</summary>
     public const string StatusExplained = "EXPLAINED";
 
@@ -1207,6 +1209,14 @@ public static class MdbReconPosting
         if (legacy is null || erp is null) { item.Status = StatusNa; return item; }
         item.Diff = erp.Value - legacy.Value;
         item.Status = item.Diff == 0m ? StatusOk : StatusDiff;
+        return item;
+    }
+
+    /// <summary>🆕 3판 Z — 레거시 값이 없는 정보 행. 히트판 값이 있으면 INFO(「참고」) · 안 읽혔으면 NA 그대로. 합계(OK·DIFF 개수)에 안 들어간다.</summary>
+    public static ReconItem InfoItem(string key, string category, string label, decimal? erp, string? detail)
+    {
+        var item = Item(key, category, label, null, erp, detail);
+        if (erp is not null) item.Status = StatusInfo;
         return item;
     }
 
@@ -1698,7 +1708,7 @@ public static class MdbReconPosting
     public const string WarnNegativeRemaining = "이전 프로그램 이월잔액보다 더 많이 맞춘 거래처가 {0} {1:N0}곳 있습니다(남은 금액이 0보다 작음). 수금·지급 내역을 확인해 주세요.";
 
     /// <summary>
-    /// 🆕 3판 R2 (설계 §24) — ⑥ 미수·미지급 각 3행: 「레거시 이월」(Σ L0 ↔ F3 · OK/DIFF) · 「그 뒤 수금·지급」(Σ M · 정보 = 레거시 칸 비움 → NA)
+    /// 🆕 3판 R2 (설계 §24) — ⑥ 미수·미지급 각 3행: 「레거시 이월」(Σ L0 ↔ F3 · OK/DIFF) · 「그 뒤 수금·지급」(Σ M · 정보 = 레거시 칸 비움 → INFO「참고」 · Z)
     /// · 「남은 금액」(Σ R · 정보 · R&lt;0 거래처 수 경고). ERP 쪽 값이 안 읽혔으면(null) 3행을 만들지 않는다.
     /// </summary>
     public static void AddLegacyBalanceRows(List<ReconItem> items, List<string> warnings, BalanceLegacy? legacy, BalanceErp? erp, string? err)
@@ -1708,18 +1718,18 @@ public static class MdbReconPosting
 
         items.Add(Item("receivable_legacy", "미수", "미수금 · 레거시 이월", legacy?.Receivable, erp.LegacyReceivable,
             Join("히트판 = 이관한 이전 프로그램 이월잔액(받을 돈) 합", err)));
-        items.Add(Item("receivable_matched", "미수", "미수금 · 그 뒤 수금", null, erp.MatchedReceivable,
+        items.Add(InfoItem("receivable_matched", "미수", "미수금 · 그 뒤 수금", erp.MatchedReceivable,
             Join(info, "이관 뒤 이월잔액에 맞춘 수금 합", err)));
-        items.Add(Item("receivable_remaining", "미수", "미수금 · 남은 금액", null, erp.RemainingReceivable,
+        items.Add(InfoItem("receivable_remaining", "미수", "미수금 · 남은 금액", erp.RemainingReceivable,
             Join(info, erp.NegativeReceivableCount > 0 ? $"남은 금액이 0보다 작은 거래처 {erp.NegativeReceivableCount:N0}곳" : null, err)));
         if (erp.NegativeReceivableCount > 0)
             warnings.Add(string.Format(CultureInfo.GetCultureInfo("ko-KR"), WarnNegativeRemaining, "미수금", erp.NegativeReceivableCount));
 
         items.Add(Item("payable_legacy", "미지급", "미지급금 · 레거시 이월", legacy?.Payable, erp.LegacyPayable,
             Join("히트판 = 이관한 이전 프로그램 이월잔액(줄 돈) 합", err)));
-        items.Add(Item("payable_matched", "미지급", "미지급금 · 그 뒤 지급", null, erp.MatchedPayable,
+        items.Add(InfoItem("payable_matched", "미지급", "미지급금 · 그 뒤 지급", erp.MatchedPayable,
             Join(info, "이관 뒤 이월잔액에 맞춘 지급 · 이관 매입 반품 합", err)));
-        items.Add(Item("payable_remaining", "미지급", "미지급금 · 남은 금액", null, erp.RemainingPayable,
+        items.Add(InfoItem("payable_remaining", "미지급", "미지급금 · 남은 금액", erp.RemainingPayable,
             Join(info, erp.NegativePayableCount > 0 ? $"남은 금액이 0보다 작은 거래처 {erp.NegativePayableCount:N0}곳" : null, err)));
         if (erp.NegativePayableCount > 0)
             warnings.Add(string.Format(CultureInfo.GetCultureInfo("ko-KR"), WarnNegativeRemaining, "미지급금", erp.NegativePayableCount));
