@@ -107,9 +107,15 @@ else
                 <MudTd Style="text-align:right">@context.Amount.ToString("N0")원</MudTd>
                 <MudTd>@context.PaymentMethodLabel</MudTd>
                 <MudTd>
+                    @* 20260915작1 3판 R4 — 이관 줄은 「이전 프로그램」 칩. 목록에서 빼지 않고 날짜순 그대로 이어 보인다.
+                         유형 이름은 지급 유형으로 가른다(이월잔액 지급도 RefOrderId 가 있어 종전엔 「매입전표」로 잘못 보였다). *@
+                    @if (CollectionPaymentLabels.IsMigrated(context.SourceType))
+                    {
+                        <MudChip T="string" Size="Size.Small" Color="Color.Default" Variant="Variant.Outlined">@CollectionPaymentLabels.MigratedChip</MudChip>
+                    }
                     @if (!string.IsNullOrEmpty(context.RefOrderId))
                     {
-                        <MudChip T="string" Size="Size.Small" Color="Color.Info" Variant="Variant.Outlined">매입전표</MudChip>
+                        <MudChip T="string" Size="Size.Small" Color="Color.Info" Variant="Variant.Outlined">@CollectionPaymentLabels.PaymentRefLabel(context.PaymentType)</MudChip>
                     }
                 </MudTd>
                 <MudTd>@context.Memo</MudTd>
@@ -129,6 +135,27 @@ else
         <MudText Typo="Typo.h6">@_dialogPartnerName 미지급 전표</MudText>
     </TitleContent>
     <DialogContent>
+        @* 20260915작1 3판 R4 — 이전 프로그램에서 넘어온 미지급금은 전표가 없다 → 한 줄로 보이고 여기서 바로 지급한다. *@
+        @if (_dialogLegacy is not null)
+        {
+            <MudPaper Elevation="0" Class="pa-3 mb-3" Style="background:#F0F9FF;border:0.5px solid #38BDF8;border-radius:8px">
+                <div class="d-flex align-center justify-space-between flex-wrap" style="gap:8px">
+                    <div>
+                        <MudText Typo="Typo.body1"><strong>@CollectionPaymentLabels.LegacyBalanceLabel</strong></MudText>
+                        <MudText Typo="Typo.body2" Style="color:#6B7280">
+                            기준일 @_dialogLegacy.BaseDate.ToString("yyyy-MM-dd")
+                            · 넘어온 미지급금 @_dialogLegacy.LegacyAmount.ToString("N0")원
+                            · 그 뒤 지급 @_dialogLegacy.MatchedAmount.ToString("N0")원
+                        </MudText>
+                    </div>
+                    <div class="d-flex align-center" style="gap:12px">
+                        <MudText Typo="Typo.body1">남은 금액 <strong style="color:#0F6E56">@_dialogLegacy.RemainingAmount.ToString("N0")원</strong></MudText>
+                        <MudButton Variant="Variant.Filled" Color="Color.Success" Size="Size.Small"
+                                   OnClick="OpenLegacyPayDialog">지급</MudButton>
+                    </div>
+                </div>
+            </MudPaper>
+        }
         <MudTable Items="_dialogDocs" Dense="true" Hover="true" T="PayableDocumentModel">
             <HeaderContent>
                 <MudTh Style="width:40px">
@@ -270,6 +297,39 @@ else
                 </MudItem>
             </MudGrid>
         }
+        else if (_targetLegacy is not null)
+        {
+            @* 20260915작1 3판 R4 — 이월잔액 지급. 남은 금액을 넘는지·기준일까지인지는 서버가 최종 판정하고, 그 문구를 그대로 띄운다. *@
+            <MudPaper Elevation="0" Class="pa-3 mb-3" Style="background:#F8FAFC;border:0.5px solid var(--mud-palette-lines-default);border-radius:8px">
+                <MudText Typo="Typo.body2" Style="color:#6B7280">거래처</MudText>
+                <MudText Typo="Typo.body1" Class="mb-2"><strong>@_dialogPartnerName</strong></MudText>
+                <MudText Typo="Typo.body2" Style="color:#6B7280">맞출 곳</MudText>
+                <MudText Typo="Typo.body1" Class="mb-2"><strong>@CollectionPaymentLabels.LegacyBalanceLabel</strong> (기준일 @_targetLegacy.BaseDate.ToString("yyyy-MM-dd"))</MudText>
+                <MudText Typo="Typo.body2" Style="color:#6B7280">남은 금액</MudText>
+                <MudText Typo="Typo.h6" Style="color:#0F6E56"><strong>@_targetLegacy.RemainingAmount.ToString("N0")원</strong></MudText>
+            </MudPaper>
+
+            <MudGrid Spacing="2">
+                <MudItem xs="12" sm="6">
+                    <MudNumericField T="decimal" Label="지급 금액" @bind-Value="_payAmount" Variant="Variant.Outlined" Margin="Margin.Dense" Format="N0" />
+                </MudItem>
+                <MudItem xs="12" sm="6">
+                    <MudDatePicker Label="지급일자" @bind-Date="_payDate" Variant="Variant.Outlined" Margin="Margin.Dense" />
+                </MudItem>
+                <MudItem xs="12" sm="6">
+                    <MudSelect T="string" Label="결제수단" @bind-Value="_payMethod" Variant="Variant.Outlined" Margin="Margin.Dense">
+                        <MudSelectItem Value="@("cash")">현금</MudSelectItem>
+                        <MudSelectItem Value="@("bank_transfer")">계좌이체</MudSelectItem>
+                        <MudSelectItem Value="@("card")">카드</MudSelectItem>
+                        <MudSelectItem Value="@("note")">어음</MudSelectItem>
+                        <MudSelectItem Value="@("check")">수표</MudSelectItem>
+                    </MudSelect>
+                </MudItem>
+                <MudItem xs="12">
+                    <MudTextField T="string" Label="메모(선택)" @bind-Value="_payMemo" Variant="Variant.Outlined" Margin="Margin.Dense" />
+                </MudItem>
+            </MudGrid>
+        }
     </DialogContent>
     <DialogActions>
         <MudButton OnClick="ClosePayDialog">취소</MudButton>
@@ -299,6 +359,10 @@ else
     private DateTime? _payDate = DateTime.Today;
     private string _payMethod = "cash";
     private string _payMemo = "";
+
+    // 20260915작1 3판 R4 — 이전 프로그램 이월잔액 (펼친 거래처 한 줄 · 지급 대상)
+    private LegacyBalanceRowModel? _dialogLegacy;
+    private LegacyBalanceRowModel? _targetLegacy;
 
     // 일괄 지급 처리
     private HashSet<string> _checkedDocIds = new();
@@ -362,7 +426,13 @@ else
             var headers = new[] { "지급일", "거래처", "지급액", "지급수단", "참조 전표", "비고" };
             var rows = _history.Select(p => (IReadOnlyList<object?>)new object?[]
             {
-                p.PaymentDate, p.PartnerName, p.Amount, p.PaymentMethodLabel, p.RefOrderId, p.Memo
+                p.PaymentDate, p.PartnerName, p.Amount, p.PaymentMethodLabel,
+                // 20260915작1 3판 R4 — 종전엔 내부 번호(RefOrderId)가 그대로 나갔다 → 화면 칩과 같은 말만(R-A6)
+                CollectionPaymentLabels.ExportText(
+                    CollectionPaymentLabels.IsMigrated(p.SourceType),
+                    !string.IsNullOrWhiteSpace(p.RefOrderId),
+                    CollectionPaymentLabels.PaymentRefLabel(p.PaymentType)),
+                p.Memo
             }).ToList();
 
             await GridExport.ExportExcelAsync("지급 이력", headers, rows, $"총 {rows.Count:N0}건");
@@ -398,6 +468,7 @@ else
         _dialogPartnerId = summary.PartnerId;
         _dialogPartnerName = summary.PartnerName;
         _dialogDocs = _payables.Documents.Where(d => d.PartnerId == summary.PartnerId).ToList();
+        _dialogLegacy = _payables.LegacyBalances.FirstOrDefault(l => l.PartnerId == summary.PartnerId);
         _checkedDocIds.Clear();
         _allChecked = false;
         _docsDialogVisible = true;
@@ -443,6 +514,7 @@ else
         {
             var targets = _dialogDocs.Where(d => _checkedDocIds.Contains(d.ReceiptId)).ToList();
             int success = 0, fail = 0;
+            string? firstError = null;
             foreach (var doc in targets)
             {
                 var model = new CreatePaymentModel
@@ -455,8 +527,10 @@ else
                     RefOrderId = doc.ReceiptId,
                     Memo = _bulkMemo
                 };
-                var ok = await CollSvc.CreatePaymentAsync(model);
-                if (ok) success++; else fail++;
+                // 20260915작1 3판 R4 — 실패 이유(서버 문구)를 버리지 않는다.
+                var result = await CollSvc.CreatePaymentWithMessageAsync(model);
+                if (result.Ok) success++;
+                else { fail++; firstError ??= $"{doc.ReceiptNo}: {result.ErrorMessage}"; }
             }
 
             if (fail == 0)
@@ -465,7 +539,7 @@ else
             }
             else
             {
-                Snackbar.Add($"{success}건 성공, {fail}건 실패.", Severity.Warning);
+                Snackbar.Add($"{success}건 성공, {fail}건 실패. {firstError}", Severity.Warning);
             }
             CloseBulkPayDialog();
             CloseDocsDialog();
@@ -480,6 +554,7 @@ else
     private void OpenPayDialog(PayableDocumentModel doc)
     {
         _targetDoc = doc;
+        _targetLegacy = null;   // 20260915작1 3판 R4 — 이월잔액 창을 닫지 않고 바꿔 열어도 섞이지 않게
         _payAmount = doc.Outstanding;
         _payDate = DateTime.Today;
         _payMethod = "cash";
@@ -491,10 +566,67 @@ else
     {
         _payDialogVisible = false;
         _targetDoc = null;
+        _targetLegacy = null;
+    }
+
+    /// <summary>20260915작1 3판 R4 — 이월잔액 지급 창. 금액 기본값 = 남은 금액.</summary>
+    private void OpenLegacyPayDialog()
+    {
+        if (_dialogLegacy is null) return;
+        _targetDoc = null;
+        _targetLegacy = _dialogLegacy;
+        _payAmount = _dialogLegacy.RemainingAmount;
+        _payDate = DateTime.Today;
+        _payMethod = "cash";
+        _payMemo = "";
+        _payDialogVisible = true;
+    }
+
+    /// <summary>
+    /// 20260915작1 3판 R4 — 이월잔액 지급 등록. PaymentType=legacy_balance · RefOrderId=거래처.
+    /// 🔴 남은 금액 초과·기준일까지 날짜·방향 검사는 서버가 한다 → 거절 문구를 그대로 띄운다(막는 것 ≠ 알려주는 것).
+    /// </summary>
+    private async Task ProcessLegacyPayAsync()
+    {
+        if (_targetLegacy is null) return;
+        if (_payAmount <= 0) { Snackbar.Add("지급 금액을 입력해주세요.", Severity.Warning); return; }
+
+        _processing = true;
+        try
+        {
+            var amount = _payAmount;
+            var model = new CreatePaymentModel
+            {
+                PartnerId = _dialogPartnerId,
+                PaymentDate = _payDate ?? DateTime.Today,
+                Amount = amount,
+                PaymentMethod = _payMethod,
+                PaymentType = CollectionPaymentLabels.LegacyBalanceRefType,
+                RefOrderId = _dialogPartnerId,
+                Memo = _payMemo
+            };
+            var result = await CollSvc.CreatePaymentWithMessageAsync(model);
+            if (result.Ok)
+            {
+                Snackbar.Add($"{amount:N0}원 지급 처리되었습니다 ({CollectionPaymentLabels.LegacyBalanceLabel}).", Severity.Success);
+                ClosePayDialog();
+                CloseDocsDialog();
+                await ReloadAsync();
+            }
+            else
+            {
+                Snackbar.Add(result.ErrorMessage ?? CollectionPaymentService.FallbackSaveError, Severity.Error);
+            }
+        }
+        finally
+        {
+            _processing = false;
+        }
     }
 
     private async Task ProcessPayAsync()
     {
+        if (_targetLegacy is not null) { await ProcessLegacyPayAsync(); return; }
         if (_targetDoc is null) return;
         if (_payAmount <= 0) { Snackbar.Add("지급 금액을 입력해주세요.", Severity.Warning); return; }
         if (_payAmount > _targetDoc.Outstanding) { Snackbar.Add("미지급 잔액보다 큰 금액은 처리할 수 없습니다.", Severity.Warning); return; }
@@ -512,8 +644,9 @@ else
                 RefOrderId = _targetDoc.ReceiptId,
                 Memo = _payMemo
             };
-            var ok = await CollSvc.CreatePaymentAsync(model);
-            if (ok)
+            // 20260915작1 3판 R4 — 서버 거절 문구를 그대로 띄운다(종전 bool 은 「실패했습니다」만 남겼다).
+            var result = await CollSvc.CreatePaymentWithMessageAsync(model);
+            if (result.Ok)
             {
                 Snackbar.Add($"{_payAmount:N0}원 지급 처리되었습니다.", Severity.Success);
                 ClosePayDialog();
@@ -522,7 +655,7 @@ else
             }
             else
             {
-                Snackbar.Add("지급 처리에 실패했습니다.", Severity.Error);
+                Snackbar.Add(result.ErrorMessage ?? "지급 처리에 실패했습니다.", Severity.Error);
             }
         }
         finally

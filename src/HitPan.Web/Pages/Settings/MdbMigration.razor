@@ -368,14 +368,21 @@
                     @if (recon.DiffCount == 0)
                     {
                         <MudAlert Severity="Severity.Success" Dense="true" Class="mb-3">
-                            @($"{recon.OkCount}/{recon.Items.Count} 항목 일치")
+                            @($"{recon.OkCount}/{recon.Items.Count} 항목 일치{ExplainedSuffix(recon)}")
                         </MudAlert>
                     }
                     else
                     {
                         <MudAlert Severity="Severity.Warning" Dense="true" Class="mb-3">
-                            @($"차이 {recon.DiffCount}건 — 아래 목록을 확인하세요 ({recon.OkCount}/{recon.Items.Count} 항목 일치)")
+                            @($"차이 {recon.DiffCount}건 — 아래 목록을 확인하세요 ({recon.OkCount}/{recon.Items.Count} 항목 일치{ExplainedSuffix(recon)})")
                         </MudAlert>
+                    }
+
+                    @* 20260915작1 3판 R4 — 재고 이어 계산 안내 줄(S1 · 항상 1줄). 서버 알림에 같은 말이 이미 있으면 두 번 띄우지 않는다. *@
+                    @if (RollForwardNoticeText(_migrationResult?.LegacyFinalStockRollForward) is { } rollNotice
+                         && !recon.Warnings.Any(w => w.Contains("이어 계산", StringComparison.Ordinal)))
+                    {
+                        <MudAlert Severity="Severity.Info" Dense="true" Class="mb-2">@rollNotice</MudAlert>
                     }
 
                     @* 20260915작1 갈래 C — 알림(덮어쓰기로 다시 가져오기 필요 등) · 장부 미반영 보관 화면 링크 *@
@@ -1134,7 +1141,8 @@
                     DailyReports = finalStatus.Result.DailyReports, // 작22 D: 일일보고서(레거시 메모) 잡 신설
                     Expenses = finalStatus.Result.Expenses, PurchaseOrdersFromIU = finalStatus.Result.PurchaseOrdersFromIU,
                     SalesOrdersFromIO = finalStatus.Result.SalesOrdersFromIO, TaxInvoices = finalStatus.Result.TaxInvoices,
-                    Bills = finalStatus.Result.Bills, CardPayments = finalStatus.Result.CardPayments, BankTransactions = finalStatus.Result.BankTransactions
+                    Bills = finalStatus.Result.Bills, CardPayments = finalStatus.Result.CardPayments, BankTransactions = finalStatus.Result.BankTransactions,
+                    LegacyFinalStockRollForward = finalStatus.Result.LegacyFinalStockRollForward // 20260915작1 3판 R4 — 재고 안내 줄
                 };
                 _migrationRows = new List<MigrationRow>
                 {
@@ -1275,10 +1283,24 @@
         return v == decimal.Truncate(v) ? v.ToString("N0") : v.ToString("N2");
     }
 
+    // 20260915작1 3판 R4 — 🆕 EXPLAINED(서버 R2 · 차이가 전부 사유로 설명됨) = 「사유 확인됨」.
+    //   차이 숫자는 숨기지 않는다 — 판정 칸만 파랑 정보 아이콘으로 가른다. INFO(정보 행)는 「참고」.
+    private const string ReconExplained = "EXPLAINED";
+    private const string ReconInfo = "INFO";
+
+    /// <summary>20260915작1 3판 R4 — 요약 줄에 「사유 확인됨 n」 을 붙인다(일치로 세지 않고 따로 보인다).</summary>
+    private static string ExplainedSuffix(ReconReport recon)
+    {
+        var n = recon.Items.Count(i => i.Status == ReconExplained);
+        return n > 0 ? $" · 사유 확인됨 {n}" : "";
+    }
+
     private static string GetReconIcon(string status) => status switch
     {
         "OK"   => Icons.Material.Filled.CheckCircle,
         "DIFF" => Icons.Material.Filled.Cancel,
+        ReconExplained => Icons.Material.Filled.FactCheck,
+        ReconInfo => Icons.Material.Filled.Info,
         _      => Icons.Material.Filled.Remove,
     };
 
@@ -1286,6 +1308,7 @@
     {
         "OK"   => Color.Success,
         "DIFF" => Color.Error,
+        ReconExplained => Color.Info,
         _      => Color.Default,
     };
 
@@ -1293,8 +1316,27 @@
     {
         "OK"   => "일치",
         "DIFF" => "차이",
+        ReconExplained => "사유 확인됨",
+        ReconInfo => "참고",
         _      => "—",
     };
+
+    /// <summary>
+    /// 20260915작1 3판 R4 — 재고 이어 계산 안내 줄(S1). 서버 <c>MdbLegacyFinalStock.RollForwardNotice</c> 와 같은 말.
+    /// 🔴 Web 은 Application 을 참조하지 않는다 → 문구를 여기 한 곳에 둔다({0}=개월 수).
+    /// </summary>
+    private const string RollForwardNoticeFormat = "최종재고 표 뒤 {0}개월은 거래명세서 입출고로 이어 계산했습니다. 창고이동 등 특수입출고는 반영되지 않았을 수 있습니다";
+
+    private static string? RollForwardNoticeText(RollForwardInfoModel? info)
+    {
+        if (info is null) return null;
+        var text = string.Format(System.Globalization.CultureInfo.InvariantCulture, RollForwardNoticeFormat, info.CarryMonths);
+        if (info.ZeroQtyAmountLines > 0)
+            text += $". 수량 없이 금액만 있던 줄 {info.ZeroQtyAmountLines:N0}건(금액 {FormatNumber(info.ZeroQtyAmount)}원)은 재고 금액에 넣지 않았습니다.";
+        else
+            text += ".";
+        return text;
+    }
 
     /// <summary>경과 초 1초 tick — Sticky 헤더 표시용 + 헌법 #26 v3 Y/n 다이얼로그.</summary>
     private async Task TickElapsedAsync(System.Threading.CancellationToken ct)
@@ -1486,6 +1528,19 @@
         public int CardPayments { get; set; }
         public int BankTransactions { get; set; }
         public int Total { get; set; }
+        /// <summary>20260915작1 3판 R4 — 서버 MdbMigrationResult.LegacyFinalStockRollForward(R3) 대응. 이어 계산했을 때만 값이 있다.</summary>
+        public RollForwardInfoModel? LegacyFinalStockRollForward { get; set; }
+    }
+
+    /// <summary>20260915작1 3판 R4 — 서버 MdbLegacyFinalStock.RollForwardInfo(R3) 대응.</summary>
+    private class RollForwardInfoModel
+    {
+        public string FromYm { get; set; } = "";
+        public string ToYm { get; set; } = "";
+        public int CarryMonths { get; set; }
+        public int MoveLines { get; set; }
+        public int ZeroQtyAmountLines { get; set; }
+        public decimal ZeroQtyAmount { get; set; }
     }
 
     /* ── 테이블 행 표시용 레코드 ── */
@@ -1512,7 +1567,7 @@
         public decimal? Legacy { get; set; }
         public decimal? Erp { get; set; }
         public decimal? Diff { get; set; }
-        public string Status { get; set; } = "NA"; // OK | DIFF | NA
+        public string Status { get; set; } = "NA"; // OK | DIFF | NA | EXPLAINED(20260915작1 3판 · 사유 확인됨)
         public string? Detail { get; set; }
     }
 
