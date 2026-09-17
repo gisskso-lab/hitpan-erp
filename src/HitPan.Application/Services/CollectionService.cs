@@ -31,7 +31,8 @@ public class CollectionService : ICollectionService
             SELECT c.collection_id AS CollectionId, c.partner_id AS PartnerId,
                    p.partner_name AS PartnerName, c.collection_date AS CollectionDate,
                    c.amount AS Amount, c.collection_method AS CollectionMethod,
-                   c.ref_doc_type AS RefDocType, c.ref_doc_id AS RefDocId, c.memo AS Memo
+                   c.ref_doc_type AS RefDocType, c.ref_doc_id AS RefDocId, c.memo AS Memo,
+                   c.source_type AS SourceType
             FROM collections c
             LEFT JOIN partners p ON p.partner_id = c.partner_id
             WHERE c.tenant_id = @TenantId AND c.is_active = 1
@@ -82,7 +83,8 @@ public class CollectionService : ICollectionService
                        SELECT c.collection_id AS CollectionId, c.partner_id AS PartnerId,
                               p.partner_name AS PartnerName, c.collection_date AS CollectionDate,
                               c.amount AS Amount, c.collection_method AS CollectionMethod,
-                              c.ref_doc_type AS RefDocType, c.ref_doc_id AS RefDocId, c.memo AS Memo
+                              c.ref_doc_type AS RefDocType, c.ref_doc_id AS RefDocId, c.memo AS Memo,
+                              c.source_type AS SourceType
                        {listWhere}
                        ORDER BY c.collection_date DESC, c.created_at DESC
                        LIMIT @Take OFFSET @Skip
@@ -127,6 +129,9 @@ public class CollectionService : ICollectionService
         var id = Guid.NewGuid().ToString();
         try
         {
+            // 🔴 20260915작1 3판 R1 (설계 §22 · P2 · P3) — 맞출 대상 검사. 같은 트랜잭션 · INSERT 앞 · 실패 = 400 고객 문구.
+            await EnsureCollectionTargetAllowedAsync(request, tenantId, tx, ct);
+
             await _db.ExecuteAsync(new CommandDefinition(
                 """
                 INSERT INTO collections
@@ -190,19 +195,33 @@ public class CollectionService : ICollectionService
     {
         await EnsureOpenAsync(ct);
         // 금액 조회 후 partner_balance 차감
-        var col = await _db.QueryFirstOrDefaultAsync<(string PartnerId, decimal Amount)>(new CommandDefinition(
-            "SELECT partner_id AS PartnerId, amount AS Amount FROM collections WHERE collection_id = @Id AND tenant_id = @TenantId AND is_active = 1",
+        // 20260915작1 3판 R1 — 역분개(날짜·결제수단)와 월마감(P4) 판정에 원 수금일·수단이 필요하다.
+        var col = await _db.QueryFirstOrDefaultAsync<(string PartnerId, decimal Amount, string Method, DateTime Date, string? SourceType)>(new CommandDefinition(
+            "SELECT partner_id AS PartnerId, amount AS Amount, collection_method AS Method, collection_date AS Date, source_type AS SourceType FROM collections WHERE collection_id = @Id AND tenant_id = @TenantId AND is_active = 1",
             new { Id = collectionId, TenantId = tenantId }, cancellationToken: ct));
 
         if (string.IsNullOrEmpty(col.PartnerId)) return;
+
+        // 🔴 20260915작1 3판 R1 (PM 후속 1) — 이관 수금은 partner_balance 에 기록되지 않았고(MdbMigrationService 이관) 레거시 줄은 빼지 않는다 → 삭제 거절.
+        if (string.Equals(col.SourceType, "migration", StringComparison.Ordinal))
+            throw new InvalidOperationException(MsgMigratedCollectionDelete);
+
+        // 🔴 P4 — 역분개 날짜 = 원 수금일. 그 달이 마감됐으면 삭제를 막는다(등록과 같은 문구).
+        await ApprovalTriggerHelper.EnsureNotClosedAsync(_db, tenantId, col.Date, ct);
 
         // 트랜잭션으로 비활성화 + 잔액 차감 원자적 처리
         using var tx = _db.BeginTransaction();
         try
         {
-            await _db.ExecuteAsync(new CommandDefinition(
-                "UPDATE collections SET is_active = 0, updated_at = NOW(6) WHERE collection_id = @Id AND tenant_id = @TenantId",
+            var affected = await _db.ExecuteAsync(new CommandDefinition(
+                "UPDATE collections SET is_active = 0, updated_at = NOW(6) WHERE collection_id = @Id AND tenant_id = @TenantId AND is_active = 1",
                 new { Id = collectionId, TenantId = tenantId }, transaction: tx, cancellationToken: ct));
+            if (affected == 0)
+            {
+                // 동시에 다른 요청이 먼저 지웠다 — 잔액·역분개를 두 번 하지 않는다.
+                tx.Rollback();
+                return;
+            }
 
             await _db.ExecuteAsync(new CommandDefinition(
                 """
@@ -212,6 +231,11 @@ public class CollectionService : ICollectionService
                 WHERE tenant_id = @TenantId AND partner_id = @PartnerId
                 """,
                 new { TenantId = tenantId, col.PartnerId, col.Amount }, transaction: tx, cancellationToken: ct));
+
+            // 🔴 20260915작1 3판 R1 (R-A5①) — 수금 취소 역분개. 같은 트랜잭션 · 원 수금일.
+            await AutoJournalHelper.RecordCollectionCancelAsync(
+                _db, tx, tenantId, collectionId, col.Date,
+                col.PartnerId, col.Amount, col.Method, null, ct);
 
             tx.Commit();
 
@@ -238,7 +262,8 @@ public class CollectionService : ICollectionService
             SELECT py.payment_id AS PaymentId, py.partner_id AS PartnerId,
                    p.partner_name AS PartnerName, py.payment_date AS PaymentDate,
                    py.amount AS Amount, py.payment_method AS PaymentMethod,
-                   py.payment_type AS PaymentType, py.ref_order_id AS RefOrderId, py.memo AS Memo
+                   py.payment_type AS PaymentType, py.ref_order_id AS RefOrderId, py.memo AS Memo,
+                   py.source_type AS SourceType
             FROM payments py
             LEFT JOIN partners p ON p.partner_id = py.partner_id
             WHERE py.tenant_id = @TenantId AND py.is_active = 1
@@ -266,6 +291,9 @@ public class CollectionService : ICollectionService
         var id = Guid.NewGuid().ToString();
         try
         {
+            // 🔴 20260915작1 3판 R1 (설계 §21·§22 · P2 · P3) — 맞출 대상 검사. 수금과 대칭.
+            await EnsurePaymentTargetAllowedAsync(request, tenantId, tx, ct);
+
             await _db.ExecuteAsync(new CommandDefinition(
                 """
                 INSERT INTO payments
@@ -326,18 +354,31 @@ public class CollectionService : ICollectionService
     public async Task DeletePaymentAsync(string paymentId, string tenantId, CancellationToken ct = default)
     {
         await EnsureOpenAsync(ct);
-        var pay = await _db.QueryFirstOrDefaultAsync<(string PartnerId, decimal Amount)>(new CommandDefinition(
-            "SELECT partner_id AS PartnerId, amount AS Amount FROM payments WHERE payment_id = @Id AND tenant_id = @TenantId AND is_active = 1",
+        // 20260915작1 3판 R1 — 역분개·월마감(P4)용 원 지급일·수단.
+        var pay = await _db.QueryFirstOrDefaultAsync<(string PartnerId, decimal Amount, string Method, DateTime Date, string? SourceType)>(new CommandDefinition(
+            "SELECT partner_id AS PartnerId, amount AS Amount, payment_method AS Method, payment_date AS Date, source_type AS SourceType FROM payments WHERE payment_id = @Id AND tenant_id = @TenantId AND is_active = 1",
             new { Id = paymentId, TenantId = tenantId }, cancellationToken: ct));
 
         if (string.IsNullOrEmpty(pay.PartnerId)) return;
 
+        // 🔴 20260915작1 3판 R1 (PM 후속 1) — 이관 지급 삭제 거절(수금과 같은 이유).
+        if (string.Equals(pay.SourceType, "migration", StringComparison.Ordinal))
+            throw new InvalidOperationException(MsgMigratedPaymentDelete);
+
+        // 🔴 P4 — 원 지급일의 달이 마감됐으면 삭제를 막는다.
+        await ApprovalTriggerHelper.EnsureNotClosedAsync(_db, tenantId, pay.Date, ct);
+
         using var tx = _db.BeginTransaction();
         try
         {
-            await _db.ExecuteAsync(new CommandDefinition(
-                "UPDATE payments SET is_active = 0, updated_at = NOW(6) WHERE payment_id = @Id AND tenant_id = @TenantId",
+            var affected = await _db.ExecuteAsync(new CommandDefinition(
+                "UPDATE payments SET is_active = 0, updated_at = NOW(6) WHERE payment_id = @Id AND tenant_id = @TenantId AND is_active = 1",
                 new { Id = paymentId, TenantId = tenantId }, transaction: tx, cancellationToken: ct));
+            if (affected == 0)
+            {
+                tx.Rollback();
+                return;
+            }
 
             await _db.ExecuteAsync(new CommandDefinition(
                 """
@@ -347,6 +388,11 @@ public class CollectionService : ICollectionService
                 WHERE tenant_id = @TenantId AND partner_id = @PartnerId
                 """,
                 new { TenantId = tenantId, pay.PartnerId, pay.Amount }, transaction: tx, cancellationToken: ct));
+
+            // 🔴 20260915작1 3판 R1 (R-A5①) — 지급 취소 역분개. 같은 트랜잭션 · 원 지급일.
+            await AutoJournalHelper.RecordPaymentCancelAsync(
+                _db, tx, tenantId, paymentId, pay.Date,
+                pay.PartnerId, pay.Amount, pay.Method, null, ct);
 
             tx.Commit();
 
@@ -450,7 +496,7 @@ public class CollectionService : ICollectionService
             (s, id, name) => { s.PartnerId = id; s.PartnerName = name; });
         summary = summary.OrderByDescending(s => s.Outstanding).ToList();
 
-        return new ReceivablesResponseDto { Summary = summary, Documents = docs };
+        return new ReceivablesResponseDto { Summary = summary, Documents = docs, LegacyBalances = ToLegacyRows(legacyRows, partnerNames) };
     }
 
     public async Task<PayablesResponseDto> GetPayablesAsync(string tenantId, CancellationToken ct = default)
@@ -539,61 +585,31 @@ public class CollectionService : ICollectionService
             (s, id, name) => { s.PartnerId = id; s.PartnerName = name; });
         summary = summary.OrderByDescending(s => s.Outstanding).ToList();
 
-        return new PayablesResponseDto { Summary = summary, Documents = docs };
+        return new PayablesResponseDto { Summary = summary, Documents = docs, LegacyBalances = ToLegacyRows(legacyRows, partnerNames) };
     }
 
     /// <summary>
     /// 20260915작1 갈래 E — 거래처별 「이전 프로그램 이월」 남은 금액.
     /// 미수: + 잔액 − 사람이 이관 명세서에 붙인 수금 · 미지급: − 잔액 절대값 − 사람이 이관 매입에 붙인 지급·반품. 0 이하 거래처는 뺀다.
     /// </summary>
+    /// <remarks>
+    /// 🔴 20260915작1 3판 R1 (설계 §20 #3·#4) — 식은 <see cref="LegacyBalanceMatching.ListAsync"/> 한 곳(M = 이월 매칭 수금·지급 + 갈래 E 호환분).
+    /// 화면 한 줄은 R &gt; 0 만. 갈래 E 의 옛 이월 식(이관 명세서·매입에 붙인 사람 수금·지급만 뺐다)은 이 공용 식의 E 호환분으로 옮겼다.
+    /// </remarks>
     private async Task<List<LegacyOutstandingRow>> GetLegacyOutstandingAsync(string tenantId, bool receivable, CancellationToken ct)
     {
-        const string receivableSql = """
-            SELECT plb.partner_id AS PartnerId,
-                   GREATEST(plb.balance_amount, 0) - IFNULL(c.amt, 0) AS Amount,
-                   plb.base_date AS BaseDate
-              FROM partner_legacy_balances plb
-              LEFT JOIN (
-                SELECT sd.partner_id, SUM(c.amount) AS amt
-                  FROM collections c
-                  JOIN sales_deliveries sd ON sd.delivery_id = c.ref_doc_id AND sd.tenant_id = c.tenant_id
-                 WHERE c.tenant_id = @TenantId AND c.is_active = 1 AND c.ref_doc_type = 'sales_delivery'
-                   AND COALESCE(c.source_type, '') <> 'migration'
-                   AND COALESCE(sd.source_type, '') = 'migration'
-                 GROUP BY sd.partner_id
-              ) c ON c.partner_id = plb.partner_id
-             WHERE plb.tenant_id = @TenantId
-               AND GREATEST(plb.balance_amount, 0) - IFNULL(c.amt, 0) > 0
-            """;
-        const string payableSql = """
-            SELECT plb.partner_id AS PartnerId,
-                   GREATEST(-plb.balance_amount, 0) - IFNULL(pay.amt, 0) - IFNULL(ret.amt, 0) AS Amount,
-                   plb.base_date AS BaseDate
-              FROM partner_legacy_balances plb
-              LEFT JOIN (
-                SELECT pr.partner_id, SUM(p.amount) AS amt
-                  FROM payments p
-                  JOIN purchase_receipts pr ON pr.receipt_id = p.ref_order_id AND pr.tenant_id = p.tenant_id
-                 WHERE p.tenant_id = @TenantId AND p.is_active = 1 AND p.payment_type = 'purchase'
-                   AND COALESCE(p.source_type, '') <> 'migration'
-                   AND COALESCE(pr.source_type, '') = 'migration'
-                 GROUP BY pr.partner_id
-              ) pay ON pay.partner_id = plb.partner_id
-              LEFT JOIN (
-                SELECT pr.partner_id, SUM(rti.supply_amount + rti.vat_amount) AS amt
-                  FROM purchase_returns rt
-                  JOIN purchase_return_items rti ON rti.return_id = rt.return_id AND rti.tenant_id = rt.tenant_id
-                  JOIN purchase_receipts pr ON pr.receipt_id = rt.receipt_id AND pr.tenant_id = rt.tenant_id
-                 WHERE rt.tenant_id = @TenantId AND rt.is_deleted = 0 AND rt.status = 'confirmed'
-                   AND COALESCE(pr.source_type, '') = 'migration'
-                 GROUP BY pr.partner_id
-              ) ret ON ret.partner_id = plb.partner_id
-             WHERE plb.tenant_id = @TenantId
-               AND GREATEST(-plb.balance_amount, 0) - IFNULL(pay.amt, 0) - IFNULL(ret.amt, 0) > 0
-            """;
-
-        return (await _db.QueryAsync<LegacyOutstandingRow>(new CommandDefinition(
-            receivable ? receivableSql : payableSql, new { TenantId = tenantId }, cancellationToken: ct))).ToList();
+        var matched = await LegacyBalanceMatching.ListAsync(_db, null, tenantId, receivable, ct);
+        return matched
+            .Where(r => r.RemainingAmount > 0m)
+            .Select(r => new LegacyOutstandingRow
+            {
+                PartnerId = r.PartnerId,
+                Amount = r.RemainingAmount,
+                BaseDate = r.BaseDate,
+                LegacyAmount = r.LegacyAmount,
+                MatchedAmount = r.MatchedAmount,
+            })
+            .ToList();
     }
 
     private static void MergeLegacyIntoSummary<TSummary>(
@@ -627,6 +643,125 @@ public class CollectionService : ICollectionService
         public string PartnerId { get; set; } = string.Empty;
         public decimal Amount { get; set; }
         public DateTime BaseDate { get; set; }
+        public decimal LegacyAmount { get; set; }
+        public decimal MatchedAmount { get; set; }
+    }
+
+    private static List<LegacyBalanceRowDto> ToLegacyRows(List<LegacyOutstandingRow> rows, IReadOnlyDictionary<string, string> partnerNames)
+        => rows.Select(r => new LegacyBalanceRowDto
+        {
+            PartnerId = r.PartnerId,
+            PartnerName = partnerNames.GetValueOrDefault(r.PartnerId, ""),
+            BaseDate = r.BaseDate,
+            LegacyAmount = r.LegacyAmount,
+            MatchedAmount = r.MatchedAmount,
+            RemainingAmount = r.Amount,
+        }).ToList();
+
+    // ═══════════════════════════════════════════
+    // 🔴 20260915작1 3판 R1 — 맞출 대상 서버 검사 (설계 §22 · §27 P2·P3)
+    // ═══════════════════════════════════════════
+
+    internal const string MsgMigratedCollectionDelete = "이전 프로그램에서 옮겨 온 수금은 삭제할 수 없습니다.";
+    internal const string MsgMigratedPaymentDelete = "이전 프로그램에서 옮겨 온 지급은 삭제할 수 없습니다.";
+    internal const string MsgNoDelivery = "맞출 거래명세서가 없습니다.";
+    internal const string MsgNoReceipt = "맞출 매입전표가 없습니다.";
+    internal const string MsgDeliveryOver = "이 거래명세서에 남은 받을 돈은 {0:N0}원입니다. 그보다 큰 금액은 맞출 수 없습니다.";
+    internal const string MsgReceiptOver = "이 매입전표에 남은 줄 돈은 {0:N0}원입니다. 그보다 큰 금액은 맞출 수 없습니다.";
+    internal const string MsgMigratedDelivery = "이전 프로그램에서 옮겨온 거래명세서입니다. 이 거래처의 받을 돈은 「" + LegacyBalanceMatching.Label + "」으로 맞춰 주세요.";
+    internal const string MsgMigratedReceipt = "이전 프로그램에서 옮겨온 매입전표입니다. 이 거래처의 줄 돈은 「" + LegacyBalanceMatching.Label + "」으로 맞춰 주세요.";
+
+    private static readonly System.Globalization.CultureInfo Ko = System.Globalization.CultureInfo.GetCultureInfo("ko-KR");
+
+    /// <summary>
+    /// 수금 등록 검사. ref = 이월잔액 → <see cref="LegacyBalanceMatching.EnsureMatchAllowedAsync"/> ·
+    /// ref = 거래명세서 → 행 잠금 뒤 (P3) 이월잔액 회사의 이관 명세서 거절 · (P2) 남은 금액 초과 거절. 그 밖(ref 없음 등)은 종전대로 검사 없음.
+    /// </summary>
+    private async Task EnsureCollectionTargetAllowedAsync(CreateCollectionRequest request, string tenantId, IDbTransaction tx, CancellationToken ct)
+    {
+        if (string.Equals(request.RefDocType, LegacyBalanceMatching.RefType, StringComparison.Ordinal))
+        {
+            await LegacyBalanceMatching.EnsureMatchAllowedAsync(_db, tx, tenantId, request.PartnerId, request.RefDocId,
+                request.Amount, request.CollectionDate, receivable: true, logger: null, ct);
+            return;
+        }
+
+        if (!string.Equals(request.RefDocType, "sales_delivery", StringComparison.Ordinal) || string.IsNullOrEmpty(request.RefDocId))
+            return;
+
+        var doc = await _db.QueryFirstOrDefaultAsync<TargetDoc>(new CommandDefinition(
+            $"""
+            SELECT sd.partner_id AS PartnerId, sd.total_amount + sd.vat_amount AS TotalWithVat,
+                   COALESCE(sd.source_type, '') = 'migration' AND {MdbLegacyPartnerBalance.HasLegacyBalanceSql} AS MigratedUnderLegacy
+              FROM sales_deliveries sd
+             WHERE sd.tenant_id = @TenantId AND sd.delivery_id = @RefId
+               AND sd.is_deleted = 0 AND sd.status IN ('confirmed', 'invoiced')
+             FOR UPDATE
+            """,
+            new { TenantId = tenantId, RefId = request.RefDocId }, transaction: tx, cancellationToken: ct));
+        if (doc is null || !string.Equals(doc.PartnerId, request.PartnerId, StringComparison.Ordinal))
+            throw new InvalidOperationException(MsgNoDelivery);
+        if (doc.MigratedUnderLegacy)
+            throw new InvalidOperationException(MsgMigratedDelivery);
+
+        var collected = await _db.ExecuteScalarAsync<decimal>(new CommandDefinition(
+            """
+            SELECT COALESCE(SUM(amount), 0) FROM collections
+             WHERE tenant_id = @TenantId AND is_active = 1 AND ref_doc_type = 'sales_delivery' AND ref_doc_id = @RefId
+            """,
+            new { TenantId = tenantId, RefId = request.RefDocId }, transaction: tx, cancellationToken: ct));
+        var remaining = doc.TotalWithVat - collected;
+        if (request.Amount > remaining)
+            throw new InvalidOperationException(string.Format(Ko, MsgDeliveryOver, Math.Max(remaining, 0m)));
+    }
+
+    /// <summary>지급 등록 검사 — 수금과 대칭. 매입전표 남은 금액 = 공급가+부가세 − 확정 반품 − 활성 매입 지급(<see cref="GetPayablesAsync"/> 와 같은 식).</summary>
+    private async Task EnsurePaymentTargetAllowedAsync(CreatePaymentRequest request, string tenantId, IDbTransaction tx, CancellationToken ct)
+    {
+        if (string.Equals(request.PaymentType, LegacyBalanceMatching.RefType, StringComparison.Ordinal))
+        {
+            await LegacyBalanceMatching.EnsureMatchAllowedAsync(_db, tx, tenantId, request.PartnerId, request.RefOrderId,
+                request.Amount, request.PaymentDate, receivable: false, logger: null, ct);
+            return;
+        }
+
+        if (!string.Equals(request.PaymentType, "purchase", StringComparison.Ordinal) || string.IsNullOrEmpty(request.RefOrderId))
+            return;
+
+        var doc = await _db.QueryFirstOrDefaultAsync<TargetDoc>(new CommandDefinition(
+            $"""
+            SELECT pr.partner_id AS PartnerId, pr.total_amount + pr.vat_amount AS TotalWithVat,
+                   COALESCE(pr.source_type, '') = 'migration' AND {MdbLegacyPartnerBalance.HasLegacyBalanceSql} AS MigratedUnderLegacy
+              FROM purchase_receipts pr
+             WHERE pr.tenant_id = @TenantId AND pr.receipt_id = @RefId AND pr.status = 'confirmed'
+             FOR UPDATE
+            """,
+            new { TenantId = tenantId, RefId = request.RefOrderId }, transaction: tx, cancellationToken: ct));
+        if (doc is null || !string.Equals(doc.PartnerId, request.PartnerId, StringComparison.Ordinal))
+            throw new InvalidOperationException(MsgNoReceipt);
+        if (doc.MigratedUnderLegacy)
+            throw new InvalidOperationException(MsgMigratedReceipt);
+
+        var used = await _db.ExecuteScalarAsync<decimal>(new CommandDefinition(
+            """
+            SELECT COALESCE((SELECT SUM(amount) FROM payments
+                              WHERE tenant_id = @TenantId AND is_active = 1 AND payment_type = 'purchase' AND ref_order_id = @RefId), 0)
+                 + COALESCE((SELECT SUM(rti.supply_amount + rti.vat_amount)
+                               FROM purchase_returns rt
+                               JOIN purchase_return_items rti ON rti.return_id = rt.return_id AND rti.tenant_id = rt.tenant_id
+                              WHERE rt.tenant_id = @TenantId AND rt.is_deleted = 0 AND rt.status = 'confirmed' AND rt.receipt_id = @RefId), 0)
+            """,
+            new { TenantId = tenantId, RefId = request.RefOrderId }, transaction: tx, cancellationToken: ct));
+        var remaining = doc.TotalWithVat - used;
+        if (request.Amount > remaining)
+            throw new InvalidOperationException(string.Format(Ko, MsgReceiptOver, Math.Max(remaining, 0m)));
+    }
+
+    private sealed class TargetDoc
+    {
+        public string PartnerId { get; set; } = string.Empty;
+        public decimal TotalWithVat { get; set; }
+        public bool MigratedUnderLegacy { get; set; }
     }
 
     private async Task EnsureOpenAsync(CancellationToken ct)

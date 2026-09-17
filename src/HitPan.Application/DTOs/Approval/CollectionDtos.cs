@@ -13,6 +13,8 @@ public class CollectionListDto
     public string? RefDocType { get; set; }
     public string? RefDocId { get; set; }
     public string? Memo { get; set; }
+    /// <summary>20260915작1 3판 R1 — 이관 줄이면 "migration"(화면 칩 「이전 프로그램」). 목록에서 빼지 않는다.</summary>
+    public string? SourceType { get; set; }
 }
 
 /// <summary>수금 등록 요청</summary>
@@ -40,6 +42,8 @@ public class PaymentListDto
     public string PaymentType { get; set; } = string.Empty;
     public string? RefOrderId { get; set; }
     public string? Memo { get; set; }
+    /// <summary>20260915작1 3판 R1 — 이관 줄이면 "migration"(화면 칩 「이전 프로그램」). 목록에서 빼지 않는다.</summary>
+    public string? SourceType { get; set; }
 }
 
 /// <summary>지급 등록 요청</summary>
@@ -90,6 +94,19 @@ public class ReceivablesResponseDto
 {
     public List<ReceivableSummaryDto> Summary { get; set; } = new();
     public List<ReceivableDocumentDto> Documents { get; set; } = new();
+    /// <summary>20260915작1 3판 R1 — 「이전 프로그램 이월잔액」 거래처별 한 줄(남은 금액 &gt; 0 만).</summary>
+    public List<LegacyBalanceRowDto> LegacyBalances { get; set; } = new();
+}
+
+/// <summary>20260915작1 3판 R1 — 거래처별 「이전 프로그램 이월잔액」 한 줄(기준일 · 이관 이월 · 그 뒤 수금·지급 · 남은 금액).</summary>
+public class LegacyBalanceRowDto
+{
+    public string PartnerId { get; set; } = string.Empty;
+    public string PartnerName { get; set; } = string.Empty;
+    public DateTime BaseDate { get; set; }
+    public decimal LegacyAmount { get; set; }
+    public decimal MatchedAmount { get; set; }
+    public decimal RemainingAmount { get; set; }
 }
 
 /// <summary>거래처별 미지급금 요약 (지급 메뉴 상단 표)</summary>
@@ -124,4 +141,6 @@ public class PayablesResponseDto
 {
     public List<PayableSummaryDto> Summary { get; set; } = new();
     public List<PayableDocumentDto> Documents { get; set; } = new();
+    /// <summary>20260915작1 3판 R1 — 「이전 프로그램 이월잔액」 거래처별 한 줄(남은 금액 &gt; 0 만).</summary>
+    public List<LegacyBalanceRowDto> LegacyBalances { get; set; } = new();
 }
