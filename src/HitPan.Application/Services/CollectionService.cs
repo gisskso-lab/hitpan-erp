@@ -12,12 +12,30 @@ public class CollectionService : ICollectionService
 {
     private readonly IDbConnection _db;
     private readonly IAuditService _audit;
+    private readonly IBinlogSafetyProbe? _probe;
 
-    public CollectionService(IDbConnection db, IAuditService audit)
+    /// <param name="probe">
+    /// 🔴 20260920작1 S1 — 서버 설정 판정기(설계 §3). <b>선택 인자</b>라 기존 호출자·게이트는 그대로 돈다(#1).
+    /// 안 넘기면 3판과 똑같이 READ COMMITTED 경로로만 간다 — <c>binlog_format=STATEMENT</c> 서버에서는 등록이 1665 로 막히므로
+    /// <b>운영 DI 는 반드시 등록한다</b>(<c>src/HitPan.API/Program.cs</c>).
+    /// </param>
+    public CollectionService(IDbConnection db, IAuditService audit, IBinlogSafetyProbe? probe = null)
     {
         _db = db;
         _audit = audit;
+        _probe = probe;
     }
+
+    // ── 🔴 20260920작1 S1 재시도 상수 한 곳 (작지 §8 · PM 승인 A-5) ──
+    /// <summary>총 시도 횟수(원 1 + 재시도 2).</summary>
+    private const int MatchTxMaxAttempts = 3;
+    /// <summary>재시도 대기(ms) — 시도 순서대로. 체감 상한 약 0.5초.</summary>
+    private static readonly int[] MatchTxBackoffMs = { 50, 150 };
+    /// <summary>같은 순간에 깨어나 또 부딪히지 않게 하는 지터 상한(ms).</summary>
+    private const int MatchTxJitterMaxMs = 50;
+
+    /// <summary>재시도로 삼킬 수 있는 오류만(설계 §4-3) — 교착 · 잠금 대기 초과 · 낡은 판정으로 RC 에 들어갔을 때의 1665.</summary>
+    private static readonly int[] MatchTxRetryableErrors = { 1213, 1205, 1665 };
 
     // ═══════════════════════════════════════════
     // 수금 (거래처에서 받은 돈)
@@ -129,12 +147,14 @@ public class CollectionService : ICollectionService
         // 월마감 체크
         await ApprovalTriggerHelper.EnsureNotClosedAsync(_db, tenantId, request.CollectionDate, ct);
         // 🔴 R1b PM 후속 2 (병렬이슈44) — READ COMMITTED: 거래처 잠금 뒤 R·명세서 남은 금액을 최신 커밋으로 판정 · 다른 거래처와 틈 잠금 교착 없음.
-        using var tx = _db.BeginTransaction(LegacyBalanceMatching.MatchIsolation);
+        // 🔴 20260920작1 S1 (설계 §2·§4-3) — binlog_format=STATEMENT 서버는 RC 쓰기가 1665 로 거절된다 → 판정해서 RR 경로로 간다.
+        //   두 경로의 정확성 계약은 같고(잠금 읽기), 교착은 재시도 껍질이 삼킨다. 감사로그는 껍질 밖이다.
         var id = Guid.NewGuid().ToString();
-        try
+        var mode = await ResolveMatchModeAsync(ct);
+        await RunMatchTxAsync(mode, async (tx, ct2) =>
         {
             // 🔴 20260915작1 3판 R1 (설계 §22 · P2 · P3) — 맞출 대상 검사. 같은 트랜잭션 · INSERT 앞 · 실패 = 400 고객 문구.
-            await EnsureCollectionTargetAllowedAsync(request, tenantId, tx, ct);
+            await EnsureCollectionTargetAllowedAsync(request, tenantId, tx, ct2);
 
             await _db.ExecuteAsync(new CommandDefinition(
                 """
@@ -157,7 +177,7 @@ public class CollectionService : ICollectionService
                     request.RefDocId,
                     request.Memo,
                     UserId = userId
-                }, transaction: tx, cancellationToken: ct));
+                }, transaction: tx, cancellationToken: ct2));
 
             // partner_balance 수금 반영
             await _db.ExecuteAsync(new CommandDefinition(
@@ -170,7 +190,7 @@ public class CollectionService : ICollectionService
                   total_receipt = total_receipt + @Amount,
                   last_updated_at = NOW(6)
                 """,
-                new { TenantId = tenantId, request.PartnerId, request.Amount }, transaction: tx, cancellationToken: ct));
+                new { TenantId = tenantId, request.PartnerId, request.Amount }, transaction: tx, cancellationToken: ct2));
 
             // 🔴 20260827작4 (사장님 오더 "모든 돈의 흐름을 회계장부 하나로") — 수금 자동기표.
             //   차변 현금·보통예금 / 대변 외상매출금.
@@ -178,21 +198,17 @@ public class CollectionService : ICollectionService
             //     기표가 실패하면 수금 저장도 함께 롤백된다(정합성 우선, 헌법 #20 아래 #42).
             await AutoJournalHelper.RecordCollectionAsync(
                 _db, tx, tenantId, id, request.CollectionDate,
-                request.PartnerId, request.Amount, request.CollectionMethod, userId, ct);
+                request.PartnerId, request.Amount, request.CollectionMethod, userId, ct2);
 
             tx.Commit();
-
-            // 감사로그 — 수금 생성
-            var afterJson = $"{{\"partner_id\":\"{request.PartnerId}\",\"date\":\"{request.CollectionDate:yyyy-MM-dd}\",\"amount\":{request.Amount},\"method\":\"{request.CollectionMethod}\"}}";
-            await _audit.LogAsync("create", "collection", id, afterJson: afterJson, ct: ct);
-
             return id;
-        }
-        catch (Exception)
-        {
-            try { tx.Rollback(); } catch (Exception rbex) { Console.Error.WriteLine($"[CollectionService] rollback failed: {rbex.Message}"); }
-            throw;
-        }
+        }, "수금", ct);
+
+        // 감사로그 — 수금 생성. 🔴 20260920작1 S1 — 커밋 뒤 · 재시도 껍질 **밖**(재시도에 안 섞인다).
+        var afterJson = $"{{\"partner_id\":\"{request.PartnerId}\",\"date\":\"{request.CollectionDate:yyyy-MM-dd}\",\"amount\":{request.Amount},\"method\":\"{request.CollectionMethod}\"}}";
+        await _audit.LogAsync("create", "collection", id, afterJson: afterJson, ct: ct);
+
+        return id;
     }
 
     public async Task DeleteCollectionAsync(string collectionId, string tenantId, CancellationToken ct = default)
@@ -298,12 +314,13 @@ public class CollectionService : ICollectionService
         EnsureAmountValid(request.Amount);
         await ApprovalTriggerHelper.EnsureNotClosedAsync(_db, tenantId, request.PaymentDate, ct);
         // 🔴 R1b PM 후속 2 (병렬이슈44) — 수금과 같다.
-        using var tx = _db.BeginTransaction(LegacyBalanceMatching.MatchIsolation);
+        // 🔴 20260920작1 S1 — 경로 판정·재시도 껍질도 수금과 같다(설계 §2·§4-3).
         var id = Guid.NewGuid().ToString();
-        try
+        var mode = await ResolveMatchModeAsync(ct);
+        await RunMatchTxAsync(mode, async (tx, ct2) =>
         {
             // 🔴 20260915작1 3판 R1 (설계 §21·§22 · P2 · P3) — 맞출 대상 검사. 수금과 대칭.
-            await EnsurePaymentTargetAllowedAsync(request, tenantId, tx, ct);
+            await EnsurePaymentTargetAllowedAsync(request, tenantId, tx, ct2);
 
             await _db.ExecuteAsync(new CommandDefinition(
                 """
@@ -326,7 +343,7 @@ public class CollectionService : ICollectionService
                     request.RefOrderId,
                     request.Memo,
                     UserId = userId
-                }, transaction: tx, cancellationToken: ct));
+                }, transaction: tx, cancellationToken: ct2));
 
             // partner_balance 지급 반영
             await _db.ExecuteAsync(new CommandDefinition(
@@ -339,27 +356,23 @@ public class CollectionService : ICollectionService
                   total_payment = total_payment + @Amount,
                   last_updated_at = NOW(6)
                 """,
-                new { TenantId = tenantId, request.PartnerId, request.Amount }, transaction: tx, cancellationToken: ct));
+                new { TenantId = tenantId, request.PartnerId, request.Amount }, transaction: tx, cancellationToken: ct2));
 
             // 🔴 20260827작4 — 지급 자동기표. 차변 외상매입금 / 대변 현금·보통예금.
             //   수금(RecordCollectionAsync)의 정확한 반대. 같은 트랜잭션 안이다.
             await AutoJournalHelper.RecordPaymentAsync(
                 _db, tx, tenantId, id, request.PaymentDate,
-                request.PartnerId, request.Amount, request.PaymentMethod, userId, ct);
+                request.PartnerId, request.Amount, request.PaymentMethod, userId, ct2);
 
             tx.Commit();
-
-            // 감사로그 — 지급 생성
-            var afterJson = $"{{\"partner_id\":\"{request.PartnerId}\",\"date\":\"{request.PaymentDate:yyyy-MM-dd}\",\"amount\":{request.Amount},\"method\":\"{request.PaymentMethod}\"}}";
-            await _audit.LogAsync("create", "payment", id, afterJson: afterJson, ct: ct);
-
             return id;
-        }
-        catch (Exception)
-        {
-            try { tx.Rollback(); } catch (Exception rbex) { Console.Error.WriteLine($"[CollectionService] rollback failed: {rbex.Message}"); }
-            throw;
-        }
+        }, "지급", ct);
+
+        // 감사로그 — 지급 생성. 🔴 20260920작1 S1 — 커밋 뒤 · 재시도 껍질 밖.
+        var afterJson = $"{{\"partner_id\":\"{request.PartnerId}\",\"date\":\"{request.PaymentDate:yyyy-MM-dd}\",\"amount\":{request.Amount},\"method\":\"{request.PaymentMethod}\"}}";
+        await _audit.LogAsync("create", "payment", id, afterJson: afterJson, ct: ct);
+
+        return id;
     }
 
     public async Task DeletePaymentAsync(string paymentId, string tenantId, CancellationToken ct = default)
@@ -685,6 +698,10 @@ public class CollectionService : ICollectionService
     internal const string MsgMigratedDelivery = "이전 프로그램에서 옮겨온 거래명세서입니다. 이 거래처의 받을 돈은 「" + LegacyBalanceMatching.Label + "」으로 맞춰 주세요.";
     internal const string MsgMigratedReceipt = "이전 프로그램에서 옮겨온 매입전표입니다. 이 거래처의 줄 돈은 「" + LegacyBalanceMatching.Label + "」으로 맞춰 주세요.";
 
+    // 🔴 20260920작1 S1 — 재시도 소진 문구(고객어 · 개발용어 금지 #23 · 작지 §8 상수 한 곳).
+    internal const string MsgMatchBusyCollection = "지금 다른 사용자가 같은 거래처의 수금을 처리하고 있습니다. 잠시 후 다시 저장해 주세요.";
+    internal const string MsgMatchBusyPayment = "지금 다른 사용자가 같은 거래처의 지급을 처리하고 있습니다. 잠시 후 다시 저장해 주세요.";
+
     private static readonly System.Globalization.CultureInfo Ko = System.Globalization.CultureInfo.GetCultureInfo("ko-KR");
 
     // ═══════════════════════════════════════════
@@ -754,9 +771,12 @@ public class CollectionService : ICollectionService
     /// </summary>
     private async Task EnsureCollectionTargetAllowedAsync(CreateCollectionRequest request, string tenantId, IDbTransaction tx, CancellationToken ct)
     {
+        // 🔴 20260920작1 S1 — 모드는 **열려 있는 트랜잭션에서** 읽는다(재시도로 모드가 바뀌어도 어긋날 수 없다).
+        var mode = LegacyBalanceMatching.ModeOf(tx);
+
         if (string.Equals(request.RefDocType, LegacyBalanceMatching.RefType, StringComparison.Ordinal))
         {
-            await LegacyBalanceMatching.EnsureMatchAllowedAsync(_db, tx, tenantId, request.PartnerId, request.RefDocId,
+            await LegacyBalanceMatching.EnsureMatchAllowedAsync(_db, tx, mode, tenantId, request.PartnerId, request.RefDocId,
                 request.Amount, request.CollectionDate, receivable: true, logger: null, ct);
             return;
         }
@@ -779,10 +799,13 @@ public class CollectionService : ICollectionService
         if (doc.MigratedUnderLegacy)
             throw new InvalidOperationException(MsgMigratedDelivery);
 
+        // 🔴 20260920작1 S1 · D1 (설계 §4-4) — RR 경로에서는 이 합도 잠금 읽기여야 한다.
+        //   RR 은 앞선 일반 읽기의 스냅숏을 보므로, 전표 행을 FOR UPDATE 로 잡고도 **옛 합**으로 판정해
+        //   같은 명세서에 동시 수금이 들어오면 합이 전표금액을 넘어도 통과한다. RC 경로는 꼬리절이 빈 문자열 = 3판 그대로.
         var collected = await _db.ExecuteScalarAsync<decimal>(new CommandDefinition(
-            """
+            $"""
             SELECT COALESCE(SUM(amount), 0) FROM collections
-             WHERE tenant_id = @TenantId AND is_active = 1 AND ref_doc_type = 'sales_delivery' AND ref_doc_id = @RefId
+             WHERE tenant_id = @TenantId AND is_active = 1 AND ref_doc_type = 'sales_delivery' AND ref_doc_id = @RefId{LegacyBalanceMatching.LockTailFor(mode)}
             """,
             new { TenantId = tenantId, RefId = request.RefDocId }, transaction: tx, cancellationToken: ct));
         var remaining = doc.TotalWithVat - collected;
@@ -793,9 +816,12 @@ public class CollectionService : ICollectionService
     /// <summary>지급 등록 검사 — 수금과 대칭. 매입전표 남은 금액 = 공급가+부가세 − 확정 반품 − 활성 매입 지급(<see cref="GetPayablesAsync"/> 와 같은 식).</summary>
     private async Task EnsurePaymentTargetAllowedAsync(CreatePaymentRequest request, string tenantId, IDbTransaction tx, CancellationToken ct)
     {
+        // 🔴 20260920작1 S1 — 수금과 같다.
+        var mode = LegacyBalanceMatching.ModeOf(tx);
+
         if (string.Equals(request.PaymentType, LegacyBalanceMatching.RefType, StringComparison.Ordinal))
         {
-            await LegacyBalanceMatching.EnsureMatchAllowedAsync(_db, tx, tenantId, request.PartnerId, request.RefOrderId,
+            await LegacyBalanceMatching.EnsureMatchAllowedAsync(_db, tx, mode, tenantId, request.PartnerId, request.RefOrderId,
                 request.Amount, request.PaymentDate, receivable: false, logger: null, ct);
             return;
         }
@@ -817,16 +843,25 @@ public class CollectionService : ICollectionService
         if (doc.MigratedUnderLegacy)
             throw new InvalidOperationException(MsgMigratedReceipt);
 
-        var used = await _db.ExecuteScalarAsync<decimal>(new CommandDefinition(
-            """
-            SELECT COALESCE((SELECT SUM(amount) FROM payments
-                              WHERE tenant_id = @TenantId AND is_active = 1 AND payment_type = 'purchase' AND ref_order_id = @RefId), 0)
-                 + COALESCE((SELECT SUM(rti.supply_amount + rti.vat_amount)
-                               FROM purchase_returns rt
-                               JOIN purchase_return_items rti ON rti.return_id = rt.return_id AND rti.tenant_id = rt.tenant_id
-                              WHERE rt.tenant_id = @TenantId AND rt.is_deleted = 0 AND rt.status = 'confirmed' AND rt.receipt_id = @RefId), 0)
+        // 🔴 20260920작1 S1b ㉲ (작지 §12 · PM 결재 B-3) — 스칼라 하위질의 2개를 **직접 문장 2개**로 나눈다.
+        //   S1 이 실측한 모양(수금 쪽 단일 직접 문장)과 같은 모양으로 맞춘다 — 모양이 하나면 다음 사람이 둘을 비교할 일이 없다.
+        //   ⚠️ 실측 기록: 합친 모양(스칼라 하위질의)도 STATEMENT 서버 RR 에서 **최신을 읽었다**(S1b §8-1-2 · 18,300). 「같은 함정」 의심은 성립하지 않았다.
+        //   한 연결·순차다 — `Task.WhenAll` 도, 새 연결도 아니다(#16). RC 경로는 꼬리절이 빈 문자열 = 3판 그대로.
+        var paid = await _db.ExecuteScalarAsync<decimal>(new CommandDefinition(
+            $"""
+            SELECT COALESCE(SUM(amount), 0) FROM payments
+             WHERE tenant_id = @TenantId AND is_active = 1 AND payment_type = 'purchase' AND ref_order_id = @RefId{LegacyBalanceMatching.LockTailFor(mode)}
             """,
             new { TenantId = tenantId, RefId = request.RefOrderId }, transaction: tx, cancellationToken: ct));
+        var returned = await _db.ExecuteScalarAsync<decimal>(new CommandDefinition(
+            $"""
+            SELECT COALESCE(SUM(rti.supply_amount + rti.vat_amount), 0)
+              FROM purchase_returns rt
+              JOIN purchase_return_items rti ON rti.return_id = rt.return_id AND rti.tenant_id = rt.tenant_id
+             WHERE rt.tenant_id = @TenantId AND rt.is_deleted = 0 AND rt.status = 'confirmed' AND rt.receipt_id = @RefId{LegacyBalanceMatching.LockTailFor(mode)}
+            """,
+            new { TenantId = tenantId, RefId = request.RefOrderId }, transaction: tx, cancellationToken: ct));
+        var used = paid + returned;
         var remaining = doc.TotalWithVat - used;
         if (request.Amount > remaining)
             throw new InvalidOperationException(string.Format(Ko, MsgReceiptOver, Math.Max(remaining, 0m)));
@@ -837,6 +872,80 @@ public class CollectionService : ICollectionService
         public string PartnerId { get; set; } = string.Empty;
         public decimal TotalWithVat { get; set; }
         public bool MigratedUnderLegacy { get; set; }
+    }
+
+    /// <summary>
+    /// 🔴 20260920작1 S1 (설계 §3) — 이 서버에서 쓸 매칭 모드. 판정기가 없으면 3판 그대로 RC.
+    /// 판정 실패는 판정기 안에서 삼키지 않고 경고를 남긴 뒤 RR 로 돌아온다 — 판정이 등록을 막지 않는다(#20).
+    /// </summary>
+    private async Task<LegacyMatchMode> ResolveMatchModeAsync(CancellationToken ct)
+    {
+        if (_probe is null) return LegacyMatchMode.ReadCommittedFresh;
+        return await _probe.GetModeAsync(_db, null, ct);
+    }
+
+    /// <summary>
+    /// 🔴 20260920작1 S1 (설계 §4-3) — 이월잔액 매칭 등록 트랜잭션의 얇은 재시도 껍질.
+    /// <list type="bullet">
+    /// <item><b>범위 = 트랜잭션 통째.</b> 부분 재개는 INSERT·partner_balance·자동기표의 이중 반영이 된다.</item>
+    /// <item>재시도는 <see cref="MatchTxRetryableErrors"/> 뿐. <see cref="InvalidOperationException"/>(고객 문구 거절)에는 <b>절대 걸지 않는다</b> — 거절을 재시도로 뒤집으면 잔액이 틀어진다.</item>
+    /// <item>1665 = 판정이 낡았다는 뜻 → 캐시를 버리고 다시 판정한 모드로 연다.</item>
+    /// <item>본문은 <see cref="LegacyBalanceMatching.ModeOf"/> 로 <b>실제 트랜잭션에서</b> 모드를 읽는다 → 껍질이 모드를 바꿔도 어긋날 수 없다.</item>
+    /// <item>커밋 뒤의 감사로그는 <b>껍질 밖</b>이다(재시도에 안 섞인다).</item>
+    /// </list>
+    /// </summary>
+    private async Task<T> RunMatchTxAsync<T>(LegacyMatchMode mode,
+        Func<IDbTransaction, CancellationToken, Task<T>> body, string what, CancellationToken ct)
+    {
+        var current = mode;
+        for (var attempt = 1; ; attempt++)
+        {
+            using var tx = _db.BeginTransaction(LegacyBalanceMatching.IsolationFor(current));
+            try
+            {
+                // 본문이 커밋까지 한다(커밋 실패도 재시도 대상이다).
+                return await body(tx, ct);
+            }
+            catch (Exception ex)
+            {
+                try { tx.Rollback(); } catch (Exception rbex) { Console.Error.WriteLine($"[CollectionService] rollback failed: {rbex.Message}"); }
+
+                if (!TryGetRetryableErrno(ex, out var errno)) throw;
+
+                if (errno == 1665)
+                {
+                    // 서버 설정이 바뀌었거나 판정이 낡았다 — 캐시를 버리고 다시 판정한다.
+                    _probe?.Invalidate();
+                    current = await ResolveMatchModeAsync(ct);
+                }
+
+                if (attempt >= MatchTxMaxAttempts)
+                {
+                    Console.Error.WriteLine($"[CollectionService] {what} 매칭 트랜잭션 재시도 소진 attempts={attempt} errno={errno} mode={current}");
+                    throw new InvalidOperationException(
+                        string.Equals(what, "지급", StringComparison.Ordinal) ? MsgMatchBusyPayment : MsgMatchBusyCollection, ex);
+                }
+
+                Console.Error.WriteLine($"[CollectionService] {what} 매칭 트랜잭션 재시도 attempt={attempt} errno={errno} mode={current}");
+                var waitMs = MatchTxBackoffMs[Math.Min(attempt, MatchTxBackoffMs.Length) - 1] + Random.Shared.Next(0, MatchTxJitterMaxMs + 1);
+                await Task.Delay(waitMs, ct);
+            }
+        }
+    }
+
+    /// <summary>재시도 화이트리스트 판정 — 감싸인 예외까지 훑는다. 목록에 없으면 그대로 올린다.</summary>
+    private static bool TryGetRetryableErrno(Exception ex, out int errno)
+    {
+        for (Exception? e = ex; e is not null; e = e.InnerException)
+        {
+            if (e is MySqlConnector.MySqlException my && Array.IndexOf(MatchTxRetryableErrors, my.Number) >= 0)
+            {
+                errno = my.Number;
+                return true;
+            }
+        }
+        errno = 0;
+        return false;
     }
 
     private async Task EnsureOpenAsync(CancellationToken ct)

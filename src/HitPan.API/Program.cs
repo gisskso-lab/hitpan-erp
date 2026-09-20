@@ -200,6 +200,11 @@ builder.Services.AddScoped<IReportService, ReportService>();
 builder.Services.AddScoped<IApprovalService, ApprovalService>();
 // 작(2026-08-24) 작2 [4] — 전자 퇴직서(사직서). 사장님: "전자근로계약서 = 입사/퇴사 로 메뉴변경"
 builder.Services.AddScoped<IResignationService, ResignationService>();
+// 🔴 20260920작1 S1 (작지 §8 · 설계 §3) — 이월잔액 매칭 경로 판정기. 프로세스 값 1개 + TTL 이므로 **싱글턴**이다.
+//   이 등록이 빠지면 CollectionService 는 3판과 같이 READ COMMITTED 로만 가고,
+//   binlog_format=STATEMENT 서버에서 수금·지급 등록이 ERROR 1665 로 막힌다(#20). appsettings 무접촉(#21).
+//   생성자가 선택 인자(ttl·clock)뿐이라 컨테이너 추론에 맡기지 않고 **명시 팩터리**로 만든다.
+builder.Services.AddSingleton<IBinlogSafetyProbe>(_ => new BinlogSafetyProbe());
 builder.Services.AddScoped<ICollectionService, CollectionService>();
 builder.Services.AddScoped<IMonthlyClosingService, MonthlyClosingService>();
 builder.Services.AddScoped<IFinanceService, FinanceService>();
