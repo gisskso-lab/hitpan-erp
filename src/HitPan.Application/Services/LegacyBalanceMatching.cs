@@ -192,28 +192,50 @@ public static class LegacyBalanceMatching
     /// 거래처 하나의 이월잔액 행을 <c>FOR UPDATE</c> 로 잠그고 R 을 다시 계산한다. 행이 없으면 null.
     /// 같은 거래처의 동시 이월 매칭은 이 잠금에서 줄을 선다.
     /// </summary>
-    public static async Task<Remaining?> GetForUpdateAsync(IDbConnection db, IDbTransaction tx, string tenantId, string partnerId, bool receivable, CancellationToken ct)
+    /// <inheritdoc cref="GetForUpdateAsync(IDbConnection, IDbTransaction, LegacyMatchMode, string, string, bool, CancellationToken)"/>
+    /// <remarks>
+    /// 🔴 20260920작1 S1 — 모드를 안 넘기는 <b>기존 호출자 호환</b> 오버로드(RC 경로 고정 · 헌법 #1 기존 시그니처 유지).
+    /// 새 코드는 모드를 선언하는 쪽을 쓴다. 동작은 3판과 한 글자도 다르지 않다.
+    /// </remarks>
+    public static Task<Remaining?> GetForUpdateAsync(IDbConnection db, IDbTransaction tx, string tenantId, string partnerId, bool receivable, CancellationToken ct)
+        => GetForUpdateAsync(db, tx, LegacyMatchMode.ReadCommittedFresh, tenantId, partnerId, receivable, ct);
+
+    public static async Task<Remaining?> GetForUpdateAsync(IDbConnection db, IDbTransaction tx, LegacyMatchMode mode,
+        string tenantId, string partnerId, bool receivable, CancellationToken ct)
     {
         // 🔴 20260915작1 3판 R1b (병렬이슈44 · PM 후속 2) — R 재계산은 문장마다 최신 커밋을 보는 READ COMMITTED 트랜잭션에서만.
         //   REPEATABLE READ 면 같은 트랜잭션의 앞선 일반 읽기 스냅숏으로 옛 R 을 판정한다 → 호출자 실수를 조용히 넘기지 않고 막는다.
-        if (tx.IsolationLevel != MatchIsolation)
-            throw new NotSupportedException($"[LegacyBalanceMatching] 이월잔액 매칭 트랜잭션은 {MatchIsolation} 로 열어야 한다(현재 {tx.IsolationLevel}).");
+        // 🔴 20260920작1 S1 (설계 §5) — 격리수준을 느슨하게 푸는 게 아니라 **모드를 선언받는다.**
+        //   RR 모드는 잠금 읽기(아래 꼬리절)와 한 몸이므로 「RR 로 열고 일반 읽기로 판정」은 코드로 표현할 수 없다.
+        //   Serializable·ReadUncommitted·Unspecified 는 어느 모드로도 통과 못 한다.
+        var expected = IsolationFor(mode);
+        if (tx.IsolationLevel != expected)
+            throw new NotSupportedException($"[LegacyBalanceMatching] 이월잔액 매칭 트랜잭션은 {mode} 모드에서 {expected} 로 열어야 한다(현재 {tx.IsolationLevel}).");
 
         var locked = await db.QueryFirstOrDefaultAsync<string>(new CommandDefinition(
             "SELECT balance_id FROM partner_legacy_balances WHERE tenant_id = @TenantId AND partner_id = @PartnerId FOR UPDATE",
             new { TenantId = tenantId, PartnerId = partnerId }, transaction: tx, cancellationToken: ct)).ConfigureAwait(false);
         if (locked is null) return null;
 
+        // 공용 식 본문은 한 글자도 안 건드린다(11곳 소비자 계약 · 설계 §4-2). 모드로 갈리는 것은 **꼬리 한 줄**뿐이다.
         var sql = $"""
             SELECT x.partner_id AS PartnerId, x.base_date AS BaseDate, x.legacy_amount AS LegacyAmount,
                    x.matched_amount AS MatchedAmount, x.remaining_amount AS RemainingAmount
               FROM ({(receivable ? ReceivableRemainingSql : PayableRemainingSql)}) x
-             WHERE x.partner_id = @PartnerId
+             WHERE x.partner_id = @PartnerId{LockTailFor(mode)}
             """;
         var row = await db.QueryFirstOrDefaultAsync<Row>(new CommandDefinition(
             sql, new { TenantId = tenantId, PartnerId = partnerId }, transaction: tx, cancellationToken: ct)).ConfigureAwait(false);
         return row?.ToRemaining();
     }
+
+    /// <summary>
+    /// 🔴 20260920작1 S1 — 모드가 고르는 잠금 꼬리절(설계 §4-2 · §4-4).
+    /// RC 모드는 문장마다 최신 커밋을 보므로 빈 문자열, RR 모드는 <c>LOCK IN SHARE MODE</c> 로 최신 커밋을 읽는다.
+    /// STATEMENT 서버에서도 공유 잠금 읽기는 거절되지 않는다(선행 F2 · 0단계 실측).
+    /// </summary>
+    public static string LockTailFor(LegacyMatchMode mode)
+        => mode == LegacyMatchMode.RepeatableReadLocking ? "\n LOCK IN SHARE MODE" : string.Empty;
 
     /// <summary>
     /// 병렬이슈44 PM 후속 2 — 이월잔액 매칭 트랜잭션 격리 수준. 거래처 단위 직렬화는 <c>partner_legacy_balances</c> 행 <c>FOR UPDATE</c> 가 맡고,
@@ -241,7 +263,15 @@ public static class LegacyBalanceMatching
     /// ① ref = 거래처 ② 금액 &gt; 0 ③ 이월잔액 행 있음 + 방향 맞음 ④ (S2) 기준일 검사 ⑤ 금액 ≤ R(잠금 뒤 재계산).
     /// 실패 = <see cref="InvalidOperationException"/>(고객 문구 · <c>GlobalExceptionMiddleware</c> 가 400).
     /// </summary>
-    public static async Task EnsureMatchAllowedAsync(IDbConnection db, IDbTransaction tx, string tenantId, string partnerId,
+    /// <inheritdoc cref="EnsureMatchAllowedAsync(IDbConnection, IDbTransaction, LegacyMatchMode, string, string, string?, decimal, DateTime, bool, ILogger?, CancellationToken)"/>
+    /// <remarks>
+    /// 🔴 20260920작1 S1 — 모드를 안 넘기는 <b>기존 호출자 호환</b> 오버로드(RC 경로 고정 · 헌법 #1). 동작은 3판 그대로.
+    /// </remarks>
+    public static Task EnsureMatchAllowedAsync(IDbConnection db, IDbTransaction tx, string tenantId, string partnerId,
+        string? refId, decimal amount, DateTime date, bool receivable, ILogger? logger, CancellationToken ct)
+        => EnsureMatchAllowedAsync(db, tx, LegacyMatchMode.ReadCommittedFresh, tenantId, partnerId, refId, amount, date, receivable, logger, ct);
+
+    public static async Task EnsureMatchAllowedAsync(IDbConnection db, IDbTransaction tx, LegacyMatchMode mode, string tenantId, string partnerId,
         string? refId, decimal amount, DateTime date, bool receivable, ILogger? logger, CancellationToken ct)
     {
         if (string.IsNullOrEmpty(partnerId) || !string.Equals(refId, partnerId, StringComparison.Ordinal))
@@ -250,7 +280,7 @@ public static class LegacyBalanceMatching
         if (amount <= 0m)
             Reject(logger, tenantId, partnerId, MsgAmountNotPositive);
 
-        var row = await GetForUpdateAsync(db, tx, tenantId, partnerId, receivable, ct).ConfigureAwait(false);
+        var row = await GetForUpdateAsync(db, tx, mode, tenantId, partnerId, receivable, ct).ConfigureAwait(false);
         if (row is null || row.LegacyAmount <= 0m)
             Reject(logger, tenantId, partnerId, receivable ? MsgNoReceivable : MsgNoPayable);
 
