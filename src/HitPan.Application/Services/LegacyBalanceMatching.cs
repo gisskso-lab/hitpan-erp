@@ -212,17 +212,26 @@ public static class LegacyBalanceMatching
         if (tx.IsolationLevel != expected)
             throw new NotSupportedException($"[LegacyBalanceMatching] 이월잔액 매칭 트랜잭션은 {mode} 모드에서 {expected} 로 열어야 한다(현재 {tx.IsolationLevel}).");
 
-        var locked = await db.QueryFirstOrDefaultAsync<string>(new CommandDefinition(
-            "SELECT balance_id FROM partner_legacy_balances WHERE tenant_id = @TenantId AND partner_id = @PartnerId FOR UPDATE",
+        // 🔴 20260920작1 S1b ㉮ (설계 2판 §11-4) — 잠금 읽기는 STATEMENT 서버에서도 **최신**이다(0단계 실측).
+        //   L0·base_date 를 여기서 같이 받아 둔다 — 문장이 늘지도, 잠금이 늘지도 않는다.
+        var locked = await db.QueryFirstOrDefaultAsync<LockedBalance>(new CommandDefinition(
+            "SELECT balance_id AS BalanceId, base_date AS BaseDate, balance_amount AS BalanceAmount FROM partner_legacy_balances WHERE tenant_id = @TenantId AND partner_id = @PartnerId FOR UPDATE",
             new { TenantId = tenantId, PartnerId = partnerId }, transaction: tx, cancellationToken: ct)).ConfigureAwait(false);
         if (locked is null) return null;
 
-        // 공용 식 본문은 한 글자도 안 건드린다(11곳 소비자 계약 · 설계 §4-2). 모드로 갈리는 것은 **꼬리 한 줄**뿐이다.
+        // 🔴 20260920작1 S1b ㉯ (설계 2판 §11 · 처방 (나)) — RR 경로는 **파생표를 쓰지 않는다.**
+        //   파생표는 트랜잭션 스냅숏으로 먼저 만들어져 바깥 꼬리 잠금절이 안쪽 기본 테이블 행에 닿지 않는다(S1 §3-2 실측:
+        //   같은 순간 R 85,000 / 기대 59,000). 실테이블 직접 읽기는 조인이 있어도 최신이다(S1b §8-1 실측).
+        //   RC 경로는 아래 그대로 — 문장마다 최신을 보므로 애초에 문제가 없다(설계 §11-5).
+        if (mode == LegacyMatchMode.RepeatableReadLocking)
+            return await RecomputeRemainingLockedAsync(db, tx, tenantId, partnerId, receivable, locked, ct).ConfigureAwait(false);
+
+        // 공용 식 본문은 한 글자도 안 건드린다(11곳 소비자 계약 · 설계 §4-2).
         var sql = $"""
             SELECT x.partner_id AS PartnerId, x.base_date AS BaseDate, x.legacy_amount AS LegacyAmount,
                    x.matched_amount AS MatchedAmount, x.remaining_amount AS RemainingAmount
               FROM ({(receivable ? ReceivableRemainingSql : PayableRemainingSql)}) x
-             WHERE x.partner_id = @PartnerId{LockTailFor(mode)}
+             WHERE x.partner_id = @PartnerId
             """;
         var row = await db.QueryFirstOrDefaultAsync<Row>(new CommandDefinition(
             sql, new { TenantId = tenantId, PartnerId = partnerId }, transaction: tx, cancellationToken: ct)).ConfigureAwait(false);
@@ -230,12 +239,118 @@ public static class LegacyBalanceMatching
     }
 
     /// <summary>
-    /// 🔴 20260920작1 S1 — 모드가 고르는 잠금 꼬리절(설계 §4-2 · §4-4).
+    /// 🔴 20260920작1 S1 — 모드가 고르는 잠금 꼬리절(설계 §4-4 · D1).
     /// RC 모드는 문장마다 최신 커밋을 보므로 빈 문자열, RR 모드는 <c>LOCK IN SHARE MODE</c> 로 최신 커밋을 읽는다.
-    /// STATEMENT 서버에서도 공유 잠금 읽기는 거절되지 않는다(선행 F2 · 0단계 실측).
+    /// STATEMENT 서버에서도 공유 잠금 읽기는 거절되지 않는다(선행 F2 · S1 §3 실측).
+    /// <para>
+    /// 🔴 S1b ㉱ — <b>남긴다. 쓰는 곳은 전표 남은금액(D1) 뿐이다</b>(<c>CollectionService</c>). 파생표 꼬리에는 더 이상 안 붙인다 —
+    /// 파생표 바깥의 잠금절은 옛 스냅숏을 돌려주기 때문이다(S1 §3-2). RR 의 R 재계산은 <see cref="RecomputeRemainingLockedAsync"/> 가 맡는다.
+    /// </para>
     /// </summary>
     public static string LockTailFor(LegacyMatchMode mode)
         => mode == LegacyMatchMode.RepeatableReadLocking ? "\n LOCK IN SHARE MODE" : string.Empty;
+
+    // ────────────────────────────────────────────────────────────────────────────────
+    // 🔴 20260920작1 S1b ㉰ — RR 전용 재계산 SQL (설계 2판 §11-4)
+    //   · 실테이블 직접 읽기 · 거래처 1건 필터 · 꼬리 LOCK IN SHARE MODE(이 모드에서만 쓰이므로 상수에 박는다).
+    //   · 술어·별칭(lc·ec·lp·ep·rt/rti/pr)은 공용 식에서 **그대로** 옮겼다. 두 식이 갈라지지 않게 묶는 장치는
+    //     G-RC10(값 동등성 7사례) · G-RC11(공용 식 SHA-256 앵커) — 갈래 S2 가 만든다(설계 §11-3).
+    //   · ❌ 파생표·`UNION ALL`·스칼라 하위질의로 합치지 않는다(안 서는 것으로 실측된 모양 · S1 §3-2).
+    //     같은 이유로 #16 의 `UNION ALL` 권장은 여기서 적용 예외다 — 한 연결·순차이며 `Task.WhenAll` 이 아니다.
+    // ────────────────────────────────────────────────────────────────────────────────
+
+    /// <summary>미수 M ①: 이월잔액에 직접 맞춘 수금(공용 식의 <c>lm</c> 하위질의).</summary>
+    public const string ReceivableMatchedLegacyLockedSql = """
+        SELECT COALESCE(SUM(lc.amount), 0)
+          FROM collections lc
+         WHERE lc.tenant_id = @TenantId AND lc.partner_id = @PartnerId AND lc.is_active = 1
+           AND COALESCE(lc.source_type, '') <> 'migration'
+           AND lc.ref_doc_type = 'legacy_balance' AND lc.ref_doc_id = lc.partner_id
+         LOCK IN SHARE MODE
+        """;
+
+    /// <summary>미수 M ②: 이관 명세서에 붙은 수금(공용 식의 <c>em</c> 하위질의 · 거래처는 <c>sd.partner_id</c>).</summary>
+    public const string ReceivableMatchedDocLockedSql = """
+        SELECT COALESCE(SUM(ec.amount), 0)
+          FROM collections ec
+          JOIN sales_deliveries sd ON sd.delivery_id = ec.ref_doc_id AND sd.tenant_id = ec.tenant_id
+         WHERE ec.tenant_id = @TenantId AND sd.partner_id = @PartnerId
+           AND ec.is_active = 1 AND ec.ref_doc_type = 'sales_delivery'
+           AND COALESCE(ec.source_type, '') <> 'migration'
+           AND COALESCE(sd.source_type, '') = 'migration'
+         LOCK IN SHARE MODE
+        """;
+
+    /// <summary>미지급 M ①: 이월잔액에 직접 맞춘 지급(공용 식의 <c>lm</c> 하위질의).</summary>
+    public const string PayableMatchedLegacyLockedSql = """
+        SELECT COALESCE(SUM(lp.amount), 0)
+          FROM payments lp
+         WHERE lp.tenant_id = @TenantId AND lp.partner_id = @PartnerId AND lp.is_active = 1
+           AND COALESCE(lp.source_type, '') <> 'migration'
+           AND lp.payment_type = 'legacy_balance' AND lp.ref_order_id = lp.partner_id
+         LOCK IN SHARE MODE
+        """;
+
+    /// <summary>미지급 M ②: 이관 매입에 붙은 지급(공용 식의 <c>em</c> 하위질의 · 거래처는 <c>pr.partner_id</c>).</summary>
+    public const string PayableMatchedDocLockedSql = """
+        SELECT COALESCE(SUM(ep.amount), 0)
+          FROM payments ep
+          JOIN purchase_receipts pr ON pr.receipt_id = ep.ref_order_id AND pr.tenant_id = ep.tenant_id
+         WHERE ep.tenant_id = @TenantId AND pr.partner_id = @PartnerId
+           AND ep.is_active = 1 AND ep.payment_type = 'purchase'
+           AND COALESCE(ep.source_type, '') <> 'migration'
+           AND COALESCE(pr.source_type, '') = 'migration'
+         LOCK IN SHARE MODE
+        """;
+
+    /// <summary>미지급 M ③: 이관 매입의 확정 반품(공용 식의 <c>rm</c> 하위질의 · 미확정은 제외).</summary>
+    public const string PayableMatchedReturnLockedSql = """
+        SELECT COALESCE(SUM(rti.supply_amount + rti.vat_amount), 0)
+          FROM purchase_returns rt
+          JOIN purchase_return_items rti ON rti.return_id = rt.return_id AND rti.tenant_id = rt.tenant_id
+          JOIN purchase_receipts pr ON pr.receipt_id = rt.receipt_id AND pr.tenant_id = rt.tenant_id
+         WHERE rt.tenant_id = @TenantId AND pr.partner_id = @PartnerId
+           AND rt.is_deleted = 0 AND rt.status = 'confirmed'
+           AND COALESCE(pr.source_type, '') = 'migration'
+         LOCK IN SHARE MODE
+        """;
+
+    /// <summary>
+    /// 🔴 20260920작1 S1b ㉯㉰ — RR 경로의 R 재계산. <b>이 모드에서만</b> 불린다(호출자는 <see cref="GetForUpdateAsync"/> 하나).
+    /// <list type="bullet">
+    /// <item>L0·<c>base_date</c> 는 이미 잠근 행에서 받은 값이다(㉮) — 다시 읽지 않는다.</item>
+    /// <item>M 은 실테이블 직접 문장(미수 2 · 미지급 3)을 <b>한 연결에서 순차로</b> 읽는다(#16 — <c>Task.WhenAll</c> 아님 · 연결 새로 안 만든다).</item>
+    /// <item>R = <c>GREATEST(L0,0) - ΣM</c> 을 C# <c>decimal</c> 로(#4). <b>클램프 없음</b> — 음수 R 은 그대로 돌려준다(공용 식과 같다).</item>
+    /// </list>
+    /// </summary>
+    private static async Task<Remaining> RecomputeRemainingLockedAsync(IDbConnection db, IDbTransaction tx,
+        string tenantId, string partnerId, bool receivable, LockedBalance locked, CancellationToken ct)
+    {
+        var args = new { TenantId = tenantId, PartnerId = partnerId };
+
+        decimal matched;
+        if (receivable)
+        {
+            var lm = await SumLockedAsync(db, tx, ReceivableMatchedLegacyLockedSql, args, ct).ConfigureAwait(false);
+            var em = await SumLockedAsync(db, tx, ReceivableMatchedDocLockedSql, args, ct).ConfigureAwait(false);
+            matched = lm + em;
+        }
+        else
+        {
+            var lm = await SumLockedAsync(db, tx, PayableMatchedLegacyLockedSql, args, ct).ConfigureAwait(false);
+            var em = await SumLockedAsync(db, tx, PayableMatchedDocLockedSql, args, ct).ConfigureAwait(false);
+            var rm = await SumLockedAsync(db, tx, PayableMatchedReturnLockedSql, args, ct).ConfigureAwait(false);
+            matched = lm + em + rm;
+        }
+
+        // 공용 식과 같은 산술: 미수 = GREATEST(balance_amount, 0) · 미지급 = GREATEST(-balance_amount, 0).
+        var legacy = Math.Max(receivable ? locked.BalanceAmount : -locked.BalanceAmount, 0m);
+        return new Remaining(partnerId, locked.BaseDate, legacy, matched, legacy - matched);
+    }
+
+    private static async Task<decimal> SumLockedAsync(IDbConnection db, IDbTransaction tx, string sql, object args, CancellationToken ct)
+        => await db.ExecuteScalarAsync<decimal>(new CommandDefinition(
+            sql, args, transaction: tx, cancellationToken: ct)).ConfigureAwait(false);
 
     /// <summary>
     /// 🔴 20260920작1 S1 — 열려 있는 트랜잭션이 곧 모드다(<see cref="IsolationFor"/> 의 역). 매칭 트랜잭션이 아닌 격리수준이면 <see cref="NotSupportedException"/>.
@@ -314,6 +429,14 @@ public static class LegacyBalanceMatching
     {
         logger?.LogInformation("[LegacyBalanceMatching] 이월잔액 매칭 거절 tenant={TenantId} partner={PartnerId}: {Message}", tenantId, partnerId, message);
         throw new InvalidOperationException(message);
+    }
+
+    /// <summary>🔴 S1b ㉮ — <c>FOR UPDATE</c> 로 잠근 이월잔액 행에서 같이 받아 오는 값(잠금 읽기 = 최신).</summary>
+    private sealed class LockedBalance
+    {
+        public string BalanceId { get; set; } = string.Empty;
+        public DateTime BaseDate { get; set; }
+        public decimal BalanceAmount { get; set; }
     }
 
     private sealed class Row
