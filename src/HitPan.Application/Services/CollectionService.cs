@@ -699,8 +699,12 @@ public class CollectionService : ICollectionService
     internal const string MsgMigratedReceipt = "이전 프로그램에서 옮겨온 매입전표입니다. 이 거래처의 줄 돈은 「" + LegacyBalanceMatching.Label + "」으로 맞춰 주세요.";
 
     // 🔴 20260920작1 S1 — 재시도 소진 문구(고객어 · 개발용어 금지 #23 · 작지 §8 상수 한 곳).
-    internal const string MsgMatchBusyCollection = "지금 다른 사용자가 같은 거래처의 수금을 처리하고 있습니다. 잠시 후 다시 저장해 주세요.";
-    internal const string MsgMatchBusyPayment = "지금 다른 사용자가 같은 거래처의 지급을 처리하고 있습니다. 잠시 후 다시 저장해 주세요.";
+    //   🔴 S3 ㉶ (설계 §12-8 · PM 결재 C-2): 「같은 거래처의」를 **뺐다**. 사실이 아니었다(#25).
+    //     DB-124 로 잠금을 좁힌 뒤에도 교착·대기가 정당하게 남는 자리가 셋인데(같은 거래처 동시 매칭 ·
+    //     같은 전표 동시 등록 · 갭 잠금), 그중 갭 잠금은 **거래처가 같다는 보장이 없다.**
+    //     거짓말을 안 하는 문구가 짧은 문구다.
+    internal const string MsgMatchBusyCollection = "지금 다른 사용자가 수금을 저장하고 있습니다. 잠시 후 다시 저장해 주세요.";
+    internal const string MsgMatchBusyPayment = "지금 다른 사용자가 지급을 저장하고 있습니다. 잠시 후 다시 저장해 주세요.";
 
     private static readonly System.Globalization.CultureInfo Ko = System.Globalization.CultureInfo.GetCultureInfo("ko-KR");
 
@@ -803,10 +807,7 @@ public class CollectionService : ICollectionService
         //   RR 은 앞선 일반 읽기의 스냅숏을 보므로, 전표 행을 FOR UPDATE 로 잡고도 **옛 합**으로 판정해
         //   같은 명세서에 동시 수금이 들어오면 합이 전표금액을 넘어도 통과한다. RC 경로는 꼬리절이 빈 문자열 = 3판 그대로.
         var collected = await _db.ExecuteScalarAsync<decimal>(new CommandDefinition(
-            $"""
-            SELECT COALESCE(SUM(amount), 0) FROM collections
-             WHERE tenant_id = @TenantId AND is_active = 1 AND ref_doc_type = 'sales_delivery' AND ref_doc_id = @RefId{LegacyBalanceMatching.LockTailFor(mode)}
-            """,
+            DeliveryUsedSql(mode),
             new { TenantId = tenantId, RefId = request.RefDocId }, transaction: tx, cancellationToken: ct));
         var remaining = doc.TotalWithVat - collected;
         if (request.Amount > remaining)
@@ -848,18 +849,10 @@ public class CollectionService : ICollectionService
         //   ⚠️ 실측 기록: 합친 모양(스칼라 하위질의)도 STATEMENT 서버 RR 에서 **최신을 읽었다**(S1b §8-1-2 · 18,300). 「같은 함정」 의심은 성립하지 않았다.
         //   한 연결·순차다 — `Task.WhenAll` 도, 새 연결도 아니다(#16). RC 경로는 꼬리절이 빈 문자열 = 3판 그대로.
         var paid = await _db.ExecuteScalarAsync<decimal>(new CommandDefinition(
-            $"""
-            SELECT COALESCE(SUM(amount), 0) FROM payments
-             WHERE tenant_id = @TenantId AND is_active = 1 AND payment_type = 'purchase' AND ref_order_id = @RefId{LegacyBalanceMatching.LockTailFor(mode)}
-            """,
+            ReceiptPaidSql(mode),
             new { TenantId = tenantId, RefId = request.RefOrderId }, transaction: tx, cancellationToken: ct));
         var returned = await _db.ExecuteScalarAsync<decimal>(new CommandDefinition(
-            $"""
-            SELECT COALESCE(SUM(rti.supply_amount + rti.vat_amount), 0)
-              FROM purchase_returns rt
-              JOIN purchase_return_items rti ON rti.return_id = rt.return_id AND rti.tenant_id = rt.tenant_id
-             WHERE rt.tenant_id = @TenantId AND rt.is_deleted = 0 AND rt.status = 'confirmed' AND rt.receipt_id = @RefId{LegacyBalanceMatching.LockTailFor(mode)}
-            """,
+            ReceiptReturnedSql(mode),
             new { TenantId = tenantId, RefId = request.RefOrderId }, transaction: tx, cancellationToken: ct));
         var used = paid + returned;
         var remaining = doc.TotalWithVat - used;
@@ -873,6 +866,44 @@ public class CollectionService : ICollectionService
         public decimal TotalWithVat { get; set; }
         public bool MigratedUnderLegacy { get; set; }
     }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // 🔴 20260920작1 S3 ㉵ (설계 §12-7 · 작지 §16-1 · PM 결재 C-4) — D1 세 문장
+    //
+    // 왜 뺐나: 게이트가 이 문장들을 **제 손으로 베껴 쓰고 있었다.** 베낀 게이트는
+    //   제품 문장이 바뀌어도 초록불이라, 재야 할 것을 하나도 안 재고 통과한다(병렬이슈54).
+    //   여기서 부르게 하면 제품이 바뀌는 순간 게이트가 같이 바뀐다 = 회귀가 감시된다.
+    //
+    // 🔴 **문자열은 옮기기만 했다 — 한 글자도 안 바꿨다.** 로직 변경 0 · SQL 텍스트 변경 0.
+    //   파라미터 이름 @TenantId · @RefId 는 갈래 간 고정 계약이다(작지 §16-1). 바꾸지 마라.
+    //
+    // RC 경로는 LockTailFor 가 빈 문자열을 주므로 3판 그대로다. RR 경로에서만 꼬리절이 붙는다.
+    // 잠금 범위는 DB-124 인덱스가 좁힌다 — 이 문장들을 좁히려고 술어를 더하지 마라(설계 §12-4:
+    //   「좁히기」가 「덜 세기」가 되면 성능 문제를 고치려다 금액이 틀린다).
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    /// <summary>D1-a · 거래명세서에 이미 맞춘 수금 합계.</summary>
+    internal static string DeliveryUsedSql(LegacyMatchMode mode) =>
+        $"""
+        SELECT COALESCE(SUM(amount), 0) FROM collections
+         WHERE tenant_id = @TenantId AND is_active = 1 AND ref_doc_type = 'sales_delivery' AND ref_doc_id = @RefId{LegacyBalanceMatching.LockTailFor(mode)}
+        """;
+
+    /// <summary>D1-b · 매입전표에 이미 맞춘 지급 합계.</summary>
+    internal static string ReceiptPaidSql(LegacyMatchMode mode) =>
+        $"""
+        SELECT COALESCE(SUM(amount), 0) FROM payments
+         WHERE tenant_id = @TenantId AND is_active = 1 AND payment_type = 'purchase' AND ref_order_id = @RefId{LegacyBalanceMatching.LockTailFor(mode)}
+        """;
+
+    /// <summary>D1-c · 매입전표의 확정 반품 합계(미확정은 제외).</summary>
+    internal static string ReceiptReturnedSql(LegacyMatchMode mode) =>
+        $"""
+        SELECT COALESCE(SUM(rti.supply_amount + rti.vat_amount), 0)
+          FROM purchase_returns rt
+          JOIN purchase_return_items rti ON rti.return_id = rt.return_id AND rti.tenant_id = rt.tenant_id
+         WHERE rt.tenant_id = @TenantId AND rt.is_deleted = 0 AND rt.status = 'confirmed' AND rt.receipt_id = @RefId{LegacyBalanceMatching.LockTailFor(mode)}
+        """;
 
     /// <summary>
     /// 🔴 20260920작1 S1 (설계 §3) — 이 서버에서 쓸 매칭 모드. 판정기가 없으면 3판 그대로 RC.
