@@ -5,6 +5,20 @@ using Microsoft.Extensions.Logging;
 namespace HitPan.Application.Services;
 
 /// <summary>
+/// 🔴 20260920작1 갈래 S1 — 이월잔액 매칭 트랜잭션의 경로. <b>호출자가 선언</b>하고, 이 값 하나가
+/// 격리수준(<see cref="LegacyBalanceMatching.IsolationFor"/>)과 잠금식(R 재계산 · 전표 SUM)을 함께 고른다.
+/// 「RR 로 열고 일반 읽기로 판정」하는 조합은 코드로 표현할 수 없다(설계 §5-2 — 3판이 밟은 사고를 구조로 막는다).
+/// </summary>
+public enum LegacyMatchMode
+{
+    /// <summary>READ COMMITTED + 일반 읽기 — 3판 그대로. 안전한 서버(로그 꺼짐 · MIXED · ROW)에서 쓴다.</summary>
+    ReadCommittedFresh = 0,
+
+    /// <summary>REPEATABLE READ + 잠금 읽기 — <c>binlog_format=STATEMENT</c> 서버에서 쓴다. 정확성 계약은 RC 와 같고, 대가는 지연·재시도다.</summary>
+    RepeatableReadLocking = 1
+}
+
+/// <summary>
 /// 🔴 20260915작1 개정 3판 갈래 R1 — 「이전 프로그램 이월잔액」 매칭 공용 식(L0 · M · R).
 /// <para>
 /// 근거: 작업지시서 <c>docs/운영기록/20260915작1_자료이관_머리없는줄_분류봉합_작업지시서.md</c> §15-2·§15-3 ·
@@ -207,6 +221,20 @@ public static class LegacyBalanceMatching
     /// ⚠️ 바이너리 로그를 <c>binlog_format=STATEMENT</c> 로 쓰는 서버는 RC 쓰기가 거절된다(MariaDB 11.4 기본값 MIXED).
     /// </summary>
     public const IsolationLevel MatchIsolation = IsolationLevel.ReadCommitted;
+
+    /// <summary>
+    /// 🔴 20260920작1 갈래 S1 — <c>binlog_format=STATEMENT</c> 서버에서 쓰는 격리수준(설계 §5-3).
+    /// RC 가 ERROR 1665 로 거절되는 서버에서도 등록이 막히지 않게 한다(#20). 정확성은 잠금 읽기가 지킨다.
+    /// </summary>
+    public const IsolationLevel MatchIsolationFallback = IsolationLevel.RepeatableRead;
+
+    /// <summary>모드 ↔ 격리수준. 이 사상(寫像) 한 곳만 안다 — 호출자도 가드도 여기를 본다.</summary>
+    public static IsolationLevel IsolationFor(LegacyMatchMode mode) => mode switch
+    {
+        LegacyMatchMode.ReadCommittedFresh => MatchIsolation,
+        LegacyMatchMode.RepeatableReadLocking => MatchIsolationFallback,
+        _ => throw new NotSupportedException($"[LegacyBalanceMatching] 모르는 매칭 모드({mode})다.")
+    };
 
     /// <summary>
     /// 이월잔액 매칭 등록 검사 — 호출자 트랜잭션 안 · INSERT 앞에서 부른다.
