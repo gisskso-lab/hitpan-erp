@@ -843,18 +843,25 @@ public class CollectionService : ICollectionService
         if (doc.MigratedUnderLegacy)
             throw new InvalidOperationException(MsgMigratedReceipt);
 
-        // 🔴 20260920작1 S1 · D1 (설계 §4-4) — 수금과 대칭. 합산 문장은 바깥에 FROM 이 없으므로 **각 하위 질의 꼬리**에 붙인다
-        //   (33406 STATEMENT 인스턴스에서 두 모양 모두 실행 확인 · 개발명세서 §3). RC 경로는 빈 문자열 = 3판 그대로.
-        var used = await _db.ExecuteScalarAsync<decimal>(new CommandDefinition(
+        // 🔴 20260920작1 S1b ㉲ (작지 §12 · PM 결재 B-3) — 스칼라 하위질의 2개를 **직접 문장 2개**로 나눈다.
+        //   S1 이 실측한 모양(수금 쪽 단일 직접 문장)과 같은 모양으로 맞춘다 — 모양이 하나면 다음 사람이 둘을 비교할 일이 없다.
+        //   ⚠️ 실측 기록: 합친 모양(스칼라 하위질의)도 STATEMENT 서버 RR 에서 **최신을 읽었다**(S1b §8-1-2 · 18,300). 「같은 함정」 의심은 성립하지 않았다.
+        //   한 연결·순차다 — `Task.WhenAll` 도, 새 연결도 아니다(#16). RC 경로는 꼬리절이 빈 문자열 = 3판 그대로.
+        var paid = await _db.ExecuteScalarAsync<decimal>(new CommandDefinition(
             $"""
-            SELECT COALESCE((SELECT SUM(amount) FROM payments
-                              WHERE tenant_id = @TenantId AND is_active = 1 AND payment_type = 'purchase' AND ref_order_id = @RefId{LegacyBalanceMatching.LockTailFor(mode)}), 0)
-                 + COALESCE((SELECT SUM(rti.supply_amount + rti.vat_amount)
-                               FROM purchase_returns rt
-                               JOIN purchase_return_items rti ON rti.return_id = rt.return_id AND rti.tenant_id = rt.tenant_id
-                              WHERE rt.tenant_id = @TenantId AND rt.is_deleted = 0 AND rt.status = 'confirmed' AND rt.receipt_id = @RefId{LegacyBalanceMatching.LockTailFor(mode)}), 0)
+            SELECT COALESCE(SUM(amount), 0) FROM payments
+             WHERE tenant_id = @TenantId AND is_active = 1 AND payment_type = 'purchase' AND ref_order_id = @RefId{LegacyBalanceMatching.LockTailFor(mode)}
             """,
             new { TenantId = tenantId, RefId = request.RefOrderId }, transaction: tx, cancellationToken: ct));
+        var returned = await _db.ExecuteScalarAsync<decimal>(new CommandDefinition(
+            $"""
+            SELECT COALESCE(SUM(rti.supply_amount + rti.vat_amount), 0)
+              FROM purchase_returns rt
+              JOIN purchase_return_items rti ON rti.return_id = rt.return_id AND rti.tenant_id = rt.tenant_id
+             WHERE rt.tenant_id = @TenantId AND rt.is_deleted = 0 AND rt.status = 'confirmed' AND rt.receipt_id = @RefId{LegacyBalanceMatching.LockTailFor(mode)}
+            """,
+            new { TenantId = tenantId, RefId = request.RefOrderId }, transaction: tx, cancellationToken: ct));
+        var used = paid + returned;
         var remaining = doc.TotalWithVat - used;
         if (request.Amount > remaining)
             throw new InvalidOperationException(string.Format(Ko, MsgReceiptOver, Math.Max(remaining, 0m)));
