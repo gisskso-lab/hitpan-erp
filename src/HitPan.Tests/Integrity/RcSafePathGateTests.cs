@@ -995,26 +995,63 @@ public sealed class RcSafePathGateTests : IClassFixture<RcStatementDbFixture>
         await using var b = await OpenAsync();
         await b.ExecuteAsync("SET SESSION innodb_lock_wait_timeout = 3");
 
-        var ops = new (string Name, string Sql)[]
+        var ops = new (string Name, string Sql, string Table)[]
         {
-            ("B1 collections UPDATE", $"UPDATE collections SET memo='rc12' WHERE tenant_id=@T AND partner_id='{noiseUpd}'"),
-            ("B2 collections INSERT", $"INSERT INTO collections (collection_id, tenant_id, partner_id, collection_date, amount, ref_doc_type, ref_doc_id, is_active) VALUES (UUID(), @T, '{noiseIns}', '2026-03-11', 1000, 'legacy_balance', '{noiseIns}', 1)"),
-            ("B3 payments UPDATE", $"UPDATE payments SET memo='rc12' WHERE tenant_id=@T AND partner_id='{noiseUpd}'"),
-            ("B4 payments INSERT", $"INSERT INTO payments (payment_id, tenant_id, partner_id, payment_type, amount, payment_date, ref_order_id, is_active) VALUES (UUID(), @T, '{noiseIns}', 'legacy_balance', 1000, '2026-03-11', '{noiseIns}', 1)"),
-            ("B5 purchase_returns UPDATE", $"UPDATE purchase_returns SET memo='rc12' WHERE tenant_id=@T AND partner_id='{noiseUpd}'"),
-            ("B6 purchase_returns INSERT", $"INSERT INTO purchase_returns (return_id, tenant_id, receipt_id, return_no, partner_id, return_date, status, total_amount, vat_amount, is_deleted) VALUES (UUID(), @T, 'np-{t[..8]}-9', CONCAT('RT-', SUBSTRING(UUID(),1,8)), '{noiseIns}', '2026-03-11', 'draft', 1000, 0, 0)"),
+            ("B1 collections UPDATE", $"UPDATE collections SET memo='rc12' WHERE tenant_id=@T AND partner_id='{noiseUpd}'", "collections"),
+            ("B2 collections INSERT", $"INSERT INTO collections (collection_id, tenant_id, partner_id, collection_date, amount, ref_doc_type, ref_doc_id, is_active) VALUES (UUID(), @T, '{noiseIns}', '2026-03-11', 1000, 'legacy_balance', '{noiseIns}', 1)", "collections"),
+            ("B3 payments UPDATE", $"UPDATE payments SET memo='rc12' WHERE tenant_id=@T AND partner_id='{noiseUpd}'", "payments"),
+            ("B4 payments INSERT", $"INSERT INTO payments (payment_id, tenant_id, partner_id, payment_type, amount, payment_date, ref_order_id, is_active) VALUES (UUID(), @T, '{noiseIns}', 'legacy_balance', 1000, '2026-03-11', '{noiseIns}', 1)", "payments"),
+            ("B5 purchase_returns UPDATE", $"UPDATE purchase_returns SET memo='rc12' WHERE tenant_id=@T AND partner_id='{noiseUpd}'", "purchase_returns"),
+            ("B6 purchase_returns INSERT", $"INSERT INTO purchase_returns (return_id, tenant_id, receipt_id, return_no, partner_id, return_date, status, total_amount, vat_amount, is_deleted) VALUES (UUID(), @T, 'np-{t[..8]}-9', CONCAT('RT-', SUBSTRING(UUID(),1,8)), '{noiseIns}', '2026-03-11', 'draft', 1000, 0, 0)", "purchase_returns"),
+        };
+
+        // ══════════════════════════════════════════════════════════════════════════════
+        // 🔴 B7·B8 — **다른 회사** 축. 작지 §20-2 (PM 두 번째 자백 · [4] F-1).
+        //
+        // PM 이 §19-1 에 적은 「idx_pay_partner 와 idx_pay_tenant_partner 는 잠그는 집합이 같다」는 **틀렸다.**
+        // RR 의 잠금은 일치 행 + **그 옆 간극**(넥스트키)이다. idx_pay_partner 는 회사 구분 없이
+        // partner_id 하나로 전역 정렬되므로 **간극의 이웃이 남의 회사 행**이다.
+        // ⇒ 「안전하다」를 논증으로 두지 않고 **여기서 잰다.**
+        //   · 안 막히면 → 결론(제품 무변경) 유지 · 근거는 논증이 아니라 이 실측이 된다.
+        //   · 막히면   → 🔴 멈추고 설계 4판(L3 의 인덱스 축 고정 · 작지 §17 C-3).
+        //
+        // 📐 왜 「바로 옆」이어야 하나: 간극 잠금은 **인덱스에서 이웃한 자리**에만 걸린다.
+        //   그래서 다른 회사 거래처 id 를 PA·PB 와 **앞 35글자가 같게** 만든다 — 그 둘 사이에는
+        //   다른 값이 끼어들 수 없으므로 정렬상 반드시 이웃이다. 무작위 id 로는 실행마다 결과가 달라진다.
+        // ══════════════════════════════════════════════════════════════════════════════
+        var otherT = Guid.NewGuid().ToString();
+        var xPay = PB[..^1] + (PB[^1] == 'z' ? 'y' : 'z');    // payments 축 — L3 이 PB 를 잠근다
+        var xColl = PA[..^1] + (PA[^1] == 'z' ? 'y' : 'z');   // collections 축 — L1 이 PA 를 잠근다
+        await AddPartnerAsync(db, otherT, xPay, "XP");
+        await AddPartnerAsync(db, otherT, xColl, "XC");
+
+        // 🔴 대조군 짝 — B9·B10 은 같은 「다른 회사」인데 거래처 id 가 PA·PB 와 **정렬상 멀다**(무작위).
+        //    B7·B8 만 막히고 B9·B10 은 통과하면 원인은 **이웃 간극**(인덱스 축)이다 → 설계 사안.
+        //    넷 다 막히면 원인은 이웃이 아니라 **다른 무엇**이다 — 그때 인덱스를 고치면 엉뚱한 곳을 고치는 것이다.
+        var fPay = "ff" + Guid.NewGuid().ToString()[2..];
+        var fColl = "fe" + Guid.NewGuid().ToString()[2..];
+        await AddPartnerAsync(db, otherT, fPay, "FP");
+        await AddPartnerAsync(db, otherT, fColl, "FC");
+
+        var crossOps = new (string Name, string Sql, string Table)[]
+        {
+            ("B7 다른 회사 payments INSERT (이웃)", $"INSERT INTO payments (payment_id, tenant_id, partner_id, payment_type, amount, payment_date, ref_order_id, is_active) VALUES (UUID(), '{otherT}', '{xPay}', 'legacy_balance', 1000, '2026-03-11', '{xPay}', 1)", "payments"),
+            ("B8 다른 회사 collections INSERT (이웃)", $"INSERT INTO collections (collection_id, tenant_id, partner_id, collection_date, amount, ref_doc_type, ref_doc_id, is_active) VALUES (UUID(), '{otherT}', '{xColl}', '2026-03-11', 1000, 'legacy_balance', '{xColl}', 1)", "collections"),
+            ("B9 다른 회사 payments INSERT (대조군·멂)", $"INSERT INTO payments (payment_id, tenant_id, partner_id, payment_type, amount, payment_date, ref_order_id, is_active) VALUES (UUID(), '{otherT}', '{fPay}', 'legacy_balance', 1000, '2026-03-11', '{fPay}', 1)", "payments"),
+            ("B10 다른 회사 collections INSERT (대조군·멂)", $"INSERT INTO collections (collection_id, tenant_id, partner_id, collection_date, amount, ref_doc_type, ref_doc_id, is_active) VALUES (UUID(), '{otherT}', '{fColl}', '2026-03-11', 1000, 'legacy_balance', '{fColl}', 1)", "collections"),
         };
 
         // 🔴 PM 판정 S4-2(작지 §19) — 막히면 **무엇에** 막혔는지 찍는다. 1205 는 교착이 아니라
         //    `INNODB STATUS` 에 사후 기록이 안 남는다 → **대기하는 동안** 다른 연결로 들여다봐야 한다.
         await using var probe = await OpenAsync();
         var blocked = new List<string>();
-        foreach (var (name, sql) in ops)
+        var crossBlocked = new List<string>();
+        foreach (var (name, sql, table) in ops.Concat(crossOps))
         {
             var sw = System.Diagnostics.Stopwatch.StartNew();
             var run = b.ExecuteAsync(sql, new { T = t });
             var waited = await Task.WhenAny(run, Task.Delay(700)) != run;
-            var waitLock = waited ? await WaitingLockAsync(probe) : null;
+            var waitLock = waited ? await WaitingLockAsync(probe, table) : null;
             try
             {
                 await run;
@@ -1023,7 +1060,8 @@ public sealed class RcSafePathGateTests : IClassFixture<RcStatementDbFixture>
             catch (MySqlException ex)
             {
                 Console.Error.WriteLine($"[G-RC12] {name} 🔴 {sw.ElapsedMilliseconds}ms errno={ex.Number} · 대기 상대:\n{waitLock ?? "(못 찍었다)"}");
-                blocked.Add($"{name} (errno={ex.Number} · 대기 상대 {Summarize(waitLock)})");
+                var entry = $"{name} (errno={ex.Number} · 대기 상대 {Summarize(waitLock)})";
+                if (Array.Exists(crossOps, o => o.Name == name)) crossBlocked.Add(entry); else blocked.Add(entry);
                 var culprit = MatchLockIndexes.FirstOrDefault(i => (waitLock ?? string.Empty).Contains(i, StringComparison.Ordinal));
                 Assert.True(culprit is null,
                     $"🔴 {name} 이 **이월잔액 매칭 잠금**({culprit})에 막혔다 — 병렬이슈53 재발이다.\n"
@@ -1039,7 +1077,43 @@ public sealed class RcSafePathGateTests : IClassFixture<RcStatementDbFixture>
             $"무관 거래처 차단이 {blocked.Count}건으로 늘었다(고정값 {MaxNonMatchBlocked}) — " + string.Join(" · ", blocked) + "\n"
           + "  매칭 잠금이 원인은 아니지만(위 단언이 통과했다), 막히는 자리가 늘어난 것 자체가 회귀다.");
         Console.Error.WriteLine($"[G-RC12] 매칭 잠금 외 사유로 막힌 건수 = {blocked.Count} (고정값 {MaxNonMatchBlocked})");
+
+        // ══════════════════════════════════════════════════════════════════════════════
+        // 🔴 다른 회사 축 — 실측 결과(작지 §21). **0 이 아니다. 지금은 4 다.**
+        //
+        // 대조군이 갈랐다: 이웃(B7·B8)만이 아니라 **멀리 떨어진 B9·B10 도 똑같이 막혔다.**
+        // ⇒ 원인은 「L3 이 회사 접두 없는 인덱스를 탄다」가 **아니다.** 그 가설은 실측으로 기각됐다.
+        //   잡힌 상대는 `uq_payments_source` 의 간극 — 수기 등록의 `source_id` NULL 자리,
+        //   즉 **이미 별건으로 뺀 교착 원인 ②**(작지 §19-4)다. 회사 접두가 있는데도 이웃이라 막힌다.
+        //
+        // 그래서 여기서 인덱스를 고치면 **엉뚱한 곳을 고치는 것**이다. 대신 —
+        //   · 상대가 **매칭 잠금이면** 위 `culprit` 단언이 먼저 빨간불을 낸다(그건 이 갈래의 책임이다).
+        //   · 매칭 잠금이 아닌 차단은 **지금 몇 건인지 못 박는다.** 늘면 빨간불이다.
+        // 🔴 목표값은 여전히 **0** 이다. 0 으로 내리는 일은 별건 설계(교착 원인 ②)가 한다 — 그때 이 값을 내린다.
+        // ══════════════════════════════════════════════════════════════════════════════
+        Assert.True(crossBlocked.Count <= MaxCrossTenantBlocked,
+            $"🔴 **다른 회사**의 등록이 막힌 건수가 {crossBlocked.Count}건으로 늘었다(고정값 {MaxCrossTenantBlocked}) — "
+          + string.Join(" · ", crossBlocked) + "\n"
+          + "  상대가 매칭 잠금이 아닌 것은 위 단언이 이미 확인했다. 그래도 **막히는 자리가 늘어난 것 자체가 회귀다.**\n"
+          + "  원인이 매칭 잠금으로 바뀌었다면 게이트를 고치지 말고 **멈추고 설계로 올려라**(작지 §21 · §17 C-3).");
+
+        var unnamed = crossBlocked.Count(x => x.Contains("(못 찍었다)", StringComparison.Ordinal));
+        Console.Error.WriteLine($"[G-RC12] 다른 회사 축 4건 → 막힘 {crossBlocked.Count}건(고정값 {MaxCrossTenantBlocked}) · 상대를 못 찍은 건 {unnamed}건");
+        // 🔴 못 찍은 건수도 고정한다 — 「모르는 채로 통과」가 늘어나는 것을 막는다([4] F-8 과 같은 이유).
+        Assert.True(unnamed <= MaxCrossTenantUnnamed,
+            $"다른 회사 차단 중 **상대를 못 찍은 건**이 {unnamed}건으로 늘었다(고정값 {MaxCrossTenantUnnamed}).\n"
+          + "  상대를 모르면 「매칭 잠금이 아니다」도 증명된 것이 아니다. 관측 장치(WaitingLockAsync)부터 고쳐라.");
     }
+
+    /// <summary>
+    /// 🔴 20260921 실측 고정값 — <b>다른 회사</b>의 등록 4건 중 막히는 건수. 현재 <b>4</b>(전부).
+    /// <para>상대는 매칭 잠금이 아니라 <c>uq_*_source</c> 의 NULL 간극(교착 원인 ② · 작지 §19-4 별건).
+    /// ⬜ 그 별건이 봉합되면 이 값을 <b>0</b> 으로 내린다 — 목표값은 0 이다.</para>
+    /// </summary>
+    private const int MaxCrossTenantBlocked = 4;
+
+    /// <summary>🔴 그중 <b>상대를 못 찍은</b> 건수 — 현재 2(<c>collections</c> 축). 관측의 한계이지 안전의 증거가 아니다.</summary>
+    private const int MaxCrossTenantUnnamed = 2;
 
     /// <summary>
     /// 🔴 20260920작1 S4 실측 고정값 — 무관 거래처 6건 중 <b>매칭 잠금이 아닌</b> 사유로 막히는 건수.
@@ -1048,14 +1122,27 @@ public sealed class RcSafePathGateTests : IClassFixture<RcStatementDbFixture>
     /// </summary>
     private const int MaxNonMatchBlocked = 1;
 
-    /// <summary>지금 이 서버에서 <b>대기 중</b>인 잠금 — 어느 표·어느 인덱스인지가 여기에만 보인다.</summary>
-    private static async Task<string?> WaitingLockAsync(MySqlConnection c)
+    /// <summary>
+    /// 지금 이 서버에서 <b>대기 중</b>인 잠금 — 어느 표·어느 인덱스인지가 여기에만 보인다.
+    /// <para>
+    /// 🔴 20260921 봉합: 예전 판은 <c>INNODB STATUS</c> 에서 <b>첫 번째</b> 「WAITING FOR THIS LOCK」 만 잘라 왔다.
+    /// 그래서 <c>collections</c> 에 넣다 막힌 건인데 <c>payments</c> 의 옛 기록이 찍혔다(실측).
+    /// <b>엉뚱한 상대를 근거로 원인을 정하면 그 위에 쌓는 것이 전부 틀린다</b>(인계서 §5 「재현했다고 원인이 아니다」).
+    /// ⇒ 트랜잭션 블록으로 자른 뒤 <b>지금 기다리는(LOCK WAIT) · 그 표를 건드리는</b> 블록만 고른다.
+    /// </para>
+    /// </summary>
+    private static async Task<string?> WaitingLockAsync(MySqlConnection c, string tableHint)
     {
         var status = (await c.QueryFirstAsync<InnodbStatus>("SHOW ENGINE INNODB STATUS")).Status ?? string.Empty;
-        var i = status.IndexOf("WAITING FOR THIS LOCK TO BE GRANTED", StringComparison.Ordinal);
-        if (i < 0) return null;
-        var j = status.IndexOf("---TRANSACTION", i, StringComparison.Ordinal);
-        return j > i ? status[i..j] : status[i..Math.Min(i + 1200, status.Length)];
+        var blocks = status.Split("---TRANSACTION", StringSplitOptions.None);
+        foreach (var block in blocks)
+        {
+            if (!block.Contains("WAITING FOR THIS LOCK TO BE GRANTED", StringComparison.Ordinal)) continue;
+            if (!block.Contains(tableHint, StringComparison.Ordinal)) continue;   // 그 표를 건드리는 블록만
+            var i = block.IndexOf("WAITING FOR THIS LOCK TO BE GRANTED", StringComparison.Ordinal);
+            return block[i..Math.Min(i + 1500, block.Length)];
+        }
+        return null;   // 못 찍었으면 못 찍었다고 한다 — 아무거나 주워오지 않는다
     }
 
     private static string Summarize(string? waitLock)
@@ -1130,20 +1217,28 @@ public sealed class RcSafePathGateTests : IClassFixture<RcStatementDbFixture>
         public string? Extra { get; set; }
     }
 
-    /// <summary>문장별 기대 인덱스 — S3 0단계 실측(명세서 §2-2)과 같은 계획이어야 한다.</summary>
-    private static readonly (string Name, bool Receivable, bool DocParam, string Sql, string RequiredKey)[] LockedStatements =
+    /// <summary>
+    /// RR 전용 잠금 읽기 문장 5개 — <c>EXPLAIN</c> 으로 잠금 범위를 재는 대상.
+    /// <para>
+    /// 🔴 [4] F-6 — 예전에는 여기에 「기대 인덱스 이름」 칸이 있었다. <b>지웠다.</b> 이름을 고정하면
+    /// 시드 분포에 따라 초록·빨강을 오가고(명세서 §3-3), 고정해야 할 것은 이름이 아니라
+    /// <b>회사 경계 안에서만 훑고 잠그는가</b>이기 때문이다(작지 §19-1 · <see cref="IndexSafety"/>).
+    /// 쓰지 않는 칸을 남겨 두면 다음 사람이 그걸 아직 재는 줄 안다.
+    /// </para>
+    /// </summary>
+    private static readonly (string Name, bool Receivable, bool DocParam, string Sql)[] LockedStatements =
     {
-        ("L1 ReceivableMatchedLegacyLockedSql", true,  false, LegacyBalanceMatching.ReceivableMatchedLegacyLockedSql, "idx_coll_tenant_doc"),
-        ("L2 ReceivableMatchedDocLockedSql",    true,  false, LegacyBalanceMatching.ReceivableMatchedDocLockedSql,    "idx_coll_tenant_doc"),
-        ("L3 PayableMatchedLegacyLockedSql",    false, false, LegacyBalanceMatching.PayableMatchedLegacyLockedSql,    "idx_pay_tenant_type_ref"),
-        ("L4 PayableMatchedDocLockedSql",       false, false, LegacyBalanceMatching.PayableMatchedDocLockedSql,       "idx_pay_tenant_type_ref"),
-        ("L5 PayableMatchedReturnLockedSql",    false, false, LegacyBalanceMatching.PayableMatchedReturnLockedSql,    "idx_rt_tenant_receipt"),
+        ("L1 ReceivableMatchedLegacyLockedSql", true,  false, LegacyBalanceMatching.ReceivableMatchedLegacyLockedSql),
+        ("L2 ReceivableMatchedDocLockedSql",    true,  false, LegacyBalanceMatching.ReceivableMatchedDocLockedSql),
+        ("L3 PayableMatchedLegacyLockedSql",    false, false, LegacyBalanceMatching.PayableMatchedLegacyLockedSql),
+        ("L4 PayableMatchedDocLockedSql",       false, false, LegacyBalanceMatching.PayableMatchedDocLockedSql),
+        ("L5 PayableMatchedReturnLockedSql",    false, false, LegacyBalanceMatching.PayableMatchedReturnLockedSql),
     };
 
     /// <summary>훑는 행 상한 — 「그 거래처/그 전표 몫」. 무관 행을 아무리 심어도 이 안이어야 한다.</summary>
     private const long RowsCap = 8;
 
-    [Fact(DisplayName = "G-RC13 EXPLAIN — 제품 문장 8개가 DB-124 인덱스를 타고(테넌트 넘는 인덱스 금지) · 무관 행 10배(30→300)에도 훑는 행 불변")]
+    [Fact(DisplayName = "G-RC13 EXPLAIN — 제품 문장 8개가 회사 경계 안에서만 훑는다(스키마로 판정 · 음성 대조군 포함) · 무관 행 10배(30→300)에도 훑는 행 불변")]
     public async Task GRC13_EXPLAIN_잠금범위()
     {
         if (Skip(nameof(GRC13_EXPLAIN_잠금범위))) return;
@@ -1183,6 +1278,35 @@ public sealed class RcSafePathGateTests : IClassFixture<RcStatementDbFixture>
                   + "  = 잠금·스캔 범위가 「그 전표 몫」이 아니라 **표 전체를 따라 커진다**. DB-124 가 안 먹고 있다(병렬이슈53).");
             }
         }
+
+        // ══════════════════════════════════════════════════════════════════════════════
+        // 🔴 음성 대조군 — [4] F-2. 조건 ③(「두 회사에 걸친 값 0건」)이 **장식이 아님**을 증명한다.
+        //
+        // 시험 시드는 거래처 id 를 `noise-{회사8자리}-NNNN` 로 만든다 → 두 회사에 걸친 값이 **구조상 생길 수 없다.**
+        // 그러면 ③ 은 언제나 0 을 돌려주고, 아무것도 안 재는 단언이 된다(감시자 0).
+        // ⇒ 여기서 **일부러 걸치게 만들고**, 판정이 실제로 빨간불로 바뀌는지 본다. 안 바뀌면 그 조건은 지워야 한다.
+        // ══════════════════════════════════════════════════════════════════════════════
+        var spanT = Guid.NewGuid().ToString();
+        await db.ExecuteAsync("""
+            INSERT INTO payments (payment_id, tenant_id, partner_id, payment_type, amount, payment_date, ref_order_id, is_active)
+            VALUES (UUID(), @ST, @P, 'legacy_balance', 1000, '2026-03-12', @P, 1)
+            """, new { ST = spanT, P = PB });   // PB 는 회사 t 의 거래처다 → 이제 payments 에서 두 회사에 걸친다
+        try
+        {
+            var polluted = await IndexSafety.MeasureAsync(db, ExplainTables);
+            var stillSafe = polluted.IsSafe("payments", "idx_pay_partner", out var whyPolluted);
+            Console.Error.WriteLine($"[G-RC13 음성대조군] idx_pay_partner 판정: {(stillSafe ? "안전" : "위험")} — {whyPolluted}");
+            Assert.False(stillSafe,
+                "🔴 거래처 하나를 **두 회사에 걸치게** 만들었는데도 안전판정이 그대로 통과했다.\n"
+              + "  = 조건 ③(두 회사에 걸친 값 0건)이 아무것도 안 재고 있다는 뜻이다. 그 조건은 장식이다 — 지우거나 고쳐라.\n"
+              + $"  판정 사유: {whyPolluted}");
+            Assert.Contains("두 회사에 걸쳐", whyPolluted, StringComparison.Ordinal);
+        }
+        finally
+        {
+            // 🔴 반드시 치운다 — 남기면 **다음 실행의 ③ 이 계속 빨간불**이 되어 게이트가 잡음이 된다.
+            await db.ExecuteAsync("DELETE FROM payments WHERE tenant_id = @ST", new { ST = spanT });
+        }
     }
 
     /// <summary>
@@ -1218,7 +1342,7 @@ public sealed class RcSafePathGateTests : IClassFixture<RcStatementDbFixture>
             await db.ExecuteAsync($"ANALYZE TABLE {tbl}");   // 추정치는 통계에 달려 있다
 
         var result = new Dictionary<string, List<ExplainRow>>(StringComparer.Ordinal);
-        foreach (var (name, receivable, _, sql, _) in LockedStatements)
+        foreach (var (name, receivable, _, sql) in LockedStatements)
         {
             _aliasOf[name] = AliasesOf(sql);
             result[name] = (await db.QueryAsync<ExplainRow>("EXPLAIN " + sql,
@@ -1313,14 +1437,16 @@ public sealed class RcSafePathGateTests : IClassFixture<RcStatementDbFixture>
                 s._firstCol[(r.TableName, r.IndexName)] = r.ColumnName;
 
             // ② 단일칸 PK = 그 값 하나가 표 전체에 한 행뿐이다 → 그 행의 회사도 하나다.
+            //    🔴 [4] F-3 — **반드시 `tables` 로 좁힌다.** DB 전체로 열면 단일칸 PK 이름이 ~110개(`id` 포함)나 되어
+            //       「손으로 적은 예외 3개」를 「자동 생성 예외 110개」로 바꾸는 꼴이 된다. 그건 더 나쁘다.
             foreach (var c in await db.QueryAsync<string>("""
                 SELECT k.COLUMN_NAME
                   FROM information_schema.KEY_COLUMN_USAGE k
                   JOIN (SELECT TABLE_NAME FROM information_schema.KEY_COLUMN_USAGE
-                         WHERE TABLE_SCHEMA = DATABASE() AND CONSTRAINT_NAME = 'PRIMARY'
+                         WHERE TABLE_SCHEMA = DATABASE() AND CONSTRAINT_NAME = 'PRIMARY' AND TABLE_NAME IN @T
                          GROUP BY TABLE_NAME HAVING COUNT(*) = 1) one ON one.TABLE_NAME = k.TABLE_NAME
-                 WHERE k.TABLE_SCHEMA = DATABASE() AND k.CONSTRAINT_NAME = 'PRIMARY'
-                """))
+                 WHERE k.TABLE_SCHEMA = DATABASE() AND k.CONSTRAINT_NAME = 'PRIMARY' AND k.TABLE_NAME IN @T
+                """, new { T = tables }))
                 s._globallyUniqueId.Add(c);
 
             var hasTenant = new HashSet<string>(await db.QueryAsync<string>("""
@@ -1357,7 +1483,14 @@ public sealed class RcSafePathGateTests : IClassFixture<RcStatementDbFixture>
                 why = $"첫 칸이 {col} 다 — tenant_id 도 아니고 어느 표의 단일칸 PK 도 아니다(한 값이 여러 회사에 걸칠 수 있다)";
                 return false;
             }
-            if (_spanning.TryGetValue((table, col), out var n) && n > 0)
+            // 🔴 [4] F-8 — **모르면 막는다**(fail-closed). 측정값이 없다는 것은 「안전하다」가 아니라
+            //    「안 쟀다」이고, 안 잰 것을 통과시키면 그게 감시자 0 이다.
+            if (!_spanning.TryGetValue((table, col), out var n))
+            {
+                why = $"첫 칸 {col} 이 두 회사에 걸치는지 **안 쟀다**({table} 에 tenant_id 가 없거나 측정에서 빠졌다) — 모르면 통과시키지 않는다";
+                return false;
+            }
+            if (n > 0)
             {
                 why = $"첫 칸 {col} 이 단일칸 PK 인데도 {table} 에서 {n}개 값이 두 회사에 걸쳐 있다 — 데이터가 규칙을 깼다";
                 return false;
