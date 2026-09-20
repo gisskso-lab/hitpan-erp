@@ -1,5 +1,6 @@
 ﻿using System.Security.Cryptography;
 using System.Text;
+using System.Text.RegularExpressions;
 using Dapper;
 using HitPan.Application.DTOs.Approval;
 using HitPan.Application.Interfaces;
@@ -1129,17 +1130,6 @@ public sealed class RcSafePathGateTests : IClassFixture<RcStatementDbFixture>
         public string? Extra { get; set; }
     }
 
-    /// <summary>
-    /// 🔴 <b>테넌트를 넘는 인덱스</b> — 이걸 고르면 잠금·스캔 범위가 <b>남의 회사 행</b>까지 간다(PM 판정 ① · 작지 §18).
-    /// <para>
-    /// ⚠️ 여기 없는 것도 정직하게 적는다 — <c>fk_pr_partner</c>(<c>purchase_receipts(partner_id)</c>)·
-    /// <c>idx_return</c>(<c>purchase_return_items(return_id)</c>)은 접두가 <c>tenant_id</c> 가 아니지만 <b>막지 않는다</b>:
-    /// 둘 다 값이 전역 유일한 id 라 그 범위 안에 남의 회사 행이 들어올 수 없고, S3 0단계 실측에서 옵티마이저가 고른 계획이다.
-    /// 「접두가 tenant_id 여야 한다」로 막으면 제품을 고쳐야 하는데, 그건 이 갈래의 범위가 아니다(#33).
-    /// </para>
-    /// </summary>
-    private static readonly string[] CrossTenantIndexes = { "idx_pay_partner", "idx_pay_date", "idx_pay_type", "idx_partner" };
-
     /// <summary>문장별 기대 인덱스 — S3 0단계 실측(명세서 §2-2)과 같은 계획이어야 한다.</summary>
     private static readonly (string Name, bool Receivable, bool DocParam, string Sql, string RequiredKey)[] LockedStatements =
     {
@@ -1169,15 +1159,17 @@ public sealed class RcSafePathGateTests : IClassFixture<RcStatementDbFixture>
         var other = Guid.NewGuid().ToString();
         await SeedNoiseRowsAsync(db, t, 1, 30);
         await SeedNoiseRowsAsync(db, other, 1, 30);
-        var idxFirstCol = await FirstColumnOfIndexesAsync(db);
+        var safety = await IndexSafety.MeasureAsync(db, ExplainTables);
         var before = await ExplainAllAsync(db, t);
-        AssertPlans(before, "무관 행 30건", idxFirstCol);
+        AssertPlans(before, "무관 행 30건", safety);
 
         // 🔴 대조군 — 무관 행을 10배로. `rows` 는 추정치라 「상한 이하」 하나만으로는 흔들린다(설계 §12-6).
         await SeedNoiseRowsAsync(db, t, 31, 300);
         await SeedNoiseRowsAsync(db, other, 31, 300);
+        // 🔴 10배로 늘린 뒤 **다시 잰다** — 「두 회사에 걸친 값 0건」은 지금 데이터에 대한 사실이지 영구 사실이 아니다.
+        var safetyAfter = await IndexSafety.MeasureAsync(db, ExplainTables);
         var after = await ExplainAllAsync(db, t);
-        AssertPlans(after, "무관 행 300건", idxFirstCol);
+        AssertPlans(after, "무관 행 300건", safetyAfter);
 
         foreach (var (name, rows) in after)
         {
@@ -1222,31 +1214,35 @@ public sealed class RcSafePathGateTests : IClassFixture<RcStatementDbFixture>
     /// <summary>제품 문장 8개(L1~L5 + D1-a/b/c)를 <c>EXPLAIN</c> 한다 — <b>문장은 제품 상수를 그대로 이어 붙인다</b>.</summary>
     private async Task<Dictionary<string, List<ExplainRow>>> ExplainAllAsync(MySqlConnection db, string t)
     {
-        foreach (var tbl in new[] { "collections", "payments", "purchase_returns", "purchase_return_items", "sales_deliveries", "purchase_receipts" })
+        foreach (var tbl in ExplainTables)
             await db.ExecuteAsync($"ANALYZE TABLE {tbl}");   // 추정치는 통계에 달려 있다
 
         var result = new Dictionary<string, List<ExplainRow>>(StringComparer.Ordinal);
         foreach (var (name, receivable, _, sql, _) in LockedStatements)
+        {
+            _aliasOf[name] = AliasesOf(sql);
             result[name] = (await db.QueryAsync<ExplainRow>("EXPLAIN " + sql,
                 new { TenantId = t, PartnerId = receivable ? PA : PB })).AsList();
+        }
 
-        result["D1-a DeliveryUsedSql"] = (await db.QueryAsync<ExplainRow>("EXPLAIN " + CollectionService.DeliveryUsedSql(RR),
-            new { TenantId = t, RefId = DocD })).AsList();
-        result["D1-b ReceiptPaidSql"] = (await db.QueryAsync<ExplainRow>("EXPLAIN " + CollectionService.ReceiptPaidSql(RR),
-            new { TenantId = t, RefId = DocR })).AsList();
-        result["D1-c ReceiptReturnedSql"] = (await db.QueryAsync<ExplainRow>("EXPLAIN " + CollectionService.ReceiptReturnedSql(RR),
-            new { TenantId = t, RefId = DocR })).AsList();
+        foreach (var (name, sql, refId) in new[]
+                 {
+                     ("D1-a DeliveryUsedSql",   CollectionService.DeliveryUsedSql(RR),   DocD),
+                     ("D1-b ReceiptPaidSql",    CollectionService.ReceiptPaidSql(RR),    DocR),
+                     ("D1-c ReceiptReturnedSql", CollectionService.ReceiptReturnedSql(RR), DocR),
+                 })
+        {
+            _aliasOf[name] = AliasesOf(sql);
+            result[name] = (await db.QueryAsync<ExplainRow>("EXPLAIN " + sql, new { TenantId = t, RefId = refId })).AsList();
+        }
         return result;
     }
 
-    /// <summary>
-    /// 🔴 접두가 <c>tenant_id</c> 가 아니어도 되는 인덱스 — <b>값이 전역 유일한 id</b> 라 그 범위에 남의 회사 행이 못 들어온다.
-    /// <c>idx_return</c>(<c>purchase_return_items.return_id</c>) · <c>fk_pr_partner</c>(<c>purchase_receipts.partner_id</c>) ·
-    /// <c>PRIMARY</c>. 셋 다 S3 0단계 실측에서 옵티마이저가 고른 계획이고, 막으면 제품을 고쳐야 한다(범위 밖 · #33).
-    /// </summary>
-    private static readonly string[] TenantPrefixExempt = { "idx_return", "fk_pr_partner", "PRIMARY" };
+    /// <summary>안전판정을 재는 표 — <c>EXPLAIN</c> 이 닿는 표 전부.</summary>
+    private static readonly string[] ExplainTables =
+        { "collections", "payments", "purchase_returns", "purchase_return_items", "sales_deliveries", "purchase_receipts", "partners" };
 
-    private static void AssertPlans(Dictionary<string, List<ExplainRow>> plans, string when, Dictionary<string, string> firstColumnOf)
+    private void AssertPlans(Dictionary<string, List<ExplainRow>> plans, string when, IndexSafety safety)
     {
         foreach (var (name, rows) in plans)
         {
@@ -1259,18 +1255,19 @@ public sealed class RcSafePathGateTests : IClassFixture<RcStatementDbFixture>
                 Assert.True(!string.Equals(r.Type, "ALL", StringComparison.OrdinalIgnoreCase) && r.Key is not null,
                     $"🔴 {name} · 표 {r.Table}({when}): 인덱스를 안 탄다(type={r.Type} key={r.Key ?? "NULL"}).\n"
                   + "  = 그 회사 표를 통째로 훑으면서 잠근다. 상관없는 거래처의 수금·지급이 막힌다(병렬이슈53).");
-                Assert.True(Array.IndexOf(CrossTenantIndexes, r.Key) < 0,
-                    $"🔴 {name} · 표 {r.Table}({when}): **테넌트를 넘는 인덱스**({r.Key})를 골랐다.\n"
-                  + "  범위 안에 남의 회사 행이 들어온다 — 잠금 범위이자 테넌트 격리 문제다(작지 §18 PM 판정 ①).");
+                // 🔴 PM 판정 S4-3(작지 §19-1) — 「어느 인덱스 이름인지」는 시드 분포에 따라 갈린다(명세서 §3-3).
+                //    고정할 것은 이름이 아니라 **성질**이다: 그 인덱스로 훑고 잠그는 범위에 **남의 회사 행이 들어올 수 있는가**.
+                //    손으로 적은 예외 목록은 두지 않는다 — 이름만 더하면 조용히 초록이 되는 길이다(감시자 0 · 인계서 §5-2).
+                //    ⚠️ 행 수 상한보다 **먼저** 잰다 — 범위가 남의 회사까지 가는 것이 더 근본적인 사고이고,
+                //       행 수로 먼저 걸리면 「왜 빨간불인지」가 잘못 읽힌다.
+                var table = RealTableOf(name, r.Table);
+                Assert.True(safety.IsSafe(table, r.Key!, out var why),
+                    $"🔴 {name} · 표 {r.Table}(={table} · {when}): 고른 인덱스 {r.Key} 의 범위에 **남의 회사 행**이 들어올 수 있다 — {why}.\n"
+                  + "  잠금 범위이자 테넌트 격리 문제다(작지 §19-1 PM 판정).");
+                Console.Error.WriteLine($"[G-RC13 {when}] {name} · {table} · {r.Key} 안전판정: {why}");
+
                 Assert.True(r.Rows is not null && r.Rows <= RowsCap,
                     $"🔴 {name} · 표 {r.Table}({when}): 훑는 행 {r.Rows} 가 상한 {RowsCap} 을 넘었다 — 「그 전표 몫」이 아니다.");
-
-                // 🔴 PM 판정 S4-3(작지 §19) — 「어느 인덱스인지」는 시드 분포에 따라 갈린다(명세서 §3-3).
-                //    고정해야 하는 것은 이름이 아니라 **성질**이다: 접두가 tenant_id 여야 회사 경계 안에서만 훑고 잠근다.
-                var first = r.Key is not null && firstColumnOf.TryGetValue(r.Key, out var col) ? col : "(모름)";
-                Assert.True(Array.IndexOf(TenantPrefixExempt, r.Key) >= 0 || string.Equals(first, "tenant_id", StringComparison.Ordinal),
-                    $"🔴 {name} · 표 {r.Table}({when}): 고른 인덱스 {r.Key} 의 첫 칸이 {first} 다 — tenant_id 접두가 아니다.\n"
-                  + "  그 범위에는 **남의 회사 행**이 들어온다 = 잠금 범위이자 테넌트 격리 문제다(작지 §18 PM 판정 ①).");
             }
         }
     }
@@ -1282,24 +1279,121 @@ public sealed class RcSafePathGateTests : IClassFixture<RcStatementDbFixture>
         public string ColumnName { get; set; } = string.Empty;
     }
 
-    /// <summary>인덱스별 첫 칸 — 「테넌트 접두인가」를 이름 목록이 아니라 <b>스키마</b>에 물어본다.</summary>
-    private static async Task<Dictionary<string, string>> FirstColumnOfIndexesAsync(MySqlConnection db)
+    /// <summary>
+    /// 🔴 <b>잠금 범위 안전 판정</b> — 작지 §19-1 (PM 판정 S4-3).
+    /// <para>
+    /// 지켜야 하는 것은 「인덱스 첫 칸이 <c>tenant_id</c> 다」가 <b>아니라</b>
+    /// 「그 인덱스로 훑고 잠그는 범위에 <b>남의 회사 행이 들어올 수 없다</b>」이다. 대리물이 아니라 목적을 잰다.
+    /// </para>
+    /// <para>셋 다 <b>잰다</b> — 손으로 적은 예외 목록은 두지 않는다:
+    /// ① 첫 칸이 <c>tenant_id</c> 인가(<c>information_schema.STATISTICS</c>)
+    /// ② 아니라면 그 칸이 <b>어느 표의 단일칸 PRIMARY KEY</b> 인가(= 값 하나가 표 전체에 한 행 → 회사도 하나)
+    /// ③ 그리고 <b>실제로</b> 그 칸이 두 회사에 걸친 값이 없는가(회사 2개가 심긴 시험 DB 에서 COUNT).
+    /// </para>
+    /// <para>
+    /// ⚠️ ②만으로 통과시키지 않는 이유: <c>payments.partner_id</c> 에는 FK 가 없어서 스키마가 「한 회사」를 강제하지 못한다.
+    /// 그래서 ③ 으로 <b>센다.</b> 데이터가 규칙을 깨면 여기서 먼저 빨간불이 난다.
+    /// </para>
+    /// </summary>
+    private sealed class IndexSafety
     {
-        var rows = await db.QueryAsync<StatRow>("""
-            SELECT TABLE_NAME AS TableName, INDEX_NAME AS IndexName, COLUMN_NAME AS ColumnName
-              FROM information_schema.STATISTICS
-             WHERE TABLE_SCHEMA = DATABASE() AND SEQ_IN_INDEX = 1
-            """);
-        // ⚠️ EXPLAIN 의 `table` 칸은 **별칭**(lc·ec·ep…)이라 표 이름으로 못 찾는다 → 인덱스 이름으로 찾는다.
-        //    같은 인덱스 이름이 두 표에 있으면(예: idx_tenant_partner) 첫 칸을 **모아서** 본다 — 하나라도 다르면 통과 못 한다.
-        var byIndex = new Dictionary<string, SortedSet<string>>(StringComparer.Ordinal);
-        foreach (var r in rows)
+        private readonly Dictionary<(string Table, string Index), string> _firstCol = new();
+        private readonly HashSet<string> _globallyUniqueId = new(StringComparer.Ordinal);
+        private readonly Dictionary<(string Table, string Column), long> _spanning = new();
+
+        public static async Task<IndexSafety> MeasureAsync(MySqlConnection db, string[] tables)
         {
-            if (!byIndex.TryGetValue(r.IndexName, out var set)) byIndex[r.IndexName] = set = new SortedSet<string>(StringComparer.Ordinal);
-            set.Add(r.ColumnName);
+            var s = new IndexSafety();
+
+            foreach (var r in await db.QueryAsync<StatRow>("""
+                SELECT TABLE_NAME AS TableName, INDEX_NAME AS IndexName, COLUMN_NAME AS ColumnName
+                  FROM information_schema.STATISTICS
+                 WHERE TABLE_SCHEMA = DATABASE() AND SEQ_IN_INDEX = 1 AND TABLE_NAME IN @T
+                """, new { T = tables }))
+                s._firstCol[(r.TableName, r.IndexName)] = r.ColumnName;
+
+            // ② 단일칸 PK = 그 값 하나가 표 전체에 한 행뿐이다 → 그 행의 회사도 하나다.
+            foreach (var c in await db.QueryAsync<string>("""
+                SELECT k.COLUMN_NAME
+                  FROM information_schema.KEY_COLUMN_USAGE k
+                  JOIN (SELECT TABLE_NAME FROM information_schema.KEY_COLUMN_USAGE
+                         WHERE TABLE_SCHEMA = DATABASE() AND CONSTRAINT_NAME = 'PRIMARY'
+                         GROUP BY TABLE_NAME HAVING COUNT(*) = 1) one ON one.TABLE_NAME = k.TABLE_NAME
+                 WHERE k.TABLE_SCHEMA = DATABASE() AND k.CONSTRAINT_NAME = 'PRIMARY'
+                """))
+                s._globallyUniqueId.Add(c);
+
+            var hasTenant = new HashSet<string>(await db.QueryAsync<string>("""
+                SELECT TABLE_NAME FROM information_schema.COLUMNS
+                 WHERE TABLE_SCHEMA = DATABASE() AND COLUMN_NAME = 'tenant_id' AND TABLE_NAME IN @T
+                """, new { T = tables }), StringComparer.Ordinal);
+
+            // ③ 센다 — 시험 DB 에는 회사가 2개 심겨 있다(무관 행 시드).
+            foreach (var kv in s._firstCol)
+            {
+                var (table, col) = (kv.Key.Table, kv.Value);
+                if (string.Equals(col, "tenant_id", StringComparison.Ordinal)) continue;
+                if (!hasTenant.Contains(table) || s._spanning.ContainsKey((table, col))) continue;
+                s._spanning[(table, col)] = await db.ExecuteScalarAsync<long>(
+                    $"SELECT COUNT(*) FROM (SELECT `{col}` FROM `{table}` GROUP BY `{col}` HAVING COUNT(DISTINCT tenant_id) > 1) x");
+            }
+            return s;
         }
-        return byIndex.ToDictionary(kv => kv.Key, kv => string.Join(",", kv.Value), StringComparer.Ordinal);
+
+        public bool IsSafe(string table, string index, out string why)
+        {
+            if (!_firstCol.TryGetValue((table, index), out var col))
+            {
+                why = $"인덱스 {index} 를 표 {table} 의 스키마에서 못 찾았다 — 판정 불가라 통과시키지 않는다";
+                return false;
+            }
+            if (string.Equals(col, "tenant_id", StringComparison.Ordinal))
+            {
+                why = "첫 칸이 tenant_id";
+                return true;
+            }
+            if (!_globallyUniqueId.Contains(col))
+            {
+                why = $"첫 칸이 {col} 다 — tenant_id 도 아니고 어느 표의 단일칸 PK 도 아니다(한 값이 여러 회사에 걸칠 수 있다)";
+                return false;
+            }
+            if (_spanning.TryGetValue((table, col), out var n) && n > 0)
+            {
+                why = $"첫 칸 {col} 이 단일칸 PK 인데도 {table} 에서 {n}개 값이 두 회사에 걸쳐 있다 — 데이터가 규칙을 깼다";
+                return false;
+            }
+            why = $"첫 칸 {col} 은 단일칸 PK(한 값 = 한 회사) · {table} 에서 두 회사에 걸친 값 0건";
+            return true;
+        }
     }
+
+    /// <summary>
+    /// <c>EXPLAIN</c> 의 <c>table</c> 칸은 <b>별칭</b>(<c>lp</c>·<c>ec</c>…)이라 스키마에 물어볼 수가 없다.
+    /// → 제품 문장에서 <c>FROM/JOIN 표 별칭</c> 을 읽어 <b>진짜 표 이름</b>으로 되돌린다.
+    /// </summary>
+    private static readonly Regex FromJoinAlias = new(
+        @"\b(?:FROM|JOIN)\s+`?([A-Za-z_][A-Za-z0-9_]*)`?\s+(?:AS\s+)?`?([A-Za-z_][A-Za-z0-9_]*)`?",
+        RegexOptions.IgnoreCase | RegexOptions.Compiled);
+
+    private static readonly string[] SqlKeywords = { "ON", "WHERE", "JOIN", "LOCK", "GROUP", "ORDER", "LEFT", "INNER", "AND", "FOR", "UNION" };
+
+    private static Dictionary<string, string> AliasesOf(string sql)
+    {
+        var map = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        foreach (System.Text.RegularExpressions.Match m in FromJoinAlias.Matches(sql))
+        {
+            var alias = m.Groups[2].Value;
+            if (Array.Exists(SqlKeywords, k => string.Equals(k, alias, StringComparison.OrdinalIgnoreCase))) continue;
+            map[alias] = m.Groups[1].Value;
+        }
+        return map;
+    }
+
+    /// <summary>문장 이름 + EXPLAIN 별칭 → 진짜 표 이름. 못 되돌리면 <b>별칭 그대로</b> 돌려준다(그러면 안전판정이 빨간불이 된다).</summary>
+    private string RealTableOf(string statement, string? alias)
+        => alias is not null && _aliasOf.TryGetValue(statement, out var m) && m.TryGetValue(alias, out var real) ? real : alias ?? "(없다)";
+
+    private readonly Dictionary<string, Dictionary<string, string>> _aliasOf = new(StringComparer.Ordinal);
 
     // ────────────────────────────── G-RC11 (순수) ──────────────────────────────
 
@@ -1334,4 +1428,39 @@ public sealed class RcSafePathGateTests : IClassFixture<RcStatementDbFixture>
 
     private static string Sha256Lf(string s)
         => Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(s.Replace("\r\n", "\n")))).ToLowerInvariant();
+
+    /// <summary>
+    /// 🔴 <b>고객 노출 문구 앵커</b> — 작지 §19-6-1 (PM 판정 · 무력화 ② 축 변경).
+    /// <para>
+    /// 다른 사례들은 기대 문구를 <b>제품 상수에서 만든다</b>(복제 금지 · §18 요구 ②). 그래서 상수를 고치면
+    /// 양쪽이 같이 바뀌어 <b>아무도 못 잡는다</b> — 무력화 ②가 초록으로 남은 이유다(실측).
+    /// </para>
+    /// <para>
+    /// 여기서는 문구 <b>본문</b>을 기록값으로 박아 둔다. 고치면 이 사례가 먼저 빨간불이 나고,
+    /// 앵커를 같이 고쳐야 통과한다 = <b>고객이 보는 말을 바꾸는 일이 의도적인 행위가 된다</b>(#23 · #25).
+    /// 문구를 정말 바꿔야 할 때는 기록값을 고치면 된다 — 막는 게이트가 아니라 <b>알리는 게이트</b>다.
+    /// </para>
+    /// </summary>
+    [Fact(DisplayName = "G-RC15 문구 앵커 — 고객이 보는 문구 4개가 기록값과 한 글자도 다르지 않다 (조용한 변경을 막는다)")]
+    public void GRC15_고객문구_앵커()
+    {
+        var anchors = new (string Name, string Actual, string Recorded)[]
+        {
+            ("MsgDeliveryOver", CollectionService.MsgDeliveryOver,
+                "이 거래명세서에 남은 받을 돈은 {0:N0}원입니다. 그보다 큰 금액은 맞출 수 없습니다."),
+            ("MsgReceiptOver", CollectionService.MsgReceiptOver,
+                "이 매입전표에 남은 줄 돈은 {0:N0}원입니다. 그보다 큰 금액은 맞출 수 없습니다."),
+            // 🔴 S3 ㉶ (PM 결재 C-2): 「같은 거래처의」를 뺐다 — 사실이 아니었다. 이 앵커가 그 결정을 지킨다.
+            ("MsgMatchBusyCollection", CollectionService.MsgMatchBusyCollection,
+                "지금 다른 사용자가 수금을 저장하고 있습니다. 잠시 후 다시 저장해 주세요."),
+            ("MsgMatchBusyPayment", CollectionService.MsgMatchBusyPayment,
+                "지금 다른 사용자가 지급을 저장하고 있습니다. 잠시 후 다시 저장해 주세요."),
+        };
+
+        foreach (var (name, actual, recorded) in anchors)
+            Assert.True(string.Equals(actual, recorded, StringComparison.Ordinal),
+                $"🔴 고객 노출 문구 {name} 이 바뀌었다.\n  기록: {recorded}\n  현재: {actual}\n"
+              + "  고객이 보는 말이다. 바꾸는 것이 맞다면 이 기록값도 같이 고쳐라 — 그러면 통과한다(작지 §19-6-1).\n"
+              + "  ⚠️ 개발용어(AI·Claude·에러코드·인덱스명)가 섞이지 않았는지도 같이 보라(#23).");
+    }
 }
