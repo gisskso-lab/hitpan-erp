@@ -806,7 +806,11 @@ CREATE TABLE `collections` (
   UNIQUE KEY `uq_collections_source_hash` (`tenant_id`,`migrated_source_hash`),
   KEY `idx_tenant_partner` (`tenant_id`,`partner_id`),
   KEY `idx_tenant_date` (`tenant_id`,`collection_date`),
-  KEY `idx_coll_tenant_active_date` (`tenant_id`,`is_active`,`collection_date` DESC)
+  KEY `idx_coll_tenant_active_date` (`tenant_id`,`is_active`,`collection_date` DESC),
+  -- 20260920작1 S3 (DB-124): 전표 수금합의 잠금 범위를 「그 전표」로 좁힌다.
+  --   이 인덱스가 없으면 RR 경로의 잠금 읽기가 collections 를 통째로 훑어(실측 ALL)
+  --   아무 상관 없는 다른 거래처의 수금 등록까지 1205 로 막는다.
+  KEY `idx_coll_tenant_doc` (`tenant_id`,`ref_doc_type`,`ref_doc_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='수금 — 거래처로부터 받은 돈 기록';
 /*!40101 SET character_set_client = @saved_cs_client */;
 
@@ -2940,7 +2944,12 @@ CREATE TABLE `payments` (
   KEY `idx_pay_partner` (`partner_id`),
   KEY `idx_pay_date` (`payment_date`),
   KEY `idx_pay_type` (`payment_type`),
-  KEY `idx_pay_tenant` (`tenant_id`)
+  KEY `idx_pay_tenant` (`tenant_id`),
+  -- 20260920작1 S3 (DB-124): collections 와 같은 이유 — 전표 지급합의 잠금 범위를 좁힌다.
+  KEY `idx_pay_tenant_type_ref` (`tenant_id`,`payment_type`,`ref_order_id`),
+  -- 20260920작1 S3 (DB-124): payments 에는 (tenant_id,partner_id) 복합이 없어 옵티마이저가
+  --   idx_pay_tenant(테넌트 전체)와 idx_pay_partner(테넌트를 넘는다) 사이에서 갈린다.
+  KEY `idx_pay_tenant_partner` (`tenant_id`,`partner_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
@@ -3154,7 +3163,10 @@ CREATE TABLE `purchase_returns` (
   KEY `idx_purchase_returns_reason` (`tenant_id`,`return_reason`,`return_date`),
   -- 20260827작9 W3: 매입반품번호 UNIQUE. sales_returns 엔 uq_sret_tenant_returnno 가 있는데
   --   매입반품에만 없던 비대칭. COUNT+1 채번과 겹치면 조용히 중복됐다.
-  UNIQUE KEY `uq_pret_return_no` (`tenant_id`,`return_no`)
+  UNIQUE KEY `uq_pret_return_no` (`tenant_id`,`return_no`),
+  -- 20260920작1 S3 (DB-124): 전표 반품합의 잠금 범위. receipt_id 접두 인덱스가 없어
+  --   조인 순서가 뒤집혀 purchase_return_items 를 통째로 훑고 있었다(실측 ALL).
+  KEY `idx_rt_tenant_receipt` (`tenant_id`,`receipt_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
