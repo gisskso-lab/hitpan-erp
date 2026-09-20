@@ -1004,26 +1004,115 @@ public sealed class RcSafePathGateTests : IClassFixture<RcStatementDbFixture>
             ("B6 purchase_returns INSERT", $"INSERT INTO purchase_returns (return_id, tenant_id, receipt_id, return_no, partner_id, return_date, status, total_amount, vat_amount, is_deleted) VALUES (UUID(), @T, 'np-{t[..8]}-9', CONCAT('RT-', SUBSTRING(UUID(),1,8)), '{noiseIns}', '2026-03-11', 'draft', 1000, 0, 0)"),
         };
 
+        // 🔴 PM 판정 S4-2(작지 §19) — 막히면 **무엇에** 막혔는지 찍는다. 1205 는 교착이 아니라
+        //    `INNODB STATUS` 에 사후 기록이 안 남는다 → **대기하는 동안** 다른 연결로 들여다봐야 한다.
+        await using var probe = await OpenAsync();
         var blocked = new List<string>();
         foreach (var (name, sql) in ops)
         {
             var sw = System.Diagnostics.Stopwatch.StartNew();
+            var run = b.ExecuteAsync(sql, new { T = t });
+            var waited = await Task.WhenAny(run, Task.Delay(700)) != run;
+            var waitLock = waited ? await WaitingLockAsync(probe) : null;
             try
             {
-                await b.ExecuteAsync(sql, new { T = t });
+                await run;
                 Console.Error.WriteLine($"[G-RC12] {name} 🟢 {sw.ElapsedMilliseconds}ms");
             }
             catch (MySqlException ex)
             {
-                Console.Error.WriteLine($"[G-RC12] {name} 🔴 {sw.ElapsedMilliseconds}ms errno={ex.Number} {ex.Message}");
-                blocked.Add($"{name} (errno={ex.Number})");
+                Console.Error.WriteLine($"[G-RC12] {name} 🔴 {sw.ElapsedMilliseconds}ms errno={ex.Number} · 대기 상대:\n{waitLock ?? "(못 찍었다)"}");
+                blocked.Add($"{name} (errno={ex.Number} · 대기 상대 {Summarize(waitLock)})");
+                var culprit = MatchLockIndexes.FirstOrDefault(i => (waitLock ?? string.Empty).Contains(i, StringComparison.Ordinal));
+                Assert.True(culprit is null,
+                    $"🔴 {name} 이 **이월잔액 매칭 잠금**({culprit})에 막혔다 — 병렬이슈53 재발이다.\n"
+                  + "  DB-124 잠금범위 인덱스가 빠졌거나 옵티마이저가 안 고른 것이다. 다른 거래처가 못 쓰는 ERP 는 흐름이 끊긴 것이다(#20).\n"
+                  + $"  대기 상대:\n{waitLock}");
             }
         }
         await atx.RollbackAsync();
 
-        Assert.True(blocked.Count == 0,
-            "🔴 RR 매칭 잠금이 **무관 거래처**의 등록까지 막았다(병렬이슈53 재발) — " + string.Join(" · ", blocked) + "\n"
-          + "  DB-124 잠금범위 인덱스가 빠졌거나 옵티마이저가 안 고른 것이다. 다른 거래처가 못 쓰는 ERP 는 흐름이 끊긴 것이다(#20).");
+        // 🔴 PM 판정 S4-2 — 매칭 잠금이 아닌 이유로 막히는 것이 **현재 동작**이다(수기 등록의 유니크 간극 · 명세서 §3-1).
+        //    그것까지 초록으로 덮지 않고, **지금 몇 건이 그러한지**를 고정한다. 늘어나면 빨간불이다.
+        Assert.True(blocked.Count <= MaxNonMatchBlocked,
+            $"무관 거래처 차단이 {blocked.Count}건으로 늘었다(고정값 {MaxNonMatchBlocked}) — " + string.Join(" · ", blocked) + "\n"
+          + "  매칭 잠금이 원인은 아니지만(위 단언이 통과했다), 막히는 자리가 늘어난 것 자체가 회귀다.");
+        Console.Error.WriteLine($"[G-RC12] 매칭 잠금 외 사유로 막힌 건수 = {blocked.Count} (고정값 {MaxNonMatchBlocked})");
+    }
+
+    /// <summary>
+    /// 🔴 20260920작1 S4 실측 고정값 — 무관 거래처 6건 중 <b>매칭 잠금이 아닌</b> 사유로 막히는 건수.
+    /// 현재 1건(B4 `payments` INSERT · 수기 등록의 <c>source_id</c> NULL 유니크 간극 · 명세서 §3-1·§3-2).
+    /// ⬜ 별건 설계로 없애면 이 값을 0 으로 내린다(PM 판정 S4-5).
+    /// </summary>
+    private const int MaxNonMatchBlocked = 1;
+
+    /// <summary>지금 이 서버에서 <b>대기 중</b>인 잠금 — 어느 표·어느 인덱스인지가 여기에만 보인다.</summary>
+    private static async Task<string?> WaitingLockAsync(MySqlConnection c)
+    {
+        var status = (await c.QueryFirstAsync<InnodbStatus>("SHOW ENGINE INNODB STATUS")).Status ?? string.Empty;
+        var i = status.IndexOf("WAITING FOR THIS LOCK TO BE GRANTED", StringComparison.Ordinal);
+        if (i < 0) return null;
+        var j = status.IndexOf("---TRANSACTION", i, StringComparison.Ordinal);
+        return j > i ? status[i..j] : status[i..Math.Min(i + 1200, status.Length)];
+    }
+
+    private static string Summarize(string? waitLock)
+    {
+        if (waitLock is null) return "(못 찍었다)";
+        var i = waitLock.IndexOf("index ", StringComparison.Ordinal);
+        if (i < 0) return "(인덱스 줄 없음)";
+        var j = waitLock.IndexOf('\n', i);
+        return j > i ? waitLock[i..j].Trim() : waitLock[i..].Trim();
+    }
+
+    // ────────────────────────────── G-RC14 (유니크 축 · 🆕 S4) ──────────────────────────────
+
+    /// <summary>
+    /// 🔴 <b>G-RC14 — 유니크 축</b>. 20260920작1 S4 (PM 판정 S4-5 · 작지 §19).
+    /// <para>
+    /// 매칭 잠금과 <b>다른 뿌리</b>다. 같은 이관 키(<c>source_id</c>)로 두 연결이 동시에 수금을 넣으면
+    /// <c>uq_collections_source</c>(<c>tenant_id</c>,<c>source_id</c>)가 <b>한쪽만</b> 통과시킨다 — 돈이 두 번 들어가지 않는다.
+    /// </para>
+    /// <para>
+    /// ⚠️ 이 게이트는 <b>고치는 게이트가 아니라 고정하는 게이트</b>다. 수기 등록(<c>source_id</c> NULL)이
+    /// 이 유니크 인덱스의 같은 자리에서 RR 간극 잠금으로 교착하는 것(명세서 §3-1)은 <b>별건 설계</b>로 넘겼다(S4-5).
+    /// 여기서는 「<b>멱등은 지켜진다</b> · 교착이 나면 재시도 껍질이 삼킨다」는 <b>현재 사실</b>만 못 박는다.
+    /// 나중에 그 별건이 손대면 이 게이트가 먼저 말을 한다.
+    /// </para>
+    /// </summary>
+    [Fact(DisplayName = "G-RC14 유니크 축 — 같은 이관 키(source_id)로 동시 수금 INSERT 는 한쪽만 성공(멱등) · 교착은 재시도가 삼킨다")]
+    public async Task GRC14_유니크축_동시()
+    {
+        if (Skip(nameof(GRC14_유니크축_동시))) return;
+        var (db, t, _svc, _p) = await NewTenantAsync();
+        await using var _ = db;
+
+        const string sourceId = "mig-rc14-same-key";
+        var sql = """
+            INSERT INTO collections (collection_id, tenant_id, partner_id, collection_date, amount, ref_doc_type, ref_doc_id, is_active, source_type, source_id)
+            VALUES (UUID(), @T, @P, '2026-03-10', 10000, 'legacy_balance', @P, 1, 'migration', @S)
+            """;
+
+        await using var c1 = await OpenAsync();
+        await using var c2 = await OpenAsync();
+        await using var tx1 = await BeginRrAsync(c1);
+        await using var tx2 = await BeginRrAsync(c2);
+
+        var e1 = await Record.ExceptionAsync(() => c1.ExecuteAsync(sql, new { T = t, P = PA, S = sourceId }, tx1));
+        // 뒤 연결은 같은 유니크 자리에서 기다린다 — 앞이 커밋하면 1062, 롤백하면 통과.
+        var second = c2.ExecuteAsync(sql, new { T = t, P = PC, S = sourceId }, tx2);
+        var waited = await Task.WhenAny(second, Task.Delay(1000)) != second;
+        await tx1.CommitAsync();
+        var e2 = await Record.ExceptionAsync(() => second);
+        if (e2 is null) await tx2.CommitAsync(); else await tx2.RollbackAsync();
+
+        Assert.Null(e1);
+        Assert.True(waited, "뒤 연결이 유니크 자리에서 기다리지 않았다 — 같은 이관 키가 직렬화되지 않는다(멱등이 깨진다).");
+        Assert.True(e2 is MySqlException my && my.Number == 1062,
+            $"같은 이관 키 두 번째 INSERT 가 막히지 않았다 — 이관 수금이 두 줄이 된다(멱등 깨짐). 실제: {e2?.GetType().Name} {e2?.Message}");
+        Assert.Equal(1, await db.ExecuteScalarAsync<int>(
+            "SELECT COUNT(*) FROM collections WHERE tenant_id=@T AND source_id=@S", new { T = t, S = sourceId }));
     }
 
     // ────────────────────────────── G-RC13 (EXPLAIN · 🆕 S4) ──────────────────────────────
@@ -1080,14 +1169,15 @@ public sealed class RcSafePathGateTests : IClassFixture<RcStatementDbFixture>
         var other = Guid.NewGuid().ToString();
         await SeedNoiseRowsAsync(db, t, 1, 30);
         await SeedNoiseRowsAsync(db, other, 1, 30);
+        var idxFirstCol = await FirstColumnOfIndexesAsync(db);
         var before = await ExplainAllAsync(db, t);
-        AssertPlans(before, "무관 행 30건");
+        AssertPlans(before, "무관 행 30건", idxFirstCol);
 
         // 🔴 대조군 — 무관 행을 10배로. `rows` 는 추정치라 「상한 이하」 하나만으로는 흔들린다(설계 §12-6).
         await SeedNoiseRowsAsync(db, t, 31, 300);
         await SeedNoiseRowsAsync(db, other, 31, 300);
         var after = await ExplainAllAsync(db, t);
-        AssertPlans(after, "무관 행 300건");
+        AssertPlans(after, "무관 행 300건", idxFirstCol);
 
         foreach (var (name, rows) in after)
         {
@@ -1149,13 +1239,15 @@ public sealed class RcSafePathGateTests : IClassFixture<RcStatementDbFixture>
         return result;
     }
 
-    private static void AssertPlans(Dictionary<string, List<ExplainRow>> plans, string when)
-    {
-        var required = LockedStatements.ToDictionary(s => s.Name, s => s.RequiredKey, StringComparer.Ordinal);
-        required["D1-a DeliveryUsedSql"] = "idx_coll_tenant_doc";
-        required["D1-b ReceiptPaidSql"] = "idx_pay_tenant_type_ref";
-        required["D1-c ReceiptReturnedSql"] = "idx_rt_tenant_receipt";
+    /// <summary>
+    /// 🔴 접두가 <c>tenant_id</c> 가 아니어도 되는 인덱스 — <b>값이 전역 유일한 id</b> 라 그 범위에 남의 회사 행이 못 들어온다.
+    /// <c>idx_return</c>(<c>purchase_return_items.return_id</c>) · <c>fk_pr_partner</c>(<c>purchase_receipts.partner_id</c>) ·
+    /// <c>PRIMARY</c>. 셋 다 S3 0단계 실측에서 옵티마이저가 고른 계획이고, 막으면 제품을 고쳐야 한다(범위 밖 · #33).
+    /// </summary>
+    private static readonly string[] TenantPrefixExempt = { "idx_return", "fk_pr_partner", "PRIMARY" };
 
+    private static void AssertPlans(Dictionary<string, List<ExplainRow>> plans, string when, Dictionary<string, string> firstColumnOf)
+    {
         foreach (var (name, rows) in plans)
         {
             foreach (var r in rows)
@@ -1172,12 +1264,41 @@ public sealed class RcSafePathGateTests : IClassFixture<RcStatementDbFixture>
                   + "  범위 안에 남의 회사 행이 들어온다 — 잠금 범위이자 테넌트 격리 문제다(작지 §18 PM 판정 ①).");
                 Assert.True(r.Rows is not null && r.Rows <= RowsCap,
                     $"🔴 {name} · 표 {r.Table}({when}): 훑는 행 {r.Rows} 가 상한 {RowsCap} 을 넘었다 — 「그 전표 몫」이 아니다.");
+
+                // 🔴 PM 판정 S4-3(작지 §19) — 「어느 인덱스인지」는 시드 분포에 따라 갈린다(명세서 §3-3).
+                //    고정해야 하는 것은 이름이 아니라 **성질**이다: 접두가 tenant_id 여야 회사 경계 안에서만 훑고 잠근다.
+                var first = r.Key is not null && firstColumnOf.TryGetValue(r.Key, out var col) ? col : "(모름)";
+                Assert.True(Array.IndexOf(TenantPrefixExempt, r.Key) >= 0 || string.Equals(first, "tenant_id", StringComparison.Ordinal),
+                    $"🔴 {name} · 표 {r.Table}({when}): 고른 인덱스 {r.Key} 의 첫 칸이 {first} 다 — tenant_id 접두가 아니다.\n"
+                  + "  그 범위에는 **남의 회사 행**이 들어온다 = 잠금 범위이자 테넌트 격리 문제다(작지 §18 PM 판정 ①).");
             }
-            Assert.True(rows.Any(r => string.Equals(r.Key, required[name], StringComparison.Ordinal)),
-                $"🔴 {name}({when}): DB-124 인덱스 {required[name]} 를 아무 표도 안 탔다 — 계획: "
-              + string.Join(" · ", rows.Select(r => $"{r.Table}:{r.Key ?? "NULL"}")) + "\n"
-              + "  옵티마이저가 인덱스를 안 고르면 봉합은 「넣었다」로 끝난 것이다(작지 §17 C-3 — 멈추고 PM 보고).");
         }
+    }
+
+    private sealed class StatRow
+    {
+        public string TableName { get; set; } = string.Empty;
+        public string IndexName { get; set; } = string.Empty;
+        public string ColumnName { get; set; } = string.Empty;
+    }
+
+    /// <summary>인덱스별 첫 칸 — 「테넌트 접두인가」를 이름 목록이 아니라 <b>스키마</b>에 물어본다.</summary>
+    private static async Task<Dictionary<string, string>> FirstColumnOfIndexesAsync(MySqlConnection db)
+    {
+        var rows = await db.QueryAsync<StatRow>("""
+            SELECT TABLE_NAME AS TableName, INDEX_NAME AS IndexName, COLUMN_NAME AS ColumnName
+              FROM information_schema.STATISTICS
+             WHERE TABLE_SCHEMA = DATABASE() AND SEQ_IN_INDEX = 1
+            """);
+        // ⚠️ EXPLAIN 의 `table` 칸은 **별칭**(lc·ec·ep…)이라 표 이름으로 못 찾는다 → 인덱스 이름으로 찾는다.
+        //    같은 인덱스 이름이 두 표에 있으면(예: idx_tenant_partner) 첫 칸을 **모아서** 본다 — 하나라도 다르면 통과 못 한다.
+        var byIndex = new Dictionary<string, SortedSet<string>>(StringComparer.Ordinal);
+        foreach (var r in rows)
+        {
+            if (!byIndex.TryGetValue(r.IndexName, out var set)) byIndex[r.IndexName] = set = new SortedSet<string>(StringComparer.Ordinal);
+            set.Add(r.ColumnName);
+        }
+        return byIndex.ToDictionary(kv => kv.Key, kv => string.Join(",", kv.Value), StringComparer.Ordinal);
     }
 
     // ────────────────────────────── G-RC11 (순수) ──────────────────────────────
