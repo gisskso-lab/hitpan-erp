@@ -238,6 +238,17 @@ public static class LegacyBalanceMatching
         => mode == LegacyMatchMode.RepeatableReadLocking ? "\n LOCK IN SHARE MODE" : string.Empty;
 
     /// <summary>
+    /// 🔴 20260920작1 S1 — 열려 있는 트랜잭션이 곧 모드다(<see cref="IsolationFor"/> 의 역). 매칭 트랜잭션이 아닌 격리수준이면 <see cref="NotSupportedException"/>.
+    /// 재시도 껍질이 모드를 다시 판정해도 본문이 실제 트랜잭션과 어긋날 수 없게 한다.
+    /// </summary>
+    public static LegacyMatchMode ModeOf(IDbTransaction tx) => tx.IsolationLevel switch
+    {
+        MatchIsolation => LegacyMatchMode.ReadCommittedFresh,
+        MatchIsolationFallback => LegacyMatchMode.RepeatableReadLocking,
+        _ => throw new NotSupportedException($"[LegacyBalanceMatching] 이월잔액 매칭 트랜잭션은 {MatchIsolation} 또는 {MatchIsolationFallback} 로 열어야 한다(현재 {tx.IsolationLevel}).")
+    };
+
+    /// <summary>
     /// 병렬이슈44 PM 후속 2 — 이월잔액 매칭 트랜잭션 격리 수준. 거래처 단위 직렬화는 <c>partner_legacy_balances</c> 행 <c>FOR UPDATE</c> 가 맡고,
     /// R 재계산은 문장마다 최신 커밋을 본다(파생표 <c>LOCK IN SHARE MODE</c> 방식은 다른 거래처 동시 매칭에서 교착 실측 → 폐기 · G8-w).
     /// ⚠️ 바이너리 로그를 <c>binlog_format=STATEMENT</c> 로 쓰는 서버는 RC 쓰기가 거절된다(MariaDB 11.4 기본값 MIXED).
