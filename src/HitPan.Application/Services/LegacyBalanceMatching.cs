@@ -269,13 +269,36 @@ public static class LegacyBalanceMatching
          LOCK IN SHARE MODE
         """;
 
-    /// <summary>미수 M ②: 이관 명세서에 붙은 수금(공용 식의 <c>em</c> 하위질의 · 거래처는 <c>sd.partner_id</c>).</summary>
+    /// <summary>
+    /// 미수 M ②: 이관 명세서에 붙은 수금(공용 식의 <c>em</c> 하위질의 · 거래처는 <c>sd.partner_id</c>).
+    ///
+    /// <para>
+    /// 🔴 <b>㉪ <c>AND ec.ref_doc_id IS NOT NULL</c> — 20260921작2 갈래 A · T3-3</b> (설계 §16 · PM 결재 §15).
+    /// </para>
+    /// <para>
+    /// <b>왜 값이 안 바뀌나</b>: 바로 위 조인이 <b>INNER</b>(평문 <c>JOIN</c>)이고
+    /// <c>sd.delivery_id = ec.ref_doc_id</c> 로 맞춘다. <c>ec.ref_doc_id</c> 가 <c>NULL</c> 이면
+    /// 등치 비교가 UNKNOWN 이라 <b>조인이 이미 그 행을 버린다</b>. 즉 ㉪ 는 조인이 이미 함의하는 술어이고
+    /// <b>결과집합을 한 행도 바꾸지 않는다</b>. 「덜 세는」 방향의 변경이 아니다(#4 · 작2 §0).
+    /// </para>
+    /// <para>
+    /// <b>왜 그래도 넣나</b>: 술어가 없으면 옵티마이저가 <c>NULL</c> 행까지 인덱스 범위에 넣어
+    /// 채움 0% 구간에서 <b>그 회사 수금 전부</b>를 잠근다(실측 112,020행). ㉪ 를 넣으면 <b>1행</b>이 된다.
+    /// </para>
+    /// <para>
+    /// 🔴 <b>혼자 두지 마라 — 한 묶음이다.</b> DB-125 의 인덱스 2개(C2 <c>sales_deliveries</c> ·
+    /// C4 <c>collections</c> 커버링)가 <b>없는 상태에서 이 줄만</b> 있으면, 채움 2~4% 구간이
+    /// <b>지금보다 나빠진다</b>(실측 +48% ~ +182%). 되돌릴 때도 <b>㉪ 를 먼저</b> 내리고 인덱스를 지운다
+    /// (설계 §16-3 R-2). 감시자는 <c>G-RC17</c>.
+    /// </para>
+    /// </summary>
     public const string ReceivableMatchedDocLockedSql = """
         SELECT COALESCE(SUM(ec.amount), 0)
           FROM collections ec
           JOIN sales_deliveries sd ON sd.delivery_id = ec.ref_doc_id AND sd.tenant_id = ec.tenant_id
          WHERE ec.tenant_id = @TenantId AND sd.partner_id = @PartnerId
            AND ec.is_active = 1 AND ec.ref_doc_type = 'sales_delivery'
+           AND ec.ref_doc_id IS NOT NULL
            AND COALESCE(ec.source_type, '') <> 'migration'
            AND COALESCE(sd.source_type, '') = 'migration'
          LOCK IN SHARE MODE
