@@ -42,6 +42,13 @@ public sealed class UpdateOrchestrator
     //   ApplyUpdateAsync 1회 실행 안에서만 의미 있다(진입 시 false 로 리셋).
     private bool _lastSwapBlockedByMigrationGate;
 
+    // T3-6 (20260921작2 §14-4 S-2·S-3′): 이번 zip 의 '신규' 마이그 머리말에서 긁은 '-- @verify-index:' 선언 목록.
+    //   교차검증 단계(PassesMigrationCrossCheckAsync)에서 채우고, 검증 단계(VerifyNewVersionAsync 3번째 조건)에서 읽는다.
+    //   · null  = 아직 수집 전이거나 수집 실패 = "판정 불가" ⇒ 🔴 차단하지 않는다(V-2 fail-open).
+    //   · 빈 집합 = 선언이 0개 = 확인 대상 0 ⇒ 기존 흐름 그대로(회귀 없음).
+    //   ApplyUpdateAsync 1회 실행 안에서만 의미 있다(진입 시 null 로 리셋 — _lastSwapBlockedByMigrationGate 와 같은 규칙).
+    private HashSet<string>? _declaredVerifyIndexes;
+
     // 봉합 (2026-06-29, 작1 고리3): 백업 실행기를 주입받는다(없으면 컴파일 깨지지 않게 신규 인자 추가만 — 헌법 #1).
     // 봉합 (2026-07-16, 작1 W4-1): 교체 구간 정지·복원 게이트와 진행 표식을 주입받는다(추가만).
     // 봉합 (2026-07-16, 작1 W4-4): 재시작기(WS28I_FourProcess)를 주입받는다 — schtasks /Run 재기동을
@@ -193,6 +200,7 @@ public sealed class UpdateOrchestrator
 
         _lock.Acquire(manifest.Version);
         _lastSwapBlockedByMigrationGate = false;   // W4-6: 이번 적용 시작 시 게이트 표식 초기화.
+        _declaredVerifyIndexes = null;             // T3-6: 이번 적용의 인덱스 선언 목록 초기화(수집 전 = 판정 불가).
         try
         {
             if (!await _gate.StopForSwapAsync(slot.Value, ct))
@@ -532,6 +540,13 @@ public sealed class UpdateOrchestrator
             if (!applied.Contains(migId)) newMigrations.Add(migId);
         }
 
+        // T3-6 · S-3′ (20260921작2 §14-4): 이번에 '신규'인 마이그 파일의 머리말에서 '-- @verify-index:' 선언을 긁는다.
+        //   🔴 확인할 인덱스 목록을 코드에 하드코딩하지 않는다 — 하드코딩하면 다음 마이그(DB-126…)에서
+        //     같은 구멍이 다시 난다(축을 고친 의미가 없어진다). 다음 마이그는 선언 줄만 적으면 자동으로 걸린다.
+        //   · 읽는 집합은 위 newMigrations 와 같다(신규분만). 옛 마이그·컬럼 마이그는 선언이 0개라 영향 0.
+        //   · 🟢 이 수집은 교체 여부를 바꾸지 않는다 — 실패해도 null(판정 불가)만 남기고 게이트 판정은 그대로다.
+        _declaredVerifyIndexes = CollectDeclaredVerifyIndexes(sqlFiles, applied);
+
         if (newMigrations.Count > 0)
         {
             // ★ 2026-08-09 고리5 완성 (사장님 결재 "승인") — 여기서 더 이상 차단하지 않는다.
@@ -552,6 +567,22 @@ public sealed class UpdateOrchestrator
             //
             //   ⚠️ 백업은 이미 이 흐름 앞단에서 워치독이 수행한다(사장님 결재 업데이트 흐름).
             //      마이그가 데이터를 변형하는 종류로 넓어지면 이 판단을 재결재받는다.
+            //
+            //   ★ 2026-09-21 사장님 결재 (20260921작2 §13 S-1) — 바로 윗줄의 재결재 조건을 정정한다.
+            //     (위 2026-08-09 문장은 이력으로 남긴다 — 지우지 않는다. 헌법 #1 · "문서는 지우지 않고 상태만 바꾼다".)
+            //
+            //     🔴 축이 「데이터를 바꾸는가」가 아니라 「실패가 드러나는가」다.
+            //
+            //     정정된 재결재 조건:
+            //       "마이그가 **실패가 드러나지 않는 종류**(인덱스·성능 등 — 실패해도 오류 0건·화면 정상)를
+            //        **포함하면** 이 판단을 재결재받는다."
+            //
+            //     왜 옛 축이 틀렸나: 인덱스 마이그는 실패해도 오류 0건·화면 정상이라 조용히 나빠질 뿐이다
+            //       (느려지고 넓게 잠근다). 데이터를 한 글자도 안 바꾸므로 옛 축("데이터를 변형하는가")에
+            //       걸리지 않고, 그래서 '경고 후 통과' 가 그대로 적용돼 부분 적용이 success 로 기록됐다.
+            //       드러나는 실패(컬럼 부재 500)는 사람이 보지만, 안 드러나는 실패는 아무도 안 본다.
+            //     ⇒ 그래서 VerifyNewVersionAsync 에 3번째 조건(선언된 인덱스 실재 확인)을 두었다(S-2).
+            //     ⇒ 이 정정은 이 트랙만의 장치가 아니다 — 앞으로 나갈 모든 성능·인덱스 마이그에 걸린다.
             _logger.LogWarning("[Update] ⚠️ 신규 마이그 {N}개 포함({List}) — 교체를 계속합니다. " +
                                "적용 주체: HitPan.API 기동 시 MigrationRunner(고리5). " +
                                "적용 실패 시 해당 지점에서 중단되고 새 컬럼을 쓰는 화면만 영향을 받습니다({V}).",
@@ -595,6 +626,234 @@ public sealed class UpdateOrchestrator
         }
 
         return true;
+    }
+
+    // ══════════════════════════════════════════════════════════════════════════════════
+    // T3-6 부분 적용 차단 장치 (20260921작2 §13 S-1~S-4 · §14-4 · §16-4 V-1~V-8 / 설계 §16-2)
+    //
+    // ■ 무엇을 막나
+    //   인덱스 마이그는 실패해도 오류 0건·화면 정상이라 아무도 못 본다. 그 상태로 신버전 코드가 올라가면
+    //   '부분 적용'(코드는 신버전 · 인덱스는 없음)이 success 로 기록되고 .old 까지 정리된다.
+    //   ⇒ 검증 단계에서 "선언된 인덱스가 실제로 있는가"를 한 번 더 묻는다.
+    //
+    // ■ 🔴 기존 불변 안전 원칙과의 관계 — 이것은 '예외'다 (V-6, 몰래 바꾸지 않는다)
+    //   W4-3 불변 안전 원칙 1 은 "이 기능의 어떤 실패도 업데이트 성공을 뒤집지 않는다" 인데,
+    //   이 장치는 정확히 그 반대를 한다 — 업데이트 성공을 뒤집는다. 그래서 예외임을 여기 적고,
+    //   예외의 범위를 아래 둘로 좁힌다. 그 밖으로 넓히려면 재결재다.
+    //     V-1 🔴 차단은 "확실히 없다" 일 때만 — information_schema 를 **읽어서** 0행임을 확인한 경우에만 false.
+    //     V-2 🔴 "판정을 못 했다" 는 차단하지 않는다(DB 연결 실패·타임아웃·권한·예외) — fail-open.
+    //            통과시키고 경고 + 본사 통지만 남긴다. 🔴 여기를 fail-closed 로 만들면 멀쩡한 업데이트가 되돌아간다.
+    //   ⇒ W4-3 원칙 2~6(영구 고립 0 · 바닥 없이 뛰지 않는다 · 침묵 금지 · ASCII · schtasks)은 무접촉이다.
+    //
+    // ■ 🔴 왜 fail-open 인가 (맞바꿈 — V-3)
+    //   닫는 것: 조용한 부분 적용. 여는 것: 판정 불가 시 부분 적용.
+    //   후자가 훨씬 드물고, 전자는 롤백으로 복구되지만 **잘못된 롤백은 고객이 쓰던 버전을 뺏는다.**
+    //
+    // ■ #43 좁은 뜻 무접촉 — Major 팝업 Y/N 흐름은 한 글자도 안 바뀐다. 이 장치는 '동의 뒤' 구간이다.
+    // ■ #23 — 고객 노출 문구 신설 0. 실패 시 길은 기존 FinishWithRollbackAsync 하나뿐이고,
+    //         인덱스 이름은 내부 로그에만 남는다(화면·팝업 0).
+    // ■ #30 — 본사 통지는 통지일 뿐이다. 통지가 실패해도 업데이트 판정은 안 바뀐다(V-4).
+    // ══════════════════════════════════════════════════════════════════════════════════
+
+    /// <summary>선언 줄 접두 — 마이그 SQL 머리말에 기계가 읽는 형식으로 적는다.</summary>
+    private const string VerifyIndexDeclarationTag = "@verify-index:";
+
+    /// <summary>3번째 조건의 폴링 상한(초). 마이그는 스왑·재시작 뒤 API 기동 때 돌므로 출현을 기다린다.</summary>
+    private const int VerifyIndexPollSeconds = 30;
+
+    /// <summary>3번째 조건 판정 결과. <b>MissingConfirmed 만</b> 차단이다(V-1).</summary>
+    public enum VerifyIndexDecision
+    {
+        /// <summary>선언이 0개 = 확인 대상 없음 ⇒ 통과(기존 흐름 무변경).</summary>
+        NoDeclarations,
+        /// <summary>선언된 것이 전부 실재 ⇒ 통과.</summary>
+        Present,
+        /// <summary>🔴 읽어서 "없다"를 확인 ⇒ 차단(false). 여기만 롤백으로 간다.</summary>
+        MissingConfirmed,
+        /// <summary>🔴 판정 불가(못 읽었다) ⇒ fail-open 통과 + 경고 + 본사 통지(V-2).</summary>
+        Undetermined
+    }
+
+    /// <summary>
+    /// 3번째 조건의 <b>순수 판정</b>(DB·파일 불필요 — 게이트가 그대로 부른다).
+    ///   <paramref name="declared"/> 가 <c>null</c> 이면 수집 자체를 못 한 것이므로 <see cref="VerifyIndexDecision.Undetermined"/>,
+    ///   <paramref name="present"/> 가 <c>null</c> 이면 조회를 못 한 것이므로 역시 Undetermined 다.
+    ///   🔴 <c>present</c> 가 <b>빈 집합</b>인 것은 "읽었는데 없다" 이므로 Undetermined 가 아니라 MissingConfirmed 다.
+    /// </summary>
+    public static (VerifyIndexDecision Decision, IReadOnlyList<string> Missing) DecideDeclaredIndexes(
+        IReadOnlyCollection<string>? declared, ISet<string>? present)
+    {
+        if (declared is null) return (VerifyIndexDecision.Undetermined, Array.Empty<string>());
+        if (declared.Count == 0) return (VerifyIndexDecision.NoDeclarations, Array.Empty<string>());
+        if (present is null) return (VerifyIndexDecision.Undetermined, Array.Empty<string>());
+
+        var missing = declared.Where(d => !present.Contains(d)).ToList();
+        return missing.Count == 0
+            ? (VerifyIndexDecision.Present, Array.Empty<string>())
+            : (VerifyIndexDecision.MissingConfirmed, missing);
+    }
+
+    /// <summary>
+    /// 마이그 SQL 한 편의 내용에서 <c>-- @verify-index: &lt;table&gt;.&lt;index_name&gt;</c> 선언을 긁는다(여러 줄 가능).
+    ///   · 주석 줄(<c>--</c>)만 본다 — 본문 SQL 에 우연히 섞인 문자열은 선언이 아니다.
+    ///   · 식별자는 <c>[A-Za-z0-9_]</c> 만 허용하고 <c>table.index</c> 두 토막이어야 한다. 어긋나면 건너뛴다
+    ///     (조용히 버리지 않는다 — 호출부가 개수 차이를 로그로 남긴다).
+    ///   · 반환은 소문자 정규화 — <c>information_schema</c> 쪽도 LOWER 로 읽는다.
+    /// </summary>
+    public static IReadOnlyList<string> ParseVerifyIndexDeclarations(string sqlContent)
+    {
+        var result = new List<string>();
+        if (string.IsNullOrEmpty(sqlContent)) return result;
+
+        foreach (var raw in sqlContent.Split('\n'))
+        {
+            var line = raw.Trim();
+            if (!line.StartsWith("--", StringComparison.Ordinal)) continue;
+
+            var at = line.IndexOf(VerifyIndexDeclarationTag, StringComparison.OrdinalIgnoreCase);
+            if (at < 0) continue;
+
+            var value = line[(at + VerifyIndexDeclarationTag.Length)..].Trim();
+            if (!IsWellFormedIndexRef(value)) continue;
+
+            var key = value.ToLowerInvariant();
+            if (!result.Contains(key)) result.Add(key);
+        }
+        return result;
+    }
+
+    /// <summary><c>table.index</c> 두 토막 · 식별자 문자만. 그 외는 선언으로 안 친다.</summary>
+    private static bool IsWellFormedIndexRef(string value)
+    {
+        var dot = value.IndexOf('.');
+        if (dot <= 0 || dot == value.Length - 1) return false;
+        if (value.IndexOf('.', dot + 1) >= 0) return false;   // 점이 둘 이상이면 형식 밖
+        foreach (var ch in value)
+        {
+            if (ch == '.') continue;
+            if (!char.IsLetterOrDigit(ch) && ch != '_') return false;
+        }
+        return true;
+    }
+
+    /// <summary>
+    /// 이번 zip 의 <b>신규</b> 마이그 파일들에서 선언을 모은다(S-3′).
+    ///   · 읽는 집합 = 교차검증 게이트 ①의 <c>newMigrations</c> 와 같다(이미 적용된 누적 이력은 제외).
+    ///   · 파일을 하나라도 못 읽으면 <c>null</c>(판정 불가) — 🔴 그래도 <b>교체를 막지는 않는다</b>.
+    ///     호출부가 이 메서드의 반환값으로 교체 여부를 바꾸지 않고, 3번째 조건이 V-2 로 처리한다.
+    /// </summary>
+    private HashSet<string>? CollectDeclaredVerifyIndexes(string[] sqlFiles, HashSet<string> applied)
+    {
+        var set = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var file in sqlFiles)
+        {
+            var migId = NormalizeMigrationId(Path.GetFileName(file));
+            if (migId.Length == 0) continue;          // DB-NN 형식이 아니면 마이그 추적 대상 아님
+            if (applied.Contains(migId)) continue;    // 이미 적용된 누적 이력 — 신규 아님
+
+            string content;
+            try
+            {
+                content = File.ReadAllText(file);
+            }
+            catch (Exception ex)
+            {
+                // 헌법 #15 — 침묵 금지. 못 읽었으면 목록이 불완전하므로 '판정 불가'로 되돌린다(V-2 로 이어진다).
+                _logger.LogWarning(ex, "[Update/Verify] 마이그 파일 읽기 실패({File}) — 인덱스 선언 수집 불가(판정 불가)", Path.GetFileName(file));
+                return null;
+            }
+
+            foreach (var decl in ParseVerifyIndexDeclarations(content)) set.Add(decl);
+        }
+
+        if (set.Count > 0)
+            _logger.LogInformation("[Update/Verify] 신규 마이그 인덱스 선언 {N}개 수집: {List}", set.Count, string.Join(", ", set));
+        return set;
+    }
+
+    /// <summary>
+    /// 🔴 <b>3번째 조건</b>(S-2) — 선언된 인덱스가 <b>실제로</b> 있는지 확인한다.
+    ///   2초 간격 × 최대 <see cref="VerifyIndexPollSeconds"/>초 폴링으로 출현을 기다린 뒤 판정한다
+    ///   (마이그는 스왑·재시작 뒤 API 기동 때 도므로, /health 가 신버전으로 200 을 준 뒤라도 경합 여지를 남긴다).
+    ///
+    ///   반환 <c>false</c> 는 <see cref="VerifyIndexDecision.MissingConfirmed"/> <b>하나뿐</b>이다(V-1).
+    ///   🔴 호출부는 손대지 않는다 — <c>false</c> 면 기존 흐름이 <c>FinishWithRollbackAsync</c> 로 간다.
+    /// </summary>
+    private async Task<bool> VerifyDeclaredIndexesAsync(UpdateManifest manifest, CancellationToken ct)
+    {
+        var declared = _declaredVerifyIndexes;
+
+        if (declared is null)
+        {
+            // 선언 목록을 수집조차 못 했다 = 판정 불가 ⇒ 🔴 fail-open(V-2). 기다려도 달라질 게 없으니 바로 통과.
+            _logger.LogWarning("[Update/Verify] ⚠️ 인덱스 선언 목록을 수집하지 못했습니다 — 3번째 조건 판정 불가로 " +
+                               "통과시킵니다(fail-open, 작2 §16-4 V-2)({V}).", manifest.Version);
+            await NotifyIndexVerifyUndeterminedAsync(manifest, ct).ConfigureAwait(false);
+            return true;
+        }
+
+        // 선언 0개 = 확인 대상 0 ⇒ 기존 흐름 그대로. 옛 마이그·컬럼 마이그는 여기서 끝난다(회귀 없음).
+        if (declared.Count == 0) return true;
+
+        var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(VerifyIndexPollSeconds);
+        var attempt = 0;
+        var lastDecision = VerifyIndexDecision.Undetermined;
+        IReadOnlyList<string> lastMissing = Array.Empty<string>();
+
+        while (true)
+        {
+            ct.ThrowIfCancellationRequested();
+            attempt++;
+
+            var present = await _statusWriter.GetExistingIndexNamesAsync(ct).ConfigureAwait(false);
+            (lastDecision, lastMissing) = DecideDeclaredIndexes(declared, present);
+
+            if (lastDecision is VerifyIndexDecision.Present or VerifyIndexDecision.NoDeclarations)
+            {
+                _logger.LogInformation("[Update/Verify] 검증 통과(3번째 조건) — 선언 인덱스 {N}개 실재 확인(시도 {A}회).",
+                    declared?.Count ?? 0, attempt);
+                return true;
+            }
+
+            if (DateTime.UtcNow >= deadline) break;
+            await Task.Delay(TimeSpan.FromSeconds(2), ct).ConfigureAwait(false);
+        }
+
+        if (lastDecision == VerifyIndexDecision.MissingConfirmed)
+        {
+            // 🔴 V-1 — 읽어서 "없다"를 확인한 경우. 여기가 유일한 차단이다.
+            //   인덱스 이름은 내부 로그에만 남긴다(#23 — 고객 화면에 안 나간다).
+            _logger.LogError("[Update] 🛑 검증 실패(3번째 조건) — 이번 릴리스가 만들기로 선언한 인덱스가 " +
+                             "{N}개 없습니다({List}). 부분 적용 상태이므로 롤백합니다({V}).",
+                             lastMissing.Count, string.Join(", ", lastMissing), manifest.Version);
+            return false;
+        }
+
+        // 🔴 V-2 — 판정 불가(못 읽었다). 차단하지 않는다. 경고 + 본사 통지만 남긴다.
+        //   여기를 fail-closed 로 바꾸면 DB 를 잠깐 못 읽었다는 이유로 멀쩡한 업데이트가 되돌아간다.
+        _logger.LogWarning("[Update/Verify] ⚠️ 3번째 조건 판정 불가({A}회 시도) — 통과시킵니다(fail-open, 작2 §16-4 V-2). " +
+                           "선언 {N}개 · 버전 {V}. 인덱스 실재를 확인하지 못했으므로 부분 적용 가능성이 남습니다.",
+                           attempt, declared?.Count ?? 0, manifest.Version);
+        await NotifyIndexVerifyUndeterminedAsync(manifest, ct).ConfigureAwait(false);
+        return true;
+    }
+
+    /// <summary>
+    /// 판정 불가를 본사에 통지한다(통지만 — 헌법 #30). 🔴 <b>통지 실패가 업데이트를 막으면 안 된다</b>(V-4):
+    ///   어떤 예외도 여기서 끝내고 호출부의 판정에 영향을 주지 않는다. 취소는 그대로 올린다(기존 관례).
+    /// </summary>
+    private async Task NotifyIndexVerifyUndeterminedAsync(UpdateManifest manifest, CancellationToken ct)
+    {
+        try
+        {
+            await _meta.NotifyEmergencyAsync("update_index_verify_undetermined", $"W4-5:{manifest.Version}", ct).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) { throw; }
+        catch (Exception ex)
+        {
+            // 헌법 #15 — 침묵 금지. 그러나 #30 — 본사가 안 받아도 고객 PC 는 스스로 간다.
+            _logger.LogWarning(ex, "[Update/Verify] 판정 불가 통지 실패 — 업데이트 판정에는 영향 없습니다.");
+        }
     }
 
     /// <summary>
@@ -697,7 +956,12 @@ public sealed class UpdateOrchestrator
             {
                 _logger.LogInformation("[Update] 검증 통과 — /health 200 + 버전 일치('{V}') + FileVersion 교차(시도 {N}회, 슬롯 {Slot}).",
                     manifest.Version, attempt, slot);
-                return true;
+
+                // ── ③ 3번째 조건 (T3-6, 20260921작2 §13 S-2): 선언된 인덱스가 '실제로' 있는가 ──
+                //   🔴 ①②를 둘 다 통과한 뒤에만 묻는다 — 마이그는 스왑·재시작 뒤 API 기동 때 돌기 때문이다.
+                //   🔴 false 는 "읽어서 없음을 확인" 하나뿐이고(V-1), 판정 불가는 통과다(V-2 fail-open).
+                //   호출부는 무변경 — false 면 기존 흐름이 FinishWithRollbackAsync 로 간다.
+                return await VerifyDeclaredIndexesAsync(manifest, ct).ConfigureAwait(false);
             }
 
             // 아직이면 로그는 시끄럽지 않게 요약만(폴링 성격상 초반 몇 회는 기동 중이라 정상 미달).
