@@ -2097,6 +2097,30 @@ public sealed class RcRatioPairDbFixture : IDisposable
 /// </list>
 /// </para>
 /// </summary>
+/// <summary>
+/// 🔴 <b>이 컬렉션은 혼자 돈다</b> — 20260921작2 갈래 A · A-4 봉합(2026-09-22).
+///
+/// <para>
+/// 사고: 전수 실행에서 <b>무관한 게이트 4건</b>(<c>TaxInvoiceMigratedLockGateTests</c>)이
+/// <b>30초 Command Timeout</b> 으로 빨간불이었다. 따로 떼어 돌리니 <b>4/4 통과</b>했다.
+/// </para>
+/// <para>
+/// 원인: 이 고정물의 시드가 <b>115,150행 × 2 사본</b> + 채움 <c>UPDATE</c> 109,822행 × 여러 회 + <c>ANALYZE</c> 를
+/// 돌리는데, <c>TaxInvoice…</c> 는 <b>같은 인스턴스</b>(<c>HITPAN_DB_PORT</c>)를 쓴다.
+/// 잠금·부하가 겹치면 <b>재는 것과 무관한 게이트가 먼저 죽는다.</b>
+/// </para>
+/// <para>
+/// 🔴 <b>최소 개입으로 봉합한다</b> — 부딪힌 상대를 찾아다니며 묶지 않고, <b>부하를 내는 쪽</b>을 직렬로 돌린다.
+/// 이렇게 하면 상대가 늘어나도 규칙을 안 고친다. (기존 <c>BackupCredentialGateCollection</c> 과 같은 패턴)
+/// </para>
+/// </summary>
+[CollectionDefinition(Name, DisableParallelization = true)]
+public sealed class RcLockRatioGateCollection
+{
+    public const string Name = "RcLockRatioGate";
+}
+
+[Collection(RcLockRatioGateCollection.Name)]
 public sealed class RcLockRatioGateTests : IClassFixture<RcRatioPairDbFixture>
 {
     private readonly RcRatioPairDbFixture _fx;
