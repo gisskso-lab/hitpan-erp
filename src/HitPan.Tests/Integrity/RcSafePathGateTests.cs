@@ -1758,11 +1758,14 @@ public sealed class RcRatioPairDbFixture : IDisposable
         c.Open();
         using var tx = c.BeginTransaction();
         var sum = c.ExecuteScalar<decimal>(sql, new { TenantId, PartnerId = partnerId }, tx, commandTimeout: 300);
-        var locked = c.ExecuteScalar<long>(
+
+        // 🔴 「행이 없다」와 「0 이다」를 구별한다.
+        //    innodb_trx 에 이 트랜잭션이 아예 없으면 측정 실패다 — 0 으로 읽어 통과시키면 거짓 초록이다.
+        var locked = c.QuerySingleOrDefault<long?>(
             "SELECT trx_rows_locked FROM information_schema.innodb_trx WHERE trx_mysql_thread_id = CONNECTION_ID()",
             transaction: tx);
         tx.Rollback();
-        return (sum, locked);
+        return (sum, locked ?? -1);
     }
 
     private void ImportShippingDdl(string db)
@@ -1804,16 +1807,36 @@ public sealed class RcRatioPairDbFixture : IDisposable
         using var c = new MySqlConnection(DbConnString(db));
         c.Open();
 
+        // 🔴 부모 먼저 — sales_deliveries.partner_id 에 FK(fk_sd_partner → partners)가 걸려 있다.
+        //    partners 자신은 FK 가 없으므로 tenants 는 만들지 않는다(마이그가 tenants 를 안 보는 것과 같은 결).
+        c.Execute($@"
+            INSERT INTO partners
+                (partner_id, tenant_id, partner_code, partner_name, partner_type,
+                 is_active, created_at, updated_at)
+            SELECT CONCAT('p', LPAD(seq, 8, '0')),
+                   '{TenantId}',
+                   CONCAT('PC', LPAD(seq, 8, '0')),
+                   CONCAT('거래처', seq),
+                   '[]', 1, NOW(6), NOW(6)
+              FROM seq_1_to_{DeliveryRows}", commandTimeout: 600);
+
+        c.Execute($@"
+            INSERT INTO partners
+                (partner_id, tenant_id, partner_code, partner_name, partner_type,
+                 is_active, created_at, updated_at)
+            VALUES ('{HotPartner}', '{TenantId}', 'PC-HOT', '편중 거래처', '[]', 1, NOW(6), NOW(6))",
+            commandTimeout: 300);
+
         c.Execute($@"
             INSERT INTO sales_deliveries
                 (delivery_id, tenant_id, delivery_no, partner_id, delivery_date,
-                 source_type, status, total_amount, vat_amount, created_at)
+                 source_type, status, total_amount, vat_amount, created_at, updated_at)
             SELECT CONCAT('d', LPAD(seq, 9, '0')),
                    '{TenantId}',
                    CONCAT('DN', seq),
                    IF(seq <= {HotPartnerDeliveries}, '{HotPartner}', CONCAT('p', LPAD(seq, 8, '0'))),
                    '2026-01-01',
-                   'migration', 'confirmed', 1000.00, 100.00, NOW(6)
+                   'migration', 'confirmed', 1000.00, 100.00, NOW(6), NOW(6)
               FROM seq_1_to_{DeliveryRows}", commandTimeout: 600);
 
         c.Execute("ALTER TABLE collections ADD COLUMN seq_no INT NULL", commandTimeout: 300);
@@ -2046,6 +2069,18 @@ public sealed class RcLockRatioGateTests : IClassFixture<RcRatioPairDbFixture>
             if (b.Locked <= 0)
             {
                 failures.Add($"A-1 위반 @ {fill}% — 봉합 전 잠금이 {b.Locked} 다. 시드가 안 돌았다(분모 0).");
+                continue;
+            }
+
+            // ── 🔴 A-1′ — 봉합 쪽 측정이 「등록조차 안 됐다」를 0 으로 착각하지 않는다 ──
+            //    합계가 0 이 아니라면 그 행들을 실제로 잠갔다는 뜻이다. 그런데 잠금 행 수가 0 이면
+            //    innodb_trx 에서 이 트랜잭션을 못 찾은 것이다 = 측정 실패지 「완벽한 봉합」이 아니다.
+            //    이걸 통과로 세면 게이트가 영원히 초록이 된다(작2 §0 「읽기 프로브 금지」와 같은 사고).
+            if (s.Sum != 0 && s.Locked <= 0)
+            {
+                failures.Add(
+                    $"A-1′ 위반 @ {fill}% — 봉합 쪽 합계가 {s.Sum} 인데 잠금 행 수가 {s.Locked} 다.\n"
+                  + "    합계가 0 이 아니면 그 행들을 잠갔어야 한다 ⇒ 측정이 안 잡힌 것이다(거짓 초록).");
                 continue;
             }
 
