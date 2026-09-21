@@ -1597,3 +1597,586 @@ public sealed class RcSafePathGateTests : IClassFixture<RcStatementDbFixture>
               + "  ⚠️ 개발용어(AI·Claude·에러코드·인덱스명)가 섞이지 않았는지도 같이 보라(#23).");
     }
 }
+
+// ══════════════════════════════════════════════════════════════════════════════
+//  G-RC17 · G-RC18 — 20260921작2 갈래 A (T3-1) · 작지 §14-1 · 설계 §16-1
+// ══════════════════════════════════════════════════════════════════════════════
+
+/// <summary>
+/// 🔴 <b>쌍 사본 고정물</b> — G-RC17 이 재는 「봉합 전 ↔ 봉합 후」 두 DB 를 만든다.
+///
+/// <para>
+/// <b>쌍의 정의</b>(설계 §16-1(2)) — <b>같은 회차 · 같은 시드 스크립트 · 같은 채움 수</b>에서 두 사본을 번갈아 잰다.
+/// <list type="bullet">
+///   <item><b>기준선 사본</b> — DB-125 <b>미적용</b> + ㉪ <b>없는</b> SQL</item>
+///   <item><b>봉합 사본</b> — DB-125 <b>적용</b> + ㉪ <b>있는</b> SQL</item>
+/// </list>
+/// </para>
+/// <para>
+/// 🔴 <b>토대는 출하 DDL 이다</b>(작지 §3 T3-0) — 오염된 기존 DB 를 쓰지 않는다.
+/// 🔴 출하 DDL 에 DB-125 KEY 가 편입된 뒤에도(T3-4) 쌍이 성립하도록, 기준선 사본은 두 인덱스를
+/// <b>명시적으로 DROP</b> 하고 봉합 사본은 <b>명시적으로 ADD</b> 한다. 「출하 DDL 이 어느 쪽이냐」에 안 기댄다.
+/// </para>
+/// <para>
+/// 🔴 <b>SKIP 을 통과로 세지 않는다</b> — 변수가 없으면 로컬은 건너뛰고 CI 는 실패한다.
+/// </para>
+/// </summary>
+public sealed class RcRatioPairDbFixture : IDisposable
+{
+    /// <summary>기준선 사본 — DB-125 인덱스 <b>없음</b>.</summary>
+    public string BaseDb { get; } = "hitpan_a_base_" + Guid.NewGuid().ToString("N")[..8];
+
+    /// <summary>봉합 사본 — DB-125 인덱스 <b>있음</b>.</summary>
+    public string SealDb { get; } = "hitpan_a_seal_" + Guid.NewGuid().ToString("N")[..8];
+
+    /// <summary>시드 규모 — 실측(작2 §12-3)이 나온 규모와 같은 자릿수로 맞춘다.</summary>
+    public const int DeliveryRows = 115_150;
+
+    /// <inheritdoc cref="DeliveryRows"/>
+    public const int CollectionRows = 109_822;
+
+    /// <summary>편중 칸 — 이 거래처 하나가 배송 <see cref="HotPartnerDeliveries"/> 건을 가진다.</summary>
+    public const string HotPartner = "p-hot";
+
+    /// <inheritdoc cref="HotPartner"/>
+    public const int HotPartnerDeliveries = 1_114;
+
+    /// <summary>테넌트는 하나다. 🔴 <c>tenants</c> 를 조인하지 않는다(DB-111/112 전례).</summary>
+    public const string TenantId = "a-gate-tenant";
+
+    /// <summary>🔴 비영 진실집합 — <c>seq % 7 == 0</c> 인 수금만 <c>manual</c>. 나머지는 <c>migration</c>.</summary>
+    public const int NonMigrationEvery = 7;
+
+    public bool Available { get; }
+
+    /// <summary>못 쓰는 이유. 쓸 수 있으면 <c>null</c>.</summary>
+    public string? Unavailable { get; }
+
+    private readonly bool _created;
+
+    public RcRatioPairDbFixture()
+    {
+        var why = UnavailableReason();
+        if (why is not null) { Unavailable = why; return; }
+
+        using (var admin = new MySqlConnection(ServerConnString()))
+        {
+            admin.Open();
+            foreach (var db in new[] { BaseDb, SealDb })
+                admin.Execute($"DROP DATABASE IF EXISTS `{db}`; CREATE DATABASE `{db}` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;");
+        }
+        _created = true;
+
+        foreach (var db in new[] { BaseDb, SealDb })
+        {
+            ImportShippingDdl(db);
+            Seed(db);
+        }
+
+        // 🔴 쌍을 확정한다 — 출하 DDL 이 어느 쪽이든 결과가 같게.
+        using (var b = new MySqlConnection(DbConnString(BaseDb)))
+        {
+            b.Open();
+            DropIfExists(b, BaseDb, "sales_deliveries", "idx_sd_tenant_partner_src");
+            DropIfExists(b, BaseDb, "collections", "idx_coll_tenant_doc_cover");
+        }
+        using (var s = new MySqlConnection(DbConnString(SealDb)))
+        {
+            s.Open();
+            AddIfMissing(s, SealDb, "sales_deliveries", "idx_sd_tenant_partner_src",
+                "(`tenant_id`,`partner_id`,`source_type`)");
+            AddIfMissing(s, SealDb, "collections", "idx_coll_tenant_doc_cover",
+                "(`tenant_id`,`ref_doc_type`,`ref_doc_id`,`is_active`,`source_type`,`amount`)");
+        }
+
+        Available = true;
+    }
+
+    private static bool IndexExists(MySqlConnection c, string db, string table, string index) =>
+        c.ExecuteScalar<long>(
+            "SELECT COUNT(*) FROM information_schema.statistics "
+          + "WHERE table_schema=@db AND table_name=@t AND index_name=@i",
+            new { db, t = table, i = index }) > 0;
+
+    private static void DropIfExists(MySqlConnection c, string db, string table, string index)
+    {
+        if (IndexExists(c, db, table, index))
+            c.Execute($"ALTER TABLE `{table}` DROP INDEX `{index}`");
+    }
+
+    private static void AddIfMissing(MySqlConnection c, string db, string table, string index, string cols)
+    {
+        if (!IndexExists(c, db, table, index))
+            c.Execute($"ALTER TABLE `{table}` ADD KEY `{index}` {cols}");
+    }
+
+    /// <summary>
+    /// 🔴 <b>채움 비율</b>을 쌍의 양쪽에 <b>같은 규칙 · 같은 수</b>로 건다.
+    /// 반환값 = 실제로 채워진 행 수(A-2 가 이 값을 기대값과 대조한다).
+    /// </summary>
+    public long SetFill(string db, int percent)
+    {
+        var k = (long)Math.Floor(CollectionRows * (double)percent / 100.0);
+        using var c = new MySqlConnection(DbConnString(db));
+        c.Open();
+        c.Execute("UPDATE collections SET ref_doc_id = NULL", commandTimeout: 300);
+        if (k > 0)
+        {
+            c.Execute(
+                "UPDATE collections SET ref_doc_id = CONCAT('d', LPAD(seq_no, 9, '0')) WHERE seq_no <= @k",
+                new { k }, commandTimeout: 300);
+        }
+        return c.ExecuteScalar<long>("SELECT COUNT(*) FROM collections WHERE ref_doc_id IS NOT NULL");
+    }
+
+    /// <summary>🔴 판정 원칙 5 — 측정 직전 <c>ANALYZE</c>. <b>쌍의 양쪽 모두.</b> 한쪽만 하면 거짓 초록(K-4).</summary>
+    public void Analyze(string db)
+    {
+        using var c = new MySqlConnection(DbConnString(db));
+        c.Open();
+        c.Execute("ANALYZE TABLE collections", commandTimeout: 300);
+        c.Execute("ANALYZE TABLE sales_deliveries", commandTimeout: 300);
+    }
+
+    /// <summary>판정 원칙 6 — <c>History list length</c>. 0 이 아니면 퍼지 잔재가 남아 있다.</summary>
+    public long HistoryListLength()
+    {
+        using var c = new MySqlConnection(ServerConnString());
+        c.Open();
+        var status = c.QuerySingle<dynamic>("SHOW ENGINE INNODB STATUS").Status as string ?? "";
+        var m = Regex.Match(status, @"History list length\s+(\d+)");
+        return m.Success ? long.Parse(m.Groups[1].Value) : -1;
+    }
+
+    /// <summary>
+    /// 🔴 <b>잠금 행 수 측정</b> — 한 연결에 한 문장, <c>ROLLBACK</c> 으로 닫는다.
+    /// 읽기 프로브가 아니다: <c>LOCK IN SHARE MODE</c> 가 실제로 잠근 행 수를 <c>innodb_trx</c> 에서 읽는다.
+    /// </summary>
+    public (decimal Sum, long Locked) MeasureLock(string db, string sql, string partnerId)
+    {
+        using var c = new MySqlConnection(DbConnString(db));
+        c.Open();
+        using var tx = c.BeginTransaction();
+        var sum = c.ExecuteScalar<decimal>(sql, new { TenantId, PartnerId = partnerId }, tx, commandTimeout: 300);
+
+        // 🔴 「행이 없다」와 「0 이다」를 구별한다.
+        //    innodb_trx 에 이 트랜잭션이 아예 없으면 측정 실패다 — 0 으로 읽어 통과시키면 거짓 초록이다.
+        var locked = c.QuerySingleOrDefault<long?>(
+            "SELECT trx_rows_locked FROM information_schema.innodb_trx WHERE trx_mysql_thread_id = CONNECTION_ID()",
+            transaction: tx);
+        tx.Rollback();
+        return (sum, locked ?? -1);
+    }
+
+    private void ImportShippingDdl(string db)
+    {
+        var psi = new System.Diagnostics.ProcessStartInfo(MysqlExe())
+        {
+            RedirectStandardInput = true,
+            RedirectStandardError = true,
+            UseShellExecute = false,
+            StandardInputEncoding = new UTF8Encoding(false)
+        };
+        psi.ArgumentList.Add($"--host={Host}");
+        psi.ArgumentList.Add($"--port={Port}");
+        psi.ArgumentList.Add($"-u{User}");
+        if (!string.IsNullOrEmpty(Pass)) psi.ArgumentList.Add($"-p{Pass}");
+        psi.ArgumentList.Add("--default-character-set=utf8mb4");
+        psi.ArgumentList.Add(db);
+
+        using var proc = System.Diagnostics.Process.Start(psi)!;
+        proc.StandardInput.Write(File.ReadAllText(Path.Combine(RepoRoot(), "installer", "hitpan_db_clean.sql")));
+        proc.StandardInput.Close();
+        var err = proc.StandardError.ReadToEnd();
+        proc.WaitForExit();
+        if (proc.ExitCode != 0)
+            throw new InvalidOperationException($"출하 DDL import 실패({db}):\n{err}");
+    }
+
+    /// <summary>
+    /// 🔴 <b>시드</b> — 실측이 나온 규모·모양을 그대로 만든다.
+    /// <list type="bullet">
+    ///   <item>거래처 편중: <see cref="HotPartner"/> 하나가 배송 <see cref="HotPartnerDeliveries"/> 건</item>
+    ///   <item>타입 칸 선택도 0: <c>sales_deliveries.source_type</c> 전부 <c>migration</c></item>
+    ///   <item>🔴 비영 진실집합: 수금 <see cref="NonMigrationEvery"/> 개마다 하나가 <c>manual</c></item>
+    /// </list>
+    /// <c>seq_no</c> 는 채움 비율을 결정적으로 걸기 위한 보조 컬럼이다(추가만 · 기존 컬럼 무접촉).
+    /// </summary>
+    private void Seed(string db)
+    {
+        using var c = new MySqlConnection(DbConnString(db));
+        c.Open();
+
+        // 🔴 부모 먼저 — sales_deliveries.partner_id 에 FK(fk_sd_partner → partners)가 걸려 있다.
+        //    partners 자신은 FK 가 없으므로 tenants 는 만들지 않는다(마이그가 tenants 를 안 보는 것과 같은 결).
+        c.Execute($@"
+            INSERT INTO partners
+                (partner_id, tenant_id, partner_code, partner_name, partner_type,
+                 is_active, created_at, updated_at)
+            SELECT CONCAT('p', LPAD(seq, 8, '0')),
+                   '{TenantId}',
+                   CONCAT('PC', LPAD(seq, 8, '0')),
+                   CONCAT('거래처', seq),
+                   '[]', 1, NOW(6), NOW(6)
+              FROM seq_1_to_{DeliveryRows}", commandTimeout: 600);
+
+        c.Execute($@"
+            INSERT INTO partners
+                (partner_id, tenant_id, partner_code, partner_name, partner_type,
+                 is_active, created_at, updated_at)
+            VALUES ('{HotPartner}', '{TenantId}', 'PC-HOT', '편중 거래처', '[]', 1, NOW(6), NOW(6))",
+            commandTimeout: 300);
+
+        c.Execute($@"
+            INSERT INTO sales_deliveries
+                (delivery_id, tenant_id, delivery_no, partner_id, delivery_date,
+                 source_type, status, total_amount, vat_amount, created_at, updated_at)
+            SELECT CONCAT('d', LPAD(seq, 9, '0')),
+                   '{TenantId}',
+                   CONCAT('DN', seq),
+                   IF(seq <= {HotPartnerDeliveries}, '{HotPartner}', CONCAT('p', LPAD(seq, 8, '0'))),
+                   '2026-01-01',
+                   'migration', 'confirmed', 1000.00, 100.00, NOW(6), NOW(6)
+              FROM seq_1_to_{DeliveryRows}", commandTimeout: 600);
+
+        c.Execute("ALTER TABLE collections ADD COLUMN seq_no INT NULL", commandTimeout: 300);
+
+        c.Execute($@"
+            INSERT INTO collections
+                (collection_id, tenant_id, partner_id, collection_date, amount,
+                 collection_method, ref_doc_type, ref_doc_id, is_active, source_type, seq_no)
+            SELECT CONCAT('c', LPAD(seq, 9, '0')),
+                   '{TenantId}',
+                   CONCAT('p', LPAD(seq, 8, '0')),
+                   '2026-01-01',
+                   100.00,
+                   'cash',
+                   'sales_delivery',
+                   NULL,
+                   1,
+                   IF(seq % {NonMigrationEvery} = 0, 'manual', 'migration'),
+                   seq
+              FROM seq_1_to_{CollectionRows}", commandTimeout: 600);
+
+        c.Execute("ALTER TABLE collections ADD KEY idx_a_gate_seq (seq_no)", commandTimeout: 300);
+    }
+
+    /// <summary>🔴 이 시드에서 L2 의 <b>기대 합계</b> — 0 이 아니어야 한다(A-4).</summary>
+    public decimal ExpectedL2Sum(int fillPercent)
+    {
+        var k = (long)Math.Floor(CollectionRows * (double)fillPercent / 100.0);
+        var overlap = Math.Min(k, HotPartnerDeliveries);
+        var hits = overlap / NonMigrationEvery;
+        return hits * 100.00m;
+    }
+
+    private static string? Port => Environment.GetEnvironmentVariable("HITPAN_DB_LOCK_PORT")
+                                ?? Environment.GetEnvironmentVariable("HITPAN_DB_STMT_PORT");
+    private static string Host => Environment.GetEnvironmentVariable("HITPAN_DB_HOST") ?? "localhost";
+    private static string User => Environment.GetEnvironmentVariable("HITPAN_DB_USER") ?? "root";
+    private static string Pass => Environment.GetEnvironmentVariable("HITPAN_DB_PASS") ?? "";
+
+    public string DbConnString(string db) => ServerConnString().Replace("User=", $"Database={db};User=");
+
+    private static string ServerConnString() =>
+        $"Server={Host};Port={Port};User={User};Password={Pass};DefaultCommandTimeout=600;GuidFormat=None;AllowUserVariables=true;";
+
+    private static string MysqlExe() =>
+        Environment.GetEnvironmentVariable("HITPAN_MYSQL") ?? @"C:\Program Files\MariaDB 11.4\bin\mysql.exe";
+
+    private static string RepoRoot()
+    {
+        var dir = new DirectoryInfo(AppContext.BaseDirectory);
+        while (dir is not null)
+        {
+            if (File.Exists(Path.Combine(dir.FullName, "HitPan.sln"))) return dir.Parent!.FullName;
+            dir = dir.Parent;
+        }
+        throw new InvalidOperationException("HitPan.sln 을 못 찾았다.");
+    }
+
+    /// <summary>
+    /// 🔴 <b>SEQUENCE 엔진</b>이 있어야 시드가 한 문장으로 선다. 없으면 <b>건너뛰지 말고 못 쓴다고 말한다</b>.
+    /// </summary>
+    private static string? UnavailableReason()
+    {
+        if (string.IsNullOrWhiteSpace(Port))
+        {
+            if (DbGateEnvironment.IsCi)
+                throw new Xunit.Sdk.XunitException(
+                    "[G-RC17] HITPAN_DB_LOCK_PORT(또는 HITPAN_DB_STMT_PORT)가 없다 — CI 는 반드시 띄워야 한다.\n"
+                  + "  이 게이트가 잠금 범위 봉합의 유일한 감시자다(작2 §14-1).");
+            return "HITPAN_DB_LOCK_PORT / HITPAN_DB_STMT_PORT 가 없다";
+        }
+        if (!DbGateEnvironment.IsCi && !File.Exists(MysqlExe()))
+            return $"mysql 클라이언트 없음: {MysqlExe()}";
+        try
+        {
+            using var c = new MySqlConnection(ServerConnString());
+            c.Open();
+            var seq = c.ExecuteScalar<long>(
+                "SELECT COUNT(*) FROM information_schema.engines WHERE engine='SEQUENCE' AND support IN ('YES','DEFAULT')");
+            if (seq == 0) return "SEQUENCE 엔진이 없다 — 이 시드는 seq_1_to_N 을 쓴다";
+            return null;
+        }
+        catch (MySqlException ex)
+        {
+            return $"측정 인스턴스에 못 붙는다: {ex.Message}";
+        }
+    }
+
+    public void Dispose()
+    {
+        if (!_created) return;
+        try
+        {
+            using var admin = new MySqlConnection(ServerConnString());
+            admin.Open();
+            admin.Execute($"DROP DATABASE IF EXISTS `{BaseDb}`; DROP DATABASE IF EXISTS `{SealDb}`;");
+        }
+        catch (MySqlException ex)
+        {
+            // #15 — 빈 catch 금지. 정리 실패는 게이트 판정을 뒤집지 않는다.
+            Console.Error.WriteLine($"[G-RC17] 사본 정리 실패(무해): {ex.Message}");
+        }
+    }
+}
+
+/// <summary>
+/// 🔴 <b>G-RC17 · G-RC18</b> — 20260921작2 갈래 A · T3-1 (작지 §14-1 · 설계 §16-1).
+///
+/// <para>
+/// <b>G-RC17 판정식</b>: <c>봉합후_trx_rows_locked ≤ 봉합전_trx_rows_locked × 0.80</c><br/>
+/// <b>판정 구간</b> = <c>0% · 2% · 4%</c> 세 칸 <b>전부</b>. 5% 이상은 <b>기록만</b>(K-6 · 비의 수치 미실측).
+/// </para>
+///
+/// <para>
+/// 🔴 <b><c>0.80</c> 은 「고정 상수 상한」이 아니다.</b> 잠금 행 수에 거는 절대값이 아니라
+/// <b>같은 회차 쌍의 비</b>다. 그래서 작지 §0 의 「고정 상수 상한 금지」·N-5 와 충돌하지 않는다.
+/// 시드가 0건이면 <b>분모가 0 이라 A-1 이 먼저 운다</b>. 재는 사례 수와 같은 상한도 아니다
+/// (<c>MaxCrossTenantBlocked=4</c> 사고와 다른 모양이다).
+/// </para>
+///
+/// <para><b>🔴 계수 0.80 이 깨지는 조건 — 설계 §16-1(4) K-1~K-6 을 그대로 옮긴다</b>
+/// <list type="bullet">
+///   <item><b>K-1</b> 🔴 <b>2% 근방 칸 — 완충이 <c>0.059</c> 뿐이다</b>(관측비 0.741).
+///         봉합후가 <b>8% 나빠지거나</b> 기준선이 <b>8% 좋아지면</b> 거짓 빨간불이 난다.
+///         <b>이 칸이 가장 얇다.</b></item>
+///   <item><b>K-2</b> 🔴 <b>몰림 분포</b>(채움이 한 거래처·한 기간에 쏠림) — C2 의 <c>partner_id</c> 선택도가
+///         죽어 비가 1 로 올라 빨간불. ⚠️ <b>미실측</b>(CTO C-D3).</item>
+///   <item><b>K-3</b> 🔴 <b>옵티마이저(MariaDB) 버전 변경</b> — ㉪ 가 무시되면 0% 칸 비가 1 로 간다(CTO C-B2).</item>
+///   <item><b>K-4</b> 🔴 <b>쌍의 한쪽만 <c>ANALYZE</c> 하면 거짓 초록</b> — 기준선 쪽을 빠뜨리면
+///         비가 <c>0.02</c> 까지 떨어진다(실측 2% 칸 37배 플립). <b>가장 위험하다.</b>
+///         그래서 이 게이트는 <b>양쪽 모두</b> ANALYZE 한다.</item>
+///   <item><b>K-5</b> 🔴 <b>퍼지 잔재(<c>HLL &gt; 0</c>)</b> — 봉합후 칸을 <b>260배</b>까지 때린다(43→11,159).
+///         0% 칸은 완충이 커서 견디나 <b>2% 칸은 못 견딘다</b> ⇒ 거짓 빨간불.</item>
+///   <item><b>K-6</b> ⚠️ <b>채움 5% 이상 구간</b> — 9구간 전부 기준선 이하였으나 <b>비의 수치는 기록이 없다</b>
+///         ⇒ <b>판정은 0·2·4% 세 칸만</b>, 5·10·50·100% 는 기록만.</item>
+/// </list>
+/// </para>
+/// </summary>
+public sealed class RcLockRatioGateTests : IClassFixture<RcRatioPairDbFixture>
+{
+    private readonly RcRatioPairDbFixture _fx;
+
+    public RcLockRatioGateTests(RcRatioPairDbFixture fx) => _fx = fx;
+
+    /// <summary>🔴 계수. 설계 §16-1(3) · PM 결재 P-20.</summary>
+    private const double RatioCeiling = 0.80;
+
+    /// <summary>A-3 — 봉합 전(= 쌍이 같은 상태)이면 비가 이 값 이상이라 빨간불이어야 한다.</summary>
+    private const double AliveRatioFloor = 0.95;
+
+    /// <summary>㉪ — L2 에 들어가는 술어 한 줄.</summary>
+    private const string KappaPredicate = "ec.ref_doc_id IS NOT NULL";
+
+    /// <summary>🔴 판정 구간. 5% 이상은 기록만 한다(K-6).</summary>
+    private static readonly int[] JudgedFills = { 0, 2, 4 };
+
+    /// <summary>🔴 기록만 하는 구간.</summary>
+    private static readonly int[] RecordedFills = { 5, 10 };
+
+    /// <summary>
+    /// 🔴 <b>봉합 전 SQL</b> — 제품 문장에서 ㉪ 한 줄만 뺀다.
+    /// <para>
+    /// 🔴 이렇게 만드는 이유: <b>A-3(살아있음)이 저절로 걸리게 하려고</b>다.
+    /// 누가 제품에서 ㉪ 를 되돌리면 두 문장이 <b>같아지고</b> 비가 1.0 이 되어 게이트가 운다.
+    /// 즉 이 게이트는 「인덱스가 있나」가 아니라 <b>「봉합이 아직 거기 있나」</b>를 잰다.
+    /// </para>
+    /// </summary>
+    private static string BaselineSql(string productSql)
+    {
+        var kept = productSql
+            .Split('\n')
+            .Where(l => !l.Contains(KappaPredicate, StringComparison.Ordinal));
+        return string.Join("\n", kept);
+    }
+
+    [Fact(DisplayName = "G-RC17 쌍 부등식 — L2 잠금이 0·2·4% 세 칸 전부에서 봉합 전의 0.80 배 이하 (양쪽 ANALYZE · 살아있음 단언 동반)")]
+    public void G_RC17_PairInequality()
+    {
+        if (!_fx.Available) { Assert.True(DbGateEnvironment.SkipOrFail(_fx.Unavailable!)); return; }
+
+        var productSql = LegacyBalanceMatching.ReceivableMatchedDocLockedSql;
+        var baselineSql = BaselineSql(productSql);
+
+        // ── A-3 살아있음 ① — 제품에 ㉪ 가 실제로 있나 ──────────────────────────
+        // 없으면 두 문장이 같다 = 쌍이 같은 상태 = 비가 1.0 = 빨간불. 그게 「봉합 전」이다.
+        Assert.True(
+            !string.Equals(productSql, baselineSql, StringComparison.Ordinal),
+            "🔴 G-RC17 이 잴 것이 없다 — 제품 L2(ReceivableMatchedDocLockedSql)에 ㉪ 가 없다.\n"
+          + $"  찾은 술어: `{KappaPredicate}`\n"
+          + "  봉합 전이라면 이 빨간불이 정상이다(작2 §3 T3-1 → T3-3 순서).\n"
+          + "  봉합 뒤인데 이게 뜨면 ㉪ 가 되돌려진 것이다 — 그대로 두지 마라.");
+
+        var report = new StringBuilder();
+        var failures = new List<string>();
+
+        foreach (var fill in JudgedFills.Concat(RecordedFills))
+        {
+            var judged = JudgedFills.Contains(fill);
+
+            // ── A-2 — 쌍의 양쪽에 같은 규칙 · 같은 수로 채운다 ──────────────
+            var expected = (long)Math.Floor(RcRatioPairDbFixture.CollectionRows * (double)fill / 100.0);
+            var baseFilled = _fx.SetFill(_fx.BaseDb, fill);
+            var sealFilled = _fx.SetFill(_fx.SealDb, fill);
+
+            Assert.True(baseFilled == expected && sealFilled == expected,
+                $"🔴 A-2 — 채움 수가 기대와 다르다 @ {fill}%.\n"
+              + $"  기대 {expected} · 기준선 {baseFilled} · 봉합 {sealFilled}\n"
+              + "  쌍이 「같은 채움 수」가 아니면 비는 아무것도 뜻하지 않는다.");
+
+            // ── 🔴 판정 원칙 5 — 양쪽 모두 ANALYZE (K-4) ────────────────────
+            _fx.Analyze(_fx.BaseDb);
+            _fx.Analyze(_fx.SealDb);
+
+            // ── 판정 원칙 6 — HLL 확인 (K-5) ────────────────────────────────
+            var hll = _fx.HistoryListLength();
+
+            var b = _fx.MeasureLock(_fx.BaseDb, baselineSql, RcRatioPairDbFixture.HotPartner);
+            var s = _fx.MeasureLock(_fx.SealDb, productSql, RcRatioPairDbFixture.HotPartner);
+
+            var ratio = b.Locked > 0 ? (double)s.Locked / b.Locked : -1;
+
+            report.AppendLine(
+                $"[G-RC17] 채움 {fill,3}% · 채운 행 {baseFilled,7} · HLL {hll,4} · "
+              + $"봉합전 {b.Locked,8} · 봉합후 {s.Locked,8} · 비 {ratio:F4} · "
+              + (judged ? "판정" : "기록만"));
+
+            if (!judged) continue;
+
+            // ── A-1 — 분모가 0 이면 시드가 안 돈 것이다 ─────────────────────
+            if (b.Locked <= 0)
+            {
+                failures.Add($"A-1 위반 @ {fill}% — 봉합 전 잠금이 {b.Locked} 다. 시드가 안 돌았다(분모 0).");
+                continue;
+            }
+
+            // ── 🔴 A-1′ — 봉합 쪽 측정이 「등록조차 안 됐다」를 0 으로 착각하지 않는다 ──
+            //    합계가 0 이 아니라면 그 행들을 실제로 잠갔다는 뜻이다. 그런데 잠금 행 수가 0 이면
+            //    innodb_trx 에서 이 트랜잭션을 못 찾은 것이다 = 측정 실패지 「완벽한 봉합」이 아니다.
+            //    이걸 통과로 세면 게이트가 영원히 초록이 된다(작2 §0 「읽기 프로브 금지」와 같은 사고).
+            if (s.Sum != 0 && s.Locked <= 0)
+            {
+                failures.Add(
+                    $"A-1′ 위반 @ {fill}% — 봉합 쪽 합계가 {s.Sum} 인데 잠금 행 수가 {s.Locked} 다.\n"
+                  + "    합계가 0 이 아니면 그 행들을 잠갔어야 한다 ⇒ 측정이 안 잡힌 것이다(거짓 초록).");
+                continue;
+            }
+
+            // ── A-4 — 값 동등의 기대값이 0 이 아니어야 한다 ─────────────────
+            //    🔴 `0.00 = 0.00` 은 증명이 아니다(작2 §16-3 W-1).
+            //    단 0% 칸은 「맞은 전표가 하나도 없다」가 정의라서 구조적으로 0 이다 — 거기선 면제한다.
+            var expectedSum = _fx.ExpectedL2Sum(fill);
+            if (fill > 0 && expectedSum <= 0)
+                failures.Add($"A-4 위반 @ {fill}% — 기대 합계가 0 이다. 비영 진실집합이 아니다.");
+
+            // ── W-1 — 금액 불변. 봉합 전후 값이 같아야 한다 ─────────────────
+            if (b.Sum != s.Sum)
+                failures.Add($"🔴 W-1 위반 @ {fill}% — 금액이 바뀌었다. 봉합전 {b.Sum} · 봉합후 {s.Sum}");
+            if (fill > 0 && s.Sum != expectedSum)
+                failures.Add($"🔴 W-1 위반 @ {fill}% — 봉합후 합계 {s.Sum} 가 기대값 {expectedSum} 과 다르다.");
+
+            // ── 판정식 ──────────────────────────────────────────────────────
+            if (ratio > RatioCeiling)
+                failures.Add(
+                    $"🔴 G-RC17 @ {fill}% — 비 {ratio:F4} 가 상한 {RatioCeiling:F2} 를 넘었다 "
+                  + $"(봉합전 {b.Locked} · 봉합후 {s.Locked}).");
+        }
+
+        Console.Error.Write(report.ToString());
+
+        Assert.True(failures.Count == 0,
+            "🔴 G-RC17 실패:\n  " + string.Join("\n  ", failures) + "\n\n" + report
+          + "\n  ⚠️ 비가 1.0 근처라면 봉합(C2·C4·㉪) 중 하나가 빠진 것이다 — 셋은 한 묶음이다(작2 §0).\n"
+          + "  ⚠️ 비가 0.02 처럼 비현실적으로 좋다면 쌍의 한쪽만 ANALYZE 된 것을 의심하라(K-4).");
+    }
+
+    [Fact(DisplayName = "G-RC17 살아있음(A-3) — 쌍을 같은 상태로 두면 비가 0.95 이상이라 반드시 빨간불이다 (게이트가 영원히 초록이 아님을 증명)")]
+    public void G_RC17_Alive_A3()
+    {
+        if (!_fx.Available) { Assert.True(DbGateEnvironment.SkipOrFail(_fx.Unavailable!)); return; }
+
+        // 🔴 「봉합 전」을 흉내낸다 — 두 사본 모두 기준선 SQL 로 잰다(= ㉪ 없는 상태).
+        //    인덱스는 봉합 사본에 그대로 둔 채다. 그래도 ㉪ 가 없으면 0% 칸에서 비가 1 로 간다(N-2).
+        var baselineSql = BaselineSql(LegacyBalanceMatching.ReceivableMatchedDocLockedSql);
+
+        var expected = 0L;
+        var baseFilled = _fx.SetFill(_fx.BaseDb, 0);
+        var sealFilled = _fx.SetFill(_fx.SealDb, 0);
+        Assert.True(baseFilled == expected && sealFilled == expected, "A-2 — 0% 채움이 안 걸렸다.");
+
+        _fx.Analyze(_fx.BaseDb);
+        _fx.Analyze(_fx.SealDb);
+
+        var b = _fx.MeasureLock(_fx.BaseDb, baselineSql, RcRatioPairDbFixture.HotPartner);
+        var s = _fx.MeasureLock(_fx.SealDb, baselineSql, RcRatioPairDbFixture.HotPartner);
+
+        Assert.True(b.Locked > 0, $"A-1 — 봉합 전 잠금이 {b.Locked} 다. 시드가 안 돌았다.");
+
+        var ratio = (double)s.Locked / b.Locked;
+        Console.Error.WriteLine(
+            $"[G-RC17/A-3] ㉪ 없이 0% — 봉합전 {b.Locked} · 봉합후 {s.Locked} · 비 {ratio:F4} (기대: {AliveRatioFloor} 이상)");
+
+        Assert.True(ratio >= AliveRatioFloor,
+            $"🔴 A-3 — ㉪ 를 뺐는데도 비가 {ratio:F4} 로 좋다(기대 {AliveRatioFloor} 이상).\n"
+          + "  그러면 G-RC17 은 ㉪ 가 되돌려져도 초록일 수 있다 = 살아있는 게이트가 아니다.\n"
+          + "  인덱스만으로 0% 구간이 고쳐졌다는 뜻이므로, 봉합의 근거(작2 §0 「술어를 못 빼는 이유」)를 다시 재라.");
+    }
+
+    [Fact(DisplayName = "G-RC18-a 힌트 0개 감시자 — DB-125 미적용 사본에서도 L2·L4 가 오류 없이 돈다 (인덱스 없는 구버전 DB 에서 등록이 죽지 않는다)")]
+    public void G_RC18a_NoHintSurvivesWithoutIndexes()
+    {
+        if (!_fx.Available) { Assert.True(DbGateEnvironment.SkipOrFail(_fx.Unavailable!)); return; }
+
+        // 🔴 이 게이트의 뜻을 한정한다(작2 §14-1 G-RC18-a):
+        //    「오류 0」은 **힌트가 안 들어왔다**는 뜻이지, **부분 적용이 안전하다**는 뜻이 아니다.
+        //    부분 적용을 막는 것은 T3-6 차단 장치(갈래 B)이고 G-RC18-b·c·d 가 거기 붙는다.
+        var statements = new (string Name, string Sql)[]
+        {
+            ("L2 ReceivableMatchedDocLockedSql", LegacyBalanceMatching.ReceivableMatchedDocLockedSql),
+            ("L4 PayableMatchedDocLockedSql", LegacyBalanceMatching.PayableMatchedDocLockedSql),
+        };
+
+        // ① 힌트가 0개인가 — 인덱스 없는 DB 에서 1176 으로 등록을 죽이는 것이 힌트다(B-3 · N-4).
+        foreach (var (name, sql) in statements)
+        {
+            foreach (var hint in new[] { "FORCE INDEX", "USE INDEX", "IGNORE INDEX", "STRAIGHT_JOIN" })
+                Assert.True(
+                    sql.IndexOf(hint, StringComparison.OrdinalIgnoreCase) < 0,
+                    $"🔴 N-4 — {name} 에 힌트 `{hint}` 가 들어왔다.\n"
+                  + "  인덱스가 없는 구버전 DB 에서 **1176 으로 등록이 죽는다**. 힌트는 0개다(작2 §0 · B-3).");
+        }
+
+        // ② DB-125 인덱스가 하나도 없는 사본에서 실제로 돈다 — 느린 것은 무방, 오류가 0 이어야 한다.
+        foreach (var (name, sql) in statements)
+        {
+            var ex = Record.Exception(() => _fx.MeasureLock(_fx.BaseDb, sql, RcRatioPairDbFixture.HotPartner));
+            Assert.True(ex is null,
+                $"🔴 G-RC18-a — DB-125 미적용 사본에서 {name} 이 실패했다: {ex?.Message}\n"
+              + "  구버전 DB 는 **느릴 뿐 등록은 살아야 한다**(작2 §0).");
+        }
+
+        Console.Error.WriteLine("[G-RC18-a] 힌트 0개 · DB-125 미적용 사본에서 L2·L4 오류 0 🟢");
+    }
+}
