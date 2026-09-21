@@ -210,6 +210,76 @@ public sealed class WatchdogStatusWriter
         }
     }
 
+    /// <summary>
+    /// 20260921작2 T3-6 · S-3 (사장님 결재 §13) — 로컬 DB 에 <b>실재하는 인덱스 이름</b> 집합을 읽는다.
+    ///   반환값은 <c>"table.index"</c> 소문자 키다(예: <c>"collections.idx_coll_tenant_doc_cover"</c>).
+    ///
+    ///   🔴 <b>왜 <c>schema_migrations</c> 가 아니라 <c>information_schema.statistics</c> 인가</b>
+    ///     <c>schema_migrations</c> 는 증거가 못 된다 — DB-111/112 전례에서 <c>success=1</c> 인데 실작업이 0이었고,
+    ///     <c>installer\hitpan_db_clean.sql</c> 이 행을 시드하기도 한다. "적용됐다고 적힌 것"과 "실제로 있는 것"은 다르다.
+    ///     인덱스가 진짜 있는지는 DB 자신에게 묻는다. (마이그가 자기 존재를 확인할 때 쓰는 수단과 같다.)
+    ///
+    ///   · 읽기 전용 SELECT · <c>tenants</c> 조인 0 · DDL 0 · 쓰기 0 · 파라미터 0(값 주입 자체가 없다).
+    ///   · <b>조회 실패·연결 실패·예외 = <c>null</c> = "판정 불가"</b>. 빈 집합(<c>Count==0</c>)과 <c>null</c> 은 다르다 —
+    ///     빈 집합은 "읽었는데 없다"(확실히 없다), <c>null</c> 은 "못 읽었다"다.
+    ///   · 🔴 <b>null 을 어떻게 쓸지는 호출부가 정한다.</b> 업데이트 3번째 조건(V-2)은 <b>fail-open</b> —
+    ///     판정 불가는 차단하지 않는다(멀쩡한 업데이트를 되돌리는 것이 더 나쁘다). 교차검증 게이트 ①
+    ///     (<see cref="GetAppliedMigrationIdsAsync"/>)의 "null=차단" 규칙과 <b>의도적으로 다르다</b>.
+    ///
+    ///   헌법 #1(추가만 — 기존 메서드 무수정) · #15(실패 경로 전부 로그) · #16(단일 쿼리·드라이버 미사용) · #30(본사 의존 0).
+    /// </summary>
+    public async Task<HashSet<string>?> GetExistingIndexNamesAsync(CancellationToken ct)
+    {
+        var (host, port, dbName, user, pass) = ResolveDbCredentials();
+        if (string.IsNullOrWhiteSpace(dbName) || string.IsNullOrWhiteSpace(user))
+        {
+            _logger.LogWarning("[Update/Verify] db.conf 에서 DB 자격증명을 읽지 못했습니다 — 인덱스 실재 조회 불가(판정 불가)");
+            return null;
+        }
+        return await GetExistingIndexNamesAsync(host, port, dbName, user, pass, ct).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// <see cref="GetExistingIndexNamesAsync(CancellationToken)"/> 의 자격증명 명시 판.
+    ///   게이트(G-RC18-b·c)가 <b>사본 DB</b>를 가리켜 실측하기 위한 진입점이다 — 운영 db.conf 를 건드리지 않는다.
+    /// </summary>
+    public async Task<HashSet<string>?> GetExistingIndexNamesAsync(
+        string host, int port, string dbName, string user, string pass, CancellationToken ct)
+    {
+        try
+        {
+            // information_schema.statistics: 인덱스 1개가 컬럼 수만큼 행을 낸다 → DISTINCT 로 이름 단위로 접는다.
+            //   DESCRIBE 확인(2026-09-21, 안전 33306): TABLE_SCHEMA · TABLE_NAME · INDEX_NAME 존재(헌법 #13).
+            const string sql =
+                "SELECT DISTINCT LOWER(CONCAT(table_name, '.', index_name)) " +
+                "FROM information_schema.statistics WHERE table_schema = DATABASE();";
+
+            var clientExe = ResolveMariadbBinary("mariadb.exe", "mysql.exe");
+            var args = $"-h {host} -P {port} -u {user} \"-p{pass}\" -N -B --default-character-set=utf8mb4 -e \"{sql.Replace("\"", "\\\"")}\" {dbName}";
+
+            var (exit, stdout, stderr) = await RunReadAsync(clientExe, args, ct).ConfigureAwait(false);
+            if (exit != 0)
+            {
+                _logger.LogWarning("[Update/Verify] 인덱스 실재 조회 실패(exit={E}): {Err} — 판정 불가(null)", exit, stderr);
+                return null;
+            }
+
+            var set = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var line in stdout.Split('\n'))
+            {
+                var name = line.Trim();
+                if (name.Length > 0) set.Add(name);
+            }
+            return set;
+        }
+        catch (OperationCanceledException) { throw; }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "[Update/Verify] 인덱스 실재 조회 예외 — 판정 불가(null)");
+            return null;
+        }
+    }
+
     /// <summary>stdout 을 돌려받는 읽기 실행(RunWriteAsync 의 SELECT 판). exit·stdout·stderr 를 반환한다.</summary>
     private async Task<(int exit, string stdout, string stderr)> RunReadAsync(string exe, string args, CancellationToken ct)
     {
