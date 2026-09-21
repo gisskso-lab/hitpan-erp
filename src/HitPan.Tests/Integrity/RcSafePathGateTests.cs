@@ -1621,6 +1621,14 @@ public sealed class RcSafePathGateTests : IClassFixture<RcStatementDbFixture>
 /// 🔴 <b>SKIP 을 통과로 세지 않는다</b> — 변수가 없으면 로컬은 건너뛰고 CI 는 실패한다.
 /// </para>
 /// </summary>
+/// <summary>
+/// 🔴 이웃 프로브 한 건. <paramref name="Judged"/> 가 <c>false</c> 면 <b>기록만</b> 한다(CTO C-C3 · G-RC16 ④).
+/// </summary>
+public sealed record NeighborProbe(string Name, string Sql, bool Judged);
+
+/// <summary>이웃 프로브 결과. <paramref name="Error"/> 는 <b>막힘이 아닌</b> 오류만 담는다.</summary>
+public sealed record NeighborProbeResult(string Name, bool Blocked, string? Error, long ElapsedMs);
+
 public sealed class RcRatioPairDbFixture : IDisposable
 {
     /// <summary>기준선 사본 — DB-125 인덱스 <b>없음</b>.</summary>
@@ -1773,8 +1781,17 @@ public sealed class RcRatioPairDbFixture : IDisposable
         using var tx = c.BeginTransaction();
         var sum = c.ExecuteScalar<decimal>(sql, new { TenantId, PartnerId = partnerId }, tx, commandTimeout: 300);
 
-        // 🔴 「행이 없다」와 「0 이다」를 구별한다.
-        //    innodb_trx 에 이 트랜잭션이 아예 없으면 측정 실패다 — 0 으로 읽어 통과시키면 거짓 초록이다.
+        var (locked, attempts) = ReadTrxRowsLocked(c, tx);
+        tx.Rollback();
+        return (sum, locked, attempts);
+    }
+
+    /// <summary>
+    /// 🔴 「행이 없다」와 「0 이다」를 구별해 <c>trx_rows_locked</c> 를 읽는다.
+    /// 캐시가 갱신될 때까지 다시 읽고, <b>끝내 못 잡으면 <c>-1</c></b> 을 돌려준다(0 으로 갈음 금지).
+    /// </summary>
+    private static (long Locked, int Attempts) ReadTrxRowsLocked(MySqlConnection c, MySqlTransaction tx)
+    {
         long? locked = null;
         var attempts = 0;
         while (attempts < TrxLookupMaxAttempts)
@@ -1786,9 +1803,7 @@ public sealed class RcRatioPairDbFixture : IDisposable
             if (locked.HasValue) break;
             Thread.Sleep(TrxLookupRetryDelayMs);
         }
-
-        tx.Rollback();
-        return (sum, locked ?? -1, attempts);
+        return (locked ?? -1, attempts);
     }
 
     /// <summary>🔴 <c>trx_i_s_cache</c> 갱신을 기다리는 최대 횟수. 못 잡으면 <c>-1</c> 로 남긴다(거짓 초록 금지).</summary>
@@ -1796,6 +1811,84 @@ public sealed class RcRatioPairDbFixture : IDisposable
 
     /// <summary>재조회 간격. InnoDB 캐시 최소 유휴 시간(0.1초)보다 넉넉히 잡는다.</summary>
     private const int TrxLookupRetryDelayMs = 150;
+
+    /// <summary>프로브가 막힘을 판정하는 대기 시간(초). 짧게 잡아 게이트가 오래 안 걸리게 한다.</summary>
+    public const int ProbeLockWaitSeconds = 3;
+
+    /// <summary>
+    /// 🔴 <b>이웃 프로브 실행</b> — W-3(등록 경로 침해 없음)을 재는 유일한 수단(작2 §16-3).
+    ///
+    /// <para>
+    /// 🔴 <b>읽기 프로브가 아니다</b>. 보유자가 <c>LOCK IN SHARE MODE</c> 로 쥐고 있는 동안
+    /// <b>다른 연결에서 경로 끝 <c>INSERT</c></b> 를 시도한다. 읽기끼리는 서로 안 막으므로
+    /// 프로브를 읽기로 만들면 <b>영원히 초록</b>이다(작2 §5 N-6).
+    /// </para>
+    /// <para>
+    /// <paramref name="holderSql"/> 가 <c>null</c> 이면 <b>보유자 없는 대조군</b>이다 — 전부 통과해야 한다.
+    /// 통과하지 않으면 프로브 자체가 <b>다른 이유로</b> 막히는 것이고, 그때 잠금을 논하면 엉뚱한 곳을 본다.
+    /// </para>
+    /// <para>
+    /// 🔴 <b>막힘(1205·1213)과 그 밖의 오류를 구별한다.</b> 스키마 오류를 「막혔다」로 세면
+    /// 게이트가 아무것도 안 재고 빨간불을 낸다. 그 밖의 오류는 <c>Error</c> 에 담아 <b>그대로 드러낸다</b>.
+    /// </para>
+    /// </summary>
+    public (long HolderLocked, int HolderAttempts, List<NeighborProbeResult> Results) RunNeighborProbes(
+        string db, string? holderSql, string partnerId, IReadOnlyList<NeighborProbe> probes)
+    {
+        using var holder = new MySqlConnection(DbConnString(db));
+        holder.Open();
+
+        MySqlTransaction? htx = null;
+        long holderLocked = 0;
+        var holderAttempts = 0;
+
+        if (holderSql is not null)
+        {
+            htx = holder.BeginTransaction();
+            holder.ExecuteScalar<decimal>(holderSql, new { TenantId, PartnerId = partnerId }, htx, commandTimeout: 300);
+            // 🔴 보유자가 실제로 쥐었다는 증거를 남긴다 — 안 쥔 채 「통과」를 세면 거짓 초록이다.
+            (holderLocked, holderAttempts) = ReadTrxRowsLocked(holder, htx);
+        }
+
+        var results = new List<NeighborProbeResult>();
+        try
+        {
+            using var probe = new MySqlConnection(DbConnString(db));
+            probe.Open();
+            probe.Execute($"SET SESSION innodb_lock_wait_timeout = {ProbeLockWaitSeconds}");
+
+            foreach (var p in probes)
+            {
+                var sw = System.Diagnostics.Stopwatch.StartNew();
+                using var ptx = probe.BeginTransaction();
+                try
+                {
+                    probe.Execute(p.Sql, transaction: ptx, commandTimeout: 60);
+                    ptx.Rollback();                       // 🔴 프로브는 자취를 안 남긴다
+                    results.Add(new NeighborProbeResult(p.Name, false, null, sw.ElapsedMilliseconds));
+                }
+                catch (MySqlException ex)
+                {
+                    try { ptx.Rollback(); }
+                    catch (MySqlException rex)
+                    {
+                        // #15 — 빈 catch 금지. 롤백 실패는 판정을 뒤집지 않는다.
+                        Console.Error.WriteLine($"[G-RC16] 프로브 롤백 실패(무해): {rex.Message}");
+                    }
+
+                    var blocked = ex.Number is 1205 or 1213;   // 1205 잠금 대기 초과 · 1213 교착
+                    results.Add(new NeighborProbeResult(
+                        p.Name, blocked, blocked ? null : $"{ex.Number} {ex.Message}", sw.ElapsedMilliseconds));
+                }
+            }
+        }
+        finally
+        {
+            if (htx is not null) { htx.Rollback(); htx.Dispose(); }
+        }
+
+        return (holderLocked, holderAttempts, results);
+    }
 
     private void ImportShippingDdl(string db)
     {
@@ -2185,6 +2278,161 @@ public sealed class RcLockRatioGateTests : IClassFixture<RcRatioPairDbFixture>
             $"🔴 A-3 — ㉪ 를 뺐는데도 비가 {ratio:F4} 로 좋다(기대 {AliveRatioFloor} 이상).\n"
           + "  그러면 G-RC17 은 ㉪ 가 되돌려져도 초록일 수 있다 = 살아있는 게이트가 아니다.\n"
           + "  인덱스만으로 0% 구간이 고쳐졌다는 뜻이므로, 봉합의 근거(작2 §0 「술어를 못 빼는 이유」)를 다시 재라.");
+    }
+
+    // ────────────────────────────── G-RC16 (이웃 프로브 · W-3) ──────────────────────────────
+
+    /// <summary>🔴 편중 거래처와 <b>무관한</b> 거래처. 시드가 만든 <c>p00000001</c> 이다(<see cref="RcRatioPairDbFixture.HotPartner"/> 가 아니다).</summary>
+    private const string ColdPartner = "p00000001";
+
+    /// <summary>
+    /// 🔴 <b>경로 끝 INSERT 프로브 5종</b>(작2 §4 G-RC16 ①~⑤).
+    /// <list type="bullet">
+    ///   <item>①② <b>무관 거래처</b> 수금·지급 등록</item>
+    ///   <item>③ <b>같은 거래처</b> 매입 등록 — 구동표를 안 옮긴다는 확인</item>
+    ///   <item>④ <b>같은 거래처</b> 매입반품 — 🔴 <b>판정에서 뺀다</b>(L5 미해결 · CTO C-C3). <b>상태만 기록</b></item>
+    ///   <item>⑤ 다른 거래처 <b>지급 등록 경로</b> — L4 를 읽고 이어서 등록한다</item>
+    /// </list>
+    /// <para>
+    /// ⚠️ <b>⑤ 는 근사다</b> — 서비스 계층(<c>PaymentService</c>)을 부르는 게 아니라
+    /// 제품 문장 <c>PayableMatchedDocLockedSql</c> 을 같은 트랜잭션에서 읽고 <c>payments</c> 에 넣는다.
+    /// <b>잠금 경로는 같지만 경로 「전체」는 아니다.</b> 이 한계를 개발명세서에 적는다.
+    /// </para>
+    /// </summary>
+    private static IReadOnlyList<NeighborProbe> BuildProbes()
+    {
+        const string t = RcRatioPairDbFixture.TenantId;
+        const string hot = RcRatioPairDbFixture.HotPartner;
+
+        var payableRead = LegacyBalanceMatching.PayableMatchedDocLockedSql
+            .Replace("@TenantId", $"'{t}'", StringComparison.Ordinal)
+            .Replace("@PartnerId", $"'{ColdPartner}'", StringComparison.Ordinal);
+
+        return new[]
+        {
+            new NeighborProbe("① 무관 거래처 collections INSERT",
+                $"INSERT INTO collections (collection_id, tenant_id, partner_id, collection_date, amount, "
+              + $"ref_doc_type, ref_doc_id, is_active, source_type) "
+              + $"VALUES (UUID(), '{t}', '{ColdPartner}', '2026-09-21', 1000.00, 'sales_delivery', NULL, 1, 'manual')",
+                true),
+
+            new NeighborProbe("② 무관 거래처 payments INSERT",
+                $"INSERT INTO payments (payment_id, tenant_id, partner_id, payment_type, amount, payment_date, "
+              + $"ref_order_id, is_active, source_type) "
+              + $"VALUES (UUID(), '{t}', '{ColdPartner}', 'purchase', 1000.00, '2026-09-21', NULL, 1, 'manual')",
+                true),
+
+            new NeighborProbe("③ 같은 거래처 purchase_receipts INSERT",
+                $"INSERT INTO purchase_receipts (receipt_id, tenant_id, receipt_no, partner_id, receipt_date, "
+              + $"source_type, status, total_amount, vat_amount, created_at) "
+              + $"VALUES (UUID(), '{t}', CONCAT('PR-', SUBSTRING(UUID(), 1, 8)), '{hot}', '2026-09-21', "
+              + $"'manual', 'draft', 1000.00, 100.00, NOW(6))",
+                true),
+
+            // 🔴 ④ 는 판정하지 않는다 — L5 가 처방 없이 닫혔으므로 막힘도 통과도 초록이다(CTO C-C3).
+            new NeighborProbe("④ 같은 거래처 purchase_returns INSERT (기록만 · L5 미해결)",
+                $"INSERT INTO purchase_returns (return_id, tenant_id, return_no, receipt_id, partner_id, return_date, "
+              + $"return_type, status, total_amount, vat_amount) "
+              + $"VALUES (UUID(), '{t}', CONCAT('RT-', SUBSTRING(UUID(), 1, 8)), NULL, '{hot}', '2026-09-21', "
+              + $"'purchase_return', 'draft', 1000.00, 100.00)",
+                false),
+
+            new NeighborProbe("⑤ 다른 거래처 지급 등록 경로(L4 읽기 + 등록)",
+                payableRead + ";\n"
+              + $"INSERT INTO payments (payment_id, tenant_id, partner_id, payment_type, amount, payment_date, "
+              + $"ref_order_id, is_active, source_type) "
+              + $"VALUES (UUID(), '{t}', '{ColdPartner}', 'purchase', 2000.00, '2026-09-21', NULL, 1, 'manual')",
+                true),
+        };
+    }
+
+    [Fact(DisplayName = "G-RC16 이웃 프로브 — 봉합 전에 통과하던 등록이 봉합 후에 막히지 않는다 (W-3 · 경로 끝 INSERT · 보유자 없는 대조군 동반)")]
+    public void G_RC16_NeighborProbes_W3()
+    {
+        if (!_fx.Available) { Assert.True(DbGateEnvironment.SkipOrFail(_fx.Unavailable!)); return; }
+
+        var productSql = LegacyBalanceMatching.ReceivableMatchedDocLockedSql;
+        var baselineSql = BaselineSql(productSql);
+        var probes = BuildProbes();
+
+        var report = new StringBuilder();
+        var failures = new List<string>();
+        var baselineBlockedTotal = 0;
+
+        // ── 대조군 먼저 — 보유자 없이 5/5 통과해야 한다 ─────────────────────────
+        //    🔴 여기서 막히면 프로브가 「잠금 말고 다른 이유」로 막히는 것이다.
+        //       그 상태에서 잠금을 논하면 엉뚱한 곳을 본다(9/21 「대조군이 원인을 갈랐다」).
+        foreach (var db in new[] { _fx.BaseDb, _fx.SealDb })
+        {
+            _fx.SetFill(db, 0);
+            var (_, _, ctrl) = _fx.RunNeighborProbes(db, holderSql: null, RcRatioPairDbFixture.HotPartner, probes);
+            var bad = ctrl.Where(r => r.Blocked || r.Error is not null).ToList();
+            var tag = db == _fx.BaseDb ? "기준선" : "봉합";
+
+            report.AppendLine($"[G-RC16/대조군·{tag}] 보유자 없음 · 통과 {ctrl.Count - bad.Count}/{ctrl.Count}");
+            foreach (var r in bad)
+                failures.Add($"🔴 대조군({tag}) — {r.Name} 이 보유자도 없는데 "
+                           + (r.Blocked ? "막혔다" : $"오류가 났다: {r.Error}"));
+        }
+
+        // ── 본 판정 — 쌍의 양쪽을 같은 채움에서 잰다 ────────────────────────────
+        foreach (var fill in new[] { 0, 2 })
+        {
+            _fx.SetFill(_fx.BaseDb, fill);
+            _fx.SetFill(_fx.SealDb, fill);
+            _fx.Analyze(_fx.BaseDb);
+            _fx.Analyze(_fx.SealDb);
+
+            var (bLocked, bAttempts, bRes) =
+                _fx.RunNeighborProbes(_fx.BaseDb, baselineSql, RcRatioPairDbFixture.HotPartner, probes);
+            var (sLocked, sAttempts, sRes) =
+                _fx.RunNeighborProbes(_fx.SealDb, productSql, RcRatioPairDbFixture.HotPartner, probes);
+
+            report.AppendLine(
+                $"[G-RC16] 채움 {fill,3}% · 보유자 잠금 기준선 {bLocked}(조회 {bAttempts}) · 봉합 {sLocked}(조회 {sAttempts})");
+
+            // 🔴 보유자가 실제로 쥐었는지부터 — 안 쥐었으면 「통과」가 아무 뜻이 없다.
+            if (bLocked <= 0)
+                failures.Add($"🔴 보유자 미성립 @ {fill}% — 기준선 보유자 잠금이 {bLocked} 다. 프로브가 아무것도 안 쟀다.");
+            if (sLocked <= 0)
+                failures.Add($"🔴 보유자 미성립 @ {fill}% — 봉합 보유자 잠금이 {sLocked} 다. 프로브가 아무것도 안 쟀다.");
+
+            for (var i = 0; i < probes.Count; i++)
+            {
+                var p = probes[i];
+                var b = bRes[i];
+                var s = sRes[i];
+
+                report.AppendLine(
+                    $"    {p.Name,-46} 기준선 {(b.Blocked ? "막힘" : "통과")}({b.ElapsedMs}ms) → "
+                  + $"봉합 {(s.Blocked ? "막힘" : "통과")}({s.ElapsedMs}ms)"
+                  + (p.Judged ? "" : "  ⟵ 기록만"));
+
+                // 막힘이 아닌 오류는 숨기지 않는다 — 판정 대상이든 아니든.
+                if (b.Error is not null) failures.Add($"🔴 기준선 프로브 오류 @ {fill}% — {p.Name}: {b.Error}");
+                if (s.Error is not null) failures.Add($"🔴 봉합 프로브 오류 @ {fill}% — {p.Name}: {s.Error}");
+
+                if (!p.Judged) continue;
+                if (b.Blocked) baselineBlockedTotal++;
+
+                // ── 🔴 W-3 — 오더의 핵심. 봉합 전에 통과하던 것이 봉합 후에 막히면 그 자리에서 중단이다.
+                if (!b.Blocked && s.Blocked)
+                    failures.Add(
+                        $"🔴 W-3 위반 @ {fill}% — {p.Name} 이 봉합 전에는 통과했는데 봉합 후에 막혔다.\n"
+                      + "    사장님 오더(작2 §16-3 W-3)의 중단 조건이다 — 그 자리에서 멈춘다.");
+            }
+        }
+
+        // ── 🔴 살아있음 — 기준선에서 하나도 안 막혔다면 이 프로브는 아무것도 안 재고 있다 ──
+        if (failures.Count == 0 && baselineBlockedTotal == 0)
+            failures.Add(
+                "🔴 살아있음 위반 — 기준선(봉합 전)에서 막힌 판정 사례가 0건이다.\n"
+              + "    봉합 전에 아무도 안 막히면 이 게이트는 무엇이 좋아졌는지도, 나빠졌는지도 못 잰다.\n"
+              + "    프로브가 보유자와 같은 자리를 짚고 있는지 다시 보라(대조군이 통과했으므로 프로브 자체는 돈다).");
+
+        Console.Error.Write(report.ToString());
+
+        Assert.True(failures.Count == 0, "🔴 G-RC16 실패:\n  " + string.Join("\n  ", failures) + "\n\n" + report);
     }
 
     [Fact(DisplayName = "G-RC18-a 힌트 0개 감시자 — DB-125 미적용 사본에서도 L2·L4 가 오류 없이 돈다 (인덱스 없는 구버전 DB 에서 등록이 죽지 않는다)")]
