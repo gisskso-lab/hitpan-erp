@@ -2220,16 +2220,21 @@ public sealed class RcLockRatioGateTests : IClassFixture<RcRatioPairDbFixture>
                 continue;
             }
 
-            // ── 🔴 A-1′ — 봉합 쪽 측정이 「등록조차 안 됐다」를 0 으로 착각하지 않는다 ──
-            //    합계가 0 이 아니라면 그 행들을 실제로 잠갔다는 뜻이다. 그런데 잠금 행 수가 0 이면
-            //    innodb_trx 에서 이 트랜잭션을 못 찾은 것이다 = 측정 실패지 「완벽한 봉합」이 아니다.
-            //    이걸 통과로 세면 게이트가 영원히 초록이 된다(작2 §0 「읽기 프로브 금지」와 같은 사고).
-            if (s.Sum != 0 && s.Locked <= 0)
+            // ── 🔴 A-1′ — 측정 실패(-1)를 「완벽한 봉합」으로 착각하지 않는다 ──────
+            //    🔴 20260922 [4] §4-3 봉합: **`s.Sum` 조건을 뺐다.**
+            //    옛 판은 `s.Sum != 0 && s.Locked <= 0` 이었는데, **0% 칸은 정의상 `s.Sum == 0`** 이라
+            //    **가드가 0% 에서 꺼져 있었다.** 그러면 `-1 / 110661 = -0.000009` 가
+            //    `ratio > 0.80` 검사를 **언제나 통과**한다 ⇒ **0% 칸이 거짓 초록을 낸다.**
+            //    🔴 이론이 아니다 — 이 게이트의 첫 실행 로그(명세서 §9-1)가 바로 그 모양이었고,
+            //    그때 빨간불을 낸 것은 **별개 시험 A-3** 이었다. A-3 이 우연히 잡혔다면 아무도 못 봤다.
+            //    🔴 그리고 0% 는 작2 가 「이관 직후」로 가장 중요하게 본 칸이다.
+            //
+            //    `LOCK IN SHARE MODE` 는 결과가 0행이어도 잠금을 잡는다 ⇒ **0 이하는 언제나 측정 실패**다.
+            if (s.Locked <= 0)
             {
                 failures.Add(
-                    $"A-1′ 위반 @ {fill}% — 봉합 쪽 합계가 {s.Sum} 인데 잠금 행 수가 {s.Locked} 다"
-                  + $"(innodb_trx 조회 {s.Attempts}회).\n"
-                  + "    합계가 0 이 아니면 그 행들을 잠갔어야 한다 ⇒ 측정이 안 잡힌 것이다(거짓 초록).\n"
+                    $"A-1′ 위반 @ {fill}% — 봉합 쪽 잠금 행 수가 {s.Locked} 다(합계 {s.Sum} · innodb_trx 조회 {s.Attempts}회).\n"
+                  + "    LOCK IN SHARE MODE 는 결과가 0행이어도 잠금을 잡는다 ⇒ 측정이 안 잡힌 것이다(거짓 초록).\n"
                   + "    🔴 조회 횟수가 상한까지 갔다면 캐시 지연이 아니라 다른 원인이다 — 새로 규명하라.");
                 continue;
             }
@@ -2382,6 +2387,7 @@ public sealed class RcLockRatioGateTests : IClassFixture<RcRatioPairDbFixture>
         var report = new StringBuilder();
         var failures = new List<string>();
         var baselineBlockedTotal = 0;
+        var undecidable = 0;
 
         // ── 대조군 먼저 — 보유자 없이 5/5 통과해야 한다 ─────────────────────────
         //    🔴 여기서 막히면 프로브가 「잠금 말고 다른 이유」로 막히는 것이다.
@@ -2400,7 +2406,9 @@ public sealed class RcLockRatioGateTests : IClassFixture<RcRatioPairDbFixture>
         }
 
         // ── 본 판정 — 쌍의 양쪽을 같은 채움에서 잰다 ────────────────────────────
-        foreach (var fill in new[] { 0, 2 })
+        //    🔴 4% 는 CTO **C-D1**(「이웃 프로브를 2%·4% 시드에서도」)이 요구한 칸이다.
+        //    [4] §7-2 가 「게이트가 0·2 로 고정돼 못 쟀다」고 적었다 — 그래서 넣는다.
+        foreach (var fill in new[] { 0, 2, 4 })
         {
             _fx.SetFill(_fx.BaseDb, fill);
             _fx.SetFill(_fx.SealDb, fill);
@@ -2439,20 +2447,44 @@ public sealed class RcLockRatioGateTests : IClassFixture<RcRatioPairDbFixture>
                 if (!p.Judged) continue;
                 if (b.Blocked) baselineBlockedTotal++;
 
-                // ── 🔴 W-3 — 오더의 핵심. 봉합 전에 통과하던 것이 봉합 후에 막히면 그 자리에서 중단이다.
-                if (!b.Blocked && s.Blocked)
+                // ── 🔴 판정 — **설계 §15-7 의 절대 조건**이 主다 ────────────────────
+                //    설계: 「보유자가 있어도 ①②③⑤ **통과**」가 합격 조건 · 「①②가 막힘 → 🔴」.
+                //    🔴 기준선이 어떻든 **봉합 쪽이 막히면 실패**다.
+                //
+                //    이 줄이 없던 판(20260922 [4] 반려)이 무엇을 놓쳤나 — 실측으로 둘 다 잡혔다:
+                //      (가) **기준선도 막히는 칸**이 「위반 없음」에 섞였다. 0% 칸의 ① 은 기준선이
+                //           6/6 회 막혀 `!b.Blocked` 가 영원히 거짓 ⇒ **그 칸은 발화 자체가 불가능**했다.
+                //      (나) **봉합을 되돌려도 초록**이었다(N-2·N-8). 봉합 쪽이 이웃을 3초 막는데 통과가 났다.
+                //    ⇒ 상대 비교만으로는 「좋아졌나」를 단언하는 줄이 하나도 없었다.
+                if (s.Blocked)
+                {
+                    var why = b.Blocked
+                        ? "기준선도 막혔다 — 🔴 이 칸은 **판정 불능**이지 「위반 없음」이 아니다"
+                        : "🔴 **W-3 위반** — 봉합 전에는 통과했다(작2 §16-3 중단 조건)";
+
                     failures.Add(
-                        $"🔴 W-3 위반 @ {fill}% — {p.Name} 이 봉합 전에는 통과했는데 봉합 후에 막혔다.\n"
-                      + "    사장님 오더(작2 §16-3 W-3)의 중단 조건이다 — 그 자리에서 멈춘다.");
+                        $"🔴 설계 §15-7 위반 @ {fill}% — {p.Name} 이 **봉합 후에 막혔다**({s.ElapsedMs}ms).\n"
+                      + $"    {why}\n"
+                      + "    설계가 정한 합격 조건은 「보유자가 있어도 ①②③⑤ 통과」다.");
+
+                    if (b.Blocked) undecidable++;
+                }
             }
         }
 
         // ── 🔴 살아있음 — 기준선에서 하나도 안 막혔다면 이 프로브는 아무것도 안 재고 있다 ──
-        if (failures.Count == 0 && baselineBlockedTotal == 0)
+        //    🔴 다른 실패가 있어도 이 검사를 건너뛰지 않는다([4] §4-4).
+        //    「W-3 위반 1건 + 살아있음 0건」인 회차에서 앞의 것만 뜨면,
+        //    **게이트가 아무것도 안 재고 있다**는 더 중요한 사실이 가려진다.
+        if (baselineBlockedTotal == 0)
             failures.Add(
                 "🔴 살아있음 위반 — 기준선(봉합 전)에서 막힌 판정 사례가 0건이다.\n"
               + "    봉합 전에 아무도 안 막히면 이 게이트는 무엇이 좋아졌는지도, 나빠졌는지도 못 잰다.\n"
               + "    프로브가 보유자와 같은 자리를 짚고 있는지 다시 보라(대조군이 통과했으므로 프로브 자체는 돈다).");
+
+        // 🔴 판정 불능을 **수치로** 남긴다 — 「위반 없음」과 섞이지 않게([4] §4-6).
+        report.AppendLine(
+            $"[G-RC16] 요약 — 기준선 막힘(판정사례) {baselineBlockedTotal}건 · 판정 불능 {undecidable}건 · 실패 {failures.Count}건");
 
         Console.Error.Write(report.ToString());
 
