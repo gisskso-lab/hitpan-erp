@@ -255,9 +255,13 @@ public sealed class WatchdogStatusWriter
                 "FROM information_schema.statistics WHERE table_schema = DATABASE();";
 
             var clientExe = ResolveMariadbBinary("mariadb.exe", "mysql.exe");
-            var args = $"-h {host} -P {port} -u {user} \"-p{pass}\" -N -B --default-character-set=utf8mb4 -e \"{sql.Replace("\"", "\\\"")}\" {dbName}";
 
-            var (exit, stdout, stderr) = await RunReadAsync(clientExe, args, ct).ConfigureAwait(false);
+            // 🔴 비밀번호가 비면 '-p' 를 붙이지 않는다 — 값 없는 '-p' 는 클라이언트가 **대화형 입력을 기다린다**
+            //   (2026-09-21 실측: 프롬프트에서 무한 대기). 업데이트 검증 중에 그러면 업데이트가 멈춘다.
+            var passOpt = string.IsNullOrEmpty(pass) ? "" : $" \"-p{pass}\"";
+            var args = $"-h {host} -P {port} -u {user}{passOpt} -N -B --default-character-set=utf8mb4 -e \"{sql.Replace("\"", "\\\"")}\" {dbName}";
+
+            var (exit, stdout, stderr) = await RunReadBoundedAsync(clientExe, args, ct).ConfigureAwait(false);
             if (exit != 0)
             {
                 _logger.LogWarning("[Update/Verify] 인덱스 실재 조회 실패(exit={E}): {Err} — 판정 불가(null)", exit, stderr);
@@ -277,6 +281,69 @@ public sealed class WatchdogStatusWriter
         {
             _logger.LogWarning(ex, "[Update/Verify] 인덱스 실재 조회 예외 — 판정 불가(null)");
             return null;
+        }
+    }
+
+    /// <summary>
+    /// T3-6 전용 읽기 실행 — <see cref="RunReadAsync"/> 와 같은 모양이되 <b>시간 상한 + stdin 차단</b>을 더한다.
+    ///   🔴 왜 따로 두나(기존 메서드 무수정 — #1): 이 조회는 <b>업데이트 검증 한복판</b>에서 돈다.
+    ///     클라이언트가 어떤 이유로든 입력을 기다리면(예: 값 없는 <c>-p</c> 프롬프트) 업데이트 자체가 멈춘다 —
+    ///     구멍을 메우려다 <b>없던 실패</b>를 만드는 것이라 작2 §16-4 가 금지한 바로 그것이다.
+    ///   · stdin 을 열어 즉시 닫는다 — 프롬프트가 떠도 대화형으로 매달리지 않는다.
+    ///   · <paramref name="timeoutSeconds"/> 를 넘기면 프로세스를 끝내고 exit=-1 을 돌려준다 ⇒ 호출부는 null(판정 불가) ⇒ fail-open.
+    /// </summary>
+    private async Task<(int exit, string stdout, string stderr)> RunReadBoundedAsync(
+        string exe, string args, CancellationToken ct, int timeoutSeconds = 15)
+    {
+        var psi = new ProcessStartInfo
+        {
+            FileName = exe,
+            Arguments = args,
+            UseShellExecute = false,
+            RedirectStandardInput = true,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            CreateNoWindow = true,
+            StandardOutputEncoding = Encoding.UTF8
+        };
+        using var proc = Process.Start(psi)
+            ?? throw new InvalidOperationException($"{exe} 실행 실패(Process.Start null)");
+
+        proc.StandardInput.Close();   // 입력을 기다릴 여지를 없앤다.
+
+        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        timeout.CancelAfter(TimeSpan.FromSeconds(timeoutSeconds));
+
+        var outTask = proc.StandardOutput.ReadToEndAsync(CancellationToken.None);
+        var errTask = proc.StandardError.ReadToEndAsync(CancellationToken.None);
+
+        try
+        {
+            await proc.WaitForExitAsync(timeout.Token).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+        {
+            // 상한 초과 — 바깥 취소가 아니다. 프로세스를 끝내고 '판정 불가' 로 돌려준다(차단하지 않는다).
+            TryKill(proc);
+            _logger.LogWarning("[Update/Verify] 인덱스 조회가 {S}초를 넘겨 중단했습니다 — 판정 불가로 처리합니다.", timeoutSeconds);
+            return (-1, "", $"timeout after {timeoutSeconds}s");
+        }
+
+        var stdout = await outTask.ConfigureAwait(false);
+        var stderr = await errTask.ConfigureAwait(false);
+        return (proc.ExitCode, stdout, stderr);
+    }
+
+    /// <summary>상한 초과 프로세스 정리. 실패해도 삼키지 않고 로그만 남긴다(헌법 #15).</summary>
+    private void TryKill(Process proc)
+    {
+        try
+        {
+            if (!proc.HasExited) proc.Kill(entireProcessTree: true);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "[Update/Verify] 상한 초과 조회 프로세스 정리 실패 — 무시하고 계속합니다.");
         }
     }
 
