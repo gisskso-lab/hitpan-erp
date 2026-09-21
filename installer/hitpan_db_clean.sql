@@ -810,7 +810,13 @@ CREATE TABLE `collections` (
   -- 20260920작1 S3 (DB-124): 전표 수금합의 잠금 범위를 「그 전표」로 좁힌다.
   --   이 인덱스가 없으면 RR 경로의 잠금 읽기가 collections 를 통째로 훑어(실측 ALL)
   --   아무 상관 없는 다른 거래처의 수금 등록까지 1205 로 막는다.
-  KEY `idx_coll_tenant_doc` (`tenant_id`,`ref_doc_type`,`ref_doc_id`)
+  KEY `idx_coll_tenant_doc` (`tenant_id`,`ref_doc_type`,`ref_doc_id`),
+  -- 20260921작2 갈래 A (DB-125): 위 idx_coll_tenant_doc 를 「커버링」으로 확장한 별도 인덱스.
+  --   is_active·source_type·amount 까지 인덱스 안에 있어 테이블을 되짚지 않는다.
+  --   🔴 단독 효과는 작다(−1.5%). 이 인덱스의 존재 이유는 제품 SQL 의 ㉪
+  --   (L2 ReceivableMatchedDocLockedSql 의 `AND ec.ref_doc_id IS NOT NULL`)가
+  --   채움 2~4% 구간에서 만드는 함정을 없애는 것이다 — 이 인덱스 없이 ㉪ 만 있으면 +48~182% 로 나빠진다.
+  KEY `idx_coll_tenant_doc_cover` (`tenant_id`,`ref_doc_type`,`ref_doc_id`,`is_active`,`source_type`,`amount`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='수금 — 거래처로부터 받은 돈 기록';
 /*!40101 SET character_set_client = @saved_cs_client */;
 
@@ -3321,6 +3327,10 @@ CREATE TABLE `sales_deliveries` (
   KEY `idx_tenant_date` (`tenant_id`,`delivery_date`),
   KEY `idx_tenant_partner` (`tenant_id`,`partner_id`),
   KEY `idx_tenant_status` (`tenant_id`,`status`),
+  -- 20260921작2 갈래 A (DB-125): L2 ReceivableMatchedDocLockedSql 의 sd 쪽 커버링.
+  --   (tenant_id, partner_id) 까지만 타면 source_type 을 테이블에서 되짚느라 구동표가 뒤집히고
+  --   필요 없는 행까지 잠근다. source_type 을 인덱스 안에 넣어 잠금 범위를 좁힌다(실측 −36%).
+  KEY `idx_sd_tenant_partner_src` (`tenant_id`,`partner_id`,`source_type`),
   KEY `idx_sd_tenant_date` (`tenant_id`,`delivery_date`),
   KEY `idx_sales_deliveries_tax_invoice` (`tax_invoice_id`),
   KEY `fk_sd_partner` (`partner_id`),
@@ -3601,7 +3611,7 @@ INSERT INTO `schema_migrations` (`migration_id`, `app_version`, `success`) VALUE
 ('DB-74','clean-ddl',1),('DB-75','clean-ddl',1),('DB-76','clean-ddl',1),('DB-77','clean-ddl',1),
 ('DB-78','clean-ddl',1),('DB-79','clean-ddl',1),('DB-80','clean-ddl',1),('DB-81','clean-ddl',1),
 ('DB-82','clean-ddl',1),('DB-83','clean-ddl',1),('DB-84','clean-ddl',1),('DB-85','clean-ddl',1),
-('DB-86','clean-ddl',1),('DB-87','clean-ddl',1),('DB-88','clean-ddl',1),('DB-89','clean-ddl',1),('DB-90','clean-ddl',1),('DB-91','clean-ddl',1),('DB-92','clean-ddl',1),('DB-93','clean-ddl',1),('DB-94','clean-ddl',1),('DB-95','clean-ddl',1),('DB-96','clean-ddl',1),('DB-97','clean-ddl',1),('DB-98','clean-ddl',1),('DB-99','clean-ddl',1),('DB-100','clean-ddl',1),('DB-101','clean-ddl',1),('DB-102','clean-ddl',1),('DB-103','clean-ddl',1),('DB-104','clean-ddl',1),('DB-105','clean-ddl',1),('DB-106','clean-ddl',1),('DB-107','clean-ddl',1),('DB-108','clean-ddl',1),('DB-109','clean-ddl',1),('DB-110','clean-ddl',1),('DB-111','clean-ddl',1),('DB-112','clean-ddl',1),('DB-113','clean-ddl',1),('DB-114','clean-ddl',1),('DB-115','clean-ddl',1),('DB-116','clean-ddl',1),('DB-117','clean-ddl',1),('DB-118','clean-ddl',1),('DB-119','clean-ddl',1),('DB-120','clean-ddl',1),('DB-123','clean-ddl',1),('DB-124','clean-ddl',1);
+('DB-86','clean-ddl',1),('DB-87','clean-ddl',1),('DB-88','clean-ddl',1),('DB-89','clean-ddl',1),('DB-90','clean-ddl',1),('DB-91','clean-ddl',1),('DB-92','clean-ddl',1),('DB-93','clean-ddl',1),('DB-94','clean-ddl',1),('DB-95','clean-ddl',1),('DB-96','clean-ddl',1),('DB-97','clean-ddl',1),('DB-98','clean-ddl',1),('DB-99','clean-ddl',1),('DB-100','clean-ddl',1),('DB-101','clean-ddl',1),('DB-102','clean-ddl',1),('DB-103','clean-ddl',1),('DB-104','clean-ddl',1),('DB-105','clean-ddl',1),('DB-106','clean-ddl',1),('DB-107','clean-ddl',1),('DB-108','clean-ddl',1),('DB-109','clean-ddl',1),('DB-110','clean-ddl',1),('DB-111','clean-ddl',1),('DB-112','clean-ddl',1),('DB-113','clean-ddl',1),('DB-114','clean-ddl',1),('DB-115','clean-ddl',1),('DB-116','clean-ddl',1),('DB-117','clean-ddl',1),('DB-118','clean-ddl',1),('DB-119','clean-ddl',1),('DB-120','clean-ddl',1),('DB-123','clean-ddl',1),('DB-124','clean-ddl',1),('DB-125','clean-ddl',1);
 
 --
 -- Table structure for table `service_tickets`
