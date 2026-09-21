@@ -1751,8 +1751,22 @@ public sealed class RcRatioPairDbFixture : IDisposable
     /// <summary>
     /// 🔴 <b>잠금 행 수 측정</b> — 한 연결에 한 문장, <c>ROLLBACK</c> 으로 닫는다.
     /// 읽기 프로브가 아니다: <c>LOCK IN SHARE MODE</c> 가 실제로 잠근 행 수를 <c>innodb_trx</c> 에서 읽는다.
+    ///
+    /// <para>
+    /// 🔴 <b><c>innodb_trx</c> 는 즉시 보이지 않는다</b>(A-1 봉합 · 작2 §17-3 정정).
+    /// InnoDB 는 <c>information_schema.innodb_trx</c> 를 <b>내부 캐시(<c>trx_i_s_cache</c>)</b>로 돌려주고
+    /// 그 캐시는 <b>최소 유휴 시간</b> 동안 갱신되지 않는다. 그래서 <b>쌍의 두 번째 측정</b>처럼
+    /// 직전 조회와 간격이 짧으면 <b>자기 트랜잭션이 아직 없던 스냅샷</b>이 돌아와 행이 0건이 된다.
+    /// 🔴 <b>연결 문제가 아니다</b> — 같은 연결·같은 <c>CONNECTION_ID()</c> 인데도 안 잡힌다
+    /// (작2 §17-3 의 「다른 연결에서 읽는다」 진단을 이 주석이 정정한다. 코드는 처음부터 같은 연결이었다).
+    /// </para>
+    /// <para>
+    /// ⇒ <b>캐시가 갱신될 때까지 다시 읽는다.</b> 🔴 끝내 못 잡으면 <c>-1</c> 을 그대로 돌려준다 —
+    /// <b>0 으로 갈음해 통과시키지 않는다</b>(A-1′ 가 그 거짓 초록을 잡는 자리다).
+    /// <paramref name="Attempts"/> 는 <b>실험이 실제로 잡혔다는 증거</b>로 보고표에 같이 싣는다.
+    /// </para>
     /// </summary>
-    public (decimal Sum, long Locked) MeasureLock(string db, string sql, string partnerId)
+    public (decimal Sum, long Locked, int Attempts) MeasureLock(string db, string sql, string partnerId)
     {
         using var c = new MySqlConnection(DbConnString(db));
         c.Open();
@@ -1761,12 +1775,27 @@ public sealed class RcRatioPairDbFixture : IDisposable
 
         // 🔴 「행이 없다」와 「0 이다」를 구별한다.
         //    innodb_trx 에 이 트랜잭션이 아예 없으면 측정 실패다 — 0 으로 읽어 통과시키면 거짓 초록이다.
-        var locked = c.QuerySingleOrDefault<long?>(
-            "SELECT trx_rows_locked FROM information_schema.innodb_trx WHERE trx_mysql_thread_id = CONNECTION_ID()",
-            transaction: tx);
+        long? locked = null;
+        var attempts = 0;
+        while (attempts < TrxLookupMaxAttempts)
+        {
+            attempts++;
+            locked = c.QuerySingleOrDefault<long?>(
+                "SELECT trx_rows_locked FROM information_schema.innodb_trx WHERE trx_mysql_thread_id = CONNECTION_ID()",
+                transaction: tx);
+            if (locked.HasValue) break;
+            Thread.Sleep(TrxLookupRetryDelayMs);
+        }
+
         tx.Rollback();
-        return (sum, locked ?? -1);
+        return (sum, locked ?? -1, attempts);
     }
+
+    /// <summary>🔴 <c>trx_i_s_cache</c> 갱신을 기다리는 최대 횟수. 못 잡으면 <c>-1</c> 로 남긴다(거짓 초록 금지).</summary>
+    private const int TrxLookupMaxAttempts = 12;
+
+    /// <summary>재조회 간격. InnoDB 캐시 최소 유휴 시간(0.1초)보다 넉넉히 잡는다.</summary>
+    private const int TrxLookupRetryDelayMs = 150;
 
     private void ImportShippingDdl(string db)
     {
@@ -2058,9 +2087,11 @@ public sealed class RcLockRatioGateTests : IClassFixture<RcRatioPairDbFixture>
 
             var ratio = b.Locked > 0 ? (double)s.Locked / b.Locked : -1;
 
+            // 🔴 조회 횟수를 같이 싣는다 — 「실험이 실제로 잡혔다」는 증거다(작2 §17-3 A-1 봉합).
+            //    2 이상이면 innodb_trx 캐시가 갱신되기를 기다린 것이다. 1 이면 첫 조회에 잡혔다.
             report.AppendLine(
                 $"[G-RC17] 채움 {fill,3}% · 채운 행 {baseFilled,7} · HLL {hll,4} · "
-              + $"봉합전 {b.Locked,8} · 봉합후 {s.Locked,8} · 비 {ratio:F4} · "
+              + $"봉합전 {b.Locked,8}(조회 {b.Attempts}) · 봉합후 {s.Locked,8}(조회 {s.Attempts}) · 비 {ratio:F4} · "
               + (judged ? "판정" : "기록만"));
 
             if (!judged) continue;
@@ -2079,8 +2110,10 @@ public sealed class RcLockRatioGateTests : IClassFixture<RcRatioPairDbFixture>
             if (s.Sum != 0 && s.Locked <= 0)
             {
                 failures.Add(
-                    $"A-1′ 위반 @ {fill}% — 봉합 쪽 합계가 {s.Sum} 인데 잠금 행 수가 {s.Locked} 다.\n"
-                  + "    합계가 0 이 아니면 그 행들을 잠갔어야 한다 ⇒ 측정이 안 잡힌 것이다(거짓 초록).");
+                    $"A-1′ 위반 @ {fill}% — 봉합 쪽 합계가 {s.Sum} 인데 잠금 행 수가 {s.Locked} 다"
+                  + $"(innodb_trx 조회 {s.Attempts}회).\n"
+                  + "    합계가 0 이 아니면 그 행들을 잠갔어야 한다 ⇒ 측정이 안 잡힌 것이다(거짓 초록).\n"
+                  + "    🔴 조회 횟수가 상한까지 갔다면 캐시 지연이 아니라 다른 원인이다 — 새로 규명하라.");
                 continue;
             }
 
@@ -2132,11 +2165,21 @@ public sealed class RcLockRatioGateTests : IClassFixture<RcRatioPairDbFixture>
         var b = _fx.MeasureLock(_fx.BaseDb, baselineSql, RcRatioPairDbFixture.HotPartner);
         var s = _fx.MeasureLock(_fx.SealDb, baselineSql, RcRatioPairDbFixture.HotPartner);
 
-        Assert.True(b.Locked > 0, $"A-1 — 봉합 전 잠금이 {b.Locked} 다. 시드가 안 돌았다.");
+        Assert.True(b.Locked > 0,
+            $"A-1 — 봉합 전 잠금이 {b.Locked} 다(innodb_trx 조회 {b.Attempts}회). 시드가 안 돌았다.");
+
+        // 🔴 측정 실패(-1)를 「좋은 비」로 읽지 않는다.
+        //    여기서 s.Locked 가 -1 이면 비가 음수가 되어 「게이트가 안 살아있다」는 엉뚱한 판정이 난다.
+        //    A-1′ 와 같은 자리다 — 「행이 없다」는 「0 이다」가 아니다.
+        Assert.True(s.Locked > 0,
+            $"A-1′ — 봉합 쪽 잠금이 {s.Locked} 다(innodb_trx 조회 {s.Attempts}회).\n"
+          + "  같은 기준선 SQL 을 쟀으니 잠갔어야 한다 ⇒ 측정이 안 잡힌 것이다.\n"
+          + "  🔴 이걸 비에 넣으면 음수가 되어 A-3 이 「게이트가 죽었다」로 잘못 운다.");
 
         var ratio = (double)s.Locked / b.Locked;
         Console.Error.WriteLine(
-            $"[G-RC17/A-3] ㉪ 없이 0% — 봉합전 {b.Locked} · 봉합후 {s.Locked} · 비 {ratio:F4} (기대: {AliveRatioFloor} 이상)");
+            $"[G-RC17/A-3] ㉪ 없이 0% — 봉합전 {b.Locked}(조회 {b.Attempts}) · "
+          + $"봉합후 {s.Locked}(조회 {s.Attempts}) · 비 {ratio:F4} (기대: {AliveRatioFloor} 이상)");
 
         Assert.True(ratio >= AliveRatioFloor,
             $"🔴 A-3 — ㉪ 를 뺐는데도 비가 {ratio:F4} 로 좋다(기대 {AliveRatioFloor} 이상).\n"
