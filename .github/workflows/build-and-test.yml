@@ -520,3 +520,19 @@ jobs:
       # 빌드 0/0 과 로컬 빈 DB 실측은 이걸 못 잡는다(파일 이름 문제 + 빈 DB 엔 기록이 없음).
       - name: Check migration id collision
         run: bash scripts/check-migration-id-collision.sh
+
+  verify-index-declaration:
+    name: 인덱스 마이그 선언 (@verify-index 누락)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      # 왜 이 잡이 있나 (2026-09-21, 20260921작2 §14-4 · §15-1 P-21):
+      #   인덱스 마이그는 실패해도 오류 0건·화면 정상이라 아무도 못 본다. 그래서 워치독 업데이트 검증이
+      #   "선언된 인덱스가 실제로 있는가" 를 확인하는데, 그 목록을 코드에 하드코딩하지 않고
+      #   마이그 파일 머리말의 '-- @verify-index:' 선언에서 읽는다.
+      #   🔴 남는 구멍은 "다음 마이그가 선언을 안 적는 것" 하나다 — 그걸 여기서 닫는다.
+      - name: Check @verify-index declaration
+        run: bash scripts/check-verify-index-declaration.sh
