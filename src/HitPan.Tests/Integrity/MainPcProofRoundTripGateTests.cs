@@ -13,8 +13,9 @@ using Xunit;
 namespace HitPan.Tests.Integrity;
 
 /// <summary>
-/// 🔴 <b>G-1a · G-2a · G-4 · G-5a · G-5b · G-6 · G-7a~G-7d · G-9 · G-13a</b> —
+/// 🔴 <b>G-1a · G-1c · G-2a · G-4 · G-5a · G-5b · G-6 · G-7a~G-7d · G-9 · G-13a</b> —
 /// 메인PC 「왕복 증명」의 <b>표·출입증·판정</b> (20260922작3 · 설계 §8).
+/// <para>🚨 <b>G-1c 는 이 파일의 다른 게이트가 전부 놓친 P0 를 지킨다</b> — 미들웨어를 실제로 지나가 본다.</para>
 /// </summary>
 /// <remarks>
 /// <para>
@@ -486,6 +487,89 @@ public sealed class MainPcProofRoundTripGateTests
         xff.Request.Headers["X-Forwarded-For"] = "10.0.0.5";
         xff.Connection.RemoteIpAddress = IPAddress.Loopback;
         Assert.False(MainPcOnlyAttribute.IsLocalConsole(xff));
+    }
+
+    // ══════════════════════════════════════════════════════════════
+    // 🚨 G-1c — ②가 미들웨어를 지나 컨트롤러까지 닿는가 (20260922작3 P0 봉합)
+    // ══════════════════════════════════════════════════════════════
+
+    /// <summary>
+    /// 🚨 <b>G-1c — 토큰 없는 ②가 <c>TenantMiddleware</c> 를 지나 컨트롤러에 닿는다.</b>
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// 🔴 <b>무엇이 났나</b> (2026-09-22 실측) — `/api/devices/mainpc-proof` 가 <b>401 · 컨트롤러 도달 안 함</b>이었다.
+    /// ②는 브라우저가 자기 PC 안의 히트판을 두드리는 길이라 <b>설계상 토큰을 싣지 않는데</b>
+    /// (<c>hitpan-mainpc-proof.js</c> 의 <c>credentials:'omit'</c>), 이 미들웨어가 <b>먼저 잘랐다.</b>
+    /// ⇒ <c>confirmed</c> 가 영원히 <c>false</c> ⇒ <b>모든 PC 가 클라이언트로 판정</b> ⇒ 자료관리가 안 열린다.
+    /// 사장님이 보신 증상 ②③ 이 <b>하나도 봉합되지 않은 상태</b>였다.
+    /// </para>
+    /// <para>
+    /// 🔴 <b>같은 파일에서 세 번째 사고다</b>(작10 <c>update-status-local</c> · 작12 <c>update-consent-local</c>).
+    /// <c>[AllowAnonymous]</c> 는 <b>이 미들웨어보다 뒤</b>라 소용이 없다.
+    /// </para>
+    /// <para>
+    /// 🔴 <b>이 게이트가 왜 따로 필요한가</b> — 이 파일의 다른 게이트 전부가 이 결함을 <b>못 잡았다.</b>
+    /// 나머지는 <c>MainPcOnlyAttribute</c>·<c>MainPcProofService</c> 를 <b>따로</b> 부른다.
+    /// <b>게이트가 초록인 것과, 실제 요청이 그 함수까지 닿는 것은 다른 질문이다.</b>
+    /// ⇒ 이 게이트만 <b>문을 실제로 지나가 본다.</b>
+    /// </para>
+    /// <para>
+    /// 🟢 <b>음성 대조군을 안에 넣었다</b> — ③·등록은 <b>여전히 401</b> 이어야 하고, 없는 길도 401 이어야 한다.
+    /// 그래야 <i>"`/api/devices` 를 통째로 열어 버렸다"</i> 를 이 게이트가 잡는다.
+    /// </para>
+    /// </remarks>
+    [Fact(DisplayName = "G-1c 🚨 토큰 없는 ②는 문을 지나간다 · ③과 등록은 여전히 막힌다 (음성 대조군 포함)")]
+    public async Task G1c_토큰없는_왕복확인만_문을_지나간다()
+    {
+        // 🟢 지나가야 하는 것 — ②뿐이다.
+        var (status, reached) = await ThroughTenantGateAsync("/api/devices/mainpc-proof");
+        Assert.True(reached,
+            $"②(mainpc-proof)가 컨트롤러에 닿지 못했다(status={status}). "
+          + "TenantMiddleware 화이트리스트에서 이 주소가 빠졌다는 뜻이고, 그러면 왕복 증명은 "
+          + "실물에서 절대 완성되지 않는다 — 모든 PC 가 클라이언트로 판정된다(2026-09-22 P0).");
+
+        // 🔴 막혀야 하는 것 — 통째로 열지 않았음을 지킨다.
+        foreach (var mustBlock in new[]
+        {
+            "/api/devices/mainpc-verify",     // ③ — 세션 대조가 걸리는 자리다. 토큰이 반드시 있어야 한다
+            "/api/devices/mainpc-register",   // 등록 — 대표(부모계정) 확인이 걸리는 자리다
+            "/api/devices",                   // 기기 목록
+            "/api/devices/zzz-없는-길",       // 없는 길
+        })
+        {
+            var (blockedStatus, blockedReached) = await ThroughTenantGateAsync(mustBlock);
+            Assert.False(blockedReached,
+                $"{mustBlock} 가 토큰 없이 지나갔다(status={blockedStatus}) — "
+              + "/api/devices 를 통째로 열어 버렸다는 뜻이다. 이 주소 하나만 열어야 한다.");
+            Assert.Equal(StatusCodes.Status401Unauthorized, blockedStatus);
+        }
+    }
+
+    /// <summary>
+    /// 인증 없는 요청을 <b>실제 <c>TenantMiddleware</c> 에 통과시켜</b> 본다.
+    /// </summary>
+    /// <remarks>
+    /// 🟢 글자를 읽지 않는다 — 미들웨어를 <b>불러서</b> 다음 단계가 실행됐는지를 본다.
+    /// ⚠️ DB·포트·설치본 무접촉이다. 뒤 단계는 세우지 않는다(닿았는지만 본다).
+    /// </remarks>
+    private static async Task<(int status, bool reachedNext)> ThroughTenantGateAsync(string path)
+    {
+        var reached = false;
+        var middleware = new HitPan.API.Middleware.TenantMiddleware(_ =>
+        {
+            reached = true;
+            return Task.CompletedTask;
+        });
+
+        var ctx = new DefaultHttpContext();
+        ctx.Request.Path = path;
+        ctx.Request.Method = "POST";
+        // 브라우저가 자기 PC 를 두드린 그 모양 — 터널 헤더 없음 · 루프백.
+        ctx.Connection.RemoteIpAddress = IPAddress.Loopback;
+
+        await middleware.InvokeAsync(ctx, new HitPan.Infrastructure.Security.CurrentTenant());
+        return (ctx.Response.StatusCode, reached);
     }
 
     // ══════════════════════════════════════════════════════════════
