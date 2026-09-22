@@ -419,12 +419,23 @@ jobs:
           #    ⇒ 🔴 **새 게이트 클래스를 만들면 이 줄에 등록하고, CI 로그에 그 이름이 뜨는지까지 확인한다.**
           #       (「게이트는 글자가 아니라 동작」 26번째 · 근거: docs/운영기록/20260922결1_…CTO1차결재.md N-1)
           GATES="$GATES|RcSafePathGate|RcLockRatioGate"
+          # 🔴 20260922작3 — 메인PC 「왕복 증명」 봉인·기기줄 게이트(G-11a·G-14·G-15·G-16·G-18·G-19a).
+          #    등록 근거는 **초록불이 아니라 무력화 시험**이다(#32) — 봉합을 빼고 실제로 FAIL 을 확인했다:
+          #      C-10 옛 메인PC 내리기 UPDATE 제거 → G-15 · C-11 rows==0 검사 제거 → G-16b
+          #      C-12 거래처/상품 한쪽만 세기 → G-18 · C-13 키없음→미등록 갈래 제거 → G-14
+          #    표 전문: docs/개발/erp/20260922작3_메인PC게이트시험_개발명세서.md §4
+          #    🔴 이 잡이 **유일한 계측 경로**다 — 개발 PC 의 `hitpan` 계정은 CREATE DATABASE 권한이 없어
+          #       로컬에서는 `[SKIP]` 으로만 남는다(개발명세서 §5). 로컬 초록을 통과로 읽지 마라.
+          GATES="$GATES|MainPcSealRegistryGate"
 
           echo "▶ 이 잡이 무는 게이트: $GATES"
           # 🔴 20260913작2 정정 — 이제 기기 계열 중 **MainPcRestartMarkGate 는 문다**(임시 DB 권한 실측 · C-3).
+          #    🔴 20260922작3 추가 — **MainPcSealRegistryGate 도 문다**(위 등록).
           #    나머지 기기·승인 계열은 여전히 안 문다. "안 넣었다는 사실을 로그에 남긴다" 는 원칙 그대로다.
           echo "▶ 이 잡이 물지 않는 것: 기기·승인 계열 중 DeviceAndKey·DeviceSlotSeed·ApproverCandidate 등(범위 밖)"
-          echo "▶ 기기 계열 중 무는 것: MainPcRestartMarkGate (임시 DB CREATE DATABASE 권한 실측 후 등록 — 20260913작2)"
+          echo "▶ 기기 계열 중 무는 것: MainPcRestartMarkGate (20260913작2) · MainPcSealRegistryGate (20260922작3)"
+          # ⚠️ MainPcProofRoundTripGate(순수 게이트 13건)는 **여기에 넣지 않는다** — DB 를 안 쓴다.
+          #    `build` 잡의 `dotnet test src/HitPan.sln` 이 필터 없이 이미 문다. DB 유무에 순수 게이트를 묶지 않는다.
 
           FILTER=$(echo "$GATES" | sed 's/|/|FullyQualifiedName~/g')
           dotnet test src/HitPan.Tests/HitPan.Tests.csproj \
