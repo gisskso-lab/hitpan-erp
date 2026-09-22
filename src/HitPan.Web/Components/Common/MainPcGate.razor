@@ -29,12 +29,35 @@
     <div style="position:fixed;inset:0;z-index:9001;display:flex;align-items:center;justify-content:center;padding:16px;">
         <MudPaper Elevation="8" Class="pa-6" Style="max-width:520px;margin:0 auto;">
             <div class="d-flex align-center mb-3">
-                <MudIcon Icon="@Icons.Material.Filled.Computer" Color="Color.Primary" Style="font-size:32px;" Class="mr-3" />
+                <MudIcon Icon="@(_prompt == Prompt.RestoreHint ? Icons.Material.Filled.Restore : Icons.Material.Filled.Computer)"
+                         Color="Color.Primary" Style="font-size:32px;" Class="mr-3" />
                 <MudText Typo="Typo.h6">
-                    @(_prompt == Prompt.Register ? "이 컴퓨터를 회사 자료 컴퓨터로 등록할까요?"
-                                                 : "회사 자료 컴퓨터를 이 컴퓨터로 바꿀까요?")
+                    @(_prompt switch
+                    {
+                        Prompt.Register    => "이 컴퓨터를 회사 자료 컴퓨터로 등록할까요?",
+                        Prompt.Change      => "회사 자료 컴퓨터를 이 컴퓨터로 바꿀까요?",
+                        _                  => "연결되었습니다",
+                    })
                 </MudText>
             </div>
+
+@* 🔵 자료가 비어 있는 컴퓨터다 — 갈 곳을 알려 준다 (사장님 결재 D-11).
+     이 안내가 없으면 고객은 **빈 화면을 보고 자료가 날아간 줄 안다.** *@
+@if (_prompt == Prompt.RestoreHint)
+{
+    <MudText Typo="Typo.body1" Class="mb-2">
+        이 컴퓨터가 <b>회사 자료 컴퓨터</b>로 연결되었습니다.
+    </MudText>
+    <MudText Typo="Typo.body2" Class="mb-4">
+        아직 자료가 들어 있지 않습니다. 기존에 쓰시던 자료가 있으면
+        <b>[설정 → 자료관리 → 자료복구]</b> 에서 가져오세요.
+    </MudText>
+    <div class="d-flex justify-end">
+        <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="Dismiss">알겠습니다</MudButton>
+    </div>
+}
+else
+{
 
             @* 🔴 고객이 읽는 말이다 — "인증키"·"왕복"·"루프백" 같은 개발 용어를 쓰지 않는다. *@
             <MudText Typo="Typo.body2" Class="mb-2">
@@ -69,12 +92,13 @@
                     @(_busy ? "처리 중…" : (_prompt == Prompt.Register ? "등록" : "이 컴퓨터로 바꾸기"))
                 </MudButton>
             </div>
+}
         </MudPaper>
     </div>
 }
 
 @code {
-    private enum Prompt { None, Register, Change }
+    private enum Prompt { None, Register, Change, RestoreHint }
 
     private Prompt _prompt = Prompt.None;
     private bool _busy;
@@ -183,11 +207,15 @@
                 return;
             }
 
+            var done = await res.Content.ReadFromJsonAsync<RegisterResponse>();
+
             // 등록이 끝났으니 곧바로 한 바퀴 더 돌아 출입증을 받아 둔다 —
             //   그래야 자료관리가 **지금 바로** 열린다(다시 로그인할 필요가 없다).
             await RunProofAsync();
 
-            _prompt = Prompt.None;
+            // 🔵 자료가 비어 있으면 갈 곳을 알려 준다 (사장님 결재 D-11).
+            //   새 컴퓨터로 옮겨 온 고객이 빈 화면만 보면 자료가 날아간 줄 안다(#20).
+            _prompt = done?.DataEmpty == true ? Prompt.RestoreHint : Prompt.None;
         }
         catch (Exception ex)
         {
@@ -214,4 +242,12 @@
     }
 
     private sealed class MessageResponse { public string? Message { get; set; } }
+
+    private sealed class RegisterResponse
+    {
+        public bool Registered { get; set; }
+
+        /// <summary>이 회사에 아직 자료가 없다 — 「자료 복구」를 안내한다(사장님 결재 D-11).</summary>
+        public bool DataEmpty { get; set; }
+    }
 }

@@ -117,6 +117,16 @@ public interface IMainPcProofService
     ///    DB 도 <c>uq_tenant_main_pc</c> 로 이를 막는다(DB-120).
     /// </remarks>
     Task<bool> RegisterThisPcAsync(string tenantId, string deviceId, CancellationToken ct);
+
+    /// <summary>
+    /// 🔵 <b>이 회사에 아직 자료가 없는가</b> — 등록 직후 「자료 복구」를 안내할지 가른다.
+    /// </summary>
+    /// <remarks>
+    /// 새 컴퓨터에 히트판을 깔면 DB 가 비어 있다. 그때 아무 말도 없으면 고객은
+    /// <b>빈 화면을 보고 자료가 날아간 줄 안다.</b> 갈 곳을 알려 주지 않는 안내는
+    /// 흐름이 끊긴 것이다(헌법 #20).
+    /// </remarks>
+    Task<bool> IsDataEmptyAsync(string tenantId, CancellationToken ct);
 }
 
 /// <summary>왕복 증명의 결과 — 화면이 무엇을 할지 여기서 갈린다.</summary>

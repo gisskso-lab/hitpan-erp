@@ -623,7 +623,12 @@ public sealed class DeviceController : ControllerBase
             return StatusCode(StatusCodes.Status500InternalServerError,
                 new { message = "등록을 마치지 못했습니다. 잠시 후 다시 시도해 주세요." });
 
-        return Ok(new { registered = true });
+        // 🔵 자료가 비어 있으면 화면이 「자료 복구」를 안내한다 (사장님 결재 D-11).
+        //   새 컴퓨터로 옮겨 온 고객은 여기서 갈 곳을 알아야 한다 — 빈 화면만 보면
+        //   자료가 날아간 줄 안다(#20).
+        var dataEmpty = await _proof.IsDataEmptyAsync(tid, ct);
+
+        return Ok(new { registered = true, dataEmpty });
     }
 
     /// <summary>왕복 증명이 주고받는 것은 <b>표 하나뿐</b>이다.</summary>
