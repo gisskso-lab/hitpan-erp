@@ -44,6 +44,25 @@ public sealed class TenantMiddleware
             //   🔴 /api/auth 를 통째로 열지 않는다 — 이 주소 하나만 연다(작10 원칙 계승).
             //   실행 가부는 AuthController 가 스스로 판단한다(버전 대조·서명검증은 워치독).
             || path.StartsWithSegments("/api/auth/update-consent-local")
+            // 🔴 20260922작3 — 사장님 결재. **메인PC 「왕복 증명」의 ②**(20260922작2 절A·절B).
+            //   [무엇이 났나] 실측: `/api/devices/mainpc-proof` → **401 · 컨트롤러 도달 안 함.**
+            //     ②는 브라우저가 **자기 PC 안의 히트판을** 두드리는 길이라 설계상 토큰을 싣지 않는다
+            //     (`hitpan-mainpc-proof.js` 의 `credentials:'omit'` · 인터페이스 주석
+            //      *"이 길은 로그인 토큰 없이 지나간다"*). ⇒ 이 미들웨어가 먼저 잘라
+            //     `confirmed` 가 **영원히 false** 였다. 모든 PC 가 클라이언트로 판정되고
+            //     자료관리가 안 열린다 — 사장님이 보신 증상 ②③ 이 하나도 봉합되지 않은 상태였다.
+            //   🔴 **이 파일에서 같은 사고가 세 번째다**(작10 update-status-local · 작12 update-consent-local).
+            //     `[AllowAnonymous]` 는 **이 미들웨어보다 뒤**라 소용이 없다.
+            //     ⇒ ERP API 에 **토큰 없이 부르는 길**을 새로 낼 때는 이 목록을 먼저 본다.
+            //   [열어도 안전한 근거] 앞의 두 주소와 같은 논리다 — **서버가 스스로 판단한다.**
+            //     컨트롤러가 들어오자마자 `MainPcOnlyAttribute.IsLocalConsole` 을 보고(터널 헤더가 하나라도
+            //     있으면 즉시 거절), 표는 **1회용·60초·세션 묶음**이며 회사 식별자도 **표 안에서** 나온다.
+            //     표를 맞히지 못하면 아무 일도 일어나지 않는다.
+            //   🔴 `/api/devices` 를 통째로 열지 않는다 — **이 주소 하나만** 연다(작10 원칙 계승).
+            //     ③ `mainpc-verify` 와 `mainpc-register` 는 토큰이 **반드시** 있어야 한다. 그것이
+            //     세션 대조와 대표 확인이 걸리는 자리다. 게이트가 이 비대칭을 지킨다
+            //     (`MainPcProofRoundTripGateTests` G-1c · 대조군 C-16: 이 줄을 빼면 G-1c 가 FAIL 한다).
+            || path.StartsWithSegments("/api/devices/mainpc-proof")
             || path.StartsWithSegments("/api/backoffice/auth")
             // 사장님 결재 저장 2026-06-02 모두결재 — 랜딩 가입·결제·설치 저장 = 인증 면제 (AllowAnonymous 저장 정합)
             || path.StartsWithSegments("/api/landing")

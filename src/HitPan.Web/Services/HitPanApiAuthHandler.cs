@@ -20,6 +20,13 @@ public sealed class HitPanApiAuthHandler(
     // 🔴 장비넘버 헤더 (20260816작2) — 인증번호가 없는 기기(메인PC)도 통과할 길.
     //   ⚠️ 서버 DeviceAuthMiddleware.DeviceIdHeader 와 **글자가 같아야** 한다.
     private const string DeviceIdHeader = "X-HitPan-Device-Id";
+
+    /// <summary>
+    /// 🔵 메인PC 「왕복 증명」 출입증 (20260922작2 절D).
+    /// <para>⚠️ 서버 <c>MainPcOnlyAttribute.PassHeader</c> 와 <b>글자가 같아야 한다.</b>
+    /// 한쪽만 바꾸면 자료관리가 조용히 안 열린다.</para>
+    /// </summary>
+    private const string MainPcPassHeader = "X-MainPc-Pass";
     // 동시 다발 401 시 refresh 가 중복 호출되지 않도록 직렬화한다(토큰 회전 충돌 방지).
     private static readonly SemaphoreSlim RefreshLock = new(1, 1);
 
@@ -153,6 +160,20 @@ public sealed class HitPanApiAuthHandler(
                 .ConfigureAwait(false);
             if (!string.IsNullOrWhiteSpace(deviceId))
                 request.Headers.TryAddWithoutValidation(DeviceIdHeader, deviceId);
+
+            // 🔴 20260922작2 절D — 메인PC 출입증도 함께 보낸다.
+            //
+            //   [무엇을 푸나] 고객은 **도메인으로 접속한다.** 터널을 지나오면 서버가 보는 주소는
+            //     외부 접속이든 메인PC 든 항상 127.0.0.1 이라 **IP 로는 메인PC 를 가릴 수 없다.**
+            //     ⇒ 종전에는 도메인으로 여는 한 자료관리(백업·초기화·자료이관)가 **영영 안 열렸다.**
+            //
+            //   [무엇을 보내나] 브라우저가 **자기 PC 안의 히트판을 실제로 두드려** 받아 온 값이다.
+            //     클라이언트 PC 에는 두드릴 히트판이 없어 애초에 받을 수 없다.
+            //   ⚠️ 없으면 그냥 안 보낸다. 막을지 말지는 **서버가 정한다**(위 인증 번호와 같은 원칙).
+            var mainPcPass = await js.InvokeAsync<string?>("hitpanMainPc.getPass", Array.Empty<object?>())
+                .ConfigureAwait(false);
+            if (!string.IsNullOrWhiteSpace(mainPcPass))
+                request.Headers.TryAddWithoutValidation(MainPcPassHeader, mainPcPass);
         }
         catch (Exception ex)
         {
