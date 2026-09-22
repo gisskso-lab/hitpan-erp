@@ -62,7 +62,30 @@
         });
     }
 
+    // 🔴 출입증은 sessionStorage 에 둔다 — localStorage 가 아니다.
+    //   창을 닫으면 사라진다. 이 값은 **짧게 살아야** 안전하고, 디스크에 오래 남을 이유가 없다.
+    //   ⚠️ 사생활 보호 모드·저장 차단 환경에서는 접근 자체가 예외를 던진다.
+    //     그때도 화면은 멀쩡히 돌아야 하므로 전부 try 로 감싼다(값이 없으면 왕복을 다시 돌면 그만이다).
+    var PASS_KEY = 'hitpan.mainpc.pass';
+
+    function readPass() {
+        try { return sessionStorage.getItem(PASS_KEY) || null; } catch (e) { return null; }
+    }
+
+    function writePass(v) {
+        try {
+            if (v) sessionStorage.setItem(PASS_KEY, v);
+            else sessionStorage.removeItem(PASS_KEY);
+        } catch (e) { /* 저장을 못 해도 동작은 계속된다 — 다음 요청에서 왕복을 다시 돈다 */ }
+    }
+
     window.hitpanMainPc = {
+        /** 자료관리 요청에 함께 보낼 출입증. 없으면 null. */
+        getPass: function () { return readPass(); },
+
+        /** 왕복을 통과해 받은 출입증을 보관한다. null 을 주면 지운다. */
+        setPass: function (v) { writePass(v); return true; },
+
         /**
          * 표를 들고 자기 컴퓨터 안의 히트판을 두드린다.
          * @param {string} challenge 서버가 발급한 표

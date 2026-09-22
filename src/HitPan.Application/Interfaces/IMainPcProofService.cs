@@ -80,7 +80,32 @@ public interface IMainPcProofService
     /// <summary>
     /// ③ 결과를 묻는다 — <b>도메인(터널) 경유 호출</b>. 표를 쓰고 나면 버린다.
     /// </summary>
-    MainPcProofOutcome Consume(string tenantId, string sessionKey, string challenge);
+    /// <param name="pass">
+    /// 🟢 통과한 경우에만 채워지는 <b>출입증</b>. 이후 자료관리 요청이 이것을 내민다.
+    /// </param>
+    MainPcProofOutcome Consume(string tenantId, string sessionKey, string challenge, out string? pass);
+
+    /// <summary>
+    /// 🔴 이 요청이 내민 <b>출입증</b>이 살아 있는가 — 자료관리 관문이 매 요청 묻는다.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// [왜 기기ID 로 기억하지 않나] 그것이 <b>지금 뚫려 있는 바로 그 구멍</b>이다.
+    /// 기존 <c>JoinServerRowAsync</c> 는 브라우저가 보내온 기기ID 를 믿었고,
+    /// 그래서 외부 PC 가 메인PC 의 기기ID 를 적어 보내면 <b>그대로 메인PC 가 됐다.</b>
+    /// 밖에서 온 값으로 신분을 정하면 언제나 자칭이 가능하다.
+    /// </para>
+    /// <para>
+    /// [왜 사용자ID 로도 안 되나] 같은 사람이 옆자리 PC 에서 로그인해도 같은 값이다.
+    /// 우리가 가리려는 것은 <b>사람이 아니라 컴퓨터</b>다.
+    /// </para>
+    /// <para>
+    /// ⇒ <b>서버가 만들어 준 비밀</b>로만 기억한다. 추측할 수 없고, 서버 메모리에만 있고,
+    /// <b>짧게 산다.</b> 만료되면 화면이 조용히 왕복을 다시 돌아 새로 받는다 —
+    /// 메인PC 면 저절로 갱신되고, 아니면 그때 닫힌다. <b>고객은 이 일을 모른다.</b>
+    /// </para>
+    /// </remarks>
+    bool IsPassValid(string? pass);
 
     /// <summary>
     /// 🔵 <b>메인PC 로 등록한다</b> — 새 키를 만들어 <b>이 PC 에 봉인</b>하고 기기 줄에 심는다.

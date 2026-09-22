@@ -34,7 +34,18 @@ public sealed class MainPcOnlyAttribute : ActionFilterAttribute
     /// 같은 <c>/start</c> 라도 「없는 것만 보태기」는 어디서든 되고, <b>지우는 쪽만</b> 메인PC 로 묶는다.
     /// 규칙을 복붙하면 한쪽만 고쳐지는 날이 온다.
     /// </remarks>
-    public static bool IsMainPc(HttpContext http)
+    /// <summary>
+    /// 🔴 <b>이 요청이 그 컴퓨터 안에서 직접 들어왔는가</b> — 소켓만 본다. 20260922작2 절D.
+    /// </summary>
+    /// <remarks>
+    /// 종전 <c>IsMainPc</c> 의 본문을 <b>한 글자도 바꾸지 않고</b> 이 이름으로 옮겼다(헌법 #1).
+    /// <para>
+    /// 🔴 <b>이 판정만 「왕복 증명」의 ②를 받을 수 있다.</b> 아래 <c>IsMainPc</c> 는 출입증도 인정하는데,
+    /// ②가 그것을 쓰면 <b>출입증을 가진 브라우저가 스스로 출입증을 갱신하는 고리</b>가 생긴다.
+    /// 한 번 새어 나간 출입증이 영원히 사는 길이 열린다. <b>두 판정을 절대 합치지 마라.</b>
+    /// </para>
+    /// </remarks>
+    public static bool IsLocalConsole(HttpContext http)
     {
         var req = http.Request;
 
@@ -46,6 +57,39 @@ public sealed class MainPcOnlyAttribute : ActionFilterAttribute
         var isLoopback = remote is not null && System.Net.IPAddress.IsLoopback(remote);
 
         return !viaTunnel && isLoopback;
+    }
+
+    /// <summary>
+    /// 🔵 「왕복 증명」이 발급한 <b>출입증</b>을 담아 오는 헤더 (20260922작2 절D).
+    /// </summary>
+    public const string PassHeader = "X-MainPc-Pass";
+
+    public static bool IsMainPc(HttpContext http)
+    {
+        // ① 그 컴퓨터에서 직접 연 화면 — 종전 경로. 그대로 통과시킨다(무회귀 · 헌법 #1).
+        if (IsLocalConsole(http)) return true;
+
+        // ② 🔴 20260922작2 절D — 도메인(터널)으로 들어온 메인PC.
+        //
+        //   [왜 필요한가] 고객은 도메인으로 접속한다. 터널을 지나오면 ①은 **반드시 거짓**이다 —
+        //     Cloudflare 가 CF-Connecting-IP 를 붙이기 때문이다.
+        //     ⇒ 종전에는 도메인으로 여는 한 메인PC 로 인식된 적이 **한 번도 없었고**,
+        //       자료관리(백업·초기화·자료이관)가 전부 403 이었다.
+        //
+        //   [무엇을 믿나] 브라우저가 **자기 PC 안의 히트판을 실제로 두드려** 받아 온 출입증.
+        //     기기ID 나 사용자ID 로 기억하지 않는다 — 그것이 지금 뚫려 있는 바로 그 구멍이다
+        //     (밖에서 온 값으로 신분을 정하면 언제나 자칭이 가능하다).
+        //     출입증은 **서버가 만들어 서버 메모리에만 두고**, 짧게 산다.
+        var pass = http.Request.Headers[PassHeader].ToString();
+        if (string.IsNullOrWhiteSpace(pass)) return false;
+
+        // ⚠️ 어트리뷰트는 DI 를 직접 못 받는다 — 요청 범위에서 꺼낸다.
+        //   서비스가 없으면(구성 누락) **막는다.** 열어 두는 쪽으로 실패하지 않는다.
+        var proof = http.RequestServices
+            .GetService(typeof(HitPan.Application.Interfaces.IMainPcProofService))
+            as HitPan.Application.Interfaces.IMainPcProofService;
+
+        return proof?.IsPassValid(pass) == true;
     }
 
     public override void OnActionExecuting(ActionExecutingContext context)
