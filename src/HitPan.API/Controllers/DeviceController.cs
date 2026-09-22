@@ -21,7 +21,18 @@ public sealed class DeviceController : ControllerBase
 {
     private readonly ITenantDeviceService _svc;
 
-    public DeviceController(ITenantDeviceService svc) => _svc = svc;
+    /// <summary>
+    /// 🔴 메인PC 「왕복 증명」 (20260922작2 절A · 사장님 전결).
+    /// <para>터널을 지나온 접속에서는 IP 로 메인PC 를 가릴 수 없다 — 브라우저가
+    /// 자기 PC 안의 히트판을 두드려 오는지로 가른다.</para>
+    /// </summary>
+    private readonly IMainPcProofService _proof;
+
+    public DeviceController(ITenantDeviceService svc, IMainPcProofService proof)
+    {
+        _svc = svc;
+        _proof = proof;
+    }
 
     /// <summary>기기 목록 — TenantAdmin은 전체, 일반 사용자는 자기 것만.</summary>
     [HttpGet]
@@ -476,5 +487,135 @@ public sealed class DeviceController : ControllerBase
         /// <para>⚠️ 안 고르면 <c>null</c> 이고, 그때는 기존 주인을 <b>그대로 둔다</b>(안 지운다).</para>
         /// </summary>
         public string? AssignUserId { get; set; }
+    }
+
+    // ═════════════════════════════════════════════════════════════════
+    // 🔴 메인PC 「왕복 증명」 — 20260922작2 절A (사장님 전결 2026-09-22)
+    //
+    //   [무엇이 문제였나] 메인PC 판정이 `터널 헤더 없음 AND 루프백` 하나뿐이었다.
+    //     그런데 고객은 **도메인으로 접속한다.** Cloudflare 가 CF-Connecting-IP 를 반드시
+    //     붙이므로 첫 조건에서 항상 탈락한다 — 불안정이 아니라 **100% 실패**였고,
+    //     자료관리(백업·초기화·자료이관)가 전부 403 이었다.
+    //
+    //   [왜 IP 로는 못 하나] cloudflared 가 **그 PC 안에서** 히트판을 다시 부른다.
+    //     ⇒ 소켓 주소는 외부 접속이든 메인PC 든 **항상 127.0.0.1**.
+    //     ⇒ 같은 사무실이면 공인 IP 도 같다. **IP 축은 원리적으로 불가능하다.**
+    //
+    //   [무엇으로 가르나] 그 컴퓨터 안에 **히트판 본체가 있는가.**
+    //     API 는 루프백 전용 바인딩이라 클라이언트 PC 가 127.0.0.1 을 두드리면
+    //     **자기 PC 를 두드리는 것**이고 거기엔 아무도 없다. 남의 메인PC 를 두드릴 방법이 없다.
+    //
+    //   [흐름] ①challenge(도메인) → ②proof(로컬 직결) → ③verify(도메인)
+    // ═════════════════════════════════════════════════════════════════
+
+    /// <summary>① 표를 받는다 — 도메인(터널) 경유.</summary>
+    [HttpPost("mainpc-challenge")]
+    public IActionResult IssueMainPcChallenge()
+    {
+        var tid = HttpContext.Items["TenantId"]?.ToString();
+        var uid = HttpContext.Items["UserId"]?.ToString();
+        if (string.IsNullOrEmpty(tid) || string.IsNullOrEmpty(uid)) return Forbid();
+
+        return Ok(new { challenge = _proof.IssueChallenge(tid, uid) });
+    }
+
+    /// <summary>
+    /// ② 표를 들고 온 <b>로컬 직결</b> 요청 — 이 컴퓨터 안에 본체가 있다는 뜻이다.
+    /// </summary>
+    /// <remarks>
+    /// 🔴 <b>여기서 「진짜 로컬인가」를 반드시 먼저 본다.</b> 이 확인이 빠지면 터널을 지나온
+    /// 요청도 로컬로 인정되어 <b>설계 전체가 무너진다</b> — 아무 PC 나 메인PC 가 된다.
+    /// <para>
+    /// ⚠️ 판정은 <c>MainPcOnlyAttribute.IsMainPc</c> 한 곳을 쓴다. 규칙을 복붙하면
+    /// 한쪽만 고쳐지는 날이 온다(기존 주석이 이미 경고하고 있는 자리다).
+    /// </para>
+    /// <para>
+    /// ⚠️ 어트리뷰트로 걸지 않고 <b>본문에서</b> 묻는 이유 — 로컬이 아닐 때 403 이 아니라
+    /// <b>조용히 "아직 아님"</b> 으로 답해야 하기 때문이다. 클라이언트 PC 에서는 이것이
+    /// <b>정상</b>이고, 고객 화면에 오류가 보이면 안 된다(사장님: *"고객은 모르게"*).
+    /// </para>
+    /// </remarks>
+    /// <remarks>
+    /// 🔴 <b><c>[AllowAnonymous]</c> 인 이유</b> — 브라우저가 <b>자기 PC 로</b> 보내는 요청이다.
+    /// 여기에 로그인 토큰까지 실어 나를 이유가 없다(토큰이 한 곳 더 돌아다닌다).
+    /// <b>표만으로 충분하다</b> — 표는 서버가 발급했고, 1회용이며, 60초만 살고,
+    /// 회사 식별자도 <b>표 안에서</b> 나온다. 최종 판정은 ③에서 <b>세션까지 대조</b>한 뒤 나온다.
+    /// <para>⚠️ 대신 <b>여기서 로컬 여부를 반드시 본다.</b> 그것이 이 길의 유일한 자물쇠다.</para>
+    /// </remarks>
+    [HttpPost("mainpc-proof")]
+    [AllowAnonymous]
+    public async Task<IActionResult> ConfirmMainPcLocal([FromBody] MainPcChallengeRequest req, CancellationToken ct)
+    {
+        if (!HitPan.API.Security.MainPcOnlyAttribute.IsMainPc(HttpContext))
+            return Ok(new { confirmed = false });
+
+        var outcome = await _proof.ConfirmLocalAsync(req.Challenge ?? "", ct);
+        return Ok(new { confirmed = outcome != MainPcProofOutcome.NotProven });
+    }
+
+    /// <summary>③ 결과를 묻는다 — 도메인(터널) 경유. 표는 여기서 소모된다.</summary>
+    /// <remarks>
+    /// 화면은 이 값으로 갈린다 —
+    /// <c>MainPcConfirmed</c> 자료관리를 연다 · <c>NotRegisteredYet</c> [메인PC 등록] 팝업 ·
+    /// <c>DifferentPc</c> [메인PC 변경] 팝업 · <c>NotProven</c> 아무것도 안 한다(클라이언트 PC 의 정상).
+    /// </remarks>
+    [HttpPost("mainpc-verify")]
+    public IActionResult VerifyMainPc([FromBody] MainPcChallengeRequest req)
+    {
+        var tid = HttpContext.Items["TenantId"]?.ToString();
+        var uid = HttpContext.Items["UserId"]?.ToString();
+        if (string.IsNullOrEmpty(tid) || string.IsNullOrEmpty(uid)) return Forbid();
+
+        var outcome = _proof.Consume(tid, uid, req.Challenge ?? "");
+        return Ok(new { outcome = outcome.ToString(), isMainPc = outcome == MainPcProofOutcome.MainPcConfirmed });
+    }
+
+    /// <summary>
+    /// 🔵 <b>이 컴퓨터를 메인PC 로 등록/변경한다</b> — 20260922작2 절C·절F.
+    /// </summary>
+    /// <remarks>
+    /// 🔴 <b>왕복이 통과한 표에 대해서만</b> 받는다. 그렇지 않으면 아무나 자기를 메인PC 로 만든다.
+    /// <para>
+    /// ⚠️ 대표(부모계정)만 할 수 있다 — 설계 D-8. 메인PC 여부는 이미 물리로 확인되므로
+    /// 보안 차이는 없지만, <i>"대표가 정한다"</i> 는 반자동 원칙에 맞춘다.
+    /// </para>
+    /// <para>
+    /// ⚠️ 이미 메인PC 줄이 있으면 <b>그 줄을 내리고 이 줄을 올린다</b>(새 줄을 만들지 않는다).
+    /// DB 도 <c>uq_tenant_main_pc</c> 로 회사당 1줄을 보장한다(DB-120).
+    /// </para>
+    /// </remarks>
+    [HttpPost("mainpc-register")]
+    public async Task<IActionResult> RegisterMainPc([FromBody] MainPcChallengeRequest req, CancellationToken ct)
+    {
+        var tid = HttpContext.Items["TenantId"]?.ToString();
+        var uid = HttpContext.Items["UserId"]?.ToString();
+        if (string.IsNullOrEmpty(tid) || string.IsNullOrEmpty(uid)) return Forbid();
+
+        if (User.FindFirst("account_type")?.Value != "tenant_admin")
+            return Forbid();
+
+        // 🔴 표를 소모하며 판정을 다시 확인한다 — 화면 말을 믿지 않는다.
+        var outcome = _proof.Consume(tid, uid, req.Challenge ?? "");
+        if (outcome != MainPcProofOutcome.NotRegisteredYet && outcome != MainPcProofOutcome.DifferentPc)
+        {
+            return BadRequest(new { message = "이 컴퓨터에서는 등록할 수 없습니다. 회사 자료가 들어 있는 컴퓨터에서 진행해 주세요." });
+        }
+
+        var deviceId = Request.Headers["X-Device-Id"].ToString();
+        if (string.IsNullOrWhiteSpace(deviceId))
+            return BadRequest(new { message = "기기 정보를 확인할 수 없습니다. 다시 접속해 주세요." });
+
+        var ok = await _proof.RegisterThisPcAsync(tid, deviceId, ct);
+        if (!ok)
+            return StatusCode(StatusCodes.Status500InternalServerError,
+                new { message = "등록을 마치지 못했습니다. 잠시 후 다시 시도해 주세요." });
+
+        return Ok(new { registered = true });
+    }
+
+    /// <summary>왕복 증명이 주고받는 것은 <b>표 하나뿐</b>이다.</summary>
+    public sealed class MainPcChallengeRequest
+    {
+        public string? Challenge { get; set; }
     }
 }

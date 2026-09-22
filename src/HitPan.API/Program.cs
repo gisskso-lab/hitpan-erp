@@ -105,6 +105,10 @@ builder.Services.AddScoped<IPermissionService, PermissionService>();
 builder.Services.AddScoped<IAuditService, AuditService>();
 builder.Services.AddScoped<ITenantCertificateService, TenantCertificateService>();
 builder.Services.AddScoped<ITenantDeviceService, TenantDeviceService>();
+// 🔴 메인PC 「왕복 증명」 (20260922작2 절A · 사장님 전결) — 브라우저가 자기 PC 안의 히트판을
+//   두드려 오는지로 메인PC 를 가른다. 터널을 지나온 접속에서는 IP 로 가릴 방법이 없기 때문이다.
+//   ⚠️ Scoped 다 — 안에서 DB 를 읽는다. 표(challenge) 자체는 프로세스 공용 메모리에 둔다.
+builder.Services.AddScoped<IMainPcProofService, MainPcProofService>();
 builder.Services.AddScoped<IEmployeeService, EmployeeService>();
 builder.Services.AddScoped<IPositionService, PositionService>();
 // 작(2026-08-13) 단계4 토대: 부서 마스터 CRUD. 종전엔 조회만 있어 부서를 만들 방법이 없었다.
@@ -538,7 +542,19 @@ app.Use(async (ctx, next) =>
             "style-src-elem 'self' 'unsafe-inline' https://t1.kakaocdn.net https://fonts.googleapis.com https://cdn.jsdelivr.net; " +
             "font-src 'self' https://fonts.gstatic.com https://cdn.jsdelivr.net data:; " +
             "img-src 'self' data: https:; " +
-            "connect-src 'self' https: wss:; " +
+            // 🔴 메인PC 「왕복 증명」 (20260922작2 절B · 사장님 전결) —
+            //   브라우저가 **자기 PC 안의 히트판**을 두드려야 메인PC 인지 가릴 수 있다.
+            //   터널을 지나오면 소켓 주소가 외부든 메인PC 든 항상 127.0.0.1 이라 IP 로는 못 가린다.
+            //
+            //   ⚠️ 이 한 줄이 없으면 브라우저가 우리 CSP 에 먼저 막힌다 — 실측에서
+            //     `violates ... "connect-src 'self' https: wss:"` 로 차단됐다.
+            //     브라우저 자체의 벽이 아니라 **우리가 스스로 막고 있던 것**이었다.
+            //
+            //   🔴 `http:` 전체를 열지 않는다. **이 주소 두 개뿐**이다.
+            //     넓게 열면 어느 http 서버로든 나갈 수 있게 되어 CSP 를 켠 의미가 사라진다.
+            //   ⚠️ 루프백은 브라우저가 안전한 출처로 취급하므로 https 페이지에서도 혼합 콘텐츠가 아니다.
+            //     (실측: 도메인 페이지 → 127.0.0.1:5257 → HTTP 200 · 차단 메시지 0)
+            "connect-src 'self' https: wss: http://127.0.0.1:5257 http://localhost:5257; " +
             // 봉합 2026-08-20 20260820작4 (설계1) — 우편번호 찾기 창이 안 뜨던 것.
             //
             //   [무엇이 났나] 6/17(1.2.13) CSP 봉합이 **script-src 3종만 넣고 frame-src 를 빠뜨렸다.**

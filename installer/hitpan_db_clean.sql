@@ -3893,6 +3893,13 @@ CREATE TABLE `tenant_devices` (
   `revoked_at` datetime(6) DEFAULT NULL,
   `revoked_reason` varchar(200) DEFAULT NULL,
   `is_main_pc` tinyint(1) NOT NULL DEFAULT 0 COMMENT '메인PC(히트판 본체·DB 보유) 여부. 회사당 1대 — DB 가 보장한다 (DB-120: main_pc_key + uq_tenant_main_pc). 코드도 함께 막는다',
+  -- 🔴 DB-126: 메인PC 「왕복 증명」의 비밀. TPM/DPAPI 로 그 PC 에 봉인된 상태로만 담는다.
+  --   브라우저가 자기 PC 안의 히트판(127.0.0.1)을 두드려 받아 오는 증표를 이 키로 만든다.
+  --   ⚠️ 파일이 아니라 DB 에 두는 이유 — 자료와 함께 이사해야 「컴퓨터가 바뀌었다」를 알 수 있다.
+  --     새 PC 에서 백업을 복원하면 옛 봉인키가 따라 들어오고, 그것이 **안 풀리는 것**이 신호가 된다.
+  --     파일에 두면 복원해도 안 따라오므로 그 신호가 영영 안 뜨고, 메인PC 를 영영 못 옮긴다.
+  `mainpc_sealed_key` varbinary(1024) DEFAULT NULL COMMENT '메인PC 인증키 — TPM/DPAPI 로 그 PC 에 봉인된 상태. 원문 미저장. NULL=미등록 (DB-126)',
+  `mainpc_key_issued_at` datetime(6) DEFAULT NULL COMMENT '메인PC 인증키 발급(= 메인PC 등록·변경) 시각 (DB-126)',
   -- 🔴 DB-120: 메인PC 1대 보장. 메인PC 일 때만 tenant_id, 아니면 NULL.
   --   UNIQUE 는 NULL 을 중복으로 보지 않으므로 일반 기기는 몇 대든 자유롭고 메인PC 만 회사당 1행으로 잠긴다.
   --   🔴 **본문에 직접 싣는다** — 시드에만 넣으면 신규설치 고객은 그 마이그를 영원히 건너뛰어
