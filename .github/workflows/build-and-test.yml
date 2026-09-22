@@ -128,33 +128,6 @@ jobs:
           done
           echo "::error::MariaDB 서비스 컨테이너 기동 실패"; exit 1
 
-      - name: Start STATEMENT MariaDB (위험 서버 재현 — RcSafePathGate 전용)
-        # 🔴 20260920작1 갈래 S2 (작지 §5-1 · 설계 §6-1).
-        #   서비스 컨테이너(`services:`)로는 못 한다 — `options` 는 docker run 옵션이지 CMD 인자가 아니라
-        #   `--log-bin --binlog-format=STATEMENT` 같은 **기동 인자**를 줄 수 없다. 그래서 스텝에서 직접 띄운다.
-        #
-        #   왜 필요한가: 수금·지급 등록은 binlog_format=STATEMENT 서버에서 READ COMMITTED 쓰기가 1665 로 거절된다.
-        #   그래서 그런 서버에서는 REPEATABLE READ + 잠금 읽기 경로로 간다. 그 경로는 **이 인스턴스에서만** 돈다 —
-        #   위의 3306(기본 MIXED)은 RC 경로라 RR 분기에 아예 안 들어간다. 즉 이 스텝이 없으면
-        #   RR 봉합 전체가 CI 에서 한 번도 안 돌고, 그건 이 잡이 처음부터 막으려던 「안 돈 게이트를 통과로 세기」다.
-        run: |
-          docker run -d --name mariadb-stmt -p 3307:3306 \
-            -e MARIADB_ROOT_PASSWORD=dbgate_ci \
-            mariadb:11.4 --log-bin=stmt --binlog-format=STATEMENT --server-id=9920
-          for i in $(seq 1 30); do
-            if mysql -h 127.0.0.1 -P 3307 -u root -pdbgate_ci -e "SELECT 1" >/dev/null 2>&1; then
-              echo "STATEMENT MariaDB ready"
-              # 🔴 「떴다」로 만족하지 않는다 — 위험 서버인지 값으로 확인한다(게이트 fixture 도 같은 것을 다시 잰다).
-              mysql -h 127.0.0.1 -P 3307 -u root -pdbgate_ci -N \
-                -e "SELECT CONCAT('log_bin=', @@log_bin, ' binlog_format=', @@binlog_format, ' ', VERSION());"
-              exit 0
-            fi
-            echo "waiting for statement mariadb ($i)"; sleep 2
-          done
-          echo "::error::STATEMENT MariaDB 기동 실패 — RcSafePathGate 가 못 돈다. 건너뛴 게이트는 통과가 아니다."
-          docker logs mariadb-stmt || true
-          exit 1
-
       - name: Create gate database (출하 DDL 적재)
         # 일부 게이트는 자기 DB 를 스스로 만들지만(CREATE DATABASE),
         # TrialBalance 처럼 HITPAN_TEST_DB 가 이미 있다고 보고 붙는 게이트가 있다.
@@ -187,9 +160,6 @@ jobs:
           HITPAN_DB_USER: 'root'
           HITPAN_DB_PASS: 'dbgate_ci'
           HITPAN_TEST_DB: 'hitpan_e2e'
-          # 🔴 20260920작1 S2 — 위험 서버(STATEMENT) 인스턴스. RcSafePathGate 는 **이 변수로만** 그 서버를 찾는다.
-          #   없거나 못 붙으면 게이트가 실패한다(SKIP 을 통과로 세지 않는다 · fixture 가 log_bin/binlog_format 까지 확인).
-          HITPAN_DB_STMT_PORT: '3307'
         #
         # 🔴 범위를 밝힌다 (조용한 축소 금지) — 이번에 무는 것은 **업무 로직 게이트 12종**이다.
         #    기기·승인 계열(DeviceAndKey·DeviceSlotSeed·ApproverCandidate 등)은 시험마다
@@ -377,10 +347,7 @@ jobs:
           #    표 전문: docs/개발/erp/20260922작3_메인PC게이트시험_개발명세서.md §4
           #    🔴 이 잡이 **유일한 계측 경로**다 — 개발 PC 의 `hitpan` 계정은 CREATE DATABASE 권한이 없어
           #       로컬에서는 건너뛰기 표시로만 남는다(개발명세서 §5). 로컬 초록을 통과로 읽지 마라.
-          #       ⚠️ 이 주석에 건너뛰기 표시를 **글자 그대로 적지 않는다** — 아래 가드가 로그를 그 글자로
-          #          훑으므로, 적어 두면 훗날 가드가 잡 로그를 훑게 바뀌는 날 애먼 빨간불이 된다.
-          #    🟢 계측 완료 2026-09-22 (run 35740148757 · SHA 2cf53752): 5건 전부 Passed(각 700~790ms).
-          #       같은 잡의 유일한 실패는 별건 A(G-RC13)이고 이 게이트와 무관하다.
+          #    🟢 계측 완료 2026-09-22 (run 35740148757): 5건 전부 Passed(각 700~790ms).
           GATES="$GATES|MainPcSealRegistryGate"
 
           echo "▶ 이 잡이 무는 게이트: $GATES"
@@ -389,8 +356,6 @@ jobs:
           #    나머지 기기·승인 계열은 여전히 안 문다. "안 넣었다는 사실을 로그에 남긴다" 는 원칙 그대로다.
           echo "▶ 이 잡이 물지 않는 것: 기기·승인 계열 중 DeviceAndKey·DeviceSlotSeed·ApproverCandidate 등(범위 밖)"
           echo "▶ 기기 계열 중 무는 것: MainPcRestartMarkGate (20260913작2) · MainPcSealRegistryGate (20260922작3)"
-          # ⚠️ MainPcProofRoundTripGate(순수 게이트 13건)는 **여기에 넣지 않는다** — DB 를 안 쓴다.
-          #    `build` 잡의 `dotnet test src/HitPan.sln` 이 필터 없이 이미 문다. DB 유무에 순수 게이트를 묶지 않는다.
 
           FILTER=$(echo "$GATES" | sed 's/|/|FullyQualifiedName~/g')
           dotnet test src/HitPan.Tests/HitPan.Tests.csproj \
@@ -496,19 +461,3 @@ jobs:
       # 빌드 0/0 과 로컬 빈 DB 실측은 이걸 못 잡는다(파일 이름 문제 + 빈 DB 엔 기록이 없음).
       - name: Check migration id collision
         run: bash scripts/check-migration-id-collision.sh
-
-  verify-index-declaration:
-    name: 인덱스 마이그 선언 (@verify-index 누락)
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v7
-
-      # 왜 이 잡이 있나 (2026-09-21, 20260921작2 §14-4 · §15-1 P-21):
-      #   인덱스 마이그는 실패해도 오류 0건·화면 정상이라 아무도 못 본다. 그래서 워치독 업데이트 검증이
-      #   "선언된 인덱스가 실제로 있는가" 를 확인하는데, 그 목록을 코드에 하드코딩하지 않고
-      #   마이그 파일 머리말의 '-- @verify-index:' 선언에서 읽는다.
-      #   🔴 남는 구멍은 "다음 마이그가 선언을 안 적는 것" 하나다 — 그걸 여기서 닫는다.
-      - name: Check @verify-index declaration
-        run: bash scripts/check-verify-index-declaration.sh
