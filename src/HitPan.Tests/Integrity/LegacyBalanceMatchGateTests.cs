@@ -716,10 +716,14 @@ public sealed class LegacyBalanceMatchGateTests : IClassFixture<LegacyBalanceMat
             Assert.Contains($"{legacy - amount:N0}원 남았습니다", rejected!.Message);
         }
 
-        // 계약 가드 — REPEATABLE READ 트랜잭션으로 부르면 옛 R 로 판정하지 않고 바로 막힌다
+        // 계약 가드 — 「아무 격리 수준이나 통과」가 아님을 계속 잰다.
+        // 🔴 20260920작1 S2 (작지 §5-3 · 설계 §6-3) — 종전에는 REPEATABLE READ 로 쟀다.
+        //   RR 은 이제 위험 서버(binlog_format=STATEMENT)의 **정식 경로**다(LegacyMatchMode.RepeatableReadLocking).
+        //   그래서 어느 모드로도 통과 못 하는 Serializable 로 바꾼다 — 사례 삭제가 아니라 대상 교체다(사례 수 24 유지).
+        //   RR 경로 자체를 재는 것은 신설 RcSafePathGate 다(STATEMENT 인스턴스에서만 돈다).
         await using var rr = new MySqlConnection(_fx.DbConnString());
         await rr.OpenAsync();
-        await using var rrTx = await rr.BeginTransactionAsync(System.Data.IsolationLevel.RepeatableRead);
+        await using var rrTx = await rr.BeginTransactionAsync(System.Data.IsolationLevel.Serializable);
         await Assert.ThrowsAsync<NotSupportedException>(() => LegacyBalanceMatching.GetForUpdateAsync(rr, rrTx, t, PA, true, CancellationToken.None));
     }
 

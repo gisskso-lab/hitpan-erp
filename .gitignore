@@ -92,3 +92,48 @@ hitpan-apiwwwroot/
 # Claude Code — 로컬 전용(worktrees · 개인 설정). 표준 에이전트 정의만 추적 (20260911작1)
 .claude/*
 !.claude/agents/
+
+# ═══════════════════════════════════════════════════════════════════════════
+# 🔴 DB 덤프·백업 폴더 (2026-09-22 사장님 결재 — 「고쳐」)
+#
+# 사고: db-backup-20260608-212123/ 와 db-backup-demo-final-20260820-223022/ 가
+#       합계 504MB(db.conf · hitpan_erp.sql · hitpan_backoffice.sql · hitpan_e2e.sql)로
+#       작업트리에 있었는데, 위의 `hitpan_erp_backup_*.sql` · `backups/` ·
+#       `installer/api-backup-*/` 어느 규칙에도 **안 걸렸다**(git check-ignore 실측 0건).
+#       `git add -A` 한 번이면 고객 데이터가 이력에 들어가고, 들어가면 지우기 어렵다 (#18 · #22).
+#
+# 원인: 이름 목록으로 막고 있었다 — **새 이름 하나에 뚫린다.**
+#       (「이름 목록 예외는 감시자를 지운다」 — 20260920작1 S4 교훈과 같은 병)
+#
+# 🔴 봉합하면서 **하지 않은 것**: `*backup*/` 같은 넓은 패턴은 쓰지 않았다.
+#    `src/HitPan.Application/DTOs/Backup/` 이 있고 Windows 는 대소문자를 안 가리므로
+#    **소스가 통째로 무시될 뻔했다.** 넓게 막는 게 안전하다는 가정이 여기서 깨진다.
+#
+# 🔴 위의 기존 규칙은 한 줄도 지우지 않았다 — 아래는 **추가**다 (#1).
+# ⚠️ 이 규칙은 **이름 모양**을 막을 뿐 내용을 못 본다. 다른 이름의 덤프는 여전히 새 나간다
+#    ⇒ 「커밋 전 대용량·덤프 차단」은 별건으로 세운다(훅은 인프라 변경 · #29).
+db-backup-*/
+*-db-backup-*/
+*.dump
+*.sql.gz
+*.sql.zip
+
+# 🔴 [4] 독립검증 §4-1 (2026-09-22) — **위 규칙이 「폴더 이름」만 막고 있었다**
+#   실측: `hitpan_erp.sql` · `hitpan_e2e.sql`(504MB 폴더 안에 있던 **바로 그 파일명**)과
+#         밑줄 이름 `db_backup_2026/` · 단수 `backup/` 이 **전부 안 막혔다.**
+#         폴더에서 한 칸만 꺼내면 그대로 `git add -A` 에 딸려 들어간다.
+#   🔴 내가 「이름 목록은 새 이름 하나에 뚫린다」고 지적해 놓고 **같은 병으로 봉합했다.**
+#   ⇒ 덤프 **파일명 자체**와 구분자(하이픈·밑줄) 양쪽을 막는다.
+#   ⚠️ 추적 중인 같은 이름 0건 실측 확인 후 추가(`git ls-files` 0건).
+hitpan_erp.sql
+hitpan_e2e.sql
+hitpan_backoffice.sql
+db_backup_*/
+*_db_backup_*/
+/backup/
+#   🔴 `backup/`·`Backup/` 을 쓸 뻔했다가 **커밋 전에 실측으로 잡았다** — 그 패턴은
+#      `src/HitPan.Application/DTOs/Backup/` 과 `src/HitPan.Web/Pages/Backup/` 을 막는다.
+#      기존 파일은 추적 중이라 살아 있지만 **그 폴더의 새 파일이 조용히 무시된다.**
+#   🔴 그리고 `git check-ignore` 는 **추적 중인 파일을 안 보여 준다** — 그것만 보면 거짓 안심이다.
+#      반드시 **`--no-index`** 로 규칙 자체를 확인하라. 위 실측도 그걸로 다시 했다.
+#   ⇒ 루트 한정 `/backup/` 만 남긴다.

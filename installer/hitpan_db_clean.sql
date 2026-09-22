@@ -806,7 +806,17 @@ CREATE TABLE `collections` (
   UNIQUE KEY `uq_collections_source_hash` (`tenant_id`,`migrated_source_hash`),
   KEY `idx_tenant_partner` (`tenant_id`,`partner_id`),
   KEY `idx_tenant_date` (`tenant_id`,`collection_date`),
-  KEY `idx_coll_tenant_active_date` (`tenant_id`,`is_active`,`collection_date` DESC)
+  KEY `idx_coll_tenant_active_date` (`tenant_id`,`is_active`,`collection_date` DESC),
+  -- 20260920작1 S3 (DB-124): 전표 수금합의 잠금 범위를 「그 전표」로 좁힌다.
+  --   이 인덱스가 없으면 RR 경로의 잠금 읽기가 collections 를 통째로 훑어(실측 ALL)
+  --   아무 상관 없는 다른 거래처의 수금 등록까지 1205 로 막는다.
+  KEY `idx_coll_tenant_doc` (`tenant_id`,`ref_doc_type`,`ref_doc_id`),
+  -- 20260921작2 갈래 A (DB-125): 위 idx_coll_tenant_doc 를 「커버링」으로 확장한 별도 인덱스.
+  --   is_active·source_type·amount 까지 인덱스 안에 있어 테이블을 되짚지 않는다.
+  --   🔴 단독 효과는 작다(−1.5%). 이 인덱스의 존재 이유는 제품 SQL 의 ㉪
+  --   (L2 ReceivableMatchedDocLockedSql 의 `AND ec.ref_doc_id IS NOT NULL`)가
+  --   채움 2~4% 구간에서 만드는 함정을 없애는 것이다 — 이 인덱스 없이 ㉪ 만 있으면 +48~182% 로 나빠진다.
+  KEY `idx_coll_tenant_doc_cover` (`tenant_id`,`ref_doc_type`,`ref_doc_id`,`is_active`,`source_type`,`amount`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='수금 — 거래처로부터 받은 돈 기록';
 /*!40101 SET character_set_client = @saved_cs_client */;
 
@@ -2940,7 +2950,12 @@ CREATE TABLE `payments` (
   KEY `idx_pay_partner` (`partner_id`),
   KEY `idx_pay_date` (`payment_date`),
   KEY `idx_pay_type` (`payment_type`),
-  KEY `idx_pay_tenant` (`tenant_id`)
+  KEY `idx_pay_tenant` (`tenant_id`),
+  -- 20260920작1 S3 (DB-124): collections 와 같은 이유 — 전표 지급합의 잠금 범위를 좁힌다.
+  KEY `idx_pay_tenant_type_ref` (`tenant_id`,`payment_type`,`ref_order_id`),
+  -- 20260920작1 S3 (DB-124): payments 에는 (tenant_id,partner_id) 복합이 없어 옵티마이저가
+  --   idx_pay_tenant(테넌트 전체)와 idx_pay_partner(테넌트를 넘는다) 사이에서 갈린다.
+  KEY `idx_pay_tenant_partner` (`tenant_id`,`partner_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
@@ -3154,7 +3169,10 @@ CREATE TABLE `purchase_returns` (
   KEY `idx_purchase_returns_reason` (`tenant_id`,`return_reason`,`return_date`),
   -- 20260827작9 W3: 매입반품번호 UNIQUE. sales_returns 엔 uq_sret_tenant_returnno 가 있는데
   --   매입반품에만 없던 비대칭. COUNT+1 채번과 겹치면 조용히 중복됐다.
-  UNIQUE KEY `uq_pret_return_no` (`tenant_id`,`return_no`)
+  UNIQUE KEY `uq_pret_return_no` (`tenant_id`,`return_no`),
+  -- 20260920작1 S3 (DB-124): 전표 반품합의 잠금 범위. receipt_id 접두 인덱스가 없어
+  --   조인 순서가 뒤집혀 purchase_return_items 를 통째로 훑고 있었다(실측 ALL).
+  KEY `idx_rt_tenant_receipt` (`tenant_id`,`receipt_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
@@ -3309,6 +3327,10 @@ CREATE TABLE `sales_deliveries` (
   KEY `idx_tenant_date` (`tenant_id`,`delivery_date`),
   KEY `idx_tenant_partner` (`tenant_id`,`partner_id`),
   KEY `idx_tenant_status` (`tenant_id`,`status`),
+  -- 20260921작2 갈래 A (DB-125): L2 ReceivableMatchedDocLockedSql 의 sd 쪽 커버링.
+  --   (tenant_id, partner_id) 까지만 타면 source_type 을 테이블에서 되짚느라 구동표가 뒤집히고
+  --   필요 없는 행까지 잠근다. source_type 을 인덱스 안에 넣어 잠금 범위를 좁힌다(실측 −36%).
+  KEY `idx_sd_tenant_partner_src` (`tenant_id`,`partner_id`,`source_type`),
   KEY `idx_sd_tenant_date` (`tenant_id`,`delivery_date`),
   KEY `idx_sales_deliveries_tax_invoice` (`tax_invoice_id`),
   KEY `fk_sd_partner` (`partner_id`),
@@ -3589,7 +3611,7 @@ INSERT INTO `schema_migrations` (`migration_id`, `app_version`, `success`) VALUE
 ('DB-74','clean-ddl',1),('DB-75','clean-ddl',1),('DB-76','clean-ddl',1),('DB-77','clean-ddl',1),
 ('DB-78','clean-ddl',1),('DB-79','clean-ddl',1),('DB-80','clean-ddl',1),('DB-81','clean-ddl',1),
 ('DB-82','clean-ddl',1),('DB-83','clean-ddl',1),('DB-84','clean-ddl',1),('DB-85','clean-ddl',1),
-('DB-86','clean-ddl',1),('DB-87','clean-ddl',1),('DB-88','clean-ddl',1),('DB-89','clean-ddl',1),('DB-90','clean-ddl',1),('DB-91','clean-ddl',1),('DB-92','clean-ddl',1),('DB-93','clean-ddl',1),('DB-94','clean-ddl',1),('DB-95','clean-ddl',1),('DB-96','clean-ddl',1),('DB-97','clean-ddl',1),('DB-98','clean-ddl',1),('DB-99','clean-ddl',1),('DB-100','clean-ddl',1),('DB-101','clean-ddl',1),('DB-102','clean-ddl',1),('DB-103','clean-ddl',1),('DB-104','clean-ddl',1),('DB-105','clean-ddl',1),('DB-106','clean-ddl',1),('DB-107','clean-ddl',1),('DB-108','clean-ddl',1),('DB-109','clean-ddl',1),('DB-110','clean-ddl',1),('DB-111','clean-ddl',1),('DB-112','clean-ddl',1),('DB-113','clean-ddl',1),('DB-114','clean-ddl',1),('DB-115','clean-ddl',1),('DB-116','clean-ddl',1),('DB-117','clean-ddl',1),('DB-118','clean-ddl',1),('DB-119','clean-ddl',1),('DB-120','clean-ddl',1),('DB-123','clean-ddl',1);
+('DB-86','clean-ddl',1),('DB-87','clean-ddl',1),('DB-88','clean-ddl',1),('DB-89','clean-ddl',1),('DB-90','clean-ddl',1),('DB-91','clean-ddl',1),('DB-92','clean-ddl',1),('DB-93','clean-ddl',1),('DB-94','clean-ddl',1),('DB-95','clean-ddl',1),('DB-96','clean-ddl',1),('DB-97','clean-ddl',1),('DB-98','clean-ddl',1),('DB-99','clean-ddl',1),('DB-100','clean-ddl',1),('DB-101','clean-ddl',1),('DB-102','clean-ddl',1),('DB-103','clean-ddl',1),('DB-104','clean-ddl',1),('DB-105','clean-ddl',1),('DB-106','clean-ddl',1),('DB-107','clean-ddl',1),('DB-108','clean-ddl',1),('DB-109','clean-ddl',1),('DB-110','clean-ddl',1),('DB-111','clean-ddl',1),('DB-112','clean-ddl',1),('DB-113','clean-ddl',1),('DB-114','clean-ddl',1),('DB-115','clean-ddl',1),('DB-116','clean-ddl',1),('DB-117','clean-ddl',1),('DB-118','clean-ddl',1),('DB-119','clean-ddl',1),('DB-120','clean-ddl',1),('DB-123','clean-ddl',1),('DB-124','clean-ddl',1),('DB-125','clean-ddl',1),('DB-126','clean-ddl',1);
 
 --
 -- Table structure for table `service_tickets`
@@ -3983,6 +4005,13 @@ CREATE TABLE `tenant_devices` (
   `revoked_at` datetime(6) DEFAULT NULL,
   `revoked_reason` varchar(200) DEFAULT NULL,
   `is_main_pc` tinyint(1) NOT NULL DEFAULT 0 COMMENT '메인PC(히트판 본체·DB 보유) 여부. 회사당 1대 — DB 가 보장한다 (DB-120: main_pc_key + uq_tenant_main_pc). 코드도 함께 막는다',
+  -- 🔴 DB-126: 메인PC 「왕복 증명」의 비밀. TPM/DPAPI 로 그 PC 에 봉인된 상태로만 담는다.
+  --   브라우저가 자기 PC 안의 히트판(127.0.0.1)을 두드려 받아 오는 증표를 이 키로 만든다.
+  --   ⚠️ 파일이 아니라 DB 에 두는 이유 — 자료와 함께 이사해야 「컴퓨터가 바뀌었다」를 알 수 있다.
+  --     새 PC 에서 백업을 복원하면 옛 봉인키가 따라 들어오고, 그것이 **안 풀리는 것**이 신호가 된다.
+  --     파일에 두면 복원해도 안 따라오므로 그 신호가 영영 안 뜨고, 메인PC 를 영영 못 옮긴다.
+  `mainpc_sealed_key` varbinary(1024) DEFAULT NULL COMMENT '메인PC 인증키 — TPM/DPAPI 로 그 PC 에 봉인된 상태. 원문 미저장. NULL=미등록 (DB-126)',
+  `mainpc_key_issued_at` datetime(6) DEFAULT NULL COMMENT '메인PC 인증키 발급(= 메인PC 등록·변경) 시각 (DB-126)',
   -- 🔴 DB-120: 메인PC 1대 보장. 메인PC 일 때만 tenant_id, 아니면 NULL.
   --   UNIQUE 는 NULL 을 중복으로 보지 않으므로 일반 기기는 몇 대든 자유롭고 메인PC 만 회사당 1행으로 잠긴다.
   --   🔴 **본문에 직접 싣는다** — 시드에만 넣으면 신규설치 고객은 그 마이그를 영원히 건너뛰어

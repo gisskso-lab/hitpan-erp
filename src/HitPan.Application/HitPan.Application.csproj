@@ -8,6 +8,15 @@
   </ItemGroup>
 
   <ItemGroup>
+    <!-- 🔴 20260920작1 S3 ㉷ (설계 §12-7 · PM 결재 C-4)
+         게이트가 제품 SQL·문구를 **복제하지 않고 그대로 부르게** 한다.
+         복제한 게이트는 제품이 바뀌어도 초록불이라 아무것도 안 지킨다(병렬이슈54).
+         public 이 아니라 internal 인 이유: public 은 다른 어셈블리에 새 공개 계약을 만든다
+         (다음 사람이 이 SQL 을 재사용한다). 선례 — HitPan.Infrastructure.csproj:13 · HitPan.Watchdog.csproj:19. -->
+    <InternalsVisibleTo Include="HitPan.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
     <PackageReference Include="BCrypt.Net-Next" Version="4.1.0" />
     <PackageReference Include="ClosedXML" Version="0.105.0" />
     <PackageReference Include="Dapper" Version="2.1.72" />
