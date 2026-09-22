@@ -66,6 +66,13 @@
                            사장님 설계 취지가 깨진다(작업지시서 §2). *@
                     <DeviceAuthGate @bind-GateActive="_gateActive" />
 
+                    @* 🔴 메인PC 「왕복 증명」 (20260922작2 절C·절F · 사장님 전결).
+                         본문을 막지 않는다 — 뒤에서 조용히 돌고, 대표에게만, 필요할 때만 말을 건다.
+                         클라이언트 PC 직원은 이 팝업을 평생 못 본다.
+                       ⚠️ DeviceAuthGate 와 달리 GateActive 를 쓰지 않는다 —
+                         이 관문은 **아무도 막지 않기** 때문이다. *@
+                    <MainPcGate />
+
                     <main class="hitpan-content mud-px-4 mud-py-4">
                         @if (!_gateActive)
                         {
