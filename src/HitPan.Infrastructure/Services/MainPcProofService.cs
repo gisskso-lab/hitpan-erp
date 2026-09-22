@@ -150,8 +150,10 @@ public sealed class MainPcProofService : IMainPcProofService
     // ③ 결과 확인 (도메인 경유) — 쓰고 나면 버린다
     // ─────────────────────────────────────────────────────────
 
-    public MainPcProofOutcome Consume(string tenantId, string sessionKey, string challenge)
+    public MainPcProofOutcome Consume(string tenantId, string sessionKey, string challenge, out string? pass)
     {
+        pass = null;
+
         if (string.IsNullOrWhiteSpace(challenge) || !_challenges.TryRemove(challenge, out var entry))
             return MainPcProofOutcome.NotProven;
 
@@ -163,7 +165,60 @@ public sealed class MainPcProofService : IMainPcProofService
             return MainPcProofOutcome.NotProven;
         }
 
+        // 🟢 통과한 경우에만 출입증을 준다.
+        //   ⚠️ 등록 전(NotRegisteredYet)·컴퓨터가 바뀐 경우(DifferentPc)에는 주지 않는다 —
+        //     아직 이 회사의 메인PC 가 아니기 때문이다. 그 둘은 팝업으로 간다.
+        if (entry.Outcome == MainPcProofOutcome.MainPcConfirmed)
+        {
+            pass = IssuePass();
+        }
+
         return entry.Outcome;
+    }
+
+    // ─────────────────────────────────────────────────────────
+    // 🔴 출입증 — 자료관리 관문이 매 요청 묻는다
+    // ─────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// 출입증이 사는 시간. <b>일부러 짧다.</b>
+    /// </summary>
+    /// <remarks>
+    /// 이 값을 길게 잡으면, 메인PC 브라우저에서 이 비밀을 빼낸 사람이 그만큼 오래 쓸 수 있다.
+    /// 짧게 잡으면 만료될 뿐이고, 화면이 <b>조용히 왕복을 다시 돌아</b> 새로 받는다 —
+    /// 메인PC 면 저절로 갱신되고, 아니면 그때 닫힌다. <b>고객은 이 일을 모른다.</b>
+    /// </remarks>
+    private static readonly TimeSpan PassLifetime = TimeSpan.FromMinutes(30);
+
+    private static readonly ConcurrentDictionary<string, DateTimeOffset> _passes = new(StringComparer.Ordinal);
+
+    private static string IssuePass()
+    {
+        if (_passes.Count >= SweepThreshold)
+        {
+            foreach (var kv in _passes)
+            {
+                if (DateTimeOffset.UtcNow > kv.Value) _passes.TryRemove(kv.Key, out _);
+            }
+        }
+
+        var pass = Convert.ToHexString(RandomNumberGenerator.GetBytes(32)).ToLowerInvariant();
+        _passes[pass] = DateTimeOffset.UtcNow.Add(PassLifetime);
+        return pass;
+    }
+
+    public bool IsPassValid(string? pass)
+    {
+        if (string.IsNullOrWhiteSpace(pass)) return false;
+        if (!_passes.TryGetValue(pass, out var expiresAt)) return false;
+
+        if (DateTimeOffset.UtcNow > expiresAt)
+        {
+            _passes.TryRemove(pass, out _);
+            return false;
+        }
+
+        return true;
     }
 
     // ─────────────────────────────────────────────────────────

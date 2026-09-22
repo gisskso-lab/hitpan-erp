@@ -112,16 +112,17 @@ public sealed class DeviceController : ControllerBase
     [HttpGet("is-main-pc")]
     public IActionResult IsMainPc()
     {
-        // 터널(cloudflared)을 지나온 요청은 원래 주소를 헤더에 달고 온다.
-        // 헤더가 **하나라도 있으면** 바깥에서 들어온 것이다 — 로컬일 수 없다.
-        var viaTunnel =
-            Request.Headers.ContainsKey("CF-Connecting-IP") ||
-            Request.Headers.ContainsKey("X-Forwarded-For");
-
-        var remote = HttpContext.Connection.RemoteIpAddress;
-        var isLoopback = remote is not null && System.Net.IPAddress.IsLoopback(remote);
-
-        return Ok(new { isMainPc = !viaTunnel && isLoopback });
+        // 🔴 20260922작2 절D — 판정을 **한 곳**으로 모았다.
+        //
+        //   [무엇이 문제였나] 여기에 같은 규칙이 **복붙**돼 있었다. 그래서 관문(MainPcOnlyAttribute)만
+        //     고치면 화면은 안 열리고, 여기만 고치면 화면은 열리는데 저장이 막힌다.
+        //     종전 주석도 *"같은 규칙이어야 한다"* 고 경고하고 있었다 — 그 경고를 구조로 바꾼다.
+        //
+        //   [무엇이 바뀌나] 이제 **도메인(터널)으로 들어온 메인PC 도 참**이다.
+        //     브라우저가 자기 PC 안의 히트판을 두드려 받아 온 출입증이 있으면 인정한다.
+        //     종전에는 터널을 지나오면 무조건 거짓이라, 고객이 도메인으로 쓰는 한
+        //     자료관리 메뉴가 **영영 안 열렸다.**
+        return Ok(new { isMainPc = HitPan.API.Security.MainPcOnlyAttribute.IsMainPc(HttpContext) });
     }
 
     /// <summary>
@@ -546,7 +547,10 @@ public sealed class DeviceController : ControllerBase
     [AllowAnonymous]
     public async Task<IActionResult> ConfirmMainPcLocal([FromBody] MainPcChallengeRequest req, CancellationToken ct)
     {
-        if (!HitPan.API.Security.MainPcOnlyAttribute.IsMainPc(HttpContext))
+        // 🔴 반드시 IsLocalConsole 이다 — IsMainPc 를 쓰면 안 된다.
+        //   IsMainPc 는 출입증도 인정하므로, 출입증을 가진 브라우저가 **스스로 출입증을 갱신하는
+        //   고리**가 생긴다. 한 번 새어 나간 출입증이 영원히 사는 길이 열린다.
+        if (!HitPan.API.Security.MainPcOnlyAttribute.IsLocalConsole(HttpContext))
             return Ok(new { confirmed = false });
 
         var outcome = await _proof.ConfirmLocalAsync(req.Challenge ?? "", ct);
@@ -566,8 +570,14 @@ public sealed class DeviceController : ControllerBase
         var uid = HttpContext.Items["UserId"]?.ToString();
         if (string.IsNullOrEmpty(tid) || string.IsNullOrEmpty(uid)) return Forbid();
 
-        var outcome = _proof.Consume(tid, uid, req.Challenge ?? "");
-        return Ok(new { outcome = outcome.ToString(), isMainPc = outcome == MainPcProofOutcome.MainPcConfirmed });
+        var outcome = _proof.Consume(tid, uid, req.Challenge ?? "", out var pass);
+        return Ok(new
+        {
+            outcome  = outcome.ToString(),
+            isMainPc = outcome == MainPcProofOutcome.MainPcConfirmed,
+            // 🟢 통과했을 때만 나온다. 화면은 이것을 들고 자료관리 문 앞에 선다.
+            pass,
+        });
     }
 
     /// <summary>
@@ -595,13 +605,16 @@ public sealed class DeviceController : ControllerBase
             return Forbid();
 
         // 🔴 표를 소모하며 판정을 다시 확인한다 — 화면 말을 믿지 않는다.
-        var outcome = _proof.Consume(tid, uid, req.Challenge ?? "");
+        var outcome = _proof.Consume(tid, uid, req.Challenge ?? "", out _);
         if (outcome != MainPcProofOutcome.NotRegisteredYet && outcome != MainPcProofOutcome.DifferentPc)
         {
             return BadRequest(new { message = "이 컴퓨터에서는 등록할 수 없습니다. 회사 자료가 들어 있는 컴퓨터에서 진행해 주세요." });
         }
 
-        var deviceId = Request.Headers["X-Device-Id"].ToString();
+        // ⚠️ 헤더 이름은 HitPanApiAuthHandler 가 실제로 보내는 것과 같아야 한다 —
+        //   `X-HitPan-Device-Id` 다. 비슷한 이름(`X-Device-Id`)을 쓰면 값이 늘 비어
+        //   "기기 정보를 확인할 수 없습니다" 로만 끝난다.
+        var deviceId = Request.Headers["X-HitPan-Device-Id"].ToString();
         if (string.IsNullOrWhiteSpace(deviceId))
             return BadRequest(new { message = "기기 정보를 확인할 수 없습니다. 다시 접속해 주세요." });
 

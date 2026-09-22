@@ -1,0 +1,217 @@
+@* =============================================================
+   메인PC 「왕복 증명」 관문 — 20260922작2 절C·절F
+     설계: docs/설계/erp/20260922_설계_메인PC물리식별_왕복증명.md
+
+   🔴 이 컴포넌트는 **본문을 막지 않는다.** 뒤에서 조용히 돌고, 필요할 때만 말을 건다.
+     (사장님: "실제 사용하는 고객은 인증키가 도는지 안도는지 모르게")
+
+   [로그인 직후 한 번]
+     이미 등록돼 있다        → 출입증만 받아 두고 **아무것도 안 띄운다**
+     본체는 있는데 미등록    → 🔵 [메인PC 등록] 팝업 (대표에게만)
+     본체는 있는데 다른 PC   → 🔵 [메인PC 변경] 팝업 (대표에게만 · 새 컴퓨터로 이전)
+     본체가 없다(클라이언트) → **아무것도 안 띄운다.** 직원은 이 팝업을 평생 못 본다
+
+   ⚠️ 클라이언트 PC 에서 실패하는 것은 **정상**이다. 오류로 취급하지 않는다.
+============================================================= *@
+
+@using Microsoft.AspNetCore.Components.Authorization
+@using System.Net.Http.Json
+@inject HttpClient Http
+@inject IJSRuntime JS
+@inject AuthenticationStateProvider AuthProvider
+@inject ILogger<MainPcGate> _logger
+
+@if (_prompt != Prompt.None)
+{
+    <MudOverlay Visible="true" DarkBackground="true" ZIndex="9000" />
+    @* ⚠️ 스타일을 인라인으로 둔다 — 전역 CSS 에 이름을 하나 더 만들면
+       다음 사람이 그 파일을 찾아다녀야 한다. 이 팝업은 여기서만 쓴다. *@
+    <div style="position:fixed;inset:0;z-index:9001;display:flex;align-items:center;justify-content:center;padding:16px;">
+        <MudPaper Elevation="8" Class="pa-6" Style="max-width:520px;margin:0 auto;">
+            <div class="d-flex align-center mb-3">
+                <MudIcon Icon="@Icons.Material.Filled.Computer" Color="Color.Primary" Style="font-size:32px;" Class="mr-3" />
+                <MudText Typo="Typo.h6">
+                    @(_prompt == Prompt.Register ? "이 컴퓨터를 회사 자료 컴퓨터로 등록할까요?"
+                                                 : "회사 자료 컴퓨터를 이 컴퓨터로 바꿀까요?")
+                </MudText>
+            </div>
+
+            @* 🔴 고객이 읽는 말이다 — "인증키"·"왕복"·"루프백" 같은 개발 용어를 쓰지 않는다. *@
+            <MudText Typo="Typo.body2" Class="mb-2">
+                @if (_prompt == Prompt.Register)
+                {
+                    <text>
+                        이 컴퓨터에 회사 자료(히트판 본체)가 들어 있습니다.<br />
+                        등록하면 백업·복구 같은 <b>자료관리</b>를 이 컴퓨터에서 하실 수 있습니다.
+                    </text>
+                }
+                else
+                {
+                    <text>
+                        회사 자료가 <b>다른 컴퓨터</b>에 등록되어 있었습니다.<br />
+                        지금 이 컴퓨터에 자료가 들어 있으니, 이 컴퓨터로 바꾸시면 됩니다.
+                    </text>
+                }
+            </MudText>
+
+            <MudText Typo="Typo.caption" Class="mb-4" Style="color:var(--mud-palette-text-secondary);">
+                한 번만 하시면 됩니다. 다음부터는 이 안내가 나오지 않습니다.
+            </MudText>
+
+            @if (_error is not null)
+            {
+                <MudAlert Severity="Severity.Warning" Dense="true" Class="mb-3">@_error</MudAlert>
+            }
+
+            <div class="d-flex justify-end" style="gap:8px;">
+                <MudButton Variant="Variant.Text" Disabled="_busy" OnClick="Dismiss">나중에</MudButton>
+                <MudButton Variant="Variant.Filled" Color="Color.Primary" Disabled="_busy" OnClick="RegisterAsync">
+                    @(_busy ? "처리 중…" : (_prompt == Prompt.Register ? "등록" : "이 컴퓨터로 바꾸기"))
+                </MudButton>
+            </div>
+        </MudPaper>
+    </div>
+}
+
+@code {
+    private enum Prompt { None, Register, Change }
+
+    private Prompt _prompt = Prompt.None;
+    private bool _busy;
+    private string? _error;
+    private bool _ran;
+
+    /// <summary>
+    /// 🔴 로그인 직후 <b>한 번만</b> 돈다 (사장님 결재 D-1).
+    /// </summary>
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender || _ran) return;
+        _ran = true;
+
+        try
+        {
+            var auth = await AuthProvider.GetAuthenticationStateAsync();
+            if (auth.User?.Identity?.IsAuthenticated != true) return;
+
+            var outcome = await RunProofAsync();
+
+            // ⚠️ 등록·변경을 권하는 것은 **대표에게만** 한다(설계 D-8).
+            //   메인PC 여부는 이미 물리로 확인됐으므로 보안 차이는 없지만,
+            //   "대표가 정한다" 는 반자동 원칙에 맞춘다.
+            var isOwner = auth.User.FindFirst("account_type")?.Value == "tenant_admin";
+
+            _prompt = (outcome, isOwner) switch
+            {
+                ("NotRegisteredYet", true) => Prompt.Register,
+                ("DifferentPc", true)      => Prompt.Change,
+                _                          => Prompt.None,
+            };
+
+            if (_prompt != Prompt.None) StateHasChanged();
+        }
+        catch (Exception ex)
+        {
+            // 🔴 여기서 화면에 오류를 띄우지 않는다 — 클라이언트 PC 에서는 실패가 정상이다.
+            //   ⚠️ 헌법 #15 — 조용히 삼키지는 않는다. 흔적은 남긴다.
+            _logger.LogDebug(ex, "메인PC 확인을 마치지 못했습니다 — 클라이언트 PC 에서는 정상입니다.");
+        }
+    }
+
+    /// <summary>
+    /// 왕복 한 바퀴 — ①표 받기 → ②자기 PC 안의 히트판 두드리기 → ③결과 확인.
+    /// </summary>
+    /// <returns>서버가 내린 판정 이름. 실패하면 <c>NotProven</c>.</returns>
+    private async Task<string> RunProofAsync()
+    {
+        // ① 표를 받는다 (도메인 경유)
+        var issued = await Http.PostAsJsonAsync("api/devices/mainpc-challenge", new { });
+        if (!issued.IsSuccessStatusCode) return "NotProven";
+
+        var challenge = (await issued.Content.ReadFromJsonAsync<ChallengeResponse>())?.Challenge;
+        if (string.IsNullOrWhiteSpace(challenge)) return "NotProven";
+
+        // ② 자기 PC 안의 히트판을 두드린다 (터널을 안 지난다)
+        //   클라이언트 PC 에서는 두드릴 히트판이 없어 false 가 온다 — 그것이 정상이다.
+        var knocked = await JS.InvokeAsync<bool>("hitpanMainPc.probe", challenge);
+        if (!knocked) return "NotProven";
+
+        // ③ 결과를 묻는다 (도메인 경유). 통과했으면 출입증이 함께 온다.
+        var verified = await Http.PostAsJsonAsync("api/devices/mainpc-verify", new { challenge });
+        if (!verified.IsSuccessStatusCode) return "NotProven";
+
+        var body = await verified.Content.ReadFromJsonAsync<VerifyResponse>();
+        if (body is null) return "NotProven";
+
+        // 🟢 출입증을 보관한다 — 이후 자료관리 요청이 이것을 들고 간다.
+        if (!string.IsNullOrWhiteSpace(body.Pass))
+            await JS.InvokeVoidAsync("hitpanMainPc.setPass", body.Pass);
+
+        return body.Outcome ?? "NotProven";
+    }
+
+    /// <summary>
+    /// 🔵 [등록] · [이 컴퓨터로 바꾸기].
+    /// </summary>
+    /// <remarks>
+    /// ⚠️ <b>왕복을 한 번 더 돈다.</b> 앞서 받은 표는 결과를 확인할 때 이미 소모됐고,
+    /// 무엇보다 <b>등록하는 그 순간에 다시 증명하는 편이 옳다.</b>
+    /// </remarks>
+    private async Task RegisterAsync()
+    {
+        _busy = true;
+        _error = null;
+        try
+        {
+            var issued = await Http.PostAsJsonAsync("api/devices/mainpc-challenge", new { });
+            var challenge = issued.IsSuccessStatusCode
+                ? (await issued.Content.ReadFromJsonAsync<ChallengeResponse>())?.Challenge
+                : null;
+
+            if (string.IsNullOrWhiteSpace(challenge)
+                || !await JS.InvokeAsync<bool>("hitpanMainPc.probe", challenge))
+            {
+                _error = "이 컴퓨터에서는 등록할 수 없습니다. 회사 자료가 들어 있는 컴퓨터에서 진행해 주세요.";
+                return;
+            }
+
+            var res = await Http.PostAsJsonAsync("api/devices/mainpc-register", new { challenge });
+            if (!res.IsSuccessStatusCode)
+            {
+                var msg = await res.Content.ReadFromJsonAsync<MessageResponse>();
+                _error = msg?.Message ?? "등록을 마치지 못했습니다. 잠시 후 다시 시도해 주세요.";
+                return;
+            }
+
+            // 등록이 끝났으니 곧바로 한 바퀴 더 돌아 출입증을 받아 둔다 —
+            //   그래야 자료관리가 **지금 바로** 열린다(다시 로그인할 필요가 없다).
+            await RunProofAsync();
+
+            _prompt = Prompt.None;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "메인PC 등록 중 오류");
+            _error = "등록을 마치지 못했습니다. 잠시 후 다시 시도해 주세요.";
+        }
+        finally
+        {
+            _busy = false;
+            StateHasChanged();
+        }
+    }
+
+    /// <summary>[나중에] — 닫기만 한다. 다음 로그인 때 다시 묻는다.</summary>
+    private void Dismiss() => _prompt = Prompt.None;
+
+    private sealed class ChallengeResponse { public string? Challenge { get; set; } }
+
+    private sealed class VerifyResponse
+    {
+        public string? Outcome { get; set; }
+        public bool IsMainPc { get; set; }
+        public string? Pass { get; set; }
+    }
+
+    private sealed class MessageResponse { public string? Message { get; set; } }
+}
