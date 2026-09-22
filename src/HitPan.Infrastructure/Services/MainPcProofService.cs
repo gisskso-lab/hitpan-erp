@@ -275,6 +275,39 @@ public sealed class MainPcProofService : IMainPcProofService
         return true;
     }
 
+    public async Task<bool> IsDataEmptyAsync(string tenantId, CancellationToken ct)
+    {
+        // 🔵 사장님 결재 D-11 — *"팝업으로 복구하라고 안내"*
+        //
+        //   [왜 필요한가] 새 컴퓨터에 히트판을 깔면 DB 가 비어 있다. 그때 아무 말도 없으면
+        //     고객은 **빈 화면을 보고 자료가 날아간 줄 안다.** 갈 곳을 알려 주지 않는 안내는
+        //     흐름이 끊긴 것이다(헌법 #20).
+        //
+        //   [무엇으로 「비었다」를 판정하나] 거래처와 상품 **둘 다** 0 일 때만이다.
+        //     ⚠️ 한쪽만 보면 안 된다 — 상품만 쓰는 회사도, 거래처만 먼저 넣는 회사도 있다.
+        //     둘 다 비었다면 아직 아무것도 시작하지 않은 것이 거의 확실하다.
+        //   ⚠️ 전표를 세지 않는 이유: 마스터만 옮겨 놓고 전표는 나중에 넣는 경우가 있다.
+        //     그때 "자료가 없다" 고 말하면 틀린 안내가 된다.
+        //
+        //   ⚠️ 헌법 #16 — 연결 하나에 UNION ALL 로 한 번에 묻는다(병렬 조회 금지).
+        // ⚠️ ValueTuple 로 받지 않는다 — Dapper 는 튜플을 **이름이 아니라 순서**로 채운다.
+        //   컬럼 순서를 나중에 누가 바꾸면 값이 조용히 뒤바뀌고, 빌드는 멀쩡하다.
+        //   이름으로 매핑되는 형태로 받는다.
+        var counts = await _db.QueryFirstOrDefaultAsync<EmptyCheck>(new CommandDefinition(
+            @"SELECT
+                 (SELECT COUNT(*) FROM partners WHERE tenant_id = @TenantId) AS PartnerCount,
+                 (SELECT COUNT(*) FROM items    WHERE tenant_id = @TenantId) AS ItemCount",
+            new { TenantId = tenantId }, cancellationToken: ct));
+
+        return counts is not null && counts.PartnerCount == 0 && counts.ItemCount == 0;
+    }
+
+    private sealed class EmptyCheck
+    {
+        public long PartnerCount { get; set; }
+        public long ItemCount { get; set; }
+    }
+
     // ─────────────────────────────────────────────────────────
 
     /// <summary>만료된 표를 털어낸다. 표는 짧게 살고, 수가 적어 비용이 없다.</summary>
