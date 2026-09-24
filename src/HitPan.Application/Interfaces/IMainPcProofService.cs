@@ -108,6 +108,27 @@ public interface IMainPcProofService
     bool IsPassValid(string? pass);
 
     /// <summary>
+    /// 🔴 <b>출입증이 살아 있고, 그 회사의 것인가</b> — 20260924작1 · PM 결재 <b>Q-2</b>.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// 종전에는 출입증이 <b>서버 메모리의 목록에 있기만 하면</b> 통했다. 회사를 안 봤다.
+    /// 이제 발급할 때 회사를 함께 적어 두고, 쓸 때 <b>대조</b>한다.
+    /// </para>
+    /// <para>
+    /// 🔴 <b>"출입증을 묶었다" 가 아니다.</b> 닫히는 축은 <b>회사 하나</b>다 —
+    /// 같은 회사 안에서 기기·사용자가 다른 출입증은 <b>여전히 통한다</b>(별건 <b>O-2</b>).
+    /// 거짓봉합 금지(PM 재결재 §10).
+    /// </para>
+    /// <para>
+    /// ⚠️ 종전 1인자 <see cref="IsPassValid(string?)"/> 는 <b>지우지 않는다</b>(#1).
+    /// 회사를 모르는 자리에서 종전과 똑같이 판정한다.
+    /// </para>
+    /// </remarks>
+    /// <param name="tenantId"><c>null</c> 이면 회사 대조를 하지 않는다(종전 동작).</param>
+    bool IsPassValid(string? pass, string? tenantId);
+
+    /// <summary>
     /// 🔵 <b>메인PC 로 등록한다</b> — 새 키를 만들어 <b>이 PC 에 봉인</b>하고 기기 줄에 심는다.
     /// </summary>
     /// <remarks>
@@ -146,4 +167,22 @@ public enum MainPcProofOutcome
     /// 새 컴퓨터로 옮겨 온 것이다. [메인PC 변경] 팝업.
     /// </summary>
     DifferentPc = 3,
+
+    /// <summary>
+    /// 🔵 <b>옛 방식으로 봉인된 값이다 — 풀 수 있는 사람이 아무도 없다.</b> [다시 인증] 팝업.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// 20260924작1 절B. 종전 봉인은 <b>TPM 금고</b>에 만들고 해제는 <b>소프트웨어 금고</b>를 열었다
+    /// (선행검증 R-1). 그 값들은 이제 <b>봉투가 없다</b>는 것으로 알아본다 —
+    /// 「풀기」가 아니라 「알아보기」로 푼다.
+    /// </para>
+    /// <para>
+    /// 🔴 <c>DifferentPc</c> 와 <b>가른다.</b> 이건 컴퓨터가 바뀐 것이 아니라
+    /// <b>우리 코드가 못 풀게 만들어 둔 값</b>이다. 고객에게 *"컴퓨터를 바꾸시겠습니까"* 라고
+    /// 물으면 <b>틀린 안내</b>가 된다.
+    /// </para>
+    /// ⚠️ 값 <b>4</b> — 앞 네 값의 번호·이름은 한 글자도 바꾸지 않았다(#1).
+    /// </remarks>
+    ReRegisterRequired = 4,
 }

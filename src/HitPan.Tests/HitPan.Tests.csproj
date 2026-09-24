@@ -33,6 +33,14 @@
          ⚠️ 이렇게 하는 이유: 1.3.28 반려는 "글자는 맞는데 화면에 안 갔다" 였다.
             글자검사만으로는 또 놓친다 — **불러서 결과를 본다.** -->
     <Compile Include="..\HitPan.Web\Services\ApiErrorText.cs" Link="Linked\ApiErrorText.cs" />
+
+    <!-- 🔴 20260924작1 절E (G-26 · G-27 · G-32) — 같은 이유로 **소스를 링크**한다.
+         두 파일은 일부러 Blazor 를 안 쓴다(그 파일 머리에 적어 뒀다) — 게이트가
+         **진짜 요청·헤더·횟수**를 세어 보게 하려는 것이다. 글자검사가 아니다. -->
+    <Compile Include="..\HitPan.Web\Services\MainPcRetryCoordinator.cs"
+             Link="Linked\MainPcRetryCoordinator.cs" />
+    <Compile Include="..\HitPan.Web\Services\MainPcAccessState.cs"
+             Link="Linked\MainPcAccessState.cs" />
   </ItemGroup>
 
   <ItemGroup>

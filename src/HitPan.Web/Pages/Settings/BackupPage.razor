@@ -14,7 +14,10 @@
 
 @* 🔴 자료가 든 그 컴퓨터에서만 연다 (사장님 지시 2026-08-11).
      백업·복원은 원격에서 남의 컴퓨터 자료를 건드리는 일이 되면 안 된다. *@
-<MainPcOnly>
+@* 🔴 20260924작1 절D — 조회는 **통과한 뒤에** 돈다. 종전에는 OnInitializedAsync 가
+     곧바로 쏴서, 클라이언트 PC 에서는 콘솔에 403 이 쌓이고 메인PC 에서도 왕복 전에
+     한 번 튕겼다. 🔴 서버 판정(BackupController)은 그대로 둔다 — 화면을 감추는 것은 차단이 아니다. *@
+<MainPcOnly OnAllowed="LoadAsync">
 
 <PageHeader Title="자료 백업·복원" Subtitle="로컬 미러 백업 — 1차 메인 + 2차 외장(선택)">
     <Actions>
@@ -155,10 +158,8 @@
     private List<RestoreHistoryModel> _restoreHistory = new();
     private bool _busy;
 
-    protected override async Task OnInitializedAsync()
-    {
-        await LoadAsync();
-    }
+    // 🔴 20260924작1 절D — 여기서 조회하지 않는다. <MainPcOnly OnAllowed="LoadAsync"> 가
+    //   **통과한 뒤에** 부른다. LoadAsync 본문·저장 동작·마크업은 한 줄도 안 바꿨다(#1).
 
     private async Task LoadAsync()
     {

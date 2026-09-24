@@ -36,6 +36,7 @@
                     {
                         Prompt.Register    => "이 컴퓨터를 회사 자료 컴퓨터로 등록할까요?",
                         Prompt.Change      => "회사 자료 컴퓨터를 이 컴퓨터로 바꿀까요?",
+                        Prompt.Reissue     => "자료보관 컴퓨터 인증을 한 번 더 받아 주세요",
                         _                  => "연결되었습니다",
                     })
                 </MudText>
@@ -68,6 +69,14 @@ else
                         등록하면 백업·복구 같은 <b>자료관리</b>를 이 컴퓨터에서 하실 수 있습니다.
                     </text>
                 }
+                else if (_prompt == Prompt.Reissue)
+                {
+                    @* 🔴 20260924작1 절B — 고객어로 말한다. "봉인"·"키"·"공급자" 같은 말을 쓰지 않는다. *@
+                    <text>
+                        자료보관 컴퓨터 인증을 한 번 더 받아야 합니다.<br />
+                        이 컴퓨터가 <b>회사 자료가 들어 있는 그 컴퓨터</b>가 맞으면 [다시 인증] 을 눌러 주세요.
+                    </text>
+                }
                 else
                 {
                     <text>
@@ -89,7 +98,12 @@ else
             <div class="d-flex justify-end" style="gap:8px;">
                 <MudButton Variant="Variant.Text" Disabled="_busy" OnClick="Dismiss">나중에</MudButton>
                 <MudButton Variant="Variant.Filled" Color="Color.Primary" Disabled="_busy" OnClick="RegisterAsync">
-                    @(_busy ? "처리 중…" : (_prompt == Prompt.Register ? "등록" : "이 컴퓨터로 바꾸기"))
+                    @(_busy ? "처리 중…" : (_prompt switch
+                    {
+                        Prompt.Register => "등록",
+                        Prompt.Reissue  => "다시 인증",
+                        _               => "이 컴퓨터로 바꾸기",
+                    }))
                 </MudButton>
             </div>
 }
@@ -98,7 +112,11 @@ else
 }
 
 @code {
-    private enum Prompt { None, Register, Change, RestoreHint }
+    /// <summary>
+    /// 🔴 <c>Reissue</c> 는 20260924작1 절B 에서 <b>더한 것</b>이다(#1 · 기존 값 무변).
+    /// 옛 방식으로 봉인돼 <b>아무도 못 푸는</b> 값을 만났을 때 간다 — 컴퓨터가 바뀐 것이 아니다.
+    /// </summary>
+    private enum Prompt { None, Register, Change, RestoreHint, Reissue }
 
     private Prompt _prompt = Prompt.None;
     private bool _busy;
@@ -127,9 +145,11 @@ else
 
             _prompt = (outcome, isOwner) switch
             {
-                ("NotRegisteredYet", true) => Prompt.Register,
-                ("DifferentPc", true)      => Prompt.Change,
-                _                          => Prompt.None,
+                ("NotRegisteredYet", true)   => Prompt.Register,
+                ("DifferentPc", true)        => Prompt.Change,
+                // 🔴 20260924작1 절B — 이 줄이 없으면 `_` 로 떨어져 팝업이 **안 뜬다 = 막다른 방**(8/16 P0).
+                ("ReRegisterRequired", true) => Prompt.Reissue,
+                _                            => Prompt.None,
             };
 
             if (_prompt != Prompt.None) StateHasChanged();

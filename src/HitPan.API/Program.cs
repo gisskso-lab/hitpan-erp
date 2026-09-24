@@ -108,7 +108,13 @@ builder.Services.AddScoped<ITenantDeviceService, TenantDeviceService>();
 // 🔴 메인PC 「왕복 증명」 (20260922작2 절A · 사장님 전결) — 브라우저가 자기 PC 안의 히트판을
 //   두드려 오는지로 메인PC 를 가른다. 터널을 지나온 접속에서는 IP 로 가릴 방법이 없기 때문이다.
 //   ⚠️ Scoped 다 — 안에서 DB 를 읽는다. 표(challenge) 자체는 프로세스 공용 메모리에 둔다.
-builder.Services.AddScoped<IMainPcProofService, MainPcProofService>();
+//   🔴 20260924작1 절A — 생성자가 둘이다(종전 3인자는 #1 로 남겨 뒀다).
+//     **어느 것을 쓰는지 여기서 못박는다** — 컨테이너가 고르게 두면 봉합이 안 붙은 채로 조용히 돈다.
+builder.Services.AddScoped<IMainPcProofService>(sp => new MainPcProofService(
+    sp.GetRequiredService<System.Data.IDbConnection>(),
+    sp.GetRequiredService<HitPan.Application.Services.Security.ITpmKeyService>(),
+    sp.GetRequiredService<HitPan.Application.Services.Security.IMainPcSealService>(),
+    sp.GetRequiredService<Microsoft.Extensions.Logging.ILogger<MainPcProofService>>()));
 builder.Services.AddScoped<IEmployeeService, EmployeeService>();
 builder.Services.AddScoped<IPositionService, PositionService>();
 // 작(2026-08-13) 단계4 토대: 부서 마스터 CRUD. 종전엔 조회만 있어 부서를 만들 방법이 없었다.
@@ -173,6 +179,15 @@ builder.Services.AddHttpClient<IGeocodingService, KakaoGeocodingService>(c =>
 // 헌법 #22 (본사 데이터 0) + #23 (5중 검증) + #25 (3대 원칙) + 보안 매니저 1·2 + Red Team 본질 진단
 builder.Services.AddSingleton<HitPan.Application.Services.Security.ITpmKeyService,
     HitPan.Application.Services.Security.TpmKeyService>();
+// 🔴 20260924작1 절A — 메인PC 전용 봉인. 위 ITpmKeyService 등록은 **그대로 둔다**(#1 · 세금계산서 경로).
+//   키 이름이 회사·세대별로 다르고(HitPan.MainPc.SealKey.{T16}.{GG}) 해제 때 공급자를 명시한다.
+//   🚨 이 경로는 **덮어쓰기 옵션을 한 번도 쓰지 않는다**(§9-1 · M-12 의 뿌리).
+//   ⚠️ 생성자에 기본값 있는 인자(keyPrefix·allowPlatform)가 있다 — **직접 만든다.**
+//     컨테이너 추측에 맡기면 부팅이 통째로 걸리는 자리다.
+builder.Services.AddSingleton<HitPan.Application.Services.Security.IMainPcSealService>(sp =>
+    new HitPan.Application.Services.Security.MainPcSealService(
+        sp.GetRequiredService<
+            Microsoft.Extensions.Logging.ILogger<HitPan.Application.Services.Security.MainPcSealService>>()));
 builder.Services.AddScoped<HitPan.Application.Services.Security.IDoubleEncryptionService,
     HitPan.Application.Services.Security.DoubleEncryptionService>();
 builder.Services.AddSingleton<HitPan.Application.Services.Security.ICertStorageService,

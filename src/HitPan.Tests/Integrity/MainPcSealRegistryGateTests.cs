@@ -203,8 +203,47 @@ public sealed class MainPcSealRegistryGateTests : IDisposable
         }
     }
 
-    private MainPcProofService NewService(MySqlConnection db) =>
-        new(db, new LocalSealTpm(), NullLogger<MainPcProofService>.Instance);
+    /// <summary>
+    /// 🚨 20260924작1 [4] C-2 — 종전 3인자 생성자는 <b>컴파일 오류</b>로 막혔다(M-12 재발 경로).
+    /// 종전 길이 하던 일을 <b>대역으로 세워</b> 4인자 길로 넣는다 — <b>판정은 한 글자도 안 바뀐다.</b>
+    /// ⚠️ 여기 꽂히는 것은 <c>LocalSealTpm</c> — <b>실물 TpmKeyService 가 아니다.</b>
+    /// </summary>
+    private sealed class PassThroughSeal(ITpmKeyService tpm) : IMainPcSealService
+    {
+        public byte[] Seal(string tenantId, string deviceId, byte[] raw) => tpm.SealKey(raw);
+
+        public byte[] Seal(string tenantId, string deviceId, byte[] raw, byte? currentGeneration) =>
+            tpm.SealKey(raw);
+
+        public MainPcUnsealResult Unseal(byte[] envelope, string tenantId, string deviceId)
+        {
+            try
+            {
+                return MainPcUnsealResult.Ok(tpm.UnsealKey(envelope));
+            }
+            catch (Exception)
+            {
+                return MainPcUnsealResult.NotThisPc();
+            }
+        }
+
+        public bool TryReadGeneration(byte[]? envelope, out byte generation)
+        {
+            generation = 0;
+            return false;
+        }
+
+        public bool TryDeleteGenerationKey(string tenantId, byte generation) => false;
+
+        public bool IsPlatformKspUsable() => tpm.IsTpmAvailable();
+    }
+
+    private MainPcProofService NewService(MySqlConnection db)
+    {
+        var tpm = new LocalSealTpm();
+        return new MainPcProofService(db, tpm, new PassThroughSeal(tpm),
+            NullLogger<MainPcProofService>.Instance);
+    }
 
     /// <summary>
     /// 실물 모양의 기기 줄 한 개. <c>user_id</c> 는 <b>NULL</b> 로 둔다 —
