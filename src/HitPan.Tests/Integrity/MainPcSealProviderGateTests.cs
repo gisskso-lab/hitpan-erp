@@ -43,8 +43,13 @@ public sealed class MainPcSealProviderGateTests
     private static string IsolatedPrefix() =>
         "HitPanTest.MainPcSeal." + Guid.NewGuid().ToString("N")[..8];
 
+    /// <summary>
+    /// 🔴 <c>HITPAN_TEST_NO_TPM</c> 이 켜지면 <b>P 갈래를 아예 안 쓴다</b> —
+    /// TPM 없는 컴퓨터(= CI 러너 · 고객 PC)를 로컬에서 재현하는 유일한 통로다(20260924작1 절E CI 봉합).
+    /// </summary>
     private static MainPcSealService Make(string prefix, bool allowPlatform) =>
-        new(NullLogger<MainPcSealService>.Instance, prefix, allowPlatform);
+        new(NullLogger<MainPcSealService>.Instance, prefix,
+            allowPlatform && !PlatformKspEnvironment.ForcedOff);
 
     private static bool OnWindows => RuntimeInformation.IsOSPlatform(OSPlatform.Windows);
 
@@ -91,11 +96,22 @@ public sealed class MainPcSealProviderGateTests
     {
         if (!OnWindows) return;
 
+        // 🔴 TPM 이 없는 컴퓨터(= CI 러너)에서는 **못 잰다.** 🚫 조용히 통과시키지 않는다.
+        //   G-21a 가 본질(봉인↔해제 공급자 일치)을 L 갈래에서 이미 묻는다.
+        if (!PlatformKspEnvironment.IsUsable)
+        {
+            PlatformKspEnvironment.SkipLoudly("G-21b", "TPM 금고로의 진짜 왕복");
+            return;
+        }
+
         var prefix = IsolatedPrefix();
         var svc = Make(prefix, allowPlatform: true);
 
-        // ⚠️ TPM 이 없는 러너에서는 안 돈다. G-21a 가 본질(봉인↔해제 공급자 일치)을 이미 묻는다.
-        if (!svc.IsPlatformKspUsable()) return;
+        if (!svc.IsPlatformKspUsable())
+        {
+            PlatformKspEnvironment.SkipLoudly("G-21b", "TPM 금고로의 진짜 왕복(키 생성 불가)");
+            return;
+        }
 
         try
         {
@@ -125,6 +141,20 @@ public sealed class MainPcSealProviderGateTests
         if (!OnWindows) return;
 
         var name = IsolatedPrefix() + ".g22";
+
+        // 🔴 TPM 이 없는 컴퓨터에서도 **이 게이트는 빈손으로 끝나지 않는다.**
+        //   R-1 의 본질은 *"금고가 다르면 같은 이름이어도 없는 키다"* 이고,
+        //   TPM 이 없는 컴퓨터에서는 그 사실이 **「물으면 터진다」는 모양**으로 나타난다.
+        //   ⇒ 그것을 **그대로 단언한다.** 「없으니 통과」가 아니다.
+        if (!PlatformKspEnvironment.IsUsable)
+        {
+            PlatformKspEnvironment.SkipLoudly("G-22", "TPM 금고에 같은 이름이 없다는 확인(Exists=False)");
+
+            // ⚠️ 흉내(HITPAN_TEST_NO_TPM)일 때는 **실제로는 TPM 이 있으므로** 이 단언을 하면 거짓이 된다.
+            //   흉내는 「제품이 TPM 없이 도는가」를 재려는 것이지 금고 분리를 재려는 것이 아니다.
+            if (!PlatformKspEnvironment.ForcedOff) AssertSoftwareOnlyProviderSeparation(name);
+            return;
+        }
         CngKey? key = null;
         try
         {
@@ -138,6 +168,43 @@ public sealed class MainPcSealProviderGateTests
             // 🔴 이것이 선행검증 R-1 의 전부다 — **같은 이름이어도 금고가 다르면 없는 키다.**
             Assert.True(CngKey.Exists(name, CngProvider.MicrosoftSoftwareKeyStorageProvider));
             Assert.False(CngKey.Exists(name, CngProvider.MicrosoftPlatformCryptoProvider));
+        }
+        finally
+        {
+            if (key is not null)
+            {
+                key.Delete();
+                Assert.False(CngKey.Exists(name, CngProvider.MicrosoftSoftwareKeyStorageProvider));
+            }
+        }
+    }
+
+    /// <summary>
+    /// TPM 없는 컴퓨터판 R-1 — <b>소프트웨어 금고에는 있고, TPM 금고는 물으면 터진다.</b>
+    /// </summary>
+    /// <remarks>
+    /// 🔴 이것도 <b>공급자 분리의 증거</b>다. 두 금고가 같은 공간이었다면 이런 일은 없다.
+    /// 그리고 이 단언이 통과한다는 것은 곧 <b>제품 코드가 이 예외를 견뎌야 한다</b>는 뜻이기도 하다
+    /// (견디는지는 G-33·G-35 가 등록을 실제로 돌려 확인한다).
+    /// </remarks>
+    [SupportedOSPlatform("windows")]
+    private static void AssertSoftwareOnlyProviderSeparation(string name)
+    {
+        CngKey? key = null;
+        try
+        {
+            key = CngKey.Create(CngAlgorithm.Rsa, name, new CngKeyCreationParameters
+            {
+                Provider = CngProvider.MicrosoftSoftwareKeyStorageProvider,
+                KeyCreationOptions = CngKeyCreationOptions.None,
+                ExportPolicy = CngExportPolicies.None,
+            });
+
+            Assert.True(CngKey.Exists(name, CngProvider.MicrosoftSoftwareKeyStorageProvider));
+
+            // 🔴 TPM 이 없으면 **물음 자체가 던진다.** 조용히 false 가 아니다 — 그것이 이 환경의 사실이다.
+            Assert.ThrowsAny<CryptographicException>(
+                () => CngKey.Exists(name, CngProvider.MicrosoftPlatformCryptoProvider));
         }
         finally
         {
@@ -420,6 +487,14 @@ public sealed class MainPcSealProviderGateTests
             var rawA = RandomNumberGenerator.GetBytes(32);
             var envelopeA = svc.Seal(TenantA, DeviceA, rawA);
 
+            // 🔴 TPM 이 없으면 L 갈래로 내려간다 — L 에는 **이름이 없어** 충돌할 것도 없다.
+            //   그 컴퓨터에서 이 시험이 무는 것은 「둘째 봉인이 첫째를 안 죽인다」뿐이고,
+            //   **이름 축은 안 잰 것**이다. 🚫 조용히 넘어가지 않는다.
+            if (envelopeA[4] != (byte)'P')
+            {
+                PlatformKspEnvironment.SkipLoudly("G-29", "회사별 키 이름(T16)의 충돌 방지 — P 갈래");
+            }
+
             // 🔴 같은 컴퓨터 · 같은 접두사 · **다른 회사**. 이름이 회사별이 아니면 여기서 A 가 죽는다.
             svc.Seal(TenantB, DeviceA, RandomNumberGenerator.GetBytes(32));
 
@@ -452,6 +527,12 @@ public sealed class MainPcSealProviderGateTests
 
             // 🚨 세대가 안 올라가면 덮어쓰기와 같은 일이 벌어진다(M-12).
             Assert.NotEqual(oldGen, newGen);
+
+            // 🔴 TPM 이 없으면 L 갈래다 — 세대는 봉투에만 있고 **이름 충돌은 안 쟀다.**
+            if (newEnvelope[4] != (byte)'P')
+            {
+                PlatformKspEnvironment.SkipLoudly("G-29b", "세대별 키 이름의 충돌 방지 — P 갈래");
+            }
 
             var old = svc.Unseal(oldEnvelope, TenantA, DeviceA);
             Assert.Equal(MainPcUnsealStatus.Ok, old.Status);
@@ -575,6 +656,12 @@ public sealed class MainPcSealProviderGateTests
             if (newEnvelope[4] == (byte)'P')
             {
                 Assert.Equal(MainPcUnsealStatus.NotThisPc, svc.Unseal(newEnvelope, TenantA, DeviceA).Status);
+            }
+            else
+            {
+                // 🔴 L 갈래에는 지울 이름이 없다 ⇒ 이 축은 **안 쟀다.** 🚫 조용히 통과시키지 않는다.
+                //   그 갈래의 진실원은 DB 이고, DB 축은 G-35 가 TPM 과 무관하게 잰다.
+                PlatformKspEnvironment.SkipLoudly("G-31", "되돌린 새 세대 키가 안 남는지 — P 갈래");
             }
         }
         finally
@@ -732,6 +819,16 @@ public sealed class MainPcSealProviderGateTests
         // ⚠️ OperatingSystem.IsWindows() 로 묻는다 — 분석기가 알아보는 유일한 형태다(CA1416).
         if (!OperatingSystem.IsWindows()) return;
 
+        // 🔴 20260924작1 절E CI 봉합 — TPM 이 없는 컴퓨터(= CI 러너)에서는
+        //   CngKey.Exists(..., Platform) 이 **false 를 주지 않고 던진다.**
+        //   이름 있는 키는 P 갈래에만 있으므로, TPM 이 없으면 **만들어진 적도 없다** ⇒ 잔재도 없다.
+        //   🚫 그래도 조용히 넘어가지 않는다 — 안 쟀다는 사실을 stderr 에 남긴다.
+        if (!PlatformKspEnvironment.IsUsable)
+        {
+            PlatformKspEnvironment.SkipLoudly("잔재 확인(P 갈래)", "시험 키가 남았는지");
+            return;
+        }
+
         var svc = Make(prefix, allowPlatform: true);
 
         // ① 이 시험이 만든 것을 **전부 지운다**(§5-0).
@@ -761,7 +858,17 @@ public sealed class MainPcSealProviderGateTests
     [SupportedOSPlatform("windows")]
     private static void CollectIfExists(string name, List<string> leftovers)
     {
-        if (CngKey.Exists(name, CngProvider.MicrosoftPlatformCryptoProvider)) leftovers.Add(name);
+        try
+        {
+            if (CngKey.Exists(name, CngProvider.MicrosoftPlatformCryptoProvider)) leftovers.Add(name);
+        }
+        catch (CryptographicException ex)
+        {
+            // #15 — 삼키지 않는다. TPM 이 도중에 사라지는 경우까지 조용히 넘기면
+            //   「잔재 0」이 **재본 적 없는 주장**이 된다. 크게 적고 나간다.
+            Console.Error.WriteLine(
+                $"[SKIP-TPM] 잔재 확인 — TPM 금고를 열지 못했다: {ex.GetType().Name}: {ex.Message}");
+        }
     }
 
     // ─────────────────────────────────────────────────────────

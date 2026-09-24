@@ -40,6 +40,26 @@ jobs:
         run: dotnet test src/HitPan.sln --configuration Release --no-build --nologo --verbosity normal --logger "trx;LogFileName=test-results.trx"
         continue-on-error: false
 
+      # 🔴 20260924작1 §5 — **안 잰 축을 로그에 드러낸다** (PM 결재 · 헌법 #32)
+      #   메인PC 봉인 게이트 일부는 TPM(Platform KSP)이 있어야만 성립한다.
+      #   TPM 없는 러너에서 그 축을 건너뛰는 것은 정당하지만,
+      #   🚨 **건너뛴 사실이 안 보이면 「막는 척만 하는 게이트」와 구별되지 않는다**(가짜게이트 8건 전례).
+      #   VSTest 는 통과 시험의 콘솔 출력을 CI 로그에 싣지 않고(실측 확인),
+      #   xUnit 2.9.3 에는 Assert.Skip 이 없어 Skipped 집계로도 못 띄운다.
+      #   ⇒ 시험이 남긴 표식 파일을 여기서 **그대로 출력**한다. 파일이 없으면 모든 축을 실측한 판이다.
+      #   ⚠️ 판정을 바꾸지 않는다 — 보여주기만 한다(always 라 실패해도 찍힌다).
+      - name: 안 잰 축 표식 (TPM 없는 러너)
+        if: always()
+        shell: pwsh
+        run: |
+          $f = Get-ChildItem -Path . -Filter 'tpm-skips.log' -Recurse -File -ErrorAction SilentlyContinue
+          if ($f) {
+            Write-Host "::warning::TPM(Platform KSP) 없는 러너 — 아래 축은 이 판에서 재지 않았다"
+            $f | ForEach-Object { Write-Host "--- $($_.FullName) ---"; Get-Content $_.FullName }
+          } else {
+            Write-Host "[TPM축] tpm-skips.log 없음 — 모든 축을 실측한 판이다"
+          }
+
       # 게이트 (2026-07-16, 작1 W-0 — 설계팀·검증팀 SoD 확증한 P0 재발 차단):
       #   마이그 SQL(DB-*.sql)이 publish 산출물에서 통째로 누락되는 사고를 원천 차단한다.
       #   .sql 은 .NET SDK 기본 Content 가 아니라, csproj 복사 지시가 빠지면 publish 에 0개가 실린다.
