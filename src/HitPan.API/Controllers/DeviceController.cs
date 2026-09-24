@@ -517,6 +517,12 @@ public sealed class DeviceController : ControllerBase
         var uid = HttpContext.Items["UserId"]?.ToString();
         if (string.IsNullOrEmpty(tid) || string.IsNullOrEmpty(uid)) return Forbid();
 
+        // 🔴 20260924작1 · PM 결재 Q-1 — **서버가 대표를 거른다.**
+        //   종전에는 화면(MainPcGate.razor:126)만 대표를 걸렀다 — 화면 말을 믿는 구조였다.
+        //   자료관리는 부모계정 + 메인PC 에서만이다(사장님 2026-08-11 · BackupController.cs:17).
+        //   ⚠️ 표면을 넓히는 것이 아니라 **좁히는 것**이다 — 오늘 이 길로 오는 사람은 대표뿐이다.
+        if (User.FindFirst("account_type")?.Value != "tenant_admin") return Forbid();
+
         return Ok(new { challenge = _proof.IssueChallenge(tid, uid) });
     }
 
@@ -570,6 +576,10 @@ public sealed class DeviceController : ControllerBase
         var uid = HttpContext.Items["UserId"]?.ToString();
         if (string.IsNullOrEmpty(tid) || string.IsNullOrEmpty(uid)) return Forbid();
 
+        // 🔴 20260924작1 · PM 결재 Q-1 — ①과 **같은 문**을 여기도 세운다.
+        //   ①만 막고 ③을 열어 두면 표를 얻은 다른 경로가 출입증을 받아 갈 수 있다.
+        if (User.FindFirst("account_type")?.Value != "tenant_admin") return Forbid();
+
         var outcome = _proof.Consume(tid, uid, req.Challenge ?? "", out var pass);
         return Ok(new
         {
@@ -605,8 +615,12 @@ public sealed class DeviceController : ControllerBase
             return Forbid();
 
         // 🔴 표를 소모하며 판정을 다시 확인한다 — 화면 말을 믿지 않는다.
+        //   🔴 20260924작1 절B — ReRegisterRequired 를 **여기 안 더하면 막다른 방**이다.
+        //     [다시 인증] 팝업은 뜨는데 눌러도 400 으로 튕긴다(8/16 P0 와 같은 모양).
         var outcome = _proof.Consume(tid, uid, req.Challenge ?? "", out _);
-        if (outcome != MainPcProofOutcome.NotRegisteredYet && outcome != MainPcProofOutcome.DifferentPc)
+        if (outcome != MainPcProofOutcome.NotRegisteredYet
+            && outcome != MainPcProofOutcome.DifferentPc
+            && outcome != MainPcProofOutcome.ReRegisterRequired)
         {
             return BadRequest(new { message = "이 컴퓨터에서는 등록할 수 없습니다. 회사 자료가 들어 있는 컴퓨터에서 진행해 주세요." });
         }
@@ -620,8 +634,11 @@ public sealed class DeviceController : ControllerBase
 
         var ok = await _proof.RegisterThisPcAsync(tid, deviceId, ct);
         if (!ok)
+            // 🔴 PM 결재 O-3 — **막다른 방을 만들지 않는다.** 왜 안 됐는지 말하고, 다시 눌러 볼 길을 남긴다.
+            //   (팝업은 닫히지 않고 [다시 인증] 버튼이 그대로 살아 있다 — MainPcGate.RegisterAsync)
             return StatusCode(StatusCodes.Status500InternalServerError,
-                new { message = "등록을 마치지 못했습니다. 잠시 후 다시 시도해 주세요." });
+                new { message = "이 컴퓨터에 인증 정보를 안전하게 저장하지 못했습니다. "
+                              + "잠시 후 다시 눌러 주세요. 계속 같으면 히트판 고객센터로 알려 주세요." });
 
         // 🔵 자료가 비어 있으면 화면이 「자료 복구」를 안내한다 (사장님 결재 D-11).
         //   새 컴퓨터로 옮겨 온 고객은 여기서 갈 곳을 알아야 한다 — 빈 화면만 보면

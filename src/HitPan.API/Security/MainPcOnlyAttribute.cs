@@ -89,7 +89,12 @@ public sealed class MainPcOnlyAttribute : ActionFilterAttribute
             .GetService(typeof(HitPan.Application.Interfaces.IMainPcProofService))
             as HitPan.Application.Interfaces.IMainPcProofService;
 
-        return proof?.IsPassValid(pass) == true;
+        // 🔴 20260924작1 · PM 결재 Q-2 — **회사까지 대조**한다. 출입증 목록에 있기만 하면
+        //   통하던 종전 판정은, 한 API 에 여러 회사가 붙는 자리에서 회사를 안 봤다.
+        //   ⚠️ 닫히는 축은 **회사 하나**다. 기기·사용자 축은 별건 O-2 로 열려 있다(거짓봉합 금지).
+        //   ⚠️ TenantId 는 미들웨어가 JWT 에서 넣은 값이다(#2 — 파라미터로 받지 않는다).
+        var tid = http.Items["TenantId"]?.ToString();
+        return proof?.IsPassValid(pass, tid) == true;
     }
 
     public override void OnActionExecuting(ActionExecutingContext context)

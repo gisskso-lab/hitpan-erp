@@ -41,27 +41,35 @@ else
 @code {
     [Parameter] public RenderFragment? ChildContent { get; set; }
 
-    private bool _checking = true;
-    private bool _isMainPc;
+    /// <summary>
+    /// 🔴 <b>통과한 뒤에야 부른다</b> — 20260924작1 절D.
+    /// </summary>
+    /// <remarks>
+    /// 종전에는 화면이 <c>OnInitializedAsync</c> 에서 곧바로 조회를 쐈다. 그 조회는
+    /// 자료보관 컴퓨터에서만 열리는 문이라, 클라이언트 PC 에서는 <b>매번 403 이 쌓였고</b>
+    /// 메인PC 에서도 왕복이 끝나기 전에 쏘면 한 번 튕겼다.
+    /// ⚠️ 이것은 <b>차단이 아니라 소음·깜빡임 제거</b>다. 서버 판정은 그대로 둔다.
+    /// </remarks>
+    [Parameter] public EventCallback OnAllowed { get; set; }
+
+    // 🔴 판정·호출 규칙은 MainPcAccessState 한 곳에 있다 — 게이트 G-27 이 그것을 직접 세어 본다.
+    private readonly MainPcAccessState _access = new();
+
+    private bool _checking => _access.Checking;
+    private bool _isMainPc => _access.IsMainPc;
 
     protected override async Task OnInitializedAsync()
     {
-        try
-        {
-            var r = await Http.GetFromJsonAsync<MainPcResult>("api/devices/is-main-pc");
-            _isMainPc = r?.IsMainPc ?? false;
-        }
-        catch (Exception ex)
-        {
+        await _access.ResolveAsync(
+            async () =>
+            {
+                var r = await Http.GetFromJsonAsync<MainPcResult>("api/devices/is-main-pc");
+                return r?.IsMainPc ?? false;
+            },
+            OnAllowed.HasDelegate ? () => OnAllowed.InvokeAsync() : null,
             // 못 물어봤으면 **안 보여준다.** 확인이 안 된 상태에서 열어주면
-            // 막은 적이 없는 것과 같다.
-            _logger.LogWarning(ex, "자료보관 컴퓨터 여부를 확인하지 못했습니다 — 잠근 채로 둡니다.");
-            _isMainPc = false;
-        }
-        finally
-        {
-            _checking = false;
-        }
+            // 막은 적이 없는 것과 같다. (#15 — 조용히 넘어가지 않는다)
+            ex => _logger.LogWarning(ex, "자료보관 컴퓨터 여부를 확인하지 못했습니다 — 잠근 채로 둡니다."));
     }
 
     private sealed class MainPcResult

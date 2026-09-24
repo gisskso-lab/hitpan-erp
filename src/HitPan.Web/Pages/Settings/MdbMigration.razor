@@ -659,6 +659,12 @@
             _isMainPc = false;
         }
 
+        // 🔴 20260924작1 절D — **통과한 뒤에만 부른다.**
+        //   아래 조회는 자료보관 컴퓨터에서만 열리는 문(api/migration/*)이다. 클라이언트 PC 에서
+        //   쏘면 매번 403 이 콘솔에 쌓였다. 판정은 바로 위에서 이미 났으므로 그 값을 쓴다.
+        //   ⚠️ 화면을 감추는 것은 차단이 아니다 — 서버 판정(MigrationController)은 그대로 둔다.
+        if (!_isMainPc) { return; }
+
         try
         {
             var resp = await Http.GetAsync("api/migration/legacy-mdb/current");

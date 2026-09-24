@@ -4,6 +4,8 @@ using System.Net.Http.Json;
 using System.Text;
 using HitPan.Web.Models;
 using Microsoft.Extensions.Logging;
+// 🔴 20260924작1 절C — 왕복 ②가 JS(hitpanMainPc.probe)를 부른다. 확장 메서드가 여기 산다.
+using Microsoft.JSInterop;
 using MudBlazor;
 
 namespace HitPan.Web.Services;
@@ -29,6 +31,15 @@ public sealed class HitPanApiAuthHandler(
     private const string MainPcPassHeader = "X-MainPc-Pass";
     // 동시 다발 401 시 refresh 가 중복 호출되지 않도록 직렬화한다(토큰 회전 충돌 방지).
     private static readonly SemaphoreSlim RefreshLock = new(1, 1);
+
+    /// <summary>
+    /// 🔴 20260924작1 절C — 403 <c>main_pc_only</c> 1회 자동 재왕복.
+    /// </summary>
+    /// <remarks>
+    /// <b>static</b> 이다 — 핸들러는 요청마다 새로 만들어질 수 있는데, 쿨다운은
+    /// <b>브라우저 전체</b>에 하나여야 의미가 있다(안 그러면 매 요청이 자기만의 쿨다운을 갖는다).
+    /// </remarks>
+    private static readonly MainPcRetryCoordinator MainPcRetry = new(() => DateTimeOffset.UtcNow);
 
     protected override async Task<HttpResponseMessage> SendAsync(
         HttpRequestMessage request,
@@ -95,6 +106,39 @@ public sealed class HitPanApiAuthHandler(
                 logger.LogWarning("기기 미인증으로 차단됨: {Method} {Path}", request.Method, path);
                 DeviceAuthState.MarkBlocked();
             }
+            // 🔴 20260924작1 절C — 401 재시도 **옆자리**. 출입증이 없거나 만료된 것뿐이면
+            //   왕복을 한 바퀴 돌아 받아 오고 원요청을 한 번 더 보낸다.
+            //   ⚠️ 여기서 잡히지 않으면 아래 평소 403 안내로 그대로 내려간다(#20 — 흐름을 끊지 않는다).
+            else if (await MainPcRetryCoordinator
+                         .IsMainPcDeniedAsync(response, LogMainPcRetry).ConfigureAwait(false))
+            {
+                var recovered = await MainPcRetry.TryRecoverAsync(
+                    request,
+                    (req, token) => base.SendAsync(req, token),
+                    CloneRequestAsync,
+                    async req =>
+                    {
+                        await AttachTokenAsync(req).ConfigureAwait(false);
+                        await AttachDeviceKeyAsync(req).ConfigureAwait(false);
+                    },
+                    challenge => js.InvokeAsync<bool>("hitpanMainPc.probe", challenge).AsTask(),
+                    pass => js.InvokeVoidAsync("hitpanMainPc.setPass", pass).AsTask(),
+                    IsOwnerAsync,
+                    LogMainPcRetry,
+                    cancellationToken).ConfigureAwait(false);
+
+                if (recovered is not null)
+                {
+                    response.Dispose();
+                    response = recovered;
+                }
+                else
+                {
+                    // 🔴 스낵바를 띄우지 않는다 — **클라이언트 PC 에서는 이것이 정상**이다.
+                    //   화면(MainPcOnly)이 이미 "자료보관 컴퓨터에서만" 이라고 말한다.
+                    logger.LogWarning("자료보관 컴퓨터가 아니어서 막힘: {Method} {Path}", request.Method, path);
+                }
+            }
             else
             {
                 logger.LogWarning("403 Forbidden on {Method} {Path}", request.Method, path);
@@ -103,6 +147,59 @@ public sealed class HitPanApiAuthHandler(
         }
 
         return response;
+    }
+
+    /// <summary>
+    /// 🔴 절C C-① — <b>대표(부모계정)인가.</b> 20260924작1 §9-5.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// 오늘 출입증을 받는 사람은 대표뿐이다(<c>MainPcGate.razor:126</c>). 그 표면을 그대로 유지한다 —
+    /// 직원 화면에서 헛왕복을 돌면 <b>소음이자 표면 확대</b>다.
+    /// </para>
+    /// <para>
+    /// ⚠️ <b>이것은 차단이 아니다.</b> 진짜 차단은 서버가 한다(Q-1 · <c>DeviceController</c> 의
+    /// <c>mainpc-challenge</c>·<c>mainpc-verify</c>). 화면 판정은 <b>믿는 근거가 아니라 절약</b>이다.
+    /// </para>
+    /// <para>⚠️ 값은 <b>토큰 안</b>에서만 읽는다 — 어디서 받아 적지 않는다(#2 정신).</para>
+    /// </remarks>
+    private async Task<bool> IsOwnerAsync()
+    {
+        try
+        {
+            var token = await storage.GetAsync<string>(AuthStorageKeys.AccessToken).ConfigureAwait(false);
+            if (!token.Success || string.IsNullOrWhiteSpace(token.Value)) return false;
+
+            return ReadAccountType(token.Value!) == "tenant_admin";
+        }
+        catch (Exception ex)
+        {
+            // #15 — 못 읽었으면 **안 돈다.** 확인이 안 된 상태에서 왕복을 도는 쪽으로 실패하지 않는다.
+            logger.LogDebug(ex, "대표 계정 여부를 확인하지 못했습니다 — 자료보관 컴퓨터 재확인을 건너뜁니다.");
+            return false;
+        }
+    }
+
+    /// <summary>JWT 본문에서 <c>account_type</c> 한 칸만 꺼낸다(서명은 서버가 본다).</summary>
+    private static string? ReadAccountType(string jwt)
+    {
+        var parts = jwt.Split('.');
+        if (parts.Length < 2) return null;
+
+        var payload = parts[1].Replace('-', '+').Replace('_', '/');
+        payload = payload.PadRight(payload.Length + ((4 - (payload.Length % 4)) % 4), '=');
+
+        using var doc = System.Text.Json.JsonDocument.Parse(Convert.FromBase64String(payload));
+        return doc.RootElement.TryGetProperty("account_type", out var v) ? v.GetString() : null;
+    }
+
+    /// <summary>
+    /// 절C 의 말할 자리 — <b>조용히 삼키지 않는다</b>(#15). 고객 화면에는 안 띄운다(정상 경로다).
+    /// </summary>
+    private void LogMainPcRetry(string message, Exception? ex)
+    {
+        if (ex is null) logger.LogDebug("{Message}", message);
+        else logger.LogDebug(ex, "{Message}", message);
     }
 
     /// <summary>저장된 AccessToken 을 Authorization 헤더에 붙인다(없으면 그대로 통과).</summary>

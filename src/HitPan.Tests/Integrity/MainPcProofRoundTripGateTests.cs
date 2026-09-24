@@ -104,8 +104,52 @@ public sealed class MainPcProofRoundTripGateTests
         public bool IsSealedKeyValid(byte[] sealedKey) => throw new Xunit.Sdk.XunitException("같은 이유.");
     }
 
-    private static MainPcProofService NewService() =>
-        new(new ForbiddenDbConnection(), new NeverCalledTpm(), NullLogger<MainPcProofService>.Instance);
+    /// <summary>
+    /// 🚨 20260924작1 [4] C-2 — 종전 3인자 생성자는 <b>컴파일 오류</b>로 막혔다(M-12 재발 경로).
+    /// </summary>
+    /// <remarks>
+    /// 🔴 이 파일의 <b>판정은 한 글자도 안 바뀐다.</b> 종전 3인자 길이 하던 일(봉인·해제를
+    /// <see cref="ITpmKeyService"/> 로 그대로 보내기)을 <b>여기서 대역으로 세워</b> 4인자 길로 넣는다.
+    /// ⚠️ 여기 꽂히는 것은 <c>NeverCalledTpm</c> — <b>실물 TpmKeyService 가 아니다.</b> 부르면 시험이 터진다.
+    /// </remarks>
+    private sealed class PassThroughSeal(ITpmKeyService tpm) : IMainPcSealService
+    {
+        public byte[] Seal(string tenantId, string deviceId, byte[] raw) => tpm.SealKey(raw);
+
+        public byte[] Seal(string tenantId, string deviceId, byte[] raw, byte? currentGeneration) =>
+            tpm.SealKey(raw);
+
+        public MainPcUnsealResult Unseal(byte[] envelope, string tenantId, string deviceId)
+        {
+            try
+            {
+                return MainPcUnsealResult.Ok(tpm.UnsealKey(envelope));
+            }
+            catch (Exception)
+            {
+                // 종전 흐름 그대로 — 안 풀리면 「등록된 그 컴퓨터가 아니다」다.
+                return MainPcUnsealResult.NotThisPc();
+            }
+        }
+
+        public bool TryReadGeneration(byte[]? envelope, out byte generation)
+        {
+            generation = 0;
+            return false;
+        }
+
+        public bool TryDeleteGenerationKey(string tenantId, byte generation) => false;
+
+        public bool IsPlatformKspUsable() => tpm.IsTpmAvailable();
+    }
+
+    private static MainPcProofService NewService()
+    {
+        var tpm = new NeverCalledTpm();
+        return new MainPcProofService(
+            new ForbiddenDbConnection(), tpm, new PassThroughSeal(tpm),
+            NullLogger<MainPcProofService>.Instance);
+    }
 
     /// <summary>회사·세션은 시험마다 고유하게 — 표 보관소가 <b>static 전역</b>이다(작3 §4-2).</summary>
     private static string Fresh(string tag) => $"{tag}-{Guid.NewGuid():N}";
