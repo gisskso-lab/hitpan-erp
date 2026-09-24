@@ -20,6 +20,10 @@
 @inject IJSRuntime JS
 @inject AuthenticationStateProvider AuthProvider
 @inject ILogger<MainPcGate> _logger
+@* 🔴 20260925작1 절B — 왕복 한 바퀴는 이제 한 곳에만 있다(HitPan.Web.Services.MainPcProofRunner).
+   자료관리 진입에서도 같은 왕복이 필요해졌고(MainPcOnly.razor · 절C),
+   두 곳이 각자 들고 있으면 한쪽만 고쳐지는 날이 온다. *@
+@inject HitPan.Web.Services.MainPcProofRunner Proof
 
 @if (_prompt != Prompt.None)
 {
@@ -165,34 +169,13 @@ else
     /// <summary>
     /// 왕복 한 바퀴 — ①표 받기 → ②자기 PC 안의 히트판 두드리기 → ③결과 확인.
     /// </summary>
-    /// <returns>서버가 내린 판정 이름. 실패하면 <c>NotProven</c>.</returns>
-    private async Task<string> RunProofAsync()
-    {
-        // ① 표를 받는다 (도메인 경유)
-        var issued = await Http.PostAsJsonAsync("api/devices/mainpc-challenge", new { });
-        if (!issued.IsSuccessStatusCode) return "NotProven";
-
-        var challenge = (await issued.Content.ReadFromJsonAsync<ChallengeResponse>())?.Challenge;
-        if (string.IsNullOrWhiteSpace(challenge)) return "NotProven";
-
-        // ② 자기 PC 안의 히트판을 두드린다 (터널을 안 지난다)
-        //   클라이언트 PC 에서는 두드릴 히트판이 없어 false 가 온다 — 그것이 정상이다.
-        var knocked = await JS.InvokeAsync<bool>("hitpanMainPc.probe", challenge);
-        if (!knocked) return "NotProven";
-
-        // ③ 결과를 묻는다 (도메인 경유). 통과했으면 출입증이 함께 온다.
-        var verified = await Http.PostAsJsonAsync("api/devices/mainpc-verify", new { challenge });
-        if (!verified.IsSuccessStatusCode) return "NotProven";
-
-        var body = await verified.Content.ReadFromJsonAsync<VerifyResponse>();
-        if (body is null) return "NotProven";
-
-        // 🟢 출입증을 보관한다 — 이후 자료관리 요청이 이것을 들고 간다.
-        if (!string.IsNullOrWhiteSpace(body.Pass))
-            await JS.InvokeVoidAsync("hitpanMainPc.setPass", body.Pass);
-
-        return body.Outcome ?? "NotProven";
-    }
+    /// <remarks>
+    /// 🔴 <b>20260925작1 절B — 본문이 <c>HitPan.Web.Services.MainPcProofRunner</c> 로 옮겨갔다.</b>
+    /// 한 글자도 안 바꾸고 자리만 옮겼다(헌법 #1). 자료관리 진입(<c>MainPcOnly.razor</c> · 절C)도
+    /// <b>같은 왕복</b>을 써야 해서, 규칙을 한 곳에만 두기 위함이다.
+    /// <para>⚠️ 여기에 다시 복붙하지 마라 — 게이트 G-1 이 복붙본이 생기는지 센다.</para>
+    /// </remarks>
+    private Task<string> RunProofAsync() => Proof.RunAsync();
 
     /// <summary>
     /// 🔵 [등록] · [이 컴퓨터로 바꾸기].
@@ -254,12 +237,8 @@ else
 
     private sealed class ChallengeResponse { public string? Challenge { get; set; } }
 
-    private sealed class VerifyResponse
-    {
-        public string? Outcome { get; set; }
-        public bool IsMainPc { get; set; }
-        public string? Pass { get; set; }
-    }
+    // 🔴 20260925작1 절B — 종전의 VerifyResponse 는 왕복과 함께
+    //   HitPan.Web.Services.MainPcVerifyResponse 로 옮겨갔다. 여기서는 더 쓰지 않는다.
 
     private sealed class MessageResponse { public string? Message { get; set; } }
 

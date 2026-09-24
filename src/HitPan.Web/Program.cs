@@ -40,6 +40,9 @@ var apiUri = new Uri($"{apiBase.TrimEnd('/')}/");
 builder.Services.AddMudServices();
 builder.Services.AddAuthorizationCore();
 builder.Services.AddScoped<HitPanProtectedLocalStorage>();
+// 🔴 20260925작1 절B — 메인PC 「왕복 증명」 한 바퀴. 규칙을 한 곳에만 둔다.
+//   로그인 직후(MainPcGate)와 자료관리 진입(MainPcOnly)이 **같은 것**을 부른다.
+builder.Services.AddScoped<MainPcProofRunner>();
 builder.Services.AddScoped<IAuthTokenRefresher, AuthTokenRefresher>();
 builder.Services.AddScoped<HitPanAuthStateProvider>();
 builder.Services.AddScoped<AuthenticationStateProvider>(sp => sp.GetRequiredService<HitPanAuthStateProvider>());
