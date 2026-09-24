@@ -14,6 +14,8 @@
 *@
 @inject HttpClient Http
 @inject ILogger<MainPcOnly> _logger
+@* 🔴 20260925작1 절C — 왕복을 한 번 더 도는 데 쓴다. 규칙은 MainPcProofRunner 한 곳에만 있다(절B). *@
+@inject HitPan.Web.Services.MainPcProofRunner Proof
 
 @if (_checking)
 {
@@ -63,8 +65,29 @@ else
         await _access.ResolveAsync(
             async () =>
             {
+                // ① 먼저 묻는다 — 종전 경로 그대로. 로그인 직후 왕복이 통과했으면 여기서 끝난다.
                 var r = await Http.GetFromJsonAsync<MainPcResult>("api/devices/is-main-pc");
-                return r?.IsMainPc ?? false;
+                if (r?.IsMainPc == true) return true;
+
+                // 🔵 20260925작1 절C — 여기서 **한 번 더 돈다.**
+                //
+                //   [무엇이 문제였나] 브라우저가 "이 사이트가 당신 컴퓨터 안을 봐도 됩니까" 를
+                //     묻는 동안 로그인 직후의 왕복이 시간제한에 걸려 죽었다. 고객이 [허용] 을 눌러도
+                //     **다시 물어보는 자리가 없어서** 화면은 영영 "이 컴퓨터가 아닙니다" 였다.
+                //     ⇒ 고객은 새로고침을 해야만 열렸다(사장님 실측 2026-09-25).
+                //
+                //   [왜 여기인가] 자료관리에 **들어오는 순간**이 곧 "지금 다시 확인해 달라" 는 뜻이다.
+                //     화면을 새로고침하지 않는다 — 왕복만 다시 돈다. 입력 중이던 것이 날아가지 않는다.
+                //
+                //   ⚠️ **한 번만 돈다.** 두 번째 실패는 그대로 실패로 둔다 — 고리가 돌면 안 된다.
+                //   ⚠️ 클라이언트 PC 에서 공짜다 — 두드릴 히트판이 없는 자리는 **1ms 에 끝난다**
+                //     (연결 거부 · 선행검증 2026-09-25 §5). 느려지지 않는다.
+                var outcome = await Proof.RunAsync();
+                if (outcome != "MainPcConfirmed") return false;
+
+                // 출입증이 생겼으니 이번에는 열린다.
+                var again = await Http.GetFromJsonAsync<MainPcResult>("api/devices/is-main-pc");
+                return again?.IsMainPc ?? false;
             },
             OnAllowed.HasDelegate ? () => OnAllowed.InvokeAsync() : null,
             // 못 물어봤으면 **안 보여준다.** 확인이 안 된 상태에서 열어주면
