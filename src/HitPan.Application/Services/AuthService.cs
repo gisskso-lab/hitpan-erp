@@ -120,11 +120,17 @@ public class AuthService : IAuthService
         //       ⬛ [낡은 줄] *"화면 조작만으로 되던 것을 **헤더까지 함께 위조해야** 되게 바꿨을 뿐이다"*
         //         — **틀렸다.** 위조를 요구하지 않는다. 함께 맞출 필요도 없다.
         //       🔴 **「서버가 이긴다」는 UA 가 말을 할 때만이다. UA 를 침묵시키면 신고값이 이긴다.**
-        //         - `User-Agent` 를 **안 보내거나 공백**으로 두면 `JudgeTypeFromUserAgent` 가 `null` 을
-        //           돌려주고(`DeviceTypeResolver.cs:176`), `:136` 이 **신고값을 그대로 쓴다**
-        //           (신고값도 없으면 `?? "mobile"` — 싼 칸).
-        //         - **Mac 계열 UA** 는 `:191-197` 이 8/10 아이패드 사고 재발 방지를 위해
+        //         - `User-Agent` 를 **안 보내거나 공백**으로 두면 `DeviceTypeResolver.JudgeTypeFromUserAgent`
+        //           의 첫 줄(`IsNullOrWhiteSpace(userAgent) → null`)이 판정을 포기하고,
+        //           `DeviceTypeResolver.ResolveDeviceType` 의 `if (judged is null) return normalized ?? "mobile"`
+        //           이 **신고값을 그대로 쓴다**(신고값도 없으면 `?? "mobile"` — 싼 칸).
+        //         - **Mac 계열 UA** 는 `JudgeTypeFromUserAgent` 의 **마지막 `return null`**(어느 토큰에도
+        //           안 맞는 fall-through)이 8/10 아이패드 사고 재발 방지를 위해
         //           **의도적으로 판정을 포기**한다 ⇒ 같은 길로 빠져나간다.
+        //       🔴 20260927작2 **5차** — 바로 위 세 자리는 2차까지 줄번호(`DeviceTypeResolver.cs:176`·`:136`·
+        //         `:191-197`)로 적혀 있었다. 2차가 **같은 파일에 주석 15줄을 얹어** 커밋하는 순간 이미
+        //         어긋났다([4] R-7 실측: 실제는 `:191`·`:151`·`:204-212`). ⇒ 줄번호를 버리고
+        //         **함수·식 이름**으로 가리킨다. 주석이 밀려도 안 어긋나는 것이 근본 해결이다.
         //         - `curl`·Postman·`HttpClient` 처럼 어느 토큰에도 안 맞는 클라이언트도 마찬가지다.
         //       ⇒ 이 봉합이 실제로 한 일은 **"브라우저가 스스로 붙인 UA 가 PC 라고 말하는데 화면만
         //         mobile 이라 신고하는" 경로를 닫은 것**이다. 그것 하나다.
@@ -599,7 +605,11 @@ public class AuthService : IAuthService
         //     한 번 실패하면 **행은 없는데 `sid` 는 실린 토큰**이 나가고, `SessionValidityMiddleware`
         //     가 그 번호로 행을 못 찾아 **모든 요청을 401 로 끊는다.** 화면의 자동 재발급이 다시
         //     `/refresh` 를 불러 같은 상태를 재생산한다 — 회복은 재로그인뿐이다.
-        //     ⇒ 로그인 경로(`:160·166`)와 **똑같이** 순서를 뒤집었다: 넣기를 먼저, **성공했을 때만** 싣는다.
+        //     ⇒ 로그인 경로(`LoginAsync` 의 `InsertSessionAsync(...)` 호출 → 그 바로 뒤
+        //       `CreateLoginResponse(..., sessionRecorded ? sessionId : null)`)와 **똑같이** 순서를 뒤집었다:
+        //       넣기를 먼저, **성공했을 때만** 싣는다.
+        //       🔴 5차 — 여기 적혀 있던 `:160·166` 은 2차가 주석 12줄을 얹어 **커밋 순간 어긋났다**
+        //         ([4] R-7 실측: 실제는 `:172·178`). 줄번호 대신 함수·식 이름으로 가리킨다.
         //     🔴 전결 §2 는 *"두 자리를 같이 막아야 닫힌다"* 였는데 로그인 한쪽만 닫혀 있었다.
         //
         //   ⚠️ **트랜잭션 경계는 건드리지 않았다.** 아래 refresh_tokens 회전 트랜잭션(`BeginTransaction`)
@@ -660,7 +670,9 @@ public class AuthService : IAuthService
             sessionRecorded = await InsertSessionAsync(conn, sessionId!, user, refreshDeviceKind);
         }
 
-        // 🔴 세션 기록이 실패했으면 `sid` 를 **싣지 않는다**(D-2 · 로그인 경로 `:166` 과 같은 취급).
+        // 🔴 세션 기록이 실패했으면 `sid` 를 **싣지 않는다**(D-2 · `LoginAsync` 의
+        //   `CreateLoginResponse(..., sessionRecorded ? sessionId : null)` 과 **같은 취급**).
+        //   🔴 5차 — 여기 적혀 있던 `:166` 도 2차 주석에 밀렸다([4] R-7). 식 이름으로 가리킨다.
         //   `sid` 없는 토큰은 미들웨어가 종전처럼 통과시킨다(옛 토큰 호환 경로 · 작지 §3 금지 #1b).
         var response = CreateLoginResponse(
             user, employee, secret, redirectToWelcome: false, sessionRecorded ? sessionId : null);
@@ -679,17 +691,47 @@ public class AuthService : IAuthService
         //   401 경쟁에서 사용한 토큰만 정확히 소비하기 위함이지 멀티기기 동시 세션을 의도한 것은 아니다).
         //   봉합 (2026-06-20, 3차 전수조사 후속): EF/Dapper 가 커넥션을 암묵적으로 닫아둔 상태면
         //   BeginTransaction 이 "open and available Connection" 예외로 터진다. 명시적으로 먼저 연다.
-        if (conn.State != System.Data.ConnectionState.Open)
+        // ── 🔴 세 번째 실패 경로도 보상으로 감싼다 (20260927작2 **5차** · [4] R-2 · PM 결재) ─────────
+        //
+        //   [무엇이 틀렸나] 3차는 *"회전 실패 경로는 단일사용 거부 401 과 그 밖의 예외 **둘뿐**"* 이라
+        //     단정했다. **거짓이었다.** 바로 위 주석이 과거 실제 사고로 기록한 그대로,
+        //     **연결 열기(`OpenAsync`)와 `conn.BeginTransaction()` 자체가 터질 수 있고** 그 두 줄은
+        //     `try` **밖**이었다. 거기서 터지면 방금 넣은 세션 행이 **보상 없이 만료까지 남는다** —
+        //     3차가 닫았다고 적은 그 구멍이 **한 갈래 그대로 열려 있었다**(#42 거짓봉합 경계).
+        //
+        //   ⇒ 이 두 줄만 `try` 로 감싸 **보상 호출 자리를 하나 늘린다.**
+        //   🔴 트랜잭션 구조는 새로 짜지 않는다 — 범위를 넓히지 않고 `BeginTransaction` 결과를
+        //     그대로 아래 `using` 에 넘긴다(아래 `catch` 두 곳은 손대지 않았다).
+        //   🔴 **원인 예외는 그대로 전파**한다(`throw;`) — 보상 때문에 원인이 바뀌면
+        //     다음 사람이 엉뚱한 곳을 본다(3차가 스스로 적은 위험).
+        //   🔴 이어받은 세션(`isNewSession == false`)은 여기서도 **건드리지 않는다** —
+        //     인자가 `null` 이 되어 `CompensateNewSessionRowAsync` 첫 줄이 즉시 반환한다.
+        //   ⚠️ 한계를 적는다 — 연결이 상한 원인이었다면 보상 `DELETE` 자체도 실패한다.
+        //     그때는 삼키고 남은 세션 번호를 로그에 적는다(#15 · [4] R-6 과 같은 한계).
+        System.Data.IDbTransaction tx;
+        try
         {
-            if (conn is System.Data.Common.DbConnection dbConn)
+            if (conn.State != System.Data.ConnectionState.Open)
             {
-                await dbConn.OpenAsync(ct).ConfigureAwait(false);
+                if (conn is System.Data.Common.DbConnection dbConn)
+                {
+                    await dbConn.OpenAsync(ct).ConfigureAwait(false);
+                }
+                else
+                {
+                    conn.Open();
+                }
             }
-            else
-            {
-                conn.Open();
-            }
+            tx = conn.BeginTransaction();
         }
+        catch (Exception)
+        {
+            await CompensateNewSessionRowAsync(
+                conn, user, isNewSession && sessionRecorded ? sessionId : null,
+                "회전 준비 중 예외(연결 열기·트랜잭션 시작)");
+            throw;   // 원인 예외 그대로 — 보상은 흔적을 지우는 일이지 원인을 바꾸는 일이 아니다.
+        }
+
         // ── 보상 삭제로 감싼다 (20260927작2 **3차** · 2차 개발명세서 §7 위험 · PM 결재) ──────────
         //
         //   🔴 [무엇이 위험했나] 2차에서 세션 INSERT 를 이 트랜잭션 **앞**으로 올렸다 — `sid` 를 실을지
@@ -702,8 +744,14 @@ public class AuthService : IAuthService
         //   🔴 이어받은 세션(`isNewSession == false`)은 **건드리지 않는다.** 이 호출이 만든 행이 아니고,
         //     지우면 **일하고 있는 PC 를 갱신 실패 한 번으로 끊는다.**
         //   🔴 트랜잭션 안으로 넣지 않는다 — 부르는 자리는 **롤백이 끝난 뒤**의 `catch` 두 곳이다.
-        //     (회전 실패 경로는 그 둘뿐이다: 단일사용 거부 401 · 그 밖의 예외)
-        using (var tx = conn.BeginTransaction())
+        //   ⬛ [낡은 줄 · 3차] *"(회전 실패 경로는 그 둘뿐이다: 단일사용 거부 401 · 그 밖의 예외)"*
+        //     — **틀렸다**([4] R-2). 세 번째가 있었다: **연결 열기·`BeginTransaction` 자체의 예외**.
+        //     그 둘은 `try` 밖이라 보상이 한 번도 안 불렸다.
+        //   🔴 [정확한 서술 · 5차] 회전 실패 경로는 **셋**이고, 셋 모두 보상을 부른다:
+        //     ① 단일사용 거부 401(`deleted == 0`) — 아래 `catch (UnauthorizedAccessException)`
+        //     ② 회전 SQL 중 그 밖의 예외 — 아래 `catch (Exception)`
+        //     ③ **회전 준비**(연결 열기·`BeginTransaction`) 중 예외 — **위 블록에서 5차에 함께 막았다**
+        using (tx)
         {
             try
             {

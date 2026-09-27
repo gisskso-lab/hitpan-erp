@@ -24,7 +24,10 @@ namespace HitPan.Tests.Integrity;
 
 /// <summary>
 /// 🔴 <b>G-B1 ~ G-B15</b> — 축 B 봉합이 <b>동작으로</b> 성립하는가
-/// (20260927작2 절I · <b>3차</b>에서 G-B13 추가 · <b>4차</b>에서 G-B14·G-B15 추가 + <b>G-B4 기대값 뒤집힘</b>).
+/// (20260927작2 절I · <b>3차</b>에서 G-B13 추가 · <b>4차</b>에서 G-B14·G-B15 추가 + <b>G-B4 기대값 뒤집힘</b>
+/// · <b>5차</b>에서 <b>G-B13b 를 재설계</b>(봉합을 한 줄도 안 재고 있었다 — [4] R-1)하고 <b>G-B13c 추가</b>).
+/// 🔴 5차 — 이 파일의 음성 대조군 서술에서 <b>줄번호 참조를 걷어냈다</b>([4] R-7).
+/// 참조는 <b>함수·식 이름</b>으로 적는다 — 주석 한 줄만 얹혀도 줄번호는 커밋 순간 어긋난다.
 /// </summary>
 /// <remarks>
 /// <para>
@@ -343,7 +346,9 @@ public sealed class SessionRecordConcurrentPcGateTests : IDisposable
     /// [4] 반려 F-4 — 판정 근거가 <b>클라이언트 자진신고 한 칸</b>이라 화면에서 <c>"mobile"</c> 이라고
     /// 보내면 축 B 차단을 그대로 빠져나갔다.
     /// <para>
-    /// 🔴 음성 대조군 — <c>AuthService.cs:122</c> 를 신고값 단독 판정(옛 <c>NormalizeDeviceKind</c> 식)으로
+    /// 🔴 음성 대조군 — <c>LoginAsync</c> 의
+    /// <c>DeviceTypeResolver.ResolveDeviceType(request.DeviceType, request.UserAgent)</c> 한 줄을
+    /// 신고값 단독 판정(옛 <c>NormalizeDeviceKind</c> 식)으로
     /// 되돌리면 <c>'mobile'</c> 이 적혀 FAIL 한다. 그 <b>판정축이 실제로 갈라지는지</b>는
     /// DB 없이도 재진다 — <c>G_B1c</c> 참조.
     /// </para>
@@ -405,7 +410,7 @@ public sealed class SessionRecordConcurrentPcGateTests : IDisposable
     /// 🔴 <b>이 트랙이 존재하는 이유 그 자체다.</b> 세는 곳·지우는 곳은 있는데 <b>넣는 코드가 0건</b>이라
     /// 표가 늘 비어 있었고, 동시접속 제한이 한 번도 걸린 적이 없었다.
     /// <para>
-    /// 🔴 음성 대조군 — <c>AuthService.cs:160</c> 의 <c>InsertSessionAsync(...)</c> <b>호출 줄을 주석</b>하면
+    /// 🔴 음성 대조군 — <c>LoginAsync</c> 의 <c>InsertSessionAsync(...)</c> <b>호출 줄을 주석</b>하면
     /// 0건이 되어 FAIL 한다. <b>종전 게이트는 이 자리를 못 잡았다</b>(자기가 쓴 INSERT 를 자기가 돌렸으므로).
     /// </para>
     /// </remarks>
@@ -437,7 +442,7 @@ public sealed class SessionRecordConcurrentPcGateTests : IDisposable
     /// <remarks>
     /// <c>LoginRequest</c> 가 <c>[FromBody]</c> 라 클라이언트가 <c>userAgent</c> 를 본문에 실을 수 있다.
     /// 컨트롤러가 <b>덮어쓰지 않으면</b> 자진신고 칸이 하나 더 생겨 8/18 V-05 가 무력해진다.
-    /// <para>🔴 음성 대조군 — <c>AuthController.cs:60</c> 의
+    /// <para>🔴 음성 대조군 — <c>AuthController.Login</c> 의
     /// <c>request.UserAgent = Request.Headers["User-Agent"]…</c> <b>덮어쓰기 줄을 제거</b>하면
     /// 본문값이 이겨 <c>'mobile'</c> 이 적혀 FAIL 한다.</para>
     /// <para>
@@ -710,7 +715,8 @@ public sealed class SessionRecordConcurrentPcGateTests : IDisposable
     /// </summary>
     /// <remarks>
     /// 행이 없는데 번호를 실으면 미들웨어가 못 찾아 <b>모든 요청이 401</b> 이 된다([4] 반려 F-1).
-    /// <para>🔴 음성 대조군 — <c>AuthService.cs:166</c> 의 <c>sessionRecorded ? sessionId : null</c> 을
+    /// <para>🔴 음성 대조군 — <c>LoginAsync</c> 의
+    /// <c>CreateLoginResponse(..., sessionRecorded ? sessionId : null)</c> 을
     /// 항상 <c>sessionId</c> 로 되돌리면 <c>sid</c> 가 실려 FAIL 한다.</para>
     /// <para>
     /// ⚠️ 표를 치워 실패를 만든다 — <b>옛 고객 DB(마이그 미적용)와 같은 모양</b>이고,
@@ -822,7 +828,8 @@ public sealed class SessionRecordConcurrentPcGateTests : IDisposable
     /// <remarks>
     /// [4] 반려 F-5 — 로그아웃이 <c>WHERE user_id</c> 로 <b>전삭</b>해서, 휴대폰에서 로그아웃하면
     /// <b>일하던 컴퓨터가 401</b> 로 끊겼다. 모바일은 FREE 이고 PC 와 동시 접속이 허용된다(9/25 결재).
-    /// <para>🔴 음성 대조군 — <c>AuthController.cs:389</c> 의 <c>WHERE session_id</c> 를
+    /// <para>🔴 음성 대조군 — <c>AuthController</c> 로그아웃의
+    /// <c>DELETE FROM user_sessions WHERE session_id = @Sid</c> 를
     /// <c>WHERE user_id</c> 로 되돌리면 PC 행이 사라져 FAIL 한다.</para>
     /// <para>⚠️ 두 세션 모두 <b>운영 로그인</b>으로 만든다 — 시험이 행을 심으면 무엇을 쟀는지 증명되지 않는다.</para>
     /// </remarks>
@@ -1095,7 +1102,15 @@ public sealed class SessionRecordConcurrentPcGateTests : IDisposable
     /// <para>
     /// 🔴 <b>음성 대조군</b> — <c>AuthService</c> 회전 <c>catch</c> 두 곳의
     /// <c>CompensateNewSessionRowAsync</c> 호출을 지우면 행이 <b>1건 남아 FAIL</b> 한다.
-    /// (실제로 지워 FAIL 을 확인한 기록은 개발명세서 §4 에 있다.)
+    /// ⬛ [낡은 줄 · 3차] *"(실제로 지워 FAIL 을 확인한 기록은 개발명세서 §4 에 있다.)"*
+    /// — **거짓이었다**([4] R-8). 같은 차수 개발명세서 §1 은 그 항목을 <c>⚠️미계측 · "못 했다"</c> 로
+    /// 적고 있었다. 주석이 문서와 정면 충돌한 것이다(#42).
+    /// 🔴 [정확한 서술 · 5차] 이 게이트는 <b>기본 설정에서는 CI <c>db-gate</c> 잡에서만 계측된다.</b>
+    /// 개발 PC 는 시험이 쓰는 임시 DB 이름에 <c>CREATE DATABASE</c> 가 거부돼
+    /// (<c>hitpan</c> 1044 · <c>root</c> 1045) <c>[SKIP]</c> 이다 —
+    /// <b>로컬 초록불을 이 게이트의 통과로 읽지 마라.</b>
+    /// 음성 대조군의 FAIL 확인 기록은 <b>그것을 실제로 잰 차수의 개발명세서</b>에만 있다
+    /// (3차 명세서 §4 에는 없다 · 5차 명세서 §4 에 로그가 있다).
     /// </para>
     /// </remarks>
     [Fact]
@@ -1136,39 +1151,158 @@ public sealed class SessionRecordConcurrentPcGateTests : IDisposable
     }
 
     /// <summary>
-    /// 🔴 <b>G-B13b</b> — 보상 삭제가 <b>이어받은 세션은 건드리지 않는다</b>.
+    /// 🔴🔴 <b>G-B13b</b> — 회전이 <b>트랜잭션 안에서</b> 401(단일사용 거부)로 실패했을 때,
+    /// 보상 삭제가 <b>함께 살아 있는 세션 행은 건드리지 않는다</b>(과잉 봉합 방지).
     /// </summary>
     /// <remarks>
-    /// 🔴 잔여 행을 없애려고 <c>user_id</c> 를 전삭하거나 이어받은 세션까지 지우면,
-    /// <b>일하고 있는 PC 가 갱신 실패 한 번으로 끊긴다</b>(#20 흐름은 안 끊긴다).
-    /// 이 시험은 그 과잉 봉합을 막는다 — 같은 회전 실패인데 <b>행이 살아 있어야</b> 한다.
+    /// <para>
+    /// ⬛ <b>[낡은 시험 · 3차 — 원문 그대로]</b> *"정상 로그인 → <c>StealRefreshToken</c>(refresh_tokens 전삭)
+    /// → 갱신 401 → <c>Assert.Contains("로그아웃된", ex.Message)</c> → 이어받은 세션이 살아 있다"*.
+    /// 🔴 <b>그 시험은 봉합을 한 줄도 재지 않았다</b>([4] R-1). 그 401 은 <c>RefreshAsync</c> 의
+    /// <b>회전 전</b> 확인(<i>"로그아웃된 토큰입니다"</i>)에서 나오고, 그 자리는
+    /// <c>conn.BeginTransaction()</c> <b>앞</b>이다 ⇒ <c>CompensateNewSessionRowAsync</c> 는 <b>0회</b> 불렸다.
+    /// PM 음성대조군 ②에서 보상을 무력화했는데도 이 시험이 <b>PASS</b> 한 것이 그 증거다.
+    /// <b>봉합을 지워도 통과하는 시험은 봉합을 재지 않는다.</b>
+    /// </para>
+    /// <para>
+    /// 🔴 <b>"이어받은 세션 그 자체" 로는 음성 대조군이 성립하지 않는다 — 구조상이다.</b>
+    /// 보상 인자는 <c>isNewSession &amp;&amp; sessionRecorded ? sessionId : null</c> 이다.
+    /// 이어받은 갱신(<c>isNewSession == false</c>)은 인자가 <b>항상 <c>null</c></b> 이고
+    /// <c>CompensateNewSessionRowAsync</c> 첫 줄이 즉시 반환한다 ⇒ helper 안의
+    /// <c>WHERE session_id</c> 를 <c>WHERE user_id</c> 로 바꿔도 <b>그 시나리오는 결과가 안 바뀐다.</b>
+    /// ⇒ 과잉 봉합이 실제로 드러나는 모양은 <b>보상이 실제로 도는 갱신</b>(새 세션을 만든 갱신)에
+    /// <b>같은 계정의 다른 살아 있는 세션</b>이 공존할 때다. 이 시험이 재는 것은 그것이다.
+    /// </para>
+    /// <para>
+    /// 🔴 <b>음성 대조군</b> — <c>CompensateNewSessionRowAsync</c> 의
+    /// <c>WHERE session_id = @SessionId</c> 를 <c>WHERE user_id = @UserId</c>(전삭)로 바꾸면
+    /// <b>일하고 있는 PC 의 행까지 사라져 FAIL</b> 한다(#20 흐름은 안 끊긴다).
+    /// 🟢 <b>5차에 실제로 넣어 FAIL 을 확인했다</b>(1 FAIL / 2 PASS · 로그는 5차 개발명세서 §4).
+    /// ⚠️ 평소 개발 PC 에서는 <c>[SKIP]</c> 이다 — 기본 계측 경로는 CI <c>db-gate</c> 잡이다.
+    /// </para>
     /// </remarks>
     [Fact]
-    public async Task G_B13b_회전이_실패해도_이어받은_세션은_지우지_않는다()
+    public async Task G_B13b_회전_401_보상이_함께_살아있는_세션은_지우지_않는다()
     {
-        if (!ServerAvailable() && DbGateEnvironment.SkipOrFail("G-B13b 이어받은 세션 보존")) return;
+        if (!ServerAvailable() && DbGateEnvironment.SkipOrFail("G-B13b 보상 과잉 방지")) return;
         SetUpFreshInstall();
 
         var (svc, db) = NewAuthService();
         using (db)
         {
-            // 정상 로그인 — `sid` 가 실린다(= 갱신이 이어받는 세션).
-            var first = await svc.LoginAsync(NewLoginRequest("pc", WindowsUa));
-            var sid = SidOf(first);
-            Assert.NotNull(sid);
+            // ① 일하고 있는 PC — 정상 로그인. 이 행은 **끝까지 살아 있어야** 한다.
+            var working = await svc.LoginAsync(NewLoginRequest("pc", WindowsUa));
+            var workingSid = SidOf(working);
+            Assert.NotNull(workingSid);
             Assert.Equal(1, SessionCount(db));
 
-            // 남이 그 토큰을 먼저 써 버렸다 — 회전은 401 이다(세션 INSERT 는 아예 없다).
-            StealRefreshToken(db);
+            // ② 옛 토큰 모양(`sid` 없음)을 **운영 경로로** 하나 더 만든다 — 이 토큰의 갱신이 새 세션을 만든다.
+            //    ⚠️ 축 B 기본값은 꺼짐이라(tenant_settings 행 없음 → `?? 0`) 두 번째 `pc` 로그인이
+            //      일하는 PC 를 밀어내지 않는다. 그것이 출하 기본 상태다(§2-3).
+            HideSessionTable(db);
+            var old = await svc.LoginAsync(NewLoginRequest("pc", WindowsUa));
+            Assert.Null(SidOf(old));
+            RestoreSessionTable(db);
+            Assert.Equal(1, SessionCount(db));   // 출발선: 일하는 PC 의 행 하나뿐
 
-            var ex = await Assert.ThrowsAsync<UnauthorizedAccessException>(
-                () => svc.RefreshAsync(
-                    new RefreshTokenRequest { RefreshToken = first.RefreshToken, UserAgent = WindowsUa }));
-            Assert.Contains("로그아웃된", ex.Message);   // 이 경로는 회전 전 확인에서 걸린다
+            // ③ 세션 INSERT 가 끝나는 순간 회전이 실패하게 만든다(G-B13 과 같은 결정적 경주).
+            StealRefreshTokenWhenSessionInserted(db);
+            try
+            {
+                var ex = await Assert.ThrowsAsync<UnauthorizedAccessException>(
+                    () => svc.RefreshAsync(
+                        new RefreshTokenRequest { RefreshToken = old.RefreshToken, UserAgent = WindowsUa }));
 
-            // 🔴 일하고 있는 PC 의 세션은 그대로다.
+                // 🔴 **트랜잭션 안**에서 터진 그 401 인가 — 회전 전 확인("로그아웃된")이면
+                //   보상 호출에 닿지도 못한다. 3차 시험이 정확히 그래서 아무것도 재지 않았다.
+                Assert.Contains("이미 사용된", ex.Message);
+                Assert.DoesNotContain("로그아웃된", ex.Message);
+            }
+            finally
+            {
+                DropSessionInsertTrigger(db);   // 확인 조회가 트리거에 걸리지 않게 먼저 뗀다
+            }
+
+            // ④ 🔴 본체 — 보상은 **자기가 만든 행 하나만** 지웠다. 일하는 PC 는 그대로다.
             Assert.Equal(1, SessionCount(db));
-            Assert.True(IsAlive(db, sid!), "갱신이 실패했다고 이어받은 세션을 지웠다 — 일하는 PC 를 끊는다(#20).");
+            Assert.True(IsAlive(db, workingSid!),
+                "보상 삭제가 일하고 있는 PC 의 세션까지 지웠다 — 갱신 실패 한 번으로 남을 끊는다(#20).");
+        }
+    }
+
+    /// <summary>
+    /// 🔴🔴 <b>G-B13c</b> — <b>회전 준비</b>(연결 열기·<c>BeginTransaction</c>)가 터져도
+    /// 그 갱신이 방금 만든 <c>user_sessions</c> 행이 <b>남지 않는다</b> (5차 · [4] R-2 세 번째 경로).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// [무엇을 막는 게이트인가] 3차는 회전 실패 경로가 <i>"둘뿐"</i> 이라 적고 <c>catch</c> 두 곳만 감쌌다.
+    /// 그런데 <c>OpenAsync</c> 와 <c>conn.BeginTransaction()</c> 은 <b><c>try</c> 밖</b>이었다.
+    /// 🔴 가상 위험이 아니다 — 운영 코드의 바로 위 주석이 <i>"EF/Dapper 가 커넥션을 암묵적으로 닫아둔
+    /// 상태면 BeginTransaction 이 'open and available Connection' 예외로 터진다"</i> 를
+    /// <b>과거 실제 사고</b>로 기록하고 있다.
+    /// </para>
+    /// <para>
+    /// 🔴 <b>왜 결함 주입인가</b> — <c>BeginTransaction</c> 을 DB 상태만으로 결정적으로 터뜨릴 방법이 없다.
+    /// ⇒ <c>BeginTransactionFailingConnection</c> 이 <b>그 한 동작만</b> 던지고 나머지는 실제
+    /// <c>MySqlConnection</c> 에 그대로 넘긴다. SQL 은 전부 실제 DB 에 간다 —
+    /// ⚠️ 이것은 <b>상태 만들기</b>다. 판정(행이 남았나)은 운영 코드와 실제 표가 한다.
+    /// </para>
+    /// <para>
+    /// 🔴 <b>양성 조건</b>을 함께 잰다 — 세션 INSERT 가 <b>실제로 돌았는지</b>를
+    /// <c>AFTER INSERT</c> 트리거의 흔적으로 확인한다. 그러지 않으면 INSERT 가 아예 안 돌아도
+    /// <c>0 == 0</c> 으로 통과한다(빈 통과).
+    /// </para>
+    /// <para>
+    /// 🔴 <b>음성 대조군</b> — <c>AuthService</c> 의 <b>회전 준비 <c>try/catch</c></b>(5차 신설)를 지우면
+    /// 세션 행이 <b>1건 남아 FAIL</b> 한다. 또 그 <c>catch</c> 의 <c>throw;</c> 를 빼면
+    /// <b>원인 예외가 사라져</b> 아래 <c>ThrowsAsync&lt;InvalidOperationException&gt;</c> 가 FAIL 한다.
+    /// 🟢 <b>5차에 앞의 것을 실제로 지워 FAIL 을 확인했다</b>(1 FAIL / 2 PASS · 로그는 5차 개발명세서 §4).
+    /// ⚠️ 평소 개발 PC 에서는 <c>[SKIP]</c> 이다 — 기본 계측 경로는 CI <c>db-gate</c> 잡이다.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public async Task G_B13c_회전_준비가_터져도_갱신이_만든_세션_행이_남지_않는다()
+    {
+        if (!ServerAvailable() && DbGateEnvironment.SkipOrFail("G-B13c 회전 준비 실패 보상")) return;
+        SetUpFreshInstall();
+
+        var (svc, db) = NewAuthService();
+        using (db)
+        {
+            // ① 옛 토큰 모양(`sid` 없음)을 운영 경로로 만든다 — 갱신이 새 세션을 만드는 조건.
+            HideSessionTable(db);
+            var old = await svc.LoginAsync(NewLoginRequest("pc", WindowsUa));
+            Assert.Null(SidOf(old));
+            RestoreSessionTable(db);
+            Assert.Equal(0, SessionCount(db));   // 출발선: 세션 행이 없다
+
+            // ② 같은 DB 에, `BeginTransaction` 만 터지는 연결로 운영 서비스를 한 번 더 세운다.
+            var faulty = new BeginTransactionFailingConnection(
+                db, "The Connection property has not been initialized. [게이트 주입 G-B13c]");
+            var faultySvc = new AuthService(new GateUnitOfWork(faulty), new GateUserLookup(_user));
+
+            MarkSessionInsert(db);   // 양성 조건 — INSERT 가 실제로 돌았는지 흔적을 남긴다
+            try
+            {
+                var ex = await Assert.ThrowsAsync<InvalidOperationException>(
+                    () => faultySvc.RefreshAsync(
+                        new RefreshTokenRequest { RefreshToken = old.RefreshToken, UserAgent = WindowsUa }));
+
+                // 🔴 원인 예외가 **그대로** 왔다 — 보상이 401/500 으로 바꿔치지 않았다.
+                Assert.Contains("게이트 주입 G-B13c", ex.Message);
+                Assert.Equal(1, faulty.BeginAttempts);
+            }
+            finally
+            {
+                DropSessionInsertMarker(db);
+            }
+
+            // ③ 양성 조건 — 세션 INSERT 는 실제로 돌았다(빈 통과가 아니다).
+            Assert.Equal(1, AlertCount(db, "gate_b13c_session_inserted"));
+
+            // ④ 🔴 본체 — 주인 없는 세션 행이 남지 않았다.
+            Assert.Equal(0, SessionCount(db));
         }
     }
 
@@ -1256,9 +1390,84 @@ public sealed class SessionRecordConcurrentPcGateTests : IDisposable
     private static void DropSessionInsertTrigger(IDbConnection db) =>
         db.Execute("DROP TRIGGER IF EXISTS gate_b13_steal_token");
 
-    /// <summary>준비 (G-B13b) — 남이 이 계정의 refresh 토큰을 이미 소비한 상태.</summary>
+    /// <summary>준비 — 남이 이 계정의 refresh 토큰을 이미 소비한 상태(회전 <b>전</b> 확인에서 걸리는 모양).</summary>
+    /// <remarks>
+    /// ⚠️ 5차 — G-B13b 는 이 헬퍼를 더 쓰지 않는다. 이것이 만드는 401 은 <c>BeginTransaction</c> 앞에서
+    /// 나므로 <b>보상 호출에 닿지 못한다</b>([4] R-1). 남겨 두는 이유는 <i>"회전 전 확인"</i> 이라는
+    /// 다른 상태가 필요한 게이트가 생길 때를 위한 것이고, <b>보상 계측에는 쓰면 안 된다.</b>
+    /// </remarks>
     private static void StealRefreshToken(IDbConnection db) =>
         db.Execute("DELETE FROM refresh_tokens WHERE user_id = @UserId", new { UserId });
+
+    /// <summary>
+    /// 준비 (G-B13c) — 세션 INSERT 가 <b>실제로 돌았다</b>는 흔적을 <c>security_alerts</c> 에 남긴다.
+    /// </summary>
+    /// <remarks>
+    /// 🔴 <b>양성 조건 확인용</b>이다. 보상이 지운 뒤에는 행이 없으므로, 흔적이 없으면
+    /// <i>"INSERT 가 아예 안 돌았다"</i> 와 <i>"돌았고 보상이 지웠다"</i> 를 가를 수 없다 —
+    /// 그러면 <c>0 == 0</c> 인 <b>빈 통과</b>가 된다.
+    /// ⚠️ 이것은 상태 만들기·기록이다. 판정은 시험 본문이 한다.
+    /// (컬럼은 출하 DDL 실측 — <c>alert_id</c>·<c>alert_type</c> 만 NOT NULL, 나머지는 기본값 · #13)
+    /// </remarks>
+    private static void MarkSessionInsert(IDbConnection db) =>
+        db.Execute(
+            @"CREATE TRIGGER gate_b13c_mark_insert AFTER INSERT ON user_sessions FOR EACH ROW
+                INSERT INTO security_alerts (alert_id, tenant_id, user_id, alert_type, description)
+                VALUES (UUID(), NEW.tenant_id, NEW.user_id, 'gate_b13c_session_inserted', NEW.session_id)");
+
+    private static void DropSessionInsertMarker(IDbConnection db) =>
+        db.Execute("DROP TRIGGER IF EXISTS gate_b13c_mark_insert");
+
+    /// <summary>
+    /// 준비 (G-B13c) — <c>BeginTransaction</c> <b>한 동작만</b> 터지는 연결. 나머지는 실제 연결에 넘긴다.
+    /// </summary>
+    /// <remarks>
+    /// 🔴 <b>왜 이것이 "가짜" 가 아닌가</b> — SQL·표·트랜잭션 의미는 전부 실제 MariaDB 가 처리한다.
+    /// 이 래퍼가 하는 일은 <b>고장 하나를 결정적으로 재현</b>하는 것뿐이다
+    /// (운영 주석이 기록한 <i>"open and available Connection"</i> 사고 모양).
+    /// 판정(<i>세션 행이 남았나</i>)은 운영 코드와 실제 표가 한다 — 이 파일의 규칙 그대로다.
+    /// ⚠️ <c>DbConnection</c> 을 상속해야 한다 — <c>IUnitOfWork.GetDbConnection()</c> 의 반환형이고,
+    /// Dapper 의 비동기 경로도 <c>DbConnection</c>·<c>DbCommand</c> 를 요구한다.
+    /// </remarks>
+    private sealed class BeginTransactionFailingConnection : DbConnection
+    {
+        private readonly MySqlConnection _inner;
+        private readonly string _message;
+
+        public BeginTransactionFailingConnection(MySqlConnection inner, string message)
+        {
+            _inner = inner;
+            _message = message;
+        }
+
+        /// <summary>운영 코드가 <c>BeginTransaction</c> 을 <b>몇 번 시도했나</b>(양성 조건 확인).</summary>
+        public int BeginAttempts { get; private set; }
+
+        // ⚠️ 기반 클래스의 setter 가 [AllowNull] 이다 — 같이 붙이지 않으면 CS8765 (#19 경고 0).
+        [System.Diagnostics.CodeAnalysis.AllowNull]
+        public override string ConnectionString
+        {
+            get => _inner.ConnectionString;
+            set => _inner.ConnectionString = value!;
+        }
+
+        public override string Database => _inner.Database;
+        public override string DataSource => _inner.DataSource;
+        public override string ServerVersion => _inner.ServerVersion;
+        public override ConnectionState State => _inner.State;
+
+        public override void ChangeDatabase(string databaseName) => _inner.ChangeDatabase(databaseName);
+        public override void Close() => _inner.Close();
+        public override void Open() => _inner.Open();
+
+        protected override DbCommand CreateDbCommand() => _inner.CreateCommand();
+
+        protected override DbTransaction BeginDbTransaction(IsolationLevel isolationLevel)
+        {
+            BeginAttempts++;
+            throw new InvalidOperationException(_message);
+        }
+    }
 
     /// <summary>
     /// 준비 — <b>밀어내기로 지워진</b> PC1 의 행을 <b>만료된 채로</b> 되돌려 놓는다 (F-6 재현).
