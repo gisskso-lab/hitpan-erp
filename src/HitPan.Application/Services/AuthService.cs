@@ -381,6 +381,10 @@ public class AuthService : IAuthService
     private static async Task CompensateNewSessionRowAsync(
         System.Data.IDbConnection db, User user, string? sessionIdCreatedHere, string reason)
     {
+        // ⚠️ 계측용 음성 대조군 (20260927 · 머지 금지) — 보상 삭제를 무력화한다.
+        //   G-B13 이 「회전 401 뒤에 세션 행이 남지 않는다」를 실제로 재는지 CI 에서 확인한다.
+        if (user is not null) { await Task.CompletedTask; return; }
+
         if (string.IsNullOrWhiteSpace(sessionIdCreatedHere)) return;   // 이어받은 세션·기록 실패 — 지울 것이 없다
 
         try
