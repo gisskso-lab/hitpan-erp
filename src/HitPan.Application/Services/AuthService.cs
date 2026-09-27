@@ -711,16 +711,23 @@ public class AuthService : IAuthService
         System.Data.IDbTransaction tx;
         try
         {
+            // 🔴 6차 — 열기를 **한 갈래**로 정리했다([4] V-1 · CI CodeQL error).
+            //   ⬛ [낡은 줄 · 5차] `if (conn is System.Data.Common.DbConnection dbConn) { await dbConn.OpenAsync(ct); }
+            //     else { conn.Open(); }`
+            //   [왜 지웠나] `IUnitOfWork.GetDbConnection()` 의 반환형이 **이미 `DbConnection`** 이다
+            //     (`IUnitOfWork.cs` · `DbConnection GetDbConnection();`) ⇒ `is DbConnection` 은 항상 참이고
+            //     `else` 가지는 `conn == null` 일 때만 닿는데, 그때는 바로 위 `conn.State` 가 먼저 터진다.
+            //     **죽은 가지**라서 CodeQL 이 *"Variable conn is always null at this dereference"* 를
+            //     **error** 로 올렸다(4차 커밋은 success → 5차가 이 줄을 `try` 안으로 옮겨 새 경고로 집계됐다).
+            //   🔴 **동작은 그대로다** — 닫힌 연결을 여는 일 자체는 남긴다. 과거 실제 사고
+            //     (*"open and available Connection"* · 위 주석)를 막는 것이 이 두 줄의 목적이고,
+            //     그 목적은 `State` 검사 + `OpenAsync` 한 갈래로 온전히 유지된다.
+            //   ⚠️ 이 모양은 **다른 자리에도 많다**(`AuthController` 4곳 · `SessionValidityMiddleware` 등).
+            //     그쪽은 DI 가 `System.Data.IDbConnection` 으로 꺼내므로 `is DbConnection` 이 **실재 검사**다
+            //     — 죽은 가지가 아니라서 **건드리지 않았다**(6차 범위 밖 · 명세서 §3-1 목록).
             if (conn.State != System.Data.ConnectionState.Open)
             {
-                if (conn is System.Data.Common.DbConnection dbConn)
-                {
-                    await dbConn.OpenAsync(ct).ConfigureAwait(false);
-                }
-                else
-                {
-                    conn.Open();
-                }
+                await conn.OpenAsync(ct).ConfigureAwait(false);
             }
             tx = conn.BeginTransaction();
         }

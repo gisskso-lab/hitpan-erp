@@ -25,7 +25,10 @@ namespace HitPan.Tests.Integrity;
 /// <summary>
 /// 🔴 <b>G-B1 ~ G-B15</b> — 축 B 봉합이 <b>동작으로</b> 성립하는가
 /// (20260927작2 절I · <b>3차</b>에서 G-B13 추가 · <b>4차</b>에서 G-B14·G-B15 추가 + <b>G-B4 기대값 뒤집힘</b>
-/// · <b>5차</b>에서 <b>G-B13b 를 재설계</b>(봉합을 한 줄도 안 재고 있었다 — [4] R-1)하고 <b>G-B13c 추가</b>).
+/// · <b>5차</b>에서 <b>G-B13b 를 재설계</b>(봉합을 한 줄도 안 재고 있었다 — [4] R-1)하고 <b>G-B13c 추가</b>
+/// · <b>6차</b>에서 <b>G-B13d 추가</b> — 결재 조건 「이어받은 세션은 건드리지 않는다」가 5차까지
+/// <b>무계측</b>이었다([4] V-2: 기존 세 게이트는 전부 <c>sid</c> 없는 토큰이라 보호대
+/// <c>isNewSession &amp;&amp;</c> 를 지워도 FAIL 이 0건이었다)).
 /// 🔴 5차 — 이 파일의 음성 대조군 서술에서 <b>줄번호 참조를 걷어냈다</b>([4] R-7).
 /// 참조는 <b>함수·식 이름</b>으로 적는다 — 주석 한 줄만 얹혀도 줄번호는 커밋 순간 어긋난다.
 /// </summary>
@@ -1303,6 +1306,89 @@ public sealed class SessionRecordConcurrentPcGateTests : IDisposable
 
             // ④ 🔴 본체 — 주인 없는 세션 행이 남지 않았다.
             Assert.Equal(0, SessionCount(db));
+        }
+    }
+
+    /// <summary>
+    /// 🔴🔴 <b>G-B13d</b> — <b>이어받은 세션</b>(<c>sid</c> 있는 토큰)의 갱신에서 회전 준비가 터져도
+    /// <b>일하고 있는 그 세션 행은 살아남는다</b> (6차 · [4] V-2 · PM 결재 조건 ②).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// [무엇을 막는 게이트인가] 보상 인자는 <c>isNewSession &amp;&amp; sessionRecorded ? sessionId : null</c> 인데
+    /// <c>sessionRecorded</c> 는 이어받은 경로에서 <b>항상 <c>true</c></b> 로 시작하고
+    /// (<i>"세션 번호를 이어받은 경우는 행이 이미 있다"</i>) <c>sessionId</c> 는 <b>지금 일하고 있는 그 번호</b>다.
+    /// ⇒ <b><c>isNewSession &amp;&amp;</c> 한 조각이 살아 있는 세션을 지키는 유일한 보호대</b>다.
+    /// 그것이 없으면 <b>갱신 실패 한 번이 일하는 PC 를 끊는다</b>(#20) — 결재가
+    /// <i>"과잉 봉합 방지"</i> 로 요구한 바로 그 사고다.
+    /// </para>
+    /// <para>
+    /// 🔴 <b>왜 5차까지 무계측이었나</b> — G-B13·B13b·B13c 는 셋 다 <c>HideSessionTable</c> 로
+    /// <b><c>sid</c> 없는</b> 토큰을 만들어 쓰므로 <b>전부 <c>isNewSession == true</c></b> 다.
+    /// ⇒ 그 조각을 지워도 <b>FAIL 이 0건</b>이었다([4] V-2 실측).
+    /// </para>
+    /// <para>
+    /// ⬛ [낡은 서술 · 5차 개발명세서 §5 #6] <i>"이어받은 경로에는 그 사이에 <c>user_sessions</c> 쓰기가
+    /// 없다 ⇒ 이어받은 갱신 + tx 401 조합은 <b>구조상 결정적 재현 불가</b>"</i> — <b>틀렸다</b>([4] V-2).
+    /// 5차가 스스로 만든 <b>③경로</b>(회전 준비 예외)는 <c>deleted == 0</c> 이 <b>필요 없다.</b>
+    /// <c>sid</c> 있는 토큰 + <c>BeginTransactionFailingConnection</c> 이면 트리거·경주 없이
+    /// 이어받은 세션으로 보상 호출에 그대로 닿는다. <i>"재현 불가"</i> 는 <b>보호대가 작동하는 덕에
+    /// 관측되지 않는다</b>는 순환 논증이었다 — 그 근거를 믿고 게이트를 안 만들면 보호대가 언제 빠져도 모른다.
+    /// </para>
+    /// <para>
+    /// 🔴 <b>양성 조건</b>을 함께 잰다 — ⓐ 토큰에 <c>sid</c> 가 실렸다(= 이어받은 경로다) ·
+    /// ⓑ 회전 준비가 <b>실제로 터졌다</b>(<c>BeginAttempts == 1</c> + 주입 메시지가 그대로 왔다) ·
+    /// ⓒ 갱신이 <b>새 행을 만들지 않았다</b>(행 수가 1 그대로 = <c>isNewSession</c> 이 거짓이었다).
+    /// 그러지 않으면 <i>"보상이 안 불렸다"</i> 와 <i>"애초에 그 경로에 안 갔다"</i> 를 가를 수 없다.
+    /// </para>
+    /// <para>
+    /// 🔴 <b>음성 대조군</b> — <c>AuthService</c> 회전 준비 <c>catch</c> 의 보상 인자에서
+    /// <c>isNewSession &amp;&amp;</c> 를 지우면 <b>일하는 세션 행이 지워져 0건이 되어 FAIL</b> 한다.
+    /// 🟢 <b>6차에 실제로 지워 FAIL 을 확인했다</b>(로그는 6차 개발명세서 §4).
+    /// ⚠️ 평소 개발 PC 에서는 <c>[SKIP]</c> 이다 — 기본 계측 경로는 CI <c>db-gate</c> 잡이다.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public async Task G_B13d_이어받은_세션의_갱신이_터져도_일하는_세션_행은_살아남는다()
+    {
+        if (!ServerAvailable() && DbGateEnvironment.SkipOrFail("G-B13d 이어받은 세션 보호")) return;
+        SetUpFreshInstall();
+
+        var (svc, db) = NewAuthService();
+        using (db)
+        {
+            // ① 일하고 있는 PC — 정상 로그인. 이 토큰에는 `sid` 가 실린다(= 이어받은 갱신 경로).
+            var working = await svc.LoginAsync(NewLoginRequest("pc", WindowsUa));
+            var workingSid = SidOf(working);
+
+            // 양성 조건 ⓐ — `sid` 가 있어야 `isNewSession == false` 다. 없으면 G-B13c 와 같은 것을 재게 된다.
+            Assert.NotNull(workingSid);
+            Assert.Equal(1, SessionCount(db));
+            Assert.True(IsAlive(db, workingSid!));   // 살아 있어야 절C Guard 가 그냥 반환한다
+
+            // ② 같은 DB 에, `BeginTransaction` 만 터지는 연결로 운영 서비스를 한 번 더 세운다.
+            //    ⚠️ 트리거도 경주도 필요 없다 — ③경로는 `deleted == 0` 을 요구하지 않는다([4] V-2).
+            var faulty = new BeginTransactionFailingConnection(
+                db, "The Connection property has not been initialized. [게이트 주입 G-B13d]");
+            var faultySvc = new AuthService(new GateUnitOfWork(faulty), new GateUserLookup(_user));
+
+            // ③ 일하고 있는 그 토큰으로 갱신 → 회전 준비에서 터진다.
+            var ex = await Assert.ThrowsAsync<InvalidOperationException>(
+                () => faultySvc.RefreshAsync(
+                    new RefreshTokenRequest { RefreshToken = working.RefreshToken, UserAgent = WindowsUa }));
+
+            // 양성 조건 ⓑ — 회전 준비가 실제로 터졌고 원인 예외가 그대로 왔다(보상이 바꿔치지 않았다).
+            Assert.Contains("게이트 주입 G-B13d", ex.Message);
+            Assert.Equal(1, faulty.BeginAttempts);
+
+            // ④ 🔴 본체 — 보상이 **일하고 있는 세션을 건드리지 않았다.**
+            //    ⚠️ 이 줄이 ⓒ 보다 **먼저** 와야 한다 — 보호대를 빼면 행이 사라져 행 수도 같이 틀리는데,
+            //      그때 먼저 터지는 것이 행 수라면 실패 메시지가 *"행을 만들었나"* 로 읽혀 원인을 가린다.
+            Assert.True(IsAlive(db, workingSid!),
+                "보상 삭제가 이어받은(일하고 있는) 세션 행을 지웠다 — 갱신 실패 한 번으로 남의 PC 를 끊는다(#20).");
+
+            // 양성 조건 ⓒ — 새 행도 만들지 않았다(= `isNewSession` 이 거짓인 경로를 태웠다).
+            Assert.Equal(1, SessionCount(db));
         }
     }
 
