@@ -23,7 +23,7 @@ using Xunit;
 namespace HitPan.Tests.Integrity;
 
 /// <summary>
-/// 🔴 <b>G-B1 ~ G-B12</b> — 축 B 봉합이 <b>동작으로</b> 성립하는가 (20260927작2 절I).
+/// 🔴 <b>G-B1 ~ G-B13</b> — 축 B 봉합이 <b>동작으로</b> 성립하는가 (20260927작2 절I · <b>3차</b>에서 G-B13 추가).
 /// </summary>
 /// <remarks>
 /// <para>
@@ -866,6 +866,110 @@ public sealed class SessionRecordConcurrentPcGateTests : IDisposable
     }
 
     // ══════════════════════════════════════════════════════════════
+    // G-B13 — 회전이 실패하면 갱신이 만든 세션 행이 남지 않는다 (3차 보상 삭제)
+    // ══════════════════════════════════════════════════════════════
+
+    /// <summary>
+    /// 🔴🔴 <b>G-B13</b> — 갱신에서 <b>refresh_tokens 회전이 401 로 실패</b>하면
+    /// 그 갱신이 방금 만든 <c>user_sessions</c> 행이 <b>남지 않는다</b>.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// [무엇을 막는 게이트인가] 2차 봉합(D-2)이 세션 INSERT 를 회전 <b>앞</b>으로 올렸다.
+    /// 그래서 회전이 <i>"이미 사용된 토큰"</i>(단일사용 거부)으로 <b>401</b> 을 던지면
+    /// <b>아무도 쓰지 않는 <c>pc</c> 세션 행이 만료까지 남는다.</b>
+    /// 축 B 를 켠 고객은 <b>자기 잔여 행 때문에 자기 재로그인이 409</b> 가 된다.
+    /// </para>
+    /// <para>
+    /// 🔴 <b>경주를 결정적으로 만든다</b> — <c>deleted == 0</c> 은 원래 *"동시 갱신 2발"* 이라야 나온다.
+    /// 시험이 두 번 동시에 부르면 어느 쪽이 이길지 모른다(간헐적 게이트는 게이트가 아니다).
+    /// ⇒ <c>user_sessions</c> 에 <b>AFTER INSERT 트리거</b>를 달아, 운영 코드가 세션 행을 넣는 <b>그 순간</b>
+    /// 남이 이 토큰을 먼저 써 버린 상태(= refresh_tokens 행이 사라진 상태)가 되게 한다.
+    /// ⚠️ 트리거는 <b>상태 만들기</b>다 — 판정하는 SQL 이 아니다(이 파일의 규칙 · 작지 §3 금지 #8).
+    /// 🔴 이 트리거가 도는 것 자체가 *"INSERT 가 회전보다 먼저다"* 를 증명한다 — 순서가 되돌아가면
+    /// 트리거가 안 돌아 401 이 아니라 성공이 되고, 이 시험이 <b>먼저 깨진다.</b>
+    /// </para>
+    /// <para>
+    /// 🔴 <b>음성 대조군</b> — <c>AuthService</c> 회전 <c>catch</c> 두 곳의
+    /// <c>CompensateNewSessionRowAsync</c> 호출을 지우면 행이 <b>1건 남아 FAIL</b> 한다.
+    /// (실제로 지워 FAIL 을 확인한 기록은 개발명세서 §4 에 있다.)
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public async Task G_B13_회전이_401_로_실패하면_갱신이_만든_세션_행이_남지_않는다()
+    {
+        if (!ServerAvailable() && DbGateEnvironment.SkipOrFail("G-B13 회전 실패 보상 삭제")) return;
+        SetUpFreshInstall();
+
+        var (svc, db) = NewAuthService();
+        using (db)
+        {
+            // ① 옛 토큰 모양(`sid` 없음)을 **운영 경로로** 만든다 — G-B12 와 같은 방식.
+            HideSessionTable(db);
+            var old = await svc.LoginAsync(NewLoginRequest("pc", WindowsUa));
+            Assert.Null(SidOf(old));
+            RestoreSessionTable(db);
+            Assert.Equal(0, SessionCount(db));   // 출발선: 세션 행이 없다
+
+            // ② 세션 INSERT 가 끝나는 순간 회전이 실패하게 만든다(경주 재현).
+            StealRefreshTokenWhenSessionInserted(db);
+            try
+            {
+                var ex = await Assert.ThrowsAsync<UnauthorizedAccessException>(
+                    () => svc.RefreshAsync(
+                        new RefreshTokenRequest { RefreshToken = old.RefreshToken, UserAgent = WindowsUa }));
+
+                // 우리가 노린 그 401 인가 — 다른 이유로 튕긴 것을 통과로 읽지 않는다.
+                Assert.Contains("이미 사용된", ex.Message);
+            }
+            finally
+            {
+                DropSessionInsertTrigger(db);   // 확인 조회가 트리거에 걸리지 않게 먼저 뗀다
+            }
+
+            // ③ 🔴 본체 — 주인 없는 세션 행이 남지 않았다.
+            Assert.Equal(0, SessionCount(db));
+        }
+    }
+
+    /// <summary>
+    /// 🔴 <b>G-B13b</b> — 보상 삭제가 <b>이어받은 세션은 건드리지 않는다</b>.
+    /// </summary>
+    /// <remarks>
+    /// 🔴 잔여 행을 없애려고 <c>user_id</c> 를 전삭하거나 이어받은 세션까지 지우면,
+    /// <b>일하고 있는 PC 가 갱신 실패 한 번으로 끊긴다</b>(#20 흐름은 안 끊긴다).
+    /// 이 시험은 그 과잉 봉합을 막는다 — 같은 회전 실패인데 <b>행이 살아 있어야</b> 한다.
+    /// </remarks>
+    [Fact]
+    public async Task G_B13b_회전이_실패해도_이어받은_세션은_지우지_않는다()
+    {
+        if (!ServerAvailable() && DbGateEnvironment.SkipOrFail("G-B13b 이어받은 세션 보존")) return;
+        SetUpFreshInstall();
+
+        var (svc, db) = NewAuthService();
+        using (db)
+        {
+            // 정상 로그인 — `sid` 가 실린다(= 갱신이 이어받는 세션).
+            var first = await svc.LoginAsync(NewLoginRequest("pc", WindowsUa));
+            var sid = SidOf(first);
+            Assert.NotNull(sid);
+            Assert.Equal(1, SessionCount(db));
+
+            // 남이 그 토큰을 먼저 써 버렸다 — 회전은 401 이다(세션 INSERT 는 아예 없다).
+            StealRefreshToken(db);
+
+            var ex = await Assert.ThrowsAsync<UnauthorizedAccessException>(
+                () => svc.RefreshAsync(
+                    new RefreshTokenRequest { RefreshToken = first.RefreshToken, UserAgent = WindowsUa }));
+            Assert.Contains("로그아웃된", ex.Message);   // 이 경로는 회전 전 확인에서 걸린다
+
+            // 🔴 일하고 있는 PC 의 세션은 그대로다.
+            Assert.Equal(1, SessionCount(db));
+            Assert.True(IsAlive(db, sid!), "갱신이 실패했다고 이어받은 세션을 지웠다 — 일하는 PC 를 끊는다(#20).");
+        }
+    }
+
+    // ══════════════════════════════════════════════════════════════
     // 판정 규칙 — "모르는 것은 싼 칸으로" (DB 불필요 · build 잡에서 돈다)
     // ══════════════════════════════════════════════════════════════
 
@@ -925,6 +1029,27 @@ public sealed class SessionRecordConcurrentPcGateTests : IDisposable
         db.Execute(
             "UPDATE user_sessions SET expires_at = UTC_TIMESTAMP(6) - INTERVAL 1 HOUR WHERE session_id = @Sid",
             new { Sid = sid });
+
+    /// <summary>
+    /// 준비 (G-B13) — 운영 코드가 <b>세션 행을 넣는 그 순간</b> 남이 이 토큰을 먼저 써 버린 상태로 만든다.
+    /// </summary>
+    /// <remarks>
+    /// 🔴 <b>왜 트리거인가</b> — 회전의 <c>deleted == 0</c>(단일사용 거부 401)은 원래 *"동시 갱신 2발"* 이라야
+    /// 나온다. 시험이 두 번 동시에 부르면 어느 쪽이 이길지 몰라 <b>간헐적 게이트</b>가 된다.
+    /// 세션 INSERT 에 트리거를 달면 그 경주가 <b>결정적으로</b> 재현된다.
+    /// <para>⚠️ 이것은 <b>상태 만들기</b>다 — 판정하지 않는다. 판정은 운영 코드가 한다.</para>
+    /// </remarks>
+    private static void StealRefreshTokenWhenSessionInserted(IDbConnection db) =>
+        db.Execute(
+            @"CREATE TRIGGER gate_b13_steal_token AFTER INSERT ON user_sessions FOR EACH ROW
+                DELETE FROM refresh_tokens WHERE user_id = NEW.user_id");
+
+    private static void DropSessionInsertTrigger(IDbConnection db) =>
+        db.Execute("DROP TRIGGER IF EXISTS gate_b13_steal_token");
+
+    /// <summary>준비 (G-B13b) — 남이 이 계정의 refresh 토큰을 이미 소비한 상태.</summary>
+    private static void StealRefreshToken(IDbConnection db) =>
+        db.Execute("DELETE FROM refresh_tokens WHERE user_id = @UserId", new { UserId });
 
     /// <summary>
     /// 준비 — <b>밀어내기로 지워진</b> PC1 의 행을 <b>만료된 채로</b> 되돌려 놓는다 (F-6 재현).

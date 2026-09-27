@@ -357,6 +357,52 @@ public class AuthService : IAuthService
     }
 
     /// <summary>
+    /// 갱신이 <b>방금 만든</b> 세션 행을, 토큰 회전이 실패했을 때 되돌린다 (20260927작2 <b>3차</b> 보상 삭제).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// 🔴 <b>왜 필요한가</b> — 2차 봉합(D-2)이 세션 INSERT 를 refresh_tokens 회전 <b>앞</b>으로 올렸다.
+    /// <c>sid</c> 를 실을지 말지를 알려면 그 자리여야 한다. 그래서 회전이 실패해 <b>401</b> 을 던지면
+    /// 방금 넣은 <c>pc</c> 행이 <b>아무도 쓰지 않는 채 만료까지 남는다.</b> 축 B 를 켠 고객은
+    /// <b>자기 잔여 행 때문에 자기 재로그인이 409</b> 가 된다.
+    /// </para>
+    /// <para>
+    /// 🔴 <b>이 호출이 만든 행 하나만</b> 지운다(<c>WHERE session_id</c>). <c>user_id</c> 전삭은
+    /// <b>살아 있는 다른 PC·모바일 세션을 끊는 일</b>이라 하지 않는다.
+    /// 이어받은 세션(<c>isNewSession == false</c>)은 애초에 이 함수로 넘기지 않는다 —
+    /// 이 호출이 만든 행이 아니고, 지우면 <b>일하고 있는 PC 를 갱신 실패 한 번으로 끊는다.</b>
+    /// </para>
+    /// <para>
+    /// 🔴 <b>삭제 실패는 삼킨다</b> — 부르는 자리는 이미 예외를 던지는 길이다. 여기서 새 예외를 올리면
+    /// <b>원인이 바뀌어</b>(401 이 500 으로) 다음 사람이 엉뚱한 곳을 본다. 조용히는 넘기지 않는다(#15) —
+    /// 남은 행의 번호를 로그에 적어 손으로 찾을 수 있게 한다.
+    /// </para>
+    /// </remarks>
+    private static async Task CompensateNewSessionRowAsync(
+        System.Data.IDbConnection db, User user, string? sessionIdCreatedHere, string reason)
+    {
+        if (string.IsNullOrWhiteSpace(sessionIdCreatedHere)) return;   // 이어받은 세션·기록 실패 — 지울 것이 없다
+
+        try
+        {
+            var removed = await db.ExecuteAsync(
+                "DELETE FROM user_sessions WHERE session_id = @SessionId",
+                new { SessionId = sessionIdCreatedHere });
+
+            System.Diagnostics.Trace.TraceWarning(
+                $"[세션] 갱신 회전 실패({reason}) — 방금 만든 세션 행을 되돌렸다(삭제 {removed}건) "
+                + $"user={user.Id}, session={sessionIdCreatedHere}");
+        }
+        catch (Exception ex)
+        {
+            // 🔴 삼키지만 조용히는 넘기지 않는다 — 이 행이 남으면 본인 재로그인이 409 로 막힌다.
+            System.Diagnostics.Trace.TraceError(
+                $"[세션] 갱신 회전 실패 후 보상 삭제 실패 — 주인 없는 세션 행이 만료까지 남는다. "
+                + $"user={user.Id}, session={sessionIdCreatedHere}: {ex.Message}");
+        }
+    }
+
+    /// <summary>
     /// 만료된 <b>내 PC 세션</b>을 갱신으로 되살려도 되는지 판정한다 (20260927작2 절C · 설계 §5).
     /// </summary>
     /// <remarks>
@@ -644,6 +690,19 @@ public class AuthService : IAuthService
                 conn.Open();
             }
         }
+        // ── 보상 삭제로 감싼다 (20260927작2 **3차** · 2차 개발명세서 §7 위험 · PM 결재) ──────────
+        //
+        //   🔴 [무엇이 위험했나] 2차에서 세션 INSERT 를 이 트랜잭션 **앞**으로 올렸다 — `sid` 를 실을지
+        //     말지를 알려면 그 자리여야 한다(D-2). 그래서 **회전이 실패해 401 을 던지면** 방금 넣은
+        //     `pc` 세션 행이 **아무도 쓰지 않는 채 만료까지 남는다.** 축 B 를 켠 고객은
+        //     **자기 잔여 행 때문에 자기 재로그인이 409** 가 된다 — 자기 자신에게 막히는 모양이다.
+        //
+        //   ⇒ 회전이 실패하면 **이 갱신이 직접 만든 그 행 하나만** 지운다.
+        //   🔴 순서를 되돌리지 않는다 — INSERT 를 회전 뒤로 옮기면 실패를 알기 전에 `sid` 가 실린다(2차 제약).
+        //   🔴 이어받은 세션(`isNewSession == false`)은 **건드리지 않는다.** 이 호출이 만든 행이 아니고,
+        //     지우면 **일하고 있는 PC 를 갱신 실패 한 번으로 끊는다.**
+        //   🔴 트랜잭션 안으로 넣지 않는다 — 부르는 자리는 **롤백이 끝난 뒤**의 `catch` 두 곳이다.
+        //     (회전 실패 경로는 그 둘뿐이다: 단일사용 거부 401 · 그 밖의 예외)
         using (var tx = conn.BeginTransaction())
         {
             try
@@ -678,11 +737,17 @@ public class AuthService : IAuthService
             }
             catch (UnauthorizedAccessException)
             {
+                // 🔴 3차 보상 삭제 — 이 갱신이 만든 세션 행이 주인 없이 남지 않게 한다(위 설명).
+                await CompensateNewSessionRowAsync(
+                    conn, user, isNewSession && sessionRecorded ? sessionId : null, "단일사용 거부(401)");
                 throw; // 단일사용 거부는 이미 롤백됨 — 그대로 전파.
             }
             catch (Exception)
             {
                 try { tx.Rollback(); } catch (Exception rbex) { Console.Error.WriteLine($"[AuthService] refresh 회전 롤백 실패: {rbex.Message}"); }
+                // 🔴 3차 보상 삭제 — 같은 이유. 원인 예외는 바꾸지 않는다.
+                await CompensateNewSessionRowAsync(
+                    conn, user, isNewSession && sessionRecorded ? sessionId : null, "회전 중 예외");
                 throw;
             }
         }
