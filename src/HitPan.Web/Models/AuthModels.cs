@@ -24,6 +24,16 @@ public sealed class LoginRequestDto
     //   Edge ↔ Chrome 을 오가도 같은 줄이다 = 슬롯이 새로 안 는다.
     //   ⚠️ 서버 LoginRequest.DeviceId 와 **이름이 같아야** 실려 간다(DTO 가 두 벌이다).
     public string? DeviceId { get; set; }
+
+    /// <summary>
+    /// 🔴 다른 컴퓨터의 접속을 끊고 여기서 쓰겠다 — <b>사용자가 버튼을 눌렀을 때만</b> true (20260927작1).
+    /// </summary>
+    /// <remarks>
+    /// 🚫 <b>기본으로 true 를 보내지 마라.</b> 그러면 자동 밀어내기가 되어, 다른 컴퓨터에서
+    /// 전표를 쓰던 화면이 예고 없이 튕긴다 — ERP 는 보는 서비스가 아니라 <b>입력하는 서비스</b>다.
+    /// <para>⚠️ 서버 <c>LoginRequest.ForceSignOutOtherPc</c> 와 이름이 같아야 실려 간다(DTO 가 두 벌이다).</para>
+    /// </remarks>
+    public bool ForceSignOutOtherPc { get; set; }
 }
 
 public sealed class LoginApiResponse
@@ -87,4 +97,26 @@ public sealed class AuthLoginResult
     public bool Success { get; init; }
     public string? ErrorMessage { get; init; }
     public LoginApiResponse? Data { get; init; }
+
+    /// <summary>
+    /// 🔴 같은 계정이 <b>다른 컴퓨터에서 사용 중</b>이라 막힌 경우 (20260927작1 절D-2).
+    /// </summary>
+    /// <remarks>
+    /// 이 값이 참이면 화면은 <b>비밀번호 오류로 보여주면 안 된다.</b> 그러면 사용자가
+    /// 멀쩡한 비밀번호를 몇 번씩 다시 친다. 대신 마지막 사용 시각과
+    /// [그 컴퓨터 접속을 끊고 여기서 사용하기] 를 보여준다.
+    /// </remarks>
+    public bool OtherPcInUse { get; init; }
+
+    /// <summary>다른 컴퓨터가 마지막으로 움직인 시각. 사용자가 끊어도 될지 스스로 판단하는 근거다.</summary>
+    public DateTime? OtherPcLastActiveAt { get; init; }
+}
+
+/// <summary>로그인이 「다른 PC 사용 중」으로 막혔을 때 서버가 주는 본문 (409).</summary>
+public sealed class OtherPcInUseDto
+{
+    public string? Message { get; set; }
+    public string? Code { get; set; }
+    public DateTime? OtherPcLastActiveAt { get; set; }
+    public bool CanForce { get; set; }
 }

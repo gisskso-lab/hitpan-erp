@@ -50,7 +50,34 @@
                           Class="mb-4"
                           Style="font-family: 'Noto Sans KR', sans-serif;" />
 
-            @if (!string.IsNullOrEmpty(_errorMessage))
+            @* 🔴 20260927작1 절D-2 — 「다른 컴퓨터에서 사용 중」은 비밀번호 오류와 **다르게** 보여준다.
+                 같은 빨간 경고로 보여주면 사용자가 멀쩡한 비밀번호를 몇 번씩 다시 친다.
+                 ⚠️ 버튼이 없으면 영영 못 들어간다 — 컴퓨터가 꺼져 로그아웃이 안 돈 경우
+                    남은 접속 기록이 본인 계정을 스스로 잠그기 때문이다. *@
+            @if (_otherPcInUse)
+            {
+                <MudAlert Severity="Severity.Warning" Dense="true" Class="mb-4" Style="font-family: 'Noto Sans KR', sans-serif;">
+                    <div class="mb-2">이 계정은 지금 <b>다른 컴퓨터에서 사용 중</b>입니다.</div>
+                    @if (_otherPcLastActiveAt is not null)
+                    {
+                        <div class="mb-2" style="font-size:0.85rem;">
+                            마지막 사용: @_otherPcLastActiveAt.Value.ToLocalTime().ToString("M월 d일 HH:mm")
+                        </div>
+                    }
+                    <MudButton Variant="Variant.Filled"
+                               Color="Color.Warning"
+                               FullWidth="true"
+                               Disabled="_busy"
+                               OnClick="ForceSubmitAsync"
+                               Style="font-family: 'Noto Sans KR', sans-serif;">
+                        그 컴퓨터 접속을 끊고 여기서 사용하기
+                    </MudButton>
+                    <div class="mt-2" style="font-size:0.8rem;">
+                        그 컴퓨터에서 저장하지 않은 내용은 사라질 수 있습니다.
+                    </div>
+                </MudAlert>
+            }
+            else if (!string.IsNullOrEmpty(_errorMessage))
             {
                 <MudAlert Severity="Severity.Error" Dense="true" Class="mb-4" Style="font-family: 'Noto Sans KR', sans-serif;">
                     @_errorMessage
@@ -123,6 +150,15 @@
     private string _email = string.Empty;
     private string _password = string.Empty;
     private string? _errorMessage;
+
+    // 🔴 20260927작1 절D-2 — 「다른 컴퓨터에서 사용 중」 상태.
+    //   비밀번호 오류(_errorMessage)와 **별개 칸**이다. 한 칸에 담으면 화면이 둘을 못 가린다.
+    private bool _otherPcInUse;
+    private DateTime? _otherPcLastActiveAt;
+
+    // 사용자가 [그 컴퓨터 접속을 끊고 여기서 사용하기] 를 눌렀을 때만 참이 된다.
+    // 🚫 초기값을 true 로 바꾸지 마라 — 그 순간 자동 밀어내기가 된다.
+    private bool _forceSignOutOtherPc;
     private bool _busy;
 
     // 🔴 로그인 전 업데이트 안내 (사장님 지시 2026-08-11) — 상세 근거는 위 마크업 주석
@@ -256,6 +292,19 @@
         public string? CurrentVersion { get; set; }
     }
 
+    /// <summary>
+    /// [그 컴퓨터 접속을 끊고 여기서 사용하기] — 사용자가 <b>직접 누른</b> 밀어내기 (20260927작1 절D-2).
+    /// </summary>
+    /// <remarks>
+    /// 🔴 이 경로 하나로만 밀어낸다. 자동으로 부르지 마라 — ERP 는 입력하는 서비스라
+    /// 예고 없이 튕기면 그 컴퓨터에서 쓰던 전표가 날아간다.
+    /// </remarks>
+    private async Task ForceSubmitAsync()
+    {
+        _forceSignOutOtherPc = true;
+        await SubmitAsync();
+    }
+
     private async Task SubmitAsync()
     {
         if (_form is not null)
@@ -269,12 +318,26 @@
         }
 
         _errorMessage = null;
+        _otherPcInUse = false;
+        _otherPcLastActiveAt = null;
         _busy = true;
         try
         {
-            var result = await AuthService.LoginAsync(_email.Trim(), _password);
+            var result = await AuthService.LoginAsync(_email.Trim(), _password, _forceSignOutOtherPc);
+
+            // 🔴 한 번 쓰고 반드시 내린다. 남겨두면 **다음 로그인부터 자동 밀어내기**가 되어
+            //   사용자가 확정한 적 없는 동작이 계속 일어난다(반자동 원칙 · 사장님 전결 9/27).
+            _forceSignOutOtherPc = false;
+
             if (!result.Success)
             {
+                if (result.OtherPcInUse)
+                {
+                    _otherPcInUse = true;
+                    _otherPcLastActiveAt = result.OtherPcLastActiveAt;
+                    return;
+                }
+
                 _errorMessage = result.ErrorMessage ?? "로그인에 실패했습니다.";
                 return;
             }
