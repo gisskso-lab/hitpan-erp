@@ -29,7 +29,12 @@ public sealed class AuthService : IAuthService
         _js = js;
     }
 
-    public async Task<AuthLoginResult> LoginAsync(string email, string password, CancellationToken ct = default)
+    /// <param name="forceSignOutOtherPc">
+    /// 🔴 다른 컴퓨터 접속을 끊고 여기서 쓰겠다 — <b>사용자가 버튼을 눌렀을 때만</b> true (20260927작1 절D-2).
+    /// 기본 false. 기본을 true 로 바꾸면 자동 밀어내기가 되어 남의 입력이 날아간다.
+    /// </param>
+    public async Task<AuthLoginResult> LoginAsync(
+        string email, string password, bool forceSignOutOtherPc = false, CancellationToken ct = default)
     {
         try
         {
@@ -71,9 +76,28 @@ public sealed class AuthService : IAuthService
                     DeviceFingerprint = fingerprint,
                     DeviceType = deviceType,
                     DeviceName = deviceName,
-                    DeviceId = deviceId
+                    DeviceId = deviceId,
+                    ForceSignOutOtherPc = forceSignOutOtherPc
                 },
                 cancellationToken: ct);
+
+            // 🔴 20260927작1 절D-2 — 「다른 컴퓨터에서 사용 중」 (409).
+            //   401(비밀번호 오류)과 **반드시 갈라서 다룬다.** 같은 문구로 보여주면
+            //   사용자가 멀쩡한 비밀번호를 몇 번씩 다시 친다.
+            if (response.StatusCode == HttpStatusCode.Conflict)
+            {
+                OtherPcInUseDto? conflict = null;
+                try { conflict = await response.Content.ReadFromJsonAsync<OtherPcInUseDto>(cancellationToken: ct); }
+                catch (Exception ex) { Console.Error.WriteLine($"[Auth] 409 본문 해석 실패: {ex.Message}"); }
+
+                return new AuthLoginResult
+                {
+                    Success = false,
+                    OtherPcInUse = true,
+                    OtherPcLastActiveAt = conflict?.OtherPcLastActiveAt,
+                    ErrorMessage = conflict?.Message ?? "이미 다른 컴퓨터에서 사용 중입니다."
+                };
+            }
 
             if (response.StatusCode == HttpStatusCode.Unauthorized)
             {

@@ -25,6 +25,20 @@ public class LoginRequest
     public string? DeviceName { get; set; }
 
     /// <summary>
+    /// 🔴 <b>다른 PC 의 접속을 끊고 여기서 쓰겠다</b> — 사용자가 화면에서 버튼을 눌렀을 때만 true (DB-127 축 B).
+    /// </summary>
+    /// <remarks>
+    /// 사장님 전결(2026-09-27): <i>"거절이 기본. 밀어내기는 사용자가 확정할 때만."</i>
+    /// <para>
+    /// 🔴 <b>클라이언트가 기본으로 true 를 보내면 안 된다.</b> 그러면 자동 밀어내기가 되어
+    /// 전표 쓰던 화면이 예고 없이 튕긴다 — ERP 는 보는 서비스가 아니라 <b>입력하는 서비스</b>다.
+    /// 반자동 원칙(제안 → 확정)을 코드로 지키는 칸이다.
+    /// </para>
+    /// <para>⚠️ 이 칸이 없으면 거절만 남아, PC 가 꺼져 남은 죽은 세션이 <b>본인 계정을 스스로 잠근다.</b></para>
+    /// </remarks>
+    public bool ForceSignOutOtherPc { get; set; }
+
+    /// <summary>
     /// 🔴 <b>장비넘버</b> — 이 기기가 지난번에 서버에게 받아 보관해 둔 자기 번호 (20260816작2 · 명세서 §4-4).
     ///
     /// <para>

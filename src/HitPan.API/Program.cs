@@ -637,7 +637,21 @@ app.UseAuthorization();
 // 인증된 user_id 기반 카운트 → 터널 환경에서 다수 사용자가 같은 IP로 인식되어도 오차단 안 발생.
 app.UseMiddleware<RateLimitMiddleware>();
 app.UseMiddleware<TenantMiddleware>();
-app.UseMiddleware<SessionLimitMiddleware>();
+// 🔴 20260927작1 절G — 축 B(계정별 PC 동시로그인) 즉시 차단.
+//   SessionLimitMiddleware 앞에 둔다: 끊긴 세션이면 총량 계수까지 갈 이유가 없다.
+//   ⚠️ 아래 SessionLimitMiddleware 는 **축이 달라**(테넌트 총량 COUNT(DISTINCT user_id))
+//     한 줄도 건드리지 않았다. 섞지 않는다(헌법 #1 추가만).
+app.UseMiddleware<SessionValidityMiddleware>();
+// 🔴 20260927작1 절E — 축 A(테넌트 총량 동시세션 제한) 킬스위치.
+//   [왜 UseWhen 인가] `SessionLimitMiddleware` 를 **한 줄도 안 건드리기 위해서**다(작지 금지 #1).
+//     파일 안에 조건을 넣는 대신, 아예 **태울지 말지**를 여기서 고른다.
+//   [왜 기본이 끔인가] 축 A 는 `user_sessions` 에 넣는 코드가 없어 **한 번도 돈 적이 없다.**
+//     이번 작업으로 행이 생기는 순간 소리 없이 켜지고, 한도 초과 고객은 그날부터 429 다.
+//     ⇒ 플래그가 명시적으로 true 일 때만 태운다. 값이 없으면(조회 실패 포함) 끈 것이다.
+//   ⚠️ **「살리되 꺼둔다」** — 지운 게 아니다(헌법 #1·#37). 켜는 날 테넌트별 활성 사용자 수를 먼저 잰다.
+app.UseWhen(
+    ctx => ctx.Items[SessionValidityMiddleware.TenantSessionLimitFlag] as bool? == true,
+    branch => branch.UseMiddleware<SessionLimitMiddleware>());
 app.UseMiddleware<TermsConsentMiddleware>();  // 헌법 #24: 첫 로그인 약관 4건 강제 동의 검증
 
 // 기기 인증 검사 (20260811작3 (A)) — 인증 번호가 없으면 업무 기능만 막는다.

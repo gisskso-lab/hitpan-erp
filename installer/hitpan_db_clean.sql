@@ -3589,7 +3589,7 @@ INSERT INTO `schema_migrations` (`migration_id`, `app_version`, `success`) VALUE
 ('DB-74','clean-ddl',1),('DB-75','clean-ddl',1),('DB-76','clean-ddl',1),('DB-77','clean-ddl',1),
 ('DB-78','clean-ddl',1),('DB-79','clean-ddl',1),('DB-80','clean-ddl',1),('DB-81','clean-ddl',1),
 ('DB-82','clean-ddl',1),('DB-83','clean-ddl',1),('DB-84','clean-ddl',1),('DB-85','clean-ddl',1),
-('DB-86','clean-ddl',1),('DB-87','clean-ddl',1),('DB-88','clean-ddl',1),('DB-89','clean-ddl',1),('DB-90','clean-ddl',1),('DB-91','clean-ddl',1),('DB-92','clean-ddl',1),('DB-93','clean-ddl',1),('DB-94','clean-ddl',1),('DB-95','clean-ddl',1),('DB-96','clean-ddl',1),('DB-97','clean-ddl',1),('DB-98','clean-ddl',1),('DB-99','clean-ddl',1),('DB-100','clean-ddl',1),('DB-101','clean-ddl',1),('DB-102','clean-ddl',1),('DB-103','clean-ddl',1),('DB-104','clean-ddl',1),('DB-105','clean-ddl',1),('DB-106','clean-ddl',1),('DB-107','clean-ddl',1),('DB-108','clean-ddl',1),('DB-109','clean-ddl',1),('DB-110','clean-ddl',1),('DB-111','clean-ddl',1),('DB-112','clean-ddl',1),('DB-113','clean-ddl',1),('DB-114','clean-ddl',1),('DB-115','clean-ddl',1),('DB-116','clean-ddl',1),('DB-117','clean-ddl',1),('DB-118','clean-ddl',1),('DB-119','clean-ddl',1),('DB-120','clean-ddl',1),('DB-123','clean-ddl',1),('DB-126','clean-ddl',1);
+('DB-86','clean-ddl',1),('DB-87','clean-ddl',1),('DB-88','clean-ddl',1),('DB-89','clean-ddl',1),('DB-90','clean-ddl',1),('DB-91','clean-ddl',1),('DB-92','clean-ddl',1),('DB-93','clean-ddl',1),('DB-94','clean-ddl',1),('DB-95','clean-ddl',1),('DB-96','clean-ddl',1),('DB-97','clean-ddl',1),('DB-98','clean-ddl',1),('DB-99','clean-ddl',1),('DB-100','clean-ddl',1),('DB-101','clean-ddl',1),('DB-102','clean-ddl',1),('DB-103','clean-ddl',1),('DB-104','clean-ddl',1),('DB-105','clean-ddl',1),('DB-106','clean-ddl',1),('DB-107','clean-ddl',1),('DB-108','clean-ddl',1),('DB-109','clean-ddl',1),('DB-110','clean-ddl',1),('DB-111','clean-ddl',1),('DB-112','clean-ddl',1),('DB-113','clean-ddl',1),('DB-114','clean-ddl',1),('DB-115','clean-ddl',1),('DB-116','clean-ddl',1),('DB-117','clean-ddl',1),('DB-118','clean-ddl',1),('DB-119','clean-ddl',1),('DB-120','clean-ddl',1),('DB-123','clean-ddl',1),('DB-126','clean-ddl',1),('DB-127','clean-ddl',1);
 
 --
 -- Table structure for table `service_tickets`
@@ -4141,6 +4141,8 @@ CREATE TABLE `tenant_settings` (
   `use_sales_by_employee` tinyint(1) NOT NULL DEFAULT 0 COMMENT '담당자별 매출 집계',
   `use_personal_info_protect` tinyint(1) NOT NULL DEFAULT 0 COMMENT '개인정보보호모드',
   `industry_type` varchar(30) NOT NULL DEFAULT 'general' COMMENT '업종: general/food/elec/plastic/wood',
+  `enforce_tenant_session_limit` tinyint(1) NOT NULL DEFAULT 0 COMMENT '축A 테넌트 총량 동시세션 제한(SessionLimitMiddleware) 사용 여부. 0=끔(기본). 켜기 전 테넌트별 활성 사용자 수 실측 필수 (DB-127)',
+  `enforce_single_pc_login` tinyint(1) NOT NULL DEFAULT 1 COMMENT '축B 같은 계정 PC 동시로그인 차단 사용 여부. 1=켬(기본). 모바일은 대상 아님 (DB-127)',
   PRIMARY KEY (`tenant_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
@@ -4247,10 +4249,12 @@ CREATE TABLE `user_sessions` (
   `last_active_at` datetime(6) NOT NULL DEFAULT current_timestamp(6),
   `is_active` tinyint(1) NOT NULL DEFAULT 1,
   `expires_at` datetime(6) DEFAULT NULL COMMENT '세션 만료일시',
+  `device_kind` enum('pc','mobile') NOT NULL DEFAULT 'mobile' COMMENT '세션을 만든 기기 종류. pc=축B 동시로그인 차단 대상, mobile=대상 아님(FREE). 서버 판정값(UA 추론 아님). 기본 mobile=모르는 것은 싼 칸으로 (DB-127)',
   PRIMARY KEY (`session_id`),
   KEY `idx_user` (`user_id`),
   KEY `idx_tenant` (`tenant_id`),
-  KEY `idx_active` (`is_active`)
+  KEY `idx_active` (`is_active`),
+  KEY `idx_user_kind_exp` (`user_id`,`device_kind`,`expires_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
 

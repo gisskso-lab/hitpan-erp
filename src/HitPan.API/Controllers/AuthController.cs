@@ -295,6 +295,31 @@ public class AuthController : ControllerBase
 
             return Ok(response);
         }
+        // 🔴 20260927작1 절D — 같은 계정이 다른 PC 에서 쓰이고 있어 거절한 경우.
+        //
+        //   [왜 따로 받나] **원인이 다른 거절은 응답도 달라야 한다.**
+        //     같은 401 에 같은 모양으로 답하면 화면이 *"비밀번호가 틀렸나"* 와 구분하지 못해
+        //     사용자가 멀쩡한 비밀번호를 몇 번씩 다시 친다.
+        //
+        //   [왜 409 인가] 자격 증명은 옳다. 틀린 것은 **지금 상태**다.
+        //     401 로 답하면 화면의 자동 재발급 장치가 깨어나 엉뚱한 재시도를 한다.
+        //
+        //   ⚠️ `canForce` 는 화면이 [그 PC 접속을 끊고 여기서 사용하기] 버튼을 띄우는 열쇠다.
+        //     이 값이 안 가면 사용자는 **영영 못 들어간다** — PC 가 꺼져 로그아웃이 안 돈 경우
+        //     남은 세션이 본인 계정을 스스로 잠그기 때문이다.
+        catch (HitPan.Application.Common.ConcurrentPcLoginException ex)
+        {
+            _logger.LogInformation(
+                "다른 PC 사용 중이라 로그인 거절 — 마지막 사용 {LastActive:u}", ex.OtherPcLastActiveAtUtc);
+
+            return Conflict(new
+            {
+                message = ex.Message,
+                code = "other_pc_in_use",
+                otherPcLastActiveAt = ex.OtherPcLastActiveAtUtc,
+                canForce = true
+            });
+        }
         catch (UnauthorizedAccessException ex)
         {
             return Unauthorized(new { message = ex.Message });

@@ -101,6 +101,19 @@ public class AuthService : IAuthService
             catch (Exception ex) { System.Diagnostics.Trace.TraceWarning($"[Backfill] 부모계정 employees 백필 실패(로그인은 진행): {ex.Message}"); }
         }
 
+        // ── 축 B: 같은 계정의 PC 동시 로그인 차단 (DB-127 · 20260927작1 절D) ──────────────
+        //
+        //   🔴 여기서 막는 이유 — **상태를 바꾸기 전**이다.
+        //     아래 LastLoginAt 갱신·토큰 발급이 끝난 뒤에 던지면, 거절당한 로그인이
+        //     "마지막 로그인 시각"을 남기고 남의 refresh 토큰을 지운 흔적만 남긴다.
+        //
+        //   ⚠️ 축 A(테넌트 총량 제한, SessionLimitMiddleware)와 **다른 축**이다.
+        //     그쪽은 `COUNT(DISTINCT user_id)` 라 한 계정이 5대에 붙어도 1로 센다 —
+        //     이 정책을 그 식으로는 영원히 만들 수 없다(선행검증서 §4).
+        var loginDb = _unitOfWork.GetDbConnection();
+        var deviceKind = NormalizeDeviceKind(request.DeviceType);
+        await EnforceSinglePcLoginAsync(loginDb, user, deviceKind, request.ForceSignOutOtherPc);
+
         var redirectToWelcome = user.LastLoginAt is null;
         user.LastLoginAt = DateTime.UtcNow;
         await _unitOfWork.SaveChangesAsync(ct);
@@ -108,7 +121,12 @@ public class AuthService : IAuthService
         // 봉합 2026-06-17 1.2.12 — TenantConfigReader 정합 (1.2.6 환경변수 폐기 결재)
         var secret = TenantConfigReader.GetRequired("JWT_SECRET");
 
-        var response = CreateLoginResponse(user, employee, secret, redirectToWelcome);
+        // 🔴 세션 번호를 **토큰보다 먼저** 만든다 — 토큰 안에 이 번호가 들어가야
+        //   나중에 "이 PC 의 세션이 살아 있나" 를 물을 수 있다(절G·절H).
+        //   user_id 만으로는 PC1 과 PC2 를 못 가른다.
+        var sessionId = Guid.NewGuid().ToString();
+
+        var response = CreateLoginResponse(user, employee, secret, redirectToWelcome, sessionId);
 
         // refresh token DB 저장 — 로그아웃 is_revoked=1 차단의 기준
         var db = _unitOfWork.GetDbConnection();
@@ -127,7 +145,157 @@ public class AuthService : IAuthService
                 ExpiresAt = DateTime.UtcNow.Add(RefreshTokenLifetime)
             });
 
+        // ── 세션 기록 (20260927작1 절B) ────────────────────────────────────────────────
+        //
+        //   🔴 **이 표에 넣는 코드가 여태 한 줄도 없었다.**
+        //     세는 곳(SessionLimitMiddleware:114)과 지우는 곳(AuthController 로그아웃)은 있는데
+        //     넣는 곳만 없어 user_sessions 가 항상 비어 있었다 ⇒ 동시접속 제한이 한 번도 안 걸렸다.
+        //     DB-28 은 행이 있다고 전제하고 expires_at 컬럼까지 늘렸다 — 최소 2명이 속았다.
+        //     (선행검증서 docs/검증/선행/20260927_선행검증서_계정과금_PC동시로그인차단_전제실측.md §2)
+        //
+        //   ⚠️ refresh_tokens INSERT 와 **같은 트랜잭션이 아니다.** 이 경로에는 트랜잭션이 없고
+        //     (갱신 경로에는 있다), 새로 씌우는 것은 기존 로그인 구조 변경이라 범위 밖이다.
+        //     같은 연결·바로 다음 줄에 붙인다.
+        await InsertSessionAsync(db, sessionId, user, deviceKind);
+
         return response;
+    }
+
+    /// <summary>
+    /// 기기 종류를 <c>pc</c> / <c>mobile</c> 둘로 정규화한다.
+    /// </summary>
+    /// <remarks>
+    /// 🔴 <b>규칙을 새로 만들지 않는다</b> — 히트판에 이미 판정이 끝난 원칙이 있다:
+    /// <b>"모르는 것은 싼 칸으로"</b> (20260815 아키텍처명세서 §3 #4 — <i>"ERP 가 맞다"</i>).
+    /// 백오피스 <c>DeviceRegistrationController.cs:89-96</c> 과 <b>같은 규칙</b>이다
+    /// (규칙만 같게, 코드는 각자 — 별 시스템이므로).
+    ///
+    /// <para>
+    /// 근거가 된 사고: 모르는 값을 <c>pc</c> 로 보내 <b>고객이 쓰지도 않은 비싼 자리에 돈을 냈다.</b>
+    /// <c>?? "pc"</c> 폴백도 같은 이유로 걷어냈다(20260815작3 P1 I-6).
+    /// </para>
+    ///
+    /// <para>
+    /// ⚠️ <b>남는 구멍을 숨기지 않는다</b> — DeviceType 을 안 보내는 클라이언트는 mobile 로 떨어져
+    /// 축 B 차단을 안 받는다. 매출 누수가 아니라 <b>차단 누락</b>이다(과금 축은 9/25 결재로 계정이 됐다).
+    /// ERP 웹은 항상 보낸다(<c>Web/Services/AuthService.cs:45</c>).
+    /// </para>
+    ///
+    /// <para>🚫 UserAgent 문자열로 판정하지 마라 — 사용자가 바꿀 수 있어 위장하면 차단이 뚫린다.</para>
+    /// </remarks>
+    /// <summary>
+    /// 게이트 전용 — 실제 판정 메서드를 그대로 부른다 (20260927작1 G-3).
+    /// </summary>
+    /// <remarks>
+    /// ⚠️ 시험이 <b>값</b>을 대조하기 위해 연다. 글자 검사로는 이 결함을 못 잡는다 —
+    /// 규칙을 다른 파일로 옮기거나 문자열만 바꿔도 통과하던 실패를 되풀이하지 않는다
+    /// (<c>SessionLimitMiddleware.TierSessionLimitForTests</c> 선례).
+    /// </remarks>
+    public static string NormalizeDeviceKindForTests(string? deviceType) => NormalizeDeviceKind(deviceType);
+
+    private static string NormalizeDeviceKind(string? deviceType)
+        => string.Equals((deviceType ?? "").Trim(), "pc", StringComparison.OrdinalIgnoreCase)
+            ? "pc"
+            : "mobile";   // 빈값 · tablet · 모르는 값 전부 — 싼 칸 = 안 막히는 쪽
+
+    /// <summary>
+    /// 같은 계정이 이미 다른 PC 에서 살아 있으면 로그인을 거절한다 (축 B).
+    /// </summary>
+    /// <remarks>
+    /// 🔴 <b>모바일은 세지 않는다</b> — 9/25 결재로 모바일은 FREE 이고 PC 와 동시 접속이 허용된다.
+    /// <para>🔴 <b>죽은 세션은 막지 않는다</b>(<c>expires_at &gt; NOW()</c>) — PC 가 꺼져 로그아웃이
+    /// 안 돈 경우 남은 행이 <b>본인 계정을 스스로 잠그는</b> 일을 막는다.</para>
+    /// <para>⚠️ 판정에 실패해도 <b>로그인은 통과시킨다</b>(가용성 우선). 다만 조용히 넘기지 않는다 —
+    /// 기존 SessionLimitMiddleware 가 예외를 삼켜 <i>아무도 안 도는 걸 몰랐던</i> 그 구조를
+    /// 물려받지 않는다(#15).</para>
+    /// </remarks>
+    private static async Task EnforceSinglePcLoginAsync(
+        System.Data.IDbConnection db, User user, string deviceKind, bool force)
+    {
+        if (!string.Equals(deviceKind, "pc", StringComparison.Ordinal)) return;   // 모바일은 대상 아님
+
+        try
+        {
+            // 킬스위치 — 행이 없으면 기본 켬(1). 사고 시 배포 없이 끌 수 있어야 한다(#21 로 appsettings 불가).
+            var enabled = await db.ExecuteScalarAsync<int?>(
+                "SELECT enforce_single_pc_login FROM tenant_settings WHERE tenant_id = @TenantId",
+                new { TenantId = user.TenantId }) ?? 1;
+            if (enabled == 0) return;
+
+            var other = await db.QueryFirstOrDefaultAsync<DateTime?>(
+                @"SELECT last_active_at FROM user_sessions
+                   WHERE user_id = @UserId AND device_kind = 'pc' AND expires_at > UTC_TIMESTAMP(6)
+                   ORDER BY last_active_at DESC LIMIT 1",
+                new { UserId = user.Id });
+
+            if (other is null) return;
+
+            if (!force)
+            {
+                // 🔴 자동으로 밀어내지 않는다. 사용자가 확정해야 끊는다(반자동 원칙 · 사장님 전결 9/27).
+                throw new ConcurrentPcLoginException(other.Value);
+            }
+
+            // 사용자가 [그 PC 접속을 끊고 여기서 사용하기] 를 눌렀다 — 그때만 끊는다.
+            await db.ExecuteAsync(
+                "DELETE FROM user_sessions WHERE user_id = @UserId AND device_kind = 'pc'",
+                new { UserId = user.Id });
+        }
+        catch (ConcurrentPcLoginException)
+        {
+            throw;   // 거절은 의도된 결과다 — 아래 가용성 폴백으로 삼키면 차단이 사라진다.
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Trace.TraceError(
+                $"[축B] PC 동시로그인 판정 실패(로그인은 진행) user={user.Id}: {ex.Message}");
+        }
+    }
+
+    /// <summary>로그인 성공 시 세션 행을 남긴다. 실패해도 로그인은 막지 않는다(G-6).</summary>
+    private static async Task InsertSessionAsync(
+        System.Data.IDbConnection db, string sessionId, User user, string deviceKind)
+    {
+        try
+        {
+            await db.ExecuteAsync(
+                @"INSERT INTO user_sessions (session_id, user_id, tenant_id, login_at, last_active_at, expires_at, device_kind)
+                  VALUES (@SessionId, @UserId, @TenantId, UTC_TIMESTAMP(6), UTC_TIMESTAMP(6), @ExpiresAt, @DeviceKind)",
+                new
+                {
+                    SessionId = sessionId,
+                    UserId = user.Id,
+                    TenantId = user.TenantId,
+                    ExpiresAt = DateTime.UtcNow.Add(AccessTokenLifetime),
+                    DeviceKind = deviceKind
+                });
+        }
+        catch (Exception ex)
+        {
+            // 🔴 로그만 남기면 또 아무도 모른다 — 기존 미들웨어가 정확히 그래서 안 걸렸다.
+            //   눈에 보이는 흔적(security_alerts)을 같이 남긴다.
+            System.Diagnostics.Trace.TraceError(
+                $"[세션] user_sessions INSERT 실패(로그인은 진행) user={user.Id}: {ex.Message}");
+            try
+            {
+                await db.ExecuteAsync(
+                    @"INSERT INTO security_alerts (alert_id, tenant_id, user_id, alert_type, description)
+                      VALUES (@Id, @TenantId, @UserId, 'session_insert_failed', @Desc)",
+                    new
+                    {
+                        Id = Guid.NewGuid().ToString(),
+                        TenantId = user.TenantId,
+                        UserId = user.Id,
+                        Desc = $"세션 기록 실패: {ex.Message}".Length > 500
+                            ? $"세션 기록 실패: {ex.Message}"[..500]
+                            : $"세션 기록 실패: {ex.Message}"
+                    });
+            }
+            catch (Exception inner)
+            {
+                System.Diagnostics.Trace.TraceError($"[세션] security_alerts 기록도 실패: {inner.Message}");
+            }
+        }
     }
 
     public async Task<LoginResponse> RefreshAsync(RefreshTokenRequest request, CancellationToken ct = default)
@@ -213,7 +381,18 @@ public class AuthService : IAuthService
             catch (Exception ex) { System.Diagnostics.Trace.TraceWarning($"[Backfill] 부모계정 employees 백필 실패(refresh는 진행): {ex.Message}"); }
         }
 
-        var response = CreateLoginResponse(user, employee, secret, redirectToWelcome: false);
+        // ── 세션 번호 이어받기 (20260927작1 절C) ──────────────────────────────────────
+        //
+        //   갱신 토큰이 들고 온 세션 번호를 **그대로 쓴다.** 새로 만들면 8시간마다
+        //   세션 행이 하나씩 늘어 「같은 계정 PC 1대」 판정이 자기 자신 때문에 막힌다.
+        //
+        //   🔴 옛 갱신 토큰에는 `sid` 가 없다(배포 전에 발급된 것). 그때만 새로 만든다 —
+        //     없다고 거절하면 **배포 순간 전 고객이 튕긴다.** 7일이면 자연히 갈린다.
+        var sessionId = principal.FindFirst("sid")?.Value;
+        var isNewSession = string.IsNullOrWhiteSpace(sessionId);
+        if (isNewSession) sessionId = Guid.NewGuid().ToString();
+
+        var response = CreateLoginResponse(user, employee, secret, redirectToWelcome: false, sessionId!);
 
         // 진범 봉합 (2026-06-20, 2차 전수조사 AUTH-01 P0 → 3차 전수조사 F1/F2 강화):
         //   ① [2차 P0] 종전엔 새 RefreshToken 을 발급해 클라이언트에만 주고 테이블을 갱신하지 않아, 회전 토큰의
@@ -281,6 +460,38 @@ public class AuthService : IAuthService
                 try { tx.Rollback(); } catch (Exception rbex) { Console.Error.WriteLine($"[AuthService] refresh 회전 롤백 실패: {rbex.Message}"); }
                 throw;
             }
+        }
+
+        // ── 세션 수명 연장 (20260927작1 절C) ──────────────────────────────────────────
+        //
+        //   갱신은 "아직 쓰고 있다" 는 신호다. 세션의 만료 시각을 새 access 토큰에 맞춰 민다.
+        //   ⚠️ 밀어내기로 **이미 지워진 세션은 되살리지 않는다**(UPDATE 는 0행으로 끝난다) —
+        //     되살리면 사용자가 끊은 PC 가 갱신 한 번으로 스스로 부활한다.
+        //   🔴 옛 토큰(sid 없음)일 때만 행을 새로 만든다.
+        try
+        {
+            if (isNewSession)
+            {
+                // 🔴 갱신 경로에는 기기 정보가 없다 ⇒ **모르는 값**이다.
+                //   같은 원칙을 그대로 적용한다: 모르는 것은 싼 칸(mobile) — 차단 대상이 아니다.
+                //   여기서 "pc" 로 적으면, 옛 모바일 토큰이 갱신되는 순간 PC 세션이 생겨
+                //   **사용자 본인의 PC 로그인을 막는다.**
+                await InsertSessionAsync(conn, sessionId!, user, NormalizeDeviceKind(null));
+            }
+            else
+            {
+                await conn.ExecuteAsync(
+                    @"UPDATE user_sessions
+                         SET last_active_at = UTC_TIMESTAMP(6), expires_at = @ExpiresAt
+                       WHERE session_id = @SessionId",
+                    new { SessionId = sessionId, ExpiresAt = DateTime.UtcNow.Add(AccessTokenLifetime) });
+            }
+        }
+        catch (Exception ex)
+        {
+            // 갱신 자체는 이미 성공했다 — 세션 기록 실패로 사용자를 끊지 않는다(가용성 우선).
+            System.Diagnostics.Trace.TraceError(
+                $"[세션] 갱신 시 user_sessions 기록 실패(갱신은 성공) user={user.Id}: {ex.Message}");
         }
 
         return response;
@@ -426,7 +637,8 @@ public class AuthService : IAuthService
         return false;
     }
 
-    private static LoginResponse CreateLoginResponse(User user, Employee? employee, string secret, bool redirectToWelcome)
+    private static LoginResponse CreateLoginResponse(
+        User user, Employee? employee, string secret, bool redirectToWelcome, string sessionId)
     {
         var key = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(secret));
         var credentials = new SigningCredentials(key, SecurityAlgorithms.HmacSha256);
@@ -449,7 +661,14 @@ public class AuthService : IAuthService
             //   고객사 PC가 뚫려도 본사·타 고객사 정보가 노출되지 않게 함(헌법 #7·#22·#35).
             new("employee_id", employeeId),
             new(ClaimTypes.Role, employeeRole),
-            new("role", employeeRole)
+            new("role", employeeRole),
+
+            // 🔴 세션 번호 (DB-127 축 B · 20260927작1 절H)
+            //   이것이 없으면 **PC1 과 PC2 를 못 가른다.** user_id 만으로는
+            //   "이 사용자 세션이 있나" 는 답해도 "**이 PC** 의 세션이 살아 있나" 는 못 답한다.
+            //   SessionValidityMiddleware 가 이 값으로 밀어내기를 즉시 반영한다.
+            //   ⚠️ 비밀이 아니다 — 무작위 GUID 이고, 이 값만으로는 아무것도 못 한다.
+            new("sid", sessionId)
         };
 
         // Issuer/Audience — 토큰 스푸핑 방지 (ValidIssuer/ValidAudience와 일치해야 검증 통과)
@@ -467,7 +686,12 @@ public class AuthService : IAuthService
         var refreshClaims = new List<Claim>
         {
             new("user_id", user.Id),
-            new("token_type", "refresh")
+            new("token_type", "refresh"),
+
+            // 🔴 갱신 토큰도 세션 번호를 들고 다닌다 — 안 그러면 8시간마다 갱신할 때
+            //   **자기가 어느 세션인지 잊어버려** 새 세션 행이 계속 쌓인다.
+            //   (옛 갱신 토큰에는 이 값이 없다 — 그때는 새 번호를 만든다. RefreshAsync 참조)
+            new("sid", sessionId)
         };
 
         var refreshTokenDescriptor = new JwtSecurityToken(
