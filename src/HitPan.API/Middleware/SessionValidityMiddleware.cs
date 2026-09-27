@@ -70,6 +70,19 @@ public sealed class SessionValidityMiddleware
         var sid = context.User.FindFirstValue("sid");
         if (string.IsNullOrWhiteSpace(sid)) { await _next(context); return; }
 
+        // ── 축 B 킬스위치를 여기서 읽는다 (20260927작2 절E · 설계 §4-1) ─────────────────
+        //
+        //   🔴 <b>고객이 껐는데도 401 이 계속 나던 자리다</b>(F-1 봉합의 절반).
+        //     종전에는 축 B 스위치가 `AuthService` **로그인 경로 안에만** 있었다.
+        //     그런데 끊는 것은 여기다 ⇒ 고객이 스위치를 내려도 이 미들웨어는 계속 401 을 냈고,
+        //     한 번 세션 행이 지워진 사람은 **끌 방법이 없는 잠금**에 들어갔다.
+        //   🔴 판정 자리는 `sid` 판독 **뒤**, 세션 생존 조회 **앞**이다.
+        //     앞에 두면 `sid` 없는 옛 토큰에도 DB 조회가 한 번 더 붙고(금지 #1b 경로),
+        //     뒤에 두면 이미 401 을 내보낸 다음이라 끌 수 없다.
+        //   🔴 꺼져 있으면 생존 확인을 **건너뛰고 통과**한다 — 세션 행이 없어도 200. (게이트 G-B4)
+        //     켜져 있을 때만 죽은 세션이 401 이 된다. (게이트 G-B10)
+        if (!await IsSinglePcLoginEnabledAsync(context, db)) { await _next(context); return; }
+
         bool alive;
         try
         {
@@ -154,4 +167,47 @@ public sealed class SessionValidityMiddleware
     /// <c>Program.cs</c> 의 <c>UseWhen</c> 이 읽는 열쇠. 값이 <c>true</c> 일 때만 축 A 를 태운다.
     /// </summary>
     public const string TenantSessionLimitFlag = "TenantSessionLimitEnabled";
+
+    /// <summary>
+    /// 축 B(계정별 PC 동시로그인 차단) 킬스위치 — 이 테넌트에서 켜져 있는가 (20260927작2 절E · 설계 §4-1).
+    /// </summary>
+    /// <remarks>
+    /// 🔴 <b>기본은 끔이다.</b> 값이 없거나 못 읽었으면 <b>끈 것</b>으로 본다.
+    /// 축 B 는 기본 OFF 로 출하한다(작지 금지 #3c) — 못 읽었다고 사람을 끊지 않는다.
+    /// <para>
+    /// ⚠️ 축 A(<c>SetTenantSessionLimitFlagAsync</c>)와 <b>같은 방식·같은 캐시 수명</b>이다.
+    /// 다르게 만들면 한쪽만 고쳐지는 사고가 난다.
+    /// </para>
+    /// <para>
+    /// 🔴 <c>SessionLimitMiddleware</c> 처럼 판정을 저쪽 파일 안으로 넣지 않는다 —
+    /// 스위치는 <b>바깥에서</b> 건다(작지 금지 #1 · 축이 다른 파일은 한 줄도 안 건드린다).
+    /// </para>
+    /// </remarks>
+    private async Task<bool> IsSinglePcLoginEnabledAsync(HttpContext context, IDbConnection db)
+    {
+        // #2 계통 — tenant_id 는 요청 파라미터에서 받지 않는다. JWT 를 푼 Items 값만 쓴다.
+        var tenantId = context.Items["TenantId"]?.ToString();
+        if (string.IsNullOrEmpty(tenantId)) return false;   // 없으면 = 끔
+
+        try
+        {
+            var enabled = await _cache.GetOrCreateAsync($"single-pc-login:{tenantId}", async entry =>
+            {
+                entry.AbsoluteExpirationRelativeToNow = SessionCacheTtl;
+                var v = await db.ExecuteScalarAsync<int?>(
+                    "SELECT enforce_single_pc_login FROM tenant_settings WHERE tenant_id = @TenantId",
+                    new { TenantId = tenantId });
+                return v == 1;   // 행 없음·NULL = 끔
+            });
+
+            return enabled;
+        }
+        catch (Exception ex)
+        {
+            // 가용성 우선 — 못 읽었다고 사람을 끊지 않는다. 다만 조용히 넘기지 않는다(#15).
+            _logger.LogWarning(ex,
+                "축B 킬스위치 조회 실패 — 끈 것으로 둔다. tenant={TenantId}", tenantId);
+            return false;
+        }
+    }
 }

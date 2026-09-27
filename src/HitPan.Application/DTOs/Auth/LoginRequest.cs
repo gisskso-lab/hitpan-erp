@@ -25,6 +25,25 @@ public class LoginRequest
     public string? DeviceName { get; set; }
 
     /// <summary>
+    /// 🔴 <b>서버가 헤더에서 직접 읽은 <c>User-Agent</c></b> — 위 <c>DeviceType</c> 신고값을 교차검증한다
+    /// (20260927작2 절A · 설계 §2-3).
+    /// </summary>
+    /// <remarks>
+    /// 🔴 <b>클라이언트가 채우는 칸이 아니다.</b> 컨트롤러가 <c>LoginAsync</c> 호출 직전에
+    /// <c>Request.Headers["User-Agent"]</c> 로 <b>무조건 덮어쓴다</b>(절F). 본문에 무엇이 실려 와도 진다.
+    /// <para>
+    /// ⚠️ 그래서 <c>Web/Models/AuthModels.cs</c> 의 <c>LoginRequestDto</c> 에는 <b>이 칸을 만들지 않았다</b> —
+    /// 만들면 사람이 손으로 바꿔 보낼 수 있는 자진신고 칸이 하나에서 둘로 늘어난다(작지 §3 금지 #9).
+    /// </para>
+    /// <para>
+    /// ⚠️ 이 값도 <b>위조가 불가능하지는 않다.</b> 하는 일은 하나 —
+    /// 화면 조작만으로 기기 종류를 고르던 것을 <b>헤더까지 함께 위조해야</b> 되게 바꾼다(8/18 V-05 수준).
+    /// 🔴 이것을 <i>"위조를 막았다"</i> 고 적으면 거짓봉합이다.
+    /// </para>
+    /// </remarks>
+    public string? UserAgent { get; set; }
+
+    /// <summary>
     /// 🔴 <b>다른 PC 의 접속을 끊고 여기서 쓰겠다</b> — 사용자가 화면에서 버튼을 눌렀을 때만 true (DB-127 축 B).
     /// </summary>
     /// <remarks>
