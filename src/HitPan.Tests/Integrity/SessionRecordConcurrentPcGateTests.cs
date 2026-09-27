@@ -23,9 +23,18 @@ using Xunit;
 namespace HitPan.Tests.Integrity;
 
 /// <summary>
-/// 🔴 <b>G-B1 ~ G-B13</b> — 축 B 봉합이 <b>동작으로</b> 성립하는가 (20260927작2 절I · <b>3차</b>에서 G-B13 추가).
+/// 🔴 <b>G-B1 ~ G-B15</b> — 축 B 봉합이 <b>동작으로</b> 성립하는가
+/// (20260927작2 절I · <b>3차</b>에서 G-B13 추가 · <b>4차</b>에서 G-B14·G-B15 추가 + <b>G-B4 기대값 뒤집힘</b>).
 /// </summary>
 /// <remarks>
+/// <para>
+/// ⬛ <b>4차(2026-09-27 · 통제 분리) — G-B4 를 읽을 때 주의한다.</b>
+/// 3차까지 G-B4 는 *"축 B 를 끄면 세션 행이 없어도 통과"* 를 고정했는데, 그 기대값이 <b>틀렸다</b>
+/// (V-B3: 축 B 기본 OFF 출하 ⇒ 로그아웃이 8시간 안 먹었다). 4차는 생존 확인을
+/// <c>enforce_session_validity</c>(DB-129 · 기본 <b>1</b>) 라는 별 스위치로 떼어냈고,
+/// G-B4 는 *"축 B 를 꺼도 죽은 세션은 401"* 로 뒤집혔다.
+/// 사유 → <c>docs/운영기록/20260927_PM전결_VB3_통제분리_결재.md</c> §2.
+/// </para>
 /// <para>
 /// 🔴 <b>이 파일이 왜 통째로 다시 쓰였나 — [4] 반려 F-2.</b>
 /// 종전 이 파일은 운영 SQL 을 <b>문자열 상수로 복사</b>해 두고(<c>InsertSessionSql</c> 등)
@@ -266,11 +275,31 @@ public sealed class SessionRecordConcurrentPcGateTests : IDisposable
         };
 
     /// <summary>축 B 킬스위치를 <b>고객사 설정 한 줄</b>로 만든다(준비 — 판정은 운영 코드가 읽는다).</summary>
+    /// <remarks>
+    /// ⬛ 4차: 이 헬퍼가 세우는 것은 <b>축 B(<c>enforce_single_pc_login</c>)뿐</b>이다.
+    /// 3차까지는 이 한 줄이 생존 확인까지 함께 켜고 껐다 — 그것이 V-B3 가 지적한 고장이다.
+    /// 생존 확인을 세울 때는 <c>SetValiditySwitch</c> 를 쓴다
+    /// (전결 → <c>docs/운영기록/20260927_PM전결_VB3_통제분리_결재.md</c> §2).
+    /// </remarks>
     private static void SetKillSwitch(IDbConnection db, int on) =>
         db.Execute(
             @"INSERT INTO tenant_settings (tenant_id, enforce_single_pc_login)
               VALUES (@TenantId, @On)
               ON DUPLICATE KEY UPDATE enforce_single_pc_login = @On",
+            new { TenantId, On = on });
+
+    /// <summary>
+    /// 세션 생존 확인 스위치(DB-129 · 4차 신설)를 <b>고객사 설정 한 줄</b>로 만든다(준비).
+    /// </summary>
+    /// <remarks>
+    /// ⚠️ 행이 없으면 만든다 — 이때 축 B 는 출하 기본값(0)으로 들어온다.
+    /// 축 B 를 함께 세우려면 <c>SetKillSwitch</c> 를 <b>따로</b> 부른다. 두 스위치는 별개다.
+    /// </remarks>
+    private static void SetValiditySwitch(IDbConnection db, int on) =>
+        db.Execute(
+            @"INSERT INTO tenant_settings (tenant_id, enforce_session_validity)
+              VALUES (@TenantId, @On)
+              ON DUPLICATE KEY UPDATE enforce_session_validity = @On",
             new { TenantId, On = on });
 
     private static string? SessionKind(IDbConnection db, string sid) =>
@@ -442,59 +471,233 @@ public sealed class SessionRecordConcurrentPcGateTests : IDisposable
     }
 
     // ══════════════════════════════════════════════════════════════
-    // G-B4 / G-B10 — 미들웨어가 킬스위치를 읽는다 (F-1 전면 잠금)
+    // G-B4 / G-B10 / G-B14 / G-B15 — 미들웨어가 어느 스위치를 읽는가
+    //
+    // ⬛ 2026-09-27 봉합 4차에서 **G-B4 의 기대값이 뒤집혔다.**
+    //   옛 줄(3차까지): "축 B 를 끄면 세션 행이 없어도 통과" ← 이제 **틀리다.**
+    //   지금(4차):      "축 B 를 꺼도 죽은 세션은 401" — 생존 확인은 축 B 와 무관해졌다.
+    //   사유 → docs/운영기록/20260927_PM전결_VB3_통제분리_결재.md §2 (안 다 — 통제를 두 스위치로 분리)
+    //   🔴 옛 줄을 지우지 않고 ⬛ 로 남긴다. 기대값이 **뒤집혔다는 사실 자체**가 다음 사람에게
+    //     가장 중요한 정보다 — 지우면 *"원래 그랬던 것"* 으로 읽힌다.
     // ══════════════════════════════════════════════════════════════
 
     /// <summary>
-    /// 🔴🔴 <b>G-B4</b> — <c>sid</c> 있는 토큰 + <b>세션 행 없음</b> + 킬스위치 <c>0</c>
-    /// ⇒ 보호 API <b>200</b> (F-1 = 고객이 끌 수도 없던 전면 잠금).
+    /// 🔴🔴 <b>G-B4 (4차 개정)</b> — <c>sid</c> 있는 토큰 + 세션 <b>죽음</b> +
+    /// <b>축 B 스위치 <c>0</c></b>(+ 생존 확인은 기본 <c>1</c>) ⇒ 보호 API <b>401</b>.
     /// </summary>
     /// <remarks>
-    /// 🔴 음성 대조군 — 미들웨어의 축 B 킬스위치 판독(<c>IsSinglePcLoginEnabledAsync</c> 호출)을 제거하면
-    /// 곧바로 생존 조회로 내려가 <b>401</b> 이 되어 FAIL 한다.
-    /// <para>🔴 판정 자리도 같이 잰다 — 킬스위치는 <c>sid</c> 판독 <b>뒤</b>, 생존 조회 <b>앞</b>이어야 한다.
+    /// <para>
+    /// ⬛ <b>3차까지의 이 게이트</b>: <c>G_B4_킬스위치가_꺼져_있으면_세션_행이_없어도_통과한다</c> —
+    /// *"세션 행 없음 + 축 B <c>0</c> ⇒ <b>200</b>"* 을 고정했다.
+    /// 🔴 그 기대값이 <b>바로 V-B3 가 지적한 고장</b>이었다: 축 B 는 기본 OFF 로 출하하므로
+    /// (DB-128) 그 상태에서 <b>로그아웃·밀어내기가 액세스 토큰 수명(8시간) 내내 먹지 않았다.</b>
+    /// 4차는 생존 확인을 별 스위치로 떼어냈고, 그래서 <b>축 B 를 꺼도 죽은 세션은 401</b> 이다.
+    /// </para>
+    /// <para>
+    /// 🔴 <b>음성 대조군</b> — 미들웨어의 생존 확인 스위치 판독을 옛 컬럼
+    /// (<c>enforce_single_pc_login</c>)으로 되돌리면, 이 시험이 축 B 를 <c>0</c> 으로 두었으므로
+    /// 곧바로 통과해 <b>200</b> 이 되어 FAIL 한다. ⇒ *"어느 컬럼을 읽는가"* 를 실제로 가르는 시험이다.
+    /// 🟢 <b>실측(2026-09-27 · 로컬)</b>: 미들웨어가 읽는 컬럼을 <c>enforce_single_pc_login</c> 으로
+    /// 되돌려 <b>FAIL(기대 401 · 실제 200)</b> 을 확인한 뒤 되돌렸다.
+    /// ⚠️ <b>단, 이 게이트 자체로 잰 것이 아니다</b> — 개발 PC 는 <c>CREATE DATABASE</c> 거부라
+    /// 이 게이트가 <c>[SKIP]</c> 이다. 같은 미들웨어 실물을 권한 있는 시험 DB 에 물린
+    /// <b>임시 탐침</b>으로 쟀고 그 파일은 지웠다(명세서 §4-3). <b>게이트 형태의 계측은 CI <c>db-gate</c> 뿐이다.</b>
+    /// </para>
+    /// <para>🔴 판정 자리도 같이 잰다 — 스위치는 <c>sid</c> 판독 <b>뒤</b>, 생존 조회 <b>앞</b>이어야 한다.
     /// 앞에 두면 <c>sid</c> 없는 옛 토큰까지 DB 를 한 번 물고(금지 #1b 경로), 뒤에 두면 이미 401 이 나간 뒤다.</para>
     /// </remarks>
     [Fact]
-    public async Task G_B4_킬스위치가_꺼져_있으면_세션_행이_없어도_통과한다()
+    public async Task G_B4_축B_를_꺼도_죽은_세션은_401_이다()
     {
-        if (!ServerAvailable() && DbGateEnvironment.SkipOrFail("G-B4 킬스위치 끔 → 통과")) return;
+        if (!ServerAvailable() && DbGateEnvironment.SkipOrFail("G-B4 축B 끔 → 그래도 401")) return;
         SetUpFreshInstall();
 
         using var db = new MySqlConnection(DbConnString());
         db.Open();
-        SetKillSwitch(db, 0);
+        SetKillSwitch(db, 0);   // 🔴 축 B 는 꺼 둔다 — 출하 기본 상태(DB-128) 그대로
+
+        // 🔴 양성 조건을 명시한다 — 생존 확인은 출하 기본값(1)으로 켜져 있어야 한다(DB-129).
+        //   여기서 값을 직접 세우지 않는 이유: **출하 DDL 이 넣어 준 기본값이 실제로 1 인지**를
+        //   이 게이트가 함께 재게 한다(세우면 DDL 이 틀려도 초록이 된다).
+        Assert.Equal(1, CurrentValiditySwitch(db));
 
         var (ctx, nextCalled) = await RunSessionValidityAsync(db, sid: "sid-not-in-table");
 
-        Assert.True(nextCalled, "킬스위치가 꺼져 있는데 요청이 끊겼다 — F-1 전면 잠금이 그대로다.");
-        Assert.Equal(StatusCodes.Status200OK, ctx.Response.StatusCode);
+        Assert.False(nextCalled,
+            "축 B 를 껐다는 이유로 죽은 세션이 통과했다 — 로그아웃·밀어내기가 안 먹는다(V-B3).");
+        Assert.Equal(StatusCodes.Status401Unauthorized, ctx.Response.StatusCode);
         Assert.Equal(0, SessionCount(db));   // 행이 없는 상태였음을 확인한다(양성 조건 확인)
     }
 
     /// <summary>
-    /// 🔴 <b>G-B10</b> — <c>sid</c> 있음 + 세션 <b>죽음</b> + 킬스위치 <b>ON</b> ⇒ <b>401</b>.
+    /// 🔴 <b>G-B10</b> — <c>sid</c> 있음 + 세션 <b>죽음</b> + 생존 확인 스위치 <b>ON</b> ⇒ <b>401</b>.
     /// </summary>
     /// <remarks>
     /// 작1 에서 <b>무시험</b>이던 분기다 — F-1 잠금이 실제로 나오는 자리이므로,
     /// *"켜면 끊는다"* 가 성립하는지를 반대편에서 고정한다.
+    /// <para>⬛ 4차: 세우는 스위치가 축 B → <c>enforce_session_validity</c> 로 바뀌었다(전결 §2).
+    /// 축 B 는 <b>일부러 켜 둔다</b> — 두 스위치가 다 켜진 경우에도 401 이 나오는지를 이쪽이 맡는다.</para>
     /// <para>🔴 음성 대조군 — 세션 생존 확인(<c>session-alive</c> 조회와 <c>if (!alive)</c>)을 제거하면
-    /// 200 이 되어 FAIL 한다.</para>
+    /// 200 이 되어 FAIL 한다.
+    /// 🟢 <b>실측(2026-09-27 · 로컬)</b>: <c>if (!alive)</c> 블록을 죽여
+    /// <b>FAIL(기대 401 · 실제 200)</b> 을 확인한 뒤 되돌렸다.
+    /// ⚠️ 이 게이트가 아니라 <b>임시 탐침</b>으로 쟀다(G-B4 주석과 같은 사정 · 명세서 §4-3).</para>
     /// </remarks>
     [Fact]
-    public async Task G_B10_킬스위치가_켜져_있고_세션이_죽었으면_401_이다()
+    public async Task G_B10_생존확인이_켜져_있고_세션이_죽었으면_401_이다()
     {
-        if (!ServerAvailable() && DbGateEnvironment.SkipOrFail("G-B10 킬스위치 켬 → 401")) return;
+        if (!ServerAvailable() && DbGateEnvironment.SkipOrFail("G-B10 생존확인 켬 → 401")) return;
         SetUpFreshInstall();
 
         using var db = new MySqlConnection(DbConnString());
         db.Open();
-        SetKillSwitch(db, 1);
+        SetKillSwitch(db, 1);         // 축 B 도 켠 상태 — 둘 다 켜져도 결과는 같아야 한다
+        SetValiditySwitch(db, 1);
 
         var (ctx, nextCalled) = await RunSessionValidityAsync(db, sid: "sid-already-dead");
 
         Assert.False(nextCalled, "죽은 세션인데 요청이 통과했다 — 밀어내기가 즉시 반영되지 않는다.");
         Assert.Equal(StatusCodes.Status401Unauthorized, ctx.Response.StatusCode);
+    }
+
+    /// <summary>
+    /// 🔴🔴 <b>G-B14 (4차 신설)</b> — <c>enforce_session_validity = 0</c> 이면
+    /// 죽은 세션이어도 <b>통과(200)</b>. <b>비상 스위치가 실제로 듣는가.</b>
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// 🔴 <b>왜 이 게이트가 있어야 하나 — 비상 탈출구가 없으면 F-1 이 돌아온다.</b>
+    /// 4차는 생존 확인을 <b>기본 켬</b>으로 출하한다. 그 상태에서 세션 행이 어떤 이유로든
+    /// 사라지면(초기화·수동 수술) 그 사람은 401 을 계속 맞는다. 재로그인이 정상 복구 경로지만,
+    /// 그것도 안 되는 상황에서 <b>DB 한 줄로 끌 수 있어야</b> 한다(전결 §3).
+    /// 전결문이 *"안 나(스위치를 없애고 항상 검사)를 고르지 않은"* 이유가 바로 이 줄이다.
+    /// </para>
+    /// <para>
+    /// 🔴 <b>음성 대조군</b> — 미들웨어의 스위치 판독 한 줄
+    /// (<c>if (!await IsSessionValidityEnforcedAsync(...)) { await _next(context); return; }</c>)을
+    /// 제거하면 스위치가 <c>0</c> 이어도 생존 조회로 내려가 <b>401</b> 이 되어 FAIL 한다.
+    /// 🟢 <b>실측(2026-09-27 · 로컬)</b>: 그 줄을 죽여 <b>FAIL(기대 200 · 실제 401)</b> 을 확인한 뒤 되돌렸다.
+    /// ⚠️ 이 게이트가 아니라 <b>임시 탐침</b>으로 쟀다(G-B4 주석과 같은 사정 · 명세서 §4-3).
+    /// 🟢 같은 탐침으로 <b>판정축 분리</b>도 쟀다: 축B=0·생존=1 ⇒ <b>401</b> / 축B=1·생존=0 ⇒ <b>200</b>
+    /// ⇒ 미들웨어가 실제로 <b>새 컬럼</b>을 읽는다. 컬럼이 아예 없는 옛 DB ⇒ <b>200</b>(fail-open 성립).
+    /// </para>
+    /// <para>
+    /// ⚠️ <b>이 스위치에는 아직 쓰기 경로(화면)가 0건이다</b>(전결 §5). 지금은 DB 한 줄로만 끈다.
+    /// 그래서 이 게이트도 화면이 아니라 <b>DB 값</b>을 세워 잰다 — 그것이 지금의 유일한 조작 경로다.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public async Task G_B14_생존확인을_끄면_죽은_세션이어도_통과한다()
+    {
+        if (!ServerAvailable() && DbGateEnvironment.SkipOrFail("G-B14 비상 스위치 끔 → 통과")) return;
+        SetUpFreshInstall();
+
+        using var db = new MySqlConnection(DbConnString());
+        db.Open();
+        SetKillSwitch(db, 1);          // 🔴 축 B 는 켜 둔다 — 끄는 것은 이 새 스위치 하나여야 한다
+        SetValiditySwitch(db, 0);      // 비상 끔
+
+        var (ctx, nextCalled) = await RunSessionValidityAsync(db, sid: "sid-not-in-table");
+
+        Assert.True(nextCalled,
+            "비상 스위치를 0 으로 내렸는데 요청이 끊겼다 — 고객이 끌 수 없는 전면 잠금(F-1)이 남아 있다.");
+        Assert.Equal(StatusCodes.Status200OK, ctx.Response.StatusCode);
+    }
+
+    /// <summary>
+    /// 🔴 <b>G-B15 ① (4차 신설)</b> — 빈 DB + <b>출하 DDL</b>(#36) ⇒
+    /// <c>enforce_session_validity</c> 기본값 <b>1</b>.
+    /// </summary>
+    /// <remarks>
+    /// 생존 확인은 <b>정합성</b>이므로 켜서 출하한다(전결 §2). 기본값이 0 이면
+    /// 신규설치 고객이 <b>3차와 똑같은 상태</b>(로그아웃이 8시간 안 먹는다)로 나간다.
+    /// <para>🔴 음성 대조군 — 출하 DDL 의 그 컬럼을 <c>DEFAULT 0</c> 으로 바꾸면 FAIL 한다.
+    /// 🟢 <b>실측(2026-09-27 · hitpan_trgtest)</b>: 출하 DDL 의 <c>tenant_settings</c> 정의를
+    /// 그대로 떠서 돌려 <c>COLUMN_DEFAULT = 1</c> · 새 행 값 <c>1</c> 을 확인했다(#13).</para>
+    /// <para>⚠️ 축 B 는 이 시험에서도 <b>0</b> 이어야 한다 — 두 스위치의 방향이 반대라는 사실을 함께 고정한다.</para>
+    /// </remarks>
+    [Fact]
+    public void G_B15_1_출하DDL_신규설치에서_생존확인_기본값은_1_이다()
+    {
+        if (!ServerAvailable() && DbGateEnvironment.SkipOrFail("G-B15① 출하 DDL 기본값 1")) return;
+        SetUpFreshInstall();
+
+        using var db = new MySqlConnection(DbConnString());
+        db.Open();
+
+        Assert.Equal("1", ColumnDefault(db, "enforce_session_validity"));
+        Assert.Equal("0", ColumnDefault(db, "enforce_single_pc_login"));   // 🔴 방향이 반대다
+
+        // 실제로 들어오는 행의 값도 1 인가 — 기본값만 맞고 값이 0 이면 통제는 안 돈다.
+        db.Execute("INSERT INTO tenant_settings (tenant_id) VALUES (@TenantId)", new { TenantId });
+        Assert.Equal(1, CurrentValiditySwitch(db));
+    }
+
+    /// <summary>
+    /// 🔴 <b>G-B15 ② (4차 신설)</b> — <b>컬럼이 없던 기존 DB</b> + <c>DB-129</c> ⇒
+    /// 기본값 <b>1</b> <i>그리고</i> <b>이미 있던 행의 값도 1</b>.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// 🔴 <b>이것이 DB-128 이 물려준 급소다.</b> <c>ADD COLUMN IF NOT EXISTS</c> 만 써 두면
+    /// 나중에 기본값을 고쳐도 <b>이미 적용한 DB 가 한 줄도 안 바뀐다.</b>
+    /// 여기서는 컬럼이 신설이므로 MariaDB 가 기존 행에 <c>DEFAULT</c> 값을 채워 넣는데,
+    /// <b>그 사실을 믿지 않고 잰다</b> — 채워지지 않으면 기존 고객의 통제가 꺼진 채 남는다.
+    /// 🟢 <b>실측(2026-09-27 · hitpan_trgtest · MariaDB 11.4.10)</b>: 행 2건이 있는 표에
+    /// DB-129 를 돌려 두 행 모두 <c>1</c>, 기본값 <c>1</c>. 재적용도 <c>EXIT=0</c>.
+    /// </para>
+    /// <para>
+    /// 🔴 <b>음성 대조군</b> — DB-129 의 ② <c>MODIFY</c> 문장을 지우고, 컬럼이 <c>DEFAULT 0</c> 으로
+    /// 이미 있는 DB 에서 돌리면 <c>ADD … IF NOT EXISTS</c> 가 건너뛰어 기본값이 <b>0</b> 으로 남아 FAIL 한다.
+    /// 🟢 <b>실측(2026-09-27 · hitpan_trgtest)</b>: 그 모양을 만들어 확인했다 — 아래 시험이 그 상태를 그대로 만든다.
+    /// </para>
+    /// <para>
+    /// 🔴 <b>값은 일부러 뒤집지 않는다</b>(DB-129 머리말 ③). 이 컬럼은 <b>0 이 정당한 고객 상태</b>(비상 끔)라서,
+    /// 전면 <c>UPDATE</c> 를 넣으면 비상으로 끈 고객이 다음 업데이트에서 소리 없이 다시 켜진다.
+    /// ⇒ 이 시험은 <b>컬럼이 없던</b> 기존 DB 만 잰다. 그것이 마이그가 책임지는 범위다.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public void G_B15_2_기존DB_에_DB129_을_적용하면_기본값과_기존행_모두_1_이_된다()
+    {
+        if (!ServerAvailable() && DbGateEnvironment.SkipOrFail("G-B15② DB-129 기존 DB")) return;
+
+        var migration = Path.Combine(
+            RepoRoot(), "src", "HitPan.API", "Migrations", "SQL",
+            "DB-129_tenant_settings_session_validity.sql");
+        Assert.True(File.Exists(migration),
+            $"DB-129 이 없다: {migration}\n"
+          + "  이 파일이 없으면 기존 고객 DB 에 생존 확인 스위치 컬럼이 안 생긴다 —\n"
+          + "  미들웨어 조회가 실패해 fail-open 으로 떨어지고, 로그아웃이 8시간 안 먹는 3차 상태가 남는다.");
+
+        SetUpFreshInstall();
+
+        using var db = new MySqlConnection(DbConnString());
+        db.Open();
+
+        // 🔴 DB-128 직후(= 이 마이그 직전)의 모양을 **명시적으로** 만든다 — 컬럼이 아예 없고, 행이 2건 있다.
+        //   ①의 결과에 기대지 않는다: 출하 DDL 이 고쳐지는 순간 ②가 무엇을 쟀는지 모르게 된다.
+        db.Execute("ALTER TABLE tenant_settings DROP COLUMN enforce_session_validity");
+        db.Execute("INSERT INTO tenant_settings (tenant_id) VALUES (@TenantId), ('99999999-9999-9999-9999-999999999999')",
+            new { TenantId });
+        Assert.Null(ColumnDefault(db, "enforce_session_validity"));   // 컬럼이 없음을 확인한다
+
+        RunSqlFile(migration);
+
+        Assert.Equal("1", ColumnDefault(db, "enforce_session_validity"));
+        Assert.Equal(1, CurrentValiditySwitch(db));                    // 🔴 기존 행에도 값이 들어왔는가
+        Assert.Equal(2, db.ExecuteScalar<int>(
+            "SELECT COUNT(*) FROM tenant_settings WHERE enforce_session_validity = 1"));
+
+        // 🔴 ② MODIFY 를 재는 자리 — 컬럼이 DEFAULT 0 으로 이미 있는 DB 에서도 기본값이 1 로 고쳐지는가.
+        //   (ADD … IF NOT EXISTS 는 여기서 통째로 건너뛰어진다 — DB-128 이 물려준 급소)
+        db.Execute(
+            "ALTER TABLE tenant_settings MODIFY enforce_session_validity tinyint(1) NOT NULL DEFAULT 0");
+        Assert.Equal("0", ColumnDefault(db, "enforce_session_validity"));
+
+        RunSqlFile(migration);
+
+        Assert.Equal("1", ColumnDefault(db, "enforce_session_validity"));   // MODIFY 가 없으면 0 이 남는다
     }
 
     // ══════════════════════════════════════════════════════════════
@@ -1019,6 +1222,12 @@ public sealed class SessionRecordConcurrentPcGateTests : IDisposable
             "SELECT enforce_single_pc_login FROM tenant_settings WHERE tenant_id = @TenantId",
             new { TenantId });
 
+    /// <summary>생존 확인 스위치의 <b>저장된 값</b>(DB-129 · 4차). 행이 없으면 <c>null</c>.</summary>
+    private static int? CurrentValiditySwitch(IDbConnection db) =>
+        db.ExecuteScalar<int?>(
+            "SELECT enforce_session_validity FROM tenant_settings WHERE tenant_id = @TenantId",
+            new { TenantId });
+
     private static bool IsAlive(IDbConnection db, string sid) =>
         db.ExecuteScalar<int?>(
             @"SELECT CASE WHEN expires_at > UTC_TIMESTAMP(6) THEN 1 ELSE 0 END
@@ -1110,7 +1319,8 @@ public sealed class SessionRecordConcurrentPcGateTests : IDisposable
     /// <c>SessionValidityMiddleware</c> <b>실물</b>을 한 번 돌린다.
     /// </summary>
     /// <remarks>
-    /// ⚠️ 캐시는 <b>매번 새로 만든다</b> — 미들웨어가 <c>single-pc-login:{tenantId}</c>·
+    /// ⚠️ 캐시는 <b>매번 새로 만든다</b> — 미들웨어가 <c>session-validity:{tenantId}</c>(⬛ 3차까지
+    /// <c>single-pc-login:{tenantId}</c> · 4차에서 스위치가 갈려 키도 바뀌었다)·
     /// <c>session-alive:{sid}</c> 를 10초 캐시하므로, 공유하면 앞 시험이 뒤 시험을 오염시킨다.
     /// </remarks>
     private static async Task<(DefaultHttpContext Ctx, bool NextCalled)> RunSessionValidityAsync(
