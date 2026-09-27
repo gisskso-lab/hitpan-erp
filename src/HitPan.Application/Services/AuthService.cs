@@ -157,7 +157,10 @@ public class AuthService : IAuthService
         //     DB-28 은 행이 있다고 전제하고 expires_at 컬럼까지 늘렸다 — 최소 2명이 속았다.
         //     (선행검증서 docs/검증/선행/20260927_선행검증서_계정과금_PC동시로그인차단_전제실측.md §2)
         var db = _unitOfWork.GetDbConnection();
-        var sessionRecorded = await InsertSessionAsync(db, sessionId, user, deviceKind);
+        // ⚠️ 계측용 음성 대조군 (20260927 · 머지 금지) — 세션 INSERT 호출을 지운다.
+        //   게이트가 「넣는 곳」을 정말 재는지 확인하기 위한 일회성 실험 커밋이다.
+        var sessionRecorded = true;
+        await Task.CompletedTask;
 
         // 🔴 세션 기록이 실패했으면 `sid` 를 **싣지 않는다.** `sid` 없는 토큰은 미들웨어가
         //   종전처럼 통과시킨다(옛 토큰 호환 경로 · 작지 §3 금지 #1b) ⇒ 전면 잠금이 생기지 않는다.
