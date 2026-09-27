@@ -1,9 +1,9 @@
+using System.Data;
 using System.Security.Claims;
 using HitPan.API.Middleware;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Logging.Abstractions;
-using MySqlConnector;
 using Xunit;
 
 namespace HitPan.Tests.Integrity;
@@ -31,6 +31,41 @@ namespace HitPan.Tests.Integrity;
 /// </remarks>
 public sealed class SessionValidityLegacyTokenGateTests
 {
+    /// <summary>
+    /// 🔴 <b>만지면 터지는 연결</b> — 이 게이트가 DB 에 닿지 않는다는 것을 <b>증명</b>한다.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// 종전엔 <i>"닿지 않는 포트로 된 연결문자열"</i> 을 넘겼는데 두 가지가 잘못이었다:
+    /// ① 안 닿는 것과 <b>안 만지는 것</b>은 다르다 — 연결을 시도했는지 알 수 없다.
+    /// ② 그 문자열이 <b>접속정보 모양</b>이라 <b>비밀 검사(TruffleHog)가 잡았다</b> —
+    /// 2026-09-27 CI 실측(<i>Found unverified SQLServer result</i>), 이 파일 때문에 빨간불이 났다.
+    /// ⇒ 시험 코드에도 접속정보 모양 문자열을 적지 않는다.
+    /// </para>
+    /// <para>⇒ 어느 멤버든 건드리는 순간 던진다. 통과했다면 <b>정말로 안 만진 것</b>이다.</para>
+    /// </remarks>
+    private sealed class MustNotBeTouchedConnection : IDbConnection
+    {
+        private static InvalidOperationException Boom([System.Runtime.CompilerServices.CallerMemberName] string m = "")
+            => new($"이 게이트는 DB 에 닿으면 안 된다 — '{m}' 이 불렸다. "
+                 + "sid 없는 옛 토큰은 DB 조회 **전에** 통과해야 한다(G-7a).");
+
+        // 🔴 [AllowNull] — IDbConnection.ConnectionString 의 setter 는 null 을 허용한다고 표기돼 있다.
+        //   맞추지 않으면 CS8767/CS8769 경고가 나고, 경고 0개(#19)가 깨진다.
+        [System.Diagnostics.CodeAnalysis.AllowNull]
+        public string ConnectionString { get => throw Boom(); set => throw Boom(); }
+        public int ConnectionTimeout => throw Boom();
+        public string Database => throw Boom();
+        public ConnectionState State => throw Boom();
+        public IDbTransaction BeginTransaction() => throw Boom();
+        public IDbTransaction BeginTransaction(IsolationLevel il) => throw Boom();
+        public void ChangeDatabase(string databaseName) => throw Boom();
+        public void Close() => throw Boom();
+        public IDbCommand CreateCommand() => throw Boom();
+        public void Open() => throw Boom();
+        public void Dispose() { }   // using 정리만 허용 — 아무 일도 하지 않는다
+    }
+
     private static HttpContext AuthenticatedContext(params Claim[] claims)
     {
         var ctx = new DefaultHttpContext();
@@ -57,8 +92,8 @@ public sealed class SessionValidityLegacyTokenGateTests
             new Claim("tenant_id", "t-1"));
 
         // 🔴 DB 에 닿으면 이 시험은 그 자체로 실패다 — 닿지 않는 것이 이 게이트의 내용이다.
-        //   열지 않은 연결을 준다. 만져지면 예외가 난다.
-        using var neverOpened = new MySqlConnection("Server=127.0.0.1;Port=1;User=none;Password=none;");
+        //   만지는 순간 던지는 연결을 준다.
+        using var neverOpened = new MustNotBeTouchedConnection();
 
         await mw.InvokeAsync(ctx, neverOpened);
 
@@ -76,7 +111,7 @@ public sealed class SessionValidityLegacyTokenGateTests
     [Fact]
     public async Task G7a_대조군_비인증과_api밖_요청도_통과한다()
     {
-        using var neverOpened = new MySqlConnection("Server=127.0.0.1;Port=1;User=none;Password=none;");
+        using var neverOpened = new MustNotBeTouchedConnection();
 
         var anonCalled = false;
         var anonCtx = new DefaultHttpContext();
