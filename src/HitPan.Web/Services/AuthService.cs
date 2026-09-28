@@ -9,6 +9,16 @@ namespace HitPan.Web.Services;
 
 public sealed class AuthService : IAuthService
 {
+    /// <summary>
+    /// 🔴 로그아웃이 서버에서 끝나지 않았다는 표 (20260928작2 절K · 설계 §13-4).
+    /// </summary>
+    /// <remarks>
+    /// 로그아웃을 부르는 쪽(<c>AccountBadge</c>·<c>MultiTabBar</c>)은 곧바로 <c>/login</c> 을 새로 고쳐 불러
+    /// 안내(스낵바)가 사라진다 ⇒ 이 탭의 sessionStorage 에 한 칸 남기고 <c>Login.razor</c> 가 읽고 지운다.
+    /// 토큰이 아니다(민감 정보 0) — 저장 정책(절H)과 무관하다.
+    /// </remarks>
+    public const string LogoutIncompleteKey = "hitpan_logout_incomplete";
+
     private readonly HttpClient _http;
     private readonly HitPanProtectedLocalStorage _storage;
     private readonly HitPanAuthStateProvider _authState;
@@ -218,8 +228,37 @@ public sealed class AuthService : IAuthService
     public async Task LogoutAsync(CancellationToken ct = default)
     {
         // 로그아웃 API 호출 (자동 퇴근 기록)
-        try { await _http.PostAsJsonAsync("api/auth/logout", new { }, ct); }
-        catch { /* 퇴근 기록 실패해도 로그아웃 진행 */ }
+        // ⬛ [낡은 줄 · 20260928작2 절K 이전] `try { await _http.PostAsJsonAsync(…); } catch { /* … */ }`
+        //   — 응답 코드를 보지 않았고 빈 catch 였다(#15). 서버가 접속을 못 끝냈어도 화면은 조용히 로그아웃했고,
+        //   남은 접속 때문에 다른 PC 가 최대 8h 「다른 PC에서 사용 중입니다」로 막혔다(PI-4).
+        // 🔴 [지금] 상태를 본다. 실패면 로그인 화면에 알린다(표 한 칸 — 부르는 쪽이 곧 /login 으로 새로 고친다).
+        //   로컬 토큰은 **그래도 지운다** — 이 PC 에서는 로그아웃이 맞다.
+        var completed = false;
+        try
+        {
+            using var response = await _http.PostAsJsonAsync("api/auth/logout", new { }, ct);
+            completed = response.IsSuccessStatusCode;
+            if (!completed)
+            {
+                Console.Error.WriteLine($"[Auth] 로그아웃 서버 처리 실패 ({(int)response.StatusCode})");
+            }
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine($"[Auth] 로그아웃 요청 실패: {ex.Message}");
+        }
+
+        if (!completed)
+        {
+            try
+            {
+                await _js.InvokeVoidAsync("sessionStorage.setItem", LogoutIncompleteKey, "1");
+            }
+            catch (Exception ex)
+            {
+                Console.Error.WriteLine($"[Auth] 로그아웃 미완료 표시 저장 실패: {ex.Message}");
+            }
+        }
 
         await _storage.DeleteAsync(AuthStorageKeys.AccessToken);
         await _storage.DeleteAsync(AuthStorageKeys.RefreshToken);

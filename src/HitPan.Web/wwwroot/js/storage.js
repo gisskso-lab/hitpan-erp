@@ -1,16 +1,40 @@
-// 민감 토큰(access/refresh)은 sessionStorage — 탭 종료 시 자동 소거, localStorage 대비 XSS 노출 창 짧음.
-// 비민감 UI 상태(테마, 필터, 목록 너비 등)는 localStorage 유지.
-// (근본 방어인 HttpOnly 쿠키 전환은 P1 작지서로 별도 처리.)
+// ⬛ [낡은 머리 주석 · 20260928작2 절H 이전]
+//   "민감 토큰(access/refresh)은 sessionStorage — 탭 종료 시 자동 소거, localStorage 대비 XSS 노출 창 짧음.
+//    비민감 UI 상태(테마, 필터, 목록 너비 등)는 localStorage 유지.
+//    (근본 방어인 HttpOnly 쿠키 전환은 P1 작지서로 별도 처리.)"
+//
+// 🔴 사장님 9/28 K-6 (가) — 창을 닫으면 자기 접속에 막히던 P0 봉합(20260928작2 절H · 설계 §13-1 · PI-1).
+//   [무엇이 났나] PC 1대 차단을 켜자, 창(탭)을 닫는 순간 sessionStorage 의 토큰이 사라지는데 서버의 접속은
+//     살아 있어서, 같은 PC 에서 다시 열면 **자기 접속 때문에** 「다른 PC에서 사용 중입니다」(409)로 막혔다.
+//   [지금] access·refresh 를 **localStorage** 에 둔다 — 창·브라우저를 다시 열어도, 새 탭에서도 로그인이 이어진다.
+//     같은 브라우저의 탭들은 **한 로그인을 나눠 쓴다**(한 탭 로그아웃 = 전 탭 로그아웃).
+//   ⚠️ 대가(사장님 수용): 공용 PC 에서 로그아웃 없이 닫으면 다음 사람이 앞 사람 계정으로 열린다(상한 = refresh 7일).
+//     로그인 화면의 퇴근 안내 한 줄(절M)이 이것을 알린다. HttpOnly 쿠키는 보안 별건 트랙이다(선행 = API CORS 좁히기).
+//   비민감 UI 상태(테마, 필터, 목록 너비 등)는 종전대로 localStorage.
 const SESSION_KEYS = new Set(['access_token', 'refresh_token']);
 
 const hitpanStorage = {
     set: (key, value) => {
-        const store = SESSION_KEYS.has(key) ? sessionStorage : localStorage;
-        store.setItem(key, value);
+        // ⬛ [낡은 줄] `const store = SESSION_KEYS.has(key) ? sessionStorage : localStorage;`
+        localStorage.setItem(key, value);
+        if (SESSION_KEYS.has(key)) {
+            // 옛 자리에 남은 값이 있으면 치운다 — 두 곳에 다른 값이 있으면 어느 것이 진짜인지 갈린다.
+            sessionStorage.removeItem(key);
+        }
     },
     get: (key) => {
-        const store = SESSION_KEYS.has(key) ? sessionStorage : localStorage;
-        return store.getItem(key);
+        // ⬛ [낡은 줄] `const store = SESSION_KEYS.has(key) ? sessionStorage : localStorage; return store.getItem(key);`
+        const v = localStorage.getItem(key);
+        if (v !== null || !SESSION_KEYS.has(key)) return v;
+
+        // 🔴 옮겨 오기 — 업데이트 순간 열려 있던 탭은 토큰을 sessionStorage 에 들고 있다.
+        //   localStorage 에 없고 sessionStorage 에 있으면 옮기고 sessionStorage 에서 지운다(그 탭이 튕기지 않는다).
+        const old = sessionStorage.getItem(key);
+        if (old !== null) {
+            localStorage.setItem(key, old);
+            sessionStorage.removeItem(key);
+        }
+        return old;
     },
     remove: (key) => {
         // 마이그레이션: 같은 키가 구 localStorage에 남아있을 수 있으므로 둘 다 제거.
@@ -25,7 +49,64 @@ window.hitpanStorage_get = (key) => hitpanStorage.get(key);
 window.hitpanStorage_remove = (key) => hitpanStorage.remove(key);
 
 // ══════════════════════════════════════════════════════════════════
+// 🔴 탭 사이 갱신 잠금 (20260928작2 절I · 설계 §13-2 ②).
+//
+//   토큰을 탭끼리 나눠 쓰게 되자(절H), 두 탭이 **같은 refresh** 로 동시에 갱신을 불렀다.
+//   서버는 두 번째를 거절(단일사용)하고, 화면은 그것을 「로그인 끝」으로 읽어 토큰을 지웠다.
+//   ⇒ 브라우저 전체에서 갱신을 한 번에 하나로 줄 세운다(navigator.locks — 탭이 닫히면 브라우저가 스스로 푼다).
+//
+//   hitpanLock_acquire(name, waitMs) → 잡은 번호(1 이상) · 0 = 잠금 없이 진행(지원 안 함·기다림 초과·오류)
+//   hitpanLock_release(id)           → 그 번호의 잠금을 푼다
+//   ⚠️ 0 이어도 C# 쪽 탭 안 잠금(RefreshGate.Lock)은 그대로 있다. 막히는 쪽으로 실패하지 않는다.
+// ══════════════════════════════════════════════════════════════════
+const _hitpanLockReleases = new Map();
+let _hitpanLockSeq = 0;
+
+window.hitpanLock_acquire = (name, waitMs) => {
+    if (!navigator.locks || typeof navigator.locks.request !== 'function') return Promise.resolve(0);
+
+    const id = ++_hitpanLockSeq;
+    return new Promise((resolveAcquired) => {
+        let settled = false;
+        const controller = (typeof AbortController === 'function') ? new AbortController() : null;
+        const timer = setTimeout(() => {
+            if (settled) return;
+            settled = true;
+            if (controller) controller.abort();
+            console.warn('[hitpanLock] 갱신 잠금 기다림 초과 — 잠금 없이 진행합니다', name);
+            resolveAcquired(0);
+        }, waitMs || 15000);
+
+        const options = controller ? { signal: controller.signal } : {};
+        navigator.locks.request(name, options, () => new Promise((release) => {
+            if (settled) { release(); return; }   // 이미 포기했다 — 잡자마자 놓는다
+            settled = true;
+            clearTimeout(timer);
+            _hitpanLockReleases.set(id, release);
+            resolveAcquired(id);
+        })).catch((e) => {
+            if (settled) return;                  // 기다림 초과로 끊은 것(AbortError) — 위에서 이미 알렸다
+            settled = true;
+            clearTimeout(timer);
+            console.warn('[hitpanLock] 갱신 잠금 실패 — 잠금 없이 진행합니다', e);
+            resolveAcquired(0);
+        });
+    });
+};
+
+window.hitpanLock_release = (id) => {
+    const release = _hitpanLockReleases.get(id);
+    if (!release) return;
+    _hitpanLockReleases.delete(id);
+    release();
+};
+
+// ══════════════════════════════════════════════════════════════════
 // 🔴 팝업창(메신저)에 로그인 상태를 물려준다. 작(2026-08-14).
+//
+//   ⬛ [20260928작2 절H] 토큰이 localStorage 로 옮겨 가 **팝업도 같은 저장소를 본다** ⇒ 이 함수가 물려줄 일은
+//     사실상 없다(sessionStorage 에 토큰이 없다). 옛 판(업데이트 전)에 열린 부모 창을 위해 **남긴다** — 지우지 않는다.
+//     아래 「왜 localStorage 로 안 옮기나」 서술은 K-6 (가) 이전의 판단이다.
 //
 //   ■ 무엇을 겪고서
 //     사장님 지적: "히트판메신저 팝업은 여전히 안됨" — 창은 뜨는데 **빈 화면**이었다.

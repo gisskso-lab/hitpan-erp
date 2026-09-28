@@ -333,12 +333,14 @@ public class AuthController : ControllerBase
             _logger.LogInformation(
                 "다른 PC 사용 중이라 로그인 거절 — 마지막 사용 {LastActive:u}", ex.OtherPcLastActiveAtUtc);
 
+            // ⬛ [낡은 칸 · 1.3.46 까지] `canForce = true` — 20260928작2 절G 에서 **뺐다**(잔재 정리).
+            //   화면에 버튼이 없고(`Login.razor` 절G) 서버도 force 를 읽지 않는다 ⇒ 「끊을 수 있다」는 거짓 신호였다.
+            //   Web 모델의 `CanForce` 칸은 무접촉(작지 절G) — 값이 안 오면 `false` 로 읽힌다.
             return Conflict(new
             {
                 message = ex.Message,
                 code = "other_pc_in_use",
-                otherPcLastActiveAt = ex.OtherPcLastActiveAtUtc,
-                canForce = true
+                otherPcLastActiveAt = ex.OtherPcLastActiveAtUtc
             });
         }
         catch (UnauthorizedAccessException ex)
@@ -413,9 +415,14 @@ public class AuthController : ControllerBase
                         "UPDATE refresh_tokens SET is_revoked = 1 WHERE user_id = @UserId AND session_id = @Sid",
                         new { UserId = userId, Sid = sid });
 
+                    // ⬛ [낡은 문장 · 20260928작2 절C] `DELETE FROM user_sessions WHERE session_id = @Sid`
+                    // 🔴 20260928작2 절K (방어) — 세션 행 삭제에도 `user_id` 를 건다. refresh 폐기와 **같은 모양**:
+                    //   `sid` 는 JWT 에서만 오지만, 조건으로도 남의 행을 지울 길을 닫는다([3-V] ②).
+                    //   순서 = ① refresh 폐기(위) ② 세션 행 삭제(여기) — ① 만 되고 ② 가 터져도 절L 술어가
+                    //   그 행을 「살아 있는 PC」로 세지 않는다(쓸 수 있는 refresh 가 없다 · G-B30 ⓑ).
                     await Dapper.SqlMapper.ExecuteAsync(db,
-                        "DELETE FROM user_sessions WHERE session_id = @Sid",
-                        new { Sid = sid });
+                        "DELETE FROM user_sessions WHERE user_id = @UserId AND session_id = @Sid",
+                        new { UserId = userId, Sid = sid });
                 }
                 else
                 {
@@ -424,7 +431,18 @@ public class AuthController : ControllerBase
                         "로그아웃 — 토큰에 세션 번호가 없어 지울 행이 없다(옛 토큰·세션 기록 실패). UserId: {UserId}", userId);
                 }
             }
-            catch (Exception ex) { _logger.LogWarning(ex, "로그아웃 세션/토큰 정리 실패 — UserId: {UserId}", userId); }
+            // ⬛ [낡은 갈래 · 20260928작2 절K 이전] `catch (Exception ex) { _logger.LogWarning(…); }` 뒤 **200 「로그아웃 완료」**.
+            //   [무엇이 틀렸나] 폐기가 실패해도 200 이라 화면은 조용히 로그아웃했고, 남은 접속 때문에
+            //   다른 PC 가 최대 8h 409 로 막혔다(PI-4). 사용자는 왜인지 알 길이 없었다.
+            // 🔴 [지금] 실패는 **500** 으로 알린다(200 금지 · 설계 §13-4). 화면이 「로그아웃이 완료되지 않았습니다…」를 보여 준다.
+            //   접속기록(`logout`)은 남기지 않는다 — 끝나지 않은 로그아웃을 끝났다고 적지 않는다.
+            //   ⚠️ 이 갈래를 `Ok` 로 되돌리면 G-B30 ⓐ 가 FAIL 한다.
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "로그아웃 세션/토큰 정리 실패 — UserId: {UserId}", userId);
+                return StatusCode(500,
+                    new { message = "로그아웃이 완료되지 않았습니다" });
+            }
 
             // 🔴 20260928작2 절E — 접속기록 1행(`audit_trail` · `user_session` · `logout`). 폐기 **뒤**에 남긴다.
             //   테넌트·사용자는 JWT(`Items`)에서만(#2). 기기 종류는 로그인과 **같은 판정**(서버가 읽은 UA)이다 — 표시용.
