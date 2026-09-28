@@ -141,6 +141,16 @@ public class AuthService : IAuthService
         // user_sessions.device_kind 는 enum('pc','mobile') 두 값뿐이다(DESCRIBE 실측 · #13).
         //   판정은 위에서 끝났고, 여기서는 저장 가능한 칸으로만 접는다(tablet → 휴대기기 칸).
         var deviceKind = DeviceTypeResolver.ToSessionDeviceKind(resolvedDeviceType);
+        // 🔴 20260928작2 [4] N-6 — PI-7(갱신 경로 「UA 가 비면 `pc`」)을 **로그인에도 대칭으로** 둔다.
+        //   UA 가 비면 위 판정이 신고값을 그대로 쓴다(`?? "mobile"`) ⇒ UA 를 안 보내고 신고값 `mobile`(또는 없음)이면
+        //   직접 API 호출 한 번으로 PC 1대 차단 밖 세션이 생겼다. 판정을 포기한 경우는 **세는 쪽**이다(갱신과 같은 규칙).
+        //   브라우저는 UA 를 늘 보낸다(컨트롤러가 헤더로 덮어쓴다) — 실사용 화면 영향 없음.
+        //   ⚠️ Mac UA(판정 포기 fall-through)는 여전히 신고값·싼 칸이다(갱신과 같은 기록 · 설계 §13-6).
+        //   ⚠️ 이 갈래를 빼면 G-B33b 가 FAIL 한다(새 행 `mobile`).
+        if (string.IsNullOrWhiteSpace(request.UserAgent))
+        {
+            deviceKind = "pc";
+        }
         // ⬛ [낡은 줄 · 20260927작1] `await EnforceSinglePcLoginAsync(loginDb, user, deviceKind, request.ForceSignOutOtherPc);`
         // 🔴 20260928작2 절B (K-4 다 · 사장님 원문 *"「다른 PC에서 사용 중입니다」 안내가 뜨고, 로그인 불가."*)
         //   — **먼저 들어온 PC 가 이긴다.** `request.ForceSignOutOtherPc` 는 **읽지 않는다**

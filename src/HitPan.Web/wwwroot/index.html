@@ -67,7 +67,11 @@
         <a href="." class="reload">새로고침</a>
         <span class="dismiss">✕</span>
     </div>
-    <script src="js/storage.js"></script>
+    <!-- ⬛ [낡은 줄 · 20260928작2 이전] src 가 꼬리표 없는 js/storage.js 였다.
+         🔴 20260928작2 [4] N-4 — 버전 꼬리표를 붙인다. storage.js 가 토큰 저장 위치(localStorage)와 탭 사이
+         갱신 잠금(hitpanLock_*)을 새로 갖는다. 새 화면(WASM)에 캐시된 옛 파일이 남으면 토큰이 옛 자리에 남고
+         잠금 함수가 없어 고친 것이 안 간다(hitpan-mainpc-proof.js 와 같은 관례). -->
+    <script src="js/storage.js?v=20260928a"></script>
     <script src="js/device-fingerprint.js"></script>
     <!-- 🔴 메인PC 「왕복 증명」 (20260922작2 절B) — 브라우저가 자기 PC 안의 히트판을 두드려
          메인PC 인지 가린다. 터널을 지나오면 IP 로는 못 가리기 때문이다.
