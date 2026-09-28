@@ -269,6 +269,57 @@ public sealed class SessionRecordConcurrentPcGateTests : IDisposable
         return (new AuthService(new GateUnitOfWork(db), new GateUserLookup(_user)), db);
     }
 
+    /// <summary>
+    /// G-B29 전용 — <b>자기 연결 · 자기 계정 객체</b>를 가진 <c>AuthService</c> 실물(운영의 요청 하나 = DI 범위 하나 모양).
+    /// </summary>
+    /// <remarks>
+    /// 동시에 도는 두 로그인이 <c>User</c> 객체(실패 횟수·마지막 로그인 칸을 고친다)를 나눠 쓰지 않게 한다 —
+    /// 같은 계정(같은 <c>Id</c>·비밀번호 해시)이지만 객체는 따로다. 판정·잠금은 운영 코드와 DB 가 한다.
+    /// </remarks>
+    private (AuthService Svc, MySqlConnection Db) NewAuthServiceWithOwnUser()
+    {
+        var user = new User
+        {
+            Id = _user.Id,
+            UserId = _user.UserId,
+            TenantId = _user.TenantId,
+            Email = _user.Email,
+            PasswordHash = _user.PasswordHash,
+            UserName = _user.UserName,
+            AccountType = _user.AccountType,
+            IsActive = true,
+            LastLoginAt = _user.LastLoginAt
+        };
+        var db = new MySqlConnection(DbConnString());
+        db.Open();
+        return (new AuthService(new GateUnitOfWork(db), new GateUserLookup(user)), db);
+    }
+
+    /// <summary>작업 하나의 결과를 <b>예외째</b> 받는다(성공 = <c>null</c>) — 동시 실행 결과를 나란히 세기 위한 것(G-B29).</summary>
+    private static async Task<Exception?> CaptureAsync(Func<Task> work)
+    {
+        try
+        {
+            await work();
+            return null;
+        }
+        catch (Exception ex)
+        {
+            return ex;
+        }
+    }
+
+    /// <summary>
+    /// 준비 (G-B31 대조) — 그 세션 번호로 <b>쓸 수 있는 refresh 한 줄</b>을 붙인다(상태 만들기 · 판정 아님).
+    /// </summary>
+    /// <remarks>컬럼은 출하 DDL 실측(<c>refresh_tokens</c> — token_id·user_id·token_hash·expires_at 만 NOT NULL · #13).
+    /// <c>expires_at</c> 은 앱이 적는 것과 같은 UTC 다.</remarks>
+    private static void AttachUsableRefresh(IDbConnection db, string sid) =>
+        db.Execute(
+            @"INSERT INTO refresh_tokens (token_id, user_id, token_hash, expires_at, is_revoked, session_id)
+              VALUES (UUID(), @UserId, @Hash, UTC_TIMESTAMP(6) + INTERVAL 1 DAY, 0, @Sid)",
+            new { UserId, Hash = "gate-b31-" + Guid.NewGuid().ToString("N"), Sid = sid });
+
     private LoginRequest NewLoginRequest(
         string? claimedDeviceType, string? userAgent, bool force = false, string? fingerprint = null) => new()
         {
@@ -2144,6 +2195,354 @@ public sealed class SessionRecordConcurrentPcGateTests : IDisposable
                 new RefreshTokenRequest { RefreshToken = login.RefreshToken, UserAgent = WindowsUa });
             Assert.Equal(sid, SidOf(refreshed));
         }
+    }
+
+    // ══════════════════════════════════════════════════════════════
+    // G-B29 ~ G-B33 · W-1 — 개정2 병렬이슈 PI-2~PI-7 봉합을 동작으로 잰다
+    //   (20260928작2 절O · 설계 docs/설계/erp/로그아웃기기단위_F4_설계_20260928.md §13-7)
+    //   G-B34(끝내기 표)는 K-7 = 나 ⇒ 절N 미착수라 없다.
+    // ══════════════════════════════════════════════════════════════
+
+    /// <summary>
+    /// 🔴🔴 <b>G-B29</b> (PI-3 로그인 경주) — 같은 계정 PC 로그인 두 개를 <b>서로 다른 연결</b>로 동시에 ⇒
+    /// 성공 <b>1</b> · 409 <b>1</b> · PC 세션 행 <b>1</b>.
+    /// </summary>
+    /// <remarks>
+    /// <para>창은 <c>BEFORE INSERT ON user_sessions</c> 트리거의 <c>SLEEP(2)</c> 로 <b>결정적으로</b> 넓힌다 —
+    /// 두 로그인이 판정을 마친 뒤 세션·refresh 를 넣기 전까지 2초가 벌어진다(설계 §13-7 은 1초 · 여유를 늘렸다).</para>
+    /// <para>⚠️ 한 연결을 두 작업이 나눠 쓰지 않는다(#16) — 운영처럼 요청마다 자기 연결이다(<c>NewAuthServiceWithOwnUser</c>).</para>
+    /// <para>🔴 음성 대조군 — <c>TryAcquireLoginLockAsync</c>(<c>GET_LOCK</c>)를 빼면 둘 다 판정을 통과해 성공 2 · 행 2 로 FAIL.</para>
+    /// </remarks>
+    [Fact]
+    public async Task G_B29_같은_계정_PC_로그인_둘이_동시에_와도_하나만_들어온다()
+    {
+        if (!ServerAvailable() && DbGateEnvironment.SkipOrFail("G-B29 로그인 경주")) return;
+        SetUpFreshInstall();
+
+        using var admin = new MySqlConnection(DbConnString());
+        admin.Open();
+        SetKillSwitch(admin, 1);
+        admin.Execute(
+            "CREATE TRIGGER gate_b29_slow_session BEFORE INSERT ON user_sessions FOR EACH ROW "
+            + "SET @gate_b29_slept = SLEEP(2)");
+
+        var (svcA, dbA) = NewAuthServiceWithOwnUser();
+        var (svcB, dbB) = NewAuthServiceWithOwnUser();
+        Exception?[] outcomes;
+        using (dbA)
+        using (dbB)
+        {
+            try
+            {
+                var a = Task.Run(() => CaptureAsync(() => svcA.LoginAsync(NewLoginRequest("pc", WindowsUa))));
+                var b = Task.Run(() => CaptureAsync(() => svcB.LoginAsync(NewLoginRequest("pc", WindowsUa))));
+                outcomes = new[] { await a, await b };
+            }
+            finally
+            {
+                DropTrigger(admin, "gate_b29_slow_session");
+            }
+        }
+
+        var succeeded = outcomes.Count(o => o is null);
+        var blocked = outcomes.Count(o => o is ConcurrentPcLoginException);
+        Assert.True(succeeded == 1 && blocked == 1,
+            "동시 로그인 결과가 「성공 1 · 409 1」이 아니다 — "
+            + string.Join(" / ", outcomes.Select(o => o is null ? "성공" : o.GetType().Name + ": " + o.Message)));
+        Assert.Equal(1, admin.ExecuteScalar<int>("SELECT COUNT(*) FROM user_sessions WHERE device_kind = 'pc'"));
+    }
+
+    /// <summary>
+    /// 🔴🔴 <b>G-B30 ⓐ</b> (PI-4 로그아웃 실패) — refresh 폐기가 터지면 로그아웃은 <b>500</b> · 세션 행 <b>생존</b> · refresh 도 그대로.
+    /// </summary>
+    /// <remarks>
+    /// 종전은 실패해도 200 「로그아웃 완료」였다 ⇒ 화면은 조용히 로그아웃했고 남은 접속이 다른 PC 를 최대 8h 막았다.
+    /// <para>🔴 음성 대조군 — <c>Logout</c> 의 실패 갈래를 <c>Ok</c> 로 되돌리면 200 이라 FAIL.</para>
+    /// </remarks>
+    [Fact]
+    public async Task G_B30_1_로그아웃_refresh_폐기가_터지면_500_이다()
+    {
+        if (!ServerAvailable() && DbGateEnvironment.SkipOrFail("G-B30ⓐ 로그아웃 폐기 실패 500")) return;
+        SetUpFreshInstall();
+
+        var (svc, db) = NewAuthService();
+        using (db)
+        {
+            var pc = await svc.LoginAsync(NewLoginRequest("pc", WindowsUa));
+            var sid = SidOf(pc)!;
+
+            db.Execute(
+                "CREATE TRIGGER gate_b30a_fail_revoke BEFORE UPDATE ON refresh_tokens FOR EACH ROW "
+                + "SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'gate_b30a_fail_revoke'");
+            Microsoft.AspNetCore.Mvc.IActionResult result;
+            try
+            {
+                result = await NewAuthController(svc, db, WindowsUa, sid: sid).Logout(CancellationToken.None);
+            }
+            finally
+            {
+                DropTrigger(db, "gate_b30a_fail_revoke");
+            }
+
+            var obj = Assert.IsAssignableFrom<Microsoft.AspNetCore.Mvc.ObjectResult>(result);
+            Assert.Equal(StatusCodes.Status500InternalServerError, obj.StatusCode);
+            Assert.True(IsAlive(db, sid));                  // 끝나지 않은 로그아웃 — 행이 남았다
+            Assert.Equal(1, ActiveRefreshCount(db, sid));   // 양성 조건 — 트리거가 실제로 폐기를 막았다
+            Assert.DoesNotContain(AccessTrail(db), r => r.Action == "logout");   // 끝나지 않은 로그아웃은 적지 않는다
+        }
+    }
+
+    /// <summary>
+    /// 🔴🔴 <b>G-B30 ⓑ</b> (PI-4 · PI-5) — refresh 폐기는 됐고 <b>세션 행 삭제가 터지면</b> 500 ⇒ 원인을 걷은 뒤
+    /// 같은 계정 PC2 로그인이 <b>성공</b>한다(남은 행에 쓸 수 있는 refresh 가 없다).
+    /// </summary>
+    /// <remarks>
+    /// <para>🔴 음성 대조군 — 「살아 있는 PC」 술어(<c>LivePcSessionPredicate</c>)에서 <c>EXISTS</c> 를 빼면 남은 행이 세어져 PC2 409 로 FAIL.</para>
+    /// </remarks>
+    [Fact]
+    public async Task G_B30_2_로그아웃_행삭제가_터져도_다른_PC_는_들어온다()
+    {
+        if (!ServerAvailable() && DbGateEnvironment.SkipOrFail("G-B30ⓑ 로그아웃 반쪽 실패")) return;
+        SetUpFreshInstall();
+
+        var (svc, db) = NewAuthService();
+        using (db)
+        {
+            SetKillSwitch(db, 1);
+            var pc1 = await svc.LoginAsync(NewLoginRequest("pc", WindowsUa));
+            var sid1 = SidOf(pc1)!;
+
+            db.Execute(
+                "CREATE TRIGGER gate_b30b_fail_delete BEFORE DELETE ON user_sessions FOR EACH ROW "
+                + "SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'gate_b30b_fail_delete'");
+            Microsoft.AspNetCore.Mvc.IActionResult result;
+            try
+            {
+                result = await NewAuthController(svc, db, WindowsUa, sid: sid1).Logout(CancellationToken.None);
+            }
+            finally
+            {
+                DropTrigger(db, "gate_b30b_fail_delete");
+            }
+
+            var obj = Assert.IsAssignableFrom<Microsoft.AspNetCore.Mvc.ObjectResult>(result);
+            Assert.Equal(StatusCodes.Status500InternalServerError, obj.StatusCode);
+            Assert.True(IsAlive(db, sid1));                  // 양성 조건 — 행 삭제가 실제로 막혔다
+            Assert.Equal(0, ActiveRefreshCount(db, sid1));   // ① refresh 폐기는 됐다
+
+            var pc2 = await svc.LoginAsync(NewLoginRequest("pc", WindowsUa));   // 🔴 409 가 아니다
+            Assert.Equal("pc", SessionKind(db, SidOf(pc2)!));
+        }
+    }
+
+    /// <summary>
+    /// 🔴🔴 <b>G-B31</b> (PI-5 잔여 행은 안 잠근다) — refresh 저장 실패 + <b>보상 DELETE 도 실패</b> ⇒ 잔여 행 1 ·
+    /// 원인을 걷은 뒤 재로그인 <b>성공</b> · 대조: 그 잔여 행에 쓸 수 있는 refresh 를 붙이면 <b>409</b>.
+    /// </summary>
+    /// <remarks>
+    /// <para>G-B24 는 보상이 <b>성공</b>하는 길만 잰다. 연결이 상한 것이 원인이면 보상도 같이 죽는다 — 그때의 방어가 절L 술어다.</para>
+    /// <para>🔴 음성 대조군 — 술어에서 <c>EXISTS</c> 를 빼면 잔여 행이 세어져 재로그인 409 로 FAIL.
+    /// 대조(쓸 수 있는 refresh 를 붙이면 409)는 잔여 행이 <b>살아 있는 PC 모양</b>이라는 양성 조건이다 — 술어가 행을 아예 안 보는 것이 아님을 잰다.</para>
+    /// </remarks>
+    [Fact]
+    public async Task G_B31_보상까지_실패한_잔여_행은_재로그인을_잠그지_않는다()
+    {
+        if (!ServerAvailable() && DbGateEnvironment.SkipOrFail("G-B31 잔여 행은 안 잠근다")) return;
+        SetUpFreshInstall();
+
+        var (svc, db) = NewAuthService();
+        using (db)
+        {
+            SetKillSwitch(db, 1);
+
+            FailInsertsInto(db, "gate_b31_fail_refresh", "refresh_tokens");
+            db.Execute(
+                "CREATE TRIGGER gate_b31_fail_delete BEFORE DELETE ON user_sessions FOR EACH ROW "
+                + "SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'gate_b31_fail_delete'");
+            MarkSessionInsert(db);
+            try
+            {
+                var ex = await Assert.ThrowsAnyAsync<Exception>(
+                    () => svc.LoginAsync(NewLoginRequest("pc", WindowsUa)));
+                Assert.Contains("gate_b31_fail_refresh", ex.Message, StringComparison.Ordinal);   // 원인 예외 그대로
+            }
+            finally
+            {
+                DropTrigger(db, "gate_b31_fail_refresh");
+                DropTrigger(db, "gate_b31_fail_delete");
+                DropSessionInsertMarker(db);
+            }
+
+            Assert.Equal(1, AlertCount(db, "gate_b13c_session_inserted"));   // 양성 조건 — INSERT 는 돌았다
+            Assert.Equal(1, SessionCount(db));                                 // 양성 조건 — 보상이 실제로 실패했다
+            var residual = db.ExecuteScalar<string>("SELECT session_id FROM user_sessions LIMIT 1")!;
+            Assert.True(IsAlive(db, residual));
+
+            var again = await svc.LoginAsync(NewLoginRequest("pc", WindowsUa));   // 🔴 409 가 아니다
+            var againSid = SidOf(again)!;
+            Assert.Equal("pc", SessionKind(db, againSid));
+
+            // 대조 — 재로그인을 로그아웃으로 치우고, 잔여 행에 쓸 수 있는 refresh 를 붙이면 그 행이 「살아 있는 PC」다.
+            var logout = await NewAuthController(svc, db, WindowsUa, sid: againSid).Logout(CancellationToken.None);
+            Assert.IsType<Microsoft.AspNetCore.Mvc.OkObjectResult>(logout);
+            AttachUsableRefresh(db, residual);
+            await Assert.ThrowsAsync<ConcurrentPcLoginException>(
+                () => svc.LoginAsync(NewLoginRequest("pc", WindowsUa)));
+        }
+    }
+
+    /// <summary>
+    /// 🔴🔴 <b>G-B32 ①</b> (PI-6 회전 뒤에도 센다) — PC1 로그인 → 갱신 1회 ⇒ PC2 로그인 <b>409</b> ·
+    /// 회전된 refresh 의 <c>session_id</c> = PC1 <c>sid</c>.
+    /// </summary>
+    /// <remarks>
+    /// 절L 술어는 「그 세션의 쓸 수 있는 refresh」를 본다 ⇒ 회전 INSERT 가 <c>session_id</c> 를 빠뜨리면 첫 갱신 뒤 차단이 <b>조용히</b> 꺼진다.
+    /// <para>🔴 음성 대조군 — 회전 INSERT 의 <c>SessionId = rotatedSessionId</c> 를 빼면(NULL) PC2 가 들어와 FAIL.</para>
+    /// </remarks>
+    [Fact]
+    public async Task G_B32_1_갱신_한번_뒤에도_두번째_PC_는_409_다()
+    {
+        if (!ServerAvailable() && DbGateEnvironment.SkipOrFail("G-B32① 회전 뒤 차단")) return;
+        SetUpFreshInstall();
+
+        var (svc, db) = NewAuthService();
+        using (db)
+        {
+            SetKillSwitch(db, 1);
+
+            var pc1 = await svc.LoginAsync(NewLoginRequest("pc", WindowsUa));
+            var sid1 = SidOf(pc1)!;
+            var rotated = await svc.RefreshAsync(
+                new RefreshTokenRequest { RefreshToken = pc1.RefreshToken, UserAgent = WindowsUa });
+            Assert.Equal(sid1, SidOf(rotated));
+
+            await Assert.ThrowsAsync<ConcurrentPcLoginException>(
+                () => svc.LoginAsync(NewLoginRequest("pc", WindowsUa)));
+            Assert.Equal(1, ActiveRefreshCount(db, sid1));   // 회전된 행이 sid 를 달고 있다
+        }
+    }
+
+    /// <summary>
+    /// 🔴 <b>G-B32 ②</b> (G-B18 을 회전 토큰으로) — PC·모바일 각각 갱신 1회 → 모바일 <c>sid</c> 로그아웃 ⇒
+    /// 모바일 <b>회전 토큰</b> 갱신 401(「로그아웃된 토큰」) · PC <b>회전 토큰</b> 갱신 2회 성공.
+    /// </summary>
+    /// <remarks>🔴 음성 대조군 — 회전 INSERT 의 <c>session_id</c> 를 빼면 로그아웃 폐기가 0행이라 모바일 갱신이 성공해 FAIL.</remarks>
+    [Fact]
+    public async Task G_B32_2_회전된_토큰도_로그아웃이_그_로그인만_폐기한다()
+    {
+        if (!ServerAvailable() && DbGateEnvironment.SkipOrFail("G-B32② 회전 토큰 로그아웃")) return;
+        SetUpFreshInstall();
+
+        var (svc, db) = NewAuthService();
+        using (db)
+        {
+            SetValiditySwitch(db, 0);   // 거절 출처를 폐기 검사로 고정한다(G-B18 과 같다)
+
+            var pc = await svc.LoginAsync(NewLoginRequest("pc", WindowsUa));
+            var mobile = await svc.LoginAsync(NewLoginRequest("mobile", IPhoneUa));
+            var pcR = await svc.RefreshAsync(
+                new RefreshTokenRequest { RefreshToken = pc.RefreshToken, UserAgent = WindowsUa });
+            var mobileR = await svc.RefreshAsync(
+                new RefreshTokenRequest { RefreshToken = mobile.RefreshToken, UserAgent = IPhoneUa });
+            var mobileSid = SidOf(mobileR)!;
+
+            await NewAuthController(svc, db, IPhoneUa, sid: mobileSid).Logout(CancellationToken.None);
+
+            var ex = await Assert.ThrowsAsync<UnauthorizedAccessException>(
+                () => svc.RefreshAsync(
+                    new RefreshTokenRequest { RefreshToken = mobileR.RefreshToken, UserAgent = IPhoneUa }));
+            Assert.Contains("로그아웃된 토큰", ex.Message, StringComparison.Ordinal);
+
+            var pcAfter = await RefreshTwiceAsync(svc, pcR, WindowsUa);
+            Assert.Equal(SidOf(pc), SidOf(pcAfter));
+        }
+    }
+
+    /// <summary>
+    /// 🔴 <b>G-B32 ③</b> (G-B20 을 회전 토큰으로) — PC1 갱신 1회 → 만료 → PC2 로그인 ⇒ PC1 <b>회전 토큰</b> 갱신 401(「로그아웃된 토큰」).
+    /// </summary>
+    /// <remarks>🔴 음성 대조군 — 회전 INSERT 의 <c>session_id</c> 를 빼면 죽은 PC 정리가 회전 토큰을 못 가르고
+    /// 가드 문장(「다른 컴퓨터에서 사용 중이어서…」)으로 거절돼 메시지 단언이 FAIL.</remarks>
+    [Fact]
+    public async Task G_B32_3_회전된_토큰도_죽은_PC_정리가_폐기한다()
+    {
+        if (!ServerAvailable() && DbGateEnvironment.SkipOrFail("G-B32③ 회전 토큰 죽은 PC 정리")) return;
+        SetUpFreshInstall();
+
+        var (svc, db) = NewAuthService();
+        using (db)
+        {
+            SetKillSwitch(db, 1);
+
+            var pc1 = await svc.LoginAsync(NewLoginRequest("pc", WindowsUa));
+            var pc1R = await svc.RefreshAsync(
+                new RefreshTokenRequest { RefreshToken = pc1.RefreshToken, UserAgent = WindowsUa });
+            var sid1 = SidOf(pc1R)!;
+            ExpireSession(db, sid1);
+
+            var pc2 = await svc.LoginAsync(NewLoginRequest("pc", WindowsUa));   // 만료라 409 없음
+
+            var ex = await Assert.ThrowsAsync<UnauthorizedAccessException>(
+                () => svc.RefreshAsync(
+                    new RefreshTokenRequest { RefreshToken = pc1R.RefreshToken, UserAgent = WindowsUa }));
+            Assert.Contains("로그아웃된 토큰", ex.Message, StringComparison.Ordinal);   // 🔴 폐기에서 막혔다(가드 아님)
+
+            var pc2After = await RefreshTwiceAsync(svc, pc2, WindowsUa);
+            Assert.Equal(SidOf(pc2), SidOf(pc2After));
+        }
+    }
+
+    /// <summary>
+    /// 🔴 <b>G-B33</b> (PI-7) — <c>sid</c> 없는 옛 refresh 를 <b>UA 빈 값</b>으로 갱신 ⇒ 새 세션 행은 <b><c>pc</c></b>.
+    /// </summary>
+    /// <remarks>
+    /// 갱신에는 신고값이 없어 UA 가 비면 판정이 싼 칸(<c>mobile</c>)으로 떨어졌다 ⇒ UA 를 비운 갱신 한 번이면 차단 밖 세션이 생겼다.
+    /// <para>🔴 음성 대조군 — <c>RefreshAsync</c> 의 <c>IsNullOrWhiteSpace(request.UserAgent)</c> → <c>pc</c> 갈래를 빼면 <c>mobile</c> 로 FAIL.</para>
+    /// </remarks>
+    [Fact]
+    public async Task G_B33_UA_가_빈_옛토큰_갱신은_pc_로_센다()
+    {
+        if (!ServerAvailable() && DbGateEnvironment.SkipOrFail("G-B33 UA 공백 옛 refresh")) return;
+        SetUpFreshInstall();
+
+        var (svc, db) = NewAuthService();
+        using (db)
+        {
+            // 옛 토큰 모양(sid 없음)을 운영 경로로 만든다 — G-B12 와 같은 방식
+            HideSessionTable(db);
+            var old = await svc.LoginAsync(NewLoginRequest("pc", WindowsUa));
+            RestoreSessionTable(db);
+            Assert.Null(SidOf(old));   // 양성 조건 — 새 세션을 만드는 갱신 갈래를 탄다
+
+            var refreshed = await svc.RefreshAsync(
+                new RefreshTokenRequest { RefreshToken = old.RefreshToken, UserAgent = "" });
+            var sid = SidOf(refreshed);
+            Assert.NotNull(sid);
+            Assert.Equal("pc", SessionKind(db, sid!));
+        }
+    }
+
+    /// <summary>
+    /// 🔴 <b>W-1</b> (PI-2 갱신 판정표) — <c>RefreshGate.Decide</c> 를 <b>실제로</b> 부른다(DB 불필요 · 소스 링크).
+    /// 401 + 저장소 같음 = 지움 · 401 + 다름 = 남이 돌렸다(성공) · 5xx·연결 실패·408·429 = <b>유지</b>.
+    /// </summary>
+    /// <remarks>🔴 음성 대조군 — 「비 2xx 전부 지움」으로 되돌리면 유지·남이 돌렸다 줄이 FAIL.</remarks>
+    [Theory]
+    [InlineData(200, "a", "a", "Saved")]
+    [InlineData(204, "a", "a", "Saved")]
+    [InlineData(401, "a", "b", "OtherTabRotated")]
+    [InlineData(401, "a", "a", "Clear")]
+    [InlineData(401, "a", null, "Clear")]
+    [InlineData(403, "a", "a", "Clear")]
+    [InlineData(408, "a", "a", "Keep")]
+    [InlineData(429, "a", "a", "Keep")]
+    [InlineData(500, "a", "a", "Keep")]
+    [InlineData(502, "a", "a", "Keep")]
+    [InlineData(503, "a", "b", "Keep")]
+    [InlineData(null, "a", "a", "Keep")]
+    public void W_1_갱신판정표는_지워야_할_때만_지운다(int? status, string? sent, string? current, string expected)
+    {
+        Assert.Equal(expected, HitPan.Web.Services.RefreshGate.Decide(status, sent, current).ToString());
     }
 
     // ══════════════════════════════════════════════════════════════
