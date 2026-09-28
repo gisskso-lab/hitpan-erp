@@ -992,8 +992,7 @@ public class AuthService : IAuthService
                 //   409 는 로그인 화면에만 있는 선택지다. 그래서 절C 와 같은 문장으로 바꿔 던진다.
                 System.Diagnostics.Trace.TraceWarning(
                     $"[축B] 갱신이 새 PC 세션을 만들려 했으나 다른 PC 가 살아 있다(401 · 재로그인 유도) user={user.Id}, 이전 사용={ex.OtherPcLastActiveAtUtc:O}");
-                throw new UnauthorizedAccessException(
-                    "다른 컴퓨터에서 사용 중이어서 접속이 만료되었습니다. 다시 로그인해 주세요.");
+                throw; // NEG-B36b 서비스의 401 변환 제거 — 예외가 그대로 컨트롤러로 간다
             }
 
             sessionRecorded = await InsertSessionAsync(conn, sessionId!, user, refreshDeviceKind);
