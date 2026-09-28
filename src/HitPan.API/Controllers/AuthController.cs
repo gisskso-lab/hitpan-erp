@@ -494,10 +494,12 @@ public class AuthController : ControllerBase
         }
         catch (HitPan.Application.Common.ConcurrentPcLoginException ex)
         {
-            // 🔴 20260928작2 개정3 절Q ②(설계 §14-2 · X-1 = (가) 401 · PM 결재 9/28)
-            //   ⬛ [종전] 이 예외는 `Exception` 직계라 여기서 안 잡혀 GlobalExceptionMiddleware 의 500 으로 갔다 ⇒ 화면은
-            //     「유지」로 영원히 재시도했다. 지금은 서버가 판정한 것이므로 401 — 화면은 지우고 로그인 화면으로 가서
-            //     로그인 때 409 「다른 PC에서 사용 중입니다」를 제대로 본다(K-4 다 화면 그대로).
+            // 🔴 20260928작2 개정3 절Q ②(설계 §14-2 · X-1 = (가) 401 · PM 결재 9/28) — **방어로만 남긴다.**
+            //   ⬛ [낡은 서술 · 틀린 전제] 「이 예외는 여기서 안 잡혀 500 으로 갔다」 — CI run 36392248553 G-B36 이 뒤집었다.
+            //   [사실] **현재 도달 경로 없음**: 갱신 경로는 서비스가 이미 401 로 바꾼다 —
+            //     `HitPan.Application/Services/AuthService.cs:989-997` `catch (ConcurrentPcLoginException)` →
+            //     `throw new UnauthorizedAccessException("다른 컴퓨터에서 사용 중이어서 접속이 만료되었습니다. …")` ⇒ 위 ① 401.
+            //   이 갈래는 서비스의 그 변환이 빠지는 날 500(→ 화면 「유지」 영원히 재시도)으로 새지 않게 막는 2차 방어다.
             _logger.LogWarning(ex, "토큰 갱신 거절 — 다른 PC 가 사용 중입니다.");
             return Unauthorized(new { message = ex.Message, code = "other_pc_in_use" });
         }

@@ -2785,7 +2785,9 @@ public sealed class SessionRecordConcurrentPcGateTests : IDisposable
     /// <remarks>
     /// 종전은 <c>ConcurrentPcLoginException</c>(<c>Exception</c> 직계)이 컨트롤러를 빠져나가 500 ⇒ 화면은 「유지」로 영원히 재시도하고
     /// 「다른 PC에서 사용 중입니다」를 한 번도 못 봤다. 준비는 G-B33 과 같다(<c>HideSessionTable</c> 로 옛 토큰 모양).
-    /// <para>🔴 음성 대조군 — ② <c>catch (ConcurrentPcLoginException)</c> 를 지우면 ③ 이 받아 500 이라 FAIL.</para>
+    /// <para>⬛ [낡은 대조군] 「② catch 를 지우면 500」 — ② 는 도달 경로가 없다(서비스가 401 로 바꾼다 · <c>AuthService.cs:989-997</c>).</para>
+    /// <para>🔴 음성 대조군 — 서비스의 변환(<c>ConcurrentPcLoginException</c> → <c>UnauthorizedAccessException</c>)과 컨트롤러 ② 를 함께 빼면
+    /// 예외가 ③ 으로 가 500 이라 FAIL(② 만 남기면 ② 가 401 을 내므로 대조가 안 된다).</para>
     /// </remarks>
     [Fact]
     public async Task G_B36_다른_PC_사용중_갱신은_401_이고_세션_행이_안_생긴다()
@@ -2811,7 +2813,11 @@ public sealed class SessionRecordConcurrentPcGateTests : IDisposable
 
             var obj = Assert.IsAssignableFrom<Microsoft.AspNetCore.Mvc.ObjectResult>(result);
             Assert.Equal(StatusCodes.Status401Unauthorized, obj.StatusCode);
-            Assert.Contains("other_pc_in_use", System.Text.Json.JsonSerializer.Serialize(obj.Value), StringComparison.Ordinal);
+            // ⬛ [낡은 단언] `Assert.Contains("other_pc_in_use", …)` — 본선 run 36392248553 FAIL: 응답이 컨트롤러 ② 가 아니라
+            //   ① 에서 나간다(서비스가 이미 401 로 바꾼다 · AuthService.cs:989-997). 🔴 동작만 잰다: 401 + 다른 PC 안내 + 세션 행 안 생김.
+            //   JSON 은 한글을 \uXXXX 로 이스케이프하므로 **역직렬화한 값**으로 비교한다.
+            using var body = System.Text.Json.JsonDocument.Parse(System.Text.Json.JsonSerializer.Serialize(obj.Value));
+            Assert.Contains("다른 컴퓨터에서 사용 중", body.RootElement.GetProperty("message").GetString(), StringComparison.Ordinal);
             Assert.Equal(before, SessionCount(db));   // 거절된 갱신이 세션 행을 남기지 않았다
         }
     }
