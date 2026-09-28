@@ -501,15 +501,7 @@ public class AuthController : ControllerBase
             _logger.LogWarning(ex, "토큰 갱신 거절 — 다른 PC 가 사용 중입니다.");
             return Unauthorized(new { message = ex.Message, code = "other_pc_in_use" });
         }
-        catch (Exception ex) when (ex is not OperationCanceledException)
-        {
-            // 🔴 20260928작2 개정3 절Q ③(설계 §14-2 · R-1 서버) — 설정 누락·DB 예외는 「이 refresh 는 무효」가 아니라
-            //   「서버가 판정을 못 했다」다. ⬛ 종전엔 전역 미들웨어가 400(InvalidOperationException)·409(MySql 1451/1452)로
-            //   바꿔 화면이 「판정」으로 읽었다. 이 주소만 500 으로 정직하게 낸다(🚫 GlobalExceptionMiddleware 무접촉).
-            _logger.LogError(ex, "토큰 갱신 중 서버 오류");
-            return StatusCode(StatusCodes.Status500InternalServerError,
-                new { message = "잠시 후 다시 시도해 주세요." });
-        }
+        // NEG-B35 ③ catch 삭제
     }
 
     /// <summary>
