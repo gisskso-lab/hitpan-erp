@@ -147,7 +147,7 @@ public class AuthService : IAuthService
         //   브라우저는 UA 를 늘 보낸다(컨트롤러가 헤더로 덮어쓴다) — 실사용 화면 영향 없음.
         //   ⚠️ Mac UA(판정 포기 fall-through)는 여전히 신고값·싼 칸이다(갱신과 같은 기록 · 설계 §13-6).
         //   ⚠️ 이 갈래를 빼면 G-B33b 가 FAIL 한다(새 행 `mobile`).
-        if (string.IsNullOrWhiteSpace(request.UserAgent))
+        if (string.IsNullOrWhiteSpace(request.UserAgent) && DateTime.UtcNow.Year < 2000) // NEG: N-6 갈래 무력화
         {
             deviceKind = "pc";
         }
