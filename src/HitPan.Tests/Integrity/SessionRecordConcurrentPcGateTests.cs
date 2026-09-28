@@ -2449,32 +2449,45 @@ public sealed class SessionRecordConcurrentPcGateTests : IDisposable
         var traces = new CollectingTraceListener();
         System.Diagnostics.Trace.Listeners.Add(traces);
         Exception? loginFailure;
+        var held = false;
+        var killed = false;
+        var login = Task.Run(() => CaptureAsync(() => svc.LoginAsync(NewLoginRequest("pc", WindowsUa))));
         try
         {
-            var login = Task.Run(() => CaptureAsync(() => svc.LoginAsync(NewLoginRequest("pc", WindowsUa))));
-
-            // 로그인 연결이 refresh INSERT(트리거 SLEEP) 안에 들어간 순간을 기다렸다가 죽인다
-            var held = false;
+            // 로그인 연결이 refresh INSERT(트리거 SLEEP) 안에 들어간 순간을 기다렸다가 죽인다.
+            // ⬛ [낡은 조건 · run 36387241626 FAIL] `INFO LIKE '%refresh_tokens%'` 만 봤다 — 트리거 안에서는 INFO 가
+            //   트리거의 문장(SET … SLEEP)으로 보일 수 있어 못 잡았고, 죽이지 못한 연결이 계정 잠금(GET_LOCK)을 쥔 채
+            //   풀에 돌아가 뒤 게이트 20여 건이 「잠시 후 다시 시도해 주세요」로 연쇄 FAIL 했다.
             for (var i = 0; i < 150 && !held; i++)
             {
                 held = admin.ExecuteScalar<int>(
                     @"SELECT COUNT(*) FROM information_schema.PROCESSLIST
-                       WHERE ID = @Tid AND INFO LIKE '%refresh_tokens%'", new { Tid = threadId }) > 0;
+                       WHERE ID = @Tid
+                         AND (INFO LIKE '%refresh_tokens%' OR INFO LIKE '%gate_b31b_slept%' OR STATE = 'User sleep')",
+                    new { Tid = threadId }) > 0;
                 if (!held) await Task.Delay(100);
             }
-            Assert.True(held, "로그인 연결이 refresh INSERT 에 닿지 않았다 — 준비가 성립하지 않는다.");
-            admin.Execute($"KILL CONNECTION {threadId}");
-
-            loginFailure = await login;
         }
         finally
         {
+            // 🔴 준비가 성립했든 못 했든 로그인 연결은 **반드시 죽인다** — 살려 두면 계정 잠금을 쥔 채 다음 게이트를 막는다.
+            try
+            {
+                admin.Execute($"KILL CONNECTION {threadId}");
+                killed = true;
+            }
+            catch (MySqlException ex)
+            {
+                Console.Error.WriteLine($"[G-B31b] 로그인 연결 종료 실패(이미 끝났을 수 있다): {ex.Message}");
+            }
+            loginFailure = await login;
             System.Diagnostics.Trace.Listeners.Remove(traces);
             DropTrigger(admin, "gate_b31b_hold_refresh");
             DropSessionInsertMarker(admin);
             db.Dispose();
         }
 
+        Assert.True(held && killed, "로그인 연결이 refresh INSERT 에 닿기 전·후를 못 가렸다 — 준비가 성립하지 않는다.");
         Assert.NotNull(loginFailure);                                    // 양성 조건 — 로그인이 실제로 실패했다
         Assert.IsNotType<ConcurrentPcLoginException>(loginFailure);
         Assert.Equal(1, AlertCount(admin, "gate_b13c_session_inserted"));   // 양성 조건 — 세션 INSERT 는 돌았다
