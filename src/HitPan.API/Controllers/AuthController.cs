@@ -492,7 +492,7 @@ public class AuthController : ControllerBase
         {
             return Unauthorized(new { message = ex.Message });
         }
-        catch (HitPan.Application.Common.ConcurrentPcLoginException ex)
+        /* NEG-B36 ② catch 삭제
         {
             // 🔴 20260928작2 개정3 절Q ②(설계 §14-2 · X-1 = (가) 401 · PM 결재 9/28)
             //   ⬛ [종전] 이 예외는 `Exception` 직계라 여기서 안 잡혀 GlobalExceptionMiddleware 의 500 으로 갔다 ⇒ 화면은
@@ -500,7 +500,7 @@ public class AuthController : ControllerBase
             //     로그인 때 409 「다른 PC에서 사용 중입니다」를 제대로 본다(K-4 다 화면 그대로).
             _logger.LogWarning(ex, "토큰 갱신 거절 — 다른 PC 가 사용 중입니다.");
             return Unauthorized(new { message = ex.Message, code = "other_pc_in_use" });
-        }
+        } NEG-B36 끝 */
         // NEG-B35 ③ catch 삭제
     }
 
