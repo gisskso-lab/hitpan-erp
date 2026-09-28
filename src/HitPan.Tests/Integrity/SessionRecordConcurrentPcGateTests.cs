@@ -320,6 +320,27 @@ public sealed class SessionRecordConcurrentPcGateTests : IDisposable
               VALUES (UUID(), @UserId, @Hash, UTC_TIMESTAMP(6) + INTERVAL 1 DAY, 0, @Sid)",
             new { UserId, Hash = "gate-b31-" + Guid.NewGuid().ToString("N"), Sid = sid });
 
+    /// <summary>
+    /// 운영 코드의 <c>Trace</c> 경고를 모은다(G-B31b) — 읽기만 한다. 판정하지 않는다.
+    /// </summary>
+    /// <remarks>⚠️ <c>Trace.Listeners</c> 는 전역이다 — 다른 시험이 섞어 쓴 줄이 들어올 수 있어, 찾는 쪽이 문장으로 거른다.</remarks>
+    private sealed class CollectingTraceListener : System.Diagnostics.TraceListener
+    {
+        private readonly System.Collections.Concurrent.ConcurrentQueue<string> _lines = new();
+
+        public IReadOnlyList<string> Messages => _lines.ToArray();
+
+        public override void Write(string? message)
+        {
+            if (message is not null) _lines.Enqueue(message);
+        }
+
+        public override void WriteLine(string? message)
+        {
+            if (message is not null) _lines.Enqueue(message);
+        }
+    }
+
     private LoginRequest NewLoginRequest(
         string? claimedDeviceType, string? userAgent, bool force = false, string? fingerprint = null) => new()
         {
@@ -2392,6 +2413,85 @@ public sealed class SessionRecordConcurrentPcGateTests : IDisposable
     }
 
     /// <summary>
+    /// 🔴🔴 <b>G-B31b</b> ([4] N-3) — refresh 저장 중에 <b>원인 연결을 실제로 죽인다</b>(<c>KILL CONNECTION</c>) ⇒
+    /// 보상이 <b>복제한 새 연결</b>로 세션 행을 지운다(잔여 0 · 「새 연결로 못 했다」 경고 0) · 재로그인 성공.
+    /// </summary>
+    /// <remarks>
+    /// <para>[무엇을 재나] 트리거 SIGNAL 로는 연결이 안 죽는다 — G-B24·G-B31 은 「같은 연결로도 지울 수 있는」 실패만 쟀다.
+    /// 절L ① 의 목적은 <b>연결이 상한 경우</b>다. 9/11 백업 사고가 「열린 연결에서 꺼낸 연결 문자열에 비밀번호가 없었다」였다 —
+    /// <c>Clone()</c> 도 같은 함정이면 새 연결은 늘 실패하고, 이 게이트가 그 경고를 잡는다.</para>
+    /// <para>⚠️ CI <c>db-gate</c> 는 비밀번호가 있는 계정(<c>HITPAN_DB_PASS</c>)이다 — 비밀번호가 빈 환경이면 이 게이트는 함정을 못 가른다.</para>
+    /// <para>🔴 음성 대조군 — 복제 대신 <c>new MySqlConnection(열린 연결.ConnectionString)</c>(비밀번호가 빠진 문자열)으로 바꾸면
+    /// 「새 연결로 못 했다」 경고가 찍혀 FAIL.</para>
+    /// </remarks>
+    [Fact]
+    public async Task G_B31b_원인_연결이_죽어도_보상은_새_연결로_세션_행을_지운다()
+    {
+        if (!ServerAvailable() && DbGateEnvironment.SkipOrFail("G-B31b 원인 연결 죽음 보상")) return;
+        SetUpFreshInstall();
+
+        using var admin = new MySqlConnection(DbConnString());
+        admin.Open();
+        SetKillSwitch(admin, 1);
+        if (DbGateEnvironment.IsCi)
+        {
+            Assert.False(string.IsNullOrEmpty(Environment.GetEnvironmentVariable("HITPAN_DB_PASS")),
+                "CI 계정에 비밀번호가 없다 — 복제 연결의 비밀번호 보존을 가를 수 없다.");
+        }
+
+        var (svc, db) = NewAuthService();
+        var threadId = db.ServerThread;
+        admin.Execute(
+            "CREATE TRIGGER gate_b31b_hold_refresh BEFORE INSERT ON refresh_tokens FOR EACH ROW "
+            + "SET @gate_b31b_slept = SLEEP(20)");
+        MarkSessionInsert(admin);
+
+        var traces = new CollectingTraceListener();
+        System.Diagnostics.Trace.Listeners.Add(traces);
+        Exception? loginFailure;
+        try
+        {
+            var login = Task.Run(() => CaptureAsync(() => svc.LoginAsync(NewLoginRequest("pc", WindowsUa))));
+
+            // 로그인 연결이 refresh INSERT(트리거 SLEEP) 안에 들어간 순간을 기다렸다가 죽인다
+            var held = false;
+            for (var i = 0; i < 150 && !held; i++)
+            {
+                held = admin.ExecuteScalar<int>(
+                    @"SELECT COUNT(*) FROM information_schema.PROCESSLIST
+                       WHERE ID = @Tid AND INFO LIKE '%refresh_tokens%'", new { Tid = threadId }) > 0;
+                if (!held) await Task.Delay(100);
+            }
+            Assert.True(held, "로그인 연결이 refresh INSERT 에 닿지 않았다 — 준비가 성립하지 않는다.");
+            admin.Execute($"KILL CONNECTION {threadId}");
+
+            loginFailure = await login;
+        }
+        finally
+        {
+            System.Diagnostics.Trace.Listeners.Remove(traces);
+            DropTrigger(admin, "gate_b31b_hold_refresh");
+            DropSessionInsertMarker(admin);
+            db.Dispose();
+        }
+
+        Assert.NotNull(loginFailure);                                    // 양성 조건 — 로그인이 실제로 실패했다
+        Assert.IsNotType<ConcurrentPcLoginException>(loginFailure);
+        Assert.Equal(1, AlertCount(admin, "gate_b13c_session_inserted"));   // 양성 조건 — 세션 INSERT 는 돌았다
+
+        var freshFailed = traces.Messages.Where(m => m.Contains("보상 삭제를 새 연결로 못 했다", StringComparison.Ordinal)).ToList();
+        Assert.True(freshFailed.Count == 0, "복제 연결 보상이 실패했다(N-3) — " + string.Join(" | ", freshFailed));
+        Assert.Equal(0, admin.ExecuteScalar<int>("SELECT COUNT(*) FROM user_sessions"));   // 🔴 새 연결이 지웠다
+
+        var (svc2, db2) = NewAuthService();
+        using (db2)
+        {
+            var again = await svc2.LoginAsync(NewLoginRequest("pc", WindowsUa));   // 🔴 409 가 아니다
+            Assert.Equal("pc", SessionKind(db2, SidOf(again)!));
+        }
+    }
+
+    /// <summary>
     /// 🔴🔴 <b>G-B32 ①</b> (PI-6 회전 뒤에도 센다) — PC1 로그인 → 갱신 1회 ⇒ PC2 로그인 <b>409</b> ·
     /// 회전된 refresh 의 <c>session_id</c> = PC1 <c>sid</c>.
     /// </summary>
@@ -2519,6 +2619,29 @@ public sealed class SessionRecordConcurrentPcGateTests : IDisposable
             var sid = SidOf(refreshed);
             Assert.NotNull(sid);
             Assert.Equal("pc", SessionKind(db, sid!));
+        }
+    }
+
+    /// <summary>
+    /// 🔴 <b>G-B33b</b> ([4] N-6 · PI-7 대칭) — <b>로그인</b>도 UA 가 비면 신고값(<c>mobile</c>·없음)과 무관하게 <b><c>pc</c></b> 로 센다.
+    /// </summary>
+    /// <remarks>🔴 음성 대조군 — <c>LoginAsync</c> 의 <c>IsNullOrWhiteSpace(request.UserAgent)</c> → <c>pc</c> 갈래를 빼면 <c>mobile</c> 로 FAIL.</remarks>
+    [Fact]
+    public async Task G_B33b_UA_가_빈_로그인은_신고값이_mobile_이어도_pc_로_센다()
+    {
+        if (!ServerAvailable() && DbGateEnvironment.SkipOrFail("G-B33b UA 공백 로그인")) return;
+        SetUpFreshInstall();
+
+        var (svc, db) = NewAuthService();
+        using (db)
+        {
+            SetKillSwitch(db, 0);   // 두 번 로그인하는 준비 — 판정이 아니라 기기 종류만 잰다
+
+            var claimedMobile = await svc.LoginAsync(NewLoginRequest("mobile", ""));
+            Assert.Equal("pc", SessionKind(db, SidOf(claimedMobile)!));
+
+            var noClaim = await svc.LoginAsync(NewLoginRequest(null, null));
+            Assert.Equal("pc", SessionKind(db, SidOf(noClaim)!));
         }
     }
 
