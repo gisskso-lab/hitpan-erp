@@ -252,7 +252,9 @@ public sealed class AuthService : IAuthService
         {
             try
             {
-                await _js.InvokeVoidAsync("sessionStorage.setItem", LogoutIncompleteKey, "1");
+                // ⬛ [낡은 줄 · 개정3 절T] `sessionStorage.setItem` — 탭마다 따로라 그 탭을 닫으면 안내가 사라졌다.
+                // 🔴 20260928작2 개정3 절T(설계 §14-5 · R-3) — localStorage 로. 옛 자리 이전 없음(1.3.46 에 없던 표시).
+                await _js.InvokeVoidAsync("localStorage.setItem", LogoutIncompleteKey, "1");
             }
             catch (Exception ex)
             {

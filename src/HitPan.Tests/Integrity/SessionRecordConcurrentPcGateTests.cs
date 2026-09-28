@@ -2661,15 +2661,22 @@ public sealed class SessionRecordConcurrentPcGateTests : IDisposable
     /// <summary>
     /// 🔴 <b>W-1</b> (PI-2 갱신 판정표) — <c>RefreshGate.Decide</c> 를 <b>실제로</b> 부른다(DB 불필요 · 소스 링크).
     /// 401 + 저장소 같음 = 지움 · 401 + 다름 = 남이 돌렸다(성공) · 5xx·연결 실패·408·429 = <b>유지</b>.
+    /// 🔴 <b>개정3 절P(설계 §14-1 · R-1)</b> — 400·403·404·409 도 <b>유지</b>(⬛ 개정2: 403 = 지움). 지움의 문은 401 하나.
     /// </summary>
-    /// <remarks>🔴 음성 대조군 — 「비 2xx 전부 지움」으로 되돌리면 유지·남이 돌렸다 줄이 FAIL.</remarks>
+    /// <remarks>🔴 음성 대조군 — 「비 2xx 전부 지움」으로 되돌리면 유지·남이 돌렸다 줄이 FAIL.
+    /// 개정2 판(4xx 전부 비교 후 지움)으로 되돌리면 400·403·404·409 줄이 FAIL.</remarks>
     [Theory]
     [InlineData(200, "a", "a", "Saved")]
     [InlineData(204, "a", "a", "Saved")]
     [InlineData(401, "a", "b", "OtherTabRotated")]
     [InlineData(401, "a", "a", "Clear")]
     [InlineData(401, "a", null, "Clear")]
-    [InlineData(403, "a", "a", "Clear")]
+    // ⬛ [낡은 기대값 · 개정2] [InlineData(403, "a", "a", "Clear")] — 개정3 절P 로 뒤집혔다.
+    [InlineData(403, "a", "a", "Keep")]
+    [InlineData(400, "a", "a", "Keep")]
+    [InlineData(404, "a", "a", "Keep")]
+    [InlineData(409, "a", "a", "Keep")]
+    [InlineData(409, "a", "b", "Keep")]
     [InlineData(408, "a", "a", "Keep")]
     [InlineData(429, "a", "a", "Keep")]
     [InlineData(500, "a", "a", "Keep")]
@@ -2679,6 +2686,134 @@ public sealed class SessionRecordConcurrentPcGateTests : IDisposable
     public void W_1_갱신판정표는_지워야_할_때만_지운다(int? status, string? sent, string? current, string expected)
     {
         Assert.Equal(expected, HitPan.Web.Services.RefreshGate.Decide(status, sent, current).ToString());
+    }
+
+    /// <summary>
+    /// 🔴 <b>W-2</b> (개정3 절R · 설계 §14-3 · R-5) — 「유지」 상한: 연속 Keep <b>3회 이상 AND 첫 Keep 부터 60초 이상</b>이면
+    /// 안내 <b>한 번</b> · 그 밖 순서는 안내 없음 · <b>어느 줄도 결과가 지움(Clear)이 아니다</b>(DB 불필요 · 소스 링크).
+    /// </summary>
+    /// <remarks>
+    /// 🔴 음성 대조군 — ① 상한을 끄면 「60초 걸친 3회」 줄에 안내가 없어 FAIL ② 상한에서 <c>Clear</c> 를 돌려주면
+    /// 「Clear 아님」 검사가 FAIL.
+    /// </remarks>
+    [Theory]
+    [InlineData("K0 K90", "")]                         // 2회뿐 — 90초가 지나도 없음
+    [InlineData("K0 K5 K10", "")]                      // 3회지만 10초 안 — 순간 끊김
+    [InlineData("K0 K30 K60", "2")]                    // 3회 · 60초 — 세 번째에서 한 번
+    [InlineData("K0 K30 K60 K90 K120", "2")]           // 그 뒤 Keep 은 안내 없음(중복 금지)
+    [InlineData("K0 K30 S45 K50 K70 K100", "")]        // Saved 가 줄을 끊는다 — 다시 세면 50초뿐
+    [InlineData("K0 K30 S45 K50 K70 K100 K111", "6")]  // 다시 센 줄이 61초 · 4회 — 그때 한 번
+    [InlineData("K0 K30 C45 K50 K70 K100", "")]        // Clear 도 끊는다
+    [InlineData("K0 K30 O45 K50 K70 K100", "")]        // OtherTabRotated 도 끊는다
+    [InlineData("K0 K30 K60 S70 K80 K110 K140", "2 6")] // 끊긴 뒤 새 줄은 다시 한 번 안내할 수 있다
+    public void W_2_유지_상한은_3회_60초에_한번만_안내하고_지우지_않는다(string script, string expectedShowAt)
+    {
+        var t0 = new DateTimeOffset(2026, 9, 28, 0, 0, 0, TimeSpan.Zero);
+        var state = default(HitPan.Web.Services.KeepStreak);
+        var shownAt = new List<int>();
+        var steps = script.Split(' ');
+        for (var i = 0; i < steps.Length; i++)
+        {
+            var decision = steps[i][0] switch
+            {
+                'K' => HitPan.Web.Services.RefreshDecision.Keep,
+                'S' => HitPan.Web.Services.RefreshDecision.Saved,
+                'C' => HitPan.Web.Services.RefreshDecision.Clear,
+                _ => HitPan.Web.Services.RefreshDecision.OtherTabRotated
+            };
+            var at = t0.AddSeconds(int.Parse(steps[i][1..], System.Globalization.CultureInfo.InvariantCulture));
+            var step = HitPan.Web.Services.RefreshGate.NextKeepStreak(state, decision, at);
+
+            // 🔴 상한은 판정을 바꾸지 않는다 — Keep 을 넣었으면 Keep 이 나온다(지움 금지 · 설계 §14-3)
+            if (decision == HitPan.Web.Services.RefreshDecision.Keep)
+            {
+                Assert.NotEqual(HitPan.Web.Services.RefreshDecision.Clear, step.Decision);
+            }
+            Assert.Equal(decision, step.Decision);
+
+            if (step.ShowDegradedNotice) shownAt.Add(i);
+            state = step.State;
+        }
+
+        Assert.Equal(expectedShowAt, string.Join(' ', shownAt));
+    }
+
+    /// <summary>
+    /// 🔴🔴 <b>G-B35</b> (개정3 절Q ③ · 설계 §14-2 · R-1 서버) — 갱신 중 DB 가 <b>1452</b> 로 터지면 컨트롤러 응답은 <b>500</b>.
+    /// </summary>
+    /// <remarks>
+    /// 종전은 예외가 컨트롤러를 빠져나가 전역 미들웨어가 <c>MySqlException</c> 1452 → <b>409</b> 로 바꿨다 ⇒ 화면은 4xx 를
+    /// 「서버가 판정했다」로 읽고 멀쩡한 로그인을 지웠다. G-B30 과 같은 호출 방식(컨트롤러 직접 · 트리거로 실패 만들기).
+    /// <para>🔴 음성 대조군 — <c>Refresh</c> 의 ③ <c>catch (Exception)</c> 를 지우면 예외가 새어 나와 FAIL(실서버에선 409).</para>
+    /// </remarks>
+    [Fact]
+    public async Task G_B35_갱신이_서버_오류로_터지면_500_이다()
+    {
+        if (!ServerAvailable() && DbGateEnvironment.SkipOrFail("G-B35 갱신 서버 오류 500")) return;
+        SetUpFreshInstall();
+
+        var (svc, db) = NewAuthService();
+        using (db)
+        {
+            var pc = await svc.LoginAsync(NewLoginRequest("pc", WindowsUa));
+            var sid = SidOf(pc)!;
+
+            db.Execute(
+                "CREATE TRIGGER gate_b35_fail_rotate BEFORE INSERT ON refresh_tokens FOR EACH ROW "
+                + "SIGNAL SQLSTATE '23000' SET MYSQL_ERRNO = 1452, MESSAGE_TEXT = 'gate_b35_fail_rotate'");
+            Microsoft.AspNetCore.Mvc.IActionResult result;
+            try
+            {
+                result = await NewAuthController(svc, db, WindowsUa).Refresh(
+                    new RefreshTokenRequest { RefreshToken = pc.RefreshToken }, CancellationToken.None);
+            }
+            finally
+            {
+                DropTrigger(db, "gate_b35_fail_rotate");
+            }
+
+            var obj = Assert.IsAssignableFrom<Microsoft.AspNetCore.Mvc.ObjectResult>(result);
+            Assert.Equal(StatusCodes.Status500InternalServerError, obj.StatusCode);
+            Assert.Equal(1, ActiveRefreshCount(db, sid));   // 양성 조건 — 회전이 실제로 막혀 옛 refresh 가 그대로다
+        }
+    }
+
+    /// <summary>
+    /// 🔴🔴 <b>G-B36</b> (개정3 절Q ② · X-1 = (가) · PM 결재 9/28) — 다른 PC 가 살아 있는데 <c>sid</c> 없는 옛 refresh 로 갱신
+    /// ⇒ <b>401</b>(<c>other_pc_in_use</c>) · 세션 행 <b>새로 안 생김</b>.
+    /// </summary>
+    /// <remarks>
+    /// 종전은 <c>ConcurrentPcLoginException</c>(<c>Exception</c> 직계)이 컨트롤러를 빠져나가 500 ⇒ 화면은 「유지」로 영원히 재시도하고
+    /// 「다른 PC에서 사용 중입니다」를 한 번도 못 봤다. 준비는 G-B33 과 같다(<c>HideSessionTable</c> 로 옛 토큰 모양).
+    /// <para>🔴 음성 대조군 — ② <c>catch (ConcurrentPcLoginException)</c> 를 지우면 ③ 이 받아 500 이라 FAIL.</para>
+    /// </remarks>
+    [Fact]
+    public async Task G_B36_다른_PC_사용중_갱신은_401_이고_세션_행이_안_생긴다()
+    {
+        if (!ServerAvailable() && DbGateEnvironment.SkipOrFail("G-B36 갱신 중 다른 PC 사용 중 401")) return;
+        SetUpFreshInstall();
+
+        var (svc, db) = NewAuthService();
+        using (db)
+        {
+            // 옛 토큰 모양(sid 없음)을 운영 경로로 만든다 — G-B33 과 같은 준비
+            HideSessionTable(db);
+            var old = await svc.LoginAsync(NewLoginRequest("pc", WindowsUa));
+            RestoreSessionTable(db);
+            Assert.Null(SidOf(old));   // 양성 조건 — 새 세션을 만드는 갱신 갈래를 탄다
+
+            var pc1 = await svc.LoginAsync(NewLoginRequest("pc", WindowsUa));
+            Assert.NotNull(SidOf(pc1));
+            var before = SessionCount(db);
+
+            var result = await NewAuthController(svc, db, WindowsUa).Refresh(
+                new RefreshTokenRequest { RefreshToken = old.RefreshToken }, CancellationToken.None);
+
+            var obj = Assert.IsAssignableFrom<Microsoft.AspNetCore.Mvc.ObjectResult>(result);
+            Assert.Equal(StatusCodes.Status401Unauthorized, obj.StatusCode);
+            Assert.Contains("other_pc_in_use", System.Text.Json.JsonSerializer.Serialize(obj.Value), StringComparison.Ordinal);
+            Assert.Equal(before, SessionCount(db));   // 거절된 갱신이 세션 행을 남기지 않았다
+        }
     }
 
     // ══════════════════════════════════════════════════════════════

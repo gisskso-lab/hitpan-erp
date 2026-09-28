@@ -40,6 +40,12 @@ jobs:
         run: dotnet test src/HitPan.sln --configuration Release --no-build --nologo --verbosity normal --logger "trx;LogFileName=test-results.trx"
         continue-on-error: false
 
+      # 🔴 20260928작2 개정3 W-3 — storage.js 의 「비교 후 지움」·「옮겨 오기 표식」을 node 로 **실제로** 돌려 잰다
+      #   (글자 검사 아님 · 파일을 vm 에서 올려 window.hitpanStorage_* 를 부른다). 러너(windows-latest)에 node 가 있다.
+      #   ⚠️ 디렉터리가 아니라 파일을 준다 — node 22 는 `--test <디렉터리>` 를 파일로 읽어 실패한다(로컬 실측).
+      - name: W-3 storage.js (node)
+        run: node --test tests/node/storage_w3.test.js
+
       # 🔴 20260924작1 §5 — **안 잰 축을 로그에 드러낸다** (PM 결재 · 헌법 #32)
       #   메인PC 봉인 게이트 일부는 TPM(Platform KSP)이 있어야만 성립한다.
       #   TPM 없는 러너에서 그 축을 건너뛰는 것은 정당하지만,

@@ -13,26 +13,52 @@
 //   비민감 UI 상태(테마, 필터, 목록 너비 등)는 종전대로 localStorage.
 const SESSION_KEYS = new Set(['access_token', 'refresh_token']);
 
+// 🔴 20260928작2 개정3 절S·U — **실제** 로그인 칸 이름(C# `AuthStorageKeys`).
+//   ⚠️ [사실 · 개정3 착수 때 발견] 위 SESSION_KEYS 의 'access_token'·'refresh_token' 은 C# 이 쓰는 이름
+//     ('hitpan_access_token'·'hitpan_refresh_token')과 **다르다**(2026-04-24 `7f285b96` 부터) ⇒ 1.3.46 까지도 토큰은
+//     실제로는 localStorage 에 있었다. SESSION_KEYS 는 `hitpanStorage_inheritFromOpener` 가 쓰므로 **무접촉**으로 둔다.
+const AUTH_REFRESH_KEY = 'hitpan_refresh_token';
+const AUTH_TOKEN_KEYS = new Set(['hitpan_access_token', AUTH_REFRESH_KEY, 'access_token', 'refresh_token']);
+const AUTH_ALL_KEYS = [...AUTH_TOKEN_KEYS, 'hitpan_user_name'];
+
+// 🔴 개정3 절U(설계 §14-6 · R-4) — 옮겨 오기는 **한 번만**. 이 표식이 있으면 sessionStorage 의 토큰은 옛 찌꺼기다.
+//   `set`(토큰 칸) 때 표식 · 🚫 `remove` 는 표식하지 않는다(로그인 화면의 지움 한 번이 같은 사용자 탭의 이전을 막는다).
+const AUTH_STORE_MARK = 'hitpan_token_store_v2';
+
 const hitpanStorage = {
     set: (key, value) => {
         // ⬛ [낡은 줄] `const store = SESSION_KEYS.has(key) ? sessionStorage : localStorage;`
         localStorage.setItem(key, value);
-        if (SESSION_KEYS.has(key)) {
+        // ⬛ [낡은 조건 · 개정3 절U] `SESSION_KEYS.has(key)` — 실제 칸 이름과 달라 한 번도 참이 된 적이 없다(위 ⚠️).
+        if (AUTH_TOKEN_KEYS.has(key)) {
             // 옛 자리에 남은 값이 있으면 치운다 — 두 곳에 다른 값이 있으면 어느 것이 진짜인지 갈린다.
             sessionStorage.removeItem(key);
+            localStorage.setItem(AUTH_STORE_MARK, '1');
         }
     },
     get: (key) => {
         // ⬛ [낡은 줄] `const store = SESSION_KEYS.has(key) ? sessionStorage : localStorage; return store.getItem(key);`
         const v = localStorage.getItem(key);
-        if (v !== null || !SESSION_KEYS.has(key)) return v;
+        // ⬛ [낡은 조건 · 개정3 절U] `!SESSION_KEYS.has(key)`
+        if (v !== null || !AUTH_TOKEN_KEYS.has(key)) return v;
 
-        // 🔴 옮겨 오기 — 업데이트 순간 열려 있던 탭은 토큰을 sessionStorage 에 들고 있다.
-        //   localStorage 에 없고 sessionStorage 에 있으면 옮기고 sessionStorage 에서 지운다(그 탭이 튕기지 않는다).
+        // 🔴 개정3 절U — 표식이 있으면 옮기지 않는다. sessionStorage 의 토큰 칸은 옛 찌꺼기라 치운다.
+        if (localStorage.getItem(AUTH_STORE_MARK) !== null) {
+            AUTH_TOKEN_KEYS.forEach(k => sessionStorage.removeItem(k));
+            return null;
+        }
+
+        // 🔴 옮겨 오기(한 번) — 업데이트 순간 열려 있던 탭은 토큰을 sessionStorage 에 들고 있을 수 있다.
+        //   ⬛ [낡은 방식 · 개정3] 칸 하나씩 옮겼다 — 표식이 생긴 뒤엔 첫 칸을 옮기는 순간 둘째 칸이 막히므로
+        //   **토큰 칸 전부를 한 번에** 옮기고 표식한다.
         const old = sessionStorage.getItem(key);
         if (old !== null) {
-            localStorage.setItem(key, old);
-            sessionStorage.removeItem(key);
+            AUTH_TOKEN_KEYS.forEach(k => {
+                const s = sessionStorage.getItem(k);
+                if (s !== null && localStorage.getItem(k) === null) localStorage.setItem(k, s);
+                sessionStorage.removeItem(k);
+            });
+            localStorage.setItem(AUTH_STORE_MARK, '1');
         }
         return old;
     },
@@ -47,6 +73,24 @@ const hitpanStorage = {
 window.hitpanStorage_set = (key, value) => hitpanStorage.set(key, value);
 window.hitpanStorage_get = (key) => hitpanStorage.get(key);
 window.hitpanStorage_remove = (key) => hitpanStorage.remove(key);
+
+// 🔴 20260928작2 개정3 절S(설계 §14-4 · R-2) — **비교하고 지운다, 한 호출 안에서.**
+//   expected = C# 이 SetAsync 와 같은 인코딩으로 만든 「보낸 refresh」(없으면 null).
+//   같다 → 로그인 칸 전부(양쪽 저장소) 지움 → 'removed'
+//   다르다 → 그새 다른 탭이 새 토큰을 썼다 — 안 지움 → 'rotated'
+//   없다 → 남은 칸(access·표시이름)만 치움 → 'empty'
+//     (다른 탭 로그인이 access 를 먼저 쓰는 틈에 치워도 다음 401 의 갱신이 잇는다 — 새 refresh 는 안 건드린다)
+window.hitpanStorage_removeAuthIfRefreshIs = (expected) => {
+    const cur = localStorage.getItem(AUTH_REFRESH_KEY);
+    if (cur === null) {
+        AUTH_ALL_KEYS.forEach(k => { sessionStorage.removeItem(k); localStorage.removeItem(k); });
+        return 'empty';
+    }
+    if (cur !== expected) return 'rotated';
+    AUTH_ALL_KEYS.forEach(k => { sessionStorage.removeItem(k); localStorage.removeItem(k); });
+    return 'removed';
+};
+
 
 // ══════════════════════════════════════════════════════════════════
 // 🔴 탭 사이 갱신 잠금 (20260928작2 절I · 설계 §13-2 ②).

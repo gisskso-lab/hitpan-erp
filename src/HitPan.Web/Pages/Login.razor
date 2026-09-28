@@ -210,11 +210,13 @@
     {
         try
         {
-            var mark = await JS.InvokeAsync<string?>("sessionStorage.getItem", HitPan.Web.Services.AuthService.LogoutIncompleteKey);
+            // ⬛ [낡은 자리 · 개정3 절T] sessionStorage.getItem / removeItem
+            // 🔴 20260928작2 개정3 절T(R-3) — 쓰는 쪽(AuthService)과 같이 localStorage. 한 탭이 읽고 지우면 다른 탭엔 안 뜬다.
+            var mark = await JS.InvokeAsync<string?>("localStorage.getItem", HitPan.Web.Services.AuthService.LogoutIncompleteKey);
             if (!string.IsNullOrEmpty(mark))
             {
                 _logoutIncomplete = true;
-                await JS.InvokeVoidAsync("sessionStorage.removeItem", HitPan.Web.Services.AuthService.LogoutIncompleteKey);
+                await JS.InvokeVoidAsync("localStorage.removeItem", HitPan.Web.Services.AuthService.LogoutIncompleteKey);
             }
         }
         catch (Exception ex)

@@ -35,10 +35,9 @@ public sealed class HitPanAuthStateProvider(
                 var stillHeld = await storage.GetAsync<string>(AuthStorageKeys.RefreshToken);
                 if (stillHeld.Success && !string.IsNullOrEmpty(stillHeld.Value))
                 {
-                    if (RefreshGate.TryClaimOfflineNotice(DateTimeOffset.UtcNow, TimeSpan.FromSeconds(30)))
-                    {
-                        snackbar.Add(RefreshGate.OfflineNotice, Severity.Warning);
-                    }
+                    // ⬛ [낡은 안내 · 개정3 절R] TryClaimOfflineNotice 30초 창만.
+                    // 🔴 개정3 절R — 상한(3회 AND 60초)이면 「원활하지 않습니다」 한 번(닫을 때까지) · 그 뒤 30초 안내 멈춤.
+                    HitPan.Web.Services.HitPanApiAuthHandler.ShowKeepNotice(snackbar);
 
                     var kept = await storage.GetAsync<string>(AuthStorageKeys.AccessToken);
                     var keptToken = kept.Success && !string.IsNullOrEmpty(kept.Value) ? kept.Value : token;

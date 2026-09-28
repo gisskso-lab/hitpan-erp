@@ -77,23 +77,34 @@ public sealed class AuthTokenRefresher(
                         return false;
                     }
 
-                    await storage.SetAsync(AuthStorageKeys.AccessToken, data.AccessToken);
+                    // ⬛ [낡은 순서 · 개정3 절S] access → refresh → 표시이름
+                    // 🔴 개정3 절S — **refresh 먼저**: 남의 탭이 비교할 때 새 access 만 있고 옛 refresh 가 남은 틈을 없앤다.
                     await storage.SetAsync(AuthStorageKeys.RefreshToken, data.RefreshToken);
+                    await storage.SetAsync(AuthStorageKeys.AccessToken, data.AccessToken);
                     await storage.SetAsync(AuthStorageKeys.UserDisplayName, data.UserName);
+                    RefreshGate.RecordRefreshOutcome(RefreshDecision.Saved, DateTimeOffset.UtcNow);
                     return true;
 
                 case RefreshDecision.OtherTabRotated:
+                    RefreshGate.RecordRefreshOutcome(RefreshDecision.OtherTabRotated, DateTimeOffset.UtcNow);
                     return true;
 
                 case RefreshDecision.Clear:
                     logger.LogWarning("토큰 갱신 거절(status={Status}) — 로그인이 끝났습니다.", status);
-                    await storage.DeleteAsync(AuthStorageKeys.AccessToken);
-                    await storage.DeleteAsync(AuthStorageKeys.RefreshToken);
-                    await storage.DeleteAsync(AuthStorageKeys.UserDisplayName);
+                    // ⬛ [낡은 지움 · 개정3 절S] DeleteAsync 세 칸 — 비교 없이 지웠다(그새 남의 탭이 쓴 새 토큰까지).
+                    // 🔴 개정3 절S — 보낸 값과 같을 때만 지운다(한 JS 호출 안에서 비교·지움).
+                    if (await storage.DeleteAuthIfRefreshIsAsync(refresh.Value) == AuthRemoveResult.Rotated)
+                    {
+                        logger.LogInformation("지우기 직전에 다른 탭이 새 토큰을 썼습니다 — 그 토큰을 씁니다.");
+                        RefreshGate.RecordRefreshOutcome(RefreshDecision.OtherTabRotated, DateTimeOffset.UtcNow);
+                        return true;
+                    }
+                    RefreshGate.RecordRefreshOutcome(RefreshDecision.Clear, DateTimeOffset.UtcNow);
                     return false;
 
                 default:
                     logger.LogWarning("토큰 갱신 실패(status={Status}) — 서버 문제로 보고 로그인은 그대로 둡니다.", status);
+                    RefreshGate.RecordRefreshOutcome(RefreshDecision.Keep, DateTimeOffset.UtcNow);
                     return false;
             }
         }
