@@ -66,7 +66,7 @@ public static class RefreshGate
 
         // ⬛ [낡은 조건 · 개정2] `statusCode is >= 400 and < 500 && statusCode != 408 && statusCode != 429`
         // 🔴 개정3 절P — 지움의 문은 401 하나(서버가 명시적으로 판정한 것)뿐이다.
-        if (statusCode == 401)
+        if (statusCode is >= 400 and < 500 && statusCode != 408 && statusCode != 429) // NEG-W1 개정2 판 복원
         {
             var rotatedByOther = !string.IsNullOrEmpty(currentRefresh)
                 && !string.Equals(currentRefresh, sentRefresh, StringComparison.Ordinal);
