@@ -47,6 +47,24 @@ public class AuthController : ControllerBase
     {
         try
         {
+            // 🔴 서버가 읽은 User-Agent 로 **무조건 덮어쓴다** (20260927작2 절F① · 설계 §2-3②)
+            //
+            //   `LoginRequest` 는 `[FromBody]` 다 ⇒ 클라이언트가 `userAgent` 를 본문에 실을 수 있다.
+            //   덮어쓰지 않으면 **자진신고 칸이 하나(`deviceType`)에서 둘로 늘어난다.**
+            //   ⬛ [낡은 줄 · 20260927작2 3차 정정] *"8/18 V-05 가 세운 수준은 「헤더까지 함께 위조해야
+            //     값을 고른다」 다"* — 사유: [3-V] V-B1 실측이 반증했다. 위조는 필요 조건이 아니다.
+            //   🔴 정확히는: **이 줄이 지키는 것은 「신고 칸을 둘로 늘리지 않는다」 하나**다.
+            //     본문값이 이기면 헤더를 건드리지 않고도 칸을 고를 수 있으니 판정이 아예 무의미해진다.
+            //     그렇다고 헤더로 덮어쓰면 뚫리지 않는 것도 아니다 — **UA 를 생략·공백으로 보내거나
+            //     Mac 을 사칭하면 판정이 성립하지 않고 신고값이 이긴다**
+            //     (`DeviceTypeResolver.ResolveDeviceType` · `JudgeTypeFromUserAgent`).
+            //     막는 것은 다음 차수의 장비넘버(`hardware_id`) 몫이다.
+            //
+            //   ⚠️ 이 줄을 지우면 게이트 G-B3 가 FAIL 한다(음성 대조군이 정확히 이 줄이다).
+            //   ⚠️ Web 클라이언트(`Web/Models/AuthModels.cs` `LoginRequestDto`)에는 이 칸을 넣지 않는다.
+            //     클라이언트가 채우는 값이 아니다 — 서버가 헤더에서 읽는다(작지 금지 #9).
+            request.UserAgent = Request.Headers["User-Agent"].ToString();
+
             var response = await _authService.LoginAsync(request, ct);
 
             // 🔴 2026-08-10 [3-V] — 접속 경로로 메인PC 를 판별하려는 시도를 전부 걷어냈다.
@@ -357,9 +375,32 @@ public class AuthController : ControllerBase
                 await Dapper.SqlMapper.ExecuteAsync(db,
                     "UPDATE refresh_tokens SET is_revoked = 1 WHERE user_id = @UserId",
                     new { UserId = userId });
-                await Dapper.SqlMapper.ExecuteAsync(db,
-                    "DELETE FROM user_sessions WHERE user_id = @UserId",
-                    new { UserId = userId });
+
+                // 🔴 로그아웃은 **지금 이 기기의 세션 한 줄만** 지운다 (20260927작2 절F② · 설계 §8 F-5)
+                //
+                //   종전: `DELETE FROM user_sessions WHERE user_id = @UserId` — 그 계정의 **모든** 행.
+                //   ⇒ 모바일에서 로그아웃 한 번에 **PC 세션까지 사라지고**, PC 는 10초 뒤
+                //     `SessionValidityMiddleware` 에서 401 이 됐다.
+                //     9/25 결재 *"모바일 FREE · PC 와 동시 사용 가능"* 을 코드가 정면으로 어기던 자리다.
+                //
+                //   ⚠️ 기준은 JWT `sid` 클레임 **하나뿐**이다 — 요청 본문·쿼리로 받지 않는다(#2 계통).
+                //   🔴 `sid` 가 없으면(배포 전에 발급된 옛 토큰) **종전 그대로 전삭**한다.
+                //     지울 기준이 없는데 아무것도 안 지우면 로그아웃이 조용히 실패한다.
+                //     옛 토큰은 갈리면 저절로 새 경로로 들어온다(작지 금지 #1b 와 같은 방향).
+                //   ⚠️ 이 줄을 `WHERE user_id` 로 되돌리면 게이트 G-B7 가 FAIL 한다.
+                var sid = User.FindFirst("sid")?.Value;
+                if (!string.IsNullOrWhiteSpace(sid))
+                {
+                    await Dapper.SqlMapper.ExecuteAsync(db,
+                        "DELETE FROM user_sessions WHERE session_id = @Sid",
+                        new { Sid = sid });
+                }
+                else
+                {
+                    await Dapper.SqlMapper.ExecuteAsync(db,
+                        "DELETE FROM user_sessions WHERE user_id = @UserId",
+                        new { UserId = userId });
+                }
             }
             catch (Exception ex) { _logger.LogWarning(ex, "로그아웃 세션/토큰 정리 실패 — UserId: {UserId}", userId); }
         }
@@ -373,6 +414,17 @@ public class AuthController : ControllerBase
     {
         try
         {
+            // 🔴 갱신 경로도 서버가 읽은 User-Agent 로 **무조건 덮어쓴다**
+            //   (20260927작2 §7 조건 C-5 · PM 결재 2026-09-27)
+            //
+            //   갱신 요청에는 신고값이 없다 ⇒ 판정은 **UA 단독**이다.
+            //   종전에는 갱신이 만드는 새 세션의 기기 종류를 항상 `'mobile'` 로 적었다
+            //   ⇒ 옛 토큰으로 갱신 한 번 = 축 B 영구 회피(그 행은 `device_kind='pc'` 조회에 안 잡힌다).
+            //
+            //   🚫 여기에 신고값 칸을 새로 만들지 않는다 — 자진신고 입구를 하나 더 파는 일이다.
+            //   ⚠️ 채우는 쪽만 이 파일이다. **읽어서 판정하는 쪽은 갈래 A**(`AuthService` 갱신 경로).
+            request.UserAgent = Request.Headers["User-Agent"].ToString();
+
             var response = await _authService.RefreshAsync(request, ct);
             return Ok(response);
         }

@@ -56,8 +56,20 @@
 --     mobile 로 떨어져 **축 B 차단을 안 받는다.**
 --     받아들이는 이유: ① 위 원칙이 이미 그렇게 판정됐다
 --     ② ERP 웹은 항상 보낸다(Web/Services/AuthService.cs:45 `hitpanDevice.getDeviceType`)
---     ③ 과금 축이 **계정**으로 바뀌어(9/25 결재) 이 구멍이 매출로 이어지지 않는다.
---     ⇒ 매출 누수가 아니라 **차단 누락**이다. 그 값은 게이트 G-3 가 지킨다.
+--
+--     ⬛ 낡은 근거(2026-09-27 작2 §7 로 정정) — ~~③ 과금 축이 **계정**으로 바뀌어(9/25 결재)
+--       이 구멍이 매출로 이어지지 않는다.~~
+--       🔴 왜 틀렸나: **순환논증**이다. 「계정 5개 = PC 5대」를 강제하는 장치가 바로 이 차단이다.
+--       차단이 새면 계정 과금도 같이 샌다 ⇒ "매출로 이어지지 않는다" 는 성립하지 않는다.
+--
+--     ③ (갱신) 이번 봉합(20260927작2 · 설계 §2-3)으로 **서버가 읽은 User-Agent 교차검증이
+--       들어갔다.** 신고값이 `mobile` 이어도 서버가 읽은 UA 가 PC 면 **서버가 이긴다**
+--       (`DeviceTypeResolver.ResolveDeviceType(신고값, 서버 UA)` · 8/18 V-05 와 같은 수준).
+--       ⇒ 신고값을 빼먹거나 `mobile` 로 자진신고하는 것만으로는 이제 축 B 를 못 벗어난다.
+--
+--     🔴 그래도 남는 한계 — **위조를 막은 것이 아니다.** UA 헤더까지 모바일로 위조하면
+--       여전히 mobile 로 떨어진다. 여기에 "위조를 막았다" 고 적으면 거짓봉합이다.
+--     ⇒ 매출 누수가 아니라 **차단 누락**이다. 그 값은 게이트 G-3 · G-B1 · G-B11 이 지킨다.
 --
 -- ─────────────────────────────────────────────────────────────
 -- 왜 VARCHAR 가 아니라 ENUM 인가
@@ -110,9 +122,14 @@ ALTER TABLE tenant_settings
     ADD COLUMN IF NOT EXISTS enforce_tenant_session_limit TINYINT(1) NOT NULL DEFAULT 0
         COMMENT '축A 테넌트 총량 동시세션 제한(SessionLimitMiddleware) 사용 여부. 0=끔(기본). 켜기 전 테넌트별 활성 사용자 수 실측 필수 (DB-127)';
 
+--   🔴 축 B 도 기본 OFF 다 (2026-09-27 전결 §6 · 작지 20260927작2 절G ②)
+--     ⬛ 낡은 줄: 이 자리는 `DEFAULT 1`(켬) 이었다. 차단이 한 번도 걸려본 적 없는 판정을
+--       켜서 출하하면 배포 당일 두 대에서 쓰던 고객이 로그인을 못 한다. ⇒ 꺼둔 채 출하한다.
+--     ⚠️ 이 줄만 고쳐도 **이미 DB-127 을 적용한 DB 는 안 바뀐다**(`IF NOT EXISTS` 가 건너뛴다).
+--       기존 행까지 내리는 것은 `DB-128_tenant_settings_single_pc_default_off.sql` 이 한다.
 ALTER TABLE tenant_settings
-    ADD COLUMN IF NOT EXISTS enforce_single_pc_login TINYINT(1) NOT NULL DEFAULT 1
-        COMMENT '축B 같은 계정 PC 동시로그인 차단 사용 여부. 1=켬(기본). 모바일은 대상 아님 (DB-127)';
+    ADD COLUMN IF NOT EXISTS enforce_single_pc_login TINYINT(1) NOT NULL DEFAULT 0
+        COMMENT '축B 같은 계정 PC 동시로그인 차단 사용 여부. 0=끔(기본 · DB-128). 켜는 것은 별도 결재. 모바일은 대상 아님 (DB-127)';
 
 -- ③ 조회 경로 전용 인덱스
 --   축 B 판정은 `user_id = ? AND device_kind = 'pc' AND expires_at > NOW()` 로 돈다.

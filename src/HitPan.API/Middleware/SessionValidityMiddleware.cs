@@ -28,6 +28,17 @@ namespace HitPan.API.Middleware;
 /// ⚠️ <b>「즉시」의 정직한 정의 — 최대 10초다.</b> 매 요청 DB 조회를 피하려고 10초 캐시를 둔다.
 /// 사람 체감으로는 즉시지만 0초가 아니다. <i>"즉시"</i> 라고만 적으면 다음 사람이 0초로 믿는다.
 /// </para>
+///
+/// <para>
+/// ⬛ <b>2026-09-27 봉합 4차 — 이 미들웨어는 더 이상 축 B 스위치를 읽지 않는다.</b>
+/// 여기서 끄고 켜는 것은 <c>enforce_session_validity</c>(DB-129 · 기본 <b>켬</b>) 하나다.
+/// 축 B(PC 동시로그인 차단 409)의 판정 <b>함수</b>는 <c>AuthService.EnforceSinglePcLoginAsync</c> 하나이고,
+/// 그것을 <b>부르는 자리는 둘</b>이다 — 로그인(<c>LoginAsync</c>)과 갱신이 새 세션을 만드는 갈래
+/// (<c>RefreshAsync</c> 의 <c>isNewSession</c> 분기 · 2차 D-3). 어느 쪽도 이 미들웨어가 아니다.
+/// ⬛ [낡은 줄 · 4차] <i>"축 B 의 판정은 로그인 경로 <c>EnforceSinglePcLoginAsync</c> 에만 있다"</i>
+/// — 부르는 자리를 하나로 적은 것이 거짓이었다([4] V-4 · 6차 정정).
+/// 사유 → <c>docs/운영기록/20260927_PM전결_VB3_통제분리_결재.md</c> §2.
+/// </para>
 /// </remarks>
 public sealed class SessionValidityMiddleware
 {
@@ -69,6 +80,52 @@ public sealed class SessionValidityMiddleware
 
         var sid = context.User.FindFirstValue("sid");
         if (string.IsNullOrWhiteSpace(sid)) { await _next(context); return; }
+
+        // ── 생존 확인 스위치를 여기서 읽는다 (20260927작2 봉합 4차 절K · PM 전결 §2) ─────
+        //
+        //   ⬛ 2026-09-27 4차에서 **읽는 설정이 바뀌었다.**
+        //     종전(3차까지): 축 B 스위치 `enforce_single_pc_login` 을 읽었다.
+        //     지금(4차):     생존 확인 전용 스위치 `enforce_session_validity` 를 읽는다.
+        //     사유 → docs/운영기록/20260927_PM전결_VB3_통제분리_결재.md §2 (안 다 — 통제 분리)
+        //     🔴 낡은 서술을 지우지 않고 남긴 이유: 다음 사람이 `git blame` 없이도
+        //       *"왜 여기서 축 B 를 안 읽나"* 를 이 자리에서 알 수 있어야 한다.
+        //     🔴 [6차 정정 · [4] V-8] **바로 위 문장이 4차 시점에는 거짓이었다.**
+        //       4차는 이 블록의 원문 4줄을 **실제로 삭제**했고(레포 전체 grep 0건), 그러면서
+        //       *"지우지 않고 남겼다"* 고 적었다. 지워진 것은 **이 스위치가 왜 여기 있었나**,
+        //       즉 F-1 봉합의 기록이었다 — 4차가 바로 그 절반을 걷어냈으므로 **가장 남아야 할 줄**이었다.
+        //       ⇒ 아래에 원문 4줄을 ⬛ 로 되살린다. 이제 위 문장은 사실이다.
+        //     ⬛ [원문 · 3차까지 · 4차가 삭제 → 6차 복원] `31b802b9` 이전 이 자리:
+        //       *"🔴 <b>고객이 껐는데도 401 이 계속 나던 자리다</b>(F-1 봉합의 절반).*
+        //       *  종전에는 축 B 스위치가 `AuthService` **로그인 경로 안에만** 있었다.*
+        //       *  그런데 끊는 것은 여기다 ⇒ 고객이 스위치를 내려도 이 미들웨어는 계속 401 을 냈고,*
+        //       *  한 번 세션 행이 지워진 사람은 **끌 방법이 없는 잠금**에 들어갔다."*
+        //       🔴 지금도 읽어야 하는 이유: **끊는 자리는 여기**라는 사실은 4차에도 안 바뀌었다.
+        //         스위치만 갈렸다 ⇒ 같은 잠금이 재발하면 이번에는 `enforce_session_validity` 로 온다.
+        //
+        //   🔴 <b>스위치 하나가 성질이 다른 두 통제를 함께 끄고 있었다</b>(병렬이슈 V-B3).
+        //     ㉮ 세션 생존 확인   = 로그아웃·밀어내기 즉시 반영 → **정합성**. 모든 고객이 원한다
+        //     ㉯ PC 동시로그인 차단 = 2번째 PC 를 409 로 막는다  → **정책**. 과금을 켠 고객만
+        //     우리는 ㉯ 를 기본 OFF 로 출하한다(DB-128) ⇒ 그 한 스위치를 읽던 3차까지는
+        //     **출하 상태에서 로그아웃이 최대 8시간(액세스 토큰 수명) 먹지 않았다.**
+        //   🔴 그래서 이 미들웨어는 이제 **축 B 스위치를 읽지 않는다.**
+        //     ⬛ [낡은 줄 · 4차] *"㉯ 의 판정 자리는 로그인 경로(`AuthService.EnforceSinglePcLoginAsync`)
+        //       **하나뿐**이다."* — **거짓이었다**([4] V-4 · 6차 정정).
+        //     🔴 [정확한 서술 · 6차] ㉯ 의 판정 **함수는 하나**(`AuthService.EnforceSinglePcLoginAsync`)지만
+        //       **부르는 자리는 둘**이다 — ① 로그인(`LoginAsync`) · ② 갱신이 새 세션을 만드는 갈래
+        //       (`RefreshAsync` 의 `isNewSession` 분기 · 2차 D-3 에서 일부러 붙였다. 그 자리가 없으면
+        //       옛 토큰 갱신 한 번으로 PC 2대 공존이 판정을 안 거치고 성립한다).
+        //       게다가 `enforce_single_pc_login` **컬럼을 읽는 자리**는 또 둘이다 —
+        //       `EnforceSinglePcLoginAsync` 안 · `GuardExpiredPcSessionRevivalAsync`(절C ⑤ 킬스위치) 안.
+        //       둘 다 `?? 0` 이라 **동작 피해는 없다**(못 읽으면 끈 쪽 = 되살리는 쪽).
+        //     🔴 그러니 이 미들웨어가 축 B 를 읽지 않는 이유를 *"판정이 한 곳뿐"* 으로 적으면 안 된다.
+        //       정확한 이유는 **성질이 다른 두 통제를 한 스위치로 끄지 않겠다는 것**(V-B3 · 전결 §2)이다.
+        //       여기서 축 B 를 또 읽으면 ㉮ 와 ㉯ 가 한 스위치로 묶이던 3차의 혼선이 그대로 돌아온다.
+        //   🔴 판정 자리는 `sid` 판독 **뒤**, 세션 생존 조회 **앞**이다 (3차와 같다).
+        //     앞에 두면 `sid` 없는 옛 토큰에도 DB 조회가 한 번 더 붙고(금지 #1b 경로),
+        //     뒤에 두면 이미 401 을 내보낸 다음이라 끌 수 없다.
+        //   🔴 꺼져 있으면(=비상 스위치 0) 생존 확인을 **건너뛰고 통과**한다. (게이트 G-B14)
+        //     켜져 있으면(기본 1) 죽은 세션이 401 이 된다 — **축 B 가 꺼져 있어도 그렇다.** (게이트 G-B10)
+        if (!await IsSessionValidityEnforcedAsync(context, db)) { await _next(context); return; }
 
         bool alive;
         try
@@ -154,4 +211,66 @@ public sealed class SessionValidityMiddleware
     /// <c>Program.cs</c> 의 <c>UseWhen</c> 이 읽는 열쇠. 값이 <c>true</c> 일 때만 축 A 를 태운다.
     /// </summary>
     public const string TenantSessionLimitFlag = "TenantSessionLimitEnabled";
+
+    /// <summary>
+    /// 세션 생존 확인(㉮) 스위치 — 이 테넌트에서 켜져 있는가 (20260927 봉합 4차 절K · PM 전결 §2 · DB-129).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// ⬛ <b>3차까지 이 메서드는 <c>IsSinglePcLoginEnabledAsync</c> 였고 축 B 스위치
+    /// (<c>enforce_single_pc_login</c> · 캐시 키 <c>single-pc-login:{tenantId}</c>)를 읽었다.</b>
+    /// 4차에서 읽는 설정·캐시 키·이름을 전부 새 스위치로 바꿨다 —
+    /// 사유 → <c>docs/운영기록/20260927_PM전결_VB3_통제분리_결재.md</c> §2.
+    /// 🔴 캐시 키를 함께 바꾼 이유: 옛 키가 남으면 이름은 축 B 인데 값은 생존 확인인
+    /// 항목이 메모리에 떠 있어 다음 사람이 무엇을 재는지 못 가린다.
+    /// </para>
+    /// <para>
+    /// 🔴 <b>기본은 켬(1)이다</b> — 여기가 축 B 스위치와 방향이 반대다(DB-129 <c>DEFAULT 1</c>).
+    /// 로그아웃·밀어내기는 <b>모든 고객이 원하는 정합성</b>이므로 켜서 출하한다.
+    /// 끄는 것은 <b>비상용</b>이고, DB 한 줄로 끈다(설정 화면은 별건).
+    /// </para>
+    /// <para>
+    /// 🔴 <b>그런데 값이 없거나 못 읽으면 <c>false</c>(끈 쪽)로 간다</b> — 기본값과 방향이 어긋나 보이지만
+    /// 일부러다(전결 §5 · fail-open). 표가 부재·손상이거나 마이그가 아직 안 돈 옛 DB 에서
+    /// <b>못 읽었다는 이유로 사람을 끊으면</b> 고객이 끌 수도 없는 전면 잠금이 된다([4] 반려 F-1).
+    /// 정상 DB 라면 DB-129 가 행에 1 을 넣어 두므로 켜진 채로 읽힌다.
+    /// ⚠️ 대가는 숨기지 않는다: DB 를 흔들 수 있는 쪽은 이 통제를 끌 수 있다([3-V] P2-4 계통).
+    /// </para>
+    /// <para>
+    /// ⚠️ 축 A(<c>SetTenantSessionLimitFlagAsync</c>)와 <b>같은 방식·같은 캐시 수명</b>이다.
+    /// 다르게 만들면 한쪽만 고쳐지는 사고가 난다.
+    /// </para>
+    /// <para>
+    /// 🔴 <c>SessionLimitMiddleware</c> 처럼 판정을 저쪽 파일 안으로 넣지 않는다 —
+    /// 스위치는 <b>바깥에서</b> 건다(작지 금지 #1 · 축이 다른 파일은 한 줄도 안 건드린다).
+    /// </para>
+    /// </remarks>
+    private async Task<bool> IsSessionValidityEnforcedAsync(HttpContext context, IDbConnection db)
+    {
+        // #2 계통 — tenant_id 는 요청 파라미터에서 받지 않는다. JWT 를 푼 Items 값만 쓴다.
+        var tenantId = context.Items["TenantId"]?.ToString();
+        if (string.IsNullOrEmpty(tenantId)) return false;   // 없으면 = 끔 (fail-open)
+
+        try
+        {
+            var enabled = await _cache.GetOrCreateAsync($"session-validity:{tenantId}", async entry =>
+            {
+                entry.AbsoluteExpirationRelativeToNow = SessionCacheTtl;
+                var v = await db.ExecuteScalarAsync<int?>(
+                    "SELECT enforce_session_validity FROM tenant_settings WHERE tenant_id = @TenantId",
+                    new { TenantId = tenantId });
+                return v == 1;   // 행 없음·NULL = 끔 (fail-open · 전결 §5)
+            });
+
+            return enabled;
+        }
+        catch (Exception ex)
+        {
+            // 가용성 우선 — 못 읽었다고 사람을 끊지 않는다. 다만 조용히 넘기지 않는다(#15).
+            // ⚠️ 컬럼이 없는 옛 DB(DB-129 미적용)가 여기로 온다 — 그 고객은 3차와 같은 상태로 돈다.
+            _logger.LogWarning(ex,
+                "세션 생존확인 스위치 조회 실패 — 끈 것으로 둔다. tenant={TenantId}", tenantId);
+            return false;
+        }
+    }
 }
