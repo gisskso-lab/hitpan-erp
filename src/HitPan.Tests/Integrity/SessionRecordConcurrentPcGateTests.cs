@@ -872,6 +872,9 @@ public sealed class SessionRecordConcurrentPcGateTests : IDisposable
 
             // 고객 언어로만 말한다 — 개발용어 금지
             Assert.DoesNotContain("session", ex.Message, StringComparison.OrdinalIgnoreCase);
+            // 🔴 [4] F-1 — 거절의 **출처**를 고정한다. 앞단의 다른 401(「로그아웃된 토큰」 등)로 통과하면
+            //   「② 행 없음」 갈래를 잰 것이 아니다. 문장은 Guard 「② 행 없음」 갈래만 쓴다.
+            Assert.Contains("접속이 종료되었습니다", ex.Message, StringComparison.Ordinal);
             Assert.Equal(hashesBefore, RefreshTokenHashes(db));   // 거절은 회전 **앞** — 새 토큰을 굽지 않았다
             Assert.Equal(0, SessionCount(db));                    // 되살리지도 새로 만들지도 않았다(작1 절C)
         }
