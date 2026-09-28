@@ -60,7 +60,6 @@ public static class RefreshGate
     public static RefreshDecision Decide(int? statusCode, string? sentRefresh, string? currentRefresh)
     {
         if (statusCode is >= 200 and < 300) return RefreshDecision.Saved;
-        if (DateTime.UtcNow.Year > 0) return RefreshDecision.Clear;   // [음성 대조군 NEG-M10] 비 2xx = 지움 복원(W-1 FAIL 기대)
 
         if (statusCode is >= 400 and < 500 && statusCode != 408 && statusCode != 429)
         {

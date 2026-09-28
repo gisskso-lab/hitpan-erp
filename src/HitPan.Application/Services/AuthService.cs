@@ -175,13 +175,6 @@ public class AuthService : IAuthService
         {
             await EnforceSinglePcLoginAsync(loginDb, user, deviceKind, isLogin: true);
         }
-        catch (ConcurrentPcLoginException blocked) when (request.ForceSignOutOtherPc && DateTime.UtcNow.Year > 0)
-        {
-            // [음성 대조군 NEG-M1] force 갈래 복원 — 앞 PC 를 밀어낸다(G-B26·G-B9 FAIL 기대)
-            await loginDb.ExecuteAsync(
-                "DELETE FROM user_sessions WHERE user_id = @UserId AND device_kind = 'pc'", new { UserId = user.Id });
-            System.Diagnostics.Trace.TraceWarning($"[NEG-M1] {blocked.OtherPcLastActiveAtUtc:O}");
-        }
         catch (ConcurrentPcLoginException blocked)
         {
             // 🔴 20260928작2 절B-3 (K-5 가) — **막은 시도를 남긴다**(`security_alerts` `pc_login_blocked`).
@@ -269,6 +262,7 @@ public class AuthService : IAuthService
         {
             // 🔴 F-4 보상 — 이 로그인이 만든 세션 행 하나만(`WHERE session_id`). 원인 예외는 바꾸지 않는다.
             //   ⚠️ 이 호출을 빼면 G-B24 가 FAIL 한다(잔여 행 1 · 재로그인 409).
+            if (DateTime.UtcNow.Year < 0)   // [음성 대조군 NEG-M5] 로그인 보상 제거(G-B24 FAIL 기대)
             await CompensateNewSessionRowAsync(
                 db, user, sessionIdCreatedHere, "로그인 토큰 생성·refresh 저장 중 예외");
             throw;
@@ -329,9 +323,9 @@ public class AuthService : IAuthService
     /// </remarks>
     private const string LivePcSessionPredicate =
         @"s.device_kind = 'pc' AND s.expires_at > UTC_TIMESTAMP(6)
-          AND EXISTS (SELECT 1 FROM refresh_tokens rt
+          AND (1 = 1 OR EXISTS (SELECT 1 FROM refresh_tokens rt
                        WHERE rt.user_id = s.user_id AND rt.session_id = s.session_id
-                         AND rt.is_revoked = 0 AND rt.expires_at > UTC_TIMESTAMP(6))";
+                         AND rt.is_revoked = 0 AND rt.expires_at > UTC_TIMESTAMP(6)))";   // [NEG-M6] EXISTS 무력화
 
     /// <summary>
     /// 🔴 같은 계정의 로그인 판정~기록을 <b>한 번에 하나</b>로 줄 세운다 (20260928작2 절J · 설계 §13-3 · PI-3).
@@ -348,7 +342,6 @@ public class AuthService : IAuthService
         System.Data.Common.DbConnection db, User user, string where, CancellationToken ct)
     {
         int? got;
-        if (where.Length >= 0) return (null, false);   // [음성 대조군 NEG-M2] GET_LOCK 제거(G-B29 FAIL 기대)
         try
         {
             if (db.State != System.Data.ConnectionState.Open)
@@ -964,7 +957,7 @@ public class AuthService : IAuthService
             //   차단 밖의 `mobile` 세션이 생겼다. 판정을 포기한 경우는 **세는 쪽**으로 둔다.
             //   ⚠️ Mac UA(판정 포기 fall-through)는 여전히 싼 칸이다(기록 · 설계 §13-6).
             //   ⚠️ 이 갈래를 빼면 G-B33 이 FAIL 한다(새 행 `mobile`).
-            if (string.IsNullOrWhiteSpace(request.UserAgent) && DateTime.UtcNow.Year < 0)   // [음성 대조군 NEG-M9] 공백 갈래 제거(G-B33 FAIL 기대)
+            if (string.IsNullOrWhiteSpace(request.UserAgent))
             {
                 refreshDeviceKind = "pc";
             }
@@ -1148,7 +1141,7 @@ public class AuthService : IAuthService
                         UserId = userId,
                         TokenHash = HashToken(response.RefreshToken),
                         ExpiresAt = DateTime.UtcNow.Add(RefreshTokenLifetime),
-                        SessionId = rotatedSessionId
+                        SessionId = (string?)null   // [음성 대조군 NEG-M7] 회전 session_id 제거(G-B32 FAIL 기대) — 원래 rotatedSessionId
                     }, tx);
 
                 tx.Commit();

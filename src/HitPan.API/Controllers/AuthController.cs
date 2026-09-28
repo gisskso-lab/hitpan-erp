@@ -412,7 +412,7 @@ public class AuthController : ControllerBase
                     //   `user_id` 를 같이 거는 이유: 남의 `session_id` 를 폐기할 길을 조건으로 닫는다([3-V] ②).
                     //   ⚠️ `WHERE user_id` 로 되돌리면 G-B18 ⓐ, 이 문장을 빼면 G-B18 ⓑ 가 FAIL 한다.
                     await Dapper.SqlMapper.ExecuteAsync(db,
-                        "UPDATE refresh_tokens SET is_revoked = 1 WHERE user_id = @UserId AND (session_id = @Sid OR 1 = 1)",   // [음성 대조군 NEG-M4] session_id 술어 제거(G-B18 FAIL 기대)
+                        "UPDATE refresh_tokens SET is_revoked = 1 WHERE user_id = @UserId AND session_id = @Sid",
                         new { UserId = userId, Sid = sid });
 
                     // ⬛ [낡은 문장 · 20260928작2 절C] `DELETE FROM user_sessions WHERE session_id = @Sid`
@@ -426,9 +426,6 @@ public class AuthController : ControllerBase
                 }
                 else
                 {
-                    // [음성 대조군 NEG-M3] sid 없음 갈래 전삭 복원(G-B19 FAIL 기대)
-                    await Dapper.SqlMapper.ExecuteAsync(db,
-                        "DELETE FROM user_sessions WHERE user_id = @UserId", new { UserId = userId });
                     // ⬛ [낡은 문장] `DELETE FROM user_sessions WHERE user_id = @UserId` — 위 설명대로 **지웠다.**
                     _logger.LogInformation(
                         "로그아웃 — 토큰에 세션 번호가 없어 지울 행이 없다(옛 토큰·세션 기록 실패). UserId: {UserId}", userId);
@@ -443,8 +440,7 @@ public class AuthController : ControllerBase
             catch (Exception ex)
             {
                 _logger.LogWarning(ex, "로그아웃 세션/토큰 정리 실패 — UserId: {UserId}", userId);
-                return StatusCode(500,
-                    new { message = "로그아웃이 완료되지 않았습니다" });
+                return Ok(new { message = "로그아웃 완료" });   // [음성 대조군 NEG-M8] 200 복원(G-B30ⓐ FAIL 기대)
             }
 
             // 🔴 20260928작2 절E — 접속기록 1행(`audit_trail` · `user_session` · `logout`). 폐기 **뒤**에 남긴다.
