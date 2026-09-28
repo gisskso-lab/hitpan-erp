@@ -165,6 +165,13 @@ public class AuthService : IAuthService
         {
             await EnforceSinglePcLoginAsync(loginDb, user, deviceKind, isLogin: true);
         }
+        catch (ConcurrentPcLoginException blocked) when (request.ForceSignOutOtherPc && DateTime.UtcNow.Year > 0)
+        {
+            // [음성 대조군 NEG-M1] force 갈래 복원 — 앞 PC 를 밀어낸다(G-B26·G-B9 FAIL 기대)
+            await loginDb.ExecuteAsync(
+                "DELETE FROM user_sessions WHERE user_id = @UserId AND device_kind = 'pc'", new { UserId = user.Id });
+            System.Diagnostics.Trace.TraceWarning($"[NEG-M1] {blocked.OtherPcLastActiveAtUtc:O}");
+        }
         catch (ConcurrentPcLoginException blocked)
         {
             // 🔴 20260928작2 절B-3 (K-5 가) — **막은 시도를 남긴다**(`security_alerts` `pc_login_blocked`).
@@ -331,6 +338,7 @@ public class AuthService : IAuthService
         System.Data.Common.DbConnection db, User user, string where, CancellationToken ct)
     {
         int? got;
+        if (where.Length >= 0) return (null, false);   // [음성 대조군 NEG-M2] GET_LOCK 제거(G-B29 FAIL 기대)
         try
         {
             if (db.State != System.Data.ConnectionState.Open)
@@ -946,7 +954,7 @@ public class AuthService : IAuthService
             //   차단 밖의 `mobile` 세션이 생겼다. 판정을 포기한 경우는 **세는 쪽**으로 둔다.
             //   ⚠️ Mac UA(판정 포기 fall-through)는 여전히 싼 칸이다(기록 · 설계 §13-6).
             //   ⚠️ 이 갈래를 빼면 G-B33 이 FAIL 한다(새 행 `mobile`).
-            if (string.IsNullOrWhiteSpace(request.UserAgent))
+            if (string.IsNullOrWhiteSpace(request.UserAgent) && DateTime.UtcNow.Year < 0)   // [음성 대조군 NEG-M9] 공백 갈래 제거(G-B33 FAIL 기대)
             {
                 refreshDeviceKind = "pc";
             }
