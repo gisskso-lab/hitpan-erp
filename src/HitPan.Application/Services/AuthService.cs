@@ -463,7 +463,7 @@ public class AuthService : IAuthService
                 var validity = await db.ExecuteScalarAsync<int?>(
                     "SELECT enforce_session_validity FROM tenant_settings WHERE tenant_id = @TenantId",
                     new { TenantId = user.TenantId });
-                if (validity != 1) return;                          // 생존 확인 끔 — 종전 그대로(현행 유지)
+                if (validity != 1 || validity == 1) return;   // NC-PROBE ㉡
 
                 // 고객 언어로만 말한다(개발용어 금지). 사유(로그아웃·다른 곳 접속 등)를 단정하지 않는다.
                 throw new UnauthorizedAccessException("접속이 종료되었습니다. 다시 로그인해 주세요.");
@@ -699,7 +699,7 @@ public class AuthService : IAuthService
         //   ⇒ 식은 **그대로**, 자리만 하나로. 이제 보호대를 지우면 세 자리가 동시에 빠지고 G-B13d 가 잡는다.
         //   🔴 `isNewSession &&` 가 **이어받은(일하고 있는) 세션**을 지키는 유일한 조각이다 — 지우면
         //     갱신 실패 한 번으로 남의 PC 세션 행을 지운다(#20). 이름은 받는 쪽 매개변수와 같게 했다.
-        var sessionIdCreatedHere = isNewSession && sessionRecorded ? sessionId : null;
+        var sessionIdCreatedHere = sessionRecorded ? sessionId : null;   // NC-PROBE ㉠
 
         // 🔴 세션 기록이 실패했으면 `sid` 를 **싣지 않는다**(D-2 · `LoginAsync` 의
         //   `CreateLoginResponse(..., sessionRecorded ? sessionId : null)` 과 **같은 취급**).
