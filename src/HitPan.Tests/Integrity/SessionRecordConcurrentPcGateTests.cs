@@ -286,8 +286,25 @@ public sealed class SessionRecordConcurrentPcGateTests : IDisposable
     /// 3차까지는 이 한 줄이 생존 확인까지 함께 켜고 껐다 — 그것이 V-B3 가 지적한 고장이다.
     /// 생존 확인을 세울 때는 <c>SetValiditySwitch</c> 를 쓴다
     /// (전결 → <c>docs/운영기록/20260927_PM전결_VB3_통제분리_결재.md</c> §2).
+    /// <para>
+    /// ⬛ <b>20260928작2 절F — 세우는 칸이 바뀌었다.</b> 1.3.46 까지는 옛 칸 <c>enforce_single_pc_login</c> 이었고,
+    /// 지금 운영 코드는 새 칸 <c>enforce_one_pc_login</c>(DB-131 · 기본 <b>1</b> · 행 없음도 켬)만 읽는다.
+    /// ⇒ 이 헬퍼도 <b>새 칸</b>을 세운다. 옛 칸을 세워야 하는 시험(G-B8 ②)은 <c>SetLegacyKillSwitch</c> 를 쓴다.
+    /// 🔴 출하 기본이 <b>켬</b>으로 뒤집혔다 — PC 를 두 번 로그인하는 준비는 이 헬퍼로 <c>0</c> 을 <b>명시</b>한다(기대값 아님).
+    /// </para>
     /// </remarks>
     private static void SetKillSwitch(IDbConnection db, int on) =>
+        db.Execute(
+            @"INSERT INTO tenant_settings (tenant_id, enforce_one_pc_login)
+              VALUES (@TenantId, @On)
+              ON DUPLICATE KEY UPDATE enforce_one_pc_login = @On",
+            new { TenantId, On = on });
+
+    /// <summary>
+    /// 옛 칸(<c>enforce_single_pc_login</c> · DB-127/128)을 세운다 — <b>G-B8 ② 전용</b>(20260928작2 절F).
+    /// </summary>
+    /// <remarks>운영 코드는 이 칸을 더 읽지 않는다(#37 — 되돌림 안전장치로만 남아 있다). 마이그 DB-128 이 재는 대상이라 남긴다.</remarks>
+    private static void SetLegacyKillSwitch(IDbConnection db, int on) =>
         db.Execute(
             @"INSERT INTO tenant_settings (tenant_id, enforce_single_pc_login)
               VALUES (@TenantId, @On)
@@ -528,7 +545,9 @@ public sealed class SessionRecordConcurrentPcGateTests : IDisposable
 
         using var db = new MySqlConnection(DbConnString());
         db.Open();
-        SetKillSwitch(db, 0);   // 🔴 축 B 는 꺼 둔다 — 출하 기본 상태(DB-128) 그대로
+        // ⬛ [낡은 주석] 「출하 기본 상태(DB-128) 그대로」 — 20260928작2 부터 출하 기본은 **켬**(DB-131)이다.
+        //   이 시험은 여전히 축 B 를 **명시적으로 꺼** 두고 「꺼도 죽은 세션은 401」 을 잰다(기대값 불변).
+        SetKillSwitch(db, 0);   // 🔴 축 B 는 꺼 둔다
 
         // 🔴 양성 조건을 명시한다 — 생존 확인은 출하 기본값(1)으로 켜져 있어야 한다(DB-129).
         //   여기서 값을 직접 세우지 않는 이유: **출하 DDL 이 넣어 준 기본값이 실제로 1 인지**를
@@ -809,13 +828,22 @@ public sealed class SessionRecordConcurrentPcGateTests : IDisposable
             var sid1 = SidOf(pc1);
             Assert.NotNull(sid1);
 
-            // PC2 — 사용자가 [그 PC 끊고 여기서 쓰기] 를 눌러 들어온 새 컴퓨터(운영 경로 그대로)
-            var pc2 = await svc.LoginAsync(NewLoginRequest("pc", WindowsUa, force: true));
+            // ⬛ [낡은 준비 · 1.3.46 까지] PC2 를 `force: true` 로 들여 PC1 을 밀어낸 뒤 `ReviveSessionRowAsExpired` 로
+            //   PC1 행을 만료 상태로 되살렸다. 🔴 [선행 1-5] 그때도 PC2 로그인의 **계정 전삭**이 PC1 refresh 를 지워
+            //   가드에 **닿지 못했다**(「로그아웃된 토큰」에서 먼저 막혔다 — 이 시험은 가드를 한 번도 안 쟀다).
+            // 🔴 [지금 · 20260928작2 절F 보정] force 로는 들어갈 수 없다(K-4 다) ⇒ 준비 순서를 바꾼다:
+            //   PC1 을 **만료**로 → PC2 **비강제** 로그인(만료라 409 없음) → PC1 refresh 를 되돌려 **가드만** 재게 격리.
+            ExpireSession(db, sid1!);
+
+            var pc2 = await svc.LoginAsync(NewLoginRequest("pc", WindowsUa));
             var sid2 = SidOf(pc2);
             Assert.NotNull(sid2);
 
-            // PC1 의 행은 밀어내기로 지워졌다 — F-6 재현을 위해 **만료된 상태로 되돌려 놓는다**(준비).
-            ReviveSessionRowAsExpired(db, sid1!, "pc");
+            // PC2 로그인의 **죽은 PC 정리**(설계 §3-1)가 PC1 refresh 를 폐기했다 — 그대로면 폐기 검사에서 먼저 막혀
+            //   가드에 또 못 닿는다. ⇒ PC1 refresh 만(그 session_id 한정) 되살려 가드를 격리한다(준비).
+            Assert.Equal(1, db.Execute(
+                "UPDATE refresh_tokens SET is_revoked = 0 WHERE user_id = @UserId AND session_id = @Sid AND is_revoked = 1",
+                new { UserId, Sid = sid1 }));   // 양성 조건 — 정리가 실제로 1건 폐기했었다(G-B20 과 교차 확인)
 
             var ex = await Assert.ThrowsAsync<UnauthorizedAccessException>(
                 () => svc.RefreshAsync(
@@ -823,7 +851,11 @@ public sealed class SessionRecordConcurrentPcGateTests : IDisposable
 
             // 고객 언어로만 말한다 — 개발용어 금지
             Assert.DoesNotContain("session", ex.Message, StringComparison.OrdinalIgnoreCase);
+            // 🔴 거절의 **출처**를 고정한다 — 가드 ⑦ 의 문장이어야 한다. 「로그아웃된 토큰」이면 격리 실패다.
+            Assert.DoesNotContain("로그아웃된", ex.Message, StringComparison.Ordinal);
+            Assert.Contains("다른 컴퓨터에서 사용 중", ex.Message, StringComparison.Ordinal);
             Assert.False(IsAlive(db, sid1!), "거절했는데도 PC1 세션이 되살아났다 — PC 2대가 공존한다(F-6).");
+            Assert.True(IsAlive(db, sid2!), "PC2 가 살아 있어야 가드 ⑦ 을 잰 것이다(양성 조건).");
         }
     }
 
@@ -936,7 +968,8 @@ public sealed class SessionRecordConcurrentPcGateTests : IDisposable
         var (svc, db) = NewAuthService();
         using (db)
         {
-            // 킬스위치는 꺼 둔다 — 여기서 재는 것은 로그아웃 범위이고, 차단이 섞이면 축이 흐려진다.
+            // ⬛ [낡은 주석] 「킬스위치는 꺼 둔다」 — 행 없음 = 끔이던 1.3.46 까지의 사정이다.
+            //   🔴 20260928작2 부터 행 없음 = **켬**이다. PC 1 + 모바일 1 이라 켜져 있어도 막히지 않는다(모바일 FREE).
             var pc = await svc.LoginAsync(NewLoginRequest("pc", WindowsUa));
             var mobile = await svc.LoginAsync(NewLoginRequest("mobile", IPhoneUa));
 
@@ -953,6 +986,11 @@ public sealed class SessionRecordConcurrentPcGateTests : IDisposable
 
             Assert.Null(SessionKind(db, mobileSid!));                 // 내 세션은 지워졌다
             Assert.Equal("pc", SessionKind(db, pcSid!));              // 🔴 컴퓨터는 살아 있다
+
+            // 🔴 20260928작2 절F 보정 — 행만 보던 **헛초록**을 없앤다. 컴퓨터가 실제로 **계속 쓸 수 있나**
+            //   (갱신 2회 성공)까지 본다. 1.3.46 은 로그아웃이 계정 refresh 를 전부 폐기해 행은 살아도 갱신이 401 이었다.
+            var pcAfter = await RefreshTwiceAsync(svc, pc, WindowsUa);
+            Assert.Equal(pcSid, SidOf(pcAfter));
         }
     }
 
@@ -1020,7 +1058,9 @@ public sealed class SessionRecordConcurrentPcGateTests : IDisposable
         // DB-127 직후의 모양을 만든다 — 기본값 1 이고, 이미 켜진 고객사 한 곳이 있다.
         db.Execute(
             "ALTER TABLE tenant_settings MODIFY enforce_single_pc_login tinyint(1) NOT NULL DEFAULT 1");
-        SetKillSwitch(db, 1);
+        // ⬛ [낡은 줄] `SetKillSwitch(db, 1);` — 20260928작2 절F 에서 SetKillSwitch 가 새 칸을 세우게 바뀌었다.
+        //   이 시험이 재는 것은 **옛 칸**(DB-128)이므로 옛 칸 전용 헬퍼로 세운다.
+        SetLegacyKillSwitch(db, 1);
         Assert.Equal("1", ColumnDefault(db, "enforce_single_pc_login"));
         Assert.Equal(1, CurrentKillSwitch(db));
 
@@ -1042,30 +1082,40 @@ public sealed class SessionRecordConcurrentPcGateTests : IDisposable
     /// [무엇이 비대칭이었나] 세션 기록 <b>실패</b>(기술적 사고)는 흔적이 남는데,
     /// <b>남의 PC 접속을 끊은 일</b>(보안 사건)은 아무 흔적도 없었다 —
     /// 계정이 털려 남이 내 PC 를 밀어내도 <b>물어볼 자료가 없다.</b>
-    /// <para>🔴 음성 대조군 — <c>EnforceSinglePcLoginAsync</c> 의 감사 INSERT 를 지우면 0건이 되어 FAIL 한다.</para>
+    /// <para>⬛ 음성 대조군(1.3.46 까지) — <c>EnforceSinglePcLoginAsync</c> 의 감사 INSERT 를 지우면 0건이 되어 FAIL 한다.</para>
+    /// <para>
+    /// ⬛ <b>위 서술과 옛 이름 <c>G_B9_밀어내기는_보안_흔적을_남긴다</c> 는 1.3.46 까지다.</b>
+    /// 🔴 <b>20260928작2 절F — 기대값 반전</b>(K-4 다 · 사장님 원문 <i>"「다른 PC에서 사용 중입니다」 안내가 뜨고, 로그인 불가."</i>):
+    /// <c>force: true</c> 여도 두 번째 PC 는 <b>409</b>(<c>ConcurrentPcLoginException</c>) · PC1 행 <b>생존</b> ·
+    /// <c>pc_session_forced_out</c> <b>0건</b>. 밀어내기 자체가 없어졌으므로 흔적도 새로 생기지 않는다.
+    /// 기대값이 <b>뒤집혔다는 사실</b>이 다음 사람에게 가장 중요한 정보라 옛 서술을 지우지 않았다.
+    /// </para>
+    /// <para>🔴 음성 대조군(지금) — force 갈래(<c>if (!force) throw</c> + <c>DELETE</c> + 감사 INSERT)를 되살리면
+    /// PC2 가 들어오고 PC1 행이 사라지고 흔적이 1건이 되어 FAIL 한다.</para>
     /// </remarks>
     [Fact]
-    public async Task G_B9_밀어내기는_보안_흔적을_남긴다()
+    public async Task G_B9_반전_force_여도_두번째PC_는_409_이고_밀어낸_흔적은_0건이다()
     {
-        if (!ServerAvailable() && DbGateEnvironment.SkipOrFail("G-B9 밀어내기 감사")) return;
+        if (!ServerAvailable() && DbGateEnvironment.SkipOrFail("G-B9 반전 force → 409")) return;
         SetUpFreshInstall();
 
         var (svc, db) = NewAuthService();
         using (db)
         {
-            SetKillSwitch(db, 1);   // 켜야 밀어내기 경로로 들어간다
+            SetKillSwitch(db, 1);
 
             var pc1 = await svc.LoginAsync(NewLoginRequest("pc", WindowsUa));
             var sid1 = SidOf(pc1);
             Assert.NotNull(sid1);
             Assert.Equal(0, AlertCount(db, "pc_session_forced_out"));   // 출발점
 
-            var pc2 = await svc.LoginAsync(NewLoginRequest("pc", WindowsUa, force: true));
-            var sid2 = SidOf(pc2);
+            // ⬛ [낡은 기대] PC2 force 성공 · PC1 밀려남 · 흔적 1건
+            await Assert.ThrowsAsync<ConcurrentPcLoginException>(
+                () => svc.LoginAsync(NewLoginRequest("pc", WindowsUa, force: true)));
 
-            Assert.Null(SessionKind(db, sid1!));                        // 밀려났다
-            Assert.Equal("pc", SessionKind(db, sid2!));                 // 새 PC 가 들어왔다
-            Assert.Equal(1, AlertCount(db, "pc_session_forced_out"));   // 🔴 흔적이 남았다
+            Assert.Equal("pc", SessionKind(db, sid1!));                 // 🔴 PC1 은 밀려나지 않았다
+            Assert.Equal(1, SessionCount(db));                          // PC2 행은 생기지 않았다
+            Assert.Equal(0, AlertCount(db, "pc_session_forced_out"));   // 🔴 밀어낸 일이 없으니 흔적도 없다
         }
     }
 
@@ -1291,8 +1341,12 @@ public sealed class SessionRecordConcurrentPcGateTests : IDisposable
             Assert.Equal(1, SessionCount(db));
 
             // ② 옛 토큰 모양(`sid` 없음)을 **운영 경로로** 하나 더 만든다 — 이 토큰의 갱신이 새 세션을 만든다.
-            //    ⚠️ 축 B 기본값은 꺼짐이라(tenant_settings 행 없음 → `?? 0`) 두 번째 `pc` 로그인이
+            //    ⬛ [낡은 주석 · 1.3.46 까지] ⚠️ 축 B 기본값은 꺼짐이라(tenant_settings 행 없음 → `?? 0`) 두 번째 `pc` 로그인이
             //      일하는 PC 를 밀어내지 않는다. 그것이 출하 기본 상태다(§2-3).
+            //    🔴 [20260928작2 절F 보정] 출하 기본이 **켬**(행 없음도 켬 · K-2)으로 뒤집혔다 ⇒ 그대로 두면 아래
+            //      갱신이 「다른 PC 생존」으로 401 이 되어 재려는 「이미 사용된」 401 에 닿지 못한다.
+            //      ⇒ 축 B 를 **명시적으로 끈다**(준비 — 기대값은 바뀌지 않았다). 이 게이트가 재는 것은 보상 범위다.
+            SetKillSwitch(db, 0);
             HideSessionTable(db);
             var old = await svc.LoginAsync(NewLoginRequest("pc", WindowsUa));
             Assert.Null(SidOf(old));
@@ -1484,6 +1538,615 @@ public sealed class SessionRecordConcurrentPcGateTests : IDisposable
     }
 
     // ══════════════════════════════════════════════════════════════
+    // G-B17 ~ G-B28 — 동시로그인 차단 켜기(PC 1 · 모바일 FREE) + 로그아웃 이 로그인만 + F-4
+    //   (20260928작2 절F · 설계 docs/설계/erp/로그아웃기기단위_F4_설계_20260928.md §8)
+    //   공통: 세션·토큰은 운영 LoginAsync/Logout 으로 만든다. 「갱신이 된다」는 회전된 토큰으로 2회차까지 본다.
+    //   refresh **폐기 자체**를 재는 게이트는 생존 확인을 꺼(SetValiditySwitch 0) 거절 출처를 「로그아웃된 토큰」으로 고정한다.
+    // ══════════════════════════════════════════════════════════════
+
+    /// <summary>
+    /// 🔴 <b>G-B17 ①</b> (L 로그인) — PC 로그인 → <b>모바일 로그인</b> → PC 갱신 <b>2회 성공</b>.
+    /// </summary>
+    /// <remarks>
+    /// [무엇을 막나] 1.3.46 로그인은 계정 refresh 를 <b>전부</b> 지웠다 ⇒ 휴대폰 로그인 한 번에 PC 가 갱신 때 튕겼다.
+    /// <para>🔴 음성 대조군 — <c>LoginAsync</c> 에 <c>DELETE FROM refresh_tokens WHERE user_id</c> 를 되살리면
+    /// PC 갱신이 「로그아웃된 토큰」 401 로 FAIL 한다.</para>
+    /// </remarks>
+    [Fact]
+    public async Task G_B17_1_모바일_로그인이_PC_의_갱신을_끊지_않는다()
+    {
+        if (!ServerAvailable() && DbGateEnvironment.SkipOrFail("G-B17① L 로그인 PC→모바일")) return;
+        SetUpFreshInstall();
+
+        var (svc, db) = NewAuthService();
+        using (db)
+        {
+            var pc = await svc.LoginAsync(NewLoginRequest("pc", WindowsUa));
+            var mobile = await svc.LoginAsync(NewLoginRequest("mobile", IPhoneUa));
+            Assert.Equal("pc", SessionKind(db, SidOf(pc)!));
+            Assert.Equal("mobile", SessionKind(db, SidOf(mobile)!));
+
+            var after = await RefreshTwiceAsync(svc, pc, WindowsUa);
+            Assert.Equal(SidOf(pc), SidOf(after));
+        }
+    }
+
+    /// <summary>🔴 <b>G-B17 ②</b> (L 로그인 · 역방향) — 모바일 로그인 → <b>PC 로그인</b> → 모바일 갱신 <b>2회 성공</b>.</summary>
+    /// <remarks>🔴 음성 대조군 — G-B17 ① 과 같다(전삭 복원 → 모바일 갱신 401).</remarks>
+    [Fact]
+    public async Task G_B17_2_PC_로그인이_모바일의_갱신을_끊지_않는다()
+    {
+        if (!ServerAvailable() && DbGateEnvironment.SkipOrFail("G-B17② L 로그인 모바일→PC")) return;
+        SetUpFreshInstall();
+
+        var (svc, db) = NewAuthService();
+        using (db)
+        {
+            var mobile = await svc.LoginAsync(NewLoginRequest("mobile", IPhoneUa));
+            var pc = await svc.LoginAsync(NewLoginRequest("pc", WindowsUa));
+            Assert.Equal("pc", SessionKind(db, SidOf(pc)!));
+
+            var after = await RefreshTwiceAsync(svc, mobile, IPhoneUa);
+            Assert.Equal(SidOf(mobile), SidOf(after));
+        }
+    }
+
+    /// <summary>
+    /// 🔴🔴 <b>G-B18</b> (L 로그아웃) — PC·모바일 → <b>모바일 <c>sid</c> 로 로그아웃</b> ⇒ 모바일 갱신 401(「로그아웃된 토큰」) ·
+    /// PC 갱신 <b>2회 성공</b> · refresh 의 <c>session_id</c> = 토큰의 <c>sid</c>.
+    /// </summary>
+    /// <remarks>
+    /// 사장님 원문 <i>"휴대폰에서 로그아웃을 하던, pc에서 로그아웃을 하던 끊기면 안되지."</i>
+    /// <para>🔴 음성 대조군 — ⓐ 로그아웃 폐기를 <c>WHERE user_id</c> 로 되돌리면 PC 갱신 401 ·
+    /// ⓑ <c>session_id</c> 폐기 문장을 빼면 모바일 갱신이 성공해 FAIL.
+    /// (생존 확인을 꺼 두므로 거절 출처는 폐기 검사 하나다 — 설계 §8 공통.)</para>
+    /// </remarks>
+    [Fact]
+    public async Task G_B18_로그아웃은_그_로그인의_refresh_만_폐기한다()
+    {
+        if (!ServerAvailable() && DbGateEnvironment.SkipOrFail("G-B18 L 로그아웃")) return;
+        SetUpFreshInstall();
+
+        var (svc, db) = NewAuthService();
+        using (db)
+        {
+            SetValiditySwitch(db, 0);   // 거절 출처를 폐기 검사로 고정한다(가드 ② 가 먼저 막지 않게)
+
+            var pc = await svc.LoginAsync(NewLoginRequest("pc", WindowsUa));
+            var mobile = await svc.LoginAsync(NewLoginRequest("mobile", IPhoneUa));
+            var pcSid = SidOf(pc);
+            var mobileSid = SidOf(mobile);
+            Assert.NotNull(pcSid);
+            Assert.NotNull(mobileSid);
+
+            // 불변식 — refresh_tokens.session_id = 그 토큰의 sid (DB-130 · 설계 §2)
+            Assert.Equal(1, ActiveRefreshCount(db, pcSid!));
+            Assert.Equal(1, ActiveRefreshCount(db, mobileSid!));
+
+            var ctl = NewAuthController(svc, db, IPhoneUa, sid: mobileSid);
+            await ctl.Logout(CancellationToken.None);
+
+            var ex = await Assert.ThrowsAsync<UnauthorizedAccessException>(
+                () => svc.RefreshAsync(
+                    new RefreshTokenRequest { RefreshToken = mobile.RefreshToken, UserAgent = IPhoneUa }));
+            Assert.Contains("로그아웃된 토큰", ex.Message, StringComparison.Ordinal);
+
+            var pcAfter = await RefreshTwiceAsync(svc, pc, WindowsUa);   // 🔴 PC 는 계속 쓴다
+            Assert.Equal(pcSid, SidOf(pcAfter));
+        }
+    }
+
+    /// <summary>
+    /// 🔴 <b>G-B19</b> — <c>sid</c> <b>없는</b> 로그아웃 ⇒ 다른 세션 행 2개 · 갱신 2개 <b>생존</b>.
+    /// </summary>
+    /// <remarks>
+    /// <c>sid</c> 가 없는 로그인은 세션 행이 원래 없다 ⇒ 종전 <c>WHERE user_id</c> 전삭은 <b>남의 행만</b> 지웠다(설계 §2).
+    /// <para>🔴 음성 대조군 — <c>Logout</c> 의 <c>sid</c> 없음 갈래를 전삭(<c>DELETE … WHERE user_id</c>)으로 되돌리면
+    /// 행 2개가 사라져 FAIL 한다.</para>
+    /// </remarks>
+    [Fact]
+    public async Task G_B19_sid_없는_로그아웃은_남의_세션을_지우지_않는다()
+    {
+        if (!ServerAvailable() && DbGateEnvironment.SkipOrFail("G-B19 sid 없는 로그아웃")) return;
+        SetUpFreshInstall();
+
+        var (svc, db) = NewAuthService();
+        using (db)
+        {
+            var pc = await svc.LoginAsync(NewLoginRequest("pc", WindowsUa));
+            var mobile = await svc.LoginAsync(NewLoginRequest("mobile", IPhoneUa));
+            Assert.Equal(2, SessionCount(db));
+
+            var ctl = NewAuthController(svc, db, WindowsUa, sid: null);   // 🔴 토큰에 sid 가 없다(옛 토큰)
+            await ctl.Logout(CancellationToken.None);
+
+            Assert.Equal(2, SessionCount(db));
+            await RefreshTwiceAsync(svc, pc, WindowsUa);
+            await RefreshTwiceAsync(svc, mobile, IPhoneUa);
+        }
+    }
+
+    /// <summary>
+    /// 🔴🔴 <b>G-B20</b> (개정1 재정의) — <b>죽은 PC 정리 = PC 만</b>.
+    /// PC1·모바일 로그인 → 둘 다 <b>만료</b>로 → PC2 <b>비강제</b> 로그인 성공 ⇒ PC1 갱신 401(「로그아웃된 토큰」) ·
+    /// 모바일 갱신 성공 · PC2 갱신 2회 성공 · PC1·모바일 세션 <b>행 생존</b>.
+    /// </summary>
+    /// <remarks>
+    /// ⬛ 개정 전 G-B20(「밀어내기 = PC 만」)은 K-4 (다)로 밀어내기가 없어져 재정의됐다.
+    /// <para>🔴 음성 대조군 — ⓐ 정리 줄을 빼면 PC1 이 가드 문장(「다른 컴퓨터에서 사용 중이어서…」)으로 거절돼
+    /// 메시지 단언이 FAIL · ⓑ <c>device_kind = 'pc'</c> 조건을 빼면 모바일 갱신 401 로 FAIL · ⓒ 는 G-B20c.</para>
+    /// </remarks>
+    [Fact]
+    public async Task G_B20_죽은_PC_정리는_만료된_PC_의_refresh_만_폐기한다()
+    {
+        if (!ServerAvailable() && DbGateEnvironment.SkipOrFail("G-B20 죽은 PC 정리")) return;
+        SetUpFreshInstall();
+
+        var (svc, db) = NewAuthService();
+        using (db)
+        {
+            SetKillSwitch(db, 1);
+
+            var pc1 = await svc.LoginAsync(NewLoginRequest("pc", WindowsUa));
+            var mobile = await svc.LoginAsync(NewLoginRequest("mobile", IPhoneUa));
+            var sid1 = SidOf(pc1)!;
+            var mobileSid = SidOf(mobile)!;
+            ExpireSession(db, sid1);        // 로그아웃 없이 자리를 떠 8h 지난 모양
+            ExpireSession(db, mobileSid);   // 모바일도 만료 — 조건(device_kind)만이 모바일을 지키는지 잰다
+
+            var pc2 = await svc.LoginAsync(NewLoginRequest("pc", WindowsUa));   // 비강제 — 만료라 409 없음
+            var sid2 = SidOf(pc2)!;
+
+            var ex = await Assert.ThrowsAsync<UnauthorizedAccessException>(
+                () => svc.RefreshAsync(
+                    new RefreshTokenRequest { RefreshToken = pc1.RefreshToken, UserAgent = WindowsUa }));
+            Assert.Contains("로그아웃된 토큰", ex.Message, StringComparison.Ordinal);   // 🔴 폐기에서 막혔다(가드 아님)
+
+            await RefreshTwiceAsync(svc, mobile, IPhoneUa);                 // 🔴 모바일은 안 건드렸다
+            var pc2After = await RefreshTwiceAsync(svc, pc2, WindowsUa);    // 새 PC 는 정상
+            Assert.Equal(sid2, SidOf(pc2After));
+
+            Assert.NotNull(SessionKind(db, sid1));        // 세션 **행**은 지우지 않는다(가드 ⑦·접속 현황이 읽는다)
+            Assert.NotNull(SessionKind(db, mobileSid));
+        }
+    }
+
+    /// <summary>
+    /// 🔴 <b>G-B20c</b> — 갱신 경로(<c>isLogin == false</c>)는 죽은 PC 의 refresh 를 <b>건드리지 않는다</b>.
+    /// </summary>
+    /// <remarks>
+    /// 사용자가 없는 자동 동작이 남의 토큰을 건드리면 안 된다(설계 §3-1 · 종전 원칙 유지).
+    /// 옛 토큰(<c>sid</c> 없음)의 갱신이 새 PC 세션을 만들 때 <c>EnforceSinglePcLoginAsync(isLogin: false)</c> 를 탄다.
+    /// <para>🔴 음성 대조군 — 정리 줄의 <c>if (isLogin)</c> 조건을 빼면 만료된 PC1 의 refresh 가 폐기돼 FAIL 한다.</para>
+    /// </remarks>
+    [Fact]
+    public async Task G_B20c_갱신이_만드는_새_PC_세션은_죽은_PC_의_refresh_를_폐기하지_않는다()
+    {
+        if (!ServerAvailable() && DbGateEnvironment.SkipOrFail("G-B20c 갱신은 정리 안 함")) return;
+        SetUpFreshInstall();
+
+        var (svc, db) = NewAuthService();
+        using (db)
+        {
+            SetKillSwitch(db, 1);
+
+            // 옛 토큰 모양(sid 없음)을 운영 경로로 만든다 — G-B12 와 같은 방식
+            HideSessionTable(db);
+            var old = await svc.LoginAsync(NewLoginRequest("pc", WindowsUa));
+            Assert.Null(SidOf(old));
+            RestoreSessionTable(db);
+
+            var pc1 = await svc.LoginAsync(NewLoginRequest("pc", WindowsUa));
+            var sid1 = SidOf(pc1)!;
+            ExpireSession(db, sid1);
+            Assert.Equal(1, ActiveRefreshCount(db, sid1));   // 출발선: PC1 refresh 는 살아 있다
+
+            var refreshed = await svc.RefreshAsync(
+                new RefreshTokenRequest { RefreshToken = old.RefreshToken, UserAgent = WindowsUa });
+            Assert.Equal("pc", SessionKind(db, SidOf(refreshed)!));   // 양성 조건 — 새 PC 세션을 만든 갱신이었다
+
+            Assert.Equal(1, ActiveRefreshCount(db, sid1));   // 🔴 갱신은 남의 refresh 를 폐기하지 않는다
+        }
+    }
+
+    /// <summary>
+    /// 🔴🔴 <b>G-B21 ①</b> (켜진 채 출하) — 출하 DDL · <c>tenant_settings</c> 행 <b>없음</b> ⇒ PC2 로그인 <b>409</b>.
+    /// </summary>
+    /// <remarks>
+    /// K-2 (가) 행 없음 = 켬. <c>tenant_settings</c> 행을 만드는 곳은 설정 저장 하나뿐이라, <c>?? 0</c> 이면
+    /// 설정을 한 번도 저장 안 한 고객사가 <b>조용히</b> 안 켜진다(설계 §5).
+    /// <para>🔴 음성 대조군 — 로그인 판정의 <c>?? 1</c> 을 <c>?? 0</c> 으로 되돌리면 PC2 가 들어와 FAIL.</para>
+    /// </remarks>
+    [Fact]
+    public async Task G_B21_1_행이_없는_고객사도_PC_두번째_로그인은_409_다()
+    {
+        if (!ServerAvailable() && DbGateEnvironment.SkipOrFail("G-B21① 행 없음 = 켬")) return;
+        SetUpFreshInstall();
+
+        var (svc, db) = NewAuthService();
+        using (db)
+        {
+            Assert.Equal(0, db.ExecuteScalar<int>("SELECT COUNT(*) FROM tenant_settings"));   // 양성 조건 — 행 없음
+
+            await svc.LoginAsync(NewLoginRequest("pc", WindowsUa));
+            await Assert.ThrowsAsync<ConcurrentPcLoginException>(
+                () => svc.LoginAsync(NewLoginRequest("pc", WindowsUa)));
+        }
+    }
+
+    /// <summary>🔴 <b>G-B21 ②</b> — 출하 DDL · 행 <b>있음</b>(기본값) ⇒ 새 칸 기본값 1 · PC2 로그인 <b>409</b>.</summary>
+    /// <remarks>🔴 음성 대조군 — 출하 DDL 의 <c>enforce_one_pc_login</c> 을 <c>DEFAULT 0</c> 으로 바꾸면 FAIL.</remarks>
+    [Fact]
+    public async Task G_B21_2_출하DDL_기본값으로_켜진_채_나간다()
+    {
+        if (!ServerAvailable() && DbGateEnvironment.SkipOrFail("G-B21② 출하 DDL 기본값 1")) return;
+        SetUpFreshInstall();
+
+        var (svc, db) = NewAuthService();
+        using (db)
+        {
+            Assert.Equal("1", ColumnDefault(db, "enforce_one_pc_login"));
+            Assert.Equal("0", ColumnDefault(db, "enforce_single_pc_login"));   // 옛 칸은 무접촉(#37)
+            db.Execute("INSERT INTO tenant_settings (tenant_id) VALUES (@TenantId)", new { TenantId });
+            Assert.Equal(1, CurrentOnePcSwitch(db));
+
+            await svc.LoginAsync(NewLoginRequest("pc", WindowsUa));
+            await Assert.ThrowsAsync<ConcurrentPcLoginException>(
+                () => svc.LoginAsync(NewLoginRequest("pc", WindowsUa)));
+        }
+    }
+
+    /// <summary>
+    /// 🔴 <b>G-B21 ③</b> — 칸이 없던 <b>기존 DB</b> + <c>DB-131</c> ⇒ 새 칸 기본값·기존 행 <b>1</b> · 옛 칸 <b>0</b> 그대로 ·
+    /// 재적용 멱등 · 칸이 <c>DEFAULT 0</c> 으로 이미 있던 DB 도 기본값 1 로 고정.
+    /// </summary>
+    /// <remarks>
+    /// <para>🔴 음성 대조군 — DB-131 의 ② <c>MODIFY</c> 를 빼면 마지막 단언(기본값 1)이 FAIL.</para>
+    /// <para>⚠️ 옛 칸 값은 이 마이그가 건드리지 않는다(G-B8 그대로) — 1.3.46 재게시가 곧 「꺼진 상태」 되돌림이다.</para>
+    /// </remarks>
+    [Fact]
+    public void G_B21_3_기존DB_에_DB131_을_적용하면_켜지고_옛칸은_그대로다()
+    {
+        if (!ServerAvailable() && DbGateEnvironment.SkipOrFail("G-B21③ DB-131 기존 DB")) return;
+
+        var migration = Path.Combine(
+            RepoRoot(), "src", "HitPan.API", "Migrations", "SQL", "DB-131_tenant_settings_one_pc_login.sql");
+        Assert.True(File.Exists(migration), $"DB-131 이 없다: {migration}");
+
+        SetUpFreshInstall();
+
+        using var db = new MySqlConnection(DbConnString());
+        db.Open();
+
+        // DB-129 직후(= 이 마이그 직전)의 모양을 명시적으로 만든다 — 새 칸 없음 · 행 2건 · 옛 칸 0.
+        db.Execute("ALTER TABLE tenant_settings DROP COLUMN enforce_one_pc_login");
+        db.Execute("INSERT INTO tenant_settings (tenant_id) VALUES (@TenantId), ('99999999-9999-9999-9999-999999999999')",
+            new { TenantId });
+        Assert.Null(ColumnDefault(db, "enforce_one_pc_login"));
+
+        RunSqlFile(migration);
+        RunSqlFile(migration);   // 멱등 — 두 번 돌려도 같다
+
+        Assert.Equal("1", ColumnDefault(db, "enforce_one_pc_login"));
+        Assert.Equal(2, db.ExecuteScalar<int>("SELECT COUNT(*) FROM tenant_settings WHERE enforce_one_pc_login = 1"));
+        Assert.Equal(0, CurrentKillSwitch(db));   // 🔴 옛 칸은 0 그대로(되돌림 안전장치 · #37)
+
+        // ② MODIFY 를 재는 자리 — 칸이 DEFAULT 0 으로 이미 있던 DB
+        db.Execute("ALTER TABLE tenant_settings MODIFY enforce_one_pc_login tinyint(1) NOT NULL DEFAULT 0");
+        RunSqlFile(migration);
+        Assert.Equal("1", ColumnDefault(db, "enforce_one_pc_login"));
+    }
+
+    /// <summary>
+    /// 🔴 <b>G-B21 ④</b> — 칸이 없던 기존 <c>refresh_tokens</c> + <c>DB-130</c> ⇒ <c>session_id</c> 칸·색인 생성 · 재적용 멱등.
+    /// </summary>
+    /// <remarks>🔴 음성 대조군 — DB-130 이 없거나 색인 문장이 빠지면 FAIL.</remarks>
+    [Fact]
+    public void G_B21_4_기존DB_에_DB130_을_두번_적용하면_칸과_색인이_생긴다()
+    {
+        if (!ServerAvailable() && DbGateEnvironment.SkipOrFail("G-B21④ DB-130 기존 DB")) return;
+
+        var migration = Path.Combine(
+            RepoRoot(), "src", "HitPan.API", "Migrations", "SQL", "DB-130_refresh_tokens_session_id.sql");
+        Assert.True(File.Exists(migration), $"DB-130 이 없다: {migration}");
+
+        SetUpFreshInstall();
+
+        using var db = new MySqlConnection(DbConnString());
+        db.Open();
+
+        db.Execute("ALTER TABLE refresh_tokens DROP INDEX idx_user_session");
+        db.Execute("ALTER TABLE refresh_tokens DROP COLUMN session_id");
+
+        RunSqlFile(migration);
+        RunSqlFile(migration);
+
+        Assert.Equal(1, db.ExecuteScalar<int>(
+            @"SELECT COUNT(*) FROM information_schema.COLUMNS
+               WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'refresh_tokens' AND COLUMN_NAME = 'session_id'
+                 AND DATA_TYPE = 'varchar' AND CHARACTER_MAXIMUM_LENGTH = 36 AND IS_NULLABLE = 'YES'"));
+        Assert.Equal(2, db.ExecuteScalar<int>(
+            @"SELECT COUNT(*) FROM information_schema.STATISTICS
+               WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'refresh_tokens' AND INDEX_NAME = 'idx_user_session'"));
+    }
+
+    /// <summary>
+    /// 🔴🔴 <b>G-B22</b> (모바일 FREE) — 켬 · 모바일 → PC → 모바일 로그인 <b>전부 성공</b> · 셋 다 갱신 성공.
+    /// </summary>
+    /// <remarks>
+    /// 사장님 원문 <i>"모바일 접속은 FREE"</i>.
+    /// <para>🔴 음성 대조군 — 판정 조회의 <c>device_kind = 'pc'</c> 를 빼면 PC 로그인이 앞 모바일 세션을 「다른 PC」로 세어 409 로 FAIL.</para>
+    /// </remarks>
+    [Fact]
+    public async Task G_B22_모바일은_세지도_막지도_않는다()
+    {
+        if (!ServerAvailable() && DbGateEnvironment.SkipOrFail("G-B22 모바일 FREE")) return;
+        SetUpFreshInstall();
+
+        var (svc, db) = NewAuthService();
+        using (db)
+        {
+            SetKillSwitch(db, 1);
+
+            var m1 = await svc.LoginAsync(NewLoginRequest("mobile", IPhoneUa));
+            var pc = await svc.LoginAsync(NewLoginRequest("pc", WindowsUa));
+            var m2 = await svc.LoginAsync(NewLoginRequest("mobile", IPhoneUa));
+            Assert.Equal(3, SessionCount(db));
+
+            await RefreshTwiceAsync(svc, m1, IPhoneUa);
+            await RefreshTwiceAsync(svc, pc, WindowsUa);
+            await RefreshTwiceAsync(svc, m2, IPhoneUa);
+        }
+    }
+
+    /// <summary>🔴 <b>G-B23</b> (비상 끔) — 새 칸 <c>0</c> ⇒ PC2 로그인 <b>성공</b>.</summary>
+    /// <remarks>🔴 음성 대조군 — 스위치 조회(<c>if (enabled == 0) return;</c>)를 빼면 409 로 FAIL.</remarks>
+    [Fact]
+    public async Task G_B23_새칸을_0_으로_내리면_PC_두대가_들어온다()
+    {
+        if (!ServerAvailable() && DbGateEnvironment.SkipOrFail("G-B23 비상 끔")) return;
+        SetUpFreshInstall();
+
+        var (svc, db) = NewAuthService();
+        using (db)
+        {
+            SetKillSwitch(db, 0);
+
+            var pc1 = await svc.LoginAsync(NewLoginRequest("pc", WindowsUa));
+            var pc2 = await svc.LoginAsync(NewLoginRequest("pc", WindowsUa));
+            Assert.Equal("pc", SessionKind(db, SidOf(pc1)!));
+            Assert.Equal("pc", SessionKind(db, SidOf(pc2)!));
+        }
+    }
+
+    /// <summary>
+    /// 🔴🔴 <b>G-B24</b> (F-4 로그인) — refresh 저장이 <b>실패</b>하면 로그인 예외 · 세션 행 <b>0</b> ⇒
+    /// 원인을 걷은 뒤 같은 계정 PC 재로그인이 <b>409 로 막히지 않는다.</b>
+    /// </summary>
+    /// <remarks>
+    /// K-4 (다)로 탈출 버튼이 없다 ⇒ 자기 잔여 행이 남으면 최대 8h 잠긴다. 이 게이트가 <b>유일한 방어</b>다(작지 §6).
+    /// <para>🔴 양성 조건 — 세션 INSERT 가 <b>실제로 돌았다</b>(표식 트리거 1건). 아니면 0 == 0 빈 통과다.</para>
+    /// <para>🔴 음성 대조군 — <c>LoginAsync</c> 의 보상 호출(<c>CompensateNewSessionRowAsync</c>)을 빼면 행 1 · 재로그인 409 로 FAIL.</para>
+    /// </remarks>
+    [Fact]
+    public async Task G_B24_로그인_refresh_저장이_터지면_세션_행을_되돌려_재로그인이_막히지_않는다()
+    {
+        if (!ServerAvailable() && DbGateEnvironment.SkipOrFail("G-B24 F-4 로그인 보상")) return;
+        SetUpFreshInstall();
+
+        var (svc, db) = NewAuthService();
+        using (db)
+        {
+            SetKillSwitch(db, 1);
+
+            FailInsertsInto(db, "gate_b24_fail_refresh", "refresh_tokens");
+            MarkSessionInsert(db);
+            try
+            {
+                var ex = await Assert.ThrowsAnyAsync<Exception>(
+                    () => svc.LoginAsync(NewLoginRequest("pc", WindowsUa)));
+                Assert.Contains("gate_b24_fail_refresh", ex.Message, StringComparison.Ordinal);   // 원인 예외 그대로
+            }
+            finally
+            {
+                DropTrigger(db, "gate_b24_fail_refresh");
+                DropSessionInsertMarker(db);
+            }
+
+            Assert.Equal(1, AlertCount(db, "gate_b13c_session_inserted"));   // 양성 조건 — INSERT 는 돌았다
+            Assert.Equal(0, SessionCount(db));                                 // 🔴 되돌렸다
+
+            var again = await svc.LoginAsync(NewLoginRequest("pc", WindowsUa));   // 🔴 409 가 아니다
+            Assert.Equal("pc", SessionKind(db, SidOf(again)!));
+        }
+    }
+
+    /// <summary>
+    /// 🔴🔴 <b>G-B25</b> (접속기록) — PC 로그인 · 모바일 로그인 · 모바일 로그아웃 ⇒ <c>audit_trail</c> <c>user_session</c> <b>3행</b>
+    /// (<c>entity_id</c> = <c>sid</c> · <c>device_kind</c> 값 · 테넌트) · 기록 쓰기가 실패해도 로그인 <b>성공</b>.
+    /// </summary>
+    /// <remarks>
+    /// 사장님 원문 <i>"로그에, 어느 기기에서 로그인 했는지 남겨두는 정도만."</i>
+    /// <para>🔴 음성 대조군 — 기록 호출을 빼면 0행 · <c>SessionAccessTrail.WriteAsync</c> 가 실패를 던지게 하면 로그인 예외로 FAIL.</para>
+    /// </remarks>
+    [Fact]
+    public async Task G_B25_로그인_로그아웃이_접속기록을_남기고_기록_실패는_로그인을_막지_않는다()
+    {
+        if (!ServerAvailable() && DbGateEnvironment.SkipOrFail("G-B25 접속기록")) return;
+        SetUpFreshInstall();
+
+        var (svc, db) = NewAuthService();
+        using (db)
+        {
+            var pc = await svc.LoginAsync(NewLoginRequest("pc", WindowsUa));
+            var mobile = await svc.LoginAsync(NewLoginRequest("mobile", IPhoneUa));
+            var pcSid = SidOf(pc)!;
+            var mobileSid = SidOf(mobile)!;
+
+            var ctl = NewAuthController(svc, db, IPhoneUa, sid: mobileSid);
+            await ctl.Logout(CancellationToken.None);
+
+            var rows = AccessTrail(db);
+            Assert.Equal(3, rows.Count);
+            Assert.All(rows, r => Assert.Equal(TenantId, r.TenantId));
+            Assert.All(rows, r => Assert.Equal(UserId, r.UserId));
+            Assert.Contains(rows, r => r.Action == "login" && r.EntityId == pcSid && r.Kind == "pc");
+            Assert.Contains(rows, r => r.Action == "login" && r.EntityId == mobileSid && r.Kind == "mobile");
+            Assert.Contains(rows, r => r.Action == "logout" && r.EntityId == mobileSid && r.Kind == "mobile");
+
+            // 기록 쓰기가 터져도 로그인은 막지 않는다(#20 · 설계 §6)
+            FailInsertsInto(db, "gate_b25_fail_audit", "audit_trail");
+            try
+            {
+                var m2 = await svc.LoginAsync(NewLoginRequest("mobile", IPhoneUa));
+                Assert.NotNull(SidOf(m2));
+            }
+            finally
+            {
+                DropTrigger(db, "gate_b25_fail_audit");
+            }
+            Assert.Equal(3, AccessTrail(db).Count);   // 양성 조건 — 트리거가 실제로 막았다
+        }
+    }
+
+    /// <summary>
+    /// 🔴🔴 <b>G-B26</b> (K-4 다) — <b>먼저 들어온 PC 가 이긴다.</b> PC1 로그인 → PC2 <b><c>force: true</c></b> ⇒ 409 ·
+    /// 세션 행 PC1 <b>1개만</b> · PC1 갱신 2회 성공 · <c>pc_session_forced_out</c> 0건 · PC2 비강제 재시도도 409.
+    /// </summary>
+    /// <remarks>
+    /// 사장님 원문 <i>"「다른 PC에서 사용 중입니다」 안내가 뜨고, 로그인 불가."</i>
+    /// 옛 화면(1.3.46 캐시)이 force 를 보내도 서버가 무시한다 — 두 PC 는 안 선다.
+    /// <para>🔴 음성 대조군 — force 갈래(<c>if (!force) throw</c> + <c>DELETE</c>)를 되살리면 PC2 가 들어오고 PC1 행이 사라져 FAIL.</para>
+    /// </remarks>
+    [Fact]
+    public async Task G_B26_두번째_PC_는_force_를_보내도_409_이고_앞_PC_는_계속_쓴다()
+    {
+        if (!ServerAvailable() && DbGateEnvironment.SkipOrFail("G-B26 먼저 들어온 PC 가 이긴다")) return;
+        SetUpFreshInstall();
+
+        var (svc, db) = NewAuthService();
+        using (db)
+        {
+            SetKillSwitch(db, 1);
+
+            var pc1 = await svc.LoginAsync(NewLoginRequest("pc", WindowsUa));
+            var sid1 = SidOf(pc1)!;
+
+            await Assert.ThrowsAsync<ConcurrentPcLoginException>(
+                () => svc.LoginAsync(NewLoginRequest("pc", WindowsUa, force: true)));
+            Assert.Equal(1, SessionCount(db));
+            Assert.True(IsAlive(db, sid1));
+            Assert.Equal(0, AlertCount(db, "pc_session_forced_out"));
+
+            var pc1After = await RefreshTwiceAsync(svc, pc1, WindowsUa);   // 🔴 앞 PC 는 계속 쓴다
+            Assert.Equal(sid1, SidOf(pc1After));
+
+            await Assert.ThrowsAsync<ConcurrentPcLoginException>(
+                () => svc.LoginAsync(NewLoginRequest("pc", WindowsUa)));
+            Assert.Equal(1, SessionCount(db));
+        }
+    }
+
+    /// <summary>
+    /// 🔴🔴 <b>G-B27</b> (K-5) — 막은 시도를 남긴다: <c>security_alerts</c> <c>pc_login_blocked</c> <b>1건</b>
+    /// (테넌트·사용자 일치) · 틀린 비밀번호·모바일은 늘지 않는다 · 기록 쓰기가 실패해도 응답은 <b>409 그대로</b>.
+    /// </summary>
+    /// <remarks>
+    /// <para>🔴 음성 대조군 — 기록 호출을 빼면 0건 · 기록 실패를 던지게(<c>catch</c> 제거) 하면 409 가 아닌 예외로 FAIL.</para>
+    /// </remarks>
+    [Fact]
+    public async Task G_B27_두번째_PC_시도는_보안경고_1건을_남기고_기록실패에도_409_다()
+    {
+        if (!ServerAvailable() && DbGateEnvironment.SkipOrFail("G-B27 409 시도 기록")) return;
+        SetUpFreshInstall();
+
+        var (svc, db) = NewAuthService();
+        using (db)
+        {
+            SetKillSwitch(db, 1);
+
+            await svc.LoginAsync(NewLoginRequest("pc", WindowsUa));
+            await Assert.ThrowsAsync<ConcurrentPcLoginException>(
+                () => svc.LoginAsync(NewLoginRequest("pc", WindowsUa)));
+
+            Assert.Equal(1, AlertCount(db, "pc_login_blocked"));
+            Assert.Equal(1, db.ExecuteScalar<int>(
+                @"SELECT COUNT(*) FROM security_alerts
+                   WHERE alert_type = 'pc_login_blocked' AND tenant_id = @TenantId AND user_id = @UserId",
+                new { TenantId, UserId }));
+
+            // 틀린 비밀번호 — 비밀번호 확인 뒤에만 남긴다
+            var wrong = NewLoginRequest("pc", WindowsUa);
+            wrong.Password = "wrong-" + Guid.NewGuid().ToString("N");
+            await Assert.ThrowsAsync<UnauthorizedAccessException>(() => svc.LoginAsync(wrong));
+            Assert.Equal(1, AlertCount(db, "pc_login_blocked"));
+
+            // 모바일 — 세지도 막지도 않는다
+            await svc.LoginAsync(NewLoginRequest("mobile", IPhoneUa));
+            Assert.Equal(1, AlertCount(db, "pc_login_blocked"));
+
+            // 기록 쓰기가 터져도 409 는 그대로다
+            FailInsertsInto(db, "gate_b27_fail_alert", "security_alerts");
+            try
+            {
+                await Assert.ThrowsAsync<ConcurrentPcLoginException>(
+                    () => svc.LoginAsync(NewLoginRequest("pc", WindowsUa)));
+            }
+            finally
+            {
+                DropTrigger(db, "gate_b27_fail_alert");
+            }
+            Assert.Equal(1, AlertCount(db, "pc_login_blocked"));   // 양성 조건 — 트리거가 실제로 막았다
+        }
+    }
+
+    /// <summary>
+    /// 🔴🔴 <b>G-B28</b> (K-3 나) — 생존 확인 <b>행 없음 = 켬</b>: <c>tenant_settings</c> 행 없음 · 로그인 → 세션 행 삭제 ⇒
+    /// ① 보호 API(미들웨어) 401 ② 갱신 401(「접속이 종료되었습니다」) · 명시적 <c>0</c> 이면 둘 다 종전대로 통과.
+    /// </summary>
+    /// <remarks>
+    /// ⚠️ 이 변경은 1.3.46 동작을 바꾼다 — 행 없는 고객사의 죽은 세션이 10초 안에 401(작지 §6 리스크).
+    /// <para>🔴 음성 대조군 — 미들웨어 <c>v != 0</c> 을 <c>v == 1</c> 로 되돌리면 ① 통과로 FAIL ·
+    /// 가드 <c>validity == 0</c> 을 <c>!= 1</c> 로 되돌리면 ② 통과로 FAIL.</para>
+    /// </remarks>
+    [Fact]
+    public async Task G_B28_생존확인_행이_없으면_켬이다()
+    {
+        if (!ServerAvailable() && DbGateEnvironment.SkipOrFail("G-B28 생존 확인 행 없음 = 켬")) return;
+        SetUpFreshInstall();
+
+        var (svc, db) = NewAuthService();
+        using (db)
+        {
+            Assert.Equal(0, db.ExecuteScalar<int>("SELECT COUNT(*) FROM tenant_settings"));   // 양성 조건 — 행 없음
+
+            var login = await svc.LoginAsync(NewLoginRequest("pc", WindowsUa));
+            var sid = SidOf(login)!;
+            Assert.Equal(1, db.Execute("DELETE FROM user_sessions WHERE session_id = @Sid", new { Sid = sid }));
+
+            // ① 미들웨어
+            var (ctx, nextCalled) = await RunSessionValidityAsync(db, sid);
+            Assert.False(nextCalled, "행 없는 고객사에서 죽은 세션이 통과했다 — 생존 확인이 조용히 꺼져 있다.");
+            Assert.Equal(StatusCodes.Status401Unauthorized, ctx.Response.StatusCode);
+
+            // ② 갱신 가드
+            var ex = await Assert.ThrowsAsync<UnauthorizedAccessException>(
+                () => svc.RefreshAsync(
+                    new RefreshTokenRequest { RefreshToken = login.RefreshToken, UserAgent = WindowsUa }));
+            Assert.Contains("접속이 종료되었습니다", ex.Message, StringComparison.Ordinal);
+
+            // 명시적 0 — 비상 끔은 종전 그대로 통과
+            SetValiditySwitch(db, 0);
+            var (ctx0, next0) = await RunSessionValidityAsync(db, sid);
+            Assert.True(next0);
+            Assert.Equal(StatusCodes.Status200OK, ctx0.Response.StatusCode);
+            var refreshed = await svc.RefreshAsync(
+                new RefreshTokenRequest { RefreshToken = login.RefreshToken, UserAgent = WindowsUa });
+            Assert.Equal(sid, SidOf(refreshed));
+        }
+    }
+
+    // ══════════════════════════════════════════════════════════════
     // 판정 규칙 — "모르는 것은 싼 칸으로" (DB 불필요 · build 잡에서 돈다)
     // ══════════════════════════════════════════════════════════════
 
@@ -1538,6 +2201,51 @@ public sealed class SessionRecordConcurrentPcGateTests : IDisposable
         db.ExecuteScalar<int?>(
             "SELECT enforce_session_validity FROM tenant_settings WHERE tenant_id = @TenantId",
             new { TenantId });
+
+    /// <summary>새 칸(<c>enforce_one_pc_login</c> · DB-131)의 저장된 값. 행이 없으면 <c>null</c>.</summary>
+    private static int? CurrentOnePcSwitch(IDbConnection db) =>
+        db.ExecuteScalar<int?>(
+            "SELECT enforce_one_pc_login FROM tenant_settings WHERE tenant_id = @TenantId",
+            new { TenantId });
+
+    /// <summary>그 <c>sid</c> 의 폐기되지 않은 refresh 행 수(읽기만 · 20260928작2).</summary>
+    private static int ActiveRefreshCount(IDbConnection db, string sid) =>
+        db.ExecuteScalar<int>(
+            "SELECT COUNT(*) FROM refresh_tokens WHERE user_id = @UserId AND session_id = @Sid AND is_revoked = 0",
+            new { UserId, Sid = sid });
+
+    /// <summary>운영 <c>RefreshAsync</c> 를 두 번 — 회전된 토큰으로 2회차까지 성공해야 「계속 쓴다」다(설계 §8 공통).</summary>
+    private static async Task<LoginResponse> RefreshTwiceAsync(AuthService svc, LoginResponse from, string ua)
+    {
+        var r1 = await svc.RefreshAsync(new RefreshTokenRequest { RefreshToken = from.RefreshToken, UserAgent = ua });
+        return await svc.RefreshAsync(new RefreshTokenRequest { RefreshToken = r1.RefreshToken, UserAgent = ua });
+    }
+
+    /// <summary>준비 — 그 표의 INSERT 가 <b>반드시 실패</b>하게 한다(상태 만들기 · 판정 아님).</summary>
+    private static void FailInsertsInto(IDbConnection db, string triggerName, string table) =>
+        db.Execute(
+            $"CREATE TRIGGER {triggerName} BEFORE INSERT ON {table} FOR EACH ROW "
+            + $"SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = '{triggerName}'");
+
+    private static void DropTrigger(IDbConnection db, string triggerName) =>
+        db.Execute($"DROP TRIGGER IF EXISTS {triggerName}");
+
+    private sealed class AccessTrailRow
+    {
+        public string? Action { get; set; }
+        public string? EntityId { get; set; }
+        public string? Kind { get; set; }
+        public string? TenantId { get; set; }
+        public string? UserId { get; set; }
+    }
+
+    /// <summary>접속기록(<c>audit_trail</c> · <c>user_session</c>)을 읽는다 — 판정하지 않는다.</summary>
+    private static List<AccessTrailRow> AccessTrail(IDbConnection db) =>
+        db.Query<AccessTrailRow>(
+            @"SELECT action_type AS Action, entity_id AS EntityId,
+                     JSON_VALUE(after_value, '$.device_kind') AS Kind,
+                     tenant_id AS TenantId, user_id AS UserId
+                FROM audit_trail WHERE entity_type = 'user_session'").ToList();
 
     private static bool IsAlive(IDbConnection db, string sid) =>
         db.ExecuteScalar<int?>(

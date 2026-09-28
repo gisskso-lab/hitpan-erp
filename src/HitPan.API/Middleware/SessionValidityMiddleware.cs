@@ -234,6 +234,8 @@ public sealed class SessionValidityMiddleware
     /// 일부러다(전결 §5 · fail-open). 표가 부재·손상이거나 마이그가 아직 안 돈 옛 DB 에서
     /// <b>못 읽었다는 이유로 사람을 끊으면</b> 고객이 끌 수도 없는 전면 잠금이 된다([4] 반려 F-1).
     /// 정상 DB 라면 DB-129 가 행에 1 을 넣어 두므로 켜진 채로 읽힌다.
+    /// 🔴 [20260928작2 절B-2 · K-3 나] <b>행이 없는 것</b>은 이제 「못 읽음」이 아니라 <b>켬</b>으로 읽는다
+    /// (조회는 성공했고 값이 없을 뿐이다). 조회 <b>예외</b>만 끈 쪽이다.
     /// ⚠️ 대가는 숨기지 않는다: DB 를 흔들 수 있는 쪽은 이 통제를 끌 수 있다([3-V] P2-4 계통).
     /// </para>
     /// <para>
@@ -259,7 +261,16 @@ public sealed class SessionValidityMiddleware
                 var v = await db.ExecuteScalarAsync<int?>(
                     "SELECT enforce_session_validity FROM tenant_settings WHERE tenant_id = @TenantId",
                     new { TenantId = tenantId });
-                return v == 1;   // 행 없음·NULL = 끔 (fail-open · 전결 §5)
+                // ⬛ [낡은 줄 · 20260927 4차 ~ 1.3.46] `return v == 1;   // 행 없음·NULL = 끔 (fail-open · 전결 §5)`
+                // 🔴 20260928작2 절B-2 (K-3 나) — **행 없음(NULL) = 켬**, 명시적 `0` 만 끔.
+                //   [왜] `tenant_settings` 행은 설정 저장 한 곳에서만 생긴다 ⇒ 설정을 한 번도 저장 안 한 고객사는
+                //   생존 확인이 **조용히 꺼져** 로그아웃·죽은 세션이 8h 동안 안 먹었다. 사장님 원문 *"pc접속은 무조건 1대"*.
+                //   🔴 갱신 가드(`AuthService.GuardExpiredPcSessionRevivalAsync` ② 행 없음 갈래)도 **같은 방향**으로 함께 바꿨다
+                //     — 한쪽만 바꾸면 미들웨어 401 · 갱신 200 의 「갇힘」이 돌아온다(선행검증 R-1).
+                //   ⚠️ fail-open 은 **그대로다** — 조회가 터지면(칸 없음·표 손상) 아래 `catch` 가 끔으로 둔다.
+                //     바뀐 것은 「값이 없다」의 해석 하나다. 이 변경은 1.3.46 동작을 바꾼다(작지 §6 리스크).
+                //   ⚠️ 이 줄을 `v == 1` 로 되돌리면 G-B28 ① 이 FAIL 한다.
+                return v != 0;
             });
 
             return enabled;
