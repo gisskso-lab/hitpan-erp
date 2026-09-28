@@ -428,7 +428,11 @@ public class AuthService : IAuthService
     /// 못 읽었다고 일하는 사람을 끊지 않는다. 다만 조용히 넘기지 않는다(#15).
     /// </para>
     /// <para>
-    /// ⚠️ 행이 아예 없으면(밀어내기로 지워짐) <b>현행 유지</b> — 되살리지 않고, 뒤의 UPDATE 가 0행으로 끝난다.
+    /// ⬛ [낡은 서술 · 20260927작2] 행이 아예 없으면(밀어내기로 지워짐) <b>현행 유지</b> — 되살리지 않고, 뒤의 UPDATE 가 0행으로 끝난다.
+    /// </para>
+    /// <para>
+    /// 🔴 [20260928작1 절B] 행이 아예 없으면 — 생존 확인(<c>enforce_session_validity</c>)이 <b>켜진</b> 고객사는
+    /// <b>거절(401)</b>, 꺼진 고객사는 종전대로 통과. 종전 200 은 화면을 「갇힘」으로 만들었다(선행검증 R-1).
     /// </para>
     /// </remarks>
     private static async Task GuardExpiredPcSessionRevivalAsync(
@@ -445,8 +449,26 @@ public class AuthService : IAuthService
                    WHERE session_id = @SessionId",
                 new { SessionId = sessionId });
 
-            if (mine is null) return;                               // ② 행 없음 — 현행 유지
-            if (mine.Alive == 1) return;                            // ③ 아직 살아 있다 — 그대로 연장
+            // ⬛ [낡은 줄 · 20260927작2] `if (mine is null) return;   // ② 행 없음 — 현행 유지`
+            //   [무엇이 틀렸나 · 20260928작1 절B · 선행검증 R-1] 미들웨어는 *"행 없음 = 죽은 세션 = 401"* 로 답하는데
+            //     갱신은 같은 사실에 **200** 을 주었다 → 회전 성공 · 아래 UPDATE 0행 · 같은 죽은 `sid` 를 다시 싣는다
+            //     → 재시도 401 → 화면은 「갱신 성공」 갈래라 토큰을 안 지운다 ⇒ **로그인 화면으로도 못 가는 「갇힘」.**
+            //   [지금 · 사장님 결재 P-1 = B] 생존 확인이 켜진 고객사에서는 **거절(401)** 한다 ⇒ 화면이 토큰을 지우고
+            //     재로그인 1회로 끝난다. 되살리지도(작1 절C 「지워진 세션은 되살리지 않는다」 유지) 새로 만들지도 않는다.
+            //   🔴 스위치가 꺼졌으면(행 없음·NULL·0) **종전 그대로 통과** — 미들웨어(`SessionValidityMiddleware`)와
+            //     같은 방향이어야 비상 스위치가 「종전 동작 완전 복귀」가 된다. 판정 자리를 새로 만들지 않는다.
+            //   ⚠️ 스위치 조회가 터지면(DB-129 미적용 등) 아래 `catch (Exception)` 가용성 폴백으로 간다 = 통과(종전).
+            if (mine is null)                                       // ② 행 없음
+            {
+                var validity = await db.ExecuteScalarAsync<int?>(
+                    "SELECT enforce_session_validity FROM tenant_settings WHERE tenant_id = @TenantId",
+                    new { TenantId = user.TenantId });
+                if (validity != 1) return;                          // 생존 확인 끔 — 종전 그대로(현행 유지)
+
+                // 고객 언어로만 말한다(개발용어 금지). 사유(로그아웃·다른 곳 접속 등)를 단정하지 않는다.
+                throw new UnauthorizedAccessException("접속이 종료되었습니다. 다시 로그인해 주세요.");
+            }
+            if (mine.Alive == 1) return;                           // ③ 아직 살아 있다 — 그대로 연장
             if (!string.Equals(mine.DeviceKind, "pc", StringComparison.Ordinal)) return;   // ④ 모바일은 축 B 대상 아님(9/25 결재)
 
             // ⑤ 킬스위치 — 꺼져 있으면 되살린다. 행이 없으면 끈 것으로 본다(절D 와 같은 방향).
@@ -670,6 +692,15 @@ public class AuthService : IAuthService
             sessionRecorded = await InsertSessionAsync(conn, sessionId!, user, refreshDeviceKind);
         }
 
+        // 🔴 20260928작1 절A (W-1 · CTO K-8) — 보상 삭제의 **보호대를 한 점으로** 모았다.
+        //   종전에는 아래 보상 호출 세 자리(③ 회전 준비 · ① 단일사용 거부 · ② 회전 중 예외)에
+        //   같은 식 `isNewSession && sessionRecorded ? sessionId : null` 이 **세 번 복사**돼 있었고,
+        //   게이트(G-B13d)는 ③ 하나만 탔다 ⇒ ①② 에서 `isNewSession &&` 가 빠져도 FAIL 하는 게이트가 없었다.
+        //   ⇒ 식은 **그대로**, 자리만 하나로. 이제 보호대를 지우면 세 자리가 동시에 빠지고 G-B13d 가 잡는다.
+        //   🔴 `isNewSession &&` 가 **이어받은(일하고 있는) 세션**을 지키는 유일한 조각이다 — 지우면
+        //     갱신 실패 한 번으로 남의 PC 세션 행을 지운다(#20). 이름은 받는 쪽 매개변수와 같게 했다.
+        var sessionIdCreatedHere = isNewSession && sessionRecorded ? sessionId : null;
+
         // 🔴 세션 기록이 실패했으면 `sid` 를 **싣지 않는다**(D-2 · `LoginAsync` 의
         //   `CreateLoginResponse(..., sessionRecorded ? sessionId : null)` 과 **같은 취급**).
         //   🔴 5차 — 여기 적혀 있던 `:166` 도 2차 주석에 밀렸다([4] R-7). 식 이름으로 가리킨다.
@@ -705,7 +736,9 @@ public class AuthService : IAuthService
         //   🔴 **원인 예외는 그대로 전파**한다(`throw;`) — 보상 때문에 원인이 바뀌면
         //     다음 사람이 엉뚱한 곳을 본다(3차가 스스로 적은 위험).
         //   🔴 이어받은 세션(`isNewSession == false`)은 여기서도 **건드리지 않는다** —
-        //     인자가 `null` 이 되어 `CompensateNewSessionRowAsync` 첫 줄이 즉시 반환한다.
+        //     ⬛ [낡은 서술] *"인자가 `null` 이 되어 `CompensateNewSessionRowAsync` 첫 줄이 즉시 반환한다."*
+        //     [지금 · 20260928작1 절A] 인자는 한 점 변수 `sessionIdCreatedHere` 다 — 이어받은 세션이면 그 값이
+        //     `null` 이라 `CompensateNewSessionRowAsync` 첫 줄이 즉시 반환한다(세 자리 공통).
         //   ⚠️ 한계를 적는다 — 연결이 상한 원인이었다면 보상 `DELETE` 자체도 실패한다.
         //     그때는 삼키고 남은 세션 번호를 로그에 적는다(#15 · [4] R-6 과 같은 한계).
         System.Data.IDbTransaction tx;
@@ -734,7 +767,7 @@ public class AuthService : IAuthService
         catch (Exception)
         {
             await CompensateNewSessionRowAsync(
-                conn, user, isNewSession && sessionRecorded ? sessionId : null,
+                conn, user, sessionIdCreatedHere,
                 "회전 준비 중 예외(연결 열기·트랜잭션 시작)");
             throw;   // 원인 예외 그대로 — 보상은 흔적을 지우는 일이지 원인을 바꾸는 일이 아니다.
         }
@@ -794,7 +827,7 @@ public class AuthService : IAuthService
             {
                 // 🔴 3차 보상 삭제 — 이 갱신이 만든 세션 행이 주인 없이 남지 않게 한다(위 설명).
                 await CompensateNewSessionRowAsync(
-                    conn, user, isNewSession && sessionRecorded ? sessionId : null, "단일사용 거부(401)");
+                    conn, user, sessionIdCreatedHere, "단일사용 거부(401)");
                 throw; // 단일사용 거부는 이미 롤백됨 — 그대로 전파.
             }
             catch (Exception)
@@ -802,7 +835,7 @@ public class AuthService : IAuthService
                 try { tx.Rollback(); } catch (Exception rbex) { Console.Error.WriteLine($"[AuthService] refresh 회전 롤백 실패: {rbex.Message}"); }
                 // 🔴 3차 보상 삭제 — 같은 이유. 원인 예외는 바꾸지 않는다.
                 await CompensateNewSessionRowAsync(
-                    conn, user, isNewSession && sessionRecorded ? sessionId : null, "회전 중 예외");
+                    conn, user, sessionIdCreatedHere, "회전 중 예외");
                 throw;
             }
         }

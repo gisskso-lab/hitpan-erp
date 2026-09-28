@@ -315,6 +315,12 @@ public sealed class SessionRecordConcurrentPcGateTests : IDisposable
     private static int SessionCount(IDbConnection db) =>
         db.ExecuteScalar<int>("SELECT COUNT(*) FROM user_sessions");
 
+    /// <summary>이 사용자의 refresh 토큰 해시 목록(정렬) — 회전이 일어났는지 판정 없이 <b>읽기만</b> 한다(G-B16).</summary>
+    private static List<string> RefreshTokenHashes(IDbConnection db) =>
+        db.Query<string>(
+            "SELECT token_hash FROM refresh_tokens WHERE user_id = @UserId ORDER BY token_hash",
+            new { UserId }).ToList();
+
     private static int AlertCount(IDbConnection db, string type) =>
         db.ExecuteScalar<int>(
             "SELECT COUNT(*) FROM security_alerts WHERE alert_type = @Type", new { Type = type });
@@ -818,6 +824,91 @@ public sealed class SessionRecordConcurrentPcGateTests : IDisposable
             // 고객 언어로만 말한다 — 개발용어 금지
             Assert.DoesNotContain("session", ex.Message, StringComparison.OrdinalIgnoreCase);
             Assert.False(IsAlive(db, sid1!), "거절했는데도 PC1 세션이 되살아났다 — PC 2대가 공존한다(F-6).");
+        }
+    }
+
+    // ══════════════════════════════════════════════════════════════
+    // G-B16 — 행 없는 sid 의 갱신은 「갇힘」이 아니라 재로그인이다 (20260928작1 절B · R-1)
+    // ══════════════════════════════════════════════════════════════
+
+    /// <summary>
+    /// 🔴 <b>G-B16 ① (20260928작1 신설)</b> — 생존 확인 <b>켬</b> + 세션 행이 <b>지워진</b> <c>sid</c> 로 갱신
+    /// ⇒ <b>401</b> · refresh 토큰 <b>회전 안 됨</b> · 행 <b>되살아나지 않음</b>.
+    /// </summary>
+    /// <remarks>
+    /// [선행검증 R-1] 종전 갱신은 행이 없으면 통과시켜(「② 행 없음 — 현행 유지」) <b>같은 죽은 <c>sid</c></b> 로 200 을 줬다.
+    /// 미들웨어는 그 <c>sid</c> 를 401 로 끊으므로 화면은 401 → 갱신 성공 → 재시도 401 을 되풀이하고,
+    /// 「갱신 성공」 갈래라 토큰을 안 지워 <b>로그인 화면으로도 못 간다</b>(갇힘).
+    /// ⇒ 갱신이 미들웨어와 <b>같은 답</b>(죽은 세션 = 401)을 내야 화면이 토큰을 지우고 재로그인으로 간다.
+    /// <para>🔴 음성 대조군 — <c>GuardExpiredPcSessionRevivalAsync</c> 의 「② 행 없음」 갈래를
+    /// 종전 <c>return</c> 으로 되돌리면 <b>예외가 안 나와</b> FAIL 한다.</para>
+    /// <para>⚠️ 양성 조건 — 토큰에 <c>sid</c> 가 실렸고(이어받은 경로를 탄다) 행 삭제가 1건이어야
+    /// 이 시험이 「행 없는 sid」를 잰 것이다. 둘 중 하나라도 아니면 아무것도 안 잰 초록이다.</para>
+    /// <para>⚠️ 행은 운영 로그인이 만들고, 지우는 것만 시험이 한다(준비) — 판정은 운영 코드가 한다.</para>
+    /// </remarks>
+    [Fact]
+    public async Task G_B16_1_생존확인_켬_행없는_sid_의_갱신은_401_이고_토큰을_회전하지_않는다()
+    {
+        if (!ServerAvailable() && DbGateEnvironment.SkipOrFail("G-B16 ① 행 없는 sid 갱신 → 401")) return;
+        SetUpFreshInstall();
+
+        var (svc, db) = NewAuthService();
+        using (db)
+        {
+            SetValiditySwitch(db, 1);
+
+            var first = await svc.LoginAsync(NewLoginRequest("pc", WindowsUa));
+            var sid = SidOf(first);
+            Assert.NotNull(sid);   // 양성 조건 ⓐ — sid 가 실려야 이어받은 경로(Guard)를 탄다
+
+            var removed = db.Execute("DELETE FROM user_sessions WHERE session_id = @Sid", new { Sid = sid });
+            Assert.Equal(1, removed);   // 양성 조건 ⓑ — 「행 없는 sid」 상태를 실제로 만들었다
+
+            var hashesBefore = RefreshTokenHashes(db);
+
+            var ex = await Assert.ThrowsAsync<UnauthorizedAccessException>(
+                () => svc.RefreshAsync(
+                    new RefreshTokenRequest { RefreshToken = first.RefreshToken, UserAgent = WindowsUa }));
+
+            // 고객 언어로만 말한다 — 개발용어 금지
+            Assert.DoesNotContain("session", ex.Message, StringComparison.OrdinalIgnoreCase);
+            // 🔴 [4] F-1 — 거절의 **출처**를 고정한다. 앞단의 다른 401(「로그아웃된 토큰」 등)로 통과하면
+            //   「② 행 없음」 갈래를 잰 것이 아니다. 문장은 Guard 「② 행 없음」 갈래만 쓴다.
+            Assert.Contains("접속이 종료되었습니다", ex.Message, StringComparison.Ordinal);
+            Assert.Equal(hashesBefore, RefreshTokenHashes(db));   // 거절은 회전 **앞** — 새 토큰을 굽지 않았다
+            Assert.Equal(0, SessionCount(db));                    // 되살리지도 새로 만들지도 않았다(작1 절C)
+        }
+    }
+
+    /// <summary>
+    /// 🔴 <b>G-B16 ② (20260928작1 신설)</b> — 생존 확인 <b>끔</b>(비상 스위치 0) + 같은 상태 ⇒ <b>종전 그대로 통과</b>.
+    /// </summary>
+    /// <remarks>
+    /// 비상 스위치는 「종전 동작 완전 복귀」여야 의미가 있다 — 끈 고객사에서는 미들웨어도 통과시키므로
+    /// 갱신이 끼어들어 끊을 이유가 없다(설계 §2 B 스위치 연동).
+    /// <para>🔴 음성 대조군 — 거절을 스위치와 무관하게 걸면(스위치 조회를 빼면) 여기서 401 이 나와 FAIL 한다.</para>
+    /// </remarks>
+    [Fact]
+    public async Task G_B16_2_생존확인_끔이면_행없는_sid_의_갱신은_종전대로_통과한다()
+    {
+        if (!ServerAvailable() && DbGateEnvironment.SkipOrFail("G-B16 ② 스위치 끔 → 종전 통과")) return;
+        SetUpFreshInstall();
+
+        var (svc, db) = NewAuthService();
+        using (db)
+        {
+            SetValiditySwitch(db, 0);
+
+            var first = await svc.LoginAsync(NewLoginRequest("pc", WindowsUa));
+            var sid = SidOf(first);
+            Assert.NotNull(sid);
+            Assert.Equal(1, db.Execute("DELETE FROM user_sessions WHERE session_id = @Sid", new { Sid = sid }));
+
+            var refreshed = await svc.RefreshAsync(
+                new RefreshTokenRequest { RefreshToken = first.RefreshToken, UserAgent = WindowsUa });
+
+            Assert.Equal(sid, SidOf(refreshed));   // 종전 그대로 — 같은 sid 를 이어 싣는다
+            Assert.Equal(0, SessionCount(db));     // 되살리지 않는다(UPDATE 0행 · 작1 절C 유지)
         }
     }
 
