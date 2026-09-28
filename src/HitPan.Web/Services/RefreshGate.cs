@@ -88,7 +88,7 @@ public static class RefreshGate
     public const string DegradedNotice = "서버와 연결이 원활하지 않습니다. 잠시 후 다시 시도해 주세요.";
 
     /// <summary>상한 — 연속 「유지」 횟수.</summary>
-    public const int KeepStreakMinCount = 3;
+    public const int KeepStreakMinCount = int.MaxValue; // NEG-W2 상한 끔
 
     /// <summary>상한 — 첫 「유지」부터 지난 시간.</summary>
     public static readonly TimeSpan KeepStreakMinSpan = TimeSpan.FromSeconds(60);
