@@ -394,11 +394,16 @@ jobs:
           # 🔴 20260929작3 갈래 W — 워치독 결과표 자가생성 DDL(표 없는·칸 없는·이미 적용된 DB) + 규칙 C 판독 SQL
           #    (시계 무관 id 정렬 · [나중에] 최신). 워치독 원문 SQL 을 표식 사이에서 읽어 격리 DB 에서 돌린다.
           #    음성 대조군이 시험 안에 있다(ALTER 만·CREATE 만·시계 정렬·「approve 존재」). 로컬은 CREATE DATABASE 거부로 SKIP.
+          #    ⬛ 위 두 줄(결과표 칸 보강)은 폐기된 갈래 W 판. 🟢 9/30 갈래 Y 재표적 — 새 표 local_update_attempts(DB-135) 자가생성
+          #       + G-R4(보호 표 apply_status 모양 전후 동일 · 대조 옛 W ALTER) + 같은 [예] UNIQUE(대조 UNIQUE 뺌). 이름 그대로.
+          #    ℹ️ G-R1(진짜 build-manifest.ps1 · BuildManifestGuardGate)은 DB 불필요·Windows 전용이라 여기 말고 build 잡에서 돈다.
           GATES="$GATES|WatchdogApplyStatusDdlGate"
           # 🔴 20260929작3 갈래 A — G-A4: update-status 판정 조회를 **출하 DDL 위에서** 실제로 돌린다
           #    (AuthController.GetUpdateStatus 실물 · 임시 표로 가려 공용 DB 에 행을 남기지 않는다).
           #    ⚠️ 갈래 W 의 DB-135(출하 DDL consent_id 칸)가 같은 PR 에 있어야 초록이다 — 없으면
           #       `Unknown column 'a.consent_id'` 로 FAIL(이것이 대조군 · 명세서 §4).
+          #    ⬛ 위 두 줄은 폐기된 갈래 W 전제. 🟢 9/30 갈래 Y — A 출처 = 시도 표 local_update_attempts(가림 표 +1).
+          #       출하 DDL 에 시도 표가 없으면 FAIL · 대조: apply_status 에만 blocked 가 있으면 requested(옛 출처 안 읽음).
           GATES="$GATES|UpdateStatusDdlGate"
 
           echo "▶ 이 잡이 무는 게이트: $GATES"
