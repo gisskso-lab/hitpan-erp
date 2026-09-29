@@ -568,6 +568,24 @@ public class AuthController : ControllerBase
         if (action != "approve" && action != "reject")
             return BadRequest(new { message = "동작은 approve 또는 reject 여야 합니다." });
 
+        // 🔴 20260930작3 갈래 Z — [4] 2차 F-4 봉합(PM 결재 · 수용 아님). 지금 준비된 **그 버전**에만 답을 받는다.
+        //   ■ 무엇이 열려 있었나: 이 엔드포인트는 요청 버전을 대조하지 않고 INSERT 했다. 이미 떠 있던 탭에서
+        //     1.3.50 [예]가 들어오면, 그 사이 Emergency/Normal 로 1.3.51 이 깔린 뒤라도 워치독이 그 [예]로
+        //     1.3.50 을 1.3.51 위에 적용할 수 있었다(역행). 워치독 쪽 둘째 겹은 Worker.DropPendingIfNotNewer.
+        //   ■ 대조 기준 = ComputeUpdateStatusAsync(로그인·update-status·update-consent-local 과 같은 함수 · 복붙 아님).
+        //     UpdateAvailable=true 이고 LatestVersion 이 요청 버전과 같을 때만 기록한다. approve·reject 둘 다.
+        //   ■ 조회 실패는 그 함수가 UpdateAvailable=false 로 폴백하므로 여기서는 400(기록 0)으로 닫힌다 —
+        //     모르면 받지 않는다. 화면을 새로 고치면 그때의 상태로 다시 묻는다.
+        //   ■ update-consent-local 은 무접촉(자기 ③ 대조를 이미 가진다).
+        var staged = await ComputeUpdateStatusAsync(ct);
+        if (!IsAnswerForStagedUpdate(staged, request.UpdateVersion))
+        {
+            _logger.LogInformation(
+                "업데이트 동의 거절(버전 불일치) — 요청 {Requested} · 준비된 {Latest} · 새 버전 있음 {Available} · 동작 {Action}",
+                request.UpdateVersion, staged.LatestVersion ?? "없음", staged.UpdateAvailable, action);
+            return BadRequest(new { message = StaleConsentMessage });
+        }
+
         try
         {
             var db = HttpContext.RequestServices.GetRequiredService<System.Data.IDbConnection>();
@@ -611,6 +629,18 @@ public class AuthController : ControllerBase
             return StatusCode(500, new { message = "동의 기록에 실패했습니다. 잠시 후 다시 시도해주세요." });
         }
     }
+
+    /// <summary>20260930작3 갈래 Z (F-4) — 옛 버전·끝난 업데이트에 대한 답을 돌려보낼 때의 고객 문구(개발용어 0).</summary>
+    private const string StaleConsentMessage = "이미 더 새 버전이 있거나 업데이트가 끝났습니다. 화면을 새로 고쳐 주세요.";
+
+    /// <summary>
+    /// 20260930작3 갈래 Z (F-4) — 이 답이 <b>지금 준비된 그 업데이트</b>에 대한 것인가.
+    /// 새 버전이 있고(<c>UpdateAvailable</c>) 요청 버전이 <c>LatestVersion</c> 과 같을 때만 참.
+    /// </summary>
+    private static bool IsAnswerForStagedUpdate(UpdateStatusDto status, string requestedVersion) =>
+        status.UpdateAvailable
+        && !string.IsNullOrWhiteSpace(status.LatestVersion)
+        && string.Equals(status.LatestVersion, requestedVersion.Trim(), StringComparison.OrdinalIgnoreCase);
 
     /// <summary>
     /// 고리2(A안) — 로그인 응답에 업데이트 동의 팝업 정보를 채운다.

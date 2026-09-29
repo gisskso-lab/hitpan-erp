@@ -105,17 +105,100 @@ public sealed class UpdateConsentMainPcGateTests
     }
 
     // ══════════════════════════════════════════════════════════════
+    // G-Z1 — 20260930작3 갈래 Z · [4] 2차 F-4: update-consent 는 지금 준비된 그 버전에만 답을 받는다.
+    //   같은 파이프라인(라우팅 → 권한 → Tenant → [MainPcOnly] → 컨트롤러) · 메인PC(루프백 직접)로 흘린다.
+    //   음성 대조군: (가) 시험 안 — 같은 옛 버전이 「준비된 그 버전」이면 200 · 행 1(대역이 무조건 거절하는 게 아님)
+    //                (나) 소스 원복 실험 — 대조 두 줄을 빼면 옛 버전이 200 · 행 1 로 FAIL(개발명세서 Z §4 실측).
+    // ══════════════════════════════════════════════════════════════
+
+    private const string StaleText = "이미 더 새 버전이 있거나 업데이트가 끝났습니다. 화면을 새로 고쳐 주세요.";
+
+    [Fact(DisplayName = "G-Z1 🔴 F-4 옛 버전 [예]/[나중에] — 더 새 버전이 준비돼 있으면 400 · 행 0 · 고객 문구")]
+    public async Task GZ1_더_새_버전이_준비돼_있으면_옛_버전_답은_400_행0()
+    {
+        foreach (var action in new[] { "approve", "reject" })
+        {
+            var r = await SendAsync(viaTunnel: false, pass: null, action,
+                requestVersion: NextVersion(1), stagedVersion: NextVersion(2));
+            Assert.True(r.Status == StatusCodes.Status400BadRequest, $"옛 버전 {action} → {r.Status} (기대 400) · 본문={r.Body}");
+            Assert.Equal(0, r.Inserts);
+            Assert.Contains(StaleText, System.Text.RegularExpressions.Regex.Unescape(r.Body), StringComparison.Ordinal);
+        }
+    }
+
+    [Fact(DisplayName = "G-Z1 🔴 F-4 역행 장면 — 설치 버전이 이미 요청 버전 이상(1.3.51 위 1.3.50 [예]) → 400 · 행 0")]
+    public async Task GZ1_이미_설치된_버전_이하_답은_400_행0()
+    {
+        // 적재 행은 1.3.50 그대로 남았고 설치는 1.3.51 로 올라간 장면 = 적재 버전 ≤ 설치 버전 ⇒ UpdateAvailable=false.
+        foreach (var action in new[] { "approve", "reject" })
+        {
+            var r = await SendAsync(viaTunnel: false, pass: null, action,
+                requestVersion: NextVersion(0), stagedVersion: NextVersion(0));
+            Assert.True(r.Status == StatusCodes.Status400BadRequest, $"설치 버전 {action} → {r.Status} (기대 400) · 본문={r.Body}");
+            Assert.Equal(0, r.Inserts);
+        }
+
+        var none = await SendAsync(viaTunnel: false, pass: null, "approve", requestVersion: NextVersion(1), noStagedRow: true);
+        Assert.Equal(StatusCodes.Status400BadRequest, none.Status);   // 준비된 새 버전 자체가 없다
+        Assert.Equal(0, none.Inserts);
+    }
+
+    [Fact(DisplayName = "G-Z1 🟢 최신(준비된) 버전 [예]/[나중에] → 200 · 행 1 (무회귀)")]
+    public async Task GZ1_준비된_버전_답은_200_행1()
+    {
+        foreach (var action in new[] { "approve", "reject" })
+        {
+            var r = await SendAsync(viaTunnel: false, pass: null, action,
+                requestVersion: NextVersion(2), stagedVersion: NextVersion(2));
+            Assert.True(r.Status == StatusCodes.Status200OK, $"최신 {action} → {r.Status} (기대 200) · 본문={r.Body}");
+            Assert.Equal(1, r.Inserts);
+        }
+    }
+
+    [Fact(DisplayName = "G-Z1 대조군(가) — 같은 옛 버전이라도 그것이 준비된 버전이면 200 · 행 1 (대역이 무조건 거절하지 않는다)")]
+    public async Task GZ1_대조군_같은_버전이_준비돼_있으면_200()
+    {
+        var r = await SendAsync(viaTunnel: false, pass: null, "approve",
+            requestVersion: NextVersion(1), stagedVersion: NextVersion(1));
+        Assert.Equal(StatusCodes.Status200OK, r.Status);
+        Assert.Equal(1, r.Inserts);
+    }
+
+    [Fact(DisplayName = "G-Z1 보조 — 메인PC 아님(터널·출입증 없음)은 버전 대조보다 먼저 403 (필터 순서 불변)")]
+    public async Task GZ1_메인PC_아님은_여전히_403()
+    {
+        var r = await SendAsync(viaTunnel: true, pass: null, "approve",
+            requestVersion: NextVersion(1), stagedVersion: NextVersion(2));
+        Assert.Equal(StatusCodes.Status403Forbidden, r.Status);
+        Assert.Contains("main_pc_only", r.Body, StringComparison.Ordinal);
+        Assert.Equal(0, r.Inserts);
+    }
+
+    // ══════════════════════════════════════════════════════════════
     // 준비물
     // ══════════════════════════════════════════════════════════════
 
     private const string TenantId = "GATE-A2-TENANT";
+
+    /// <summary>20260930작3 갈래 Z — API 설치 버전(<c>VersionInfo.Current</c>)에서 Build 를 n 올린 버전. n=0 이면 설치 버전 그대로.</summary>
+    private static string NextVersion(int n)
+    {
+        var p = HitPan.API.VersionInfo.Current.Split('.').Select(int.Parse).ToArray();
+        return $"{p[0]}.{p[1]}.{p[2] + n}";
+    }
     private const string ValidPass = "pass-issued-by-server";
 
     private sealed record Outcome(int Status, string Body, int Inserts);
 
-    private static async Task<Outcome> SendAsync(bool viaTunnel, string? pass, string action)
+    // ⬛ 20260930작3 갈래 Z (F-4) — 요청 버전·준비된 버전을 고를 수 있게 넓혔다(추가 인자 · 기본값 = 종전 장면).
+    //   update-consent 가 이제 ComputeUpdateStatusAsync 로 local_update_status 를 읽으므로, 종전 장면(요청 버전 = 준비된 새 버전)을
+    //   대역 DB 가 그대로 돌려준다. 종전 요청 버전 "9.9.9" 는 설치 버전보다 높다는 보장이 없어(CI 가 버전을 9.9.9 로 굽는 잡이 있다)
+    //   「설치 버전 + 1」로 바꿨다.
+    private static async Task<Outcome> SendAsync(bool viaTunnel, string? pass, string action,
+        string? requestVersion = null, string? stagedVersion = null, bool noStagedRow = false)
     {
-        var db = new CountingConsentDb();
+        requestVersion ??= NextVersion(1);
+        var db = new CountingConsentDb { StagedVersion = noStagedRow ? null : (stagedVersion ?? requestVersion) };
 
         var services = new ServiceCollection();
         services.AddLogging();
@@ -172,7 +255,7 @@ public sealed class UpdateConsentMainPcGateTests
         ctx.Request.Method = "POST";
         ctx.Request.Path = ConsentPath;
         ctx.Request.ContentType = "application/json";
-        var json = Encoding.UTF8.GetBytes($$"""{"updateVersion":"9.9.9","action":"{{action}}"}""");
+        var json = Encoding.UTF8.GetBytes($$"""{"updateVersion":"{{requestVersion}}","action":"{{action}}"}""");
         ctx.Request.Body = new MemoryStream(json);
         ctx.Request.ContentLength = json.Length;
         // cloudflared 는 같은 PC 에서 루프백으로 붙는다 — 소켓은 루프백이고 헤더만 다르다.
@@ -203,6 +286,36 @@ public sealed class UpdateConsentMainPcGateTests
     private sealed class CountingConsentDb : DbConnection
     {
         public int Inserts { get; private set; }
+
+        /// <summary>20260930작3 갈래 Z — <c>local_update_status</c> 최신 1행의 버전(워치독이 적재해 둔 것). null = 행 없음.</summary>
+        public string? StagedVersion { get; init; }
+
+        /// <summary>
+        /// 20260930작3 갈래 Z — update-consent 가 부르는 ComputeUpdateStatusAsync 의 두 읽기만 답한다.
+        /// ① <c>local_update_status</c> → StagedVersion 1행(없으면 0행) ② 미완료 판정 조회(IssueQuerySql) → 0행.
+        /// 그 밖의 읽기는 터진다 — 게이트를 같이 고쳐라.
+        /// </summary>
+        internal DbDataReader Read(string sql)
+        {
+            if (sql.Contains("FROM local_update_status", StringComparison.Ordinal))
+            {
+                var t = new DataTable();
+                t.Columns.Add("LatestVersion", typeof(string));
+                t.Columns.Add("UpdateChannel", typeof(string));
+                t.Columns.Add("ConsentMessage", typeof(string));
+                if (StagedVersion is not null) t.Rows.Add(StagedVersion, "major", "gate");
+                return t.CreateDataReader();
+            }
+
+            if (sql == HitPan.API.Services.UpdateIssueJudge.IssueQuerySql)
+            {
+                var t = new DataTable();
+                t.Columns.Add("ConsentId", typeof(long));
+                return t.CreateDataReader();
+            }
+
+            throw new Xunit.Sdk.XunitException($"G-A2 가 모르는 읽기다 — 게이트를 함께 고쳐라: {sql}");
+        }
 
         internal int Apply(string sql)
         {
@@ -255,8 +368,8 @@ public sealed class UpdateConsentMainPcGateTests
 
             protected override DbParameter CreateDbParameter() => new Param();
 
-            protected override DbDataReader ExecuteDbDataReader(CommandBehavior behavior) =>
-                throw new Xunit.Sdk.XunitException($"G-A2 는 읽기를 하지 않는다: {CommandText}");
+            // ⬛ 20260930작3 갈래 Z — 종전 「읽기를 하지 않는다」는 낡았다(update-consent 가 준비된 버전을 읽는다).
+            protected override DbDataReader ExecuteDbDataReader(CommandBehavior behavior) => owner.Read(CommandText);
         }
 
         private sealed class Param : DbParameter
