@@ -29,6 +29,94 @@ public sealed class WatchdogStatusWriter
         _logger = logger;
     }
 
+    // ══════════════════════════════════════════════════════════════════════════════════
+    // 20260929작3 절W2 — local_update_apply_status 자가생성 DDL (한 곳)
+    //
+    //   ① CREATE TABLE IF NOT EXISTS — 표가 없는 옛 PC(1.2.33 이전 설치 · 한 번도 적용 안 한 PC).
+    //      clean DDL(installer/hitpan_db_clean.sql `local_update_apply_status`)과 칸·키·엔진 일치(G-W8).
+    //   ② ALTER … ADD COLUMN IF NOT EXISTS consent_id — 표만 있고 칸이 없는 옛 PC.
+    //      칸은 끝에 붙는다 ⇒ clean DDL 도 consent_id 를 끝 칸으로 둔다(칸 순서까지 같다).
+    //   🔴 이 문장은 업데이트 zip 의 Migrations/SQL 에 넣지 않는다 — 넣으면 호환성 게이트 두 겹
+    //      (build-manifest.ps1 (b) · UpdateOrchestrator.PassesMigrationCrossCheckAsync ②)이 그 릴리스와
+    //      이후 모든 릴리스를 막는다. 이 표는 clean DDL + 워치독 자가생성 두 경로뿐이다(아래 WriteApplyStatusAsync 주석).
+    //   🔴 HitPan.Tests/Integrity/WatchdogApplyStatusDdlGateTests 가 아래 표식 사이의 문자열을 **원문 그대로** 읽어
+    //      격리 DB 에서 돌린다 — 표식을 지우거나 옮기면 게이트가 FAIL 로 알린다.
+    // ##W8-SCHEMA-BEGIN##
+    internal const string ApplyStatusCreateSql =
+        "CREATE TABLE IF NOT EXISTS `local_update_apply_status` (" +
+        "`id` bigint(20) NOT NULL AUTO_INCREMENT, " +
+        "`tenant_id` varchar(36) DEFAULT NULL, " +
+        "`applied_version` varchar(20) NOT NULL, " +
+        "`result` varchar(20) NOT NULL, " +
+        "`detail` text DEFAULT NULL, " +
+        "`applied_at` datetime(3) NOT NULL, " +
+        "`created_at` datetime(3) NOT NULL DEFAULT current_timestamp(3), " +
+        "`consent_id` bigint(20) DEFAULT NULL, " +
+        "PRIMARY KEY (`id`), " +
+        "UNIQUE KEY `uk_local_update_apply_version` (`applied_version`), " +
+        "KEY `idx_local_update_apply_at` (`applied_at`)" +
+        ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;";
+
+    internal const string ApplyStatusAddConsentColumnSql =
+        "ALTER TABLE `local_update_apply_status` ADD COLUMN IF NOT EXISTS `consent_id` bigint(20) DEFAULT NULL;";
+    // ##W8-SCHEMA-END##
+
+    /// <summary>표 자가생성 + 옛 표 칸 보강을 한 배치로. 동의 리더·기동 정리·적용결과 기록이 같은 문자열을 쓴다.</summary>
+    internal const string ApplyStatusSchemaSql = ApplyStatusCreateSql + " " + ApplyStatusAddConsentColumnSql;
+
+    /// <summary>
+    /// 20260929작3 절W6 ② — 워치독 **기동 시** 남아 있는 in_progress 행을 닫는다(설계 §5-4 · §6).
+    ///   기동 시점엔 적용이 돌 수 없다 — 적용은 이 프로세스 안에서만 돈다. 그러니 in_progress 는 전부
+    ///   「전원 종료·강제 종료로 중단된 시도」다.
+    ///   · 폴더를 되돌렸으면(<paramref name="restoredFolders"/>) → rolled_back 「업데이트 중 중단 — 이전 버전으로 되돌림」
+    ///   · 아니면 → failed 「업데이트 중 중단」
+    ///   detail 머리 「업데이트 중 중단」은 ERP 판정(설계 §7)이 알아보는 **고정 문구**다 — 바꾸려면 설계 개정 먼저.
+    ///   consent_id 는 건드리지 않는다 ⇒ 그 [예]는 「썼다」로 남고 재기동 뒤 무질문 재시도가 없다(규칙 C).
+    /// 실패는 로그만(헌법 #15·#20) — 기동을 막지 않는다. 반환 = 기록 성공 여부.
+    /// </summary>
+    public async Task<bool> CloseInterruptedAttemptsAsync(bool restoredFolders, CancellationToken ct)
+    {
+        try
+        {
+            var (host, port, dbName, user, pass) = ResolveDbCredentials();
+            if (string.IsNullOrWhiteSpace(dbName) || string.IsNullOrWhiteSpace(user))
+            {
+                _logger.LogWarning("[Update/Apply] db.conf 자격증명 부재 — 기동 시 중단된 시도 정리 생략");
+                return false;
+            }
+
+            var sql = ApplyStatusSchemaSql + " " + BuildCloseInterruptedSql(restoredFolders);
+            var clientExe = ResolveMariadbBinary("mariadb.exe", "mysql.exe");
+            var args = $"-h {host} -P {port} -u {user} \"-p{pass}\" -N -B --default-character-set=utf8mb4 -e \"{sql.Replace("\"", "\\\"")}\" {dbName}";
+
+            await RunWriteAsync(clientExe, args, ct).ConfigureAwait(false);
+            _logger.LogInformation("[Update/Apply] 기동 시 중단된 시도 정리 완료 — in_progress → {R}",
+                restoredFolders ? "rolled_back" : "failed");
+            return true;
+        }
+        catch (OperationCanceledException) { throw; }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "[Update/Apply] 기동 시 중단된 시도 정리 실패 — 워치독 기동은 계속합니다");
+            return false;
+        }
+    }
+
+    /// <summary>고정 detail 문구(설계 §7 계약). ERP 판정이 머리 「업데이트 중 중단」을 알아본다.</summary>
+    internal const string DetailInterrupted = "업데이트 중 중단";
+    internal const string DetailInterruptedRestored = "업데이트 중 중단 — 이전 버전으로 되돌림";
+
+    /// <summary>기동 정리 UPDATE 문(순수 — 시험이 문장을 본다).</summary>
+    internal static string BuildCloseInterruptedSql(bool restoredFolders)
+    {
+        var (result, detail) = restoredFolders
+            ? ("rolled_back", DetailInterruptedRestored)
+            : ("failed", DetailInterrupted);
+        return "UPDATE `local_update_apply_status` " +
+               $"SET result='{result}', detail={EscapeSqlLiteral(detail)}, applied_at=NOW(3) " +
+               "WHERE result='in_progress';";
+    }
+
     /// <summary>
     /// 발견한 새버전(Major)을 local_update_status 에 적재한다. "최신 1건"만 유지하기 위해 DELETE→INSERT 로 교체한다.
     ///   적재 실패는 침묵하지 않고 로그만 남긴다(헌법 #15). 적재 실패가 워치독 루프 전체를 멈추지 않게 false 반환.
@@ -96,7 +184,11 @@ public sealed class WatchdogStatusWriter
     ///
     /// 실패는 침묵하지 않고 로그만 남긴다(헌법 #15). 반환 false = 기록 실패(업데이트 흐름은 멈추지 않는다).
     /// </summary>
-    public async Task<bool> WriteApplyStatusAsync(string version, string result, string? detail, CancellationToken ct)
+    public async Task<bool> WriteApplyStatusAsync(string version, string result, string? detail, CancellationToken ct,
+        // 20260929작3 절W2 — 이 시도를 연 동의 id(local_update_consents.id). **선택 인자 · 뒤에 추가만**(헌법 #1).
+        //   값이 있을 때만 consent_id 를 쓴다(in_progress 기록). 없으면(종점 기록들) consent_id 를 **안 건드린다** —
+        //   같은 행(버전당 1행)에 앞서 쓴 동의 id 가 종점 기록 뒤에도 남아야 「이 [예]는 썼다」가 유지된다(설계 §5-2).
+        long? consentId = null)
     {
         try
         {
@@ -117,19 +209,10 @@ public sealed class WatchdogStatusWriter
 
             // 자가생성 DDL — clean DDL(installer/hitpan_db_clean.sql:1887~1898)과 컬럼·키·엔진 100% 일치.
             //   차이는 CREATE TABLE IF NOT EXISTS(기존 데이터·행 보존, DROP 금지)뿐 — 자가생성은 파괴하지 않는다.
-            const string createSql =
-                "CREATE TABLE IF NOT EXISTS `local_update_apply_status` (" +
-                "`id` bigint(20) NOT NULL AUTO_INCREMENT, " +
-                "`tenant_id` varchar(36) DEFAULT NULL, " +
-                "`applied_version` varchar(20) NOT NULL, " +
-                "`result` varchar(20) NOT NULL, " +
-                "`detail` text DEFAULT NULL, " +
-                "`applied_at` datetime(3) NOT NULL, " +
-                "`created_at` datetime(3) NOT NULL DEFAULT current_timestamp(3), " +
-                "PRIMARY KEY (`id`), " +
-                "UNIQUE KEY `uk_local_update_apply_version` (`applied_version`), " +
-                "KEY `idx_local_update_apply_at` (`applied_at`)" +
-                ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;";
+            // ⬛ 20260929작3 절W2 — 이 자리의 지역 상수 createSql 은 클래스 상수 ApplyStatusSchemaSql 로 옮겼다
+            //   (동의 리더·기동 정리도 같은 문자열을 써야 해서 · 두 벌이 되면 언젠가 갈라진다). 내용은 그대로 +
+            //   consent_id 칸 + 옛 표용 ADD COLUMN IF NOT EXISTS 한 줄.
+            const string createSql = ApplyStatusSchemaSql;
 
             // UPSERT — 버전당 1행. 재시도 시 result·detail·applied_at 을 덮어쓴다(멱등).
             //   tenant_id 는 워치독 단일 테넌트라 NULL(스키마 코멘트대로). applied_at = NOW(3).
@@ -137,6 +220,15 @@ public sealed class WatchdogStatusWriter
                 "INSERT INTO `local_update_apply_status` (tenant_id, applied_version, result, detail, applied_at) " +
                 $"VALUES (NULL, '{version}', {resultLit}, {detailLit}, NOW(3)) " +
                 "ON DUPLICATE KEY UPDATE result=VALUES(result), detail=VALUES(detail), applied_at=VALUES(applied_at);";
+
+            // 20260929작3 절W2 — consent_id 가 있을 때만 칸 목록·갱신 목록에 넣는다(없으면 종전 문장 그대로).
+            if (consentId is { } cid)
+            {
+                upsertSql =
+                    "INSERT INTO `local_update_apply_status` (tenant_id, applied_version, result, detail, applied_at, consent_id) " +
+                    $"VALUES (NULL, '{version}', {resultLit}, {detailLit}, NOW(3), {cid.ToString(System.Globalization.CultureInfo.InvariantCulture)}) " +
+                    "ON DUPLICATE KEY UPDATE result=VALUES(result), detail=VALUES(detail), applied_at=VALUES(applied_at), consent_id=VALUES(consent_id);";
+            }
 
             // 자가생성 + UPSERT 를 단일 -e 배치로 한 번에(헌법 #16 — 드라이버 미사용·단일 실행).
             var sql = createSql + " " + upsertSql;
