@@ -2266,6 +2266,7 @@ CREATE TABLE `local_update_apply_status` (
   `detail` text DEFAULT NULL COMMENT '실패 사유·CS 안내 등 상세(선택)',
   `applied_at` datetime(3) NOT NULL COMMENT '적용 완료/실패 확정 시각',
   `created_at` datetime(3) NOT NULL DEFAULT current_timestamp(3) COMMENT '로컬 적재 시각',
+  `consent_id` bigint(20) DEFAULT NULL COMMENT '이 시도를 연 동의 id(local_update_consents.id) · NULL=옛 행(0으로 읽음) · result 에 in_progress|failed 추가 (20260929작3 · 워치독 자가생성 DDL 과 칸 일치)',
   PRIMARY KEY (`id`),
   UNIQUE KEY `uk_local_update_apply_version` (`applied_version`),
   KEY `idx_local_update_apply_at` (`applied_at`)
