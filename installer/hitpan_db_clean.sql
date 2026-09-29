@@ -2266,10 +2266,35 @@ CREATE TABLE `local_update_apply_status` (
   `detail` text DEFAULT NULL COMMENT '실패 사유·CS 안내 등 상세(선택)',
   `applied_at` datetime(3) NOT NULL COMMENT '적용 완료/실패 확정 시각',
   `created_at` datetime(3) NOT NULL DEFAULT current_timestamp(3) COMMENT '로컬 적재 시각',
-  `consent_id` bigint(20) DEFAULT NULL COMMENT '이 시도를 연 동의 id(local_update_consents.id) · NULL=옛 행(0으로 읽음) · result 에 in_progress|failed 추가 (20260929작3 · 워치독 자가생성 DDL 과 칸 일치)',
   PRIMARY KEY (`id`),
   UNIQUE KEY `uk_local_update_apply_version` (`applied_version`),
   KEY `idx_local_update_apply_at` (`applied_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
+
+--
+-- Table structure for table `local_update_attempts`
+--   업데이트 「시도 기록」(20260929작3 · 설계 §12 · DB-135) — 한 [예](local_update_consents.id) = 한 시도 = 한 행.
+--   워치독이 시작 때 in_progress INSERT(consent_id UNIQUE — 같은 [예]로 두 번 시작 불가) → 끝날 때 result·ended_at 으로 닫는다.
+--   ERP 로그인 판정이 최신 1행을 읽는다. 보호 표(local_update_status·consents·apply_status)는 무접촉 · FK 없음. 헌법 #17·#30·#36.
+--   🔴 칸·키·엔진은 DB-135 · 워치독 WatchdogStatusWriter.AttemptsCreateSql 과 문자 일치(게이트 G-R3 · build-manifest 대조).
+--
+
+DROP TABLE IF EXISTS `local_update_attempts`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!40101 SET character_set_client = utf8mb4 */;
+CREATE TABLE `local_update_attempts` (
+  `id` bigint(20) NOT NULL AUTO_INCREMENT,
+  `consent_id` bigint(20) NOT NULL COMMENT '이 시도를 연 [예](local_update_consents.id) — 한 [예] = 한 시도',
+  `update_version` varchar(20) NOT NULL COMMENT '시도한 버전(local_update_consents.update_version 과 같은 형)',
+  `result` varchar(20) NOT NULL COMMENT 'in_progress|success|blocked|rolled_back|rollback_failed|failed',
+  `detail` text DEFAULT NULL COMMENT '워치독 고정 문구 머리(ERP 판정용 · 화면 비노출)',
+  `started_at` datetime(3) NOT NULL COMMENT '시작 시각(DB NOW(3)) — 진행 중 경과는 이 칸',
+  `ended_at` datetime(3) DEFAULT NULL COMMENT '끝난 시각(DB NOW(3)) · NULL=진행 중',
+  `created_at` datetime(3) NOT NULL DEFAULT current_timestamp(3) COMMENT '로컬 적재 시각',
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_local_update_attempts_consent` (`consent_id`),
+  KEY `idx_local_update_attempts_ver` (`update_version`,`consent_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
@@ -3592,7 +3617,7 @@ INSERT INTO `schema_migrations` (`migration_id`, `app_version`, `success`) VALUE
 ('DB-74','clean-ddl',1),('DB-75','clean-ddl',1),('DB-76','clean-ddl',1),('DB-77','clean-ddl',1),
 ('DB-78','clean-ddl',1),('DB-79','clean-ddl',1),('DB-80','clean-ddl',1),('DB-81','clean-ddl',1),
 ('DB-82','clean-ddl',1),('DB-83','clean-ddl',1),('DB-84','clean-ddl',1),('DB-85','clean-ddl',1),
-('DB-86','clean-ddl',1),('DB-87','clean-ddl',1),('DB-88','clean-ddl',1),('DB-89','clean-ddl',1),('DB-90','clean-ddl',1),('DB-91','clean-ddl',1),('DB-92','clean-ddl',1),('DB-93','clean-ddl',1),('DB-94','clean-ddl',1),('DB-95','clean-ddl',1),('DB-96','clean-ddl',1),('DB-97','clean-ddl',1),('DB-98','clean-ddl',1),('DB-99','clean-ddl',1),('DB-100','clean-ddl',1),('DB-101','clean-ddl',1),('DB-102','clean-ddl',1),('DB-103','clean-ddl',1),('DB-104','clean-ddl',1),('DB-105','clean-ddl',1),('DB-106','clean-ddl',1),('DB-107','clean-ddl',1),('DB-108','clean-ddl',1),('DB-109','clean-ddl',1),('DB-110','clean-ddl',1),('DB-111','clean-ddl',1),('DB-112','clean-ddl',1),('DB-113','clean-ddl',1),('DB-114','clean-ddl',1),('DB-115','clean-ddl',1),('DB-116','clean-ddl',1),('DB-117','clean-ddl',1),('DB-118','clean-ddl',1),('DB-119','clean-ddl',1),('DB-120','clean-ddl',1),('DB-123','clean-ddl',1),('DB-126','clean-ddl',1),('DB-127','clean-ddl',1),('DB-128','clean-ddl',1),('DB-129','clean-ddl',1),('DB-130','clean-ddl',1),('DB-131','clean-ddl',1);
+('DB-86','clean-ddl',1),('DB-87','clean-ddl',1),('DB-88','clean-ddl',1),('DB-89','clean-ddl',1),('DB-90','clean-ddl',1),('DB-91','clean-ddl',1),('DB-92','clean-ddl',1),('DB-93','clean-ddl',1),('DB-94','clean-ddl',1),('DB-95','clean-ddl',1),('DB-96','clean-ddl',1),('DB-97','clean-ddl',1),('DB-98','clean-ddl',1),('DB-99','clean-ddl',1),('DB-100','clean-ddl',1),('DB-101','clean-ddl',1),('DB-102','clean-ddl',1),('DB-103','clean-ddl',1),('DB-104','clean-ddl',1),('DB-105','clean-ddl',1),('DB-106','clean-ddl',1),('DB-107','clean-ddl',1),('DB-108','clean-ddl',1),('DB-109','clean-ddl',1),('DB-110','clean-ddl',1),('DB-111','clean-ddl',1),('DB-112','clean-ddl',1),('DB-113','clean-ddl',1),('DB-114','clean-ddl',1),('DB-115','clean-ddl',1),('DB-116','clean-ddl',1),('DB-117','clean-ddl',1),('DB-118','clean-ddl',1),('DB-119','clean-ddl',1),('DB-120','clean-ddl',1),('DB-123','clean-ddl',1),('DB-126','clean-ddl',1),('DB-127','clean-ddl',1),('DB-128','clean-ddl',1),('DB-129','clean-ddl',1),('DB-130','clean-ddl',1),('DB-131','clean-ddl',1),('DB-135','clean-ddl',1);
 
 --
 -- Table structure for table `service_tickets`

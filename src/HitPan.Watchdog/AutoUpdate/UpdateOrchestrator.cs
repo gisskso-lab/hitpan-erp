@@ -165,7 +165,8 @@ public sealed class UpdateOrchestrator
             _logger.LogError("[Update] 다운로드/검증 실패 — 적용 차단 ({V})", manifest.Version);
             // 20260929작3 절W5 — 종전엔 이 종점이 결과행을 안 남겨, ERP 가 「왜 안 됐나」를 몰랐다(설계 §5-3).
             //   아무것도 안 바꿨다(구버전 그대로). detail 은 설계 §7 매핑이 「그 밖 · 시작 안 됨」으로 읽는 고정 문구.
-            await RecordApplyStatusAsync(manifest, "failed", "다운로드·검증 실패 — 업데이트 시작 안 함", ct);
+            // ⬛ 갈래 R(설계 §12-1 ③) — apply_status·본사 보고 깔때기를 거치지 않고 **시도 행만** 닫는다(보고 수 불변).
+            await CloseAttemptOnlyAsync(manifest, "failed", "다운로드·검증 실패 — 업데이트 시작 안 함", ct);
             return false;
         }
 
@@ -192,7 +193,8 @@ public sealed class UpdateOrchestrator
         {
             _logger.LogError("[Update] 🛑 슬롯을 판정하지 못해 적용을 중단합니다 — 구버전 그대로 유지({V})", manifest.Version);
             // 20260929작3 절W5 — 행 안 남던 종점(설계 §5-3). 구버전 그대로.
-            await RecordApplyStatusAsync(manifest, "failed", "실행 슬롯 판정 실패 — 업데이트 시작 안 함", ct);
+            // ⬛ 갈래 R(설계 §12-1 ③) — 시도 행만 닫는다(apply_status 기록 0 · 본사 보고 0).
+            await CloseAttemptOnlyAsync(manifest, "failed", "실행 슬롯 판정 실패 — 업데이트 시작 안 함", ct);
             return false;
         }
 
@@ -478,8 +480,10 @@ public sealed class UpdateOrchestrator
 
     /// <summary>워치독이 직접 SQL 로 읽고 쓰는 상태 테이블 — 이 스키마 변경은 구버전 워치독을 깬다(B-2 게이트 대상).
     /// apply_status 는 워치독 상태기록기(WatchdogStatusWriter)가 직접 CREATE·INSERT 한다(W4-6) — F-1 반영으로 포함.</summary>
+    // 20260929작3 갈래 R(설계 §12-6 · PM 결재 9/30) — 시도 표 local_update_attempts 추가(워치독이 직접 읽고 쓴다).
+    //   빌드타임 게이트(build-manifest.ps1 $guardedTables)와 같은 목록이어야 한다.
     private static readonly string[] GuardedUpdateTables =
-        { "local_update_status", "local_update_consents", "local_update_apply_status" };
+        { "local_update_status", "local_update_consents", "local_update_apply_status", "local_update_attempts" };
 
     /// <summary>
     /// 20260722작2(A'안) — 마이그 파일명에서 migration_id 를 추출한다. API MigrationRunner 의 규칙과 반드시
@@ -934,6 +938,27 @@ public sealed class UpdateOrchestrator
         //   ⚠️ ct 를 넘기지 않는다 — 넘기면 업데이트 종료와 함께 보고가 취소돼 버린다.
         //      취소 없이 짧은 자체 타임아웃(UpdateHistoryClient)으로 스스로 끝낸다.
         _ = ReportUpdateHistoryToHqAsync(manifest, result, detail, CancellationToken.None);
+
+        // 20260929작3 갈래 R(설계 §12-1 ①·R10) — 종전 기록·보고는 **그대로** 두고, 그 뒤 시도 행을 같은 결과로 닫는다.
+        //   동의 없는 경로(Normal·Emergency)는 열린 행이 없어 0행 = 무해.
+        await CloseAttemptOnlyAsync(manifest, result, detail, ct);
+    }
+
+    /// <summary>
+    /// 20260929작3 갈래 R — 시도 행(local_update_attempts)만 닫는다. apply_status 기록 0 · 본사 보고 0(설계 §12-1 ③).
+    ///   실패는 라이터가 로그로 남긴다 — 흐름을 멈추지 않는다(헌법 #15·#20). 취소만 위로.
+    /// </summary>
+    private async Task CloseAttemptOnlyAsync(UpdateManifest manifest, string result, string? detail, CancellationToken ct)
+    {
+        try
+        {
+            await _statusWriter.CloseAttemptAsync(manifest.Version, result, detail, ct).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) { throw; }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "[Update] 시도 행 닫기 호출 실패 — 버전 {V}, 결과 {R}", manifest.Version, result);
+        }
     }
 
     /// <summary>

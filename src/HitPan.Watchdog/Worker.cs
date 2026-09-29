@@ -113,7 +113,15 @@ public class Worker : BackgroundService
     //   호출을 대리자 한 겹으로 모았다. 운영에서는 생성자가 실제 메서드를 그대로 꽂는다(동작 불변).
     //   ⚠️ 운영 코드는 이 필드를 바꾸지 않는다 — 시험(InternalsVisibleTo)만 바꾼다.
     internal Func<string, CancellationToken, Task<ConsentUsage>> ReadConsentUsageSeam;
-    internal Func<string, string, string?, long?, CancellationToken, Task<bool>> WriteApplyStatusSeam;
+    // ⬛ 갈래 R — WriteApplyStatusSeam(apply_status 에 in_progress·consent_id)은 폐기 → 시도 표 열기·닫기 두 자리.
+    internal Func<long, string, CancellationToken, Task<AttemptOpenResult>> OpenAttemptSeam;
+    internal Func<string, string, string?, CancellationToken, Task<bool>> CloseAttemptSeam;
+
+    // 20260929작3 갈래 R 규칙 Z-1(설계 §12-5 · PM 결재 3루프) — 시도 표 때문에 적용을 보류한 동의 id 와 연속 횟수.
+    //   같은 동의 id 로 연속 3루프까지만 보류하고, 넘으면 종전 규칙(이 수명에서 처음 보는 동의 id → 적용)으로 내려앉는다.
+    internal const int AttemptHoldLimit = 3;
+    private long _attemptHoldConsentId;
+    private int _attemptHoldCount;
     internal Func<UpdateManifest, CancellationToken, Task<bool>> ApplyUpdateSeam;
     internal Action<UpdateManifest> ReportConsentRejectedSeam;
     internal Func<bool, CancellationToken, Task<bool>> CloseInterruptedAttemptsSeam;
@@ -173,7 +181,8 @@ public class Worker : BackgroundService
 
         // 20260929작3 — 바깥 호출 자리에 실제 메서드를 꽂는다(운영 동작 = 종전 직접 호출과 같다).
         ReadConsentUsageSeam = _consent.ReadLatestWithUsageAsync;
-        WriteApplyStatusSeam = (v, r, d, cid, ct) => _statusWriter.WriteApplyStatusAsync(v, r, d, ct, cid);
+        OpenAttemptSeam = _statusWriter.OpenAttemptAsync;
+        CloseAttemptSeam = _statusWriter.CloseAttemptAsync;
         ApplyUpdateSeam = _update.ApplyUpdateAsync;
         ReportConsentRejectedSeam = _update.ReportConsentRejected;
         CloseInterruptedAttemptsSeam = _statusWriter.CloseInterruptedAttemptsAsync;
@@ -651,9 +660,19 @@ public class Worker : BackgroundService
         var usage = await ReadConsentUsageSeam(m.Version, ct);
         var decision = usage.Decision;
 
+        // 20260929작3 갈래 R 규칙 Z-1 — 시도 표를 못 읽었다(동의 표만 읽힘). 같은 동의 id 로 3루프까지만 보류.
+        var oldRuleFallback = false;
+        if (decision == ConsentDecision.Approve && usage.AttemptsUnknown)
+        {
+            if (!AttemptHoldExceeded(usage.ConsentId, m.Version, "시도 표 판독 실패"))
+                return;   // 보류 — 펜딩 유지 · 다음 루프 재판독
+            oldRuleFallback = true;
+        }
+
         // 규칙 C — 최신이 approve 인데 새 [예]가 아니면 「이미 쓴 [예]」: 적용 안 함 · 펜딩 해제 · 보고 0.
+        //   Z-1 내려앉음(옛 규칙)에서는 인메모리 동의 id 집합만 본다.
         if (decision == ConsentDecision.Approve
-            && (!usage.IsFreshApprove || _consentAppliedVersions.Contains(usage.ConsentId)))
+            && ((!oldRuleFallback && !usage.IsFreshApprove) || _consentAppliedVersions.Contains(usage.ConsentId)))
         {
             _logger.LogInformation("[Update] Major 버전 {V} — 최신 [예](동의 {Id})는 이미 한 번 시도한 동의입니다(이미 쓴 동의 {Used}). " +
                                    "다시 적용하지 않습니다 — ERP 가 다시 물어 새 [예]가 들어오면 그때 한 번 더 시도합니다.",
@@ -693,14 +712,27 @@ public class Worker : BackgroundService
                 //   재기동 뒤 묻지 않고 옛 [예]로 다시 시도하는 일(B-3)이 원리적으로 사라진다(설계 §3).
                 //   ③ 기록에 실패하면 적용하지 않고 펜딩을 유지한다(다음 루프에 다시) — 기록 없이 적용하면
                 //     재기동 뒤 같은 [예]로 또 시도하게 된다.
-                var marked = await WriteApplyStatusSeam(m.Version, "in_progress",
-                    $"동의 {usage.ConsentId} 로 적용 시작", usage.ConsentId, ct);
-                if (!marked)
+                // ⬛ 갈래 R — 기록 자리 apply_status → 시도 표 INSERT(UPSERT 아님 · 설계 §12-1).
+                //   AlreadyUsed(UNIQUE 위반) = 그 [예]는 이미 시도했다 → 적용 안 함 · 펜딩 해제(G-R7).
+                //   Failed = 기록 실패 → 규칙 Z-1: 같은 동의 id 로 3루프까지 보류, 넘으면 옛 규칙으로 적용 + LogWarning.
+                var opened = oldRuleFallback
+                    ? AttemptOpenResult.Failed
+                    : await OpenAttemptSeam(usage.ConsentId, m.Version, ct);
+                if (opened == AttemptOpenResult.AlreadyUsed)
+                {
+                    _logger.LogInformation("[Update] Major 버전 {V} — 동의 {Id} 는 시도 표에 이미 있습니다. 다시 적용하지 않습니다.", m.Version, usage.ConsentId);
+                    _consentAppliedVersions.Add(usage.ConsentId);
+                    _pendingConsentUpdate = null;
+                    break;
+                }
+                if (opened == AttemptOpenResult.Failed && !oldRuleFallback
+                    && !AttemptHoldExceeded(usage.ConsentId, m.Version, "시도 행 기록 실패"))
                 {
                     _logger.LogWarning("[Update] Major 버전 {V} — 적용 시작 기록(in_progress · 동의 {Id})에 실패해 이번 루프에는 적용하지 않습니다. 펜딩 유지 — 다음 루프에 다시 시도합니다.",
                         m.Version, usage.ConsentId);
                     break;
                 }
+                ResetAttemptHold();
 
                 // 멱등 기록을 먼저 남긴 뒤 적용 — 적용 중 예외가 나도 같은 버전을 무한 재시도하지 않게 한다.
                 // ⬛ 20260929작3 — 「같은 버전」 → 「같은 동의 id」(키 변경 · 위 필드 주석).
@@ -715,7 +747,8 @@ public class Worker : BackgroundService
                     // 20260929작3 절W5 — 행 안 남던 종점(설계 §5-3). 예외면 in_progress 가 그대로 남아
                     //   ERP 가 30분 동안 「진행 중」으로 보였다. failed 로 닫는다(consent_id 는 안 건드림 — 쓴 [예] 유지).
                     //   detail 은 「업데이트 중 중단」으로 시작하지 않는다(설계 §7 「그 밖」 매핑).
-                    await WriteApplyStatusSeam(m.Version, "failed", $"적용 중 예외 — {ex.GetType().Name}", null, ct);
+                    //   ⬛ 갈래 R — 시도 행만 닫는다(진행 중 행만 · 오케스트레이터 종점이 이미 닫았으면 무변경 · [4] F-3).
+                    await CloseAttemptSeam(m.Version, "failed", $"적용 중 예외 — {ex.GetType().Name}", ct);
                 }
                 break;
 
@@ -737,6 +770,35 @@ public class Worker : BackgroundService
                 _logger.LogDebug("[Update] Major 버전 {V} 동의 조회 실패 — 펜딩 유지(다음 루프 재시도)", m.Version);
                 break;
         }
+    }
+
+    /// <summary>
+    /// 20260929작3 갈래 R 규칙 Z-1 — 시도 표 때문에 보류할 때 부른다. 같은 동의 id 연속 횟수를 센다.
+    ///   반환 false = 아직 보류(1~3루프) · true = 상한 초과 → 옛 규칙으로 내려앉는다(LogWarning).
+    /// </summary>
+    private bool AttemptHoldExceeded(long consentId, string version, string why)
+    {
+        if (_attemptHoldConsentId != consentId)
+        {
+            _attemptHoldConsentId = consentId;
+            _attemptHoldCount = 0;
+        }
+        _attemptHoldCount++;
+        if (_attemptHoldCount <= AttemptHoldLimit)
+        {
+            _logger.LogWarning("[Update] Major 버전 {V} — {Why}로 적용 보류 {N}/{Max}루프(동의 {Id}). 펜딩 유지.",
+                version, why, _attemptHoldCount, AttemptHoldLimit, consentId);
+            return false;
+        }
+        _logger.LogWarning("[Update] Major 버전 {V} — {Why}가 {Max}루프를 넘었습니다(동의 {Id}). 시도 표 없이 종전 규칙(이 수명에서 처음 보는 동의 id)으로 적용합니다(규칙 Z-1).",
+            version, why, AttemptHoldLimit, consentId);
+        return true;
+    }
+
+    private void ResetAttemptHold()
+    {
+        _attemptHoldConsentId = 0;
+        _attemptHoldCount = 0;
     }
 
     /// <summary>
