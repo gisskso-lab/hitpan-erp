@@ -540,8 +540,16 @@ public class AuthController : ControllerBase
     ///   · tenant_id·user_id 는 JWT 클레임에서만 받는다(헌법 #2). 파라미터로 받지 않는다.
     ///   · INSERT ONLY — 동의 이력은 갱신/삭제하지 않는다(매 동의/거부를 한 행으로 남긴다).
     /// </summary>
+    /// <remarks>
+    /// 🔴 20260929작3 절A3 — <b>[예]/[나중에]는 메인PC 에서만</b>(사장님 9/29 ③ 「= 메인PC에서만」).
+    /// 메인PC 가 아니면 <c>MainPcOnly</c> 필터가 403 <c>main_pc_only</c> 로 돌려보내고 <b>행 0</b> —
+    /// approve·reject 둘 다다. 종전엔 직원 PC 의 [나중에]가 사장님의 [예]를 뒤집을 수 있었다(1차 선행검증 ⑤).
+    /// 판정은 단일출처 <c>MainPcOnlyAttribute.IsMainPc</c> — 도메인으로 연 메인PC 는 출입증으로 통과한다.
+    /// 응답 문구는 무변경. <c>update-consent-local</c> 은 무접촉(설계 §8).
+    /// </remarks>
     [HttpPost("update-consent")]
     [Authorize(Policy = "TenantOnly")]
+    [HitPan.API.Security.MainPcOnly]
     public async Task<IActionResult> UpdateConsent([FromBody] UpdateConsentRequest request, CancellationToken ct)
     {
         var tenantId = HttpContext.Items["TenantId"]?.ToString();
@@ -838,7 +846,12 @@ public class AuthController : ControllerBase
             UpdateAvailable = false,
             LatestVersion = null,
             UpdateChannel = null,
-            ConsentMessage = null
+            ConsentMessage = null,
+            // 🔴 20260929작3 절A2 — 응답 4필드(추가만 · 설계 §4). 새 버전이 없으면 none.
+            IssueKind = HitPan.API.Services.UpdateIssueJudge.KindNone,
+            IssueText = null,
+            NeedsPrompt = false,
+            CanRespond = ComputeCanRespond()
         };
 
         try
@@ -873,6 +886,9 @@ public class AuthController : ControllerBase
                 status.LatestVersion = row.LatestVersion;
                 status.UpdateChannel = row.UpdateChannel;
                 status.ConsentMessage = row.ConsentMessage;
+
+                // 🔴 20260929작3 절A2 — 「미완료」 판정(설계 §4). 새 버전이 있을 때만 C·A 를 읽는다.
+                await ApplyUpdateIssueAsync(db, status, ct);
             }
         }
         catch (Exception ex)
@@ -880,9 +896,77 @@ public class AuthController : ControllerBase
             // 헌법 #15: 침묵 금지 + 호출자는 절대 안 깨지게(false 폴백).
             _logger.LogWarning(ex, "업데이트 상태 조회 실패 — UpdateAvailable false 폴백");
             status.UpdateAvailable = false;
+            // 20260929작3 절A2 — 폴백과 짝을 맞춘다(새 버전 없음 = none · 팝업 없음).
+            status.IssueKind = HitPan.API.Services.UpdateIssueJudge.KindNone;
+            status.IssueText = null;
+            status.NeedsPrompt = false;
         }
 
         return status;
+    }
+
+    /// <summary>
+    /// 🔴 20260929작3 절A2 — L 의 최신 동의 C · 결과행 A 를 <b>한 번의 쿼리</b>로 읽어 판정을 채운다(설계 §4).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// 쿼리는 <see cref="HitPan.API.Services.UpdateIssueJudge.IssueQuerySql"/> <b>한 개</b>(#16 — WhenAll 금지).
+    /// 종전 L 조회는 <b>무변경</b>(#1)이고, 같은 연결로 그 뒤에 한 번 더 묻는다 — L 을 알아야 C·A 를 찾는다.
+    /// </para>
+    /// <para>
+    /// 🔴 <b>실패 = 종전 폴백</b>(#15·#20): 표·칸(<c>consent_id</c> · DB-135) 부재 등 어떤 예외도
+    /// LogWarning 한 줄 후 <c>first</c>(= 종전처럼 새 버전이 있으면 팝업)로 간다. ERP 사용·로그인을 막지 않는다.
+    /// </para>
+    /// </remarks>
+    private async Task ApplyUpdateIssueAsync(System.Data.IDbConnection db, UpdateStatusDto status, CancellationToken ct)
+    {
+        HitPan.API.Services.UpdateIssueJudge.Verdict verdict;
+        try
+        {
+            var row = await Dapper.SqlMapper.QueryFirstOrDefaultAsync<HitPan.API.Services.UpdateIssueJudge.IssueRow>(db,
+                new Dapper.CommandDefinition(
+                    HitPan.API.Services.UpdateIssueJudge.IssueQuerySql,
+                    new { Version = status.LatestVersion },
+                    cancellationToken: ct));
+
+            // 경과(C): consented_at 은 update-consent 가 API 시계(DateTime.Now)로 적는다 — 같은 시계로 잰다(설계 §4).
+            verdict = HitPan.API.Services.UpdateIssueJudge.Judge(
+                HitPan.API.Services.UpdateIssueJudge.FromRow(status.UpdateAvailable, status.LatestVersion, row, DateTime.Now));
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "업데이트 미완료 판정 조회 실패 — 종전 팝업 동작으로 폴백 (Version: {Version})", status.LatestVersion);
+            verdict = HitPan.API.Services.UpdateIssueJudge.Fallback(status.UpdateAvailable, status.LatestVersion);
+        }
+
+        status.IssueKind = verdict.Kind;
+        status.IssueText = verdict.IssueText;
+        status.NeedsPrompt = verdict.NeedsPrompt;
+    }
+
+    /// <summary>
+    /// 🔴 20260929작3 절A2 — [예]/[나중에]를 이 화면에서 누를 수 있나 = <b>메인PC 인가</b>.
+    /// </summary>
+    /// <remarks>
+    /// 판정 단일출처 <c>MainPcOnlyAttribute.IsMainPc</c> 를 <b>호출</b>만 한다(복붙 금지 — 한쪽만 고쳐지면
+    /// 화면은 [예]를 보여 주는데 서버는 403 이 된다). <c>update-consent</c> 의 필터와 같은 함수다(절A3).
+    /// 판정 중 예외는 <b>누를 수 없음</b>(false)으로 닫는다 — 열어 두는 쪽으로 실패하지 않는다.
+    /// </remarks>
+    private bool ComputeCanRespond()
+    {
+        try
+        {
+            return HitPan.API.Security.MainPcOnlyAttribute.IsMainPc(HttpContext);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "메인PC 판정 실패 — 업데이트 응답 불가(false)로 닫는다");
+            return false;
+        }
     }
 
     /// <summary>local_update_status 1행 매핑(고리2 새버전 상태).</summary>
@@ -965,6 +1049,23 @@ public sealed class UpdateStatusDto
 
     /// <summary>팝업에 보여줄 안내 문구(manifest 발행값).</summary>
     public string? ConsentMessage { get; set; }
+
+    // ── 20260929작3 절A2 — 응답 4필드 추가(기존 5필드 불변 · 설계 §4 · 갈래 F 와의 계약) ──
+
+    /// <summary>
+    /// 미완료 종류: none · first · later · requested · not_started · in_progress · interrupted · failed
+    /// (<c>UpdateIssueJudge.Kind*</c>).
+    /// </summary>
+    public string? IssueKind { get; set; }
+
+    /// <summary>고객 문구(설계 §7 매핑 결과만 · 워치독 detail 원문 비노출). none 이면 null.</summary>
+    public string? IssueText { get; set; }
+
+    /// <summary>[예]/[나중에]를 누를 수 있는 자리인가 = <c>MainPcOnlyAttribute.IsMainPc</c>.</summary>
+    public bool CanRespond { get; set; }
+
+    /// <summary>팝업이 필요한가 = kind ∈ first·later·not_started·interrupted·failed.</summary>
+    public bool NeedsPrompt { get; set; }
 }
 
 /// <summary>고리2 업데이트 동의 요청 — tenant_id·user_id 는 JWT 클레임에서만(헌법 #2), 바디에 두지 않는다.</summary>
