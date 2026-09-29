@@ -35,14 +35,40 @@ public sealed class MainPcProofRunner
         _js = js;
     }
 
+    /// <summary>🔴 20260929작3 절F2 — 지금 돌고 있는 한 바퀴. 끝났으면 다음 호출이 새로 돈다.</summary>
+    private readonly object _flightLock = new();
+    private Task<string>? _inFlight;
+
+    /// <summary>
+    /// 🔵 왕복 한 바퀴 — <b>단일 비행</b>(20260929작3 절F2 · 설계 §8).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// 로그인 직후 <c>MainPcGate</c> 와 업데이트 안내(<c>UpdateConsentGate</c> · M-22 R-1 경주 대기)가
+    /// <b>동시에</b> 부른다. 각자 돌면 표(challenge)가 두 장 나가 뒤의 것이 앞의 출입증 판정을 흔든다.
+    /// ⇒ 진행 중이면 <b>같은 Task</b> 를 돌려준다 — 왕복은 1회, 결과는 둘이 나눠 쓴다(G-F3).
+    /// </para>
+    /// <para>⚠️ 끝난 결과를 붙잡아 두지 않는다 — 다음 호출은 새로 돈다(출입증 30분 만료 · 재확인 경로).</para>
+    /// </remarks>
+    public Task<string> RunAsync()
+    {
+        lock (_flightLock)
+        {
+            if (_inFlight is { IsCompleted: false } running) return running;
+            _inFlight = RunOnceAsync();
+            return _inFlight;
+        }
+    }
+
     /// <summary>
     /// 왕복 한 바퀴. 서버가 내린 판정 이름을 돌려준다. 실패하면 <c>NotProven</c>.
     /// </summary>
     /// <remarks>
     /// 🔴 실패는 오류가 아니다 — <b>클라이언트 PC 에서는 실패가 정상</b>이다.
     /// 그러므로 여기서 예외를 던지거나 화면에 무엇을 띄우지 않는다.
+    /// <para>⬛ 20260929작3 절F2 — 이름만 <c>RunAsync</c> → <c>RunOnceAsync</c>(private). 본문은 한 글자도 안 바꿨다(#1).</para>
     /// </remarks>
-    public async Task<string> RunAsync()
+    private async Task<string> RunOnceAsync()
     {
         // ① 표를 받는다 (도메인 경유)
         var issued = await _http.PostAsJsonAsync("api/devices/mainpc-challenge", new { });

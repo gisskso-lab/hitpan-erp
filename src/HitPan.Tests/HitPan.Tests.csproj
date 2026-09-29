@@ -50,6 +50,16 @@
     <!-- 🔴 20260928작2 절V (W-4) — 로그아웃 완료 판정 LogoutGate.IsServerLogoutDone 을 실제로 불러 잰다(순수 C#). -->
     <Compile Include="..\HitPan.Web\Services\LogoutGate.cs"
              Link="Linked\LogoutGate.cs" />
+
+    <!-- 🔴 20260929작3 갈래 F (G-F1 · G-F3) — 업데이트 안내 판정표·방아쇠·메인PC 왕복 단일 비행을 **실제로 불러** 잰다.
+         UpdatePromptPlan·UpdatePromptBus 는 Blazor 비의존 순수 C#. MainPcProofRunner 는 HttpClient·IJSRuntime 만 쓴다
+         (IJSRuntime 은 API 가 끌어오는 공유 프레임워크에 있다) — 대역 두 개로 실제 요청 수를 센다. 글자검사가 아니다. -->
+    <Compile Include="..\HitPan.Web\Services\UpdatePromptPlan.cs"
+             Link="Linked\UpdatePromptPlan.cs" />
+    <Compile Include="..\HitPan.Web\Services\UpdatePromptBus.cs"
+             Link="Linked\UpdatePromptBus.cs" />
+    <Compile Include="..\HitPan.Web\Services\MainPcProofRunner.cs"
+             Link="Linked\MainPcProofRunner.cs" />
   </ItemGroup>
 
   <ItemGroup>

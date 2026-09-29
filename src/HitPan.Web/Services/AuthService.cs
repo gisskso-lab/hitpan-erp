@@ -172,6 +172,9 @@ public sealed class AuthService : IAuthService
             }
 
             await PersistSessionAsync(data);
+            // 🔴 20260929작3 절F4 — 로그인하면 업데이트 안내를 **다시 묻는다**(#43 「다음 로그인에 다시」 · Q-2).
+            //   ⚠️ 방송(Notify) **앞**에서 지운다 — 방송이 ERP 메인을 그리고, 그 첫 그림에서 게이트가 이 칸을 읽는다.
+            await ForgetUpdatePromptShownAsync();
             await _authState.NotifySessionChangedAsync();
             return new AuthLoginResult { Success = true, Data = data };
         }
@@ -275,7 +278,28 @@ public sealed class AuthService : IAuthService
         await _storage.DeleteAsync(AuthStorageKeys.AccessToken);
         await _storage.DeleteAsync(AuthStorageKeys.RefreshToken);
         await _storage.DeleteAsync(AuthStorageKeys.UserDisplayName);
+        // 🔴 20260929작3 절F4 — 같은 탭에서 다시 로그인해도 업데이트 안내가 다시 뜨게 한다.
+        await ForgetUpdatePromptShownAsync();
         await _authState.NotifySessionChangedAsync();
+    }
+
+    /// <summary>
+    /// 🔴 20260929작3 절F4 — 「이 탭에서 이미 안내했다」 표를 지운다(설계 §8 · B-4).
+    /// </summary>
+    /// <remarks>
+    /// ⬛ 종전엔 이 표가 탭을 닫을 때까지 남아, 같은 탭에서 로그아웃 → 로그인해도 같은 버전은 <b>다시 안 물었다</b>.
+    /// 실패해도 로그인·로그아웃은 계속한다(#20) — 흔적만 남긴다(#15).
+    /// </remarks>
+    private async Task ForgetUpdatePromptShownAsync()
+    {
+        try
+        {
+            await _js.InvokeVoidAsync("sessionStorage.removeItem", UpdatePromptPlan.SessionKey);
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine($"[Auth] 업데이트 안내 표 지우기 실패: {ex.GetType().Name}: {ex.Message}");
+        }
     }
 
     private async Task PersistSessionAsync(LoginApiResponse data)

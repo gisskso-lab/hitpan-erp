@@ -46,12 +46,18 @@ public sealed class MainPcRetryCoordinator(Func<DateTimeOffset> clock)
     /// <remarks>
     /// 다른 403 에서 왕복을 돌면 <b>표면이 넓어진다</b> — 오늘 출입증을 쓰는 문이 이 셋이므로
     /// 그 표면을 그대로 유지한다. 새 문이 생기면 <b>여기 한 줄</b>을 더한다(#1 추가만).
+    /// <para>⬛ 「세 갈래뿐」은 20260929작3 절F3 이전 서술 — 지금은 넷(업데이트 동의 한 주소 추가).</para>
     /// </remarks>
     public static readonly string[] EligiblePathPrefixes =
     {
         "/api/backup/",
         "/api/data-reset/",
         "/api/migration/",
+        // 🔴 20260929작3 절F3 — 업데이트 [예]/[나중에] 도 메인PC 만 받는다(서버 [MainPcOnly] · 사장님 ③).
+        //   출입증 30분 만료 뒤 누른 [예] 가 403 이면 대표만 왕복 1회 후 재시도한다(G-F2).
+        //   ⚠️ 끝이 '/' 가 아니다 ⇒ 이 주소 **자체**만 대상이다 — 익명 입구 update-consent-local 은
+        //     삼키지 않는다(설계 §8 「새 재시도 입구를 익명 경로에 열지 않는다」 · 아래 MatchesPrefix).
+        "/api/auth/update-consent",
     };
 
     private readonly Func<DateTimeOffset> _clock = clock;
@@ -108,13 +114,26 @@ public sealed class MainPcRetryCoordinator(Func<DateTimeOffset> clock)
     {
         foreach (var prefix in EligiblePathPrefixes)
         {
-            if (path.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)) return true;
+            // ⬛ [낡은 줄 · 20260929작3 절F3 이전] `path.StartsWith(prefix, …)` — 앞머리만 보면
+            //   "/api/auth/update-consent" 가 "/api/auth/update-consent-local"(익명 입구)까지 삼킨다.
+            if (MatchesPrefix(path, prefix)) return true;
 
             // 상대 주소(선행 슬래시 없음)로 부른 자리도 같은 문이다.
-            if (path.StartsWith(prefix[1..], StringComparison.OrdinalIgnoreCase)) return true;
+            if (MatchesPrefix(path, prefix[1..])) return true;
         }
 
         return false;
+    }
+
+    /// <summary>
+    /// 🔴 20260929작3 절F3 — 끝이 '/' 인 항목(자료관리 세 갈래)은 <b>종전 그대로</b> 앞머리 일치.
+    /// 끝이 '/' 가 아닌 항목은 그 주소 자체(또는 그 아래 '/')만 — 이름이 이어 붙은 다른 주소는 아니다.
+    /// </summary>
+    private static bool MatchesPrefix(string path, string prefix)
+    {
+        if (!path.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)) return false;
+        if (prefix.EndsWith('/')) return true;
+        return path.Length == prefix.Length || path[prefix.Length] is '/' or '?';
     }
 
     /// <summary>
