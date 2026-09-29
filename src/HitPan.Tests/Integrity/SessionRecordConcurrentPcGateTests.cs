@@ -2739,7 +2739,7 @@ public sealed class SessionRecordConcurrentPcGateTests : IDisposable
     }
 
     /// <summary>
-    /// 🔴 <b>W-3</b> (절V · [4] 최종 판정 §10 P2 헛안내) — 로그아웃 응답 판정 <c>LogoutGate.IsServerLogoutDone</c> 를
+    /// 🔴 <b>W-4</b> (절V · ⚠️ W-3 은 node storage_w3 가 이미 쓴다 · [4] 최종 판정 §10 P2 헛안내) — 로그아웃 응답 판정 <c>LogoutGate.IsServerLogoutDone</c> 를
     /// <b>실제로</b> 부른다(DB 불필요 · 소스 링크). 2xx·<b>401</b> = 완료(미완료 표시 안 남김) · 5xx·연결 실패(null) = 미완료(표시 남김).
     /// </summary>
     /// <remarks>🔴 음성 대조군 — 개정3 판 「2xx 만 완료」(401 도 미완료)로 되돌리면 401 줄이 FAIL.</remarks>
@@ -2751,7 +2751,7 @@ public sealed class SessionRecordConcurrentPcGateTests : IDisposable
     [InlineData(502, false)]
     [InlineData(503, false)]
     [InlineData(null, false)]
-    public void W_3_로그아웃은_401이면_이미_끝난것_5xx와_연결실패만_미완료(int? status, bool expectedDone)
+    public void W_4_로그아웃은_401이면_이미_끝난것_5xx와_연결실패만_미완료(int? status, bool expectedDone)
     {
         Assert.Equal(expectedDone, HitPan.Web.Services.LogoutGate.IsServerLogoutDone(status));
     }

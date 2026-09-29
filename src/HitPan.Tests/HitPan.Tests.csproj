@@ -47,7 +47,7 @@
     <Compile Include="..\HitPan.Web\Services\RefreshGate.cs"
              Link="Linked\RefreshGate.cs" />
 
-    <!-- 🔴 20260928작2 절V (W-3) — 로그아웃 완료 판정 LogoutGate.IsServerLogoutDone 을 실제로 불러 잰다(순수 C#). -->
+    <!-- 🔴 20260928작2 절V (W-4) — 로그아웃 완료 판정 LogoutGate.IsServerLogoutDone 을 실제로 불러 잰다(순수 C#). -->
     <Compile Include="..\HitPan.Web\Services\LogoutGate.cs"
              Link="Linked\LogoutGate.cs" />
   </ItemGroup>

@@ -14,12 +14,12 @@ namespace HitPan.Web.Services;
 /// <b>미완료</b>(안내 남김 · 절K 그대로). 그 밖 4xx(403·408·429 등)는 개정3 판 그대로 미완료로 둔다(이번 절 범위 밖 · 명세서 절V).
 /// <b>서버 변경 0.</b>
 /// </para>
-/// <para>🔴 <b>Blazor 를 쓰지 않는다</b> — 시험 프로젝트가 이 파일을 소스 링크로 불러 판정(W-3)을 직접 잰다.</para>
+/// <para>🔴 <b>Blazor 를 쓰지 않는다</b> — 시험 프로젝트가 이 파일을 소스 링크로 불러 판정(W-4)을 직접 잰다.</para>
 /// </remarks>
 public static class LogoutGate
 {
     /// <summary>서버 쪽 로그아웃이 끝났으면 true — 2xx 또는 401. <paramref name="statusCode"/> null = 연결 실패.</summary>
-    /// <remarks>⚠️ 401 을 미완료로 되돌리면(개정3 판 「2xx 만 완료」) W-3 의 401 줄이 FAIL 한다.</remarks>
+    /// <remarks>⚠️ 401 을 미완료로 되돌리면(개정3 판 「2xx 만 완료」) W-4 의 401 줄이 FAIL 한다.</remarks>
     public static bool IsServerLogoutDone(int? statusCode)
     {
         if (statusCode is null)
