@@ -391,6 +391,10 @@ jobs:
           #      이 3건은 로컬에서 **음성 대조군 FAIL 까지 실측**됐다(명세서 §4 N1·N2).
           #    ⚠️ G-B8 은 **갈래 C1 산출물 의존**이다(출하 DDL `DEFAULT 0` + `DB-128`). C1 머지 전엔 빨간불이 맞다.
           GATES="$GATES|SessionRecordConcurrentPcGate"
+          # 🔴 20260929작3 갈래 W — 워치독 결과표 자가생성 DDL(표 없는·칸 없는·이미 적용된 DB) + 규칙 C 판독 SQL
+          #    (시계 무관 id 정렬 · [나중에] 최신). 워치독 원문 SQL 을 표식 사이에서 읽어 격리 DB 에서 돌린다.
+          #    음성 대조군이 시험 안에 있다(ALTER 만·CREATE 만·시계 정렬·「approve 존재」). 로컬은 CREATE DATABASE 거부로 SKIP.
+          GATES="$GATES|WatchdogApplyStatusDdlGate"
 
           echo "▶ 이 잡이 무는 게이트: $GATES"
           # 🔴 20260913작2 정정 — 이제 기기 계열 중 **MainPcRestartMarkGate 는 문다**(임시 DB 권한 실측 · C-3).
