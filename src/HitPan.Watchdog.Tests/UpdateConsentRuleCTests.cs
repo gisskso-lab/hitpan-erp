@@ -627,10 +627,11 @@ public sealed class UpdateConsentRuleCTests : IDisposable
     private sealed class CountingUpdateClient : IUpdateClient
     {
         public int ManifestFetches;
+        public UpdateManifest? Next;   // 갈래 X 보완 G-X3 — feed 가 돌려줄 manifest(기본 null = 새 버전 없음)
         public Task<UpdateManifest?> GetLatestManifestAsync(string currentVersion, CancellationToken ct)
         {
             ManifestFetches++;
-            return Task.FromResult<UpdateManifest?>(null);
+            return Task.FromResult(Next);
         }
         public Task<string> DownloadAsync(UpdateManifest manifest, string targetDir, CancellationToken ct) =>
             throw new NotSupportedException("G-X2 는 다운로드를 부르지 않는다");
@@ -648,7 +649,9 @@ public sealed class UpdateConsentRuleCTests : IDisposable
         var w = NewWorker(db, client: feed);
         var m = Manifest();
         w.PendingConsentUpdateForTest = m;
-        w.ExpireUpdateCheckGateForTest();   // 게이트가 열려 있어도 feed 를 안 부르는지 본다(가장 불리한 조건)
+        // ⬛ 갈래 X 보완(PM 9/30) — 종전 「게이트 만료(가장 불리)」 → 「방금 정규 확인함」. 이제 이 분기는 정규 확인 주기는
+        //   그대로 돌리므로(G-X3), 여기서 재는 것은 「주기 전 루프들은 조회 0 = 강제 만료 없음」이다.
+        w.LastUpdateCheckUtcForTest = DateTime.UtcNow;
 
         for (var i = 0; i < 5; i++)
             await w.EvaluateUpdateForTestAsync(CancellationToken.None);
@@ -664,6 +667,35 @@ public sealed class UpdateConsentRuleCTests : IDisposable
         Assert.Equal(6, db.UsedConsentId);
         Assert.Equal(0, feed.ManifestFetches);
         Assert.Equal(0, db.RejectReports);
+    }
+
+    [Fact(DisplayName = "G-X3 🔴 이미 쓴 [예]로 펜딩 1.3.50 유지 중 — 주기 전 조회 0 · 정규 확인 시점에 조회 1 · 1.3.51 로 펜딩 교체")]
+    public async Task GX3_정규_확인은_돈다_더_새_버전이면_펜딩_교체()
+    {
+        var db = new FakeLocalDb { Result = "failed", UsedConsentId = 5 };
+        db.Consents.Add((5, "approve"));
+        var feed = new CountingUpdateClient { Next = Manifest("1.3.51") };   // 실패한 1.3.50 을 고치는 1.3.51 게시
+        var w = NewWorker(db, client: feed);
+        w.PendingConsentUpdateForTest = Manifest("1.3.50");
+        w.LastUpdateCheckUtcForTest = DateTime.UtcNow;   // 방금 정규 확인함
+
+        for (var i = 0; i < 3; i++)
+            await w.EvaluateUpdateForTestAsync(CancellationToken.None);
+        Assert.Equal(0, feed.ManifestFetches);                                  // 강제 만료 없음(F-2)
+        Assert.Equal("1.3.50", w.PendingConsentUpdateForTest?.Version);
+
+        // 정규 확인 시점 도래(기본 60분 주기 + 1분).
+        w.LastUpdateCheckUtcForTest = DateTime.UtcNow - TimeSpan.FromMinutes(61);
+        await w.EvaluateUpdateForTestAsync(CancellationToken.None);
+
+        Assert.Equal(1, feed.ManifestFetches);
+        Assert.Equal("1.3.51", w.PendingConsentUpdateForTest?.Version);        // 고치는 업데이트가 들어온다
+        Assert.Equal(0, db.ApplyCalls);                                         // 옛 [예]로 적용하지 않는다
+        Assert.Equal(0, db.RejectReports);
+
+        // 그 뒤 루프는 다시 주기 전 — 조회 0 추가.
+        await w.EvaluateUpdateForTestAsync(CancellationToken.None);
+        Assert.Equal(1, feed.ManifestFetches);
     }
 
     [Fact(DisplayName = "G-X2 음성대조군 — 펜딩을 풀면(종전 동작) 같은 루프에서 feed 조회가 일어난다(계수기 검증)")]

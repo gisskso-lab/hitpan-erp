@@ -130,6 +130,17 @@ public class Worker : BackgroundService
     // 20260929작3 갈래 X · F-2 — 「이미 쓴 [예]」 안내를 Information 으로 남긴 마지막 동의 id(같은 id 반복은 Debug).
     private long _usedApproveNoticeConsentId;
 
+    // 20260929작3 갈래 X 보완(PM 결재 9/30) — 이번 소비가 「이미 쓴 [예]」로 펜딩을 유지했는가.
+    //   ConsumeConsentForMajorAsync 가 매번 먼저 false 로 두고 그 분기에서만 true. 호출부가 정규 확인 주기로 내려갈지 가른다.
+    private bool _pendingHeldByUsedApprove;
+
+    /// <summary>20260929작3 갈래 X 보완 · G-X3 시험용 — 마지막 정규 확인 시각(확인 게이트)을 읽고 쓴다.</summary>
+    internal DateTime? LastUpdateCheckUtcForTest
+    {
+        get => _lastUpdateCheckUtc;
+        set => _lastUpdateCheckUtc = value;
+    }
+
     /// <summary>20260929작3 갈래 X · G-X2 시험용 — 한 루프의 업데이트 평가(운영 RunOneLoop 가 부르는 그 함수)를 그대로 부른다.</summary>
     internal Task EvaluateUpdateForTestAsync(CancellationToken ct) => EvaluateUpdateOncePerDayAsync(ct);
 
@@ -440,6 +451,9 @@ public class Worker : BackgroundService
     /// </summary>
     private async Task EvaluateUpdateOncePerDayAsync(CancellationToken ct)
     {
+        // 20260929작3 갈래 X 보완 — 「이미 쓴 [예]」로 Major 펜딩을 든 채 정규 확인 주기로 내려가는 루프인가.
+        var majorHeldForRegularCheck = false;
+
         // 봉합 (2026-06-29, 작1 고리2 워치독 측): Major(동의 필요) 펜딩이 있으면 매 루프 로컬 동의를 읽어
         //   적용 가부를 판단한다. 동의는 ERP 에서 아무 때나 들어올 수 있으므로 확인 주기 게이트와 분리해
         //   _pendingNightUpdate 와 동일한 매 루프 폴링 패턴으로 처리한다(feed 재조회 없음 — 로컬 DB 만 읽음).
@@ -466,11 +480,21 @@ public class Worker : BackgroundService
                 _logger.LogInformation("[Update] Major 펜딩 해소 — 확인 게이트 즉시 만료. 새 버전이 올라와 있으면 다음 루프에서 발견합니다.");
             }
             // 동의 처리(승인 적용 진입/거부 폐기) 후엔 펜딩이 비워졌을 수 있다. 다른 채널 평가와 섞지 않고 반환.
-            return;
+            // 20260929작3 갈래 X 보완(PM 결재 9/30) — 단 「이미 쓴 [예]」로 펜딩을 **유지**한 경우만은 반환하지 않고
+            //   아래 **정규 확인 주기(N시간 게이트)** 로 내려간다. 강제 만료는 하지 않는다(F-2 — 2분 주기 재조회 0).
+            //   ■ 왜: 실패한 1.3.50 을 고치려고 1.3.51 을 게시해도 고객이 답하기 전까지 1.3.50 에 묶이고,
+            //     [예]를 누르면 다시 1.3.50 을 시도하게 된다(「업데이트를 고치는 업데이트가 못 들어오는」 길).
+            //     정규 확인에서 더 새 버전이 오면 아래 RequireConsent 가 펜딩을 그 버전으로 바꾼다.
+            //   ■ 미응답(None)·조회실패(Error)·기록실패 보류는 종전 그대로 반환한다(범위 밖 · 기존 성질).
+            if (_pendingConsentUpdate is null || !_pendingHeldByUsedApprove)
+                return;
+            majorHeldForRegularCheck = true;
         }
 
         // 낮에 보류해 둔 Normal 업데이트가 있으면, 야간 창에 진입했을 때 feed 재조회 없이 적용한다.
-        if (_pendingNightUpdate is { } pending && _update.IsNightWindow(DateTime.Now))
+        // 20260929작3 갈래 X 보완 — Major 펜딩을 든 채 내려온 루프에서는 종전처럼 이 적용을 하지 않는다
+        //   (종전엔 Major 펜딩이 있으면 위에서 반환해 여기에 오지 않았다 — 그 성질 유지).
+        if (!majorHeldForRegularCheck && _pendingNightUpdate is { } pending && _update.IsNightWindow(DateTime.Now))
         {
             var toApply = _pendingNightUpdate;
             _pendingNightUpdate = null;
@@ -666,6 +690,7 @@ public class Worker : BackgroundService
         // ⬛ 20260929작3 절W4 — 종전 「이 버전을 이미 시도했으면 조회 없이 펜딩 해제」 멱등 블록은 뺐다(수정).
         //   버전 키로 막으면 새 [예](N-UPD2)가 조회조차 안 된다. 멱등은 이제 판독 뒤 **동의 id** 로 건다(아래).
         //   종전 조회 ReadLatestAsync 는 리더에 남아 있다(#1) — 규칙 C 는 id·used 까지 읽는 새 판독을 쓴다.
+        _pendingHeldByUsedApprove = false;   // 갈래 X 보완 — 「이미 쓴 [예]」 분기에서만 true
         var usage = await ReadConsentUsageSeam(m.Version, ct);
         var decision = usage.Decision;
 
@@ -705,6 +730,9 @@ public class Worker : BackgroundService
             //     아래 Approve 로 적용에 진입한다(규칙 C 그대로 — 새 [예] 한 번 = 시도 한 번).
             //   ⚠️ 대가: 펜딩이 선 동안엔 feed 를 안 읽으므로 그 사이 더 새 버전이 게시돼도 발견하지 않는다 —
             //     None(미응답) 분기와 같은 성질이다. 고객이 [예]·[나중에] 로 답하면 풀린다.
+            //   ⬛ 위 「대가」는 PM 반려(9/30)로 **이 분기에서는 없앴다** — 아래 표식으로 호출부가 정규 확인 주기
+            //     (N시간 게이트 · 기본 60분)는 그대로 돌리고, 더 새 버전이 오면 펜딩을 그 버전으로 바꾼다.
+            _pendingHeldByUsedApprove = true;
             return;
         }
 
