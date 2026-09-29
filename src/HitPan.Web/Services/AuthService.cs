@@ -241,7 +241,9 @@ public sealed class AuthService : IAuthService
             //   — 401(서버 쪽 로그인이 이미 끝남 · 다른 탭 먼저 로그아웃 · 오래 방치)도 미완료로 봐 거짓 안내를 남겼다.
             // 🔴 [지금 · 절V] 판정은 LogoutGate 한 곳 — 2xx·401 = 완료 · 5xx·연결 실패 = 미완료.
             var status = (int)response.StatusCode;
-            completed = LogoutGate.IsServerLogoutDone(status);
+            // ⬛ [낡은 줄 · 절V] `completed = LogoutGate.IsServerLogoutDone(status);` — 갱신이 서버에 못 닿아 돌아온 401 도 완료로 봤다.
+            // 🔴 [지금 · 절W] 응답 전체로 판정 — 「갱신 못 닿음」 표식이 붙은 401 은 미완료(안내 남김).
+            completed = LogoutGate.IsServerLogoutDone(response);
             if (!completed)
             {
                 Console.Error.WriteLine($"[Auth] 로그아웃 서버 처리 실패 ({status})");

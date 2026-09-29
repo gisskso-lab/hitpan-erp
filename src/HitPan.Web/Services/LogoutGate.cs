@@ -1,3 +1,5 @@
+using System.Net.Http;
+
 namespace HitPan.Web.Services;
 
 /// <summary>
@@ -34,5 +36,43 @@ public static class LogoutGate
         }
 
         return code == 401;
+    }
+
+    /// <summary>
+    /// 🔴 20260928작2 절W (9/29 CTO 결재 §3 · 사장님 5-2 (A)) — 「갱신이 서버에 닿지 못해(<see cref="RefreshDecision.Keep"/>)
+    /// 원래 401 을 그대로 돌려준 응답」에 다는 표식 이름. 화면(브라우저) 안에서만 달고 읽는다 — 서버는 이 이름을 모른다.
+    /// </summary>
+    public const string RefreshUnreachedHeader = "X-HitPan-Refresh-Unreached";
+
+    /// <summary>
+    /// 🔴 절W — 401 뒤 갱신 판정이 <see cref="RefreshDecision.Keep"/>(5xx·연결 실패·저장 실패)이면 응답에 표식을 단다.
+    /// 그 밖 판정(Clear·Saved·OtherTabRotated)은 아무것도 하지 않는다. 응답의 상태·본문은 바꾸지 않는다(다른 API 호출 동작 무변경).
+    /// </summary>
+    /// <remarks>부르는 곳 = <c>HitPanApiAuthHandler.SendAsync</c> 의 Keep 갈래 한 곳.</remarks>
+    public static void MarkIfRefreshUnreached(HttpResponseMessage response, RefreshDecision decision)
+    {
+        if (decision != RefreshDecision.Keep)
+        {
+            return;
+        }
+
+        response.Headers.Remove(RefreshUnreachedHeader);
+        response.Headers.TryAddWithoutValidation(RefreshUnreachedHeader, "1");
+    }
+
+    /// <summary>
+    /// 🔴 절W — 응답 전체를 보고 판정한다. <see cref="RefreshUnreachedHeader"/> 표식이 붙은 401 은 서버가 로그아웃을 거절한 게 아니라
+    /// <b>갱신이 서버에 못 닿은 것</b>이므로 <b>미완료</b>(안내 남김 · 문구 기존 그대로). 표식이 없으면 <see cref="IsServerLogoutDone(int?)"/> 그대로.
+    /// </summary>
+    /// <remarks>⚠️ 표식을 무시하면(절V 판 「401 = 완료」) W-4b 의 Keep 줄이 FAIL 한다(⚠️ W-5·W-6 은 작11 playwright 측정 id 가 이미 쓴다).</remarks>
+    public static bool IsServerLogoutDone(HttpResponseMessage response)
+    {
+        var status = (int)response.StatusCode;
+        if (status == 401 && response.Headers.Contains(RefreshUnreachedHeader))
+        {
+            return false;
+        }
+
+        return IsServerLogoutDone(status);
     }
 }

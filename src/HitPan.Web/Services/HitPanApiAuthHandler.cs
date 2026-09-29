@@ -91,6 +91,9 @@ public sealed class HitPanApiAuthHandler(
                 //   ⬛ 종전엔 이 경우도 아래 갈래로 떨어져 토큰을 지우고 「로그인이 만료되었습니다」를 띄웠다 ⇒
                 //     회선이 잠깐 끊겨도 로그인이 사라지고, 다시 들어오려 하면 자기 접속에 막혔다(409).
                 logger.LogWarning("토큰 재발급이 서버에 닿지 못했습니다 — 저장된 로그인은 그대로 둡니다.");
+                // 🔴 20260928작2 절W — 돌려주는 원래 401 에 「갱신 못 닿음」 표식만 단다(상태·본문 그대로).
+                //   로그아웃 판정(LogoutGate)이 이 401 을 「서버가 거절함 = 완료」로 잘못 읽지 않게 한다.
+                LogoutGate.MarkIfRefreshUnreached(response, decision);
                 // ⬛ [낡은 안내 · 개정3 절R] TryClaimOfflineNotice 30초 창만 — 끝없이 되풀이됐다.
                 // 🔴 개정3 절R — 연속 「유지」 상한(3회 AND 60초)이면 상한 안내 한 번(닫을 때까지) · 그 뒤 30초 안내 멈춤.
                 ShowKeepNotice(snackbar);

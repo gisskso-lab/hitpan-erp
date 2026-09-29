@@ -2757,6 +2757,35 @@ public sealed class SessionRecordConcurrentPcGateTests : IDisposable
     }
 
     /// <summary>
+    /// 🔴 <b>W-4b</b> (절W · 9/29 CTO 결재 §3 · 사장님 5-2 (A) · ⚠️ W-5·W-6 은 작11 playwright 측정 id 가 이미 쓴다) —
+    /// 401 뒤 갱신 판정을 핸들러와 <b>같은 함수</b>(<c>LogoutGate.MarkIfRefreshUnreached</c>)로 응답에 반영한 다음
+    /// 로그아웃 판정(<c>LogoutGate.IsServerLogoutDone(HttpResponseMessage)</c>)을 <b>실제로</b> 부른다(DB 불필요 · 소스 링크).
+    /// <b>Keep</b>(갱신이 서버에 못 닿음) 뒤 돌아온 401 = <b>미완료</b> · <b>Clear</b>(갱신이 서버에서 거절됨 · 갱신할 토큰 없음) 뒤 401 = 완료.
+    /// 표식은 401 에서만 판정을 바꾼다(2xx·5xx 는 W-4 그대로).
+    /// </summary>
+    /// <remarks>🔴 음성 대조군 — 판정이 표식을 무시하면(절V 판 「401 = 완료」) Keep·401 줄이 FAIL.</remarks>
+    [Theory]
+    [InlineData(401, 'K', false)]
+    [InlineData(401, 'C', true)]
+    [InlineData(401, 'N', true)]
+    [InlineData(200, 'K', true)]
+    [InlineData(503, 'K', false)]
+    [InlineData(503, 'C', false)]
+    public void W_4b_로그아웃_401이라도_갱신이_서버에_못닿았으면_미완료(int status, char decisionCode, bool expectedDone)
+    {
+        using var response = new System.Net.Http.HttpResponseMessage((System.Net.HttpStatusCode)status);
+        if (decisionCode != 'N')
+        {
+            var decision = decisionCode == 'K'
+                ? HitPan.Web.Services.RefreshDecision.Keep
+                : HitPan.Web.Services.RefreshDecision.Clear;
+            HitPan.Web.Services.LogoutGate.MarkIfRefreshUnreached(response, decision);
+        }
+
+        Assert.Equal(expectedDone, HitPan.Web.Services.LogoutGate.IsServerLogoutDone(response));
+    }
+
+    /// <summary>
     /// 🔴🔴 <b>G-B35</b> (개정3 절Q ③ · 설계 §14-2 · R-1 서버) — 갱신 중 DB 가 <b>1452</b> 로 터지면 컨트롤러 응답은 <b>500</b>.
     /// </summary>
     /// <remarks>
